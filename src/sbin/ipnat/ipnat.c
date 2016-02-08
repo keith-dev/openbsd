@@ -1,4 +1,4 @@
-/*	$OpenBSD: ipnat.c,v 1.13 1997/02/14 11:02:05 niklas Exp $	*/
+/*	$OpenBSD: ipnat.c,v 1.18 1997/09/22 05:11:43 millert Exp $	*/
 /*
  * (C)opyright 1993,1994,1995 by Darren Reed.
  *
@@ -53,7 +53,7 @@
 
 #if !defined(lint) && defined(LIBC_SCCS)
 static  char    sccsid[] ="@(#)ipnat.c	1.9 6/5/96 (C) 1993 Darren Reed";
-static	char	rcsid[] = "Id: ipnat.c,v 2.0.1.7 1997/01/30 12:02:32 darrenr Exp";
+static	char	rcsid[] = "$DRId: ipnat.c,v 2.0.1.8 1997/02/16 21:23:40 darrenr Exp $";
 #endif
 
 #if	SOLARIS
@@ -142,9 +142,9 @@ char *argv[];
  * of bits.
  */
 int	countbits(ip)
-u_long	ip;
+u_int	ip;
 {
-	u_long	ipn;
+	u_int	ipn;
 	int	cnt = 0, i, j;
 
 	ip = ipn = ntohl(ip);
@@ -204,7 +204,7 @@ void *ptr;
 		else
 			printf("%s", inet_ntoa(np->in_in[1]));
 		printf(" -> %s/", inet_ntoa(np->in_out[0]));
-		bits = countbits(ntohl(np->in_out[1].s_addr));
+		bits = countbits(np->in_out[1].s_addr);
 		if (bits != -1)
 			printf("%d ", bits);
 		else
@@ -349,18 +349,18 @@ char	*name, *proto;
 }
 
 
-u_long	hostmask(msk)
+u_int	hostmask(msk)
 char	*msk;
 {
 	int	bits = -1;
-	u_long	mask;
+	u_int	mask;
 
 	if (!isdigit(*msk))
-		return (u_long)-1;
+		return (u_int)-1;
 	if (strchr(msk, '.'))
 		return inet_addr(msk);
 	if (strchr(msk, 'x'))
-		return (u_long)strtol(msk, NULL, 0);
+		return (u_int)strtol(msk, NULL, 0);
 	/*
 	 * set x most significant bits
 	 */
@@ -374,9 +374,9 @@ char	*msk;
 
 /* 
  * get_if_addr(): given a string containing an interface name (e.g. "ppp0")
- *		  return the IP address it represents as an unsigned long
+ *		  return the IP address it represents as an unsigned int
  */
-u_long	if_addr(name)
+u_int	if_addr(name)
 char	*name;
 {
 	struct ifconf ifc;
@@ -433,10 +433,10 @@ if_addr_lose:
 }
 
 /*
- * returns an ip address as a long var as a result of either a DNS lookup or
+ * returns an ip address as an int var as a result of either a DNS lookup or
  * straight inet_addr() call
  */
-u_long	hostnum(host, resolved)
+u_int	hostnum(host, resolved)
 char	*host;
 int	*resolved;
 {
@@ -451,7 +451,7 @@ int	*resolved;
 
 	if (!(hp = gethostbyname(host))) {
 		if (!(np = getnetbyname(host))) {
-			u_long addr;
+			u_int addr;
 			if ((addr = if_addr(host)) != INADDR_NONE)
 				return addr;
 			*resolved = -1;
@@ -460,7 +460,7 @@ int	*resolved;
 		}
 		return np->n_net;
 	}
-	return *(u_long *)hp->h_addr;
+	return *(u_int32_t *)hp->h_addr;
 }
 
 
@@ -658,8 +658,12 @@ char *line;
 		ipn.in_pnext = portnum(tport, proto); /* target port */
 		s = NULL; /* That's all she wrote! */
 	}
+	ipn.in_inip &= ipn.in_inmsk;
+	ipn.in_outip &= ipn.in_outmsk;
+
 	if (!s)
 		return &ipn;
+
 	if (strcasecmp(s, "portmap")) {
 		fprintf(stderr, "expected \"portmap\" - got \"%s\"\n", s);
 		return NULL;
@@ -704,9 +708,12 @@ int opts;
 	FILE	*fp;
 	int	linenum = 1;
 
-	if (strcmp(file, "-"))
-		fp = fopen(file, "r");
-	else
+	if (strcmp(file, "-")) {
+		if ((fp = fopen(file, "r")) == NULL) {
+			perror("fopen");
+			exit(-1);
+		}
+	} else
 		fp = stdin;
 
 	while (fgets(line, sizeof(line) - 1, fp)) {

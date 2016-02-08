@@ -1,5 +1,5 @@
-/*	$OpenBSD: extern.h,v 1.13 1997/04/23 20:33:04 deraadt Exp $	*/
-/*	$NetBSD: extern.h,v 1.15 1997/04/14 09:09:17 lukem Exp $	*/
+/*	$OpenBSD: extern.h,v 1.16 1997/09/04 04:37:14 millert Exp $	*/
+/*	$NetBSD: extern.h,v 1.17 1997/08/18 10:20:19 lukem Exp $	*/
 
 /*-
  * Copyright (c) 1994 The Regents of the University of California.
@@ -42,7 +42,6 @@ void    abort_remote __P((FILE *));
 void    abortpt __P((int));
 void    abortrecv __P((int));
 void    abortsend __P((int));
-void    aborthttp __P((int));
 void	account __P((int, char **));
 void	alarmtimer __P((int));
 int	another __P((int *, char ***, const char *));
@@ -69,6 +68,7 @@ char   *domap __P((char *));
 void	doproxy __P((int, char **));
 char   *dotrans __P((char *));
 int     empty __P((struct fd_set *, int));
+int	foregroundproc __P((void));
 void	get __P((int, char **));
 struct cmd *getcmd __P((const char *));
 int	getit __P((int, char **, int, const char *));
@@ -76,7 +76,7 @@ int	getreply __P((int));
 int	globulize __P((char **));
 char   *gunique __P((const char *));
 void	help __P((int, char **));
-char   *hookup __P((const char *, int));
+char   *hookup __P((const char *, in_port_t));
 void	idle __P((int, char **));
 int     initconn __P((void));
 void	intr __P((void));
@@ -112,7 +112,7 @@ void	quit __P((int, char **));
 void	quote __P((int, char **));
 void	quote1 __P((const char *, int, char **));
 void    recvrequest __P((const char *, const char *, const char *,
-	    const char *, int));
+	    const char *, int, int));
 void	reget __P((int, char **));
 char   *remglob __P((char **, int, char **));
 off_t	remotesize __P((const char *, int));
@@ -134,6 +134,7 @@ void	setdebug __P((int, char **));
 void	setedit __P((int, char **));
 void	setform __P((int, char **));
 void	setftmode __P((int, char **));
+void	setgate __P((int, char **));
 void	setglob __P((int, char **));
 void	sethash __P((int, char **));
 void	setnmap __P((int, char **));

@@ -6,7 +6,7 @@
 .\" this stuff is worth it, you can buy me a beer in return.   Poul-Henning Kamp
 .\" ----------------------------------------------------------------------------
 .\"
-.\" 	$OpenBSD: mdX.3,v 1.5 1997/03/07 11:25:37 provos Exp $
+.\" 	$OpenBSD: mdX.3,v 1.8 1997/07/15 01:54:22 millert Exp $
 .\"
 .Dd October 9, 1996
 .Dt MDX 3
@@ -24,7 +24,7 @@
 .Ft void
 .Fn MDXInit "MDX_CTX *context"
 .Ft void
-.Fn MDXUpdate "MDX_CTX *context" "unsigned char *data" "unsigned int len"
+.Fn MDXUpdate "MDX_CTX *context" "const unsigned char *data" "unsigned int len"
 .Ft void
 .Fn MDXFinal "unsigned char digest[16]" "MDX_CTX *context"
 .Ft "char *"
@@ -57,6 +57,11 @@ run over the data with
 .Fn MDXUpdate ,
 and finally extract the result using
 .Fn MDXFinal .
+When a null pointer is passed to
+.Fn MDXFinal
+as first argument only the final padding will be applied and the 
+current context can still be used with
+.Fn MDXUpdate .
 .Pp
 .Fn MDXEnd
 is a wrapper for
@@ -129,10 +134,11 @@ This code is derived directly from these implementations by Poul-Henning Kamp
 Phk ristede runen.
 .Sh HISTORY
 These functions appeared in
-.Em FreeBSD-2.0 .
+.Em OpenBSD-2.0 .
 .Sh BUGS
-Hans Dobbertin has found a collision in the compress function of MD5 and
-recommends using SHA or RIPEMD-160 instead.
+Hans Dobbertin has shown collisions for the full version of MD4 and
+found a collision in the compress function of MD5. The use of SHA or 
+RIPEMD-160 is recommended instead.
 .Pp
 MD2 has only been licensed for use in Privacy Enhanced Mail.
 Use MD4 or MD5 if that isn't what you're doing.

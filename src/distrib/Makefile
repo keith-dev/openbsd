@@ -1,5 +1,14 @@
-#	$OpenBSD: Makefile,v 1.1 1996/06/02 11:43:46 deraadt Exp $
+#	$OpenBSD: Makefile,v 1.8 1997/10/20 00:25:38 deraadt Exp $
 
-SUBDIR=	${MACHINE}
+.if	make(obj)
+SUBDIR= special alpha amiga arc crunch hp300 i386 mac68k mvme68k \
+	pmax powerpc sparc
+.elif	!make(install)
+SUBDIR= special
+.endif
+.if exists(${MACHINE})
+SUBDIR+= ${MACHINE}
+.endif
+SUBDIR+= notes
 
 .include <bsd.subdir.mk>

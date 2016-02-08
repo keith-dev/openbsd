@@ -1,4 +1,4 @@
-#	$OpenBSD: services,v 1.9 1997/02/11 04:16:35 gene Exp $
+#	$OpenBSD: services,v 1.14 1997/09/30 18:46:47 kstailey Exp $
 #
 # Network services, Internet style
 #
@@ -116,6 +116,10 @@ imap3		220/tcp				# Interactive Mail Access
 imap3		220/udp				# Protocol v3
 ulistserv	372/tcp				# UNIX Listserv
 ulistserv	372/udp
+nnsp		433/tcp		usenet		# Network News Transfer
+https		443/tcp				# secure http (SSL)
+photuris	468/tcp				# Photuris Key Management
+photuris	468/udp
 #
 # UNIX specific services
 #
@@ -183,7 +187,15 @@ eklogin		2105/tcp		# Kerberos encrypted `rlogin'
 # Unofficial services
 #
 supfilesrv	871/tcp			# SUP server
+cddb		888/tcp			# Audio CD Database
 supfiledbg	1127/tcp		# SUP debugging
 radius		1645/udp		# radius authentication
 radacct		1646/udp		# radius accounting
 icb		7326/tcp		# Internet Citizen's Band
+#
+# Appletalk
+#
+rtmp		1/ddp			# Routing Table Maintenance Protocol
+nbp		2/ddp			# Name Binding Protocol
+echo		4/ddp			# AppleTalk Echo Protocol
+zip		6/ddp			# Zone Information Protocol

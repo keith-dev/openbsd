@@ -1,4 +1,4 @@
-#	$OpenBSD: bsd.lib.mk,v 1.13 1997/04/27 21:38:28 millert Exp $
+#	$OpenBSD: bsd.lib.mk,v 1.15 1997/09/08 11:16:10 niklas Exp $
 #	$NetBSD: bsd.lib.mk,v 1.67 1996/01/17 20:39:26 mycroft Exp $
 #	@(#)bsd.lib.mk	5.26 (Berkeley) 5/2/91
 
@@ -21,7 +21,7 @@ SHLIB_MINOR != . ${.CURDIR}/shlib_version ; echo $$minor
 .SUFFIXES: .out .o .po .so .S .s .c .cc .C .f .y .l .ln .m4
 
 .c.o:
-	@echo "${COMPILE.c} ${.IMPSRC}"
+	@echo "${COMPILE.c} ${.IMPSRC} -o ${.TARGET}"
 	@${COMPILE.c} ${.IMPSRC}  -o ${.TARGET}.o
 	@${LD} -x -r ${.TARGET}.o -o ${.TARGET}
 	@rm -f ${.TARGET}.o
@@ -42,7 +42,7 @@ SHLIB_MINOR != . ${.CURDIR}/shlib_version ; echo $$minor
 	${LINT} ${LINTFLAGS} ${CFLAGS:M-[IDU]*} -i ${.IMPSRC}
 
 .cc.o .C.o:
-	@echo "${COMPILE.cc} ${.IMPSRC}"
+	@echo "${COMPILE.cc} ${.IMPSRC} -o ${TARGET}"
 	@${COMPILE.cc} ${.IMPSRC} -o ${.TARGET}.o
 	@${LD} -x -r ${.TARGET}.o -o ${.TARGET}
 	@rm -f ${.TARGET}.o
@@ -87,6 +87,13 @@ CFLAGS+=	${COPTS}
 
 .if !defined(PICFLAG) && (${MACHINE_ARCH} != "mips")
 PICFLAG=-fpic
+.if ${MACHINE_ARCH} == "m68k"
+# Function CSE makes gas -k not recognize external function calls as lazily
+# resolvable symbols, thus sometimes making ld.so report undefined symbol
+# errors on symbols found in shared library members that would never be 
+# called.  Ask niklas@openbsd.org for details.
+PICFLAG+=-fno-function-cse
+.endif
 .endif
 
 .if !defined(NOPROFILE)

@@ -1,4 +1,4 @@
-#       $OpenBSD: install.md,v 1.8 1997/05/15 05:13:09 millert Exp $
+#       $OpenBSD: install.md,v 1.15 1997/10/30 21:14:41 niklas Exp $
 # Copyright (c) 1996 The NetBSD Foundation, Inc.
 # All rights reserved.
 #
@@ -72,8 +72,8 @@ md_set_term() {
 	if [ ! -z "$TERM" ]; then
 		return
 	fi
-	echo -n "Specify terminal type [ansi-mini]: "
-	getresp "ansi-mini"
+	echo -n "Specify terminal type [sun]: "
+	getresp "sun"
 	TERM="$resp"
 	export TERM
 }
@@ -100,7 +100,7 @@ md_get_cddevs() {
 
 md_get_ifdevs() {
         # return available network devices
-	md_get_msgbuf | egrep "(^ed[0-9] |^[dl]e[0-9] )" | sed -e 's/^ *//' -e 's/ .*//'
+	md_get_msgbuf | egrep "(^e[dp][0-9] |^[dl]e[0-9] |fxp[0-9])" | sed -e 's/^ *//' -e 's/ .*//'
 }
 
 md_get_partition_range() {
@@ -120,11 +120,9 @@ md_installboot() {
 	# use extracted mdec if it exists (may be newer)
 	if [ -d /mnt/usr/mdec ]; then
 		cp /mnt/usr/mdec/boot /mnt/boot
-		sync
 		/mnt/usr/mdec/installboot -v /mnt/boot /mnt/usr/mdec/bootxx $_rawdev
 	elif [ -d /usr/mdec ]; then
 		cp /usr/mdec/boot /mnt/boot
-		sync
 		/usr/mdec/installboot -v /mnt/boot /usr/mdec/bootxx $_rawdev
 	else
 		echo "No boot block prototypes found, you must run installboot manually."
@@ -157,67 +155,42 @@ md_prep_disklabel()
 
 	_disk=$1
 	md_checkfordisklabel $_disk
-	echo "Note: your disklabel editor is $EDITOR"
 	case $? in
 	0)
-		echo -n "Do you wish to edit the disklabel on $_disk? [y] "
 		;;
 	1)
-		echo "WARNING: Disk $_disk has no label"
-		echo -n "Do you want to create one with the disklabel editor? [y] "
+		echo "WARNING: Disk $_disk has no label. You will be creating a new one."
+		echo
 		;;
 	2)
-		echo "WARNING: Label on disk $_disk is corrupted"
-		echo -n "Do you want to try and repair the damage using the disklabel editor? [y] "
+		echo "WARNING: Label on disk $_disk is corrupted. You will be repairing."
+		echo
 		;;
-	esac
-
-	getresp "y"
-	case "$resp" in
-	y*|Y*) ;;
-	*)	return ;;
 	esac
 
 	# display example
 	cat << \__md_prep_disklabel_1
 
-Here is an example of what the partition information will look like once
-you have entered the disklabel editor. Disk partition sizes and offsets
-are in sector (most likely 512 bytes) units. Make sure these size/offset
-pairs are on cylinder boundaries (the number of sector per cylinder is
-given in the `sectors/cylinder' entry, which is not shown here).
-
-Do not change any parameters except the partition layout and the label name.
-It's probably also wisest not to touch the `8 partitions:' line, even
-in case you have defined less than eight partitions.
-
-[Example]
-8 partitions:
-#        size   offset    fstype   [fsize bsize   cpg]
-  a:    50176        0    4.2BSD     1024  8192    16   # (Cyl.    0 - 111)
-  b:    64512    50176      swap                        # (Cyl.  112 - 255)
-  c:   640192        0   unknown                        # (Cyl.    0 - 1428)
-  d:   525504   114688    4.2BSD     1024  8192    16   # (Cyl.  256 - 1428)
-[End of example]
-
+If you are unsure of how to use multiple partitions properly
+(ie. seperating /, /usr, /tmp, /var, /usr/local, and other things)
+just split the space into a root and swap partition for now.
 __md_prep_disklabel_1
-	echo -n "Press [Enter] to continue "
-	getresp ""
+
 	disklabel -W ${_disk}
-	disklabel -e ${_disk}
+	disklabel -E ${_disk}
 }
 
 md_welcome_banner() {
 {
 	if [ "$MODE" = "install" ]; then
 		echo ""
-		echo "Welcome to the OpenBSD/alpha ${VERSION} installation program."
+		echo "Welcome to the OpenBSD/alpha ${VERSION_MAJOR}.${VERSION_MINOR} installation program."
 		cat << \__welcome_banner_1
 
-This program is designed to help you put OpenBSD on your disk,
-in a simple and rational way.  You'll be asked several questions,
-and it would probably be useful to have your disk's hardware
-manual, the installation notes, and a calculator handy.
+This program is designed to help you put OpenBSD on your disk, in a
+simple and rational way.  You'll be asked several questions, and it
+would probably be useful to have your disk's hardware manual, the
+installation notes, and a calculator handy.
 __welcome_banner_1
 
 	else
@@ -232,19 +205,19 @@ As a reminder, installing the `etc' binary set is NOT recommended.
 Once the rest of your system has been upgraded, you should manually
 merge any changes to files in the `etc' set into those files which
 already exist on your system.
+
 __welcome_banner_2
 	fi
 
 cat << \__welcome_banner_3
 
-As with anything which modifies your disk's contents, this
-program can cause SIGNIFICANT data loss, and you are advised
-to make sure your data is backed up before beginning the
-installation process.
+As with anything which modifies your disk's contents, this program can
+cause SIGNIFICANT data loss, and you are advised to make sure your
+data is backed up before beginning the installation process.
 
-Default answers are displayed in brackets after the questions.
-You can hit Control-C at any time to quit, but if you do so at a
-prompt, you may have to hit return.  Also, quitting in the middle of
+Default answers are displayed in brackets after the questions.  You
+can hit Control-C at any time to quit, but if you do so at a prompt,
+you may have to hit return.  Also, quitting in the middle of
 installation may leave your system in an inconsistent state.
 
 __welcome_banner_3

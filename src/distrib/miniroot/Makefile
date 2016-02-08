@@ -1,8 +1,6 @@
-#	$OpenBSD: Makefile,v 1.16 1997/05/23 18:31:28 deraadt Exp $
-#	$NetBSD: Makefile,v 1.2.4.3 1996/07/04 07:05:32 leo Exp $
+#	$OpenBSD: Makefile,v 1.20 1997/10/01 22:12:57 deraadt Exp $
 
-# Revision is 2.1
-REV=		21
+REV=		22
 
 CBIN=		instbin
 ARCHDIR=	${.CURDIR}/../${MACHINE}/miniroot
@@ -38,15 +36,14 @@ all:
 bsd:
 	cd ${.CURDIR}/../../sys/arch/${MACHINE}/conf && config GENERIC
 	cd ${.CURDIR}/../../sys/arch/${MACHINE}/compile/GENERIC && \
-	    make clean && make depend && make
+	    make clean && make
 	cp ${.CURDIR}/../../sys/arch/${MACHINE}/compile/GENERIC/bsd bsd
 
 all: ${CBIN} bsd
 	dd if=/dev/zero of=${REALIMAGE} count=${IMAGESIZE}
 	vnconfig -v -c ${VND} ${REALIMAGE}
 	disklabel -w ${RAWLABEL} ${VND} ${DISKTYPE}
-	newfs -m 0 -o space ${NEWFSOPTS} ${VND_RDEV} ${DISKTYPE} || \
-	    ${NEWFS_WILL_FAIL}
+	newfs -m 0 -o space ${NEWFSOPTS} ${VND_RDEV} || ${NEWFS_WILL_FAIL}
 	mount ${VND_DEV} ${MOUNT_POINT}
 	mtree -def ${MTREE} -p ${MOUNT_POINT}/ -u
 	REV=${REV} CURDIR=${.CURDIR} OBJDIR=${.OBJDIR} ARCHDIR=${ARCHDIR} \

@@ -1,4 +1,4 @@
-/*	$OpenBSD: forward.c,v 1.4 1997/01/12 23:43:05 millert Exp $	*/
+/*	$OpenBSD: forward.c,v 1.6 1997/05/30 19:33:44 millert Exp $	*/
 /*	$NetBSD: forward.c,v 1.7 1996/02/13 16:49:10 ghudson Exp $	*/
 
 /*-
@@ -41,12 +41,11 @@
 #if 0
 static char sccsid[] = "@(#)forward.c	8.1 (Berkeley) 6/6/93";
 #endif
-static char rcsid[] = "$OpenBSD: forward.c,v 1.4 1997/01/12 23:43:05 millert Exp $";
+static char rcsid[] = "$OpenBSD: forward.c,v 1.6 1997/05/30 19:33:44 millert Exp $";
 #endif /* not lint */
 
 #include <sys/types.h>
 #include <sys/stat.h>
-#include <sys/time.h>
 #include <sys/mman.h>
 
 #include <err.h>
@@ -92,7 +91,7 @@ forward(fp, style, off, sbp)
 	struct stat *sbp;
 {
 	register int ch;
-	struct timeval second;
+	struct stat nsb;
 
 	switch(style) {
 	case FBYTES:
@@ -166,7 +165,7 @@ forward(fp, style, off, sbp)
 	}
 
 	for (;;) {
-		while ((ch = getc(fp)) != EOF)
+		while (!feof(fp) && (ch = getc(fp)) != EOF)
 			if (putchar(ch) == EOF)
 				oerr();
 		if (ferror(fp)) {
@@ -176,16 +175,24 @@ forward(fp, style, off, sbp)
 		(void)fflush(stdout);
 		if (!fflag)
 			break;
-		/*
-		 * We pause for one second after displaying any data that has
-		 * accumulated since we read the file.  Since sleep(3) takes
-		 * eight system calls, use select() instead.
-		 */
-		second.tv_sec = 1;
-		second.tv_usec = 0;
-		if (select(0, NULL, NULL, NULL, &second) == -1)
-			err(1, "select");
+		sleep(1);
 		clearerr(fp);
+
+		if (stat(fname, &nsb) != 0)
+			continue;
+		/* Reopen file if the inode changes or file was truncated */
+		if (nsb.st_ino != sbp->st_ino) {
+			warnx("%s has been replaced, reopening.", fname);
+			if ((fp = freopen(fname, "r", fp)) == NULL) {
+				ierr();
+				return;
+			}
+			(void)memcpy(sbp, &nsb, sizeof(nsb));
+		} else if (nsb.st_size < sbp->st_size) {
+			warnx("%s has been truncated, resetting.", fname);
+			rewind(fp);
+			(void)memcpy(sbp, &nsb, sizeof(nsb));
+		}
 	}
 }
 

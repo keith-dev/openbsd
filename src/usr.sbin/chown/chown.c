@@ -1,4 +1,4 @@
-/*	$OpenBSD: chown.c,v 1.4 1997/01/26 05:54:28 downsj Exp $	*/
+/*	$OpenBSD: chown.c,v 1.10 1997/09/20 12:44:29 deraadt Exp $	*/
 
 /*
  * Copyright (c) 1988, 1993, 1994
@@ -41,7 +41,7 @@ static char copyright[] =
 
 #ifndef lint
 /* from: static char sccsid[] = "@(#)chown.c	8.8 (Berkeley) 4/4/94"; */
-static char *rcsid = "$Id: chown.c,v 1.4 1997/01/26 05:54:28 downsj Exp $";
+static char *rcsid = "$Id: chown.c,v 1.10 1997/09/20 12:44:29 deraadt Exp $";
 #endif /* not lint */
 
 #include <sys/param.h>
@@ -58,17 +58,16 @@ static char *rcsid = "$Id: chown.c,v 1.4 1997/01/26 05:54:28 downsj Exp $";
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include <locale.h>
 
 void	a_gid __P((char *));
 void	a_uid __P((char *));
-void	chownerr __P((char *));
-u_long	id __P((char *, char *));
 void	usage __P((void));
 
 uid_t uid;
 gid_t gid;
 int Rflag, ischown, fflag;
-char *gname, *myname;
+extern char *__progname;
 
 int
 main(argc, argv)
@@ -80,8 +79,9 @@ main(argc, argv)
 	int Hflag, Lflag, Pflag, ch, fts_options, hflag, rval;
 	char *cp;
 	
-	myname = (cp = strrchr(*argv, '/')) ? cp + 1 : *argv;
-	ischown = myname[2] == 'o';
+	setlocale(LC_ALL, "");
+
+	ischown = __progname[2] == 'o';
 	
 	Hflag = Lflag = Pflag = hflag = 0;
 	while ((ch = getopt(argc, argv, "HLPRfh")) != -1)
@@ -132,16 +132,16 @@ main(argc, argv)
 
 	uid = gid = -1;
 	if (ischown) {
-#ifdef SUPPORT_DOT
-		if ((cp = strchr(*argv, '.')) != NULL) {
-			*cp++ = '\0';
-			a_gid(cp);
-		} else
-#endif
 		if ((cp = strchr(*argv, ':')) != NULL) {
 			*cp++ = '\0';
 			a_gid(cp);
 		} 
+#ifdef SUPPORT_DOT
+		else if ((cp = strchr(*argv, '.')) != NULL) {
+			*cp++ = '\0';
+			a_gid(cp);
+		}
+#endif
 		a_uid(*argv);
 	} else 
 		a_gid(*argv);
@@ -189,11 +189,21 @@ a_gid(s)
 	char *s;
 {
 	struct group *gr;
+	char *ep;
+	u_long ul;
 
-	if (*s == '\0')			/* Argument was "uid[:.]". */
+	if (*s == '\0')			/* Argument was "gid[:.]". */
 		return;
-	gname = s;
-	gid = ((gr = getgrnam(s)) == NULL) ? id(s, "group") : gr->gr_gid;
+
+	if ((gr = getgrnam(s)) != NULL) {
+		gid = gr->gr_gid;
+	} else {
+		if ((ul = strtoul(s, &ep, 10)) == ULONG_MAX)
+			err(1, "%s", s);
+		if (*ep != '\0')
+			errx(1, "%s: invalid group name", s);
+		gid = (gid_t)ul;
+	}
 }
 
 void
@@ -201,37 +211,29 @@ a_uid(s)
 	char *s;
 {
 	struct passwd *pw;
-
-	if (*s == '\0')			/* Argument was "[:.]gid". */
-		return;
-	uid = ((pw = getpwnam(s)) == NULL) ? id(s, "user") : pw->pw_uid;
-}
-
-u_long
-id(name, type)
-	char *name, *type;
-{
-	u_long val;
 	char *ep;
+	u_long ul;
 
-	/*
-	 * XXX
-	 * We know that uid_t's and gid_t's are unsigned longs.
-	 */
-	errno = 0;
-	val = strtoul(name, &ep, 10);
-	if (errno)
-		err(1, "%s", name);
-	if (*ep != '\0')
-		errx(1, "%s: illegal %s name", name, type);
-	return (val);
+	if (*s == '\0')			/* Argument was "gid[:.]". */
+		return;
+
+	if ((pw = getpwnam(s)) != NULL) {
+		uid = pw->pw_uid;
+	} else {
+		if ((ul = strtoul(s, &ep, 10)) == ULONG_MAX)
+			err(1, "%s", s);
+		if (*ep != '\0')
+			errx(1, "%s: invalid user name", s);
+		uid = (uid_t)ul;
+	}
 }
 
 void
 usage()
 {
+
 	(void)fprintf(stderr,
 	    "usage: %s [-R [-H | -L | -P]] [-f] %s file ...\n",
-	    myname, ischown ? "[owner][:group]" : "group");
+	    __progname, ischown ? "[owner][:group]" : "group");
 	exit(1);
 }

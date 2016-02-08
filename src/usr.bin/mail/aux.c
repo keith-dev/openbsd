@@ -1,5 +1,5 @@
-/*	$OpenBSD: aux.c,v 1.3 1997/01/17 07:12:44 millert Exp $	*/
-/*	$NetBSD: aux.c,v 1.4 1996/06/08 19:48:10 christos Exp $	*/
+/*	$OpenBSD: aux.c,v 1.12 1997/08/04 17:30:22 millert Exp $	*/
+/*	$NetBSD: aux.c,v 1.5 1997/05/13 06:15:52 mikel Exp $	*/
 
 /*
  * Copyright (c) 1980, 1993
@@ -38,7 +38,7 @@
 #if 0
 static char sccsid[] = "@(#)aux.c	8.1 (Berkeley) 6/6/93";
 #else
-static char rcsid[] = "$OpenBSD: aux.c,v 1.3 1997/01/17 07:12:44 millert Exp $";
+static char rcsid[] = "$OpenBSD: aux.c,v 1.12 1997/08/04 17:30:22 millert Exp $";
 #endif
 #endif /* not lint */
 
@@ -62,9 +62,9 @@ savestr(str)
 	char *new;
 	int size = strlen(str) + 1;
 
-	if ((new = salloc(size)) != NOSTR)
-		bcopy(str, new, size);
-	return new;
+	if ((new = salloc(size)) != NULL)
+		(void)memcpy(new, str, size);
+	return(new);
 }
 
 /*
@@ -78,27 +78,27 @@ save2str(str, old)
 	int newsize = strlen(str) + 1;
 	int oldsize = old ? strlen(old) + 1 : 0;
 
-	if ((new = salloc(newsize + oldsize)) != NOSTR) {
+	if ((new = salloc(newsize + oldsize)) != NULL) {
 		if (oldsize) {
-			bcopy(old, new, oldsize);
+			(void)memcpy(new, old, oldsize);
 			new[oldsize - 1] = ' ';
 		}
-		bcopy(str, new + oldsize, newsize);
+		(void)memcpy(new + oldsize, str, newsize);
 	}
-	return new;
+	return(new);
 }
 
 /*
  * Announce a fatal error and die.
  */
-#if __STDC__
+#ifdef __STDC__
 #include <stdarg.h>
 #else
 #include <varargs.h>
 #endif
 
 void
-#if __STDC__
+#ifdef __STDC__
 panic(const char *fmt, ...)
 #else
 panic(fmt, va_alist)
@@ -107,7 +107,7 @@ panic(fmt, va_alist)
 #endif
 {
 	va_list ap;
-#if __STDC__
+#ifdef __STDC__
 	va_start(ap, fmt);
 #else
 	va_start(ap);
@@ -115,7 +115,7 @@ panic(fmt, va_alist)
 	(void)fprintf(stderr, "panic: ");
 	vfprintf(stderr, fmt, ap);
 	va_end(ap);
-	(void)fprintf(stderr, "\n");
+	(void)putc('\n', stderr);
 	fflush(stderr);
 	abort();
 }
@@ -159,14 +159,14 @@ argcount(argv)
 {
 	register char **ap;
 
-	for (ap = argv; *ap++ != NOSTR;)
+	for (ap = argv; *ap++ != NULL;)
 		;	
-	return ap - argv - 1;
+	return(ap - argv - 1);
 }
 
 /*
  * Return the desired header line from the passed message
- * pointer (or NOSTR if the desired header field is not available).
+ * pointer (or NULL if the desired header field is not available).
  */
 char *
 hfield(field, mp)
@@ -177,20 +177,20 @@ hfield(field, mp)
 	char linebuf[LINESIZE];
 	register int lc;
 	register char *hfield;
-	char *colon, *oldhfield = NOSTR;
+	char *colon, *oldhfield = NULL;
 
 	ibuf = setinput(mp);
 	if ((lc = mp->m_lines - 1) < 0)
-		return NOSTR;
+		return(NULL);
 	if (readline(ibuf, linebuf, LINESIZE) < 0)
-		return NOSTR;
+		return(NULL);
 	while (lc > 0) {
 		if ((lc = gethfield(ibuf, linebuf, lc, &colon)) < 0)
-			return oldhfield;
+			return(oldhfield);
 		if ((hfield = ishfield(linebuf, colon, field)) != NULL)
 			oldhfield = save2str(hfield, oldhfield);
 	}
-	return oldhfield;
+	return(oldhfield);
 }
 
 /*
@@ -212,9 +212,9 @@ gethfield(f, linebuf, rem, colon)
 
 	for (;;) {
 		if (--rem < 0)
-			return -1;
+			return(-1);
 		if ((c = readline(f, linebuf, LINESIZE)) <= 0)
-			return -1;
+			return(-1);
 		for (cp = linebuf; isprint(*cp) && *cp != ' ' && *cp != ':';
 		     cp++)
 			;
@@ -244,11 +244,11 @@ gethfield(f, linebuf, rem, colon)
 			if (cp + c >= linebuf + LINESIZE - 2)
 				break;
 			*cp++ = ' ';
-			bcopy(cp2, cp, c);
+			(void)memcpy(cp, cp2, c);
 			cp += c;
 		}
 		*cp = 0;
-		return rem;
+		return(rem);
 	}
 	/* NOTREACHED */
 }
@@ -268,28 +268,33 @@ ishfield(linebuf, colon, field)
 	*cp = 0;
 	if (strcasecmp(linebuf, field) != 0) {
 		*cp = ':';
-		return 0;
+		return(0);
 	}
 	*cp = ':';
 	for (cp++; *cp == ' ' || *cp == '\t'; cp++)
 		;
-	return cp;
+	return(cp);
 }
 
 /*
- * Copy a string, lowercasing it as we go.
+ * Copy a string, lowercasing it as we go.  ``dsize'' should be
+ * the real size (not len) of the dest string (guarantee NULL term).
  */
 void
-istrcpy(dest, src)
+istrncpy(dest, src, dsize)
 	register char *dest, *src;
+	register size_t dsize;
 {
 
-	do {
-		if (isupper(*src))
-			*dest++ = tolower(*src);
-		else
-			*dest++ = *src;
-	} while (*src++ != 0);
+	if (dsize != 0) {
+		while (--dsize != 0 && *src != '\0') {
+			if (isupper(*src))
+				*dest++ = tolower(*src++);
+			else
+				*dest++ = *src++;
+		}
+		*dest = '\0';
+	}
 }
 
 /*
@@ -318,15 +323,15 @@ source(v)
 	FILE *fi;
 	char *cp;
 
-	if ((cp = expand(*arglist)) == NOSTR)
+	if ((cp = expand(*arglist)) == NULL)
 		return(1);
 	if ((fi = Fopen(cp, "r")) == NULL) {
-		perror(cp);
+		warn(cp);
 		return(1);
 	}
 	if (ssp >= NOFILE - 1) {
-		printf("Too much \"sourcing\" going on.\n");
-		Fclose(fi);
+		puts("Too much \"sourcing\" going on.");
+		(void)Fclose(fi);
 		return(1);
 	}
 	sstack[ssp].s_file = input;
@@ -348,13 +353,13 @@ int
 unstack()
 {
 	if (ssp <= 0) {
-		printf("\"Source\" stack over-pop.\n");
+		puts("\"Source\" stack over-pop.");
 		sourcing = 0;
 		return(1);
 	}
-	Fclose(input);
+	(void)Fclose(input);
 	if (cond != CANY)
-		printf("Unmatched \"if\"\n");
+		puts("Unmatched \"if\"");
 	ssp--;
 	cond = sstack[ssp].s_cond;
 	loading = sstack[ssp].s_loading;
@@ -447,7 +452,7 @@ skip_comment(cp)
 			break;
 		}
 	}
-	return cp;
+	return(cp);
 }
 
 /*
@@ -460,15 +465,18 @@ skin(name)
 {
 	register int c;
 	register char *cp, *cp2;
-	char *bufend;
 	int gotlt, lastsp;
-	char nbuf[BUFSIZ];
+	char *nbuf, *bufend;
 
-	if (name == NOSTR)
-		return(NOSTR);
-	if (strchr(name, '(') == NOSTR && strchr(name, '<') == NOSTR
-	    && strchr(name, ' ') == NOSTR)
+	if (name == NULL)
+		return(NULL);
+	if (strchr(name, '(') == NULL && strchr(name, '<') == NULL
+	    && strchr(name, ' ') == NULL)
 		return(name);
+
+	/* We assume that length(input) <= length(output) */
+	if ((nbuf = (char *)malloc(strlen(name) + 1)) == NULL)
+		panic("Out of memory");
 	gotlt = 0;
 	lastsp = 0;
 	bufend = nbuf;
@@ -552,7 +560,9 @@ skin(name)
 	}
 	*cp2 = 0;
 
-	return(savestr(nbuf));
+	if ((nbuf = (char *)realloc(nbuf, strlen(nbuf) + 1)) == NULL)
+		panic("Out of memory");
+	return(nbuf);
 }
 
 /*
@@ -573,12 +583,12 @@ name1(mp, reptype)
 	register FILE *ibuf;
 	int first = 1;
 
-	if ((cp = hfield("from", mp)) != NOSTR)
-		return cp;
-	if (reptype == 0 && (cp = hfield("sender", mp)) != NOSTR)
-		return cp;
+	if ((cp = hfield("from", mp)) != NULL)
+		return(cp);
+	if (reptype == 0 && (cp = hfield("sender", mp)) != NULL)
+		return(cp);
 	ibuf = setinput(mp);
-	namebuf[0] = 0;
+	namebuf[0] = '\0';
 	if (readline(ibuf, linebuf, LINESIZE) < 0)
 		return(savestr(namebuf));
 newname:
@@ -606,10 +616,12 @@ newname:
 				break;
 			cp++;
 			if (first) {
-				strcpy(namebuf, cp);
+				cp2 = namebuf;
 				first = 0;
 			} else
-				strcpy(strrchr(namebuf, '!')+1, cp);
+				cp2 = strrchr(namebuf, '!') + 1;
+			strncpy(cp2, cp, sizeof(namebuf) - (cp2 - namebuf) - 2);
+			namebuf[sizeof(namebuf) - 2] = '\0';
 			strcat(namebuf, "!");
 			goto newname;
 		}
@@ -645,8 +657,8 @@ anyof(s1, s2)
 
 	while (*s1)
 		if (strchr(s2, *s1++))
-			return 1;
-	return 0;
+			return(1);
+	return(0);
 }
 
 /*
@@ -658,8 +670,8 @@ raise(c)
 {
 
 	if (islower(c))
-		return toupper(c);
-	return c;
+		return(toupper(c));
+	return(c);
 }
 
 /*
@@ -672,7 +684,7 @@ copy(s1, s2)
 
 	while ((*s2++ = *s1++) != '\0')
 		;
-	return s2 - 1;
+	return(s2 - 1);
 }
 
 /*
@@ -683,19 +695,19 @@ isign(field, ignore)
 	char *field;
 	struct ignoretab ignore[2];
 {
-	char realfld[BUFSIZ];
+	char realfld[LINESIZE];
 
 	if (ignore == ignoreall)
-		return 1;
+		return(1);
 	/*
 	 * Lower-case the string, so that "Status" and "status"
 	 * will hash to the same place.
 	 */
-	istrcpy(realfld, field);
+	istrncpy(realfld, field, sizeof(realfld));
 	if (ignore[1].i_count > 0)
-		return (!member(realfld, ignore + 1));
+		return(!member(realfld, ignore + 1));
 	else
-		return (member(realfld, ignore));
+		return(member(realfld, ignore));
 }
 
 int
@@ -708,6 +720,6 @@ member(realfield, table)
 	for (igp = table->i_head[hash(realfield)]; igp != 0; igp = igp->i_link)
 		if (*igp->i_field == *realfield &&
 		    equal(igp->i_field, realfield))
-			return (1);
-	return (0);
+			return(1);
+	return(0);
 }

@@ -1,6 +1,5 @@
-#	$OpenBSD: Makefile,v 1.2 1997/03/01 15:08:18 provos Exp $
+#	$OpenBSD: Makefile,v 1.4 1997/07/18 22:59:06 provos Exp $
 
-SUBDIR=	delspi pfr rt rtdelete sah sahhmac sesp sesp3md5 sespmd5 sgrp shahmac \
-	si4 ipsecadm
+SUBDIR=	ipsecadm rt rtdelete photurisd startkey
 
 .include <bsd.subdir.mk>

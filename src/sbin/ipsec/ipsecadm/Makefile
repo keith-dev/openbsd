@@ -1,8 +1,7 @@
-#	$OpenBSD: Makefile,v 1.1 1997/03/01 15:08:24 provos Exp $
+#	$OpenBSD: Makefile,v 1.6 1997/08/26 17:19:05 provos Exp $
 
 PROG= ipsecadm
-SRCS= ipsecadm.c xf_espdes.c xf_esp3desmd5.c xf_ahmd5.c xf_ahhmacmd5.c \
-	xf_ahhmacsha1.c xf_ip4.c xf_espdesmd5.c kernel.c xf_grp.c \
-	xf_delspi.c xf_pfr.c
+SRCS= ipsecadm.c kernel.c xf_esp_new.c xf_esp_old.c xf_ah_old.c xf_ah_new.c \
+	xf_delspi.c xf_grp.c
 
 .include <bsd.prog.mk>

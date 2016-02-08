@@ -1,4 +1,4 @@
-/*	$OpenBSD: cache.c,v 1.4 1996/09/15 22:34:06 millert Exp $	*/
+/*	$OpenBSD: cache.c,v 1.6 1997/07/25 18:58:27 mickey Exp $	*/
 /*	$NetBSD: cache.c,v 1.4 1995/03/21 09:07:10 cgd Exp $	*/
 
 /*-
@@ -42,7 +42,7 @@
 #if 0
 static char sccsid[] = "@(#)cache.c	8.1 (Berkeley) 5/31/93";
 #else
-static char rcsid[] = "$OpenBSD: cache.c,v 1.4 1996/09/15 22:34:06 millert Exp $";
+static char rcsid[] = "$OpenBSD: cache.c,v 1.6 1997/07/25 18:58:27 mickey Exp $";
 #endif
 #endif /* not lint */
 
@@ -81,7 +81,7 @@ static GIDC **grptb = NULL;	/* group name to gid cache */
  *	0 if ok, -1 otherwise
  */
 
-#if __STDC__
+#ifdef __STDC__
 int
 uidtb_start(void)
 #else
@@ -110,7 +110,7 @@ uidtb_start()
  *	0 if ok, -1 otherwise
  */
 
-#if __STDC__
+#ifdef __STDC__
 int
 gidtb_start(void)
 #else
@@ -139,7 +139,7 @@ gidtb_start()
  *	0 if ok, -1 otherwise
  */
 
-#if __STDC__
+#ifdef __STDC__
 int
 usrtb_start(void)
 #else
@@ -168,7 +168,7 @@ usrtb_start()
  *	0 if ok, -1 otherwise
  */
 
-#if __STDC__
+#ifdef __STDC__
 int
 grptb_start(void)
 #else
@@ -198,7 +198,7 @@ grptb_start()
  *	Pointer to stored name (or a empty string)
  */
 
-#if __STDC__
+#ifdef __STDC__
 char *
 name_uid(uid_t uid, int frc)
 #else
@@ -261,7 +261,7 @@ name_uid(uid, frc)
 		if (ptr == NULL)
 			return(pw->pw_name);
 		ptr->uid = uid;
-		(void)strncpy(ptr->name, pw->pw_name, UNMLEN);
+		(void)strncpy(ptr->name, pw->pw_name, UNMLEN-1);
 		ptr->name[UNMLEN-1] = '\0';
 		ptr->valid = VALID;
 	}
@@ -276,7 +276,7 @@ name_uid(uid, frc)
  *	Pointer to stored name (or a empty string)
  */
 
-#if __STDC__
+#ifdef __STDC__
 char *
 name_gid(gid_t gid, int frc)
 #else
@@ -339,7 +339,7 @@ name_gid(gid, frc)
 		if (ptr == NULL)
 			return(gr->gr_name);
 		ptr->gid = gid;
-		(void)strncpy(ptr->name, gr->gr_name, GNMLEN);
+		(void)strncpy(ptr->name, gr->gr_name, GNMLEN-1);
 		ptr->name[GNMLEN-1] = '\0';
 		ptr->valid = VALID;
 	}
@@ -353,7 +353,7 @@ name_gid(gid, frc)
  *	the uid (if any) for a user name, or a -1 if no match can be found
  */
 
-#if __STDC__
+#ifdef __STDC__
 int
 uid_name(char *name, uid_t *uid)
 #else
@@ -405,7 +405,7 @@ uid_name(name, uid)
 		*uid = pw->pw_uid;
 		return(0);
 	}
-	(void)strncpy(ptr->name, name, UNMLEN);
+	(void)strncpy(ptr->name, name, UNMLEN-1);
 	ptr->name[UNMLEN-1] = '\0';
 	if ((pw = getpwnam(name)) == NULL) {
 		ptr->valid = INVALID;
@@ -423,7 +423,7 @@ uid_name(name, uid)
  *	the gid (if any) for a group name, or a -1 if no match can be found
  */
 
-#if __STDC__
+#ifdef __STDC__
 int
 gid_name(char *name, gid_t *gid)
 #else
@@ -475,7 +475,7 @@ gid_name(name, gid)
 		return(0);
 	}
 
-	(void)strncpy(ptr->name, name, GNMLEN);
+	(void)strncpy(ptr->name, name, GNMLEN-1);
 	ptr->name[GNMLEN-1] = '\0';
 	if ((gr = getgrnam(name)) == NULL) {
 		ptr->valid = INVALID;

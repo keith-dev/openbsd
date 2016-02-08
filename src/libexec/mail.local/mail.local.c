@@ -39,7 +39,7 @@ char copyright[] =
 
 #ifndef lint
 /*static char sccsid[] = "from: @(#)mail.local.c	5.6 (Berkeley) 6/19/91";*/
-static char rcsid[] = "$Id: mail.local.c,v 1.15 1997/04/04 18:41:27 deraadt Exp $";
+static char rcsid[] = "$Id: mail.local.c,v 1.17 1997/08/13 21:09:27 dm Exp $";
 #endif /* not lint */
 
 #include <sys/param.h>
@@ -393,8 +393,8 @@ retry:
 			goto bad;
 		}
 	} else {
-		if (sb.st_nlink != 1 || S_ISLNK(sb.st_mode)) {
-			err(NOTFATAL, "%s: linked file", path);
+		if (sb.st_nlink != 1 || !S_ISREG(sb.st_mode)) {
+			err(NOTFATAL, "%s: linked or special file", path);
 			goto bad;
 		}
 		if ((mbfd = open(path, O_APPEND|O_WRONLY|O_EXLOCK,
@@ -412,8 +412,8 @@ retry:
 			goto bad;
 		}
 		/* paranoia? */
-		if (fsb.st_nlink != 1 || S_ISLNK(fsb.st_mode)) {
-			err(NOTFATAL, "%s: linked file", path);
+		if (fsb.st_nlink != 1 || !S_ISREG(fsb.st_mode)) {
+			err(NOTFATAL, "%s: linked or special file", path);
 			goto bad;
 		}
 	}
@@ -495,14 +495,14 @@ usage()
 	err(FATAL, "usage: mail.local [-lLH] [-f from] user ...");
 }
 
-#if __STDC__
+#ifdef __STDC__
 #include <stdarg.h>
 #else
 #include <varargs.h>
 #endif
 
 void
-#if __STDC__
+#ifdef __STDC__
 err(int isfatal, const char *fmt, ...)
 #else
 err(isfatal, fmt)
@@ -512,7 +512,7 @@ err(isfatal, fmt)
 #endif
 {
 	va_list ap;
-#if __STDC__
+#ifdef __STDC__
 	va_start(ap, fmt);
 #else
 	va_start(ap);

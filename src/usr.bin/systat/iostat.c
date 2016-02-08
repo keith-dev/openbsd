@@ -1,4 +1,4 @@
-/*	$OpenBSD: iostat.c,v 1.7 1997/02/04 04:42:42 kstailey Exp $	*/
+/*	$OpenBSD: iostat.c,v 1.9 1997/07/15 14:41:06 kstailey Exp $	*/
 /*	$NetBSD: iostat.c,v 1.5 1996/05/10 23:16:35 thorpej Exp $	*/
 
 /*
@@ -38,7 +38,7 @@
 #if 0
 static char sccsid[] = "@(#)iostat.c	8.1 (Berkeley) 6/6/93";
 #endif
-static char rcsid[] = "$OpenBSD: iostat.c,v 1.7 1997/02/04 04:42:42 kstailey Exp $";
+static char rcsid[] = "$OpenBSD: iostat.c,v 1.9 1997/07/15 14:41:06 kstailey Exp $";
 #endif not lint
 
 #include <sys/param.h>
@@ -90,6 +90,7 @@ initiostat()
 {
 	dkinit(1);
 	dkreadstats();
+	return (1);
 }
 
 void
@@ -194,7 +195,6 @@ barlabels(row)
 void
 showiostat()
 {
-	register u_int64_t t;
 	register int i, row, col;
 
 	dkswap();

@@ -1,4 +1,4 @@
-/*	$OpenBSD: su.c,v 1.21 1997/02/18 20:07:56 tholo Exp $	*/
+/*	$OpenBSD: su.c,v 1.30 1997/09/11 11:21:55 deraadt Exp $	*/
 
 /*
  * Copyright (c) 1988 The Regents of the University of California.
@@ -41,7 +41,7 @@ char copyright[] =
 
 #ifndef lint
 /*static char sccsid[] = "from: @(#)su.c	5.26 (Berkeley) 7/6/91";*/
-static char rcsid[] = "$OpenBSD: su.c,v 1.21 1997/02/18 20:07:56 tholo Exp $";
+static char rcsid[] = "$OpenBSD: su.c,v 1.30 1997/09/11 11:21:55 deraadt Exp $";
 #endif /* not lint */
 
 #include <sys/param.h>
@@ -64,13 +64,18 @@ static char rcsid[] = "$OpenBSD: su.c,v 1.21 1997/02/18 20:07:56 tholo Exp $";
 #endif                                                                       
 
 #ifdef KERBEROS
-#include <kerberosIV/des.h>
+#include <des.h>
 #include <kerberosIV/krb.h>
 #include <netdb.h>
+
+int kerberos __P((char *username, char *user, int uid));
 
 #define	ARGSTR	"-Kflm"
 
 int use_kerberos = 1;
+char krbtkfile[MAXPATHLEN];
+char lrealm[REALM_SZ];
+int ksettkfile(char *);
 #else
 #define	ARGSTR	"-flm"
 #endif
@@ -90,7 +95,7 @@ main(argc, argv)
 	uid_t ruid;
 	int asme, ch, asthem, fastlogin, prio;
 	enum { UNSET, YES, NO } iscsh = UNSET;
-	char *user, *shell, *avshell, *username, *cleanenv[10], **np;
+	char *user, *shell, *avshell, *username, **np;
 	char shellbuf[MAXPATHLEN], avshellbuf[MAXPATHLEN];
 
 	asme = asthem = fastlogin = 0;
@@ -157,6 +162,11 @@ main(argc, argv)
 	if ((user = strdup(pwd->pw_name)) == NULL)
 		err(1, "can't allocate memory");
 
+#if KERBEROS
+	if (ksettkfile(user))
+		use_kerberos = 0;
+#endif
+
 	if (ruid) {
 #ifdef KERBEROS
 	    if (!use_kerberos || kerberos(username, user, pwd->pw_uid))
@@ -210,7 +220,7 @@ badlogin:
 		iscsh = NO;
 	}
 
-	if (p = strrchr(shell, '/'))
+	if ((p = strrchr(shell, '/')))
 		avshell = p+1;
 	else
 		avshell = shell;
@@ -234,8 +244,8 @@ badlogin:
 	if (!asme) {
 		if (asthem) {
 			p = getenv("TERM");
-			cleanenv[0] = NULL;
-			environ = cleanenv;
+			if ((environ = calloc(1, sizeof (char *))) == NULL)
+				errx(1, "calloc");
 			(void)setenv("PATH", _PATH_DEFPATH, 1);
 			if (p)
 				(void)setenv("TERM", p, 1);
@@ -254,6 +264,11 @@ badlogin:
 		(void)setenv("HOME", pwd->pw_dir, 1);
 		(void)setenv("SHELL", shell, 1);
 	}
+
+#ifdef KERBEROS
+	if (*krbtkfile)
+		(void)setenv("KRBTKFILE", krbtkfile, 1);
+#endif
 
 	if (iscsh == YES) {
 		if (fastlogin)
@@ -306,12 +321,13 @@ ontty()
 	static char buf[MAXPATHLEN + 4];
 
 	buf[0] = 0;
-	if (p = ttyname(STDERR_FILENO))
+	if ((p = ttyname(STDERR_FILENO)))
 		snprintf(buf, sizeof(buf), " on %s", p);
 	return (buf);
 }
 
 #ifdef KERBEROS
+int
 kerberos(username, user, uid)
 	char *username, *user;
 	int uid;
@@ -319,24 +335,17 @@ kerberos(username, user, uid)
 	KTEXT_ST ticket;
 	AUTH_DAT authdata;
 	struct hostent *hp;
-	register char *p;
 	int kerno;
-	u_long faddr;
-	char lrealm[REALM_SZ], krbtkfile[MAXPATHLEN];
+	in_addr_t faddr;
 	char hostname[MAXHOSTNAMELEN], savehost[MAXHOSTNAMELEN];
 	char *ontty(), *krb_get_phost();
 
-	if (krb_get_lrealm(lrealm, 1) != KSUCCESS)
-		return (1);
 	if (koktologin(username, lrealm, user) && !uid) {
 		(void)fprintf(stderr, "kerberos su: not in %s's ACL.\n", user);
 		return (1);
 	}
-	(void)snprintf(krbtkfile, sizeof(krbtkfile), "%s_%s_%d", TKT_ROOT,
-		user, getuid());
-
-	(void)setenv("KRBTKFILE", krbtkfile, 1);
 	(void)krb_set_tkt_string(krbtkfile);
+
 	/*
 	 * Set real as well as effective ID to 0 for the moment,
 	 * to make the kerberos library do the right thing.
@@ -447,5 +456,16 @@ koktologin(name, realm, toname)
 	kdata->prealm[sizeof(kdata->prealm) -1] = '\0';
 
 	return (kuserok(kdata, toname));
+}
+
+int
+ksettkfile(user)
+	char *user;
+{
+	if (krb_get_lrealm(lrealm, 1) != KSUCCESS)
+		return (1);
+	(void)snprintf(krbtkfile, sizeof(krbtkfile), "%s_%s_%u", TKT_ROOT,
+		user, getuid());
+	return (0);
 }
 #endif

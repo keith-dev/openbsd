@@ -210,7 +210,7 @@ main(argc, argv)
 	int argc;
 	char *argv[];
 {
-	int ch, funix, i, inetm, fklog, klogm, len;
+	int ch, funix, i, inetm = 0, fklog, klogm, len;
 	struct sockaddr_un sunx, fromunix;
 	struct sockaddr_in sin, frominet;
 	FILE *fp;
@@ -287,6 +287,7 @@ main(argc, argv)
 			die(0);
 		}
 		memset(&sin, 0, sizeof(sin));
+		sin.sin_len = sizeof(sin);
 		sin.sin_family = AF_INET;
 		sin.sin_port = LogPort = sp->s_port;
 		if (bind(finet, (struct sockaddr *)&sin, sizeof(sin)) < 0) {
@@ -519,6 +520,7 @@ logmsg(pri, msg, from, flags)
 		if (f->f_file >= 0) {
 			fprintlog(f, flags, msg);
 			(void)close(f->f_file);
+			f->f_file = -1;
 		}
 		(void)sigsetmask(omask);
 		return;
@@ -545,7 +547,7 @@ logmsg(pri, msg, from, flags)
 			(void)strncpy(f->f_lasttime, timestamp, 15);
 			f->f_prevcount++;
 			dprintf("msg repeated %d times, %ld sec of %d\n",
-			    f->f_prevcount, now - f->f_time,
+			    f->f_prevcount, (long)(now - f->f_time),
 			    repeatinterval[f->f_repeatcount]);
 			/*
 			 * If domark would have logged this by now,
@@ -646,10 +648,7 @@ fprintlog(f, flags, msg)
 		if (sendto(finet, line, l, 0,
 		    (struct sockaddr *)&f->f_un.f_forw.f_addr,
 		    sizeof(f->f_un.f_forw.f_addr)) != l) {
-			int e = errno;
-			(void)close(f->f_file);
 			f->f_type = F_UNUSED;
-			errno = e;
 			logerror("sendto");
 		}
 		break;
@@ -688,6 +687,7 @@ fprintlog(f, flags, msg)
 					goto again;
 			} else {
 				f->f_type = F_UNUSED;
+				f->f_file = -1;
 				errno = e;
 				logerror(f->f_un.f_fname);
 			}
@@ -768,9 +768,11 @@ reapchild(signo)
 	int signo;
 {
 	union wait status;
+	int save_errno = errno;
 
 	while (wait3((int *)&status, WNOHANG, (struct rusage *)NULL) > 0)
 		;
+	errno = save_errno;
 }
 
 /*
@@ -850,13 +852,16 @@ die(signo)
 	int signo;
 {
 	struct filed *f;
+	int was_initialized = Initialized;
 	char buf[100];
 
+	Initialized = 0;		/* Don't log SIGCHLDs */
 	for (f = Files; f != NULL; f = f->f_next) {
 		/* flush any pending output */
 		if (f->f_prevcount)
 			fprintlog(f, 0, (char *)NULL);
 	}
+	Initialized = was_initialized;
 	if (signo) {
 		dprintf("syslogd: exiting on signal %d\n", signo);
 		(void)sprintf(buf, "exiting on signal %d", signo);
@@ -895,8 +900,9 @@ init(signo)
 		case F_FILE:
 		case F_TTY:
 		case F_CONSOLE:
-		case F_FORW:
 			(void)close(f->f_file);
+			break;
+		case F_FORW:
 			break;
 		}
 		next = f->f_next;
@@ -1017,6 +1023,12 @@ cfline(line, f)
 		if (*buf == '*')
 			pri = LOG_PRIMASK + 1;
 		else {
+			/* ignore trailing spaces */
+			int i;
+			for (i=strlen(buf)-1; i >= 0 && buf[i] == ' '; i--) {
+				buf[i]='\0';
+			}
+
 			pri = decode(buf, prioritynames);
 			if (pri < 0) {
 				(void)snprintf(ebuf, sizeof ebuf,
@@ -1070,17 +1082,19 @@ cfline(line, f)
 			break;
 		}
 		memset(&f->f_un.f_forw.f_addr, 0,
-			 sizeof(f->f_un.f_forw.f_addr));
+		    sizeof(f->f_un.f_forw.f_addr));
+		f->f_un.f_forw.f_addr.sin_len = sizeof(f->f_un.f_forw.f_addr);
 		f->f_un.f_forw.f_addr.sin_family = AF_INET;
 		f->f_un.f_forw.f_addr.sin_port = LogPort;
-		memmove(&f->f_un.f_forw.f_addr.sin_addr, hp->h_addr, hp->h_length);
+		memmove(&f->f_un.f_forw.f_addr.sin_addr, hp->h_addr,
+		    hp->h_length);
 		f->f_type = F_FORW;
 		break;
 
 	case '/':
 		(void)strcpy(f->f_un.f_fname, p);
 		if ((f->f_file = open(p, O_WRONLY|O_APPEND, 0)) < 0) {
-			f->f_file = F_UNUSED;
+			f->f_type = F_UNUSED;
 			logerror(p);
 			break;
 		}

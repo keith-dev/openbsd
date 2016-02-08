@@ -32,7 +32,7 @@
  */
 
 #if defined(LIBC_SCCS) && !defined(lint)
-static char rcsid[] = "$OpenBSD: fstab.c,v 1.3 1996/08/19 08:22:51 tholo Exp $";
+static char rcsid[] = "$OpenBSD: fstab.c,v 1.6 1997/07/09 00:28:19 millert Exp $";
 #endif /* LIBC_SCCS and not lint */
 
 #include <sys/types.h>
@@ -76,9 +76,9 @@ fstabscan()
 				_fs_fstab.fs_vfstype =
 				    strcmp(_fs_fstab.fs_type, FSTAB_SW) ?
 				    "ufs" : "swap";
-				if (cp = strtok((char *)NULL, ":\n")) {
+				if ((cp = strtok((char *)NULL, ":\n"))) {
 					_fs_fstab.fs_freq = atoi(cp);
-					if (cp = strtok((char *)NULL, ":\n")) {
+					if ((cp = strtok((char *)NULL, ":\n"))) {
 						_fs_fstab.fs_passno = atoi(cp);
 						return(1);
 					}
@@ -102,7 +102,8 @@ fstabscan()
 			if ((cp = strtok((char *)NULL, " \t\n")) != NULL)
 				_fs_fstab.fs_passno = atoi(cp);
 		}
-		strcpy(subline, _fs_fstab.fs_mntops);
+		strncpy(subline, _fs_fstab.fs_mntops, sizeof subline-1);
+		subline[sizeof subline-1] = '\0';
 		for (typexx = 0, cp = strtok(subline, ","); cp;
 		     cp = strtok((char *)NULL, ",")) {
 			if (strlen(cp) != 2)
@@ -143,8 +144,8 @@ bad:		/* no way to distinguish between EOF and syntax error */
 struct fstab *
 getfsent()
 {
-	if (!_fs_fp && !setfsent() || !fstabscan())
-		return((struct fstab *)NULL);
+	if ((!_fs_fp && !setfsent()) || !fstabscan())
+		return(NULL);
 	return(&_fs_fstab);
 }
 
@@ -177,7 +178,7 @@ setfsent()
 		rewind(_fs_fp);
 		return(1);
 	}
-	if (_fs_fp = fopen(_PATH_FSTAB, "r"))
+	if ((_fs_fp = fopen(_PATH_FSTAB, "r")))
 		return(1);
 	error(errno);
 	return(0);

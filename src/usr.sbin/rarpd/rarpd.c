@@ -1,4 +1,4 @@
-/*	$OpenBSD: rarpd.c,v 1.9 1997/03/29 04:01:58 deraadt Exp $ */
+/*	$OpenBSD: rarpd.c,v 1.15 1997/09/18 08:05:47 deraadt Exp $ */
 /*	$NetBSD: rarpd.c,v 1.12 1996/03/21 18:28:23 jtc Exp $	*/
 
 /*
@@ -28,7 +28,7 @@ char    copyright[] =
 #endif				/* not lint */
 
 #ifndef lint
-static char rcsid[] = "$OpenBSD: rarpd.c,v 1.9 1997/03/29 04:01:58 deraadt Exp $";
+static char rcsid[] = "$OpenBSD: rarpd.c,v 1.15 1997/09/18 08:05:47 deraadt Exp $";
 #endif
 
 
@@ -43,7 +43,6 @@ static char rcsid[] = "$OpenBSD: rarpd.c,v 1.9 1997/03/29 04:01:58 deraadt Exp $
 #include <stdlib.h>
 #include <syslog.h>
 #include <string.h>
-#include <strings.h>
 #include <sys/types.h>
 #include <unistd.h>
 #include <sys/time.h>
@@ -262,11 +261,14 @@ init_all()
 	ifr = ifc.ifc_req;
 	for (i = 0; i < ifc.ifc_len;
 	     i += len, ifr = (struct ifreq *)((caddr_t)ifr + len)) {
-		len = sizeof(ifr->ifr_name) + ifr->ifr_addr.sa_len;
+		len = sizeof(ifr->ifr_name) +
+		      (ifr->ifr_addr.sa_len > sizeof(struct sockaddr) ?
+		       ifr->ifr_addr.sa_len : sizeof(struct sockaddr));
+
 		if (ioctl(fd, SIOCGIFFLAGS, (caddr_t)ifr) < 0) {
 			free(inbuf);
-			err(FATAL, "init_all: SIOCGIFFLAGS: %s",
-			    strerror(errno));
+			err(FATAL, "init_all: SIOCGIFFLAGS %s: %s",
+			    ifr->ifr_name, strerror(errno));
 			/* NOTREACHED */
 		}
 		if ((ifr->ifr_flags &
@@ -561,7 +563,7 @@ rarp_process(ii, pkt)
 	struct ether_header *ep;
 	struct hostent *hp;
 	u_int32_t  target_ipaddr;
-	char    ename[256];
+	char    ename[MAXHOSTNAMELEN];
 	struct	in_addr in;
 
 	ep = (struct ether_header *) pkt;
@@ -580,7 +582,7 @@ rarp_process(ii, pkt)
 
 	if (target_ipaddr == 0) {
 		in.s_addr = ii->ii_ipaddr & ii->ii_netmask;
-		err(NONFATAL, "cannot find %s on net %s\n",
+		err(NONFATAL, "cannot find %s on net %s",
 		    ename, inet_ntoa(in));
 		return;
 	}
@@ -598,12 +600,12 @@ lookup_eaddr(ifname, eaddr)
 	char *ifname;
 	u_char *eaddr;
 {
-	char inbuf[8192];
+	char *inbuf = NULL;
 	struct ifconf ifc;
 	struct ifreq *ifr;
 	struct sockaddr_dl *sdl;
 	int fd;
-	int i, len;
+	int i, len, inlen = 8192;
 
 	/* We cannot use SIOCGIFADDR on the BPF descriptor.
 	   We must instead get all the interfaces with SIOCGIFCONF
@@ -615,13 +617,24 @@ lookup_eaddr(ifname, eaddr)
 		/* NOTREACHED */
 	}
 
-	ifc.ifc_len = sizeof(inbuf);
-	ifc.ifc_buf = inbuf;
-	if (ioctl(fd, SIOCGIFCONF, (caddr_t)&ifc) < 0 ||
-	    ifc.ifc_len < sizeof(struct ifreq)) {
-		err(FATAL, "lookup_eaddr: SIOGIFCONF: %s", strerror(errno));
-		/* NOTREACHED */
+	while (1) {
+		ifc.ifc_len = inlen;
+		ifc.ifc_buf = inbuf = realloc(inbuf, inlen);
+		if (inbuf == NULL) {
+			close(fd);
+			err(FATAL, "init_all: malloc: %s", strerror(errno));
+		}
+		if (ioctl(fd, SIOCGIFCONF, (char *)&ifc) < 0) {
+			(void) close(fd);
+			free(inbuf);
+			err(FATAL, "init_all: SIOCGIFCONF: %s", strerror(errno));
+			/* NOTREACHED */
+		}
+		if (ifc.ifc_len + sizeof(*ifr) < inlen)
+			break;
+		inlen *= 2;
 	}
+
 	ifr = ifc.ifc_req;
 	for (i = 0; i < ifc.ifc_len;
 	     i += len, ifr = (struct ifreq *)((caddr_t)ifr + len)) {
@@ -636,10 +649,12 @@ lookup_eaddr(ifname, eaddr)
 				fprintf(stderr, "%s: %x:%x:%x:%x:%x:%x\n",
 				    ifr->ifr_name, eaddr[0], eaddr[1],
 				    eaddr[2], eaddr[3], eaddr[4], eaddr[5]);
+			free(inbuf);
 			return;
 		}
 	}
 
+	free(inbuf);
 	err(FATAL, "lookup_eaddr: Never saw interface `%s'!", ifname);
 }
 /*
@@ -803,14 +818,14 @@ ipaddrtonetmask(addr)
 	/* NOTREACHED */
 }
 
-#if __STDC__
+#ifdef __STDC__
 #include <stdarg.h>
 #else
 #include <varargs.h>
 #endif
 
 void
-#if __STDC__
+#ifdef __STDC__
 err(int fatal, const char *fmt,...)
 #else
 err(fmt, va_alist)
@@ -820,7 +835,7 @@ va_dcl
 #endif
 {
 	va_list ap;
-#if __STDC__
+#ifdef __STDC__
 	va_start(ap, fmt);
 #else
 	va_start(ap);
@@ -841,7 +856,7 @@ va_dcl
 }
 
 void
-#if __STDC__
+#ifdef __STDC__
 debug(const char *fmt,...)
 #else
 debug(fmt, va_alist)
@@ -852,7 +867,7 @@ va_dcl
 	va_list ap;
 
 	if (dflag) {
-#if __STDC__
+#ifdef __STDC__
 		va_start(ap, fmt);
 #else
 		va_start(ap);

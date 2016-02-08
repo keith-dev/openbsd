@@ -1,3 +1,5 @@
+/*	$OpenBSD: crt0.c,v 1.5 1997/07/23 20:39:32 kstailey Exp $	*/
+
 /*   
  *   Mach Operating System
  *   Copyright (c) 1991, 1992 Carnegie Mellon University
@@ -25,6 +27,10 @@
  *   the rights to redistribute these changes.
  */
 
+#if defined(LIBC_SCCS) && !defined(lint)
+static char rcsid[] = "$OpenBSD: crt0.c,v 1.5 1997/07/23 20:39:32 kstailey Exp $";
+#endif /* LIBC_SCCS and not lint */
+
 /* 
  *   Author :   Jeffrey Friedl
  *   Created:   July 1992
@@ -44,7 +50,7 @@
  * and how we derive argc, argv, and envp from that:
  *
  *    +-------------------+ <-------------------------------------- r31
- *    | ARGC              | <- argc = r31[0];
+ *    | ARGC		  | <- argc = r31[0];
  *    +-------------------+ <- argv = &r31[1];
  *    | &(argument #1)    |
  *    +-------------------+
@@ -52,7 +58,7 @@
  *     -  - - - - - - -  - 
  *    | &(argument #ARGC) |
  *    +-------------------+
- *    | 0x00000000        | <- end-of-ARGV-list marker (redundant information).
+ *    | 0x00000000	  | <- end-of-ARGV-list marker (redundant information).
  *    +-------------------+ <- environ = envp =  &argv[argc+1];
  *    | &(env. var. #1)   |
  *    +-------------------+
@@ -60,7 +66,7 @@
  *     -  - - - - - - -  - 
  *    | &(env. var. #N)   |
  *    +-------------------+
- *    | 0x00000000        | <- end-of-ENVP-list marker (not redundant!).
+ *    | 0x00000000	  | <- end-of-ENVP-list marker (not redundant!).
  *    +-------------------+
  *
  * We use 'start:' to grab r31 and and call real_start(argc, argv, envp).
@@ -72,9 +78,9 @@
 
 #include "common.h"
 
-asm("       text                ");
-asm("       align  4            ");
-asm("start: global start        ");
+asm("	    text		");
+asm("	    align  4		");
+asm("start: global start	");
 asm("       ld     r2, r31,   0 "); /* First arg to real_start: argc */
 asm("       addu   r3, r31,   4 "); /* Second arg to real_start: argv */
 asm("       lda    r4,  r3  [r2]"); /* Third arg to real_start: envp, but.... */

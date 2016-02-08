@@ -1,4 +1,4 @@
-/*	$OpenBSD: ypserv_proc.c,v 1.12 1997/04/12 16:38:06 deraadt Exp $ */
+/*	$OpenBSD: ypserv_proc.c,v 1.14 1997/09/12 01:44:57 deraadt Exp $ */
 
 /*
  * Copyright (c) 1994 Mats O Jansson <moj@stacken.kth.se>
@@ -32,7 +32,7 @@
  */
 
 #ifndef LINT
-static char rcsid[] = "$OpenBSD: ypserv_proc.c,v 1.12 1997/04/12 16:38:06 deraadt Exp $";
+static char rcsid[] = "$OpenBSD: ypserv_proc.c,v 1.14 1997/09/12 01:44:57 deraadt Exp $";
 #endif
 
 #include <rpc/rpc.h>
@@ -299,18 +299,17 @@ ypproc_xfr_2_svc(argp, rqstp)
 		return(NULL);
 	}
 
+	snprintf(tid, sizeof(tid), "%d",argp->transid);
+	snprintf(prog, sizeof(prog), "%d", argp->prog);
+	snprintf(port, sizeof(port), "%d", argp->port);
+	ipadd = inet_ntoa(caller->sin_addr);
+
 	pid = vfork();
 	if (pid == -1) {
 		svcerr_systemerr(rqstp->rq_xprt);
 		return(NULL);
 	}
-
 	if (pid == 0) {
-		snprintf(tid, sizeof(tid), "%d",argp->transid);
-		snprintf(prog, sizeof(prog), "%d", argp->prog);
-		snprintf(port, sizeof(port), "%d", argp->port);
-		ipadd = inet_ntoa(caller->sin_addr);
-
 		execl(ypxfr_proc, "ypxfr", "-d", argp->map_parms.domain,
 		    "-C",tid, prog, ipadd, port, argp->map_parms.map, NULL);
 		_exit(1);
@@ -471,7 +470,7 @@ ypproc_order_2_svc(argp, rqstp)
 	int ok = acl_check_host(&caller->sin_addr);
 	int secure = ypdb_secure(argp->domain,argp->map);
 
-	if (strchr(argp->domain, '/') || strchr(argp->map, '/'))
+	if (strchr(argp->domain, '/'))
 		goto bail;
 	YPLOG( "order_2: caller=[%s].%d, auth_ok=%s, secure=%s, domain=%s, map=%s",
 	  inet_ntoa(caller->sin_addr), ntohs(caller->sin_port),
@@ -485,6 +484,8 @@ bail:
 
 	if (secure && (ntohs(caller->sin_port) >= IPPORT_RESERVED)) {
 		res.stat = YP_YPERR;
+	} else if (strchr(argp->map, '/')) {
+		res.stat = YP_NOMAP;
 	} else {
 		res = ypdb_get_order(argp->domain,argp->map);
 	}
@@ -925,13 +926,10 @@ bail:
 	}
 
 	pid = vfork();
-
 	if (pid == -1) {
 		svcerr_systemerr(rqstp->rq_xprt);
 		return(NULL);
-		
 	}
-
 	if (pid == 0) {
 		execl(yppush_proc, "yppush", "-d", argp->yppush_req_domain,
 		      argp->yppush_req_map, NULL);
@@ -976,13 +974,10 @@ bail:
 	}
 
 	pid = vfork();
-
 	if (pid == -1) {
 		svcerr_systemerr(rqstp->rq_xprt);
 		return(NULL);
-		
 	}
-
 	if (pid == 0) {
 		execl(ypxfr_proc, "ypxfr", "-d", argp->yppull_req_domain,
 		      argp->yppull_req_map, NULL);
@@ -1029,13 +1024,10 @@ bail:
 	}
 
 	pid = vfork();
-
 	if (pid == -1) {
 		svcerr_systemerr(rqstp->rq_xprt);
 		return(NULL);
-		
 	}
-
 	if (pid == 0) {
 		execl(ypxfr_proc, "ypxfr", "-d", argp->ypget_req_domain, "-h",
 		      argp->ypget_req_owner, argp->yppush_req_map, NULL);

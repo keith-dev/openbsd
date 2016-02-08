@@ -1,4 +1,4 @@
-/*	$OpenBSD: main.c,v 1.9 1997/01/15 23:43:17 millert Exp $	*/
+/*	$OpenBSD: main.c,v 1.13 1997/08/25 19:05:26 deraadt Exp $	*/
 /*	$NetBSD: main.c,v 1.8 1996/05/10 23:16:36 thorpej Exp $	*/
 
 /*-
@@ -44,7 +44,7 @@ static char copyright[] =
 #if 0
 static char sccsid[] = "@(#)main.c	8.1 (Berkeley) 6/6/93";
 #endif
-static char rcsid[] = "$OpenBSD: main.c,v 1.9 1997/01/15 23:43:17 millert Exp $";
+static char rcsid[] = "$OpenBSD: main.c,v 1.13 1997/08/25 19:05:26 deraadt Exp $";
 #endif /* not lint */
 
 #include <sys/param.h>
@@ -52,9 +52,11 @@ static char rcsid[] = "$OpenBSD: main.c,v 1.9 1997/01/15 23:43:17 millert Exp $"
 #include <err.h>
 #include <nlist.h>
 #include <signal.h>
+#include <ctype.h>
 #include <stdio.h>
 #include <string.h>
 #include <unistd.h>
+#include <stdlib.h>
 #include <limits.h>
 
 #include "systat.h"
@@ -68,7 +70,7 @@ static struct nlist namelist[] = {
 	{ "_stathz" },
 	{ "" }
 };
-static int     dellave;
+static double     dellave;
 
 kvm_t *kd;
 char	*memf = NULL;
@@ -83,11 +85,11 @@ char    c;
 char    *namp;
 char    hostname[MAXHOSTNAMELEN];
 WINDOW  *wnd;
-int     CMDLINE;
+long	CMDLINE;
 
 static	WINDOW *wload;			/* one line window for load average */
 
-static void usage();
+static void usage __P((void));
 
 int
 main(argc, argv)
@@ -239,7 +241,7 @@ display(signo)
 			c = '>';
 			dellave = -dellave;
 		}
-		if (dellave < 0.1)
+		if (dellave < 0.05)
 			c = '|';
 		dellave = avenrun[0];
 		wmove(wload, 0, 0); wclrtoeol(wload);
@@ -271,20 +273,22 @@ void
 die(signo)
 	int signo;
 {
-	move(CMDLINE, 0);
-	clrtoeol();
-	refresh();
-	endwin();
+	if (wnd) {
+		move(CMDLINE, 0);
+		clrtoeol();
+		refresh();
+		endwin();
+	}
 	exit(0);
 }
 
-#if __STDC__
+#ifdef __STDC__
 #include <stdarg.h>
 #else
 #include <varargs.h>
 #endif
 
-#if __STDC__
+#ifdef __STDC__
 void
 error(const char *fmt, ...)
 #else
@@ -297,7 +301,7 @@ error(fmt, va_alist)
 	va_list ap;
 	char buf[255];
 	int oy, ox;
-#if __STDC__
+#ifdef __STDC__
 	va_start(ap, fmt);
 #else
 	va_start(ap);

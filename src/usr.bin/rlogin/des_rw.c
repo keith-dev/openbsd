@@ -1,4 +1,4 @@
-/*	$OpenBSD: des_rw.c,v 1.5 1996/11/11 05:59:44 mickey Exp $	*/
+/*	$OpenBSD: des_rw.c,v 1.7 1997/06/29 11:10:36 provos Exp $	*/
 /*	$NetBSD: des_rw.c,v 1.2 1995/03/21 07:58:30 cgd Exp $	*/
 
 /*-
@@ -38,14 +38,14 @@
 #if 0
 static char sccsid[] = "@(#)des_rw.c	8.1 (Berkeley) 6/6/93";
 #else
-static char rcsid[] = "$OpenBSD: des_rw.c,v 1.5 1996/11/11 05:59:44 mickey Exp $";
+static char rcsid[] = "$OpenBSD: des_rw.c,v 1.7 1997/06/29 11:10:36 provos Exp $";
 #endif
 #endif /* not lint */
 
 #ifdef KERBEROS
 #include <sys/param.h>
 
-#include <kerberosIV/des.h>
+#include <des.h>
 #include <kerberosIV/krb.h>
 
 #include <stdlib.h>
@@ -174,7 +174,7 @@ des_write(fd, buf, len)
 	if(len < 8) {
 		if(!seeded) {
 			seeded = 1;
-			srandom((int) time((long *)0));
+			srandom((int) time(NULL));
 		}
 		garbage = random();
 		/* insert random garbage */

@@ -1,4 +1,4 @@
-/*	$OpenBSD: encrypt.c,v 1.5 1997/03/30 19:22:46 provos Exp $	*/
+/*	$OpenBSD: encrypt.c,v 1.7 1997/06/17 21:03:40 kstailey Exp $	*/
 
 /*
  * Copyright (c) 1996, Jason Downs.  All rights reserved.
@@ -29,6 +29,7 @@
 #include <sys/types.h>
 #include <err.h>
 #include <errno.h>
+#include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
 #include <pwd.h>
@@ -190,7 +191,7 @@ int main(argc, argv)
 
     	/* Perhaps it isn't worth worrying about, but... */
     	string = strdup(argv[optind]);
-    	if (string == (char *)NULL)
+    	if (string == NULL)
     	    err(1, NULL);
     	/* Wipe the argument. */
     	bzero(argv[optind], strlen(argv[optind]));

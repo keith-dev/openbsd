@@ -1,5 +1,5 @@
 #
-#	$OpenBSD: dot.profile,v 1.3 1997/05/11 18:44:34 millert Exp $
+#	$OpenBSD: dot.profile,v 1.7 1997/10/25 05:40:55 deraadt Exp $
 #
 # Copyright (c) 1994 Christopher G. Demetriou
 # All rights reserved.
@@ -30,10 +30,12 @@
 # THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #
 
-PATH=/sbin:/bin:/usr/bin:/usr/sbin:/
-export PATH
+export PATH=/sbin:/bin:/usr/bin:/usr/sbin:/
+export HISTFILE=/.sh_history
 
 umask 022
+
+set -o emacs # emacs-style command line editing
 
 # XXX
 # the TERM/EDITOR stuff is really well enough parameterized to be moved
@@ -43,7 +45,8 @@ umask 022
 # Terminals in termcap, default TERM.
 # This assumes a *small* termcap file.
 TERMS=`grep '^[A-z]' /usr/share/misc/termcap | sed -e 's/|[^|]*$//' -e 's/|/ /g'`
-TERM=ansi-mini
+TERM=sun
+PAGER=more
 
 if [ "X${DONEPROFILE}" = "X" ]; then
 	DONEPROFILE=YES
@@ -79,6 +82,7 @@ if [ "X${DONEPROFILE}" = "X" ]; then
 			break
 		fi
 		if isin $resp $TERMS ; then
+			TERM=$resp
 			break;
 		fi
 		echo "Type $resp unknown."

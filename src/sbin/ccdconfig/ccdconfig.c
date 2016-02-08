@@ -1,4 +1,4 @@
-/*	$OpenBSD: ccdconfig.c,v 1.7 1997/01/13 21:23:35 deraadt Exp $	*/
+/*	$OpenBSD: ccdconfig.c,v 1.9 1997/09/14 08:52:13 deraadt Exp $	*/
 /*	$NetBSD: ccdconfig.c,v 1.6 1996/05/16 07:11:18 thorpej Exp $	*/
 
 /*-
@@ -100,7 +100,6 @@ static	int do_single __P((int, char **, int));
 static	int do_all __P((int));
 static	int dump_ccd __P((int, char **));
 static	int flags_to_val __P((char *));
-static	int pathtodevt __P((char *, dev_t *));
 static	void print_ccd_info __P((struct ccd_softc *, kvm_t *));
 static	char *resolve_ccdname __P((char *));
 static	void usage __P((void));
@@ -168,27 +167,28 @@ main(argc, argv)
 	 * Discard setgid privileges if not the running kernel so that bad
 	 * guys can't print interesting stuff from kernel memory.
 	 */
-	if (core != NULL || kernel != NULL) {
+	if (core != NULL || kernel != NULL || action != CCD_DUMP) {
 		setegid(getgid());
 		setgid(getgid());
 	}
 
 	switch (action) {
-		case CCD_CONFIG:
-		case CCD_UNCONFIG:
-			exit(do_single(argc, argv, action));
-			/* NOTREACHED */
+	case CCD_CONFIG:
+	case CCD_UNCONFIG:
+		exit(do_single(argc, argv, action));
+		/* NOTREACHED */
 
-		case CCD_CONFIGALL:
-		case CCD_UNCONFIGALL:
-			exit(do_all(action));
-			/* NOTREACHED */
+	case CCD_CONFIGALL:
+	case CCD_UNCONFIGALL:
+		exit(do_all(action));
+		/* NOTREACHED */
 
-		case CCD_DUMP:
-			exit(dump_ccd(argc, argv));
-			/* NOTREACHED */
+	case CCD_DUMP:
+		exit(dump_ccd(argc, argv));
+		/* NOTREACHED */
 	}
 	/* NOTREACHED */
+	exit(0);
 }
 
 static int
@@ -199,9 +199,9 @@ do_single(argc, argv, action)
 {
 	struct ccd_ioctl ccio;
 	char *ccd, *cp, *cp2, **disks;
-	int noflags = 0, i, ileave, flags, j, error;
+	int noflags = 0, i, ileave, flags = 0, j;
 
-	bzero(&ccio, sizeof(ccio));
+	memset(&ccio, 0, sizeof(ccio));
 
 	/*
 	 * If unconfiguring, all arguments are treated as ccds.
@@ -318,7 +318,7 @@ do_all(action)
 	FILE *f;
 	char line[_POSIX2_LINE_MAX];
 	char *cp, **argv;
-	int argc, rval;
+	int argc, rval = 0;
 	gid_t egid;
 
 	egid = getegid();
@@ -396,7 +396,6 @@ pathtounit(path, unitp)
 	int *unitp;
 {
 	struct stat st;
-	dev_t dev;
 	int maxpartitions;
 
 	if (stat(path, &st) != 0)
@@ -417,7 +416,7 @@ static char *
 resolve_ccdname(name)
 	char *name;
 {
-	char c, *cp, *path;
+	char c, *path;
 	size_t len, newlen;
 	int rawpart;
 
@@ -432,7 +431,7 @@ resolve_ccdname(name)
 	newlen = len + 8;
 	if ((path = malloc(newlen)) == NULL)
 		return (NULL);
-	bzero(path, newlen);
+	memset(path, 0, newlen);
 
 	if (isdigit(c)) {
 		if ((rawpart = getrawpartition()) < 0) {
@@ -498,7 +497,7 @@ dump_ccd(argc, argv)
 	int i, error, numccd, numconfiged = 0;
 	kvm_t *kd;
 
-	bzero(errbuf, sizeof(errbuf));
+	memset(errbuf, 0, sizeof(errbuf));
 
 	if ((kd = kvm_openfiles(kernel, core, NULL, O_RDONLY,
 	    errbuf)) == NULL) {
@@ -525,7 +524,7 @@ dump_ccd(argc, argv)
 		warnx("no memory for configuration data");
 		goto bad;
 	}
-	bzero(cs, readsize);
+	memset(cs, 0, readsize);
 
 	/*
 	 * Read the ccd configuration data from the kernel and dump
@@ -605,7 +604,7 @@ print_ccd_info(cs, kd)
 		    cs->sc_unit);
 		return;
 	}
-	bzero(cip, readsize);
+	memset(cip, 0, readsize);
 
 	/* Dump out softc information. */
 	printf("ccd%d\t\t%d\t%d\t", cs->sc_unit, cs->sc_ileave,

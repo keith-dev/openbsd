@@ -1,4 +1,4 @@
-/*	$OpenBSD: ipx.c,v 1.1 1996/08/16 09:29:32 mickey Exp $	*/
+/*	$OpenBSD: ipx.c,v 1.4 1997/06/29 21:46:01 millert Exp $	*/
 
 /*
  * Copyright (c) 1996 Michael Shalayeff
@@ -38,7 +38,7 @@
 #if 0
 static char sccsid[] = "from: @(#)ns.c	8.1 (Berkeley) 6/6/93";
 #else
-static char *rcsid = "$OpenBSD: ipx.c,v 1.1 1996/08/16 09:29:32 mickey Exp $";
+static char *rcsid = "$OpenBSD: ipx.c,v 1.4 1997/06/29 21:46:01 millert Exp $";
 #endif
 #endif /* not lint */
 
@@ -64,6 +64,7 @@ static char *rcsid = "$OpenBSD: ipx.c,v 1.1 1996/08/16 09:29:32 mickey Exp $";
 #define SANAMES
 #include <netipx/spx_debug.h>
 
+#include <limits.h>
 #include <nlist.h>
 #include <errno.h>
 #include <stdio.h>
@@ -126,18 +127,21 @@ ipxprotopr(off, name)
 			if (aflag)
 				printf(" (including servers)");
 			putchar('\n');
-			if (Aflag)
-				printf("%-8.8s ", "PCB");
-			printf(Aflag ?
-				"%-5.5s %-6.6s %-6.6s  %-18.18s %-18.18s %s\n" :
-				"%-5.5s %-6.6s %-6.6s  %-22.22s %-22.22s %s\n",
-				"Proto", "Recv-Q", "Send-Q",
-				"Local Address", "Foreign Address", "(state)");
+                        if (Aflag)
+				printf("%-*.*s %-5.5s %-6.6s %-6.6s  %-*.*s %-*.*s %s\n",
+				    PLEN, PLEN, "PCB", "Proto", "Recv-Q",
+				    "Send-Q", PLEN, PLEN, "Local Address",
+				    PLEN, PLEN, "Foreign Address", "(state)");
+			else
+				printf("%-5.5s %-6.6s %-6.6s  %-22.22s %-22.22s %s\n",
+				    "Proto", "Recv-Q", "Send-Q",
+				    "Local Address", "Foreign Address",
+				    "(state)");
 			first = 0;
 		}
 		if (Aflag)
-			printf("%8x ", ipxpcb.ipxp_ppcb);
-		printf("%-5.5s %6d %6d ", name, sockb.so_rcv.sb_cc,
+			printf("%*p ", PLEN, ipxpcb.ipxp_ppcb);
+		printf("%-5.5s %6ld %6ld ", name, sockb.so_rcv.sb_cc,
 			sockb.so_snd.sb_cc);
 		printf("  %-22.22s", ipx_prpr(&ipxpcb.ipxp_laddr));
 		printf(" %-22.22s", ipx_prpr(&ipxpcb.ipxp_faddr));
@@ -152,7 +156,7 @@ ipxprotopr(off, name)
 	}
 }
 #define ANY(x,y,z) \
-	((x) ? printf("\t%d %s%s%s -- %s\n",x,y,plural(x),z,"x") : 0)
+	((x) ? printf("\t%ld %s%s%s -- %s\n",x,y,plural(x),z,"x") : 0)
 
 /*
  * Dump SPX statistics structure.
@@ -169,18 +173,18 @@ spx_stats(off, name)
 		return;
 	kread(off, (char *)&spx_istat, sizeof (spx_istat));
 	printf("%s:\n", name);
-	ANY(spx_istat.nonucn, "connection", " dropped due to no new sockets ");
-	ANY(spx_istat.gonawy, "connection", " terminated due to our end dying");
-	ANY(spx_istat.nonucn, "connection",
+	ANY((long)spx_istat.nonucn, "connection", " dropped due to no new sockets ");
+	ANY((long)spx_istat.gonawy, "connection", " terminated due to our end dying");
+	ANY((long)spx_istat.nonucn, "connection",
 	    " dropped due to inability to connect");
-	ANY(spx_istat.noconn, "connection",
+	ANY((long)spx_istat.noconn, "connection",
 	    " dropped due to inability to connect");
-	ANY(spx_istat.notme, "connection",
+	ANY((long)spx_istat.notme, "connection",
 	    " incompleted due to mismatched id's");
-	ANY(spx_istat.wrncon, "connection", " dropped due to mismatched id's");
-	ANY(spx_istat.bdreas, "packet", " dropped out of sequence");
-	ANY(spx_istat.lstdup, "packet", " duplicating the highest packet");
-	ANY(spx_istat.notyet, "packet", " refused as exceeding allocation");
+	ANY((long)spx_istat.wrncon, "connection", " dropped due to mismatched id's");
+	ANY((long)spx_istat.bdreas, "packet", " dropped out of sequence");
+	ANY((long)spx_istat.lstdup, "packet", " duplicating the highest packet");
+	ANY((long)spx_istat.notyet, "packet", " refused as exceeding allocation");
 	ANY(spxstat.spxs_connattempt, "connection", " initiated");
 	ANY(spxstat.spxs_accepts, "connection", " accepted");
 	ANY(spxstat.spxs_connects, "connection", " established");

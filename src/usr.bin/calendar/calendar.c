@@ -1,4 +1,4 @@
-/*	$OpenBSD: calendar.c,v 1.6 1997/01/15 23:42:16 millert Exp $	*/
+/*	$OpenBSD: calendar.c,v 1.10 1997/09/15 07:12:03 millert Exp $	*/
 
 /*
  * Copyright (c) 1989, 1993, 1994
@@ -43,7 +43,7 @@ static const char copyright[] =
 #if 0
 static const char sccsid[] = "@(#)calendar.c  8.3 (Berkeley) 3/25/94";
 #else
-static char rcsid[] = "$OpenBSD: calendar.c,v 1.6 1997/01/15 23:42:16 millert Exp $";
+static char rcsid[] = "$OpenBSD: calendar.c,v 1.10 1997/09/15 07:12:03 millert Exp $";
 #endif
 #endif /* not lint */
 
@@ -77,7 +77,7 @@ main(argc, argv)
 
 	(void) setlocale(LC_ALL, "");
 
-	while ((ch = getopt(argc, argv, "?-af:t:A:B:")) != -1)
+	while ((ch = getopt(argc, argv, "-af:t:A:B:")) != -1)
 		switch (ch) {
 		case '-':		/* backward contemptible */
 		case 'a':
@@ -85,7 +85,6 @@ main(argc, argv)
 				errx(1, strerror(EPERM));
 			doall = 1;
 			break;
-
 
 		case 'f': /* other calendar file */
 		        calendarFile = optarg;
@@ -103,7 +102,6 @@ main(argc, argv)
 			f_dayBefore = atoi(optarg);
 			break;
 
-		case '?':
 		default:
 			usage();
 		}
@@ -119,7 +117,7 @@ main(argc, argv)
 
 	settime(f_time);
 
-	if (doall)
+	if (doall) {
 		while ((pw = getpwent()) != NULL) {
 			(void)setegid(pw->pw_gid);
 			(void)initgroups(pw->pw_name, pw->pw_gid);
@@ -128,6 +126,7 @@ main(argc, argv)
 				cal();
 			(void)seteuid(0);
 		}
+	}
 	else if ((caldir = getenv("CALENDAR_DIR")) != NULL) {
 		if(!chdir(caldir))
 			cal();
@@ -142,6 +141,6 @@ void
 usage()
 {
 	(void)fprintf(stderr,
-		      "usage: calendar [-a] [-A days] [-B days] [-f calendarfile]\n");
+	    "usage: calendar [-a] [-A days] [-B days] [-f calendarfile] [-t [[[yy]yy][mm]]dd]\n");
 	exit(1);
 }

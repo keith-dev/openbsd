@@ -1,5 +1,5 @@
 /*	$NetBSD: create.c,v 1.11 1996/09/05 09:24:19 mycroft Exp $	*/
-/*	$OpenBSD: create.c,v 1.6 1997/04/06 09:15:30 deraadt Exp $	*/
+/*	$OpenBSD: create.c,v 1.10 1997/07/25 20:12:15 mickey Exp $	*/
 
 /*-
  * Copyright (c) 1989, 1993
@@ -38,7 +38,7 @@
 #if 0
 static char sccsid[] = "@(#)create.c	8.1 (Berkeley) 6/6/93";
 #else
-static char rcsid[] = "$OpenBSD: create.c,v 1.6 1997/04/06 09:15:30 deraadt Exp $";
+static char rcsid[] = "$OpenBSD: create.c,v 1.10 1997/07/25 20:12:15 mickey Exp $";
 #endif
 #endif /* not lint */
 
@@ -54,6 +54,8 @@ static char rcsid[] = "$OpenBSD: create.c,v 1.6 1997/04/06 09:15:30 deraadt Exp 
 #include <unistd.h>
 #include <stdio.h>
 #include <md5.h>
+#include <sha1.h>
+#include <rmd160.h>
 #include "mtree.h"
 #include "extern.h"
 
@@ -93,7 +95,7 @@ cwalk()
 	argv[0] = ".";
 	argv[1] = NULL;
 	if ((t = fts_open(argv, ftsoptions, dsort)) == NULL)
-		err("fts_open: %s", strerror(errno));
+		error("fts_open: %s", strerror(errno));
 	while ((p = fts_read(t))) {
 		if (iflag)
 			indent = p->fts_level * 4;
@@ -159,7 +161,7 @@ statf(indent, p)
 			if ((pw = getpwuid(p->fts_statp->st_uid)) != NULL) {
 				output(indent, &offset, "uname=%s", pw->pw_name);
 			} else {
-				err("could not get uname for uid=%u",
+				error("could not get uname for uid=%u",
 				    p->fts_statp->st_uid);
 			}
 		}
@@ -171,7 +173,7 @@ statf(indent, p)
 			if ((gr = getgrgid(p->fts_statp->st_gid)) != NULL) {
 				output(indent, &offset, "gname=%s", gr->gr_name);
 			} else {
-				err("could not get gname for gid=%u",
+				error("could not get gname for gid=%u",
 				    p->fts_statp->st_gid);
 			}
 		}
@@ -191,7 +193,7 @@ statf(indent, p)
 	if (keys & F_CKSUM && S_ISREG(p->fts_statp->st_mode)) {
 		if ((fd = open(p->fts_accpath, O_RDONLY, 0)) < 0 ||
 		    crc(fd, &val, &len))
-			err("%s: %s", p->fts_accpath, strerror(errno));
+			error("%s: %s", p->fts_accpath, strerror(errno));
 		(void)close(fd);
 		output(indent, &offset, "cksum=%lu", val);
 	}
@@ -199,11 +201,28 @@ statf(indent, p)
 		char *md5digest, buf[33];
 
 		md5digest = MD5File(p->fts_accpath,buf);
-		if (!md5digest) {
-			err("%s: %s", p->fts_accpath, strerror(errno));
-		} else {
+		if (!md5digest)
+			error("%s: %s", p->fts_accpath, strerror(errno));
+		else
 			output(indent, &offset, "md5digest=%s", md5digest);
-		}
+	}
+	if (keys & F_RMD160 && S_ISREG(p->fts_statp->st_mode)) {
+		char *rmd160digest, buf[41];
+
+		rmd160digest = RMD160File(p->fts_accpath,buf);
+		if (!rmd160digest)
+			error("%s: %s", p->fts_accpath, strerror(errno));
+		else
+			output(indent, &offset, "rmd160digest=%s", rmd160digest);
+	}
+	if (keys & F_SHA1 && S_ISREG(p->fts_statp->st_mode)) {
+		char *sha1digest, buf[41];
+
+		sha1digest = SHA1File(p->fts_accpath,buf);
+		if (!sha1digest)
+			error("%s: %s", p->fts_accpath, strerror(errno));
+		else
+			output(indent, &offset, "sha1digest=%s", sha1digest);
 	}
 	if (keys & F_SLINK &&
 	    (p->fts_info == FTS_SL || p->fts_info == FTS_SLNONE))
@@ -242,7 +261,7 @@ statd(t, parent, puid, pgid, pmode)
 
 	if ((p = fts_children(t, 0)) == NULL) {
 		if (errno)
-			err("%s: %s", RP(parent), strerror(errno));
+			error("%s: %s", RP(parent), strerror(errno));
 		return (1);
 	}
 
@@ -287,14 +306,14 @@ statd(t, parent, puid, pgid, pmode)
 			if ((pw = getpwuid(saveuid)) != NULL)
 				(void)printf(" uname=%s", pw->pw_name);
 			else
-				err("could not get uname for uid=%u", saveuid);
+				error("could not get uname for uid=%u", saveuid);
 		if (keys & F_UID)
 			(void)printf(" uid=%u", saveuid);
 		if (keys & F_GNAME)
 			if ((gr = getgrgid(savegid)) != NULL)
 				(void)printf(" gname=%s", gr->gr_name);
 			else
-				err("could not get gname for gid=%u", savegid);
+				error("could not get gname for gid=%u", savegid);
 		if (keys & F_GID)
 			(void)printf(" gid=%u", savegid);
 		if (keys & F_MODE)
@@ -321,14 +340,14 @@ dsort(a, b)
 	return (strcmp((*a)->fts_name, (*b)->fts_name));
 }
 
-#if __STDC__
+#ifdef __STDC__
 #include <stdarg.h>
 #else
 #include <varargs.h>
 #endif
 
 void
-#if __STDC__
+#ifdef __STDC__
 output(int indent, int *offset, const char *fmt, ...)
 #else
 output(indent, offset, fmt, va_alist)
@@ -340,7 +359,7 @@ output(indent, offset, fmt, va_alist)
 {
 	va_list ap;
 	char buf[1024];
-#if __STDC__
+#ifdef __STDC__
 	va_start(ap, fmt);
 #else
 	va_start(ap);

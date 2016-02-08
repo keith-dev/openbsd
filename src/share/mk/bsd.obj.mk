@@ -1,4 +1,4 @@
-#	$OpenBSD: bsd.obj.mk,v 1.8 1997/05/03 11:32:46 niklas Exp $
+#	$OpenBSD: bsd.obj.mk,v 1.11 1997/08/22 14:52:11 flipk Exp $
 #	$NetBSD: bsd.obj.mk,v 1.9 1996/04/10 21:08:05 thorpej Exp $
 
 .if !target(obj)
@@ -31,17 +31,17 @@ __usrobjdirpf=
 .endif
 
 obj! _SUBDIRUSE
-	@cd ${.CURDIR}; rm -f ${__objdir} > /dev/null 2>&1 || true; \
+	@cd ${.CURDIR}; \
 	here=`/bin/pwd`; bsdsrcdir=`cd ${BSDSRCDIR}; /bin/pwd`; \
 	subdir=$${here#$${bsdsrcdir}/}; \
 	if test $$here != $$subdir ; then \
 		dest=${__usrobjdir}/$$subdir${__usrobjdirpf} ; \
 		echo "$$here/${__objdir} -> $$dest"; \
 		if test ! -L ${__objdir} -o \
-		    X`perl -e "print readlink('${__objdir}')"` != X$$dest; \
+		    X`readlink ${__objdir}` != X$$dest; \
 		    then \
 			if test -e ${__objdir}; then rm -rf ${__objdir}; fi; \
-			ln -s $$dest ${__objdir}; \
+			ln -sf $$dest ${__objdir}; \
 		fi; \
 		if test -d ${__usrobjdir} -a ! -d $$dest; then \
 			mkdir -p $$dest; \

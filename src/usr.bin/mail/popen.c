@@ -1,5 +1,5 @@
-/*	$OpenBSD: popen.c,v 1.4 1997/03/29 03:01:47 millert Exp $	*/
-/*	$NetBSD: popen.c,v 1.4 1996/06/08 19:48:35 christos Exp $	*/
+/*	$OpenBSD: popen.c,v 1.13 1997/08/31 14:32:14 millert Exp $	*/
+/*	$NetBSD: popen.c,v 1.6 1997/05/13 06:48:42 mikel Exp $	*/
 
 /*
  * Copyright (c) 1980, 1993
@@ -38,13 +38,14 @@
 #if 0
 static char sccsid[] = "@(#)popen.c	8.1 (Berkeley) 6/6/93";
 #else
-static char rcsid[] = "$OpenBSD: popen.c,v 1.4 1997/03/29 03:01:47 millert Exp $";
+static char rcsid[] = "$OpenBSD: popen.c,v 1.13 1997/08/31 14:32:14 millert Exp $";
 #endif
 #endif /* not lint */
 
 #include "rcv.h"
 #include <sys/wait.h>
 #include <fcntl.h>
+#include <errno.h>
 #include "extern.h"
 
 #define READ 0
@@ -62,7 +63,7 @@ struct child {
 	int pid;
 	char done;
 	char free;
-	union wait status;
+	int status;
 	struct child *link;
 };
 static struct child *child;
@@ -79,9 +80,9 @@ Fopen(file, mode)
 
 	if ((fp = fopen(file, mode)) != NULL) {
 		register_file(fp, 0, 0);
-		(void) fcntl(fileno(fp), F_SETFD, 1);
+		(void)fcntl(fileno(fp), F_SETFD, 1);
 	}
-	return fp;
+	return(fp);
 }
 
 FILE *
@@ -93,9 +94,9 @@ Fdopen(fd, mode)
 
 	if ((fp = fdopen(fd, mode)) != NULL) {
 		register_file(fp, 0, 0);
-		(void) fcntl(fileno(fp), F_SETFD, 1);
+		(void)fcntl(fileno(fp), F_SETFD, 1);
 	}
-	return fp;
+	return(fp);
 }
 
 int
@@ -103,7 +104,7 @@ Fclose(fp)
 	FILE *fp;
 {
 	unregister_file(fp);
-	return fclose(fp);
+	return(fclose(fp));
 }
 
 FILE *
@@ -118,9 +119,9 @@ Popen(cmd, mode)
 	FILE *fp;
 
 	if (pipe(p) < 0)
-		return NULL;
-	(void) fcntl(p[READ], F_SETFD, 1);
-	(void) fcntl(p[WRITE], F_SETFD, 1);
+		return(NULL);
+	(void)fcntl(p[READ], F_SETFD, 1);
+	(void)fcntl(p[WRITE], F_SETFD, 1);
 	if (*mode == 'r') {
 		myside = p[READ];
 		fd0 = -1;
@@ -131,15 +132,15 @@ Popen(cmd, mode)
 		fd1 = -1;
 	}
 	sigemptyset(&nset);
-	if ((pid = start_command(cmd, &nset, fd0, fd1, NOSTR, NOSTR, NOSTR)) < 0) {
-		close(p[READ]);
-		close(p[WRITE]);
-		return NULL;
+	if ((pid = start_command(cmd, &nset, fd0, fd1, NULL, NULL, NULL)) < 0) {
+		(void)close(p[READ]);
+		(void)close(p[WRITE]);
+		return(NULL);
 	}
-	(void) close(hisside);
+	(void)close(hisside);
 	if ((fp = fdopen(myside, mode)) != NULL)
 		register_file(fp, 1, pid);
-	return fp;
+	return(fp);
 }
 
 int
@@ -151,14 +152,14 @@ Pclose(ptr)
 
 	i = file_pid(ptr);
 	unregister_file(ptr);
-	(void) fclose(ptr);
+	(void)fclose(ptr);
 	sigemptyset(&nset);
 	sigaddset(&nset, SIGINT);
 	sigaddset(&nset, SIGHUP);
 	sigprocmask(SIG_BLOCK, &nset, &oset);
 	i = wait_child(i);
 	sigprocmask(SIG_SETMASK, &oset, NULL);
-	return i;
+	return(i);
 }
 
 void
@@ -167,9 +168,9 @@ close_all_files()
 
 	while (fp_head)
 		if (fp_head->pipe)
-			(void) Pclose(fp_head->fp);
+			(void)Pclose(fp_head->fp);
 		else
-			(void) Fclose(fp_head->fp);
+			(void)Fclose(fp_head->fp);
 }
 
 void
@@ -179,7 +180,7 @@ register_file(fp, pipe, pid)
 {
 	struct fp *fpp;
 
-	if ((fpp = (struct fp *) malloc(sizeof *fpp)) == NULL)
+	if ((fpp = (struct fp *)malloc(sizeof(*fpp))) == NULL)
 		panic("Out of memory");
 	fpp->fp = fp;
 	fpp->pipe = pipe;
@@ -197,7 +198,7 @@ unregister_file(fp)
 	for (pp = &fp_head; (p = *pp) != NULL; pp = &p->link)
 		if (p->fp == fp) {
 			*pp = p->link;
-			free((char *) p);
+			(void)free(p);
 			return;
 		}
 	panic("Invalid file pointer");
@@ -211,7 +212,7 @@ file_pid(fp)
 
 	for (p = fp_head; p; p = p->link)
 		if (p->fp == fp)
-			return (p->pid);
+			return(p->pid);
 	panic("Invalid file pointer");
 	/*NOTREACHED*/
 }
@@ -225,47 +226,47 @@ file_pid(fp)
  */
 /*VARARGS4*/
 int
-run_command(cmd, mask, infd, outfd, a0, a1, a2)
+run_command(cmd, nset, infd, outfd, a0, a1, a2)
 	char *cmd;
-	sigset_t *mask;
+	sigset_t *nset;
 	int infd, outfd;
 	char *a0, *a1, *a2;
 {
 	int pid;
 
-	if ((pid = start_command(cmd, mask, infd, outfd, a0, a1, a2)) < 0)
-		return -1;
-	return wait_command(pid);
+	if ((pid = start_command(cmd, nset, infd, outfd, a0, a1, a2)) < 0)
+		return(-1);
+	return(wait_command(pid));
 }
 
 /*VARARGS4*/
 int
-start_command(cmd, mask, infd, outfd, a0, a1, a2)
+start_command(cmd, nset, infd, outfd, a0, a1, a2)
 	char *cmd;
-	sigset_t *mask;
+	sigset_t *nset;
 	int infd, outfd;
 	char *a0, *a1, *a2;
 {
 	int pid;
 
 	if ((pid = vfork()) < 0) {
-		perror("fork");
-		return -1;
+		warn("fork");
+		return(-1);
 	}
 	if (pid == 0) {
 		char *argv[100];
-		int i = getrawlist(cmd, argv, sizeof argv / sizeof *argv);
+		int i = getrawlist(cmd, argv, sizeof(argv)/ sizeof(*argv));
 
-		if ((argv[i++] = a0) != NOSTR &&
-		    (argv[i++] = a1) != NOSTR &&
-		    (argv[i++] = a2) != NOSTR)
-			argv[i] = NOSTR;
-		prepare_child(mask, infd, outfd);
+		if ((argv[i++] = a0) != NULL &&
+		    (argv[i++] = a1) != NULL &&
+		    (argv[i++] = a2) != NULL)
+			argv[i] = NULL;
+		prepare_child(nset, infd, outfd);
 		execvp(argv[0], argv);
-		perror(argv[0]);
+		warn(argv[0]);
 		_exit(1);
 	}
-	return pid;
+	return(pid);
 }
 
 void
@@ -274,7 +275,7 @@ prepare_child(nset, infd, outfd)
 	int infd, outfd;
 {
 	int i;
-	sigset_t fset;
+	sigset_t eset;
 
 	/*
 	 * All file descriptors other than 0, 1, and 2 are supposed to be
@@ -284,15 +285,17 @@ prepare_child(nset, infd, outfd)
 		dup2(infd, 0);
 	if (outfd >= 0)
 		dup2(outfd, 1);
-	if (nset) {
-		for (i = 1; i <= NSIG; i++)
+	if (nset == NULL)
+		return;
+	if (nset != NULL) {
+		for (i = 1; i < NSIG; i++)
 			if (sigismember(nset, i))
-				(void) signal(i, SIG_IGN);
-		if (!sigismember(nset, SIGINT))
-			(void) signal(SIGINT, SIG_DFL);
+				(void)signal(i, SIG_IGN);
 	}
-	sigfillset(&fset);
-	(void) sigprocmask(SIG_UNBLOCK, &fset, NULL);
+	if (nset == NULL || !sigismember(nset, SIGINT))
+		(void)signal(SIGINT, SIG_DFL);
+	sigemptyset(&eset);
+	(void)sigprocmask(SIG_SETMASK, &eset, NULL);
 }
 
 int
@@ -301,10 +304,10 @@ wait_command(pid)
 {
 
 	if (wait_child(pid) < 0) {
-		printf("Fatal error in process.\n");
-		return -1;
+		puts("Fatal error in process.");
+		return(-1);
 	}
-	return 0;
+	return(0);
 }
 
 static struct child *
@@ -317,12 +320,12 @@ findchild(pid)
 	     cpp = &(*cpp)->link)
 			;
 	if (*cpp == NULL) {
-		*cpp = (struct child *) malloc(sizeof (struct child));
+		*cpp = (struct child *)malloc(sizeof(struct child));
 		(*cpp)->pid = pid;
 		(*cpp)->done = (*cpp)->free = 0;
 		(*cpp)->link = NULL;
 	}
-	return *cpp;
+	return(*cpp);
 }
 
 static void
@@ -334,7 +337,7 @@ delchild(cp)
 	for (cpp = &child; *cpp != cp; cpp = &(*cpp)->link)
 		;
 	*cpp = cp->link;
-	free((char *) cp);
+	(void)free(cp);
 }
 
 void
@@ -342,11 +345,12 @@ sigchild(signo)
 	int signo;
 {
 	int pid;
-	union wait status;
+	int status;
 	register struct child *cp;
+	int save_errno = errno;
 
 	while ((pid =
-	    wait3((int *)&status, WNOHANG, (struct rusage *)0)) > 0) {
+	    waitpid((pid_t)-1, &status, WNOHANG)) > 0) {
 		cp = findchild(pid);
 		if (cp->free)
 			delchild(cp);
@@ -355,9 +359,10 @@ sigchild(signo)
 			cp->status = status;
 		}
 	}
+	errno = save_errno;
 }
 
-union wait wait_status;
+int wait_status;
 
 /*
  * Wait for a specific child to die.
@@ -366,8 +371,9 @@ int
 wait_child(pid)
 	int pid;
 {
-	sigset_t nset, oset;
 	register struct child *cp = findchild(pid);
+	sigset_t nset, oset;
+
 	sigemptyset(&nset);
 	sigaddset(&nset, SIGCHLD);
 	sigprocmask(SIG_BLOCK, &nset, &oset);
@@ -377,7 +383,7 @@ wait_child(pid)
 	wait_status = cp->status;
 	delchild(cp);
 	sigprocmask(SIG_SETMASK, &oset, NULL);
-	return wait_status.w_status ? -1 : 0;
+	return((WIFEXITED(wait_status) && WEXITSTATUS(wait_status)) ? -1 : 0);
 }
 
 /*
@@ -387,8 +393,9 @@ void
 free_child(pid)
 	int pid;
 {
-	sigset_t nset, oset;
 	register struct child *cp = findchild(pid);
+	sigset_t nset, oset;
+
 	sigemptyset(&nset);
 	sigaddset(&nset, SIGCHLD);
 	sigprocmask(SIG_BLOCK, &nset, &oset);
@@ -415,33 +422,33 @@ handle_spool_locks(action)
 	if (action == 0) {
 		/* Clear the lock */
 		if (lockfp == NULL) {
-			fprintf(stderr,
-			    "handle_spool_locks: no spool lock to remove.\n");
-			return (-1);
+			fputs("handle_spool_locks: no spool lock to remove.\n",
+			    stderr);
+			return(-1);
 		}
 		(void)kill(lock_pid, SIGTERM);
-		Pclose(lockfp);
+		(void)Pclose(lockfp);
 		lockfp = NULL;
 	} else if (action == 1) {
 		/* Create the lock */
-		if ((cmd = (char *) malloc(sizeof(_PATH_MAIL_LOCAL) + 3)) == NULL)
+		if ((cmd = (char *)malloc(sizeof(_PATH_MAIL_LOCAL) + 3)) == NULL)
 			panic("Out of memory");
 		sprintf(cmd, "%s -H", _PATH_MAIL_LOCAL);
 		if ((lockfp = Popen(cmd, "r")) == NULL || getc(lockfp) != '1') {
 			lockfp = NULL;
-			free(cmd);
-			return (0);
+			(void)free(cmd);
+			return(0);
 		}
 
 		lock_pid = fp_head->pid;	/* new entries added at head */
-		free(cmd);
+		(void)free(cmd);
 	} else {
 		fprintf(stderr, "handle_spool_locks: unknown action %d\n",
 		    action);
-		return (-1);
+		return(-1);
 	}
 
-	return (1);
+	return(1);
 }
 
 int

@@ -1,4 +1,4 @@
-#	$OpenBSD: Makefile,v 1.10 1997/05/14 18:39:07 niklas Exp $
+#	$OpenBSD: Makefile,v 1.12 1997/09/26 01:51:30 millert Exp $
 
 .include "../Makefile.inc"
 
@@ -16,14 +16,14 @@ LISTS=		${.CURDIR}/list
 bsd:
 	cd ${.CURDIR}/../../../../sys/arch/sparc/conf && config FLOPPY
 	cd ${.CURDIR}/../../../../sys/arch/sparc/compile/FLOPPY && \
-	    make clean && make depend && make
+	    make clean && make
 	cp ${.CURDIR}/../../../../sys/arch/sparc/compile/FLOPPY/bsd bsd
 
 all:	bsd
 	dd if=/dev/zero of=${REALIMAGE} bs=10k count=144
 	vnconfig -v -c ${VND} ${REALIMAGE}
 	disklabel -w ${VND} floppy
-	newfs -O -m 0 -o space -i 20480 -c 80 ${VND_RDEV} floppy
+	newfs -O -m 0 -o space -i 20480 -c 80 ${VND_RDEV}
 	mount ${VND_DEV} ${MOUNT_POINT}
 	sync; /usr/mdec/binstall -v ffs ${MOUNT_POINT}
 	TOPDIR=${.CURDIR}/.. CURDIR=${.CURDIR} OBJDIR=${.OBJDIR} \

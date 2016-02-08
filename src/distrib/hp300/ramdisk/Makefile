@@ -1,4 +1,4 @@
-#	$OpenBSD: Makefile,v 1.5 1997/05/14 18:38:57 niklas Exp $
+#	$OpenBSD: Makefile,v 1.10 1997/10/31 05:41:27 downsj Exp $
 #	$NetBSD: Makefile,v 1.1 1995/07/18 04:13:06 briggs Exp $
 
 TOP=		${.CURDIR}/..
@@ -17,27 +17,28 @@ VND_CRDEV=	/dev/r${VND}c
 PID!=		echo $$$$
 REALIMAGE!=	echo /var/tmp/image.${PID}
 
-all: ${CBIN} ${IMAGE}
+all: ${CBIN} ${IMAGE} bsd.rd
 	@echo "all done"
+
+install: bsd.rd
+	cp bsd.rd ${DESTDIR}/snapshot/bsd.rd
+	cp ${.CURDIR}/../HP-IB.geometry ${DESTDIR}/snapshot
 
 .include "Makefile.inc"
 
 DISKTYPE=       rdroot
 NBLKS=          4096
-# minfree, opt, b/i  trks, sects, cpg
-NEWFSARGS= -m 0 -o space -c 16 -i 4096
-
-bsd.gz: bsd.rd
-	gzip -c9 bsd.rd > bsd.gz
+NEWFSARGS= -m 0 -o space -c 16 -i 3072
 
 bsd.rd: ${IMAGE} bsd rdsetroot
-	cp bsd bsd.rd
-	${.OBJDIR}/rdsetroot bsd.rd < ${IMAGE}
+	${.OBJDIR}/rdsetroot bsd < ${IMAGE}
+	gzip -c9 bsd > bsd.rd
+	rm bsd
 
 bsd:
-#	cd ${.CURDIR}/../../../sys/arch/hp300/conf && config RAMDISK
-#	cd ${.CURDIR}/../../../sys/arch/hp300/compile/RAMDISK && \
-#	    make clean && make depend && make
+	cd ${.CURDIR}/../../../sys/arch/hp300/conf && config RAMDISK
+	cd ${.CURDIR}/../../../sys/arch/hp300/compile/RAMDISK && \
+	    make clean && make
 	cp ${.CURDIR}/../../../sys/arch/hp300/compile/RAMDISK/bsd bsd
 
 ${IMAGE}: ${CBIN} rd_setup do_files rd_teardown
@@ -45,8 +46,8 @@ ${IMAGE}: ${CBIN} rd_setup do_files rd_teardown
 rd_setup: ${CBIN}
 	dd if=/dev/zero of=${REALIMAGE} bs=512 count=${NBLKS}
 	vnconfig -v -c ${VND} ${REALIMAGE}
-	disklabel -w -r ${VND} ${DISKTYPE}
-	newfs ${NEWFSARGS} ${VND_RDEV} ${DISKTYPE}
+	disklabel -w ${VND} ${DISKTYPE}
+	newfs ${NEWFSARGS} ${VND_RDEV}
 	fsck ${VND_RDEV}
 	mount ${VND_DEV} ${MOUNT_POINT}
 

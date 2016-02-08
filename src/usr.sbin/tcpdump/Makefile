@@ -1,5 +1,4 @@
-#	$OpenBSD: Makefile,v 1.6 1996/12/12 16:23:03 bitblt Exp $
-#	$NetBSD: Makefile,v 1.6 1995/03/07 23:18:39 mycroft Exp $
+#	$OpenBSD: Makefile,v 1.10 1997/09/21 11:44:30 deraadt Exp $
 #
 #  Copyright (c) 1988, 1989, 1990, 1991, 1992, 1993, 1994
 # 	The Regents of the University of California.  All rights reserved.
@@ -24,7 +23,10 @@
 PROG=	tcpdump
 MAN=	tcpdump.8
 
-CFLAGS+=-DCSLIP -DPPP -DFDDI -DETHER_SERVICE -DRETSIGTYPE=void
+CFLAGS+=-DCSLIP -DPPP -DFDDI -DETHER_SERVICE -DRETSIGTYPE=void -DHAVE_NET_SLIP_H
+.if (${MACHINE_ARCH} == "alpha") || (${MACHINE_ARCH} == "mips") || (${MACHINE_ARCH} == "sparc")
+CFLAGS+=-DLBL_ALIGN
+.endif
 
 LDADD+=	-lpcap -ll
 DPADD+=	${LIBL} ${LIBPCAP}
@@ -38,7 +40,7 @@ SRCS=	tcpdump.c addrtoname.c \
 	print-wb.c print-decnet.c print-isoclns.c print-ipx.c \
 	print-atm.c print-dvmrp.c print-krb.c print-pim.c print-netbios.c \
 	util.c bpf_dump.c parsenfsfh.c version.c machdep.c print-igrp.c \
-        print-gre.c
+        print-gre.c print-radius.c
 
 AWKS =	atime.awk packetdat.awk send-ack.awk stime.awk
 

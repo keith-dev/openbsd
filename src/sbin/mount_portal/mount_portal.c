@@ -1,4 +1,4 @@
-/*	$OpenBSD: mount_portal.c,v 1.7 1997/03/23 03:52:14 millert Exp $	*/
+/*	$OpenBSD: mount_portal.c,v 1.13 1997/08/20 05:10:25 millert Exp $	*/
 /*	$NetBSD: mount_portal.c,v 1.8 1996/04/13 01:31:54 jtc Exp $	*/
 
 /*
@@ -47,7 +47,7 @@ char copyright[] =
 #if 0
 static char sccsid[] = "@(#)mount_portal.c	8.6 (Berkeley) 4/26/95";
 #else
-static char rcsid[] = "$OpenBSD: mount_portal.c,v 1.7 1997/03/23 03:52:14 millert Exp $";
+static char rcsid[] = "$OpenBSD: mount_portal.c,v 1.13 1997/08/20 05:10:25 millert Exp $";
 #endif
 #endif /* not lint */
 
@@ -87,12 +87,14 @@ static void
 sigchld(sig)
 	int sig;
 {
+	int save_errno = errno;
 	pid_t pid;
 
-	while ((pid = waitpid((pid_t) -1, (int *) 0, WNOHANG)) > 0)
+	while ((pid = waitpid((pid_t) -1, NULL, WNOHANG)) > 0)
 		;
 	if (pid < 0 && errno != ECHILD)
 		syslog(LOG_WARNING, "waitpid: %m");
+	errno = save_errno;
 }
 
 static void
@@ -123,9 +125,10 @@ main(argc, argv)
 	char *conf;
 	int mntflags = 0;
 	char tag[32];
+	fd_set *fdsp;
+	int fdssize;
 
 	qelem q;
-	int rc;
 	int so;
 	int error = 0;
 
@@ -175,6 +178,7 @@ main(argc, argv)
 		err(1, "socket(2)");
 
 	(void)unlink(un.sun_path);
+	/* XXX teeny race? */
 	if (bind(so, (struct sockaddr *) &un, sizeof(un)) < 0)
 		err(1, "bind(2)");
 	(void)unlink(un.sun_path);
@@ -182,22 +186,28 @@ main(argc, argv)
 	(void)listen(so, 5);
 
 	args.pa_socket = so;
-	(void)snprintf(tag, sizeof(tag), "portal:%d", getpid() + 1);
-	args.pa_config = tag;
-
-	rc = mount(MOUNT_PORTAL, mountpt, mntflags, &args);
-	if (rc < 0)
-		err(1, "mount(2)");
 
 	/*
-	 * Everything is ready to go - now is a good time to fork
+	 * Must fork before mount to get pid in name right.
 	 */
 	daemon(0, 0);
+
+	(void)snprintf(tag, sizeof(tag), "portal:%d", getpid());
+	args.pa_config = tag;
 
 	/*
 	 * Start logging (and change name)
 	 */
 	openlog("portald", LOG_CONS|LOG_PID, LOG_DAEMON);
+
+	if (mount(MOUNT_PORTAL, mountpt, mntflags, &args)) {
+		if (errno == EOPNOTSUPP)
+			syslog(LOG_ERR,
+			    "mount: Filesystem not supported by kernel");
+		else
+			syslog(LOG_ERR, "mount: %m");
+		exit(1);
+	}
 
 	q.q_forw = q.q_back = &q;
 	readcf = 1;
@@ -205,6 +215,9 @@ main(argc, argv)
 	(void)signal(SIGCHLD, sigchld);
 	(void)signal(SIGHUP, sighup);
 	(void)signal(SIGTERM, sigterm);
+
+	fdssize = howmany(so+1, NFDBITS) * sizeof(fd_mask);
+	fdsp = (fd_set *)malloc(fdssize);
 
 	/*
 	 * Just loop waiting for new connections and activating them
@@ -214,7 +227,6 @@ main(argc, argv)
 		int len2 = sizeof(un2);
 		int so2;
 		pid_t pid;
-		fd_set fdset;
 		int rc;
 
 		/*
@@ -231,10 +243,9 @@ main(argc, argv)
 		 * Will get EINTR if a signal has arrived, so just
 		 * ignore that error code
 		 */
-		FD_ZERO(&fdset);
-		FD_SET(so, &fdset);
-		rc = select(so+1, &fdset, (fd_set *)0, (fd_set *)0,
-		    (struct timeval *)0);
+		memset(fdsp, 0, fdssize);
+		FD_SET(so, fdsp);
+		rc = select(so+1, fdsp, NULL, NULL, NULL);
 		if (rc < 0) {
 			if (errno == EINTR)
 				continue;
@@ -279,6 +290,7 @@ main(argc, argv)
 			break;
 		}
 	}
+	free(fdsp);
 	syslog(LOG_INFO, "%s unmounted", mountpt);
 	exit(0);
 }

@@ -1,4 +1,4 @@
-/*	$OpenBSD: ypserv.c,v 1.9 1997/04/12 00:14:28 deraadt Exp $ */
+/*	$OpenBSD: ypserv.c,v 1.11 1997/08/05 05:09:33 deraadt Exp $ */
 
 /*
  * Copyright (c) 1994 Mats O Jansson <moj@stacken.kth.se>
@@ -32,7 +32,7 @@
  */
 
 #ifndef LINT
-static char rcsid[] = "$OpenBSD: ypserv.c,v 1.9 1997/04/12 00:14:28 deraadt Exp $";
+static char rcsid[] = "$OpenBSD: ypserv.c,v 1.11 1997/08/05 05:09:33 deraadt Exp $";
 #endif
 
 #include "yp.h"
@@ -43,6 +43,7 @@ static char rcsid[] = "$OpenBSD: ypserv.c,v 1.9 1997/04/12 00:14:28 deraadt Exp 
 #include <string.h> /* strcmp */ 
 #include <netdb.h>
 #include <signal.h>
+#include <errno.h>
 #include <sys/ttycom.h>/* TIOCNOTTY */
 #ifdef __cplusplus
 #include <sysent.h> /* getdtablesize, open */
@@ -505,7 +506,11 @@ char *argv[];
 void
 sig_child()
 {
-	while (wait3((int *)NULL, WNOHANG, (struct rusage *)NULL) > 0);
+	int save_errno = errno;
+
+	while (wait3((int *)NULL, WNOHANG, (struct rusage *)NULL) > 0)
+		;
+	errno = save_errno;
 }
 
 void

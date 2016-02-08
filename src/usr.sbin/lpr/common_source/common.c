@@ -1,4 +1,4 @@
-/*	$OpenBSD: common.c,v 1.4 1997/01/17 16:11:35 millert Exp $	*/
+/*	$OpenBSD: common.c,v 1.7 1997/07/25 20:12:11 mickey Exp $	*/
 
 /*
  * Copyright (c) 1983, 1993
@@ -42,7 +42,7 @@
 #if 0
 static char sccsid[] = "@(#)common.c	8.5 (Berkeley) 4/28/95";
 #else
-static char rcsid[] = "$OpenBSD: common.c,v 1.4 1997/01/17 16:11:35 millert Exp $";
+static char rcsid[] = "$OpenBSD: common.c,v 1.7 1997/07/25 20:12:11 mickey Exp $";
 #endif
 #endif /* not lint */
 
@@ -52,6 +52,7 @@ static char rcsid[] = "$OpenBSD: common.c,v 1.4 1997/01/17 16:11:35 millert Exp 
 
 #include <sys/socket.h>
 #include <netinet/in.h>
+#include <arpa/inet.h>
 #include <netdb.h>
 
 #include <dirent.h>
@@ -145,8 +146,7 @@ getport(rhost, rport)
 	if (rhost == NULL)
 		fatal("no remote host to connect to");
 	bzero((char *)&sin, sizeof(sin));
-	sin.sin_addr.s_addr = inet_addr(rhost);
-	if (sin.sin_addr.s_addr != INADDR_NONE)
+	if (inet_aton(rhost, &sin.sin_addr) == 1)
 		sin.sin_family = AF_INET;
 	else {
 		hp = gethostbyname(rhost);
@@ -359,14 +359,14 @@ delay(n)
 	(void) select(0, (fd_set *)0, (fd_set *)0, (fd_set *)0, &tdelay);
 }
 
-#if __STDC__
+#ifdef __STDC__
 #include <stdarg.h>
 #else
 #include <varargs.h>
 #endif
 
 void
-#if __STDC__
+#ifdef __STDC__
 fatal(const char *msg, ...)
 #else
 fatal(msg, va_alist)
@@ -375,7 +375,7 @@ fatal(msg, va_alist)
 #endif
 {
 	va_list ap;
-#if __STDC__
+#ifdef __STDC__
 	va_start(ap, msg);
 #else
 	va_start(ap);

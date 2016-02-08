@@ -1,3 +1,4 @@
+/*	$OpenBSD: words.c,v 1.3 1997/08/24 21:55:14 deraadt Exp $	*/
 /*	$NetBSD: words.c,v 1.3 1995/03/21 15:08:00 cgd Exp $	*/
 
 /*
@@ -41,7 +42,7 @@ static char rcsid[] = "$NetBSD: words.c,v 1.3 1995/03/21 15:08:00 cgd Exp $";
 #endif
 #endif /* not lint */
 
-#include "externs.h"
+#include "extern.h"
 
 struct wlist wlist[] = {
 	{ "knife",	KNIFE,		OBJECT },

@@ -1,4 +1,4 @@
-#	$OpenBSD: Makefile.bsd-wrapper,v 1.14 1997/05/05 20:16:32 rahnds Exp $
+#	$OpenBSD: Makefile.bsd-wrapper,v 1.16 1997/06/23 22:20:25 kstailey Exp $
 
 MAN=		binutils/ar.1 binutils/nm.1 \
 		binutils/objcopy.1 binutils/objdump.1 binutils/ranlib.1 \
@@ -29,6 +29,11 @@ config: .FORCE
 config.status:
 	sh ${.CURDIR}/configure --prefix=/usr --disable-gdbtk
 
+.ifdef NOMAN
+maninstall:
+	@echo NOMAN is set
+.endif
+
 install: maninstall
 	${MAKE} prefix=${DESTDIR}/usr infodir=${DESTDIR}/usr/share/info \
 		bindir=${DESTDIR}/usr/bin INSTALL_MAN= install
@@ -47,4 +52,6 @@ tags:
 
 .include <bsd.obj.mk>
 .include <bsd.subdir.mk>
+.ifndef NOMAN
 .include <bsd.man.mk>
+.endif

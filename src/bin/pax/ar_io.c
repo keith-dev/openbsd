@@ -1,4 +1,4 @@
-/*	$OpenBSD: ar_io.c,v 1.13 1997/03/25 09:30:19 millert Exp $	*/
+/*	$OpenBSD: ar_io.c,v 1.17 1997/09/01 18:29:42 deraadt Exp $	*/
 /*	$NetBSD: ar_io.c,v 1.5 1996/03/26 23:54:13 mrg Exp $	*/
 
 /*-
@@ -42,7 +42,7 @@
 #if 0
 static char sccsid[] = "@(#)ar_io.c	8.2 (Berkeley) 4/18/94";
 #else
-static char rcsid[] = "$OpenBSD: ar_io.c,v 1.13 1997/03/25 09:30:19 millert Exp $";
+static char rcsid[] = "$OpenBSD: ar_io.c,v 1.17 1997/09/01 18:29:42 deraadt Exp $";
 #endif
 #endif /* not lint */
 
@@ -85,7 +85,7 @@ static struct stat arsb;		/* stat of archive device at open */
 static int invld_rec;			/* tape has out of spec record size */
 static int wr_trail = 1;		/* trailer was rewritten in append */
 static int can_unlnk = 0;		/* do we unlink null archives?  */
-char *arcname;                  	/* printable name of archive */
+char *arcname;				/* printable name of archive */
 char *gzip_program;			/* name of gzip program */
 
 static int get_phys __P((void));
@@ -101,7 +101,7 @@ static void ar_start_gzip __P((int));
  *	-1 on failure, 0 otherwise
  */
 
-#if __STDC__
+#ifdef __STDC__
 int
 ar_open(char *name)
 #else
@@ -110,7 +110,7 @@ ar_open(name)
 	char *name;
 #endif
 {
-        struct mtget mb;
+	struct mtget mb;
 
 	if (arfd != -1)
 		(void)close(arfd);
@@ -308,7 +308,7 @@ ar_open(name)
  * ar_close()
  *	closes archive device, increments volume number, and prints i/o summary
  */
-#if __STDC__
+#ifdef __STDC__
 void
 ar_close(void)
 #else
@@ -426,7 +426,7 @@ ar_close()
  *	other side of the pipe from getting a SIGPIPE (pax will stop
  *	reading an archive once a format dependent trailer is detected).
  */
-#if __STDC__
+#ifdef __STDC__
 void
 ar_drain(void)
 #else
@@ -463,7 +463,7 @@ ar_drain()
  *	0 if all ready to write, -1 otherwise
  */
 
-#if __STDC__
+#ifdef __STDC__
 int
 ar_set_wr(void)
 #else
@@ -478,7 +478,7 @@ ar_set_wr()
 	 * will stop us if the archive containing the trailer was not written
 	 */
 	wr_trail = 0;
-	
+
 	/* 
 	 * Add any device dependent code as required here
 	 */
@@ -506,7 +506,7 @@ ar_set_wr()
  *	0 if we can append, -1 otherwise.
  */
 
-#if __STDC__
+#ifdef __STDC__
 int
 ar_app_ok(void)
 #else
@@ -535,7 +535,7 @@ ar_app_ok()
  *	Number of bytes in buffer. 0 for end of file, -1 for a read error.
  */
 
-#if __STDC__
+#ifdef __STDC__
 int
 ar_read(register char *buf, register int cnt)
 #else
@@ -612,7 +612,7 @@ ar_read(buf, cnt)
 	else
 		paxwarn(0, "End of archive volume %d reached", arvol);
 	return(res);
-} 
+}
 
 /*
  * ar_write()
@@ -625,7 +625,7 @@ ar_read(buf, cnt)
  *	error in the archive occured.
  */
 
-#if __STDC__
+#ifdef __STDC__
 int
 ar_write(register char *buf, register int bsz)
 #else
@@ -730,8 +730,8 @@ ar_write(buf, bsz)
 		paxwarn(1,"Unable to append, trailer re-write failed. Quitting.");
 		return(res);
 	}
-		
-	if (res == 0) 
+
+	if (res == 0)
 		paxwarn(0, "End of archive volume %d reached", arvol);
 	else if (res < 0)
 		syswarn(1, errno, "Failed write to archive volume: %d", arvol);
@@ -750,7 +750,7 @@ ar_write(buf, bsz)
  *	0 when ok to try i/o again, -1 otherwise.
  */
 
-#if __STDC__
+#ifdef __STDC__
 int
 ar_rdsync(void)
 #else
@@ -761,7 +761,7 @@ ar_rdsync()
 	long fsbz;
 	off_t cpos;
 	off_t mpos;
-        struct mtop mb;
+	struct mtop mb;
 
 	/*
 	 * Fail resync attempts at user request (done) or this is going to be
@@ -811,7 +811,7 @@ ar_rdsync()
 		if ((cpos = lseek(arfd, (off_t)0L, SEEK_CUR)) < 0)
 			break;
 		mpos = fsbz - (cpos % (off_t)fsbz);
-		if (lseek(arfd, mpos, SEEK_CUR) < 0) 
+		if (lseek(arfd, mpos, SEEK_CUR) < 0)
 			break;
 		lstrval = 1;
 		break;
@@ -841,7 +841,7 @@ ar_rdsync()
  *	partial move (the amount moved is in skipped)
  */
 
-#if __STDC__
+#ifdef __STDC__
 int
 ar_fow(off_t sksz, off_t *skipped)
 #else
@@ -870,7 +870,7 @@ ar_fow(sksz, skipped)
 	 * number of physical blocks to skip (we do not know physical block
 	 * size at this point), so we must only read foward on tapes!
 	 */
-	if (artyp != ISREG) 
+	if (artyp != ISREG)
 		return(0);
 
 	/*
@@ -907,7 +907,7 @@ ar_fow(sksz, skipped)
  *	0 if moved the requested distance, -1 on complete failure
  */
 
-#if __STDC__
+#ifdef __STDC__
 int
 ar_rev(off_t sksz)
 #else
@@ -917,8 +917,8 @@ ar_rev(sksz)
 #endif
 {
 	off_t cpos;
-        struct mtop mb;
-	register int phyblk; 
+	struct mtop mb;
+	register int phyblk;
 
 	/*
 	 * make sure we do not have try to reverse on a flawed archive
@@ -928,7 +928,7 @@ ar_rev(sksz)
 
 	switch(artyp) {
 	case ISPIPE:
-		if (sksz <= 0) 
+		if (sksz <= 0)
 			break;
 		/*
 		 * cannot go backwards on these critters
@@ -1045,7 +1045,7 @@ ar_rev(sksz)
  *	physical block size if ok (ok > 0), -1 otherwise
  */
 
-#if __STDC__
+#ifdef __STDC__
 static int
 get_phys(void)
 #else
@@ -1163,7 +1163,7 @@ get_phys()
  *	0 when ready to continue, -1 when all done
  */
 
-#if __STDC__
+#ifdef __STDC__
 int
 ar_next(void)
 #else
@@ -1183,7 +1183,7 @@ ar_next()
 	if (sigprocmask(SIG_BLOCK, &s_mask, &o_mask) < 0)
 		syswarn(0, errno, "Unable to set signal mask");
 	ar_close();
-	if (sigprocmask(SIG_SETMASK, &o_mask, (sigset_t *)NULL) < 0)
+	if (sigprocmask(SIG_SETMASK, &o_mask, NULL) < 0)
 		syswarn(0, errno, "Unable to restore signal mask");
 
 	if (done || !wr_trail || strcmp(NM_TAR, argv0) == 0)
@@ -1238,7 +1238,7 @@ ar_next()
 				/*
 				 * we are to continue with the same device
 				 */
-				if (ar_open(arcname) >= 0) 
+				if (ar_open(arcname) >= 0)
 					return(0);
 				tty_prnt("Cannot re-open %s, try again\n",
 					arcname);
@@ -1277,10 +1277,10 @@ ar_next()
 			tty_prnt("Empty file name, try again\n");
 			continue;
 		}
-                if (!strcmp(buf, "..")) {
-                        tty_prnt("Illegal file name: .. try again\n");
-                        continue;
-                }
+		if (!strcmp(buf, "..")) {
+			tty_prnt("Illegal file name: .. try again\n");
+			continue;
+		}
 		if (strlen(buf) > PAXPATHLEN) {
 			tty_prnt("File name too long, try again\n");
 			continue;

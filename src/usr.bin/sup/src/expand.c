@@ -1,4 +1,4 @@
-/*	$OpenBSD: expand.c,v 1.4 1997/04/01 07:35:01 todd Exp $	*/
+/*	$OpenBSD: expand.c,v 1.6 1997/09/16 23:03:10 millert Exp $	*/
 
 /*
  * Copyright (c) 1991 Carnegie Mellon University
@@ -105,7 +105,7 @@ static int match __P((char *, char *));
 static int amatch __P((char *, char *));
 static void addone __P((char *, char *));
 static int addpath __P((int));
-static int gethdir __P((char *));
+static int gethdir __P((char *, int));
 
 int expand(spec, buffer, bufsize)
 	register char *spec;
@@ -139,12 +139,12 @@ static void glob(as)
 		if (!*cs || *cs == '/') {
 			if (pathp != path + 1) {
 				*pathp = 0;
-				if (gethdir(path + 1)) goto endit;
-				strcpy(path, path + 1);
+				if (gethdir(path + 1,sizeof path-1)) goto endit;
+				strncpy(path, path + 1, sizeof path-1);
 			} else
-				strcpy(path, (char *)getenv("HOME"));
-			pathp = path;
-			while (*pathp) pathp++;
+				strncpy(path, (char *)getenv("HOME"), sizeof path-1);
+			path[sizeof path-1] = '\0';
+			pathp = path + strlen(path);
 		}
 	}
 	while (*cs == 0 || strchr(globchars, *cs) == 0) {
@@ -242,8 +242,8 @@ pend:
 doit:
 			savec = *pm;
 			*pm = 0;
-			strcpy(lm, pl);
-			strcat(restbuf, pe + 1);
+			snprintf(lm, sizeof(restbuf) - (lm - restbuf),
+			    "%s%s", pl, pe + 1);
 			*pm = savec;
 			if (s == 0) {
 				spathp = pathp;
@@ -379,13 +379,15 @@ static int addpath(c)
 	return(0);
 }
 
-static int gethdir(home)
+static int gethdir(home,homelen)
 	char *home;
+	int homelen;
 {
 	register struct passwd *pp = getpwnam(home);
 
 	if (pp == 0)
 		return(1);
-	strcpy(home, pp->pw_dir);
+	strncpy(home, pp->pw_dir, homelen-1);
+	home[homelen-1] = '\0';
 	return(0);
 }

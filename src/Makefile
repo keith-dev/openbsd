@@ -1,5 +1,4 @@
-#	$OpenBSD: Makefile,v 1.17 1997/04/19 21:26:09 millert Exp $
-#	$NetBSD: Makefile,v 1.25 1995/10/09 02:11:28 thorpej Exp $
+#	$OpenBSD: Makefile,v 1.22 1997/09/21 11:46:58 deraadt Exp $
 
 #
 # For more information on building in tricky environments, please see
@@ -32,6 +31,10 @@ SUBDIR+= sys lkm
 SUBDIR+= kerberosIV
 .endif
 
+.if   make(clean) || make(cleandir) || make(obj)
+SUBDIR+= distrib
+.endif
+
 .if exists(regress)
 .ifmake !(install)
 SUBDIR+= regress
@@ -59,6 +62,9 @@ afterinstall:
 .endif
 
 build:
+.ifdef GLOBAL_AUTOCONF_CACHE
+	rm -f ${GLOBAL_AUTOCONF_CACHE}
+.endif
 	(cd ${.CURDIR}/share/mk && ${MAKE} install)
 	(cd ${.CURDIR}/include; ${MAKE} includes)
 	${MAKE} cleandir

@@ -1,4 +1,4 @@
-/*	$OpenBSD: pstat.c,v 1.7 1996/12/22 03:29:03 deraadt Exp $	*/
+/*	$OpenBSD: pstat.c,v 1.15 1997/09/18 08:59:54 deraadt Exp $	*/
 /*	$NetBSD: pstat.c,v 1.27 1996/10/23 22:50:06 cgd Exp $	*/
 
 /*-
@@ -44,7 +44,7 @@ static char copyright[] =
 #if 0
 from: static char sccsid[] = "@(#)pstat.c	8.9 (Berkeley) 2/16/94";
 #else
-static char *rcsid = "$OpenBSD: pstat.c,v 1.7 1996/12/22 03:29:03 deraadt Exp $";
+static char *rcsid = "$OpenBSD: pstat.c,v 1.15 1997/09/18 08:59:54 deraadt Exp $";
 #endif
 #endif /* not lint */
 
@@ -76,6 +76,7 @@ static char *rcsid = "$OpenBSD: pstat.c,v 1.7 1996/12/22 03:29:03 deraadt Exp $"
 #include <kvm.h>
 #include <limits.h>
 #include <nlist.h>
+#include <paths.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -151,6 +152,8 @@ void	ttymode __P((void));
 void	ttyprt __P((struct tty *));
 void	ufs_header __P((void));
 int	ufs_print __P((struct vnode *));
+void	ext2fs_header __P((void));
+int	ext2fs_print __P((struct vnode *));
 void	usage __P((void));
 void	vnode_header __P((void));
 void	vnode_print __P((struct vnode *, struct vnode *));
@@ -280,6 +283,9 @@ vnodemode()
 			} else if (!strncmp(ST.f_fstypename, MOUNT_NFS,
 			    MFSNAMELEN)) {
 				nfs_header();
+			} else if (!strncmp(ST.f_fstypename, MOUNT_EXT2FS,
+			    MFSNAMELEN)) {
+				ext2fs_header();
 			}
 			(void)printf("\n");
 		}
@@ -289,6 +295,9 @@ vnodemode()
 			ufs_print(vp);
 		} else if (!strncmp(ST.f_fstypename, MOUNT_NFS, MFSNAMELEN)) {
 			nfs_print(vp);
+		} else if (!strncmp(ST.f_fstypename, MOUNT_EXT2FS,
+		    MFSNAMELEN)) {
+			ext2fs_print(vp);
 		}
 		(void)printf("\n");
 	}
@@ -355,6 +364,8 @@ vnode_print(avnode, vp)
 		*fp++ = 'B';
 	if (flag & VALIASED)
 		*fp++ = 'A';
+	if (flag & VDIROP)
+		*fp++ = 'D';
 	if (flag == 0)
 		*fp++ = '-';
 	*fp = '\0';
@@ -405,15 +416,62 @@ ufs_print(vp)
 	*flags = '\0';
 
 	(void)printf(" %6d %5s", ip->i_number, flagbuf);
-	type = ip->i_mode & S_IFMT;
-	if (S_ISCHR(ip->i_mode) || S_ISBLK(ip->i_mode))
-		if (usenumflag || ((name = devname(ip->i_rdev, type)) == NULL))
+	type = ip->i_ffs_mode & S_IFMT;
+	if (S_ISCHR(ip->i_ffs_mode) || S_ISBLK(ip->i_ffs_mode))
+		if (usenumflag ||
+		    ((name = devname(ip->i_ffs_rdev, type)) == NULL))
 			(void)printf("   %2d,%-2d", 
-			    major(ip->i_rdev), minor(ip->i_rdev));
+			    major(ip->i_ffs_rdev), minor(ip->i_ffs_rdev));
 		else
 			(void)printf(" %7s", name);
 	else
-		(void)printf(" %7qd", ip->i_size);
+		(void)printf(" %7qd", ip->i_ffs_size);
+	return (0);
+}
+
+void
+ext2fs_header() 
+{
+	(void)printf(" FILEID IFLAG SZ");
+}
+
+int
+ext2fs_print(vp) 
+	struct vnode *vp;
+{
+	register int flag;
+	struct inode inode, *ip = &inode;
+	char flagbuf[16], *flags = flagbuf;
+	char *name;
+	mode_t type;
+
+	KGETRET(VTOI(vp), &inode, sizeof(struct inode), "vnode's inode");
+	flag = ip->i_flag;
+	if (flag & IN_LOCKED)
+		*flags++ = 'L';
+	if (flag & IN_WANTED)
+		*flags++ = 'W';
+	if (flag & IN_RENAME)
+		*flags++ = 'R';
+	if (flag & IN_UPDATE)
+		*flags++ = 'U';
+	if (flag & IN_ACCESS)
+		*flags++ = 'A';
+	if (flag & IN_CHANGE)
+		*flags++ = 'C';
+	if (flag & IN_MODIFIED)
+		*flags++ = 'M';
+	if (flag & IN_SHLOCK)
+		*flags++ = 'S';
+	if (flag & IN_EXLOCK)
+		*flags++ = 'E';
+	if (flag & IN_LWAIT)
+		*flags++ = 'Z';
+	if (flag == 0)
+		*flags++ = '-';
+	*flags = '\0';
+
+	(void)printf(" %6d %5s %2d", ip->i_number, flagbuf, ip->i_e2fs_size);
 	return (0);
 }
 
@@ -696,7 +754,7 @@ kinfo_vnodes(avnodes)
 	return ((struct e_vnode *)vbuf);
 }
 	
-char hdr[]="  LINE  RAW  CAN  OUT  HWT LWT    COL STATE      SESS  PGID DISC\n";
+char hdr[]="   LINE RAW  CAN  OUT  HWT LWT    COL STATE      SESS  PGID DISC\n";
 
 void
 ttymode()
@@ -747,9 +805,9 @@ ttyprt(tp)
 	char *name, state[20];
 
 	if (usenumflag || (name = devname(tp->t_dev, S_IFCHR)) == NULL)
-		(void)printf("0x%3x:%1x ", major(tp->t_dev), minor(tp->t_dev)); 
+		(void)printf("%2d,%-3d   ", major(tp->t_dev), minor(tp->t_dev));
 	else
-		(void)printf("%-7s ", name);
+		(void)printf("%7s ", name);
 	(void)printf("%3d %4d ", tp->t_rawq.c_cc, tp->t_canq.c_cc);
 	(void)printf("%4d %4d %3d %6d ", tp->t_outq.c_cc, 
 		tp->t_hiwat, tp->t_lowat, tp->t_column);
@@ -813,7 +871,7 @@ filemode()
 	nfile = (len - sizeof(struct filelist)) / sizeof(struct file);
 	
 	(void)printf("%d/%d open files\n", nfile, maxfile);
-	(void)printf("   LOC   TYPE    FLG     CNT  MSG    DATA    OFFSET\n");
+	(void)printf("     LOC TYPE       FLG  CNT  MSG      DATA  OFFSET\n");
 	for (; (char *)fp < buf + len; addr = fp->f_list.le_next, fp++) {
 		if ((unsigned)fp->f_type > DTYPE_SOCKET)
 			continue;
@@ -860,7 +918,7 @@ getfiles(abuf, alen)
 	 * Add emulation of KINFO_FILE here.
 	 */
 	if (memf != NULL)
-		errx(1, "files on dead kernel, not implemented\n");
+		errx(1, "files on dead kernel, not implemented");
 
 	mib[0] = CTL_KERN;
 	mib[1] = KERN_FILE;
@@ -1000,10 +1058,16 @@ swapmode()
 		if (!(sw[i].sw_flags & SW_FREED))
 			continue;
 
-		if (!totalflag)
-			(void)printf("/dev/%-6s %*d ",
-			    devname(sw[i].sw_dev, S_IFBLK),
-			    hlen, sw[i].sw_nblks / div);
+		if (!totalflag) {
+			if (usenumflag)
+				(void)printf("%2d,%-2d       %*d ",
+				    major(sw[i].sw_dev), minor(sw[i].sw_dev),
+				    hlen, sw[i].sw_nblks / div);
+			else
+				(void)printf("%s%-6s %*d ", _PATH_DEV,
+				    devname(sw[i].sw_dev, S_IFBLK),
+				    hlen, sw[i].sw_nblks / div);
+		}
 
 		xsize = sw[i].sw_nblks;
 		xfree = perdev[i];

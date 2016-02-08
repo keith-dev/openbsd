@@ -1,4 +1,4 @@
-/*	$OpenBSD: common.h,v 1.6 1997/01/17 15:47:51 millert Exp $ */
+/*	$OpenBSD: common.h,v 1.9 1997/09/22 05:45:26 millert Exp $ */
 
 #define DEBUGGING
 
@@ -30,8 +30,12 @@
 #include <sys/types.h>
 #include <sys/file.h>
 #include <sys/stat.h>
+#include <sys/param.h>
 #include <ctype.h>
+#include <paths.h>
 #include <signal.h>
+#include <stdlib.h>
+#include <unistd.h>
 #undef malloc
 #undef realloc
 
@@ -49,7 +53,7 @@
 
 #define MAXHUNKSIZE 100000		/* is this enough lines? */
 #define INITHUNKMAX 125			/* initial dynamic allocation size */
-#define MAXLINELEN 1024
+#define MAXLINELEN 8192
 #define BUFFERSIZE 1024
 
 #define SCCSPREFIX "s."

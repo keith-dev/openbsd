@@ -1,4 +1,4 @@
-/*	$OpenBSD: main.c,v 1.6 1997/01/15 23:40:23 millert Exp $	*/
+/*	$OpenBSD: main.c,v 1.13 1997/09/12 04:35:18 millert Exp $	*/
 /*	$NetBSD: main.c,v 1.3 1995/03/21 09:04:44 cgd Exp $	*/
 
 /* main.c: This file contains the main control and user-interface routines
@@ -39,7 +39,7 @@ char *copyright =
 #if 0
 static char *rcsid = "@(#)main.c,v 1.1 1994/02/01 00:34:42 alm Exp";
 #else
-static char rcsid[] = "$OpenBSD: main.c,v 1.6 1997/01/15 23:40:23 millert Exp $";
+static char rcsid[] = "$OpenBSD: main.c,v 1.13 1997/09/12 04:35:18 millert Exp $";
 #endif
 #endif /* not lint */
 
@@ -60,6 +60,7 @@ static char rcsid[] = "$OpenBSD: main.c,v 1.6 1997/01/15 23:40:23 millert Exp $"
  */
 
 #include <sys/ioctl.h>
+#include <sys/stat.h>
 #include <sys/wait.h>
 #include <ctype.h>
 #include <setjmp.h>
@@ -94,6 +95,7 @@ int red = 0;			/* if set, restrict shell/directory access */
 int scripted = 0;		/* if set, suppress diagnostics */
 int sigflags = 0;		/* if set, signals received while mutex set */
 int sigactive = 0;		/* if set, signal handlers are enabled */
+int interactive = 0;		/* if set, we are in interactive mode */
 
 char old_filename[MAXPATHLEN + 1] = "";	/* default filename */
 long current_addr;		/* current address in editor buffer */
@@ -115,6 +117,11 @@ main(argc, argv)
 {
 	int c, n;
 	long status = 0;
+
+#ifdef __GNUC__
+	(void)&argc;
+	(void)&argv;
+#endif
 
 	red = (n = strlen(argv[0])) > 2 && argv[0][n - 3] == 'r';
 top:
@@ -149,10 +156,24 @@ top:
 		argv++;
 		argc--;
 	}
+
+	if (!(interactive = isatty(0))) {
+		struct stat sb;
+
+		/* assert: pipes show up as fifo's when fstat'd */
+		if (fstat(0, &sb) || !S_ISFIFO(sb.st_mode)) {
+			if (lseek(0, 0, SEEK_CUR)) {
+				interactive = 1;
+				setlinebuf(stdout);
+			}
+		}
+	}
+
 	/* assert: reliable signals! */
 #ifdef SIGWINCH
 	handle_winch(SIGWINCH);
-	if (isatty(0)) signal(SIGWINCH, handle_winch);
+	if (isatty(0))
+		signal(SIGWINCH, handle_winch);
 #endif
 	signal(SIGHUP, signal_hup);
 	signal(SIGQUIT, SIG_IGN);
@@ -169,7 +190,7 @@ top:
 		init_buffers();
 		sigactive = 1;			/* enable signal handlers */
 		if (argc && **argv && is_legal_filename(*argv)) {
-			if (read_file(*argv, 0) < 0 && !isatty(0))
+			if (read_file(*argv, 0) < 0 && !interactive)
 				quit(2);
 			else if (**argv != '!')
 				strcpy(old_filename, *argv);
@@ -177,7 +198,7 @@ top:
 			fputs("?\n", stderr);
 			if (**argv == '\0')
 				strcpy(errmsg, "invalid filename");
-			if (!isatty(0))
+			if (!interactive)
 				quit(2);
 		}
 	}
@@ -195,8 +216,8 @@ top:
 			if (modified && !scripted) {
 				fputs("?\n", stderr);
 				strcpy(errmsg, "warning: file modified");
-				if (!isatty(0)) {
-					fprintf(stderr, garrulous ? 
+				if (!interactive) {
+					fprintf(stderr, garrulous ?
 					    "script, line %d: %s\n" :
 					    "", lineno, errmsg);
 					quit(2);
@@ -219,7 +240,7 @@ top:
 		    (status = exec_command()) >= 0)
 			if (!status || (status &&
 			    (status = display_lines(current_addr, current_addr,
-			        status)) >= 0))
+				status)) >= 0))
 				continue;
 		switch (status) {
 		case EOF:
@@ -228,17 +249,17 @@ top:
 			modified = 0;
 			fputs("?\n", stderr);		/* give warning */
 			strcpy(errmsg, "warning: file modified");
-			if (!isatty(0)) {
-				fprintf(stderr, garrulous ? 
-				    "script, line %d: %s\n" : 
+			if (!interactive) {
+				fprintf(stderr, garrulous ?
+				    "script, line %d: %s\n" :
 				    "", lineno, errmsg);
 				quit(2);
 			}
 			break;
 		case FATAL:
-			if (!isatty(0))
-				fprintf(stderr, garrulous ? 
-				    "script, line %d: %s\n" : "", 
+			if (!interactive)
+				fprintf(stderr, garrulous ?
+				    "script, line %d: %s\n" : "",
 				    lineno, errmsg);
 			else
 				fprintf(stderr, garrulous ? "%s\n" : "",
@@ -246,8 +267,8 @@ top:
 			quit(3);
 		default:
 			fputs("?\n", stderr);
-			if (!isatty(0)) {
-				fprintf(stderr, garrulous ? 
+			if (!interactive) {
+				fprintf(stderr, garrulous ?
 				    "script, line %d: %s\n" : "",
 				    lineno, errmsg);
 				quit(2);
@@ -552,7 +573,7 @@ exec_command()
 			GET_COMMAND_SUFFIX();
 		isglobal++;
 		if (exec_global(n, gflag) < 0)
-			return ERR; 
+			return ERR;
 		break;
 	case 'h':
 		if (addr_cnt > 0) {
@@ -695,7 +716,7 @@ exec_command()
 				sflags |= SGR;
 				ibufp++;
 				break;
-			case '0': case '1': case '2': case '3': case '4': 
+			case '0': case '1': case '2': case '3': case '4':
 			case '5': case '6': case '7': case '8': case '9':
 				STRTOL(sgnum, ibufp);
 				sflags |= SGF;
@@ -806,7 +827,7 @@ exec_command()
 			return ERR;
 		}
 #endif
-		if ((addr = write_file(*fnp ? fnp : old_filename, 
+		if ((addr = write_file(*fnp ? fnp : old_filename,
 		    (c == 'W') ? "a" : "w", first_addr, second_addr)) < 0)
 			return ERR;
 		else if (addr == addr_last)
@@ -1152,7 +1173,7 @@ move_lines(addr)
 		REQUE(b2, b1->q_forw);
 		REQUE(a1->q_back, a2);
 		REQUE(b1, a1);
-		current_addr = addr + ((addr < first_addr) ? 
+		current_addr = addr + ((addr < first_addr) ?
 		    second_addr - first_addr + 1 : 0);
 	}
 	if (isglobal)
@@ -1355,7 +1376,8 @@ signal_hup(signo)
 {
 	if (mutex)
 		sigflags |= (1 << (signo - 1));
-	else	handle_hup(signo);
+	else
+		handle_hup(signo);
 }
 
 
@@ -1365,7 +1387,8 @@ signal_int(signo)
 {
 	if (mutex)
 		sigflags |= (1 << (signo - 1));
-	else	handle_int(signo);
+	else
+		handle_int(signo);
 }
 
 
@@ -1415,6 +1438,8 @@ void
 handle_winch(signo)
 	int signo;
 {
+	int save_errno = errno;
+
 	struct winsize ws;		/* window size structure */
 
 	sigflags &= ~(1 << (signo - 1));
@@ -1422,6 +1447,7 @@ handle_winch(signo)
 		if (ws.ws_row > 2) rows = ws.ws_row - 2;
 		if (ws.ws_col > 8) cols = ws.ws_col - 8;
 	}
+	errno = save_errno;
 }
 
 

@@ -1,4 +1,4 @@
-/*	$OpenBSD: buf_subs.c,v 1.4 1997/04/06 06:11:10 millert Exp $	*/
+/*	$OpenBSD: buf_subs.c,v 1.7 1997/09/01 18:29:46 deraadt Exp $	*/
 /*	$NetBSD: buf_subs.c,v 1.5 1995/03/21 09:07:08 cgd Exp $	*/
 
 /*-
@@ -42,7 +42,7 @@
 #if 0
 static char sccsid[] = "@(#)buf_subs.c	8.2 (Berkeley) 4/18/94";
 #else
-static char rcsid[] = "$OpenBSD: buf_subs.c,v 1.4 1997/04/06 06:11:10 millert Exp $";
+static char rcsid[] = "$OpenBSD: buf_subs.c,v 1.7 1997/09/01 18:29:46 deraadt Exp $";
 #endif
 #endif /* not lint */
 
@@ -63,7 +63,7 @@ static char rcsid[] = "$OpenBSD: buf_subs.c,v 1.4 1997/04/06 06:11:10 millert Ex
  */
 
 #define MINFBSZ		512		/* default block size for hole detect */
-#define MAXFLT          10              /* default media read error limit */
+#define MAXFLT		10		/* default media read error limit */
 
 /*
  * Need to change bufmem to dynamic allocation when the upper
@@ -74,8 +74,8 @@ static char bufmem[MAXBLK+BLKMULT];	/* i/o buffer + pushback id space */
 static char *buf;			/* normal start of i/o buffer */
 static char *bufend;			/* end or last char in i/o buffer */
 static char *bufpt;			/* read/write point in i/o buffer */
-int blksz = MAXBLK;                    	/* block input/output size in bytes */
-int wrblksz;                      	/* user spec output size in bytes */
+int blksz = MAXBLK;			/* block input/output size in bytes */
+int wrblksz;				/* user spec output size in bytes */
 int maxflt = MAXFLT;			/* MAX consecutive media errors */
 int rdblksz;				/* first read blksize (tapes only) */
 off_t wrlimit;				/* # of bytes written per archive vol */
@@ -89,7 +89,7 @@ off_t rdcnt;				/* # of bytes read on current vol */
  *	0 if ok, -1 if the user specified write block size violates pax spec
  */
 
-#if __STDC__
+#ifdef __STDC__
 int
 wr_start(void)
 #else
@@ -105,7 +105,7 @@ wr_start()
 	 * archive that might be hard to read elsewhere. If all ok, we then
 	 * open the first archive volume
 	 */
-	if (!wrblksz)  
+	if (!wrblksz)
 		wrblksz = frmt->bsz;
 	if (wrblksz > MAXBLK) {
 		paxwarn(1, "Write block size of %d too large, maximium is: %d",
@@ -142,7 +142,7 @@ wr_start()
  *	0 if ok, -1 otherwise
  */
 
-#if __STDC__
+#ifdef __STDC__
 int
 rd_start(void)
 #else
@@ -185,7 +185,7 @@ rd_start()
  *	set up buffer system for copying within the file system
  */
 
-#if __STDC__
+#ifdef __STDC__
 void
 cp_start(void)
 #else
@@ -229,7 +229,7 @@ cp_start()
  *	0 for success, -1 for failure
  */
 
-#if __STDC__
+#ifdef __STDC__
 int
 appnd_start(off_t skcnt)
 #else
@@ -334,7 +334,7 @@ appnd_start(skcnt)
  *	0 on success, and -1 on failure
  */
 
-#if __STDC__
+#ifdef __STDC__
 int
 rd_sync(void)
 #else
@@ -407,7 +407,7 @@ rd_sync()
  *	pback space is increased.
  */
 
-#if __STDC__
+#ifdef __STDC__
 void
 pback(char *pt, int cnt)
 #else
@@ -430,7 +430,7 @@ pback(pt, cnt)
  *	0 if ok, -1 failure, and 1 when EOF on the archive volume was detected.
  */
 
-#if __STDC__
+#ifdef __STDC__
 int
 rd_skip(off_t skcnt)
 #else
@@ -505,7 +505,7 @@ rd_skip(skcnt)
  *	BE a requirement....
  */
 
-#if __STDC__
+#ifdef __STDC__
 void
 wr_fin(void)
 #else
@@ -531,7 +531,7 @@ wr_fin()
  *	0 if buffer was filled ok, -1 o.w. (buffer flush failure)
  */
 
-#if __STDC__
+#ifdef __STDC__
 int
 wr_rdbuf(register char *out, register int outcnt)
 #else
@@ -574,7 +574,7 @@ wr_rdbuf(out, outcnt)
  *	-1 is a read error
  */
 
-#if __STDC__
+#ifdef __STDC__
 int
 rd_wrbuf(register char *in, register int cpcnt)
 #else
@@ -629,7 +629,7 @@ rd_wrbuf(in, cpcnt)
  *	0 if ok, -1 if there was a buf_flush failure
  */
 
-#if __STDC__
+#ifdef __STDC__
 int
 wr_skip(off_t skcnt)
 #else
@@ -673,7 +673,7 @@ wr_skip(skcnt)
  *	0, but "left" is set to be greater than zero.
  */
 
-#if __STDC__
+#ifdef __STDC__
 int
 wr_rdfile(ARCHD *arcn, int ifd, off_t *left)
 #else
@@ -742,7 +742,7 @@ wr_rdfile(arcn, ifd, left)
  *	we return a 0 but "left" is set to be the amount unwritten
  */
 
-#if __STDC__
+#ifdef __STDC__
 int
 rd_wrfile(ARCHD *arcn, int ofd, off_t *left)
 #else
@@ -767,11 +767,11 @@ rd_wrfile(arcn, ofd, left)
 	 * pass the blocksize of the file being written to the write routine,
 	 * if the size is zero, use the default MINFBSZ
 	 */
-        if (fstat(ofd, &sb) == 0) {
+	if (fstat(ofd, &sb) == 0) {
 		if (sb.st_blksize > 0)
 			sz = (int)sb.st_blksize;
-        } else
-                syswarn(0,errno,"Unable to obtain block size for file %s",fnm);
+	} else
+		syswarn(0,errno,"Unable to obtain block size for file %s",fnm);
 	rem = sz;
 	*left = 0L;
 
@@ -819,7 +819,7 @@ rd_wrfile(arcn, ofd, left)
 	/*
 	 * if we failed from archive read, we do not want to skip
 	 */
-	if ((size > 0L) && (*left == 0L)) 
+	if ((size > 0L) && (*left == 0L))
 		return(-1);
 
 	/*
@@ -838,7 +838,7 @@ rd_wrfile(arcn, ofd, left)
  *	destination file so we can properly copy files with holes.
  */
 
-#if __STDC__
+#ifdef __STDC__
 void
 cp_file(ARCHD *arcn, int fd1, int fd2)
 #else
@@ -870,11 +870,11 @@ cp_file(arcn, fd1, fd2)
 	 * pass the blocksize of the file being written to the write routine,
 	 * if the size is zero, use the default MINFBSZ
 	 */
-        if (fstat(fd2, &sb) == 0) {
+	if (fstat(fd2, &sb) == 0) {
 		if (sb.st_blksize > 0)
 			sz = sb.st_blksize;
-        } else
-                syswarn(0,errno,"Unable to obtain block size for file %s",fnm);
+	} else
+		syswarn(0,errno,"Unable to obtain block size for file %s",fnm);
 	rem = sz;
 
 	/*
@@ -927,7 +927,7 @@ cp_file(arcn, fd1, fd2)
  *	0 when finished (user specified termination in ar_next()).
  */
 
-#if __STDC__
+#ifdef __STDC__
 int
 buf_fill(void)
 #else
@@ -977,7 +977,7 @@ buf_fill()
  *	0 if all is ok, -1 when a write error occurs.
  */
 
-#if __STDC__
+#ifdef __STDC__
 int
 buf_flush(register int bufcnt)
 #else
@@ -1028,7 +1028,7 @@ buf_flush(bufcnt)
 		/*
 		 * write a block and check if it all went out ok
 		 */
-		cnt = ar_write(buf, blksz); 
+		cnt = ar_write(buf, blksz);
 		if (cnt == blksz) {
 			/*
 			 * the write went ok

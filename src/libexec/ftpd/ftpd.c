@@ -1,4 +1,4 @@
-/*	$OpenBSD: ftpd.c,v 1.35 1997/05/01 14:45:37 deraadt Exp $	*/
+/*	$OpenBSD: ftpd.c,v 1.44 1997/08/06 00:18:00 angelos Exp $	*/
 /*	$NetBSD: ftpd.c,v 1.15 1995/06/03 22:46:47 mycroft Exp $	*/
 
 /*
@@ -86,18 +86,27 @@ static char rcsid[] = "$NetBSD: ftpd.c,v 1.15 1995/06/03 22:46:47 mycroft Exp $"
 #include <time.h>
 #include <vis.h>
 #include <unistd.h>
+#include <util.h>
 #include <utmp.h>
+
+#if defined(TCPWRAPPERS)
+#include <tcpd.h>
+#endif	/* TCPWRAPPERS */
+
+#if defined(SKEY)
+#include <skey.h>
+#endif
 
 #include "pathnames.h"
 #include "extern.h"
 
-#if __STDC__
+#ifdef __STDC__
 #include <stdarg.h>
 #else
 #include <varargs.h>
 #endif
 
-static char version[] = "Version 6.2/OpenBSD";
+static char version[] = "Version 6.3/OpenBSD";
 
 extern	off_t restart_point;
 extern	char cbuf[];
@@ -148,6 +157,11 @@ char	*guestpw;
 static char ttyline[20];
 char	*tty = ttyline;		/* for klogin */
 static struct utmp utmp;	/* for utmp */
+
+#if defined(TCPWRAPPERS)
+int	allow_severity = LOG_INFO;
+int	deny_severity = LOG_NOTICE;
+#endif	/* TCPWRAPPERS */
 
 #if defined(KERBEROS)
 int	notickets = 1;
@@ -208,6 +222,7 @@ static struct passwd *
 		 sgetpwnam __P((char *));
 static char	*sgetsave __P((char *));
 static void	 reapchild __P((int));
+static int	 check_host __P((struct sockaddr_in *));
 
 void	 logxfer __P((char *, off_t, time_t));
 
@@ -378,10 +393,16 @@ main(argc, argv, envp)
 			}
 			close(fd);
 		}
+
+#if defined(TCPWRAPPERS)
+		/* ..in the child. */
+		if (!check_host(&his_addr))
+			exit(1);
+#endif	/* TCPWRAPPERS */
 	} else {
 		addrlen = sizeof(his_addr);
 		if (getpeername(0, (struct sockaddr *)&his_addr,
-			        &addrlen) < 0) {
+				&addrlen) < 0) {
 			syslog(LOG_ERR, "getpeername (%s): %m", argv[0]);
 			exit(1);
 		}
@@ -603,7 +624,7 @@ user(name)
 		return;
 	}
 
-	if (pw = sgetpwnam(name)) {
+	if ((pw = sgetpwnam(name))) {
 		if ((shell = pw->pw_shell) == NULL || *shell == 0)
 			shell = _PATH_BSHELL;
 		while ((cp = getusershell()) != NULL)
@@ -685,7 +706,7 @@ end_login()
 	sigprocmask (SIG_BLOCK, &allsigs, NULL);
 	(void) seteuid((uid_t)0);
 	if (logged_in) {
-		logwtmp(ttyline, "", "");
+		ftpdlogwtmp(ttyline, "", "");
 		if (doutmp)
 			logout(utmp.ut_line);
 	}
@@ -770,7 +791,7 @@ skip:
 	(void) initgroups(pw->pw_name, pw->pw_gid);
 
 	/* open wtmp before chroot */
-	logwtmp(ttyline, pw->pw_name, remotehost);
+	ftpdlogwtmp(ttyline, pw->pw_name, remotehost);
 
 	/* open utmp before chroot */
 	if (doutmp) {
@@ -869,8 +890,8 @@ skip:
 #ifdef HASSETPROCTITLE
 		snprintf(proctitle, sizeof(proctitle),
 		    "%s: anonymous/%.*s", remotehost,
-		    sizeof(proctitle) - sizeof(remotehost) -
-		    sizeof(": anonymous/"), passwd);
+		    (int)(sizeof(proctitle) - sizeof(remotehost) -
+		    sizeof(": anonymous/")), passwd);
 		setproctitle(proctitle);
 #endif /* HASSETPROCTITLE */
 		if (logging)
@@ -1515,17 +1536,17 @@ fatal(s)
 }
 
 void
-#if __STDC__
+#ifdef __STDC__
 reply(int n, const char *fmt, ...)
 #else
 reply(n, fmt, va_alist)
 	int n;
 	char *fmt;
-        va_dcl
+	va_dcl
 #endif
 {
 	va_list ap;
-#if __STDC__
+#ifdef __STDC__
 	va_start(ap, fmt);
 #else
 	va_start(ap);
@@ -1541,17 +1562,17 @@ reply(n, fmt, va_alist)
 }
 
 void
-#if __STDC__
+#ifdef __STDC__
 lreply(int n, const char *fmt, ...)
 #else
 lreply(n, fmt, va_alist)
 	int n;
 	char *fmt;
-        va_dcl
+	va_dcl
 #endif
 {
 	va_list ap;
-#if __STDC__
+#ifdef __STDC__
 	va_start(ap, fmt);
 #else
 	va_start(ap);
@@ -1589,7 +1610,7 @@ yyerror(s)
 {
 	char *cp;
 
-	if (cp = strchr(cbuf,'\n'))
+	if ((cp = strchr(cbuf,'\n')))
 		*cp = '\0';
 	reply(500, "'%s': command not understood.", cbuf);
 }
@@ -1743,7 +1764,7 @@ dologout(status)
 		sigfillset(&allsigs);
 		sigprocmask(SIG_BLOCK, &allsigs, NULL);
 		(void) seteuid((uid_t)0);
-		logwtmp(ttyline, "", "");
+		ftpdlogwtmp(ttyline, "", "");
 		if (doutmp)
 			logout(utmp.ut_line);
 #if defined(KERBEROS)
@@ -1760,6 +1781,7 @@ myoob(signo)
 	int signo;
 {
 	char *cp;
+	int save_errno = errno;
 
 	/* only process if transfer occurring */
 	if (!transflag)
@@ -1783,6 +1805,7 @@ myoob(signo)
 		else
 			reply(213, "Status: %qd bytes transferred", byte_count);
 	}
+	errno = save_errno;
 }
 
 /*
@@ -1795,7 +1818,6 @@ void
 passive()
 {
 	int len, on;
-	u_short port;
 	char *p, *a;
 
 	if (pw == NULL) {
@@ -1942,7 +1964,7 @@ send_file_list(whichf)
 		transflag = 0;
 		goto out;
 	}
-	while (dirname = *dirlist++) {
+	while ((dirname = *dirlist++)) {
 		if (stat(dirname, &st) < 0) {
 			/*
 			 * If user typed "ls -l", etc, and the client
@@ -2040,7 +2062,11 @@ static void
 reapchild(signo)
 	int signo;
 {
-	while (wait3(NULL, WNOHANG, NULL) > 0);
+	int save_errno = errno;
+
+	while (wait3(NULL, WNOHANG, NULL) > 0)
+		;
+	errno = save_errno;
 }
 
 void
@@ -2049,39 +2075,63 @@ logxfer(name, size, start)
 	off_t size;
 	time_t start;
 {
-	char buf[2048];
-	char path[MAXPATHLEN];
+	char buf[400 + MAXHOSTNAMELEN*4 + MAXPATHLEN*4];
+	char dir[MAXPATHLEN], path[MAXPATHLEN], rpath[MAXPATHLEN];
 	char vremotehost[MAXHOSTNAMELEN*4], vpath[MAXPATHLEN*4];
-	char *vname, *vpw;
+	char *vpw;
 	time_t now;
 
-	if ((statfd >= 0) && (getcwd(path, sizeof(path)) != NULL)) {
+	if ((statfd >= 0) && (getcwd(dir, sizeof(dir)) != NULL)) {
 		time(&now);
 
-		vname = (char *)malloc(strlen(name)*4+1);
-		if (vname == NULL)
-			return;
 		vpw = (char *)malloc(strlen((guest) ? guestpw : pw->pw_name)*4+1);
-		if (vpw == NULL) {
-			free(vname);
+		if (vpw == NULL)
 			return;
+
+		snprintf(path, sizeof path, "%s/%s", dir, name);
+		if (realpath(path, rpath) == NULL) {
+			strncpy(rpath, path, sizeof rpath-1);
+			rpath[sizeof rpath-1] = '\0';
 		}
+		strvis(vpath, rpath, VIS_SAFE|VIS_NOSLASH);
 
 		strvis(vremotehost, remotehost, VIS_SAFE|VIS_NOSLASH);
-		strvis(vpath, path, VIS_SAFE|VIS_NOSLASH);
-		strvis(vname, name, VIS_SAFE|VIS_NOSLASH);
 		strvis(vpw, (guest) ? guestpw : pw->pw_name, VIS_SAFE|VIS_NOSLASH);
 
 		snprintf(buf, sizeof(buf),
-			 "%.24s %d %s %qd %s/%s %c %s %c %c %s ftp %d %s %s\n",
-			 ctime(&now), now - start + (now == start),
-			 vremotehost, size, vpath, vname,
-			 ((type == TYPE_A) ? 'a' : 'b'), "*" /* none yet */,
-			 'o', ((guest) ? 'a' : 'r'),
-			 vpw, 0 /* none yet */,
-			 ((guest) ? "*" : pw->pw_name), dhostname);
+		    "%.24s %d %s %qd %s %c %s %c %c %s ftp %d %s %s\n",
+		    ctime(&now), now - start + (now == start),
+		    vremotehost, (long long) size, vpath,
+		    ((type == TYPE_A) ? 'a' : 'b'), "*" /* none yet */,
+		    'o', ((guest) ? 'a' : 'r'),
+		    vpw, 0 /* none yet */,
+		    ((guest) ? "*" : pw->pw_name), dhostname);
 		write(statfd, buf, strlen(buf));
-		free(vname);
 		free(vpw);
 	}
 }
+
+#if defined(TCPWRAPPERS)
+static int
+check_host(sin)
+	struct sockaddr_in *sin;
+{
+	struct hostent *hp = gethostbyaddr((char *)&sin->sin_addr,
+		sizeof(struct in_addr), AF_INET);
+	char *addr = inet_ntoa(sin->sin_addr);
+
+	if (hp) {
+		if (!hosts_ctl("ftpd", hp->h_name, addr, STRING_UNKNOWN)) {
+			syslog(LOG_NOTICE, "tcpwrappers rejected: %s [%s]",
+			    hp->h_name, addr);
+			return (0);
+		}
+	} else {
+		if (!hosts_ctl("ftpd", STRING_UNKNOWN, addr, STRING_UNKNOWN)) {
+			syslog(LOG_NOTICE, "tcpwrappers rejected: [%s]", addr);
+			return (0);
+		}
+	}
+	return (1);
+}
+#endif	/* TCPWRAPPERS */

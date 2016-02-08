@@ -1,5 +1,5 @@
-#	$OpenBSD: Makefile,v 1.1 1996/06/02 11:43:50 deraadt Exp $
+#	$OpenBSD: Makefile,v 1.4 1997/09/18 17:18:37 deraadt Exp $
 
-SUBDIR=	../crunch floppies
+SUBDIR=	floppies
 
 .include <bsd.subdir.mk>

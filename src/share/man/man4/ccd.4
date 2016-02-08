@@ -1,4 +1,4 @@
-.\"	$OpenBSD: ccd.4,v 1.4 1997/01/05 22:12:17 deraadt Exp $
+.\"	$OpenBSD: ccd.4,v 1.6 1997/08/27 18:01:09 deraadt Exp $
 .\"	$NetBSD: ccd.4,v 1.5 1995/10/09 06:09:09 thorpej Exp $
 .\"
 .\" Copyright (c) 1994 Jason Downs.
@@ -58,7 +58,7 @@ partitions of the disks
 be combined.  Each component partition should be offset at least one
 cylinder from the beginning of the component disk.  This avoids potential
 conflicts between the component disk's disklabel and the
-.Nm ccd's
+.Nm ccd Ns 's
 disklabel.  The kernel will only allow component partitions of type FS_BSDFFS.
 .Pp
 In order to compile in support for the ccd, you must add a line similar
@@ -69,7 +69,7 @@ pseudo-device	ccd	4	# concatenated disk devices
 .Pp
 The count argument is how many
 .Nm ccds
-memory is allocated for a boot time.  In this example, no more than 4
+memory is allocated for at boot time.  In this example, no more than 4
 .Nm ccds
 may be configured.
 .Pp
@@ -86,8 +86,8 @@ other than DEV_BSIZE in order to calculate the correct interleave.
 The kernel will not allow an interleave factor less than the size
 of the largest component sector divided by DEV_BSIZE.
 .Pp
-Note that best performance is achieved if all compent disks have the same
-geometery and size.  Optimum striping cannot occur with different
+Note that best performance is achieved if all component disks have the same
+geometry and size.  Optimum striping cannot occur with different
 disk types.
 .Pp
 There is a run-time utility that is used for configuring

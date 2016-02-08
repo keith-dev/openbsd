@@ -1,5 +1,5 @@
 /*	$NetBSD: rcp.c,v 1.9 1995/03/21 08:19:06 cgd Exp $	*/
-/*	$OpenBSD: rcp.c,v 1.10 1997/03/26 01:19:49 deraadt Exp $	*/
+/*	$OpenBSD: rcp.c,v 1.16 1997/09/12 04:43:18 millert Exp $	*/
 
 /*
  * Copyright (c) 1983, 1990, 1992, 1993
@@ -74,7 +74,7 @@ static char rcsid[] = "$NetBSD: rcp.c,v 1.9 1995/03/21 08:19:06 cgd Exp $";
 #include "extern.h"
 
 #ifdef KERBEROS
-#include <kerberosIV/des.h>
+#include <des.h>
 #include <kerberosIV/krb.h>
 
 char	dst_realm_buf[REALM_SZ];
@@ -103,7 +103,7 @@ int	 kerberos __P((char **, char *, char *, char *));
 void	 oldw __P((const char *, ...));
 /* XXX from ../../usr.bin/rlogin/krcmd.c */
 int krcmd __P((char **, u_short, char *, char *, int *, char *));
-int krcmd_mutual __P((char **, u_short, char *, char *, int *, 
+int krcmd_mutual __P((char **, u_short, char *, char *, int *,
 		       char *, CREDENTIALS *, Key_schedule));
 #endif
 int	 response __P((void));
@@ -364,10 +364,10 @@ tolocal(argc, argv)
 		if ((bp = malloc(len)) == NULL)
 			err(1, NULL);
 		(void)snprintf(bp, len, "%s -f %s", cmd, src);
-		rem = 
+		rem =
 #ifdef KERBEROS
-		    use_kerberos ? 
-			kerberos(&host, bp, pwd->pw_name, suser) : 
+		    use_kerberos ?
+			kerberos(&host, bp, pwd->pw_name, suser) :
 #endif
 			rcmd(&host, port, pwd->pw_name, suser, bp, 0);
 		(void)free(bp);
@@ -399,7 +399,7 @@ source(argc, argv)
 	char *last, *name, buf[BUFSIZ];
 
 	for (indx = 0; indx < argc; ++indx) {
-                name = argv[indx];
+		name = argv[indx];
 		if ((fd = open(name, O_RDONLY, 0)) < 0)
 			goto syserr;
 		if (fstat(fd, &stb)) {
@@ -429,7 +429,8 @@ syserr:			run_err("%s: %s", name, strerror(errno));
 			 * versions expecting microseconds.
 			 */
 			(void)snprintf(buf, sizeof(buf), "T%ld 0 %ld 0\n",
-			    stb.st_mtimespec.tv_sec, stb.st_atimespec.tv_sec);
+			    (long)stb.st_mtimespec.tv_sec,
+			    (long)stb.st_atimespec.tv_sec);
 			(void)write(rem, buf, strlen(buf));
 			if (response() < 0)
 				goto next;
@@ -493,7 +494,8 @@ rsource(name, statp)
 		last++;
 	if (pflag) {
 		(void)snprintf(path, sizeof(path), "T%ld 0 %ld 0\n",
-		    statp->st_mtimespec.tv_sec, statp->st_atimespec.tv_sec);
+		    (long)statp->st_mtimespec.tv_sec,
+		    (long)statp->st_atimespec.tv_sec);
 		(void)write(rem, path, strlen(path));
 		if (response() < 0) {
 			closedir(dirp);
@@ -711,7 +713,7 @@ bad:			run_err("%s: %s", np, strerror(errno));
 					j = write(ofd, bp->buf, count);
 					if (j != count) {
 						wrerr = YES;
-						wrerrno = j >= 0 ? EIO : errno; 
+						wrerrno = j >= 0 ? EIO : errno;
 					}
 				}
 				count = 0;
@@ -721,7 +723,7 @@ bad:			run_err("%s: %s", np, strerror(errno));
 		if (count != 0 && wrerr == NO &&
 		    (j = write(ofd, bp->buf, count)) != count) {
 			wrerr = YES;
-			wrerrno = j >= 0 ? EIO : errno; 
+			wrerrno = j >= 0 ? EIO : errno;
 		}
 		if (ftruncate(ofd, size)) {
 			run_err("%s: truncate: %s", np, strerror(errno));
@@ -777,8 +779,8 @@ again:
 		errno = 0;
 		if (dest_realm == NULL)
 			dest_realm = krb_realmofhost(*host);
-		rem = 
-		    doencrypt ? 
+		rem =
+		    doencrypt ?
 			krcmd_mutual(host,
 			    port, user, bp, 0, dest_realm, &cred, schedule) :
 			krcmd(host, port, user, bp, 0, dest_realm);
@@ -841,9 +843,9 @@ void
 usage()
 {
 #ifdef KERBEROS
-	(void)fprintf(stderr, "%s\n\t%s\n",
+	(void)fprintf(stderr, "%s\n%s\n",
 	    "usage: rcp [-Kpx] [-k realm] f1 f2",
-	    "or: rcp [-Kprx] [-k realm] f1 ... fn directory");
+	    "   or: rcp [-Kprx] [-k realm] f1 ... fn directory");
 #else
 	(void)fprintf(stderr,
 	    "usage: rcp [-p] f1 f2; or: rcp [-pr] f1 ... fn directory\n");
@@ -851,7 +853,7 @@ usage()
 	exit(1);
 }
 
-#if __STDC__
+#ifdef __STDC__
 #include <stdarg.h>
 #else
 #include <varargs.h>
@@ -859,12 +861,12 @@ usage()
 
 #ifdef KERBEROS
 void
-#if __STDC__
+#ifdef __STDC__
 oldw(const char *fmt, ...)
 #else
 oldw(fmt, va_alist)
 	char *fmt;
-        va_dcl
+	va_dcl
 #endif
 {
 	char realm[REALM_SZ];
@@ -872,7 +874,7 @@ oldw(fmt, va_alist)
 
 	if (krb_get_lrealm(realm, 1) != KSUCCESS)
 		return;
-#if __STDC__
+#ifdef __STDC__
 	va_start(ap, fmt);
 #else
 	va_start(ap);
@@ -885,17 +887,17 @@ oldw(fmt, va_alist)
 #endif
 
 void
-#if __STDC__
+#ifdef __STDC__
 run_err(const char *fmt, ...)
 #else
 run_err(fmt, va_alist)
 	char *fmt;
-        va_dcl
+	va_dcl
 #endif
 {
 	static FILE *fp;
 	va_list ap;
-#if __STDC__
+#ifdef __STDC__
 	va_start(ap, fmt);
 #else
 	va_start(ap);

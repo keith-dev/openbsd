@@ -1,4 +1,4 @@
-/*	$OpenBSD: utility.c,v 1.6 1996/12/23 13:10:10 robin Exp $	*/
+/*	$OpenBSD: utility.c,v 1.8 1997/07/23 20:36:36 kstailey Exp $	*/
 /*	$NetBSD: utility.c,v 1.9 1996/02/28 20:38:29 thorpej Exp $	*/
 
 /*
@@ -39,7 +39,7 @@
 static char sccsid[] = "@(#)utility.c	8.4 (Berkeley) 5/30/95";
 static char rcsid[] = "$NetBSD: utility.c,v 1.9 1996/02/28 20:38:29 thorpej Exp $";
 #else
-static char rcsid[] = "$OpenBSD: utility.c,v 1.6 1996/12/23 13:10:10 robin Exp $";
+static char rcsid[] = "$OpenBSD: utility.c,v 1.8 1997/07/23 20:36:36 kstailey Exp $";
 #endif
 #endif /* not lint */
 
@@ -483,7 +483,7 @@ putf(cp, where)
 
 		case 'v':
 			puts(utsinfo.version);
-                        break;
+			break;
 		}
 		cp++;
 	}
@@ -515,7 +515,6 @@ printsub(direction, pointer, length)
     int			length;		/* length of suboption data */
 {
     register int i;
-    char buf[512];
 
 	if (!(diagnostic & TD_OPTIONS))
 		return;

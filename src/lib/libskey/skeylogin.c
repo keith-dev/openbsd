@@ -6,41 +6,43 @@
  *          John S. Walden <jsw@thumper.bellcore.com>
  *          Scott Chasin <chasin@crimelab.com>
  *
+ * Modifications:
+ *          Todd C. Miller <Todd.Miller@courtesan.com>
+ *
  * S/KEY verification check, lookups, and authentication.
  * 
- * $Id: skeylogin.c,v 1.11 1996/11/03 18:57:29 millert Exp $
+ * $OpenBSD: skeylogin.c,v 1.22 1997/09/12 20:47:39 millert Exp $
  */
 
 #include <sys/param.h>
+#include <sys/file.h>
 #ifdef	QUOTA
 #include <sys/quota.h>
 #endif
 #include <sys/stat.h>
 #include <sys/time.h>
 #include <sys/resource.h>
-
-#include <stdio.h>
-#include <stdlib.h>
-#include <unistd.h>
-#include <string.h>
-#include <ctype.h>
 #include <sys/types.h>
 #include <sys/stat.h>
-#include <time.h>
+
+#include <ctype.h>
+#include <err.h>
 #include <errno.h>
+#include <paths.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <time.h>
+#include <unistd.h>
 
 #include "skey.h"
-
-#ifndef _PATH_KEYFILE
-#define	_PATH_KEYFILE	"/etc/skeykeys"
-#endif
 
 char *skipspace __P((char *));
 int skeylookup __P((struct skey *, char *));
 
 /* Issue a skey challenge for user 'name'. If successful,
- * fill in the caller's skey structure and return 0. If unsuccessful
- * (e.g., if name is unknown) return -1.
+ * fill in the caller's skey structure and return(0). If unsuccessful
+ * (e.g., if name is unknown) return(-1).
  *
  * The file read/write pointer is left at the start of the
  * record.
@@ -58,22 +60,22 @@ getskeyprompt(mp, name, prompt)
 	(void)strcpy(prompt, "otp-md0 55 latour1\n");
 	switch (rval) {
 	case -1:	/* File error */
-		return -1;
+		return(-1);
 	case 0:		/* Lookup succeeded, return challenge */
 		(void)sprintf(prompt, "otp-%.*s %d %.*s\n",
 			      SKEY_MAX_HASHNAME_LEN, skey_get_algorithm(),
 			      mp->n - 1, SKEY_MAX_SEED_LEN, mp->seed);
-		return 0;
+		return(0);
 	case 1:		/* User not found */
 		(void)fclose(mp->keyfile);
-		return -1;
+		return(-1);
 	}
-	return -1;	/* Can't happen */
+	return(-1);	/* Can't happen */
 }
 
 /* Return  a skey challenge string for user 'name'. If successful,
- * fill in the caller's skey structure and return 0. If unsuccessful
- * (e.g., if name is unknown) return -1.
+ * fill in the caller's skey structure and return(0). If unsuccessful
+ * (e.g., if name is unknown) return(-1).
  *
  * The file read/write pointer is left at the start of the
  * record.
@@ -89,18 +91,18 @@ skeychallenge(mp, name, ss)
 	rval = skeylookup(mp,name);
 	switch(rval){
 	case -1:	/* File error */
-		return -1;
+		return(-1);
 	case 0:		/* Lookup succeeded, issue challenge */
 		(void)sprintf(ss, "otp-%.*s %d %.*s", SKEY_MAX_HASHNAME_LEN,
 			      skey_get_algorithm(), mp->n - 1,
 			      SKEY_MAX_SEED_LEN, mp->seed);
-		return 0;
+		return(0);
 	case 1:		/* User not found */
 		(void)fclose(mp->keyfile);
-		return -1;
+		return(-1);
 	}
-	return -1;	/* Can't happen */
-}	
+	return(-1);	/* Can't happen */
+}
 
 /* Find an entry in the One-time Password database.
  * Return codes:
@@ -115,20 +117,22 @@ skeylookup(mp, name)
 {
 	int found = 0;
 	long recstart = 0;
-	char *cp, *ht;
+	char *cp, *ht = NULL;
 	struct stat statbuf;
 
-	/* See if _PATH_KEYFILE exists, and create it if not */
-	if (stat(_PATH_KEYFILE, &statbuf) == -1 && errno == ENOENT) {
-		mp->keyfile = fopen(_PATH_KEYFILE, "w+");
+	/* See if _PATH_SKEYKEYS exists, and create it if not */
+	if (stat(_PATH_SKEYKEYS, &statbuf) == -1 && errno == ENOENT) {
+		mp->keyfile = fopen(_PATH_SKEYKEYS, "w+");
 		if (mp->keyfile)
-			chmod(_PATH_KEYFILE, 0644);
+			fchmod(fileno(mp->keyfile), 0600);
 	} else {
 		/* Otherwise open normally for update */
-		mp->keyfile = fopen(_PATH_KEYFILE, "r+");
+		mp->keyfile = fopen(_PATH_SKEYKEYS, "r+");
+		if (mp->keyfile && (statbuf.st_mode & 0007777) != 0600)
+			fchmod(fileno(mp->keyfile), 0600);
 	}
 	if (mp->keyfile == NULL)
-		return -1;
+		return(-1);
 
 	/* Look up user name in database */
 	while (!feof(mp->keyfile)) {
@@ -164,14 +168,73 @@ skeylookup(mp, name)
 	if (found) {
 		(void)fseek(mp->keyfile, recstart, SEEK_SET);
 		/* Set hash type */
-		if (skey_set_algorithm(ht) == NULL) {
+		if (ht && skey_set_algorithm(ht) == NULL) {
 			warnx("Unknown hash algorithm %s, using %s", ht,
 			      skey_get_algorithm());
 		}
-		return 0;
+		return(0);
 	} else {
-		return 1;
+		return(1);
 	}
+}
+
+/* Get the next entry in the One-time Password database.
+ * Return codes:
+ * -1: error in opening database
+ *  0: next entry found and stored in mp
+ *  1: no more entries, file R/W pointer positioned at EOF
+ */
+int
+skeygetnext(mp)
+	struct skey *mp;
+{
+	long recstart = 0;
+	char *cp;
+	struct stat statbuf;
+
+	/* See if _PATH_SKEYKEYS exists, and create it if not */
+	if (mp->keyfile == NULL) {
+		if (stat(_PATH_SKEYKEYS, &statbuf) == -1 && errno == ENOENT) {
+			mp->keyfile = fopen(_PATH_SKEYKEYS, "w+");
+			if (mp->keyfile)
+				fchmod(fileno(mp->keyfile), 0600);
+		} else {
+			/* Otherwise open normally for update */
+			mp->keyfile = fopen(_PATH_SKEYKEYS, "r+");
+			if (mp->keyfile && (statbuf.st_mode & 0007777) != 0600)
+				fchmod(fileno(mp->keyfile), 0600);
+		}
+		if (mp->keyfile == NULL)
+			return(-1);
+	}
+
+	/* Look up next user in database */
+	while (!feof(mp->keyfile)) {
+		recstart = ftell(mp->keyfile);
+		mp->recstart = recstart;
+		if (fgets(mp->buf, sizeof(mp->buf), mp->keyfile) != mp->buf)
+			break;
+		rip(mp->buf);
+		if (mp->buf[0] == '#')
+			continue;	/* Comment */
+		if ((mp->logname = strtok(mp->buf, " \t")) == NULL)
+			continue;
+		if ((cp = strtok(NULL, " \t")) == NULL)
+			continue;
+		/* Save hash type if specified, else use md4 */
+		if (isalpha(*cp)) {
+			if ((cp = strtok(NULL, " \t")) == NULL)
+				continue;
+		}
+		mp->n = atoi(cp);
+		if ((mp->seed = strtok(NULL, " \t")) == NULL)
+			continue;
+		if ((mp->val = strtok(NULL, " \t")) == NULL)
+			continue;
+		/* Got a real entry */
+		break;
+	}
+	return(feof(mp->keyfile));
 }
 
 /* Verify response to a s/key challenge.
@@ -195,6 +258,7 @@ skeyverify(mp, response)
 	struct tm *tm;
 	char tbuf[27];
 	char *cp;
+	int i, rval;
 
 	time(&now);
 	tm = localtime(&now);
@@ -202,7 +266,7 @@ skeyverify(mp, response)
 
 	if (response == NULL) {
 		(void)fclose(mp->keyfile);
-		return -1;
+		return(-1);
 	}
 	rip(response);
 
@@ -210,7 +274,7 @@ skeyverify(mp, response)
 	if (etob(key, response) != 1 && atob8(key, response) != 0) {
 		/* Neither english words or ascii hex */
 		(void)fclose(mp->keyfile);
-		return -1;
+		return(-1);
 	}
 
 	/* Compute fkey = f(key) */
@@ -219,19 +283,25 @@ skeyverify(mp, response)
 	f(fkey);
 
 	/*
-	 * in order to make the window of update as short as possible
-	 * we must do the comparison here and if OK write it back
-	 * other wise the same password can be used twice to get in
-	 * to the system
+	 * Obtain an exclusive lock on the key file so the same password
+	 * cannot be used twice to get in to the system.
 	 */
-	(void)setpriority(PRIO_PROCESS, 0, -4);
+	for (i = 0; i < 300; i++) {
+		if ((rval = flock(fileno(mp->keyfile), LOCK_EX|LOCK_NB)) == 0 ||
+		    errno != EWOULDBLOCK)
+			break;
+		usleep(100000);			/* Sleep for 0.1 seconds */
+	}
+	if (rval == -1) {			/* Can't get exclusive lock */
+		errno = EAGAIN;
+		return(-1);
+	}
 
-	/* reread the file record NOW */
+	/* Reread the file record NOW */
 	(void)fseek(mp->keyfile, mp->recstart, SEEK_SET);
 	if (fgets(mp->buf, sizeof(mp->buf), mp->keyfile) != mp->buf) {
-		(void)setpriority(PRIO_PROCESS, 0, 0);
 		(void)fclose(mp->keyfile);
-		return -1;
+		return(-1);
 	}
 	rip(mp->buf);
 	mp->logname = strtok(mp->buf, " \t");
@@ -246,9 +316,8 @@ skeyverify(mp, response)
 	/* Do actual comparison */
 	if (memcmp(filekey, fkey, SKEY_BINKEY_SIZE) != 0){
 		/* Wrong response */
-		(void)setpriority(PRIO_PROCESS, 0, 0);
 		(void)fclose(mp->keyfile);
-		return 1;
+		return(1);
 	}
 
 	/*
@@ -270,8 +339,7 @@ skeyverify(mp, response)
 
 	(void)fclose(mp->keyfile);
 	
-	(void)setpriority(PRIO_PROCESS, 0, 0);
-	return 0;
+	return(0);
 }
 
 /*
@@ -306,9 +374,9 @@ skey_keyinfo(username)
 
 	i = skeychallenge(&skey, username, str);
 	if (i == -1)
-		return 0;
+		return(0);
 
-	return str;
+	return(str);
 }
  
 /*
@@ -329,12 +397,12 @@ skey_passcheck(username, passwd)
 
 	i = skeylookup(&skey, username);
 	if (i == -1 || i == 1)
-		return -1;
+		return(-1);
 
 	if (skeyverify(&skey, passwd) == 0)
-		return skey.n;
+		return(skey.n);
 
-	return -1;
+	return(-1);
 }
 
 /*
@@ -361,9 +429,18 @@ skey_authenticate(username)
 	if (i != 0) {
 		char *p, *u;
 
-		/* Base first 4 chars of seed on hostname */
-		if (gethostname(pbuf, sizeof(pbuf)) < 0)
-			strcpy(pbuf, "asjd");
+		/*
+		 * Base first 4 chars of seed on hostname.
+		 * Add some filler for short hostnames if necessary.
+		 */
+		if (gethostname(pbuf, sizeof(pbuf)) == -1)
+			*(p = pbuf) = '.';
+		else
+			for (p = pbuf; *p && isalnum(*p); p++)
+				if (isalpha(*p) && isupper(*p))
+					*p = tolower(*p);
+		if (*p && pbuf - p < 4)
+			(void)strncpy(p, "asjd", 4 - (pbuf - p));
 		p = &pbuf[4];
 		*p = '\0';
 
@@ -400,9 +477,9 @@ skey_authenticate(username)
 			    "\nWarning! Key initialization needed soon.  (%d logins left)\n",
 			    skey.n);
 		}
-		return 0;
+		return(0);
 	}
-	return -1;
+	return(-1);
 }
 
 /* Comment out user's entry in the s/key database
@@ -425,10 +502,10 @@ skeyzero(mp, response)
 	(void)fseek(mp->keyfile, mp->recstart, SEEK_SET);
 	if (fputc('#', mp->keyfile) == EOF) {
 		fclose(mp->keyfile);
-		return -1;
+		return(-1);
 	}
 
 	(void)fclose(mp->keyfile);
 	
-	return 0;
+	return(0);
 }

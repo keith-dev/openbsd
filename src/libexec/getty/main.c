@@ -39,7 +39,7 @@ static char copyright[] =
 
 #ifndef lint
 /*static char sccsid[] = "from: @(#)main.c	8.1 (Berkeley) 6/20/93";*/
-static char rcsid[] = "$Id: main.c,v 1.7 1997/04/06 08:43:41 deraadt Exp $";
+static char rcsid[] = "$Id: main.c,v 1.10 1997/08/05 23:37:35 angelos Exp $";
 #endif /* not lint */
 
 #include <sys/param.h>
@@ -55,7 +55,6 @@ static char rcsid[] = "$Id: main.c,v 1.7 1997/04/06 08:43:41 deraadt Exp $";
 #include <ctype.h>
 #include <fcntl.h>
 #include <setjmp.h>
-#include <signal.h>
 #include <stdlib.h>
 #include <string.h>
 #include <syslog.h>
@@ -75,13 +74,13 @@ static char rcsid[] = "$Id: main.c,v 1.7 1997/04/06 08:43:41 deraadt Exp $";
 
 /* defines for auto detection of incoming PPP calls (->PAP/CHAP) */
 
-#define PPP_FRAME           0x7e  /* PPP Framing character */
-#define PPP_STATION         0xff  /* "All Station" character */
-#define PPP_ESCAPE          0x7d  /* Escape Character */
-#define PPP_CONTROL         0x03  /* PPP Control Field */
+#define PPP_FRAME	    0x7e  /* PPP Framing character */
+#define PPP_STATION	    0xff  /* "All Station" character */
+#define PPP_ESCAPE	    0x7d  /* Escape Character */
+#define PPP_CONTROL	    0x03  /* PPP Control Field */
 #define PPP_CONTROL_ESCAPED 0x23  /* PPP Control Field, escaped */
-#define PPP_LCP_HI          0xc0  /* LCP protocol - high byte */
-#define PPP_LCP_LOW         0x21  /* LCP protocol - low byte */
+#define PPP_LCP_HI	    0xc0  /* LCP protocol - high byte */
+#define PPP_LCP_LOW	    0x21  /* LCP protocol - low byte */
 
 struct termios tmode, omode;
 
@@ -295,6 +294,9 @@ main(argc, argv)
 			alarm(TO);
 		}
 		if ((rval = getname()) == 2) {
+			oflush();
+			alarm(0);
+			signal(SIGALRM, SIG_DFL);
 			execle(PP, "ppplogin", ttyn, (char *) 0, env);
 			syslog(LOG_ERR, "%s: %m", PP);
 			exit(1);

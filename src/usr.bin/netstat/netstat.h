@@ -1,4 +1,4 @@
-/*	$OpenBSD: netstat.h,v 1.5 1997/02/21 09:09:53 angelos Exp $	*/
+/*	$OpenBSD: netstat.h,v 1.10 1997/07/23 04:38:34 denny Exp $	*/
 /*	$NetBSD: netstat.h,v 1.6 1996/05/07 02:55:05 thorpej Exp $	*/
 
 /*
@@ -37,6 +37,9 @@
  */
 
 #include <sys/cdefs.h>
+
+/* What is the max length of a pointer printed with %p (including 0x)? */
+#define PLEN	(LONG_BIT / 4 + 2)
 
 int	Aflag;		/* show addresses of protocol control block */
 int	aflag;		/* show all sockets (including servers) */
@@ -82,14 +85,15 @@ void	impstats __P((u_long, u_long));
 void	intpr __P((int, u_long));
 
 void	pr_rthdr __P(());
+void	pr_encaphdr __P(());
 void	pr_family __P((int));
 void	rt_stats __P((u_long));
 char	*ns_phost __P((struct sockaddr *));
 char	*ipx_phost __P((struct sockaddr *));
 void	upHex __P((char *));
 
-char	*routename __P((u_int32_t));
-char	*netname __P((u_int32_t, u_int32_t));
+char	*routename __P((in_addr_t));
+char	*netname __P((in_addr_t, in_addr_t));
 char	*ns_print __P((struct sockaddr *));
 char	*ipx_print __P((struct sockaddr *));
 void	routepr __P((u_long));
@@ -119,3 +123,9 @@ void	tp_stats __P((caddr_t, caddr_t));
 
 void	mroutepr __P((u_long, u_long, u_long, u_long));
 void	mrt_stats __P((u_long, u_long));
+
+void	atalkprotopr __P((u_long, char *));
+void	ddp_stats __P((u_long, char *));
+char	*atalk_print __P((const struct sockaddr *, int));
+char	*atalk_print2 __P((const struct sockaddr *,
+		const struct sockaddr *, int));

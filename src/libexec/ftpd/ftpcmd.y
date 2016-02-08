@@ -319,7 +319,7 @@ cmd
 					fromname = (char *) 0;
 				} else {
 					reply(503, 
-                                          "Bad sequence of commands.");
+					  "Bad sequence of commands.");
 				}
 			}
 			free($4);
@@ -360,8 +360,8 @@ cmd
 			} else
 				help(cmdtab, $3);
 
-		        if ($3 != NULL)
-		        	free ($3);
+			if ($3 != NULL)
+				free ($3);
 		}
 	| NOOP CRLF
 		{
@@ -459,7 +459,7 @@ cmd
 					timeout = $6;
 					(void) alarm((unsigned) timeout);
 					reply(200,
-				         "Maximum IDLE time set to %d seconds",
+					 "Maximum IDLE time set to %d seconds",
 					    timeout);
 				}
 			}
@@ -554,7 +554,7 @@ rcmd
 					free($4);
 				}
 			} else {
-                        	if ($4)
+				if ($4)
 					free ($4);
 			}
 		}
@@ -985,8 +985,7 @@ yylex()
 					setproctitle("%s: %s", proctitle, cbuf);
 					*cp = c;
 				}
-			} else
-				setproctitle("%s: %s", proctitle, cbuf);
+			}
 #endif /* HASSETPROCTITLE */
 			if ((cp = strpbrk(cbuf, " \n")))
 				cpos = cp - cbuf;

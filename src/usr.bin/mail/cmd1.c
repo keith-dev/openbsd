@@ -1,5 +1,5 @@
-/*	$OpenBSD: cmd1.c,v 1.4 1997/03/29 03:01:44 millert Exp $	*/
-/*	$NetBSD: cmd1.c,v 1.5 1996/06/08 19:48:11 christos Exp $	*/
+/*	$OpenBSD: cmd1.c,v 1.11 1997/07/30 06:32:38 millert Exp $	*/
+/*	$NetBSD: cmd1.c,v 1.9 1997/07/09 05:29:48 mikel Exp $	*/
 
 /*-
  * Copyright (c) 1980, 1993
@@ -36,9 +36,9 @@
 
 #ifndef lint
 #if 0
-static char sccsid[] = "@(#)cmd1.c	8.1 (Berkeley) 6/6/93";
+static char sccsid[] = "@(#)cmd1.c	8.2 (Berkeley) 4/20/95";
 #else
-static char rcsid[] = "$OpenBSD: cmd1.c,v 1.4 1997/03/29 03:01:44 millert Exp $";
+static char rcsid[] = "$OpenBSD: cmd1.c,v 1.11 1997/07/30 06:32:38 millert Exp $";
 #endif
 #endif /* not lint */
 
@@ -91,7 +91,7 @@ headers(v)
 		printhead(mesg);
 	}
 	if (flag == 0) {
-		printf("No more mail.\n");
+		puts("No more mail.");
 		return(1);
 	}
 	return(0);
@@ -116,7 +116,7 @@ scroll(v)
 	case '+':
 		s++;
 		if (s * size > msgCount) {
-			printf("On last screenful of messages\n");
+			puts("On last screenful of messages");
 			return(0);
 		}
 		screen = s;
@@ -124,7 +124,7 @@ scroll(v)
 
 	case '-':
 		if (--s < 0) {
-			printf("On first screenful of messages\n");
+			puts("On first screenful of messages");
 			return(0);
 		}
 		screen = s;
@@ -146,9 +146,9 @@ screensize()
 	int s;
 	char *cp;
 
-	if ((cp = value("screen")) != NOSTR && (s = atoi(cp)) > 0)
-		return s;
-	return screenheight - 4;
+	if ((cp = value("screen")) != NULL && (s = atoi(cp)) > 0)
+		return(s);
+	return(screenheight - 4);
 }
 
 /*
@@ -185,8 +185,8 @@ printhead(mesg)
 	char *name;
 
 	mp = &message[mesg-1];
-	(void) readline(setinput(mp), headline, LINESIZE);
-	if ((subjline = hfield("subject", mp)) == NOSTR)
+	(void)readline(setinput(mp), headline, LINESIZE);
+	if ((subjline = hfield("subject", mp)) == NULL)
 		subjline = hfield("subj", mp);
 	/*
 	 * Bletch!
@@ -204,11 +204,12 @@ printhead(mesg)
 	if (mp->m_flag & MBOX)
 		dispc = 'M';
 	parse(headline, &hl, pbuf);
-	sprintf(wcount, "%3d/%-5d", mp->m_lines, mp->m_size);
+	(void)snprintf(wcount, sizeof(wcount), "%3d/%-5d", mp->m_lines,
+	    mp->m_size);
 	subjlen = screenwidth - 50 - strlen(wcount);
-	name = value("show-rcpt") != NOSTR ?
+	name = value("show-rcpt") != NULL ?
 		skin(hfield("to", mp)) : nameof(mp, 0);
-	if (subjline == NOSTR || subjlen < 0)		/* pretty pathetic */
+	if (subjline == NULL || subjlen < 0)		/* pretty pathetic */
 		printf("%c%c%3d %-20.20s  %16.16s %s\n",
 			curind, dispc, mesg, name, hl.l_date, wcount);
 	else
@@ -239,17 +240,17 @@ pcmdlist(v)
 	register const struct cmd *cp;
 	register int cc;
 
-	printf("Commands are:\n");
+	puts("Commands are:");
 	for (cc = 0, cp = cmdtab; cp->c_name != NULL; cp++) {
 		cc += strlen(cp->c_name) + 2;
 		if (cc > 72) {
-			printf("\n");
+			putchar('\n');
 			cc = strlen(cp->c_name) + 2;
 		}
-		if ((cp+1)->c_name != NOSTR)
+		if ((cp+1)->c_name != NULL)
 			printf("%s, ", cp->c_name);
 		else
-			printf("%s\n", cp->c_name);
+			puts(cp->c_name);
 	}
 	return(0);
 }
@@ -262,7 +263,7 @@ more(v)
 	void *v;
 {
 	int *msgvec = v;
-	return (type1(msgvec, 1, 1));
+	return(type1(msgvec, 1, 1));
 }
 
 /*
@@ -274,7 +275,7 @@ More(v)
 {
 	int *msgvec = v;
 
-	return (type1(msgvec, 0, 1));
+	return(type1(msgvec, 0, 1));
 }
 
 /*
@@ -304,7 +305,7 @@ Type(v)
 /*
  * Type out the messages requested.
  */
-jmp_buf	pipestop;
+sigjmp_buf	pipestop;
 int
 type1(msgvec, doign, page)
 	int *msgvec;
@@ -316,16 +317,16 @@ type1(msgvec, doign, page)
 	int nlines;
 	FILE *obuf;
 #if __GNUC__
-	/* Avoid longjmp clobbering */
-	(void) &cp;
-	(void) &obuf;
+	/* Avoid siglongjmp clobbering */
+	(void)&cp;
+	(void)&obuf;
 #endif
 
 	obuf = stdout;
-	if (setjmp(pipestop))
+	if (sigsetjmp(pipestop, 1))
 		goto close_pipe;
-	if (value("interactive") != NOSTR &&
-	    (page || (cp = value("crt")) != NOSTR)) {
+	if (value("interactive") != NULL &&
+	    (page || (cp = value("crt")) != NULL)) {
 		nlines = 0;
 		if (!page) {
 			for (ip = msgvec; *ip && ip-msgvec < msgCount; ip++)
@@ -337,28 +338,28 @@ type1(msgvec, doign, page)
 				cp = _PATH_MORE;
 			obuf = Popen(cp, "w");
 			if (obuf == NULL) {
-				perror(cp);
+				warn(cp);
 				obuf = stdout;
 			} else
-				signal(SIGPIPE, brokpipe);
+				(void)signal(SIGPIPE, brokpipe);
 		}
 	}
 	for (ip = msgvec; *ip && ip - msgvec < msgCount; ip++) {
 		mp = &message[*ip - 1];
 		touch(mp);
 		dot = mp;
-		if (value("quiet") == NOSTR)
+		if (value("quiet") == NULL)
 			fprintf(obuf, "Message %d:\n", *ip);
-		(void) send(mp, obuf, doign ? ignore : 0, NOSTR);
+		(void)send(mp, obuf, doign ? ignore : 0, NULL);
 	}
 close_pipe:
 	if (obuf != stdout) {
 		/*
 		 * Ignore SIGPIPE so it can't cause a duplicate close.
 		 */
-		signal(SIGPIPE, SIG_IGN);
-		Pclose(obuf);
-		signal(SIGPIPE, SIG_DFL);
+		(void)signal(SIGPIPE, SIG_IGN);
+		(void)Pclose(obuf);
+		(void)signal(SIGPIPE, SIG_DFL);
 	}
 	return(0);
 }
@@ -371,7 +372,7 @@ void
 brokpipe(signo)
 	int signo;
 {
-	longjmp(pipestop, 1);
+	siglongjmp(pipestop, 1);
 }
 
 /*
@@ -392,7 +393,7 @@ top(v)
 
 	topl = 5;
 	valtop = value("toplines");
-	if (valtop != NOSTR) {
+	if (valtop != NULL) {
 		topl = atoi(valtop);
 		if (topl < 0 || topl > 10000)
 			topl = 5;
@@ -402,14 +403,14 @@ top(v)
 		mp = &message[*ip - 1];
 		touch(mp);
 		dot = mp;
-		if (value("quiet") == NOSTR)
+		if (value("quiet") == NULL)
 			printf("Message %d:\n", *ip);
 		ibuf = setinput(mp);
 		c = mp->m_lines;
 		if (!lineb)
-			printf("\n");
+			putchar('\n');
 		for (lines = 0; lines < c && lines <= topl; lines++) {
-			if (readline(ibuf, linebuf, LINESIZE) < 0)
+			if (readline(ibuf, linebuf, sizeof(linebuf)) < 0)
 				break;
 			puts(linebuf);
 			lineb = blankline(linebuf);
@@ -462,15 +463,39 @@ int
 folders(v)
 	void *v;
 {
-	char dirname[BUFSIZ];
+	char dirname[PATHSIZE];
 	char *cmd;
 
-	if (getfold(dirname) < 0) {
-		printf("No value set for \"folder\"\n");
-		return 1;
+	if (getfold(dirname, sizeof(dirname)) < 0) {
+		puts("No value set for \"folder\"");
+		return(1);
 	}
-	if ((cmd = value("LISTER")) == NOSTR)
+	if ((cmd = value("LISTER")) == NULL)
 		cmd = "ls";
-	(void) run_command(cmd, 0, -1, -1, dirname, NOSTR, NOSTR);
-	return 0;
+	(void)run_command(cmd, 0, -1, -1, dirname, NULL, NULL);
+	return(0);
+}
+
+/*
+ * Update the mail file with any new messages that have
+ * come in since we started reading mail.
+ */
+int
+inc(v)
+	void *v;
+{
+	int nmsg, mdot;
+
+	nmsg = incfile();
+
+	if (nmsg == 0) {
+		puts("No new mail.");
+	} else if (nmsg > 0) {
+		mdot = newfileinfo(msgCount - nmsg);
+		dot = &message[mdot - 1];
+	} else {
+		puts("\"inc\" command failed...");
+	}
+
+	return(0);
 }

@@ -1,4 +1,4 @@
-/*	$OpenBSD: ypbind.c,v 1.25 1997/05/06 18:41:11 deraadt Exp $ */
+/*	$OpenBSD: ypbind.c,v 1.29 1997/06/18 23:50:12 deraadt Exp $ */
 
 /*
  * Copyright (c) 1996 Theo de Raadt <deraadt@theos.com>
@@ -34,7 +34,7 @@
  */
 
 #ifndef LINT
-static char rcsid[] = "$OpenBSD: ypbind.c,v 1.25 1997/05/06 18:41:11 deraadt Exp $";
+static char rcsid[] = "$OpenBSD: ypbind.c,v 1.29 1997/06/18 23:50:12 deraadt Exp $";
 #endif
 
 #include <sys/param.h>
@@ -110,6 +110,7 @@ int check;
 #define YPSET_LOCAL	1
 #define YPSET_ALL	2
 int ypsetmode = YPSET_NO;
+int insecure = 0;
 
 int rpcsock, pingsock;
 struct rmtcallargs rmtca;
@@ -155,12 +156,18 @@ ypbindproc_domain_2x(transp, argp, clnt)
 	struct _dom_binding *ypdb;
 	char path[MAXPATHLEN];
 	time_t now;
+	int count = 0;
 
 	if (strchr((char *)argp, '/'))
 		return NULL;
 
-	memset(&res, 0, sizeof res);
+	memset(&res, 0, sizeof(res));
 	res.ypbind_status = YPBIND_FAIL_VAL;
+
+	for (ypdb = ypbindlist; ypdb && count < 100; ypdb = ypdb->dom_pnext)
+		count++;
+	if (count >= 100)
+		return NULL;	/* prevent DOS: sorry, you lose */
 
 	for (ypdb = ypbindlist; ypdb; ypdb = ypdb->dom_pnext)
 		if (!strcmp(ypdb->dom_domain, *argp))
@@ -168,6 +175,8 @@ ypbindproc_domain_2x(transp, argp, clnt)
 
 	if (ypdb == NULL) {
 		ypdb = (struct _dom_binding *)malloc(sizeof *ypdb);
+		if (ypdb == NULL)
+			return NULL;
 		memset(ypdb, 0, sizeof *ypdb);
 		strncpy(ypdb->dom_domain, *argp, sizeof ypdb->dom_domain-1);
 		ypdb->dom_domain[sizeof ypdb->dom_domain-1] = '\0';
@@ -334,7 +343,7 @@ ypbindprog_2(rqstp, transp)
 void
 usage()
 {
-	fprintf(stderr, "usage: ypbind [-ypset] [-ypsetme]\n");
+	fprintf(stderr, "usage: ypbind [-ypset] [-ypsetme] [-insecure]\n");
 	exit(0);
 }
 
@@ -360,7 +369,9 @@ main(argc, argv)
 
 	while (--argc) {
 		++argv;
-		if (!strcmp("-ypset", *argv))
+		if (!strcmp("-insecure", *argv))
+			insecure = 1;
+		else if (!strcmp("-ypset", *argv))
 			ypsetmode = YPSET_ALL;
 		else if (!strcmp("-ypsetme", *argv))
 			ypsetmode = YPSET_LOCAL;
@@ -501,6 +512,8 @@ main(argc, argv)
 
 	/* build initial domain binding, make it "unsuccessful" */
 	ypbindlist = (struct _dom_binding *)malloc(sizeof *ypbindlist);
+	if (ypbindlist == NULL)
+		errx(1, "no memory");
 	memset(ypbindlist, 0, sizeof *ypbindlist);
 	strncpy(ypbindlist->dom_domain, domain, sizeof ypbindlist->dom_domain-1);
 	ypbindlist->dom_domain[sizeof (ypbindlist->dom_domain)-1] = '\0';
@@ -1006,6 +1019,8 @@ int force;
 		if (force == 0)
 			return;
 		ypdb = (struct _dom_binding *)malloc(sizeof *ypdb);
+		if (ypdb == NULL)
+			return;
 		memset(ypdb, 0, sizeof *ypdb);
 		strncpy(ypdb->dom_domain, dom, sizeof ypdb->dom_domain-1);
 		ypdb->dom_domain[sizeof (ypdb->dom_domain)-1] = '\0';
@@ -1015,7 +1030,7 @@ int force;
 	}
 
 	/* we do not support sunos 3.0 insecure servers */
-	if (ntohs(raddrp->sin_port) >= IPPORT_RESERVED)
+	if (insecure == 0 && ntohs(raddrp->sin_port) >= IPPORT_RESERVED)
 		return;
 
 	/* soft update, alive */

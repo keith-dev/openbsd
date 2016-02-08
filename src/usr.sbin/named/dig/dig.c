@@ -1,10 +1,10 @@
-/*	$OpenBSD: dig.c,v 1.2 1997/03/12 10:41:48 downsj Exp $	*/
+/*	$OpenBSD: dig.c,v 1.4 1997/07/21 02:10:56 angelos Exp $	*/
 
 #ifndef lint
 #if 0
 static char rcsid[] = "$From: dig.c,v 8.8 1996/05/21 07:32:40 vixie Exp $";
 #else
-static char rcsid[] = "$OpenBSD: dig.c,v 1.2 1997/03/12 10:41:48 downsj Exp $";
+static char rcsid[] = "$OpenBSD: dig.c,v 1.4 1997/07/21 02:10:56 angelos Exp $";
 #endif
 #endif
 
@@ -344,7 +344,7 @@ main(argc, argv)
 				fprintf(stderr, "dig: too many arguments\n");
 				exit(10);
 			}
-			*ax++ = *vtmp;
+			*ax++ = strdup(*vtmp);
 		}
 		vtmp++;
 	}
@@ -636,7 +636,7 @@ main(argc, argv)
 					       inet_ntoa(_res.nsaddr_list[i]
 							 .sin_addr));
 					printf(";; WHEN: %s",
-					       ctime(&(exectime.tv_sec)));
+					       ctime((time_t *) &(exectime.tv_sec)));
 				}
 				if (!x)
 					break;	/* success */
@@ -691,7 +691,7 @@ main(argc, argv)
 			printf(";; FROM: %s to SERVER: %s\n",
 			       myhostname, srvmsg);
 			printf(";; WHEN: %s",
-			       ctime(&(exectime.tv_sec)));
+			       ctime((time_t *) &(exectime.tv_sec)));
 			printf(";; MSG SIZE  sent: %d  rcvd: %d\n",
 			       bytes_out, bytes_in);
 		}

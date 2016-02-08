@@ -1,3 +1,5 @@
+/*	$OpenBSD: yppasswd.h,v 1.4 1997/08/19 07:00:51 niklas Exp $*/
+
 /*
  * Copyright (c) 1995 Mats O Jansson <moj@stacken.kth.se>
  * All rights reserved.
@@ -28,7 +30,6 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- *	$Id: yppasswd.h,v 1.2 1996/06/26 22:11:26 maja Exp $
  */
 
 #ifndef _YPPASSWD_H_RPCGEN
@@ -46,11 +47,11 @@ struct x_passwd {
 typedef struct x_passwd x_passwd;
 #ifdef __cplusplus 
 extern "C" bool_t xdr_x_passwd(XDR *, x_passwd*);
-#elif __STDC__ 
+#elif defined(__STDC__)
 extern  bool_t xdr_x_passwd(XDR *, x_passwd*);
-#else /* Old Style C */ 
+#else /* Old Style C */
 bool_t xdr_x_passwd();
-#endif /* Old Style C */ 
+#endif /* Old Style C */
 
 
 struct yppasswd {
@@ -60,7 +61,7 @@ struct yppasswd {
 typedef struct yppasswd yppasswd;
 #ifdef __cplusplus 
 extern "C" bool_t xdr_yppasswd(XDR *, yppasswd*);
-#elif __STDC__ 
+#elif defined(__STDC__)
 extern  bool_t xdr_yppasswd(XDR *, yppasswd*);
 #else /* Old Style C */ 
 bool_t xdr_yppasswd();
@@ -75,7 +76,7 @@ bool_t xdr_yppasswd();
 extern "C" int * yppasswdproc_update_1(yppasswd *, CLIENT *);
 extern "C" int * yppasswdproc_update_1_svc(yppasswd *, struct svc_req *, SVCXPRT *);
 
-#elif __STDC__
+#elif defined(__STDC__)
 #define YPPASSWDPROC_UPDATE ((u_long)1)
 extern  int * yppasswdproc_update_1(yppasswd *, CLIENT *);
 extern  int * yppasswdproc_update_1_svc(yppasswd *, struct svc_req *, SVCXPRT *);

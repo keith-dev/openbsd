@@ -1,4 +1,4 @@
-/*	$OpenBSD: lpr.c,v 1.12 1997/01/17 16:12:46 millert Exp $ */
+/*	$OpenBSD: lpr.c,v 1.19 1997/07/25 20:12:13 mickey Exp $ */
 /*	$NetBSD: lpr.c,v 1.10 1996/03/21 18:12:25 jtc Exp $	*/
 
 /*
@@ -50,7 +50,7 @@ static char copyright[] =
 #if 0
 static char sccsid[] = "@(#)lpr.c	8.4 (Berkeley) 4/28/95";
 #else
-static char rcsid[] = "$OpenBSD: lpr.c,v 1.12 1997/01/17 16:12:46 millert Exp $";
+static char rcsid[] = "$OpenBSD: lpr.c,v 1.19 1997/07/25 20:12:13 mickey Exp $";
 #endif
 #endif /* not lint */
 
@@ -111,12 +111,12 @@ static void	 chkprinter __P((char *));
 static void	 cleanup __P((int));
 static void	 copy __P((int, char []));
 static void	 fatal2 __P((const char *, ...));
-static char	*itoa __P((int));
 static char	*linked __P((char *));
 static char	*lmktemp __P((char *, int, int));
 static void	 mktemps __P((void));
 static int	 nfile __P((char *));
 static int	 test __P((char *));
+static char	*itoa __P((int));
 
 uid_t	uid, euid;
 
@@ -127,7 +127,6 @@ main(argc, argv)
 {
 	struct passwd *pw;
 	struct group *gptr;
-	extern char *itoa();
 	register char *arg, *cp;
 	char buf[BUFSIZ];
 	int i, f;
@@ -411,6 +410,7 @@ main(argc, argv)
 		exit(0);
 	}
 	cleanup(0);
+	return (1);
 	/* NOTREACHED */
 }
 
@@ -443,7 +443,8 @@ copy(f, n)
 			nc -= BUFSIZ;
 			nr++;
 			if (MX > 0 && nr > MX) {
-				printf("%s: %s: copy file is too large\n", name, n);
+				printf("%s: %s: copy file is too large\n",
+				       name, n);
 				break;
 			}
 		}
@@ -464,13 +465,13 @@ linked(file)
 	register char *file;
 {
 	register char *cp;
-	static char buf[BUFSIZ];
+	static char nfile[MAXPATHLEN];
 	register int ret;
 
 	if (*file != '/') {
-		if (getcwd(buf, BUFSIZ) == NULL) {
+		if (getcwd(nfile, sizeof(nfile)) == NULL)
 			return(NULL);
-		}
+
 		while (file[0] == '.') {
 			switch (file[1]) {
 			case '/':
@@ -478,7 +479,7 @@ linked(file)
 				continue;
 			case '.':
 				if (file[2] == '/') {
-					if ((cp = strrchr(buf, '/')) != NULL)
+					if ((cp = strrchr(nfile, '/')) != NULL)
 						*cp = '\0';
 					file += 3;
 					continue;
@@ -486,9 +487,9 @@ linked(file)
 			}
 			break;
 		}
-		strcat(buf, "/");
-		strcat(buf, file);
-		file = buf;
+		strncat(nfile, "/", sizeof(nfile) - strlen(nfile) - 1);
+		strncat(nfile, file, sizeof(nfile) - strlen(nfile) - 1);
+		file = nfile;
 	}
 	seteuid(euid);
 	ret = symlink(file, dfname);
@@ -744,14 +745,14 @@ lmktemp(id, num, len)
 	return(s);
 }
 
-#if __STDC__
+#ifdef __STDC__
 #include <stdarg.h>
 #else
 #include <varargs.h>
 #endif
 
 static void
-#if __STDC__
+#ifdef __STDC__
 fatal2(const char *msg, ...)
 #else
 fatal2(msg, va_alist)
@@ -760,7 +761,7 @@ fatal2(msg, va_alist)
 #endif
 {
 	va_list ap;
-#if __STDC__
+#ifdef __STDC__
 	va_start(ap, msg);
 #else
 	va_start(ap);

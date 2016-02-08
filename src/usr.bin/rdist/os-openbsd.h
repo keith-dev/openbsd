@@ -1,4 +1,4 @@
-/* * $OpenBSD: os-openbsd.h,v 1.5 1997/04/27 13:01:29 downsj Exp $*/
+/* * $OpenBSD: os-openbsd.h,v 1.9 1997/07/22 06:59:39 millert Exp $*/
 /*
  * Copyright (c) 1993 Michael A. Cooper
  * Copyright (c) 1993 Regents of the University of California.
@@ -154,8 +154,6 @@ typedef void POINTER;
 #define NEED_STRING_H			/* Need <string.h> */
 
 /*
- * Path to the remote shell command.
- * Define this only if the pathname is different than
- * that which appears in "include/paths.h".
+ * We have <paths.h>
  */
-#define _PATH_REMSH	"/usr/local/bin/ssh"			/**/
+#define PATHS_H	<paths.h>

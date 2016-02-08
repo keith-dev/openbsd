@@ -1,4 +1,4 @@
-/*	$OpenBSD: route.c,v 1.18 1997/04/10 10:09:02 deraadt Exp $	*/
+/*	$OpenBSD: route.c,v 1.23 1997/07/13 23:12:09 angelos Exp $	*/
 /*	$NetBSD: route.c,v 1.16 1996/04/15 18:27:05 cgd Exp $	*/
 
 /*
@@ -44,7 +44,7 @@ static char copyright[] =
 #if 0
 static char sccsid[] = "@(#)route.c	8.3 (Berkeley) 3/19/94";
 #else
-static char rcsid[] = "$OpenBSD: route.c,v 1.18 1997/04/10 10:09:02 deraadt Exp $";
+static char rcsid[] = "$OpenBSD: route.c,v 1.23 1997/07/13 23:12:09 angelos Exp $";
 #endif
 #endif /* not lint */
 
@@ -95,14 +95,25 @@ int	iflag, verbose, aflen = sizeof (struct sockaddr_in);
 int	locking, lockrest, debugonly;
 struct	rt_metrics rt_metrics;
 u_long  rtm_inits;
-struct	in_addr inet_makeaddr();
-char	*routename(), *netname();
-void   flushroutes(), newroute(), monitor(), sockaddr(), sodump();
-void   print_getmsg(), print_rtmsg(), pmsg_common(), pmsg_addrs();
-void   bprintf(), mask_addr();
-int	getaddr(), rtmsg(), x25_makemask();
-extern	char *inet_ntoa(), *iso_ntoa(), *link_ntoa();
-extern void show();
+
+char	*routename __P((struct sockaddr *));
+char	*netname __P((struct sockaddr *));
+void	 flushroutes __P((int, char **));
+void	 newroute __P((int, char **));
+void	 monitor __P((void));
+void	 sockaddr __P((char *, struct sockaddr *));
+void	 sodump __P((sup, char *));
+void	 print_getmsg __P((struct rt_msghdr *, int));
+void	 print_rtmsg __P((struct rt_msghdr *, int));
+void	 pmsg_common __P((struct rt_msghdr *));
+void	 pmsg_addrs __P((char *, int));
+void	 bprintf __P((FILE *, int, u_char *));
+void	 mask_addr __P((void));
+int	 getaddr __P((int, char *, struct hostent **));
+int	 rtmsg __P((int, int));
+int	 x25_makemask __P((void));
+
+extern void show __P((int, char **));	/* XXX - from show.c */
 
 __dead void
 usage(cp)
@@ -112,6 +123,8 @@ usage(cp)
 		(void) fprintf(stderr, "route: botched keyword: %s\n", cp);
 	(void) fprintf(stderr,
 	    "usage: route [ -nqv ] cmd [[ -<qualifers> ] args ]\n");
+	(void) fprintf(stderr,
+	    "keywords: get, add, change, delete, show, flush, monitor.\n");
 	exit(1);
 	/* NOTREACHED */
 }
@@ -131,7 +144,7 @@ quit(s)
 }
 
 #define ROUNDUP(a) \
-	((a) > 0 ? (1 + (((a) - 1) | (sizeof(long) - 1))) : sizeof(long))
+	((a) > 0 ? (1 + (((a) - 1) | (sizeof(in_addr_t) - 1))) : sizeof(in_addr_t))
 #define ADVANCE(x, n) (x += ROUNDUP((n)->sa_len))
 
 int
@@ -246,8 +259,12 @@ flushroutes(argc, argv)
 			case K_OSI:
 				af = AF_ISO;
 				break;
+			case K_ENCAP:
+				af = AF_ENCAP;
+				break;
 			case K_X25:
 				af = AF_CCITT;
+				break;
 			default:
 				goto bad;
 		} else
@@ -366,8 +383,8 @@ routename(sa)
 		if (in.s_addr == INADDR_ANY || sa->sa_len < 4)
 			cp = "default";
 		if (!cp && !nflag) {
-			if ((hp = gethostbyaddr((char *)&in,
-			    sizeof (struct in_addr), AF_INET))) {
+			if ((hp = gethostbyaddr((char *)&in.s_addr,
+			    sizeof (in.s_addr), AF_INET)) != NULL) {
 				if ((cp = strchr(hp->h_name, '.')) &&
 				    !strcmp(cp + 1, domain))
 					*cp = 0;
@@ -412,16 +429,15 @@ netname(sa)
 	char *cp = NULL;
 	static char line[MAXHOSTNAMELEN];
 	struct netent *np = 0;
-	long net, mask;
-	int subnetshift;
+	in_addr_t net, mask, subnetshift;
 	char *ns_print();
 	char *ipx_print();
 
 	switch (sa->sa_family) {
 
 	case AF_INET:
-	    {	struct in_addr in;
-		in = ((struct sockaddr_in *)sa)->sin_addr;
+	    {
+		struct in_addr in = ((struct sockaddr_in *)sa)->sin_addr;
 
 		in.s_addr = ntohl(in.s_addr);
 		if (in.s_addr == 0)
@@ -444,7 +460,7 @@ netname(sa)
 			 * width subnet fields.
 			 */
 			while (in.s_addr &~ mask)
-				mask = mask >> subnetshift;
+				mask = (int)mask >> subnetshift;
 			net = in.s_addr & mask;
 			while ((mask & 1) == 0)
 				mask >>= 1, net >>= 1;
@@ -1002,7 +1018,7 @@ ns_print(sns)
 		*cport = '\0';
 
 	(void) snprintf(mybuf, sizeof mybuf, "0x%x.%s%s",
-	    (u_int32_t)ntohl(net.long_e), host, cport);
+	    ntohl(net.long_e), host, cport);
 	return (mybuf);
 }
 
@@ -1050,7 +1066,7 @@ ipx_print(sipx)
 		*cport = 0;
 
 	(void) snprintf(mybuf, sizeof mybuf, "%XH.%s%s",
-	    (u_int32_t)ntohl(net.long_e), host, cport);
+	    ntohl(net.long_e), host, cport);
 	return (mybuf);
 }
 
@@ -1291,7 +1307,7 @@ print_getmsg(rtm, msglen)
 	register char *cp;
 	register int i;
 
-	(void) printf("   route to: %s\n", routename(&so_dst));
+	(void) printf("   route to: %s\n", routename(&so_dst.sa));
 	if (rtm->rtm_version != RTM_VERSION) {
 		(void)fprintf(stderr,
 		    "routing message version %d not understood\n",

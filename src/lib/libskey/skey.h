@@ -8,15 +8,15 @@
  *
  * Modifications:
  *          Scott Chasin <chasin@crimelab.com>
+ *          Todd C. Miller <Todd.Miller@courtesan.com>
  *
  * Main client header
  *
- * $Id: skey.h,v 1.7 1996/11/03 18:57:29 millert Exp $
+ * $OpenBSD: skey.h,v 1.10 1997/07/27 21:36:05 millert Exp $
  */
 
 /* Server-side data structure for reading keys file during login */
-struct skey
-{
+struct skey {
 	FILE *keyfile;
 	char buf[256];
 	char *logname;
@@ -27,8 +27,7 @@ struct skey
 };
 
 /* Client-side structure for scanning data stream for challenge */
-struct mc
-{
+struct mc {
 	char buf[256];
 	int skip;
 	int cnt;
@@ -59,8 +58,8 @@ struct mc
 #define SKEY_MAX_CHALLENGE	(11 + SKEY_MAX_HASHNAME_LEN + SKEY_MAX_SEED_LEN)
 #endif
 
-/* Max length of hash algorithm name (md4/md5/sha1) */
-#define SKEY_MAX_HASHNAME_LEN	4
+/* Max length of hash algorithm name (md4/md5/sha1/rmd160) */
+#define SKEY_MAX_HASHNAME_LEN	6
 
 /* Size of a binary key (not NULL-terminated) */
 #define SKEY_BINKEY_SIZE	8
@@ -89,5 +88,6 @@ int getskeyprompt __P((struct skey *mp, char *name, char *prompt));
 int atob8 __P((char *out, char *in));
 int btoa8 __P((char *out, char *in));
 int htoi __P((int c));
-const char * skey_get_algorithm __P((void));
-char * skey_set_algorithm __P((char *new));
+const char *skey_get_algorithm __P((void));
+char *skey_set_algorithm __P((char *new));
+int skeygetnext __P((struct skey *mp));

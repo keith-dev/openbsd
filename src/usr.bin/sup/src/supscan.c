@@ -1,4 +1,4 @@
-/*	$OpenBSD: supscan.c,v 1.5 1997/04/01 07:35:49 todd Exp $	*/
+/*	$OpenBSD: supscan.c,v 1.8 1997/09/16 11:01:24 deraadt Exp $	*/
 
 /*
  * Copyright (c) 1992 Carnegie Mellon University
@@ -82,7 +82,7 @@
 #include <c.h>
 #include <netdb.h>
 #include <setjmp.h>
-#if __STDC__
+#ifdef __STDC__
 #include <stdarg.h>
 #else
 #include <varargs.h>
@@ -228,7 +228,7 @@ char **argv;
 		argv++;
 	}
 	if (!fflag) {
-		(void) sprintf (fbuf,FILEDIRS,DEFDIR);
+		(void) snprintf (fbuf,sizeof fbuf,FILEDIRS,DEFDIR);
 		filename = fbuf;
 	}
 	if (sflag) {
@@ -236,7 +236,7 @@ char **argv;
 			usage ();
 		firstC = NULL;
 		c = &firstC;
-		(void) sprintf (buf,FILEHOSTS,DEFDIR);
+		(void) snprintf (buf,sizeof buf,FILEHOSTS,DEFDIR);
 		if ((f = fopen (buf,"r")) == NULL)
 			quit (1,"supscan: Unable to open %s\n",buf);
 		while ((p = fgets (buf,STRINGLENGTH,f)) != NULL) {
@@ -300,7 +300,8 @@ register char *filename,*collname,*basedir;
 			(void) fclose (f);
 		}
 		if (basedir == NULL) {
-			(void) sprintf (buf,FILEBASEDEFAULT,collname);
+			(void) snprintf (buf,sizeof buf,
+				FILEBASEDEFAULT,collname);
 			basedir = salloc (buf);
 		}
 	}
@@ -310,7 +311,7 @@ register char *filename,*collname,*basedir;
 		return (NULL);
 	}
 	prefix = NULL;
-	(void) sprintf (buf,FILEPREFIX,collname);
+	(void) snprintf (buf,sizeof buf,FILEPREFIX,collname);
 	if ((f = fopen (buf,"r")) != NULL) {
 		while ((p = fgets (buf,STRINGLENGTH,f)) != NULL) {
 			q = strchr (p,'\n');

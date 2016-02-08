@@ -1,4 +1,4 @@
-/*	$OpenBSD: nfsd.c,v 1.4 1997/01/15 23:41:34 millert Exp $	*/
+/*	$OpenBSD: nfsd.c,v 1.9 1997/09/05 18:29:34 deraadt Exp $	*/
 /*	$NetBSD: nfsd.c,v 1.19 1996/02/18 23:18:56 mycroft Exp $	*/
 
 /*
@@ -73,7 +73,7 @@ static char rcsid[] = "$NetBSD: nfsd.c,v 1.19 1996/02/18 23:18:56 mycroft Exp $"
 #include <nfs/nfs.h>
 
 #ifdef NFSKERB
-#include <kerberosIV/des.h>
+#include <des.h>
 #include <kerberosIV/krb.h>
 #endif
 
@@ -85,7 +85,7 @@ static char rcsid[] = "$NetBSD: nfsd.c,v 1.19 1996/02/18 23:18:56 mycroft Exp $"
 #include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <strings.h>
+#include <string.h>
 #include <syslog.h>
 #include <unistd.h>
 
@@ -172,7 +172,8 @@ main(argc, argv, envp)
 		case 'n':
 			nfsdcnt = atoi(optarg);
 			if (nfsdcnt < 1 || nfsdcnt > MAXNFSDCNT) {
-				warnx("nfsd count %d; reset to %d", DEFNFSDCNT);
+				warnx("nfsd count %d; reset to %d",
+				    nfsdcnt, DEFNFSDCNT);
 				nfsdcnt = DEFNFSDCNT;
 			}
 			break;
@@ -214,7 +215,8 @@ main(argc, argv, envp)
 	if (argc == 1) {
 		nfsdcnt = atoi(argv[0]);
 		if (nfsdcnt < 1 || nfsdcnt > MAXNFSDCNT) {
-			warnx("nfsd count %d; reset to %d", DEFNFSDCNT);
+			warnx("nfsd count %d; reset to %d",
+			    nfsdcnt, DEFNFSDCNT);
 			nfsdcnt = DEFNFSDCNT;
 		}
 	}
@@ -282,7 +284,7 @@ main(argc, argv, envp)
 			 * in ONC RPC".
 			 */
 			kt.length = ntohl(kt.length);
-			if (gettimeofday(&ktv, (struct timezone *)0) == 0 &&
+			if (gettimeofday(&ktv, NULL) == 0 &&
 			    kt.length > 0 && kt.length <=
 			    (RPCAUTH_MAXSIZ - 3 * NFSX_UNSIGNED)) {
 			    kin.w1 = NFS_KERBW1(kt);
@@ -624,6 +626,9 @@ void
 reapchild(signo)
 	int signo;
 {
+	int save_errno = errno;
 
-	while (wait3(NULL, WNOHANG, NULL) > 0);
+	while (wait3(NULL, WNOHANG, NULL) > 0)
+		;
+	errno = save_errno;
 }

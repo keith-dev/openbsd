@@ -1,5 +1,5 @@
-/*	$OpenBSD: read.c,v 1.3 1997/03/14 05:12:58 millert Exp $	*/
-/*	$NetBSD: read.c,v 1.3 1997/01/14 04:17:25 lukem Exp $	*/
+/*	$OpenBSD: read.c,v 1.6 1997/08/20 03:30:13 millert Exp $	*/
+/*	$NetBSD: read.c,v 1.4 1997/04/11 17:52:47 christos Exp $	*/
 
 /*-
  * Copyright (c) 1992, 1993
@@ -41,7 +41,7 @@
 #if 0
 static char sccsid[] = "@(#)read.c	8.1 (Berkeley) 6/4/93";
 #else
-static char rcsid[] = "$OpenBSD: read.c,v 1.3 1997/03/14 05:12:58 millert Exp $";
+static char rcsid[] = "$OpenBSD: read.c,v 1.6 1997/08/20 03:30:13 millert Exp $";
 #endif
 #endif /* not lint && not SCCSID */
 
@@ -93,13 +93,17 @@ read__fixio(fd, e)
 
 #ifdef EWOULDBLOCK
     case EWOULDBLOCK:
-# define TRY_AGAIN
+# ifndef TRY_AGAIN
+#  define TRY_AGAIN
+# endif
 #endif /* EWOULDBLOCK */
 
 #if defined(POSIX) && defined(EAGAIN)
 # if defined(EWOULDBLOCK) && EWOULDBLOCK != EAGAIN
     case EAGAIN:
-#  define TRY_AGAIN
+#  ifndef TRY_AGAIN
+#   define TRY_AGAIN
+#  endif
 # endif /* EWOULDBLOCK && EWOULDBLOCK != EAGAIN */
 #endif /* POSIX && EAGAIN */
 
@@ -160,7 +164,7 @@ read_preread(el)
 	if (chrs > 0) {
 	    buf[chrs] = '\0';
 	    el->el_chared.c_macro.nline = strdup(buf);
-	    el_push(el->el_chared.c_macro.nline);
+	    el_push(el, el->el_chared.c_macro.nline);
 	}
     }
 #endif  /* FIONREAD */
@@ -316,6 +320,9 @@ el_gets(el, nread)
     el_action_t  cmdnum = 0;
     int     num;		/* how many chars we have read at NL */
     char    ch;
+#ifdef FIONREAD
+    c_macro_t *ma = &el->el_chared.c_macro;
+#endif /* FIONREAD */
 
     if (el->el_flags & HANDLE_SIGNALS)
 	sig_set(el);
@@ -325,7 +332,7 @@ el_gets(el, nread)
 
 #ifdef FIONREAD
     if (el->el_tty.t_mode == EX_IO && ma->level < 0) {
-	long    chrs = 0;
+	int    chrs = 0;
 
 	(void)ioctl(el->el_infd, FIONREAD, (ioctl_t) &chrs);
 	if (chrs == 0) {

@@ -1,3 +1,4 @@
+/*	$OpenBSD: arp.c,v 1.8 1997/09/12 04:07:16 millert Exp $ */
 /*	$NetBSD: arp.c,v 1.12 1995/04/24 13:25:18 cgd Exp $ */
 
 /*
@@ -75,7 +76,7 @@ static char *rcsid = "$NetBSD: arp.c,v 1.12 1995/04/24 13:25:18 cgd Exp $";
 #include <unistd.h>
 
 int delete __P((const char *, const char *));
-void dump __P((u_long));
+void dump __P((in_addr_t));
 void ether_print __P((const u_char *));
 int file __P((char *));
 void get __P((const char *));
@@ -353,7 +354,7 @@ delete:
  */
 void
 dump(addr)
-	u_long addr;
+	in_addr_t addr;
 {
 	int mib[6];
 	size_t needed;
@@ -518,7 +519,7 @@ getinetaddr(host, inap)
 	if (inet_aton(host, inap) == 1)
 		return (0);
 	if ((hp = gethostbyname(host)) == NULL) {
-		warnx("%s: %s\n", host, hstrerror(h_errno));
+		warnx("%s: %s", host, hstrerror(h_errno));
 		return (-1);
 	}
 	(void)memcpy(inap, hp->h_addr, sizeof(*inap));

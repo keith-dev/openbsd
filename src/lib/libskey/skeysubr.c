@@ -7,10 +7,11 @@
  *
  * Modifications: 
  *          Scott Chasin <chasin@crimelab.com>
+ *          Todd C. Miller <Todd.Miller@courtesan.com>
  *
  * S/KEY misc routines.
  *
- * $Id: skeysubr.c,v 1.12 1996/11/03 18:57:30 millert Exp $
+ * $OpenBSD: skeysubr.c,v 1.17 1997/07/27 21:36:06 millert Exp $
  */
 
 #include <stdio.h>
@@ -22,6 +23,7 @@
 #include <md4.h>
 #include <md5.h>
 #include <sha1.h>
+#include <rmd160.h>
 
 #include "skey.h"
 
@@ -33,9 +35,11 @@
 static void f_md4 __P((char *x));
 static void f_md5 __P((char *x));
 static void f_sha1 __P((char *x));
+static void f_rmd160 __P((char *x));
 static int keycrunch_md4 __P((char *result, char *seed, char *passwd));
 static int keycrunch_md5 __P((char *result, char *seed, char *passwd));
 static int keycrunch_sha1 __P((char *result, char *seed, char *passwd));
+static int keycrunch_rmd160 __P((char *result, char *seed, char *passwd));
 static void lowcase __P((char *s));
 static void skey_echo __P((int action));
 static void trapped __P((int sig));
@@ -47,7 +51,7 @@ static int skey_hash_type = SKEY_HASH_DEFAULT;
  * Hash types we support.
  * Each has an associated keycrunch() and f() function.
  */
-#define SKEY_ALGORITH_LAST	3
+#define SKEY_ALGORITH_LAST	4
 struct skey_algorithm_table {
 	const char *name;
 	int (*keycrunch) __P((char *, char *, char *));
@@ -56,7 +60,8 @@ struct skey_algorithm_table {
 static struct skey_algorithm_table skey_algorithm_table[] = {
 	{ "md4", keycrunch_md4, f_md4 },
 	{ "md5", keycrunch_md5, f_md5 },
-	{ "sha1", keycrunch_sha1, f_sha1 }
+	{ "sha1", keycrunch_sha1, f_sha1 },
+	{ "rmd160", keycrunch_rmd160, f_rmd160 }
 };
 
 
@@ -87,7 +92,7 @@ keycrunch_md4(result, seed, passwd)
 
 	buflen = strlen(seed) + strlen(passwd);
 	if ((buf = (char *)malloc(buflen+1)) == NULL)
-		return -1;
+		return(-1);
 	(void)strcpy(buf, seed);
 	lowcase(buf);
 	(void)strcat(buf, passwd);
@@ -105,7 +110,7 @@ keycrunch_md4(result, seed, passwd)
 
 	(void)memcpy((void *)result, (void *)results, SKEY_BINKEY_SIZE);
 
-	return 0;
+	return(0);
 }
 
 static int
@@ -121,7 +126,7 @@ keycrunch_md5(result, seed, passwd)
 
 	buflen = strlen(seed) + strlen(passwd);
 	if ((buf = (char *)malloc(buflen+1)) == NULL)
-		return -1;
+		return(-1);
 	(void)strcpy(buf, seed);
 	lowcase(buf);
 	(void)strcat(buf, passwd);
@@ -139,7 +144,7 @@ keycrunch_md5(result, seed, passwd)
 
 	(void)memcpy((void *)result, (void *)results, SKEY_BINKEY_SIZE);
 
-	return 0;
+	return(0);
 }
 
 static int
@@ -149,34 +154,67 @@ keycrunch_sha1(result, seed, passwd)
 	char *passwd;	/* Password, any length */
 {
 	char *buf;
-	SHA1_INFO sha;
+	SHA1_CTX sha;
+	u_int32_t results[5];
 	unsigned int buflen;
 
 	buflen = strlen(seed) + strlen(passwd);
 	if ((buf = (char *)malloc(buflen+1)) == NULL)
-		return -1;
+		return(-1);
 	(void)strcpy(buf, seed);
 	lowcase(buf);
 	(void)strcat(buf, passwd);
 
 	/* Crunch the key through SHA1 */
 	sevenbit(buf);
-	sha1Init(&sha);
-	sha1Update(&sha, (unsigned char *)buf, buflen);
-	sha1Final(&sha);
+	SHA1Init(&sha);
+	SHA1Update(&sha, (unsigned char *)buf, buflen);
+	SHA1Final((unsigned char *)results, &sha);
 	(void)free(buf);
 
 	/* Fold 160 to 64 bits */
-	sha.digest[0] ^= sha.digest[2];
-	sha.digest[1] ^= sha.digest[3];
-	sha.digest[0] ^= sha.digest[4];
+	results[0] ^= results[2];
+	results[1] ^= results[3];
+	results[0] ^= results[4];
 
-	(void)memcpy((void *)result, (void *)sha.digest, SKEY_BINKEY_SIZE);
-#if BYTE_ORDER == LITTLE_ENDIAN
-	sha1ByteReverse((u_int32_t *)result, SKEY_BINKEY_SIZE);
-#endif /* LITTLE_ENDIAN */
+	(void)memcpy((void *)result, (void *)results, SKEY_BINKEY_SIZE);
 
-	return 0;
+	return(0);
+}
+
+static int
+keycrunch_rmd160(result, seed, passwd)
+	char *result;	/* SKEY_BINKEY_SIZE result */
+	char *seed;	/* Seed, any length */
+	char *passwd;	/* Password, any length */
+{
+	char *buf;
+	RMD160_CTX rmd;
+	u_int32_t results[5];
+	unsigned int buflen;
+
+	buflen = strlen(seed) + strlen(passwd);
+	if ((buf = (char *)malloc(buflen+1)) == NULL)
+		return(-1);
+	(void)strcpy(buf, seed);
+	lowcase(buf);
+	(void)strcat(buf, passwd);
+
+	/* Crunch the key through RMD-160 */
+	sevenbit(buf);
+	RMD160Init(&rmd);
+	RMD160Update(&rmd, (unsigned char *)buf, buflen);
+	RMD160Final((unsigned char *)results, &rmd);
+	(void)free(buf);
+
+	/* Fold 160 to 64 bits */
+	results[0] ^= results[2];
+	results[1] ^= results[3];
+	results[0] ^= results[4];
+
+	(void)memcpy((void *)result, (void *)results, SKEY_BINKEY_SIZE);
+
+	return(0);
 }
 
 /*
@@ -230,21 +268,38 @@ static void
 f_sha1(x)
 	char *x;
 {
-	SHA1_INFO sha;
+	SHA1_CTX sha;
+	u_int32_t results[5];
 
-	sha1Init(&sha);
-	sha1Update(&sha, (unsigned char *)x, SKEY_BINKEY_SIZE);
-	sha1Final(&sha);
+	SHA1Init(&sha);
+	SHA1Update(&sha, (unsigned char *)x, SKEY_BINKEY_SIZE);
+	SHA1Final((unsigned char *)results, &sha);
 
 	/* Fold 160 to 64 bits */
-	sha.digest[0] ^= sha.digest[2];
-	sha.digest[1] ^= sha.digest[3];
-	sha.digest[0] ^= sha.digest[4];
+	results[0] ^= results[2];
+	results[1] ^= results[3];
+	results[0] ^= results[4];
 
-	(void)memcpy((void *)x, (void *)sha.digest, SKEY_BINKEY_SIZE);
-#if BYTE_ORDER == LITTLE_ENDIAN
-	sha1ByteReverse((u_int32_t *)x, SKEY_BINKEY_SIZE);
-#endif /* LITTLE_ENDIAN */
+	(void)memcpy((void *)x, (void *)results, SKEY_BINKEY_SIZE);
+}
+
+static void
+f_rmd160(x)
+	char *x;
+{
+	RMD160_CTX rmd;
+	u_int32_t results[5];
+
+	RMD160Init(&rmd);
+	RMD160Update(&rmd, (unsigned char *)x, SKEY_BINKEY_SIZE);
+	RMD160Final((unsigned char *)results, &rmd);
+
+	/* Fold 160 to 64 bits */
+	results[0] ^= results[2];
+	results[1] ^= results[3];
+	results[0] ^= results[4];
+
+	(void)memcpy((void *)x, (void *)results, SKEY_BINKEY_SIZE);
 }
 
 /* Strip trailing cr/lf from a line of text */
@@ -285,7 +340,7 @@ readpass(buf, n)
 
 	sevenbit(buf);
 
-	return buf;
+	return(buf);
 }
 
 /* Read in an s/key OTP (does not turn off echo) */
@@ -297,9 +352,9 @@ readskey(buf, n)
 	(void)fgets(buf, n, stdin);
 	rip(buf);
 
-	sevenbit (buf);
+	sevenbit(buf);
 
-	return buf;
+	return(buf);
 }
 
 /* Signal handler for trapping ^C */
@@ -322,45 +377,47 @@ trapped(sig)
  */
 int
 atob8(out, in)
-	register char *out, *in;
+	register char *out;
+	register char *in;
 {
 	register int i;
 	register int val;
 
 	if (in == NULL || out == NULL)
-		return -1;
+		return(-1);
 
 	for (i=0; i < 8; i++) {
 		if ((in = skipspace(in)) == NULL)
-			return -1;
+			return(-1);
 		if ((val = htoi(*in++)) == -1)
-			return -1;
+			return(-1);
 		*out = val << 4;
 
 		if ((in = skipspace(in)) == NULL)
-			return -1;
+			return(-1);
 		if ((val = htoi(*in++)) == -1)
-			return -1;
+			return(-1);
 		*out++ |= val;
 	}
-	return 0;
+	return(0);
 }
 
 /* Convert 8-byte binary array to hex-ascii string */
 int
 btoa8(out, in)
-	register char *out, *in;
+	register char *out;
+	register char *in;
 {
 	register int i;
 
 	if (in == NULL || out == NULL)
-		return -1;
+		return(-1);
 
 	for (i=0; i < 8; i++) {
 		(void)sprintf(out, "%02x", *in++ & 0xff);
 		out += 2;
 	}
-	return 0;
+	return(0);
 }
 
 /* Convert hex digit to binary integer */
@@ -369,12 +426,12 @@ htoi(c)
 	register int c;
 {
 	if ('0' <= c && c <= '9')
-		return c - '0';
+		return(c - '0');
 	if ('a' <= c && c <= 'f')
-		return 10 + c - 'a';
+		return(10 + c - 'a');
 	if ('A' <= c && c <= 'F')
-		return 10 + c - 'A';
-	return -1;
+		return(10 + c - 'A');
+	return(-1);
 }
 
 /* Skip leading spaces from the string */
@@ -386,9 +443,9 @@ skipspace(cp)
 		cp++;
 
 	if (*cp == '\0')
-		return NULL;
+		return(NULL);
 	else
-		return cp;
+		return(cp);
 }
 
 /* Remove backspaced over charaters from the string */
@@ -436,11 +493,11 @@ skey_set_algorithm(new)
 	for (i = 0; i < SKEY_ALGORITH_LAST; i++) {
 		if (strcmp(new, skey_algorithm_table[i].name) == 0) {
 			skey_hash_type = i;
-			return new;
+			return(new);
 		}
 	}
 
-	return NULL;
+	return(NULL);
 }
 
 /* Get current hash type */

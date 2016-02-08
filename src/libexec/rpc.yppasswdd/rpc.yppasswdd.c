@@ -1,3 +1,5 @@
+/*	$OpenBSD: rpc.yppasswdd.c,v 1.9 1997/08/19 07:00:51 niklas Exp $	*/
+
 /*
  * Copyright (c) 1994 Mats O Jansson <moj@stacken.kth.se>
  * All rights reserved.
@@ -30,17 +32,23 @@
  */
 
 #ifndef LINT
-static char rcsid[] = "$Id: rpc.yppasswdd.c,v 1.4 1997/04/23 09:33:43 deraadt Exp $";
+static char rcsid[] = "$OpenBSD: rpc.yppasswdd.c,v 1.9 1997/08/19 07:00:51 niklas Exp $";
 #endif
 
+#include <sys/types.h>
+#include <sys/wait.h>
+
+#include <signal.h>
 #include <stdio.h>
+#include <unistd.h>
+#include <stdlib.h>
+#include <errno.h>
+#include <string.h>
+#include <pwd.h>
+#include <util.h>
+
 #include <rpc/rpc.h>
 #include <rpc/pmap_clnt.h>
-#include <signal.h>
-#include <sys/wait.h>
-#include <sys/types.h>
-#include <unistd.h>
-#include <string.h>
 
 #include "yppasswd.h"
 
@@ -51,13 +59,15 @@ int     noshell, nogecos, nopw, domake;
 char    make_arg[1024] = "make";
 char   *progname = "yppasswdd";
 char   *tempname;
+char   *dir;
 
 void
 usage()
 {
-	fprintf(stderr, "%s%s",
+	fprintf(stderr, "%s%s%s",
 	    "usage: rpc.yppasswdd ",
-	    "[-noshell] [-nogecos] [-nopw] [-m arg1 arg2 ... ]\n");
+	    "[-d dir] [-noshell] [-nogecos] [-nopw]\n",
+	    "                     [-m arg1 arg2 ... ]\n");
 	exit(1);
 }
 
@@ -84,6 +94,10 @@ main(argc, argv)
 					strcat(make_arg, argv[i]);
 					i++;
 				}
+			} else if (strcmp("-d", argv[i]) == 0
+			    && i < argc + 1) {
+				i++;
+				dir = argv[i];
 			} else
 				usage();
 			i++;
@@ -164,6 +178,9 @@ yppasswddprog_1(rqstp, transp)
 void
 sig_child()
 {
+	int save_errno = errno;
+
 	while (wait3((int *) NULL, WNOHANG, (struct rusage *) NULL) > 0)
 		;
+	errno = save_errno;
 }

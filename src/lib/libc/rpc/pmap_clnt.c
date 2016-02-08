@@ -28,7 +28,7 @@
  */
 
 #if defined(LIBC_SCCS) && !defined(lint)
-static char *rcsid = "$OpenBSD: pmap_clnt.c,v 1.6 1996/08/20 21:15:40 deraadt Exp $";
+static char *rcsid = "$OpenBSD: pmap_clnt.c,v 1.8 1997/09/22 05:11:08 millert Exp $";
 #endif /* LIBC_SCCS and not lint */
 
 /*
@@ -38,6 +38,7 @@ static char *rcsid = "$OpenBSD: pmap_clnt.c,v 1.6 1996/08/20 21:15:40 deraadt Ex
  * Copyright (C) 1984, Sun Microsystems, Inc.
  */
 
+#include <unistd.h>
 #include <rpc/rpc.h>
 #include <rpc/pmap_prot.h>
 #include <rpc/pmap_clnt.h>
@@ -60,7 +61,7 @@ pmap_set(program, version, protocol, port)
 	u_short port;
 {
 	struct sockaddr_in myaddress;
-	int socket = -1;
+	int sock = -1;
 	register CLIENT *client;
 	struct pmap parms;
 	bool_t rslt;
@@ -69,7 +70,7 @@ pmap_set(program, version, protocol, port)
 		return (FALSE);
 	myaddress.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
 	client = clntudp_bufcreate(&myaddress, PMAPPROG, PMAPVERS,
-	    timeout, &socket, RPCSMALLMSGSIZE, RPCSMALLMSGSIZE);
+	    timeout, &sock, RPCSMALLMSGSIZE, RPCSMALLMSGSIZE);
 	if (client == (CLIENT *)NULL)
 		return (FALSE);
 	parms.pm_prog = program;
@@ -82,8 +83,8 @@ pmap_set(program, version, protocol, port)
 		return (FALSE);
 	}
 	CLNT_DESTROY(client);
-	if (socket != -1)
-		(void)close(socket);
+	if (sock != -1)
+		(void)close(sock);
 	return (rslt);
 }
 
@@ -97,7 +98,7 @@ pmap_unset(program, version)
 	u_long version;
 {
 	struct sockaddr_in myaddress;
-	int socket = -1;
+	int sock = -1;
 	register CLIENT *client;
 	struct pmap parms;
 	bool_t rslt;
@@ -106,7 +107,7 @@ pmap_unset(program, version)
 		return (FALSE);
 	myaddress.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
 	client = clntudp_bufcreate(&myaddress, PMAPPROG, PMAPVERS,
-	    timeout, &socket, RPCSMALLMSGSIZE, RPCSMALLMSGSIZE);
+	    timeout, &sock, RPCSMALLMSGSIZE, RPCSMALLMSGSIZE);
 	if (client == (CLIENT *)NULL)
 		return (FALSE);
 	parms.pm_prog = program;
@@ -115,7 +116,7 @@ pmap_unset(program, version)
 	CLNT_CALL(client, PMAPPROC_UNSET, xdr_pmap, &parms, xdr_bool, &rslt,
 	    tottimeout);
 	CLNT_DESTROY(client);
-	if (socket != -1)
-		(void)close(socket);
+	if (sock != -1)
+		(void)close(sock);
 	return (rslt);
 }

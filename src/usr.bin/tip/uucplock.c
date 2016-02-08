@@ -1,4 +1,4 @@
-/*	$OpenBSD: uucplock.c,v 1.3 1997/04/02 01:47:04 millert Exp $	*/
+/*	$OpenBSD: uucplock.c,v 1.5 1997/09/01 23:24:27 deraadt Exp $	*/
 /*	$NetBSD: uucplock.c,v 1.7 1997/02/11 09:24:08 mrg Exp $	*/
 
 /*
@@ -38,15 +38,17 @@
 #if 0
 static char sccsid[] = "@(#)uucplock.c	8.1 (Berkeley) 6/6/93";
 #endif
-static char rcsid[] = "$OpenBSD: uucplock.c,v 1.3 1997/04/02 01:47:04 millert Exp $";
+static char rcsid[] = "$OpenBSD: uucplock.c,v 1.5 1997/09/01 23:24:27 deraadt Exp $";
 #endif /* not lint */
 
-#include <stdio.h>
-#include <string.h>
-#include <unistd.h>
 #include <sys/types.h>
 #include <sys/file.h>
 #include <sys/dir.h>
+#include <stdio.h>
+#include <string.h>
+#include <signal.h>
+#include <unistd.h>
+#include <stdlib.h>
 #include <errno.h>
 #include "pathnames.h"
 
@@ -56,6 +58,7 @@ static char rcsid[] = "$OpenBSD: uucplock.c,v 1.3 1997/04/02 01:47:04 millert Ex
  * 	  -1 - failure
  */
 
+int
 uu_lock(ttyname)
 	char *ttyname;
 {
@@ -64,7 +67,7 @@ uu_lock(ttyname)
 	char text_pid[81];
 	int len;
 
-	(void)sprintf(tbuf, _PATH_LOCKDIRNAME, ttyname);
+	(void)snprintf(tbuf, sizeof tbuf, _PATH_LOCKDIRNAME, ttyname);
 	fd = open(tbuf, O_RDWR|O_CREAT|O_EXCL, 0660);
 	if (fd < 0) {
 		/*
@@ -118,11 +121,12 @@ uu_lock(ttyname)
 	return(0);
 }
 
+int
 uu_unlock(ttyname)
 	char *ttyname;
 {
 	char tbuf[sizeof(_PATH_LOCKDIRNAME) + MAXNAMLEN];
 
-	(void)sprintf(tbuf, _PATH_LOCKDIRNAME, ttyname);
+	(void)snprintf(tbuf, sizeof tbuf, _PATH_LOCKDIRNAME, ttyname);
 	return(unlink(tbuf));
 }

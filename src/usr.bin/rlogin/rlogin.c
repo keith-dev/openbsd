@@ -1,4 +1,4 @@
-/*	$OpenBSD: rlogin.c,v 1.12 1997/01/17 07:13:13 millert Exp $	*/
+/*	$OpenBSD: rlogin.c,v 1.18 1997/09/03 18:01:01 kstailey Exp $	*/
 /*	$NetBSD: rlogin.c,v 1.8 1995/10/05 09:07:22 mycroft Exp $	*/
 
 /*
@@ -44,7 +44,7 @@ static char copyright[] =
 #if 0
 static char sccsid[] = "@(#)rlogin.c	8.1 (Berkeley) 6/6/93";
 #else
-static char rcsid[] = "$OpenBSD: rlogin.c,v 1.12 1997/01/17 07:13:13 millert Exp $";
+static char rcsid[] = "$OpenBSD: rlogin.c,v 1.18 1997/09/03 18:01:01 kstailey Exp $";
 #endif
 #endif /* not lint */
 
@@ -81,7 +81,7 @@ static char rcsid[] = "$OpenBSD: rlogin.c,v 1.12 1997/01/17 07:13:13 millert Exp
 #endif
 
 #ifdef KERBEROS
-#include <kerberosIV/des.h>
+#include <des.h>
 #include <kerberosIV/krb.h>
 
 CREDENTIALS cred;
@@ -121,7 +121,7 @@ struct	winsize winsize;
 
 void		catch_child __P((int));
 void		copytochild __P((int));
-__dead void	doit __P((long));
+__dead void	doit __P((int));
 __dead void	done __P((int));
 void		echo __P((char));
 u_int		getescape __P((char *));
@@ -156,7 +156,7 @@ main(argc, argv)
 	struct passwd *pw;
 	struct servent *sp;
 	struct termios tty;
-	long omask;
+	int omask;
 	int argoff, ch, dflag, one, uid;
 	char *host, *p, *user, term[64];
 
@@ -164,7 +164,7 @@ main(argc, argv)
 	one = 1;
 	host = user = NULL;
 
-	if (p = strrchr(argv[0], '/'))
+	if ((p = strrchr(argv[0], '/')))
 		++p;
 	else
 		p = argv[0];
@@ -355,12 +355,13 @@ try_connect:
 	/*NOTREACHED*/
 }
 
-int child;
+pid_t child;
 
 void
 doit(omask)
-	long omask;
+	int omask;
 {
+	struct sigaction sa;
 
 	(void)signal(SIGINT, SIG_IGN);
 	setsignal(SIGHUP);
@@ -372,14 +373,25 @@ doit(omask)
 		done(1);
 	}
 	if (child == 0) {
+		(void)signal(SIGCHLD, SIG_DFL);
 		if (reader(omask) == 0) {
 			msg("connection closed.");
 			exit(0);
 		}
 		sleep(1);
+
 		msg("\aconnection closed.");
 		exit(1);
 	}
+
+	/*
+	 * Use sigaction() instead of signal() to avoid getting SIGCHLDs
+	 * for stopped children.
+	 */
+	sigemptyset(&sa.sa_mask);
+	sa.sa_flags = SA_RESTART | SA_NOCLDSTOP;
+	sa.sa_handler = catch_child;
+	(void)sigaction(SIGCHLD, &sa, NULL);
 
 	/*
 	 * We may still own the socket, and may have a pending SIGURG (or might
@@ -389,7 +401,6 @@ doit(omask)
 	 * that were set above.
 	 */
 	(void)sigsetmask(omask);
-	(void)signal(SIGCHLD, catch_child);
 	writer();
 	msg("closed connection.");
 	done(0);
@@ -418,7 +429,8 @@ done(status)
 		/* make sure catch_child does not snap it up */
 		(void)signal(SIGCHLD, SIG_DFL);
 		if (kill(child, SIGKILL) >= 0)
-			while ((w = wait(&wstatus)) > 0 && w != child);
+			while ((w = wait(&wstatus)) > 0 && w != child)
+				;
 	}
 	exit(status);
 }
@@ -444,18 +456,23 @@ void
 catch_child(signo)
 	int signo;
 {
-	union wait status;
-	int pid;
+	int save_errno = errno;
+	int status;
+	pid_t pid;
 
 	for (;;) {
-		pid = wait3((int *)&status, WNOHANG|WUNTRACED, NULL);
+		pid = wait3(&status, WNOHANG, NULL);
 		if (pid == 0)
-			return;
+			break;
 		/* if the child (reader) dies, just quit */
-		if (pid < 0 || (pid == child && !WIFSTOPPED(status)))
-			done((int)(status.w_termsig | status.w_retcode));
+		if (pid == child && !WIFSTOPPED(status)) {
+			child = -1;
+			if (WIFEXITED(status))
+				done(WEXITSTATUS(status));
+			done(WTERMSIG(status));
+		}
 	}
-	/* NOTREACHED */
+	errno = save_errno;
 }
 
 /*
@@ -541,7 +558,7 @@ writer()
 }
 
 void
-#if __STDC__
+#ifdef __STDC__
 echo(register char c)
 #else
 echo(c)
@@ -572,9 +589,7 @@ stop(all)
 	int all;
 {
 	mode(0);
-	(void)signal(SIGCHLD, SIG_IGN);
 	(void)kill(all ? 0 : getpid(), SIGTSTP);
-	(void)signal(SIGCHLD, catch_child);
 	mode(1);
 	sigwinch(0);			/* check for size changes */
 }
@@ -626,7 +641,8 @@ sendwindow()
 #define	WRITING	2
 
 jmp_buf rcvtop;
-int ppid, rcvcnt, rcvstate;
+pid_t ppid;
+int rcvcnt, rcvstate;
 char rcvbuf[8 * 1024];
 
 void
@@ -635,6 +651,7 @@ oob(signo)
 {
 	struct termios tty;
 	int atmark, n, rcvd;
+	int save_errno = errno;
 	char waste[BUFSIZ], mark;
 
 	rcvd = 0;
@@ -649,16 +666,21 @@ oob(signo)
 			if (rcvcnt < sizeof(rcvbuf)) {
 				n = read(rem, rcvbuf + rcvcnt,
 				    sizeof(rcvbuf) - rcvcnt);
-				if (n <= 0)
+				if (n <= 0) {
+					errno = save_errno;
 					return;
+				}
 				rcvd += n;
 			} else {
 				n = read(rem, waste, sizeof(waste));
-				if (n <= 0)
+				if (n <= 0) {
+					errno = save_errno;
 					return;
+				}
 			}
 			continue;
 		default:
+			errno = save_errno;
 			return;
 		}
 	}
@@ -709,6 +731,7 @@ oob(signo)
 	 */
 	if (rcvd && rcvstate == READING)
 		longjmp(rcvtop, 1);
+	errno = save_errno;
 }
 
 /* reader: read from remote: line -> 1 */
@@ -716,7 +739,8 @@ int
 reader(omask)
 	int omask;
 {
-	int pid, n, remaining;
+	pid_t pid;
+	int n, remaining;
 	char *bufp;
 
 #if BSD >= 43 || defined(SUNOS4)
@@ -809,7 +833,9 @@ void
 copytochild(signo)
 	int signo;
 {
+	int save_errno = errno;
 	(void)kill(child, SIGURG);
+	errno = save_errno;
 }
 
 void
@@ -822,7 +848,7 @@ msg(str)
 #ifdef KERBEROS
 /* VARARGS */
 void
-#if __STDC__
+#ifdef __STDC__
 warning(const char *fmt, ...)
 #else
 warning(fmt, va_alist)

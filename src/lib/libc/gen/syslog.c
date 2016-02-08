@@ -32,7 +32,7 @@
  */
 
 #if defined(LIBC_SCCS) && !defined(lint)
-static char rcsid[] = "$OpenBSD: syslog.c,v 1.2 1996/08/19 08:26:33 tholo Exp $";
+static char rcsid[] = "$OpenBSD: syslog.c,v 1.4 1997/07/25 20:30:04 mickey Exp $";
 #endif /* LIBC_SCCS and not lint */
 
 #include <sys/types.h>
@@ -49,7 +49,7 @@ static char rcsid[] = "$OpenBSD: syslog.c,v 1.2 1996/08/19 08:26:33 tholo Exp $"
 #include <time.h>
 #include <unistd.h>
 
-#if __STDC__
+#ifdef __STDC__
 #include <stdarg.h>
 #else
 #include <varargs.h>
@@ -68,7 +68,7 @@ extern char	*__progname;		/* Program name, from crt0. */
  *	print message on log file; output is intended for syslogd(8).
  */
 void
-#if __STDC__
+#ifdef __STDC__
 syslog(int pri, const char *fmt, ...)
 #else
 syslog(pri, fmt, va_alist)
@@ -79,7 +79,7 @@ syslog(pri, fmt, va_alist)
 {
 	va_list ap;
 
-#if __STDC__
+#ifdef __STDC__
 	va_start(ap, fmt);
 #else
 	va_start(ap);
@@ -177,7 +177,7 @@ vsyslog(pri, fmt, ap)
 	 * We wouldn't need this mess if printf handled %m, or if 
 	 * strerror() had been invented before syslog().
 	 */
-	for (t = fmt_cpy, fmt_left = FMT_LEN; ch = *fmt; ++fmt) {
+	for (t = fmt_cpy, fmt_left = FMT_LEN; (ch = *fmt); ++fmt) {
 		if (ch == '%' && fmt[1] == 'm') {
 			++fmt;
 			prlen = snprintf(t, fmt_left, "%s",

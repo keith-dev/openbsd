@@ -1,4 +1,4 @@
-/*	$OpenBSD: options.c,v 1.24 1997/04/16 03:50:23 millert Exp $	*/
+/*	$OpenBSD: options.c,v 1.30 1997/09/01 18:29:54 deraadt Exp $	*/
 /*	$NetBSD: options.c,v 1.6 1996/03/26 23:54:18 mrg Exp $	*/
 
 /*-
@@ -42,7 +42,7 @@
 #if 0
 static char sccsid[] = "@(#)options.c	8.2 (Berkeley) 4/18/94";
 #else
-static char rcsid[] = "$OpenBSD: options.c,v 1.24 1997/04/16 03:50:23 millert Exp $";
+static char rcsid[] = "$OpenBSD: options.c,v 1.30 1997/09/01 18:29:54 deraadt Exp $";
 #endif
 #endif /* not lint */
 
@@ -129,6 +129,7 @@ FSUB fsub[] = {
 #define	F_OCPIO	0	/* format when called as cpio -6 */
 #define	F_ACPIO	1	/* format when called as cpio -c */
 #define	F_CPIO	3	/* format when called as cpio */
+#define F_OTAR	4	/* format when called as tar -o */
 #define F_TAR	5	/* format when called as tar */
 #define DEFLT	5	/* default write format from list above */
 
@@ -145,7 +146,7 @@ int ford[] = {5, 4, 3, 2, 1, 0, -1 };
  *	parser
  */
 
-#if __STDC__
+#ifdef __STDC__
 void
 options(register int argc, register char **argv)
 #else
@@ -181,7 +182,7 @@ options(argc, argv)
  *	the user specified a legal set of flags. If not, complain and exit
  */
 
-#if __STDC__
+#ifdef __STDC__
 static void
 pax_options(register int argc, register char **argv)
 #else
@@ -196,7 +197,7 @@ pax_options(argc, argv)
 	unsigned int flg = 0;
 	unsigned int bflg = 0;
 	register char *pt;
-        FSUB tmp;
+	FSUB tmp;
 	extern char *optarg;
 	extern int optind;
 
@@ -588,7 +589,7 @@ pax_options(argc, argv)
  *	the user specified a legal set of flags. If not, complain and exit
  */
 
-#if __STDC__
+#ifdef __STDC__
 static void
 tar_options(register int argc, register char **argv)
 #else
@@ -600,6 +601,7 @@ tar_options(argc, argv)
 {
 	register int c;
 	int fstdin = 0;
+	int Oflag = 0;
 
 	/*
 	 * Set default values.
@@ -610,8 +612,8 @@ tar_options(argc, argv)
 	 * process option flags
 	 */
 	while ((c = getoldopt(argc, argv,
-	    "b:cef:hmopruts:vwxzBC:HLPXZ014578")) 
-	    != EOF)  {
+	    "b:cef:hmopruts:vwxzBC:HLOPXZ014578"))
+	    != EOF) {
 		switch(c) {
 		case 'b':
 			/*
@@ -644,7 +646,7 @@ tar_options(argc, argv)
 				 * treat a - as stdin
 				 */
 				fstdin = 1;
-				arcname = (char *)0;
+				arcname = NULL;
 				break;
 			}
 			fstdin = 0;
@@ -665,6 +667,8 @@ tar_options(argc, argv)
 		case 'o':
 			if (opt_add("write_opt=nodir") < 0)
 				tar_usage();
+		case 'O':
+			Oflag = 1;
 			break;
 		case 'p':
 			/*
@@ -794,9 +798,14 @@ tar_options(argc, argv)
 
 	/*
 	 * if we are writing (ARCHIVE) specify tar, otherwise run like pax
+	 * (unless -o specified)
 	 */
-	if (act == ARCHIVE)
-		frmt = &(fsub[F_TAR]);
+	if (act == ARCHIVE || act == APPND)
+		frmt = &(fsub[Oflag ? F_OTAR : F_TAR]);
+	else if (Oflag) {
+		paxwarn(1, "The -O/-o options are only valid when writing an archive");
+		tar_usage();		/* only valid when writing */
+	}
 
 	/*
 	 * process the args as they are interpreted by the operation mode
@@ -807,10 +816,10 @@ tar_options(argc, argv)
 	default:
 		{
 			int sawpat = 0;
-				
-			while (*argv != (char *)NULL) {
+
+			while (*argv != NULL) {
 				if (strcmp(*argv, "-C") == 0) {
-					if(*++argv == (char *)NULL)
+					if(*++argv == NULL)
 						break;
 					chdname = *argv++;
 
@@ -824,21 +833,21 @@ tar_options(argc, argv)
 			 * if patterns were added, we are doing	chdir()
 			 * on a file-by-file basis, else, just one 
 			 * global chdir (if any) after opening input.
-			*/
+			 */
 			if (sawpat > 0)
-				chdname = NULL;	
+				chdname = NULL;
 		}
 		break;
 	case ARCHIVE:
 	case APPND:
-		if (chdname != (char *)NULL) {	/* initial chdir() */
+		if (chdname != NULL) {	/* initial chdir() */
 			if (ftree_add(chdname, 1) < 0)
 				tar_usage();
 		}
 
-		while (*argv != (char *)NULL) {
+		while (*argv != NULL) {
 			if (!strcmp(*argv, "-C")) {
-				if (*++argv == (char *)NULL)
+				if (*++argv == NULL)
 					break;
 				if (ftree_add(*argv++, 1) < 0)
 					tar_usage();
@@ -853,9 +862,9 @@ tar_options(argc, argv)
 		maxflt = 0;
 		break;
 	}
-	if (!fstdin && ((arcname == (char *)NULL) || (*arcname == '\0'))) {
+	if (!fstdin && ((arcname == NULL) || (*arcname == '\0'))) {
 		arcname = getenv("TAPE");
-		if ((arcname == (char *)NULL) || (*arcname == '\0'))
+		if ((arcname == NULL) || (*arcname == '\0'))
 			arcname = _PATH_DEFTAPE;
 	}
 }
@@ -883,7 +892,7 @@ mkpath(path)
 				return (-1);
 			}
 		} else if (!S_ISDIR(sb.st_mode)) {
-		        syswarn(1, ENOTDIR, "%s", path);
+			syswarn(1, ENOTDIR, "%s", path);
 			return (-1);
 		}
 
@@ -899,7 +908,7 @@ mkpath(path)
  *	the user specified a legal set of flags. If not, complain and exit
  */
 
-#if __STDC__
+#ifdef __STDC__
 static void
 cpio_options(register int argc, register char **argv)
 #else
@@ -912,7 +921,7 @@ cpio_options(argc, argv)
 	register int c, i;
 	size_t len;
 	char *str;
-        FSUB tmp;
+	FSUB tmp;
 	FILE *fp;
 
 	kflag = 1;
@@ -1123,12 +1132,12 @@ cpio_options(argc, argv)
 	switch (act) {
 		case LIST:
 		case EXTRACT:
-			while (*argv != (char *)NULL)
+			while (*argv != NULL)
 				if (pat_add(*argv++, NULL) < 0)
 					cpio_usage();
 			break;
 		case COPY:
-			if (*argv == (char *)NULL) {
+			if (*argv == NULL) {
 				paxwarn(0, "Destination directory was not supplied");
 				cpio_usage();
 			}
@@ -1140,7 +1149,7 @@ cpio_options(argc, argv)
 			/* FALL THROUGH */
 		case ARCHIVE:
 		case APPND:
-			if (*argv != (char *)NULL)
+			if (*argv != NULL)
 				cpio_usage();
 			/*
 			 * no read errors allowed on updates/append operation!
@@ -1162,7 +1171,7 @@ cpio_options(argc, argv)
  *	print out those invalid flag sets found to the user
  */
 
-#if __STDC__
+#ifdef __STDC__
 static void
 printflg(unsigned int flg)
 #else
@@ -1189,17 +1198,17 @@ printflg(flg)
  *	by the user
  */
 
-#if __STDC__
+#ifdef __STDC__
 static int
 c_frmt(const void *a, const void *b)
 #else
 static int
 c_frmt(a, b)
-        void *a;
-        void *b;
+	void *a;
+	void *b;
 #endif
 {
-        return(strcmp(((FSUB *)a)->name, ((FSUB *)b)->name));
+	return(strcmp(((FSUB *)a)->name, ((FSUB *)b)->name));
 }
 
 /*
@@ -1210,7 +1219,7 @@ c_frmt(a, b)
  *	pointer to next OPLIST entry or NULL (end of list).
  */
 
-#if __STDC__
+#ifdef __STDC__
 OPLIST *
 opt_next(void)
 #else
@@ -1231,7 +1240,7 @@ opt_next()
  *	when the format does not support options.
  */
 
-#if __STDC__
+#ifdef __STDC__
 int
 bad_opt(void)
 #else
@@ -1262,7 +1271,7 @@ bad_opt()
  *	0 if format in name=value format, -1 if -o is passed junk
  */
 
-#if __STDC__
+#ifdef __STDC__
 int
 opt_add(register char *str)
 #else
@@ -1337,7 +1346,7 @@ opt_add(str)
  *	0 for an error, a positive value o.w.
  */
 
-#if __STDC__
+#ifdef __STDC__
 static off_t
 str_offt(char *val)
 #else
@@ -1412,7 +1421,7 @@ str_offt(val)
  *	0
  */
 
-#if __STDC__
+#ifdef __STDC__
 static int
 no_op(void)
 #else
@@ -1428,7 +1437,7 @@ no_op()
  *	print the usage summary to the user
  */
 
-#if __STDC__
+#ifdef __STDC__
 void
 pax_usage(void)
 #else
@@ -1444,7 +1453,7 @@ pax_usage()
 	(void)fputs("       pax -r [-cdiknuvDYZ] [-E limit] ", stderr);
 	(void)fputs("[-f archive] [-o options] ... \n", stderr);
 	(void)fputs("           [-p string] ... [-s replstr] ... ", stderr);
-	(void)fputs("[-U user] ... [-G group] ...\n           ", stderr);
+	(void)fputs("[-U user] ... [-G group] ...\n	      ", stderr);
 	(void)fputs("[-T [from_date][,to_date]] ... ", stderr);
 	(void)fputs(" [pattern ...]\n", stderr);
 	(void)fputs("       pax -w [-dituvHLPX] [-b blocksize] ", stderr);
@@ -1467,7 +1476,7 @@ pax_usage()
  *	print the usage summary to the user
  */
 
-#if __STDC__
+#ifdef __STDC__
 void
 tar_usage(void)
 #else
@@ -1487,7 +1496,7 @@ tar_usage()
  *	print the usage summary to the user
  */
 
-#if __STDC__
+#ifdef __STDC__
 void
 cpio_usage(void)
 #else

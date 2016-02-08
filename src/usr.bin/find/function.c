@@ -1,4 +1,4 @@
-/*	$OpenBSD: function.c,v 1.8 1996/12/23 04:58:10 millert Exp $	*/
+/*	$OpenBSD: function.c,v 1.10 1997/09/01 02:44:19 millert Exp $	*/
 
 /*-
  * Copyright (c) 1990, 1993
@@ -38,7 +38,7 @@
 
 #ifndef lint
 /*static char sccsid[] = "from: @(#)function.c	8.1 (Berkeley) 6/6/93";*/
-static char rcsid[] = "$OpenBSD: function.c,v 1.8 1996/12/23 04:58:10 millert Exp $";
+static char rcsid[] = "$OpenBSD: function.c,v 1.10 1997/09/01 02:44:19 millert Exp $";
 #endif /* not lint */
 
 #include <sys/param.h>
@@ -53,6 +53,7 @@ static char rcsid[] = "$OpenBSD: function.c,v 1.8 1996/12/23 04:58:10 millert Ex
 #include <fnmatch.h>
 #include <fts.h>
 #include <grp.h>
+#include <libgen.h>
 #include <pwd.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -76,6 +77,10 @@ static char rcsid[] = "$OpenBSD: function.c,v 1.8 1996/12/23 04:58:10 millert Ex
 }
 
 static PLAN *palloc __P((enum ntype, int (*) __P((PLAN *, FTSENT *))));
+
+extern int dotfd;
+extern time_t now;
+extern FTS *tree;
 
 /*
  * find_parsenum --
@@ -141,7 +146,6 @@ f_atime(plan, entry)
 	PLAN *plan;
 	FTSENT *entry;
 {
-	extern time_t now;
 
 	COMPARE((now - entry->fts_statp->st_atime +
 	    SECSPERDAY - 1) / SECSPERDAY, plan->t_data);
@@ -171,7 +175,6 @@ f_ctime(plan, entry)
 	PLAN *plan;
 	FTSENT *entry;
 {
-	extern time_t now;
 
 	COMPARE((now - entry->fts_statp->st_ctime +
 	    SECSPERDAY - 1) / SECSPERDAY, plan->t_data);
@@ -273,7 +276,6 @@ f_exec(plan, entry)
 	register PLAN *plan;
 	FTSENT *entry;
 {
-	extern int dotfd;
 	register int cnt;
 	pid_t pid;
 	int status;
@@ -375,22 +377,18 @@ f_execdir(plan, entry)
 	register PLAN *plan;
 	FTSENT *entry;
 {
-	extern int dotfd;
 	register int cnt;
 	pid_t pid;
 	int status;
-	char *file;
+	char base[MAXPATHLEN];
 
-	/* XXX - if file/dir ends in '/' this will not work -- can it? */
-	if ((file = strrchr(entry->fts_path, '/')))
-	    file++;
-	else
-	    file = entry->fts_path;
-
+	/* Substitute basename(path) for {} since cwd is it's parent dir */
+	(void)strncpy(base, basename(entry->fts_path), sizeof(base) - 1);
+	base[sizeof(base) - 1] = '\0';
 	for (cnt = 0; plan->e_argv[cnt]; ++cnt)
 		if (plan->e_len[cnt])
 			brace_subst(plan->e_orig[cnt], &plan->e_argv[cnt],
-			    file, plan->e_len[cnt]);
+			    base, plan->e_len[cnt]);
 
 	/* don't mix output of command with find output */
 	fflush(stdout);
@@ -425,6 +423,7 @@ c_execdir(argvp)
 	register char **argv, **ap, *p;
 
 	ftsoptions &= ~FTS_NOSTAT;
+	ftsoptions |= FTS_CHDIRROOT;
 	isoutput = 1;
     
 	new = palloc(N_EXECDIR, f_execdir);
@@ -503,7 +502,7 @@ f_fstype(plan, entry)
 		 */
 		if (entry->fts_info == FTS_SL ||
 		    entry->fts_info == FTS_SLNONE) {
-			if (p = strrchr(entry->fts_accpath, '/'))
+			if ((p = strrchr(entry->fts_accpath, '/')))
 				++p;
 			else
 				p = entry->fts_accpath;
@@ -697,7 +696,6 @@ f_maxdepth(plan, entry)
 	PLAN *plan;
 	FTSENT *entry;
 {
-	extern FTS *tree;
 
 	if (entry->fts_level >= plan->max_data)
 		fts_set(tree, entry, FTS_SKIP);
@@ -726,7 +724,6 @@ f_mindepth(plan, entry)
 	PLAN *plan;
 	FTSENT *entry;
 {
-	extern FTS *tree;
 
 	return (entry->fts_level >= plan->min_data);
 }
@@ -753,7 +750,6 @@ f_mtime(plan, entry)
 	PLAN *plan;
 	FTSENT *entry;
 {
-	extern time_t now;
 
 	COMPARE((now - entry->fts_statp->st_mtime + SECSPERDAY - 1) /
 	    SECSPERDAY, plan->t_data);
@@ -964,6 +960,7 @@ f_print(plan, entry)
 }
 
 /* ARGSUSED */
+int
 f_print0(plan, entry)
 	PLAN *plan;
 	FTSENT *entry;
@@ -999,7 +996,6 @@ f_prune(plan, entry)
 	PLAN *plan;
 	FTSENT *entry;
 {
-	extern FTS *tree;
 
 	if (fts_set(tree, entry, FTS_SKIP))
 		err(1, "%s", entry->fts_path);
@@ -1260,7 +1256,7 @@ palloc(t, f)
 {
 	PLAN *new;
 
-	if (new = malloc(sizeof(PLAN))) {
+	if ((new = malloc(sizeof(PLAN)))) {
 		new->type = t;
 		new->eval = f;
 		new->flags = 0;

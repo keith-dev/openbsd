@@ -1,4 +1,4 @@
-#	$OpenBSD: Makefile,v 1.10 1997/05/14 18:38:50 niklas Exp $
+#	$OpenBSD: Makefile,v 1.14 1997/10/19 20:34:54 deraadt Exp $
 
 TOP=		${.CURDIR}/..
 
@@ -6,7 +6,6 @@ TOP=		${.CURDIR}/..
 IMAGE=		ramdisk${REV}.fs
 CRUNCHCONF?=    ${TOP}/ramdisk/${CBIN}.conf
 BASE=		ramdisk
-KERNEL=		${TOP}/../../sys/arch/${MACHINE}/compile/RAMDISK/bsd
 
 MOUNT_POINT=	/mnt
 
@@ -22,7 +21,7 @@ GZIP?=		gzip
 GZIPFLAGS?=	-9f
 INSTALLBOOT?=	/usr/mdec/installboot -v
 
-FLOPPY?=	floppy.fs
+FLOPPY?=	floppy${REV}.fs
 FLOPPYBLKS?=	2880
 FLOPPYTYPE?=	floppy3
 BOOT?=		/usr/mdec/boot
@@ -45,8 +44,7 @@ ${FLOPPY}:	bsd.gz
 	dd if=/dev/zero of=${REALIMAGE} count=${FLOPPYBLKS}
 	vnconfig -v -c ${VND} ${REALIMAGE}
 	disklabel -w -r ${VND} ${FLOPPYTYPE}
-	newfs ${NEWFSARGS} ${NEWFSARGS_FD} -s ${FLOPPYBLKS} ${VND_RDEV} \
-	    ${FLOPPYTYPE}
+	newfs ${NEWFSARGS} ${NEWFSARGS_FD} -s ${FLOPPYBLKS} ${VND_RDEV}
 	mount ${VND_DEV} ${MOUNT_POINT}
 	cp ${BOOT} ${MOUNT_POINT}
 	cp bsd.gz ${MOUNT_POINT}/bsd
@@ -65,11 +63,20 @@ ${FLOPPY}:	bsd.gz
 	    rm -f ${REALIMAGE} ; \
 	fi
 
-bsd.gz: ${KERNEL} ${IMAGE} ecoffrdsetroot
-	cp ${KERNEL} bsd
-	${.OBJDIR}/ecoffrdsetroot bsd < ${IMAGE}
-	${STRIP} bsd
-	${GZIP} ${GZIPFLAGS} bsd
+bsd.gz:	bsd.rd
+	cp bsd.rd bsd.strip
+	${STRIP} bsd.strip
+	${GZIP} -c ${GZIPFLAGS} bsd.strip > bsd.gz
+
+bsd.rd: bsd ${IMAGE} ecoffrdsetroot
+	cp bsd bsd.rd
+	${.OBJDIR}/ecoffrdsetroot bsd.rd < ${IMAGE}
+
+bsd:
+	cd ${.CURDIR}/../../../sys/arch/alpha/conf && config RAMDISK
+	cd ${.CURDIR}/../../../sys/arch/alpha/compile/RAMDISK && \
+	    make clean && make
+	cp ${.CURDIR}/../../../sys/arch/alpha/compile/RAMDISK/bsd bsd
 
 ${IMAGE}:	do_prep do_mount do_files do_umount
 	mv -f ${REALIMAGE} ${IMAGE}
@@ -77,16 +84,13 @@ ${IMAGE}:	do_prep do_mount do_files do_umount
 ecoffrdsetroot:	${TOP}/ecoffrdsetroot.c
 	${HOSTCC} ${HOSTCFLAGS} -o ecoffrdsetroot ${TOP}/ecoffrdsetroot.c
 
-bsd:	${KERNEL}
-	cp ${KERNEL} bsd
-
 do_prep:
 	dd if=/dev/zero of=${REALIMAGE} count=${NBLKS}
 	vnconfig -v -c ${VND} ${REALIMAGE}
 	disklabel -w -r ${VND} ${DISKTYPE}
 	
 do_mount:
-	newfs ${NEWFSARGS} ${NEWFSARGS_RD} -s ${NBLKS} ${VND_RDEV} ${DISKTYPE}
+	newfs ${NEWFSARGS} ${NEWFSARGS_RD} -s ${NBLKS} ${VND_RDEV}
 	mount ${VND_DEV} ${MOUNT_POINT}
  
 do_umount:
@@ -101,4 +105,4 @@ unconfig:
 	-vnconfig -u ${VND}
 
 beforeinstall:
-	cp ${FLOPPY} ${DESTDIR}/snapshot
+	cp ${FLOPPY} bsd.rd ${DESTDIR}/snapshot

@@ -1,4 +1,4 @@
-/*	$OpenBSD: supfilesrv.c,v 1.7 1997/04/01 07:35:43 todd Exp $	*/
+/*	$OpenBSD: supfilesrv.c,v 1.12 1997/10/11 23:34:21 beck Exp $	*/
 
 /*
  * Copyright (c) 1992 Carnegie Mellon University
@@ -28,12 +28,13 @@
 /*
  * supfilesrv -- SUP File Server
  *
- * Usage:  supfilesrv [-l] [-P] [-N] [-R] [-S]
+ * Usage:  supfilesrv [-l] [-P] [-N] [-R] [-S] [-O]
  *	-l	"live" -- don't fork daemon
  *	-P	"debug ports" -- use debugging network ports
  *	-N	"debug network" -- print debugging messages for network i/o
  *	-R	"RCS mode" -- if file is an rcs file, use co to get contents
  *	-S	"Operate silently" -- Only print error messages
+ *      -O      "One Connection" -- Reject servicing multiple connections
  *
  **********************************************************************
  * HISTORY
@@ -147,7 +148,7 @@
 #include <pwd.h>
 #include <grp.h>
 #include <fcntl.h>
-#if __STDC__
+#ifdef __STDC__
 #include <stdarg.h>
 #else
 #include <varargs.h>
@@ -235,6 +236,7 @@ int progpid = -1;			/* and process id */
 jmp_buf sjbuf;				/* jump location for network errors */
 TREELIST *listTL;			/* list of trees to upgrade */
 
+char *oneconnect = NULL;	        /* -O flag */
 int silent;				/* -S flag */
 int live;				/* -l flag */
 int dbgportsq;				/* -P flag */
@@ -319,9 +321,22 @@ char **argv;
 
 	init (argc,argv);		/* process arguments */
 
-#ifdef HAS_DAEMON
 	if (!live)			/* if not debugging, turn into daemon */
+#ifdef HAS_DAEMON
 		daemon(0, 0);
+#else
+	{
+	  int r;
+	  r=fork();
+	  if (r>0) {
+	    exit(0);
+	  }
+	  else if (r < 0) {
+	    perror("fork:");
+	    exit(-1);
+	  }
+	  setsid();
+	}
 #endif
 
 	logopen ("supfile");
@@ -438,6 +453,12 @@ char **argv;
 				quit (1,"Missing arg to -C\n");
 			argv++;
 			maxchildren = atoi(argv[0]);
+			break;
+		case 'O':
+			if (--argc < 1)
+				quit (1,"Missing arg to -O\n");
+			argv++;
+			oneconnect = argv[0];
 			break;
 		case 'H':
 			if (--argc < 3)
@@ -683,7 +704,7 @@ srvsetup ()
 
 		/* check crosspatch host access file */
 		cryptkey = NULL;
-		(void) sprintf (buf,FILEXPATCH,xuser);
+		(void) snprintf (buf,sizeof buf,FILEXPATCH,xuser);
 
 		/* Turn off link following */
 		if (link_nofollow(1) != -1) {
@@ -745,7 +766,7 @@ srvsetup ()
 		release = salloc (DEFRELEASE);
 	if (basedir == NULL || *basedir == '\0') {
 		basedir = NULL;
-		(void) sprintf (buf,FILEDIRS,DEFDIR);
+		(void) snprintf (buf,sizeof buf,FILEDIRS,DEFDIR);
 		f = fopen (buf,"r");
 		if (f) {
 			while ((p = fgets (buf,STRINGLENGTH,f)) != NULL) {
@@ -762,13 +783,13 @@ srvsetup ()
 			(void) fclose (f);
 		}
 		if (basedir == NULL) {
-			(void) sprintf (buf,FILEBASEDEFAULT,collname);
+			(void) snprintf (buf,sizeof buf,FILEBASEDEFAULT,collname);
 			basedir = salloc(buf);
 		}
 	}
 	if (chdir (basedir) < 0)
 		goaway ("Can't chdir to base directory %s",basedir);
-	(void) sprintf (buf,FILEPREFIX,collname);
+	(void) snprintf (buf,sizeof buf,FILEPREFIX,collname);
 	f = fopen (buf,"r");
 	if (f) {
 		while ((p = fgets (buf,STRINGLENGTH,f)) != NULL) {
@@ -812,7 +833,7 @@ srvsetup ()
 		char *h;
 		if ((h = tl->TLhost) == NULL)
 			h = FILEHOSTDEF;
-		(void) sprintf (buf,FILEHOST,collname,h);
+		(void) snprintf (buf,sizeof buf,FILEHOST,collname,h);
 		f = fopen (buf,"r");
 		if (f) {
 			int hostok = FALSE;
@@ -842,7 +863,7 @@ srvsetup ()
 		}
 	}
 	/* try to lock collection */
-	(void) sprintf (buf,FILELOCK,collname);
+	(void) snprintf (buf,sizeof buf,FILELOCK,collname);
 #ifdef LOCK_SH
 	x = open (buf,O_RDONLY,0);
 	if (x >= 0) {
@@ -858,6 +879,10 @@ srvsetup ()
 		lockfd = x;
 	}
 #endif
+	if (oneconnect != NULL
+	    && (lock_host_file(oneconnect) < 0)) {
+	  goaway("I'm still working on a previous request from your host.");
+	}
 	setupack = FSETUPOK;
 	x = msgsetupack ();
 	if (x != SCMOK)  goaway ("Error sending setup reply to client");
@@ -874,7 +899,7 @@ docrypt ()
 	struct stat sbuf;
 
 	if (!xpatch) {
-		(void) sprintf (buf,FILECRYPT,collname);
+		(void) snprintf (buf,sizeof buf,FILECRYPT,collname);
 
 		/* Turn off link following */
 		if (link_nofollow(1) != -1) {
@@ -1151,8 +1176,9 @@ void *v;
 					av[ac++] = "-q";
 					av[ac++] = "-p";
 					if (rcs_branch != NULL) {
-						sprintf(rcs_release, "-r%s",
-							rcs_branch);
+						snprintf(rcs_release,
+						    sizeof rcs_release,
+						    "-r%s",rcs_branch);
 						av[ac++] = rcs_release;
 					}
 #endif
@@ -1314,20 +1340,21 @@ time_t starttime;
 		logerr ("Reason %d:  %s",doneack,donereason);
 	goawayreason = donereason;
 	cdprefix ((char *)NULL);
-	(void) sprintf (lognam,FILELOGFILE,collname);
+	(void) snprintf (lognam,sizeof lognam,FILELOGFILE,collname);
 	if ((logfd = open(lognam,O_APPEND|O_WRONLY,0644)) < 0)
 		return; /* can not open file up...error */
 	finishtime = time ((time_t *)NULL);
 	p = tmpbuf;
-	(void) sprintf (p,"%s ",fmttime (lasttime));
+	(void) snprintf (p,sizeof tmpbuf-(p-tmpbuf),"%s ",fmttime (lasttime));
 	p += strlen(p);
-	(void) sprintf (p,"%s ",fmttime (starttime));
+	(void) snprintf (p,sizeof tmpbuf-(p-tmpbuf),"%s ",fmttime (starttime));
 	p += strlen(p);
-	(void) sprintf (p,"%s ",fmttime (finishtime));
+	(void) snprintf (p,sizeof tmpbuf-(p-tmpbuf),"%s ",fmttime (finishtime));
 	p += strlen(p);
 	if ((releasename = release) == NULL)
 		releasename = "UNKNOWN";
-	(void) sprintf (p,"%s %s %d %s\n",remotehost(),releasename,
+	(void) snprintf (p,sizeof tmpbuf-(p-tmpbuf),"%s %s %d %s\n",
+		remotehost(),releasename,
 		FDONESUCCESS-doneack,donereason);
 	p += strlen(p);
 #if	MACH
@@ -1456,17 +1483,22 @@ int fileuid,filegid;
 	if (namep == NULL) {
 		pwd = getpwuid (fileuid);
 		if (pwd == NULL) {
-			(void) sprintf (errbuf,"Reason:  Unknown user id %d",
+			(void) snprintf (errbuf,sizeof errbuf,
+				"Reason:  Unknown user id %d",
 				fileuid);
 			return (errbuf);
 		}
 		grp = getgrgid (filegid);
-		if (grp)  group = strcpy (nbuf,grp->gr_name);
+		if (grp) {
+			group = strncpy (nbuf,grp->gr_name, sizeof nbuf-1);
+			nbuf[sizeof nbuf-1] = '\0';
+		}
 		else  group = NULL;
 		account = NULL;
 		pswdp = NULL;
 	} else {
-		(void) strcpy (nbuf,namep);
+		(void) strncpy (nbuf,namep, sizeof nbuf-1);
+		nbuf[sizeof nbuf-1] = '\0';
 		account = group = strchr (nbuf,',');
 		if (group != NULL) {
 			*group++ = '\0';
@@ -1479,7 +1511,8 @@ int fileuid,filegid;
 		}
 		pwd = getpwnam (nbuf);
 		if (pwd == NULL) {
-			(void) sprintf (errbuf,"Reason:  Unknown user %s",
+			(void) snprintf (errbuf,sizeof errbuf,
+				"Reason:  Unknown user %s",
 				nbuf);
 			return (errbuf);
 		}
@@ -1493,8 +1526,9 @@ int fileuid,filegid;
                         setpag(); /* set a pag */
                         if (ka_UserAuthenticate(pwd->pw_name, "", 0,
                                                 pswdp, 1, &reason)) {
-                                (void) sprintf (errbuf,"AFS authentication failed, %s",
-                                                reason);
+                                (void) snprintf (errbuf,sizeof errbuf,
+					"AFS authentication failed, %s",
+                                        reason);
                                 logerr ("Attempt by %s; %s",
                                         nbuf, errbuf);
                                 return (errbuf);
@@ -1538,7 +1572,7 @@ int fileuid,filegid;
 		break;
 #if	CMUCS
 	case ACCESS_CODE_INSECUREPWD:
-		(void) sprintf (errbuf,"Reason:  %s",p);
+		(void) snprintf (errbuf,sizeof errbuf,"Reason:  %s",p);
 		p = errbuf;
 		break;
 	case ACCESS_CODE_DENIED:
@@ -1579,7 +1613,9 @@ int fileuid,filegid;
 		break;
 #endif	/* CMUCS */
 	default:
-		(void) sprintf (p = errbuf,"Reason:  Status %d",status);
+		(void) snprintf (errbuf,sizeof errbuf,
+			"Reason:  Status %d",status);
+		p = errbuf;
 		break;
 	}
 	if (pwd == NULL)
@@ -1610,6 +1646,10 @@ int fileuid,filegid;
 		logerr ("setegid: %%m");
 	if (setgid (pwd->pw_gid) < 0)
 		logerr ("setgid: %%m");
+#ifndef NO_SETLOGIN
+	if (setlogin (pwd->pw_name) < 0)
+		logerr ("setlogin: %%m");
+#endif
 	if (seteuid (pwd->pw_uid) < 0)
 		logerr ("seteuid: %%m");
 	if (setuid (pwd->pw_uid) < 0)
@@ -1657,9 +1697,10 @@ time_t time;
 	static char buf[STRINGLENGTH];
 	int len;
 
-	(void) strcpy (buf,ctime (&time));
+	(void) strncpy (buf,ctime (&time), sizeof buf-1);
+	buf[sizeof buf-1] = '\0';
 	len = strlen(buf+4)-6;
-	(void) strncpy (buf,buf+4,len);
+	(void) strncpy (buf,buf+4,len);		/* XXX TDR */
 	buf[len] = '\0';
 	return (buf);
 }

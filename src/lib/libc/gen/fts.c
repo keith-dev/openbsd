@@ -1,4 +1,4 @@
-/*	$OpenBSD: fts.c,v 1.7 1997/03/24 02:54:15 millert Exp $	*/
+/*	$OpenBSD: fts.c,v 1.14 1997/10/11 04:04:40 millert Exp $	*/
 
 /*-
  * Copyright (c) 1990, 1993, 1994
@@ -37,7 +37,7 @@
 #if 0
 static char sccsid[] = "@(#)fts.c	8.6 (Berkeley) 8/14/94";
 #else
-static char rcsid[] = "$OpenBSD: fts.c,v 1.7 1997/03/24 02:54:15 millert Exp $";
+static char rcsid[] = "$OpenBSD: fts.c,v 1.14 1997/10/11 04:04:40 millert Exp $";
 #endif
 #endif /* LIBC_SCCS and not lint */
 
@@ -81,7 +81,7 @@ FTS *
 fts_open(argv, options, compar)
 	char * const *argv;
 	register int options;
-	int (*compar)();
+	int (*compar) __P((const FTSENT **, const FTSENT **));
 {
 	register FTS *sp;
 	register FTSENT *p, *root;
@@ -167,7 +167,7 @@ fts_open(argv, options, compar)
 	sp->fts_cur->fts_info = FTS_INIT;
 
 	/*
-	 * If using chdir(2), grab a file descriptor pointing to dot to insure
+	 * If using chdir(2), grab a file descriptor pointing to dot to ensure
 	 * that we can get back here; this could be avoided for some paths,
 	 * but almost certainly not worth the effort.  Slashes, symbolic links,
 	 * and ".." are all fairly nasty problems.  Note, if we can't get the
@@ -257,12 +257,12 @@ fts_close(sp)
 }
 
 /*
- * Special case a root of "/" so that slashes aren't appended which would
- * cause paths to be written as "//foo".
+ * Special case of "/" at the end of the path so that slashes aren't
+ * appended which would cause paths to be written as "....//foo".
  */
 #define	NAPPEND(p)							\
-	(p->fts_level == FTS_ROOTLEVEL && p->fts_pathlen == 1 &&	\
-	    p->fts_path[0] == '/' ? 0 : p->fts_pathlen)
+	(p->fts_path[p->fts_pathlen - 1] == '/'				\
+	    ? p->fts_pathlen - 1 : p->fts_pathlen)
 
 FTSENT *
 fts_read(sp)
@@ -321,7 +321,7 @@ fts_read(sp)
 			}
 			p->fts_info = FTS_DP;
 			return (p);
-		} 
+		}
 
 		/* Rebuild if only read the names and now traversing. */
 		if (sp->fts_child && ISSET(FTS_NAMEONLY)) {
@@ -366,13 +366,20 @@ next:	tmp = p;
 		free(tmp);
 
 		/*
-		 * If reached the top, return to the original directory, and
-		 * load the paths for the next root.
+		 * If reached the top, return to the original directory (or
+		 * the root of the tree), and load the paths for the next root.
 		 */
 		if (p->fts_level == FTS_ROOTLEVEL) {
-			if (FCHDIR(sp, sp->fts_rfd)) {
-				SET(FTS_STOP);
-				return (NULL);
+			if ((sp->fts_options & FTS_CHDIRROOT)) {
+				if (chdir(p->fts_accpath)) {
+					SET(FTS_STOP);
+					return (NULL);
+				}
+			} else {
+				if (FCHDIR(sp, sp->fts_rfd)) {
+					SET(FTS_STOP);
+					return (NULL);
+				}
 			}
 			fts_load(sp, p);
 			return (sp->fts_cur = p);
@@ -426,9 +433,16 @@ name:		t = sp->fts_path + NAPPEND(p->fts_parent);
 	 * one directory.
 	 */
 	if (p->fts_level == FTS_ROOTLEVEL) {
-		if (FCHDIR(sp, sp->fts_rfd)) {
-			SET(FTS_STOP);
-			return (NULL);
+		if ((sp->fts_options & FTS_CHDIRROOT)) {
+			if (chdir(p->fts_accpath)) {
+				SET(FTS_STOP);
+				return (NULL);
+			}
+		} else {
+			if (FCHDIR(sp, sp->fts_rfd)) {
+				SET(FTS_STOP);
+				return (NULL);
+			}
 		}
 	} else if (p->fts_flags & FTS_SYMFOLLOW) {
 		if (FCHDIR(sp, p->fts_symfd)) {
@@ -516,7 +530,7 @@ fts_children(sp, instr)
 	if (instr == FTS_NAMEONLY) {
 		SET(FTS_NAMEONLY);
 		instr = BNAMES;
-	} else 
+	} else
 		instr = BCHILD;
 
 	/*
@@ -707,7 +721,7 @@ mem1:				saved_errno = errno;
 			p->fts_accpath = cur->fts_accpath;
 		} else if (nlinks == 0
 #ifdef DT_DIR
-		    || (nostat && 
+		    || (nostat &&
 		    dp->d_type != DT_DIR && dp->d_type != DT_UNKNOWN)
 #endif
 		    ) {
@@ -755,7 +769,7 @@ mem1:				saved_errno = errno;
 	 * state.
 	 */
 	if (ISSET(FTS_NOCHDIR)) {
-		if (cp - 1 > sp->fts_path)
+		if (len == sp->fts_pathlen)
 			--cp;
 		*cp = '\0';
 	}
@@ -825,7 +839,7 @@ fts_stat(sp, p, follow)
 			if (!lstat(p->fts_accpath, sbp)) {
 				errno = 0;
 				return (FTS_SLNONE);
-			} 
+			}
 			p->fts_errno = saved_errno;
 			goto err;
 		}
@@ -926,8 +940,9 @@ fts_alloc(sp, name, namelen)
 	if ((p = malloc(len)) == NULL)
 		return (NULL);
 
-	/* Copy the name plus the trailing NULL. */
-	memmove(p->fts_name, name, namelen + 1);
+	/* Copy the name and guarantee NULL termination. */
+	memmove(p->fts_name, name, namelen);
+	p->fts_name[namelen] = '\0';
 
 	if (!ISSET(FTS_NOSTAT))
 		p->fts_statp = (struct stat *)ALIGN(p->fts_name + namelen + 2);
@@ -958,7 +973,7 @@ fts_lfree(head)
  * Allow essentially unlimited paths; find, rm, ls should all work on any tree.
  * Most systems will allow creation of paths much longer than MAXPATHLEN, even
  * though the kernel won't resolve them.  Add the size (not just what's needed)
- * plus 256 bytes so don't realloc the path 2 bytes at a time. 
+ * plus 256 bytes so don't realloc the path 2 bytes at a time.
  */
 static int
 fts_palloc(sp, more)
@@ -1020,34 +1035,28 @@ fts_safe_changedir(sp, p, fd)
 	FTSENT *p;
 	int fd;
 {
-	int ret, oerrno, newfd = fd;
+	int ret, oerrno, newfd;
 	struct stat sb;
 
+	newfd = fd;
 	if (ISSET(FTS_NOCHDIR))
 		return (0);
-
 	if (fd < 0 && (newfd = open(p->fts_accpath, O_RDONLY, 0)) < 0)
 		return (-1);
-
 	if (fstat(newfd, &sb)) {
 		ret = -1;
 		goto bail;
 	}
-
 	if (p->fts_dev != sb.st_dev || p->fts_ino != sb.st_ino) {
 		errno = ENOENT;		/* disinformation */
 		ret = -1;
 		goto bail;
 	}
-
 	ret = fchdir(newfd);
-
 bail:
 	oerrno = errno;
-
 	if (fd < 0)
-		(void) close(newfd);
-
+		(void)close(newfd);
 	errno = oerrno;
-	return(ret);
+	return (ret);
 }

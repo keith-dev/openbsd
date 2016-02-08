@@ -1,4 +1,4 @@
-/*	$OpenBSD: fdformat.c,v 1.2 1996/06/28 00:53:38 downsj Exp $	*/
+/*	$OpenBSD: fdformat.c,v 1.5 1997/09/21 00:30:11 millert Exp $	*/
 
 /*
  * Copyright (C) 1992-1994 by Joerg Wunsch, Dresden
@@ -44,9 +44,10 @@
 #include <stdlib.h>
 #include <unistd.h>
 #include <fcntl.h>
-#include <strings.h>
+#include <string.h>
 #include <ctype.h>
 #include <err.h>
+#include <util.h>
 
 #include <errno.h>
 #include <sys/types.h>
@@ -118,7 +119,7 @@ verify_track(fd, track, tracksize)
                 fprintf (stderr, "\nfdformat: out of memory\n");
                 exit (2);
         }
-        if (lseek (fd, (long) track*tracksize, 0) < 0)
+        if (lseek (fd, (off_t) track*tracksize, 0) < 0)
                 rv = -1;
         /* try twice reading it, without using the normal retrier */
         else if (read (fd, buf, tracksize) != tracksize
@@ -244,8 +245,7 @@ main(argc, argv)
         if(optind != argc - 1)
                 usage();
 
-	fd = opendev(argv[optind], O_RDWR, 0, &devname);
-	if (fd < 0)
+	if ((fd = opendev(argv[optind], O_RDWR, OPENDEV_PART, &devname)) < 0)
 		err(1, devname);
 
         if(ioctl(fd, FD_GTYPE, &fdt) < 0)

@@ -1,4 +1,4 @@
-/*	$OpenBSD: key.c,v 1.6 1996/12/17 19:09:30 tholo Exp $	*/
+/*	$OpenBSD: key.c,v 1.8 1997/08/24 06:49:30 deraadt Exp $	*/
 /*	$NetBSD: key.c,v 1.11 1995/09/07 06:57:11 jtc Exp $	*/
 
 /*-
@@ -38,7 +38,7 @@
 #if 0
 static char sccsid[] = "@(#)key.c	8.4 (Berkeley) 2/20/95";
 #else
-static char rcsid[] = "$OpenBSD: key.c,v 1.6 1996/12/17 19:09:30 tholo Exp $";
+static char rcsid[] = "$OpenBSD: key.c,v 1.8 1997/08/24 06:49:30 deraadt Exp $";
 #endif
 #endif /* not lint */
 
@@ -107,10 +107,10 @@ static struct key {
 
 static int
 c_key(a, b)
-        const void *a, *b;
+	const void *a, *b;
 {
 
-        return (strcmp(((struct key *)a)->name, ((struct key *)b)->name));
+	return (strcmp(((struct key *)a)->name, ((struct key *)b)->name));
 }
 
 int
@@ -133,7 +133,7 @@ ksearch(argvp, ip)
 	    sizeof(keys)/sizeof(struct key), sizeof(struct key), c_key)))
 		return (0);
 	if (!(kp->flags & F_OFFOK) && ip->off) {
-		warnx("illegal option -- %s", name);
+		warnx("illegal option -- -%s", name);
 		usage();
 	}
 	if (kp->flags & F_NEEDARG && !(ip->arg = *++*argvp)) {

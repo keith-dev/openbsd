@@ -1,5 +1,5 @@
-/*	$OpenBSD: optr.c,v 1.12 1996/10/12 01:24:15 deraadt Exp $	*/
-/*	$NetBSD: optr.c,v 1.4 1996/05/18 16:16:17 jtk Exp $	*/
+/*	$OpenBSD: optr.c,v 1.16 1997/08/05 23:17:11 angelos Exp $	*/
+/*	$NetBSD: optr.c,v 1.11 1997/05/27 08:34:36 mrg Exp $	*/
 
 /*-
  * Copyright (c) 1980, 1988, 1993
@@ -38,7 +38,7 @@
 #if 0
 static char sccsid[] = "@(#)optr.c	8.2 (Berkeley) 1/6/94";
 #else
-static char rcsid[] = "$OpenBSD: optr.c,v 1.12 1996/10/12 01:24:15 deraadt Exp $";
+static char rcsid[] = "$OpenBSD: optr.c,v 1.16 1997/08/05 23:17:11 angelos Exp $";
 #endif
 #endif /* not lint */
 
@@ -70,7 +70,6 @@ static char rcsid[] = "$OpenBSD: optr.c,v 1.12 1996/10/12 01:24:15 deraadt Exp $
 
 void	alarmcatch __P((/* int, int */));
 int	datesort __P((const void *, const void *));
-static	void sendmes __P((char *, char *));
 
 /*
  *	Query the operator; This previously-fascist piece of code
@@ -95,7 +94,7 @@ query(question)
 	FILE	*mytty;
 	time_t	firstprompt, when_answered;
 
-	firstprompt = time((time_t *)0);
+	firstprompt = time(NULL);
 
 	if ((mytty = fopen(_PATH_TTY, "r")) == NULL)
 		quit("fopen on %s fails: %s\n", _PATH_TTY, strerror(errno));
@@ -128,7 +127,7 @@ query(question)
 	if (signal(SIGALRM, sig) == SIG_IGN)
 		signal(SIGALRM, SIG_IGN);
 	(void) fclose(mytty);
-	when_answered = time((time_t *)0);
+	when_answered = time(NULL);
 	/*
 	 * Adjust the base for time estimates to ignore time we spent waiting
 	 * for operator input.
@@ -147,6 +146,8 @@ char lastmsg[BUFSIZ];
 void
 alarmcatch()
 {
+	int save_errno = errno;
+
 	if (notify == 0) {
 		if (timeout == 0)
 			(void) fprintf(stderr,
@@ -165,6 +166,7 @@ alarmcatch()
 	signal(SIGALRM, alarmcatch);
 	(void) alarm(120);
 	timeout = 1;
+	errno = save_errno;
 }
 
 /*
@@ -179,21 +181,20 @@ interrupt(signo)
 		dumpabort(0);
 }
 
-/*              
+/*
  *	We now use wall(1) to do the actual broadcasting.
- */         
+ */
 void
 broadcast(message)
 	char	*message;
 {
 	FILE *fp;
-	char buf[sizeof(_PATH_WALL) + 12];
+	char buf[sizeof(_PATH_WALL) + sizeof(OPGRENT) + 3];
 
 	if (!notify)
 		return;
 
-	(void) strcpy(buf, _PATH_WALL);
-	(void) strcpy(buf + sizeof(_PATH_WALL) - 1, " -g operator");
+	(void)snprintf(buf, sizeof(buf), "%s -g %s", _PATH_WALL, OPGRENT);
 	if ((fp = popen(buf, "w")) == NULL)
 		return;
 
@@ -232,7 +233,7 @@ timeest()
 }
 
 void
-#if __STDC__
+#ifdef __STDC__
 msg(const char *fmt, ...)
 #else
 msg(fmt, va_alist)
@@ -246,7 +247,7 @@ msg(fmt, va_alist)
 #ifdef TDEBUG
 	(void) fprintf(stderr, "pid=%d ", getpid());
 #endif
-#if __STDC__
+#ifdef __STDC__
 	va_start(ap, fmt);
 #else
 	va_start(ap);
@@ -259,7 +260,7 @@ msg(fmt, va_alist)
 }
 
 void
-#if __STDC__
+#ifdef __STDC__
 msgtail(const char *fmt, ...)
 #else
 msgtail(fmt, va_alist)
@@ -268,7 +269,7 @@ msgtail(fmt, va_alist)
 #endif
 {
 	va_list ap;
-#if __STDC__
+#ifdef __STDC__
 	va_start(ap, fmt);
 #else
 	va_start(ap);
@@ -278,7 +279,7 @@ msgtail(fmt, va_alist)
 }
 
 void
-#if __STDC__
+#ifdef __STDC__
 quit(const char *fmt, ...)
 #else
 quit(fmt, va_alist)
@@ -292,7 +293,7 @@ quit(fmt, va_alist)
 #ifdef TDEBUG
 	(void) fprintf(stderr, "pid=%d ", getpid());
 #endif
-#if __STDC__
+#ifdef __STDC__
 	va_start(ap, fmt);
 #else
 	va_start(ap);
@@ -315,7 +316,7 @@ allocfsent(fs)
 {
 	register struct fstab *new;
 
-	new = (struct fstab *)malloc(sizeof (*fs));
+	new = (struct fstab *)malloc(sizeof(*fs));
 	if (new == NULL ||
 	    (new->fs_file = strdup(fs->fs_file)) == NULL ||
 	    (new->fs_type = strdup(fs->fs_type)) == NULL ||
@@ -353,7 +354,7 @@ getfstab()
 		    strcmp(fs->fs_type, FSTAB_RQ))
 			continue;
 		fs = allocfsent(fs);
-		if ((pf = (struct pfstab *)malloc(sizeof (*pf))) == NULL)
+		if ((pf = (struct pfstab *)malloc(sizeof(*pf))) == NULL)
 			quit("%s\n", strerror(errno));
 		pf->pf_fstab = fs;
 		pf->pf_next = table;

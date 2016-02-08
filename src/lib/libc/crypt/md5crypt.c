@@ -1,4 +1,4 @@
-/*	$OpenBSD: md5crypt.c,v 1.7 1996/12/14 06:49:36 tholo Exp $	*/
+/*	$OpenBSD: md5crypt.c,v 1.9 1997/07/23 20:58:27 kstailey Exp $	*/
 
 /*
  * ----------------------------------------------------------------------------
@@ -13,7 +13,7 @@
  */
 
 #if defined(LIBC_SCCS) && !defined(lint)
-static char rcsid[] = "$OpenBSD: md5crypt.c,v 1.7 1996/12/14 06:49:36 tholo Exp $";
+static char rcsid[] = "$OpenBSD: md5crypt.c,v 1.9 1997/07/23 20:58:27 kstailey Exp $";
 #endif /* LIBC_SCCS and not lint */
 
 #include <unistd.h>
@@ -25,12 +25,12 @@ static char rcsid[] = "$OpenBSD: md5crypt.c,v 1.7 1996/12/14 06:49:36 tholo Exp 
 static unsigned char itoa64[] =		/* 0 ... 63 => ascii - 64 */
 	"./0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
 
-static void to64 __P((char *, unsigned long, int));
+static void to64 __P((char *, u_int32_t, int));
 
 static void
 to64(s, v, n)
 	char *s;
-	unsigned long v;
+	u_int32_t v;
 	int n;
 {
 	while (--n >= 0) {
@@ -61,7 +61,7 @@ md5crypt(pw, salt)
 	unsigned char	final[16];
 	int sl,pl,i;
 	MD5_CTX	ctx,ctx1;
-	unsigned long l;
+	u_int32_t l;
 
 	/* Refine the Salt first */
 	sp = (const unsigned char *)salt;
@@ -146,7 +146,7 @@ md5crypt(pw, salt)
 	l = (final[ 2]<<16) | (final[ 8]<<8) | final[14]; to64(p,l,4); p += 4;
 	l = (final[ 3]<<16) | (final[ 9]<<8) | final[15]; to64(p,l,4); p += 4;
 	l = (final[ 4]<<16) | (final[10]<<8) | final[ 5]; to64(p,l,4); p += 4;
-	l =                    final[11]                ; to64(p,l,2); p += 2;
+	l =		       final[11]		; to64(p,l,2); p += 2;
 	*p = '\0';
 
 	/* Don't leave anything around in vm they could use. */

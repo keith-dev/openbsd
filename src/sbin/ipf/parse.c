@@ -1,4 +1,4 @@
-/*	$OpenBSD: parse.c,v 1.12 1997/04/19 19:08:29 kstailey Exp $	*/
+/*	$OpenBSD: parse.c,v 1.16 1997/08/24 18:29:39 millert Exp $	*/
 /*
  * (C)opyright 1993-1996 by Darren Reed.
  *
@@ -35,7 +35,7 @@
 
 #if !defined(lint) && defined(LIBC_SCCS)
 static	char	sccsid[] ="@(#)parse.c	1.44 6/5/96 (C) 1993-1996 Darren Reed";
-static	char	rcsid[] = "$DRId: parse.c,v 2.0.1.2 1997/02/17 13:59:44 darrenr Exp $";
+static	char	rcsid[] = "$DRId: parse.c,v 2.0.1.4 1997/03/20 15:49:25 darrenr Exp $";
 #endif
 
 extern	struct	ipopt_names	ionames[], secclass[];
@@ -110,15 +110,13 @@ char	*line;
 			fil.fr_flags |= FR_RETICMP;
 			cpp++;
 			if (*(*cpp + 11) == '(') {
-				int icode = icmpcode(*cpp + 12);
-
-				if (icode == -1) {
+				fil.fr_icode = icmpcode(*cpp + 12);
+				if (fil.fr_icode == -1) {
 					fprintf(stderr,
 						"unrecognized icmp code %s\n",
 						*cpp + 12);
 					return NULL;
 				}
-				fil.fr_icode = icode;
 			}
 		} else if (!strncasecmp(*(cpp+1), "return-rst", 10)) {
 			fil.fr_flags |= FR_RETRST;
@@ -567,7 +565,7 @@ int	*resolved;
 		}
 		return np->n_net;
 	}
-	return *(u_long *)hp->h_addr;
+	return *(u_int32_t *)hp->h_addr;
 }
 
 /*
@@ -932,8 +930,11 @@ struct	frentry	*fp;
 			if (!strcasecmp(*t, **cp))
 				break;
 		}
-		if (i == -1)
+		if (i == -1) {
+			(void)fprintf(stderr,
+				"Invalid icmp-type (%s) specified\n", **cp);
 			return -1;
+		}
 	}
 	fp->fr_icmp = (u_short)(i << 8);
 	fp->fr_icmpm = (u_short)0xff00;

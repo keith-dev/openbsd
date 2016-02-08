@@ -32,7 +32,7 @@
  */
 
 #if defined(LIBC_SCCS) && !defined(lint)
-static char rcsid[] = "$OpenBSD: exec.c,v 1.5 1996/12/05 05:37:10 deraadt Exp $";
+static char rcsid[] = "$OpenBSD: exec.c,v 1.7 1997/09/20 09:46:10 deraadt Exp $";
 #endif /* LIBC_SCCS and not lint */
 
 #include <sys/param.h>
@@ -44,7 +44,7 @@ static char rcsid[] = "$OpenBSD: exec.c,v 1.5 1996/12/05 05:37:10 deraadt Exp $"
 #include <stdio.h>
 #include <paths.h>
 
-#if __STDC__
+#ifdef __STDC__
 #include <stdarg.h>
 #else
 #include <varargs.h>
@@ -87,7 +87,7 @@ buildargv(ap, arg, envpp)
 }
 
 int
-#if __STDC__
+#ifdef __STDC__
 execl(const char *name, const char *arg, ...)
 #else
 execl(name, arg, va_alist)
@@ -100,7 +100,7 @@ execl(name, arg, va_alist)
 	int sverrno;
 	char **argv;
 
-#if __STDC__
+#ifdef __STDC__
 	va_start(ap, arg);
 #else
 	va_start(ap);
@@ -115,7 +115,7 @@ execl(name, arg, va_alist)
 }
 
 int
-#if __STDC__
+#ifdef __STDC__
 execle(const char *name, const char *arg, ...)
 #else
 execle(name, arg, va_alist)
@@ -125,25 +125,36 @@ execle(name, arg, va_alist)
 #endif
 {
 	va_list ap;
-	int sverrno;
 	char **argv, **envp;
+	int i;
+
+#ifdef __STDC__
+	va_start(ap, arg);
+#else
+	va_start(ap);
+#endif
+	for (i = 1; va_arg(ap, char *) != NULL; i++)
+		;
+	va_end(ap);
+
+	argv = alloca (i * sizeof (char *));
 
 #if __STDC__
 	va_start(ap, arg);
 #else
 	va_start(ap);
 #endif
-	if ((argv = buildargv(ap, arg, &envp)))
-		(void)execve(name, argv, envp);
+	argv[0] = (char *) arg;
+	for (i = 1; (argv[i] = (char *) va_arg(ap, char *)) != NULL; i++)
+		;
+	envp = (char **) va_arg(ap, char **);
 	va_end(ap);
-	sverrno = errno;
-	free(argv);
-	errno = sverrno;
-	return (-1);
+
+	return execve(name, argv, envp);
 }
 
 int
-#if __STDC__
+#ifdef __STDC__
 execlp(const char *name, const char *arg, ...)
 #else
 execlp(name, arg, va_alist)
@@ -156,7 +167,7 @@ execlp(name, arg, va_alist)
 	int sverrno;
 	char **argv;
 
-#if __STDC__
+#ifdef __STDC__
 	va_start(ap, arg);
 #else
 	va_start(ap);

@@ -1,5 +1,5 @@
-/*	$OpenBSD: extern.h,v 1.4 1997/03/29 03:01:45 millert Exp $	*/
-/*	$NetBSD: extern.h,v 1.4 1996/06/08 19:48:21 christos Exp $	*/
+/*	$OpenBSD: extern.h,v 1.11 1997/07/30 07:19:30 millert Exp $	*/
+/*	$NetBSD: extern.h,v 1.7 1997/07/09 05:22:00 mikel Exp $	*/
 
 /*-
  * Copyright (c) 1992, 1993
@@ -33,8 +33,8 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- *	@(#)extern.h	8.1 (Berkeley) 6/6/93
- *	$NetBSD: extern.h,v 1.4 1996/06/08 19:48:21 christos Exp $
+ *	@(#)extern.h	8.2 (Berkeley) 4/20/95
+ *	$OpenBSD: extern.h,v 1.11 1997/07/30 07:19:30 millert Exp $
  */
 
 struct name;
@@ -94,7 +94,7 @@ int	 anyof __P((char *, char *));
 int	 append __P((struct message *, FILE *));
 int	 argcount __P((char **));
 void	 assign __P((char [], char []));
-int	 bangexp __P((char *));
+int	 bangexp __P((char *, size_t));
 int	 blankline __P((char []));
 void	 brokpipe __P((int));
 int	 charcount __P((char *, int));
@@ -130,17 +130,18 @@ void	 fail __P((char [], char []));
 int	 file __P((void *));
 struct grouphead *
 	 findgroup __P((char []));
-void	 findmail __P((char *, char *));
+void	 findmail __P((char *, char *, int));
 int	 first __P((int, int));
 void	 fixhead __P((struct header *, struct name *));
 void	 fmt __P((char *, struct name *, FILE *, int));
 int	 folders __P((void *));
-int	 forward __P((char [], FILE *, int));
+int	 forward __P((char [], FILE *, char *, int));
 void	 free_child __P((int));
 int	 from __P((void *));
 off_t	 fsize __P((FILE *));
-int	 getfold __P((char *));
+int	 getfold __P((char *, int));
 int	 gethfield __P((FILE *, char [], int, char **));
+void	 gethfromtty __P((struct header *, int));
 int	 getmsglist __P((char *, int *, int));
 int	 getrawlist __P((char [], char **, int));
 int	 getuserid __P((char []));
@@ -158,13 +159,15 @@ struct ignoretab;
 int	 ignore1 __P((char *[], struct ignoretab *, char *));
 int	 igshow __P((struct ignoretab *, char *));
 void	 intr __P((int));
+int	 inc __P((void *));
+int	 incfile __P((void));
 int	 isdate __P((char []));
 int	 isdir __P((char []));
 int	 isfileaddr __P((char *));
 int	 ishead __P((char []));
 int	 isign __P((char *, struct ignoretab []));
 int	 isprefix __P((char *, char *));
-void	 istrcpy __P((char *, char *));
+void	 istrncpy __P((char *, char *, size_t));
 const struct cmd *
 	 lex __P((char []));
 void	 load __P((char *));
@@ -173,7 +176,7 @@ struct var *
 int	 mail __P((struct name *,
 	    struct name *, struct name *, struct name *, char *));
 void	 mail1 __P((struct header *, int));
-void	 makemessage __P((FILE *));
+void	 makemessage __P((FILE *, int));
 void	 mark __P((int));
 int	 markall __P((char [], int));
 int	 matchsender __P((char *, int));
@@ -185,7 +188,7 @@ void	 mespipe __P((FILE *, char []));
 int	 messize __P((void *));
 int	 metamess __P((int, int));
 int	 more __P((void *));
-int	 newfileinfo __P((void));
+int	 newfileinfo __P((int));
 int	 next __P((void *));
 int	 null __P((void *));
 void	 panic __P((const char *, ...))
@@ -200,7 +203,7 @@ void	 prettyprint __P((struct name *));
 void	 printgroup __P((char []));
 void	 printhead __P((int));
 int	 puthead __P((struct header *, FILE *, int));
-int	 putline __P((FILE *, char *));
+int	 putline __P((FILE *, char *, int));
 int	 pversion __P((void *));
 void	 quit __P((void));
 int	 quitcmd __P((void *));
@@ -230,7 +233,7 @@ int	 sendmail __P((void *));
 int	 set __P((void *));
 int	 setfile __P((char *));
 void	 setmsize __P((int));
-void	 setptr __P((FILE *));
+void	 setptr __P((FILE *, off_t));
 void	 setscreensize __P((void));
 int	 shell __P((void *));
 void	 sigchild __P((int));
@@ -264,3 +267,6 @@ int	 visual __P((void *));
 int	 wait_child __P((int));
 int	 wait_command __P((int));
 int	 writeback __P((FILE *));
+
+extern char *__progname;
+extern char *tmpdir;

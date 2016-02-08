@@ -1,4 +1,4 @@
-/*	$OpenBSD: ar_subs.c,v 1.6 1997/02/27 23:32:57 michaels Exp $	*/
+/*	$OpenBSD: ar_subs.c,v 1.13 1997/09/16 21:20:35 niklas Exp $	*/
 /*	$NetBSD: ar_subs.c,v 1.5 1995/03/21 09:07:06 cgd Exp $	*/
 
 /*-
@@ -42,7 +42,7 @@
 #if 0
 static char sccsid[] = "@(#)ar_subs.c	8.2 (Berkeley) 4/18/94";
 #else
-static char rcsid[] = "$OpenBSD: ar_subs.c,v 1.6 1997/02/27 23:32:57 michaels Exp $";
+static char rcsid[] = "$OpenBSD: ar_subs.c,v 1.13 1997/09/16 21:20:35 niklas Exp $";
 #endif
 #endif /* not lint */
 
@@ -70,7 +70,7 @@ extern sigset_t s_mask;
  * the user: list, append, read ...
  */
 
-static char hdbuf[BLKMULT];             /* space for archive header on read */
+static char hdbuf[BLKMULT];		/* space for archive header on read */
 u_long flcnt;				/* number of files processed */
 
 /*
@@ -79,7 +79,7 @@ u_long flcnt;				/* number of files processed */
  *	(no pattern matches all).
  */
 
-#if __STDC__
+#ifdef __STDC__
 void
 list(void)
 #else
@@ -107,7 +107,7 @@ list()
 	if (vflag && ((uidtb_start() < 0) || (gidtb_start() < 0)))
 		return;
 
-	now = time((time_t *)NULL);
+	now = time(NULL);
 
 	/*
 	 * step through the archive until the format says it is done
@@ -150,7 +150,7 @@ list()
 	 * the patterns supplied by the user were all matched
 	 */
 	(void)(*frmt->end_rd)();
-	(void)sigprocmask(SIG_BLOCK, &s_mask, (sigset_t *)NULL);
+	(void)sigprocmask(SIG_BLOCK, &s_mask, NULL);
 	ar_close();
 	pat_chk();
 }
@@ -161,7 +161,7 @@ list()
  *	pattern(s) (no patterns extracts all members)
  */
 
-#if __STDC__
+#ifdef __STDC__
 void
 extract(void)
 #else
@@ -194,7 +194,7 @@ extract()
 	if (iflag && (name_start() < 0))
 		return;
 
-	now = time((time_t *)NULL);
+	now = time(NULL);
 
 	/*
 	 * step through each entry on the archive until the format read routine
@@ -349,8 +349,9 @@ extract()
 		 * if required, chdir around.
 		 */
 		if ((arcn->pat != NULL) && (arcn->pat->chdname != NULL))
-			if (chdir(cwdpt) != 0)
-				syswarn(1, errno, "Can't chdir to %s", cwdpt);
+			if (fchdir(cwdfd) != 0)
+				syswarn(1, errno,
+				    "Can't fchdir to starting directory");
 	}
 
 	/*
@@ -359,7 +360,7 @@ extract()
 	 * to avoid chance for multiple entry into the cleanup code.
 	 */
 	(void)(*frmt->end_rd)();
-	(void)sigprocmask(SIG_BLOCK, &s_mask, (sigset_t *)NULL);
+	(void)sigprocmask(SIG_BLOCK, &s_mask, NULL);
 	ar_close();
 	proc_dir();
 	pat_chk();
@@ -371,7 +372,7 @@ extract()
  *	previously written archive.
  */
 
-#if __STDC__
+#ifdef __STDC__
 static void
 wr_archive(register ARCHD *arcn, int is_app)
 #else
@@ -415,7 +416,7 @@ wr_archive(arcn, is_app)
 	 */
 	wr_one = is_app;
 
-	now = time((time_t *)NULL);
+	now = time(NULL);
 
 	/*
 	 * while there are files to archive, process them one at at time
@@ -552,7 +553,7 @@ wr_archive(arcn, is_app)
 		(*frmt->end_wr)();
 		wr_fin();
 	}
-	(void)sigprocmask(SIG_BLOCK, &s_mask, (sigset_t *)NULL);
+	(void)sigprocmask(SIG_BLOCK, &s_mask, NULL);
 	ar_close();
 	if (tflag)
 		proc_dir();
@@ -581,7 +582,7 @@ wr_archive(arcn, is_app)
  *	over write existing files that it creates.
  */
 
-#if __STDC__
+#ifdef __STDC__
 void
 append(void)
 #else
@@ -722,7 +723,7 @@ append()
  *	write a new archive
  */
 
-#if __STDC__
+#ifdef __STDC__
 void
 archive(void)
 #else
@@ -753,7 +754,7 @@ archive()
  *	(except the files are forced to be under the destination directory).
  */
 
-#if __STDC__
+#ifdef __STDC__
 void
 copy(void)
 #else
@@ -777,7 +778,7 @@ copy()
 	 * set up the destination dir path and make sure it is a directory. We
 	 * make sure we have a trailing / on the destination
 	 */
-	dlen = l_strncpy(dirbuf, dirptr, PAXPATHLEN);
+	dlen = l_strncpy(dirbuf, dirptr, sizeof(dirbuf) - 1);
 	dest_pt = dirbuf + dlen;
 	if (*(dest_pt-1) != '/') {
 		*dest_pt++ = '/';
@@ -914,7 +915,7 @@ copy()
 		 * try to create a hard link to the src file if requested
 		 * but make sure we are not trying to overwrite ourselves.
 		 */
-		if (lflag) 
+		if (lflag)
 			res = cross_lnk(arcn);
 		else
 			res = chk_same(arcn);
@@ -980,7 +981,7 @@ copy()
 	 * patterns were selected block off signals to avoid chance for
 	 * multiple entry into the cleanup code.
 	 */
-	(void)sigprocmask(SIG_BLOCK, &s_mask, (sigset_t *)NULL);
+	(void)sigprocmask(SIG_BLOCK, &s_mask, NULL);
 	ar_close();
 	proc_dir();
 	ftree_chk();
@@ -1005,7 +1006,7 @@ copy()
  *	the specs for rd_wrbuf() for more details)
  */
 
-#if __STDC__
+#ifdef __STDC__
 static int
 next_head(register ARCHD *arcn)
 #else
@@ -1021,7 +1022,8 @@ next_head(arcn)
 	register int hsz;
 	register int in_resync = 0; 	/* set when we are in resync mode */
 	int cnt = 0;			/* counter for trailer function */
-	
+	int first = 1;			/* on 1st read, EOF isn't premature. */
+
 	/*
 	 * set up initial conditions, we want a whole frmt->hsz block as we
 	 * have no data yet.
@@ -1039,6 +1041,17 @@ next_head(arcn)
 				break;
 
 			/*
+			 * If we read 0 bytes (EOF) from an archive when we
+			 * expect to find a header, we have stepped upon
+			 * an archive without the customary block of zeroes
+			 * end marker.  It's just stupid to error out on
+			 * them, so exit gracefully.
+			 */
+			if (first && ret == 0)
+				return(-1);
+			first = 0;
+
+			/*
 			 * some kind of archive read problem, try to resync the
 			 * storage device, better give the user the bad news.
 			 */
@@ -1049,7 +1062,7 @@ next_head(arcn)
 			if (!in_resync) {
 				if (act == APPND) {
 					paxwarn(1,
-				          "Archive I/O error, cannot continue");
+					  "Archive I/O error, cannot continue");
 					return(-1);
 				}
 				paxwarn(1,"Archive I/O error. Trying to recover.");
@@ -1151,7 +1164,7 @@ next_head(arcn)
  *	0 if archive found -1 otherwise
  */
 
-#if __STDC__
+#ifdef __STDC__
 static int
 get_arc(void)
 #else
@@ -1165,7 +1178,7 @@ get_arc()
 	register int minhd = BLKMULT;
 	char *hdend;
 	int notice = 0;
-	
+
 	/*
 	 * find the smallest header size in all archive formats and then set up
 	 * to read the archive.

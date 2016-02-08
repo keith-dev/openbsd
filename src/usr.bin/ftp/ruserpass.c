@@ -1,5 +1,5 @@
-/*	$OpenBSD: ruserpass.c,v 1.8 1997/04/23 20:33:21 deraadt Exp $	*/
-/*	$NetBSD: ruserpass.c,v 1.13 1997/04/01 14:20:34 mrg Exp $	*/
+/*	$OpenBSD: ruserpass.c,v 1.10 1997/09/05 00:02:30 millert Exp $	*/
+/*	$NetBSD: ruserpass.c,v 1.14 1997/07/20 09:46:01 lukem Exp $	*/
 
 /*
  * Copyright (c) 1985, 1993, 1994
@@ -38,7 +38,7 @@
 #if 0
 static char sccsid[] = "@(#)ruserpass.c	8.4 (Berkeley) 4/27/95";
 #else
-static char rcsid[] = "$OpenBSD: ruserpass.c,v 1.8 1997/04/23 20:33:21 deraadt Exp $";
+static char rcsid[] = "$OpenBSD: ruserpass.c,v 1.10 1997/09/05 00:02:30 millert Exp $";
 #endif
 #endif /* not lint */
 
@@ -133,12 +133,14 @@ next:
 				goto match;
 			if ((tmp = strchr(hostname, '.')) != NULL &&
 			    strcasecmp(tmp, mydomain) == 0 &&
-			    strncasecmp(hostname, tokval, tmp-hostname) == 0 &&
+			    strncasecmp(hostname, tokval,
+			    (size_t)(tmp - hostname)) == 0 &&
 			    tokval[tmp - hostname] == '\0')
 				goto match;
 			if ((tmp = strchr(host, '.')) != NULL &&
 			    strcasecmp(tmp, mydomain) == 0 &&
-			    strncasecmp(host, tokval, tmp - host) == 0 &&
+			    strncasecmp(host, tokval,
+			    (size_t)(tmp - host)) == 0 &&
 			    tokval[tmp - host] == '\0')
 				goto match;
 			continue;
@@ -187,7 +189,7 @@ next:
 				(void)fclose(cfile);
 				return (0);
 			}
-			while ((c=getc(cfile)) != EOF)
+			while ((c = fgetc(cfile)) != EOF)
 				if (c != ' ' && c != '\t')
 					break;
 			if (c == EOF || c == '\n') {
@@ -201,7 +203,7 @@ next:
 			}
 			tmp = macros[macnum].mac_name;
 			*tmp++ = c;
-			for (i=0; i < 8 && (c=getc(cfile)) != EOF &&
+			for (i=0; i < 8 && (c = fgetc(cfile)) != EOF &&
 			    !isspace(c); ++i) {
 				*tmp++ = c;
 			}
@@ -212,7 +214,7 @@ next:
 			}
 			*tmp = '\0';
 			if (c != '\n') {
-				while ((c=getc(cfile)) != EOF && c != '\n');
+				while ((c = fgetc(cfile)) != EOF && c != '\n');
 			}
 			if (c == EOF) {
 				fputs(
@@ -228,7 +230,7 @@ next:
 			}
 			tmp = macros[macnum].mac_start;
 			while (tmp != macbuf + 4096) {
-				if ((c=getc(cfile)) == EOF) {
+				if ((c = fgetc(cfile)) == EOF) {
 				fputs(
 "Macro definition missing null line terminator.\n", ttyout);
 					goto bad;
@@ -271,24 +273,24 @@ token()
 
 	if (feof(cfile) || ferror(cfile))
 		return (0);
-	while ((c = getc(cfile)) != EOF &&
+	while ((c = fgetc(cfile)) != EOF &&
 	    (c == '\n' || c == '\t' || c == ' ' || c == ','))
 		continue;
 	if (c == EOF)
 		return (0);
 	cp = tokval;
 	if (c == '"') {
-		while ((c = getc(cfile)) != EOF && c != '"') {
+		while ((c = fgetc(cfile)) != EOF && c != '"') {
 			if (c == '\\')
-				c = getc(cfile);
+				c = fgetc(cfile);
 			*cp++ = c;
 		}
 	} else {
 		*cp++ = c;
-		while ((c = getc(cfile)) != EOF
+		while ((c = fgetc(cfile)) != EOF
 		    && c != '\n' && c != '\t' && c != ' ' && c != ',') {
 			if (c == '\\')
-				c = getc(cfile);
+				c = fgetc(cfile);
 			*cp++ = c;
 		}
 	}

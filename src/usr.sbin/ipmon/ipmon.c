@@ -41,7 +41,7 @@
 #include <ctype.h>
 
 #if !defined(lint) && defined(LIBC_SCCS)
-static	char	rcsid[] = "$Id: ipmon.c,v 1.7 1997/02/11 22:24:10 kstailey Exp $";
+static	char	rcsid[] = "$Id: ipmon.c,v 1.10 1997/07/22 17:00:05 kstailey Exp $";
 #endif
 
 #include "ip_fil_compat.h"
@@ -267,7 +267,7 @@ int	len;
 		if (j && !(j & 0xf)) {
 			*t++ = '\n';
 			*t = '\0';
-			fputs(line, stdout);
+			fputs(line, log);
 			t = (u_char *)line;
 			*t = '\0';
 		}
@@ -300,8 +300,8 @@ int	len;
 		*t++ = '\n';
 		*t = '\0';
 	}
-	fputs(line, stdout);
-	fflush(stdout);
+	fputs(line, log);
+	fflush(log);
 }
 
 
@@ -487,7 +487,8 @@ int	blen;
 		dumphex(log, buf, sizeof(struct ipl_ci));
 	if (opts & OPT_HEXBODY)
 		dumphex(log, ip, lp->plen + lp->hlen);
-	fflush(log);
+	if (!(opts & OPT_SYSLOG))
+		fflush(log);
 }
 
 int main(argc, argv)
@@ -547,6 +548,8 @@ char *argv[];
 	if (!(opts & OPT_SYSLOG)) {
 		log = argv[optind] ? fopen(argv[optind], "a") : stdout;
 		setvbuf(log, NULL, _IONBF, 0);
+	} else {
+		daemon(0, 0);
 	}
 
 	if (flushed) {

@@ -1,4 +1,4 @@
-/*	$OpenBSD: rmjob.c,v 1.5 1997/01/17 16:11:37 millert Exp $	*/
+/*	$OpenBSD: rmjob.c,v 1.8 1997/07/23 22:12:12 deraadt Exp $	*/
 
 /*
  * Copyright (c) 1983, 1993
@@ -37,7 +37,7 @@
 #if 0
 static char sccsid[] = "@(#)rmjob.c	8.2 (Berkeley) 4/28/95";
 #else
-static char rcsid[] = "$OpenBSD: rmjob.c,v 1.5 1997/01/17 16:11:37 millert Exp $";
+static char rcsid[] = "$OpenBSD: rmjob.c,v 1.8 1997/07/23 22:12:12 deraadt Exp $";
 #endif
 #endif /* not lint */
 
@@ -100,7 +100,7 @@ rmjob()
 	if (cgetstr(bp,"lo", &LO) < 0)
 		LO = DEFLOCK;
 	cgetstr(bp, "rm", &RM);
-	if (cp = checkremote())
+	if ((cp = checkremote()))
 		printf("Warning: %s\n", cp);
 
 	/*
@@ -216,6 +216,8 @@ process(file)
 	while (getline(cfp)) {
 		switch (line[0]) {
 		case 'U':  /* unlink associated files */
+			if (strchr(line+1, '/') || strncmp(line+1, "df", 2))
+				break;
 			do_unlink(line+1);
 		}
 	}
@@ -338,7 +340,7 @@ rmremote()
 		*cp++ = ' ';
 		strcpy(cp, user[i]);
 	}
-	for (i = 0; i < requests && cp-buf+10 < sizeof buf; i++) {
+	for (i = 0; i < requests && cp-buf+10 < sizeof(buf) - 1; i++) {
 		cp += strlen(cp);
 		(void) sprintf(cp, " %d", requ[i]);
 	}

@@ -1,4 +1,4 @@
-/*	$OpenBSD: proc.c,v 1.3 1996/12/14 12:17:42 mickey Exp $	*/
+/*	$OpenBSD: proc.c,v 1.7 1997/09/22 05:09:15 millert Exp $	*/
 /*	$NetBSD: proc.c,v 1.9 1995/04/29 23:21:33 mycroft Exp $	*/
 
 /*-
@@ -38,7 +38,7 @@
 #if 0
 static char sccsid[] = "@(#)proc.c	8.1 (Berkeley) 5/31/93";
 #else
-static char rcsid[] = "$OpenBSD: proc.c,v 1.3 1996/12/14 12:17:42 mickey Exp $";
+static char rcsid[] = "$OpenBSD: proc.c,v 1.7 1997/09/22 05:09:15 millert Exp $";
 #endif
 #endif /* not lint */
 
@@ -48,12 +48,11 @@ static char rcsid[] = "$OpenBSD: proc.c,v 1.3 1996/12/14 12:17:42 mickey Exp $";
 #include <unistd.h>
 #include <stdlib.h>
 #include <string.h>
-#if __STDC__
+#ifdef __STDC__
 # include <stdarg.h>
 #else
 # include <varargs.h>
 #endif
-#include <err.h>
 
 #include "csh.h"
 #include "dir.h"
@@ -92,6 +91,7 @@ pchild(notused)
     register struct process *fp;
     register int pid;
     extern int insource;
+    int save_errno = errno;
     union wait w;
     int     jobflags;
     struct rusage ru;
@@ -107,6 +107,7 @@ loop:
 	    goto loop;
 	}
 	pnoprocesses = pid == -1;
+	errno = save_errno;
 	return;
     }
     for (pp = proclist.p_next; pp != NULL; pp = pp->p_next)
@@ -742,16 +743,16 @@ pprint(pp, flag)
 		case PINTERRUPTED:
 		case PSTOPPED:
 		case PSIGNALED:
-                    /*
-                     * tell what happened to the background job
-                     * From: Michael Schroeder
-                     * <mlschroe@immd4.informatik.uni-erlangen.de>
-                     */
-                    if ((flag & REASON)
-                        || ((flag & AREASON)
-                            && reason != SIGINT
-                            && (reason != SIGPIPE
-                                || (pp->p_flags & PPOU) == 0))) {
+		    /*
+		     * tell what happened to the background job
+		     * From: Michael Schroeder
+		     * <mlschroe@immd4.informatik.uni-erlangen.de>
+		     */
+		    if ((flag & REASON)
+			|| ((flag & AREASON)
+			    && reason != SIGINT
+			    && (reason != SIGPIPE
+				|| (pp->p_flags & PPOU) == 0))) {
 			(void) fprintf(cshout, format,
 				       sys_siglist[(unsigned char)
 						   pp->p_reason]);

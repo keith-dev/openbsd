@@ -1,4 +1,4 @@
-/*	$OpenBSD: extract.c,v 1.2 1996/06/26 05:31:20 deraadt Exp $	*/
+/*	$OpenBSD: extract.c,v 1.4 1997/08/19 07:22:09 denny Exp $	*/
 /*	$NetBSD: extract.c,v 1.5 1995/03/26 03:27:53 glass Exp $	*/
 
 /*-
@@ -41,7 +41,7 @@
 #if 0
 static char sccsid[] = "@(#)extract.c	8.3 (Berkeley) 4/2/94";
 #else 
-static char rcsid[] = "$OpenBSD: extract.c,v 1.2 1996/06/26 05:31:20 deraadt Exp $";
+static char rcsid[] = "$OpenBSD: extract.c,v 1.4 1997/08/19 07:22:09 denny Exp $";
 #endif
 #endif /* not lint */
 
@@ -96,11 +96,22 @@ extract(argv)
 		    sb.st_mtime > chdr.date)
 			continue;
 
-		if ((tfd = open(file, O_WRONLY|O_CREAT|O_TRUNC, S_IWUSR)) < 0) {
-			warn("%s", file);
-			skip_arobj(afd);
-			eval = 1;
-			continue;
+		if (options & AR_CC) {
+			/* -C means do not overwrite existing files */
+			if ((tfd = open(file, O_WRONLY|O_CREAT|O_EXCL,
+			    S_IWUSR)) < 0) {
+				skip_arobj(afd);
+				eval = 1;
+				continue;
+			}
+		} else {
+			if ((tfd = open(file, O_WRONLY|O_CREAT|O_TRUNC,
+			    S_IWUSR)) < 0) {
+				warn("%s", file);
+				skip_arobj(afd);
+				eval = 1;
+				continue;
+			}
 		}
 
 		if (options & AR_V)
@@ -116,7 +127,7 @@ extract(argv)
 		}
 		if (options & AR_O) {
 			tv[0].tv_sec = tv[1].tv_sec = chdr.date;
-			if (utimes(file, tv)) {
+			if (futimes(tfd, tv)) {
 				warn("utimes: %s", file);
 				eval = 1;
 			}

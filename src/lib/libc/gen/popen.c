@@ -35,7 +35,7 @@
  */
 
 #if defined(LIBC_SCCS) && !defined(lint)
-static char rcsid[] = "$OpenBSD: popen.c,v 1.4 1997/04/16 21:59:04 millert Exp $";
+static char rcsid[] = "$OpenBSD: popen.c,v 1.9 1997/09/11 18:51:04 deraadt Exp $";
 #endif /* LIBC_SCCS and not lint */
 
 #include <sys/param.h>
@@ -64,7 +64,11 @@ popen(program, type)
 	FILE *iop;
 	int pdes[2], pid;
 
-	if (*type != 'r' && *type != 'w' || type[1]) {
+#ifdef __GNUC__
+	(void)&cur;
+#endif
+
+	if ((*type != 'r' && *type != 'w') || type[1] != '\0') {
 		errno = EINVAL;
 		return (NULL);
 	}
@@ -85,34 +89,39 @@ popen(program, type)
 		return (NULL);
 		/* NOTREACHED */
 	case 0:				/* Child. */
+	    {
+		struct pid *pcur;
+		/*
+		 * because vfork() instead of fork(), must leak FILE *,
+		 * but luckily we are terminally headed for an execl()
+		 */
+		for (pcur = pidlist; pcur; pcur = pcur->next)
+			close(fileno(pcur->fp));
+
 		if (*type == 'r') {
+			int tpdes1 = pdes[1];
+
+			(void) close(pdes[0]);
 			/*
 			 * We must NOT modify pdes, due to the
 			 * semantics of vfork.
 			 */
-			int tpdes1 = pdes[1];
 			if (tpdes1 != STDOUT_FILENO) {
 				(void)dup2(tpdes1, STDOUT_FILENO);
 				(void)close(tpdes1);
 				tpdes1 = STDOUT_FILENO;
 			}
-			(void) close(pdes[0]);
 		} else {
+			(void)close(pdes[1]);
 			if (pdes[0] != STDIN_FILENO) {
 				(void)dup2(pdes[0], STDIN_FILENO);
 				(void)close(pdes[0]);
 			}
-			(void)close(pdes[1]);
 		}
-		/*
-		 * because vfork() instead of fork(), must leak FILE *,
-		 * but luckily we are terminally headed for an execl()
-		 */
-		for (cur = pidlist; cur; cur = cur->next)
-			close(fileno(cur->fp));
 		execl(_PATH_BSHELL, "sh", "-c", program, NULL);
 		_exit(127);
 		/* NOTREACHED */
+	    }
 	}
 
 	/* Parent; assume fdopen can't fail. */

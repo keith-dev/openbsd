@@ -1,4 +1,4 @@
-OpenBSD/alpha 2.1 is expected to run on the following hardware.
+OpenBSD/alpha 2.2 is expected to run on the following hardware.
 If you have hardware that is listed here and are unable to run
 OpenBSD, or if you are able to run OpenBSD on hardware not listed
 here, please send mail to <tech@openbsd.org> with as much information
@@ -22,7 +22,7 @@ Supported hardware:
 			Other TurboChannel option boards.
 			The ISDN/Audio chip.
 
-	AlphaStation {200,250,255,400,500,500} and AXPpci systems
+	AlphaStation {200,250,255,400,500} and AXPpci systems
 	    (including the Multia) using the following peripherals:
 
 		Supported hardware:
@@ -36,6 +36,10 @@ Supported hardware:
 			DEC ZLXp-E1 (DC21030-based, "TGA") video boards.
 			PCI and ISA NE2000-compatible ethernet cards.
 			SMC/WD 8003, 8013, and the SMC "Elite16" ISA boards.
+			Integrated AXPpci33 and other ISA IDE controllers,
+			    and associated disks.
+				[Note: With single ATAPI device IDE busses, the
+				ATAPI device should be set to SLAVE.]
 			Keyboard.
 			PS/2-style mice.
 
@@ -44,6 +48,7 @@ Supported hardware:
 			ISA ns16x50-family serial port boards.
 			ISA ns16x50 multi-port serial boards.
 			Other NCR 53c8xx SCSI boards.
+			ST506/MFM/ESDI ISA controllers.
 
 		Things that are *not* supported at this time:
 			ISA VGA boards.

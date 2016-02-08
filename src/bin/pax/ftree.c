@@ -1,4 +1,4 @@
-/*	$OpenBSD: ftree.c,v 1.4 1996/10/27 06:45:11 downsj Exp $	*/
+/*	$OpenBSD: ftree.c,v 1.8 1997/09/01 18:29:49 deraadt Exp $	*/
 /*	$NetBSD: ftree.c,v 1.4 1995/03/21 09:07:21 cgd Exp $	*/
 
 /*-
@@ -42,7 +42,7 @@
 #if 0
 static char sccsid[] = "@(#)ftree.c	8.2 (Berkeley) 4/18/94";
 #else
-static char rcsid[] = "$OpenBSD: ftree.c,v 1.4 1996/10/27 06:45:11 downsj Exp $";
+static char rcsid[] = "$OpenBSD: ftree.c,v 1.8 1997/09/01 18:29:49 deraadt Exp $";
 #endif
 #endif /* not lint */
 
@@ -95,7 +95,7 @@ static int ftree_arg __P((void));
  *	0 if there is at least one valid file arg to process, -1 otherwise
  */
 
-#if __STDC__
+#ifdef __STDC__
 int
 ftree_start(void)
 #else
@@ -154,7 +154,7 @@ ftree_start()
  *	0 if added to the linked list, -1 if failed
  */
 
-#if __STDC__
+#ifdef __STDC__
 int
 ftree_add(register char *str, int chflg)
 #else
@@ -206,7 +206,7 @@ ftree_add(str, chflg)
  *	-n and -d processing.
  */
 
-#if __STDC__
+#ifdef __STDC__
 void
 ftree_sel(register ARCHD *arcn)
 #else
@@ -220,7 +220,7 @@ ftree_sel(arcn)
 	 * when file trees are supplied pax as args. The list is not used when
 	 * the trees are read from stdin.
 	 */
-	if (ftcur != NULL) 
+	if (ftcur != NULL)
 		ftcur->refcnt = 1;
 
 	/*
@@ -245,7 +245,7 @@ ftree_sel(arcn)
  *	have a selected member (reference count still 0)
  */
 
-#if __STDC__
+#ifdef __STDC__
 void
 ftree_chk(void)
 #else
@@ -287,7 +287,7 @@ ftree_chk()
  *	stdin).
  */
 
-#if __STDC__
+#ifdef __STDC__
 static int
 ftree_arg(void)
 #else
@@ -328,10 +328,10 @@ ftree_arg()
 			else if ((ftcur = ftcur->fow) == NULL)
 				return(-1);
 			if (ftcur->chflg) {
-				/* First chdir() back... */
-				if (chdir(cwdpt) < 0) {
-					syswarn(1, errno, "Can't chdir to %s",
-					    cwdpt);
+				/* First fchdir() back... */
+				if (fchdir(cwdfd) < 0) {
+					syswarn(1, errno,
+					  "Can't fchdir to starting directory");
 					return(-1);
 				}
 				if (chdir(ftcur->fname) < 0) {
@@ -366,7 +366,7 @@ ftree_arg()
  *	0 when contents of arcn have been set with the next file, -1 when done.
  */
 
-#if __STDC__
+#ifdef __STDC__
 int
 next_file(register ARCHD *arcn)
 #else
@@ -558,7 +558,7 @@ next_file(arcn)
 	/*
 	 * copy file name, set file name length
 	 */
-	arcn->nlen = l_strncpy(arcn->name, ftent->fts_path, PAXPATHLEN+1);
+	arcn->nlen = l_strncpy(arcn->name, ftent->fts_path, sizeof(arcn->name) - 1);
 	arcn->name[arcn->nlen] = '\0';
 	arcn->org_name = ftent->fts_path;
 	return(0);

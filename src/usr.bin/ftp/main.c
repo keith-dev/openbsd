@@ -1,5 +1,5 @@
-/*	$OpenBSD: main.c,v 1.31 1997/04/28 20:35:59 millert Exp $	*/
-/*	$NetBSD: main.c,v 1.21 1997/04/05 03:27:39 lukem Exp $	*/
+/*	$OpenBSD: main.c,v 1.36 1997/09/04 04:37:16 millert Exp $	*/
+/*	$NetBSD: main.c,v 1.24 1997/08/18 10:20:26 lukem Exp $	*/
 
 /*
  * Copyright (c) 1985, 1989, 1993, 1994
@@ -44,7 +44,7 @@ static char copyright[] =
 #if 0
 static char sccsid[] = "@(#)main.c	8.6 (Berkeley) 10/9/94";
 #else
-static char rcsid[] = "$OpenBSD: main.c,v 1.31 1997/04/28 20:35:59 millert Exp $";
+static char rcsid[] = "$OpenBSD: main.c,v 1.36 1997/09/04 04:37:16 millert Exp $";
 #endif
 #endif /* not lint */
 
@@ -65,15 +65,18 @@ static char rcsid[] = "$OpenBSD: main.c,v 1.31 1997/04/28 20:35:59 millert Exp $
 
 #include "ftp_var.h"
 
+int main __P((int, char **));
+
 int
 main(argc, argv)
 	int argc;
 	char *argv[];
 {
 	struct servent *sp;
-	int ch, top, port, rval;
+	int ch, top, rval;
+	long port;
 	struct passwd *pw = NULL;
-	char *cp, homedir[MAXPATHLEN];
+	char *cp, *ep, homedir[MAXPATHLEN];
 	int dumb_terminal = 0;
 	int outfd = -1;
 
@@ -87,6 +90,23 @@ main(argc, argv)
 		httpport = htons(HTTP_PORT);	/* good fallback */
 	else
 		httpport = sp->s_port;
+	gateport = 0;
+	cp = getenv("FTPSERVERPORT");
+	if (cp != NULL) {
+		port = strtol(cp, &ep, 10);
+		if (port < 1 || port > USHRT_MAX || *ep != '\0')
+			warnx("bad FTPSERVERPORT port number: %s (ignored)",
+			    cp);
+		else
+			gateport = htons(port);
+	}
+	if (gateport == 0) {
+		sp = getservbyname("ftpgate", "tcp");
+		if (sp == 0)
+			gateport = htons(GATE_PORT);
+		else
+			gateport = sp->s_port;
+	}
 	doglob = 1;
 	interactive = 1;
 	autologin = 1;
@@ -94,6 +114,7 @@ main(argc, argv)
 	preserve = 1;
 	verbose = 0;
 	progress = 0;
+	gatemode = 0;
 #ifndef SMALL
 	editing = 0;
 	el = NULL;
@@ -106,6 +127,19 @@ main(argc, argv)
 	cp = (cp == NULL) ? argv[0] : cp + 1;
 	if (strcmp(cp, "pftp") == 0)
 		passivemode = 1;
+	else if (strcmp(cp, "gate-ftp") == 0)
+		gatemode = 1;
+
+	gateserver = getenv("FTPSERVER");
+	if (gateserver == NULL || *gateserver == '\0')
+		gateserver = GATE_SERVER;
+	if (gatemode) {
+		if (*gateserver == '\0') {
+			warnx(
+"Neither $FTPSERVER nor GATE_SERVER is defined; disabling gate-ftp");
+			gatemode = 0;
+		}
+	}
 
 	cp = getenv("TERM");
 	dumb_terminal = (cp == NULL || !strcmp(cp, "dumb") ||
@@ -115,16 +149,17 @@ main(argc, argv)
 		verbose = 1;		/* verbose if from a tty */
 #ifndef SMALL
 		if (!dumb_terminal)
-			editing = 1;	/* editing mode on if from a tty */
+			editing = 1;	/* editing mode on if tty is usable */
 #endif
 	}
 
 	ttyout = stdout;
-	if (isatty(fileno(ttyout)) && !dumb_terminal)
-		progress = 1;		/* progress bar on if going to a tty */
-	else {
-		ttyout = stderr;
+	if (isatty(fileno(ttyout)) && !dumb_terminal && foregroundproc())
+		progress = 1;		/* progress bar on if tty is usable */
+
+	if (!isatty(fileno(ttyout))) {
 		outfd = fileno(stdout);
+		ttyout = stderr;
 	}
 
 	while ((ch = getopt(argc, argv, "adeginpPr:tvV")) != -1) {
@@ -161,11 +196,11 @@ main(argc, argv)
 			break;
 
 		case 'P':
-			port = atoi(optarg);
-			if (port <= 0)
+			port = strtol(optarg, &ep, 10);
+			if (port < 1 || port > USHRT_MAX || *ep != '\0')
 				warnx("bad port number: %s (ignored)", optarg);
 			else
-				ftpport = htons(port);
+				ftpport = htons((in_port_t)port);
 			break;
 
 		case 'r':
@@ -215,6 +250,11 @@ main(argc, argv)
 	setttywidth(0);
 	(void)signal(SIGWINCH, setttywidth);
 
+#ifdef __GNUC__				/* XXX: to shut up gcc warnings */
+	(void)&argc;
+	(void)&argv;
+#endif
+
 	if (argc > 0) {
 		if (strchr(argv[0], ':') != NULL) {
 			anonftp = 1;	/* Handle "automatic" transfers. */
@@ -243,6 +283,7 @@ main(argc, argv)
 					sleep(retry_connect);
 				}
 			} while (!connected);
+			retry_connect = 0; /* connected, stop hiding msgs */
 		}
 	}
 #ifndef SMALL
@@ -360,7 +401,7 @@ cmdscanner(top)
 				fputs("sorry, input line too long.\n", ttyout);
 				break;
 			}
-			memcpy(line, buf, num);
+			memcpy(line, buf, (size_t)num);
 			line[num] = '\0';
 			history(hist, H_ENTER, buf);
 		}
@@ -656,7 +697,7 @@ void
 usage()
 {
 	(void)fprintf(stderr,
-	    "usage: %s [-adeginprtvV] [host [port]]\n"
+	    "usage: %s [-adeginptvV] [-r <seconds>] [host [port]]\n"
 	    "       %s host:path[/]\n"
 	    "       %s ftp://host[:port]/path[/]\n"
 	    "       %s http://host[:port]/file\n",

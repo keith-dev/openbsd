@@ -1,5 +1,4 @@
-#	$OpenBSD: Makefile,v 1.6 1997/04/27 20:56:49 millert Exp $
-#	$NetBSD: Makefile,v 1.8 1996/06/08 19:48:09 christos Exp $
+#	$OpenBSD: Makefile,v 1.8 1997/09/21 11:49:50 deraadt Exp $
 
 PROG=	mail
 SRCS=	version.c aux.c cmd1.c cmd2.c cmd3.c cmdtab.c collect.c \
@@ -13,6 +12,8 @@ MLINKS=	mail.1 Mail.1 mail.1 mailx.1
 beforeinstall:
 	cd ${.CURDIR}/misc; ${INSTALL} ${INSTALL_COPY} -o ${BINOWN} -g ${BINGRP} \
 	    -m 444 ${SFILES} ${DESTDIR}/usr/share/misc
+
+distribution:
 	cd ${.CURDIR}/misc; ${INSTALL} ${INSTALL_COPY} -o root -g wheel \
 	    -m 644 ${EFILES} ${DESTDIR}/etc
 

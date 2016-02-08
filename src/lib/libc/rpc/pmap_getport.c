@@ -28,7 +28,7 @@
  */
 
 #if defined(LIBC_SCCS) && !defined(lint)
-static char *rcsid = "$OpenBSD: pmap_getport.c,v 1.4 1996/12/10 07:46:41 deraadt Exp $";
+static char *rcsid = "$OpenBSD: pmap_getport.c,v 1.6 1997/09/22 05:11:08 millert Exp $";
 #endif /* LIBC_SCCS and not lint */
 
 /*
@@ -38,6 +38,7 @@ static char *rcsid = "$OpenBSD: pmap_getport.c,v 1.4 1996/12/10 07:46:41 deraadt
  * Copyright (C) 1984, Sun Microsystems, Inc.
  */
 
+#include <unistd.h>
 #include <rpc/rpc.h>
 #include <rpc/pmap_prot.h>
 #include <rpc/pmap_clnt.h>
@@ -60,13 +61,13 @@ pmap_getport(address, program, version, protocol)
 	u_int protocol;
 {
 	u_short port = 0;
-	int socket = -1;
+	int sock = -1;
 	register CLIENT *client;
 	struct pmap parms;
 
 	address->sin_port = htons(PMAPPORT);
 	client = clntudp_bufcreate(address, PMAPPROG,
-	    PMAPVERS, timeout, &socket, RPCSMALLMSGSIZE, RPCSMALLMSGSIZE);
+	    PMAPVERS, timeout, &sock, RPCSMALLMSGSIZE, RPCSMALLMSGSIZE);
 	if (client != (CLIENT *)NULL) {
 		parms.pm_prog = program;
 		parms.pm_vers = version;
@@ -81,8 +82,8 @@ pmap_getport(address, program, version, protocol)
 		}
 		CLNT_DESTROY(client);
 	}
-	if (socket != -1)
-		(void)close(socket);
+	if (sock != -1)
+		(void)close(sock);
 	address->sin_port = 0;
 	return (port);
 }

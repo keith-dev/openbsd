@@ -1,4 +1,4 @@
-/*	$OpenBSD: printjob.c,v 1.11 1997/04/04 18:41:44 deraadt Exp $ */
+/*	$OpenBSD: printjob.c,v 1.19 1997/09/09 04:27:27 millert Exp $ */
 /*	$NetBSD: printjob.c,v 1.9.4.3 1996/07/12 22:31:39 jtc Exp $	*/
 
 /*
@@ -132,7 +132,6 @@ static char      *scnline __P((int, char *, int));
 static int        sendfile __P((int, char *));
 static int        sendit __P((char *));
 static void       sendmail __P((char *, int));
-static void       set_ttyflags __P((struct termios *));
 static void       setty __P((void));
 
 void
@@ -186,7 +185,7 @@ printjob()
 	/*
 	 * write process id for others to know
 	 */
-	sprintf(line, "%u\n", pid);
+	sprintf(line, "%d\n", pid);
 	pidoff = i = strlen(line);
 	if (write(lfd, line, i) != i) {
 		syslog(LOG_ERR, "%s: %s: %m", printer, LO);
@@ -332,7 +331,7 @@ printit(file)
 	 */
 	for (i = 0; i < 4; i++)
 		strcpy(fonts[i], ifonts[i]);
-	sprintf(&width[2], "%d", PW);
+	sprintf(&width[2], "%ld", PW);
 	strcpy(indent+2, "0");
 
 	/*
@@ -498,6 +497,8 @@ pass2:
 			continue;
 
 		case 'U':
+			if (strchr(line+1, '/'))
+				continue;
 			(void) unlink(line+1);
 		}
 	/*
@@ -719,7 +720,7 @@ start:
 	tof = 0;
 
 	/* Copy filter output to "lf" logfile */
-	if (fp = fopen(tempfile, "r")) {
+	if ((fp = fopen(tempfile, "r"))) {
 		while (fgets(buf, sizeof(buf), fp))
 			fputs(buf, stderr);
 		fclose(fp);
@@ -794,7 +795,7 @@ sendit(file)
 		}
 		if (line[0] >= 'a' && line[0] <= 'z') {
 			strcpy(last, line);
-			while (i = getline(cfp))
+			while ((i = getline(cfp)))
 				if (strcmp(last, line))
 					break;
 			switch (sendfile('\3', last+1)) {
@@ -822,7 +823,7 @@ sendit(file)
 	 */
 	fseek(cfp, 0L, 0);
 	while (getline(cfp))
-		if (line[0] == 'U')
+		if (line[0] == 'U' && !strchr(line+1, '/'))
 			(void) unlink(line+1);
 	/*
 	 * clean-up in case another control file exists
@@ -926,7 +927,6 @@ banner(name1, name2)
 	char *name1, *name2;
 {
 	time_t tvec;
-	extern char *ctime();
 
 	time(&tvec);
 	if (!SF && !tof)
@@ -999,7 +999,7 @@ scan_out(scfd, scsp, dlm)
 				for (j = WIDTH; --j;)
 					*strp++ = BACKGND;
 			else
-				strp = scnline(scnkey[c][scnhgt-1-d], strp, cc);
+				strp = scnline(scnkey[(int)c][scnhgt-1-d], strp, cc);
 			if (*sp == dlm || *sp == '\0' || nchrs++ >= PW/(WIDTH+1)-1)
 				break;
 			*strp++ = BACKGND;
@@ -1045,11 +1045,12 @@ sendmail(user, bombed)
 {
 	register int i, nofile;
 	int p[2], s;
-	register char *cp;
-	char buf[100];
+	register char *cp = NULL;
 	struct stat stb;
 	FILE *fp;
 
+	if (user[0] == '-' || user[0] == '/' || !isprint(user[0]))
+		return;
 	pipe(p);
 	if ((s = dofork(DORETURN)) == 0) {		/* child */
 		dup2(p[0], 0);
@@ -1058,10 +1059,9 @@ sendmail(user, bombed)
 			(void) close(i);
 		if ((cp = strrchr(_PATH_SENDMAIL, '/')) != NULL)
 			cp++;
-	else
+		else
 			cp = _PATH_SENDMAIL;
-		snprintf(buf, sizeof buf, "%s@%s", user, fromhost);
-		execl(_PATH_SENDMAIL, cp, buf, 0);
+		execl(_PATH_SENDMAIL, cp, "-t", 0);
 		exit(0);
 	} else if (s > 0) {				/* parent */
 		dup2(p[1], 1);
@@ -1107,9 +1107,12 @@ sendmail(user, bombed)
 	}
 	(void) close(p[0]);
 	(void) close(p[1]);
-	wait(NULL);
-	syslog(LOG_INFO, "mail sent to user %s about job %s on printer %s (%s)",
-		user, *jobname ? jobname : "<unknown>", printer, cp);
+	if (s != -1) {
+		wait(NULL);
+		syslog(LOG_INFO,
+		    "mail sent to user %s about job %s on printer %s (%s)",
+		    user, *jobname ? jobname : "<unknown>", printer, cp);
+	}
 }
 
 /*
@@ -1133,12 +1136,13 @@ dofork(action)
 		if (pid == 0) {
 			pw = getpwuid(DU);
 			if (pw == 0) {
-				syslog(LOG_ERR, "uid %d not in password file",
-				    DU);
+				syslog(LOG_ERR, "uid %u not in password file",
+				    (uid_t)DU);
 				break;
 			}
 			initgroups(pw->pw_name, pw->pw_gid);
 			setgid(pw->pw_gid);
+			setlogin("");
 			setuid(DU);
 		}
 		return (pid);
@@ -1206,18 +1210,18 @@ init()
 		FF = DEFFF;
 	if (cgetnum(bp, "pw", &PW) < 0)
 		PW = DEFWIDTH;
-	sprintf(&width[2], "%d", PW);
+	sprintf(&width[2], "%ld", PW);
 	if (cgetnum(bp, "pl", &PL) < 0)
 		PL = DEFLENGTH;
-	sprintf(&length[2], "%d", PL);
+	sprintf(&length[2], "%ld", PL);
 	if (cgetnum(bp,"px", &PX) < 0)
 		PX = 0;
-	sprintf(&pxwidth[2], "%d", PX);
+	sprintf(&pxwidth[2], "%ld", PX);
 	if (cgetnum(bp, "py", &PY) < 0)
 		PY = 0;
-	sprintf(&pxlength[2], "%d", PY);
+	sprintf(&pxlength[2], "%ld", PY);
 	cgetstr(bp, "rm", &RM);
-	if (s = checkremote())
+	if ((s = checkremote()))
 		syslog(LOG_WARNING, s);
 
 	cgetstr(bp, "af", &AF);
@@ -1263,7 +1267,7 @@ openpr()
 	char *cp;
 
 	if (!remote && *LP) {
-		if (cp = strchr(LP, '@'))
+		if ((cp = strchr(LP, '@')))
 			opennet(cp);
 		else
 			opentty();
@@ -1358,7 +1362,6 @@ static void
 opentty()
 {
 	register int i;
-	int resp, port;
 
 	for (i = 1; ; i = i < 32 ? i << 1 : i) {
 		pfd = open(LP, RW ? O_RDWR : O_WRONLY);
@@ -1387,7 +1390,7 @@ static void
 openrem()
 {
 	register int i, n;
-	int resp, port;
+	int resp;
 
 	for (i = 1; ; i = i < 256 ? i << 1 : i) {
 		resp = -1;
@@ -1533,14 +1536,14 @@ setty()
 	return;
 }
 
-#if __STDC__
+#ifdef __STDC__
 #include <stdarg.h>
 #else
 #include <varargs.h>
 #endif
 
 static void
-#if __STDC__
+#ifdef __STDC__
 pstatus(const char *msg, ...)
 #else
 pstatus(msg, va_alist)
@@ -1551,7 +1554,7 @@ pstatus(msg, va_alist)
 	register int fd;
 	char buf[BUFSIZ];
 	va_list ap;
-#if __STDC__
+#ifdef __STDC__
 	va_start(ap, msg);
 #else
 	va_start(ap);
@@ -1564,7 +1567,7 @@ pstatus(msg, va_alist)
 		exit(1);
 	}
 	ftruncate(fd, 0);
-	(void)vsnprintf(buf, sizeof(buf), msg, ap);
+	(void)vsnprintf(buf, sizeof(buf) - 1, msg, ap);
 	va_end(ap);
 	strcat(buf, "\n");
 	(void) write(fd, buf, strlen(buf));

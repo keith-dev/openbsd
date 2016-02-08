@@ -1,4 +1,4 @@
-/*	$OpenBSD: ypxfr.c,v 1.20 1997/05/22 08:05:30 deraadt Exp $ */
+/*	$OpenBSD: ypxfr.c,v 1.22 1997/07/30 12:07:02 maja Exp $ */
 
 /*
  * Copyright (c) 1994 Mats O Jansson <moj@stacken.kth.se>
@@ -32,7 +32,7 @@
  */
 
 #ifndef LINT
-static char rcsid[] = "$OpenBSD: ypxfr.c,v 1.20 1997/05/22 08:05:30 deraadt Exp $";
+static char rcsid[] = "$OpenBSD: ypxfr.c,v 1.22 1997/07/30 12:07:02 maja Exp $";
 #endif
 
 #include <sys/types.h>
@@ -51,15 +51,15 @@ static char rcsid[] = "$OpenBSD: ypxfr.c,v 1.20 1997/05/22 08:05:30 deraadt Exp 
 
 #include <rpc/rpc.h>
 #include <rpc/xdr.h>
-#include <rpcsvc/ypclnt.h>
 #include <rpcsvc/yp.h>
+#include <rpcsvc/ypclnt.h>
 
 #include "yplib_host.h"
 #include "yplog.h"
 #include "ypdb.h"
 #include "ypdef.h"
 
-extern char *__progname;
+extern char *__progname;		/* from crt0.o */
 DBM	*db;
 
 extern bool_t xdr_ypresp_all_seq();
@@ -69,12 +69,12 @@ extern void *ypresp_data;
 
 static int
 ypxfr_foreach(status,keystr,keylen,valstr,vallen,data)
-int status,keylen,vallen,*data;
-char *keystr,*valstr;
+int status,keylen,vallen;
+char *keystr,*valstr,*data;
 {
 	datum	key,val;
 
-	if (status == 2)
+	if (status == YP_NOMORE)
 		return(0);
 
 	keystr[keylen] = '\0';

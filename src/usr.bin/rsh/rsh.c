@@ -1,4 +1,4 @@
-/*	$OpenBSD: rsh.c,v 1.12 1997/03/26 19:41:59 deraadt Exp $	*/
+/*	$OpenBSD: rsh.c,v 1.16 1997/08/06 06:43:41 deraadt Exp $	*/
 
 /*-
  * Copyright (c) 1983, 1990 The Regents of the University of California.
@@ -41,7 +41,7 @@ char copyright[] =
 
 #ifndef lint
 /*static char sccsid[] = "from: @(#)rsh.c	5.24 (Berkeley) 7/1/91";*/
-static char rcsid[] = "$OpenBSD: rsh.c,v 1.12 1997/03/26 19:41:59 deraadt Exp $";
+static char rcsid[] = "$OpenBSD: rsh.c,v 1.16 1997/08/06 06:43:41 deraadt Exp $";
 #endif /* not lint */
 
 #include <sys/types.h>
@@ -57,7 +57,7 @@ static char rcsid[] = "$OpenBSD: rsh.c,v 1.12 1997/03/26 19:41:59 deraadt Exp $"
 #include <stdio.h>
 #include <errno.h>
 #include <string.h>
-#if __STDC__
+#ifdef __STDC__
 #include <stdarg.h>
 #else
 #include <varargs.h>
@@ -65,7 +65,7 @@ static char rcsid[] = "$OpenBSD: rsh.c,v 1.12 1997/03/26 19:41:59 deraadt Exp $"
 #include "pathnames.h"
 
 #ifdef KERBEROS
-#include <kerberosIV/des.h>
+#include <des.h>
 #include <kerberosIV/krb.h>
 
 CREDENTIALS cred;
@@ -90,7 +90,7 @@ main(argc, argv)
 	extern int optind;
 	struct passwd *pw;
 	struct servent *sp;
-	long omask;
+	int omask;
 	int argoff, asrsh, ch, dflag, nflag, one, pid, rem, uid;
 	register char *p;
 	char *args, *host, *user, *copyargs();
@@ -311,7 +311,7 @@ try_connect:
 
 talk(nflag, omask, pid, rem)
 	int nflag, pid;
-	long omask;
+	int omask;
 	register int rem;
 {
 	register int cc, wc;
@@ -406,18 +406,21 @@ void
 sendsig(signo)
 	char signo;
 {
+	int save_errno = errno;
+
 #ifdef KERBEROS
 	if (doencrypt)
 		(void)des_write(rfd2, &signo, 1);
 	else
 #endif
 		(void)write(rfd2, &signo, 1);
+	errno = save_errno;
 }
 
 #ifdef KERBEROS
 /* VARARGS */
 void
-#if __STDC__
+#ifdef __STDC__
 warning(const char *fmt, ...)
 #else
 warning(va_alist)
@@ -425,7 +428,7 @@ va_dcl
 #endif
 {
 	va_list ap;
-#if !__STDC__
+#ifndef __STDC__
 	char *fmt;
 #endif
 	char myrealm[REALM_SZ];
@@ -433,7 +436,7 @@ va_dcl
 	if (krb_get_lrealm(myrealm, 0) != KSUCCESS)
 		return;
 	(void)fprintf(stderr, "rsh: warning, using standard rsh: ");
-#if __STDC__
+#ifdef __STDC__
 	va_start(ap, fmt);
 #else
 	va_start(ap);

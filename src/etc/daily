@@ -1,6 +1,6 @@
 #!/bin/sh -
 #
-#	$OpenBSD: daily,v 1.18 1997/02/19 16:49:18 millert Exp $
+#	$OpenBSD: daily,v 1.22 1997/10/21 03:00:56 mickey Exp $
 #	From: @(#)daily	8.2 (Berkeley) 1/25/94
 #
 PATH=/bin:/usr/bin:/sbin:/usr/sbin:/usr/local/bin
@@ -8,7 +8,7 @@ host=`hostname -s`
 echo "Subject: $host daily run output"
 bak=/var/backups
 
-if [ -f /etc/daily.local ];then
+if [ -f /etc/daily.local ]; then
 	echo ""
 	echo "Running daily.local:"
 	. /etc/daily.local
@@ -104,7 +104,7 @@ fi
 		echo "Backing up root filesystem:"
 		echo "copying /dev/r$rootdev to /dev/r$rootbak"
 		dd if=/dev/r$rootdev of=/dev/r$rootbak bs=16b seek=1 skip=1 \
-			conv=noerror,sync
+			conv=noerror
 		fsck -y /dev/r$rootbak
 	}
 }
@@ -118,8 +118,8 @@ then
 		echo "Not running calendar, (yp client)."
 	fi
 else
-	echo "Running calendar."
-	calendar -a
+	echo "Running calendar in the background."
+	calendar -a &
 fi
 
 # Rotation of mail log now handled automatically by cron and 'newsyslog'
@@ -178,7 +178,7 @@ if [ -f /etc/Distfile ]; then
 	echo ""
 	echo "Running rdist:"
 	if [ -d /var/log/rdist ]; then
-		logf=`date | awk '{printf "%s.%s.%s", $6, $2, $3}'`
+		logf=`date +%Y.%b.%e`
 		rdist -f /etc/Distfile 2>&1 | tee /var/log/rdist/$logf
 	else
 		rdist -f /etc/Distfile 

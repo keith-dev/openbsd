@@ -1,4 +1,4 @@
-#	$OpenBSD: 4.4BSD.dist,v 1.36 1997/05/02 22:26:15 graichen Exp $
+#	$OpenBSD: 4.4BSD.dist,v 1.41 1997/10/20 21:45:24 millert Exp $
 
 /set type=dir uname=root gname=wheel mode=0755
 # .
@@ -50,6 +50,12 @@ mtree
 
 # ./etc/namedb
 namedb
+
+# ./etc/namedb/tmp
+tmp
+# ./etc/namedb/tmp
+..
+
 # ./etc/namedb
 ..
 
@@ -66,6 +72,11 @@ sliphome
 # ./etc/uucp
 uucp
 # ./etc/uucp
+..
+
+# ./etc/photuris
+photuris
+# ./etc/photuris
 ..
 
 # ./etc
@@ -137,7 +148,7 @@ gen		gname=bin uname=root mode=0755
 ..
 
 # ./usr/include/g++/std
-std             gname=bin uname=root mode=0555
+std             gname=bin uname=root mode=0755
 # ./usr/include/g++/std
 ..
 
@@ -165,7 +176,7 @@ rpcsvc		gname=bin uname=root mode=0755
 ..
 
 # ./usr/include/ss
-ss		gname=bin uname=root mode=0555
+ss		gname=bin uname=root mode=0755
 # ./usr/include/ss
 ..
 
@@ -859,6 +870,11 @@ info
 # ./usr/share/info
 ..
 
+# ./usr/share/ipsec
+ipsec
+# ./usr/share/ipsec
+..
+
 # ./usr/share/lkm
 lkm		gname=bin uname=root
 
@@ -1532,15 +1548,15 @@ rwho
 spool
 
 # ./var/spool/ftp
-ftp
+ftp		mode=0555
 
 # ./var/spool/ftp/bin
-bin
+bin		mode=0511
 # ./var/spool/ftp/bin
 ..
 
 # ./var/spool/ftp/etc
-etc
+etc		mode=0511
 # ./var/spool/ftp/etc
 ..
 
@@ -1550,7 +1566,7 @@ hidden           mode=0111
 ..
 
 # ./var/spool/ftp/pub			XXX
-#pub               mode=0777
+#pub		mode=0555
 # ./var/spool/ftp/pub			XXX
 #..
 

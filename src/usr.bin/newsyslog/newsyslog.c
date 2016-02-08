@@ -1,4 +1,36 @@
-/*	$OpenBSD: newsyslog.c,v 1.9 1997/04/27 13:48:55 downsj Exp $	*/
+/*	$OpenBSD: newsyslog.c,v 1.12 1997/07/10 17:37:10 kstailey Exp $	*/
+
+/*
+ * Copyright (c) 1997, Jason Downs.  All rights reserved.
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in the
+ *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *      This product includes software developed by Jason Downs for the
+ *      OpenBSD system.
+ * 4. Neither the name(s) of the author(s) nor the name OpenBSD
+ *    may be used to endorse or promote products derived from this software
+ *    without specific prior written permission.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE AUTHOR(S) ``AS IS'' AND ANY EXPRESS
+ * OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
+ * WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+ * DISCLAIMED.  IN NO EVENT SHALL THE AUTHOR(S) BE LIABLE FOR ANY DIRECT,
+ * INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
+ * (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+ * SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+ * CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
+ * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
+ * SUCH DAMAGE.
+ */
 
 /*
  * This file contains changes from the Open Software Foundation.
@@ -29,7 +61,7 @@ provided "as is" without express or implied warranty.
  */
 
 #ifndef lint
-static char rcsid[] = "$OpenBSD: newsyslog.c,v 1.9 1997/04/27 13:48:55 downsj Exp $";
+static char rcsid[] = "$OpenBSD: newsyslog.c,v 1.12 1997/07/10 17:37:10 kstailey Exp $";
 #endif /* not lint */
 
 #ifndef CONF
@@ -43,6 +75,12 @@ static char rcsid[] = "$OpenBSD: newsyslog.c,v 1.9 1997/04/27 13:48:55 downsj Ex
 #endif
 #ifndef COMPRESS_POSTFIX
 #define COMPRESS_POSTFIX ".Z"
+#endif
+#ifndef STATS_DIR
+#define STATS_DIR "/etc"
+#endif
+#ifndef SENDMAIL
+#define SENDMAIL "/usr/lib/sendmail"
 #endif
 
 #include <stdio.h>
@@ -59,12 +97,14 @@ static char rcsid[] = "$OpenBSD: newsyslog.c,v 1.9 1997/04/27 13:48:55 downsj Ex
 #include <pwd.h>
 #include <grp.h>
 #include <unistd.h>
+#include <err.h>
 
 #define kbytes(size)  (((size) + 1023) >> 10)
 
-#define CE_COMPACT 1            /* Compact the achived log files */
-#define CE_BINARY 2             /* Logfile is in binary, don't add */
-                                /* status messages */
+#define CE_COMPACT	0x01		/* Compact the achived log files */
+#define CE_BINARY	0x02		/* Logfile is in binary, don't add */
+					/* status messages */
+#define CE_MONITOR	0x04		/* Monitory for changes */
 #define NONE -1
         
 struct conf_entry {
@@ -76,13 +116,16 @@ struct conf_entry {
         int     hours;          /* Hours between log trimming */
         int     permissions;    /* File permissions on the log */
         int     flags;          /* Flags (CE_COMPACT & CE_BINARY)  */
+	char	*whom;		/* Whom to notify if logfile changes */
         struct conf_entry       *next; /* Linked list pointer */
 };
 
-char    *progname;              /* contains argv[0] */
+extern const char *__progname;
+
 int     verbose = 0;            /* Print out what's going on */
 int     needroot = 1;           /* Root privs are necessary */
 int     noaction = 0;           /* Don't do anything, just show it */
+int	monitor = 0;		/* Don't do monitoring by default */
 char    *conf = CONF;           /* Configuration file to use */
 time_t  timenow;
 int     syslog_pid;             /* read in from /etc/syslog.pid */
@@ -104,7 +147,10 @@ int sizefile __P((char *));
 int age_old_log __P((char *));
 char *sob __P((char *));
 char *son __P((char *));
-int isnumber __P((char *));
+int isnumberstr __P((char *));
+void domonitor __P((char *, char *));
+FILE *openmail __P((void));
+void closemail __P((FILE *));
 
 int main(argc, argv)
         int argc;
@@ -113,15 +159,13 @@ int main(argc, argv)
         struct conf_entry *p, *q;
         
         PRS(argc,argv);
-        if (needroot && getuid() && geteuid()) {
-                fprintf(stderr,"%s: must have root privs\n",progname);
-                exit(1);
-        }
+        if (needroot && getuid() && geteuid())
+		errx(1, "You must be root.");
         p = q = parse_file();
         while (p) {
                 do_entry(p);
                 p=p->next;
-                free((char *) q);
+                free(q);
                 q=p;
         }
         exit(0);
@@ -149,7 +193,9 @@ void do_entry(ent)
                         printf("size (Kb): %d [%d] ", size, ent->size);
                 if (verbose && (ent->hours > 0))
                         printf(" age (hr): %d [%d] ", modtime, ent->hours);
-                if (((ent->size > 0) && (size >= ent->size)) ||
+		if (monitor && ent->flags & CE_MONITOR)
+			domonitor(ent->log, ent->whom);
+                if (!monitor && ((ent->size > 0) && (size >= ent->size)) ||
                     ((ent->hours > 0) && ((modtime >= ent->hours)
                                         || (modtime < 0)))) {
                         if (verbose)
@@ -180,8 +226,7 @@ void PRS(argc, argv)
         char    line[BUFSIZ];
 	char	*p;
 
-        progname = argv[0];
-        timenow = time((time_t *) 0);
+        timenow = time(NULL);
         daytime = ctime(&timenow) + 4;
         daytime[15] = '\0';
 
@@ -202,7 +247,7 @@ void PRS(argc, argv)
 		*p = '\0';
 
         optind = 1;             /* Start options parsing */
-        while ((c = getopt(argc,argv,"nrvf:t:")) != -1) {
+        while ((c = getopt(argc,argv,"nrvmf:t:")) != -1) {
                 switch (c) {
                 case 'n':
                         noaction++; /* This implies needroot as off */
@@ -216,6 +261,9 @@ void PRS(argc, argv)
                 case 'f':
                         conf = optarg;
                         break;
+		case 'm':
+			monitor++;
+			break;
                 default:
                         usage();
                 }
@@ -224,9 +272,7 @@ void PRS(argc, argv)
 
 void usage()
 {
-        fprintf(stderr,
-                "Usage: %s <-nrv> <-f config-file>\n", progname);
-        exit(1);
+	errx(1, "usage: %s <-nrvm> <-f config-file>", __progname);
 }
 
 /* Parse a configuration file and return a linked list of all the logs
@@ -246,39 +292,41 @@ struct conf_entry *parse_file()
                 f = fopen(conf,"r");
         else
                 f = stdin;
-        if (!f) {
-                (void) fprintf(stderr,"%s: ",progname);
-                perror(conf);
-                exit(1);
-        }
+        if (!f)
+		err(1, conf);
+
         while (fgets(line,BUFSIZ,f)) {
                 if ((line[0]== '\n') || (line[0] == '#'))
                         continue;
                 errline = strdup(line);
+		if (errline == NULL)
+			err(1, "strdup");
                 if (!first) {
                         working = (struct conf_entry *) malloc(sizeof(struct conf_entry));
+			if (working == NULL)
+				err(1, "malloc");
                         first = working;
                 } else {
                         working->next = (struct conf_entry *) malloc(sizeof(struct conf_entry));
+			if (working->next == NULL)
+				err(1, "malloc");
                         working = working->next;
                 }
 
                 q = parse = missing_field(sob(line),errline);
                 *(parse = son(line)) = '\0';
                 working->log = strdup(q);
+		if (working->log == NULL)
+			err(1, "strdup");
 
                 q = parse = missing_field(sob(++parse),errline);
                 *(parse = son(parse)) = '\0';
                 if ((group = strchr(q, '.')) != NULL) {
                     *group++ = '\0';
                     if (*q) {
-                        if (!(isnumber(q))) {
-                            if ((pass = getpwnam(q)) == NULL) {
-                                fprintf(stderr,
-                                    "Error in config file; unknown user:\n");
-                                fputs(errline,stderr);
-                                exit(1);
-                            }
+                        if (!(isnumberstr(q))) {
+                            if ((pass = getpwnam(q)) == NULL)
+				errx(1, "Error in config file; unknown user: %s", q);
                             working->uid = pass->pw_uid;
                         } else
                             working->uid = atoi(q);
@@ -287,13 +335,9 @@ struct conf_entry *parse_file()
                     
                     q = group;
                     if (*q) {
-                        if (!(isnumber(q))) {
-                            if ((grp = getgrnam(q)) == NULL) {
-                                fprintf(stderr,
-                                    "Error in config file; unknown group:\n");
-                                fputs(errline,stderr);
-                                exit(1);
-                            }
+                        if (!(isnumberstr(q))) {
+                            if ((grp = getgrnam(q)) == NULL)
+				errx(1, "Error in config file; unknown group: %s", q);
                             working->gid = grp->gr_gid;
                         } else
                             working->gid = atoi(q);
@@ -302,25 +346,16 @@ struct conf_entry *parse_file()
                     
                     q = parse = missing_field(sob(++parse),errline);
                     *(parse = son(parse)) = '\0';
-                }
-                else 
+                } else 
                     working->uid = working->gid = NONE;
 
-                if (!sscanf(q,"%o",&working->permissions)) {
-                        fprintf(stderr,
-                                "Error in config file; bad permissions:\n");
-                        fputs(errline,stderr);
-                        exit(1);
-                }
+                if (!sscanf(q,"%o",&working->permissions))
+			errx(1, "Error in config file; bad permissions: %s", q);
 
                 q = parse = missing_field(sob(++parse),errline);
                 *(parse = son(parse)) = '\0';
-                if (!sscanf(q,"%d",&working->numlogs)) {
-                        fprintf(stderr,
-                                "Error in config file; bad number:\n");
-                        fputs(errline,stderr);
-                        exit(1);
-                }
+                if (!sscanf(q,"%d",&working->numlogs))
+			errx(1, "Error in config file; bad number: %s", q);
 
                 q = parse = missing_field(sob(++parse),errline);
                 *(parse = son(parse)) = '\0';
@@ -344,19 +379,27 @@ struct conf_entry *parse_file()
                                 working->flags |= CE_COMPACT;
                         else if ((*q == 'B') || (*q == 'b'))
                                 working->flags |= CE_BINARY;
-                        else {
-                                fprintf(stderr,
-                                        "Illegal flag in config file -- %c\n",
-                                        *q);
-                                exit(1);
-                        }
+			else if ((*q == 'M') || (*q == 'm'))
+				working->flags |= CE_MONITOR;
+                        else
+				errx(1, "Illegal flag in config file: %c", *q);
                         q++;
                 }
+
+		working->whom = NULL;
+		if (working->flags & CE_MONITOR) {	/* Optional field */
+			q = parse = sob(++parse);
+			*(parse = son(parse)) = '\0';
+
+			working->whom = strdup(q);
+			if (working->log == NULL)
+				err(1, "strdup");
+		}
                 
                 free(errline);
         }
         if (working)
-                working->next = (struct conf_entry *) NULL;
+                working->next = NULL;
         (void) fclose(f);
         return(first);
 }
@@ -365,8 +408,9 @@ char *missing_field(p, errline)
         char    *p,*errline;
 {
         if (!p || !*p) {
-                fprintf(stderr,"Missing field in config file:\n");
-                fputs(errline,stderr);
+                fprintf(stderr, "%s: Missing field in config file line:\n",
+		    __progname);
+                fputs(errline, stderr);
                 exit(1);
         }
         return(p);
@@ -440,20 +484,14 @@ void dotrim(log, numdays, flags, perm, owner_uid, group_gid)
                 printf("Start new log...");
         else {
                 fd = creat(log,perm);
-                if (fd < 0) {
-                        perror("can't start new log");
-                        exit(1);
-                }               
-                if (fchown(fd, owner_uid, group_gid)) {
-                        perror("can't chmod new log file");
-                        exit(1);
-                }
+                if (fd < 0)
+			err(1, "can't start new log");
+                if (fchown(fd, owner_uid, group_gid))
+			err(1, "can't chmod new log file");
                 (void) close(fd);
                 if (!(flags & CE_BINARY))
-                        if (log_trim(log)) {    /* Add status message */
-                                perror("can't add status message to log");
-                                exit(1);
-                        }
+                        if (log_trim(log))	/* Add status message */
+                                err(1, "can't add status message to log");
         }
         if (noaction)
                 printf("chmod %o %s...",perm,log);
@@ -461,14 +499,10 @@ void dotrim(log, numdays, flags, perm, owner_uid, group_gid)
                 (void) chmod(log,perm);
         if (noaction)
                 printf("kill -HUP %d (syslogd)\n",syslog_pid);
-        else
-	if (syslog_pid < MIN_PID || syslog_pid > MAX_PID) {
-		fprintf(stderr,"%s: preposterous process number: %d\n",
-				progname, syslog_pid);
-        } else if (kill(syslog_pid,SIGHUP)) {
-                        fprintf(stderr,"%s: ",progname);
-                        perror("warning - could not restart syslogd");
-                }
+        else if (syslog_pid < MIN_PID || syslog_pid > MAX_PID)
+		warnx("preposterous process number: %d", syslog_pid);
+        else if (kill(syslog_pid,SIGHUP))
+                        warnx("warning - could not restart syslogd");
         if (flags & CE_COMPACT) {
                 if (noaction)
                         printf("Compress %s.0\n",log);
@@ -487,8 +521,7 @@ int log_trim(log)
         fprintf(f,"%s %s newsyslog[%d]: logfile turned over\n",
                 daytime, hostname, getpid());
         if (fclose(f) == EOF) {
-                perror("log_trim: fclose:");
-                exit(1);
+                err(1, "log_trim: fclose");
         }
         return(0);
 }
@@ -503,14 +536,10 @@ void compress_log(log)
         pid = fork();
         (void) sprintf(tmp,"%s.0",log);
         if (pid < 0) {
-                fprintf(stderr,"%s: ",progname);
-                perror("fork");
-                exit(1);
+		err(1, "fork");
         } else if (!pid) {
                 (void) execl(COMPRESS,"compress","-f",tmp,0);
-                fprintf(stderr,"%s: ",progname);
-                perror(COMPRESS);
-                exit(1);
+		err(1, COMPRESS);
         }
 }
 
@@ -560,12 +589,140 @@ char *son(p)
         
 /* Check if string is actually a number */
 
-int isnumber(string)
-char *string;
+int isnumberstr(string)
+	char *string;
 {
         while (*string != '\0') {
             if (!isdigit(*string++))
 		return(0);
         }
         return(1);
+}
+
+void domonitor(log, whom)
+	char *log, *whom;
+{
+	struct stat sb, tsb;
+	char *fname, *flog, *p, *rb = NULL;
+	FILE *fp;
+	off_t osize;
+	int rd;
+
+	if (stat(log, &sb) < 0)
+		return;
+
+	flog = strdup(log);
+	if (flog == NULL)
+		err(1, "strdup");
+
+	for (p = flog; *p != '\0'; p++) {
+		if (*p == '/')
+			*p = '_';
+	}
+	fname = (char *) malloc(strlen(STATS_DIR) + strlen(flog) + 17);
+	if (fname == NULL)
+		err(1, "malloc");
+
+	sprintf(fname, "%s/newsyslog.%s.size", STATS_DIR, flog);
+
+	/* ..if it doesn't exist, simply record the current size. */
+	if ((sb.st_size == 0) || stat(fname, &tsb) < 0)
+		goto update;
+
+	fp = fopen(fname, "r");
+	if (fp == NULL) {
+		warn(fname);
+		goto cleanup;
+	}
+#ifdef QUAD_OFF_T
+	if (fscanf(fp, "%qd\n", &osize) != 1) {
+#else
+	if (fscanf(fp, "%ld\n", &osize) != 1) {
+#endif	/* QUAD_OFF_T */
+		fclose(fp);
+		goto update;
+	}
+
+	fclose(fp);
+
+	/* If the file is smaller, mark the entire thing as changed. */
+	if (sb.st_size < osize)
+		osize = 0;
+
+	/* Now see if current size is larger. */
+	if (sb.st_size > osize) {
+		rb = (char *) malloc(sb.st_size - osize);
+		if (rb == NULL)
+			err(1, "malloc");
+
+		/* Open logfile, seek. */
+		fp = fopen(log, "r");
+		if (fp == NULL) {
+			warn(log);
+			goto cleanup;
+		}
+		fseek(fp, osize, SEEK_SET);
+		rd = fread(rb, 1, sb.st_size - osize, fp);
+		if (rd < 1) {
+			warn("fread");
+			fclose(fp);
+			goto cleanup;
+		}
+		
+		/* Send message. */
+		fclose(fp);
+
+		fp = openmail();
+		if (fp == NULL) {
+			warn("openmail");
+			goto cleanup;
+		}
+		fprintf(fp, "To: %s\nSubject: LOGFILE NOTIFICATION: %s\n\n\n",
+		    whom, log);
+		fwrite(rb, 1, rd, fp);
+		fputs("\n\n", fp);
+
+		closemail(fp);
+	}
+update:
+	/* Reopen for writing and update file. */
+	fp = fopen(fname, "w");
+	if (fp == NULL) {
+		warn(fname);
+		goto cleanup;
+	}
+#ifdef QUAD_OFF_T
+	fprintf(fp, "%qd\n", sb.st_size);
+#else
+	fprintf(fp, "%ld\n", sb.st_size);
+#endif	/* QUAD_OFF_T */
+	fclose(fp);
+
+cleanup:
+	free(flog);
+	free(fname);
+	if (rb != NULL)
+		free(rb);
+}
+
+FILE *openmail()
+{
+	char *cmdbuf;
+	FILE *ret;
+
+	cmdbuf = (char *) malloc(strlen(SENDMAIL) + 3);
+	if (cmdbuf == NULL)
+		return(NULL);
+
+	sprintf(cmdbuf, "%s -t", SENDMAIL);
+	ret = popen(cmdbuf, "w");
+
+	free(cmdbuf);
+	return(ret);
+}
+
+void closemail(pfp)
+	FILE *pfp;
+{
+	pclose(pfp);
 }

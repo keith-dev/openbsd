@@ -1,4 +1,4 @@
-#	$OpenBSD: Makefile,v 1.6 1997/05/24 14:21:00 pefo Exp $
+#	$OpenBSD: Makefile,v 1.8 1997/09/26 02:20:41 millert Exp $
 
 # NOTE! We don't do crunched yet!
 
@@ -48,14 +48,14 @@ ${IMAGE}: rd_setup do_files rd_teardown
 bsd:
 	cd ${.TOP}/../../sys/arch/arc/conf && config RAMDISK
 	cd ${.TOP}/../../sys/arch/arc/compile/RAMDISK && \
-	    make clean && make depend && make
+	    make clean && make
 	cp ${.TOP}/../../sys/arch/arc/compile/RAMDISK/bsd bsd
 
 rd_setup: 
 	dd if=/dev/zero of=${REALIMAGE} bs=512 count=${NBLKS}
 	vnconfig -v -c ${VND} ${REALIMAGE}
 	disklabel -w -r ${VND} ${DISKTYPE}
-	newfs ${NEWFSARGS} ${VND_RDEV} ${DISKTYPE}
+	newfs ${NEWFSARGS} ${VND_RDEV}
 	fsck ${VND_RDEV}
 	mount ${VND_DEV} ${MOUNT_POINT}
 

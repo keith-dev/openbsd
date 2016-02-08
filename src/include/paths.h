@@ -1,4 +1,4 @@
-/*	$OpenBSD: paths.h,v 1.6 1997/04/16 03:41:52 millert Exp $	*/
+/*	$OpenBSD: paths.h,v 1.9 1997/08/29 18:05:38 mickey Exp $	*/
 /*	$NetBSD: paths.h,v 1.7 1994/10/26 00:56:12 cgd Exp $	*/
 
 /*
@@ -53,6 +53,7 @@
 #define	_PATH_DRUM	"/dev/drum"
 #define	_PATH_FSIRAND	"/sbin/fsirand"
 #define	_PATH_KMEM	"/dev/kmem"
+#define	_PATH_KVMDB	"/var/db/kvm.db"
 #define	_PATH_LOCALE	"/usr/share/locale"
 #define	_PATH_MAILDIR	"/var/mail"
 #define	_PATH_MAN	"/usr/share/man"
@@ -61,11 +62,13 @@
 #define	_PATH_RSH	"/usr/bin/rsh"
 #define	_PATH_SENDMAIL	"/usr/sbin/sendmail"
 #define	_PATH_SHELLS	"/etc/shells"
+#define	_PATH_SKEYKEYS	"/etc/skeykeys"
 #define	_PATH_TTY	"/dev/tty"
 #define	_PATH_UNIX	"/bsd"
 #define	_PATH_VI	"/usr/bin/vi"
 
 /* Provide trailing slash, since mostly used for building pathnames. */
+#define _PATH_BOOTDIR	"/usr/mdec/"
 #define	_PATH_DEV	"/dev/"
 #define	_PATH_TMP	"/tmp/"
 #define	_PATH_VARDB	"/var/db/"

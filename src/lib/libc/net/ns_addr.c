@@ -35,7 +35,7 @@
  */
 
 #if defined(LIBC_SCCS) && !defined(lint)
-static char rcsid[] = "$OpenBSD: ns_addr.c,v 1.2 1996/08/19 08:29:30 tholo Exp $";
+static char rcsid[] = "$OpenBSD: ns_addr.c,v 1.4 1997/07/21 20:31:05 deraadt Exp $";
 #endif /* LIBC_SCCS and not lint */
 
 #include <sys/param.h>
@@ -45,7 +45,8 @@ static char rcsid[] = "$OpenBSD: ns_addr.c,v 1.2 1996/08/19 08:29:30 tholo Exp $
 
 static struct ns_addr addr, zero_addr;
 
-static void Field(), cvtbase();
+static void Field __P((char *, u_int8_t *, int));
+static void cvtbase __P((long, int, int[], int, u_int8_t[], int));
 
 struct ns_addr 
 ns_addr(name)
@@ -64,7 +65,7 @@ ns_addr(name)
 	 * form  2-272.AA001234H.01777, i.e. XDE standard.
 	 * Great efforts are made to insure backward compatability.
 	 */
-	if (hostname = strchr(buf, '#'))
+	if ((hostname = strchr(buf, '#')))
 		separator = '#';
 	else {
 		hostname = strchr(buf, '.');
@@ -89,7 +90,7 @@ ns_addr(name)
 		Field(socketname, (u_char *)&addr.x_port, 2);
 	}
 
-	Field(hostname, addr.x_host.c_host, 6);
+	Field(hostname, (u_char *)addr.x_host.c_host, 6);
 
 	return (addr);
 }

@@ -41,11 +41,11 @@ bsd:	${KERNEL}
 
 do_prep: ${CBIN} do_unconfig
 	sh ${.CURDIR}/start_rdconfig.sh ${RDEV} ${NBLKS}
-	dd if=/usr/mdec/sdboot of=${CDEV}
+#	dd if=/usr/mdec/sdboot of=${CDEV}
 	disklabel -w ${CDEV} ${DISKTYPE}
 	
 do_mount:
-	-newfs ${NEWFSARGS} -s ${NBLKS} ${CDEV} ${DISKTYPE}
+	-newfs ${NEWFSARGS} -s ${NBLKS} ${CDEV}
 	mount ${BDEV} ${MOUNT_POINT}
  
 do_umount_copy:

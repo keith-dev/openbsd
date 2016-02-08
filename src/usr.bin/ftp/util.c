@@ -1,5 +1,5 @@
-/*	$OpenBSD: util.c,v 1.9 1997/05/11 17:12:57 millert Exp $	*/
-/*	$NetBSD: util.c,v 1.7 1997/04/14 09:09:24 lukem Exp $	*/
+/*	$OpenBSD: util.c,v 1.15 1997/09/15 04:57:54 millert Exp $	*/
+/*	$NetBSD: util.c,v 1.12 1997/08/18 10:20:27 lukem Exp $	*/
 
 /*
  * Copyright (c) 1985, 1989, 1993, 1994
@@ -35,7 +35,7 @@
  */
 
 #ifndef lint
-static char rcsid[] = "$OpenBSD: util.c,v 1.9 1997/05/11 17:12:57 millert Exp $";
+static char rcsid[] = "$OpenBSD: util.c,v 1.15 1997/09/15 04:57:54 millert Exp $";
 #endif /* not lint */
 
 /*
@@ -49,6 +49,7 @@ static char rcsid[] = "$OpenBSD: util.c,v 1.9 1997/05/11 17:12:57 millert Exp $"
 #include <err.h>
 #include <errno.h>
 #include <fcntl.h>
+#include <limits.h>
 #include <glob.h>
 #include <pwd.h>
 #include <signal.h>
@@ -71,7 +72,7 @@ setpeer(argc, argv)
 	char *argv[];
 {
 	char *host;
-	short port;
+	in_port_t port;
 
 	if (connected) {
 		fprintf(ttyout, "Already connected to %s, use close first.\n",
@@ -86,20 +87,44 @@ setpeer(argc, argv)
 		code = -1;
 		return;
 	}
-	port = ftpport;
+	if (gatemode)
+		port = gateport;
+	else
+		port = ftpport;
 	if (argc > 2) {
-		port = atoi(argv[2]);
-		if (port <= 0) {
-			fprintf(ttyout, "%s: bad port number '%s'.\n", argv[1], argv[2]);
-			fprintf(ttyout, "usage: %s host-name [port]\n", argv[0]);
+		char *ep;
+		long nport;
+
+		nport = strtol(argv[2], &ep, 10);
+		if (nport < 1 || nport > USHRT_MAX || *ep != '\0') {
+			fprintf(ttyout, "%s: bad port number '%s'.\n",
+			    argv[1], argv[2]);
+			fprintf(ttyout, "usage: %s host-name [port]\n",
+			    argv[0]);
 			code = -1;
 			return;
 		}
-		port = htons(port);
+		port = htons((in_port_t)nport);
 	}
-	host = hookup(argv[1], port);
+
+	if (gatemode) {
+		if (gateserver == NULL || *gateserver == '\0')
+			errx(1, "gateserver not defined (shouldn't happen)");
+		host = hookup(gateserver, port);
+	} else
+		host = hookup(argv[1], port);
+
 	if (host) {
 		int overbose;
+
+		if (gatemode) {
+			if (command("PASSERVE %s", argv[1]) != COMPLETE)
+				return;
+			if (verbose)
+				fprintf(ttyout,
+				    "Connected via pass-through server %s\n",
+				    gateserver);
+		}
 
 		connected = 1;
 		/*
@@ -183,7 +208,8 @@ login(host, user, pass)
 	char *acct;
 	char anonpass[MAXLOGNAME + 1 + MAXHOSTNAMELEN];	/* "user@hostname" */
 	char hostname[MAXHOSTNAMELEN];
-	int n, aflag, retry = 0;
+	struct passwd *pw;
+	int n, aflag = 0, retry = 0;
 
 	acct = NULL;
 	if (user == NULL) {
@@ -203,7 +229,12 @@ login(host, user, pass)
 		/*
 		 * Set up anonymous login password.
 		 */
-		user = getlogin();
+		if ((user = getlogin()) == NULL) {
+			if ((pw = getpwuid(getuid())) == NULL)
+				user = "anonymous";
+			else
+				user = pw->pw_name;
+		}
 		gethostname(hostname, MAXHOSTNAMELEN);
 #ifndef DONT_CHEAT_ANONPASS
 		/*
@@ -220,23 +251,18 @@ login(host, user, pass)
 		    user, hp->h_name);
 #endif
 		pass = anonpass;
-		user = "ftp";
+		user = "anonymous";	/* as per RFC 1635 */
 	}
 
 tryagain:
-
 	if (retry)
-		user = "anonymous";
+		user = "ftp";		/* some servers only allow "ftp" */
 
 	while (user == NULL) {
 		char *myname = getlogin();
 
-		if (myname == NULL) {
-			struct passwd *pp = getpwuid(getuid());
-
-			if (pp != NULL)
-				myname = pp->pw_name;
-		}
+		if (myname == NULL && (pw = getpwuid(getuid())) != NULL)
+			myname = pw->pw_name;
 		if (myname)
 			fprintf(ttyout, "Name (%s:%s): ", host, myname);
 		else
@@ -303,7 +329,7 @@ another(pargc, pargv, prompt)
 	}
 	fprintf(ttyout, "(%s) ", prompt);
 	line[len++] = ' ';
-	if (fgets(&line[len], sizeof(line) - len, stdin) == NULL)
+	if (fgets(&line[len], (int)(sizeof(line) - len), stdin) == NULL)
 		intr();
 	len += strlen(&line[len]);
 	if (len > 0 && line[len - 1] == '\n')
@@ -379,7 +405,7 @@ remglob(argv, doswitch, errbuf)
                 if (doswitch)
                         pswitch(!proxy);
                 for (mode = "w"; *++argv != NULL; mode = "a")
-                        recvrequest("NLST", temp, *argv, mode, 0);
+                        recvrequest("NLST", temp, *argv, mode, 0, 0);
 		if ((code / 100) != COMPLETE) {
 			if (errbuf != NULL)
 				*errbuf = reply_string;
@@ -433,6 +459,15 @@ confirm(cmd, file)
 			confirmrest = 1;
 			fprintf(ttyout, "Prompting off for duration of %s.\n", cmd);
 			break;
+		case 'y':
+			return(1);
+			break;
+		default:
+			fprintf(ttyout, "n, y, p, a, are the only acceptable commands!\n");
+			fprintf(ttyout, "%s %s? ", cmd, file);
+			fgets(line, sizeof(line), stdin);
+			confirm(cmd, file);
+			break;
 	}
 	return (1);
 }
@@ -461,7 +496,10 @@ globulize(cpp)
 		globfree(&gl);
 		return (0);
 	}
-	*cpp = strdup(gl.gl_pathv[0]);	/* XXX - wasted memory */
+		/* XXX: caller should check if *cpp changed, and
+		 *	free(*cpp) if that is the case
+		 */
+	*cpp = strdup(gl.gl_pathv[0]);
 	globfree(&gl);
 	return (1);
 }
@@ -481,11 +519,19 @@ remotesize(file, noisy)
 	size = -1;
 	if (debug == 0)
 		verbose = -1;
-	if (command("SIZE %s", file) == COMPLETE)
-		sscanf(reply_string, "%*s %qd", &size);
-	else if (noisy && debug == 0) {
+	if (command("SIZE %s", file) == COMPLETE) {
+		char *cp, *ep;
+
+		cp = strchr(reply_string, ' ');
+		if (cp != NULL) {
+			cp++;
+			size = strtoq(cp, &ep, 10);
+			if (*ep != '\0' && !isspace(*ep))
+				size = -1;
+		}
+	} else if (noisy && debug == 0) {
 		fputs(reply_string, ttyout);
-		fputs("\n", ttyout);
+		fputc('\n', ttyout);
 	}
 	verbose = overbose;
 	return (size);
@@ -501,8 +547,10 @@ remotemodtime(file, noisy)
 {
 	int overbose;
 	time_t rtime;
+	int ocode;
 
 	overbose = verbose;
+	ocode = code;
 	rtime = -1;
 	if (debug == 0)
 		verbose = -1;
@@ -526,17 +574,39 @@ remotemodtime(file, noisy)
 			rtime += timebuf.tm_gmtoff;	/* conv. local -> GMT */
 	} else if (noisy && debug == 0) {
 		fputs(reply_string, ttyout);
-		fputs("\n", ttyout);
+		fputc('\n', ttyout);
 	}
 	verbose = overbose;
+	if (rtime == -1)
+		code = ocode;
 	return (rtime);
 }
 
+/*
+ * Returns true if this is the controlling/foreground process, else false.
+ */
+int
+foregroundproc()
+{
+	static pid_t pgrp = -1;
+	int ctty_pgrp;
+
+	if (pgrp == -1)
+		pgrp = getpgrp();
+
+	return((ioctl(STDOUT_FILENO, TIOCGPGRP, &ctty_pgrp) != -1 &&
+	    ctty_pgrp == pgrp));
+}
+
+void updateprogressmeter __P((int));
+
 void
-updateprogressmeter()
+updateprogressmeter(dummy)
+	int dummy;
 {
 
-	progressmeter(0);
+	if (foregroundproc())
+		progressmeter(0);
 }
 
 /*
@@ -601,7 +671,7 @@ progressmeter(flag)
 		abbrevsize >>= 10;
 	}
 	snprintf(buf + strlen(buf), sizeof(buf) - strlen(buf),
-	    " %5qd %c%c ", abbrevsize, prefixes[i],
+	    " %5qd %c%c ", (quad_t)abbrevsize, prefixes[i],
 	    prefixes[i] == ' ' ? ' ' : 'B');
 
 	timersub(&now, &lastupdate, &wait);
@@ -618,7 +688,7 @@ progressmeter(flag)
 	timersub(&now, &start, &td);
 	elapsed = td.tv_sec + (td.tv_usec / 1000000.0);
 
-	if (bytes <= 0 || elapsed <= 0.0) {
+	if (bytes <= 0 || elapsed <= 0.0 || cursize > filesize) {
 		snprintf(buf + strlen(buf), sizeof(buf) - strlen(buf),
 		    "   --:-- ETA");
 	} else if (wait.tv_sec >= STALLTIME) {
@@ -680,13 +750,15 @@ ptransfer(siginfo)
 		meg = 1;
 	(void)snprintf(buf, sizeof(buf),
 	    "%qd byte%s %s in %.2f seconds (%.2f %sB/s)\n",
-	    bytes, bytes == 1 ? "" : "s", direction, elapsed,
+	    (quad_t)bytes, bytes == 1 ? "" : "s", direction, elapsed,
 	    bs / (1024.0 * (meg ? 1024.0 : 1.0)), meg ? "M" : "K");
-	if (siginfo && bytes > 0 && elapsed > 0.0 && filesize >= 0) {
+	if (siginfo && bytes > 0 && elapsed > 0.0 && filesize >= 0
+	    && bytes + restart_point <= filesize) {
 		remaining = (int)((filesize - restart_point) /
 				  (bytes / elapsed) - elapsed);
 		hh = remaining / 3600;
 		remaining %= 3600;
+			/* "buf+len(buf) -1" to overwrite \n */
 		snprintf(buf + strlen(buf) - 1, sizeof(buf) - strlen(buf),
 		    "  ETA: %02d:%02d:%02d\n", hh, remaining / 60,
 		    remaining % 60);

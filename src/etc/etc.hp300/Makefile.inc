@@ -1,29 +1,29 @@
-#	$OpenBSD: Makefile.inc,v 1.4 1997/02/19 10:07:26 downsj Exp $
-#	$NetBSD: Makefile.inc,v 1.2 1996/03/22 05:14:27 scottr Exp $
-#
+#	$OpenBSD: Makefile.inc,v 1.15 1997/10/24 12:38:41 downsj Exp $
 #	etc.hp300/Makefile.inc -- hp300-specific etc Makefile targets
 
 .ifdef DESTDIR
-snap_md: bsd-gen.gz bsd-dl.gz
+snap_md: bsd bsd.dl bootblocks distrib
 
-bsd-gen:
+bsd:
 	cd ${.CURDIR}/../sys/arch/hp300/conf && config GENERIC
 	cd ${.CURDIR}/../sys/arch/hp300/compile/GENERIC && \
 	    make clean && make depend && make
 	cp ${.CURDIR}/../sys/arch/hp300/compile/GENERIC/bsd \
-	    ${DESTDIR}/snapshot/bsd-gen
+	    ${DESTDIR}/snapshot/bsd
 
-bsd-dl:
+bsd.dl:
 	cd ${.CURDIR}/../sys/arch/hp300/conf && config DISKLESS
 	cd ${.CURDIR}/../sys/arch/hp300/compile/DISKLESS && \
 	    make clean && make depend && make
 	cp ${.CURDIR}/../sys/arch/hp300/compile/DISKLESS/bsd \
-	    ${DESTDIR}/snapshot/bsd-dl
+	    ${DESTDIR}/snapshot/bsd.dl
 
-bsd-gen.gz: bsd-gen
-	gzip -f9 ${DESTDIR}/snapshot/bsd-gen
+bootblocks:
+	cp ${DESTDIR}/usr/mdec/uboot.raw ${DESTDIR}/snapshot
+	cp ${DESTDIR}/usr/mdec/uboot.lif ${DESTDIR}/snapshot/SYS_UBOOT
 
-bsd-dl.gz: bsd-dl
-	gzip -f9 ${DESTDIR}/snapshot/bsd-dl
+distrib:
+	cd ${.CURDIR}/../distrib && make cleandir && \
+	    make && make install
 
 .endif	# DESTDIR check

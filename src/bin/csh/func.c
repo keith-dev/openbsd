@@ -1,4 +1,4 @@
-/*    $OpenBSD: func.c,v 1.3 1996/06/23 14:19:22 deraadt Exp $       */
+/*    $OpenBSD: func.c,v 1.6 1997/07/25 18:58:07 mickey Exp $       */
 /*    $NetBSD: func.c,v 1.11 1996/02/09 02:28:29 christos Exp $       */
 
 /*-
@@ -38,7 +38,7 @@
 #if 0
 static char sccsid[] = "@(#)func.c	8.1 (Berkeley) 5/31/93";
 #else
-static char rcsid[] = "$OpenBSD: func.c,v 1.3 1996/06/23 14:19:22 deraadt Exp $";
+static char rcsid[] = "$OpenBSD: func.c,v 1.6 1997/07/25 18:58:07 mickey Exp $";
 #endif
 #endif /* not lint */
 
@@ -49,7 +49,7 @@ static char rcsid[] = "$OpenBSD: func.c,v 1.3 1996/06/23 14:19:22 deraadt Exp $"
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
-#if __STDC__
+#ifdef __STDC__
 # include <stdarg.h>
 #else
 # include <varargs.h>
@@ -1174,7 +1174,7 @@ findlim(cp)
 {
     register struct limits *lp, *res;
 
-    res = (struct limits *) NULL;
+    res = NULL;
     for (lp = limits; lp->limconst >= 0; lp++)
 	if (prefix(cp, str2short(lp->limname))) {
 	    if (res)
@@ -1407,7 +1407,7 @@ retry:
 	    old = signal(SIGTTIN, SIG_DFL);
 	    (void) kill(0, SIGTTIN);
 	    (void) signal(SIGTTIN, old);
-          goto retry;
+	  goto retry;
 	}
 	(void) setpgid(0, shpgrp);
 	(void) tcsetpgrp(FSHTTY, shpgrp);

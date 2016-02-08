@@ -1,4 +1,4 @@
-/*	$OpenBSD: inode.c,v 1.8 1996/10/20 08:36:34 tholo Exp $	*/
+/*	$OpenBSD: inode.c,v 1.13 1997/10/11 20:19:36 niklas Exp $	*/
 /*	$NetBSD: inode.c,v 1.23 1996/10/11 20:15:47 thorpej Exp $	*/
 
 /*
@@ -38,7 +38,7 @@
 #if 0
 static char sccsid[] = "@(#)inode.c	8.5 (Berkeley) 2/8/95";
 #else
-static char rcsid[] = "$OpenBSD: inode.c,v 1.8 1996/10/20 08:36:34 tholo Exp $";
+static char rcsid[] = "$OpenBSD: inode.c,v 1.13 1997/10/11 20:19:36 niklas Exp $";
 #endif
 #endif /* not lint */
 
@@ -246,7 +246,7 @@ chkrange(blk, cnt)
 {
 	register int c;
 
-	if ((unsigned)(blk + cnt) > maxfsblock)
+	if ((unsigned)blk > maxfsblock || (unsigned)(blk + cnt) > maxfsblock)
 		return (1);
 	c = dtog(&sblock, blk);
 	if (blk < cgdmin(&sblock, c)) {
@@ -384,7 +384,7 @@ cacheino(dp, inumber)
 	if (blks > NDADDR)
 		blks = NDADDR + NIADDR;
 	inp = (struct inoinfo *)
-		malloc(sizeof(*inp) + (blks - 1) * sizeof(daddr_t));
+		malloc(sizeof(*inp) + (blks ? blks - 1 : 0) * sizeof(daddr_t));
 	if (inp == NULL)
 		return;
 	inpp = &inphead[inumber % numdirs];
@@ -425,7 +425,7 @@ getinoinfo(inumber)
 		return (inp);
 	}
 	errexit("cannot find inode %d\n", inumber);
-	return ((struct inoinfo *)0);
+	return (NULL);
 }
 
 /*

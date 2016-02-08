@@ -1,3 +1,4 @@
+/*	$OpenBSD: battlestar.c,v 1.5 1997/08/24 21:55:01 deraadt Exp $	*/
 /*	$NetBSD: battlestar.c,v 1.3 1995/03/21 15:06:47 cgd Exp $	*/
 
 /*
@@ -54,8 +55,11 @@ static char rcsid[] = "$NetBSD: battlestar.c,v 1.3 1995/03/21 15:06:47 cgd Exp $
  * on the Cory PDP-11/70, University of California, Berkeley.
  */
 
-#include "externs.h"
+#include "extern.h"
 
+int main __P((int, char **));
+
+int
 main(argc,argv)
 int  argc;
 char **argv;
@@ -63,6 +67,9 @@ char **argv;
 	char mainbuf[LINELENGTH];
 	char *next;
 
+	open_score_file();
+
+	/* revoke privs. */
 	egid = getegid();
 	setegid(getgid());
 
@@ -95,6 +102,6 @@ run:
 		case 0:
 			goto start;
 		default:
-			exit();
+			exit(1);
 	}
 }

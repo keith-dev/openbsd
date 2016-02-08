@@ -1,4 +1,4 @@
-/*	$OpenBSD: main.c,v 1.9 1997/02/22 04:35:24 angelos Exp $	*/
+/*	$OpenBSD: main.c,v 1.12 1997/07/23 04:38:33 denny Exp $	*/
 /*	$NetBSD: main.c,v 1.9 1996/05/07 02:55:02 thorpej Exp $	*/
 
 /*
@@ -44,7 +44,7 @@ char copyright[] =
 #if 0
 static char sccsid[] = "from: @(#)main.c	8.4 (Berkeley) 3/1/94";
 #else
-static char *rcsid = "$OpenBSD: main.c,v 1.9 1997/02/22 04:35:24 angelos Exp $";
+static char *rcsid = "$OpenBSD: main.c,v 1.12 1997/07/23 04:38:33 denny Exp $";
 #endif
 #endif /* not lint */
 
@@ -147,7 +147,11 @@ struct nlist nl[] = {
 	{ "_espstat"},
 #define N_IP4STAT	38
 	{ "_ip4stat"},
-	"",
+#define N_DDPSTAT	39
+	{ "_ddpstat"},
+#define N_DDPCB		40
+	{ "_ddpcb"},
+	{ ""},
 };
 
 struct protox {
@@ -213,7 +217,14 @@ struct protox isoprotox[] = {
 	  0,		0 }
 };
 
-struct protox *protoprotox[] = { protox, ipxprotox, nsprotox, isoprotox, NULL };
+struct protox atalkprotox[] = {
+	{ N_DDPCB,	N_DDPSTAT,	1,	atalkprotopr,
+	  ddp_stats,	"ddp" },
+	{ -1,		-1,		0,	0,
+	  0,		0 }
+};
+
+struct protox *protoprotox[] = { protox, ipxprotox, nsprotox, isoprotox, atalkprotox, NULL };
 
 static void printproto __P((struct protox *, char *));
 static void usage __P((void));
@@ -231,7 +242,6 @@ main(argc, argv)
 	extern int optind;
 	register struct protoent *p;
 	register struct protox *tp;	/* for printing cblocks & stats */
-	register char *cp;
 	int ch;
 	char *nlistf = NULL, *memf = NULL;
 	char buf[_POSIX2_LINE_MAX];
@@ -262,6 +272,10 @@ main(argc, argv)
 				af = AF_NS;
 			else if (strcmp(optarg, "iso") == 0)
 				af = AF_ISO;
+			else if (strcmp(optarg, "encap") == 0)
+				af = AF_ENCAP;
+			else if (strcmp(optarg, "atalk") == 0)
+				af = AF_APPLETALK;
 			else {
 				(void)fprintf(stderr,
 				    "%s: %s: unknown address family\n",
@@ -407,7 +421,7 @@ main(argc, argv)
 		setprotoent(1);
 		setservent(1);
 		/* ugh, this is O(MN) ... why do we do this? */
-		while (p = getprotoent()) {
+		while ((p = getprotoent())) {
 			for (tp = protox; tp->pr_name; tp++)
 				if (strcmp(tp->pr_name, p->p_name) == 0)
 					break;
@@ -428,6 +442,9 @@ main(argc, argv)
 			printproto(tp, tp->pr_name);
 	if ((af == AF_UNIX || af == AF_UNSPEC) && !sflag)
 		unixpr(nl[N_UNIXSW].n_value);
+	if (af == AF_APPLETALK || af == AF_UNSPEC)
+		for (tp = atalkprotox; tp->pr_name; tp++)
+			printproto(tp, tp->pr_name);
 	exit(0);
 }
 
@@ -518,11 +535,11 @@ name2protox(name)
 	 * Try to find the name in the list of "well-known" names. If that
 	 * fails, check if name is an alias for an Internet protocol.
 	 */
-	if (tp = knownname(name))
+	if ((tp = knownname(name)))
 		return (tp);
 
 	setprotoent(1);			/* make protocol lookup cheaper */
-	while (p = getprotoent()) {
+	while ((p = getprotoent())) {
 		/* assert: name not same as p->name */
 		for (alias = p->p_aliases; *alias; alias++)
 			if (strcmp(name, *alias) == 0) {

@@ -1,4 +1,4 @@
-/* $OpenBSD: xf_grp.c,v 1.2 1997/04/14 10:04:33 provos Exp $ */
+/* $OpenBSD: xf_grp.c,v 1.8 1997/09/14 10:37:47 deraadt Exp $ */
 /*
  * The author of this code is John Ioannidis, ji@tla.org,
  * 	(except when noted otherwise).
@@ -6,9 +6,11 @@
  * This code was written for BSD/OS in Athens, Greece, in November 1995.
  *
  * Ported to OpenBSD and NetBSD, with additional transforms, in December 1996,
- * by Angelos D. Keromytis, kermit@forthnet.gr.
- *
- * Copyright (C) 1995, 1996, 1997 by John Ioannidis and Angelos D. Keromytis.
+ * by Angelos D. Keromytis, kermit@forthnet.gr. Additional code written by
+ * Niels Provos in Germany.
+ * 
+ * Copyright (C) 1995, 1996, 1997 by John Ioannidis, Angelos D. Keromytis and
+ * Niels Provos.
  *	
  * Permission to use, copy, and modify this software without fee
  * is hereby granted, provided that this entire notice is included in
@@ -55,46 +57,30 @@ int xf_set __P(( struct encap_msghdr *));
 int x2i __P((char *));
 
 int
-xf_grp(argc, argv)
-int argc;
-char **argv;
+xf_grp(dst, spi, proto, dst2, spi2, proto2)
+struct in_addr dst, dst2;
+u_int32_t spi, spi2;
+int proto, proto2;
 {
-	int nspis;
+     struct encap_msghdr *em;
 
-	struct encap_msghdr *em;
+     bzero(buf, EMT_GRPSPIS_FLEN);
 
-	if ((argc < 3) || (argc > 9) || ((argc % 2) != 1)) {
-	  fprintf(stderr, "usage: %s dst1 spi1 [ dst2 spi2 [ dst3 spi3 [ dst4 spi4 ] ] ] \n", argv[0]);
-	  return 0;
-	}
+     em = (struct encap_msghdr *)&buf[0];
 
-	nspis = argc / 2;
-	
-	em = (struct encap_msghdr *)&buf[0];
-	
-	em->em_msglen = 4 + nspis * 12;
-	em->em_version = 0;
-	em->em_type = EMT_GRPSPIS;
+     em->em_msglen = EMT_GRPSPIS_FLEN;
+     em->em_version = PFENCAP_VERSION_1;
+     em->em_type = EMT_GRPSPIS;
 
-	switch (nspis)
-	{
-	      case 4:
-		em->em_rel[3].emr_spi = htonl(strtoul(argv[8], NULL, 16));
-		em->em_rel[3].emr_dst.s_addr = inet_addr(argv[7]);
-	      case 3:
-		em->em_rel[2].emr_spi = htonl(strtoul(argv[6], NULL, 16));
-		em->em_rel[2].emr_dst.s_addr = inet_addr(argv[5]);
-	      case 2:
-		em->em_rel[1].emr_spi = htonl(strtoul(argv[4], NULL, 16));
-		em->em_rel[1].emr_dst.s_addr = inet_addr(argv[3]);
-	      case 1:
-		em->em_rel[0].emr_spi = htonl(strtoul(argv[2], NULL, 16));
-		em->em_rel[0].emr_dst.s_addr = inet_addr(argv[1]);
-		break;
-	}
+     em->em_rel_spi = spi;
+     em->em_rel_dst = dst;
+     em->em_rel_sproto = proto;
+
+     em->em_rel_spi2 = spi2;
+     em->em_rel_dst2 = dst2;
+     em->em_rel_sproto2 = proto2;
 	
-	
-	return xf_set(em);
+     return xf_set(em);
 }
 
 

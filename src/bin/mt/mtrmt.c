@@ -1,4 +1,4 @@
-/*	$OpenBSD: mtrmt.c,v 1.5 1996/09/15 20:14:18 millert Exp $	*/
+/*	$OpenBSD: mtrmt.c,v 1.7 1997/09/12 04:01:37 millert Exp $	*/
 /*	$NetBSD: mtrmt.c,v 1.2 1996/03/06 06:22:07 scottr Exp $	*/
 
 /*-
@@ -144,7 +144,7 @@ rmtgetconn()
 		tuser = pwd->pw_name;
 
 	rmtape = rcmd(&rmtpeer, (u_short)sp->s_port, pwd->pw_name, tuser,
-	    _PATH_RMT, (int *)0);
+	    _PATH_RMT, NULL);
 	if (rmtape == -1)
 		exit(1);		/* rcmd already printed error message */
 
@@ -269,7 +269,7 @@ rmtreply(cmd)
 		if (cp > code && *--cp == '\n')
 			*cp = '\0';
 
-		warnx("Protocol to remote tape server botched (code \"%s\").\n",
+		warnx("Protocol to remote tape server botched (code \"%s\").",
 		    code);
 		rmtconnaborted();
 	}
@@ -304,7 +304,7 @@ rmtgets(line, len)
 		len--;
 	}
 	*cp = '\0';
-	warnx("Protocol to remote tape server botched.\n");
-	warnx("(rmtgets got \"%s\").\n", line);
+	warnx("Protocol to remote tape server botched.");
+	warnx("(rmtgets got \"%s\").", line);
 	rmtconnaborted();
 }

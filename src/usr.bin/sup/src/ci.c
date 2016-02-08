@@ -1,4 +1,4 @@
-/*	$OpenBSD: ci.c,v 1.3 1997/01/17 07:13:18 millert Exp $	*/
+/*	$OpenBSD: ci.c,v 1.5 1997/09/16 10:42:49 deraadt Exp $	*/
 
 /*
  * Copyright (c) 1991 Carnegie Mellon University
@@ -140,7 +140,6 @@
  */
 
 
-#include <strings.h>
 #include <libc.h>
 #include <ci.h>
 #include <del.h>
@@ -250,7 +249,7 @@ char *cmdfpath;			/* search list for command files */
 
     if (*cinext) {		/* get line from ^ command */
      	if (ciback) { 
-      	  sprintf(line,"%s;%s",cinext,ciprev);	
+      	  snprintf(line,sizeof line,"%s;%s",cinext,ciprev);	
     	  ciback = 0;
 	}
     	else {
@@ -453,7 +452,7 @@ char *cmdfpath;			/* search list for command files */
     	  i = getstab ("INTERRUPT:  abort or breakpoint?",delchoice,"abort");
     	  if (i == 0) ciexit = 1; 	/* abort */
     	  else {		/* breakpoint */
-    	    sprintf (bprompt,"Breakpoint for %s",prompt);
+    	    snprintf (bprompt,sizeof bprompt,"Breakpoint for %s",prompt);
     	    ci (bprompt,0,cidepth,list,helppath,cmdfpath);
     	    }
     	  }

@@ -1,6 +1,4 @@
-#	$OpenBSD: Makefile,v 1.41 1997/04/19 21:26:24 millert Exp $
-#	$NetBSD: Makefile,v 1.62 1996/03/10 05:45:43 thorpej Exp $
-#	from: @(#)Makefile	5.8.1.1 (Berkeley) 5/8/91
+#	$OpenBSD: Makefile,v 1.47 1997/09/21 11:48:14 deraadt Exp $
 
 .include <bsd.own.mk>
 
@@ -8,23 +6,22 @@ SUBDIR= apply apropos arch asa at aucat awk banner basename bdes biff cal \
 	calendar cap_mkdb cdio checknr chflags chpass cksum cmp col colcrt \
 	colrm column comm compile_et compress cpp crontab ctags cut dirname \
 	du elf2olf encrypt env error expand false file file2c find finger fmt \
-	fold from fsplit fstat ftp gencat getconf getopt head hexdump id \
-	indent \
+	fold from fsplit fstat ftp gencat getconf getopt gprof head hexdump \
+	id indent \
 	info_mkdb ipcrm ipcs join jot kdump ktrace lam last lastcomm leave \
 	less lex lndir locate lock logger login logname look lorder m4 \
 	machine mail make man mesg mk_cmds mkdep mkfifo mkstr mktemp modstat \
 	msgs nc netstat newsyslog \
 	nfsstat nice nohup oldrdist pagesize passwd paste patch pr printenv \
-	printf quota rdist rdistd renice rev rlogin rpcgen rpcinfo rs \
+	printf quota rdist rdistd readlink renice rev rlogin rpcgen rpcinfo rs \
 	rsh rup ruptime rusers rwall rwho \
-	script sed shar showmount skey skeyinit soelim sort split \
-	su sup systat tail talk tcopy tee telnet tftp time \
-	tip tn3270 touch tput tr true tset tsort tty ul uname unexpand \
+	script sed shar showmount skey skeyaudit skeyinfo skeyinit soelim sort \
+	split su sup systat tail talk tcopy tee telnet tftp time \
+	tip tn3270 top touch tput tr true tset tsort tty ul uname unexpand \
 	unifdef uniq units unvis users uudecode uuencode \
-	vacation vgrind vi vim vis vmstat w wall wc what whatis \
+	vacation vgrind vi vis vmstat w wall wc what whatis \
 	which who whois window write \
-	xargs xinstall xlint xstr yacc yes \
-	gprof
+	xargs xinstall xlint xstr yacc yes
 
 .if (${YP} == "yes")
 SUBDIR+=ypcat ypmatch ypwhich

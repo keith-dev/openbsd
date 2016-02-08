@@ -1,3 +1,4 @@
+/*	$OpenBSD: save.c,v 1.6 1997/09/01 18:13:20 millert Exp $	*/
 /*	$NetBSD: save.c,v 1.3 1995/03/21 15:07:57 cgd Exp $	*/
 
 /*
@@ -41,13 +42,13 @@ static char rcsid[] = "$NetBSD: save.c,v 1.3 1995/03/21 15:07:57 cgd Exp $";
 #endif
 #endif /* not lint */
 
-#include "externs.h"
+#include "extern.h"
 
+void
 restore()
 {
-	char *getenv();
 	char *home;
-	char home1[1024];
+	char home1[PATH_MAX];
 	register int n;
 	int tmp;
 	register FILE *fp;
@@ -61,15 +62,15 @@ restore()
 		return;
 	}
 	setegid(egid);
-	if ((fp = fopen(home1, "r")) == 0) {
-		perror(home1);
+	if ((fp = fopen(home1, "r")) == NULL) {
+		warn("can't open %s for reading", home1);
 		setegid(getgid());
 		return;
 	}
 	setegid(getgid());
 	fread(&WEIGHT, sizeof WEIGHT, 1, fp);
 	fread(&CUMBER, sizeof CUMBER, 1, fp);
-	fread(&clock, sizeof clock, 1, fp);
+	fread(&bclock, sizeof bclock, 1, fp);
 	fread(&tmp, sizeof tmp, 1, fp);
 	location = tmp ? dayfile : nightfile;
 	for (n = 1; n <= NUMOFROOMS; n++) {
@@ -82,7 +83,7 @@ restore()
 	fread(notes, sizeof notes, 1, fp);
 	fread(&direction, sizeof direction, 1, fp);
 	fread(&position, sizeof position, 1, fp);
-	fread(&time, sizeof time, 1, fp);
+	fread(&btime, sizeof btime, 1, fp);
 	fread(&fuel, sizeof fuel, 1, fp);
 	fread(&torps, sizeof torps, 1, fp);
 	fread(&carrying, sizeof carrying, 1, fp);
@@ -102,13 +103,14 @@ restore()
 	fread(&pleasure, sizeof pleasure, 1, fp);
 	fread(&power, sizeof power, 1, fp);
 	fread(&ego, sizeof ego, 1, fp);
+	fclose(fp);
 }
 
+void
 save()
 {
-	char *getenv();
 	char *home;
-	char home1[100];
+	char home1[PATH_MAX];
 	register int n;
 	int tmp;
 	FILE *fp;
@@ -122,8 +124,8 @@ save()
 		return;
 	}
 	setegid(egid);
-	if ((fp = fopen(home1, "w")) == 0) {
-		perror(home1);
+	if ((fp = fopen(home1, "w")) == NULL) {
+		warn("can't open %s for writing", home1);
 		setegid(getgid());
 		return;
 	}
@@ -131,7 +133,7 @@ save()
 	printf("Saved in %s.\n", home1);
 	fwrite(&WEIGHT, sizeof WEIGHT, 1, fp);
 	fwrite(&CUMBER, sizeof CUMBER, 1, fp);
-	fwrite(&clock, sizeof clock, 1, fp);
+	fwrite(&bclock, sizeof bclock, 1, fp);
 	tmp = location == dayfile;
 	fwrite(&tmp, sizeof tmp, 1, fp);
 	for (n = 1; n <= NUMOFROOMS; n++) {
@@ -144,7 +146,7 @@ save()
 	fwrite(notes, sizeof notes, 1, fp);
 	fwrite(&direction, sizeof direction, 1, fp);
 	fwrite(&position, sizeof position, 1, fp);
-	fwrite(&time, sizeof time, 1, fp);
+	fwrite(&btime, sizeof btime, 1, fp);
 	fwrite(&fuel, sizeof fuel, 1, fp);
 	fwrite(&torps, sizeof torps, 1, fp);
 	fwrite(&carrying, sizeof carrying, 1, fp);
@@ -164,4 +166,5 @@ save()
 	fwrite(&pleasure, sizeof pleasure, 1, fp);
 	fwrite(&power, sizeof power, 1, fp);
 	fwrite(&ego, sizeof ego, 1, fp);
+	fclose(fp);
 }

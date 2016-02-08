@@ -1,7 +1,7 @@
-#	from: @(#)Makefile	5.3 (Berkeley) 5/11/90
-#	$Id: Makefile,v 1.1.1.1 1995/10/18 08:47:29 deraadt Exp $
+#	$OpenBSD: Makefile,v 1.3 1997/09/21 11:43:30 deraadt Exp $
 
 PROG=	chroot
 MAN=	chroot.8
+LDSTATIC=	${STATIC}
 
 .include <bsd.prog.mk>

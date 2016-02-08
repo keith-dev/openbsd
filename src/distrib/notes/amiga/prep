@@ -105,11 +105,11 @@ Choosing installation root filesystem type:
 Transferring the miniroot filesystem:
 
 	The OpenBSD/amiga installation or upgrade can use a "miniroot"
-	fileystem which is installed on the partition used by OpenBSD
+	filesystem which is installed on the partition used by OpenBSD
 	for swapping.
 
 	Once the hard disk has been prepared for OpenBSD, the miniroot
-	filesystem (miniroot21.fs) is transferred to the swap partition
+	filesystem (miniroot22.fs) is transferred to the swap partition
 	configured during the hard disk prep (or the existing swap
 	partition in the case of an upgrade).  The xstreamtodev utility
 	provided in the "amiga/utilities" directory can be used on
@@ -122,7 +122,7 @@ Transferring the miniroot filesystem:
 	swap partition.
 
 	On AmigaDOS, the command:
-		xstreamtodev --input=miniroot21.fs --rdb-name=<swap partition>
+		xstreamtodev --input=miniroot22.fs --rdb-name=<swap partition>
 	where <swap partition> is the name you gave to the OpenBSD
 	partition to be used for swapping.  If xstreamtodev is unable to
 	determine the SCSI driver device name or the unit number of the
@@ -131,9 +131,9 @@ Transferring the miniroot filesystem:
 
 	To transfer the miniroot using an older BSD, you should be booted
 	up in single user state on the current system, or use the
-	"shutdown now" command to shutdown to single-uyser state.  Then
+	"shutdown now" command to shutdown to single-user state.  Then
 	copy the miniroot using dd:
-		dd if=miniroot21.fs of=/dev/rsdXb
+		dd if=miniroot22.fs of=/dev/rsdXb
 	where /dev/rsdXb should be the device path of the swap partition
 	your system is configured to use.  Once the file is copied,
 	reboot back to AmigaDOS to boot the new OpenBSD kernel.  NOTE:

@@ -1,13 +1,9 @@
-#
+#	$OpenBSD: Makefile.inc,v 1.12 1997/10/06 17:56:22 maja Exp $
 #	etc.pmax/Makefile.inc -- pmax-specific etc Makefile targets
-#
-#	$Id: Makefile.inc,v 1.7 1997/05/14 07:37:08 graichen Exp $
 
 .ifdef DESTDIR
 
-snap_md: binutils bsd simpleroot
-	cp ${.CURDIR}/../sys/arch/sparc/compile/GENERIC/bsd \
-	    ${DESTDIR}/snapshot/bsd
+snap_md: binutils bsd bsd.nfs bsd.rz0 distrib
 
 binutils:
 	cd ${DESTDIR} && tar cf - usr/*openbsd* \
@@ -24,7 +20,7 @@ bsd.nfs:
 	cd ${.CURDIR}/../sys/arch/pmax/conf && config GENERIC.NFS
 	cd ${.CURDIR}/../sys/arch/pmax/compile/GENERIC.NFS && \
 	    make clean && make depend && make
-	elf2ecoff ${.CURDIR}/../sys/arch/pmax/compile/GENERIC.NFS/bsd \
+	elf2ecoff ${.CURDIR}/../sys/arch/pmax/compile/GENERIC.NFS/bsd.elf \
 	    ${DESTDIR}/snapshot/bsd.nfs
 
 bsd.rz0:
@@ -34,8 +30,8 @@ bsd.rz0:
 	cp ${.CURDIR}/../sys/arch/pmax/compile/GENERIC.rz0/bsd \
 	    ${DESTDIR}/snapshot/bsd.rz0
 
-simpleroot:
-	cd ${.CURDIR}/../distrib/simpleroot && make cleandir && \
+distrib:
+	cd ${.CURDIR}/../distrib && make cleandir && \
 	    make && make install
 
 .endif	# DESTDIR check

@@ -1,4 +1,4 @@
-/*	$OpenBSD: sleep.c,v 1.4 1997/01/15 23:40:28 millert Exp $	*/
+/*	$OpenBSD: sleep.c,v 1.8 1997/09/12 04:44:32 millert Exp $	*/
 /*	$NetBSD: sleep.c,v 1.8 1995/03/21 09:11:11 cgd Exp $	*/
 
 /*
@@ -44,25 +44,36 @@ static char copyright[] =
 #if 0
 static char sccsid[] = "@(#)sleep.c	8.3 (Berkeley) 4/2/94";
 #else
-static char rcsid[] = "$OpenBSD: sleep.c,v 1.4 1997/01/15 23:40:28 millert Exp $";
+static char rcsid[] = "$OpenBSD: sleep.c,v 1.8 1997/09/12 04:44:32 millert Exp $";
 #endif
 #endif /* not lint */
 
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
+#include <ctype.h>
 #include <locale.h>
+#include <time.h>
+#include <signal.h>
 
 void usage __P((void));
+void alarmh __P((int));
 
 int
 main(argc, argv)
 	int argc;
 	char *argv[];
 {
-	int ch, secs;
+	int ch;
+	int secs = 0;
+	unsigned char *cp;
+	long nsecs = 0;
+	struct timespec rqtp;
+	int i;
 
 	setlocale(LC_ALL, "");
+
+	signal(SIGALRM, alarmh);
 
 	while ((ch = getopt(argc, argv, "")) != -1)
 		switch(ch) {
@@ -75,8 +86,36 @@ main(argc, argv)
 	if (argc != 1)
 		usage();
 
-	if ((secs = atoi(*argv)) > 0)
-		(void)sleep(secs);
+	cp = *argv;
+	while ((*cp != '\0') && (*cp != '.')) {
+		if (!isdigit(*cp)) usage();
+		secs = (secs * 10) + (*cp++ - '0');
+	}
+
+	/* Handle fractions of a second */
+	if (*cp == '.') {
+		*cp++ = '\0';
+		for (i = 100000000; i > 0; i /= 10) {
+			if (*cp == '\0') break;
+			if (!isdigit(*cp)) usage();
+			nsecs += (*cp++ - '0') * i;
+		}
+
+		/*
+		 * We parse all the way down to nanoseconds
+		 * in the above for loop. Be pedantic about
+		 * checking the rest of the argument.
+		 */
+		while (*cp != '\0') {
+			if (!isdigit(*cp++)) usage();
+		}
+	}
+
+	rqtp.tv_sec = (time_t) secs;
+	rqtp.tv_nsec = nsecs;
+
+	if ((secs > 0) || (nsecs > 0))
+		(void)nanosleep(&rqtp, NULL);
 	exit(0);
 }
 
@@ -86,4 +125,19 @@ usage()
 
 	(void)fprintf(stderr, "usage: sleep seconds\n");
 	exit(1);
+}
+
+/*
+ * POSIX 1003.2 says sleep should exit with 0 return code on reception
+ * of SIGALRM.
+ */
+void
+alarmh(sigraised)
+	int sigraised;
+{
+	/*
+	 * exit() flushes stdio buffers, which is not legal in a signal
+	 * handler. Use _exit().
+	 */
+	_exit(0);
 }

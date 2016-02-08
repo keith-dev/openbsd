@@ -1,4 +1,4 @@
-/*	$OpenBSD: modload.c,v 1.12 1997/03/27 19:57:55 deraadt Exp $	*/
+/*	$OpenBSD: modload.c,v 1.19 1997/09/17 10:06:32 deraadt Exp $	*/
 /*	$NetBSD: modload.c,v 1.13 1995/05/28 05:21:58 jtc Exp $	*/
 
 /*
@@ -69,6 +69,17 @@ int symtab = 1;
 int quiet = 0;
 int dounlink = 0;
 
+#if defined(__alpha) || defined(__mips)
+#define LDSYMTABLE	"-R"
+#define LDTEXTSTART	"-Ttext"
+#define LDSYMPREFIX	""
+#else
+#define LDSYMTABLE	"-A"
+#define LDTEXTSTART	"-T"
+#define LDSYMPREFIX	"_"
+#define MAGICCHECK
+#endif
+
 void
 linkcmd(kernel, entry, outfile, address, object)
 	char *kernel, *entry, *outfile;
@@ -79,21 +90,20 @@ linkcmd(kernel, entry, outfile, address, object)
 	pid_t pid;
 	int status;
 
-	snprintf(entrybuf, sizeof entrybuf, "_%s", entry);
+	snprintf(entrybuf, sizeof entrybuf, "%s%s", LDSYMPREFIX, entry);
 	snprintf(addrbuf, sizeof addrbuf, "%x", address);
 
 	if (debug)
-		printf("%s -A %s -e %s -o %s -T %s %s\n",
-			_PATH_LD, kernel, entrybuf, outfile,
-			addrbuf, object);
-
+		printf("%s %s %s -e %s -o %s %s %s %s\n",
+		    _PATH_LD, LDSYMTABLE, kernel, entrybuf,
+		    outfile, LDTEXTSTART, addrbuf, object);
 	
 	if ((pid = fork()) < 0)
 		err(18, "fork");
 
 	if(pid == 0) {
-		execl(_PATH_LD, "ld", "-A", kernel, "-e", entrybuf, "-o",
-		outfile, "-T", addrbuf, object, (char *)0);
+		execl(_PATH_LD, "ld", LDSYMTABLE, kernel, "-e", entrybuf, "-o",
+		    outfile, LDTEXTSTART, addrbuf, object, NULL);
 		exit(128 + errno);
 	}
 
@@ -179,7 +189,7 @@ main(argc, argv)
 	struct stat stb;
 	u_int modsize;	/* XXX */
 	u_int modentry;	/* XXX */
-	struct nlist nl, *nlp;
+	struct nlist *nlp;
 	int strtablen, numsyms;
 
 	struct lmc_loadbuf ldbuf;
@@ -285,7 +295,7 @@ main(argc, argv)
 	 * Pre-open the 0-linked module to get the size information
 	 */
 	if ((modfd = open(out, O_RDONLY, 0)) == -1)
-		err(4, out);
+		err(4, "%s", out);
 	fileopen |= MOD_OPEN;
 
 	/*
@@ -307,11 +317,13 @@ main(argc, argv)
 	close(modfd);
 	fileopen &= ~MOD_OPEN;
 
+#ifdef MAGICCHECK
 	/*
 	 * Magic number...
 	 */
 	if (N_BADMAG(info_buf))
 		errx(4, "not an a.out format file");
+#endif
 
 	/*
 	 * Calculate the size of the module
@@ -356,7 +368,7 @@ main(argc, argv)
 	 * Open the relinked module to load it...
 	 */
 	if ((modfd = open(out, O_RDONLY, 0)) == -1)
-		err(4, out);
+		err(4, "%s", out);
 	fileopen |= MOD_OPEN;
 
 	/*
@@ -493,7 +505,7 @@ main(argc, argv)
 	if (post) {
 		struct lmc_stat sbuf;
 		char name[MAXLKMNAME] = "";
-		char id[16], type[16], offset[16];
+		char id[16], type[16], offset[32];
 
 		sbuf.id = resrv.slot;
 		sbuf.name = name;
@@ -501,7 +513,7 @@ main(argc, argv)
 			err(15, "error fetching module stats for post-install");
 		sprintf(id, "%d", sbuf.id);
 		sprintf(type, "0x%x", sbuf.type);
-		sprintf(offset, "%d", sbuf.offset);
+		sprintf(offset, "%lu", sbuf.offset);
 		/*
 		 * XXX
 		 * The modload docs say that drivers can install bdevsw &

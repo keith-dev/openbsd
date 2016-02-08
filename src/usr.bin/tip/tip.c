@@ -1,4 +1,4 @@
-/*	$OpenBSD: tip.c,v 1.5 1997/04/20 23:29:33 millert Exp $	*/
+/*	$OpenBSD: tip.c,v 1.8 1997/09/01 23:24:26 deraadt Exp $	*/
 /*	$NetBSD: tip.c,v 1.13 1997/04/20 00:03:05 mellon Exp $	*/
 
 /*
@@ -44,7 +44,7 @@ static char copyright[] =
 #if 0
 static char sccsid[] = "@(#)tip.c	8.1 (Berkeley) 6/6/93";
 #endif
-static char rcsid[] = "$OpenBSD: tip.c,v 1.5 1997/04/20 23:29:33 millert Exp $";
+static char rcsid[] = "$OpenBSD: tip.c,v 1.8 1997/09/01 23:24:26 deraadt Exp $";
 #endif /* not lint */
 
 /*
@@ -71,7 +71,9 @@ void	cleanup();
 char	*sname();
 char	PNbuf[256];			/* This limits the size of a number */
 
+int
 main(argc, argv)
+	int argc;
 	char *argv[];
 {
 	char *system = NOSTR;
@@ -136,7 +138,7 @@ main(argc, argv)
 	for (p = system; *p; p++)
 		*p = '\0';
 	PN = PNbuf;
-	(void)snprintf(sbuf, sizeof(sbuf), "tip%d", BR);
+	(void)snprintf(sbuf, sizeof(sbuf), "tip%ld", BR);
 	system = sbuf;
 
 notnumber:
@@ -175,7 +177,7 @@ notnumber:
 	vinit();				/* init variables */
 	setparity("even");			/* set the parity table */
 	if ((i = speed(number(value(BAUDRATE)))) == 0) {
-		printf("tip: bad baud rate %d\n", number(value(BAUDRATE)));
+		printf("tip: bad baud rate %ld\n", number(value(BAUDRATE)));
 		daemon_uid();
 		(void)uu_unlock(uucplock);
 		exit(3);
@@ -188,7 +190,7 @@ notnumber:
 	 */
 	if (HW)
 		ttysetup(i);
-	if (p = connect()) {
+	if ((p = connect())) {
 		printf("\07%s\n[EOT]\n", p);
 		daemon_uid();
 		(void)uu_unlock(uucplock);
@@ -226,11 +228,12 @@ cucommon:
 	 * so, fork one process for local side and one for remote.
 	 */
 	printf(cumode ? "Connected\r\n" : "\07connected\r\n");
-	if (pid = fork())
+	if ((pid = fork()))
 		tipin();
 	else
 		tipout();
 	/*NOTREACHED*/
+	exit(0);
 }
 
 void
@@ -254,6 +257,7 @@ cleanup()
  */
 static int uidswapped;
 
+void
 user_uid()
 {
 	if (uidswapped == 0) {
@@ -262,6 +266,7 @@ user_uid()
 	}
 }
 
+void
 daemon_uid()
 {
 
@@ -271,14 +276,17 @@ daemon_uid()
 	}
 }
 
+void
 shell_uid()
 {
+	setegid(gid);
 	seteuid(uid);
 }
 
 /*
  * put the controlling keyboard into raw mode
  */
+void
 raw()
 {
 	tcsetattr(0, TCSADRAIN, &term);
@@ -288,6 +296,7 @@ raw()
 /*
  * return keyboard to normal mode
  */
+void
 unraw()
 {
 	tcsetattr(0, TCSADRAIN, &defterm);
@@ -300,9 +309,11 @@ static	jmp_buf promptbuf;
  *  in from the terminal.  Handles signals & allows use of
  *  normal erase and kill characters.
  */
-prompt(s, p)
+int
+prompt(s, p, sz)
 	char *s;
-	register char *p;
+	char *p;
+	size_t sz;
 {
 	register int c;
 	register char *b = p;
@@ -314,7 +325,7 @@ prompt(s, p)
 	unraw();
 	printf("%s", s);
 	if (setjmp(promptbuf) == 0)
-		while ((c = getchar()) != EOF && (*p = c) != '\n')
+		while ((c = getchar()) != EOF && (*p = c) != '\n' && --sz > 0)
 			p++;
 	*p = '\0';
 
@@ -340,6 +351,7 @@ intprompt()
 /*
  * ****TIPIN   TIPIN****
  */
+void
 tipin()
 {
 	char gch, bol = 1;
@@ -387,6 +399,7 @@ extern esctable_t etable[];
  * Escape handler --
  *  called on recognition of ``escapec'' at the beginning of a line
  */
+int
 escape()
 {
 	register char gch;
@@ -408,6 +421,7 @@ escape()
 	return (gch);
 }
 
+int
 speed(n)
 	int n;
 {
@@ -419,15 +433,19 @@ speed(n)
 	return 0;
 }
 
-any(c, p)
-	register char c, *p;
+int
+any(cc, p)
+	register int cc;
+	char *p;
 {
+	char c = cc;
 	while (p && *p)
 		if (*p++ == c)
 			return (1);
 	return (0);
 }
 
+int
 size(s)
 	register char	*s;
 {
@@ -445,7 +463,7 @@ interp(s)
 	static char buf[256];
 	register char *p = buf, c, *q;
 
-	while (c = *s++) {
+	while ((c = *s++)) {
 		for (q = "\nn\rr\tt\ff\033E\bb"; *q; q++)
 			if (*q++ == c) {
 				*p++ = '\\'; *p++ = *q;
@@ -484,6 +502,7 @@ ctrl(c)
 /*
  * Help command
  */
+void
 help(c)
 	char c;
 {
@@ -502,6 +521,7 @@ help(c)
 /*
  * Set up the "remote" tty's state
  */
+void
 ttysetup(speed)
 	int speed;
 {
@@ -547,6 +567,7 @@ static char partab[0200];
  * We are doing 8 bit wide output, so we just generate a character
  * with the right parity and output it.
  */
+void
 pwrite(fd, buf, n)
 	int fd;
 	char *buf;
@@ -573,6 +594,7 @@ pwrite(fd, buf, n)
 /*
  * Build a parity table with appropriate high-order bit.
  */
+void
 setparity(defparity)
 	char *defparity;
 {

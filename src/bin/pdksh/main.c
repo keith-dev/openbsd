@@ -1,4 +1,4 @@
-/*	$OpenBSD: main.c,v 1.5 1997/01/02 09:34:03 downsj Exp $	*/
+/*	$OpenBSD: main.c,v 1.9 1997/09/12 00:32:53 deraadt Exp $	*/
 
 /*
  * startup, main loop, enviroments and error handling
@@ -26,7 +26,7 @@ static int	is_restricted ARGS((char *name));
 
 static const char	initifs [] = "IFS= \t\n"; /* must be R/W */
 
-static const	char   initsubs [] = 
+static const	char   initsubs [] =
   "${PS2=> } ${PS3=#? } ${PS4=+ }";
 
 static const char version_param[] =
@@ -487,9 +487,9 @@ include(name, argc, argv, intr_ok)
 	s->u.shf = shf;
 	s->file = str_save(name, ATEMP);
 	i = shell(s, FALSE);
-	quitenv();
 	source = sold;
 	shf_close(s->u.shf);
+	quitenv();
 	if (old_argv) {
 		e->loc->argv = old_argv;
 		e->loc->argc = old_argc;

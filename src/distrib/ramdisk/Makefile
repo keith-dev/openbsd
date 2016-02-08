@@ -1,8 +1,6 @@
-#	$OpenBSD: Makefile,v 1.5 1997/05/24 23:16:48 deraadt Exp $
-#	$NetBSD: Makefile,v 1.2.4.3 1996/07/04 07:05:32 leo Exp $
+#	$OpenBSD: Makefile,v 1.11 1997/10/09 16:13:07 niklas Exp $
 
-# Revision is 2.1
-REV=		21
+REV=		22
 
 CBIN=		instbin
 ARCHDIR=	${.CURDIR}/../${MACHINE}/ramdisk
@@ -59,9 +57,9 @@ ${FLOPPY}:	bsd.gz ${BOOT} ${BOOTXX}
 	dd if=/dev/zero of=${REALIMAGE} count=${FLOPPYSIZE}
 	vnconfig -v -c ${VND} ${REALIMAGE}
 	disklabel -w ${RAWLABEL} ${VND} ${FLOPPYTYPE}
-	newfs ${NEWFSOPTS_FD} ${VND_RDEV} ${FLOPPYTYPE}
+	newfs ${NEWFSOPTS_FD} ${VND_RDEV}
 	mount ${VND_DEV} ${MOUNT_POINT}
-	cp ${BOOT} ${MOUNT_POINT}
+	cp ${BOOT} ${MOUNT_POINT}/boot
 	cp bsd.gz ${MOUNT_POINT}/bsd
 	${INSTALLBOOT} -v ${MOUNT_POINT}/boot ${BOOTXX} ${VND_RDEV}
 	@echo ""
@@ -76,7 +74,7 @@ ${FLOPPY}:	bsd.gz ${BOOT} ${BOOTXX}
 bsd:
 	cd ${.CURDIR}/../../sys/arch/${MACHINE}/conf && config ${KERNEL}
 	cd ${.CURDIR}/../../sys/arch/${MACHINE}/compile/${KERNEL} && \
-	    make clean && make depend && make
+	    make depend && make clean && make
 	cp ${.CURDIR}/../../sys/arch/${MACHINE}/compile/${KERNEL}/bsd bsd
 
 bsd.rd:	bsd ${IMAGE} rdsetroot
@@ -94,7 +92,7 @@ ${IMAGE}: ${CBIN}
 	dd if=/dev/zero of=${REALIMAGE} count=${IMAGESIZE}
 	vnconfig -v -c ${VND} ${REALIMAGE}
 	disklabel -w ${RAWLABEL} ${VND} ${DISKTYPE}
-	newfs ${NEWFSOPTS_RD} ${VND_RDEV} ${DISKTYPE} || ${NEWFS_WILL_FAIL}
+	newfs ${NEWFSOPTS_RD} ${VND_RDEV} || ${NEWFS_WILL_FAIL}
 	mount ${VND_DEV} ${MOUNT_POINT}
 	mtree -def ${MTREE} -p ${MOUNT_POINT}/ -u
 	REV=${REV} CURDIR=${.CURDIR} OBJDIR=${.OBJDIR} ARCHDIR=${ARCHDIR} \

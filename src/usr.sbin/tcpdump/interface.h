@@ -18,7 +18,7 @@
  * WARRANTIES, INCLUDING, WITHOUT LIMITATION, THE IMPLIED WARRANTIES OF
  * MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE.
  *
- * @(#) $Header: /cvs/src/usr.sbin/tcpdump/interface.h,v 1.5 1996/12/12 16:22:53 bitblt Exp $ (LBL)
+ * @(#) $Header: /cvs/src/usr.sbin/tcpdump/interface.h,v 1.7 1997/07/25 20:12:20 mickey Exp $ (LBL)
  */
 
 #ifndef tcpdump_interface_h
@@ -140,7 +140,7 @@ extern char *savestr(const char *);
 
 extern void wrapup(int);
 
-#if __STDC__
+#ifdef __STDC__
 extern __dead void error(const char *, ...)
     __attribute__((volatile, format (printf, 1, 2)));
 extern void warning(const char *, ...) __attribute__ ((format (printf, 1, 2)));
@@ -167,6 +167,7 @@ extern int llc_print(const u_char *, u_int, u_int, const u_char *,
 extern void aarp_print(const u_char *, u_int);
 extern void arp_print(const u_char *, u_int, u_int);
 extern void atalk_print(const u_char *, u_int);
+extern void atalk_print_llap(const u_char *, u_int);
 extern void atm_if_print(u_char *, const struct pcap_pkthdr *, const u_char *);
 extern void bootp_print(const u_char *, u_int, u_short, u_short);
 extern void decnet_print(const u_char *, u_int, u_int);

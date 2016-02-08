@@ -1,4 +1,4 @@
-/*	$OpenBSD: reboot.c,v 1.7 1997/04/11 09:06:42 deraadt Exp $	*/
+/*	$OpenBSD: reboot.c,v 1.10 1997/09/03 21:18:38 mickey Exp $	*/
 /*	$NetBSD: reboot.c,v 1.8 1995/10/05 05:36:22 mycroft Exp $	*/
 
 /*
@@ -44,27 +44,28 @@ static char copyright[] =
 #if 0
 static char sccsid[] = "@(#)reboot.c	8.1 (Berkeley) 6/5/93";
 #else
-static char rcsid[] = "$OpenBSD: reboot.c,v 1.7 1997/04/11 09:06:42 deraadt Exp $";
+static char rcsid[] = "$OpenBSD: reboot.c,v 1.10 1997/09/03 21:18:38 mickey Exp $";
 #endif
 #endif /* not lint */
 
+#include <sys/types.h>
 #include <sys/reboot.h>
 #include <signal.h>
 #include <pwd.h>
 #include <errno.h>
+#include <err.h>
 #include <syslog.h>
 #include <unistd.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <paths.h>
+#include <util.h>
 
-void err __P((const char *fmt, ...));
 void usage __P((void));
+extern char *__progname;
 
 #define _PATH_RCSHUTDOWN	"/etc/rc.shutdown"
-
-int dohalt;
 
 int
 main(argc, argv)
@@ -73,25 +74,25 @@ main(argc, argv)
 {
 	register int i;
 	struct passwd *pw;
-	int ch, howto, lflag, nflag, qflag, sverrno;
+	int ch, howto, dohalt, lflag, nflag, pflag, qflag, sverrno;
 	char *p, *user;
 
-	/* Get our name */
-	p = strrchr(*argv, '/');
-	if(p == NULL) p = *argv;
-	else p++;
+	p = __progname;
 
 	/* Nuke login shell */
 	if(*p == '-') p++;
 
+	howto = dohalt = lflag = nflag = pflag = qflag = 0;
 	if (!strcmp(p, "halt")) {
 		dohalt = 1;
 		howto = RB_HALT;
-	} else
-		howto = 0;
-	lflag = nflag = qflag = 0;
-	while ((ch = getopt(argc, argv, "lnqd")) != -1)
+	}
+
+	while ((ch = getopt(argc, argv, "dlnpq")) != -1)
 		switch(ch) {
+		case 'd':
+			howto |= RB_DUMP;
+			break;
 		case 'l':		/* Undocumented; used by shutdown. */
 			lflag = 1;
 			break;
@@ -99,11 +100,15 @@ main(argc, argv)
 			nflag = 1;
 			howto |= RB_NOSYNC;
 			break;
+		case 'p':
+			/* Only works if we're called as halt. */
+			if (dohalt) {
+				pflag = 1;
+				howto |= RB_POWERDOWN;
+			}
+			break;
 		case 'q':
 			qflag = 1;
-			break;
-		case 'd':
-			howto |= RB_DUMP;
 			break;
 		case '?':
 		default:
@@ -113,11 +118,11 @@ main(argc, argv)
 	argv += optind;
 
 	if (geteuid())
-		err("%s", strerror(EPERM));
+		errx(1, "%s", strerror(EPERM));
 
 	if (qflag) {
 		reboot(howto);
-		err("%s", strerror(errno));
+		err(1, "reboot");
 	}
 
 	/* Log the reboot. */
@@ -127,7 +132,12 @@ main(argc, argv)
 			    pw->pw_name : "???";
 		if (dohalt) {
 			openlog("halt", 0, LOG_AUTH | LOG_CONS);
-			syslog(LOG_CRIT, "halted by %s", user);
+			if (pflag) {
+				syslog(LOG_CRIT,
+					"halted (with powerdown) by %s", user);
+			} else {
+				syslog(LOG_CRIT, "halted by %s", user);
+			}
 		} else {
 			openlog("reboot", 0, LOG_AUTH | LOG_CONS);
 			syslog(LOG_CRIT, "rebooted by %s", user);
@@ -145,7 +155,7 @@ main(argc, argv)
 
 	/* Just stop init -- if we fail, we'll restart it. */
 	if (kill(1, SIGTSTP) == -1)
-		err("SIGTSTP init: %s", strerror(errno));
+		err(1, "SIGTSTP init");
 
 	/* Ignore the SIGHUP we get when our parent shell dies. */
 	(void)signal(SIGHUP, SIG_IGN);
@@ -172,8 +182,7 @@ main(argc, argv)
 		 * single-user mode.
 		 */
 		if (errno != ESRCH) {
-			(void)fprintf(stderr, "%s: SIGTERM processes: %s",
-			    dohalt ? "halt" : "reboot", strerror(errno));
+			warn("SIGTERM processes");
 			goto restart;
 		}
 	}
@@ -195,8 +204,7 @@ main(argc, argv)
 			goto restart;
 		}
 		if (i > 5) {
-			(void)fprintf(stderr,
-			    "WARNING: some process(es) wouldn't die\n");
+			warnx("WARNING: some process(es) wouldn't die");
 			break;
 		}
 		(void)sleep(2 * i);
@@ -207,43 +215,13 @@ main(argc, argv)
 
 restart:
 	sverrno = errno;
-	err("%s%s", kill(1, SIGHUP) == -1 ? "(can't restart init): " : "",
-	    strerror(sverrno));
+	errx(1, kill(1, SIGHUP) == -1 ? "(can't restart init): " : "");
 	/* NOTREACHED */
 }
 
 void
 usage()
 {
-	(void)fprintf(stderr, "usage: %s [-nqd]\n", dohalt ? "halt" : "reboot");
+	(void)fprintf(stderr, "usage: %s [-dlnpq]\n", __progname);
 	exit(1);
-}
-
-#if __STDC__
-#include <stdarg.h>
-#else
-#include <varargs.h>
-#endif
-
-void
-#if __STDC__
-err(const char *fmt, ...)
-#else
-err(fmt, va_alist)
-	char *fmt;
-        va_dcl
-#endif
-{
-	va_list ap;
-#if __STDC__
-	va_start(ap, fmt);
-#else
-	va_start(ap);
-#endif
-	(void)fprintf(stderr, "%s: ", dohalt ? "halt" : "reboot");
-	(void)vfprintf(stderr, fmt, ap);
-	va_end(ap);
-	(void)fprintf(stderr, "\n");
-	exit(1);
-	/* NOTREACHED */
 }

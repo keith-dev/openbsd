@@ -1,4 +1,4 @@
-/*	$OpenBSD: scm.c,v 1.4 1997/04/01 07:35:22 todd Exp $	*/
+/*	$OpenBSD: scm.c,v 1.8 1997/10/12 20:29:55 beck Exp $	*/
 
 /*
  * Copyright (c) 1992 Carnegie Mellon University
@@ -159,7 +159,8 @@
 #include <arpa/inet.h>
 #include <net/if.h>
 #include <netdb.h>
-#if __STDC__
+#include <syslog.h>
+#ifdef __STDC__
 #include <stdarg.h>
 #else
 #include <varargs.h>
@@ -207,6 +208,82 @@ static char *myhost __P((void));
  ***    C O N N E C T I O N   R O U T I N E S    ***
  ***    F O R   S E R V E R                      ***
  ***************************************************/
+
+int lock_host_file(char *lockdir) {
+
+  /* mark that we are servicing a connection from host at ia.  we do
+   * this by getting an exclusive lock on a file that is "ia" in
+   * dotted decimal, in directory "lockdir". For convienence's sake we
+   * write our process ID in there. Should be called from servicing
+   * child, so lock goes away on exit. must be called after service()
+   * sets global remoteaddr (above).
+   *
+   * returns fd for file on success,-1 on failure.
+   */
+
+  char *dd, *lpath;
+  int i, fd; 
+  FILE *f;
+
+  dd=strdup(inet_ntoa(remoteaddr));
+  if (dd == NULL) {
+    syslog(LOG_ERR, "Malloc failed in lock_host_file()");
+    return(-1);
+  }
+  i=strlen(lockdir) + strlen(dd) + 2; /* null and maybe a / */
+  lpath=(char *)malloc(i * sizeof(char));
+  lpath[i-1]='\0';
+  if (lpath == NULL) {
+    syslog(LOG_ERR, "Malloc failed in lock_host_file()");
+    free(dd);
+    return(-1);
+  }
+  (void) strncpy(lpath, lockdir, i-1);
+  if (lpath[strlen(lpath) - 1] != '/') {
+    lpath[strlen(lpath) + 1] = '\0';
+    lpath[strlen(lpath)] = '/'; 
+  }
+  (void) strncat(lpath, dd, i - strlen(lpath)); 
+  if (lpath[i-1] != '\0') {
+    syslog(LOG_CRIT, "Buffer overrun in lock_host_file(). SHOULD NOT HAPPEN!");
+    abort();
+  }
+  free(dd);
+  if ((fd = open(lpath, O_CREAT | O_WRONLY, 0600)) < 0) {
+    syslog(LOG_ERR, "Couldn't open/create lock file %s (%m)", lpath);
+    free(lpath);
+    return(-1);
+  }
+#ifdef USE_LOCKF
+  if (lockf(fd, F_TLOCK, 0) != 0) 
+#else
+  if (flock(fd, LOCK_EX | LOCK_NB ) != 0)
+#endif
+    {
+      syslog(LOG_DEBUG, "Can't get lock on %s.", lpath);
+      free(lpath);
+      close(fd);
+      return(-1);
+    }
+  if (ftruncate(fd, 0) < 0) {
+    syslog(LOG_ERR, "Couldn't ftruncate fd %d for lock file %s (%m)",
+	   fd, lpath);
+    free(lpath);
+    close(fd);
+    return(-1);
+  }
+  f=fdopen(fd,"w");
+  if (f == NULL) {
+    syslog(LOG_ERR, "Couldn't fopen fd %d for lock file %s (%m)", fd, lpath);
+    free(lpath);
+    close(fd);
+    return(-1);
+  }
+  (void)fprintf(f,"%d\n", getpid());
+  fflush(f);
+  free(lpath);
+  return(fd);
+}
 
 int
 servicesetup (server)		/* listen for clients */
@@ -432,7 +509,8 @@ char *myhost ()		/* find my host name */
 			return (NULL);
 		if ((h = gethostbyname (name)) == NULL)
 			return (NULL);
-		(void) strcpy (name,h->h_name);
+		(void) strncpy (name,h->h_name,sizeof name-1);
+		name[sizeof name-1] = '\0';
 	}
 	return (name);
 }

@@ -1,4 +1,4 @@
-/*	$OpenBSD: route.c,v 1.8 1997/01/25 23:26:42 tholo Exp $	*/
+/*	$OpenBSD: route.c,v 1.20 1997/07/28 18:56:03 kstailey Exp $	*/
 /*	$NetBSD: route.c,v 1.15 1996/05/07 02:55:06 thorpej Exp $	*/
 
 /*
@@ -38,7 +38,7 @@
 #if 0
 static char sccsid[] = "from: @(#)route.c	8.3 (Berkeley) 3/9/94";
 #else
-static char *rcsid = "$OpenBSD: route.c,v 1.8 1997/01/25 23:26:42 tholo Exp $";
+static char *rcsid = "$OpenBSD: route.c,v 1.20 1997/07/28 18:56:03 kstailey Exp $";
 #endif
 #endif /* not lint */
 
@@ -54,18 +54,28 @@ static char *rcsid = "$OpenBSD: route.c,v 1.8 1997/01/25 23:26:42 tholo Exp $";
 #include <net/route.h>
 #undef _KERNEL
 #include <netinet/in.h>
+#include <arpa/inet.h>
 
 #include <netns/ns.h>
 
 #include <netipx/ipx.h>
 
+#include <netatalk/at.h>
+
 #include <sys/sysctl.h>
 
+#include <limits.h>
 #include <netdb.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+
+#ifndef INET
+#define INET
+#endif
+
+#include <net/encap.h>
 #include "netstat.h"
 
 #define kget(p, d) (kread((u_long)(p), (char *)&(d), sizeof (d)))
@@ -114,6 +124,7 @@ static void np_rtentry __P((struct rt_msghdr *));
 static void p_sockaddr __P((struct sockaddr *, int, int));
 static void p_flags __P((int, char *));
 static void p_rtentry __P((struct rtentry *));
+static void encap_print __P((struct rtentry *));
 
 /*
  * Print routing tables.
@@ -148,7 +159,10 @@ routepr(rtree)
 			} else if (af == AF_UNSPEC || af == i) {
 				pr_family(i);
 				do_rtent = 1;
-				pr_rthdr();
+				if (i != AF_ENCAP)
+					pr_rthdr();
+				else
+					pr_encaphdr();
 				p_tree(head.rnh_treetop);
 			}
 		}
@@ -180,6 +194,12 @@ pr_family(af)
 	case AF_CCITT:
 		afname = "X.25";
 		break;
+	case AF_ENCAP:
+		afname = "Encap";
+		break;
+	case AF_APPLETALK:
+		afname = "AppleTalk";
+		break;
 	default:
 		afname = NULL;
 		break;
@@ -191,7 +211,7 @@ pr_family(af)
 }
 
 /* column widths; each followed by one space */
-#define	WID_DST		16	/* width of destination column */
+#define	WID_DST		18	/* width of destination column */
 #define	WID_GW		18	/* width of gateway column */
 
 /*
@@ -202,11 +222,24 @@ pr_rthdr()
 {
 
 	if (Aflag)
-		printf("%-8.8s ","Address");
-	printf("%-*.*s %-*.*s %-6.6s  %6.6s%8.8s %6.6s  %s\n",
+		printf("%-*.*s ", PLEN, PLEN, "Address");
+	printf("%-*.*s %-*.*s %-6.6s  %6.6s  %6.6s %6.6s  %s\n",
 		WID_DST, WID_DST, "Destination",
 		WID_GW, WID_GW, "Gateway",
 		"Flags", "Refs", "Use", "Mtu", "Interface");
+}
+
+/*
+ * Print header for AF_ENCAP entries.
+ */
+void
+pr_encaphdr()
+{
+	if (Aflag)
+		printf("%-*s ", PLEN, "Address");
+	printf("%-31s %-5s %-31s %-5s %-5s %-26s\n",
+	    "Source address/netmask", "Port", "Destination address/netmask", 
+	    "Port", "Proto", "SA(Address/SPI/Proto)");
 }
 
 static struct sockaddr *
@@ -229,7 +262,7 @@ again:
 	kget(rn, rnode);
 	if (rnode.rn_b < 0) {
 		if (Aflag)
-			printf("%-8.8x ", rn);
+			printf("%-16p ", rn);
 		if (rnode.rn_flags & RNF_ROOT) {
 			if (Aflag)
 				printf("(root node)%s",
@@ -244,11 +277,11 @@ again:
 			    0, 44);
 			putchar('\n');
 		}
-		if (rn = rnode.rn_dupedkey)
+		if ((rn = rnode.rn_dupedkey))
 			goto again;
 	} else {
 		if (Aflag && do_rtent) {
-			printf("%-8.8x ", rn);
+			printf("%-16p ", rn);
 			p_rtnode();
 		}
 		rn = rnode.rn_r;
@@ -268,21 +301,22 @@ p_rtnode()
 		if (rnode.rn_mask) {
 			printf("\t  mask ");
 			p_sockaddr(kgetsa((struct sockaddr *)rnode.rn_mask),
-				    0, -1);
+			    0, -1);
 		} else if (rm == 0)
 			return;
 	} else {
 		sprintf(nbuf, "(%d)", rnode.rn_b);
-		printf("%6.6s %8.8x : %8.8x", nbuf, rnode.rn_l, rnode.rn_r);
+		printf("%6.6s %16p : %16p", nbuf, rnode.rn_l,
+		    rnode.rn_r);
 	}
 	while (rm) {
 		kget(rm, rmask);
 		sprintf(nbuf, " %d refs, ", rmask.rm_refs);
-		printf(" mk = %8.8x {(%d),%s",
+		printf(" mk = %16p {(%d),%s",
 			rm, -1 - rmask.rm_b, rmask.rm_refs ? nbuf : " ");
 		p_sockaddr(kgetsa((struct sockaddr *)rmask.rm_mask), 0, -1);
 		putchar('}');
-		if (rm = rmask.rm_mklist)
+		if ((rm = rmask.rm_mklist))
 			printf(" ->");
 	}
 	putchar('\n');
@@ -296,19 +330,25 @@ ntreestuff()
 	char *buf, *next, *lim;
 	register struct rt_msghdr *rtm;
 
-        mib[0] = CTL_NET;
-        mib[1] = PF_ROUTE;
-        mib[2] = 0;
-        mib[3] = 0;
-        mib[4] = NET_RT_DUMP;
-        mib[5] = 0;
-        if (sysctl(mib, 6, NULL, &needed, NULL, 0) < 0)
-		{ perror("route-sysctl-estimate"); exit(1);}
-	if ((buf = malloc(needed)) == 0)
-		{ printf("out of space\n"); exit(1);}
-        if (sysctl(mib, 6, buf, &needed, NULL, 0) < 0)
-		{ perror("sysctl of routing table"); exit(1);}
-	lim  = buf + needed;
+	mib[0] = CTL_NET;
+	mib[1] = PF_ROUTE;
+	mib[2] = 0;
+	mib[3] = 0;
+	mib[4] = NET_RT_DUMP;
+	mib[5] = 0;
+	if (sysctl(mib, 6, NULL, &needed, NULL, 0) < 0) {
+		perror("route-sysctl-estimate");
+		exit(1);
+	}
+	if ((buf = malloc(needed)) == 0) {
+		printf("out of space\n");
+		exit(1);
+	}
+        if (sysctl(mib, 6, buf, &needed, NULL, 0) < 0) {
+		perror("sysctl of routing table");
+		exit(1);
+	}
+	lim = buf + needed;
 	for (next = buf; next < lim; next += rtm->rtm_msglen) {
 		rtm = (struct rt_msghdr *)next;
 		np_rtentry(rtm);
@@ -349,7 +389,7 @@ np_rtentry(rtm)
 	else {
 		p_sockaddr(sa, rtm->rtm_flags, 16);
 		if (sa->sa_len == 0)
-			sa->sa_len = sizeof(long);
+			sa->sa_len = sizeof(in_addr_t);
 		sa = (struct sockaddr *)(sa->sa_len + (char *)sa);
 		p_sockaddr(sa, 0, 18);
 	}
@@ -384,7 +424,7 @@ p_sockaddr(sa, flags, width)
 	case AF_IPX:
 		cp = ipx_print(sa);
 		break;
-
+		
 	case AF_LINK:
 	    {
 		register struct sockaddr_dl *sdl = (struct sockaddr_dl *)sa;
@@ -416,11 +456,17 @@ p_sockaddr(sa, flags, width)
 		break;
 	    }
 
+	case AF_APPLETALK:
+	    {
+		/* XXX could do better */
+		cp = atalk_print(sa,11);
+		break;
+	    }
 	default:
 	    {
 		register u_char *s = (u_char *)sa->sa_data, *slim;
 
-		slim =  sa->sa_len + (u_char *) sa;
+		slim = sa->sa_len + (u_char *) sa;
 		cplim = cp + sizeof(workbuf) - 6;
 		cp += sprintf(cp, "(%d)", sa->sa_family);
 		while (s < slim && cp < cplim) {
@@ -464,13 +510,21 @@ p_rtentry(rt)
 	register struct rtentry *rt;
 {
 	static struct ifnet ifnet, *lastif;
-
-	p_sockaddr(kgetsa(rt_key(rt)), rt->rt_flags, WID_DST);
+	struct sockaddr *sa;
+	
+	sa = kgetsa(rt_key(rt));
+	
+	if (sa->sa_family == AF_ENCAP) {
+		encap_print(rt);
+		return;
+	}
+	
+	p_sockaddr(sa, rt->rt_flags, WID_DST);
 	p_sockaddr(kgetsa(rt->rt_gateway), RTF_HOST, WID_GW);
 	p_flags(rt->rt_flags, "%-6.6s ");
-	printf("%6d %8d ", rt->rt_refcnt, rt->rt_use);
+	printf("%6d %8ld ", rt->rt_refcnt, rt->rt_use);
 	if (rt->rt_rmx.rmx_mtu)
-		printf("%6d ", rt->rt_rmx.rmx_mtu);
+		printf("%6ld ", rt->rt_rmx.rmx_mtu);
 	else
 		printf("%6s ", "-");
 	if (rt->rt_ifp) {
@@ -486,7 +540,7 @@ p_rtentry(rt)
 
 char *
 routename(in)
-	u_int32_t in;
+	in_addr_t in;
 {
 	register char *cp;
 	static char line[MAXHOSTNAMELEN + 1];
@@ -530,13 +584,12 @@ routename(in)
  */
 char *
 netname(in, mask)
-	u_int32_t in, mask;
+	in_addr_t in, mask;
 {
 	char *cp = 0;
 	static char line[MAXHOSTNAMELEN + 1];
 	struct netent *np = 0;
-	u_int32_t net;
-	int subnetshift;
+	in_addr_t net, subnetshift;
 
 	in = ntohl(in);
 	mask = ntohl(mask);
@@ -561,7 +614,7 @@ netname(in, mask)
 			 	* width subnet fields.
 			 	*/
 				while (in &~ mask)
-					mask = (long)mask >> subnetshift;
+					mask = (int)mask >> subnetshift;
 			}
 			net = in & mask;
 			while ((mask & 1) == 0)
@@ -622,7 +675,7 @@ ns_print(sa)
 	register struct sockaddr_ns *sns = (struct sockaddr_ns*)sa;
 	struct ns_addr work;
 	union { union ns_net net_e; u_long long_e; } net;
-	u_short port;
+	in_port_t port;
 	static char mybuf[50], cport[10], chost[25];
 	char *host = "";
 	register char *p; register u_char *q;
@@ -630,7 +683,7 @@ ns_print(sa)
 	work = sns->sns_addr;
 	port = ntohs(work.x_port);
 	work.x_port = 0;
-	net.net_e  = work.x_net;
+	net.net_e = work.x_net;
 	if (ns_nullhost(work) && net.long_e == 0) {
 		if (port ) {
 			sprintf(mybuf, "*.%xH", port);
@@ -690,15 +743,15 @@ ipx_print(sa)
 	register struct sockaddr_ipx *sipx = (struct sockaddr_ipx*)sa;
 	struct ipx_addr work;
 	union { union ipx_net net_e; u_long long_e; } net;
-	u_short port;
+	in_port_t port;
 	static char mybuf[50], cport[10], chost[25];
 	char *host = "";
-	register char *p; register u_char *q;
+	register char *q;
 
 	work = sipx->sipx_addr;
 	port = ntohs(work.ipx_port);
 	work.ipx_port = 0;
-	net.net_e  = work.ipx_net;
+	net.net_e = work.ipx_net;
 	if (ipx_nullhost(work) && net.long_e == 0) {
 		if (port != 0) {
 			sprintf(mybuf, "*.%xH", port);
@@ -744,6 +797,39 @@ ipx_phost(sa)
 	p = ipx_print((struct sockaddr *)&work);
 	if (strncmp("0H.", p, 3) == 0) p += 3;
 	return(p);
+}
+
+static void
+encap_print(rt)
+	register struct rtentry *rt;
+{
+	struct sockaddr_encap sen1, sen2, sen3;
+	u_char buffer[32];
+	int i;
+
+	bcopy(kgetsa(rt_key(rt)), &sen1, sizeof(sen1));
+	bcopy(kgetsa(rt_mask(rt)), &sen2, sizeof(sen2));
+	bcopy(kgetsa(rt->rt_gateway), &sen3, sizeof(sen3));
+
+	bzero(buffer, 32);
+	strncpy(buffer, inet_ntoa(sen1.sen_ip_src), 15);
+	i = strlen(buffer);
+	strncpy(buffer + i, "/", 1);
+	i++;
+	strncpy(buffer + i, inet_ntoa(sen2.sen_ip_src), 15);
+
+	printf("%-31s %-5u ", buffer, sen1.sen_sport);
+
+	bzero(buffer, 32);
+	strncpy(buffer, inet_ntoa(sen1.sen_ip_dst), 15);
+	i = strlen(buffer);
+	strncpy(buffer + i, "/", 1);
+	i++;
+	strncpy(buffer + i, inet_ntoa(sen2.sen_ip_dst), 15);
+
+	printf("%-31s %-5u %-5u ", buffer, sen1.sen_dport, sen1.sen_proto);
+	printf("%s/%08x/%-lu\n", inet_ntoa(sen3.sen_ipsp_dst),
+	       ntohl(sen3.sen_ipsp_spi), sen3.sen_ipsp_sproto);
 }
 
 void

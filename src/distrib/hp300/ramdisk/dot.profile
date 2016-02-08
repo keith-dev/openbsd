@@ -1,5 +1,5 @@
 #
-#	$OpenBSD: dot.profile,v 1.3 1997/02/23 19:10:51 downsj Exp $
+#	$OpenBSD: dot.profile,v 1.5 1997/10/20 22:24:06 millert Exp $
 #	$NetBSD: dot.profile,v 1.1 1995/07/18 04:13:09 briggs Exp $
 #
 # Copyright (c) 1994 Christopher G. Demetriou
@@ -31,23 +31,31 @@
 # THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #
 
-PATH=/sbin:/bin:/usr/bin:/usr/sbin:/
-export PATH
-TERM=hp300h
-export TERM
+export PATH=/sbin:/bin:/usr/bin:/usr/sbin:/
+export HISTFILE=/.sh_history
+export TERM=hp300h
+export HOME=/
 
-# set up some sane defaults
-echo 'erase ^?, werase ^H, kill ^U, intr ^C'
-stty newcrt werase ^H intr ^C kill ^U erase ^? 9600
-echo ''
+umask 022
 
-# This needs to be done now, for the sake of ksh.
-if [ ! -f /tmp/writeable ]; then
+set -o emacs # emacs-style command line editing
+
+TMPWRITEABLE=/tmp/writeable
+
+if [ "X${DONEPROFILE}" = "X" ]; then
+	DONEPROFILE=YES
+	export DONEPROFILE
+
+	# set up some sane defaults
+	echo 'erase ^?, werase ^W, kill ^U, intr ^C'
+	stty newcrt werase ^W intr ^C kill ^U erase ^? 9600
+	echo ''
+
 	echo 'Remounting /dev/rd0a as root...'
-	mount -t ffs -u /dev/rd0a /
-	sleep 2
-	# ..and let install.md know we've done it.
-	> /tmp/writeable
+	mount /dev/rd0a /
+
+	# tell install.md we've done it
+	> ${TMPWRITEABLE}
 fi
 
 # pull in the function definitions that people will use from the shell prompt.
@@ -55,5 +63,4 @@ fi
 . /.instutils
 
 # run the installation script.
-umask 022
 install

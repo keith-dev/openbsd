@@ -1,5 +1,5 @@
-/*	$OpenBSD: ftp.c,v 1.18 1997/04/23 20:33:13 deraadt Exp $	*/
-/*	$NetBSD: ftp.c,v 1.25 1997/04/14 09:09:22 lukem Exp $	*/
+/*	$OpenBSD: ftp.c,v 1.23 1997/09/05 00:02:29 millert Exp $	*/
+/*	$NetBSD: ftp.c,v 1.27 1997/08/18 10:20:23 lukem Exp $	*/
 
 /*
  * Copyright (c) 1985, 1989, 1993, 1994
@@ -38,7 +38,7 @@
 #if 0
 static char sccsid[] = "@(#)ftp.c	8.6 (Berkeley) 10/27/94";
 #else
-static char rcsid[] = "$OpenBSD: ftp.c,v 1.18 1997/04/23 20:33:13 deraadt Exp $";
+static char rcsid[] = "$OpenBSD: ftp.c,v 1.23 1997/09/05 00:02:29 millert Exp $";
 #endif
 #endif /* not lint */
 
@@ -86,9 +86,9 @@ FILE	*cin, *cout;
 char *
 hookup(host, port)
 	const char *host;
-	int port;
+	in_port_t port;
 {
-	struct hostent *hp = 0;
+	struct hostent *hp = NULL;
 	int s, len, tos;
 	static char hostnamebuf[MAXHOSTNAMELEN];
 
@@ -105,7 +105,8 @@ hookup(host, port)
 			return ((char *) 0);
 		}
 		hisctladdr.sin_family = hp->h_addrtype;
-		memcpy(&hisctladdr.sin_addr, hp->h_addr_list[0], hp->h_length);
+		memcpy(&hisctladdr.sin_addr, hp->h_addr_list[0],
+		    (size_t)hp->h_length);
 		(void)strncpy(hostnamebuf, hp->h_name, sizeof(hostnamebuf) - 1);
 		hostnamebuf[sizeof(hostnamebuf) - 1] = '\0';
 	}
@@ -128,7 +129,7 @@ hookup(host, port)
 			warn("connect to address %s", ia);
 			hp->h_addr_list++;
 			memcpy(&hisctladdr.sin_addr, hp->h_addr_list[0],
-			    hp->h_length);
+			    (size_t)hp->h_length);
 			fprintf(ttyout, "Trying %s...\n", inet_ntoa(hisctladdr.sin_addr));
 			(void)close(s);
 			s = socket(hisctladdr.sin_family, SOCK_STREAM, 0);
@@ -282,18 +283,18 @@ getreply(expecteof)
 	for (line = 0 ;; line++) {
 		dig = n = code = 0;
 		cp = current_line;
-		while ((c = getc(cin)) != '\n') {
+		while ((c = fgetc(cin)) != '\n') {
 			if (c == IAC) {     /* handle telnet commands */
-				switch (c = getc(cin)) {
+				switch (c = fgetc(cin)) {
 				case WILL:
 				case WONT:
-					c = getc(cin);
+					c = fgetc(cin);
 					fprintf(cout, "%c%c%c", IAC, DONT, c);
 					(void)fflush(cout);
 					break;
 				case DO:
 				case DONT:
-					c = getc(cin);
+					c = fgetc(cin);
 					fprintf(cout, "%c%c%c", IAC, WONT, c);
 					(void)fflush(cout);
 					break;
@@ -319,8 +320,9 @@ getreply(expecteof)
 				return (4);
 			}
 			if (c != '\r' && (verbose > 0 ||
-			    (verbose > -1 && n == '5' && dig > 4)) &&
-			    (n < '5' || !retry_connect)) {
+			    ((verbose > -1 && n == '5' && dig > 4)) &&
+			    (((!n && c < '5') || (n && n < '5'))
+			     || !retry_connect))) {
 				if (proxflag &&
 				   (dig == 1 || (dig == 5 && verbose == 0)))
 					fprintf(ttyout, "%s:", hostname);
@@ -415,15 +417,26 @@ sendrequest(cmd, local, remote, printnames)
 {
 	struct stat st;
 	int c, d;
-	FILE *fin, *dout = 0;
+	FILE *fin, *dout;
 	int (*closefunc) __P((FILE *));
 	sig_t oldinti, oldintr, oldintp;
-	off_t hashbytes;
+	volatile off_t hashbytes;
 	char *lmode, buf[BUFSIZ], *bufp;
 	int oprogress;
 
+#ifdef __GNUC__				/* XXX: to shut up gcc warnings */
+	(void)&fin;
+	(void)&dout;
+	(void)&closefunc;
+	(void)&oldinti;
+	(void)&oldintr;
+	(void)&oldintp;
+	(void)&lmode;
+#endif
+
 	hashbytes = mark;
 	direction = "sent";
+	dout = NULL;
 	bytes = 0;
 	filesize = -1;
 	oprogress = progress;
@@ -583,7 +596,8 @@ sendrequest(cmd, local, remote, printnames)
 		while ((c = read(fileno(fin), buf, sizeof(buf))) > 0) {
 			bytes += c;
 			for (bufp = buf; c > 0; c -= d, bufp += d)
-				if ((d = write(fileno(dout), bufp, c)) <= 0)
+				if ((d = write(fileno(dout), bufp, (size_t)c))
+				    <= 0)
 					break;
 			if (hash && (!progress || filesize < 0) ) {
 				while (bytes >= hashbytes) {
@@ -609,7 +623,7 @@ sendrequest(cmd, local, remote, printnames)
 		break;
 
 	case TYPE_A:
-		while ((c = getc(fin)) != EOF) {
+		while ((c = fgetc(fin)) != EOF) {
 			if (c == '\n') {
 				while (hash && (!progress || filesize < 0) &&
 				    (bytes >= hashbytes)) {
@@ -699,31 +713,46 @@ abortrecv(notused)
 }
 
 void
-recvrequest(cmd, local, remote, lmode, printnames)
+recvrequest(cmd, local, remote, lmode, printnames, ignorespecial)
 	const char *cmd, *local, *remote, *lmode;
-	int printnames;
+	int printnames, ignorespecial;
 {
-	FILE *fout, *din = 0;
+	FILE *fout, *din;
 	int (*closefunc) __P((FILE *));
 	sig_t oldinti, oldintr, oldintp;
-	int c, d, is_retr, tcrflag, bare_lfs = 0;
-	static int bufsize;
+	int c, d;
+	volatile int is_retr, tcrflag, bare_lfs;
+	static size_t bufsize;
 	static char *buf;
-	off_t hashbytes;
+	volatile off_t hashbytes;
 	struct stat st;
 	time_t mtime;
 	int oprogress;
 	int opreserve;
 
+#ifdef __GNUC__				/* XXX: to shut up gcc warnings */
+	(void)&local;
+	(void)&fout;
+	(void)&din;
+	(void)&closefunc;
+	(void)&oldinti;
+	(void)&oldintr;
+	(void)&oldintp;
+#endif
+
+	fout = NULL;
+	din = NULL;
+	oldinti = NULL;
 	hashbytes = mark;
 	direction = "received";
 	bytes = 0;
+	bare_lfs = 0;
 	filesize = -1;
 	oprogress = progress;
 	opreserve = preserve;
 	is_retr = strcmp(cmd, "RETR") == 0;
 	if (is_retr && verbose && printnames) {
-		if (local && *local != '-')
+		if (local && (ignorespecial || *local != '-'))
 			fprintf(ttyout, "local: %s ", local);
 		if (remote)
 			fprintf(ttyout, "remote: %s\n", remote);
@@ -755,8 +784,8 @@ recvrequest(cmd, local, remote, lmode, printnames)
 	}
 	oldintr = signal(SIGINT, abortrecv);
 	oldinti = signal(SIGINFO, psummary);
-	if (strcmp(local, "-") && *local != '|') {
-		if (access(local, 2) < 0) {
+	if (ignorespecial || (strcmp(local, "-") && *local != '|')) {
+		if (access(local, W_OK) < 0) {
 			char *dir = strrchr(local, '/');
 
 			if (errno != ENOENT && errno != EACCES) {
@@ -768,7 +797,7 @@ recvrequest(cmd, local, remote, lmode, printnames)
 			}
 			if (dir != NULL)
 				*dir = 0;
-			d = access(dir == local ? "/" : dir ? local : ".", 2);
+			d = access(dir == local ? "/" : dir ? local : ".", W_OK);
 			if (dir != NULL)
 				*dir = '/';
 			if (d < 0) {
@@ -779,7 +808,7 @@ recvrequest(cmd, local, remote, lmode, printnames)
 				return;
 			}
 			if (!runique && errno == EACCES &&
-			    chmod(local, 0600) < 0) {
+			    chmod(local, (S_IRUSR|S_IWUSR)) < 0) {
 				warn("local: %s", local);
 				(void)signal(SIGINT, oldintr);
 				(void)signal(SIGINFO, oldinti);
@@ -836,11 +865,11 @@ recvrequest(cmd, local, remote, lmode, printnames)
 	din = dataconn("r");
 	if (din == NULL)
 		goto abort;
-	if (strcmp(local, "-") == 0) {
+	if (!ignorespecial && strcmp(local, "-") == 0) {
 		fout = stdout;
 		progress = 0;
 		preserve = 0;
-	} else if (*local == '|') {
+	} else if (!ignorespecial && *local == '|') {
 		oldintp = signal(SIGPIPE, SIG_IGN);
 		fout = popen(local + 1, "w");
 		if (fout == NULL) {
@@ -891,7 +920,7 @@ recvrequest(cmd, local, remote, lmode, printnames)
 		}
 		errno = d = 0;
 		while ((c = read(fileno(din), buf, bufsize)) > 0) {
-			if ((d = write(fileno(fout), buf, c)) != c)
+			if ((d = write(fileno(fout), buf, (size_t)c)) != c)
 				break;
 			bytes += c;
 			if (hash && (!progress || filesize < 0)) {
@@ -929,7 +958,7 @@ recvrequest(cmd, local, remote, lmode, printnames)
 				goto done;
 			n = restart_point;
 			for (i = 0; i++ < n;) {
-				if ((ch = getc(fout)) == EOF)
+				if ((ch = fgetc(fout)) == EOF)
 					goto done;
 				if (ch == '\n')
 					i++;
@@ -944,7 +973,7 @@ done:
 				return;
 			}
 		}
-		while ((c = getc(din)) != EOF) {
+		while ((c = fgetc(din)) != EOF) {
 			if (c == '\n')
 				bare_lfs++;
 			while (c == '\r') {
@@ -955,7 +984,7 @@ done:
 					hashbytes += mark;
 				}
 				bytes++;
-				if ((c = getc(din)) != '\n' || tcrflag) {
+				if ((c = fgetc(din)) != '\n' || tcrflag) {
 					if (ferror(fout))
 						goto break2;
 					(void)putc('\r', fout);
@@ -973,9 +1002,10 @@ done:
 		}
 break2:
 		if (bare_lfs) {
-			printf(
+			fprintf(ttyout,
 "WARNING! %d bare linefeeds received in ASCII mode.\n", bare_lfs);
-			fputs("File may not have transferred correctly.\n", ttyout);
+			fputs("File may not have transferred correctly.\n",
+			    ttyout);
 		}
 		if (hash && (!progress || filesize < 0)) {
 			if (bytes < hashbytes)
@@ -1014,7 +1044,7 @@ break2:
 				ut.actime = time(NULL);
 				ut.modtime = mtime;
 				if (utime(local, &ut) == -1)
-					printf(
+					fprintf(ttyout,
 				"Can't change modification time on %s to %s",
 					    local, asctime(localtime(&mtime)));
 			}
@@ -1343,10 +1373,18 @@ proxtrans(cmd, local, remote)
 	const char *cmd, *local, *remote;
 {
 	sig_t oldintr;
-	int secndflag = 0, prox_type, nfnd;
+	int prox_type, nfnd;
+	volatile int secndflag;
 	char *cmd2;
 	struct fd_set mask;
 
+#ifdef __GNUC__				/* XXX: to shut up gcc warnings */
+	(void)&oldintr;
+	(void)&cmd2;
+#endif
+
+	oldintr = NULL;
+	secndflag = 0;
 	if (strcmp(cmd, "RETR"))
 		cmd2 = "RETR";
 	else
@@ -1410,7 +1448,7 @@ abort:
 		if (command("%s %s", cmd2, local) != PRELIM) {
 			pswitch(0);
 			if (cpend)
-				abort_remote((FILE *) NULL);
+				abort_remote(NULL);
 		}
 		pswitch(1);
 		if (ptabflg)
@@ -1419,13 +1457,13 @@ abort:
 		return;
 	}
 	if (cpend)
-		abort_remote((FILE *) NULL);
+		abort_remote(NULL);
 	pswitch(!proxy);
 	if (!cpend && !secndflag) {  /* only if cmd = "RETR" (proxy=1) */
 		if (command("%s %s", cmd2, local) != PRELIM) {
 			pswitch(0);
 			if (cpend)
-				abort_remote((FILE *) NULL);
+				abort_remote(NULL);
 			pswitch(1);
 			if (ptabflg)
 				code = -1;
@@ -1434,7 +1472,7 @@ abort:
 		}
 	}
 	if (cpend)
-		abort_remote((FILE *) NULL);
+		abort_remote(NULL);
 	pswitch(!proxy);
 	if (cpend) {
 		FD_ZERO(&mask);
@@ -1491,7 +1529,7 @@ gunique(local)
 
 	if (cp)
 		*cp = '\0';
-	d = access(cp == local ? "/" : cp ? local : ".", 2);
+	d = access(cp == local ? "/" : cp ? local : ".", W_OK);
 	if (cp)
 		*cp = '/';
 	if (d < 0) {
@@ -1512,7 +1550,7 @@ gunique(local)
 			ext = '0';
 		else
 			ext++;
-		if ((d = access(new, 0)) < 0)
+		if ((d = access(new, F_OK)) < 0)
 			break;
 		if (ext != '0')
 			cp--;

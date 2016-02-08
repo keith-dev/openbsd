@@ -1,11 +1,9 @@
-#
+#	$OpenBSD: Makefile.inc,v 1.10 1997/10/31 22:20:45 deraadt Exp $
 #	etc.alpha/Makefile.inc -- alpha-specific etc Makefile targets
-#
-#	$Id: Makefile.inc,v 1.7 1997/05/24 21:39:06 graichen Exp $
 
 .ifdef DESTDIR
 
-snap_md: binutils bsd floppy
+snap_md: binutils bsd distrib boot
 
 binutils:
 	cd ${DESTDIR} && tar cf - usr/*openbsd* \
@@ -18,8 +16,11 @@ bsd:
 	cp ${.CURDIR}/../sys/arch/alpha/compile/GENERIC/bsd \
 	    ${DESTDIR}/snapshot/bsd
 
-floppy:
-	cd ${.CURDIR}/../distrib/alpha/ramdisk && \
+distrib:
+	cd ${.CURDIR}/../distrib && \
 	    make cleandir && make && make install
+
+boot:
+	cp ${DESTDIR}/usr/mdec/boot ${DESTDIR}/snapshot
 
 .endif	# DESTDIR check

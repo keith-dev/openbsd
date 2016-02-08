@@ -1,5 +1,5 @@
 #!/bin/sh
-#	$OpenBSD: install.sub,v 1.35 1997/05/18 23:12:02 deraadt Exp $
+#	$OpenBSD: install.sub,v 1.49 1997/10/29 21:38:17 deraadt Exp $
 #	$NetBSD: install.sub,v 1.5.2.8 1996/09/02 23:25:02 pk Exp $
 #
 # Copyright (c) 1996 The NetBSD Foundation, Inc.
@@ -301,11 +301,9 @@ __get_reldir_1
 getrootdisk() {
 	cat << \__getrootdisk_1
 
-The installation program needs to know which disk to consider
-the root disk.  Note the unit number may be different than
-the unit number you used in the standalone installation
-program.
-
+The installation program needs to know which disk to consider the root disk.
+Note the unit number may be different than the unit number you used in the
+boot program (especially on a PC with multiple disk controllers).
 Available disks are:
 
 __getrootdisk_1
@@ -381,31 +379,40 @@ addifconfig() {
 configurenetwork() {
 	local _ifsdone
 	local _ifs
+	local _ouranswer
+	local _reprompt
 
 	_IFS=`md_get_ifdevs`
 	_ifsdone=""
+	_ouranswer=""
+	_reprompt=1
 	resp=""		# force at least one iteration
 	while [ "X${resp}" != X"done" ]; do
-	cat << \__configurenetwork_1
+		if [ $_reprompt = 1 ]; then
+			cat << \__configurenetwork_1
 
 You may configure the following network interfaces (the interfaces
 marked with [X] have been succesfully configured):
 
 __configurenetwork_1
 
-		for _ifs in $_IFS; do
-			if isin $_ifs $_ifsdone ; then
-				echo -n "[X] "
-			else
-				echo -n "    "
-			fi
-			echo $_ifs
-		done
-		echo	""
-		echo -n	"Configure which interface? [done] "
-		getresp "done"
+			for _ifs in $_IFS; do
+				if isin $_ifs $_ifsdone ; then
+					echo -n "	[X] "
+				else
+					echo -n "	[ ] "
+				fi
+				echo $_ifs
+			done
+			echo	""
+		fi
+		echo -n	"Configure which interface? (or, enter 'done') [$_ouranswer] "
+		getresp "$_ouranswer"
 		case "$resp" in
 		"done")
+			;;
+		"")
+			_reprompt=0
 			;;
 		*)
 			_ifs=$resp
@@ -416,8 +423,11 @@ __configurenetwork_1
 			else
 				echo "Invalid response: \"$resp\" is not in list"
 			fi
+			_ouranswer="done"
+			_reprompt=1
 			;;
 		esac
+
 	done
 }
 
@@ -464,9 +474,12 @@ configure_ifs() {
 	done
 
 	# Get netmask
-	resp=""		# force one iteration
+	resp=""
+	if [ "X${_interface_mask}" = X"" ]; then
+		_interface_mask=255.255.255.0
+	fi
 	while [ "X${resp}" = X"" ]; do
-		echo -n "Netmask? [$_interface_mask] "
+		echo -n "Netmask ? [$_interface_mask] "
 		getresp "$_interface_mask"
 		_interface_mask=$resp
 	done
@@ -477,8 +490,7 @@ configure_ifs() {
 	echo "    -link0            BNC"
 	echo "    link0 -link1      AUI"
 	echo "    link0 link1       UTP"
-	echo "But please keep in mind not all drivers use flags like this."
-	echo ""
+	echo "(But please keep in mind not all drivers use flags like this)."
 	echo -n "Additional link-layer arguments? [$_interface_extra] "
 	getresp "$_interface_extra"
 	if [ "X${resp}" != X"" ]; then
@@ -611,15 +623,16 @@ install_url() {
 	# Is this an ftp or http install?
 	_url_type=$1; shift
 
-	echo "\nThis is an automated ${_url_type}-based installation process.\n"\
-"You will be asked several questions and then the\n"\
-"files will be retrieved iteratively via ftp(1).\n"
+	echo
+	echo "This is an automated ${_url_type}-based installation process.  You will be asked"
+	echo "questions and then the files will be retrieved iteratively via ftp(1)."
+	echo
 	    
 	# Proxy the connections?
 	if [ "X${_proxy_host}" = X"" ]; then
 		_proxy_host=none
 	fi
-	echo -n "http/ftp proxy URL? [${_proxy_host}] "
+	echo -n "HTTP/FTP proxy URL? (if you use a proxy) [${_proxy_host}] "
 	getresp "${_proxy_host}"
 	if [ "X${resp}" = X"none" ]; then
 		unset _proxy_host ftp_proxy http_proxy
@@ -648,14 +661,14 @@ install_url() {
 	case "$resp" in
 	n*|N*) ;;
 	*)
-		ftp ${_ftp_passive} -V -a ftp://ftp.usa.openbsd.org/pub/OpenBSD/${VERSION_MAJOR}.${VERSION_MINOR}/ftplist | grep "^${_url_type}:"
+		ftp ${_ftp_passive} -V -a ftp://ftp.openbsd.org/pub/OpenBSD/${VERSION_MAJOR}.${VERSION_MINOR}/ftplist | grep "^${_url_type}:"
 		;;
 	esac
 
 	# Get server IP address
 	resp=""		# force one iteration
 	while [ "X${resp}" = X"" ]; do
-		eval echo -n "Server IP? [\$_${_url_type}_server_ip]\ "
+		eval echo -n "Server IP address or hostname? [\$_${_url_type}_server_ip]\ "
 		eval getresp "\$_${_url_type}_server_ip"
 		eval _${_url_type}_server_ip=$resp
 	done
@@ -777,17 +790,16 @@ install_url() {
 		_next=""
 		for _f in $_sets $_kernel ; do
 			if isin $_f $_setsdone ; then
-				echo -n "[X] "
+				echo -n "	[X] "
 				_next=""
 			else
-				echo -n "    "
+				echo -n "	[ ] "
 				if [ -z "$_next" ]; then
 				    _next=$_f
 				fi
 			fi
 			echo $_f
 		done
-		echo ""
 
 		# Get the name of the file.
 		echo -n "File name [$_next]? "
@@ -825,10 +837,9 @@ install_url() {
 		return
 	fi
 
-	echo	""
-	echo	"Fetching files via ${_url_type} may take a long time,"
-	echo	"especially over a slow network connection."
-	echo -n	"Ready to download files? [y] "
+	echo
+	echo "Fetching files via ${_url_type} may take a long time, especially over a slow network"
+	echo -n "connection.  Ready to download files? [y] "
 	getresp "y"
 	case "$resp" in
 		y*|Y*)
@@ -875,10 +886,10 @@ install_url() {
 			_next=""
 			for _f in $_failed_files ; do
 				if isin $_f $_setsdone ; then
-					echo -n "[X] "
+					echo -n "	[X] "
 					_next=""
 				else
-					echo -n "    "
+					echo -n "	[ ] "
 					if [ -z "$_next" ]; then
 						_next=$_f
 					fi
@@ -947,10 +958,10 @@ install_from_mounted_fs() {
 		_next=""
 		for _f in $_sets $_kernel ; do
 			if isin $_f $_setsdone; then
-				echo -n "[X] "
+				echo -n "	[X] "
 				_next=""
 			else
-				echo -n "    "
+				echo -n "	[ ] "
 				if [ -z "$_next" ]; then
 					_next=$_f
 				fi
@@ -965,7 +976,7 @@ install_from_mounted_fs() {
 		else
 			resp=y
 		fi
-		echo -n "Continue extraction [$resp]?"
+		echo -n "Continue extraction in this directory [$resp]?"
 		getresp "$resp"
 		if [ "$resp" = "n" ]; then
 			break
@@ -1075,7 +1086,7 @@ __install_cdrom_2
 	done
 
 	# Mount the CD-ROM
-	if ! mount -t ${_filesystem} -o ro \
+	if ! mount -t ${_fstype} -o ro \
 	    /dev/${_drive}${_partition} /mnt2 ; then
 		echo "Cannot mount CD-ROM drive.  Aborting."
 		return
@@ -1103,6 +1114,7 @@ mount_a_disk() {
 	# returns 0 on failure.
 
 	local _drive
+	local _def_partition
 	local _partition_range
 	local _partition
 	local _fstype
@@ -1131,11 +1143,34 @@ mount_a_disk() {
 	esac
 
 	# Get partition
-	_partition_range=`md_get_partition_range`
+	cat <<__mount_a_disk_1
+
+The following partitions have been found on $_drive:
+
+__mount_a_disk_1
+	disklabel $_drive 2>/dev/null | grep '^  .:'
+	echo
+	_likely_partition_range=`disklabel $_drive 2>/dev/null | \
+	    sed -n -e '/swap/s/.*//' -e '/unused/s/.*//' \
+		-e '/^  .:/{s/^  \(.\).*/\1/;H;}' \
+		-e '${g;s/\n//g;s/^/[/;s/$/]/p;}'`
+	_partition_range=`disklabel $_drive 2>/dev/null | \
+	    sed -n -e '/^  .:/{s/^  \(.\).*/\1/;H;}' \
+		-e '${g;s/\n//g;s/^/[/;s/$/]/p;}'`
+	_def_partition=`echo $_likely_partition_range | \
+	    sed -n 's/^\[\(.\).*\]/\1/p'`
+	if [ -z "$_def_partition" ]; then
+		_def_partition=`echo $_partition_range | \
+		    sed -n 's/^\[\(.\).*\]/\1/p'`
+		if [ -z "$_def_partition" ]; then
+			echo "There are no usable partitions on that disk"
+			return 0
+		fi
+	fi 
 	resp=""		# force one iteration
 	while [ "X${resp}" = X"" ]; do
-		echo -n "Partition? [d] "
-		getresp "d"
+		echo -n "Partition? [$_def_partition] "
+		getresp "$_def_partition"
 		case "$resp" in
 			$_partition_range)
 				_partition=$resp
@@ -1152,26 +1187,31 @@ mount_a_disk() {
 	cat << \__mount_a_disk_2
 
 The following filesystem types are supported:
-	1) ffs
+	1) default (deduced from the disklabel)
+	2) ffs
 __mount_a_disk_2
 	_md_fstype=`md_native_fstype`
 	_md_fsopts=`md_native_fsopts`
 	if [ ! -z "$_md_fstype" ]; then
-		echo "	2) $_md_fstype"
+		echo "	3) $_md_fstype"
 	else
 		_md_fstype="_undefined_"
 	fi
 	resp=""		# force one iteration
 	while [ "X${resp}" = X"" ]; do
-		echo -n "Which filesystem type? [ffs] "
-		getresp "ffs"
+		echo -n "Which filesystem type? [default] "
+		getresp "default"
 		case "$resp" in
+			default)
+				_fstype=""
+				_fsopts="ro"
+				;;
 			ffs)
-				_fstype=$resp
+				_fstype="-t $resp"
 				_fsopts="ro"
 				;;
 			$_md_fstype)
-				_fstype=$resp
+				_fstype="-t $resp"
 				_fsopts=$_md_fsopts
 				;;
 			*)
@@ -1182,8 +1222,7 @@ __mount_a_disk_2
 	done
 
 	# Mount the disk
-	if ! mount -t ${_fstype} -o $_fsopts \
-	    /dev/${_drive}${_partition} /mnt2 ; then
+	if ! mount $_fstype -o $_fsopts /dev/${_drive}${_partition} /mnt2; then
 		echo "Cannot mount disk.  Aborting."
 		return 0
 	fi
@@ -1225,7 +1264,7 @@ install_nfs() {
 	# Get the IP address of the server
 	resp=""		# force one iteration
 	while [ "X${resp}" = X"" ]; do
-		echo -n "Server IP address? [${_nfs_server_ip}] "
+		echo -n "Server IP address or hostname? [${_nfs_server_ip}] "
 		getresp "${_nfs_server_ip}"
 	done
 	_nfs_server_ip=$resp
@@ -1599,30 +1638,22 @@ __mount_filesystems_1
 unmount_fs()
 {
 	# Unmount all filesystems and check their integrity.
-	# Usage: [-fast] <fstab file>
-	local _fast
+	# Usage: [-check] <fstab file>
+	local _check
 	local _fstab
 	local _pid
 
-	if [ "$1" = "-fast" ]; then
-		_fast=1
+	if [ "$1" = "-check" ]; then
+		_check=1
 		_fstab=$2
 	else
-		_fast=0
+		_check=0
 		_fstab=$1
 	fi
 
 	if [ ! \( -f $_fstab -a -s $_fstab \) ]; then
 		echo "fstab empty" > /dev/tty
 		return
-	fi
-
-	if [ $_fast = 0 ]; then
-		echo -n	"Syncing disks..."
-		#_pid=`twiddle`
-		sync; sleep 4; sync; sleep 2; sync; sleep 2
-		#kill $_pid
-		echo	"done."
 	fi
 
 	(
@@ -1641,14 +1672,13 @@ unmount_fs()
 		done
 		echo "Done."
 
-		if [ $_fast = 0 ]; then
-			exit
+		if [ $_check = 1 ]; then
+			echo "Checking filesystem integrity..."
+			for _dev in ${_devs}; do
+				echo  "${_dev}"
+				fsck -f ${_dev}
+			done
 		fi
-		echo "Checking filesystem integrity..."
-		for _dev in ${_devs}; do
-			echo  "${_dev}"
-			fsck -f ${_dev}
-		done
 		echo "Done."
 	) < $_fstab
 }

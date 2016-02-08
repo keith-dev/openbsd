@@ -1,4 +1,4 @@
-/*	$OpenBSD: sysctl.c,v 1.7 1997/04/06 20:19:22 millert Exp $	*/
+/*	$OpenBSD: sysctl.c,v 1.32 1997/10/25 21:46:06 mickey Exp $	*/
 /*	$NetBSD: sysctl.c,v 1.9 1995/09/30 07:12:50 thorpej Exp $	*/
 
 /*
@@ -44,7 +44,7 @@ static char copyright[] =
 #if 0
 static char sccsid[] = "@(#)sysctl.c	8.1 (Berkeley) 6/6/93";
 #else
-static char *rcsid = "$OpenBSD: sysctl.c,v 1.7 1997/04/06 20:19:22 millert Exp $";
+static char *rcsid = "$OpenBSD: sysctl.c,v 1.32 1997/10/25 21:46:06 mickey Exp $";
 #endif
 #endif /* not lint */
 
@@ -56,9 +56,12 @@ static char *rcsid = "$OpenBSD: sysctl.c,v 1.7 1997/04/06 20:19:22 millert Exp $
 #include <vm/vm_param.h>
 #include <machine/cpu.h>
 
+#include <net/route.h>
+
 #include <netinet/in.h>
 #include <netinet/in_systm.h>
 #include <netinet/ip.h>
+#include <netinet/in_pcb.h>
 #include <netinet/ip_icmp.h>
 #include <netinet/icmp_var.h>
 #include <netinet/ip_var.h>
@@ -72,12 +75,20 @@ static char *rcsid = "$OpenBSD: sysctl.c,v 1.7 1997/04/06 20:19:22 millert Exp $
 #include <netipx/ipx_var.h>
 #include <netipx/spx_var.h>
 #include <ddb/db_var.h>
+#include <dev/rndvar.h>
+#include <net/encap.h>
+#include <netinet/ip_ipsp.h>
 
+#include <err.h>
 #include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <ctype.h>
+
+#ifdef CPU_BIOS
+#include <machine/biosvar.h>
+#endif
 
 struct ctlname topname[] = CTL_NAMES;
 struct ctlname kernname[] = CTL_KERN_NAMES;
@@ -122,25 +133,32 @@ int	Aflag, aflag, nflag, wflag;
  */
 #define	CLOCK		0x00000001
 #define	BOOTTIME	0x00000002
-#define	CONSDEV		0x00000004
+#define	CHRDEV		0x00000004
+#define	BLKDEV		0x00000008
+#define RNDSTATS	0x00000010
+#define BADDYNAMIC	0x00000020
+#define BIOSGEO		0x00000040
+#define BIOSDEV		0x00000080
+#define	MAJ2DEV		0x00000100
 
 /* prototypes */
-void usage();
-void debuginit();
-void parse __P((	char *string, int flags));
-void listall __P((char *prefix, 	struct list *lp));
-int findname __P((char *string, 	char *level, char **bufp, struct list *namelist));
-int sysctl_inet __P((char *string, char **bufpp, 	int mib[], int flags, int *typep));
-int sysctl_ipx __P((char *string, char **bufpp, 	int mib[], int flags, int *typep));
-int sysctl_fs __P((char *string, char **bufpp, 	int mib[], int flags, int *typep));
+void debuginit __P((void));
+void listall __P((char *, struct list *));
+void parse __P((char *, int));
+void parse_baddynamic __P((int *, size_t, char *, void **, size_t *, int, int));
+void usage __P((void));
+int findname __P((char *, char *, char **, struct list *));
+int sysctl_inet __P((char *, char **, int *, int, int *));
+int sysctl_ipsec __P((char *, char **, int *, int, int *));
+int sysctl_ipx __P((char *, char **, int *, int, int *));
+int sysctl_fs __P((char *, char **, int *, int, int *));
+int sysctl_bios __P((char *, char **, int *, int, int *));
 
 int
 main(argc, argv)
 	int argc;
 	char *argv[];
 {
-	extern char *optarg;
-	extern int optind;
 	int ch, lvl1;
 
 	while ((ch = getopt(argc, argv, "Aanw")) != -1) {
@@ -193,15 +211,16 @@ listall(prefix, lp)
 	int lvl2;
 	char *cp, name[BUFSIZ];
 
-	if (lp->list == 0)
+	if (lp->list == NULL)
 		return;
-	strncpy(name, prefix, BUFSIZ-1);
+	(void)strncpy(name, prefix, BUFSIZ-1);
+	name[BUFSIZ-1] = '\0';
 	cp = &name[strlen(name)];
 	*cp++ = '.';
 	for (lvl2 = 0; lvl2 < lp->size; lvl2++) {
-		if (lp->list[lvl2].ctl_name == 0)
+		if (lp->list[lvl2].ctl_name == NULL)
 			continue;
-		strcpy(cp, lp->list[lvl2].ctl_name);
+		(void)strcpy(cp, lp->list[lvl2].ctl_name);
 		parse(name, Aflag);
 	}
 }
@@ -216,23 +235,22 @@ parse(string, flags)
 	char *string;
 	int flags;
 {
-	int indx, type, state;
+	int indx, type, state, len;
 	int special = 0;
 	void *newval = 0;
 	int intval, newsize = 0;
 	quad_t quadval;
-	size_t size, len;
+	size_t size;
 	struct list *lp;
 	int mib[CTL_MAXNAME];
 	char *cp, *bufp, buf[BUFSIZ];
 
+	(void)strncpy(buf, string, sizeof(buf) - 1);
+	buf[sizeof(buf) - 1] = '\0';
 	bufp = buf;
-	snprintf(buf, BUFSIZ, "%s", string);
 	if ((cp = strchr(string, '=')) != NULL) {
-		if (!wflag) {
-			fprintf(stderr, "Must specify -w to set variables\n");
-			exit(2);
-		}
+		if (!wflag)
+			errx(2, "must specify -w to set variables");
 		*strchr(buf, '=') = '\0';
 		*cp++ = '\0';
 		while (isspace(*cp))
@@ -247,8 +265,7 @@ parse(string, flags)
 		debuginit();
 	lp = &secondlevel[indx];
 	if (lp->list == 0) {
-		fprintf(stderr, "%s: class is not implemented\n",
-		    topname[indx].ctl_name);
+		warnx("%s: class is not implemented", topname[indx].ctl_name);
 		return;
 	}
 	if (bufp == NULL) {
@@ -266,44 +283,43 @@ parse(string, flags)
 		switch (mib[1]) {
 		case KERN_PROF:
 			mib[2] = GPROF_STATE;
-			size = sizeof state;
-			if (sysctl(mib, 3, &state, &size, NULL, 0) < 0) {
+			size = sizeof(state);
+			if (sysctl(mib, 3, &state, &size, NULL, 0) == -1) {
 				if (flags == 0)
 					return;
 				if (!nflag)
-					fprintf(stdout, "%s: ", string);
-				fprintf(stderr,
-				    "kernel is not compiled for profiling\n");
+					(void)printf("%s: ", string);
+				(void)puts("kernel is not compiled for profiling");
 				return;
 			}
 			if (!nflag)
-				fprintf(stdout, "%s: %s\n", string,
+				(void)printf("%s = %s\n", string,
 				    state == GMON_PROF_OFF ? "off" : "running");
 			return;
 		case KERN_VNODE:
 		case KERN_FILE:
 			if (flags == 0)
 				return;
-			fprintf(stderr,
-			    "Use pstat to view %s information\n", string);
+			warnx("use pstat to view %s information", string);
 			return;
 		case KERN_PROC:
 			if (flags == 0)
 				return;
-			fprintf(stderr,
-			    "Use ps to view %s information\n", string);
+			warnx("use ps to view %s information", string);
 			return;
 		case KERN_NTPTIME:
 			if (flags == 0)
 				return;
-			fprintf(stderr,
-			    "Use xntpd to view %s information\n", string);
+			warnx("use xntpdc to view %s information", string);
 			return;
 		case KERN_CLOCKRATE:
 			special |= CLOCK;
 			break;
 		case KERN_BOOTTIME:
 			special |= BOOTTIME;
+			break;
+		case KERN_RND:
+			special |= RNDSTATS;
 			break;
 		}
 		break;
@@ -317,32 +333,50 @@ parse(string, flags)
 
 			getloadavg(loads, 3);
 			if (!nflag)
-				fprintf(stdout, "%s: ", string);
-			fprintf(stdout, "%.2f %.2f %.2f\n", 
-			    loads[0], loads[1], loads[2]);
+				(void)printf("%s = ", string);
+			(void)printf("%.2f %.2f %.2f\n", loads[0],
+			    loads[1], loads[2]);
 			return;
 		} else if (mib[1] == VM_PSSTRINGS) {
 			struct _ps_strings _ps;
 
 			len = sizeof(_ps);
-			sysctl(mib, 2, &_ps, &len, NULL, 0);
+			if (sysctl(mib, 2, &_ps, &len, NULL, 0) == -1) {
+				if (flags == 0)
+					return;
+				if (!nflag)
+					(void)printf("%s: ", string);
+				(void)puts("can't find ps strings");
+				return;
+			}
 			if (!nflag)
-				fprintf(stdout, "%s: ", string);
-			fprintf(stdout, "%ld\n", _ps.val);
+				(void)printf("%s = ", string);
+			(void)printf("%p\n", _ps.val);
 			return;
 		}
 		if (flags == 0)
 			return;
-		fprintf(stderr,
-		    "Use vmstat or systat to view %s information\n", string);
+		warnx("use vmstat or systat to view %s information", string);
 		return;
 
 	case CTL_NET:
 		if (mib[1] == PF_INET) {
 			len = sysctl_inet(string, &bufp, mib, flags, &type);
-			if (len >= 0)
-				break;
-			return;
+			if (len < 0)
+				return;
+
+			if ((mib[2] == IPPROTO_TCP &&
+			     mib[3] == TCPCTL_BADDYNAMIC) ||
+			    (mib[2] == IPPROTO_UDP &&
+			     mib[3] == UDPCTL_BADDYNAMIC)) {
+
+				special |= BADDYNAMIC;
+
+				if (newval != NULL)
+					parse_baddynamic(mib, len, string,
+					    &newval, &newsize, flags, nflag);
+			}
+			break;
 		}
 		if (mib[1] == PF_IPX) {
 			len = sysctl_ipx(string, &bufp, mib, flags, &type);
@@ -350,9 +384,15 @@ parse(string, flags)
 				break;
 			return;
 		}
+		if (mib[1] == PF_ENCAP) {
+			len = sysctl_ipsec(string, &bufp, mib, flags, &type);
+			if (len >= 0)
+				break;
+			return;
+		}
 		if (flags == 0)
 			return;
-		fprintf(stderr, "Use netstat to view %s information\n", string);
+		warnx("use netstat to view %s information", string);
 		return;
 
 	case CTL_DEBUG:
@@ -363,7 +403,41 @@ parse(string, flags)
 	case CTL_MACHDEP:
 #ifdef CPU_CONSDEV
 		if (mib[1] == CPU_CONSDEV)
-			special |= CONSDEV;
+			special |= CHRDEV;
+#endif
+#ifdef CPU_BLK2CHR
+		if (mib[1] == CPU_BLK2CHR) {
+			if (bufp == NULL)
+				return;
+			mib[2] = makedev(atoi(bufp),0);
+			bufp = NULL;
+			len = 3;
+			special |= CHRDEV;
+			break;
+		}
+#endif
+#ifdef CPU_CHR2BLK
+		if (mib[1] == CPU_CHR2BLK) {
+			if (bufp == NULL)
+				return;
+			mib[2] = makedev(atoi(bufp),0);
+			bufp = NULL;
+			len = 3;
+			special |= BLKDEV;
+			break;
+		}
+#endif
+#ifdef CPU_BIOS
+		if (mib[1] == CPU_BIOS) {
+			len = sysctl_bios(string, &bufp, mib, flags, &type);
+			if (len < 0)
+				return;
+			if (mib[2] == BIOS_DEV)
+				special |= BIOSDEV;
+			if (mib[2] == BIOS_DISKINFO)
+				special |= BIOSGEO;
+			break;
+		}
 #endif
 		break;
 
@@ -378,12 +452,12 @@ parse(string, flags)
 		break;
 
 	default:
-		fprintf(stderr, "Illegal top level value: %d\n", mib[0]);
+		warnx("illegal top level value: %d", mib[0]);
 		return;
 	
 	}
 	if (bufp) {
-		fprintf(stderr, "name %s in %s is unknown\n", bufp, string);
+		warnx("name %s in %s is unknown", bufp, string);
 		return;
 	}
 	if (newsize > 0) {
@@ -391,13 +465,13 @@ parse(string, flags)
 		case CTLTYPE_INT:
 			intval = atoi(newval);
 			newval = &intval;
-			newsize = sizeof intval;
+			newsize = sizeof(intval);
 			break;
 
 		case CTLTYPE_QUAD:
-			sscanf(newval, "%qd", &quadval);
+			(void)sscanf(newval, "%qd", &quadval);
 			newval = &quadval;
-			newsize = sizeof quadval;
+			newsize = sizeof(quadval);
 			break;
 		}
 	}
@@ -407,18 +481,19 @@ parse(string, flags)
 			return;
 		switch (errno) {
 		case EOPNOTSUPP:
-			fprintf(stderr, "%s: value is not available\n", string);
+			warnx("%s: value is not available", string);
 			return;
 		case ENOTDIR:
-			fprintf(stderr, "%s: specification is incomplete\n",
-			    string);
+			warnx("%s: specification is incomplete", string);
 			return;
 		case ENOMEM:
-			fprintf(stderr, "%s: type is unknown to this program\n",
-			    string);
+			warnx("%s: type is unknown to this program", string);
 			return;
+		case ENXIO:
+			if (special & BIOSGEO)
+				return;
 		default:
-			perror(string);
+			warnx(string);
 			return;
 		}
 	}
@@ -426,8 +501,8 @@ parse(string, flags)
 		struct clockinfo *clkp = (struct clockinfo *)buf;
 
 		if (!nflag)
-			fprintf(stdout, "%s: ", string);
-		fprintf(stdout,
+			(void)printf("%s = ", string);
+		(void)printf(
 		    "tick = %d, tickadj = %d, hz = %d, profhz = %d, stathz = %d\n",
 		    clkp->tick, clkp->tickadj, clkp->hz, clkp->profhz, clkp->stathz);
 		return;
@@ -438,71 +513,200 @@ parse(string, flags)
 
 		if (!nflag) {
 			boottime = btp->tv_sec;
-			fprintf(stdout, "%s = %s\n", string, ctime(&boottime));
+			(void)printf("%s = %s", string, ctime(&boottime));
 		} else
-			fprintf(stdout, "%ld\n", btp->tv_sec);
+			(void)printf("%ld\n", btp->tv_sec);
 		return;
 	}
-	if (special & CONSDEV) {
+	if (special & BLKDEV) {
 		dev_t dev = *(dev_t *)buf;
 
 		if (!nflag)
-			fprintf(stdout, "%s = %s\n", string,
+			(void)printf("%s = %s\n", string,
+			    devname(dev, S_IFBLK));
+		else
+			(void)printf("0x%x\n", dev);
+		return;
+	}
+	if (special & CHRDEV) {
+		dev_t dev = *(dev_t *)buf;
+
+		if (!nflag)
+			(void)printf("%s = %s\n", string,
 			    devname(dev, S_IFCHR));
 		else
-			fprintf(stdout, "0x%x\n", dev);
+			(void)printf("0x%x\n", dev);
+		return;
+	}
+#ifdef CPU_BIOS
+	if (special & BIOSGEO) {
+		bios_diskinfo_t *pdi = (bios_diskinfo_t *)buf;
+
+		if (!nflag)
+			(void)printf("%s = ", string);
+		(void)printf("bootdev = 0x%x, "
+			     "cylinders = %u, heads = %u, sectors = %u\n",
+			     pdi->bsd_dev, pdi->bios_cylinders, pdi->bios_heads,
+			     pdi->bios_sectors);
+		return;
+	}
+	if (special & BIOSDEV) {
+		int dev = *(int*)buf;
+
+		if (!nflag)
+			(void)printf("%s = ", string);
+		(void) printf("0x%02x\n", dev);
+		return;
+	}
+#endif
+	if (special & RNDSTATS) {
+		struct rndstats *rndstats = (struct rndstats *)buf;
+
+		if (!nflag)
+			(void)printf("%s = ", string);
+		(void)printf(
+		    "%u %u %u %u %u %u %u %u %u %u %u %u %u %u %u %u\n",
+		    rndstats->rnd_total, rndstats->rnd_used,
+		    rndstats->arc4_reads, rndstats->rnd_timer,
+		    rndstats->rnd_mouse, rndstats->rnd_tty,
+		    rndstats->rnd_disk, rndstats->rnd_net,
+		    rndstats->rnd_reads, rndstats->rnd_waits,
+		    rndstats->rnd_enqs, rndstats->rnd_deqs,
+		    rndstats->rnd_drops, rndstats->rnd_drople,
+		    rndstats->rnd_asleep, rndstats->rnd_queued);
+		return;
+	}
+	if (special & BADDYNAMIC) {
+		in_port_t port, lastport;
+		u_int32_t *baddynamic = (u_int32_t *)buf;
+
+		if (!nflag)
+			(void)printf("%s%s", string, newsize ? ": " : " = ");
+		lastport = 0;
+		for (port = IPPORT_RESERVED/2; port < IPPORT_RESERVED; port++)
+			if (DP_ISSET(baddynamic, port)) {
+				(void)printf("%s%hd", lastport ? "," : "",
+				    port);
+				lastport = port;
+			}
+		if (newsize != 0) {
+			if (!nflag)
+				fputs(" -> ", stdout);
+			baddynamic = (u_int32_t *)newval;
+			lastport = 0;
+			for (port = IPPORT_RESERVED/2; port < IPPORT_RESERVED;
+			    port++)
+				if (DP_ISSET(baddynamic, port)) {
+					(void)printf("%s%hd",
+					    lastport ? "," : "", port);
+					lastport = port;
+				}
+		}
+		(void)putchar('\n');
 		return;
 	}
 	switch (type) {
 	case CTLTYPE_INT:
 		if (newsize == 0) {
 			if (!nflag)
-				fprintf(stdout, "%s = ", string);
-			fprintf(stdout, "%d\n", *(int *)buf);
+				(void)printf("%s = ", string);
+			(void)printf("%d\n", *(int *)buf);
 		} else {
 			if (!nflag)
-				fprintf(stdout, "%s: %d -> ", string,
+				(void)printf("%s: %d -> ", string,
 				    *(int *)buf);
-			fprintf(stdout, "%d\n", *(int *)newval);
+			(void)printf("%d\n", *(int *)newval);
 		}
 		return;
 
 	case CTLTYPE_STRING:
 		if (newsize == 0) {
 			if (!nflag)
-				fprintf(stdout, "%s = ", string);
-			fprintf(stdout, "%s\n", buf);
+				(void)printf("%s = ", string);
+			(void)puts(buf);
 		} else {
 			if (!nflag)
-				fprintf(stdout, "%s: %s -> ", string, buf);
-			fprintf(stdout, "%s\n", (char *)newval);
+				(void)printf("%s: %s -> ", string, buf);
+			(void)puts((char *)newval);
 		}
 		return;
 
 	case CTLTYPE_QUAD:
 		if (newsize == 0) {
 			if (!nflag)
-				fprintf(stdout, "%s = ", string);
-			fprintf(stdout, "%qd\n", *(quad_t *)buf);
+				(void)printf("%s = ", string);
+			(void)printf("%qd\n", *(quad_t *)buf);
 		} else {
 			if (!nflag)
-				fprintf(stdout, "%s: %qd -> ", string,
+				(void)printf("%s: %qd -> ", string,
 				    *(quad_t *)buf);
-			fprintf(stdout, "%qd\n", *(quad_t *)newval);
+			(void)printf("%qd\n", *(quad_t *)newval);
 		}
 		return;
 
 	case CTLTYPE_STRUCT:
-		fprintf(stderr, "%s: unknown structure returned\n",
-		    string);
+		warnx("%s: unknown structure returned", string);
 		return;
 
 	default:
 	case CTLTYPE_NODE:
-		fprintf(stderr, "%s: unknown type returned\n",
-		    string);
+		warnx("%s: unknown type returned", string);
 		return;
 	}
+}
+
+void
+parse_baddynamic(mib, len, string, newvalp, newsizep, flags, nflag)
+	int mib[];
+	size_t len;
+	char *string;
+	void **newvalp;
+	size_t *newsizep;
+	int flags;
+	int nflag;
+{
+	static u_int32_t newbaddynamic[DP_MAPSIZE];
+	in_port_t port;
+	size_t size;
+	char action, *cp;
+
+	if (strchr((char *)*newvalp, '+') || strchr((char *)*newvalp, '-')) {
+		size = sizeof(newbaddynamic);
+		if (sysctl(mib, len, newbaddynamic, &size, 0, 0) == -1) {
+			if (flags == 0)
+				return;
+			if (!nflag)
+				(void)printf("%s: ", string);
+			(void)puts("kernel does contain bad dynamic port tables");
+			return;
+		}
+
+		while (*newvalp && (cp = strsep((char **)newvalp, ", \t")) && *cp) {
+			if (*cp != '+' && *cp != '-')
+				errx(1, "cannot mix +/- with full list");
+			action = *cp++;
+			port = atoi(cp);
+			if (port < IPPORT_RESERVED/2 || port >= IPPORT_RESERVED)
+				errx(1, "invalid port, range is %d to %d",
+				    IPPORT_RESERVED/2, IPPORT_RESERVED-1);
+			if (action == '+')
+				DP_SET(newbaddynamic, port);
+			else
+				DP_CLR(newbaddynamic, port);
+		}
+	} else {
+		(void)memset((void *)newbaddynamic, 0, sizeof(newbaddynamic));
+		while (*newvalp && (cp = strsep((char **)newvalp, ", \t")) && *cp) {
+			port = atoi(cp);
+			if (port < IPPORT_RESERVED/2 || port >= IPPORT_RESERVED)
+				errx(1, "invalid port, range is %d to %d",
+				    IPPORT_RESERVED/2, IPPORT_RESERVED-1);
+			DP_SET(newbaddynamic, port);
+		}
+	}
+
+	*newvalp = (void *)newbaddynamic;
+	*newsizep = sizeof(newbaddynamic);
 }
 
 /*
@@ -548,13 +752,111 @@ sysctl_fs(string, bufpp, mib, flags, typep)
 
 	if (*bufpp == NULL) {
 		listall(string, &fslist);
-		return (-1);
+		return(-1);
 	}
 	if ((indx = findname(string, "third", bufpp, &fslist)) == -1)
-		return (-1);
+		return(-1);
 	mib[2] = indx;
 	*typep = fslist.list[indx].ctl_type;
-	return (3);
+	return(3);
+}
+
+#ifdef CPU_BIOS
+struct ctlname biosname[] = CTL_BIOS_NAMES;
+struct list bioslist = { biosname, BIOS_MAXID };
+
+/*
+ * handle BIOS requests
+ */
+int
+sysctl_bios(string, bufpp, mib, flags, typep)
+	char *string;
+	char **bufpp;
+	int mib[];
+	int flags;
+	int *typep;
+{
+	char *name;
+	int indx;
+
+	if (*bufpp == NULL) {
+		listall(string, &bioslist);
+		return(-1);
+	}
+	if ((indx = findname(string, "third", bufpp, &bioslist)) == -1)
+		return(-1);
+	mib[2] = indx;
+	if (indx == BIOS_DISKINFO) {
+		if (*bufpp == NULL) {
+			char name[BUFSIZ];
+
+			/* scan all the bios devices */
+			for (indx = 0; indx < 256; indx++) {
+				snprintf(name, sizeof(name), "%s.%u",
+					 string, indx);
+				parse(name, 1);
+			}
+			return(-1);
+		}
+		if ((name = strsep(bufpp, ".")) == NULL) {
+			warnx("%s: incomplete specification", string);
+			return(-1);
+		}
+		mib[3] = atoi(name);
+		*typep = CTLTYPE_STRUCT;
+		return 4;
+	} else {
+		*typep = bioslist.list[indx].ctl_type;
+		return(3);
+	}
+}
+#endif
+
+struct ctlname encapname[] = ENCAPCTL_NAMES;
+struct ctlname ipsecname[] = CTL_IPSEC_NAMES;
+struct list ipseclist = { ipsecname, IPSECCTL_MAXID };
+struct list ipsecvars[] = {
+	{ encapname, ENCAPCTL_MAXID }, 
+};
+
+/*
+ * handle ipsec requests
+ */
+int
+sysctl_ipsec(string, bufpp, mib, flags, typep)
+	char *string;
+	char **bufpp;
+	int mib[];
+	int flags;
+	int *typep;
+{
+	struct list *lp;
+	int indx;
+
+	if (*bufpp == NULL) {
+		listall(string, &ipseclist);
+		return(-1);
+	}
+	if ((indx = findname(string, "third", bufpp, &ipseclist)) == -1)
+		return(-1);
+	mib[2] = indx;
+	if (indx <= IPSECCTL_MAXID && ipsecvars[indx].list != NULL)
+		lp = &ipsecvars[indx];
+	else if (!flags)
+		return(-1);
+	else {
+		warnx("%s: no variables defined for this protocol", string);
+		return(-1);
+	}
+	if (*bufpp == NULL) {
+		listall(string, lp);
+		return(-1);
+	}
+	if ((indx = findname(string, "fourth", bufpp, lp)) == -1)
+		return(-1);
+	mib[3] = indx;
+	*typep = lp->list[indx].ctl_type;
+	return(4);
 }
 
 struct ctlname inetname[] = CTL_IPPROTO_NAMES;
@@ -600,29 +902,28 @@ sysctl_inet(string, bufpp, mib, flags, typep)
 
 	if (*bufpp == NULL) {
 		listall(string, &inetlist);
-		return (-1);
+		return(-1);
 	}
 	if ((indx = findname(string, "third", bufpp, &inetlist)) == -1)
-		return (-1);
+		return(-1);
 	mib[2] = indx;
 	if (indx <= IPPROTO_UDP && inetvars[indx].list != NULL)
 		lp = &inetvars[indx];
 	else if (!flags)
-		return (-1);
+		return(-1);
 	else {
-		fprintf(stderr, "%s: no variables defined for this protocol\n",
-		    string);
-		return (-1);
+		warnx("%s: no variables defined for this protocol", string);
+		return(-1);
 	}
 	if (*bufpp == NULL) {
 		listall(string, lp);
-		return (-1);
+		return(-1);
 	}
 	if ((indx = findname(string, "fourth", bufpp, lp)) == -1)
-		return (-1);
+		return(-1);
 	mib[3] = indx;
 	*typep = lp->list[indx].ctl_type;
-	return (4);
+	return(4);
 }
 
 struct ctlname ipxname[] = CTL_IPXPROTO_NAMES;
@@ -639,7 +940,7 @@ struct list ipxvars[] = {
 };
 
 /*
- * handle internet requests
+ * Handle internet requests
  */
 int
 sysctl_ipx(string, bufpp, mib, flags, typep)
@@ -654,29 +955,28 @@ sysctl_ipx(string, bufpp, mib, flags, typep)
 
 	if (*bufpp == NULL) {
 		listall(string, &ipxlist);
-		return (-1);
+		return(-1);
 	}
 	if ((indx = findname(string, "third", bufpp, &ipxlist)) == -1)
-		return (-1);
+		return(-1);
 	mib[2] = indx;
 	if (indx <= IPXPROTO_SPX && ipxvars[indx].list != NULL)
 		lp = &ipxvars[indx];
 	else if (!flags)
-		return (-1);
+		return(-1);
 	else {
-		fprintf(stderr, "%s: no variables defined for this protocol\n",
-		    string);
-		return (-1);
+		warnx("%s: no variables defined for this protocol", string);
+		return(-1);
 	}
 	if (*bufpp == NULL) {
 		listall(string, lp);
-		return (-1);
+		return(-1);
 	}
 	if ((indx = findname(string, "fourth", bufpp, lp)) == -1)
-		return (-1);
+		return(-1);
 	mib[3] = indx;
 	*typep = lp->list[indx].ctl_type;
-	return (4);
+	return(4);
 }
 
 /*
@@ -693,19 +993,18 @@ findname(string, level, bufp, namelist)
 	int i;
 
 	if (namelist->list == 0 || (name = strsep(bufp, ".")) == NULL) {
-		fprintf(stderr, "%s: incomplete specification\n", string);
-		return (-1);
+		warnx("%s: incomplete specification", string);
+		return(-1);
 	}
 	for (i = 0; i < namelist->size; i++)
 		if (namelist->list[i].ctl_name != NULL &&
 		    strcmp(name, namelist->list[i].ctl_name) == 0)
 			break;
 	if (i == namelist->size) {
-		fprintf(stderr, "%s level name %s in %s is invalid\n",
-		    level, name, string);
-		return (-1);
+		warnx("%s level name %s in %s is invalid", level, name, string);
+		return(-1);
 	}
-	return (i);
+	return(i);
 }
 
 void

@@ -1,4 +1,4 @@
-/*	$OpenBSD: mount_nfs.c,v 1.9 1997/04/20 15:37:26 deraadt Exp $	*/
+/*	$OpenBSD: mount_nfs.c,v 1.13 1997/08/20 05:10:23 millert Exp $	*/
 /*	$NetBSD: mount_nfs.c,v 1.12.4.1 1996/05/25 22:48:05 fvdl Exp $	*/
 
 /*
@@ -67,7 +67,7 @@ static char rcsid[] = "$NetBSD: mount_nfs.c,v 1.12.4.1 1996/05/25 22:48:05 fvdl 
 #endif
 
 #ifdef NFSKERB
-#include <kerberosIV/des.h>
+#include <des.h>
 #include <kerberosIV/krb.h>
 #endif
 
@@ -88,7 +88,7 @@ static char rcsid[] = "$NetBSD: mount_nfs.c,v 1.12.4.1 1996/05/25 22:48:05 fvdl 
 #include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <strings.h>
+#include <string.h>
 #include <unistd.h>
 
 #include "mntopts.h"
@@ -433,8 +433,12 @@ main(argc, argv)
 
 	if (!getnfsargs(spec, nfsargsp))
 		exit(1);
-	if (mount(MOUNT_NFS, name, mntflags, nfsargsp))
-		err(1, "%s", name);
+	if (mount(MOUNT_NFS, name, mntflags, nfsargsp)) {
+		if (errno == EOPNOTSUPP)
+			errx(1, "%s: Filesystem not supported by kernel", name);
+		else
+			err(1, name);
+	}
 	if (nfsargsp->flags & (NFSMNT_NQNFS | NFSMNT_KERB)) {
 		if ((opflags & ISBGRND) == 0) {
 			if (i = fork()) {
@@ -495,7 +499,7 @@ main(argc, argv)
 			 */
 			if (kret == KSUCCESS &&
 			    ktick.kt.length <= (RPCAUTH_MAXSIZ-3*NFSX_UNSIGNED)
-			    && gettimeofday(&ktv, (struct timezone *)0) == 0) {
+			    && gettimeofday(&ktv, NULL) == 0) {
 			    ncd.ncd_authtype = RPCAUTH_KERB4;
 			    ncd.ncd_authstr = (u_char *)&ktick;
 			    ncd.ncd_authlen = nfsm_rndup(ktick.kt.length) +
@@ -609,7 +613,7 @@ getnfsargs(spec, nfsargsp)
 	if (inet_aton(hostp, &saddr.sin_addr) != 0) {
 		if ((nfsargsp->flags & NFSMNT_KERB)) {
 			if ((hp = gethostbyaddr((char *)&saddr.sin_addr.s_addr,
-			    sizeof (u_long), AF_INET)) == (struct hostent *)0) {
+			    sizeof (u_long), AF_INET)) == NULL) {
 				warnx("can't resolve hostname for address %s",
 				    hostp);
 				return (0);

@@ -1,3 +1,4 @@
+/*	$OpenBSD: nightobjs.c,v 1.3 1997/08/24 21:55:12 deraadt Exp $	*/
 /*	$NetBSD: nightobjs.c,v 1.3 1995/03/21 15:07:46 cgd Exp $	*/
 
 /*
@@ -41,7 +42,7 @@ static char rcsid[] = "$NetBSD: nightobjs.c,v 1.3 1995/03/21 15:07:46 cgd Exp $"
 #endif
 #endif /* not lint */
 
-#include "externs.h"
+#include "extern.h"
 
 struct objs nightobjs[] = {
 	{ 218,	PAJAMAS },

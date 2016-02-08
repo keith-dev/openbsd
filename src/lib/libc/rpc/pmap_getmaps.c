@@ -28,7 +28,7 @@
  */
 
 #if defined(LIBC_SCCS) && !defined(lint)
-static char *rcsid = "$OpenBSD: pmap_getmaps.c,v 1.4 1996/12/10 07:46:39 deraadt Exp $";
+static char *rcsid = "$OpenBSD: pmap_getmaps.c,v 1.6 1997/09/22 05:11:08 millert Exp $";
 #endif /* LIBC_SCCS and not lint */
 
 /*
@@ -46,6 +46,7 @@ static char *rcsid = "$OpenBSD: pmap_getmaps.c,v 1.4 1996/12/10 07:46:39 deraadt
 #include <netdb.h>
 #include <stdio.h>
 #include <errno.h>
+#include <unistd.h>
 #include <net/if.h>
 #include <sys/ioctl.h>
 #define NAMELEN 255
@@ -60,7 +61,7 @@ pmap_getmaps(address)
 	 struct sockaddr_in *address;
 {
 	struct pmaplist *head = (struct pmaplist *)NULL;
-	int socket = -1;
+	int sock = -1;
 	struct timeval minutetimeout;
 	register CLIENT *client;
 
@@ -68,7 +69,7 @@ pmap_getmaps(address)
 	minutetimeout.tv_usec = 0;
 	address->sin_port = htons(PMAPPORT);
 	client = clnttcp_create(address, PMAPPROG,
-	    PMAPVERS, &socket, 50, 500);
+	    PMAPVERS, &sock, 50, 500);
 	if (client != (CLIENT *)NULL) {
 		if (CLNT_CALL(client, PMAPPROC_DUMP, xdr_void, NULL, xdr_pmaplist,
 		    &head, minutetimeout) != RPC_SUCCESS) {
@@ -76,8 +77,8 @@ pmap_getmaps(address)
 		}
 		CLNT_DESTROY(client);
 	}
-	if (socket != -1)
-		(void)close(socket);
+	if (sock != -1)
+		(void)close(sock);
 	address->sin_port = 0;
 	return (head);
 }

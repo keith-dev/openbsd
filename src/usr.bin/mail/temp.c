@@ -1,4 +1,4 @@
-/*	$OpenBSD: temp.c,v 1.5 1997/03/29 03:01:47 millert Exp $	*/
+/*	$OpenBSD: temp.c,v 1.9 1997/07/24 17:27:13 millert Exp $	*/
 /*	$NetBSD: temp.c,v 1.5 1996/06/08 19:48:42 christos Exp $	*/
 
 /*
@@ -38,12 +38,11 @@
 #if 0
 static char sccsid[] = "@(#)temp.c	8.1 (Berkeley) 6/6/93";
 #else
-static char rcsid[] = "$OpenBSD: temp.c,v 1.5 1997/03/29 03:01:47 millert Exp $";
+static char rcsid[] = "$OpenBSD: temp.c,v 1.9 1997/07/24 17:27:13 millert Exp $";
 #endif
 #endif /* not lint */
 
 #include "rcv.h"
-#include <errno.h>
 #include "extern.h"
 
 /*
@@ -52,11 +51,6 @@ static char rcsid[] = "$OpenBSD: temp.c,v 1.5 1997/03/29 03:01:47 millert Exp $"
  * Give names to all the temporary files that we will need.
  */
 
-char	*tempMail;
-char	*tempQuit;
-char	*tempEdit;
-char	*tempResid;
-char	*tempMesg;
 char	*tmpdir;
 
 void
@@ -76,31 +70,22 @@ tinit()
 		cp--;
 	}
 
-	tempMail  = tempnam(tmpdir, "Rs");
-	tempResid = tempnam(tmpdir, "Rq");
-	tempQuit  = tempnam(tmpdir, "Rm");
-	tempEdit  = tempnam(tmpdir, "Re");
-	tempMesg  = tempnam(tmpdir, "Rx");
-
 	/*
 	 * It's okay to call savestr in here because main will
 	 * do a spreserve() after us.
 	 */
-	if (myname != NOSTR) {
-		if (getuserid(myname) < 0) {
-			printf("\"%s\" is not a user of this system\n",
-			    myname);
-			exit(1);
-		}
+	if (myname != NULL) {
+		if (getuserid(myname) < 0)
+			errx(1, "\"%s\" is not a user of this system", myname);
 	} else {
-		if ((cp = username()) == NOSTR) {
+		if ((cp = username()) == NULL) {
 			myname = "nobody";
 			if (rcvmode)
 				exit(1);
 		} else
 			myname = savestr(cp);
 	}
-	if ((cp = getenv("HOME")) == NOSTR || strlen(getenv("HOME")) >= PATHSIZE)
+	if ((cp = getenv("HOME")) == NULL || strlen(getenv("HOME")) >= PATHSIZE)
 		cp = ".";
 	homedir = savestr(cp);
 	if (debug)

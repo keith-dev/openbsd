@@ -39,7 +39,7 @@ static char copyright[] =
 
 #ifndef lint
 /*static char sccsid[] = "from: @(#)comsat.c	8.1 (Berkeley) 6/4/93";*/
-static char rcsid[] = "$Id: comsat.c,v 1.4 1996/12/22 03:41:12 tholo Exp $";
+static char rcsid[] = "$Id: comsat.c,v 1.6 1997/08/05 23:35:23 angelos Exp $";
 #endif /* not lint */
 
 #include <sys/param.h>
@@ -141,7 +141,10 @@ void
 reapchildren(signo)
 	int signo;
 {
+	int save_errno = errno;
+
 	while (wait3(NULL, WNOHANG, NULL) > 0);
+	errno = save_errno;
 }
 
 void
@@ -151,6 +154,7 @@ onalrm(signo)
 	static u_int utmpsize;		/* last malloced size for utmp */
 	static u_int utmpmtime;		/* last modification time for utmp */
 	struct stat statbf;
+	int save_errno = errno;
 
 	if (time(NULL) - lastmsgtime >= MAXIDLE)
 		exit(0);
@@ -168,6 +172,7 @@ onalrm(signo)
 		(void)lseek(uf, (off_t)0, L_SET);
 		nutmp = read(uf, utmp, (int)statbf.st_size)/sizeof(struct utmp);
 	}
+	errno = save_errno;
 }
 
 void

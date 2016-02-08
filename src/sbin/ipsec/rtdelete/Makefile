@@ -1,4 +1,4 @@
-#	$OpenBSD: Makefile,v 1.1 1997/02/21 23:17:32 niklas Exp $
+#	$OpenBSD: Makefile,v 1.3 1997/09/05 10:07:31 provos Exp $
 
 PROG=	rtdelete
 

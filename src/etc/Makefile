@@ -1,4 +1,4 @@
-#	$OpenBSD: Makefile,v 1.60 1997/05/19 19:31:22 deraadt Exp $
+#	$OpenBSD: Makefile,v 1.77 1997/10/24 15:57:13 deraadt Exp $
 
 TZDIR=		/usr/share/zoneinfo
 LOCALTIME=	US/Pacific
@@ -9,17 +9,16 @@ NOOBJ=	oobj
 .include "etc.${MACHINE}/Makefile.inc"
 .endif
 
-# disktab may be wrong -- hcx9 is a tahoe, but gets its own.
 # -rw-r--r--
 BINOWN= root
 BINGRP= wheel
 BIN1=	aliases bootptab changelist ccd.conf csh.cshrc csh.login csh.logout \
 	daily dm.conf exports ftpusers ftpchroot gettytab group hosts \
-	hosts.equiv hosts.lpd ifaliases inetd.conf ipf.rules ksh.kshrc \
+	hosts.lpd ifaliases inetd.conf ipf.rules ksh.kshrc \
 	locate.rc man.conf monthly motd mrouted.conf myname nat.rules \
 	netstart networks newsyslog.conf passwd.conf phones printcap \
-	protocols rbootd.conf rc rc.local rc.securelevel remote rpc security \
-	services shells syslog.conf virc weekly etc.${MACHINE}/disktab
+	protocols rbootd.conf rc rc.conf rc.local rc.securelevel remote rpc security \
+	services shells syslog.conf weekly etc.${MACHINE}/disktab
 
 # -rw-rw-r--
 BIN2=	motd
@@ -60,6 +59,7 @@ distribution-etc-root-var: distrib-dirs
 	    chgrp ${BINGRP} ${DESTDIR}/etc/fbtab && \
 	    chmod 644 ${DESTDIR}/etc/fbtab
 	${INSTALL} -c -o ${BINOWN} -g ${BINGRP} -m 664 ${BIN2} ${DESTDIR}/etc
+	${INSTALL} -c -o root -g wheel -m 600 hosts.equiv ${DESTDIR}/etc
 	${INSTALL} -c -o root -g wheel -m 600 crontab ${DESTDIR}/var/cron/tabs/root
 	${INSTALL} -c -o root -g wheel -m 600 master.passwd ${DESTDIR}/etc
 	pwd_mkdb -p -d ${DESTDIR}/etc /etc/master.passwd
@@ -68,7 +68,7 @@ distribution-etc-root-var: distrib-dirs
 	(cd root; \
 		${INSTALL} -c -o root -g wheel -m 644 dot.cshrc \
 		    ${DESTDIR}/root/.cshrc; \
-		${INSTALL} -c -o root -g wheel -m 644 dot.klogin \
+		${INSTALL} -c -o root -g wheel -m 600 dot.klogin \
 		    ${DESTDIR}/root/.klogin; \
 		${INSTALL} -c -o root -g wheel -m 644 dot.login \
 		    ${DESTDIR}/root/.login; \
@@ -91,7 +91,20 @@ distribution-etc-root-var: distrib-dirs
 		${INSTALL} -c -o root -g wheel -m 600 special \
 		    ${DESTDIR}/etc/mtree; \
 		${INSTALL} -c -o root -g wheel -m 444 4.4BSD.dist \
+		    ${DESTDIR}/etc/mtree; \
+		${INSTALL} -c -o root -g wheel -m 444 BSD.local.dist \
+		    ${DESTDIR}/etc/mtree; \
+		${INSTALL} -c -o root -g wheel -m 444 BSD.x11.dist \
 		    ${DESTDIR}/etc/mtree)
+	(cd photuris; \
+		${INSTALL} -c -o root -g wheel -m 600 secrets.conf \
+		    ${DESTDIR}/etc/photuris; \
+		${INSTALL} -c -o root -g wheel -m 600 attributes.conf \
+		    ${DESTDIR}/etc/photuris; \
+		${INSTALL} -c -o root -g wheel -m 600 photuris.conf \
+		    ${DESTDIR}/etc/photuris; \
+		${INSTALL} -c -o root -g wheel -m 600 photuris.startup \
+		    ${DESTDIR}/etc/photuris)
 	(cd ppp; \
 		${INSTALL} -c -o root -g wheel -m 600 chap-secrets \
 		    ${DESTDIR}/etc/ppp; \
@@ -115,7 +128,7 @@ distribution-etc-root-var: distrib-dirs
 		${DESTDIR}/var/crash
 	${INSTALL} -c -o ${BINOWN} -g operator -m 664 /dev/null \
 		${DESTDIR}/etc/dumpdates
-	${INSTALL} -c -o ${BINOWN} -g operator -m 644 /dev/null \
+	${INSTALL} -c -o ${BINOWN} -g wheel -m 600 /dev/null \
 		${DESTDIR}/etc/skeykeys
 	${INSTALL} -c -o root -g wheel -m 600 /dev/null \
 		${DESTDIR}/var/at/at.deny
@@ -123,7 +136,7 @@ distribution-etc-root-var: distrib-dirs
 		${DESTDIR}/var/cron/log
 	${INSTALL} -c -o nobody -g ${BINGRP} -m 664 /dev/null \
 		${DESTDIR}/var/db/locate.database
-	${INSTALL} -c -o ${BINOWN} -g ${BINGRP} -m 664 /dev/null \
+	${INSTALL} -c -o ${BINOWN} -g ${BINGRP} -m 640 /dev/null \
 		${DESTDIR}/var/log/authlog
 	${INSTALL} -c -o ${BINOWN} -g ${BINGRP} -m 664 /dev/null \
 		${DESTDIR}/var/log/daemon
@@ -131,7 +144,7 @@ distribution-etc-root-var: distrib-dirs
 		${DESTDIR}/var/log/ftpd
 	${INSTALL} -c -o ${BINOWN} -g ${BINGRP} -m 664 /dev/null \
 		${DESTDIR}/var/log/ipflog
-	${INSTALL} -c -o ${BINOWN} -g ${BINGRP} -m 664 /dev/null \
+	${INSTALL} -c -o ${BINOWN} -g ${BINGRP} -m 644 /dev/null \
 		${DESTDIR}/var/log/lastlog
 	${INSTALL} -c -o ${BINOWN} -g ${BINGRP} -m 664 /dev/null \
 		${DESTDIR}/var/log/lpd-errs
@@ -139,18 +152,16 @@ distribution-etc-root-var: distrib-dirs
 		${DESTDIR}/var/log/maillog
 	${INSTALL} -c -o ${BINOWN} -g ${BINGRP} -m 664 /dev/null \
 		${DESTDIR}/var/log/messages
-	${INSTALL} -c -o ${BINOWN} -g ${BINGRP} -m 664 /dev/null \
+	${INSTALL} -c -o ${BINOWN} -g ${BINGRP} -m 600 /dev/null \
 		${DESTDIR}/var/log/secure
-	${INSTALL} -c -o ${BINOWN} -g ${BINGRP} -m 664 /dev/null \
+	${INSTALL} -c -o ${BINOWN} -g ${BINGRP} -m 644 /dev/null \
 		${DESTDIR}/var/log/wtmp
 	${INSTALL} -c -o ${BINOWN} -g ${BINGRP} -m 664 /dev/null \
 		${DESTDIR}/var/log/xferlog
 	${INSTALL} -c -o daemon -g staff -m 664 /dev/null \
 		${DESTDIR}/var/msgs/bounds
-	${INSTALL} -c -o ${BINOWN} -g ${BINGRP} -m 664 /dev/null \
+	${INSTALL} -c -o ${BINOWN} -g utmp -m 664 /dev/null \
 		${DESTDIR}/var/run/utmp
-	(cd etc.${MACHINE}; ${INSTALL} -c -o ${BINOWN} -g ${BINGRP} -m 444 \
-	    fstab.* ${DESTDIR}/etc)
 .if (${MACHINE_ARCH} == "mips")
 	(cd etc.${MACHINE}; ${INSTALL} -c -o ${BINOWN} -g ${BINGRP} -m 444 \
 	    ld.so.conf ${DESTDIR}/etc)
@@ -162,13 +173,11 @@ distribution-etc-root-var: distrib-dirs
 .endif
 	(cd ../usr.sbin/sendmail/cf/cf; ${MAKE} distribution)
 	(cd ../usr.sbin/ypserv/ypinit; ${MAKE} distribution)
+	(cd ../usr.bin/mail; ${MAKE} distribution)
+	/usr/sbin/sendmail -C${DESTDIR}/etc/sendmail.cf -bi -O AliasFile=${DESTDIR}/etc/aliases
 
 distribution: distribution-etc-root-var
 	(cd ..; ${MAKE} install)
-
-hcx9-distribution:
-	(cd etc.tahoe; ${INSTALL} -c -o ${BINOWN} -g ${BINGRP} -m 444 ${WCS2} \
-	    ${DESTDIR}/)
 
 distrib-dirs:
 	${INSTALL} -d -o root -g wheel -m 755 ${DESTDIR}
@@ -188,10 +197,11 @@ release: distribution snap_pre snap_md
 	cd ${.CURDIR}/../distrib/sets; csh maketars
 	-cp ${DESTDIR}/snapshot/bsd* ${RELEASEDIR}
 	-cp ${DESTDIR}/snapshot/*boot* ${RELEASEDIR}
+	-cp ${DESTDIR}/snapshot/*BOOT* ${RELEASEDIR}
 	-cp ${DESTDIR}/snapshot/INSTALL.* ${RELEASEDIR}
 	-cp ${DESTDIR}/snapshot/*.fs ${DESTDIR}/snapshot/*.fs.gz ${RELEASEDIR}
-	-cd ${RELEASEDIR}; md5 bsd* *boot* INSTALL.* *.fs *.gz > MD5
-	-cd ${RELEASEDIR}; cksum bsd* *boot* INSTALL.* *.fs *.gz > CKSUM
+	-cd ${RELEASEDIR}; md5 bsd* *boot* *BOOT* INSTALL.* *.fs *.gz > MD5
+	-cd ${RELEASEDIR}; cksum bsd* *boot* *BOOT* INSTALL.* *.fs *.gz > CKSUM
 .endif
 
 snapshot: distribution snap_pre snap_tar snap_md
@@ -222,8 +232,8 @@ snap_tar:
 	    | ${GZIP} ${GZIPFLAGS} > snapshot/usr.lib.tar${GZIPEXT}
 	cd ${DESTDIR} && tar cf - usr/libexec \
 	    | ${GZIP} ${GZIPFLAGS} > snapshot/usr.libexec.tar${GZIPEXT}
-	cd ${DESTDIR} && tar cf - usr/mdec usr/libdata usr/local usr/src \
-	    usr/obj | ${GZIP} ${GZIPFLAGS} \
+	cd ${DESTDIR} && tar cf - usr/mdec usr/libdata usr/lkm usr/local \
+	    usr/src usr/obj | ${GZIP} ${GZIPFLAGS} \
 	    > snapshot/usr.misc.tar${GZIPEXT}
 	cd ${DESTDIR} && tar cf - usr/sbin \
 	    | ${GZIP} ${GZIPFLAGS} > snapshot/usr.sbin.tar${GZIPEXT}

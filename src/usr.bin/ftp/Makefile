@@ -1,9 +1,15 @@
-#	$OpenBSD: Makefile,v 1.9 1997/04/10 00:17:06 millert Exp $
-#	$NetBSD: Makefile,v 1.11 1997/03/24 21:59:36 christos Exp $
-#	from: @(#)Makefile	8.2 (Berkeley) 4/3/94
+#	$OpenBSD: Makefile,v 1.14 1997/10/02 04:22:39 imp Exp $
 
-# define SMALL to disable command line editing
+# Define SMALL to disable command line editing
 #CFLAGS+=-DSMALL
+
+# Uncomment the following to provide defaults for gate-ftp operation
+#CFLAGS+=-DGATE_SERVER=\"ftp-gw.host\" # -DGATE_PORT=21
+
+.if (defined(USE_SOCKS) && ${USE_SOCKS} == "YES")
+CFLAGS += -DSOCKS -I/usr/local/include
+LDADD += -lsocks5
+.endif
 
 PROG=	ftp
 SRCS=	cmds.c cmdtab.c complete.c domacro.c fetch.c ftp.c main.c ruserpass.c \
@@ -11,5 +17,7 @@ SRCS=	cmds.c cmdtab.c complete.c domacro.c fetch.c ftp.c main.c ruserpass.c \
 
 LDADD+=	-ledit -ltermcap
 DPADD+=	${LIBEDIT} ${LIBTERMCAP}
+
+#COPTS+= -Wall -Wconversion -Wstrict-prototypes -Wmissing-prototypes
 
 .include <bsd.prog.mk>

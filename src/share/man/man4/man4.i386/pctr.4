@@ -1,4 +1,4 @@
-.\"	$OpenBSD: pctr.4,v 1.2 1996/12/10 09:06:24 deraadt Exp $
+.\"	$OpenBSD: pctr.4,v 1.4 1997/09/16 07:52:17 deraadt Exp $
 .\"
 .\" Pentium performance counter driver for OpenBSD.
 .\" Copyright 1996 David Mazieres <dm@lcs.mit.edu>.
@@ -33,7 +33,6 @@ call to program the function of each counter.  All require the
 following includes:
 .Bd -literal -offset indent
 #include <sys/types.h>
-#include <sys/ioccom.h>
 #include <machine/cpu.h>
 #include <machine/pctr.h>
 .Ed
@@ -461,7 +460,7 @@ Events marked /a can take the
 .Dv P6CTR_UM_A
 bit.
 
-Unlike the Pentium counters, the Pentium Pro conters can be read
+Unlike the Pentium counters, the Pentium Pro counters can be read
 directly from user-mode without need to invoke the kernel.  The macro
 .Fn rdpmc ctr
 takes 0 or 1 as an argument to specify a counter, and returns that

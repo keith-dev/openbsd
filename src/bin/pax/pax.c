@@ -1,4 +1,4 @@
-/*	$OpenBSD: pax.c,v 1.7 1997/04/05 22:36:17 millert Exp $	*/
+/*	$OpenBSD: pax.c,v 1.11 1997/09/01 18:29:58 deraadt Exp $	*/
 /*	$NetBSD: pax.c,v 1.5 1996/03/26 23:54:20 mrg Exp $	*/
 
 /*-
@@ -48,7 +48,7 @@ static char copyright[] =
 #if 0
 static char sccsid[] = "@(#)pax.c	8.2 (Berkeley) 4/18/94";
 #else
-static char rcsid[] = "$OpenBSD: pax.c,v 1.7 1997/04/05 22:36:17 millert Exp $";
+static char rcsid[] = "$OpenBSD: pax.c,v 1.11 1997/09/01 18:29:58 deraadt Exp $";
 #endif
 #endif /* not lint */
 
@@ -62,6 +62,7 @@ static char rcsid[] = "$OpenBSD: pax.c,v 1.7 1997/04/05 22:36:17 millert Exp $";
 #include <unistd.h>
 #include <stdlib.h>
 #include <errno.h>
+#include <fcntl.h>
 #include "pax.h"
 #include "extern.h"
 static int gen_init __P((void));
@@ -76,6 +77,7 @@ static int gen_init __P((void));
 int	act = DEFOP;		/* read/write/append/copy */
 FSUB	*frmt = NULL;		/* archive format type */
 int	cflag;			/* match all EXCEPT pattern/file */
+int	cwdfd;			/* starting cwd */
 int	dflag;			/* directory member match only  */
 int	iflag;			/* interactive file/archive rename */
 int	kflag;			/* do not overwrite existing files */
@@ -103,7 +105,6 @@ int	docrc;			/* check/create file crc */
 char	*dirptr;		/* destination dir in a copy */
 char	*ltmfrmt;		/* -v locale time format (if any) */
 char	*argv0;			/* root of argv[0] */
-char	*cwdpt;			/* starting cwd */
 sigset_t s_mask;		/* signal mask for cleanup critical sect */
 
 /*
@@ -226,7 +227,7 @@ sigset_t s_mask;		/* signal mask for cleanup critical sect */
  * Return: 0 if ok, 1 otherwise
  */
 
-#if __STDC__
+#ifdef __STDC__
 int
 main(int argc, char **argv)
 #else
@@ -239,9 +240,9 @@ main(argc, argv)
 	/*
 	 * Keep a reference to cwd, so we can always come back home.
 	 */
-	cwdpt = getcwd(NULL, 0);
-	if (cwdpt == NULL) {
-		syswarn(0, errno, "Can't get current working directory.");
+	cwdfd = open(".", O_RDONLY);
+	if (cwdfd < 0) {
+		syswarn(0, errno, "Can't open current working directory.");
 		return(exit_val);
 	}
 
@@ -249,7 +250,7 @@ main(argc, argv)
 	 * parse options, determine operational mode, general init
 	 */
 	options(argc, argv);
-        if ((gen_init() < 0) || (tty_init() < 0))
+	if ((gen_init() < 0) || (tty_init() < 0))
 		return(exit_val);
 
 	/*
@@ -285,7 +286,7 @@ main(argc, argv)
  *	never....
  */
 
-#if __STDC__
+#ifdef __STDC__
 void
 sig_cleanup(int which_sig)
 #else
@@ -318,7 +319,7 @@ sig_cleanup(which_sig)
  *	when dealing with a medium to large sized archives.
  */
 
-#if __STDC__
+#ifdef __STDC__
 static int
 gen_init(void)
 #else
@@ -389,27 +390,27 @@ gen_init()
 	n_hand.sa_handler = sig_cleanup;
 
 	if ((sigaction(SIGHUP, &n_hand, &o_hand) < 0) &&
-	    (o_hand.sa_handler == SIG_IGN) && 
+	    (o_hand.sa_handler == SIG_IGN) &&
 	    (sigaction(SIGHUP, &o_hand, &o_hand) < 0))
 		goto out;
 
 	if ((sigaction(SIGTERM, &n_hand, &o_hand) < 0) &&
-	    (o_hand.sa_handler == SIG_IGN) && 
+	    (o_hand.sa_handler == SIG_IGN) &&
 	    (sigaction(SIGTERM, &o_hand, &o_hand) < 0))
 		goto out;
 
 	if ((sigaction(SIGINT, &n_hand, &o_hand) < 0) &&
-	    (o_hand.sa_handler == SIG_IGN) && 
+	    (o_hand.sa_handler == SIG_IGN) &&
 	    (sigaction(SIGINT, &o_hand, &o_hand) < 0))
 		goto out;
 
 	if ((sigaction(SIGQUIT, &n_hand, &o_hand) < 0) &&
-	    (o_hand.sa_handler == SIG_IGN) && 
+	    (o_hand.sa_handler == SIG_IGN) &&
 	    (sigaction(SIGQUIT, &o_hand, &o_hand) < 0))
 		goto out;
 
 	if ((sigaction(SIGXCPU, &n_hand, &o_hand) < 0) &&
-	    (o_hand.sa_handler == SIG_IGN) && 
+	    (o_hand.sa_handler == SIG_IGN) &&
 	    (sigaction(SIGXCPU, &o_hand, &o_hand) < 0))
 		goto out;
 

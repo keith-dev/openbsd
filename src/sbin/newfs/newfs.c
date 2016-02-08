@@ -1,4 +1,4 @@
-/*	$OpenBSD: newfs.c,v 1.14 1997/02/23 03:51:25 millert Exp $	*/
+/*	$OpenBSD: newfs.c,v 1.17 1997/09/26 01:49:18 millert Exp $	*/
 /*	$NetBSD: newfs.c,v 1.20 1996/05/16 07:13:03 thorpej Exp $	*/
 
 /*
@@ -44,7 +44,7 @@ static char copyright[] =
 #if 0
 static char sccsid[] = "@(#)newfs.c	8.8 (Berkeley) 4/18/94";
 #else
-static char rcsid[] = "$OpenBSD: newfs.c,v 1.14 1997/02/23 03:51:25 millert Exp $";
+static char rcsid[] = "$OpenBSD: newfs.c,v 1.17 1997/09/26 01:49:18 millert Exp $";
 #endif
 #endif /* not lint */
 
@@ -72,7 +72,7 @@ static char rcsid[] = "$OpenBSD: newfs.c,v 1.14 1997/02/23 03:51:25 millert Exp 
 #include <unistd.h>
 #include <util.h>
 
-#if __STDC__
+#ifdef __STDC__
 #include <stdarg.h>
 #else
 #include <varargs.h>
@@ -88,7 +88,7 @@ struct mntopt mopts[] = {
 	{ NULL },
 };
 
-#if __STDC__
+#ifdef __STDC__
 void	fatal(const char *fmt, ...);
 #else
 void	fatal();
@@ -169,6 +169,7 @@ int	cpg = DESCPG;		/* cylinders/cylinder group */
 int	cpgflg;			/* cylinders/cylinder group flag was given */
 int	minfree = MINFREE;	/* free space threshold */
 int	opt = DEFAULTOPT;	/* optimization preference (space or time) */
+int	reqopt = -1;		/* opt preference has not been specified */
 int	density;		/* number of bytes per inode */
 int	maxcontig = 8;		/* max contiguous blocks to allocate */
 int	rotdelay = ROTDELAY;	/* rotational delay between blocks */
@@ -287,9 +288,9 @@ main(argc, argv)
 				getmntopts(optarg, mopts, &mntflags);
 			else {
 				if (strcmp(optarg, "space") == 0)
-					opt = FS_OPTSPACE;
+					reqopt = opt = FS_OPTSPACE;
 				else if (strcmp(optarg, "time") == 0)
-					opt = FS_OPTTIME;
+					reqopt = opt = FS_OPTTIME;
 				else
 	fatal("%s: unknown optimization preference: use `space' or `time'.");
 			}
@@ -335,7 +336,7 @@ main(argc, argv)
 	argc -= optind;
 	argv += optind;
 
-	if (ffs && argc != 2 && (mfs || argc != 1))
+	if (ffs && argc - mfs != 1)
 		usage();
 
 	special = argv[0];
@@ -423,12 +424,15 @@ main(argc, argv)
 			++mp;
 		}
 	}
+#ifdef COMPAT
 	if (mfs && disktype != NULL) {
 		lp = (struct disklabel *)getdiskbyname(disktype);
 		if (lp == NULL)
 			fatal("%s: unknown disk type", disktype);
 		pp = &lp->d_partitions[1];
-	} else {
+	} else
+#endif
+	{
 		fsi = open(special, O_RDONLY);
 		if (fsi < 0)
 			fatal("%s: %s", special, strerror(errno));
@@ -442,10 +446,6 @@ main(argc, argv)
 		    && !isdigit(*cp))
 			fatal("%s: can't figure out file system partition",
 			    argv[0]);
-#ifdef COMPAT
-		if (!mfs && disktype == NULL)
-			disktype = argv[1];
-#endif
 		lp = getdisklabel(special, fsi);
 		if (isdigit(*cp))
 			pp = &lp->d_partitions[0];
@@ -514,7 +514,7 @@ havelabel:
 		maxcontig = MAX(1, MIN(MAXPHYS, MAXBSIZE) / bsize - 1);
 	if (density == 0)
 		density = NFPI * fsize;
-	if (minfree < MINFREE && opt != FS_OPTSPACE) {
+	if (minfree < MINFREE && opt != FS_OPTSPACE && reqopt == -1) {
 		fprintf(stderr, "Warning: changing optimization to space ");
 		fprintf(stderr, "because minfree is less than %d%%\n", MINFREE);
 		opt = FS_OPTSPACE;
@@ -678,7 +678,7 @@ rewritelabel(s, fd, lp)
 
 /*VARARGS*/
 void
-#if __STDC__
+#ifdef __STDC__
 fatal(const char *fmt, ...)
 #else
 fatal(fmt, va_alist)
@@ -688,7 +688,7 @@ fatal(fmt, va_alist)
 {
 	va_list ap;
 
-#if __STDC__
+#ifdef __STDC__
 	va_start(ap, fmt);
 #else
 	va_start(ap);
@@ -711,15 +711,10 @@ usage()
 		fprintf(stderr,
 		    "usage: %s [ -fsoptions ] special-device mount-point\n",
 			__progname);
-	} else
+	} else {
 		fprintf(stderr,
-		    "usage: %s [ -fsoptions ] special-device%s\n",
-		    __progname,
-#ifdef COMPAT
-		    " [device-type]");
-#else
-		    "");
-#endif
+		    "usage: %s [ -fsoptions ] special-device\n", __progname);
+	}
 	fprintf(stderr, "where fsoptions are:\n");
 	fprintf(stderr,
 	    "\t-N do not create file system, just print out parameters\n");

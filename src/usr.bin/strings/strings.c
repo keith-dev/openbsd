@@ -1,4 +1,4 @@
-/*	$OpenBSD: strings.c,v 1.2 1996/06/26 05:39:30 deraadt Exp $	*/
+/*	$OpenBSD: strings.c,v 1.4 1997/09/11 11:21:54 deraadt Exp $	*/
 /*	$NetBSD: strings.c,v 1.7 1995/02/15 15:49:19 jtc Exp $	*/
 
 /*
@@ -44,7 +44,7 @@ static char copyright[] =
 #if 0
 static char sccsid[] = "@(#)strings.c	8.2 (Berkeley) 1/28/94";
 #endif
-static char rcsid[] = "$OpenBSD: strings.c,v 1.2 1996/06/26 05:39:30 deraadt Exp $";
+static char rcsid[] = "$OpenBSD: strings.c,v 1.4 1997/09/11 11:21:54 deraadt Exp $";
 #endif /* not lint */
 
 #include <sys/types.h>
@@ -74,8 +74,10 @@ static int	hcnt,			/* head count */
 		read_len;		/* length to read */
 static u_char	hbfr[sizeof(EXEC)];	/* buffer for struct exec */
 
-static void usage();
+static void usage __P((void));
+int getch __P((void));
 
+int
 main(argc, argv)
 	int argc;
 	char **argv;
@@ -159,7 +161,7 @@ main(argc, argv)
 		exit (1);
 	}
 
-	if (!(bfr = malloc(minlen))) {
+	if (!(bfr = malloc(minlen + 1))) {
 		(void)fprintf(stderr, "strings: %s\n", strerror(errno));
 		exit(1);
 	}
@@ -227,6 +229,7 @@ nextfile: ;
  * getch --
  *	get next character from wherever
  */
+int
 getch()
 {
 	++foff;

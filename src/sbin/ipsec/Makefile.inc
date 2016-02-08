@@ -1,4 +1,4 @@
-#	$OpenBSD: Makefile.inc,v 1.1 1997/02/21 23:17:22 niklas Exp $
+#	$OpenBSD: Makefile.inc,v 1.3 1997/07/20 10:32:41 provos Exp $
 
 BINDIR=	/sbin
-NOMAN=
+LDSTATIC=	${STATIC}

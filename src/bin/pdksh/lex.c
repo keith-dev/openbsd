@@ -1,4 +1,4 @@
-/*	$OpenBSD: lex.c,v 1.5 1996/11/21 07:59:32 downsj Exp $	*/
+/*	$OpenBSD: lex.c,v 1.10 1997/09/12 04:39:32 millert Exp $	*/
 
 /*
  * lexical analysis and source input
@@ -62,7 +62,7 @@ yylex(cf)
 #ifdef KSH
 	else if (cf&LETEXPR) {
 		*wp++ = OQUOTE;	 /* enclose arguments in (double) quotes */
-		istate = SDPAREN;	
+		istate = SDPAREN;
 		ndparen = 0;
 	}
 #endif /* KSH */
@@ -587,10 +587,12 @@ Done:
 
 		  case '(':  /*)*/
 #ifdef KSH
-			if ((c2 = getsc()) == '(') /*)*/
-				c = MDPAREN;
-			else
-				ungetsc(c2);
+			if (!Flag(FSH)) {
+				if ((c2 = getsc()) == '(') /*)*/
+					c = MDPAREN;
+				else
+					ungetsc(c2);
+			}
 #endif /* KSH */
 			return c;
 		  /*(*/
@@ -1033,7 +1035,9 @@ set_prompt(to, s)
 			struct shf *shf;
 			char *ps1;
 			Area *saved_atemp;
-
+#ifdef __GNUC__
+			(void)&ps1;
+#endif
 			ps1 = str_val(global("PS1"));
 			shf = shf_sopen((char *) 0, strlen(ps1) * 2,
 				SHF_WR | SHF_DYNAMIC, (struct shf *) 0);

@@ -1,4 +1,4 @@
-/*	$OpenBSD: mountd.c,v 1.16 1997/05/04 21:05:28 millert Exp $	*/
+/*	$OpenBSD: mountd.c,v 1.22 1997/09/29 19:31:05 millert Exp $	*/
 /*	$NetBSD: mountd.c,v 1.31 1996/02/18 11:57:53 fvdl Exp $	*/
 
 /*
@@ -119,9 +119,9 @@ struct exportlist {
 #define	EX_LINKED	0x1
 
 struct netmsk {
-	u_long	nt_net;
-	u_long	nt_mask;
-	char *nt_name;
+	in_addr_t	nt_net;
+	in_addr_t	nt_mask;
+	char		*nt_name;
 };
 
 union grouptypes {
@@ -163,7 +163,7 @@ void	add_dlist __P((struct dirlist **, struct dirlist *,
 void	add_mlist __P((char *, char *));
 int	check_dirpath __P((char *));
 int	check_options __P((struct dirlist *));
-int	chk_host __P((struct dirlist *, u_long, int *, int *));
+int	chk_host __P((struct dirlist *, in_addr_t, int *, int *));
 void	del_mlist __P((char *, char *));
 struct dirlist *dirp_search __P((struct dirlist *, char *));
 int	do_mount __P((struct exportlist *, struct grouplist *, int,
@@ -176,6 +176,7 @@ void	free_dir __P((struct dirlist *));
 void	free_exp __P((struct exportlist *));
 void	free_grp __P((struct grouplist *));
 void	free_host __P((struct hostlist *));
+void	new_exportlist __P((void));
 void	get_exportlist __P((void));
 int	get_host __P((char *, struct grouplist *, struct grouplist *));
 int	get_num __P((char *));
@@ -192,7 +193,7 @@ void	nextfield __P((char **, char **));
 void	out_of_mem __P((void));
 void	parsecred __P((char *, struct ucred *));
 int	put_exlist __P((struct dirlist *, XDR *, struct dirlist *, int *));
-int	scan_tree __P((struct dirlist *, u_long));
+int	scan_tree __P((struct dirlist *, in_addr_t));
 void	send_umntall __P((void));
 int	umntall_each __P((caddr_t, struct sockaddr_in *));
 int	xdr_dir __P((XDR *, char *));
@@ -301,7 +302,7 @@ main(argc, argv)
 	    fprintf(pidfile, "%d\n", getpid());
 	    fclose(pidfile);
 	}
-	signal(SIGHUP, (void (*) __P((int))) get_exportlist);
+	signal(SIGHUP, (void (*) __P((int))) new_exportlist);
 	signal(SIGTERM, (void (*) __P((int))) send_umntall);
 	if ((udptransp = svcudp_create(RPC_ANYSOCK)) == NULL ||
 	    (tcptransp = svctcp_create(RPC_ANYSOCK, 0, 0)) == NULL) {
@@ -340,7 +341,7 @@ mntsrv(rqstp, transp)
 	struct stat stb;
 	struct statfs fsb;
 	struct hostent *hp;
-	u_long saddr;
+	in_addr_t saddr;
 	u_short sport;
 	char rpcpath[RPCMNT_PATHLEN+1], dirpath[MAXPATHLEN];
 	long bad = 0;
@@ -651,6 +652,15 @@ put_exlist(dp, xdrsp, adp, putdefp)
 char line[LINESIZ];
 FILE *exp_file;
 
+void
+new_exportlist()
+{
+	int save_errno = errno;
+
+	get_exportlist();
+	errno = save_errno;
+}
+
 /*
  * Get the export list
  */
@@ -704,6 +714,7 @@ get_exportlist()
 
 		if (!strncmp(fsp->f_fstypename, MOUNT_MFS, MFSNAMELEN) ||
 		    !strncmp(fsp->f_fstypename, MOUNT_FFS, MFSNAMELEN) ||
+		    !strncmp(fsp->f_fstypename, MOUNT_EXT2FS, MFSNAMELEN) ||
 		    !strncmp(fsp->f_fstypename, MOUNT_MSDOS, MFSNAMELEN) ||
 		    !strncmp(fsp->f_fstypename, MOUNT_ADOSFS, MFSNAMELEN) ||
 		    !strncmp(fsp->f_fstypename, MOUNT_CD9660, MFSNAMELEN)) {
@@ -711,9 +722,10 @@ get_exportlist()
 			targs.ua.fspec = NULL;
 			targs.ua.export.ex_flags = MNT_DELEXPORT;
 			if (mount(fsp->f_fstypename, fsp->f_mntonname,
-				  fsp->f_flags | MNT_UPDATE,
+				  (u_short)fsp->f_flags | MNT_UPDATE,
 				  (caddr_t)&targs) < 0)
-				syslog(LOG_ERR, "Can't delete exports for %s",
+				syslog(LOG_ERR,
+				       "Can't delete exports for %s: %m",
 				       fsp->f_mntonname);
 		}
 		fsp++;
@@ -845,14 +857,18 @@ get_exportlist()
 				}
 				if (netgrp) {
 				    if (get_host(hst, grp, tgrp)) {
-					syslog(LOG_ERR, "Bad netgroup %s", cp);
-					getexp_err(ep, tgrp);
-					endnetgrent();
-					goto nextline;
+					syslog(LOG_ERR,
+					    "Unknown host (%s) in netgroup %s",
+					    hst, cp);
+					has_host = FALSE;
+					continue;
 				    }
 				} else if (get_host(cp, grp, tgrp)) {
-				    getexp_err(ep, tgrp);
-				    goto nextline;
+				    syslog(LOG_ERR,
+					"Unknown host (%s) in line %s",
+					cp, line);
+				    has_host = FALSE;
+				    continue;
 				}
 				has_host = TRUE;
 			    } while (netgrp && getnetgrent((const char **)&hst,
@@ -1171,7 +1187,7 @@ dirp_search(dp, dirpath)
 int
 chk_host(dp, saddr, defsetp, hostsetp)
 	struct dirlist *dp;
-	u_long saddr;
+	in_addr_t saddr;
 	int *defsetp;
 	int *hostsetp;
 {
@@ -1217,7 +1233,7 @@ chk_host(dp, saddr, defsetp, hostsetp)
 int
 scan_tree(dp, saddr)
 	struct dirlist *dp;
-	u_long saddr;
+	in_addr_t saddr;
 {
 	int defset, hostset;
 
@@ -1309,7 +1325,7 @@ do_opt(cpp, endcpp, ep, grp, has_hostp, exflagsp, cr)
 			*exflagsp |= MNT_EXKERB;
 			opt_flags |= OP_KERB;
 		} else if (cpoptarg && (!strcmp(cpopt, "mask") ||
-			!strcmp(cpopt, "m"))) {
+		    !strcmp(cpopt, "m"))) {
 			if (get_net(cpoptarg, &grp->gr_ptr.gt_net, 1)) {
 				syslog(LOG_ERR, "Bad mask: %s", cpoptarg);
 				return (1);
@@ -1317,7 +1333,7 @@ do_opt(cpp, endcpp, ep, grp, has_hostp, exflagsp, cr)
 			usedarg++;
 			opt_flags |= OP_MASK;
 		} else if (cpoptarg && (!strcmp(cpopt, "network") ||
-			!strcmp(cpopt, "n"))) {
+		    !strcmp(cpopt, "n"))) {
 			if (grp->gr_type != GT_NULL) {
 				syslog(LOG_ERR, "Network/host conflict");
 				return (1);
@@ -1375,7 +1391,7 @@ get_host(cp, grp, tgrp)
 	char **addrp, **naddrp;
 	struct hostent t_host;
 	int i;
-	u_long saddr;
+	in_addr_t saddr;
 	char *aptr[2];
 
 	if (grp->gr_type != GT_NULL)
@@ -1566,7 +1582,7 @@ do_mount(ep, grp, exflags, anoncrp, dirp, dirplen, fsb)
 		struct msdosfs_args da;
 		struct adosfs_args aa;
 	} args;
-	u_long net;
+	in_addr_t net;
 
 	args.ua.fspec = 0;
 	args.ua.export.ex_flags = exflags;
@@ -1640,7 +1656,8 @@ do_mount(ep, grp, exflags, anoncrp, dirp, dirplen, fsb)
 		 * exportable file systems and not just MOUNT_FFS.
 		 */
 		while (mount(fsb->f_fstypename, dirp,
-		       fsb->f_flags | MNT_UPDATE, (caddr_t)&args) < 0) {
+		       (u_short)fsb->f_flags | MNT_UPDATE, (caddr_t)&args) <
+                       0) {
 			if (cp)
 				*cp-- = savedc;
 			else
@@ -1672,7 +1689,7 @@ do_mount(ep, grp, exflags, anoncrp, dirp, dirplen, fsb)
 			if (cp == dirp) {
 				if (debug)
 					fprintf(stderr, "mnt unsucc\n");
-				syslog(LOG_ERR, "Can't export %s", dirp);
+				syslog(LOG_ERR, "Can't export %s: %m", dirp);
 				return (2);
 			}
 			savedc = *cp;
@@ -1700,7 +1717,7 @@ get_net(cp, net, maskflg)
 	int maskflg;
 {
 	struct netent *np;
-	long netaddr;
+	in_addr_t netaddr;
 	struct in_addr inetaddr, inetaddr2;
 	char *name;
 

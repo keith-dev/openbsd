@@ -1,4 +1,4 @@
-/*	$OpenBSD: gen_subs.c,v 1.4 1997/01/24 19:41:21 millert Exp $	*/
+/*	$OpenBSD: gen_subs.c,v 1.8 1997/09/01 18:29:51 deraadt Exp $	*/
 /*	$NetBSD: gen_subs.c,v 1.5 1995/03/21 09:07:26 cgd Exp $	*/
 
 /*-
@@ -42,7 +42,7 @@
 #if 0
 static char sccsid[] = "@(#)gen_subs.c	8.1 (Berkeley) 5/31/93";
 #else
-static char rcsid[] = "$OpenBSD: gen_subs.c,v 1.4 1997/01/24 19:41:21 millert Exp $";
+static char rcsid[] = "$OpenBSD: gen_subs.c,v 1.8 1997/09/01 18:29:51 deraadt Exp $";
 #endif
 #endif /* not lint */
 
@@ -81,7 +81,7 @@ static char rcsid[] = "$OpenBSD: gen_subs.c,v 1.4 1997/01/24 19:41:21 millert Ex
  *	list the members of an archive in ls format
  */
 
-#if __STDC__
+#ifdef __STDC__
 void
 ls_list(register ARCHD *arcn, time_t now, FILE *fp)
 #else
@@ -170,7 +170,7 @@ ls_list(arcn, now, fp)
  * 	print a short summary of file to tty.
  */
 
-#if __STDC__
+#ifdef __STDC__
 void
 ls_tty(register ARCHD *arcn)
 #else
@@ -187,7 +187,7 @@ ls_tty(arcn)
 		/*
 		 * no locale specified format
 		 */
-		if ((arcn->sb.st_mtime + SIXMONTHS) <= time((time_t *)NULL))
+		if ((arcn->sb.st_mtime + SIXMONTHS) <= time(NULL))
 			timefrmt = OLDFRMT;
 		else
 			timefrmt = CURFRMT;
@@ -206,43 +206,15 @@ ls_tty(arcn)
 }
 
 /*
- * zf_strncpy()
- *	copy src to dest up to len chars (stopping at first '\0'), when src is
- *	shorter than len, pads to len with '\0'. big performance win (and 
- *	a lot easier to code) over strncpy(), then a strlen() then a
- *	memset(). (or doing the memset() first).
- */
-
-#if __STDC__
-void
-zf_strncpy(register char *dest, register char *src, int len)
-#else
-void
-zf_strncpy(dest, src, len)
-	register char *dest;
-	register char *src;
-	int len;
-#endif
-{
-	register char *stop;
-
-	stop = dest + len;
-	while ((dest < stop) && (*src != '\0'))
-		*dest++ = *src++;
-	while (dest < stop)
-		*dest++ = '\0';
-	return;
-}
-
-/*
  * l_strncpy()
- *	copy src to dest up to len chars (stopping at first '\0')
+ *	copy src to dest up to len chars (stopping at first '\0').
+ *	when src is shorter than len, pads to len with '\0'. 
  * Return:
  *	number of chars copied. (Note this is a real performance win over
- *	doing a strncpy() then a strlen()
+ *	doing a strncpy(), a strlen(), and then a possible memset())
  */
 
-#if __STDC__
+#ifdef __STDC__
 int
 l_strncpy(register char *dest, register char *src, int len)
 #else
@@ -260,9 +232,10 @@ l_strncpy(dest, src, len)
 	start = dest;
 	while ((dest < stop) && (*src != '\0'))
 		*dest++ = *src++;
-	if (dest < stop)
-		*dest = '\0';
-	return(dest - start);
+	len = dest - start;
+	while (dest < stop)
+		*dest++ = '\0';
+	return(len);
 }
 
 /*
@@ -275,7 +248,7 @@ l_strncpy(dest, src, len)
  *	unsigned long value
  */
 
-#if __STDC__
+#ifdef __STDC__
 u_long
 asc_ul(register char *str, int len, register int base)
 #else
@@ -326,7 +299,7 @@ asc_ul(str, len, base)
  *	NOTE: the string created is NOT TERMINATED.
  */
 
-#if __STDC__
+#ifdef __STDC__
 int
 ul_asc(u_long val, register char *str, register int len, register int base)
 #else
@@ -340,7 +313,7 @@ ul_asc(val, str, len, base)
 {
 	register char *pt;
 	u_long digit;
-	
+
 	/*
 	 * WARNING str is not '\0' terminated by this routine
 	 */
@@ -355,7 +328,7 @@ ul_asc(val, str, len, base)
 		while (pt >= str) {
 			if ((digit = (val & 0xf)) < 10)
 				*pt-- = '0' + (char)digit;
-			else 
+			else
 				*pt-- = 'a' + (char)(digit - 10);
 			if ((val = (val >> 4)) == (u_long)0)
 				break;
@@ -389,7 +362,7 @@ ul_asc(val, str, len, base)
  *	u_quad_t value
  */
 
-#if __STDC__
+#ifdef __STDC__
 u_quad_t
 asc_uqd(register char *str, int len, register int base)
 #else
@@ -440,7 +413,7 @@ asc_uqd(str, len, base)
  *	NOTE: the string created is NOT TERMINATED.
  */
 
-#if __STDC__
+#ifdef __STDC__
 int
 uqd_asc(u_quad_t val, register char *str, register int len, register int base)
 #else
@@ -454,7 +427,7 @@ uqd_asc(val, str, len, base)
 {
 	register char *pt;
 	u_quad_t digit;
-	
+
 	/*
 	 * WARNING str is not '\0' terminated by this routine
 	 */
@@ -469,7 +442,7 @@ uqd_asc(val, str, len, base)
 		while (pt >= str) {
 			if ((digit = (val & 0xf)) < 10)
 				*pt-- = '0' + (char)digit;
-			else 
+			else
 				*pt-- = 'a' + (char)(digit - 10);
 			if ((val = (val >> 4)) == (u_quad_t)0)
 				break;

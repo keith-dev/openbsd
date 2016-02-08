@@ -10,7 +10,7 @@
 #include "config.h"
 
 #ifndef lint
-static const char sccsid[] = "@(#)v_txt.c	10.86 (Berkeley) 9/20/96";
+static const char sccsid[] = "@(#)v_txt.c	10.87 (Berkeley) 10/13/96";
 #endif /* not lint */
 
 #include <sys/types.h>
@@ -1414,7 +1414,8 @@ resolve:/*
 	 *    command line or doing file name completion, resolve them.
 	 */
 	if ((vip->totalcount != 0 || F_ISSET(gp, G_BELLSCHED)) &&
-	    !F_ISSET(sp, SC_TINPUT_INFO) && !filec_redraw && vs_resolve(sp, 0))
+	    !F_ISSET(sp, SC_TINPUT_INFO) && !filec_redraw &&
+	    vs_resolve(sp, NULL, 0))
 		return (1);
 
 	/*
@@ -2222,7 +2223,7 @@ txt_fc_col(sp, argc, argv)
 				break;
 		}
 		if (nf)
-			FREE_SPACE(sp, p, 0);
+			FREE_SPACE(sp, (char *) p, 0);
 		CHK_INTR;
 	} else {
 		/* Figure out the number of columns. */
@@ -2240,7 +2241,7 @@ txt_fc_col(sp, argc, argv)
 				p = msg_print(sp, argv[base]->bp + prefix, &nf);
 				cnt = ex_printf(sp, "%s", p);
 				if (nf)
-					FREE_SPACE(sp, p, 0);
+					FREE_SPACE(sp, (char *) p, 0);
 				CHK_INTR;
 				if ((base += numrows) >= argc)
 					break;

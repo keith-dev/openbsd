@@ -1,4 +1,4 @@
-/*	$OpenBSD: parms.c,v 1.4 1997/01/17 07:12:22 millert Exp $	*/
+/*	$OpenBSD: parms.c,v 1.6 1997/07/30 23:28:43 deraadt Exp $	*/
 
 /*
  * Copyright (c) 1983, 1993

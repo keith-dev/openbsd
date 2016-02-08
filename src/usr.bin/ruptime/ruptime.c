@@ -1,4 +1,4 @@
-/*	$OpenBSD: ruptime.c,v 1.3 1997/01/15 23:43:10 millert Exp $	*/
+/*	$OpenBSD: ruptime.c,v 1.5 1997/07/06 02:28:55 millert Exp $	*/
 
 /*
  * Copyright (c) 1983 The Regents of the University of California.
@@ -41,7 +41,7 @@ char copyright[] =
 
 #ifndef lint
 /*static char sccsid[] = "from: @(#)ruptime.c	5.8 (Berkeley) 7/21/90";*/
-static char rcsid[] = "$OpenBSD: ruptime.c,v 1.3 1997/01/15 23:43:10 millert Exp $";
+static char rcsid[] = "$OpenBSD: ruptime.c,v 1.5 1997/07/06 02:28:55 millert Exp $";
 #endif /* not lint */
 
 #include <sys/param.h>
@@ -49,6 +49,7 @@ static char rcsid[] = "$OpenBSD: ruptime.c,v 1.3 1997/01/15 23:43:10 millert Exp
 #include <dirent.h>
 #include <protocols/rwhod.h>
 #include <stdio.h>
+#include <unistd.h>
 #include <stdlib.h>
 #include <string.h>
 #include <errno.h>
@@ -67,6 +68,9 @@ time_t now;
 int rflg = 1;
 int hscmp(), ucmp(), lcmp(), tcmp();
 
+void morehosts __P((void));
+
+int
 main(argc, argv)
 	int argc;
 	char **argv;
@@ -115,7 +119,7 @@ main(argc, argv)
 	morehosts();
 	hsp = hs;
 	maxloadav = -1;
-	while (dp = readdir(dirp)) {
+	while ((dp = readdir(dirp))) {
 		if (dp->d_ino == 0 || strncmp(dp->d_name, "whod.", 5))
 			continue;
 		if ((f = open(dp->d_name, O_RDONLY, 0)) < 0) {
@@ -185,23 +189,24 @@ interval(tval, updown)
 	static char resbuf[32];
 	int days, hours, minutes;
 
-	if (tval < 0 || tval > 365*24*60*60) {
-		(void)sprintf(resbuf, "   %s ??:??", updown);
+	if (tval < 0 || tval > 999*24*60*60) {
+		(void)sprintf(resbuf, "%s     ??:??", updown);
 		return(resbuf);
 	}
 	minutes = (tval + 59) / 60;		/* round to minutes */
 	hours = minutes / 60; minutes %= 60;
 	days = hours / 24; hours %= 24;
 	if (days)
-		(void)sprintf(resbuf, "%s %2d+%02d:%02d",
+		(void)sprintf(resbuf, "%s %3d+%02d:%02d",
 		    updown, days, hours, minutes);
 	else
-		(void)sprintf(resbuf, "%s    %2d:%02d",
+		(void)sprintf(resbuf, "%s     %2d:%02d",
 		    updown, hours, minutes);
 	return(resbuf);
 }
 
 /* alphabetical comparison */
+int
 hscmp(a1, a2)
 	void *a1, *a2;
 {
@@ -211,6 +216,7 @@ hscmp(a1, a2)
 }
 
 /* load average comparison */
+int
 lcmp(a1, a2)
 	void *a1, *a2;
 {
@@ -229,6 +235,7 @@ lcmp(a1, a2)
 }
 
 /* number of users comparison */
+int
 ucmp(a1, a2)
 	void *a1, *a2;
 {
@@ -246,6 +253,7 @@ ucmp(a1, a2)
 }
 
 /* uptime comparison */
+int
 tcmp(a1, a2)
 	void *a1, *a2;
 {
@@ -260,6 +268,7 @@ tcmp(a1, a2)
 	));
 }
 
+void
 morehosts()
 {
 	hs = realloc((char *)hs, (hspace *= 2) * sizeof(*hs));

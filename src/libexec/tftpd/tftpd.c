@@ -1,3 +1,5 @@
+/*	$OpenBSD: tftpd.c,v 1.10 1997/10/06 06:07:29 deraadt Exp $	*/
+
 /*
  * Copyright (c) 1983 Regents of the University of California.
  * All rights reserved.
@@ -39,7 +41,7 @@ char copyright[] =
 
 #ifndef lint
 /*static char sccsid[] = "from: @(#)tftpd.c	5.13 (Berkeley) 2/26/91";*/
-static char rcsid[] = "$Id: tftpd.c,v 1.6 1997/02/16 23:49:21 deraadt Exp $";
+static char rcsid[] = "$OpenBSD: tftpd.c,v 1.10 1997/10/06 06:07:29 deraadt Exp $: tftpd.c,v 1.6 1997/02/16 23:49:21 deraadt Exp $";
 #endif /* not lint */
 
 /*
@@ -83,15 +85,16 @@ char	ackbuf[PKTSIZE];
 struct	sockaddr_in from;
 int	fromlen;
 
-#define MAXARG	4
-char	*dirs[MAXARG+1];
+int	ndirs;
+char	**dirs;
 
 int	secure = 0;
+int	cancreate = 0;
 
 static void
 usage()
 {
-	syslog(LOG_ERR, "Usage: %s [-s] [directory ...]\n", __progname);
+	syslog(LOG_ERR, "Usage: %s [-cs] [directory ...]\n", __progname);
 	exit(1);
 }
 
@@ -111,8 +114,11 @@ main(argc, argv)
 
 	openlog("tftpd", LOG_PID, LOG_DAEMON);
 
-	while ((c = getopt(argc, argv, "s")) != -1)
+	while ((c = getopt(argc, argv, "cs")) != -1)
 		switch (c) {
+		case 'c':
+			cancreate = 1;
+			break;
 		case 's':
 			secure = 1;
 			break;
@@ -123,15 +129,30 @@ main(argc, argv)
 		}
 
 	for (; optind != argc; optind++) {
-		if (!secure) {
-			if (n >= MAXARG) {
-				syslog(LOG_ERR, "too many directories\n");
-				exit(1);
-			} else
-				dirs[n++] = argv[optind];
+		if (dirs)
+			dirs = realloc(dirs, (ndirs+2) * sizeof (char *));
+		else
+			dirs = calloc(ndirs+2, sizeof(char *));
+		if (dirs == NULL) {
+			syslog(LOG_ERR, "malloc: %m\n");
+			exit(1);
+		}			
+		dirs[n++] = argv[optind];
+		dirs[n] = NULL;
+		ndirs++;
+	}
+
+	if (secure) {
+		if (ndirs == 0) {
+			syslog(LOG_ERR, "no -s directory\n");
+			exit(1);
 		}
-		if (chdir(argv[optind])) {
-			syslog(LOG_ERR, "%s: %m\n", argv[optind]);
+		if (ndirs > 1) {
+			syslog(LOG_ERR, "too many -s directories\n");
+			exit(1);
+		}
+		if (chdir(dirs[0])) {
+			syslog(LOG_ERR, "%s: %m\n", dirs[0]);
 			exit(1);
 		}
 	}
@@ -244,9 +265,6 @@ struct formats {
 } formats[] = {
 	{ "netascii",	validate_access,	sendfile,	recvfile, 1 },
 	{ "octet",	validate_access,	sendfile,	recvfile, 0 },
-#ifdef notdef
-	{ "mail",	validate_user,		sendmail,	recvmail, 1 },
-#endif
 	{ 0 }
 };
 
@@ -319,7 +337,7 @@ validate_access(filename, mode)
 	int mode;
 {
 	struct stat stbuf;
-	int	fd;
+	int	fd, wmode;
 	char *cp, **dirp;
 
 	if (!secure) {
@@ -338,22 +356,47 @@ validate_access(filename, mode)
 		if (*dirp==0 && dirp!=dirs)
 			return (EACCESS);
 	}
-	if (stat(filename, &stbuf) < 0)
-		return (errno == ENOENT ? ENOTFOUND : EACCESS);
-	if (mode == RRQ) {
-		if ((stbuf.st_mode&(S_IREAD >> 6)) == 0)
-			return (EACCESS);
+
+	/*
+	 * We use different a different permissions scheme if `cancreate' is
+	 * set.
+	 */
+	wmode = O_TRUNC;
+	if (stat(filename, &stbuf) < 0) {
+		if (!cancreate)
+			return (errno == ENOENT ? ENOTFOUND : EACCESS);
+		else {
+			if ((errno == ENOENT) && (mode != RRQ))
+				wmode = O_CREAT;
+			else
+				return(EACCESS);
+		}
 	} else {
-		if ((stbuf.st_mode&(S_IWRITE >> 6)) == 0)
-			return (EACCESS);
+		if (mode == RRQ) {
+			if ((stbuf.st_mode&(S_IREAD >> 6)) == 0)
+				return (EACCESS);
+		} else {
+			if ((stbuf.st_mode&(S_IWRITE >> 6)) == 0)
+				return (EACCESS);
+		}
 	}
-	fd = open(filename, mode == RRQ ? O_RDONLY : (O_WRONLY|O_TRUNC));
+	fd = open(filename, mode == RRQ ? O_RDONLY : (O_WRONLY|wmode));
 	if (fd < 0)
 		return (errno + 100);
-	file = fdopen(fd, (mode == RRQ)? "r":"w");
-	if (file == NULL) {
-		return errno+100;
+	/*
+	 * If the file was created, set default permissions.
+	 */
+	if ((wmode == O_CREAT) && fchmod(fd, 0666) < 0) {
+		int serrno = errno;
+
+		close(fd);
+		unlink(filename);
+
+		return (serrno + 100);
 	}
+	file = fdopen(fd, (mode == RRQ)? "r":"w");
+	if (file == NULL)
+		return (errno + 100);
 	return (0);
 }
 
@@ -401,7 +444,7 @@ send_data:
 		}
 		read_ahead(file, pf->f_convert);
 		for ( ; ; ) {
-			alarm(rexmtval);        /* read the ack */
+			alarm(rexmtval);	/* read the ack */
 			n = recv(peer, ackbuf, sizeof (ackbuf), 0);
 			alarm(0);
 			if (n < 0) {
@@ -468,7 +511,7 @@ send_ack:
 			alarm(rexmtval);
 			n = recv(peer, dp, PKTSIZE, 0);
 			alarm(0);
-			if (n < 0) {            /* really? */
+			if (n < 0) {		/* really? */
 				syslog(LOG_ERR, "tftpd: read: %m\n");
 				goto abort;
 			}
@@ -483,19 +526,19 @@ send_ack:
 				/* Re-synchronize with the other side */
 				(void) synchnet(peer);
 				if (dp->th_block == (block-1))
-					goto send_ack;          /* rexmit */
+					goto send_ack;		/* rexmit */
 			}
 		}
 		/*  size = write(file, dp->th_data, n - 4); */
 		size = writeit(file, &dp, n - 4, pf->f_convert);
-		if (size != (n-4)) {                    /* ahem */
+		if (size != (n-4)) {			/* ahem */
 			if (size < 0) nak(errno + 100);
 			else nak(ENOSPACE);
 			goto abort;
 		}
 	} while (size == SEGSIZE);
 	write_behind(file, pf->f_convert);
-	(void) fclose(file);            /* close data file */
+	(void) fclose(file);		/* close data file */
 
 	ap->th_opcode = htons((u_short)ACK);    /* send the "final" ack */
 	ap->th_block = htons((u_short)(block));
@@ -505,7 +548,7 @@ send_ack:
 	alarm(rexmtval);
 	n = recv(peer, buf, sizeof (buf), 0); /* normally times out and quits */
 	alarm(0);
-	if (n >= 4 &&                   /* if read some data */
+	if (n >= 4 &&			/* if read some data */
 	    dp->th_opcode == DATA &&    /* and got a data block */
 	    block == dp->th_block) {	/* then my last ack was lost */
 		(void) send(peer, ackbuf, 4, 0);     /* resend final ack */

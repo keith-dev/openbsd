@@ -1,3 +1,5 @@
+/*	$OpenBSD: fingerd.c,v 1.10 1997/08/16 21:38:21 millert Exp $	*/
+
 /*
  * Copyright (c) 1983, 1993
  *	The Regents of the University of California.  All rights reserved.
@@ -38,8 +40,11 @@ static char copyright[] =
 #endif /* not lint */
 
 #ifndef lint
-/*static char sccsid[] = "from: @(#)fingerd.c	8.1 (Berkeley) 6/4/93";*/
-static char rcsid[] = "$Id: fingerd.c,v 1.6 1997/01/15 23:40:56 millert Exp $";
+#if 0
+static char sccsid[] = "from: @(#)fingerd.c	8.1 (Berkeley) 6/4/93";
+#else
+static char rcsid[] = "$OpenBSD: fingerd.c,v 1.10 1997/08/16 21:38:21 millert Exp $";
+#endif
 #endif /* not lint */
 
 #include <sys/types.h>
@@ -53,7 +58,7 @@ static char rcsid[] = "$Id: fingerd.c,v 1.6 1997/01/15 23:40:56 millert Exp $";
 #include <netdb.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <strings.h>
+#include <string.h>
 #include "pathnames.h"
 
 void err __P((const char *, ...));
@@ -123,6 +128,10 @@ main(argc, argv)
 	if (!fgets(line, sizeof(line), stdin))
 		exit(1);
 	
+	/*
+	 * Note: we assume that finger(1) will treat "--" as end of
+	 * command args (ie: that it uses getopt(3)).
+	 */
 	av[ac++] = "--";
 	comp = &av[1];
 	for (lp = line, ap = &av[ac]; ac < ENTRIES;) {
@@ -193,23 +202,23 @@ main(argc, argv)
 	exit(0);
 }
 
-#if __STDC__
+#ifdef __STDC__
 #include <stdarg.h>
 #else
 #include <varargs.h>
 #endif
 
 void
-#if __STDC__
+#ifdef __STDC__
 err(const char *fmt, ...)
 #else
 err(fmt, va_alist)
 	char *fmt;
-        va_dcl
+	va_dcl
 #endif
 {
 	va_list ap;
-#if __STDC__
+#ifdef __STDC__
 	va_start(ap, fmt);
 #else
 	va_start(ap);

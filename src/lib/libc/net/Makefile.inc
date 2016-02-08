@@ -1,7 +1,9 @@
-#	$OpenBSD: Makefile.inc,v 1.10 1997/04/13 22:37:17 provos Exp $
+#	$OpenBSD: Makefile.inc,v 1.13 1997/07/28 16:27:16 niklas Exp $
 
 # net sources
 .PATH: ${.CURDIR}/arch/${MACHINE_ARCH}/net ${.CURDIR}/net
+
+CFLAGS+=-DRESOLVSORT
 
 SRCS+=	base64.c gethostnamadr.c getnetbyaddr.c getnetbyname.c getnetent.c \
 	getnetnamadr.c getproto.c getprotoent.c getprotoname.c getservbyname.c \
@@ -20,8 +22,8 @@ SRCS+=	base64.c gethostnamadr.c getnetbyaddr.c getnetbyname.c getnetent.c \
 .include "${.CURDIR}/arch/${MACHINE_ARCH}/net/Makefile.inc"
 
 MAN+=	byteorder.3 ethers.3 gethostbyname.3 getnetent.3 getprotoent.3 \
-	getservent.3 inet.3 iso_addr.3 link_addr.3 ns.3 ipx.3 rcmd.3 rcmdsh.3 \
-	resolver.3
+	getservent.3 inet.3 inet_net.3 iso_addr.3 link_addr.3 ns.3 ipx.3 \
+	rcmd.3 rcmdsh.3 resolver.3
 
 MLINKS+=byteorder.3 htonl.3 byteorder.3 htons.3 byteorder.3 ntohl.3 \
 	byteorder.3 ntohs.3
@@ -39,7 +41,7 @@ MLINKS+=getservent.3 endservent.3 getservent.3 getservbyname.3 \
 MLINKS+=inet.3 addr.3 inet.3 inet_addr.3 inet.3 inet_aton.3 \
 	inet.3 inet_lnaof.3 inet.3 inet_makeaddr.3 inet.3 inet_netof.3 \
 	inet.3 inet_network.3 inet.3 inet_ntoa.3 inet.3 network.3 \
-	inet.3 ntoa.3
+	inet.3 ntoa.3 inet.3 inet_ntop.3 inet.3 inet_pton.3
 MLINKS+=iso_addr.3 iso_ntoa.3
 MLINKS+=link_addr.3 link_ntoa.3
 MLINKS+=ipx.3 ipx_addr.3 ipx.3 ipx_ntoa.3

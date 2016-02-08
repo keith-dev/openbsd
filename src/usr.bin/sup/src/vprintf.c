@@ -1,4 +1,4 @@
-/*	$OpenBSD: vprintf.c,v 1.3 1997/04/01 07:35:53 todd Exp $	*/
+/*	$OpenBSD: vprintf.c,v 1.5 1997/10/11 23:34:22 beck Exp $	*/
 
 /*
  * Copyright (c) 1991 Carnegie Mellon University
@@ -97,7 +97,7 @@ vsnprintf(s, n, fmt, args)
 	FILE fakebuf;
 
 	fakebuf._flag = STRFLAG;
-	fakebuf._ptr = s;
+	fakebuf._base = fakebuf._ptr = s;
 	fakebuf._cnt = n-1;
 	fakebuf._file = -1;
 	_doprnt(fmt, args, &fakebuf);

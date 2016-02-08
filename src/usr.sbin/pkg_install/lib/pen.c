@@ -1,7 +1,7 @@
-/*	$OpenBSD: pen.c,v 1.2 1996/06/04 08:43:45 niklas Exp $	*/
+/*	$OpenBSD: pen.c,v 1.5 1997/07/14 14:13:17 graichen Exp $	*/
 
 #ifndef lint
-static const char *rcsid = "$OpenBSD: pen.c,v 1.2 1996/06/04 08:43:45 niklas Exp $";
+static const char *rcsid = "$OpenBSD: pen.c,v 1.5 1997/07/14 14:13:17 graichen Exp $";
 #endif
 
 /*
@@ -49,15 +49,15 @@ find_play_pen(char *pen, size_t sz)
     if (pen[0] && stat(pen, &sb) != FAIL && (min_free(pen) >= sz))
 	return pen;
     else if ((cp = getenv("PKG_TMPDIR")) != NULL && stat(cp, &sb) != FAIL && (min_free(cp) >= sz))
-	sprintf(pen, "%s/instmp.XXXXXX", cp);
+	sprintf(pen, "%s/instmp.XXXXXXXXXX", cp);
     else if ((cp = getenv("TMPDIR")) != NULL && stat(cp, &sb) != FAIL && (min_free(cp) >= sz))
-	sprintf(pen, "%s/instmp.XXXXXX", cp);
+	sprintf(pen, "%s/instmp.XXXXXXXXXX", cp);
     else if (stat("/var/tmp", &sb) != FAIL && min_free("/var/tmp") >= sz)
-	strcpy(pen, "/var/tmp/instmp.XXXXXX");
+	strcpy(pen, "/var/tmp/instmp.XXXXXXXXXX");
     else if (stat("/tmp", &sb) != FAIL && min_free("/tmp") >= sz)
-	strcpy(pen, "/tmp/instmp.XXXXXX");
+	strcpy(pen, "/tmp/instmp.XXXXXXXXXX");
     else if ((stat("/usr/tmp", &sb) == SUCCESS || mkdir("/usr/tmp", 01777) == SUCCESS) && min_free("/usr/tmp") >= sz)
-	strcpy(pen, "/usr/tmp/instmp.XXXXXX");
+	strcpy(pen, "/usr/tmp/instmp.XXXXXXXXXX");
     else {
 	barf("Can't find enough temporary space to extract the files, please set\n"
 	     "your PKG_TMPDIR environment variable to a location with at least %d bytes\n"
@@ -75,18 +75,36 @@ char *
 make_playpen(char *pen, size_t sz)
 {
     char *tmp;
+    int i = 0;
+    mode_t um;
 
-    if (!find_play_pen(pen, sz))
-	return NULL;
+    um = umask(S_IWGRP|S_IWOTH);
+    while (1) {
+	if (!find_play_pen(pen, sz)) {
+	    umask(um);
+	    return NULL;
+	}
 
-    if (!mktemp(pen)) {
-	barf("Can't mktemp '%s'.", pen);
+        if (!mktemp(pen)) {
+	    barf("Can't mktemp '%s'.", pen);
+	    umask(um);
+	    return NULL;
+        }
+
+        if (mkdir(pen, 0755) == FAIL) {
+	    if (i++ < 100) {
+	        /* try again! */
+	        continue;
+	    }
+	} else
+	    break;
+
+        barf("Can't mkdir '%s'.", pen);
+        umask(um);
 	return NULL;
     }
-    if (mkdir(pen, 0755) == FAIL) {
-	barf("Can't mkdir '%s'.", pen);
-	return NULL;
-    }
+    umask(um);
+
     if (Verbose) {
 	if (sz)
 	    fprintf(stderr, "Requested space: %d bytes, free space: %d bytes in %s\n", (int)sz, min_free(pen), pen);

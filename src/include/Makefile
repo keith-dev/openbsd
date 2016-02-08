@@ -1,4 +1,4 @@
-#	$OpenBSD: Makefile,v 1.40 1997/04/27 20:55:58 millert Exp $
+#	$OpenBSD: Makefile,v 1.46 1997/08/18 05:29:41 millert Exp $
 #	$NetBSD: Makefile,v 1.59 1996/05/15 21:36:43 jtc Exp $
 
 #	@(#)Makefile	5.45.1.1 (Berkeley) 5/6/91
@@ -9,11 +9,11 @@
 # Missing: mp.h
 
 FILES=	a.out.h ar.h assert.h bitstring.h blf.h bm.h cpio.h ctype.h db.h \
-	dirent.h disktab.h elf_abi.h err.h fnmatch.h fstab.h fts.h glob.h \
-	grp.h ieeefp.h iso646.h kvm.h langinfo.h limits.h locale.h \
-	malloc.h math.h md4.h md5.h memory.h mpool.h ndbm.h netdb.h \
-	netgroup.h nlist.h nl_types.h olf_abi.h paths.h poll.h pwd.h \
-	ranlib.h re_comp.h regex.h resolv.h search.h setjmp.h sgtty.h \
+	des.h dirent.h disktab.h elf_abi.h err.h fnmatch.h fstab.h fts.h \
+	glob.h grp.h ieeefp.h inttypes.h iso646.h kvm.h langinfo.h libgen.h \
+	limits.h locale.h malloc.h math.h md4.h md5.h memory.h mpool.h ndbm.h \
+	netdb.h netgroup.h nlist.h nl_types.h olf_abi.h paths.h poll.h pwd.h \
+	ranlib.h re_comp.h regex.h resolv.h rmd160.h search.h setjmp.h sgtty.h \
 	sha1.h signal.h stab.h stddef.h stdio.h stdlib.h string.h \
 	strings.h struct.h sysexits.h tar.h time.h ttyent.h tzfile.h \
 	unistd.h utime.h utmp.h vis.h
@@ -31,7 +31,7 @@ MFILES+= link.h dlfcn.h
 
 DIRS=	arpa protocols rpc rpcsvc
 LDIRS=	dev net netinet netccitt netiso netns netipx nfs sys ufs vm ddb \
-	scsi gnu/ext2fs
+	scsi netatalk
 
 RDIRS=	../lib/libcom_err ../lib/libcompat ../lib/libcurses ../lib/libform \
 	../lib/libmenu ../lib/libocurses ../lib/libpanel ../lib/librpcsvc \
