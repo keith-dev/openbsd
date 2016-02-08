@@ -1,4 +1,4 @@
-/*	$OpenBSD: ami.c,v 1.218 2011/02/22 02:30:08 dlg Exp $	*/
+/*	$OpenBSD: ami.c,v 1.220 2011/07/17 22:46:48 matthew Exp $	*/
 
 /*
  * Copyright (c) 2001 Michael Shalayeff

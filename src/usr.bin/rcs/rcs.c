@@ -1,4 +1,4 @@
-/*	$OpenBSD: rcs.c,v 1.72 2010/12/10 09:48:43 jasper Exp $	*/
+/*	$OpenBSD: rcs.c,v 1.78 2011/07/14 16:38:39 sobrado Exp $	*/
 /*
  * Copyright (c) 2004 Jean-Francois Brousseau <jfb@openbsd.org>
  * All rights reserved.
@@ -44,87 +44,16 @@
 #include "rcsutil.h"
 #include "xmalloc.h"
 
-#define RCS_KWEXP_SIZE  1024
-
-
 /* invalid characters in RCS states */
 static const char rcs_state_invch[] = RCS_STATE_INVALCHAR;
 
 /* invalid characters in RCS symbol names */
 static const char rcs_sym_invch[] = RCS_SYM_INVALCHAR;
 
-/* comment leaders, depending on the file's suffix */
-static const struct rcs_comment {
-	const char	*rc_suffix;
-	const char	*rc_cstr;
-} rcs_comments[] = {
-	{ "1",    ".\\\" " },
-	{ "2",    ".\\\" " },
-	{ "3",    ".\\\" " },
-	{ "4",    ".\\\" " },
-	{ "5",    ".\\\" " },
-	{ "6",    ".\\\" " },
-	{ "7",    ".\\\" " },
-	{ "8",    ".\\\" " },
-	{ "9",    ".\\\" " },
-	{ "a",    "-- "    },	/* Ada		 */
-	{ "ada",  "-- "    },
-	{ "adb",  "-- "    },
-	{ "asm",  ";; "    },	/* assembler (MS-DOS) */
-	{ "ads",  "-- "    },	/* Ada */
-	{ "bat",  ":: "    },	/* batch (MS-DOS) */
-	{ "body", "-- "    },	/* Ada */
-	{ "c",    " * "    },	/* C */
-	{ "c++",  "// "    },	/* C++ */
-	{ "cc",   "// "    },
-	{ "cpp",  "// "    },
-	{ "cxx",  "// "    },
-	{ "m",    "// "    },	/* Objective-C */
-	{ "cl",   ";;; "   },	/* Common Lisp	 */
-	{ "cmd",  ":: "    },	/* command (OS/2) */
-	{ "cmf",  "c "     },	/* CM Fortran	 */
-	{ "csh",  "# "     },	/* shell	 */
-	{ "e",    "# "     },	/* efl		 */
-	{ "epsf", "% "     },	/* encapsulated postscript */
-	{ "epsi", "% "     },	/* encapsulated postscript */
-	{ "el",   "; "     },	/* Emacs Lisp	 */
-	{ "f",    "c "     },	/* Fortran	 */
-	{ "for",  "c "     },
-	{ "h",    " * "    },	/* C-header	 */
-	{ "hh",   "// "    },	/* C++ header	 */
-	{ "hpp",  "// "    },
-	{ "hxx",  "// "    },
-	{ "in",   "# "     },	/* for Makefile.in */
-	{ "l",    " * "    },	/* lex */
-	{ "mac",  ";; "    },	/* macro (DEC-10, MS-DOS, PDP-11, VMS, etc) */
-	{ "mak",  "# "     },	/* makefile, e.g. Visual C++ */
-	{ "me",   ".\\\" " },	/* me-macros	t/nroff	 */
-	{ "ml",   "; "     },	/* mocklisp	 */
-	{ "mm",   ".\\\" " },	/* mm-macros	t/nroff	 */
-	{ "ms",   ".\\\" " },	/* ms-macros	t/nroff	 */
-	{ "man",  ".\\\" " },	/* man-macros	t/nroff	 */
-	{ "p",    " * "    },	/* pascal	 */
-	{ "pas",  " * "    },
-	{ "pl",   "# "     },	/* Perl	(conflict with Prolog) */
-	{ "pm",   "# "     },	/* Perl	module */
-	{ "ps",   "% "     },	/* postscript */
-	{ "psw",  "% "     },	/* postscript wrap */
-	{ "pswm", "% "     },	/* postscript wrap */
-	{ "r",    "# "     },	/* ratfor	 */
-	{ "rc",   " * "    },	/* Microsoft Windows resource file */
-	{ "red",  "% "     },	/* psl/rlisp	 */
-	{ "sh",   "# "     },	/* shell	 */
-	{ "sl",   "% "     },	/* psl		 */
-	{ "spec", "-- "    },	/* Ada		 */
-	{ "tex",  "% "     },	/* tex		 */
-	{ "y",    " * "    },	/* yacc		 */
-	{ "ye",   " * "    },	/* yacc-efl	 */
-	{ "yr",   " * "    },	/* yacc-ratfor	 */
-};
-
 struct rcs_kw rcs_expkw[] =  {
 	{ "Author",	RCS_KW_AUTHOR   },
 	{ "Date",	RCS_KW_DATE     },
+	{ "Locker",	RCS_KW_LOCKER   },
 	{ "Header",	RCS_KW_HEADER   },
 	{ "Id",		RCS_KW_ID       },
 	{ "OpenBSD",	RCS_KW_ID       },
@@ -135,19 +64,6 @@ struct rcs_kw rcs_expkw[] =  {
 	{ "Source",	RCS_KW_SOURCE   },
 	{ "State",	RCS_KW_STATE    },
 };
-
-#define NB_COMTYPES	(sizeof(rcs_comments)/sizeof(rcs_comments[0]))
-
-static const char *rcs_errstrs[] = {
-	"No error",
-	"No such entry",
-	"Duplicate entry found",
-	"Bad RCS number",
-	"Invalid RCS symbol",
-	"Parse error",
-};
-
-#define RCS_NERR   (sizeof(rcs_errstrs)/sizeof(rcs_errstrs[0]))
 
 int rcs_errno = RCS_ERR_NOERR;
 char *timezone_flag = NULL;
@@ -513,17 +429,6 @@ out:
 }
 
 /*
- * rcs_head_get()
- *
- * Retrieve the revision number of the head revision for the RCS file <file>.
- */
-const RCSNUM *
-rcs_head_get(RCSFILE *file)
-{
-	return (file->rf_head);
-}
-
-/*
  * rcs_head_set()
  *
  * Set the revision number of the head revision for the RCS file <file> to
@@ -555,23 +460,6 @@ const RCSNUM *
 rcs_branch_get(RCSFILE *file)
 {
 	return (file->rf_branch);
-}
-
-/*
- * rcs_branch_set()
- *
- * Set the default branch for the RCS file <file> to <bnum>.
- * Returns 0 on success, -1 on failure.
- */
-int
-rcs_branch_set(RCSFILE *file, const RCSNUM *bnum)
-{
-	if (file->rf_branch == NULL)
-		file->rf_branch = rcsnum_alloc();
-
-	rcsnum_cpy(bnum, file->rf_branch, 0);
-	file->rf_flags &= ~RCS_SYNCED;
-	return (0);
 }
 
 /*
@@ -867,17 +755,6 @@ rcs_lock_remove(RCSFILE *file, const char *user, RCSNUM *rev)
 }
 
 /*
- * rcs_desc_get()
- *
- * Retrieve the description for the RCS file <file>.
- */
-const char *
-rcs_desc_get(RCSFILE *file)
-{
-	return (file->rf_desc);
-}
-
-/*
  * rcs_desc_set()
  *
  * Set the description for the RCS file <file>.
@@ -892,41 +769,6 @@ rcs_desc_set(RCSFILE *file, const char *desc)
 		xfree(file->rf_desc);
 	file->rf_desc = tmp;
 	file->rf_flags &= ~RCS_SYNCED;
-}
-
-/*
- * rcs_comment_lookup()
- *
- * Lookup the assumed comment leader based on a file's suffix.
- * Returns a pointer to the string on success, or NULL on failure.
- */
-const char *
-rcs_comment_lookup(const char *filename)
-{
-	int i;
-	const char *sp;
-
-	if ((sp = strrchr(filename, '.')) == NULL) {
-		rcs_errno = RCS_ERR_NOENT;
-		return (NULL);
-	}
-	sp++;
-
-	for (i = 0; i < (int)NB_COMTYPES; i++)
-		if (strcmp(rcs_comments[i].rc_suffix, sp) == 0)
-			return (rcs_comments[i].rc_cstr);
-	return (NULL);
-}
-
-/*
- * rcs_comment_get()
- *
- * Retrieve the comment leader for the RCS file <file>.
- */
-const char *
-rcs_comment_get(RCSFILE *file)
-{
-	return (file->rf_comment);
 }
 
 /*
@@ -1195,7 +1037,7 @@ rcs_delta_stats(struct rcs_delta *rdp, int *ladded, int *lremoved)
 {
 	struct rcs_lines *plines;
 	struct rcs_line *lp;
-	int added, i, lineno, nbln, removed;
+	int added, i, nbln, removed;
 	char op, *ep;
 	u_char tmp;
 
@@ -1214,7 +1056,7 @@ rcs_delta_stats(struct rcs_delta *rdp, int *ladded, int *lremoved)
 			/* NUL-terminate line buffer for strtol() safety. */
 			tmp = lp->l_line[lp->l_len - 1];
 			lp->l_line[lp->l_len - 1] = '\0';
-			lineno = (int)strtol((lp->l_line + 1), &ep, 10);
+			(void)strtol((lp->l_line + 1), &ep, 10);
 			ep++;
 			nbln = (int)strtol(ep, &ep, 10);
 			/* Restore the last byte of the buffer */
@@ -1241,7 +1083,6 @@ rcs_delta_stats(struct rcs_delta *rdp, int *ladded, int *lremoved)
 	*ladded = added;
 	*lremoved = removed;
 }
- 	 
 
 /*
  * rcs_rev_add()
@@ -1567,25 +1408,6 @@ rcs_kflag_get(const char *flags)
 }
 
 /*
- * rcs_errstr()
- *
- * Get the error string matching the RCS error code <code>.
- */
-const char *
-rcs_errstr(int code)
-{
-	const char *esp;
-
-	if (code < 0 || (code >= (int)RCS_NERR && code != RCS_ERR_ERRNO))
-		esp = NULL;
-	else if (code == RCS_ERR_ERRNO)
-		esp = strerror(errno);
-	else
-		esp = rcs_errstrs[code];
-	return (esp);
-}
-
-/*
  * rcs_freedelta()
  *
  * Free the contents of a delta structure.
@@ -1657,221 +1479,209 @@ rcs_strprint(const u_char *str, size_t slen, FILE *stream)
  * On error, return NULL.
  */
 static BUF *
-rcs_expand_keywords(char *rcsfile, struct rcs_delta *rdp, BUF *bp, int mode)
+rcs_expand_keywords(char *rcsfile_in, struct rcs_delta *rdp, BUF *bp, int mode)
 {
 	BUF *newbuf;
+	u_char *c, *kw, *fin;
+	char buf[256], *tmpf, resolved[MAXPATHLEN], *rcsfile;
+	u_char *line, *line2;
+	u_int i, j;
 	int kwtype;
-	u_int j, found;
-	u_char *c, *kwstr, *start, *end, *fin;
-	char expbuf[256], buf[256];
+	int found;
 	struct tm tb;
-	char *fmt;
-	size_t len;
 
-	kwtype = 0;
-	kwstr = NULL;
-
-	/*
-	 * -z support for RCS
-	 */
 	tb = rdp->rd_date;
 	if (timezone_flag != NULL)
 		rcs_set_tz(timezone_flag, rdp, &tb);
 
-	len = buf_len(bp);
+	if (realpath(rcsfile_in, resolved) == NULL)
+		rcsfile = rcsfile_in;
+	else
+		rcsfile = resolved;
 
-	c = buf_get(bp);
-	found = 0;
-	/* Final character in buffer. */
-	fin = c + len - 1;
-
-	/* If no keywords are found, return original buffer. */
-	newbuf = bp;
+	newbuf = buf_alloc(buf_len(bp));
 
 	/*
 	 * Keyword formats:
 	 * $Keyword$
 	 * $Keyword: value$
 	 */
-	for (; c < fin; c++) {
-		if (*c == '$') {
-			BUF *tmpbuf;
-			size_t clen;
+	c = buf_get(bp);
+	fin = c + buf_len(bp);
+	/* Copying to newbuf is deferred until the first keyword. */
+	found = 0;
 
-			/* remember start of this possible keyword */
-			start = c;
+	while (c < fin) {
+		kw = memchr(c, '$', fin - c);
+		if (kw == NULL)
+			break;
+		++kw;
+		if (found) {
+			/* Copy everything up to and including the $. */
+			buf_append(newbuf, c, kw - c);
+		}
+		c = kw;
+		/* c points after the $ now. */
+		if (c == fin)
+			break;
+		if (!isalpha(*c)) /* all valid keywords start with a letter */
+			continue;
 
-			/* first following character has to be alphanumeric */
-			c++;
-			if (!isalpha(*c)) {
-				c = start;
-				continue;
+		for (i = 0; i < RCS_NKWORDS; ++i) {
+			size_t kwlen;
+
+			kwlen = strlen(rcs_expkw[i].kw_str);
+			/*
+			 * kwlen must be less than clen since clen includes
+			 * either a terminating `$' or a `:'.
+			 */
+			if (c + kwlen < fin &&
+			    memcmp(c , rcs_expkw[i].kw_str, kwlen) == 0 &&
+			    (c[kwlen] == '$' || c[kwlen] == ':')) {
+				c += kwlen;
+				break;
 			}
+		}
+		if (i == RCS_NKWORDS)
+			continue;
+		kwtype = rcs_expkw[i].kw_type;
 
-			/* Number of characters between c and fin, inclusive. */
-			clen = fin - c + 1;
-
-			/* look for any matching keywords */
-			found = 0;
-			for (j = 0; j < RCS_NKWORDS; j++) {
-				size_t kwlen;
-
-				kwlen = strlen(rcs_expkw[j].kw_str);
-				/*
-				 * kwlen must be less than clen since clen
-				 * includes either a terminating `$' or a `:'.
-				 */
-				if (kwlen < clen &&
-				    memcmp(c, rcs_expkw[j].kw_str, kwlen) == 0 &&
-				    (c[kwlen] == '$' || c[kwlen] == ':')) {
-					found = 1;
-					kwstr = rcs_expkw[j].kw_str;
-					kwtype = rcs_expkw[j].kw_type;
-					c += kwlen;
+		/*
+		 * If the next character is ':' we need to look for an '$'
+		 * before the end of the line to be sure it is in fact a
+		 * keyword.
+		 */
+		if (*c == ':') {
+			for (; c < fin; ++c) {
+				if (*c == '$' || *c == '\n')
 					break;
-				}
 			}
 
-			/* unknown keyword, continue looking */
-			if (found == 0) {
-				c = start;
+			if (*c != '$') {
+				if (found)
+					buf_append(newbuf, kw, c - kw);
 				continue;
 			}
+		}
+		++c;
 
-			/*
-			 * if the next character was ':' we need to look for
-			 * an '$' before the end of the line to be sure it is
-			 * in fact a keyword.
-			 */
-			if (*c == ':') {
-				for (; c <= fin; ++c) {
-					if (*c == '$' || *c == '\n')
-						break;
-				}
+		if (!found) {
+			found = 1;
+			/* Copy everything up to and including the $. */
+			buf_append(newbuf, buf_get(bp), kw - buf_get(bp));
+		}
 
-				if (*c != '$') {
-					c = start;
-					continue;
-				}
-			}
-			end = c + 1;
+		if (mode & RCS_KWEXP_NAME) {
+			buf_puts(newbuf, rcs_expkw[i].kw_str);
+			if (mode & RCS_KWEXP_VAL)
+				buf_puts(newbuf, ": ");
+		}
 
-			/* start constructing the expansion */
-			expbuf[0] = '\0';
-
-			if (mode & RCS_KWEXP_NAME) {
-				char *tmp;
-
-				(void)xasprintf(&tmp, "$%s%s", kwstr,
-				    (mode & RCS_KWEXP_VAL) ? ": " : "");
-				if (strlcat(expbuf, tmp, sizeof(expbuf)) >= sizeof(expbuf))
-					errx(1, "rcs_expand_keywords: string truncated");
-				xfree(tmp);
+		/* Order matters because of RCS_KW_ID and RCS_KW_HEADER. */
+		if (mode & RCS_KWEXP_VAL) {
+			if (kwtype & (RCS_KW_RCSFILE|RCS_KW_LOG)) {
+				if ((kwtype & RCS_KW_FULLPATH) ||
+				    (tmpf = strrchr(rcsfile, '/')) == NULL)
+					buf_puts(newbuf, rcsfile);
+				else
+					buf_puts(newbuf, tmpf + 1);
+				buf_putc(newbuf, ' ');
 			}
 
-			/*
-			 * order matters because of RCS_KW_ID and
-			 * RCS_KW_HEADER here
-			 */
-			if (mode & RCS_KWEXP_VAL) {
-				if (kwtype & RCS_KW_RCSFILE) {
-					char *tmp;
-
-					(void)xasprintf(&tmp, "%s ",
-					    (kwtype & RCS_KW_FULLPATH) ? rcsfile : basename(rcsfile));
-					if (strlcat(expbuf, tmp, sizeof(expbuf)) >= sizeof(expbuf))
-						errx(1, "rcs_expand_keywords: string truncated");
-					xfree(tmp);
-				}
-
-				if (kwtype & RCS_KW_REVISION) {
-					char *tmp;
-
-					rcsnum_tostr(rdp->rd_num, buf, sizeof(buf));
-					(void)xasprintf(&tmp, "%s ", buf);
-					if (strlcat(expbuf, tmp, sizeof(expbuf)) >= sizeof(buf))
-						errx(1, "rcs_expand_keywords: string truncated");
-					xfree(tmp);
-				}
-
-				if (kwtype & RCS_KW_DATE) {
-					if (timezone_flag != NULL)
-						fmt = "%Y/%m/%d %H:%M:%S%z ";
-					else
-						fmt = "%Y/%m/%d %H:%M:%S ";
-
-					strftime(buf, sizeof(buf), fmt, &tb);
-					if (strlcat(expbuf, buf, sizeof(expbuf)) >= sizeof(expbuf))
-						errx(1, "rcs_expand_keywords: string truncated");
-				}
-
-				if (kwtype & RCS_KW_AUTHOR) {
-					char *tmp;
-
-					(void)xasprintf(&tmp, "%s ", rdp->rd_author);
-					if (strlcat(expbuf, tmp, sizeof(expbuf)) >= sizeof(expbuf))
-						errx(1, "rcs_expand_keywords: string truncated");
-					xfree(tmp);
-				}
-
-				if (kwtype & RCS_KW_STATE) {
-					char *tmp;
-
-					(void)xasprintf(&tmp, "%s ", rdp->rd_state);
-					if (strlcat(expbuf, tmp, sizeof(expbuf)) >= sizeof(expbuf))
-						errx(1, "rcs_expand_keywords: string truncated");
-					xfree(tmp);
-				}
-
-				/* order does not matter anymore below */
-				if (kwtype & RCS_KW_LOG)
-					if (strlcat(expbuf, " ", sizeof(expbuf)) >= sizeof(expbuf))
-						errx(1, "rcs_expand_keywords: string truncated");
-
-				if (kwtype & RCS_KW_SOURCE) {
-					char *tmp;
-
-					(void)xasprintf(&tmp, "%s ", rcsfile);
-					if (strlcat(expbuf, tmp, sizeof(expbuf)) >= sizeof(expbuf))
-						errx(1, "rcs_expand_keywords: string truncated");
-					xfree(tmp);
-				}
-
-				if (kwtype & RCS_KW_NAME)
-					if (strlcat(expbuf, " ", sizeof(expbuf)) >= sizeof(expbuf))
-						errx(1, "rcs_expand_keywords: string truncated");
+			if (kwtype & RCS_KW_REVISION) {
+				rcsnum_tostr(rdp->rd_num, buf, sizeof(buf));
+				buf_puts(newbuf, buf);
+				buf_putc(newbuf, ' ');
 			}
 
-			/* end the expansion */
-			if (mode & RCS_KWEXP_NAME)
-				if (strlcat(expbuf, "$", sizeof(expbuf)) >= sizeof(expbuf))
-					errx(1, "rcs_expand_keywords: string truncated");
+			if (kwtype & RCS_KW_DATE) {
+				strftime(buf, sizeof(buf),
+				    "%Y/%m/%d %H:%M:%S ", &tb);
+				buf_puts(newbuf, buf);
+			}
 
-			/* Concatenate everything together. */
-			tmpbuf = buf_alloc(len + strlen(expbuf));
-			/* Append everything before keyword. */
-			buf_append(tmpbuf, buf_get(newbuf),
-			    start - (unsigned char *)buf_get(newbuf));
-			/* Append keyword. */
-			buf_append(tmpbuf, expbuf, strlen(expbuf));
-			/* Point c to end of keyword. */
-			c = buf_get(tmpbuf) + buf_len(tmpbuf) - 1;
-			/* Append everything after keyword. */
-			buf_append(tmpbuf, end,
-			    ((unsigned char *)buf_get(newbuf) + buf_len(newbuf)) - end);
-			/* Point fin to end of data. */
-			fin = buf_get(tmpbuf) + buf_len(tmpbuf) - 1;
-			/* Recalculate new length. */
-			len = buf_len(tmpbuf);
+			if (kwtype & RCS_KW_AUTHOR) {
+				buf_puts(newbuf, rdp->rd_author);
+				buf_putc(newbuf, ' ');
+			}
 
-			/* tmpbuf is now ready, free old newbuf if allocated here. */
-			if (newbuf != bp)
-				buf_free(newbuf);
-			newbuf = tmpbuf;
+			if (kwtype & RCS_KW_STATE) {
+				buf_puts(newbuf, rdp->rd_state);
+				buf_putc(newbuf, ' ');
+			}
+
+			/* Order does not matter anymore below. */
+			if (kwtype & RCS_KW_SOURCE) {
+				buf_puts(newbuf, rcsfile);
+				buf_putc(newbuf, ' ');
+			}
+
+			if (kwtype & RCS_KW_NAME)
+				buf_putc(newbuf, ' ');
+
+			if ((kwtype & RCS_KW_LOCKER)) {
+				if (rdp->rd_locker) {
+					buf_puts(newbuf, rdp->rd_locker);
+					buf_putc(newbuf, ' ');
+				}
+			}
+		}
+
+		/* End the expansion. */
+		if (mode & RCS_KWEXP_NAME)
+			buf_putc(newbuf, '$');
+
+		if (kwtype & RCS_KW_LOG) {
+			line = memrchr(buf_get(bp), '\n', kw - buf_get(bp) - 1);
+			if (line == NULL)
+				line = buf_get(bp);
+			else
+				++line;
+			line2 = kw - 1;
+			while (line2 > line && line2[-1] == ' ')
+				--line2;
+
+			buf_putc(newbuf, '\n');
+			buf_append(newbuf, line, kw - 1 - line);
+			buf_puts(newbuf, "Revision ");
+			rcsnum_tostr(rdp->rd_num, buf, sizeof(buf));
+			buf_puts(newbuf, buf);
+			buf_puts(newbuf, "  ");
+			strftime(buf, sizeof(buf), "%Y/%m/%d %H:%M:%S", &tb);
+			buf_puts(newbuf, buf);
+
+			buf_puts(newbuf, "  ");
+			buf_puts(newbuf, rdp->rd_author);
+			buf_putc(newbuf, '\n');
+
+			for (i = 0; rdp->rd_log[i]; i += j) {
+				j = strcspn(rdp->rd_log + i, "\n");
+				if (j == 0)
+					buf_append(newbuf, line, line2 - line);
+				else
+					buf_append(newbuf, line, kw - 1 - line);
+				if (rdp->rd_log[i + j])
+					++j;
+				buf_append(newbuf, rdp->rd_log + i, j);
+			}
+			buf_append(newbuf, line, line2 - line);
+			for (j = 0; c + j < fin; ++j) {
+				if (c[j] != ' ')
+					break;
+			}
+			if (c + j == fin || c[j] == '\n')
+				c += j;
 		}
 	}
 
-	return (newbuf);
+	if (found) {
+		buf_append(newbuf, c, fin - c);
+		buf_free(bp);
+		return (newbuf);
+	} else {
+		buf_free(newbuf);
+		return (bp);
+	}
 }
 
 /*
@@ -2004,24 +1814,6 @@ rcs_state_check(const char *state)
 		}
 
 	return (ret);
-}
-
-/*
- * rcs_state_get()
- *
- * Get the state for a given revision of a specified RCSFILE.
- *
- * Returns NULL on failure.
- */
-const char *
-rcs_state_get(RCSFILE *rfp, RCSNUM *rev)
-{
-	struct rcs_delta *rdp;
-
-	if ((rdp = rcs_findrev(rfp, rev)) == NULL)
-		return (NULL);
-
-	return (rdp->rd_state);
 }
 
 /*

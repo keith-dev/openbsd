@@ -1,4 +1,4 @@
-#	$OpenBSD: GENERIC,v 1.32 2011/02/17 20:14:30 miod Exp $
+#	$OpenBSD: GENERIC,v 1.36 2011/07/07 23:41:09 tedu Exp $
 #
 # For further information on compiling OpenBSD kernels, see the config(8)
 # man page.
@@ -79,7 +79,7 @@ vga*		at pci?
 wsdisplay*	at vga?
 auvia*		at pci?
 audio*		at auvia?
-viaenv*		at pci?
+viapm*		at pci?
 
 # USB Controllers
 ohci*		at pci?
@@ -122,9 +122,6 @@ uchcom*		at uhub?	# WinChipHead CH341/340 serial
 ucom*		at uchcom?
 ulpt*		at uhub?	# USB Printers	
 umass*		at uhub?	# USB Mass Storage devices
-atapiscsi*	at umass?
-scsibus*	at atapiscsi?
-scsibus*	at umass?
 urio*		at uhub?	# Diamond Multimedia Rio 500
 uscanner*	at uhub? disable# USB Scanners
 uhidev*		at uhub?	# Human Interface Devices
@@ -176,16 +173,15 @@ udl*		at uhub?
 wsdisplay*	at udl?
 
 # Bluetooth controllers
-ubt*	at uhub? disable	# USB Bluetooth
-bthub*	at ubt?
-
-bthidev*	at bthub?		# Bluetooth HID support
-btkbd*	at bthidev?
-btms*	at bthidev?
-wskbd*	at btkbd? mux 1
-wsmouse*	at btms? mux 0
-btsco*	at bthub?		# Bluetooth audio support
-audio*	at btsco?
+#ubt*	at uhub? disable	# USB Bluetooth
+#bthub*	at ubt?
+#bthidev*	at bthub?		# Bluetooth HID support
+#btkbd*	at bthidev?
+#btms*	at bthidev?
+#wskbd*	at btkbd? mux 1
+#wsmouse*	at btms? mux 0
+#btsco*	at bthub?		# Bluetooth audio support
+#audio*	at btsco?
 
 # NICs
 ral*		at pci?
@@ -203,6 +199,7 @@ urlphy*		at mii?		# Realtek RTL8150L internal PHY
 ukphy*		at mii?		# "unknown" PHYs
 
 # SCSI Bus devices
+scsibus*	at scsi?
 sd*		at scsibus?
 st*		at scsibus?
 cd*		at scsibus?

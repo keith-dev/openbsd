@@ -1,4 +1,4 @@
-/*	$OpenBSD: util.c,v 1.38 2010/11/29 15:25:56 gilles Exp $	*/
+/*	$OpenBSD: util.c,v 1.47 2011/05/17 18:54:32 gilles Exp $	*/
 
 /*
  * Copyright (c) 2000,2001 Markus Friedl.  All rights reserved.
@@ -110,40 +110,6 @@ hostname_match(char *hostname, char *pattern)
 }
 
 int
-recipient_to_path(struct path *path, char *recipient)
-{
-	char *username;
-	char *hostname;
-
-	username = recipient;
-	hostname = strrchr(username, '@');
-
-	if (username[0] == '\0') {
-		*path->user = '\0';
-		*path->domain = '\0';
-		return 1;
-	}
-
-	if (hostname == NULL) {
-		if (strcasecmp(username, "postmaster") != 0)
-			return 0;
-		hostname = "localhost";
-	} else {
-		*hostname++ = '\0';
-	}
-
-	if (strlcpy(path->user, username, sizeof(path->user))
-	    >= sizeof(path->user))
-		return 0;
-
-	if (strlcpy(path->domain, hostname, sizeof(path->domain))
-	    >= sizeof(path->domain))
-		return 0;
-
-	return 1;
-}
-
-int
 valid_localpart(char *s)
 {
 #define IS_ATEXT(c)     (isalnum((int)(c)) || strchr("!#$%&'*+-/=?^_`{|}~", (c)))
@@ -186,6 +152,40 @@ nextsub:
         return 1;
 }
 
+int
+email_to_mailaddr(struct mailaddr *maddr, char *email)
+{
+	char *username;
+	char *hostname;
+
+	username = email;
+	hostname = strrchr(username, '@');
+
+	if (username[0] == '\0') {
+		*maddr->user = '\0';
+		*maddr->domain = '\0';
+		return 1;
+	}
+
+	if (hostname == NULL) {
+		if (strcasecmp(username, "postmaster") != 0)
+			return 0;
+		hostname = "localhost";
+	} else {
+		*hostname++ = '\0';
+	}
+
+	if (strlcpy(maddr->user, username, sizeof(maddr->user))
+	    >= sizeof(maddr->user))
+		return 0;
+
+	if (strlcpy(maddr->domain, hostname, sizeof(maddr->domain))
+	    >= sizeof(maddr->domain))
+		return 0;
+
+	return 1;
+}
+
 char *
 ss_to_text(struct sockaddr_storage *ss)
 {
@@ -199,12 +199,13 @@ ss_to_text(struct sockaddr_storage *ss)
 		in_addr_t addr;
 		
 		addr = ((struct sockaddr_in *)ss)->sin_addr.s_addr;
-		bsnprintf(p, NI_MAXHOST,
-		    "%d.%d.%d.%d",
-		    addr & 0xff,
-		    (addr >> 8) & 0xff,
-		    (addr >> 16) & 0xff,
-		    (addr >> 24) & 0xff);
+                addr = ntohl(addr);
+                bsnprintf(p, NI_MAXHOST,
+                    "%d.%d.%d.%d",
+                    (addr >> 24) & 0xff,
+                    (addr >> 16) & 0xff,
+                    (addr >> 8) & 0xff,
+                    addr & 0xff);
 	}
 
 	if (ss->ss_family == PF_INET6) {
@@ -218,123 +219,6 @@ ss_to_text(struct sockaddr_storage *ss)
 	}
 
 	return (buf);
-}
-
-char *
-ss_to_ptr(struct sockaddr_storage *ss)
-{
-	static char buffer[1024];
-
-	/* we need to construct a PTR query */
-	switch (ss->ss_family) {
-	case AF_INET: {
-		in_addr_t addr;
-		
-		addr = ((struct sockaddr_in *)ss)->sin_addr.s_addr;
-
-		bsnprintf(buffer, sizeof (buffer),
-		    "%d.%d.%d.%d.in-addr.arpa",
-		    (addr >> 24) & 0xff,
-		    (addr >> 16) & 0xff,
-		    (addr >> 8) & 0xff,
-		    addr & 0xff);
-		break;
-	}
-	case AF_INET6: {
-		struct sockaddr_in6 *in6 = (struct sockaddr_in6 *)ss;
-		struct in6_addr	*in6_addr;
-
-		in6_addr = &in6->sin6_addr;
-		bsnprintf(buffer, sizeof (buffer),
-		    "%d.%d.%d.%d.%d.%d.%d.%d.%d.%d.%d.%d.%d.%d.%d.%d."
-		    "%d.%d.%d.%d.%d.%d.%d.%d.%d.%d.%d.%d.%d.%d.%d.%d."
-		    "ip6.arpa",
-		    in6_addr->s6_addr[15] & 0xf,
-		    (in6_addr->s6_addr[15] >> 4) & 0xf,
-		    in6_addr->s6_addr[14] & 0xf,
-		    (in6_addr->s6_addr[14] >> 4) & 0xf,
-		    in6_addr->s6_addr[13] & 0xf,
-		    (in6_addr->s6_addr[13] >> 4) & 0xf,
-		    in6_addr->s6_addr[12] & 0xf,
-		    (in6_addr->s6_addr[12] >> 4) & 0xf,
-		    in6_addr->s6_addr[11] & 0xf,
-		    (in6_addr->s6_addr[11] >> 4) & 0xf,
-		    in6_addr->s6_addr[10] & 0xf,
-		    (in6_addr->s6_addr[10] >> 4) & 0xf,
-		    in6_addr->s6_addr[9] & 0xf,
-		    (in6_addr->s6_addr[9] >> 4) & 0xf,
-		    in6_addr->s6_addr[8] & 0xf,
-		    (in6_addr->s6_addr[8] >> 4) & 0xf,
-		    in6_addr->s6_addr[7] & 0xf,
-		    (in6_addr->s6_addr[7] >> 4) & 0xf,
-		    in6_addr->s6_addr[6] & 0xf,
-		    (in6_addr->s6_addr[6] >> 4) & 0xf,
-		    in6_addr->s6_addr[5] & 0xf,
-		    (in6_addr->s6_addr[5] >> 4) & 0xf,
-		    in6_addr->s6_addr[4] & 0xf,
-		    (in6_addr->s6_addr[4] >> 4) & 0xf,
-		    in6_addr->s6_addr[3] & 0xf,
-		    (in6_addr->s6_addr[3] >> 4) & 0xf,
-		    in6_addr->s6_addr[2] & 0xf,
-		    (in6_addr->s6_addr[2] >> 4) & 0xf,
-		    in6_addr->s6_addr[1] & 0xf,
-		    (in6_addr->s6_addr[1] >> 4) & 0xf,
-		    in6_addr->s6_addr[0] & 0xf,
-		    (in6_addr->s6_addr[0] >> 4) & 0xf);
-		break;
-	}
-	default:
-		fatalx("dns_query_ptr");
-	}
-
-	return buffer;
-}
-
-int
-valid_message_id(char *mid)
-{
-	u_int8_t cnt;
-
-	/* [0-9]{10}\.[a-zA-Z0-9]{16} */
-	for (cnt = 0; cnt < 10; ++cnt, ++mid)
-		if (! isdigit((int)*mid))
-			return 0;
-
-	if (*mid++ != '.')
-		return 0;
-
-	for (cnt = 0; cnt < 16; ++cnt, ++mid)
-		if (! isalnum((int)*mid))
-			return 0;
-
-	return (*mid == '\0');
-}
-
-int
-valid_message_uid(char *muid)
-{
-	u_int8_t cnt;
-
-	/* [0-9]{10}\.[a-zA-Z0-9]{16}\.[0-9]{0,} */
-	for (cnt = 0; cnt < 10; ++cnt, ++muid)
-		if (! isdigit((int)*muid))
-			return 0;
-
-	if (*muid++ != '.')
-		return 0;
-
-	for (cnt = 0; cnt < 16; ++cnt, ++muid)
-		if (! isalnum((int)*muid))
-			return 0;
-
-	if (*muid++ != '.')
-		return 0;
-
-	for (cnt = 0; *muid != '\0'; ++cnt, ++muid)
-		if (! isdigit((int)*muid))
-			return 0;
-
-	return (cnt != 0);
 }
 
 char *
@@ -368,7 +252,7 @@ time_to_text(time_t when)
  * Check file for security. Based on usr.bin/ssh/auth.c.
  */
 int
-secure_file(int fd, char *path, struct passwd *pw, int mayread)
+secure_file(int fd, char *path, char *userdir, uid_t uid, int mayread)
 {
 	char		 buf[MAXPATHLEN];
 	char		 homedir[MAXPATHLEN];
@@ -378,13 +262,13 @@ secure_file(int fd, char *path, struct passwd *pw, int mayread)
 	if (realpath(path, buf) == NULL)
 		return 0;
 
-	if (realpath(pw->pw_dir, homedir) == NULL)
+	if (realpath(userdir, homedir) == NULL)
 		homedir[0] = '\0';
 
 	/* Check the open file to avoid races. */
 	if (fstat(fd, &st) < 0 ||
 	    !S_ISREG(st.st_mode) ||
-	    (st.st_uid != 0 && st.st_uid != pw->pw_uid) ||
+	    (st.st_uid != 0 && st.st_uid != uid) ||
 	    (st.st_mode & (mayread ? 022 : 066)) != 0)
 		return 0;
 
@@ -395,7 +279,7 @@ secure_file(int fd, char *path, struct passwd *pw, int mayread)
 		strlcpy(buf, cp, sizeof(buf));
 
 		if (stat(buf, &st) < 0 ||
-		    (st.st_uid != 0 && st.st_uid != pw->pw_uid) ||
+		    (st.st_uid != 0 && st.st_uid != uid) ||
 		    (st.st_mode & 022) != 0)
 			return 0;
 
@@ -461,16 +345,16 @@ lowercase(char *buf, char *s, size_t len)
 }
 
 void
-message_set_errormsg(struct message *messagep, char *fmt, ...)
+envelope_set_errormsg(struct envelope *e, char *fmt, ...)
 {
 	int ret;
 	va_list ap;
 
 	va_start(ap, fmt);
 
-	ret = vsnprintf(messagep->session_errorline, MAX_LINE_SIZE, fmt, ap);
+	ret = vsnprintf(e->delivery.errorline, MAX_LINE_SIZE, fmt, ap);
 	if (ret >= MAX_LINE_SIZE)
-		strlcpy(messagep->session_errorline + (MAX_LINE_SIZE - 4), "...", 4);
+		strlcpy(e->delivery.errorline + (MAX_LINE_SIZE - 4), "...", 4);
 
 	/* this should not happen */
 	if (ret == -1)
@@ -480,9 +364,9 @@ message_set_errormsg(struct message *messagep, char *fmt, ...)
 }
 
 char *
-message_get_errormsg(struct message *messagep)
+envelope_get_errormsg(struct envelope *e)
 {
-	return messagep->session_errorline;
+	return e->delivery.errorline;
 }
 
 void
@@ -509,20 +393,6 @@ sa_set_port(struct sockaddr *sa, int port)
 
 	memcpy(sa, res->ai_addr, res->ai_addrlen);
 	freeaddrinfo(res);
-}
-
-struct path *
-path_dup(struct path *path)
-{
-	struct path *pathp;
-
-	pathp = calloc(sizeof(struct path), 1);
-	if (pathp == NULL)
-		fatal("calloc");
-
-	*pathp = *path;
-
-	return pathp;
 }
 
 u_int64_t
@@ -599,7 +469,8 @@ session_socket_no_linger(int fd)
 int
 session_socket_error(int fd)
 {
-	int	 error, len;
+	int		error;
+	socklen_t	len;
 
 	len = sizeof(error);
 	if (getsockopt(fd, SOL_SOCKET, SO_ERROR, &error, &len) == -1)
@@ -641,4 +512,48 @@ log_sockaddr(struct sockaddr *sa)
 		return ("(unknown)");
 	else
 		return (buf);
+}
+
+u_int32_t
+filename_to_msgid(char *filename)
+{
+	u_int32_t ulval;
+	char *ep;
+
+	errno = 0;
+	ulval = strtoul(filename, &ep, 16);
+	if (filename[0] == '\0' || *ep != '\0')
+		return 0;
+	if (errno == ERANGE && ulval == 0xffffffff)
+		return 0;
+
+	return ulval;
+}
+
+u_int64_t
+filename_to_evpid(char *filename)
+{
+	u_int64_t ullval;
+	char *ep;
+
+	errno = 0;
+	ullval = strtoull(filename, &ep, 16);
+	if (filename[0] == '\0' || *ep != '\0')
+		return 0;
+	if (errno == ERANGE && ullval == ULLONG_MAX)
+		return 0;
+
+	return ullval;
+}
+
+u_int32_t
+evpid_to_msgid(u_int64_t evpid)
+{
+	return (evpid >> 32);
+}
+
+u_int64_t
+msgid_to_evpid(u_int32_t msgid)
+{
+	return ((u_int64_t)msgid << 32);
 }

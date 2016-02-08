@@ -1,4 +1,4 @@
-/*	$OpenBSD: cerror.S,v 1.5 2005/08/07 16:40:14 espie Exp $ */
+/*	$OpenBSD: cerror.S,v 1.7 2011/04/09 15:45:16 deraadt Exp $ */
 /*-
  * Copyright (c) 1990 The Regents of the University of California.
  * All rights reserved.
@@ -34,9 +34,11 @@
 
 #include "SYS.h"
 
+WEAK_ALIAS(_cerror,__cerror)
+
 	.even
 	.globl	_errno
-__cerror:
+___cerror:
 #ifdef	PIC
 	movl	#__GLOBAL_OFFSET_TABLE_,a0
 	lea	pc@(0,a0:l),a0

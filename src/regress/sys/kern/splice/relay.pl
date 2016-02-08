@@ -1,5 +1,5 @@
 #!/usr/bin/perl
-#	$OpenBSD: relay.pl,v 1.1 2011/01/07 22:06:08 bluhm Exp $
+#	$OpenBSD: relay.pl,v 1.4 2011/07/23 23:56:08 bluhm Exp $
 
 # Copyright (c) 2010 Alexander Bluhm <bluhm@openbsd.org>
 #
@@ -76,9 +76,17 @@ $s->down;
 
 exit if $args{nocheck};
 
-my $clen = $c->loggrep(qr/^LEN: /) unless $args{client}{nocheck};
-my $rlen = $r->loggrep(qr/^LEN: /) unless $args{relay}{nocheck};
-my $slen = $s->loggrep(qr/^LEN: /) unless $args{server}{nocheck};
+$r->loggrep(qr/^Timeout$/) or die "no relay timeout"
+    if $args{relay}{idle};
+$r->loggrep(qr/^Max$/) or die "no relay max"
+    if $args{relay}{max} && $args{len};
+
+my $clen = $c->loggrep(qr/^LEN: /) // die "no client len"
+    unless $args{client}{nocheck};
+my $rlen = $r->loggrep(qr/^LEN: /) // die "no relay len"
+    unless $args{relay}{nocheck};
+my $slen = $s->loggrep(qr/^LEN: /) // die "no server len"
+    unless $args{server}{nocheck};
 !$clen || !$rlen || $clen eq $rlen
     or die "client: $clen", "relay: $rlen", "len mismatch";
 !$rlen || !$slen || $rlen eq $slen
@@ -94,15 +102,16 @@ my $slen = $s->loggrep(qr/^LEN: /) unless $args{server}{nocheck};
 
 my $cmd5 = $c->loggrep(qr/^MD5: /) unless $args{client}{nocheck};
 my $smd5 = $s->loggrep(qr/^MD5: /) unless $args{server}{nocheck};
-!$cmd5 || !$smd5 || $cmd5 eq $smd5
+!$cmd5 || !$smd5 || ref($args{md5}) eq 'ARRAY' || $cmd5 eq $smd5
     or die "client: $cmd5", "server: $smd5", "md5 mismatch";
-!defined($args{md5}) || !$cmd5 || $cmd5 eq "MD5: $args{md5}\n"
-    or die "client: $cmd5", "md5 $args{md5} expected";
-!defined($args{md5}) || !$smd5 || $smd5 eq "MD5: $args{md5}\n"
-    or die "server: $smd5", "md5 $args{md5} expected";
+my $md5 = ref($args{md5}) eq 'ARRAY' ? join('|', @{$args{md5}}) : $args{md5};
+!$md5 || !$cmd5 || $cmd5 =~ /^MD5: ($md5)$/
+    or die "client: $cmd5", "md5 $md5 expected";
+!$md5 || !$smd5 || $smd5 =~ /^MD5: ($md5)$/
+    or die "server: $smd5", "md5 $md5 expected";
 
-$args{relay}{errorin} = 0 unless $args{relay}{nocheck};
-$args{relay}{errorout} = 0 unless $args{relay}{nocheck};
+$args{relay}{errorin} //= 0 unless $args{relay}{nocheck};
+$args{relay}{errorout} //= 0 unless $args{relay}{nocheck};
 my %name2proc = (client => $c, relay => $r, server => $s);
 foreach my $name (qw(client relay server)) {
 	$args{$name}{errorin} //= $args{$name}{error};

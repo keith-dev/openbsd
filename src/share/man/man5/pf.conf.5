@@ -1,4 +1,4 @@
-.\"	$OpenBSD: pf.conf.5,v 1.489 2011/02/01 17:31:47 jmc Exp $
+.\"	$OpenBSD: pf.conf.5,v 1.505 2011/08/08 02:50:57 mcbride Exp $
 .\"
 .\" Copyright (c) 2002, Daniel Hartmeier
 .\" All rights reserved.
@@ -27,7 +27,7 @@
 .\" ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 .\" POSSIBILITY OF SUCH DAMAGE.
 .\"
-.Dd $Mdocdate: February 1 2011 $
+.Dd $Mdocdate: August 8 2011 $
 .Dt PF.CONF 5
 .Os
 .Sh NAME
@@ -62,9 +62,14 @@ A method for detecting a host's operating system.
 Some example rulesets.
 .El
 .Pp
+The current line can be extended over multiple lines using a backslash
+.Pq Sq \e .
 Comments can be put anywhere in the file using a hash mark
 .Pq Sq # ,
 and extend to the end of the current line.
+Care should be taken when commenting out multi-line text:
+the comment is effective until the end of the entire block.
+.Pp
 Additional configuration files can be included with the
 .Ic include
 keyword, for example:
@@ -267,6 +272,9 @@ see the
 .Ic group
 keyword in
 .Xr ifconfig 8 .
+.It Ar on Ar rdomain Aq Ar number
+This rule applies only to packets coming in on, or going out through, this
+particular routing domain.
 .It Aq Ar af
 This rule applies only to packets of this address family.
 Supported values are
@@ -600,6 +608,30 @@ For example, the following rule will drop 20% of incoming ICMP packets:
 .Pp
 .Dl block in proto icmp probability 20%
 .Pp
+.It Xo Ar prio Aq Ar priority
+.No \*(Ba ( Aq Ar priority ,
+.Aq Ar priority )
+.Xc
+Packets matching this rule will be assigned a specific queueing priority.
+Priorities are assigned as integers 0 through 7,
+with a default priority of 3.
+If two priorities are given, packets which have a TOS of
+.Ar lowdelay
+and TCP ACKs with no data payload will be assigned to the second one.
+.Pp
+For example:
+.Bd -literal -offset indent
+pass in proto tcp to port 25 prio 2
+pass in proto tcp to port 22 prio (2, 5)
+.Ed
+.Pp
+The interface priority queues accessed by the
+.Ar prio
+keyword are always enabled and do not require any additional
+configuration, unlike the queues described below and in the
+.Sx QUEUEING
+section.
+.Pp
 .It Xo Ar queue Aq Ar queue
 .No \*(Ba ( Aq Ar queue ,
 .Aq Ar queue )
@@ -866,10 +898,11 @@ to be modified (source with
 .Ar nat-to ,
 destination with
 .Ar rdr-to ) .
-.It Ar random Op Ar sticky-address
+.It Ar least-states Op Ar sticky-address
 The
-.Ar random
-option selects an address at random within the defined block of addresses.
+.Ar least-states
+option selects the address with the least active states from
+a given address pool.
 .Pp
 .Ar sticky-address
 can be specified to ensure that multiple connections from the
@@ -880,16 +913,21 @@ in order to make the mappings last
 beyond the lifetime of the states,
 increase the global options with
 .Ar set timeout src.track .
+.It Ar random Op Ar sticky-address
+The
+.Ar random
+option selects an address at random within the defined block of addresses.
+.Ar sticky-address
+is as described above.
 .It Ar round-robin Op Ar sticky-address
 The
 .Ar round-robin
-option loops through the redirection address(es).
+option loops through the redirection address(es) and considers given weights
+associated with address(es).
+Weights can be specified between 1 and 65535.
+Addresses with higher weights are selected more often.
 .Ar sticky-address
 is as described above.
-.Pp
-When more than one redirection address is specified,
-.Ar round-robin
-is the only permitted pool type.
 .It Ar source-hash Op Ar key
 The
 .Ar source-hash
@@ -911,6 +949,12 @@ option prevents
 .Xr pf 4
 from modifying the source port on TCP and UDP packets.
 .El
+.Pp
+When more than one redirection address is specified,
+.Ar round-robin
+and
+.Ar least-states
+are the only permitted pool types.
 .Ss Routing
 If a packet matches a rule with one of the following route options set,
 the packet filter will route the packet according to the type of route option.
@@ -923,10 +967,6 @@ The
 option creates a duplicate of the packet and routes it like
 .Ar route-to .
 The original packet gets routed as it normally would.
-.It Ar fastroute
-The
-.Ar fastroute
-option does a normal route lookup to find the next hop for the packet.
 .It Ar reply-to
 The
 .Ar reply-to
@@ -963,6 +1003,7 @@ for which there is a single redirection address which has a
 subnet mask smaller than 32 for IPv4 or 128 for IPv6 (more than one IP
 address),
 the methods
+.Ar least-states ,
 .Ar random ,
 .Ar round-robin ,
 and
@@ -1006,9 +1047,6 @@ This should be a keyword from the following ordered list
 .Cm info ,
 and
 .Cm debug .
-The last keyword,
-.Cm debug ,
-must be quoted.
 These keywords correspond to the similar (LOG_) values specified to the
 .Xr syslog 3
 library routine.
@@ -1131,17 +1169,6 @@ instead of being dropped;
 the reassembled packet will have the
 .Ar dont-fragment
 bit cleared.
-.It Ar set require-order
-If set to
-.Ar yes ,
-.Xr pfctl 8
-will enforce that statement types in the ruleset are listed in the
-following order, to match the operation of the underlying packet
-filtering engine:
-.Em options ,
-.Em queueing ,
-.Em filtering .
-This option is disabled by default.
 .It Ar set ruleset-optimization
 .Bl -tag -width xxxxxxxx -compact
 .It Ar basic
@@ -1185,6 +1212,9 @@ Packets passing in or out on such interfaces are passed as if pf was
 disabled, i.e. pf does not process them in any way.
 This can be useful on loopback and other virtual interfaces, when
 packet filtering is not desired and can have unexpected effects.
+.Ar ifspec
+is only evaluated when the ruleset is loaded; interfaces created
+later will not be skipped.
 .It Ar set state-defaults
 The
 .Ar state-defaults
@@ -1487,10 +1517,6 @@ ECN implies RED.
 Enables Random Early Detection (RED) on this queue.
 RED drops packets with a probability proportional to the average
 queue length.
-.\" .It Ar rio
-.\" Enables RIO on this queue.
-.\" RIO is RED with IN/OUT, thus running
-.\" RED two times more than RIO would achieve the same effect.
 .El
 .Pp
 The
@@ -1604,6 +1630,8 @@ They can also be used for the redirect address of
 and
 .Ar rdr-to
 and in the routing options of filter rules, but only for
+.Ar least-states
+and
 .Ar round-robin
 pools.
 .Pp
@@ -2262,10 +2290,16 @@ blind attacker would have to guess the timestamp as well.
 Enforces a TOS for matching IPv4 packets.
 .Ar string
 may be one of
+.Ar critical ,
+.Ar inetcontrol ,
 .Ar lowdelay ,
+.Ar netcontrol ,
 .Ar throughput ,
-or
-.Ar reliability ;
+.Ar reliability ,
+or one of the DiffServ Code Points:
+.Ar ef ,
+.Ar af11 ... af43 ,
+.Ar cs0 ... cs7 ;
 .Ar number
 may be either a hex or decimal number.
 .El
@@ -2322,8 +2356,10 @@ Once this limit is reached, fragments that would have to be cached
 are dropped until other entries time out.
 The timeout value can also be adjusted.
 .Pp
-Currently, only IPv4 fragments are supported and IPv6 fragments
-are blocked unconditionally.
+When forwarding reassembled IPv6 packets, pf refragments them with
+the original maximum fragment size.
+This allows the sender to determine the optimal fragment size by
+path MTU discovery.
 .Ss Blocking Spoofed Traffic
 Spoofing is the faking of IP addresses,
 typically for malicious purposes.
@@ -2604,7 +2640,8 @@ to a group of web servers on the internal network.
 match out on $ext_if inet from any to any nat-to 192.0.2.16/28 \e
     source-hash
 match in  on $ext_if proto tcp from any to any port 80 \e
-    rdr-to { 10.1.2.155, 10.1.2.160, 10.1.2.161 } round-robin
+    rdr-to { 10.1.2.155 weight 2, 10.1.2.160 weight 1, \e
+             10.1.2.161 weight 8 } round-robin
 .Ed
 .Pp
 The bidirectional address translation example uses a single
@@ -2643,7 +2680,6 @@ option         = "set" ( [ "timeout" ( timeout | "{" timeout-list "}" ) ] |
                  [ "block-policy" ( "drop" | "return" ) ] |
                  [ "state-policy" ( "if-bound" | "floating" ) ]
                  [ "state-defaults" state-opts ]
-                 [ "require-order" ( "yes" | "no" ) ]
                  [ "fingerprints" filename ] |
                  [ "skip on" ifspec ] |
                  [ "debug" ( "none" | "urgent" | "misc" | "loud" ) ] |
@@ -2651,7 +2687,8 @@ option         = "set" ( [ "timeout" ( timeout | "{" timeout-list "}" ) ] |
 
 pf-rule        = action [ ( "in" | "out" ) ]
                  [ "log" [ "(" logopts ")"] ] [ "quick" ]
-                 [ "on" ifspec ] [ af ] [ protospec ] hosts [ filteropts ]
+                 [ "on" ( ifspec | "rdomain" number ) ] [ af ]
+                 [ protospec ] hosts [ filteropts ]
 
 logopts        = logopt [ [ "," ] logopts ]
 logopt         = "all" | "matches" | "user" | "to" interface-name
@@ -2665,6 +2702,7 @@ filteropt      = user | group | flags | icmp-type | icmp6-type |
 		 "divert-packet" "port" port | "divert-reply" |
 		 "divert-to" host "port" port |
                  "label" string | "tag" string | [ ! ] "tagged" string |
+                 "prio" ( number | "(" number [ [ "," ] number ] ")" ) |
                  "queue" ( string | "(" string [ [ "," ] string ] ")" ) |
                  "rtable" number | "probability" number"%" |
 		 "binat-to" ( redirhost | "{" redirhost-list "}" )
@@ -2673,7 +2711,7 @@ filteropt      = user | group | flags | icmp-type | icmp6-type |
 		 [ portspec ] [ pooltype ] |
 		 "nat-to" ( redirhost | "{" redirhost-list "}" )
 		 [ portspec ] [ pooltype ] [ "static-port" ] |
-		 [ "fastroute" | route ] |
+		 [ route ] |
 		 [ "received-on" ( interface-name | interface-group ) ]
 
 scrubopts      = scrubopt [ [ "," ] scrubopts ]
@@ -2685,8 +2723,8 @@ antispoof-rule = "antispoof" [ "log" ] [ "quick" ]
 
 table-rule     = "table" "\*(Lt" string "\*(Gt" [ tableopts ]
 tableopts      = tableopt [ tableopts ]
-tableopt       = "persist" | "const" | "counters" | "file" string |
-                 "{" [ tableaddrs ] "}"
+tableopt       = "persist" | "const" | "counters" |
+                 "file" string | "{" [ tableaddrs ] "}"
 tableaddrs     = tableaddr-spec [ [ "," ] tableaddrs ]
 tableaddr-spec = [ "!" ] tableaddr [ "/" mask-bits ]
 tableaddr      = hostname | ifspec | "self" |
@@ -2740,7 +2778,9 @@ hosts          = "all" |
                  "{" host-list "}" | "route" string ) [ port ]
 
 ipspec         = "any" | host | "{" host-list "}"
-host           = [ "!" ] ( address [ "/" mask-bits ] | "\*(Lt" string "\*(Gt" )
+host           = [ "!" ] ( address [ "weight" number ] |
+                 address [ "/" mask-bits ] [ "weight" number ] |
+                 "\*(Lt" string "\*(Gt" )
 redirhost      = address [ "/" mask-bits ]
 routehost      = host | host "@" interface-name |
                  "(" interface-name [ address [ "/" mask-bits ] ] ")"
@@ -2797,20 +2837,22 @@ timeout        = ( "tcp.first" | "tcp.opening" | "tcp.established" |
                  "adaptive.start" | "adaptive.end" ) number
 
 limit-list     = limit-item [ [ "," ] limit-list ]
-limit-item     = ( "states" | "frags" | "src-nodes" ) number
+limit-item     = ( "states" | "frags" | "src-nodes" | "tables" |
+                 "table-entries" ) number
 
-pooltype       = ( "bitmask" | "random" |
-                 "source-hash" [ ( hex-key | string-key ) ] |
-                 "round-robin" ) [ sticky-address ]
+pooltype       = ( "bitmask" | "least-states" |
+                 "random" | "round-robin" |
+                 "source-hash" [ ( hex-key | string-key ) ] )
+                 [ sticky-address ]
 
 subqueue       = string | "{" queue-list "}"
 queue-list     = string [ [ "," ] string ]
 cbq-def        = "cbq" [ "(" cbq-opt [ [ "," ] cbq-opt ] ")" ]
 priq-def       = "priq" [ "(" priq-opt [ [ "," ] priq-opt ] ")" ]
 hfsc-def       = "hfsc" [ "(" hfsc-opt [ [ "," ] hfsc-opt ] ")" ]
-cbq-opt        = ( "default" | "borrow" | "red" | "ecn" | "rio" )
-priq-opt       = ( "default" | "red" | "ecn" | "rio" )
-hfsc-opt       = ( "default" | "red" | "ecn" | "rio" |
+cbq-opt        = ( "default" | "borrow" | "red" | "ecn" )
+priq-opt       = ( "default" | "red" | "ecn" )
+hfsc-opt       = ( "default" | "red" | "ecn" |
                  linkshare-sc | realtime-sc | upperlimit-sc )
 linkshare-sc   = "linkshare" sc-spec
 realtime-sc    = "realtime" sc-spec

@@ -1,4 +1,4 @@
-/* $OpenBSD: options-table.c,v 1.3 2011/01/13 13:38:57 nicm Exp $ */
+/* $OpenBSD: options-table.c,v 1.12 2011/07/30 18:01:26 nicm Exp $ */
 
 /*
  * Copyright (c) 2011 Nicholas Marriott <nicm@users.sourceforge.net>
@@ -36,6 +36,9 @@
 const char *options_table_mode_keys_list[] = {
 	"emacs", "vi", NULL
 };
+const char *options_table_mode_mouse_list[] = {
+	"off", "on", "copy-mode", NULL
+};
 const char *options_table_clock_mode_style_list[] = {
 	"12", "24", NULL
 };
@@ -55,7 +58,7 @@ const struct options_table_entry server_options_table[] = {
 	  .type = OPTIONS_TABLE_NUMBER,
 	  .minimum = 1,
 	  .maximum = INT_MAX,
-	  .default_num = 9
+	  .default_num = 20
 	},
 
 	{ .name = "escape-time",
@@ -75,6 +78,11 @@ const struct options_table_entry server_options_table[] = {
 	  .default_num = 0 /* overridden in main() */
 	},
 
+	{ .name = "set-clipboard",
+	  .type = OPTIONS_TABLE_FLAG,
+	  .default_num = 1
+	},
+
 	{ .name = NULL }
 };
 
@@ -91,6 +99,11 @@ const struct options_table_entry session_options_table[] = {
 	  .type = OPTIONS_TABLE_CHOICE,
 	  .choices = options_table_bell_action_list,
 	  .default_num = BELL_ANY
+	},
+
+	{ .name = "bell-on-alert",
+	  .type = OPTIONS_TABLE_FLAG,
+	  .default_num = 0
 	},
 
 	{ .name = "default-command",
@@ -193,7 +206,17 @@ const struct options_table_entry session_options_table[] = {
 	  .default_num = 20
 	},
 
+	{ .name = "mouse-resize-pane",
+	  .type = OPTIONS_TABLE_FLAG,
+	  .default_num = 0
+	},
+
 	{ .name = "mouse-select-pane",
+	  .type = OPTIONS_TABLE_FLAG,
+	  .default_num = 0
+	},
+
+	{ .name = "mouse-select-window",
 	  .type = OPTIONS_TABLE_FLAG,
 	  .default_num = 0
 	},
@@ -351,12 +374,15 @@ const struct options_table_entry session_options_table[] = {
 	{ .name = "terminal-overrides",
 	  .type = OPTIONS_TABLE_STRING,
 	  .default_str = "*88col*:colors=88,*256col*:colors=256"
+	                 ",xterm*:XT:Ms=\\E]52;%p1%s;%p2%s\\007"
+	                 ":Cc=\\E]12;%p1%s\\007:Cr=\\E]112\\007"
+			 ":Cs=\\E[%p1%d q:Csr=\\E[2 q"
 	},
 
 	{ .name = "update-environment",
 	  .type = OPTIONS_TABLE_STRING,
 	  .default_str = "DISPLAY SSH_ASKPASS SSH_AUTH_SOCK SSH_AGENT_PID "
-	                    "SSH_CONNECTION WINDOWID XAUTHORITY"
+	                 "SSH_CONNECTION WINDOWID XAUTHORITY"
 
 	},
 
@@ -461,7 +487,8 @@ const struct options_table_entry window_options_table[] = {
 	},
 
 	{ .name = "mode-mouse",
-	  .type = OPTIONS_TABLE_FLAG,
+	  .type = OPTIONS_TABLE_CHOICE,
+	  .choices = options_table_mode_mouse_list,
 	  .default_num = 0
 	},
 

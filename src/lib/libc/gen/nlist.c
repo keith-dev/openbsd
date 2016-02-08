@@ -1,4 +1,4 @@
-/*	$OpenBSD: nlist.c,v 1.53 2008/06/04 21:12:50 deraadt Exp $ */
+/*	$OpenBSD: nlist.c,v 1.55 2011/07/03 19:55:28 krw Exp $ */
 /*
  * Copyright (c) 1989, 1993
  *	The Regents of the University of California.  All rights reserved.
@@ -73,7 +73,7 @@ __aout_fdnlist(int fd, struct nlist *list)
 	struct exec exec;
 
 	if (pread(fd, &exec, sizeof(exec), (off_t)0) != sizeof(exec) ||
-	    N_BADMAG(exec) || exec.a_syms == NULL)
+	    N_BADMAG(exec) || exec.a_syms == 0)
 		return (-1);
 
 	stroff = N_STROFF(exec);
@@ -269,7 +269,7 @@ out:
  * is ELF and valid for the target platform.
  *
  * WARNING:  This is NOT a ELF ABI function and
- * as such it's use should be restricted.
+ * as such its use should be restricted.
  */
 int
 __elf_is_okay__(Elf_Ehdr *ehdr)
@@ -340,7 +340,7 @@ __elf_fdnlist(int fd, struct nlist *list)
 	}
 
 	/*
-	 * Find the symbol table entry and it's corresponding
+	 * Find the symbol table entry and its corresponding
 	 * string table entry.	Version 1.1 of the ABI states
 	 * that there is only one symbol table but that this
 	 * could change in the future.

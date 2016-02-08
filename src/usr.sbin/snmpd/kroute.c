@@ -1,4 +1,4 @@
-/*	$OpenBSD: kroute.c,v 1.15 2010/10/15 09:27:03 sthen Exp $	*/
+/*	$OpenBSD: kroute.c,v 1.17 2011/04/21 14:55:22 sthen Exp $	*/
 
 /*
  * Copyright (c) 2007, 2008 Reyk Floeter <reyk@vantronix.net>
@@ -44,6 +44,8 @@
 #include <event.h>
 
 #include "snmpd.h"
+
+extern struct snmpd	*env;
 
 struct {
 	struct event		 ks_ev;
@@ -159,6 +161,10 @@ kr_init(void)
 	if (setsockopt(kr_state.ks_fd, SOL_SOCKET, SO_USELOOPBACK,
 	    &opt, sizeof(opt)) == -1)
 		log_warn("kr_init: setsockopt");	/* not fatal */
+
+	if (env->sc_rtfilter && setsockopt(kr_state.ks_fd, PF_ROUTE,
+	    ROUTE_MSGFILTER, &env->sc_rtfilter, sizeof(env->sc_rtfilter)) == -1)
+		log_warn("kr_init: setsockopt(ROUTE_MSGFILTER)");
 
 	/* grow receive buffer, don't wanna miss messages */
 	optlen = sizeof(default_rcvbuf);
@@ -780,7 +786,7 @@ mask2prefixlen6(struct sockaddr_in6 *sa_in6)
 		case 0x00:
 			return (l);
 		default:
-			fatalx("non continguous inet6 netmask");
+			fatalx("non contiguous inet6 netmask");
 		}
 	}
 

@@ -1,4 +1,4 @@
-#	$OpenBSD: Makefile,v 1.162 2011/01/09 02:26:31 deraadt Exp $
+#	$OpenBSD: Makefile,v 1.168 2011/07/29 12:59:28 blambert Exp $
 #	$NetBSD: Makefile,v 1.4 1996/01/09 03:23:01 thorpej Exp $
 
 #	Makefile for section 9 (kernel function and variable) manual pages.
@@ -6,7 +6,7 @@
 MAN=	altq.9 aml_evalnode.9 atomic.9 audio.9 autoconf.9 bio_register.9 \
 	boot.9 \
 	buffercache.9 bus_dma.9 bus_space.9 copy.9 crypto.9 delay.9 \
-	disk.9 disklabel.9 dohooks.9 dopowerhooks.9 \
+	disk.9 disklabel.9 dma_alloc.9 dohooks.9 dopowerhooks.9 \
 	domountroothooks.9 doshutdownhooks.9 dostartuphooks.9 \
 	evcount.9 file.9 \
 	fork1.9 extent.9 getdevvp.9 getnewvnode.9 hash.9 hashinit.9 \
@@ -15,7 +15,8 @@ MAN=	altq.9 aml_evalnode.9 atomic.9 audio.9 autoconf.9 bio_register.9 \
 	ieee80211_node.9 ieee80211_output.9 ieee80211_proto.9 \
 	ieee80211_radiotap.9 \
 	iic.9 intro.9 inittodr.9 \
-	kern.9 knote.9 kthread.9 ktrace.9 loadfirmware.9 lock.9 log.9 \
+	kern.9 km_alloc.9 knote.9 kthread.9 ktrace.9 \
+	loadfirmware.9 lock.9 log.9 \
 	malloc.9 mbuf.9 mbuf_tags.9 md5.9 mi_switch.9 microtime.9 \
 	mountroothook_establish.9 mutex.9 namei.9 \
 	panic.9 pci_conf_read.9 pci_intr_map.9 pfind.9 physio.9 pmap.9 \
@@ -23,7 +24,7 @@ MAN=	altq.9 aml_evalnode.9 atomic.9 audio.9 autoconf.9 bio_register.9 \
 	radio.9 arc4random.9 rasops.9 ratecheck.9 resettodr.9 rssadapt.9 rwlock.9 \
 	sensor_attach.9 \
 	shutdownhook_establish.9 tsleep.9 spl.9 startuphook_establish.9 \
-	socreate.9 style.9 syscall.9 systrace.9 sysctl_int.9 \
+	socreate.9 sosplice.9 style.9 syscall.9 systrace.9 sysctl_int.9 \
 	tc_init.9 time.9 timeout.9 tvtohz.9 uiomove.9 uvm.9 vfs.9 vfs_busy.9 \
 	vfs_cache.9 vaccess.9 vclean.9 vcount.9 vdevgone.9 vfinddev.9 vflush.9 \
 	vflushbuf.9 vget.9 vgone.9 vhold.9 vinvalbuf.9 vnode.9 vnsubr.9 \
@@ -184,6 +185,7 @@ MLINKS+=kern.9 imax.9 kern.9 imin.9 kern.9 lmax.9 kern.9 lmin.9 \
 	kern.9 strlen.9 kern.9 strncpy.9 kern.9 strlcpy.9 kern.9 strlcat.9 \
 	kern.9 strcmp.9 kern.9 strncmp.9 kern.9 strncasecmp.9 \
 	kern.9 timingsafe_bcmp.9 kern.9 getsn.9
+MLINKS+=km_alloc.9 km_free.9
 MLINKS+=knote.9 KNOTE.9
 MLINKS+=kthread.9 kthread_create.9 kthread.9 kthread_exit.9 \
 	kthread.9 kthread_create_deferred.9
@@ -199,7 +201,7 @@ MLINKS+=malloc.9 free.9
 MLINKS+=mbuf.9 m_copym2.9 mbuf.9 m_copym.9 mbuf.9 m_free.9 mbuf.9 MFREE.9 \
 	mbuf.9 m_get.9 mbuf.9 MGET.9 mbuf.9 m_getclr.9 mbuf.9 m_gethdr.9 \
 	mbuf.9 MGETHDR.9 mbuf.9 m_prepend.9 mbuf.9 M_PREPEND.9 \
-	mbuf.9 m_pulldown.9 mbuf.9 m_pullup.9 mbuf.9 m_pullup2.9 \
+	mbuf.9 m_pulldown.9 mbuf.9 m_pullup.9 \
 	mbuf.9 m_split.9 \
 	mbuf.9 m_inject.9 mbuf.9 m_getptr.9 mbuf.9 m_adj.9 mbuf.9 m_copyback.9 \
 	mbuf.9 m_freem.9 mbuf.9 m_reclaim.9 mbuf.9 m_copydata.9 \
@@ -226,7 +228,8 @@ MLINKS+=mutex.9 mtx_enter_try.9
 MLINKS+=namei.9 lookup.9 namei.9 relookup.9 namei.9 NDINIT.9
 MLINKS+=pci_conf_read.9 pci_conf_write.9 pci_conf_read.9 pci_make_tag.9 \
 	pci_conf_read.9 pci_decompose_tag.9
-MLINKS+=pci_intr_map.9 pci_intr_string.9 pci_intr_map.9 pci_intr_line.9 \
+MLINKS+=pci_intr_map.9 pci_intr_map_msi.9 pci_intr_map.9 pci_intr_string.9 \
+	pci_intr_map.9 pci_intr_line.9 \
 	pci_intr_map.9 pci_intr_establish.9 \
 	pci_intr_map.9 pci_intr_disestablish.9
 MLINKS+=pfind.9 pgfind.9
@@ -243,6 +246,7 @@ MLINKS+=pool.9 pool_init.9 pool.9 pool_destroy.9 \
 	pool.9 pool_get.9 pool.9 pool_put.9 pool.9 pool_prime.9 \
 	pool.9 pool_sethiwat.9 pool.9 pool_setipl.9 pool.9 pool_setlowat.9 \
 	pool.9 pool_sethardlimit.9
+MLINKS+=dma_alloc.9 dma_free.9
 MLINKS+=powerhook_establish.9 powerhook_disestablish.9
 MLINKS+=printf.9 snprintf.9 printf.9 vsnprintf.9 printf.9 vprintf.9 \
 	printf.9 uprintf.9 printf.9 ttyprintf.9 printf.9 db_printf.9
@@ -279,6 +283,7 @@ MLINKS+=shutdownhook_establish.9 shutdownhook_disestablish.9
 MLINKS+=socreate.9 sobind.9 socreate.9 soclose.9 socreate.9 soconnect.9 \
 	socreate.9 sogetopt.9 socreate.9 soreceive.9 socreate.9 sosetopt.9 \
 	socreate.9 sosend.9 socreate.9 soshutdown.9
+MLINKS+=sosplice.9 somove.9
 MLINKS+=spl.9 spl0.9 spl.9 splassert.9 spl.9 splbio.9 spl.9 splclock.9 \
 	spl.9 splhigh.9 spl.9 spllowersoftclock.9 \
 	spl.9 splnet.9 spl.9 splsched.9 spl.9 splserial.9 spl.9 splsoftclock.9 \

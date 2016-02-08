@@ -1,4 +1,4 @@
-/*	$OpenBSD: rcsparse.c,v 1.4 2010/10/20 19:53:53 tobias Exp $	*/
+/*	$OpenBSD: rcsparse.c,v 1.7 2011/07/14 16:38:39 sobrado Exp $	*/
 /*
  * Copyright (c) 2010 Tobias Stoeckmann <tobias@openbsd.org>
  *
@@ -923,21 +923,21 @@ rcsparse_token(RCSFILE *rfp, int allowed)
 		}
 		return (ret);
 		/* NOTREACHED */
-        case ':':
+	case ':':
 		type = RCS_TOK_COLON;
 		if (type & allowed)
 			return (type);
 		rcsparse_warnx(rfp, "unexpected token \"%c\"", c);
 		return (0);
 		/* NOTREACHED */
-        case ';':
+	case ';':
 		type = RCS_TOK_SCOLON;
 		if (type & allowed)
 			return (type);
 		rcsparse_warnx(rfp, "unexpected token \"%c\"", c);
 		return (0);
 		/* NOTREACHED */
-        case ',':
+	case ',':
 		type = RCS_TOK_COMMA;
 		if (type & allowed)
 			return (type);
@@ -988,7 +988,7 @@ rcsparse_token(RCSFILE *rfp, int allowed)
 
 	switch (allowed) {
 	case RCS_TYPE_COMMITID:
-		/* XXX validate commitd */
+		/* XXX validate commitid */
 		break;
 	case RCS_TYPE_LOGIN:
 		if (!valid_login(pdp->rp_buf)) {
@@ -1137,7 +1137,6 @@ end:
 static int
 rcsparse_deltatext(RCSFILE *rfp)
 {
-	struct rcs_pdata *pdp;
 	int ret;
 
 	if (rfp->rf_flags & PARSED_DELTATEXTS)
@@ -1147,8 +1146,6 @@ rcsparse_deltatext(RCSFILE *rfp)
 		if ((ret = rcsparse_desc(rfp)))
 			return (ret);
 		
-	pdp = (struct rcs_pdata *)rfp->rf_pdata;
-
 	if (rcsparse(rfp, sec_deltatext))
 		return (-1);
 

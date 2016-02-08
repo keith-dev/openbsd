@@ -1,4 +1,4 @@
-/*	$OpenBSD: kern_ktrace.c,v 1.49 2010/07/26 01:56:27 guenther Exp $	*/
+/*	$OpenBSD: kern_ktrace.c,v 1.54 2011/07/11 15:40:47 guenther Exp $	*/
 /*	$NetBSD: kern_ktrace.c,v 1.23 1996/02/09 18:59:36 christos Exp $	*/
 
 /*
@@ -138,7 +138,7 @@ ktrsysret(struct proc *p, register_t code, int error, register_t retval)
 	ktrinitheader(&kth, p, KTR_SYSRET);
 	ktp.ktr_code = code;
 	ktp.ktr_error = error;
-	ktp.ktr_retval = retval;		/* what about val2 ? */
+	ktp.ktr_retval = retval;
 
 	kth.ktr_buf = (caddr_t)&ktp;
 	kth.ktr_len = sizeof(struct ktr_sysret);
@@ -270,6 +270,30 @@ ktrcsw(struct proc *p, int out, int user)
 	kth.ktr_len = sizeof(struct ktr_csw);
 
 	ktrwrite(p, &kth);
+	p->p_traceflag &= ~KTRFAC_ACTIVE;
+}
+
+void
+ktrstruct(struct proc *p, const char *name, const void *data, size_t datalen)
+{
+	struct ktr_header kth;
+	void *buf;
+	size_t buflen;
+
+	p->p_traceflag |= KTRFAC_ACTIVE;
+	ktrinitheader(&kth, p, KTR_STRUCT);
+	
+	if (data == NULL)
+		datalen = 0;
+	buflen = strlen(name) + 1 + datalen;
+	buf = malloc(buflen, M_TEMP, M_WAITOK);
+	strlcpy(buf, name, buflen);
+	bcopy(data, buf + strlen(name) + 1, datalen);
+	kth.ktr_buf = buf;
+	kth.ktr_len = buflen;
+
+	ktrwrite(p, &kth);
+	free(buf, M_TEMP);
 	p->p_traceflag &= ~KTRFAC_ACTIVE;
 }
 
@@ -515,7 +539,7 @@ ktrcanset(struct proc *callp, struct proc *targetp)
 	    caller->p_rgid == target->p_rgid &&	/* XXX */
 	    target->p_rgid == target->p_svgid &&
 	    (targetp->p_traceflag & KTRFAC_ROOT) == 0 &&
-	    !ISSET(targetp->p_flag, P_SUGID)) ||
+	    !ISSET(targetp->p_p->ps_flags, PS_SUGID)) ||
 	    caller->pc_ucred->cr_uid == 0)
 		return (1);
 

@@ -1,15 +1,18 @@
-# $OpenBSD: Makefile,v 1.40 2010/12/24 10:36:48 espie Exp $
+# $OpenBSD: Makefile,v 1.47 2011/07/13 11:57:10 espie Exp $
 
-REGRESS_TARGETS=pkgnames signatures depends-check longnames update-check1 \
+REGRESS_TARGETS=pkgnames pkgpaths signatures depends-check longnames \
+	update-check1 \
 	collision-check3 collision-check5 partial-update-test conflict-update \
 	merge-update split-update big-merge family-circus missing \
 	lib-report1 lib-report2 lib-report3 loop1 \
 	lib-report4 lib-report5 lib-report6 lib-report7 \
-	qttest gstest
+	qttest gstest exotest inter1 manual1
 
 
 
-ADD_PKG=perl ${.CURDIR}/myadd
+ADD_PKG=perl ${.CURDIR}/my add
+DELETE_PKG=perl ${.CURDIR}/my delete
+INFO_PKG=perl ${.CURDIR}/my info
 CREATE_PKG=perl ${.CURDIR}/mycreate
 LONG1=iamareallongfilenamethatcantberepresentedcorrectlyinatararchivebutwewantittohappenanywaysohmygodaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa42
 LONG2=iamanotherreallygfilenamethatcantberepresentedcorrectlyinatararchivebutwewantittohappenanywaysohmygodaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa42
@@ -24,9 +27,12 @@ D$i ?= ${.OBJDIR}/dest$i
 DEST$i ?= ${D$i}/usr/local
 .endfor
 
-# current maxes: D26, SRC17, plist14
+# current maxes: D31, SRC20, plist18
 pkgnames:
 	perl ${.CURDIR}/check-name
+
+pkgpaths:
+	perl ${.CURDIR}/check-path
 
 signatures: 
 	-rm -f signatures.out
@@ -184,6 +190,32 @@ gstest: rep0/gs-0.tgz rep0/gs-0-no_x11.tgz rep0/purple-0.tgz
 	-@ROOT=${D27} PKG_PATH=${.OBJDIR}/rep0 ${ADD_PKG} purple-0
 	@if ROOT=${D27} PKG_PATH=${.OBJDIR}/rep0 ${ADD_PKG} -r gs-0-no_x11; then exit 1; fi
 
+exotest: rep0/exo-0.tgz rep1/exo-1.tgz
+	@-rm -rf ${D28}
+	@ROOT=${D28} PKG_PATH=${.OBJDIR}/rep0 ${ADD_PKG} exo
+	@ROOT=${D28} PKG_PATH=${.OBJDIR}/rep1 ${ADD_PKG} -u exo
+
+thunarvfstest: rep0/thunar-0.tgz rep0/q-0.tgz rep1/thunar-vfs-1.tgz rep1/q-1.tgz rep1/thunar-1.tgz
+	@-rm -rf ${D29}
+	@ROOT=${D29} PKG_PATH=${.OBJDIR}/rep0 ${ADD_PKG} q
+	@ROOT=${D29} PKG_PATH=${.OBJDIR}/rep1 ${ADD_PKG} -u q
+
+# test for manual install
+manual1: rep0/ma-0.tgz rep0/mb-0.tgz rep0/mc-0.tgz rep0/md-0.tgz \
+	rep1/ma-1.tgz rep1/mb-1.tgz rep1/me-1.tgz rep1/md-1.tgz
+	@-rm -rf ${D30}
+	@ROOT=${D30} PKG_PATH=${.OBJDIR}/rep0 ${ADD_PKG} md mb
+	@ROOT=${D30} ${INFO_PKG} -mq|diff -u - ${.CURDIR}/list9.out
+	@ROOT=${D30} PKG_PATH=${.OBJDIR}/rep1 ${ADD_PKG} -u
+	@ROOT=${D30} ${INFO_PKG} -mq|diff -u - ${.CURDIR}/list10.out
+	@ROOT=${D30} ${DELETE_PKG} -a
+	@ROOT=${D30} ${INFO_PKG} -q|diff -u - ${.CURDIR}/list11.out
+
+inter1: rep0/inta-0.tgz rep0/intb-0.tgz
+	-rm -rf ${D31}
+	@ROOT=${D31} PKG_PATH=${.OBJDIR}/rep0 ${ADD_PKG} inta intb
+	@ROOT=${D31} ${DELETE_PKG} inta intb
+
 plist1:
 	@echo "@owner "`id -un` >$@
 	@echo "@group "`id -gn` >>$@
@@ -256,6 +288,32 @@ plist14:
 	@echo "@group "`id -gn` >>$@
 	@echo phonon >>$@
 
+plist15:
+	@echo "@owner "`id -un` >>$@
+	@echo "@group "`id -gn` >>$@
+	@echo foo/ >>$@
+	@echo foo/a >>$@
+	@echo bar >>$@
+
+plist16:
+	@echo "@owner "`id -un` >>$@
+	@echo "@group "`id -gn` >>$@
+	@echo foo/ >>$@
+	@echo foo/a >>$@
+	@echo bar/ >>$@
+	@echo bar/a >>$@
+
+plist17:
+	@echo "@owner "`id -un` >>$@
+	@echo "@group "`id -gn` >>$@
+	@echo '@lib lib/libthunar-vfs.so.$${LIBthunar-vfs_VERSION}' >>$@
+
+plist18:
+	@echo "@owner "`id -un` >>$@
+	@echo "@group "`id -gn` >>$@
+	@echo "@conflict thunar-<1" >>$@
+	@echo '@lib lib/libthunar-vfs.so.$${LIBthunar-vfs_VERSION}' >>$@
+
 rep0/a-0.tgz:
 	@${CREATE_PKG} -P't/b:b-*:b-0' -f ${.CURDIR}/empty $@
 
@@ -266,9 +324,24 @@ rep0/o1-0.tgz rep0/o2-0.tgz rep0/ga-0.tgz \
 rep0/gb-0.tgz rep1/gb-0p0.tgz rep1/gd-1.tgz rep0/ge-0.tgz \
 rep0/gf-1.tgz rep1/gf-0.tgz \
 rep1/missc-0.tgz rep0/q5-0.tgz rep1/q5-1.tgz \
+rep0/ma-0.tgz rep1/ma-1.tgz rep0/mc-0.tgz rep1/me-1.tgz \
 rep0/tcl-8.5.7.tgz:
 	@${CREATE_PKG} -f ${.CURDIR}/empty $@
 
+rep0/md-0.tgz:
+	${CREATE_PKG} -P't/ma:ma-*:ma-0' -P't/mb:mb-*:mb-0' -P't/mc:mc-*:mc-0' -f ${.CURDIR}/empty $@
+rep1/md-1.tgz:
+	${CREATE_PKG} -P't/ma:ma-*:ma-1' -P't/mb:mb-*:mb-1' -P't/me:me-*:me-1' -f ${.CURDIR}/empty $@
+rep0/mb-0.tgz:
+	${CREATE_PKG} -P't/ma:ma-*:ma-0' -f ${.CURDIR}/empty $@
+rep1/mb-1.tgz:
+	${CREATE_PKG} -P't/ma:ma-*:ma-1' -f ${.CURDIR}/empty $@
+
+rep0/inta-0.tgz:
+	${CREATE_PKG} -P't/intb:intb-*:intb-0' -f ${.CURDIR}/empty $@
+rep0/intb-0.tgz:
+	${CREATE_PKG} -P't/inta:inta-*:inta-0' -f ${.CURDIR}/empty $@
+ 
 rep1/o-1.tgz:
 	@${CREATE_PKG} -DREGRESSION_TESTING -P't/p:p-*:p-0' -W'coincoin.0.0' -f ${.CURDIR}/empty $@
 
@@ -323,6 +396,37 @@ rep1/qt-1.tgz: plist14
 	@mkdir -p ${SRC16}
 	touch ${SRC16}/phonon
 	@${CREATE_PKG} -B src16 -f plist14 $@
+
+rep0/exo-0.tgz: plist15
+	@mkdir -p ${SRC18}/foo
+	touch ${SRC18}/foo/a
+	cd ${SRC18} && ln -s foo bar
+	@${CREATE_PKG} -B src18 -f plist15 $@
+
+rep1/exo-1.tgz: plist16
+	@mkdir -p ${SRC19}/{foo,bar}
+	touch ${SRC19}/{bar,foo}/a
+	@${CREATE_PKG} -B src19 -f plist16 $@
+
+rep0/thunar-0.tgz: plist17
+	@mkdir -p ${SRC20}/lib
+	@touch ${SRC20}/lib/libthunar-vfs.so.0.0
+	@${CREATE_PKG} -B src20 -DLIBthunar-vfs_VERSION=0.0 -f plist17 $@
+
+rep1/thunar-vfs-1.tgz: plist18
+	@mkdir -p ${SRC20}/lib
+	@touch ${SRC20}/lib/libthunar-vfs.so.0.0
+	@${CREATE_PKG} -B src20 -DLIBthunar-vfs_VERSION=0.0 -f plist18 $@
+
+rep1/thunar-1.tgz:
+	@${CREATE_PKG} -f ${.CURDIR}/empty $@
+
+
+rep0/q-0.tgz:
+	@${CREATE_PKG} -P't/thunar:thunar-*:thunar-0' -f ${.CURDIR}/empty $@
+
+rep1/q-1.tgz:
+	@${CREATE_PKG} -P't/thunar-vfs:thunar-vfs-*:thunar-vfs-1' -f ${.CURDIR}/empty $@
 
 rep0/gs-0.tgz:
 	@${CREATE_PKG} -f ${.CURDIR}/empty $@

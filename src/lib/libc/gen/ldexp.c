@@ -1,4 +1,4 @@
-/*	$OpenBSD: ldexp.c,v 1.1 2009/04/19 16:42:06 martynas Exp $	*/
+/*	$OpenBSD: ldexp.c,v 1.5 2011/07/26 11:43:01 martynas Exp $	*/
 /* @(#)s_scalbn.c 5.1 93/09/24 */
 /* @(#)fdlibm.h 5.1 93/09/24 */
 /*
@@ -12,9 +12,7 @@
  * ====================================================
  */
 
-#if 0
-__FBSDID("$FreeBSD: src/lib/libc/gen/ldexp.c,v 1.1 2005/01/22 06:03:40 das Exp $");
-#endif
+/* LINTLIBRARY */
 
 #include <sys/types.h>
 #include <sys/cdefs.h>
@@ -24,7 +22,7 @@ __FBSDID("$FreeBSD: src/lib/libc/gen/ldexp.c,v 1.1 2005/01/22 06:03:40 das Exp $
 
 /* Bit fiddling routines copied from msun/src/math_private.h,v 1.15 */
 
-#if BYTE_ORDER == BIG_ENDIAN
+#if (BYTE_ORDER == BIG_ENDIAN) || (defined(__arm__) && !defined(__VFP_FP__))
 
 typedef union
 {
@@ -38,7 +36,7 @@ typedef union
 
 #endif
 
-#if BYTE_ORDER == LITTLE_ENDIAN
+#if (BYTE_ORDER == LITTLE_ENDIAN) && !(defined(__arm__) && !defined(__VFP_FP__))
 
 typedef union
 {
@@ -126,8 +124,11 @@ ldexp(double x, int n)
         return x*twom54;
 }
 
-#if LDBL_MANT_DIG == 53
-#ifdef __weak_alias
+#if	LDBL_MANT_DIG == 53
+#ifdef	lint
+/* PROTOLIB1 */
+long double ldexpl(long double, int);
+#else	/* lint */
 __weak_alias(ldexpl, ldexp);
-#endif /* __weak_alias */
-#endif /* LDBL_MANT_DIG == 53 */
+#endif	/* lint */
+#endif	/* LDBL_MANT_DIG == 53 */

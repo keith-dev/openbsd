@@ -1,4 +1,4 @@
-/*	$OpenBSD: init_main.c,v 1.174 2011/01/08 19:45:09 deraadt Exp $	*/
+/*	$OpenBSD: init_main.c,v 1.180 2011/07/07 18:00:33 guenther Exp $	*/
 /*	$NetBSD: init_main.c,v 1.84.4.1 1996/06/02 09:08:06 mrg Exp $	*/
 
 /*
@@ -191,10 +191,7 @@ main(void *framep)
 	quad_t lim;
 	int s, i;
 	extern struct pdevinit pdevinit[];
-	extern void scheduler_start(void);
 	extern void disk_init(void);
-	extern void endtsleep(void *);
-	extern void realitexpire(void *);
 
 	/*
 	 * Initialize the current process pointer (curproc) before
@@ -283,9 +280,9 @@ main(void *framep)
 	session0.s_count = 1;
 	session0.s_leader = pr;
 
-	atomic_setbits_int(&p->p_flag, P_SYSTEM | P_NOCLDWAIT);
+	atomic_setbits_int(&p->p_flag, P_SYSTEM);
 	p->p_stat = SONPROC;
-	p->p_nice = NZERO;
+	pr->ps_nice = NZERO;
 	p->p_emul = &emul_native;
 	bcopy("swapper", p->p_comm, sizeof ("swapper"));
 
@@ -368,7 +365,7 @@ main(void *framep)
 	initclocks();
 
 	/* Lock the kernel on behalf of proc0. */
-	KERNEL_PROC_LOCK(p);
+	KERNEL_LOCK();
 
 #ifdef SYSVSHM
 	/* Initialize System V style shared memory. */
@@ -615,6 +612,9 @@ start_init(void *arg)
 
 	check_console(p);
 
+	/* process 0 ignores SIGCHLD, but we can't */
+	p->p_sigacts->ps_flags = 0;
+
 	/*
 	 * Need just enough stack to hold the faked-up "execve()" arguments.
 	 */
@@ -713,7 +713,7 @@ start_init(void *arg)
 		 * other than it doesn't exist, complain.
 		 */
 		if ((error = sys_execve(p, &args, retval)) == 0) {
-			KERNEL_PROC_UNLOCK(p);
+			KERNEL_UNLOCK();
 			return;
 		}
 		if (error != ENOENT)

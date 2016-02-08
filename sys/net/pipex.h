@@ -1,4 +1,4 @@
-/*	$OpenBSD: pipex.h,v 1.6 2010/09/24 14:50:30 hsuenaga Exp $	*/
+/*	$OpenBSD: pipex.h,v 1.9 2011/07/08 18:30:17 yasuoka Exp $	*/
 
 /*
  * Copyright (c) 2009 Internet Initiative Japan Inc.
@@ -28,6 +28,23 @@
 
 #ifndef NET_PIPEX_H
 #define NET_PIPEX_H 1
+
+/*
+ * Names for pipex sysctl objects
+ */
+#define PIPEXCTL_ENABLE		1
+#define PIPEXCTL_MAXID		2
+
+#define PIPEXCTL_NAMES { \
+        { 0, 0 }, \
+        { "enable", CTLTYPE_INT }, \
+}
+
+#define PIPEXCTL_VARS { \
+	NULL, \
+	&pipex_enable \
+	NULL \
+}
 
 #define PIPEX_ENABLE			1
 #define PIPEX_DISABLE			0
@@ -77,6 +94,7 @@ struct pipex_session_req {
 	uint16_t	pr_peer_mru; 		/* Peer's MRU */
 	uint16_t	pr_timeout_sec; 	/* Idle Timer */
 
+	struct in_addr	pr_ip_srcaddr;		/* local framed IP-Address */
 	struct in_addr	pr_ip_address;		/* framed IP-Address */
 	struct in_addr	pr_ip_netmask;		/* framed IP-Netmask */
 	struct sockaddr_in6 pr_ip6_address;	/* framed IPv6-Address */
@@ -144,6 +162,12 @@ struct pppx_hdr {
 	u_int32_t	pppx_id;
 };
 
+struct pipex_session_descr_req {
+	int		pdr_protocol;		/* tunnel protocol */
+	uint16_t	pdr_session_id;		/* session-id */
+	char		pdr_descr[IFDESCRSIZE];	/* description */
+};
+
 
 /* PIPEX ioctls */
 #define PIPEXSMODE	_IOW ('p',  1, int)
@@ -153,8 +177,10 @@ struct pppx_hdr {
 #define PIPEXCSESSION	_IOW ('p',  5, struct pipex_session_config_req)
 #define PIPEXGSTAT	_IOWR('p',  6, struct pipex_session_stat_req)
 #define PIPEXGCLOSED	_IOR ('p',  7, struct pipex_session_list_req)
+#define PIPEXSIFDESCR	_IOW ('p',  8, struct pipex_session_descr_req)
 
 #ifdef _KERNEL
+extern int	pipex_enable;
 
 struct pipex_session;
 

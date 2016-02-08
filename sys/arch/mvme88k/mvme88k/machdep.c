@@ -1,4 +1,4 @@
-/* $OpenBSD: machdep.c,v 1.241 2011/01/05 22:20:22 miod Exp $	*/
+/* $OpenBSD: machdep.c,v 1.244 2011/06/26 22:40:00 deraadt Exp $	*/
 /*
  * Copyright (c) 1998, 1999, 2000, 2001 Steve Murphree, Jr.
  * Copyright (c) 1996 Nivas Madhur
@@ -81,6 +81,7 @@
 
 #include <dev/cons.h>
 
+#include <net/if.h>
 #include <uvm/uvm.h>
 
 #include "ksyms.h"
@@ -144,20 +145,6 @@ struct vm_map *phys_map = NULL;
 __cpu_simple_lock_t cpu_hatch_mutex;
 __cpu_simple_lock_t cpu_boot_mutex = __SIMPLELOCK_LOCKED;
 #endif
-
-/*
- * Declare these as initialized data so we can patch them.
- */
-#ifndef BUFCACHEPERCENT
-#define BUFCACHEPERCENT 5
-#endif
-
-#ifdef	BUFPAGES
-int bufpages = BUFPAGES;
-#else
-int bufpages = 0;
-#endif
-int bufcachepercent = BUFCACHEPERCENT;
 
 /*
  * 32 or 34 bit physical address bus depending upon the CPU flavor.
@@ -438,6 +425,7 @@ boot(howto)
 		else
 			printf("WARNING: not updating battery clock\n");
 	}
+	if_downall();
 
 	uvm_shutdown();
 	splhigh();		/* Disable interrupts. */
@@ -990,7 +978,7 @@ mvme_bootstrap()
 	 * might want to register ECC memory separately later on...
 	 */
 	uvm_page_physload(atop(avail_start), atop(avail_end),
-	    atop(avail_start), atop(avail_end), VM_FREELIST_DEFAULT);
+	    atop(avail_start), atop(avail_end), 0);
 
 	/*
 	 * Initialize message buffer.

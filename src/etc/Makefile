@@ -1,4 +1,4 @@
-#	$OpenBSD: Makefile,v 1.294 2010/10/26 20:56:03 robert Exp $
+#	$OpenBSD: Makefile,v 1.309 2011/07/22 09:30:54 espie Exp $
 
 TZDIR=		/usr/share/zoneinfo
 LOCALTIME=	Canada/Mountain
@@ -6,10 +6,27 @@ MTREEDIR=	/etc/mtree
 
 NOOBJ=
 
+KERNELS = GENERIC bsd
+
 .if exists(etc.${MACHINE}/Makefile.inc)
 .include "etc.${MACHINE}/Makefile.inc"
 .endif
 
+.for CONF K in ${KERNELS}
+.  if !target($K)
+$K:
+	cd ../sys/arch/${MACHINE}/conf && config ${CONF}
+	cd ../sys/arch/${MACHINE}/compile/${CONF} && \
+	    ${MAKE} clean && exec ${MAKE}
+.  endif
+ALL_KERNELS += $K
+.endfor
+
+kernels: bootblocks ${ALL_KERNELS}
+.for CONF K in ${KERNELS}
+	cp ../sys/arch/${MACHINE}/compile/${CONF}/bsd ${RELEASEDIR}/$K
+.endfor
+	
 # -rw-r--r--
 BINOWN= root
 BINGRP= wheel
@@ -18,7 +35,7 @@ BIN1=	changelist ccd.conf csh.cshrc csh.login csh.logout daily dhcpd.conf \
 	ksh.kshrc locate.rc man.conf monthly motd mrouted.conf myname \
 	netstart networks newsyslog.conf printcap protocols \
 	rbootd.conf rc rc.conf rc.local rc.securelevel rc.shutdown \
-	remote rpc security services shells syslog.conf weekly \
+	remote rpc services shells syslog.conf weekly \
 	etc.${MACHINE}/disktab dhclient.conf mailer.conf ntpd.conf \
 	moduli pf.os sensorsd.conf ifstated.conf
 
@@ -30,10 +47,18 @@ BIN1+=	wsconsctl.conf
 # -rw-rw-r--
 BIN2=	motd
 
+# -r-xr-xr-x
+RCDAEMONS=	amd apmd aucat bgpd bootparamd btd cron dhcpd dhcrelay dvmrpd \
+		ftpd ftpproxy hostapd hotplugd httpd identd ifstated iked \
+		inetd isakmpd ldapd ldattach ldpd lpd mopd mrouted named nsd \
+		ntpd ospfd ospf6d portmap pflogd rarpd rbootd relayd ripd \
+		route6d rtadvd rtsold rwhod sasyncd sendmail sensorsd smtpd \
+		snmpd spamd sshd syslogd watchdogd wsmoused xdm ypbind ypldap \
+		yppasswdd ypserv kdc kadmind kpasswdd nfsd mountd lockd statd \
+		spamlogd
+
 MISETS=	base${OSrev}.tgz comp${OSrev}.tgz \
 	man${OSrev}.tgz game${OSrev}.tgz etc${OSrev}.tgz
-
-PCS=	pcs750.bin
 
 # Use NOGZIP on architectures where the gzip'ing would take too much time
 # (pmax or slower :-)).  This way you get only tar'ed snap files and you can
@@ -103,6 +128,7 @@ distribution-etc-root-var: distrib-dirs
 	${INSTALL} -c -o root -g wheel -m 600 sasyncd.conf ${DESTDIR}/etc
 	${INSTALL} -c -o root -g wheel -m 600 snmpd.conf ${DESTDIR}/etc
 	${INSTALL} -c -o root -g wheel -m 600 ldapd.conf ${DESTDIR}/etc
+	${INSTALL} -c -o root -g wheel -m 600 ypldap.conf ${DESTDIR}/etc
 	${INSTALL} -c -o root -g _nsd -m 640 nsd.conf ${DESTDIR}/etc
 	${INSTALL} -c -o ${BINOWN} -g ${BINGRP} -m 555 \
 	    etc.${MACHINE}/MAKEDEV ${DESTDIR}/dev
@@ -235,12 +261,6 @@ distribution-etc-root-var: distrib-dirs
 	    ${DESTDIR}/var/log/xferlog
 	${INSTALL} -c -o ${BINOWN} -g utmp -m 664 /dev/null \
 	    ${DESTDIR}/var/run/utmp
-.if ${MACHINE} == "vax"
-	uudecode -p etc.vax/${PCS}.uu > ${DESTDIR}/${PCS} && \
-	    chown ${BINOWN} ${DESTDIR}/${PCS} && \
-	    chgrp ${BINGRP} ${DESTDIR}/${PCS} && \
-	    chmod 644 ${DESTDIR}/${PCS}
-.endif
 	cd ../gnu/usr.sbin/sendmail/cf/cf && exec ${MAKE} distribution
 	cd ../usr.sbin/ypserv/ypinit && exec ${MAKE} distribution
 	cd ../usr.bin/ssh && exec ${MAKE} distribution
@@ -257,6 +277,8 @@ distribution-etc-root-var: distrib-dirs
 	    ${DESTDIR}/etc/sudoers
 	cd rc.d; \
 		${INSTALL} -c -o root -g wheel -m 644 rc.subr \
+		    ${DESTDIR}/etc/rc.d && \
+		${INSTALL} -c -o ${BINOWN} -g ${BINGRP} -m 555 ${RCDAEMONS} \
 		    ${DESTDIR}/etc/rc.d
 
 distribution:
@@ -290,7 +312,7 @@ release-sets:
 
 sha:
 	-cd ${RELEASEDIR}; \
-	    sum -a sha256 INSTALL.`arch -ks` ${MDEXT} ${MISETS} > SHA256
+	    sum -a sha256 INSTALL.`arch -ks` ${ALL_KERNELS} ${MDEXT} ${MISETS} > SHA256
 
 release: distribution kernels release-sets distrib sha
 
@@ -314,7 +336,9 @@ update-moduli:
 	) > moduli
 
 .PHONY: distribution-etc-root-var distribution distrib-dirs \
-	release allarchs kernels release-sets m4 install-mtree
+	release allarchs kernels release-sets m4 install-mtree \
+	bootblocks ${ALL_KERNELS}
+	
 
 SUBDIR+= etc.alpha etc.amd64 etc.armish etc.aviion etc.hp300 etc.hppa
 SUBDIR+= etc.hppa64 etc.i386 etc.landisk etc.loongson etc.luna88k 

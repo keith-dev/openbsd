@@ -1,5 +1,5 @@
 # $FreeBSD: src/gnu/usr.bin/cc/cc_tools/Makefile,v 1.88.8.1 2009/04/15 03:14:26 kensmith Exp $
-# $OpenBSD: Makefile,v 1.8 2010/09/10 16:20:11 kettenis Exp $
+# $OpenBSD: Makefile,v 1.11 2011/08/04 14:46:58 kettenis Exp $
 
 .include <bsd.own.mk>
 
@@ -27,6 +27,9 @@ TARGET_INC+=	options.h
 .if ${TARGET_ARCH} == "amd64"
 TARGET_INC+=	i386/biarch64.h
 .endif
+.if ${TARGET_ARCH} == "hppa64"
+TARGET_INC+=	pa/pa64-start.h
+.endif
 .if ${TARGET_ARCH} == "sh"
 TARGET_INC+=	sh/little.h
 .endif
@@ -44,6 +47,11 @@ TARGET_INC+=	alpha/elf.h
 TARGET_INC+=	alpha/openbsd1.h
 .else
 TARGET_INC+=	elfos.h
+.endif
+.if ${TARGET_ARCH} == "arm"
+TARGET_INC+=	arm/elf.h
+TARGET_INC+=	arm/aout.h
+TARGET_INC+=	arm/arm.h
 .endif
 .if ${TARGET_ARCH} == "sh"
 TARGET_INC+=	sh/elf.h
@@ -68,6 +76,8 @@ TM_DEFINES+= TARGET_ENDIAN_DEFAULT=0
 .endif
 .if ${TARGET_ARCH} == "amd64"
 TARGET_INC+=	${GCC_CPU}/x86-64.h
+TARGET_INC+=	${GCC_CPU}/openbsd64.h
+.elif ${TARGET_ARCH} == "hppa64"
 TARGET_INC+=	${GCC_CPU}/openbsd64.h
 .elif ${TARGET_ARCH} == "sparc64"
 TARGET_INC+=	${GCC_CPU}/openbsd64.h

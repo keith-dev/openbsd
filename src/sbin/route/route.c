@@ -1,4 +1,4 @@
-/*	$OpenBSD: route.c,v 1.152 2010/10/25 19:39:55 deraadt Exp $	*/
+/*	$OpenBSD: route.c,v 1.155 2011/07/04 22:48:31 claudio Exp $	*/
 /*	$NetBSD: route.c,v 1.16 1996/04/15 18:27:05 cgd Exp $	*/
 
 /*
@@ -704,7 +704,7 @@ inet_makenetandmask(u_int32_t net, struct sockaddr_in *sin, int bits)
 	char *cp;
 
 	rtm_addrs |= RTA_NETMASK;
-	if (net == 0)
+	if (net == 0 && bits == 0)
 		mask = addr = 0;
 	else if (bits) {
 		addr = net;
@@ -865,6 +865,7 @@ getaddr(int which, char *s, struct hostent **hpp)
 	    }
 
 	case AF_LINK:
+		su->sa.sa_len = sizeof(struct sockaddr_dl);
 		link_addr(s, &su->sdl);
 		return (1);
 	case AF_MPLS:
@@ -1035,6 +1036,7 @@ monitor(int argc, char *argv[])
 				af = AF_INET6;
 				break;
 			case K_IFACE:
+			case K_INTERFACE:
 				filter = ROUTE_FILTER(RTM_IFINFO) |
 				    ROUTE_FILTER(RTM_IFANNOUNCE);
 				break;

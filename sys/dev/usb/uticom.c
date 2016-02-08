@@ -1,4 +1,4 @@
-/*	$OpenBSD: uticom.c,v 1.13 2011/01/25 20:03:36 jakemsr Exp $	*/
+/*	$OpenBSD: uticom.c,v 1.17 2011/07/03 15:47:17 matthew Exp $	*/
 /*
  * Copyright (c) 2005 Dmitry Komissaroff <dxi@mail.ru>.
  *
@@ -357,7 +357,7 @@ fwload_done:
 	err = usbd_device2interface_handle(sc->sc_udev, UTICOM_IFACE_INDEX,
 	    &sc->sc_iface);
 	if (err) {
-		printf("failed to get interface: %s\n",
+		printf("%s: failed to get interface: %s\n",
 		    sc->sc_dev.dv_xname, usbd_errstr(err));
 		sc->sc_dying = 1;
 		return;
@@ -370,7 +370,7 @@ fwload_done:
 	for (i = 0; i < id->bNumEndpoints; i++) {
 		ed = usbd_interface2endpoint_descriptor(sc->sc_iface, i);
 		if (ed == NULL) {
-			printf("no endpoint descriptor for %d\n",
+			printf("%s: no endpoint descriptor for %d\n",
 			    sc->sc_dev.dv_xname, i);
 			sc->sc_dying = 1;
 			return;
@@ -465,9 +465,6 @@ uticom_activate(struct device *self, int act)
 	int rv = 0;
 
 	switch (act) {
-	case DVACT_ACTIVATE:
-		break;
-
 	case DVACT_DEACTIVATE:
 		if (sc->sc_subdev != NULL)
 			rv = config_deactivate(sc->sc_subdev);
@@ -925,7 +922,7 @@ uticom_download_fw(struct uticom_softc *sc, int pipeno,
 		return (error);
 
 	buffer_size = UTICOM_FW_BUFSZ + sizeof(struct uticom_fw_header);
-	buffer = malloc(buffer_size, M_USBDEV, M_WAITOK);
+	buffer = malloc(buffer_size, M_USBDEV, M_WAITOK | M_CANFAIL);
 
 	if (!buffer) {
 		printf("%s: uticom_download_fw: out of memory\n",
@@ -972,7 +969,7 @@ uticom_download_fw(struct uticom_softc *sc, int pipeno,
 	memcpy(obuf, buffer, buffer_size);
 
 	usbd_setup_xfer(oxfer, pipe, (usbd_private_handle)sc, obuf, buffer_size,
-	    USBD_NO_COPY || USBD_SYNCHRONOUS, USBD_NO_TIMEOUT, 0);
+	    USBD_NO_COPY | USBD_SYNCHRONOUS, USBD_NO_TIMEOUT, 0);
 	err = usbd_sync_transfer(oxfer);
 
 	if (err != USBD_NORMAL_COMPLETION)

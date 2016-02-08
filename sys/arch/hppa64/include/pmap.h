@@ -1,4 +1,4 @@
-/*	$OpenBSD: pmap.h,v 1.4 2010/12/26 15:40:59 miod Exp $	*/
+/*	$OpenBSD: pmap.h,v 1.7 2011/07/07 18:40:12 kettenis Exp $	*/
 
 /*
  * Copyright (c) 2005 Michael Shalayeff
@@ -21,7 +21,7 @@
 #define _MACHINE_PMAP_H_
 
 #include <machine/pte.h>
-#include <uvm/uvm_pglist.h>
+#include <uvm/uvm_page.h>
 #include <uvm/uvm_object.h>
 
 struct pmap {
@@ -51,7 +51,7 @@ extern struct pmap kernel_pmap_store;
  * pool quickmaps
  */
 #define	pmap_map_direct(pg)	((vaddr_t)VM_PAGE_TO_PHYS(pg))
-#define	pmap_unmap_direct(va) PHYS_TO_VM_PAGE((paddr_t)(va))
+struct vm_page *pmap_unmap_direct(vaddr_t);
 #define	__HAVE_PMAP_DIRECT
 
 /*
@@ -68,6 +68,11 @@ pmap_prefer(vaddr_t offs, vaddr_t hint)
 	return pmap_prefer_hint;
 }
 
+/* pmap prefer alignment */
+#define PMAP_PREFER_ALIGN()	(HPPA_PGALIAS)
+/* pmap prefer offset within alignment */
+#define PMAP_PREFER_OFFSET(of)	((of) & HPPA_PGAOFF)
+
 #define	PMAP_GROWKERNEL
 #define	PMAP_STEAL_MEMORY
 
@@ -82,7 +87,6 @@ pmap_prefer(vaddr_t offs, vaddr_t hint)
 #define pmap_is_modified(pg)	pmap_testbit(pg, PTE_DIRTY)
 #define pmap_is_referenced(pg)	pmap_testbit(pg, PTE_REFTRAP)
 
-#define pmap_proc_iflush(p,va,len)	/* nothing */
 #define pmap_unuse_final(p)		/* nothing */
 #define	pmap_remove_holes(map)		do { /* nothing */ } while (0)
 

@@ -1,4 +1,4 @@
-/*	$OpenBSD: kern_event.c,v 1.38 2010/08/02 19:54:07 guenther Exp $	*/
+/*	$OpenBSD: kern_event.c,v 1.41 2011/07/02 22:20:08 nicm Exp $	*/
 
 /*-
  * Copyright (c) 1999,2000,2001 Jonathan Lemon <jlemon@FreeBSD.org>
@@ -63,7 +63,7 @@ int	kqueue_write(struct file *fp, off_t *poff, struct uio *uio,
 int	kqueue_ioctl(struct file *fp, u_long com, caddr_t data,
 		    struct proc *p);
 int	kqueue_poll(struct file *fp, int events, struct proc *p);
-int 	kqueue_kqfilter(struct file *fp, struct knote *kn);
+int	kqueue_kqfilter(struct file *fp, struct knote *kn);
 int	kqueue_stat(struct file *fp, struct stat *st, struct proc *p);
 int	kqueue_close(struct file *fp, struct proc *p);
 void	kqueue_wakeup(struct kqueue *kq);
@@ -164,7 +164,7 @@ kqueue_kqfilter(struct file *fp, struct knote *kn)
 	struct kqueue *kq = (struct kqueue *)kn->kn_fp->f_data;
 
 	if (kn->kn_filter != EVFILT_READ)
-		return (1);
+		return (EINVAL);
 
 	kn->kn_fop = &kqread_filtops;
 	SLIST_INSERT_HEAD(&kq->kq_sel.si_note, kn, kn_selnext);
@@ -208,7 +208,7 @@ filt_procattach(struct knote *kn)
 	 */
 	if (p->p_p != curproc->p_p &&
 	    (p->p_cred->p_ruid != curproc->p_cred->p_ruid ||
-	    (p->p_flag & P_SUGID)) && suser(curproc, 0) != 0)
+	    (p->p_p->ps_flags & PS_SUGID)) && suser(curproc, 0) != 0)
 		return (EACCES);
 
 	kn->kn_ptr.p_proc = p;
@@ -325,7 +325,7 @@ filt_timerexpire(void *knx)
 
 /*
  * data contains amount of time to sleep, in milliseconds
- */ 
+ */
 int
 filt_timerattach(struct knote *kn)
 {

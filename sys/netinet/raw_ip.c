@@ -1,4 +1,4 @@
-/*	$OpenBSD: raw_ip.c,v 1.50 2010/09/08 08:34:42 claudio Exp $	*/
+/*	$OpenBSD: raw_ip.c,v 1.60 2011/07/04 17:35:01 yasuoka Exp $	*/
 /*	$NetBSD: raw_ip.c,v 1.25 1996/02/18 18:58:33 christos Exp $	*/
 
 /*
@@ -128,6 +128,8 @@ rip_input(struct mbuf *m, ...)
 
 	ripsrc.sin_addr = ip->ip_src;
 	CIRCLEQ_FOREACH(inp, &rawcbtable.inpt_queue, inp_queue) {
+		if (inp->inp_socket->so_state & SS_CANTRCVMORE)
+			continue;
 #ifdef INET6
 		if (inp->inp_flags & INP_IPV6)
 			continue;
@@ -145,7 +147,7 @@ rip_input(struct mbuf *m, ...)
 			/* XXX rdomain support */
 			if ((divert = pf_find_divert(m)) == NULL)
 				continue;
-			if (inp->inp_laddr.s_addr != divert->addr.ipv4.s_addr)
+			if (inp->inp_laddr.s_addr != divert->addr.v4.s_addr)
 				continue;
 		} else
 #endif
@@ -417,13 +419,14 @@ rip_usrreq(struct socket *so, int req, struct mbuf *m, struct mbuf *nam,
 			error = EINVAL;
 			break;
 		}
-		if ((TAILQ_EMPTY(&ifnet)) ||
-		    ((addr->sin_family != AF_INET) &&
-		     (addr->sin_family != AF_IMPLINK)) ||
-		    (addr->sin_addr.s_addr &&
-		     (!(so->so_options & SO_BINDANY) &&
-		     in_iawithaddr(addr->sin_addr, NULL, inp->inp_rtableid) ==
-		     0))) {
+		if (TAILQ_EMPTY(&ifnet) || addr->sin_family != AF_INET) {
+			error = EADDRNOTAVAIL;
+			break;
+		}
+		if (!((so->so_options & SO_BINDANY) ||
+		    addr->sin_addr.s_addr == 0 ||
+		    in_iawithaddr(addr->sin_addr, inp->inp_rtableid) ||
+		    in_broadcast(addr->sin_addr, NULL, inp->inp_rtableid))) {
 			error = EADDRNOTAVAIL;
 			break;
 		}
@@ -442,8 +445,7 @@ rip_usrreq(struct socket *so, int req, struct mbuf *m, struct mbuf *nam,
 			error = EADDRNOTAVAIL;
 			break;
 		}
-		if ((addr->sin_family != AF_INET) &&
-		     (addr->sin_family != AF_IMPLINK)) {
+		if (addr->sin_family != AF_INET) {
 			error = EAFNOSUPPORT;
 			break;
 		}

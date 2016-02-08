@@ -1,4 +1,4 @@
-/*	$OpenBSD: policy.c,v 1.16 2011/01/26 16:59:24 mikeb Exp $	*/
+/*	$OpenBSD: policy.c,v 1.19 2011/05/02 12:39:18 mikeb Exp $	*/
 /*	$vantronix: policy.c,v 1.29 2010/05/28 15:34:35 reyk Exp $	*/
 
 /*
@@ -97,6 +97,7 @@ struct iked_policy *
 policy_test(struct iked *env, struct iked_policy *key)
 {
 	struct iked_policy	*p = NULL, *pol = NULL;
+	struct iked_flow	*flow = NULL, *flowkey;
 	u_int			 cnt = 0;
 
 	p = TAILQ_FIRST(&env->sc_policies);
@@ -119,13 +120,27 @@ policy_test(struct iked *env, struct iked_policy *key)
 		    p->pol_local.addr_mask) != 0)
 			p = p->pol_skip[IKED_SKIP_SRC_ADDR];
 		else {
+			/*
+			 * Check if a specific flow is requested
+			 * (eg. for acquire messages from the kernel)
+			 * and find a matching flow.
+			 */
+			if (key->pol_nflows &&
+			    (flowkey = RB_MIN(iked_flows,
+			    &key->pol_flows)) != NULL &&
+			    (flow = RB_FIND(iked_flows, &p->pol_flows,
+			    flowkey)) == NULL) {
+				p = TAILQ_NEXT(p, pol_entry);
+				continue;
+			}
+
 			/* Policy matched */
 			pol = p;
 
 			if (pol->pol_flags & IKED_POLICY_QUICK)
 				break;
 
-			/* Continue to find last matchin policy */
+			/* Continue to find last matching policy */
 			p = TAILQ_NEXT(p, pol_entry);
 		}
 	}
@@ -329,9 +344,28 @@ sa_free(struct iked *env, struct iked_sa *sa)
 	config_free_sa(env, sa);
 }
 
+void
+sa_free_flows(struct iked *env, struct iked_saflows *head)
+{
+	struct iked_flow	*flow, *next;
+
+	for (flow = TAILQ_FIRST(head); flow != NULL; flow = next) {
+		next = TAILQ_NEXT(flow, flow_entry);
+
+		log_debug("%s: free %p", __func__, flow);
+
+		if (flow->flow_loaded)
+			RB_REMOVE(iked_flows, &env->sc_activeflows, flow);
+		TAILQ_REMOVE(head, flow, flow_entry);
+		(void)pfkey_flow_delete(env->sc_pfkey, flow);
+		flow_free(flow);
+	}
+}
+
+
 int
 sa_address(struct iked_sa *sa, struct iked_addr *addr,
-    struct sockaddr_storage *peer)
+    struct sockaddr_storage *peer, int initiator)
 {
 	struct iked_policy	*pol = sa->sa_policy;
 
@@ -350,6 +384,8 @@ sa_address(struct iked_sa *sa, struct iked_addr *addr,
 	}
 
 	if (addr == &sa->sa_peer) {
+		memcpy(&sa->sa_polpeer, initiator ? &pol->pol_peer :
+		    &sa->sa_peer, sizeof(sa->sa_polpeer));
 		/* XXX Re-insert node into the tree */
 		(void)RB_REMOVE(iked_sapeers, &pol->pol_sapeers, sa);
 		RB_INSERT(iked_sapeers, &pol->pol_sapeers, sa);
@@ -443,15 +479,15 @@ sa_peer_lookup(struct iked_policy *pol, struct sockaddr_storage *peer)
 {
 	struct iked_sa	 key;
 
-	memcpy(&key.sa_peer.addr, peer, sizeof(*peer));
+	memcpy(&key.sa_polpeer.addr, peer, sizeof(*peer));
 	return (RB_FIND(iked_sapeers, &pol->pol_sapeers, &key));
 }
 
 static __inline int
 sa_peer_cmp(struct iked_sa *a, struct iked_sa *b)
 {
-	return (sockaddr_cmp((struct sockaddr *)&a->sa_peer.addr,
-	    (struct sockaddr *)&b->sa_peer.addr, -1));
+	return (sockaddr_cmp((struct sockaddr *)&a->sa_polpeer.addr,
+	    (struct sockaddr *)&b->sa_polpeer.addr, -1));
 }
 
 RB_GENERATE(iked_sapeers, iked_sa, sa_peer_entry, sa_peer_cmp);
@@ -508,15 +544,16 @@ flow_cmp(struct iked_flow *a, struct iked_flow *b)
 {
 	int		diff = 0;
 
-	diff = addr_cmp(a->flow_peer, b->flow_peer, 0);
+	if (a->flow_peer && b->flow_peer)
+		diff = addr_cmp(a->flow_peer, b->flow_peer, 0);
 	if (!diff)
 		diff = addr_cmp(&a->flow_dst, &b->flow_dst, 1);
 	if (!diff)
 		diff = addr_cmp(&a->flow_src, &b->flow_src, 1);
-	if (!diff)
+	if (!diff && a->flow_dir && b->flow_dir)
 		diff = (int)a->flow_dir - (int)b->flow_dir;
 
 	return (diff);
 }
 
-RB_GENERATE(iked_activeflows, iked_flow, flow_node, flow_cmp);
+RB_GENERATE(iked_flows, iked_flow, flow_node, flow_cmp);

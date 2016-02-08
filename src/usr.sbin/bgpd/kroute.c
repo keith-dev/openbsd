@@ -1,4 +1,4 @@
-/*	$OpenBSD: kroute.c,v 1.186 2010/10/11 11:45:57 claudio Exp $ */
+/*	$OpenBSD: kroute.c,v 1.188 2011/05/01 12:56:04 claudio Exp $ */
 
 /*
  * Copyright (c) 2003, 2004 Henning Brauer <henning@openbsd.org>
@@ -1155,6 +1155,8 @@ kr_net_reload(u_int rtableid, struct network_head *nh)
 		xn = kr_net_find(kt, n);
 		if (xn) {
 			xn->net.old = 0;
+			filterset_free(&xn->net.attrset);
+			filterset_move(&n->net.attrset, &xn->net.attrset);
 			kr_net_delete(n);
 		} else
 			TAILQ_INSERT_TAIL(&kt->krn, n, entry);
@@ -2379,7 +2381,7 @@ mask2prefixlen6(struct sockaddr_in6 *sa_in6)
 		case 0x00:
 			return (l);
 		default:
-			fatalx("non continguous inet6 netmask");
+			fatalx("non contiguous inet6 netmask");
 		}
 	}
 

@@ -1,4 +1,4 @@
-/* $OpenBSD: screen-write.c,v 1.46 2011/01/25 23:40:26 nicm Exp $ */
+/* $OpenBSD: screen-write.c,v 1.50 2011/05/18 20:24:29 nicm Exp $ */
 
 /*
  * Copyright (c) 2007 Nicholas Marriott <nicm@users.sourceforge.net>
@@ -1012,8 +1012,10 @@ screen_write_cell(struct screen_write_ctx *ctx,
 	 * If this is a wide character and there is no room on the screen, for
 	 * the entire character, don't print it.
 	 */
-	if (width > 1 && (width > screen_size_x(s) ||
-	    (s->cx != screen_size_x(s) && s->cx > screen_size_x(s) - width)))
+	if (!(s->mode & MODE_WRAP)
+	    && (width > 1 && (width > screen_size_x(s) ||
+		(s->cx != screen_size_x(s)
+		 && s->cx > screen_size_x(s) - width))))
 		return;
 
 	/*
@@ -1045,7 +1047,7 @@ screen_write_cell(struct screen_write_ctx *ctx,
 	}
 
 	/* Sanity checks. */
-	if (((s->mode & MODE_WRAP) && s->cx > screen_size_x(s) - 1)
+	if (((s->mode & MODE_WRAP) && s->cx > screen_size_x(s) - width)
 	    || s->cy > screen_size_y(s) - 1)
 		return;
 
@@ -1190,4 +1192,28 @@ screen_write_overwrite(struct screen_write_ctx *ctx, u_int width)
 			break;
 		grid_view_set_cell(gd, xx, s->cy, &grid_default_cell);
 	}
+}
+
+void
+screen_write_setselection(struct screen_write_ctx *ctx, u_char *str, u_int len)
+{
+	struct tty_ctx	ttyctx;
+
+	screen_write_initctx(ctx, &ttyctx, 0);
+	ttyctx.ptr = str;
+	ttyctx.num = len;
+
+	tty_write(tty_cmd_setselection, &ttyctx);
+}
+
+void
+screen_write_rawstring(struct screen_write_ctx *ctx, u_char *str, u_int len)
+{
+	struct tty_ctx		 ttyctx;
+
+	screen_write_initctx(ctx, &ttyctx, 0);
+	ttyctx.ptr = str;
+	ttyctx.num = len;
+
+	tty_write(tty_cmd_rawstring, &ttyctx);
 }

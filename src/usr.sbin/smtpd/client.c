@@ -1,4 +1,4 @@
-/*	$OpenBSD: client.c,v 1.33 2010/11/28 13:56:43 gilles Exp $	*/
+/*	$OpenBSD: client.c,v 1.37 2011/07/06 20:56:16 gilles Exp $	*/
 
 /*
  * Copyright (c) 2009 Jacek Masiulaniec <jacekm@dobremiasto.net>
@@ -50,7 +50,7 @@ int		 ssl_buf_write(SSL *, struct msgbuf *);
  * Initialize SMTP session.
  */
 struct smtp_client *
-client_init(int fd, int body, char *ehlo, int verbose)
+client_init(int fd, FILE *body, char *ehlo, int verbose)
 {
 	struct smtp_client	*sp = NULL;
 	struct client_cmd	*c;
@@ -76,8 +76,7 @@ client_init(int fd, int body, char *ehlo, int verbose)
 		sp->verbose = stdout;
 	else if ((sp->verbose = fopen("/dev/null", "a")) == NULL)
 		fatal("client_init: fopen");
-	if ((sp->body = fdopen(body, "r")) == NULL)
-		fatal("client_init: fdopen");
+	sp->body = body;
 	sp->timeout.tv_sec = 300;
 	msgbuf_init(&sp->w);
 	sp->w.fd = fd;
@@ -690,6 +689,8 @@ client_getln(struct smtp_client *sp, int type)
 
 		if (ln[3] == ' ')
 			break;
+
+		free(ln);
 	}
 
 	/* validate reply code */
@@ -882,7 +883,8 @@ client_socket_write(struct smtp_client *sp)
 char *
 buf_getln(struct ibuf_read *r)
 {
-	char	*buf = r->buf, *line;
+	char	*line;
+	u_char	*buf = r->buf;
 	size_t	 bufsz = r->wpos, i;
 
 	/* look for terminating newline */
@@ -914,7 +916,7 @@ buf_getln(struct ibuf_read *r)
 int
 buf_read(int fd, struct ibuf_read *r)
 {
-	char		*buf = r->buf + r->wpos;
+	u_char		*buf = r->buf + r->wpos;
 	size_t		 bufsz = sizeof(r->buf) - r->wpos;
 	ssize_t		 n;
 

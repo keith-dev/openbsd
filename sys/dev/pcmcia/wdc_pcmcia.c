@@ -1,4 +1,4 @@
-/*	$OpenBSD: wdc_pcmcia.c,v 1.24 2010/08/31 17:13:47 deraadt Exp $	*/
+/*	$OpenBSD: wdc_pcmcia.c,v 1.27 2011/07/03 15:47:17 matthew Exp $	*/
 /*	$NetBSD: wdc_pcmcia.c,v 1.19 1999/02/19 21:49:43 abs Exp $ */
 
 /*-
@@ -192,7 +192,7 @@ wdc_pcmcia_lookup(pa)
 	int i, cis_match;
 
 	for (wpp = wdc_pcmcia_pr;
-	    wpp < &wdc_pcmcia_pr[sizeof(wdc_pcmcia_pr)/sizeof(wdc_pcmcia_pr[0])];
+	    wpp < &wdc_pcmcia_pr[nitems(wdc_pcmcia_pr)];
 	    wpp++)
 		if ((wpp->wpp_vendor == PCMCIA_VENDOR_INVALID ||
 		     pa->manufacturer == wpp->wpp_vendor) &&
@@ -343,10 +343,9 @@ wdc_pcmcia_attach(parent, self, aux)
 	sc->sc_wdcdev.nchannels = 1;
 	sc->wdc_channel.channel = 0;
 	sc->wdc_channel.wdc = &sc->sc_wdcdev;
-	sc->wdc_channel.ch_queue = malloc(sizeof(struct channel_queue),
-	    M_DEVBUF, M_NOWAIT);
+	sc->wdc_channel.ch_queue = wdc_alloc_queue();
 	if (sc->wdc_channel.ch_queue == NULL) {
-		printf("can't allocate memory for command queue\n");
+		printf("cannot allocate channel queue\n");
 		goto ch_queue_alloc_failed;
 	}
 	if (quirks & WDC_PCMCIA_NO_EXTRA_RESETS)
@@ -406,7 +405,7 @@ wdc_pcmcia_detach(self, flags)
 		return (error);
 
         if (sc->wdc_channel.ch_queue != NULL)
-                free(sc->wdc_channel.ch_queue, M_DEVBUF);
+                wdc_free_queue(sc->wdc_channel.ch_queue);
 
         /* Unmap our i/o window and i/o space. */
         pcmcia_io_unmap(sc->sc_pf, sc->sc_iowindow);
@@ -432,16 +431,6 @@ wdc_pcmcia_activate(self, act)
 		return (0);
 
 	switch (act) {
-	case DVACT_ACTIVATE:
-		if (sc->sc_ih == NULL) {
-			/* XXX attach function already did the work */
-			pcmcia_function_enable(sc->sc_pf);
-			sc->sc_ih = pcmcia_intr_establish(sc->sc_pf, IPL_BIO, 
-			    wdcintr, &sc->wdc_channel, sc->sc_wdcdev.sc_dev.dv_xname);
-			wdcreset(&sc->wdc_channel, VERBOSE);
-		}
-		rv = config_activate_children(self, act);
-		break;
 	case DVACT_QUIESCE:
 		rv = config_activate_children(self, act);
 		break;

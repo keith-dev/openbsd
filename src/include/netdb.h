@@ -1,4 +1,4 @@
-/*	$OpenBSD: netdb.h,v 1.27 2009/06/02 16:47:50 jasper Exp $	*/
+/*	$OpenBSD: netdb.h,v 1.29 2011/07/07 14:25:15 sobrado Exp $	*/
 
 /*
  * ++Copyright++ 1980, 1983, 1988, 1993
@@ -144,7 +144,7 @@ struct	protoent {
 #define	NETDB_INTERNAL	-1	/* see errno */
 #define	NETDB_SUCCESS	0	/* no problem */
 #define	HOST_NOT_FOUND	1 /* Authoritative Answer Host not found */
-#define	TRY_AGAIN	2 /* Non-Authoritive Host not found, or SERVERFAIL */
+#define	TRY_AGAIN	2 /* Non-Authoritative Host not found, or SERVERFAIL */
 #define	NO_RECOVERY	3 /* Non recoverable errors, FORMERR, REFUSED, NOTIMP */
 #define	NO_DATA		4 /* Valid name, no data record of requested type */
 #define	NO_ADDRESS	NO_DATA		/* no address */
@@ -155,9 +155,10 @@ struct	protoent {
 #define AI_NUMERICHOST	4	/* don't ever try hostname lookup */
 #define AI_EXT		8	/* enable non-portable extensions */
 #define AI_NUMERICSERV	16	/* don't ever try servname lookup */
+#define AI_FQDN		32	/* return the FQDN that was resolved */
 /* valid flags for addrinfo */
 #define AI_MASK \
-    (AI_PASSIVE | AI_CANONNAME | AI_NUMERICHOST | AI_NUMERICSERV)
+    (AI_PASSIVE | AI_CANONNAME | AI_NUMERICHOST | AI_NUMERICSERV | AI_FQDN)
 
 #define NI_NUMERICHOST	1	/* return the host address, not the name */
 #define NI_NUMERICSERV	2	/* return the service address, not the name */

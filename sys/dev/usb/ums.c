@@ -1,4 +1,4 @@
-/*	$OpenBSD: ums.c,v 1.33 2010/08/02 23:17:34 miod Exp $ */
+/*	$OpenBSD: ums.c,v 1.35 2011/07/03 15:47:17 matthew Exp $ */
 /*	$NetBSD: ums.c,v 1.60 2003/03/11 16:44:00 augustss Exp $	*/
 
 /*
@@ -163,9 +163,6 @@ ums_activate(struct device *self, int act)
 	int rv = 0;
 
 	switch (act) {
-	case DVACT_ACTIVATE:
-		break;
-
 	case DVACT_DEACTIVATE:
 		if (ms->sc_wsmousedev != NULL)
 			rv = config_deactivate(ms->sc_wsmousedev);
@@ -227,15 +224,18 @@ ums_ioctl(void *v, u_long cmd, caddr_t data, int flag, struct proc *p)
 	struct hidms *ms = &sc->sc_ms;
 	int rc;
 
+	rc = uhidev_ioctl(&sc->sc_hdev, cmd, data, flag, p);
+	if (rc != -1)
+		return rc;
+	rc = hidms_ioctl(ms, cmd, data, flag, p);
+	if (rc != -1)
+		return rc;
+
 	switch (cmd) {
 	case WSMOUSEIO_GTYPE:
 		*(u_int *)data = WSMOUSE_TYPE_USB;
 		return 0;
 	default:
-		rc = uhidev_ioctl(&sc->sc_hdev, cmd, data, flag, p);
-		if (rc != -1)
-			return rc;
-		else
-			return hidms_ioctl(ms, cmd, data, flag, p);
+		return -1;
 	}
 }

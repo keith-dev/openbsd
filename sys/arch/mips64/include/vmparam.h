@@ -1,4 +1,4 @@
-/*	$OpenBSD: vmparam.h,v 1.22 2010/12/15 05:30:19 tedu Exp $	*/
+/*	$OpenBSD: vmparam.h,v 1.24 2011/05/30 22:25:21 oga Exp $	*/
 /*	$NetBSD: vmparam.h,v 1.5 1994/10/26 21:10:10 cgd Exp $	*/
 
 /*
@@ -38,8 +38,8 @@
  *	@(#)vmparam.h	8.2 (Berkeley) 4/22/94
  */
 
-#ifndef _MIPS_VMPARAM_H_
-#define _MIPS_VMPARAM_H_
+#ifndef _MIPS64_VMPARAM_H_
+#define _MIPS64_VMPARAM_H_
 
 /*
  * Machine dependent constants mips processors.
@@ -106,11 +106,6 @@
 #define VM_PIE_MIN_ADDR		PAGE_SIZE
 #define VM_PIE_MAX_ADDR		(0x10000000UL)
 
-#ifndef VM_NFREELIST
-#define	VM_NFREELIST		1
-#endif
-#define	VM_FREELIST_DEFAULT	0
-
 /* virtual sizes (bytes) for various kernel submaps */
 #define VM_PHYS_SIZE		(USRIOSIZE*PAGE_SIZE)
 
@@ -140,4 +135,4 @@ struct vm_page_md {
 
 #endif	/* _KERNEL && !_LOCORE */
 
-#endif /* !_MIPS_VMPARAM_H_ */
+#endif /* !_MIPS64_VMPARAM_H_ */

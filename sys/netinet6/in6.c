@@ -1,4 +1,4 @@
-/*	$OpenBSD: in6.c,v 1.89 2010/10/07 22:07:06 mpf Exp $	*/
+/*	$OpenBSD: in6.c,v 1.93 2011/08/08 13:04:35 bluhm Exp $	*/
 /*	$KAME: in6.c,v 1.372 2004/06/14 08:14:21 itojun Exp $	*/
 
 /*
@@ -60,6 +60,9 @@
  *
  *	@(#)in.c	8.2 (Berkeley) 11/15/93
  */
+
+#include "bridge.h"
+#include "carp.h"
 
 #include <sys/param.h>
 #include <sys/ioctl.h>
@@ -910,14 +913,7 @@ in6_update_ifa(struct ifnet *ifp, struct in6_aliasreq *ifra,
 	 */
 	if (ia == NULL) {
 		hostIsNew = 1;
-		/*
-		 * When in6_update_ifa() is called in a process of a received
-		 * RA, it is called under an interrupt context.  So, we should
-		 * call malloc with M_NOWAIT.
-		 */
-		ia = malloc(sizeof(*ia), M_IFADDR, M_NOWAIT | M_ZERO);
-		if (ia == NULL)
-			return (ENOBUFS);
+		ia = malloc(sizeof(*ia), M_IFADDR, M_WAITOK | M_ZERO);
 		LIST_INIT(&ia->ia6_memberships);
 		/* Initialize the address and masks, and put time stamp */
 		ia->ia_ifa.ifa_addr = (struct sockaddr *)&ia->ia_addr;
@@ -1934,28 +1930,42 @@ in6ifa_ifpwithaddr(struct ifnet *ifp, struct in6_addr *addr)
 }
 
 /*
- * find the internet address on a given interface corresponding to a neighbor's
- * address.
+ * Check wether an interface has a prefix by looking up the cloning route.
  */
-struct in6_ifaddr *
-in6ifa_ifplocaladdr(const struct ifnet *ifp, const struct in6_addr *addr)
+int
+in6_ifpprefix(const struct ifnet *ifp, const struct in6_addr *addr)
 {
-	struct ifaddr *ifa;
-	struct in6_ifaddr *ia;
+	struct sockaddr_in6 dst;
+	struct rtentry *rt;
+	u_int tableid = 0;  /* XXX */
 
-	TAILQ_FOREACH(ifa, &ifp->if_addrlist, ifa_list) {
-		if (ifa->ifa_addr == NULL)
-			continue;	/* just for safety */
-		if (ifa->ifa_addr->sa_family != AF_INET6)
-			continue;
-		ia = (struct in6_ifaddr *)ifa;
-		if (IN6_ARE_MASKED_ADDR_EQUAL(addr,
-				&ia->ia_addr.sin6_addr,
-				&ia->ia_prefixmask.sin6_addr))
-			return ia;
+	bzero(&dst, sizeof(dst));
+	dst.sin6_len = sizeof(struct sockaddr_in6);
+	dst.sin6_family = AF_INET6;
+	dst.sin6_addr = *addr;
+	rt = rtalloc1((struct sockaddr *)&dst, RT_NOCLONING, tableid);
+
+	if (rt == NULL)
+		return (0);
+	if ((rt->rt_flags & (RTF_CLONING | RTF_CLONED)) == 0 ||
+	    (rt->rt_ifp != ifp &&
+#if NBRIDGE > 0
+	    (rt->rt_ifp->if_bridge == NULL || ifp->if_bridge == NULL ||
+	    rt->rt_ifp->if_bridge != ifp->if_bridge) &&
+#endif
+#if NCARP > 0
+	    (ifp->if_type != IFT_CARP || rt->rt_ifp != ifp->if_carpdev) &&
+	    (rt->rt_ifp->if_type != IFT_CARP || rt->rt_ifp->if_carpdev != ifp)&&
+	    (ifp->if_type != IFT_CARP || rt->rt_ifp->if_type != IFT_CARP ||
+	    rt->rt_ifp->if_carpdev != ifp->if_carpdev) &&
+#endif
+	    1)) {
+		RTFREE(rt);
+		return (0);
 	}
 
-	return NULL;
+	RTFREE(rt);
+	return (1);
 }
 
 /*

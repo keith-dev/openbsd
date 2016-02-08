@@ -1,4 +1,4 @@
-/*	$OpenBSD: cerror.S,v 1.7 2008/05/21 20:39:32 miod Exp $ */
+/*	$OpenBSD: cerror.S,v 1.9 2011/04/09 15:45:17 deraadt Exp $ */
 /*
  * Copyright (c) 1983, 1993
  *	The Regents of the University of California.  All rights reserved.
@@ -30,8 +30,10 @@
 
 #include "SYS.h"
 
+WEAK_ALIAS(_cerror,__cerror)
+
 	.globl	_C_LABEL(errno)
-_C_LABEL(_cerror):
+_C_LABEL(__cerror):
 	movl	r0,_C_LABEL(errno)
 	mnegl	$1,r0
 	mnegl	$1,r1

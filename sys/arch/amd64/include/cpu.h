@@ -1,4 +1,4 @@
-/*	$OpenBSD: cpu.h,v 1.62 2010/11/29 00:04:09 dlg Exp $	*/
+/*	$OpenBSD: cpu.h,v 1.68 2011/06/16 19:46:40 kettenis Exp $	*/
 /*	$NetBSD: cpu.h,v 1.1 2003/04/26 18:39:39 fvdl Exp $	*/
 
 /*-
@@ -35,8 +35,8 @@
  *	@(#)cpu.h	5.4 (Berkeley) 5/9/91
  */
 
-#ifndef _AMD64_CPU_H_
-#define _AMD64_CPU_H_
+#ifndef _MACHINE_CPU_H_
+#define _MACHINE_CPU_H_
 
 /*
  * Definitions unique to x86-64 cpu support.
@@ -72,6 +72,7 @@ struct cpu_info {
 	u_int32_t ci_randseed;
 
 	u_int64_t ci_scratch;
+	u_int64_t ci_cur_fsbase;
 
 	struct proc *ci_fpcurproc;
 	struct proc *ci_fpsaveproc;
@@ -81,11 +82,11 @@ struct cpu_info {
 	struct pcb *ci_idle_pcb;
 
 	struct intrsource *ci_isources[MAX_INTR_SOURCES];
-	u_int32_t	ci_ipending;
+	u_int64_t	ci_ipending;
 	int		ci_ilevel;
 	int		ci_idepth;
-	u_int32_t	ci_imask[NIPL];
-	u_int32_t	ci_iunmask[NIPL];
+	u_int64_t	ci_imask[NIPL];
+	u_int64_t	ci_iunmask[NIPL];
 #ifdef DIAGNOSTIC
 	int		ci_mutex_level;
 #endif
@@ -317,6 +318,10 @@ void x86_bus_space_mallocok(void);
 void k8_powernow_init(struct cpu_info *);
 void k8_powernow_setperf(int);
 
+/* k1x-pstate.c */
+void k1x_init(struct cpu_info *);
+void k1x_setperf(int);
+
 void est_init(struct cpu_info *);
 void est_setperf(int);
 
@@ -370,4 +375,4 @@ void mp_setperf_init(void);
  */
 #define CR4_DEFAULT (CR4_PAE|CR4_PGE|CR4_PSE|CR4_OSFXSR|CR4_OSXMMEXCPT)
 
-#endif /* !_AMD64_CPU_H_ */
+#endif /* !_MACHINE_CPU_H_ */

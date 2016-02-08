@@ -1,4 +1,4 @@
-#	$OpenBSD: install.md,v 1.50 2011/01/03 00:36:49 deraadt Exp $
+#	$OpenBSD: install.md,v 1.53 2011/07/06 20:02:16 halex Exp $
 #
 #
 # Copyright (c) 1996 The NetBSD Foundation, Inc.
@@ -39,16 +39,14 @@ NCPU=$(sysctl -n hw.ncpufound)
 ((NCPU > 1)) && { DEFAULTSETS="bsd bsd.rd bsd.mp" ; SANESETS="bsd bsd.mp" ; }
 
 md_installboot() {
-	if [[ -f /mnt/bsd.mp ]] && ((NCPU > 1)); then
-		echo "Multiprocessor machine; using bsd.mp instead of bsd."
-		mv /mnt/bsd /mnt/bsd.sp 2>/dev/null
-		mv /mnt/bsd.mp /mnt/bsd
-	fi
-
 	# LBA biosboot uses /boot's i-node number. Using 'cat' preserves that
 	# number, so multiboot setups (NTLDR) can work across upgrades.
 	cat /usr/mdec/boot >/mnt/boot
-	/usr/mdec/installboot /mnt/boot /usr/mdec/biosboot ${1}
+	if ! /usr/mdec/installboot /mnt/boot /usr/mdec/biosboot ${1} ; then
+		echo "\nFailed to install bootblocks."
+		echo "You will not be able to boot OpenBSD from ${1}."
+		exit
+	fi
 }
 
 md_prep_fdisk() {
@@ -114,7 +112,7 @@ md_prep_disklabel() {
 			c*|C*)	break ;;
 			*)	continue ;;
 			esac
-			disklabel -f $_f $_op -A $_disk
+			disklabel $FSTABFLAG $_f $_op -A $_disk
 			return
 		done
 	fi
@@ -131,7 +129,7 @@ start of the disk, NOT the start of the OpenBSD MBR partition.
 
 __EOT
 
-	disklabel -f $_f -E $_disk
+	disklabel $FSTABFLAG $_f -E $_disk
 }
 
 md_congrats() {

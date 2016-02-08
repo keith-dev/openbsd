@@ -1,4 +1,4 @@
-/*	$OpenBSD: database.c,v 1.27 2010/05/26 13:56:08 nicm Exp $ */
+/*	$OpenBSD: database.c,v 1.29 2011/05/09 12:24:41 claudio Exp $ */
 
 /*
  * Copyright (c) 2005 Claudio Jeker <claudio@openbsd.org>
@@ -138,7 +138,8 @@ send_db_description(struct nbr *nbr)
 		fatalx("send_db_description: unknown interface type");
 	}
 
-	dd_hdr.opts = area_ospf_options(nbr->iface->area);
+	/* XXX button or not for opaque LSA? */
+	dd_hdr.opts = area_ospf_options(nbr->iface->area) | OSPF_OPTION_O;
 	dd_hdr.bits = bits;
 	dd_hdr.dd_seq_num = htonl(nbr->dd_seq_num);
 
@@ -187,9 +188,9 @@ recv_db_description(struct nbr *nbr, char *buf, u_int16_t len)
 	    nbr->last_rx_bits == dd_hdr.bits &&
 	    ntohl(dd_hdr.dd_seq_num) == nbr->dd_seq_num - nbr->dd_master ?
 	    1 : 0) {
-			log_debug("recv_db_description: dupe from ID %s",
-			    inet_ntoa(nbr->id));
-			dupe = 1;
+		log_debug("recv_db_description: dupe from ID %s",
+		    inet_ntoa(nbr->id));
+		dupe = 1;
 	}
 
 	switch (nbr->state) {
@@ -211,6 +212,13 @@ recv_db_description(struct nbr *nbr, char *buf, u_int16_t len)
 	case NBR_STA_XSTRT:
 		if (dupe)
 			return;
+		nbr->capa_options = dd_hdr.opts;
+		if ((nbr->capa_options & nbr->options) != nbr->options) {
+			log_warnx("recv_db_description: neighbor ID %s "
+			    "sent inconsistent options %x vs. %x",
+			    inet_ntoa(nbr->id), nbr->capa_options,
+			    nbr->options);
+		}
 		/*
 		 * check bits: either I,M,MS or only M
 		 */

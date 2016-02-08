@@ -1,25 +1,8 @@
-#	$OpenBSD: Makefile.inc,v 1.10 2011/01/14 17:18:50 deraadt Exp $
+#	$OpenBSD: Makefile.inc,v 1.12 2011/07/22 09:30:54 espie Exp $
 
-kernels: bootblocks bsd bsd.mp
-	cp ${.CURDIR}/../sys/arch/hppa/compile/GENERIC/bsd \
-	    ${RELEASEDIR}/bsd
-	cp ${.CURDIR}/../sys/arch/hppa/compile/GENERIC.MP/bsd \
-	    ${RELEASEDIR}/bsd.mp
-
-bsd:
-	cd ${.CURDIR}/../sys/arch/hppa/conf && config GENERIC
-	cd ${.CURDIR}/../sys/arch/hppa/compile/GENERIC && \
-	    ${MAKE} clean && ${MAKE} depend && exec ${MAKE}
-
-bsd.mp:
-	cd ${.CURDIR}/../sys/arch/hppa/conf && config GENERIC.MP
-	cd ${.CURDIR}/../sys/arch/hppa/compile/GENERIC.MP && \
-	    ${MAKE} clean && ${MAKE} depend && exec ${MAKE}
+KERNELS += GENERIC.MP bsd.mp
 
 bootblocks:
 	cp ${DESTDIR}/usr/mdec/xxboot ${RELEASEDIR}
 
-MDEXT=	bsd bsd.mp bsd.rd cd${OSrev}.iso lif${OSrev}.fs \
-	xxboot
-
-.PHONY: bsd bsd.mp bootblocks
+MDEXT=	bsd.rd cd${OSrev}.iso lif${OSrev}.fs xxboot

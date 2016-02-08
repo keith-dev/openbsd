@@ -1,4 +1,4 @@
-/* $OpenBSD: status.c,v 1.71 2011/01/26 01:54:56 nicm Exp $ */
+/* $OpenBSD: status.c,v 1.77 2011/07/08 06:37:57 nicm Exp $ */
 
 /*
  * Copyright (c) 2007 Nicholas Marriott <nicm@users.sourceforge.net>
@@ -38,8 +38,8 @@ void	status_job_free(void *);
 void	status_job_callback(struct job *);
 char   *status_print(
 	    struct client *, struct winlink *, time_t, struct grid_cell *);
-void	status_replace1(struct client *,
-	    struct winlink *, char **, char **, char *, size_t, int);
+void	status_replace1(struct client *, struct session *, struct winlink *,
+	    struct window_pane *, char **, char **, char *, size_t, int);
 void	status_message_callback(int, short, void *);
 
 const char *status_prompt_up_history(u_int *);
@@ -80,8 +80,8 @@ status_redraw_get_left(struct client *c,
 	if (attr != 0)
 		gc->attr = attr;
 
-	left = status_replace(
-	    c, NULL, options_get_string(&s->options, "status-left"), t, 1);
+	left = status_replace(c, NULL,
+	    NULL, NULL, options_get_string(&s->options, "status-left"), t, 1);
 
 	*size = options_get_number(&s->options, "status-left-length");
 	leftlen = screen_write_cstrlen(utf8flag, "%s", left);
@@ -110,14 +110,31 @@ status_redraw_get_right(struct client *c,
 	if (attr != 0)
 		gc->attr = attr;
 
-	right = status_replace(
-	    c, NULL, options_get_string(&s->options, "status-right"), t, 1);
+	right = status_replace(c, NULL,
+	    NULL, NULL, options_get_string(&s->options, "status-right"), t, 1);
 
 	*size = options_get_number(&s->options, "status-right-length");
 	rightlen = screen_write_cstrlen(utf8flag, "%s", right);
 	if (rightlen < *size)
 		*size = rightlen;
 	return (right);
+}
+
+/* Set window at window list position. */
+void
+status_set_window_at(struct client *c, u_int x)
+{
+	struct session	*s = c->session;
+	struct winlink	*wl;
+
+	x += s->wlmouse;
+	RB_FOREACH(wl, winlinks, &s->windows) {
+		if (x < wl->status_width &&
+			session_select(s, wl->idx) == 0) {
+			server_redraw_session(s);
+		}
+		x -= wl->status_width + 1;
+	}
 }
 
 /* Draw status for client on the last lines of given context. */
@@ -325,6 +342,7 @@ draw:
 		wloffset++;
 
 	/* Copy the window list. */
+	s->wlmouse = -wloffset + wlstart;
 	screen_write_cursormove(&ctx, wloffset, 0);
 	screen_write_copy(&ctx, &window_list, wlstart, 0, wlwidth, 1);
 	screen_free(&window_list);
@@ -347,16 +365,20 @@ out:
 
 /* Replace a single special sequence (prefixed by #). */
 void
-status_replace1(struct client *c,struct winlink *wl,
-    char **iptr, char **optr, char *out, size_t outsize, int jobsflag)
+status_replace1(struct client *c, struct session *s, struct winlink *wl,
+    struct window_pane *wp, char **iptr, char **optr, char *out,
+    size_t outsize, int jobsflag)
 {
-	struct session *s = c->session;
-	char		ch, tmp[256], *ptr, *endptr, *freeptr;
-	size_t		ptrlen;
-	long		limit;
+	char	ch, tmp[256], *ptr, *endptr, *freeptr;
+	size_t	ptrlen;
+	long	limit;
 
+	if (s == NULL)
+		s = c->session;
 	if (wl == NULL)
 		wl = s->curw;
+	if (wp == NULL)
+		wp = wl->window->active;
 
 	errno = 0;
 	limit = strtol(*iptr, &endptr, 10);
@@ -379,9 +401,20 @@ status_replace1(struct client *c,struct winlink *wl,
 		if ((ptr = status_find_job(c, iptr)) == NULL)
 			return;
 		goto do_replace;
+	case 'D':
+		xsnprintf(tmp, sizeof tmp, "%%%u", wp->id);
+		ptr = tmp;
+		goto do_replace;
 	case 'H':
 		if (gethostname(tmp, sizeof tmp) != 0)
 			fatal("gethostname failed");
+		ptr = tmp;
+		goto do_replace;
+	case 'h':
+		if (gethostname(tmp, sizeof tmp) != 0)
+			fatal("gethostname failed");
+		if ((ptr = strchr(tmp, '.')) != NULL)
+			*ptr = '\0';
 		ptr = tmp;
 		goto do_replace;
 	case 'I':
@@ -389,15 +422,15 @@ status_replace1(struct client *c,struct winlink *wl,
 		ptr = tmp;
 		goto do_replace;
 	case 'P':
-		xsnprintf(tmp, sizeof tmp, "%u",
-		    window_pane_index(wl->window, wl->window->active));
+		xsnprintf(
+		    tmp, sizeof tmp, "%u", window_pane_index(wl->window, wp));
 		ptr = tmp;
 		goto do_replace;
 	case 'S':
 		ptr = s->name;
 		goto do_replace;
 	case 'T':
-		ptr = wl->window->active->base.title;
+		ptr = wp->base.title;
 		goto do_replace;
 	case 'W':
 		ptr = wl->window->name;
@@ -449,8 +482,8 @@ skip_to:
 
 /* Replace special sequences in fmt. */
 char *
-status_replace(struct client *c,
-    struct winlink *wl, const char *fmt, time_t t, int jobsflag)
+status_replace(struct client *c, struct session *s, struct winlink *wl,
+    struct window_pane *wp, const char *fmt, time_t t, int jobsflag)
 {
 	static char	out[BUFSIZ];
 	char		in[BUFSIZ], ch, *iptr, *optr;
@@ -470,7 +503,8 @@ status_replace(struct client *c,
 			*optr++ = ch;
 			continue;
 		}
-		status_replace1(c, wl, &iptr, &optr, out, sizeof out, jobsflag);
+		status_replace1(
+		    c, s, wl, wp, &iptr, &optr, out, sizeof out, jobsflag);
 	}
 	*optr = '\0';
 
@@ -608,7 +642,7 @@ status_job_callback(struct job *job)
 		buf = xstrdup(line);
 
 	so->out = buf;
-	server_redraw_client(c);
+	server_status_client(c);
 }
 
 /* Return winlink status line entry and adjust gc as necessary. */
@@ -657,7 +691,7 @@ status_print(
 			gc->attr = attr;
 	}
 
-	text = status_replace(c, wl, fmt, t, 1);
+	text = status_replace(c, NULL, wl, NULL, fmt, t, 1);
 	return (text);
 }
 
@@ -781,7 +815,7 @@ status_message_redraw(struct client *c)
 
 /* Enable status line prompt. */
 void
-status_prompt_set(struct client *c, const char *msg,
+status_prompt_set(struct client *c, const char *msg, const char *input,
     int (*callbackfn)(void *, const char *), void (*freefn)(void *),
     void *data, int flags)
 {
@@ -790,10 +824,14 @@ status_prompt_set(struct client *c, const char *msg,
 	status_message_clear(c);
 	status_prompt_clear(c);
 
-	c->prompt_string = xstrdup(msg);
+	c->prompt_string = status_replace(c, NULL, NULL, NULL, msg,
+	    time(NULL), 0);
 
-	c->prompt_buffer = xstrdup("");
-	c->prompt_index = 0;
+	if (input == NULL)
+		input = "";
+	c->prompt_buffer = status_replace(c, NULL, NULL, NULL, input,
+	    time(NULL), 0);
+	c->prompt_index = strlen(c->prompt_buffer);
 
 	c->prompt_callbackfn = callbackfn;
 	c->prompt_freefn = freefn;
@@ -837,13 +875,18 @@ status_prompt_clear(struct client *c)
 
 /* Update status line prompt with a new prompt string. */
 void
-status_prompt_update(struct client *c, const char *msg)
+status_prompt_update(struct client *c, const char *msg, const char *input)
 {
 	xfree(c->prompt_string);
-	c->prompt_string = xstrdup(msg);
+	c->prompt_string = status_replace(c, NULL, NULL, NULL, msg,
+	    time(NULL), 0);
 
-	*c->prompt_buffer = '\0';
-	c->prompt_index = 0;
+	xfree(c->prompt_buffer);
+	if (input == NULL)
+		input = "";
+	c->prompt_buffer = status_replace(c, NULL, NULL, NULL, input,
+	    time(NULL), 0);
+	c->prompt_index = strlen(c->prompt_buffer);
 
 	c->prompt_hindex = 0;
 

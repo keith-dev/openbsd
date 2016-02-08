@@ -1,4 +1,4 @@
-/*	$OpenBSD: kern_fork.c,v 1.123 2010/10/31 00:03:44 guenther Exp $	*/
+/*	$OpenBSD: kern_fork.c,v 1.128 2011/07/07 18:00:33 guenther Exp $	*/
 /*	$NetBSD: kern_fork.c,v 1.29 1996/02/09 18:59:34 christos Exp $	*/
 
 /*
@@ -184,6 +184,7 @@ process_new(struct proc *newproc, struct proc *parentproc)
 	crhold(parent->ps_cred->pc_ucred);
 	pr->ps_limit->p_refcnt++;
 
+	pr->ps_flags = parent->ps_flags & (PS_SUGID | PS_SUGIDEXEC);
 	if (parent->ps_session->s_ttyvp != NULL &&
 	    parent->ps_flags & PS_CONTROLT)
 		atomic_setbits_int(&pr->ps_flags, PS_CONTROLT);
@@ -205,8 +206,6 @@ fork1(struct proc *p1, int exitsig, int flags, void *stack, size_t stacksize,
 	int count;
 	vaddr_t uaddr;
 	int s;
-	extern void endtsleep(void *);
-	extern void realitexpire(void *);
 	struct  ptrace_state *newptstat = NULL;
 #if NSYSTRACE > 0
 	void *newstrp = NULL;
@@ -252,7 +251,7 @@ fork1(struct proc *p1, int exitsig, int flags, void *stack, size_t stacksize,
 
 	uaddr = uvm_km_kmemalloc_pla(kernel_map, uvm.kernel_object, USPACE,
 	    USPACE_ALIGN, UVM_KMF_ZERO,
-	    dma_constraint.ucr_low, dma_constraint.ucr_high,
+	    no_constraint.ucr_low, no_constraint.ucr_high,
 	    0, 0, USPACE/PAGE_SIZE);
 	if (uaddr == 0) {
 		chgproccnt(uid, -1);
@@ -303,7 +302,6 @@ fork1(struct proc *p1, int exitsig, int flags, void *stack, size_t stacksize,
 	 */
 	if (p1->p_flag & P_PROFIL)
 		startprofclock(p2);
-	atomic_setbits_int(&p2->p_flag, p1->p_flag & (P_SUGID | P_SUGIDEXEC));
 	if (flags & FORK_PTRACE)
 		atomic_setbits_int(&p2->p_flag, p1->p_flag & P_TRACED);
 
@@ -319,8 +317,10 @@ fork1(struct proc *p1, int exitsig, int flags, void *stack, size_t stacksize,
 	else
 		p2->p_fd = fdcopy(p1);
 
-	if (flags & FORK_PPWAIT)
-		atomic_setbits_int(&p2->p_flag, P_PPWAIT);
+	if (flags & FORK_PPWAIT) {
+		atomic_setbits_int(&p2->p_p->ps_flags, PS_PPWAIT);
+		atomic_setbits_int(&p1->p_p->ps_flags, PS_ISPWAIT);
+	}
 	if (flags & FORK_NOZOMBIE)
 		atomic_setbits_int(&p2->p_flag, P_NOZOMBIE);
 
@@ -462,11 +462,13 @@ fork1(struct proc *p1, int exitsig, int flags, void *stack, size_t stacksize,
 
 	/*
 	 * Preserve synchronization semantics of vfork.  If waiting for
-	 * child to exec or exit, set P_PPWAIT on child, and sleep on our
-	 * process (in case of exit).
+	 * child to exec or exit, set PS_PPWAIT on child and PS_ISPWAIT
+	 * on ourselves, and sleep on our process for the latter flag
+	 * to go away.
+	 * XXX Need to stop other rthreads in the parent
 	 */
 	if (flags & FORK_PPWAIT)
-		while (p2->p_flag & P_PPWAIT)
+		while (p1->p_p->ps_flags & PS_ISPWAIT)
 			tsleep(p1->p_p, PWAIT, "ppwait", 0);
 
 	/*
@@ -524,6 +526,6 @@ proc_trampoline_mp(void)
 	SCHED_ASSERT_UNLOCKED();
 	KASSERT(__mp_lock_held(&kernel_lock) == 0);
 
-	KERNEL_PROC_LOCK(p);
+	KERNEL_LOCK();
 }
 #endif

@@ -1,4 +1,4 @@
-#	$OpenBSD: Makefile,v 1.16 2009/04/17 15:59:48 deraadt Exp $
+#	$OpenBSD: Makefile,v 1.19 2011/07/08 21:39:32 drahn Exp $
 
 TOP=		${.CURDIR}/..
 
@@ -17,7 +17,7 @@ FLOPPYSIZE?=	2880
 FLOPPYTYPE?=	floppy
 INSTALLBOOT?=	/usr/mdec/installboot
 
-VND?=		svnd0
+VND?=		vnd0
 VND_DEV=	/dev/${VND}a
 VND_RDEV=	/dev/r${VND}a
 VND_CRDEV=	/dev/r${VND}c
@@ -85,7 +85,7 @@ ${IMAGE}: rd_setup do_files rd_teardown
 bsd:
 	cd ${TOP}/../../sys/arch/sparc64/conf && config ${KERNEL}
 	cd ${TOP}/../../sys/arch/sparc64/compile/${KERNEL} && \
-	    ${MAKE} clean && ${MAKE} depend && COPTS=-Os ${MAKE}
+	    ${MAKE} clean && COPTS=-Os exec ${MAKE}
 	cp ${TOP}/../../sys/arch/sparc64/compile/${KERNEL}/bsd bsd
 
 rd_setup:
@@ -102,7 +102,9 @@ rd_teardown:
 	-vnconfig -u ${VND}
 
 elfrdsetroot:	${TOP}/../common/elfrdsetroot.c
-	${HOSTCC} -o elfrdsetroot ${TOP}/../common/elfrdsetroot.c
+	${HOSTCC} ${HOSTCFLAGS} -o elfrdsetroot \
+	    ${TOP}/../common/elfrdsetroot.c ${TOP}/../common/elf32.c \
+	    ${TOP}/../common/elf64.c
 
 unconfig:
 	-umount -f ${MOUNT_POINT}

@@ -1,4 +1,4 @@
-/*	$OpenBSD: openbsd-syscalls.c,v 1.38 2010/07/05 22:26:20 tedu Exp $	*/
+/*	$OpenBSD: openbsd-syscalls.c,v 1.40 2011/07/04 22:59:42 tedu Exp $	*/
 /*
  * Copyright 2002 Niels Provos <provos@citi.umich.edu>
  * All rights reserved.
@@ -33,9 +33,7 @@
 
 #include <sys/syscall.h>
 
-#include <compat/freebsd/freebsd_syscall.h>
 #include <compat/linux/linux_syscall.h>
-#include <compat/svr4/svr4_syscall.h>
 
 #define KTRACE
 #define PTRACE
@@ -45,12 +43,9 @@
 #define SYSVMSG
 #define SYSVSHM
 #define LFS
-#define RTHREADS
 #include <kern/syscalls.c>
 
-#include <compat/freebsd/freebsd_syscalls.c>
 #include <compat/linux/linux_syscalls.c>
-#include <compat/svr4/svr4_syscalls.c>
 #undef KTRACE
 #undef PTRACE
 #undef NFSCLIENT
@@ -59,7 +54,6 @@
 #undef SYSVMSG
 #undef SYSVSHM
 #undef LFS
-#undef RTHREADS
 
 #include <sys/ioctl.h>
 #include <sys/tree.h>
@@ -85,8 +79,6 @@ static struct emulation emulations[] = {
 	{ "native",	syscallnames,		SYS_MAXSYSCALL },
 	{ "aout",	syscallnames,		SYS_MAXSYSCALL },
 	{ "linux",	linux_syscallnames,	LINUX_SYS_MAXSYSCALL },
-	{ "svr4",	svr4_syscallnames,	SVR4_SYS_MAXSYSCALL },
-	{ "freebsd",	freebsd_syscallnames,	FREEBSD_SYS_MAXSYSCALL },
 	{ NULL,		NULL,			0 }
 };
 

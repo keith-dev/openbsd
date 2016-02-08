@@ -1,4 +1,4 @@
-/*	$OpenBSD: pass2.c,v 1.29 2009/10/27 23:59:32 deraadt Exp $	*/
+/*	$OpenBSD: pass2.c,v 1.32 2011/05/08 14:38:40 otto Exp $	*/
 /*	$NetBSD: pass2.c,v 1.17 1996/09/27 22:45:15 christos Exp $	*/
 
 /*
@@ -213,15 +213,15 @@ pass2(void)
 			if (reply("FIX") == 0)
 				continue;
 			(void)makeentry(inp->i_number, inp->i_parent, "..");
-			lncntp[inp->i_parent]--;
+			ILNCOUNT(inp->i_parent)--;
 			continue;
 		}
 		fileerror(inp->i_parent, inp->i_number,
 		    "BAD INODE NUMBER FOR '..'");
 		if (reply("FIX") == 0)
 			continue;
-		lncntp[inp->i_dotdot]++;
-		lncntp[inp->i_parent]--;
+		ILNCOUNT(inp->i_dotdot)++;
+		ILNCOUNT(inp->i_parent)--;
 		inp->i_dotdot = inp->i_parent;
 		(void)changeino(inp->i_number, "..", inp->i_parent);
 	}
@@ -236,7 +236,6 @@ pass2(void)
 		    inp->i_number == ROOTINO)
 			continue;
 		pinp = getinoinfo(inp->i_parent);
-		inp->i_parentp = pinp;
 		inp->i_sibling = pinp->i_child;
 		pinp->i_child = inp;
 	}
@@ -259,13 +258,6 @@ pass2check(struct inodesc *idesc)
 	char pathbuf[MAXPATHLEN + 1];
 
 	/*
-	 * If converting, set directory entry type.
-	 */
-	if (doinglevel2 && dirp->d_ino > 0 && dirp->d_ino < maxino) {
-		dirp->d_type = GET_ITYPE(dirp->d_ino);
-		ret |= ALTERED;
-	}
-	/*
 	 * check for "."
 	 */
 	if (idesc->id_entryno != 0)
@@ -277,7 +269,7 @@ pass2check(struct inodesc *idesc)
 			if (reply("FIX") == 1)
 				ret |= ALTERED;
 		}
-		if (newinofmt && dirp->d_type != DT_DIR) {
+		if (dirp->d_type != DT_DIR) {
 			direrror(idesc->id_number, "BAD TYPE VALUE FOR '.'");
 			dirp->d_type = DT_DIR;
 			if (reply("FIX") == 1)
@@ -287,21 +279,9 @@ pass2check(struct inodesc *idesc)
 	}
 	direrror(idesc->id_number, "MISSING '.'");
 	proto.d_ino = idesc->id_number;
-	if (newinofmt)
-		proto.d_type = DT_DIR;
-	else
-		proto.d_type = 0;
+	proto.d_type = DT_DIR;
 	proto.d_namlen = 1;
 	(void)strlcpy(proto.d_name, ".", sizeof proto.d_name);
-#	if BYTE_ORDER == LITTLE_ENDIAN
-		if (!newinofmt) {
-			u_char tmp;
-
-			tmp = proto.d_type;
-			proto.d_type = proto.d_namlen;
-			proto.d_namlen = tmp;
-		}
-#	endif
 	entrysize = DIRSIZ(0, &proto);
 	if (dirp->d_ino != 0 && strcmp(dirp->d_name, "..") != 0) {
 		pfatal("CANNOT FIX, FIRST ENTRY IN DIRECTORY CONTAINS %s\n",
@@ -318,7 +298,7 @@ pass2check(struct inodesc *idesc)
 		proto.d_reclen = entrysize;
 		memcpy(dirp, &proto, (size_t)entrysize);
 		idesc->id_entryno++;
-		lncntp[dirp->d_ino]--;
+		ILNCOUNT(dirp->d_ino)--;
 		dirp = (struct direct *)((char *)(dirp) + entrysize);
 		memset(dirp, 0, (size_t)n);
 		dirp->d_reclen = n;
@@ -330,21 +310,9 @@ chk1:
 		goto chk2;
 	inp = getinoinfo(idesc->id_number);
 	proto.d_ino = inp->i_parent;
-	if (newinofmt)
-		proto.d_type = DT_DIR;
-	else
-		proto.d_type = 0;
+	proto.d_type = DT_DIR;
 	proto.d_namlen = 2;
 	(void)strlcpy(proto.d_name, "..", sizeof proto.d_name);
-#	if BYTE_ORDER == LITTLE_ENDIAN
-		if (!newinofmt) {
-			u_char tmp;
-
-			tmp = proto.d_type;
-			proto.d_type = proto.d_namlen;
-			proto.d_namlen = tmp;
-		}
-#	endif
 	entrysize = DIRSIZ(0, &proto);
 	if (idesc->id_entryno == 0) {
 		n = DIRSIZ(0, dirp);
@@ -353,14 +321,14 @@ chk1:
 		proto.d_reclen = dirp->d_reclen - n;
 		dirp->d_reclen = n;
 		idesc->id_entryno++;
-		lncntp[dirp->d_ino]--;
+		ILNCOUNT(dirp->d_ino)--;
 		dirp = (struct direct *)((char *)(dirp) + n);
 		memset(dirp, 0, (size_t)proto.d_reclen);
 		dirp->d_reclen = proto.d_reclen;
 	}
 	if (dirp->d_ino != 0 && strcmp(dirp->d_name, "..") == 0) {
 		inp->i_dotdot = dirp->d_ino;
-		if (newinofmt && dirp->d_type != DT_DIR) {
+		if (dirp->d_type != DT_DIR) {
 			direrror(idesc->id_number, "BAD TYPE VALUE FOR '..'");
 			dirp->d_type = DT_DIR;
 			if (reply("FIX") == 1)
@@ -390,7 +358,7 @@ chk1:
 	}
 	idesc->id_entryno++;
 	if (dirp->d_ino != 0)
-		lncntp[dirp->d_ino]--;
+		ILNCOUNT(dirp->d_ino)--;
 	return (ret|KEEPON);
 chk2:
 	if (dirp->d_ino == 0)
@@ -446,7 +414,7 @@ again:
 			dp = ginode(dirp->d_ino);
 			SET_ISTATE(dirp->d_ino, (DIP(dp, di_mode) & IFMT) ==
 			    IFDIR ? DSTATE : FSTATE);
-			lncntp[dirp->d_ino] = DIP(dp, di_nlink);
+			ILNCOUNT(dirp->d_ino) = DIP(dp, di_nlink);
 			goto again;
 
 		case DSTATE:
@@ -473,15 +441,14 @@ again:
 			/* FALLTHROUGH */
 
 		case FSTATE:
-			if (newinofmt && dirp->d_type !=
-			    GET_ITYPE(dirp->d_ino)) {
+			if (dirp->d_type != GET_ITYPE(dirp->d_ino)) {
 				fileerror(idesc->id_number, dirp->d_ino,
 				    "BAD TYPE VALUE");
 				dirp->d_type = GET_ITYPE(dirp->d_ino);
 				if (reply("FIX") == 1)
 					ret |= ALTERED;
 			}
-			lncntp[dirp->d_ino]--;
+			ILNCOUNT(dirp->d_ino)--;
 			break;
 
 		default:

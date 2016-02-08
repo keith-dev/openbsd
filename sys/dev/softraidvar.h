@@ -1,4 +1,4 @@
-/* $OpenBSD: softraidvar.h,v 1.97 2011/01/29 15:01:22 marco Exp $ */
+/* $OpenBSD: softraidvar.h,v 1.106 2011/07/07 03:50:00 tedu Exp $ */
 /*
  * Copyright (c) 2006 Marco Peereboom <marco@peereboom.us>
  * Copyright (c) 2008 Chris Kuethe <ckuethe@openbsd.org>
@@ -19,8 +19,14 @@
 #ifndef SOFTRAIDVAR_H
 #define SOFTRAIDVAR_H
 
-#include <crypto/md5.h>
+#include <sys/socket.h>
 #include <sys/vnode.h>
+
+#include <net/if.h>
+#include <netinet/in.h>
+#include <netinet/if_ether.h>
+
+#include <crypto/md5.h>
 
 #define SR_META_VERSION		4	/* bump when sr_metadata changes */
 #define SR_META_SIZE		64	/* save space at chunk beginning */
@@ -240,6 +246,14 @@ struct sr_crypto_kdfpair {
 	u_int32_t	kdfsize2;
 };
 
+struct sr_aoe_config {
+	char		nic[IFNAMSIZ];
+	struct ether_addr dsteaddr;
+	unsigned short	shelf;
+	unsigned char	slot;
+};
+
+
 #ifdef _KERNEL
 #include <dev/biovar.h>
 
@@ -274,7 +288,7 @@ extern u_int32_t		sr_debug;
 #endif
 
 #define	SR_MAXFER		MAXPHYS
-#define	SR_MAX_LD		1
+#define	SR_MAX_LD		256
 #define	SR_MAX_CMDS		16
 #define	SR_MAX_STATES		7
 #define SR_VM_IGNORE_DIRTY	1
@@ -381,13 +395,14 @@ struct sr_raid6 {
 };
 
 /* CRYPTO */
+TAILQ_HEAD(sr_crypto_wu_head, sr_crypto_wu);
 #define SR_CRYPTO_NOWU		16
+
 struct sr_crypto {
+	struct mutex		 scr_mutex;
+	struct sr_crypto_wu_head scr_wus;
 	struct sr_meta_crypto	*scr_meta;
 	struct sr_chunk		*key_disk;
-
-	struct pool		sr_uiopl;
-	struct pool		sr_iovpl;
 
 	/* XXX only keep scr_sid over time */
 	u_int8_t		scr_key[SR_CRYPTO_MAXKEYS][SR_CRYPTO_KEYBYTES];
@@ -401,19 +416,19 @@ struct sr_aoe {
 	struct aoe_handler	*sra_ah;
 	int			sra_tag;
 	struct ifnet		*sra_ifp;
-	char			sra_eaddr[6];
+	struct ether_addr	sra_eaddr;
 };
 
-struct sr_metadata_list {
-	u_int8_t		sml_metadata[SR_META_SIZE * 512];
-	dev_t			sml_mm;
-	u_int32_t		sml_chunk_id;
-	int			sml_used;
+struct sr_boot_chunk {
+	struct sr_metadata	sbc_metadata;
+	dev_t			sbc_mm;
+	u_int32_t		sbc_chunk_id;
+	int			sbc_used;
 
-	SLIST_ENTRY(sr_metadata_list) sml_link;
+	SLIST_ENTRY(sr_boot_chunk) sbc_link;
 };
 
-SLIST_HEAD(sr_metadata_list_head, sr_metadata_list);
+SLIST_HEAD(sr_boot_chunk_head, sr_boot_chunk);
 
 struct sr_boot_volume {
 	struct sr_uuid		sbv_uuid;	/* Volume UUID. */
@@ -422,7 +437,7 @@ struct sr_boot_volume {
 	u_int32_t		sbv_chunk_no;	/* Number of chunks. */
 	u_int32_t		sbv_dev_no;	/* Number of devs discovered. */
 
-	struct sr_metadata_list_head	sml;	/* List of metadata. */
+	struct sr_boot_chunk_head sbv_chunks;	/* List of chunks. */
 
 	SLIST_ENTRY(sr_boot_volume)	sbv_link;
 };
@@ -453,7 +468,7 @@ struct sr_volume {
 
 	/* sensors */
 	struct ksensor		sv_sensor;
-	struct ksensordev	sv_sensordev;
+	int			sv_sensor_attached;
 	int			sv_sensor_valid;
 };
 
@@ -470,8 +485,7 @@ struct sr_discipline {
 #define	SR_MD_RAID4		7
 #define	SR_MD_RAID6		8
 	char			sd_name[10];	/* human readable dis name */
-	u_int8_t		sd_scsibus;	/* scsibus discipline uses */
-	struct scsi_link	sd_link;	/* link to midlayer */
+	u_int16_t		sd_target;	/* scsibus target discipline uses */
 
 	u_int32_t		sd_capabilities;
 #define SR_CAP_SYSTEM_DISK	0x00000001
@@ -505,7 +519,6 @@ struct sr_discipline {
 	int			sd_deleted;
 
 	struct device		*sd_scsibus_dev;
-	void			(*sd_shutdownhook)(void *);
 
 	/* discipline volume */
 	struct sr_volume	sd_vol;		/* volume associated */
@@ -524,7 +537,9 @@ struct sr_discipline {
 	struct sr_wu_list	sd_wu_freeq;	/* free wu queue */
 	struct sr_wu_list	sd_wu_pendq;	/* pending wu queue */
 	struct sr_wu_list	sd_wu_defq;	/* deferred wu queue */
-	int			sd_wu_sleep;	/* wu sleepers counter */
+
+	struct mutex		sd_wu_mtx;
+	struct scsi_iopool	sd_iopool;
 
 	/* discipline stats */
 	int			sd_wu_pending;
@@ -565,6 +580,7 @@ struct sr_softc {
 	struct device		sc_dev;
 
 	int			(*sc_ioctl)(struct device *, u_long, caddr_t);
+	void			(*sc_shutdownhook)(void *);
 
 	struct rwlock		sc_lock;
 
@@ -573,19 +589,17 @@ struct sr_softc {
 	struct rwlock		sc_hs_lock;	/* Lock for hotspares list. */
 	int			sc_hotspare_no; /* Number of hotspares. */
 
-	int			sc_sensors_running;
-	/*
-	 * during scsibus attach this is the discipline that is in use
-	 * this variable is protected by sc_lock and splhigh
-	 */
-	struct sr_discipline	*sc_attach_dis;
+	struct ksensordev	sc_sensordev;
+	struct sensor_task	*sc_sensor_task;
+
+	struct scsi_link	sc_link;	/* scsi prototype link */
+	struct scsibus_softc	*sc_scsibus;
 
 	/*
 	 * XXX expensive, alternative would be nice but has to be cheap
-	 * since the scsibus lookup happens on each IO
+	 * since the target lookup happens on each IO
 	 */
-#define SR_MAXSCSIBUS		256
-	struct sr_discipline	*sc_dis[SR_MAXSCSIBUS]; /* scsibus is u_int8_t */
+	struct sr_discipline	*sc_dis[SR_MAX_LD];
 };
 
 /* hotplug */
@@ -602,8 +616,8 @@ struct sr_ccb		*sr_ccb_get(struct sr_discipline *);
 void			sr_ccb_put(struct sr_ccb *);
 int			sr_wu_alloc(struct sr_discipline *);
 void			sr_wu_free(struct sr_discipline *);
-struct sr_workunit	*sr_wu_get(struct sr_discipline *, int);
-void			sr_wu_put(struct sr_workunit *);
+void			*sr_wu_get(void *);
+void			sr_wu_put(void *, void *);
 
 /* misc functions */
 int32_t			sr_validate_stripsize(u_int32_t);

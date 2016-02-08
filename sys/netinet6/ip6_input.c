@@ -1,4 +1,4 @@
-/*	$OpenBSD: ip6_input.c,v 1.98 2010/09/09 09:46:13 claudio Exp $	*/
+/*	$OpenBSD: ip6_input.c,v 1.102 2011/08/04 16:40:08 bluhm Exp $	*/
 /*	$KAME: ip6_input.c,v 1.188 2001/03/29 05:34:31 itojun Exp $	*/
 
 /*
@@ -155,7 +155,7 @@ ip6_init(void)
 		    pr->pr_protocol && pr->pr_protocol != IPPROTO_RAW &&
 		    pr->pr_protocol < IPPROTO_MAX)
 			ip6_protox[pr->pr_protocol] = pr - inet6sw;
-	ip6intrq.ifq_maxlen = ip6qmaxlen;
+	IFQ_SET_MAXLEN(&ip6intrq, ip6qmaxlen);
 	ip6_randomid_init();
 	nd6_init();
 	frag6_init();
@@ -270,7 +270,13 @@ ip6_input(struct mbuf *m)
 		in6_ifstat_inc(m->m_pkthdr.rcvif, ifs6_in_addrerr);
 		goto bad;
 	}
-
+	if ((IN6_IS_ADDR_LOOPBACK(&ip6->ip6_src) ||
+	    IN6_IS_ADDR_LOOPBACK(&ip6->ip6_dst)) &&
+	    (m->m_pkthdr.rcvif->if_flags & IFF_LOOPBACK) == 0) {
+		    ip6stat.ip6s_badscope++;
+		    in6_ifstat_inc(m->m_pkthdr.rcvif, ifs6_in_addrerr);
+		    goto bad;
+	}
 	if (IN6_IS_ADDR_MC_INTFACELOCAL(&ip6->ip6_dst) &&
 	    !(m->m_flags & M_LOOP)) {
 		/*
@@ -332,7 +338,7 @@ ip6_input(struct mbuf *m)
          * Packet filter
          */
 	odst = ip6->ip6_dst;
-	if (pf_test6(PF_IN, m->m_pkthdr.rcvif, &m, NULL) != PF_PASS)
+	if (pf_test(AF_INET6, PF_IN, m->m_pkthdr.rcvif, &m, NULL) != PF_PASS)
 		goto bad;
 	if (m == NULL)
 		return;
@@ -343,15 +349,9 @@ ip6_input(struct mbuf *m)
 
 	if (IN6_IS_ADDR_LOOPBACK(&ip6->ip6_src) ||
 	    IN6_IS_ADDR_LOOPBACK(&ip6->ip6_dst)) {
-		if (m->m_pkthdr.rcvif->if_flags & IFF_LOOPBACK) {
-			ours = 1;
-			deliverifp = m->m_pkthdr.rcvif;
-			goto hbhcheck;
-		} else {
-			ip6stat.ip6s_badscope++;
-			in6_ifstat_inc(m->m_pkthdr.rcvif, ifs6_in_addrerr);
-			goto bad;
-		}
+		ours = 1;
+		deliverifp = m->m_pkthdr.rcvif;
+		goto hbhcheck;
 	}
 
 	/* drop packets if interface ID portion is already filled */
@@ -729,7 +729,7 @@ ip6_input(struct mbuf *m)
 	m_freem(m);
 }
 
-/* scan packet for RH0 routing header. Mostly stolen from pf.c:pf_test6() */
+/* scan packet for RH0 routing header. Mostly stolen from pf.c:pf_test() */
 int
 ip6_check_rh0hdr(struct mbuf *m)
 {
@@ -974,8 +974,8 @@ ip6_process_hopopts(struct mbuf *m, u_int8_t *opthead, int hbhlen,
 /*
  * Unknown option processing.
  * The third argument `off' is the offset from the IPv6 header to the option,
- * which is necessary if the IPv6 header the and option header and IPv6 header
- * is not continuous in order to return an ICMPv6 error.
+ * which allows returning an ICMPv6 error even if the IPv6 header and the
+ * option header are not continuous.
  */
 int
 ip6_unknown_opt(u_int8_t *optp, struct mbuf *m, int off)

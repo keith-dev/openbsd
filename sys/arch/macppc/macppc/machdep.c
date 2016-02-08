@@ -1,4 +1,4 @@
-/*	$OpenBSD: machdep.c,v 1.123 2011/01/08 18:10:23 deraadt Exp $	*/
+/*	$OpenBSD: machdep.c,v 1.130 2011/07/05 04:48:01 guenther Exp $	*/
 /*	$NetBSD: machdep.c,v 1.4 1996/10/16 19:33:11 ws Exp $	*/
 
 /*
@@ -52,6 +52,7 @@
 #include <sys/core.h>
 #include <sys/kcore.h>
 
+#include <net/if.h>
 #include <uvm/uvm.h>
 
 #include <dev/cons.h>
@@ -91,20 +92,6 @@
  */
 extern struct user *proc0paddr;
 struct pool ppc_vecpl;
-
-/*
- * Declare these as initialized data so we can patch them.
- */
-#ifndef BUFCACHEPERCENT
-#define BUFCACHEPERCENT 5
-#endif
-
-#ifdef BUFPAGES
-int bufpages = BUFPAGES;
-#else
-int bufpages = 0;
-#endif
-int bufcachepercent = BUFCACHEPERCENT;
 
 struct uvm_constraint_range  dma_constraint = { 0x0, (paddr_t)-1 };
 struct uvm_constraint_range *uvm_md_constraints[] = { NULL };
@@ -576,17 +563,17 @@ sendsig(sig_t catcher, int sig, int mask, u_long code, int type,
 	frame.sf_signum = sig;
 
 	tf = trapframe(p);
-	oldonstack = psp->ps_sigstk.ss_flags & SS_ONSTACK;
+	oldonstack = p->p_sigstk.ss_flags & SS_ONSTACK;
 
 	/*
 	 * Allocate stack space for signal handler.
 	 */
-	if ((psp->ps_flags & SAS_ALTSTACK)
+	if ((p->p_sigstk.ss_flags & SS_DISABLE) == 0
 	    && !oldonstack
 	    && (psp->ps_sigonstack & sigmask(sig))) {
-		fp = (struct sigframe *)(psp->ps_sigstk.ss_sp
-					 + psp->ps_sigstk.ss_size);
-		psp->ps_sigstk.ss_flags |= SS_ONSTACK;
+		fp = (struct sigframe *)(p->p_sigstk.ss_sp
+					 + p->p_sigstk.ss_size);
+		p->p_sigstk.ss_flags |= SS_ONSTACK;
 	} else
 		fp = (struct sigframe *)tf->fixreg[1];
 
@@ -642,9 +629,9 @@ sys_sigreturn(struct proc *p, void *v, register_t *retval)
 		return EINVAL;
 	bcopy(&sc.sc_frame, tf, sizeof *tf);
 	if (sc.sc_onstack & 1)
-		p->p_sigacts->ps_sigstk.ss_flags |= SS_ONSTACK;
+		p->p_sigstk.ss_flags |= SS_ONSTACK;
 	else
-		p->p_sigacts->ps_sigstk.ss_flags &= ~SS_ONSTACK;
+		p->p_sigstk.ss_flags &= ~SS_ONSTACK;
 	p->p_sigmask = sc.sc_mask & ~sigcantmask;
 	return EJUSTRETURN;
 }
@@ -868,6 +855,7 @@ boot(int howto)
 			printf("WARNING: not updating battery clock\n");
 		}
 	}
+	if_downall();
 
 	uvm_shutdown();
 	splhigh();
@@ -1008,6 +996,12 @@ systype(char *name)
 
 int ppc_configed_intr_cnt = 0;
 struct intrhand ppc_configed_intr[MAX_PRECONF_INTR];
+
+/*
+ * True if the system has any non-level interrupts which are shared
+ * on the same pin.
+ */
+int	intr_shared_edge;
 
 void *
 ppc_intr_establish(void *lcv, pci_intr_handle_t ih, int type, int level,

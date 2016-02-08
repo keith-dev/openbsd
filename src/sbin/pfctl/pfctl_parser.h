@@ -1,4 +1,4 @@
-/*	$OpenBSD: pfctl_parser.h,v 1.94 2010/06/25 23:27:47 henning Exp $ */
+/*	$OpenBSD: pfctl_parser.h,v 1.97 2011/07/27 00:26:10 mcbride Exp $ */
 
 /*
  * Copyright (c) 2001 Daniel Hartmeier
@@ -103,7 +103,9 @@ struct node_if {
 	char			 ifname[IFNAMSIZ];
 	u_int8_t		 not;
 	u_int8_t		 dynamic; /* antispoof */
+	u_int8_t		 use_rdomain;
 	u_int			 ifa_flags;
+	int			 rdomain;
 	struct node_if		*next;
 	struct node_if		*tail;
 };
@@ -115,6 +117,7 @@ struct node_host {
 	sa_family_t		 af;
 	u_int8_t		 not;
 	u_int32_t		 ifindex;	/* link-local IPv6 addrs */
+	u_int16_t		 weight;	/* load balancing weight */
 	char			*ifname;
 	u_int			 ifa_flags;
 	struct node_host	*next;
@@ -170,6 +173,7 @@ struct pf_opt_tbl {
 	char			 pt_name[PF_TABLE_NAME_SIZE];
 	int			 pt_rulecount;
 	int			 pt_generated;
+	u_int32_t		 pt_flags;
 	struct node_tinithead	 pt_nodes;
 	struct pfr_buffer	*pt_buf;
 };

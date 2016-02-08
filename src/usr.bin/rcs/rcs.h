@@ -1,4 +1,4 @@
-/*	$OpenBSD: rcs.h,v 1.13 2010/10/20 19:53:53 tobias Exp $	*/
+/*	$OpenBSD: rcs.h,v 1.15 2011/07/06 15:36:52 nicm Exp $	*/
 /*
  * Copyright (c) 2004 Jean-Francois Brousseau <jfb@openbsd.org>
  * All rights reserved.
@@ -69,10 +69,11 @@
 #define RCS_KW_SOURCE		0x0400
 #define RCS_KW_STATE		0x0800
 #define RCS_KW_FULLPATH		0x0010
+#define RCS_KW_LOCKER		0x10000
 
 #define RCS_KW_ID \
 	(RCS_KW_RCSFILE | RCS_KW_REVISION | RCS_KW_DATE \
-	| RCS_KW_AUTHOR | RCS_KW_STATE)
+	| RCS_KW_AUTHOR | RCS_KW_STATE | RCS_KW_LOCKER)
 
 #define RCS_KW_HEADER	(RCS_KW_ID | RCS_KW_FULLPATH)
 
@@ -213,10 +214,8 @@ extern int rcs_errno;
 
 RCSFILE			*rcs_open(const char *, int, int, ...);
 void			 rcs_close(RCSFILE *);
-const RCSNUM		*rcs_head_get(RCSFILE *);
 int			 rcs_head_set(RCSFILE *, RCSNUM *);
 const RCSNUM		*rcs_branch_get(RCSFILE *);
-int			 rcs_branch_set(RCSFILE *, const RCSNUM *);
 int			 rcs_access_add(RCSFILE *, const char *);
 int			 rcs_access_remove(RCSFILE *, const char *);
 int			 rcs_access_check(RCSFILE *, const char *);
@@ -231,10 +230,7 @@ int			 rcs_lock_add(RCSFILE *, const char *, RCSNUM *);
 int			 rcs_lock_remove(RCSFILE *, const char *, RCSNUM *);
 BUF			*rcs_getrev(RCSFILE *, RCSNUM *);
 int			 rcs_deltatext_set(RCSFILE *, RCSNUM *, BUF *);
-const char		*rcs_desc_get(RCSFILE *);
 void			 rcs_desc_set(RCSFILE *, const char *);
-const char		*rcs_comment_lookup(const char *);
-const char		*rcs_comment_get(RCSFILE *);
 void			 rcs_comment_set(RCSFILE *, const char *);
 BUF			*rcs_kwexp_buf(BUF *, RCSFILE *, RCSNUM *);
 void			 rcs_kwexp_set(RCSFILE *, int);
@@ -245,9 +241,7 @@ time_t			 rcs_rev_getdate(RCSFILE *, RCSNUM *);
 int			 rcs_rev_setlog(RCSFILE *, RCSNUM *, const char *);
 int			 rcs_rev_remove(RCSFILE *, RCSNUM *);
 int			 rcs_state_set(RCSFILE *, RCSNUM *, const char *);
-const char		*rcs_state_get(RCSFILE *, RCSNUM *);
 int			 rcs_state_check(const char *);
-const char		*rcs_errstr(int);
 void			 rcs_write(RCSFILE *);
 void			 rcs_delta_stats(struct rcs_delta *, int *, int *);
 
@@ -260,7 +254,6 @@ RCSNUM	*rcsnum_parse(const char *);
 RCSNUM	*rcsnum_brtorev(const RCSNUM *);
 RCSNUM	*rcsnum_revtobr(const RCSNUM *);
 RCSNUM	*rcsnum_inc(RCSNUM *);
-RCSNUM	*rcsnum_dec(RCSNUM *);
 void	 rcsnum_free(RCSNUM *);
 int	 rcsnum_addmagic(RCSNUM *);
 int	 rcsnum_aton(const char *, char **, RCSNUM *);

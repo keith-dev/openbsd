@@ -1,4 +1,4 @@
-/*	$OpenBSD: vfs_bio.c,v 1.127 2010/11/13 17:45:44 deraadt Exp $	*/
+/*	$OpenBSD: vfs_bio.c,v 1.133 2011/07/06 20:50:05 beck Exp $	*/
 /*	$NetBSD: vfs_bio.c,v 1.44 1996/06/11 11:15:36 pk Exp $	*/
 
 /*
@@ -56,10 +56,9 @@
 #include <sys/resourcevar.h>
 #include <sys/conf.h>
 #include <sys/kernel.h>
+#include <sys/specdev.h>
 
 #include <uvm/uvm_extern.h>
-
-#include <miscfs/specfs/specdev.h>
 
 /*
  * Definitions for the buffer free lists.
@@ -113,9 +112,6 @@ long backoffpages;	/* backoff counter for page allocations */
 long buflowpages;	/* bufpages low water mark */
 long bufhighpages; 	/* bufpages high water mark */
 long bufbackpages; 	/* number of pages we back off when asked to shrink */
-
-/* XXX - should be defined here. */
-extern int bufcachepercent;
 
 vsize_t bufkvm;
 
@@ -191,19 +187,19 @@ buf_put(struct buf *bp)
 void
 bufinit(void)
 {
+	u_int64_t dmapages;
 	struct bqueues *dp;
 
-	/* XXX - for now */
-	bufhighpages = buflowpages = bufpages = bufcachepercent = bufkvm = 0;
+	dmapages = uvm_pagecount(&dma_constraint);
 
 	/*
 	 * If MD code doesn't say otherwise, use 10% of kvm for mappings and
-	 * 10% physmem for pages.
+	 * 10% of dmaable pages for cache pages.
 	 */
 	if (bufcachepercent == 0)
 		bufcachepercent = 10;
 	if (bufpages == 0)
-		bufpages = physmem * bufcachepercent / 100;
+		bufpages = dmapages * bufcachepercent / 100;
 
 	bufhighpages = bufpages;
 
@@ -212,7 +208,7 @@ bufinit(void)
 	 * we will not allow uvm to steal back more than this number of
 	 * pages
 	 */
-	buflowpages = physmem * 10 / 100;
+	buflowpages = dmapages * 10 / 100;
 
 	/*
 	 * set bufbackpages to 100 pages, or 10 percent of the low water mark
@@ -331,7 +327,7 @@ bufadjust(int newbufpages)
  * Make the buffer cache back off from cachepct.
  */
 int
-bufbackoff()
+bufbackoff(struct uvm_constraint_range *range, long size)
 {
 	/*
 	 * Back off the amount of buffer cache pages. Called by the page
@@ -406,8 +402,7 @@ bio_doread(struct vnode *vp, daddr64_t blkno, int size, int async)
  * This algorithm described in Bach (p.54).
  */
 int
-bread(struct vnode *vp, daddr64_t blkno, int size, struct ucred *cred,
-    struct buf **bpp)
+bread(struct vnode *vp, daddr64_t blkno, int size, struct buf **bpp)
 {
 	struct buf *bp;
 
@@ -424,7 +419,7 @@ bread(struct vnode *vp, daddr64_t blkno, int size, struct ucred *cred,
  */
 int
 breadn(struct vnode *vp, daddr64_t blkno, int size, daddr64_t rablks[],
-    int rasizes[], int nrablks, struct ucred *cred, struct buf **bpp)
+    int rasizes[], int nrablks, struct buf **bpp)
 {
 	struct buf *bp;
 	int i;
@@ -460,9 +455,10 @@ bread_cluster_callback(struct buf *bp)
 		size_t newsize = xbpp[1]->b_bufsize;
 
 		/*
-		 * Shrink this buffer to only cover its part of the total I/O.
+		 * Shrink this buffer's mapping to only cover its part of
+		 * the total I/O.
 		 */
-		buf_shrink_mem(bp, newsize);
+		buf_fix_mapping(bp, newsize);
 		bp->b_bcount = newsize;
 	}
 

@@ -1,4 +1,4 @@
-/*	$OpenBSD: ospf.h,v 1.19 2010/06/26 18:02:07 guenther Exp $ */
+/*	$OpenBSD: ospf.h,v 1.21 2011/05/09 12:24:41 claudio Exp $ */
 
 /*
  * Copyright (c) 2004, 2005 Esben Norby <norby@openbsd.org>
@@ -29,8 +29,6 @@
 #define IPPROTO_OSPF		89
 #define AllSPFRouters		"224.0.0.5"
 #define AllDRouters		"224.0.0.6"
-
-#define PACKET_HDR		100 /* XXX used to calculate the IP payload */
 
 #define DEFAULT_METRIC		10
 #define DEFAULT_REDIST_METRIC	100
@@ -83,11 +81,14 @@
 #define MAX_SIMPLE_AUTH_LEN	8
 
 /* OSPF compatibility flags */
+#define OSPF_OPTION_MT		0x01
 #define OSPF_OPTION_E		0x02
 #define OSPF_OPTION_MC		0x04
 #define OSPF_OPTION_NP		0x08
 #define OSPF_OPTION_EA		0x10
 #define OSPF_OPTION_DC		0x20
+#define OSPF_OPTION_O		0x40	/* only on DD options */
+#define OSPF_OPTION_DN		0x80	/* only on LSA options */
 
 /* OSPF packet types */
 #define PACKET_TYPE_HELLO	1
@@ -179,6 +180,9 @@ struct ls_upd_hdr {
 #define LSA_TYPE_SUM_NETWORK	3
 #define LSA_TYPE_SUM_ROUTER	4
 #define	LSA_TYPE_EXTERNAL	5
+#define	LSA_TYPE_LINK_OPAQ	9
+#define	LSA_TYPE_AREA_OPAQ	10
+#define	LSA_TYPE_AS_OPAQ	11
 
 #define LINK_TYPE_POINTTOPOINT	1
 #define LINK_TYPE_TRANSIT_NET	2
@@ -188,6 +192,18 @@ struct ls_upd_hdr {
 /* LSA headers */
 #define LSA_METRIC_MASK		0x00ffffff	/* only for sum & as-ext */
 #define LSA_ASEXT_E_FLAG	0x80000000
+
+/* for some reason they thought 24bit types are fun, make them less a hazard */
+#define LSA_24_MASK 0xffffff
+#define LSA_24_GETHI(x)		\
+	((x) >> 24)
+#define LSA_24_GETLO(x)		\
+	((x) & LSA_24_MASK)
+#define LSA_24_SETHI(x, y)	\
+	((x) = ((x) & LSA_24_MASK) | (((y) & 0xff) << 24))
+#define LSA_24_SETLO(x, y)	\
+	((x) = ((y) & LSA_24_MASK) | ((x) & ~LSA_24_MASK))
+
 
 #define OSPF_RTR_B		0x01
 #define OSPF_RTR_E		0x02

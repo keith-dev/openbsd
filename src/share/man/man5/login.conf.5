@@ -30,10 +30,10 @@
 .\" OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
 .\" SUCH DAMAGE.
 .\"
-.\" $OpenBSD: login.conf.5,v 1.45 2010/12/03 12:39:19 millert Exp $
+.\" $OpenBSD: login.conf.5,v 1.47 2011/04/17 06:34:31 jmc Exp $
 .\" BSDI $From: login.conf.5,v 2.20 2000/06/26 14:50:38 prb Exp $
 .\"
-.Dd $Mdocdate: December 3 2010 $
+.Dd $Mdocdate: April 17 2011 $
 .Dt LOGIN.CONF 5
 .Os
 .Sh NAME
@@ -284,7 +284,7 @@ If 0, the new password will only be accepted if it passes the password
 quality check.
 .\"
 .Pp
-.It path Ta path Ta value of Dv _PATH_DEFPATH
+.It path Ta path Ta value of Dv _PATH_DEFPATH Ta
 .br
 Default search path.
 See
@@ -412,7 +412,8 @@ It may have a trailing
 .Li b ,
 .Li k ,
 .Li m ,
-.Li g or
+.Li g
+or
 .Li t
 to indicate that the value is in 512-byte blocks,
 kilobytes, megabytes, gigabytes, or terrabytes, respectively.

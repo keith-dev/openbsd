@@ -1,4 +1,4 @@
-/*	$OpenBSD: control.c,v 1.56 2010/11/28 13:56:43 gilles Exp $	*/
+/*	$OpenBSD: control.c,v 1.59 2011/07/21 23:29:24 gilles Exp $	*/
 
 /*
  * Copyright (c) 2008 Pierre-Yves Ritschard <pyr@openbsd.org>
@@ -47,26 +47,24 @@ struct {
 	int			 fd;
 } control_state;
 
-void		 control_imsg(struct smtpd *, struct imsgev *, struct imsg *);
+void		 control_imsg(struct imsgev *, struct imsg *);
 __dead void	 control_shutdown(void);
 int		 control_init(void);
-void		 control_listen(struct smtpd *);
+void		 control_listen(void);
 void		 control_cleanup(void);
 void		 control_accept(int, short, void *);
 struct ctl_conn	*control_connbyfd(int);
-void		 control_close(struct smtpd *, int);
+void		 control_close(int);
 void		 control_sig_handler(int, short, void *);
 void		 control_dispatch_ext(int, short, void *);
 
 struct ctl_connlist	ctl_conns;
 
 void
-control_imsg(struct smtpd *env, struct imsgev *iev, struct imsg *imsg)
+control_imsg(struct imsgev *iev, struct imsg *imsg)
 {
 	struct ctl_conn	*c;
 	struct reload	*reload;
-	struct remove	*rem;
-	struct sched	*sched;
 
 	if (iev->proc == PROC_SMTP) {
 		switch (imsg->hdr.type) {
@@ -76,30 +74,6 @@ control_imsg(struct smtpd *env, struct imsgev *iev, struct imsg *imsg)
 				return;
 			imsg_compose_event(&c->iev, IMSG_CTL_OK, 0, 0,
 			    imsg->fd, NULL, 0);
-			return;
-		}
-	}
-
-	if (iev->proc == PROC_QUEUE) {
-		switch (imsg->hdr.type) {
-		case IMSG_QUEUE_SCHEDULE:
-			sched = imsg->data;
-			c = control_connbyfd(sched->fd);
-			if (c == NULL)
-				return;
-			imsg_compose_event(&c->iev,
-			    sched->ret ? IMSG_CTL_OK : IMSG_CTL_FAIL, 0, 0, -1,
-			    NULL, 0);
-			return;
-
-		case IMSG_QUEUE_REMOVE:
-			rem = imsg->data;
-			c = control_connbyfd(rem->fd);
-			if (c == NULL)
-				return;
-			imsg_compose_event(&c->iev,
-			    rem->ret ? IMSG_CTL_OK : IMSG_CTL_FAIL, 0, 0,
-			    -1, NULL, 0);
 			return;
 		}
 	}
@@ -137,7 +111,7 @@ control_sig_handler(int sig, short event, void *p)
 
 
 pid_t
-control(struct smtpd *env)
+control(void)
 {
 	struct sockaddr_un	 sun;
 	int			 fd;
@@ -147,6 +121,7 @@ control(struct smtpd *env)
 	struct event		 ev_sigint;
 	struct event		 ev_sigterm;
 	struct peer		 peers [] = {
+		{ PROC_RUNNER,	 imsg_dispatch },
 		{ PROC_QUEUE,	 imsg_dispatch },
 		{ PROC_SMTP,	 imsg_dispatch },
 		{ PROC_MFA,	 imsg_dispatch },
@@ -162,7 +137,7 @@ control(struct smtpd *env)
 		return (pid);
 	}
 
-	purge_config(env, PURGE_EVERYTHING);
+	purge_config(PURGE_EVERYTHING);
 
 	pw = env->sc_pw;
 
@@ -213,8 +188,8 @@ control(struct smtpd *env)
 	imsg_callback = control_imsg;
 	event_init();
 
-	signal_set(&ev_sigint, SIGINT, control_sig_handler, env);
-	signal_set(&ev_sigterm, SIGTERM, control_sig_handler, env);
+	signal_set(&ev_sigint, SIGINT, control_sig_handler, NULL);
+	signal_set(&ev_sigterm, SIGTERM, control_sig_handler, NULL);
 	signal_add(&ev_sigint, NULL);
 	signal_add(&ev_sigterm, NULL);
 	signal(SIGPIPE, SIG_IGN);
@@ -222,9 +197,9 @@ control(struct smtpd *env)
 
 	TAILQ_INIT(&ctl_conns);
 
-	config_pipes(env, peers, nitems(peers));
-	config_peers(env, peers, nitems(peers));
-	control_listen(env);
+	config_pipes(peers, nitems(peers));
+	config_peers(peers, nitems(peers));
+	control_listen();
 
 	if (event_dispatch() < 0)
 		fatal("event_dispatch");
@@ -241,7 +216,7 @@ control_shutdown(void)
 }
 
 void
-control_listen(struct smtpd *env)
+control_listen(void)
 {
 	int avail = availdesc();
 
@@ -250,7 +225,7 @@ control_listen(struct smtpd *env)
 	avail--;
 
 	event_set(&control_state.ev, control_state.fd, EV_READ|EV_PERSIST,
-	    control_accept, env);
+	    control_accept, NULL);
 	event_add(&control_state.ev, NULL);
 
 	/* guarantee 2 fds to each accepted client */
@@ -272,7 +247,6 @@ control_accept(int listenfd, short event, void *arg)
 	socklen_t		 len;
 	struct sockaddr_un	 sun;
 	struct ctl_conn		*c;
-	struct smtpd		*env = arg;
 
 	len = sizeof(sun);
 	if ((connfd = accept(listenfd, (struct sockaddr *)&sun, &len)) == -1) {
@@ -288,9 +262,8 @@ control_accept(int listenfd, short event, void *arg)
 	imsg_init(&c->iev.ibuf, connfd);
 	c->iev.handler = control_dispatch_ext;
 	c->iev.events = EV_READ;
-	c->iev.data = env;
 	event_set(&c->iev.ev, c->iev.ibuf.fd, c->iev.events,
-	    c->iev.handler, env);
+	    c->iev.handler, NULL);
 	event_add(&c->iev.ev, NULL);
 	TAILQ_INSERT_TAIL(&ctl_conns, c, entry);
 
@@ -318,7 +291,7 @@ control_connbyfd(int fd)
 }
 
 void
-control_close(struct smtpd *env, int fd)
+control_close(int fd)
 {
 	struct ctl_conn	*c;
 
@@ -346,7 +319,6 @@ void
 control_dispatch_ext(int fd, short event, void *arg)
 {
 	struct ctl_conn		*c;
-	struct smtpd		*env = arg;
 	struct imsg		 imsg;
 	int			 n;
 	uid_t			 euid;
@@ -362,21 +334,21 @@ control_dispatch_ext(int fd, short event, void *arg)
 
 	if (event & EV_READ) {
 		if ((n = imsg_read(&c->iev.ibuf)) == -1 || n == 0) {
-			control_close(env, fd);
+			control_close(fd);
 			return;
 		}
 	}
 
 	if (event & EV_WRITE) {
 		if (msgbuf_write(&c->iev.ibuf.w) < 0) {
-			control_close(env, fd);
+			control_close(fd);
 			return;
 		}
 	}
 
 	for (;;) {
 		if ((n = imsg_get(&c->iev.ibuf, &imsg)) == -1) {
-			control_close(env, fd);
+			control_close(fd);
 			return;
 		}
 
@@ -400,68 +372,6 @@ control_dispatch_ext(int fd, short event, void *arg)
 			imsg_compose_event(&c->iev, IMSG_STATS, 0, 0, -1,
 			    env->stats, sizeof(struct stats));
 			break;
-		case IMSG_QUEUE_SCHEDULE: {
-			struct sched *s = imsg.data;
-
-			if (euid)
-				goto badcred;
-	
-			if (IMSG_DATA_SIZE(&imsg) != sizeof(*s))
-				goto badcred;
-
-			s->fd = fd;
-
-			if (! valid_message_id(s->mid) && ! valid_message_uid(s->mid)) {
-				imsg_compose_event(&c->iev, IMSG_CTL_FAIL, 0, 0, -1,
-				    NULL, 0);
-				break;
-			}
-
-			imsg_compose_event(env->sc_ievs[PROC_QUEUE], IMSG_QUEUE_SCHEDULE, 0, 0, -1, s, sizeof(*s));
-			break;
-		}
-
-		case IMSG_QUEUE_REMOVE: {
-			struct remove *s = imsg.data;
-
-			if (euid)
-				goto badcred;
-	
-			if (IMSG_DATA_SIZE(&imsg) != sizeof(*s))
-				goto badcred;
-
-			s->fd = fd;
-
-			if (! valid_message_id(s->mid) && ! valid_message_uid(s->mid)) {
-				imsg_compose_event(&c->iev, IMSG_CTL_FAIL, 0, 0, -1,
-				    NULL, 0);
-				break;
-			}
-
-			imsg_compose_event(env->sc_ievs[PROC_QUEUE], IMSG_QUEUE_REMOVE, 0, 0, -1, s, sizeof(*s));
-			break;
-		}
-/*
-		case IMSG_CONF_RELOAD: {
-			struct reload r;
-
-			log_debug("received reload request");
-
-			if (euid)
-				goto badcred;
-
-			if (env->sc_flags & SMTPD_CONFIGURING) {
-				imsg_compose_event(&c->iev, IMSG_CTL_FAIL, 0, 0, -1,
-					NULL, 0);
-				break;
-			}
-			env->sc_flags |= SMTPD_CONFIGURING;
-
-			r.fd = fd;
-			imsg_compose_event(env->sc_ievs[PROC_PARENT], IMSG_CONF_RELOAD, 0, 0, -1, &r, sizeof(r));
-			break;
-		}
-*/
 		case IMSG_CTL_SHUTDOWN:
 			/* NEEDS_FIX */
 			log_debug("received shutdown request");
@@ -563,6 +473,7 @@ control_dispatch_ext(int fd, short event, void *arg)
 			    IMSG_QUEUE_RESUME_OUTGOING, 0, 0, -1, NULL, 0);
 			imsg_compose_event(&c->iev, IMSG_CTL_OK, 0, 0, -1, NULL, 0);
 			break;
+
 		case IMSG_SMTP_RESUME:
 			if (euid)
 				goto badcred;
@@ -577,6 +488,36 @@ control_dispatch_ext(int fd, short event, void *arg)
 			    0, 0, -1, NULL, 0);
 			imsg_compose_event(&c->iev, IMSG_CTL_OK, 0, 0, -1, NULL, 0);
 			break;
+
+		case IMSG_RUNNER_SCHEDULE: {
+			u_int64_t ullval;
+
+			if (euid)
+				goto badcred;
+
+			ullval = *(u_int64_t *)imsg.data;
+
+			imsg_compose_event(env->sc_ievs[PROC_RUNNER], IMSG_RUNNER_SCHEDULE,
+			    0, 0, -1, &ullval, sizeof(ullval));
+
+			imsg_compose_event(&c->iev, IMSG_CTL_OK, 0, 0, -1, NULL, 0);
+			break;
+		}
+
+		case IMSG_RUNNER_REMOVE: {
+			u_int64_t ullval;
+
+			if (euid)
+				goto badcred;
+
+			ullval = *(u_int64_t *)imsg.data;
+
+			imsg_compose_event(env->sc_ievs[PROC_RUNNER], IMSG_RUNNER_REMOVE,
+			    0, 0, -1, &ullval, sizeof(ullval));
+
+			imsg_compose_event(&c->iev, IMSG_CTL_OK, 0, 0, -1, NULL, 0);
+			break;
+		}
 		default:
 			log_debug("control_dispatch_ext: "
 			    "error handling imsg %d", imsg.hdr.type);

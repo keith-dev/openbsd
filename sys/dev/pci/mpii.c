@@ -1,4 +1,4 @@
-/*	$OpenBSD: mpii.c,v 1.39 2011/02/24 23:40:31 dlg Exp $	*/
+/*	$OpenBSD: mpii.c,v 1.47 2011/07/21 01:03:30 sthen Exp $	*/
 /*
  * Copyright (c) 2010 Mike Belopuhov <mkb@crypt.org.ru>
  * Copyright (c) 2009 James Giannoules
@@ -2088,7 +2088,21 @@ void		mpii_refresh_sensors(void *);
 
 static const struct pci_matchid mpii_devices[] = {
 	{ PCI_VENDOR_SYMBIOS,	PCI_PRODUCT_SYMBIOS_SAS2004 },
-	{ PCI_VENDOR_SYMBIOS,	PCI_PRODUCT_SYMBIOS_SAS2008 }
+	{ PCI_VENDOR_SYMBIOS,	PCI_PRODUCT_SYMBIOS_SAS2008 },
+	{ PCI_VENDOR_SYMBIOS,	PCI_PRODUCT_SYMBIOS_SAS2108_3 },
+	{ PCI_VENDOR_SYMBIOS,	PCI_PRODUCT_SYMBIOS_SAS2108_4 },
+	{ PCI_VENDOR_SYMBIOS,	PCI_PRODUCT_SYMBIOS_SAS2108_5 },
+	{ PCI_VENDOR_SYMBIOS,	PCI_PRODUCT_SYMBIOS_SAS2116_1 },
+	{ PCI_VENDOR_SYMBIOS,	PCI_PRODUCT_SYMBIOS_SAS2116_2 },
+	{ PCI_VENDOR_SYMBIOS,	PCI_PRODUCT_SYMBIOS_SAS2208_1 },
+	{ PCI_VENDOR_SYMBIOS,	PCI_PRODUCT_SYMBIOS_SAS2208_2 },
+	{ PCI_VENDOR_SYMBIOS,	PCI_PRODUCT_SYMBIOS_SAS2208_3 },
+	{ PCI_VENDOR_SYMBIOS,	PCI_PRODUCT_SYMBIOS_SAS2208_4 },
+	{ PCI_VENDOR_SYMBIOS,	PCI_PRODUCT_SYMBIOS_SAS2208_5 },
+	{ PCI_VENDOR_SYMBIOS,	PCI_PRODUCT_SYMBIOS_SAS2208_6 },
+	{ PCI_VENDOR_SYMBIOS,	PCI_PRODUCT_SYMBIOS_SAS2308_1 },
+	{ PCI_VENDOR_SYMBIOS,	PCI_PRODUCT_SYMBIOS_SAS2308_2 },
+	{ PCI_VENDOR_SYMBIOS,	PCI_PRODUCT_SYMBIOS_SAS2308_3 }
 };
 
 int
@@ -2141,7 +2155,7 @@ mpii_attach(struct device *parent, struct device *self, void *aux)
 	    MPII_INTR_MASK_DOORBELL);
 
 	/* hook up the interrupt */
-	if (pci_intr_map(pa, &ih)) {
+	if (pci_intr_map_msi(pa, &ih) != 0 && pci_intr_map(pa, &ih) != 0) {
 		printf(": unable to map interrupt\n");
 		goto unmap;
 	}
@@ -4648,12 +4662,15 @@ mpii_scsi_cmd_done(struct mpii_ccb *ccb)
 	xs->status = sie->scsi_status;
 	switch (letoh16(sie->ioc_status) & MPII_IOCSTATUS_MASK) {
 	case MPII_IOCSTATUS_SCSI_DATA_UNDERRUN:
-		xs->resid = xs->datalen - letoh32(sie->transfer_count);
-		if (sie->scsi_state & MPII_SCSIIO_ERR_STATE_NO_SCSI_STATUS) {
+		switch (xs->status) {
+		case SCSI_OK:
+			xs->resid = xs->datalen - letoh32(sie->transfer_count);
+			break;
+		default:
 			xs->error = XS_DRIVER_STUFFUP;
 			break;
 		}
-		/* FALLTHROUGH */
+		break;
 	case MPII_IOCSTATUS_SUCCESS:
 	case MPII_IOCSTATUS_SCSI_RECOVERED_ERROR:
 		switch (xs->status) {
@@ -5268,7 +5285,7 @@ mpii_create_sensors(struct mpii_softc *sc)
 	int			i;
 
 	sc->sc_sensors = malloc(sizeof(struct ksensor) * sc->sc_vd_count,
-	    M_DEVBUF, M_WAITOK | M_ZERO);
+	    M_DEVBUF, M_WAITOK | M_CANFAIL | M_ZERO);
 	if (sc->sc_sensors == NULL)
 		return (1);
 	sc->sc_nsensors = sc->sc_vd_count;
@@ -5276,9 +5293,8 @@ mpii_create_sensors(struct mpii_softc *sc)
 	strlcpy(sc->sc_sensordev.xname, DEVNAME(sc),
 	    sizeof(sc->sc_sensordev.xname));
 
-	for (i = sc->sc_vd_id_low; i < sc->sc_vd_id_low + sc->sc_vd_count;
-	     i++) {
-		link = scsi_get_link(ssc, i, 0);
+	for (i = 0; i < sc->sc_vd_count; i++) {
+		link = scsi_get_link(ssc, i + sc->sc_vd_id_low, 0);
 		if (link == NULL)
 			goto bad;
 
@@ -5336,7 +5352,7 @@ mpii_refresh_sensors(void *arg)
 			sc->sc_sensors[i].status = SENSOR_S_OK;
 			break;
 		case BIOC_SVINVALID:
-			/* FALLTRHOUGH */
+			/* FALLTHROUGH */
 		default:
 			sc->sc_sensors[i].value = 0; /* unknown */
 			sc->sc_sensors[i].status = SENSOR_S_UNKNOWN;

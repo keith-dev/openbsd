@@ -1,11 +1,13 @@
-# $OpenBSD: Makefile.inc,v 1.4 2010/06/27 19:56:11 phessler Exp $
+# $OpenBSD: Makefile.inc,v 1.6 2011/07/24 20:26:52 schwarze Exp $
 
 DIFF=diff -au
 MANDOC?=mandoc
-#MANDOCOPTS=-fstrict -Wall
-NROFF=nroff -mandoc
+#MANDOCOPTS=-Wall
+NROFF=/usr/local/bin/nroff -c -mandoc -Tascii
 SED=sed
 SH=/bin/sh
+
+CLEANFILES=*.mandoc_ascii
 
 all: clean
 
@@ -17,7 +19,7 @@ groff: ${GROFF_TARGETS:C/$/.out_ascii/}
 	@echo "  -> ${*}"
 	@${MANDOC} ${MANDOCOPTS} ${.CURDIR}/${*}.in | ${SED} '$$d' \
 		> ${*}.mandoc_ascii
-	@${DIFF} ${*}.out_ascii ${*}.mandoc_ascii
+	@${DIFF} ${.CURDIR}/${*}.out_ascii ${*}.mandoc_ascii
 
 .in.out_ascii:
 	@echo "  -> ${*}"
@@ -27,13 +29,3 @@ groff: ${GROFF_TARGETS:C/$/.out_ascii/}
 	@echo "  -> ${*}"
 	@MANDOC="${MANDOC}" MANDOCOPTS="${MANDOCOPTS}" \
 		${SH} ${.CURDIR}/${*}.sh 
-
-clean:
-	rm -f *.mandoc_ascii *.core
-
-groff-clean:
-.if defined(GROFF_TARGETS)
-	rm -f ${GROFF_TARGETS:C/$/.out_ascii/}
-.endif
-
-cleandir: groff-clean clean

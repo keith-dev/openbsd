@@ -1,4 +1,4 @@
-/*	$OpenBSD: pass1.c,v 1.33 2010/07/09 06:41:17 otto Exp $	*/
+/*	$OpenBSD: pass1.c,v 1.36 2011/05/02 22:23:59 chl Exp $	*/
 /*	$NetBSD: pass1.c,v 1.16 1996/09/27 22:45:15 christos Exp $	*/
 
 /*
@@ -61,10 +61,13 @@ pass1_info(char *buf, size_t buflen)
 void
 pass1(void)
 {
-	struct inodesc idesc;
-	ino_t inumber, inosused;
+	ino_t inumber, inosused, ninosused;
+	size_t inospace;
+	struct inostat *info;
 	int c;
+	struct inodesc idesc;
 	daddr64_t i, cgd;
+	u_int8_t *cp;
 
 	/*
 	 * Set file system reserved blocks in used block map.
@@ -101,12 +104,90 @@ pass1(void)
 				inosused = sblock.fs_ipg;
 		} else
 			inosused = sblock.fs_ipg;
-		cginosused[c] = inosused;
+
+		/*
+		 * If we are using soft updates, then we can trust the
+		 * cylinder group inode allocation maps to tell us which
+		 * inodes are allocated. We will scan the used inode map
+		 * to find the inodes that are really in use, and then
+		 * read only those inodes in from disk.
+		 */
+		if (preen && usedsoftdep) {
+			cp = &cg_inosused(&cgrp)[(inosused - 1) / CHAR_BIT];
+			for ( ; inosused > 0; inosused -= CHAR_BIT, cp--) {
+				if (*cp == 0)
+					continue;
+				for (i = 1 << (CHAR_BIT - 1); i > 0; i >>= 1) {
+					if (*cp & i)
+						break;
+					inosused--;
+				}
+				break;
+			}
+			if (inosused < 0)
+				inosused = 0;
+		}
+		/*
+ 		 * Allocate inoinfo structures for the allocated inodes.
+		 */
+		inostathead[c].il_numalloced = inosused;
+		if (inosused == 0) {
+			inostathead[c].il_stat = 0;
+			continue;
+		}
+		info = calloc((unsigned)inosused, sizeof(struct inostat));
+		inospace = (unsigned)inosused * sizeof(struct inostat);
+		if (info == NULL)
+			errexit("cannot alloc %u bytes for inoinfo",
+			    (unsigned)(sizeof(struct inostat) * inosused));
+		inostathead[c].il_stat = info;
+		/*
+		 * Scan the allocated inodes.
+		 */
 		for (i = 0; i < inosused; i++, inumber++) {
 			info_inumber = inumber;
-			if (inumber < ROOTINO)
+			if (inumber < ROOTINO) {
+				(void)getnextinode(inumber);
 				continue;
+			}
 			checkinode(inumber, &idesc);
+		}
+		lastino += 1;
+		if (inosused < sblock.fs_ipg || inumber == lastino)
+			continue;
+		/*
+		 * If we were not able to determine in advance which inodes
+		 * were in use, then reduce the size of the inoinfo structure
+		 * to the size necessary to describe the inodes that we
+		 * really found.
+		 */
+		if (lastino < (c * sblock.fs_ipg))
+			ninosused = 0;
+		else
+			ninosused = lastino - (c * sblock.fs_ipg);
+		inostathead[c].il_numalloced = ninosused;
+		if (ninosused == 0) {
+			free(inostathead[c].il_stat);
+			inostathead[c].il_stat = 0;
+			continue;
+		}
+		if (ninosused != inosused) {
+			struct inostat *ninfo;
+			size_t ninospace = ninosused * sizeof(*ninfo);
+			if (ninospace / sizeof(*info) != ninosused) {
+				pfatal("too many inodes %llu\n",
+				    (unsigned long long)ninosused);
+				exit(8);
+			}
+			ninfo = realloc(info, ninospace);
+			if (ninfo == NULL) {
+				pfatal("cannot realloc %zu bytes to %zu "
+				    "for inoinfo\n", inospace, ninospace);
+				exit(8);
+			}
+			if (ninosused > inosused)
+				(void)memset(&ninfo[inosused], 0, ninospace - inospace);
+			inostathead[c].il_stat = ninfo;
 		}
 	}
 	info_fn = NULL;
@@ -121,7 +202,6 @@ checkinode(ino_t inumber, struct inodesc *idesc)
 	struct zlncnt *zlnp;
 	int ndb, j;
 	mode_t mode;
-	char *symbuf;
 	u_int64_t lndb;
 
 	dp = getnextinode(inumber);
@@ -178,34 +258,6 @@ checkinode(ino_t inumber, struct inodesc *idesc)
 		ndb++;
 	if (mode == IFLNK) {
 		/*
-		 * Note that the old fastlink format always had di_blocks set
-		 * to 0.  Other than that we no longer use the `spare' field
-		 * (which is now the extended uid) for sanity checking, the
-		 * new format is the same as the old.  We simply ignore the
-		 * conversion altogether.  - mycroft, 19MAY1994
-		 */
-		if (sblock.fs_magic == FS_UFS1_MAGIC && doinglevel2 &&
-		    DIP(dp, di_size) > 0 &&
-		    DIP(dp, di_size) < MAXSYMLINKLEN_UFS1 &&
-		    DIP(dp, di_blocks) != 0) {
-			symbuf = alloca(secsize);
-			if (bread(fsreadfd, symbuf,
-			    fsbtodb(&sblock, DIP(dp, di_db[0])),
-			    (long)secsize) != 0)
-				errexit("cannot read symlink\n");
-			if (debug) {
-				symbuf[DIP(dp, di_size)] = 0;
-				printf("convert symlink %d(%s) of size %llu\n",
-					inumber, symbuf,
-					(unsigned long long)DIP(dp, di_size));
-			}
-			dp = ginode(inumber);
-			memcpy(dp->dp1.di_shortlink, symbuf,
-			    (long)DIP(dp, di_size));
-			DIP_SET(dp, di_blocks, 0);
-			inodirty();
-		}
-		/*
 		 * Fake ndb value so direct/indirect block checks below
 		 * will detect any garbage after symlink string.
 		 */
@@ -244,7 +296,7 @@ checkinode(ino_t inumber, struct inodesc *idesc)
 	if (ftypeok(dp) == 0)
 		goto unknown;
 	n_files++;
-	lncntp[inumber] = DIP(dp, di_nlink);
+	ILNCOUNT(inumber) = DIP(dp, di_nlink);
 	if (DIP(dp, di_nlink) <= 0) {
 		zlnp =  malloc(sizeof *zlnp);
 		if (zlnp == NULL) {
@@ -268,16 +320,6 @@ checkinode(ino_t inumber, struct inodesc *idesc)
 	} else
 		SET_ISTATE(inumber, FSTATE);
 	SET_ITYPE(inumber, IFTODT(mode));
-	if (sblock.fs_magic == FS_UFS1_MAGIC && doinglevel2 &&
-	   (dp->dp1.di_ouid != (u_short)-1 ||
-	    dp->dp1.di_ogid != (u_short)-1)) {
-		dp = ginode(inumber);
-		DIP_SET(dp, di_uid, dp->dp1.di_ouid);
-		dp->dp1.di_ouid = -1;
-		DIP_SET(dp, di_gid, dp->dp1.di_ogid);
-		dp->dp1.di_ogid = -1;
-		inodirty();
-	}
 	badblk = dupblk = 0;
 	idesc->id_number = inumber;
 	(void)ckinode(dp, idesc);

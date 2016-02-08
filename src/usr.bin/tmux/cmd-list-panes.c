@@ -1,4 +1,4 @@
-/* $OpenBSD: cmd-list-panes.c,v 1.7 2011/01/04 00:42:46 nicm Exp $ */
+/* $OpenBSD: cmd-list-panes.c,v 1.11 2011/07/04 14:04:40 nicm Exp $ */
 
 /*
  * Copyright (c) 2009 Nicholas Marriott <nicm@users.sourceforge.net>
@@ -28,10 +28,15 @@
 
 int	cmd_list_panes_exec(struct cmd *, struct cmd_ctx *);
 
+void	cmd_list_panes_server(struct cmd_ctx *);
+void	cmd_list_panes_session(struct session *, struct cmd_ctx *, int);
+void	cmd_list_panes_window(
+	    struct session *, struct winlink *, struct cmd_ctx *, int);
+
 const struct cmd_entry cmd_list_panes_entry = {
 	"list-panes", "lsp",
-	"t:", 0, 0,
-	CMD_TARGET_WINDOW_USAGE,
+	"ast:", 0, 0,
+	"[-as] [-t target]",
 	0,
 	NULL,
 	NULL,
@@ -41,16 +46,54 @@ const struct cmd_entry cmd_list_panes_entry = {
 int
 cmd_list_panes_exec(struct cmd *self, struct cmd_ctx *ctx)
 {
-	struct args		*args = self->args;
-	struct winlink		*wl;
+	struct args	*args = self->args;
+	struct session	*s;
+	struct winlink	*wl;
+
+	if (args_has(args, 'a'))
+		cmd_list_panes_server(ctx);
+	else if (args_has(args, 's')) {
+		s = cmd_find_session(ctx, args_get(args, 't'), 0);
+		if (s == NULL)
+			return (-1);
+		cmd_list_panes_session(s, ctx, 1);
+	} else {
+		wl = cmd_find_window(ctx, args_get(args, 't'), &s);
+		if (wl == NULL)
+			return (-1);
+		cmd_list_panes_window(s, wl, ctx, 0);
+	}
+
+	return (0);
+}
+
+void
+cmd_list_panes_server(struct cmd_ctx *ctx)
+{
+	struct session	*s;
+
+	RB_FOREACH(s, sessions, &sessions)
+		cmd_list_panes_session(s, ctx, 2);
+}
+
+void
+cmd_list_panes_session(struct session *s, struct cmd_ctx *ctx, int type)
+{
+	struct winlink	*wl;
+
+	RB_FOREACH(wl, winlinks, &s->windows)
+		cmd_list_panes_window(s, wl, ctx, type);
+}
+
+void
+cmd_list_panes_window(
+    struct session *s, struct winlink *wl, struct cmd_ctx *ctx, int type)
+{
 	struct window_pane	*wp;
 	struct grid		*gd;
 	struct grid_line	*gl;
 	u_int			 i, n;
 	unsigned long long	 size;
-
-	if ((wl = cmd_find_window(ctx, args_get(args, 't'), NULL)) == NULL)
-		return (-1);
 
 	n = 0;
 	TAILQ_FOREACH(wp, &wl->window->panes, entry) {
@@ -64,12 +107,31 @@ cmd_list_panes_exec(struct cmd *self, struct cmd_ctx *ctx)
 		}
 		size += gd->hsize * sizeof *gd->linedata;
 
-		ctx->print(ctx, "%u: [%ux%u] [history %u/%u, %llu bytes]%s%s",
-		    n, wp->sx, wp->sy, gd->hsize, gd->hlimit, size,
-		    wp == wp->window->active ? " (active)" : "",
-		    wp->fd == -1 ? " (dead)" : "");
+		switch (type) {
+		case 0:
+			ctx->print(ctx,
+			    "%u: [%ux%u] [history %u/%u, %llu bytes] %%%u%s%s",
+			    n, wp->sx, wp->sy, gd->hsize, gd->hlimit, size,
+			    wp->id, wp == wp->window->active ? " (active)" : "",
+			    wp->fd == -1 ? " (dead)" : "");
+			break;
+		case 1:
+			ctx->print(ctx,
+			    "%d.%u: [%ux%u] [history %u/%u, %llu bytes] "
+			    "%%%u%s%s", wl->idx,
+			    n, wp->sx, wp->sy, gd->hsize, gd->hlimit, size,
+			    wp->id, wp == wp->window->active ? " (active)" : "",
+			    wp->fd == -1 ? " (dead)" : "");
+			break;
+		case 2:
+			ctx->print(ctx,
+			    "%s:%d.%u: [%ux%u] [history %u/%u, %llu bytes] "
+			    "%%%u%s%s", s->name, wl->idx,
+			    n, wp->sx, wp->sy, gd->hsize, gd->hlimit, size,
+			    wp->id, wp == wp->window->active ? " (active)" : "",
+			    wp->fd == -1 ? " (dead)" : "");
+			break;
+		}
 		n++;
 	}
-
-	return (0);
 }

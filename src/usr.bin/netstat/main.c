@@ -1,4 +1,4 @@
-/*	$OpenBSD: main.c,v 1.87 2010/10/30 23:06:05 bluhm Exp $	*/
+/*	$OpenBSD: main.c,v 1.89 2011/07/09 00:45:40 henning Exp $	*/
 /*	$NetBSD: main.c,v 1.9 1996/05/07 02:55:02 thorpej Exp $	*/
 
 /*
@@ -132,13 +132,8 @@ struct protox ip6protox[] = {
 	{ -1,		NULL,		NULL,		NULL }
 };
 
-struct protox atalkprotox[] = {
-	{ N_DDPCB,	atalkprotopr,	ddp_stats,	"ddp" },
-	{ -1,		NULL,		NULL,		NULL }
-};
-
 struct protox *protoprotox[] = {
-	protox, ip6protox, atalkprotox, NULL
+	protox, ip6protox, NULL
 };
 
 static void printproto(struct protox *, char *, int, u_long);
@@ -169,13 +164,17 @@ main(int argc, char *argv[])
 
 	af = AF_UNSPEC;
 
-	while ((ch = getopt(argc, argv, "Aabc:dFf:gI:ilM:mN:np:P:qrsT:tuvW:w:")) != -1)
+	while ((ch = getopt(argc, argv,
+	    "AaBbc:dFf:gI:ilM:mN:np:P:qrsT:tuvW:w:")) != -1)
 		switch (ch) {
 		case 'A':
 			Aflag = 1;
 			break;
 		case 'a':
 			aflag = 1;
+			break;
+		case 'B':
+			Bflag = 1;
 			break;
 		case 'b':
 			bflag = 1;
@@ -200,8 +199,6 @@ main(int argc, char *argv[])
 				af = AF_UNIX;
 			else if (strcmp(optarg, "encap") == 0)
 				af = PF_KEY;
-			else if (strcmp(optarg, "atalk") == 0)
-				af = AF_APPLETALK;
 			else if (strcmp(optarg, "mpls") == 0)
 				af = AF_MPLS;
 			else if (strcmp(optarg, "pflow") == 0)
@@ -425,9 +422,6 @@ main(int argc, char *argv[])
 			printproto(tp, tp->pr_name, AF_INET6, pcbaddr);
 	if ((af == AF_UNIX || af == AF_UNSPEC) && !sflag)
 		unixpr(nl[N_UNIXSW].n_value, pcbaddr);
-	if (af == AF_APPLETALK || af == AF_UNSPEC)
-		for (tp = atalkprotox; tp->pr_name; tp++)
-			printproto(tp, tp->pr_name, af, pcbaddr);
 	exit(0);
 }
 
@@ -527,7 +521,7 @@ static void
 usage(void)
 {
 	(void)fprintf(stderr,
-	    "usage: %s [-Aan] [-f address_family] [-M core] [-N system]\n"
+	    "usage: %s [-AaBn] [-f address_family] [-M core] [-N system]\n"
 	    "       %s [-bdFgilmnqrstu] [-f address_family] [-M core] [-N system]\n"
 	    "               [-T tableid]\n"
 	    "       %s [-bdn] [-c count] [-I interface] [-M core] [-N system] [-w wait]\n"

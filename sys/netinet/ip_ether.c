@@ -1,4 +1,4 @@
-/*	$OpenBSD: ip_ether.c,v 1.56 2010/10/28 16:36:16 claudio Exp $  */
+/*	$OpenBSD: ip_ether.c,v 1.58 2011/07/04 20:42:15 dhill Exp $  */
 /*
  * The author of this code is Angelos D. Keromytis (kermit@adk.gr)
  *
@@ -27,6 +27,7 @@
  */
 
 #include "bridge.h"
+#include "pf.h"
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -121,7 +122,7 @@ etherip_input(struct mbuf *m, ...)
 		return;
 #endif
 	default:
-		DPRINTF(("etherip_input(): dropped, unhandled protcol \n"));
+		DPRINTF(("etherip_input(): dropped, unhandled protocol\n"));
 		etheripstat.etherip_pdrops++;
 		m_freem(m);
 		return;
@@ -137,8 +138,7 @@ etherip_input6(struct mbuf **m, int *offp, int proto)
 #if NBRIDGE > 0
 	case IPPROTO_ETHERIP:
 		/* If we do not accept EtherIP explicitly, drop. */
-		if (proto == IPPROTO_ETHERIP && !etherip_allow &&
-		    ((*m)->m_flags & (M_AUTH|M_CONF)) == 0) {
+		if (!etherip_allow && ((*m)->m_flags & (M_AUTH|M_CONF)) == 0) {
 			DPRINTF(("etherip_input6(): dropped due to policy\n"));
 			etheripstat.etherip_pdrops++;
 			m_freem(*m);
@@ -153,7 +153,7 @@ etherip_input6(struct mbuf **m, int *offp, int proto)
 		return IPPROTO_DONE;
 #endif
 	default:
-		DPRINTF(("etherip_input6(): dropped, unhandled protcol \n"));
+		DPRINTF(("etherip_input6(): dropped, unhandled protocol\n"));
 		etheripstat.etherip_pdrops++;
 		m_freem(*m);
 		return IPPROTO_DONE;

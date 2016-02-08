@@ -1,4 +1,4 @@
-/*      $OpenBSD: if_malo.c,v 1.71 2010/08/30 20:33:18 deraadt Exp $ */
+/*      $OpenBSD: if_malo.c,v 1.73 2011/07/03 15:47:17 matthew Exp $ */
 
 /*
  * Copyright (c) 2007 Marcus Glocker <mglocker@openbsd.org>
@@ -205,7 +205,7 @@ malo_pcmcia_attach(struct device *parent, struct device *self, void *aux)
 	}
 	intrstr = pcmcia_intr_string(psc->sc_pf, psc->sc_ih);
 	if (intrstr != NULL) {
-		if (*intrstr != NULL)
+		if (*intrstr != '\0')
 			printf(", %s", intrstr);
 	}
 	printf("\n");
@@ -240,13 +240,6 @@ malo_pcmcia_activate(struct device *dev, int act)
 	struct ifnet *ifp = &ic->ic_if;
 
 	switch (act) {
-	case DVACT_ACTIVATE:
-		pcmcia_function_enable(psc->sc_pf);
-		psc->sc_ih = pcmcia_intr_establish(psc->sc_pf, IPL_NET,
-		    cmalo_intr, sc, sc->sc_dev.dv_xname);
-		workq_queue_task(NULL, &sc->sc_resume_wqt, 0,
-		    malo_pcmcia_resume, sc, NULL);
-		break;
 	case DVACT_SUSPEND:
 		if ((sc->sc_flags & MALO_DEVICE_ATTACHED) &&
 		    (ifp->if_flags & IFF_RUNNING))

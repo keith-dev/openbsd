@@ -10,6 +10,8 @@
  * ====================================================
  */
 
+/* LINTLIBRARY */
+
 /* Tanh(x)
  * Return the Hyperbolic Tangent of x
  *
@@ -34,7 +36,10 @@
  *	only tanh(0)=0 is exact for finite argument.
  */
 
-#include "math.h"
+#include <sys/cdefs.h>
+#include <float.h>
+#include <math.h>
+
 #include "math_private.h"
 
 static const double one=1.0, two=2.0, tiny = 1.0e-300;
@@ -43,10 +48,10 @@ double
 tanh(double x)
 {
 	double t,z;
-	int32_t jx,ix;
+	int32_t jx,ix,lx;
 
     /* High word of |x|. */
-	GET_HIGH_WORD(jx,x);
+	EXTRACT_WORDS(jx,lx,x);
 	ix = jx&0x7fffffff;
 
     /* x is INF or NaN */
@@ -57,6 +62,8 @@ tanh(double x)
 
     /* |x| < 22 */
 	if (ix < 0x40360000) {		/* |x|<22 */
+	    if ((ix | lx) == 0)
+		return x;		/* x == +-0 */
 	    if (ix<0x3c800000) 		/* |x|<2**-55 */
 		return x*(one+x);    	/* tanh(small) = small */
 	    if (ix>=0x3ff00000) {	/* |x|>=1  */
@@ -72,3 +79,12 @@ tanh(double x)
 	}
 	return (jx>=0)? z: -z;
 }
+
+#if	LDBL_MANT_DIG == 53
+#ifdef	lint
+/* PROTOLIB1 */
+long double tanhl(long double);
+#else	/* lint */
+__weak_alias(tanhl, tanh);
+#endif	/* lint */
+#endif	/* LDBL_MANT_DIG == 53 */

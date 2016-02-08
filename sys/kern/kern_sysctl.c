@@ -1,4 +1,4 @@
-/*	$OpenBSD: kern_sysctl.c,v 1.197 2011/02/16 10:37:45 mikeb Exp $	*/
+/*	$OpenBSD: kern_sysctl.c,v 1.206 2011/07/05 04:48:02 guenther Exp $	*/
 /*	$NetBSD: kern_sysctl.c,v 1.17 1996/05/20 17:49:05 mrg Exp $	*/
 
 /*-
@@ -45,6 +45,7 @@
 #include <sys/malloc.h>
 #include <sys/proc.h>
 #include <sys/resourcevar.h>
+#include <sys/signalvar.h>
 #include <sys/file.h>
 #include <sys/filedesc.h>
 #include <sys/vnode.h>
@@ -270,12 +271,12 @@ kern_sysctl(int *name, u_int namelen, void *oldp, size_t *oldlenp, void *newp,
 	extern int cryptodevallowsoft;
 #endif
 	extern int maxlocksperuid;
+	extern int pool_debug;
 
 	/* all sysctl names at this level are terminal except a ton of them */
 	if (namelen != 1) {
 		switch (name[0]) {
 		case KERN_PROC:
-		case KERN_PROC2:
 		case KERN_PROF:
 		case KERN_MALLOCSTATS:
 		case KERN_TTY:
@@ -362,8 +363,7 @@ kern_sysctl(int *name, u_int namelen, void *oldp, size_t *oldlenp, void *newp,
 		return (sysctl_vnode(oldp, oldlenp, p));
 #ifndef SMALL_KERNEL
 	case KERN_PROC:
-	case KERN_PROC2:
-		return (sysctl_doproc(name, namelen, oldp, oldlenp));
+		return (sysctl_doproc(name + 1, namelen - 1, oldp, oldlenp));
 	case KERN_PROC_ARGS:
 		return (sysctl_proc_args(name + 1, namelen - 1, oldp, oldlenp,
 		     p));
@@ -566,6 +566,7 @@ kern_sysctl(int *name, u_int namelen, void *oldp, size_t *oldlenp, void *newp,
 		return (sysctl_int(oldp, oldlenp, newp, newlen,
 		    &rthreads_enabled));
 	case KERN_CACHEPCT: {
+		u_int64_t dmapages;
 		int opct, pgs;
 		opct = bufcachepercent;
 		error = sysctl_int(oldp, oldlenp, newp, newlen,
@@ -576,8 +577,9 @@ kern_sysctl(int *name, u_int namelen, void *oldp, size_t *oldlenp, void *newp,
 			bufcachepercent = opct;
 			return (EINVAL);
 		}
+		dmapages = uvm_pagecount(&dma_constraint);
 		if (bufcachepercent != opct) {
-			pgs = bufcachepercent * physmem / 100;
+			pgs = bufcachepercent * dmapages / 100;
 			bufadjust(pgs); /* adjust bufpages */
 			bufhighpages = bufpages; /* set high water mark */
 		}
@@ -591,6 +593,15 @@ kern_sysctl(int *name, u_int namelen, void *oldp, size_t *oldlenp, void *newp,
 		return sysctl_rdstruct(oldp, oldlenp, newp, &dev, sizeof(dev));
 	case KERN_NETLIVELOCKS:
 		return (sysctl_rdint(oldp, oldlenp, newp, mcllivelocks));
+	case KERN_POOL_DEBUG: {
+		int old_pool_debug = pool_debug;
+
+		error = sysctl_int(oldp, oldlenp, newp, newlen,
+		    &pool_debug);
+		if (error == 0 && pool_debug != old_pool_debug)
+			pool_reclaim_all();
+		return (error);
+	}
 	default:
 		return (EOPNOTSUPP);
 	}
@@ -601,6 +612,7 @@ kern_sysctl(int *name, u_int namelen, void *oldp, size_t *oldlenp, void *newp,
  * hardware related system variables.
  */
 char *hw_vendor, *hw_prod, *hw_uuid, *hw_serial, *hw_ver;
+int allowpowerdown = 1;
 
 int
 hw_sysctl(int *name, u_int namelen, void *oldp, size_t *oldlenp, void *newp,
@@ -706,6 +718,12 @@ hw_sysctl(int *name, u_int namelen, void *oldp, size_t *oldlenp, void *newp,
 	case HW_USERMEM64:
 		return (sysctl_rdquad(oldp, oldlenp, newp,
 		    ptoa((psize_t)physmem - uvmexp.wired)));
+	case HW_ALLOWPOWERDOWN:
+		if (securelevel > 0)
+			return (sysctl_rdint(oldp, oldlenp, newp,
+			    allowpowerdown));
+		return (sysctl_int(oldp, oldlenp, newp, newlen,
+		    &allowpowerdown));
 	default:
 		return (EOPNOTSUPP);
 	}
@@ -1026,6 +1044,7 @@ sysctl_file(char *where, size_t *sizep, struct proc *p)
 			cfile.f_offset = (off_t)-1;
 			cfile.f_rxfer = 0;
 			cfile.f_wxfer = 0;
+			cfile.f_seek = 0;
 			cfile.f_rbytes = 0;
 			cfile.f_wbytes = 0;
 		}
@@ -1061,17 +1080,18 @@ fill_file2(struct kinfo_file2 *kf, struct file *fp, struct filedesc *fdp,
 		kf->f_uid = fp->f_cred->cr_uid;
 		kf->f_gid = fp->f_cred->cr_gid;
 		kf->f_ops = PTRTOINT64(fp->f_ops);
-		kf->f_offset = fp->f_offset;
 		kf->f_data = PTRTOINT64(fp->f_data);
 		kf->f_usecount = fp->f_usecount;
 
 		if (suser(p, 0) == 0 || p->p_ucred->cr_uid == fp->f_cred->cr_uid) {
+			kf->f_offset = fp->f_offset;
 			kf->f_rxfer = fp->f_rxfer;
 			kf->f_rwfer = fp->f_wxfer;
 			kf->f_seek = fp->f_seek;
 			kf->f_rbytes = fp->f_rbytes;
 			kf->f_wbytes = fp->f_rbytes;
-		}
+		} else
+			kf->f_offset = -1;
 	} else if (vp != NULL) {
 		/* fake it */
 		kf->f_type = DTYPE_VNODE;
@@ -1137,7 +1157,7 @@ fill_file2(struct kinfo_file2 *kf, struct file *fp, struct filedesc *fdp,
 			kf->inp_laddru[2] = inpcb->inp_laddr6.s6_addr32[2];
 			kf->inp_laddru[3] = inpcb->inp_laddr6.s6_addr32[3];
 			kf->inp_fport = inpcb->inp_fport;
-			kf->inp_faddru[0] = inpcb->inp_laddr6.s6_addr32[0];
+			kf->inp_faddru[0] = inpcb->inp_faddr6.s6_addr32[0];
 			kf->inp_faddru[1] = inpcb->inp_faddr6.s6_addr32[1];
 			kf->inp_faddru[2] = inpcb->inp_faddr6.s6_addr32[2];
 			kf->inp_faddru[3] = inpcb->inp_faddr6.s6_addr32[3];
@@ -1323,42 +1343,33 @@ sysctl_file2(int *name, u_int namelen, char *where, size_t *sizep,
 /*
  * try over estimating by 5 procs
  */
-#define KERN_PROCSLOP	(5 * sizeof (struct kinfo_proc))
+#define KERN_PROCSLOP	5
 
 int
 sysctl_doproc(int *name, u_int namelen, char *where, size_t *sizep)
 {
-	struct kinfo_proc2 *kproc2 = NULL;
-	struct eproc *eproc = NULL;
+	struct kinfo_proc *kproc = NULL;
 	struct proc *p;
 	struct process *pr;
 	char *dp;
 	int arg, buflen, doingzomb, elem_size, elem_count;
-	int error, needed, type, op;
+	int error, needed, op;
 
 	dp = where;
 	buflen = where != NULL ? *sizep : 0;
 	needed = error = 0;
-	type = name[0];
 
-	if (type == KERN_PROC) {
-		if (namelen != 3 && !(namelen == 2 &&
-		    (name[1] == KERN_PROC_ALL || name[1] == KERN_PROC_KTHREAD)))
-			return (EINVAL);
-		op = name[1];
-		arg = op == KERN_PROC_ALL ? 0 : name[2];
-		elem_size = elem_count = 0;
-		eproc = malloc(sizeof(struct eproc), M_TEMP, M_WAITOK);
-	} else /* if (type == KERN_PROC2) */ {
-		if (namelen != 5 || name[3] < 0 || name[4] < 0 ||
-		    name[3] > sizeof(*kproc2))
-			return (EINVAL);
-		op = name[1];
-		arg = name[2];
-		elem_size = name[3];
-		elem_count = name[4];
-		kproc2 = malloc(sizeof(struct kinfo_proc2), M_TEMP, M_WAITOK);
-	}
+	if (namelen != 4 || name[2] < 0 || name[3] < 0 ||
+	    name[2] > sizeof(*kproc))
+		return (EINVAL);
+	op = name[0];
+	arg = name[1];
+	elem_size = name[2];
+	elem_count = name[3];
+
+	if (where != NULL)
+		kproc = malloc(sizeof(*kproc), M_TEMP, M_WAITOK);
+
 	p = LIST_FIRST(&allproc);
 	doingzomb = 0;
 again:
@@ -1418,47 +1429,26 @@ again:
 			if (p->p_flag & P_SYSTEM)
 				continue;
 			break;
+
 		case KERN_PROC_KTHREAD:
 			/* no filtering */
 			break;
+
 		default:
 			error = EINVAL;
 			goto err;
 		}
-		if (type == KERN_PROC) {
-			if (buflen >= sizeof(struct kinfo_proc)) {
-				fill_eproc(p, eproc);
-				error = copyout((caddr_t)p,
-				    &((struct kinfo_proc *)dp)->kp_proc,
-				    sizeof(struct proc));
-				if (error)
-					goto err;
-				error = copyout((caddr_t)eproc,
-				    &((struct kinfo_proc *)dp)->kp_eproc,
-				    sizeof(*eproc));
-				if (error)
-					goto err;
-				dp += sizeof(struct kinfo_proc);
-				buflen -= sizeof(struct kinfo_proc);
-			}
-			needed += sizeof(struct kinfo_proc);
-		} else /* if (type == KERN_PROC2) */ {
-			if (buflen >= elem_size && elem_count > 0) {
-				fill_kproc2(p, kproc2);
-				/*
-				 * Copy out elem_size, but not larger than
-				 * the size of a struct kinfo_proc2.
-				 */
-				error = copyout(kproc2, dp,
-				    min(sizeof(*kproc2), elem_size));
-				if (error)
-					goto err;
-				dp += elem_size;
-				buflen -= elem_size;
-				elem_count--;
-			}
-			needed += elem_size;
+
+		if (buflen >= elem_size && elem_count > 0) {
+			fill_kproc(p, kproc);
+			error = copyout(kproc, dp, elem_size);
+			if (error)
+				goto err;
+			dp += elem_size;
+			buflen -= elem_size;
+			elem_count--;
 		}
+		needed += elem_size;
 	}
 	if (doingzomb == 0) {
 		p = LIST_FIRST(&zombproc);
@@ -1472,87 +1462,28 @@ again:
 			goto err;
 		}
 	} else {
-		needed += KERN_PROCSLOP;
+		needed += KERN_PROCSLOP * elem_size;
 		*sizep = needed;
 	}
 err:
-	if (eproc)
-		free(eproc, M_TEMP);
-	if (kproc2)
-		free(kproc2, M_TEMP);
+	if (kproc)
+		free(kproc, M_TEMP);
 	return (error);
 }
 
 /*
- * Fill in an eproc structure for the specified process.
+ * Fill in a kproc structure for the specified process.
  */
 void
-fill_eproc(struct proc *p, struct eproc *ep)
-{
-	struct tty *tp;
-
-	ep->e_paddr = p;
-	ep->e_sess = p->p_p->ps_pgrp->pg_session;
-	ep->e_pcred = *p->p_cred;
-	ep->e_ucred = *p->p_ucred;
-	if (p->p_stat == SIDL || P_ZOMBIE(p)) {
-		ep->e_vm.vm_rssize = 0;
-		ep->e_vm.vm_tsize = 0;
-		ep->e_vm.vm_dsize = 0;
-		ep->e_vm.vm_ssize = 0;
-		bzero(&ep->e_pstats, sizeof(ep->e_pstats));
-		ep->e_pstats_valid = 0;
-	} else {
-		struct vmspace *vm = p->p_vmspace;
-
-		ep->e_vm.vm_rssize = vm_resident_count(vm);
-		ep->e_vm.vm_tsize = vm->vm_tsize;
-		ep->e_vm.vm_dsize = vm->vm_dused;
-		ep->e_vm.vm_ssize = vm->vm_ssize;
-		ep->e_pstats = *p->p_stats;
-		ep->e_pstats_valid = 1;
-	}
-	if (p->p_p->ps_pptr)
-		ep->e_ppid = p->p_p->ps_pptr->ps_pid;
-	else
-		ep->e_ppid = 0;
-	ep->e_pgid = p->p_p->ps_pgrp->pg_id;
-	ep->e_jobc = p->p_p->ps_pgrp->pg_jobc;
-	if ((p->p_p->ps_flags & PS_CONTROLT) &&
-	     (tp = ep->e_sess->s_ttyp)) {
-		ep->e_tdev = tp->t_dev;
-		ep->e_tpgid = tp->t_pgrp ? tp->t_pgrp->pg_id : NO_PID;
-		ep->e_tsess = tp->t_session;
-	} else
-		ep->e_tdev = NODEV;
-	ep->e_flag = ep->e_sess->s_ttyvp ? EPROC_CTTY : 0;
-	if (SESS_LEADER(p->p_p))
-		ep->e_flag |= EPROC_SLEADER;
-	strncpy(ep->e_wmesg, p->p_wmesg ? p->p_wmesg : "", WMESGLEN);
-	ep->e_wmesg[WMESGLEN] = '\0';
-	ep->e_xsize = ep->e_xrssize = 0;
-	ep->e_xccount = ep->e_xswrss = 0;
-	strncpy(ep->e_login, ep->e_sess->s_login, MAXLOGNAME-1);
-	ep->e_login[MAXLOGNAME-1] = '\0';
-	strncpy(ep->e_emul, p->p_emul->e_name, EMULNAMELEN);
-	ep->e_emul[EMULNAMELEN] = '\0';
-	ep->e_maxrss = p->p_rlimit ? p->p_rlimit[RLIMIT_RSS].rlim_cur : 0;
-	ep->e_limit = p->p_p->ps_limit;
-}
-
-/*
- * Fill in a kproc2 structure for the specified process.
- */
-void
-fill_kproc2(struct proc *p, struct kinfo_proc2 *ki)
+fill_kproc(struct proc *p, struct kinfo_proc *ki)
 {
 	struct process *pr = p->p_p;
 	struct session *s = pr->ps_session;
 	struct tty *tp;
 	struct timeval ut, st;
 
-	FILL_KPROC2(ki, strlcpy, p, pr, p->p_cred, p->p_ucred, pr->ps_pgrp,
-	    p, pr, s, p->p_vmspace, pr->ps_limit, p->p_stats);
+	FILL_KPROC(ki, strlcpy, p, pr, p->p_cred, p->p_ucred, pr->ps_pgrp,
+	    p, pr, s, p->p_vmspace, pr->ps_limit, p->p_stats, p->p_sigacts);
 
 	/* stuff that's too painful to generalize into the macros */
 	if (pr->ps_pptr)

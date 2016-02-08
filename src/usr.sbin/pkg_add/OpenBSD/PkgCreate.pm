@@ -1,6 +1,6 @@
 #! /usr/bin/perl
 # ex:ts=8 sw=4:
-# $OpenBSD: PkgCreate.pm,v 1.41 2011/01/09 13:06:10 espie Exp $
+# $OpenBSD: PkgCreate.pm,v 1.47 2011/06/24 14:36:16 espie Exp $
 #
 # Copyright (c) 2003-2010 Marc Espie <espie@openbsd.org>
 #
@@ -108,6 +108,7 @@ sub pretend_to_archive
 
 sub archive {}
 sub comment_create_package {}
+sub grab_manpages {}
 
 sub print_file {}
 
@@ -244,10 +245,6 @@ sub copy_over
 }
 
 sub discover_directories
-{
-}
-
-sub remove_temp
 {
 }
 
@@ -421,6 +418,18 @@ sub makesum_plist
 package OpenBSD::PackingElement::Manpage;
 use File::Basename;
 
+sub grab_manpages
+{
+	my ($self, $state) = @_;
+	my $filename;
+	if ($self->{wtempname}) {
+		$filename = $self->{wtempname};
+	} else {
+		$filename = $state->{base}.$self->fullname;
+	}
+	push(@{$state->{manpages}}, $filename);
+}
+
 sub makesum_plist
 {
 	my ($self, $plist, $state) = @_;
@@ -428,9 +437,15 @@ sub makesum_plist
 		return $self->SUPER::makesum_plist($plist, $state);
 	}
 	my $dest = $self->source_to_dest;
-	my $d = dirname($self->cwd."/".$dest);
-	my ($fh, $tempname) = OpenBSD::Temp::permanent_file(
-	    $ENV{TMPDIR} // '/tmp', "manpage.".basename($dest));
+	my $fullname = $self->cwd."/".$dest;
+	my $d = dirname($fullname);
+	$state->{mandir} //= OpenBSD::Temp::permanent_dir(
+	    $ENV{TMPDIR} // '/tmp', "manpage");
+	my $tempname = $state->{mandir}."/".$fullname;
+	require File::Path;
+	File::Path::make_path($state->{mandir}."/".$d);
+	open my $fh, ">", $tempname or $state->error("can't create #1: #2", 
+	    $tempname, $!);
 	chmod 0444, $fh;
 	if (-d $state->{base}.$d) {
 		undef $d;
@@ -448,16 +463,6 @@ sub makesum_plist
 	my $e = OpenBSD::PackingElement::Manpage->add($plist, $dest);
 	$e->{wtempname} = $tempname;
 	$e->compute_checksum($e, $state, $state->{base});
-}
-
-sub remove_temp
-{
-	my $self = shift;
-
-	if (defined $self->{wtempname}) {
-		unlink($self->{wtempname});
-		$self->{wtempname} = undef;
-	}
 }
 
 package OpenBSD::PackingElement::Depend;
@@ -576,6 +581,8 @@ sub really_solve_dependency
 {
 	my ($self, $state, $dep, $package) = @_;
 
+	$state->progress->message($dep->{pkgpath});
+
 	# look in installed packages
 	my $v = $self->find_dep_in_installed($state, $dep);
 	if (!defined $v) {
@@ -589,37 +596,41 @@ sub really_solve_dependency
 	return $v;
 }
 
+my $cache = {};
 sub solve_from_ports
 {
 	my ($self, $state, $dep, $package) = @_;
 
 	my $portsdir = $state->defines('PORTSDIR');
 	return undef unless defined $portsdir;
-	my $plist = $self->ask_tree($state, $dep, $portsdir,
-	    'print-plist-with-depends');
-	if ($? != 0 || !defined $plist->pkgname) {
-		$plist = $self->ask_tree($state, $dep, $portsdir,
-		    'print-plist');
+	my $pkgname;
+	if (defined $cache->{$dep->{pkgpath}}) {
+		$pkgname = $cache->{$dep->{pkgpath}};
+	} else {
+		my $plist = $self->ask_tree($state, $dep, $portsdir,
+		    'print-plist-with-depends', 'wantlib_args=no-wantlib-args');
+		if ($? != 0 || !defined $plist->pkgname) {
+			$state->error("Can't obtain dependency #1 from ports tree",
+			    $dep->{pattern});
+			return undef;
+		}
+		OpenBSD::SharedLibs::add_libs_from_plist($plist, $state);
+		$self->add_dep($plist);
+		$pkgname = $plist->pkgname;
+		$cache->{$dep->{pkgpath}} = $pkgname;
 	}
-	if ($? != 0 || !defined $plist->pkgname) {
-		$state->error("Can't obtain dependency #1 from ports tree",
-		    $dep->{pattern});
-		return undef;
-	}
-	if ($dep->spec->filter($plist->pkgname) == 0) {
+	if ($dep->spec->filter($pkgname) == 0) {
 		$state->error("Dependency #1 doesn't match FULLPKGNAME: #2",
-		    $dep->{pattern}, $plist->pkgname);
+		    $dep->{pattern}, $pkgname);
 		return undef;
 	}
 
-	OpenBSD::SharedLibs::add_libs_from_plist($plist, $state);
-	$self->add_dep($plist);
-	return $plist->pkgname;
+	return $pkgname;
 }
 
 sub ask_tree
 {
-	my ($self, $state, $dep, $portsdir, $action) = @_;
+	my ($self, $state, $dep, $portsdir, @action) = @_;
 
 	my $make = OpenBSD::Paths->make;
 	my $pid = open(my $fh, "-|");
@@ -631,7 +642,7 @@ sub ask_tree
 		open STDERR, '>', '/dev/null';
 		$ENV{SUBDIR} = $dep->{pkgpath};
 		$ENV{ECHO_MSG} = ':';
-		exec $make ('make', $action);
+		exec $make ('make', @action);
 	}
 	my $plist = OpenBSD::PackingList->read($fh,
 	    \&OpenBSD::PackingList::PrelinkStuffOnly);
@@ -1052,6 +1063,29 @@ sub check_dependencies
 	}
 }
 
+sub finish_manpages
+{
+	my ($self, $state, $plist) = @_;
+	$plist->grab_manpages($state);
+	if (defined $state->{manpages}) {
+		$state->{v} ++;
+
+		require OpenBSD::Makewhatis;
+
+		try {
+			OpenBSD::Makewhatis::scan_manpages($state->{manpages}, 
+			    $state);
+		} catchall {
+			$state->errsay("Error in makewhatis: #1", $_);
+		};
+		$state->{v} --;
+	}
+
+	if (defined $state->{mandir}) {
+		require File::Path;
+		File::Path::remove_tree($state->{mandir});
+	}
+}
 
 sub parse_and_run
 {
@@ -1083,7 +1117,7 @@ sub parse_and_run
 		    }
 	};
 	$state->{no_exports} = 1;
-	$state->handle_options('p:f:d:M:U:s:A:L:B:P:W:qQ',
+	$state->handle_options('p:f:d:M:U:s:A:B:P:W:qQ',
 	    '[-nQqvx] [-A arches] [-B pkg-destdir] [-D name[=value]]',
 	    '[-L localbase] [-M displayfile] [-P pkg-dependency]',
 	    '[-s x509 -s cert -s priv] [-U undisplayfile] [-W wantedlib]',
@@ -1207,7 +1241,7 @@ sub parse_and_run
 	} else {
 		$self->create_package($state, $plist, $wname);
 	}
-	$plist->remove_temp;
+	$self->finish_manpages($state, $plist);
 	}catch {
 		print STDERR "$0: $_\n";
 		return 1;

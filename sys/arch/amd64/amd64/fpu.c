@@ -1,4 +1,4 @@
-/*	$OpenBSD: fpu.c,v 1.21 2010/09/29 15:11:31 joshe Exp $	*/
+/*	$OpenBSD: fpu.c,v 1.26 2011/07/11 15:40:47 guenther Exp $	*/
 /*	$NetBSD: fpu.c,v 1.1 2003/04/26 18:39:28 fvdl Exp $	*/
 
 /*-
@@ -30,12 +30,6 @@
  * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
- *
- *	@(#)npx.c	7.2 (Berkeley) 5/12/91
- */
-
-/*
- * XXXfvdl update copyright notice. this started out as a stripped isa/npx.c
  */
 
 #include <sys/param.h>
@@ -96,6 +90,11 @@ void fpudna(struct cpu_info *);
 static int x86fpflags_to_siginfo(u_int32_t);
 
 /*
+ * The mxcsr_mask for this host, taken from fxsave() on the primary CPU
+ */
+uint32_t	fpu_mxcsr_mask;
+
+/*
  * Init the FPU.
  */
 void
@@ -103,6 +102,16 @@ fpuinit(struct cpu_info *ci)
 {
 	lcr0(rcr0() & ~(CR0_EM|CR0_TS));
 	fninit();
+	if (fpu_mxcsr_mask == 0) {
+		struct fxsave64 fx __attribute__((aligned(16)));
+
+		bzero(&fx, sizeof(fx));
+		fxsave(&fx);
+		if (fx.fx_mxcsr_mask)
+			fpu_mxcsr_mask = fx.fx_mxcsr_mask;
+		else
+			fpu_mxcsr_mask = __INITIAL_MXCSR_MASK__;
+	}
 	lcr0(rcr0() | (CR0_TS));
 }
 
@@ -151,9 +160,9 @@ fputrap(struct trapframe *frame)
 	sfp->fp_ex_sw = sfp->fp_fxsave.fx_fsw;
 	code = x86fpflags_to_siginfo (statbits);
 	sv.sival_ptr = (void *)frame->tf_rip;	/* XXX - ? */
-	KERNEL_PROC_LOCK(p);
+	KERNEL_LOCK();
 	trapsignal(p, SIGFPE, frame->tf_err, code, sv);
-	KERNEL_PROC_UNLOCK(p);
+	KERNEL_UNLOCK();
 }
 
 static int

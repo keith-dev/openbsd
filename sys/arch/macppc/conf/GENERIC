@@ -1,4 +1,4 @@
-#	$OpenBSD: GENERIC,v 1.206 2011/02/17 20:14:30 miod Exp $g
+#	$OpenBSD: GENERIC,v 1.212 2011/07/07 23:41:09 tedu Exp $g
 #
 # For further information on compiling OpenBSD kernels, see the config(8)
 # man page.
@@ -86,6 +86,7 @@ sk*		at skc?		#  each port of above
 mskc*		at pci?		# Marvell Yukon-2
 msk*		at mskc?	#  each port of above
 an*		at pci?		# Cisco/Aironet
+ath*		at pci?		# Atheros AR5k (802.11a/b/g)
 atw*		at pci?		# ADMtek ADM8211 (802.11)
 bwi*		at pci?		# Broadcom AirForce (802.11b/g)
 wi*		at pci?		# WaveLAN IEEE 802.11DS
@@ -155,6 +156,7 @@ macgpio*	at macobio?	# GPIO, PMU interrupt router.
 macgpio*	at macgpio?	# GPIO, PMU interrupt router.
 sysbutton*	at macgpio?	# Xserve system id button.
 pgs*		at macgpio?	# Programmer Switch.
+dfs*		at macgpio?	# Dynamic Frequency Switching.
 akbd*		at adb?		# ADB keyboard
 wskbd*		at akbd? mux 1
 ams*		at adb?		# ADB mouse
@@ -184,19 +186,6 @@ puc*		at pci?		# PCI "universal" comm device
 #puc*		at cardbus?
 com*		at puc?
 
-#scsibus*	at adv?
-scsibus*	at ahc?
-#scsibus*	at ami?
-#scsibus*	at bha?
-#scsibus*	at esp?
-scsibus*	at mesh?
-scsibus*	at ioprbs?
-scsibus*	at iopsp?
-scsibus*	at pcscp?
-scsibus*	at isp?
-scsibus*	at mpi?
-scsibus*	at arc?
-scsibus*	at siop?
 
 mediabay*	at macobio?
 wdc*		at mediabay?
@@ -205,7 +194,6 @@ wd*		at wdc? flags 0x0000
 wd*		at pciide? flags 0x0000
 atapiscsi*	at wdc? flags 0x0000
 atapiscsi*	at pciide? flags 0x0000
-scsibus*	at atapiscsi?
 
 # USB Controllers
 ohci*	at pci?			# Open Host Controller
@@ -254,8 +242,6 @@ umidi*	at uhub?		# USB MIDI
 midi*	at umidi?
 ulpt*	at uhub?		# USB Printers
 umass*	at uhub?		# USB Mass Storage devices
-scsibus* at umass?
-atapiscsi* at umass?
 uhidev*	at uhub?		# Human Interface Devices
 tpms*	at uhidev?		# Apple touchpad mouse
 wsmouse* at tpms? mux 0
@@ -316,16 +302,15 @@ udl*		at uhub?
 wsdisplay*	at udl?
 
 # Bluetooth controllers
-ubt*	at uhub? disable	# USB Bluetooth
-bthub*	at ubt?
-
-bthidev* at bthub?		# Bluetooth HID support
-btkbd*	at bthidev?
-btms*	at bthidev?
-wskbd*	at btkbd? mux 1
-wsmouse* at btms? mux 0
-btsco*	at bthub?		# Bluetooth audio support
-audio*	at btsco?
+#ubt*	at uhub? disable	# USB Bluetooth
+#bthub*	at ubt?
+#bthidev* at bthub?		# Bluetooth HID support
+#btkbd*	at bthidev?
+#btms*	at bthidev?
+#wskbd*	at btkbd? mux 1
+#wsmouse* at btms? mux 0
+#btsco*	at bthub?		# Bluetooth audio support
+#audio*	at btsco?
 
 # I2C bus support
 iic*		at kiic?
@@ -387,6 +372,7 @@ audio*		at daca?
 # MIDI support
 midi*		at eap?
 
+scsibus*	at scsi?
 sd*		at scsibus?
 st*		at scsibus?
 cd*		at scsibus?
@@ -404,3 +390,4 @@ owctr*	at onewire?			# Counter device
 
 pseudo-device	hotplug	1	# devices hot plugging
 pseudo-device	wsmux	2	# mouse & keyboard multiplexor
+pseudo-device	sequencer 1

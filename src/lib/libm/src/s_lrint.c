@@ -1,4 +1,4 @@
-/*	$OpenBSD: s_lrint.c,v 1.1 2006/09/25 20:25:41 kettenis Exp $	*/
+/*	$OpenBSD: s_lrint.c,v 1.7 2011/07/06 00:02:42 martynas Exp $	*/
 /* $NetBSD: lrint.c,v 1.3 2004/10/13 15:18:32 drochner Exp $ */
 
 /*-
@@ -27,11 +27,15 @@
  * SUCH DAMAGE.
  */
 
+/* LINTLIBRARY */
+
 #include <sys/types.h>
 #include <sys/limits.h>
+#include <float.h>
 #include <math.h>
 #include <ieeefp.h>
 #include <machine/ieee.h>
+
 #include "math_private.h"
 
 #ifndef LRINTNAME
@@ -57,39 +61,50 @@ LRINTNAME(double x)
 	RESTYPE res;
 
 	GET_HIGH_WORD(i0, x);
-	e = i0 >> 20;
+	e = i0 >> DBL_FRACHBITS;
 	s = e >> DBL_EXPBITS;
 	e = (e & 0x7ff) - DBL_EXP_BIAS;
 
-	/* 1.0 x 2^-1 is the smallest number which can be rounded to 1 */
-	if (e < -1)
-		return (0);
 	/* 1.0 x 2^31 (or 2^63) is already too large */
 	if (e >= (int)RESTYPE_BITS - 1)
 		return (s ? RESTYPE_MIN : RESTYPE_MAX); /* ??? unspecified */
 
 	/* >= 2^52 is already an exact integer */
 	if (e < DBL_FRACBITS) {
+		volatile double t = x;	/* clip extra precision */
 		/* round, using current direction */
-		x += TWO52[s];
-		x -= TWO52[s];
+		t += TWO52[s];
+		t -= TWO52[s];
+		x = t;
 	}
 
 	EXTRACT_WORDS(i0, i1, x);
-	e = ((i0 >> 20) & 0x7ff) - DBL_EXP_BIAS;
+	e = ((i0 >> DBL_FRACHBITS) & 0x7ff) - DBL_EXP_BIAS;
 	i0 &= 0xfffff;
-	i0 |= (1 << 20);
+	i0 |= (1 << DBL_FRACHBITS);
+
+	if (e < 0)
+		return (0);
 
 	shift = e - DBL_FRACBITS;
 	if (shift >=0)
-		res = (shift < 32 ? (RESTYPE)i1 << shift : 0);
+		res = (shift < RESTYPE_BITS ? (RESTYPE)i1 << shift : 0);
 	else
-		res = (shift > -32 ? i1 >> -shift : 0);
+		res = (shift > -RESTYPE_BITS ? (RESTYPE)i1 >> -shift : 0);
 	shift += 32;
 	if (shift >=0)
-		res |= (shift < 32 ? (RESTYPE)i0 << shift : 0);
+		res |= (shift < RESTYPE_BITS ? (RESTYPE)i0 << shift : 0);
 	else
-		res |= (shift > -32 ? i0 >> -shift : 0);
+		res |= (shift > -RESTYPE_BITS ? (RESTYPE)i0 >> -shift : 0);
 
 	return (s ? -res : res);
 }
+
+#if	LDBL_MANT_DIG == 53
+#ifdef	lint
+/* PROTOLIB1 */
+long int lrintl(long double);
+#else	/* lint */
+__weak_alias(lrintl, lrint);
+#endif	/* lint */
+#endif	/* LDBL_MANT_DIG == 53 */

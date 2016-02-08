@@ -1,4 +1,4 @@
-/*	$OpenBSD: if.c,v 1.233 2011/01/25 05:44:05 tedu Exp $	*/
+/*	$OpenBSD: if.c,v 1.239 2011/07/09 00:47:18 henning Exp $	*/
 /*	$NetBSD: if.c,v 1.35 1996/05/07 05:26:04 thorpej Exp $	*/
 
 /*
@@ -279,7 +279,7 @@ if_attachsetup(struct ifnet *ifp)
 	ifindex2ifnet[if_index] = ifp;
 
 	if (ifp->if_snd.ifq_maxlen == 0)
-		ifp->if_snd.ifq_maxlen = ifqmaxlen;
+		IFQ_SET_MAXLEN(&ifp->if_snd, ifqmaxlen);
 #ifdef ALTQ
 	ifp->if_snd.altq_type = 0;
 	ifp->if_snd.altq_disc = NULL;
@@ -585,10 +585,6 @@ do { \
 #ifdef INET6
 	IF_DETACH_QUEUES(ip6intrq);
 #endif
-#ifdef NETATALK
-	IF_DETACH_QUEUES(atintrq1);
-	IF_DETACH_QUEUES(atintrq2);
-#endif
 #ifdef NATM
 	IF_DETACH_QUEUES(natmintrq);
 #endif
@@ -652,33 +648,35 @@ do { \
 void
 if_detach_queues(struct ifnet *ifp, struct ifqueue *q)
 {
-	struct mbuf *m, *prev, *next;
+	struct mbuf *m, *prev = NULL, *next;
+	int prio;
 
-	prev = NULL;
-	for (m = q->ifq_head; m; m = next) {
-		next = m->m_nextpkt;
+	for (prio = 0; prio <= IFQ_MAXPRIO; prio++) {
+		for (m = q->ifq_q[prio].head; m; m = next) {
+			next = m->m_nextpkt;
 #ifdef DIAGNOSTIC
-		if ((m->m_flags & M_PKTHDR) == 0) {
-			prev = m;
-			continue;
-		}
+			if ((m->m_flags & M_PKTHDR) == 0) {
+				prev = m;
+				continue;
+			}
 #endif
-		if (m->m_pkthdr.rcvif != ifp) {
-			prev = m;
-			continue;
+			if (m->m_pkthdr.rcvif != ifp) {
+				prev = m;
+				continue;
+			}
+
+			if (prev)
+				prev->m_nextpkt = m->m_nextpkt;
+			else
+				q->ifq_q[prio].head = m->m_nextpkt;
+			if (q->ifq_q[prio].tail == m)
+				q->ifq_q[prio].tail = prev;
+			q->ifq_len--;
+
+			m->m_nextpkt = NULL;
+			m_freem(m);
+			IF_DROP(q);
 		}
-
-		if (prev)
-			prev->m_nextpkt = m->m_nextpkt;
-		else
-			q->ifq_head = m->m_nextpkt;
-		if (q->ifq_tail == m)
-			q->ifq_tail = prev;
-		q->ifq_len--;
-
-		m->m_nextpkt = NULL;
-		m_freem(m);
-		IF_DROP(q);
 	}
 }
 
@@ -1168,24 +1166,6 @@ if_link_state_change(struct ifnet *ifp)
 }
 
 /*
- * Flush an interface queue.
- */
-void
-if_qflush(struct ifqueue *ifq)
-{
-	struct mbuf *m, *n;
-
-	n = ifq->ifq_head;
-	while ((m = n) != NULL) {
-		n = m->m_act;
-		m_freem(m);
-	}
-	ifq->ifq_head = 0;
-	ifq->ifq_tail = 0;
-	ifq->ifq_len = 0;
-}
-
-/*
  * Handle interface watchdog timer routines.  Called
  * from softclock, we decrement timers (if set) and
  * call the appropriate interface routine on expiration.
@@ -1357,6 +1337,31 @@ ifioctl(struct socket *so, u_long cmd, caddr_t data, struct proc *p)
 		}
 #endif
 
+#ifndef SMALL_KERNEL
+		if (ifp->if_capabilities & IFCAP_WOL) {
+			if (ISSET(ifr->ifr_flags, IFXF_WOL) &&
+			    !ISSET(ifp->if_xflags, IFXF_WOL)) {
+				int s = splnet();
+				ifp->if_xflags |= IFXF_WOL;
+				error = ifp->if_wol(ifp, 1);
+				splx(s);
+				if (error)
+					return (error);
+			}
+			if (ISSET(ifp->if_xflags, IFXF_WOL) &&
+			    !ISSET(ifr->ifr_flags, IFXF_WOL)) {
+				int s = splnet();
+				ifp->if_xflags &= ~IFXF_WOL;
+				error = ifp->if_wol(ifp, 0);
+				splx(s);
+				if (error)
+					return (error);
+			}
+		} else if (ISSET(ifr->ifr_flags, IFXF_WOL)) {
+			ifr->ifr_flags &= ~IFXF_WOL;
+			error = ENOTSUP;
+		}
+#endif
 
 		ifp->if_xflags = (ifp->if_xflags & IFXF_CANTCHANGE) |
 			(ifr->ifr_flags & ~IFXF_CANTCHANGE);
@@ -1594,7 +1599,7 @@ ifioctl(struct socket *so, u_long cmd, caddr_t data, struct proc *p)
 	default:
 		if (so->so_proto == 0)
 			return (EOPNOTSUPP);
-#if !defined(COMPAT_43) && !defined(COMPAT_LINUX) && !defined(COMPAT_SVR4)
+#if !defined(COMPAT_43) && !defined(COMPAT_LINUX)
 		error = ((*so->so_proto->pr_usrreq)(so, PRU_CONTROL,
 			(struct mbuf *) cmd, (struct mbuf *) data,
 			(struct mbuf *) ifp, p));
@@ -1693,7 +1698,7 @@ ifconf(u_long cmd, caddr_t data)
 				TAILQ_FOREACH(ifa,
 				    &ifp->if_addrlist, ifa_list) {
 					sa = ifa->ifa_addr;
-#if defined(COMPAT_43) || defined(COMPAT_LINUX) || defined(COMPAT_SVR4)
+#if defined(COMPAT_43) || defined(COMPAT_LINUX)
 					if (cmd != OSIOCGIFCONF)
 #endif
 					if (sa->sa_len > sizeof(*sa))
@@ -1723,7 +1728,7 @@ ifconf(u_long cmd, caddr_t data)
 			    ifa != TAILQ_END(&ifp->if_addrlist);
 			    ifa = TAILQ_NEXT(ifa, ifa_list)) {
 				struct sockaddr *sa = ifa->ifa_addr;
-#if defined(COMPAT_43) || defined(COMPAT_LINUX) || defined(COMPAT_SVR4)
+#if defined(COMPAT_43) || defined(COMPAT_LINUX)
 				if (cmd == OSIOCGIFCONF) {
 					struct osockaddr *osa =
 					    (struct osockaddr *)&ifr.ifr_addr;

@@ -1,4 +1,4 @@
-/*	$OpenBSD: string.h,v 1.20 2010/09/24 13:33:00 matthew Exp $	*/
+/*	$OpenBSD: string.h,v 1.22 2011/07/03 18:51:01 jsg Exp $	*/
 /*	$NetBSD: string.h,v 1.6 1994/10/26 00:56:30 cgd Exp $	*/
 
 /*-
@@ -46,8 +46,10 @@ typedef	__size_t	size_t;
 #ifndef	NULL
 #ifdef 	__GNUG__
 #define	NULL	__null
-#else
+#elif defined(__cplusplus)
 #define	NULL	0L
+#else
+#define	NULL	((void *)0)
 #endif
 #endif
 

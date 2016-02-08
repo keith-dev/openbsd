@@ -1,4 +1,4 @@
-/*	$OpenBSD: kern_exit.c,v 1.97 2010/08/02 19:54:07 guenther Exp $	*/
+/*	$OpenBSD: kern_exit.c,v 1.103 2011/07/25 19:38:53 tedu Exp $	*/
 /*	$NetBSD: kern_exit.c,v 1.39 1996/04/22 01:38:25 christos Exp $	*/
 
 /*
@@ -162,11 +162,13 @@ exit1(struct proc *p, int rv, int flags)
 		while (!TAILQ_EMPTY(&pr->ps_threads))
 			tsleep(&pr->ps_threads, PUSER, "thrdeath", 0);
 		/*
-		 * If parent is waiting for us to exit or exec, P_PPWAIT
+		 * If parent is waiting for us to exit or exec, PS_PPWAIT
 		 * is set; we wake up the parent early to avoid deadlock.
 		 */
-		if (p->p_flag & P_PPWAIT) {
-			atomic_clearbits_int(&p->p_flag, P_PPWAIT);
+		if (pr->ps_flags & PS_PPWAIT) {
+			atomic_clearbits_int(&pr->ps_flags, PS_PPWAIT);
+			atomic_clearbits_int(&pr->ps_pptr->ps_flags,
+			    PS_ISPWAIT);
 			wakeup(pr->ps_pptr);
 		}
 	}
@@ -174,7 +176,6 @@ exit1(struct proc *p, int rv, int flags)
 	if (p->p_flag & P_PROFIL)
 		stopprofclock(p);
 	p->p_ru = pool_get(&rusage_pool, PR_WAITOK);
-	p->p_sigignore = ~0;
 	p->p_siglist = 0;
 	timeout_del(&p->p_realit_to);
 	timeout_del(&p->p_stats->p_virt_to);
@@ -303,11 +304,12 @@ exit1(struct proc *p, int rv, int flags)
 
 		/*
 		 * Notify parent that we're gone.  If we have P_NOZOMBIE
-		 * or parent has the P_NOCLDWAIT flag set, notify process 1
+		 * or parent has the SAS_NOCLDWAIT flag set, notify process 1
 		 * instead (and hope it will handle this situation).
 		 */
 		if ((p->p_flag & P_NOZOMBIE) ||
-		    (pr->ps_pptr->ps_mainproc->p_flag & P_NOCLDWAIT)) {
+		    (pr->ps_pptr->ps_mainproc->p_sigacts->ps_flags &
+		    SAS_NOCLDWAIT)) {
 			struct process *ppr = pr->ps_pptr;
 			proc_reparent(pr, initproc->p_p);
 			/*
@@ -391,7 +393,7 @@ reaper(void)
 {
 	struct proc *p;
 
-	KERNEL_PROC_UNLOCK(curproc);
+	KERNEL_UNLOCK();
 
 	SCHED_ASSERT_UNLOCKED();
 
@@ -404,7 +406,7 @@ reaper(void)
 		LIST_REMOVE(p, p_hash);
 		mtx_leave(&deadproc_mutex);
 
-		KERNEL_PROC_LOCK(curproc);
+		KERNEL_LOCK();
 
 		/*
 		 * Free the VM resources we're still holding on to.
@@ -426,11 +428,11 @@ reaper(void)
 			proc_zap(p);
 		}
 
-		KERNEL_PROC_UNLOCK(curproc);
+		KERNEL_UNLOCK();
 	}
 }
 
-pid_t
+int
 sys_wait4(struct proc *q, void *v, register_t *retval)
 {
 	struct sys_wait4_args /* {

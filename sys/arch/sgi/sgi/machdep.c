@@ -1,4 +1,4 @@
-/*	$OpenBSD: machdep.c,v 1.106 2010/10/24 15:40:03 miod Exp $ */
+/*	$OpenBSD: machdep.c,v 1.112 2011/06/26 22:40:00 deraadt Exp $ */
 
 /*
  * Copyright (c) 2003-2004 Opsycon AB  (www.opsycon.se / www.opsycon.com)
@@ -47,6 +47,7 @@
 #include <sys/sem.h>
 #endif
 
+#include <net/if.h>
 #include <uvm/uvm.h>
 
 #include <machine/db_machdep.h>
@@ -82,22 +83,12 @@ void dump_tlb(void);
 char	machine[] = MACHINE;		/* Machine "architecture" */
 char	cpu_model[30];
 
-/*
- * Declare these as initialized data so we can patch them.
- */
-#ifndef	BUFCACHEPERCENT
-#define	BUFCACHEPERCENT	5	/* Can be changed in config. */
-#endif
-#ifndef	BUFPAGES
-#define BUFPAGES 0		/* Can be changed in config. */
-#endif
-
-int	bufpages = BUFPAGES;
-int	bufcachepercent = BUFCACHEPERCENT;
-
 /* low 32 bits range. */
 struct uvm_constraint_range  dma_constraint = { 0x0, 0x7fffffff };
-struct uvm_constraint_range *uvm_md_constraints[] = { NULL };
+struct uvm_constraint_range *uvm_md_constraints[] = {
+	&dma_constraint,
+	NULL
+};
 
 vm_map_t exec_map;
 vm_map_t phys_map;
@@ -116,7 +107,6 @@ int	rsvdmem;		/* Reserved memory not usable. */
 int	ncpu = 1;		/* At least one CPU in the system. */
 struct	user *proc0paddr;
 int	console_ok;		/* Set when console initialized. */
-int	kbd_reset;
 int16_t	masternasid;
 
 int32_t *environment;
@@ -239,7 +229,6 @@ mips_init(int argc, void *argv, caddr_t boot_esym)
 		ip32_setup();
 		break;
 #endif
-
 #ifdef TGT_ORIGIN
 	case SGI_IP27:
 		bios_printf("Found SGI-IP27, setting up.\n");
@@ -256,7 +245,6 @@ mips_init(int argc, void *argv, caddr_t boot_esym)
 
 		break;
 #endif
-
 #ifdef TGT_OCTANE
 	case SGI_OCTANE:
 		bios_printf("Found SGI-IP30, setting up.\n");
@@ -264,7 +252,6 @@ mips_init(int argc, void *argv, caddr_t boot_esym)
 		ip30_setup();
 		break;
 #endif
-
 	default:
 		bios_printf("Kernel doesn't support this system type!\n");
 		bios_printf("Halting system.\n");
@@ -276,7 +263,6 @@ mips_init(int argc, void *argv, caddr_t boot_esym)
 	 * Look at arguments passed to us and compute boothowto.
 	 */
 	boothowto = RB_AUTOBOOT;
-
 	dobootopts(argc, argv);
 
 	/*
@@ -316,7 +302,6 @@ mips_init(int argc, void *argv, caddr_t boot_esym)
 	for (i = 0; i < MAXMEMSEGS && mem_layout[i].mem_last_page != 0; i++) {
 		uint64_t fp, lp;
 		uint64_t firstkernpage, lastkernpage;
-		unsigned int freelist;
 		paddr_t firstkernpa, lastkernpa;
 
 		if (IS_XKPHYS((vaddr_t)start))
@@ -333,14 +318,13 @@ mips_init(int argc, void *argv, caddr_t boot_esym)
 
 		fp = mem_layout[i].mem_first_page;
 		lp = mem_layout[i].mem_last_page;
-		freelist = mem_layout[i].mem_freelist;
 
 		/* Account for kernel and kernel symbol table. */
 		if (fp >= firstkernpage && lp < lastkernpage)
 			continue;	/* In kernel. */
 
 		if (lp < firstkernpage || fp > lastkernpage) {
-			uvm_page_physload(fp, lp, fp, lp, freelist);
+			uvm_page_physload(fp, lp, fp, lp, 0);
 			continue;	/* Outside kernel. */
 		}
 
@@ -350,11 +334,11 @@ mips_init(int argc, void *argv, caddr_t boot_esym)
 			lp = firstkernpage;
 		else { /* Need to split! */
 			uint64_t xp = firstkernpage;
-			uvm_page_physload(fp, xp, fp, xp, freelist);
+			uvm_page_physload(fp, xp, fp, xp, 0);
 			fp = lastkernpage;
 		}
 		if (lp > fp) {
-			uvm_page_physload(fp, lp, fp, lp, freelist);
+			uvm_page_physload(fp, lp, fp, lp, 0);
 		}
 	}
 
@@ -446,7 +430,7 @@ mips_init(int argc, void *argv, caddr_t boot_esym)
 	/*
 	 * Init message buffer.
 	 */
-	msgbufbase = (caddr_t)pmap_steal_memory(MSGBUFSIZE, NULL,NULL);
+	msgbufbase = (caddr_t)pmap_steal_memory(MSGBUFSIZE, NULL, NULL);
 	initmsgbuf(msgbufbase, MSGBUFSIZE);
 
 	/*
@@ -546,11 +530,11 @@ dobootopts(int argc, void *argv)
 		 */
 		if (strncmp(cp, "OSLoadOptions=", 14) == 0) {
 			if (strcmp(&cp[14], "auto") == 0)
-					boothowto &= ~(RB_SINGLE|RB_ASKNAME);
+				boothowto &= ~(RB_SINGLE|RB_ASKNAME);
 			else if (strcmp(&cp[14], "single") == 0)
-					boothowto |= RB_SINGLE;
+				boothowto |= RB_SINGLE;
 			else if (strcmp(&cp[14], "debug") == 0)
-					boothowto |= RB_KDB;
+				boothowto |= RB_KDB;
 			continue;
 		}
 
@@ -611,10 +595,10 @@ cpu_startup()
 	 * Good {morning,afternoon,evening,night}.
 	 */
 	printf(version);
-	printf("real mem = %u (%uMB)\n", ptoa(physmem),
-	    ptoa(physmem)/1024/1024);
-	printf("rsvd mem = %u (%uMB)\n", ptoa(rsvdmem),
-	    ptoa(rsvdmem)/1024/1024);
+	printf("real mem = %lu (%luMB)\n", ptoa((psize_t)physmem),
+	    ptoa((psize_t)physmem)/1024/1024);
+	printf("rsvd mem = %lu (%luMB)\n", ptoa((psize_t)rsvdmem),
+	    ptoa((psize_t)rsvdmem)/1024/1024);
 
 	/*
 	 * Allocate a submap for exec arguments. This map effectively
@@ -630,8 +614,8 @@ cpu_startup()
 #ifdef PMAPDEBUG
 	pmapdebug = opmapdebug;
 #endif
-	printf("avail mem = %u (%uMB)\n", ptoa(uvmexp.free),
-	    ptoa(uvmexp.free)/1024/1024);
+	printf("avail mem = %lu (%luMB)\n", ptoa((psize_t)uvmexp.free),
+	    ptoa((psize_t)uvmexp.free)/1024/1024);
 
 	/*
 	 * Set up CPU-specific registers, cache, etc.
@@ -673,10 +657,6 @@ cpu_sysctl(name, namelen, oldp, oldlenp, newp, newlen, p)
 		return ENOTDIR;		/* Overloaded */
 
 	switch (name[0]) {
-	case CPU_KBDRESET:
-		if (securelevel > 0)
-			return (sysctl_rdint(oldp, oldlenp, newp, kbd_reset));
-		return (sysctl_int(oldp, oldlenp, newp, newlen, &kbd_reset));
 	default:
 		return EOPNOTSUPP;
 	}
@@ -724,6 +704,7 @@ boot(int howto)
 			printf("WARNING: not updating battery clock\n");
 		}
 	}
+	if_downall();
 
 	uvm_shutdown();
 	(void) splhigh();		/* Extreme priority. */

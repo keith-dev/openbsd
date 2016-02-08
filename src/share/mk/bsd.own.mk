@@ -1,4 +1,4 @@
-#	$OpenBSD: bsd.own.mk,v 1.104 2010/09/24 14:04:06 miod Exp $
+#	$OpenBSD: bsd.own.mk,v 1.110 2011/07/10 17:03:38 miod Exp $
 #	$NetBSD: bsd.own.mk,v 1.24 1996/04/13 02:08:09 thorpej Exp $
 
 # Host-specific overrides
@@ -31,19 +31,28 @@ ELF_TOOLCHAIN?=	no
 ELF_TOOLCHAIN?=	yes
 .endif
 
-# gcc3
-.if ${MACHINE_ARCH} == "m68k" || ${MACHINE_ARCH} == "m88k" || \
-    ${MACHINE_ARCH} == "sparc" || ${MACHINE_ARCH} == "vax"
+GCC2_ARCH=m68k m88k vax
+#GCC3_ARCH=alpha sh
+GCC4_ARCH=amd64 arm hppa hppa64 i386 ia64 mips64 mips64el powerpc sparc sparc64
+BINUTILS217_ARCH=ia64
+
+.for _arch in ${MACHINE_ARCH}
+.if !empty(GCC2_ARCH:M${_arch})
 USE_GCC3?=no
 COMPILER_VERSION?=gcc2
-.elif ${MACHINE_ARCH} == "amd64" || ${MACHINE_ARCH} == "hppa" || \
-    ${MACHINE_ARCH} == "i386" || ${MACHINE_ARCH:Mmips64*} || \
-    ${MACHINE_ARCH} == "powerpc" || ${MACHINE_ARCH} == "sparc64"
+.elif !empty(GCC4_ARCH:M${_arch})
 COMPILER_VERSION?=gcc4
 .else
 USE_GCC3?=yes
 COMPILER_VERSION?=gcc3
 .endif
+
+.if !empty(BINUTILS217_ARCH:M${_arch})
+BINUTILS_VERSION=binutils-2.17
+.else
+BINUTILS_VERSION=binutils
+.endif
+.endfor
 
 # where the system object and source trees are kept; can be configurable
 # by the user in case they want them in ~/foosrc and ~/fooobj, for example
@@ -56,18 +65,12 @@ BINMODE?=	555
 NONBINMODE?=	444
 DIRMODE?=	755
 
-# Define MANZ to have the man pages compressed (gzip)
-#MANZ=		1
-
-# Define MANPS to have PostScript manual pages generated
-#MANPS=		1
-
 SHAREDIR?=	/usr/share
 SHAREGRP?=	bin
 SHAREOWN?=	root
 SHAREMODE?=	${NONBINMODE}
 
-MANDIR?=	/usr/share/man/cat
+MANDIR?=	/usr/share/man/man
 MANGRP?=	bin
 MANOWN?=	root
 MANMODE?=	${NONBINMODE}

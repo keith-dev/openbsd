@@ -1,4 +1,4 @@
-/*	$OpenBSD: netstat.h,v 1.58 2010/10/30 23:06:05 bluhm Exp $	*/
+/*	$OpenBSD: netstat.h,v 1.60 2011/07/09 00:45:40 henning Exp $	*/
 /*	$NetBSD: netstat.h,v 1.6 1996/05/07 02:55:05 thorpej Exp $	*/
 
 /*
@@ -39,6 +39,7 @@
 
 int	Aflag;		/* show addresses of protocol control block */
 int	aflag;		/* show all sockets (including servers) */
+int	Bflag;		/* show TCP send and receive buffer sizes */
 int	bflag;		/* show bytes instead of packets */
 int	dflag;		/* show i/f dropped packets */
 int	Fflag;		/* show routes whose gateways are in specified AF */
@@ -135,7 +136,3 @@ void	unixpr(u_long, u_long);
 
 void	mroutepr(u_long, u_long, u_long);
 void	mrt_stats(void);
-
-void	atalkprotopr(u_long, char *, int, u_long);
-void	ddp_stats(char *);
-char	*atalk_print(const struct sockaddr *, int);

@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_pfsync.c,v 1.161 2011/03/02 12:02:26 dlg Exp $	*/
+/*	$OpenBSD: if_pfsync.c,v 1.167 2011/08/03 00:01:30 dlg Exp $	*/
 
 /*
  * Copyright (c) 2002 Michael Shalayeff
@@ -317,7 +317,7 @@ pfsync_clone_create(struct if_clone *ifc, int unit)
 	ifp->if_output = pfsyncoutput;
 	ifp->if_start = pfsyncstart;
 	ifp->if_type = IFT_PFSYNC;
-	ifp->if_snd.ifq_maxlen = ifqmaxlen;
+	IFQ_SET_MAXLEN(&ifp->if_snd, ifqmaxlen);
 	ifp->if_hdrlen = sizeof(struct pfsync_header);
 	ifp->if_mtu = 1500; /* XXX */
 	ifp->if_hardmtu = MCLBYTES; /* XXX */
@@ -345,6 +345,7 @@ int
 pfsync_clone_destroy(struct ifnet *ifp)
 {
 	struct pfsync_softc *sc = ifp->if_softc;
+	struct pfsync_deferral *pd;
 	int s;
 
 	timeout_del(&sc->sc_bulk_tmo);
@@ -358,8 +359,11 @@ pfsync_clone_destroy(struct ifnet *ifp)
 	pfsync_drop(sc);
 
 	s = splsoftnet();
-	while (sc->sc_deferred > 0)
-		pfsync_undefer(TAILQ_FIRST(&sc->sc_deferrals), 0);
+	while (sc->sc_deferred > 0) {
+		pd = TAILQ_FIRST(&sc->sc_deferrals);
+		timeout_del(&pd->pd_tmo);
+		pfsync_undefer(pd, 0);
+	}
 	splx(s);
 
 	pool_destroy(&sc->sc_pool);
@@ -445,7 +449,9 @@ pfsync_state_export(struct pfsync_state *sp, struct pf_state *st)
 	sp->direction = st->direction;
 	sp->log = st->log;
 	sp->timeout = st->timeout;
+	/* XXX replace state_flags post 5.0 */
 	sp->state_flags = st->state_flags;
+	sp->all_state_flags = htons(st->state_flags);
 	if (!SLIST_EMPTY(&st->src_nodes))
 		sp->sync_flags |= PFSYNC_FLAG_SRCNODE;
 
@@ -497,6 +503,9 @@ pfsync_state_import(struct pfsync_state *sp, int flags)
 			return (EINVAL);
 		return (0);	/* skip this state */
 	}
+
+	if (sp->af == 0)
+		return (0);	/* skip this state */
 
 	/*
 	 * If the ruleset checksums match or the state is coming from the ioctl,
@@ -573,7 +582,8 @@ pfsync_state_import(struct pfsync_state *sp, int flags)
 	st->direction = sp->direction;
 	st->log = sp->log;
 	st->timeout = sp->timeout;
-	st->state_flags = sp->state_flags;
+	/* XXX replace state_flags post 5.0 */
+	st->state_flags = sp->state_flags | ntohs(sp->all_state_flags);
 	st->max_mss = ntohs(sp->max_mss);
 	st->min_ttl = sp->min_ttl;
 	st->set_tos = sp->set_tos;
@@ -1547,7 +1557,7 @@ pfsync_sendout(void)
 	m->m_len = m->m_pkthdr.len = sc->sc_len;
 
 	/* build the ip header */
-	ip = (struct ip *)m->m_data;
+	ip = mtod(m, struct ip *);
 	bcopy(&sc->sc_template, ip, sizeof(*ip));
 	offset = sizeof(*ip);
 
@@ -1707,11 +1717,16 @@ pfsync_defer(struct pf_state *st, struct mbuf *m)
 
 	splsoftassert(IPL_SOFTNET);
 
-	if (!sc->sc_defer || m->m_flags & (M_BCAST|M_MCAST))
+	if (!sc->sc_defer ||
+	    ISSET(st->state_flags, PFSTATE_NOSYNC) ||
+	    m->m_flags & (M_BCAST|M_MCAST))
 		return (0);
 
-	if (sc->sc_deferred >= 128)
-		pfsync_undefer(TAILQ_FIRST(&sc->sc_deferrals), 0);
+	if (sc->sc_deferred >= 128) {
+		pd = TAILQ_FIRST(&sc->sc_deferrals);
+		if (timeout_del(&pd->pd_tmo))
+			pfsync_undefer(pd, 0);
+	}
 
 	pd = pool_get(&sc->sc_pool, M_NOWAIT);
 	if (pd == NULL)
@@ -1741,7 +1756,6 @@ pfsync_undefer(struct pfsync_deferral *pd, int drop)
 
 	splsoftassert(IPL_SOFTNET);
 
-	timeout_del(&pd->pd_tmo); /* bah */
 	TAILQ_REMOVE(&sc->sc_deferrals, pd, pd_entry);
 	sc->sc_deferred--;
 
@@ -1786,7 +1800,8 @@ pfsync_deferred(struct pf_state *st, int drop)
 
 	TAILQ_FOREACH(pd, &sc->sc_deferrals, pd_entry) {
 		 if (pd->pd_st == st) {
-			pfsync_undefer(pd, drop);
+			if (timeout_del(&pd->pd_tmo))
+				pfsync_undefer(pd, drop);
 			return;
 		}
 	}

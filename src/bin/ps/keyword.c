@@ -1,4 +1,4 @@
-/*	$OpenBSD: keyword.c,v 1.30 2010/02/14 00:17:14 guenther Exp $	*/
+/*	$OpenBSD: keyword.c,v 1.32 2011/04/10 03:20:58 guenther Exp $	*/
 /*	$NetBSD: keyword.c,v 1.12.6.1 1996/05/30 21:25:13 cgd Exp $	*/
 
 /*-
@@ -60,7 +60,7 @@ int	utime(), stime(), ixrss(), idrss(), isrss();
 #endif
 
 /* Compute offset in common structures. */
-#define	POFF(x)	offsetof(struct kinfo_proc2, x)
+#define	POFF(x)	offsetof(struct kinfo_proc, x)
 
 #define	UIDFMT	"u"
 #define	UIDLEN	5
@@ -75,7 +75,7 @@ int	utime(), stime(), ixrss(), idrss(), isrss();
 
 #define	USERLEN	8
 
-/* Bit types must match their respective entries in struct kinfo_proc2 */
+/* Bit types must match their respective entries in struct kinfo_proc */
 VAR var[] = {
 	{"%cpu", "%CPU", NULL, NLIST, pcpu, 4},
 	{"%mem", "%MEM", NULL, NLIST, pmem, 4},
@@ -90,7 +90,7 @@ VAR var[] = {
 	{"cpuid", "CPUID", NULL, 0, pvar, 8, 0, POFF(p_cpuid), UINT64, "lld"},
 	{"cputime", "", "time"},
 	{"dsiz", "DSIZ", NULL, 0, dsize, 4},
-	{"emul", "EMUL", NULL, LJUST, emulname, EMULNAMELEN},
+	{"emul", "EMUL", NULL, LJUST, emulname, KI_EMULNAMELEN - 1},
 	{"etime", "", "start"},
 	{"f", "F", NULL, 0, pvar, 7, 0, POFF(p_flag), INT32, "x"},
 	{"flags", "", "f"},
@@ -171,7 +171,7 @@ VAR var[] = {
 	{"usrpri", "", "upr"},
 	{"vsize", "", "vsz"},
 	{"vsz", "VSZ", NULL, 0, vsize, 5},
-	{"wchan", "WCHAN", NULL, LJUST, wchan, 7},
+	{"wchan", "WCHAN", NULL, LJUST, wchan, KI_WMESGLEN - 1},
 	{"xstat", "XSTAT", NULL, 0, pvar, 4, 0, POFF(p_xstat), UINT16, "x"},
 	{""},
 };

@@ -1,4 +1,4 @@
-/*	$Id: man_validate.c,v 1.40 2011/01/17 00:15:19 schwarze Exp $ */
+/*	$Id: man_validate.c,v 1.46 2011/07/07 20:07:38 schwarze Exp $ */
 /*
  * Copyright (c) 2008, 2009, 2010, 2011 Kristaps Dzonsons <kristaps@bsd.lv>
  * Copyright (c) 2010 Ingo Schwarze <schwarze@openbsd.org>
@@ -26,6 +26,7 @@
 #include <string.h>
 #include <time.h>
 
+#include "man.h"
 #include "mandoc.h"
 #include "libman.h"
 #include "libmandoc.h"
@@ -49,30 +50,31 @@ static	int	  check_par(CHKARGS);
 static	int	  check_part(CHKARGS);
 static	int	  check_root(CHKARGS);
 static	int	  check_sec(CHKARGS);
-static	int	  check_text(CHKARGS);
+static	void	  check_text(CHKARGS);
 
 static	int	  post_AT(CHKARGS);
+static	int	  post_vs(CHKARGS);
 static	int	  post_fi(CHKARGS);
 static	int	  post_nf(CHKARGS);
 static	int	  post_TH(CHKARGS);
 static	int	  post_UC(CHKARGS);
 
 static	v_check	  posts_at[] = { post_AT, NULL };
+static	v_check	  posts_br[] = { post_vs, check_eq0, NULL };
 static	v_check	  posts_eq0[] = { check_eq0, NULL };
 static	v_check	  posts_fi[] = { check_eq0, post_fi, NULL };
-static	v_check	  posts_le1[] = { check_le1, NULL };
 static	v_check	  posts_ft[] = { check_ft, NULL };
 static	v_check	  posts_nf[] = { check_eq0, post_nf, NULL };
 static	v_check	  posts_par[] = { check_par, NULL };
 static	v_check	  posts_part[] = { check_part, NULL };
 static	v_check	  posts_sec[] = { check_sec, NULL };
+static	v_check	  posts_sp[] = { post_vs, check_le1, NULL };
 static	v_check	  posts_th[] = { check_ge2, check_le5, post_TH, NULL };
 static	v_check	  posts_uc[] = { post_UC, NULL };
 static	v_check	  pres_bline[] = { check_bline, NULL };
 
-
 static	const struct man_valid man_valids[MAN_MAX] = {
-	{ NULL, posts_eq0 }, /* br */
+	{ NULL, posts_br }, /* br */
 	{ pres_bline, posts_th }, /* TH */
 	{ pres_bline, posts_sec }, /* SH */
 	{ pres_bline, posts_sec }, /* SS */
@@ -94,7 +96,7 @@ static	const struct man_valid man_valids[MAN_MAX] = {
 	{ NULL, NULL }, /* IR */
 	{ NULL, NULL }, /* RI */
 	{ NULL, posts_eq0 }, /* na */ /* FIXME: should warn only. */
-	{ NULL, posts_le1 }, /* sp */ /* FIXME: should warn only. */
+	{ NULL, posts_sp }, /* sp */ /* FIXME: should warn only. */
 	{ pres_bline, posts_nf }, /* nf */
 	{ pres_bline, posts_fi }, /* fi */
 	{ NULL, NULL }, /* RE */
@@ -117,6 +119,8 @@ man_valid_pre(struct man *m, struct man_node *n)
 	case (MAN_TEXT):
 		/* FALLTHROUGH */
 	case (MAN_ROOT):
+		/* FALLTHROUGH */
+	case (MAN_EQN):
 		/* FALLTHROUGH */
 	case (MAN_TBL):
 		return(1);
@@ -144,9 +148,12 @@ man_valid_post(struct man *m)
 
 	switch (m->last->type) {
 	case (MAN_TEXT): 
-		return(check_text(m, m->last));
+		check_text(m, m->last);
+		return(1);
 	case (MAN_ROOT):
 		return(check_root(m, m->last));
+	case (MAN_EQN):
+		/* FALLTHROUGH */
 	case (MAN_TBL):
 		return(1);
 	default:
@@ -187,51 +194,56 @@ check_root(CHKARGS)
 		 */
 
 	        m->meta.title = mandoc_strdup("unknown");
-		m->meta.date = time(NULL);
 		m->meta.msec = mandoc_strdup("1");
+		m->meta.date = mandoc_normdate
+			(m->parse, NULL, n->line, n->pos);
 	}
 
 	return(1);
 }
 
-
-static int
+static void
 check_text(CHKARGS) 
 {
-	char		*p;
-	int		 pos, c;
+	char		*p, *pp, *cpp;
+	int		 pos;
 	size_t		 sz;
 
-	for (p = n->string, pos = n->pos + 1; *p; p++, pos++) {
+	p = n->string;
+	pos = n->pos + 1;
+
+	while ('\0' != *p) {
 		sz = strcspn(p, "\t\\");
+
 		p += (int)sz;
-
-		if ('\0' == *p)
-			break;
-
 		pos += (int)sz;
 
 		if ('\t' == *p) {
-			if (MAN_LITERAL & m->flags)
-				continue;
-			if (man_pmsg(m, n->line, pos, MANDOCERR_BADTAB))
-				continue;
-			return(0);
+			if ( ! (MAN_LITERAL & m->flags))
+				man_pmsg(m, n->line, pos, MANDOCERR_BADTAB);
+			p++;
+			pos++;
+			continue;
+		} else if ('\0' == *p)
+			break;
+
+		pos++;
+		pp = ++p;
+
+		if (ESCAPE_ERROR == mandoc_escape
+				((const char **)&pp, NULL, NULL)) {
+			man_pmsg(m, n->line, pos, MANDOCERR_BADESCAPE);
+			break;
 		}
 
-		/* Check the special character. */
+		cpp = p;
+		while (NULL != (cpp = memchr(cpp, ASCII_HYPH, pp - cpp)))
+			*cpp = '-';
 
-		c = mandoc_special(p);
-		if (c) {
-			p += c - 1;
-			pos += c - 1;
-		} else
-			man_pmsg(m, n->line, pos, MANDOCERR_BADESCAPE);
+		pos += pp - p;
+		p = pp;
 	}
-
-	return(1);
 }
-
 
 #define	INEQ_DEFINE(x, ineq, name) \
 static int \
@@ -239,7 +251,7 @@ check_##name(CHKARGS) \
 { \
 	if (n->nchild ineq (x)) \
 		return(1); \
-	man_vmsg(m, MANDOCERR_ARGCOUNT, n->line, n->pos, \
+	mandoc_vmsg(MANDOCERR_ARGCOUNT, m->parse, n->line, n->pos, \
 			"line arguments %s %d (have %d)", \
 			#ineq, (x), n->nchild); \
 	return(1); \
@@ -291,14 +303,17 @@ check_ft(CHKARGS)
 	}
 
 	if (0 == ok) {
-		man_vmsg(m, MANDOCERR_BADFONT,
-				n->line, n->pos, "%s", cp);
+		mandoc_vmsg
+			(MANDOCERR_BADFONT, m->parse,
+			 n->line, n->pos, "%s", cp);
 		*cp = '\0';
 	}
 
 	if (1 < n->nchild)
-		man_vmsg(m, MANDOCERR_ARGCOUNT, n->line, n->pos,
-				"want one child (have %d)", n->nchild);
+		mandoc_vmsg
+			(MANDOCERR_ARGCOUNT, m->parse, n->line, 
+			 n->pos, "want one child (have %d)", 
+			 n->nchild);
 
 	return(1);
 }
@@ -307,13 +322,11 @@ static int
 check_sec(CHKARGS)
 {
 
-	if (MAN_HEAD == n->type && 0 == n->nchild) {
-		man_nmsg(m, n, MANDOCERR_SYNTARGCOUNT);
-		return(0);
-	} else if (MAN_BODY == n->type && 0 == n->nchild)
-		man_nmsg(m, n, MANDOCERR_NOBODY);
+	if ( ! (MAN_HEAD == n->type && 0 == n->nchild)) 
+		return(1);
 
-	return(1);
+	man_nmsg(m, n, MANDOCERR_SYNTARGCOUNT);
+	return(0);
 }
 
 
@@ -322,7 +335,8 @@ check_part(CHKARGS)
 {
 
 	if (MAN_BODY == n->type && 0 == n->nchild)
-		man_nmsg(m, n, MANDOCERR_NOBODY);
+		mandoc_msg(MANDOCERR_ARGCWARN, m->parse, n->line, 
+				n->pos, "want children (have none)");
 
 	return(1);
 }
@@ -370,6 +384,7 @@ static int
 post_TH(CHKARGS)
 {
 	const char	*p;
+	int		 line, pos;
 
 	if (m->meta.title)
 		free(m->meta.title);
@@ -379,12 +394,13 @@ post_TH(CHKARGS)
 		free(m->meta.source);
 	if (m->meta.msec)
 		free(m->meta.msec);
-	if (m->meta.rawdate)
-		free(m->meta.rawdate);
+	if (m->meta.date)
+		free(m->meta.date);
 
-	m->meta.title = m->meta.vol = m->meta.rawdate =
+	line = n->line;
+	pos = n->pos;
+	m->meta.title = m->meta.vol = m->meta.date =
 		m->meta.msec = m->meta.source = NULL;
-	m->meta.date = 0;
 
 	/* ->TITLE<- MSEC DATE SOURCE VOL */
 
@@ -412,24 +428,12 @@ post_TH(CHKARGS)
 
 	/* TITLE MSEC ->DATE<- SOURCE VOL */
 
-	/*
-	 * Try to parse the date.  If this works, stash the epoch (this
-	 * is optimal because we can reformat it in the canonical form).
-	 * If it doesn't parse, isn't specified at all, or is an empty
-	 * string, then use the current date.
-	 */
-
 	if (n)
 		n = n->next;
-	if (n && n->string && *n->string) {
-		m->meta.date = mandoc_a2time
-			(MTIME_ISO_8601, n->string);
-		if (0 == m->meta.date) {
-			man_nmsg(m, n, MANDOCERR_BADDATE);
-			m->meta.rawdate = mandoc_strdup(n->string);
-		}
-	} else
-		m->meta.date = time(NULL);
+	if (n)
+		pos = n->pos;
+	m->meta.date = mandoc_normdate
+		(m->parse, n ? n->string : NULL, line, pos);
 
 	/* TITLE MSEC DATE ->SOURCE<- VOL */
 
@@ -549,5 +553,19 @@ post_AT(CHKARGS)
 		free(m->meta.source);
 
 	m->meta.source = mandoc_strdup(p);
+	return(1);
+}
+
+static int
+post_vs(CHKARGS)
+{
+
+	/* 
+	 * Don't warn about this because it occurs in pod2man and would
+	 * cause considerable (unfixable) warnage.
+	 */
+	if (NULL == n->prev && MAN_ROOT == n->parent->type)
+		man_node_delete(m, n);
+
 	return(1);
 }

@@ -1,4 +1,4 @@
-/*	$OpenBSD: pfctl_parser.c,v 1.273 2011/01/23 11:19:55 bluhm Exp $ */
+/*	$OpenBSD: pfctl_parser.c,v 1.279 2011/07/27 00:26:10 mcbride Exp $ */
 
 /*
  * Copyright (c) 2001 Daniel Hartmeier
@@ -489,6 +489,9 @@ print_pool(struct pf_pool *pool, u_int16_t p1, u_int16_t p2,
 	case PF_POOL_ROUNDROBIN:
 		printf(" round-robin");
 		break;
+	case PF_POOL_LEASTSTATES:
+		printf(" least-states");
+		break;
 	}
 	if (pool->opts & PF_POOL_STICKYADDR)
 		printf(" sticky-address");
@@ -771,6 +774,12 @@ print_rule(struct pf_rule *r, const char *anchor_call, int verbose)
 		else
 			printf(" on %s", r->ifname);
 	}
+	if (r->onrdomain >= 0) {
+		if (r->ifnot)
+			printf(" on ! rdomain %i", r->onrdomain);
+		else
+			printf(" on rdomain %i", r->onrdomain);
+	}
 	if (r->af) {
 		if (r->af == AF_INET)
 			printf(" inet");
@@ -829,9 +838,27 @@ print_rule(struct pf_rule *r, const char *anchor_call, int verbose)
 	}
 	if (r->tos)
 		printf(" tos 0x%2.2x", r->tos);
+
+	opts = 0;
+	if (r->max_states || r->max_src_nodes || r->max_src_states)
+		opts = 1;
+	if (r->rule_flag & PFRULE_NOSYNC)
+		opts = 1;
+	if (r->rule_flag & PFRULE_SRCTRACK)
+		opts = 1;
+	if (r->rule_flag & PFRULE_IFBOUND)
+		opts = 1;
+	if (r->rule_flag & PFRULE_STATESLOPPY)
+		opts = 1;
+	if (r->rule_flag & PFRULE_PFLOW)
+		opts = 1;
+	for (i = 0; !opts && i < PFTM_MAX; ++i)
+		if (r->timeout[i])
+			opts = 1;
+
 	if (!r->keep_state && r->action == PF_PASS && !anchor_call[0])
 		printf(" no state");
-	else if (r->keep_state == PF_STATE_NORMAL)
+	else if (r->keep_state == PF_STATE_NORMAL && opts)
 		printf(" keep state");
 	else if (r->keep_state == PF_STATE_MODULATE)
 		printf(" modulate state");
@@ -852,22 +879,6 @@ print_rule(struct pf_rule *r, const char *anchor_call, int verbose)
 		}
 		printf(" probability %s%%", buf);
 	}
-	opts = 0;
-	if (r->max_states || r->max_src_nodes || r->max_src_states)
-		opts = 1;
-	if (r->rule_flag & PFRULE_NOSYNC)
-		opts = 1;
-	if (r->rule_flag & PFRULE_SRCTRACK)
-		opts = 1;
-	if (r->rule_flag & PFRULE_IFBOUND)
-		opts = 1;
-	if (r->rule_flag & PFRULE_STATESLOPPY)
-		opts = 1;
-	if (r->rule_flag & PFRULE_PFLOW)
-		opts = 1;
-	for (i = 0; !opts && i < PFTM_MAX; ++i)
-		if (r->timeout[i])
-			opts = 1;
 	if (opts) {
 		printf(" (");
 		if (r->max_states) {
@@ -1056,12 +1067,14 @@ print_rule(struct pf_rule *r, const char *anchor_call, int verbose)
 			printf(" reply-to");
 		else if (r->rt == PF_DUPTO)
 			printf(" dup-to");
-		else if (r->rt == PF_FASTROUTE)
-			printf(" fastroute");
-		if (r->rt != PF_FASTROUTE) {
-			printf(" ");
-			print_pool(&r->route, 0, 0, r->af, PF_POOL_ROUTE, verbose);
-		}
+		printf(" ");
+		print_pool(&r->route, 0, 0, r->af, PF_POOL_ROUTE, verbose);
+	}
+	if (r->prio[0] != PF_PRIO_NOTSET) {
+		if (r->prio[0] == r->prio[1])
+			printf(" prio %u", r->prio[0]);
+		else
+			printf(" prio(%u, %u)", r->prio[0], r->prio[1]);
 	}
 }
 
@@ -1435,7 +1448,6 @@ ifa_skip_if(const char *filter, struct node_host *p)
 	return (p->ifname[n] < '0' || p->ifname[n] > '9');
 }
 
-
 struct node_host *
 host(const char *s)
 {
@@ -1494,8 +1506,10 @@ host(const char *s)
 		fprintf(stderr, "no IP address found for %s\n", s);
 		return (NULL);
 	}
-	for (n = h; n != NULL; n = n->next)
+	for (n = h; n != NULL; n = n->next) {
 		n->addr.type = PF_ADDR_ADDRMASK;
+		n->weight = 0;
+	}	
 	return (h);
 }
 
@@ -1687,9 +1701,41 @@ host_dns(const char *s, int v4mask, int v6mask)
 int
 append_addr(struct pfr_buffer *b, char *s, int test)
 {
-	char			 *r;
+	static int 		 previous = 0;
+	static int		 expect = 0;
+	struct pfr_addr		*a;
 	struct node_host	*h, *n;
-	int			 rv, not = 0;
+	char			*r;
+	const char		*errstr;
+	int			 rv, not = 0, i = 0;
+	u_int16_t		 weight;
+	
+	/* skip weight if given */
+	if (strcmp(s, "weight") == 0) {
+		expect = 1;
+		return (1); /* expecting further call */
+	}
+	
+	/* check if previous host is set */
+	if (expect) {
+		/* parse and append load balancing weight */
+		weight = strtonum(s, 1, USHRT_MAX, &errstr);
+		if (errstr) {
+			fprintf(stderr, "failed to convert weight %s\n", s);
+			return (-1);
+		}
+		if (previous != -1) {
+			PFRB_FOREACH(a, b) {
+				if (++i >= previous) {
+					a->pfra_weight = weight;
+					a->pfra_type = PFRKE_COST;
+				}
+			}
+		}
+		
+		expect = 0;
+		return (0);
+	}
 
 	for (r = s; *r == '!'; r++)
 		not = !not;
@@ -1698,6 +1744,7 @@ append_addr(struct pfr_buffer *b, char *s, int test)
 		return (-1);
 	}
 	rv = append_addr_host(b, n, test, not);
+	previous = b->pfrb_size;
 	do {
 		h = n;
 		n = n->next;
@@ -1728,6 +1775,10 @@ append_addr_host(struct pfr_buffer *b, struct node_host *n, int test, int not)
 		 	   sizeof(addr.pfra_ifname)) >= sizeof(addr.pfra_ifname))
 				errx(1, "append_addr_host: strlcpy");
 			addr.pfra_type = PFRKE_ROUTE;
+		}
+		if (n->weight > 0) {
+			addr.pfra_weight = n->weight;
+			addr.pfra_type = PFRKE_COST;
 		}
 		switch (n->af) {
 		case AF_INET:

@@ -1,4 +1,4 @@
-/*	$OpenBSD: pfctl_optimize.c,v 1.25 2010/03/23 13:31:29 henning Exp $ */
+/*	$OpenBSD: pfctl_optimize.c,v 1.29 2011/07/27 00:26:10 mcbride Exp $ */
 
 /*
  * Copyright (c) 2004 Mike Frantzen <frantzen@openbsd.org>
@@ -173,6 +173,8 @@ struct pf_rule_field {
     PF_RULE_FIELD(dst.port_op,		NOMERGE),
     PF_RULE_FIELD(src.neg,		NOMERGE),
     PF_RULE_FIELD(dst.neg,		NOMERGE),
+    PF_RULE_FIELD(rtableid,		NOMERGE),
+    PF_RULE_FIELD(onrdomain,		NOMERGE),
 
     /* These fields can be merged */
     PF_RULE_FIELD(src.addr,		COMBINED),
@@ -227,6 +229,7 @@ int	skip_compare(int, struct pf_skip_step *, struct pf_opt_rule *);
 void	skip_init(void);
 int	skip_cmp_af(struct pf_rule *, struct pf_rule *);
 int	skip_cmp_dir(struct pf_rule *, struct pf_rule *);
+int	skip_cmp_rdom(struct pf_rule *, struct pf_rule *);
 int	skip_cmp_dst_addr(struct pf_rule *, struct pf_rule *);
 int	skip_cmp_dst_port(struct pf_rule *, struct pf_rule *);
 int	skip_cmp_ifp(struct pf_rule *, struct pf_rule *);
@@ -242,11 +245,12 @@ const char *skip_comparitors_names[PF_SKIP_COUNT];
 #define PF_SKIP_COMPARITORS {				\
     { "ifp", PF_SKIP_IFP, skip_cmp_ifp },		\
     { "dir", PF_SKIP_DIR, skip_cmp_dir },		\
+    { "rdomain", PF_SKIP_RDOM, skip_cmp_rdom },		\
     { "af", PF_SKIP_AF, skip_cmp_af },			\
     { "proto", PF_SKIP_PROTO, skip_cmp_proto },		\
     { "saddr", PF_SKIP_SRC_ADDR, skip_cmp_src_addr },	\
-    { "sport", PF_SKIP_SRC_PORT, skip_cmp_src_port },	\
     { "daddr", PF_SKIP_DST_ADDR, skip_cmp_dst_addr },	\
+    { "sport", PF_SKIP_SRC_PORT, skip_cmp_src_port },	\
     { "dport", PF_SKIP_DST_PORT, skip_cmp_dst_port }	\
 }
 
@@ -1036,6 +1040,15 @@ skip_cmp_dir(struct pf_rule *a, struct pf_rule *b)
 	return (0);
 }
 
+/* Compare two rules ON RDOMAIN field for skiplist construction */
+int
+skip_cmp_rdom(struct pf_rule *a, struct pf_rule *b)
+{
+	if (a->onrdomain == -1 || a->onrdomain != b->onrdomain)
+		return (1);
+	return (a->ifnot != b->ifnot);
+}
+
 /* Compare two rules DST Address field for skiplist construction */
 int
 skip_cmp_dst_addr(struct pf_rule *a, struct pf_rule *b)
@@ -1218,6 +1231,7 @@ add_opt_table(struct pfctl *pf, struct pf_opt_tbl **tbl, sa_family_t af,
 	node_host.af = af;
 	node_host.addr = addr->addr;
 	node_host.ifname = ifname;
+	node_host.weight = addr->weight;
 
 #ifdef OPT_DEBUG
 	DEBUG("<%s> adding %s/%d", (*tbl)->pt_name, inet_ntop(af,
@@ -1292,7 +1306,7 @@ again:
 	}
 	tablenum++;
 
-	if (pfctl_define_table(tbl->pt_name, PFR_TFLAG_CONST, 1,
+	if (pfctl_define_table(tbl->pt_name, PFR_TFLAG_CONST | tbl->pt_flags, 1,
 	    pf->astack[0]->name, tbl->pt_buf, pf->astack[0]->ruleset.tticket)) {
 		warn("failed to create table %s in %s",
 		    tbl->pt_name, pf->astack[0]->name);

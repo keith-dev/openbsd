@@ -1,4 +1,4 @@
-#	$OpenBSD: Makefile,v 1.20 2010/10/18 04:07:50 deraadt Exp $
+#	$OpenBSD: Makefile,v 1.24 2011/07/10 04:03:23 deraadt Exp $
 
 CBIN=		instbin
 ARCHDIR=	${.CURDIR}/..
@@ -11,7 +11,7 @@ SRCDIR=		${.CURDIR}/../../..
 .endif
 
 MOUNT_POINT?=	/mnt
-VND?=		svnd0
+VND?=		vnd0
 VND_DEV=	/dev/${VND}a
 VND_RDEV=	/dev/r${VND}a
 DISKTYPE=	rdroot
@@ -21,6 +21,7 @@ IMAGE?=		ramdisk${REV}.fs
 IMAGESIZE?=	4608 # 2.25MB in 512 byte blocks
 NEWFS_WILL_FAIL?=false
 RDSETROOT?=	elfrdsetroot
+RDSETROOT_EXT_SRC=${.CURDIR}/../../common/elf32.c ${.CURDIR}/../../common/elf64.c
 CRUNCHGENOPTS?=-E
 KERNEL?=	RAMDISK
 UTILS?=		${.CURDIR}/../../miniroot
@@ -62,7 +63,7 @@ ${CDROM}: bsd ${CDBOOT}
 obsd:
 	cd ${SRCDIR}/sys/arch/${MACHINE}/conf && config ${KERNEL}
 	cd ${SRCDIR}/sys/arch/${MACHINE}/compile/${KERNEL} && \
-	    ${MAKE} clean && ${MAKE} depend && ${MAKE}
+	    ${MAKE} clean && exec ${MAKE}
 	cp ${SRCDIR}/sys/arch/${MACHINE}/compile/${KERNEL}/bsd obsd
 
 bsd.rd:	obsd ${IMAGE} ${RDSETROOT}
@@ -73,8 +74,9 @@ bsd.rd:	obsd ${IMAGE} ${RDSETROOT}
 bsd:	bsd.rd
 	${GZIPCMD} ${GZIPFLAGS} < bsd.rd > bsd
 
-${RDSETROOT}: ${.CURDIR}/../../common/${RDSETROOT}.c
-	${HOSTCC} ${HOSTCCFLAGS} -o ${RDSETROOT} $<
+${RDSETROOT}: ${.CURDIR}/../../common/${RDSETROOT}.c ${RDSETROOT_EXT_SRC}
+	${HOSTCC} ${HOSTCCFLAGS} -o ${RDSETROOT} ${RDSETROOT_EXT_SRC} \
+	    ${.CURDIR}/../../common/${RDSETROOT}.c
 
 ${IMAGE}: ${CBIN}
 	dd if=/dev/zero of=${REALIMAGE} count=${IMAGESIZE}
@@ -107,7 +109,7 @@ ${CBIN}: ${CBIN}.mk ${CBIN}.cache ${CBIN}.c
 
 clean cleandir:
 	/bin/rm -f *.core ${IMAGE} ${CBIN} ${CBIN}.mk ${CBIN}.cache \
-	${CBIN}.conf *.o *.lo *.c obsd bsd bsd.* ${LIF} ${CDROM}
+	    ${CBIN}.conf *.o *.lo *.c obsd bsd bsd.* ${LIF} ${CDROM}
 
 .ifdef RELEASEDIR
 beforeinstall:

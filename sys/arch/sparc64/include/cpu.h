@@ -1,4 +1,4 @@
-/*	$OpenBSD: cpu.h,v 1.75 2010/12/21 14:56:24 claudio Exp $	*/
+/*	$OpenBSD: cpu.h,v 1.78 2011/07/06 22:26:44 kettenis Exp $	*/
 /*	$NetBSD: cpu.h,v 1.28 2001/06/14 22:56:58 thorpej Exp $ */
 
 /*
@@ -41,18 +41,19 @@
  *	@(#)cpu.h	8.4 (Berkeley) 1/5/94
  */
 
-#ifndef _CPU_H_
-#define _CPU_H_
+#ifndef _MACHINE_CPU_H_
+#define _MACHINE_CPU_H_
 
 /*
  * CTL_MACHDEP definitions.
  */
+		/*		1	formerly: booted kernel name */
 #define	CPU_LED_BLINK		2	/* int: blink leds? */
 #define	CPU_ALLOWAPERTURE	3	/* allow xf86 operations */
 #define	CPU_CPUTYPE		4	/* cpu type */
 #define	CPU_CECCERRORS		5	/* Correctable ECC errors */
 #define	CPU_CECCLAST		6	/* Correctable ECC last fault addr */
-#define	CPU_KBDRESET		7	/* soft reset via keyboard */
+		/*		7	formerly: soft reset via keyboard */
 #define	CPU_MAXID		8	/* number of valid machdep ids */
 
 #define	CTL_MACHDEP_NAMES {			\
@@ -63,7 +64,7 @@
 	{ "cputype", CTLTYPE_INT },		\
 	{ "ceccerrs", CTLTYPE_INT },		\
 	{ "cecclast", CTLTYPE_QUAD },		\
-	{ "kbdreset", CTLTYPE_INT },		\
+	{ 0, 0 },				\
 }
 
 #ifdef _KERNEL
@@ -148,6 +149,9 @@ struct cpu_info {
 	paddr_t			ci_cpuset;
 	paddr_t			ci_mondo;
 #endif
+
+	int			ci_pci_probe;
+	int			ci_pci_fault;
 
 #ifdef DIAGNOSTIC
 	int	ci_mutex_level;
@@ -325,4 +329,4 @@ extern void blink_led_register(struct blink_led *);
 #endif
 
 #endif /* _KERNEL */
-#endif /* _CPU_H_ */
+#endif /* _MACHINE_CPU_H_ */

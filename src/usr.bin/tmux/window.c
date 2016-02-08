@@ -1,4 +1,4 @@
-/* $OpenBSD: window.c,v 1.63 2011/01/25 22:31:50 nicm Exp $ */
+/* $OpenBSD: window.c,v 1.66 2011/06/05 10:53:05 nicm Exp $ */
 
 /*
  * Copyright (c) 2007 Nicholas Marriott <nicm@users.sourceforge.net>
@@ -56,6 +56,10 @@
 /* Global window list. */
 struct windows windows;
 
+/* Global panes tree. */
+struct window_pane_tree all_window_panes;
+u_int	next_window_pane;
+
 void	window_pane_read_callback(struct bufferevent *, void *);
 void	window_pane_error_callback(struct bufferevent *, short, void *);
 
@@ -65,6 +69,14 @@ int
 winlink_cmp(struct winlink *wl1, struct winlink *wl2)
 {
 	return (wl1->idx - wl2->idx);
+}
+
+RB_GENERATE(window_pane_tree, window_pane, tree_entry, window_pane_cmp);
+
+int
+window_pane_cmp(struct window_pane *wp1, struct window_pane *wp2)
+{
+	return (wp1->id - wp2->id);
 }
 
 struct winlink *
@@ -344,21 +356,65 @@ window_set_active_pane(struct window *w, struct window_pane *wp)
 	}
 }
 
+struct window_pane *
+window_get_active_at(struct window *w, u_int x, u_int y)
+{
+	struct window_pane	*wp;
+
+	TAILQ_FOREACH(wp, &w->panes, entry) {
+		if (!window_pane_visible(wp))
+			continue;
+		if (x < wp->xoff || x > wp->xoff + wp->sx)
+			continue;
+		if (y < wp->yoff || y > wp->yoff + wp->sy)
+			continue;
+		return (wp);
+	}
+	return (NULL);
+}
+
 void
 window_set_active_at(struct window *w, u_int x, u_int y)
 {
 	struct window_pane	*wp;
 
-	TAILQ_FOREACH(wp, &w->panes, entry) {
-		if (wp == w->active || !window_pane_visible(wp))
-			continue;
-		if (x < wp->xoff || x >= wp->xoff + wp->sx)
-			continue;
-		if (y < wp->yoff || y >= wp->yoff + wp->sy)
-			continue;
+	wp = window_get_active_at(w, x, y);
+	if (wp != NULL && wp != w->active)
 		window_set_active_pane(w, wp);
-		break;
-	}
+}
+
+struct window_pane *
+window_find_string(struct window *w, const char *s)
+{
+	u_int	x, y;
+
+	x = w->sx / 2;
+	y = w->sy / 2;
+
+	if (strcasecmp(s, "top") == 0)
+		y = 0;
+	else if (strcasecmp(s, "bottom") == 0)
+		y = w->sy - 1;
+	else if (strcasecmp(s, "left") == 0)
+		x = 0;
+	else if (strcasecmp(s, "right") == 0)
+		x = w->sx - 1;
+	else if (strcasecmp(s, "top-left") == 0) {
+		x = 0;
+		y = 0;
+	} else if (strcasecmp(s, "top-right") == 0) {
+		x = w->sx - 1;
+		y = 0;
+	} else if (strcasecmp(s, "bottom-left") == 0) {
+		x = 0;
+		y = w->sy - 1;
+	} else if (strcasecmp(s, "bottom-right") == 0) {
+		x = w->sx - 1;
+		y = w->sy - 1;
+	} else
+		return (NULL);
+
+	return (window_get_active_at(w, x, y));
 }
 
 struct window_pane *
@@ -495,6 +551,16 @@ window_printable_flags(struct session *s, struct winlink *wl)
 	return (xstrdup(flags));
 }
 
+/* Find pane in global tree by id. */
+struct window_pane *
+window_pane_find_by_id(u_int id)
+{
+	struct window_pane	wp;
+
+	wp.id = id;
+	return (RB_FIND(window_pane_tree, &all_window_panes, &wp));
+}
+
 struct window_pane *
 window_pane_create(struct window *w, u_int sx, u_int sy, u_int hlimit)
 {
@@ -502,6 +568,9 @@ window_pane_create(struct window *w, u_int sx, u_int sy, u_int hlimit)
 
 	wp = xcalloc(1, sizeof *wp);
 	wp->window = w;
+
+	wp->id = next_window_pane++;
+	RB_INSERT(window_pane_tree, &all_window_panes, wp);
 
 	wp->cmd = NULL;
 	wp->shell = NULL;
@@ -555,6 +624,8 @@ window_pane_destroy(struct window_pane *wp)
 		bufferevent_free(wp->pipe_event);
 	}
 
+	RB_REMOVE(window_pane_tree, &all_window_panes, wp);
+
 	if (wp->cwd != NULL)
 		xfree(wp->cwd);
 	if (wp->shell != NULL)
@@ -569,7 +640,7 @@ window_pane_spawn(struct window_pane *wp, const char *cmd, const char *shell,
     const char *cwd, struct environ *env, struct termios *tio, char **cause)
 {
 	struct winsize	 ws;
-	char		*argv0;
+	char		*argv0, paneid[16];
 	const char	*ptr;
 	struct termios	 tio2;
 
@@ -616,6 +687,8 @@ window_pane_spawn(struct window_pane *wp, const char *cmd, const char *shell,
 
 		closefrom(STDERR_FILENO + 1);
 
+		xsnprintf(paneid, sizeof paneid, "%%%u", wp->id);
+		environ_set(env, "TMUX_PANE", paneid);
 		environ_push(env);
 
 		clear_signals(1);
@@ -855,7 +928,8 @@ window_pane_mouse(
 	m->y -= wp->yoff;
 
 	if (wp->mode != NULL) {
-		if (wp->mode->mouse != NULL)
+		if (wp->mode->mouse != NULL &&
+		    options_get_number(&wp->window->options, "mode-mouse"))
 			wp->mode->mouse(wp, sess, m);
 	} else if (wp->fd != -1)
 		input_mouse(wp, m);

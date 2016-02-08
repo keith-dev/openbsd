@@ -1,4 +1,4 @@
-/*	$OpenBSD: traceroute.c,v 1.73 2010/09/13 10:09:00 claudio Exp $	*/
+/*	$OpenBSD: traceroute.c,v 1.77 2011/06/21 17:31:07 mikeb Exp $	*/
 /*	$NetBSD: traceroute.c,v 1.10 1995/05/21 15:50:45 mycroft Exp $	*/
 
 /*-
@@ -286,6 +286,7 @@ int waittime = 5;		/* time to wait for response (in seconds) */
 int nflag;			/* print addresses numerically */
 int dump;
 int xflag;			/* show ICMP extension header */
+int tflag;			/* tos flag was set */
 
 int
 main(int argc, char *argv[])
@@ -293,11 +294,13 @@ main(int argc, char *argv[])
 	int mib[4] = { CTL_NET, PF_INET, IPPROTO_IP, IPCTL_DEFTTL };
 	int ttl_flag = 0, incflag = 1, protoset = 0, sump = 0;
 	int ch, i, lsrr = 0, on = 1, probe, seq = 0, tos = 0;
+	int last_tos, tos_returned;
 	size_t size = sizeof(max_ttl);
 	struct sockaddr_in from, to;
 	struct hostent *hp;
 	u_int32_t tmprnd;
-	struct ip *ip;
+	struct ip *ip, *inner_ip;
+	struct icmp *icp;
 	u_int8_t ttl;
 	char *ep;
 	const char *errstr;
@@ -427,7 +430,8 @@ main(int argc, char *argv[])
 			l = strtol(optarg, &ep, 10);
 			if (errno || !*optarg || *ep || l < 0 || l > 255)
 				errx(1, "tos must be 0 to 255.");
-			tos = (int)l;
+			last_tos = tos = (int)l;
+			tflag = 1;
 			break;
 		case 'v':
 			verbose++;
@@ -438,10 +442,10 @@ main(int argc, char *argv[])
 			if (errstr)
 				errx(1, "rtable value is %s: %s",
 				    errstr, optarg);
-			if (setsockopt(sndsock, IPPROTO_IP, SO_RTABLE,
+			if (setsockopt(sndsock, SOL_SOCKET, SO_RTABLE,
 			    &rtableid, sizeof(rtableid)) == -1)
 				err(1, "setsockopt SO_RTABLE");
-			if (setsockopt(s, IPPROTO_IP, SO_RTABLE,
+			if (setsockopt(s, SOL_SOCKET, SO_RTABLE,
 			    &rtableid, sizeof(rtableid)) == -1)
 				err(1, "setsockopt SO_RTABLE");
 			break;
@@ -636,6 +640,17 @@ main(int argc, char *argv[])
 					++got_there;
 					break;
 				}
+
+				icp = (struct icmp *) (((u_char *)ip)+(ip->ip_hl<<2));
+				inner_ip = (struct ip *) (((u_char *)icp)+8);
+
+				tos_returned = inner_ip->ip_tos;
+
+				if (tflag && (tos_returned != last_tos))
+					printf (" (TOS=%d!)", tos_returned);
+
+				last_tos = tos_returned;
+
 				/* time exceeded in transit */
 				if (i == -1)
 					break;
@@ -855,7 +870,7 @@ wait_for_reply(int sock, struct sockaddr_in *from, struct timeval *sent)
 		wait.tv_sec--;
 	}
 	if (wait.tv_sec < 0)
-		wait.tv_sec = wait.tv_usec = 0;
+		timerclear(&wait);
 
 	if (select(sock+1, fdsp, (fd_set *)0, (fd_set *)0, &wait) > 0)
 		cc = recvfrom(s, (char *)packet, sizeof(packet), 0,

@@ -1,4 +1,4 @@
-/*	$OpenBSD: mfs_vnops.c,v 1.40 2010/12/21 20:14:44 thib Exp $	*/
+/*	$OpenBSD: mfs_vnops.c,v 1.42 2011/07/04 20:35:35 deraadt Exp $	*/
 /*	$NetBSD: mfs_vnops.c,v 1.8 1996/03/17 02:16:32 christos Exp $	*/
 
 /*
@@ -40,8 +40,7 @@
 #include <sys/buf.h>
 #include <sys/vnode.h>
 #include <sys/malloc.h>
-
-#include <miscfs/specfs/specdev.h>
+#include <sys/specdev.h>
 
 #include <machine/vmparam.h>
 
@@ -50,7 +49,6 @@
 
 /* mfs vnode operations. */
 struct vops mfs_vops = {
-        .vop_default    = eopnotsupp,
         .vop_lookup     = mfs_badop,
         .vop_create     = mfs_badop,
         .vop_mknod      = mfs_badop,

@@ -1,4 +1,4 @@
-/*	$OpenBSD: pf_ioctl.c,v 1.236 2010/12/15 14:22:25 claudio Exp $ */
+/*	$OpenBSD: pf_ioctl.c,v 1.241 2011/07/08 18:50:51 henning Exp $ */
 
 /*
  * Copyright (c) 2001 Daniel Hartmeier
@@ -263,7 +263,7 @@ void
 pf_rm_rule(struct pf_rulequeue *rulequeue, struct pf_rule *rule)
 {
 	if (rulequeue != NULL) {
-		if (rule->states_cur <= 0) {
+		if (rule->states_cur <= 0 && rule->src_nodes <= 0) {
 			/*
 			 * XXX - we need to remove the table *before* detaching
 			 * the rule to make sure the table code does not delete
@@ -814,11 +814,11 @@ pf_setup_pfsync_matching(struct pf_ruleset *rs)
 
 		if (!rs->rules.inactive.ptr_array)
 			return (ENOMEM);
-	}
 
-	TAILQ_FOREACH(rule, rs->rules.inactive.ptr, entries) {
-		pf_hash_rule(&ctx, rule);
-		(rs->rules.inactive.ptr_array)[rule->nr] = rule;
+		TAILQ_FOREACH(rule, rs->rules.inactive.ptr, entries) {
+			pf_hash_rule(&ctx, rule);
+			(rs->rules.inactive.ptr_array)[rule->nr] = rule;
+		}
 	}
 
 	MD5Final(digest, &ctx);
@@ -1066,6 +1066,10 @@ pfioctl(dev_t dev, u_long cmd, caddr_t addr, int flags, struct proc *p)
 		if (pf_anchor_setup(rule, ruleset, pr->anchor_call))
 			error = EINVAL;
 		if (rule->rt && !rule->direction)
+			error = EINVAL;
+		if ((rule->prio[0] != PF_PRIO_NOTSET && rule->prio[0] >
+		    IFQ_MAXPRIO) || (rule->prio[1] != PF_PRIO_NOTSET &&
+                    rule->prio[1] > IFQ_MAXPRIO))
 			error = EINVAL;
 
 		if (error) {
@@ -1511,6 +1515,7 @@ pfioctl(dev_t dev, u_long cmd, caddr_t addr, int flags, struct proc *p)
 				pnl->rsport = sk->port[sidx];
 				PF_ACPY(&pnl->rdaddr, &sk->addr[didx], sk->af);
 				pnl->rdport = sk->port[didx];
+				pnl->rrdomain = sk->rdomain;
 			} else
 				error = ENOENT;
 		}
@@ -2516,8 +2521,13 @@ pf_rule_copyin(struct pf_rule *from, struct pf_rule *to,
 	to->os_fingerprint = from->os_fingerprint;
 
 	to->rtableid = from->rtableid;
-	if (to->rtableid > 0 && !rtable_exists(to->rtableid))
+	if (to->rtableid >= 0 && !rtable_exists(to->rtableid))
 		return (EBUSY);
+	to->onrdomain = from->onrdomain;
+	if (to->onrdomain >= 0 && !rtable_exists(to->onrdomain))
+		return (EBUSY);
+	if (to->onrdomain >= 0)		/* make sure it is a real rdomain */
+		to->onrdomain = rtable_l2(to->onrdomain);
 
 	for (i = 0; i < PFTM_MAX; i++)
 		to->timeout[i] = from->timeout[i];
@@ -2589,6 +2599,8 @@ pf_rule_copyin(struct pf_rule *from, struct pf_rule *to,
 	to->divert.port = from->divert.port;
 	to->divert_packet.addr = from->divert_packet.addr;
 	to->divert_packet.port = from->divert_packet.port;
+	to->prio[0] = from->prio[0];
+	to->prio[1] = from->prio[1];
 
 	return (0);
 }

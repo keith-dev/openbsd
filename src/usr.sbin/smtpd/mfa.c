@@ -1,4 +1,4 @@
-/*	$OpenBSD: mfa.c,v 1.54 2010/11/28 14:35:58 gilles Exp $	*/
+/*	$OpenBSD: mfa.c,v 1.59 2011/05/16 21:05:52 gilles Exp $	*/
 
 /*
  * Copyright (c) 2008 Gilles Chehade <gilles@openbsd.org>
@@ -34,25 +34,25 @@
 #include "smtpd.h"
 #include "log.h"
 
-void		mfa_imsg(struct smtpd *, struct imsgev *, struct imsg *);
-__dead void	mfa_shutdown(void);
-void		mfa_sig_handler(int, short, void *);
-void		mfa_test_mail(struct smtpd *, struct message *);
-void		mfa_test_rcpt(struct smtpd *, struct message *);
-void		mfa_test_rcpt_resume(struct smtpd *, struct submit_status *);
-int		mfa_strip_source_route(char *, size_t);
+static void mfa_imsg(struct imsgev *, struct imsg *);
+static void mfa_shutdown(void);
+static void mfa_sig_handler(int, short, void *);
+static void mfa_test_mail(struct envelope *);
+static void mfa_test_rcpt(struct envelope *);
+static void mfa_test_rcpt_resume(struct submit_status *);
+static int mfa_strip_source_route(char *, size_t);
 
-void
-mfa_imsg(struct smtpd *env, struct imsgev *iev, struct imsg *imsg)
+static void
+mfa_imsg(struct imsgev *iev, struct imsg *imsg)
 {
 	if (iev->proc == PROC_SMTP) {
 		switch (imsg->hdr.type) {
 		case IMSG_MFA_MAIL:
-			mfa_test_mail(env, imsg->data);
+			mfa_test_mail(imsg->data);
 			return;
 
 		case IMSG_MFA_RCPT:
-			mfa_test_rcpt(env, imsg->data);
+			mfa_test_rcpt(imsg->data);
 			return;
 		}
 	}
@@ -67,7 +67,7 @@ mfa_imsg(struct smtpd *env, struct imsgev *iev, struct imsg *imsg)
 			return;
 
 		case IMSG_LKA_RULEMATCH:
-			mfa_test_rcpt_resume(env, imsg->data);
+			mfa_test_rcpt_resume(imsg->data);
 			return;
 		}
 	}
@@ -83,7 +83,7 @@ mfa_imsg(struct smtpd *env, struct imsgev *iev, struct imsg *imsg)
 	fatalx("mfa_imsg: unexpected imsg");
 }
 
-void
+static void
 mfa_sig_handler(int sig, short event, void *p)
 {
 	switch (sig) {
@@ -96,7 +96,7 @@ mfa_sig_handler(int sig, short event, void *p)
 	}
 }
 
-void
+static void
 mfa_shutdown(void)
 {
 	log_info("mail filter exiting");
@@ -105,7 +105,7 @@ mfa_shutdown(void)
 
 
 pid_t
-mfa(struct smtpd *env)
+mfa(void)
 {
 	pid_t		 pid;
 	struct passwd	*pw;
@@ -129,7 +129,7 @@ mfa(struct smtpd *env)
 		return (pid);
 	}
 
-	purge_config(env, PURGE_EVERYTHING);
+	purge_config(PURGE_EVERYTHING);
 
 	pw = env->sc_pw;
 
@@ -149,15 +149,15 @@ mfa(struct smtpd *env)
 	imsg_callback = mfa_imsg;
 	event_init();
 
-	signal_set(&ev_sigint, SIGINT, mfa_sig_handler, env);
-	signal_set(&ev_sigterm, SIGTERM, mfa_sig_handler, env);
+	signal_set(&ev_sigint, SIGINT, mfa_sig_handler, NULL);
+	signal_set(&ev_sigterm, SIGTERM, mfa_sig_handler, NULL);
 	signal_add(&ev_sigint, NULL);
 	signal_add(&ev_sigterm, NULL);
 	signal(SIGPIPE, SIG_IGN);
 	signal(SIGHUP, SIG_IGN);
 
-	config_pipes(env, peers, nitems(peers));
-	config_peers(env, peers, nitems(peers));
+	config_pipes(peers, nitems(peers));
+	config_peers(peers, nitems(peers));
 
 	if (event_dispatch() < 0)
 		fatal("event_dispatch");
@@ -167,23 +167,23 @@ mfa(struct smtpd *env)
 }
 
 void
-mfa_test_mail(struct smtpd *env, struct message *m)
+mfa_test_mail(struct envelope *e)
 {
 	struct submit_status	 ss;
 
-	ss.id = m->id;
+	ss.id = e->session_id;
 	ss.code = 530;
-	ss.u.path = m->sender;
+	ss.u.maddr = e->delivery.from;
 
-	if (mfa_strip_source_route(ss.u.path.user, sizeof(ss.u.path.user)))
+	if (mfa_strip_source_route(ss.u.maddr.user, sizeof(ss.u.maddr.user)))
 		goto refuse;
 
-	if (! valid_localpart(ss.u.path.user) ||
-	    ! valid_domainpart(ss.u.path.domain)) {
+	if (! valid_localpart(ss.u.maddr.user) ||
+	    ! valid_domainpart(ss.u.maddr.domain)) {
 		/*
 		 * "MAIL FROM:<>" is the exception we allow.
 		 */
-		if (!(ss.u.path.user[0] == '\0' && ss.u.path.domain[0] == '\0'))
+		if (!(ss.u.maddr.user[0] == '\0' && ss.u.maddr.domain[0] == '\0'))
 			goto refuse;
 	}
 
@@ -201,30 +201,24 @@ accept:
 	    0, -1, &ss, sizeof(ss));
 }
 
-void
-mfa_test_rcpt(struct smtpd *env, struct message *m)
+static void
+mfa_test_rcpt(struct envelope *e)
 {
 	struct submit_status	 ss;
 
-	if (! valid_message_id(m->message_id))
-		fatalx("mfa_test_rcpt: received corrupted message_id");
-
-	ss.id = m->session_id;
+	ss.id = e->session_id;
 	ss.code = 530;
-	ss.u.path = m->session_rcpt;
-	ss.ss = m->session_ss;
-	ss.msg = *m;
-	ss.msg.recipient = m->session_rcpt;
-	ss.flags = m->flags;
+	ss.u.maddr = e->delivery.rcpt_orig;
+	ss.ss = e->delivery.ss;
+	ss.envelope = *e;
+	ss.envelope.delivery.rcpt = e->delivery.rcpt_orig;
+	ss.flags = e->delivery.flags;
 
-	mfa_strip_source_route(ss.u.path.user, sizeof(ss.u.path.user));
-
-	if (! valid_localpart(ss.u.path.user) ||
-	    ! valid_domainpart(ss.u.path.domain))
+	mfa_strip_source_route(ss.u.maddr.user, sizeof(ss.u.maddr.user));
+	
+	if (! valid_localpart(ss.u.maddr.user) ||
+	    ! valid_domainpart(ss.u.maddr.domain))
 		goto refuse;
-
-	if (ss.flags & F_MESSAGE_AUTHENTICATED)
-		ss.u.path.flags |= F_PATH_AUTHENTICATED;
 
 	imsg_compose_event(env->sc_ievs[PROC_LKA], IMSG_LKA_RULEMATCH, 0, 0, -1,
 	    &ss, sizeof(ss));
@@ -235,21 +229,21 @@ refuse:
 	    sizeof(ss));
 }
 
-void
-mfa_test_rcpt_resume(struct smtpd *env, struct submit_status *ss) {
+static void
+mfa_test_rcpt_resume(struct submit_status *ss) {
 	if (ss->code != 250) {
 		imsg_compose_event(env->sc_ievs[PROC_SMTP], IMSG_MFA_RCPT, 0, 0, -1, ss,
 		    sizeof(*ss));
 		return;
 	}
 
-	ss->msg.recipient = ss->u.path;
-	ss->msg.expire = ss->msg.recipient.rule.r_qexpire;
+	ss->envelope.delivery.rcpt = ss->u.maddr;
+	ss->envelope.delivery.expire = ss->envelope.rule.r_qexpire;
 	imsg_compose_event(env->sc_ievs[PROC_LKA], IMSG_LKA_RCPT, 0, 0, -1,
 	    ss, sizeof(*ss));
 }
 
-int
+static int
 mfa_strip_source_route(char *buf, size_t len)
 {
 	char *p;

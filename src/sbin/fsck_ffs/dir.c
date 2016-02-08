@@ -1,4 +1,4 @@
-/*	$OpenBSD: dir.c,v 1.24 2009/10/27 23:59:32 deraadt Exp $	*/
+/*	$OpenBSD: dir.c,v 1.27 2011/05/08 14:38:40 otto Exp $	*/
 /*	$NetBSD: dir.c,v 1.20 1996/09/27 22:45:11 christos Exp $	*/
 
 /*
@@ -85,7 +85,7 @@ propagate(ino_t inumber)
 		else if (inp->i_sibling)
 			inp = inp->i_sibling;
 		else
-			inp = inp->i_parentp;
+			inp = getinoinfo(inp->i_parent);
 	}
 }
 
@@ -115,29 +115,8 @@ dirscan(struct inodesc *idesc)
 	for (dp = fsck_readdir(idesc); dp != NULL; dp = fsck_readdir(idesc)) {
 		dsize = dp->d_reclen;
 		memcpy(dbuf, dp, (size_t)dsize);
-#		if (BYTE_ORDER == LITTLE_ENDIAN)
-			if (!newinofmt) {
-				struct direct *tdp = (struct direct *)dbuf;
-				u_char tmp;
-
-				tmp = tdp->d_namlen;
-				tdp->d_namlen = tdp->d_type;
-				tdp->d_type = tmp;
-			}
-#		endif
 		idesc->id_dirp = (struct direct *)dbuf;
 		if ((n = (*idesc->id_func)(idesc)) & ALTERED) {
-#			if (BYTE_ORDER == LITTLE_ENDIAN)
-				if (!newinofmt && !doinglevel2) {
-					struct direct *tdp;
-					u_char tmp;
-
-					tdp = (struct direct *)dbuf;
-					tmp = tdp->d_namlen;
-					tdp->d_namlen = tdp->d_type;
-					tdp->d_type = tmp;
-				}
-#			endif
 			bp = getdirblk(idesc->id_blkno, blksiz);
 			memcpy(bp->b_un.b_buf + idesc->id_loc - dsize, dbuf,
 			    (size_t)dsize);
@@ -230,19 +209,9 @@ dircheck(struct inodesc *idesc, struct direct *dp)
 		return (0);
 	if (dp->d_ino == 0)
 		return (1);
-	size = DIRSIZ(!newinofmt, dp);
-#	if (BYTE_ORDER == LITTLE_ENDIAN)
-		if (!newinofmt) {
-			type = dp->d_namlen;
-			namlen = dp->d_type;
-		} else {
-			namlen = dp->d_namlen;
-			type = dp->d_type;
-		}
-#	else
-		namlen = dp->d_namlen;
-		type = dp->d_type;
-#	endif
+	size = DIRSIZ(0, dp);
+	namlen = dp->d_namlen;
+	type = dp->d_type;
 	if (dp->d_reclen < size ||
 	    idesc->id_filesize < size ||
 	    type > 15)
@@ -334,27 +303,9 @@ mkentry(struct inodesc *idesc)
 	dirp = (struct direct *)(((char *)dirp) + oldlen);
 	dirp->d_ino = idesc->id_parent;	/* ino to be entered is in id_parent */
 	dirp->d_reclen = newent.d_reclen;
-	if (newinofmt)
-		dirp->d_type = GET_ITYPE(idesc->id_parent);
-	else
-		dirp->d_type = 0;
+	dirp->d_type = GET_ITYPE(idesc->id_parent);
 	dirp->d_namlen = newent.d_namlen;
 	memcpy(dirp->d_name, idesc->id_name, (size_t)dirp->d_namlen + 1);
-#	if (BYTE_ORDER == LITTLE_ENDIAN)
-		/*
-		 * If the entry was split, dirscan() will only reverse the byte
-		 * order of the original entry, and not the new one, before
-		 * writing it back out.  So, we reverse the byte order here if
-		 * necessary.
-		 */
-		if (oldlen != 0 && !newinofmt && !doinglevel2) {
-			u_char tmp;
-
-			tmp = dirp->d_namlen;
-			dirp->d_namlen = dirp->d_type;
-			dirp->d_type = tmp;
-		}
-#	endif
 	return (ALTERED|STOP);
 }
 
@@ -366,10 +317,7 @@ chgino(struct inodesc *idesc)
 	if (memcmp(dirp->d_name, idesc->id_name, (int)dirp->d_namlen + 1))
 		return (KEEPON);
 	dirp->d_ino = idesc->id_parent;
-	if (newinofmt)
-		dirp->d_type = GET_ITYPE(idesc->id_parent);
-	else
-		dirp->d_type = 0;
+	dirp->d_type = GET_ITYPE(idesc->id_parent);
 	return (ALTERED|STOP);
 }
 
@@ -443,8 +391,8 @@ linkup(ino_t orphan, ino_t parentdir)
 		idesc.id_type = ADDR;
 		idesc.id_func = pass4check;
 		idesc.id_number = oldlfdir;
-		adjust(&idesc, lncntp[oldlfdir] + 1);
-		lncntp[oldlfdir] = 0;
+		adjust(&idesc, ILNCOUNT(oldlfdir) + 1);
+		ILNCOUNT(oldlfdir) = 0;
 		dp = ginode(lfdir);
 	}
 	if (GET_ISTATE(lfdir) != DFOUND) {
@@ -457,7 +405,7 @@ linkup(ino_t orphan, ino_t parentdir)
 		printf("\n\n");
 		return (0);
 	}
-	lncntp[orphan]--;
+	ILNCOUNT(orphan)--;
 	if (lostdir) {
 		if ((changeino(orphan, "..", lfdir) & ALTERED) == 0 &&
 		    parentdir != (ino_t)-1)
@@ -465,7 +413,7 @@ linkup(ino_t orphan, ino_t parentdir)
 		dp = ginode(lfdir);
 		DIP_SET(dp, di_nlink, DIP(dp, di_nlink) + 1);
 		inodirty();
-		lncntp[lfdir]++;
+		ILNCOUNT(lfdir)++;
 		pwarn("DIR I=%u CONNECTED. ", orphan);
 		if (parentdir != (ino_t)-1) {
 			printf("PARENT WAS I=%u\n", parentdir);
@@ -476,7 +424,7 @@ linkup(ino_t orphan, ino_t parentdir)
 			 * fixes the parent link count so that fsck does
 			 * not need to be rerun.
 			 */
-			lncntp[parentdir]++;
+			ILNCOUNT(parentdir)++;
 		}
 		if (preen == 0)
 			printf("\n");
@@ -615,10 +563,7 @@ allocdir(ino_t parent, ino_t request, int mode)
 	struct inoinfo *inp;
 
 	ino = allocino(request, IFDIR|mode);
-	if (newinofmt)
-		dirp = &dirhead;
-	else
-		dirp = (struct dirtemplate *)&odirhead;
+	dirp = &dirhead;
 	dirp->dot_ino = ino;
 	dirp->dotdot_ino = parent;
 	dp = ginode(ino);
@@ -636,7 +581,7 @@ allocdir(ino_t parent, ino_t request, int mode)
 	DIP_SET(dp, di_nlink, 2);
 	inodirty();
 	if (ino == ROOTINO) {
-		lncntp[ino] = DIP(dp, di_nlink);
+		ILNCOUNT(ino) = DIP(dp, di_nlink);
 		cacheino(dp, ino);
 		return(ino);
 	}
@@ -650,8 +595,8 @@ allocdir(ino_t parent, ino_t request, int mode)
 	inp->i_dotdot = parent;
 	SET_ISTATE(ino, GET_ISTATE(parent));
 	if (GET_ISTATE(ino) == DSTATE) {
-		lncntp[ino] = DIP(dp, di_nlink);
-		lncntp[parent]++;
+		ILNCOUNT(ino) = DIP(dp, di_nlink);
+		ILNCOUNT(parent)++;
 	}
 	dp = ginode(parent);
 	DIP_SET(dp, di_nlink, DIP(dp, di_nlink) + 1);

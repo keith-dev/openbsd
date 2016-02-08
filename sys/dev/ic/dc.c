@@ -1,4 +1,4 @@
-/*	$OpenBSD: dc.c,v 1.121 2010/09/07 16:21:42 deraadt Exp $	*/
+/*	$OpenBSD: dc.c,v 1.124 2011/07/07 20:42:56 henning Exp $	*/
 
 /*
  * Copyright (c) 1997, 1998, 1999
@@ -749,7 +749,7 @@ dc_miibus_writereg(struct device *self, int phy, int reg, int data)
 	struct dc_mii_frame frame;
 	int i, phy_reg;
 
-	bzero((char *)&frame, sizeof(frame));
+	bzero(&frame, sizeof(frame));
 
 	if (DC_IS_ADMTEK(sc) && phy != DC_ADMTEK_PHYADDR)
 		return;
@@ -903,7 +903,7 @@ dc_setfilt_21143(struct dc_softc *sc)
 	sc->dc_cdata.dc_tx_cnt++;
 	sframe = &sc->dc_ldata->dc_tx_list[i];
 	sp = &sc->dc_ldata->dc_sbuf[0];
-	bzero((char *)sp, DC_SFRAME_LEN);
+	bzero(sp, DC_SFRAME_LEN);
 
 	sframe->dc_data = htole32(sc->sc_listmap->dm_segs[0].ds_addr +
 	    offsetof(struct dc_list_data, dc_sbuf));
@@ -1126,7 +1126,7 @@ dc_setfilt_xircom(struct dc_softc *sc)
 	sc->dc_cdata.dc_tx_cnt++;
 	sframe = &sc->dc_ldata->dc_tx_list[i];
 	sp = &sc->dc_ldata->dc_sbuf[0];
-	bzero((char *)sp, DC_SFRAME_LEN);
+	bzero(sp, DC_SFRAME_LEN);
 
 	sframe->dc_data = htole32(sc->sc_listmap->dm_segs[0].ds_addr +
 	    offsetof(struct dc_list_data, dc_sbuf));
@@ -1934,7 +1934,7 @@ dc_newbuf(struct dc_softc *sc, int i, struct mbuf *m)
 	 * 82c169 chips.
 	 */
 	if (sc->dc_flags & DC_PNIC_RX_BUG_WAR)
-		bzero((char *)mtod(m_new, char *), m_new->m_len);
+		bzero(mtod(m_new, char *), m_new->m_len);
 
 	bus_dmamap_sync(sc->sc_dmat, sc->dc_cdata.dc_rx_chain[i].sd_map, 0,
 	    sc->dc_cdata.dc_rx_chain[i].sd_map->dm_mapsize,
@@ -2668,7 +2668,7 @@ dc_start(struct ifnet *ifp)
 
 	sc = ifp->if_softc;
 
-	if (!sc->dc_link && ifp->if_snd.ifq_len < 10)
+	if (!sc->dc_link && IFQ_LEN(&ifp->if_snd) < 10)
 		return;
 
 	if (ifp->if_flags & IFF_OACTIVE)
@@ -3056,6 +3056,7 @@ void
 dc_stop(struct dc_softc *sc, int softonly)
 {
 	struct ifnet *ifp;
+	u_int32_t isr;
 	int i;
 
 	ifp = &sc->sc_arpcom.ac_if;
@@ -3067,6 +3068,28 @@ dc_stop(struct dc_softc *sc, int softonly)
 
 	if (!softonly) {
 		DC_CLRBIT(sc, DC_NETCFG, (DC_NETCFG_RX_ON|DC_NETCFG_TX_ON));
+
+		for (i = 0; i < DC_TIMEOUT; i++) {
+			isr = CSR_READ_4(sc, DC_ISR);
+			if ((isr & DC_ISR_TX_IDLE ||
+			    (isr & DC_ISR_TX_STATE) == DC_TXSTATE_RESET) &&
+			    (isr & DC_ISR_RX_STATE) == DC_RXSTATE_STOPPED)
+				break;
+			DELAY(10);
+		}
+
+		if (i == DC_TIMEOUT) {
+			if (!((isr & DC_ISR_TX_IDLE) ||
+			    (isr & DC_ISR_TX_STATE) == DC_TXSTATE_RESET) &&
+			    !DC_IS_ASIX(sc) && !DC_IS_DAVICOM(sc))
+				printf("%s: failed to force tx to idle state\n",
+				    sc->sc_dev.dv_xname);
+			if (!((isr & DC_ISR_RX_STATE) == DC_RXSTATE_STOPPED) &&
+			    !DC_HAS_BROKEN_RXSTATE(sc))
+				printf("%s: failed to force rx to idle state\n",
+				    sc->sc_dev.dv_xname);
+		}
+
 		CSR_WRITE_4(sc, DC_IMR, 0x00000000);
 		CSR_WRITE_4(sc, DC_TXADDR, 0x00000000);
 		CSR_WRITE_4(sc, DC_RXADDR, 0x00000000);
@@ -3089,8 +3112,7 @@ dc_stop(struct dc_softc *sc, int softonly)
 			sc->dc_cdata.dc_rx_chain[i].sd_mbuf = NULL;
 		}
 	}
-	bzero((char *)&sc->dc_ldata->dc_rx_list,
-		sizeof(sc->dc_ldata->dc_rx_list));
+	bzero(&sc->dc_ldata->dc_rx_list, sizeof(sc->dc_ldata->dc_rx_list));
 
 	/*
 	 * Free the TX list buffers.
@@ -3113,8 +3135,7 @@ dc_stop(struct dc_softc *sc, int softonly)
 			sc->dc_cdata.dc_tx_chain[i].sd_mbuf = NULL;
 		}
 	}
-	bzero((char *)&sc->dc_ldata->dc_tx_list,
-		sizeof(sc->dc_ldata->dc_tx_list));
+	bzero(&sc->dc_ldata->dc_tx_list, sizeof(sc->dc_ldata->dc_tx_list));
 
 	bus_dmamap_sync(sc->sc_dmat, sc->sc_listmap,
 	    0, sc->sc_listmap->dm_mapsize,

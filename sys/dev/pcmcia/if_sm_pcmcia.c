@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_sm_pcmcia.c,v 1.30 2010/08/30 20:33:18 deraadt Exp $	*/
+/*	$OpenBSD: if_sm_pcmcia.c,v 1.32 2011/07/03 15:47:17 matthew Exp $	*/
 /*	$NetBSD: if_sm_pcmcia.c,v 1.11 1998/08/15 20:47:32 thorpej Exp $  */
 
 /*-
@@ -128,7 +128,7 @@ sm_pcmcia_match(parent, match, aux)
 	struct pcmcia_attach_args *pa = aux;
 	int i;
 
-	for (i = 0; i < sizeof(sm_pcmcia_prod)/sizeof(sm_pcmcia_prod[0]); i++)
+	for (i = 0; i < nitems(sm_pcmcia_prod); i++)
 		if (pa->manufacturer == sm_pcmcia_prod[i].spp_vendor &&
 		    pa->product == sm_pcmcia_prod[i].spp_product &&
 		    pa->pf->number == sm_pcmcia_prod[i].spp_expfunc)
@@ -254,12 +254,6 @@ sm_pcmcia_activate(dev, act)
 	struct ifnet *ifp = &sc->sc_smc.sc_arpcom.ac_if;
 
 	switch (act) {
-	case DVACT_ACTIVATE:
-		pcmcia_function_enable(sc->sc_pf);
-		sc->sc_ih = pcmcia_intr_establish(sc->sc_pf, IPL_NET,
-		    smc91cxx_intr, sc, sc->sc_smc.sc_dev.dv_xname);
-		smc91cxx_init(&sc->sc_smc);
-		break;
 	case DVACT_DEACTIVATE:
 		ifp->if_timer = 0;
 		if (ifp->if_flags & IFF_RUNNING)

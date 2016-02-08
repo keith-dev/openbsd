@@ -1,4 +1,4 @@
-/*	$OpenBSD: umass.c,v 1.60 2011/01/25 20:03:36 jakemsr Exp $ */
+/*	$OpenBSD: umass.c,v 1.62 2011/07/03 15:47:17 matthew Exp $ */
 /*	$NetBSD: umass.c,v 1.116 2004/06/30 05:53:46 mycroft Exp $	*/
 
 /*
@@ -123,8 +123,6 @@
  * in use. When the transfer has finished, these routines call
  * umass_cam_cb again to complete the CAM command.
  */
-
-#include "atapiscsi.h"
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -597,11 +595,7 @@ umass_attach(struct device *parent, struct device *self, void *aux)
 
 	case UMASS_CPROTO_UFI:
 	case UMASS_CPROTO_ATAPI:
-#if (NATAPIBUS > 0) || (NATAPISCSI > 0)
 		error = umass_atapi_attach(sc);
-#else
-		printf("%s: atapiscsi not configured\n", sc->sc_dev.dv_xname);
-#endif
 		break;
 
 	case UMASS_CPROTO_ISD_ATA:
@@ -685,9 +679,6 @@ umass_activate(struct device *dev, int act)
 	    sc->sc_dev.dv_xname, act));
 
 	switch (act) {
-	case DVACT_ACTIVATE:
-		break;
-
 	case DVACT_DEACTIVATE:
 		sc->sc_dying = 1;
 		if (scbus == NULL || scbus->sc_child == NULL)

@@ -1,4 +1,4 @@
-# $OpenBSD: disktab,v 1.23 2010/07/02 20:33:54 tedu Exp $
+# $OpenBSD: disktab,v 1.25 2011/06/08 19:16:19 krw Exp $
 
 miniroot:\
 	:ty=winchester:se#512:nt#2:rm#300:ns#64:nc#96:\

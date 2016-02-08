@@ -1,4 +1,4 @@
-#	$OpenBSD: GENERIC,v 1.22 2010/08/30 18:56:18 deraadt Exp $
+#	$OpenBSD: GENERIC,v 1.26 2011/08/07 20:39:39 kettenis Exp $
 #
 # For further information on compiling OpenBSD kernels, see the config(8)
 # man page.
@@ -33,10 +33,10 @@ option	PCIVERBOSE
 ppb*	at pci?
 pci*	at ppb?
 
-#goofy*	at pci?			# NS87560UBD
-#com*	at goofy?
-#lpt*	at goofy?
-#fdc*	at goofy?
+ssio*	at pci?
+com0	at ssio? irq 4
+com1	at ssio? irq 3
+#lpt0	at ssio?
 
 # CardBus bus support
 #cbb*		at pci?
@@ -87,8 +87,6 @@ pci*	at ppb?
 #midi*	at umidi?
 #ulpt*	at uhub?		# USB Printers
 #umass*	at uhub?		# USB Mass Storage devices
-#scsibus* at umass?
-#atapiscsi* at umass?
 #uhidev*	at uhub?	# Human Interface Devices
 #ums*	at uhidev?		# USB mouse
 #wsmouse* at ums? mux 0
@@ -121,10 +119,8 @@ pci*	at ppb?
 
 #ie*	at pci?
 
-#siop*	at pci?			# NCR 538XX SCSI controllers(new)
-#scsibus* at siop?
+siop*	at pci?			# NCR 538XX SCSI controllers(new)
 #ahd*	at pci?			# Adaptec 79?? SCSI controllers
-#scsibus* at ahd?
 
 #em*	at pci?			# Intel Pro/1000 ethernet
 #ti*	at pci?			# Alteon Tigon 1Gb ethernet
@@ -172,11 +168,11 @@ ukphy*		at mii?		# generic unknown PHYs
 #wd*	at wdc? flags 0x0000
 #wd*	at pciide? flags 0x0000
 #atapiscsi* at pciide?
-#scsibus* at atapiscsi?
 
 # These entries find devices on all SCSI busses and assign
 # unit numers dynamically.
-#sd*	at scsibus?
+scsibus* at scsi?
+sd*	at scsibus?
 #st*	at scsibus?
 #cd*	at scsibus?
 #ch*	at scsibus?

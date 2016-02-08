@@ -1,4 +1,4 @@
-/*	$OpenBSD: ntfs_vnops.c,v 1.22 2010/12/21 20:14:43 thib Exp $	*/
+/*	$OpenBSD: ntfs_vnops.c,v 1.24 2011/07/04 20:35:35 deraadt Exp $	*/
 /*	$NetBSD: ntfs_vnops.c,v 1.6 2003/04/10 21:57:26 jdolecek Exp $	*/
 
 /*
@@ -47,13 +47,12 @@
 #include <sys/malloc.h>
 #include <sys/buf.h>
 #include <sys/dirent.h>
+#include <sys/specdev.h>
 
 /*#define NTFS_DEBUG 1*/
 #include <ntfs/ntfs.h>
 #include <ntfs/ntfs_inode.h>
 #include <ntfs/ntfs_subr.h>
-
-#include <miscfs/specfs/specdev.h>
 
 #include <sys/unistd.h> /* for pathconf(2) constants */
 
@@ -741,7 +740,6 @@ ntfs_pathconf(void *v)
  * Global vfs data structures
  */
 struct vops ntfs_vops = {
-	.vop_default	= eopnotsupp,
 	.vop_getattr	= ntfs_getattr,
 	.vop_inactive	= ntfs_inactive,
 	.vop_reclaim	= ntfs_reclaim,

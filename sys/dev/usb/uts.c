@@ -1,4 +1,4 @@
-/*	$OpenBSD: uts.c,v 1.28 2011/01/25 20:03:36 jakemsr Exp $ */
+/*	$OpenBSD: uts.c,v 1.30 2011/07/03 15:47:17 matthew Exp $ */
 
 /*
  * Copyright (c) 2007 Robert Nagy <robert@openbsd.org>
@@ -254,9 +254,6 @@ uts_activate(struct device *self, int act)
 	int rv = 0;
 
 	switch (act) {
-	case DVACT_ACTIVATE:
-		break;
-
 	case DVACT_DEACTIVATE:
 		if (sc->sc_wsmousedev != NULL)
 			rv = config_deactivate(sc->sc_wsmousedev);
@@ -339,6 +336,8 @@ uts_ioctl(void *v, u_long cmd, caddr_t data, int flag, struct proc *l)
 		    wsmc->resx >= 0 && wsmc->resy >= 0 &&
 		    wsmc->minx < 32768 && wsmc->maxx < 32768 &&
 		    wsmc->miny < 32768 && wsmc->maxy < 32768 &&
+		    (wsmc->maxx - wsmc->minx) != 0 &&
+		    (wsmc->maxy - wsmc->miny) != 0 &&
 		    wsmc->resx < 32768 && wsmc->resy < 32768 &&
 		    wsmc->swapxy >= 0 && wsmc->swapxy <= 1 &&
 		    wsmc->samplelen >= 0 && wsmc->samplelen <= 1))
@@ -430,7 +429,9 @@ uts_get_pos(usbd_private_handle addr, struct uts_pos *tp)
 			tp->x = x;
 			tp->y = y;
 		}
-		if (!sc->sc_rawmode) {
+		if (!sc->sc_rawmode &&
+		    (sc->sc_tsscale.maxx - sc->sc_tsscale.minx) != 0 &&
+		    (sc->sc_tsscale.maxy - sc->sc_tsscale.miny) != 0) {
 			/* Scale down to the screen resolution. */
 			tp->x = ((tp->x - sc->sc_tsscale.minx) *
 			    sc->sc_tsscale.resx) /

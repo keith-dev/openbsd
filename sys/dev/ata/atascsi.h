@@ -1,4 +1,4 @@
-/*	$OpenBSD: atascsi.h,v 1.45 2011/01/26 21:41:00 drahn Exp $ */
+/*	$OpenBSD: atascsi.h,v 1.47 2011/07/08 07:43:05 dlg Exp $ */
 
 /*
  * Copyright (c) 2007 David Gwynne <dlg@openbsd.org>
@@ -17,6 +17,9 @@
  * ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
+
+#ifndef _DEV_ATA_ATASCSI_H_
+#define _DEV_ATA_ATASCSI_H_
 
 struct atascsi;
 struct scsi_link;
@@ -171,6 +174,9 @@ struct ata_identify {
  * ATA DSM (Data Set Management) subcommands
  */
 #define ATA_DSM_TRIM		0x01
+
+#define ATA_DSM_TRIM_DESC(_lba, _len)	((_lba) | ((u_int64_t)(_len) << 48))
+#define ATA_DSM_TRIM_MAX_LEN		0xffff
 
 /*
  * Frame Information Structures
@@ -327,8 +333,6 @@ struct ata_xfer {
 	void			*atascsi_private;
 
 	int			pmp_port;
-
-	void			(*ata_put_xfer)(struct ata_xfer *);
 };
 
 /*
@@ -339,6 +343,7 @@ struct atascsi_methods {
 	int			(*probe)(void *, int, int);
 	void			(*free)(void *, int, int);
 	struct ata_xfer *	(*ata_get_xfer)(void *, int);
+	void			(*ata_put_xfer)(struct ata_xfer *);
 	void			(*ata_cmd)(struct ata_xfer *);
 };
 
@@ -368,3 +373,5 @@ int		atascsi_probe_dev(struct atascsi *, int, int);
 int		atascsi_detach_dev(struct atascsi *, int, int, int);
 
 void		ata_complete(struct ata_xfer *);
+
+#endif /* _DEV_ATA_ATASCSI_H_ */

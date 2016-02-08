@@ -1,4 +1,4 @@
-/*	$OpenBSD: disksubr.c,v 1.20 2011/02/26 13:07:48 krw Exp $	*/
+/*	$OpenBSD: disksubr.c,v 1.26 2011/07/10 16:16:08 krw Exp $	*/
 
 /*
  * Copyright (c) 1999 Michael Shalayeff
@@ -50,8 +50,6 @@ int	readsgilabel(struct buf *, void (*)(struct buf *),
  * secpercyl, secsize and anything required for a block i/o read
  * operation in the driver's strategy/start routines
  * must be filled in before calling us.
- *
- * Returns null on success and an error string on failure.
  */
 int
 readdisklabel(dev_t dev, void (*strat)(struct buf *),
@@ -120,7 +118,8 @@ readsgilabel(struct buf *bp, void (*strat)(struct buf *),
 
 	bp->b_blkno = 0;
 	bp->b_bcount = lp->d_secsize;
-	bp->b_flags = B_BUSY | B_READ | B_RAW;
+	CLR(bp->b_flags, B_READ | B_WRITE | B_DONE);
+	SET(bp->b_flags, B_BUSY | B_READ | B_RAW);
 	(*strat)(bp);
 
 	/* if successful, locate disk label within block and validate */
@@ -201,12 +200,21 @@ finished:
 	    DL_BLKSPERSEC(lp);
 	offset = DL_BLKOFFSET(lp, fsoffs + LABELSECTOR) + LABELOFFSET;
 	bp->b_bcount = lp->d_secsize;
-	bp->b_flags = B_BUSY | B_READ | B_RAW;
+	CLR(bp->b_flags, B_READ | B_WRITE | B_DONE);
+	SET(bp->b_flags, B_BUSY | B_READ | B_RAW);
 	(*strat)(bp);
 	if (biowait(bp))
 		return (bp->b_error);
 
-	return checkdisklabel(bp->b_data + offset, lp, fsoffs, fsend);
+	/*
+	 * Do OpenBSD disklabel validation/adjustment.
+	 *
+	 * N.B: No matter what the bits are on the disk, we now have the
+	 * OpenBSD disklabel for this sgi disk. DO NOT proceed to
+	 * readdoslabel(), iso_spooflabel(), etc.
+	 */
+	checkdisklabel(bp->b_data + offset, lp, fsoffs, fsend);
+	return (0);
 }
 
 /*
@@ -224,22 +232,25 @@ writedisklabel(dev_t dev, void (*strat)(struct buf *), struct disklabel *lp)
 	bp = geteblk((int)lp->d_secsize);
 	bp->b_dev = dev;
 
-	if (readsgilabel(bp, strat, lp, &partoff, 1) != NULL &&
-	    readdoslabel(bp, strat, lp, &partoff, 1) != NULL)
+	if (readsgilabel(bp, strat, lp, &partoff, 1) != 0 &&
+	    readdoslabel(bp, strat, lp, &partoff, 1) != 0)
 		goto done;
 
 	/* Read it in, slap the new label in, and write it back out */
-	bp->b_blkno = DL_BLKTOSEC(lp, partoff+LABELSECTOR) * DL_BLKSPERSEC(lp);
-	offset = DL_BLKOFFSET(lp, partoff + LABELSECTOR) + LABELOFFSET;
+	bp->b_blkno = DL_BLKTOSEC(lp, partoff + DOS_LABELSECTOR) *
+	    DL_BLKSPERSEC(lp);
+	offset = DL_BLKOFFSET(lp, partoff + DOS_LABELSECTOR);
 	bp->b_bcount = lp->d_secsize;
-	bp->b_flags = B_BUSY | B_READ | B_RAW;
+	CLR(bp->b_flags, B_READ | B_WRITE | B_DONE);
+	SET(bp->b_flags, B_BUSY | B_READ | B_RAW);
 	(*strat)(bp);
 	if ((error = biowait(bp)) != 0)
 		goto done;
 
 	dlp = (struct disklabel *)(bp->b_data + offset);
 	*dlp = *lp;
-	bp->b_flags = B_BUSY | B_WRITE | B_RAW;
+	CLR(bp->b_flags, B_READ | B_WRITE | B_DONE);
+	SET(bp->b_flags, B_BUSY | B_WRITE | B_RAW);
 	(*strat)(bp);
 	error = biowait(bp);
 

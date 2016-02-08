@@ -1,4 +1,4 @@
-/*	$OpenBSD: auvia.c,v 1.47 2010/09/12 03:17:34 jakemsr Exp $ */
+/*	$OpenBSD: auvia.c,v 1.49 2011/07/03 15:47:16 matthew Exp $ */
 /*	$NetBSD: auvia.c,v 1.28 2002/11/04 16:38:49 kent Exp $	*/
 
 /*-
@@ -233,7 +233,7 @@ int
 auvia_match(struct device *parent, void *match, void *aux)
 {
 	return (pci_matchbyid((struct pci_attach_args *)aux, auvia_devices,
-	    sizeof(auvia_devices)/sizeof(auvia_devices[0])));
+	    nitems(auvia_devices)));
 }
 
 int
@@ -243,8 +243,6 @@ auvia_activate(struct device *self, int act)
 	int rv = 0;
 
 	switch (act) {
- 	case DVACT_ACTIVATE:
-		break;
 	case DVACT_QUIESCE:
 		rv = config_activate_children(self, act);
 		break;

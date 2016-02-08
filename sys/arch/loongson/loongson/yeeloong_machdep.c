@@ -1,4 +1,4 @@
-/*	$OpenBSD: yeeloong_machdep.c,v 1.15 2010/10/14 21:23:04 pirofti Exp $	*/
+/*	$OpenBSD: yeeloong_machdep.c,v 1.17 2011/07/21 20:36:12 miod Exp $	*/
 
 /*
  * Copyright (c) 2009, 2010 Miodrag Vallat.
@@ -17,8 +17,9 @@
  */
 
 /*
- * Lemote {Fu,Lyn,Yee}loong specific code and configuration data.
- * (this file really ought to be named lemote_machdep.c by now)
+ * eBenton EBT700 and Lemote {Fu,Lyn,Yee}loong specific code and
+ * configuration data.
+ * (this file probably ought to be named lemote_machdep.c by now)
  */
 
 #include <sys/param.h>
@@ -203,6 +204,29 @@ const struct platform yeeloong_platform = {
 #endif
 };
 
+/* eBenton EBT700 is similar to Lemote Yeeloong, except for a smaller screen */
+const struct platform ebenton_platform = {
+	.system_type = LOONGSON_EBT700,
+	.vendor = "eBenton",
+	.product = "EBT700",
+
+	.bonito_config = &lemote_bonito,
+	.isa_chipset = &lemote_isa_chipset,
+	.legacy_io_ranges = yeeloong_legacy_ranges,
+
+	.setup = NULL,
+	.device_register = lemote_device_register,
+
+	.powerdown = yeeloong_powerdown,
+	.reset = lemote_reset,
+#ifdef notyet
+#if NYKBEC > 0
+	.suspend = ykbec_suspend,
+	.resume = ykbec_resume
+#endif
+#endif
+};
+
 /*
  * PCI model specific routines
  */
@@ -346,7 +370,7 @@ lemote_isa_intr(uint32_t hwpend, struct trap_frame *frame)
 	 * Now process allowed interrupts.
 	 */
 	if (isr != 0) {
-		int lvl, bitno;
+		int lvl, bitno, ret;
 		uint64_t tmpisr;
 
 		/* Service higher level interrupts first */
@@ -365,13 +389,16 @@ lemote_isa_intr(uint32_t hwpend, struct trap_frame *frame)
 				for (ih = bonito_intrhand[BONITO_ISA_IRQ(bitno)];
 				    ih != NULL; ih = ih->ih_next) {
 					splraise(ih->ih_level);
-					if ((*ih->ih_fun)(ih->ih_arg) != 0) {
+					ret = (*ih->ih_fun)(ih->ih_arg);
+					if (ret) {
 						rc = 1;
 						ih->ih_count.ec_count++;
 					}
 					__asm__ (".set noreorder\n");
 					curcpu()->ci_ipl = frame->ipl;
 					__asm__ ("sync\n\t.set reorder\n");
+					if (ret == 1)
+						break;
 				}
 				if (rc == 0)
 					printf("spurious isa interrupt %d\n",

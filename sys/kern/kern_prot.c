@@ -1,4 +1,4 @@
-/*	$OpenBSD: kern_prot.c,v 1.46 2010/07/26 01:56:27 guenther Exp $	*/
+/*	$OpenBSD: kern_prot.c,v 1.50 2011/07/25 20:32:06 tedu Exp $	*/
 /*	$NetBSD: kern_prot.c,v 1.33 1996/02/09 18:59:42 christos Exp $	*/
 
 /*
@@ -59,8 +59,7 @@ int
 sys_getpid(struct proc *p, void *v, register_t *retval)
 {
 
-	retval[0] = p->p_p->ps_pid;
-	retval[1] = p->p_p->ps_pptr->ps_pid;
+	*retval = p->p_p->ps_pid;
 	return (0);
 }
 
@@ -96,7 +95,7 @@ sys_getpgrp(struct proc *p, void *v, register_t *retval)
 /*
  * SysVR.4 compatible getpgid()
  */
-pid_t
+int
 sys_getpgid(struct proc *curp, void *v, register_t *retval)
 {
 	struct sys_getpgid_args /* {
@@ -115,7 +114,7 @@ found:
 	return (0);
 }
 
-pid_t
+int
 sys_getsid(struct proc *curp, void *v, register_t *retval)
 {
 	struct sys_getsid_args /* {
@@ -142,8 +141,7 @@ int
 sys_getuid(struct proc *p, void *v, register_t *retval)
 {
 
-	retval[0] = p->p_cred->p_ruid;
-	retval[1] = p->p_ucred->cr_uid;
+	*retval = p->p_cred->p_ruid;
 	return (0);
 }
 
@@ -160,7 +158,7 @@ sys_geteuid(struct proc *p, void *v, register_t *retval)
 int
 sys_issetugid(struct proc *p, void *v, register_t *retval)
 {
-	if (p->p_flag & P_SUGIDEXEC)
+	if (p->p_p->ps_flags & PS_SUGIDEXEC)
 		*retval = 1;
 	else
 		*retval = 0;
@@ -172,8 +170,7 @@ int
 sys_getgid(struct proc *p, void *v, register_t *retval)
 {
 
-	retval[0] = p->p_cred->p_rgid;
-	retval[1] = p->p_ucred->cr_gid;
+	*retval = p->p_cred->p_rgid;
 	return (0);
 }
 
@@ -284,7 +281,7 @@ sys_setpgid(struct proc *curp, void *v, register_t *retval)
 			error = EPERM;
 			goto out;
 		}
-		if (targpr->ps_mainproc->p_flag & P_EXEC) {
+		if (targpr->ps_flags & PS_EXEC) {
 			error = EACCES;
 			goto out;
 		}
@@ -404,7 +401,7 @@ sys_setresuid(struct proc *p, void *v, register_t *retval)
 	if (suid != (uid_t)-1 && suid != pc->p_svuid)
 		pc->p_svuid = suid;
 
-	atomic_setbits_int(&p->p_flag, P_SUGID);
+	atomic_setbits_int(&p->p_p->ps_flags, PS_SUGID);
 	return (0);
 }
 
@@ -498,7 +495,7 @@ sys_setresgid(struct proc *p, void *v, register_t *retval)
 	if (sgid != (gid_t)-1)
 		pc->p_svgid = sgid;
 
-	atomic_setbits_int(&p->p_flag, P_SUGID);
+	atomic_setbits_int(&p->p_p->ps_flags, PS_SUGID);
 	return (0);
 }
 
@@ -607,7 +604,7 @@ sys_setuid(struct proc *p, void *v, register_t *retval)
 	 */
 	pc->pc_ucred = crcopy(pc->pc_ucred);
 	pc->pc_ucred->cr_uid = uid;
-	atomic_setbits_int(&p->p_flag, P_SUGID);
+	atomic_setbits_int(&p->p_p->ps_flags, PS_SUGID);
 	return (0);
 }
 
@@ -636,7 +633,7 @@ sys_seteuid(struct proc *p, void *v, register_t *retval)
 	 */
 	pc->pc_ucred = crcopy(pc->pc_ucred);
 	pc->pc_ucred->cr_uid = euid;
-	atomic_setbits_int(&p->p_flag, P_SUGID);
+	atomic_setbits_int(&p->p_p->ps_flags, PS_SUGID);
 	return (0);
 }
 
@@ -675,7 +672,7 @@ sys_setgid(struct proc *p, void *v, register_t *retval)
 	 */
 	pc->pc_ucred = crcopy(pc->pc_ucred);
 	pc->pc_ucred->cr_gid = gid;
-	atomic_setbits_int(&p->p_flag, P_SUGID);
+	atomic_setbits_int(&p->p_p->ps_flags, PS_SUGID);
 	return (0);
 }
 
@@ -704,7 +701,7 @@ sys_setegid(struct proc *p, void *v, register_t *retval)
 	 */
 	pc->pc_ucred = crcopy(pc->pc_ucred);
 	pc->pc_ucred->cr_gid = egid;
-	atomic_setbits_int(&p->p_flag, P_SUGID);
+	atomic_setbits_int(&p->p_p->ps_flags, PS_SUGID);
 	return (0);
 }
 
@@ -731,7 +728,7 @@ sys_setgroups(struct proc *p, void *v, register_t *retval)
 	if (error)
 		return (error);
 	pc->pc_ucred->cr_ngroups = ngrp;
-	atomic_setbits_int(&p->p_flag, P_SUGID);
+	atomic_setbits_int(&p->p_p->ps_flags, PS_SUGID);
 	return (0);
 }
 

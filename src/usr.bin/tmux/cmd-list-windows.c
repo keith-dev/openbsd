@@ -1,4 +1,4 @@
-/* $OpenBSD: cmd-list-windows.c,v 1.11 2011/01/04 00:42:46 nicm Exp $ */
+/* $OpenBSD: cmd-list-windows.c,v 1.14 2011/07/04 14:04:40 nicm Exp $ */
 
 /*
  * Copyright (c) 2007 Nicholas Marriott <nicm@users.sourceforge.net>
@@ -28,10 +28,13 @@
 
 int	cmd_list_windows_exec(struct cmd *, struct cmd_ctx *);
 
+void	cmd_list_windows_server(struct cmd_ctx *);
+void	cmd_list_windows_session(struct session *, struct cmd_ctx *, int);
+
 const struct cmd_entry cmd_list_windows_entry = {
 	"list-windows", "lsw",
-	"t:", 0, 0,
-	CMD_TARGET_SESSION_USAGE,
+	"at:", 0, 0,
+	"[-a] " CMD_TARGET_SESSION_USAGE,
 	0,
 	NULL,
 	NULL,
@@ -43,19 +46,47 @@ cmd_list_windows_exec(struct cmd *self, struct cmd_ctx *ctx)
 {
 	struct args	*args = self->args;
 	struct session	*s;
-	struct winlink	*wl;
-	char		*layout;
 
-	if ((s = cmd_find_session(ctx, args_get(args, 't'))) == NULL)
-		return (-1);
-
-	RB_FOREACH(wl, winlinks, &s->windows) {
-		layout = layout_dump(wl->window);
-		ctx->print(ctx, "%d: %s [%ux%u] [layout %s]%s",
-		    wl->idx, wl->window->name, wl->window->sx, wl->window->sy,
-		    layout, wl == s->curw ? " (active)" : "");
-		xfree(layout);
+	if (args_has(args, 'a'))
+		cmd_list_windows_server(ctx);
+	else {
+		s = cmd_find_session(ctx, args_get(args, 't'), 0);
+		if (s == NULL)
+			return (-1);
+		cmd_list_windows_session(s, ctx, 0);
 	}
 
 	return (0);
+}
+
+void
+cmd_list_windows_server(struct cmd_ctx *ctx)
+{
+	struct session	*s;
+
+	RB_FOREACH(s, sessions, &sessions)
+		cmd_list_windows_session(s, ctx, 1);
+}
+
+void
+cmd_list_windows_session(struct session *s, struct cmd_ctx *ctx, int type)
+{
+	struct winlink	*wl;
+	char		*layout;
+
+	RB_FOREACH(wl, winlinks, &s->windows) {
+		layout = layout_dump(wl->window);
+		if (type) {
+			ctx->print(ctx, "%s:%d: %s [%ux%u] [layout %s]%s",
+			    s->name, wl->idx, wl->window->name, wl->window->sx,
+			    wl->window->sy, layout,
+			    wl == s->curw ? " (active)" : "");
+		} else {
+			ctx->print(ctx, "%d: %s [%ux%u] [layout %s]%s",
+			    wl->idx, wl->window->name, wl->window->sx,
+			    wl->window->sy, layout,
+			    wl == s->curw ? " (active)" : "");
+		}
+		xfree(layout);
+	}
 }

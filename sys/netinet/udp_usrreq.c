@@ -1,4 +1,4 @@
-/*	$OpenBSD: udp_usrreq.c,v 1.138 2010/09/24 14:50:30 hsuenaga Exp $	*/
+/*	$OpenBSD: udp_usrreq.c,v 1.145 2011/07/08 18:30:17 yasuoka Exp $	*/
 /*	$NetBSD: udp_usrreq.c,v 1.28 1996/03/16 23:54:03 christos Exp $	*/
 
 /*
@@ -352,7 +352,7 @@ udp_input(struct mbuf *m, ...)
 		 * to userland
 		 */
 		if (spi != 0) {
-			if ((m = m_pullup2(m, skip)) == NULL) {
+			if ((m = m_pullup(m, skip)) == NULL) {
 				udpstat.udps_hdrops++;
 				return;
 			}
@@ -412,10 +412,11 @@ udp_input(struct mbuf *m, ...)
 #ifdef INET6
 	if ((ip6 && IN6_IS_ADDR_MULTICAST(&ip6->ip6_dst)) ||
 	    (ip && IN_MULTICAST(ip->ip_dst.s_addr)) ||
-	    (ip && in_broadcast(ip->ip_dst, m->m_pkthdr.rcvif))) {
+	    (ip && in_broadcast(ip->ip_dst, m->m_pkthdr.rcvif,
+	    m->m_pkthdr.rdomain))) {
 #else /* INET6 */
 	if (IN_MULTICAST(ip->ip_dst.s_addr) ||
-	    in_broadcast(ip->ip_dst, m->m_pkthdr.rcvif)) {
+	    in_broadcast(ip->ip_dst, m->m_pkthdr.rcvif, m->m_pkthdr.rdomain)) {
 #endif /* INET6 */
 		struct inpcb *last;
 		/*
@@ -442,6 +443,8 @@ udp_input(struct mbuf *m, ...)
 		 */
 		last = NULL;
 		CIRCLEQ_FOREACH(inp, &udbtable.inpt_queue, inp_queue) {
+			if (inp->inp_socket->so_state & SS_CANTRCVMORE)
+				continue;
 #ifdef INET6
 			/* don't accept it if AF does not match */
 			if (ip6 && !(inp->inp_flags & INP_IPV6))
@@ -689,7 +692,7 @@ udp_input(struct mbuf *m, ...)
 		    IP_RECVDSTPORT, IPPROTO_IP);
 	}
 #ifdef PIPEX
-	if (inp->inp_pipex) {
+	if (pipex_enable && inp->inp_pipex) {
 		struct pipex_session *session;
 		int off = iphlen + sizeof(struct udphdr);
 		if ((session = pipex_l2tp_lookup_session(m, off)) != NULL) {
@@ -1015,7 +1018,7 @@ udp_output(struct mbuf *m, ...)
 	 * until ip_output() or hardware (if it exists).
 	 */
 	if (udpcksum) {
-		m->m_pkthdr.csum_flags |= M_UDPV4_CSUM_OUT;
+		m->m_pkthdr.csum_flags |= M_UDP_CSUM_OUT;
 		ui->ui_sum = in_cksum_phdr(ui->ui_src.s_addr,
 		    ui->ui_dst.s_addr, htons((u_int16_t)len +
 		    sizeof (struct udphdr) + IPPROTO_UDP));

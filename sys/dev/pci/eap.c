@@ -1,4 +1,4 @@
-/*      $OpenBSD: eap.c,v 1.41 2010/09/22 21:59:59 jakemsr Exp $ */
+/*      $OpenBSD: eap.c,v 1.43 2011/07/03 15:47:17 matthew Exp $ */
 /*	$NetBSD: eap.c,v 1.46 2001/09/03 15:07:37 reinoud Exp $ */
 
 /*
@@ -288,7 +288,7 @@ int
 eap_match(struct device *parent, void *match, void *aux)
 {
 	return (pci_matchbyid((struct pci_attach_args *)aux, eap_devices,
-	    sizeof(eap_devices)/sizeof(eap_devices[0])));
+	    nitems(eap_devices)));
 }
 
 int
@@ -298,8 +298,6 @@ eap_activate(struct device *self, int act)
 	int rv = 0;
 
 	switch (act) {
-	case DVACT_ACTIVATE:
-		break;
 	case DVACT_QUIESCE:
 		rv = config_activate_children(self, act);
 		break;
@@ -799,7 +797,7 @@ eap_allocmem(struct eap_softc *sc, size_t size, size_t align, struct eap_dma *p)
 
 	p->size = size;
 	error = bus_dmamem_alloc(sc->sc_dmatag, p->size, align, 0,
-	    p->segs, sizeof(p->segs)/sizeof(p->segs[0]),
+	    p->segs, nitems(p->segs),
 	    &p->nsegs, BUS_DMA_NOWAIT);
 	if (error)
 		return (error);

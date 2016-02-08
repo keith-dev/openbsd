@@ -1,4 +1,4 @@
-/*	$OpenBSD: filter.c,v 1.13 2010/01/13 01:07:34 claudio Exp $ */
+/*	$OpenBSD: filter.c,v 1.16 2011/06/22 08:44:02 sthen Exp $ */
 
 /*
  * Copyright (c) 2004, 2005 Camiel Dobbelaar, <cd@sentia.nl>
@@ -42,10 +42,6 @@
 int add_addr(struct sockaddr *, struct pf_pool *);
 int prepare_rule(u_int32_t, struct sockaddr *, struct sockaddr *,
     u_int16_t);
-int server_lookup4(struct sockaddr_in *, struct sockaddr_in *,
-    struct sockaddr_in *);
-int server_lookup6(struct sockaddr_in6 *, struct sockaddr_in6 *,
-    struct sockaddr_in6 *);
 
 static struct pfioc_rule	pfr;
 static struct pfioc_trans	pft;
@@ -70,7 +66,7 @@ add_addr(struct sockaddr *addr, struct pf_pool *pfp)
 }
 
 int
-add_nat(u_int32_t id, struct sockaddr *src, struct sockaddr *dst,
+add_nat(u_int32_t id, struct sockaddr *src, int s_rd, struct sockaddr *dst,
     u_int16_t d_port, struct sockaddr *nat, u_int16_t nat_range_low,
     u_int16_t nat_range_high)
 {
@@ -87,6 +83,8 @@ add_nat(u_int32_t id, struct sockaddr *src, struct sockaddr *dst,
 		return (-1);
 
 	pfr.rule.direction = PF_OUT;
+	/* XXX limit the source routing domain */
+	pfr.rule.rtableid = -1;
 	pfr.rule.nat.proxy_port[0] = nat_range_low;
 	pfr.rule.nat.proxy_port[1] = nat_range_high;
 	if (ioctl(dev, DIOCADDRULE, &pfr) == -1)
@@ -96,8 +94,8 @@ add_nat(u_int32_t id, struct sockaddr *src, struct sockaddr *dst,
 }
 
 int
-add_rdr(u_int32_t id, struct sockaddr *src, struct sockaddr *dst,
-    u_int16_t d_port, struct sockaddr *rdr, u_int16_t rdr_port)
+add_rdr(u_int32_t id, struct sockaddr *src, int s_rd, struct sockaddr *dst,
+    u_int16_t d_port, struct sockaddr *rdr, u_int16_t rdr_port, int d_rd)
 {
 	if (!src || !dst || !d_port || !rdr || !rdr_port ||
 	    (src->sa_family != rdr->sa_family)) {
@@ -112,6 +110,8 @@ add_rdr(u_int32_t id, struct sockaddr *src, struct sockaddr *dst,
 		return (-1);
 
 	pfr.rule.direction = PF_IN;
+	/* XXX limit the source routing domain */
+	pfr.rule.rtableid = d_rd;
 	pfr.rule.rdr.proxy_port[0] = rdr_port;
 	if (ioctl(dev, DIOCADDRULE, &pfr) == -1)
 		return (-1);
@@ -133,7 +133,7 @@ do_rollback(void)
 {
 	if (ioctl(dev, DIOCXROLLBACK, &pft) == -1)
 		return (-1);
-	
+
 	return (0);
 }
 
@@ -150,7 +150,7 @@ init_filter(char *opt_qname, char *opt_tagname, int opt_verbose)
 	else if (opt_verbose == 2)
 		rule_log = PF_LOG_ALL;
 
-	dev = open("/dev/pf", O_RDWR);	
+	dev = open("/dev/pf", O_RDWR);
 	if (dev == -1)
 		err(1, "open /dev/pf");
 	if (ioctl(dev, DIOCGETSTATUS, &status) == -1)
@@ -180,7 +180,7 @@ prepare_commit(u_int32_t id)
 
 	return (0);
 }
-	
+
 int
 prepare_rule(u_int32_t id, struct sockaddr *src,
     struct sockaddr *dst, u_int16_t d_port)
@@ -189,7 +189,7 @@ prepare_rule(u_int32_t id, struct sockaddr *src,
 
 	if ((src->sa_family != AF_INET && src->sa_family != AF_INET6) ||
 	    (src->sa_family != dst->sa_family)) {
-	    	errno = EPROTONOSUPPORT;
+		errno = EPROTONOSUPPORT;
 		return (-1);
 	}
 
@@ -248,78 +248,6 @@ prepare_rule(u_int32_t id, struct sockaddr *src,
 		strlcpy(pfr.rule.tagname, tagname,
                                sizeof pfr.rule.tagname);
 	}
-
-	return (0);
-}
-
-int
-server_lookup(struct sockaddr *client, struct sockaddr *proxy,
-    struct sockaddr *server)
-{
-	if (client->sa_family == AF_INET)
-		return (server_lookup4(satosin(client), satosin(proxy),
-		    satosin(server)));
-	
-	if (client->sa_family == AF_INET6)
-		return (server_lookup6(satosin6(client), satosin6(proxy),
-		    satosin6(server)));
-
-	errno = EPROTONOSUPPORT;
-	return (-1);
-}
-
-int
-server_lookup4(struct sockaddr_in *client, struct sockaddr_in *proxy,
-    struct sockaddr_in *server)
-{
-	struct pfioc_natlook pnl;
-
-	memset(&pnl, 0, sizeof pnl);
-	pnl.direction = PF_OUT;
-	pnl.af = AF_INET;
-	pnl.proto = IPPROTO_TCP;
-	memcpy(&pnl.saddr.v4, &client->sin_addr.s_addr, sizeof pnl.saddr.v4);
-	memcpy(&pnl.daddr.v4, &proxy->sin_addr.s_addr, sizeof pnl.daddr.v4);
-	pnl.sport = client->sin_port;
-	pnl.dport = proxy->sin_port;
-	
-	if (ioctl(dev, DIOCNATLOOK, &pnl) == -1)
-		return (-1);
-
-	memset(server, 0, sizeof(struct sockaddr_in));
-	server->sin_len = sizeof(struct sockaddr_in);
-	server->sin_family = AF_INET;
-	memcpy(&server->sin_addr.s_addr, &pnl.rdaddr.v4,
-	    sizeof server->sin_addr.s_addr);
-	server->sin_port = pnl.rdport;
-		
-	return (0);
-}
-
-int
-server_lookup6(struct sockaddr_in6 *client, struct sockaddr_in6 *proxy,
-    struct sockaddr_in6 *server)
-{
-	struct pfioc_natlook pnl;
-
-	memset(&pnl, 0, sizeof pnl);
-	pnl.direction = PF_OUT;
-	pnl.af = AF_INET6;
-	pnl.proto = IPPROTO_TCP;
-	memcpy(&pnl.saddr.v6, &client->sin6_addr.s6_addr, sizeof pnl.saddr.v6);
-	memcpy(&pnl.daddr.v6, &proxy->sin6_addr.s6_addr, sizeof pnl.daddr.v6);
-	pnl.sport = client->sin6_port;
-	pnl.dport = proxy->sin6_port;
-	
-	if (ioctl(dev, DIOCNATLOOK, &pnl) == -1)
-		return (-1);
-
-	memset(server, 0, sizeof(struct sockaddr_in6));
-	server->sin6_len = sizeof(struct sockaddr_in6);
-	server->sin6_family = AF_INET6;
-	memcpy(&server->sin6_addr.s6_addr, &pnl.rdaddr.v6,
-	    sizeof server->sin6_addr);
-	server->sin6_port = pnl.rdport;
 
 	return (0);
 }

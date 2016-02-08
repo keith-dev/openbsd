@@ -1,4 +1,4 @@
-#	$OpenBSD: install.md,v 1.26 2011/02/19 10:18:03 miod Exp $
+#	$OpenBSD: install.md,v 1.29 2011/07/06 20:02:16 halex Exp $
 #
 #
 # Copyright (c) 1996 The NetBSD Foundation, Inc.
@@ -55,12 +55,6 @@ md_installboot() {
 	if [[ -f /mnt/bsd.rd.${IPARCH} ]]; then
 		mv /mnt/bsd.rd.${IPARCH} /mnt/bsd.rd
 	fi
-
-	if [[ -f /mnt/bsd.mp ]] && ((NCPU > 1)); then
-		echo "Multiprocessor machine; using bsd.mp instead of bsd."
-		mv /mnt/bsd /mnt/bsd.sp 2>/dev/null
-		mv /mnt/bsd.mp /mnt/bsd
-	fi
 }
 
 md_prep_disklabel()
@@ -74,7 +68,7 @@ md_prep_disklabel()
 	0)	/usr/mdec/sgivol $_disk
 	cat <<__EOT
 
-A SGI Volume Header was found on the disk. Normally you want to replace it
+An SGI Volume Header was found on the disk. Normally you want to replace it
 with a new Volume Header suitable for installing OpenBSD. Doing this will
 of course delete all data currently on the disk.
 __EOT
@@ -160,7 +154,7 @@ __EOT
 			c*|C*)	break ;;
 			*)	continue ;;
 			esac
-			disklabel -f $_f $_op -A $_disk
+			disklabel $FSTABFLAG $_f $_op -A $_disk
 			return
 		done
 	fi
@@ -182,7 +176,7 @@ boot loader will not be able to locate and load the kernel.
 Do not change any parameters except the partition layout and the label name.
 
 __EOT
-	disklabel -c -f /tmp/fstab.$_disk -E $_disk
+	disklabel -c $FSTABFLAG /tmp/fstab.$_disk -E $_disk
 }
 
 md_congrats() {

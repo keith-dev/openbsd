@@ -1,4 +1,4 @@
-/*	$OpenBSD: parse.y,v 1.20 2011/01/21 11:56:00 reyk Exp $	*/
+/*	$OpenBSD: parse.y,v 1.22 2011/05/27 12:01:02 reyk Exp $	*/
 /*	$vantronix: parse.y,v 1.22 2010/06/03 11:08:34 reyk Exp $	*/
 
 /*
@@ -149,9 +149,9 @@ const struct ipsec_xf ipsecencxfs[] = {
 	{ "3des",		IKEV2_XFORMENCR_3DES,		24 },
 	{ "3des-cbc",		IKEV2_XFORMENCR_3DES,		24 },
 	{ "aes-128",		IKEV2_XFORMENCR_AES_CBC,	16, 16 },
-	{ "aes-192",		IKEV2_XFORMENCR_AES_CBC, 	24, 24 },
-	{ "aes-256",		IKEV2_XFORMENCR_AES_CBC, 	32, 32 },
-	{ "aes-ctr",		IKEV2_XFORMENCR_AES_CTR, 	16, 16, 4 },
+	{ "aes-192",		IKEV2_XFORMENCR_AES_CBC,	24, 24 },
+	{ "aes-256",		IKEV2_XFORMENCR_AES_CBC,	32, 32 },
+	{ "aes-ctr",		IKEV2_XFORMENCR_AES_CTR,	16, 16, 4 },
 	{ "aes-128-gcm",	IKEV2_XFORMENCR_AES_GCM_16,	16, 16, 4, 1 },
 	{ "aes-192-gcm",	IKEV2_XFORMENCR_AES_GCM_16,	24, 24, 4, 1 },
 	{ "aes-256-gcm",	IKEV2_XFORMENCR_AES_GCM_16,	32, 32, 4, 1 },
@@ -713,7 +713,7 @@ transform	: AUTHXF STRING			{
 ike_sa		: /* empty */	{
 			$$ = NULL;
 		}
-		| IKESA 		{
+		| IKESA		{
 			encxfs = ikeencxfs;
 		} transforms	{
 			if (($$ = calloc(1, sizeof(*$$))) == NULL)
@@ -725,9 +725,9 @@ ike_sa		: /* empty */	{
 child_sa	: /* empty */	{
 			$$ = NULL;
 		}
-		| CHILDSA 		{
+		| CHILDSA	{
 			encxfs = ipsecencxfs;
-		} transforms		{
+		} transforms	{
 			if (($$ = calloc(1, sizeof(*$$))) == NULL)
 				err(1, "child_sa: calloc");
 			$$->xfs = $3;
@@ -2122,7 +2122,7 @@ print_policy(struct iked_policy *pol)
 			print_verbose(" inet6");
 	}
 
-	TAILQ_FOREACH(flow, &pol->pol_flows, flow_entry) {
+	RB_FOREACH(flow, iked_flows, &pol->pol_flows) {
 		print_verbose(" from %s",
 		    print_host(&flow->flow_src.addr, NULL, 0));
 		if (flow->flow_src.addr_af != AF_UNSPEC &&
@@ -2411,7 +2411,7 @@ create_ike(char *name, int af, u_int8_t ipproto, struct ipsec_hosts *hosts,
 		pol.pol_lifetime = deflifetime;
 
 	TAILQ_INIT(&pol.pol_proposals);
-	TAILQ_INIT(&pol.pol_flows);
+	RB_INIT(&pol.pol_flows);
 
 	prop[0].prop_id = ++pol.pol_nproposals;
 	prop[0].prop_protoid = IKEV2_SAPROTO_IKE;
@@ -2505,7 +2505,7 @@ create_ike(char *name, int af, u_int8_t ipproto, struct ipsec_hosts *hosts,
 		flows[j].flow_dst.addr_port = hosts->dport;
 
 		pol.pol_nflows++;
-		TAILQ_INSERT_TAIL(&pol.pol_flows, &flows[j], flow_entry);
+		RB_INSERT(iked_flows, &pol.pol_flows, &flows[j]);
 	}
 
 	for (j = 0, ipa = ikecfg; ipa; ipa = ipa->next, j++) {

@@ -1,4 +1,4 @@
-/*	$OpenBSD: stddef.h,v 1.10 2009/09/22 21:40:02 jsg Exp $	*/
+/*	$OpenBSD: stddef.h,v 1.12 2011/07/03 18:51:01 jsg Exp $	*/
 /*	$NetBSD: stddef.h,v 1.4 1994/10/26 00:56:26 cgd Exp $	*/
 
 /*-
@@ -67,8 +67,10 @@ typedef	__mbstate_t	mbstate_t;
 #ifndef	NULL
 #ifdef 	__GNUG__
 #define NULL	__null
-#else
+#elif defined(__cplusplus)
 #define	NULL	0L
+#else
+#define	NULL	((void *)0)
 #endif
 #endif
 

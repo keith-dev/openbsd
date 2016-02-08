@@ -1,4 +1,4 @@
-/*	$OpenBSD: fifo_vnops.c,v 1.34 2010/12/21 20:14:43 thib Exp $	*/
+/*	$OpenBSD: fifo_vnops.c,v 1.36 2011/07/02 22:20:08 nicm Exp $	*/
 /*	$NetBSD: fifo_vnops.c,v 1.18 1996/03/16 23:52:42 christos Exp $	*/
 
 /*
@@ -62,7 +62,6 @@ struct fifoinfo {
 };
 
 struct vops fifo_vops = {
-	.vop_default	= eopnotsupp,
 	.vop_lookup	= vop_generic_lookup,
 	.vop_create	= fifo_badop,
 	.vop_mknod	= fifo_badop,
@@ -478,7 +477,7 @@ fifo_kqfilter(void *v)
 		sb = &so->so_snd;
 		break;
 	default:
-		return (1);
+		return (EINVAL);
 	}
 
 	ap->a_kn->kn_hook = so;

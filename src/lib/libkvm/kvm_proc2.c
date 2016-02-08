@@ -1,4 +1,4 @@
-/*	$OpenBSD: kvm_proc2.c,v 1.3 2010/07/26 01:56:27 guenther Exp $	*/
+/*	$OpenBSD: kvm_proc2.c,v 1.8 2011/07/05 04:48:01 guenther Exp $	*/
 /*	$NetBSD: kvm_proc.c,v 1.30 1999/03/24 05:50:50 mrg Exp $	*/
 /*-
  * Copyright (c) 1998 The NetBSD Foundation, Inc.
@@ -77,6 +77,7 @@
 #include <sys/stat.h>
 #include <sys/ioctl.h>
 #include <sys/tty.h>
+#include <sys/signalvar.h>
 #include <stddef.h>
 #include <stdlib.h>
 #include <string.h>
@@ -105,7 +106,7 @@ static int
 kvm_proclist(kvm_t *kd, int op, int arg, struct proc *p,
     char *bp, int maxcnt, size_t esize)
 {
-	struct kinfo_proc2 kp;
+	struct kinfo_proc kp;
 	struct session sess;
 	struct pcred pcred;
 	struct ucred ucred;
@@ -113,6 +114,7 @@ kvm_proclist(kvm_t *kd, int op, int arg, struct proc *p,
 	struct process process, process2;
 	struct pgrp pgrp;
 	struct tty tty;
+	struct sigacts sa, *sap;
 	struct vmspace vm, *vmp;
 	struct plimit limits, *limp;
 	struct pstats pstats, *ps;
@@ -188,6 +190,16 @@ kvm_proclist(kvm_t *kd, int op, int arg, struct proc *p,
 		}
 		else
 			leader_pid = 0;
+		if (proc.p_sigacts) {
+			if (KREAD(kd, (u_long)proc.p_sigacts, &sa)) {
+				_kvm_err(kd, kd->program, "can't read sigacts at %x",
+				    proc.p_sigacts);
+				return (-1);
+			}
+			sap = &sa;
+		}
+		else
+			sap = NULL;
 
 		switch (op) {
 		case KERN_PROC_PID:
@@ -265,8 +277,8 @@ kvm_proclist(kvm_t *kd, int op, int arg, struct proc *p,
 			ps = NULL;
 
 #define do_copy_str(_d, _s, _l)	kvm_read(kd, (u_long)(_s), (_d), (_l)-1)
-		FILL_KPROC2(&kp, do_copy_str, &proc, &process, &pcred, &ucred,
-		    &pgrp, p, proc.p_p, &sess, vmp, limp, ps);
+		FILL_KPROC(&kp, do_copy_str, &proc, &process, &pcred, &ucred,
+		    &pgrp, p, proc.p_p, &sess, vmp, limp, ps, sap);
 #undef do_copy_str
 
 		/* stuff that's too painful to generalize into the macros */
@@ -295,8 +307,8 @@ kvm_proclist(kvm_t *kd, int op, int arg, struct proc *p,
 	return (cnt);
 }
 
-struct kinfo_proc2 *
-kvm_getproc2(kvm_t *kd, int op, int arg, size_t esize, int *cnt)
+struct kinfo_proc *
+kvm_getprocs(kvm_t *kd, int op, int arg, size_t esize, int *cnt)
 {
 	int mib[6], st, nprocs;
 	size_t size;
@@ -304,36 +316,36 @@ kvm_getproc2(kvm_t *kd, int op, int arg, size_t esize, int *cnt)
 	if ((ssize_t)esize < 0)
 		return (NULL);
 
-	if (kd->procbase2 != NULL) {
-		free(kd->procbase2);
+	if (kd->procbase != NULL) {
+		free(kd->procbase);
 		/*
 		 * Clear this pointer in case this call fails.  Otherwise,
 		 * kvm_close() will free it again.
 		 */
-		kd->procbase2 = 0;
+		kd->procbase = 0;
 	}
 
 	if (ISALIVE(kd)) {
 		size = 0;
 		mib[0] = CTL_KERN;
-		mib[1] = KERN_PROC2;
+		mib[1] = KERN_PROC;
 		mib[2] = op;
 		mib[3] = arg;
 		mib[4] = esize;
 		mib[5] = 0;
 		st = sysctl(mib, 6, NULL, &size, NULL, 0);
 		if (st == -1) {
-			_kvm_syserr(kd, kd->program, "kvm_getproc2");
+			_kvm_syserr(kd, kd->program, "kvm_getprocs");
 			return (NULL);
 		}
 
 		mib[5] = size / esize;
-		kd->procbase2 = _kvm_malloc(kd, size);
-		if (kd->procbase2 == 0)
+		kd->procbase = _kvm_malloc(kd, size);
+		if (kd->procbase == 0)
 			return (NULL);
-		st = sysctl(mib, 6, kd->procbase2, &size, NULL, 0);
+		st = sysctl(mib, 6, kd->procbase, &size, NULL, 0);
 		if (st == -1) {
-			_kvm_syserr(kd, kd->program, "kvm_getproc2");
+			_kvm_syserr(kd, kd->program, "kvm_getprocs");
 			return (NULL);
 		}
 		nprocs = size / esize;
@@ -343,9 +355,9 @@ kvm_getproc2(kvm_t *kd, int op, int arg, size_t esize, int *cnt)
 		struct proc *p;
 		char *bp;
 
-		if (esize > sizeof(struct kinfo_proc2)) {
+		if (esize > sizeof(struct kinfo_proc)) {
 			_kvm_syserr(kd, kd->program,
-			    "kvm_getproc2: unknown fields requested: libkvm out of date?");
+			    "kvm_getprocs: unknown fields requested: libkvm out of date?");
 			return (NULL);
 		}
 
@@ -367,10 +379,10 @@ kvm_getproc2(kvm_t *kd, int op, int arg, size_t esize, int *cnt)
 			return (NULL);
 		}
 
-		kd->procbase2 = _kvm_malloc(kd, maxprocs * esize);
-		if (kd->procbase2 == 0)
+		kd->procbase = _kvm_malloc(kd, maxprocs * esize);
+		if (kd->procbase == 0)
 			return (NULL);
-		bp = (char *)kd->procbase2;
+		bp = (char *)kd->procbase;
 
 		/* allproc */
 		if (KREAD(kd, nl[1].n_value, &p)) {
@@ -392,6 +404,12 @@ kvm_getproc2(kvm_t *kd, int op, int arg, size_t esize, int *cnt)
 			nprocs += i;
 	}
 	*cnt = nprocs;
-	return (kd->procbase2);
+	return (kd->procbase);
+}
+
+struct kinfo_proc *
+kvm_getproc2(kvm_t *kd, int op, int arg, size_t esize, int *cnt)
+{
+	return (kvm_getprocs(kd, op, arg, esize, cnt));
 }
 

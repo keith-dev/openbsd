@@ -1,4 +1,4 @@
-/*	$OpenBSD: proc.h,v 1.132 2010/07/26 01:56:27 guenther Exp $	*/
+/*	$OpenBSD: proc.h,v 1.141 2011/07/07 18:00:33 guenther Exp $	*/
 /*	$NetBSD: proc.h,v 1.44 1996/04/22 01:23:21 christos Exp $	*/
 
 /*-
@@ -164,6 +164,7 @@ struct process {
 	struct	plimit *ps_limit;	/* Process limits. */
 	struct	pgrp *ps_pgrp;		/* Pointer to process group. */
 	u_int	ps_rtableid;		/* Process routing table/domain. */
+	char	ps_nice;		/* Process "nice" value. */
 
 /* End area that is copied on creation. */
 #define ps_endcopy	ps_refcnt
@@ -182,7 +183,6 @@ struct process {
  * OR them together for export.
  */
 #define	PS_CONTROLT	_P_CONTROLT
-#define	PS_NOCLDSTOP	_P_NOCLDSTOP
 #define	PS_PPWAIT	_P_PPWAIT
 #define	PS_PROFIL	_P_PROFIL
 #define	PS_SUGID	_P_SUGID
@@ -190,8 +190,8 @@ struct process {
 #define	PS_TRACED	_P_TRACED
 #define	PS_WAITED	_P_WAITED
 #define	PS_EXEC		_P_EXEC
+#define	PS_ISPWAIT	_P_ISPWAIT
 #define	PS_SUGIDEXEC	_P_SUGIDEXEC
-#define	PS_NOCLDWAIT	_P_NOCLDWAIT
 #define	PS_NOZOMBIE	_P_NOZOMBIE
 #define	PS_INEXEC	_P_INEXEC
 #define	PS_SYSTRACE	_P_SYSTRACE
@@ -270,6 +270,7 @@ struct proc {
 					/* NULL. Malloc type M_EMULDATA */
 
 	sigset_t p_sigdivert;		/* Signals to be diverted to thread. */
+	struct	sigaltstack p_sigstk;	/* sp & on stack state variable */
 
 /* End area that is zeroed on creation. */
 #define	p_endzero	p_startcopy
@@ -278,12 +279,9 @@ struct proc {
 #define	p_startcopy	p_sigmask
 
 	sigset_t p_sigmask;	/* Current signal mask. */
-	sigset_t p_sigignore;	/* Signals being ignored. */
-	sigset_t p_sigcatch;	/* Signals being caught by user. */
 
 	u_char	p_priority;	/* Process priority. */
-	u_char	p_usrpri;	/* User-priority based on p_cpu and p_nice. */
-	char	p_nice;		/* Process "nice" value. */
+	u_char	p_usrpri;	/* User-priority based on p_cpu and ps_nice. */
 	char	p_comm[MAXCOMLEN+1];
 
 	struct	emul *p_emul;		/* Emulation information */
@@ -291,6 +289,12 @@ struct proc {
 
 /* End area that is copied on creation. */
 #define	p_endcopy	p_addr
+
+	sigset_t p_oldmask;	/* Saved mask from before sigpause */
+	union sigval p_sigval;	/* For core dump/debugger XXX */
+	long	p_sicode;	/* For core dump/debugger XXX */
+	int	p_sisig;	/* For core dump/debugger XXX */
+	int	p_sitype;	/* For core dump/debugger XXX */
 
 	struct	user *p_addr;	/* Kernel virtual addr of u-area */
 	struct	mdproc p_md;	/* Any machine-dependent fields. */
@@ -317,33 +321,32 @@ struct proc {
  */
 #define	_P_CONTROLT	0x000002	/* Has a controlling terminal. */
 #define	P_INMEM		0x000004	/* Loaded into memory. UNUSED */
-#define	P_NOCLDSTOP	0x000008	/* No SIGCHLD when children stop. */
-#define	P_PPWAIT	0x000010	/* Parent waits for child exec/exit. */
+#define	P_SIGSUSPEND	0x000008	/* Need to restore before-suspend mask*/
+#define	_P_PPWAIT	0x000010	/* Parent waits for exec/exit. */
 #define	P_PROFIL	0x000020	/* Has started profiling. */
 #define	P_SELECT	0x000040	/* Selecting; wakeup/waiting danger. */
 #define	P_SINTR		0x000080	/* Sleep is interruptible. */
-#define	P_SUGID		0x000100	/* Had set id privs since last exec. */
+#define	_P_SUGID	0x000100	/* Had set id privs since last exec. */
 #define	P_SYSTEM	0x000200	/* No sigs, stats or swapping. */
 #define	P_TIMEOUT	0x000400	/* Timing out during sleep. */
 #define	P_TRACED	0x000800	/* Debugged process being traced. */
 #define	P_WAITED	0x001000	/* Debugging proc has waited for child. */
 /* XXX - Should be merged with INEXEC */
 #define	P_WEXIT		0x002000	/* Working on exiting. */
-#define	P_EXEC		0x004000	/* Process called exec. */
+#define	_P_EXEC		0x004000	/* Process called exec. */
 
 /* Should be moved to machine-dependent areas. */
 #define	P_OWEUPC	0x008000	/* Owe proc an addupc() at next ast. */
+#define	_P_ISPWAIT	0x010000	/* Is parent of PPWAIT child. */
 
 /* XXX Not sure what to do with these, yet. */
 #define	P_SSTEP		0x020000	/* proc needs single-step fixup ??? */
-#define	P_SUGIDEXEC	0x040000	/* last execve() was set[ug]id */
+#define	_P_SUGIDEXEC	0x040000	/* last execve() was set[ug]id */
 
-#define	P_NOCLDWAIT	0x080000	/* Let pid 1 wait for my children */
 #define	P_NOZOMBIE	0x100000	/* Pid 1 waits for me instead of dad */
 #define P_INEXEC	0x200000	/* Process is doing an exec right now */
 #define P_SYSTRACE	0x400000	/* Process system call tracing active*/
 #define P_CONTINUED	0x800000	/* Proc has continued from a stopped state. */
-#define P_BIGLOCK	0x2000000	/* Process needs kernel "big lock" to run */
 #define	P_THREAD	0x4000000	/* Only a thread, not a real process */
 #define	P_IGNEXITRV	0x8000000	/* For thread kills */
 #define	P_SOFTDEP	0x10000000	/* Stuck processing softdep worklist */
@@ -352,12 +355,16 @@ struct proc {
 
 #ifndef _KERNEL
 #define	P_CONTROLT	_P_CONTROLT
+#define	P_PPWAIT	_P_PPWAIT
+#define	P_SUGID		_P_SUGID
+#define	P_EXEC		_P_EXEC
+#define	P_SUGIDEXEC	_P_SUGIDEXEC
 #endif
 
 #define	P_BITS \
-    ("\20\02CONTROLT\03INMEM\04NOCLDSTOP\05PPWAIT\06PROFIL\07SELECT" \
+    ("\20\02CONTROLT\03INMEM\04SIGPAUSE\05PPWAIT\06PROFIL\07SELECT" \
      "\010SINTR\011SUGID\012SYSTEM\013TIMEOUT\014TRACED\015WAITED\016WEXIT" \
-     "\017EXEC\020PWEUPC\022SSTEP\023SUGIDEXEC\024NOCLDWAIT" \
+     "\017EXEC\020PWEUPC\021ISPWAIT\022SSTEP\023SUGIDEXEC" \
      "\025NOZOMBIE\026INEXEC\027SYSTRACE\030CONTINUED\032BIGLOCK" \
      "\033THREAD\034IGNEXITRV\035SOFTDEP\036STOPPED\037CPUPEG")
 
@@ -470,6 +477,7 @@ void	pgdelete(struct pgrp *);
 void	procinit(void);
 void	resetpriority(struct proc *);
 void	setrunnable(struct proc *);
+void	endtsleep(void *);
 void	unsleep(struct proc *);
 void	reaper(void);
 void	exit1(struct proc *, int, int);

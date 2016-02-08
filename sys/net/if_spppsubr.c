@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_spppsubr.c,v 1.84 2011/01/11 15:42:05 deraadt Exp $	*/
+/*	$OpenBSD: if_spppsubr.c,v 1.94 2011/07/07 00:08:04 henning Exp $	*/
 /*
  * Synchronous PPP/Cisco link level subroutines.
  * Keepalive protocol implemented in both Cisco and PPP modes.
@@ -47,6 +47,7 @@
 #include <sys/syslog.h>
 #include <sys/malloc.h>
 #include <sys/mbuf.h>
+#include <sys/workq.h>
 
 #if defined (__OpenBSD__)
 #include <sys/timeout.h>
@@ -410,8 +411,7 @@ HIDE void sppp_print_string(const char *p, u_short len);
 HIDE void sppp_qflush(struct ifqueue *ifq);
 int sppp_update_gw_walker(struct radix_node *rn, void *arg, u_int);
 void sppp_update_gw(struct ifnet *ifp);
-HIDE void sppp_set_ip_addrs(struct sppp *sp, u_int32_t myaddr,
-			      u_int32_t hisaddr);
+HIDE void sppp_set_ip_addrs(void *, void *);
 HIDE void sppp_clear_ip_addrs(struct sppp *sp);
 HIDE void sppp_set_phase(struct sppp *sp);
 
@@ -540,7 +540,7 @@ sppp_input(struct ifnet *ifp, struct mbuf *m)
 
 	/* preserve the alignment */
 	if (m->m_len < m->m_pkthdr.len) {
-		m = m_pullup2(m, m->m_pkthdr.len);
+		m = m_pullup(m, m->m_pkthdr.len);
 		if (m == NULL) {
 			if (debug)
 				log(LOG_DEBUG,
@@ -933,8 +933,8 @@ sppp_attach(struct ifnet *ifp)
 	sp->pp_if.if_type = IFT_PPP;
 	sp->pp_if.if_output = sppp_output;
 	IFQ_SET_MAXLEN(&sp->pp_if.if_snd, 50);
-	sp->pp_fastq.ifq_maxlen = 50;
-	sp->pp_cpq.ifq_maxlen = 50;
+	IFQ_SET_MAXLEN(&sp->pp_fastq, 50);
+	IFQ_SET_MAXLEN(&sp->pp_cpq, 50);
 	sp->pp_loopcnt = 0;
 	sp->pp_alivecnt = 0;
 	sp->pp_last_activity = 0;
@@ -944,7 +944,6 @@ sppp_attach(struct ifnet *ifp)
 	sp->pp_phase = PHASE_DEAD;
 	sp->pp_up = lcp.Up;
 	sp->pp_down = lcp.Down;
-
 
 	for (i = 0; i < IDX_COUNT; i++)
 		timeout_set(&sp->ch[i], (cps[i])->TO, (void *)sp);
@@ -1012,7 +1011,7 @@ sppp_isempty(struct ifnet *ifp)
 	int empty, s;
 
 	s = splnet();
-	empty = !sp->pp_fastq.ifq_head && !sp->pp_cpq.ifq_head &&
+	empty = IF_IS_EMPTY(&sp->pp_fastq) && IF_IS_EMPTY(&sp->pp_cpq) &&
 		IFQ_IS_EMPTY(&sp->pp_if.if_snd);
 	splx(s);
 	return (empty);
@@ -1057,12 +1056,14 @@ sppp_pick(struct ifnet *ifp)
 	int s;
 
 	s = splnet();
-	m = sp->pp_cpq.ifq_head;
+	IF_POLL(&sp->pp_cpq, m);
 	if (m == NULL &&
 	    (sp->pp_phase == PHASE_NETWORK ||
-	     (sp->pp_flags & PP_CISCO) != 0))
-		if ((m = sp->pp_fastq.ifq_head) == NULL)
+	     (sp->pp_flags & PP_CISCO) != 0)) {
+		IF_POLL(&sp->pp_fastq, m);
+		if ((m) == NULL)
 			IFQ_POLL(&sp->pp_if.if_snd, m);
+	}
 	splx (s);
 	return (m);
 }
@@ -3024,19 +3025,38 @@ sppp_ipcp_RCN_nak(struct sppp *sp, struct lcp_header *h, int len)
 		addlog("\n");
 }
 
+struct sppp_set_ip_addrs_args {
+	struct sppp *sp;
+	u_int32_t myaddr;
+	u_int32_t hisaddr;
+};
+
 HIDE void
 sppp_ipcp_tlu(struct sppp *sp)
 {
+	struct ifnet *ifp = &sp->pp_if;
+	struct sppp_set_ip_addrs_args *args;
+
+	args = malloc(sizeof(*args), M_TEMP, M_NOWAIT);
+	if (args == NULL)
+		return;
+
+	args->sp = sp;
+
 	/* we are up. Set addresses and notify anyone interested */
-	u_int32_t myaddr, hisaddr;
-	sppp_get_ip_addrs(sp, &myaddr, &hisaddr, 0);
+	sppp_get_ip_addrs(sp, &args->myaddr, &args->hisaddr, 0);
 	if ((sp->ipcp.flags & IPCP_MYADDR_DYN) &&
 	    (sp->ipcp.flags & IPCP_MYADDR_SEEN))
-		myaddr = sp->ipcp.req_myaddr;
+		args->myaddr = sp->ipcp.req_myaddr;
 	if ((sp->ipcp.flags & IPCP_HISADDR_DYN) &&
 	    (sp->ipcp.flags & IPCP_HISADDR_SEEN))
-		hisaddr = sp->ipcp.req_hisaddr;
-	sppp_set_ip_addrs(sp, myaddr, hisaddr);
+		args->hisaddr = sp->ipcp.req_hisaddr;
+
+	if (workq_add_task(NULL, 0, sppp_set_ip_addrs, args, NULL)) {
+		free(args, M_TEMP);
+		printf("%s: workq_add_task failed, cannot set "
+		    "addresses\n", ifp->if_xname);
+	}
 }
 
 HIDE void
@@ -3325,7 +3345,7 @@ sppp_ipv6cp_RCR(struct sppp *sp, struct lcp_header *h, int len)
 				continue;
 			}
 
-			memset(&suggestaddr, 0, sizeof(&suggestaddr));
+			memset(&suggestaddr, 0, sizeof(suggestaddr));
 			if (collision && nohisaddr) {
 				/* collision, hisaddr unknown - Conf-Rej */
 				type = CONF_REJ;
@@ -3777,8 +3797,7 @@ sppp_chap_input(struct sppp *sp, struct mbuf *m)
 		/* Compute reply value. */
 		MD5Init(&ctx);
 		MD5Update(&ctx, &h->ident, 1);
-		MD5Update(&ctx, sp->myauth.secret,
-			  strlen(sp->myauth.secret));
+		MD5Update(&ctx, sp->myauth.secret, strlen(sp->myauth.secret));
 		MD5Update(&ctx, value, value_len);
 		MD5Final(digest, &ctx);
 		dsize = sizeof digest;
@@ -3896,8 +3915,7 @@ sppp_chap_input(struct sppp *sp, struct mbuf *m)
 
 		MD5Init(&ctx);
 		MD5Update(&ctx, &h->ident, 1);
-		MD5Update(&ctx, sp->hisauth.secret,
-			  strlen(sp->hisauth.secret));
+		MD5Update(&ctx, sp->hisauth.secret, strlen(sp->hisauth.secret));
 		MD5Update(&ctx, sp->chap_challenge, AUTHCHALEN);
 		MD5Final(digest, &ctx);
 
@@ -4518,16 +4536,7 @@ sppp_auth_send(const struct cp *cp, struct sppp *sp,
 HIDE void
 sppp_qflush(struct ifqueue *ifq)
 {
-	struct mbuf *m, *n;
-
-	n = ifq->ifq_head;
-	while ((m = n)) {
-		n = m->m_act;
-		m_freem (m);
-	}
-	ifq->ifq_head = 0;
-	ifq->ifq_tail = 0;
-	ifq->ifq_len = 0;
+	IF_PURGE(ifq);
 }
 
 /*
@@ -4689,15 +4698,27 @@ sppp_update_gw(struct ifnet *ifp)
 }
 
 /*
+ * Work queue task adding addresses from process context.
  * If an address is 0, leave it the way it is.
  */
 HIDE void
-sppp_set_ip_addrs(struct sppp *sp, u_int32_t myaddr, u_int32_t hisaddr)
+sppp_set_ip_addrs(void *arg1, void *arg2)
 {
-	STDDCL;
+	struct sppp_set_ip_addrs_args *args = arg1;
+	struct sppp *sp = args->sp;
+	u_int32_t myaddr = args->myaddr;
+	u_int32_t hisaddr = args->hisaddr;
+	struct ifnet *ifp = &sp->pp_if;
+	int debug = ifp->if_flags & IFF_DEBUG;
  	struct ifaddr *ifa;
  	struct sockaddr_in *si;
 	struct sockaddr_in *dest;
+	int s;
+	
+	/* Arguments are now on local stack so free temporary storage. */
+	free(args, M_TEMP);
+
+	s = splsoftnet();
 
 	/*
 	 * Pick the first AF_INET address from the list,
@@ -4748,10 +4769,12 @@ sppp_set_ip_addrs(struct sppp *sp, u_int32_t myaddr, u_int32_t hisaddr)
 		if (debug && error) {
 			log(LOG_DEBUG, SPP_FMT "sppp_set_ip_addrs: in_ifinit "
 			" failed, error=%d\n", SPP_ARGS(ifp), error);
+			splx(s);
 			return;
 		}
 		sppp_update_gw(ifp);
 	}
+	splx(s);
 }
 
 /*
@@ -5091,6 +5114,10 @@ sppp_set_params(struct sppp *sp, struct ifreq *ifr)
 				strlcpy(p, spa->secret, len);
 				if (auth->secret != NULL)
 					free(auth->secret, M_DEVBUF);
+				auth->secret = p;
+			} else if (!auth->secret) {
+				p = malloc(1, M_DEVBUF, M_WAITOK);
+				p[0] = '\0';
 				auth->secret = p;
 			}
 		}

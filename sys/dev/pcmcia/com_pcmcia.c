@@ -1,4 +1,4 @@
-/*	$OpenBSD: com_pcmcia.c,v 1.51 2010/08/30 20:33:18 deraadt Exp $	*/
+/*	$OpenBSD: com_pcmcia.c,v 1.53 2011/07/03 15:47:17 matthew Exp $	*/
 /*	$NetBSD: com_pcmcia.c,v 1.15 1998/08/22 17:47:58 msaitoh Exp $	*/
 
 /*
@@ -189,8 +189,7 @@ com_pcmcia_match(parent, match, aux)
 		return 1;
 
 	/* 3. Is this a card we know about? */
-	for (i = 0; i < sizeof(com_pcmcia_prod)/sizeof(com_pcmcia_prod[0]);
-	    i++) {
+	for (i = 0; i < nitems(com_pcmcia_prod); i++) {
 		for (j = 0; j < 4; j++)
 			if (com_pcmcia_prod[i].cis1_info[j] &&
 			    pa->card->cis1_info[j] &&
@@ -212,11 +211,6 @@ com_pcmcia_activate(dev, act)
 	struct com_pcmcia_softc *sc = (void *) dev;
 
 	switch (act) {
-	case DVACT_ACTIVATE:
-		pcmcia_function_enable(sc->sc_pf);
-		sc->sc_ih = pcmcia_intr_establish(sc->sc_pf, IPL_TTY,
-		    comintr, sc, sc->sc_com.sc_dev.dv_xname);
-		break;
 	case DVACT_SUSPEND:
 		if (sc->sc_ih)
 			pcmcia_intr_disestablish(sc->sc_pf, sc->sc_ih);

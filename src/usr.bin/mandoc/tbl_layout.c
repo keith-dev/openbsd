@@ -1,4 +1,4 @@
-/*	$Id: tbl_layout.c,v 1.7 2011/01/16 01:11:50 schwarze Exp $ */
+/*	$Id: tbl_layout.c,v 1.9 2011/05/29 21:22:18 schwarze Exp $ */
 /*
  * Copyright (c) 2009, 2010, 2011 Kristaps Dzonsons <kristaps@bsd.lv>
  *
@@ -68,6 +68,23 @@ mods(struct tbl_node *tbl, struct tbl_cell *cp,
 	char		 buf[5];
 	int		 i;
 
+	/* Not all types accept modifiers. */
+
+	switch (cp->pos) {
+	case (TBL_CELL_DOWN):
+		/* FALLTHROUGH */
+	case (TBL_CELL_HORIZ):
+		/* FALLTHROUGH */
+	case (TBL_CELL_DHORIZ):
+		/* FALLTHROUGH */
+	case (TBL_CELL_VERT):
+		/* FALLTHROUGH */
+	case (TBL_CELL_DVERT):
+		return(1);
+	default:
+		break;
+	}
+
 mod:
 	/* 
 	 * XXX: since, at least for now, modifiers are non-conflicting
@@ -100,7 +117,8 @@ mod:
 			(*pos)++;
 			goto mod;
 		}
-		TBL_MSG(tbl, MANDOCERR_TBLLAYOUT, ln, *pos);
+		mandoc_msg(MANDOCERR_TBLLAYOUT, 
+				tbl->parse, ln, *pos, NULL);
 		return(0);
 	}
 
@@ -117,7 +135,8 @@ mod:
 		/* No greater than 4 digits. */
 
 		if (4 == i) {
-			TBL_MSG(tbl, MANDOCERR_TBLLAYOUT, ln, *pos);
+			mandoc_msg(MANDOCERR_TBLLAYOUT, tbl->parse,
+					ln, *pos, NULL);
 			return(0);
 		}
 
@@ -156,7 +175,8 @@ mod:
 		(*pos)--;
 		break;
 	default:
-		TBL_MSG(tbl, MANDOCERR_TBLLAYOUT, ln, *pos - 1);
+		mandoc_msg(MANDOCERR_TBLLAYOUT, tbl->parse,
+				ln, *pos - 1, NULL);
 		return(0);
 	}
 
@@ -171,7 +191,8 @@ mod:
 		break;
 	}
 
-	TBL_MSG(tbl, MANDOCERR_TBLLAYOUT, ln, *pos - 1);
+	mandoc_msg(MANDOCERR_TBLLAYOUT, tbl->parse,
+			ln, *pos - 1, NULL);
 	return(0);
 }
 
@@ -189,7 +210,8 @@ cell(struct tbl_node *tbl, struct tbl_row *rp,
 			break;
 
 	if (KEYS_MAX == i) {
-		TBL_MSG(tbl, MANDOCERR_TBLLAYOUT, ln, *pos);
+		mandoc_msg(MANDOCERR_TBLLAYOUT, tbl->parse, 
+				ln, *pos, NULL);
 		return(0);
 	}
 
@@ -205,7 +227,8 @@ cell(struct tbl_node *tbl, struct tbl_row *rp,
 
 	if (TBL_CELL_SPAN == c) {
 		if (NULL == rp->first) {
-			TBL_MSG(tbl, MANDOCERR_TBLLAYOUT, ln, *pos);
+			mandoc_msg(MANDOCERR_TBLLAYOUT, tbl->parse,
+					ln, *pos, NULL);
 			return(0);
 		} else if (rp->last)
 			switch (rp->last->pos) {
@@ -213,7 +236,8 @@ cell(struct tbl_node *tbl, struct tbl_row *rp,
 			case (TBL_CELL_DVERT):
 			case (TBL_CELL_HORIZ):
 			case (TBL_CELL_DHORIZ):
-				TBL_MSG(tbl, MANDOCERR_TBLLAYOUT, ln, *pos);
+				mandoc_msg(MANDOCERR_TBLLAYOUT, tbl->parse,
+						ln, *pos, NULL);
 				return(0);
 			default:
 				break;
@@ -226,7 +250,7 @@ cell(struct tbl_node *tbl, struct tbl_row *rp,
 	 */
 
 	if (TBL_CELL_DOWN == c && rp == tbl->first_row) {
-		TBL_MSG(tbl, MANDOCERR_TBLLAYOUT, ln, *pos);
+		mandoc_msg(MANDOCERR_TBLLAYOUT, tbl->parse, ln, *pos, NULL);
 		return(0);
 	}
 
@@ -244,7 +268,7 @@ cell(struct tbl_node *tbl, struct tbl_row *rp,
 	if (rp->last && (TBL_CELL_VERT == c || TBL_CELL_DVERT == c) &&
 			(TBL_CELL_VERT == rp->last->pos || 
 			 TBL_CELL_DVERT == rp->last->pos)) {
-		TBL_MSG(tbl, MANDOCERR_TBLLAYOUT, ln, *pos - 1);
+		mandoc_msg(MANDOCERR_TBLLAYOUT, tbl->parse, ln, *pos - 1, NULL);
 		return(0);
 	}
 
@@ -285,7 +309,8 @@ cell:
 	if ('.' == p[*pos]) {
 		tbl->part = TBL_PART_DATA;
 		if (NULL == tbl->first_row) 
-			TBL_MSG(tbl, MANDOCERR_TBLNOLAYOUT, ln, *pos);
+			mandoc_msg(MANDOCERR_TBLNOLAYOUT, tbl->parse, 
+					ln, *pos, NULL);
 		(*pos)++;
 		return;
 	}
@@ -415,19 +440,19 @@ cell_alloc(struct tbl_node *tbl, struct tbl_row *rp, enum tbl_cellt pos)
 }
 
 static void
-head_adjust(const struct tbl_cell *cell, struct tbl_head *head)
+head_adjust(const struct tbl_cell *cellp, struct tbl_head *head)
 {
-	if (TBL_CELL_VERT != cell->pos &&
-			TBL_CELL_DVERT != cell->pos) {
+	if (TBL_CELL_VERT != cellp->pos &&
+			TBL_CELL_DVERT != cellp->pos) {
 		head->pos = TBL_HEAD_DATA;
 		return;
 	}
 
-	if (TBL_CELL_VERT == cell->pos)
+	if (TBL_CELL_VERT == cellp->pos)
 		if (TBL_HEAD_DVERT != head->pos)
 			head->pos = TBL_HEAD_VERT;
 
-	if (TBL_CELL_DVERT == cell->pos)
+	if (TBL_CELL_DVERT == cellp->pos)
 		head->pos = TBL_HEAD_DVERT;
 }
 

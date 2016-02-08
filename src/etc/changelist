@@ -1,4 +1,4 @@
-#	$OpenBSD: changelist,v 1.71 2011/01/19 18:34:58 david Exp $
+#	$OpenBSD: changelist,v 1.74 2011/07/07 06:15:53 schwarze Exp $
 #
 # List of files which the security script backs up and checks
 # for modifications.
@@ -38,6 +38,7 @@
 /etc/gettytab
 /etc/group
 /etc/hostapd.conf
++/etc/hostname.*
 /etc/hosts
 /etc/hosts.allow
 /etc/hosts.deny
@@ -101,7 +102,6 @@
 /etc/pf.conf
 /etc/pf.os
 /etc/pkg.conf
-/etc/portal.conf
 /etc/printcap
 /etc/profile
 /etc/protocols
@@ -123,7 +123,6 @@
 /etc/rpc
 /etc/rtadvd.conf
 /etc/sasyncd.conf
-/etc/security
 /etc/sensorsd.conf
 /etc/services
 /etc/shells

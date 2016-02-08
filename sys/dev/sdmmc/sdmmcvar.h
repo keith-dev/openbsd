@@ -1,4 +1,4 @@
-/*	$OpenBSD: sdmmcvar.h,v 1.18 2010/08/24 14:52:23 blambert Exp $	*/
+/*	$OpenBSD: sdmmcvar.h,v 1.20 2011/07/17 22:46:48 matthew Exp $	*/
 
 /*
  * Copyright (c) 2006 Uwe Stuehler <uwe@openbsd.org>

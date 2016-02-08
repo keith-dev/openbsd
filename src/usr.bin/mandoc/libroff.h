@@ -1,4 +1,4 @@
-/*	$Id: libroff.h,v 1.2 2011/01/25 12:24:26 schwarze Exp $ */
+/*	$Id: libroff.h,v 1.4 2011/04/24 16:22:02 schwarze Exp $ */
 /*
  * Copyright (c) 2009, 2010, 2011 Kristaps Dzonsons <kristaps@bsd.lv>
  *
@@ -27,8 +27,7 @@ enum	tbl_part {
 };
 
 struct	tbl_node {
-	mandocmsg	  msg; /* status messages */
-	void		 *data; /* privdata for messages */
+	struct mparse	 *parse; /* parse point */
 	int		  pos; /* invocation column */
 	int		  line; /* invocation line */
 	enum tbl_part	  part;
@@ -43,10 +42,12 @@ struct	tbl_node {
 	struct tbl_node	 *next;
 };
 
-#define	TBL_MSG(tblp, type, line, col) \
-	(*(tblp)->msg)((type), (tblp)->data, (line), (col), NULL)
+struct	eqn_node {
+	struct eqn	  eqn;
+	struct eqn_node	 *next;
+};
 
-struct tbl_node	*tbl_alloc(int, int, void *, mandocmsg);
+struct tbl_node	*tbl_alloc(int, int, struct mparse *);
 void		 tbl_restart(int, int, struct tbl_node *);
 void		 tbl_free(struct tbl_node *);
 void		 tbl_reset(struct tbl_node *);
@@ -57,6 +58,10 @@ int		 tbl_data(struct tbl_node *, int, const char *);
 int		 tbl_cdata(struct tbl_node *, int, const char *);
 const struct tbl_span	*tbl_span(struct tbl_node *);
 void		 tbl_end(struct tbl_node *);
+struct eqn_node	*eqn_alloc(int, int);
+void		 eqn_end(struct eqn_node *);
+void		 eqn_free(struct eqn_node *);
+enum rofferr 	 eqn_read(struct eqn_node **, int, const char *, int);
 
 __END_DECLS
 

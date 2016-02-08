@@ -1,4 +1,4 @@
-#	$OpenBSD: GENERIC,v 1.10 2011/02/17 20:14:30 miod Exp $
+#	$OpenBSD: GENERIC,v 1.13 2011/07/07 23:41:09 tedu Exp $
 #
 # For further information on compiling OpenBSD kernels, see the config(8)
 # man page.
@@ -88,8 +88,6 @@ umidi*		at uhub?		# USB MIDI
 midi*		at umidi?
 ulpt*		at uhub?		# USB Printers
 umass*		at uhub?		# USB Mass Storage devices
-scsibus*	at umass?
-atapiscsi*	at umass?
 uhidev*		at uhub?		# Human Interface Devices
 ums*		at uhidev?		# USB mouse
 wsmouse*	at ums? mux 0
@@ -125,6 +123,7 @@ uow*		at uhub?		# Maxim/Dallas DS2490 1-Wire adapter
 onewire* at uow?
 utwitch*	at uhidev?		# YUREX BBU sensor
 
+scsibus*	at scsi?
 sd*		at scsibus?		# SCSI disk drives
 #st*		at scsibus?		# SCSI tape drives
 cd*		at scsibus?		# SCSI CD-ROM drives
@@ -192,25 +191,24 @@ wsdisplay*	at lcd? console ?
 
 pxammc0		at pxaip? addr 0x41100000	# MMC/SD/SDIO controller
 sdmmc*		at pxammc?		# SD/MMC bus
-scsibus*	at sdmmc?		# SCSI emulation
 
 # Bluetooth controllers
-sbt*	at sdmmc? disable		# SDIO Bluetooth
-bthub*	at sbt?
-ubt*	at uhub? disable		# USB Bluetooth
-bthub*	at ubt?
+#sbt*	at sdmmc? disable		# SDIO Bluetooth
+#bthub*	at sbt?
+#ubt*	at uhub? disable		# USB Bluetooth
+#bthub*	at ubt?
+#bthidev* at bthub?			# Bluetooth HID support
+#btkbd*	at bthidev?
+#btms*	at bthidev?
+#wskbd*	at btkbd? mux 1
+#wsmouse* at btms? mux 0
+#btsco*	at bthub?			# Bluetooth audio support
+#audio*	at btsco?
+
 
 # USB Video
 uvideo* at uhub?
 video*  at uvideo?
-
-bthidev* at bthub?			# Bluetooth HID support
-btkbd*	at bthidev?
-btms*	at bthidev?
-wskbd*	at btkbd? mux 1
-wsmouse* at btms? mux 0
-btsco*	at bthub?			# Bluetooth audio support
-audio*	at btsco?
 
 # 1-Wire devices
 option ONEWIREVERBOSE

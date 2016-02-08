@@ -1,4 +1,4 @@
-/*	$OpenBSD: vmparam.h,v 1.46 2011/01/07 03:15:39 tedu Exp $	*/
+/*	$OpenBSD: vmparam.h,v 1.48 2011/05/30 22:25:21 oga Exp $	*/
 /*	$NetBSD: vmparam.h,v 1.15 1994/10/27 04:16:34 cgd Exp $	*/
 
 /*-
@@ -35,8 +35,8 @@
  *	@(#)vmparam.h	5.9 (Berkeley) 5/12/91
  */
 
-#ifndef _MACHINE_VM_PARAM_H_
-#define _MACHINE_VM_PARAM_H_
+#ifndef _MACHINE_VMPARAM_H_
+#define _MACHINE_VMPARAM_H_
 /*
  * Machine dependent constants for 386.
  */
@@ -117,10 +117,6 @@
 #define	VM_PHYSSEG_STRAT	VM_PSTRAT_BSEARCH
 #define	VM_PHYSSEG_NOADD	/* can't add RAM after vm_mem_init */
 
-#define VM_NFREELIST		2
-#define VM_FREELIST_DEFAULT	0
-#define VM_FREELIST_FIRST16	1
-
 #define __HAVE_VM_PAGE_MD
 struct pv_entry;
 struct vm_page_md {
@@ -131,4 +127,4 @@ struct vm_page_md {
 	(pg)->mdpage.pv_list = NULL;	\
 } while (0)
 
-#endif /* _MACHINE_VM_PARAM_H_ */
+#endif /* _MACHINE_VMPARAM_H_ */

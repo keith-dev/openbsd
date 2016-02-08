@@ -1,4 +1,4 @@
-/*	$OpenBSD: dlfcn.c,v 1.82 2010/07/01 19:25:44 drahn Exp $ */
+/*	$OpenBSD: dlfcn.c,v 1.84 2011/06/27 16:47:50 sthen Exp $ */
 
 /*
  * Copyright (c) 1998 Per Fogelstrom, Opsycon AB

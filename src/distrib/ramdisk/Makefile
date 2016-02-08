@@ -1,4 +1,4 @@
-#	$OpenBSD: Makefile,v 1.37 2010/10/18 04:07:51 deraadt Exp $
+#	$OpenBSD: Makefile,v 1.40 2011/07/10 16:24:08 deraadt Exp $
 
 REV=		${OSrev}
 
@@ -12,7 +12,7 @@ ARCHDIR=	${.CURDIR}/../${MACHINE}/ramdisk
 .endif
 
 MOUNT_POINT?=	/mnt
-VND?=		svnd0
+VND?=		vnd0
 VND_DEV=	/dev/${VND}a
 VND_RDEV=	/dev/r${VND}a
 DISKTYPE=	rdroot
@@ -23,10 +23,12 @@ IMAGESIZE?=	8192 # 4MB in 512 byte blocks
 NEWFS_WILL_FAIL?=false
 .if ${ELF_TOOLCHAIN:L} == "yes"
 RDSETROOT?=	elfrdsetroot
+RDSETROOT_EXT_SRC=${.CURDIR}/../common/elf32.c ${.CURDIR}/../common/elf64.c
 CRUNCHGENOPTS?=-E
 .else
 RDSETROOT?=	rdsetroot
 CRUNCHGENOPTS?=
+RDSETROOT_EXT_SRC=
 .endif
 KERNEL?=	RAMDISK
 UTILS?=		${.CURDIR}/../miniroot
@@ -96,8 +98,9 @@ bsd.rd:	bsd ${IMAGE} ${RDSETROOT}
 bsd.gz:	bsd.rd
 	${GZIPCMD} ${GZIPFLAGS} < bsd.rd > bsd.gz
 
-${RDSETROOT}: ${.CURDIR}/../common/${RDSETROOT}.c
-	${HOSTCC} ${HOSTCCFLAGS} -o ${RDSETROOT} ${.CURDIR}/../common/${RDSETROOT}.c
+${RDSETROOT}: ${.CURDIR}/../common/${RDSETROOT}.c ${RDSETROOT_EXT_SRC}
+	${HOSTCC} ${HOSTCCFLAGS} -o ${RDSETROOT} ${RDSETROOT_EXT_SRC} \
+	    ${.CURDIR}/../common/${RDSETROOT}.c
 
 ${IMAGE}: ${CBIN}
 	dd if=/dev/zero of=${REALIMAGE} count=${IMAGESIZE}

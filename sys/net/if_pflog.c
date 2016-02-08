@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_pflog.c,v 1.33 2010/12/07 11:39:40 jsg Exp $	*/
+/*	$OpenBSD: if_pflog.c,v 1.38 2011/07/07 00:47:18 mcbride Exp $	*/
 /*
  * The authors of this code are John Ioannidis (ji@tla.org),
  * Angelos D. Keromytis (kermit@csd.uch.gr) and 
@@ -128,7 +128,7 @@ pflog_clone_create(struct if_clone *ifc, int unit)
 	ifp->if_output = pflogoutput;
 	ifp->if_start = pflogstart;
 	ifp->if_type = IFT_PFLOG;
-	ifp->if_snd.ifq_maxlen = ifqmaxlen;
+	IFQ_SET_MAXLEN(&ifp->if_snd, ifqmaxlen);
 	ifp->if_hdrlen = PFLOG_HDRLEN;
 	if_attach(ifp);
 	if_alloc_sadl(ifp);
@@ -210,7 +210,7 @@ pflogioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 }
 
 int
-pflog_packet(struct pfi_kif *kif, struct mbuf *m, sa_family_t af, u_int8_t dir,
+pflog_packet(struct pfi_kif *kif, struct mbuf *m, u_int8_t dir,
     u_int8_t reason, struct pf_rule *rm, struct pf_rule *am,
     struct pf_ruleset *ruleset, struct pf_pdesc *pd)
 {
@@ -226,7 +226,7 @@ pflog_packet(struct pfi_kif *kif, struct mbuf *m, sa_family_t af, u_int8_t dir,
 
 	bzero(&hdr, sizeof(hdr));
 	hdr.length = PFLOG_REAL_HDRLEN;
-	hdr.af = af;
+	hdr.af = pd->af;
 	hdr.action = rm->action;
 	hdr.reason = reason;
 	memcpy(hdr.ifname, kif->pfik_name, sizeof(hdr.ifname));
@@ -273,6 +273,7 @@ pflog_bpfcopy(const void *src_arg, void *dst_arg, size_t len)
 {
 	const struct mbuf	*m;
 	struct pfloghdr		*pfloghdr;
+	struct pf_state		*s = NULL;
 	u_int			 count;
 	u_char			*dst;
 	u_short			 action, reason;
@@ -283,6 +284,8 @@ pflog_bpfcopy(const void *src_arg, void *dst_arg, size_t len)
 		struct icmp		icmp;
 #ifdef INET6
 		struct icmp6_hdr	icmp6;
+		struct mld_hdr		mld;
+		struct nd_neighbor_solicit nd_ns;
 #endif /* INET6 */
 	} pf_hdrs;
 
@@ -334,8 +337,8 @@ pflog_bpfcopy(const void *src_arg, void *dst_arg, size_t len)
 	/* rewrite addresses if needed */
 	memset(&pd, 0, sizeof(pd));
 	pd.hdr.any = &pf_hdrs;
-	if (pf_setup_pdesc(pfloghdr->af, pfloghdr->dir, &pd, mfake, &action,
-	    &reason, NULL, NULL, NULL, NULL, &off, &hdrlen) == -1)
+	if (pf_setup_pdesc(pfloghdr->af, pfloghdr->dir, &pd, &mfake, &action,
+	    &reason, NULL, NULL, NULL, &s, NULL, &off, &hdrlen) == -1)
 		return;
 
 	PF_ACPY(&osaddr, pd.src, pd.af);

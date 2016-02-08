@@ -1,4 +1,4 @@
-/*	$OpenBSD: parse.y,v 1.597 2010/12/31 12:15:31 bluhm Exp $	*/
+/*	$OpenBSD: parse.y,v 1.607 2011/07/29 10:51:46 mcbride Exp $	*/
 
 /*
  * Copyright (c) 2001 Markus Friedl.  All rights reserved.
@@ -63,13 +63,11 @@
 
 static struct pfctl	*pf = NULL;
 static int		 debug = 0;
-static int		 rulestate = 0;
 static u_int16_t	 returnicmpdefault =
 			    (ICMP_UNREACH << 8) | ICMP_UNREACH_PORT;
 static u_int16_t	 returnicmp6default =
 			    (ICMP6_DST_UNREACH << 8) | ICMP6_DST_UNREACH_NOPORT;
 static int		 blockpolicy = PFRULE_DROP;
-static int		 require_order = 0;
 static int		 default_statelock;
 
 TAILQ_HEAD(files, file)		 files = TAILQ_HEAD_INITIALIZER(files);
@@ -104,14 +102,6 @@ int		 symset(const char *, const char *, int);
 char		*symget(const char *);
 
 int		 atoul(char *, u_long *);
-
-enum {
-	PFCTL_STATE_NONE,
-	PFCTL_STATE_OPTION,
-	PFCTL_STATE_QUEUE,
-	PFCTL_STATE_NAT,
-	PFCTL_STATE_FILTER
-};
 
 struct node_proto {
 	u_int8_t		 proto;
@@ -240,6 +230,7 @@ struct filter_opts {
 #define FOM_MAXMSS	0x0040
 #define FOM_SETTOS	0x0100
 #define FOM_SCRUB_TCP	0x0200
+#define FOM_PRIO	0x0400
 	struct node_uid		*uid;
 	struct node_gid		*gid;
 	struct node_if		*rcv;
@@ -264,6 +255,7 @@ struct filter_opts {
 	char			*match_tag;
 	u_int8_t		 match_tag_not;
 	u_int			 rtableid;
+	u_int8_t		 prio[2];
 	struct {
 		struct node_host	*addr;
 		u_int16_t		port;
@@ -362,7 +354,6 @@ int		 expand_queue(struct pf_altq *, struct node_if *,
 		    struct node_queue_opt *);
 int		 expand_skip_interface(struct node_if *);
 
-int	 check_rulestate(int);
 int	 getservice(char *);
 int	 rule_label(struct pf_rule *, char *);
 
@@ -389,6 +380,7 @@ typedef struct {
 		int			 i;
 		char			*string;
 		u_int			 rtableid;
+		u_int16_t		 weight;		
 		struct {
 			u_int8_t	 b1;
 			u_int8_t	 b2;
@@ -453,16 +445,17 @@ int	parseport(char *, struct range *r, int);
 %token	PASS BLOCK MATCH SCRUB RETURN IN OS OUT LOG QUICK ON FROM TO FLAGS
 %token	RETURNRST RETURNICMP RETURNICMP6 PROTO INET INET6 ALL ANY ICMPTYPE
 %token	ICMP6TYPE CODE KEEP MODULATE STATE PORT BINATTO NODF
-%token	MINTTL ERROR ALLOWOPTS FASTROUTE FILENAME ROUTETO DUPTO REPLYTO NO LABEL
+%token	MINTTL ERROR ALLOWOPTS FILENAME ROUTETO DUPTO REPLYTO NO LABEL
 %token	NOROUTE URPFFAILED FRAGMENT USER GROUP MAXMSS MAXIMUM TTL TOS DROP TABLE
 %token	REASSEMBLE ANCHOR
 %token	SET OPTIMIZATION TIMEOUT LIMIT LOGINTERFACE BLOCKPOLICY RANDOMID
-%token	REQUIREORDER SYNPROXY FINGERPRINTS NOSYNC DEBUG SKIP HOSTID
+%token	SYNPROXY FINGERPRINTS NOSYNC DEBUG SKIP HOSTID
 %token	ANTISPOOF FOR INCLUDE MATCHES
-%token	BITMASK RANDOM SOURCEHASH ROUNDROBIN STATICPORT PROBABILITY
+%token	BITMASK RANDOM SOURCEHASH ROUNDROBIN LEASTSTATES STATICPORT PROBABILITY
+%token	WEIGHT
 %token	ALTQ CBQ PRIQ HFSC BANDWIDTH TBRSIZE LINKSHARE REALTIME UPPERLIMIT
-%token	QUEUE PRIORITY QLIMIT RTABLE
-%token	LOAD RULESET_OPTIMIZATION
+%token	QUEUE PRIORITY QLIMIT RTABLE RDOMAIN
+%token	LOAD RULESET_OPTIMIZATION RTABLE RDOMAIN PRIO
 %token	STICKYADDRESS MAXSRCSTATES MAXSRCNODES SOURCETRACK GLOBAL RULE
 %token	MAXSRCCONN MAXSRCCONNRATE OVERLOAD FLUSH SLOPPY PFLOW
 %token	TAGGED TAG IFBOUND FLOATING STATEPOLICY STATEDEFAULTS ROUTE SETTOS
@@ -474,10 +467,11 @@ int	parseport(char *, struct range *r, int);
 %type	<v.number>		number icmptype icmp6type uid gid
 %type	<v.number>		tos not yesno optnodf
 %type	<v.probability>		probability
+%type	<v.weight>		optweight
 %type	<v.i>			dir af optimizer
 %type	<v.i>			sourcetrack flush unaryop statelock
 %type	<v.b>			action
-%type	<v.b>			flags flag blockspec
+%type	<v.b>			flags flag blockspec prio
 %type	<v.range>		portplain portstar portrange
 %type	<v.hashkey>		hashkey
 %type	<v.proto>		proto proto_list proto_item
@@ -489,6 +483,7 @@ int	parseport(char *, struct range *r, int);
 %type	<v.fromto>		fromto
 %type	<v.peer>		ipportspec from to
 %type	<v.host>		ipspec xhost host dynaddr host_list
+%type	<v.host>		table_host_list tablespec
 %type	<v.host>		redir_host_list redirspec
 %type	<v.host>		route_host route_host_list routespec
 %type	<v.os>			os xos os_list
@@ -577,15 +572,9 @@ optnodf		: /* empty */	{ $$ = 0; }
 		;
 
 option		: SET REASSEMBLE yesno optnodf		{
-			if (check_rulestate(PFCTL_STATE_OPTION))
-				YYERROR;
 			pfctl_set_reassembly(pf, $3, $4);
 		}
 		| SET OPTIMIZATION STRING		{
-			if (check_rulestate(PFCTL_STATE_OPTION)) {
-				free($3);
-				YYERROR;
-			}
 			if (pfctl_set_optimization(pf, $3) != 0) {
 				yyerror("unknown optimization %s", $3);
 				free($3);
@@ -604,10 +593,6 @@ option		: SET REASSEMBLE yesno optnodf		{
 		| SET LIMIT limit_spec
 		| SET LIMIT '{' optnl limit_list '}'
 		| SET LOGINTERFACE stringall		{
-			if (check_rulestate(PFCTL_STATE_OPTION)) {
-				free($3);
-				YYERROR;
-			}
 			if (pfctl_set_logif(pf, $3) != 0) {
 				yyerror("error setting loginterface %s", $3);
 				free($3);
@@ -628,30 +613,16 @@ option		: SET REASSEMBLE yesno optnodf		{
 		| SET BLOCKPOLICY DROP	{
 			if (pf->opts & PF_OPT_VERBOSE)
 				printf("set block-policy drop\n");
-			if (check_rulestate(PFCTL_STATE_OPTION))
-				YYERROR;
 			blockpolicy = PFRULE_DROP;
 		}
 		| SET BLOCKPOLICY RETURN {
 			if (pf->opts & PF_OPT_VERBOSE)
 				printf("set block-policy return\n");
-			if (check_rulestate(PFCTL_STATE_OPTION))
-				YYERROR;
 			blockpolicy = PFRULE_RETURN;
-		}
-		| SET REQUIREORDER yesno {
-			if (pf->opts & PF_OPT_VERBOSE)
-				printf("set require-order %s\n",
-				    $3 == 1 ? "yes" : "no");
-			require_order = $3;
 		}
 		| SET FINGERPRINTS STRING {
 			if (pf->opts & PF_OPT_VERBOSE)
 				printf("set fingerprints \"%s\"\n", $3);
-			if (check_rulestate(PFCTL_STATE_OPTION)) {
-				free($3);
-				YYERROR;
-			}
 			if (!pf->anchor->name[0]) {
 				if (pfctl_file_fingerprints(pf->dev,
 				    pf->opts, $3)) {
@@ -676,16 +647,18 @@ option		: SET REASSEMBLE yesno optnodf		{
 			default_statelock = $3;
 		}
 		| SET DEBUG STRING {
-			if (check_rulestate(PFCTL_STATE_OPTION)) {
-				free($3);
-				YYERROR;
-			}
 			if (pfctl_set_debug(pf, $3) != 0) {
 				yyerror("error setting debuglevel %s", $3);
 				free($3);
 				YYERROR;
 			}
 			free($3);
+		}
+		| SET DEBUG DEBUG {
+			if (pfctl_set_debug(pf, "debug") != 0) {
+				yyerror("error setting debuglevel debug");
+				YYERROR;
+			}
 		}
 		| SET SKIP interface {
 			if (expand_skip_interface($3) != 0) {
@@ -795,12 +768,6 @@ anchorrule	: ANCHOR anchorname dir quick interface af proto fromto
 		{
 			struct pf_rule	r;
 			struct node_proto	*proto;
-
-			if (check_rulestate(PFCTL_STATE_FILTER)) {
-				if ($2)
-					free($2);
-				YYERROR;
-			}
 
 			if ($2 && ($2[0] == '_' || strstr($2, "/_") != NULL)) {
 				free($2);
@@ -915,6 +882,11 @@ anchorrule	: ANCHOR anchorname dir quick interface af proto fromto
 					YYERROR;
 				}
 			r.match_tag_not = $9.match_tag_not;
+			if ($9.marker & FOM_PRIO) {
+				r.prio[0] = $9.prio[0];
+				r.prio[1] = $9.prio[1];
+			} else
+				r.prio[0] = r.prio[1] = PF_PRIO_NOTSET;
 
 			decide_address_family($8.src.host, &r.af);
 			decide_address_family($8.dst.host, &r.af);
@@ -1037,9 +1009,6 @@ antispoof	: ANTISPOOF logquick antispoof_ifspc af antispoof_opts {
 			struct node_host	*h = NULL, *hh;
 			struct node_if		*i, *j;
 
-			if (check_rulestate(PFCTL_STATE_FILTER))
-				YYERROR;
-
 			for (i = $3; i; i = i->next) {
 				bzero(&r, sizeof(r));
 
@@ -1049,6 +1018,7 @@ antispoof	: ANTISPOOF logquick antispoof_ifspc af antispoof_opts {
 				r.logif = $2.logif;
 				r.quick = $2.quick;
 				r.af = $4;
+				r.prio[0] = r.prio[1] = PF_PRIO_NOTSET;
 				if (rule_label(&r, $5.label))
 					YYERROR;
 				r.rtableid = $5.rtableid;
@@ -1238,7 +1208,7 @@ table_opt	: STRING		{
 			free($1);
 		}
 		| '{' optnl '}'		{ table_opts.init_addr = 1; }
-		| '{' optnl host_list '}'	{
+		| '{' optnl table_host_list '}'	{
 			struct node_host	*n;
 			struct node_tinit	*ti;
 
@@ -1290,11 +1260,27 @@ table_opt	: STRING		{
 		}
 		;
 
+tablespec	: xhost	optweight		{
+			if ($2 > 0) {
+				struct node_host	*n;
+				for (n = $1; n != NULL; n = n->next)
+					n->weight = $2;
+			}
+			$$ = $1;
+		}
+		| '{' optnl table_host_list '}'	{ $$ = $3; }
+		;
+
+table_host_list	: tablespec optnl			{ $$ = $1; }
+		| table_host_list comma tablespec optnl {
+			$1->tail->next = $3;
+			$1->tail = $3->tail;
+			$$ = $1;
+		}
+		;
+
 altqif		: ALTQ interface queue_opts QUEUE qassign {
 			struct pf_altq	a;
-
-			if (check_rulestate(PFCTL_STATE_QUEUE))
-				YYERROR;
 
 			memset(&a, 0, sizeof(a));
 			if ($3.scheduler.qtype == ALTQT_NONE) {
@@ -1317,13 +1303,7 @@ altqif		: ALTQ interface queue_opts QUEUE qassign {
 queuespec	: QUEUE STRING interface queue_opts qassign {
 			struct pf_altq	a;
 
-			if (check_rulestate(PFCTL_STATE_QUEUE)) {
-				free($2);
-				YYERROR;
-			}
-
 			memset(&a, 0, sizeof(a));
-
 			if (strlcpy(a.qname, $2, sizeof(a.qname)) >=
 			    sizeof(a.qname)) {
 				yyerror("queue name too long (max "
@@ -1512,8 +1492,6 @@ cbqflags_item	: STRING	{
 				$$ = CBQCLF_RED;
 			else if (!strcmp($1, "ecn"))
 				$$ = CBQCLF_RED|CBQCLF_ECN;
-			else if (!strcmp($1, "rio"))
-				$$ = CBQCLF_RIO;
 			else {
 				yyerror("unknown cbq flag \"%s\"", $1);
 				free($1);
@@ -1534,8 +1512,6 @@ priqflags_item	: STRING	{
 				$$ = PRCF_RED;
 			else if (!strcmp($1, "ecn"))
 				$$ = PRCF_RED|PRCF_ECN;
-			else if (!strcmp($1, "rio"))
-				$$ = PRCF_RIO;
 			else {
 				yyerror("unknown priq flag \"%s\"", $1);
 				free($1);
@@ -1634,8 +1610,6 @@ hfscopts_item	: LINKSHARE bandwidth				{
 				hfsc_opts.flags |= HFCF_RED;
 			else if (!strcmp($1, "ecn"))
 				hfsc_opts.flags |= HFCF_RED|HFCF_ECN;
-			else if (!strcmp($1, "rio"))
-				hfsc_opts.flags |= HFCF_RIO;
 			else {
 				yyerror("unknown hfsc flag \"%s\"", $1);
 				free($1);
@@ -1687,11 +1661,7 @@ pfrule		: action dir logquick interface af proto fromto
 			int			 adaptive = 0;
 			int			 defaults = 0;
 
-			if (check_rulestate(PFCTL_STATE_FILTER))
-				YYERROR;
-
 			memset(&r, 0, sizeof(r));
-
 			r.action = $1.b1;
 			switch ($1.b2) {
 			case PFRULE_RETURNRST:
@@ -1730,6 +1700,11 @@ pfrule		: action dir logquick interface af proto fromto
 			}
 			if ($8.marker & FOM_SCRUB_TCP)
 				r.scrub_flags |= PFSTATE_SCRUB_TCP;
+			if ($8.marker & FOM_PRIO) {
+				r.prio[0] = $8.prio[0];
+				r.prio[1] = $8.prio[1];
+			} else
+				r.prio[0] = r.prio[1] = PF_PRIO_NOTSET;
 
 			r.af = $5;
 			if ($8.tag)
@@ -2028,31 +2003,39 @@ pfrule		: action dir logquick interface af proto fromto
 					memcpy(&r.route.key, $8.route.key,
 					    sizeof(struct pf_poolhashkey));
 			}
-			if (r.rt && r.rt != PF_FASTROUTE) {
+			if (r.rt) {
 				decide_address_family($8.route.host, &r.af);
 				if ((r.route.opts & PF_POOL_TYPEMASK) ==
 				    PF_POOL_NONE && ($8.route.host->next != NULL ||
 				    $8.route.host->addr.type == PF_ADDR_TABLE ||
 				    DYNIF_MULTIADDR($8.route.host->addr)))
 					r.route.opts |= PF_POOL_ROUNDROBIN;
-				if ((r.route.opts & PF_POOL_TYPEMASK) !=
-				    PF_POOL_ROUNDROBIN &&
+				if (((r.route.opts & PF_POOL_TYPEMASK) !=
+				    PF_POOL_ROUNDROBIN) &&
+				    ((r.route.opts & PF_POOL_TYPEMASK) !=
+				    PF_POOL_LEASTSTATES) &&
 				    disallow_table($8.route.host,
 				    "tables are only "
-				    "supported in round-robin routing pools"))
+				    "supported in round-robin or "
+				    "least-states routing pools"))
 					YYERROR;
-				if ((r.route.opts & PF_POOL_TYPEMASK) !=
-				    PF_POOL_ROUNDROBIN &&
+				if (((r.route.opts & PF_POOL_TYPEMASK) !=
+				    PF_POOL_ROUNDROBIN) &&
+				    ((r.route.opts & PF_POOL_TYPEMASK) !=
+				    PF_POOL_LEASTSTATES) &&
 				    disallow_alias($8.route.host,
 				    "interface (%s) "
-				    "is only supported in round-robin "
-				    "routing pools"))
+				    "is only supported in round-robin or "
+				    "least-states routing pools"))
 					YYERROR;
 				if ($8.route.host->next != NULL) {
-					if ((r.route.opts & PF_POOL_TYPEMASK) !=
-					    PF_POOL_ROUNDROBIN) {
+					if (((r.route.opts & PF_POOL_TYPEMASK) !=
+					    PF_POOL_ROUNDROBIN) &&
+					    ((r.route.opts & PF_POOL_TYPEMASK) !=
+					    PF_POOL_LEASTSTATES)) {
 						yyerror("r.route.opts must "
-						    "be PF_POOL_ROUNDROBIN");
+						    "be PF_POOL_ROUNDROBIN "
+						    "or PF_POOL_LEASTSTATES");
 						YYERROR;
 					}
 				}
@@ -2293,15 +2276,12 @@ filter_opt	: USER uids {
 			    sizeof(filter_opts.nat.pool_opts));
 			filter_opts.nat.pool_opts.staticport = 1;
 		}
-		| FASTROUTE {
-			filter_opts.route.host = NULL;
-			filter_opts.route.rt = PF_FASTROUTE;
-			filter_opts.route.pool_opts = 0;
-		}
 		| ROUTETO routespec pool_opts {
 			filter_opts.route.host = $2;
 			filter_opts.route.rt = PF_ROUTETO;
 			filter_opts.route.pool_opts = $3.type | $3.opts;
+			memcpy(&filter_opts.rroute.pool_opts, &$3,
+			    sizeof(filter_opts.rroute.pool_opts));
 			if ($3.key != NULL)
 				filter_opts.route.key = $3.key;
 		}
@@ -2316,6 +2296,8 @@ filter_opt	: USER uids {
 			filter_opts.route.host = $2;
 			filter_opts.route.rt = PF_DUPTO;
 			filter_opts.route.pool_opts = $3.type | $3.opts;
+			memcpy(&filter_opts.rroute.pool_opts, &$3,
+			    sizeof(filter_opts.rroute.pool_opts));
 			if ($3.key != NULL)
 				filter_opts.route.key = $3.key;
 		}
@@ -2325,6 +2307,33 @@ filter_opt	: USER uids {
 				YYERROR;
 			}
 			filter_opts.rcv = $2;
+		}
+		| prio {
+			if (filter_opts.marker & FOM_PRIO) {
+				yyerror("prio cannot be redefined");
+				YYERROR;
+			}
+			filter_opts.marker |= FOM_PRIO;
+			filter_opts.prio[0] = $1.b1;
+			filter_opts.prio[1] = $1.b2;
+		}
+		;
+
+prio		: PRIO NUMBER {
+			if ($2 < 0 || $2 > IFQ_MAXPRIO) {
+				yyerror("prio must be 0 - %u", IFQ_MAXPRIO);
+				YYERROR;
+			}
+			$$.b1 = $$.b2 = $2;
+		}
+		| PRIO '(' NUMBER comma NUMBER ')' {
+			if ($3 < 0 || $3 > IFQ_MAXPRIO ||
+			    $5 < 0 || $5 > IFQ_MAXPRIO) {
+				yyerror("prio must be 0 - %u", IFQ_MAXPRIO);
+				YYERROR;
+			}
+			$$.b1 = $3;
+			$$.b2 = $5;
 		}
 		;
 
@@ -2544,6 +2553,20 @@ if_item		: STRING			{
 			$$->next = NULL;
 			$$->tail = $$;
 		}
+		| RDOMAIN NUMBER		{
+			if ($2 < 0 || $2 > RT_TABLEID_MAX) {
+				yyerror("rdomain outside range");
+				YYERROR;
+			}
+			$$ = calloc(1, sizeof(struct node_if));
+			if ($$ == NULL)
+				err(1, "if_item: calloc");
+			$$->not = 0;
+			$$->use_rdomain = 1;
+			$$->rdomain = $2;
+			$$->next = NULL;
+			$$->tail = $$;
+		}
 		;
 
 af		: /* empty */			{ $$ = 0; }
@@ -2681,6 +2704,7 @@ ipspec		: ANY				{ $$ = NULL; }
 		| '{' optnl host_list '}'	{ $$ = $3; }
 		;
 
+
 host_list	: ipspec optnl			{ $$ = $1; }
 		| host_list comma ipspec optnl	{
 			if ($1 == NULL) {
@@ -2722,6 +2746,16 @@ xhost		: not host			{
 			$$->not = $1;
 			$$->tail = $$;
 		}
+		;
+		
+optweight	: WEIGHT NUMBER			{
+			if ($2 < 1 || $2 > USHRT_MAX) {
+				yyerror("weight out of range");
+				YYERROR;
+			}
+			$$ = $2;
+		}
+		| /* empty */ { $$ = 0; }
 		;
 
 host		: STRING			{
@@ -3578,22 +3612,39 @@ portstar	: numberstring			{
 		}
 		;
 
-redirspec	: host				{ $$ = $1; }
+redirspec	: host optweight		{ 
+			if ($2 > 0) {
+				struct node_host	*n;
+				for (n = $1; n != NULL; n = n->next)
+					n->weight = $2;
+			}
+			$$ = $1;
+		}
 		| '{' optnl redir_host_list '}'	{ $$ = $3; }
 		;
 
-redir_host_list	: host optnl			{
+redir_host_list	: host optweight optnl			{
 			if ($1->addr.type != PF_ADDR_ADDRMASK) {
 				free($1);
 				yyerror("only addresses can be listed for"
 				    "redirection pools ");
 				YYERROR;
 			}
+			if ($2 > 0) {
+				struct node_host	*n;
+				for (n = $1; n != NULL; n = n->next)
+					n->weight = $2;
+			}
 			$$ = $1;
 		}
-		| redir_host_list comma host optnl {
+		| redir_host_list comma host optweight optnl {
 			$1->tail->next = $3;
 			$1->tail = $3->tail;
+			if ($4 > 0) {
+				struct node_host	*n;
+				for (n = $3; n != NULL; n = n->next)
+					n->weight = $4;
+			}
 			$$ = $1;
 		}
 		;
@@ -3706,6 +3757,13 @@ pool_opt	: BITMASK	{
 			}
 			pool_opts.type = PF_POOL_ROUNDROBIN;
 		}
+		| LEASTSTATES	{
+			if (pool_opts.type) {
+				yyerror("pool type cannot be redefined");
+				YYERROR;
+			}
+			pool_opts.type = PF_POOL_LEASTSTATES;
+		}
 		| STATICPORT	{
 			if (pool_opts.staticport) {
 				yyerror("static-port cannot be redefined");
@@ -3803,8 +3861,15 @@ route_host	: STRING			{
 		}
 		;
 
-route_host_list	: route_host optnl			{ $$ = $1; }
-		| route_host_list comma route_host optnl {
+route_host_list	: route_host optweight optnl		{ 
+			if ($2 > 0) {
+				struct node_host	*n;
+				for (n = $1; n != NULL; n = n->next)
+					n->weight = $2;
+			}
+			$$ = $1;
+		}
+		| route_host_list comma route_host optweight optnl {
 			if ($1->af == 0)
 				$1->af = $3->af;
 			if ($1->af != $3->af) {
@@ -3814,20 +3879,28 @@ route_host_list	: route_host optnl			{ $$ = $1; }
 			}
 			$1->tail->next = $3;
 			$1->tail = $3->tail;
+			if ($4 > 0) {
+				struct node_host	*n;
+				for (n = $3; n != NULL; n = n->next)
+					n->weight = $4;
+			}
 			$$ = $1;
 		}
 		;
 
-routespec	: route_host			{ $$ = $1; }
+routespec	: route_host optweight			{
+			if ($2 > 0) {
+				struct node_host	*n;
+				for (n = $1; n != NULL; n = n->next)
+					n->weight = $2;
+			}
+			$$ = $1;
+		}
 		| '{' optnl route_host_list '}'	{ $$ = $3; }
 		;
 
 timeout_spec	: STRING NUMBER
 		{
-			if (check_rulestate(PFCTL_STATE_OPTION)) {
-				free($1);
-				YYERROR;
-			}
 			if ($2 < 0 || $2 > UINT_MAX) {
 				yyerror("only positive values permitted");
 				YYERROR;
@@ -3847,10 +3920,6 @@ timeout_list	: timeout_list comma timeout_spec optnl
 
 limit_spec	: STRING NUMBER
 		{
-			if (check_rulestate(PFCTL_STATE_OPTION)) {
-				free($1);
-				YYERROR;
-			}
 			if ($2 < 0 || $2 > UINT_MAX) {
 				yyerror("only positive values permitted");
 				YYERROR;
@@ -3948,9 +4017,23 @@ rule_consistent(struct pf_rule *r, int anchor_call)
 {
 	int	problems = 0;
 
+	if (r->proto != IPPROTO_TCP && r->os_fingerprint != PF_OSFP_ANY) {
+		yyerror("os only applies to tcp");
+		problems++;
+	}
 	if (r->proto != IPPROTO_TCP && r->proto != IPPROTO_UDP &&
 	    (r->src.port_op || r->dst.port_op)) {
 		yyerror("port only applies to tcp/udp");
+		problems++;
+	}
+	if (r->proto != IPPROTO_TCP && r->proto != IPPROTO_UDP &&
+	    r->uid.op) {
+		yyerror("user only applies to tcp/udp");
+		problems++;
+	}
+	if (r->proto != IPPROTO_TCP && r->proto != IPPROTO_UDP &&
+	    r->gid.op) {
+		yyerror("group only applies to tcp/udp");
 		problems++;
 	}
 	if (r->proto != IPPROTO_ICMP && r->proto != IPPROTO_ICMPV6 &&
@@ -4032,7 +4115,7 @@ rule_consistent(struct pf_rule *r, int anchor_call)
 			problems++;
 		}
 		if (r->rt) {
-			yyerror("route-to, reply-to, dup-to and fastroute "
+			yyerror("route-to, reply-to and dup-to "
 			   "must not be used on match rules");
 			problems++;
 		}
@@ -4050,7 +4133,7 @@ process_tabledef(char *name, struct table_opts *opts)
 	ab.pfrb_type = PFRB_ADDRS;
 	SIMPLEQ_FOREACH(ti, &opts->init_nodes, entries) {
 		if (ti->file)
-			if (pfr_buf_load(&ab, ti->file, 0, append_addr)) {
+			if (pfr_buf_load(&ab, ti->file, 0)) {
 				if (errno)
 					yyerror("cannot load \"%s\": %s",
 					    ti->file, strerror(errno));
@@ -4303,6 +4386,9 @@ expand_altq(struct pf_altq *a, struct node_if *interfaces,
 		if (interface->not) {
 			yyerror("altq on ! <interface> is not supported");
 			errs++;
+		} else if (interface->use_rdomain) {
+			yyerror("altq on rdomain <num> is not supported");
+			errs++;
 		} else {
 			if (eval_pfaltq(pf, &pa, &bwspec, opts))
 				errs++;
@@ -4532,7 +4618,6 @@ collapse_redirspec(struct pf_pool *rpool, struct pf_rule *r,
 	struct pf_rule_addr ra;
 	int	i = 0;
 
-
 	if (!rs || !rs->rdr || rs->rdr->host == NULL) {
 		rpool->addr.type = PF_ADDR_NONE;
 		return (0);
@@ -4567,8 +4652,10 @@ collapse_redirspec(struct pf_pool *rpool, struct pf_rule *r,
 		return (0);
 	} else {		/* more than one address */
 		if (rs->pool_opts.type &&
-		     rs->pool_opts.type != PF_POOL_ROUNDROBIN) {
-			yyerror("only round-robin valid for multiple "
+		    (rs->pool_opts.type != PF_POOL_ROUNDROBIN) &&
+		    (rs->pool_opts.type != PF_POOL_LEASTSTATES)) {
+			yyerror("only round-robin or "
+			    "least-states valid for multiple "
 			    "translation or routing addresses");
 			return (1);
 		}
@@ -4587,10 +4674,11 @@ collapse_redirspec(struct pf_pool *rpool, struct pf_rule *r,
 			}
 			memset(&ra, 0, sizeof(ra));
 			ra.addr = h->addr;
+			ra.weight = h->weight;
 			if (add_opt_table(pf, &tbl,
 			    h->af, &ra, h->ifname))
 				return (1);
-                }
+		}
 	}
 	if (tbl) {
 		if ((pf->opts & PF_OPT_NOACTION) == 0 &&
@@ -4600,7 +4688,8 @@ collapse_redirspec(struct pf_pool *rpool, struct pf_rule *r,
 		pf->tdirty = 1;
 
 		if (pf->opts & PF_OPT_VERBOSE)
-			print_tabledef(tbl->pt_name, PFR_TFLAG_CONST,
+			print_tabledef(tbl->pt_name,
+			    PFR_TFLAG_CONST | tbl->pt_flags,
 			    1, &tbl->pt_nodes);
 
 		memset(&rpool->addr, 0, sizeof(rpool->addr));
@@ -4711,10 +4800,10 @@ expand_rule(struct pf_rule *r, int keeprule, struct node_if *interfaces,
 	LOOP_THROUGH(struct node_proto, proto, protos,
 	LOOP_THROUGH(struct node_icmp, icmp_type, icmp_types,
 	LOOP_THROUGH(struct node_host, src_host, src_hosts,
-	LOOP_THROUGH(struct node_port, src_port, src_ports,
-	LOOP_THROUGH(struct node_os, src_os, src_oses,
 	LOOP_THROUGH(struct node_host, dst_host, dst_hosts,
+	LOOP_THROUGH(struct node_port, src_port, src_ports,
 	LOOP_THROUGH(struct node_port, dst_port, dst_ports,
+	LOOP_THROUGH(struct node_os, src_os, src_oses,
 	LOOP_THROUGH(struct node_uid, uid, uids,
 	LOOP_THROUGH(struct node_gid, gid, gids,
 
@@ -4759,6 +4848,10 @@ expand_rule(struct pf_rule *r, int keeprule, struct node_if *interfaces,
 		else
 			memset(r->ifname, '\0', sizeof(r->ifname));
 
+		if (interface->use_rdomain)
+			r->onrdomain = interface->rdomain;
+		else
+			r->onrdomain = -1;
 		if (strlcpy(r->label, label, sizeof(r->label)) >=
 		    sizeof(r->label))
 			errx(1, "expand_rule: strlcpy");
@@ -4969,6 +5062,9 @@ expand_skip_interface(struct node_if *interfaces)
 		if (interface->not) {
 			yyerror("skip on ! <interface> is not supported");
 			errs++;
+		} else if (interface->use_rdomain) {
+			yyerror("skip on rdomain <num> is not supported");
+			errs++;
 		} else
 			errs += pfctl_set_interface_flags(pf,
 			    interface->ifname, PFI_IFLAG_SKIP, 1);
@@ -4997,18 +5093,6 @@ freehostlist(struct node_host *h)
 
 #undef FREE_LIST
 #undef LOOP_THROUGH
-
-int
-check_rulestate(int desired_state)
-{
-	if (require_order && (rulestate > desired_state)) {
-		yyerror("Rules must be in order: options, normalization, "
-		    "queueing, translation, filtering");
-		return (1);
-	}
-	rulestate = desired_state;
-	return (0);
-}
 
 int
 kw_cmp(const void *k, const void *e)
@@ -5040,7 +5124,6 @@ lookup(char *s)
 		{ "divert-to",		DIVERTTO},
 		{ "drop",		DROP},
 		{ "dup-to",		DUPTO},
-		{ "fastroute",		FASTROUTE},
 		{ "file",		FILENAME},
 		{ "fingerprints",	FINGERPRINTS},
 		{ "flags",		FLAGS},
@@ -5062,6 +5145,7 @@ lookup(char *s)
 		{ "inet6",		INET6},
 		{ "keep",		KEEP},
 		{ "label",		LABEL},
+		{ "least-states",	LEASTSTATES},
 		{ "limit",		LIMIT},
 		{ "linkshare",		LINKSHARE},
 		{ "load",		LOAD},
@@ -5090,6 +5174,7 @@ lookup(char *s)
 		{ "pass",		PASS},
 		{ "pflow",		PFLOW},
 		{ "port",		PORT},
+		{ "prio",		PRIO},
 		{ "priority",		PRIORITY},
 		{ "priq",		PRIQ},
 		{ "probability",	PROBABILITY},
@@ -5099,12 +5184,12 @@ lookup(char *s)
 		{ "quick",		QUICK},
 		{ "random",		RANDOM},
 		{ "random-id",		RANDOMID},
+		{ "rdomain",		RDOMAIN},
 		{ "rdr-to",		RDRTO},
 		{ "realtime",		REALTIME},
 		{ "reassemble",		REASSEMBLE},
 		{ "received-on",	RECEIVEDON},
 		{ "reply-to",		REPLYTO},
-		{ "require-order",	REQUIREORDER},
 		{ "return",		RETURN},
 		{ "return-icmp",	RETURNICMP},
 		{ "return-icmp6",	RETURNICMP6},
@@ -5139,6 +5224,7 @@ lookup(char *s)
 		{ "upperlimit",		UPPERLIMIT},
 		{ "urpf-failed",	URPFFAILED},
 		{ "user",		USER},
+		{ "weight",		WEIGHT},
 	};
 	const struct keywords	*p;
 
@@ -5501,12 +5587,10 @@ parse_config(char *filename, struct pfctl *xpf)
 
 	pf = xpf;
 	errors = 0;
-	rulestate = PFCTL_STATE_NONE;
 	returnicmpdefault = (ICMP_UNREACH << 8) | ICMP_UNREACH_PORT;
 	returnicmp6default =
 	    (ICMP6_DST_UNREACH << 8) | ICMP6_DST_UNREACH_NOPORT;
 	blockpolicy = PFRULE_DROP;
-	require_order = 0;
 
 	if ((file = pushfile(filename, 0)) == NULL) {
 		warn("cannot open the main config file!");

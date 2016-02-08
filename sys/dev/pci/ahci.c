@@ -1,4 +1,4 @@
-/*	$OpenBSD: ahci.c,v 1.172 2011/01/28 06:32:31 dlg Exp $ */
+/*	$OpenBSD: ahci.c,v 1.181 2011/07/04 22:06:07 jmatthew Exp $ */
 
 /*
  * Copyright (c) 2006 David Gwynne <dlg@openbsd.org>
@@ -27,6 +27,7 @@
 #include <sys/timeout.h>
 #include <sys/queue.h>
 #include <sys/mutex.h>
+#include <sys/pool.h>
 
 #include <machine/bus.h>
 
@@ -372,6 +373,7 @@ struct ahci_port {
 	TAILQ_HEAD(, ahci_ccb)	ap_ccb_free;
 	TAILQ_HEAD(, ahci_ccb)	ap_ccb_pending;
 	struct mutex		ap_ccb_mtx;
+	struct ahci_ccb		*ap_ccb_err;
 
 	u_int32_t		ap_state;
 #define AP_S_NORMAL			0
@@ -391,7 +393,7 @@ struct ahci_port {
 	u_int32_t		ap_err_saved_active;
 	u_int32_t		ap_err_saved_active_cnt;
 
-	u_int8_t		ap_err_scratch[512];
+	u_int8_t		*ap_err_scratch;
 
 #ifdef AHCI_DEBUG
 	char			ap_name[16];
@@ -416,6 +418,7 @@ struct ahci_softc {
 #define AHCI_F_NO_NCQ			(1<<0)
 #define AHCI_F_IGN_FR			(1<<1)
 #define AHCI_F_IPMS_PROBE		(1<<2)	/* IPMS on failed PMP probe */
+#define AHCI_F_NO_PMP			(1<<3)	/* ignore PMP capability */
 
 	u_int			sc_ncmds;
 
@@ -454,6 +457,8 @@ int			ahci_ati_sb700_attach(struct ahci_softc *,
 			    struct pci_attach_args *);
 int			ahci_amd_hudson2_attach(struct ahci_softc *,
 			    struct pci_attach_args *);
+int			ahci_intel_attach(struct ahci_softc *,
+			    struct pci_attach_args *);
 int			ahci_nvidia_mcp_attach(struct ahci_softc *,
 			    struct pci_attach_args *);
 
@@ -475,6 +480,43 @@ static const struct ahci_device ahci_devices[] = {
 	    NULL,		ahci_ati_sb700_attach },
 	{ PCI_VENDOR_ATI,	PCI_PRODUCT_ATI_SBX00_SATA_6,
 	    NULL,		ahci_ati_sb700_attach },
+
+	{ PCI_VENDOR_INTEL,	PCI_PRODUCT_INTEL_6SERIES_AHCI_1,
+	    NULL,		ahci_intel_attach },
+	{ PCI_VENDOR_INTEL,	PCI_PRODUCT_INTEL_6SERIES_AHCI_2,
+	    NULL,		ahci_intel_attach },
+	{ PCI_VENDOR_INTEL,	PCI_PRODUCT_INTEL_6321ESB_AHCI,
+	    NULL,		ahci_intel_attach },
+	{ PCI_VENDOR_INTEL,	PCI_PRODUCT_INTEL_82801GR_AHCI,
+	    NULL,		ahci_intel_attach },
+	{ PCI_VENDOR_INTEL,	PCI_PRODUCT_INTEL_82801GBM_AHCI,
+	    NULL,		ahci_intel_attach },
+	{ PCI_VENDOR_INTEL,	PCI_PRODUCT_INTEL_82801H_AHCI_6P,
+	    NULL,		ahci_intel_attach },
+	{ PCI_VENDOR_INTEL,	PCI_PRODUCT_INTEL_82801H_AHCI_4P,
+	    NULL,		ahci_intel_attach },
+	{ PCI_VENDOR_INTEL,	PCI_PRODUCT_INTEL_82801HBM_AHCI,
+	    NULL,		ahci_intel_attach },
+	{ PCI_VENDOR_INTEL,	PCI_PRODUCT_INTEL_82801I_AHCI_1,
+	    NULL,		ahci_intel_attach },
+	{ PCI_VENDOR_INTEL,	PCI_PRODUCT_INTEL_82801I_AHCI_2,
+	    NULL,		ahci_intel_attach },
+	{ PCI_VENDOR_INTEL,	PCI_PRODUCT_INTEL_82801I_AHCI_3,
+	    NULL,		ahci_intel_attach },
+	{ PCI_VENDOR_INTEL,	PCI_PRODUCT_INTEL_82801JD_AHCI,
+	    NULL,		ahci_intel_attach },
+	{ PCI_VENDOR_INTEL,	PCI_PRODUCT_INTEL_82801JI_AHCI,
+	    NULL,		ahci_intel_attach },
+	{ PCI_VENDOR_INTEL,	PCI_PRODUCT_INTEL_3400_AHCI_1,
+	    NULL,		ahci_intel_attach },
+	{ PCI_VENDOR_INTEL,	PCI_PRODUCT_INTEL_3400_AHCI_2,
+	    NULL,		ahci_intel_attach },
+	{ PCI_VENDOR_INTEL,	PCI_PRODUCT_INTEL_3400_AHCI_3,
+	    NULL,		ahci_intel_attach },
+	{ PCI_VENDOR_INTEL,	PCI_PRODUCT_INTEL_3400_AHCI_4,
+	    NULL,		ahci_intel_attach },
+	{ PCI_VENDOR_INTEL,	PCI_PRODUCT_INTEL_EP80579_AHCI,
+	    NULL,		ahci_intel_attach },
 
 	{ PCI_VENDOR_NVIDIA,	PCI_PRODUCT_NVIDIA_MCP65_AHCI_2,
 	    NULL,		ahci_nvidia_mcp_attach },
@@ -620,6 +662,7 @@ struct atascsi_methods ahci_atascsi_methods = {
 	ahci_ata_probe,
 	ahci_ata_free,
 	ahci_ata_get_xfer,
+	ahci_ata_put_xfer,
 	ahci_ata_cmd
 };
 
@@ -708,6 +751,13 @@ ahci_amd_hudson2_attach(struct ahci_softc *sc, struct pci_attach_args *pa)
 }
 
 int
+ahci_intel_attach(struct ahci_softc *sc, struct pci_attach_args *pa)
+{
+	sc->sc_flags |= AHCI_F_NO_PMP;
+	return (0);
+}
+
+int
 ahci_nvidia_mcp_attach(struct ahci_softc *sc, struct pci_attach_args *pa)
 {
 	sc->sc_flags |= AHCI_F_IGN_FR;
@@ -759,7 +809,7 @@ ahci_pci_attach(struct device *parent, struct device *self, void *aux)
 		}
 	}
 
-	if (pci_intr_map(pa, &ih) != 0) {
+	if (pci_intr_map_msi(pa, &ih) != 0 && pci_intr_map(pa, &ih) != 0) {
 		printf(": unable to map interrupt\n");
 		return;
 	}
@@ -862,8 +912,7 @@ noccc:
 	aaa.aaa_methods = &ahci_atascsi_methods;
 	aaa.aaa_minphys = NULL;
 	aaa.aaa_nports = AHCI_MAX_PORTS;
-	aaa.aaa_ncmds = sc->sc_ncmds;
-	aaa.aaa_capability = ASAA_CAP_NEEDS_RESERVED;
+	aaa.aaa_ncmds = sc->sc_ncmds - 1;
 	if (!(sc->sc_flags & AHCI_F_NO_NCQ) &&
 	    (sc->sc_cap & AHCI_REG_CAP_SNCQ)) {
 		aaa.aaa_capability |= ASAA_CAP_NCQ | ASAA_CAP_PMP_NCQ;
@@ -1094,6 +1143,12 @@ ahci_port_alloc(struct ahci_softc *sc, u_int port)
 		    DEVNAME(sc), port);
 		goto reterr;
 	}
+	ap->ap_err_scratch = dma_alloc(DEV_BSIZE, PR_NOWAIT | PR_ZERO);
+	if (ap->ap_err_scratch == NULL) {
+		printf("%s: unable to allocate DMA scratch buf for port %d\n",
+		    DEVNAME(sc), port);
+		goto freeport;
+	}
 
 #ifdef AHCI_DEBUG
 	snprintf(ap->ap_name, sizeof(ap->ap_name), "%s.%d",
@@ -1221,11 +1276,14 @@ nomem:
 		ccb->ccb_xa.packetcmd = ccb->ccb_cmd_table->acmd;
 		ccb->ccb_xa.tag = i;
 
-		ccb->ccb_xa.ata_put_xfer = ahci_ata_put_xfer;
-
 		ccb->ccb_xa.state = ATA_S_COMPLETE;
 		ahci_put_ccb(ccb);
 	}
+
+	/* grab a ccb for use during error recovery */
+	ap->ap_ccb_err = &ap->ap_ccbs[sc->sc_ncmds - 1];
+	TAILQ_REMOVE(&ap->ap_ccb_free, ap->ap_ccb_err, ccb_entry);
+	ap->ap_ccb_err->ccb_xa.state = ATA_S_COMPLETE;
 
 	/* Wait for ICC change to complete */
 	ahci_pwait_clr(ap, AHCI_PREG_CMD, AHCI_PREG_CMD_ICC, 1);
@@ -1306,6 +1364,9 @@ ahci_port_free(struct ahci_softc *sc, u_int port)
 		ahci_write(sc, AHCI_REG_IS, 1 << port);
 	}
 
+	if (ap->ap_ccb_err)
+		ahci_put_ccb(ap->ap_ccb_err);
+
 	if (ap->ap_ccbs) {
 		while ((ccb = ahci_get_ccb(ap)) != NULL)
 			bus_dmamap_destroy(sc->sc_dmat, ccb->ccb_dmamap);
@@ -1318,6 +1379,8 @@ ahci_port_free(struct ahci_softc *sc, u_int port)
 		ahci_dmamem_free(sc, ap->ap_dmamem_rfis);
 	if (ap->ap_dmamem_cmd_table)
 		ahci_dmamem_free(sc, ap->ap_dmamem_cmd_table);
+	if (ap->ap_err_scratch)
+		dma_free(ap->ap_err_scratch, DEV_BSIZE);
 
 	/* bus_space(9) says we dont free the subregions handle */
 
@@ -2061,6 +2124,7 @@ ahci_port_portreset(struct ahci_port *ap, int pmp)
 	}
 
 	if (pmp == 0 ||
+	    (ap->ap_sc->sc_flags & AHCI_F_NO_PMP) ||
 	    !ISSET(ahci_read(ap->ap_sc, AHCI_REG_CAP), AHCI_REG_CAP_SPM)) {
 		goto err;
 	}
@@ -2466,7 +2530,7 @@ ahci_issue_pending_ncq_commands(struct ahci_port *ap)
 	 * If a port multiplier is attached to the port, we can only
 	 * issue commands for one of its ports at a time.
 	 */
-	if (ap->ap_sactive != NULL &&
+	if (ap->ap_sactive != 0 &&
 	    ap->ap_pmp_ncq_port != nextccb->ccb_xa.pmp_port) {
 		return;
 	}
@@ -3003,12 +3067,11 @@ ahci_get_err_ccb(struct ahci_port *ap)
 	 * Grab a CCB to use for error recovery.  This should never fail, as
 	 * we ask atascsi to reserve one for us at init time.
 	 */
-	err_ccb = ahci_get_ccb(ap);
-	KASSERT(err_ccb != NULL);
+	err_ccb = ap->ap_ccb_err;
 	err_ccb->ccb_xa.flags = 0;
 	err_ccb->ccb_done = ahci_empty_done;
 
-	return err_ccb;
+	return (err_ccb);
 }
 
 void
@@ -3028,8 +3091,10 @@ ahci_put_err_ccb(struct ahci_ccb *ccb)
 		printf("ahci_port_err_ccb_restore but SACT %08x != 0?\n", sact);
 	KASSERT(ahci_pread(ap, AHCI_PREG_CI) == 0);
 
+#ifdef DIAGNOSTIC
 	/* Done with the CCB */
-	ahci_put_ccb(ccb);
+	KASSERT(ccb == ap->ap_ccb_err);
+#endif
 
 	/* Restore outstanding command state */
 	ap->ap_sactive = ap->ap_err_saved_sactive;

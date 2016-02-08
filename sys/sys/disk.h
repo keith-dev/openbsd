@@ -1,4 +1,4 @@
-/*	$OpenBSD: disk.h,v 1.28 2010/11/17 15:01:05 bluhm Exp $	*/
+/*	$OpenBSD: disk.h,v 1.31 2011/06/30 16:28:05 matthew Exp $	*/
 /*	$NetBSD: disk.h,v 1.11 1996/04/28 20:22:50 thorpej Exp $	*/
 
 /*
@@ -151,13 +151,17 @@ extern	int disk_count;			/* number of disks in global disklist */
 extern	int disk_change;		/* disk attached/detached */
 
 void	disk_init(void);
-int	disk_construct(struct disk *, char *);
+int	disk_construct(struct disk *);
 void	disk_attach(struct device *, struct disk *);
 void	disk_detach(struct disk *);
+int	disk_openpart(struct disk *, int, int, int);
+void	disk_closepart(struct disk *, int, int);
+void	disk_gone(int (*)(dev_t, int, int, struct proc *), int);
 void	disk_busy(struct disk *);
 void	disk_unbusy(struct disk *, long, int);
 
 int	disk_lock(struct disk *);
+void	disk_lock_nointr(struct disk *);
 void    disk_unlock(struct disk *);
 struct device *disk_lookup(struct cfdriver *, int);
 

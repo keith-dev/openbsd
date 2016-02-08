@@ -1,4 +1,4 @@
-/*	$OpenBSD: ip_icmp.c,v 1.92 2010/09/13 09:59:32 claudio Exp $	*/
+/*	$OpenBSD: ip_icmp.c,v 1.94 2011/07/06 01:57:37 dlg Exp $	*/
 /*	$NetBSD: ip_icmp.c,v 1.19 1996/02/13 23:42:22 christos Exp $	*/
 
 /*
@@ -313,6 +313,7 @@ icmp_input(struct mbuf *m, ...)
 	void *(*ctlfunc)(int, struct sockaddr *, u_int, void *);
 	int code;
 	extern u_char ip_protox[];
+	extern int ipforwarding;
 	int hlen;
 	va_list ap;
 	struct rtentry *rt;
@@ -532,8 +533,12 @@ icmp_input(struct mbuf *m, ...)
 		icp->icmp_type = ICMP_MASKREPLY;
 		icp->icmp_mask = ia->ia_sockmask.sin_addr.s_addr;
 		if (ip->ip_src.s_addr == 0) {
-			if (ia->ia_ifp->if_flags & IFF_BROADCAST)
-				ip->ip_src = ia->ia_broadaddr.sin_addr;
+			if (ia->ia_ifp->if_flags & IFF_BROADCAST) {
+				if (ia->ia_broadaddr.sin_addr.s_addr)
+					ip->ip_src = ia->ia_broadaddr.sin_addr;
+				else
+					ip->ip_src.s_addr = INADDR_BROADCAST;
+			}
 			else if (ia->ia_ifp->if_flags & IFF_POINTOPOINT)
 				ip->ip_src = ia->ia_dstaddr.sin_addr;
 		}
@@ -558,7 +563,7 @@ reflect:
 		/* Free packet atttributes */
 		if (m->m_flags & M_PKTHDR)
 			m_tag_delete_chain(m);
-		if (icmp_rediraccept == 0)
+		if (icmp_rediraccept == 0 || ipforwarding == 1)
 			goto freeit;
 		if (code > 3)
 			goto badcode;
@@ -673,6 +678,7 @@ icmp_reflect(struct mbuf *m, struct mbuf **op, struct in_ifaddr *ia)
 			if (t.s_addr == ia->ia_addr.sin_addr.s_addr)
 				break;
 			if ((ia->ia_ifp->if_flags & IFF_BROADCAST) &&
+			    ia->ia_broadaddr.sin_addr.s_addr != 0 &&
 			    t.s_addr == ia->ia_broadaddr.sin_addr.s_addr)
 				break;
 		}

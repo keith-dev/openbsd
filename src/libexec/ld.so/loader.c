@@ -1,4 +1,4 @@
-/*	$OpenBSD: loader.c,v 1.121 2010/12/07 18:29:28 drahn Exp $ */
+/*	$OpenBSD: loader.c,v 1.125 2011/06/27 16:47:50 sthen Exp $ */
 
 /*
  * Copyright (c) 1998 Per Fogelstrom, Opsycon AB
@@ -87,12 +87,6 @@ _dl_set_sod(const char *path, struct sod *sod)
 		_dl_build_sod(++fname, sod);
 	else
 		_dl_build_sod(path, sod);
-}
-
-void
-_dl_debug_state(void)
-{
-	/* Debugger stub */
 }
 
 /*
@@ -639,7 +633,7 @@ _dl_boot_bind(const long sp, long *dl_data, Elf_Dyn *dynamicp)
 	argv = (char **)stack;
 	envp = &argv[argc + 1];
 	stack = (long *)envp;
-	while (*stack++ != NULL)
+	while (*stack++ != 0L)
 		;
 
 	/*

@@ -1,4 +1,4 @@
-/*	$OpenBSD: re.c,v 1.132 2010/11/28 22:13:48 kettenis Exp $	*/
+/*	$OpenBSD: re.c,v 1.136 2011/06/15 13:19:19 jsg Exp $	*/
 /*	$FreeBSD: if_re.c,v 1.31 2004/09/04 07:54:05 ru Exp $	*/
 /*
  * Copyright (c) 1997, 1998-2003
@@ -194,6 +194,9 @@ void	re_disable_hw_im(struct rl_softc *);
 void	re_disable_sim_im(struct rl_softc *);
 void	re_config_imtype(struct rl_softc *, int);
 void	re_setup_intr(struct rl_softc *, int, int);
+#ifndef SMALL_KERNEL
+int	re_wol(struct ifnet*, int);
+#endif
 
 #ifdef RE_DIAG
 int	re_diag(struct rl_softc *);
@@ -221,7 +224,9 @@ static const struct re_revision {
 	{ RL_HWREV_8101,	"RTL8101" },
 	{ RL_HWREV_8101E,	"RTL8101E" },
 	{ RL_HWREV_8102E,	"RTL8102E" },
+	{ RL_HWREV_8401E,	"RTL8401E" },
 	{ RL_HWREV_8102EL,	"RTL8102EL" },
+	{ RL_HWREV_8102EL_SPIN1, "RTL8102EL 1" },
 	{ RL_HWREV_8103E,       "RTL8103E" },
 	{ RL_HWREV_8110S,	"RTL8110S" },
 	{ RL_HWREV_8139CPLUS,	"RTL8139C+" },
@@ -231,9 +236,11 @@ static const struct re_revision {
 	{ RL_HWREV_8168C,	"RTL8168C/8111C" },
 	{ RL_HWREV_8168C_SPIN2,	"RTL8168C/8111C" },
 	{ RL_HWREV_8168CP,	"RTL8168CP/8111CP" },
+	{ RL_HWREV_8105E,	"RTL8105E" },
 	{ RL_HWREV_8168D,	"RTL8168D/8111D" },
 	{ RL_HWREV_8168DP,      "RTL8168DP/8111DP" },
 	{ RL_HWREV_8168E,       "RTL8168E/8111E" },
+	{ RL_HWREV_8168E_VL,	"RTL8168E/8111E-VL" },
 	{ RL_HWREV_8169,	"RTL8169" },
 	{ RL_HWREV_8169_8110SB,	"RTL8169/8110SB" },
 	{ RL_HWREV_8169_8110SBL, "RTL8169SBL" },
@@ -827,8 +834,15 @@ re_attach(struct rl_softc *sc, const char *intrstr)
 		/* FALLTHROUGH */
 	case RL_HWREV_8102E:
 	case RL_HWREV_8102EL:
+	case RL_HWREV_8102EL_SPIN1:
 		sc->rl_flags |= RL_FLAG_NOJUMBO | RL_FLAG_INVMAR |
 		    RL_FLAG_PHYWAKE | RL_FLAG_PAR | RL_FLAG_DESCV2 |
+		    RL_FLAG_MACSTAT | RL_FLAG_CMDSTOP | RL_FLAG_AUTOPAD;
+		break;
+	case RL_HWREV_8401E:
+	case RL_HWREV_8105E:
+		sc->rl_flags |= RL_FLAG_INVMAR | RL_FLAG_PHYWAKE |
+		    RL_FLAG_PHYWAKE_PM | RL_FLAG_PAR | RL_FLAG_DESCV2 |
 		    RL_FLAG_MACSTAT | RL_FLAG_CMDSTOP | RL_FLAG_AUTOPAD;
 		break;
 	case RL_HWREV_8168_SPIN1:
@@ -864,6 +878,11 @@ re_attach(struct rl_softc *sc, const char *intrstr)
 		    RL_FLAG_PHYWAKE_PM | RL_FLAG_PAR | RL_FLAG_DESCV2 |
 		    RL_FLAG_MACSTAT | RL_FLAG_HWIM | RL_FLAG_CMDSTOP |
 		    RL_FLAG_AUTOPAD | RL_FLAG_NOJUMBO;
+		break;
+	case RL_HWREV_8168E_VL:
+		sc->rl_flags |= RL_FLAG_INVMAR | RL_FLAG_PHYWAKE |
+		    RL_FLAG_PAR | RL_FLAG_DESCV2 | RL_FLAG_MACSTAT |
+		    RL_FLAG_CMDSTOP | RL_FLAG_AUTOPAD | RL_FLAG_NOJUMBO;
 		break;
 	case RL_HWREV_8169_8110SB:
 	case RL_HWREV_8169_8110SBL:
@@ -1118,11 +1137,19 @@ re_attach(struct rl_softc *sc, const char *intrstr)
 	ifp->if_capabilities |= IFCAP_VLAN_HWTAGGING;
 #endif
 
+#ifndef SMALL_KERNEL
+	ifp->if_capabilities |= IFCAP_WOL;
+	ifp->if_wol = re_wol;
+	re_wol(ifp, 0);
+#endif
 	timeout_set(&sc->timer_handle, re_tick, sc);
 
 	/* Take PHY out of power down mode. */
-	if (sc->rl_flags & RL_FLAG_PHYWAKE_PM)
+	if (sc->rl_flags & RL_FLAG_PHYWAKE_PM) {
 		CSR_WRITE_1(sc, RL_PMCH, CSR_READ_1(sc, RL_PMCH) | 0x80);
+		if (sc->sc_hwrev == RL_HWREV_8401E)
+			CSR_WRITE_1(sc, 0xD1, CSR_READ_1(sc, 0xD1) & ~0x08);
+	}
 	if (sc->rl_flags & RL_FLAG_PHYWAKE) {
 		re_gmii_writereg((struct device *)sc, 1, 0x1f, 0);
 		re_gmii_writereg((struct device *)sc, 1, 0x0e, 0);
@@ -1699,18 +1726,18 @@ re_encap(struct rl_softc *sc, struct mbuf *m, int *idx)
 	 */
 
 	if ((m->m_pkthdr.csum_flags &
-	    (M_IPV4_CSUM_OUT|M_TCPV4_CSUM_OUT|M_UDPV4_CSUM_OUT)) != 0) {
+	    (M_IPV4_CSUM_OUT|M_TCP_CSUM_OUT|M_UDP_CSUM_OUT)) != 0) {
 		if (sc->rl_flags & RL_FLAG_DESCV2) {
 			vlanctl |= RL_TDESC_CMD_IPCSUMV2;
-			if (m->m_pkthdr.csum_flags & M_TCPV4_CSUM_OUT)
+			if (m->m_pkthdr.csum_flags & M_TCP_CSUM_OUT)
 				vlanctl |= RL_TDESC_CMD_TCPCSUMV2;
-			if (m->m_pkthdr.csum_flags & M_UDPV4_CSUM_OUT)
+			if (m->m_pkthdr.csum_flags & M_UDP_CSUM_OUT)
 				vlanctl |= RL_TDESC_CMD_UDPCSUMV2;
 		} else {
 			csum_flags |= RL_TDESC_CMD_IPCSUM;
-			if (m->m_pkthdr.csum_flags & M_TCPV4_CSUM_OUT)
+			if (m->m_pkthdr.csum_flags & M_TCP_CSUM_OUT)
 				csum_flags |= RL_TDESC_CMD_TCPCSUM;
-			if (m->m_pkthdr.csum_flags & M_UDPV4_CSUM_OUT)
+			if (m->m_pkthdr.csum_flags & M_UDP_CSUM_OUT)
 				csum_flags |= RL_TDESC_CMD_UDPCSUM;
 		}
 	}
@@ -2335,3 +2362,52 @@ re_setup_intr(struct rl_softc *sc, int enable_intrs, int imtype)
 		      sc->sc_dev.dv_xname, imtype);
 	}
 }
+
+#ifndef SMALL_KERNEL
+int
+re_wol(struct ifnet *ifp, int enable)
+{
+	struct rl_softc *sc = ifp->if_softc;
+	int i;
+	u_int8_t val;
+	struct re_wolcfg {
+		u_int8_t	enable;
+		u_int8_t	reg;
+		u_int8_t	bit;
+	} re_wolcfg[] = {
+		/* Always disable all wake events expect magic packet. */
+		{ 0,	RL_CFG5,	RL_CFG5_WOL_UCAST },
+		{ 0,	RL_CFG5,	RL_CFG5_WOL_MCAST },
+		{ 0,	RL_CFG5,	RL_CFG5_WOL_BCAST },
+		{ 1,	RL_CFG3,	RL_CFG3_WOL_MAGIC },
+		{ 0,	RL_CFG3,	RL_CFG3_WOL_LINK }
+	};
+
+	if (enable) {
+		if ((CSR_READ_1(sc, RL_CFG1) & RL_CFG1_PME) == 0) {
+			printf("%s: power management is disabled, "
+			    "cannot do WOL\n", sc->sc_dev.dv_xname);
+			return (ENOTSUP);
+		}
+		if ((CSR_READ_1(sc, RL_CFG2) & RL_CFG2_AUXPWR) == 0)
+			printf("%s: no auxiliary power, cannot do WOL from D3 "
+			    "(power-off) state\n", sc->sc_dev.dv_xname);
+	}
+
+	/* Temporarily enable write to configuration registers. */
+	CSR_WRITE_1(sc, RL_EECMD, RL_EEMODE_WRITECFG);
+
+	for (i = 0; i < nitems(re_wolcfg); i++) {
+		val = CSR_READ_1(sc, re_wolcfg[i].reg);
+		if (enable && re_wolcfg[i].enable)
+			val |= re_wolcfg[i].bit;
+		else
+			val &= ~re_wolcfg[i].bit;
+		CSR_WRITE_1(sc, re_wolcfg[i].reg, val);
+	}
+
+	CSR_WRITE_1(sc, RL_EECMD, RL_EEMODE_OFF);
+
+	return (0);
+}
+#endif

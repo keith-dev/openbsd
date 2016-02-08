@@ -1,4 +1,4 @@
-/*	$OpenBSD: com.c,v 1.145 2010/08/28 12:48:14 miod Exp $	*/
+/*	$OpenBSD: com.c,v 1.148 2011/07/03 15:47:16 matthew Exp $	*/
 /*	$NetBSD: com.c,v 1.82.4.1 1996/06/02 09:08:00 mrg Exp $	*/
 
 /*
@@ -236,9 +236,6 @@ com_activate(struct device *self, int act)
 
 	s = spltty();
 	switch (act) {
-	case DVACT_ACTIVATE:
-		break;
-
 	case DVACT_DEACTIVATE:
 #ifdef KGDB
 		if (sc->sc_hwflags & (COM_HW_CONSOLE|COM_HW_KGDB)) {
@@ -538,7 +535,8 @@ compwroff(struct com_softc *sc)
 	 */
 	bus_space_write_1(iot, ioh, com_fifo, 0);
 	delay(100);
-	(void) bus_space_read_1(iot, ioh, com_data);
+	if (ISSET(bus_space_read_1(iot, ioh, com_lsr), LSR_RXRDY))
+		(void) bus_space_read_1(iot, ioh, com_data);
 	delay(100);
 	bus_space_write_1(iot, ioh, com_fifo,
 			  FIFO_RCV_RST | FIFO_XMT_RST);
@@ -1789,7 +1787,8 @@ com_attach_subr(struct com_softc *sc)
 
 	/* clear and disable fifo */
 	bus_space_write_1(iot, ioh, com_fifo, FIFO_RCV_RST | FIFO_XMT_RST);
-	(void)bus_space_read_1(iot, ioh, com_data);
+	if (ISSET(bus_space_read_1(iot, ioh, com_lsr), LSR_RXRDY))
+		(void)bus_space_read_1(iot, ioh, com_data);
 	bus_space_write_1(iot, ioh, com_fifo, 0);
 
 	sc->sc_mcr = 0;

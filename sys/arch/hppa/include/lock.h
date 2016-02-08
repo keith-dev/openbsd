@@ -1,9 +1,9 @@
-/*	$OpenBSD: lock.h,v 1.4 2011/01/12 21:11:12 kettenis Exp $	*/
+/*	$OpenBSD: lock.h,v 1.6 2011/06/24 12:49:06 jsing Exp $	*/
 
 /* public domain */
 
-#ifndef	_HPPA_LOCK_H_
-#define	_HPPA_LOCK_H_
+#ifndef	_MACHINE_LOCK_H_
+#define	_MACHINE_LOCK_H_
 
 #include <machine/atomic.h>
 
@@ -21,10 +21,9 @@ __cpu_simple_lock_init(__cpu_simple_lock_t *l)
 static __inline__ void
 __cpu_simple_lock(__cpu_simple_lock_t *l)
 {
-	__cpu_simple_lock_t old;
+	volatile u_int old;
 
 	do {
-		old = __SIMPLELOCK_LOCKED;
 		__asm__ __volatile__
 		    ("ldcws 0(%2), %0" : "=&r" (old), "+m" (l) : "r" (l));
 	} while (old != __SIMPLELOCK_UNLOCKED);
@@ -33,7 +32,7 @@ __cpu_simple_lock(__cpu_simple_lock_t *l)
 static __inline__ int
 __cpu_simple_lock_try(__cpu_simple_lock_t *l)
 {
-	__cpu_simple_lock_t old = __SIMPLELOCK_LOCKED;
+	volatile u_int old;
 
 	__asm__ __volatile__
 	    ("ldcws 0(%2), %0" : "=&r" (old), "+m" (l) : "r" (l));
@@ -52,4 +51,4 @@ int	rw_cas_hppa(volatile unsigned long *, unsigned long, unsigned long);
 #define	rw_cas rw_cas_hppa
 #endif
 
-#endif	/* _HPPA_LOCK_H_ */
+#endif	/* _MACHINE_LOCK_H_ */

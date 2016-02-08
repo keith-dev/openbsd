@@ -1,4 +1,4 @@
-.\"	$OpenBSD: pkg_delete.1,v 1.35 2010/06/05 07:11:43 espie Exp $
+.\"	$OpenBSD: pkg_delete.1,v 1.40 2011/07/18 19:19:08 espie Exp $
 .\"
 .\" Documentation and design originally from FreeBSD. All the code has
 .\" been rewritten since. We keep the documentation's notice:
@@ -15,7 +15,7 @@
 .\" Jordan K. Hubbard
 .\"
 .\"
-.Dd $Mdocdate: June 5 2010 $
+.Dd $Mdocdate: July 18 2011 $
 .Dt PKG_DELETE 1
 .Os
 .Sh NAME
@@ -23,12 +23,9 @@
 .Nd delete software package distributions
 .Sh SYNOPSIS
 .Nm pkg_delete
-.Op Fl cIimnqsvx
+.Op Fl acIimnqsvx
 .Op Fl B Ar pkg-destdir
-.Oo Fl D Ar name
-.Ns Oo Ns = Ns Ar value
-.Oc
-.Oc
+.Op Fl D Ar name Ns Op = Ns Ar value
 .Ar pkg-name Op Ar ...
 .Sh DESCRIPTION
 The
@@ -54,6 +51,11 @@ can be omitted, unless the resulting specification is ambiguous.
 .Pp
 The options are as follows:
 .Bl -tag -width BB-pkg-destdir
+.It Fl a
+Delete unused dependencies (packages that are not needed by anything tagged
+as installed manually).
+Can be used without
+.Ar pkgnames .
 .It Fl B Ar pkg-destdir
 Set
 .Ar pkg-destdir
@@ -72,8 +74,6 @@ is a keyword that states what failsafe
 should be waived.
 Recognized keywords include:
 .Bl -tag -width "dependenciesXX"
-.It Ar ambiguous
-delete all packages matching ambiguous package specifications.
 .It Ar baddepend
 force the deletion of packages even if they reference inexistent dependencies.
 .It Ar dependencies
@@ -82,10 +82,6 @@ also delete the whole set of packages that depends upon the requested packages.
 uninstall even if not running as root.
 .It Ar scripts
 external scripts may fail.
-.It Ar uninstalled
-proceed even if some package names don't resolve to installed package names.
-.It Ar verbosedeps
-show detailed dependency information.
 .El
 .It Fl I
 If scripts exist for a given package, do not execute them.
@@ -189,6 +185,7 @@ script invoked from the package.
 .Xr pkg_add 1 ,
 .Xr pkg_create 1 ,
 .Xr pkg_info 1 ,
+.Xr pkg.conf 5 ,
 .Xr packages-specs 7
 .Sh AUTHORS
 .Bl -tag -width indent -compact

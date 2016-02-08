@@ -1,4 +1,4 @@
-/*	$OpenBSD: editor.c,v 1.248 2011/02/19 21:18:59 krw Exp $	*/
+/*	$OpenBSD: editor.c,v 1.258 2011/07/05 21:39:08 krw Exp $	*/
 
 /*
  * Copyright (c) 1997-2000 Todd C. Miller <Todd.Miller@courtesan.com>
@@ -77,8 +77,12 @@ const struct space_allocation alloc_big[] = {
 	{  MEG(900),         GIG(2),   5, "/usr"	},
 	{  MEG(512),         GIG(1),   3, "/usr/X11R6"	},
 	{    GIG(2),        GIG(10),  10, "/usr/local"	},
-	{    GIG(1),         GIG(2),   3, "/usr/src"	},
-	{    GIG(1),         GIG(2),   3, "/usr/obj"	},
+	{    GIG(1),         GIG(2),   2, "/usr/src"	},
+#ifdef STATICLINKING
+	{ MEG(2600),         GIG(3),   4, "/usr/obj"	},
+#else
+	{ MEG(1300),         GIG(2),   4, "/usr/obj"	},
+#endif
 	{    GIG(1),       GIG(300),  45, "/home"	}
 	/* Anything beyond this leave for the user to decide */
 };
@@ -157,9 +161,9 @@ static int overlap;
  * Simple partition editor.
  */
 int
-editor(struct disklabel *lp, int f)
+editor(int f)
 {
-	struct disklabel origlabel, lastlabel, tmplabel, label = *lp;
+	struct disklabel origlabel, lastlabel, tmplabel, newlab = lab;
 	struct disklabel *disk_geop = NULL;
 	struct partition *pp;
 	FILE *fp;
@@ -175,32 +179,32 @@ editor(struct disklabel *lp, int f)
 		errx(4, "out of memory");
 
 	/* Don't allow disk type of "unknown" */
-	getdisktype(&label, "You need to specify a type for this disk.", specname);
+	getdisktype(&newlab, "You need to specify a type for this disk.", specname);
 
 	/* Get the on-disk geometries if possible */
 	get_geometry(f, &disk_geop);
 
 	/* How big is the OpenBSD portion of the disk?  */
-	find_bounds(&label);
+	find_bounds(&newlab);
 
 	/* Make sure there is no partition overlap. */
-	if (has_overlap(&label))
+	if (has_overlap(&newlab))
 		errx(1, "can't run when there is partition overlap.");
 
 	/* If we don't have a 'c' partition, create one. */
-	pp = &label.d_partitions[RAW_PART];
-	if (label.d_npartitions < 3 || DL_GETPSIZE(pp) == 0) {
+	pp = &newlab.d_partitions[RAW_PART];
+	if (newlab.d_npartitions < 3 || DL_GETPSIZE(pp) == 0) {
 		puts("No 'c' partition found, adding one that spans the disk.");
-		if (label.d_npartitions < 3)
-			label.d_npartitions = 3;
+		if (newlab.d_npartitions < 3)
+			newlab.d_npartitions = 3;
 		DL_SETPOFFSET(pp, 0);
-		DL_SETPSIZE(pp, DL_GETDSIZE(&label));
+		DL_SETPSIZE(pp, DL_GETDSIZE(&newlab));
 		pp->p_fstype = FS_UNUSED;
 		pp->p_fragblock = pp->p_cpg = 0;
 	}
 
 #ifdef SUN_CYLCHECK
-	if (label.d_flags & D_VENDOR) {
+	if (newlab.d_flags & D_VENDOR) {
 		puts("This platform requires that partition offsets/sizes "
 		    "be on cylinder boundaries.\n"
 		    "Partition offsets/sizes will be rounded to the "
@@ -209,15 +213,15 @@ editor(struct disklabel *lp, int f)
 #endif
 
 	/* Set d_bbsize and d_sbsize as necessary */
-	if (label.d_bbsize == 0)
-		label.d_bbsize = BBSIZE;
-	if (label.d_sbsize == 0)
-		label.d_sbsize = SBSIZE;
+	if (newlab.d_bbsize == 0)
+		newlab.d_bbsize = BBSIZE;
+	if (newlab.d_sbsize == 0)
+		newlab.d_sbsize = SBSIZE;
 
 	/* Save the (U|u)ndo labels and mountpoints. */
 	mpcopy(origmountpoints, mountpoints);
-	origlabel = label;
-	lastlabel = label;
+	origlabel = newlab;
+	lastlabel = newlab;
 
 	puts("Label editor (enter '?' for help at any prompt)");
 	for (;;) {
@@ -237,7 +241,7 @@ editor(struct disklabel *lp, int f)
 			 * changes but decides not to.
 			 */
 			tmplabel = lastlabel;
-			lastlabel = label;
+			lastlabel = newlab;
 			mpcopy(tmpmountpoints, omountpoints);
 			mpcopy(omountpoints, mountpoints);
 		}
@@ -249,26 +253,26 @@ editor(struct disklabel *lp, int f)
 			break;
 
 		case 'A':
-			if (ioctl(f, DIOCGPDINFO, &label) == 0) {
+			if (ioctl(f, DIOCGPDINFO, &newlab) == 0) {
 				aflag = 1;
-				editor_allocspace(&label);
+				editor_allocspace(&newlab);
 			} else
-				label = lastlabel;
+				newlab = lastlabel;
 			break;
 		case 'a':
-			editor_add(&label, arg);
+			editor_add(&newlab, arg);
 			break;
 
 		case 'b':
-			set_bounds(&label);
+			set_bounds(&newlab);
 			break;
 
 		case 'c':
-			editor_change(&label, arg);
+			editor_change(&newlab, arg);
 			break;
 
 		case 'D':
-			if (ioctl(f, DIOCGPDINFO, &label) == 0) {
+			if (ioctl(f, DIOCGPDINFO, &newlab) == 0) {
 				dflag = 1;
 				for (i=0; i<MAXPARTITIONS; i++) {
 					free(mountpoints[i]);
@@ -279,23 +283,23 @@ editor(struct disklabel *lp, int f)
 			break;
 
 		case 'd':
-			editor_delete(&label, arg);
+			editor_delete(&newlab, arg);
 			break;
 
 		case 'e':
-			edit_parms(&label);
+			edit_parms(&newlab);
 			break;
 
 		case 'g':
-			set_geometry(&label, disk_geop, lp, arg);
+			set_geometry(&newlab, disk_geop, &lab, arg);
 			break;
 
 		case 'i':
-			set_duid(&label);
+			set_duid(&newlab);
 			break;
 
 		case 'm':
-			editor_modify(&label, arg);
+			editor_modify(&newlab, arg);
 			break;
 
 		case 'n':
@@ -304,15 +308,16 @@ editor(struct disklabel *lp, int f)
 				    "without the -f flag.\n", stderr);
 				break;
 			}
-			editor_name(&label, arg);
+			editor_name(&newlab, arg);
 			break;
 
 		case 'p':
-			display_edit(&label, arg ? *arg : 0, editor_countfree(&label));
+			display_edit(&newlab, arg ? *arg : 0,
+			    editor_countfree(&newlab));
 			break;
 
 		case 'l':
-			display(stdout, &label, arg ? *arg : 0, 0);
+			display(stdout, &newlab, arg ? *arg : 0, 0);
 			break;
 
 		case 'M': {
@@ -341,8 +346,6 @@ editor(struct disklabel *lp, int f)
 				puts("In no change mode, not writing label.");
 				goto done;
 			}
-			/* Save mountpoint info if there is any. */
-			mpsave(&label);
 
                         /*
 			 * If we haven't changed the original label, and it
@@ -352,8 +355,10 @@ editor(struct disklabel *lp, int f)
 			 * exit without further questions.
 			 */
 			if (!dflag && !aflag &&
-			    memcmp(lp, &label, sizeof(label)) == 0) {
+			    memcmp(&lab, &newlab, sizeof(newlab)) == 0) {
 				puts("No label changes.");
+				/* Save mountpoint info. */
+				mpsave(&newlab);
 				goto done;
 			}
 			do {
@@ -362,8 +367,8 @@ editor(struct disklabel *lp, int f)
 				    "y");
 			} while (arg && tolower(*arg) != 'y' && tolower(*arg) != 'n');
 			if (arg && tolower(*arg) == 'y') {
-				if (writelabel(f, bootarea, &label) == 0) {
-					*lp = label;
+				if (writelabel(f, bootarea, &newlab) == 0) {
+					newlab = lab; /* lab now has UID info */
 					goto done;
 				}
 				warnx("unable to write label");
@@ -375,7 +380,7 @@ editor(struct disklabel *lp, int f)
 
 		case 'R':
 			if (aflag && !overlap)
-				editor_resize(&label, arg);
+				editor_resize(&newlab, arg);
 			else
 				fputs("Resize only implemented for auto "
 				    "allocated labels\n", stderr);
@@ -385,7 +390,7 @@ editor(struct disklabel *lp, int f)
 			struct diskchunk *chunks;
 			int i;
 			/* Display free space. */
-			chunks = free_chunks(&label);
+			chunks = free_chunks(&newlab);
 			for (i = 0; chunks[i].start != 0 || chunks[i].stop != 0;
 			    i++)
 				fprintf(stderr, "Free sectors: %16llu - %16llu "
@@ -393,7 +398,7 @@ editor(struct disklabel *lp, int f)
 				    chunks[i].start, chunks[i].stop - 1,
 				    chunks[i].stop - chunks[i].start);
 			fprintf(stderr, "Total free sectors: %llu.\n",
-			    editor_countfree(&label));
+			    editor_countfree(&newlab));
 			break;
 		}
 
@@ -408,7 +413,7 @@ editor(struct disklabel *lp, int f)
 			if ((fp = fopen(arg, "w")) == NULL) {
 				warn("cannot open %s", arg);
 			} else {
-				display(fp, &label, 0, 1);
+				display(fp, &newlab, 0, 1);
 				(void)fclose(fp);
 			}
 			break;
@@ -418,10 +423,10 @@ editor(struct disklabel *lp, int f)
 			 * If we allow 'U' repeatedly, information would be lost. This way
 			 * multiple 'U's followed by 'u' would undo the 'U's.
 			 */
-			if (memcmp(&label, &origlabel, sizeof(label)) ||
+			if (memcmp(&newlab, &origlabel, sizeof(newlab)) ||
 			    !mpequal(mountpoints, origmountpoints)) {
-				tmplabel = label;
-				label = origlabel;
+				tmplabel = newlab;
+				newlab = origlabel;
 				lastlabel = tmplabel;
 				mpcopy(tmpmountpoints, mountpoints);
 				mpcopy(mountpoints, origmountpoints);
@@ -431,8 +436,8 @@ editor(struct disklabel *lp, int f)
 			break;
 
 		case 'u':
-			tmplabel = label;
-			label = lastlabel;
+			tmplabel = newlab;
+			newlab = lastlabel;
 			lastlabel = tmplabel;
 			mpcopy(tmpmountpoints, mountpoints);
 			mpcopy(mountpoints, omountpoints);
@@ -447,11 +452,11 @@ editor(struct disklabel *lp, int f)
 			}
 
 			/* Write label to disk. */
-			if (writelabel(f, bootarea, &label) != 0)
+			if (writelabel(f, bootarea, &newlab) != 0)
 				warnx("unable to write label");
 			else {
 				dflag = aflag = 0;
-				*lp = label;
+				newlab = lab; /* lab now has UID info */
 			}
 			break;
 
@@ -466,7 +471,7 @@ editor(struct disklabel *lp, int f)
 			break;
 
 		case 'z':
-			zero_partitions(&label);
+			zero_partitions(&newlab);
 			break;
 
 		case '\n':
@@ -481,7 +486,7 @@ editor(struct disklabel *lp, int f)
 		 * If no changes were made to label or mountpoints, then
 		 * restore undo info.
 		 */
-		if (memcmp(&label, &lastlabel, sizeof(label)) == 0 &&
+		if (memcmp(&newlab, &lastlabel, sizeof(newlab)) == 0 &&
 		    (mpequal(mountpoints, omountpoints))) {
 			lastlabel = tmplabel;
 			mpcopy(omountpoints, tmpmountpoints);
@@ -587,8 +592,14 @@ again:
 		for (j = 0;  j < MAXPARTITIONS; j++)
 			if (DL_GETPSIZE(&lp->d_partitions[j]) == 0)
 				break;
-		if (j == MAXPARTITIONS)
-			return;
+		if (j == MAXPARTITIONS) {
+			/* It did not work out, try next strategy */
+			free(alloc);
+			if (++index < nitems(alloc_table))
+				goto again;
+			else
+				return;
+		}
 		partno = j;
 		pp = &lp->d_partitions[j];
 		partmp = &mountpoints[j];
@@ -656,7 +667,8 @@ cylinderalign:
 		/* Everything seems ok so configure the partition. */
 		DL_SETPSIZE(pp, secs);
 		DL_SETPOFFSET(pp, chunkstart);
-		fragsize = 2048;
+		fragsize = (lp->d_secsize == DEV_BSIZE) ? 2048 :
+		    lp->d_secsize;
 		if (secs * lp->d_secsize > 128ULL * 1024 * 1024 * 1024)
 			fragsize *= 2;
 		if (secs * lp->d_secsize > 512ULL * 1024 * 1024 * 1024)
@@ -726,11 +738,11 @@ editor_resize(struct disklabel *lp, char *p)
 		fputs("Cannot resize spoofed partition\n", stderr);
 		return;
 	}
-	secs = getuint(lp, "grow (+) or shrink (-) (with unit)",
-	    "amount to grow (+) or shrink (-) partition including unit",
-	    0, editor_countfree(lp), 0, DO_CONVERSIONS);
+	secs = getuint(lp, "[+|-]new size (with unit)",
+	    "new size or amount to grow (+) or shrink (-) partition including unit",
+	    sz, editor_countfree(lp), 0, DO_CONVERSIONS);
 
-	if (secs == 0 || secs == -1) {
+	if (secs <= 0) {
 		fputs("Command aborted\n", stderr);
 		return;
 	}
@@ -742,16 +754,13 @@ editor_resize(struct disklabel *lp, char *p)
 	else
 		secs = ((secs - cylsecs + 1) / cylsecs) * cylsecs;
 #endif
-	if (DL_GETPOFFSET(pp) + sz + secs > ending_sector) {
+	if (DL_GETPOFFSET(pp) + secs > ending_sector) {
 		fputs("Amount too big\n", stderr);
 		return;
 	}
-	if (sz + secs < 0) {
-		fputs("Amount too small\n", stderr);
-		return;
-	}
 
-	DL_SETPSIZE(pp, sz + secs);
+	DL_SETPSIZE(pp, secs);
+	get_bsize(&label, partno);
 
 	/*
 	 * Pack partitions above the resized partition, leaving unused
@@ -782,6 +791,7 @@ editor_resize(struct disklabel *lp, char *p)
 			fputs("No room left for all partitions\n", stderr);
 			return;
 		}
+		get_bsize(&label, i);
 		prev = pp;
 	}
 	*lp = label;
@@ -1194,13 +1204,19 @@ getuint(struct disklabel *lp, char *prompt, char *helpstring,
 					break;
 				case '%':
 					buf[--n] = '\0';
-					percent = strtod(buf, NULL) / 100.0;
+					p = &buf[0];
+					if (*p == '+' || *p == '-')
+						operator = *p++;
+					percent = strtod(p, NULL) / 100.0;
 					snprintf(buf, sizeof(buf), "%lld",
 					    DL_GETDSIZE(lp));
 					break;
 				case '&':
 					buf[--n] = '\0';
-					percent = strtod(buf, NULL) / 100.0;
+					p = &buf[0];
+					if (*p == '+' || *p == '-')
+						operator = *p++;
+					percent = strtod(p, NULL) / 100.0;
 					snprintf(buf, sizeof(buf), "%lld",
 					    maxval);
 					break;
@@ -1465,8 +1481,10 @@ edit_parms(struct disklabel *lp)
 			break;
 	}
 	/* Adjust ending_sector if necessary. */
-	if (ending_sector > ui)
+	if (ending_sector > ui) {
 		ending_sector = ui;
+		DL_SETBEND(lp, ending_sector);
+	}
 	DL_SETDSIZE(lp, ui);
 }
 
@@ -1607,7 +1625,9 @@ set_bounds(struct disklabel *lp)
 		}
 	} while (ui > DL_GETDSIZE(lp) - start_temp);
 	ending_sector = start_temp + ui;
+	DL_SETBEND(lp, ending_sector);
 	starting_sector = start_temp;
+	DL_SETBSTART(lp, starting_sector);
 }
 
 /*
@@ -1739,23 +1759,23 @@ editor_help(void)
 {
 	puts("Available commands:");
 	puts(
-"  ? | h    - show help                  n [part] - set mount point\n"
-"  A        - auto partition all space   p [unit] - print partitions\n"
-"  a [part] - add partition              q        - quit & save changes\n"
-"  b        - set OpenBSD boundaries     R [part] - resize a partition\n"
-"  c [part] - change partition size      r        - display free space\n"
-"  D        - reset label to default     s [path] - save label to file\n"
-"  d [part] - delete partition           U        - undo all changes\n"
-"  e        - edit drive parameters      u        - undo last change\n"
-"  g [d|u]  - [d]isk or [u]ser geometry  w        - write label to disk\n"
-"  i        - modify disklabel UID       X        - toggle expert mode\n"
-"  l [unit] - print disk label header    x        - exit & lose changes\n"
-"  M        - disklabel(8) man page      z        - delete all partitions\n"
-"  m [part] - modify partition\n"
+" ? | h    - show help                 n [part] - set mount point\n"
+" A        - auto partition all space  p [unit] - print partitions\n"
+" a [part] - add partition             q        - quit & save changes\n"
+" b        - set OpenBSD boundaries    R [part] - resize auto allocated partition\n"
+" c [part] - change partition size     r        - display free space\n"
+" D        - reset label to default    s [path] - save label to file\n"
+" d [part] - delete partition          U        - undo all changes\n"
+" e        - edit drive parameters     u        - undo last change\n"
+" g [d|u]  - [d]isk or [u]ser geometry w        - write label to disk\n"
+" i        - modify disklabel UID      X        - toggle expert mode\n"
+" l [unit] - print disk label header   x        - exit & lose changes\n"
+" M        - disklabel(8) man page     z        - delete all partitions\n"
+" m [part] - modify partition\n"
 "\n"
 "Suffixes can be used to indicate units other than sectors:\n"
-"\t'b' (bytes), 'k' (kilobytes), 'm' (megabytes), 'g' (gigabytes)\n"
-"\t'c' (cylinders), '%' (% of total disk), '&' (% of free space).\n"
+" 'b' (bytes), 'k' (kilobytes), 'm' (megabytes), 'g' (gigabytes) 't' (terabytes)\n"
+" 'c' (cylinders), '%' (% of total disk), '&' (% of free space).\n"
 "Values in non-sector units are truncated to the nearest cylinder boundary.");
 
 }
@@ -1806,6 +1826,7 @@ mpsave(struct disklabel *lp)
 	char bdev[MAXPATHLEN], *p;
 	struct mountinfo mi[MAXPARTITIONS];
 	FILE *fp;
+	u_int8_t fstype;
 
 	if (!fstabfile)
 		return;
@@ -1813,14 +1834,21 @@ mpsave(struct disklabel *lp)
 	memset(&mi, 0, sizeof(mi));
 
 	for (i = 0; i < MAXPARTITIONS; i++) {
-		if (mountpoints[i] != NULL) {
+		fstype = lp->d_partitions[i].p_fstype;
+		if (mountpoints[i] != NULL || fstype == FS_SWAP) {
 			mi[i].mountpoint = mountpoints[i];
 			mi[i].partno = i;
 		}
 	}
 
 	/* Convert specname to bdev */
-	if (strncmp(_PATH_DEV, specname, sizeof(_PATH_DEV) - 1) == 0 &&
+	if (uidflag) {
+		snprintf(bdev, sizeof(bdev),
+		    "%02hhx%02hhx%02hhx%02hhx%02hhx%02hhx%02hhx%02hhx.%c",
+		    lab.d_uid[0], lab.d_uid[1], lab.d_uid[2], lab.d_uid[3],
+		    lab.d_uid[4], lab.d_uid[5], lab.d_uid[6], lab.d_uid[7],
+		    specname[strlen(specname)-1]);
+	} else if (strncmp(_PATH_DEV, specname, sizeof(_PATH_DEV) - 1) == 0 &&
 	    specname[sizeof(_PATH_DEV) - 1] == 'r') {
 		snprintf(bdev, sizeof(bdev), "%s%s", _PATH_DEV,
 		    &specname[sizeof(_PATH_DEV)]);
@@ -1837,12 +1865,16 @@ mpsave(struct disklabel *lp)
 	qsort((void *)mi, MAXPARTITIONS, sizeof(struct mountinfo), micmp);
 
 	if ((fp = fopen(fstabfile, "w"))) {
-		for (i = 0; i < MAXPARTITIONS && mi[i].mountpoint; i++) {
+		for (i = 0; i < MAXPARTITIONS; i++) {
 			j =  mi[i].partno;
-			fprintf(fp, "%s%c %s %s rw 1 %d\n", bdev, 'a' + j,
-			    mi[i].mountpoint,
-			    fstypesnames[lp->d_partitions[j].p_fstype],
-			    j == 0 ? 1 : 2);
+			fstype = lp->d_partitions[j].p_fstype;
+			if (fstype == FS_SWAP) {
+				fprintf(fp, "%s%c none swap sw\n", bdev, 'a'+j);
+			} else if (mi[i].mountpoint) {
+				fprintf(fp, "%s%c %s %s rw 1 %d\n", bdev,
+				    'a' + j, mi[i].mountpoint,
+				    fstypesnames[fstype], j == 0 ? 1 : 2);
+			}
 		}
 		fclose(fp);
 	}
@@ -2151,9 +2183,8 @@ get_geometry(int f, struct disklabel **dgpp)
 	/* Get disk geometry */
 	if ((disk_geop = calloc(1, sizeof(struct disklabel))) == NULL)
 		errx(4, "out of memory");
-	if (ioctl(f, DIOCGPDINFO, disk_geop) < 0 &&
-	    ioctl(f, DIOCGDINFO, disk_geop) < 0)
-		err(4, "ioctl DIOCGDINFO");
+	if (ioctl(f, DIOCGPDINFO, disk_geop) < 0)
+		err(4, "ioctl DIOCGPDINFO");
 	*dgpp = disk_geop;
 }
 

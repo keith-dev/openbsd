@@ -1,4 +1,4 @@
-/*	$OpenBSD: conf.h,v 1.8 2010/11/28 20:48:46 miod Exp $	*/
+/*	$OpenBSD: conf.h,v 1.10 2011/07/04 16:52:41 nicm Exp $	*/
 /*	$NetBSD: conf.h,v 1.7 2002/04/19 01:04:39 wiz Exp $	*/
 
 /*
@@ -40,8 +40,8 @@
  * Prototypes for device driver functions
  */
 
-#ifndef _ARM_CONF_H
-#define	_ARM_CONF_H
+#ifndef _ARM_CONF_H_
+#define	_ARM_CONF_H_
  
 
 #include <sys/conf.h>
@@ -62,7 +62,7 @@ cdev_decl(fd);
         dev_init(c,n,open), dev_init(c,n,close), (dev_type_read((*))) enodev, \
         (dev_type_write((*))) enodev, dev_init(c,n,ioctl), \
 	(dev_type_stop((*))) enodev, 0, selfalse, \
-	(dev_type_mmap((*))) enodev, 0, D_KQFILTER, dev_init(c,n,kqfilter) }
+	(dev_type_mmap((*))) enodev, 0, 0, dev_init(c,n,kqfilter) }
 
 cdev_decl(com);
 cdev_decl(lpt);
@@ -70,4 +70,4 @@ cdev_decl(pci);
 cdev_decl(apm);
 cdev_decl(spkr);
 
-#endif	/* _ARM_CONF_H_ */
+#endif	/* _ARM_CONF_H__ */

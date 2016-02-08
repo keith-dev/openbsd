@@ -1,4 +1,4 @@
-/*	$OpenBSD: date.c,v 1.33 2010/03/31 17:51:21 deraadt Exp $	*/
+/*	$OpenBSD: date.c,v 1.37 2011/07/08 18:07:16 deraadt Exp $	*/
 /*	$NetBSD: date.c,v 1.11 1995/09/07 06:21:05 jtc Exp $	*/
 
 /*
@@ -46,12 +46,10 @@
 #include <unistd.h>
 #include <util.h>
 
-#include "extern.h"
-
 extern	char *__progname;
 
 time_t tval;
-int retval, jflag, nflag;
+int retval, jflag;
 int slidetime;
 
 static void setthetime(char *);
@@ -63,13 +61,13 @@ main(int argc, char *argv[])
 {
 	struct timezone tz;
 	int ch, rflag;
-	char *format, buf[1024];
+	char *format, buf[1024], *outzone = NULL;
 
 	setlocale(LC_ALL, "");
 
 	tz.tz_dsttime = tz.tz_minuteswest = 0;
 	rflag = 0;
-	while ((ch = getopt(argc, argv, "ad:jnr:ut:")) != -1)
+	while ((ch = getopt(argc, argv, "ad:jr:ut:z:")) != -1)
 		switch((char)ch) {
 		case 'd':		/* daylight saving time */
 			tz.tz_dsttime = atoi(optarg) ? 1 : 0;
@@ -79,9 +77,6 @@ main(int argc, char *argv[])
 			break;
 		case 'j':		/* don't set */
 			jflag = 1;
-			break;
-		case 'n':		/* don't set network */
-			nflag = 1;
 			break;
 		case 'r':		/* user specified seconds */
 			rflag = 1;
@@ -98,6 +93,9 @@ main(int argc, char *argv[])
 				break;
 			}
 			/* FALLTHROUGH */
+		case 'z':
+			outzone = optarg;
+			break;
 		default:
 			usage();
 		}
@@ -120,16 +118,26 @@ main(int argc, char *argv[])
 	/* allow the operands in any order */
 	if (*argv && **argv == '+') {
 		format = *argv + 1;
-		++argv;
+		argv++;
+		argc--;
 	}
 
 	if (*argv) {
 		setthetime(*argv);
-		++argv;
+		argv++;
+		argc--;
 	}
 
-	if (*argv && **argv == '+')
+	if (*argv && **argv == '+') {
 		format = *argv + 1;
+		argc--;
+	}
+
+	if (argc > 0)
+		errx(1, "too many arguments");
+
+	if (outzone)
+		setenv("TZ", outzone, 1);
 
 	(void)strftime(buf, sizeof(buf), format, localtime(&tval));
 	(void)printf("%s\n", buf);
@@ -214,43 +222,33 @@ setthetime(char *p)
 		return;
 
 	/* set the time */
-	if (nflag || netsettime(tval)) {
-		if (slidetime) {
-			struct timeval tv_current;
+	if (slidetime) {
+		struct timeval tv_current;
 
-			if (gettimeofday(&tv_current, NULL) == -1)
-				err(1, "Could not get local time of day");
+		if (gettimeofday(&tv_current, NULL) == -1)
+			err(1, "Could not get local time of day");
 
-			tv.tv_sec = tval - tv_current.tv_sec;
-			tv.tv_usec = 0;
-			if (adjtime(&tv, NULL) == -1)
-				errx(1, "adjtime");
-		} else {
+		tv.tv_sec = tval - tv_current.tv_sec;
+		tv.tv_usec = 0;
+		if (adjtime(&tv, NULL) == -1)
+			errx(1, "adjtime");
+	} else {
 #ifndef SMALL
-			logwtmp("|", "date", "");
+		logwtmp("|", "date", "");
 #endif
-			tv.tv_sec = tval;
-			tv.tv_usec = 0;
-			if (settimeofday(&tv, NULL))
-				err(1, "settimeofday");
+		tv.tv_sec = tval;
+		tv.tv_usec = 0;
+		if (settimeofday(&tv, NULL))
+			err(1, "settimeofday");
 #ifndef SMALL
-			logwtmp("{", "date", "");
+		logwtmp("{", "date", "");
 #endif
-		}
 	}
 
 	if ((p = getlogin()) == NULL)
 		p = "???";
 	syslog(LOG_AUTH | LOG_NOTICE, "date set by %s", p);
 }
-
-#ifdef SMALL
-int
-netsettime(tval)
-{
-	return (2);
-}
-#endif
 
 static void
 badformat(void)
@@ -263,9 +261,9 @@ static void
 usage(void)
 {
 	(void)fprintf(stderr,
-	    "usage: %s [-ajnu] [-d dst] [-r seconds] [-t minutes_west] [+format]\n",
+	    "usage: %s [-aju] [-d dst] [-r seconds] [-t minutes_west] [-z output_zone]\n",
 	     __progname);
 	(void)fprintf(stderr,
-	    "%-*s[[[[[[cc]yy]mm]dd]HH]MM[.SS]]\n", (int)strlen(__progname) + 8, "");
+	    "%-*s[+format] [[[[[[cc]yy]mm]dd]HH]MM[.SS]]\n", (int)strlen(__progname) + 8, "");
 	exit(1);
 }

@@ -1,4 +1,4 @@
-/*	$OpenBSD: sysctl.c,v 1.174 2010/11/02 10:24:34 dlg Exp $	*/
+/*	$OpenBSD: sysctl.c,v 1.177 2011/07/08 18:30:17 yasuoka Exp $	*/
 /*	$NetBSD: sysctl.c,v 1.9 1995/09/30 07:12:50 thorpej Exp $	*/
 
 /*
@@ -72,6 +72,7 @@
 
 #include <net/pfvar.h>
 #include <net/if_pfsync.h>
+#include <net/pipex.h>
 
 #ifdef INET6
 #include <netinet/ip6.h>
@@ -392,7 +393,6 @@ parse(char *string, int flags)
 			warnx("use pstat to view %s information", string);
 			return;
 		case KERN_PROC:
-		case KERN_PROC2:
 			if (flags == 0)
 				return;
 			warnx("use ps to view %s information", string);
@@ -588,6 +588,12 @@ parse(char *string, int flags)
 		}
 		if (mib[1] == PF_MPLS) {
 			len = sysctl_mpls(string, &bufp, mib, flags, &type);
+			if (len < 0)
+				return;
+			break;
+		}
+		if (mib[1] == PF_PIPEX) {
+			len = sysctl_pipex(string, &bufp, mib, flags, &type);
 			if (len < 0)
 				return;
 			break;
@@ -1004,49 +1010,75 @@ parse(char *string, int flags)
 	}
 }
 
+static void
+parse_ports(char *portspec, int *port, int *high_port)
+{
+	char *dash;
+	const char *errstr;
+
+	if ((dash = strchr(portspec, '-')) != NULL)
+		*dash++ = '\0';
+	*port = strtonum(portspec, 0, 65535, &errstr);
+	if (errstr != NULL)
+		errx(1, "port is %s: %s", errstr, portspec);
+	if (dash != NULL) {
+		*high_port = strtonum(dash, 0, 65535, &errstr);
+		if (errstr != NULL)
+			errx(1, "high port is %s: %s", errstr, dash);
+		if (*high_port < *port)
+			errx(1, "high port %d is lower than %d",
+			    *high_port, *port);
+	} else
+		*high_port = *port;
+}
+
 void
 parse_baddynamic(int mib[], size_t len, char *string, void **newvalp,
     size_t *newsizep, int flags, int nflag)
 {
 	static u_int32_t newbaddynamic[DP_MAPSIZE];
-	in_port_t port;
+	int port, high_port, baddynamic_loaded = 0, full_list_set = 0;
 	size_t size;
 	char action, *cp;
-	const char *errstr;
 
-	if (strchr((char *)*newvalp, '+') || strchr((char *)*newvalp, '-')) {
-		size = sizeof(newbaddynamic);
-		if (sysctl(mib, len, newbaddynamic, &size, 0, 0) == -1) {
-			if (flags == 0)
-				return;
-			if (!nflag)
-				(void)printf("%s: ", string);
-			(void)puts("kernel does contain bad dynamic port tables");
-			return;
-		}
-
-		while (*newvalp && (cp = strsep((char **)newvalp, ", \t")) && *cp) {
-			if (*cp != '+' && *cp != '-')
+	while (*newvalp && (cp = strsep((char **)newvalp, ", \t")) && *cp) {
+		if (*cp == '+' || *cp == '-') {
+			if (full_list_set)
 				errx(1, "cannot mix +/- with full list");
 			action = *cp++;
-			port = strtonum(cp, 0, 65535, &errstr);
-			if (errstr != NULL)
-				errx(1, "port is %s: %s", errstr, cp);
-			if (action == '+')
+			if (!baddynamic_loaded) {
+				size = sizeof(newbaddynamic);
+				if (sysctl(mib, len, newbaddynamic,
+				    &size, 0, 0) == -1) {
+					if (flags == 0)
+						return;
+					if (!nflag)
+						printf("%s: ", string);
+					puts("kernel does contain bad dynamic "
+					    "port tables");
+					return;
+				}
+				baddynamic_loaded = 1;
+			}
+			parse_ports(cp, &port, &high_port);
+			for (; port <= high_port; port++) {
+				if (action == '+')
+					DP_SET(newbaddynamic, port);
+				else
+					DP_CLR(newbaddynamic, port);
+			}
+		} else {
+			if (baddynamic_loaded)
+				errx(1, "cannot mix +/- with full list");
+			if (!full_list_set) {
+				bzero(newbaddynamic, sizeof(newbaddynamic));
+				full_list_set = 1;
+			}
+			parse_ports(cp, &port, &high_port);
+			for (; port <= high_port; port++)
 				DP_SET(newbaddynamic, port);
-			else
-				DP_CLR(newbaddynamic, port);
-		}
-	} else {
-		(void)memset((void *)newbaddynamic, 0, sizeof(newbaddynamic));
-		while (*newvalp && (cp = strsep((char **)newvalp, ", \t")) && *cp) {
-			port = strtonum(cp, 0, 65535, &errstr);
-			if (errstr != NULL)
-				errx(1, "port is %s: %s", errstr, cp);
-			DP_SET(newbaddynamic, port);
 		}
 	}
-
 	*newvalp = (void *)newbaddynamic;
 	*newsizep = sizeof(newbaddynamic);
 }
@@ -1321,6 +1353,7 @@ struct ctlname pfsyncname[] = PFSYNCCTL_NAMES;
 struct ctlname divertname[] = DIVERTCTL_NAMES;
 struct ctlname bpfname[] = CTL_NET_BPF_NAMES;
 struct ctlname ifqname[] = CTL_IFQ_NAMES;
+struct ctlname pipexname[] = PIPEXCTL_NAMES;
 struct list inetlist = { inetname, IPPROTO_MAXID };
 struct list inetvars[] = {
 	{ ipname, IPCTL_MAXID },	/* ip */
@@ -1585,6 +1618,7 @@ struct list inetvars[] = {
 };
 struct list bpflist = { bpfname, NET_BPF_MAXID };
 struct list ifqlist = { ifqname, IFQCTL_MAXID };
+struct list pipexlist = { pipexname, PIPEXCTL_MAXID };
 
 struct list kernmalloclist = { kernmallocname, KERN_MALLOC_MAXID };
 struct list forkstatlist = { forkstatname, KERN_FORKSTAT_MAXID };
@@ -2143,6 +2177,24 @@ sysctl_mpls(char *string, char **bufpp, int mib[], int flags, int *typep)
 		*typep = lp->list[tindx].ctl_type;
 		return(4);
 	}
+	return (3);
+}
+
+/* handle PIPEX requests */
+int
+sysctl_pipex(char *string, char **bufpp, int mib[], int flags, int *typep)
+{
+	struct list *lp;
+	int indx;
+
+	if (*bufpp == NULL) {
+		listall(string, &pipexlist);
+		return (-1);
+	}
+	if ((indx = findname(string, "third", bufpp, &pipexlist)) == -1)
+		return (-1);
+	mib[2] = indx;
+	*typep = pipexlist.list[indx].ctl_type;
 	return (3);
 }
 

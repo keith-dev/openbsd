@@ -1,4 +1,4 @@
-/* $OpenBSD: input.c,v 1.35 2011/01/28 20:39:22 nicm Exp $ */
+/* $OpenBSD: input.c,v 1.40 2011/07/08 06:28:05 nicm Exp $ */
 
 /*
  * Copyright (c) 2007 Nicholas Marriott <nicm@users.sourceforge.net>
@@ -41,6 +41,9 @@
  *
  * - A state for the screen \033k...\033\\ sequence to rename a window. This is
  *   pretty stupid but not supporting it is more trouble than it is worth.
+ *
+ * - Special handling for ESC inside a DCS to allow arbitrary byte sequences to
+ *   be passed to the underlying teminal(s).
  */
 
 /* Helper functions. */
@@ -50,8 +53,6 @@ void	input_reply(struct input_ctx *, const char *, ...);
 
 /* Transition entry/exit handlers. */
 void	input_clear(struct input_ctx *);
-void	input_enter_dcs(struct input_ctx *);
-void	input_exit_dcs(struct input_ctx *);
 void	input_enter_osc(struct input_ctx *);
 void	input_exit_osc(struct input_ctx *);
 void	input_enter_apc(struct input_ctx *);
@@ -68,6 +69,7 @@ int	input_c0_dispatch(struct input_ctx *);
 int	input_esc_dispatch(struct input_ctx *);
 int	input_csi_dispatch(struct input_ctx *);
 void	input_csi_dispatch_sgr(struct input_ctx *);
+int	input_dcs_dispatch(struct input_ctx *);
 int	input_utf8_open(struct input_ctx *);
 int	input_utf8_add(struct input_ctx *);
 int	input_utf8_close(struct input_ctx *);
@@ -124,6 +126,7 @@ enum input_csi_type {
 	INPUT_CSI_CUU,
 	INPUT_CSI_DA,
 	INPUT_CSI_DCH,
+	INPUT_CSI_DECSCUSR,
 	INPUT_CSI_DECSTBM,
 	INPUT_CSI_DL,
 	INPUT_CSI_DSR,
@@ -166,6 +169,7 @@ const struct input_table_entry input_csi_table[] = {
 	{ 'l', "?", INPUT_CSI_RM_PRIVATE },
 	{ 'm', "",  INPUT_CSI_SGR },
 	{ 'n', "",  INPUT_CSI_DSR },
+	{ 'q', " ", INPUT_CSI_DECSCUSR },
 	{ 'r', "",  INPUT_CSI_DECSTBM },
 };
 
@@ -204,6 +208,7 @@ const struct input_transition input_state_dcs_enter_table[];
 const struct input_transition input_state_dcs_parameter_table[];
 const struct input_transition input_state_dcs_intermediate_table[];
 const struct input_transition input_state_dcs_handler_table[];
+const struct input_transition input_state_dcs_escape_table[];
 const struct input_transition input_state_dcs_ignore_table[];
 const struct input_transition input_state_osc_string_table[];
 const struct input_transition input_state_apc_string_table[];
@@ -286,8 +291,15 @@ const struct input_state input_state_dcs_intermediate = {
 /* dcs_handler state definition. */
 const struct input_state input_state_dcs_handler = {
 	"dcs_handler",
-	input_enter_dcs, input_exit_dcs,
+	NULL, NULL,
 	input_state_dcs_handler_table
+};
+
+/* dcs_escape state definition. */
+const struct input_state input_state_dcs_escape = {
+	"dcs_escape",
+	NULL, NULL,
+	input_state_dcs_escape_table
 };
 
 /* dcs_ignore state definition. */
@@ -482,7 +494,7 @@ const struct input_transition input_state_dcs_enter_table[] = {
 	{ 0x3a, 0x3a, NULL,		  &input_state_dcs_ignore },
 	{ 0x3b, 0x3b, input_parameter,	  &input_state_dcs_parameter },
 	{ 0x3c, 0x3f, input_intermediate, &input_state_dcs_parameter },
-	{ 0x40, 0x7e, NULL,		  &input_state_dcs_handler },
+	{ 0x40, 0x7e, input_input,	  &input_state_dcs_handler },
 	{ 0x7f, 0xff, NULL,		  NULL },
 
 	{ -1, -1, NULL, NULL }
@@ -500,7 +512,7 @@ const struct input_transition input_state_dcs_parameter_table[] = {
 	{ 0x3a, 0x3a, NULL,		  &input_state_dcs_ignore },
 	{ 0x3b, 0x3b, input_parameter,	  NULL },
 	{ 0x3c, 0x3f, NULL,		  &input_state_dcs_ignore },
-	{ 0x40, 0x7e, NULL,		  &input_state_dcs_handler },
+	{ 0x40, 0x7e, input_input,	  &input_state_dcs_handler },
 	{ 0x7f, 0xff, NULL,		  NULL },
 
 	{ -1, -1, NULL, NULL }
@@ -515,7 +527,7 @@ const struct input_transition input_state_dcs_intermediate_table[] = {
 	{ 0x1c, 0x1f, NULL,		  NULL },
 	{ 0x20, 0x2f, input_intermediate, NULL },
 	{ 0x30, 0x3f, NULL,		  &input_state_dcs_ignore },
-	{ 0x40, 0x7e, NULL,		  &input_state_dcs_handler },
+	{ 0x40, 0x7e, input_input,	  &input_state_dcs_handler },
 	{ 0x7f, 0xff, NULL,		  NULL },
 
 	{ -1, -1, NULL, NULL }
@@ -523,18 +535,27 @@ const struct input_transition input_state_dcs_intermediate_table[] = {
 
 /* dcs_handler state table. */
 const struct input_transition input_state_dcs_handler_table[] = {
-	INPUT_STATE_ANYWHERE,
+	/* No INPUT_STATE_ANYWHERE */
 
-	{ 0x00, 0x17, NULL,	    NULL },
-	{ 0x19, 0x19, input_input,  NULL },
-	{ 0x1c, 0x1f, input_input,  NULL },
-	{ 0x20, 0x7e, input_input,  NULL },
-	{ 0x7f, 0xff, NULL,	    NULL },
+	{ 0x00, 0x1a, input_input,  NULL },
+	{ 0x1b, 0x1b, NULL,	    &input_state_dcs_escape },
+	{ 0x1c, 0xff, input_input,  NULL },
 
 	{ -1, -1, NULL, NULL }
 };
 
-/* device_ignore state table. */
+/* dcs_escape state table. */
+const struct input_transition input_state_dcs_escape_table[] = {
+	/* No INPUT_STATE_ANYWHERE */
+
+	{ 0x00, 0x5b, input_input,	  &input_state_dcs_handler },
+	{ 0x5c, 0x5c, input_dcs_dispatch, &input_state_ground },
+	{ 0x5d, 0xff, input_input,	  &input_state_dcs_handler },
+
+	{ -1, -1, NULL, NULL }
+};
+
+/* dcs_ignore state table. */
 const struct input_transition input_state_dcs_ignore_table[] = {
 	INPUT_STATE_ANYWHERE,
 
@@ -770,7 +791,7 @@ input_split(struct input_ctx *ictx)
 	return (0);
 }
 
-/* Get an argument or return default value..*/
+/* Get an argument or return default value. */
 int
 input_get(struct input_ctx *ictx, u_int validx, int minval, int defval)
 {
@@ -1240,6 +1261,10 @@ input_csi_dispatch(struct input_ctx *ictx)
 		n = input_get(ictx, 0, 1, 1);
 		screen_write_cursormove(sctx, s->cx, n - 1);
 		break;
+	case INPUT_CSI_DECSCUSR:
+		n = input_get(ictx, 0, 0, 0);
+		screen_set_cursor_style(s, n);
+		break;
 	}
 
 	return (0);
@@ -1277,7 +1302,7 @@ input_csi_dispatch_sgr(struct input_ctx *ictx)
 					gc->fg = 8;
 				} else if (n == 48) {
 					gc->flags &= ~GRID_FLAG_BG256;
-					gc->fg = 8;
+					gc->bg = 8;
 				}
 
 			} else {
@@ -1391,20 +1416,26 @@ input_csi_dispatch_sgr(struct input_ctx *ictx)
 	}
 }
 
-/* DCS string started. */
-void
-input_enter_dcs(struct input_ctx *ictx)
-{
-	log_debug("%s", __func__);
-
-	input_clear(ictx);
-}
-
 /* DCS terminator (ST) received. */
-void
-input_exit_dcs(unused struct input_ctx *ictx)
+int
+input_dcs_dispatch(struct input_ctx *ictx)
 {
-	log_debug("%s", __func__);
+	const char	prefix[] = "tmux;";
+	const u_int	prefix_len = (sizeof prefix) - 1;
+
+	if (ictx->flags & INPUT_DISCARD)
+		return (0);
+
+	log_debug("%s: \"%s\"", __func__, ictx->input_buf);
+
+	/* Check for tmux prefix. */
+	if (ictx->input_len >= prefix_len &&
+	    strncmp(ictx->input_buf, prefix, prefix_len) == 0) {
+		screen_write_rawstring(&ictx->ctx,
+		    ictx->input_buf + prefix_len, ictx->input_len - prefix_len);
+	}
+
+	return (0);
 }
 
 /* OSC string started. */
@@ -1420,17 +1451,39 @@ input_enter_osc(struct input_ctx *ictx)
 void
 input_exit_osc(struct input_ctx *ictx)
 {
+	u_char *p = ictx->input_buf;
+	int	option;
+
 	if (ictx->flags & INPUT_DISCARD)
 		return;
-	log_debug("%s: \"%s\"", __func__, ictx->input_buf);
-
-	if (ictx->input_len < 2 || ictx->input_buf[1] != ';')
-		return;
-	if (ictx->input_buf[0] != '0' && ictx->input_buf[0] != '2')
+	if (ictx->input_len < 1 || *p < '0' || *p > '9')
 		return;
 
-	screen_set_title(ictx->ctx.s, ictx->input_buf + 2);
-	server_status_window(ictx->wp->window);
+	log_debug("%s: \"%s\"", __func__, p);
+
+	option = 0;
+	while (*p >= '0' && *p <= '9')
+		option = option * 10 + *p++ - '0';
+	if (*p == ';')
+		p++;
+
+	switch (option) {
+	case 0:
+	case 2:
+		screen_set_title(ictx->ctx.s, p);
+		server_status_window(ictx->wp->window);
+		break;
+	case 12:
+		screen_set_cursor_colour(ictx->ctx.s, p);
+		break;
+	case 112:
+		if (*p == '\0') /* No arguments allowed. */
+			screen_set_cursor_colour(ictx->ctx.s, "");
+		break;
+	default:
+		log_debug("%s: unknown '%u'", __func__, option);
+		break;
+	}
 }
 
 /* APC string started. */

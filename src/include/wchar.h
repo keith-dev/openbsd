@@ -1,4 +1,4 @@
-/*	$OpenBSD: wchar.h,v 1.11 2010/07/24 09:58:39 guenther Exp $	*/
+/*	$OpenBSD: wchar.h,v 1.19 2011/07/04 04:37:34 nicm Exp $	*/
 /*	$NetBSD: wchar.h,v 1.16 2003/03/07 07:11:35 tshiozak Exp $	*/
 
 /*-
@@ -65,8 +65,10 @@
 #ifndef	NULL
 #ifdef	__GNUG__
 #define	NULL	__null
-#else
+#elif defined(__cplusplus)
 #define	NULL	0L
+#else
+#define	NULL	((void *)0)
 #endif
 #endif
 
@@ -145,6 +147,12 @@ long int wcstol(const wchar_t * __restrict, wchar_t ** __restrict, int base);
 unsigned long int wcstoul(const wchar_t * __restrict, wchar_t ** __restrict,
 		int base);
 
+#if __POSIX_VISIBLE >= 200809
+wchar_t	*wcsdup(const wchar_t *);
+int wcscasecmp(const wchar_t *, const wchar_t *);
+int wcsncasecmp(const wchar_t *, const wchar_t *, size_t);
+#endif
+
 #if __ISO_C_VISIBLE >= 1999
 float	wcstof(const wchar_t * __restrict, wchar_t ** __restrict);
 long double wcstold(const wchar_t * __restrict, wchar_t ** __restrict);
@@ -171,6 +179,14 @@ wint_t putwc(wchar_t, FILE *);
 wint_t putwchar(wchar_t);
 
 int fwide(FILE *, int);
+
+int fwprintf(FILE * __restrict, const wchar_t * __restrict, ...);
+int swprintf(wchar_t * __restrict, size_t, const wchar_t * __restrict, ...);
+int vfwprintf(FILE * __restrict, const wchar_t * __restrict, __va_list);
+int vswprintf(wchar_t * __restrict, size_t, const wchar_t * __restrict,
+	__va_list);
+int vwprintf(const wchar_t * __restrict, __va_list);
+int wprintf(const wchar_t * __restrict, ...);
 
 #define getwc(f) fgetwc(f)
 #define getwchar() getwc(stdin)

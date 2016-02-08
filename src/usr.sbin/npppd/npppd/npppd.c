@@ -1,4 +1,4 @@
-/* $OpenBSD: npppd.c,v 1.8 2010/09/24 14:50:30 yasuoka Exp $ */
+/* $OpenBSD: npppd.c,v 1.12 2011/07/08 06:14:54 yasuoka Exp $ */
 
 /*-
  * Copyright (c) 2009 Internet Initiative Japan Inc.
@@ -29,7 +29,7 @@
  * Next pppd(nppd). This file provides a npppd daemon process and operations
  * for npppd instance.
  * @author	Yasuoka Masahiko
- * $Id: npppd.c,v 1.8 2010/09/24 14:50:30 yasuoka Exp $
+ * $Id: npppd.c,v 1.12 2011/07/08 06:14:54 yasuoka Exp $
  */
 #include <sys/cdefs.h>
 #include "version.h"
@@ -49,6 +49,7 @@ __COPYRIGHT(
 #include <sys/socket.h>
 #include <sys/param.h>
 #include <sys/sysctl.h>
+#include <sys/wait.h>
 #include <netinet/in.h>
 #include <netinet/in_systm.h>
 #include <netinet/ip.h>
@@ -113,9 +114,10 @@ static uint32_t        str_hash(const void *, int);
 static void            npppd_on_sighup (int, short, void *);
 static void            npppd_on_sigterm (int, short, void *);
 static void            npppd_on_sigint (int, short, void *);
+static void            npppd_on_sigchld (int, short, void *);
 static void            npppd_reset_timer(npppd *);
 static void            npppd_timer(int, short, void *);
-static void	       npppd_auth_finalizer_periodic(npppd *);
+static void            npppd_auth_finalizer_periodic(npppd *);
 static int  rd2slist_walk (struct radish *, void *);
 static int  rd2slist (struct radish_head *, slist *);
 static inline void     seed_random(long *);
@@ -146,11 +148,12 @@ int        main (int, char *[]);
 int
 main(int argc, char *argv[])
 {
-	int ch, retval = 0, ll_adjust = 0, runasdaemon = 0;
+	int ch, retstatus, ll_adjust = 0, runasdaemon = 0;
 	extern char *optarg;
 	const char *npppd_conf0 = DEFAULT_NPPPD_CONF;
 	struct passwd *pw;
 
+	retstatus = EXIT_SUCCESS;
 	while ((ch = getopt(argc, argv, "Dc:dhs")) != -1) {
 		switch (ch) {
 		case 's':
@@ -192,7 +195,7 @@ main(int argc, char *argv[])
 		err(1, "cannot drop privileges");
 
 	if (npppd_init(&s_npppd, npppd_conf0) != 0) {
-		retval = 1;
+		retstatus = EXIT_FAILURE;
 		goto fail;
 	}
 
@@ -209,13 +212,15 @@ main(int argc, char *argv[])
 	/* privileges is dropped */
 
 	npppd_start(&s_npppd);
+	if (s_npppd.stop_by_error != 0)
+		retstatus = EXIT_FAILURE;
 	npppd_fini(&s_npppd);
 	/* FALLTHROUGH */
 fail:
 	privsep_fini();
 	log_printf(LOG_NOTICE, "Terminate npppd.");
 
-	return retval;
+	exit(retstatus);
 }
 
 static void
@@ -255,7 +260,9 @@ npppd_init(npppd *_this, const char *config_file)
 	long seed;
 
 	memset(_this, 0, sizeof(npppd));
+#ifndef	NO_ROUTE_FOR_POOLED_ADDRESS
 	loop.s_addr = htonl(INADDR_LOOPBACK);
+#endif
 
 	NPPPD_ASSERT(config_file != NULL);
 
@@ -284,6 +291,8 @@ npppd_init(npppd *_this, const char *config_file)
 	/* initialize random seeds */
 	seed_random(&seed);
 	srandom(seed);
+
+	_this->boot_id = (uint32_t)random();
 
 	/* load configuration */
 	if ((status = npppd_reload_config(_this)) != 0)
@@ -342,9 +351,11 @@ npppd_init(npppd *_this, const char *config_file)
 	signal_set(&_this->ev_sigterm, SIGTERM, npppd_on_sigterm, _this);
 	signal_set(&_this->ev_sigint, SIGINT, npppd_on_sigint, _this);
 	signal_set(&_this->ev_sighup, SIGHUP, npppd_on_sighup, _this);
+	signal_set(&_this->ev_sigchld, SIGCHLD, npppd_on_sigchld, _this);
 	signal_add(&_this->ev_sigterm, NULL);
 	signal_add(&_this->ev_sigint, NULL);
 	signal_add(&_this->ev_sighup, NULL);
+	signal_add(&_this->ev_sigchld, NULL);
 
 	evtimer_set(&_this->ev_timer, npppd_timer, _this);
 
@@ -489,6 +500,7 @@ npppd_fini(npppd *_this)
 	signal_del(&_this->ev_sigterm);
 	signal_del(&_this->ev_sigint);
 	signal_del(&_this->ev_sighup);
+	signal_del(&_this->ev_sigchld);
 
 	if (_this->properties != NULL)
 		properties_destroy(_this->properties);
@@ -564,6 +576,9 @@ npppd_reset_routing_table(npppd *_this, int pool_only)
 {
 #ifndef	NO_ROUTE_FOR_POOLED_ADDRESS
 	slist rtlist0;
+
+	if (_this->iface[0].using_pppx) 
+		return 0;
 
 	slist_init(&rtlist0);
 	if (rd2slist(_this->rd, &rtlist0) != 0)
@@ -925,6 +940,7 @@ pipex_setup_common(npppd_ppp *ppp, struct pipex_session_req *req)
 	if (ppp->adjust_mss != 0)
 		req->pr_ppp_flags |= PIPEX_PPP_ADJUST_TCPMSS;
 
+	req->pr_ip_srcaddr = ppp->pppd->iface[0].ip4addr;
 	req->pr_ip_address = ppp->ppp_framed_ip_address;
 	req->pr_ip_netmask = ppp->ppp_framed_ip_netmask;
 	req->pr_peer_mru = ppp->peer_mru;
@@ -1077,6 +1093,19 @@ npppd_ppp_pipex_enable(npppd *_this, npppd_ppp *ppp)
 		return error;
 	}
 
+	if (_this->iface[ppp->ifidx].using_pppx) {
+		struct pipex_session_descr_req descr_req;
+
+		descr_req.pdr_protocol = req.pr_protocol;
+		descr_req.pdr_session_id = req.pr_session_id;
+		memset(descr_req.pdr_descr, 0, sizeof(descr_req.pdr_descr));
+		strlcpy(descr_req.pdr_descr, ppp->username, sizeof(descr_req.pdr_descr));
+		error = ioctl(_this->iface[ppp->ifidx].devf, PIPEXSIFDESCR, &descr_req);
+		if (error != 0) {
+			log_printf(LOG_WARNING, "PIPEXSIFDESCR(%s) failed: %d\n", ppp->username, error);
+		}
+	}
+
 	ppp->pipex_enabled = 1;
 	if (ppp->timeout_sec > 0) {
 		/* Stop the npppd's idle-timer.  We use pipex's idle-timer */
@@ -1124,6 +1153,15 @@ npppd_ppp_pipex_disable(npppd *_this, npppd_ppp *ppp)
 		/* PPTP specific informations */
 		req.pcr_session_id = call->id;
 		req.pcr_protocol = PIPEX_PROTO_PPTP;
+		break;
+#endif
+#ifdef USE_NPPPD_L2TP
+	case PPP_TUNNEL_L2TP:
+		l2tp = (l2tp_call *)ppp->phy_context;
+
+		/* L2TP specific context */
+		req.pcr_session_id = l2tp->session_id;
+		req.pcr_protocol = PIPEX_PROTO_L2TP;
 		break;
 #endif
 	default:
@@ -1256,6 +1294,11 @@ pipex_periodic(npppd *_this)
 			continue;
 		}
 		ppp_log(ppp, LOG_INFO, "Stop requested by the kernel");
+		/* TODO: PIPEX doesn't return the disconect reason */
+#ifdef USE_NPPPD_RADIUS
+		ppp_set_radius_terminate_cause(ppp,
+		    RADIUS_TERMNATE_CAUSE_IDLE_TIMEOUT);
+#endif
 		ppp_stop(ppp, NULL);
 	}
 pipex_done:
@@ -1361,42 +1404,50 @@ npppd_set_ip_enabled(npppd *_this, npppd_ppp *ppp, int enabled)
 		}
 
 #ifndef	NO_ROUTE_FOR_POOLED_ADDRESS
-		if (ppp->snp.snp_next != NULL)
-			/*
-			 * There is a blackhole route that has same
-			 * address/mask.
-			 */
-			in_route_delete(&ppp->ppp_framed_ip_address,
-			    &ppp->ppp_framed_ip_netmask, &loop, RTF_BLACKHOLE);
-		/* See the comment for MRU_IPMTU() on ppp.h */
-		if (ppp->ppp_framed_ip_netmask.s_addr == 0xffffffffL) {
-			in_host_route_add(&ppp->ppp_framed_ip_address,
-			    &ppp_iface(ppp)->ip4addr, ppp_iface(ppp)->ifname,
-			    MRU_IPMTU(ppp->peer_mru));
-		} else {
-			in_route_add(&ppp->ppp_framed_ip_address,
-			    &ppp->ppp_framed_ip_netmask,
-			    &ppp_iface(ppp)->ip4addr, ppp_iface(ppp)->ifname, 0,
-			    MRU_IPMTU(ppp->peer_mru));
+		if (_this->iface[ppp->ifidx].using_pppx == 0) {
+			if (ppp->snp.snp_next != NULL)
+				/*
+				 * There is a blackhole route that has same
+				 * address/mask.
+				 */
+				in_route_delete(&ppp->ppp_framed_ip_address,
+				    &ppp->ppp_framed_ip_netmask, &loop,
+				    RTF_BLACKHOLE);
+			/* See the comment for MRU_IPMTU() on ppp.h */
+			if (ppp->ppp_framed_ip_netmask.s_addr == 0xffffffffL) {
+				in_host_route_add(&ppp->ppp_framed_ip_address,
+				    &ppp_iface(ppp)->ip4addr,
+				    ppp_iface(ppp)->ifname,
+				    MRU_IPMTU(ppp->peer_mru));
+			} else {
+				in_route_add(&ppp->ppp_framed_ip_address,
+				    &ppp->ppp_framed_ip_netmask,
+				    &ppp_iface(ppp)->ip4addr,
+				    ppp_iface(ppp)->ifname, 0,
+				    MRU_IPMTU(ppp->peer_mru));
+			}
 		}
 #endif
 	} else {
 #ifndef	NO_ROUTE_FOR_POOLED_ADDRESS
-		if (ppp->ppp_framed_ip_netmask.s_addr == 0xffffffffL) {
-			in_host_route_delete(&ppp->ppp_framed_ip_address,
-			    &ppp_iface(ppp)->ip4addr);
-		} else {
-			in_route_delete(&ppp->ppp_framed_ip_address,
-			    &ppp->ppp_framed_ip_netmask,
-			    &ppp_iface(ppp)->ip4addr, 0);
+		if (_this->iface[ppp->ifidx].using_pppx == 0) {
+			if (ppp->ppp_framed_ip_netmask.s_addr == 0xffffffffL) {
+				in_host_route_delete(&ppp->ppp_framed_ip_address,
+				    &ppp_iface(ppp)->ip4addr);
+			} else {
+				in_route_delete(&ppp->ppp_framed_ip_address,
+				    &ppp->ppp_framed_ip_netmask,
+				    &ppp_iface(ppp)->ip4addr, 0);
+			}
+			if (ppp->snp.snp_next != NULL)
+				/*
+				 * There is a blackhole route that has same
+				 * address/mask.
+				 */
+				in_route_add(&ppp->snp.snp_addr,
+				    &ppp->snp.snp_mask, &loop, LOOPBACK_IFNAME,
+				    RTF_BLACKHOLE, 0);
 		}
-		if (ppp->snp.snp_next != NULL)
-			/*
-			 * There is a blackhole route that has same
-			 * address/mask.
-			 */
-			in_route_add(&ppp->snp.snp_addr, &ppp->snp.snp_mask,
-			    &loop, LOOPBACK_IFNAME, RTF_BLACKHOLE, 0);
 #endif
 		if (ppp->username[0] != '\0') {
 			hl = hash_lookup(_this->map_user_ppp, ppp->username);
@@ -1713,27 +1764,31 @@ npppd_set_radish(npppd *_this, void *radish_head)
 	}
 	count = 0;
 #ifndef	NO_ROUTE_FOR_POOLED_ADDRESS
-	for (slist_itr_first(&rtlist0); slist_itr_has_next(&rtlist0);) {
-		radish = slist_itr_next(&rtlist0);
-		in_route_delete(&SIN(radish->rd_route)->sin_addr,
-		    &SIN(radish->rd_mask)->sin_addr, &loop, RTF_BLACKHOLE);
-		count++;
-	}
-	if (count > 0)
-		log_printf(LOG_INFO,
-		    "Deleted %d routes for old pool addresses", count);
+	if (_this->iface[0].using_pppx == 0) {
+		for (slist_itr_first(&rtlist0); slist_itr_has_next(&rtlist0);) {
+			radish = slist_itr_next(&rtlist0);
+			in_route_delete(&SIN(radish->rd_route)->sin_addr,
+			    &SIN(radish->rd_mask)->sin_addr, &loop,
+			    RTF_BLACKHOLE);
+			count++;
+		}
+		if (count > 0)
+			log_printf(LOG_INFO,
+			    "Deleted %d routes for old pool addresses", count);
 
-	count = 0;
-	for (slist_itr_first(&rtlist1); slist_itr_has_next(&rtlist1);) {
-		radish = slist_itr_next(&rtlist1);
-		in_route_add(&(SIN(radish->rd_route)->sin_addr),
-		    &SIN(radish->rd_mask)->sin_addr, &loop, LOOPBACK_IFNAME,
-		    RTF_BLACKHOLE, 0);
-		count++;
+		count = 0;
+		for (slist_itr_first(&rtlist1); slist_itr_has_next(&rtlist1);) {
+			radish = slist_itr_next(&rtlist1);
+			in_route_add(&(SIN(radish->rd_route)->sin_addr),
+			    &SIN(radish->rd_mask)->sin_addr, &loop,
+			    LOOPBACK_IFNAME, RTF_BLACKHOLE, 0);
+			count++;
+		}
+		if (count > 0)
+			log_printf(LOG_INFO,
+				    "Added %d routes for new pool addresses",
+				    count);
 	}
-	if (count > 0)
-		log_printf(LOG_INFO,
-		    "Added %d routes for new pool addresses", count);
 #endif
 	slist_fini(&rtlist0);
 	slist_fini(&rtlist1);
@@ -1876,6 +1931,28 @@ npppd_on_sigint(int fd, short ev_type, void *ctx)
 	npppd_stop(_this);
 }
 
+static void
+npppd_on_sigchld(int fd, short ev_type, void *ctx)
+{
+	int status;
+	pid_t wpid;
+	npppd *_this;
+
+	_this = ctx;
+	wpid = privsep_priv_pid();
+	if (wait4(wpid, &status, WNOHANG, NULL) == wpid) {
+		if (WIFSIGNALED(status))
+			log_printf(LOG_WARNING,
+			    "priviledged process exits abnormaly.  signal=%d",
+			    WTERMSIG(status));
+		else
+			log_printf(LOG_WARNING,
+			    "priviledged process exits abnormaly.  status=%d",
+			    WEXITSTATUS(status));
+		_this->stop_by_error = 1;
+		npppd_stop(_this);
+	}
+}
 /***********************************************************************
  * Miscellaneous functions
  ***********************************************************************/
@@ -1980,10 +2057,10 @@ npppd_ppp_bind_realm(npppd *_this, npppd_ppp *ppp, const char *username, int
 			    strcmp(username + lusername - lsuffix,
 				npppd_auth_get_suffix(realm0)) == 0))) {
 				/* check prefix */
-				lprefix = strlen(npppd_auth_get_suffix(realm0));
+				lprefix = strlen(npppd_auth_get_prefix(realm0));
 				if (lprefix > 0 &&
 				    strncmp(username,
-					    npppd_auth_get_suffix(realm0),
+					    npppd_auth_get_prefix(realm0),
 					    lprefix) != 0)
 					continue;
 
@@ -2178,7 +2255,7 @@ npppd_rd_walktree_delete(struct radish_head *rh)
  * @return return NULL if no usable RADIUS setting.
  */
 void *
-npppd_get_radius_req_setting(npppd *_this, npppd_ppp *ppp)
+npppd_get_radius_auth_setting(npppd *_this, npppd_ppp *ppp)
 {
 	NPPPD_ASSERT(_this != NULL);
 	NPPPD_ASSERT(ppp != NULL);
@@ -2188,21 +2265,7 @@ npppd_get_radius_req_setting(npppd *_this, npppd_ppp *ppp)
 	if (!npppd_ppp_is_realm_radius(_this, ppp))
 		return NULL;
 
-	return npppd_auth_radius_get_radius_req_setting(
-	    (npppd_auth_radius *)ppp->realm);
-}
-
-/** Notice a failure on RAIDUS request/response */
-void
-npppd_radius_server_failure_notify(npppd *_this, npppd_ppp *ppp, void *rad_ctx,
-    const char *reason)
-{
-	NPPPD_ASSERT(rad_ctx != NULL);
-	NPPPD_ASSERT(ppp != NULL);
-
-	npppd_auth_radius_server_failure_notify(
-	    (npppd_auth_radius *)ppp->realm, radius_get_server_address(rad_ctx),
-	    reason);
+	return npppd_auth_radius_get_radius_auth_setting(ppp->realm);
 }
 #endif
 
@@ -2248,8 +2311,10 @@ npppd_auth_finalizer_periodic(npppd *_this)
 				slist_itr_remove(&users);
 			}
 		}
-		if (refcnt == 0)
+		if (refcnt == 0) {
 			npppd_auth_destroy(auth_base);
+			slist_itr_remove(&_this->realms);
+		}
 	}
 	if (ndisposing > 0)
 		slist_fini(&users);

@@ -1,4 +1,4 @@
-.\" $OpenBSD: bsd.port.mk.5,v 1.276 2010/12/11 10:41:30 martynas Exp $
+.\" $OpenBSD: bsd.port.mk.5,v 1.284 2011/07/15 23:11:59 fgsch Exp $
 .\"
 .\" Copyright (c) 2000-2008 Marc Espie
 .\"
@@ -24,7 +24,7 @@
 .\" (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
 .\" THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 .\"
-.Dd $Mdocdate: December 11 2010 $
+.Dd $Mdocdate: July 15 2011 $
 .Dt BSD.PORT.MK 5
 .Os
 .Sh NAME
@@ -85,9 +85,10 @@ for
 .It Ar full-{build,run,all}-depends
 Print all dependencies a package depends upon for building, running,
 or both, as a list of package names.
-.It Ar {build,lib,run}-depends-list
+.It Ar {build,lib,regress,run}-depends-list
 Print a list of first level package specifications a port depends as
-build dependencies, library dependencies, or run dependencies.
+build dependencies, library dependencies, regress dependencies or
+run dependencies.
 .It Ar print-{build,run}-depends
 User convenience target that displays the result of
 .Ar full-{build,run}-depends
@@ -821,6 +822,20 @@ Flags appended to
 if
 .Ev WARNINGS
 is set.
+.It Ev CCACHE_DIR
+Sets the cache directory used when
+.Ev USE_CCACHE
+is set to yes.
+Defaults to ${WRKOBJDIR}/.ccache.
+Can be set on a per-${PKGPATH} basis.
+For instance, setting CCACHE_DIR_www/mozilla=/tmp/ccache
+will affect only the mozilla port.
+.It Ev CCACHE_ENV
+Sets additional environment variables when
+.Ev USE_CCACHE
+is set to yes.
+For instance, to enable verbose logging, set
+CCACHE_ENV="CCACHE_LOGFILE=/tmp/ccache.log"
 .It Ev CDROM_SITE
 Path to a local database that holds distribution files (usually a CD-ROM
 or other similar media), used to retrieve distribution files before going
@@ -1088,7 +1103,7 @@ ERRORS+="Fatal: Missing comment"
 In the normal extraction stage (when
 .Ev EXTRACT_ONLY
 is not empty), this is the contents of a case statement, used to extract files.
-Fragments are automatically appended to extract tar and zip
+Fragments are automatically appended to extract tar, xz and zip
 archives, so that the default case is equivalent to the following shell
 fragment:
 .Bd -literal
@@ -1097,6 +1112,8 @@ cd ${WRKDIR}
 for archive in ${EXTRACT_ONLY}
 do
     case $$archive in
+    	*.tar.xz)
+	  xzcat ${FULLDISTDIR}/$$archive| tar xf -;;
 	*.zip)
 	  unzip -q ${FULLDISTDIR}/$$archive -d ${WRKDIR};;
 	*.tar.bz2)
@@ -1112,6 +1129,8 @@ do
     esac
 done
 .Ed
+The use of xz archives is discouraged, as it makes things impossible to
+build on vax and very annoying on sparc.
 .It Ev EXTRACT_ONLY
 Set if not all ${DISTFILES} should be extracted at do-extract stage.
 Default value is ${DISTFILES}.
@@ -1407,9 +1426,6 @@ containing the other copies must be set here.
 External modules mechanism, documented separately.
 See
 .Xr port-modules 5 .
-.It Ev MOTIFLIB
-Read-only.
-Correct incantation to link with motif.
 .It Ev MULTI_PACKAGES
 Set to a list of package extensions for ports that create multiple packages.
 See
@@ -1429,6 +1445,13 @@ Do not use instead of
 without very good reasons.
 .It Ev NO_BUILD
 Port does not need any build stage.
+.It Ev NO_CCACHE
+Set to
+.Sq Yes
+to prevent ccache from being used when building a certain port,
+even when
+.Ev USE_CCACHE
+is set.
 .It Ev NO_CHECKSUM
 Set to
 .Sq Yes
@@ -1808,14 +1831,13 @@ Many GNU configure ports can be built in a directory distinct from the
 place they were unpacked.
 For some specific ports, this is even mandatory.
 Set to
+.Sq yes
+or
 .Sq simple
 if this is the case.
 The ports infrastructure will generate a separate ${WRKBUILD} directory
 in which the port will be configured and built.
 Wipe ${WRKBUILD} to start anew, but skipping the extract/patch stage.
-Set to
-.Sq flavored
-if distinct flavors of the port may share a common source tree.
 .It Ev SHARED_LIBS
 List of shared libraries that the port may build, as a list of the form
 .Sq libname
@@ -2012,6 +2034,13 @@ Used to store cookies for package updates and defaults to
 .Pa ${PORTSDIR}/update/${MACHINE_ARCH} .
 If set to empty, will revert to a file under
 .Pa ${WRKDIR} .
+.It Ev USE_CCACHE
+User settings.
+Set to
+.Sq Yes
+to use ccache when building ports.
+Adds a build dependency on devel/ccache, and sets up the build
+environment so that it is used.
 .It Ev USE_GMAKE
 Set to
 .Sq Yes
@@ -2027,22 +2056,11 @@ to format manpages behind the scene using groff while building packages.
 Set to
 .Sq Yes
 if libtool is required for correct behavior of this port.
-Adds correct dependencies, and passes LIBTOOL environment variable to
-scripts invocations.
-.It Ev USE_MOTIF
 Set to
-.Sq any
-if port works with any version of motif;
-.Sq lesstif
-if port requires lesstif to work;
-.Sq openmotif
-if ports requires openmotif to work.
-The
-.Sq any
-setting creates an extra flavor choice of
-.Sq lesstif .
-See also
-.Ev MOTIFLIB
+.Sq gnu
+if the ports tree libtool is insufficient and GNU libtool is required.
+Adds dependencies if necessary, and passes LIBTOOL environment variable to
+scripts invocations.
 .It Ev USE_SYSTRACE
 User settings.
 Set to
@@ -2322,9 +2340,6 @@ instead.
 Use
 .Ev CONFIGURE_STYLE
 instead.
-.It Ev HAVE_MOTIF
-Old user settings.
-No longer needed since OpenMotif is now free.
 .It Ev IGNOREFILES
 Set to the list of files that can't be checksummed.
 All uses of it have led to postponing the correct action: talking
@@ -2765,6 +2780,7 @@ The following variables are subpackage dependent:
 .Ev RUN_DEPENDS ,
 .Ev WANTLIB ,
 .Ev LIB_DEPENDS ,
+.Ev IGNORE ,
 .Ev ONLY_FOR_ARCHS ,
 .Ev NOT_FOR_ARCHS ,
 .Ev PREFIX ,
@@ -2840,7 +2856,9 @@ for all subpackages.
 and
 .Ev NOT_FOR_ARCHS
 interact with
-.Ev MULTI_PACKAGES .
+.Ev MULTI_PACKAGES
+and
+.Ev IGNORE .
 The infrastructure will automatically filter subpackages
 that are not suitable for the current architecture.
 Thus,

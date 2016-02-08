@@ -1,4 +1,4 @@
-/*	$OpenBSD: pmap.h,v 1.37 2010/12/26 15:40:59 miod Exp $	*/
+/*	$OpenBSD: pmap.h,v 1.39 2011/06/30 22:18:01 jsg Exp $	*/
 /*	$NetBSD: pmap.h,v 1.1 2003/04/26 18:39:46 fvdl Exp $	*/
 
 /*
@@ -72,8 +72,8 @@
  * pmap.h: see pmap.c for the history of this pmap module.
  */
 
-#ifndef	_AMD64_PMAP_H_
-#define	_AMD64_PMAP_H_
+#ifndef	_MACHINE_PMAP_H_
+#define	_MACHINE_PMAP_H_
 
 #ifndef _LOCORE
 #include <machine/cpufunc.h>
@@ -463,8 +463,7 @@ pmap_remove_all(struct pmap *pmap)
  */
 
 __inline static void
-pmap_update_pg(va)
-	vaddr_t va;
+pmap_update_pg(vaddr_t va)
 {
 	invlpg(va);
 }
@@ -474,8 +473,7 @@ pmap_update_pg(va)
  */
 
 __inline static void
-pmap_update_2pg(va, vb)
-	vaddr_t va, vb;
+pmap_update_2pg(vaddr_t va, vaddr_t vb)
 {
 	invlpg(va);
 	invlpg(vb);
@@ -511,10 +509,7 @@ pmap_page_protect(struct vm_page *pg, vm_prot_t prot)
  */
 
 __inline static void
-pmap_protect(pmap, sva, eva, prot)
-	struct pmap *pmap;
-	vaddr_t sva, eva;
-	vm_prot_t prot;
+pmap_protect(struct pmap *pmap, vaddr_t sva, vaddr_t eva, vm_prot_t prot)
 {
 	if ((prot & VM_PROT_WRITE) == 0) {
 		if (prot & (VM_PROT_READ|VM_PROT_EXECUTE)) {
@@ -570,4 +565,4 @@ kvtopte(vaddr_t va)
 #define __HAVE_PMAP_DIRECT
 
 #endif /* _KERNEL && !_LOCORE */
-#endif	/* _AMD64_PMAP_H_ */
+#endif	/* _MACHINE_PMAP_H_ */

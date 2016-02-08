@@ -1,4 +1,4 @@
-/*	$OpenBSD: scsiconf.h,v 1.142 2010/12/24 02:45:33 krw Exp $	*/
+/*	$OpenBSD: scsiconf.h,v 1.149 2011/07/17 22:46:48 matthew Exp $	*/
 /*	$NetBSD: scsiconf.h,v 1.35 1997/04/02 02:29:38 mycroft Exp $	*/
 
 /*
@@ -233,6 +233,7 @@ _4ltol(u_int8_t *bytes)
 #define DEVID_NAA	1
 #define DEVID_EUI	2
 #define DEVID_T10	3
+#define DEVID_SERIAL	4
 
 struct devid {
 	u_int8_t	d_type;
@@ -537,6 +538,8 @@ daddr64_t scsi_size(struct scsi_link *, int, u_int32_t *);
 int	scsi_test_unit_ready(struct scsi_link *, int, int);
 int	scsi_inquire(struct scsi_link *, struct scsi_inquiry_data *, int);
 int	scsi_inquire_vpd(struct scsi_link *, void *, u_int, u_int8_t, int);
+void	scsi_init_inquiry(struct scsi_xfer *, u_int8_t, u_int8_t,
+	    void *, size_t);
 int	scsi_prevent(struct scsi_link *, int, int);
 int	scsi_start(struct scsi_link *, int, int);
 int	scsi_mode_sense(struct scsi_link *, int, int, struct scsi_mode_header *,
@@ -625,15 +628,6 @@ void	scsi_xsh_set(struct scsi_xshandler *, struct scsi_link *,
 	    void (*)(struct scsi_xfer *));
 void	scsi_xsh_add(struct scsi_xshandler *);
 void	scsi_xsh_del(struct scsi_xshandler *);
-
-/*
- * Entrypoints for multipathing
- */
-int	mpath_path_attach(struct scsi_link *);
-int	mpath_path_detach(struct scsi_link *, int);
-
-void	mpath_path_activate(struct scsi_link *);
-void	mpath_path_deactivate(struct scsi_link *);
 
 /*
  * Utility functions for SCSI HBA emulation.

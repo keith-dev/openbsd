@@ -1,4 +1,4 @@
-/*	$OpenBSD: disklabel.c,v 1.175 2010/12/13 01:01:41 marco Exp $	*/
+/*	$OpenBSD: disklabel.c,v 1.181 2011/06/05 11:57:17 krw Exp $	*/
 
 /*
  * Copyright (c) 1987, 1993
@@ -92,13 +92,14 @@ void	setbootflag(struct disklabel *);
 #endif
 
 enum {
-	UNSPEC, EDIT, EDITOR, READ, RESTORE, SETWRITEABLE, WRITE, WRITEBOOT
+	UNSPEC, EDIT, EDITOR, READ, RESTORE, WRITE, WRITEBOOT
 } op = UNSPEC;
 
 int	aflag;
 int	cflag;
 int	dflag;
 int	tflag;
+int	uidflag;
 int	verbose;
 int	donothing;
 char	print_unit;
@@ -119,11 +120,11 @@ u_int64_t getnum(char *, u_int64_t, u_int64_t, const char **);
 int
 main(int argc, char *argv[])
 {
-	int ch, f, i, writeable, error = 0;
+	int ch, f, error = 0;
 	struct disklabel *lp;
 	FILE *t;
 
-	while ((ch = getopt(argc, argv, "ABEf:hNRWb:cdenp:s:tvw")) != -1)
+	while ((ch = getopt(argc, argv, "ABEf:F:hRb:cdenp:s:tvw")) != -1)
 		switch (ch) {
 		case 'A':
 			++aflag;
@@ -136,22 +137,10 @@ main(int argc, char *argv[])
 			xxboot = optarg;
 			break;
 #endif
-		case 'N':
-			if (op != UNSPEC)
-				usage();
-			writeable = 0;
-			op = SETWRITEABLE;
-			break;
 		case 'R':
 			if (op != UNSPEC)
 				usage();
 			op = RESTORE;
-			break;
-		case 'W':
-			if (op != UNSPEC)
-				usage();
-			writeable = 1;
-			op = SETWRITEABLE;
 			break;
 		case 'c':
 			++cflag;
@@ -171,6 +160,11 @@ main(int argc, char *argv[])
 			break;
 		case 'f':
 			fstabfile = optarg;
+			uidflag = 0;
+			break;
+		case 'F':
+			fstabfile = optarg;
+			++uidflag;
 			break;
 		case 'h':
 			print_unit = '*';
@@ -237,7 +231,7 @@ main(int argc, char *argv[])
 		if (argc != 1)
 			usage();
 		readlabel(f);
-		error = editor(&lab, f);
+		error = editor(f);
 		break;
 	case READ:
 		if (argc != 1)
@@ -266,12 +260,6 @@ main(int argc, char *argv[])
 		if (error == 0)
 			error = writelabel(f, bootarea, lp);
 		fclose(t);
-		break;
-	case SETWRITEABLE:
-		if (!donothing) {
-			if (ioctl(f, DIOCWLABEL, (char *)&writeable) < 0)
-				err(4, "ioctl DIOCWLABEL");
-		}
 		break;
 	case WRITE:
 		if (dflag | aflag) {
@@ -351,10 +339,6 @@ int
 writelabel(int f, char *boot, struct disklabel *lp)
 {
 #if NUMBOOT > 0
-	int writeable;
-#endif
-
-#if NUMBOOT > 0
 	setbootflag(lp);
 #endif
 	lp->d_magic = DISKMAGIC;
@@ -383,14 +367,6 @@ writelabel(int f, char *boot, struct disklabel *lp)
 				perror("lseek");
 				return (1);
 			}
-			/*
-			 * write enable label sector before write (if necessary),
-			 * disable after writing.
-			 */
-			writeable = 1;
-
-			if (ioctl(f, DIOCWLABEL, &writeable) < 0)
-				perror("ioctl DIOCWLABEL");
 			if (write(f, boot, lp->d_bbsize) != lp->d_bbsize) {
 				perror("write");
 				return (1);
@@ -403,10 +379,6 @@ writelabel(int f, char *boot, struct disklabel *lp)
 			perror("write");
 			return(1);
 		}
-		writeable = 0;
-		if (!donothing)
-			if (ioctl(f, DIOCWLABEL, &writeable) < 0)
-				perror("ioctl DIOCWLABEL");
 	} else
 #endif /* NUMBOOT > 0 */
 	if (!donothing) {
@@ -430,8 +402,12 @@ writelabel(int f, char *boot, struct disklabel *lp)
 	}
 #endif
 	/* Finally, write out any mount point information. */
-	if (!donothing)
+	if (!donothing) {
+		/* First refresh our copy of the current label to get UID. */
+		if (ioctl(f, DIOCGDINFO, &lab) < 0)
+			err(4, "ioctl DIOCGDINFO");
 		mpsave(lp);
+	}
 
 	return (0);
 }
@@ -832,6 +808,7 @@ edit(struct disklabel *lp, int f)
 	int first, ch, fd, error = 0;
 	struct disklabel label;
 	FILE *fp;
+	u_int64_t total_sectors, starting_sector, ending_sector;
 
 	if ((fd = mkstemp(tmpfil)) == -1 || (fp = fdopen(fd, "w")) == NULL) {
 		if (fd != -1)
@@ -857,8 +834,18 @@ edit(struct disklabel *lp, int f)
 			warn("%s", tmpfil);
 			break;
 		}
+		/* Get values set by OS and not the label. */
+		if (ioctl(f, DIOCGPDINFO, &label) < 0)
+			err(4, "ioctl DIOCGPDINFO");
+		ending_sector = DL_GETBEND(&label);
+		starting_sector = DL_GETBSTART(&label);
+		total_sectors = DL_GETDSIZE(&label);
 		memset(&label, 0, sizeof(label));
 		error = getasciilabel(fp, &label);
+		DL_SETBEND(&label, ending_sector);
+		DL_SETBSTART(&label, starting_sector);
+		DL_SETDSIZE(&label, total_sectors);
+
 		if (error == 0) {
 			if (cmplabel(lp, &label) == 0) {
 				puts("No changes.");
@@ -1473,11 +1460,9 @@ usage(void)
 	fprintf(stderr,
 	    "       disklabel -e [-c | -d] [-Anv] disk\t\t\t(edit)\n");
 	fprintf(stderr,
-	    "       disklabel -E [-c | -d] [-Anv] [-f tempfile] disk\t\t(simple editor)\n");
+	    "       disklabel -E [-c | -d] [-Anv] [-F|-f file] disk\t(simple editor)\n");
 	fprintf(stderr,
 	    "       disklabel -R [-nv] disk protofile\t\t\t(restore)\n");
-	fprintf(stderr,
-	    "       disklabel -N | -W [-nv] disk\t\t\t\t(protect)\n\n");
 #if NUMBOOT > 0
 	fprintf(stderr,
 	    "%sdisklabel -B  [-nv]%s disk [disktype]           (boot)\n",
