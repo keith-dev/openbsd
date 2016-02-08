@@ -1,4 +1,4 @@
-/*	$OpenBSD: intr.c,v 1.40 2015/01/06 12:50:47 dlg Exp $	*/
+/*	$OpenBSD: intr.c,v 1.43 2015/07/16 05:10:14 guenther Exp $	*/
 /*	$NetBSD: intr.c,v 1.3 2003/03/03 22:16:20 fvdl Exp $	*/
 
 /*
@@ -56,7 +56,6 @@
 #include "lapic.h"
 
 #if NIOAPIC > 0
-#include <machine/i82093var.h> 
 #include <machine/mpbiosvar.h>
 #endif
 
@@ -65,7 +64,7 @@
 #endif
 
 struct pic softintr_pic = {
-        {0, {NULL}, NULL, 0, "softintr_fakepic", NULL, 0, 0},
+        {0, {NULL}, NULL, 0, "softintr_pic0", NULL, 0, 0},
         PIC_SOFT,
 #ifdef MULTIPROCESSOR
 	{},
@@ -621,20 +620,6 @@ cpu_intr_init(struct cpu_info *ci)
 	intr_calculatemasks(ci);
 
 }
-
-#ifdef MULTIPROCESSOR
-void
-x86_softintlock(void)
-{
-	__mp_lock(&kernel_lock);
-}
-
-void
-x86_softintunlock(void)
-{
-	__mp_unlock(&kernel_lock);
-}
-#endif
 
 void
 intr_printconfig(void)

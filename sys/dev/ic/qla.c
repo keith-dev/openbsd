@@ -1,4 +1,4 @@
-/*	$OpenBSD: qla.c,v 1.49 2015/02/09 07:43:08 jmatthew Exp $ */
+/*	$OpenBSD: qla.c,v 1.51 2015/06/19 11:12:24 jmatthew Exp $ */
 
 /*
  * Copyright (c) 2011 David Gwynne <dlg@openbsd.org>
@@ -19,7 +19,6 @@
 
 #include <sys/param.h>
 #include <sys/systm.h>
-#include <sys/buf.h>
 #include <sys/device.h>
 #include <sys/ioctl.h>
 #include <sys/malloc.h>
@@ -53,9 +52,9 @@ int qladebug = QLA_D_PORT;
 
 
 #ifndef ISP_NOFIRMWARE
-extern const u_int16_t isp_2100_risc_code[];
-extern const u_int16_t isp_2200_risc_code[];
-extern const u_int16_t isp_2300_risc_code[];
+#include <dev/microcode/isp/asm_2100.h>
+#include <dev/microcode/isp/asm_2200.h>
+#include <dev/microcode/isp/asm_2300.h>
 #endif
 
 struct cfdriver qla_cd = {

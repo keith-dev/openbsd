@@ -1,4 +1,4 @@
-/*	$OpenBSD: lapic.c,v 1.37 2014/09/21 16:14:52 sf Exp $	*/
+/*	$OpenBSD: lapic.c,v 1.40 2015/07/18 19:21:03 sf Exp $	*/
 /* $NetBSD: lapic.c,v 1.1.2.8 2000/02/23 06:10:50 sommerfeld Exp $ */
 
 /*-
@@ -70,7 +70,6 @@ void
 lapic_map(paddr_t lapic_base)
 {
 	int s;
-	pt_entry_t *pte;
 	vaddr_t va = (vaddr_t)&local_apic;
 
 	disable_intr();
@@ -85,8 +84,7 @@ lapic_map(paddr_t lapic_base)
 	 * might have changed the value of cpu_number()..
 	 */
 
-	pte = kvtopte(va);
-	*pte = lapic_base | PG_RW | PG_V | PG_N;
+	pmap_pte_set(va, lapic_base, PG_RW | PG_V | PG_N);
 	invlpg(va);
 
 #ifdef MULTIPROCESSOR
@@ -442,10 +440,9 @@ i82489_icr_wait(void)
 }
 
 #ifdef MULTIPROCESSOR
-int
+void
 i386_ipi_init(int target)
 {
-
 	if ((target & LAPIC_DEST_MASK) == 0)
 		i82489_writereg(LAPIC_ICRHI, target << LAPIC_ID_SHIFT);
 
@@ -460,11 +457,9 @@ i386_ipi_init(int target)
 	     LAPIC_DLMODE_INIT | LAPIC_LVL_TRIG | LAPIC_LVL_DEASSERT);
 
 	i82489_icr_wait();
-
-	return 0;
 }
 
-int
+void
 i386_ipi(int vec, int target, int dl)
 {
 	int s;
@@ -482,7 +477,5 @@ i386_ipi(int vec, int target, int dl)
 	i82489_icr_wait();
 
 	splx(s);
-
-	return 0;
 }
 #endif /* MULTIPROCESSOR */

@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_spppsubr.c,v 1.130 2015/01/27 03:17:36 dlg Exp $	*/
+/*	$OpenBSD: if_spppsubr.c,v 1.136 2015/07/18 15:51:16 mpi Exp $	*/
 /*
  * Synchronous PPP/Cisco link level subroutines.
  * Keepalive protocol implemented in both Cisco and PPP modes.
@@ -356,7 +356,7 @@ void sppp_phase_network(struct sppp *sp);
 void sppp_print_bytes(const u_char *p, u_short len);
 void sppp_print_string(const char *p, u_short len);
 void sppp_qflush(struct ifqueue *ifq);
-int sppp_update_gw_walker(struct radix_node *rn, void *arg, u_int);
+int sppp_update_gw_walker(struct rtentry *rt, void *arg, unsigned int id);
 void sppp_update_gw(struct ifnet *ifp);
 void sppp_set_ip_addrs(void *);
 void sppp_clear_ip_addrs(void *);
@@ -437,11 +437,10 @@ void
 sppp_input(struct ifnet *ifp, struct mbuf *m)
 {
 	struct ppp_header ht;
-	struct ifqueue *inq = 0;
+	struct niqueue *inq = NULL;
 	struct sppp *sp = (struct sppp *)ifp;
 	struct timeval tv;
 	int debug = ifp->if_flags & IFF_DEBUG;
-	int s;
 
 	if (ifp->if_flags & IFF_UP) {
 		/* Count received bytes, add hardware framing */
@@ -458,9 +457,10 @@ sppp_input(struct ifnet *ifp, struct mbuf *m)
 			    SPP_FMT "input packet is too small, %d bytes\n",
 			    SPP_ARGS(ifp), m->m_pkthdr.len);
 	  drop:
+		m_freem (m);
+	  dropped:
 		++ifp->if_ierrors;
 		++ifp->if_iqdrops;
-		m_freem (m);
 		return;
 	}
 
@@ -538,7 +538,6 @@ sppp_input(struct ifnet *ifp, struct mbuf *m)
 			return;
 		case PPP_IP:
 			if (sp->state[IDX_IPCP] == STATE_OPENED) {
-				schednetisr (NETISR_IP);
 				inq = &ipintrq;
 				sp->pp_last_activity = tv.tv_sec;
 			}
@@ -551,7 +550,6 @@ sppp_input(struct ifnet *ifp, struct mbuf *m)
 			return;
 		case PPP_IPV6:
 			if (sp->state[IDX_IPV6CP] == STATE_OPENED) {
-				schednetisr (NETISR_IPV6);
 				inq = &ip6intrq;
 				sp->pp_last_activity = tv.tv_sec;
 			}
@@ -580,12 +578,10 @@ sppp_input(struct ifnet *ifp, struct mbuf *m)
 			m_freem (m);
 			return;
 		case ETHERTYPE_IP:
-			schednetisr (NETISR_IP);
 			inq = &ipintrq;
 			break;
 #ifdef INET6
 		case ETHERTYPE_IPV6:
-			schednetisr (NETISR_IPV6);
 			inq = &ip6intrq;
 			break;
 #endif
@@ -605,21 +601,13 @@ sppp_input(struct ifnet *ifp, struct mbuf *m)
 	if (! (ifp->if_flags & IFF_UP) || ! inq)
 		goto drop;
 
-	/* Check queue. */
-	s = splnet();
-	if (IF_QFULL (inq)) {
+	if (niq_enqueue(inq, m) != 0) {
 		/* Queue overflow. */
-		IF_DROP(inq);
-		splx(s);
 		if (debug)
 			log(LOG_DEBUG, SPP_FMT "protocol queue overflow\n",
 				SPP_ARGS(ifp));
-		if (!inq->ifq_congestion)
-			if_congestion(inq);
-		goto drop;
+		goto dropped;
 	}
-	IF_ENQUEUE(inq, m);
-	splx(s);
 }
 
 /*
@@ -632,7 +620,7 @@ sppp_output(struct ifnet *ifp, struct mbuf *m,
 	struct sppp *sp = (struct sppp*) ifp;
 	struct ppp_header *h;
 	struct timeval tv;
-	int s, len, rv = 0;
+	int s, rv = 0;
 	u_int16_t protocol;
 
 #ifdef DIAGNOSTIC
@@ -800,25 +788,19 @@ sppp_output(struct ifnet *ifp, struct mbuf *m,
 	 * Queue message on interface, and start output if interface
 	 * not yet active.
 	 */
-	len = m->m_pkthdr.len;
-	IFQ_ENQUEUE(&ifp->if_snd, m, NULL, rv);
-
+	rv = if_enqueue(ifp, m);
 	if (rv != 0) {
-		++ifp->if_oerrors;
-		splx (s);
+		ifp->if_oerrors++;
 		return (rv);
 	}
-
-	if (!(ifp->if_flags & IFF_OACTIVE))
-		(*ifp->if_start) (ifp);
 
 	/*
 	 * Count output packets and bytes.
 	 * The packet length includes header, FCS and 1 flag,
 	 * according to RFC 1333.
 	 */
-	ifp->if_obytes += len + sp->pp_framebytes;
-	splx (s);
+	ifp->if_obytes += sp->pp_framebytes;
+
 	return (0);
 }
 
@@ -1173,7 +1155,7 @@ sppp_cisco_send(struct sppp *sp, u_int32_t type, u_int32_t par1, u_int32_t par2)
 	if (! m)
 		return;
 	m->m_pkthdr.len = m->m_len = PPP_HEADER_LEN + CISCO_PACKET_LEN;
-	m->m_pkthdr.rcvif = 0;
+	m->m_pkthdr.ph_ifidx = 0;
 
 	h = mtod (m, struct ppp_header*);
 	h->address = CISCO_MULTICAST;
@@ -1232,7 +1214,7 @@ sppp_cp_send(struct sppp *sp, u_short proto, u_char type,
 	if (! m)
 		return;
 	m->m_pkthdr.len = m->m_len = pkthdrlen + LCP_HEADER_LEN + len;
-	m->m_pkthdr.rcvif = 0;
+	m->m_pkthdr.ph_ifidx = 0;
 
 	if (sp->pp_flags & PP_NOFRAMING) {
 		*mtod(m, u_int16_t *) = htons(proto);
@@ -4335,7 +4317,7 @@ sppp_auth_send(const struct cp *cp, struct sppp *sp,
 	MGETHDR (m, M_DONTWAIT, MT_DATA);
 	if (! m)
 		return;
-	m->m_pkthdr.rcvif = 0;
+	m->m_pkthdr.ph_ifidx = 0;
 
 	if (sp->pp_flags & PP_NOFRAMING) {
 		*mtod(m, u_int16_t *) = htons(cp->proto);
@@ -4520,10 +4502,9 @@ sppp_get_ip_addrs(struct sppp *sp, u_int32_t *src, u_int32_t *dst,
 }
 
 int
-sppp_update_gw_walker(struct radix_node *rn, void *arg, u_int id)
+sppp_update_gw_walker(struct rtentry *rt, void *arg, unsigned int id)
 {
 	struct ifnet *ifp = arg;
-	struct rtentry *rt = (struct rtentry *)rn;
 
 	if (rt->rt_ifp == ifp) {
 		if (rt->rt_ifa->ifa_dstaddr->sa_family !=
@@ -4539,16 +4520,13 @@ sppp_update_gw_walker(struct radix_node *rn, void *arg, u_int id)
 void
 sppp_update_gw(struct ifnet *ifp)
 {
-        struct radix_node_head *rnh;
 	u_int tid;
 
 	/* update routing table */
 	for (tid = 0; tid <= RT_TABLEID_MAX; tid++) {
-		if ((rnh = rtable_get(tid, AF_INET)) != NULL) {
-			while ((*rnh->rnh_walktree)(rnh,
-			    sppp_update_gw_walker, ifp) == EAGAIN)
-				;	/* nothing */
-		}
+		while (rtable_walk(tid, AF_INET, sppp_update_gw_walker,
+		    ifp) == EAGAIN)
+			;	/* nothing */
 	}
 }
 

@@ -1,4 +1,4 @@
-/*	$OpenBSD: packet.c,v 1.37 2015/02/09 11:54:24 claudio Exp $ */
+/*	$OpenBSD: packet.c,v 1.41 2015/07/21 04:43:28 renato Exp $ */
 
 /*
  * Copyright (c) 2009 Michele Marchetto <michele@openbsd.org>
@@ -23,6 +23,7 @@
 
 #include <netinet/in.h>
 #include <netinet/ip.h>
+#include <netinet/tcp.h>
 #include <arpa/inet.h>
 #include <net/if_dl.h>
 #include <fcntl.h>
@@ -39,6 +40,7 @@
 #include "ldpe.h"
 
 extern struct ldpd_conf        *leconf;
+extern struct ldpd_sysdep	sysdep;
 
 struct iface	*disc_find_iface(unsigned int, struct in_addr);
 ssize_t		 session_get_pdu(struct ibuf_read *, char **);
@@ -95,7 +97,8 @@ send_packet(int fd, struct iface *iface, void *pkt, size_t len,
 
 	if (sendto(fd, pkt, len, 0, (struct sockaddr *)dst,
 	    sizeof(*dst)) == -1) {
-		log_warn("send_packet: error sending packet");
+		log_warn("send_packet: error sending packet to %s",
+		    inet_ntoa(dst->sin_addr));
 		return (-1);
 	}
 
@@ -157,7 +160,9 @@ disc_recv_packet(int fd, short event, void *bula)
 	/* find a matching interface */
 	if ((fd == leconf->ldp_discovery_socket) &&
 	    (iface = disc_find_iface(ifindex, src.sin_addr)) == NULL) {
-		log_debug("disc_recv_packet: cannot find a matching interface");
+		log_debug("disc_recv_packet: cannot find a matching subnet "
+		    "on interface index %d for %s", ifindex,
+		    inet_ntoa(src.sin_addr));
 		return;
 	}
 
@@ -207,7 +212,7 @@ disc_find_iface(unsigned int ifindex, struct in_addr src)
 	struct if_addr	*if_addr;
 
 	LIST_FOREACH(iface, &leconf->iface_list, entry)
-		LIST_FOREACH(if_addr, &iface->addr_list, iface_entry)
+		LIST_FOREACH(if_addr, &iface->addr_list, entry)
 			switch (iface->type) {
 			case IF_TYPE_POINTOPOINT:
 				if (ifindex == iface->ifindex &&
@@ -263,6 +268,8 @@ session_accept(int fd, short event, void *bula)
 	struct sockaddr_in	 src;
 	int			 newfd;
 	socklen_t		 len = sizeof(src);
+	struct nbr_params	*nbrp;
+	int			 opt;
 
 	if (!(event & EV_READ))
 		return;
@@ -281,6 +288,26 @@ session_accept(int fd, short event, void *bula)
 			log_debug("sess_recv_packet: accept error: %s",
 			    strerror(errno));
 		return;
+	}
+
+	nbrp = nbr_params_find(leconf, src.sin_addr);
+	if (nbrp && nbrp->auth.method == AUTH_MD5SIG) {
+		if (sysdep.no_pfkey || sysdep.no_md5sig) {
+			log_warnx("md5sig configured but not available");
+			close(newfd);
+			return;
+		}
+
+		len = sizeof(opt);
+		if (getsockopt(newfd, IPPROTO_TCP, TCP_MD5SIG,
+		    &opt, &len) == -1)
+			fatal("getsockopt TCP_MD5SIG");
+		if (!opt) {	/* non-md5'd connection! */
+			log_warnx(
+			    "connection attempt without md5 signature");
+			close(newfd);
+			return;
+		}
 	}
 
 	tcp_new(newfd, NULL);

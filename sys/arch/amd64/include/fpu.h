@@ -1,4 +1,4 @@
-/*	$OpenBSD: fpu.h,v 1.9 2011/03/23 16:54:34 pirofti Exp $	*/
+/*	$OpenBSD: fpu.h,v 1.11 2015/03/25 21:05:18 kettenis Exp $	*/
 /*	$NetBSD: fpu.h,v 1.1 2003/04/26 18:39:40 fvdl Exp $	*/
 
 #ifndef	_MACHINE_FPU_H_
@@ -28,8 +28,17 @@ struct fxsave64 {
 	u_int8_t   fx_unused3[96];
 } __packed;
 
+struct xstate_hdr {
+	uint64_t	xstate_bv;
+	uint64_t	xstate_xcomp_bv;
+	uint8_t		xstate_rsrv0[0];
+	uint8_t		xstate_rsrv[40];
+} __packed;
+
 struct savefpu {
 	struct fxsave64 fp_fxsave;	/* see above */
+	struct xstate_hdr fp_xstate;
+	u_int64_t fp_ymm[16][2];
 	u_int16_t fp_ex_sw;		/* saved status from last exception */
 	u_int16_t fp_ex_tw;		/* saved tag from last exception */
 };
@@ -49,7 +58,9 @@ struct savefpu {
 struct trapframe;
 struct cpu_info;
 
+extern size_t	fpu_save_len;
 extern uint32_t	fpu_mxcsr_mask;
+extern uint64_t	xsave_mask;
 
 void fpuinit(struct cpu_info *);
 void fpudrop(void);

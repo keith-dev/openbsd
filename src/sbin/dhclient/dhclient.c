@@ -1,4 +1,4 @@
-/*	$OpenBSD: dhclient.c,v 1.359 2015/02/15 01:56:42 tedu Exp $	*/
+/*	$OpenBSD: dhclient.c,v 1.361 2015/05/18 14:59:42 krw Exp $	*/
 
 /*
  * Copyright 2004 Henning Brauer <henning@openbsd.org>
@@ -467,7 +467,7 @@ main(int argc, char *argv[])
 	get_ifname(argv[0]);
 	ifi->index = if_nametoindex(ifi->name);
 	if (ifi->index == 0)
-		error("'%s' is not an interface", ifi->name);
+		error("%s: no such interface", ifi->name);
 
 	tzset();
 
@@ -1059,13 +1059,6 @@ dhcpoffer(struct in_addr client_addr, struct option_data *options, char *info)
 		note("Unsatisfactory %s", info);
 		return;
 	}
-
-	/*
-	 * Reject offers whose subnet is already configured on another
-	 * interface.
-	 */
-	if (subnet_exists(lease))
-		return;
 
 	/*
 	 * If this lease was acquired through a BOOTREPLY, record that

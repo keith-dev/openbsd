@@ -1,4 +1,4 @@
-/*	$OpenBSD: tcp_output.c,v 1.108 2014/12/19 17:14:40 tedu Exp $	*/
+/*	$OpenBSD: tcp_output.c,v 1.113 2015/07/13 23:11:37 bluhm Exp $	*/
 /*	$NetBSD: tcp_output.c,v 1.16 1997/06/03 16:17:09 kml Exp $	*/
 
 /*
@@ -42,10 +42,10 @@
  *    documentation and/or other materials provided with the distribution.
  * 3. All advertising materials mentioning features or use of this software
  *    must display the following acknowledgements:
- * 	This product includes software developed by the University of
- * 	California, Berkeley and its contributors.
- * 	This product includes software developed at the Information
- * 	Technology Division, US Naval Research Laboratory.
+ *	This product includes software developed by the University of
+ *	California, Berkeley and its contributors.
+ *	This product includes software developed at the Information
+ *	Technology Division, US Naval Research Laboratory.
  * 4. Neither the name of the NRL nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
@@ -79,7 +79,6 @@
 #include <sys/kernel.h>
 
 #include <net/route.h>
-#include <net/if.h>
 
 #include <netinet/in.h>
 #include <netinet/ip.h>
@@ -110,7 +109,7 @@ void
 tcp_print_holes(struct tcpcb *tp)
 {
 	struct sackhole *p = tp->snd_holes;
-	if (p == 0)
+	if (p == NULL)
 		return;
 	printf("Hole report: start--end dups rxmit\n");
 	while (p) {
@@ -156,7 +155,7 @@ tcp_sack_output(struct tcpcb *tp)
 #endif
 			return (p);
 		}
-        	p = p->next;
+		p = p->next;
 	}
 	return (NULL);
 }
@@ -301,7 +300,7 @@ again:
 			if (SEQ_LT(tp->snd_una, tp->snd_last))
 				tp->snd_cwnd -= tp->t_maxseg;
 #endif
-    		}
+		}
 	}
 #endif /* TCP_SACK */
 
@@ -519,7 +518,7 @@ send:
 	 * always fit in a single mbuf, leaving room for a maximum
 	 * link header, i.e.
 	 *	max_linkhdr + sizeof(network header) + sizeof(struct tcphdr +
-	 * 		optlen <= MHLEN
+	 *		optlen <= MHLEN
 	 */
 	optlen = 0;
 
@@ -725,7 +724,8 @@ send:
 			    mtod(m, caddr_t) + hdrlen);
 			m->m_len += len;
 		} else {
-			m->m_next = m_copy(so->so_snd.sb_mb, off, (int) len);
+			m->m_next = m_copym(so->so_snd.sb_mb, off, (int) len,
+			    M_NOWAIT);
 			if (m->m_next == 0) {
 				(void) m_free(m);
 				error = ENOBUFS;
@@ -766,7 +766,7 @@ send:
 		m->m_data += max_linkhdr;
 		m->m_len = hdrlen;
 	}
-	m->m_pkthdr.rcvif = (struct ifnet *)0;
+	m->m_pkthdr.ph_ifidx = 0;
 	m->m_pkthdr.len = hdrlen + len;
 
 	if (!tp->t_template)
@@ -1008,6 +1008,32 @@ send:
 				tp->t_rxtshift = 0;
 			}
 		}
+
+		if (len == 0 && so->so_snd.sb_cc &&
+		    TCP_TIMER_ISARMED(tp, TCPT_REXMT) == 0 &&
+		    TCP_TIMER_ISARMED(tp, TCPT_PERSIST) == 0) {
+			/*
+			 * Avoid a situation where we do not set persist timer
+			 * after a zero window condition. For example:
+			 * 1) A -> B: packet with enough data to fill the window
+			 * 2) B -> A: ACK for #1 + new data (0 window
+			 *    advertisement)
+			 * 3) A -> B: ACK for #2, 0 len packet
+			 *
+			 * In this case, A will not activate the persist timer,
+			 * because it chose to send a packet. Unless tcp_output
+			 * is called for some other reason (delayed ack timer,
+			 * another input packet from B, socket syscall), A will
+			 * not send zero window probes.
+			 *
+			 * So, if you send a 0-length packet, but there is data
+			 * in the socket buffer, and neither the rexmt or
+			 * persist timer is already set, then activate the
+			 * persist timer.
+			 */
+			tp->t_rxtshift = 0;
+			tcp_setpersist(tp);
+		}
 	} else
 		if (SEQ_GT(tp->snd_nxt + len, tp->snd_max))
 			tp->snd_max = tp->snd_nxt + len;
@@ -1104,10 +1130,10 @@ send:
 	if (error) {
 out:
 		if (error == ENOBUFS) {
-			/* 
+			/*
 			 * If the interface queue is full, or IP cannot
 			 * get an mbuf, trigger TCP slow start.
-			 */ 
+			 */
 			tp->snd_cwnd = tp->t_maxseg;
 			return (0);
 		}
@@ -1135,10 +1161,10 @@ out:
 
 		return (error);
 	}
-	
+
 	if (packetlen > tp->t_pmtud_mtu_sent)
 		tp->t_pmtud_mtu_sent = packetlen;
-	
+
 	tcpstat.tcps_sndtotal++;
 	if (tp->t_flags & TF_DELACK)
 		tcpstat.tcps_delack++;

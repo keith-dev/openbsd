@@ -1,4 +1,4 @@
-#	$OpenBSD: RAMDISK,v 1.189 2015/01/12 17:25:03 deraadt Exp $
+#	$OpenBSD: RAMDISK,v 1.191 2015/07/17 22:52:28 tedu Exp $
 
 machine		i386
 maxusers	4
@@ -17,7 +17,6 @@ option		SCSITERSE
 
 option		FFS
 option		MSDOSFS
-option		INET
 
 config		bsd root on rd0a swap on rd0b and wd0b and sd0b
 
@@ -30,7 +29,7 @@ acpi0		at bios?
 #acpibat*	at acpi?
 #acpibtn*	at acpi?
 #acpicpu*	at acpi?
-#acpiec*	at acpi?
+acpiec*		at acpi?
 acpiprt*	at acpi?
 acpimadt0	at acpi?
 #acpitz*	at acpi?

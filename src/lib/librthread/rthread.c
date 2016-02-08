@@ -1,4 +1,4 @@
-/*	$OpenBSD: rthread.c,v 1.79 2014/11/16 05:26:20 guenther Exp $ */
+/*	$OpenBSD: rthread.c,v 1.83 2015/05/19 20:50:06 guenther Exp $ */
 /*
  * Copyright (c) 2004,2005 Ted Unangst <tedu@openbsd.org>
  * All Rights Reserved.
@@ -26,7 +26,7 @@
 #include <sys/socket.h>
 #include <sys/mman.h>
 #include <sys/msg.h>
-#if defined(__ELF__)
+#ifndef NO_PIC
 #include <sys/exec_elf.h>
 #pragma weak _DYNAMIC
 #endif
@@ -197,6 +197,7 @@ _rthread_init(void)
 
 	_thread_pagesize = (size_t)sysconf(_SC_PAGESIZE);
 	_rthread_attr_default.guard_size = _thread_pagesize;
+	thread->attr = _rthread_attr_default;
 
 	_rthread_initlib();
 
@@ -204,7 +205,7 @@ _rthread_init(void)
 
 	_rthread_debug(1, "rthread init\n");
 
-#if defined(__ELF__) && !defined(__vax__)
+#ifndef NO_PIC
 	if (_DYNAMIC) {
 		/*
 		 * To avoid recursion problems in ld.so, we need to trigger the
@@ -429,6 +430,12 @@ pthread_create(pthread_t *threadp, const pthread_attr_t *attr,
 	thread->tid = -1;
 
 	thread->attr = attr != NULL ? *(*attr) : _rthread_attr_default;
+	if (thread->attr.sched_inherit == PTHREAD_INHERIT_SCHED) {
+		pthread_t self = pthread_self();
+
+		thread->attr.sched_policy = self->attr.sched_policy;
+		thread->attr.sched_param = self->attr.sched_param;
+	}
 	if (thread->attr.detach_state == PTHREAD_CREATE_DETACHED)
 		thread->flags |= THREAD_DETACHED;
 	thread->flags |= THREAD_CANCEL_ENABLE|THREAD_CANCEL_DEFERRED;
@@ -647,7 +654,7 @@ _thread_dump_info(void)
 	_spinunlock(&_thread_lock);
 }
 
-#if defined(__ELF__)
+#ifndef NO_PIC
 /*
  * _rthread_dl_lock() provides the locking for dlopen(), dlclose(), and
  * the function called via atexit() to invoke all destructors.  The latter
@@ -664,8 +671,7 @@ _rthread_dl_lock(int what)
 	static struct pthread_queue lockers = TAILQ_HEAD_INITIALIZER(lockers);
 	static int count = 0;
 
-	if (what == 0)
-	{
+	if (what == 0) {
 		pthread_t self = pthread_self();
 
 		/* lock, possibly recursive */
@@ -682,9 +688,7 @@ _rthread_dl_lock(int what)
 		}
 		count++;
 		_spinunlock(&lock);
-	}
-	else
-	{
+	} else if (what == 1) {
 		/* unlock, possibly recursive */
 		if (--count == 0) {
 			pthread_t next;
@@ -697,6 +701,12 @@ _rthread_dl_lock(int what)
 			if (next != NULL)
 				__thrwakeup(next, 1);
 		}
+	} else {
+		/* reinit: used in child after fork to clear the queue */
+		lock = _SPINLOCK_UNLOCKED_ASSIGN;
+		if (--count == 0)
+			owner = NULL;
+		TAILQ_INIT(&lockers);
 	}
 }
 
@@ -712,17 +722,12 @@ _rthread_bind_lock(int what)
 }
 #endif
 
-#ifdef __ELF__
-#define CERROR_SYMBOL __cerror
-#else
-#define CERROR_SYMBOL _cerror
-#endif
 
 /*
  * XXX: Bogus type signature, but we only need to be able to emit a
  * reference to it below.
  */
-extern void CERROR_SYMBOL(void);
+extern void __cerror(void);
 
 /*
  * All weak references used within libc that are redefined in libpthread
@@ -730,12 +735,14 @@ extern void CERROR_SYMBOL(void);
  * be used when linking -static.
  */
 static void *__libc_overrides[] __used = {
-	&CERROR_SYMBOL,
+	&__cerror,
 	&__errno,
 	&_thread_arc4_lock,
 	&_thread_arc4_unlock,
 	&_thread_atexit_lock,
 	&_thread_atexit_unlock,
+	&_thread_atfork_lock,
+	&_thread_atfork_unlock,
 	&_thread_malloc_lock,
 	&_thread_malloc_unlock,
 	&_thread_mutex_destroy,

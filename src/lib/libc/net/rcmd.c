@@ -70,6 +70,7 @@ rcmd_af(char **ahost, int porta, const char *locuser, const char *remuser,
 	char c, *p;
 	int refused;
 	in_port_t rport = porta;
+	int numread;
 
 	/* call rcmdsh() with specified remote shell if appropriate. */
 	if (!issetugid() && (p = getenv("RSH")) && *p) {
@@ -97,9 +98,8 @@ rcmd_af(char **ahost, int porta, const char *locuser, const char *remuser,
 	hints.ai_flags = AI_CANONNAME;
 	error = getaddrinfo(*ahost, pbuf, &hints, &res);
 	if (error) {
-#if 0
-		warnx("%s: %s", *ahost, gai_strerror(error));
-#endif
+		(void)fprintf(stderr, "rcmd: %s: %s\n", *ahost,
+		    gai_strerror(error));
 		return (-1);
 	}
 	if (res->ai_canonname) {
@@ -177,13 +177,6 @@ rcmd_af(char **ahost, int porta, const char *locuser, const char *remuser,
 	/* given "af" can be PF_UNSPEC, we need the real af for "s" */
 	af = r->ai_family;
 	freeaddrinfo(res);
-#if 0
-	/*
-	 * try to rresvport() to the same port. This will make rresvport()
-	 * fail it's first bind, resulting in it choosing a random port.
-	 */
-	lport--;
-#endif
 	if (fd2p == 0) {
 		write(s, "", 1);
 		lport = 0;
@@ -272,9 +265,10 @@ again:
 	(void)write(s, locuser, strlen(locuser)+1);
 	(void)write(s, remuser, strlen(remuser)+1);
 	(void)write(s, cmd, strlen(cmd)+1);
-	if (read(s, &c, 1) != 1) {
+	if ((numread = read(s, &c, 1)) != 1) {
 		(void)fprintf(stderr,
-		    "rcmd: %s: %s\n", *ahost, strerror(errno));
+		    "rcmd: %s: %s\n", *ahost,
+		    numread == -1 ? strerror(errno) : "Short read");
 		goto bad2;
 	}
 	if (c != 0) {

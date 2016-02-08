@@ -1,4 +1,4 @@
-/* $OpenBSD: conf_def.c,v 1.29 2015/02/07 13:19:15 doug Exp $ */
+/* $OpenBSD: conf_def.c,v 1.31 2015/07/18 22:42:09 beck Exp $ */
 /* Copyright (C) 1995-1998 Eric Young (eay@cryptsoft.com)
  * All rights reserved.
  *
@@ -228,12 +228,11 @@ def_load_bio(CONF *conf, BIO *in, long *line)
 		goto err;
 	}
 
-	section = malloc(10);
+	section = strdup("default");
 	if (section == NULL) {
 		CONFerr(CONF_F_DEF_LOAD_BIO, ERR_R_MALLOC_FAILURE);
 		goto err;
 	}
-	strlcpy(section, "default",10);
 
 	if (_CONF_new_data(conf) == 0) {
 		CONFerr(CONF_F_DEF_LOAD_BIO, ERR_R_MALLOC_FAILURE);
@@ -574,8 +573,12 @@ str_copy(CONF *conf, char *section, char **pto, char *from)
 				    CONF_R_VARIABLE_HAS_NO_VALUE);
 				goto err;
 			}
-			BUF_MEM_grow_clean(buf,
-			    (strlen(p) + buf->length - (e - from)));
+			if (!BUF_MEM_grow_clean(buf,
+				(strlen(p) + buf->length - (e - from)))) {
+				CONFerr(CONF_F_STR_COPY,
+				    CONF_R_MODULE_INITIALIZATION_ERROR);
+				goto err;
+			}
 			while (*p)
 				buf->data[to++] = *(p++);
 

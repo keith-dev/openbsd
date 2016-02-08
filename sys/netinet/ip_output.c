@@ -1,4 +1,4 @@
-/*	$OpenBSD: ip_output.c,v 1.276 2014/12/17 09:57:13 mpi Exp $	*/
+/*	$OpenBSD: ip_output.c,v 1.286 2015/07/16 21:14:21 mpi Exp $	*/
 /*	$NetBSD: ip_output.c,v 1.28 1996/02/13 23:43:07 christos Exp $	*/
 
 /*
@@ -158,13 +158,9 @@ ip_output(struct mbuf *m0, struct mbuf *opt, struct route *ro, int flags,
 	 * though (e.g., traceroute) have a source address of zeroes.
 	 */
 	if (ip->ip_src.s_addr == INADDR_ANY) {
-		if (flags & IP_ROUTETOETHER) {
-			error = EINVAL;
-			goto bad;
-		}
 		donerouting = 1;
 
-		if (ro == 0) {
+		if (ro == NULL) {
 			ro = &iproute;
 			memset(ro, 0, sizeof(*ro));
 		}
@@ -182,7 +178,7 @@ ip_output(struct mbuf *m0, struct mbuf *opt, struct route *ro, int flags,
 			ro->ro_rt = NULL;
 		}
 
-		if (ro->ro_rt == 0) {
+		if (ro->ro_rt == NULL) {
 			dst->sin_family = AF_INET;
 			dst->sin_len = sizeof(*dst);
 			dst->sin_addr = ip->ip_dst;
@@ -195,11 +191,11 @@ ip_output(struct mbuf *m0, struct mbuf *opt, struct route *ro, int flags,
 			mtu = ifp->if_mtu;
 			IFP_TO_IA(ifp, ia);
 		} else {
-			if (ro->ro_rt == 0)
+			if (ro->ro_rt == NULL)
 				ro->ro_rt = rtalloc_mpath(&ro->ro_dst,
 				    NULL, ro->ro_tableid);
 
-			if (ro->ro_rt == 0) {
+			if (ro->ro_rt == NULL) {
 				ipstat.ips_noroute++;
 				error = EHOSTUNREACH;
 				goto bad;
@@ -229,23 +225,8 @@ reroute:
 		goto done_spd;
 
 	/* Do we have any pending SAs to apply ? */
-	mtag = m_tag_find(m, PACKET_TAG_IPSEC_PENDING_TDB, NULL);
-	if (mtag != NULL) {
-#ifdef DIAGNOSTIC
-		if (mtag->m_tag_len != sizeof (struct tdb_ident))
-			panic("ip_output: tag of length %hu (should be %zu",
-			    mtag->m_tag_len, sizeof (struct tdb_ident));
-#endif
-		tdbi = (struct tdb_ident *)(mtag + 1);
-		tdb = gettdb(tdbi->rdomain,
-		    tdbi->spi, &tdbi->dst, tdbi->proto);
-		if (tdb == NULL)
-			error = -EINVAL;
-		m_tag_delete(m, mtag);
-	}
-	else
-		tdb = ipsp_spd_lookup(m, AF_INET, hlen, &error,
-		    IPSP_DIRECTION_OUT, NULL, inp, ipsecflowinfo);
+	tdb = ipsp_spd_lookup(m, AF_INET, hlen, &error,
+	    IPSP_DIRECTION_OUT, NULL, inp, ipsecflowinfo);
 
 	if (tdb == NULL) {
 		if (error == 0) {
@@ -272,9 +253,7 @@ reroute:
 		/* Loop detection */
 		for (mtag = m_tag_first(m); mtag != NULL;
 		    mtag = m_tag_next(m, mtag)) {
-			if (mtag->m_tag_id != PACKET_TAG_IPSEC_OUT_DONE &&
-			    mtag->m_tag_id !=
-			    PACKET_TAG_IPSEC_OUT_CRYPTO_NEEDED)
+			if (mtag->m_tag_id != PACKET_TAG_IPSEC_OUT_DONE)
 				continue;
 			tdbi = (struct tdb_ident *)(mtag + 1);
 			if (tdbi->spi == tdb->tdb_spi &&
@@ -308,13 +287,8 @@ reroute:
  done_spd:
 #endif /* IPSEC */
 
-	if (flags & IP_ROUTETOETHER) {
-		dst = satosin(&ro->ro_dst);
-		ifp = ro->ro_rt->rt_ifp;
-		mtu = ifp->if_mtu;
-		ro->ro_rt = NULL;
-	} else if (donerouting == 0) {
-		if (ro == 0) {
+	if (donerouting == 0) {
+		if (ro == NULL) {
 			ro = &iproute;
 			memset(ro, 0, sizeof(*ro));
 		}
@@ -332,7 +306,7 @@ reroute:
 			ro->ro_rt = NULL;
 		}
 
-		if (ro->ro_rt == 0) {
+		if (ro->ro_rt == NULL) {
 			dst->sin_family = AF_INET;
 			dst->sin_len = sizeof(*dst);
 			dst->sin_addr = ip->ip_dst;
@@ -345,11 +319,11 @@ reroute:
 			mtu = ifp->if_mtu;
 			IFP_TO_IA(ifp, ia);
 		} else {
-			if (ro->ro_rt == 0)
+			if (ro->ro_rt == NULL)
 				ro->ro_rt = rtalloc_mpath(&ro->ro_dst,
 				    &ip->ip_src.s_addr, ro->ro_tableid);
 
-			if (ro->ro_rt == 0) {
+			if (ro->ro_rt == NULL) {
 				ipstat.ips_noroute++;
 				error = EHOSTUNREACH;
 				goto bad;
@@ -532,7 +506,7 @@ sendit:
 #if NPF > 0
 		if ((encif = enc_getif(tdb->tdb_rdomain,
 		    tdb->tdb_tap)) == NULL ||
-		    pf_test(AF_INET, PF_OUT, encif, &m, NULL) != PF_PASS) {
+		    pf_test(AF_INET, PF_OUT, encif, &m) != PF_PASS) {
 			error = EACCES;
 			m_freem(m);
 			goto done;
@@ -603,25 +577,13 @@ sendit:
 		error = ipsp_process_packet(m, tdb, AF_INET, 0);
 		return error;  /* Nothing more to be done */
 	}
-
-	/*
-	 * If we got here and IPsec crypto processing didn't happen, drop it.
-	 */
-	if (ipsec_in_use && (mtag = m_tag_find(m,
-	    PACKET_TAG_IPSEC_OUT_CRYPTO_NEEDED, NULL)) != NULL) {
-		/* Notify IPsec to do its own crypto. */
-		ipsp_skipcrypto_unmark((struct tdb_ident *)(mtag + 1));
-		m_freem(m);
-		error = EHOSTUNREACH;
-		goto done;
-	}
 #endif /* IPSEC */
 
 	/*
 	 * Packet filter
 	 */
 #if NPF > 0
-	if (pf_test(AF_INET, PF_OUT, ifp, &m, NULL) != PF_PASS) {
+	if (pf_test(AF_INET, PF_OUT, ifp, &m) != PF_PASS) {
 		error = EHOSTUNREACH;
 		m_freem(m);
 		goto done;
@@ -764,7 +726,7 @@ ip_fragment(struct mbuf *m, struct ifnet *ifp, u_long mtu)
 	mhlen = sizeof (struct ip);
 	for (off = hlen + len; off < ntohs(ip->ip_len); off += len) {
 		MGETHDR(m, M_DONTWAIT, MT_HEADER);
-		if (m == 0) {
+		if (m == NULL) {
 			ipstat.ips_odropped++;
 			error = ENOBUFS;
 			goto sendorfree;
@@ -791,14 +753,14 @@ ip_fragment(struct mbuf *m, struct ifnet *ifp, u_long mtu)
 		else
 			mhip->ip_off |= IP_MF;
 		mhip->ip_len = htons((u_int16_t)(len + mhlen));
-		m->m_next = m_copy(m0, off, len);
+		m->m_next = m_copym(m0, off, len, M_NOWAIT);
 		if (m->m_next == 0) {
 			ipstat.ips_odropped++;
 			error = ENOBUFS;
 			goto sendorfree;
 		}
 		m->m_pkthdr.len = mhlen + len;
-		m->m_pkthdr.rcvif = (struct ifnet *)0;
+		m->m_pkthdr.ph_ifidx = 0;
 		mhip->ip_off = htons((u_int16_t)mhip->ip_off);
 		mhip->ip_sum = 0;
 		if ((ifp != NULL) &&
@@ -862,7 +824,7 @@ ip_insertoptions(struct mbuf *m, struct mbuf *opt, int *phlen)
 		ip->ip_dst = p->ipopt_dst;
 	if (m->m_flags & M_EXT || m->m_data - optlen < m->m_pktdat) {
 		MGETHDR(n, M_DONTWAIT, MT_HEADER);
-		if (n == 0)
+		if (n == NULL)
 			return (m);
 		M_MOVE_HDR(n, m);
 		n->m_pkthdr.len += optlen;
@@ -942,17 +904,12 @@ ip_ctloutput(int op, struct socket *so, int level, int optname,
 	struct mbuf *m = *mp;
 	int optval = 0;
 	struct proc *p = curproc; /* XXX */
-#ifdef IPSEC
-	struct ipsec_ref *ipr;
-	size_t iprlen;
-	u_int16_t opt16val;
-#endif
 	int error = 0;
 	u_int rtid = 0;
 
 	if (level != IPPROTO_IP) {
 		error = EINVAL;
-		if (op == PRCO_SETOPT && *mp)
+		if (op == PRCO_SETOPT)
 			(void) m_free(*mp);
 	} else switch (op) {
 	case PRCO_SETOPT:
@@ -1041,7 +998,7 @@ ip_ctloutput(int op, struct socket *so, int level, int optname,
 			break;
 
 		case IP_PORTRANGE:
-			if (m == 0 || m->m_len != sizeof(int))
+			if (m == NULL || m->m_len != sizeof(int))
 				error = EINVAL;
 			else {
 				optval = *mtod(m, int *);
@@ -1077,7 +1034,7 @@ ip_ctloutput(int op, struct socket *so, int level, int optname,
 #ifndef IPSEC
 			error = EOPNOTSUPP;
 #else
-			if (m == 0 || m->m_len != sizeof(int)) {
+			if (m == NULL || m->m_len != sizeof(int)) {
 				error = EINVAL;
 				break;
 			}
@@ -1087,21 +1044,6 @@ ip_ctloutput(int op, struct socket *so, int level, int optname,
 			    optval > IPSEC_LEVEL_UNIQUE) {
 				error = EINVAL;
 				break;
-			}
-
-			/* Unlink cached output TDB to force a re-search */
-			if (inp->inp_tdb_out) {
-				int s = splsoftnet();
-				TAILQ_REMOVE(&inp->inp_tdb_out->tdb_inp_out,
-				    inp, inp_tdb_out_next);
-				splx(s);
-			}
-
-			if (inp->inp_tdb_in) {
-				int s = splsoftnet();
-				TAILQ_REMOVE(&inp->inp_tdb_in->tdb_inp_in,
-				    inp, inp_tdb_in_next);
-				splx(s);
 			}
 
 			switch (optname) {
@@ -1140,166 +1082,12 @@ ip_ctloutput(int op, struct socket *so, int level, int optname,
 				inp->inp_seclevel[SL_IPCOMP] = optval;
 				break;
 			}
-			if (!error)
-				inp->inp_secrequire = get_sa_require(inp);
 #endif
-			break;
-
-		case IP_IPSEC_REMOTE_CRED:
-		case IP_IPSEC_REMOTE_AUTH:
-			/* Can't set the remote credential or key */
-			error = EOPNOTSUPP;
 			break;
 
 		case IP_IPSEC_LOCAL_ID:
 		case IP_IPSEC_REMOTE_ID:
-		case IP_IPSEC_LOCAL_CRED:
-		case IP_IPSEC_LOCAL_AUTH:
-#ifndef IPSEC
 			error = EOPNOTSUPP;
-#else
-			if (m == NULL || m->m_len < 2) {
-				error = EINVAL;
-				break;
-			}
-
-			m_copydata(m, 0, 2, (caddr_t) &opt16val);
-
-			/* If the type is 0, then we cleanup and return */
-			if (opt16val == 0) {
-				switch (optname) {
-				case IP_IPSEC_LOCAL_ID:
-					if (inp->inp_ipo != NULL &&
-					    inp->inp_ipo->ipo_srcid != NULL) {
-						ipsp_reffree(inp->inp_ipo->ipo_srcid);
-						inp->inp_ipo->ipo_srcid = NULL;
-					}
-					break;
-
-				case IP_IPSEC_REMOTE_ID:
-					if (inp->inp_ipo != NULL &&
-					    inp->inp_ipo->ipo_dstid != NULL) {
-						ipsp_reffree(inp->inp_ipo->ipo_dstid);
-						inp->inp_ipo->ipo_dstid = NULL;
-					}
-					break;
-
-				case IP_IPSEC_LOCAL_CRED:
-					if (inp->inp_ipo != NULL &&
-					    inp->inp_ipo->ipo_local_cred != NULL) {
-						ipsp_reffree(inp->inp_ipo->ipo_local_cred);
-						inp->inp_ipo->ipo_local_cred = NULL;
-					}
-					break;
-
-				case IP_IPSEC_LOCAL_AUTH:
-					if (inp->inp_ipo != NULL &&
-					    inp->inp_ipo->ipo_local_auth != NULL) {
-						ipsp_reffree(inp->inp_ipo->ipo_local_auth);
-						inp->inp_ipo->ipo_local_auth = NULL;
-					}
-					break;
-				}
-
-				error = 0;
-				break;
-			}
-
-			/* Can't have an empty payload */
-			if (m->m_len == 2) {
-				error = EINVAL;
-				break;
-			}
-
-			/* Allocate if needed */
-			if (inp->inp_ipo == NULL) {
-				inp->inp_ipo = ipsec_add_policy(inp,
-				    AF_INET, IPSP_DIRECTION_OUT);
-				if (inp->inp_ipo == NULL) {
-					error = ENOBUFS;
-					break;
-				}
-			}
-
-			iprlen = sizeof(struct ipsec_ref) + m->m_len - 2;
-			ipr = malloc(iprlen, M_CREDENTIALS, M_NOWAIT);
-			if (ipr == NULL) {
-				error = ENOBUFS;
-				break;
-			}
-
-			ipr->ref_count = 1;
-			ipr->ref_malloctype = M_CREDENTIALS;
-			ipr->ref_len = m->m_len - 2;
-			ipr->ref_type = opt16val;
-			m_copydata(m, 2, m->m_len - 2, (caddr_t)(ipr + 1));
-
-			switch (optname) {
-			case IP_IPSEC_LOCAL_ID:
-				/* Check valid types and NUL-termination */
-				if (ipr->ref_type < IPSP_IDENTITY_PREFIX ||
-				    ipr->ref_type > IPSP_IDENTITY_CONNECTION ||
-				    ((char *)(ipr + 1))[ipr->ref_len - 1]) {
-					free(ipr, M_CREDENTIALS, iprlen);
-					error = EINVAL;
-				} else {
-					if (inp->inp_ipo->ipo_srcid != NULL)
-						ipsp_reffree(inp->inp_ipo->ipo_srcid);
-					inp->inp_ipo->ipo_srcid = ipr;
-				}
-				break;
-			case IP_IPSEC_REMOTE_ID:
-				/* Check valid types and NUL-termination */
-				if (ipr->ref_type < IPSP_IDENTITY_PREFIX ||
-				    ipr->ref_type > IPSP_IDENTITY_CONNECTION ||
-				    ((char *)(ipr + 1))[ipr->ref_len - 1]) {
-					free(ipr, M_CREDENTIALS, iprlen);
-					error = EINVAL;
-				} else {
-					if (inp->inp_ipo->ipo_dstid != NULL)
-						ipsp_reffree(inp->inp_ipo->ipo_dstid);
-					inp->inp_ipo->ipo_dstid = ipr;
-				}
-				break;
-			case IP_IPSEC_LOCAL_CRED:
-				if (ipr->ref_type < IPSP_CRED_KEYNOTE ||
-				    ipr->ref_type > IPSP_CRED_X509) {
-					free(ipr, M_CREDENTIALS, iprlen);
-					error = EINVAL;
-				} else {
-					if (inp->inp_ipo->ipo_local_cred != NULL)
-						ipsp_reffree(inp->inp_ipo->ipo_local_cred);
-					inp->inp_ipo->ipo_local_cred = ipr;
-				}
-				break;
-			case IP_IPSEC_LOCAL_AUTH:
-				if (ipr->ref_type < IPSP_AUTH_PASSPHRASE ||
-				    ipr->ref_type > IPSP_AUTH_RSA) {
-					free(ipr, M_CREDENTIALS, iprlen);
-					error = EINVAL;
-				} else {
-					if (inp->inp_ipo->ipo_local_auth != NULL)
-						ipsp_reffree(inp->inp_ipo->ipo_local_auth);
-					inp->inp_ipo->ipo_local_auth = ipr;
-				}
-				break;
-			}
-
-			/* Unlink cached output TDB to force a re-search */
-			if (inp->inp_tdb_out) {
-				int s = splsoftnet();
-				TAILQ_REMOVE(&inp->inp_tdb_out->tdb_inp_out,
-				    inp, inp_tdb_out_next);
-				splx(s);
-			}
-
-			if (inp->inp_tdb_in) {
-				int s = splsoftnet();
-				TAILQ_REMOVE(&inp->inp_tdb_in->tdb_inp_in,
-				    inp, inp_tdb_in_next);
-				splx(s);
-			}
-#endif
 			break;
 		case SO_RTABLE:
 			if (m == NULL || m->m_len < sizeof(u_int)) {
@@ -1461,73 +1249,7 @@ ip_ctloutput(int op, struct socket *so, int level, int optname,
 			break;
 		case IP_IPSEC_LOCAL_ID:
 		case IP_IPSEC_REMOTE_ID:
-		case IP_IPSEC_LOCAL_CRED:
-		case IP_IPSEC_REMOTE_CRED:
-		case IP_IPSEC_LOCAL_AUTH:
-		case IP_IPSEC_REMOTE_AUTH:
-#ifndef IPSEC
 			error = EOPNOTSUPP;
-#else
-			*mp = m = m_get(M_WAIT, MT_SOOPTS);
-			m->m_len = sizeof(u_int16_t);
-			ipr = NULL;
-			switch (optname) {
-			case IP_IPSEC_LOCAL_ID:
-				if (inp->inp_ipo != NULL)
-					ipr = inp->inp_ipo->ipo_srcid;
-				opt16val = IPSP_IDENTITY_NONE;
-				break;
-			case IP_IPSEC_REMOTE_ID:
-				if (inp->inp_ipo != NULL)
-					ipr = inp->inp_ipo->ipo_dstid;
-				opt16val = IPSP_IDENTITY_NONE;
-				break;
-			case IP_IPSEC_LOCAL_CRED:
-				if (inp->inp_ipo != NULL)
-					ipr = inp->inp_ipo->ipo_local_cred;
-				opt16val = IPSP_CRED_NONE;
-				break;
-			case IP_IPSEC_REMOTE_CRED:
-				ipr = inp->inp_ipsec_remotecred;
-				opt16val = IPSP_CRED_NONE;
-				break;
-			case IP_IPSEC_LOCAL_AUTH:
-				if (inp->inp_ipo != NULL)
-					ipr = inp->inp_ipo->ipo_local_auth;
-				opt16val = IPSP_AUTH_NONE;
-				break;
-			case IP_IPSEC_REMOTE_AUTH:
-				ipr = inp->inp_ipsec_remoteauth;
-				opt16val = IPSP_AUTH_NONE;
-				break;
-			}
-			if (ipr == NULL)
-				*mtod(m, u_int16_t *) = opt16val;
-			else {
-				size_t len;
-
-				len = m->m_len + ipr->ref_len;
-				if (len > MCLBYTES) {
-					 m_free(m);
-					 error = EINVAL;
-					 break;
-				}
-				/* allocate mbuf cluster for larger option */
-				if (len > MLEN) {
-					 MCLGET(m, M_WAITOK);
-					 if ((m->m_flags & M_EXT) == 0) {
-						 m_free(m);
-						 error = ENOBUFS;
-						 break;
-					 }
-
-				}
-				m->m_len = len;
-				*mtod(m, u_int16_t *) = ipr->ref_type;
-				m_copyback(m, sizeof(u_int16_t), ipr->ref_len,
-				    ipr + 1, M_NOWAIT);
-			}
-#endif
 			break;
 		case SO_RTABLE:
 			*mp = m = m_get(M_WAIT, MT_SOOPTS);
@@ -1564,7 +1286,7 @@ ip_pcbopts(struct mbuf **pcbopt, struct mbuf *m)
 	if (*pcbopt)
 		(void)m_free(*pcbopt);
 	*pcbopt = 0;
-	if (m == (struct mbuf *)0 || m->m_len == 0) {
+	if (m == NULL || m->m_len == 0) {
 		/*
 		 * Only turning off any previous options.
 		 */
@@ -1634,7 +1356,7 @@ ip_pcbopts(struct mbuf **pcbopt, struct mbuf *m)
 			 */
 			memmove((caddr_t)&cp[IPOPT_OFFSET+1],
 			    (caddr_t)(&cp[IPOPT_OFFSET+1] +
-			    sizeof(struct in_addr)),			    
+			    sizeof(struct in_addr)),
 			    (unsigned)cnt - (IPOPT_OFFSET+1));
 			break;
 		}

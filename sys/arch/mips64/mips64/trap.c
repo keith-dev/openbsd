@@ -1,4 +1,4 @@
-/*	$OpenBSD: trap.c,v 1.105 2015/02/08 05:40:48 uebayasi Exp $	*/
+/*	$OpenBSD: trap.c,v 1.108 2015/08/03 13:32:15 visa Exp $	*/
 
 /*
  * Copyright (c) 1988 University of Utah.
@@ -181,10 +181,8 @@ trap(struct trap_frame *trapframe)
 	if (type != T_SYSCALL)
 #endif
 		atomic_inc_int(&uvmexp.traps);
-	if (USERMODE(trapframe->sr)) {
+	if (USERMODE(trapframe->sr))
 		type |= T_USER;
-		refreshcreds(p);
-	}
 
 	/*
 	 * Enable hardware interrupts if they were on before the trap;
@@ -207,6 +205,9 @@ trap(struct trap_frame *trapframe)
 		}
 		break;
 	}
+
+	if (type & T_USER)
+		refreshcreds(p);
 
 #ifdef CPU_R8000
 	/*
@@ -352,7 +353,7 @@ itsa(struct trap_frame *trapframe, struct cpu_info *ci, struct proc *p,
 			onfault = pcb->pcb_onfault;
 			pcb->pcb_onfault = 0;
 			KERNEL_LOCK();
-			rv = uvm_fault(kernel_map, trunc_page(va), 0, ftype);
+			rv = uvm_fault(kernel_map, va, 0, ftype);
 			KERNEL_UNLOCK();
 			pcb->pcb_onfault = onfault;
 			if (rv == 0)
@@ -1520,8 +1521,10 @@ fpe_branch_emulate(struct proc *p, struct trap_frame *tf, uint32_t insn,
 #endif
 		return rc;
 	}
+	KERNEL_LOCK();
 	rc = uvm_fault_wire(map, p->p_md.md_fppgva,
 	    p->p_md.md_fppgva + PAGE_SIZE, PROT_MASK);
+	KERNEL_UNLOCK();
 	if (rc != 0) {
 #ifdef DEBUG
 		printf("%s: uvm_fault_wire on %p failed: %d\n",

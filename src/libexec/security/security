@@ -1,8 +1,8 @@
 #!/usr/bin/perl -T
 
-# $OpenBSD: security,v 1.32 2014/12/04 00:07:21 schwarze Exp $
+# $OpenBSD: security,v 1.36 2015/07/21 19:07:13 schwarze Exp $
 #
-# Copyright (c) 2011, 2012, 2014 Ingo Schwarze <schwarze@openbsd.org>
+# Copyright (c) 2011, 2012, 2014, 2015 Ingo Schwarze <schwarze@openbsd.org>
 # Copyright (c) 2011 Andrew Fresh <andrew@afresh1.com>
 #
 # Permission to use, copy, modify, and distribute this software for any
@@ -22,7 +22,7 @@ use strict;
 
 use Digest::SHA qw(sha256_hex);
 use Errno qw(ENOENT);
-use Fcntl qw(:mode);
+use Fcntl qw(O_RDONLY O_NONBLOCK :mode);
 use File::Basename qw(basename);
 use File::Compare qw(compare);
 use File::Copy qw(copy);
@@ -336,7 +336,16 @@ sub find_homes {
 	nag !(open my $fh, '<', $filename),
 	    "open: $filename: $!"
 	    and return [];
-	my $homes = [ map [ @{[split /:/]}[0,2,5] ], <$fh> ];
+	my $homes = [];
+	while (<$fh>) {
+		my $entry = [ @{[split /:/]}[0,2,5] ];
+		chomp;
+		nag !defined $entry->[2],
+		    "Incomplete line \"$_\" in $filename."
+		    and next;
+		chomp $entry->[2];
+		push @$homes, $entry;
+	}
 	close $fh;
 	return $homes;
 }
@@ -362,8 +371,11 @@ sub check_rhosts_content {
 	foreach my $base (qw(rhosts shosts)) {
 		my $filename = "$home/.$base";
 		next unless -s $filename;
-		nag !open(my $fh, '<', $filename),
+		nag !sysopen(my $fh, $filename, O_RDONLY | O_NONBLOCK),
 		    "open: $filename: $!"
+		    and next;
+		nag !(-f $fh),
+		    "$filename is not a regular file"
 		    and next;
 		local $_;
 		nag /^\+\s*$/,
@@ -528,7 +540,7 @@ sub find_special_files {
 	    "cannot spawn mount: $!"
 	    and return;
 	while (<$fh>) {
-		my ($path, $type) = /on\s+(.*?)\s+type\s+(\w+)/;
+		my ($path, $type) = /\son\s+(.*?)\s+type\s+(\w+)/;
 		$skip{$path} = 1 if $path &&
 		    ($type =~ /^(?:a|nnp|proc)fs$/ || !/\(.*local.*\)/);
 	}
@@ -729,7 +741,11 @@ sub diff {
 	    and return;
 	local $/;
 	my $diff = <$fh>;
-	close_or_nag $fh, "diff";
+	{
+		close $fh and last;
+		nag $!, "diff: error closing pipe: $!" and last;
+		nag $? >> 8 > 1, "diff: exit code " . ($? >> 8);
+	}
 	return nag !!$diff, $diff;
 }
 

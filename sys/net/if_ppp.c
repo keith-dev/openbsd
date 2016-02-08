@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_ppp.c,v 1.80 2014/12/19 17:14:39 tedu Exp $	*/
+/*	$OpenBSD: if_ppp.c,v 1.87 2015/07/15 22:16:41 deraadt Exp $	*/
 /*	$NetBSD: if_ppp.c,v 1.39 1997/05/17 21:11:59 christos Exp $	*/
 
 /*
@@ -154,18 +154,10 @@ static void	ppp_ifstart(struct ifnet *ifp);
 int		ppp_clone_create(struct if_clone *, int);
 int		ppp_clone_destroy(struct ifnet *);
 
-/*
- * Some useful mbuf macros not in mbuf.h.
- */
-#define M_IS_CLUSTER(m)	((m)->m_flags & M_EXT)
-
-#define M_DATASTART(m)	\
-	(M_IS_CLUSTER(m) ? (m)->m_ext.ext_buf : \
-	    (m)->m_flags & M_PKTHDR ? (m)->m_pktdat : (m)->m_dat)
-
-#define M_DATASIZE(m)	\
-	(M_IS_CLUSTER(m) ? (m)->m_ext.ext_size : \
-	    (m)->m_flags & M_PKTHDR ? MHLEN: MLEN)
+void		ppp_pkt_list_init(struct ppp_pkt_list *, u_int);
+int		ppp_pkt_enqueue(struct ppp_pkt_list *, struct ppp_pkt *);
+struct ppp_pkt *ppp_pkt_dequeue(struct ppp_pkt_list *);
+struct mbuf *	ppp_pkt_mbuf(struct ppp_pkt *);
 
 /*
  * We steal two bits in the mbuf m_flags, to mark high-priority packets
@@ -232,9 +224,9 @@ ppp_clone_create(struct if_clone *ifc, int unit)
     sc->sc_if.if_output = pppoutput;
     sc->sc_if.if_start = ppp_ifstart;
     IFQ_SET_MAXLEN(&sc->sc_if.if_snd, IFQ_MAXLEN);
-    IFQ_SET_MAXLEN(&sc->sc_inq, IFQ_MAXLEN);
+    mq_init(&sc->sc_inq, IFQ_MAXLEN, IPL_NET);
     IFQ_SET_MAXLEN(&sc->sc_fastq, IFQ_MAXLEN);
-    IFQ_SET_MAXLEN(&sc->sc_rawq, IFQ_MAXLEN);
+    ppp_pkt_list_init(&sc->sc_rawq, IFQ_MAXLEN);
     IFQ_SET_READY(&sc->sc_if.if_snd);
     if_attach(&sc->sc_if);
     if_alloc_sadl(&sc->sc_if);
@@ -315,6 +307,7 @@ pppalloc(pid_t pid)
 void
 pppdealloc(struct ppp_softc *sc)
 {
+    struct ppp_pkt *pkt;
     struct mbuf *m;
 
     splsoftassert(IPL_SOFTNET);
@@ -323,18 +316,10 @@ pppdealloc(struct ppp_softc *sc)
     sc->sc_if.if_flags &= ~(IFF_UP|IFF_RUNNING);
     sc->sc_devp = NULL;
     sc->sc_xfer = 0;
-    for (;;) {
-	IF_DEQUEUE(&sc->sc_rawq, m);
-	if (m == NULL)
-	    break;
+    while ((pkt = ppp_pkt_dequeue(&sc->sc_rawq)) != NULL)
+	ppp_pkt_free(pkt);
+    while ((m = mq_dequeue(&sc->sc_inq)) != NULL)
 	m_freem(m);
-    }
-    for (;;) {
-	IF_DEQUEUE(&sc->sc_inq, m);
-	if (m == NULL)
-	    break;
-	m_freem(m);
-    }
     for (;;) {
 	IF_DEQUEUE(&sc->sc_fastq, m);
 	if (m == NULL)
@@ -345,10 +330,9 @@ pppdealloc(struct ppp_softc *sc)
 	sc->sc_npqueue = m->m_nextpkt;
 	m_freem(m);
     }
-    if (sc->sc_togo != NULL) {
-	m_freem(sc->sc_togo);
-	sc->sc_togo = NULL;
-    }
+    m_freem(sc->sc_togo);
+    sc->sc_togo = NULL;
+
 #ifdef PPP_COMPRESS
     ppp_ccp_closed(sc);
     sc->sc_xc_state = NULL;
@@ -398,7 +382,7 @@ pppioctl(struct ppp_softc *sc, u_long cmd, caddr_t data, int flag,
 
     switch (cmd) {
     case FIONREAD:
-	*(int *)data = IFQ_LEN(&sc->sc_inq);
+	*(int *)data = mq_len(&sc->sc_inq);
 	break;
 
     case PPPIOCGUNIT:
@@ -740,7 +724,7 @@ pppoutput(struct ifnet *ifp, struct mbuf *m0, struct sockaddr *dst,
      * (This assumes M_LEADINGSPACE is always 0 for a cluster mbuf.)
      */
     M_PREPEND(m0, PPP_HDRLEN, M_DONTWAIT);
-    if (m0 == 0) {
+    if (m0 == NULL) {
 	error = ENOBUFS;
 	goto bad;
     }
@@ -1056,31 +1040,28 @@ void
 pppintr(void)
 {
     struct ppp_softc *sc;
-    int s, s2;
+    int s;
+    struct ppp_pkt *pkt;
     struct mbuf *m;
 
     splsoftassert(IPL_SOFTNET);
 
-    s = splsoftnet();	/* XXX - what's the point of this? see comment above */
     LIST_FOREACH(sc, &ppp_softc_list, sc_list) {
 	if (!(sc->sc_flags & SC_TBUSY)
 	    && (!IFQ_IS_EMPTY(&sc->sc_if.if_snd) ||
 	    !IFQ_IS_EMPTY(&sc->sc_fastq))) {
-	    s2 = splnet();
+	    s = splnet();
 	    sc->sc_flags |= SC_TBUSY;
-	    splx(s2);
+	    splx(s);
 	    (*sc->sc_start)(sc);
 	}
-	while (!IFQ_IS_EMPTY(&sc->sc_rawq)) {
-	    s2 = splnet();
-	    IF_DEQUEUE(&sc->sc_rawq, m);
-	    splx(s2);
+	while ((pkt = ppp_pkt_dequeue(&sc->sc_rawq)) != NULL) {
+	    m = ppp_pkt_mbuf(pkt);
 	    if (m == NULL)
-		break;
+		continue;
 	    ppp_inproc(sc, m);
 	}
     }
-    splx(s);
 }
 
 #ifdef PPP_COMPRESS
@@ -1203,15 +1184,11 @@ ppp_ccp_closed(struct ppp_softc *sc)
  * were omitted.
  */
 void
-ppppktin(struct ppp_softc *sc, struct mbuf *m, int lost)
+ppppktin(struct ppp_softc *sc, struct ppp_pkt *pkt, int lost)
 {
-    int s = splnet();
-
-    if (lost)
-	m->m_flags |= M_ERRMARK;
-    IF_ENQUEUE(&sc->sc_rawq, m);
-    schednetisr(NETISR_PPP);
-    splx(s);
+    pkt->p_hdr.ph_errmark = lost;
+    if (ppp_pkt_enqueue(&sc->sc_rawq, pkt) == 0)
+	schednetisr(NETISR_PPP);
 }
 
 /*
@@ -1225,7 +1202,6 @@ static void
 ppp_inproc(struct ppp_softc *sc, struct mbuf *m)
 {
     struct ifnet *ifp = &sc->sc_if;
-    struct ifqueue *inq;
     int s, ilen, xlen, proto, rv;
     u_char *cp, adrs, ctrl;
     struct mbuf *mp, *dmp = NULL;
@@ -1368,7 +1344,7 @@ ppp_inproc(struct ppp_softc *sc, struct mbuf *m)
 	if (m->m_len <= M_TRAILINGSPACE(mp)) {
 	    bcopy(mtod(m, u_char *), mtod(mp, u_char *) + mp->m_len, m->m_len);
 	    mp->m_len += m->m_len;
-	    MFREE(m, mp->m_next);
+	    mp->m_next = m_free(m);
 	} else
 	    mp->m_next = m;
 	m = mp;
@@ -1394,21 +1370,8 @@ ppp_inproc(struct ppp_softc *sc, struct mbuf *m)
     }
 #endif /* VJC */
 
-    /*
-     * If the packet will fit in a header mbuf, don't waste a
-     * whole cluster on it.
-     */
-    if (ilen <= MHLEN && M_IS_CLUSTER(m)) {
-	MGETHDR(mp, M_DONTWAIT, MT_DATA);
-	if (mp != NULL) {
-	    m_copydata(m, 0, ilen, mtod(mp, caddr_t));
-	    m_freem(m);
-	    m = mp;
-	    m->m_len = ilen;
-	}
-    }
     m->m_pkthdr.len = ilen;
-    m->m_pkthdr.rcvif = ifp;
+    m->m_pkthdr.ph_ifidx = ifp->if_index;
 
     /* mark incoming routing table */
     m->m_pkthdr.ph_rtableid = ifp->if_rdomain;
@@ -1462,45 +1425,44 @@ ppp_inproc(struct ppp_softc *sc, struct mbuf *m)
 	m->m_pkthdr.len -= PPP_HDRLEN;
 	m->m_data += PPP_HDRLEN;
 	m->m_len -= PPP_HDRLEN;
-	schednetisr(NETISR_IP);
-	inq = &ipintrq;
+
+	if (niq_enqueue(&ipintrq, m) != 0)
+		rv = 0; /* failure */
+	else
+		rv = 1; /* ipintrq success */
 	break;
 
     default:
 	/*
 	 * Some other protocol - place on input queue for read().
 	 */
-	inq = &sc->sc_inq;
-	rv = 1;
+	if (mq_enqueue(&sc->sc_inq, m) != 0) {
+		if_congestion();
+		rv = 0; /* failure */
+	} else
+		rv = 2; /* input queue */
 	break;
     }
 
-    /*
-     * Put the packet on the appropriate input queue.
-     */
-    s = splnet();
-    if (IF_QFULL(inq)) {
-	IF_DROP(inq);
-	splx(s);
+    if (rv == 0) {
+	/* failure */
 	if (sc->sc_flags & SC_DEBUG)
 	    printf("%s: input queue full\n", ifp->if_xname);
 	ifp->if_iqdrops++;
-	if (!inq->ifq_congestion)
-		if_congestion(inq);
-	goto bad;
+	goto dropped;
     }
-    IF_ENQUEUE(inq, m);
-    splx(s);
+
     ifp->if_ipackets++;
     ifp->if_ibytes += ilen;
 
-    if (rv)
+    if (rv == 2)
 	(*sc->sc_ctlp)(sc);
 
     return;
 
  bad:
     m_freem(m);
+ dropped:
     sc->sc_if.if_ierrors++;
     sc->sc_stats.ppp_ierrors++;
 }
@@ -1548,4 +1510,96 @@ ppp_ifstart(struct ifnet *ifp)
 	sc = ifp->if_softc;
 	(*sc->sc_start)(sc);
 }
+
+void
+ppp_pkt_list_init(struct ppp_pkt_list *pl, u_int limit)
+{
+	mtx_init(&pl->pl_mtx, IPL_TTY);
+	pl->pl_head = pl->pl_tail = NULL;
+	pl->pl_count = 0;
+	pl->pl_limit = limit;
+}
+
+int
+ppp_pkt_enqueue(struct ppp_pkt_list *pl, struct ppp_pkt *pkt)
+{
+	int drop = 0;
+
+	mtx_enter(&pl->pl_mtx);
+	if (pl->pl_count < pl->pl_limit) {
+		if (pl->pl_tail == NULL)
+			pl->pl_head = pl->pl_tail = pkt;
+		else {
+			PKT_NEXTPKT(pl->pl_tail) = pkt;
+			pl->pl_tail = pkt;
+		}
+		PKT_NEXTPKT(pkt) = NULL;
+		pl->pl_count++;
+	} else
+		drop = 1;
+	mtx_leave(&pl->pl_mtx);
+
+	if (drop)
+		ppp_pkt_free(pkt);
+ 
+	return (drop);
+}
+
+struct ppp_pkt *
+ppp_pkt_dequeue(struct ppp_pkt_list *pl)
+{
+	struct ppp_pkt *pkt;
+
+	mtx_enter(&pl->pl_mtx);
+	pkt = pl->pl_head;
+	if (pkt != NULL) {
+		pl->pl_head = PKT_NEXTPKT(pkt);
+		if (pl->pl_head == NULL)
+			pl->pl_tail = NULL;
+
+		pl->pl_count--;
+	}
+	mtx_leave(&pl->pl_mtx);
+
+	return (pkt);
+}
+
+struct mbuf *
+ppp_pkt_mbuf(struct ppp_pkt *pkt0)
+{
+	extern struct pool ppp_pkts;
+	struct mbuf *m0 = NULL, **mp = &m0, *m;
+	struct ppp_pkt *pkt = pkt0;
+	size_t len = 0;
+
+	do {
+		MGETHDR(m, M_DONTWAIT, MT_DATA);
+		if (m == NULL)
+			goto fail;
+
+		MEXTADD(m, pkt, sizeof(*pkt), M_EXTWR,
+		    m_extfree_pool, &ppp_pkts);
+		m->m_data += sizeof(pkt->p_hdr);
+		m->m_len = PKT_LEN(pkt);
+
+		len += m->m_len;
+
+		*mp = m;
+		mp = &m->m_next;
+
+		pkt = PKT_NEXT(pkt);
+	} while (pkt != NULL);
+
+	m0->m_pkthdr.len = len;
+	if (pkt0->p_hdr.ph_errmark)
+		m0->m_flags |= M_ERRMARK;
+
+	return (m0);
+
+fail:
+	m_freem(m0);
+	ppp_pkt_free(pkt0);
+	return (NULL);
+}
+
 #endif	/* NPPP > 0 */

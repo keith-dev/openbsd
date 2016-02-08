@@ -1,4 +1,4 @@
-/*	$OpenBSD: gus.c,v 1.41 2014/09/14 14:17:25 jsg Exp $	*/
+/*	$OpenBSD: gus.c,v 1.43 2015/06/25 20:05:11 ratchov Exp $	*/
 /*	$NetBSD: gus.c,v 1.51 1998/01/25 23:48:06 mycroft Exp $	*/
 
 /*-
@@ -106,8 +106,6 @@
 #include <machine/cpufunc.h>
 #include <sys/audioio.h>
 #include <dev/audio_if.h>
-#include <dev/mulaw.h>
-#include <dev/auconv.h>
 
 #include <dev/isa/isavar.h>
 #include <dev/isa/isadmavar.h>
@@ -289,10 +287,10 @@ struct audio_hw_if gus_hw_if = {
 	gus_mixer_set_port,
 	gus_mixer_get_port,
 	gus_mixer_query_devinfo,
-	ad1848_malloc,
-	ad1848_free,
-	ad1848_round,
-	ad1848_mappage,
+	gus_malloc,
+	gus_free,
+	gus_round,
+	gus_mappage,
 	gus_get_props,
 
 	NULL,
@@ -512,11 +510,9 @@ gus_dma_output(void *addr, void *buf, int size, void (*intr)(void *), void *arg)
 	int flags;
 
 	DMAPRINTF(("gus_dma_output %d @ %p\n", size, buf));
-	mtx_enter(&audio_lock);
 	if (size != sc->sc_blocksize) {
 	    DPRINTF(("gus_dma_output reqsize %d not sc_blocksize %d\n",
 		     size, sc->sc_blocksize));
-	    mtx_leave(&audio_lock);
 	    return EINVAL;
 	}
 
@@ -540,7 +536,6 @@ gus_dma_output(void *addr, void *buf, int size, void (*intr)(void *), void *arg)
 			size &= 1;
 		}
 		if (size == 0) {
-			mtx_leave(&audio_lock);
 			return 0;
 		}
 
@@ -581,7 +576,6 @@ gus_dma_output(void *addr, void *buf, int size, void (*intr)(void *), void *arg)
 #endif
 
 	gusdmaout(sc, flags, boarddma, (caddr_t) buffer, size);
-	mtx_leave(&audio_lock);
 	return 0;
 }
 
@@ -1485,12 +1479,8 @@ gus_set_params(void *addr, int setmode, int usemode, struct audio_params *p,
 	struct gus_softc *sc = addr;
 
 	switch (p->encoding) {
-	case AUDIO_ENCODING_ULAW:
-	case AUDIO_ENCODING_ALAW:
 	case AUDIO_ENCODING_SLINEAR_LE:
 	case AUDIO_ENCODING_ULINEAR_LE:
-	case AUDIO_ENCODING_SLINEAR_BE:
-	case AUDIO_ENCODING_ULINEAR_BE:
 		break;
 	default:
 		return (EINVAL);
@@ -1520,20 +1510,6 @@ gus_set_params(void *addr, int setmode, int usemode, struct audio_params *p,
 	if (setmode & AUMODE_PLAY)
 		sc->sc_orate = p->sample_rate;
 
-	switch (p->encoding) {
-	case AUDIO_ENCODING_ULAW:
-		p->sw_code = mulaw_to_ulinear8;
-		r->sw_code = ulinear8_to_mulaw;
-		break;
-	case AUDIO_ENCODING_ALAW:
-		p->sw_code = alaw_to_ulinear8;
-		r->sw_code = ulinear8_to_alaw;
-		break;
-	case AUDIO_ENCODING_ULINEAR_BE:
-	case AUDIO_ENCODING_SLINEAR_BE:
-		r->sw_code = p->sw_code = swap_bytes;
-		break;
-	}
 	p->bps = AUDIO_BPS(p->precision);
 	r->bps = AUDIO_BPS(r->precision);
 	p->msb = r->msb = 1;
@@ -2199,12 +2175,10 @@ gus_dma_input(void *addr, void *buf, int size, void (*callback)(void *),
 	u_char dmac;
 	DMAPRINTF(("gus_dma_input called\n"));
 
-	mtx_enter(&audio_lock);
 	/*
 	 * Sample SIZE bytes of data from the card, into buffer at BUF.
 	 */
 	if (sc->sc_precision == 16) {
-	    mtx_leave(&audio_lock);
 	    return EINVAL;		/* XXX */
 	}
 
@@ -2234,7 +2208,6 @@ gus_dma_input(void *addr, void *buf, int size, void (*callback)(void *),
 
 
 	DMAPRINTF(("gus_dma_input returning\n"));
-	mtx_leave(&audio_lock);
 	return 0;
 }
 
@@ -3147,54 +3120,29 @@ gus_query_encoding(void *addr, struct audio_encoding *fp)
 {
 	switch (fp->index) {
 	case 0:
-		strlcpy(fp->name, AudioEmulaw, sizeof fp->name);
-		fp->encoding = AUDIO_ENCODING_ULAW;
-		fp->precision = 8;
-		fp->flags = AUDIO_ENCODINGFLAG_EMULATED;
-		break;
-	case 1:
 		strlcpy(fp->name, AudioEslinear, sizeof fp->name);
 		fp->encoding = AUDIO_ENCODING_SLINEAR;
 		fp->precision = 8;
 		fp->flags = 0;
 		break;
-	case 2:
+	case 1:
 		strlcpy(fp->name, AudioEslinear_le, sizeof fp->name);
 		fp->encoding = AUDIO_ENCODING_SLINEAR_LE;
 		fp->precision = 16;
 		fp->flags = 0;
 		break;
-	case 3:
+	case 2:
 		strlcpy(fp->name, AudioEulinear, sizeof fp->name);
 		fp->encoding = AUDIO_ENCODING_ULINEAR;
 		fp->precision = 8;
 		fp->flags = 0;
 		break;
-	case 4:
+	case 3:
 		strlcpy(fp->name, AudioEulinear_le, sizeof fp->name);
 		fp->encoding = AUDIO_ENCODING_ULINEAR_LE;
 		fp->precision = 16;
 		fp->flags = 0;
 		break;
-	case 5:
-		strlcpy(fp->name, AudioEslinear_be, sizeof fp->name);
-		fp->encoding = AUDIO_ENCODING_SLINEAR_BE;
-		fp->precision = 16;
-		fp->flags = AUDIO_ENCODINGFLAG_EMULATED;
-		break;
-	case 6:
-		strlcpy(fp->name, AudioEulinear_be, sizeof fp->name);
-		fp->encoding = AUDIO_ENCODING_ULINEAR_BE;
-		fp->precision = 16;
-		fp->flags = AUDIO_ENCODINGFLAG_EMULATED;
-		break;
-	case 7:
-		strlcpy(fp->name, AudioEalaw, sizeof fp->name);
-		fp->encoding = AUDIO_ENCODING_ALAW;
-		fp->precision = 8;
-		fp->flags = AUDIO_ENCODINGFLAG_EMULATED;
-		break;
-
 	default:
 		return(EINVAL);
 		/*NOTREACHED*/
@@ -3203,6 +3151,40 @@ gus_query_encoding(void *addr, struct audio_encoding *fp)
 	fp->msb = 1;
 
 	return (0);
+}
+
+void *
+gus_malloc(void *addr, int direction, size_t size, int pool, int flags)
+{
+	struct gus_softc *sc = addr;
+	int drq;
+
+	if (direction == AUMODE_PLAY)
+		drq = sc->sc_drq;
+	else
+		drq = sc->sc_recdrq;
+
+	return isa_malloc(sc->sc_isa, drq, size, pool, flags);
+}
+
+void
+gus_free(void *addr, void *ptr, int pool)
+{
+	isa_free(ptr, pool);
+}
+
+size_t
+gus_round(void *addr, int direction, size_t size)
+{
+	if (size > MAX_ISADMA)
+		size = MAX_ISADMA;
+	return size;
+}
+
+paddr_t
+gus_mappage(void *addr, void *mem, off_t off, int prot)
+{
+	return isa_mappage(mem, off, prot);
 }
 
 /*

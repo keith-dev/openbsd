@@ -1,6 +1,6 @@
 #!/bin/sh
 #
-# $OpenBSD: rcctl.sh,v 1.66 2015/03/02 06:58:42 ajacoutot Exp $
+# $OpenBSD: rcctl.sh,v 1.78 2015/08/03 13:18:48 ajacoutot Exp $
 #
 # Copyright (c) 2014, 2015 Antoine Jacoutot <ajacoutot@openbsd.org>
 # Copyright (c) 2014 Ingo Schwarze <schwarze@openbsd.org>
@@ -17,9 +17,9 @@
 # ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
 # OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 
-_special_services="accounting check_quotas ipsec multicast_host
-                   multicast_router pf spamd_black"
-readonly _special_services
+_special_svcs="accounting check_quotas ipsec multicast_host multicast_router pf
+               spamd_black"
+readonly _special_svcs
 
 # get local functions from rc.subr(8)
 FUNCS_ONLY=1
@@ -28,16 +28,22 @@ _rc_parse_conf
 
 usage()
 {
-	_rc_err "usage: ${0##*/} [-df] enable|disable|get|set|getdef|getall|order|action
-             [service | daemon [variable [arguments]] | daemons]"
+	_rc_err "usage: ${0##*/} [-df] action|get|getdef|ls|order|set
+                [service | daemon [variable [arguments]] | daemons | lsarg]"
 }
 
 needs_root()
 {
-	[ "$(id -u)" -ne 0 ] && _rc_err "${0##*/} $1: need root privileges"
+	[ "$(id -u)" -ne 0 ] && _rc_err "${0##*/}: \"$*\" needs root privileges"
 }
 
-ls_rcscripts() {
+rcctl_err()
+{
+	_rc_err "${0##*/}: ${1}" ${2}
+}
+
+ls_rcscripts()
+{
 	local _s
 
 	cd /etc/rc.d && set -- *
@@ -71,9 +77,9 @@ pkg_scripts_order()
 	local _pkg_scripts _svc
 	for _svc in ${_svcs}; do
 		if svc_is_base ${_svc} || svc_is_special ${_svc}; then
-			_rc_err "${0##*/}: ${_svc} is not a pkg script"
+			rcctl_err "${_svc} is not a pkg script"
 		elif ! svc_get ${_svc} status; then
-			_rc_err "${0##*/}: ${_svc} is not enabled"
+			rcctl_err "${_svc} is not enabled"
 		fi
 	done
 	_pkg_scripts=$(echo "${_svcs} ${pkg_scripts}" | tr "[:blank:]" "\n" | \
@@ -100,22 +106,28 @@ pkg_scripts_rm()
 
 rcconf_edit_begin()
 {
-	_TMP_RCCONF=$(mktemp -p /etc -t rc.conf.local.XXXXXXXXXX) || exit 1
+	_TMP_RCCONF=$(mktemp -p /etc -t rc.conf.local.XXXXXXXXXX) || \
+		rcctl_err "cannot create temporary file under /etc"
 	if [ -f /etc/rc.conf.local ]; then
-		# only to keep permissions (file content is not needed)
-		cp -p /etc/rc.conf.local ${_TMP_RCCONF} || exit 1
+		cat /etc/rc.conf.local >${_TMP_RCCONF} || \
+			rcctl_err "cannot append to ${_TMP_RCCONF}"
 	else
-		touch /etc/rc.conf.local || exit 1
+		touch /etc/rc.conf.local || \
+			rcctl_err "cannot create /etc/rc.conf.local"
 	fi
 }
 
 rcconf_edit_end()
 {
-	sort -u -o ${_TMP_RCCONF} ${_TMP_RCCONF} || exit 1
-	mv ${_TMP_RCCONF} /etc/rc.conf.local || exit 1
+	sort -u -o ${_TMP_RCCONF} ${_TMP_RCCONF} || \
+		rcctl_err "cannot modify ${_TMP_RCCONF}"
+	cat ${_TMP_RCCONF} >/etc/rc.conf.local || \
+		rcctl_err "cannot append to /etc/rc.conf.local"
 	if [ ! -s /etc/rc.conf.local ]; then
-		rm /etc/rc.conf.local || exit 1
+		rm /etc/rc.conf.local || \
+			rcctl_err "cannot remove /etc/rc.conf.local"
 	fi
+	rm -f ${_TMP_RCCONF}
 	_rc_parse_conf # reload new values
 }
 
@@ -133,7 +145,8 @@ svc_is_base()
 	local _svc=$1
 	[ -n "${_svc}" ] || return
 
-	grep -E 'start_daemon[[:space:]]+[[:alnum:]]' /etc/rc | cut -d ' ' -f2- | grep -qw -- ${_svc}
+	grep -E 'start_daemon[[:space:]]+[[:alnum:]]' /etc/rc | \
+		cut -d ' ' -f2- | grep -qw -- ${_svc}
 }
 
 svc_is_special()
@@ -141,7 +154,54 @@ svc_is_special()
 	local _svc=$1
 	[ -n "${_svc}" ] || return
 
-	echo ${_special_services} | grep -qw -- ${_svc}
+	echo ${_special_svcs} | grep -qw -- ${_svc}
+}
+
+svc_ls()
+{
+	local _lsarg=$1
+	[ -n "${_lsarg}" ] || return
+
+	# we do not want to return the "status" nor the rc.d(8) script retcode
+	local _ret=0 _on _svc _started
+
+	case ${_lsarg} in
+		all)
+			(
+				ls_rcscripts
+				echo ${_special_svcs} | tr "[:blank:]" "\n"
+			) | sort
+			;;
+		faulty)
+			for _svc in $(svc_ls on); do
+				svc_is_base ${_svc} && \
+					! /etc/rc.d/${_svc} check >/dev/null && \
+					echo ${_svc} && _ret=1
+			done
+			;;
+		off|on)
+			for _svc in $(svc_ls all); do
+				svc_get ${_svc} status && _on=1
+					[ "${_lsarg}" = "on" -a -n "${_on}" ] || \
+						[ "${_lsarg}" = "off" -a -z "${_on}" ] && \
+					echo ${_svc}
+				unset _on
+			done
+			;;
+		started|stopped)
+			for _svc in $(ls_rcscripts); do
+				/etc/rc.d/${_svc} check >/dev/null && _started=1
+				[ "${_lsarg}" = "started" -a -n "${_started}" ] || \
+					[ "${_lsarg}" = "stopped" -a -z "${_started}" ] && \
+					echo ${_svc}
+				unset _started
+			done
+			;;
+		*)
+			_ret=1
+	esac
+
+	return ${_ret}
 }
 
 svc_get()
@@ -150,7 +210,7 @@ svc_get()
 	[ -n "${_svc}" ] || return
 
 	local _status=0 _val _var=$2
-	local daemon_flags daemon_timeout daemon_user
+	local daemon_class daemon_flags daemon_timeout daemon_user
 
 	if svc_is_special ${_svc}; then
 		daemon_flags="$(eval echo \${${_svc}})"
@@ -162,18 +222,31 @@ svc_get()
 			fi
 		fi
 
-		[ -z "${daemon_flags}" ] && \
-			daemon_flags="$(eval echo \"\${${_svc}_flags}\")"
-		[ -z "${daemon_flags}" ] && \
-			daemon_flags="$(svc_getdef ${_svc} flags)"
-		[ -z "${daemon_timeout}" ] && \
-			daemon_timeout="$(eval echo \"\${${_svc}_timeout}\")"
-		[ -z "${daemon_timeout}" ] && \
-			daemon_timeout="$(svc_getdef ${_svc} timeout)"
-		[ -z "${daemon_user}" ] && \
-			daemon_user="$(eval echo \"\${${_svc}_user}\")"
-		[ -z "${daemon_user}" ] && \
-			daemon_user="$(svc_getdef ${_svc} user)"
+		# these are expensive, make sure they are explicitely requested
+		if [ -z "${_var}" -o "${_var}" = "class" ]; then
+			getcap -f /etc/login.conf ${_svc} 1>/dev/null 2>&1 && \
+				daemon_class=${_svc}
+			[ -z "${daemon_class}" ] && \
+				daemon_class="$(svc_getdef ${_svc} class)"
+		fi
+		if [[ -z ${_var} || ${_var} == @(flags|status) ]]; then
+			[ -z "${daemon_flags}" ] && \
+				daemon_flags="$(eval echo \"\${${_svc}_flags}\")"
+			[ -z "${daemon_flags}" ] && \
+				daemon_flags="$(svc_getdef ${_svc} flags)"
+		fi
+		if [ -z "${_var}" -o "${_var}" = "timeout" ]; then
+			[ -z "${daemon_timeout}" ] && \
+				daemon_timeout="$(eval echo \"\${${_svc}_timeout}\")"
+			[ -z "${daemon_timeout}" ] && \
+				daemon_timeout="$(svc_getdef ${_svc} timeout)"
+		fi
+		if [ -z "${_var}" -o "${_var}" = "user" ]; then
+			[ -z "${daemon_user}" ] && \
+				daemon_user="$(eval echo \"\${${_svc}_user}\")"
+			[ -z "${daemon_user}" ] && \
+				daemon_user="$(svc_getdef ${_svc} user)"
+		fi
 	fi
 
 	[ "${daemon_flags}" = "NO" ] && _status=1
@@ -186,6 +259,7 @@ svc_get()
 		if svc_is_special ${_svc}; then
 			echo "${_svc}=${daemon_flags}"
 		else
+			echo "${_svc}_class=${daemon_class}"
 			echo "${_svc}_flags=${daemon_flags}"
 			echo "${_svc}_timeout=${daemon_timeout}"
 			echo "${_svc}_user=${daemon_user}"
@@ -201,7 +275,7 @@ svc_getdef()
 	[ -n "${_svc}" ] || return
 
 	local _status=0 _val _var=$2
-	local daemon_flags daemon_timeout daemon_user
+	local daemon_class daemon_flags daemon_timeout daemon_user
 
 	if svc_is_special ${_svc}; then
 		# unconditionally parse: we always output flags and/or status
@@ -224,6 +298,7 @@ svc_getdef()
 		rc_cmd() { }
 		. /etc/rc.d/${_svc} >/dev/null 2>&1
 
+		daemon_class=daemon
 		[ -z "${daemon_timeout}" ] && daemon_timeout=30
 		[ -z "${daemon_user}" ] && daemon_user=root
 	fi
@@ -236,6 +311,7 @@ svc_getdef()
 		if svc_is_special ${_svc}; then
 			echo "${_svc}=${daemon_flags}"
 		else
+			echo "${_svc}_class=${daemon_class}"
 			echo "${_svc}_flags=${daemon_flags}"
 			echo "${_svc}_timeout=${daemon_timeout}"
 			echo "${_svc}_user=${daemon_user}"
@@ -271,6 +347,9 @@ svc_set()
 	shift 2
 	local _args="$*"
 
+	# don't check if we are already enabled or disabled because rc.conf(8)
+	# defaults may have changed in which case we may have a matching
+	# redundant entry in rc.conf.local that we can drop
 	if [ "${_var}" = "status" ]; then
 		if [ "${_args}" = "on" ]; then
 			_var="flags"
@@ -287,11 +366,11 @@ svc_set()
 			svc_rm ${_svc}
 			return
 		else
-			_rc_err "${0##*/}: invalid status \"${_args}\""
+			rcctl_err "invalid status \"${_args}\""
 		fi
 	else
 		svc_get ${_svc} status || \
-			_rc_err "${0##*/}: ${svc} is not enabled"
+			rcctl_err "${svc} is not enabled"
 	fi
 
 	if svc_is_special ${_svc}; then
@@ -307,11 +386,11 @@ svc_set()
 	if [ -n "${_args}" ]; then
 		if [ "${_var}" = "timeout" ]; then
 			[[ ${_args} != +([[:digit:]]) || ${_args} -le 0 ]] && \
-				_rc_err "${0##*/}: \"${_args}\" is not a positive integer"
+				rcctl_err "\"${_args}\" is not a positive integer"
 		fi
 		if [ "${_var}" = "user" ]; then
 			getent passwd "${_args}" >/dev/null || \
-				_rc_err "${0##*/}: user \"${_args}\" does not exist"
+				rcctl_err "user \"${_args}\" does not exist"
 		fi
 		# unset flags if they match the default enabled ones
 		[ "${_args}" = "$(svc_getdef ${_svc} ${_var})" ] && \
@@ -345,7 +424,10 @@ shift $((OPTIND-1))
 [ $# -gt 0 ] || usage
 
 action=$1
-if [ "${action}" = "order" ]; then
+if [ "${action}" = "ls" ]; then
+	lsarg=$2
+	[[ ${lsarg} == @(all|faulty|off|on|started|stopped) ]] || usage
+elif [ "${action}" = "order" ]; then
 	shift 1
 	svcs="$*"
 else
@@ -356,22 +438,24 @@ else
 fi
 
 if [ -n "${svc}" ]; then
-	[[ ${action} = getall ]] && usage
+	[[ ${action} == @(disable|enable|get|getdef|set|start|stop|restart|reload|check) ]] || \
+		usage
 	svc_is_avail ${svc} || \
-		_rc_err "${0##*/}: service ${svc} does not exist" 2
-elif [[ ${action} != @(getall|order) ]] ; then
+		rcctl_err "service ${svc} does not exist" 2
+elif [[ ${action} != @(getall|ls|order) ]] ; then
 	usage
 fi
 
 if [ -n "${var}" ]; then
-	[[ ${var} != @(flags|status|timeout|user) ]] && usage
-	[[ ${action} != @(get|getdef|set) ]] && usage
+	[[ ${var} != @(class|flags|status|timeout|user) ]] && usage
 	[[ ${action} == set && ${var} = flags && ${args} = NO ]] && \
-		_rc_err "${0##*/}: \"flags NO\" contradicts \"${action}\""
+		rcctl_err "\"flags NO\" contradicts \"${action}\""
+	[[ ${action} == set && ${var} == class ]] && \
+		rcctl_err "\"${svc}_class\" is a read-only variable set in login.conf(5)"
 	if svc_is_special ${svc}; then
 		if [[ ${action} == set && ${var} != status ]] || \
-			[[ ${action} == @(get|getdef) && ${var} == @(timeout|user) ]] ; then
-			_rc_err "${0##*/}: \"${svc}\" is a special variable, cannot \"${action} ${svc} ${var}\""
+			[[ ${action} == @(get|getdef) && ${var} == @(class|timeout|user) ]]; then
+			rcctl_err "\"${svc}\" is a special variable, cannot \"${action} ${svc} ${var}\""
 		fi
 	fi
 elif [ ${action} = "set" ]; then
@@ -379,25 +463,28 @@ elif [ ${action} = "set" ]; then
 fi
 
 case ${action} in
-	disable)
+	disable) # undocumented, deprecated
 		needs_root ${action}
 		svc_set ${svc} status off
 		;;
-	enable)
+	enable) # undocumented, deprecated
 		needs_root ${action}
 		svc_set ${svc} status on
 		;;
 	get)
 		svc_get ${svc} "${var}"
 		;;
-	getall)
-		for i in $(ls_rcscripts) ${_special_services}; do
-			svc_get ${i}
-		done
-		return 0 # we do not want the "status"
+	getall) # undocumented, deprecated
+		for i in $(svc_ls all); do svc_get ${i}; done
+		return 0
 		;;
 	getdef)
 		( svc_getdef ${svc} "${var}" )
+		;;
+	ls)
+		# some rc.d(8) scripts need root for rc_check()
+		[[ ${lsarg} == @(started|stopped|faulty) ]] && needs_root ${action} ${lsarg}
+		svc_ls ${lsarg}
 		;;
 	order)
 		if [ -n "${svcs}" ]; then
@@ -413,7 +500,7 @@ case ${action} in
 		;;
 	start|stop|restart|reload|check)
 		if svc_is_special ${svc}; then
-			_rc_err "${0##*/}: \"${svc}\" is a special variable, no rc.d(8) script"
+			rcctl_err "\"${svc}\" is a special variable, no rc.d(8) script"
 		fi
 		/etc/rc.d/${svc} ${_RC_DEBUG} ${_RC_FORCE} ${action}
 		;;

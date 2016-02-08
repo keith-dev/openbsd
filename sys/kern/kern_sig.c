@@ -1,4 +1,4 @@
-/*	$OpenBSD: kern_sig.c,v 1.178 2015/02/09 13:41:24 pelikan Exp $	*/
+/*	$OpenBSD: kern_sig.c,v 1.183 2015/07/27 18:22:37 deraadt Exp $	*/
 /*	$NetBSD: kern_sig.c,v 1.54 1996/04/22 01:38:32 christos Exp $	*/
 
 /*
@@ -48,7 +48,6 @@
 #include <sys/event.h>
 #include <sys/proc.h>
 #include <sys/systm.h>
-#include <sys/buf.h>
 #include <sys/acct.h>
 #include <sys/file.h>
 #include <sys/filedesc.h>
@@ -62,6 +61,7 @@
 #include <sys/ptrace.h>
 #include <sys/sched.h>
 #include <sys/user.h>
+#include <sys/syslog.h>
 
 #include <sys/mount.h>
 #include <sys/syscallargs.h>
@@ -1458,6 +1458,9 @@ coredump(struct proc *p)
 	char name[MAXPATHLEN];
 	const char *dir = "/var/crash";
 
+	if (pr->ps_emul->e_coredump == NULL)
+		return (EINVAL);
+
 	pr->ps_flags |= PS_COREDUMP;
 
 	/*
@@ -1514,6 +1517,7 @@ coredump(struct proc *p)
 		cred->cr_gid = 0;
 	}
 
+	p->p_tamenote = TMN_COREDUMP;
 	NDINIT(&nd, LOOKUP, NOFOLLOW, UIO_SYSSPACE, name, p);
 
 	error = vn_open(&nd, O_CREAT | FWRITE | O_NOFOLLOW, S_IRUSR | S_IWUSR);
@@ -1560,45 +1564,6 @@ out:
 #endif
 }
 
-int
-coredump_trad(struct proc *p, void *cookie)
-{
-#ifdef SMALL_KERNEL
-	return EPERM;
-#else
-	struct coredump_iostate *io = cookie;
-	struct vmspace *vm = io->io_proc->p_vmspace;
-	struct vnode *vp = io->io_vp;
-	struct ucred *cred = io->io_cred;
-	struct core core;
-	int error;
-
-	core.c_midmag = 0;
-	strlcpy(core.c_name, p->p_comm, sizeof(core.c_name));
-	core.c_nseg = 0;
-	core.c_signo = p->p_sisig;
-	core.c_ucode = p->p_sitrapno;
-	core.c_cpusize = 0;
-	core.c_tsize = (u_long)ptoa(vm->vm_tsize);
-	core.c_dsize = (u_long)ptoa(vm->vm_dsize);
-	core.c_ssize = (u_long)round_page(ptoa(vm->vm_ssize));
-	error = cpu_coredump(p, vp, cred, &core);
-	if (error)
-		return (error);
-	/*
-	 * uvm_coredump() spits out all appropriate segments.
-	 * All that's left to do is to write the core header.
-	 */
-	error = uvm_coredump(p, vp, cred, &core);
-	if (error)
-		return (error);
-	error = vn_rdwr(UIO_WRITE, vp, (caddr_t)&core,
-	    (int)core.c_hdrsize, (off_t)0,
-	    UIO_SYSSPACE, IO_UNIT, cred, NULL, p);
-	return (error);
-#endif
-}
-
 #ifndef SMALL_KERNEL
 int
 coredump_write(void *cookie, enum uio_seg segflg, const void *data, size_t len)
@@ -1622,11 +1587,12 @@ coredump_write(void *cookie, enum uio_seg segflg, const void *data, size_t len)
 		    io->io_offset + coffset, segflg,
 		    IO_UNIT, io->io_cred, NULL, io->io_proc);
 		if (error) {
-			printf("pid %d (%s): %s write of %lu@%p"
-			    " at %lld failed: %d\n",
-			    io->io_proc->p_pid, io->io_proc->p_comm,
-			    segflg == UIO_USERSPACE ? "user" : "system",
-			    len, data, (long long)io->io_offset, error);
+			if (error == ENOSPC)
+				log(LOG_ERR, "coredump of %s(%d) failed, filesystem full",
+				    io->io_proc->p_comm, io->io_proc->p_pid);
+			else
+				log(LOG_ERR, "coredump of %s(%d), write failed: errno %d",
+				    io->io_proc->p_comm, io->io_proc->p_pid, error);
 			return (error);
 		}
 

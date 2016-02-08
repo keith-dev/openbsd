@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_tl.c,v 1.61 2014/12/22 02:28:52 tedu Exp $	*/
+/*	$OpenBSD: if_tl.c,v 1.64 2015/06/24 09:40:54 mpi Exp $	*/
 
 /*
  * Copyright (c) 1997, 1998
@@ -1014,10 +1014,11 @@ tl_newbuf(struct tl_softc *sc, struct tl_chain_onefrag *c)
  *
  * To make things as fast as possible, we have the chip DMA directly
  * into mbufs. This saves us from having to do a buffer copy: we can
- * just hand the mbufs directly to ether_input(). Once the frame has
- * been sent on its way, the 'list' structure is assigned a new buffer
- * and moved to the end of the RX chain. As long we we stay ahead of
- * the chip, it will always think it has an endless receive channel.
+ * just hand the mbufs directly to the network stack. Once the frame
+ * has been sent on its way, the 'list' structure is assigned a new
+ * buffer and moved to the end of the RX chain. As long we we stay
+ * ahead of the chip, it will always think it has an endless receive
+ * channel.
  *
  * If we happen to fall behind and the chip manages to fill up all of
  * the buffers, it will generate an end of channel interrupt and wait
@@ -1030,6 +1031,7 @@ tl_intvec_rxeof(void *xsc, u_int32_t type)
 	int			r = 0, total_len = 0;
 	struct ether_header	*eh;
 	struct mbuf		*m;
+	struct mbuf_list	ml = MBUF_LIST_INITIALIZER();
 	struct ifnet		*ifp;
 	struct tl_chain_onefrag	*cur_rx;
 
@@ -1059,7 +1061,6 @@ tl_intvec_rxeof(void *xsc, u_int32_t type)
 		sc->tl_cdata.tl_rx_tail = cur_rx;
 
 		eh = mtod(m, struct ether_header *);
-		m->m_pkthdr.rcvif = ifp;
 
 		/*
 		 * Note: when the ThunderLAN chip is in 'capture all
@@ -1075,21 +1076,10 @@ tl_intvec_rxeof(void *xsc, u_int32_t type)
 		}
 
 		m->m_pkthdr.len = m->m_len = total_len;
-#if NBPFILTER > 0
-		/*
-	 	 * Handle BPF listeners. Let the BPF user see the packet, but
-	 	 * don't pass it up to the ether_input() layer unless it's
-	 	 * a broadcast packet, multicast packet, matches our ethernet
-	 	 * address or the interface is in promiscuous mode. If we don't
-	 	 * want the packet, just forget it. We leave the mbuf in place
-	 	 * since it can be used again later.
-	 	 */
-		if (ifp->if_bpf)
-			bpf_mtap(ifp->if_bpf, m, BPF_DIRECTION_IN);
-#endif
-		/* pass it on. */
-		ether_input_mbuf(ifp, m);
+		ml_enqueue(&ml, m);
 	}
+
+	if_input(ifp, &ml);
 
 	return(r);
 }
@@ -1340,7 +1330,6 @@ tl_stats_update(void *xsc)
 	ifp->if_opackets += tl_tx_goodframes(tl_stats);
 	ifp->if_collisions += tl_stats.tl_tx_single_collision +
 				tl_stats.tl_tx_multi_collision;
-	ifp->if_ipackets += tl_rx_goodframes(tl_stats);
 	ifp->if_ierrors += tl_stats.tl_crc_errors + tl_stats.tl_code_errors +
 			    tl_rx_overrun(tl_stats);
 	ifp->if_oerrors += tl_tx_underrun(tl_stats);

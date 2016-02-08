@@ -1,4 +1,4 @@
-#	$OpenBSD: Makefile,v 1.400 2014/12/03 20:13:49 florian Exp $
+#	$OpenBSD: Makefile,v 1.406 2015/08/04 04:24:08 jsg Exp $
 
 TZDIR=		/usr/share/zoneinfo
 LOCALTIME=	Canada/Mountain
@@ -32,13 +32,14 @@ BINOWN= root
 BINGRP= wheel
 MUTABLE=changelist csh.cshrc csh.login csh.logout daily \
 	etc.${MACHINE}/disktab etc.${MACHINE}/login.conf ftpusers \
-	gettytab group ksh.kshrc locate.rc mailer.conf man.conf \
-	moduli monthly netstart networks newsyslog.conf \
+	gettytab group ksh.kshrc locate.rc mailer.conf \
+	moduli monthly netstart networks newsyslog.conf ntpd.conf \
 	pf.os protocols rc rc.conf rpc services shells syslog.conf weekly
 
 # -rw-r--r--
 EXAMPLES=chio.conf dhclient.conf dhcpd.conf exports ftpchroot hosts.lpd \
-	httpd.conf ifstated.conf inetd.conf mixerctl.conf mrouted.conf \
+	httpd.conf ifstated.conf inetd.conf \
+	man.conf mixerctl.conf mrouted.conf \
 	ntpd.conf printcap rbootd.conf remote sensorsd.conf
 .if ${MACHINE} != "aviion" 
 EXAMPLES+= wsconsctl.conf
@@ -46,15 +47,15 @@ EXAMPLES+= wsconsctl.conf
 
 # -rw-------
 EXAMPLES_600=bgpd.conf dvmrpd.conf hostapd.conf iked.conf ipsec.conf \
-	ldapd.conf ldpd.conf ospf6d.conf ospfd.conf pf.conf rc.local \
-	rc.securelevel rc.shutdown relayd.conf ripd.conf \
+	ldapd.conf ldpd.conf ospf6d.conf ospfd.conf pf.conf radiusd.conf \
+	rc.local rc.securelevel rc.shutdown relayd.conf ripd.conf \
 	sasyncd.conf snmpd.conf ypldap.conf 
 
 # -r-xr-xr-x
 RCDAEMONS=amd apmd bgpd bootparamd cron dhcpd dhcrelay dvmrpd ftpd ftpproxy \
 	hostapd hotplugd httpd identd ifstated iked inetd isakmpd iscsid \
 	ldapd ldattach ldomd ldpd lockd lpd mopd mountd mrouted nfsd \
-	npppd nsd ntpd ospf6d ospfd pflogd portmap rarpd rbootd relayd \
+	npppd nsd ntpd ospf6d ospfd pflogd portmap radiusd rarpd rbootd relayd \
 	ripd route6d rtadvd sasyncd sensorsd slowcgi smtpd sndiod \
 	snmpd spamd spamlogd sshd statd syslogd tftpd tftpproxy unbound \
 	watchdogd wsmoused xdm ypbind ypldap yppasswdd ypserv
@@ -203,8 +204,6 @@ distribution-etc-root-var: distrib-dirs
 	cd mail && exec ${MAKE} distribution
 	${INSTALL} -c -o root -g wheel -m 600 root/root.mail \
 	    ${DESTDIR}/var/mail/root
-	${INSTALL} -c -o root -g wheel -m 440 ../usr.bin/sudo/sudoers \
-	    ${DESTDIR}/etc/sudoers
 	cd rc.d; \
 		${INSTALL} -c -o root -g wheel -m 644 rc.subr \
 		    ${DESTDIR}/etc/rc.d && \

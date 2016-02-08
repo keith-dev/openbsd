@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_trunk.h,v 1.19 2014/12/04 00:01:53 tedu Exp $	*/
+/*	$OpenBSD: if_trunk.h,v 1.23 2015/05/26 11:39:07 mpi Exp $	*/
 
 /*
  * Copyright (c) 2005, 2006, 2007 Reyk Floeter <reyk@openbsd.org>
@@ -137,10 +137,13 @@ struct trunk_port {
 	u_int32_t			tp_flags;	/* port flags */
 	void				*lh_cookie;	/* if state hook */
 	void				*dh_cookie;	/* if detach hook */
+	struct ifih			tp_ifih;	/* input handler */
 
 	/* Redirected callbacks */
 	void	(*tp_watchdog)(struct ifnet *);
 	int	(*tp_ioctl)(struct ifnet *, u_long, caddr_t);
+	int	(*tp_output)(struct ifnet *, struct mbuf *, struct sockaddr *,
+		    struct rtentry *);
 
 	SLIST_ENTRY(trunk_port)		tp_entries;
 };
@@ -194,7 +197,7 @@ struct trunk_softc {
 	int	(*tr_start)(struct trunk_softc *, struct mbuf *);
 	int	(*tr_watchdog)(struct trunk_softc *);
 	int	(*tr_input)(struct trunk_softc *, struct trunk_port *,
-		    struct ether_header *, struct mbuf *);
+		    struct mbuf *);
 	int	(*tr_port_create)(struct trunk_port *);
 	void	(*tr_port_destroy)(struct trunk_port *);
 	void	(*tr_linkstate)(struct trunk_port *);
@@ -219,8 +222,6 @@ struct trunk_lb {
 	struct trunk_port	*lb_ports[TRUNK_MAX_PORTS];
 };
 
-int	 	trunk_input(struct ifnet *, struct ether_header *,
-		    struct mbuf *);
 int		trunk_enqueue(struct ifnet *, struct mbuf *);
 u_int32_t	trunk_hashmbuf(struct mbuf *, SIPHASH_KEY *);
 #endif /* _KERNEL */

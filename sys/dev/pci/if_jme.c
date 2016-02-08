@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_jme.c,v 1.37 2014/12/22 02:28:52 tedu Exp $	*/
+/*	$OpenBSD: if_jme.c,v 1.41 2015/06/24 09:40:54 mpi Exp $	*/
 /*-
  * Copyright (c) 2008, Pyun YongHyeon <yongari@FreeBSD.org>
  * All rights reserved.
@@ -60,7 +60,6 @@
 #include <net/bpf.h>
 #endif
 
-#include <dev/mii/mii.h>
 #include <dev/mii/miivar.h>
 #include <dev/mii/jmphyreg.h>
 
@@ -1616,6 +1615,7 @@ jme_rxpkt(struct jme_softc *sc)
 	struct ifnet *ifp = &sc->sc_arpcom.ac_if;
 	struct jme_desc *desc;
 	struct jme_rxdesc *rxd;
+	struct mbuf_list ml = MBUF_LIST_INITIALIZER();
 	struct mbuf *mp, *m;
 	uint32_t flags, status;
 	int cons, count, nsegs;
@@ -1693,7 +1693,6 @@ jme_rxpkt(struct jme_softc *sc)
 			} else {
 				m->m_len = sc->jme_cdata.jme_rxlen;
 			}
-			m->m_pkthdr.rcvif = ifp;
 
 			/*
 			 * Account for 10bytes auto padding which is used
@@ -1727,20 +1726,14 @@ jme_rxpkt(struct jme_softc *sc)
 			}
 #endif
 
-#if NBPFILTER > 0
-			if (ifp->if_bpf)
-				bpf_mtap_ether(ifp->if_bpf, m,
-				    BPF_DIRECTION_IN);
-#endif
-
-			ifp->if_ipackets++;
-			/* Pass it on. */
-			ether_input_mbuf(ifp, m);
+			ml_enqueue(&ml, m);
 
 			/* Reset mbuf chains. */
 			JME_RXCHAIN_RESET(sc);
 		}
 	}
+
+	if_input(ifp, &ml);
 
 	sc->jme_cdata.jme_rx_cons += nsegs;
 	sc->jme_cdata.jme_rx_cons %= JME_RX_RING_CNT;

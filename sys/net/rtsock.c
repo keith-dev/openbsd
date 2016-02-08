@@ -1,4 +1,4 @@
-/*	$OpenBSD: rtsock.c,v 1.157 2015/02/11 23:34:43 mpi Exp $	*/
+/*	$OpenBSD: rtsock.c,v 1.166 2015/07/18 21:58:06 mpi Exp $	*/
 /*	$NetBSD: rtsock.c,v 1.18 1996/03/29 00:32:10 cgd Exp $	*/
 
 /*
@@ -304,12 +304,11 @@ rt_senddesync(void *data)
 		desync_mbuf = rt_msg1(RTM_DESYNC, NULL);
 		if ((desync_mbuf != NULL) && 
 		    (sbappendaddr(&rp->rcb_socket->so_rcv, &route_src, 
-		    desync_mbuf, (struct mbuf *)0) != 0)) {
+		    desync_mbuf, (struct mbuf *)NULL) != 0)) {
 			rop->flags &= ~ROUTECB_FLAG_DESYNC;
 			sorwakeup(rp->rcb_socket);
 		} else {
-			if (desync_mbuf)
-				m_freem(desync_mbuf);
+			m_freem(desync_mbuf);
 			/* Re-add timeout to try sending msg again */
 			timeout_add(&rop->timeout, ROUTE_DESYNC_RESEND_TIMEOUT);
 		}
@@ -402,10 +401,10 @@ route_input(struct mbuf *m0, ...)
 
 		if (last) {
 			struct mbuf *n;
-			if ((n = m_copy(m, 0, (int)M_COPYALL)) != NULL) {
+			if ((n = m_copym(m, 0, M_COPYALL, M_NOWAIT)) != NULL) {
 				if (sbspace(&last->so_rcv) < (2 * MSIZE) ||
 				    sbappendaddr(&last->so_rcv, sosrc,
-				    n, (struct mbuf *)0) == 0) {
+				    n, (struct mbuf *)NULL) == 0) {
 					/*
 					 * Flag socket as desync'ed and 
 					 * flush required
@@ -426,7 +425,7 @@ route_input(struct mbuf *m0, ...)
 	if (last) {
 		if (sbspace(&last->so_rcv) < (2 * MSIZE) ||
 		    sbappendaddr(&last->so_rcv, sosrc,
-		    m, (struct mbuf *)0) == 0) {
+		    m, (struct mbuf *)NULL) == 0) {
 			/* Flag socket as desync'ed and flush required */
 			sotoroutecb(last)->flags |= 
 			    ROUTECB_FLAG_DESYNC | ROUTECB_FLAG_FLUSH;
@@ -444,10 +443,8 @@ int
 route_output(struct mbuf *m, ...)
 {
 	struct rt_msghdr	*rtm = NULL;
-	struct radix_node	*rn = NULL;
 	struct rtentry		*rt = NULL;
 	struct rtentry		*saved_nrt = NULL;
-	struct radix_node_head	*rnh;
 	struct rt_addrinfo	 info;
 	int			 len, newgate, error = 0;
 	struct ifnet		*ifp = NULL;
@@ -468,7 +465,7 @@ route_output(struct mbuf *m, ...)
 	va_end(ap);
 
 	info.rti_info[RTAX_DST] = NULL;	/* for error handling (goto flush) */
-	if (m == 0 || ((m->m_len < sizeof(int32_t)) &&
+	if (m == NULL || ((m->m_len < sizeof(int32_t)) &&
 	    (m = m_pullup(m, sizeof(int32_t))) == 0))
 		return (ENOBUFS);
 	if ((m->m_flags & M_PKTHDR) == 0)
@@ -584,6 +581,12 @@ route_output(struct mbuf *m, ...)
 	info.rti_mpls = rtm->rtm_mpls;
 #endif
 
+	if (info.rti_info[RTAX_GATEWAY] != NULL &&
+	    info.rti_info[RTAX_GATEWAY]->sa_family == AF_LINK &&
+	    (info.rti_flags & RTF_CLONING) == 0) {
+		info.rti_flags |= RTF_LLINFO;
+	}
+
 	switch (rtm->rtm_type) {
 	case RTM_ADD:
 		if (info.rti_info[RTAX_GATEWAY] == NULL) {
@@ -613,56 +616,52 @@ route_output(struct mbuf *m, ...)
 	case RTM_GET:
 	case RTM_CHANGE:
 	case RTM_LOCK:
-		rnh = rtable_get(tableid, info.rti_info[RTAX_DST]->sa_family);
-		if (rnh == NULL) {
+		if (!rtable_exists(tableid)) {
 			error = EAFNOSUPPORT;
 			goto flush;
 		}
-		rt = rt_lookup(info.rti_info[RTAX_DST],
-		    info.rti_info[RTAX_NETMASK], tableid);
-		rn = (struct radix_node *)rt;
-		if (rn == NULL || (rn->rn_flags & RNF_ROOT) != 0) {
+		rt = rtable_lookup(tableid, info.rti_info[RTAX_DST],
+		    info.rti_info[RTAX_NETMASK]);
+		if (rt == NULL) {
 			error = ESRCH;
-			rt = NULL;
 			goto flush;
 		}
 #ifndef SMALL_KERNEL
-		if (rn_mpath_capable(rnh)) {
-			/* first find the right priority */
-			rt = rt_mpath_matchgate(rt, NULL, prio);
-			if (!rt) {
+		/* First find the right priority. */
+		rt = rtable_mpath_match(tableid, rt, NULL, prio);
+		if (rt == NULL) {
+			error = ESRCH;
+			goto flush;
+		}
+
+
+		/*
+		 * For RTM_CHANGE/LOCK, if we got multipath routes,
+		 * a matching RTAX_GATEWAY is required.
+		 * OR
+		 * If a gateway is specified then RTM_GET and
+		 * RTM_LOCK must match the gateway no matter
+		 * what even in the non multipath case.
+		 */
+		if ((rt->rt_flags & RTF_MPATH) ||
+		    (info.rti_info[RTAX_GATEWAY] && rtm->rtm_type !=
+		     RTM_CHANGE)) {
+			rt = rtable_mpath_match(tableid, rt,
+			    info.rti_info[RTAX_GATEWAY], prio);
+			if (rt == NULL) {
 				error = ESRCH;
 				goto flush;
 			}
 			/*
-			 * For RTM_CHANGE/LOCK, if we got multipath routes,
-			 * a matching RTAX_GATEWAY is required.
-			 * OR
-			 * If a gateway is specified then RTM_GET and
-			 * RTM_LOCK must match the gateway no matter
-			 * what even in the non multipath case.
+			 * Only RTM_GET may use an empty gateway
+			 * on multipath routes
 			 */
-			if ((rt->rt_flags & RTF_MPATH) ||
-			    (info.rti_info[RTAX_GATEWAY] && rtm->rtm_type !=
-			    RTM_CHANGE)) {
-				rt = rt_mpath_matchgate(rt,
-				    info.rti_info[RTAX_GATEWAY], prio);
-				if (!rt) {
-					error = ESRCH;
-					goto flush;
-				}
-				/*
-				 * only RTM_GET may use an empty gateway
-				 * on multipath routes
-				 */
-				if (!info.rti_info[RTAX_GATEWAY] &&
-				    rtm->rtm_type != RTM_GET) {
-					rt = NULL;
-					error = ESRCH;
-					goto flush;
-				}
+			if (info.rti_info[RTAX_GATEWAY] == NULL &&
+			    rtm->rtm_type != RTM_GET) {
+				rt = NULL;
+				error = ESRCH;
+				goto flush;
 			}
-			rn = (struct radix_node *)rt;
 		}
 #endif
 		rt->rt_refcnt++;
@@ -775,8 +774,7 @@ report:
 					rt->rt_ifp = ifa->ifa_ifp;
 #ifndef SMALL_KERNEL
 					/* recheck link state after ifp change*/
-					rt_if_linkstate_change(
-					    (struct radix_node *)rt, rt->rt_ifp,
+					rt_if_linkstate_change(rt, rt->rt_ifp,
 					    tableid);
 #endif
 				}
@@ -972,10 +970,10 @@ rt_msg1(int type, struct rt_addrinfo *rtinfo)
 			m = NULL;
 		}
 	}
-	if (m == 0)
+	if (m == NULL)
 		return (m);
 	m->m_pkthdr.len = m->m_len = hlen = len;
-	m->m_pkthdr.rcvif = NULL;
+	m->m_pkthdr.ph_ifidx = 0;
 	rtm = mtod(m, struct rt_msghdr *);
 	bzero(rtm, len);
 	for (i = 0; i < RTAX_MAX; i++) {
@@ -1086,7 +1084,7 @@ rt_missmsg(int type, struct rt_addrinfo *rtinfo, int flags,
 	if (route_cb.any_count == 0)
 		return;
 	m = rt_msg1(type, rtinfo);
-	if (m == 0)
+	if (m == NULL)
 		return;
 	rtm = mtod(m, struct rt_msghdr *);
 	rtm->rtm_flags = RTF_DONE | flags;
@@ -1115,7 +1113,7 @@ rt_ifmsg(struct ifnet *ifp)
 	if (route_cb.any_count == 0)
 		return;
 	m = rt_msg1(RTM_IFINFO, NULL);
-	if (m == 0)
+	if (m == NULL)
 		return;
 	ifm = mtod(m, struct if_msghdr *);
 	ifm->ifm_index = ifp->if_index;
@@ -1182,7 +1180,7 @@ rt_ifannouncemsg(struct ifnet *ifp, int what)
 	if (route_cb.any_count == 0)
 		return;
 	m = rt_msg1(RTM_IFANNOUNCE, NULL);
-	if (m == 0)
+	if (m == NULL)
 		return;
 	ifan = mtod(m, struct if_announcemsghdr *);
 	ifan->ifan_index = ifp->if_index;
@@ -1196,10 +1194,9 @@ rt_ifannouncemsg(struct ifnet *ifp, int what)
  * This is used in dumping the kernel table via sysctl().
  */
 int
-sysctl_dumpentry(struct radix_node *rn, void *v, u_int id)
+sysctl_dumpentry(struct rtentry *rt, void *v, unsigned int id)
 {
 	struct walkarg		*w = v;
-	struct rtentry		*rt = (struct rtentry *)rn;
 	int			 error = 0, size;
 	struct rt_addrinfo	 info;
 #ifdef MPLS
@@ -1209,6 +1206,19 @@ sysctl_dumpentry(struct radix_node *rn, void *v, u_int id)
 
 	if (w->w_op == NET_RT_FLAGS && !(rt->rt_flags & w->w_arg))
 		return 0;
+	if (w->w_op == NET_RT_DUMP && w->w_arg) {
+		u_int8_t prio = w->w_arg & RTP_MASK;
+		if (w->w_arg < 0) {
+			prio = (-w->w_arg) & RTP_MASK;
+			/* Show all routes that are not this priority */
+			if (prio == (rt->rt_priority & RTP_MASK))
+				return 0;
+		} else {
+			if (prio != (rt->rt_priority & RTP_MASK) &&
+			    prio != RTP_ANY)
+				return 0;
+		}
+	}
 	bzero(&info, sizeof(info));
 	info.rti_info[RTAX_DST] = rt_key(rt);
 	info.rti_info[RTAX_GATEWAY] = rt->rt_gateway;
@@ -1318,7 +1328,6 @@ int
 sysctl_rtable(int *name, u_int namelen, void *where, size_t *given, void *new,
     size_t newlen)
 {
-	struct radix_node_head	*rnh;
 	int			 i, s, error = EINVAL;
 	u_char  		 af;
 	struct walkarg		 w;
@@ -1349,12 +1358,16 @@ sysctl_rtable(int *name, u_int namelen, void *where, size_t *given, void *new,
 
 	case NET_RT_DUMP:
 	case NET_RT_FLAGS:
-		for (i = 1; i <= AF_MAX; i++)
-			if ((rnh = rtable_get(tableid, i)) != NULL &&
-			    (af == 0 || af == i) &&
-			    (error = (*rnh->rnh_walktree)(rnh,
-			    sysctl_dumpentry, &w)))
+		for (i = 1; i <= AF_MAX; i++) {
+			if (af != 0 && af != i)
+				continue;
+
+			error = rtable_walk(tableid, i, sysctl_dumpentry, &w);
+			if (error == EAFNOSUPPORT)
+				error = 0;
+			if (error)
 				break;
+		}
 		break;
 
 	case NET_RT_IFLIST:

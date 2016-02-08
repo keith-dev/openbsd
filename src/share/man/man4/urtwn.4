@@ -1,4 +1,4 @@
-.\" $OpenBSD: urtwn.4,v 1.30 2014/06/23 13:45:14 jmc Exp $
+.\" $OpenBSD: urtwn.4,v 1.35 2015/05/15 18:49:21 jmc Exp $
 .\"
 .\" Copyright (c) 2010 Damien Bergamini <damien.bergamini@free.fr>
 .\"
@@ -14,23 +14,23 @@
 .\" ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
 .\" OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 .\"
-.Dd $Mdocdate: June 23 2014 $
+.Dd $Mdocdate: May 15 2015 $
 .Dt URTWN 4
 .Os
 .Sh NAME
 .Nm urtwn
-.Nd Realtek RTL8188CU/RTL8192CU USB IEEE 802.11b/g/n wireless network device
+.Nd Realtek RTL8188CU/RTL8188EU/RTL8192CU USB IEEE 802.11b/g/n wireless network device
 .Sh SYNOPSIS
 .Cd "urtwn* at uhub? port ?"
 .Sh DESCRIPTION
 The
 .Nm
 driver supports USB 2.0 wireless network devices based on Realtek
-RTL8188CUS, RTL8188CE-VAU, RTL8188RU and RTL8192CU chipsets.
+RTL8188CUS, RTL8188CE-VAU, RTL8188EUS, RTL8188RU and RTL8192CU chipsets.
 .Pp
-The RTL8188CUS is a highly integrated 802.11n adapter that combines
-a MAC, a 1T1R capable baseband and an RF in a single chip.
-It operates in the 2GHz spectrum only.
+The RTL8188CUS and RTL8188EUS are highly integrated 802.11n adapters
+that combine a MAC, a 1T1R capable baseband and an RF in a single chip.
+They operate in the 2GHz spectrum only.
 The RTL8188RU is a high-power variant of the RTL8188CUS.
 The RTL8188CE-VAU is a PCI Express Mini Card adapter that attaches
 to the USB interface.
@@ -83,6 +83,7 @@ which are loaded when an interface is attached:
 .It /etc/firmware/urtwn-rtl8192cfwT
 .It /etc/firmware/urtwn-rtl8192cfwU
 .It /etc/firmware/urtwn-rtl8723fw
+.It /etc/firmware/urtwn-rtl8188eufw
 .El
 .Pp
 A prepackaged version of the firmware can be installed using
@@ -97,12 +98,15 @@ The following adapters should work:
 .It B-Link BL-LW05-5R
 .It Belkin F7D1102 Surf Wireless Micro
 .It D-Link DWA-121
+.It D-Link DWA-123 rev \&D1
+.It D-Link DWA-125 rev \&D1
 .It D-Link DWA-131 rev B
 .It D-Link DWA-133
 .It D-Link DWA-135
 .It Digitus DN-7042
 .It Edimax EW-7811Un
 .It EDUP EP-N8508
+.It Elecom WDC-150SU2M
 .It Full River FR-W100NUL
 .It Hercules Wireless N USB Pico HWNUp-150
 .It IO-DATA WN-G150UM
@@ -117,6 +121,9 @@ The following adapters should work:
 .It Prolink WN2201
 .It Sitecom WL-365
 .It Solwise NET-WL-UMD-606N
+.It TP-LINK TL-WN723N v3
+.It TP-LINK TL-WN725N v2
+.It TP-Link TL-WN821N v4
 .It TRENDnet TEW-648UBM
 .El
 .Sh EXAMPLES

@@ -1,4 +1,4 @@
-/*	$OpenBSD: hme.c,v 1.70 2014/12/22 02:28:51 tedu Exp $	*/
+/*	$OpenBSD: hme.c,v 1.73 2015/06/24 09:40:54 mpi Exp $	*/
 /*	$NetBSD: hme.c,v 1.21 2001/07/07 15:59:37 thorpej Exp $	*/
 
 /*-
@@ -51,7 +51,6 @@
 #include <sys/errno.h>
 
 #include <net/if.h>
-#include <net/if_dl.h>
 #include <net/if_media.h>
 
 #include <netinet/in.h>
@@ -801,6 +800,7 @@ int
 hme_rint(struct hme_softc *sc)
 {
 	struct ifnet *ifp = &sc->sc_arpcom.ac_if;
+	struct mbuf_list ml = MBUF_LIST_INITIALIZER();
 	struct mbuf *m;
 	struct hme_sxd *sd;
 	unsigned int ri, len;
@@ -843,15 +843,10 @@ hme_rint(struct hme_softc *sc)
 		len = HME_XD_DECODE_RSIZE(flags);
 		m->m_pkthdr.len = m->m_len = len;
 
-		ifp->if_ipackets++;
-
-#if NBPFILTER > 0
-		if (ifp->if_bpf)
-			bpf_mtap(ifp->if_bpf, m, BPF_DIRECTION_IN);
-#endif
-
-		ether_input_mbuf(ifp, m);
+		ml_enqueue(&ml, m);
 	}
+
+	if_input(ifp, &ml);
 
 	sc->sc_rx_cons = ri;
 	hme_fill_rx_ring(sc);
@@ -1296,7 +1291,6 @@ hme_newbuf(struct hme_softc *sc, struct hme_sxd *d)
 	m = MCLGETI(NULL, M_DONTWAIT, NULL, MCLBYTES);
 	if (!m)
 		return (ENOBUFS);
-	m->m_pkthdr.rcvif = &sc->sc_arpcom.ac_if;
 
 	if (bus_dmamap_load(sc->sc_dmatag, sc->sc_rxmap_spare,
 	    mtod(m, caddr_t), MCLBYTES - HME_RX_OFFSET, NULL,

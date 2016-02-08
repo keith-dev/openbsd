@@ -1,4 +1,4 @@
-#	$OpenBSD: files.octeon,v 1.20 2015/02/11 00:15:41 uebayasi Exp $
+#	$OpenBSD: files.octeon,v 1.24 2015/07/20 19:44:32 pirofti Exp $
 
 # Standard stanzas config(8) can't run without
 maxpartitions 16
@@ -10,6 +10,7 @@ major	{ cd = 3 }
 major	{ wd = 4 }
 major	{ rd = 8 }
 major	{ octcf = 15 }
+major	{ amdcf = 19 }
 
 file	dev/cninit.c
 file	arch/octeon/octeon/autoconf.c
@@ -19,7 +20,6 @@ file	arch/octeon/octeon/disksubr.c		disk
 file	arch/octeon/octeon/lock_machdep.c	multiprocessor
 file	arch/octeon/octeon/machdep.c
 file	arch/mips64/mips64/mips64r2.S
-file	arch/octeon/octeon/mutex.c
 
 include "dev/ata/files.ata"
 include "dev/atapiscsi/files.atapiscsi"
@@ -53,7 +53,7 @@ device	octrtc
 attach	octrtc at mainbus
 file	arch/octeon/dev/octrtc.c			octrtc
 
-define	iobus {[base = -1]}
+define	iobus {[base = -1], [irq = 0]}
 device	iobus
 attach	iobus at mainbus
 file	arch/octeon/dev/octeon_iobus.c			iobus
@@ -67,6 +67,7 @@ file	arch/octeon/dev/cn30xxpko.c			iobus
 file	arch/octeon/dev/cn30xxasx.c			iobus
 file	arch/octeon/dev/cn30xxsmi.c			iobus
  
+# On-board USB
 attach	dwctwo at iobus with octdwctwo
 file	arch/octeon/dev/octdwctwo.c			octdwctwo	needs-flag
 
@@ -74,6 +75,11 @@ file	arch/octeon/dev/octdwctwo.c			octdwctwo	needs-flag
 device	octcf: disk
 attach	octcf at iobus
 file	arch/octeon/dev/octcf.c				octcf
+
+device	amdcf: disk
+attach	amdcf at iobus
+file	arch/octeon/dev/amdcf.c				amdcf
+
 
 # On-board RNG
 device	octrng
@@ -102,8 +108,3 @@ file	arch/octeon/dev/octeon_pcibus.c			pcibus
 file	arch/octeon/dev/octeon_bus_space.c
 
 file	arch/octeon/octeon/pciide_machdep.c		pciide
-
-# On-board USB
-device	octhci: usbus
-attach	octhci at iobus
-file	arch/octeon/dev/octhci.c			octhci

@@ -1,4 +1,4 @@
-/*	$OpenBSD: route.c,v 1.172 2015/02/06 03:22:00 reyk Exp $	*/
+/*	$OpenBSD: route.c,v 1.176 2015/07/18 21:26:03 mpi Exp $	*/
 /*	$NetBSD: route.c,v 1.16 1996/04/15 18:27:05 cgd Exp $	*/
 
 /*
@@ -31,7 +31,6 @@
  */
 
 #include <sys/socket.h>
-#include <sys/ioctl.h>
 #include <sys/sysctl.h>
 
 #include <net/if.h>
@@ -86,7 +85,8 @@ void	 monitor(int, char *[]);
 int	 prefixlen(char *);
 void	 sockaddr(char *, struct sockaddr *);
 void	 sodump(sup, char *);
-char	*priorityname(u_int8_t);
+char	*priorityname(uint8_t);
+uint8_t	 getpriority(char *);
 void	 print_getmsg(struct rt_msghdr *, int);
 const char *get_linkstate(int, int);
 void	 print_rtmsg(struct rt_msghdr *, int);
@@ -97,7 +97,7 @@ void	 mask_addr(union sockunion *, union sockunion *, int);
 int	 inet6_makenetandmask(struct sockaddr_in6 *, char *);
 int	 getaddr(int, char *, struct hostent **);
 void	 getmplslabel(char *, int);
-int	 rtmsg(int, int, int, u_char);
+int	 rtmsg(int, int, int, uint8_t);
 __dead void usage(char *);
 void	 set_metric(char *, int);
 void	 inet_makenetandmask(u_int32_t, struct sockaddr_in *, int);
@@ -231,13 +231,12 @@ main(int argc, char **argv)
 void
 flushroutes(int argc, char **argv)
 {
-	const char *errstr;
 	size_t needed;
 	int mib[7], rlen, seqno;
 	char *buf = NULL, *next, *lim = NULL;
 	struct rt_msghdr *rtm;
 	struct sockaddr *sa;
-	u_char prio = 0;
+	uint8_t prio = 0;
 	unsigned int ifindex = 0;
 
 	if (uid)
@@ -269,10 +268,7 @@ flushroutes(int argc, char **argv)
 			case K_PRIORITY:
 				if (!--argc)
 					usage(1+*argv);
-				prio = strtonum(*++argv, 0, RTP_MAX, &errstr);
-				if (errstr)
-					errx(1, "priority is %s: %s", errstr,
-					    *argv);
+				prio = getpriority(*++argv);
 				break;
 			default:
 				usage(*argv);
@@ -404,12 +400,11 @@ set_metric(char *value, int key)
 int
 newroute(int argc, char **argv)
 {
-	const char *errstr;
 	char *cmd, *dest = "", *gateway = "", *error;
 	int ishost = 0, ret = 0, attempts, oerrno, flags = RTF_STATIC;
 	int fmask = 0;
 	int key;
-	u_char prio = 0;
+	uint8_t prio = 0;
 	struct hostent *hp = NULL;
 
 	if (uid)
@@ -582,10 +577,7 @@ newroute(int argc, char **argv)
 			case K_PRIORITY:
 				if (!--argc)
 					usage(1+*argv);
-				prio = strtonum(*++argv, 0, RTP_MAX, &errstr);
-				if (errstr)
-					errx(1, "priority is %s: %s", errstr,
-					    *argv);
+				prio = getpriority(*++argv);
 				break;
 			default:
 				usage(1+*argv);
@@ -662,7 +654,8 @@ newroute(int argc, char **argv)
 void
 show(int argc, char *argv[])
 {
-	int	af = 0;
+	int		 af = 0;
+	char		 prio = 0;
 
 	while (--argc > 0) {
 		if (**(++argv)== '-')
@@ -687,6 +680,11 @@ show(int argc, char *argv[])
 					usage(1+*argv);
 				getlabel(*++argv);
 				break;
+			case K_PRIORITY:
+				if (!--argc)
+					usage(1+*argv);
+				prio = getpriority(*++argv);
+				break;
 			default:
 				usage(*argv);
 				/* NOTREACHED */
@@ -695,7 +693,7 @@ show(int argc, char *argv[])
 			usage(*argv);
 	}
 
-	p_rttables(af, tableid, Tflag);
+	p_rttables(af, tableid, Tflag, prio);
 }
 
 void
@@ -896,8 +894,8 @@ getaddr(int which, char *s, struct hostent **hpp)
 	    }
 
 	case AF_LINK:
-		su->sa.sa_len = sizeof(struct sockaddr_dl);
-		link_addr(s, &su->sdl);
+		su->sdl.sdl_index = if_nametoindex(s);
+		memset(&su->sdl.sdl_data, 0, sizeof(su->sdl.sdl_data));
 		return (1);
 	case AF_MPLS:
 		errx(1, "mpls labels require -in or -out switch");
@@ -1113,7 +1111,7 @@ struct {
 } m_rtmsg;
 
 int
-rtmsg(int cmd, int flags, int fmask, u_char prio)
+rtmsg(int cmd, int flags, int fmask, uint8_t prio)
 {
 	static int seq;
 	char *cp = m_rtmsg.m_space;
@@ -1346,7 +1344,7 @@ print_rtmsg(struct rt_msghdr *rtm, int msglen)
 }
 
 char *
-priorityname(u_int8_t prio)
+priorityname(uint8_t prio)
 {
 	switch (prio) {
 	case RTP_NONE:
@@ -1370,6 +1368,40 @@ priorityname(u_int8_t prio)
 	default:
 		return ("");
 	}
+}
+
+uint8_t
+getpriority(char *priostr)
+{
+	const char *errstr;
+	uint8_t prio;
+
+	switch (keyword(priostr)) {
+	case K_LOCAL:
+		prio = RTP_LOCAL;
+		break;
+	case K_CONNECTED:
+		prio = RTP_CONNECTED;
+		break;
+	case K_STATIC:
+		prio = RTP_STATIC;
+		break;
+	case K_OSPF:
+		prio = RTP_OSPF;
+		break;
+	case K_RIP:
+		prio = RTP_RIP;
+		break;
+	case K_BGP:
+		prio = RTP_BGP;
+		break;
+	default:
+		prio = strtonum(priostr, -RTP_MAX, RTP_MAX, &errstr);
+		if (errstr)
+			errx(1, "priority is %s: %s", errstr, priostr);
+	}
+
+	return (prio);
 }
 
 void

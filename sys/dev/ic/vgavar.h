@@ -1,4 +1,4 @@
-/* $OpenBSD: vgavar.h,v 1.11 2010/08/28 12:48:14 miod Exp $ */
+/* $OpenBSD: vgavar.h,v 1.13 2015/07/26 03:17:07 miod Exp $ */
 /* $NetBSD: vgavar.h,v 1.4 2000/06/17 07:11:50 soda Exp $ */
 
 /*
@@ -64,7 +64,8 @@ struct vga_config {
 	const struct wsscreen_descr *currenttype;
 	int currentfontset1, currentfontset2;
 
-	struct vgafont *vc_fonts[8];
+#define	VGA_MAXFONT 8
+	struct vgafont *vc_fonts[VGA_MAXFONT];
 	uint8_t vc_palette[256 * 3];
 
 	struct vgascreen *wantedscreen;
@@ -74,6 +75,13 @@ struct vga_config {
 	paddr_t (*vc_mmap)(void *, off_t, int);
 
 	struct timeout vc_switch_timeout;
+
+#ifdef __alpha__
+	/* placeholder for a custom wsscreen_descr for odd resolutions */
+	struct wsscreen_descr custom_scr;
+	struct wsscreen_descr *custom_scrlist[1];
+	struct wsscreen_list custom_list;
+#endif
 };
 
 static inline u_int8_t _vga_attr_read(struct vga_handle *, int);
@@ -183,6 +191,7 @@ int	vga_cnattach(bus_space_tag_t, bus_space_tag_t, int, int);
 
 struct wsscreen_descr;
 void	vga_loadchars(struct vga_handle *, int, int, int, int, char *);
+void	vga_restore_fonts(struct vga_config *);
 void	vga_restore_palette(struct vga_config *);
 void	vga_save_palette(struct vga_config *);
 void	vga_setfontset(struct vga_handle *, int, int);

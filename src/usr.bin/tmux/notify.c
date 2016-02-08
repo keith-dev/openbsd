@@ -1,4 +1,4 @@
-/* $OpenBSD: notify.c,v 1.5 2012/09/25 07:41:22 nicm Exp $ */
+/* $OpenBSD: notify.c,v 1.8 2015/06/05 18:18:32 nicm Exp $ */
 
 /*
  * Copyright (c) 2012 George Nachman <tmux@georgester.com>
@@ -121,9 +121,9 @@ notify_drain(void)
 		}
 
 		if (ne->client != NULL)
-			ne->client->references--;
+			server_client_unref(ne->client);
 		if (ne->session != NULL)
-			ne->session->references--;
+			session_unref(ne->session);
 		if (ne->window != NULL)
 			window_remove_ref(ne->window);
 
@@ -136,7 +136,6 @@ void
 notify_input(struct window_pane *wp, struct evbuffer *input)
 {
 	struct client	*c;
-	u_int		 i;
 
 	/*
 	 * notify_input() is not queued and only does anything when
@@ -145,9 +144,8 @@ notify_input(struct window_pane *wp, struct evbuffer *input)
 	if (!notify_enabled)
 		return;
 
-	for (i = 0; i < ARRAY_LENGTH(&clients); i++) {
-		c = ARRAY_ITEM(&clients, i);
-		if (c != NULL && (c->flags & CLIENT_CONTROL))
+	TAILQ_FOREACH(c, &clients, entry) {
+		if (c->flags & CLIENT_CONTROL)
 			control_notify_input(c, wp, input);
 	}
 }

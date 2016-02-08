@@ -1,4 +1,4 @@
-/*	$OpenBSD: r600_blit_kms.c,v 1.1 2013/08/12 04:11:53 jsg Exp $	*/
+/*	$OpenBSD: r600_blit_kms.c,v 1.3 2015/04/18 14:47:35 jsg Exp $	*/
 /*
  * Copyright 2009 Advanced Micro Devices, Inc.
  * Copyright 2009 Red Hat Inc.
@@ -31,18 +31,6 @@
 #include "r600d.h"
 #include "r600_blit_shaders.h"
 #include "radeon_blit_common.h"
-
-int r600_blit_init(struct radeon_device *rdev);
-void r600_blit_fini(struct radeon_device *rdev);
-int r600_blit_prepare_copy(struct radeon_device *rdev, unsigned num_gpu_pages,
-			   struct radeon_fence **fence, struct radeon_sa_bo **vb,
-			   struct radeon_semaphore **sem);
-void r600_blit_done_copy(struct radeon_device *rdev, struct radeon_fence **fence,
-			 struct radeon_sa_bo *vb, struct radeon_semaphore *sem);
-void r600_kms_blit_copy(struct radeon_device *rdev,
-			u64 src_gpu_addr, u64 dst_gpu_addr,
-			unsigned num_gpu_pages,
-			struct radeon_sa_bo *vb);
 
 /* emits 21 on rv770+, 23 on r600 */
 static void
@@ -555,13 +543,13 @@ int r600_blit_init(struct radeon_device *rdev)
 		return r;
 	}
 	if (rdev->family >= CHIP_RV770)
-		memcpy(ptr + rdev->r600_blit.state_offset,
+		memcpy_toio(ptr + rdev->r600_blit.state_offset,
 			    r7xx_default_state, rdev->r600_blit.state_len * 4);
 	else
-		memcpy(ptr + rdev->r600_blit.state_offset,
+		memcpy_toio(ptr + rdev->r600_blit.state_offset,
 			    r6xx_default_state, rdev->r600_blit.state_len * 4);
 	if (num_packet2s)
-		memcpy(ptr + rdev->r600_blit.state_offset + (rdev->r600_blit.state_len * 4),
+		memcpy_toio(ptr + rdev->r600_blit.state_offset + (rdev->r600_blit.state_len * 4),
 			    packet2s, num_packet2s * 4);
 	for (i = 0; i < r6xx_vs_size; i++)
 		*(u32 *)((unsigned long)ptr + rdev->r600_blit.vs_offset + i * 4) = cpu_to_le32(r6xx_vs[i]);

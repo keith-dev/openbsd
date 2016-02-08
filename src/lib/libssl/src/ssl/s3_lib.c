@@ -1,4 +1,4 @@
-/* $OpenBSD: s3_lib.c,v 1.95 2015/02/08 22:06:49 miod Exp $ */
+/* $OpenBSD: s3_lib.c,v 1.99 2015/07/19 06:23:51 doug Exp $ */
 /* Copyright (C) 1995-1998 Eric Young (eay@cryptsoft.com)
  * All rights reserved.
  *
@@ -155,6 +155,7 @@
 #include <openssl/objects.h>
 
 #include "ssl_locl.h"
+#include "bytestring.h"
 
 #define SSL3_NUM_CIPHERS	(sizeof(ssl3_ciphers) / sizeof(SSL_CIPHER))
 
@@ -1820,7 +1821,7 @@ SSL_CIPHER ssl3_ciphers[] = {
 		.algorithm2 = SSL_HANDSHAKE_MAC_SHA256|TLS1_PRF_SHA256|
 		    SSL_CIPHER_ALGORITHM2_AEAD|FIXED_NONCE_LEN(0),
 		.strength_bits = 256,
-		.alg_bits = 0,
+		.alg_bits = 256,
 	},
 
 	/* Cipher CC14 */
@@ -1837,7 +1838,7 @@ SSL_CIPHER ssl3_ciphers[] = {
 		.algorithm2 = SSL_HANDSHAKE_MAC_SHA256|TLS1_PRF_SHA256|
 		    SSL_CIPHER_ALGORITHM2_AEAD|FIXED_NONCE_LEN(0),
 		.strength_bits = 256,
-		.alg_bits = 0,
+		.alg_bits = 256,
 	},
 
 	/* Cipher CC15 */
@@ -1854,7 +1855,7 @@ SSL_CIPHER ssl3_ciphers[] = {
 		.algorithm2 = SSL_HANDSHAKE_MAC_SHA256|TLS1_PRF_SHA256|
 		    SSL_CIPHER_ALGORITHM2_AEAD|FIXED_NONCE_LEN(0),
 		.strength_bits = 256,
-		.alg_bits = 0,
+		.alg_bits = 256,
 	},
 #endif
 
@@ -2075,7 +2076,6 @@ ssl3_clear(SSL *s)
 {
 	unsigned char	*rp, *wp;
 	size_t		 rlen, wlen;
-	int		 init_extra;
 
 	ssl3_cleanup_key_block(s);
 	if (s->s3->tmp.ca_names != NULL)
@@ -2086,13 +2086,10 @@ ssl3_clear(SSL *s)
 	EC_KEY_free(s->s3->tmp.ecdh);
 	s->s3->tmp.ecdh = NULL;
 
-	s->s3->is_probably_safari = 0;
-
 	rp = s->s3->rbuf.buf;
 	wp = s->s3->wbuf.buf;
 	rlen = s->s3->rbuf.len;
 	wlen = s->s3->wbuf.len;
-	init_extra = s->s3->init_extra;
 
 	BIO_free(s->s3->handshake_buffer);
 	s->s3->handshake_buffer = NULL;
@@ -2107,7 +2104,6 @@ ssl3_clear(SSL *s)
 	s->s3->wbuf.buf = wp;
 	s->s3->rbuf.len = rlen;
 	s->s3->wbuf.len = wlen;
-	s->s3->init_extra = init_extra;
 
 	ssl_free_wbio_buffer(s);
 
@@ -2532,9 +2528,14 @@ ssl3_ctx_callback_ctrl(SSL_CTX *ctx, int cmd, void (*fp)(void))
 const SSL_CIPHER *
 ssl3_get_cipher_by_char(const unsigned char *p)
 {
+	CBS cipher;
 	uint16_t cipher_value;
 
-	n2s(p, cipher_value);
+	/* We have to assume it is at least 2 bytes due to existing API. */
+	CBS_init(&cipher, p, 2);
+	if (!CBS_get_u16(&cipher, &cipher_value))
+		return NULL;
+
 	return ssl3_get_cipher_by_value(cipher_value);
 }
 
@@ -2612,12 +2613,6 @@ ssl3_choose_cipher(SSL *s, STACK_OF(SSL_CIPHER) *clnt,
 			continue;
 		ii = sk_SSL_CIPHER_find(allow, c);
 		if (ii >= 0) {
-			if ((alg_k & SSL_kECDHE) &&
-			    (alg_a & SSL_aECDSA) && s->s3->is_probably_safari) {
-				if (!ret)
-					ret = sk_SSL_CIPHER_value(allow, ii);
-				continue;
-			}
 			ret = sk_SSL_CIPHER_value(allow, ii);
 			break;
 		}

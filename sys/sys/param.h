@@ -1,4 +1,4 @@
-/*	$OpenBSD: param.h,v 1.115 2015/01/20 18:14:51 deraadt Exp $	*/
+/*	$OpenBSD: param.h,v 1.118 2015/07/02 01:34:00 dlg Exp $	*/
 
 /*-
  * Copyright (c) 1982, 1986, 1989, 1993
@@ -41,8 +41,8 @@
 #define BSD4_3	1
 #define BSD4_4	1
 
-#define OpenBSD	201505		/* OpenBSD version (year & month). */
-#define OpenBSD5_7 1		/* OpenBSD 5.7 */
+#define OpenBSD	201510		/* OpenBSD version (year & month). */
+#define OpenBSD5_8 1		/* OpenBSD 5.8 */
 
 #ifndef NULL
 #ifdef 	__GNUG__
@@ -83,6 +83,7 @@
 #include <sys/resource.h>
 #include <sys/ucred.h>
 #include <sys/uio.h>
+#include <sys/srp.h>
 #endif
 
 /* Signals. */

@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_xge.c,v 1.59 2014/12/22 02:28:52 tedu Exp $	*/
+/*	$OpenBSD: if_xge.c,v 1.62 2015/06/24 09:40:54 mpi Exp $	*/
 /*	$NetBSD: if_xge.c,v 1.1 2005/09/09 10:30:27 ragge Exp $	*/
 
 /*
@@ -71,7 +71,6 @@
 #include <machine/bus.h>
 #include <machine/intr.h>
 
-#include <dev/mii/mii.h>
 #include <dev/mii/miivar.h>
 
 #include <dev/pci/pcivar.h>
@@ -805,6 +804,7 @@ xge_intr(void *pv)
 	struct xge_softc *sc = pv;
 	struct txd *txd;
 	struct ifnet *ifp = &sc->sc_arpcom.ac_if;
+	struct mbuf_list ml = MBUF_LIST_INITIALIZER();
 	bus_dmamap_t dmp;
 	uint64_t val;
 	int i, lasttx, plen;
@@ -893,7 +893,6 @@ xge_intr(void *pv)
 		plen += m->m_next->m_next->m_next->m_next->m_len =
 		    RXD_CTL3_BUF4SIZ(rxd->rxd_control3);
 #endif
-		m->m_pkthdr.rcvif = ifp;
 		m->m_pkthdr.len = plen;
 
 		val = rxd->rxd_control1;
@@ -912,8 +911,6 @@ xge_intr(void *pv)
 			break;
 		}
 
-		ifp->if_ipackets++;
-
 		if (RXD_CTL1_PROTOS(val) & RXD_CTL1_P_IPv4)
 			m->m_pkthdr.csum_flags |= M_IPV4_CSUM_IN_OK;
 		if (RXD_CTL1_PROTOS(val) & RXD_CTL1_P_TCP)
@@ -929,16 +926,13 @@ xge_intr(void *pv)
 		}
 #endif
 
-#if NBPFILTER > 0
-		if (ifp->if_bpf)
-			bpf_mtap_ether(ifp->if_bpf, m, BPF_DIRECTION_IN);
-#endif /* NBPFILTER > 0 */
-
-		ether_input_mbuf(ifp, m);
+		ml_enqueue(&ml, m);
 
 		if (++sc->sc_nextrx == NRXREAL)
 			sc->sc_nextrx = 0;
 	}
+
+	if_input(ifp, &ml);
 
 	return (1);
 }

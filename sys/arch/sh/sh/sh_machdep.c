@@ -1,4 +1,4 @@
-/*	$OpenBSD: sh_machdep.c,v 1.38 2015/01/20 19:43:21 kettenis Exp $	*/
+/*	$OpenBSD: sh_machdep.c,v 1.40 2015/05/15 23:20:25 deraadt Exp $	*/
 /*	$NetBSD: sh3_machdep.c,v 1.59 2006/03/04 01:13:36 uwe Exp $	*/
 
 /*
@@ -95,7 +95,6 @@
 #include <sys/sched.h>
 #include <sys/msg.h>
 #include <sys/conf.h>
-#include <sys/core.h>
 #include <sys/kcore.h>
 #include <sys/reboot.h>
 

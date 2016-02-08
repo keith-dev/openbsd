@@ -1,4 +1,4 @@
-/*	$OpenBSD: i2s.c,v 1.24 2014/07/12 18:44:42 tedu Exp $	*/
+/*	$OpenBSD: i2s.c,v 1.29 2015/07/17 22:30:58 mpi Exp $	*/
 /*	$NetBSD: i2s.c,v 1.1 2003/12/27 02:19:34 grant Exp $	*/
 
 /*-
@@ -33,9 +33,7 @@
 #include <sys/malloc.h>
 #include <sys/systm.h>
 
-#include <dev/auconv.h>
 #include <dev/audio_if.h>
-#include <dev/mulaw.h>
 #include <dev/ofw/openfirm.h>
 #include <macppc/dev/dbdma.h>
 
@@ -60,12 +58,8 @@ struct audio_params i2s_audio_default = {
 	16,		/* precision */
 	2,		/* bps */
 	1,		/* msb */
-	2,		/* channels */
-	NULL,		/* sw_code */
-	1		/* factor */
+	2		/* channels */
 };
-
-struct i2s_mode *i2s_find_mode(u_int, u_int, u_int);
 
 void	i2s_mute(u_int, int);
 int	i2s_cint(void *);
@@ -84,11 +78,25 @@ i2s_attach(struct device *parent, struct i2s_softc *sc, struct confargs *ca)
 {
 	int cirq, oirq, iirq, cirq_type, oirq_type, iirq_type;
 	u_int32_t reg[6], intr[6];
+	char compat[32];
+	int child;
 
 	sc->sc_node = OF_child(ca->ca_node);
 	sc->sc_baseaddr = ca->ca_baseaddr;
 
 	OF_getprop(sc->sc_node, "reg", reg, sizeof reg);
+
+	child = OF_child(sc->sc_node);
+	memset(compat, 0, sizeof(compat));
+	OF_getprop(child, "compatible", compat, sizeof(compat));
+
+	/* Deal with broken device-tree on PowerMac7,2 and 7,3. */
+	if (strcmp(compat, "AOAK2") == 0) {
+		reg[0] += ca->ca_reg[0];
+		reg[2] += ca->ca_reg[2];
+		reg[4] += ca->ca_reg[2];
+	}
+
 	reg[0] += sc->sc_baseaddr;
 	reg[2] += sc->sc_baseaddr;
 	reg[4] += sc->sc_baseaddr;
@@ -107,17 +115,20 @@ i2s_attach(struct device *parent, struct i2s_softc *sc, struct confargs *ca)
 	cirq = intr[0];
 	oirq = intr[2];
 	iirq = intr[4];
-	cirq_type = intr[1] ? IST_LEVEL : IST_EDGE;
-	oirq_type = intr[3] ? IST_LEVEL : IST_EDGE;
-	iirq_type = intr[5] ? IST_LEVEL : IST_EDGE;
+	cirq_type = (intr[1] & 1) ? IST_LEVEL : IST_EDGE;
+	oirq_type = (intr[3] & 1) ? IST_LEVEL : IST_EDGE;
+	iirq_type = (intr[5] & 1) ? IST_LEVEL : IST_EDGE;
 
 	/* intr_establish(cirq, cirq_type, IPL_AUDIO, i2s_intr, sc); */
-	mac_intr_establish(parent, oirq, oirq_type, IPL_AUDIO, i2s_intr,
-	    sc, sc->sc_dev.dv_xname);
-	mac_intr_establish(parent, iirq, iirq_type, IPL_AUDIO, i2s_iintr,
-	    sc, sc->sc_dev.dv_xname);
+	mac_intr_establish(parent, oirq, oirq_type, IPL_AUDIO | IPL_MPSAFE,
+	    i2s_intr, sc, sc->sc_dev.dv_xname);
+	mac_intr_establish(parent, iirq, iirq_type, IPL_AUDIO | IPL_MPSAFE,
+	    i2s_iintr, sc, sc->sc_dev.dv_xname);
 
 	printf(": irq %d,%d,%d\n", cirq, oirq, iirq);
+
+	/* Need to be explicitly turned on some G5. */
+	macobio_enable(I2SClockOffset, I2S0CLKEN|I2S0EN);
 
 	i2s_set_rate(sc, 44100);
 	sc->sc_mute = 0;
@@ -227,58 +238,10 @@ i2s_query_encoding(h, ae)
 
 	switch (ae->index) {
 	case 0:
-		strlcpy(ae->name, AudioEslinear, sizeof(ae->name));
-		ae->encoding = AUDIO_ENCODING_SLINEAR;
-		ae->precision = 16;
-		ae->flags = 0;
-		break;
-	case 1:
 		strlcpy(ae->name, AudioEslinear_be, sizeof(ae->name));
 		ae->encoding = AUDIO_ENCODING_SLINEAR_BE;
 		ae->precision = 16;
 		ae->flags = 0;
-		break;
-	case 2:
-		strlcpy(ae->name, AudioEslinear_le, sizeof(ae->name));
-		ae->encoding = AUDIO_ENCODING_SLINEAR_LE;
-		ae->precision = 16;
-		ae->flags = AUDIO_ENCODINGFLAG_EMULATED;
-		break;
-	case 3:
-		strlcpy(ae->name, AudioEulinear_be, sizeof(ae->name));
-		ae->encoding = AUDIO_ENCODING_ULINEAR_BE;
-		ae->precision = 16;
-		ae->flags = AUDIO_ENCODINGFLAG_EMULATED;
-		break;
-	case 4:
-		strlcpy(ae->name, AudioEulinear_le, sizeof(ae->name));
-		ae->encoding = AUDIO_ENCODING_ULINEAR_LE;
-		ae->precision = 16;
-		ae->flags = AUDIO_ENCODINGFLAG_EMULATED;
-		break;
-	case 5:
-		strlcpy(ae->name, AudioEmulaw, sizeof(ae->name));
-		ae->encoding = AUDIO_ENCODING_ULAW;
-		ae->precision = 8;
-		ae->flags = AUDIO_ENCODINGFLAG_EMULATED;
-		break;
-	case 6:
-		strlcpy(ae->name, AudioEalaw, sizeof(ae->name));
-		ae->encoding = AUDIO_ENCODING_ALAW;
-		ae->precision = 8;
-		ae->flags = AUDIO_ENCODINGFLAG_EMULATED;
-		break;
-	case 7:
-		strlcpy(ae->name, AudioEslinear, sizeof(ae->name));
-		ae->encoding = AUDIO_ENCODING_SLINEAR;
-		ae->precision = 8;
-		ae->flags = AUDIO_ENCODINGFLAG_EMULATED;
-		break;
-	case 8:
-		strlcpy(ae->name, AudioEulinear, sizeof(ae->name));
-		ae->encoding = AUDIO_ENCODING_ULINEAR;
-		ae->precision = 8;
-		ae->flags = AUDIO_ENCODINGFLAG_EMULATED;
 		break;
 	default:
 		err = EINVAL;
@@ -290,55 +253,12 @@ i2s_query_encoding(h, ae)
 }
 
 
-struct i2s_mode {
-	u_int encoding;
-	u_int precision;
-	u_int channels;
-	void (*sw_code)(void *, u_char *, int);
-	int factor;
-} i2s_modes[] = {
-	{ AUDIO_ENCODING_SLINEAR_LE,  8, 1, linear8_to_linear16_be_mts, 4 },
-	{ AUDIO_ENCODING_SLINEAR_LE,  8, 2, linear8_to_linear16_be, 2 },
-	{ AUDIO_ENCODING_SLINEAR_LE, 16, 1, swap_bytes_mts, 2 },
-	{ AUDIO_ENCODING_SLINEAR_LE, 16, 2, swap_bytes, 1 },
-	{ AUDIO_ENCODING_SLINEAR_BE,  8, 1, linear8_to_linear16_be_mts, 4 },
-	{ AUDIO_ENCODING_SLINEAR_BE,  8, 2, linear8_to_linear16_be, 2 },
-	{ AUDIO_ENCODING_SLINEAR_BE, 16, 1, noswap_bytes_mts, 2 },
-	{ AUDIO_ENCODING_SLINEAR_BE, 16, 2, NULL, 1 },
-	{ AUDIO_ENCODING_ULINEAR_LE,  8, 1, ulinear8_to_linear16_be_mts, 4 },
-	{ AUDIO_ENCODING_ULINEAR_LE,  8, 2, ulinear8_to_linear16_be, 2 },
-	{ AUDIO_ENCODING_ULINEAR_LE, 16, 1, change_sign16_swap_bytes_le_mts, 2 },
-	{ AUDIO_ENCODING_ULINEAR_LE, 16, 2, swap_bytes_change_sign16_be, 1 },
-	{ AUDIO_ENCODING_ULINEAR_BE,  8, 1, ulinear8_to_linear16_be_mts, 4 },
-	{ AUDIO_ENCODING_ULINEAR_BE,  8, 2, ulinear8_to_linear16_be, 2 },
-	{ AUDIO_ENCODING_ULINEAR_BE, 16, 1, change_sign16_be_mts, 2 },
-	{ AUDIO_ENCODING_ULINEAR_BE, 16, 2, change_sign16_be, 1 }
-};
-
-
-struct i2s_mode *
-i2s_find_mode(u_int encoding, u_int precision, u_int channels)
-{
-	struct i2s_mode *m;
-	int i;
-
-	for (i = 0; i < sizeof(i2s_modes)/sizeof(i2s_modes[0]); i++) {
-		m = &i2s_modes[i];
-		if (m->encoding == encoding &&
-		    m->precision == precision &&
-		    m->channels == channels)
-			return (m);
-	}
-	return (NULL);
-}
-
 int
 i2s_set_params(h, setmode, usemode, play, rec)
 	void *h;
 	int setmode, usemode;
 	struct audio_params *play, *rec;
 {
-	struct i2s_mode *m;
 	struct i2s_softc *sc = h;
 	struct audio_params *p;
 	int mode;
@@ -377,53 +297,8 @@ i2s_set_params(h, setmode, usemode, play, rec)
 			p->channels = 2;
 
 		switch (p->encoding) {
-		case AUDIO_ENCODING_SLINEAR_LE:
 		case AUDIO_ENCODING_SLINEAR_BE:
-		case AUDIO_ENCODING_ULINEAR_LE:
-		case AUDIO_ENCODING_ULINEAR_BE:
-			m = i2s_find_mode(p->encoding, p->precision,
-			    p->channels);
-			if (m == NULL) {
-				printf("mode not found: %u/%u/%u\n",
-				    p->encoding, p->precision, p->channels);
-				return (EINVAL);
-			}
-			p->factor = m->factor;
-			p->sw_code = m->sw_code;
 			break;
-
-		case AUDIO_ENCODING_ULAW:
-			if (mode == AUMODE_PLAY) {
-				if (p->channels == 1) {
-					p->factor = 4;
-					p->sw_code = mulaw_to_slinear16_be_mts;
-					break;
-				}
-				if (p->channels == 2) {
-					p->factor = 2;
-					p->sw_code = mulaw_to_slinear16_be;
-					break;
-				}
-			} else
-				break; /* XXX */
-			return (EINVAL);
-
-		case AUDIO_ENCODING_ALAW:
-			if (mode == AUMODE_PLAY) {
-				if (p->channels == 1) {
-					p->factor = 4;
-					p->sw_code = alaw_to_slinear16_be_mts;
-					break;
-				}
-				if (p->channels == 2) {
-					p->factor = 2;
-					p->sw_code = alaw_to_slinear16_be;
-					break;
-				}
-			} else
-				break; /* XXX */
-			return (EINVAL);
-
 		default:
 			return (EINVAL);
 		}
@@ -1103,7 +978,11 @@ i2s_gpio_init(struct i2s_softc *sc, int node, struct device *parent)
 		bzero(audio_gpio, sizeof audio_gpio);
 		OF_getprop(gpio, "name", name, sizeof name);
 		OF_getprop(gpio, "audio-gpio", audio_gpio, sizeof audio_gpio);
-		OF_getprop(gpio, "reg", &reg, sizeof(reg));
+		if (OF_getprop(gpio, "reg", &reg, sizeof(reg)) == -1)
+			OF_getprop(gpio, "AAPL,address", &reg, sizeof(reg));
+
+		if (reg > sc->sc_baseaddr)
+			reg = (reg - sc->sc_baseaddr);
 
 		/* gpio5 */
 		if (sc->sc_hp == 0 && strcmp(audio_gpio, "headphone-mute") == 0)
@@ -1141,11 +1020,11 @@ i2s_gpio_init(struct i2s_softc *sc, int node, struct device *parent)
 
 	if (hp_detect_intr != -1)
 		mac_intr_establish(parent, hp_detect_intr, IST_EDGE,
-		    IPL_AUDIO, i2s_cint, sc, sc->sc_dev.dv_xname);
+		    IPL_AUDIO | IPL_MPSAFE, i2s_cint, sc, sc->sc_dev.dv_xname);
 
 	if (line_detect_intr != -1)
 		mac_intr_establish(parent, line_detect_intr, IST_EDGE,
-		    IPL_AUDIO, i2s_cint, sc, sc->sc_dev.dv_xname);
+		    IPL_AUDIO | IPL_MPSAFE, i2s_cint, sc, sc->sc_dev.dv_xname);
 
 	/* Enable headphone interrupt? */
 	macobio_write(sc->sc_hp_detect, 0x80);

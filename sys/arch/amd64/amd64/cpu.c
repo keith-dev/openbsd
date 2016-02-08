@@ -1,4 +1,4 @@
-/*	$OpenBSD: cpu.c,v 1.79 2015/02/11 00:54:39 dlg Exp $	*/
+/*	$OpenBSD: cpu.c,v 1.88 2015/07/18 19:21:02 sf Exp $	*/
 /* $NetBSD: cpu.c,v 1.1 2003/04/26 18:39:26 fvdl Exp $ */
 
 /*-
@@ -140,7 +140,7 @@ replacesmap(void)
 
 	codepatch_replace(CPTAG_STAC, &_stac, 3);
 	codepatch_replace(CPTAG_CLAC, &_clac, 3);
-	
+
 	splx(s);
 }
 #endif /* !SMALL_KERNEL */
@@ -179,7 +179,6 @@ struct cpu_info *cpu_info[MAXCPUS] = { &cpu_info_primary };
 void    	cpu_hatch(void *);
 void    	cpu_boot_secondary(struct cpu_info *ci);
 void    	cpu_start_secondary(struct cpu_info *ci);
-void		cpu_copy_trampoline(void);
 #endif
 
 int
@@ -234,16 +233,16 @@ cpu_vm_init(struct cpu_info *ci)
 #endif
 }
 
-#if defined(MULTIPROCESSOR)
+
 void	cpu_idle_mwait_cycle(void);
 void	cpu_init_mwait(struct cpu_softc *);
-void	cpu_enable_mwait(void);
+
+u_int	cpu_mwait_size, cpu_mwait_states;
 
 void
 cpu_idle_mwait_cycle(void)
 {
 	struct cpu_info *ci = curcpu();
-	volatile int *state = &ci->ci_mwait[0];
 
 	if ((read_rflags() & PSL_I) == 0)
 		panic("idle with interrupts blocked!");
@@ -262,18 +261,16 @@ cpu_idle_mwait_cycle(void)
 	 * something to the queue and called cpu_unidle() between
 	 * the check in sched_idle() and here.
 	 */
-	atomic_setbits_int(state, MWAIT_IDLING);
+	atomic_setbits_int(&ci->ci_mwait, MWAIT_IDLING | MWAIT_ONLY);
 	if (ci->ci_schedstate.spc_whichqs == 0) {
-		monitor(state, 0, 0);
-		if ((*state & MWAIT_IDLING) == MWAIT_IDLING)
+		monitor(&ci->ci_mwait, 0, 0);
+		if ((ci->ci_mwait & MWAIT_IDLING) == MWAIT_IDLING)
 			mwait(0, 0);
 	}
 
 	/* done idling; let cpu_kick() know that an IPI is required */
-	atomic_clearbits_int(state, MWAIT_IDLING);
+	atomic_clearbits_int(&ci->ci_mwait, MWAIT_IDLING);
 }
-
-unsigned int mwait_size;
 
 void
 cpu_init_mwait(struct cpu_softc *sc)
@@ -284,21 +281,24 @@ cpu_init_mwait(struct cpu_softc *sc)
 		return;
 
 	/* get the monitor granularity */
-	CPUID(0x5, smallest, largest, extensions, c_substates);
+	CPUID(0x5, smallest, largest, extensions, cpu_mwait_states);
 	smallest &= 0xffff;
 	largest  &= 0xffff;
 
 	printf("%s: mwait min=%u, max=%u", sc->sc_dev.dv_xname,
 	    smallest, largest);
 	if (extensions & 0x1) {
-		printf(", C-substates=%u.%u.%u.%u.%u",
-		    0xf & (c_substates),
-		    0xf & (c_substates >> 4),
-		    0xf & (c_substates >> 8),
-		    0xf & (c_substates >> 12),
-		    0xf & (c_substates >> 16));
+		if (cpu_mwait_states > 0) {
+			c_substates = cpu_mwait_states;
+			printf(", C-substates=%u", 0xf & c_substates);
+			while ((c_substates >>= 4) > 0)
+				printf(".%u", 0xf & c_substates);
+		}
 		if (extensions & 0x2)
 			printf(", IBE");
+	} else {
+		/* substates not supported, forge the default: just C1 */
+		cpu_mwait_states = 1 << 4;
 	}
 
 	/* paranoia: check the values */
@@ -306,42 +306,13 @@ cpu_init_mwait(struct cpu_softc *sc)
 	    (largest & (sizeof(int)-1)))
 		printf(" (bogus)");
 	else
-		mwait_size = largest;
+		cpu_mwait_size = largest;
 	printf("\n");
-	/* XXX disable mwait: ACPI says not to use it on too many systems */
-	mwait_size = 0;
-}
 
-void
-cpu_enable_mwait(void)
-{
-	unsigned long area;
-	struct cpu_info *ci;
-	CPU_INFO_ITERATOR cii;
-
-	if (mwait_size == 0)
-		return;
-
-	/*
-	 * Allocate the area, with a bit extra so that we can align
-	 * to a multiple of mwait_size
-	 */
-	area = (unsigned long)malloc((ncpus * mwait_size) + mwait_size
-	    - sizeof(int), M_DEVBUF, M_NOWAIT|M_ZERO);
-	if (area == 0) {
-		printf("cpu0: mwait failed\n");
-	} else {
-		/* round to a multiple of mwait_size  */
-		area = ((area + mwait_size - sizeof(int)) / mwait_size)
-		    * mwait_size;
-		CPU_INFO_FOREACH(cii, ci) {
-			ci->ci_mwait = (int *)area;
-			area += mwait_size;
-		}
+	/* enable use of mwait; may be overriden by acpicpu later */
+	if (cpu_mwait_size > 0)
 		cpu_idle_cycle_fcn = &cpu_idle_mwait_cycle;
-	}
 }
-#endif /* MULTIPROCESSOR */
 
 void
 cpu_attach(struct device *parent, struct device *self, void *aux)
@@ -432,6 +403,7 @@ cpu_attach(struct device *parent, struct device *self, void *aux)
 		mem_range_attach();
 #endif /* MTRR */
 		cpu_init(ci);
+		cpu_init_mwait(sc);
 		break;
 
 	case CPU_ROLE_BP:
@@ -454,9 +426,7 @@ cpu_attach(struct device *parent, struct device *self, void *aux)
 #if NIOAPIC > 0
 		ioapic_bsp_id = caa->cpu_number;
 #endif
-#if defined(MULTIPROCESSOR)
 		cpu_init_mwait(sc);
-#endif
 		break;
 
 	case CPU_ROLE_AP:
@@ -502,6 +472,8 @@ cpu_attach(struct device *parent, struct device *self, void *aux)
 void
 cpu_init(struct cpu_info *ci)
 {
+	u_int cr4;
+
 	/* configure the CPU if needed */
 	if (ci->cpu_setup != NULL)
 		(*ci->cpu_setup)(ci);
@@ -512,12 +484,30 @@ cpu_init(struct cpu_info *ci)
 	patinit(ci);
 
 	lcr0(rcr0() | CR0_WP);
-	lcr4(rcr4() | CR4_DEFAULT |
-	    (ci->ci_feature_sefflags & SEFF0EBX_SMEP ? CR4_SMEP : 0));
+	cr4 = rcr4() | CR4_DEFAULT;
+	if (ci->ci_feature_sefflags & SEFF0EBX_SMEP)
+		cr4 |= CR4_SMEP;
 #ifndef SMALL_KERNEL
 	if (ci->ci_feature_sefflags & SEFF0EBX_SMAP)
-		lcr4(rcr4() | CR4_SMAP);
+		cr4 |= CR4_SMAP;
+	if (ci->ci_feature_sefflags & SEFF0EBX_FSGSBASE)
+		cr4 |= CR4_FSGSBASE;
 #endif
+	if (cpu_ecxfeature & CPUIDECX_XSAVE)
+		cr4 |= CR4_OSXSAVE;
+	lcr4(cr4);
+
+	if (cpu_ecxfeature & CPUIDECX_XSAVE) {
+		u_int32_t eax, ebx, ecx, edx;
+
+		xsave_mask = XCR0_X87 | XCR0_SSE;
+		CPUID_LEAF(0xd, 0, eax, ebx, ecx, edx);
+		if (eax & XCR0_AVX)
+			xsave_mask |= XCR0_AVX;
+		xsetbv(0, xsave_mask);
+		CPUID_LEAF(0xd, 0, eax, ebx, ecx, edx);
+		fpu_save_len = ebx;
+	}
 
 #ifdef MULTIPROCESSOR
 	ci->ci_flags |= CPUF_RUNNING;
@@ -532,8 +522,6 @@ cpu_boot_secondary_processors(void)
 {
 	struct cpu_info *ci;
 	u_long i;
-
-	cpu_enable_mwait();
 
 	for (i=0; i < MAXCPUS; i++) {
 		ci = cpu_info[i];
@@ -575,8 +563,8 @@ cpu_start_secondary(struct cpu_info *ci)
 
 	ci->ci_flags |= CPUF_AP;
 
-        pmap_kenter_pa(MP_TRAMPOLINE, MP_TRAMPOLINE, PROT_READ | PROT_EXEC);
-        pmap_kenter_pa(MP_TRAMP_DATA, MP_TRAMP_DATA, PROT_READ | PROT_WRITE);
+	pmap_kenter_pa(MP_TRAMPOLINE, MP_TRAMPOLINE, PROT_READ | PROT_EXEC);
+	pmap_kenter_pa(MP_TRAMP_DATA, MP_TRAMP_DATA, PROT_READ | PROT_WRITE);
 
 	CPU_STARTUP(ci);
 
@@ -739,48 +727,9 @@ cpu_debug_dump(void)
 }
 #endif
 
-void
-cpu_copy_trampoline(void)
-{
-	/*
-	 * Copy boot code.
-	 */
-	extern u_char cpu_spinup_trampoline[];
-	extern u_char cpu_spinup_trampoline_end[];
-	extern u_char mp_tramp_data_start[];
-	extern u_char mp_tramp_data_end[];
-
-	extern u_int32_t mp_pdirpa;
-	extern paddr_t tramp_pdirpa;
-
-	memcpy((caddr_t)MP_TRAMPOLINE,
-	    cpu_spinup_trampoline,
-	    cpu_spinup_trampoline_end-cpu_spinup_trampoline);
-
-	pmap_kenter_pa(MP_TRAMP_DATA, MP_TRAMP_DATA,
-		PROT_READ | PROT_WRITE);
-	memcpy((caddr_t)MP_TRAMP_DATA,
-		mp_tramp_data_start,
-		mp_tramp_data_end - mp_tramp_data_start);
-
-	/*
-	 * We need to patch this after we copy the tramp data,
-	 * the symbol points into the copied tramp data page.
-	 */
-	mp_pdirpa = tramp_pdirpa;
-
-	/* Unmap, will be remapped in cpu_start_secondary */
-	pmap_kremove(MP_TRAMPOLINE, PAGE_SIZE);
-	pmap_kremove(MP_TRAMP_DATA, PAGE_SIZE);
-}
-
-
 int
 mp_cpu_start(struct cpu_info *ci)
 {
-#if NLAPIC > 0
-	int error;
-#endif
 	unsigned short dwordptr[2];
 
 	/*
@@ -808,22 +757,17 @@ mp_cpu_start(struct cpu_info *ci)
 	 */
 
 	if (ci->ci_flags & CPUF_AP) {
-		if ((error = x86_ipi_init(ci->ci_apicid)) != 0)
-			return error;
+		x86_ipi_init(ci->ci_apicid);
 
 		delay(10000);
 
 		if (cpu_feature & CPUID_APIC) {
-			if ((error = x86_ipi(MP_TRAMPOLINE/PAGE_SIZE,
-					     ci->ci_apicid,
-					     LAPIC_DLMODE_STARTUP)) != 0)
-				return error;
+			x86_ipi(MP_TRAMPOLINE/PAGE_SIZE, ci->ci_apicid,
+			    LAPIC_DLMODE_STARTUP);
 			delay(200);
 
-			if ((error = x86_ipi(MP_TRAMPOLINE/PAGE_SIZE,
-					     ci->ci_apicid,
-					     LAPIC_DLMODE_STARTUP)) != 0)
-				return error;
+			x86_ipi(MP_TRAMPOLINE/PAGE_SIZE, ci->ci_apicid,
+			    LAPIC_DLMODE_STARTUP);
 			delay(200);
 		}
 	}
@@ -876,7 +820,7 @@ patinit(struct cpu_info *ci)
 #define	PAT_WP		0x5UL
 #define	PAT_WB		0x6UL
 #define	PAT_UCMINUS	0x7UL
-	/* 
+	/*
 	 * Set up PAT bits.
 	 * The default pat table is the following:
 	 * WB, WT, UC- UC, WB, WT, UC-, UC

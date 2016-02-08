@@ -1,4 +1,4 @@
-/*	$OpenBSD: raw_ip6.c,v 1.73 2015/03/04 11:10:55 mpi Exp $	*/
+/*	$OpenBSD: raw_ip6.c,v 1.79 2015/07/28 12:22:07 bluhm Exp $	*/
 /*	$KAME: raw_ip6.c,v 1.69 2001/03/04 15:55:44 itojun Exp $	*/
 
 /*
@@ -162,10 +162,13 @@ rip6_input(struct mbuf **mp, int *offp, int proto)
 			/* XXX rdomain support */
 			if ((divert = pf_find_divert(m)) == NULL)
 				continue;
+			if (IN6_IS_ADDR_UNSPECIFIED(&divert->addr.v6))
+				goto divert_reply;
 			if (!IN6_ARE_ADDR_EQUAL(&in6p->inp_laddr6,
 			    &divert->addr.v6))
 				continue;
 		} else
+ divert_reply:
 #endif
 		if (!IN6_IS_ADDR_UNSPECIFIED(&in6p->inp_laddr6) &&
 		    !IN6_ARE_ADDR_EQUAL(&in6p->inp_laddr6, &ip6->ip6_dst))
@@ -183,7 +186,7 @@ rip6_input(struct mbuf **mp, int *offp, int proto)
 		}
 		if (last) {
 			struct	mbuf *n;
-			if ((n = m_copy(m, 0, (int)M_COPYALL)) != NULL) {
+			if ((n = m_copym(m, 0, M_COPYALL, M_NOWAIT)) != NULL) {
 				if (last->inp_flags & IN6P_CONTROLOPTS)
 					ip6_savecontrol(last, n, &opts);
 				/* strip intermediate headers */
@@ -192,8 +195,7 @@ rip6_input(struct mbuf **mp, int *offp, int proto)
 				    sin6tosa(&rip6src), n, opts) == 0) {
 					/* should notify about lost packet */
 					m_freem(n);
-					if (opts)
-						m_freem(opts);
+					m_freem(opts);
 					rip6stat.rip6s_fullsock++;
 				} else
 					sorwakeup(last->inp_socket);
@@ -210,8 +212,7 @@ rip6_input(struct mbuf **mp, int *offp, int proto)
 		if (sbappendaddr(&last->inp_socket->so_rcv,
 		    sin6tosa(&rip6src), m, opts) == 0) {
 			m_freem(m);
-			if (opts)
-				m_freem(opts);
+			m_freem(opts);
 			rip6stat.rip6s_fullsock++;
 		} else
 			sorwakeup(last->inp_socket);
@@ -223,10 +224,15 @@ rip6_input(struct mbuf **mp, int *offp, int proto)
 			m_freem(m);
 		else {
 			u_int8_t *prvnxtp = ip6_get_prevhdr(m, *offp); /* XXX */
-			in6_ifstat_inc(m->m_pkthdr.rcvif, ifs6_in_protounknown);
-			icmp6_error(m, ICMP6_PARAM_PROB,
-			    ICMP6_PARAMPROB_NEXTHEADER,
-			    prvnxtp - mtod(m, u_int8_t *));
+			struct ifnet *ifp;
+
+			ifp = if_get(m->m_pkthdr.ph_ifidx);
+			if (ifp != NULL) {
+				in6_ifstat_inc(ifp, ifs6_in_protounknown);
+				icmp6_error(m, ICMP6_PARAM_PROB,
+				    ICMP6_PARAMPROB_NEXTHEADER,
+				    prvnxtp - mtod(m, u_int8_t *));
+			}
 		}
 		ip6stat.ip6s_delivered--;
 	}
@@ -472,7 +478,8 @@ rip6_output(struct mbuf *m, ...)
 	m->m_pkthdr.ph_rtableid = in6p->inp_rtableid;
 
 #if NPF > 0
-	if (in6p->inp_socket->so_state & SS_ISCONNECTED)
+	if (in6p->inp_socket->so_state & SS_ISCONNECTED &&
+	    so->so_proto->pr_protocol != IPPROTO_ICMPV6)
 		m->m_pkthdr.pf.inp = in6p;
 #endif
 
@@ -488,8 +495,7 @@ rip6_output(struct mbuf *m, ...)
 	goto freectl;
 
  bad:
-	if (m)
-		m_freem(m);
+	m_freem(m);
 
  freectl:
 	if (control) {
@@ -503,7 +509,7 @@ rip6_output(struct mbuf *m, ...)
  * Raw IPv6 socket option processing.
  */
 int
-rip6_ctloutput(int op, struct socket *so, int level, int optname, 
+rip6_ctloutput(int op, struct socket *so, int level, int optname,
 	struct mbuf **mp)
 {
 	struct inpcb *inp = sotoinpcb(so);
@@ -517,17 +523,17 @@ rip6_ctloutput(int op, struct socket *so, int level, int optname,
 		case IP_DIVERTFL:
 			switch (op) {
 			case PRCO_SETOPT:
-				if (*mp == 0 || (*mp)->m_len < sizeof (int)) {
+				if (*mp == NULL || (*mp)->m_len < sizeof(int)) {
 					error = EINVAL;
 					break;
 				}
 				dir = *mtod(*mp, int *);
 				if (inp->inp_divertfl > 0)
 					error = ENOTSUP;
-				else if ((dir & IPPROTO_DIVERT_RESP) || 
+				else if ((dir & IPPROTO_DIVERT_RESP) ||
 					   (dir & IPPROTO_DIVERT_INIT))
 					inp->inp_divertfl = dir;
-				else 
+				else
 					error = EINVAL;
 				break;
 
@@ -542,7 +548,7 @@ rip6_ctloutput(int op, struct socket *so, int level, int optname,
 				break;
 			}
 
-			if (op == PRCO_SETOPT && *mp)
+			if (op == PRCO_SETOPT)
 				(void)m_free(*mp);
 			return (error);
 
@@ -578,7 +584,7 @@ rip6_ctloutput(int op, struct socket *so, int level, int optname,
 		return (icmp6_ctloutput(op, so, level, optname, mp));
 
 	default:
-		if (op == PRCO_SETOPT && *mp)
+		if (op == PRCO_SETOPT)
 			m_free(*mp);
 		return EINVAL;
 	}
@@ -588,7 +594,7 @@ extern	u_long rip6_sendspace;
 extern	u_long rip6_recvspace;
 
 int
-rip6_usrreq(struct socket *so, int req, struct mbuf *m, struct mbuf *nam, 
+rip6_usrreq(struct socket *so, int req, struct mbuf *m, struct mbuf *nam,
 	struct mbuf *control, struct proc *p)
 {
 	struct inpcb *in6p = sotoinpcb(so);
@@ -650,7 +656,7 @@ rip6_usrreq(struct socket *so, int req, struct mbuf *m, struct mbuf *nam,
 		soisdisconnected(so);
 		/* FALLTHROUGH */
 	case PRU_DETACH:
-		if (in6p == 0)
+		if (in6p == NULL)
 			panic("rip6_detach");
 #ifdef MROUTING
 		if (so == ip6_mrouter)
@@ -816,8 +822,7 @@ rip6_usrreq(struct socket *so, int req, struct mbuf *m, struct mbuf *nam,
 	default:
 		panic("rip6_usrreq");
 	}
-	if (m != NULL)
-		m_freem(m);
+	m_freem(m);
 	return (error);
 }
 

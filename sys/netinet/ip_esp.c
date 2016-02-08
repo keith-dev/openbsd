@@ -1,4 +1,4 @@
-/*	$OpenBSD: ip_esp.c,v 1.129 2014/12/19 17:14:40 tedu Exp $ */
+/*	$OpenBSD: ip_esp.c,v 1.134 2015/07/15 22:16:42 deraadt Exp $ */
 /*
  * The authors of this code are John Ioannidis (ji@tla.org),
  * Angelos D. Keromytis (kermit@csd.uch.gr) and
@@ -69,8 +69,8 @@
 
 #include "bpfilter.h"
 
-int esp_output_cb(void *);
-int esp_input_cb(void *);
+int esp_output_cb(struct cryptop *);
+int esp_input_cb(struct cryptop *);
 
 #ifdef ENCDEBUG
 #define DPRINTF(x)	if (encdebug) printf x
@@ -144,17 +144,22 @@ esp_init(struct tdb *tdbp, struct xformsw *xsp, struct ipsecinit *ii)
 			break;
 
 		default:
-			DPRINTF(("esp_init(): unsupported encryption algorithm %d specified\n", ii->ii_encalg));
+			DPRINTF(("esp_init(): unsupported encryption "
+			    "algorithm %d specified\n", ii->ii_encalg));
 			return EINVAL;
 		}
 
 		if (ii->ii_enckeylen < txform->minkey) {
-			DPRINTF(("esp_init(): keylength %d too small (min length is %d) for algorithm %s\n", ii->ii_enckeylen, txform->minkey, txform->name));
+			DPRINTF(("esp_init(): keylength %d too small "
+			    "(min length is %d) for algorithm %s\n",
+			    ii->ii_enckeylen, txform->minkey, txform->name));
 			return EINVAL;
 		}
 
 		if (ii->ii_enckeylen > txform->maxkey) {
-			DPRINTF(("esp_init(): keylength %d too large (max length is %d) for algorithm %s\n", ii->ii_enckeylen, txform->maxkey, txform->name));
+			DPRINTF(("esp_init(): keylength %d too large "
+			    "(max length is %d) for algorithm %s\n",
+			    ii->ii_enckeylen, txform->maxkey, txform->name));
 			return EINVAL;
 		}
 
@@ -222,12 +227,15 @@ esp_init(struct tdb *tdbp, struct xformsw *xsp, struct ipsecinit *ii)
 			break;
 
 		default:
-			DPRINTF(("esp_init(): unsupported authentication algorithm %d specified\n", ii->ii_authalg));
+			DPRINTF(("esp_init(): unsupported authentication "
+			    "algorithm %d specified\n", ii->ii_authalg));
 			return EINVAL;
 		}
 
 		if (ii->ii_authkeylen != thash->keysize) {
-			DPRINTF(("esp_init(): keylength %d doesn't match algorithm %s keysize (%d)\n", ii->ii_authkeylen, thash->name, thash->keysize));
+			DPRINTF(("esp_init(): keylength %d doesn't match "
+			    "algorithm %s keysize (%d)\n", ii->ii_authkeylen,
+			    thash->name, thash->keysize));
 			return EINVAL;
 		}
 
@@ -326,8 +334,10 @@ esp_input(struct mbuf *m, struct tdb *tdb, int skip, int protoff)
 	struct cryptop *crp;
 	struct tdb_crypto *tc;
 	int plen, alen, hlen;
-	struct m_tag *mtag;
 	u_int32_t btsx, esn;
+#ifdef ENCDEBUG
+	char buf[INET6_ADDRSTRLEN];
+#endif
 
 	/* Determine the ESP header length */
 	hlen = 2 * sizeof(u_int32_t) + tdb->tdb_ivlen; /* "new" ESP */
@@ -346,7 +356,10 @@ esp_input(struct mbuf *m, struct tdb *tdb, int skip, int protoff)
 		 * block size.
 		 */
 		if (plen & (espx->blocksize - 1)) {
-			DPRINTF(("esp_input(): payload of %d octets not a multiple of %d octets, SA %s/%08x\n", plen, espx->blocksize, ipsp_address(tdb->tdb_dst), ntohl(tdb->tdb_spi)));
+			DPRINTF(("esp_input(): payload of %d octets "
+			    "not a multiple of %d octets, SA %s/%08x\n",
+			    plen, espx->blocksize, ipsp_address(&tdb->tdb_dst,
+			    buf, sizeof(buf)), ntohl(tdb->tdb_spi)));
 			espstat.esps_badilen++;
 			m_freem(m);
 			return EINVAL;
@@ -366,28 +379,32 @@ esp_input(struct mbuf *m, struct tdb *tdb, int skip, int protoff)
 			m_freem(m);
 			DPRINTF(("esp_input(): replay counter wrapped"
 			    " for SA %s/%08x\n",
-			    ipsp_address(tdb->tdb_dst), ntohl(tdb->tdb_spi)));
+			    ipsp_address(&tdb->tdb_dst, buf, sizeof(buf)),
+			    ntohl(tdb->tdb_spi)));
 			espstat.esps_wrap++;
 			return EACCES;
 		case 2:
 			m_freem(m);
 			DPRINTF(("esp_input(): old packet received"
 			    " in SA %s/%08x\n",
-			    ipsp_address(tdb->tdb_dst), ntohl(tdb->tdb_spi)));
+			    ipsp_address(&tdb->tdb_dst, buf, sizeof(buf)),
+			    ntohl(tdb->tdb_spi)));
 			espstat.esps_replay++;
 			return EACCES;
 		case 3:
 			m_freem(m);
 			DPRINTF(("esp_input(): duplicate packet received"
 			    " in SA %s/%08x\n",
-			    ipsp_address(tdb->tdb_dst), ntohl(tdb->tdb_spi)));
+			    ipsp_address(&tdb->tdb_dst, buf, sizeof(buf)),
+			    ntohl(tdb->tdb_spi)));
 			espstat.esps_replay++;
 			return EACCES;
 		default:
 			m_freem(m);
 			DPRINTF(("esp_input(): bogus value from"
 			    " checkreplaywindow() in SA %s/%08x\n",
-			    ipsp_address(tdb->tdb_dst), ntohl(tdb->tdb_spi)));
+			    ipsp_address(&tdb->tdb_dst, buf, sizeof(buf)),
+			    ntohl(tdb->tdb_spi)));
 			espstat.esps_replay++;
 			return EACCES;
 		}
@@ -413,23 +430,6 @@ esp_input(struct mbuf *m, struct tdb *tdb, int skip, int protoff)
 		tdb->tdb_flags &= ~TDBF_SOFT_BYTES;       /* Turn off checking */
 	}
 
-#ifdef notyet
-	/* Find out if we've already done crypto */
-	for (mtag = m_tag_find(m, PACKET_TAG_IPSEC_IN_CRYPTO_DONE, NULL);
-	     mtag != NULL;
-	     mtag = m_tag_find(m, PACKET_TAG_IPSEC_IN_CRYPTO_DONE, mtag)) {
-		struct tdb_ident *tdbi;
-
-		tdbi = (struct tdb_ident *) (mtag + 1);
-		if (tdbi->proto == tdb->tdb_sproto && tdbi->spi == tdb->tdb_spi &&
-		    tdbi->rdomain == tdb->tdb_rdomain && !memcmp(&tdbi->dst,
-		    &tdb->tdb_dst, sizeof(union sockaddr_union)))
-			break;
-	}
-#else
-	mtag = NULL;
-#endif
-
 	/* Get crypto descriptors */
 	crp = crypto_getreq(esph && espx ? 2 : 1);
 	if (crp == NULL) {
@@ -440,7 +440,7 @@ esp_input(struct mbuf *m, struct tdb *tdb, int skip, int protoff)
 	}
 
 	/* Get IPsec-specific opaque pointer */
-	if (esph == NULL || mtag != NULL)
+	if (esph == NULL)
 		tc = malloc(sizeof(*tc), M_XDATA, M_NOWAIT | M_ZERO);
 	else
 		tc = malloc(sizeof(*tc) + alen, M_XDATA, M_NOWAIT | M_ZERO);
@@ -451,8 +451,6 @@ esp_input(struct mbuf *m, struct tdb *tdb, int skip, int protoff)
 		espstat.esps_crypto++;
 		return ENOBUFS;
 	}
-
-	tc->tc_ptr = (caddr_t) mtag;
 
 	if (esph) {
 		crda = crp->crp_desc;
@@ -478,18 +476,17 @@ esp_input(struct mbuf *m, struct tdb *tdb, int skip, int protoff)
 			crda->crd_len = m->m_pkthdr.len - (skip + alen);
 
 		/* Copy the authenticator */
-		if (mtag == NULL)
-			m_copydata(m, m->m_pkthdr.len - alen, alen, (caddr_t) (tc + 1));
+		m_copydata(m, m->m_pkthdr.len - alen, alen, (caddr_t)(tc + 1));
 	} else
 		crde = crp->crp_desc;
 
 	/* Crypto operation descriptor */
 	crp->crp_ilen = m->m_pkthdr.len; /* Total input length */
 	crp->crp_flags = CRYPTO_F_IMBUF;
-	crp->crp_buf = (caddr_t) m;
-	crp->crp_callback = (int (*) (struct cryptop *)) esp_input_cb;
+	crp->crp_buf = (caddr_t)m;
+	crp->crp_callback = esp_input_cb;
 	crp->crp_sid = tdb->tdb_cryptoid;
-	crp->crp_opaque = (caddr_t) tc;
+	crp->crp_opaque = (caddr_t)tc;
 
 	/* These are passed as-is to the callback */
 	tc->tc_skip = skip;
@@ -514,35 +511,30 @@ esp_input(struct mbuf *m, struct tdb *tdb, int skip, int protoff)
 			crde->crd_len = m->m_pkthdr.len - (skip + hlen + alen);
 	}
 
-	if (mtag == NULL)
-		return crypto_dispatch(crp);
-	else
-		return esp_input_cb(crp);
+	return crypto_dispatch(crp);
 }
 
 /*
  * ESP input callback, called directly by the crypto driver.
  */
 int
-esp_input_cb(void *op)
+esp_input_cb(struct cryptop *crp)
 {
 	u_int8_t lastthree[3], aalg[AH_HMAC_MAX_HASHLEN];
 	int s, hlen, roff, skip, protoff, error;
 	struct mbuf *m1, *mo, *m;
 	struct auth_hash *esph;
 	struct tdb_crypto *tc;
-	struct cryptop *crp;
-	struct m_tag *mtag;
 	struct tdb *tdb;
 	u_int32_t btsx, esn;
 	caddr_t ptr;
-
-	crp = (struct cryptop *) op;
+#ifdef ENCDEBUG
+	char buf[INET6_ADDRSTRLEN];
+#endif
 
 	tc = (struct tdb_crypto *) crp->crp_opaque;
 	skip = tc->tc_skip;
 	protoff = tc->tc_protoff;
-	mtag = (struct m_tag *) tc->tc_ptr;
 
 	m = (struct mbuf *) crp->crp_buf;
 	if (m == NULL) {
@@ -585,25 +577,22 @@ esp_input_cb(void *op)
 
 	/* If authentication was performed, check now. */
 	if (esph != NULL) {
-		/*
-		 * If we have a tag, it means an IPsec-aware NIC did the verification
-		 * for us.
-		 */
-		if (mtag == NULL) {
-			/* Copy the authenticator from the packet */
-			m_copydata(m, m->m_pkthdr.len - esph->authsize,
-			    esph->authsize, aalg);
+		/* Copy the authenticator from the packet */
+		m_copydata(m, m->m_pkthdr.len - esph->authsize,
+		    esph->authsize, aalg);
 
-			ptr = (caddr_t) (tc + 1);
+		ptr = (caddr_t) (tc + 1);
 
-			/* Verify authenticator */
-			if (timingsafe_bcmp(ptr, aalg, esph->authsize)) {
-				free(tc, M_XDATA, 0);
-				DPRINTF(("esp_input_cb(): authentication failed for packet in SA %s/%08x\n", ipsp_address(tdb->tdb_dst), ntohl(tdb->tdb_spi)));
-				espstat.esps_badauth++;
-				error = EACCES;
-				goto baddone;
-			}
+		/* Verify authenticator */
+		if (timingsafe_bcmp(ptr, aalg, esph->authsize)) {
+			free(tc, M_XDATA, 0);
+			DPRINTF(("esp_input_cb(): authentication "
+			    "failed for packet in SA %s/%08x\n",
+			    ipsp_address(&tdb->tdb_dst, buf,
+				sizeof(buf)), ntohl(tdb->tdb_spi)));
+			espstat.esps_badauth++;
+			error = EACCES;
+			goto baddone;
 		}
 
 		/* Remove trailing authenticator */
@@ -627,28 +616,32 @@ esp_input_cb(void *op)
 		case 1:
 			DPRINTF(("esp_input_cb(): replay counter wrapped"
 			    " for SA %s/%08x\n",
-			    ipsp_address(tdb->tdb_dst), ntohl(tdb->tdb_spi)));
+			    ipsp_address(&tdb->tdb_dst, buf, sizeof(buf)),
+			    ntohl(tdb->tdb_spi)));
 			espstat.esps_wrap++;
 			error = EACCES;
 			goto baddone;
 		case 2:
 			DPRINTF(("esp_input_cb(): old packet received"
 			    " in SA %s/%08x\n",
-			    ipsp_address(tdb->tdb_dst), ntohl(tdb->tdb_spi)));
+			    ipsp_address(&tdb->tdb_dst, buf, sizeof(buf)),
+			    ntohl(tdb->tdb_spi)));
 			espstat.esps_replay++;
 			error = EACCES;
 			goto baddone;
 		case 3:
 			DPRINTF(("esp_input_cb(): duplicate packet received"
 			    " in SA %s/%08x\n",
-			    ipsp_address(tdb->tdb_dst), ntohl(tdb->tdb_spi)));
+			    ipsp_address(&tdb->tdb_dst, buf, sizeof(buf)),
+			    ntohl(tdb->tdb_spi)));
 			espstat.esps_replay++;
 			error = EACCES;
 			goto baddone;
 		default:
 			DPRINTF(("esp_input_cb(): bogus value from"
 			    " checkreplaywindow() in SA %s/%08x\n",
-			    ipsp_address(tdb->tdb_dst), ntohl(tdb->tdb_spi)));
+			    ipsp_address(&tdb->tdb_dst, buf, sizeof(buf)),
+			    ntohl(tdb->tdb_spi)));
 			espstat.esps_replay++;
 			error = EACCES;
 			goto baddone;
@@ -667,7 +660,8 @@ esp_input_cb(void *op)
 		espstat.esps_hdrops++;
 		splx(s);
 		DPRINTF(("esp_input_cb(): bad mbuf chain, SA %s/%08x\n",
-		    ipsp_address(tdb->tdb_dst), ntohl(tdb->tdb_spi)));
+		    ipsp_address(&tdb->tdb_dst, buf, sizeof(buf)),
+		    ntohl(tdb->tdb_spi)));
 		m_freem(m);
 		return EINVAL;
 	}
@@ -688,7 +682,7 @@ esp_input_cb(void *op)
 			/* Adjust the next mbuf by the remainder */
 			m_adj(m1->m_next, roff + hlen - m1->m_len);
 
-			/* The second mbuf is guaranteed not to have a pkthdr... */
+			/* The second mbuf is guaranteed not to have a pkthdr */
 			m->m_pkthdr.len -= (roff + hlen - m1->m_len);
 		}
 
@@ -722,7 +716,10 @@ esp_input_cb(void *op)
 	if (lastthree[1] + 2 > m->m_pkthdr.len - skip) {
 		espstat.esps_badilen++;
 		splx(s);
-		DPRINTF(("esp_input_cb(): invalid padding length %d for packet in SA %s/%08x\n", lastthree[1], ipsp_address(tdb->tdb_dst), ntohl(tdb->tdb_spi)));
+		DPRINTF(("esp_input_cb(): invalid padding length %d for "
+		    "packet in SA %s/%08x\n", lastthree[1],
+		    ipsp_address(&tdb->tdb_dst, buf, sizeof(buf)),
+		    ntohl(tdb->tdb_spi)));
 		m_freem(m);
 		return EINVAL;
 	}
@@ -731,7 +728,9 @@ esp_input_cb(void *op)
 	if ((lastthree[1] != lastthree[0]) && (lastthree[1] != 0)) {
 		espstat.esps_badenc++;
 		splx(s);
-		DPRINTF(("esp_input(): decryption failed for packet in SA %s/%08x\n", ipsp_address(tdb->tdb_dst), ntohl(tdb->tdb_spi)));
+		DPRINTF(("esp_input(): decryption failed for packet in "
+		    "SA %s/%08x\n", ipsp_address(&tdb->tdb_dst, buf,
+		    sizeof(buf)), ntohl(tdb->tdb_spi)));
 		m_freem(m);
 		return EINVAL;
 	}
@@ -743,15 +742,14 @@ esp_input_cb(void *op)
 	m_copyback(m, protoff, sizeof(u_int8_t), lastthree + 2, M_NOWAIT);
 
 	/* Back to generic IPsec input processing */
-	error = ipsec_common_input_cb(m, tdb, skip, protoff, mtag);
+	error = ipsec_common_input_cb(m, tdb, skip, protoff);
 	splx(s);
 	return (error);
 
  baddone:
 	splx(s);
 
-	if (m != NULL)
-		m_freem(m);
+	m_freem(m);
 
 	crypto_freereq(crp);
 
@@ -773,7 +771,9 @@ esp_output(struct mbuf *m, struct tdb *tdb, struct mbuf **mp, int skip,
 	struct tdb_crypto *tc;
 	unsigned char *pad;
 	u_int8_t prot;
-
+#ifdef ENCDEBUG
+	char buf[INET6_ADDRSTRLEN];
+#endif
 	struct cryptodesc *crde = NULL, *crda = NULL;
 	struct cryptop *crp;
 #if NBPFILTER > 0
@@ -819,7 +819,8 @@ esp_output(struct mbuf *m, struct tdb *tdb, struct mbuf **mp, int skip,
 		/* Check for IP maximum packet size violations. */
 		if (skip + hlen + rlen + padding + alen > IP_MAXPACKET)	{
 			DPRINTF(("esp_output(): packet in SA %s/%08x got "
-			    "too big\n", ipsp_address(tdb->tdb_dst),
+			    "too big\n", ipsp_address(&tdb->tdb_dst, buf,
+			    sizeof(buf)),
 			    ntohl(tdb->tdb_spi)));
 			m_freem(m);
 			espstat.esps_toobig++;
@@ -832,8 +833,8 @@ esp_output(struct mbuf *m, struct tdb *tdb, struct mbuf **mp, int skip,
 		/* Check for IPv6 maximum packet size violations. */
 		if (skip + hlen + rlen + padding + alen > IPV6_MAXPACKET) {
 			DPRINTF(("esp_output(): packet in SA %s/%08x got too "
-			    "big\n", ipsp_address(tdb->tdb_dst),
-			    ntohl(tdb->tdb_spi)));
+			    "big\n", ipsp_address(&tdb->tdb_dst, buf,
+			    sizeof(buf)), ntohl(tdb->tdb_spi)));
 			m_freem(m);
 			espstat.esps_toobig++;
 			return EMSGSIZE;
@@ -843,8 +844,9 @@ esp_output(struct mbuf *m, struct tdb *tdb, struct mbuf **mp, int skip,
 
 	default:
 		DPRINTF(("esp_output(): unknown/unsupported protocol "
-		    "family %d, SA %s/%08x\n", tdb->tdb_dst.sa.sa_family
-		    , ipsp_address(tdb->tdb_dst), ntohl(tdb->tdb_spi)));
+		    "family %d, SA %s/%08x\n", tdb->tdb_dst.sa.sa_family,
+		    ipsp_address(&tdb->tdb_dst, buf, sizeof(buf)),
+		    ntohl(tdb->tdb_spi)));
 		m_freem(m);
 		espstat.esps_nopf++;
 		return EPFNOSUPPORT;
@@ -887,7 +889,8 @@ esp_output(struct mbuf *m, struct tdb *tdb, struct mbuf **mp, int skip,
 
 		if (n == NULL) {
 			DPRINTF(("esp_output(): bad mbuf chain, SA %s/%08x\n",
-			    ipsp_address(tdb->tdb_dst), ntohl(tdb->tdb_spi)));
+			    ipsp_address(&tdb->tdb_dst, buf, sizeof(buf)),
+			    ntohl(tdb->tdb_spi)));
 			espstat.esps_hdrops++;
 			m_freem(m);
 			return ENOBUFS;
@@ -905,8 +908,8 @@ esp_output(struct mbuf *m, struct tdb *tdb, struct mbuf **mp, int skip,
 	mo = m_inject(m, skip, hlen, M_DONTWAIT);
 	if (mo == NULL) {
 		DPRINTF(("esp_output(): failed to inject ESP header for "
-		    "SA %s/%08x\n", ipsp_address(tdb->tdb_dst),
-		    ntohl(tdb->tdb_spi)));
+		    "SA %s/%08x\n", ipsp_address(&tdb->tdb_dst, buf,
+		    sizeof(buf)), ntohl(tdb->tdb_spi)));
 		m_freem(m);
 		espstat.esps_hdrops++;
 		return ENOBUFS;
@@ -930,7 +933,8 @@ esp_output(struct mbuf *m, struct tdb *tdb, struct mbuf **mp, int skip,
 	mo = m_inject(m, m->m_pkthdr.len, padding + alen, M_DONTWAIT);
 	if (mo == NULL) {
 		DPRINTF(("esp_output(): m_inject failed for SA %s/%08x\n",
-		    ipsp_address(tdb->tdb_dst), ntohl(tdb->tdb_spi)));
+		    ipsp_address(&tdb->tdb_dst, buf, sizeof(buf)),
+		    ntohl(tdb->tdb_spi)));
 		m_freem(m);
 		return ENOBUFS;
 	}
@@ -998,9 +1002,9 @@ esp_output(struct mbuf *m, struct tdb *tdb, struct mbuf **mp, int skip,
 	/* Crypto operation descriptor. */
 	crp->crp_ilen = m->m_pkthdr.len; /* Total input length. */
 	crp->crp_flags = CRYPTO_F_IMBUF;
-	crp->crp_buf = (caddr_t) m;
-	crp->crp_callback = (int (*) (struct cryptop *)) esp_output_cb;
-	crp->crp_opaque = (caddr_t) tc;
+	crp->crp_buf = (caddr_t)m;
+	crp->crp_callback = esp_output_cb;
+	crp->crp_opaque = (caddr_t)tc;
 	crp->crp_sid = tdb->tdb_cryptoid;
 
 	if (esph) {
@@ -1027,19 +1031,15 @@ esp_output(struct mbuf *m, struct tdb *tdb, struct mbuf **mp, int skip,
 			crda->crd_len = m->m_pkthdr.len - (skip + alen);
 	}
 
-	if ((tdb->tdb_flags & TDBF_SKIPCRYPTO) == 0)
-		return crypto_dispatch(crp);
-	else
-		return esp_output_cb(crp);
+	return crypto_dispatch(crp);
 }
 
 /*
  * ESP output callback, called directly by the crypto driver.
  */
 int
-esp_output_cb(void *op)
+esp_output_cb(struct cryptop *crp)
 {
-	struct cryptop *crp = (struct cryptop *) op;
 	struct tdb_crypto *tc;
 	struct tdb *tdb;
 	struct mbuf *m;
@@ -1099,8 +1099,7 @@ esp_output_cb(void *op)
  baddone:
 	splx(s);
 
-	if (m != NULL)
-		m_freem(m);
+	m_freem(m);
 
 	crypto_freereq(crp);
 
@@ -1116,12 +1115,10 @@ esp_output_cb(void *op)
  * return 3 for packet within current window but already received
  */
 int
-checkreplaywindow(struct tdb *tdb, u_int32_t seq, u_int32_t *seqhigh,
-    int commit)
+checkreplaywindow(struct tdb *tdb, u_int32_t seq, u_int32_t *seqh, int commit)
 {
 	u_int32_t	tl, th, wl;
-	u_int32_t	seqh, packet;
-	u_int32_t	window = TDB_REPLAYMAX - TDB_REPLAYWASTE;
+	u_int32_t	packet, window = TDB_REPLAYMAX - TDB_REPLAYWASTE;
 	int		idx, esn = tdb->tdb_flags & TDBF_ESN;
 
 	tl = (u_int32_t)tdb->tdb_rpl;
@@ -1148,7 +1145,7 @@ checkreplaywindow(struct tdb *tdb, u_int32_t seq, u_int32_t *seqhigh,
 	 */
 	if ((tl >= window - 1 && seq >= wl) ||
 	    (tl <  window - 1 && seq <  wl)) {
-		seqh = *seqhigh = th;
+		*seqh = th;
 		if (seq > tl) {
 			if (commit) {
 				if (seq - tl > window)
@@ -1163,7 +1160,7 @@ checkreplaywindow(struct tdb *tdb, u_int32_t seq, u_int32_t *seqhigh,
 					}
 				}
 				tdb->tdb_seen[idx] |= packet;
-				tdb->tdb_rpl = ((u_int64_t)seqh << 32) | seq;
+				tdb->tdb_rpl = ((u_int64_t)*seqh << 32) | seq;
 			}
 		} else {
 			if (tl - seq >= window)
@@ -1189,7 +1186,7 @@ checkreplaywindow(struct tdb *tdb, u_int32_t seq, u_int32_t *seqhigh,
 	if (tl < window - 1 && seq >= wl) {
 		if (tdb->tdb_seen[idx] & packet)
 			return (3);
-		seqh = *seqhigh = th - 1;
+		*seqh = th - 1;
 		if (commit)
 			tdb->tdb_seen[idx] |= packet;
 		return (0);
@@ -1199,8 +1196,8 @@ checkreplaywindow(struct tdb *tdb, u_int32_t seq, u_int32_t *seqhigh,
 	 * SN has wrapped and the last authenticated SN is in the old
 	 * subspace.
 	 */
-	seqh = *seqhigh = th + 1;
-	if (seqh == 0)		/* Don't let high bit to wrap */
+	*seqh = th + 1;
+	if (*seqh == 0)		/* Don't let high bit to wrap */
 		return (1);
 	if (commit) {
 		if (seq - tl > window)
@@ -1214,7 +1211,7 @@ checkreplaywindow(struct tdb *tdb, u_int32_t seq, u_int32_t *seqhigh,
 			}
 		}
 		tdb->tdb_seen[idx] |= packet;
-		tdb->tdb_rpl = ((u_int64_t)seqh << 32) | seq;
+		tdb->tdb_rpl = ((u_int64_t)*seqh << 32) | seq;
 	}
 
 	return (0);

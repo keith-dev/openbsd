@@ -1,5 +1,5 @@
 # ex:ts=8 sw=4:
-# $OpenBSD: Add.pm,v 1.164 2014/11/30 15:53:26 espie Exp $
+# $OpenBSD: Add.pm,v 1.169 2015/05/25 07:20:31 espie Exp $
 #
 # Copyright (c) 2003-2014 Marc Espie <espie@openbsd.org>
 #
@@ -101,7 +101,7 @@ sub perform_installation
 	my ($handle, $state) = @_;
 
 	$state->{partial} = $handle->{partial};
-	$state->progress->visit_with_size($handle->{plist}, 'install', $state);
+	$state->progress->visit_with_size($handle->{plist}, 'install');
 	if ($handle->{location}{early_close}) {
 		$handle->{location}->close_now;
 	} else {
@@ -484,6 +484,24 @@ sub prepare_to_extract
 	$file->{destdir} = $destdir;
 }
 
+sub create_temp
+{
+	my ($self, $d, $state, $fullname) = @_;
+	if (!-e _) {
+		$state->make_path($d, $fullname);
+	}
+	my ($fh, $tempname) = OpenBSD::Temp::permanent_file($d, "pkg");
+	$self->{tempname} = $tempname;
+	if (!defined $tempname) {
+		if ($state->allow_nonroot($fullname)) {
+			$state->errsay("Can't create temp file outside localbase for #1", $fullname);
+			return undef;
+		}
+		$state->fatal("create temporary file in #1: #2", $d, $!);
+	}
+	return ($fh, $tempname);
+}
+
 sub tie
 {
 	my ($self, $state) = @_;
@@ -504,12 +522,10 @@ sub tie
 		$state->say("link #1 -> #2", 
 		    $self->name, $d) if $state->verbose >= 3;
 	} else {
-		if (!-e _) {
-			File::Path::mkpath($d);
-		}
-		my ($fh, $tempname) = OpenBSD::Temp::permanent_file($d, "pkg");
-		$self->{tempname} = $tempname;
+		my ($fh, $tempname) = $self->create_temp($d, $state, 
+		    $self->fullname);
 
+		return if !defined $tempname;
 		my $src = $self->{tieto}->realname($state);
 		unlink($tempname);
 		$state->say("link #1 -> #2", $src, $tempname)
@@ -536,11 +552,12 @@ sub extract
 		    $self->name, $d) if $state->verbose >= 3;
 		$state->{archive}->skip;
 	} else {
-		if (!-e _) {
-			File::Path::mkpath($d);
+		my ($fh, $tempname) = $self->create_temp($d, $state, 
+		    $file->name);
+		if (!defined $tempname) {
+			$state->{archive}->skip;
+			return;
 		}
-		my ($fh, $tempname) = OpenBSD::Temp::permanent_file($d, "pkg");
-		$self->{tempname} = $tempname;
 
 		# XXX don't apply destdir twice
 		$file->{destdir} = '';
@@ -574,12 +591,16 @@ sub install
 		    $destdir.$fullname) if $state->verbose >= 5;
 		return;
 	}
-	File::Path::mkpath(dirname($destdir.$fullname));
+	$state->make_path(dirname($destdir.$fullname), $fullname);
 	if (defined $self->{link}) {
 		link($destdir.$self->{link}, $destdir.$fullname);
 	} elsif (defined $self->{symlink}) {
 		symlink($self->{symlink}, $destdir.$fullname);
 	} else {
+		if (!defined $self->{tempname}) {
+			return if $state->allow_nonroot($fullname);
+			$state->fatal("No tempname for #1", $fullname);
+		}
 		rename($self->{tempname}, $destdir.$fullname) or
 		    $state->fatal("can't move #1 to #2: #3",
 			$self->{tempname}, $fullname, $!);
@@ -757,7 +778,7 @@ sub extract
 	$state->say("new directory #1", $destdir.$fullname)
 	    if $state->verbose >= 3;
 	return if $state->{not};
-	File::Path::mkpath($destdir.$fullname);
+	$state->make_path($destdir.$fullname, $fullname);
 }
 
 sub install
@@ -770,7 +791,7 @@ sub install
 	$state->say("new directory #1", $destdir.$fullname) 
 	    if $state->verbose >= 5;
 	return if $state->{not};
-	File::Path::mkpath($destdir.$fullname);
+	$state->make_path($destdir.$fullname, $fullname);
 	$self->set_modes($state, $destdir.$fullname);
 }
 
@@ -847,6 +868,12 @@ sub copy_info
 }
 
 sub extract
+{
+	my ($self, $state) = @_;
+	$self->may_verify_digest($state);
+}
+
+sub find_extractible
 {
 	my ($self, $state) = @_;
 	$self->may_verify_digest($state);

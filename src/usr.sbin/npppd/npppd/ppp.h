@@ -1,4 +1,4 @@
-/*	$OpenBSD: ppp.h,v 1.16 2013/04/26 02:20:04 gsoares Exp $ */
+/*	$OpenBSD: ppp.h,v 1.18 2015/07/23 09:04:06 yasuoka Exp $ */
 
 /*-
  * Copyright (c) 2009 Internet Initiative Japan Inc.
@@ -223,8 +223,7 @@ typedef struct _npppd_ppp	npppd_ppp;
 #include "fsm.h"
 
 #ifdef USE_NPPPD_RADIUS
-#include <radius+.h>
-#include <radiusconst.h>
+#include <radius.h>
 #include <radius_req.h>
 #endif
 
@@ -703,12 +702,8 @@ typedef struct _dialin_proxy_info {
 
 /* adapted from FreeBSD:/usr/include/sys/cdefs */
 #ifndef __printflike
-#if __GNUC__ < 2 || __GNUC__ == 2 && __GNUC_MINOR__ < 7
-#define __printflike(fmtarg, firstvararg)
-#else
 #define __printflike(fmtarg, firstvararg) \
 	__attribute__((__format__ (__printf__, fmtarg, firstvararg)))
-#endif
 #endif
 
 /*

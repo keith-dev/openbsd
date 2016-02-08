@@ -1,4 +1,4 @@
-/* $OpenBSD: agtimer.c,v 1.1 2013/09/09 14:31:54 patrick Exp $ */
+/* $OpenBSD: agtimer.c,v 1.4 2015/06/06 16:49:04 jsg Exp $ */
 /*
  * Copyright (c) 2011 Dale Rahn <drahn@openbsd.org>
  * Copyright (c) 2013 Patrick Wildt <patrick@blueri.se>
@@ -54,9 +54,6 @@ struct agtimer_pcpu_softc {
 
 struct agtimer_softc {
 	struct device		sc_dev;
-	bus_space_tag_t		sc_iot;
-	bus_space_handle_t	sc_ioh;
-	bus_space_handle_t	sc_pioh;
 
 	struct agtimer_pcpu_softc sc_pstat[MAX_ARM_CPUS];
 
@@ -156,7 +153,8 @@ int
 agtimer_match(struct device *parent, void *cfdata, void *aux)
 {
 	if ((cpufunc_id() & CPU_ID_CORTEX_A7_MASK) == CPU_ID_CORTEX_A7 ||
-	    (cpufunc_id() & CPU_ID_CORTEX_A15_MASK) == CPU_ID_CORTEX_A15)
+	    (cpufunc_id() & CPU_ID_CORTEX_A15_MASK) == CPU_ID_CORTEX_A15 ||
+	    (cpufunc_id() & CPU_ID_CORTEX_A17_MASK) == CPU_ID_CORTEX_A17)
 		return (1);
 
 	return 0;
@@ -166,16 +164,9 @@ void
 agtimer_attach(struct device *parent, struct device *self, void *args)
 {
 	struct agtimer_softc *sc = (struct agtimer_softc *)self;
-	struct cortex_attach_args *ia = args;
-	bus_space_handle_t ioh, pioh;
-
-	sc->sc_iot = ia->ca_iot;
 
 	sc->sc_ticks_per_second = agtimer_frequency;
 	printf(": tick rate %d KHz\n", sc->sc_ticks_per_second /1000);
-
-	sc->sc_ioh = ioh;
-	sc->sc_pioh = pioh;
 
 	/* XXX: disable user access */
 
@@ -212,7 +203,7 @@ agtimer_intr(void *frame)
 	struct agtimer_pcpu_softc *pc = &sc->sc_pstat[CPU_INFO_UNIT(curcpu())];
 	uint64_t		 now;
 	uint64_t		 nextevent;
-	uint32_t		 r, reg;
+	uint32_t		 r;
 #if defined(USE_GTIMER_CMP)
 	int			 skip = 1;
 #else
@@ -270,12 +261,6 @@ agtimer_intr(void *frame)
 
 	agtimer_set_tval(delay);
 
-	reg = agtimer_get_ctrl();
-	if (reg & GTIMER_CNTP_CTL_ISTATUS) {
-		reg |= GTIMER_CNTP_CTL_IMASK;
-		agtimer_set_ctrl(reg);
-	}
-
 	return (rc);
 }
 
@@ -318,7 +303,12 @@ agtimer_cpu_initclocks()
 
 	/* establish interrupts */
 	/* XXX - irq */
+
+	/* secure physical timer */
 	ampintc_intr_establish(29, IPL_CLOCK, agtimer_intr,
+	    NULL, "tick");
+	/* non-secure physical timer */
+	ampintc_intr_establish(30, IPL_CLOCK, agtimer_intr,
 	    NULL, "tick");
 
 	next = agtimer_readcnt64(sc) + sc->sc_ticks_per_intr;

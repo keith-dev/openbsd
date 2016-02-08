@@ -1,4 +1,4 @@
-/*      $OpenBSD: if_malo.c,v 1.81 2014/12/22 02:28:52 tedu Exp $ */
+/*      $OpenBSD: if_malo.c,v 1.85 2015/06/24 09:40:54 mpi Exp $ */
 
 /*
  * Copyright (c) 2007 Marcus Glocker <mglocker@openbsd.org>
@@ -47,7 +47,6 @@
 #include <machine/bus.h>
 #include <machine/intr.h>
 
-#include <dev/pcmcia/pcmciareg.h>
 #include <dev/pcmcia/pcmciavar.h>
 #include <dev/pcmcia/pcmciadevs.h>
 
@@ -926,6 +925,7 @@ cmalo_rx(struct malo_softc *sc)
 	struct ieee80211com *ic = &sc->sc_ic;
 	struct ifnet *ifp = &ic->ic_if;
 	struct malo_rx_desc *rxdesc;
+	struct mbuf_list ml = MBUF_LIST_INITIALIZER();
 	struct mbuf *m;
 	uint8_t *data;
 	uint16_t psize;
@@ -966,23 +966,24 @@ cmalo_rx(struct malo_softc *sc)
 
 	/* prepare mbuf */
 	m = m_devget(sc->sc_data + rxdesc->pkgoffset,
-	    rxdesc->pkglen, ETHER_ALIGN, ifp);
+	    rxdesc->pkglen, ETHER_ALIGN);
 	if (m == NULL) {
 		DPRINTF(1, "RX m_devget failed\n");
 		ifp->if_ierrors++;
 		return;
 	}
 
-#if NBPFILTER > 0
-	if (ifp->if_bpf)
-		bpf_mtap(ifp->if_bpf, m, BPF_DIRECTION_IN);
-#endif
-
 	/* push the frame up to the network stack if not in monitor mode */
 	if (ic->ic_opmode != IEEE80211_M_MONITOR) {
-		ether_input_mbuf(ifp, m);
-		ifp->if_ipackets++;
+		ml_enqueue(&ml, m);
+		if_input(ifp, &ml);
+#if NBPFILTER > 0
+	} else {
+		if (ifp->if_bpf)
+			bpf_mtap(ifp->if_bpf, m, BPF_DIRECTION_IN);
+#endif
 	}
+
 }
 
 void

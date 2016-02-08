@@ -1,4 +1,4 @@
-/*	$OpenBSD: nm.c,v 1.42 2015/01/16 06:40:10 deraadt Exp $	*/
+/*	$OpenBSD: nm.c,v 1.46 2015/05/17 21:41:50 guenther Exp $	*/
 /*	$NetBSD: nm.c,v 1.7 1996/01/14 23:04:03 pk Exp $	*/
 
 /*
@@ -61,15 +61,6 @@ union hdr {
 	Elf64_Ehdr elf64;
 };
 
-/* a funky nlist overload for reading 32bit a.out on 64bit toys */
-struct nlist32 {
-	u_int32_t	strx;
-	u_int8_t	type;
-	u_int8_t	other;
-	u_int16_t	desc;
-	u_int32_t	value;
-} __packed;
-
 int armap;
 int demangle;
 int non_object_warning;
@@ -80,6 +71,7 @@ int print_file_each_line;
 int show_extensions;
 int issize;
 int usemmap = 1;
+int dynamic_only;
 
 /* size vars */
 unsigned long total_text, total_data, total_bss, total_total;
@@ -108,11 +100,11 @@ int	show_archive(int, const char *, FILE *);
 int	show_file(int, int, const char *, FILE *fp, off_t, union hdr *);
 void	print_symbol(const char *, struct nlist *);
 
-#define	OPTSTRING_NM	"aABCegnoprsuvw"
+#define	OPTSTRING_NM	"aABCDegnoprsuvw"
 const struct option longopts_nm[] = {
 	{ "debug-syms",		no_argument,		0,	'a' },
 	{ "demangle",		no_argument,		0,	'C' },
-/*	{ "dynamic",		no_argument,		0,	'D' }, */
+	{ "dynamic",		no_argument,		0,	'D' },
 	{ "extern-only",	no_argument,		0,	'g' },
 /*	{ "line-numbers",	no_argument,		0,	'l' }, */
 	{ "no-sort",		no_argument,		0,	'p' },
@@ -158,6 +150,9 @@ main(int argc, char *argv[])
 			break;
 		case 'C':
 			demangle = 1;
+			break;
+		case 'D':
+			dynamic_only = 1;
 			break;
 		case 'e':
 			show_extensions = 1;
@@ -719,12 +714,8 @@ show_file(int count, int warn_fmt, const char *name, FILE *fp, off_t foff, union
 		(void)printf("\n%s:\n", name);
 
 	/* print out symbols */
-	for (i = 0; i < nnames; i++) {
-		if (show_extensions && snames[i] != names &&
-		    SYMBOL_TYPE((snames[i] -1)->n_type) == N_INDR)
-			continue;
+	for (i = 0; i < nnames; i++)
 		print_symbol(name, snames[i]);
-	}
 
 	free(snames);
 	free(names);
@@ -754,9 +745,7 @@ print_symbol(const char *name, struct nlist *sym)
 	 */
 	if (!print_only_undefined_symbols) {
 		/* print symbol's value */
-		if (SYMBOL_TYPE(sym->n_type) == N_UNDF ||
-		    (show_extensions && SYMBOL_TYPE(sym->n_type) == N_INDR &&
-		    sym->n_value == 0))
+		if (SYMBOL_TYPE(sym->n_type) == N_UNDF)
 			(void)printf("        ");
 		else
 			(void)printf("%08lx", sym->n_value);
@@ -768,10 +757,7 @@ print_symbol(const char *name, struct nlist *sym)
 			(void)printf(" %c ", typeletter(sym));
 	}
 
-	if (SYMBOL_TYPE(sym->n_type) == N_INDR && show_extensions)
-		printf("%s -> %s\n", symname(sym), symname(sym+1));
-	else
-		(void)puts(symname(sym));
+	(void)puts(symname(sym));
 }
 
 /*
@@ -805,8 +791,6 @@ typeletter(struct nlist *np)
 		return(ext? 'F' : 'W');
 	case N_TEXT:
 		return(ext? 'T' : 't');
-	case N_INDR:
-		return(ext? 'I' : 'i');
 	case N_SIZE:
 		return(ext? 'S' : 's');
 	case N_UNDF:
@@ -891,7 +875,7 @@ usage(void)
 	if (issize)
 		fprintf(stderr, "usage: %s [-tw] [file ...]\n", __progname);
 	else
-		fprintf(stderr, "usage: %s [-aCegnoprsuw] [file ...]\n",
+		fprintf(stderr, "usage: %s [-aCDegnoprsuw] [file ...]\n",
 		    __progname);
 	exit(1);
 }

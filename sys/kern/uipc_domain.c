@@ -1,4 +1,4 @@
-/*	$OpenBSD: uipc_domain.c,v 1.39 2014/12/23 03:26:24 tedu Exp $	*/
+/*	$OpenBSD: uipc_domain.c,v 1.41 2015/07/17 18:31:08 blambert Exp $	*/
 /*	$NetBSD: uipc_domain.c,v 1.14 1996/02/09 19:00:44 christos Exp $	*/
 
 /*
@@ -38,7 +38,6 @@
 #include <sys/domain.h>
 #include <sys/mbuf.h>
 #include <sys/time.h>
-#include <sys/kernel.h>
 #include <sys/systm.h>
 #include <sys/sysctl.h>
 #include <sys/timeout.h>
@@ -51,10 +50,6 @@ struct	domain *domains;
 void		pffasttimo(void *);
 void		pfslowtimo(void *);
 struct domain *	pffinddomain(int);
-
-#if defined (KEY) || defined (IPSEC) || defined (TCP_SIGNATURE)
-int pfkey_init(void);
-#endif /* KEY || IPSEC || TCP_SIGNATURE */
 
 #define	ADDDOMAIN(x)	{ \
 	extern struct domain __CONCAT(x,domain); \
@@ -81,15 +76,10 @@ domaininit(void)
 	ADDDOMAIN(inet6);
 #endif /* INET6 */
 #if defined (KEY) || defined (IPSEC) || defined (TCP_SIGNATURE)
-	pfkey_init();
-#endif /* KEY || IPSEC */
+	ADDDOMAIN(pfkey);
+#endif
 #ifdef MPLS
-       ADDDOMAIN(mpls);
-#endif
-#ifdef IPSEC
-#ifdef __KAME__
-	ADDDOMAIN(key);
-#endif
+	ADDDOMAIN(mpls);
 #endif
 	ADDDOMAIN(route);
 

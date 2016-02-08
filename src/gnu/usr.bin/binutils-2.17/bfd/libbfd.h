@@ -201,6 +201,8 @@ extern void *_bfd_generic_read_ar_hdr
   (bfd *);
 extern void _bfd_ar_spacepad
   (char *, size_t, const char *, long);
+extern void _bfd_ar_spacepadll
+  (char *, size_t, const char *, long long);
 
 extern void *_bfd_generic_read_ar_hdr_mag
   (bfd *, const char *);
@@ -827,6 +829,8 @@ static const char *const bfd_reloc_code_real_names[] = { "@@uninitialized@@",
   "BFD_RELOC_32_PCREL_S2",
   "BFD_RELOC_16_PCREL_S2",
   "BFD_RELOC_23_PCREL_S2",
+  "BFD_RELOC_18_PCREL_S2",
+  "BFD_RELOC_28_PCREL_S2",
   "BFD_RELOC_HI22",
   "BFD_RELOC_LO10",
   "BFD_RELOC_GPREL16",

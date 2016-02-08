@@ -1,4 +1,4 @@
-/*	$OpenBSD: cpu.h,v 1.137 2014/12/16 21:40:05 tedu Exp $	*/
+/*	$OpenBSD: cpu.h,v 1.144 2015/07/13 17:45:01 mikeb Exp $	*/
 /*	$NetBSD: cpu.h,v 1.35 1996/05/05 19:29:26 christos Exp $	*/
 
 /*-
@@ -85,6 +85,10 @@ struct cpu_info {
 	u_int ci_apicid;		/* our APIC ID */
 	u_int32_t ci_randseed;
 
+#if defined(MULTIPROCESSOR)
+	struct srp_hazard ci_srp_hazards[SRP_HAZARD_NUM];
+#endif
+
 	/*
 	 * Private members.
 	 */
@@ -118,6 +122,7 @@ struct cpu_info {
 	u_int32_t	ci_model;		/* extended cpuid model */
 	u_int32_t	ci_feature_flags;	/* X86 CPUID feature bits */
 	u_int32_t	ci_feature_sefflags;	/* more CPUID feature bits */
+	u_int32_t	ci_feature_tpmflags;	/* thermal & power bits */
 	u_int32_t	cpu_class;		/* CPU class */
 	u_int32_t	ci_cflushsz;		/* clflush cache-line size */
 
@@ -126,10 +131,11 @@ struct cpu_info {
 	struct cpu_functions *ci_func;	/* start/stop functions */
 	void (*cpu_setup)(struct cpu_info *);	/* proc-dependant init */
 
-	u_int		*ci_mwait;
-/* bits in ci_mwait[0] */
+	struct device	*ci_acpicpudev;
+	volatile u_int	ci_mwait;
 #define	MWAIT_IN_IDLE		0x1	/* don't need IPI to wake */
 #define	MWAIT_KEEP_IDLING	0x2	/* cleared by other cpus to wake me */
+#define	MWAIT_ONLY		0x4	/* set if all idle states use mwait */
 #define	MWAIT_IDLING		(MWAIT_IN_IDLE | MWAIT_KEEP_IDLING)
 
 	int		ci_want_resched;
@@ -334,6 +340,10 @@ extern int cpu_perf_ebx;
 extern int cpu_perf_edx;
 extern int cpu_apmi_edx;
 
+/* cpu.c */
+extern u_int cpu_mwait_size;
+extern u_int cpu_mwait_states;
+
 /* machdep.c */
 extern int cpu_apmhalt;
 extern int cpu_class;
@@ -439,7 +449,6 @@ int	i386_set_ldt(struct proc *, void *, register_t *);
 
 /* isa_machdep.c */
 void	isa_defaultirq(void);
-void	isa_nodefaultirq(void);
 int	isa_nmi(void);
 
 /* pmap.c */
@@ -458,6 +467,7 @@ void	mp_setperf_init(void);
 void	vm86_gpfault(struct proc *, int);
 #endif /* VM86 */
 
+int	cpu_paenable(void *);
 #endif /* _KERNEL */
 
 /* 

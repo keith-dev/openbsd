@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_axe.c,v 1.129 2015/02/12 22:39:27 mpi Exp $	*/
+/*	$OpenBSD: if_axe.c,v 1.132 2015/06/24 09:40:54 mpi Exp $	*/
 
 /*
  * Copyright (c) 2005, 2006, 2007 Jonathan Gray <jsg@openbsd.org>
@@ -575,6 +575,31 @@ axe_ax88178_init(struct axe_softc *sc)
 	axe_cmd(sc, AXE_CMD_RXCTL_WRITE, 0, 0, NULL);
 }
 
+/* Read Ethernet Address from EEPROM if it is zero */
+void
+axe_ax88772b_nodeid(struct axe_softc *sc, u_char *eaddr)
+{
+	int i;
+	uint16_t val;
+
+	for (i = 0; i < ETHER_ADDR_LEN; i++) {
+		if (eaddr[i] != 0)
+			break;
+	}
+
+	/* We already have an ethernet address */
+	if (i != ETHER_ADDR_LEN)
+		return;
+
+	/* read from EEPROM */
+	for (i = 0; i < ETHER_ADDR_LEN/2; i++) {
+		axe_cmd(sc, AXE_CMD_SROM_READ, 0, AXE_EEPROM_772B_NODEID + i, &val);
+		val = ntohs(val);
+		*eaddr++ = (u_char)((val >> 8) & 0xff);
+		*eaddr++ = (u_char)(val & 0xff);
+	}
+}
+
 void
 axe_ax88772_init(struct axe_softc *sc)
 {
@@ -646,11 +671,11 @@ axe_match(struct device *parent, void *match, void *aux)
 {
 	struct usb_attach_arg *uaa = aux;
 
-	if (!uaa->iface)
-		return(UMATCH_NONE);
+	if (uaa->iface == NULL || uaa->configno != 1)
+		return (UMATCH_NONE);
 
 	return (axe_lookup(uaa->vendor, uaa->product) != NULL ?
-		UMATCH_VENDOR_PRODUCT : UMATCH_NONE);
+		UMATCH_VENDOR_PRODUCT_CONF_IFACE : UMATCH_NONE);
 }
 
 /*
@@ -662,8 +687,6 @@ axe_attach(struct device *parent, struct device *self, void *aux)
 {
 	struct axe_softc *sc = (struct axe_softc *)self;
 	struct usb_attach_arg *uaa = aux;
-	struct usbd_device *dev = uaa->device;
-	usbd_status err;
 	usb_interface_descriptor_t *id;
 	usb_endpoint_descriptor_t *ed;
 	struct mii_data	*mii;
@@ -673,15 +696,8 @@ axe_attach(struct device *parent, struct device *self, void *aux)
 	int i, s;
 
 	sc->axe_unit = self->dv_unit; /*device_get_unit(self);*/
-	sc->axe_udev = dev;
-
-	err = usbd_set_config_no(dev, AXE_CONFIG_NO, 1);
-	if (err) {
-		printf("%s: getting interface handle failed\n",
-		    sc->axe_dev.dv_xname);
-		return;
-	}
-
+	sc->axe_udev = uaa->device;
+	sc->axe_iface = uaa->iface;
 	sc->axe_flags = axe_lookup(uaa->vendor, uaa->product)->axe_flags;
 
 	usb_init_task(&sc->axe_tick_task, axe_tick_task, sc,
@@ -689,13 +705,6 @@ axe_attach(struct device *parent, struct device *self, void *aux)
 	rw_init(&sc->axe_mii_lock, "axemii");
 	usb_init_task(&sc->axe_stop_task, (void (*)(void *))axe_stop, sc,
 	    USB_TASK_TYPE_GENERIC);
-
-	err = usbd_device2interface_handle(dev, AXE_IFACE_IDX, &sc->axe_iface);
-	if (err) {
-		printf("%s: getting interface handle failed\n",
-		    sc->axe_dev.dv_xname);
-		return;
-	}
 
 	sc->axe_product = uaa->product;
 	sc->axe_vendor = uaa->vendor;
@@ -760,6 +769,9 @@ axe_attach(struct device *parent, struct device *self, void *aux)
 		axe_cmd(sc, AXE_178_CMD_READ_NODEID, 0, 0, &eaddr);
 	else
 		axe_cmd(sc, AXE_172_CMD_READ_NODEID, 0, 0, &eaddr);
+
+	if (sc->axe_flags & AX772B)
+		axe_ax88772b_nodeid(sc, eaddr);
 
 	/*
 	 * Load IPG values
@@ -1047,7 +1059,6 @@ axe_rxeof(struct usbd_xfer *xfer, void *priv, usbd_status status)
 			goto done;
 		}
 
-		ifp->if_ipackets++;
 		m->m_pkthdr.len = m->m_len = pktlen;
 
 		memcpy(mtod(m, char *), buf, pktlen);

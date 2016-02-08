@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_dc_cardbus.c,v 1.36 2014/09/14 14:17:24 jsg Exp $	*/
+/*	$OpenBSD: if_dc_cardbus.c,v 1.38 2015/05/04 03:59:42 jsg Exp $	*/
 
 /*
  * Copyright (c) 1997, 1998, 1999
@@ -52,7 +52,6 @@
 #include <netinet/in.h>
 #include <netinet/if_ether.h>
 
-#include <dev/mii/mii.h>
 #include <dev/mii/miivar.h>
 
 #include <machine/bus.h>
@@ -267,7 +266,7 @@ dc_cardbus_setup(struct dc_cardbus_softc *csc)
 
 	/* wakeup the card if needed */
 	reg = pci_conf_read(pc, csc->sc_tag, PCI_CFDA);
-	if (reg | (DC_CFDA_SUSPEND|DC_CFDA_STANDBY)) {
+	if (reg & (DC_CFDA_SUSPEND|DC_CFDA_STANDBY)) {
 		pci_conf_write(pc, csc->sc_tag, PCI_CFDA,
 		    reg & ~(DC_CFDA_SUSPEND|DC_CFDA_STANDBY));
 	}

@@ -1,4 +1,4 @@
-/*	$OpenBSD: savecore.c,v 1.50 2015/01/16 06:40:00 deraadt Exp $	*/
+/*	$OpenBSD: savecore.c,v 1.53 2015/04/26 01:23:19 guenther Exp $	*/
 /*	$NetBSD: savecore.c,v 1.26 1996/03/18 21:16:05 leo Exp $	*/
 
 /*-
@@ -34,7 +34,6 @@
 #include <sys/stat.h>
 #include <sys/mount.h>
 #include <sys/syslog.h>
-#include <sys/types.h>
 #include <sys/time.h>
 #include <sys/resource.h>
 
@@ -46,7 +45,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <tzfile.h>
 #include <unistd.h>
 #include <limits.h>
 #include <zlib.h>
@@ -391,8 +389,16 @@ save_core(void)
 		if (ferror(fp))
 err1:			syslog(LOG_WARNING, "%s: %s", path, strerror(errno));
 		bounds = 0;
-	} else
-		bounds = atoi(buf);
+	} else {
+		const char *errstr = NULL;
+		char *p;
+
+		if ((p = strchr(buf, '\n')) != NULL)
+			*p = '\0';
+		bounds = strtonum(buf, 0, INT_MAX, &errstr);
+		if (errstr)
+			syslog(LOG_WARNING, "bounds was corrupt: %s", errstr);
+	}
 	if (fp != NULL)
 		(void)fclose(fp);
 	if ((fp = fopen(path, "w")) == NULL)
@@ -569,7 +575,8 @@ get_crashtime(void)
 		return (0);
 	}
 	(void)printf("savecore: system went down at %s", ctime(&dumptime));
-#define	LEEWAY	(7 * SECSPERDAY)
+#define	SECSPERDAY	(24 * 60 * 60)
+#define	LEEWAY		(7 * SECSPERDAY)
 	if (dumptime < now - LEEWAY || dumptime > now + LEEWAY) {
 		(void)printf("dump time is unreasonable\n");
 		return (0);
@@ -607,8 +614,17 @@ check_space(void)
 	else {
 		if (fgets(buf, sizeof(buf), fp) == NULL)
 			minfree = 0;
-		else
-			minfree = atoi(buf);
+		else {
+			const char *errstr;
+			char *p;
+
+			if ((p = strchr(buf, '\n')) != NULL)
+				*p = '\0';
+			minfree = strtonum(buf, 0, LLONG_MAX, &errstr);
+			if (errstr)
+				syslog(LOG_WARNING,
+				    "minfree was corrupt: %s", errstr);
+		}
 		(void)fclose(fp);
 	}
 

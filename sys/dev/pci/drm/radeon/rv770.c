@@ -1,4 +1,4 @@
-/*	$OpenBSD: rv770.c,v 1.5 2014/02/09 12:33:44 jsg Exp $	*/
+/*	$OpenBSD: rv770.c,v 1.7 2015/04/18 14:47:35 jsg Exp $	*/
 /*
  * Copyright 2008 Advanced Micro Devices, Inc.
  * Copyright 2008 Red Hat Inc.
@@ -917,7 +917,7 @@ int rv770_copy_dma(struct radeon_device *rdev,
 	}
 
 	size_in_dw = (num_gpu_pages << RADEON_GPU_PAGE_SHIFT) / 4;
-	num_loops = howmany(size_in_dw, 0xFFFF);
+	num_loops = DIV_ROUND_UP(size_in_dw, 0xFFFF);
 	r = radeon_ring_lock(rdev, ring, num_loops * 5 + 8);
 	if (r) {
 		DRM_ERROR("radeon: moving bo (%d).\n", r);
@@ -1229,7 +1229,7 @@ static void rv770_pcie_gen2_enable(struct radeon_device *rdev)
 	/* x2 cards have a special sequence */
 	if (ASIC_IS_X2(rdev))
 		return;
-	
+
 	ret = drm_pcie_get_speed_cap_mask(rdev->ddev, &mask);
 	if (ret != 0)
 		return;

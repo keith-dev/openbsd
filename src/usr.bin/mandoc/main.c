@@ -1,4 +1,4 @@
-/*	$OpenBSD: main.c,v 1.127 2015/02/27 16:00:54 schwarze Exp $ */
+/*	$OpenBSD: main.c,v 1.149 2015/07/28 18:38:05 schwarze Exp $ */
 /*
  * Copyright (c) 2008-2012 Kristaps Dzonsons <kristaps@bsd.lv>
  * Copyright (c) 2010-2012, 2014, 2015 Ingo Schwarze <schwarze@openbsd.org>
@@ -8,9 +8,9 @@
  * purpose with or without fee is hereby granted, provided that the above
  * copyright notice and this permission notice appear in all copies.
  *
- * THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES
+ * THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHORS DISCLAIM ALL WARRANTIES
  * WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF
- * MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR
+ * MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHORS BE LIABLE FOR
  * ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
  * WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN
  * ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
@@ -19,24 +19,28 @@
 
 #include <sys/types.h>
 #include <sys/param.h>	/* MACHINE */
+#include <sys/wait.h>
 
 #include <assert.h>
 #include <ctype.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <glob.h>
+#include <signal.h>
 #include <stdio.h>
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
 
-#include "mandoc.h"
 #include "mandoc_aux.h"
-#include "main.h"
+#include "mandoc.h"
+#include "roff.h"
 #include "mdoc.h"
 #include "man.h"
-#include "manpath.h"
+#include "tag.h"
+#include "main.h"
+#include "manconf.h"
 #include "mansearch.h"
 
 enum	outmode {
@@ -48,8 +52,8 @@ enum	outmode {
 	OUTMODE_ONE
 };
 
-typedef	void		(*out_mdoc)(void *, const struct mdoc *);
-typedef	void		(*out_man)(void *, const struct man *);
+typedef	void		(*out_mdoc)(void *, const struct roff_man *);
+typedef	void		(*out_man)(void *, const struct roff_man *);
 typedef	void		(*out_free)(void *);
 
 enum	outt {
@@ -74,7 +78,7 @@ struct	curparse {
 	out_man		  outman;	/* man output ptr */
 	out_free	  outfree;	/* free output ptr */
 	void		 *outdata;	/* data for output */
-	char		  outopts[BUFSIZ]; /* buf of output opts */
+	struct manoutput *outopts;	/* output options */
 };
 
 static	int		  fs_lookup(const struct manpaths *,
@@ -89,10 +93,9 @@ int			  mandocdb(int, char**);
 static	int		  moptions(int *, char *);
 static	void		  mmsg(enum mandocerr, enum mandoclevel,
 				const char *, int, int, const char *);
-static	void		  parse(struct curparse *, int,
-				const char *, enum mandoclevel *);
-static	enum mandoclevel  passthrough(const char *, int, int);
-static	void		  spawn_pager(void);
+static	void		  parse(struct curparse *, int, const char *);
+static	void		  passthrough(const char *, int, int);
+static	pid_t		  spawn_pager(struct tag_files *);
 static	int		  toptions(struct curparse *, char *);
 static	void		  usage(enum argmode) __attribute__((noreturn));
 static	int		  woptions(struct curparse *, char *);
@@ -101,28 +104,30 @@ static	const int sec_prios[] = {1, 4, 5, 8, 6, 3, 7, 2, 9};
 static	char		  help_arg[] = "help";
 static	char		 *help_argv[] = {help_arg, NULL};
 static	const char	 *progname;
+static	enum mandoclevel  rc;
 
 
 int
 main(int argc, char *argv[])
 {
+	struct manconf	 conf;
 	struct curparse	 curp;
 	struct mansearch search;
-	struct manpaths	 paths;
+	struct tag_files *tag_files;
 	char		*auxpaths;
 	char		*defos;
 	unsigned char	*uc;
 	struct manpage	*res, *resp;
 	char		*conf_file, *defpaths;
 	size_t		 isec, i, sz;
-	int		 prio, best_prio, synopsis_only;
+	int		 prio, best_prio;
 	char		 sec;
-	enum mandoclevel rc, rctmp;
+	enum mandoclevel rctmp;
 	enum outmode	 outmode;
 	int		 fd;
 	int		 show_usage;
-	int		 use_pager;
 	int		 options;
+	int		 use_pager;
 	int		 c;
 
 	if (argc < 1)
@@ -138,7 +143,7 @@ main(int argc, char *argv[])
 
 	/* Search options. */
 
-	memset(&paths, 0, sizeof(struct manpaths));
+	memset(&conf, 0, sizeof(conf));
 	conf_file = defpaths = NULL;
 	auxpaths = NULL;
 
@@ -161,12 +166,13 @@ main(int argc, char *argv[])
 	memset(&curp, 0, sizeof(struct curparse));
 	curp.outtype = OUTT_LOCALE;
 	curp.wlevel  = MANDOCLEVEL_BADARG;
+	curp.outopts = &conf.output;
 	options = MPARSE_SO | MPARSE_UTF8 | MPARSE_LATIN1;
 	defos = NULL;
 
 	use_pager = 1;
+	tag_files = NULL;
 	show_usage = 0;
-	synopsis_only = 0;
 	outmode = OUTMODE_DEF;
 
 	while (-1 != (c = getopt(argc, argv,
@@ -185,8 +191,7 @@ main(int argc, char *argv[])
 			search.argmode = ARG_WORD;
 			break;
 		case 'h':
-			(void)strlcat(curp.outopts, "synopsis,", BUFSIZ);
-			synopsis_only = 1;
+			conf.output.synopsisonly = 1;
 			use_pager = 0;
 			outmode = OUTMODE_ALL;
 			break;
@@ -227,8 +232,9 @@ main(int argc, char *argv[])
 			break;
 		case 'O':
 			search.outkey = optarg;
-			(void)strlcat(curp.outopts, optarg, BUFSIZ);
-			(void)strlcat(curp.outopts, ",", BUFSIZ);
+			while (optarg != NULL)
+				manconf_output(&conf.output,
+				    strsep(&optarg, ","));
 			break;
 		case 'S':
 			search.arch = optarg;
@@ -293,11 +299,11 @@ main(int argc, char *argv[])
 				argc = 1;
 			}
 		} else if (argc > 1 &&
-		    ((uc = argv[0]) != NULL) &&
+		    ((uc = (unsigned char *)argv[0]) != NULL) &&
 		    ((isdigit(uc[0]) && (uc[1] == '\0' ||
 		      (isalpha(uc[1]) && uc[2] == '\0'))) ||
 		     (uc[0] == 'n' && uc[1] == '\0'))) {
-			search.sec = uc;
+			search.sec = (char *)uc;
 			argv++;
 			argc--;
 		}
@@ -321,13 +327,21 @@ main(int argc, char *argv[])
 
 		/* Access the mandoc database. */
 
-		manpath_parse(&paths, conf_file, defpaths, auxpaths);
+		manconf_parse(&conf, conf_file, defpaths, auxpaths);
 		mansearch_setup(1);
-		if( ! mansearch(&search, &paths, argc, argv, &res, &sz))
+		if ( ! mansearch(&search, &conf.manpath,
+		    argc, argv, &res, &sz))
 			usage(search.argmode);
 
-		if (sz == 0 && search.argmode == ARG_NAME)
-			fs_search(&search, &paths, argc, argv, &res, &sz);
+		if (sz == 0) {
+			if (search.argmode == ARG_NAME)
+				fs_search(&search, &conf.manpath,
+				    argc, argv, &res, &sz);
+			else
+				fprintf(stderr,
+				    "%s: nothing appropriate\n",
+				    progname);
+		}
 
 		if (sz == 0) {
 			rc = MANDOCLEVEL_BADARG;
@@ -385,6 +399,9 @@ main(int argc, char *argv[])
 	if (search.argmode == ARG_FILE && ! moptions(&options, auxpaths))
 		return((int)MANDOCLEVEL_BADARG);
 
+	if (use_pager && ! isatty(STDOUT_FILENO))
+		use_pager = 0;
+
 	curp.mchars = mchars_alloc();
 	curp.mp = mparse_alloc(options, curp.wlevel, mmsg,
 	    curp.mchars, defos);
@@ -396,9 +413,9 @@ main(int argc, char *argv[])
 		mparse_keep(curp.mp);
 
 	if (argc < 1) {
-		if (use_pager && isatty(STDOUT_FILENO))
-			spawn_pager();
-		parse(&curp, STDIN_FILENO, "<stdin>", &rc);
+		if (use_pager)
+			tag_files = tag_init();
+		parse(&curp, STDIN_FILENO, "<stdin>");
 	}
 
 	while (argc > 0) {
@@ -408,26 +425,20 @@ main(int argc, char *argv[])
 			rc = rctmp;
 
 		if (fd != -1) {
-			if (use_pager && isatty(STDOUT_FILENO))
-				spawn_pager();
-			use_pager = 0;
-
-			if (resp == NULL)
-				parse(&curp, fd, *argv, &rc);
-			else if (resp->form & FORM_SRC) {
-				/* For .so only; ignore failure. */
-				chdir(paths.paths[resp->ipath]);
-				parse(&curp, fd, resp->file, &rc);
-			} else {
-				rctmp = passthrough(resp->file, fd,
-				    synopsis_only);
-				if (rc < rctmp)
-					rc = rctmp;
+			if (use_pager) {
+				tag_files = tag_init();
+				use_pager = 0;
 			}
 
-			rctmp = mparse_wait(curp.mp);
-			if (rc < rctmp)
-				rc = rctmp;
+			if (resp == NULL)
+				parse(&curp, fd, *argv);
+			else if (resp->form & FORM_SRC) {
+				/* For .so only; ignore failure. */
+				chdir(conf.manpath.paths[resp->ipath]);
+				parse(&curp, fd, resp->file);
+			} else
+				passthrough(resp->file, fd,
+				    conf.output.synopsisonly);
 
 			if (argc > 1 && curp.outtype <= OUTT_UTF8)
 				ascii_sepline(curp.outdata);
@@ -451,12 +462,24 @@ main(int argc, char *argv[])
 
 out:
 	if (search.argmode != ARG_FILE) {
-		manpath_free(&paths);
+		manconf_free(&conf);
 		mansearch_free(res, sz);
 		mansearch_setup(0);
 	}
 
 	free(defos);
+
+	/*
+	 * When using a pager, finish writing both temporary files,
+	 * fork it, wait for the user to close it, and clean up.
+	 */
+
+	if (tag_files != NULL) {
+		fclose(stdout);
+		tag_write();
+		waitpid(spawn_pager(tag_files), NULL, 0);
+		tag_unlink();
+	}
 
 	return((int)rc);
 }
@@ -467,9 +490,9 @@ usage(enum argmode argmode)
 
 	switch (argmode) {
 	case ARG_FILE:
-		fputs("usage: mandoc [-acfhkl] [-Ios=name] "
-		    "[-Kencoding] [-mformat] [-Ooption]\n"
-		    "\t      [-Toutput] [-Wlevel] [file ...]\n", stderr);
+		fputs("usage: mandoc [-acfhkl] [-I os=name] "
+		    "[-K encoding] [-mformat] [-O option]\n"
+		    "\t      [-T output] [-W level] [file ...]\n", stderr);
 		break;
 	case ARG_NAME:
 		fputs("usage: man [-acfhklw] [-C file] [-I os=name] "
@@ -525,7 +548,7 @@ fs_lookup(const struct manpaths *paths, size_t ipath,
 		free(file);
 	}
 
-	mandoc_asprintf(&file, "%s/man%s/%s.*",
+	mandoc_asprintf(&file, "%s/man%s/%s.[01-9]*",
 	    paths->paths[ipath], sec, name);
 	globres = glob(file, 0, NULL, &globinfo);
 	if (globres != 0 && globres != GLOB_NOMATCH)
@@ -539,10 +562,8 @@ fs_lookup(const struct manpaths *paths, size_t ipath,
 		return(0);
 
 found:
-	fprintf(stderr, "%s: outdated mandoc.db lacks %s(%s) entry,\n"
-	    "     consider running  # makewhatis %s\n",
-	    progname, name, sec, paths->paths[ipath]);
-
+	fprintf(stderr, "%s: outdated mandoc.db lacks %s(%s) entry, run "
+	    "makewhatis %s\n", progname, name, sec, paths->paths[ipath]);
 	*res = mandoc_reallocarray(*res, ++*ressz, sizeof(struct manpage));
 	page = *res + (*ressz - 1);
 	page->file = file;
@@ -593,27 +614,27 @@ fs_search(const struct mansearch *cfg, const struct manpaths *paths,
 }
 
 static void
-parse(struct curparse *curp, int fd, const char *file,
-	enum mandoclevel *level)
+parse(struct curparse *curp, int fd, const char *file)
 {
-	enum mandoclevel  rc;
-	struct mdoc	 *mdoc;
-	struct man	 *man;
+	enum mandoclevel  rctmp;
+	struct roff_man	 *man;
 
 	/* Begin by parsing the file itself. */
 
 	assert(file);
 	assert(fd >= -1);
 
-	rc = mparse_readfd(curp->mp, fd, file);
+	rctmp = mparse_readfd(curp->mp, fd, file);
+	if (rc < rctmp)
+		rc = rctmp;
 
 	/*
 	 * With -Wstop and warnings or errors of at least the requested
 	 * level, do not produce output.
 	 */
 
-	if (MANDOCLEVEL_OK != rc && curp->wstop)
-		goto cleanup;
+	if (rctmp != MANDOCLEVEL_OK && curp->wstop)
+		return;
 
 	/* If unset, allocate output dev now (if applicable). */
 
@@ -683,21 +704,19 @@ parse(struct curparse *curp, int fd, const char *file,
 		}
 	}
 
-	mparse_result(curp->mp, &mdoc, &man, NULL);
+	mparse_result(curp->mp, &man, NULL);
 
 	/* Execute the out device, if it exists. */
 
-	if (man && curp->outman)
+	if (man == NULL)
+		return;
+	if (curp->outmdoc != NULL && man->macroset == MACROSET_MDOC)
+		(*curp->outmdoc)(curp->outdata, man);
+	if (curp->outman != NULL && man->macroset == MACROSET_MAN)
 		(*curp->outman)(curp->outdata, man);
-	if (mdoc && curp->outmdoc)
-		(*curp->outmdoc)(curp->outdata, mdoc);
-
-cleanup:
-	if (*level < rc)
-		*level = rc;
 }
 
-static enum mandoclevel
+static void
 passthrough(const char *file, int fd, int synopsis_only)
 {
 	const char	 synb[] = "S\bSY\bYN\bNO\bOP\bPS\bSI\bIS\bS";
@@ -755,12 +774,13 @@ passthrough(const char *file, int fd, int synopsis_only)
 
 done:
 	fclose(stream);
-	return(MANDOCLEVEL_OK);
+	return;
 
 fail:
 	fprintf(stderr, "%s: %s: SYSERR: %s: %s",
 	    progname, file, syscall, strerror(errno));
-	return(MANDOCLEVEL_SYSERR);
+	if (rc < MANDOCLEVEL_SYSERR)
+		rc = MANDOCLEVEL_SYSERR;
 }
 
 static int
@@ -904,53 +924,22 @@ mmsg(enum mandocerr t, enum mandoclevel lvl,
 	fputc('\n', stderr);
 }
 
-static void
-spawn_pager(void)
+static pid_t
+spawn_pager(struct tag_files *tag_files)
 {
 #define MAX_PAGER_ARGS 16
 	char		*argv[MAX_PAGER_ARGS];
 	const char	*pager;
 	char		*cp;
-	int		 fildes[2];
+	size_t		 cmdlen;
 	int		 argc;
-
-	if (pipe(fildes) == -1) {
-		fprintf(stderr, "%s: pipe: %s\n",
-		    progname, strerror(errno));
-		return;
-	}
-
-	switch (fork()) {
-	case -1:
-		fprintf(stderr, "%s: fork: %s\n",
-		    progname, strerror(errno));
-		exit((int)MANDOCLEVEL_SYSERR);
-	case 0:
-		close(fildes[0]);
-		if (dup2(fildes[1], STDOUT_FILENO) == -1) {
-			fprintf(stderr, "%s: dup output: %s\n",
-			    progname, strerror(errno));
-			exit((int)MANDOCLEVEL_SYSERR);
-		}
-		return;
-	default:
-		break;
-	}
-
-	/* The original process becomes the pager. */
-
-	close(fildes[1]);
-	if (dup2(fildes[0], STDIN_FILENO) == -1) {
-		fprintf(stderr, "%s: dup input: %s\n",
-		    progname, strerror(errno));
-		exit((int)MANDOCLEVEL_SYSERR);
-	}
+	pid_t		 pager_pid;
 
 	pager = getenv("MANPAGER");
 	if (pager == NULL || *pager == '\0')
 		pager = getenv("PAGER");
 	if (pager == NULL || *pager == '\0')
-		pager = "/usr/bin/more -s";
+		pager = "more -s";
 	cp = mandoc_strdup(pager);
 
 	/*
@@ -959,7 +948,7 @@ spawn_pager(void)
 	 */
 
 	argc = 0;
-	while (argc + 1 < MAX_PAGER_ARGS) {
+	while (argc + 4 < MAX_PAGER_ARGS) {
 		argv[argc++] = cp;
 		cp = strchr(cp, ' ');
 		if (cp == NULL)
@@ -970,12 +959,40 @@ spawn_pager(void)
 		if (*cp == '\0')
 			break;
 	}
+
+	/* For more(1) and less(1), use the tag file. */
+
+	if ((cmdlen = strlen(argv[0])) >= 4) {
+		cp = argv[0] + cmdlen - 4;
+		if (strcmp(cp, "less") == 0 || strcmp(cp, "more") == 0) {
+			argv[argc++] = mandoc_strdup("-T");
+			argv[argc++] = tag_files->tfn;
+		}
+	}
+	argv[argc++] = tag_files->ofn;
 	argv[argc] = NULL;
 
-	/* Hand over to the pager. */
+	switch (pager_pid = fork()) {
+	case -1:
+		fprintf(stderr, "%s: fork: %s\n",
+		    progname, strerror(errno));
+		exit((int)MANDOCLEVEL_SYSERR);
+	case 0:
+		break;
+	default:
+		return(pager_pid);
+	}
 
+	/* The child process becomes the pager. */
+
+	if (dup2(tag_files->ofd, STDOUT_FILENO) == -1) {
+		fprintf(stderr, "pager: stdout: %s\n", strerror(errno));
+		exit((int)MANDOCLEVEL_SYSERR);
+	}
+	close(tag_files->ofd);
+	close(tag_files->tfd);
 	execvp(argv[0], argv);
-	fprintf(stderr, "%s: exec: %s\n",
-	    progname, strerror(errno));
+	fprintf(stderr, "%s: exec %s: %s\n",
+	    progname, argv[0], strerror(errno));
 	exit((int)MANDOCLEVEL_SYSERR);
 }

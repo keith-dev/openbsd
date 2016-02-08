@@ -1,4 +1,4 @@
-/*	$OpenBSD: rde_filter.c,v 1.71 2014/01/24 06:07:13 phessler Exp $ */
+/*	$OpenBSD: rde_filter.c,v 1.74 2015/07/16 18:26:04 claudio Exp $ */
 
 /*
  * Copyright (c) 2004 Claudio Jeker <claudio@openbsd.org>
@@ -56,6 +56,9 @@ rde_filter(struct filter_head *rules, struct rde_aspath **new,
 			continue;
 		if (f->peer.peerid != 0 &&
 		    f->peer.peerid != peer->conf.id)
+			continue;
+		if (f->peer.remote_as != 0 &&
+		    f->peer.remote_as != peer->conf.remote_as)
 			continue;
 		if (rde_filter_match(f, asp, prefix, prefixlen, peer, from)) {
 			if (asp != NULL && new != NULL) {
@@ -419,6 +422,12 @@ rde_filter_equal(struct filter_head *a, struct filter_head *b,
 			continue;
 		}
 
+		if (peer != NULL && fa != NULL && fa->peer.remote_as != 0 &&
+		    fa->peer.remote_as != peer->conf.remote_as) {
+			fa = TAILQ_NEXT(fa, entry);
+			continue;
+		}
+
 		/* compare the two rules */
 		if ((fa == NULL && fb != NULL) || (fa != NULL && fb == NULL))
 			/* new rule added or removed */
@@ -440,7 +449,7 @@ rde_filter_equal(struct filter_head *a, struct filter_head *b,
 }
 
 void
-rde_free_filter(struct filter_head *fh)
+filterlist_free(struct filter_head *fh)
 {
 	struct filter_rule	*r;
 
@@ -461,6 +470,9 @@ filterset_free(struct filter_set_head *sh)
 {
 	struct filter_set	*s;
 	struct nexthop		*nh;
+
+	if (sh == NULL)
+		return;
 
 	while ((s = TAILQ_FIRST(sh)) != NULL) {
 		TAILQ_REMOVE(sh, s, entry);

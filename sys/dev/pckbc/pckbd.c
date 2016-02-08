@@ -1,4 +1,4 @@
-/* $OpenBSD: pckbd.c,v 1.38 2014/07/24 22:38:19 mpi Exp $ */
+/* $OpenBSD: pckbd.c,v 1.42 2015/05/04 09:33:46 mpi Exp $ */
 /* $NetBSD: pckbd.c,v 1.24 2000/06/05 22:20:57 sommerfeld Exp $ */
 
 /*-
@@ -78,7 +78,7 @@
 
 #include <dev/ic/pckbcvar.h>
 #include <dev/pckbc/pckbdreg.h>
-#include <dev/pckbc/pckbdvar.h>
+#include <dev/pckbc/pmsreg.h>
 
 #include <dev/wscons/wsconsio.h>
 #include <dev/wscons/wskbdvar.h>
@@ -362,8 +362,6 @@ pckbdattach(struct device *parent, struct device *self, void *aux)
 	struct wskbddev_attach_args a;
 	u_char cmd[1];
 
-	printf("\n");
-
 	isconsole = pckbd_is_console(pa->pa_tag, pa->pa_slot);
 
 	if (isconsole) {
@@ -403,6 +401,8 @@ pckbdattach(struct device *parent, struct device *self, void *aux)
 
 	a.accessops = &pckbd_accessops;
 	a.accesscookie = sc;
+
+	printf("\n");
 
 	/*
 	 * Attach the wskbd, saving a handle to it.
@@ -1028,6 +1028,7 @@ pckbd_cnpollc(void *v, int on)
 	if (t->t_table == 0) {
 		char cmd[1];
 
+		pckbc_flush(t->t_kbctag, t->t_kbcslot);
 		pckbd_set_xtscancode(t->t_kbctag, t->t_kbcslot, t);
 
 		/* Just to be sure. */

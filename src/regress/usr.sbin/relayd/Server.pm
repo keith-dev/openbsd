@@ -1,6 +1,6 @@
-#	$OpenBSD: Server.pm,v 1.7 2014/12/31 01:25:07 bluhm Exp $
+#	$OpenBSD: Server.pm,v 1.9 2015/07/18 22:11:34 benno Exp $
 
-# Copyright (c) 2010-2014 Alexander Bluhm <bluhm@openbsd.org>
+# Copyright (c) 2010-2015 Alexander Bluhm <bluhm@openbsd.org>
 #
 # Permission to use, copy, modify, and distribute this software for any
 # purpose with or without fee is hereby granted, provided that the above
@@ -47,6 +47,26 @@ sub new {
 	    SSL_cert_file	=> "server.crt",
 	    SSL_verify_mode	=> SSL_VERIFY_NONE,
 	) or die ref($self), " $iosocket socket listen failed: $!,$SSL_ERROR";
+	if ($self->{sndbuf}) {
+		setsockopt($ls, SOL_SOCKET, SO_SNDBUF,
+		    pack('i', $self->{sndbuf}))
+		    or die ref($self), " set sndbuf SO_SNDBUF failed: $!";
+	}
+	if ($self->{rcvbuf}) {
+		setsockopt($ls, SOL_SOCKET, SO_RCVBUF,
+		    pack('i', $self->{rcvbuf}))
+		    or die ref($self), " set rcvbuf SO_RCVBUF failed: $!";
+	}
+	if ($self->{sndtimeo}) {
+		setsockopt($ls, SOL_SOCKET, SO_SNDTIMEO,
+		    pack('l!l!', $self->{sndtimeo}, 0))
+		    or die ref($self), " set SO_SNDTIMEO failed failed: $!";
+	}
+	if ($self->{rcvtimeo}) {
+		setsockopt($ls, SOL_SOCKET, SO_RCVTIMEO,
+		    pack('l!l!', $self->{rcvtimeo}, 0))
+		    or die ref($self), " set SO_RCVTIMEO failed failed: $!";
+	}
 	my $log = $self->{log};
 	print $log "listen sock: ",$ls->sockhost()," ",$ls->sockport(),"\n";
 	$self->{listenaddr} = $ls->sockhost() unless $self->{listenaddr};
@@ -67,6 +87,12 @@ sub child {
 	    " socket accept failed: $!,$SSL_ERROR";
 	print STDERR "accept sock: ",$as->sockhost()," ",$as->sockport(),"\n";
 	print STDERR "accept peer: ",$as->peerhost()," ",$as->peerport(),"\n";
+	if ($self->{ssl}) {
+		print STDERR "ssl version: ",$as->get_sslversion(),"\n";
+		print STDERR "ssl cipher: ",$as->get_cipher(),"\n";
+		print STDERR "ssl peer certificate:\n",
+		    $as->dump_peer_certificate();
+	}
 
 	*STDIN = *STDOUT = $self->{as} = $as;
 }

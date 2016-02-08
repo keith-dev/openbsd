@@ -1,28 +1,19 @@
-/*	$OpenBSD: part.c,v 1.66 2014/05/05 17:18:08 miod Exp $	*/
+/*	$OpenBSD: part.c,v 1.72 2015/03/27 16:06:00 krw Exp $	*/
 
 /*
  * Copyright (c) 1997 Tobias Weingartner
- * All rights reserved.
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in the
- *    documentation and/or other materials provided with the distribution.
+ * Permission to use, copy, modify, and distribute this software for any
+ * purpose with or without fee is hereby granted, provided that the above
+ * copyright notice and this permission notice appear in all copies.
  *
- * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
- * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
- * OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.
- * IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT
- * NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
- * DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
- * THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
- * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
- * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ * THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES
+ * WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF
+ * MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR
+ * ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
+ * WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN
+ * ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
+ * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
 
 #include <sys/types.h>
@@ -175,8 +166,8 @@ PRT_ascii_id(int id)
 }
 
 void
-PRT_parse(struct disk *disk, struct dos_partition *prt, off_t offset,
-    off_t reloff, struct prt *partn)
+PRT_parse(struct dos_partition *prt, off_t offset, off_t reloff,
+    struct prt *partn)
 {
 	off_t off;
 	u_int32_t t;
@@ -207,7 +198,7 @@ PRT_parse(struct disk *disk, struct dos_partition *prt, off_t offset,
 	partn->ns = letoh32(t);
 #endif
 
-	PRT_fix_CHS(disk, partn);
+	PRT_fix_CHS(partn);
 }
 
 int
@@ -220,9 +211,9 @@ PRT_check_chs(struct prt *partn)
 		(partn->esect >63) ||
 		(partn->ecyl > 1023) )
 	{
-		return 0;
+		return (0);
 	}
-	return 1;
+	return (1);
 }
 
 void
@@ -231,7 +222,7 @@ PRT_make(struct prt *partn, off_t offset, off_t reloff,
 {
 	off_t off;
 	u_int32_t ecsave, scsave;
-	u_int32_t t;
+	u_int64_t t;
 
 	/* Save (and restore below) cylinder info we may fiddle with. */
 	scsave = partn->scyl;
@@ -258,21 +249,17 @@ PRT_make(struct prt *partn, off_t offset, off_t reloff,
 	} else {
 		/* should this really keep flag, id and set others to 0xff? */
 		memset(prt, 0xFF, sizeof(*prt));
-		printf("Warning CHS values out of bounds only saving LBA values\n");
+		printf("Warning CHS values out of bounds only saving "
+		    "LBA values\n");
 	}
 
 	prt->dp_flag = partn->flag & 0xFF;
 	prt->dp_typ = partn->id & 0xFF;
 
-#if 0 /* XXX */
-	prt->dp_start = htole32(partn->bs - off);
-	prt->dp_size = htole32(partn->ns);
-#else
-	t = htole32(partn->bs - off);
+	t = htole64(partn->bs - off);
 	memcpy(&prt->dp_start, &t, sizeof(u_int32_t));
-	t = htole32(partn->ns);
+	t = htole64(partn->ns);
 	memcpy(&prt->dp_size, &t, sizeof(u_int32_t));
-#endif
 
 	partn->scyl = scsave;
 	partn->ecyl = ecsave;
@@ -283,17 +270,22 @@ PRT_print(int num, struct prt *partn, char *units)
 {
 	double size;
 	int i;
+
 	i = unit_lookup(units);
 
 	if (partn == NULL) {
-		printf("            Starting         Ending         LBA Info:\n");
-		printf(" #: id      C   H   S -      C   H   S [       start:        size ]\n");
-		printf("-------------------------------------------------------------------------------\n");
+		printf("            Starting         Ending    "
+		    "     LBA Info:\n");
+		printf(" #: id      C   H   S -      C   H   S "
+		    "[       start:        size ]\n");
+		printf("---------------------------------------"
+		    "----------------------------------------\n");
 	} else {
 		size = ((double)partn->ns * unit_types[SECTORS].conversion) /
 		    unit_types[i].conversion;
-		printf("%c%1d: %.2X %6u %3u %3u - %6u %3u %3u [%12u:%12.0f%s] %s\n",
-		    (partn->flag == 0x80)?'*':' ',
+		printf("%c%1d: %.2X %6u %3u %3u - %6u %3u %3u "
+		    "[%12llu:%12.0f%s] %s\n",
+		    (partn->flag == DOSACTIVE)?'*':' ',
 		    num, partn->id,
 		    partn->scyl, partn->shead, partn->ssect,
 		    partn->ecyl, partn->ehead, partn->esect,
@@ -304,7 +296,7 @@ PRT_print(int num, struct prt *partn, char *units)
 }
 
 void
-PRT_fix_BN(struct disk *disk, struct prt *part, int pn)
+PRT_fix_BN(struct prt *part, int pn)
 {
 	u_int32_t spt, tpc, spc;
 	u_int32_t start = 0;
@@ -317,8 +309,8 @@ PRT_fix_BN(struct disk *disk, struct prt *part, int pn)
 	}
 
 	/* Disk geometry. */
-	spt = disk->sectors;
-	tpc = disk->heads;
+	spt = disk.sectors;
+	tpc = disk.heads;
 	spc = spt * tpc;
 
 	start += part->scyl * spc;
@@ -338,7 +330,7 @@ PRT_fix_BN(struct disk *disk, struct prt *part, int pn)
 }
 
 void
-PRT_fix_CHS(struct disk *disk, struct prt *part)
+PRT_fix_CHS(struct prt *part)
 {
 	u_int32_t spt, tpc, spc;
 	u_int32_t start, end, size;
@@ -351,8 +343,8 @@ PRT_fix_CHS(struct disk *disk, struct prt *part)
 	}
 
 	/* Disk geometry. */
-	spt = disk->sectors;
-	tpc = disk->heads;
+	spt = disk.sectors;
+	tpc = disk.heads;
 	spc = spt * tpc;
 
 	start = part->bs;

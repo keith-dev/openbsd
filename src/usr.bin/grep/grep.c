@@ -1,4 +1,4 @@
-/*	$OpenBSD: grep.c,v 1.49 2015/01/10 13:48:02 tedu Exp $	*/
+/*	$OpenBSD: grep.c,v 1.51 2015/04/30 13:49:04 millert Exp $	*/
 
 /*-
  * Copyright (c) 1999 James Howard and Dag-Erling Coïdan Smørgrav
@@ -27,7 +27,6 @@
  */
 
 #include <sys/types.h>
-#include <sys/limits.h>
 #include <sys/stat.h>
 #include <sys/queue.h>
 
@@ -445,6 +444,8 @@ main(int argc, char *argv[])
 		++argv;
 	}
 
+	if (Rflag && argc == 0)
+		warnx("warning: recursive search of stdin");
 	if (Eflag)
 		cflags |= REG_EXTENDED;
 	if (Fflag)

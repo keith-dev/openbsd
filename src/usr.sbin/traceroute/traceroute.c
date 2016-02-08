@@ -1,4 +1,4 @@
-/*	$OpenBSD: traceroute.c,v 1.138 2015/02/11 09:49:38 florian Exp $	*/
+/*	$OpenBSD: traceroute.c,v 1.140 2015/07/16 22:47:46 florian Exp $	*/
 /*	$NetBSD: traceroute.c,v 1.10 1995/05/21 15:50:45 mycroft Exp $	*/
 
 /*
@@ -312,6 +312,7 @@ char *pr_type(u_int8_t);
 int map_tos(char *, int *);
 double deltaT(struct timeval *, struct timeval *);
 void usage(void);
+void gettime(struct timeval *);
 
 int rcvsock;			/* receive (icmp) socket file descriptor */
 int sndsock;			/* send (udp) socket file descriptor */
@@ -587,8 +588,8 @@ main(int argc, char *argv[])
 	    (tmprnd & 0x7ff);
 	usec_perturb = arc4random();
 
-	(void) memset(&to4, 0, sizeof(to4));
-	(void) memset(&to6, 0, sizeof(to6));
+	memset(&to4, 0, sizeof(to4));
+	memset(&to6, 0, sizeof(to6));
 
 	if (inet_aton(*argv, &to4.sin_addr) != 0) {
 		hostname = *argv;
@@ -709,7 +710,7 @@ main(int argc, char *argv[])
 			err(6, "IP_HDRINCL");
 
 		if (source) {
-			(void) memset(&from4, 0, sizeof(from4));
+			memset(&from4, 0, sizeof(from4));
 			from4.sin_family = AF_INET;
 			if (inet_aton(source, &from4.sin_addr) == 0)
 				errx(1, "unknown host %s", source);
@@ -866,10 +867,10 @@ main(int argc, char *argv[])
 			int cc;
 			struct timeval t1, t2;
 
-			(void) gettimeofday(&t1, NULL);
+			gettime(&t1);
 			send_probe(++seq, ttl, incflag, to);
 			while ((cc = wait_for_reply(rcvsock, &rcvmhdr))) {
-				(void) gettimeofday(&t2, NULL);
+				gettime(&t2);
 				i = packet_ok(to->sa_family, &rcvmhdr, cc, seq,
 				    incflag);
 				/* Skip short packet */
@@ -1140,7 +1141,7 @@ build_probe4(int seq, u_int8_t ttl, int iflag)
 	}
 	op->seq = seq;
 	op->ttl = ttl;
-	(void) gettimeofday(&tv, NULL);
+	gettime(&tv);
 
 	/*
 	 * We don't want hostiles snooping the net to get any useful
@@ -1154,7 +1155,7 @@ build_probe4(int seq, u_int8_t ttl, int iflag)
 	 * work wants to use them they will have to subtract out the
 	 * perturbation first.
 	 */
-	(void) gettimeofday(&tv, NULL);
+	gettime(&tv);
 	op->sec = htonl(tv.tv_sec + sec_perturb);
 	op->usec = htonl((tv.tv_usec + usec_perturb) % 1000000);
 
@@ -1183,7 +1184,7 @@ build_probe6(int seq, u_int8_t hops, int iflag, struct sockaddr *to)
 		((struct sockaddr_in6*)to)->sin6_port = htons(port + seq);
 	else
 		((struct sockaddr_in6*)to)->sin6_port = htons(port);
-	(void) gettimeofday(&tv, NULL);
+	gettime(&tv);
 
 	if (proto == IPPROTO_ICMP) {
 		struct icmp6_hdr *icp = (struct icmp6_hdr *)outpacket;
@@ -1839,4 +1840,15 @@ usage(void)
 		    __progname);
 	}
 	exit(1);
+}
+
+void
+gettime(struct timeval *tv)
+{
+	struct timespec ts;
+
+	if (clock_gettime(CLOCK_MONOTONIC, &ts) == -1)
+		err(1, "clock_gettime(CLOCK_MONOTONIC)");
+
+	TIMESPEC_TO_TIMEVAL(tv, &ts);
 }

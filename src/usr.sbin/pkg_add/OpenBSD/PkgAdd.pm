@@ -1,7 +1,7 @@
 #! /usr/bin/perl
 
 # ex:ts=8 sw=4:
-# $OpenBSD: PkgAdd.pm,v 1.83 2015/01/27 09:35:35 espie Exp $
+# $OpenBSD: PkgAdd.pm,v 1.87 2015/06/30 19:20:08 espie Exp $
 #
 # Copyright (c) 2003-2014 Marc Espie <espie@openbsd.org>
 #
@@ -1073,7 +1073,7 @@ sub inform_user_of_problems
 		    });
 
 		$state->say("Couldn't find updates for #1", 
-		    join(', ', sort @cantupdate)) if @cantupdate > 0;
+		    join(' ', sort @cantupdate)) if @cantupdate > 0;
 	}
 	if (defined $state->{issues}) {
 		$state->say("There were some ambiguities. ".
@@ -1173,7 +1173,7 @@ sub finish_display
 		$warn = 1;
 	}
 	if ($warn && $state->{packages_without_sig}) {
-		$state->say("UNSIGNED PACKAGES: ",
+		$state->say("UNSIGNED PACKAGES: #1",
 		    join(', ', keys %{$state->{packages_without_sig}}));
 	}
 	if (defined $state->{updatedepends} && %{$state->{updatedepends}}) {

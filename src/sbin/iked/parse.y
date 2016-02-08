@@ -1,4 +1,4 @@
-/*	$OpenBSD: parse.y,v 1.46 2015/02/08 04:50:32 reyk Exp $	*/
+/*	$OpenBSD: parse.y,v 1.48 2015/07/03 17:46:52 mikeb Exp $	*/
 
 /*
  * Copyright (c) 2010-2013 Reyk Floeter <reyk@openbsd.org>
@@ -277,7 +277,8 @@ const struct ipsec_xf cpxfs[] = {
 	{ "protected-subnet", IKEV2_CFG_INTERNAL_IP4_SUBNET,	AF_INET },
 	{ "protected-subnet", IKEV2_CFG_INTERNAL_IP6_SUBNET,	AF_INET6 },
 	{ "access-server", IKEV2_CFG_INTERNAL_IP4_SERVER,	AF_INET },
-	{ "access-server", IKEV2_CFG_INTERNAL_IP6_SERVER,	AF_INET6 }
+	{ "access-server", IKEV2_CFG_INTERNAL_IP6_SERVER,	AF_INET6 },
+	{ NULL }
 };
 
 const struct iked_lifetime deflifetime = {
@@ -1770,11 +1771,12 @@ host_v6(const char *s, int prefixlen)
 
 	if (prefixlen != 128) {
 		ipa->netaddress = 1;
-		asprintf(&ipa->name, "%s/%d", hbuf, prefixlen);
-	} else
-		ipa->name = strdup(hbuf);
-	if (ipa->name == NULL)
-		err(1, "host_v6: strdup");
+		if (asprintf(&ipa->name, "%s/%d", hbuf, prefixlen) == -1)
+			err(1, "host_v6: asprintf");
+	} else {
+		if ((ipa->name = strdup(hbuf)) == NULL)
+			err(1, "host_v6: strdup");
+	}
 
 	freeaddrinfo(res);
 

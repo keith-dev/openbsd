@@ -1,4 +1,4 @@
-/*	$OpenBSD: main.c,v 1.35 2015/01/16 05:53:49 deraadt Exp $	*/
+/*	$OpenBSD: main.c,v 1.37 2015/07/16 04:31:25 tedu Exp $	*/
 
 /*-
  * Copyright (c) 1980, 1993
@@ -72,6 +72,7 @@ struct termios tmode, omode;
 int crmod, digit, lower, upper;
 
 char	hostname[HOST_NAME_MAX+1];
+char	globalhostname[HOST_NAME_MAX+1];
 struct	utsname kerninfo;
 char	name[LOGIN_NAME_MAX];
 char	dev[] = _PATH_DEV;
@@ -185,7 +186,15 @@ main(int argc, char *argv[])
 	 * J. Gettys - MIT Project Athena.
 	 */
 	if (argc <= 2 || strcmp(argv[2], "-") == 0) {
-		snprintf(ttyn, sizeof ttyn, "%s", ttyname(0));
+		if ((tname = ttyname(0)) == NULL) {
+			syslog(LOG_ERR, "stdin: %m");
+			exit(1);
+		}
+		if (strlcpy(ttyn, tname, sizeof(ttyn)) >= sizeof(ttyn)) {
+			errno = ENAMETOOLONG;
+			syslog(LOG_ERR, "%s: %m", tname);
+			exit(1);
+		}
 	} else {
 		int i;
 
@@ -260,7 +269,7 @@ main(int argc, char *argv[])
 		}
 		if (CL && *CL)
 			putpad(CL);
-		edithost(HE);
+		strlcpy(globalhostname, HN, sizeof(globalhostname));
 		if (IM && *IM)
 			putf(IM);
 		if (TO) {
@@ -524,7 +533,6 @@ prompt(void)
 static void
 putf(char *cp)
 {
-	extern char editedhost[];
 	char *slash, db[100];
 	time_t t;
 
@@ -544,7 +552,7 @@ putf(char *cp)
 			break;
 
 		case 'h':
-			xputs(editedhost);
+			xputs(globalhostname);
 			break;
 
 		case 'd': {

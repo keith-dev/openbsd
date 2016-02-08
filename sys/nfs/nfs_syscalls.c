@@ -1,4 +1,4 @@
-/*	$OpenBSD: nfs_syscalls.c,v 1.98 2014/11/15 00:03:12 tedu Exp $	*/
+/*	$OpenBSD: nfs_syscalls.c,v 1.103 2015/07/15 22:16:42 deraadt Exp $	*/
 /*	$NetBSD: nfs_syscalls.c,v 1.19 1996/02/18 11:53:52 fvdl Exp $	*/
 
 /*
@@ -67,7 +67,6 @@
 #include <nfs/rpcv2.h>
 #include <nfs/nfsproto.h>
 #include <nfs/nfs.h>
-#include <nfs/nfsm_subs.h>
 #include <nfs/nfsrvcache.h>
 #include <nfs/nfsmount.h>
 #include <nfs/nfsnode.h>
@@ -167,7 +166,7 @@ sys_nfssvc(struct proc *p, void *v, register_t *retval)
 		if (error)
 			return (error);
 
-		error = getsock(p->p_fd, nfsdarg.sock, &fp);
+		error = getsock(p, nfsdarg.sock, &fp);
 		if (error)
 			return (error);
 
@@ -380,8 +379,7 @@ loop:
 		if (error) {
 			nfsstats.srv_errs++;
 			nfsrv_updatecache(nd, 0, mreq);
-			if (nd->nd_nam2)
-				m_freem(nd->nd_nam2);
+			m_freem(nd->nd_nam2);
 			break;
 		}
 		nfsstats.srvrpccnt[nd->nd_procnum]++;
@@ -402,7 +400,7 @@ loop:
 
 		m = mreq;
 		m->m_pkthdr.len = siz;
-		m->m_pkthdr.rcvif = NULL;
+		m->m_pkthdr.ph_ifidx = 0;
 
 		/* For stream protocols, prepend a Sun RPC Record Mark. */
 		if (sotype == SOCK_STREAM) {
@@ -419,10 +417,8 @@ loop:
 		    error = EPIPE;
 		    m_freem(m);
 		}
-		if (nd->nd_nam2)
-			m_freem(nd->nd_nam2);
-		if (nd->nd_mrep)
-			m_freem(nd->nd_mrep);
+		m_freem(nd->nd_nam2);
+		m_freem(nd->nd_mrep);
 		if (error == EPIPE)
 			nfsrv_zapsock(slp);
 		if (solockp)
@@ -486,7 +482,7 @@ nfsrv_zapsock(struct nfssvc_sock *slp)
 		soshutdown(so, SHUT_RDWR);
 		closef(fp, NULL);
 		if (slp->ns_nam)
-			MFREE(slp->ns_nam, m);
+	    		m = m_free(slp->ns_nam);
 		m_freem(slp->ns_raw);
 		m = slp->ns_rec;
 		while (m) {

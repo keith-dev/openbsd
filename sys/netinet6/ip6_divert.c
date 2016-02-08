@@ -1,4 +1,4 @@
-/*      $OpenBSD: ip6_divert.c,v 1.32 2015/01/24 00:29:06 deraadt Exp $ */
+/*      $OpenBSD: ip6_divert.c,v 1.36 2015/07/15 22:16:42 deraadt Exp $ */
 
 /*
  * Copyright (c) 2009 Michele Marchetto <michele@openbsd.org>
@@ -86,19 +86,17 @@ int
 divert6_output(struct inpcb *inp, struct mbuf *m, struct mbuf *nam,
     struct mbuf *control)
 {
-	struct ifqueue *inq;
 	struct sockaddr_in6 *sin6;
 	struct socket *so;
 	struct ifaddr *ifa;
-	int s, error = 0, min_hdrlen = 0, nxt = 0, off, dir;
+	int error = 0, min_hdrlen = 0, nxt = 0, off, dir;
 	struct ip6_hdr *ip6;
 
-	m->m_pkthdr.rcvif = NULL;
+	m->m_pkthdr.ph_ifidx = 0;
 	m->m_nextpkt = NULL;
 	m->m_pkthdr.ph_rtableid = inp->inp_rtableid;
 
-	if (control)
-		m_freem(control);
+	m_freem(control);
 
 	sin6 = mtod(nam, struct sockaddr_in6 *);
 	so = inp->inp_socket;
@@ -157,9 +155,7 @@ divert6_output(struct inpcb *inp, struct mbuf *m, struct mbuf *nam,
 			error = EADDRNOTAVAIL;
 			goto fail;
 		}
-		m->m_pkthdr.rcvif = ifa->ifa_ifp;
-
-		inq = &ip6intrq;
+		m->m_pkthdr.ph_ifidx = ifa->ifa_ifp->if_index;
 
 		/*
 		 * Recalculate the protocol checksum for the inbound packet
@@ -168,10 +164,7 @@ divert6_output(struct inpcb *inp, struct mbuf *m, struct mbuf *nam,
 		 */
 		in6_proto_cksum_out(m, NULL);
 
-		s = splnet();
-		IF_INPUT_ENQUEUE(inq, m);
-		schednetisr(NETISR_IPV6);
-		splx(s);
+		niq_enqueue(&ip6intrq, m); /* return error on q full? */
 	} else {
 		error = ip6_output(m, NULL, &inp->inp_route6,
 		    IP_ALLOWBROADCAST | IP_RAWOUTPUT, NULL, NULL, NULL);
@@ -195,7 +188,7 @@ divert6_packet(struct mbuf *m, int dir, u_int16_t divert_port)
 
 	inp = NULL;
 	div6stat.divs_ipackets++;
-	
+
 	if (m->m_len < sizeof(struct ip6_hdr) &&
 	    (m = m_pullup(m, sizeof(struct ip6_hdr))) == NULL) {
 		div6stat.divs_errors++;
@@ -222,7 +215,11 @@ divert6_packet(struct mbuf *m, int dir, u_int16_t divert_port)
 		struct ifaddr *ifa;
 		struct ifnet *ifp;
 
-		ifp = m->m_pkthdr.rcvif;
+		ifp = if_get(m->m_pkthdr.ph_ifidx);
+		if (ifp == NULL) {
+			m_freem(m);
+			return (0);
+		}
 		TAILQ_FOREACH(ifa, &ifp->if_addrlist, ifa_list) {
 			if (ifa->ifa_addr->sa_family != AF_INET6)
 				continue;
@@ -343,11 +340,8 @@ divert6_usrreq(struct socket *so, int req, struct mbuf *m, struct mbuf *addr,
 	}
 
 release:
-	if (control) {
-		m_freem(control);
-	}
-	if (m)
-		m_freem(m);
+	m_freem(control);
+	m_freem(m);
 	return (error);
 }
 

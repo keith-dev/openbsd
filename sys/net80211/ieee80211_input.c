@@ -1,4 +1,4 @@
-/*	$OpenBSD: ieee80211_input.c,v 1.132 2015/02/09 03:09:57 dlg Exp $	*/
+/*	$OpenBSD: ieee80211_input.c,v 1.137 2015/07/15 22:16:42 deraadt Exp $	*/
 
 /*-
  * Copyright (c) 2001 Atsushi Onoe
@@ -46,7 +46,6 @@
 #include <net/if.h>
 #include <net/if_dl.h>
 #include <net/if_media.h>
-#include <net/if_arp.h>
 #include <net/if_llc.h>
 
 #if NBPFILTER > 0
@@ -619,8 +618,7 @@ ieee80211_defrag(struct ieee80211com *ic, struct mbuf *m, int hdrlen)
 		if (++ic->ic_defrag_cur == IEEE80211_DEFRAG_SIZE)
 			ic->ic_defrag_cur = 0;
 		df = &ic->ic_defrag[ic->ic_defrag_cur];
-		if (df->df_m != NULL)
-			m_freem(df->df_m);	/* discard old entry */
+		m_freem(df->df_m);	/* discard old entry */
 		df->df_seq = seq;
 		df->df_frag = 0;
 		df->df_m = m;
@@ -816,7 +814,6 @@ ieee80211_deliver_data(struct ieee80211com *ic, struct mbuf *m,
 		m_freem(m);
 		return;
 	}
-	ifp->if_ipackets++;
 
 	/*
 	 * Perform as a bridge within the AP.  Notice that we do not
@@ -828,7 +825,6 @@ ieee80211_deliver_data(struct ieee80211com *ic, struct mbuf *m,
 	    !(ic->ic_flags & IEEE80211_F_NOBRIDGE) &&
 	    eh->ether_type != htons(ETHERTYPE_PAE)) {
 		struct ieee80211_node *ni1;
-		int error, len;
 
 		if (ETHER_IS_MULTICAST(eh->ether_dhost)) {
 			m1 = m_copym2(m, 0, M_COPYALL, M_DONTWAIT);
@@ -845,22 +841,15 @@ ieee80211_deliver_data(struct ieee80211com *ic, struct mbuf *m,
 			}
 		}
 		if (m1 != NULL) {
-			len = m1->m_pkthdr.len;
-			IFQ_ENQUEUE(&ifp->if_snd, m1, NULL, error);
-			if (error)
-				ifp->if_oerrors++;
-			else {
-				if (m != NULL)
-					ifp->if_omcasts++;
-				ifp->if_obytes += len;
-				if_start(ifp);
-			}
+			if (if_enqueue(ifp, m1))
+				 ifp->if_oerrors++;
 		}
 	}
 #endif
 	if (m != NULL) {
 		if ((ic->ic_flags & IEEE80211_F_RSNON) &&
 		    eh->ether_type == htons(ETHERTYPE_PAE)) {
+			ifp->if_ipackets++;
 #if NBPFILTER > 0
 			/*
 			 * If we forward frame into transmitter of the AP,
@@ -2571,8 +2560,7 @@ ieee80211_recv_delba(struct ieee80211com *ic, struct mbuf *m,
 		if (ba->ba_buf != NULL) {
 			/* free all MSDUs stored in reordering buffer */
 			for (i = 0; i < IEEE80211_BA_MAX_WINSZ; i++)
-				if (ba->ba_buf[i].m != NULL)
-					m_freem(ba->ba_buf[i].m);
+				m_freem(ba->ba_buf[i].m);
 			/* free reordering buffer */
 			free(ba->ba_buf, M_DEVBUF, 0);
 			ba->ba_buf = NULL;

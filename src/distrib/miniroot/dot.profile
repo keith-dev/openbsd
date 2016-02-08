@@ -1,4 +1,4 @@
-#	$OpenBSD: dot.profile,v 1.26 2014/10/23 21:33:21 rpe Exp $
+#	$OpenBSD: dot.profile,v 1.29 2015/07/03 18:29:08 rpe Exp $
 #	$NetBSD: dot.profile,v 1.1 1995/12/18 22:54:43 pk Exp $
 #
 # Copyright (c) 2009 Kenneth R. Westerback
@@ -39,7 +39,7 @@ export OBSD="OpenBSD/$ARCH $VNAME"
 
 export PATH=/sbin:/bin:/usr/bin:/usr/sbin:/
 umask 022
-# emacs-style command line editing
+# emacs-style command line editing.
 set -o emacs
 
 # Extract rootdisk from last 'root on ...' line. e.g.
@@ -47,15 +47,15 @@ set -o emacs
 set -- $(dmesg | sed -n '/^root on /h;${g;p;}')
 rootdisk=$3
 
-if [ "X${DONEPROFILE}" = "X" ]; then
+if [[ -z $DONEPROFILE ]]; then
 	DONEPROFILE=YES
 
 	mount -u /dev/${rootdisk:-rd0a} /
 
-	# Create a fake rc that just returns 1 and throws us back
+	# Create a fake rc that just returns 1 and throws us back.
 	echo ! : > /etc/rc
 
-	# set up some sane defaults
+	# Set up some sane defaults.
 	echo 'erase ^?, werase ^W, kill ^U, intr ^C, status ^T'
 	stty newcrt werase ^W intr ^C kill ^U erase ^? status ^T
 
@@ -69,9 +69,9 @@ __EOT
 	# after a timeout, but only the very first time around.
 	timeout=false
 	timer_pid=
-	if [ ! -f /tmp/noai ] && { ifconfig netboot >/dev/null 2>&1 ||
-		[ -f /auto_install.conf ] ||
-		[ -f /auto_upgrade.conf ]; }; then
+	if [[ ! -f /tmp/noai ]] && { ifconfig netboot >/dev/null 2>&1 ||
+		[[ -f /auto_install.conf ]] ||
+		[[ -f /auto_upgrade.conf ]]; }; then
 		echo "Starting non-interactive mode in 5 seconds..."
 		>/tmp/noai
 
@@ -102,18 +102,18 @@ __EOT
 			REPLY=a
 		else
 			# User has made a choice; stop the read timeout.
-			[ -n "$timer_pid" ] && kill $timer_pid 2>/dev/null
+			[[ -n $timer_pid ]] && kill $timer_pid 2>/dev/null
 			timer_pid=
 		fi
 
 		case $REPLY in
-		a*|A*)	/install -a && break
+		[aA]*)	/install -a && break
 			;;
-		i*|I*)	/install && break
+		[iI]*)	/install && break
 			;;
-		u*|U*)	/upgrade && break
+		[uU]*)	/upgrade && break
 			;;
-		s*|S*)	break
+		[sS]*)	break
 			;;
 		!)	echo "Type 'exit' to return to install."
 			ksh

@@ -1,4 +1,4 @@
-/*	$OpenBSD: getaddrinfo_async.c,v 1.34 2015/02/14 20:15:05 jca Exp $	*/
+/*	$OpenBSD: getaddrinfo_async.c,v 1.40 2015/05/29 08:49:37 eric Exp $	*/
 /*
  * Copyright (c) 2012 Eric Faurot <eric@openbsd.org>
  *
@@ -27,7 +27,7 @@
 #include <err.h>
 #include <errno.h>
 #include <ifaddrs.h>
-#include <resolv.h> /* for res_hnok */
+#include <resolv.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
@@ -55,6 +55,7 @@ static int iter_domain(struct asr_query *, const char *, char *, size_t);
 static int addrinfo_add(struct asr_query *, const struct sockaddr *, const char *);
 static int addrinfo_from_file(struct asr_query *, int,  FILE *);
 static int addrinfo_from_pkt(struct asr_query *, char *, size_t);
+static int addrconfig_setup(struct asr_query *);
 #ifdef YP
 static int addrinfo_from_yp(struct asr_query *, int, char *);
 #endif
@@ -133,7 +134,6 @@ getaddrinfo_async_run(struct asr_query *as, struct asr_result *ar)
 	struct addrinfo	*ai;
 	int		 i, family, r;
 	FILE		*f;
-	struct ifaddrs	*ifa, *ifa0;
 	union {
 		struct sockaddr		sa;
 		struct sockaddr_in	sain;
@@ -208,26 +208,11 @@ getaddrinfo_async_run(struct asr_query *as, struct asr_result *ar)
 
 		/* Restrict result set to configured address families */
 		if (ai->ai_flags & AI_ADDRCONFIG) {
-			if (getifaddrs(&ifa0) != 0) {
+			if (addrconfig_setup(as) != 0) {
 				ar->ar_gai_errno = EAI_FAIL;
 				async_set_state(as, ASR_STATE_HALT);
 				break;
 			}
-
-			as->as.ai.flags |= ASYNC_NO_INET | ASYNC_NO_INET6;
-			for (ifa = ifa0; ifa != NULL; ifa = ifa->ifa_next) {
-				if (ifa->ifa_flags & IFF_LOOPBACK)
-					continue;
-				if (ifa->ifa_addr == NULL)
-					continue;
-				if (ifa->ifa_addr->sa_family == PF_INET)
-					as->as.ai.flags &= ~ASYNC_NO_INET;
-				else if (ifa->ifa_addr->sa_family == PF_INET6 &&
-				    !IN6_IS_ADDR_LINKLOCAL(&((struct
-				    sockaddr_in6 *)ifa->ifa_addr)->sin6_addr))
-					as->as.ai.flags &= ~ASYNC_NO_INET6;
-			}
-			freeifaddrs(ifa0);
 		}
 
 		/* Make sure there is at least a valid combination */
@@ -411,7 +396,7 @@ getaddrinfo_async_run(struct asr_query *as, struct asr_result *ar)
 			break;
 
 		case ASR_DB_FILE:
-			f = fopen(as->as_ctx->ac_hostfile, "re");
+			f = fopen(_PATH_HOSTS, "re");
 			if (f == NULL) {
 				async_set_state(as, ASR_STATE_NEXT_DB);
 				break;
@@ -654,7 +639,11 @@ iter_domain(struct asr_query *as, const char *name, char * buf, size_t len)
 		/* FALLTHROUGH */
 
 	case DOM_DOMAIN:
-		if (as->as_dom_idx < as->as_ctx->ac_domcount) {
+		if (as->as_dom_idx < as->as_ctx->ac_domcount &&
+		    (as->as_ctx->ac_options & RES_DNSRCH || (
+			as->as_ctx->ac_options & RES_DEFNAMES &&
+			as->as_dom_idx == 0 &&
+			strchr(name, '.') == NULL))) {
 			DPRINT("asr: iter_domain(\"%s\") domain \"%s\"\n",
 			    name, as->as_ctx->ac_dom[as->as_dom_idx]);
 			as->as_dom_flags |= ASYNC_DOM_DOMAIN;
@@ -756,7 +745,7 @@ addrinfo_add(struct asr_query *as, const struct sockaddr *sa, const char *cname)
 static int
 addrinfo_from_file(struct asr_query *as, int family, FILE *f)
 {
-	char		*tokens[MAXTOKEN], *c;
+	char		*tokens[MAXTOKEN], *c, buf[BUFSIZ + 1];
 	int		 n, i;
 	union {
 		struct sockaddr		sa;
@@ -765,7 +754,7 @@ addrinfo_from_file(struct asr_query *as, int family, FILE *f)
 	} u;
 
 	for (;;) {
-		n = asr_parse_namedb_line(f, tokens, MAXTOKEN);
+		n = asr_parse_namedb_line(f, tokens, MAXTOKEN, buf, sizeof(buf));
 		if (n == -1)
 			break; /* ignore errors reading the file */
 
@@ -842,6 +831,50 @@ addrinfo_from_pkt(struct asr_query *as, char *pkt, size_t pktlen)
 		if (addrinfo_add(as, &u.sa, c))
 			return (-1); /* errno set */
 	}
+	return (0);
+}
+
+static int
+addrconfig_setup(struct asr_query *as)
+{
+	struct ifaddrs		*ifa, *ifa0;
+	struct sockaddr_in	*sinp;
+	struct sockaddr_in6	*sin6p;
+
+	if (getifaddrs(&ifa0) != 0)
+		return (-1);
+
+	as->as.ai.flags |= ASYNC_NO_INET | ASYNC_NO_INET6;
+
+	for (ifa = ifa0; ifa != NULL; ifa = ifa->ifa_next) {
+		if (ifa->ifa_addr == NULL)
+			continue;
+
+		switch (ifa->ifa_addr->sa_family) {
+		case PF_INET:
+			sinp = (struct sockaddr_in *)ifa->ifa_addr;
+
+			if (sinp->sin_addr.s_addr == INADDR_LOOPBACK)
+				continue;
+
+			as->as.ai.flags &= ~ASYNC_NO_INET;
+			break;
+		case PF_INET6:
+			sin6p = (struct sockaddr_in6 *)ifa->ifa_addr;
+
+			if (IN6_IS_ADDR_LOOPBACK(&sin6p->sin6_addr))
+				continue;
+
+			if (IN6_IS_ADDR_LINKLOCAL(&sin6p->sin6_addr))
+				continue;
+
+			as->as.ai.flags &= ~ASYNC_NO_INET6;
+			break;
+		}
+	}
+
+	freeifaddrs(ifa0);
+
 	return (0);
 }
 

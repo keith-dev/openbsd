@@ -1,4 +1,4 @@
-/*	$OpenBSD: init_main.c,v 1.235 2015/02/10 05:28:18 guenther Exp $	*/
+/*	$OpenBSD: init_main.c,v 1.243 2015/07/09 19:45:37 miod Exp $	*/
 /*	$NetBSD: init_main.c,v 1.84.4.1 1996/06/02 09:08:06 mrg Exp $	*/
 
 /*
@@ -39,7 +39,6 @@
  */
 
 #include <sys/param.h>
-#include <sys/core.h>
 #include <sys/filedesc.h>
 #include <sys/file.h>
 #include <sys/errno.h>
@@ -147,6 +146,7 @@ void	crypto_init(void);
 void	init_exec(void);
 void	kqueue_init(void);
 void	taskq_init(void);
+void	pool_gc_pages(void *);
 
 extern char sigcode[], esigcode[];
 #ifdef SYSCALL_DEBUG
@@ -168,8 +168,8 @@ struct emul emul_native = {
 	0,
 	copyargs,
 	setregs,
-	NULL,
-	coredump_trad,
+	NULL,		/* fixup */
+	NULL,		/* coredump */
 	sigcode,
 	esigcode,
 	EMUL_ENABLED | EMUL_NATIVE,
@@ -233,6 +233,9 @@ main(void *framep)
 
 	/* Initialize sockets. */
 	soinit();
+
+	/* Initialize SRP subsystem. */
+	srp_startup();
 
 	/*
 	 * Initialize process and pgrp structures.
@@ -525,8 +528,7 @@ main(void *framep)
 	if (kthread_create(uvm_aiodone_daemon, NULL, NULL, "aiodoned"))
 		panic("fork aiodoned");
 
-#if !defined(__hppa__) && \
-    !((defined(__m88k__) || defined(__mips64__)) && defined(MULTIPROCESSOR))
+#if !defined(__hppa__)
 	/* Create the page zeroing kernel thread. */
 	if (kthread_create(uvm_pagezero_thread, NULL, NULL, "zerothread"))
 		panic("fork zerothread");
@@ -547,6 +549,13 @@ main(void *framep)
 
 #ifndef SMALL_KERNEL
 	timeout_set(&setperf_to, setperf_auto, NULL);
+#endif
+
+	/*
+	 * Start the idle pool page garbage collector
+	 */
+#if !(defined(__m88k__) && defined(MULTIPROCESSOR))	/* XXX */
+	pool_gc_pages(NULL);
 #endif
 
         /*

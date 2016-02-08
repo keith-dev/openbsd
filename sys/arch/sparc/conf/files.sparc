@@ -1,4 +1,4 @@
-#	$OpenBSD: files.sparc,v 1.98 2015/02/28 17:54:54 miod Exp $
+#	$OpenBSD: files.sparc,v 1.102 2015/07/17 22:52:29 tedu Exp $
 #	$NetBSD: files.sparc,v 1.44 1997/08/31 21:29:16 pk Exp $
 
 # @(#)files.sparc	8.1 (Berkeley) 7/19/93
@@ -148,12 +148,12 @@ file	arch/sparc/dev/hme.c		hme
 attach	esp at sbus, dma, obio
 file	arch/sparc/dev/esp.c		esp
 
-device	audioamd: audio, am7930, mulaw
+device	audioamd: audio, am7930
 attach	audioamd at mainbus, obio, sbus
 file	arch/sparc/dev/audioamd.c	audioamd
 file	arch/sparc/sparc/amd7930intr.s	audioamd
 
-device	audiocs: audio, auconv
+device	audiocs: audio
 attach	audiocs at sbus
 file	arch/sparc/dev/cs4231.c		audiocs
 
@@ -269,11 +269,6 @@ device	sw: scsi, ncr5380sbc
 attach	sw at obio
 file	arch/sparc/dev/si.c		si | sw
 
-# Qlogic ISP 10x0 (SBus) family
-# device declaration in sys/conf/files
-attach	isp at sbus with isp_sbus
-file	arch/sparc/dev/isp_sbus.c	isp_sbus
-
 attach	qlw at sbus with qlw_sbus
 file	arch/sparc/dev/qlw_sbus.c	qlw_sbus
 
@@ -296,8 +291,9 @@ file	arch/sparc/sparc/cache.c
 file	arch/sparc/sparc/conf.c
 file	arch/sparc/sparc/consinit.c
 file	arch/sparc/sparc/disksubr.c
+file	arch/sparc/sparc/dvma.c
 file	arch/sparc/sparc/emul.c
-file	arch/sparc/sparc/in_cksum.c		inet
+file	arch/sparc/sparc/in_cksum.c
 file	arch/sparc/sparc/intr.c
 file	arch/sparc/sparc/kgdb_machdep.c	kgdb
 file	arch/sparc/sparc/machdep.c		!solbourne

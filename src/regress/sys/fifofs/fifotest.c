@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2004, 2014 Todd C. Miller <Todd.Miller@courtesan.com>
+ * Copyright (c) 2004, 2014-2015 Todd C. Miller <Todd.Miller@courtesan.com>
  *
  * Permission to use, copy, modify, and distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -32,8 +32,9 @@
 
 void usage(void);
 void sigalrm(int);
-void dopoll(int, int, char *, int);
-void doselect(int, int, int);
+void sigusr1(int);
+void dopoll(pid_t, int, int, char *, int);
+void doselect(pid_t, int, int, int);
 void runtest(char *, int, int);
 void eoftest(char *, int, int);
 
@@ -58,11 +59,16 @@ main(int argc, char **argv)
 	if (argc != 2)
 		usage();
 
-	/* Just warn EINTR from SIGALRM */
+	/* Just want EINTR from SIGALRM */
 	sigemptyset(&sa.sa_mask);
 	sa.sa_flags = 0;
 	sa.sa_handler = sigalrm;
 	sigaction(SIGALRM, &sa, NULL);
+
+	/* SIGUSR1 is used for syncronization only. */
+	sa.sa_flags = SA_RESTART;
+	sa.sa_handler = sigusr1;
+	sigaction(SIGUSR1, &sa, NULL);
 
 	runtest(argv[1], 0, 0);
 	runtest(argv[1], 0, INFTIM);
@@ -86,6 +92,7 @@ runtest(char *fifo, int flags, int timeout)
 		exit(1);
 	}
 
+	/* Note: O_RDWR not required by POSIX */
 	alarm(2);
 	if ((fd = open(fifo, O_RDWR | flags, 0644)) == -1) {
 		printf("open %s: %s\n", fifo, strerror(errno));
@@ -97,12 +104,14 @@ runtest(char *fifo, int flags, int timeout)
 	    (flags & O_NONBLOCK) ? " (nonblocking)" : "");
 
 	printf("\nTesting empty FIFO:\n");
-	dopoll(fd, POLLIN|POLLOUT, "POLLIN|POLLOUT", timeout);
-	dopoll(fd, POLLIN, "POLLIN", timeout);
-	dopoll(fd, POLLOUT, "POLLOUT", timeout);
-	doselect(fd, fd, timeout);
-	doselect(fd, -1, timeout);
-	doselect(-1, fd, timeout);
+	dopoll(-1, fd, POLLIN|POLLOUT, "POLLIN|POLLOUT", timeout);
+	dopoll(-1, fd, POLLIN, "POLLIN", timeout);
+	dopoll(-1, fd, POLLOUT, "POLLOUT", timeout);
+	dopoll(-1, fd, 0, "(none)", timeout);
+	doselect(-1, fd, fd, timeout);
+	doselect(-1, fd, -1, timeout);
+	doselect(-1, -1, fd, timeout);
+	doselect(-1, -1, -1, timeout);
 
 	if (write(fd, "test", 4) != 4) {
 		printf("write error: %s\n", strerror(errno));
@@ -110,12 +119,14 @@ runtest(char *fifo, int flags, int timeout)
 	}
 
 	printf("\nTesting full FIFO:\n");
-	dopoll(fd, POLLIN|POLLOUT, "POLLIN|POLLOUT", timeout);
-	dopoll(fd, POLLIN, "POLLIN", timeout);
-	dopoll(fd, POLLOUT, "POLLOUT", timeout);
-	doselect(fd, fd, timeout);
-	doselect(fd, -1, timeout);
-	doselect(-1, fd, timeout);
+	dopoll(-1, fd, POLLIN|POLLOUT, "POLLIN|POLLOUT", timeout);
+	dopoll(-1, fd, POLLIN, "POLLIN", timeout);
+	dopoll(-1, fd, POLLOUT, "POLLOUT", timeout);
+	dopoll(-1, fd, 0, "(none)", timeout);
+	doselect(-1, fd, fd, timeout);
+	doselect(-1, fd, -1, timeout);
+	doselect(-1, -1, fd, timeout);
+	doselect(-1, -1, -1, timeout);
 
 	if ((nread = read(fd, buf, sizeof(buf))) <= 0) {
 		printf("read error: %s\n", (nread == 0) ? "EOF" : strerror(errno));
@@ -125,12 +136,19 @@ runtest(char *fifo, int flags, int timeout)
 	printf("\treceived '%s' from FIFO\n", buf);
 }
 
-int
+pid_t
 eof_writer(const char *fifo, int flags)
 {
 	int fd;
+	pid_t pid;
+	sigset_t mask, omask;
 
-	switch (fork()) {
+	/* Block SIGUSR1 (in child). */
+	sigemptyset(&mask);
+	sigaddset(&mask, SIGUSR1);
+	sigprocmask(SIG_BLOCK, &mask, &omask);
+
+	switch ((pid = fork())) {
 	case -1:
 		printf("fork: %s\n", strerror(errno));
 		return -1;
@@ -139,26 +157,27 @@ eof_writer(const char *fifo, int flags)
 		break;
 	default:
 		/* parent */
-		return 0;
+		sigprocmask(SIG_SETMASK, &omask, NULL);
+		return pid;
 	}
 
-	/* Wait for the reader to connect. */
-	for (;;) {
-		alarm(2);
-		fd = open(fifo, O_WRONLY | flags, 0644);
-		alarm(0);
-		if (fd != -1)
-			break;
-		if (errno != ENOENT && errno != ENXIO) {
-			printf("open %s O_WRONLY: %s\n", fifo, strerror(errno));
-			return -1;
-		}
-		usleep(10000);
+	/* Wait for reader. */
+	sigemptyset(&mask);
+	sigsuspend(&mask);
+	sigprocmask(SIG_SETMASK, &omask, NULL);
+
+	/* connect to FIFO. */
+	alarm(2);
+	fd = open(fifo, O_WRONLY | flags, 0644);
+	alarm(0);
+	if (fd == -1) {
+		printf("open %s O_WRONLY: %s\n", fifo, strerror(errno));
+		return -1;
 	}
 
 	/*
-	 * We need to give the reader time to call select() before
-	 * we close the fd.  This is racey...
+	 * We need to give the reader time to call poll() or select()
+	 * before we close the fd.  This is racey...
 	 */
 	usleep(100000);
 	close(fd);
@@ -169,13 +188,14 @@ void
 eoftest(char *fifo, int flags, int timeout)
 {
 	ssize_t nread;
-	int fd = -1, rval, pass, status;
+	int fd = -1, pass, status;
+	pid_t writer;
 	char buf[BUFSIZ];
 
 	/*
 	 * Test all combinations of select and poll.
 	 */
-	for (pass = 0; pass < 12; pass++) {
+	for (pass = 0; pass < 16; pass++) {
 		/*
 		 * We run each test twice, once with a fresh fifo,
 		 * and once with a reused one.
@@ -207,34 +227,42 @@ eoftest(char *fifo, int flags, int timeout)
 		 * The writer will sleep for a bit to give the reader time
 		 * to call select() before anything has been written.
 		 */
-		rval = eof_writer(fifo, flags);
-		if (rval == -1)
+		writer = eof_writer(fifo, flags);
+		if (writer == -1)
 			exit(1);
 
 		switch (pass) {
 		case 0:
 		case 1:
-		    dopoll(fd, POLLIN|POLLOUT, "POLLIN|POLLOUT", timeout);
+		    dopoll(writer, fd, POLLIN|POLLOUT, "POLLIN|POLLOUT", timeout);
 		    break;
 		case 2:
 		case 3:
-		    dopoll(fd, POLLIN, "POLLIN", timeout);
+		    dopoll(writer, fd, POLLIN, "POLLIN", timeout);
 		    break;
 		case 4:
 		case 5:
-		    dopoll(fd, POLLOUT, "POLLOUT", timeout);
+		    dopoll(writer, fd, POLLOUT, "POLLOUT", timeout);
 		    break;
 		case 6:
 		case 7:
-		    doselect(fd, fd, timeout);
+		    dopoll(writer, fd, 0, "(none)", timeout);
 		    break;
 		case 8:
 		case 9:
-		    doselect(fd, -1, timeout);
+		    doselect(writer, fd, fd, timeout);
 		    break;
 		case 10:
 		case 11:
-		    doselect(-1, fd, timeout);
+		    doselect(writer, fd, -1, timeout);
+		    break;
+		case 12:
+		case 13:
+		    doselect(writer, -1, fd, timeout);
+		    break;
+		case 14:
+		case 15:
+		    doselect(writer, -1, -1, timeout);
 		    break;
 		}
 		wait(&status);
@@ -251,7 +279,7 @@ eoftest(char *fifo, int flags, int timeout)
 }
 
 void
-dopoll(int fd, int events, char *str, int timeout)
+dopoll(pid_t writer, int fd, int events, char *str, int timeout)
 {
 	struct pollfd pfd;
 	int nready;
@@ -261,6 +289,8 @@ dopoll(int fd, int events, char *str, int timeout)
 
 	printf("\tpoll %s, timeout=%d\n", str, timeout);
 	pfd.events = events;
+	if (writer != -1)
+		kill(writer, SIGUSR1);
 	alarm(2);
 	nready = poll(&pfd, 1, timeout);
 	alarm(0);
@@ -283,7 +313,7 @@ dopoll(int fd, int events, char *str, int timeout)
 }
 
 void
-doselect(int rfd, int wfd, int timeout)
+doselect(pid_t writer, int rfd, int wfd, int timeout)
 {
 	struct timeval tv, *tvp;
 	fd_set *rfds = NULL, *wfds = NULL;
@@ -315,9 +345,10 @@ doselect(int rfd, int wfd, int timeout)
 		FD_SET(wfd, wfds);
 	}
 
-	printf("\tselect%s%s\n", rfds ? " read" : "",
-	    wfds ? " write" : "");
-
+	printf("\tselect%s%s, timeout=%d\n", rfds ? " read" : "",
+	    wfds ? " write" : rfds ? "" : " (none)", timeout);
+	if (writer != -1)
+		kill(writer, SIGUSR1);
 	alarm(2);
 	nready = select(maxfd + 1, rfds, wfds, NULL, &tv);
 	alarm(0);
@@ -340,6 +371,12 @@ void
 sigalrm(int dummy)
 {
 	/* Just cause EINTR */
+	return;
+}
+
+void
+sigusr1(int dummy)
+{
 	return;
 }
 

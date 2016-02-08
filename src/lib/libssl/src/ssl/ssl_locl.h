@@ -1,4 +1,4 @@
-/* $OpenBSD: ssl_locl.h,v 1.88 2015/02/22 15:54:27 jsing Exp $ */
+/* $OpenBSD: ssl_locl.h,v 1.100 2015/07/24 07:57:48 doug Exp $ */
 /* Copyright (C) 1995-1998 Eric Young (eay@cryptsoft.com)
  * All rights reserved.
  *
@@ -569,8 +569,8 @@ int ssl_cipher_id_cmp(const SSL_CIPHER *a, const SSL_CIPHER *b);
 DECLARE_OBJ_BSEARCH_GLOBAL_CMP_FN(SSL_CIPHER, SSL_CIPHER, ssl_cipher_id);
 int ssl_cipher_ptr_id_cmp(const SSL_CIPHER * const *ap,
     const SSL_CIPHER * const *bp);
-STACK_OF(SSL_CIPHER) *ssl_bytes_to_cipher_list(SSL *s, unsigned char *p,
-    int num, STACK_OF(SSL_CIPHER) **skp);
+STACK_OF(SSL_CIPHER) *ssl_bytes_to_cipher_list(SSL *s, const unsigned char *p,
+    int num);
 int ssl_cipher_list_to_bytes(SSL *s, STACK_OF(SSL_CIPHER) *sk,
     unsigned char *p);
 STACK_OF(SSL_CIPHER) *ssl_create_cipher_list(const SSL_METHOD *meth,
@@ -637,6 +637,7 @@ unsigned long ssl3_output_cert_chain(SSL *s, X509 *x);
 SSL_CIPHER *ssl3_choose_cipher(SSL *ssl, STACK_OF(SSL_CIPHER) *clnt,
     STACK_OF(SSL_CIPHER) *srvr);
 int	ssl3_setup_buffers(SSL *s);
+int	ssl3_setup_init_buffer(SSL *s);
 int	ssl3_setup_read_buffer(SSL *s);
 int	ssl3_setup_write_buffer(SSL *s);
 int	ssl3_release_read_buffer(SSL *s);
@@ -693,7 +694,7 @@ int dtls1_retransmit_message(SSL *s, unsigned short seq,
 int dtls1_get_queue_priority(unsigned short seq, int is_ccs);
 int dtls1_retransmit_buffered_messages(SSL *s);
 void dtls1_clear_record_buffer(SSL *s);
-void dtls1_get_message_header(unsigned char *data,
+int dtls1_get_message_header(unsigned char *data,
     struct hm_header_st *msg_hdr);
 void dtls1_get_ccs_header(unsigned char *data, struct ccs_header_st *ccs_hdr);
 void dtls1_reset_seq_numbers(SSL *s, int rw);
@@ -740,7 +741,6 @@ int ssl3_send_hello_request(SSL *s);
 int ssl3_send_server_key_exchange(SSL *s);
 int ssl3_send_certificate_request(SSL *s);
 int ssl3_send_server_done(SSL *s);
-int ssl3_check_client_hello(SSL *s);
 int ssl3_get_client_certificate(SSL *s);
 int ssl3_get_client_key_exchange(SSL *s);
 int ssl3_get_cert_verify(SSL *s);
@@ -757,6 +757,8 @@ int ssl23_accept(SSL *s);
 int ssl23_connect(SSL *s);
 int ssl23_read_bytes(SSL *s, int n);
 int ssl23_write_bytes(SSL *s);
+int tls_any_accept(SSL *s);
+int tls_any_connect(SSL *s);
 
 int tls1_new(SSL *s);
 void tls1_free(SSL *s);
@@ -823,9 +825,8 @@ int ssl_check_clienthello_tlsext_late(SSL *s);
 int ssl_check_serverhello_tlsext(SSL *s);
 
 #define tlsext_tick_md	EVP_sha256
-int tls1_process_ticket(SSL *s, unsigned char *session_id, int len,
+int tls1_process_ticket(SSL *s, const unsigned char *session_id, int len,
     const unsigned char *limit, SSL_SESSION **ret);
-
 int tls12_get_sigandhash(unsigned char *p, const EVP_PKEY *pk,
     const EVP_MD *md);
 int tls12_get_sigid(const EVP_PKEY *pk);
@@ -835,11 +836,11 @@ EVP_MD_CTX* ssl_replace_hash(EVP_MD_CTX **hash, const EVP_MD *md);
 void ssl_clear_hash_ctx(EVP_MD_CTX **hash);
 int ssl_add_serverhello_renegotiate_ext(SSL *s, unsigned char *p,
     int *len, int maxlen);
-int ssl_parse_serverhello_renegotiate_ext(SSL *s, unsigned char *d,
+int ssl_parse_serverhello_renegotiate_ext(SSL *s, const unsigned char *d,
     int len, int *al);
 int ssl_add_clienthello_renegotiate_ext(SSL *s, unsigned char *p,
     int *len, int maxlen);
-int ssl_parse_clienthello_renegotiate_ext(SSL *s, unsigned char *d,
+int ssl_parse_clienthello_renegotiate_ext(SSL *s, const unsigned char *d,
     int len, int *al);
 long ssl_get_algorithm2(SSL *s);
 int tls1_process_sigalgs(SSL *s, const unsigned char *data, int dsize);
@@ -850,11 +851,11 @@ int tls1_check_ec_tmp_key(SSL *s);
 
 int ssl_add_clienthello_use_srtp_ext(SSL *s, unsigned char *p,
     int *len, int maxlen);
-int ssl_parse_clienthello_use_srtp_ext(SSL *s, unsigned char *d,
+int ssl_parse_clienthello_use_srtp_ext(SSL *s, const unsigned char *d,
     int len, int *al);
 int ssl_add_serverhello_use_srtp_ext(SSL *s, unsigned char *p,
     int *len, int maxlen);
-int ssl_parse_serverhello_use_srtp_ext(SSL *s, unsigned char *d,
+int ssl_parse_serverhello_use_srtp_ext(SSL *s, const unsigned char *d,
     int len, int *al);
 
 /* s3_cbc.c */

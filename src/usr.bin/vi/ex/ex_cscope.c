@@ -1,4 +1,4 @@
-/*	$OpenBSD: ex_cscope.c,v 1.24 2015/01/16 06:40:14 deraadt Exp $	*/
+/*	$OpenBSD: ex_cscope.c,v 1.26 2015/04/24 21:48:31 brynet Exp $	*/
 
 /*-
  * Copyright (c) 1994, 1996
@@ -26,6 +26,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 #include <termios.h>
 #include <unistd.h>
 
@@ -244,7 +245,7 @@ cscope_add(SCR *sp, EXCMD *cmdp, char *dname)
 	csc->dname = csc->buf;
 	csc->dlen = len;
 	memcpy(csc->dname, dname, len);
-	csc->mtime = sb.st_mtime;
+	csc->mtim = sb.st_mtim;
 
 	/* Get the search paths for the cscope. */
 	if (get_paths(sp, csc))
@@ -359,7 +360,7 @@ run_cscope(SCR *sp, CSC *csc, char *dbname)
 	 * Cscope reads from to_cs[0] and writes to from_cs[1]; vi reads from
 	 * from_cs[0] and writes to to_cs[1].
 	 */
-	to_cs[0] = to_cs[1] = from_cs[0] = from_cs[0] = -1;
+	to_cs[0] = to_cs[1] = from_cs[0] = from_cs[1] = -1;
 	if (pipe(to_cs) < 0 || pipe(from_cs) < 0) {
 		msgq(sp, M_SYSERR, "pipe");
 		goto err;
@@ -765,7 +766,8 @@ csc_file(SCR *sp, CSC *csc, char *name, char **dirp, size_t *dlenp,
 		if (stat(buf, &sb) == 0) {
 			*dirp = *pp;
 			*dlenp = strlen(*pp);
-			*isolderp = sb.st_mtime < csc->mtime;
+			*isolderp = timespeccmp(
+			    &sb.st_mtim, &csc->mtim, <);
 			return;
 		}
 	}

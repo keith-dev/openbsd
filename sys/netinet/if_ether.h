@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_ether.h,v 1.54 2014/12/05 15:50:04 mpi Exp $	*/
+/*	$OpenBSD: if_ether.h,v 1.57 2015/06/23 13:20:17 mpi Exp $	*/
 /*	$NetBSD: if_ether.h,v 1.22 1996/05/11 13:00:00 mycroft Exp $	*/
 
 /*
@@ -164,17 +164,6 @@ struct	arpcom {
 	int	 ac_multirangecnt;		/* number of mcast ranges */
 
 };
-
-struct llinfo_arp {
-	LIST_ENTRY(llinfo_arp) la_list;
-	struct	rtentry *la_rt;
-	struct	mbuf *la_hold_head;	/* packet hold queue */
-	struct	mbuf *la_hold_tail;
-	int	la_hold_count;		/* number of packets queued */
-	long	la_asked;		/* last time we QUERIED for this addr */
-};
-#define MAX_HOLD_QUEUE 10
-#define MAX_HOLD_TOTAL 100
 #endif
 
 struct sockaddr_inarp {
@@ -199,11 +188,11 @@ struct sockaddr_inarp {
 extern u_int8_t etherbroadcastaddr[ETHER_ADDR_LEN];
 extern u_int8_t ether_ipmulticast_min[ETHER_ADDR_LEN];
 extern u_int8_t ether_ipmulticast_max[ETHER_ADDR_LEN];
-extern struct ifqueue arpintrq;
+extern struct niqueue arpintrq;
 
 void	arpwhohas(struct arpcom *, struct in_addr *);
 void	arpintr(void);
-int	arpresolve(struct arpcom *,
+int	arpresolve(struct ifnet *,
 	    struct rtentry *, struct mbuf *, struct sockaddr *, u_char *);
 void	arp_ifinit(struct arpcom *, struct ifaddr *);
 void	arp_rtrequest(int, struct rtentry *);

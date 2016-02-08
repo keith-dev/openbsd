@@ -1,4 +1,4 @@
-/*	$OpenBSD: ldpe.c,v 1.27 2015/02/10 01:03:54 claudio Exp $ */
+/*	$OpenBSD: ldpe.c,v 1.39 2015/07/21 05:04:12 renato Exp $ */
 
 /*
  * Copyright (c) 2005 Claudio Jeker <claudio@openbsd.org>
@@ -22,6 +22,7 @@
 #include <sys/socket.h>
 #include <sys/queue.h>
 #include <netinet/in.h>
+#include <netinet/tcp.h>
 #include <arpa/inet.h>
 #include <net/if_types.h>
 #include <stdlib.h>
@@ -51,6 +52,10 @@ void	 ldpe_shutdown(void);
 struct ldpd_conf	*leconf = NULL, *nconf;
 struct imsgev		*iev_main;
 struct imsgev		*iev_lde;
+struct event		 disc_ev;
+struct event		 edisc_ev;
+struct event             pfkey_ev;
+struct ldpd_sysdep	 sysdep;
 
 /* ARGSUSED */
 void
@@ -77,6 +82,7 @@ ldpe(struct ldpd_conf *xconf, int pipe_parent2ldpe[2], int pipe_ldpe2lde[2],
 	struct event		 ev_sigint, ev_sigterm;
 	struct sockaddr_in	 disc_addr, sess_addr;
 	pid_t			 pid;
+	int			 pfkeysock, opt;
 
 	switch (pid = fork()) {
 	case -1:
@@ -91,6 +97,8 @@ ldpe(struct ldpd_conf *xconf, int pipe_parent2ldpe[2], int pipe_ldpe2lde[2],
 
 	setproctitle("ldp engine");
 	ldpd_process = PROC_LDP_ENGINE;
+
+	pfkeysock = pfkey_init(&sysdep);
 
 	/* create ldpd control socket outside chroot */
 	if (control_init() == -1)
@@ -171,6 +179,16 @@ ldpe(struct ldpd_conf *xconf, int pipe_parent2ldpe[2], int pipe_ldpe2lde[2],
 	if (listen(xconf->ldp_session_socket, LDP_BACKLOG) == -1)
 		fatal("error in listen on session socket");
 
+	opt = 1;
+	if (setsockopt(xconf->ldp_session_socket, IPPROTO_TCP, TCP_MD5SIG,
+	    &opt, sizeof(opt)) == -1) {
+		if (errno == ENOPROTOOPT) {	/* system w/o md5sig */
+			log_warnx("md5sig not available, disabling");
+			sysdep.no_md5sig = 1;
+		} else
+			fatal("setsockopt TCP_MD5SIG");
+	}
+
 	/* set some defaults */
 	if (if_set_tos(xconf->ldp_session_socket,
 	    IPTOS_PREC_INTERNETCONTROL) == -1)
@@ -225,13 +243,17 @@ ldpe(struct ldpd_conf *xconf, int pipe_parent2ldpe[2], int pipe_ldpe2lde[2],
 	    iev_main->handler, iev_main);
 	event_add(&iev_main->ev, NULL);
 
-	event_set(&leconf->disc_ev, leconf->ldp_discovery_socket,
-	    EV_READ|EV_PERSIST, disc_recv_packet, NULL);
-	event_add(&leconf->disc_ev, NULL);
+	event_set(&pfkey_ev, pfkeysock, EV_READ | EV_PERSIST,
+	    ldpe_dispatch_pfkey, NULL);
+	event_add(&pfkey_ev, NULL);
 
-	event_set(&leconf->edisc_ev, leconf->ldp_ediscovery_socket,
+	event_set(&disc_ev, leconf->ldp_discovery_socket,
 	    EV_READ|EV_PERSIST, disc_recv_packet, NULL);
-	event_add(&leconf->edisc_ev, NULL);
+	event_add(&disc_ev, NULL);
+
+	event_set(&edisc_ev, leconf->ldp_ediscovery_socket,
+	    EV_READ|EV_PERSIST, disc_recv_packet, NULL);
+	event_add(&edisc_ev, NULL);
 
 	accept_add(leconf->ldp_session_socket, session_accept, NULL);
 	/* listen on ldpd control socket */
@@ -259,27 +281,24 @@ ldpe(struct ldpd_conf *xconf, int pipe_parent2ldpe[2], int pipe_ldpe2lde[2],
 void
 ldpe_shutdown(void)
 {
-	struct iface	*iface;
-	struct tnbr	*tnbr;
+	struct if_addr		*if_addr;
 
-	/* stop all interfaces */
-	while ((iface = LIST_FIRST(&leconf->iface_list)) != NULL) {
-		if (if_fsm(iface, IF_EVT_DOWN)) {
-			log_debug("error stopping interface %s",
-			    iface->name);
-		}
-		LIST_REMOVE(iface, entry);
-		if_del(iface);
-	}
+	control_cleanup();
 
-	/* stop all targeted neighbors */
-	while ((tnbr = LIST_FIRST(&leconf->tnbr_list)) != NULL) {
-		LIST_REMOVE(tnbr, entry);
-		tnbr_del(tnbr);
-	}
-
+	event_del(&disc_ev);
+	event_del(&edisc_ev);
+	event_del(&pfkey_ev);
 	close(leconf->ldp_discovery_socket);
+	close(leconf->ldp_ediscovery_socket);
 	close(leconf->ldp_session_socket);
+
+	/* remove addresses from global list */
+	while ((if_addr = LIST_FIRST(&leconf->addr_list)) != NULL) {
+		LIST_REMOVE(if_addr, entry);
+		free(if_addr);
+	}
+
+	config_clear(leconf);
 
 	/* clean up */
 	msgbuf_write(&iev_lde->ibuf.w);
@@ -288,7 +307,6 @@ ldpe_shutdown(void)
 	msgbuf_write(&iev_main->ibuf.w);
 	msgbuf_clear(&iev_main->ibuf.w);
 	free(iev_main);
-	free(leconf);
 	free(pkt_ptr);
 
 	log_info("ldp engine exiting");
@@ -314,15 +332,21 @@ ldpe_imsg_compose_lde(int type, u_int32_t peerid, pid_t pid,
 void
 ldpe_dispatch_main(int fd, short event, void *bula)
 {
-	struct imsg	 imsg;
-	struct imsgev	*iev = bula;
-	struct imsgbuf  *ibuf = &iev->ibuf;
-	struct iface	*iface = NULL;
-	struct if_addr	*if_addr = NULL, *a;
-	struct kif	*kif;
-	struct kaddr	*kaddr;
-	int		 n, shut = 0;
-	struct nbr	*nbr;
+	struct iface		*niface;
+	struct tnbr		*ntnbr;
+	struct nbr_params	*nnbrp;
+	static struct l2vpn	*nl2vpn;
+	struct l2vpn_if		*nlif;
+	struct l2vpn_pw		*npw;
+	struct imsg		 imsg;
+	struct imsgev		*iev = bula;
+	struct imsgbuf		*ibuf = &iev->ibuf;
+	struct iface		*iface = NULL;
+	struct if_addr		*if_addr = NULL;
+	struct kif		*kif;
+	struct kaddr		*ka;
+	int			 n, shut = 0;
+	struct nbr		*nbr;
 
 	if (event & EV_READ) {
 		if ((n = imsg_read(ibuf)) == -1)
@@ -345,92 +369,138 @@ ldpe_dispatch_main(int fd, short event, void *bula)
 
 		switch (imsg.hdr.type) {
 		case IMSG_IFSTATUS:
-		case IMSG_IFUP:
-		case IMSG_IFDOWN:
 			if (imsg.hdr.len != IMSG_HEADER_SIZE +
 			    sizeof(struct kif))
-				fatalx("IFINFO imsg with wrong len");
+				fatalx("IFSTATUS imsg with wrong len");
 
 			kif = imsg.data;
-			iface = if_lookup(kif->ifindex);
+			iface = if_lookup(leconf, kif->ifindex);
 			if (!iface)
 				break;
 
 			iface->flags = kif->flags;
 			iface->linkstate = kif->link_state;
-			switch (imsg.hdr.type) {
-			case IMSG_IFUP:
-				if_fsm(iface, IF_EVT_UP);
-				break;
-			case IMSG_IFDOWN:
-				if_fsm(iface, IF_EVT_DOWN);
-				break;
-			default:
-				break;
-			}
+			if_update(iface);
 			break;
 		case IMSG_NEWADDR:
 			if (imsg.hdr.len != IMSG_HEADER_SIZE +
 			    sizeof(struct kaddr))
 				fatalx("NEWADDR imsg with wrong len");
-			kaddr = imsg.data;
+			ka = imsg.data;
 
-			if ((if_addr = calloc(1, sizeof(*if_addr))) == NULL)
-				fatal("ldpe_dispatch_main");
+			if (if_addr_lookup(&leconf->addr_list, ka) == NULL) {
+				if_addr = if_addr_new(ka);
 
-			if_addr->addr.s_addr = kaddr->addr.s_addr;
-			if_addr->mask.s_addr = kaddr->mask.s_addr;
-			if_addr->dstbrd.s_addr = kaddr->dstbrd.s_addr;
-
-			LIST_INSERT_HEAD(&leconf->addr_list, if_addr,
-			    global_entry);
-			RB_FOREACH(nbr, nbr_id_head, &nbrs_by_id) {
-				if (nbr->state != NBR_STA_OPER)
-					continue;
-				send_address(nbr, if_addr);
+				LIST_INSERT_HEAD(&leconf->addr_list, if_addr,
+				    entry);
+				RB_FOREACH(nbr, nbr_id_head, &nbrs_by_id) {
+					if (nbr->state != NBR_STA_OPER)
+						continue;
+					send_address(nbr, if_addr);
+				}
 			}
 
-			iface = if_lookup(kaddr->ifindex);
-			if (iface) {
+			iface = if_lookup(leconf, ka->ifindex);
+			if (iface &&
+			    if_addr_lookup(&iface->addr_list, ka) == NULL) {
+				if_addr = if_addr_new(ka);
 				LIST_INSERT_HEAD(&iface->addr_list, if_addr,
-				    iface_entry);
-				if_fsm(iface, IF_EVT_NEWADDR);
+				    entry);
+				if_update(iface);
 			}
 			break;
 		case IMSG_DELADDR:
 			if (imsg.hdr.len != IMSG_HEADER_SIZE +
 			    sizeof(struct kaddr))
 				fatalx("DELADDR imsg with wrong len");
-			kaddr = imsg.data;
+			ka = imsg.data;
 
-			LIST_FOREACH(a, &leconf->addr_list, global_entry)
-				if (a->addr.s_addr == kaddr->addr.s_addr &&
-				    a->mask.s_addr == kaddr->mask.s_addr &&
-				    a->dstbrd.s_addr == kaddr->dstbrd.s_addr)
-					break;
-			if_addr = a;
-			if (!if_addr)
-				break;
-
-			LIST_REMOVE(if_addr, global_entry);
-			RB_FOREACH(nbr, nbr_id_head, &nbrs_by_id) {
-				if (nbr->state != NBR_STA_OPER)
-					continue;
-				send_address_withdraw(nbr, if_addr);
-			}
-
-			iface = if_lookup(kaddr->ifindex);
+			iface = if_lookup(leconf, ka->ifindex);
 			if (iface) {
-				LIST_REMOVE(if_addr, iface_entry);
-				if_fsm(iface, IF_EVT_DELADDR);
+				if_addr = if_addr_lookup(&iface->addr_list, ka);
+				if (if_addr) {
+					LIST_REMOVE(if_addr, entry);
+					free(if_addr);
+					if_update(iface);
+				}
 			}
-			free(if_addr);
+
+			if_addr = if_addr_lookup(&leconf->addr_list, ka);
+			if (if_addr) {
+				RB_FOREACH(nbr, nbr_id_head, &nbrs_by_id) {
+					if (nbr->state != NBR_STA_OPER)
+						continue;
+					send_address_withdraw(nbr, if_addr);
+				}
+				LIST_REMOVE(if_addr, entry);
+				free(if_addr);
+			}
 			break;
 		case IMSG_RECONF_CONF:
+			if ((nconf = malloc(sizeof(struct ldpd_conf))) ==
+			    NULL)
+				fatal(NULL);
+			memcpy(nconf, imsg.data, sizeof(struct ldpd_conf));
+
+			LIST_INIT(&nconf->iface_list);
+			LIST_INIT(&nconf->addr_list);
+			LIST_INIT(&nconf->tnbr_list);
+			LIST_INIT(&nconf->nbrp_list);
+			LIST_INIT(&nconf->l2vpn_list);
 			break;
 		case IMSG_RECONF_IFACE:
+			if ((niface = malloc(sizeof(struct iface))) == NULL)
+				fatal(NULL);
+			memcpy(niface, imsg.data, sizeof(struct iface));
+
+			LIST_INIT(&niface->addr_list);
+			LIST_INIT(&niface->adj_list);
+
+			LIST_INSERT_HEAD(&nconf->iface_list, niface, entry);
+			break;
+		case IMSG_RECONF_TNBR:
+			if ((ntnbr = malloc(sizeof(struct tnbr))) == NULL)
+				fatal(NULL);
+			memcpy(ntnbr, imsg.data, sizeof(struct tnbr));
+
+			LIST_INSERT_HEAD(&nconf->tnbr_list, ntnbr, entry);
+			break;
+		case IMSG_RECONF_NBRP:
+			if ((nnbrp = malloc(sizeof(struct nbr_params))) == NULL)
+				fatal(NULL);
+			memcpy(nnbrp, imsg.data, sizeof(struct nbr_params));
+
+			LIST_INSERT_HEAD(&nconf->nbrp_list, nnbrp, entry);
+			break;
+		case IMSG_RECONF_L2VPN:
+			if ((nl2vpn = malloc(sizeof(struct l2vpn))) == NULL)
+				fatal(NULL);
+			memcpy(nl2vpn, imsg.data, sizeof(struct l2vpn));
+
+			LIST_INIT(&nl2vpn->if_list);
+			LIST_INIT(&nl2vpn->pw_list);
+
+			LIST_INSERT_HEAD(&nconf->l2vpn_list, nl2vpn, entry);
+			break;
+		case IMSG_RECONF_L2VPN_IF:
+			if ((nlif = malloc(sizeof(struct l2vpn_if))) == NULL)
+				fatal(NULL);
+			memcpy(nlif, imsg.data, sizeof(struct l2vpn_if));
+
+			nlif->l2vpn = nl2vpn;
+			LIST_INSERT_HEAD(&nl2vpn->if_list, nlif, entry);
+			break;
+		case IMSG_RECONF_L2VPN_PW:
+			if ((npw = malloc(sizeof(struct l2vpn_pw))) == NULL)
+				fatal(NULL);
+			memcpy(npw, imsg.data, sizeof(struct l2vpn_pw));
+
+			npw->l2vpn = nl2vpn;
+			LIST_INSERT_HEAD(&nl2vpn->pw_list, npw, entry);
 			break;
 		case IMSG_RECONF_END:
+			merge_config(leconf, nconf);
+			nconf = NULL;
 			break;
 		case IMSG_CTL_KROUTE:
 		case IMSG_CTL_KROUTE_ADDR:
@@ -489,6 +559,7 @@ ldpe_dispatch_lde(int fd, short event, void *bula)
 		case IMSG_MAPPING_ADD:
 		case IMSG_RELEASE_ADD:
 		case IMSG_REQUEST_ADD:
+		case IMSG_WITHDRAW_ADD:
 			if (imsg.hdr.len - IMSG_HEADER_SIZE != sizeof(map))
 				fatalx("invalid size of map request");
 			memcpy(&map, imsg.data, sizeof(map));
@@ -497,34 +568,38 @@ ldpe_dispatch_lde(int fd, short event, void *bula)
 			if (nbr == NULL) {
 				log_debug("ldpe_dispatch_lde: cannot find "
 				    "neighbor");
-				return;
+				break;
 			}
 			if (nbr->state != NBR_STA_OPER)
-				return;
+				break;
 
 			switch (imsg.hdr.type) {
 			case IMSG_MAPPING_ADD:
-				nbr_mapping_add(nbr, &nbr->mapping_list, &map);
+				mapping_list_add(&nbr->mapping_list, &map);
 				break;
 			case IMSG_RELEASE_ADD:
-				nbr_mapping_add(nbr, &nbr->release_list, &map);
+				mapping_list_add(&nbr->release_list, &map);
 				break;
 			case IMSG_REQUEST_ADD:
-				nbr_mapping_add(nbr, &nbr->request_list, &map);
+				mapping_list_add(&nbr->request_list, &map);
+				break;
+			case IMSG_WITHDRAW_ADD:
+				mapping_list_add(&nbr->withdraw_list, &map);
 				break;
 			}
 			break;
 		case IMSG_MAPPING_ADD_END:
 		case IMSG_RELEASE_ADD_END:
 		case IMSG_REQUEST_ADD_END:
+		case IMSG_WITHDRAW_ADD_END:
 			nbr = nbr_find_peerid(imsg.hdr.peerid);
 			if (nbr == NULL) {
 				log_debug("ldpe_dispatch_lde: cannot find "
 				    "neighbor");
-				return;
+				break;
 			}
 			if (nbr->state != NBR_STA_OPER)
-				return;
+				break;
 
 			switch (imsg.hdr.type) {
 			case IMSG_MAPPING_ADD_END:
@@ -539,6 +614,10 @@ ldpe_dispatch_lde(int fd, short event, void *bula)
 				send_labelmessage(nbr, MSG_TYPE_LABELREQUEST,
 				    &nbr->request_list);
 				break;
+			case IMSG_WITHDRAW_ADD_END:
+				send_labelmessage(nbr, MSG_TYPE_LABELWITHDRAW,
+				    &nbr->withdraw_list);
+				break;
 			}
 			break;
 		case IMSG_NOTIFICATION_SEND:
@@ -550,16 +629,17 @@ ldpe_dispatch_lde(int fd, short event, void *bula)
 			if (nbr == NULL) {
 				log_debug("ldpe_dispatch_lde: cannot find "
 				    "neighbor");
-				return;
+				break;
 			}
 			if (nbr->state != NBR_STA_OPER)
-				return;
+				break;
 
-			send_notification_nbr(nbr, nm.status,
-			    htonl(nm.messageid), htonl(nm.type));
+			send_notification_full(nbr->tcp, &nm);
 			break;
 		case IMSG_CTL_END:
 		case IMSG_CTL_SHOW_LIB:
+		case IMSG_CTL_SHOW_L2VPN_PW:
+		case IMSG_CTL_SHOW_L2VPN_BINDING:
 			control_imsg_relay(&imsg);
 			break;
 		default:
@@ -578,10 +658,45 @@ ldpe_dispatch_lde(int fd, short event, void *bula)
 	}
 }
 
+/* ARGSUSED */
+void
+ldpe_dispatch_pfkey(int fd, short event, void *bula)
+{
+	if (event & EV_READ) {
+		if (pfkey_read(fd, NULL) == -1) {
+			fatal("pfkey_read failed, exiting...");
+		}
+	}
+}
+
 u_int32_t
 ldpe_router_id(void)
 {
 	return (leconf->rtr_id.s_addr);
+}
+
+void
+mapping_list_add(struct mapping_head *mh, struct map *map)
+{
+	struct mapping_entry	*me;
+
+	me = calloc(1, sizeof(*me));
+	if (me == NULL)
+		fatal("mapping_list_add");
+	me->map = *map;
+
+	TAILQ_INSERT_TAIL(mh, me, entry);
+}
+
+void
+mapping_list_clr(struct mapping_head *mh)
+{
+	struct mapping_entry	*me;
+
+	while ((me = TAILQ_FIRST(mh)) != NULL) {
+		TAILQ_REMOVE(mh, me, entry);
+		free(me);
+	}
 }
 
 void

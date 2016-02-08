@@ -1,17 +1,17 @@
-#	$OpenBSD: Makefile,v 1.91 2015/02/16 16:18:02 schwarze Exp $
+#	$OpenBSD: Makefile,v 1.97 2015/07/19 05:59:07 schwarze Exp $
 
 .include <bsd.own.mk>
 
 CFLAGS  += -W -Wall -Wstrict-prototypes -Wno-unused-parameter
 DPADD += ${LIBUTIL}
-LDADD	+= -lsqlite3 -lutil
+LDADD	+= -lsqlite3 -lutil -lz
 
 SRCS=	mandoc.c mandoc_aux.c preconv.c read.c \
 	roff.c tbl.c tbl_opts.c tbl_layout.c tbl_data.c eqn.c
 SRCS+=	mdoc_macro.c mdoc.c mdoc_hash.c \
 	mdoc_argv.c mdoc_validate.c att.c msec.c st.c
 SRCS+=	man_macro.c man.c man_hash.c man_validate.c
-SRCS+=	main.c mdoc_term.c chars.c term.c tree.c man_term.c eqn_term.c
+SRCS+=	main.c mdoc_term.c tag.c chars.c term.c tree.c man_term.c eqn_term.c
 SRCS+=	mdoc_man.c
 SRCS+=	html.c mdoc_html.c man_html.c out.c eqn_html.c
 SRCS+=	term_ps.c term_ascii.c tbl_term.c tbl_html.c
@@ -26,7 +26,8 @@ LINKS =	${BINDIR}/mandoc ${BINDIR}/apropos \
 	${BINDIR}/mandoc /usr/sbin/makewhatis \
 	${BINDIR}/mandoc /usr/libexec/makewhatis
 
-MAN =	apropos.1 man.1 mandoc.1 whatis.1 makewhatis.8
+MAN =	apropos.1 man.1 mandoc.1 man.conf.5 makewhatis.8
+MLINKS=	apropos.1 whatis.1
 
 CLEANFILES += man.cgi cgi.o
 
@@ -50,10 +51,10 @@ HTML_OBJS =	html.o mdoc_html.o man_html.o tbl_html.o eqn_html.o out.o
 CGI_OBJS =	${LIBMANDOC_OBJS} ${HTML_OBJS} \
 		mansearch.o mansearch_const.o cgi.o
 
-cgi.o: main.h mandoc.h mandoc_aux.h manpath.h mansearch.h cgi.h
+cgi.o: main.h mandoc.h mandoc_aux.h manconf.h mansearch.h cgi.h
 
 man.cgi: ${CGI_OBJS}
-	${CC} ${LDFLAGS} -static -o ${.TARGET} ${CGI_OBJS} ${LDADD}
+	${CC} ${LDFLAGS} ${STATIC} -o ${.TARGET} ${CGI_OBJS} ${LDADD}
 
 installcgi: man.cgi
 	${INSTALL} -d -o root -g wheel -m 755 ${DESTDIR}/var/www/cgi-bin

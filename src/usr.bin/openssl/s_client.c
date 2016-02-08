@@ -1,4 +1,4 @@
-/* $OpenBSD: s_client.c,v 1.12 2015/01/13 10:48:24 bluhm Exp $ */
+/* $OpenBSD: s_client.c,v 1.14 2015/07/17 16:07:44 doug Exp $ */
 /* Copyright (C) 1995-1998 Eric Young (eay@cryptsoft.com)
  * All rights reserved.
  *
@@ -171,10 +171,6 @@
 
 #define BUFSIZZ 1024*8
 
-extern int verify_depth;
-extern int verify_error;
-extern int verify_return_error;
-
 static int c_nbio = 0;
 static int c_Pause = 0;
 static int c_debug = 0;
@@ -227,7 +223,6 @@ sc_usage(void)
 	BIO_printf(bio_err, " -quiet        - no s_client output\n");
 	BIO_printf(bio_err, " -ign_eof      - ignore input eof (default when -quiet)\n");
 	BIO_printf(bio_err, " -no_ign_eof   - don't ignore input eof\n");
-	BIO_printf(bio_err, " -ssl3         - just use SSLv3\n");
 	BIO_printf(bio_err, " -tls1_2       - just use TLSv1.2\n");
 	BIO_printf(bio_err, " -tls1_1       - just use TLSv1.1\n");
 	BIO_printf(bio_err, " -tls1         - just use TLSv1\n");
@@ -476,8 +471,6 @@ s_client_main(int argc, char **argv)
 			nbio_test = 1;
 		else if (strcmp(*argv, "-state") == 0)
 			state = 1;
-		else if (strcmp(*argv, "-ssl3") == 0)
-			meth = SSLv3_client_method();
 		else if (strcmp(*argv, "-tls1_2") == 0)
 			meth = TLSv1_2_client_method();
 		else if (strcmp(*argv, "-tls1_1") == 0)

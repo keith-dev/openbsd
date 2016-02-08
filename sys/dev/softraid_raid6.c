@@ -1,4 +1,4 @@
-/* $OpenBSD: softraid_raid6.c,v 1.63 2014/09/14 14:17:24 jsg Exp $ */
+/* $OpenBSD: softraid_raid6.c,v 1.69 2015/07/21 03:30:51 krw Exp $ */
 /*
  * Copyright (c) 2009 Marco Peereboom <marco@peereboom.us>
  * Copyright (c) 2009 Jordan Hargrave <jordan@openbsd.org>
@@ -29,7 +29,6 @@
 #include <sys/rwlock.h>
 #include <sys/queue.h>
 #include <sys/fcntl.h>
-#include <sys/disklabel.h>
 #include <sys/mount.h>
 #include <sys/sensors.h>
 #include <sys/stat.h>
@@ -42,7 +41,6 @@
 #include <scsi/scsi_disk.h>
 
 #include <dev/softraidvar.h>
-#include <dev/rndvar.h>
 
 uint8_t *gf_map[256];
 uint8_t	gf_pow[768];
@@ -63,7 +61,7 @@ void	sr_raid6_set_vol_state(struct sr_discipline *);
 
 void	sr_raid6_xorp(void *, void *, int);
 void	sr_raid6_xorq(void *, void *, int, int);
-int	sr_raid6_addio(struct sr_workunit *wu, int, daddr_t, daddr_t,
+int	sr_raid6_addio(struct sr_workunit *wu, int, daddr_t, long,
 	    void *, int, int, void *, void *, int);
 void	sr_raid6_scrub(struct sr_discipline *);
 int	sr_failio(struct sr_workunit *);
@@ -378,15 +376,15 @@ sr_raid6_rw(struct sr_workunit *wu)
 	struct scsi_xfer	*xs = wu->swu_xs;
 	struct sr_chunk		*scp;
 	int			s, fail, i, gxinv, pxinv;
-	daddr_t			blk, lba;
-	int64_t			chunk_offs, lbaoffs, phys_offs, strip_offs;
-	int64_t			strip_no, strip_size, strip_bits;
+	daddr_t			blkno, lba;
+	int64_t			chunk_offs, lbaoffs, offset, strip_offs;
+	int64_t			strip_no, strip_size, strip_bits, row_size;
 	int64_t			fchunk, no_chunk, chunk, qchunk, pchunk;
-	int64_t			length, datalen, row_size;
+	long			length, datalen;
 	void			*pbuf, *data, *qbuf;
 
-	/* blk and scsi error will be handled by sr_validate_io */
-	if (sr_validate_io(wu, &blk, "sr_raid6_rw"))
+	/* blkno and scsi error will be handled by sr_validate_io */
+	if (sr_validate_io(wu, &blkno, "sr_raid6_rw"))
 		goto bad;
 
 	strip_size = sd->sd_meta->ssdi.ssd_strip_size;
@@ -396,7 +394,7 @@ sr_raid6_rw(struct sr_workunit *wu)
 
 	data = xs->data;
 	datalen = xs->datalen;
-	lbaoffs	= blk << DEV_BSHIFT;
+	lbaoffs	= blkno << DEV_BSHIFT;
 
 	if (xs->flags & SCSI_DATA_OUT) {
 		if ((wu_r = sr_scsi_wu_get(sd, SCSI_NOSLEEP)) == NULL){
@@ -412,8 +410,7 @@ sr_raid6_rw(struct sr_workunit *wu)
 		strip_no = lbaoffs >> strip_bits;
 		strip_offs = lbaoffs & (strip_size - 1);
 		chunk_offs = (strip_no / no_chunk) << strip_bits;
-		phys_offs = chunk_offs + strip_offs +
-		    (sd->sd_meta->ssd_data_offset << DEV_BSHIFT);
+		offset = chunk_offs + strip_offs;
 
 		/* get size remaining in this stripe */
 		length = MIN(strip_size - strip_offs, datalen);
@@ -431,7 +428,7 @@ sr_raid6_rw(struct sr_workunit *wu)
 		if (chunk >= qchunk)
 			chunk++;
 
-		lba = phys_offs >> DEV_BSHIFT;
+		lba = offset >> DEV_BSHIFT;
 
 		/* XXX big hammer.. exclude I/O from entire stripe */
 		if (wu->swu_blk_start == 0)
@@ -733,17 +730,16 @@ sr_raid6_wu_done(struct sr_workunit *wu)
 
 int
 sr_raid6_addio(struct sr_workunit *wu, int chunk, daddr_t blkno,
-    daddr_t len, void *data, int xsflags, int ccbflags, void *pbuf,
+    long len, void *data, int xsflags, int ccbflags, void *pbuf,
     void *qbuf, int gn)
 {
 	struct sr_discipline	*sd = wu->swu_dis;
 	struct sr_ccb		*ccb;
 	struct sr_raid6_opaque  *pqbuf;
 
-	DNPRINTF(SR_D_DIS, "sr_raid6_addio: %s %d.%llx %llx %p:%p\n",
+	DNPRINTF(SR_D_DIS, "sr_raid6_addio: %s %d.%lld %ld %p:%p\n",
 	    (xsflags & SCSI_DATA_IN) ? "read" : "write", chunk,
-	    (long long)blkno, (long long)len,
-	    pbuf, qbuf);
+	    (long long)blkno, len, pbuf, qbuf);
 
 	/* Allocate temporary buffer. */
 	if (data == NULL) {
@@ -796,14 +792,14 @@ sr_raid6_xorp(void *p, void *d, int len)
 void
 sr_raid6_xorq(void *q, void *d, int len, int gn)
 {
-	uint32_t 	*qbuf = q, *data = d, x;
-	uint8_t	 	*gn_map = gf_map[gn];
+	uint32_t	*qbuf = q, *data = d, x;
+	uint8_t		*gn_map = gf_map[gn];
 
 	len >>= 2;
 	while (len--) {
 		x = *data++;
 		*qbuf++ ^= (((uint32_t)gn_map[x & 0xff]) |
-		  	    ((uint32_t)gn_map[(x >> 8) & 0xff] << 8) |
+			    ((uint32_t)gn_map[(x >> 8) & 0xff] << 8) |
 			    ((uint32_t)gn_map[(x >> 16) & 0xff] << 16) |
 			    ((uint32_t)gn_map[(x >> 24) & 0xff] << 24));
 	}

@@ -1,4 +1,4 @@
-/*	$OpenBSD: raw_usrreq.c,v 1.17 2014/09/08 06:24:13 jsg Exp $	*/
+/*	$OpenBSD: raw_usrreq.c,v 1.21 2015/07/15 22:16:42 deraadt Exp $	*/
 /*	$NetBSD: raw_usrreq.c,v 1.11 1996/02/13 22:00:43 christos Exp $	*/
 
 /*
@@ -41,7 +41,6 @@
 #include <sys/errno.h>
 #include <sys/systm.h>
 
-#include <net/if.h>
 #include <net/netisr.h>
 #include <net/raw_cb.h>
 
@@ -107,9 +106,9 @@ raw_input(struct mbuf *m0, ...)
 			continue;
 		if (last) {
 			struct mbuf *n;
-			if ((n = m_copy(m, 0, (int)M_COPYALL)) != NULL) {
+			if ((n = m_copym(m, 0, M_COPYALL, M_NOWAIT)) != NULL) {
 				if (sbappendaddr(&last->so_rcv, src,
-				    n, (struct mbuf *)0) == 0)
+				    n, (struct mbuf *)NULL) == 0)
 					/* should notify about lost packet */
 					m_freem(n);
 				else {
@@ -122,7 +121,7 @@ raw_input(struct mbuf *m0, ...)
 	}
 	if (last) {
 		if (sbappendaddr(&last->so_rcv, src,
-		    m, (struct mbuf *)0) == 0)
+		    m, (struct mbuf *)NULL) == 0)
 			m_freem(m);
 		else {
 			sorwakeup(last);
@@ -311,7 +310,6 @@ raw_usrreq(struct socket *so, int req, struct mbuf *m, struct mbuf *nam,
 	}
 	splx(s);
 release:
-	if (m != NULL)
-		m_freem(m);
+	m_freem(m);
 	return (error);
 }

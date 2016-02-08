@@ -1,4 +1,4 @@
-/*	$OpenBSD: relay_http.c,v 1.43 2015/01/22 17:42:09 reyk Exp $	*/
+/*	$OpenBSD: relay_http.c,v 1.52 2015/07/28 10:24:26 reyk Exp $	*/
 
 /*
  * Copyright (c) 2006 - 2015 Reyk Floeter <reyk@openbsd.org>
@@ -35,6 +35,9 @@
 #include <fnmatch.h>
 #include <siphash.h>
 #include <imsg.h>
+#if DEBUG > 1
+#include <unistd.h>
+#endif
 
 #include "relayd.h"
 #include "http.h"
@@ -146,6 +149,7 @@ relay_httpdesc_free(struct http_descriptor *desc)
 		desc->query_val = NULL;
 	}
 	kv_purge(&desc->http_headers);
+	desc->http_lastheader = NULL;
 }
 
 void
@@ -210,7 +214,7 @@ relay_read_http(struct bufferevent *bev, void *arg)
 		else
 			value = strchr(key, ':');
 		if (value == NULL) {
-			if (cre->line == 1) {
+			if (cre->line <= 2) {
 				free(line);
 				relay_abort_http(con, 400, "malformed", 0);
 				return;
@@ -271,8 +275,10 @@ relay_read_http(struct bufferevent *bev, void *arg)
 			goto lookup;
 		} else if (cre->line == 1 && cre->dir == RELAY_DIR_REQUEST) {
 			if ((desc->http_method = relay_httpmethod_byname(key))
-			    == HTTP_METHOD_NONE)
+			    == HTTP_METHOD_NONE) {
+				free(line);
 				goto fail;
+			}
 			/*
 			 * Decode request path and query
 			 */
@@ -415,7 +421,7 @@ relay_read_http(struct bufferevent *bev, void *arg)
 		relay_reset_http(cre);
  done:
 		if (cre->dir == RELAY_DIR_REQUEST && cre->toread <= 0 &&
-		    cre->dst->bev == NULL) {
+		    cre->dst->state != STATE_CONNECTED) {
 			if (rlay->rl_conf.fwdmode == FWD_TRANS) {
 				relay_bindanyreq(con, 0, IPPROTO_TCP);
 				return;
@@ -430,11 +436,18 @@ relay_read_http(struct bufferevent *bev, void *arg)
 		relay_close(con, "last http read (done)");
 		return;
 	}
+	switch (relay_splice(cre)) {
+	case -1:
+		relay_close(con, strerror(errno));
+	case 1:
+		return;
+	case 0:
+		break;
+	}
+	bufferevent_enable(bev, EV_READ);
 	if (EVBUFFER_LENGTH(src) && bev->readcb != relay_read_http)
 		bev->readcb(bev, arg);
-	bufferevent_enable(bev, EV_READ);
-	if (relay_splice(cre) == -1)
-		relay_close(con, strerror(errno));
+	/* The callback readcb() might have freed the session. */
 	return;
  fail:
 	relay_abort_http(con, 500, strerror(errno), 0);
@@ -448,6 +461,8 @@ relay_read_httpcontent(struct bufferevent *bev, void *arg)
 {
 	struct ctl_relay_event	*cre = arg;
 	struct rsession		*con = cre->con;
+	struct protocol		*proto = con->se_relay->rl_proto;
+
 	struct evbuffer		*src = EVBUFFER_INPUT(bev);
 	size_t			 size;
 
@@ -484,9 +499,15 @@ relay_read_httpcontent(struct bufferevent *bev, void *arg)
 	}
 	if (con->se_done)
 		goto done;
+	bufferevent_enable(bev, EV_READ);
+
+	if (cre->dst->bev && EVBUFFER_LENGTH(EVBUFFER_OUTPUT(cre->dst->bev)) >
+	    (size_t)RELAY_MAX_PREFETCH * proto->tcpbufsiz)
+		bufferevent_disable(cre->bev, EV_READ);
+
 	if (bev->readcb != relay_read_httpcontent)
 		bev->readcb(bev, arg);
-	bufferevent_enable(bev, EV_READ);
+	/* The callback readcb() might have freed the session. */
 	return;
  done:
 	relay_close(con, "last http content read");
@@ -500,6 +521,7 @@ relay_read_httpchunks(struct bufferevent *bev, void *arg)
 {
 	struct ctl_relay_event	*cre = arg;
 	struct rsession		*con = cre->con;
+	struct protocol		*proto = con->se_relay->rl_proto;
 	struct evbuffer		*src = EVBUFFER_INPUT(bev);
 	char			*line;
 	long long		 llval;
@@ -601,9 +623,15 @@ relay_read_httpchunks(struct bufferevent *bev, void *arg)
  next:
 	if (con->se_done)
 		goto done;
+	bufferevent_enable(bev, EV_READ);
+
+	if (cre->dst->bev && EVBUFFER_LENGTH(EVBUFFER_OUTPUT(cre->dst->bev)) >
+	    (size_t)RELAY_MAX_PREFETCH * proto->tcpbufsiz)
+		bufferevent_disable(cre->bev, EV_READ);
+
 	if (EVBUFFER_LENGTH(src))
 		bev->readcb(bev, arg);
-	bufferevent_enable(bev, EV_READ);
+	/* The callback readcb() might have freed the session. */
 	return;
 
  done:
@@ -1321,7 +1349,7 @@ relay_httpcookie_test(struct ctl_relay_event *cre, struct relay_rule *rule,
     struct kvlist *actions)
 {
 	struct http_descriptor	*desc = cre->desc;
-	struct kv               *kv = &rule->rule_kv[KEY_TYPE_COOKIE], key;
+	struct kv		*kv = &rule->rule_kv[KEY_TYPE_COOKIE], key;
 	struct kv		*match = NULL;
 
 	if (kv->kv_type != KEY_TYPE_COOKIE)
@@ -1363,7 +1391,7 @@ relay_match_actions(struct ctl_relay_event *cre, struct relay_rule *rule,
     struct kvlist *matches, struct kvlist *actions)
 {
 	struct rsession		*con = cre->con;
-	struct kv		*kv;
+	struct kv		*kv, *tmp;
 
 	/*
 	 * Apply the following options instantly (action per match).
@@ -1382,7 +1410,7 @@ relay_match_actions(struct ctl_relay_event *cre, struct relay_rule *rule,
 	 */
 	if (matches == NULL) {
 		/* 'pass' or 'block' rule */
-		TAILQ_FOREACH(kv, &rule->rule_kvlist, kv_rule_entry) {
+		TAILQ_FOREACH_SAFE(kv, &rule->rule_kvlist, kv_rule_entry, tmp) {
 			TAILQ_INSERT_TAIL(actions, kv, kv_action_entry);
 			TAILQ_REMOVE(&rule->rule_kvlist, kv, kv_rule_entry);
 		}

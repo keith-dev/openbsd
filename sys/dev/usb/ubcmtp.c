@@ -1,4 +1,4 @@
-/*	$OpenBSD: ubcmtp.c,v 1.6 2014/07/12 18:48:52 tedu Exp $ */
+/*	$OpenBSD: ubcmtp.c,v 1.9 2015/06/17 20:39:47 jcs Exp $ */
 
 /*
  * Copyright (c) 2013-2014, joshua stein <jcs@openbsd.org>
@@ -48,7 +48,6 @@
 #include <dev/usb/usbdi.h>
 #include <dev/usb/usbdevs.h>
 #include <dev/usb/uhidev.h>
-#include <dev/usb/hid.h>
 #include <dev/usb/usbhid.h>
 
 #include <dev/wscons/wsconsio.h>
@@ -554,7 +553,7 @@ ubcmtp_ioctl(void *v, unsigned long cmd, caddr_t data, int flag, struct proc *p)
 	struct wsmouse_calibcoords *wsmc = (struct wsmouse_calibcoords *)data;
 	int wsmode;
 
-	DPRINTF("%s: in %s with cmd 0x%x\n", sc->sc_dev.dv_xname, __func__,
+	DPRINTF("%s: in %s with cmd 0x%lx\n", sc->sc_dev.dv_xname, __func__,
 	    cmd);
 
 	switch (cmd) {
@@ -820,7 +819,8 @@ ubcmtp_tp_intr(struct usbd_xfer *xfer, void *priv, usbd_status status)
 			DPRINTF("absolute input %d, %d (finger %d, button %d)\n",
 			    sc->pos[0].x, sc->pos[0].y, finger, sc->btn);
 			wsmouse_input(sc->sc_wsmousedev, sc->btn, sc->pos[0].x,
-			    sc->pos[0].y, 50 /* fake z for now */,
+			    sc->pos[0].y,
+			    (finger == 0 ? 0 : 50), /* fake z for now */
 			    finger,
 			    WSMOUSE_INPUT_ABSOLUTE_X |
 			    WSMOUSE_INPUT_ABSOLUTE_Y |

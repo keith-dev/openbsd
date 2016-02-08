@@ -1,4 +1,4 @@
-/*	$OpenBSD: kern_sysctl.c,v 1.283 2015/02/11 05:09:33 claudio Exp $	*/
+/*	$OpenBSD: kern_sysctl.c,v 1.287 2015/08/03 14:20:39 bluhm Exp $	*/
 /*	$NetBSD: kern_sysctl.c,v 1.17 1996/05/20 17:49:05 mrg Exp $	*/
 
 /*-
@@ -70,6 +70,7 @@
 #include <sys/domain.h>
 #include <sys/protosw.h>
 #include <sys/timetc.h>
+#include <sys/tame.h>
 #include <sys/evcount.h>
 #include <sys/un.h>
 #include <sys/unpcb.h>
@@ -86,11 +87,14 @@
 #include <net/route.h>
 #include <netinet/in.h>
 #include <netinet/ip.h>
+#include <netinet/ip_var.h>
 #include <netinet/in_pcb.h>
 #include <netinet/ip6.h>
 #include <netinet/tcp.h>
 #include <netinet/tcp_timer.h>
 #include <netinet/tcp_var.h>
+#include <netinet/udp.h>
+#include <netinet/udp_var.h>
 #include <netinet6/ip6_var.h>
 
 #ifdef DDB
@@ -128,8 +132,8 @@ int sysctl_sensors(int *, u_int, void *, size_t *, void *, size_t);
 int sysctl_emul(int *, u_int, void *, size_t *, void *, size_t);
 int sysctl_cptime2(int *, u_int, void *, size_t *, void *, size_t);
 
-void fill_file(struct kinfo_file *, struct file *, struct filedesc *,
-    int, struct vnode *, struct process *, struct proc *, int);
+void fill_file(struct kinfo_file *, struct file *, struct filedesc *, int,
+    struct vnode *, struct process *, struct proc *, struct socket *, int);
 void fill_kproc(struct process *, struct kinfo_proc *, struct proc *, int);
 
 int (*cpu_cpuspeed)(int *);
@@ -169,6 +173,9 @@ sys___sysctl(struct proc *p, void *v, register_t *retval)
 		       SCARG(uap, namelen) * sizeof(int));
 	if (error)
 		return (error);
+
+	if (tame_sysctl_check(p, SCARG(uap, namelen), name, SCARG(uap, new)))
+		return (tame_fail(p, EPERM, _TM_SELF));
 
 	switch (name[0]) {
 	case CTL_KERN:
@@ -1000,7 +1007,7 @@ sysctl_rdstruct(void *oldp, size_t *oldlenp, void *newp, const void *sp,
 void
 fill_file(struct kinfo_file *kf, struct file *fp, struct filedesc *fdp,
 	  int fd, struct vnode *vp, struct process *pr, struct proc *p,
-	  int show_pointers)
+	  struct socket *so, int show_pointers)
 {
 	struct vattr va;
 
@@ -1041,6 +1048,9 @@ fill_file(struct kinfo_file *kf, struct file *fp, struct filedesc *fdp,
 		kf->f_flag = FREAD;
 		if (fd == KERN_FILE_TRACE)
 			kf->f_flag |= FWRITE;
+	} else if (so != NULL) {
+		/* fake it */
+		kf->f_type = DTYPE_SOCKET;
 	}
 
 	/* information about the object associated with this file */
@@ -1073,7 +1083,8 @@ fill_file(struct kinfo_file *kf, struct file *fp, struct filedesc *fdp,
 		break;
 
 	case DTYPE_SOCKET: {
-		struct socket *so = (struct socket *)fp->f_data;
+		if (so == NULL)
+			so = (struct socket *)fp->f_data;
 
 		kf->so_type = so->so_type;
 		kf->so_state = so->so_state;
@@ -1146,8 +1157,10 @@ fill_file(struct kinfo_file *kf, struct file *fp, struct filedesc *fdp,
 
 			if (show_pointers) {
 				kf->unp_conn	= PTRTOINT64(unpcb->unp_conn);
-				kf->unp_refs	= PTRTOINT64(unpcb->unp_refs);
-				kf->unp_nextref	= PTRTOINT64(unpcb->unp_nextref);
+				kf->unp_refs	= PTRTOINT64(
+				    SLIST_FIRST(&unpcb->unp_refs));
+				kf->unp_nextref	= PTRTOINT64(
+				    SLIST_NEXT(unpcb, unp_nextref));
 				kf->v_un	= PTRTOINT64(unpcb->unp_vnode);
 				kf->unp_addr	= PTRTOINT64(unpcb->unp_addr);
 			}
@@ -1209,7 +1222,7 @@ sysctl_file(int *name, u_int namelen, char *where, size_t *sizep,
 {
 	struct kinfo_file *kf;
 	struct filedesc *fdp;
-	struct file *fp;
+	struct file *fp, *nfp;
 	struct process *pr;
 	size_t buflen, elem_size, elem_count, outsize;
 	char *dp = where;
@@ -1236,28 +1249,73 @@ sysctl_file(int *name, u_int namelen, char *where, size_t *sizep,
 
 	kf = malloc(sizeof(*kf), M_TEMP, M_WAITOK);
 
-#define FILLIT(fp, fdp, i, vp, pr) do {				\
-	if (buflen >= elem_size && elem_count > 0) {		\
-		fill_file(kf, fp, fdp, i, vp, pr, p, show_pointers);	\
-		error = copyout(kf, dp, outsize);		\
-		if (error)					\
-			break;					\
-		dp += elem_size;				\
-		buflen -= elem_size;				\
-		elem_count--;					\
-	}							\
-	needed += elem_size;					\
+#define FILLIT2(fp, fdp, i, vp, pr, so) do {				\
+	if (buflen >= elem_size && elem_count > 0) {			\
+		fill_file(kf, fp, fdp, i, vp, pr, p, so, show_pointers);\
+		error = copyout(kf, dp, outsize);			\
+		if (error)						\
+			break;						\
+		dp += elem_size;					\
+		buflen -= elem_size;					\
+		elem_count--;						\
+	}								\
+	needed += elem_size;						\
 } while (0)
+#define FILLIT(fp, fdp, i, vp, pr) \
+	FILLIT2(fp, fdp, i, vp, pr, NULL)
+#define FILLSO(so) \
+	FILLIT2(NULL, NULL, 0, NULL, NULL, so)
 
 	switch (op) {
 	case KERN_FILE_BYFILE:
-		LIST_FOREACH(fp, &filehead, f_list) {
-			if (fp->f_count == 0)
-				continue;
-			if (arg != 0 && fp->f_type != arg)
-				continue;
-			FILLIT(fp, NULL, 0, NULL, NULL);
+		/* use the inp-tables to pick up closed connections, too */
+		if (arg == DTYPE_SOCKET) {
+			extern struct inpcbtable rawcbtable, rawin6pcbtable;
+			struct inpcb *inp;
+			int s;
+
+			s = splnet();
+			TAILQ_FOREACH(inp, &tcbtable.inpt_queue, inp_queue)
+				FILLSO(inp->inp_socket);
+			TAILQ_FOREACH(inp, &udbtable.inpt_queue, inp_queue)
+				FILLSO(inp->inp_socket);
+			TAILQ_FOREACH(inp, &rawcbtable.inpt_queue, inp_queue)
+				FILLSO(inp->inp_socket);
+#ifdef INET6
+			TAILQ_FOREACH(inp, &rawin6pcbtable.inpt_queue,
+			    inp_queue)
+				FILLSO(inp->inp_socket);
+#endif
+			splx(s);
 		}
+		fp = LIST_FIRST(&filehead);
+		/* don't FREF when f_count == 0 to avoid race in fdrop() */
+		while (fp != NULL && fp->f_count == 0)
+			fp = LIST_NEXT(fp, f_list);
+		if (fp == NULL)
+			break;
+		FREF(fp);
+		do {
+			if (fp->f_count > 1 && /* 0, +1 for our FREF() */
+			    (arg == 0 || fp->f_type == arg)) {
+				int af, skip = 0;
+				if (arg == DTYPE_SOCKET && fp->f_type == arg) {
+					af = ((struct socket *)fp->f_data)->
+					    so_proto->pr_domain->dom_family;
+					if (af == AF_INET || af == AF_INET6)
+						skip = 1;
+				}
+				if (!skip)
+					FILLIT(fp, NULL, 0, NULL, NULL);
+			}
+			nfp = LIST_NEXT(fp, f_list);
+			while (nfp != NULL && nfp->f_count == 0)
+				nfp = LIST_NEXT(nfp, f_list);
+			if (nfp != NULL)
+				FREF(nfp);
+			FRELE(fp, p);
+			fp = nfp;
+		} while (fp != NULL);
 		break;
 	case KERN_FILE_BYPID:
 		/* A arg of -1 indicates all processes */

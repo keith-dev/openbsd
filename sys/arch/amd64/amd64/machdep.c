@@ -1,4 +1,4 @@
-/*	$OpenBSD: machdep.c,v 1.206 2015/01/12 16:33:31 deraadt Exp $	*/
+/*	$OpenBSD: machdep.c,v 1.215 2015/07/16 23:03:40 sf Exp $	*/
 /*	$NetBSD: machdep.c,v 1.3 2003/05/07 22:58:18 fvdl Exp $	*/
 
 /*-
@@ -114,7 +114,6 @@
 #include <dev/isa/isareg.h>
 #include <machine/isa_machdep.h>
 #include <dev/ic/i8042reg.h>
-#include <amd64/isa/nvram.h>
 
 #ifdef DDB
 #include <machine/db_machdep.h>
@@ -156,7 +155,6 @@ char machine[] = MACHINE;
 void (*cpu_idle_leave_fcn)(void) = NULL;
 void (*cpu_idle_cycle_fcn)(void) = NULL;
 void (*cpu_idle_enter_fcn)(void) = NULL;
-void (*cpu_busy_cycle_fcn)(void) = NULL;
 
 /* the following is used externally for concurrent handlers */
 int setperf_prio = 0;
@@ -164,7 +162,7 @@ int setperf_prio = 0;
 #ifdef CPURESET_DELAY
 int	cpureset_delay = CPURESET_DELAY;
 #else
-int     cpureset_delay = 2000; /* default to 2s */
+int     cpureset_delay = 0;
 #endif
 
 int	physmem;
@@ -551,10 +549,10 @@ sendsig(sig_t catcher, int sig, int mask, u_long code, int type,
 
 	if (p->p_md.md_flags & MDP_USEDFPU) {
 		fpusave_proc(p, 1);
-		sp -= sizeof(struct fxsave64);
+		sp -= fpu_save_len;
 		ksc.sc_fpstate = (struct fxsave64 *)sp;
 		if (copyout(&p->p_addr->u_pcb.pcb_savefpu.fp_fxsave,
-		    (void *)sp, sizeof(struct fxsave64)))
+		    (void *)sp, fpu_save_len))
 			sigexit(p, SIGILL);
 
 		/* Signal handlers get a completely clean FP state */
@@ -578,11 +576,6 @@ sendsig(sig_t catcher, int sig, int mask, u_long code, int type,
 	/*
 	 * Build context to run handler in.
 	 */
-	tf->tf_ds = GSEL(GUDATA_SEL, SEL_UPL);
-	tf->tf_es = GSEL(GUDATA_SEL, SEL_UPL);
-	tf->tf_fs = GSEL(GUDATA_SEL, SEL_UPL);
-	tf->tf_gs = GSEL(GUDATA_SEL, SEL_UPL);
-
 	tf->tf_rax = (u_int64_t)catcher;
 	tf->tf_rdi = sig;
 	tf->tf_rsi = sip;
@@ -639,7 +632,7 @@ sys_sigreturn(struct proc *p, void *v, register_t *retval)
 	if (ksc.sc_fpstate) {
 		struct fxsave64 *fx = &p->p_addr->u_pcb.pcb_savefpu.fp_fxsave;
 
-		if ((error = copyin(ksc.sc_fpstate, fx, sizeof(*fx))))
+		if ((error = copyin(ksc.sc_fpstate, fx, fpu_save_len)))
 			return (error);
 		fx->fx_mxcsr &= fpu_mxcsr_mask;
 		p->p_md.md_flags |= MDP_USEDFPU;
@@ -672,15 +665,15 @@ cpu_kick(struct cpu_info *ci)
 {
 	/* only need to kick other CPUs */
 	if (ci != curcpu()) {
-		if (ci->ci_mwait != NULL) {
+		if (cpu_mwait_size > 0) {
 			/*
 			 * If not idling, then send an IPI, else
 			 * just clear the "keep idling" bit.
 			 */
-			if ((ci->ci_mwait[0] & MWAIT_IN_IDLE) == 0)
+			if ((ci->ci_mwait & MWAIT_IN_IDLE) == 0)
 				x86_send_ipi(ci, X86_IPI_NOP);
 			else
-				atomic_clearbits_int(&ci->ci_mwait[0],
+				atomic_clearbits_int(&ci->ci_mwait,
 				    MWAIT_KEEP_IDLING);
 		} else {
 			/* no mwait, so need an IPI */
@@ -705,12 +698,12 @@ signotify(struct proc *p)
 void
 cpu_unidle(struct cpu_info *ci)
 {
-	if (ci->ci_mwait != NULL) {
+	if (cpu_mwait_size > 0 && (ci->ci_mwait & MWAIT_ONLY)) {
 		/*
 		 * Just clear the "keep idling" bit; if it wasn't
 		 * idling then we didn't need to do anything anyway.
 		 */
-		atomic_clearbits_int(&ci->ci_mwait[0], MWAIT_KEEP_IDLING);
+		atomic_clearbits_int(&ci->ci_mwait, MWAIT_KEEP_IDLING);
 		return;
 	}
 
@@ -746,8 +739,6 @@ boot(int howto)
 		}
 	}
 	if_downall();
-
-	delay(4*1000000);	/* XXX */
 
 	uvm_shutdown();
 	splhigh();
@@ -1015,6 +1006,29 @@ dumpsys(void)
 }
 
 /*
+ * Set FS.base for userspace and reset %ds, %es, and %fs segment registers
+ */
+void
+reset_segs(struct pcb *pcb, u_int64_t fsbase)
+{
+	/*
+	 * Segment registers (%ds, %es, %fs, %gs) aren't in the trapframe.
+	 * %gs is reset on return to userspace to avoid having to deal with
+	 * swapgs; others are reset on context switch and here.  This
+	 * operates like the cpu_switchto() sequence: if we haven't reset
+	 * %[def]s already, do so now.
+	 */
+	if (curcpu()->ci_flags & CPUF_USERSEGS) {
+		curcpu()->ci_flags &= ~CPUF_USERSEGS;
+		__asm volatile(
+		    "movw %%ax,%%ds\n\t"
+		    "movw %%ax,%%es\n\t"
+		    "movw %%ax,%%fs" : : "a"(GSEL(GUDATA_SEL, SEL_UPL)));
+	}
+	pcb->pcb_fsbase = fsbase;
+}
+
+/*
  * Clear registers on exec
  */
 void
@@ -1027,13 +1041,11 @@ setregs(struct proc *p, struct exec_package *pack, u_long stack,
 	if (p->p_addr->u_pcb.pcb_fpcpu != NULL)
 		fpusave_proc(p, 0);
 	p->p_md.md_flags &= ~MDP_USEDFPU;
-	p->p_addr->u_pcb.pcb_fsbase = 0;
+	p->p_md.md_flags |= MDP_IRET;
+
+	reset_segs(&p->p_addr->u_pcb, 0);
 
 	tf = p->p_md.md_regs;
-	tf->tf_ds = GSEL(GUDATA_SEL, SEL_UPL);
-	tf->tf_es = GSEL(GUDATA_SEL, SEL_UPL);
-	tf->tf_fs = GSEL(GUDATA_SEL, SEL_UPL);
-	tf->tf_gs = GSEL(GUDATA_SEL, SEL_UPL);
 	tf->tf_rdi = 0;
 	tf->tf_rsi = 0;
 	tf->tf_rbp = 0;
@@ -1064,7 +1076,6 @@ setregs(struct proc *p, struct exec_package *pack, u_long stack,
 
 struct gate_descriptor *idt;
 char idt_allocmap[NIDT];
-char *gdtstore;
 extern  struct user *proc0paddr;
 
 void
@@ -1545,25 +1556,25 @@ init_x86_64(paddr_t first_avail)
 
 	idt = (struct gate_descriptor *)idt_vaddr;
 	cpu_info_primary.ci_tss = (void *)(idt + NIDT);
-	gdtstore = (void *)(cpu_info_primary.ci_tss + 1);
+	cpu_info_primary.ci_gdt = (void *)(cpu_info_primary.ci_tss + 1);
 
 	/* make gdt gates and memory segments */
-	set_mem_segment(GDT_ADDR_MEM(gdtstore, GCODE_SEL), 0,
+	set_mem_segment(GDT_ADDR_MEM(cpu_info_primary.ci_gdt, GCODE_SEL), 0,
 	    0xfffff, SDT_MEMERA, SEL_KPL, 1, 0, 1);
 
-	set_mem_segment(GDT_ADDR_MEM(gdtstore, GDATA_SEL), 0,
+	set_mem_segment(GDT_ADDR_MEM(cpu_info_primary.ci_gdt, GDATA_SEL), 0,
 	    0xfffff, SDT_MEMRWA, SEL_KPL, 1, 0, 1);
 
-	set_mem_segment(GDT_ADDR_MEM(gdtstore, GUCODE32_SEL), 0,
+	set_mem_segment(GDT_ADDR_MEM(cpu_info_primary.ci_gdt, GUCODE32_SEL), 0,
 	    atop(VM_MAXUSER_ADDRESS32) - 1, SDT_MEMERA, SEL_UPL, 1, 1, 0);
 
-	set_mem_segment(GDT_ADDR_MEM(gdtstore, GUDATA_SEL), 0,
+	set_mem_segment(GDT_ADDR_MEM(cpu_info_primary.ci_gdt, GUDATA_SEL), 0,
 	    atop(VM_MAXUSER_ADDRESS) - 1, SDT_MEMRWA, SEL_UPL, 1, 0, 1);
 
-	set_mem_segment(GDT_ADDR_MEM(gdtstore, GUCODE_SEL), 0,
+	set_mem_segment(GDT_ADDR_MEM(cpu_info_primary.ci_gdt, GUCODE_SEL), 0,
 	    atop(VM_MAXUSER_ADDRESS) - 1, SDT_MEMERA, SEL_UPL, 1, 0, 1);
 
-	set_sys_segment(GDT_ADDR_SYS(gdtstore, GPROC0_SEL),
+	set_sys_segment(GDT_ADDR_SYS(cpu_info_primary.ci_gdt, GPROC0_SEL),
 	    cpu_info_primary.ci_tss, sizeof (struct x86_64_tss)-1,
 	    SDT_SYS386TSS, SEL_KPL, 0);
 
@@ -1576,7 +1587,7 @@ init_x86_64(paddr_t first_avail)
 		idt_allocmap[x] = 1;
 	}
 
-	setregion(&region, gdtstore, GDT_SIZE - 1);
+	setregion(&region, cpu_info_primary.ci_gdt, GDT_SIZE - 1);
 	lgdt(&region);
 
 	cpu_init_idt();
@@ -1905,22 +1916,6 @@ check_context(const struct reg *regs, struct trapframe *tf)
 	uint16_t sel;
 
 	if (((regs->r_rflags ^ tf->tf_rflags) & PSL_USERSTATIC) != 0)
-		return EINVAL;
-
-	sel = regs->r_es & 0xffff;
-	if (sel != 0 && !VALID_USER_DSEL(sel))
-		return EINVAL;
-
-	sel = regs->r_fs & 0xffff;
-	if (sel != 0 && !VALID_USER_DSEL(sel))
-		return EINVAL;
-
-	sel = regs->r_gs & 0xffff;
-	if (sel != 0 && !VALID_USER_DSEL(sel))
-		return EINVAL;
-
-	sel = regs->r_ds & 0xffff;
-	if (!VALID_USER_DSEL(sel))
 		return EINVAL;
 
 	sel = regs->r_ss & 0xffff;

@@ -1,4 +1,4 @@
-/*	$OpenBSD: syslogd.c,v 1.160 2015/02/24 01:29:49 bluhm Exp $	*/
+/*	$OpenBSD: syslogd.c,v 1.177 2015/07/20 19:49:33 bluhm Exp $	*/
 
 /*
  * Copyright (c) 1983, 1988, 1993, 1994
@@ -60,6 +60,7 @@
 #define MAX_MEMBUF_NAME	64		/* Max length of membuf log name */
 #define MAX_TCPBUF	(256 * 1024)	/* Maximum tcp event buffer size */
 #define	MAXSVLINE	120		/* maximum saved line length */
+#define FD_RESERVE	5		/* file descriptors not accepted */
 #define DEFUPRI		(LOG_USER|LOG_NOTICE)
 #define DEFSPRI		(LOG_KERN|LOG_CRIT)
 #define TIMERINTVL	30		/* interval for checking flush, mark */
@@ -68,11 +69,8 @@
 
 #include <sys/ioctl.h>
 #include <sys/stat.h>
-#include <sys/wait.h>
-#include <sys/socket.h>
 #include <sys/msgbuf.h>
 #include <sys/queue.h>
-#include <sys/uio.h>
 #include <sys/sysctl.h>
 #include <sys/un.h>
 #include <sys/time.h>
@@ -89,7 +87,6 @@
 #include <fcntl.h>
 #include <limits.h>
 #include <paths.h>
-#include <poll.h>
 #include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -135,6 +132,7 @@ struct filed {
 	time_t	f_time;			/* time this was last written */
 	u_char	f_pmask[LOG_NFACILITIES+1];	/* priority mask */
 	char	*f_program;		/* program this applies to */
+	char	*f_hostname;		/* host this applies to */
 	union {
 		char	f_uname[MAXUNAMES][UT_NAMESIZE+1];
 		struct {
@@ -205,6 +203,7 @@ struct	filed consfile;
 int	nunix = 1;		/* Number of Unix domain sockets requested */
 char	*path_unix[MAXUNIX] = { _PATH_LOG }; /* Paths to Unix domain sockets */
 int	Debug;			/* debug flag */
+int	Foreground;		/* run in foreground, instead of daemonizing */
 int	Startup = 1;		/* startup flag */
 char	LocalHostName[HOST_NAME_MAX+1];	/* our hostname */
 char	*LocalDomain;		/* our local domain name */
@@ -214,10 +213,12 @@ int	MarkInterval = 20 * 60;	/* interval between marks in seconds */
 int	MarkSeq = 0;		/* mark sequence number */
 int	SecureMode = 1;		/* when true, speak only unix domain socks */
 int	NoDNS = 0;		/* when true, will refrain from doing DNS lookups */
-int	IPv4Only = 0;		/* when true, disable IPv6 */
-int	IPv6Only = 0;		/* when true, disable IPv4 */
 int	IncludeHostname = 0;	/* include RFC 3164 style hostnames when forwarding */
-
+int	Family = PF_UNSPEC;	/* protocol family, may disable IPv4 or IPv6 */
+char	*bind_host = NULL;	/* bind UDP receive socket */
+char	*bind_port = NULL;
+char	*listen_host = NULL;	/* listen on TCP receive socket */
+char	*listen_port = NULL;
 char	*path_ctlsock = NULL;	/* Path to control socket */
 
 struct	tls_config *tlsconfig = NULL;
@@ -273,19 +274,38 @@ char	*linebuf;
 int	 linesize;
 
 int		 fd_ctlsock, fd_ctlconn, fd_klog, fd_sendsys,
-		 fd_udp, fd_udp6, fd_unix[MAXUNIX];
+		 fd_udp, fd_udp6, fd_bind, fd_listen, fd_unix[MAXUNIX];
 struct event	 ev_ctlaccept, ev_ctlread, ev_ctlwrite, ev_klog, ev_sendsys,
-		 ev_udp, ev_udp6, ev_unix[MAXUNIX],
+		 ev_udp, ev_udp6, ev_bind, ev_listen, ev_unix[MAXUNIX],
 		 ev_hup, ev_int, ev_quit, ev_term, ev_mark;
+
+LIST_HEAD(peer_list, peer) peers;
+struct peer {
+	LIST_ENTRY(peer)	 p_entry;
+	struct bufferevent	*p_bufev;
+	char			*p_peername;
+	char			*p_hostname;
+	int			 p_fd;
+};
+int peernum = 0;
+char hostname_unknown[] = "???";
 
 void	 klog_readcb(int, short, void *);
 void	 udp_readcb(int, short, void *);
 void	 unix_readcb(int, short, void *);
-int	 tcp_socket(struct filed *);
+int	 reserve_accept4(int, int, struct event *,
+    void (*)(int, short, void *), struct sockaddr *, socklen_t *, int);
+void	 tcp_acceptcb(int, short, void *);
+int	 octet_counting(struct evbuffer *, char **, int);
+int	 non_transparent_framing(struct evbuffer *, char **);
 void	 tcp_readcb(struct bufferevent *, void *);
+void	 tcp_closecb(struct bufferevent *, short, void *);
+int	 tcp_socket(struct filed *);
+void	 tcp_dropcb(struct bufferevent *, void *);
 void	 tcp_writecb(struct bufferevent *, void *);
 void	 tcp_errorcb(struct bufferevent *, short, void *);
 void	 tcp_connectcb(int, short, void *);
+void	 tcp_connect_retry(struct bufferevent *, struct filed *);
 struct tls *tls_socket(struct filed *);
 int	 tcpbuf_countmsg(struct bufferevent *bufev);
 void	 die_signalcb(int, short, void *);
@@ -297,7 +317,7 @@ void	 ctlconn_writecb(int, short, void *);
 void	 ctlconn_logto(char *);
 void	 ctlconn_cleanup(void);
 
-struct filed *cfline(char *, char *);
+struct filed *cfline(char *, char *, char *);
 void	cvthname(struct sockaddr *, char *, size_t);
 int	decode(const char *, const CODE *);
 void	die(int);
@@ -312,8 +332,10 @@ void	printsys(char *);
 char   *ttymsg(struct iovec *, int, char *, int);
 void	usage(void);
 void	wallmsg(struct filed *, struct iovec *);
-int	loghost(char *, char **, char **, char **);
+int	loghost_parse(char *, char **, char **, char **);
 int	getmsgbufsize(void);
+int	socket_bind(const char *, const char *, const char *, int, int,
+    int *, int *);
 int	unix_socket(char *, int, mode_t);
 void	double_rbuf(int);
 void	tailify_replytext(char *, int);
@@ -321,28 +343,33 @@ void	tailify_replytext(char *, int);
 int
 main(int argc, char *argv[])
 {
-	struct addrinfo	 hints, *res, *res0;
 	struct timeval	 to;
 	const char	*errstr;
 	char		*p;
 	int		 ch, i;
 	int		 lockpipe[2] = { -1, -1}, pair[2], nullfd, fd;
 
-	while ((ch = getopt(argc, argv, "46C:dhnuf:m:p:a:s:V")) != -1)
+	while ((ch = getopt(argc, argv, "46a:C:dFf:hm:np:s:T:U:uV")) != -1)
 		switch (ch) {
 		case '4':		/* disable IPv6 */
-			IPv4Only = 1;
-			IPv6Only = 0;
+			Family = PF_INET;
 			break;
 		case '6':		/* disable IPv4 */
-			IPv6Only = 1;
-			IPv4Only = 0;
+			Family = PF_INET6;
+			break;
+		case 'a':
+			if (nunix >= MAXUNIX)
+				errx(1, "out of descriptors: %s", optarg);
+			path_unix[nunix++] = optarg;
 			break;
 		case 'C':		/* file containing CA certificates */
 			CAfile = optarg;
 			break;
 		case 'd':		/* debug */
 			Debug++;
+			break;
+		case 'F':		/* foreground */
+			Foreground = 1;
 			break;
 		case 'f':		/* configuration file */
 			ConfFile = optarg;
@@ -362,16 +389,21 @@ main(int argc, char *argv[])
 		case 'p':		/* path */
 			path_unix[0] = optarg;
 			break;
-		case 'u':		/* allow udp input port */
-			SecureMode = 0;
-			break;
-		case 'a':
-			if (nunix >= MAXUNIX)
-				errx(1, "out of descriptors: %s", optarg);
-			path_unix[nunix++] = optarg;
-			break;
 		case 's':
 			path_ctlsock = optarg;
+			break;
+		case 'T':		/* allow tcp and listen on address */
+			if (loghost_parse(optarg, NULL, &listen_host,
+			    &listen_port) == -1)
+				errx(1, "bad listen address: %s", optarg);
+			break;
+		case 'U':		/* allow udp only from address */
+			if (loghost_parse(optarg, NULL, &bind_host, &bind_port)
+			    == -1)
+				errx(1, "bad bind address: %s", optarg);
+			break;
+		case 'u':		/* allow udp input port */
+			SecureMode = 0;
 			break;
 		case 'V':		/* do not verify certificates */
 			NoVerify = 1;
@@ -414,62 +446,29 @@ main(int argc, char *argv[])
 		die(0);
 	}
 
-	memset(&hints, 0, sizeof(hints));
-	hints.ai_family = AF_UNSPEC;
-	hints.ai_socktype = SOCK_DGRAM;
-	hints.ai_protocol = IPPROTO_UDP;
-	hints.ai_flags = AI_PASSIVE;
-
-	i = getaddrinfo(NULL, "syslog", &hints, &res0);
-	if (i) {
+	if (socket_bind("udp", NULL, "syslog", 0, SecureMode,
+	    &fd_udp, &fd_udp6) == -1) {
 		errno = 0;
-		logerror("syslog/udp: unknown service");
-		die(0);
+		logerror("socket bind *");
+		if (!Debug)
+			die(0);
 	}
-
-	fd_udp = fd_udp6 = -1;
-	for (res = res0; res; res = res->ai_next) {
-		int *fdp;
-
-		switch (res->ai_family) {
-		case AF_INET:
-			if (IPv6Only)
-				continue;
-			fdp = &fd_udp;
-			break;
-		case AF_INET6:
-			if (IPv4Only)
-				continue;
-			fdp = &fd_udp6;
-			break;
-		default:
-			continue;
-		}
-
-		if (*fdp >= 0)
-			continue;
-
-		*fdp = socket(res->ai_family, res->ai_socktype,
-		    res->ai_protocol);
-		if (*fdp == -1)
-			continue;
-
-		if (bind(*fdp, res->ai_addr, res->ai_addrlen) < 0) {
-			logerror("bind");
-			close(*fdp);
-			*fdp = -1;
-			if (!Debug)
-				die(0);
-			continue;
-		}
-
-		if (SecureMode)
-			shutdown(*fdp, SHUT_RD);
-		else
-			double_rbuf(*fdp);
+	fd_bind = -1;
+	if (bind_host && socket_bind("udp", bind_host, bind_port, 1, 0,
+	    &fd_bind, &fd_bind) == -1) {
+		errno = 0;
+		logerror("socket bind udp");
+		if (!Debug)
+			die(0);
 	}
-
-	freeaddrinfo(res0);
+	fd_listen = -1;
+	if (listen_host && socket_bind("tcp", listen_host, listen_port, 1, 0,
+	    &fd_listen, &fd_listen) == -1) {
+		errno = 0;
+		logerror("socket listen tcp");
+		if (!Debug)
+			die(0);
+	}
 
 #ifndef SUN_LEN
 #define SUN_LEN(unp) (strlen((unp)->sun_path) + 2)
@@ -497,7 +496,7 @@ main(int argc, char *argv[])
 			if (!Debug)
 				die(0);
 		} else {
-			if (listen(fd_ctlsock, 16) == -1) {
+			if (listen(fd_ctlsock, 5) == -1) {
 				logerror("ctlsock listen");
 				die(0);
 			}
@@ -557,14 +556,14 @@ main(int argc, char *argv[])
 
 	tzset();
 
-	if (!Debug) {
+	if (!Debug && !Foreground) {
 		char c;
 
 		pipe(lockpipe);
 
 		switch(fork()) {
 		case -1:
-			exit(1);
+			err(1, "fork");
 		case 0:
 			setsid();
 			close(lockpipe[0]);
@@ -605,6 +604,9 @@ main(int argc, char *argv[])
 	    &ev_sendsys);
 	event_set(&ev_udp, fd_udp, EV_READ|EV_PERSIST, udp_readcb, &ev_udp);
 	event_set(&ev_udp6, fd_udp6, EV_READ|EV_PERSIST, udp_readcb, &ev_udp6);
+	event_set(&ev_bind, fd_bind, EV_READ|EV_PERSIST, udp_readcb, &ev_bind);
+	event_set(&ev_listen, fd_listen, EV_READ|EV_PERSIST, tcp_acceptcb,
+	    &ev_listen);
 	for (i = 0; i < nunix; i++)
 		event_set(&ev_unix[i], fd_unix[i], EV_READ|EV_PERSIST,
 		    unix_readcb, &ev_unix[i]);
@@ -629,10 +631,10 @@ main(int argc, char *argv[])
 	reply_text = ctl_reply + CTL_HDR_LEN;
 
 	if (!Debug) {
+		close(lockpipe[1]);
 		dup2(nullfd, STDIN_FILENO);
 		dup2(nullfd, STDOUT_FILENO);
 		dup2(nullfd, STDERR_FILENO);
-		close(lockpipe[1]);
 	}
 	if (nullfd > 2)
 		close(nullfd);
@@ -655,6 +657,10 @@ main(int argc, char *argv[])
 		if (fd_udp6 != -1)
 			event_add(&ev_udp6, NULL);
 	}
+	if (fd_bind != -1)
+		event_add(&ev_bind, NULL);
+	if (fd_listen != -1)
+		event_add(&ev_listen, NULL);
 	for (i = 0; i < nunix; i++)
 		if (fd_unix[i] != -1)
 			event_add(&ev_unix[i], NULL);
@@ -680,6 +686,114 @@ main(int argc, char *argv[])
 
 	event_dispatch();
 	/* NOTREACHED */
+	return (0);
+}
+
+int
+socket_bind(const char *proto, const char *host, const char *port,
+    int reuseaddr, int shutread, int *fd, int *fd6)
+{
+	struct addrinfo	 hints, *res, *res0;
+	char		 hostname[NI_MAXHOST], servname[NI_MAXSERV];
+	char		 ebuf[ERRBUFSIZE];
+	int		*fdp, error;
+
+	*fd = *fd6 = -1;
+	if (proto == NULL)
+		proto = "udp";
+	if (port == NULL)
+		port = "syslog";
+
+	memset(&hints, 0, sizeof(hints));
+	hints.ai_family = Family;
+	if (strcmp(proto, "udp") == 0) {
+		hints.ai_socktype = SOCK_DGRAM;
+		hints.ai_protocol = IPPROTO_UDP;
+	} else {
+		hints.ai_socktype = SOCK_STREAM;
+		hints.ai_protocol = IPPROTO_TCP;
+	}
+	hints.ai_flags = AI_PASSIVE;
+
+	if ((error = getaddrinfo(host, port, &hints, &res0))) {
+		snprintf(ebuf, sizeof(ebuf), "getaddrinfo "
+		    "proto %s, host %s, port %s: %s",
+		    proto, host ? host : "*", port, gai_strerror(error));
+		logerror(ebuf);
+		die(0);
+	}
+
+	for (res = res0; res; res = res->ai_next) {
+		switch (res->ai_family) {
+		case AF_INET:
+			fdp = fd;
+			break;
+		case AF_INET6:
+			fdp = fd6;
+			break;
+		default:
+			continue;
+		}
+		if (*fdp >= 0)
+			continue;
+
+		if ((*fdp = socket(res->ai_family,
+		    res->ai_socktype | SOCK_NONBLOCK, res->ai_protocol)) == -1)
+			continue;
+
+		if (getnameinfo(res->ai_addr, res->ai_addrlen, hostname,
+		    sizeof(hostname), servname, sizeof(servname),
+		    NI_NUMERICHOST | NI_NUMERICSERV |
+		    (res->ai_socktype == SOCK_DGRAM ? NI_DGRAM : 0)) != 0) {
+			dprintf("Malformed bind address\n");
+			hostname[0] = servname[0] = '\0';
+		}
+		if (shutread && shutdown(*fdp, SHUT_RD) == -1) {
+			snprintf(ebuf, sizeof(ebuf), "shutdown SHUT_RD "
+			    "protocol %d, address %s, portnum %s",
+			    res->ai_protocol, hostname, servname);
+			logerror(ebuf);
+			close(*fdp);
+			*fdp = -1;
+			continue;
+		}
+		if (setsockopt(*fdp, SOL_SOCKET, SO_REUSEADDR, &reuseaddr,
+		    sizeof(reuseaddr)) == -1) {
+			snprintf(ebuf, sizeof(ebuf), "setsockopt SO_REUSEADDR "
+			    "protocol %d, address %s, portnum %s",
+			    res->ai_protocol, hostname, servname);
+			logerror(ebuf);
+			close(*fdp);
+			*fdp = -1;
+			continue;
+		}
+		if (bind(*fdp, res->ai_addr, res->ai_addrlen) == -1) {
+			snprintf(ebuf, sizeof(ebuf), "bind "
+			    "protocol %d, address %s, portnum %s",
+			    res->ai_protocol, hostname, servname);
+			logerror(ebuf);
+			close(*fdp);
+			*fdp = -1;
+			continue;
+		}
+		if (!shutread && res->ai_protocol == IPPROTO_TCP &&
+		    listen(*fdp, 10) == -1) {
+			snprintf(ebuf, sizeof(ebuf), "listen "
+			    "protocol %d, address %s, portnum %s",
+			    res->ai_protocol, hostname, servname);
+			logerror(ebuf);
+			close(*fdp);
+			*fdp = -1;
+			continue;
+		}
+		if (!shutread && res->ai_protocol == IPPROTO_UDP)
+			double_rbuf(*fdp);
+	}
+
+	freeaddrinfo(res0);
+
+	if (*fd == -1 && *fd6 == -1)
+		return (-1);
 	return (0);
 }
 
@@ -715,7 +829,7 @@ udp_readcb(int fd, short event, void *arg)
 		cvthname((struct sockaddr *)&sa, resolve, sizeof(resolve));
 		dprintf("cvthname res: %s\n", resolve);
 		printline(resolve, linebuf);
-	} else if (n < 0 && errno != EINTR)
+	} else if (n < 0 && errno != EINTR && errno != EWOULDBLOCK)
 		logerror("recvfrom udp");
 }
 
@@ -731,30 +845,270 @@ unix_readcb(int fd, short event, void *arg)
 	if (n > 0) {
 		linebuf[n] = '\0';
 		printline(LocalHostName, linebuf);
-	} else if (n < 0 && errno != EINTR)
+	} else if (n < 0 && errno != EINTR && errno != EWOULDBLOCK)
 		logerror("recvfrom unix");
+}
+
+int
+reserve_accept4(int lfd, int event, struct event *ev,
+    void (*cb)(int, short, void *),
+    struct sockaddr *sa, socklen_t *salen, int flags)
+{
+	struct timeval	 to = { 1, 0 };
+	char		 ebuf[ERRBUFSIZE];
+	int		 afd;
+
+	if (event & EV_TIMEOUT) {
+		dprintf("Listen again\n");
+		/* Enable the listen event, there is no timeout anymore. */
+		event_set(ev, lfd, EV_READ|EV_PERSIST, cb, ev);
+		event_add(ev, NULL);
+		errno = EWOULDBLOCK;
+		return (-1);
+	}
+
+	if (getdtablecount() + FD_RESERVE >= getdtablesize()) {
+		afd = -1;
+		errno = EMFILE;
+	} else
+		afd = accept4(lfd, sa, salen, flags);
+
+	if (afd == -1 && (errno == ENFILE || errno == EMFILE)) {
+		snprintf(ebuf, sizeof(ebuf), "syslogd: accept deferred: %s",
+		    strerror(errno));
+		logmsg(LOG_SYSLOG|LOG_WARNING, ebuf, LocalHostName, ADDDATE);
+		/*
+		 * Disable the listen event and convert it to a timeout.
+		 * Pass the listen file descriptor to the callback.
+		 */
+		event_del(ev);
+		event_set(ev, lfd, 0, cb, ev);
+		event_add(ev, &to);
+		return (-1);
+	}
+
+	return (afd);
+}
+
+void
+tcp_acceptcb(int fd, short event, void *arg)
+{
+	struct event		*ev = arg;
+	struct peer		*p;
+	struct sockaddr_storage	 ss;
+	socklen_t		 sslen;
+	char			 hostname[NI_MAXHOST], servname[NI_MAXSERV];
+	char			*peername, ebuf[ERRBUFSIZE];
+
+	sslen = sizeof(ss);
+	if ((fd = reserve_accept4(fd, event, ev, tcp_acceptcb,
+	    (struct sockaddr *)&ss, &sslen, SOCK_NONBLOCK)) == -1) {
+		if (errno != ENFILE && errno != EMFILE &&
+		    errno != EINTR && errno != EWOULDBLOCK &&
+		    errno != ECONNABORTED)
+			logerror("accept tcp socket");
+		return;
+	}
+	dprintf("Accepting tcp connection\n");
+
+	if (getnameinfo((struct sockaddr *)&ss, sslen, hostname,
+	    sizeof(hostname), servname, sizeof(servname),
+	    NI_NUMERICHOST | NI_NUMERICSERV) != 0 ||
+	    asprintf(&peername, ss.ss_family == AF_INET6 ?
+	    "[%s]:%s" : "%s:%s", hostname, servname) == -1) {
+		dprintf("Malformed accept address\n");
+		peername = hostname_unknown;
+	}
+	dprintf("Peer addresss and port %s\n", peername);
+	if ((p = malloc(sizeof(*p))) == NULL) {
+		snprintf(ebuf, sizeof(ebuf), "malloc \"%s\"", peername);
+		logerror(ebuf);
+		close(fd);
+		return;
+	}
+	p->p_fd = fd;
+	if ((p->p_bufev = bufferevent_new(fd, tcp_readcb, NULL, tcp_closecb,
+	    p)) == NULL) {
+		snprintf(ebuf, sizeof(ebuf), "bufferevent \"%s\"", peername);
+		logerror(ebuf);
+		free(p);
+		close(fd);
+		return;
+	}
+	if (!NoDNS && peername != hostname_unknown &&
+	    priv_getnameinfo((struct sockaddr *)&ss, ss.ss_len, hostname,
+	    sizeof(hostname)) != 0) {
+		dprintf("Host name for accept address (%s) unknown\n",
+		    hostname);
+	}
+	if (peername == hostname_unknown ||
+	    (p->p_hostname = strdup(hostname)) == NULL)
+		p->p_hostname = hostname_unknown;
+	dprintf("Peer hostname %s\n", hostname);
+	p->p_peername = peername;
+	LIST_INSERT_HEAD(&peers, p, p_entry);
+	peernum++;
+	bufferevent_enable(p->p_bufev, EV_READ);
+
+	snprintf(ebuf, sizeof(ebuf), "syslogd: tcp logger \"%s\" accepted",
+	    peername);
+	logmsg(LOG_SYSLOG|LOG_INFO, ebuf, LocalHostName, ADDDATE);
+}
+
+/*
+ * Syslog over TCP  RFC 6587  3.4.1. Octet Counting
+ */
+int
+octet_counting(struct evbuffer *evbuf, char **msg, int drain)
+{
+	char	*p, *buf, *end;
+	int	 len;
+
+	buf = EVBUFFER_DATA(evbuf);
+	end = buf + EVBUFFER_LENGTH(evbuf);
+	/*
+	 * It can be assumed that octet-counting framing is used if a syslog
+	 * frame starts with a digit.
+	 */
+	if (buf >= end || !isdigit(*buf))
+		return (-1);
+	/*
+	 * SYSLOG-FRAME = MSG-LEN SP SYSLOG-MSG
+	 * MSG-LEN is the octet count of the SYSLOG-MSG in the SYSLOG-FRAME.
+	 * We support up to 5 digits in MSG-LEN, so the maximum is 99999.
+	 */
+	for (p = buf; p < end && p < buf + 5; p++) {
+		if (!isdigit(*p))
+			break;
+	}
+	if (buf >= p || p >= end || *p != ' ')
+		return (-1);
+	p++;
+	/* Using atoi() is safe as buf starts with 1 to 5 digits and a space. */
+	len = atoi(buf);
+	if (drain)
+		dprintf(" octet counting %d", len);
+	if (p + len > end)
+		return (0);
+	if (drain)
+		evbuffer_drain(evbuf, p - buf);
+	if (msg)
+		*msg = p;
+	return (len);
+}
+
+/*
+ * Syslog over TCP  RFC 6587  3.4.2. Non-Transparent-Framing
+ */
+int
+non_transparent_framing(struct evbuffer *evbuf, char **msg)
+{
+	char	*p, *buf, *end;
+
+	buf = EVBUFFER_DATA(evbuf);
+	end = buf + EVBUFFER_LENGTH(evbuf);
+	/*
+	 * The TRAILER has usually been a single character and most often
+	 * is ASCII LF (%d10).  However, other characters have also been
+	 * seen, with ASCII NUL (%d00) being a prominent example.
+	 */
+	for (p = buf; p < end; p++) {
+		if (*p == '\0' || *p == '\n')
+			break;
+	}
+	if (p + 1 - buf >= INT_MAX)
+		return (-1);
+	dprintf(" non transparent framing");
+	if (p >= end)
+		return (0);
+	/*
+	 * Some devices have also been seen to emit a two-character
+	 * TRAILER, which is usually CR and LF.
+	 */
+	if (buf < p && p[0] == '\n' && p[-1] == '\r')
+		p[-1] = '\0';
+	if (msg)
+		*msg = buf;
+	return (p + 1 - buf);
+}
+
+void
+tcp_readcb(struct bufferevent *bufev, void *arg)
+{
+	struct peer		*p = arg;
+	char			*msg, line[MAXLINE + 1];
+	int			 len;
+
+	while (EVBUFFER_LENGTH(bufev->input) > 0) {
+		dprintf("tcp logger \"%s\"", p->p_peername);
+		msg = NULL;
+		len = octet_counting(bufev->input, &msg, 1);
+		if (len < 0)
+			len = non_transparent_framing(bufev->input, &msg);
+		if (len < 0)
+			dprintf("unknown method");
+		if (msg == NULL) {
+			dprintf(", incomplete frame");
+			break;
+		}
+		dprintf(", use %d bytes\n", len);
+		if (len > 0 && msg[len-1] == '\n')
+			msg[len-1] = '\0';
+		if (len == 0 || msg[len-1] != '\0') {
+			strlcpy(line, msg,
+			    MINIMUM((size_t)len+1, sizeof(line)));
+			msg = line;
+		}
+		printline(p->p_hostname, msg);
+		evbuffer_drain(bufev->input, len);
+	}
+	/* Maximum frame has 5 digits, 1 space, MAXLINE chars, 1 new line. */
+	if (EVBUFFER_LENGTH(bufev->input) >= 5 + 1 + MAXLINE + 1) {
+		dprintf(", use %zu bytes\n", EVBUFFER_LENGTH(bufev->input));
+		printline(p->p_hostname, EVBUFFER_DATA(bufev->input));
+		evbuffer_drain(bufev->input, -1);
+	} else if (EVBUFFER_LENGTH(bufev->input) > 0)
+		dprintf(", buffer %zu bytes\n", EVBUFFER_LENGTH(bufev->input));
+}
+
+void
+tcp_closecb(struct bufferevent *bufev, short event, void *arg)
+{
+	struct peer		*p = arg;
+	char			 ebuf[ERRBUFSIZE];
+
+	if (event & EVBUFFER_EOF) {
+		snprintf(ebuf, sizeof(ebuf), "syslogd: tcp logger \"%s\" "
+		    "connection close", p->p_peername);
+		logmsg(LOG_SYSLOG|LOG_INFO, ebuf, LocalHostName, ADDDATE);
+	} else {
+		snprintf(ebuf, sizeof(ebuf), "syslogd: tcp logger \"%s\" "
+		    "connection error: %s", p->p_peername, strerror(errno));
+		logmsg(LOG_SYSLOG|LOG_NOTICE, ebuf, LocalHostName, ADDDATE);
+	}
+
+	peernum--;
+	LIST_REMOVE(p, p_entry);
+	if (p->p_peername != hostname_unknown)
+		free(p->p_peername);
+	if (p->p_hostname != hostname_unknown)
+		free(p->p_hostname);
+	bufferevent_free(p->p_bufev);
+	close(p->p_fd);
+	free(p);
 }
 
 int
 tcp_socket(struct filed *f)
 {
-	int	 s, flags;
+	int	 s;
 	char	 ebuf[ERRBUFSIZE];
 
-	if ((s = socket(f->f_un.f_forw.f_addr.ss_family, SOCK_STREAM,
-	    IPPROTO_TCP)) == -1) {
+	if ((s = socket(f->f_un.f_forw.f_addr.ss_family,
+	    SOCK_STREAM | SOCK_NONBLOCK, IPPROTO_TCP)) == -1) {
 		snprintf(ebuf, sizeof(ebuf), "socket \"%s\"",
 		    f->f_un.f_forw.f_loghost);
 		logerror(ebuf);
-		return (-1);
-	}
-	/* Connect must not block the process. */
-	if ((flags = fcntl(s, F_GETFL)) == -1 ||
-	    fcntl(s, F_SETFL, flags | O_NONBLOCK) == -1) {
-		snprintf(ebuf, sizeof(ebuf), "fcntl \"%s\" O_NONBLOCK",
-		    f->f_un.f_forw.f_loghost);
-		logerror(ebuf);
-		close(s);
 		return (-1);
 	}
 	if (connect(s, (struct sockaddr *)&f->f_un.f_forw.f_addr,
@@ -769,7 +1123,7 @@ tcp_socket(struct filed *f)
 }
 
 void
-tcp_readcb(struct bufferevent *bufev, void *arg)
+tcp_dropcb(struct bufferevent *bufev, void *arg)
 {
 	struct filed	*f = arg;
 
@@ -838,13 +1192,8 @@ tcp_errorcb(struct bufferevent *bufev, short event, void *arg)
 	 */
 	buf = EVBUFFER_DATA(bufev->output);
 	end = buf + EVBUFFER_LENGTH(bufev->output);
-	for (p = buf; p < end && p < buf + 4; p++) {
-		if (!isdigit(*p))
-			break;
-	}
-	/* Using atoi() is safe as buf starts with 1 to 4 digits and a space. */
-	if (buf < end && !(buf + 1 <= p && p < end && *p == ' ' &&
-	    (l = atoi(buf)) > 0 && buf + l < end && buf[l] == '\n')) {
+	if (buf < end && !((l = octet_counting(bufev->output, &p, 0)) > 0 &&
+	    p[l-1] == '\n')) {
 		for (p = buf; p < end; p++) {
 			if (*p == '\n') {
 				evbuffer_drain(bufev->output, p - buf + 1);
@@ -853,13 +1202,13 @@ tcp_errorcb(struct bufferevent *bufev, short event, void *arg)
 		}
 		/* Without '\n' discard everything. */
 		if (p == end)
-			evbuffer_drain(bufev->output, p - buf);
+			evbuffer_drain(bufev->output, -1);
 		dprintf("loghost \"%s\" dropped partial message\n",
 		    f->f_un.f_forw.f_loghost);
 		f->f_un.f_forw.f_dropped++;
 	}
 
-	tcp_connectcb(-1, 0, f);
+	tcp_connect_retry(bufev, f);
 
 	/* Log the connection error to the fresh buffer after reconnecting. */
 	logmsg(LOG_SYSLOG|LOG_WARNING, ebuf, LocalHostName, ADDDATE);
@@ -871,23 +1220,17 @@ tcp_connectcb(int fd, short event, void *arg)
 	struct filed		*f = arg;
 	struct bufferevent	*bufev = f->f_un.f_forw.f_bufev;
 	struct tls		*ctx;
-	struct timeval		 to;
 	int			 s;
 
-	if ((event & EV_TIMEOUT) == 0 && f->f_un.f_forw.f_reconnectwait > 0)
-		goto retry;
-
-	/* Avoid busy reconnect loop, delay until successful write. */
-	if (f->f_un.f_forw.f_reconnectwait == 0)
-		f->f_un.f_forw.f_reconnectwait = 1;
-
-	if ((s = tcp_socket(f)) == -1)
-		goto retry;
+	if ((s = tcp_socket(f)) == -1) {
+		tcp_connect_retry(bufev, f);
+		return;
+	}
 	dprintf("tcp connect callback: socket success, event %#x\n", event);
 	f->f_file = s;
 
 	bufferevent_setfd(bufev, s);
-	bufferevent_setcb(bufev, tcp_readcb, tcp_writecb, tcp_errorcb, f);
+	bufferevent_setcb(bufev, tcp_dropcb, tcp_writecb, tcp_errorcb, f);
 	/*
 	 * Although syslog is a write only protocol, enable reading from
 	 * the socket to detect connection close and errors.
@@ -898,7 +1241,8 @@ tcp_connectcb(int fd, short event, void *arg)
 		if ((ctx = tls_socket(f)) == NULL) {
 			close(f->f_file);
 			f->f_file = -1;
-			goto retry;
+			tcp_connect_retry(bufev, f);
+			return;
 		}
 		dprintf("tcp connect callback: TLS context success\n");
 		f->f_un.f_forw.f_ctx = ctx;
@@ -907,18 +1251,23 @@ tcp_connectcb(int fd, short event, void *arg)
 		buffertls_connect(&f->f_un.f_forw.f_buftls, s,
 		    f->f_un.f_forw.f_host);
 	}
+}
 
-	return;
+void
+tcp_connect_retry(struct bufferevent *bufev, struct filed *f)
+{
+	struct timeval		 to;
 
- retry:
-	f->f_un.f_forw.f_reconnectwait <<= 1;
+	if (f->f_un.f_forw.f_reconnectwait == 0)
+		f->f_un.f_forw.f_reconnectwait = 1;
+	else
+		f->f_un.f_forw.f_reconnectwait <<= 1;
 	if (f->f_un.f_forw.f_reconnectwait > 600)
 		f->f_un.f_forw.f_reconnectwait = 600;
 	to.tv_sec = f->f_un.f_forw.f_reconnectwait;
 	to.tv_usec = 0;
 
-	dprintf("tcp connect callback: retry, event %#x, wait %d\n",
-	    event, f->f_un.f_forw.f_reconnectwait);
+	dprintf("tcp connect retry: wait %d\n", f->f_un.f_forw.f_reconnectwait);
 	bufferevent_setfd(bufev, -1);
 	/* We can reuse the write event as bufferevent is disabled. */
 	evtimer_set(&bufev->ev_write, tcp_connectcb, f);
@@ -969,8 +1318,9 @@ usage(void)
 {
 
 	(void)fprintf(stderr,
-	    "usage: syslogd [-46dhnuV] [-a path] [-C CAfile] [-f config_file]\n"
-	    "               [-m mark_interval] [-p log_socket] [-s reporting_socket]\n");
+	    "usage: syslogd [-46dFhnuV] [-a path] [-C CAfile] [-f config_file]\n"
+	    "               [-m mark_interval] [-p log_socket] [-s reporting_socket]\n"
+	    "               [-T listen_address] [-U bind_address]\n");
 	exit(1);
 }
 
@@ -1096,8 +1446,10 @@ logmsg(int pri, char *msg, char *from, int flags)
 	prilev = LOG_PRI(pri);
 
 	/* extract program name */
-	while (isspace((unsigned char)*msg))
+	while (isspace((unsigned char)*msg)) {
 		msg++;
+		msglen--;
+	}
 	for (i = 0; i < NAME_MAX; i++) {
 		if (!isalnum((unsigned char)msg[i]) && msg[i] != '-')
 			break;
@@ -1123,10 +1475,11 @@ logmsg(int pri, char *msg, char *from, int flags)
 		    f->f_pmask[fac] == INTERNAL_NOPRI)
 			continue;
 
-		/* skip messages with the incorrect program name */
-		if (f->f_program)
-			if (strcmp(prog, f->f_program) != 0)
-				continue;
+		/* skip messages with the incorrect program or hostname */
+		if (f->f_program && strcmp(prog, f->f_program) != 0)
+			continue;
+		if (f->f_hostname && strcmp(from, f->f_hostname) != 0)
+			continue;
 
 		if (f->f_type == F_CONSOLE && (flags & IGN_CONS))
 			continue;
@@ -1259,6 +1612,7 @@ fprintlog(struct filed *f, int flags, char *msg)
 			case ENETDOWN:
 			case ENETUNREACH:
 			case ENOBUFS:
+			case EWOULDBLOCK:
 				/* silently dropped */
 				break;
 			default:
@@ -1269,22 +1623,8 @@ fprintlog(struct filed *f, int flags, char *msg)
 		}
 		break;
 
-	case F_FORWTLS:
-		if (f->f_un.f_forw.f_buftls.bt_flags & BT_WRITE_AGAIN) {
-			/*
-			 * After an OpenSSL SSL_ERROR_WANT_WRITE you must not
-			 * modify the buffer pointer or length until the next
-			 * successful write.  Otherwise there will be an
-			 * error SSL3_WRITE_PENDING:bad write retry.
-			 * XXX This should be handled in the buffertls layer.
-			 */
-			dprintf(" %s (dropped tls write again)\n",
-			    f->f_un.f_forw.f_loghost);
-			f->f_un.f_forw.f_dropped++;
-			break;
-		}
-		/* FALLTHROUGH */
 	case F_FORWTCP:
+	case F_FORWTLS:
 		dprintf(" %s", f->f_un.f_forw.f_loghost);
 		if (EVBUFFER_LENGTH(f->f_un.f_forw.f_bufev->output) >=
 		    MAX_TCPBUF) {
@@ -1482,7 +1822,7 @@ cvthname(struct sockaddr *f, char *result, size_t res_len)
 	if (getnameinfo(f, f->sa_len, result, res_len, NULL, 0,
 	    NI_NUMERICHOST|NI_NUMERICSERV|NI_DGRAM) != 0) {
 		dprintf("Malformed from address\n");
-		strlcpy(result, "???", res_len);
+		strlcpy(result, hostname_unknown, res_len);
 		return;
 	}
 	dprintf("cvthname(%s)\n", result);
@@ -1490,7 +1830,7 @@ cvthname(struct sockaddr *f, char *result, size_t res_len)
 		return;
 
 	if (priv_getnameinfo(f, f->sa_len, result, res_len) != 0)
-		dprintf("Host name for your address (%s) unknown\n", result);
+		dprintf("Host name for from address (%s) unknown\n", result);
 }
 
 void
@@ -1591,11 +1931,12 @@ die(int signo)
 void
 init(void)
 {
-	char cline[LINE_MAX], prog[NAME_MAX+1], *p;
+	char progblock[NAME_MAX+1], hostblock[NAME_MAX+1], *cline, *p;
 	struct filed_list mb;
 	struct filed *f, *m;
 	FILE *cf;
 	int i;
+	size_t s;
 
 	dprintf("init\n");
 
@@ -1637,10 +1978,11 @@ init(void)
 			(void)close(f->f_file);
 			break;
 		}
-		if (f->f_program)
-			free(f->f_program);
+		free(f->f_program);
+		free(f->f_hostname);
 		if (f->f_type == F_MEMBUF) {
 			f->f_program = NULL;
+			f->f_hostname = NULL;
 			dprintf("add %p to mb\n", f);
 			SIMPLEQ_INSERT_HEAD(&mb, f, f_next);
 		} else
@@ -1651,9 +1993,10 @@ init(void)
 	/* open the configuration file */
 	if ((cf = priv_open_config()) == NULL) {
 		dprintf("cannot open %s\n", ConfFile);
-		SIMPLEQ_INSERT_TAIL(&Files, cfline("*.ERR\t/dev/console", "*"),
-		    f_next);
-		SIMPLEQ_INSERT_TAIL(&Files, cfline("*.PANIC\t*", "*"), f_next);
+		SIMPLEQ_INSERT_TAIL(&Files,
+		    cfline("*.ERR\t/dev/console", "*", "*"), f_next);
+		SIMPLEQ_INSERT_TAIL(&Files,
+		    cfline("*.PANIC\t*", "*", "*"), f_next);
 		Initialized = 1;
 		return;
 	}
@@ -1661,13 +2004,16 @@ init(void)
 	/*
 	 *  Foreach line in the conf table, open that file.
 	 */
-	f = NULL;
-	strlcpy(prog, "*", sizeof(prog));
-	while (fgets(cline, sizeof(cline), cf) != NULL) {
+	cline = NULL;
+	s = 0;
+	strlcpy(progblock, "*", sizeof(progblock));
+	strlcpy(hostblock, "*", sizeof(hostblock));
+	while (getline(&cline, &s, cf) != -1) {
 		/*
 		 * check for end-of-section, comments, strip off trailing
-		 * spaces and newline character. !prog is treated
-		 * specially: the following lines apply only to that program.
+		 * spaces and newline character. !progblock and +hostblock
+		 * are treated specially: the following lines apply only to
+		 * that program.
 		 */
 		for (p = cline; isspace((unsigned char)*p); ++p)
 			continue;
@@ -1679,18 +2025,37 @@ init(void)
 				p++;
 			if (!*p || (*p == '*' && (!p[1] ||
 			    isspace((unsigned char)p[1])))) {
-				strlcpy(prog, "*", sizeof(prog));
+				strlcpy(progblock, "*", sizeof(progblock));
 				continue;
 			}
 			for (i = 0; i < NAME_MAX; i++) {
 				if (!isalnum((unsigned char)p[i]) &&
 				    p[i] != '-' && p[i] != '!')
 					break;
-				prog[i] = p[i];
+				progblock[i] = p[i];
 			}
-			prog[i] = 0;
+			progblock[i] = 0;
 			continue;
 		}
+		if (*p == '+') {
+			p++;
+			while (isspace((unsigned char)*p))
+				p++;
+			if (!*p || (*p == '*' && (!p[1] ||
+			    isspace((unsigned char)p[1])))) {
+				strlcpy(hostblock, "*", sizeof(hostblock));
+				continue;
+			}
+			for (i = 0; i < NAME_MAX; i++) {
+				if (!isalnum((unsigned char)p[i]) &&
+				    p[i] != '-' && p[i] != '+')
+					break;
+				hostblock[i] = p[i];
+			}
+			hostblock[i] = 0;
+			continue;
+		}
+
 		p = cline + strlen(cline);
 		while (p > cline)
 			if (!isspace((unsigned char)*--p)) {
@@ -1698,9 +2063,14 @@ init(void)
 				break;
 			}
 		*p = '\0';
-		f = cfline(cline, prog);
+		f = cfline(cline, progblock, hostblock);
 		if (f != NULL)
 			SIMPLEQ_INSERT_TAIL(&Files, f, f_next);
+	}
+	free(cline);
+	if (!feof(cf)) {
+		logerror("Unable to read config file");
+		die(0);
 	}
 
 	/* Match and initialize the memory buffers */
@@ -1780,8 +2150,10 @@ init(void)
 				break;
 
 			}
-			if (f->f_program)
-				printf(" (%s)", f->f_program);
+			if (f->f_program || f->f_hostname)
+				printf(" (%s, %s)",
+				    f->f_program ? f->f_program : "*",
+				    f->f_hostname ? f->f_hostname : "*");
 			printf("\n");
 		}
 	}
@@ -1807,14 +2179,21 @@ find_dup(struct filed *f)
 		case F_CONSOLE:
 		case F_PIPE:
 			if (strcmp(list->f_un.f_fname, f->f_un.f_fname) == 0 &&
-			    progmatches(list->f_program, f->f_program))
+			    progmatches(list->f_program, f->f_program) &&
+			    progmatches(list->f_hostname, f->f_hostname)) {
+				dprintf("duplicate %s\n", f->f_un.f_fname);
 				return (list);
+			}
 			break;
 		case F_MEMBUF:
 			if (strcmp(list->f_un.f_mb.f_mname,
 			    f->f_un.f_mb.f_mname) == 0 &&
-			    progmatches(list->f_program, f->f_program))
+			    progmatches(list->f_program, f->f_program) &&
+			    progmatches(list->f_hostname, f->f_hostname)) {
+				dprintf("duplicate membuf %s\n",
+				    f->f_un.f_mb.f_mname);
 				return (list);
+			}
 			break;
 		}
 	}
@@ -1825,7 +2204,7 @@ find_dup(struct filed *f)
  * Crack a configuration file line
  */
 struct filed *
-cfline(char *line, char *prog)
+cfline(char *line, char *progblock, char *hostblock)
 {
 	int i, pri;
 	size_t rb_len;
@@ -1834,7 +2213,8 @@ cfline(char *line, char *prog)
 	struct filed *xf, *f, *d;
 	struct timeval to;
 
-	dprintf("cfline(\"%s\", f, \"%s\")\n", line, prog);
+	dprintf("cfline(\"%s\", f, \"%s\", \"%s\")\n",
+	    line, progblock, hostblock);
 
 	errno = 0;	/* keep strerror() stuff out of logerror messages */
 
@@ -1846,15 +2226,19 @@ cfline(char *line, char *prog)
 		f->f_pmask[i] = INTERNAL_NOPRI;
 
 	/* save program name if any */
-	if (*prog == '!') {
+	f->f_quick = 0;
+	if (*progblock == '!') {
+		progblock++;
 		f->f_quick = 1;
-		prog++;
-	} else
-		f->f_quick = 0;
-	if (!strcmp(prog, "*"))
-		prog = NULL;
-	else
-		f->f_program = strdup(prog);
+	}
+	if (*hostblock == '+') {
+		hostblock++;
+		f->f_quick = 1;
+	}
+	if (strcmp(progblock, "*") != 0)
+		f->f_program = strdup(progblock);
+	if (strcmp(hostblock, "*") != 0)
+		f->f_hostname = strdup(hostblock);
 
 	/* scan through the list of selectors */
 	for (p = line; *p && *p != '\t';) {
@@ -1932,7 +2316,7 @@ cfline(char *line, char *prog)
 			logerror(ebuf);
 			break;
 		}
-		if (loghost(++p, &proto, &host, &port) == -1) {
+		if (loghost_parse(++p, &proto, &host, &port) == -1) {
 			snprintf(ebuf, sizeof(ebuf), "bad loghost \"%s\"",
 			    f->f_un.f_forw.f_loghost);
 			logerror(ebuf);
@@ -2012,7 +2396,7 @@ cfline(char *line, char *prog)
 			f->f_type = F_FORWUDP;
 		} else if (strncmp(ipproto, "tcp", 3) == 0) {
 			if ((f->f_un.f_forw.f_bufev = bufferevent_new(-1,
-			    tcp_readcb, tcp_writecb, tcp_errorcb, f)) == NULL) {
+			    tcp_dropcb, tcp_writecb, tcp_errorcb, f)) == NULL) {
 				snprintf(ebuf, sizeof(ebuf),
 				    "bufferevent \"%s\"",
 				    f->f_un.f_forw.f_loghost);
@@ -2146,15 +2530,21 @@ cfline(char *line, char *prog)
  * Parse the host and port parts from a loghost string.
  */
 int
-loghost(char *str, char **proto, char **host, char **port)
+loghost_parse(char *str, char **proto, char **host, char **port)
 {
-	*proto = NULL;
+	char *prefix = NULL;
+
 	if ((*host = strchr(str, ':')) &&
 	    (*host)[1] == '/' && (*host)[2] == '/') {
-		*proto = str;
+		prefix = str;
 		**host = '\0';
 		str = *host + 3;
 	}
+	if (proto)
+		*proto = prefix;
+	else if (prefix)
+		return (-1);
+
 	*host = str;
 	if (**host == '[') {
 		(*host)++;
@@ -2333,29 +2723,22 @@ void
 ctlsock_acceptcb(int fd, short event, void *arg)
 {
 	struct event		*ev = arg;
-	int			 flags;
 
-	dprintf("Accepting control connection\n");
-	fd = accept(fd, NULL, NULL);
-	if (fd == -1) {
-		if (errno != EINTR && errno != EWOULDBLOCK &&
+	if ((fd = reserve_accept4(fd, event, ev, ctlsock_acceptcb,
+	    NULL, NULL, SOCK_NONBLOCK)) == -1) {
+		if (errno != ENFILE && errno != EMFILE &&
+		    errno != EINTR && errno != EWOULDBLOCK &&
 		    errno != ECONNABORTED)
 			logerror("accept ctlsock");
 		return;
 	}
+	dprintf("Accepting control connection\n");
 
 	if (fd_ctlconn != -1)
 		ctlconn_cleanup();
 
 	/* Only one connection at a time */
 	event_del(ev);
-
-	if ((flags = fcntl(fd, F_GETFL)) == -1 ||
-	    fcntl(fd, F_SETFL, flags | O_NONBLOCK) == -1) {
-		logerror("fcntl ctlconn O_NONBLOCK");
-		close(fd);
-		return;
-	}
 
 	fd_ctlconn = fd;
 	/* file descriptor has changed, reset event */
@@ -2403,6 +2786,8 @@ ctlconn_readcb(int fd, short event, void *arg)
 	case -1:
 		if (errno == EINTR)
 			goto retry;
+		if (errno == EWOULDBLOCK)
+			return;
 		logerror("ctlconn read");
 		/* FALLTHROUGH */
 	case 0:
@@ -2532,6 +2917,8 @@ ctlconn_writecb(int fd, short event, void *arg)
 	case -1:
 		if (errno == EINTR)
 			goto retry;
+		if (errno == EWOULDBLOCK)
+			return;
 		if (errno != EPIPE)
 			logerror("ctlconn write");
 		/* FALLTHROUGH */

@@ -1,4 +1,4 @@
-/*	$OpenBSD: be.c,v 1.48 2014/12/22 02:26:54 tedu Exp $	*/
+/*	$OpenBSD: be.c,v 1.51 2015/06/24 09:40:53 mpi Exp $	*/
 
 /*
  * Copyright (c) 1998 Theo de Raadt and Jason L. Wright.
@@ -55,7 +55,6 @@
 #include <machine/autoconf.h>
 #include <machine/cpu.h>
 
-#include <sparc/dev/sbusvar.h>
 #include <sparc/dev/dmareg.h>
 #include <sparc/dev/dmavar.h>
 
@@ -989,6 +988,7 @@ be_read(sc, idx, len)
 	int idx, len;
 {
 	struct ifnet *ifp = &sc->sc_arpcom.ac_if;
+	struct mbuf_list ml = MBUF_LIST_INITIALIZER();
 	struct mbuf *m;
 
 	if (len <= sizeof(struct ether_header) ||
@@ -1004,24 +1004,14 @@ be_read(sc, idx, len)
 	/*
 	 * Pull packet off interface.
 	 */
-	m = qec_get(ifp, sc->sc_bufs->rx_buf[idx & BE_RX_RING_MASK], len);
+	m = qec_get(sc->sc_bufs->rx_buf[idx & BE_RX_RING_MASK], len);
 	if (m == NULL) {
 		ifp->if_ierrors++;
 		return;
 	}
-	ifp->if_ipackets++;
 
-
-#if NBPFILTER > 0
-	/*
-	 * Check if there's a BPF listener on this interface.
-	 * If so, hand off the raw packet to BPF.
-	 */
-	if (ifp->if_bpf)
-		bpf_mtap(ifp->if_bpf, m, BPF_DIRECTION_IN);
-#endif
-	/* Pass the packet up. */
-	ether_input_mbuf(ifp, m);
+	ml_enqueue(&ml, m);
+	if_input(ifp, &ml);
 }
 
 /*

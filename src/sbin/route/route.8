@@ -1,4 +1,4 @@
-.\"	$OpenBSD: route.8,v 1.74 2015/02/06 03:22:00 reyk Exp $
+.\"	$OpenBSD: route.8,v 1.77 2015/07/18 00:05:02 phessler Exp $
 .\"	$NetBSD: route.8,v 1.6 1995/03/18 15:00:13 cgd Exp $
 .\"
 .\" Copyright (c) 1983, 1991, 1993
@@ -30,7 +30,7 @@
 .\"
 .\"	@(#)route.8	8.3 (Berkeley) 3/19/94
 .\"
-.Dd $Mdocdate: February 6 2015 $
+.Dd $Mdocdate: July 18 2015 $
 .Dt ROUTE 8
 .Os
 .Sh NAME
@@ -165,6 +165,7 @@ are shown.
 .Op Ar family
 .Op Fl gateway
 .Op Fl label Ar label
+.Op Fl priority Ar priority
 .Xc
 Print out the route table similar to "netstat -r" (see
 .Xr netstat 1 ) .
@@ -177,6 +178,13 @@ same address family as the destination are shown.
 If
 .Fl label
 is specified, only routes with the specified label are shown.
+.Pp
+If
+.Fl priority
+is specified, only routes with the specified (numeric) priority are shown.
+Some well known priorities can be given by name.
+If the priority is negative, then routes that do not match the numeric
+priority are shown.
 .El
 .Pp
 The other commands relating to adding, changing, or deleting routes
@@ -338,6 +346,7 @@ A specific routing priority can be specified with the optional
 qualifier.
 If no priority is specified the kernel will set a priority depending on the
 RTF_STATIC flag to either RTP_STATIC or RTP_DEFAULT.
+Note that priority 1 is reserved for kernel use.
 .Pp
 The optional
 .Fl mpath
@@ -496,9 +505,6 @@ route to the 192.168.5.0/24 network:
 .Bl -diag
 .It "%s: gateway %s flags %x"
 The specified route is being added to or deleted from the tables.
-The values printed are from the routing table entry supplied in the
-.Xr ioctl 2
-call.
 If the gateway address used was not the primary address of the gateway
 (the first one returned by
 .Xr gethostbyname 3 ) ,

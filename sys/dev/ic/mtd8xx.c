@@ -1,4 +1,4 @@
-/*	$OpenBSD: mtd8xx.c,v 1.24 2014/12/22 02:28:51 tedu Exp $	*/
+/*	$OpenBSD: mtd8xx.c,v 1.27 2015/06/24 09:40:54 mpi Exp $	*/
 
 /*
  * Copyright (c) 2003 Oleg Safiullin <form@pdp11.org.ru>
@@ -79,7 +79,7 @@ static void mtd_start(struct ifnet *);
 static void mtd_stop(struct ifnet *);
 static void mtd_watchdog(struct ifnet *);
 
-static void mtd_rxeof(struct mtd_softc *);
+static int mtd_rxeof(struct mtd_softc *);
 static int mtd_rx_resync(struct mtd_softc *);
 static void mtd_txeof(struct mtd_softc *);
 
@@ -834,10 +834,7 @@ mtd_intr(void *xsc)
 
 		/* RX interrupt. */
 		if (status & ISR_RI) {
-			int curpkts = ifp->if_ipackets;
-
-			mtd_rxeof(sc);
-			if (curpkts == ifp->if_ipackets)
+			if (mtd_rxeof(sc) == 0)
 				while(mtd_rx_resync(sc))
 					mtd_rxeof(sc);
 		}
@@ -871,13 +868,14 @@ mtd_intr(void *xsc)
  * A frame has been uploaded: pass the resulting mbuf chain up to
  * the higher level protocols.
  */
-static void
+static int
 mtd_rxeof(struct mtd_softc *sc)
 {
+	struct mbuf_list ml = MBUF_LIST_INITIALIZER();
 	struct mbuf *m;
 	struct ifnet *ifp;
 	struct mtd_rx_desc *cur_rx;
-	int i, total_len = 0;
+	int i, total_len = 0, consumed = 0;
 	u_int32_t rxstat;
 
 	ifp = &sc->sc_arpcom.ac_if;
@@ -912,7 +910,7 @@ mtd_rxeof(struct mtd_softc *sc)
 				continue;
 			} else {
 				mtd_init(ifp);
-				return;
+				break;
 			}
 		}
 
@@ -923,7 +921,7 @@ mtd_rxeof(struct mtd_softc *sc)
 		    0, sc->mtd_cdata.mtd_rx_chain[i].sd_map->dm_mapsize,
 		    BUS_DMASYNC_POSTREAD);
 
-		m0 = m_devget(mtod(m, char *), total_len,  ETHER_ALIGN, ifp);
+		m0 = m_devget(mtod(m, char *), total_len,  ETHER_ALIGN);
 		mtd_newbuf(sc, i, m);
 		i = (i + 1) % MTD_RX_LIST_CNT;
 		if (m0 == NULL) {
@@ -932,16 +930,15 @@ mtd_rxeof(struct mtd_softc *sc)
 		}
 		m = m0;
 
-		ifp->if_ipackets++;
-
-#if NBPFILTER > 0
-		if (ifp->if_bpf)
-			bpf_mtap(ifp->if_bpf, m, BPF_DIRECTION_IN);
-#endif
-		ether_input_mbuf(ifp, m);
+		consumed++;
+		ml_enqueue(&ml, m);
 	}
 
+	if_input(ifp, &ml);
+
 	sc->mtd_cdata.mtd_rx_prod = i;
+
+	return (consumed);
 }
 
 

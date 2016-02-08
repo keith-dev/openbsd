@@ -1,4 +1,4 @@
-/* $OpenBSD: gnum4.c,v 1.47 2015/01/16 06:40:09 deraadt Exp $ */
+/* $OpenBSD: gnum4.c,v 1.50 2015/04/29 00:13:26 millert Exp $ */
 
 /*
  * Copyright (c) 1999 Marc Espie
@@ -37,6 +37,7 @@
 #include <regex.h>
 #include <stddef.h>
 #include <stdlib.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <string.h>
 #include <errno.h>
@@ -74,9 +75,7 @@ new_path_entry(const char *dirname)
 	n = malloc(sizeof(struct path_entry));
 	if (!n)
 		errx(1, "out of memory");
-	n->name = strdup(dirname);
-	if (!n->name)
-		errx(1, "out of memory");
+	n->name = xstrdup(dirname);
 	n->next = 0;
 	return n;
 }
@@ -111,9 +110,7 @@ ensure_m4path()
 	if (!envpath)
 		return;
 	/* for portability: getenv result is read-only */
-	envpath = strdup(envpath);
-	if (!envpath)
-		errx(1, "out of memory");
+	envpath = xstrdup(envpath);
 	for (sweep = envpath;
 	    (path = strsep(&sweep, ":")) != NULL;)
 	    addtoincludepath(path);
@@ -212,8 +209,11 @@ addchars(const char *c, size_t n)
 	while (current + n > bufsize) {
 		if (bufsize == 0)
 			bufsize = 1024;
-		else
+		else if (bufsize <= SIZE_MAX/2) {
 			bufsize *= 2;
+		} else {
+			errx(1, "size overflow");
+		}
 		buffer = xrealloc(buffer, bufsize, NULL);
 	}
 	memcpy(buffer+current, c, n);

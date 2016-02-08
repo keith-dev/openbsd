@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_vge.c,v 1.59 2014/12/22 02:28:52 tedu Exp $	*/
+/*	$OpenBSD: if_vge.c,v 1.63 2015/06/24 09:40:54 mpi Exp $	*/
 /*	$FreeBSD: if_vge.c,v 1.3 2004/09/11 22:13:25 wpaul Exp $	*/
 /*
  * Copyright (c) 2004
@@ -111,7 +111,6 @@
 #include <net/bpf.h>
 #endif
 
-#include <dev/mii/mii.h>
 #include <dev/mii/miivar.h>
 
 #include <dev/pci/pcireg.h>
@@ -984,6 +983,7 @@ vge_rx_list_init(struct vge_softc *sc)
 void
 vge_rxeof(struct vge_softc *sc)
 {
+	struct mbuf_list	ml = MBUF_LIST_INITIALIZER();
 	struct mbuf		*m;
 	struct ifnet		*ifp;
 	int			i, total_len;
@@ -1077,7 +1077,7 @@ vge_rxeof(struct vge_softc *sc)
 			}
 
 			m0 = m_devget(mtod(m, char *),
-			    total_len - ETHER_CRC_LEN, ETHER_ALIGN, ifp);
+			    total_len - ETHER_CRC_LEN, ETHER_ALIGN);
 			vge_newbuf(sc, i, m);
 			if (m0 == NULL) {
 				ifp->if_ierrors++;
@@ -1119,9 +1119,6 @@ vge_rxeof(struct vge_softc *sc)
 		bcopy(m->m_data, m->m_data + ETHER_ALIGN, total_len);
 		m->m_data += ETHER_ALIGN;
 #endif
-		ifp->if_ipackets++;
-		m->m_pkthdr.rcvif = ifp;
-
 		/* Do RX checksumming */
 
 		/* Check IP header checksum */
@@ -1141,16 +1138,14 @@ vge_rxeof(struct vge_softc *sc)
 		}
 #endif
 
-#if NBPFILTER > 0
-		if (ifp->if_bpf)
-			bpf_mtap_ether(ifp->if_bpf, m, BPF_DIRECTION_IN);
-#endif
-		ether_input_mbuf(ifp, m);
+		ml_enqueue(&ml, m);
 
 		lim++;
 		if (lim == VGE_RX_DESC_CNT)
 			break;
 	}
+
+	if_input(ifp, &ml);
 
 	/* Flush the RX DMA ring */
 	bus_dmamap_sync(sc->sc_dmat,

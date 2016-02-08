@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_ste.c,v 1.57 2014/12/22 02:28:52 tedu Exp $ */
+/*	$OpenBSD: if_ste.c,v 1.59 2015/06/24 09:40:54 mpi Exp $ */
 /*
  * Copyright (c) 1997, 1998, 1999
  *	Bill Paul <wpaul@ctr.columbia.edu>.  All rights reserved.
@@ -628,6 +628,7 @@ void
 ste_rxeof(struct ste_softc *sc)
 {
         struct mbuf		*m;
+	struct mbuf_list	ml = MBUF_LIST_INITIALIZER();
         struct ifnet		*ifp;
 	struct ste_chain_onefrag	*cur_rx;
 	int			total_len = 0, count=0;
@@ -685,22 +686,15 @@ ste_rxeof(struct ste_softc *sc)
 			continue;
 		}
 
-		m->m_pkthdr.rcvif = ifp;
 		m->m_pkthdr.len = m->m_len = total_len;
 
-		ifp->if_ipackets++;
-
-#if NBPFILTER > 0
-		if (ifp->if_bpf)
-			bpf_mtap(ifp->if_bpf, m, BPF_DIRECTION_IN);
-#endif
-
-		/* pass it on. */
-		ether_input_mbuf(ifp, m);
+		ml_enqueue(&ml, m);
 
 		cur_rx->ste_ptr->ste_status = 0;
 		count++;
 	}
+
+	if_input(ifp, &ml);
 }
 
 void

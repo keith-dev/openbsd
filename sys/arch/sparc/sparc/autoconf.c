@@ -1,4 +1,4 @@
-/*	$OpenBSD: autoconf.c,v 1.97 2014/11/22 22:48:38 miod Exp $	*/
+/*	$OpenBSD: autoconf.c,v 1.100 2015/03/30 20:30:22 miod Exp $	*/
 /*	$NetBSD: autoconf.c,v 1.73 1997/07/29 09:41:53 fair Exp $ */
 
 /*
@@ -159,6 +159,11 @@ struct promvec promvecdat;
 struct om_vector *oldpvec = (struct om_vector *)PROM_BASE;
 #endif
 
+#if (defined(SUN4) || defined(SUN4C) || defined(SUN4E)) && \
+    (defined(SUN4D) || defined(SUN4M)) && !defined(SMALL_KERNEL)
+vaddr_t vm_kernel_space_size;
+#endif
+
 /*
  * locore.s code calls bootstrap() just before calling main(), after double
  * mapping the kernel to high memory and setting up the trap base register.
@@ -237,6 +242,20 @@ bootstrap()
 			*oldpvec->vector_cmd = oldmon_w_cmd;
 	}
 #endif /* SUN4 */
+
+	/*
+	 * Decide upon which address space partition to use if it could not
+	 * be decided at compile-time (i.e. for GENERIC kernels supporting
+	 * both the old Sun MMU and the SRMMU).
+	 */
+#if (defined(SUN4) || defined(SUN4C) || defined(SUN4E)) && \
+    (defined(SUN4D) || defined(SUN4M)) && !defined(SMALL_KERNEL)
+	if (CPU_ISSUN4OR4COR4E)
+		vm_min_kernel_address = VM_MIN_KERNEL_ADDRESS_SUN4;
+	else
+		vm_min_kernel_address = VM_MIN_KERNEL_ADDRESS_SRMMU;
+	vm_kernel_space_size = VM_MAX_KERNEL_ADDRESS - vm_min_kernel_address;
+#endif
 
 	bzero(&cpuinfo, sizeof(struct cpu_softc));
 	cpuinfo.master = 1;
@@ -783,6 +802,7 @@ cpu_configure()
 	register char *cp;
 	int s;
 	extern struct user *proc0paddr;
+	extern struct sparc_bus_dma_tag dvma_dmatag;
 
 	/* build the bootpath */
 	bootpath_build();
@@ -840,6 +860,7 @@ cpu_configure()
 
 	oca.ca_ra.ra_node = node;
 	oca.ca_ra.ra_name = cp = "mainbus";
+	oca.ca_dmat = &dvma_dmatag;
 	if (config_rootfound(cp, (void *)&oca) == NULL)
 		panic("mainbus not configured");
 
@@ -1194,11 +1215,13 @@ mainbus_attach(parent, dev, aux)
 		/* Configure the CPU. */
 		bzero(&oca, sizeof(oca));
 		oca.ca_ra.ra_name = "cpu";
-		(void)config_found(dev, (void *)&oca, mbprint);
+		oca.ca_dmat = ca->ca_dmat;
+		config_found(dev, (void *)&oca, mbprint);
 
 		/* Start at the beginning of the bootpath */
 		bzero(&oca, sizeof(oca));
 		oca.ca_ra.ra_bp = bootpath;
+		oca.ca_dmat = ca->ca_dmat;
 
 		oca.ca_bustype = BUS_MAIN;
 		oca.ca_ra.ra_name = "obio";
@@ -1208,7 +1231,7 @@ mainbus_attach(parent, dev, aux)
 		for (ssp = oldmon_special; (sp = *ssp) != NULL; ssp++) {
 			oca.ca_bustype = BUS_MAIN;
 			oca.ca_ra.ra_name = sp;
-			(void)config_found(dev, (void *)&oca, mbprint);
+			config_found(dev, (void *)&oca, mbprint);
 		}
 		return;
 	}
@@ -1256,6 +1279,7 @@ mainbus_attach(parent, dev, aux)
 				oca.ca_ra.ra_name = "cpu";
 				oca.ca_ra.ra_paddr = 0;
 				oca.ca_ra.ra_nreg = 0;
+				oca.ca_dmat = ca->ca_dmat;
 				config_found(dev, (void *)&oca, mbprint);
 			}
 		}
@@ -1265,6 +1289,7 @@ mainbus_attach(parent, dev, aux)
 		oca.ca_ra.ra_name = "cpu";
 		oca.ca_ra.ra_paddr = 0;
 		oca.ca_ra.ra_nreg = 0;
+		oca.ca_dmat = ca->ca_dmat;
 		config_found(dev, (void *)&oca, mbprint);
 	}
 
@@ -1335,7 +1360,7 @@ mainbus_attach(parent, dev, aux)
 				splx(11 << 8);		/*XXX*/
 #endif
 			oca.ca_bustype = BUS_MAIN;
-			(void) config_found(dev, (void *)&oca, mbprint);
+			config_found(dev, (void *)&oca, mbprint);
 		}
 	}
 
@@ -1350,6 +1375,7 @@ mainbus_attach(parent, dev, aux)
 		bzero(&oca, sizeof(oca));
 		oca.ca_bustype = BUS_MAIN;
 		oca.ca_ra.ra_name = "led";
+		oca.ca_dmat = ca->ca_dmat;
 		config_found(dev, (void *)&oca, mbprint);
 	}
 #endif

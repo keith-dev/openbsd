@@ -1,4 +1,4 @@
-/*	$OpenBSD: relayd.c,v 1.138 2015/01/22 17:42:09 reyk Exp $	*/
+/*	$OpenBSD: relayd.c,v 1.143 2015/07/29 20:55:43 benno Exp $	*/
 
 /*
  * Copyright (c) 2007 - 2014 Reyk Floeter <reyk@openbsd.org>
@@ -87,6 +87,8 @@ parent_sig_handler(int sig, short event, void *arg)
 		/* FALLTHROUGH */
 	case SIGCHLD:
 		do {
+			int len;
+
 			pid = waitpid(WAIT_ANY, &status, WNOHANG);
 			if (pid <= 0)
 				continue;
@@ -94,16 +96,20 @@ parent_sig_handler(int sig, short event, void *arg)
 			fail = 0;
 			if (WIFSIGNALED(status)) {
 				fail = 1;
-				asprintf(&cause, "terminated; signal %d",
+				len = asprintf(&cause, "terminated; signal %d",
 				    WTERMSIG(status));
 			} else if (WIFEXITED(status)) {
 				if (WEXITSTATUS(status) != 0) {
 					fail = 1;
-					asprintf(&cause, "exited abnormally");
+					len = asprintf(&cause,
+					    "exited abnormally");
 				} else
-					asprintf(&cause, "exited okay");
+					len = asprintf(&cause, "exited okay");
 			} else
 				fatalx("unexpected cause of SIGCHLD");
+
+			if (len == -1)
+				fatal("asprintf");
 
 			die = 1;
 
@@ -408,6 +414,7 @@ parent_shutdown(struct relayd *env)
 
 	proc_kill(env->sc_ps);
 	control_cleanup(&env->sc_ps->ps_csock);
+	(void)unlink(env->sc_ps->ps_csock.cs_name);
 	carp_demote_shutdown();
 
 	free(env->sc_ps);
@@ -546,12 +553,13 @@ parent_dispatch_ca(int fd, struct privsep_proc *p, struct imsg *imsg)
 }
 
 void
-purge_table(struct tablelist *head, struct table *table)
+purge_table(struct relayd *env, struct tablelist *head, struct table *table)
 {
 	struct host		*host;
 
 	while ((host = TAILQ_FIRST(&table->hosts)) != NULL) {
 		TAILQ_REMOVE(&table->hosts, host, entry);
+		TAILQ_REMOVE(&env->sc_hosts, host, globalentry);
 		if (event_initialized(&host->cte.ev)) {
 			event_del(&host->cte.ev);
 			close(host->cte.s);
@@ -766,18 +774,13 @@ kv_purge(struct kvtree *keys)
 void
 kv_free(struct kv *kv)
 {
-	if (kv->kv_type == KEY_TYPE_NONE)
-		return;
-	if (kv->kv_key != NULL) {
-		free(kv->kv_key);
-	}
-	kv->kv_key = NULL;
-	if (kv->kv_value != NULL) {
-		free(kv->kv_value);
-	}
-	kv->kv_value = NULL;
-	kv->kv_matchtree = NULL;
-	kv->kv_match = NULL;
+	/*
+	 * This function does not clear memory referenced by
+	 * kv_children or stuff on the tailqs. Use kv_delete() instead.
+	 */
+
+	free(kv->kv_key);
+	free(kv->kv_value);
 	memset(kv, 0, sizeof(*kv));
 }
 
@@ -1018,11 +1021,8 @@ rule_settable(struct relay_rules *rules, struct relay_table *rlt)
 
 	TAILQ_FOREACH(r, rules, rule_entry) {
 		if (r->rule_tablename[0] &&
-		    strcmp(pname, r->rule_tablename) == 0) {
+		    strcmp(pname, r->rule_tablename) == 0)
 			r->rule_table = rlt;
-		} else {
-			r->rule_table = NULL;
-		}
 	}
 }
 

@@ -1,4 +1,4 @@
-/* $OpenBSD: apps.c,v 1.25 2015/02/07 04:09:43 bcook Exp $ */
+/* $OpenBSD: apps.c,v 1.33 2015/07/21 03:47:17 bcook Exp $ */
 /*
  * Copyright (c) 2014 Joel Sing <jsing@openbsd.org>
  *
@@ -126,7 +126,6 @@
 
 #include <sys/types.h>
 #include <sys/stat.h>
-#include <sys/times.h>
 
 #include <ctype.h>
 #include <errno.h>
@@ -134,7 +133,6 @@
 #include <stdlib.h>
 #include <limits.h>
 #include <string.h>
-#include <strings.h>
 #include <unistd.h>
 
 #include "apps.h"
@@ -1251,21 +1249,6 @@ end:
 }
 
 #ifndef OPENSSL_NO_ENGINE
-/* Try to load an engine in a shareable library */
-static ENGINE *
-try_load_engine(BIO *err, const char *engine, int debug)
-{
-	ENGINE *e = ENGINE_by_id("dynamic");
-
-	if (e) {
-		if (!ENGINE_ctrl_cmd_string(e, "SO_PATH", engine, 0) ||
-		    !ENGINE_ctrl_cmd_string(e, "LOAD", NULL, 0)) {
-			ENGINE_free(e);
-			e = NULL;
-		}
-	}
-	return e;
-}
 
 ENGINE *
 setup_engine(BIO *err, const char *engine, int debug)
@@ -1278,17 +1261,27 @@ setup_engine(BIO *err, const char *engine, int debug)
 			ENGINE_register_all_complete();
 			return NULL;
 		}
-		if ((e = ENGINE_by_id(engine)) == NULL &&
-		    (e = try_load_engine(err, engine, debug)) == NULL) {
+		if ((e = ENGINE_by_id(engine)) == NULL) {
 			BIO_printf(err, "invalid engine \"%s\"\n", engine);
 			ERR_print_errors(err);
 			return NULL;
 		}
 		if (debug) {
-			ENGINE_ctrl(e, ENGINE_CTRL_SET_LOGSTREAM,
-			    0, err, 0);
+			if (ENGINE_ctrl(e, ENGINE_CTRL_SET_LOGSTREAM,
+			    0, err, 0) <= 0) {
+				BIO_printf(err, "Cannot set logstream for "
+				    "engine \"%s\"\n", engine);
+				ERR_print_errors(err);
+				ENGINE_free(e);
+				return NULL;
+			}
 		}
-		ENGINE_ctrl_cmd(e, "SET_USER_INTERFACE", 0, ui_method, 0, 1);
+		if (!ENGINE_ctrl_cmd(e, "SET_USER_INTERFACE", 0, ui_method, 0, 1)) {
+			BIO_printf(err, "can't set user interface\n");
+			ERR_print_errors(err);
+			ENGINE_free(e);
+			return NULL;
+		}
 		if (!ENGINE_set_default(e, ENGINE_METHOD_ALL)) {
 			BIO_printf(err, "can't use that engine\n");
 			ERR_print_errors(err);
@@ -1526,7 +1519,11 @@ rotate_serial(char *serialfile, char *new_suffix, char *old_suffix)
 		BIO_printf(bio_err, "unable to rename %s to %s\n",
 		    buf[0], serialfile);
 		perror("reason");
-		rename(buf[1], serialfile);
+		if (rename(buf[1], serialfile) < 0) {
+			BIO_printf(bio_err, "unable to rename %s to %s\n",
+			    buf[1], serialfile);
+			perror("reason");
+		}
 		goto err;
 	}
 	return 1;
@@ -1730,7 +1727,11 @@ rotate_index(const char *dbfile, const char *new_suffix, const char *old_suffix)
 		BIO_printf(bio_err, "unable to rename %s to %s\n",
 		    buf[0], dbfile);
 		perror("reason");
-		rename(buf[1], dbfile);
+		if (rename(buf[1], dbfile) < 0) {
+			BIO_printf(bio_err, "unable to rename %s to %s\n",
+			    buf[1], dbfile);
+			perror("reason");
+		}
 		goto err;
 	}
 
@@ -1739,8 +1740,16 @@ rotate_index(const char *dbfile, const char *new_suffix, const char *old_suffix)
 		BIO_printf(bio_err, "unable to rename %s to %s\n",
 		    buf[4], buf[3]);
 		perror("reason");
-		rename(dbfile, buf[0]);
-		rename(buf[1], dbfile);
+		if (rename(dbfile, buf[0]) < 0) {
+			BIO_printf(bio_err, "unable to rename %s to %s\n",
+			    dbfile, buf[0]);
+			perror("reason");
+		}
+		if (rename(buf[1], dbfile) < 0) {
+			BIO_printf(bio_err, "unable to rename %s to %s\n",
+			    buf[1], dbfile);
+			perror("reason");
+		}
 		goto err;
 	}
 
@@ -1749,9 +1758,21 @@ rotate_index(const char *dbfile, const char *new_suffix, const char *old_suffix)
 		BIO_printf(bio_err, "unable to rename %s to %s\n",
 		    buf[2], buf[4]);
 		perror("reason");
-		rename(buf[3], buf[4]);
-		rename(dbfile, buf[0]);
-		rename(buf[1], dbfile);
+		if (rename(buf[3], buf[4]) < 0) {
+			BIO_printf(bio_err, "unable to rename %s to %s\n",
+			    buf[3], buf[4]);
+			perror("reason");
+		}
+		if (rename(dbfile, buf[0]) < 0) {
+			BIO_printf(bio_err, "unable to rename %s to %s\n",
+			    dbfile, buf[0]);
+			perror("reason");
+		}
+		if (rename(buf[1], dbfile) < 0) {
+			BIO_printf(bio_err, "unable to rename %s to %s\n",
+			    buf[1], dbfile);
+			perror("reason");
+		}
 		goto err;
 	}
 	return 1;
@@ -2043,8 +2064,10 @@ args_verify(char ***pargs, int *pargc, int *badarg, BIO *err,
 		*badarg = 1;
 		goto end;
 	}
-	if (otmp)
+	if (otmp) {
 		X509_VERIFY_PARAM_add0_policy(*pm, otmp);
+		otmp = NULL;
+	}
 	if (flags)
 		X509_VERIFY_PARAM_set_flags(*pm, flags);
 
@@ -2063,6 +2086,7 @@ end:
 	if (pargc)
 		*pargc -= *pargs - oldargs;
 
+	ASN1_OBJECT_free(otmp);
 	return 1;
 }
 
@@ -2300,7 +2324,8 @@ options_parse(int argc, char **argv, struct option *opts, char **unnamed,
 		if (opt->type == OPTION_ARG ||
 		    opt->type == OPTION_ARG_FORMAT ||
 		    opt->type == OPTION_ARG_FUNC ||
-		    opt->type == OPTION_ARG_INT) {
+		    opt->type == OPTION_ARG_INT ||
+		    opt->type == OPTION_ARG_LONG) {
 			if (++i >= argc) {
 				fprintf(stderr, "missing %s argument for -%s\n",
 				    opt->argname, opt->name);
@@ -2342,6 +2367,19 @@ options_parse(int argc, char **argv, struct option *opts, char **unnamed,
 				return (1);
 			}
 			*opt->opt.value = (int)val;
+			break;
+
+		case OPTION_ARG_LONG:
+			val = strtonum(argv[i], 0, LONG_MAX, &errstr);
+			if (errstr != NULL) {
+				fprintf(stderr, "%s %s argument for -%s\n",
+				    errstr, opt->argname, opt->name);
+				return (1);
+			}
+			*opt->opt.lvalue = (long)val;
+			break;
+
+		case OPTION_DISCARD:
 			break;
 
 		case OPTION_FUNC:

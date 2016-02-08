@@ -1,28 +1,19 @@
-/*	$OpenBSD: fdisk.c,v 1.65 2015/02/09 04:27:15 krw Exp $	*/
+/*	$OpenBSD: fdisk.c,v 1.74 2015/07/09 19:48:36 krw Exp $	*/
 
 /*
  * Copyright (c) 1997 Tobias Weingartner
- * All rights reserved.
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in the
- *    documentation and/or other materials provided with the distribution.
+ * Permission to use, copy, modify, and distribute this software for any
+ * purpose with or without fee is hereby granted, provided that the above
+ * copyright notice and this permission notice appear in all copies.
  *
- * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
- * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
- * OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.
- * IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT
- * NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
- * DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
- * THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
- * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
- * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ * THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES
+ * WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF
+ * MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR
+ * ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
+ * WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN
+ * ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
+ * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
 
 #include <sys/types.h>
@@ -40,6 +31,7 @@
 #include "part.h"
 #include "mbr.h"
 #include "misc.h"
+#include "cmd.h"
 #include "user.h"
 
 #define _PATH_MBR _PATH_BOOTDIR "mbr"
@@ -56,7 +48,7 @@ usage(void)
 	extern char * __progname;
 
 	fprintf(stderr, "usage: %s "
-	    "[-egiuy] [-c cylinders -h heads -s sectors] [-f mbrfile] "
+	    "[-i|-u] [-egy] [-c # -h # -s #] [-f mbrfile] "
 	    "[-l blocks] disk\n"
 	    "\t-i: initialize disk with virgin MBR\n"
 	    "\t-u: update MBR code, preserve partition table\n"
@@ -75,17 +67,17 @@ usage(void)
 int
 main(int argc, char *argv[])
 {
-	int ch, fd, error;
+	ssize_t len;
+	int ch, fd;
 	int i_flag = 0, e_flag = 0, u_flag = 0;
 	int c_arg = 0, h_arg = 0, s_arg = 0;
-	struct disk disk;
 	u_int32_t l_arg = 0;
+	char *query;
 #ifdef HAS_MBR
 	char *mbrfile = _PATH_MBR;
 #else
 	char *mbrfile = NULL;
 #endif
-	struct mbr mbr;
 	struct dos_mbr dos_mbr;
 
 	while ((ch = getopt(argc, argv, "ieguf:c:h:s:l:y")) != -1) {
@@ -142,7 +134,7 @@ main(int argc, char *argv[])
 	memset(&disk, 0, sizeof(disk));
 
 	/* Argument checking */
-	if (argc != 1)
+	if (argc != 1 || (i_flag && u_flag))
 		usage();
 	else
 		disk.name = argv[0];
@@ -153,7 +145,7 @@ main(int argc, char *argv[])
 	}
 
 	/* Start with the disklabel geometry and get the sector size. */
-	DISK_getlabelgeometry(&disk);
+	DISK_getlabelgeometry();
 
 	if (c_arg | h_arg | s_arg) {
 		/* Use supplied geometry if it is completely specified. */
@@ -179,9 +171,9 @@ main(int argc, char *argv[])
 
 	/* Print out current MBRs on disk */
 	if ((i_flag + u_flag + e_flag) == 0)
-		exit(USER_print_disk(&disk));
+		USER_print_disk();
 
-	/* Parse mbr template, to pass on later */
+	/* Create initial/default MBR. */
 	if (mbrfile != NULL && (fd = open(mbrfile, O_RDONLY)) == -1) {
 		warn("%s", mbrfile);
 		warnx("using builtin MBR");
@@ -190,20 +182,29 @@ main(int argc, char *argv[])
 	if (mbrfile == NULL) {
 		memcpy(&dos_mbr, builtin_mbr, sizeof(dos_mbr));
 	} else {
-		error = MBR_read(fd, 0, &dos_mbr);
-		if (error == -1)
-			err(1, "Unable to read MBR");
+		len = read(fd, &dos_mbr, sizeof(dos_mbr));
+		if (len == -1)
+			err(1, "Unable to read MBR from '%s'", mbrfile);
+		else if (len != sizeof(dos_mbr))
+			errx(1, "Unable to read complete MBR from '%s'",
+			    mbrfile);
 		close(fd);
 	}
-	MBR_parse(&disk, &dos_mbr, 0, 0, &mbr);
+	MBR_parse(&dos_mbr, 0, 0, &initial_mbr);
 
-	/* Now do what we are supposed to */
-	if (i_flag || u_flag)
-		if (USER_init(&disk, &mbr, u_flag) == -1)
-			err(1, "error initializing MBR");
+	query = NULL;
+	if (i_flag) {
+		MBR_init(&initial_mbr);
+		query = "Do you wish to write new MBR and partition table?";
+	} else if (u_flag) {
+		MBR_pcopy(&initial_mbr);
+		query = "Do you wish to write new MBR?";
+	}
+	if (query && ask_yn(query))
+		Xwrite(NULL, &initial_mbr);
 
 	if (e_flag)
-		USER_edit(&disk, &mbr, 0, 0);
+		USER_edit(0, 0);
 
 	return (0);
 }

@@ -1,4 +1,4 @@
-/*	$OpenBSD: xl.c,v 1.121 2014/12/22 02:28:51 tedu Exp $	*/
+/*	$OpenBSD: xl.c,v 1.125 2015/06/24 09:40:54 mpi Exp $	*/
 
 /*
  * Copyright (c) 1997, 1998, 1999
@@ -121,7 +121,6 @@
 #include <netinet/in.h>
 #include <netinet/if_ether.h>
 
-#include <dev/mii/mii.h>
 #include <dev/mii/miivar.h>
 
 #include <machine/bus.h>
@@ -178,9 +177,6 @@ int xl_list_tx_init_90xB(struct xl_softc *);
 void xl_wait(struct xl_softc *);
 void xl_mediacheck(struct xl_softc *);
 void xl_choose_xcvr(struct xl_softc *, int);
-#ifdef notdef
-void xl_testpacket(struct xl_softc *);
-#endif
 
 int xl_miibus_readreg(struct device *, int, int);
 void xl_miibus_writereg(struct device *, int, int, int);
@@ -661,35 +657,6 @@ xl_iff_905b(struct xl_softc *sc)
 	XL_SEL_WIN(7);
 }
 
-#ifdef notdef
-void
-xl_testpacket(struct xl_softc *sc)
-{
-	struct mbuf	*m;
-	struct ifnet	*ifp;
-	int		error;
-
-	ifp = &sc->sc_arpcom.ac_if;
-
-	MGETHDR(m, M_DONTWAIT, MT_DATA);
-
-	if (m == NULL)
-		return;
-
-	memcpy(mtod(m, struct ether_header *)->ether_dhost,
-	    &sc->sc_arpcom.ac_enaddr, ETHER_ADDR_LEN);
-	memcpy(mtod(m, struct ether_header *)->ether_shost,
-	    &sc->sc_arpcom.ac_enaddr, ETHER_ADDR_LEN);
-	mtod(m, struct ether_header *)->ether_type = htons(3);
-	mtod(m, unsigned char *)[14] = 0;
-	mtod(m, unsigned char *)[15] = 0;
-	mtod(m, unsigned char *)[16] = 0xE3;
-	m->m_len = m->m_pkthdr.len = sizeof(struct ether_header) + 3;
-	IFQ_ENQUEUE(&ifp->if_snd, m, NULL, error);
-	xl_start(ifp);
-}
-#endif
-
 void
 xl_setcfg(struct xl_softc *sc)
 {
@@ -1165,6 +1132,7 @@ xl_newbuf(struct xl_softc *sc, struct xl_chain_onefrag *c)
 void
 xl_rxeof(struct xl_softc *sc)
 {
+	struct mbuf_list	ml = MBUF_LIST_INITIALIZER();
         struct mbuf		*m;
         struct ifnet		*ifp;
 	struct xl_chain_onefrag	*cur_rx;
@@ -1226,17 +1194,7 @@ again:
 			continue;
 		}
 
-		ifp->if_ipackets++;
-		m->m_pkthdr.rcvif = ifp;
 		m->m_pkthdr.len = m->m_len = total_len;
-#if NBPFILTER > 0
-		/*
-		 * Handle BPF listeners. Let the BPF user see the packet.
-		 */
-		if (ifp->if_bpf) {
-			bpf_mtap(ifp->if_bpf, m, BPF_DIRECTION_IN);
-		}
-#endif
 
 		if (sc->xl_type == XL_TYPE_905B) {
 			if (!(rxstat & XL_RXSTAT_IPCKERR) &&
@@ -1254,7 +1212,7 @@ again:
 			m->m_pkthdr.csum_flags = sumflags;
 		}
 
-		ether_input_mbuf(ifp, m);
+		ml_enqueue(&ml, m);
 	}
 
 	xl_fill_rx_ring(sc);
@@ -1279,6 +1237,8 @@ again:
 		xl_fill_rx_ring(sc);
 		goto again;
 	}
+
+	if_input(ifp, &ml);
 }
 
 /*

@@ -1,4 +1,4 @@
-/*	$OpenBSD: usbdi.c,v 1.80 2015/02/12 05:07:52 uebayasi Exp $ */
+/*	$OpenBSD: usbdi.c,v 1.83 2015/07/10 15:47:48 mpi Exp $ */
 /*	$NetBSD: usbdi.c,v 1.103 2002/09/27 15:37:38 provos Exp $	*/
 /*	$FreeBSD: src/sys/dev/usb/usbdi.c,v 1.28 1999/11/17 22:33:49 n_hibma Exp $	*/
 
@@ -42,7 +42,6 @@
 
 #include <dev/usb/usb.h>
 #include <dev/usb/usbdi.h>
-#include <dev/usb/usbdi_util.h>
 #include <dev/usb/usbdivar.h>
 #include <dev/usb/usb_mem.h>
 
@@ -281,7 +280,6 @@ usbd_transfer(struct usbd_xfer *xfer)
 {
 	struct usbd_pipe *pipe = xfer->pipe;
 	usbd_status err;
-	u_int size;
 	int flags, s;
 
 	if (usbd_is_dying(pipe->device))
@@ -298,25 +296,23 @@ usbd_transfer(struct usbd_xfer *xfer)
 	if (pipe->aborting)
 		return (USBD_CANCELLED);
 
-	size = xfer->length;
 	/* If there is no buffer, allocate one. */
-	if (!(xfer->rqflags & URQ_DEV_DMABUF) && size != 0) {
+	if ((xfer->rqflags & URQ_DEV_DMABUF) == 0) {
 		struct usbd_bus *bus = pipe->device->bus;
 
 #ifdef DIAGNOSTIC
 		if (xfer->rqflags & URQ_AUTO_DMABUF)
 			printf("usbd_transfer: has old buffer!\n");
 #endif
-		err = usb_allocmem(bus, size, 0, &xfer->dmabuf);
+		err = usb_allocmem(bus, xfer->length, 0, &xfer->dmabuf);
 		if (err)
 			return (err);
 		xfer->rqflags |= URQ_AUTO_DMABUF;
 	}
 
 	/* Copy data if going out. */
-	if (!(xfer->flags & USBD_NO_COPY) && size != 0 &&
-	    !usbd_xfer_isread(xfer))
-		memcpy(KERNADDR(&xfer->dmabuf, 0), xfer->buffer, size);
+	if (((xfer->flags & USBD_NO_COPY) == 0) && !usbd_xfer_isread(xfer))
+		memcpy(KERNADDR(&xfer->dmabuf, 0), xfer->buffer, xfer->length);
 
 	err = pipe->methods->transfer(xfer);
 
@@ -459,10 +455,14 @@ usbd_setup_isoc_xfer(struct usbd_xfer *xfer, struct usbd_pipe *pipe,
     void *priv, u_int16_t *frlengths, u_int32_t nframes,
     u_int16_t flags, usbd_callback callback)
 {
+	int i;
+
 	xfer->pipe = pipe;
 	xfer->priv = priv;
 	xfer->buffer = 0;
 	xfer->length = 0;
+	for (i = 0; i < nframes; i++)
+		xfer->length += frlengths[i];
 	xfer->actlen = 0;
 	xfer->flags = flags;
 	xfer->timeout = USBD_NO_TIMEOUT;
@@ -612,28 +612,6 @@ usbd_clear_endpoint_toggle(struct usbd_pipe *pipe)
 		pipe->methods->cleartoggle(pipe);
 }
 
-int
-usbd_endpoint_count(struct usbd_interface *iface, u_int8_t *count)
-{
-#ifdef DIAGNOSTIC
-	if (iface == NULL || iface->idesc == NULL) {
-		printf("usbd_endpoint_count: NULL pointer\n");
-		return (1);
-	}
-#endif
-	*count = iface->idesc->bNumEndpoints;
-	return (0);
-}
-
-int
-usbd_interface_count(struct usbd_device *dev, u_int8_t *count)
-{
-	if (dev->cdesc == NULL)
-		return (1);
-	*count = dev->cdesc->bNumInterface;
-	return (0);
-}
-
 usbd_status
 usbd_device2interface_handle(struct usbd_device *dev, u_int8_t ifaceno,
     struct usbd_interface **iface)
@@ -737,7 +715,7 @@ usb_transfer_complete(struct usbd_xfer *xfer)
 		pipe->running = 0;
 
 #ifdef DIAGNOSTIC
-	if (xfer->actlen > xfer->length && xfer->length != 0) {
+	if (xfer->actlen > xfer->length) {
 		printf("%s: actlen > len %u > %u\n", __func__, xfer->actlen,
 		    xfer->length);
 		xfer->actlen = xfer->length;

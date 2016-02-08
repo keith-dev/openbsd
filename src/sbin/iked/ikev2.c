@@ -1,4 +1,4 @@
-/*	$OpenBSD: ikev2.c,v 1.119 2015/02/06 10:39:01 deraadt Exp $	*/
+/*	$OpenBSD: ikev2.c,v 1.121 2015/07/07 19:13:31 markus Exp $	*/
 
 /*
  * Copyright (c) 2010-2013 Reyk Floeter <reyk@openbsd.org>
@@ -54,6 +54,7 @@ struct iked_sa *
 	    u_int8_t *, u_int8_t **, size_t *);
 
 void	 ikev2_recv(struct iked *, struct iked_message *);
+int	 ikev2_ike_auth_compatible(struct iked_sa *, u_int8_t, u_int8_t);
 int	 ikev2_ike_auth_recv(struct iked *, struct iked_sa *,
 	    struct iked_message *);
 int	 ikev2_ike_auth(struct iked *, struct iked_sa *);
@@ -122,6 +123,9 @@ void	 ikev2_ipcomp_csa_free(struct iked *, struct iked_childsa *);
 int	 ikev2_cp_setaddr(struct iked *, struct iked_sa *);
 int	 ikev2_cp_fixaddr(struct iked_sa *, struct iked_addr *,
 	    struct iked_addr *);
+
+ssize_t	ikev2_add_sighashnotify(struct ibuf *, struct ikev2_payload **,
+	    ssize_t);
 
 static struct privsep_proc procs[] = {
 	{ "parent",	PROC_PARENT,	ikev2_dispatch_parent },
@@ -469,10 +473,8 @@ ikev2_recv(struct iked *env, struct iked_message *msg)
 		ikev2_msg_prevail(env, &sa->sa_responses, msg);
 	}
 
-	if (sa_address(sa, &sa->sa_peer, &msg->msg_peer,
-	    sa->sa_hdr.sh_initiator) == -1 ||
-	    sa_address(sa, &sa->sa_local, &msg->msg_local,
-	    sa->sa_hdr.sh_initiator) == -1)
+	if (sa_address(sa, &sa->sa_peer, &msg->msg_peer) == -1 ||
+	    sa_address(sa, &sa->sa_local, &msg->msg_local) == -1)
 		return;
 
 	sa->sa_fd = msg->msg_fd;
@@ -491,6 +493,17 @@ done:
 		log_debug("%s: closing SA", __func__);
 		sa_free(env, sa);
 	}
+}
+
+int
+ikev2_ike_auth_compatible(struct iked_sa *sa, u_int8_t want, u_int8_t have)
+{
+	if (want == have)
+		return (0);
+	if (sa->sa_sigsha2 &&
+	    have == IKEV2_AUTH_SIG && want == IKEV2_AUTH_RSA_SIG)
+		return (0);
+	return (-1);
 }
 
 int
@@ -517,19 +530,10 @@ ikev2_ike_auth_recv(struct iked *env, struct iked_sa *sa,
 		sa->sa_policy = NULL;
 		if (policy_lookup(env, msg) == 0 && msg->msg_policy &&
 		    msg->msg_policy != old) {
-			log_debug("%s: policy switch %p/%s to %p/%s",
-			    __func__, old, old->pol_name,
-			    msg->msg_policy, msg->msg_policy->pol_name);
-			RB_REMOVE(iked_sapeers, &old->pol_sapeers, sa);
-			if (RB_INSERT(iked_sapeers,
-			    &msg->msg_policy->pol_sapeers, sa)) {
-				/* failed, restore */
-				log_debug("%s: conflicting sa", __func__);
-				RB_INSERT(iked_sapeers, &old->pol_sapeers, sa);
-				msg->msg_policy = old;
-			} else
-				policy_unref(env, old);
+			/* move sa to new policy */
 			policy = sa->sa_policy = msg->msg_policy;
+			TAILQ_REMOVE(&old->pol_sapeers, sa, sa_peer_entry);
+			TAILQ_INSERT_TAIL(&policy->pol_sapeers, sa, sa_peer_entry);
 		} else {
 			/* restore */
 			msg->msg_policy = sa->sa_policy = old;
@@ -579,11 +583,13 @@ ikev2_ike_auth_recv(struct iked *env, struct iked_sa *sa,
 			ikeauth.auth_length = ibuf_size(sa->sa_eapmsk);
 		}
 
-		if (msg->msg_auth.id_type != ikeauth.auth_method) {
+		if (ikev2_ike_auth_compatible(sa,
+		    ikeauth.auth_method, msg->msg_auth.id_type) < 0) {
 			log_warnx("%s: unexpected auth method %s", __func__,
-			    print_map(ikeauth.auth_method, ikev2_auth_map));
+			    print_map(msg->msg_auth.id_type, ikev2_auth_map));
 			return (-1);
 		}
+		ikeauth.auth_method = msg->msg_auth.id_type;
 
 		if ((authmsg = ikev2_msg_auth(env, sa,
 		    sa->sa_hdr.sh_initiator)) == NULL) {
@@ -756,7 +762,7 @@ ikev2_init_ike_sa(struct iked *env, void *arg)
 	TAILQ_FOREACH(pol, &env->sc_policies, pol_entry) {
 		if ((pol->pol_flags & IKED_POLICY_ACTIVE) == 0)
 			continue;
-		if (sa_peer_lookup(pol, &pol->pol_peer.addr) != NULL) {
+		if (!TAILQ_EMPTY(&pol->pol_sapeers)) {
 			log_debug("%s: \"%s\" is already active",
 			    __func__, pol->pol_name);
 			continue;
@@ -908,6 +914,9 @@ ikev2_init_ike_sa_peer(struct iked *env, struct iked_policy *pol,
 		len += sizeof(*n);
 	}
 
+	if ((len = ikev2_add_sighashnotify(buf, &pld, len)) == -1)
+		goto done;
+
 	if (ikev2_next_payload(pld, len, IKEV2_PAYLOAD_NONE) == -1)
 		goto done;
 
@@ -919,12 +928,6 @@ ikev2_init_ike_sa_peer(struct iked *env, struct iked_policy *pol,
 	ibuf_release(sa->sa_1stmsg);
 	if ((sa->sa_1stmsg = ibuf_dup(buf)) == NULL) {
 		log_debug("%s: failed to copy 1st message", __func__);
-		goto done;
-	}
-
-	memcpy(&sa->sa_polpeer, &pol->pol_peer, sizeof(sa->sa_polpeer));
-	if (RB_INSERT(iked_sapeers, &pol->pol_sapeers, sa)) {
-		log_debug("%s: conflicting sa", __func__);
 		goto done;
 	}
 
@@ -1473,6 +1476,46 @@ ikev2_add_ipcompnotify(struct iked *env, struct ibuf *e,
 
 	sa->sa_cpi_in = spi;	/* already on host byte order */
 	log_debug("%s: sa_cpi_in 0x%04x", __func__, sa->sa_cpi_in);
+
+	return (len);
+}
+
+ssize_t
+ikev2_add_sighashnotify(struct ibuf *e, struct ikev2_payload **pld,
+    ssize_t len)
+{
+	struct ikev2_notify		*n;
+	u_int8_t			*ptr;
+	size_t				 i;
+	u_int16_t			 hash, signature_hashes[] = {
+		IKEV2_SIGHASH_SHA2_256,
+		IKEV2_SIGHASH_SHA2_384,
+		IKEV2_SIGHASH_SHA2_512
+	};
+
+	if (ikev2_next_payload(*pld, len, IKEV2_PAYLOAD_NOTIFY) == -1)
+		return (-1);
+
+	/* XXX signature_hashes are hardcoded for now */
+	len = sizeof(*n) + nitems(signature_hashes) * sizeof(hash);
+
+	/* NOTIFY payload */
+	if ((*pld = ikev2_add_payload(e)) == NULL)
+		return (-1);
+	if ((ptr = ibuf_advance(e, len)) == NULL)
+		return (-1);
+
+	n = (struct ikev2_notify *)ptr;
+	n->n_protoid = 0;
+	n->n_spisize = 0;
+	n->n_type = htobe16(IKEV2_N_SIGNATURE_HASH_ALGORITHMS);
+	ptr += sizeof(*n);
+
+	for (i = 0; i < nitems(signature_hashes); i++) {
+		hash = htobe16(signature_hashes[i]);
+		memcpy(ptr, &hash, sizeof(hash));
+		ptr += sizeof(hash);
+	}
 
 	return (len);
 }
@@ -2084,6 +2127,10 @@ ikev2_resp_ike_sa_init(struct iked *env, struct iked_message *msg)
 		    len, NULL, sa->sa_policy->pol_certreqtype)) == -1)
 			goto done;
 	}
+
+	if (sa->sa_sigsha2 &&
+	    (len = ikev2_add_sighashnotify(buf, &pld, len)) == -1)
+		goto done;
 
 	if (ikev2_next_payload(pld, len, IKEV2_PAYLOAD_NONE) == -1)
 		goto done;
@@ -2816,7 +2863,6 @@ ikev2_ikesa_enable(struct iked *env, struct iked_sa *sa, struct iked_sa *nsa)
 	struct iked_childsa		*csa, *nextcsa;
 	struct iked_flow		*flow, *nextflow;
 	struct iked_proposal		*prop, *nextprop;
-	int				 initiator;
 
 	log_debug("%s: IKE SA %p ispi %s rspi %s replaced"
 	    " by SA %p ispi %s rspi %s ",
@@ -2826,29 +2872,6 @@ ikev2_ikesa_enable(struct iked *env, struct iked_sa *sa, struct iked_sa *nsa)
 	    nsa,
 	    print_spi(nsa->sa_hdr.sh_ispi, 8),
 	    print_spi(nsa->sa_hdr.sh_rspi, 8));
-
-	/*
-	 * Transfer policy and address:
-	 * - Remember if we initiated the original IKE-SA because of our policy.
-	 * - Note that sa_address() will insert the new SA when we set sa_peer.
-	 */
-	initiator = !memcmp(&sa->sa_polpeer, &sa->sa_policy->pol_peer,
-	    sizeof(sa->sa_polpeer));
-	nsa->sa_policy = sa->sa_policy;
-	RB_REMOVE(iked_sapeers, &sa->sa_policy->pol_sapeers, sa);
-	sa->sa_policy = NULL;
-	if (sa_address(nsa, &nsa->sa_peer, &sa->sa_peer.addr,
-	    initiator) == -1 ||
-	    sa_address(nsa, &nsa->sa_local, &sa->sa_local.addr,
-	    initiator) == -1) {
-		/* reinsert old SA :/ */
-		sa->sa_policy = nsa->sa_policy;
-		if (RB_FIND(iked_sapeers, &nsa->sa_policy->pol_sapeers, nsa))
-			RB_REMOVE(iked_sapeers, &nsa->sa_policy->pol_sapeers, nsa);
-		RB_INSERT(iked_sapeers, &sa->sa_policy->pol_sapeers, sa);
-		nsa->sa_policy = NULL;
-		return (-1);
-	}
 
 	/* Transfer socket and NAT information */
 	nsa->sa_fd = sa->sa_fd;

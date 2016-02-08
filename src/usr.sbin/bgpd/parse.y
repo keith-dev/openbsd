@@ -1,4 +1,4 @@
-/*	$OpenBSD: parse.y,v 1.275 2014/11/20 05:51:20 jsg Exp $ */
+/*	$OpenBSD: parse.y,v 1.281 2015/07/16 18:26:04 claudio Exp $ */
 
 /*
  * Copyright (c) 2002, 2003, 2004 Henning Brauer <henning@openbsd.org>
@@ -23,6 +23,7 @@
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
+#include <sys/un.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include <netmpls/mpls.h>
@@ -76,19 +77,16 @@ int		 symset(const char *, const char *, int);
 char		*symget(const char *);
 
 static struct bgpd_config	*conf;
-static struct mrt_head		*mrtconf;
-static struct network_head	*netconf, *gnetconf;
+static struct network_head	*netconf;
 static struct peer		*peer_l, *peer_l_old;
 static struct peer		*curpeer;
 static struct peer		*curgroup;
 static struct rdomain		*currdom;
-static struct rdomain_head	*rdom_l;
 static struct filter_head	*filter_l;
 static struct filter_head	*peerfilter_l;
 static struct filter_head	*groupfilter_l;
 static struct filter_rule	*curpeer_filter[2];
 static struct filter_rule	*curgroup_filter[2];
-static struct listen_addrs	*listen_addrs;
 static u_int32_t		 id;
 
 struct filter_peers_l {
@@ -135,6 +133,7 @@ int		 neighbor_consistent(struct peer *);
 int		 merge_filterset(struct filter_set_head *, struct filter_set *);
 void		 copy_filterset(struct filter_set_head *,
 		    struct filter_set_head *);
+void		 merge_filter_lists(struct filter_head *, struct filter_head *);
 struct filter_rule	*get_rule(enum action_types);
 
 int		 getcommunity(char *);
@@ -306,7 +305,7 @@ yesno		:  STRING			{
 		;
 
 varset		: STRING '=' string		{
-			if (conf->opts & BGPD_OPT_VERBOSE)
+			if (cmd_opts & BGPD_OPT_VERBOSE)
 				printf("%s = \"%s\"\n", $1, $3);
 			if (symset($1, $3, 0) == -1)
 				fatal("cannot store variable");
@@ -373,7 +372,7 @@ conf_main	: AS as4number		{
 
 			la->fd = -1;
 			memcpy(&la->sa, addr2sa(&$3, BGP_PORT), sizeof(la->sa));
-			TAILQ_INSERT_TAIL(listen_addrs, la, entry);
+			TAILQ_INSERT_TAIL(conf->listen_addrs, la, entry);
 		}
 		| FIBPRIORITY NUMBER		{
 			if ($2 <= RTP_NONE || $2 > RTP_MAX) {
@@ -577,6 +576,11 @@ conf_main	: AS as4number		{
 			conf->connectretry = $2;
 		}
 		| SOCKET STRING	restricted {
+			if (strlen($2) >=
+			    sizeof(((struct sockaddr_un *)0)->sun_path)) {
+				yyerror("socket path too long");
+				YYERROR;
+			}
 			if ($3) {
 				free(conf->rcsock);
 				conf->rcsock = $2;
@@ -754,9 +758,9 @@ rdomain		: RDOMAIN NUMBER optnl '{' optnl	{
 		}
 		    rdomainopts_l '}' {
 			/* insert into list */
-			SIMPLEQ_INSERT_TAIL(rdom_l, currdom, entry);
+			SIMPLEQ_INSERT_TAIL(&conf->rdomains, currdom, entry);
 			currdom = NULL;
-			netconf = gnetconf;
+			netconf = &conf->networks;
 		}
 
 rdomainopts_l	: rdomainopts_l rdomainoptsl
@@ -1302,7 +1306,7 @@ peeropts	: REMOTEAS as4number	{
 			}
 			free($2);
 			if (carp_demote_init(curpeer->conf.demote_group,
-			    conf->opts & BGPD_OPT_FORCE_DEMOTE) == -1) {
+			    cmd_opts & BGPD_OPT_FORCE_DEMOTE) == -1) {
 				yyerror("error initializing group \"%s\"",
 				    curpeer->conf.demote_group);
 				YYERROR;
@@ -1456,7 +1460,7 @@ filter_peer	: ANY		{
 			if (($$ = calloc(1, sizeof(struct filter_peers_l))) ==
 			    NULL)
 				fatal(NULL);
-			$$->p.groupid = $$->p.peerid = 0;
+			$$->p.remote_as = $$->p.groupid = $$->p.peerid = 0;
 			$$->next = NULL;
 			for (p = peer_l; p != NULL; p = p->next)
 				if (!memcmp(&p->conf.remote_addr,
@@ -1470,13 +1474,20 @@ filter_peer	: ANY		{
 				YYERROR;
 			}
 		}
+ 		| AS as4number	{
+			if (($$ = calloc(1, sizeof(struct filter_peers_l))) ==
+			    NULL)
+				fatal(NULL);
+			$$->p.groupid = $$->p.peerid = 0;
+			$$->p.remote_as = $2;
+		}
 		| GROUP STRING	{
 			struct peer *p;
 
 			if (($$ = calloc(1, sizeof(struct filter_peers_l))) ==
 			    NULL)
 				fatal(NULL);
-			$$->p.peerid = 0;
+			$$->p.remote_as = $$->p.peerid = 0;
 			$$->next = NULL;
 			for (p = peer_l; p != NULL; p = p->next)
 				if (!strcmp(p->conf.group, $2)) {
@@ -1972,7 +1983,7 @@ filter_set_opt	: LOCALPREF NUMBER		{
 			if (($$ = calloc(1, sizeof(struct filter_set))) == NULL)
 				fatal(NULL);
 			$$->type = ACTION_PFTABLE;
-			if (!(conf->opts & BGPD_OPT_NOACTION) &&
+			if (!(cmd_opts & BGPD_OPT_NOACTION) &&
 			    pftable_exists($2) != 0) {
 				yyerror("pftable name does not exist");
 				free($2);
@@ -2566,46 +2577,21 @@ popfile(void)
 }
 
 int
-parse_config(char *filename, struct bgpd_config *xconf,
-    struct mrt_head *xmconf, struct peer **xpeers, struct network_head *nc,
-    struct filter_head *xfilter_l, struct rdomain_head *xrdom_l)
+parse_config(char *filename, struct bgpd_config *xconf, struct peer **xpeers)
 {
 	struct sym		*sym, *next;
 	struct peer		*p, *pnext;
-	struct listen_addr	*la;
-	struct network		*n;
-	struct filter_rule	*r;
 	struct rde_rib		*rr;
-	struct rdomain		*rd;
 	int			 errors = 0;
-	u_int8_t		 old_prio;
 
-	old_prio = xconf->fib_priority;
+	conf = new_config();
 
-	if ((conf = calloc(1, sizeof(struct bgpd_config))) == NULL)
-		fatal(NULL);
-
-	conf->opts = xconf->opts;
-	conf->csock = strdup(SOCKET_NAME);
-
-	if ((file = pushfile(filename, 1)) == NULL) {
-		free(conf);
-		return (-1);
-	}
-	topfile = file;
-
-	if ((mrtconf = calloc(1, sizeof(struct mrt_head))) == NULL)
-		fatal(NULL);
-	if ((listen_addrs = calloc(1, sizeof(struct listen_addrs))) == NULL)
-		fatal(NULL);
 	if ((filter_l = calloc(1, sizeof(struct filter_head))) == NULL)
 		fatal(NULL);
 	if ((peerfilter_l = calloc(1, sizeof(struct filter_head))) == NULL)
 		fatal(NULL);
 	if ((groupfilter_l = calloc(1, sizeof(struct filter_head))) == NULL)
 		fatal(NULL);
-	LIST_INIT(mrtconf);
-	TAILQ_INIT(listen_addrs);
 	TAILQ_INIT(filter_l);
 	TAILQ_INIT(peerfilter_l);
 	TAILQ_INIT(groupfilter_l);
@@ -2616,16 +2602,16 @@ parse_config(char *filename, struct bgpd_config *xconf,
 	curgroup = NULL;
 	id = 1;
 
-	/* network list is always empty in the parent */
-	gnetconf = netconf = nc;
-	TAILQ_INIT(netconf);
-	/* init the empty filter list for later */
-	TAILQ_INIT(xfilter_l);
-	SIMPLEQ_INIT(xrdom_l);
-	rdom_l = xrdom_l;
+	netconf = &conf->networks;
 
 	add_rib("Adj-RIB-In", 0, F_RIB_NOFIB | F_RIB_NOEVALUATE);
 	add_rib("Loc-RIB", 0, 0);
+
+	if ((file = pushfile(filename, 1)) == NULL) {
+		free(conf);
+		return (-1);
+	}
+	topfile = file;
 
 	yyparse();
 	errors = file->errors;
@@ -2634,7 +2620,7 @@ parse_config(char *filename, struct bgpd_config *xconf,
 	/* Free macros and check which have not been used. */
 	for (sym = TAILQ_FIRST(&symhead); sym != NULL; sym = next) {
 		next = TAILQ_NEXT(sym, entry);
-		if ((conf->opts & BGPD_OPT_VERBOSE2) && !sym->used)
+		if ((cmd_opts & BGPD_OPT_VERBOSE2) && !sym->used)
 			fprintf(stderr, "warning: macro \"%s\" not "
 			    "used\n", sym->nam);
 		if (!sym->persist) {
@@ -2646,64 +2632,33 @@ parse_config(char *filename, struct bgpd_config *xconf,
 	}
 
 	if (errors) {
-		/* XXX more leaks in this case */
-		free(conf->csock);
-		free(conf->rcsock);
-
-		while ((la = TAILQ_FIRST(listen_addrs)) != NULL) {
-			TAILQ_REMOVE(listen_addrs, la, entry);
-			free(la);
-		}
-		free(listen_addrs);
-
 		for (p = peer_l; p != NULL; p = pnext) {
 			pnext = p->next;
 			free(p);
 		}
 
-		while ((n = TAILQ_FIRST(netconf)) != NULL) {
-			TAILQ_REMOVE(netconf, n, entry);
-			filterset_free(&n->net.attrset);
-			free(n);
-		}
-
-		while ((r = TAILQ_FIRST(filter_l)) != NULL) {
-			TAILQ_REMOVE(filter_l, r, entry);
-			filterset_free(&r->set);
-			free(r);
-		}
-
-		while ((r = TAILQ_FIRST(peerfilter_l)) != NULL) {
-			TAILQ_REMOVE(peerfilter_l, r, entry);
-			filterset_free(&r->set);
-			free(r);
-		}
-
-		while ((r = TAILQ_FIRST(groupfilter_l)) != NULL) {
-			TAILQ_REMOVE(groupfilter_l, r, entry);
-			filterset_free(&r->set);
-			free(r);
-		}
 		while ((rr = SIMPLEQ_FIRST(&ribnames)) != NULL) {
 			SIMPLEQ_REMOVE_HEAD(&ribnames, entry);
 			free(rr);
 		}
-		while ((rd = SIMPLEQ_FIRST(rdom_l)) != NULL) {
-			SIMPLEQ_REMOVE_HEAD(rdom_l, entry);
-			filterset_free(&rd->export);
-			filterset_free(&rd->import);
 
-			while ((n = TAILQ_FIRST(&rd->net_l)) != NULL) {
-				TAILQ_REMOVE(&rd->net_l, n, entry);
-				filterset_free(&n->net.attrset);
-				free(n);
-			}
+		filterlist_free(filter_l);
+		filterlist_free(peerfilter_l);
+		filterlist_free(groupfilter_l);
 
-			free(rd);
-		}
+		free_config(conf);
 	} else {
-		errors += merge_config(xconf, conf, peer_l, listen_addrs);
-		errors += mrt_mergeconfig(xmconf, mrtconf);
+		/*
+		 * Move filter list and static group and peer filtersets
+		 * together. Static group sets come first then peer sets
+		 * last normal filter rules.
+		 */
+		merge_filter_lists(conf->filters, groupfilter_l);
+		merge_filter_lists(conf->filters, peerfilter_l);
+		merge_filter_lists(conf->filters, filter_l);
+
+		errors += mrt_mergeconfig(xconf->mrt, conf->mrt);
+		errors += merge_config(xconf, conf, peer_l);
 		*xpeers = peer_l;
 
 		for (p = peer_l_old; p != NULL; p = pnext) {
@@ -2711,36 +2666,9 @@ parse_config(char *filename, struct bgpd_config *xconf,
 			free(p);
 		}
 
-		/*
-		 * Move filter list and static group and peer filtersets
-		 * together. Static group sets come first then peer sets
-		 * last normal filter rules.
-		 */
-		while ((r = TAILQ_FIRST(groupfilter_l)) != NULL) {
-			TAILQ_REMOVE(groupfilter_l, r, entry);
-			TAILQ_INSERT_TAIL(xfilter_l, r, entry);
-		}
-		while ((r = TAILQ_FIRST(peerfilter_l)) != NULL) {
-			TAILQ_REMOVE(peerfilter_l, r, entry);
-			TAILQ_INSERT_TAIL(xfilter_l, r, entry);
-		}
-		while ((r = TAILQ_FIRST(filter_l)) != NULL) {
-			TAILQ_REMOVE(filter_l, r, entry);
-			TAILQ_INSERT_TAIL(xfilter_l, r, entry);
-		}
-	}
-
-	free(conf);
-	free(mrtconf);
-	free(filter_l);
-	free(peerfilter_l);
-	free(groupfilter_l);
-
-	if (!errors && old_prio != RTP_NONE && old_prio !=
-	    xconf->fib_priority) {
-		kr_fib_decouple_all(old_prio);
-		kr_fib_update_prio_all(xconf->fib_priority);
-		kr_fib_couple_all(xconf->fib_priority);
+		free(filter_l);
+		free(peerfilter_l);
+		free(groupfilter_l);
 	}
 
 	return (errors ? -1 : 0);
@@ -3101,7 +3029,7 @@ add_mrtconfig(enum mrt_type type, char *name, int timeout, struct peer *p,
 {
 	struct mrt	*m, *n;
 
-	LIST_FOREACH(m, mrtconf, entry) {
+	LIST_FOREACH(m, conf->mrt, entry) {
 		if ((rib && strcmp(rib, m->rib)) ||
 		    (!rib && *m->rib))
 			continue;
@@ -3155,7 +3083,7 @@ add_mrtconfig(enum mrt_type type, char *name, int timeout, struct peer *p,
 		}
 	}
 
-	LIST_INSERT_HEAD(mrtconf, n, entry);
+	LIST_INSERT_HEAD(conf->mrt, n, entry);
 
 	return (0);
 }
@@ -3571,6 +3499,17 @@ copy_filterset(struct filter_set_head *source, struct filter_set_head *dest)
 			fatal(NULL);
 		memcpy(t, s, sizeof(struct filter_set));
 		TAILQ_INSERT_TAIL(dest, t, entry);
+	}
+}
+
+void
+merge_filter_lists(struct filter_head *dst, struct filter_head *src)
+{
+	struct filter_rule *r;
+
+	while ((r = TAILQ_FIRST(src)) != NULL) {
+		TAILQ_REMOVE(src, r, entry);
+		TAILQ_INSERT_TAIL(dst, r, entry);
 	}
 }
 

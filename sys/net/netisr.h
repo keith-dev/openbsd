@@ -1,4 +1,4 @@
-/*	$OpenBSD: netisr.h,v 1.40 2014/08/10 07:28:32 guenther Exp $	*/
+/*	$OpenBSD: netisr.h,v 1.42 2015/07/20 21:16:39 rzalamena Exp $	*/
 /*	$NetBSD: netisr.h,v 1.12 1995/08/12 23:59:24 mycroft Exp $	*/
 
 /*
@@ -50,10 +50,8 @@
  * interrupt used for scheduling the network code to calls
  * on the lowest level routine of each protocol.
  */
-#define	NETISR_RND_DONE	1
 #define	NETISR_IP	2		/* same as AF_INET */
 #define	NETISR_TX	3		/* for if_snd processing */
-#define	NETISR_MPLS	4		/* AF_MPLS would overflow */
 #define	NETISR_PFSYNC	5		/* for pfsync "immediate" tx */
 #define	NETISR_ARP	18		/* same as AF_LINK */
 #define	NETISR_IPV6	24		/* same as AF_INET6 */
@@ -73,7 +71,6 @@ void	ip6intr(void);
 void	pppintr(void);
 void	bridgeintr(void);
 void	pppoeintr(void);
-void	mplsintr(void);
 void	pfsyncintr(void);
 
 #include <machine/atomic.h>

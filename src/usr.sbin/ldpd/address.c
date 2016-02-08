@@ -1,4 +1,4 @@
-/*	$OpenBSD: address.c,v 1.15 2014/10/25 03:23:49 lteo Exp $ */
+/*	$OpenBSD: address.c,v 1.17 2015/07/21 04:52:29 renato Exp $ */
 
 /*
  * Copyright (c) 2009 Michele Marchetto <michele@openbsd.org>
@@ -52,7 +52,7 @@ send_address(struct nbr *nbr, struct if_addr *if_addr)
 		fatal("send_address");
 
 	if (if_addr == NULL)
-		LIST_FOREACH(if_addr, &leconf->addr_list, global_entry)
+		LIST_FOREACH(if_addr, &leconf->addr_list, entry)
 			iface_count++;
 	else
 		iface_count = 1;
@@ -111,7 +111,7 @@ recv_address(struct nbr *nbr, char *buf, u_int16_t len)
 	}
 
 	/* For now we only support IPv4 */
-	if (alt.family != htons(ADDR_IPV4)) {
+	if (alt.family != htons(AF_IPV4)) {
 		send_notification_nbr(nbr, S_UNSUP_ADDR, addr.msgid, addr.type);
 		return (-1);
 	}
@@ -148,12 +148,12 @@ gen_address_list_tlv(struct ibuf *buf, struct if_addr *if_addr,
 	alt.type = TLV_TYPE_ADDRLIST;
 	alt.length = htons(size);
 	/* XXX: just ipv4 for now */
-	alt.family = htons(ADDR_IPV4);
+	alt.family = htons(AF_IPV4);
 
 	ibuf_add(buf, &alt, sizeof(alt));
 
 	if (if_addr == NULL)
-		LIST_FOREACH(if_addr, &leconf->addr_list, global_entry)
+		LIST_FOREACH(if_addr, &leconf->addr_list, entry)
 			ibuf_add(buf, &if_addr->addr, sizeof(if_addr->addr));
 	else
 		ibuf_add(buf, &if_addr->addr, sizeof(if_addr->addr));

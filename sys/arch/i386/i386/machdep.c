@@ -1,4 +1,4 @@
-/*	$OpenBSD: machdep.c,v 1.567 2015/02/08 04:41:48 deraadt Exp $	*/
+/*	$OpenBSD: machdep.c,v 1.574 2015/07/21 03:38:22 reyk Exp $	*/
 /*	$NetBSD: machdep.c,v 1.214 1996/11/10 03:16:17 thorpej Exp $	*/
 
 /*-
@@ -115,6 +115,7 @@
 #include <machine/reg.h>
 #include <machine/specialreg.h>
 #include <machine/biosvar.h>
+#include <machine/pte.h>
 #ifdef MULTIPROCESSOR
 #include <machine/mpbiosvar.h>
 #endif /* MULTIPROCESSOR */
@@ -314,6 +315,11 @@ int allowaperture = 0;
 #endif
 
 int has_rdrand;
+
+#include "pvbus.h"
+#if NPVBUS > 0
+#include <dev/pv/pvvar.h>
+#endif
 
 void	winchip_cpu_setup(struct cpu_info *);
 void	amd_family5_setperf_setup(struct cpu_info *);
@@ -1076,6 +1082,11 @@ const struct cpu_cpuid_feature cpu_seff0_ebxfeatures[] = {
 	{ SEFF0EBX_SMAP,	"SMAP" },
 };
 
+const struct cpu_cpuid_feature cpu_tpm_eaxfeatures[] = {
+	{ TPM_SENSOR,		"SENSOR" },
+	{ TPM_ARAT,		"ARAT" },
+};
+
 const struct cpu_cpuid_feature i386_cpuid_eaxperf[] = {
 	{ CPUIDEAX_VERID,	"PERF" },
 };
@@ -1480,14 +1491,7 @@ intelcore_update_sensor(void *args)
 void
 intel686_cpusensors_setup(struct cpu_info *ci)
 {
-	u_int regs[4];
-
-	if (!CPU_IS_PRIMARY(ci) || cpuid_level < 0x06)
-		return;
-
-	/* CPUID.06H.EAX[0] = 1 tells us if we have on-die sensor */
-	cpuid(0x06, regs);
-	if ((regs[0] & 0x01) != 1)
+	if (!CPU_IS_PRIMARY(ci) || (ci->ci_feature_tpmflags & TPM_SENSOR) == 0)
 		return;
 
 	/* Setup the sensors structures */
@@ -1987,6 +1991,20 @@ identifycpu(struct cpu_info *ci)
 						    (numbits == 0 ? "" : ","),
 						    cpu_seff0_ebxfeatures[i].feature_name);
 			}
+
+			if (!strcmp(cpu_vendor, "GenuineIntel") &&
+			    cpuid_level >= 0x06 ) {
+				u_int dummy;
+
+				CPUID(0x06, ci->ci_feature_tpmflags, dummy,
+				    dummy, dummy);
+				max = nitems(cpu_tpm_eaxfeatures);
+				for (i = 0; i < max; i++)
+					if (ci->ci_feature_tpmflags &
+					    cpu_tpm_eaxfeatures[i].feature_bit)
+						printf(",%s", cpu_tpm_eaxfeatures[i].feature_name);
+			}
+
 			printf("\n");
 		}
 	}
@@ -1997,6 +2015,11 @@ identifycpu(struct cpu_info *ci)
 #ifndef SMALL_KERNEL
 		if (ci->ci_feature_sefflags & SEFF0EBX_SMAP)
 			replacesmap();
+#endif
+
+#if NPVBUS > 0
+		if (cpu_ecxfeature & CPUIDECX_HV)
+			has_hv_cpuid = 1;
 #endif
 	}
 
@@ -2531,15 +2554,15 @@ cpu_kick(struct cpu_info *ci)
 {
 	/* only need to kick other CPUs */
 	if (ci != curcpu()) {
-		if (ci->ci_mwait != NULL) {
+		if (cpu_mwait_size > 0) {
 			/*
 			 * If not idling, then send an IPI, else
 			 * just clear the "keep idling" bit.
 			 */
-			if ((ci->ci_mwait[0] & MWAIT_IN_IDLE) == 0)
+			if ((ci->ci_mwait & MWAIT_IN_IDLE) == 0)
 				i386_send_ipi(ci, I386_IPI_NOP);
 			else
-				atomic_clearbits_int(&ci->ci_mwait[0],
+				atomic_clearbits_int(&ci->ci_mwait,
 				    MWAIT_KEEP_IDLING);
 		} else {
 			/* no mwait, so need an IPI */
@@ -2564,12 +2587,12 @@ signotify(struct proc *p)
 void
 cpu_unidle(struct cpu_info *ci)
 {
-	if (ci->ci_mwait != NULL) {
+	if (cpu_mwait_size > 0 && (ci->ci_mwait & MWAIT_ONLY)) {
 		/*
 		 * Just clear the "keep idling" bit; if it wasn't
 		 * idling then we didn't need to do anything anyway.
 		 */
-		atomic_clearbits_int(&ci->ci_mwait[0], MWAIT_KEEP_IDLING);
+		atomic_clearbits_int(&ci->ci_mwait, MWAIT_KEEP_IDLING);
 		return;
 	}
 
@@ -2605,8 +2628,6 @@ boot(int howto)
 		}
 	}
 	if_downall();
-
-	delay(4*1000000);	/* XXX */
 
 	uvm_shutdown();
 	splhigh();
@@ -2997,7 +3018,6 @@ fix_f00f(void)
 	struct region_descriptor region;
 	vaddr_t va;
 	void *p;
-	pt_entry_t *pte;
 
 	/* Allocate two new pages */
 	va = uvm_km_zalloc(kernel_map, NBPG*2);
@@ -3012,8 +3032,7 @@ fix_f00f(void)
 	    GCODE_SEL);
 
 	/* Map first page RO */
-	pte = PTE_BASE + atop(va);
-	*pte &= ~PG_RW;
+	pmap_pte_setbits(va, 0, PG_RW);
 
 	/* Reload idtr */
 	setregion(&region, idt, sizeof(idt_region) - 1);
@@ -3185,9 +3204,6 @@ init386(paddr_t first_avail)
 		panic("no BIOS memory map supplied");
 #endif
  
-	/* install the lowmem ptp after boot args for 1:1 mappings */
-	pmap_prealloc_lowmem_ptp(round_page((paddr_t)(bootargv + bootargc)));
-
 	/*
 	 * account all the memory passed in the map from /boot
 	 * calculate avail_end and count the physmem.
@@ -3333,24 +3349,6 @@ init386(paddr_t first_avail)
 	}
 #ifdef DEBUG
 	printf("\n");
-#endif
-
-#if defined(MULTIPROCESSOR) || \
-    (NACPI > 0 && !defined(SMALL_KERNEL))
-	/* install the lowmem ptp after boot args for 1:1 mappings */
-	pmap_prealloc_lowmem_ptp(PTP0_PA);
-#endif
-
-#ifdef MULTIPROCESSOR
-	pmap_kenter_pa((vaddr_t)MP_TRAMPOLINE,		/* virtual */
-	    (paddr_t)MP_TRAMPOLINE,			/* physical */
-	    PROT_READ | PROT_WRITE | PROT_EXEC);	/* protection */
-#endif
-
-#if NACPI > 0 && !defined(SMALL_KERNEL)
-	pmap_kenter_pa((vaddr_t)ACPI_TRAMPOLINE,	/* virtual */
-	    (paddr_t)ACPI_TRAMPOLINE,			/* physical */
-	    PROT_READ | PROT_WRITE | PROT_EXEC);	/* protection */
 #endif
 
 	tlbflush();
@@ -3894,20 +3892,6 @@ splassert_check(int wantipl, const char *func)
 		splassert_fail(wantipl, lapic_tpr, func);
 	if (wantipl == IPL_NONE && curcpu()->ci_idepth != 0)
 		splassert_fail(-1, curcpu()->ci_idepth, func);
-}
-#endif
-
-#ifdef MULTIPROCESSOR
-void
-i386_softintlock(void)
-{
-	__mp_lock(&kernel_lock);
-}
-
-void
-i386_softintunlock(void)
-{
-	__mp_unlock(&kernel_lock);
 }
 #endif
 

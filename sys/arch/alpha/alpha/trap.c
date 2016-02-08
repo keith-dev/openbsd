@@ -1,4 +1,4 @@
-/* $OpenBSD: trap.c,v 1.77 2014/12/24 21:15:30 miod Exp $ */
+/* $OpenBSD: trap.c,v 1.80 2015/06/23 12:29:46 deraadt Exp $ */
 /* $NetBSD: trap.c,v 1.52 2000/05/24 16:48:33 thorpej Exp $ */
 
 /*-
@@ -409,7 +409,7 @@ do_fault:
 			 * argument space is lazy-allocated.
 			 */
 			if (!user && (a0 >= VM_MIN_KERNEL_ADDRESS ||
-			    p == NULL || p->p_addr->u_pcb.pcb_onfault == 0)) {
+			    p->p_addr->u_pcb.pcb_onfault == 0)) {
 				vm = NULL;
 				map = kernel_map;
 			} else {
@@ -418,13 +418,11 @@ do_fault:
 			}
 	
 			va = trunc_page((vaddr_t)a0);
-			if (p != NULL) {
-				onfault = p->p_addr->u_pcb.pcb_onfault;
-				p->p_addr->u_pcb.pcb_onfault = 0;
-			}
+			onfault = p->p_addr->u_pcb.pcb_onfault;
+			p->p_addr->u_pcb.pcb_onfault = 0;
 			rv = uvm_fault(map, va, 0, ftype);
-			if (p != NULL)
-				p->p_addr->u_pcb.pcb_onfault = onfault;
+			p->p_addr->u_pcb.pcb_onfault = onfault;
+
 			/*
 			 * If this was a stack access we keep track of the
 			 * maximum accessed stack size.  Also, if vm_fault
@@ -435,8 +433,7 @@ do_fault:
 			if (map != kernel_map &&
 			    (caddr_t)va >= vm->vm_maxsaddr) {
 				if (rv == 0) {
-					if (p != NULL)
-					    uvm_grow(p, va);
+					uvm_grow(p, va);
 				} else if (rv == EACCES)
 					rv = EFAULT;
 			}
@@ -447,11 +444,9 @@ do_fault:
 
 			if (!user) {
 				/* Check for copyin/copyout fault */
-				if (p != NULL &&
-				    p->p_addr->u_pcb.pcb_onfault != 0) {
+				if (p->p_addr->u_pcb.pcb_onfault != 0) {
 					framep->tf_regs[FRAME_PC] =
 					    p->p_addr->u_pcb.pcb_onfault;
-					p->p_addr->u_pcb.pcb_onfault = 0;
 					KERNEL_UNLOCK();
 					goto out;
 				}

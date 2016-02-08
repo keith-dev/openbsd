@@ -1,4 +1,4 @@
-/*	$OpenBSD: scsi_base.c,v 1.218 2015/01/27 03:17:37 dlg Exp $	*/
+/*	$OpenBSD: scsi_base.c,v 1.221 2015/06/07 19:13:27 krw Exp $	*/
 /*	$NetBSD: scsi_base.c,v 1.43 1997/04/02 02:29:36 mycroft Exp $	*/
 
 /*
@@ -39,7 +39,6 @@
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/kernel.h>
-#include <sys/buf.h>
 #include <sys/uio.h>
 #include <sys/errno.h>
 #include <sys/device.h>
@@ -321,7 +320,7 @@ scsi_ioh_set(struct scsi_iohandler *ioh, struct scsi_iopool *iopl,
 int
 scsi_ioh_add(struct scsi_iohandler *ioh)
 {
-	struct scsi_iopool *iopl = ioh->pool;	
+	struct scsi_iopool *iopl = ioh->pool;
 	int rv = 0;
 
 	mtx_enter(&iopl->mtx);
@@ -1098,7 +1097,7 @@ scsi_do_mode_sense(struct scsi_link *sc_link, int page,
 				 * Page data may be invalid (e.g. all zeros)
 				 * but we accept the device's word that this is
 				 * the best it can do. Some devices will freak
-				 * out if their word is not accepted and 
+				 * out if their word is not accepted and
 				 * MODE_SENSE_BIG is attempted.
 				 */
 				return (0);
@@ -1514,13 +1513,13 @@ scsi_interpret_sense(struct scsi_xfer *xs)
 			case SENSE_NOT_READY_BECOMING_READY:
 			case SENSE_NOT_READY_FORMAT:
 			case SENSE_NOT_READY_REBUILD:
-			case SENSE_NOT_READY_RECALC:		
+			case SENSE_NOT_READY_RECALC:
 			case SENSE_NOT_READY_INPROGRESS:
 			case SENSE_NOT_READY_LONGWRITE:
 			case SENSE_NOT_READY_SELFTEST:
 			case SENSE_NOT_READY_INIT_REQUIRED:
 				SC_DEBUG(sc_link, SDEV_DB1,
-		    		    ("not ready (ASC_ASCQ == %#x)\n",
+				    ("not ready (ASC_ASCQ == %#x)\n",
 				    ASC_ASCQ(sense)));
 				return (scsi_delay(xs, 1));
 			case SENSE_NOMEDIUM:
@@ -2331,7 +2330,7 @@ asc2ascii(u_int8_t asc, u_int8_t ascq, char *result, size_t len)
 		break;
 	case 0x4d:
 		snprintf(result, len,
-	 	    "Tagged Overlapped Commands (0x%02x = TASK TAG)", ascq);
+		    "Tagged Overlapped Commands (0x%02x = TASK TAG)", ascq);
 		return;
 	case 0x70:
 		snprintf(result, len,
@@ -2501,7 +2500,7 @@ scsi_xs_show(struct scsi_xfer *xs)
 	printf("retr(0x%x)", xs->retries);
 	printf("timo(0x%x)", xs->timeout);
 	printf("data(%p)", xs->data);
-	printf("res(0x%x)", xs->resid);
+	printf("res(0x%zx)", xs->resid);
 	printf("err(0x%x)", xs->error);
 	printf("bp(%p)\n", xs->bp);
 

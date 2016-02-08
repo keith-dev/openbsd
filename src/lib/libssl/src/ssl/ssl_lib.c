@@ -1,4 +1,4 @@
-/* $OpenBSD: ssl_lib.c,v 1.101 2015/02/22 15:54:27 jsing Exp $ */
+/* $OpenBSD: ssl_lib.c,v 1.105 2015/07/19 20:32:18 doug Exp $ */
 /* Copyright (C) 1995-1998 Eric Young (eay@cryptsoft.com)
  * All rights reserved.
  *
@@ -155,6 +155,8 @@
 #include <openssl/engine.h>
 #endif
 
+#include "bytestring.h"
+
 const char *SSL_version_str = OPENSSL_VERSION_TEXT;
 
 SSL3_ENC_METHOD ssl3_undef_enc_method = {
@@ -188,8 +190,7 @@ int
 SSL_clear(SSL *s)
 {
 	if (s->method == NULL) {
-		SSLerr(SSL_F_SSL_CLEAR,
-		    SSL_R_NO_METHOD_SPECIFIED);
+		SSLerr(SSL_F_SSL_CLEAR, SSL_R_NO_METHOD_SPECIFIED);
 		return (0);
 	}
 
@@ -203,8 +204,7 @@ SSL_clear(SSL *s)
 	s->shutdown = 0;
 
 	if (s->renegotiate) {
-		SSLerr(SSL_F_SSL_CLEAR,
-		    ERR_R_INTERNAL_ERROR);
+		SSLerr(SSL_F_SSL_CLEAR, ERR_R_INTERNAL_ERROR);
 		return (0);
 	}
 
@@ -217,10 +217,8 @@ SSL_clear(SSL *s)
 	s->rwstate = SSL_NOTHING;
 	s->rstate = SSL_ST_READ_HEADER;
 
-	if (s->init_buf != NULL) {
-		BUF_MEM_free(s->init_buf);
-		s->init_buf = NULL;
-	}
+	BUF_MEM_free(s->init_buf);
+	s->init_buf = NULL;
 
 	ssl_clear_cipher_ctx(s);
 	ssl_clear_hash_ctx(&s->read_hash);
@@ -240,6 +238,7 @@ SSL_clear(SSL *s)
 			return (0);
 	} else
 		s->method->ssl_clear(s);
+
 	return (1);
 }
 
@@ -1413,35 +1412,39 @@ ssl_cipher_list_to_bytes(SSL *s, STACK_OF(SSL_CIPHER) *sk, unsigned char *p)
 }
 
 STACK_OF(SSL_CIPHER) *
-ssl_bytes_to_cipher_list(SSL *s, unsigned char *p, int num,
-    STACK_OF(SSL_CIPHER) **skp)
+ssl_bytes_to_cipher_list(SSL *s, const unsigned char *p, int num)
 {
+	CBS			 cbs;
 	const SSL_CIPHER	*c;
-	STACK_OF(SSL_CIPHER)	*sk;
-	int			 i;
+	STACK_OF(SSL_CIPHER)	*sk = NULL;
 	unsigned long		 cipher_id;
-	uint16_t		 cipher_value;
-	uint16_t		 max_version;
+	uint16_t		 cipher_value, max_version;
 
 	if (s->s3)
 		s->s3->send_connection_binding = 0;
 
-	if ((num % SSL3_CIPHER_VALUE_SIZE) != 0) {
+	/*
+	 * RFC 5246 section 7.4.1.2 defines the interval as [2,2^16-2].
+	 */
+	if (num < 2 || num > 0x10000 - 2) {
 		SSLerr(SSL_F_SSL_BYTES_TO_CIPHER_LIST,
 		    SSL_R_ERROR_IN_RECEIVED_CIPHER_LIST);
 		return (NULL);
 	}
-	if (skp == NULL || *skp == NULL) {
-		sk = sk_SSL_CIPHER_new_null(); /* change perhaps later */
-		if (sk == NULL)
-			goto err;
-	} else {
-		sk = *skp;
-		sk_SSL_CIPHER_zero(sk);
+
+	if ((sk = sk_SSL_CIPHER_new_null()) == NULL) {
+		SSLerr(SSL_F_SSL_BYTES_TO_CIPHER_LIST, ERR_R_MALLOC_FAILURE);
+		goto err;
 	}
 
-	for (i = 0; i < num; i += SSL3_CIPHER_VALUE_SIZE) {
-		n2s(p, cipher_value);
+	CBS_init(&cbs, p, num);
+	while (CBS_len(&cbs) > 0) {
+		if (!CBS_get_u16(&cbs, &cipher_value)) {
+			SSLerr(SSL_F_SSL_BYTES_TO_CIPHER_LIST,
+			    SSL_R_ERROR_IN_RECEIVED_CIPHER_LIST);
+			goto err;
+		}
+
 		cipher_id = SSL3_CK_ID | cipher_value;
 
 		if (s->s3 != NULL && cipher_id == SSL3_CK_SCSV) {
@@ -1489,13 +1492,11 @@ ssl_bytes_to_cipher_list(SSL *s, unsigned char *p, int num,
 		}
 	}
 
-	if (skp != NULL)
-		*skp = sk;
 	return (sk);
 
 err:
-	if (skp == NULL || *skp == NULL)
-		sk_SSL_CIPHER_free(sk);
+	sk_SSL_CIPHER_free(sk);
+
 	return (NULL);
 }
 
@@ -2824,6 +2825,9 @@ ssl_init_wbio_buffer(SSL *s, int push)
 void
 ssl_free_wbio_buffer(SSL *s)
 {
+	if (s == NULL)
+		return;
+
 	if (s->bbio == NULL)
 		return;
 

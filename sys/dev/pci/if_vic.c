@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_vic.c,v 1.85 2015/02/10 23:22:39 brad Exp $	*/
+/*	$OpenBSD: if_vic.c,v 1.91 2015/06/24 09:40:54 mpi Exp $	*/
 
 /*
  * Copyright (c) 2006 Reyk Floeter <reyk@openbsd.org>
@@ -37,7 +37,6 @@
 #include <machine/intr.h>
 
 #include <net/if.h>
-#include <net/if_dl.h>
 #include <net/if_media.h>
 #include <net/if_types.h>
 
@@ -79,8 +78,8 @@
 #define   VIC_CMD_IFF_PROMISC	0x0001		/* Promiscous enabled */
 #define   VIC_CMD_IFF_BROADCAST	0x0002		/* Broadcast enabled */
 #define   VIC_CMD_IFF_MULTICAST	0x0004		/* Multicast enabled */
-#define  VIC_CMD_INTR_DISABLE	0x0020	/* Enable interrupts */
-#define  VIC_CMD_INTR_ENABLE	0x0040	/* Disable interrupts */
+#define  VIC_CMD_INTR_DISABLE	0x0020	/* Disable interrupts */
+#define  VIC_CMD_INTR_ENABLE	0x0040	/* Enable interrupts */
 #define  VIC_CMD_Tx_DONE	0x0100	/* Tx done register */
 #define  VIC_CMD_NUM_Rx_BUF	0x0200	/* Number of Rx buffers */
 #define  VIC_CMD_NUM_Tx_BUF	0x0400	/* Number of Tx buffers */
@@ -861,10 +860,7 @@ vic_rx_proc(struct vic_softc *sc, int q)
 			goto nextp;
 		}
 
-		m->m_pkthdr.rcvif = ifp;
 		m->m_pkthdr.len = m->m_len = len;
-
-		ifp->if_ipackets++;
 
 		ml_enqueue(&ml, m);
 

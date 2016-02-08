@@ -56,7 +56,7 @@ our %args = (
 	    get_thirdlog() => 0,
 	    qr/syslogd: start/ => 1,
 	    qr/syslogd: restart/ => 1,
-	    get_charlog() => '~41',
+	    get_charlog() => '~43',
 	    qr/syslogd: dropped 2[0-9][0-9] messages to remote loghost/ => 1,
 	},
     },

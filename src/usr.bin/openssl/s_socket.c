@@ -1,4 +1,4 @@
-/* $OpenBSD: s_socket.c,v 1.3 2014/12/03 22:16:02 bcook Exp $ */
+/* $OpenBSD: s_socket.c,v 1.7 2015/07/20 03:22:25 doug Exp $ */
 /* Copyright (C) 1995-1998 Eric Young (eay@cryptsoft.com)
  * All rights reserved.
  *
@@ -83,12 +83,7 @@ int
 init_client(int *sock, char *host, char *port, int type, int af)
 {
 	struct addrinfo hints, *ai_top, *ai;
-	int i, s;
-
-	if (BIO_sock_init() != 1) {
-		BIO_printf(bio_err, "BIO_sock_init failed\n");
-		return (0);
-	}
+	int i, s = -1;
 
 	memset(&hints, '\0', sizeof(hints));
 	hints.ai_family = af;
@@ -116,8 +111,7 @@ init_client(int *sock, char *host, char *port, int type, int af)
 			    (char *) &i, sizeof(i));
 			if (i < 0) {
 				perror("keepalive");
-				close(s);
-				return (0);
+				goto out;
 			}
 		}
 		if ((i = connect(s, ai->ai_addr, ai->ai_addrlen)) == 0) {
@@ -126,10 +120,13 @@ init_client(int *sock, char *host, char *port, int type, int af)
 			return (1);
 		}
 		close(s);
+		s = -1;
 	}
 
 	perror("connect");
-	close(s);
+out:
+	if (s != -1)
+		close(s);
 	freeaddrinfo(ai_top);
 	return (0);
 }
@@ -181,11 +178,6 @@ init_server_long(int *sock, int port, char *ip, int type)
 	struct sockaddr_in server;
 	int s = -1;
 
-	if (BIO_sock_init() != 1) {
-		BIO_printf(bio_err, "BIO_sock_init failed\n");
-		return (0);
-	}
-
 	memset((char *) &server, 0, sizeof(server));
 	server.sin_family = AF_INET;
 	server.sin_port = htons((unsigned short) port);
@@ -204,8 +196,11 @@ init_server_long(int *sock, int port, char *ip, int type)
 #if defined SOL_SOCKET && defined SO_REUSEADDR
 	{
 		int j = 1;
-		setsockopt(s, SOL_SOCKET, SO_REUSEADDR,
-		    (void *) &j, sizeof j);
+		if (setsockopt(s, SOL_SOCKET, SO_REUSEADDR,
+		    (void *) &j, sizeof j) == -1) {
+			perror("setsockopt");
+			goto err;
+		}
 	}
 #endif
 	if (bind(s, (struct sockaddr *) & server, sizeof(server)) == -1) {

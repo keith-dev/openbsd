@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_mos.c,v 1.27 2014/12/22 02:28:52 tedu Exp $	*/
+/*	$OpenBSD: if_mos.c,v 1.31 2015/06/24 09:40:54 mpi Exp $	*/
 
 /*
  * Copyright (c) 2008 Johann Christian Rode <jcrode@gmx.net>
@@ -95,7 +95,6 @@
 #include <netinet/in.h>
 #include <netinet/if_ether.h>
 
-#include <dev/mii/mii.h>
 #include <dev/mii/miivar.h>
 
 #include <dev/usb/usb.h>
@@ -703,6 +702,7 @@ mos_attach(struct device *parent, struct device *self, void *aux)
 	if (err) {
 		printf("%s: couldn't get MAC address\n",
 		    sc->mos_dev.dv_xname);
+		splx(s);
 		return;
 	}
 	bcopy(eaddr, (char *)&sc->arpcom.ac_enaddr, ETHER_ADDR_LEN);
@@ -903,6 +903,7 @@ mos_rxeof(struct usbd_xfer *xfer, void *priv, usbd_status status)
 	u_int8_t		rxstat;
 	u_int32_t		total_len;
 	u_int16_t		pktlen = 0;
+	struct mbuf_list	ml = MBUF_LIST_INITIALIZER();
 	struct mbuf		*m;
 	int			s;
 
@@ -961,21 +962,14 @@ mos_rxeof(struct usbd_xfer *xfer, void *priv, usbd_status status)
 		goto done;
 	}
 
-	ifp->if_ipackets++;
-	m->m_pkthdr.rcvif = ifp;
 	m->m_pkthdr.len = m->m_len = pktlen;
 
 	memcpy(mtod(m, char *), buf, pktlen);
 
-	/* push the packet up */
+	ml_enqueue(&ml, m);
+
 	s = splnet();
-#if NBPFILTER > 0
-	if (ifp->if_bpf)
-		bpf_mtap(ifp->if_bpf, m, BPF_DIRECTION_IN);
-#endif
-
-	ether_input_mbuf(ifp, m);
-
+	if_input(ifp, &ml);
 	splx(s);
 
 done:

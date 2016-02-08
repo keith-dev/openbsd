@@ -1,4 +1,4 @@
-/*	$OpenBSD: rtsx_pci.c,v 1.8 2015/02/23 20:40:47 phessler Exp $	*/
+/*	$OpenBSD: rtsx_pci.c,v 1.12 2015/04/28 07:55:13 stsp Exp $	*/
 
 /*
  * Copyright (c) 2006 Uwe Stuehler <uwe@openbsd.org>
@@ -20,7 +20,6 @@
 #include <sys/param.h>
 #include <sys/device.h>
 #include <sys/systm.h>
-#include <sys/malloc.h>
 
 #include <dev/pci/pcivar.h>
 #include <dev/pci/pcidevs.h>
@@ -49,7 +48,7 @@ rtsx_pci_match(struct device *parent, void *match, void *aux)
 	struct pci_attach_args *pa = aux;
 
 	/* 
-	 * Explicitly match the UNDEFINED device class only. Some RTS5902
+	 * Explicitly match the UNDEFINED device class only. Some RTS5209
 	 * devices advertise a SYSTEM/SDHC class in addition to the UNDEFINED
 	 * device class. Let sdhc(4) handle the SYSTEM/SDHC ones.
 	 */
@@ -60,8 +59,10 @@ rtsx_pci_match(struct device *parent, void *match, void *aux)
 	if (PCI_PRODUCT(pa->pa_id) == PCI_PRODUCT_REALTEK_RTS5209 ||
 	    PCI_PRODUCT(pa->pa_id) == PCI_PRODUCT_REALTEK_RTS5227 ||
 	    PCI_PRODUCT(pa->pa_id) == PCI_PRODUCT_REALTEK_RTS5229 ||
-	    PCI_PRODUCT(pa->pa_id) == PCI_PRODUCT_REALTEK_RTL8411B ||
-	    PCI_PRODUCT(pa->pa_id) == PCI_PRODUCT_REALTEK_RTL8402)
+	    PCI_PRODUCT(pa->pa_id) == PCI_PRODUCT_REALTEK_RTS5249 ||
+	    PCI_PRODUCT(pa->pa_id) == PCI_PRODUCT_REALTEK_RTL8402 ||
+	    PCI_PRODUCT(pa->pa_id) == PCI_PRODUCT_REALTEK_RTL8411 ||
+	    PCI_PRODUCT(pa->pa_id) == PCI_PRODUCT_REALTEK_RTL8411B)
 		return 1;
 
 	return 0;
@@ -117,10 +118,8 @@ rtsx_pci_attach(struct device *parent, struct device *self, void *aux)
 		case PCI_PRODUCT_REALTEK_RTS5209:
 			flags = RTSX_F_5209;
 			break;
-		case PCI_PRODUCT_REALTEK_RTS5227:
-			flags = RTSX_F_5227;
-			break;
 		case PCI_PRODUCT_REALTEK_RTS5229:
+		case PCI_PRODUCT_REALTEK_RTS5249:
 			flags = RTSX_F_5229;
 			break;
 		default:

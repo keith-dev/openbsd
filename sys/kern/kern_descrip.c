@@ -1,4 +1,4 @@
-/*	$OpenBSD: kern_descrip.c,v 1.116 2015/01/19 01:19:17 deraadt Exp $	*/
+/*	$OpenBSD: kern_descrip.c,v 1.120 2015/05/17 01:22:01 deraadt Exp $	*/
 /*	$NetBSD: kern_descrip.c,v 1.42 1996/03/30 22:24:38 christos Exp $	*/
 
 /*
@@ -55,7 +55,6 @@
 #include <sys/ucred.h>
 #include <sys/unistd.h>
 #include <sys/resourcevar.h>
-#include <sys/conf.h>
 #include <sys/mount.h>
 #include <sys/syscallargs.h>
 #include <sys/event.h>
@@ -188,6 +187,21 @@ fd_getfile(struct filedesc *fdp, int fd)
 		return (NULL);
 
 	if (!FILE_IS_USABLE(fp))
+		return (NULL);
+
+	return (fp);
+}
+
+struct file *
+fd_getfile_mode(struct filedesc *fdp, int fd, int mode)
+{
+	struct file *fp;
+
+	KASSERT(mode != 0);
+
+	fp = fd_getfile(fdp, fd);
+
+	if (fp == NULL || (fp->f_flag & mode) == 0)
 		return (NULL);
 
 	return (fp);
@@ -381,6 +395,16 @@ restart:
 
 	case F_GETFL:
 		*retval = OFLAGS(fp->f_flag);
+		break;
+
+	case F_ISATTY:
+		vp = (struct vnode *)fp->f_data;
+	        if (fp->f_type == DTYPE_VNODE && (vp->v_flag & VISTTY))
+			*retval = 1;
+		else {
+			*retval = 0;
+			error = ENOTTY;
+		}
 		break;
 
 	case F_SETFL:

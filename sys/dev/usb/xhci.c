@@ -1,4 +1,4 @@
-/* $OpenBSD: xhci.c,v 1.58 2015/01/21 14:02:33 mpi Exp $ */
+/* $OpenBSD: xhci.c,v 1.63 2015/07/12 12:54:31 mpi Exp $ */
 
 /*
  * Copyright (c) 2014-2015 Martin Pieuchot
@@ -560,7 +560,8 @@ xhci_reset(struct xhci_softc *sc)
 	XOWRITE4(sc, XHCI_USBCMD, XHCI_CMD_HCRST);
 	for (i = 0; i < 100; i++) {
 		usb_delay_ms(&sc->sc_bus, 1);
-		hcr = XOREAD4(sc, XHCI_USBCMD) & XHCI_STS_CNR;
+		hcr = (XOREAD4(sc, XHCI_USBCMD) & XHCI_CMD_HCRST) |
+		    (XOREAD4(sc, XHCI_USBSTS) & XHCI_STS_CNR);
 		if (!hcr)
 			break;
 	}
@@ -714,7 +715,8 @@ xhci_event_xfer(struct xhci_softc *sc, uint64_t paddr, uint32_t status,
 	struct xhci_pipe *xp;
 	struct usbd_xfer *xfer;
 	struct xhci_xfer *xx;
-	uint8_t dci, slot, code, remain;
+	uint8_t dci, slot, code;
+	uint32_t remain;
 	int trb_idx;
 
 	slot = XHCI_TRB_GET_SLOT(flags);
@@ -743,6 +745,9 @@ xhci_event_xfer(struct xhci_softc *sc, uint64_t paddr, uint32_t status,
 		printf("%s: NULL xfer pointer\n", DEVNAME(sc));
 		return;
 	}
+
+	if (remain > xfer->length)
+		remain = xfer->length;
 
 	switch (code) {
 	case XHCI_CODE_SUCCESS:
@@ -2184,6 +2189,7 @@ xhci_root_ctrl_start(struct usbd_xfer *xfer)
 			XOWRITE4(sc, port, v | XHCI_PS_PEC);
 			break;
 		case UHF_C_PORT_SUSPEND:
+		case UHF_C_PORT_LINK_STATE:
 			XOWRITE4(sc, port, v | XHCI_PS_PLC);
 			break;
 		case UHF_C_PORT_OVER_CURRENT:
@@ -2243,32 +2249,40 @@ xhci_root_ctrl_start(struct usbd_xfer *xfer)
 		}
 		v = XOREAD4(sc, XHCI_PORTSC(index));
 		DPRINTFN(8,("xhci_root_ctrl_start: port status=0x%04x\n", v));
+		i = UPS_PORT_LS_SET(XHCI_PS_GET_PLS(v));
 		switch (XHCI_PS_SPEED(v)) {
 		case XHCI_SPEED_FULL:
-			i = UPS_FULL_SPEED;
+			i |= UPS_FULL_SPEED;
 			break;
 		case XHCI_SPEED_LOW:
-			i = UPS_LOW_SPEED;
+			i |= UPS_LOW_SPEED;
 			break;
 		case XHCI_SPEED_HIGH:
-			i = UPS_HIGH_SPEED;
+			i |= UPS_HIGH_SPEED;
 			break;
 		case XHCI_SPEED_SUPER:
 		default:
-			i = UPS_SUPER_SPEED;
 			break;
 		}
 		if (v & XHCI_PS_CCS)	i |= UPS_CURRENT_CONNECT_STATUS;
 		if (v & XHCI_PS_PED)	i |= UPS_PORT_ENABLED;
 		if (v & XHCI_PS_OCA)	i |= UPS_OVERCURRENT_INDICATOR;
 		if (v & XHCI_PS_PR)	i |= UPS_RESET;
-		if (v & XHCI_PS_PP)	i |= UPS_PORT_POWER;
+		if (v & XHCI_PS_PP)	{
+			if (XHCI_PS_SPEED(v) >= XHCI_SPEED_FULL &&
+			    XHCI_PS_SPEED(v) <= XHCI_SPEED_HIGH)
+				i |= UPS_PORT_POWER;
+			else
+				i |= UPS_PORT_POWER_SS;
+		}
 		USETW(ps.wPortStatus, i);
 		i = 0;
 		if (v & XHCI_PS_CSC)    i |= UPS_C_CONNECT_STATUS;
 		if (v & XHCI_PS_PEC)    i |= UPS_C_PORT_ENABLED;
 		if (v & XHCI_PS_OCC)    i |= UPS_C_OVERCURRENT_INDICATOR;
 		if (v & XHCI_PS_PRC)	i |= UPS_C_PORT_RESET;
+		if (v & XHCI_PS_PLC)	i |= UPS_C_PORT_LINK_STATE;
+		if (v & XHCI_PS_CEC)	i |= UPS_C_PORT_CONFIG_ERROR;
 		USETW(ps.wPortChange, i);
 		l = min(len, sizeof ps);
 		memcpy(buf, &ps, l);

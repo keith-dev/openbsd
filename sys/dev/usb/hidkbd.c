@@ -1,4 +1,4 @@
-/*	$OpenBSD: hidkbd.c,v 1.13 2014/07/12 18:48:52 tedu Exp $	*/
+/*	$OpenBSD: hidkbd.c,v 1.16 2015/07/15 14:15:46 miod Exp $	*/
 /*      $NetBSD: ukbd.c,v 1.85 2003/03/11 16:44:00 augustss Exp $        */
 
 /*
@@ -55,7 +55,6 @@
 #include <dev/wscons/wsksymvar.h>
 
 #include <dev/usb/hidkbdsc.h>
-#include <dev/usb/hidkbdvar.h>
 
 #ifdef HIDKBD_DEBUG
 #define DPRINTF(x)	do { if (hidkbddebug) printf x; } while (0)
@@ -553,7 +552,7 @@ hidkbd_parse_desc(struct hidkbd *kbd, int id, void *desc, int dlen)
 {
 	struct hid_data *d;
 	struct hid_item h;
-	int i, ivar = 0;
+	unsigned int i, ivar = 0;
 
 	kbd->sc_nkeycode = 0;
 
@@ -574,9 +573,8 @@ hidkbd_parse_desc(struct hidkbd *kbd, int id, void *desc, int dlen)
 	}
 
 	kbd->sc_nvar = ivar;
-	kbd->sc_var = (struct hidkbd_variable *)malloc(
-			sizeof(struct hidkbd_variable) * ivar, M_DEVBUF,
-			M_NOWAIT);
+	kbd->sc_var = (struct hidkbd_variable *)mallocarray(ivar,
+			sizeof(struct hidkbd_variable), M_DEVBUF, M_NOWAIT);
 
 	if (!kbd->sc_var)
 		return NULL;
@@ -600,7 +598,7 @@ hidkbd_parse_desc(struct hidkbd *kbd, int id, void *desc, int dlen)
 			}
 
 			/* variable report */
-			if (ivar < MAXVARS) {
+			if (i < MAXVARS) {
 				kbd->sc_var[i].loc = h.loc;
 				kbd->sc_var[i].mask = 1 << (i % 8);
 				kbd->sc_var[i].key = HID_GET_USAGE(h.usage);

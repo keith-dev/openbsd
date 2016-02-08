@@ -174,8 +174,8 @@ static void renameTriggerFunc(
   UNUSED_PARAMETER(NotUsed);
 
   /* The principle used to locate the table name in the CREATE TRIGGER 
-  ** statement is that the table name is the first token that is immediatedly
-  ** preceded by either TK_ON or TK_DOT and immediatedly followed by one
+  ** statement is that the table name is the first token that is immediately
+  ** preceded by either TK_ON or TK_DOT and immediately followed by one
   ** of TK_WHEN, TK_BEGIN or TK_FOR.
   */
   if( zSql ){
@@ -690,7 +690,10 @@ void sqlite3AlterFinishAddColumn(Parse *pParse, Token *pColDef){
   */
   if( pDflt ){
     sqlite3_value *pVal = 0;
-    if( sqlite3ValueFromExpr(db, pDflt, SQLITE_UTF8, SQLITE_AFF_NONE, &pVal) ){
+    int rc;
+    rc = sqlite3ValueFromExpr(db, pDflt, SQLITE_UTF8, SQLITE_AFF_NONE, &pVal);
+    assert( rc==SQLITE_OK || rc==SQLITE_NOMEM );
+    if( rc!=SQLITE_OK ){
       db->mallocFailed = 1;
       return;
     }

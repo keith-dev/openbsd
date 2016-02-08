@@ -1,4 +1,4 @@
-/*	$OpenBSD: tftpd.c,v 1.26 2015/01/16 06:40:22 deraadt Exp $	*/
+/*	$OpenBSD: tftpd.c,v 1.28 2015/07/20 04:28:03 dlg Exp $	*/
 
 /*
  * Copyright (c) 2012 David Gwynne <dlg@uq.edu.au>
@@ -90,6 +90,8 @@
 #define TIMEOUT_MAX	255		/* maximal packet rexmt timeout */
 
 #define RETRIES		5
+
+#define SEEDPATH	"/etc/random.seed"
 
 struct formats;
 
@@ -936,6 +938,20 @@ validate_access(struct tftp_client *client, const char *filename)
 	struct stat	 stbuf;
 	int		 fd, wmode;
 	const char	*errstr;
+
+	if (strcmp(filename, SEEDPATH) == 0) {
+		char *buf;
+		if (mode != RRQ)
+			return (EACCESS);
+
+		buf = client->buf + sizeof(client->buf) - 512;
+		arc4random_buf(buf, 512);
+		client->file = fmemopen(buf, 512, "r");
+		if (client->file == NULL)
+			return (errno + 100);
+
+		return (0);
+	}
 
 	/*
 	 * We use a different permissions scheme if `cancreate' is

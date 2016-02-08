@@ -1,4 +1,4 @@
-/*	$OpenBSD: pci_quirks.c,v 1.5 2007/07/02 07:19:54 dlg Exp $	*/
+/*	$OpenBSD: pci_quirks.c,v 1.7 2015/07/20 18:05:04 miod Exp $	*/
 /*	$NetBSD: pci_quirks.c,v 1.1 1998/05/31 06:03:44 cgd Exp $	*/
 
 /*
@@ -36,7 +36,6 @@
  */
 
 #include <sys/param.h>
-#include <sys/device.h>
 
 #include <dev/pci/pcireg.h>
 #include <dev/pci/pcivar.h>
@@ -44,7 +43,9 @@
 
 static const struct pci_quirkdata pci_quirks[] = {
 	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82371FB_ISA,
-	    PCI_QUIRK_MULTIFUNCTION }
+	    PCI_QUIRK_MULTIFUNCTION },
+	{ PCI_VENDOR_CIRRUS, PCI_PRODUCT_CIRRUS_CL_PD6729,
+	    PCI_QUIRK_MONOFUNCTION }
 };
 
 const struct pci_quirkdata *

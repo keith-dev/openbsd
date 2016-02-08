@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_upgt.c,v 1.66 2014/12/22 02:28:52 tedu Exp $ */
+/*	$OpenBSD: if_upgt.c,v 1.69 2015/05/02 10:44:29 jsg Exp $ */
 
 /*
  * Copyright (c) 2007 Marcus Glocker <mglocker@openbsd.org>
@@ -29,7 +29,6 @@
 #include <sys/device.h>
 #include <sys/endian.h>
 
-#include <machine/bus.h>
 #include <machine/intr.h>
 
 #if NBPFILTER > 0
@@ -1497,8 +1496,10 @@ upgt_tx_task(void *arg)
 		if (wh->i_fc[1] & IEEE80211_FC1_PROTECTED) {
 			k = ieee80211_get_txkey(ic, wh, ic->ic_bss);
 
-			if ((m = ieee80211_encrypt(ic, m, k)) == NULL)
+			if ((m = ieee80211_encrypt(ic, m, k)) == NULL) {
+				splx(s);
 				return;
+			}
 
 			/* in case packet header moved, reset pointer */
 			wh = mtod(m, struct ieee80211_frame *);
@@ -1582,6 +1583,7 @@ upgt_tx_task(void *arg)
 		if (error != 0 && error != USBD_IN_PROGRESS) {
 			printf("%s: could not transmit TX data URB!\n",
 			    sc->sc_dev.dv_xname);
+			splx(s);
 			return;
 		}
 
@@ -1736,7 +1738,7 @@ upgt_rx(struct upgt_softc *sc, uint8_t *data, int pkglen)
 	rxdesc = (struct upgt_lmac_rx_desc *)data;
 
 	/* create mbuf which is suitable for strict alignment archs */
-	m = m_devget(rxdesc->data, pkglen, ETHER_ALIGN, ifp);
+	m = m_devget(rxdesc->data, pkglen, ETHER_ALIGN);
 	if (m == NULL) {
 		DPRINTF(1, "%s: could not create RX mbuf!\n", sc->sc_dev.dv_xname);
 		ifp->if_ierrors++;

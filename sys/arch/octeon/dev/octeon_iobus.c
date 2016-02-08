@@ -1,4 +1,4 @@
-/*	$OpenBSD: octeon_iobus.c,v 1.9 2015/02/11 05:42:17 uebayasi Exp $ */
+/*	$OpenBSD: octeon_iobus.c,v 1.14 2015/07/20 19:44:32 pirofti Exp $ */
 
 /*
  * Copyright (c) 2000-2004 Opsycon AB  (www.opsycon.se)
@@ -47,12 +47,13 @@
 
 #include <octeon/dev/iobusvar.h>
 #include <octeon/dev/cn30xxgmxreg.h>
-#include <octeon/dev/octhcireg.h>
+#include <octeon/dev/octhcireg.h>	/* USBN_BASE */
 
-int	 iobusmatch(struct device *, void *, void *);
-void	 iobusattach(struct device *, struct device *, void *);
-int	 iobusprint(void *, const char *);
-int	 iobussubmatch(struct device *, void *, void *);
+int	iobusmatch(struct device *, void *, void *);
+void	iobusattach(struct device *, struct device *, void *);
+int	iobusprint(void *, const char *);
+int	iobussubmatch(struct device *, void *, void *);
+int	iobussearch(struct device *, void *, void *);
 
 u_int8_t iobus_read_1(bus_space_tag_t, bus_space_handle_t, bus_size_t);
 u_int16_t iobus_read_2(bus_space_tag_t, bus_space_handle_t, bus_size_t);
@@ -80,14 +81,6 @@ void	 iobus_read_raw_8(bus_space_tag_t, bus_space_handle_t, bus_addr_t,
 	    u_int8_t *, bus_size_t);
 void	 iobus_write_raw_8(bus_space_tag_t, bus_space_handle_t, bus_addr_t,
 	    const u_int8_t *, bus_size_t);
-
-int	 iobus_space_map(bus_space_tag_t, bus_addr_t, bus_size_t, int,
-	    bus_space_handle_t *);
-void	 iobus_space_unmap(bus_space_tag_t, bus_space_handle_t, bus_size_t);
-int	 iobus_space_region(bus_space_tag_t, bus_space_handle_t, bus_size_t,
-	    bus_size_t, bus_space_handle_t *);
-
-void	*iobus_space_vaddr(bus_space_tag_t, bus_space_handle_t);
 
 bus_addr_t iobus_pa_to_device(paddr_t);
 paddr_t	 iobus_device_to_pa(bus_addr_t);
@@ -147,28 +140,20 @@ struct machine_bus_dma_tag iobus_bus_dma_tag = {
 };
 
 /*
- * List of iobus child devices.
+ * List of iobus child devices whose base addresses are too large to be
+ * recorded in the kernel configuration file. So look them up from here instead.
  */
 
-#define	IOBUSDEV(name, unitno, unit)	\
-	{ name, unitno, unit, &iobus_tag, &iobus_bus_dma_tag }
-const struct iobus_unit iobus_units[] = {
-	{ OCTEON_CF_BASE, 0 },			/* octcf */
-	{ 0, 0 },				/* pcibus */
-	{ GMX0_BASE_PORT0, CIU_INT_GMX_DRP0 },	/* cn30xxgmx */
-	{ OCTEON_RNG_BASE, 0 },			/* octrng */
-	{ 0, CIU_INT_USB },			/* octhci */
-	{ USBN_BASE, CIU_INT_USB },		/* octdwctwo */
+static const struct octeon_iobus_addrs iobus_addrs[] = {
+	{ "octcf",	OCTEON_CF_BASE  },
+	{ "cn30xxgmx",	GMX0_BASE_PORT0 },
+	{ "octrng",	OCTEON_RNG_BASE },
+	{ "dwctwo",	USBN_BASE       },
+	{ "amdcf",	OCTEON_AMDCF_BASE},
 };
-struct iobus_attach_args iobus_children[] = {
-	IOBUSDEV("octcf", 0, &iobus_units[0]),
-	IOBUSDEV("pcibus", 0, &iobus_units[1]),
-	IOBUSDEV("cn30xxgmx", 0, &iobus_units[2]),
-	IOBUSDEV("octrng", 0, &iobus_units[3]),
-	IOBUSDEV("octhci", 0, &iobus_units[4]),
-	IOBUSDEV("dwctwo", 0, &iobus_units[5]),
-};
-#undef	IOBUSDEV
+
+/* There can only be one. */
+int	iobus_found;
 
 /*
  * Match bus only to targets which have this bus.
@@ -176,6 +161,9 @@ struct iobus_attach_args iobus_children[] = {
 int
 iobusmatch(struct device *parent, void *match, void *aux)
 {
+	if (iobus_found)
+		return (0);
+
 	return (1);
 }
 
@@ -187,10 +175,10 @@ iobusprint(void *aux, const char *iobus)
 	if (iobus != NULL)
 		printf("%s at %s", aa->aa_name, iobus);
 
-	if (aa->aa_unit->addr != 0)
-		printf(" base 0x%lx", aa->aa_unit->addr);
-	if (aa->aa_unit->irq >= 0)
-		printf(" irq %d", aa->aa_unit->irq);
+	if (aa->aa_addr != 0)
+		printf(" base 0x%lx", aa->aa_addr);
+	if (aa->aa_irq >= 0)
+		printf(" irq %d", aa->aa_irq);
 
 	return (UNCONF);
 }
@@ -204,7 +192,7 @@ iobussubmatch(struct device *parent, void *vcf, void *args)
 	if (strcmp(cf->cf_driver->cd_name, aa->aa_name) != 0)
 		return 0;
 
-	if (cf->cf_loc[0] != -1 && cf->cf_loc[0] != (int)aa->aa_unit->addr)
+	if (cf->cf_loc[0] != -1 && cf->cf_loc[0] != (int)aa->aa_addr)
 		return 0;
 
 	return (*cf->cf_attach->ca_match)(parent, cf, aa);
@@ -213,17 +201,19 @@ iobussubmatch(struct device *parent, void *vcf, void *args)
 void
 iobusattach(struct device *parent, struct device *self, void *aux)
 {
+	struct device *sc = self;
 	struct octeon_config oc;
-	uint i;
 
 	/*
-	 * Map and setup CRIME control registers.
+	 * Map and setup CIU control registers.
 	 */
 	if (bus_space_map(&iobus_tag, OCTEON_CIU_BASE, OCTEON_CIU_SIZE, 0,
 		&iobus_h)) {
 		printf(": can't map CIU control registers\n");
 		return;
 	}
+
+	iobus_found = 1;
 
 	printf("\n");
 
@@ -238,11 +228,38 @@ iobusattach(struct device *parent, struct device *self, void *aux)
 	cn30xxpow_bootstrap(&oc);
 
 	/*
-	 * Attach subdevices.
+	 * Attach all subdevices as described in the config file.
 	 */
-	for (i = 0; i < nitems(iobus_children); i++)
-		config_found_sm(self, iobus_children + i,
-		    iobusprint, iobussubmatch);
+	config_search(iobussearch, self, sc);
+}
+
+int
+iobussearch(struct device *parent, void *v, void *aux)
+{
+	struct iobus_attach_args aa;
+	struct cfdata *cf = v;
+	int i;
+
+	aa.aa_name = cf->cf_driver->cd_name;
+	aa.aa_bust = &iobus_tag;
+	aa.aa_dmat = &iobus_bus_dma_tag;
+	aa.aa_addr = cf->cf_loc[0];
+	aa.aa_irq  = cf->cf_loc[1];
+	aa.aa_unitno = cf->cf_unit;
+
+	/* No address specified, try to look it up. */
+	if (aa.aa_addr == -1) {
+		for (i = 0; i < nitems(iobus_addrs); i++) {
+			if (strcmp(iobus_addrs[i].name, cf->cf_driver->cd_name) == 0)
+				aa.aa_addr = iobus_addrs[i].address;
+		}
+	}
+
+	if (cf->cf_attach->ca_match(parent, cf, &aa) == 0)
+		return 0;
+
+	config_attach(parent, cf, &aa, iobusprint);
+	return 1;
 }
 
 int

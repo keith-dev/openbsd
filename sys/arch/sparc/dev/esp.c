@@ -1,4 +1,4 @@
-/*	$OpenBSD: esp.c,v 1.34 2014/01/21 03:42:21 dlg Exp $	*/
+/*	$OpenBSD: esp.c,v 1.36 2015/03/29 15:41:15 miod Exp $	*/
 /*	$NetBSD: esp.c,v 1.69 1997/08/27 11:24:18 bouyer Exp $	*/
 
 /*
@@ -114,8 +114,8 @@
 
 #include <uvm/uvm_extern.h>
 
-#include <machine/cpu.h>
 #include <machine/autoconf.h>
+#include <machine/cpu.h>
 
 #include <dev/ic/ncr53c9xreg.h>
 #include <dev/ic/ncr53c9xvar.h>
@@ -182,12 +182,15 @@ espmatch(parent, vcf, aux)
 	struct device *parent;
 	void *vcf, *aux;
 {
-	register struct cfdata *cf = vcf;
-	register struct confargs *ca = aux;
-	register struct romaux *ra = &ca->ca_ra;
+	struct cfdata *cf = vcf;
+	struct confargs *ca = aux;
+	struct romaux *ra = &ca->ca_ra;
 
 #if defined(SUN4C) || defined(SUN4D) || defined(SUN4E) || defined(SUN4M)
 	if (ca->ca_bustype == BUS_SBUS) {
+		if (!sbus_testdma((struct sbus_softc *)parent, ca))
+			return (0);
+
 		if (strcmp("SUNW,fas", ra->ra_name) == 0 ||
 		    strcmp("ptscII", ra->ra_name) == 0)
 			return (1);
@@ -196,12 +199,10 @@ espmatch(parent, vcf, aux)
 
 	if (strcmp(cf->cf_driver->cd_name, ra->ra_name))
 		return (0);
+
 #if defined(SUN4C) || defined(SUN4D) || defined(SUN4E) || defined(SUN4M)
-	if (ca->ca_bustype == BUS_SBUS) {
-		if (!sbus_testdma((struct sbus_softc *)parent, ca))
-			return (0);
+	if (ca->ca_bustype == BUS_SBUS)
 		return (1);
-	}
 #endif
 #ifdef SUN4
 	if (cpuinfo.cpu_type == CPUTYP_4_100)
@@ -483,17 +484,19 @@ espattach(parent, self, aux)
 	 * below.
 	 */
 	bp = ca->ca_ra.ra_bp;
-	switch (ca->ca_bustype) {
-	case BUS_SBUS:
-		if (bp != NULL && strcmp(bp->name, "esp") == 0 &&
-		    SAME_ESP(sc, bp, ca))
-			bootpath_store(1, bp + 1);
-		break;
-	default:
-		if (bp != NULL && strcmp(bp->name, "esp") == 0 &&
-			bp->val[0] == -1 && bp->val[1] == sc->sc_dev.dv_unit)
-			bootpath_store(1, bp + 1);
-		break;
+	if (bp != NULL && (strcmp(bp->name, "esp") == 0 ||
+	    strcmp(bp->name, ca->ca_ra.ra_name) == 0)) {
+		switch (ca->ca_bustype) {
+		case BUS_SBUS:
+			if (SAME_ESP(sc, bp, ca))
+				bootpath_store(1, bp + 1);
+			break;
+		default:
+			if (bp->val[0] == -1 &&
+			    bp->val[1] == sc->sc_dev.dv_unit)
+				bootpath_store(1, bp + 1);
+			break;
+		}
 	}
 
 	/* Turn on target selection using the `dma' method */

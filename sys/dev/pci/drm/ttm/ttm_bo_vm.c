@@ -1,4 +1,4 @@
-/*	$OpenBSD: ttm_bo_vm.c,v 1.5 2015/02/11 07:01:37 jsg Exp $	*/
+/*	$OpenBSD: ttm_bo_vm.c,v 1.7 2015/04/05 11:53:53 kettenis Exp $	*/
 /**************************************************************************
  *
  * Copyright (c) 2006-2009 VMware, Inc., Palo Alto, CA., USA
@@ -403,7 +403,7 @@ ssize_t ttm_bo_io(struct ttm_bo_device *bdev, struct file *filp,
 		goto out_unref;
 	}
 
-	page_offset = *f_pos & ~PAGE_MASK;
+	page_offset = *f_pos & PAGE_MASK;
 	io_size = bo->num_pages - kmap_offset;
 	io_size = (io_size << PAGE_SHIFT) - page_offset;
 	if (count < io_size)
@@ -434,9 +434,9 @@ ssize_t ttm_bo_io(struct ttm_bo_device *bdev, struct file *filp,
 	virtual += page_offset;
 
 	if (write)
-		ret = copyin(wbuf, virtual, io_size);
+		ret = copy_from_user(virtual, wbuf, io_size);
 	else
-		ret = copyout(virtual, rbuf, io_size);
+		ret = copy_to_user(rbuf, virtual, io_size);
 
 	ttm_bo_kunmap(&map);
 	ttm_bo_unreserve(bo);
@@ -472,7 +472,7 @@ ssize_t ttm_bo_fbdev_io(struct ttm_buffer_object *bo, const char __user *wbuf,
 	if (unlikely(kmap_offset >= bo->num_pages))
 		return -EFBIG;
 
-	page_offset = *f_pos & ~PAGE_MASK;
+	page_offset = *f_pos & PAGE_MASK;
 	io_size = bo->num_pages - kmap_offset;
 	io_size = (io_size << PAGE_SHIFT) - page_offset;
 	if (count < io_size)
@@ -502,9 +502,9 @@ ssize_t ttm_bo_fbdev_io(struct ttm_buffer_object *bo, const char __user *wbuf,
 	virtual += page_offset;
 
 	if (write)
-		ret = copyin(wbuf, virtual, io_size);
+		ret = copy_from_user(virtual, wbuf, io_size);
 	else
-		ret = copyout(virtual, rbuf, io_size);
+		ret = copy_to_user(rbuf, virtual, io_size);
 
 	ttm_bo_kunmap(&map);
 	ttm_bo_unreserve(bo);

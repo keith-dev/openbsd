@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_ethersubr.c,v 1.189 2015/02/16 18:24:02 markus Exp $	*/
+/*	$OpenBSD: if_ethersubr.c,v 1.221 2015/07/29 00:04:03 rzalamena Exp $	*/
 /*	$NetBSD: if_ethersubr.c,v 1.19 1996/05/07 02:40:30 thorpej Exp $	*/
 
 /*
@@ -87,8 +87,6 @@ didn't get a copy, you may request one from <license@ipv6.nrl.navy.mil>.
 #include <sys/syslog.h>
 #include <sys/timeout.h>
 
-#include <crypto/siphash.h>	/* required by if_trunk.h */
-
 #include <net/if.h>
 #include <net/netisr.h>
 #include <net/route.h>
@@ -101,35 +99,13 @@ didn't get a copy, you may request one from <license@ipv6.nrl.navy.mil>.
 #include <netinet/if_ether.h>
 #include <netinet/ip_ipsp.h>
 
-#include <dev/rndvar.h>
-
 #if NBPFILTER > 0
 #include <net/bpf.h>
-#endif
-
-#include "bridge.h"
-#if NBRIDGE > 0
-#include <net/if_bridge.h>
-#endif
-
-#include "vlan.h"
-#if NVLAN > 0
-#include <net/if_vlan_var.h>
-#endif /* NVLAN > 0 */
-
-#include "carp.h"
-#if NCARP > 0
-#include <netinet/ip_carp.h>
 #endif
 
 #include "pppoe.h"
 #if NPPPOE > 0
 #include <net/if_pppoe.h>
-#endif
-
-#include "trunk.h"
-#if NTRUNK > 0
-#include <net/if_trunk.h>
 #endif
 
 #ifdef INET6
@@ -148,9 +124,6 @@ didn't get a copy, you may request one from <license@ipv6.nrl.navy.mil>.
 u_char etherbroadcastaddr[ETHER_ADDR_LEN] =
     { 0xff, 0xff, 0xff, 0xff, 0xff, 0xff };
 #define senderr(e) { error = (e); goto bad;}
-
-static inline int	ether_addheader(struct mbuf **, struct ifnet *,
-			   u_int16_t, u_char *, u_char *);
 
 int
 ether_ioctl(struct ifnet *ifp, struct arpcom *arp, u_long cmd, caddr_t data)
@@ -186,127 +159,45 @@ ether_ioctl(struct ifnet *ifp, struct arpcom *arp, u_long cmd, caddr_t data)
 	return (error);
 }
 
-static inline int
-ether_addheader(struct mbuf **m, struct ifnet *ifp, u_int16_t etype,
-    u_char *esrc, u_char *edst)
-{
-	struct ether_header *eh;
-
-#if NVLAN > 0
-	if ((*m)->m_flags & M_VLANTAG) {
-		struct ifvlan	*ifv = ifp->if_softc;
-		struct ifnet	*p = ifv->ifv_p;
-		u_int8_t	prio = (*m)->m_pkthdr.pf.prio;
-
-		/* IEEE 802.1p has prio 0 and 1 swapped */
-		if (prio <= 1)
-			prio = !prio;
-
-#if NBRIDGE > 0
-		/*
-		 * The bridge might send on non-vlan interfaces -- which
-		 * do not need this header -- or add the vlan-header itself
-		 * in bridge_ifenqueue -- which would add a second header.
-		 */
-		if (ifp->if_bridgeport)
-			(*m)->m_flags &= ~M_VLANTAG;
-		else
-#endif
-		/* should we use the tx tagging hw offload at all? */
-		if ((p->if_capabilities & IFCAP_VLAN_HWTAGGING) &&
-		    (ifv->ifv_type == ETHERTYPE_VLAN)) {
-			(*m)->m_pkthdr.ether_vtag = ifv->ifv_tag +
-			    (prio << EVL_PRIO_BITS);
-			/* don't return, need to add regular ethernet header */
-		} else {
-			struct ether_vlan_header	*evh;
-
-			M_PREPEND(*m, sizeof(*evh), M_DONTWAIT);
-			if (*m == NULL)
-				return (-1);
-			evh = mtod(*m, struct ether_vlan_header *);
-			memcpy(evh->evl_dhost, edst, sizeof(evh->evl_dhost));
-			memcpy(evh->evl_shost, esrc, sizeof(evh->evl_shost));
-			evh->evl_proto = etype;
-			evh->evl_encap_proto = htons(ifv->ifv_type);
-			evh->evl_tag = htons(ifv->ifv_tag +
-			    (prio << EVL_PRIO_BITS));
-			(*m)->m_flags &= ~M_VLANTAG;
-			return (0);
-		}
-	}
-#endif /* NVLAN > 0 */
-	M_PREPEND(*m, ETHER_HDR_LEN, M_DONTWAIT);
-	if (*m == NULL)
-		return (-1);
-	eh = mtod(*m, struct ether_header *);
-	eh->ether_type = etype;
-	memcpy(eh->ether_dhost, edst, sizeof(eh->ether_dhost));
-	memcpy(eh->ether_shost, esrc, sizeof(eh->ether_shost));
-	return (0);
-}
-
 /*
  * Ethernet output routine.
  * Encapsulate a packet of type family for the local net.
  * Assumes that ifp is actually pointer to arpcom structure.
  */
 int
-ether_output(struct ifnet *ifp0, struct mbuf *m0, struct sockaddr *dst,
+ether_output(struct ifnet *ifp, struct mbuf *m, struct sockaddr *dst,
     struct rtentry *rt)
 {
 	u_int16_t etype;
-	int s, len, error = 0;
 	u_char edst[ETHER_ADDR_LEN];
 	u_char *esrc;
-	struct mbuf *m = m0;
 	struct mbuf *mcopy = NULL;
 	struct ether_header *eh;
-	struct arpcom *ac = (struct arpcom *)ifp0;
-	short mflags;
-	struct ifnet *ifp = ifp0;
+	struct arpcom *ac = (struct arpcom *)ifp;
+	int error = 0;
 
 #ifdef DIAGNOSTIC
 	if (ifp->if_rdomain != rtable_l2(m->m_pkthdr.ph_rtableid)) {
 		printf("%s: trying to send packet on wrong domain. "
-		    "if %d vs. mbuf %d, AF %d\n", ifp->if_xname,
-		    ifp->if_rdomain, rtable_l2(m->m_pkthdr.ph_rtableid),
-		    dst->sa_family);
+		    "if %d vs. mbuf %d\n", ifp->if_xname,
+		    ifp->if_rdomain, rtable_l2(m->m_pkthdr.ph_rtableid));
 	}
-#endif
-
-#if NTRUNK > 0
-	/* restrict transmission on trunk members to bpf only */
-	if (ifp->if_type == IFT_IEEE8023ADLAG &&
-	    (m_tag_find(m, PACKET_TAG_DLT, NULL) == NULL))
-		senderr(EBUSY);
 #endif
 
 	esrc = ac->ac_enaddr;
-
-#if NCARP > 0
-	if (ifp->if_type == IFT_CARP) {
-		ifp = ifp->if_carpdev;
-		ac = (struct arpcom *)ifp;
-
-		if ((ifp0->if_flags & (IFF_UP|IFF_RUNNING)) !=
-		    (IFF_UP|IFF_RUNNING))
-			senderr(ENETDOWN);
-	}
-#endif /* NCARP > 0 */
 
 	if ((ifp->if_flags & (IFF_UP|IFF_RUNNING)) != (IFF_UP|IFF_RUNNING))
 		senderr(ENETDOWN);
 
 	switch (dst->sa_family) {
 	case AF_INET:
-		error = arpresolve(ac, rt, m, dst, edst);
+		error = arpresolve(ifp, rt, m, dst, edst);
 		if (error)
 			return (error == EAGAIN ? 0 : error);
 		/* If broadcasting on a simplex interface, loopback a copy */
 		if ((m->m_flags & M_BCAST) && (ifp->if_flags & IFF_SIMPLEX) &&
 		    !m->m_pkthdr.pf.routed)
-			mcopy = m_copy(m, 0, (int)M_COPYALL);
+			mcopy = m_copym(m, 0, M_COPYALL, M_NOWAIT);
 		etype = htons(ETHERTYPE_IP);
 		break;
 #ifdef INET6
@@ -336,7 +227,8 @@ ether_output(struct ifnet *ifp0, struct mbuf *m0, struct sockaddr *dst,
 				    sizeof(edst));
 				break;
 			case AF_INET:
-				error = arpresolve(ac, rt, m, dst, edst);
+			case AF_MPLS:
+				error = arpresolve(ifp, rt, m, dst, edst);
 				if (error)
 					return (error == EAGAIN ? 0 : error);
 				break;
@@ -372,81 +264,17 @@ ether_output(struct ifnet *ifp0, struct mbuf *m0, struct sockaddr *dst,
 	if (mcopy)
 		(void) looutput(ifp, mcopy, dst, rt);
 
-#if NCARP > 0
-	if (ifp0 != ifp && ifp0->if_type == IFT_CARP)
-		esrc = carp_get_srclladdr(ifp0, esrc);
-#endif
+	M_PREPEND(m, sizeof(struct ether_header), M_DONTWAIT);
+	if (m == NULL)
+		return (ENOBUFS);
+	eh = mtod(m, struct ether_header *);
+	eh->ether_type = etype;
+	memcpy(eh->ether_dhost, edst, sizeof(eh->ether_dhost));
+	memcpy(eh->ether_shost, esrc, sizeof(eh->ether_shost));
 
-	if (ether_addheader(&m, ifp, etype, esrc, edst) == -1)
-		senderr(ENOBUFS);
-
-#if NBRIDGE > 0
-	/*
-	 * Interfaces that are bridgeports need special handling for output.
-	 */
-	if (ifp->if_bridgeport) {
-		struct m_tag *mtag;
-
-		/*
-		 * Check if this packet has already been sent out through
-		 * this bridgeport, in which case we simply send it out
-		 * without further bridge processing.
-		 */
-		for (mtag = m_tag_find(m, PACKET_TAG_BRIDGE, NULL); mtag;
-		    mtag = m_tag_find(m, PACKET_TAG_BRIDGE, mtag)) {
-#ifdef DEBUG
-			/* Check that the information is there */
-			if (mtag->m_tag_len != sizeof(caddr_t)) {
-				error = EINVAL;
-				goto bad;
-			}
-#endif
-			if (!memcmp(&ifp->if_bridgeport, mtag + 1,
-			    sizeof(caddr_t)))
-				break;
-		}
-		if (mtag == NULL) {
-			/* Attach a tag so we can detect loops */
-			mtag = m_tag_get(PACKET_TAG_BRIDGE, sizeof(caddr_t),
-			    M_NOWAIT);
-			if (mtag == NULL) {
-				error = ENOBUFS;
-				goto bad;
-			}
-			memcpy(mtag + 1, &ifp->if_bridgeport, sizeof(caddr_t));
-			m_tag_prepend(m, mtag);
-			error = bridge_output(ifp, m, NULL, NULL);
-			return (error);
-		}
-	}
-#endif
-	mflags = m->m_flags;
-	len = m->m_pkthdr.len;
-	s = splnet();
-	/*
-	 * Queue message on interface, and start output if interface
-	 * not yet active.
-	 */
-	IFQ_ENQUEUE(&ifp->if_snd, m, NULL, error);
-	if (error) {
-		/* mbuf is already freed */
-		splx(s);
-		return (error);
-	}
-	ifp->if_obytes += len;
-#if NCARP > 0
-	if (ifp != ifp0)
-		ifp0->if_obytes += len;
-#endif /* NCARP > 0 */
-	if (mflags & M_MCAST)
-		ifp->if_omcasts++;
-	if_start(ifp);
-	splx(s);
-	return (error);
-
+	return (if_enqueue(ifp, m));
 bad:
-	if (m)
-		m_freem(m);
+	m_freem(m);
 	return (error);
 }
 
@@ -456,49 +284,21 @@ bad:
  * the ether header, which is provided separately.
  */
 int
-ether_input(struct ifnet *ifp0, void *hdr, struct mbuf *m)
+ether_input(struct ifnet *ifp, struct mbuf *m)
 {
-	struct ether_header *eh = hdr;
-	struct ifqueue *inq;
+	struct ether_header *eh;
+	struct niqueue *inq;
 	u_int16_t etype;
-	int s, llcfound = 0;
+	int llcfound = 0;
 	struct llc *l;
 	struct arpcom *ac;
-	struct ifnet *ifp = ifp0;
-#if NTRUNK > 0
-	int i = 0;
-#endif
 #if NPPPOE > 0
 	struct ether_header *eh_tmp;
 #endif
 
-	/* mark incoming routing table */
-	m->m_pkthdr.ph_rtableid = ifp->if_rdomain;
+	eh = mtod(m, struct ether_header *);
+	m_adj(m, ETHER_HDR_LEN);
 
-	if (eh == NULL) {
-		eh = mtod(m, struct ether_header *);
-		m_adj(m, ETHER_HDR_LEN);
-	}
-
-#if NTRUNK > 0
-	/* Handle input from a trunk port */
-	while (ifp->if_type == IFT_IEEE8023ADLAG) {
-		if (++i > TRUNK_MAX_STACKING) {
-			m_freem(m);
-			return (1);
-		}
-		if (trunk_input(ifp, eh, m) != 0)
-			return (1);
-
-		/* Has been set to the trunk interface */
-		ifp = m->m_pkthdr.rcvif;
-	}
-#endif
-
-	if ((ifp->if_flags & IFF_UP) == 0) {
-		m_freem(m);
-		return (1);
-	}
 	if (ETHER_IS_MULTICAST(eh->ether_dhost)) {
 		/*
 		 * If this is not a simplex interface, drop the packet
@@ -518,79 +318,18 @@ ether_input(struct ifnet *ifp0, void *hdr, struct mbuf *m)
 		else
 			m->m_flags |= M_MCAST;
 		ifp->if_imcasts++;
-#if NTRUNK > 0
-		if (ifp != ifp0)
-			ifp0->if_imcasts++;
-#endif
 	}
-
-	ifp->if_ibytes += m->m_pkthdr.len + sizeof(*eh);
-#if NTRUNK > 0
-	if (ifp != ifp0)
-		ifp0->if_ibytes += m->m_pkthdr.len + sizeof(*eh);
-#endif
 
 	etype = ntohs(eh->ether_type);
-
-	if (!(netisr & (1 << NETISR_RND_DONE))) {
-		add_net_randomness(etype);
-		atomic_setbits_int(&netisr, (1 << NETISR_RND_DONE));
-	}
-
-#if NVLAN > 0
-	if (((m->m_flags & M_VLANTAG) || etype == ETHERTYPE_VLAN ||
-	    etype == ETHERTYPE_QINQ) && (vlan_input(eh, m) == 0))
-		return (1);
-#endif
-
-#if NBRIDGE > 0
-	/*
-	 * Tap the packet off here for a bridge, if configured and
-	 * active for this interface.  bridge_input returns
-	 * NULL if it has consumed the packet, otherwise, it
-	 * gets processed as normal.
-	 */
-	if (ifp->if_bridgeport) {
-		if (m->m_flags & M_PROTO1)
-			m->m_flags &= ~M_PROTO1;
-		else {
-			m = bridge_input(ifp, eh, m);
-			if (m == NULL)
-				return (1);
-			/* The bridge has determined it's for us. */
-			ifp = m->m_pkthdr.rcvif;
-		}
-	}
-#endif
-
-#if NVLAN > 0
-	if ((m->m_flags & M_VLANTAG) || etype == ETHERTYPE_VLAN ||
-	    etype == ETHERTYPE_QINQ) {
-		/* The bridge did not want the vlan frame either, drop it. */
-		ifp->if_noproto++;
-		m_freem(m);
-		return (1);
-	}
-#endif /* NVLAN > 0 */
-
-#if NCARP > 0
-	if (ifp->if_carp) {
-		if (ifp->if_type != IFT_CARP && (carp_input(ifp, eh, m) == 0))
-			return (1);
-		/* clear mcast if received on a carp IP balanced address */
-		else if (ifp->if_type == IFT_CARP &&
-		    m->m_flags & (M_BCAST|M_MCAST) &&
-		    carp_our_mcastaddr(ifp, (u_int8_t *)&eh->ether_dhost))
-			m->m_flags &= ~(M_BCAST|M_MCAST);
-	}
-#endif /* NCARP > 0 */
 
 	ac = (struct arpcom *)ifp;
 
 	/*
 	 * If packet has been filtered by the bpf listener, drop it now
+	 * also HW vlan tagged packets that were not collected by vlan(4)
+	 * must be dropped now.
 	 */
-	if (m->m_flags & M_FILDROP) {
+	if (m->m_flags & (M_FILDROP | M_VLANTAG)) {
 		m_freem(m);
 		return (1);
 	}
@@ -600,29 +339,22 @@ ether_input(struct ifnet *ifp0, void *hdr, struct mbuf *m)
 	 * is for us.  Drop otherwise.
 	 */
 	if ((m->m_flags & (M_BCAST|M_MCAST)) == 0 &&
-	    ((ifp->if_flags & IFF_PROMISC) || (ifp0->if_flags & IFF_PROMISC))) {
+	    (ifp->if_flags & IFF_PROMISC)) {
 		if (memcmp(ac->ac_enaddr, eh->ether_dhost, ETHER_ADDR_LEN)) {
 			m_freem(m);
 			return (1);
 		}
 	}
 
-	/*
-	 * Schedule softnet interrupt and enqueue packet within the same spl.
-	 */
-	s = splnet();
 decapsulate:
-
 	switch (etype) {
 	case ETHERTYPE_IP:
-		schednetisr(NETISR_IP);
 		inq = &ipintrq;
 		break;
 
 	case ETHERTYPE_ARP:
 		if (ifp->if_flags & IFF_NOARP)
 			goto dropanyway;
-		schednetisr(NETISR_ARP);
 		inq = &arpintrq;
 		break;
 
@@ -630,14 +362,13 @@ decapsulate:
 		if (ifp->if_flags & IFF_NOARP)
 			goto dropanyway;
 		revarpinput(m);	/* XXX queue? */
-		goto done;
+		return (1);
 
 #ifdef INET6
 	/*
 	 * Schedule IPv6 software interrupt for incoming IPv6 packet.
 	 */
 	case ETHERTYPE_IPV6:
-		schednetisr(NETISR_IPV6);
 		inq = &ip6intrq;
 		break;
 #endif /* INET6 */
@@ -645,14 +376,12 @@ decapsulate:
 	case ETHERTYPE_PPPOEDISC:
 	case ETHERTYPE_PPPOE:
 #ifndef PPPOE_SERVER
-		if (m->m_flags & (M_MCAST | M_BCAST)) {
-			m_freem(m);
-			goto done;
-		}
+		if (m->m_flags & (M_MCAST | M_BCAST))
+			goto dropanyway;
 #endif
 		M_PREPEND(m, sizeof(*eh), M_DONTWAIT);
 		if (m == NULL)
-			goto done;
+			return (1);
 
 		eh_tmp = mtod(m, struct ether_header *);
 		/*
@@ -665,26 +394,26 @@ decapsulate:
 		if (pipex_enable) {
 			struct pipex_session *session;
 
+			KERNEL_LOCK();
 			if ((session = pipex_pppoe_lookup_session(m)) != NULL) {
 				pipex_pppoe_input(m, session);
-				goto done;
+				KERNEL_UNLOCK();
+				return (1);
 			}
+			KERNEL_UNLOCK();
 		}
 #endif
 		if (etype == ETHERTYPE_PPPOEDISC)
 			inq = &pppoediscinq;
 		else
 			inq = &pppoeinq;
-
-		schednetisr(NETISR_PPPOE);
 		break;
 #endif
 #ifdef MPLS
 	case ETHERTYPE_MPLS:
 	case ETHERTYPE_MPLS_MCAST:
-		inq = &mplsintrq;
-		schednetisr(NETISR_MPLS);
-		break;
+		mpls_input(ifp, m);
+		return (1);
 #endif
 	default:
 		if (llcfound || etype > ETHERMTU)
@@ -702,21 +431,19 @@ decapsulate:
 				m_adj(m, 6);
 				M_PREPEND(m, sizeof(*eh), M_DONTWAIT);
 				if (m == NULL)
-					goto done;
+					return (1);
 				*mtod(m, struct ether_header *) = *eh;
 				goto decapsulate;
 			}
-			goto dropanyway;
-		dropanyway:
 		default:
-			m_freem(m);
-			goto done;
+			goto dropanyway;
 		}
 	}
 
-	IF_INPUT_ENQUEUE(inq, m);
-done:
-	splx(s);
+	niq_enqueue(inq, m);
+	return (1);
+dropanyway:
+	m_freem(m);
 	return (1);
 }
 
@@ -801,6 +528,9 @@ ether_ifdetach(struct ifnet *ifp)
 	struct arpcom *ac = (struct arpcom *)ifp;
 	struct ifih *ether_ifih;
 	struct ether_multi *enm;
+
+	/* Undo pseudo-driver changes. */
+	if_deactivate(ifp);
 
 	ether_ifih = SLIST_FIRST(&ifp->if_inputs);
 	SLIST_REMOVE_HEAD(&ifp->if_inputs, ifih_next);

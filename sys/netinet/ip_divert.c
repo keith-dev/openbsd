@@ -1,4 +1,4 @@
-/*      $OpenBSD: ip_divert.c,v 1.32 2015/01/24 00:29:06 deraadt Exp $ */
+/*      $OpenBSD: ip_divert.c,v 1.35 2015/07/15 22:16:42 deraadt Exp $ */
 
 /*
  * Copyright (c) 2009 Michele Marchetto <michele@openbsd.org>
@@ -82,20 +82,18 @@ int
 divert_output(struct inpcb *inp, struct mbuf *m, struct mbuf *nam,
     struct mbuf *control)
 {
-	struct ifqueue *inq;
 	struct sockaddr_in *sin;
 	struct socket *so;
 	struct ifaddr *ifa;
-	int s, error = 0, min_hdrlen = 0, dir;
+	int error = 0, min_hdrlen = 0, dir;
 	struct ip *ip;
 	u_int16_t off;
 
-	m->m_pkthdr.rcvif = NULL;
+	m->m_pkthdr.ph_ifidx = 0;
 	m->m_nextpkt = NULL;
 	m->m_pkthdr.ph_rtableid = inp->inp_rtableid;
 
-	if (control)
-		m_freem(control);
+	m_freem(control);
 
 	sin = mtod(nam, struct sockaddr_in *);
 	so = inp->inp_socket;
@@ -147,9 +145,7 @@ divert_output(struct inpcb *inp, struct mbuf *m, struct mbuf *nam,
 			error = EADDRNOTAVAIL;
 			goto fail;
 		}
-		m->m_pkthdr.rcvif = ifa->ifa_ifp;
-
-		inq = &ipintrq;
+		m->m_pkthdr.ph_ifidx = ifa->ifa_ifp->if_index;
 
 		/*
 		 * Recalculate IP and protocol checksums for the inbound packet
@@ -160,10 +156,7 @@ divert_output(struct inpcb *inp, struct mbuf *m, struct mbuf *nam,
 		ip->ip_sum = in_cksum(m, off);
 		in_proto_cksum_out(m, NULL);
 
-		s = splnet();
-		IF_INPUT_ENQUEUE(inq, m);
-		schednetisr(NETISR_IP);
-		splx(s);
+		niq_enqueue(&ipintrq, m);
 	} else {
 		error = ip_output(m, NULL, &inp->inp_route,
 		    IP_ALLOWBROADCAST | IP_RAWOUTPUT, NULL, NULL, 0);
@@ -216,7 +209,11 @@ divert_packet(struct mbuf *m, int dir, u_int16_t divert_port)
 		struct ifaddr *ifa;
 		struct ifnet *ifp;
 
-		ifp = m->m_pkthdr.rcvif;
+		ifp = if_get(m->m_pkthdr.ph_ifidx);
+		if (ifp == NULL) {
+			m_freem(m);
+			return (0);
+		}
 		TAILQ_FOREACH(ifa, &ifp->if_addrlist, ifa_list) {
 			if (ifa->ifa_addr->sa_family != AF_INET)
 				continue;
@@ -339,11 +336,8 @@ divert_usrreq(struct socket *so, int req, struct mbuf *m, struct mbuf *addr,
 	}
 
 release:
-	if (control) {
-		m_freem(control);
-	}
-	if (m)
-		m_freem(m);
+	m_freem(control);
+	m_freem(m);
 	return (error);
 }
 

@@ -1,4 +1,4 @@
-/*	$OpenBSD: acpi_machdep.c,v 1.68 2015/01/06 12:50:47 dlg Exp $	*/
+/*	$OpenBSD: acpi_machdep.c,v 1.70 2015/03/16 20:31:47 deraadt Exp $	*/
 /*
  * Copyright (c) 2005 Thorsten Lockert <tholo@sigmasoft.com>
  *
@@ -50,7 +50,6 @@
 #endif
 
 #if NLAPIC > 0
-#include <machine/apicvar.h>
 #include <machine/i82489reg.h>
 #include <machine/i82489var.h>
 #endif
@@ -208,8 +207,6 @@ acpi_release_glk(uint32_t *lock)
 	return ((old & GL_BIT_PENDING) != 0);
 }
 
-#ifndef SMALL_KERNEL
-
 void
 acpi_attach_machdep(struct acpi_softc *sc)
 {
@@ -219,6 +216,7 @@ acpi_attach_machdep(struct acpi_softc *sc)
 	    IST_LEVEL, IPL_TTY, acpi_interrupt, sc, sc->sc_dev.dv_xname);
 	cpuresetfn = acpi_reset;
 
+#ifndef SMALL_KERNEL
 	/*
 	 * Sanity check before setting up trampoline.
 	 * Ensure the trampoline size is < PAGE_SIZE
@@ -241,7 +239,10 @@ acpi_attach_machdep(struct acpi_softc *sc)
 	/* Unmap, will be remapped in acpi_sleep_cpu */
 	pmap_kremove(ACPI_TRAMPOLINE, PAGE_SIZE);
 	pmap_kremove(ACPI_TRAMP_DATA, PAGE_SIZE);
+#endif /* SMALL_KERNEL */
 }
+
+#ifndef SMALL_KERNEL
 
 void
 acpi_sleep_clocks(struct acpi_softc *sc, int state)

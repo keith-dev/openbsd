@@ -1,4 +1,4 @@
-/*	$OpenBSD: scsiconf.c,v 1.190 2015/02/11 00:50:03 dlg Exp $	*/
+/*	$OpenBSD: scsiconf.c,v 1.192 2015/06/07 19:13:27 krw Exp $	*/
 /*	$NetBSD: scsiconf.c,v 1.57 1996/05/02 01:09:01 neil Exp $	*/
 
 /*
@@ -61,7 +61,6 @@
 
 #include <scsi/scsi_all.h>
 #include <scsi/scsiconf.h>
-#include <scsi/mpathvar.h>
 
 #if NBIO > 0
 #include <sys/ioctl.h>
@@ -778,7 +777,7 @@ scsibus_printlink(struct scsi_link *link)
 		int i;
 
 		switch (link->id->d_type) {
-		case DEVID_NAA:   
+		case DEVID_NAA:
 			printf(" naa.");
 			break;
 		case DEVID_EUI:
@@ -954,7 +953,7 @@ scsi_probedev(struct scsibus_softc *scsi, int target, int lun)
 	case SID_QUAL_LU_OK:
 		if ((inqbuf->device & SID_TYPE) == T_NODEVICE) {
 			SC_DEBUG(sc_link, SDEV_DB1,
-		    	    ("Bad LUN. SID_TYPE = T_NODEVICE\n"));
+			    ("Bad LUN. SID_TYPE = T_NODEVICE\n"));
 			goto bad;
 		}
 		break;
@@ -1039,7 +1038,7 @@ scsi_probedev(struct scsibus_softc *scsi, int target, int lun)
 
 		sc_link->lun = 1;
 		scsi_inquire(sc_link, usbinqbuf, scsi_autoconf | SCSI_SILENT);
-	    	sc_link->lun = 0;
+		sc_link->lun = 0;
 
 		dma_free(usbinqbuf, sizeof(*usbinqbuf));
 	}

@@ -1,4 +1,4 @@
-/*	$OpenBSD: locore.s,v 1.150 2015/02/11 00:16:07 miod Exp $	*/
+/*	$OpenBSD: locore.s,v 1.159 2015/07/16 22:06:08 mlarkin Exp $	*/
 /*	$NetBSD: locore.s,v 1.145 1996/05/03 19:41:19 christos Exp $	*/
 
 /*-
@@ -51,6 +51,7 @@
 #include <compat/linux/linux_syscall.h>
 #endif
 
+#include <machine/codepatch.h>
 #include <machine/cputypes.h>
 #include <machine/param.h>
 #include <machine/pte.h>
@@ -64,6 +65,7 @@
 #include <machine/i82489reg.h>
 #endif
 
+#ifndef SMALL_KERNEL
 /*
  * As stac/clac SMAP instructions are 3 bytes, we want the fastest
  * 3 byte nop sequence possible here.  This will be replaced by
@@ -73,7 +75,21 @@
  * on all family 0x6 and 0xf processors (ie 686+)
  * So use 3 of the single byte nops for compatibility
  */
-#define SMAP_NOP       .byte 0x90, 0x90, 0x90
+#define SMAP_NOP	.byte 0x90, 0x90, 0x90
+#define SMAP_STAC	CODEPATCH_START			;\
+			SMAP_NOP			;\
+			CODEPATCH_END(CPTAG_STAC)
+#define SMAP_CLAC	CODEPATCH_START			;\
+			SMAP_NOP			;\
+			CODEPATCH_END(CPTAG_CLAC)
+
+#else
+
+#define SMAP_STAC
+#define SMAP_CLAC
+
+#endif
+
 
 /*
  * override user-land alignment before including asm.h
@@ -176,7 +192,9 @@
 	.globl	_C_LABEL(cpu_perf_edx)
 	.globl	_C_LABEL(cpu_apmi_edx)
 	.globl	_C_LABEL(cold), _C_LABEL(cnvmem), _C_LABEL(extmem)
+	.globl	_C_LABEL(cpu_pae)
 	.globl	_C_LABEL(esym)
+	.globl	_C_LABEL(nkptp_max)
 	.globl	_C_LABEL(boothowto), _C_LABEL(bootdev), _C_LABEL(atdevbase)
 	.globl	_C_LABEL(proc0paddr), _C_LABEL(PTDpaddr), _C_LABEL(PTDsize)
 	.globl	_C_LABEL(gdt)
@@ -204,6 +222,7 @@ _C_LABEL(lapic_tpr):
 
 _C_LABEL(cpu):		.long	0	# are we 386, 386sx, 486, 586 or 686
 _C_LABEL(cpu_id):	.long	0	# saved from 'cpuid' instruction
+_C_LABEL(cpu_pae):	.long	0	# are we using PAE paging mode?
 _C_LABEL(cpu_miscinfo):	.long	0	# misc info (apic/brand id) from 'cpuid'
 _C_LABEL(cpu_feature):	.long	0	# feature flags from 'cpuid' instruction
 _C_LABEL(ecpu_feature): .long	0	# extended feature flags from 'cpuid'
@@ -411,10 +430,6 @@ try586:	/* Use the `cpuid' instruction. */
 
 	movl	$2,%eax
 	cpuid
-/*
-	cmp	$1,%al
-	jne	1f
-*/
 
 	movl	%eax,RELOC(_C_LABEL(cpu_cache_eax))
 	movl	%ebx,RELOC(_C_LABEL(cpu_cache_ebx))
@@ -479,13 +494,13 @@ try586:	/* Use the `cpuid' instruction. */
 /*
  * Virtual address space of kernel:
  *
- * text | data | bss | [syms] | proc0 stack | page dir     | Sysmap
- *			      0             1       2      3
+ * text | data | bss | [syms] | proc0 kstack | page dir     | Sysmap
+ *			      0             1       2       6
  */
 #define	PROC0STACK	((0)		* NBPG)
 #define	PROC0PDIR	((  UPAGES)	* NBPG)
-#define	SYSMAP		((1+UPAGES)	* NBPG)
-#define	TABLESIZE	((1+UPAGES) * NBPG) /* + _C_LABEL(nkpde) * NBPG */
+#define	SYSMAP		((4+UPAGES)	* NBPG)
+#define	TABLESIZE	((4+UPAGES) * NBPG) /* + _C_LABEL(nkpde) * NBPG */
 
 	/* Find end of kernel image. */
 	movl	$RELOC(_C_LABEL(end)),%edi
@@ -513,9 +528,9 @@ try586:	/* Use the `cpuid' instruction. */
 	jge	1f
 	movl	$NKPTP_MIN,%ecx			# set at min
 	jmp	2f
-1:	cmpl	$NKPTP_MAX,%ecx			# larger than max?
+1:	cmpl	RELOC(_C_LABEL(nkptp_max)),%ecx	# larger than max?
 	jle	2f
-	movl	$NKPTP_MAX,%ecx
+	movl	RELOC(_C_LABEL(nkptp_max)),%ecx
 2:	movl	%ecx,RELOC(_C_LABEL(nkpde))	# and store it back
 
 	/* Clear memory for bootstrap tables. */
@@ -525,7 +540,6 @@ try586:	/* Use the `cpuid' instruction. */
 	subl	%edi,%ecx			# size of tables
 	shrl	$2,%ecx
 	xorl	%eax, %eax
-	cld
 	rep
 	stosl
 
@@ -579,9 +593,9 @@ try586:	/* Use the `cpuid' instruction. */
 /*
  * Construct a page table directory.
  */
-	movl	RELOC(_C_LABEL(nkpde)),%ecx		# count of pde s,
+	movl	RELOC(_C_LABEL(nkpde)),%ecx		# count of pdes,
 	leal	(PROC0PDIR+0*4)(%esi),%ebx		# where temp maps!
-	leal	(SYSMAP+PG_V|PG_KW)(%esi),%eax		# pte for KPT in proc 0
+	leal	(SYSMAP+PG_V|PG_KW|PG_U|PG_M)(%esi),%eax # pte for KPT in proc 0
 	fillkpt
 
 /*
@@ -590,12 +604,14 @@ try586:	/* Use the `cpuid' instruction. */
  */
 	movl	RELOC(_C_LABEL(nkpde)),%ecx		# count of pde s,
 	leal	(PROC0PDIR+PDSLOT_KERN*4)(%esi),%ebx	# map them high
-	leal	(SYSMAP+PG_V|PG_KW)(%esi),%eax		# pte for KPT in proc 0
+	leal	(SYSMAP+PG_V|PG_KW|PG_U|PG_M)(%esi),%eax # pte for KPT in proc 0
 	fillkpt
 
 	/* Install a PDE recursively mapping page directory as a page table! */
-	leal	(PROC0PDIR+PG_V|PG_KW)(%esi),%eax	# pte for ptd
+	leal	(PROC0PDIR+PG_V|PG_KW|PG_U|PG_M)(%esi),%eax # pte for ptd
 	movl	%eax,(PROC0PDIR+PDSLOT_PTE*4)(%esi)	# recursive PD slot
+	addl	$NBPG, %eax				# pte for ptd[1]
+	movl    %eax,(PROC0PDIR+(PDSLOT_PTE+1)*4)(%esi) # recursive PD slot
 
 	/* Save phys. addr of PTD, for libkvm. */
 	leal	(PROC0PDIR)(%esi),%eax		# phys address of ptd in proc 0
@@ -656,6 +672,18 @@ NENTRY(proc_trampoline)
 	addl	$4,%esp
 	INTRFASTEXIT
 	/* NOTREACHED */
+
+	/* This must come before any use of the CODEPATCH macros */
+       .section .codepatch,"a"
+       .align  8
+       .globl _C_LABEL(codepatch_begin)
+_C_LABEL(codepatch_begin):
+       .previous
+
+       .section .codepatchend,"a"
+       .globl _C_LABEL(codepatch_end)
+_C_LABEL(codepatch_end):
+       .previous
 
 /*****************************************************************************/
 
@@ -731,8 +759,7 @@ ENTRY(kcopy)
 	subl	%esi,%eax
 	cmpl	%ecx,%eax		# overlapping?
 	jb	1f
-	cld				# nope, copy forward
-	shrl	$2,%ecx			# copy by 32-bit words
+	shrl	$2,%ecx			# nope, copy forward by 32-bit words
 	rep
 	movsl
 	movl	24+FPADD(%esp),%ecx
@@ -788,7 +815,6 @@ ENTRY(kcopy)
  * copyout(caddr_t from, caddr_t to, size_t len);
  * Copy len bytes into the user's address space.
  */
-.globl _C_LABEL(_copyout_stac), _C_LABEL(_copyout_clac)
 ENTRY(copyout)
 #ifdef DDB
 	pushl	%ebp
@@ -817,11 +843,9 @@ ENTRY(copyout)
 
 	GET_CURPCB(%edx)
 	movl	$_C_LABEL(copy_fault),PCB_ONFAULT(%edx)
-_C_LABEL(_copyout_stac):
-	SMAP_NOP
+	SMAP_STAC
 
 	/* bcopy(%esi, %edi, %eax); */
-	cld
 	movl	%eax,%ecx
 	shrl	$2,%ecx
 	rep
@@ -831,8 +855,7 @@ _C_LABEL(_copyout_stac):
 	rep
 	movsb
 
-_C_LABEL(_copyout_clac):
-	SMAP_NOP
+	SMAP_CLAC
 	popl	PCB_ONFAULT(%edx)
 	popl	%edi
 	popl	%esi
@@ -846,7 +869,6 @@ _C_LABEL(_copyout_clac):
  * copyin(caddr_t from, caddr_t to, size_t len);
  * Copy len bytes from the user's address space.
  */
-.globl _C_LABEL(_copyin_stac), _C_LABEL(_copyin_clac)
 ENTRY(copyin)
 #ifdef DDB
 	pushl	%ebp
@@ -857,8 +879,7 @@ ENTRY(copyin)
 	GET_CURPCB(%eax)
 	pushl	$0
 	movl	$_C_LABEL(copy_fault),PCB_ONFAULT(%eax)
-_C_LABEL(_copyin_stac):
-	SMAP_NOP
+	SMAP_STAC
 	
 	movl	16+FPADD(%esp),%esi
 	movl	20+FPADD(%esp),%edi
@@ -876,7 +897,6 @@ _C_LABEL(_copyin_stac):
 	ja	_C_LABEL(copy_fault)
 
 	/* bcopy(%esi, %edi, %eax); */
-	cld
 	movl	%eax,%ecx
 	shrl	$2,%ecx
 	rep
@@ -886,8 +906,7 @@ _C_LABEL(_copyin_stac):
 	rep
 	movsb
 
-_C_LABEL(_copyin_clac):
-	SMAP_NOP
+	SMAP_CLAC
 	GET_CURPCB(%edx)
 	popl	PCB_ONFAULT(%edx)
 	popl	%edi
@@ -898,10 +917,8 @@ _C_LABEL(_copyin_clac):
 #endif
 	ret
 
-.globl _C_LABEL(_copy_fault_clac)
 ENTRY(copy_fault)
-_C_LABEL(_copy_fault_clac):
-	SMAP_NOP
+	SMAP_CLAC
 	GET_CURPCB(%edx)
 	popl	PCB_ONFAULT(%edx)
 	popl	%edi
@@ -919,7 +936,6 @@ _C_LABEL(_copy_fault_clac):
  * NUL) in *lencopied.  If the string is too long, return ENAMETOOLONG; else
  * return 0 or EFAULT.
  */
-.globl _C_LABEL(_copyoutstr_stac)
 ENTRY(copyoutstr)
 #ifdef DDB
 	pushl	%ebp
@@ -934,8 +950,7 @@ ENTRY(copyoutstr)
 
 5:	GET_CURPCB(%eax)
 	movl	$_C_LABEL(copystr_fault),PCB_ONFAULT(%eax)
-_C_LABEL(_copyoutstr_stac):
-	SMAP_NOP
+	SMAP_STAC
 	/*
 	 * Get min(%edx, VM_MAXUSER_ADDRESS-%edi).
 	 */
@@ -951,7 +966,6 @@ _C_LABEL(_copyoutstr_stac):
 	movl	%eax,20+FPADD(%esp)
 
 1:	incl	%edx
-	cld
 
 1:	decl	%edx
 	jz	2f
@@ -978,7 +992,6 @@ _C_LABEL(_copyoutstr_stac):
  * NUL) in *lencopied.  If the string is too long, return ENAMETOOLONG; else
  * return 0 or EFAULT.
  */
-.globl _C_LABEL(_copyinstr_stac)
 ENTRY(copyinstr)
 #ifdef DDB
 	pushl	%ebp
@@ -988,8 +1001,7 @@ ENTRY(copyinstr)
 	pushl	%edi
 	GET_CURPCB(%ecx)
 	movl	$_C_LABEL(copystr_fault),PCB_ONFAULT(%ecx)
-_C_LABEL(_copyinstr_stac):
-	SMAP_NOP
+	SMAP_STAC
 
 	movl	12+FPADD(%esp),%esi		# %esi = from
 	movl	16+FPADD(%esp),%edi		# %edi = to
@@ -1009,7 +1021,6 @@ _C_LABEL(_copyinstr_stac):
 	movl	%eax,20+FPADD(%esp)
 
 1:	incl	%edx
-	cld
 
 1:	decl	%edx
 	jz	2f
@@ -1029,13 +1040,11 @@ _C_LABEL(_copyinstr_stac):
 	movl	$ENAMETOOLONG,%eax
 	jmp	copystr_return
 
-.globl _C_LABEL(_copystr_fault_clac)
 ENTRY(copystr_fault)
 	movl	$EFAULT,%eax
 
 copystr_return:
-_C_LABEL(_copystr_fault_clac):
-	SMAP_NOP
+	SMAP_CLAC
 	/* Set *lencopied and return %eax. */
 	GET_CURPCB(%ecx)
 	movl	$0,PCB_ONFAULT(%ecx)
@@ -1071,7 +1080,6 @@ ENTRY(copystr)
 	movl	16+FPADD(%esp),%edi		# edi = to
 	movl	20+FPADD(%esp),%edx		# edx = maxlen
 	incl	%edx
-	cld
 
 1:	decl	%edx
 	jz	4f
@@ -1396,8 +1404,7 @@ IDTVEC(fpu)
 	 * error.  It would be better to handle npx interrupts as traps but
 	 * this is difficult for nested interrupts.
 	 */
-	pushl	$0			# dummy error code
-	pushl	$T_ASTFLT
+	subl	$8,%esp			/* space for tf_{err,trapno} */
 	INTRENTRY
 	pushl	CPL			# if_ppl in intrframe
 	pushl	%esp			# push address of intrframe
@@ -1459,9 +1466,8 @@ calltrap:
 	jz	1f
 5:	CLEAR_ASTPENDING(%ecx)
 	sti
-	movl	$T_ASTFLT,TF_TRAPNO(%esp)
 	pushl	%esp
-	call	_C_LABEL(trap)
+	call	_C_LABEL(ast)
 	addl	$4,%esp
 	jmp	2b
 #ifndef DIAGNOSTIC
@@ -1486,8 +1492,7 @@ calltrap:
  * Trap gate entry for syscall
  */
 IDTVEC(syscall)
-	pushl	$2		# size of instruction for restart
-	pushl	$T_ASTFLT	# trap # for doing ASTs
+	subl	$8,%esp			/* space for tf_{err,trapno} */
 	INTRENTRY
 	pushl	%esp
 	call	_C_LABEL(syscall)
@@ -1499,9 +1504,8 @@ IDTVEC(syscall)
 	/* Always returning to user mode here. */
 	CLEAR_ASTPENDING(%ecx)
 	sti
-	/* Pushed T_ASTFLT into tf_trapno on entry. */
 	pushl	%esp
-	call	_C_LABEL(trap)
+	call	_C_LABEL(ast)
 	addl	$4,%esp
 	jmp	2b
 1:	INTRFASTEXIT
@@ -1519,7 +1523,6 @@ ENTRY(bzero)
 	movl	8(%esp),%edi
 	movl	12(%esp),%edx
 
-	cld				/* set fill direction forward */
 	xorl	%eax,%eax		/* set fill data to 0 */
 
 	/*
@@ -1599,7 +1602,6 @@ ENTRY(i686_pagezero)
 
 	movl	12(%esp), %edi
 	movl	$1024, %ecx
-	cld
 
 	ALIGN_TEXT
 1:
@@ -1645,9 +1647,48 @@ ENTRY(i686_pagezero)
 #endif
 
 /*
+ * int cpu_paenable(void *);
+ */
+ENTRY(cpu_paenable)
+	movl	$-1, %eax
+	testl	$CPUID_PAE, _C_LABEL(cpu_feature)
+	jz	1f
+
+	pushl	%esi
+	pushl	%edi
+	movl	12(%esp), %esi
+	movl	%cr3, %edi
+	orl	$0xfe0, %edi    /* PDPT will be in the last four slots! */
+	movl	%edi, %cr3
+	addl	$KERNBASE, %edi /* and make it back virtual again */
+	movl	$8, %ecx
+	rep
+	movsl
+
+	movl	%cr4, %eax
+	orl	$CR4_PAE, %eax
+	movl	%eax, %cr4      /* BANG!!! */
+
+	movl	$MSR_EFER, %ecx
+	rdmsr
+	orl	$EFER_NXE, %eax
+	wrmsr
+
+	movl	12(%esp), %eax
+	subl	$KERNBASE, %eax
+	movl	%eax, %cr3      /* reload real PDPT */
+	movl	$4*NBPG, %eax
+	movl	%eax, _C_LABEL(PTDsize)
+
+	xorl	%eax, %eax
+	popl	%edi
+	popl	%esi
+1:
+	ret
+
+/*
  * ucas_32(volatile int32_t *uptr, int32_t old, int32_t new);
  */
-.global _C_LABEL(_ucas_32_stac), _C_LABEL(_ucas_32_clac)
 ENTRY(ucas_32)
 #ifdef DDB
 	pushl	%ebp
@@ -1666,14 +1707,12 @@ ENTRY(ucas_32)
 
 	GET_CURPCB(%edx)
 	movl	$_C_LABEL(copy_fault),PCB_ONFAULT(%edx)
-_C_LABEL(_ucas_32_stac):
-	SMAP_NOP
+	SMAP_STAC
 
 	lock
 	cmpxchgl %edi, (%esi)
 
-_C_LABEL(_ucas_32_clac):
-	SMAP_NOP
+	SMAP_CLAC
 	popl	PCB_ONFAULT(%edx)
 	popl	%edi
 	popl	%esi

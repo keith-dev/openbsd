@@ -1,4 +1,4 @@
-/*	$OpenBSD: macintr.c,v 1.50 2015/01/04 13:01:42 mpi Exp $	*/
+/*	$OpenBSD: macintr.c,v 1.52 2015/06/24 11:58:06 mpi Exp $	*/
 
 /*-
  * Copyright (c) 2008 Dale Rahn <drahn@openbsd.org>
@@ -127,8 +127,6 @@ int macintr_prog_button (void *arg);
 
 intr_establish_t macintr_establish;
 intr_disestablish_t macintr_disestablish;
-extern intr_establish_t *mac_intr_establish_func;
-extern intr_disestablish_t *mac_intr_disestablish_func;
 
 ppc_splraise_t macintr_splraise;
 ppc_spllower_t macintr_spllower;
@@ -201,8 +199,6 @@ macintr_attach(struct device *parent, struct device *self, void *aux)
 	install_extint(mac_ext_intr);
 	intr_establish_func  = macintr_establish;
 	intr_disestablish_func  = macintr_disestablish;
-	mac_intr_establish_func  = macintr_establish;
-	mac_intr_disestablish_func  = macintr_disestablish;
 
 	ppc_intr_func.raise = macintr_splraise;
 	ppc_intr_func.lower = macintr_spllower;
@@ -284,11 +280,7 @@ macintr_establish(void * lcv, int irq, int type, int level,
 	struct cpu_info *ci = curcpu();
 	struct intrq *iq;
 	struct intrhand *ih;
-	int s;
-
-#if 0
-printf("macintr_establish, hI %d L %d %s", irq, level, ppc_intr_typename(type));
-#endif
+	int s, flags;
 
 	if (!LEGAL_IRQ(irq) || type == IST_NONE) {
 		printf("%s: bogus irq %d or type %d", __func__, irq, type);
@@ -319,9 +311,15 @@ printf("macintr_establish, hI %d L %d %s", irq, level, ppc_intr_typename(type));
 		break;
 	}
 
+	flags = level & IPL_MPSAFE;
+	level &= ~IPL_MPSAFE;
+
+	KASSERT(level <= IPL_TTY || level >= IPL_CLOCK || flags & IPL_MPSAFE);
+
 	ih->ih_fun = ih_fun;
 	ih->ih_arg = ih_arg;
 	ih->ih_level = level;
+	ih->ih_flags = flags;
 	ih->ih_irq = irq;
 	evcount_attach(&ih->ih_count, name, &ih->ih_irq);
 

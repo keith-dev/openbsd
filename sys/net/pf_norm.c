@@ -1,4 +1,4 @@
-/*	$OpenBSD: pf_norm.c,v 1.174 2015/02/08 01:29:19 henning Exp $ */
+/*	$OpenBSD: pf_norm.c,v 1.180 2015/07/19 01:58:19 sashan Exp $ */
 
 /*
  * Copyright 2001 Niels Provos <provos@citi.umich.edu>
@@ -52,7 +52,6 @@
 #include <net/if.h>
 #include <net/if_var.h>
 #include <net/if_types.h>
-#include <net/bpf.h>
 #include <net/if_pflog.h>
 
 #ifdef INET6
@@ -468,8 +467,11 @@ pf_join_fragment(struct pf_fragment *frag)
 	frent = TAILQ_FIRST(&frag->fr_queue);
 	TAILQ_REMOVE(&frag->fr_queue, frent, fr_next);
 
-	/* Magic from ip_input */
 	m = frent->fe_m;
+	/* Strip off any trailing bytes */
+	if ((frent->fe_hdrlen + frent->fe_len) < m->m_pkthdr.len)
+		m_adj(m, (frent->fe_hdrlen + frent->fe_len) - m->m_pkthdr.len);
+	/* Magic from ip_input */
 	m2 = m->m_next;
 	m->m_next = NULL;
 	m_cat(m, m2);
@@ -481,6 +483,9 @@ pf_join_fragment(struct pf_fragment *frag)
 		m2 = frent->fe_m;
 		/* Strip off ip header */
 		m_adj(m2, frent->fe_hdrlen);
+		/* Strip off any trailing bytes */
+		if (frent->fe_len < m2->m_pkthdr.len)
+			m_adj(m2, frent->fe_len - m2->m_pkthdr.len);
 		pool_put(&pf_frent_pl, frent);
 		pf_nfrents--;
 		m_cat(m, m2);
@@ -675,7 +680,7 @@ fail:
 }
 
 int
-pf_refragment6(struct mbuf **m0, struct m_tag *mtag, int dir)
+pf_refragment6(struct mbuf **m0, struct m_tag *mtag)
 {
 	struct mbuf		*m = *m0, *t;
 	struct pf_fragment_tag	*ftag = (struct pf_fragment_tag *)(mtag + 1);
@@ -878,8 +883,7 @@ tcp_drop:
 }
 
 int
-pf_normalize_tcp_init(struct pf_pdesc *pd, struct pf_state_peer *src,
-    struct pf_state_peer *dst)
+pf_normalize_tcp_init(struct pf_pdesc *pd, struct pf_state_peer *src)
 {
 	struct tcphdr	*th = pd->hdr.tcp;
 	u_int32_t	 tsval, tsecr;
@@ -906,6 +910,8 @@ pf_normalize_tcp_init(struct pf_pdesc *pd, struct pf_state_peer *src,
 		break;
 	}
 #endif /* INET6 */
+	default:
+		unhandled_af(pd->af);
 	}
 
 	/*
@@ -1010,6 +1016,8 @@ pf_normalize_tcp_stateful(struct pf_pdesc *pd, u_short *reason,
 		}
 		break;
 #endif /* INET6 */
+	default:
+		unhandled_af(pd->af);
 	}
 
 	if (th->th_off > (sizeof(struct tcphdr) >> 2) &&
@@ -1412,7 +1420,7 @@ pf_scrub(struct mbuf *m, u_int16_t flags, sa_family_t af, u_int8_t min_ttl,
 	struct ip		*h = mtod(m, struct ip *);
 #ifdef INET6
 	struct ip6_hdr		*h6 = mtod(m, struct ip6_hdr *);
-#endif
+#endif	/* INET6 */
 
 	/* Clear IP_DF if no-df was requested */
 	if (flags & PFSTATE_NODF && af == AF_INET && h->ip_off & htons(IP_DF))
@@ -1424,7 +1432,7 @@ pf_scrub(struct mbuf *m, u_int16_t flags, sa_family_t af, u_int8_t min_ttl,
 #ifdef INET6
 	if (min_ttl && af == AF_INET6 && h6->ip6_hlim < min_ttl)
 		h6->ip6_hlim = min_ttl;
-#endif
+#endif	/* INET6 */
 
 	/* Enforce tos */
 	if (flags & PFSTATE_SETTOS) {
@@ -1436,7 +1444,7 @@ pf_scrub(struct mbuf *m, u_int16_t flags, sa_family_t af, u_int8_t min_ttl,
 			h6->ip6_flow &= ~htonl(0x0fc00000);
 			h6->ip6_flow |= htonl(((u_int32_t)tos) << 20);
 		}
-#endif
+#endif	/* INET6 */
 	}
 
 	/* random-id, but not for fragments */

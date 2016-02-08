@@ -1,4 +1,4 @@
-/*	$OpenBSD: nd6_rtr.c,v 1.98 2015/02/19 22:24:20 bluhm Exp $	*/
+/*	$OpenBSD: nd6_rtr.c,v 1.113 2015/07/18 15:51:17 mpi Exp $	*/
 /*	$KAME: nd6_rtr.c,v 1.97 2001/02/07 11:09:13 itojun Exp $	*/
 
 /*
@@ -45,11 +45,11 @@
 #include <sys/queue.h>
 
 #include <net/if.h>
+#include <net/if_dl.h>
 #include <net/if_var.h>
 #include <net/if_types.h>
-#include <net/if_dl.h>
 #include <net/route.h>
-#include <net/radix.h>
+#include <net/rtable.h>
 
 #include <netinet/in.h>
 #include <netinet6/in6_var.h>
@@ -72,11 +72,30 @@ void purge_detached(struct ifnet *);
 
 void in6_init_address_ltimes(struct nd_prefix *, struct in6_addrlifetime *);
 
-int rt6_deleteroute(struct radix_node *, void *, u_int);
+int rt6_deleteroute(struct rtentry *, void *, unsigned int);
 
 void nd6_addr_add(void *);
 
+void nd6_rs_output_timo(void *);
+void nd6_rs_output_set_timo(int);
+void nd6_rs_output(struct ifnet *, struct in6_ifaddr *);
+void nd6_rs_dev_state(void *);
+
 extern int nd6_recalc_reachtm_interval;
+
+#define ND6_RS_OUTPUT_INTERVAL		60
+#define ND6_RS_OUTPUT_QUICK_INTERVAL	1
+
+struct timeout	nd6_rs_output_timer;
+int		nd6_rs_output_timeout = ND6_RS_OUTPUT_INTERVAL;
+int		nd6_rs_timeout_count = 0;
+
+void
+nd6_rs_init(void)
+{
+	timeout_set(&nd6_rs_output_timer, nd6_rs_output_timo, NULL);
+}
+
 
 /*
  * Receive Router Solicitation Message - just for routers.
@@ -88,7 +107,7 @@ extern int nd6_recalc_reachtm_interval;
 void
 nd6_rs_input(struct mbuf *m, int off, int icmp6len)
 {
-	struct ifnet *ifp = m->m_pkthdr.rcvif;
+	struct ifnet *ifp;
 	struct ip6_hdr *ip6 = mtod(m, struct ip6_hdr *);
 	struct nd_router_solicit *nd_rs;
 	struct in6_addr saddr6 = ip6->ip6_src;
@@ -106,8 +125,12 @@ nd6_rs_input(struct mbuf *m, int off, int icmp6len)
 	union nd_opts ndopts;
 	char src[INET6_ADDRSTRLEN], dst[INET6_ADDRSTRLEN];
 
+	ifp = if_get(m->m_pkthdr.ph_ifidx);
+	if (ifp == NULL)
+		goto freeit;
+
 	/* If I'm not a router, ignore it. XXX - too restrictive? */
-	if (!ip6_forwarding || (ifp->if_xflags & IFXF_AUTOCONF6))
+	if (!ip6_forwarding)
 		goto freeit;
 
 	/* Sanity checks */
@@ -197,7 +220,7 @@ nd6_rs_output(struct ifnet* ifp, struct in6_ifaddr *ia6)
 	if (m == NULL)
 		return;
 
-	m->m_pkthdr.rcvif = NULL;
+	m->m_pkthdr.ph_ifidx = 0;
 	m->m_pkthdr.ph_rtableid = ifp->if_rdomain;
 	m->m_flags |= M_MCAST;
 	m->m_pkthdr.csum_flags |= M_ICMP_CSUM_OUT;
@@ -218,7 +241,7 @@ nd6_rs_output(struct ifnet* ifp, struct in6_ifaddr *ia6)
 	/* ip6->ip6_plen will be set later */
 	ip6->ip6_nxt = IPPROTO_ICMPV6;
 	ip6->ip6_hlim = 255;
-	
+
 	ip6->ip6_dst = in6addr_linklocal_allrouters;
 
 	ip6->ip6_src = ia6->ia_addr.sin6_addr;
@@ -256,6 +279,63 @@ nd6_rs_output(struct ifnet* ifp, struct in6_ifaddr *ia6)
 }
 
 void
+nd6_rs_output_set_timo(int timeout)
+{
+	nd6_rs_output_timeout = timeout;
+	timeout_add_sec(&nd6_rs_output_timer, nd6_rs_output_timeout);
+}
+
+void
+nd6_rs_output_timo(void *ignored_arg)
+{
+	struct ifnet *ifp;
+	struct in6_ifaddr *ia6;
+
+	if (nd6_rs_timeout_count == 0)
+		return;
+
+	if (nd6_rs_output_timeout < ND6_RS_OUTPUT_INTERVAL)
+		/* exponential backoff if running quick timeouts */
+		nd6_rs_output_timeout *= 2;
+	if (nd6_rs_output_timeout > ND6_RS_OUTPUT_INTERVAL)
+		nd6_rs_output_timeout = ND6_RS_OUTPUT_INTERVAL;
+
+	TAILQ_FOREACH(ifp, &ifnet, if_list) {
+		if (ISSET(ifp->if_flags, IFF_RUNNING) &&
+		    ISSET(ifp->if_xflags, IFXF_AUTOCONF6)) {
+			ia6 = in6ifa_ifpforlinklocal(ifp, IN6_IFF_TENTATIVE);
+			if (ia6 != NULL)
+				nd6_rs_output(ifp, ia6);
+		}
+	}
+	timeout_add_sec(&nd6_rs_output_timer, nd6_rs_output_timeout);
+}
+
+void
+nd6_rs_attach(struct ifnet *ifp)
+{
+	if (!ISSET(ifp->if_xflags, IFXF_AUTOCONF6)) {
+		nd6_rs_timeout_count++;
+		RS_LHCOOKIE(ifp) = hook_establish(ifp->if_linkstatehooks, 1,
+		    nd6_rs_dev_state, ifp);
+	}
+
+	nd6_rs_output_set_timo(ND6_RS_OUTPUT_QUICK_INTERVAL);
+}
+
+void
+nd6_rs_detach(struct ifnet *ifp)
+{
+	if (ISSET(ifp->if_xflags, IFXF_AUTOCONF6)) {
+		nd6_rs_timeout_count--;
+		hook_disestablish(ifp->if_linkstatehooks, RS_LHCOOKIE(ifp));
+	}
+
+	if (nd6_rs_timeout_count == 0)
+		timeout_del(&nd6_rs_output_timer);
+}
+
+void
 nd6_rs_dev_state(void *arg)
 {
 	struct ifnet *ifp;
@@ -272,30 +352,28 @@ nd6_rs_dev_state(void *arg)
  * Receive Router Advertisement Message.
  *
  * Based on RFC 2461
- * TODO: on-link bit on prefix information
- * TODO: ND_RA_FLAG_{OTHER,MANAGED} processing
  */
 void
 nd6_ra_input(struct mbuf *m, int off, int icmp6len)
 {
-	struct ifnet *ifp = m->m_pkthdr.rcvif;
-	struct nd_ifinfo *ndi = ND_IFINFO(ifp);
+	struct ifnet *ifp;
+	struct nd_ifinfo *ndi;
 	struct ip6_hdr *ip6 = mtod(m, struct ip6_hdr *);
 	struct nd_router_advert *nd_ra;
 	struct in6_addr saddr6 = ip6->ip6_src;
-#if 0
-	struct in6_addr daddr6 = ip6->ip6_dst;
-	int flags; /* = nd_ra->nd_ra_flags_reserved; */
-	int is_managed = ((flags & ND_RA_FLAG_MANAGED) != 0);
-	int is_other = ((flags & ND_RA_FLAG_OTHER) != 0);
-#endif
 	union nd_opts ndopts;
 	struct nd_defrouter *dr;
 	char src[INET6_ADDRSTRLEN], dst[INET6_ADDRSTRLEN];
 
+	ifp = if_get(m->m_pkthdr.ph_ifidx);
+	if (ifp == NULL)
+		goto freeit;
+
 	/* We accept RAs only if inet6 autoconf is enabled  */
 	if (!(ifp->if_xflags & IFXF_AUTOCONF6))
 		goto freeit;
+
+	ndi = ND_IFINFO(ifp);
 	if (!(ndi->flags & ND6_IFF_ACCEPT_RTADV))
 		goto freeit;
 
@@ -347,7 +425,7 @@ nd6_ra_input(struct mbuf *m, int off, int icmp6len)
 	dr0.ifp = ifp;
 	/* unspecified or not? (RFC 2461 6.3.4) */
 	if (advreachable) {
-		NTOHL(advreachable);
+		advreachable = ntohl(advreachable);
 		if (advreachable <= MAX_REACHABLE_TIME &&
 		    ndi->basereachable != advreachable) {
 			ndi->basereachable = advreachable;
@@ -420,7 +498,7 @@ nd6_ra_input(struct mbuf *m, int off, int icmp6len)
 			pr.ndpr_prefix.sin6_family = AF_INET6;
 			pr.ndpr_prefix.sin6_len = sizeof(pr.ndpr_prefix);
 			pr.ndpr_prefix.sin6_addr = pi->nd_opt_pi_prefix;
-			pr.ndpr_ifp = (struct ifnet *)m->m_pkthdr.rcvif;
+			pr.ndpr_ifp = ifp;
 
 			pr.ndpr_raf_onlink = (pi->nd_opt_pi_flags_reserved &
 			     ND_OPT_PI_FLAG_ONLINK) ? 1 : 0;
@@ -580,7 +658,7 @@ defrtrlist_del(struct nd_defrouter *dr)
 	 * as a next hop.
 	 */
 	/* XXX: better condition? */
-	if (!ip6_forwarding && (dr->ifp->if_xflags & IFXF_AUTOCONF6))
+	if (!ip6_forwarding)
 		rt6_flush(&dr->rtaddr, dr->ifp);
 
 	if (dr->installed) {
@@ -711,21 +789,6 @@ defrouter_select(void)
 	struct rtentry *rt = NULL;
 	struct llinfo_nd6 *ln = NULL;
 	int s = splsoftnet();
-
-	/*
-	 * This function should be called only when acting as an autoconfigured
-	 * host.  Although the remaining part of this function is not effective
-	 * if the node is not an autoconfigured host, we explicitly exclude
-	 * such cases here for safety.
-	 */
-	/* XXX too strict? */
-	if (ip6_forwarding) {
-		nd6log((LOG_WARNING,
-		    "defrouter_select: called unexpectedly (forwarding=%d)\n",
-		    ip6_forwarding));
-		splx(s);
-		return;
-	}
 
 	/*
 	 * Let's handle easy case (3) first:
@@ -880,7 +943,7 @@ defrtrlist_update(struct nd_defrouter *new)
 	/* entry does not exist */
 	if (new->rtlifetime == 0) {
 		/* flush all possible redirects */
-		if (!ip6_forwarding && (new->ifp->if_xflags & IFXF_AUTOCONF6))
+		if (new->ifp->if_xflags & IFXF_AUTOCONF6)
 			rt6_flush(&new->rtaddr, new->ifp);
 		splx(s);
 		return (NULL);
@@ -1012,8 +1075,54 @@ purge_detached(struct ifnet *ifp)
 	}
 }
 
+struct nd_prefix *
+nd6_prefix_add(struct ifnet *ifp, struct sockaddr_in6 *addr,
+    struct sockaddr_in6 *mask, struct in6_addrlifetime *lt, int autoconf)
+{
+	struct nd_prefix pr0, *pr;
+	int i;
+
+	/*
+	 * convert mask to prefix length (prefixmask has already
+	 * been validated in in6_update_ifa().
+	 */
+	memset(&pr0, 0, sizeof(pr0));
+	pr0.ndpr_ifp = ifp;
+	pr0.ndpr_plen = in6_mask2len(&mask->sin6_addr, NULL);
+	pr0.ndpr_prefix = *addr;
+	pr0.ndpr_mask = mask->sin6_addr;
+	/* apply the mask for safety. */
+	for (i = 0; i < 4; i++) {
+		pr0.ndpr_prefix.sin6_addr.s6_addr32[i] &=
+		    mask->sin6_addr.s6_addr32[i];
+	}
+	/*
+	 * XXX: since we don't have an API to set prefix (not address)
+	 * lifetimes, we just use the same lifetimes as addresses.
+	 * The (temporarily) installed lifetimes can be overridden by
+	 * later advertised RAs (when accept_rtadv is non 0), which is
+	 * an intended behavior.
+	 */
+	pr0.ndpr_raf_onlink = 1; /* should be configurable? */
+	pr0.ndpr_raf_auto = autoconf;
+	pr0.ndpr_vltime = lt->ia6t_vltime;
+	pr0.ndpr_pltime = lt->ia6t_pltime;
+
+	/* add the prefix if not yet. */
+	if ((pr = nd6_prefix_lookup(&pr0)) == NULL) {
+		/*
+		 * nd6_prelist_add will install the corresponding
+		 * interface route.
+		 */
+		if (nd6_prelist_add(&pr0, NULL, &pr) != 0)
+			return (NULL);
+	}
+
+	return (pr);
+}
+
 int
-nd6_prelist_add(struct nd_prefix *pr, struct nd_defrouter *dr, 
+nd6_prelist_add(struct nd_prefix *pr, struct nd_defrouter *dr,
     struct nd_prefix **newp)
 {
 	struct nd_prefix *new = NULL;
@@ -1376,12 +1485,13 @@ prelist_update(struct nd_prefix *new, struct nd_defrouter *dr, struct mbuf *m)
 	}
 
 	if ((!autoconf || ((ifp->if_xflags & IFXF_INET6_NOPRIVACY) == 0 &&
-	    !tempaddr_preferred)) && new->ndpr_vltime != 0 &&
+	     !tempaddr_preferred)) &&
+	    new->ndpr_vltime != 0 && new->ndpr_pltime != 0 &&
 	    !((ifp->if_xflags & IFXF_INET6_NOPRIVACY) && statique)) {
 		/*
 		 * There is no SLAAC address and/or there is no preferred RFC
-		 * 4941 temporary address. And the valid prefix lifetime is
-		 * non-zero. And there is no static address in the same prefix.
+		 * 4941 temporary address. And prefix lifetimes are non-zero.
+		 * And there is no static address in the same prefix.
 		 * Create new addresses in process context.
 		 * Increment prefix refcount to ensure the prefix is not
 		 * removed before the task is done.
@@ -1409,7 +1519,7 @@ nd6_addr_add(void *prptr)
 	autoconf = 1;
 	privacy = (pr->ndpr_ifp->if_xflags & IFXF_INET6_NOPRIVACY) == 0;
 
-	/* 
+	/*
 	 * Check again if a non-deprecated address has already
 	 * been autoconfigured for this prefix.
 	 */
@@ -1467,7 +1577,8 @@ nd6_addr_add(void *prptr)
 		pfxlist_onlink_check();
 
 	/* Decrement prefix refcount now that the task is done. */
-	pr->ndpr_refcnt--;
+	if (--pr->ndpr_refcnt == 0)
+		prelist_remove(pr);
 
 	splx(s);
 }
@@ -1574,7 +1685,7 @@ pfxlist_onlink_check(void)
 	 * interfaces.  Such cases will be handled in nd6_prefix_onlink,
 	 * so we don't have to care about them.
 	 */
-	LIST_FOREACH(pr, &nd_prefix, ndpr_entry) {	
+	LIST_FOREACH(pr, &nd_prefix, ndpr_entry) {
 		int e;
 
 		if (IN6_IS_ADDR_LINKLOCAL(&pr->ndpr_prefix.sin6_addr))
@@ -1737,12 +1848,11 @@ nd6_prefix_onlink(struct nd_prefix *pr)
 	bzero(&mask6, sizeof(mask6));
 	mask6.sin6_len = sizeof(mask6);
 	mask6.sin6_addr = pr->ndpr_mask;
-	/* rtrequest1() will probably set RTF_UP, but we're not sure. */
-	rtflags = RTF_UP;
+
 	if (nd6_need_cache(ifp))
-		rtflags |= RTF_CLONING;
+		rtflags = (RTF_UP | RTF_CLONING | RTF_CONNECTED);
 	else
-		rtflags &= ~RTF_CLONING;
+		rtflags = RTF_UP;
 
 	bzero(&info, sizeof(info));
 	info.rti_flags = rtflags;
@@ -2074,26 +2184,24 @@ in6_init_address_ltimes(struct nd_prefix *new, struct in6_addrlifetime *lt6)
 void
 rt6_flush(struct in6_addr *gateway, struct ifnet *ifp)
 {
-	struct radix_node_head *rnh = rtable_get(ifp->if_rdomain, AF_INET6);
-	int s = splsoftnet();
+	int s;
 
 	/* We'll care only link-local addresses */
-	if (!IN6_IS_ADDR_LINKLOCAL(gateway)) {
-		splx(s);
+	if (!IN6_IS_ADDR_LINKLOCAL(gateway))
 		return;
-	}
+
 	/* XXX: hack for KAME's link-local address kludge */
 	gateway->s6_addr16[1] = htons(ifp->if_index);
 
-	rnh->rnh_walktree(rnh, rt6_deleteroute, (void *)gateway);
+	s = splsoftnet();
+	rtable_walk(ifp->if_rdomain, AF_INET6, rt6_deleteroute, gateway);
 	splx(s);
 }
 
 int
-rt6_deleteroute(struct radix_node *rn, void *arg, u_int id)
+rt6_deleteroute(struct rtentry *rt, void *arg, unsigned int id)
 {
 	struct rt_addrinfo info;
-	struct rtentry *rt = (struct rtentry *)rn;
 	struct in6_addr *gate = (struct in6_addr *)arg;
 
 	if (rt->rt_gateway == NULL || rt->rt_gateway->sa_family != AF_INET6)

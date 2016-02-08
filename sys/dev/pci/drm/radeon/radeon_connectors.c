@@ -1,4 +1,4 @@
-/*	$OpenBSD: radeon_connectors.c,v 1.4 2014/08/08 16:41:16 jsg Exp $	*/
+/*	$OpenBSD: radeon_connectors.c,v 1.6 2015/04/18 14:47:35 jsg Exp $	*/
 /*
  * Copyright 2007-8 Advanced Micro Devices, Inc.
  * Copyright 2008 Red Hat Inc.
@@ -40,11 +40,6 @@ extern void
 radeon_atombios_connected_scratch_regs(struct drm_connector *connector,
 				       struct drm_encoder *encoder,
 				       bool connected);
-void	 radeon_add_atom_connector(struct drm_device *, uint32_t, uint32_t, int,
-	     struct radeon_i2c_bus_rec *, uint32_t, uint16_t, struct radeon_hpd *,
-	     struct radeon_router *);
-void	 radeon_add_legacy_connector(struct drm_device *, uint32_t, uint32_t, int,
-	     struct radeon_i2c_bus_rec *, uint16_t, struct radeon_hpd *);
 
 void radeon_connector_hotplug(struct drm_connector *connector)
 {
@@ -652,9 +647,7 @@ static void radeon_connector_destroy(struct drm_connector *connector)
 	if (radeon_connector->edid)
 		kfree(radeon_connector->edid);
 	kfree(radeon_connector->con_priv);
-#ifdef __linux__
 	drm_sysfs_connector_remove(connector);
-#endif
 	drm_connector_cleanup(connector);
 	kfree(connector);
 }
@@ -1222,9 +1215,7 @@ static void radeon_dp_connector_destroy(struct drm_connector *connector)
 	if (radeon_dig_connector->dp_i2c_bus)
 		radeon_i2c_destroy(radeon_dig_connector->dp_i2c_bus);
 	kfree(radeon_connector->con_priv);
-#ifdef __linux__
 	drm_sysfs_connector_remove(connector);
-#endif
 	drm_connector_cleanup(connector);
 	kfree(connector);
 }
@@ -1900,9 +1891,7 @@ radeon_add_atom_connector(struct drm_device *dev,
 		connector->polled = DRM_CONNECTOR_POLL_HPD;
 
 	connector->display_info.subpixel_order = subpixel_order;
-#ifdef __linux__
 	drm_sysfs_connector_add(connector);
-#endif
 	return;
 
 failed:
@@ -2059,7 +2048,5 @@ radeon_add_legacy_connector(struct drm_device *dev,
 	} else
 		connector->polled = DRM_CONNECTOR_POLL_HPD;
 	connector->display_info.subpixel_order = subpixel_order;
-#ifdef __linux__
 	drm_sysfs_connector_add(connector);
-#endif
 }

@@ -1,4 +1,4 @@
-#	$OpenBSD: GENERIC,v 1.215 2015/03/04 14:36:19 jsg Exp $
+#	$OpenBSD: GENERIC,v 1.219 2015/07/31 00:16:53 benno Exp $
 #
 #	Machine-independent option; used by all architectures for their
 #	GENERIC kernel
@@ -50,8 +50,7 @@ option		TCP_ECN		# Explicit Congestion Notification for TCP
 option		TCP_SIGNATURE	# TCP MD5 Signatures, for BGP routing sessions
 #option		TCP_FACK	# Forward Acknowledgements for TCP
 
-option		INET		# IP + ICMP + TCP + UDP
-option		INET6		# IPv6 (needs INET)
+option		INET6		# IPv6
 option		IPSEC		# IPsec
 #option		KEY		# PF_KEY (implied by IPSEC)
 option		PPP_BSDCOMP	# PPP BSD compression
@@ -96,6 +95,7 @@ pseudo-device	gif		# IPv[46] over IPv[46] tunnel (RFC1933)
 pseudo-device	gre		# GRE encapsulation interface
 pseudo-device	loop		# network loopback
 pseudo-device	mpe		# MPLS PE interface
+pseudo-device	mpw		# MPLS pseudowire support
 pseudo-device	ppp		# PPP
 pseudo-device	pppoe		# PPP over Ethernet (RFC 2516)
 pseudo-device	pppx		# PPP multiplexer

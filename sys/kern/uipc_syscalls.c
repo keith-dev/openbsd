@@ -1,4 +1,4 @@
-/*	$OpenBSD: uipc_syscalls.c,v 1.99 2015/01/19 19:57:59 guenther Exp $	*/
+/*	$OpenBSD: uipc_syscalls.c,v 1.106 2015/07/28 05:50:41 guenther Exp $	*/
 /*	$NetBSD: uipc_syscalls.c,v 1.19 1996/02/09 19:00:48 christos Exp $	*/
 
 /*
@@ -38,7 +38,6 @@
 #include <sys/proc.h>
 #include <sys/file.h>
 #include <sys/ioctl.h>
-#include <sys/buf.h>
 #include <sys/malloc.h>
 #include <sys/event.h>
 #include <sys/mbuf.h>
@@ -46,6 +45,7 @@
 #include <sys/socket.h>
 #include <sys/socketvar.h>
 #include <sys/signalvar.h>
+#include <sys/tame.h>
 #include <sys/unpcb.h>
 #include <sys/un.h>
 #ifdef KTRACE
@@ -78,6 +78,9 @@ sys_socket(struct proc *p, void *v, register_t *retval)
 	struct file *fp;
 	int type = SCARG(uap, type);
 	int fd, error;
+
+	if (tame_socket_check(p, SCARG(uap, domain)))
+		return (tame_fail(p, EPERM, _TM_UNIX));
 
 	fdplock(fdp);
 	error = falloc(p, &fp, &fd);
@@ -121,7 +124,10 @@ sys_bind(struct proc *p, void *v, register_t *retval)
 	struct mbuf *nam;
 	int error;
 
-	if ((error = getsock(p->p_fd, SCARG(uap, s), &fp)) != 0)
+	if (tame_bind_check(p, SCARG(uap, name)))
+		return (tame_fail(p, EPERM, _TM_UNIX));
+
+	if ((error = getsock(p, SCARG(uap, s), &fp)) != 0)
 		return (error);
 	error = sockargs(&nam, SCARG(uap, name), SCARG(uap, namelen),
 	    MT_SONAME);
@@ -148,7 +154,7 @@ sys_listen(struct proc *p, void *v, register_t *retval)
 	struct file *fp;
 	int error;
 
-	if ((error = getsock(p->p_fd, SCARG(uap, s), &fp)) != 0)
+	if ((error = getsock(p, SCARG(uap, s), &fp)) != 0)
 		return (error);
 	error = solisten(fp->f_data, SCARG(uap, backlog));
 	FRELE(fp, p);
@@ -199,7 +205,7 @@ doaccept(struct proc *p, int sock, struct sockaddr *name, socklen_t *anamelen,
 
 	if (name && (error = copyin(anamelen, &namelen, sizeof (namelen))))
 		return (error);
-	if ((error = getsock(fdp, sock, &fp)) != 0)
+	if ((error = getsock(p, sock, &fp)) != 0)
 		return (error);
 	headfp = fp;
 	s = splsoftnet();
@@ -316,7 +322,10 @@ sys_connect(struct proc *p, void *v, register_t *retval)
 	struct mbuf *nam = NULL;
 	int error, s;
 
-	if ((error = getsock(p->p_fd, SCARG(uap, s), &fp)) != 0)
+	if (tame_connect_check(p))
+		return (tame_fail(p, EPERM, _TM_UNIX));
+
+	if ((error = getsock(p, SCARG(uap, s), &fp)) != 0)
 		return (error);
 	so = fp->f_data;
 	if ((so->so_state & SS_NBIO) && (so->so_state & SS_ISCONNECTING)) {
@@ -404,7 +413,7 @@ sys_socketpair(struct proc *p, void *v, register_t *retval)
 	}
 	if ((error = soconnect2(so1, so2)) != 0)
 		goto free4;
-	if (SCARG(uap, type) == SOCK_DGRAM) {
+	if ((SCARG(uap, type) & SOCK_TYPE_MASK) == SOCK_DGRAM) {
 		/*
 		 * Datagram socket connection is asymmetric.
 		 */
@@ -456,6 +465,9 @@ sys_sendto(struct proc *p, void *v, register_t *retval)
 	struct msghdr msg;
 	struct iovec aiov;
 
+	if (tame_sendto_check(p, SCARG(uap, to)))
+		return (tame_fail(p, EPERM, _TM_UNIX));
+
 	msg.msg_name = (caddr_t)SCARG(uap, to);
 	msg.msg_namelen = SCARG(uap, tolen);
 	msg.msg_iov = &aiov;
@@ -482,6 +494,14 @@ sys_sendmsg(struct proc *p, void *v, register_t *retval)
 	error = copyin(SCARG(uap, msg), &msg, sizeof (msg));
 	if (error)
 		return (error);
+#ifdef KTRACE
+	if (KTRPOINT(p, KTR_STRUCT))
+		ktrmsghdr(p, &msg);
+#endif
+
+	if (tame_sendto_check(p, msg.msg_name))
+		return (tame_fail(p, EPERM, _TM_UNIX));
+
 	if (msg.msg_iovlen > IOV_MAX)
 		return (EMSGSIZE);
 	if (msg.msg_iovlen > UIO_SMALLIOV)
@@ -493,6 +513,10 @@ sys_sendmsg(struct proc *p, void *v, register_t *retval)
 	    (error = copyin(msg.msg_iov, iov,
 		    (unsigned)(msg.msg_iovlen * sizeof (struct iovec)))))
 		goto done;
+#ifdef KTRACE
+	if (msg.msg_iovlen && KTRPOINT(p, KTR_STRUCT))
+		ktriovec(p, iov, msg.msg_iovlen);
+#endif
 	msg.msg_iov = iov;
 	msg.msg_flags = 0;
 	error = sendit(p, SCARG(uap, s), &msg, SCARG(uap, flags), retval);
@@ -519,7 +543,7 @@ sendit(struct proc *p, int s, struct msghdr *mp, int flags, register_t *retsize)
 
 	to = NULL;
 
-	if ((error = getsock(p->p_fd, s, &fp)) != 0)
+	if ((error = getsock(p, s, &fp)) != 0)
 		return (error);
 	auio.uio_iov = mp->msg_iov;
 	auio.uio_iovcnt = mp->msg_iovlen;
@@ -556,6 +580,16 @@ sendit(struct proc *p, int s, struct msghdr *mp, int flags, register_t *retsize)
 		    mp->msg_controllen, MT_CONTROL);
 		if (error)
 			goto bad;
+#ifdef KTRACE
+		if (KTRPOINT(p, KTR_STRUCT) && mp->msg_controllen)
+			ktrcmsghdr(p, mtod(control, char *),
+			    mp->msg_controllen);
+#endif
+
+		if (tame_cmsg_send(p, control, mp->msg_controllen)) {
+			m_free(control);
+			goto bad;
+		}
 	} else
 		control = 0;
 #ifdef KTRACE
@@ -610,6 +644,9 @@ sys_recvfrom(struct proc *p, void *v, register_t *retval)
 	struct iovec aiov;
 	int error;
 
+	if (tame_recvfrom_check(p, SCARG(uap, from)))
+		return (tame_fail(p, EPERM, _TM_UNIX));
+
 	if (SCARG(uap, fromlenaddr)) {
 		error = copyin(SCARG(uap, fromlenaddr),
 		    &msg.msg_namelen, sizeof (msg.msg_namelen));
@@ -643,6 +680,10 @@ sys_recvmsg(struct proc *p, void *v, register_t *retval)
 	error = copyin(SCARG(uap, msg), &msg, sizeof (msg));
 	if (error)
 		return (error);
+
+	if (tame_recvfrom_check(p, msg.msg_name))
+		return (tame_fail(p, EPERM, _TM_UNIX));
+
 	if (msg.msg_iovlen > IOV_MAX)
 		return (EMSGSIZE);
 	if (msg.msg_iovlen > UIO_SMALLIOV)
@@ -661,6 +702,13 @@ sys_recvmsg(struct proc *p, void *v, register_t *retval)
 	msg.msg_iov = iov;
 	if ((error = recvit(p, SCARG(uap, s), &msg, NULL, retval)) == 0) {
 		msg.msg_iov = uiov;
+#ifdef KTRACE
+		if (KTRPOINT(p, KTR_STRUCT)) {
+			ktrmsghdr(p, &msg);
+			if (msg.msg_iovlen)
+				ktriovec(p, iov, msg.msg_iovlen);
+		}
+#endif
 		error = copyout(&msg, SCARG(uap, msg), sizeof(msg));
 	}
 done:
@@ -685,7 +733,7 @@ recvit(struct proc *p, int s, struct msghdr *mp, caddr_t namelenp,
 	int iovlen = 0;
 #endif
 
-	if ((error = getsock(p->p_fd, s, &fp)) != 0)
+	if ((error = getsock(p, s, &fp)) != 0)
 		return (error);
 	auio.uio_iov = mp->msg_iov;
 	auio.uio_iovcnt = mp->msg_iovlen;
@@ -760,23 +808,29 @@ recvit(struct proc *p, int s, struct msghdr *mp, caddr_t namelenp,
 			len = 0;
 		else {
 			struct mbuf *m = control;
-			caddr_t p = mp->msg_control;
+			caddr_t cp = mp->msg_control;
 
+#ifdef KTRACE
+			if (KTRPOINT(p, KTR_STRUCT) && len)
+				ktrcmsghdr(p, mtod(control, char *), len);
+#endif
 			do {
 				i = m->m_len;
 				if (len < i) {
 					mp->msg_flags |= MSG_CTRUNC;
 					i = len;
 				}
-				error = copyout(mtod(m, caddr_t), p, i);
+				if (tame_cmsg_recv(p, control, mp->msg_controllen))
+					goto out;
+				error = copyout(mtod(m, caddr_t), cp, i);
 				if (m->m_next)
 					i = ALIGN(i);
-				p += i;
+				cp += i;
 				len -= i;
 				if (error != 0 || len <= 0)
 					break;
 			} while ((m = m->m_next) != NULL);
-			len = p - (caddr_t)mp->msg_control;
+			len = cp - (caddr_t)mp->msg_control;
 		}
 		mp->msg_controllen = len;
 	}
@@ -804,7 +858,7 @@ sys_shutdown(struct proc *p, void *v, register_t *retval)
 	struct file *fp;
 	int error;
 
-	if ((error = getsock(p->p_fd, SCARG(uap, s), &fp)) != 0)
+	if ((error = getsock(p, SCARG(uap, s), &fp)) != 0)
 		return (error);
 	error = soshutdown(fp->f_data, SCARG(uap, how));
 	FRELE(fp, p);
@@ -826,7 +880,10 @@ sys_setsockopt(struct proc *p, void *v, register_t *retval)
 	struct mbuf *m = NULL;
 	int error;
 
-	if ((error = getsock(p->p_fd, SCARG(uap, s), &fp)) != 0)
+	if (tame_setsockopt_check(p, SCARG(uap, level), SCARG(uap, name)))
+		return (tame_fail(p, EPERM, _TM_INET));
+
+	if ((error = getsock(p, SCARG(uap, s), &fp)) != 0)
 		return (error);
 	if (SCARG(uap, valsize) > MCLBYTES) {
 		error = EINVAL;
@@ -877,7 +934,7 @@ sys_getsockopt(struct proc *p, void *v, register_t *retval)
 	socklen_t valsize;
 	int error;
 
-	if ((error = getsock(p->p_fd, SCARG(uap, s), &fp)) != 0)
+	if ((error = getsock(p, SCARG(uap, s), &fp)) != 0)
 		return (error);
 	if (SCARG(uap, val)) {
 		error = copyin(SCARG(uap, avalsize),
@@ -921,7 +978,7 @@ sys_getsockname(struct proc *p, void *v, register_t *retval)
 	socklen_t len;
 	int error;
 
-	if ((error = getsock(p->p_fd, SCARG(uap, fdes), &fp)) != 0)
+	if ((error = getsock(p, SCARG(uap, fdes), &fp)) != 0)
 		return (error);
 	error = copyin(SCARG(uap, alen), &len, sizeof (len));
 	if (error)
@@ -957,7 +1014,7 @@ sys_getpeername(struct proc *p, void *v, register_t *retval)
 	socklen_t len;
 	int error;
 
-	if ((error = getsock(p->p_fd, SCARG(uap, fdes), &fp)) != 0)
+	if ((error = getsock(p, SCARG(uap, fdes), &fp)) != 0)
 		return (error);
 	so = fp->f_data;
 	if ((so->so_state & SS_ISCONNECTED) == 0) {
@@ -1017,11 +1074,11 @@ sockargs(struct mbuf **mp, const void *buf, size_t buflen, int type)
 }
 
 int
-getsock(struct filedesc *fdp, int fdes, struct file **fpp)
+getsock(struct proc *p, int fdes, struct file **fpp)
 {
 	struct file *fp;
 
-	if ((fp = fd_getfile(fdp, fdes)) == NULL)
+	if ((fp = fd_getfile(p->p_fd, fdes)) == NULL)
 		return (EBADF);
 	if (fp->f_type != DTYPE_SOCKET)
 		return (ENOTSOCK);

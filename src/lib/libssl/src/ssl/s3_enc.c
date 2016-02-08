@@ -1,4 +1,4 @@
-/* $OpenBSD: s3_enc.c,v 1.59 2015/02/22 15:54:27 jsing Exp $ */
+/* $OpenBSD: s3_enc.c,v 1.61 2015/07/19 20:32:18 doug Exp $ */
 /* Copyright (C) 1995-1998 Eric Young (eay@cryptsoft.com)
  * All rights reserved.
  *
@@ -491,6 +491,9 @@ ssl3_free_digest_list(SSL *s)
 {
 	int i;
 
+	if (s == NULL)
+		return;
+
 	if (s->s3->handshake_dgst == NULL)
 		return;
 	for (i = 0; i < SSL_MAX_DIGEST; i++) {
@@ -831,9 +834,12 @@ ssl3_alert_code(int code)
 		return (SSL3_AD_HANDSHAKE_FAILURE);
 	case SSL_AD_INTERNAL_ERROR:
 		return (SSL3_AD_HANDSHAKE_FAILURE);
+	case SSL_AD_INAPPROPRIATE_FALLBACK:
+		return (TLS1_AD_INAPPROPRIATE_FALLBACK);
 	case SSL_AD_USER_CANCELLED:
 		return (SSL3_AD_HANDSHAKE_FAILURE);
-	case SSL_AD_NO_RENEGOTIATION:	return(-1); /* Don't send it :-) */
+	case SSL_AD_NO_RENEGOTIATION:
+		return(-1); /* Don't send it :-) */
 	case SSL_AD_UNSUPPORTED_EXTENSION:
 		return (SSL3_AD_HANDSHAKE_FAILURE);
 	case SSL_AD_CERTIFICATE_UNOBTAINABLE:
@@ -846,8 +852,6 @@ ssl3_alert_code(int code)
 		return (SSL3_AD_HANDSHAKE_FAILURE);
 	case SSL_AD_UNKNOWN_PSK_IDENTITY:
 		return (TLS1_AD_UNKNOWN_PSK_IDENTITY);
-	case SSL_AD_INAPPROPRIATE_FALLBACK:
-		return (TLS1_AD_INAPPROPRIATE_FALLBACK);
 	default:
 		return (-1);
 	}

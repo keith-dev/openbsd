@@ -200,6 +200,15 @@ _C_LABEL(acpi_protected_mode_resume):
 	mov	acpi_saved_cr4,%eax
 	mov	%eax,%cr4
 
+	testl	$CR4_PAE, %eax
+	jz	1f
+
+	movl	$MSR_EFER, %ecx
+	rdmsr
+	orl	$EFER_NXE, %eax
+	wrmsr
+
+1:
 	/*
 	 * Re-enable paging, using the CR3 we stored before suspend
 	 * as our new page table base location. Restore CR0 after
@@ -270,8 +279,7 @@ _C_LABEL(acpi_protected_mode_resume):
 
 	/*
 	 * Everything is almost reset back to the way it was immediately before
-	 * suspend. There are a few more registers to restore - this is
-	 * done in acpi_restorecpu. We'll jump to that routine, and after
+	 * suspend. There are a few more registers to restore, and after
 	 * that, jump back to the OS. There's still some things
 	 * to do there, like re-enable interrupts, resume devices, APICs,
 	 * etc.
@@ -351,9 +359,25 @@ NENTRY(hibernate_activate_resume_pt_machdep)
 	andl	$(~CR4_PGE), %eax
 	movl	%eax, %cr4
 
+	/* 
+	 * Switch to the hibernate resume pagetable if we're running
+	 * in non-PAE mode.  If we're running in PAE mode, this will
+	 * switch to the PTPDEs we stashed into the hibernate resume
+	 * pagetable, but continue to use the normal pagetables until we
+	 * disable PAE below.
+	 */
+	movl	$HIBERNATE_PD_PAGE, %eax
+	orl	$0xfe0, %eax
+	movl	%eax, %cr3
+
+	/* Disable PAE */
+	movl	%cr4, %eax
+	andl	$(~CR4_PAE), %eax
+	movl	%eax, %cr4
+
 	wbinvd
 	movl	$HIBERNATE_PD_PAGE, %eax
-	movl	%eax,	%cr3
+	movl	%eax, %cr3
 	jmp	1f
 
 1:	nop

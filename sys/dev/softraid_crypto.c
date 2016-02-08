@@ -1,4 +1,4 @@
-/* $OpenBSD: softraid_crypto.c,v 1.116 2014/12/19 17:15:16 tedu Exp $ */
+/* $OpenBSD: softraid_crypto.c,v 1.122 2015/07/27 04:11:58 halex Exp $ */
 /*
  * Copyright (c) 2007 Marco Peereboom <marco@peereboom.us>
  * Copyright (c) 2008 Hans-Joerg Hoexer <hshoexer@openbsd.org>
@@ -42,7 +42,6 @@
 #include <sys/dkio.h>
 
 #include <crypto/cryptodev.h>
-#include <crypto/cryptosoft.h>
 #include <crypto/rijndael.h>
 #include <crypto/md5.h>
 #include <crypto/sha1.h>
@@ -251,7 +250,7 @@ sr_crypto_prepare(struct sr_workunit *wu, int encrypt)
 	struct sr_crypto_wu	*crwu;
 	struct cryptodesc	*crd;
 	int			flags, i, n;
-	daddr_t			blk;
+	daddr_t			blkno;
 	u_int			keyndx;
 
 	DNPRINTF(SR_D_DIS, "%s: sr_crypto_prepare wu %p encrypt %d\n",
@@ -266,7 +265,7 @@ sr_crypto_prepare(struct sr_workunit *wu, int encrypt)
 	} else
 		crwu->cr_uio.uio_iov->iov_base = xs->data;
 
-	blk = wu->swu_blk_start;
+	blkno = wu->swu_blk_start;
 	n = xs->datalen >> DEV_BSHIFT;
 
 	/*
@@ -290,7 +289,7 @@ sr_crypto_prepare(struct sr_workunit *wu, int encrypt)
 	 * across a different key blocks (e.g. 0.5TB boundary). Currently
 	 * this is already broken by the use of scr_key[0] below.
 	 */
-	keyndx = blk >> SR_CRYPTO_KEY_BLKSHIFT;
+	keyndx = blkno >> SR_CRYPTO_KEY_BLKSHIFT;
 	crwu->cr_crp->crp_sid = sd->mds.mdd_crypto.scr_sid[keyndx];
 
 	crwu->cr_crp->crp_opaque = crwu;
@@ -298,7 +297,7 @@ sr_crypto_prepare(struct sr_workunit *wu, int encrypt)
 	crwu->cr_crp->crp_alloctype = M_DEVBUF;
 	crwu->cr_crp->crp_buf = &crwu->cr_uio;
 	for (i = 0, crd = crwu->cr_crp->crp_desc; crd;
-	    i++, blk++, crd = crd->crd_next) {
+	    i++, blkno++, crd = crd->crd_next) {
 		crd->crd_skip = i << DEV_BSHIFT;
 		crd->crd_len = DEV_BSIZE;
 		crd->crd_inject = 0;
@@ -306,7 +305,7 @@ sr_crypto_prepare(struct sr_workunit *wu, int encrypt)
 		crd->crd_alg = sd->mds.mdd_crypto.scr_alg;
 		crd->crd_klen = sd->mds.mdd_crypto.scr_klen;
 		crd->crd_key = sd->mds.mdd_crypto.scr_key[0];
-		memcpy(crd->crd_iv, &blk, sizeof(blk));
+		memcpy(crd->crd_iv, &blkno, sizeof(blkno));
 	}
 
 	return (crwu);
@@ -656,7 +655,7 @@ sr_crypto_create_key_disk(struct sr_discipline *sd, dev_t dev)
 		goto fail;
 	}
 	if (label.d_partitions[part].p_fstype != FS_RAID) {
-		sr_error(sc, "%s partition not of type RAID (%d)\n",
+		sr_error(sc, "%s partition not of type RAID (%d)",
 		    devname, label.d_partitions[part].p_fstype);
 		goto fail;
 	}
@@ -826,7 +825,7 @@ sr_crypto_read_key_disk(struct sr_discipline *sd, dev_t dev)
 		goto done;
 	}
 	if (label.d_partitions[part].p_fstype != FS_RAID) {
-		sr_error(sc, "%s partition not of type RAID (%d)\n",
+		sr_error(sc, "%s partition not of type RAID (%d)",
 		    devname, label.d_partitions[part].p_fstype);
 		goto done;
 	}
@@ -834,7 +833,7 @@ sr_crypto_read_key_disk(struct sr_discipline *sd, dev_t dev)
 	/*
 	 * Read and validate key disk metadata.
 	 */
-	sm = malloc(SR_META_SIZE * 512, M_DEVBUF, M_WAITOK | M_ZERO);
+	sm = malloc(SR_META_SIZE * DEV_BSIZE, M_DEVBUF, M_WAITOK | M_ZERO);
 	if (sr_meta_native_read(sd, dev, sm, NULL)) {
 		sr_error(sc, "native bootprobe could not read native metadata");
 		goto done;
@@ -887,7 +886,7 @@ done:
 		free(omi, M_DEVBUF, 0);
 	}
 
-	free(sm, M_DEVBUF, SR_META_SIZE * 512);
+	free(sm, M_DEVBUF, SR_META_SIZE * DEV_BSIZE);
 
 	if (vn && open) {
 		VOP_CLOSE(vn, FREAD, NOCRED, curproc);
@@ -1100,13 +1099,13 @@ int
 sr_crypto_rw(struct sr_workunit *wu)
 {
 	struct sr_crypto_wu	*crwu;
-	daddr_t			blk;
+	daddr_t			blkno;
 	int			rv = 0;
 
 	DNPRINTF(SR_D_DIS, "%s: sr_crypto_rw wu %p\n",
 	    DEVNAME(wu->swu_dis->sd_sc), wu);
 
-	if (sr_validate_io(wu, &blk, "sr_crypto_rw"))
+	if (sr_validate_io(wu, &blkno, "sr_crypto_rw"))
 		return (1);
 
 	if (wu->swu_xs->flags & SCSI_DATA_OUT) {
@@ -1128,7 +1127,7 @@ sr_crypto_write(struct cryptop *crp)
 	struct sr_workunit	*wu = &crwu->cr_wu;
 	int			s;
 
-	DNPRINTF(SR_D_INTR, "%s: sr_crypto_write: wu %x xs: %x\n",
+	DNPRINTF(SR_D_INTR, "%s: sr_crypto_write: wu %p xs: %p\n",
 	    DEVNAME(wu->swu_dis->sd_sc), wu, wu->swu_xs);
 
 	if (crp->crp_etype) {
@@ -1149,12 +1148,11 @@ sr_crypto_dev_rw(struct sr_workunit *wu, struct sr_crypto_wu *crwu)
 	struct scsi_xfer	*xs = wu->swu_xs;
 	struct sr_ccb		*ccb;
 	struct uio		*uio;
-	daddr_t			blk;
+	daddr_t			blkno;
 
-	blk = wu->swu_blk_start;
-	blk += sd->sd_meta->ssd_data_offset;
+	blkno = wu->swu_blk_start;
 
-	ccb = sr_ccb_rw(sd, 0, blk, xs->datalen, xs->data, xs->flags, 0);
+	ccb = sr_ccb_rw(sd, 0, blkno, xs->datalen, xs->data, xs->flags, 0);
 	if (!ccb) {
 		/* should never happen but handle more gracefully */
 		printf("%s: %s: too many ccbs queued\n",
@@ -1207,7 +1205,7 @@ sr_crypto_read(struct cryptop *crp)
 	struct sr_workunit	*wu = &crwu->cr_wu;
 	int			s;
 
-	DNPRINTF(SR_D_INTR, "%s: sr_crypto_read: wu %x xs: %x\n",
+	DNPRINTF(SR_D_INTR, "%s: sr_crypto_read: wu %p xs: %p\n",
 	    DEVNAME(wu->swu_dis->sd_sc), wu, wu->swu_xs);
 
 	if (crp->crp_etype)

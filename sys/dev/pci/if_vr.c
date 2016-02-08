@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_vr.c,v 1.137 2014/12/22 02:28:52 tedu Exp $	*/
+/*	$OpenBSD: if_vr.c,v 1.141 2015/06/24 09:40:54 mpi Exp $	*/
 
 /*
  * Copyright (c) 1997, 1998
@@ -90,7 +90,6 @@
 
 #include <machine/bus.h>
 
-#include <dev/mii/mii.h>
 #include <dev/mii/miivar.h>
 
 #include <dev/pci/pcireg.h>
@@ -826,6 +825,7 @@ void
 vr_rxeof(struct vr_softc *sc)
 {
 	struct mbuf		*m;
+	struct mbuf_list 	ml = MBUF_LIST_INITIALIZER();
 	struct ifnet		*ifp;
 	struct vr_chain_onefrag	*cur_rx;
 	int			total_len = 0;
@@ -898,8 +898,7 @@ vr_rxeof(struct vr_softc *sc)
 #ifdef __STRICT_ALIGNMENT
 		{
 			struct mbuf *m0;
-			m0 = m_devget(mtod(m, caddr_t), total_len,
-			    ETHER_ALIGN, ifp);
+			m0 = m_devget(mtod(m, caddr_t), total_len, ETHER_ALIGN);
 			m_freem(m);
 			if (m0 == NULL) {
 				ifp->if_ierrors++;
@@ -908,11 +907,8 @@ vr_rxeof(struct vr_softc *sc)
 			m = m0;
 		} 
 #else
-		m->m_pkthdr.rcvif = ifp;
 		m->m_pkthdr.len = m->m_len = total_len;
 #endif
-
-		ifp->if_ipackets++;
 
 		if (sc->vr_quirks & VR_Q_CSUM &&
 		    (rxstat & VR_RXSTAT_FRAG) == 0 &&
@@ -941,15 +937,7 @@ vr_rxeof(struct vr_softc *sc)
 		}
 #endif
 
-#if NBPFILTER > 0
-		/*
-		 * Handle BPF listeners. Let the BPF user see the packet.
-		 */
-		if (ifp->if_bpf)
-			bpf_mtap_ether(ifp->if_bpf, m, BPF_DIRECTION_IN);
-#endif
-		/* pass it on. */
-		ether_input_mbuf(ifp, m);
+		ml_enqueue(&ml, m);
 	}
 
 	vr_fill_rx_ring(sc);
@@ -957,6 +945,8 @@ vr_rxeof(struct vr_softc *sc)
 	bus_dmamap_sync(sc->sc_dmat, sc->sc_listmap.vrm_map,
 	    0, sc->sc_listmap.vrm_map->dm_mapsize,
 	    BUS_DMASYNC_PREREAD | BUS_DMASYNC_PREWRITE);
+
+	if_input(ifp, &ml);
 }
 
 void

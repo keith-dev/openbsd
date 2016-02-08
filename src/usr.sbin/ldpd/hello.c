@@ -1,4 +1,4 @@
-/*	$OpenBSD: hello.c,v 1.24 2014/10/25 03:23:49 lteo Exp $ */
+/*	$OpenBSD: hello.c,v 1.28 2015/07/21 04:52:29 renato Exp $ */
 
 /*
  * Copyright (c) 2009 Michele Marchetto <michele@openbsd.org>
@@ -66,7 +66,7 @@ send_hello(enum hello_type type, struct iface *iface, struct tnbr *tnbr)
 		dst.sin_addr.s_addr = tnbr->addr.s_addr;
 		holdtime = tnbr->hello_holdtime;
 		flags = TARGETED_HELLO;
-		if (tnbr->flags & F_TNBR_CONFIGURED)
+		if ((tnbr->flags & F_TNBR_CONFIGURED) || tnbr->pw_count)
 			flags |= REQUEST_TARG_HELLO;
 		fd = tnbr->discovery_fd;
 		break;
@@ -128,18 +128,26 @@ recv_hello(struct iface *iface, struct in_addr src, char *buf, u_int16_t len)
 
 	bzero(&source, sizeof(source));
 	if (flags & TARGETED_HELLO) {
-		tnbr = tnbr_find(src);
+		tnbr = tnbr_find(leconf, src);
+
+		/* remove the dynamic tnbr if the 'R' bit was cleared */
+		if (tnbr && (tnbr->flags & F_TNBR_DYNAMIC) &&
+		    !((flags & REQUEST_TARG_HELLO))) {
+			tnbr->flags &= ~F_TNBR_DYNAMIC;
+			tnbr = tnbr_check(tnbr);
+		}
+
 		if (!tnbr) {
 			if (!((flags & REQUEST_TARG_HELLO) &&
 			    leconf->flags & LDPD_FLAG_TH_ACCEPT))
 				return;
 
-			tnbr = tnbr_new(leconf, src, 0);
-			if (!tnbr)
-				return;
+			tnbr = tnbr_new(leconf, src);
+			tnbr->flags |= F_TNBR_DYNAMIC;
 			tnbr_init(leconf, tnbr);
 			LIST_INSERT_HEAD(&leconf->tnbr_list, tnbr, entry);
 		}
+
 		source.type = HELLO_TARGETED;
 		source.target = tnbr;
 	} else {
@@ -177,12 +185,12 @@ recv_hello(struct iface *iface, struct in_addr src, char *buf, u_int16_t len)
 	if (!nbr) {
 		/* create new adjacency and new neighbor */
 		nbr = nbr_new(lsr_id, transport_addr);
-		adj = adj_new(nbr, &source, holdtime, transport_addr);
+		adj = adj_new(nbr, &source, transport_addr);
 	} else {
 		adj = adj_find(nbr, &source);
 		if (!adj) {
 			/* create new adjacency for existing neighbor */
-			adj = adj_new(nbr, &source, holdtime, transport_addr);
+			adj = adj_new(nbr, &source, transport_addr);
 
 			if (nbr->addr.s_addr != transport_addr.s_addr)
 				log_warnx("recv_hello: neighbor %s: multiple "

@@ -24,7 +24,7 @@ our %args = (
 	    write_message($self, get_thirdlog());
 	    ${$self->{server}}->loggrep("Accepted", 5, 2)
 		or die ref($self), " server did not receive second log";
-	    ${$self->{syslogd}}->loggrep(qr/dropped \d+ messages/, 5)
+	    ${$self->{syslogd}}->loggrep(qr/syslogd: dropped \d+ messages/, 5)
 		or die ref($self), " syslogd did not log dropped messages";
 	})},
     },
@@ -34,7 +34,7 @@ our %args = (
 	loggrep => {
 	    get_between2loggrep(),
 	    get_charlog() => 300,
-	    qr/dropped partial message/ => 1,
+	    qr/loghost .* dropped partial message/ => 1,
 	},
     },
     server => {
@@ -46,7 +46,13 @@ our %args = (
 		$self->{redo}--;
 		return;
 	    }
-	    ${$self->{syslogd}}->loggrep(get_thirdlog(), 40)
+	    # read slowly to get output buffer out of sync
+	    foreach (1..10) {
+		print STDERR ">>> ". scalar <STDIN>;
+		sleep 1;
+		last if ${$self->{syslogd}}->loggrep(get_thirdlog());
+	    }
+	    ${$self->{syslogd}}->loggrep(get_thirdlog(), 30)
 		or die ref($self), " syslogd did not receive third log";
 	    shutdown(\*STDOUT, 1)
 		or die "shutdown write failed: $!";
@@ -55,9 +61,7 @@ our %args = (
 	loggrep => {
 	    qr/Accepted/ => 2,
 	    get_between2loggrep(),
-	    get_secondlog() => 0,
 	    get_thirdlog() => 0,
-	    qr/>>> [0-9A-Za-z]{10}/ => 0,
 	},
     },
     file => {

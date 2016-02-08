@@ -1,4 +1,4 @@
-/*	$OpenBSD: neighbor.c,v 1.44 2015/02/09 11:54:24 claudio Exp $ */
+/*	$OpenBSD: neighbor.c,v 1.52 2015/07/21 05:02:57 renato Exp $ */
 
 /*
  * Copyright (c) 2009 Michele Marchetto <michele@openbsd.org>
@@ -23,6 +23,7 @@
 #include <sys/time.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
+#include <netinet/tcp.h>
 #include <arpa/inet.h>
 #include <net/if.h>
 
@@ -70,9 +71,10 @@ nbr_pid_compare(struct nbr *a, struct nbr *b)
 struct nbr_id_head nbrs_by_id = RB_INITIALIZER(&nbrs_by_id);
 struct nbr_pid_head nbrs_by_pid = RB_INITIALIZER(&nbrs_by_pid);
 
-u_int32_t	peercnt = NBR_CNTSTART;
+u_int32_t	peercnt = 1;
 
-extern struct ldpd_conf	*leconf;
+extern struct ldpd_conf		*leconf;
+extern struct ldpd_sysdep	 sysdep;
 
 struct {
 	int		state;
@@ -208,24 +210,20 @@ nbr_fsm(struct nbr *nbr, enum nbr_event event)
 struct nbr *
 nbr_new(struct in_addr id, struct in_addr addr)
 {
-	struct nbr	*nbr;
+	struct nbr		*nbr;
+	struct nbr_params	*nbrp;
 
 	log_debug("nbr_new: LSR ID %s", inet_ntoa(id));
 
 	if ((nbr = calloc(1, sizeof(*nbr))) == NULL)
 		fatal("nbr_new");
 
+	LIST_INIT(&nbr->adj_list);
 	nbr->state = NBR_STA_PRESENT;
 	nbr->id.s_addr = id.s_addr;
 	nbr->addr.s_addr = addr.s_addr;
+	nbr->peerid = 0;
 
-	/* get next unused peerid */
-	while (nbr_find_peerid(++peercnt))
-		;
-	nbr->peerid = peercnt;
-
-	if (RB_INSERT(nbr_pid_head, &nbrs_by_pid, nbr) != NULL)
-		fatalx("nbr_new: RB_INSERT(nbrs_by_pid) failed");
 	if (RB_INSERT(nbr_id_head, &nbrs_by_id, nbr) != NULL)
 		fatalx("nbr_new: RB_INSERT(nbrs_by_id) failed");
 
@@ -240,6 +238,12 @@ nbr_new(struct in_addr id, struct in_addr addr)
 	evtimer_set(&nbr->keepalive_timer, nbr_ktimer, nbr);
 	evtimer_set(&nbr->initdelay_timer, nbr_idtimer, nbr);
 
+	/* init pfkey - remove old if any, load new ones */
+	pfkey_remove(nbr);
+	nbrp = nbr_params_find(leconf, nbr->addr);
+	if (nbrp && pfkey_establish(nbr, nbrp) == -1)
+		fatalx("pfkey setup failed");
+
 	return (nbr);
 }
 
@@ -249,6 +253,7 @@ nbr_del(struct nbr *nbr)
 	log_debug("nbr_del: LSR ID %s", inet_ntoa(nbr->id));
 
 	nbr_fsm(nbr, NBR_EVT_CLOSE_SESSION);
+	pfkey_remove(nbr);
 
 	if (event_pending(&nbr->ev_connect, EV_WRITE, NULL))
 		event_del(&nbr->ev_connect);
@@ -262,10 +267,26 @@ nbr_del(struct nbr *nbr)
 	mapping_list_clr(&nbr->release_list);
 	mapping_list_clr(&nbr->abortreq_list);
 
-	RB_REMOVE(nbr_pid_head, &nbrs_by_pid, nbr);
+	if (nbr->peerid)
+		RB_REMOVE(nbr_pid_head, &nbrs_by_pid, nbr);
 	RB_REMOVE(nbr_id_head, &nbrs_by_id, nbr);
 
 	free(nbr);
+}
+
+void
+nbr_update_peerid(struct nbr *nbr)
+{
+	if (nbr->peerid)
+		RB_REMOVE(nbr_pid_head, &nbrs_by_pid, nbr);
+
+	/* get next unused peerid */
+	while (nbr_find_peerid(++peercnt))
+		;
+	nbr->peerid = peercnt;
+
+	if (RB_INSERT(nbr_pid_head, &nbrs_by_pid, nbr) != NULL)
+		fatalx("nbr_new: RB_INSERT(nbrs_by_pid) failed");
 }
 
 struct nbr *
@@ -340,8 +361,7 @@ nbr_ktimeout(int fd, short event, void *arg)
 {
 	struct nbr *nbr = arg;
 
-	log_debug("nbr_ktimeout: neighbor ID %s peerid %u", inet_ntoa(nbr->id),
-	    nbr->peerid);
+	log_debug("nbr_ktimeout: neighbor ID %s", inet_ntoa(nbr->id));
 
 	session_shutdown(nbr, S_KEEPALIVE_TMR, 0, 0);
 }
@@ -373,8 +393,7 @@ nbr_idtimer(int fd, short event, void *arg)
 {
 	struct nbr *nbr = arg;
 
-	log_debug("nbr_idtimer: neighbor ID %s peerid %u", inet_ntoa(nbr->id),
-	    nbr->peerid);
+	log_debug("nbr_idtimer: neighbor ID %s", inet_ntoa(nbr->id));
 
 	if (nbr_session_active_role(nbr))
 		nbr_establish_connection(nbr);
@@ -465,15 +484,30 @@ nbr_connect_cb(int fd, short event, void *arg)
 int
 nbr_establish_connection(struct nbr *nbr)
 {
-	struct sockaddr_in	local_sa;
-	struct sockaddr_in	remote_sa;
+	struct sockaddr_in	 local_sa;
+	struct sockaddr_in	 remote_sa;
 	struct adj		*adj;
+	struct nbr_params	*nbrp;
+	int			 opt = 1;
 
 	nbr->fd = socket(AF_INET, SOCK_STREAM|SOCK_NONBLOCK|SOCK_CLOEXEC, 0);
 	if (nbr->fd == -1) {
 		log_warn("nbr_establish_connection: error while "
 		    "creating socket");
 		return (-1);
+	}
+
+	nbrp = nbr_params_find(leconf, nbr->addr);
+	if (nbrp && nbrp->auth.method == AUTH_MD5SIG) {
+		if (sysdep.no_pfkey || sysdep.no_md5sig) {
+			log_warnx("md5sig configured but not available");
+			return (-1);
+		}
+		if (setsockopt(nbr->fd, IPPROTO_TCP, TCP_MD5SIG,
+		    &opt, sizeof(opt)) == -1) {
+			log_warn("setsockopt md5sig");
+			return (-1);
+		}
 	}
 
 	bzero(&local_sa, sizeof(local_sa));
@@ -527,6 +561,9 @@ nbr_act_session_operational(struct nbr *nbr)
 {
 	nbr->idtimer_cnt = 0;
 
+	/* this is necessary to avoid ipc synchronization issues */
+	nbr_update_peerid(nbr);
+
 	return (ldpe_imsg_compose_lde(IMSG_NEIGHBOR_UP, nbr->peerid, 0,
 	    &nbr->id, sizeof(nbr->id)));
 }
@@ -534,61 +571,34 @@ nbr_act_session_operational(struct nbr *nbr)
 void
 nbr_send_labelmappings(struct nbr *nbr)
 {
-	if (leconf->mode & MODE_ADV_UNSOLICITED) {
-		ldpe_imsg_compose_lde(IMSG_LABEL_MAPPING_FULL, nbr->peerid, 0,
-		    NULL, 0);
-	}
+	ldpe_imsg_compose_lde(IMSG_LABEL_MAPPING_FULL, nbr->peerid, 0,
+	    NULL, 0);
 }
 
-void
-nbr_mapping_add(struct nbr *nbr, struct mapping_head *mh, struct map *map)
+struct nbr_params *
+nbr_params_new(struct in_addr addr)
 {
-	struct mapping_entry	*me;
+	struct nbr_params	*nbrp;
 
-	me = calloc(1, sizeof(*me));
-	if (me == NULL)
-		fatal("nbr_mapping_add");
-	me->map = *map;
+	if ((nbrp = calloc(1, sizeof(*nbrp))) == NULL)
+		fatal("nbr_params_new");
 
-	TAILQ_INSERT_TAIL(mh, me, entry);
+	nbrp->addr.s_addr = addr.s_addr;
+	nbrp->auth.method = AUTH_NONE;
+
+	return (nbrp);
 }
 
-struct mapping_entry *
-nbr_mapping_find(struct nbr *nbr, struct mapping_head *mh, struct map *map)
+struct nbr_params *
+nbr_params_find(struct ldpd_conf *xconf, struct in_addr addr)
 {
-	struct mapping_entry	*me = NULL;
+	struct nbr_params *nbrp;
 
-	TAILQ_FOREACH(me, mh, entry) {
-		if (me->map.prefix.s_addr == map->prefix.s_addr &&
-		    me->map.prefixlen == map->prefixlen)
-			return (me);
-	}
+	LIST_FOREACH(nbrp, &xconf->nbrp_list, entry)
+		if (nbrp->addr.s_addr == addr.s_addr)
+			return (nbrp);
 
 	return (NULL);
-}
-
-void
-nbr_mapping_del(struct nbr *nbr, struct mapping_head *mh, struct map *map)
-{
-	struct mapping_entry	*me;
-
-	me = nbr_mapping_find(nbr, mh, map);
-	if (me == NULL)
-		return;
-
-	TAILQ_REMOVE(mh, me, entry);
-	free(me);
-}
-
-void
-mapping_list_clr(struct mapping_head *mh)
-{
-	struct mapping_entry	*me;
-
-	while ((me = TAILQ_FIRST(mh)) != NULL) {
-		TAILQ_REMOVE(mh, me, entry);
-		free(me);
-	}
 }
 
 struct ctl_nbr *

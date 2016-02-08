@@ -1,4 +1,4 @@
-/*	$OpenBSD: if.h,v 1.160 2015/02/08 06:00:52 mpi Exp $	*/
+/*	$OpenBSD: if.h,v 1.164 2015/06/07 12:02:28 jsg Exp $	*/
 /*	$NetBSD: if.h,v 1.23 1996/05/07 02:40:27 thorpej Exp $	*/
 
 /*
@@ -102,7 +102,7 @@ struct	if_data {
 	u_char		ifi_link_state;		/* current link state */
 	u_int32_t	ifi_mtu;		/* maximum transmission unit */
 	u_int32_t	ifi_metric;		/* routing metric (external only) */
-	u_int32_t	ifi_pad;
+	u_int32_t	ifi_rdomain;		/* routing instance */
 	u_int64_t	ifi_baudrate;		/* linespeed */
 	/* volatile statistics */
 	u_int64_t	ifi_ipackets;		/* packets received on interface */
@@ -446,6 +446,7 @@ void	if_attach(struct ifnet *);
 void	if_attachdomain(void);
 void	if_attachtail(struct ifnet *);
 void	if_attachhead(struct ifnet *);
+void	if_deactivate(struct ifnet *);
 void	if_detach(struct ifnet *);
 void	if_down(struct ifnet *);
 void	if_downall(void);
@@ -463,6 +464,9 @@ void	if_group_routechange(struct sockaddr *, struct sockaddr *);
 struct	ifnet *ifunit(const char *);
 struct	ifnet *if_get(unsigned int);
 void	ifnewlladdr(struct ifnet *);
+void	if_congestion(void);
+int	if_congested(void);
+__dead void	unhandled_af(int);
 
 #endif /* _KERNEL */
 

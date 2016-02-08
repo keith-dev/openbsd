@@ -1,4 +1,4 @@
-/* $OpenBSD: s3_clnt.c,v 1.108 2015/03/08 16:48:47 miod Exp $ */
+/* $OpenBSD: s3_clnt.c,v 1.121 2015/07/29 19:16:09 miod Exp $ */
 /* Copyright (C) 1995-1998 Eric Young (eay@cryptsoft.com)
  * All rights reserved.
  *
@@ -148,6 +148,8 @@
  * OTHERWISE.
  */
 
+#include <limits.h>
+#include <stdint.h>
 #include <stdio.h>
 
 #include "ssl_locl.h"
@@ -164,6 +166,14 @@
 #endif
 #ifndef OPENSSL_NO_GOST
 #include <openssl/gost.h>
+#endif
+
+#include "bytestring.h"
+
+#ifdef __OpenBSD__
+#include <sys/cdefs.h>
+__warn_references(SSLv3_client_method,
+    "SSLv3_client_method() enables the use of insecure protocols");
 #endif
 
 static const SSL_METHOD *ssl3_get_client_method(int ver);
@@ -218,7 +228,6 @@ ssl3_get_client_method(int ver)
 int
 ssl3_connect(SSL *s)
 {
-	BUF_MEM	*buf = NULL;
 	void   (*cb)(const SSL *ssl, int type, int val) = NULL;
 	int	 ret = -1;
 	int	 new_state, state, skip = 0;
@@ -263,26 +272,14 @@ ssl3_connect(SSL *s)
 			/* s->version=SSL3_VERSION; */
 			s->type = SSL_ST_CONNECT;
 
-			if (s->init_buf == NULL) {
-				if ((buf = BUF_MEM_new()) == NULL) {
-					ret = -1;
-					goto end;
-				}
-				if (!BUF_MEM_grow(buf,
-				    SSL3_RT_MAX_PLAIN_LENGTH)) {
-					ret = -1;
-					goto end;
-				}
-				s->init_buf = buf;
-				buf = NULL;
+			if (!ssl3_setup_init_buffer(s)) {
+				ret = -1;
+				goto end;
 			}
-
 			if (!ssl3_setup_buffers(s)) {
 				ret = -1;
 				goto end;
 			}
-
-			/* setup buffing BIO */
 			if (!ssl_init_wbio_buffer(s, 0)) {
 				ret = -1;
 				goto end;
@@ -631,12 +628,12 @@ ssl3_connect(SSL *s)
 		}
 		skip = 0;
 	}
+
 end:
 	s->in_handshake--;
-	if (buf != NULL)
-		BUF_MEM_free(buf);
 	if (cb != NULL)
 		cb(s, SSL_CB_CONNECT_EXIT, ret);
+
 	return (ret);
 }
 
@@ -723,16 +720,6 @@ ssl3_client_hello(SSL *s)
 			    SSL_R_NO_CIPHERS_AVAILABLE);
 			goto err;
 		}
-#ifdef OPENSSL_MAX_TLS1_2_CIPHER_LENGTH
-			/*
-			 * Some servers hang if client hello > 256 bytes
-			 * as hack workaround chop number of supported ciphers
-			 * to keep it well below this if we use TLS v1.2
-			 */
-		if (TLS1_get_version(s) >= TLS1_2_VERSION &&
-		    i > OPENSSL_MAX_TLS1_2_CIPHER_LENGTH)
-			i = OPENSSL_MAX_TLS1_2_CIPHER_LENGTH & ~1;
-#endif
 		s2n(i, p);
 		p += i;
 
@@ -989,10 +976,10 @@ int
 ssl3_get_server_certificate(SSL *s)
 {
 	int			 al, i, ok, ret = -1;
-	unsigned long		 n, nc, llen, l;
+	long			 n;
+	CBS			 cbs, cert_list;
 	X509			*x = NULL;
-	const unsigned char	*q, *p;
-	unsigned char		*d;
+	const unsigned char	*q;
 	STACK_OF(X509)		*sk = NULL;
 	SESS_CERT		*sc;
 	EVP_PKEY		*pkey = NULL;
@@ -1014,7 +1001,7 @@ ssl3_get_server_certificate(SSL *s)
 		    SSL_R_BAD_MESSAGE_TYPE);
 		goto f_err;
 	}
-	p = d = (unsigned char *)s->init_msg;
+
 
 	if ((sk = sk_X509_new_null()) == NULL) {
 		SSLerr(SSL_F_SSL3_GET_SERVER_CERTIFICATE,
@@ -1022,35 +1009,42 @@ ssl3_get_server_certificate(SSL *s)
 		goto err;
 	}
 
-	if (p + 3 - d > n)
+	if (n < 0)
 		goto truncated;
-	n2l3(p, llen);
-	if (llen + 3 != n) {
+
+	CBS_init(&cbs, s->init_msg, n);
+	if (CBS_len(&cbs) < 3)
+		goto truncated;
+
+	if (!CBS_get_u24_length_prefixed(&cbs, &cert_list) ||
+	    CBS_len(&cbs) != 0) {
 		al = SSL_AD_DECODE_ERROR;
 		SSLerr(SSL_F_SSL3_GET_SERVER_CERTIFICATE,
 		    SSL_R_LENGTH_MISMATCH);
 		goto f_err;
 	}
-	for (nc = 0; nc < llen; ) {
-		if (p + 3 - d > n)
+
+	while (CBS_len(&cert_list) > 0) {
+		CBS cert;
+
+		if (CBS_len(&cert_list) < 3)
 			goto truncated;
-		n2l3(p, l);
-		if ((l + nc + 3) > llen) {
+		if (!CBS_get_u24_length_prefixed(&cert_list, &cert)) {
 			al = SSL_AD_DECODE_ERROR;
 			SSLerr(SSL_F_SSL3_GET_SERVER_CERTIFICATE,
 			    SSL_R_CERT_LENGTH_MISMATCH);
 			goto f_err;
 		}
 
-		q = p;
-		x = d2i_X509(NULL, &q, l);
+		q = CBS_data(&cert);
+		x = d2i_X509(NULL, &q, CBS_len(&cert));
 		if (x == NULL) {
 			al = SSL_AD_BAD_CERTIFICATE;
 			SSLerr(SSL_F_SSL3_GET_SERVER_CERTIFICATE,
 			    ERR_R_ASN1_LIB);
 			goto f_err;
 		}
-		if (q != (p + l)) {
+		if (q != CBS_data(&cert) + CBS_len(&cert)) {
 			al = SSL_AD_DECODE_ERROR;
 			SSLerr(SSL_F_SSL3_GET_SERVER_CERTIFICATE,
 			    SSL_R_CERT_LENGTH_MISMATCH);
@@ -1062,8 +1056,6 @@ ssl3_get_server_certificate(SSL *s)
 			goto err;
 		}
 		x = NULL;
-		nc += l + 3;
-		p = q;
 	}
 
 	i = ssl_verify_cert_chain(s, sk);
@@ -1168,8 +1160,6 @@ ssl3_get_key_exchange(SSL *s)
 	alg_k = s->s3->tmp.new_cipher->algorithm_mkey;
 	alg_a = s->s3->tmp.new_cipher->algorithm_auth;
 
-	EVP_MD_CTX_init(&md_ctx);
-
 	/*
 	 * Use same message size as in ssl3_get_certificate_request()
 	 * as ServerKeyExchange message may be skipped.
@@ -1178,6 +1168,8 @@ ssl3_get_key_exchange(SSL *s)
 	    SSL3_ST_CR_KEY_EXCH_B, -1, s->max_cert_list, &ok);
 	if (!ok)
 		return ((int)n);
+	
+	EVP_MD_CTX_init(&md_ctx);
 
 	if (s->s3->tmp.message_type != SSL3_MT_SERVER_KEY_EXCHANGE) {
 		/*
@@ -1192,6 +1184,7 @@ ssl3_get_key_exchange(SSL *s)
 		}
 
 		s->s3->tmp.reuse_message = 1;
+		EVP_MD_CTX_cleanup(&md_ctx);
 		return (1);
 	}
 
@@ -1550,11 +1543,11 @@ int
 ssl3_get_certificate_request(SSL *s)
 {
 	int			 ok, ret = 0;
-	unsigned long		 n, nc, l;
-	unsigned int		 llen, ctype_num, i;
+	long		 	 n;
+	uint8_t			 ctype_num;
+	CBS			 cert_request, ctypes, rdn_list;
 	X509_NAME		*xn = NULL;
-	const unsigned char	*p, *q;
-	unsigned char		*d;
+	const unsigned char	*q;
 	STACK_OF(X509_NAME)	*ca_sk = NULL;
 
 	n = s->method->ssl_get_message(s, SSL3_ST_CR_CERT_REQ_A,
@@ -1596,7 +1589,9 @@ ssl3_get_certificate_request(SSL *s)
 		}
 	}
 
-	p = d = (unsigned char *)s->init_msg;
+	if (n < 0)
+		goto truncated;
+	CBS_init(&cert_request, s->init_msg, n);
 
 	if ((ca_sk = sk_X509_NAME_new(ca_dn_cmp)) == NULL) {
 		SSLerr(SSL_F_SSL3_GET_CERTIFICATE_REQUEST,
@@ -1605,92 +1600,88 @@ ssl3_get_certificate_request(SSL *s)
 	}
 
 	/* get the certificate types */
-	if (1 > n)
+	if (!CBS_get_u8(&cert_request, &ctype_num))
 		goto truncated;
-	ctype_num= *(p++);
+
 	if (ctype_num > SSL3_CT_NUMBER)
 		ctype_num = SSL3_CT_NUMBER;
-	if (p + ctype_num - d > n) {
+	if (!CBS_get_bytes(&cert_request, &ctypes, ctype_num) ||
+	    !CBS_write_bytes(&ctypes, s->s3->tmp.ctype,
+	    sizeof(s->s3->tmp.ctype), NULL)) {
 		SSLerr(SSL_F_SSL3_GET_CERTIFICATE_REQUEST,
 		    SSL_R_DATA_LENGTH_TOO_LONG);
 		goto err;
 	}
 
-	for (i = 0; i < ctype_num; i++)
-		s->s3->tmp.ctype[i] = p[i];
-	p += ctype_num;
 	if (SSL_USE_SIGALGS(s)) {
-		if (p + 2 - d > n) {
+		CBS sigalgs;
+
+		if (CBS_len(&cert_request) < 2) {
 			SSLerr(SSL_F_SSL3_GET_CERTIFICATE_REQUEST,
 			    SSL_R_DATA_LENGTH_TOO_LONG);
 			goto err;
 		}
-		n2s(p, llen);
+
 		/* Check we have enough room for signature algorithms and
 		 * following length value.
 		 */
-		if ((unsigned long)(p - d + llen + 2) > n) {
+		if (!CBS_get_u16_length_prefixed(&cert_request, &sigalgs)) {
 			ssl3_send_alert(s, SSL3_AL_FATAL, SSL_AD_DECODE_ERROR);
 			SSLerr(SSL_F_SSL3_GET_CERTIFICATE_REQUEST,
 			    SSL_R_DATA_LENGTH_TOO_LONG);
 			goto err;
 		}
-		if ((llen & 1) || !tls1_process_sigalgs(s, p, llen)) {
+		if ((CBS_len(&sigalgs) & 1) ||
+		    !tls1_process_sigalgs(s, CBS_data(&sigalgs),
+		    CBS_len(&sigalgs))) {
 			ssl3_send_alert(s, SSL3_AL_FATAL, SSL_AD_DECODE_ERROR);
 			SSLerr(SSL_F_SSL3_GET_CERTIFICATE_REQUEST,
 			    SSL_R_SIGNATURE_ALGORITHMS_ERROR);
 			goto err;
 		}
-		p += llen;
 	}
 
 	/* get the CA RDNs */
-	if (p + 2 - d > n) {
+	if (CBS_len(&cert_request) < 2) {
 		SSLerr(SSL_F_SSL3_GET_CERTIFICATE_REQUEST,
 		    SSL_R_DATA_LENGTH_TOO_LONG);
 		goto err;
 	}
-	n2s(p, llen);
 
-	if ((unsigned long)(p - d + llen) != n) {
+	if (!CBS_get_u16_length_prefixed(&cert_request, &rdn_list) ||
+	    CBS_len(&cert_request) != 0) {
 		ssl3_send_alert(s, SSL3_AL_FATAL, SSL_AD_DECODE_ERROR);
 		SSLerr(SSL_F_SSL3_GET_CERTIFICATE_REQUEST,
 		    SSL_R_LENGTH_MISMATCH);
 		goto err;
 	}
 
-	for (nc = 0; nc < llen; ) {
-		if (p + 2 - d > n) {
+	while (CBS_len(&rdn_list) > 0) {
+		CBS rdn;
+
+		if (CBS_len(&rdn_list) < 2) {
 			SSLerr(SSL_F_SSL3_GET_CERTIFICATE_REQUEST,
 			    SSL_R_DATA_LENGTH_TOO_LONG);
 			goto err;
 		}
-		n2s(p, l);
-		if ((l + nc + 2) > llen) {
-			if ((s->options & SSL_OP_NETSCAPE_CA_DN_BUG))
-				goto cont; /* netscape bugs */
+
+		if (!CBS_get_u16_length_prefixed(&rdn_list, &rdn)) {
 			ssl3_send_alert(s, SSL3_AL_FATAL, SSL_AD_DECODE_ERROR);
 			SSLerr(SSL_F_SSL3_GET_CERTIFICATE_REQUEST,
 			    SSL_R_CA_DN_TOO_LONG);
 			goto err;
 		}
 
-		q = p;
-
-		if ((xn = d2i_X509_NAME(NULL, &q, l)) == NULL) {
-			/* If netscape tolerance is on, ignore errors */
-			if (s->options & SSL_OP_NETSCAPE_CA_DN_BUG)
-				goto cont;
-			else {
-				ssl3_send_alert(s, SSL3_AL_FATAL,
-				    SSL_AD_DECODE_ERROR);
-				SSLerr(SSL_F_SSL3_GET_CERTIFICATE_REQUEST,
-				    ERR_R_ASN1_LIB);
-				goto err;
-			}
+		q = CBS_data(&rdn);
+		if ((xn = d2i_X509_NAME(NULL, &q, CBS_len(&rdn))) == NULL) {
+			ssl3_send_alert(s, SSL3_AL_FATAL,
+			    SSL_AD_DECODE_ERROR);
+			SSLerr(SSL_F_SSL3_GET_CERTIFICATE_REQUEST,
+			    ERR_R_ASN1_LIB);
+			goto err;
 		}
 
-		if (q != (p + l)) {
+		if (q != CBS_data(&rdn) + CBS_len(&rdn)) {
 			ssl3_send_alert(s, SSL3_AL_FATAL, SSL_AD_DECODE_ERROR);
 			SSLerr(SSL_F_SSL3_GET_CERTIFICATE_REQUEST,
 			    SSL_R_CA_DN_LENGTH_MISMATCH);
@@ -1701,14 +1692,6 @@ ssl3_get_certificate_request(SSL *s)
 			    ERR_R_MALLOC_FAILURE);
 			goto err;
 		}
-
-		p += l;
-		nc += l + 2;
-	}
-
-	if (0) {
-cont:
-		ERR_clear_error();
 	}
 
 	/* we should setup a certificate to return.... */
@@ -1740,10 +1723,10 @@ ca_dn_cmp(const X509_NAME * const *a, const X509_NAME * const *b)
 int
 ssl3_get_new_session_ticket(SSL *s)
 {
-	int			 ok, al, ret = 0, ticklen;
+	int			 ok, al, ret = 0;
+	uint32_t		 lifetime_hint;
 	long			 n;
-	const unsigned char	*p;
-	unsigned char		*d;
+	CBS			 cbs, session_ticket;
 
 	n = s->method->ssl_get_message(s, SSL3_ST_CR_SESSION_TICKET_A,
 	    SSL3_ST_CR_SESSION_TICKET_B, -1, 16384, &ok);
@@ -1760,34 +1743,35 @@ ssl3_get_new_session_ticket(SSL *s)
 		    SSL_R_BAD_MESSAGE_TYPE);
 		goto f_err;
 	}
-	if (n < 6) {
-		/* need at least ticket_lifetime_hint + ticket length */
+
+	if (n < 0) {
 		al = SSL_AD_DECODE_ERROR;
 		SSLerr(SSL_F_SSL3_GET_NEW_SESSION_TICKET,
 		    SSL_R_LENGTH_MISMATCH);
 		goto f_err;
 	}
 
-	p = d = (unsigned char *)s->init_msg;
-	n2l(p, s->session->tlsext_tick_lifetime_hint);
-	n2s(p, ticklen);
-	/* ticket_lifetime_hint + ticket_length + ticket */
-	if (ticklen + 6 != n) {
+	CBS_init(&cbs, s->init_msg, n);
+	if (!CBS_get_u32(&cbs, &lifetime_hint) ||
+#if UINT32_MAX > LONG_MAX
+	    lifetime_hint > LONG_MAX ||
+#endif
+	    !CBS_get_u16_length_prefixed(&cbs, &session_ticket) ||
+	    CBS_len(&cbs) != 0) {
 		al = SSL_AD_DECODE_ERROR;
 		SSLerr(SSL_F_SSL3_GET_NEW_SESSION_TICKET,
 		    SSL_R_LENGTH_MISMATCH);
 		goto f_err;
 	}
-	free(s->session->tlsext_tick);
-	s->session->tlsext_ticklen = 0;
-	s->session->tlsext_tick = malloc(ticklen);
-	if (!s->session->tlsext_tick) {
+	s->session->tlsext_tick_lifetime_hint = (long)lifetime_hint;
+
+	if (!CBS_stow(&session_ticket, &s->session->tlsext_tick,
+	    &s->session->tlsext_ticklen)) {
 		SSLerr(SSL_F_SSL3_GET_NEW_SESSION_TICKET,
 		    ERR_R_MALLOC_FAILURE);
 		goto err;
 	}
-	memcpy(s->session->tlsext_tick, p, ticklen);
-	s->session->tlsext_ticklen = ticklen;
+
 	/*
 	 * There are two ways to detect a resumed ticket sesion.
 	 * One is to set an appropriate session ID and then the server
@@ -1804,8 +1788,9 @@ ssl3_get_new_session_ticket(SSL *s)
 	 * to the SHA256 (or SHA1 is SHA256 is disabled) hash of the
 	 * ticket.
 	 */
-	EVP_Digest(p, ticklen, s->session->session_id,
-	    &s->session->session_id_length, EVP_sha256(), NULL);
+	EVP_Digest(CBS_data(&session_ticket), CBS_len(&session_ticket),
+	    s->session->session_id, &s->session->session_id_length,
+	    EVP_sha256(), NULL);
 	ret = 1;
 	return (ret);
 f_err:
@@ -1817,9 +1802,11 @@ err:
 int
 ssl3_get_cert_status(SSL *s)
 {
+	CBS			 cert_status, response;
+	size_t			 stow_len;
 	int			 ok, al;
-	unsigned long		 resplen, n;
-	const unsigned char	*p;
+	long			 n;
+	uint8_t			 status_type;
 
 	n = s->method->ssl_get_message(s, SSL3_ST_CR_CERT_STATUS_A,
 	    SSL3_ST_CR_CERT_STATUS_B, SSL3_MT_CERTIFICATE_STATUS,
@@ -1827,36 +1814,50 @@ ssl3_get_cert_status(SSL *s)
 
 	if (!ok)
 		return ((int)n);
-	if (n < 4) {
+
+	if (n < 0) {
 		/* need at least status type + length */
 		al = SSL_AD_DECODE_ERROR;
 		SSLerr(SSL_F_SSL3_GET_CERT_STATUS,
 		    SSL_R_LENGTH_MISMATCH);
 		goto f_err;
 	}
-	p = (unsigned char *)s->init_msg;
-	if (*p++ != TLSEXT_STATUSTYPE_ocsp) {
-		al = SSL_AD_DECODE_ERROR;
-		SSLerr(SSL_F_SSL3_GET_CERT_STATUS,
-		    SSL_R_UNSUPPORTED_STATUS_TYPE);
-		goto f_err;
-	}
-	n2l3(p, resplen);
-	if (resplen + 4 != n) {
+
+	CBS_init(&cert_status, s->init_msg, n);
+	if (!CBS_get_u8(&cert_status, &status_type) ||
+	    CBS_len(&cert_status) < 3) {
+		/* need at least status type + length */
 		al = SSL_AD_DECODE_ERROR;
 		SSLerr(SSL_F_SSL3_GET_CERT_STATUS,
 		    SSL_R_LENGTH_MISMATCH);
 		goto f_err;
 	}
-	free(s->tlsext_ocsp_resp);
-	s->tlsext_ocsp_resp = BUF_memdup(p, resplen);
-	if (!s->tlsext_ocsp_resp) {
-		al = SSL_AD_INTERNAL_ERROR;
+
+	if (status_type != TLSEXT_STATUSTYPE_ocsp) {
+		al = SSL_AD_DECODE_ERROR;
 		SSLerr(SSL_F_SSL3_GET_CERT_STATUS,
-		    ERR_R_MALLOC_FAILURE);
+		    SSL_R_UNSUPPORTED_STATUS_TYPE);
 		goto f_err;
 	}
-	s->tlsext_ocsp_resplen = resplen;
+
+	if (!CBS_get_u24_length_prefixed(&cert_status, &response) ||
+	    CBS_len(&cert_status) != 0) {
+		al = SSL_AD_DECODE_ERROR;
+		SSLerr(SSL_F_SSL3_GET_CERT_STATUS,
+		    SSL_R_LENGTH_MISMATCH);
+		goto f_err;
+	}
+
+	if (!CBS_stow(&response, &s->tlsext_ocsp_resp,
+	    &stow_len) || stow_len > INT_MAX) {
+		s->tlsext_ocsp_resplen = 0;
+ 		al = SSL_AD_INTERNAL_ERROR;
+ 		SSLerr(SSL_F_SSL3_GET_CERT_STATUS,
+ 		    ERR_R_MALLOC_FAILURE);
+ 		goto f_err;
+ 	}
+	s->tlsext_ocsp_resplen = (int)stow_len;
+
 	if (s->ctx->tlsext_status_cb) {
 		int ret;
 		ret = s->ctx->tlsext_status_cb(s, s->ctx->tlsext_status_arg);
@@ -2033,37 +2034,8 @@ ssl3_send_client_key_exchange(SSL *s)
 		} else if (alg_k & (SSL_kECDHE|SSL_kECDHr|SSL_kECDHe)) {
 			const EC_GROUP *srvr_group = NULL;
 			EC_KEY *tkey;
-			int ecdh_clnt_cert = 0;
 			int field_size = 0;
 
-			/*
-			 * Did we send out the client's ECDH share for use
-			 * in premaster computation as part of client
-			 * certificate? If so, set ecdh_clnt_cert to 1.
-			 */
-			if ((alg_k & (SSL_kECDHr|SSL_kECDHe)) &&
-			    (s->cert != NULL)) {
-				/*
-				 * XXX: For now, we do not support client
-				 * authentication using ECDH certificates.
-				 * To add such support, one needs to add
-				 * code that checks for appropriate
-				 * conditions and sets ecdh_clnt_cert to 1.
-				 * For example, the cert have an ECC
-				 * key on the same curve as the server's
-				 * and the key should be authorized for
-				 * key agreement.
-				 *
-				 * One also needs to add code in ssl3_connect
-				 * to skip sending the certificate verify
-				 * message.
-				 *
-				 * if ((s->cert->key->privatekey != NULL) &&
-				 *     (s->cert->key->privatekey->type ==
-				 *      EVP_PKEY_EC) && ...)
-				 * ecdh_clnt_cert = 1;
-				 */
-			}
 
 			/* Ensure that we have an ephemeral key for ECDHE. */
 			if ((alg_k & SSL_kECDHE) &&
@@ -2111,36 +2083,13 @@ ssl3_send_client_key_exchange(SSL *s)
 				    ERR_R_EC_LIB);
 				goto err;
 			}
-			if (ecdh_clnt_cert) {
-				/*
-				 * Reuse key info from our certificate
-				 * We only need our private key to perform
-				 * the ECDH computation.
-				 */
-				const BIGNUM *priv_key;
-				tkey = s->cert->key->privatekey->pkey.ec;
-				priv_key = EC_KEY_get0_private_key(tkey);
-				if (priv_key == NULL) {
-					SSLerr(
-					    SSL_F_SSL3_SEND_CLIENT_KEY_EXCHANGE,
-					    ERR_R_MALLOC_FAILURE);
-					goto err;
-				}
-				if (!EC_KEY_set_private_key(clnt_ecdh,
-				    priv_key)) {
-					SSLerr(
-					    SSL_F_SSL3_SEND_CLIENT_KEY_EXCHANGE,
-					    ERR_R_EC_LIB);
-					goto err;
-				}
-			} else {
-				/* Generate a new ECDH key pair */
-				if (!(EC_KEY_generate_key(clnt_ecdh))) {
-					SSLerr(
-					    SSL_F_SSL3_SEND_CLIENT_KEY_EXCHANGE,
-					    ERR_R_ECDH_LIB);
-					goto err;
-				}
+
+			/* Generate a new ECDH key pair */
+			if (!(EC_KEY_generate_key(clnt_ecdh))) {
+				SSLerr(
+				    SSL_F_SSL3_SEND_CLIENT_KEY_EXCHANGE,
+				    ERR_R_ECDH_LIB);
+				goto err;
 			}
 
 			/*
@@ -2168,47 +2117,41 @@ ssl3_send_client_key_exchange(SSL *s)
 
 			memset(p, 0, n); /* clean up */
 
-			if (ecdh_clnt_cert) {
-				/* Send empty client key exch message. */
-				n = 0;
-			} else {
-				/*
-				 * First check the size of encoding and
-				 * allocate memory accordingly.
-				 */
-				encoded_pt_len = EC_POINT_point2oct(
-				    srvr_group,
-				    EC_KEY_get0_public_key(clnt_ecdh),
-				    POINT_CONVERSION_UNCOMPRESSED,
-				    NULL, 0, NULL);
+			/*
+			 * First check the size of encoding and
+			 * allocate memory accordingly.
+			 */
+			encoded_pt_len = EC_POINT_point2oct(
+				srvr_group,
+				EC_KEY_get0_public_key(clnt_ecdh),
+				POINT_CONVERSION_UNCOMPRESSED,
+				NULL, 0, NULL);
 
-				encodedPoint = malloc(encoded_pt_len);
+			encodedPoint = malloc(encoded_pt_len);
 
-				bn_ctx = BN_CTX_new();
-				if ((encodedPoint == NULL) ||
-				    (bn_ctx == NULL)) {
-					SSLerr(
-					    SSL_F_SSL3_SEND_CLIENT_KEY_EXCHANGE,
-					    ERR_R_MALLOC_FAILURE);
-					goto err;
-				}
-
-				/* Encode the public key */
-				n = EC_POINT_point2oct(srvr_group,
-				    EC_KEY_get0_public_key(clnt_ecdh),
-				    POINT_CONVERSION_UNCOMPRESSED,
-				    encodedPoint, encoded_pt_len, bn_ctx);
-
-				*p = n; /* length of encoded point */
-				/* Encoded point will be copied here */
-				p += 1;
-
-				/* copy the point */
-				memcpy((unsigned char *)p, encodedPoint, n);
-				/* increment n to account for length field */
-				n += 1;
-
+			bn_ctx = BN_CTX_new();
+			if ((encodedPoint == NULL) ||
+			    (bn_ctx == NULL)) {
+				SSLerr(
+				    SSL_F_SSL3_SEND_CLIENT_KEY_EXCHANGE,
+				    ERR_R_MALLOC_FAILURE);
+				goto err;
 			}
+
+			/* Encode the public key */
+			n = EC_POINT_point2oct(srvr_group,
+			    EC_KEY_get0_public_key(clnt_ecdh),
+			    POINT_CONVERSION_UNCOMPRESSED,
+			    encodedPoint, encoded_pt_len, bn_ctx);
+
+			*p = n; /* length of encoded point */
+			/* Encoded point will be copied here */
+			p += 1;
+
+			/* copy the point */
+			memcpy((unsigned char *)p, encodedPoint, n);
+			/* increment n to account for length field */
+			n += 1;
 
 			/* Free allocated memory */
 			BN_CTX_free(bn_ctx);

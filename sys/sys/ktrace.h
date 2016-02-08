@@ -1,4 +1,4 @@
-/*	$OpenBSD: ktrace.h,v 1.21 2014/10/13 03:46:33 guenther Exp $	*/
+/*	$OpenBSD: ktrace.h,v 1.23 2015/07/28 05:50:41 guenther Exp $	*/
 /*	$NetBSD: ktrace.h,v 1.12 1996/02/04 02:12:29 christos Exp $	*/
 
 /*
@@ -90,10 +90,12 @@ struct ktr_syscall {
  */
 #define KTR_SYSRET	2
 struct ktr_sysret {
-	short	ktr_code;
-	short	ktr_eosys;
+	int	ktr_code;
 	int	ktr_error;
-	register_t ktr_retval;
+	/*
+	 * If ktr_error is zero, then followed by retval: register_t for
+	 * all syscalls except lseek(), which uses long long
+	 */
 };
 
 /*
@@ -202,7 +204,7 @@ void ktrgenio(struct proc *, int, enum uio_rw, struct iovec *, ssize_t);
 void ktrnamei(struct proc *, char *);
 void ktrpsig(struct proc *, int, sig_t, int, int, siginfo_t *);
 void ktrsyscall(struct proc *, register_t, size_t, register_t []);
-void ktrsysret(struct proc *, register_t, int, register_t);
+void ktrsysret(struct proc *, register_t, int, const register_t [2]);
 void ktr_kuser(const char *, void *, size_t);
 int ktruser(struct proc *, const char *, const void *, size_t);
 
@@ -232,5 +234,11 @@ void    ktrstruct(struct proc *, const char *, const void *, size_t);
 	ktrstruct((p), "fdset", (s), l)
 #define ktrquota(p, s) \
 	ktrstruct((p), "quota", (s), sizeof(struct dqblk))
+#define ktrmsghdr(p, s) \
+	ktrstruct(p, "msghdr", s, sizeof(struct msghdr))
+#define ktriovec(p, s, count) \
+	ktrstruct(p, "iovec", s, (count) * sizeof(struct iovec))
+#define ktrcmsghdr(p, c, len) \
+	ktrstruct(p, "cmsghdr", c, len)
 
 #endif	/* !_KERNEL */

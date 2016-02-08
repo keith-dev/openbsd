@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_eg.c,v 1.36 2014/12/22 02:28:51 tedu Exp $	*/
+/*	$OpenBSD: if_eg.c,v 1.39 2015/06/24 09:40:54 mpi Exp $	*/
 /*	$NetBSD: if_eg.c,v 1.26 1996/05/12 23:52:27 mycroft Exp $	*/
 
 /*
@@ -521,7 +521,7 @@ egstart(struct ifnet *ifp)
 loop:
 	/* Dequeue the next datagram. */
 	IFQ_DEQUEUE(&ifp->if_snd, m0);
-	if (m0 == 0)
+	if (m0 == NULL)
 		return;
 	
 	ifp->if_flags |= IFF_OACTIVE;
@@ -670,8 +670,9 @@ void
 egread(struct eg_softc *sc, caddr_t buf, int len)
 {
 	struct ifnet *ifp = &sc->sc_arpcom.ac_if;
+	struct mbuf_list ml = MBUF_LIST_INITIALIZER();
 	struct mbuf *m;
-	
+
 	if (len <= sizeof(struct ether_header) ||
 	    len > ETHER_MAX_LEN) {
 		printf("%s: invalid packet size %d; dropping\n",
@@ -682,23 +683,13 @@ egread(struct eg_softc *sc, caddr_t buf, int len)
 
 	/* Pull packet off interface. */
 	m = egget(sc, buf, len);
-	if (m == 0) {
+	if (m == NULL) {
 		ifp->if_ierrors++;
 		return;
 	}
 
-	ifp->if_ipackets++;
-
-#if NBPFILTER > 0
-	/*
-	 * Check if there's a BPF listener on this interface.
-	 * If so, hand off the raw packet to BPF.
-	 */
-	if (ifp->if_bpf)
-		bpf_mtap(ifp->if_bpf, m, BPF_DIRECTION_IN);
-#endif
-
-	ether_input_mbuf(ifp, m);
+	ml_enqueue(&ml, m);
+	if_input(ifp, &ml);
 }
 
 /*
@@ -707,14 +698,12 @@ egread(struct eg_softc *sc, caddr_t buf, int len)
 struct mbuf *
 egget(struct eg_softc *sc, caddr_t buf, int totlen)
 {
-	struct ifnet *ifp = &sc->sc_arpcom.ac_if;
 	struct mbuf *top, **mp, *m;
 	int len;
 
 	MGETHDR(m, M_DONTWAIT, MT_DATA);
-	if (m == 0)
+	if (m == NULL)
 		return (0);
-	m->m_pkthdr.rcvif = ifp;
 	m->m_pkthdr.len = totlen;
 	len = MHLEN;
 	top = 0;
@@ -723,7 +712,7 @@ egget(struct eg_softc *sc, caddr_t buf, int totlen)
 	while (totlen > 0) {
 		if (top) {
 			MGET(m, M_DONTWAIT, MT_DATA);
-			if (m == 0) {
+			if (m == NULL) {
 				m_freem(top);
 				return (0);
 			}

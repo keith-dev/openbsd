@@ -1,4 +1,4 @@
-/*	$OpenBSD: autri.c,v 1.36 2014/07/12 18:48:51 tedu Exp $	*/
+/*	$OpenBSD: autri.c,v 1.39 2015/06/10 20:14:02 ratchov Exp $	*/
 
 /*
  * Copyright (c) 2001 SOMEYA Yoshihiko and KUROSAWA Takahiro.
@@ -50,8 +50,6 @@
 #include <sys/audioio.h>
 #include <dev/audio_if.h>
 #include <dev/midi_if.h>
-#include <dev/mulaw.h>
-#include <dev/auconv.h>
 #include <dev/ic/ac97.h>
 #include <dev/ic/mpuvar.h>
 
@@ -699,8 +697,8 @@ autri_init(void *sc_)
 	if (sc->sc_devid == AUTRI_DEVICE_ID_ALI_M5451) {
 		sc->sc_play.ch      = 0;
 		sc->sc_play.ch_intr = 1;
-		sc->sc_rec.ch       = 31;
-		sc->sc_rec.ch_intr  = 2;
+		sc->sc_rec.ch       = 2;
+		sc->sc_rec.ch_intr  = 3;
 	} else {
 		sc->sc_play.ch      = 0x20;
 		sc->sc_play.ch_intr = 0x21;
@@ -912,46 +910,10 @@ autri_query_encoding(void *addr, struct audio_encoding *fp)
 		fp->flags = 0;
 		break;
 	case 1:
-		strlcpy(fp->name, AudioEmulaw, sizeof fp->name);
-		fp->encoding = AUDIO_ENCODING_ULAW;
-		fp->precision = 8;
-		fp->flags = AUDIO_ENCODINGFLAG_EMULATED;
-		break;
-	case 2:
-		strlcpy(fp->name, AudioEalaw, sizeof fp->name);
-		fp->encoding = AUDIO_ENCODING_ALAW;
-		fp->precision = 8;
-		fp->flags = AUDIO_ENCODINGFLAG_EMULATED;
-		break;
-	case 3:
-		strlcpy(fp->name, AudioEslinear, sizeof fp->name);
-		fp->encoding = AUDIO_ENCODING_SLINEAR;
-		fp->precision = 8;
-		fp->flags = 0;
-		break;
-	case 4:
 		strlcpy(fp->name, AudioEslinear_le, sizeof fp->name);
 		fp->encoding = AUDIO_ENCODING_SLINEAR_LE;
 		fp->precision = 16;
 		fp->flags = 0;
-		break;
-	case 5:
-		strlcpy(fp->name, AudioEulinear_le, sizeof fp->name);
-		fp->encoding = AUDIO_ENCODING_ULINEAR_LE;
-		fp->precision = 16;
-		fp->flags = 0;
-		break;
-	case 6:
-		strlcpy(fp->name, AudioEslinear_be, sizeof fp->name);
-		fp->encoding = AUDIO_ENCODING_SLINEAR_BE;
-		fp->precision = 16;
-		fp->flags = AUDIO_ENCODINGFLAG_EMULATED;
-		break;
-	case 7:
-		strlcpy(fp->name, AudioEulinear_be, sizeof fp->name);
-		fp->encoding = AUDIO_ENCODING_ULINEAR_BE;
-		fp->precision = 16;
-		fp->flags = AUDIO_ENCODINGFLAG_EMULATED;
 		break;
 	default:
 		return (EINVAL);
@@ -973,44 +935,14 @@ autri_set_params(void *addr, int setmode, int usemode, struct audio_params *play
 	    mode = mode == AUMODE_RECORD ? AUMODE_PLAY : -1) {
 		if ((setmode & mode) == 0)
 			continue;
-
 		p = mode == AUMODE_PLAY ? play : rec;
-		if (p->sample_rate < 4000)
-			p->sample_rate = 4000;
-		if (p->sample_rate > 48000)
-			p->sample_rate = 48000;
-		if (p->precision > 16)
+		p->sample_rate = 48000;
+		if (p->precision != 8)
 			p->precision = 16;
-		if (p->channels > 2)
+		if (p->channels != 1)
 			p->channels = 2;
-		p->factor = 1;
-		p->sw_code = 0;
-		switch (p->encoding) {
-		case AUDIO_ENCODING_SLINEAR_BE:
-		case AUDIO_ENCODING_ULINEAR_BE:
-			if (p->precision == 16)
-				p->sw_code = swap_bytes;
-			break;
-		case AUDIO_ENCODING_SLINEAR_LE:
-		case AUDIO_ENCODING_ULINEAR_LE:
-			break;
-		case AUDIO_ENCODING_ULAW:
-			if (mode == AUMODE_PLAY)
-				p->sw_code = mulaw_to_ulinear8;
-			else
-				p->sw_code = ulinear8_to_mulaw;
-
-			break;
-		case AUDIO_ENCODING_ALAW:
-			if (mode == AUMODE_PLAY)
-				p->sw_code = alaw_to_ulinear8;
-			else
-				p->sw_code = ulinear8_to_alaw;
-
-			break;
-		default:
-			return (EINVAL);
-		}
+		p->encoding = p->precision == 16 ?
+		    AUDIO_ENCODING_SLINEAR_LE : AUDIO_ENCODING_ULINEAR_LE;
 		p->bps = AUDIO_BPS(p->precision);
 		p->msb = 1;
 	}

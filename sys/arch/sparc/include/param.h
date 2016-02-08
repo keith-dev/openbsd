@@ -1,4 +1,4 @@
-/*	$OpenBSD: param.h,v 1.49 2013/03/26 05:04:10 deraadt Exp $	*/
+/*	$OpenBSD: param.h,v 1.51 2015/03/30 20:30:22 miod Exp $	*/
 
 /*
  * Copyright (c) 1992, 1993
@@ -90,8 +90,6 @@
 
 #ifdef _KERNEL
 
-#define	KERNTEXTOFF	0xf8004000		/* start of kernel text */
-
 #define	NBPG		PAGE_SIZE		/* bytes/page */
 #define	PGSHIFT		PAGE_SHIFT		/* LOG2(PAGE_SIZE) */
 #define	PGOFSET		PAGE_MASK		/* byte offset into page */
@@ -114,10 +112,9 @@
 #define	NKMEMPAGES_MAX_DEFAULT		((4 * 1024 * 1024) >> PAGE_SHIFT)
 
 #ifndef _LOCORE
-extern vaddr_t		dvma_base;
-extern vaddr_t		dvma_end;
 extern struct extent	*dvmamap_extent;
 
+extern void	dvma_init(void);
 extern caddr_t	kdvma_mapin(caddr_t, int, int);
 extern caddr_t	dvma_malloc_space(size_t, void *, int, int);
 extern void	dvma_free(caddr_t, size_t, void *);

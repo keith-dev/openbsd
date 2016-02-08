@@ -1,4 +1,4 @@
-#	$OpenBSD: GENERIC,v 1.252 2015/01/03 21:24:19 uaa Exp $
+#	$OpenBSD: GENERIC,v 1.254 2015/04/16 09:09:49 mpi Exp $
 #
 # For further information on compiling OpenBSD kernels, see the config(8)
 # man page.
@@ -63,6 +63,7 @@ usb*	at ohci?
 # USB devices
 uhub*	at usb?				# USB Hubs
 uhub*	at uhub?			# USB Hubs
+ualea*	at uhub?			# Araneus Alea II TRNG
 umodem*	at uhub?			# USB Modems/Serial
 ucom*	at umodem?
 uvisor*	at uhub?			# Handspring Visor
@@ -203,8 +204,6 @@ gdt*	at pci?				# ICP Vortex GDT RAID controllers
 #ami*	at pci?				# AMI MegaRAID controllers
 
 # Networking devices
-lmc*	at pci?				# Lan Media Corp SSI/T3/HSSI
-san*	at pci?				# Sangoma PCI AFT card
 pcn*	at pci?				# AMD PCnet-PCI Ethernet
 de*	at pci?				# 21x4[012]-based Ethernet
 dc*	at pci?				# 21143, "tulip" clone ethernet

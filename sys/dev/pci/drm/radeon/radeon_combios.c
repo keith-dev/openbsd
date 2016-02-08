@@ -1,4 +1,4 @@
-/*	$OpenBSD: radeon_combios.c,v 1.6 2015/02/11 07:01:37 jsg Exp $	*/
+/*	$OpenBSD: radeon_combios.c,v 1.8 2015/04/18 14:47:35 jsg Exp $	*/
 /*
  * Copyright 2004 ATI Technologies Inc., Markham, Ontario
  * Copyright 2007-8 Advanced Micro Devices, Inc.
@@ -50,11 +50,6 @@ radeon_add_legacy_connector(struct drm_device *dev,
 extern void
 radeon_add_legacy_encoder(struct drm_device *dev, uint32_t encoder_enum,
 			  uint32_t supported_device);
-
-
-void radeon_combios_connected_scratch_regs(struct drm_connector *connector,
-				      struct drm_encoder *encoder,
-				      bool connected);
 
 /* old legacy ATI BIOS routines */
 
@@ -1211,8 +1206,7 @@ struct radeon_encoder_lvds *radeon_combios_get_lvds_info(struct radeon_encoder
 			 lvds->native_mode.vdisplay);
 
 		lvds->panel_vcc_delay = RBIOS16(lcd_info + 0x2c);
-		if (2000 < lvds->panel_vcc_delay)
-			lvds->panel_vcc_delay = 2000;
+		lvds->panel_vcc_delay = min_t(u16, lvds->panel_vcc_delay, 2000);
 
 		lvds->panel_pwr_delay = RBIOS8(lcd_info + 0x24);
 		lvds->panel_digon_delay = RBIOS16(lcd_info + 0x38) & 0xf;

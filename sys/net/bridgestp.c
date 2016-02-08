@@ -1,4 +1,4 @@
-/*	$OpenBSD: bridgestp.c,v 1.51 2014/12/19 17:14:39 tedu Exp $	*/
+/*	$OpenBSD: bridgestp.c,v 1.59 2015/07/17 18:15:41 mpi Exp $	*/
 
 /*
  * Copyright (c) 2000 Jason L. Wright (jason@thought.net)
@@ -32,10 +32,6 @@
  * ISO/IEC 802.1D-2004, June 9, 2004.
  */
 
-#include "bridge.h"
-
-#if NBRIDGE > 0
-
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/mbuf.h>
@@ -49,7 +45,6 @@
 #include <net/if_types.h>
 #include <net/if_dl.h>
 #include <net/if_llc.h>
-#include <net/if_media.h>
 #include <net/netisr.h>
 
 #include <netinet/in.h>
@@ -259,7 +254,7 @@ void	bstp_set_timer_tc(struct bstp_port *);
 void	bstp_set_timer_msgage(struct bstp_port *);
 int	bstp_rerooted(struct bstp_state *, struct bstp_port *);
 u_int32_t	bstp_calc_path_cost(struct bstp_port *);
-void	bstp_notify_rtage(void *, int);
+void	bstp_notify_rtage(struct bstp_port *, int);
 void	bstp_ifupdstatus(struct bstp_state *, struct bstp_port *);
 void	bstp_enable_port(struct bstp_state *, struct bstp_port *);
 void	bstp_disable_port(struct bstp_state *, struct bstp_port *);
@@ -358,7 +353,6 @@ bstp_transmit_tcn(struct bstp_state *bs, struct bstp_port *bp)
 	struct ifnet *ifp = bp->bp_ifp;
 	struct ether_header *eh;
 	struct mbuf *m;
-	int s, len, error;
 
 	if (ifp == NULL || (ifp->if_flags & IFF_RUNNING) == 0)
 		return;
@@ -366,7 +360,7 @@ bstp_transmit_tcn(struct bstp_state *bs, struct bstp_port *bp)
 	MGETHDR(m, M_DONTWAIT, MT_DATA);
 	if (m == NULL)
 		return;
-	m->m_pkthdr.rcvif = ifp;
+	m->m_pkthdr.ph_ifidx = ifp->if_index;
 	m->m_pkthdr.len = sizeof(*eh) + sizeof(bpdu);
 	m->m_pkthdr.pf.prio = BSTP_IFQ_PRIO;
 	m->m_len = m->m_pkthdr.len;
@@ -383,16 +377,8 @@ bstp_transmit_tcn(struct bstp_state *bs, struct bstp_port *bp)
 	bpdu.tbu_bpdutype = BSTP_MSGTYPE_TCN;
 	bcopy(&bpdu, mtod(m, caddr_t) + sizeof(*eh), sizeof(bpdu));
 
-	s = splnet();
 	bp->bp_txcount++;
-	len = m->m_pkthdr.len;
-	IFQ_ENQUEUE(&ifp->if_snd, m, NULL, error);
-	if (error == 0) {
-		ifp->if_obytes += len;
-		ifp->if_omcasts++;
-		if_start(ifp);
-	}
-	splx(s);
+	if_enqueue(ifp, m);
 }
 
 void
@@ -474,7 +460,7 @@ bstp_send_bpdu(struct bstp_state *bs, struct bstp_port *bp,
 	struct ifnet *ifp = bp->bp_ifp;
 	struct mbuf *m;
 	struct ether_header *eh;
-	int s, len, error;
+	int s;
 
 	s = splnet();
 	if (ifp == NULL || (ifp->if_flags & IFF_RUNNING) == 0)
@@ -517,18 +503,12 @@ bstp_send_bpdu(struct bstp_state *bs, struct bstp_port *bp,
 	default:
 		panic("not implemented");
 	}
-	m->m_pkthdr.rcvif = ifp;
+	m->m_pkthdr.ph_ifidx = ifp->if_index;
 	m->m_len = m->m_pkthdr.len;
 	m->m_pkthdr.pf.prio = BSTP_IFQ_PRIO;
 
 	bp->bp_txcount++;
-	len = m->m_pkthdr.len;
-	IFQ_ENQUEUE(&ifp->if_snd, m, NULL, error);
-	if (error == 0) {
-		ifp->if_obytes += len;
-		ifp->if_omcasts++;
-		if_start(ifp);
-	}
+	if_enqueue(ifp, m);
  done:
 	splx(s);
 }
@@ -597,6 +577,9 @@ bstp_input(struct bstp_state *bs, struct bstp_port *bp,
 	len = ntohs(eh->ether_type);
 	if (len < sizeof(tpdu))
 		goto out;
+
+	m_adj(m, ETHER_HDR_LEN);
+
 	if (m->m_pkthdr.len > len)
 		m_adj(m, len - m->m_pkthdr.len);
 	if ((m = m_pullup(m, sizeof(tpdu))) == NULL)
@@ -642,8 +625,7 @@ bstp_input(struct bstp_state *bs, struct bstp_port *bp,
 		break;
 	}
  out:
-	if (m)
-		m_freem(m);
+	m_freem(m);
 	return (NULL);
 }
 
@@ -1465,7 +1447,7 @@ bstp_set_port_tc(struct bstp_port *bp, int state)
 		bstp_timer_stop(&bp->bp_tc_timer);
 		/* flush routes on the parent bridge */
 		bp->bp_fdbflush = 1;
-		bstp_notify_rtage(bp->bp_ifp, 0);
+		bstp_notify_rtage(bp, 0);
 		bp->bp_tc_ack = 0;
 		DPRINTF("%s -> TC_INACTIVE\n", bp->bp_ifp->if_xname);
 		break;
@@ -1507,7 +1489,7 @@ bstp_set_port_tc(struct bstp_port *bp, int state)
 	case BSTP_TCSTATE_PROPAG:
 		/* flush routes on the parent bridge */
 		bp->bp_fdbflush = 1;
-		bstp_notify_rtage(bp->bp_ifp, 0);
+		bstp_notify_rtage(bp, 0);
 		bp->bp_tc_prop = 0;
 		bstp_set_timer_tc(bp);
 		DPRINTF("%s -> TC_PROPAG\n", bp->bp_ifp->if_xname);
@@ -1603,9 +1585,8 @@ bstp_calc_path_cost(struct bstp_port *bp)
 }
 
 void
-bstp_notify_rtage(void *arg, int pending)
+bstp_notify_rtage(struct bstp_port *bp, int pending)
 {
-	struct bstp_port *bp = (struct bstp_port *)arg;
 	int age = 0;
 
 	splassert(IPL_NET);
@@ -2278,4 +2259,3 @@ bstp_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 
 	return (err);
 }
-#endif /* NBRIDGE */

@@ -1,4 +1,4 @@
-/* $OpenBSD: cmd-load-buffer.c,v 1.31 2014/10/20 22:29:25 nicm Exp $ */
+/* $OpenBSD: cmd-load-buffer.c,v 1.34 2015/06/05 18:06:30 nicm Exp $ */
 
 /*
  * Copyright (c) 2009 Tiago Cunha <me@tiagocunha.org>
@@ -72,7 +72,7 @@ cmd_load_buffer_exec(struct cmd *self, struct cmd_q *cmdq)
 
 	if (c != NULL && c->session == NULL)
 		cwd = c->cwd;
-	else if ((s = cmd_current_session(cmdq, 0)) != NULL)
+	else if ((s = cmd_find_current(cmdq)) != NULL)
 		cwd = s->cwd;
 	else
 		cwd = AT_FDCWD;
@@ -132,7 +132,7 @@ cmd_load_buffer_callback(struct client *c, int closed, void *data)
 		return;
 	c->stdin_callback = NULL;
 
-	c->references--;
+	server_client_unref(c);
 	if (c->flags & CLIENT_DEAD)
 		return;
 

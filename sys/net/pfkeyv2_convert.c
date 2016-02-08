@@ -1,4 +1,4 @@
-/*	$OpenBSD: pfkeyv2_convert.c,v 1.47 2015/02/06 03:04:49 blambert Exp $	*/
+/*	$OpenBSD: pfkeyv2_convert.c,v 1.54 2015/06/11 15:59:17 mikeb Exp $	*/
 /*
  * The author of this code is Angelos D. Keromytis (angelos@keromytis.org)
  *
@@ -279,12 +279,8 @@ export_sa(void **p, struct tdb *tdb)
 void
 import_lifetime(struct tdb *tdb, struct sadb_lifetime *sadb_lifetime, int type)
 {
-	struct timeval tv;
-
 	if (!sadb_lifetime)
 		return;
-
-	getmicrotime(&tv);
 
 	switch (type) {
 	case PFKEYV2_LIFETIME_HARD:
@@ -303,11 +299,8 @@ import_lifetime(struct tdb *tdb, struct sadb_lifetime *sadb_lifetime, int type)
 		if ((tdb->tdb_exp_timeout =
 		    sadb_lifetime->sadb_lifetime_addtime) != 0) {
 			tdb->tdb_flags |= TDBF_TIMER;
-			if (tv.tv_sec + tdb->tdb_exp_timeout < tv.tv_sec)
-				tv.tv_sec = ((unsigned long) -1) / 2; /* XXX */
-			else
-				tv.tv_sec += tdb->tdb_exp_timeout;
-			timeout_add(&tdb->tdb_timer_tmo, hzto(&tv));
+			timeout_add_sec(&tdb->tdb_timer_tmo,
+			    tdb->tdb_exp_timeout);
 		} else
 			tdb->tdb_flags &= ~TDBF_TIMER;
 
@@ -334,11 +327,8 @@ import_lifetime(struct tdb *tdb, struct sadb_lifetime *sadb_lifetime, int type)
 		if ((tdb->tdb_soft_timeout =
 		    sadb_lifetime->sadb_lifetime_addtime) != 0) {
 			tdb->tdb_flags |= TDBF_SOFT_TIMER;
-			if (tv.tv_sec + tdb->tdb_soft_timeout < tv.tv_sec)
-				tv.tv_sec = ((unsigned long) -1) / 2; /* XXX */
-			else
-				tv.tv_sec += tdb->tdb_soft_timeout;
-			timeout_add(&tdb->tdb_stimer_tmo, hzto(&tv));
+			timeout_add_sec(&tdb->tdb_stimer_tmo,
+			    tdb->tdb_soft_timeout);
 		} else
 			tdb->tdb_flags &= ~TDBF_SOFT_TIMER;
 
@@ -700,194 +690,68 @@ export_address(void **p, struct sockaddr *sa)
 }
 
 /*
- * Import authentication information into the TDB.
- */
-void
-import_auth(struct tdb *tdb, struct sadb_x_cred *sadb_auth, int dstauth)
-{
-	struct ipsec_ref **ipr;
-
-	if (!sadb_auth)
-		return;
-
-	if (dstauth == PFKEYV2_AUTH_REMOTE)
-		ipr = &tdb->tdb_remote_auth;
-	else
-		ipr = &tdb->tdb_local_auth;
-
-	*ipr = malloc(EXTLEN(sadb_auth) - sizeof(struct sadb_x_cred) +
-	    sizeof(struct ipsec_ref), M_CREDENTIALS, M_WAITOK);
-	(*ipr)->ref_len = EXTLEN(sadb_auth) - sizeof(struct sadb_x_cred);
-
-	switch (sadb_auth->sadb_x_cred_type) {
-	case SADB_X_AUTHTYPE_PASSPHRASE:
-		(*ipr)->ref_type = IPSP_AUTH_PASSPHRASE;
-		break;
-	case SADB_X_AUTHTYPE_RSA:
-		(*ipr)->ref_type = IPSP_AUTH_RSA;
-		break;
-	default:
-		free(*ipr, M_CREDENTIALS, 0);
-		*ipr = NULL;
-		return;
-	}
-	(*ipr)->ref_count = 1;
-	(*ipr)->ref_malloctype = M_CREDENTIALS;
-	bcopy((void *) sadb_auth + sizeof(struct sadb_x_cred),
-	    (*ipr) + 1, (*ipr)->ref_len);
-}
-
-/*
- * Import a set of credentials into the TDB.
- */
-void
-import_credentials(struct tdb *tdb, struct sadb_x_cred *sadb_cred, int dstcred)
-{
-	struct ipsec_ref **ipr;
-
-	if (!sadb_cred)
-		return;
-
-	if (dstcred == PFKEYV2_CRED_REMOTE)
-		ipr = &tdb->tdb_remote_cred;
-	else
-		ipr = &tdb->tdb_local_cred;
-
-	*ipr = malloc(EXTLEN(sadb_cred) - sizeof(struct sadb_x_cred) +
-	    sizeof(struct ipsec_ref), M_CREDENTIALS, M_WAITOK);
-	(*ipr)->ref_len = EXTLEN(sadb_cred) - sizeof(struct sadb_x_cred);
-
-	switch (sadb_cred->sadb_x_cred_type) {
-	case SADB_X_CREDTYPE_X509:
-		(*ipr)->ref_type = IPSP_CRED_X509;
-		break;
-	case SADB_X_CREDTYPE_KEYNOTE:
-		(*ipr)->ref_type = IPSP_CRED_KEYNOTE;
-		break;
-	default:
-		free(*ipr, M_CREDENTIALS, 0);
-		*ipr = NULL;
-		return;
-	}
-	(*ipr)->ref_count = 1;
-	(*ipr)->ref_malloctype = M_CREDENTIALS;
-	bcopy((void *) sadb_cred + sizeof(struct sadb_x_cred),
-	    (*ipr) + 1, (*ipr)->ref_len);
-}
-
-/*
  * Import an identity payload into the TDB.
  */
-void
-import_identity(struct tdb *tdb, struct sadb_ident *sadb_ident, int type)
+static void
+import_identity(struct ipsec_id **id, struct sadb_ident *sadb_ident)
 {
-	struct ipsec_ref **ipr;
-
-	if (!sadb_ident)
+	if (!sadb_ident) {
+		*id = NULL;
 		return;
+	}
 
-	if (type == PFKEYV2_IDENTITY_SRC)
-		ipr = &tdb->tdb_srcid;
-	else
-		ipr = &tdb->tdb_dstid;
-
-	*ipr = malloc(EXTLEN(sadb_ident) - sizeof(struct sadb_ident) +
-	    sizeof(struct ipsec_ref), M_CREDENTIALS, M_WAITOK);
-	(*ipr)->ref_len = EXTLEN(sadb_ident) - sizeof(struct sadb_ident);
+	*id = malloc(EXTLEN(sadb_ident) - sizeof(struct sadb_ident) +
+	    sizeof(struct ipsec_id), M_CREDENTIALS, M_WAITOK);
+	(*id)->len = EXTLEN(sadb_ident) - sizeof(struct sadb_ident);
 
 	switch (sadb_ident->sadb_ident_type) {
 	case SADB_IDENTTYPE_PREFIX:
-		(*ipr)->ref_type = IPSP_IDENTITY_PREFIX;
+		(*id)->type = IPSP_IDENTITY_PREFIX;
 		break;
 	case SADB_IDENTTYPE_FQDN:
-		(*ipr)->ref_type = IPSP_IDENTITY_FQDN;
+		(*id)->type = IPSP_IDENTITY_FQDN;
 		break;
 	case SADB_IDENTTYPE_USERFQDN:
-		(*ipr)->ref_type = IPSP_IDENTITY_USERFQDN;
-		break;
-	case SADB_X_IDENTTYPE_CONNECTION:
-		(*ipr)->ref_type = IPSP_IDENTITY_CONNECTION;
+		(*id)->type = IPSP_IDENTITY_USERFQDN;
 		break;
 	default:
-		free(*ipr, M_CREDENTIALS, 0);
-		*ipr = NULL;
+		free(*id, M_CREDENTIALS, 0);
+		*id = NULL;
 		return;
 	}
-	(*ipr)->ref_count = 1;
-	(*ipr)->ref_malloctype = M_CREDENTIALS;
-	bcopy((void *) sadb_ident + sizeof(struct sadb_ident), (*ipr) + 1,
-	    (*ipr)->ref_len);
+	bcopy((void *) sadb_ident + sizeof(struct sadb_ident), (*id) + 1,
+	    (*id)->len);
 }
 
 void
-export_credentials(void **p, struct tdb *tdb, int dstcred)
+import_identities(struct ipsec_ids **ids, int swapped,
+    struct sadb_ident *srcid, struct sadb_ident *dstid)
 {
-	struct ipsec_ref **ipr;
-	struct sadb_x_cred *sadb_cred = (struct sadb_x_cred *) *p;
+	struct ipsec_ids *tmp;
 
-	if (dstcred == PFKEYV2_CRED_REMOTE)
-		ipr = &tdb->tdb_remote_cred;
-	else
-		ipr = &tdb->tdb_local_cred;
-
-	sadb_cred->sadb_x_cred_len = (sizeof(struct sadb_x_cred) +
-	    PADUP((*ipr)->ref_len)) / sizeof(uint64_t);
-
-	switch ((*ipr)->ref_type) {
-	case IPSP_CRED_KEYNOTE:
-		sadb_cred->sadb_x_cred_type = SADB_X_CREDTYPE_KEYNOTE;
-		break;
-	case IPSP_CRED_X509:
-		sadb_cred->sadb_x_cred_type = SADB_X_CREDTYPE_X509;
-		break;
+	*ids = NULL;
+	tmp = malloc(sizeof(struct ipsec_ids), M_CREDENTIALS, M_WAITOK);
+	import_identity(&tmp->id_local, swapped ? dstid: srcid);
+	import_identity(&tmp->id_remote, swapped ? srcid: dstid);
+	if (tmp->id_local != NULL && tmp->id_remote != NULL) {
+		*ids = ipsp_ids_insert(tmp);
+		if (*ids == tmp)
+			return;
 	}
-	*p += sizeof(struct sadb_x_cred);
-	bcopy((*ipr) + 1, *p, (*ipr)->ref_len);
-	*p += PADUP((*ipr)->ref_len);
+	free(tmp->id_local, M_CREDENTIALS, 0);
+	free(tmp->id_remote, M_CREDENTIALS, 0);
+	free(tmp, M_CREDENTIALS, 0);
 }
 
-void
-export_auth(void **p, struct tdb *tdb, int dstauth)
+static void
+export_identity(void **p, struct ipsec_id *id)
 {
-	struct ipsec_ref **ipr;
-	struct sadb_x_cred *sadb_auth = (struct sadb_x_cred *) *p;
-
-	if (dstauth == PFKEYV2_AUTH_REMOTE)
-		ipr = &tdb->tdb_remote_auth;
-	else
-		ipr = &tdb->tdb_local_auth;
-
-	sadb_auth->sadb_x_cred_len = (sizeof(struct sadb_x_cred) +
-	    PADUP((*ipr)->ref_len)) / sizeof(uint64_t);
-
-	switch ((*ipr)->ref_type) {
-	case IPSP_AUTH_PASSPHRASE:
-		sadb_auth->sadb_x_cred_type = SADB_X_AUTHTYPE_PASSPHRASE;
-		break;
-	case IPSP_AUTH_RSA:
-		sadb_auth->sadb_x_cred_type = SADB_X_AUTHTYPE_RSA;
-		break;
-	}
-	*p += sizeof(struct sadb_x_cred);
-	bcopy((*ipr) + 1, *p, (*ipr)->ref_len);
-	*p += PADUP((*ipr)->ref_len);
-}
-
-void
-export_identity(void **p, struct tdb *tdb, int type)
-{
-	struct ipsec_ref **ipr;
 	struct sadb_ident *sadb_ident = (struct sadb_ident *) *p;
 
-	if (type == PFKEYV2_IDENTITY_SRC)
-		ipr = &tdb->tdb_srcid;
-	else
-		ipr = &tdb->tdb_dstid;
-
 	sadb_ident->sadb_ident_len = (sizeof(struct sadb_ident) +
-	    PADUP((*ipr)->ref_len)) / sizeof(uint64_t);
+	    PADUP(id->len)) / sizeof(uint64_t);
 
-	switch ((*ipr)->ref_type) {
+	switch (id->type) {
 	case IPSP_IDENTITY_PREFIX:
 		sadb_ident->sadb_ident_type = SADB_IDENTTYPE_PREFIX;
 		break;
@@ -897,13 +761,20 @@ export_identity(void **p, struct tdb *tdb, int type)
 	case IPSP_IDENTITY_USERFQDN:
 		sadb_ident->sadb_ident_type = SADB_IDENTTYPE_USERFQDN;
 		break;
-	case IPSP_IDENTITY_CONNECTION:
-		sadb_ident->sadb_ident_type = SADB_X_IDENTTYPE_CONNECTION;
-		break;
 	}
 	*p += sizeof(struct sadb_ident);
-	bcopy((*ipr) + 1, *p, (*ipr)->ref_len);
-	*p += PADUP((*ipr)->ref_len);
+	bcopy(id + 1, *p, id->len);
+	*p += PADUP(id->len);
+}
+
+void
+export_identities(void **p, struct ipsec_ids *ids, int swapped,
+    void **headers)
+{
+	headers[SADB_EXT_IDENTITY_SRC] = *p;
+	export_identity(p, swapped ? ids->id_remote : ids->id_local);
+	headers[SADB_EXT_IDENTITY_DST] = *p;
+	export_identity(p, swapped ? ids->id_local : ids->id_remote);
 }
 
 /* ... */

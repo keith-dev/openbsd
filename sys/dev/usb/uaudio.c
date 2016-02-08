@@ -1,4 +1,4 @@
-/*	$OpenBSD: uaudio.c,v 1.109 2015/01/12 07:12:58 deraadt Exp $ */
+/*	$OpenBSD: uaudio.c,v 1.112 2015/06/15 15:45:28 mpi Exp $ */
 /*	$NetBSD: uaudio.c,v 1.90 2004/10/29 17:12:53 kent Exp $	*/
 
 /*
@@ -52,8 +52,6 @@
 
 #include <sys/audioio.h>
 #include <dev/audio_if.h>
-#include <dev/mulaw.h>
-#include <dev/auconv.h>
 
 #include <dev/usb/usb.h>
 #include <dev/usb/usbdevs.h>
@@ -2356,8 +2354,6 @@ uaudio_get_default_params(void *addr, int mode, struct audio_params *p)
 	p->bps = 2;
 	p->msb = 1;
 	p->channels = 2;
-	p->sw_code = NULL;
-	p->factor = 1;
 
 	/* If the device doesn't support the current mode, there's no
 	 * need to find better parameters.
@@ -2942,10 +2938,8 @@ uaudio_chan_ptransfer(struct chan *ch)
 #endif
 
 	DPRINTFN(5,("uaudio_chan_ptransfer: transfer xfer=%p\n", cb->xfer));
-	/* Fill the request */
-	usbd_setup_isoc_xfer(cb->xfer, ch->pipe, cb, cb->sizes,
-			     ch->nframes, USBD_NO_COPY,
-			     uaudio_chan_pintr);
+	usbd_setup_isoc_xfer(cb->xfer, ch->pipe, cb, cb->sizes, ch->nframes,
+	    USBD_NO_COPY | USBD_SHORT_XFER_OK, uaudio_chan_pintr);
 
 	(void)usbd_transfer(cb->xfer);
 }
@@ -3000,9 +2994,9 @@ uaudio_chan_psync_transfer(struct chan *ch)
 	sb->size = total;
 
 	DPRINTFN(5,("%s: transfer xfer=%p\n", __func__, sb->xfer));
-	/* Fill the request */
 	usbd_setup_isoc_xfer(sb->xfer, ch->sync_pipe, sb, sb->sizes,
-	    ch->nsync_frames, USBD_NO_COPY, uaudio_chan_psync_intr);
+	    ch->nsync_frames, USBD_NO_COPY | USBD_SHORT_XFER_OK,
+	    uaudio_chan_psync_intr);
 
 	(void)usbd_transfer(sb->xfer);
 }
@@ -3099,10 +3093,8 @@ uaudio_chan_rtransfer(struct chan *ch)
 #endif
 
 	DPRINTFN(5,("uaudio_chan_rtransfer: transfer xfer=%p\n", cb->xfer));
-	/* Fill the request */
-	usbd_setup_isoc_xfer(cb->xfer, ch->pipe, cb, cb->sizes,
-			     ch->nframes, USBD_NO_COPY,
-			     uaudio_chan_rintr);
+	usbd_setup_isoc_xfer(cb->xfer, ch->pipe, cb, cb->sizes, ch->nframes,
+	    USBD_NO_COPY | USBD_SHORT_XFER_OK, uaudio_chan_rintr);
 
 	(void)usbd_transfer(cb->xfer);
 }
@@ -3493,9 +3485,6 @@ uaudio_set_params(void *addr, int setmode, int usemode,
 			    __func__, mode == AUMODE_RECORD ? "rec" : "play"));
 			continue;
 		}
-
-		p->sw_code = NULL;
-		p->factor  = 1;
 
 		p->bps = sc->sc_alts[i].asf1desc->bSubFrameSize;
 		p->msb = 1;

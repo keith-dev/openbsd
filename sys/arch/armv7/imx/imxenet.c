@@ -1,4 +1,4 @@
-/* $OpenBSD: imxenet.c,v 1.10 2015/01/17 02:57:16 jsg Exp $ */
+/* $OpenBSD: imxenet.c,v 1.16 2015/06/24 09:40:53 mpi Exp $ */
 /*
  * Copyright (c) 2012-2013 Patrick Wildt <patrick@blueri.se>
  *
@@ -136,6 +136,8 @@
 #define ENET_HUMMINGBOARD_PHY_RST		(3*32+15)
 #define ENET_SABRELITE_PHY			6
 #define ENET_SABRELITE_PHY_RST			(2*32+23)
+#define ENET_SABRESD_PHY			1
+#define ENET_SABRESD_PHY_RST			(0*32+25)
 #define ENET_NITROGEN6X_PHY			6
 #define ENET_NITROGEN6X_PHY_RST			(0*32+27)
 #define ENET_UDOO_PHY				6
@@ -145,6 +147,8 @@
 #define ENET_WANDBOARD_PHY			1
 #define ENET_PHYFLEX_PHY			3
 #define ENET_PHYFLEX_PHY_RST			(2*32+23)
+#define ENET_NOVENA_PHY				7
+#define ENET_NOVENA_PHY_RST			(2*32+23)
 
 #define HREAD4(sc, reg)							\
 	(bus_space_read_4((sc)->sc_iot, (sc)->sc_ioh, (reg)))
@@ -180,6 +184,8 @@ struct imxenet_softc {
 struct imxenet_softc *imxenet_sc;
 
 void imxenet_attach(struct device *, struct device *, void *);
+int imxenet_enaddr_valid(u_char *);
+void imxenet_enaddr(struct imxenet_softc *);
 void imxenet_chip_init(struct imxenet_softc *);
 int imxenet_ioctl(struct ifnet *, u_long, caddr_t);
 void imxenet_start(struct ifnet *);
@@ -255,6 +261,13 @@ imxenet_attach(struct device *parent, struct device *self, void *args)
 		imxgpio_set_bit(ENET_NITROGEN6X_PHY_RST);
 		delay(100);
 		break;
+	case BOARD_ID_IMX6_SABRESD:
+		imxgpio_clear_bit(ENET_SABRESD_PHY_RST);
+		imxgpio_set_dir(ENET_SABRESD_PHY_RST, IMXGPIO_DIR_OUT);
+		delay(1000 * 10);
+		imxgpio_set_bit(ENET_SABRESD_PHY_RST);
+		delay(100);
+		break;
 	case BOARD_ID_IMX6_UDOO:
 		imxgpio_set_bit(ENET_UDOO_PWR);
 		imxgpio_set_dir(ENET_UDOO_PWR, IMXGPIO_DIR_OUT);
@@ -264,7 +277,18 @@ imxenet_attach(struct device *parent, struct device *self, void *args)
 		imxgpio_set_bit(ENET_UDOO_PHY_RST);
 		delay(1000 * 100);
 		break;
+	case BOARD_ID_IMX6_NOVENA:
+		imxgpio_clear_bit(ENET_NOVENA_PHY_RST);
+		imxgpio_set_dir(ENET_NOVENA_PHY_RST, IMXGPIO_DIR_OUT);
+		delay(1000 * 10);
+		imxgpio_set_bit(ENET_NOVENA_PHY_RST);
+		delay(100);
+		break;
 	}
+	printf("\n");
+
+	/* Figure out the hardware address. Must happen before reset. */
+	imxenet_enaddr(sc);
 
 	/* reset the controller */
 	HSET4(sc, ENET_ECR, ENET_ECR_RESET);
@@ -319,8 +343,6 @@ imxenet_attach(struct device *parent, struct device *self, void *args)
 	sc->cur_tx = 0;
 	sc->cur_rx = 0;
 
-	printf("\n");
-
 	s = splnet();
 
 	ifp = &sc->sc_ac.ac_if;
@@ -330,9 +352,6 @@ imxenet_attach(struct device *parent, struct device *self, void *args)
 	ifp->if_ioctl = imxenet_ioctl;
 	ifp->if_start = imxenet_start;
 	ifp->if_capabilities = IFCAP_VLAN_MTU;
-
-	memset(sc->sc_ac.ac_enaddr, 0xff, ETHER_ADDR_LEN);
-	imxocotp_get_ethernet_address(sc->sc_ac.ac_enaddr);
 
 	printf("%s: address %s\n", sc->sc_dev.dv_xname,
 	    ether_sprintf(sc->sc_ac.ac_enaddr));
@@ -376,6 +395,58 @@ bad:
 	bus_space_unmap(sc->sc_iot, sc->sc_ioh, aa->aa_dev->mem[0].size);
 }
 
+/* Try to determine a valid hardware address */
+void
+imxenet_enaddr(struct imxenet_softc *sc)
+{
+	u_int32_t tmp;
+	u_char enaddr[6];
+
+	/* XXX serial EEPROM */
+	/* XXX FDT */
+
+	/* Try to get an address from COTP */
+	memset(enaddr, 0xff, ETHER_ADDR_LEN);
+	imxocotp_get_ethernet_address(enaddr);
+	if (imxenet_enaddr_valid(enaddr)) {
+		memcpy(sc->sc_ac.ac_enaddr, enaddr, ETHER_ADDR_LEN);
+		return;
+	}
+
+	/* The firmware or bootloader may have already set an address */
+	tmp = HREAD4(sc, ENET_PALR);
+	sc->sc_ac.ac_enaddr[0] = (tmp >> 24) & 0xff;
+	sc->sc_ac.ac_enaddr[1] = (tmp >> 16) & 0xff;
+	sc->sc_ac.ac_enaddr[2] = (tmp >> 8) & 0xff;
+	sc->sc_ac.ac_enaddr[3] = tmp & 0xff;
+	tmp = HREAD4(sc, ENET_PAUR);
+	sc->sc_ac.ac_enaddr[4] = (tmp >> 24) & 0xff;
+	sc->sc_ac.ac_enaddr[5] = (tmp >> 16) & 0xff;
+	if (imxenet_enaddr_valid(sc->sc_ac.ac_enaddr))
+		return;
+
+	/* No usable address found, use a random one */
+	printf("%s: no hardware address found, using random\n",
+	    sc->sc_dev.dv_xname);
+	ether_fakeaddr(&sc->sc_ac.ac_if);
+}
+
+int
+imxenet_enaddr_valid(u_char addr[6])
+{
+	/* Multicast */
+	if (ETHER_IS_MULTICAST(addr))
+		return 0;
+	/* All 0/1 */
+	if (addr[0] == 0 && addr[1] == 0 && addr[2] == 0 &&
+	    addr[3] == 0 && addr[4] == 0 && addr[5] == 0)
+		return 0;
+	if (addr[0] == 0xff && addr[1] == 0xff && addr[2] == 0xff &&
+	    addr[3] == 0xff && addr[4] == 0xff && addr[5] == 0xff)
+		return 0;
+	return 1;
+}
+
 void
 imxenet_chip_init(struct imxenet_softc *sc)
 {
@@ -398,11 +469,17 @@ imxenet_chip_init(struct imxenet_softc *sc)
 	case BOARD_ID_IMX6_SABRELITE:
 		phy = ENET_SABRELITE_PHY;
 		break;
+	case BOARD_ID_IMX6_SABRESD:
+		phy = ENET_SABRESD_PHY;
+		break;
 	case BOARD_ID_IMX6_UDOO:
 		phy = ENET_UDOO_PHY;
 		break;
 	case BOARD_ID_IMX6_UTILITE:
 		phy = ENET_UTILITE_PHY;
+		break;
+	case BOARD_ID_IMX6_NOVENA:
+		phy = ENET_NOVENA_PHY;
 		break;
 	case BOARD_ID_IMX6_WANDBOARD:
 		phy = ENET_WANDBOARD_PHY;
@@ -460,8 +537,22 @@ imxenet_chip_init(struct imxenet_softc *sc)
 		/* enable all interrupts */
 		imxenet_miibus_writereg(dev, phy, 0x1b, 0xff00);
 		break;
+	case BOARD_ID_IMX6_NOVENA:	/* Micrel KSZ9021 */
+		/* TXEN_SKEW_PS/TXC_SKEW_PS/RXDV_SKEW_PS/RXC_SKEW_PS */
+		imxenet_miibus_writereg(dev, phy, 0x0b, 0x8104);
+		imxenet_miibus_writereg(dev, phy, 0x0c, 0xf0f0);
+
+		/* RXD0_SKEW_PS/RXD1_SKEW_PS/RXD2_SKEW_PS/RXD3_SKEW_PS */
+		imxenet_miibus_writereg(dev, phy, 0x0b, 0x8105);
+		imxenet_miibus_writereg(dev, phy, 0x0c, 0x0000);
+
+		/* TXD0_SKEW_PS/TXD1_SKEW_PS/TXD2_SKEW_PS/TXD3_SKEW_PS */
+		imxenet_miibus_writereg(dev, phy, 0x0b, 0x8106);
+		imxenet_miibus_writereg(dev, phy, 0x0c, 0xffff);
+		break;
 	case BOARD_ID_IMX6_CUBOXI:		/* AR8035 */
 	case BOARD_ID_IMX6_HUMMINGBOARD:	/* AR8035 */
+	case BOARD_ID_IMX6_SABRESD:		/* AR8031 */
 	case BOARD_ID_IMX6_UTILITE:
 	case BOARD_ID_IMX6_WANDBOARD:		/* AR8031 */
 		/* disable SmartEEE */
@@ -859,6 +950,7 @@ void
 imxenet_recv(struct imxenet_softc *sc)
 {
 	struct ifnet *ifp = &sc->sc_ac.ac_if;
+	struct mbuf_list ml = MBUF_LIST_INITIALIZER();
 
 	bus_dmamap_sync(sc->rbdma.dma_tag, sc->rbdma.dma_map,
 	    0, sc->rbdma.dma_size,
@@ -878,8 +970,6 @@ imxenet_recv(struct imxenet_softc *sc)
 			goto done;
 		}
 
-		ifp->if_ipackets++;
-		m->m_pkthdr.rcvif = ifp;
 		m->m_pkthdr.len = m->m_len = sc->rx_desc_base[sc->cur_rx].data_length;
 		m_adj(m, ETHER_ALIGN);
 
@@ -903,17 +993,14 @@ imxenet_recv(struct imxenet_softc *sc)
 		else
 			sc->cur_rx++;
 
-		/* push the packet up */
-#if NBPFILTER > 0
-		if (ifp->if_bpf)
-			bpf_mtap(ifp->if_bpf, m, BPF_DIRECTION_IN);
-#endif
-		ether_input_mbuf(ifp, m);
+		ml_enqueue(&ml, m);
 	}
 
 done:
 	/* rx descriptors are ready */
 	HWRITE4(sc, ENET_RDAR, ENET_RDAR_RDAR);
+
+	if_input(ifp, &ml);
 }
 
 int

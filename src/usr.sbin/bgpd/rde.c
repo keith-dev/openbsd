@@ -1,4 +1,4 @@
-/*	$OpenBSD: rde.c,v 1.329 2014/10/08 16:15:37 deraadt Exp $ */
+/*	$OpenBSD: rde.c,v 1.336 2015/08/04 14:46:38 phessler Exp $ */
 
 /*
  * Copyright (c) 2003, 2004 Henning Brauer <henning@openbsd.org>
@@ -156,11 +156,9 @@ u_int32_t	pathhashsize = 1024;
 u_int32_t	attrhashsize = 512;
 u_int32_t	nexthophashsize = 64;
 
-pid_t
-rde_main(int pipe_m2r[2], int pipe_s2r[2], int pipe_m2s[2], int pipe_s2rctl[2],
-    int debug)
+void
+rde_main(int debug, int verbose)
 {
-	pid_t			 pid;
 	struct passwd		*pw;
 	struct pollfd		*pfd = NULL;
 	struct rde_mrt_ctx	*mctx, *xmctx;
@@ -169,14 +167,8 @@ rde_main(int pipe_m2r[2], int pipe_s2r[2], int pipe_m2s[2], int pipe_s2rctl[2],
 	int			 timeout;
 	u_int8_t		 aid;
 
-	switch (pid = fork()) {
-	case -1:
-		fatal("cannot fork");
-	case 0:
-		break;
-	default:
-		return (pid);
-	}
+	log_init(debug);
+	log_verbose(verbose);
 
 	if ((pw = getpwnam(BGPD_USER)) == NULL)
 		fatal("getpwnam");
@@ -201,20 +193,10 @@ rde_main(int pipe_m2r[2], int pipe_s2r[2], int pipe_m2s[2], int pipe_s2rctl[2],
 	signal(SIGALRM, SIG_IGN);
 	signal(SIGUSR1, SIG_IGN);
 
-	close(pipe_s2r[0]);
-	close(pipe_s2rctl[0]);
-	close(pipe_m2r[0]);
-	close(pipe_m2s[0]);
-	close(pipe_m2s[1]);
-
 	/* initialize the RIB structures */
-	if ((ibuf_se = malloc(sizeof(struct imsgbuf))) == NULL ||
-	    (ibuf_se_ctl = malloc(sizeof(struct imsgbuf))) == NULL ||
-	    (ibuf_main = malloc(sizeof(struct imsgbuf))) == NULL)
+	if ((ibuf_main = malloc(sizeof(struct imsgbuf))) == NULL)
 		fatal(NULL);
-	imsg_init(ibuf_se, pipe_s2r[1]);
-	imsg_init(ibuf_se_ctl, pipe_s2rctl[1]);
-	imsg_init(ibuf_main, pipe_m2r[1]);
+	imsg_init(ibuf_main, 3);
 
 	pt_init();
 	path_init(pathhashsize);
@@ -251,21 +233,13 @@ rde_main(int pipe_m2r[2], int pipe_s2r[2], int pipe_m2s[2], int pipe_s2rctl[2],
 		}
 		timeout = INFTIM;
 		bzero(pfd, sizeof(struct pollfd) * pfd_elms);
-		pfd[PFD_PIPE_MAIN].fd = ibuf_main->fd;
-		pfd[PFD_PIPE_MAIN].events = POLLIN;
-		if (ibuf_main->w.queued > 0)
-			pfd[PFD_PIPE_MAIN].events |= POLLOUT;
 
-		pfd[PFD_PIPE_SESSION].fd = ibuf_se->fd;
-		pfd[PFD_PIPE_SESSION].events = POLLIN;
-		if (ibuf_se->w.queued > 0)
-			pfd[PFD_PIPE_SESSION].events |= POLLOUT;
+		set_pollfd(&pfd[PFD_PIPE_MAIN], ibuf_main);
+		set_pollfd(&pfd[PFD_PIPE_SESSION], ibuf_se);
+		set_pollfd(&pfd[PFD_PIPE_SESSION_CTL], ibuf_se_ctl);
 
-		pfd[PFD_PIPE_SESSION_CTL].fd = ibuf_se_ctl->fd;
-		pfd[PFD_PIPE_SESSION_CTL].events = POLLIN;
-		if (ibuf_se_ctl->w.queued > 0)
-			pfd[PFD_PIPE_SESSION_CTL].events |= POLLOUT;
-		else if (rib_dump_pending())
+		if (rib_dump_pending() &&
+		    ibuf_se_ctl && ibuf_se_ctl->w.queued == 0)
 			timeout = 0;
 
 		i = PFD_PIPE_COUNT;
@@ -290,29 +264,26 @@ rde_main(int pipe_m2r[2], int pipe_s2r[2], int pipe_m2s[2], int pipe_s2rctl[2],
 			continue;
 		}
 
-		if ((pfd[PFD_PIPE_MAIN].revents & POLLOUT) &&
-		    ibuf_main->w.queued)
-			if (msgbuf_write(&ibuf_main->w) <= 0 && errno != EAGAIN)
-				fatal("pipe write error");
-
-		if (pfd[PFD_PIPE_MAIN].revents & POLLIN)
+		if (handle_pollfd(&pfd[PFD_PIPE_MAIN], ibuf_main) == -1)
+			fatalx("Lost connection to parent");
+		else
 			rde_dispatch_imsg_parent(ibuf_main);
 
-		if ((pfd[PFD_PIPE_SESSION].revents & POLLOUT) &&
-		    ibuf_se->w.queued)
-			if (msgbuf_write(&ibuf_se->w) <= 0 && errno != EAGAIN)
-				fatal("pipe write error");
-
-		if (pfd[PFD_PIPE_SESSION].revents & POLLIN)
+		if (handle_pollfd(&pfd[PFD_PIPE_SESSION], ibuf_se) == -1) {
+			log_warnx("RDE: Lost connection to SE");
+			msgbuf_clear(&ibuf_se->w);
+			free(ibuf_se);
+			ibuf_se = NULL;
+		} else
 			rde_dispatch_imsg_session(ibuf_se);
 
-		if ((pfd[PFD_PIPE_SESSION_CTL].revents & POLLOUT) &&
-		    ibuf_se_ctl->w.queued)
-			if (msgbuf_write(&ibuf_se_ctl->w) <= 0 &&
-			    errno != EAGAIN)
-				fatal("pipe write error");
-
-		if (pfd[PFD_PIPE_SESSION_CTL].revents & POLLIN)
+		if (handle_pollfd(&pfd[PFD_PIPE_SESSION_CTL], ibuf_se_ctl) ==
+		    -1) {
+			log_warnx("RDE: Lost connection to SE control");
+			msgbuf_clear(&ibuf_se_ctl->w);
+			free(ibuf_se_ctl);
+			ibuf_se_ctl = NULL;
+		} else
 			rde_dispatch_imsg_session(ibuf_se_ctl);
 
 		for (j = PFD_PIPE_COUNT, mctx = LIST_FIRST(&rde_mrts);
@@ -326,7 +297,7 @@ rde_main(int pipe_m2r[2], int pipe_s2r[2], int pipe_m2s[2], int pipe_s2rctl[2],
 		rde_update_queue_runner();
 		for (aid = AID_INET6; aid < AID_MAX; aid++)
 			rde_update6_queue_runner(aid);
-		if (ibuf_se_ctl->w.queued <= 0)
+		if (ibuf_se_ctl && ibuf_se_ctl->w.queued <= 0)
 			rib_dump_runner();
 	}
 
@@ -342,10 +313,13 @@ rde_main(int pipe_m2r[2], int pipe_s2r[2], int pipe_m2s[2], int pipe_s2rctl[2],
 		free(mctx);
 	}
 
-	msgbuf_clear(&ibuf_se->w);
+	if (ibuf_se)
+		msgbuf_clear(&ibuf_se->w);
 	free(ibuf_se);
-	msgbuf_clear(&ibuf_se_ctl->w);
+	if (ibuf_se_ctl)
+		msgbuf_clear(&ibuf_se_ctl->w);
 	free(ibuf_se_ctl);
+
 	msgbuf_clear(&ibuf_main->w);
 	free(ibuf_main);
 
@@ -375,12 +349,7 @@ rde_dispatch_imsg_session(struct imsgbuf *ibuf)
 	u_int16_t		 len;
 	u_int8_t		 aid;
 
-	if ((n = imsg_read(ibuf)) == -1)
-		fatal("rde_dispatch_imsg_session: imsg_read error");
-	if (n == 0)	/* connection closed */
-		fatalx("rde_dispatch_imsg_session: pipe closed");
-
-	for (;;) {
+	while (ibuf) {
 		if ((n = imsg_get(ibuf, &imsg)) == -1)
 			fatal("rde_dispatch_imsg_session: imsg_read error");
 		if (n == 0)
@@ -638,6 +607,7 @@ rde_dispatch_imsg_parent(struct imsgbuf *ibuf)
 	struct imsg		 imsg;
 	struct mrt		 xmrt;
 	struct rde_rib		 rn;
+	struct imsgbuf		*i;
 	struct filter_head	*nr;
 	struct filter_rule	*r;
 	struct filter_set	*s;
@@ -645,18 +615,41 @@ rde_dispatch_imsg_parent(struct imsgbuf *ibuf)
 	int			 n, fd;
 	u_int16_t		 rid;
 
-	if ((n = imsg_read(ibuf)) == -1)
-		fatal("rde_dispatch_imsg_parent: imsg_read error");
-	if (n == 0)	/* connection closed */
-		fatalx("rde_dispatch_imsg_parent: pipe closed");
-
-	for (;;) {
+	while (ibuf) {
 		if ((n = imsg_get(ibuf, &imsg)) == -1)
 			fatal("rde_dispatch_imsg_parent: imsg_read error");
 		if (n == 0)
 			break;
 
 		switch (imsg.hdr.type) {
+		case IMSG_SOCKET_CONN:
+		case IMSG_SOCKET_CONN_CTL:
+			if ((fd = imsg.fd) == -1) {
+				log_warnx("expected to receive imsg fd to "
+				    "SE but didn't receive any");
+				break;
+			}
+			if ((i = malloc(sizeof(struct imsgbuf))) == NULL)
+				fatal(NULL);
+			imsg_init(i, fd);
+			if (imsg.hdr.type == IMSG_SOCKET_CONN) {
+				if (ibuf_se) {
+					log_warnx("Unexpected imsg connection "
+					    "to SE received");
+					msgbuf_clear(&ibuf_se->w);
+					free(ibuf_se);
+				}
+				ibuf_se = i;
+			} else {
+				if (ibuf_se_ctl) {
+					log_warnx("Unexpected imsg ctl "
+					    "connection to SE received");
+					msgbuf_clear(&ibuf_se_ctl->w);
+					free(ibuf_se_ctl);
+				}
+				ibuf_se_ctl = i;
+			}
+			break;
 		case IMSG_NETWORK_ADD:
 			if (imsg.hdr.len - IMSG_HEADER_SIZE !=
 			    sizeof(struct network_config)) {
@@ -803,7 +796,7 @@ rde_dispatch_imsg_parent(struct imsgbuf *ibuf)
 		case IMSG_FILTER_SET:
 			if (imsg.hdr.len > IMSG_HEADER_SIZE +
 			    sizeof(struct filter_set))
-				fatalx("IMSG_RECONF_CONF bad len");
+				fatalx("IMSG_FILTER_SET bad len");
 			if (parent_set == NULL) {
 				log_warnx("rde_dispatch_imsg_parent: "
 				    "IMSG_FILTER_SET unexpected");
@@ -1124,7 +1117,8 @@ rde_update_dispatch(struct imsg *imsg)
 		/* max prefix checker */
 		if (peer->conf.max_prefix &&
 		    peer->prefix_cnt >= peer->conf.max_prefix) {
-			log_peer_warnx(&peer->conf, "prefix limit reached");
+			log_peer_warnx(&peer->conf, "prefix limit reached"
+			    " (>%u/%u)", peer->prefix_cnt, peer->conf.max_prefix);
 			rde_update_err(peer, ERR_CEASE, ERR_CEASE_MAX_PREFIX,
 			    NULL, 0);
 			goto done;
@@ -1206,7 +1200,9 @@ rde_update_dispatch(struct imsg *imsg)
 				if (peer->conf.max_prefix &&
 				    peer->prefix_cnt >= peer->conf.max_prefix) {
 					log_peer_warnx(&peer->conf,
-					    "prefix limit reached");
+					    "prefix limit reached"
+					    " (>%u/%u)", peer->prefix_cnt,
+					    peer->conf.max_prefix);
 					rde_update_err(peer, ERR_CEASE,
 					    ERR_CEASE_MAX_PREFIX, NULL, 0);
 					goto done;
@@ -1242,7 +1238,9 @@ rde_update_dispatch(struct imsg *imsg)
 				if (peer->conf.max_prefix &&
 				    peer->prefix_cnt >= peer->conf.max_prefix) {
 					log_peer_warnx(&peer->conf,
-					    "prefix limit reached");
+					    "prefix limit reached"
+					    " (>%u/%u)", peer->prefix_cnt,
+					    peer->conf.max_prefix);
 					rde_update_err(peer, ERR_CEASE,
 					    ERR_CEASE_MAX_PREFIX, NULL, 0);
 					goto done;
@@ -1961,11 +1959,11 @@ rde_update_err(struct rde_peer *peer, u_int8_t error, u_int8_t suberr,
 
 	if ((wbuf = imsg_create(ibuf_se, IMSG_UPDATE_ERR, peer->conf.id, 0,
 	    size + sizeof(error) + sizeof(suberr))) == NULL)
-		fatal("imsg_create error");
+		fatal("%s %d imsg_create error", __func__, __LINE__);
 	if (imsg_add(wbuf, &error, sizeof(error)) == -1 ||
 	    imsg_add(wbuf, &suberr, sizeof(suberr)) == -1 ||
 	    imsg_add(wbuf, data, size) == -1)
-		fatal("imsg_add error");
+		fatal("%s %d imsg_add error", __func__, __LINE__);
 	imsg_close(ibuf_se, wbuf);
 	peer->state = PEER_ERR;
 }
@@ -2488,13 +2486,14 @@ rde_send_kroute(struct prefix *new, struct prefix *old, u_int16_t ribid)
 				    sizeof(kr.nexthop));
 			if (imsg_compose(ibuf_main, type, rd->rtableid, 0, -1,
 			    &kr, sizeof(kr)) == -1)
-				fatal("imsg_compose error");
+				fatal("%s %d imsg_compose error", __func__,
+				    __LINE__);
 		}
 		break;
 	default:
 		if (imsg_compose(ibuf_main, type, ribs[ribid].rtableid, 0, -1,
 		    &kr, sizeof(kr)) == -1)
-			fatal("imsg_compose error");
+			fatal("%s %d imsg_compose error", __func__, __LINE__);
 		break;
 	}
 }
@@ -2523,7 +2522,7 @@ rde_send_pftable(u_int16_t id, struct bgpd_addr *addr,
 	if (imsg_compose(ibuf_main,
 	    del ? IMSG_PFTABLE_REMOVE : IMSG_PFTABLE_ADD,
 	    0, 0, -1, &pfm, sizeof(pfm)) == -1)
-		fatal("imsg_compose error");
+		fatal("%s %d imsg_compose error", __func__, __LINE__);
 }
 
 void
@@ -2535,7 +2534,7 @@ rde_send_pftable_commit(void)
 
 	if (imsg_compose(ibuf_main, IMSG_PFTABLE_COMMIT, 0, 0, -1, NULL, 0) ==
 	    -1)
-		fatal("imsg_compose error");
+		fatal("%s %d imsg_compose error", __func__, __LINE__);
 }
 
 /*
@@ -2553,7 +2552,7 @@ rde_send_nexthop(struct bgpd_addr *next, int valid)
 
 	if (imsg_compose(ibuf_main, type, 0, 0, -1, next,
 	    sizeof(struct bgpd_addr)) == -1)
-		fatal("imsg_compose error");
+		fatal("%s %d imsg_compose error", __func__, __LINE__);
 }
 
 /*
@@ -2669,12 +2668,12 @@ rde_reload_done(void)
 			/* dump the full table to neighbors that changed rib */
 			peer_dump(peer->conf.id, AID_UNSPEC);
 	}
-	rde_free_filter(out_rules_tmp);
+	filterlist_free(out_rules_tmp);
 	out_rules_tmp = NULL;
 	for (rid = 0; rid < rib_size; rid++) {
 		if (*ribs[rid].name == '\0')
 			continue;
-		rde_free_filter(ribs[rid].in_rules_tmp);
+		filterlist_free(ribs[rid].in_rules_tmp);
 		ribs[rid].in_rules_tmp = NULL;
 		ribs[rid].state = RECONF_NONE;
 	}
@@ -2920,7 +2919,8 @@ rde_update_queue_runner(void)
 			/* finally send message to SE */
 			if (imsg_compose(ibuf_se, IMSG_UPDATE, peer->conf.id,
 			    0, -1, queue_buf, wpos) == -1)
-				fatal("imsg_compose error");
+				fatal("%s %d imsg_compose error", __func__,
+				    __LINE__);
 			sent++;
 			if (eor) {
 				eor = 0;
@@ -2955,7 +2955,8 @@ rde_update6_queue_runner(u_int8_t aid)
 			/* finally send message to SE */
 			if (imsg_compose(ibuf_se, IMSG_UPDATE, peer->conf.id,
 			    0, -1, b, len) == -1)
-				fatal("imsg_compose error");
+				fatal("%s %d imsg_compose error", __func__,
+				    __LINE__);
 			sent++;
 		}
 		max -= sent;
@@ -2986,7 +2987,8 @@ rde_update6_queue_runner(u_int8_t aid)
 			/* finally send message to SE */
 			if (imsg_compose(ibuf_se, IMSG_UPDATE, peer->conf.id,
 			    0, -1, b, len) == -1)
-				fatal("imsg_compose error");
+				fatal("%s %d imsg_compose error", __func__,
+				    __LINE__);
 			sent++;
 		}
 		max -= sent;
@@ -3185,8 +3187,19 @@ peer_up(u_int32_t id, struct session_up *sup)
 	}
 
 	if (peer->state != PEER_DOWN && peer->state != PEER_NONE &&
-	    peer->state != PEER_UP)
-		fatalx("peer_up: bad state");
+	    peer->state != PEER_UP) {
+		/*
+		 * There is a race condition when doing PEER_ERR -> PEER_DOWN.
+		 * So just do a full reset of the peer here.
+		 */
+		for (i = 0; i < AID_MAX; i++) {
+			peer->staletime[i] = 0;
+			peer_flush(peer, i);
+		}
+		up_down(peer);
+		peer->prefix_cnt = 0;
+		peer->state = PEER_DOWN;
+	}
 	peer->remote_bgpid = ntohl(sup->remote_bgpid);
 	peer->short_as = sup->short_as;
 	memcpy(&peer->remote_addr, &sup->remote_addr,
@@ -3329,7 +3342,7 @@ peer_recv_eor(struct rde_peer *peer, u_int8_t aid)
 	 */
 	if (imsg_compose(ibuf_se, IMSG_SESSION_RESTARTED, peer->conf.id,
 	    0, -1, &aid, sizeof(aid)) == -1)
-		fatal("imsg_compose error");
+		fatal("%s %d imsg_compose error", __func__, __LINE__);
 }
 
 void
@@ -3346,7 +3359,8 @@ peer_send_eor(struct rde_peer *peer, u_int8_t aid)
 		bzero(&null, 4);
 		if (imsg_compose(ibuf_se, IMSG_UPDATE, peer->conf.id,
 		    0, -1, &null, 4) == -1)
-			fatal("imsg_compose error in peer_send_eor");
+			fatal("%s %d imsg_compose error in peer_send_eor",
+			    __func__, __LINE__);
 	} else {
 		u_int16_t	i;
 		u_char		buf[10];
@@ -3367,7 +3381,8 @@ peer_send_eor(struct rde_peer *peer, u_int8_t aid)
 
 		if (imsg_compose(ibuf_se, IMSG_UPDATE, peer->conf.id,
 		    0, -1, &buf, 10) == -1)
-			fatal("imsg_compose error in peer_send_eor");
+			fatal("%s %d imsg_compose error in peer_send_eor",
+			    __func__, __LINE__);
 	}
 }
 
@@ -3542,11 +3557,11 @@ rde_shutdown(void)
 			peer_down(p->conf.id);
 
 	/* free filters */
-	rde_free_filter(out_rules);
+	filterlist_free(out_rules);
 	for (i = 0; i < rib_size; i++) {
 		if (*ribs[i].name == '\0')
 			break;
-		rde_free_filter(ribs[i].in_rules);
+		filterlist_free(ribs[i].in_rules);
 	}
 
 	nexthop_shutdown();

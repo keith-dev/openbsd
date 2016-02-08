@@ -1,4 +1,4 @@
-/* $OpenBSD: d1_clnt.c,v 1.43 2015/02/09 10:53:28 jsing Exp $ */
+/* $OpenBSD: d1_clnt.c,v 1.47 2015/07/15 18:35:34 beck Exp $ */
 /*
  * DTLS implementation written by Nagendra Modadugu
  * (nagendra@cs.stanford.edu) for the OpenSSL project 2005.
@@ -113,6 +113,7 @@
  * [including the GNU Public Licence.]
  */
 
+#include <limits.h>
 #include <stdio.h>
 
 #include "ssl_locl.h"
@@ -123,6 +124,8 @@
 #include <openssl/evp.h>
 #include <openssl/md5.h>
 #include <openssl/objects.h>
+
+#include "bytestring.h"
 
 static const SSL_METHOD *dtls1_get_client_method(int ver);
 static int dtls1_get_hello_verify(SSL *s);
@@ -176,7 +179,6 @@ dtls1_get_client_method(int ver)
 int
 dtls1_connect(SSL *s)
 {
-	BUF_MEM *buf = NULL;
 	void (*cb)(const SSL *ssl, int type, int val) = NULL;
 	int ret = -1;
 	int new_state, state, skip = 0;
@@ -223,25 +225,14 @@ dtls1_connect(SSL *s)
 			/* s->version=SSL3_VERSION; */
 			s->type = SSL_ST_CONNECT;
 
-			if (s->init_buf == NULL) {
-				if ((buf = BUF_MEM_new()) == NULL) {
-					ret = -1;
-					goto end;
-				}
-				if (!BUF_MEM_grow(buf, SSL3_RT_MAX_PLAIN_LENGTH)) {
-					ret = -1;
-					goto end;
-				}
-				s->init_buf = buf;
-				buf = NULL;
+			if (!ssl3_setup_init_buffer(s)) {
+				ret = -1;
+				goto end;
 			}
-
 			if (!ssl3_setup_buffers(s)) {
 				ret = -1;
 				goto end;
 			}
-
-			/* setup buffing BIO */
 			if (!ssl_init_wbio_buffer(s, 0)) {
 				ret = -1;
 				goto end;
@@ -429,7 +420,7 @@ dtls1_connect(SSL *s)
 			ret = dtls1_send_client_verify(s);
 			if (ret <= 0)
 				goto end;
-				s->state = SSL3_ST_CW_CHANGE_A;
+			s->state = SSL3_ST_CW_CHANGE_A;
 			s->init_num = 0;
 			s->s3->change_cipher_spec = 0;
 			break;
@@ -603,14 +594,12 @@ dtls1_connect(SSL *s)
 		}
 		skip = 0;
 	}
+
 end:
 	s->in_handshake--;
-
-
-	if (buf != NULL)
-		BUF_MEM_free(buf);
 	if (cb != NULL)
 		cb(s, SSL_CB_CONNECT_EXIT, ret);
+
 	return (ret);
 }
 
@@ -711,9 +700,11 @@ err:
 static int
 dtls1_get_hello_verify(SSL *s)
 {
-	int n, al, ok = 0;
-	unsigned char *data;
-	unsigned int cookie_len;
+	long n;
+	int al, ok = 0;
+	size_t cookie_len;
+	uint16_t ssl_version;
+	CBS hello_verify_request, cookie;
 
 	n = s->method->ssl_get_message(s, DTLS1_ST_CR_HELLO_VERIFY_REQUEST_A,
 	    DTLS1_ST_CR_HELLO_VERIFY_REQUEST_B, -1, s->max_cert_list, &ok);
@@ -727,32 +718,33 @@ dtls1_get_hello_verify(SSL *s)
 		return (1);
 	}
 
-	if (2 > n)
+	if (n < 0)
 		goto truncated;
-	data = (unsigned char *)s->init_msg;
 
-	if ((data[0] != (s->version >> 8)) || (data[1] != (s->version&0xff))) {
+	CBS_init(&hello_verify_request, s->init_msg, n);
+
+	if (!CBS_get_u16(&hello_verify_request, &ssl_version))
+		goto truncated;
+
+	if (ssl_version != s->version) {
 		SSLerr(SSL_F_DTLS1_GET_HELLO_VERIFY, SSL_R_WRONG_SSL_VERSION);
-		s->version = (s->version & 0xff00) | data[1];
+		s->version = (s->version & 0xff00) | (ssl_version & 0xff);
 		al = SSL_AD_PROTOCOL_VERSION;
 		goto f_err;
 	}
-	data += 2;
 
-	if (2 + 1 > n)
+	if (!CBS_get_u8_length_prefixed(&hello_verify_request, &cookie))
 		goto truncated;
-	cookie_len = *(data++);
-	if (2 + 1 + cookie_len > n)
-		goto truncated;
-	if (cookie_len > sizeof(s->d1->cookie)) {
+
+	if (!CBS_write_bytes(&cookie, s->d1->cookie,
+	    sizeof(s->d1->cookie), &cookie_len)) {
+		s->d1->cookie_len = 0;
 		al = SSL_AD_ILLEGAL_PARAMETER;
 		goto f_err;
 	}
-
-	memcpy(s->d1->cookie, data, cookie_len);
 	s->d1->cookie_len = cookie_len;
-
 	s->d1->send_cookie = 1;
+
 	return 1;
 
 truncated:
@@ -889,36 +881,7 @@ dtls1_send_client_key_exchange(SSL *s)
 		} else if (alg_k & (SSL_kECDHE|SSL_kECDHr|SSL_kECDHe)) {
 			const EC_GROUP *srvr_group = NULL;
 			EC_KEY *tkey;
-			int ecdh_clnt_cert = 0;
 			int field_size = 0;
-
-			/* Did we send out the client's
-			 * ECDH share for use in premaster
-			 * computation as part of client certificate?
-			 * If so, set ecdh_clnt_cert to 1.
-			 */
-			if ((alg_k & (SSL_kECDHr|SSL_kECDHe)) &&
-			    (s->cert != NULL)) {
-				/* XXX: For now, we do not support client
-				 * authentication using ECDH certificates.
-				 * To add such support, one needs to add
-				 * code that checks for appropriate
-				 * conditions and sets ecdh_clnt_cert to 1.
-				 * For example, the cert have an ECC
-				 * key on the same curve as the server's
-				 * and the key should be authorized for
-				 * key agreement.
-				 *
-				 * One also needs to add code in ssl3_connect
-				 * to skip sending the certificate verify
-				 * message.
-				 *
-				 * if ((s->cert->key->privatekey != NULL) &&
-				 *     (s->cert->key->privatekey->type ==
-				 *      EVP_PKEY_EC) && ...)
-				 * ecdh_clnt_cert = 1;
-				 */
-			}
 
 			if (s->session->sess_cert->peer_ecdh_tmp != NULL) {
 				tkey = s->session->sess_cert->peer_ecdh_tmp;
@@ -957,31 +920,12 @@ dtls1_send_client_key_exchange(SSL *s)
 				    ERR_R_EC_LIB);
 				goto err;
 			}
-			if (ecdh_clnt_cert) {
-				/* Reuse key info from our certificate
-				 * We only need our private key to perform
-				 * the ECDH computation.
-				 */
-				const BIGNUM *priv_key;
-				tkey = s->cert->key->privatekey->pkey.ec;
-				priv_key = EC_KEY_get0_private_key(tkey);
-				if (priv_key == NULL) {
-					SSLerr(SSL_F_DTLS1_SEND_CLIENT_KEY_EXCHANGE,
-					    ERR_R_MALLOC_FAILURE);
-					goto err;
-				}
-				if (!EC_KEY_set_private_key(clnt_ecdh, priv_key)) {
-					SSLerr(SSL_F_DTLS1_SEND_CLIENT_KEY_EXCHANGE,
-					    ERR_R_EC_LIB);
-					goto err;
-				}
-			} else {
-				/* Generate a new ECDH key pair */
-				if (!(EC_KEY_generate_key(clnt_ecdh))) {
-					SSLerr(SSL_F_DTLS1_SEND_CLIENT_KEY_EXCHANGE,
-					    ERR_R_ECDH_LIB);
-					goto err;
-				}
+
+			/* Generate a new ECDH key pair */
+			if (!(EC_KEY_generate_key(clnt_ecdh))) {
+				SSLerr(SSL_F_DTLS1_SEND_CLIENT_KEY_EXCHANGE,
+				    ERR_R_ECDH_LIB);
+				goto err;
 			}
 
 			/* use the 'p' output buffer for the ECDH key, but
@@ -1007,44 +951,38 @@ dtls1_send_client_key_exchange(SSL *s)
 				s, s->session->master_key, p, n);
 			memset(p, 0, n); /* clean up */
 
-			if (ecdh_clnt_cert) {
-				/* Send empty client key exch message */
-				n = 0;
-			} else {
-				/* First check the size of encoding and
-				 * allocate memory accordingly.
-				 */
-				encoded_pt_len = EC_POINT_point2oct(srvr_group,
-				    EC_KEY_get0_public_key(clnt_ecdh),
-				    POINT_CONVERSION_UNCOMPRESSED,
-				    NULL, 0, NULL);
+			/* First check the size of encoding and
+			 * allocate memory accordingly.
+			 */
+			encoded_pt_len = EC_POINT_point2oct(srvr_group,
+			    EC_KEY_get0_public_key(clnt_ecdh),
+			    POINT_CONVERSION_UNCOMPRESSED,
+			    NULL, 0, NULL);
 
-				encodedPoint = malloc(encoded_pt_len);
+			encodedPoint = malloc(encoded_pt_len);
 
-				bn_ctx = BN_CTX_new();
-				if ((encodedPoint == NULL) ||
-				    (bn_ctx == NULL)) {
-					SSLerr(SSL_F_DTLS1_SEND_CLIENT_KEY_EXCHANGE,
-					    ERR_R_MALLOC_FAILURE);
-					goto err;
-				}
-
-				/* Encode the public key */
-				n = EC_POINT_point2oct(srvr_group,
-				    EC_KEY_get0_public_key(clnt_ecdh),
-				    POINT_CONVERSION_UNCOMPRESSED,
-				    encodedPoint, encoded_pt_len, bn_ctx);
-
-				*p = n; /* length of encoded point */
-				/* Encoded point will be copied here */
-				p += 1;
-
-				/* copy the point */
-				memcpy((unsigned char *)p, encodedPoint, n);
-				/* increment n to account for length field */
-				n += 1;
-
+			bn_ctx = BN_CTX_new();
+			if ((encodedPoint == NULL) ||
+			    (bn_ctx == NULL)) {
+				SSLerr(SSL_F_DTLS1_SEND_CLIENT_KEY_EXCHANGE,
+				    ERR_R_MALLOC_FAILURE);
+				goto err;
 			}
+
+			/* Encode the public key */
+			n = EC_POINT_point2oct(srvr_group,
+			    EC_KEY_get0_public_key(clnt_ecdh),
+			    POINT_CONVERSION_UNCOMPRESSED,
+			    encodedPoint, encoded_pt_len, bn_ctx);
+
+			*p = n; /* length of encoded point */
+			/* Encoded point will be copied here */
+			p += 1;
+
+			/* copy the point */
+			memcpy((unsigned char *)p, encodedPoint, n);
+			/* increment n to account for length field */
+			n += 1;
 
 			/* Free allocated memory */
 			BN_CTX_free(bn_ctx);

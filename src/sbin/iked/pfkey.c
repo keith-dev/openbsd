@@ -1,4 +1,4 @@
-/*	$OpenBSD: pfkey.c,v 1.41 2015/01/16 06:39:58 deraadt Exp $	*/
+/*	$OpenBSD: pfkey.c,v 1.43 2015/07/17 14:48:17 mikeb Exp $	*/
 
 /*
  * Copyright (c) 2010-2013 Reyk Floeter <reyk@openbsd.org>
@@ -128,36 +128,37 @@ pfkey_couple(int sd, struct iked_sas *sas, int couple)
 	struct iked_sa		*sa;
 	struct iked_flow	*flow;
 	struct iked_childsa	*csa;
-	u_int			 old;
 	const char		*mode[] = { "coupled", "decoupled" };
 
 	/* Socket is not ready */
 	if (sd == -1)
 		return (-1);
 
-	old = sadb_decoupled ? 1 : 0;
-	sadb_decoupled = couple ? 0 : 1;
-
-	if (old == sadb_decoupled)
+	if (sadb_decoupled == !couple)
 		return (0);
 
 	log_debug("%s: kernel %s -> %s", __func__,
-	    mode[old], mode[sadb_decoupled]);
+	    mode[sadb_decoupled], mode[!sadb_decoupled]);
+
+	/* Allow writes to the PF_KEY socket */
+	sadb_decoupled = 0;
 
 	RB_FOREACH(sa, iked_sas, sas) {
 		TAILQ_FOREACH(csa, &sa->sa_childsas, csa_entry) {
-			if (!csa->csa_loaded && !sadb_decoupled)
+			if (!csa->csa_loaded && couple)
 				(void)pfkey_sa_add(sd, csa, NULL);
-			else if (csa->csa_loaded && sadb_decoupled)
+			else if (csa->csa_loaded && !couple)
 				(void)pfkey_sa_delete(sd, csa);
 		}
 		TAILQ_FOREACH(flow, &sa->sa_flows, flow_entry) {
-			if (!flow->flow_loaded && !sadb_decoupled)
+			if (!flow->flow_loaded && couple)
 				(void)pfkey_flow_add(sd, flow);
-			else if (flow->flow_loaded && sadb_decoupled)
+			else if (flow->flow_loaded && !couple)
 				(void)pfkey_flow_delete(sd, flow);
 		}
 	}
+
+	sadb_decoupled = !couple;
 
 	return (0);
 }
@@ -186,19 +187,16 @@ pfkey_flow(int sd, u_int8_t satype, u_int8_t action, struct iked_flow *flow)
 	struct sockaddr_storage	 ssrc, sdst, slocal, speer, smask, dmask;
 	struct iovec		 iov[IOV_CNT];
 	int			 iov_cnt, ret = -1;
-	in_port_t		 sport, dport;
 
-	sport = dport = 0;
 	sa_srcid = sa_dstid = NULL;
 
 	bzero(&ssrc, sizeof(ssrc));
 	bzero(&smask, sizeof(smask));
 	memcpy(&ssrc, &flow->flow_src.addr, sizeof(ssrc));
 	memcpy(&smask, &flow->flow_src.addr, sizeof(smask));
-	if ((sport = flow->flow_src.addr_port) != 0)
-		dport = 0xffff;
-	socket_af((struct sockaddr *)&ssrc, sport);
-	socket_af((struct sockaddr *)&smask, dport);
+	socket_af((struct sockaddr *)&ssrc, flow->flow_src.addr_port);
+	socket_af((struct sockaddr *)&smask, flow->flow_src.addr_port ?
+	    0xfffff : 0);
 
 	switch (flow->flow_src.addr_af) {
 	case AF_INET:
@@ -223,10 +221,9 @@ pfkey_flow(int sd, u_int8_t satype, u_int8_t action, struct iked_flow *flow)
 	bzero(&dmask, sizeof(dmask));
 	memcpy(&sdst, &flow->flow_dst.addr, sizeof(sdst));
 	memcpy(&dmask, &flow->flow_dst.addr, sizeof(dmask));
-	if ((sport = flow->flow_dst.addr_port) != 0)
-		dport = 0xffff;
-	socket_af((struct sockaddr *)&sdst, sport);
-	socket_af((struct sockaddr *)&dmask, dport);
+	socket_af((struct sockaddr *)&sdst, flow->flow_dst.addr_port);
+	socket_af((struct sockaddr *)&dmask, flow->flow_dst.addr_port ?
+	    0xffff : 0);
 
 	switch (flow->flow_dst.addr_af) {
 	case AF_INET:
@@ -1301,9 +1298,19 @@ pfkey_sa_add(int fd, struct iked_childsa *sa, struct iked_childsa *last)
 	    print_spi(sa->csa_spi.spi, 4));
 
 	if (pfkey_sa(fd, satype, cmd, sa) == -1) {
-		if (cmd == SADB_ADD)
+		if (cmd == SADB_ADD) {
 			(void)pfkey_sa_delete(fd, sa);
-		return (-1);
+			return (-1);
+		}
+		if (sa->csa_allocated && !sa->csa_loaded && errno == ESRCH) {
+			/* Needed for recoupling local SAs */
+			log_debug("%s: SADB_UPDATE on local SA returned ESRCH,"
+			    " trying SADB_ADD", __func__);
+			if (pfkey_sa(fd, satype, SADB_ADD, sa) == -1)
+				return (-1);
+		} else {
+			return (-1);
+		}
 	}
 
 	if (last && cmd == SADB_ADD) {

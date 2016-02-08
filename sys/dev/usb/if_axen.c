@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_axen.c,v 1.11 2015/01/22 10:23:47 mpi Exp $	*/
+/*	$OpenBSD: if_axen.c,v 1.16 2015/07/16 00:35:06 yuo Exp $	*/
 
 /*
  * Copyright (c) 2013 Yojiro UO <yuo@openbsd.org>
@@ -641,11 +641,11 @@ axen_match(struct device *parent, void *match, void *aux)
 {
 	struct usb_attach_arg *uaa = aux;
 
-	if (!uaa->iface)
-		return UMATCH_NONE;
+	if (uaa->iface == NULL || uaa->configno != 1)
+		return (UMATCH_NONE);
 
 	return (axen_lookup(uaa->vendor, uaa->product) != NULL ?
-		UMATCH_VENDOR_PRODUCT : UMATCH_NONE);
+		UMATCH_VENDOR_PRODUCT_CONF_IFACE : UMATCH_NONE);
 }
 
 void
@@ -653,8 +653,6 @@ axen_attach(struct device *parent, struct device *self, void *aux)
 {
 	struct axen_softc	*sc = (struct axen_softc *)self;
 	struct usb_attach_arg	*uaa = aux;
-	struct usbd_device	*dev = uaa->device;
-	usbd_status		 err;
 	usb_interface_descriptor_t *id;
 	usb_endpoint_descriptor_t *ed;
 	struct mii_data		*mii;
@@ -664,15 +662,8 @@ axen_attach(struct device *parent, struct device *self, void *aux)
 	int			 i, s;
 
 	sc->axen_unit = self->dv_unit; /*device_get_unit(self);*/
-	sc->axen_udev = dev;
-
-	err = usbd_set_config_no(dev, AXEN_CONFIG_NO, 1);
-	if (err) {
-		printf("%s: getting interface handle failed\n",
-		    sc->axen_dev.dv_xname);
-		return;
-	}
-
+	sc->axen_udev = uaa->device;
+	sc->axen_iface = uaa->iface;
 	sc->axen_flags = axen_lookup(uaa->vendor, uaa->product)->axen_flags;
 
 	usb_init_task(&sc->axen_tick_task, axen_tick_task, sc,
@@ -681,24 +672,27 @@ axen_attach(struct device *parent, struct device *self, void *aux)
 	usb_init_task(&sc->axen_stop_task, (void (*)(void *))axen_stop, sc,
 	    USB_TASK_TYPE_GENERIC);
 
-	err = usbd_device2interface_handle(dev, AXEN_IFACE_IDX,
-	    &sc->axen_iface);
-	if (err) {
-		printf("%s: getting interface handle failed\n",
-		    sc->axen_dev.dv_xname);
-		return;
-	}
-
 	sc->axen_product = uaa->product;
 	sc->axen_vendor = uaa->vendor;
 
 	id = usbd_get_interface_descriptor(sc->axen_iface);
 
-	/* XXX fix when USB3.0 HC is supported */
 	/* decide on what our bufsize will be */
-	sc->axen_bufsz = (sc->axen_udev->speed == USB_SPEED_HIGH) ?
-	    AXEN_BUFSZ_HS * 1024 : AXEN_BUFSZ_LS * 1024;
-
+	switch (sc->axen_udev->speed) {
+	case USB_SPEED_FULL:
+	    	sc->axen_bufsz = AXEN_BUFSZ_LS * 1024; 
+		break;
+	case USB_SPEED_HIGH:
+	    	sc->axen_bufsz = AXEN_BUFSZ_HS * 1024; 
+		break;
+	case USB_SPEED_SUPER:
+	    	sc->axen_bufsz = AXEN_BUFSZ_SS * 1024; 
+		break;
+	default:
+		printf("%s: not supported usb bus type", sc->axen_dev.dv_xname);
+		return;
+	}
+		
 	/* Find endpoints. */
 	for (i = 0; i < id->bNumEndpoints; i++) {
 		ed = usbd_interface2endpoint_descriptor(sc->axen_iface, i);
@@ -948,6 +942,7 @@ axen_rxeof(struct usbd_xfer *xfer, void *priv, usbd_status status)
 	struct axen_softc	*sc = c->axen_sc;
 	struct ifnet		*ifp = GET_IFP(sc);
 	u_char			*buf = c->axen_buf;
+	struct mbuf_list	ml = MBUF_LIST_INITIALIZER();
 	struct mbuf		*m;
 	u_int32_t		total_len;
 	u_int32_t		rx_hdr, pkt_hdr;
@@ -998,9 +993,9 @@ axen_rxeof(struct usbd_xfer *xfer, void *priv, usbd_status status)
 		printf("rxeof: too large transfer\n");
 		goto done;
 	}
-		
+
 	/* sanity check */
-	if ((int)hdr_offset > total_len) {
+	if (hdr_offset > total_len) {
 		ifp->if_ierrors++;
 		usbd_delay_ms(sc->axen_udev, 100);
 		goto done;
@@ -1032,6 +1027,7 @@ axen_rxeof(struct usbd_xfer *xfer, void *priv, usbd_status status)
 
 		pkt_hdr = letoh32(*hdr_p);
 		pkt_len = (pkt_hdr >> 16) & 0x1fff;
+
 		DPRINTFN(10,("rxeof: packet#%d, pkt_hdr 0x%08x, pkt_len %zu\n",
 		   pkt_count, pkt_hdr, pkt_len));
 
@@ -1051,10 +1047,8 @@ axen_rxeof(struct usbd_xfer *xfer, void *priv, usbd_status status)
 			goto nextpkt;
 		}
 
-		/* skip pseudo header (2byte) */
-		ifp->if_ipackets++;
-		m->m_pkthdr.rcvif = ifp;
-		m->m_pkthdr.len = m->m_len = pkt_len - 2;
+		/* skip pseudo header (2byte) and trailer padding (4Byte) */
+		m->m_pkthdr.len = m->m_len = pkt_len - 6;
 
 #ifdef AXEN_TOE
 		/* cheksum err */
@@ -1076,16 +1070,9 @@ axen_rxeof(struct usbd_xfer *xfer, void *priv, usbd_status status)
 			    M_UDP_CSUM_IN_OK;
 #endif
 
-		memcpy(mtod(m, char *), buf + 2, pkt_len - 2);
+		memcpy(mtod(m, char *), buf + 2, pkt_len - 6);
 
-		/* push the packet up */
-		s = splnet();
-#if NBPFILTER > 0
-		if (ifp->if_bpf)
-			bpf_mtap(ifp->if_bpf, m, BPF_DIRECTION_IN);
-#endif
-		ether_input_mbuf(ifp, m);
-		splx(s);
+		ml_enqueue(&ml, m);
 
 nextpkt:
 		/*
@@ -1100,6 +1087,11 @@ nextpkt:
 	} while( pkt_count > 0);
 
 done:
+	/* push the packet up */
+	s = splnet();
+	if_input(ifp, &ml);
+	splx(s);
+
 	/* clear buffer for next transaction */
 	memset(c->axen_buf, 0, sc->axen_bufsz);
 
@@ -1218,7 +1210,20 @@ axen_encap(struct axen_softc *sc, struct mbuf *m, int idx)
 
 	c = &sc->axen_cdata.axen_tx_chain[idx];
 
-	boundary = (sc->axen_udev->speed == USB_SPEED_HIGH) ? 512 : 64;
+	switch (sc->axen_udev->speed) {
+	case USB_SPEED_FULL:
+	    	boundary = 64;
+		break;
+	case USB_SPEED_HIGH:
+	    	boundary = 512;
+		break;
+	case USB_SPEED_SUPER:
+	    	boundary = 4096; /* XXX */
+		break;
+	default:
+		printf("%s: not supported usb bus type", sc->axen_dev.dv_xname);
+		return EIO;
+	}
 
 	hdr.plen = htole32(m->m_pkthdr.len);
 	hdr.gso = 0; /* disable segmentation offloading */

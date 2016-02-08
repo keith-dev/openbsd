@@ -1,4 +1,4 @@
-/*	$OpenBSD: mpls.h,v 1.29 2015/01/15 23:50:31 deraadt Exp $	*/
+/*	$OpenBSD: mpls.h,v 1.34 2015/07/29 00:04:03 rzalamena Exp $	*/
 
 /*
  * Copyright (C) 1999, 2000 and 2001 AYAME Project, WIDE Project.
@@ -64,6 +64,9 @@ struct shim_hdr {
 #define MPLS_BOS_OFFSET		8
 #define MPLS_TTL_MASK		__MADDR(0x000000ffU)
 
+#define CW_ZERO_MASK		__MADDR(0xf0000000U)
+#define CW_FRAG_MASK		__MADDR(0x00300000U)
+
 #define MPLS_BOS_ISSET(l)	(((l) & MPLS_BOS_MASK) == MPLS_BOS_MASK)
 
 /* Reserved lavel values (RFC3032) */
@@ -107,7 +110,6 @@ struct rt_mpls {
  */
 #define MPLSCTL_ENABLE			1
 #define	MPLSCTL_DEFTTL			2
-#define MPLSCTL_IFQUEUE			3
 #define	MPLSCTL_MAXINKLOOP		4
 #define MPLSCTL_MAPTTL_IP		5
 #define MPLSCTL_MAPTTL_IP6		6
@@ -133,6 +135,20 @@ struct rt_mpls {
 	&mpls_mapttl_ip6 \
 }
 
+#define IMR_TYPE_NONE			0
+#define IMR_TYPE_ETHERNET		1
+#define IMR_TYPE_ETHERNET_TAGGED	2
+
+#define IMR_FLAG_CONTROLWORD		0x1
+
+struct ifmpwreq {
+	uint32_t	imr_flags;
+	uint32_t	imr_type; /* pseudowire type */
+	struct		shim_hdr imr_lshim; /* local label */
+	struct		shim_hdr imr_rshim; /* remote label */
+	struct		sockaddr_storage imr_nexthop;
+};
+
 #endif
 
 #ifdef _KERNEL
@@ -141,8 +157,9 @@ extern	struct domain mplsdomain;
 
 struct mpe_softc {
 	struct ifnet		sc_if;		/* the interface */
+	struct ifaddr		sc_ifa;
 	int			sc_unit;
-	struct shim_hdr		sc_shim;
+	struct sockaddr_mpls	sc_smpls;
 	LIST_ENTRY(mpe_softc)	sc_list;
 };
 
@@ -159,7 +176,6 @@ void	mpe_input6(struct mbuf *, struct ifnet *, struct sockaddr_mpls *,
 extern int mpls_raw_usrreq(struct socket *, int, struct mbuf *,
 			struct mbuf *, struct mbuf *, struct proc *);
 
-extern struct ifqueue	mplsintrq;	/* MPLS input queue */
 extern int		mpls_defttl;
 extern int		mpls_mapttl_ip;
 extern int		mpls_mapttl_ip6;
@@ -167,15 +183,14 @@ extern int		mpls_inkloop;
 
 
 void	mpls_init(void);
-void	mplsintr(void);
 
 struct mbuf	*mpls_shim_pop(struct mbuf *);
 struct mbuf	*mpls_shim_swap(struct mbuf *, struct rt_mpls *);
 struct mbuf	*mpls_shim_push(struct mbuf *, struct rt_mpls *);
 
 int		 mpls_sysctl(int *, u_int, void *, size_t *, void *, size_t);
-void		 mpls_input(struct mbuf *);
 int		 mpls_output(struct ifnet *, struct mbuf *, struct sockaddr *,
 		    struct rtentry *);
+void		 mpls_input(struct ifnet *, struct mbuf *);
 
 #endif /* _KERNEL */

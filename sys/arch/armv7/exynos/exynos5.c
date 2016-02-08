@@ -1,4 +1,4 @@
-/* $OpenBSD: exynos5.c,v 1.1 2015/01/26 02:48:24 bmercer Exp $ */
+/* $OpenBSD: exynos5.c,v 1.4 2015/07/17 17:33:50 jsg Exp $ */
 /*
  * Copyright (c) 2011 Uwe Stuehler <uwe@openbsd.org>
  * Copyright (c) 2012 Patrick Wildt <patrick@blueri.se>
@@ -42,16 +42,21 @@
 #define SYSREG_ADDR	0x10050000
 #define SYSREG_SIZE	0x1000
 
+#define GIC_DIST_ADDR	0x10481000
+#define GIC_DIST_SIZE	0x1000
+#define GIC_CPU_ADDR	0x10482000
+#define GIC_CPU_SIZE	0x1000
+
 #define UARTx_SIZE	0x100
 #define UART1_ADDR	0x12c00000
 #define UART2_ADDR	0x12c10000
 #define UART3_ADDR	0x12c20000
 #define UART4_ADDR	0x12c30000
 
-#define UART1_IRQ	83
-#define UART2_IRQ	84
-#define UART3_IRQ	85
-#define UART4_IRQ	86
+#define UART1_IRQ	51
+#define UART2_IRQ	52
+#define UART3_IRQ	53
+#define UART4_IRQ	54
 
 #define USB_EHCI_ADDR	0x12110000
 #define USB_PHY_ADDR	0x12130000
@@ -111,6 +116,9 @@
 #define PCIE_IRQ1	121
 #define PCIE_IRQ2	122
 #define PCIE_IRQ3	123
+
+#define EXDISPLAY_ADDR	0xbfc00000
+#define EXDISPLAY_SIZE	0x202000
 
 struct armv7_dev exynos5_devs[] = {
 
@@ -311,14 +319,26 @@ struct armv7_dev exynos5_devs[] = {
 	  .irq = { USB_IRQ }
 	},
 
+	{ .name = "exdisplay",
+	  .unit = 0,
+	  .mem = { { EXDISPLAY_ADDR, EXDISPLAY_SIZE } },
+	},
+
 	/* Terminator */
 	{ .name = NULL,
 	  .unit = 0
 	}
 };
 
+extern paddr_t gic_dist_base, gic_cpu_base, gic_dist_size, gic_cpu_size;
+
 void
 exynos5_init(void)
 {
 	armv7_set_devs(exynos5_devs);
+
+	gic_dist_base = GIC_DIST_ADDR;
+	gic_dist_size = GIC_DIST_SIZE;
+	gic_cpu_base = GIC_CPU_ADDR;
+	gic_cpu_size = GIC_CPU_SIZE;
 }

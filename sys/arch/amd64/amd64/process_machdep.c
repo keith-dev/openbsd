@@ -1,4 +1,4 @@
-/*	$OpenBSD: process_machdep.c,v 1.11 2011/12/17 14:07:49 kettenis Exp $	*/
+/*	$OpenBSD: process_machdep.c,v 1.14 2015/06/28 18:54:54 guenther Exp $	*/
 /*	$NetBSD: process_machdep.c,v 1.1 2003/04/26 18:39:31 fvdl Exp $	*/
 
 /*-
@@ -66,7 +66,6 @@
 
 #include <machine/psl.h>
 #include <machine/reg.h>
-#include <machine/segments.h>
 #include <machine/fpu.h>
 
 static __inline struct trapframe *process_frame(struct proc *);
@@ -115,10 +114,10 @@ process_read_regs(struct proc *p, struct reg *regs)
         regs->r_rflags = tf->tf_rflags;
         regs->r_cs  = tf->tf_cs;
         regs->r_ss  = tf->tf_ss;
-        regs->r_ds  = tf->tf_ds;
-        regs->r_es  = tf->tf_es;
-        regs->r_fs  = tf->tf_fs;
-        regs->r_gs  = tf->tf_gs;
+        regs->r_ds  = GSEL(GUDATA_SEL, SEL_UPL);
+        regs->r_es  = GSEL(GUDATA_SEL, SEL_UPL);
+        regs->r_fs  = GSEL(GUDATA_SEL, SEL_UPL);
+        regs->r_gs  = GSEL(GUDATA_SEL, SEL_UPL);
 
 	return (0);
 }
@@ -178,10 +177,9 @@ process_write_regs(struct proc *p, struct reg *regs)
         tf->tf_rflags = regs->r_rflags;
         tf->tf_cs  = regs->r_cs;
         tf->tf_ss  = regs->r_ss;
-        tf->tf_ds  = regs->r_ds;
-        tf->tf_es  = regs->r_es;
-        tf->tf_fs  = regs->r_fs;
-        tf->tf_gs  = regs->r_gs;
+
+	/* force target to return via iretq so all registers are updated */
+	p->p_md.md_flags |= MDP_IRET;
 
 	return (0);
 }

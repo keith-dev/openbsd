@@ -1,4 +1,4 @@
-/* $OpenBSD: d1_srvr.c,v 1.49 2015/02/09 10:53:28 jsing Exp $ */
+/* $OpenBSD: d1_srvr.c,v 1.55 2015/06/18 22:51:05 doug Exp $ */
 /*
  * DTLS implementation written by Nagendra Modadugu
  * (nagendra@cs.stanford.edu) for the OpenSSL project 2005.
@@ -228,20 +228,10 @@ dtls1_accept(SSL *s)
 			}
 			s->type = SSL_ST_ACCEPT;
 
-			if (s->init_buf == NULL) {
-				BUF_MEM *buf;
-				if ((buf = BUF_MEM_new()) == NULL) {
-					ret = -1;
-					goto end;
-				}
-				if (!BUF_MEM_grow(buf, SSL3_RT_MAX_PLAIN_LENGTH)) {
-					BUF_MEM_free(buf);
-					ret = -1;
-					goto end;
-				}
-				s->init_buf = buf;
+			if (!ssl3_setup_init_buffer(s)) {
+				ret = -1;
+				goto end;
 			}
-
 			if (!ssl3_setup_buffers(s)) {
 				ret = -1;
 				goto end;
@@ -478,22 +468,13 @@ dtls1_accept(SSL *s)
 
 		case SSL3_ST_SR_CERT_A:
 		case SSL3_ST_SR_CERT_B:
-			/* Check for second client hello (MS SGC) */
-			ret = ssl3_check_client_hello(s);
-			if (ret <= 0)
-				goto end;
-			if (ret == 2) {
-				dtls1_stop_timer(s);
-				s->state = SSL3_ST_SR_CLNT_HELLO_C;
-			} else {
-				/* could be sent for a DH cert, even if we
-				 * have not asked for it :-) */
+			if (s->s3->tmp.cert_request) {
 				ret = ssl3_get_client_certificate(s);
 				if (ret <= 0)
 					goto end;
-				s->init_num = 0;
-				s->state = SSL3_ST_SR_KEY_EXCH_A;
 			}
+			s->init_num = 0;
+			s->state = SSL3_ST_SR_KEY_EXCH_A;
 			break;
 
 		case SSL3_ST_SR_KEY_EXCH_A:
@@ -535,7 +516,7 @@ dtls1_accept(SSL *s)
 			ret = ssl3_get_cert_verify(s);
 			if (ret <= 0)
 				goto end;
-				s->state = SSL3_ST_SR_FINISHED_A;
+			s->state = SSL3_ST_SR_FINISHED_A;
 			s->init_num = 0;
 			break;
 
@@ -1174,20 +1155,10 @@ dtls1_send_certificate_request(SSL *s)
 					goto err;
 				}
 				p = (unsigned char *)&(buf->data[DTLS1_HM_HEADER_LENGTH + n]);
-				if (!(s->options & SSL_OP_NETSCAPE_CA_DN_BUG)) {
-					s2n(j, p);
-					i2d_X509_NAME(name, &p);
-					n += 2 + j;
-					nl += 2 + j;
-				} else {
-					d = p;
-					i2d_X509_NAME(name, &p);
-					j -= 2;
-					s2n(j, d);
-					j += 2;
-					n += j;
-					nl += j;
-				}
+				s2n(j, p);
+				i2d_X509_NAME(name, &p);
+				n += 2 + j;
+				nl += 2 + j;
 			}
 		}
 		/* else no CA names */
@@ -1298,6 +1269,7 @@ dtls1_send_newsession_ticket(SSL *s)
 			if (tctx->tlsext_ticket_key_cb(s, key_name, iv, &ctx,
 			    &hctx, 1) < 0) {
 				free(senc);
+				EVP_CIPHER_CTX_cleanup(&ctx);
 				return -1;
 			}
 		} else {

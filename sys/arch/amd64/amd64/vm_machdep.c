@@ -1,4 +1,4 @@
-/*	$OpenBSD: vm_machdep.c,v 1.29 2014/11/16 12:30:56 deraadt Exp $	*/
+/*	$OpenBSD: vm_machdep.c,v 1.33 2015/06/28 18:54:54 guenther Exp $	*/
 /*	$NetBSD: vm_machdep.c,v 1.1 2003/04/26 18:39:33 fvdl Exp $	*/
 
 /*-
@@ -49,7 +49,6 @@
 #include <sys/vnode.h>
 #include <sys/buf.h>
 #include <sys/user.h>
-#include <sys/core.h>
 #include <sys/exec.h>
 #include <sys/ptrace.h>
 #include <sys/signalvar.h>
@@ -58,8 +57,8 @@
 
 #include <machine/cpu.h>
 #include <machine/reg.h>
-#include <machine/specialreg.h>
 #include <machine/fpu.h>
+#include <machine/tcb.h>
 
 void setredzone(struct proc *);
 
@@ -126,11 +125,7 @@ cpu_fork(struct proc *p1, struct proc *p2, void *stack, size_t stacksize,
 	sf = (struct switchframe *)tf - 1;
 	sf->sf_r12 = (u_int64_t)func;
 	sf->sf_r13 = (u_int64_t)arg;
-	/* XXX fork of init(8) returns via proc_trampoline() */
-	if (p2->p_pid == 1)
-		sf->sf_rip = (u_int64_t)proc_trampoline;
-	else
-		sf->sf_rip = (u_int64_t)child_trampoline;
+	sf->sf_rip = (u_int64_t)proc_trampoline;
 	pcb->pcb_rsp = (u_int64_t)sf;
 	pcb->pcb_rbp = 0;
 }
@@ -151,56 +146,6 @@ cpu_exit(struct proc *p)
 
 	pmap_deactivate(p);
 	sched_exit(p);
-}
-
-/*
- * Dump the machine specific segment at the start of a core dump.
- */     
-struct md_core {
-	struct reg intreg;
-	struct fpreg freg;
-};
-
-int
-cpu_coredump(struct proc *p, struct vnode *vp, struct ucred *cred,
-    struct core *chdr)
-{
-	struct md_core md_core;
-	struct coreseg cseg;
-	int error;
-
-	CORE_SETMAGIC(*chdr, COREMAGIC, MID_MACHINE, 0);
-	chdr->c_hdrsize = ALIGN(sizeof(*chdr));
-	chdr->c_seghdrsize = ALIGN(sizeof(cseg));
-	chdr->c_cpusize = sizeof(md_core);
-
-	/* Save integer registers. */
-	error = process_read_regs(p, &md_core.intreg);
-	if (error)
-		return error;
-
-	/* Save floating point registers. */
-	error = process_read_fpregs(p, &md_core.freg);
-	if (error)
-		return error;
-
-	CORE_SETMAGIC(cseg, CORESEGMAGIC, MID_MACHINE, CORE_CPU);
-	cseg.c_addr = 0;
-	cseg.c_size = chdr->c_cpusize;
-
-	error = vn_rdwr(UIO_WRITE, vp, (caddr_t)&cseg, chdr->c_seghdrsize,
-	    (off_t)chdr->c_hdrsize, UIO_SYSSPACE, IO_UNIT, cred, NULL, p);
-	if (error)
-		return error;
-
-	error = vn_rdwr(UIO_WRITE, vp, (caddr_t)&md_core, sizeof(md_core),
-	    (off_t)(chdr->c_hdrsize + chdr->c_seghdrsize), UIO_SYSSPACE,
-	    IO_UNIT, cred, NULL, p);
-	if (error)
-		return error;
-
-	chdr->c_nseg++;
-	return 0;
 }
 
 /*
@@ -274,4 +219,17 @@ vunmapbuf(struct buf *bp, vsize_t len)
 	uvm_km_free_wakeup(phys_map, addr, len);
 	bp->b_data = bp->b_saveaddr;
 	bp->b_saveaddr = 0;
+}
+
+void *
+tcb_get(struct proc *p)
+{
+	return ((void *)p->p_addr->u_pcb.pcb_fsbase);
+}
+
+void
+tcb_set(struct proc *p, void *tcb)
+{
+	KASSERT(p == curproc);
+	reset_segs(&p->p_addr->u_pcb, (u_int64_t)tcb);
 }

@@ -1,4 +1,4 @@
-/*	$OpenBSD: midivar.h,v 1.7 2013/03/15 09:10:52 ratchov Exp $	*/
+/*	$OpenBSD: midivar.h,v 1.9 2015/05/16 09:56:10 ratchov Exp $	*/
 
 /*
  * Copyright (c) 2003, 2004 Alexandre Ratchov
@@ -27,8 +27,6 @@
 
 #define MIDI_MAXWRITE	32	/* max bytes to give to the uart at once */
 #define MIDI_RATE	3125	/* midi uart baud rate in bytes/second */
-#define MIDI_UNIT(a)	((a) & 0xff)
-#define MIDI_DEV2SC(a)	(midi_cd.cd_devs[MIDI_UNIT(a)])
 
 /*
  * simple ring buffer
@@ -72,9 +70,7 @@ struct midi_softc {
 	struct device	    dev;
 	struct midi_hw_if  *hw_if;
 	void		   *hw_hdl;
-	int	 	    isopen;
 	int		    isbusy;		/* concerns only the output */
-	int		    isdying;
 	int		    flags;		/* open flags */
 	int		    props;		/* midi hw proprieties */
 	int		    rchan;

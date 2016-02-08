@@ -1,4 +1,4 @@
-/*	$OpenBSD: obio.c,v 1.23 2015/01/14 21:35:43 miod Exp $	*/
+/*	$OpenBSD: obio.c,v 1.25 2015/03/30 20:30:22 miod Exp $	*/
 /*	$NetBSD: obio.c,v 1.37 1997/07/29 09:58:11 fair Exp $	*/
 
 /*
@@ -71,20 +71,20 @@ struct bus_softc {
 
 
 /* autoconfiguration driver */
-static int	busmatch(struct device *, void *, void *);
-static void	obioattach(struct device *, struct device *, void *);
-static void	vmesattach(struct device *, struct device *, void *);
-static void	vmelattach(struct device *, struct device *, void *);
-static void	vmeattach(struct device *, struct device *, void *);
+int	busmatch(struct device *, void *, void *);
+void	obioattach(struct device *, struct device *, void *);
+void	vmesattach(struct device *, struct device *, void *);
+void	vmelattach(struct device *, struct device *, void *);
+void	vmeattach(struct device *, struct device *, void *);
 
-int		busprint(void *, const char *);
-int		vmeprint(void *, const char *);
-static int	busattach(struct device *, void *, void *, int);
-int		obio_scan(struct device *, void *, void *);
-int 		vmes_scan(struct device *, void *, void *);
-int 		vmel_scan(struct device *, void *, void *);
-void		vmebus_translate(struct device *, struct confargs *, int);
-int 		vmeintr(void *);
+int	busprint(void *, const char *);
+int	vmeprint(void *, const char *);
+int	busattach(struct device *, void *, void *, int);
+int	obio_scan(struct device *, void *, void *);
+int 	vmes_scan(struct device *, void *, void *);
+int 	vmel_scan(struct device *, void *, void *);
+void	vmebus_translate(struct device *, struct confargs *, int);
+int 	vmeintr(void *);
 
 struct cfattach obio_ca = {
 	sizeof(struct bus_softc), busmatch, obioattach
@@ -273,7 +273,8 @@ obioattach(parent, self, args)
 
 		sbus_translate(self, &oca);
 		oca.ca_bustype = BUS_OBIO;
-		(void) config_found(self, (void *)&oca, busprint);
+		oca.ca_dmat = ca->ca_dmat;
+		config_found(self, (void *)&oca, busprint);
 	}
 
 	for (node = node0; node; node = nextsibling(node)) {
@@ -292,7 +293,8 @@ obioattach(parent, self, args)
 		/* Translate into parent address spaces */
 		sbus_translate(self, &oca);
 		oca.ca_bustype = BUS_OBIO;
-		(void) config_found(self, (void *)&oca, busprint);
+		oca.ca_dmat = ca->ca_dmat;
+		config_found(self, (void *)&oca, busprint);
 	}
 #endif
 }
@@ -388,11 +390,13 @@ vmeattach(parent, self, aux)
 
 	oca.ca_ra.ra_name = "vmes";
 	oca.ca_bustype = BUS_MAIN;
-	(void)config_found(self, (void *)&oca, vmeprint);
+	oca.ca_dmat = ca->ca_dmat;
+	config_found(self, (void *)&oca, vmeprint);
 
 	oca.ca_ra.ra_name = "vmel";
 	oca.ca_bustype = BUS_MAIN;
-	(void)config_found(self, (void *)&oca, vmeprint);
+	oca.ca_dmat = ca->ca_dmat;
+	config_found(self, (void *)&oca, vmeprint);
 }
 
 void

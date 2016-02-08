@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_run.c,v 1.107 2015/02/10 23:25:46 mpi Exp $	*/
+/*	$OpenBSD: if_run.c,v 1.109 2015/06/12 15:47:31 mpi Exp $	*/
 
 /*-
  * Copyright (c) 2008-2010 Damien Bergamini <damien.bergamini@free.fr>
@@ -35,7 +35,6 @@
 #include <sys/device.h>
 #include <sys/endian.h>
 
-#include <machine/bus.h>
 #include <machine/intr.h>
 
 #if NBPFILTER > 0
@@ -519,11 +518,11 @@ run_match(struct device *parent, void *match, void *aux)
 {
 	struct usb_attach_arg *uaa = aux;
 
-	if (uaa->iface != NULL)
+	if (uaa->iface == NULL || uaa->configno != 1)
 		return UMATCH_NONE;
 
 	return (usb_lookup(run_devs, uaa->vendor, uaa->product) != NULL) ?
-	    UMATCH_VENDOR_PRODUCT : UMATCH_NONE;
+	    UMATCH_VENDOR_PRODUCT_CONF_IFACE : UMATCH_NONE;
 }
 
 void
@@ -535,24 +534,11 @@ run_attach(struct device *parent, struct device *self, void *aux)
 	struct ifnet *ifp = &ic->ic_if;
 	usb_interface_descriptor_t *id;
 	usb_endpoint_descriptor_t *ed;
-	int i, nrx, ntx, ntries, error;
+	int i, nrx, ntx, ntries;
 	uint32_t ver;
 
 	sc->sc_udev = uaa->device;
-
-	if (usbd_set_config_no(sc->sc_udev, 1, 0) != 0) {
-		printf("%s: could not set configuration no\n",
-		    sc->sc_dev.dv_xname);
-		return;
-	}
-
-	/* get the first interface handle */
-	error = usbd_device2interface_handle(sc->sc_udev, 0, &sc->sc_iface);
-	if (error != 0) {
-		printf("%s: could not get interface handle\n",
-		    sc->sc_dev.dv_xname);
-		return;
-	}
+	sc->sc_iface = uaa->iface;
 
 	/*
 	 * Find all bulk endpoints.  There are 7 bulk endpoints: 1 for RX

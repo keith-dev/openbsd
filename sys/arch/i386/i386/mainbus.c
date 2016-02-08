@@ -1,4 +1,4 @@
-/*	$OpenBSD: mainbus.c,v 1.50 2012/10/04 08:32:20 ehrhardt Exp $	*/
+/*	$OpenBSD: mainbus.c,v 1.52 2015/07/23 06:21:37 reyk Exp $	*/
 /*	$NetBSD: mainbus.c,v 1.21 1997/06/06 23:14:20 thorpej Exp $	*/
 
 /*
@@ -52,9 +52,9 @@
 #include "acpi.h"
 #include "ipmi.h"
 #include "esm.h"
-#include "vmt.h"
 #include "vesabios.h"
 #include "amdmsr.h"
+#include "pvbus.h"
 
 #include <machine/cpuvar.h>
 #include <machine/i82093var.h>
@@ -69,8 +69,8 @@
 #include <dev/ipmivar.h>
 #endif
 
-#if NVMT > 0
-#include <dev/vmtvar.h>
+#if NPVBUS > 0
+#include <dev/pv/pvvar.h>
 #endif
 
 #if NAMDMSR > 0
@@ -114,6 +114,9 @@ union mainbus_attach_args {
 #endif
 #if NESM > 0
 	struct esm_attach_args mba_eaa;
+#endif
+#if NPVBUS > 0
+	struct pvbus_attach_args mba_pvba;
 #endif
 };
 
@@ -161,13 +164,6 @@ mainbus_attach(struct device *parent, struct device *self, void *aux)
 		mba.mba_iaa.iaa_memt = I386_BUS_SPACE_MEM;
 		if (ipmi_probe(&mba.mba_iaa))
 			config_found(self, &mba.mba_iaa, mainbus_print);
-	}
-#endif
-
-#if NVMT > 0
-	if (vmt_probe()) {
-		mba.mba_busname = "vmt";
-		config_found(self, &mba.mba_busname, mainbus_print);
 	}
 #endif
 
@@ -221,6 +217,14 @@ mainbus_attach(struct device *parent, struct device *self, void *aux)
 		mba.mba_eaa.eaa_memt = I386_BUS_SPACE_MEM;
 		if (esm_probe(&mba.mba_eaa))
 			config_found(self, &mba.mba_eaa, mainbus_print);
+	}
+#endif
+
+#if NPVBUS > 0
+	/* Probe first to hide the "not configured" message */
+	if (pvbus_probe()) {
+		mba.mba_pvba.pvba_busname = "pvbus";
+		config_found(self, &mba.mba_pvba.pvba_busname, mainbus_print);
 	}
 #endif
 

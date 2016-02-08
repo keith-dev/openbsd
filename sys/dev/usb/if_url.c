@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_url.c,v 1.72 2015/02/12 09:08:47 mpi Exp $ */
+/*	$OpenBSD: if_url.c,v 1.75 2015/06/24 09:40:54 mpi Exp $ */
 /*	$NetBSD: if_url.c,v 1.6 2002/09/29 10:19:21 martin Exp $	*/
 /*
  * Copyright (c) 2001, 2002
@@ -54,7 +54,6 @@
 #include <sys/device.h>
 
 #include <net/if.h>
-#include <net/if_arp.h>
 #include <net/if_dl.h>
 #include <net/if_media.h>
 
@@ -966,25 +965,22 @@ url_rxeof(struct usbd_xfer *xfer, void *priv, usbd_status status)
 		goto done;
 	}
 
-	ifp->if_ipackets++;
 	total_len -= ETHER_CRC_LEN;
 
 	m = c->url_mbuf;
 	m->m_pkthdr.len = m->m_len = total_len;
 	ml_enqueue(&ml, m);
 
-	s = splnet();
-
 	if (url_newbuf(sc, c, NULL) == ENOBUFS) {
 		ifp->if_ierrors++;
-		goto done1;
+		goto done;
 	}
 
 	DPRINTF(("%s: %s: deliver %d\n", sc->sc_dev.dv_xname,
 		 __func__, m->m_len));
-	if_input(ifp, &ml);
 
- done1:
+	s = splnet();
+	if_input(ifp, &ml);
 	splx(s);
 
  done:

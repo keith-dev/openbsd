@@ -1,4 +1,4 @@
-/*	$OpenBSD: drm_crtc_helper.c,v 1.10 2015/02/11 07:01:36 jsg Exp $	*/
+/*	$OpenBSD: drm_crtc_helper.c,v 1.13 2015/07/11 04:00:46 jsg Exp $	*/
 /*
  * Copyright (c) 2006-2008 Intel Corporation
  * Copyright (c) 2007 Dave Airlie <airlied@linux.ie>
@@ -67,6 +67,7 @@ void drm_helper_move_panel_connectors_to_head(struct drm_device *dev)
 EXPORT_SYMBOL(drm_helper_move_panel_connectors_to_head);
 
 static bool drm_kms_helper_poll = true;
+module_param_named(poll, drm_kms_helper_poll, bool, 0600);
 
 static void drm_mode_validate_flag(struct drm_connector *connector,
 				   int flags)
@@ -959,16 +960,17 @@ EXPORT_SYMBOL(drm_helper_resume_force_mode);
 void drm_kms_helper_hotplug_event(struct drm_device *dev)
 {
 	/* send a uevent + call fbdev */
-//	drm_sysfs_hotplug_event(dev);
+	drm_sysfs_hotplug_event(dev);
 	if (dev->mode_config.funcs->output_poll_changed)
 		dev->mode_config.funcs->output_poll_changed(dev);
 }
 EXPORT_SYMBOL(drm_kms_helper_hotplug_event);
 
-#define DRM_OUTPUT_POLL_SECONDS 10
-static void drm_output_poll_execute(void *arg1)
+#define DRM_OUTPUT_POLL_PERIOD (10*HZ)
+static void output_poll_execute(struct work_struct *work)
 {
-	struct drm_device *dev = (struct drm_device *)arg1;
+	struct delayed_work *delayed_work = to_delayed_work(work);
+	struct drm_device *dev = container_of(delayed_work, struct drm_device, mode_config.output_poll_work);
 	struct drm_connector *connector;
 	enum drm_connector_status old_status;
 	bool repoll = false, changed = false;
@@ -1013,24 +1015,14 @@ static void drm_output_poll_execute(void *arg1)
 		drm_kms_helper_hotplug_event(dev);
 
 	if (repoll)
-		timeout_add_sec(&dev->mode_config.output_poll_to,
-		    DRM_OUTPUT_POLL_SECONDS);
-}
-
-static void
-drm_output_poll_tick(void *arg)
-{
-	struct drm_device *dev = arg;
-
-	task_add(systq, &dev->mode_config.poll_task);
+		schedule_delayed_work(delayed_work, DRM_OUTPUT_POLL_PERIOD);
 }
 
 void drm_kms_helper_poll_disable(struct drm_device *dev)
 {
 	if (!dev->mode_config.poll_enabled)
 		return;
-	timeout_del(&dev->mode_config.output_poll_to);
-	task_del(systq, &dev->mode_config.poll_task);
+	cancel_delayed_work_sync(&dev->mode_config.output_poll_work);
 }
 EXPORT_SYMBOL(drm_kms_helper_poll_disable);
 
@@ -1049,16 +1041,13 @@ void drm_kms_helper_poll_enable(struct drm_device *dev)
 	}
 
 	if (poll)
-		timeout_add_sec(&dev->mode_config.output_poll_to,
-		    DRM_OUTPUT_POLL_SECONDS);
+		schedule_delayed_work(&dev->mode_config.output_poll_work, DRM_OUTPUT_POLL_PERIOD);
 }
 EXPORT_SYMBOL(drm_kms_helper_poll_enable);
 
 void drm_kms_helper_poll_init(struct drm_device *dev)
 {
-	task_set(&dev->mode_config.poll_task, drm_output_poll_execute, dev);
-	timeout_set(&dev->mode_config.output_poll_to, drm_output_poll_tick,
-	    dev);
+	INIT_DELAYED_WORK(&dev->mode_config.output_poll_work, output_poll_execute);
 	dev->mode_config.poll_enabled = true;
 
 	drm_kms_helper_poll_enable(dev);

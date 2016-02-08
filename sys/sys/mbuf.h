@@ -1,4 +1,4 @@
-/*	$OpenBSD: mbuf.h,v 1.187 2015/02/10 03:46:30 lteo Exp $	*/
+/*	$OpenBSD: mbuf.h,v 1.195 2015/07/08 07:21:50 mpi Exp $	*/
 /*	$NetBSD: mbuf.h,v 1.19 1996/02/09 18:25:14 christos Exp $	*/
 
 /*
@@ -121,7 +121,7 @@ struct pkthdr_pf {
 
 /* record/packet header in first mbuf of chain; valid if M_PKTHDR set */
 struct	pkthdr {
-	struct ifnet		*rcvif;		/* rcv interface */
+	void			*ph_cookie;	/* additional data */
 	SLIST_HEAD(packet_tags, m_tag) tags;	/* list of packet tags */
 	int			 len;		/* total packet length */
 	u_int16_t		 tagsset;	/* mtags attached */
@@ -129,7 +129,7 @@ struct	pkthdr {
 	u_int16_t		 csum_flags;	/* checksum flags */
 	u_int16_t		 ether_vtag;	/* Ethernet 802.1p+Q vlan tag */
 	u_int			 ph_rtableid;	/* routing table id */
-	void			*ph_cookie;	/* additional data */
+	u_int			 ph_ifidx;	/* rcv interface index */
 	struct pkthdr_pf	 pf;
 };
 
@@ -301,15 +301,8 @@ struct mbuf {
 	MCLINITREFERENCE(m);						\
 } while (/* CONSTCOND */ 0)
 
-#define MCLGET(m, how) (void) m_clget((m), (how), NULL, MCLBYTES)
-#define MCLGETI(m, how, ifp, l) m_clget((m), (how), (ifp), (l))
-
-/*
- * MFREE(struct mbuf *m, struct mbuf *n)
- * Free a single mbuf and associated external storage.
- * Place the successor, if any, in n.
- */
-#define	MFREE(m, n) n = m_free((m))
+#define MCLGET(m, how) (void) m_clget((m), (how), MCLBYTES)
+#define MCLGETI(m, how, ifp, l) m_clget((m), (how), (l))
 
 /*
  * Move just m_pkthdr from from to to,
@@ -379,9 +372,6 @@ struct mbuf {
 /* length to m_copy to copy all */
 #define	M_COPYALL	1000000000
 
-/* compatibility with 4.3 */
-#define  m_copy(m, o, l)	m_copym((m), (o), (l), M_DONTWAIT)
-
 /*
  * Mbuf statistics.
  * For statistics related to mbuf and cluster allocations, see also the
@@ -425,7 +415,7 @@ struct  mbuf *m_inject(struct mbuf *, int, int, int);
 struct  mbuf *m_getptr(struct mbuf *, int, int *);
 int	m_leadingspace(struct mbuf *);
 int	m_trailingspace(struct mbuf *);
-struct mbuf *m_clget(struct mbuf *, int, struct ifnet *, u_int);
+struct mbuf *m_clget(struct mbuf *, int, u_int);
 void	m_extref(struct mbuf *, struct mbuf *);
 void	m_extfree_pool(caddr_t, u_int, void *);
 void	m_adj(struct mbuf *, int);
@@ -434,7 +424,7 @@ void	m_freem(struct mbuf *);
 void	m_reclaim(void *, int);
 void	m_copydata(struct mbuf *, int, int, caddr_t);
 void	m_cat(struct mbuf *, struct mbuf *);
-struct mbuf *m_devget(char *, int, int, struct ifnet *);
+struct mbuf *m_devget(char *, int, int);
 int	m_apply(struct mbuf *, int, int,
 	    int (*)(caddr_t, caddr_t, unsigned int), caddr_t);
 int	m_dup_pkthdr(struct mbuf *, struct mbuf *, int);
@@ -454,15 +444,10 @@ struct m_tag *m_tag_next(struct mbuf *, struct m_tag *);
 /* Packet tag types */
 #define PACKET_TAG_IPSEC_IN_DONE	0x0001  /* IPsec applied, in */
 #define PACKET_TAG_IPSEC_OUT_DONE	0x0002  /* IPsec applied, out */
-#define PACKET_TAG_IPSEC_IN_CRYPTO_DONE	0x0004  /* NIC IPsec crypto done */
-#define PACKET_TAG_IPSEC_OUT_CRYPTO_NEEDED 0x0008  /* NIC IPsec crypto req'ed */
-#define PACKET_TAG_IPSEC_PENDING_TDB	0x0010  /* Reminder to do IPsec */
-#define PACKET_TAG_BRIDGE		0x0020  /* Bridge processing done */
 #define PACKET_TAG_GIF			0x0040  /* GIF processing done */
 #define PACKET_TAG_GRE			0x0080  /* GRE processing done */
 #define PACKET_TAG_DLT			0x0100 /* data link layer type */
 #define PACKET_TAG_PF_DIVERT		0x0200 /* pf(4) diverted packet */
-#define PACKET_TAG_PIPEX		0x0400 /* pipex session cache */
 #define PACKET_TAG_PF_REASSEMBLED	0x0800 /* pf reassembled ipv6 packet */
 #define PACKET_TAG_SRCROUTE		0x1000 /* IPv4 source routing options */
 #define PACKET_TAG_TUNNEL		0x2000	/* Tunnel endpoint address */
@@ -470,7 +455,7 @@ struct m_tag *m_tag_next(struct mbuf *, struct m_tag *);
 #define MTAG_BITS \
     ("\20\1IPSEC_IN_DONE\2IPSEC_OUT_DONE\3IPSEC_IN_CRYPTO_DONE" \
     "\4IPSEC_OUT_CRYPTO_NEEDED\5IPSEC_PENDING_TDB\6BRIDGE\7GIF\10GRE\11DLT" \
-    "\12PF_DIVERT\13PIPEX\14PF_REASSEMBLED\15SRCROUTE\16TUNNEL")
+    "\12PF_DIVERT\14PF_REASSEMBLED\15SRCROUTE\16TUNNEL")
 
 /*
  * Maximum tag payload length (that is excluding the m_tag structure).

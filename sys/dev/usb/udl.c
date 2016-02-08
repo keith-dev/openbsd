@@ -1,4 +1,4 @@
-/*	$OpenBSD: udl.c,v 1.81 2014/12/09 07:05:06 doug Exp $ */
+/*	$OpenBSD: udl.c,v 1.83 2015/05/02 10:44:29 jsg Exp $ */
 
 /*
  * Copyright (c) 2009 Marcus Glocker <mglocker@openbsd.org>
@@ -35,8 +35,6 @@
 #include <sys/systm.h>
 
 #include <uvm/uvm_extern.h>
-
-#include <machine/bus.h>
 
 #include <dev/usb/usb.h>
 #include <dev/usb/usbdi.h>
@@ -1838,6 +1836,7 @@ udl_cmd_send_async(struct udl_softc *sc)
 	}
 	if (i == UDL_CMD_XFER_COUNT) {
 		/* this shouldn't happen */
+		splx(s);
 		return (USBD_IN_USE);
 	}
 	cx = &sc->sc_cmd_xfer[i];

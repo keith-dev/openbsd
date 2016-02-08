@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_ix.c,v 1.117 2015/02/12 04:58:59 dlg Exp $	*/
+/*	$OpenBSD: if_ix.c,v 1.121 2015/06/24 09:40:54 mpi Exp $	*/
 
 /******************************************************************************
 
@@ -953,8 +953,15 @@ ixgbe_media_status(struct ifnet * ifp, struct ifmediareq * ifmr)
 			ifmr->ifm_active |= IFM_100_TX | IFM_FDX;
 			break;
 		case IXGBE_LINK_SPEED_1GB_FULL:
-			ifmr->ifm_active |= ((sc->optics == IFM_1000_SX) ?
-			    IFM_1000_SX : IFM_1000_T) | IFM_FDX;
+			switch (sc->optics) {
+			case IFM_1000_SX:
+			case IFM_1000_LX:
+				ifmr->ifm_active |= sc->optics | IFM_FDX;
+				break;
+			default:
+				ifmr->ifm_active |= IFM_1000_T | IFM_FDX;
+				break;
+			}
 			break;
 		case IXGBE_LINK_SPEED_10GB_FULL:
 			ifmr->ifm_active |= sc->optics | IFM_FDX;
@@ -1407,6 +1414,8 @@ ixgbe_setup_optics(struct ix_softc *sc)
 		sc->optics = IFM_10G_CX4;
 	else if (layer & IXGBE_PHYSICAL_LAYER_1000BASE_SX)
 		sc->optics = IFM_1000_SX;
+	else if (layer & IXGBE_PHYSICAL_LAYER_1000BASE_LX)
+		sc->optics = IFM_1000_LX;
 }
 
 /*********************************************************************
@@ -2049,6 +2058,8 @@ ixgbe_tx_ctx_setup(struct tx_ring *txr, struct mbuf *mp,
 #ifdef notyet
 	struct ip6_hdr *ip6;
 #endif
+	struct mbuf *m;
+	int	ipoff;
 	uint32_t vlan_macip_lens = 0, type_tucmd_mlhl = 0;
 	int 	ehdrlen, ip_hlen = 0;
 	uint16_t etype;
@@ -2094,9 +2105,13 @@ ixgbe_tx_ctx_setup(struct tx_ring *txr, struct mbuf *mp,
 	 * Jump over vlan headers if already present,
 	 * helpful for QinQ too.
 	 */
+	if (mp->m_len < sizeof(struct ether_header))
+		return (1);
 #if NVLAN > 0
 	eh = mtod(mp, struct ether_vlan_header *);
 	if (eh->evl_encap_proto == htons(ETHERTYPE_VLAN)) {
+		if (mp->m_len < sizeof(struct ether_vlan_header))
+			return (1);
 		etype = ntohs(eh->evl_proto);
 		ehdrlen = ETHER_HDR_LEN + ETHER_VLAN_ENCAP_LEN;
 	} else {
@@ -2114,15 +2129,23 @@ ixgbe_tx_ctx_setup(struct tx_ring *txr, struct mbuf *mp,
 
 	switch (etype) {
 	case ETHERTYPE_IP:
-		ip = (struct ip *)(mp->m_data + ehdrlen);
+		if (mp->m_pkthdr.len < ehdrlen + sizeof(*ip))
+			return (1);
+		m = m_getptr(mp, ehdrlen, &ipoff);
+		KASSERT(m != NULL && m->m_len - ipoff >= sizeof(*ip));
+		ip = (struct ip *)(m->m_data + ipoff);
 		ip_hlen = ip->ip_hl << 2;
 		ipproto = ip->ip_p;
 		type_tucmd_mlhl |= IXGBE_ADVTXD_TUCMD_IPV4;
 		break;
 #ifdef notyet
 	case ETHERTYPE_IPV6:
-		ip6 = (struct ip6_hdr *)(mp->m_data + ehdrlen);
-		ip_hlen = sizeof(struct ip6_hdr);
+		if (mp->m_pkthdr.len < ehdrlen + sizeof(*ip6))
+			return (1);
+		m = m_getptr(mp, ehdrlen, &ipoff);
+		KASSERT(m != NULL && m->m_len - ipoff >= sizeof(*ip6));
+		ip6 = (struct ip6 *)(m->m_data + ipoff);
+		ip_hlen = sizeof(*ip6);
 		/* XXX-BZ this will go badly in case of ext hdrs. */
 		ipproto = ip6->ip6_nxt;
 		type_tucmd_mlhl |= IXGBE_ADVTXD_TUCMD_IPV6;
@@ -2896,7 +2919,6 @@ ixgbe_rxeof(struct ix_queue *que)
 			sendmp = NULL;
 			mp->m_next = nxbuf->buf;
 		} else { /* Sending this frame? */
-			ifp->if_ipackets++;
 			rxr->rx_packets++;
 			/* capture data for AIM */
 			rxr->bytes += sendmp->m_pkthdr.len;
@@ -3213,15 +3235,14 @@ void
 ixgbe_handle_msf(struct ix_softc *sc)
 {
 	struct ixgbe_hw *hw = &sc->hw;
-	uint32_t autoneg, err;
+	uint32_t autoneg;
 	bool negotiate;
 
 	autoneg = hw->phy.autoneg_advertised;
-	if ((!autoneg) && (hw->mac.ops.get_link_capabilities))
-		err = hw->mac.ops.get_link_capabilities(hw, &autoneg,
-		    &negotiate);
-	if (err)
-		return;
+	if ((!autoneg) && (hw->mac.ops.get_link_capabilities)) {
+		if (hw->mac.ops.get_link_capabilities(hw, &autoneg, &negotiate))
+			return;
+	}
 	if (hw->mac.ops.setup_link)
 		hw->mac.ops.setup_link(hw, autoneg, TRUE);
 }

@@ -1,4 +1,4 @@
-/*	$OpenBSD: term.c,v 1.104 2015/01/31 00:11:52 schwarze Exp $ */
+/*	$OpenBSD: term.c,v 1.108 2015/04/29 18:32:57 schwarze Exp $ */
 /*
  * Copyright (c) 2008, 2009, 2010, 2011 Kristaps Dzonsons <kristaps@bsd.lv>
  * Copyright (c) 2010-2015 Ingo Schwarze <schwarze@openbsd.org>
@@ -7,9 +7,9 @@
  * purpose with or without fee is hereby granted, provided that the above
  * copyright notice and this permission notice appear in all copies.
  *
- * THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES
+ * THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHORS DISCLAIM ALL WARRANTIES
  * WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF
- * MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR
+ * MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHORS BE LIABLE FOR
  * ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
  * WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN
  * ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
@@ -47,7 +47,7 @@ term_free(struct termp *p)
 
 void
 term_begin(struct termp *p, term_margin head,
-		term_margin foot, const void *arg)
+		term_margin foot, const struct roff_meta *arg)
 {
 
 	p->headf = head;
@@ -263,6 +263,7 @@ term_flushln(struct termp *p)
 
 	p->col = 0;
 	p->overstep = 0;
+	p->flags &= ~(TERMP_BACKAFTER | TERMP_BACKBEFORE);
 
 	if ( ! (TERMP_NOBREAK & p->flags)) {
 		p->viscol = 0;
@@ -411,14 +412,10 @@ term_word(struct termp *p, const char *word)
 		p->flags |= TERMP_NOSPACE;
 
 	p->flags &= ~(TERMP_SENTENCE | TERMP_NONEWLINE);
+	p->skipvsp = 0;
 
 	while ('\0' != *word) {
 		if ('\\' != *word) {
-			if (TERMP_SKIPCHAR & p->flags) {
-				p->flags &= ~TERMP_SKIPCHAR;
-				word++;
-				continue;
-			}
 			if (TERMP_NBRWORD & p->flags) {
 				if (' ' == *word) {
 					encode(p, nbrsp, 1);
@@ -477,13 +474,13 @@ term_word(struct termp *p, const char *word)
 			term_fontlast(p);
 			continue;
 		case ESCAPE_NOSPACE:
-			if (TERMP_SKIPCHAR & p->flags)
-				p->flags &= ~TERMP_SKIPCHAR;
-			else if ('\0' == *word)
+			if (p->flags & TERMP_BACKAFTER)
+				p->flags &= ~TERMP_BACKAFTER;
+			else if (*word == '\0')
 				p->flags |= (TERMP_NOSPACE | TERMP_NONEWLINE);
 			continue;
 		case ESCAPE_SKIPCHAR:
-			p->flags |= TERMP_SKIPCHAR;
+			p->flags |= TERMP_BACKAFTER;
 			continue;
 		case ESCAPE_OVERSTRIKE:
 			cp = seq + sz;
@@ -493,9 +490,14 @@ term_word(struct termp *p, const char *word)
 					continue;
 				}
 				encode1(p, *seq++);
-				if (seq < cp)
-					encode(p, "\b", 1);
+				if (seq < cp) {
+					if (p->flags & TERMP_BACKBEFORE)
+						p->flags |= TERMP_BACKAFTER;
+					else
+						p->flags |= TERMP_BACKBEFORE;
+				}
 			}
+			continue;
 		default:
 			continue;
 		}
@@ -550,16 +552,16 @@ encode1(struct termp *p, int c)
 {
 	enum termfont	  f;
 
-	if (TERMP_SKIPCHAR & p->flags) {
-		p->flags &= ~TERMP_SKIPCHAR;
-		return;
+	if (p->col + 7 >= p->maxcols)
+		adjbuf(p, p->col + 7);
+
+	f = (c == ASCII_HYPH || isgraph(c)) ?
+	    p->fontq[p->fonti] : TERMFONT_NONE;
+
+	if (p->flags & TERMP_BACKBEFORE) {
+		p->buf[p->col++] = 8;
+		p->flags &= ~TERMP_BACKBEFORE;
 	}
-
-	if (p->col + 6 >= p->maxcols)
-		adjbuf(p, p->col + 6);
-
-	f = p->fontq[p->fonti];
-
 	if (TERMFONT_UNDER == f || TERMFONT_BI == f) {
 		p->buf[p->col++] = '_';
 		p->buf[p->col++] = 8;
@@ -572,6 +574,10 @@ encode1(struct termp *p, int c)
 		p->buf[p->col++] = 8;
 	}
 	p->buf[p->col++] = c;
+	if (p->flags & TERMP_BACKAFTER) {
+		p->flags |= TERMP_BACKBEFORE;
+		p->flags &= ~TERMP_BACKAFTER;
+	}
 }
 
 static void
@@ -579,29 +585,8 @@ encode(struct termp *p, const char *word, size_t sz)
 {
 	size_t		  i;
 
-	if (TERMP_SKIPCHAR & p->flags) {
-		p->flags &= ~TERMP_SKIPCHAR;
-		return;
-	}
-
-	/*
-	 * Encode and buffer a string of characters.  If the current
-	 * font mode is unset, buffer directly, else encode then buffer
-	 * character by character.
-	 */
-
-	if (p->fontq[p->fonti] == TERMFONT_NONE) {
-		if (p->col + sz >= p->maxcols)
-			adjbuf(p, p->col + sz);
-		for (i = 0; i < sz; i++)
-			p->buf[p->col++] = word[i];
-		return;
-	}
-
-	/* Pre-buffer, assuming worst-case. */
-
-	if (p->col + 1 + (sz * 5) >= p->maxcols)
-		adjbuf(p, p->col + 1 + (sz * 5));
+	if (p->col + 2 + (sz * 5) >= p->maxcols)
+		adjbuf(p, p->col + 2 + (sz * 5));
 
 	for (i = 0; i < sz; i++) {
 		if (ASCII_HYPH == word[i] ||
@@ -616,8 +601,7 @@ void
 term_setwidth(struct termp *p, const char *wstr)
 {
 	struct roffsu	 su;
-	size_t		 width;
-	int		 iop;
+	int		 iop, width;
 
 	iop = 0;
 	width = 0;
@@ -828,11 +812,12 @@ term_vspan(const struct termp *p, const struct roffsu *su)
 	return(ri < 66 ? ri : 1);
 }
 
+/*
+ * Convert a scaling width to basic units, rounding down.
+ */
 int
 term_hspan(const struct termp *p, const struct roffsu *su)
 {
-	double		 v;
 
-	v = (*p->hspan)(p, su);
-	return(v > 0.0 ? v + 0.0005 : v - 0.0005);
+	return((*p->hspan)(p, su));
 }

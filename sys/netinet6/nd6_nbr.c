@@ -1,4 +1,4 @@
-/*	$OpenBSD: nd6_nbr.c,v 1.88 2014/12/17 09:57:13 mpi Exp $	*/
+/*	$OpenBSD: nd6_nbr.c,v 1.91 2015/07/16 15:28:38 mpi Exp $	*/
 /*	$KAME: nd6_nbr.c,v 1.61 2001/02/10 16:06:14 jinmei Exp $	*/
 
 /*
@@ -38,7 +38,6 @@
 #include <sys/sockio.h>
 #include <sys/time.h>
 #include <sys/kernel.h>
-#include <sys/errno.h>
 #include <sys/ioctl.h>
 #include <sys/syslog.h>
 #include <sys/queue.h>
@@ -84,7 +83,6 @@ void nd6_dad_ns_output(struct dadq *, struct ifaddr *);
 void nd6_dad_ns_input(struct ifaddr *);
 void nd6_dad_duplicated(struct dadq *);
 
-static int dad_ignore_ns = 0;	/* ignore NS in DAD - specwise incorrect*/
 static int dad_maxtry = 15;	/* max # of *tries* to transmit DAD packet */
 
 /*
@@ -96,7 +94,7 @@ static int dad_maxtry = 15;	/* max # of *tries* to transmit DAD packet */
 void
 nd6_ns_input(struct mbuf *m, int off, int icmp6len)
 {
-	struct ifnet *ifp = m->m_pkthdr.rcvif;
+	struct ifnet *ifp;
 	struct ip6_hdr *ip6 = mtod(m, struct ip6_hdr *);
 	struct nd_neighbor_solicit *nd_ns;
 	struct in6_addr saddr6 = ip6->ip6_src;
@@ -112,6 +110,10 @@ nd6_ns_input(struct mbuf *m, int off, int icmp6len)
 	union nd_opts ndopts;
 	struct sockaddr_dl *proxydl = NULL;
 	char addr[INET6_ADDRSTRLEN], addr0[INET6_ADDRSTRLEN];
+
+	ifp = if_get(m->m_pkthdr.ph_ifidx);
+	if (ifp == NULL)
+		goto freeit;
 
 	IP6_EXTHDR_GET(nd_ns, struct nd_neighbor_solicit *, m, off, icmp6len);
 	if (nd_ns == NULL) {
@@ -393,7 +395,7 @@ nd6_ns_output(struct ifnet *ifp, struct in6_addr *daddr6,
 	}
 	if (m == NULL)
 		return;
-	m->m_pkthdr.rcvif = NULL;
+	m->m_pkthdr.ph_ifidx = 0;
 	m->m_pkthdr.ph_rtableid = ifp->if_rdomain;
 
 	if (daddr6 == NULL || IN6_IS_ADDR_MULTICAST(daddr6)) {
@@ -563,7 +565,7 @@ nd6_ns_output(struct ifnet *ifp, struct in6_addr *daddr6,
 void
 nd6_na_input(struct mbuf *m, int off, int icmp6len)
 {
-	struct ifnet *ifp = m->m_pkthdr.rcvif;
+	struct ifnet *ifp;
 	struct ip6_hdr *ip6 = mtod(m, struct ip6_hdr *);
 	struct nd_neighbor_advert *nd_na;
 	struct in6_addr saddr6 = ip6->ip6_src;
@@ -581,6 +583,10 @@ nd6_na_input(struct mbuf *m, int off, int icmp6len)
 	struct sockaddr_dl *sdl;
 	union nd_opts ndopts;
 	char addr[INET6_ADDRSTRLEN], addr0[INET6_ADDRSTRLEN];
+
+	ifp = if_get(m->m_pkthdr.ph_ifidx);
+	if (ifp == NULL)
+		goto freeit;
 
 	if (ip6->ip6_hlim != 255) {
 		nd6log((LOG_ERR,
@@ -944,7 +950,7 @@ nd6_na_output(struct ifnet *ifp, struct in6_addr *daddr6,
 	}
 	if (m == NULL)
 		return;
-	m->m_pkthdr.rcvif = NULL;
+	m->m_pkthdr.ph_ifidx = 0;
 	m->m_pkthdr.ph_rtableid = ifp->if_rdomain;
 
 	if (IN6_IS_ADDR_MULTICAST(daddr6)) {
@@ -1411,18 +1417,6 @@ nd6_dad_ns_input(struct ifaddr *ifa)
 	taddr6 = &ia6->ia_addr.sin6_addr;
 	duplicate = 0;
 	dp = nd6_dad_find(ifa);
-
-	/* Quickhack - completely ignore DAD NS packets */
-	if (dad_ignore_ns) {
-		char addr[INET6_ADDRSTRLEN];
-
-		nd6log((LOG_INFO,
-		    "nd6_dad_ns_input: ignoring DAD NS packet for "
-		    "address %s(%s)\n",
-		    inet_ntop(AF_INET6, taddr6, addr, sizeof(addr)),
-		    ifa->ifa_ifp->if_xname));
-		return;
-	}
 
 	/*
 	 * if I'm yet to start DAD, someone else started using this address

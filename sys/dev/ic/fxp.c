@@ -1,4 +1,4 @@
-/*	$OpenBSD: fxp.c,v 1.119 2015/02/12 09:08:00 mpi Exp $	*/
+/*	$OpenBSD: fxp.c,v 1.121 2015/06/24 09:40:54 mpi Exp $	*/
 /*	$NetBSD: if_fxp.c,v 1.2 1997/06/05 02:01:55 thorpej Exp $	*/
 
 /*
@@ -49,7 +49,6 @@
 #include <sys/timeout.h>
 
 #include <net/if.h>
-#include <net/if_dl.h>
 #include <net/if_media.h>
 #include <net/if_types.h>
 
@@ -958,7 +957,6 @@ fxp_stats_update(void *arg)
 	ifp->if_opackets += letoh32(sp->tx_good);
 	ifp->if_collisions += letoh32(sp->tx_total_collisions);
 	if (sp->rx_good) {
-		ifp->if_ipackets += letoh32(sp->rx_good);
 		sc->rx_idle_secs = 0;
 	} else if (sc->sc_flags & FXPF_RECV_WORKAROUND)
 		sc->rx_idle_secs++;

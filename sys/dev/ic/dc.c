@@ -1,4 +1,4 @@
-/*	$OpenBSD: dc.c,v 1.137 2015/01/23 12:49:13 dlg Exp $	*/
+/*	$OpenBSD: dc.c,v 1.141 2015/06/24 09:40:54 mpi Exp $	*/
 
 /*
  * Copyright (c) 1997, 1998, 1999
@@ -104,7 +104,6 @@
 #include <sys/timeout.h>
 
 #include <net/if.h>
-#include <net/if_dl.h>
 #include <net/if_types.h>
 
 #include <netinet/in.h>
@@ -132,7 +131,7 @@ int dc_coal(struct dc_softc *, struct mbuf **);
 
 void dc_pnic_rx_bug_war(struct dc_softc *, int);
 int dc_rx_resync(struct dc_softc *);
-void dc_rxeof(struct dc_softc *);
+int dc_rxeof(struct dc_softc *);
 void dc_txeof(struct dc_softc *);
 void dc_tick(void *);
 void dc_tx_underrun(struct dc_softc *);
@@ -2066,13 +2065,14 @@ dc_rx_resync(struct dc_softc *sc)
  * A frame has been uploaded: pass the resulting mbuf chain up to
  * the higher level protocols.
  */
-void
+int
 dc_rxeof(struct dc_softc *sc)
 {
 	struct mbuf *m;
 	struct ifnet *ifp;
 	struct dc_desc *cur_rx;
-	int i, offset, total_len = 0;
+	struct mbuf_list ml = MBUF_LIST_INITIALIZER();
+	int i, offset, total_len = 0, consumed = 0;
 	u_int32_t rxstat;
 
 	ifp = &sc->sc_arpcom.ac_if;
@@ -2135,7 +2135,7 @@ dc_rxeof(struct dc_softc *sc)
 					continue;
 				} else {
 					dc_init(sc);
-					return;
+					break;
 				}
 			}
 		}
@@ -2143,8 +2143,7 @@ dc_rxeof(struct dc_softc *sc)
 		/* No errors; receive the packet. */	
 		total_len -= ETHER_CRC_LEN;
 
-		m->m_pkthdr.rcvif = ifp;
-		m0 = m_devget(mtod(m, char *), total_len, ETHER_ALIGN, ifp);
+		m0 = m_devget(mtod(m, char *), total_len, ETHER_ALIGN);
 		dc_newbuf(sc, i, m);
 		DC_INC(i, DC_RX_LIST_CNT);
 		if (m0 == NULL) {
@@ -2153,15 +2152,15 @@ dc_rxeof(struct dc_softc *sc)
 		}
 		m = m0;
 
-		ifp->if_ipackets++;
-#if NBPFILTER > 0
-		if (ifp->if_bpf)
-			bpf_mtap(ifp->if_bpf, m, BPF_DIRECTION_IN);
-#endif
-		ether_input_mbuf(ifp, m);
+		consumed++;
+		ml_enqueue(&ml, m);
 	}
 
 	sc->dc_cdata.dc_rx_prod = i;
+
+	if_input(ifp, &ml);
+
+	return (consumed);
 }
 
 /*
@@ -2446,10 +2445,7 @@ dc_intr(void *arg)
 		CSR_WRITE_4(sc, DC_ISR, status);
 
 		if (status & DC_ISR_RX_OK) {
-			int		curpkts;
-			curpkts = ifp->if_ipackets;
-			dc_rxeof(sc);
-			if (curpkts == ifp->if_ipackets) {
+			if (dc_rxeof(sc) == 0) {
 				while(dc_rx_resync(sc))
 					dc_rxeof(sc);
 			}
@@ -2471,10 +2467,7 @@ dc_intr(void *arg)
 
 		if ((status & DC_ISR_RX_WATDOGTIMEO)
 		    || (status & DC_ISR_RX_NOBUF)) {
-			int		curpkts;
-			curpkts = ifp->if_ipackets;
-			dc_rxeof(sc);
-			if (curpkts == ifp->if_ipackets) {
+			if (dc_rxeof(sc) == 0) {
 				while(dc_rx_resync(sc))
 					dc_rxeof(sc);
 			}

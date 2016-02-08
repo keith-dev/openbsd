@@ -1,4 +1,4 @@
-/* $OpenBSD: client.c,v 1.85 2014/10/20 23:27:14 nicm Exp $ */
+/* $OpenBSD: client.c,v 1.91 2015/07/13 18:10:26 nicm Exp $ */
 
 /*
  * Copyright (c) 2007 Nicholas Marriott <nicm@users.sourceforge.net>
@@ -222,7 +222,7 @@ client_main(int argc, char **argv, int flags)
 		cmdflags = CMD_STARTSERVER;
 	} else if (argc == 0) {
 		msg = MSG_COMMAND;
-		cmdflags = CMD_STARTSERVER|CMD_CANTNEST;
+		cmdflags = CMD_STARTSERVER;
 	} else {
 		msg = MSG_COMMAND;
 
@@ -240,33 +240,27 @@ client_main(int argc, char **argv, int flags)
 		TAILQ_FOREACH(cmd, &cmdlist->list, qentry) {
 			if (cmd->entry->flags & CMD_STARTSERVER)
 				cmdflags |= CMD_STARTSERVER;
-			if (cmd->entry->flags & CMD_CANTNEST)
-				cmdflags |= CMD_CANTNEST;
 		}
 		cmd_list_free(cmdlist);
-	}
-
-	/*
-	 * Check if this could be a nested session, if the command can't nest:
-	 * if the socket path matches $TMUX, this is probably the same server.
-	 */
-	if (shell_cmd == NULL && environ_path != NULL &&
-	    (cmdflags & CMD_CANTNEST) &&
-	    strcmp(socket_path, environ_path) == 0) {
-		fprintf(stderr, "sessions should be nested with care, "
-		    "unset $TMUX to force\n");
-		return (1);
 	}
 
 	/* Set process title, log and signals now this is the client. */
 	setproctitle("client (%s)", socket_path);
 	logfile("client");
 
+	/* Establish signal handlers. */
+	set_signals(client_signal);
+
 	/* Initialize the client socket and start the server. */
 	fd = client_connect(socket_path, cmdflags & CMD_STARTSERVER);
 	if (fd == -1) {
-		fprintf(stderr, "failed to connect to server: %s\n",
-		    strerror(errno));
+		if (errno == ECONNREFUSED) {
+			fprintf(stderr, "no server running on %s\n",
+			    socket_path);
+		} else {
+			fprintf(stderr, "error connecting to %s (%s)\n",
+			    socket_path, strerror(errno));
+		}
 		return (1);
 	}
 
@@ -295,9 +289,6 @@ client_main(int argc, char **argv, int flags)
 		cfsetospeed(&tio, cfgetospeed(&saved_tio));
 		tcsetattr(STDIN_FILENO, TCSANOW, &tio);
 	}
-
-	/* Establish signal handlers. */
-	set_signals(client_signal);
 
 	/* Send identify messages. */
 	client_send_identify(flags);
@@ -357,9 +348,11 @@ client_main(int argc, char **argv, int flags)
 void
 client_send_identify(int flags)
 {
-	const char	*s;
+	const char	 *s;
 	char		**ss;
-	int		 fd;
+	size_t		  sslen;
+	int		  fd;
+	pid_t		  pid;
 
 	client_write_one(MSG_IDENTIFY_FLAGS, -1, &flags, sizeof flags);
 
@@ -379,8 +372,14 @@ client_send_identify(int flags)
 		fatal("dup failed");
 	client_write_one(MSG_IDENTIFY_STDIN, fd, NULL, 0);
 
-	for (ss = environ; *ss != NULL; ss++)
-		client_write_one(MSG_IDENTIFY_ENVIRON, -1, *ss, strlen(*ss) + 1);
+	pid = getpid();
+	client_write_one(MSG_IDENTIFY_CLIENTPID, -1, &pid, sizeof pid);
+
+	for (ss = environ; *ss != NULL; ss++) {
+		sslen = strlen(*ss) + 1;
+		if (sslen <= MAX_IMSGSIZE - IMSG_HEADER_SIZE)
+			client_write_one(MSG_IDENTIFY_ENVIRON, -1, *ss, sslen);
+	}
 
 	client_write_one(MSG_IDENTIFY_DONE, -1, NULL, 0);
 
@@ -557,7 +556,7 @@ client_dispatch_wait(void *data0)
 		data = imsg.data;
 		datalen = imsg.hdr.len - IMSG_HEADER_SIZE;
 
-		log_debug("got %d from server", imsg.hdr.type);
+		log_debug("got %u from server", imsg.hdr.type);
 		switch (imsg.hdr.type) {
 		case MSG_EXIT:
 		case MSG_SHUTDOWN:
@@ -604,7 +603,7 @@ client_dispatch_wait(void *data0)
 				fatalx("bad MSG_VERSION size");
 
 			fprintf(stderr, "protocol version mismatch "
-			    "(client %u, server %u)\n", PROTOCOL_VERSION,
+			    "(client %d, server %u)\n", PROTOCOL_VERSION,
 			    imsg.hdr.peerid);
 			client_exitval = 1;
 
@@ -648,7 +647,7 @@ client_dispatch_attached(void)
 		data = imsg.data;
 		datalen = imsg.hdr.len - IMSG_HEADER_SIZE;
 
-		log_debug("got %d from server", imsg.hdr.type);
+		log_debug("got %u from server", imsg.hdr.type);
 		switch (imsg.hdr.type) {
 		case MSG_DETACH:
 		case MSG_DETACHKILL:

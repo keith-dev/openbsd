@@ -1,4 +1,4 @@
-/*	$OpenBSD: dwc2_coreintr.c,v 1.6 2015/02/12 06:46:23 uebayasi Exp $	*/
+/*	$OpenBSD: dwc2_coreintr.c,v 1.8 2015/06/28 11:48:18 jmatthew Exp $	*/
 /*	$NetBSD: dwc2_coreintr.c,v 1.8 2014/04/04 05:40:57 skrll Exp $	*/
 
 /*
@@ -47,10 +47,13 @@ __KERNEL_RCSID(0, "$NetBSD: dwc2_coreintr.c,v 1.8 2014/04/04 05:40:57 skrll Exp 
 #endif
 
 #include <sys/param.h>
+#include <sys/systm.h>
 #include <sys/kernel.h>
 #include <sys/mutex.h>
 #include <sys/pool.h>
 #include <sys/timeout.h>
+
+#include <lib/libkern/libkern.h>
 
 #include <machine/bus.h>
 
@@ -58,9 +61,6 @@ __KERNEL_RCSID(0, "$NetBSD: dwc2_coreintr.c,v 1.8 2014/04/04 05:40:57 skrll Exp 
 #include <dev/usb/usbdi.h>
 #include <dev/usb/usbdivar.h>
 #include <dev/usb/usb_mem.h>
-
-#include <dev/usb/dwc2/linux/kernel.h>
-#include <dev/usb/dwc2/linux/list.h>
 
 #include <dev/usb/dwc2/dwc2.h>
 #include <dev/usb/dwc2/dwc2var.h>
@@ -305,6 +305,7 @@ STATIC void dwc2_handle_conn_id_status_change_intr(struct dwc2_hsotg *hsotg)
 	 * scheduling.
 	 */
 	spin_unlock(&hsotg->lock);
+	task_set(&hsotg->wf_otg, dwc2_conn_id_status_change, hsotg);
 	task_add(hsotg->wq_otg, &hsotg->wf_otg);
 	spin_lock(&hsotg->lock);
 

@@ -1,4 +1,4 @@
-/*	$OpenBSD: uvm.h,v 1.57 2014/10/03 17:41:00 kettenis Exp $	*/
+/*	$OpenBSD: uvm.h,v 1.59 2015/05/04 10:21:15 dlg Exp $	*/
 /*	$NetBSD: uvm.h,v 1.24 2000/11/27 08:40:02 chs Exp $	*/
 
 /*
@@ -38,9 +38,6 @@
 #include <uvm/uvm_glue.h>
 #include <uvm/uvm_km.h>
 #include <uvm/uvm_swap.h>
-#ifdef UVM_SWAP_ENCRYPT
-#include <uvm/uvm_swap_encrypt.h>
-#endif
 
 #include <uvm/uvm_pmemrange.h>
 
@@ -59,8 +56,6 @@ struct uvm {
 	/* Lock order: pageqlock, then fpageqlock. */
 	struct mutex fpageqlock;	/* lock for free page q  + pdaemon */
 	boolean_t page_init_done;	/* TRUE if uvm_page_init() finished */
-	boolean_t page_idle_zero;	/* TRUE if we should try to zero
-					   pages in the idle loop */
 	struct uvm_pmr_control pmr_control; /* pmemrange data */
 
 		/* page daemon trigger */

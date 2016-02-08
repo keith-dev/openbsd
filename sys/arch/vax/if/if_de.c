@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_de.c,v 1.27 2015/02/01 15:27:11 miod Exp $	*/
+/*	$OpenBSD: if_de.c,v 1.30 2015/07/04 17:32:20 miod Exp $	*/
 /*	$NetBSD: if_de.c,v 1.27 1997/04/19 15:02:29 ragge Exp $	*/
 
 /*
@@ -88,7 +88,7 @@ int	dedebug = 0;
  * efficiently.
  */
 struct	de_softc {
-	struct	device ds_dev;	/* Configuration common part */
+	struct	device ds_dev;		/* Configuration common part */
 	struct	arpcom ds_ac;		/* Ethernet common part */
 	struct	dedevice *ds_vaddr;	/* Virtual address of this interface */
 #define 	ds_if	ds_ac.ac_if	/* network-visible interface */
@@ -352,7 +352,7 @@ destart(ifp)
 		return;
 	for (nxmit = ds->ds_nxmit; nxmit < NXMT; nxmit++) {
 		IF_DEQUEUE(&ds->ds_if.if_snd, m);
-		if (m == 0)
+		if (m == NULL)
 			break;
 		rp = &ds->ds_xrent[ds->ds_xfree];
 		if (rp->r_flags & XFLG_OWN)
@@ -423,7 +423,7 @@ deintr(unit)
 		ifxp = &ds->ds_ifw[ds->ds_xindex];
 		/* check for unusual conditions */
 		if (rp->r_flags & (XFLG_ERRS|XFLG_MTCH|XFLG_ONE|XFLG_MORE)) {
-		if (rp->r_flags & XFLG_ERRS) {
+			if (rp->r_flags & XFLG_ERRS) {
 				/* output error */
 				ds->ds_if.if_oerrors++;
 				if (dedebug) {
@@ -440,7 +440,6 @@ deintr(unit)
 				ds->ds_if.if_collisions += 2;	/* guess */
 			} else if (rp->r_flags & XFLG_MTCH) {
 				/* received our own packet */
-				ds->ds_if.if_ipackets++;
 				deread(ds, &ifxp->ifrw,
 				    rp->r_slen - sizeof (struct ether_header));
 			}
@@ -483,7 +482,6 @@ derecv(unit)
 
 	rp = &ds->ds_rrent[ds->ds_rindex];
 	while ((rp->r_flags & RFLG_OWN) == 0) {
-		ds->ds_if.if_ipackets++;
 		if (ds->ds_deuba.iff_flags & UBA_NEEDBDP) {
 			struct uba_softc *uh = (void *)ds->ds_dev.dv_parent;
 

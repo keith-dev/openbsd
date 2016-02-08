@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_txp.c,v 1.113 2014/12/22 02:28:52 tedu Exp $	*/
+/*	$OpenBSD: if_txp.c,v 1.116 2015/06/24 09:40:54 mpi Exp $	*/
 
 /*
  * Copyright (c) 2001
@@ -64,7 +64,6 @@
 #include <machine/bus.h>
 
 #include <dev/mii/mii.h>
-#include <dev/mii/miivar.h>
 #include <dev/pci/pcireg.h>
 #include <dev/pci/pcivar.h>
 #include <dev/pci/pcidevs.h>
@@ -603,6 +602,7 @@ txp_rx_reclaim(struct txp_softc *sc, struct txp_rx_ring *r,
 	struct ifnet *ifp = &sc->sc_arpcom.ac_if;
 	struct txp_rx_desc *rxd;
 	struct mbuf *m;
+	struct mbuf_list ml = MBUF_LIST_INITIALIZER();
 	struct txp_swdesc *sd;
 	u_int32_t roff, woff;
 	int idx;
@@ -660,7 +660,6 @@ txp_rx_reclaim(struct txp_softc *sc, struct txp_rx_ring *r,
 					goto next;
 				}
 			}
-			mnew->m_pkthdr.rcvif = ifp;
 			mnew->m_pkthdr.len = mnew->m_len = m->m_len;
 			mnew->m_data += 2;
 			bcopy(m->m_data, mnew->m_data, m->m_len);
@@ -681,14 +680,6 @@ txp_rx_reclaim(struct txp_softc *sc, struct txp_rx_ring *r,
 		}
 #endif
 
-#if NBPFILTER > 0
-		/*
-		 * Handle BPF listeners. Let the BPF user see the packet.
-		 */
-		if (ifp->if_bpf)
-			bpf_mtap_ether(ifp->if_bpf, m, BPF_DIRECTION_IN);
-#endif
-
 		if (rxd->rx_stat & htole32(RX_STAT_IPCKSUMBAD))
 			sumflags |= M_IPV4_CSUM_IN_BAD;
 		else if (rxd->rx_stat & htole32(RX_STAT_IPCKSUMGOOD))
@@ -706,7 +697,7 @@ txp_rx_reclaim(struct txp_softc *sc, struct txp_rx_ring *r,
 
 		m->m_pkthdr.csum_flags = sumflags;
 
-		ether_input_mbuf(ifp, m);
+		ml_enqueue(&ml, m);
 
 next:
 		bus_dmamap_sync(sc->sc_dmat, dma->dma_map,
@@ -725,13 +716,14 @@ next:
 		woff = letoh32(*r->r_woff);
 	}
 
+	if_input(ifp, &ml);
+
 	*r->r_roff = htole32(woff);
 }
 
 void
 txp_rxbuf_reclaim(struct txp_softc *sc)
 {
-	struct ifnet *ifp = &sc->sc_arpcom.ac_if;
 	struct txp_hostvar *hv = sc->sc_hostvar;
 	struct txp_rxbuf_desc *rbd;
 	struct txp_swdesc *sd;
@@ -758,7 +750,6 @@ txp_rxbuf_reclaim(struct txp_softc *sc)
 		MCLGET(sd->sd_mbuf, M_DONTWAIT);
 		if ((sd->sd_mbuf->m_flags & M_EXT) == 0)
 			goto err_mbuf;
-		sd->sd_mbuf->m_pkthdr.rcvif = ifp;
 		sd->sd_mbuf->m_pkthdr.len = sd->sd_mbuf->m_len = MCLBYTES;
 		if (bus_dmamap_create(sc->sc_dmat, TXP_MAX_PKTLEN, 1,
 		    TXP_MAX_PKTLEN, 0, BUS_DMA_NOWAIT, &sd->sd_map))
@@ -863,7 +854,6 @@ txp_tx_reclaim(struct txp_softc *sc, struct txp_tx_ring *r,
 int
 txp_alloc_rings(struct txp_softc *sc)
 {
-	struct ifnet *ifp = &sc->sc_arpcom.ac_if;
 	struct txp_boot_record *boot;
 	struct txp_swdesc *sd;
 	u_int32_t r;
@@ -1025,7 +1015,6 @@ txp_alloc_rings(struct txp_softc *sc)
 			goto bail_rxbufring;
 		}
 		sd->sd_mbuf->m_pkthdr.len = sd->sd_mbuf->m_len = MCLBYTES;
-		sd->sd_mbuf->m_pkthdr.rcvif = ifp;
 		if (bus_dmamap_create(sc->sc_dmat, TXP_MAX_PKTLEN, 1,
 		    TXP_MAX_PKTLEN, 0, BUS_DMA_NOWAIT, &sd->sd_map)) {
 			goto bail_rxbufring;
@@ -1278,7 +1267,6 @@ txp_tick(void *vsc)
 	ifp->if_collisions += ext[0].ext_2 + ext[0].ext_3 + ext[1].ext_2 +
 	    ext[1].ext_3;
 	ifp->if_opackets += rsp->rsp_par2;
-	ifp->if_ipackets += ext[2].ext_3;
 
 out:
 	if (rsp != NULL)

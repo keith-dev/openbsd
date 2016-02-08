@@ -1,4 +1,4 @@
-/*	$OpenBSD: evergreen_cs.c,v 1.4 2015/02/11 07:01:37 jsg Exp $	*/
+/*	$OpenBSD: evergreen_cs.c,v 1.6 2015/04/18 14:47:35 jsg Exp $	*/
 /*
  * Copyright 2010 Advanced Micro Devices, Inc.
  * Copyright 2008 Red Hat Inc.
@@ -39,10 +39,6 @@ int r600_dma_cs_next_reloc(struct radeon_cs_parser *p,
 			   struct radeon_cs_reloc **cs_reloc);
 static int evergreen_cs_packet_next_reloc(struct radeon_cs_parser *p,
 					  struct radeon_cs_reloc **cs_reloc);
-int evergreen_cs_parse(struct radeon_cs_parser *p);
-int evergreen_dma_cs_parse(struct radeon_cs_parser *p);
-int evergreen_ib_parse(struct radeon_device *rdev, struct radeon_ib *ib);
-int evergreen_dma_ib_parse(struct radeon_device *rdev, struct radeon_ib *ib);
 
 struct evergreen_cs_track {
 	u32			group_size;
@@ -510,9 +506,9 @@ static int evergreen_cs_track_validate_htile(struct radeon_cs_parser *p,
 
 	if (G_028ABC_LINEAR(track->htile_surface)) {
 		/* pitch must be 16 htiles aligned == 16 * 8 pixel aligned */
-		nbx = roundup2(nbx, 16 * 8);
+		nbx = round_up(nbx, 16 * 8);
 		/* height is npipes htiles aligned == npipes * 8 pixel aligned */
-		nby = roundup(nby, track->npipes * 8);
+		nby = round_up(nby, track->npipes * 8);
 	} else {
 		/* always assume 8x8 htile */
 		/* align is htile align * 8, htile align vary according to
@@ -521,23 +517,23 @@ static int evergreen_cs_track_validate_htile(struct radeon_cs_parser *p,
 		switch (track->npipes) {
 		case 8:
 			/* HTILE_WIDTH = 8 & HTILE_HEIGHT = 8*/
-			nbx = roundup2(nbx, 64 * 8);
-			nby = roundup2(nby, 64 * 8);
+			nbx = round_up(nbx, 64 * 8);
+			nby = round_up(nby, 64 * 8);
 			break;
 		case 4:
 			/* HTILE_WIDTH = 8 & HTILE_HEIGHT = 8*/
-			nbx = roundup2(nbx, 64 * 8);
-			nby = roundup2(nby, 32 * 8);
+			nbx = round_up(nbx, 64 * 8);
+			nby = round_up(nby, 32 * 8);
 			break;
 		case 2:
 			/* HTILE_WIDTH = 8 & HTILE_HEIGHT = 8*/
-			nbx = roundup2(nbx, 32 * 8);
-			nby = roundup2(nby, 32 * 8);
+			nbx = round_up(nbx, 32 * 8);
+			nby = round_up(nby, 32 * 8);
 			break;
 		case 1:
 			/* HTILE_WIDTH = 8 & HTILE_HEIGHT = 8*/
-			nbx = roundup2(nbx, 32 * 8);
-			nby = roundup2(nby, 16 * 8);
+			nbx = round_up(nbx, 32 * 8);
+			nby = round_up(nby, 16 * 8);
 			break;
 		default:
 			dev_warn(p->dev, "%s:%d invalid num pipes %d\n",

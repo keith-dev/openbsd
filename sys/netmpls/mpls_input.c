@@ -1,4 +1,4 @@
-/*	$OpenBSD: mpls_input.c,v 1.42 2014/12/23 03:24:08 tedu Exp $	*/
+/*	$OpenBSD: mpls_input.c,v 1.47 2015/07/29 00:04:03 rzalamena Exp $	*/
 
 /*
  * Copyright (c) 2008 Claudio Jeker <claudio@openbsd.org>
@@ -40,8 +40,6 @@
 
 #include <netmpls/mpls.h>
 
-struct ifqueue	mplsintrq;
-
 #ifdef MPLS_DEBUG
 #define MPLS_LABEL_GET(l)	((ntohl((l) & MPLS_LABEL_MASK)) >> MPLS_LABEL_OFFSET)
 #define MPLS_TTL_GET(l)		(ntohl((l) & MPLS_TTL_MASK))
@@ -57,41 +55,18 @@ struct mbuf	*mpls_do_error(struct mbuf *, int, int, int);
 void
 mpls_init(void)
 {
-	IFQ_SET_MAXLEN(&mplsintrq, IFQ_MAXLEN);
 }
 
 void
-mplsintr(void)
+mpls_input(struct ifnet *ifp, struct mbuf *m)
 {
-	struct mbuf *m;
-	int s;
-
-	for (;;) {
-		/* Get next datagram of input queue */
-		s = splnet();
-		IF_DEQUEUE(&mplsintrq, m);
-		splx(s);
-		if (m == NULL)
-			return;
-#ifdef DIAGNOSTIC
-		if ((m->m_flags & M_PKTHDR) == 0)
-			panic("mplsintr no HDR");
-#endif
-		mpls_input(m);
-	}
-}
-
-void
-mpls_input(struct mbuf *m)
-{
-	struct ifnet *ifp = m->m_pkthdr.rcvif;
 	struct sockaddr_mpls *smpls;
 	struct sockaddr_mpls sa_mpls;
 	struct shim_hdr	*shim;
 	struct rtentry *rt = NULL;
 	struct rt_mpls *rt_mpls;
 	u_int8_t ttl;
-	int i, s, hasbos;
+	int i, hasbos;
 
 	if (!ISSET(ifp->if_xflags, IFXF_MPLS)) {
 		m_freem(m);
@@ -158,10 +133,7 @@ mpls_input(struct mbuf *m)
 do_v4:
 					if (mpls_ip_adjttl(m, ttl))
 						goto done;
-					s = splnet();
-					IF_INPUT_ENQUEUE(&ipintrq, m);
-					schednetisr(NETISR_IP);
-					splx(s);
+					niq_enqueue(&ipintrq, m);
 					goto done;
 				}
 				continue;
@@ -171,10 +143,7 @@ do_v4:
 do_v6:
 					if (mpls_ip6_adjttl(m, ttl))
 						goto done;
-					s = splnet();
-					IF_INPUT_ENQUEUE(&ip6intrq, m);
-					schednetisr(NETISR_IPV6);
-					splx(s);
+					niq_enqueue(&ip6intrq, m);
 					goto done;
 				}
 				continue;
@@ -201,7 +170,9 @@ do_v6:
 			}
 		}
 
+		KERNEL_LOCK();
 		rt = rtalloc(smplstosa(smpls), RT_REPORT|RT_RESOLVE, 0);
+		KERNEL_UNLOCK();
 		if (rt == NULL) {
 			/* no entry for this label */
 #ifdef MPLS_DEBUG
@@ -241,19 +212,13 @@ do_v6:
 			case AF_INET:
 				if (mpls_ip_adjttl(m, ttl))
 					break;
-				s = splnet();
-				IF_INPUT_ENQUEUE(&ipintrq, m);
-				schednetisr(NETISR_IP);
-				splx(s);
+				niq_enqueue(&ipintrq, m);
 				break;
 #ifdef INET6
 			case AF_INET6:
 				if (mpls_ip6_adjttl(m, ttl))
 					break;
-				s = splnet();
-				IF_INPUT_ENQUEUE(&ip6intrq, m);
-				schednetisr(NETISR_IPV6);
-				splx(s);
+				niq_enqueue(&ip6intrq, m);
 				break;
 #endif
 			default:
@@ -274,6 +239,11 @@ do_v6:
 				goto done;
 			}
 #endif
+			if (ifp->if_type == IFT_MPLSTUNNEL) {
+				ifp->if_output(ifp, m, rt_key(rt), rt);
+				goto done;
+			}
+
 			if (!rt->rt_gateway) {
 				m_freem(m);
 				goto done;
@@ -321,7 +291,9 @@ do_v6:
 		if (ifp != NULL && rt_mpls->mpls_operation != MPLS_OP_LOCAL)
 			break;
 
+		KERNEL_LOCK();
 		rtfree(rt);
+		KERNEL_UNLOCK();
 		rt = NULL;
 	}
 
@@ -348,10 +320,15 @@ do_v6:
 		goto done;
 	}
 
+	KERNEL_LOCK();
 	(*ifp->if_ll_output)(ifp, m, smplstosa(smpls), rt);
+	KERNEL_UNLOCK();
 done:
-	if (rt)
+	if (rt) {
+		KERNEL_LOCK();
 		rtfree(rt);
+		KERNEL_UNLOCK();
+	}
 }
 
 int
@@ -451,7 +428,9 @@ mpls_do_error(struct mbuf *m, int type, int code, int destmtu)
 		smpls->smpls_len = sizeof(*smpls);
 		smpls->smpls_label = shim->shim_label & MPLS_LABEL_MASK;
 
+		KERNEL_LOCK();
 		rt = rtalloc(smplstosa(smpls), RT_REPORT|RT_RESOLVE, 0);
+		KERNEL_UNLOCK();
 		if (rt == NULL) {
 			/* no entry for this label */
 			m_freem(m);
@@ -464,14 +443,20 @@ mpls_do_error(struct mbuf *m, int type, int code, int destmtu)
 			 * less interface we need to find some other IP to
 			 * use as source.
 			 */
+			KERNEL_LOCK();
 			rtfree(rt);
+			KERNEL_UNLOCK();
 			m_freem(m);
 			return (NULL);
 		}
 		rt->rt_use++;
+		KERNEL_LOCK();
 		rtfree(rt);
-		if (icmp_reflect(m, NULL, ia))
+		if (icmp_reflect(m, NULL, ia)) {
+			KERNEL_UNLOCK();
 			return (NULL);
+		}
+		KERNEL_UNLOCK();
 
 		ip = mtod(m, struct ip *);
 		/* stuff to fix up which is normaly done in ip_output */

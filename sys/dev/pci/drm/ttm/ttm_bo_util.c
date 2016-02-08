@@ -1,4 +1,4 @@
-/*	$OpenBSD: ttm_bo_util.c,v 1.9 2015/02/12 08:48:32 jsg Exp $	*/
+/*	$OpenBSD: ttm_bo_util.c,v 1.14 2015/04/12 05:31:23 jsg Exp $	*/
 /**************************************************************************
  *
  * Copyright (c) 2007-2009 VMware, Inc., Palo Alto, CA., USA
@@ -37,11 +37,6 @@ int	 ttm_mem_reg_ioremap(struct ttm_bo_device *, struct ttm_mem_reg *,
 	     void **);
 void	 ttm_mem_reg_iounmap(struct ttm_bo_device *, struct ttm_mem_reg *,
 	     void *);
-
-void	*kmap(struct vm_page *);
-void	 kunmap(void *addr);
-void	*vmap(struct vm_page **, unsigned int, unsigned long, pgprot_t);
-void	 vunmap(void *, size_t);
 
 void ttm_bo_free_old_node(struct ttm_buffer_object *bo)
 {
@@ -252,11 +247,7 @@ static int ttm_copy_io_page(void *dst, void *src, unsigned long page)
 
 	int i;
 	for (i = 0; i < PAGE_SIZE / sizeof(uint32_t); ++i)
-#ifdef notyet
 		iowrite32(ioread32(srcP++), dstP++);
-#else
-		*dstP++ = *srcP++;
-#endif
 	return 0;
 }
 
@@ -279,7 +270,7 @@ static int ttm_copy_io_ttm_page(struct ttm_tt *ttm, void *src,
 	if (!dst)
 		return -ENOMEM;
 
-	memcpy(dst, src, PAGE_SIZE);
+	memcpy_fromio(dst, src, PAGE_SIZE);
 
 	if (pgprot_val(prot) != pgprot_val(PAGE_KERNEL))
 		vunmap(dst, PAGE_SIZE);
@@ -307,7 +298,6 @@ static int ttm_copy_ttm_io_page(struct ttm_tt *ttm, void *dst,
 	if (!src)
 		return -ENOMEM;
 
-#define memcpy_toio(d, s, n) memcpy(d, s, n)
 	memcpy_toio(dst, src, PAGE_SIZE);
 
 	if (pgprot_val(prot) != pgprot_val(PAGE_KERNEL))
@@ -453,9 +443,7 @@ static int ttm_buffer_object_transfer(struct ttm_buffer_object *bo,
 	 * TODO: Explicit member copy would probably be better here.
 	 */
 
-#ifdef notyet
 	init_waitqueue_head(&fbo->event_queue);
-#endif
 	INIT_LIST_HEAD(&fbo->ddestroy);
 	INIT_LIST_HEAD(&fbo->lru);
 	INIT_LIST_HEAD(&fbo->swap);
@@ -518,69 +506,6 @@ static int ttm_bo_ioremap(struct ttm_buffer_object *bo,
 			    bo->mem.bus.bsh);
 	}
 	return (!map->virtual) ? -ENOMEM : 0;
-}
-
-void *
-kmap(struct vm_page *pg)
-{
-	vaddr_t va;
-
-#if defined (__HAVE_PMAP_DIRECT)
-	va = pmap_map_direct(pg);
-#else
-	va = uvm_km_valloc(kernel_map, PAGE_SIZE);
-	if (va == 0)
-		return (NULL);
-	pmap_kenter_pa(va, VM_PAGE_TO_PHYS(pg), PROT_READ | PROT_WRITE);
-	pmap_update(pmap_kernel());
-#endif
-	return (void *)va;
-}
-
-void
-kunmap(void *addr)
-{
-	vaddr_t va = (vaddr_t)addr;
-
-#if defined (__HAVE_PMAP_DIRECT)
-	pmap_unmap_direct(va);
-#else
-	pmap_kremove(va, PAGE_SIZE);
-	pmap_update(pmap_kernel());
-	uvm_km_free(kernel_map, va, PAGE_SIZE);
-#endif
-}
-
-void *
-vmap(struct vm_page **pages, unsigned int npages, unsigned long flags,
-     pgprot_t prot)
-{
-	vaddr_t va;
-	paddr_t pa;
-	int i;
-
-	va = uvm_km_valloc(kernel_map, PAGE_SIZE * npages);
-	if (va == 0)
-		return NULL;
-	for (i = 0; i < npages; i++) {
-		pa = VM_PAGE_TO_PHYS(pages[i]) | prot;
-		pmap_enter(pmap_kernel(), va + (i * PAGE_SIZE), pa,
-		    PROT_READ | PROT_WRITE,
-		    PROT_READ | PROT_WRITE | PMAP_WIRED);
-		pmap_update(pmap_kernel());
-	}
-
-	return (void *)va;
-}
-
-void
-vunmap(void *addr, size_t size)
-{
-	vaddr_t va = (vaddr_t)addr;
-
-	pmap_remove(pmap_kernel(), va, va + size);
-	pmap_update(pmap_kernel());
-	uvm_km_free(kernel_map, va, size);
 }
 
 static int ttm_bo_kmap_ttm(struct ttm_buffer_object *bo,

@@ -1,4 +1,4 @@
-/*	$OpenBSD: i82596.c,v 1.40 2014/12/22 02:28:51 tedu Exp $	*/
+/*	$OpenBSD: i82596.c,v 1.43 2015/06/24 09:40:54 mpi Exp $	*/
 /*	$NetBSD: i82586.c,v 1.18 1998/08/15 04:42:42 mycroft Exp $	*/
 
 /*-
@@ -982,9 +982,8 @@ i82596_get(struct ie_softc *sc, int head, int totlen)
 	resid = totlen;
 
 	MGETHDR(m0, M_DONTWAIT, MT_DATA);
-	if (m0 == 0)
+	if (m0 == NULL)
 		return (0);
-	m0->m_pkthdr.rcvif = &sc->sc_arpcom.ac_if;
 	m0->m_pkthdr.len = totlen;
 	len = MHLEN;
 	m = m0;
@@ -1014,7 +1013,7 @@ i82596_get(struct ie_softc *sc, int head, int totlen)
 		totlen -= len;
 		if (totlen > 0) {
 			MGET(newm, M_DONTWAIT, MT_DATA);
-			if (newm == 0)
+			if (newm == NULL)
 				goto bad;
 			len = MLEN;
 			m = m->m_next = newm;
@@ -1088,6 +1087,7 @@ i82596_readframe(sc, num)
 {
 	struct ifnet *ifp = &sc->sc_arpcom.ac_if;
 	struct mbuf *m;
+	struct mbuf_list ml = MBUF_LIST_INITIALIZER();
 	u_int16_t bstart, bend;
 	int pktlen;
 
@@ -1099,7 +1099,7 @@ i82596_readframe(sc, num)
 	m = i82596_get(sc, bstart, pktlen);
 	i82596_release_rbd_list(sc, bstart, bend);
 
-	if (m == 0) {
+	if (m == NULL) {
 		sc->sc_arpcom.ac_if.if_ierrors++;
 		return (0);
 	}
@@ -1114,17 +1114,8 @@ i82596_readframe(sc, num)
 	}
 #endif
 
-#if NBPFILTER > 0
-	/* Check for a BPF filter; if so, hand it up. */
-	if (ifp->if_bpf)
-		bpf_mtap(ifp->if_bpf, m, BPF_DIRECTION_IN);
-#endif /* NBPFILTER > 0 */
-
-	/*
-	 * Finally pass this packet up to higher layers.
-	 */
-	ether_input_mbuf(ifp, m);
-	ifp->if_ipackets++;
+	ml_enqueue(&ml, m);
+	if_input(ifp, &ml);
 	return (0);
 }
 
@@ -1238,7 +1229,7 @@ i82596_start(ifp)
 		}
 
 		IFQ_DEQUEUE(&ifp->if_snd, m0);
-		if (m0 == 0)
+		if (m0 == NULL)
 			break;
 
 		/* We need to use m->m_pkthdr.len, so require the header */

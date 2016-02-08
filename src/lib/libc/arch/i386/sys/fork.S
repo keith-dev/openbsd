@@ -1,4 +1,4 @@
-/*	$OpenBSD: fork.S,v 1.4 2005/08/07 11:30:38 espie Exp $ */
+/*	$OpenBSD: fork.S,v 1.6 2015/04/07 01:27:06 guenther Exp $ */
 /*-
  * Copyright (c) 1990 The Regents of the University of California.
  * All rights reserved.
@@ -33,7 +33,5 @@
 
 #include "SYS.h"
 
-SYSCALL(fork)
-	decl	%edx	/* from 1 to 0 in child, 0 to -1 in parent */
-	andl	%edx,%eax
-	ret		/* pid = fork(); */
+RSYSCALL_HIDDEN(fork)
+WEAK_ALIAS(_thread_fork,_thread_sys_fork)

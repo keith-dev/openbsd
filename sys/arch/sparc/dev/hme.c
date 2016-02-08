@@ -1,4 +1,4 @@
-/*	$OpenBSD: hme.c,v 1.67 2014/12/22 02:26:54 tedu Exp $	*/
+/*	$OpenBSD: hme.c,v 1.71 2015/07/08 07:21:49 mpi Exp $	*/
 
 /*
  * Copyright (c) 1998 Jason L. Wright (jason@thought.net)
@@ -797,13 +797,13 @@ hme_put(sc, idx, m)
 	for (; m; m = n) {
 		len = m->m_len;
 		if (len == 0) {
-			MFREE(m, n);
+			n = m_free(m);
 			continue;
 		}
 		bcopy(mtod(m, caddr_t), buf, len);
 		buf += len;
 		tlen += len;
-		MFREE(m, n);
+		n = m_free(m);
 	}
 	return (tlen);
 }
@@ -815,6 +815,7 @@ hme_read(sc, idx, len, flags)
 	u_int32_t flags;
 {
 	struct ifnet *ifp = &sc->sc_arpcom.ac_if;
+	struct mbuf_list ml = MBUF_LIST_INITIALIZER();
 	struct mbuf *m;
 
 	if (len <= sizeof(struct ether_header) ||
@@ -827,24 +828,14 @@ hme_read(sc, idx, len, flags)
 
 	/* Pull packet off interface. */
 	m = m_devget(sc->sc_bufs->rx_buf[idx] + HME_RX_OFFSET, len,
-	    HME_RX_OFFSET, &sc->sc_arpcom.ac_if);
+	    HME_RX_OFFSET);
 	if (m == NULL) {
 		ifp->if_ierrors++;
 		return;
 	}
 
-	ifp->if_ipackets++;
-
-#if NBPFILTER > 0
-	/*
-	 * Check if there's a BPF listener on this interface.
-	 * If so, hand off the raw packet to BPF.
-	 */
-	if (ifp->if_bpf)
-		bpf_mtap(ifp->if_bpf, m, BPF_DIRECTION_IN);
-#endif
-	/* Pass the packet up. */
-	ether_input_mbuf(ifp, m);
+	ml_enqueue(&ml, m);
+	if_input(ifp, &ml);
 }
 
 void

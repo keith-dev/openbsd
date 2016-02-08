@@ -1,5 +1,5 @@
 # ex:ts=8 sw=4:
-# $OpenBSD: Installed.pm,v 1.29 2014/06/15 23:49:51 afresh1 Exp $
+# $OpenBSD: Installed.pm,v 1.33 2015/06/25 13:33:25 sthen Exp $
 #
 # Copyright (c) 2007-2014 Marc Espie <espie@openbsd.org>
 #
@@ -26,6 +26,27 @@ use warnings;
 
 package OpenBSD::PackageRepositoryBase;
 
+my ($version, $current);
+
+sub expand_locations
+{
+	my ($class, $string, $state) = @_;
+	require OpenBSD::Paths;
+	if ($string eq '%a') {
+		return OpenBSD::Paths->machine_architecture;
+	} elsif ($string eq '%v') {
+		return OpenBSD::Paths->os_version;
+	} elsif ($string eq '%c') {
+		return OpenBSD::Paths->os_directory;
+	} elsif ($string eq '%m') {
+		return join('/',
+		    'pub/OpenBSD', 
+		    OpenBSD::Paths->os_directory,
+		    'packages', 
+		    OpenBSD::Paths->machine_architecture);
+	}
+}
+
 sub parse_url
 {
 	my ($class, $r, $state) = @_;
@@ -40,6 +61,7 @@ sub parse_url
 		$$r = '';
 	}
 
+	$path =~ s/\%[vacm]/$class->expand_locations($&, $state)/ge;
 	$path .= '/' unless $path =~ m/\/$/;
 	bless { path => $path, state => $state }, $class;
 }

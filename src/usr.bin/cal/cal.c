@@ -1,4 +1,4 @@
-/*	$OpenBSD: cal.c,v 1.26 2013/11/20 21:33:17 deraadt Exp $	*/
+/*	$OpenBSD: cal.c,v 1.28 2015/03/17 19:31:30 millert Exp $	*/
 /*	$NetBSD: cal.c,v 1.6 1995/03/26 03:10:24 glass Exp $	*/
 
 /*
@@ -41,7 +41,6 @@
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
-#include <tzfile.h>
 #include <unistd.h>
 
 #define	THURSDAY		4		/* for reformation */
@@ -203,7 +202,7 @@ main(int argc, char *argv[])
 				errx(1, "illegal year value: use 1-9999");
 			(void)time(&now);
 			local_time = localtime(&now);
-			year = local_time->tm_year + TM_YEAR_BASE;
+			year = local_time->tm_year + 1900;
 		} else {
 			year = strtonum(*argv, 1, 9999, &errstr);
 			if (errstr)
@@ -213,7 +212,7 @@ main(int argc, char *argv[])
 	case 0:
 		(void)time(&now);
 		local_time = localtime(&now);
-		year = local_time->tm_year + TM_YEAR_BASE;
+		year = local_time->tm_year + 1900;
 		if (!yflag)
 			month = local_time->tm_mon + 1;
 		break;

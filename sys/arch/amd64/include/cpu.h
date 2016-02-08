@@ -1,4 +1,4 @@
-/*	$OpenBSD: cpu.h,v 1.90 2015/01/15 15:30:17 sf Exp $	*/
+/*	$OpenBSD: cpu.h,v 1.97 2015/07/02 01:33:59 dlg Exp $	*/
 /*	$NetBSD: cpu.h,v 1.1 2003/04/26 18:39:39 fvdl Exp $	*/
 
 /*-
@@ -92,6 +92,7 @@ struct cpu_info {
 	u_int32_t	ci_feature_flags;
 	u_int32_t	ci_feature_eflags;
 	u_int32_t	ci_feature_sefflags;
+	u_int32_t	ci_feature_tpmflags;
 	u_int32_t	ci_signature;
 	u_int32_t	ci_family;
 	u_int32_t	ci_model;
@@ -109,10 +110,11 @@ struct cpu_info {
 	void (*cpu_setup)(struct cpu_info *);
 	void (*ci_info)(struct cpu_info *);
 
-	u_int		*ci_mwait;
-/* bits in ci_mwait[0] */
+	struct device	*ci_acpicpudev;
+	volatile u_int	ci_mwait;
 #define	MWAIT_IN_IDLE		0x1	/* don't need IPI to wake */
 #define	MWAIT_KEEP_IDLING	0x2	/* cleared by other cpus to wake me */
+#define	MWAIT_ONLY		0x4	/* set if all idle states use mwait */
 #define	MWAIT_IDLING	(MWAIT_IN_IDLE | MWAIT_KEEP_IDLING)
 
 	int		ci_want_resched;
@@ -128,6 +130,10 @@ struct cpu_info {
 #define CI_DDB_STOPPED		2
 #define CI_DDB_ENTERDDB		3
 #define CI_DDB_INDDB		4
+
+#ifdef MULTIPROCESSOR
+	struct srp_hazard	ci_srp_hazards[SRP_HAZARD_NUM];
+#endif
 
 	struct ksensordev	ci_sensordev;
 	struct ksensor		ci_sensor;
@@ -145,6 +151,8 @@ struct cpu_info {
 #define CPUF_IDENTIFIED	0x0020		/* CPU has been identified */
 
 #define CPUF_CONST_TSC	0x0040		/* CPU has constant TSC */
+#define CPUF_USERSEGS_BIT	7	/* CPU has curproc's segments */
+#define CPUF_USERSEGS	(1<<CPUF_USERSEGS_BIT)		/* and FS.base */
 
 #define CPUF_PRESENT	0x1000		/* CPU is present */
 #define CPUF_RUNNING	0x2000		/* CPU is running */
@@ -269,6 +277,7 @@ struct timeval;
 
 
 #ifdef _KERNEL
+/* locore.S */
 extern int biosbasemem;
 extern int biosextmem;
 extern int cpu;
@@ -283,6 +292,10 @@ extern int cpu_id;
 extern char cpu_vendor[];
 extern int cpuid_level;
 extern int cpuspeed;
+
+/* cpu.c */
+extern u_int cpu_mwait_size;
+extern u_int cpu_mwait_states;
 
 /* identcpu.c */
 void	identifycpu(struct cpu_info *);
@@ -307,7 +320,6 @@ struct pcb;
 void	savectx(struct pcb *);
 void	switch_exit(struct proc *, void (*)(struct proc *));
 void	proc_trampoline(void);
-void	child_trampoline(void);
 
 /* clock.c */
 extern void (*initclock_func)(void);

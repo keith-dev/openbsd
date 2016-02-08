@@ -1,4 +1,4 @@
-/*	$OpenBSD: dump.h,v 1.22 2014/09/03 02:34:34 guenther Exp $	*/
+/*	$OpenBSD: dump.h,v 1.24 2015/05/23 05:17:20 guenther Exp $	*/
 /*	$NetBSD: dump.h,v 1.11 1997/06/05 11:13:20 lukem Exp $	*/
 
 /*-
@@ -60,7 +60,6 @@ char	*duid;		/* duid of the disk being dumped */
 char	lastlevel;	/* dump level of previous dump */
 char	level;		/* dump level of this dump */
 int	uflag;		/* update flag */
-int	Uflag;		/* use duids in dumpdates flag */
 int	diskfd;		/* disk file descriptor */
 int	tapefd;		/* tape file descriptor */
 int	pipeout;	/* true => output to standard output */
@@ -126,6 +125,7 @@ __dead void dumpabort(int signo);
 void	getfstab(void);
 
 char	*rawname(char *cp);
+char	*getduid(char *path);
 union	dinode *getino(ino_t inum, int *mode);
 
 /* rdump routines */

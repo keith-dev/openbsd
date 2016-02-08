@@ -1,4 +1,4 @@
-#	$OpenBSD: Makefile,v 1.7 2013/11/01 20:35:52 jasper Exp $
+#	$OpenBSD: Makefile,v 1.11 2015/07/17 17:02:52 jsg Exp $
 
 REV=	${OSrev}
 
@@ -22,8 +22,11 @@ VND_CRDEV=	/dev/r${VND}c
 PID!=		echo $$$$
 
 KERNADDR_OMAP=0x80300000
-KERNADDR_IMX=0x10800000
-KERNADDR_SUNXI=0x40800000
+KERNADDR_IMX=0x10300000
+KERNADDR_SUNXI=0x40300000
+KERNADDR_VEXPRESSA15=0x80300000
+KERNADDR_VEXPRESSA9=0x60300000
+KERNADDR_EXYNOS=0x40300000
 
 DISKTYPE=       rdroot
 NBLKS=		10240
@@ -36,27 +39,28 @@ all ${IMAGE}:
 	@false
 .else
 
-ALLSOC=		IMX OMAP SUNXI
-ALLBSD=
-ALLBSDRD=
+ALLSOC=		EXYNOS IMX OMAP SUNXI VEXPRESSA9 VEXPRESSA15
+ALLBSD=		bsd
+ALLBSDRD=	${BSD_RD}
 .for SOC in ${ALLSOC}
-ALLBSD+=	bsd.${SOC}
-ALLBSDRD+=	${BSD_RD}.${SOC} ${BSD_RD}.${SOC}.umg
-all:	${ALLBSDRD}
+ALLBSDRD+=	${BSD_RD}.${SOC}.umg
 .endfor
+all:	${ALLBSDRD}
+
+bsd:
+	cd ${TOP}/../../sys/arch/armv7/conf && config RAMDISK
+	cd ${TOP}/../../sys/arch/armv7/compile/RAMDISK && \
+	    ${MAKE} clean && exec ${MAKE}
+	cp ${TOP}/../../sys/arch/armv7/compile/RAMDISK/bsd bsd
+
+${BSD_RD}: ${CBIN} ${IMAGE} bsd rdsetroot
+	cp bsd ${BSD_RD}
+	${.OBJDIR}/rdsetroot ${BSD_RD} ${IMAGE}
 
 .for SOC in ${ALLSOC}
-bsd.${SOC}:
-	cd ${TOP}/../../sys/arch/armv7/conf && config RAMDISK-${SOC}
-	cd ${TOP}/../../sys/arch/armv7/compile/RAMDISK-${SOC} && \
-	    ${MAKE} clean && exec ${MAKE}
-	cp ${TOP}/../../sys/arch/armv7/compile/RAMDISK-${SOC}/bsd bsd.${SOC}
-
-${BSD_RD}.${SOC}: ${CBIN} ${IMAGE} bsd.${SOC} rdsetroot
-	cp bsd.${SOC} ${BSD_RD}.${SOC}
-	${.OBJDIR}/rdsetroot ${BSD_RD}.${SOC} ${IMAGE}
+${BSD_RD}.${SOC}.umg: ${BSD_RD}
 	mkuboot -a arm -o linux -e ${KERNADDR_${SOC}} -l ${KERNADDR_${SOC}} \
-	    ${BSD_RD}.${SOC} ${BSD_RD}.${SOC}.umg
+	    ${BSD_RD} ${BSD_RD}.${SOC}.umg
 .endfor
 
 ${IMAGE}: rd_setup do_files rd_teardown

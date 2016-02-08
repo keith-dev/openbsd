@@ -1,4 +1,4 @@
-/*	$OpenBSD: ip_input.c,v 1.246 2015/02/09 12:18:19 claudio Exp $	*/
+/*	$OpenBSD: ip_input.c,v 1.252 2015/07/16 21:14:21 mpi Exp $	*/
 /*	$NetBSD: ip_input.c,v 1.30 1996/03/16 23:53:58 christos Exp $	*/
 
 /*
@@ -42,7 +42,6 @@
 #include <sys/protosw.h>
 #include <sys/socket.h>
 #include <sys/socketvar.h>
-#include <sys/syslog.h>
 #include <sys/sysctl.h>
 #include <sys/pool.h>
 
@@ -50,6 +49,7 @@
 #include <net/if_var.h>
 #include <net/if_dl.h>
 #include <net/route.h>
+#include <net/netisr.h>
 
 #include <netinet/in.h>
 #include <netinet/in_systm.h>
@@ -114,7 +114,7 @@ int	ip_frags = 0;
 
 int *ipctl_vars[IPCTL_MAXID] = IPCTL_VARS;
 
-struct	ifqueue ipintrq;
+struct niqueue ipintrq = NIQUEUE_INITIALIZER(IFQ_MAXLEN, NETISR_IP);
 
 struct pool ipqent_pool;
 struct pool ipq_pool;
@@ -159,7 +159,7 @@ ip_init(void)
 	pool_init(&ipq_pool, sizeof(struct ipq), 0, 0, 0, "ipq", NULL);
 
 	pr = pffindproto(PF_INET, IPPROTO_RAW, SOCK_RAW);
-	if (pr == 0)
+	if (pr == NULL)
 		panic("ip_init");
 	for (i = 0; i < IPPROTO_MAX; i++)
 		ip_protox[i] = pr - inetsw;
@@ -170,7 +170,6 @@ ip_init(void)
 		    pr->pr_protocol < IPPROTO_MAX)
 			ip_protox[pr->pr_protocol] = pr - inetsw;
 	LIST_INIT(&ipq);
-	IFQ_SET_MAXLEN(&ipintrq, IFQ_MAXLEN);
 	if (ip_mtudisc != 0)
 		ip_mtudisc_timeout_q =
 		    rt_timer_queue_create(ip_mtudisc_timeout);
@@ -193,18 +192,12 @@ void
 ipintr(void)
 {
 	struct mbuf *m;
-	int s;
 
-	for (;;) {
-		/*
-		 * Get next datagram off input queue and get IP header
-		 * in first mbuf.
-		 */
-		s = splnet();
-		IF_DEQUEUE(&ipintrq, m);
-		splx(s);
-		if (m == NULL)
-			return;
+	/*
+	 * Get next datagram off input queue and get IP header
+	 * in first mbuf.
+	 */
+	while ((m = niq_dequeue(&ipintrq)) != NULL) {
 #ifdef	DIAGNOSTIC
 		if ((m->m_flags & M_PKTHDR) == 0)
 			panic("ipintr no HDR");
@@ -232,7 +225,9 @@ ipv4_input(struct mbuf *m)
 	struct m_tag *mtag;
 #endif /* IPSEC */
 
-	ifp = m->m_pkthdr.rcvif;
+	ifp = if_get(m->m_pkthdr.ph_ifidx);
+	if (ifp == NULL)
+		goto bad;
 
 	ipstat.ips_total++;
 	if (m->m_len < sizeof (struct ip) &&
@@ -320,7 +315,7 @@ ipv4_input(struct mbuf *m)
 	 * Packet filter
 	 */
 	pfrdr = ip->ip_dst.s_addr;
-	if (pf_test(AF_INET, PF_IN, ifp, &m, NULL) != PF_PASS)
+	if (pf_test(AF_INET, PF_IN, ifp, &m) != PF_PASS)
 		goto bad;
 	if (m == NULL)
 		return;
@@ -557,7 +552,7 @@ found:
 			ipqe->ipqe_m = m;
 			ipqe->ipqe_ip = ip;
 			m = ip_reass(ipqe, fp);
-			if (m == 0) {
+			if (m == NULL) {
 				return;
 			}
 			ipstat.ips_reassembled++;
@@ -583,7 +578,7 @@ found:
          */
         if ((ip->ip_p == IPPROTO_ESP) || (ip->ip_p == IPPROTO_AH) ||
 	    (ip->ip_p == IPPROTO_IPCOMP))
-        	goto skipipsec;
+		goto skipipsec;
 
 	/*
 	 * If the protected packet was tunneled, then we need to
@@ -1057,7 +1052,7 @@ ip_dooptions(struct mbuf *m, struct ifnet *ifp)
 			ipaddr.sin_addr = ip->ip_dst;
 			ia = ifatoia(ifa_ifwithaddr(sintosa(&ipaddr),
 			    m->m_pkthdr.ph_rtableid));
-			if (ia == 0) {
+			if (ia == NULL) {
 				if (opt == IPOPT_SSRR) {
 					type = ICMP_UNREACH;
 					code = ICMP_UNREACH_SRCFAIL;
@@ -1095,7 +1090,7 @@ ip_dooptions(struct mbuf *m, struct ifnet *ifp)
 				/* keep packet in the virtual instance */
 				ia = ip_rtaddr(ipaddr.sin_addr,
 				    m->m_pkthdr.ph_rtableid);
-			if (ia == 0) {
+			if (ia == NULL) {
 				type = ICMP_UNREACH;
 				code = ICMP_UNREACH_SRCFAIL;
 				goto bad;
@@ -1136,9 +1131,9 @@ ip_dooptions(struct mbuf *m, struct ifnet *ifp)
 			 * Again keep the packet inside the virtual instance.
 			 */
 			if ((ia = ifatoia(ifa_ifwithaddr(sintosa(&ipaddr),
-			    m->m_pkthdr.ph_rtableid))) == 0 &&
+			    m->m_pkthdr.ph_rtableid))) == NULL &&
 			    (ia = ip_rtaddr(ipaddr.sin_addr,
-			    m->m_pkthdr.ph_rtableid)) == 0) {
+			    m->m_pkthdr.ph_rtableid)) == NULL) {
 				type = ICMP_UNREACH;
 				code = ICMP_UNREACH_HOST;
 				goto bad;
@@ -1176,7 +1171,7 @@ ip_dooptions(struct mbuf *m, struct ifnet *ifp)
 				ipaddr.sin_addr = dst;
 				ia = ifatoia(ifaof_ifpforaddr(sintosa(&ipaddr),
 				    ifp));
-				if (ia == 0)
+				if (ia == NULL)
 					continue;
 				memcpy(&sin, &ia->ia_addr.sin_addr,
 				    sizeof(struct in_addr));
@@ -1192,7 +1187,7 @@ ip_dooptions(struct mbuf *m, struct ifnet *ifp)
 				ipaddr.sin_len = sizeof(ipaddr);
 				ipaddr.sin_addr = sin;
 				if (ifa_ifwithaddr(sintosa(&ipaddr),
-				    m->m_pkthdr.ph_rtableid) == 0)
+				    m->m_pkthdr.ph_rtableid) == NULL)
 					continue;
 				ipt.ipt_ptr += sizeof(struct in_addr);
 				break;
@@ -1617,7 +1612,7 @@ ip_sysctl(int *name, u_int namelen, void *oldp, size_t *oldlenp, void *newp,
 				       ipsec_def_comp,
 				       sizeof(ipsec_def_comp)));
 	case IPCTL_IFQUEUE:
-	        return (sysctl_ifq(name + 1, namelen - 1,
+	        return (sysctl_niq(name + 1, namelen - 1,
 		    oldp, oldlenp, newp, newlen, &ipintrq));
 	case IPCTL_STATS:
 		return (sysctl_rdstruct(oldp, oldlenp, newp,
@@ -1694,7 +1689,7 @@ ip_savecontrol(struct inpcb *inp, struct mbuf **mp, struct ip *ip,
 		struct sockaddr_dl sdl;
 		struct ifnet *ifp;
 
-		ifp = m->m_pkthdr.rcvif;
+		ifp = if_get(m->m_pkthdr.ph_ifidx);
 		if (ifp == NULL || ifp->if_sadl == NULL) {
 			memset(&sdl, 0, sizeof(sdl));
 			sdl.sdl_len = offsetof(struct sockaddr_dl, sdl_data[0]);

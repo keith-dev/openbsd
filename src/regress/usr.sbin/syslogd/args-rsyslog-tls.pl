@@ -8,6 +8,7 @@
 
 use strict;
 use warnings;
+use Socket;
 
 our %args = (
     syslogd => {
@@ -15,9 +16,9 @@ our %args = (
 	late => 1,  # connect after the listen socket has been created
     },
     rsyslogd => {
-	listen => { proto => "tls" },
+	listen => { domain => AF_INET, proto => "tls", addr => "127.0.0.1" },
 	loggrep => {
-	    get_testlog() => 1,
+	    get_testlog().qr/'$/ => 1,
 	    qr/Error/ => 0,
 	},
     },

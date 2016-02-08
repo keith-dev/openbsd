@@ -1,4 +1,4 @@
-/*	$OpenBSD: print.c,v 1.59 2015/01/16 06:39:32 deraadt Exp $	*/
+/*	$OpenBSD: print.c,v 1.62 2015/07/19 19:26:00 deraadt Exp $	*/
 /*	$NetBSD: print.c,v 1.27 1995/09/29 21:58:12 cgd Exp $	*/
 
 /*-
@@ -46,7 +46,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <tzfile.h>
 #include <unistd.h>
 #include <limits.h>
 #include <pwd.h>
@@ -270,6 +269,8 @@ state(const struct kinfo_proc *kp, VARENT *ve)
 		*cp++ = 's';
 	if ((kp->p_psflags & PS_CONTROLT) && kp->p__pgid == kp->p_tpgid)
 		*cp++ = '+';
+	if (kp->p_psflags & PS_TAMED)
+		*cp++ = 't';
 	*cp = '\0';
 
 	if (state == 'R' && kp->p_cpuid != KI_NOCPU) {
@@ -408,6 +409,9 @@ started(const struct kinfo_proc *kp, VARENT *ve)
 		return;
 	}
 
+#define SECSPERHOUR	(60 * 60)
+#define SECSPERDAY	(24 * 60 * 60)
+
 	startt = kp->p_ustart_sec;
 	tp = localtime(&startt);
 	if (!now)
@@ -521,28 +525,12 @@ cputime(const struct kinfo_proc *kp, VARENT *ve)
 double
 getpcpu(const struct kinfo_proc *kp)
 {
-	double d;
-
 	if (fscale == 0)
 		return (0.0);
 
 #define	fxtofl(fixpt)	((double)(fixpt) / fscale)
 
-	/* XXX - I don't like this */
-	if (kp->p_swtime == 0)
-		return (0.0);
-	if (rawcpu)
-		return (100.0 * fxtofl(kp->p_pctcpu));
-
-	d = kp->p_swtime * log(fxtofl(ccpu));
-	if (d < -700.0)
-		d = 0.0;		/* avoid IEEE underflow */
-	else
-		d = exp(d);
-	if (d == 1.0)
-		return (0.0);
-	return (100.0 * fxtofl(kp->p_pctcpu) /
-		(1.0 - d));
+	return (100.0 * fxtofl(kp->p_pctcpu));
 }
 
 void

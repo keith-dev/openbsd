@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_de.c,v 1.117 2014/12/22 02:28:52 tedu Exp $	*/
+/*	$OpenBSD: if_de.c,v 1.123 2015/06/26 11:50:39 kettenis Exp $	*/
 /*	$NetBSD: if_de.c,v 1.58 1998/01/12 09:39:58 thorpej Exp $	*/
 
 /*-
@@ -49,6 +49,7 @@
 #include <sys/kernel.h>
 #include <sys/device.h>
 #include <sys/timeout.h>
+#include <sys/pool.h>
 
 #include <net/if.h>
 #include <net/if_media.h>
@@ -68,7 +69,6 @@
 #include <machine/intr.h>
 #include <dev/pci/pcireg.h>
 #include <dev/pci/pcivar.h>
-#include <dev/pci/pcidevs.h>
 #include <dev/ic/dc21040reg.h>
 
 /*
@@ -3181,6 +3181,7 @@ tulip_rx_intr(tulip_softc_t * const sc)
     TULIP_PERFSTART(rxintr)
     tulip_ringinfo_t * const ri = &sc->tulip_rxinfo;
     struct ifnet * const ifp = &sc->tulip_if;
+    struct mbuf_list ml = MBUF_LIST_INITIALIZER();
     int fillok = 1;
 #if defined(TULIP_DEBUG)
     int cnt = 0;
@@ -3237,13 +3238,8 @@ tulip_rx_intr(tulip_softc_t * const sc)
 		    eop = ri->ri_first;
 		TULIP_RXDESC_POSTSYNC(sc, eop, sizeof(*eop));
 		if (eop == ri->ri_nextout || ((((volatile tulip_desc_t *) eop)->d_status & TULIP_DSTS_OWNER))) {
-#if defined(TULIP_DEBUG)
-		    sc->tulip_dbg.dbg_rxintrs++;
-		    sc->tulip_dbg.dbg_rxpktsperintr[cnt]++;
-#endif
 		    TULIP_PERFEND(rxget);
-		    TULIP_PERFEND(rxintr);
-		    return;
+		    goto out;
 		}
 		total_len++;
 	    }
@@ -3290,16 +3286,6 @@ tulip_rx_intr(tulip_softc_t * const sc)
 #if defined(DIAGNOSTIC)
 	    TULIP_SETCTX(me, NULL);
 #endif
-
-#if NBPFILTER > 0
-	    if (sc->tulip_bpf != NULL) {
-		if (me == ms) {
-		    bpf_tap(sc->tulip_if.if_bpf, mtod(ms, caddr_t),
-		        total_len, BPF_DIRECTION_IN);
-		} else
-		    bpf_mtap(sc->tulip_if.if_bpf, ms, BPF_DIRECTION_IN);
-	    }
-#endif
 	    sc->tulip_flags |= TULIP_RXACT;
 	    accept = 1;
 	} else {
@@ -3342,7 +3328,6 @@ tulip_rx_intr(tulip_softc_t * const sc)
 #if defined(TULIP_DEBUG)
 	cnt++;
 #endif
-	ifp->if_ipackets++;
 	if (++eop == ri->ri_last)
 	    eop = ri->ri_first;
 	ri->ri_nextin = eop;
@@ -3383,14 +3368,12 @@ tulip_rx_intr(tulip_softc_t * const sc)
 		) {
 #if !defined(TULIP_COPY_RXDATA)
 		ms->m_pkthdr.len = total_len;
-		ms->m_pkthdr.rcvif = ifp;
-		ether_input_mbuf(ifp, ms);
+		ml_enqueue(&ml, ms);
 #else
 		m0->m_data += 2;	/* align data after header */
 		m_copydata(ms, 0, total_len, mtod(m0, caddr_t));
 		m0->m_len = m0->m_pkthdr.len = total_len;
-		m0->m_pkthdr.rcvif = ifp;
-		ether_input_mbuf(ifp, m0);
+		ml_enqueue(&ml, m0);
 		m0 = ms;
 #endif
 	    }
@@ -3456,6 +3439,8 @@ tulip_rx_intr(tulip_softc_t * const sc)
 	    sc->tulip_flags &= ~TULIP_RXBUFSLOW;
 	TULIP_PERFEND(rxget);
     }
+out:
+    if_input(ifp, &ml);
 
 #if defined(TULIP_DEBUG)
     sc->tulip_dbg.dbg_rxintrs++;
@@ -4101,7 +4086,7 @@ tulip_txput_setup(tulip_softc_t * const sc)
 	return;
     }
     bcopy(sc->tulip_setupdata, sc->tulip_setupbuf,
-	  sizeof(sc->tulip_setupbuf));
+        sizeof(sc->tulip_setupdata));
     /*
      * Clear WANTSETUP and set DOINGSETUP.  Set know that WANTSETUP is
      * set and DOINGSETUP is clear doing an XOR of the two will DTRT.
@@ -4218,9 +4203,6 @@ tulip_ifioctl(struct ifnet * ifp, u_long cmd, caddr_t data)
  * goes wrong.
  * the modification becomes a bit complicated since tulip_txput() might
  * copy and modify the mbuf passed.
- */
-/*
- * These routines gets called at device spl (from ether_output).
  */
 
 void
@@ -4376,18 +4358,11 @@ tulip_busdma_init(tulip_softc_t * const sc)
     int error = 0;
 
     /*
-     * Allocate dmamap for setup descriptor
+     * Allocate space and dmamap for setup descriptor
      */
-    error = bus_dmamap_create(sc->tulip_dmatag, sizeof(sc->tulip_setupbuf), 2,
-			      sizeof(sc->tulip_setupbuf), 0, BUS_DMA_NOWAIT,
-			      &sc->tulip_setupmap);
-    if (error == 0) {
-	error = bus_dmamap_load(sc->tulip_dmatag, sc->tulip_setupmap,
-				sc->tulip_setupbuf, sizeof(sc->tulip_setupbuf),
-				NULL, BUS_DMA_NOWAIT);
-	if (error)
-	    bus_dmamap_destroy(sc->tulip_dmatag, sc->tulip_setupmap);
-    }
+    error = tulip_busdma_allocmem(sc, sizeof(sc->tulip_setupdata),
+				  &sc->tulip_setupmap, &sc->tulip_setupbuf);
+
     /*
      * Allocate space and dmamap for transmit ring
      */

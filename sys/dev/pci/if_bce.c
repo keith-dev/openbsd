@@ -1,4 +1,4 @@
-/* $OpenBSD: if_bce.c,v 1.42 2015/01/27 00:59:39 brad Exp $ */
+/* $OpenBSD: if_bce.c,v 1.46 2015/06/24 09:40:54 mpi Exp $ */
 /* $NetBSD: if_bce.c,v 1.3 2003/09/29 01:53:02 mrg Exp $	 */
 
 /*
@@ -64,7 +64,6 @@
 #include <dev/mii/mii.h>
 #include <dev/mii/miivar.h>
 #include <dev/mii/miidevs.h>
-#include <dev/mii/brgphyreg.h>
 
 #include <dev/pci/if_bcereg.h>
 
@@ -695,6 +694,7 @@ void
 bce_rxintr(struct bce_softc *sc)
 {
 	struct ifnet *ifp = &sc->bce_ac.ac_if;
+	struct mbuf_list ml = MBUF_LIST_INITIALIZER();
 	struct rx_pph *pph;
 	struct mbuf *m;
 	int curr;
@@ -739,20 +739,9 @@ bce_rxintr(struct bce_softc *sc)
 		len -= ETHER_CRC_LEN;
 
 		m = m_devget(sc->bce_data + i * MCLBYTES +
-		    BCE_PREPKT_HEADER_SIZE, len, ETHER_ALIGN, ifp);
-		ifp->if_ipackets++;
+		    BCE_PREPKT_HEADER_SIZE, len, ETHER_ALIGN);
 
-#if NBPFILTER > 0
-		/*
-		 * Pass this up to any BPF listeners, but only
-		 * pass it up the stack if it's for us.
-		 */
-		if (ifp->if_bpf)
-			bpf_mtap(ifp->if_bpf, m, BPF_DIRECTION_IN);
-#endif
-
-		/* Pass it on. */
-		ether_input_mbuf(ifp, m);
+		ml_enqueue(&ml, m);
 
 		/* re-check current in case it changed */
 		curr = (bus_space_read_4(sc->bce_btag, sc->bce_bhandle,
@@ -761,6 +750,9 @@ bce_rxintr(struct bce_softc *sc)
 		if (curr >= BCE_NRXDESC)
 			curr = BCE_NRXDESC - 1;
 	}
+
+	if_input(ifp, &ml);
+
 	sc->bce_rxin = curr;
 }
 

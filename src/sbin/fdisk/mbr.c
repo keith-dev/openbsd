@@ -1,28 +1,19 @@
-/*	$OpenBSD: mbr.c,v 1.43 2015/02/10 01:20:10 krw Exp $	*/
+/*	$OpenBSD: mbr.c,v 1.52 2015/04/02 18:00:55 krw Exp $	*/
 
 /*
  * Copyright (c) 1997 Tobias Weingartner
- * All rights reserved.
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in the
- *    documentation and/or other materials provided with the distribution.
+ * Permission to use, copy, modify, and distribute this software for any
+ * purpose with or without fee is hereby granted, provided that the above
+ * copyright notice and this permission notice appear in all copies.
  *
- * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
- * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
- * OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.
- * IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT
- * NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
- * DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
- * THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
- * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
- * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ * THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES
+ * WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF
+ * MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR
+ * ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
+ * WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN
+ * ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
+ * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
 
 #include <sys/param.h>	/* DEV_BSIZE */
@@ -44,8 +35,10 @@
 #include "misc.h"
 #include "mbr.h"
 
+struct mbr initial_mbr;
+
 void
-MBR_init_GPT(struct disk *disk, struct mbr *mbr)
+MBR_init_GPT(struct mbr *mbr)
 {
 	/* Initialize a protective MBR for GPT. */
 	bzero(&mbr->part, sizeof(mbr->part));
@@ -53,21 +46,21 @@ MBR_init_GPT(struct disk *disk, struct mbr *mbr)
 	/* Use whole disk, starting after MBR. */
 	mbr->part[0].id = DOSPTYP_EFI;
 	mbr->part[0].bs = 1;
-	mbr->part[0].ns = disk->size - 1;
+	mbr->part[0].ns = disk.size - 1;
 
 	/* Fix up start/length fields. */
-	PRT_fix_CHS(disk, &mbr->part[0]);
+	PRT_fix_CHS(&mbr->part[0]);
 }
 
 void
-MBR_init(struct disk *disk, struct mbr *mbr)
+MBR_init(struct mbr *mbr)
 {
 	extern int g_flag;
 	u_int64_t adj;
 	daddr_t i;
 
 	if (g_flag) {
-		MBR_init_GPT(disk, mbr);
+		MBR_init_GPT(mbr);
 		return;
 	}
 
@@ -81,23 +74,23 @@ MBR_init(struct disk *disk, struct mbr *mbr)
 
 	/* Use whole disk. Reserve first track, or first cyl, if possible. */
 	mbr->part[3].id = DOSPTYP_OPENBSD;
-	if (disk->heads > 1)
+	if (disk.heads > 1)
 		mbr->part[3].shead = 1;
 	else
 		mbr->part[3].shead = 0;
-	if (disk->heads < 2 && disk->cylinders > 1)
+	if (disk.heads < 2 && disk.cylinders > 1)
 		mbr->part[3].scyl = 1;
 	else
 		mbr->part[3].scyl = 0;
 	mbr->part[3].ssect = 1;
 
 	/* Go right to the end */
-	mbr->part[3].ecyl = disk->cylinders - 1;
-	mbr->part[3].ehead = disk->heads - 1;
-	mbr->part[3].esect = disk->sectors;
+	mbr->part[3].ecyl = disk.cylinders - 1;
+	mbr->part[3].ehead = disk.heads - 1;
+	mbr->part[3].esect = disk.sectors;
 
 	/* Fix up start/length fields */
-	PRT_fix_BN(disk, &mbr->part[3], 3);
+	PRT_fix_BN(&mbr->part[3], 3);
 
 #if defined(__powerpc__) || defined(__mips__)
 	/* Now fix up for the MS-DOS boot partition on PowerPC. */
@@ -106,7 +99,7 @@ MBR_init(struct disk *disk, struct mbr *mbr)
 	mbr->part[3].ns += mbr->part[3].bs;
 	mbr->part[3].bs = mbr->part[0].bs + mbr->part[0].ns;
 	mbr->part[3].ns -= mbr->part[3].bs;
-	PRT_fix_CHS(disk, &mbr->part[3]);
+	PRT_fix_CHS(&mbr->part[3]);
 	if ((mbr->part[3].shead != 1) || (mbr->part[3].ssect != 1)) {
 		/* align the partition on a cylinder boundary */
 		mbr->part[3].shead = 0;
@@ -114,7 +107,7 @@ MBR_init(struct disk *disk, struct mbr *mbr)
 		mbr->part[3].scyl += 1;
 	}
 	/* Fix up start/length fields */
-	PRT_fix_BN(disk, &mbr->part[3], 3);
+	PRT_fix_BN(&mbr->part[3], 3);
 #endif
 
 	/* Start OpenBSD MBR partition on a power of 2 block number. */
@@ -124,12 +117,11 @@ MBR_init(struct disk *disk, struct mbr *mbr)
 	adj = DL_BLKTOSEC(&dl, i) - mbr->part[3].bs;
 	mbr->part[3].bs += adj;
 	mbr->part[3].ns -= adj; 
-	PRT_fix_CHS(disk, &mbr->part[3]);
+	PRT_fix_CHS(&mbr->part[3]);
 }
 
 void
-MBR_parse(struct disk *disk, struct dos_mbr *dos_mbr, off_t offset,
-    off_t reloff, struct mbr *mbr)
+MBR_parse(struct dos_mbr *dos_mbr, off_t offset, off_t reloff, struct mbr *mbr)
 {
 	struct dos_partition dos_parts[NDOSPART];
 	int i;
@@ -142,7 +134,7 @@ MBR_parse(struct disk *disk, struct dos_mbr *dos_mbr, off_t offset,
 	memcpy(dos_parts, dos_mbr->dmbr_parts, sizeof(dos_parts));
 
 	for (i = 0; i < NDOSPART; i++)
-		PRT_parse(disk, &dos_parts[i], offset, reloff, &mbr->part[i]);
+		PRT_parse(&dos_parts[i], offset, reloff, &mbr->part[i]);
 }
 
 void
@@ -168,6 +160,7 @@ MBR_print(struct mbr *mbr, char *units)
 	int i;
 
 	/* Header */
+	printf("Offset: %lld\t", (long long)mbr->offset);
 	printf("Signature: 0x%X\n", (int)mbr->signature);
 	PRT_print(0, NULL, units);
 
@@ -181,7 +174,7 @@ MBR_read(int fd, off_t where, struct dos_mbr *dos_mbr)
 {
 	char *secbuf;
 
-	secbuf = MBR_readsector(fd, where);
+	secbuf = DISK_readsector(fd, where);
 	if (secbuf == NULL)
 		return (-1);
 
@@ -196,7 +189,7 @@ MBR_write(int fd, off_t where, struct dos_mbr *dos_mbr)
 {
 	char *secbuf;
 
-	secbuf = MBR_readsector(fd, where);
+	secbuf = DISK_readsector(fd, where);
 	if (secbuf == NULL)
 		return (-1);
 
@@ -205,7 +198,7 @@ MBR_write(int fd, off_t where, struct dos_mbr *dos_mbr)
 	 * write the sector back to "disk".
 	 */
 	memcpy(secbuf, dos_mbr, sizeof(*dos_mbr));
-	MBR_writesector(fd, secbuf, where);
+	DISK_writesector(fd, secbuf, where);
 	ioctl(fd, DIOCRLDINFO, 0);
 
 	free(secbuf);
@@ -218,13 +211,13 @@ MBR_write(int fd, off_t where, struct dos_mbr *dos_mbr)
  * untouched.
  */
 void
-MBR_pcopy(struct disk *disk, struct mbr *mbr)
+MBR_pcopy(struct mbr *mbr)
 {
-	int i, fd, error;
-	struct dos_mbr dos_mbr;
 	struct dos_partition dos_parts[NDOSPART];
+	struct dos_mbr dos_mbr;
+	int i, fd, error;
 
-	fd = DISK_open(disk->name, O_RDONLY);
+	fd = DISK_open(disk.name, O_RDONLY);
 	error = MBR_read(fd, 0, &dos_mbr);
 	close(fd);
 
@@ -234,62 +227,7 @@ MBR_pcopy(struct disk *disk, struct mbr *mbr)
 	memcpy(dos_parts, dos_mbr.dmbr_parts, sizeof(dos_parts));
 
 	for (i = 0; i < NDOSPART; i++)
-		PRT_parse(disk, &dos_parts[i], 0, 0, &mbr->part[i]);
-}
-
-/*
- * Read the sector at 'where' into a sector sized buf and return the latter.
- */
-char *
-MBR_readsector(int fd, off_t where)
-{
-	char *secbuf;
-	const int secsize = unit_types[SECTORS].conversion;
-	ssize_t len;
-	off_t off;
-
-	where *= secsize;
-	off = lseek(fd, where, SEEK_SET);
-	if (off != where)
-		return (NULL);
-
-	secbuf = calloc(1, secsize);
-	if (secbuf == NULL)
-		return (NULL);
-
-	len = read(fd, secbuf, secsize);
-	if (len == -1 || len != secsize) {
-		free(secbuf);
-		return (NULL);
-	}
-
-	return (secbuf);
-}
-
-/*
- * Write the sector sized 'secbuf' to the sector at 'where'.
- */
-int
-MBR_writesector(int fd, char *secbuf, off_t where)
-{
-	const int secsize = unit_types[SECTORS].conversion;
-	ssize_t len;
-	off_t off;
-
-	len = -1;
-
-	where *= secsize;
-	off = lseek(fd, where, SEEK_SET);
-	if (off == where)
-		len = write(fd, secbuf, secsize);
-
-	if (len == -1 || len != secsize) {
-		/* short read or write */
-		errno = EIO;
-		return (-1);
-	}
-
-	return (0);
+		PRT_parse(&dos_parts[i], 0, 0, &mbr->part[i]);
 }
 
 /*
@@ -301,7 +239,6 @@ MBR_writesector(int fd, char *secbuf, off_t where)
 void
 MBR_zapgpt(int fd, struct dos_mbr *dos_mbr, uint64_t lastsec)
 {
-	const int secsize = unit_types[SECTORS].conversion;
 	struct dos_partition dos_parts[NDOSPART];
 	char *secbuf;
 	uint64_t sig;
@@ -314,25 +251,25 @@ MBR_zapgpt(int fd, struct dos_mbr *dos_mbr, uint64_t lastsec)
 		    (dos_parts[i].dp_typ == DOSPTYP_EFISYS))
 			return;
 
-	secbuf = MBR_readsector(fd, GPTSECTOR);
+	secbuf = DISK_readsector(fd, GPTSECTOR);
 	if (secbuf == NULL)
 		return;
 
 	memcpy(&sig, secbuf, sizeof(sig));
-	if (sig == GPTSIGNATURE) {
+	if (letoh64(sig) == GPTSIGNATURE) {
 		memset(secbuf, 0, sizeof(sig));
-		MBR_writesector(fd, secbuf, GPTSECTOR);
+		DISK_writesector(fd, secbuf, GPTSECTOR);
 	}
 	free(secbuf);
 
-	secbuf = MBR_readsector(fd, lastsec);
+	secbuf = DISK_readsector(fd, lastsec);
 	if (secbuf == NULL)
 		return;
 
 	memcpy(&sig, secbuf, sizeof(sig));
-	if (sig == GPTSIGNATURE) {
+	if (letoh64(sig) == GPTSIGNATURE) {
 		memset(secbuf, 0, sizeof(sig));
-		MBR_writesector(fd, secbuf, lastsec);
+		DISK_writesector(fd, secbuf, lastsec);
 	}
 	free(secbuf);
 }

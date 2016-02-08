@@ -1,4 +1,4 @@
-/*	$OpenBSD: file.c,v 1.95 2014/04/09 20:50:03 florian Exp $	*/
+/*	$OpenBSD: file.c,v 1.97 2015/03/25 12:25:36 bcallah Exp $	*/
 
 /* This file is in the public domain. */
 
@@ -6,11 +6,17 @@
  *	File commands.
  */
 
-#include "def.h"
-
+#include <sys/queue.h>
 #include <sys/stat.h>
-
+#include <errno.h>
 #include <libgen.h>
+#include <signal.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <unistd.h>
+
+#include "def.h"
 
 size_t xdirname(char *, const char *, size_t);
 
@@ -545,10 +551,7 @@ filewrite(int f, int n)
 /*
  * Save the contents of the current buffer back into its associated file.
  */
-#ifndef	MAKEBACKUP
-#define	MAKEBACKUP TRUE
-#endif /* !MAKEBACKUP */
-static int	makebackup = MAKEBACKUP;
+static int	makebackup = TRUE;
 
 /* ARGSUSED */
 int

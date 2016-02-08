@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_ef_isapnp.c,v 1.27 2014/12/22 02:28:51 tedu Exp $	*/
+/*	$OpenBSD: if_ef_isapnp.c,v 1.30 2015/07/08 07:21:50 mpi Exp $	*/
 
 /*
  * Copyright (c) 1999 Jason L. Wright (jason@thought.net)
@@ -310,7 +310,7 @@ startagain:
 			filler >>= 8;
 			filler |= m->m_data[(m->m_len & ~3) + i] << 24;
 		}
-		MFREE(m, m0);
+		m0 = m_free(m);
 		m = m0;
 	}
 
@@ -671,6 +671,7 @@ efread(sc)
 	bus_space_tag_t iot = sc->sc_iot;
 	bus_space_handle_t ioh = sc->sc_ioh;
 	struct ifnet *ifp = &sc->sc_arpcom.ac_if;
+	struct mbuf_list ml = MBUF_LIST_INITIALIZER();
 	struct mbuf *m;
 	int len;
 
@@ -718,14 +719,8 @@ efread(sc)
 		return;
 	}
 
-	ifp->if_ipackets++;
-
-#if NBPFILTER > 0
-	if (ifp->if_bpf)
-		bpf_mtap(ifp->if_bpf, m, BPF_DIRECTION_IN);
-#endif
-
-	ether_input_mbuf(ifp, m);
+	ml_enqueue(&ml, m);
+	if_input(ifp, &ml);
 }
 
 struct mbuf *
@@ -735,14 +730,12 @@ efget(sc, totlen)
 {
 	bus_space_tag_t iot = sc->sc_iot;
 	bus_space_handle_t ioh = sc->sc_ioh;
-	struct ifnet *ifp = &sc->sc_arpcom.ac_if;
 	struct mbuf *top, **mp, *m;
 	int len, pad, s;
 
 	MGETHDR(m, M_DONTWAIT, MT_DATA);
 	if (m == NULL)
 		return (NULL);
-	m->m_pkthdr.rcvif = ifp;
 	m->m_pkthdr.len = totlen;
 	pad = ALIGN(sizeof(struct ether_header)) - sizeof(struct ether_header);
 	m->m_data += pad;

@@ -1,4 +1,4 @@
-#	$OpenBSD: airport,v 1.50 2015/02/10 09:30:37 sthen Exp $
+#	$OpenBSD: airport,v 1.53 2015/05/25 14:50:10 deraadt Exp $
 #	@(#)airport	8.1 (Berkeley) 6/8/93
 #
 # Some of this information from the Airport Search Engine at
@@ -34,7 +34,7 @@ ACT:Madison Cooper, Waco, Texas, USA
 ACV:Arcata/Eureka, California, USA
 ACY:Atlantic City International, Atlantic City, New Jersey, USA
 ADA:Adana, Turkey
-ADB:Adnam Menderes, Izmir, Turkey
+ADB:Adnan Menderes, Izmir, Turkey
 ADD:Bole, Addis Ababa, Ethiopia
 ADJ:Marka, Amman, Jordan
 ADL:Adelaide, Adelaide, South Australia, Australia
@@ -91,7 +91,7 @@ ANK:Etimesgut, Ankara, Turkey
 ANR:Antwerp International, Antwerp, Belgium
 ANU:V.C. Bird International, Saint Johns / Antigua, Antigua And Barbuda
 ANV:Anvik, Alaska, USA
-AOI:Falconara, Ancona, Italy
+AOI:Aeroporto delle Marche, Ancona, Italy
 AOJ:Aomori, Japan
 AOK:Karpathos, Karpathos, Greece
 AOO:Altoona/Blair County, Altoona, Pennsylvania, USA
@@ -193,7 +193,7 @@ BIQ:Biarritz-Anglet-Bayonne, Biarritz, France
 BIS:Bismarck Municipal, North Dakota, USA
 BJI:Bemidji Regional, Bemidji, Minnesota, USA
 BJL:Banjul International, Banjul, Gambia
-BJV:Bodrum, Turkey
+BJV:Milas-Bodrum, Bodrum, Turkey
 BJX:Del Bajio International, Leon/Guanajuato, Guanajuato, Mexico
 BKI:Kota Kinabalu International, Kota Kinabalu, Sabah, Malaysia
 BKK:Suvarnabhumi Airport, Bangkok, Thailand
@@ -332,8 +332,8 @@ CIX:Cornel Ruiz, Chiclayo, Peru
 CJB:Peelamedu, Coimbatore, India
 CJS:International Abraham Gonzalez, Ciudad Juarez, Chihuahua, Mexico
 CJU:Cheju, Cheju, South Korea
-CKC:Cherkasy International, Cherkasy, Ukraine
 CKB:North Central West Virginia, Bridgeport, West Virginia, USA
+CKC:Cherkasy International, Cherkasy, Ukraine
 CKS:International / Brasilia Brazil, Carajas, Para, Brazil
 CKY:Conakry, Conakry, Guinea
 CLD:Carlsbad/Palomar, California, USA
@@ -909,12 +909,13 @@ KUV:Kunsan, South Korea
 KVA:Kavala, Greece
 KVB:Skovde, Sweden
 KWA:Kwajalein, Marshall Islands
-KWI:Kuwait International
 KWG:Kryvyi Rih International, Dnipropetrovs'k, Ukraine
+KWI:Kuwait International
 KWL:Guilin, China
 KXK:Khurba, Komsomolsk-on-Amur, Russia
 KZI:Kozani, Greece
 KZN:Kazan, Russia
+KZR:Zafer, Turkey
 KZS:Kastelorizo, Greece
 LAD:Fevereiro, Luanda, Angola
 LAF:Purdue University, Lafayette, Indiana, USA

@@ -1,4 +1,4 @@
-/*	$OpenBSD: parse.y,v 1.23 2014/11/20 05:51:20 jsg Exp $ */
+/*	$OpenBSD: parse.y,v 1.30 2015/07/21 04:56:44 renato Exp $ */
 
 /*
  * Copyright (c) 2004, 2005, 2008 Esben Norby <norby@openbsd.org>
@@ -41,6 +41,7 @@
 
 #include "ldp.h"
 #include "ldpd.h"
+#include "lde.h"
 #include "ldpe.h"
 #include "log.h"
 
@@ -85,23 +86,34 @@ int		 host(const char *, struct in_addr *, struct in_addr *);
 static struct ldpd_conf	*conf;
 static int			 errors = 0;
 
-struct iface	*iface = NULL;
-struct tnbr	*tnbr = NULL;
+struct iface		*iface = NULL;
+struct tnbr		*tnbr = NULL;
+struct nbr_params	*nbrp = NULL;
+struct l2vpn		*l2vpn = NULL;
+struct l2vpn_pw		*pw = NULL;
 
 struct config_defaults {
 	u_int16_t	lhello_holdtime;
 	u_int16_t	lhello_interval;
 	u_int16_t	thello_holdtime;
 	u_int16_t	thello_interval;
+	u_int8_t	pwflags;
 };
 
 struct config_defaults	 globaldefs;
 struct config_defaults	 ifacedefs;
 struct config_defaults	 tnbrdefs;
+struct config_defaults	 pwdefs;
 struct config_defaults	*defs;
 
-struct iface	*conf_get_if(struct kif *);
-struct tnbr	*conf_get_tnbr(struct in_addr);
+int			 bad_ip_addr(struct in_addr);
+
+struct iface		*conf_get_if(struct kif *);
+struct tnbr		*conf_get_tnbr(struct in_addr);
+struct nbr_params	*conf_get_nbrp(struct in_addr);
+struct l2vpn		*conf_get_l2vpn(char *);
+struct l2vpn_if		*conf_get_l2vpn_if(struct l2vpn *, struct kif *);
+struct l2vpn_pw		*conf_get_l2vpn_pw(struct l2vpn *, struct kif *);
 
 typedef struct {
 	union {
@@ -118,13 +130,18 @@ typedef struct {
 %token	THELLOHOLDTIME THELLOINTERVAL
 %token	THELLOACCEPT
 %token	KEEPALIVE
-%token	DISTRIBUTION RETENTION ADVERTISEMENT
+%token	NEIGHBOR PASSWORD
+%token	L2VPN TYPE VPLS PWTYPE MTU BRIDGE
+%token	ETHERNET ETHERNETTAGGED STATUSTLV CONTROLWORD
+%token	PSEUDOWIRE NEIGHBOR PWID
 %token	EXTTAG
 %token	YES NO
 %token	ERROR
 %token	<v.string>	STRING
 %token	<v.number>	NUMBER
 %type	<v.number>	yesno
+%type	<v.number>	l2vpn_type
+%type	<v.number>	pw_type
 %type	<v.string>	string
 
 %%
@@ -135,6 +152,8 @@ grammar		: /* empty */
 		| grammar varset '\n'
 		| grammar interface '\n'
 		| grammar tneighbor '\n'
+		| grammar neighbor '\n'
+		| grammar l2vpn '\n'
 		| grammar error '\n'		{ file->errors++; }
 		;
 
@@ -155,6 +174,13 @@ yesno		: YES	{ $$ = 1; }
 		| NO	{ $$ = 0; }
 		;
 
+l2vpn_type	: VPLS	{ $$ = L2VPN_TYPE_VPLS; }
+		;
+
+pw_type		: ETHERNET		{ $$ = PW_TYPE_ETHERNET; }
+		| ETHERNETTAGGED	{ $$ = PW_TYPE_ETHERNET_TAGGED; }
+		;
+
 varset		: STRING '=' string {
 			if (conf->opts & LDPD_OPT_VERBOSE)
 				printf("%s = \"%s\"\n", $1, $3);
@@ -172,54 +198,16 @@ conf_main	: ROUTERID STRING {
 				YYERROR;
 			}
 			free($2);
+			if (bad_ip_addr(conf->rtr_id)) {
+				yyerror("invalid router-id");
+				YYERROR;
+			}
 		}
 		| FIBUPDATE yesno {
 			if ($2 == 0)
 				conf->flags |= LDPD_FLAG_NO_FIB_UPDATE;
 			else
 				conf->flags &= ~LDPD_FLAG_NO_FIB_UPDATE;
-		}
-		| DISTRIBUTION STRING {
-			conf->mode &= ~(MODE_DIST_INDEPENDENT |
-			    MODE_DIST_ORDERED);
-
-			if (!strcmp($2, "independent"))
-				conf->mode |= MODE_DIST_INDEPENDENT;
-			else if (!strcmp($2, "ordered"))
-				conf->mode |= MODE_DIST_ORDERED;
-			else {
-				yyerror("unknown distribution type");
-				free($2);
-				YYERROR;
-			}
-		}
-		| RETENTION STRING {
-			conf->mode &= ~(MODE_RET_CONSERVATIVE |
-			    MODE_RET_LIBERAL);
-
-			if (!strcmp($2, "conservative"))
-				conf->mode |= MODE_RET_CONSERVATIVE;
-			else if (!strcmp($2, "liberal"))
-				conf->mode |= MODE_RET_LIBERAL;
-			else {
-				yyerror("unknown retention type");
-				free($2);
-				YYERROR;
-			}
-		}
-		| ADVERTISEMENT STRING {
-			conf->mode &= ~(MODE_ADV_ONDEMAND |
-			    MODE_ADV_UNSOLICITED);
-
-			if (!strcmp($2, "ondemand"))
-				conf->mode |= MODE_ADV_ONDEMAND;
-			else if (!strcmp($2, "unsolicited"))
-				conf->mode |= MODE_ADV_UNSOLICITED;
-			else {
-				yyerror("unknown retention type");
-				free($2);
-				YYERROR;
-			}
 		}
 		| THELLOACCEPT yesno {
 			if ($2 == 0)
@@ -239,6 +227,7 @@ conf_main	: ROUTERID STRING {
 		| iface_defaults
 		| tnbr_defaults
 		;
+
 iface_defaults	: LHELLOHOLDTIME NUMBER {
 			if ($2 < MIN_HOLDTIME ||
 			    $2 > MAX_HOLDTIME) {
@@ -281,6 +270,204 @@ tnbr_defaults	: THELLOHOLDTIME NUMBER {
 		}
 		;
 
+nbr_opts	: PASSWORD STRING {
+			if (strlcpy(nbrp->auth.md5key, $2,
+			    sizeof(nbrp->auth.md5key)) >=
+			    sizeof(nbrp->auth.md5key)) {
+				yyerror("tcp md5sig password too long: max %zu",
+				    sizeof(nbrp->auth.md5key) - 1);
+				free($2);
+				YYERROR;
+			}
+			nbrp->auth.md5key_len = strlen($2);
+			nbrp->auth.method = AUTH_MD5SIG;
+			free($2);
+		}
+		;
+
+pw_defaults	: STATUSTLV yesno {
+			if ($2 == 1) {
+				defs->pwflags |= F_PW_STATUSTLV_CONF;
+				defs->pwflags |= F_PW_STATUSTLV;
+			} else {
+				defs->pwflags &= ~F_PW_STATUSTLV_CONF;
+				defs->pwflags &= ~F_PW_STATUSTLV;
+			}
+		}
+		| CONTROLWORD yesno {
+			if ($2 == 1) {
+				defs->pwflags |= F_PW_CONTROLWORD_CONF;
+				defs->pwflags |= F_PW_CONTROLWORD;
+			} else {
+				defs->pwflags &= ~F_PW_CONTROLWORD_CONF;
+				defs->pwflags &= ~F_PW_CONTROLWORD;
+			}
+		}
+		;
+
+pwopts		: PWID NUMBER {
+			if ($2 < MIN_PWID_ID ||
+			    $2 > MAX_PWID_ID) {
+				yyerror("pw-id out of range (%d-%d)",
+				    MIN_PWID_ID, MAX_PWID_ID);
+				YYERROR;
+			}
+
+			pw->pwid = $2;
+		}
+		| NEIGHBOR STRING {
+			struct in_addr	 addr;
+			struct tnbr	*t;
+
+			if (inet_aton($2, &addr) == 0) {
+				yyerror(
+				    "error parsing neighbor address");
+				free($2);
+				YYERROR;
+			}
+			free($2);
+
+			pw->addr.s_addr = addr.s_addr;
+
+			t = tnbr_find(conf, addr);
+			if (t == NULL) {
+				t = tnbr_new(conf, addr);
+				LIST_INSERT_HEAD(&conf->tnbr_list, t, entry);
+			}
+
+			t->pw_count++;
+		}
+		| pw_defaults
+		;
+
+pseudowire	: PSEUDOWIRE STRING {
+			struct kif	*kif;
+
+			if ((kif = kif_findname($2)) == NULL) {
+				yyerror("unknown interface %s", $2);
+				free($2);
+				YYERROR;
+			}
+			free($2);
+
+			if (kif->media_type != IFT_MPLSTUNNEL) {
+				yyerror("unsupported interface type on "
+				    "interface %s", kif->ifname);
+				YYERROR;
+			}
+
+			pw = conf_get_l2vpn_pw(l2vpn, kif);
+			if (pw == NULL)
+				YYERROR;
+			LIST_INSERT_HEAD(&l2vpn->pw_list, pw, entry);
+
+			memcpy(&pwdefs, defs, sizeof(pwdefs));
+			defs = &pwdefs;
+		} pw_block {
+			struct l2vpn	*l;
+			struct l2vpn_pw *p;
+
+			LIST_FOREACH(l, &conf->l2vpn_list, entry)
+				LIST_FOREACH(p, &l->pw_list, entry)
+					if (pw != p &&
+					    pw->pwid == p->pwid &&
+					    pw->addr.s_addr == p->addr.s_addr) {
+						yyerror("pseudowire already "
+						    "configured");
+						YYERROR;
+					}
+
+			pw->flags = defs->pwflags;
+			defs = &globaldefs;
+			pw = NULL;
+		}
+		;
+
+pw_block	: '{' optnl pwopts_l '}'
+		| '{' optnl '}'
+		| /* nothing */
+		;
+
+pwopts_l	: pwopts_l pwopts nl
+		| pwopts optnl
+		;
+
+l2vpnopts	: PWTYPE pw_type {
+			l2vpn->pw_type = $2;
+		}
+		| MTU NUMBER {
+			if ($2 < MIN_L2VPN_MTU ||
+			    $2 > MAX_L2VPN_MTU) {
+				yyerror("l2vpn mtu out of range (%d-%d)",
+				    MIN_L2VPN_MTU, MAX_L2VPN_MTU);
+				YYERROR;
+			}
+			l2vpn->mtu = $2;
+		}
+		| pw_defaults
+		| BRIDGE STRING {
+			struct l2vpn	 *l;
+			struct kif	 *kif;
+
+			if ((kif = kif_findname($2)) == NULL) {
+				yyerror("unknown interface %s", $2);
+				free($2);
+				YYERROR;
+			}
+			free($2);
+
+			if (l2vpn->br_ifindex != 0) {
+				yyerror("bridge interface cannot be "
+				    "redefined on l2vpn %s", l2vpn->name);
+				YYERROR;
+			}
+
+			if (kif->media_type != IFT_BRIDGE) {
+				yyerror("unsupported interface type on "
+				    "interface %s", kif->ifname);
+				YYERROR;
+			}
+
+			LIST_FOREACH(l, &conf->l2vpn_list, entry) {
+				if (l->br_ifindex == kif->ifindex) {
+					yyerror("bridge %s is already being "
+					    "used by l2vpn %s", kif->ifname,
+					    l->name);
+					YYERROR;
+				}
+			}
+
+			l2vpn->br_ifindex = kif->ifindex;
+			strlcpy(l2vpn->br_ifname, kif->ifname,
+			    sizeof(l2vpn->br_ifname));
+		}
+		| INTERFACE STRING {
+			struct kif	*kif;
+			struct l2vpn_if	*lif;
+
+			if ((kif = kif_findname($2)) == NULL) {
+				yyerror("unknown interface %s", $2);
+				free($2);
+				YYERROR;
+			}
+			free($2);
+
+			if (kif->media_type == IFT_BRIDGE
+			    || kif->media_type == IFT_LOOP
+			    || kif->media_type == IFT_CARP) {
+				yyerror("unsupported interface type on "
+				    "interface %s", kif->ifname);
+				YYERROR;
+			}
+
+			lif = conf_get_l2vpn_if(l2vpn, kif);
+			if (lif == NULL)
+				YYERROR;
+			LIST_INSERT_HEAD(&l2vpn->if_list, lif, entry);
+		}
+		| pseudowire
+		;
+
 optnl		: '\n' optnl
 		|
 		;
@@ -301,7 +488,8 @@ interface	: INTERFACE STRING	{
 			if (iface == NULL)
 				YYERROR;
 			if (iface->media_type == IFT_LOOP ||
-			    iface->media_type == IFT_CARP) {
+			    iface->media_type == IFT_CARP ||
+			    iface->media_type == IFT_MPLSTUNNEL) {
 				yyerror("unsupported interface type on "
 				    "interface %s", iface->name);
 				YYERROR;
@@ -338,10 +526,16 @@ tneighbor	: TNEIGHBOR STRING	{
 				YYERROR;
 			}
 			free($2);
+			if (bad_ip_addr(addr)) {
+				yyerror("invalid neighbor address");
+				YYERROR;
+			}
 
 			tnbr = conf_get_tnbr(addr);
 			if (tnbr == NULL)
 				YYERROR;
+
+			tnbr->flags |= F_TNBR_CONFIGURED;
 			LIST_INSERT_HEAD(&conf->tnbr_list, tnbr, entry);
 
 			memcpy(&tnbrdefs, defs, sizeof(tnbrdefs));
@@ -362,6 +556,59 @@ tneighbor_block	: '{' optnl tneighboropts_l '}'
 
 tneighboropts_l	: tneighboropts_l tnbr_defaults nl
 		| tnbr_defaults optnl
+		;
+
+neighbor	: NEIGHBOR STRING	{
+			struct in_addr	 addr;
+
+			if (inet_aton($2, &addr) == 0) {
+				yyerror(
+				    "error parsing neighbor address");
+				free($2);
+				YYERROR;
+			}
+			free($2);
+			if (bad_ip_addr(addr)) {
+				yyerror("invalid neighbor address");
+				YYERROR;
+			}
+
+			nbrp = conf_get_nbrp(addr);
+			if (nbrp == NULL)
+				YYERROR;
+			LIST_INSERT_HEAD(&conf->nbrp_list, nbrp, entry);
+		} neighbor_block {
+			nbrp = NULL;
+		}
+		;
+
+neighbor_block	: '{' optnl neighboropts_l '}'
+		| '{' optnl '}'
+		| /* nothing */
+		;
+
+neighboropts_l	: neighboropts_l nbr_opts nl
+		| nbr_opts optnl
+		;
+
+l2vpn		: L2VPN STRING TYPE l2vpn_type {
+			l2vpn = conf_get_l2vpn($2);
+			if (l2vpn == NULL)
+				YYERROR;
+			l2vpn->type = $4;
+			LIST_INSERT_HEAD(&conf->l2vpn_list, l2vpn, entry);
+		} l2vpn_block {
+			l2vpn = NULL;
+		}
+		;
+
+l2vpn_block	: '{' optnl l2vpnopts_l '}'
+		| '{' optnl '}'
+		| /* nothing */
+		;
+
+l2vpnopts_l	: l2vpnopts_l l2vpnopts nl
+		| l2vpnopts optnl
 		;
 
 %%
@@ -398,21 +645,31 @@ lookup(char *s)
 {
 	/* this has to be sorted always */
 	static const struct keywords keywords[] = {
-		{"advertisement",		ADVERTISEMENT},
-		{"distribution",		DISTRIBUTION},
-		{"external-tag",		EXTTAG},
+		{"bridge",			BRIDGE},
+		{"control-word",		CONTROLWORD},
+		{"ethernet",			ETHERNET},
+		{"ethernet-tagged",		ETHERNETTAGGED},
 		{"fib-update",			FIBUPDATE},
 		{"interface",			INTERFACE},
 		{"keepalive",			KEEPALIVE},
+		{"l2vpn",			L2VPN},
 		{"link-hello-holdtime",		LHELLOHOLDTIME},
 		{"link-hello-interval",		LHELLOINTERVAL},
+		{"mtu",				MTU},
+		{"neighbor",			NEIGHBOR},
 		{"no",				NO},
-		{"retention",			RETENTION},
+		{"password",			PASSWORD},
+		{"pseudowire",			PSEUDOWIRE},
+		{"pw-id",			PWID},
+		{"pw-type",			PWTYPE},
 		{"router-id",			ROUTERID},
+		{"status-tlv",			STATUSTLV},
 		{"targeted-hello-accept",	THELLOACCEPT},
 		{"targeted-hello-holdtime",	THELLOHOLDTIME},
 		{"targeted-hello-interval",	THELLOINTERVAL},
 		{"targeted-neighbor",		TNEIGHBOR},
+		{"type",			TYPE},
+		{"vpls",			VPLS},
 		{"yes",				YES}
 	};
 	const struct keywords	*p;
@@ -752,15 +1009,22 @@ parse_config(char *filename, int opts)
 	defs->thello_interval = DEFAULT_HELLO_INTERVAL;
 	conf->thello_holdtime = TARGETED_DFLT_HOLDTIME;
 	conf->thello_interval = DEFAULT_HELLO_INTERVAL;
-
-	conf->mode = (MODE_DIST_INDEPENDENT | MODE_RET_LIBERAL |
-	    MODE_ADV_UNSOLICITED);
+	defs->pwflags |= F_PW_STATUSTLV_CONF;
+	defs->pwflags |= F_PW_STATUSTLV;
+	defs->pwflags |= F_PW_CONTROLWORD_CONF;
+	defs->pwflags |= F_PW_CONTROLWORD;
 
 	if ((file = pushfile(filename, !(conf->opts & LDPD_OPT_NOACTION))) == NULL) {
 		free(conf);
 		return (NULL);
 	}
 	topfile = file;
+
+	LIST_INIT(&conf->iface_list);
+	LIST_INIT(&conf->addr_list);
+	LIST_INIT(&conf->tnbr_list);
+	LIST_INIT(&conf->nbrp_list);
+	LIST_INIT(&conf->l2vpn_list);
 
 	yyparse();
 	errors = file->errors;
@@ -866,6 +1130,16 @@ symget(const char *nam)
 	return (NULL);
 }
 
+int
+bad_ip_addr(struct in_addr addr)
+{
+	u_int32_t a = ntohl(addr.s_addr);
+
+	return (((a >> IN_CLASSA_NSHIFT) == 0)
+	    || ((a >> IN_CLASSA_NSHIFT) == IN_LOOPBACKNET)
+	    || IN_MULTICAST(a) || IN_BADCLASS(a));
+}
+
 struct iface *
 conf_get_if(struct kif *kif)
 {
@@ -889,27 +1163,127 @@ conf_get_tnbr(struct in_addr addr)
 {
 	struct tnbr	*t;
 
-	LIST_FOREACH(t, &conf->tnbr_list, entry) {
-		if (t->addr.s_addr == addr.s_addr) {
-			yyerror("targeted neighbor %s already configured",
+	t = tnbr_find(conf, addr);
+	if (t && (t->flags & F_TNBR_CONFIGURED)) {
+		yyerror("targeted neighbor %s already configured",
+		    inet_ntoa(addr));
+		return (NULL);
+	}
+
+	t = tnbr_new(conf, addr);
+
+	return (t);
+}
+
+struct nbr_params *
+conf_get_nbrp(struct in_addr addr)
+{
+	struct nbr_params	*n;
+
+	LIST_FOREACH(n, &conf->nbrp_list, entry) {
+		if (n->addr.s_addr == addr.s_addr) {
+			yyerror("neighbor %s already configured",
 			    inet_ntoa(addr));
 			return (NULL);
 		}
 	}
 
-	t = tnbr_new(conf, addr, 1);
+	n = nbr_params_new(addr);
 
-	return (t);
+	return (n);
+}
+
+struct l2vpn *
+conf_get_l2vpn(char *name)
+{
+	struct l2vpn	 *l;
+
+	if (l2vpn_find(conf, name)) {
+		yyerror("l2vpn %s already configured", name);
+		return (NULL);
+	}
+
+	l = l2vpn_new(name);
+
+	return (l);
+}
+
+struct l2vpn_if *
+conf_get_l2vpn_if(struct l2vpn *l, struct kif *kif)
+{
+	struct iface	*i;
+	struct l2vpn	*ltmp;
+
+	LIST_FOREACH(i, &conf->iface_list, entry) {
+		if (i->ifindex == kif->ifindex) {
+			yyerror("interface %s already configured",
+			    kif->ifname);
+			return (NULL);
+		}
+	}
+
+	LIST_FOREACH(ltmp, &conf->l2vpn_list, entry)
+		if (l2vpn_if_find(ltmp, kif->ifindex)) {
+			yyerror("interface %s is already being "
+			    "used by l2vpn %s", kif->ifname, ltmp->name);
+			return (NULL);
+		}
+
+	return (l2vpn_if_new(l, kif));
+}
+
+struct l2vpn_pw *
+conf_get_l2vpn_pw(struct l2vpn *l, struct kif *kif)
+{
+	struct l2vpn	*ltmp;
+
+	LIST_FOREACH(ltmp, &conf->l2vpn_list, entry) {
+		if (l2vpn_pw_find(ltmp, kif->ifindex)) {
+			yyerror("pseudowire %s is already being "
+			    "used by l2vpn %s", kif->ifname, ltmp->name);
+			return (NULL);
+		}
+	}
+
+	return (l2vpn_pw_new(l, kif));
 }
 
 void
 clear_config(struct ldpd_conf *xconf)
 {
-	struct iface	*i;
+	struct iface		*i;
+	struct tnbr		*t;
+	struct nbr_params	*n;
+	struct l2vpn		*l;
+	struct l2vpn_if		*f;
+	struct l2vpn_pw		*p;
 
-	while ((i = LIST_FIRST(&conf->iface_list)) != NULL) {
+	while ((i = LIST_FIRST(&xconf->iface_list)) != NULL) {
 		LIST_REMOVE(i, entry);
 		if_del(i);
+	}
+
+	while ((t = LIST_FIRST(&xconf->tnbr_list)) != NULL) {
+		LIST_REMOVE(t, entry);
+		tnbr_del(t);
+	}
+
+	while ((n = LIST_FIRST(&xconf->nbrp_list)) != NULL) {
+		LIST_REMOVE(n, entry);
+		free(n);
+	}
+
+	while ((l = LIST_FIRST(&xconf->l2vpn_list)) != NULL) {
+		while ((f = LIST_FIRST(&l->if_list)) != NULL) {
+			LIST_REMOVE(f, entry);
+			free(f);
+		}
+		while ((p = LIST_FIRST(&l->pw_list)) != NULL) {
+			LIST_REMOVE(p, entry);
+			free(p);
+		}
+		LIST_REMOVE(l, entry);
+		free(l);
 	}
 
 	free(xconf);

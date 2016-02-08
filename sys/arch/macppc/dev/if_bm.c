@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_bm.c,v 1.31 2015/02/09 03:09:57 dlg Exp $	*/
+/*	$OpenBSD: if_bm.c,v 1.34 2015/07/08 07:21:49 mpi Exp $	*/
 /*	$NetBSD: if_bm.c,v 1.1 1999/01/01 01:27:52 tsubai Exp $	*/
 
 /*-
@@ -549,7 +549,6 @@ bmac_rint(void *v)
 		}
 
 		ml_enqueue(&ml, m);
-		ifp->if_ipackets++;
 
 next:
 		DBDMA_BUILD_CMD(cmd, DBDMA_CMD_IN_LAST, 0, DBDMA_INT_ALWAYS,
@@ -618,7 +617,7 @@ bmac_start(struct ifnet *ifp)
 			return;
 
 		IFQ_DEQUEUE(&ifp->if_snd, m);
-		if (m == 0)
+		if (m == NULL)
 			break;
 #if NBPFILTER > 0
 		/*
@@ -663,13 +662,13 @@ bmac_put(struct bmac_softc *sc, caddr_t buff, struct mbuf *m)
 	for (; m; m = n) {
 		len = m->m_len;
 		if (len == 0) {
-			MFREE(m, n);
+			n = m_free(m);
 			continue;
 		}
 		bcopy(mtod(m, caddr_t), buff, len);
 		buff += len;
 		tlen += len;
-		MFREE(m, n);
+		n = m_free(m);
 	}
 	if (tlen > NBPG)
 		panic("%s: putpacket packet overflow", sc->sc_dev.dv_xname);
@@ -685,7 +684,7 @@ bmac_get(struct bmac_softc *sc, caddr_t pkt, int totlen)
 	int len;
 
 	MGETHDR(m, M_DONTWAIT, MT_DATA);
-	if (m == 0)
+	if (m == NULL)
 		return (0);
 	m->m_pkthdr.len = totlen;
 	len = MHLEN;
@@ -695,7 +694,7 @@ bmac_get(struct bmac_softc *sc, caddr_t pkt, int totlen)
 	while (totlen > 0) {
 		if (top) {
 			MGET(m, M_DONTWAIT, MT_DATA);
-			if (m == 0) {
+			if (m == NULL) {
 				m_freem(top);
 				return (0);
 			}

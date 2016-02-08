@@ -1,4 +1,4 @@
-#	$OpenBSD: changelist,v 1.103 2014/10/02 09:02:48 mpi Exp $
+#	$OpenBSD: changelist,v 1.108 2015/08/03 04:19:25 yasuoka Exp $
 #
 # List of files which the security script backs up and checks
 # for modifications.
@@ -26,6 +26,7 @@
 /etc/dhcpd.conf
 /etc/disktab
 /etc/distfile
+/etc/doas.conf
 /etc/dvmrpd.conf
 /etc/ethers
 /etc/exports
@@ -89,6 +90,7 @@
 /etc/profile
 /etc/protocols
 +/etc/pwd.db
++/etc/radiusd.conf
 /etc/rbootd.conf
 /etc/rc
 /etc/rc.conf
@@ -121,7 +123,6 @@
 /etc/ssh/ssh_host_rsa_key.pub
 /etc/ssh/sshd_config
 /etc/ssl/cert.pem
-/etc/sudoers
 /etc/suid_profile
 /etc/sysctl.conf
 /etc/syslog.conf
@@ -145,8 +146,8 @@
 /var/cron/cron.allow
 /var/cron/cron.deny
 /var/cron/tabs/root
-/var/nsd/etc/nsd.conf
-/var/unbound/etc/root.key
++/var/nsd/etc/nsd.conf
+/var/unbound/db/root.key
 /var/unbound/etc/unbound.conf
 /var/yp/Makefile.main
 /var/yp/Makefile.yp

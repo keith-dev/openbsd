@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_vmx.c,v 1.24 2015/02/10 02:57:32 pelikan Exp $	*/
+/*	$OpenBSD: if_vmx.c,v 1.30 2015/06/24 09:40:54 mpi Exp $	*/
 
 /*
  * Copyright (c) 2013 Tsubai Masanari
@@ -44,15 +44,14 @@
 
 #include <dev/pci/if_vmxreg.h>
 #include <dev/pci/pcivar.h>
-#include <dev/pci/pcireg.h>
 #include <dev/pci/pcidevs.h>
 
 #define NRXQUEUE 1
 #define NTXQUEUE 1
 
-#define NTXDESC 128 /* tx ring size */
+#define NTXDESC 512 /* tx ring size */
 #define NTXSEGS 8 /* tx descriptors per packet */
-#define NRXDESC 128
+#define NRXDESC 512
 #define NTXCOMPDESC NTXDESC
 #define NRXCOMPDESC (NRXDESC * 2)	/* ring1 + ring2 */
 
@@ -591,17 +590,20 @@ int
 vmxnet3_intr(void *arg)
 {
 	struct vmxnet3_softc *sc = arg;
+	struct ifnet *ifp = &sc->sc_arpcom.ac_if;
 
 	if (READ_BAR1(sc, VMXNET3_BAR1_INTR) == 0)
 		return 0;
 	if (sc->sc_ds->event)
 		vmxnet3_evintr(sc);
-	vmxnet3_rxintr(sc, &sc->sc_rxq[0]);
-	vmxnet3_txintr(sc, &sc->sc_txq[0]);
 #ifdef VMXNET3_STAT
 	vmxstat.intr++;
 #endif
-	vmxnet3_enable_intr(sc, 0);
+	if (ifp->if_flags & IFF_RUNNING) {
+		vmxnet3_rxintr(sc, &sc->sc_rxq[0]);
+		vmxnet3_txintr(sc, &sc->sc_txq[0]);
+		vmxnet3_enable_intr(sc, 0);
+	}
 	return 1;
 }
 
@@ -765,7 +767,6 @@ skip_buffer:
 		}
 	}
 
-	ifp->if_ipackets += ml_len(&ml);
 	if_input(ifp, &ml);
 
 	/* XXX Should we (try to) allocate buffers for ring 2 too? */

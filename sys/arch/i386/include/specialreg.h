@@ -1,4 +1,4 @@
-/*	$OpenBSD: specialreg.h,v 1.49 2015/01/19 16:01:43 jsg Exp $	*/
+/*	$OpenBSD: specialreg.h,v 1.52 2015/06/07 08:11:50 guenther Exp $	*/
 /*	$NetBSD: specialreg.h,v 1.7 1994/10/27 04:16:26 cgd Exp $	*/
 
 /*-
@@ -85,6 +85,7 @@
 #define	CR4_OSXMMEXCPT	0x00000400	/* enable unmasked SSE exceptions */
 #define	CR4_VMXE	0x00002000	/* enable virtual machine operation */
 #define	CR4_SMXE	0x00004000	/* enable safe mode operation */
+#define	CR4_FSGSBASE	0x00010000	/* enable {RD,WR}{FS,GS}BASE ops */
 #define	CR4_PCIDE	0x00020000	/* enable process-context IDs */
 #define	CR4_OSXSAVE	0x00040000	/* enable XSAVE and extended states */
 #define	CR4_SMEP	0x00100000	/* supervisor mode exec protection */
@@ -178,6 +179,12 @@
 #define	SEFF0EBX_SMAP		0x00100000 /* Supervisor mode access prevent */
 
 /*
+ * Thermal and Power Management (CPUID function 0x6) EAX bits
+ */
+#define	TPM_SENSOR	0x00000001	 /* Digital temp sensor */
+#define	TPM_ARAT	0x00000004	 /* APIC Timer Always Running */
+
+/*
  * "Architectural Performance Monitoring" bits (CPUID function 0x0a):
  * EAX bits
  */
@@ -248,11 +255,11 @@
 #define	CPUID2STEPPING(cpuid)	((cpuid) & 15)
 
 #define	CPUID(code, eax, ebx, ecx, edx)                         \
-	__asm("cpuid"                                           \
+	__asm volatile("cpuid"                                  \
 	    : "=a" (eax), "=b" (ebx), "=c" (ecx), "=d" (edx)    \
 	    : "a" (code));
 #define	CPUID_LEAF(code, leaf, eax, ebx, ecx, edx)		\
-	__asm("cpuid"                                           \
+	__asm volatile("cpuid"                                  \
 	    : "=a" (eax), "=b" (ebx), "=c" (ecx), "=d" (edx)    \
 	    : "a" (code), "c" (leaf));
 

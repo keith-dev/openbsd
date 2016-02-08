@@ -1,4 +1,4 @@
-/*	$OpenBSD: krpc_subr.c,v 1.25 2014/12/18 20:59:21 tedu Exp $	*/
+/*	$OpenBSD: krpc_subr.c,v 1.28 2015/07/15 22:16:42 deraadt Exp $	*/
 /*	$NetBSD: krpc_subr.c,v 1.12.4.1 1996/06/07 00:52:26 cgd Exp $	*/
 
 /*
@@ -54,7 +54,6 @@
 #include <sys/socket.h>
 #include <sys/socketvar.h>
 
-#include <net/if.h>
 #include <netinet/in.h>
 
 #include <nfs/rpcv2.h>
@@ -330,7 +329,7 @@ krpc_call(struct sockaddr_in *sa, u_int prog, u_int vers, u_int func,
 		m = m->m_next;
 	}
 	mhead->m_pkthdr.len = len;
-	mhead->m_pkthdr.rcvif = NULL;
+	mhead->m_pkthdr.ph_ifidx = 0;
 
 	/*
 	 * Send it, repeatedly, until a reply is received,
@@ -366,14 +365,12 @@ krpc_call(struct sockaddr_in *sa, u_int prog, u_int vers, u_int func,
 		 */
 		secs = timo;
 		while (secs > 0) {
-			if (from) {
-				m_freem(from);
-				from = NULL;
-			}
-			if (m) {
-				m_freem(m);
-				m = NULL;
-			}
+			m_freem(from);
+			from = NULL;
+
+			m_freem(m);
+			m = NULL;
+
 			auio.uio_resid = len = 1<<16;
 			auio.uio_procp = NULL;
 			rcvflg = 0;
@@ -452,9 +449,9 @@ krpc_call(struct sockaddr_in *sa, u_int prog, u_int vers, u_int func,
 	}
 
  out:
-	if (nam) m_freem(nam);
-	if (mhead) m_freem(mhead);
-	if (from) m_freem(from);
+	m_freem(nam);
+	m_freem(mhead);
+	m_freem(from);
 	soclose(so);
 	return error;
 }

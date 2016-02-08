@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_bridge.h,v 1.41 2015/01/24 00:29:06 deraadt Exp $	*/
+/*	$OpenBSD: if_bridge.h,v 1.44 2015/07/02 09:40:02 mpi Exp $	*/
 
 /*
  * Copyright (c) 1999, 2000 Jason L. Wright (jason@thought.net)
@@ -35,6 +35,7 @@
 #ifndef _NET_IF_BRIDGE_H_
 #define _NET_IF_BRIDGE_H_
 
+#include <sys/timeout.h>
 #include <net/pfvar.h>
 
 /*
@@ -436,8 +437,7 @@ struct bridge_softc {
 extern const u_int8_t bstp_etheraddr[];
 
 void	bridge_ifdetach(struct ifnet *);
-struct mbuf *bridge_input(struct ifnet *, struct ether_header *,
-    struct mbuf *);
+struct mbuf *bridge_input(struct ifnet *, struct mbuf *);
 int	bridge_output(struct ifnet *, struct mbuf *, struct sockaddr *,
     struct rtentry *);
 void	bridge_update(struct ifnet *, struct ether_addr *, int);

@@ -1,4 +1,4 @@
-/*	$OpenBSD: ti.c,v 1.12 2014/12/22 02:28:51 tedu Exp $	*/
+/*	$OpenBSD: ti.c,v 1.15 2015/06/24 09:40:54 mpi Exp $	*/
 
 /*
  * Copyright (c) 1997, 1998, 1999
@@ -85,7 +85,6 @@
 #include <sys/queue.h>
 
 #include <net/if.h>
-#include <net/if_dl.h>
 #include <net/if_types.h>
 
 #include <netinet/in.h>
@@ -1530,6 +1529,7 @@ void
 ti_rxeof(struct ti_softc *sc)
 {
 	struct ifnet		*ifp;
+	struct mbuf_list	ml = MBUF_LIST_INITIALIZER();
 	struct ti_cmd_desc	cmd;
 
 	ifp = &sc->arpcom.ac_if;
@@ -1602,8 +1602,6 @@ ti_rxeof(struct ti_softc *sc)
 			panic("%s: couldn't get mbuf", sc->sc_dv.dv_xname);
 
 		m->m_pkthdr.len = m->m_len = cur_rx->ti_len;
-		ifp->if_ipackets++;
-		m->m_pkthdr.rcvif = ifp;
 
 #if NVLAN > 0
 		if (cur_rx->ti_flags & TI_BDFLAG_VLAN_TAG) {
@@ -1612,18 +1610,10 @@ ti_rxeof(struct ti_softc *sc)
 		}
 #endif
 
-#if NBPFILTER > 0
-		/*
-	 	 * Handle BPF listeners. Let the BPF user see the packet.
-	 	 */
-		if (ifp->if_bpf)
-			bpf_mtap_ether(ifp->if_bpf, m, BPF_DIRECTION_IN);
-#endif
-
 		if ((cur_rx->ti_ip_cksum ^ 0xffff) == 0)
 			m->m_pkthdr.csum_flags |= M_IPV4_CSUM_IN_OK;
 
-		ether_input_mbuf(ifp, m);
+		ml_enqueue(&ml, m);
 	}
 
 	/* Only necessary on the Tigon 1. */
@@ -1634,6 +1624,8 @@ ti_rxeof(struct ti_softc *sc)
 	TI_UPDATE_STDPROD(sc, sc->ti_std);
 	TI_UPDATE_MINIPROD(sc, sc->ti_mini);
 	TI_UPDATE_JUMBOPROD(sc, sc->ti_jumbo);
+
+	if_input(ifp, &ml);
 }
 
 void

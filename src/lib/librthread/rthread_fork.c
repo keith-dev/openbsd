@@ -1,8 +1,8 @@
-/*	$OpenBSD: rthread_fork.c,v 1.10 2013/11/29 16:27:40 guenther Exp $ */
+/*	$OpenBSD: rthread_fork.c,v 1.13 2015/05/19 20:50:06 guenther Exp $ */
 
 /*
  * Copyright (c) 2008 Kurt Miller <kurt@openbsd.org>
- * Copyright (c) 2008 Philip Guenther <guenther@gmail.com>
+ * Copyright (c) 2008 Philip Guenther <guenther@openbsd.org>
  * Copyright (c) 2003 Daniel Eischen <deischen@freebsd.org>
  * All rights reserved.
  *
@@ -30,7 +30,7 @@
  * $FreeBSD: /repoman/r/ncvs/src/lib/libc_r/uthread/uthread_atfork.c,v 1.1 2004/12/10 03:36:45 grog Exp $
  */
 
-#if defined(__ELF__)
+#ifndef NO_PIC
 #include <sys/types.h>
 #include <sys/exec_elf.h>
 #pragma weak _DYNAMIC
@@ -46,18 +46,6 @@
 
 #include "rthread.h"
 
-struct rthread_atfork {
-	TAILQ_ENTRY(rthread_atfork) next;
-	void (*prepare)(void);
-	void (*parent)(void);
-	void (*child)(void);
-};
-
-static TAILQ_HEAD(atfork_listhead, rthread_atfork) _atfork_list =
-    TAILQ_HEAD_INITIALIZER(_atfork_list);
-
-static struct _spinlock _atfork_lock = _SPINLOCK_UNLOCKED;
-
 pid_t   _thread_sys_fork(void);
 pid_t   _thread_sys_vfork(void);
 pid_t	_dofork(int);
@@ -68,7 +56,7 @@ _dofork(int is_vfork)
 	pthread_t me;
 	pid_t (*sys_fork)(void);
 	pid_t newid;
-#if defined(__ELF__)
+#ifndef NO_PIC
 	sigset_t nmask, omask;
 #endif
 
@@ -87,7 +75,7 @@ _dofork(int is_vfork)
 	 * binding in the other locking functions can succeed.
 	 */
 
-#if defined(__ELF__)
+#ifndef NO_PIC
 	if (_DYNAMIC)
 		_rthread_dl_lock(0);
 #endif
@@ -96,7 +84,7 @@ _dofork(int is_vfork)
 	_thread_malloc_lock();
 	_thread_arc4_lock();
 
-#if defined(__ELF__)
+#ifndef NO_PIC
 	if (_DYNAMIC) {
 		sigfillset(&nmask);
 		_thread_sys_sigprocmask(SIG_BLOCK, &nmask, &omask);
@@ -106,7 +94,7 @@ _dofork(int is_vfork)
 
 	newid = sys_fork();
 
-#if defined(__ELF__)
+#ifndef NO_PIC
 	if (_DYNAMIC) {
 		_rthread_bind_lock(1);
 		_thread_sys_sigprocmask(SIG_SETMASK, &omask, NULL);
@@ -117,12 +105,12 @@ _dofork(int is_vfork)
 	_thread_malloc_unlock();
 	_thread_atexit_unlock();
 
-#if defined(__ELF__)
-	if (_DYNAMIC)
-		_rthread_dl_lock(1);
-#endif
-
 	if (newid == 0) {
+#ifndef NO_PIC
+		/* reinitialize the lock in the child */
+		if (_DYNAMIC)
+			_rthread_dl_lock(2);
+#endif
 		/* update this thread's structure */
 		me->tid = getthrid();
 		me->donesem.lock = _SPINLOCK_UNLOCKED_ASSIGN;
@@ -140,53 +128,21 @@ _dofork(int is_vfork)
 		/* single threaded now */
 		__isthreaded = 0;
 	}
+#ifndef NO_PIC
+	else if (_DYNAMIC)
+		_rthread_dl_lock(1);
+#endif
 	return newid;
 }
 
 pid_t
-fork(void)
+_thread_fork(void)
 {
-	struct rthread_atfork *p;
-	pid_t newid;
-
-	_spinlock(&_atfork_lock);
-	TAILQ_FOREACH_REVERSE(p, &_atfork_list, atfork_listhead, next)
-		if (p->prepare)
-			p->prepare();
-	newid = _dofork(0);
-	if (newid == 0) {
-		TAILQ_FOREACH(p, &_atfork_list, next)
-			if (p->child)
-				p->child();
-	} else {
-		TAILQ_FOREACH(p, &_atfork_list, next)
-			if (p->parent)
-				p->parent();
-	}
-	_spinunlock(&_atfork_lock);
-	return newid;
+	return _dofork(0);
 }
 
 pid_t
 vfork(void)
 {
 	return _dofork(1);
-}
-
-int
-pthread_atfork(void (*prepare)(void), void (*parent)(void),
-    void (*child)(void))
-{
-	struct rthread_atfork *af;
-
-	if ((af = malloc(sizeof *af)) == NULL)
-		return (ENOMEM);
-
-	af->prepare = prepare;
-	af->parent = parent;
-	af->child = child;
-	_spinlock(&_atfork_lock);
-	TAILQ_INSERT_TAIL(&_atfork_list, af, next);
-	_spinunlock(&_atfork_lock);
-	return (0);
 }

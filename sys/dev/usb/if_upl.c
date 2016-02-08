@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_upl.c,v 1.62 2015/02/04 05:12:13 mpi Exp $ */
+/*	$OpenBSD: if_upl.c,v 1.67 2015/06/30 13:54:42 mpi Exp $ */
 /*	$NetBSD: if_upl.c,v 1.19 2002/07/11 21:14:26 augustss Exp $	*/
 /*
  * Copyright (c) 2000 The NetBSD Foundation, Inc.
@@ -48,7 +48,6 @@
 
 #include <net/if.h>
 #include <net/if_types.h>
-#include <net/if_dl.h>
 #include <net/netisr.h>
 
 #if NBPFILTER > 0
@@ -422,6 +421,7 @@ upl_rxeof(struct usbd_xfer *xfer, void *priv, usbd_status status)
 	struct upl_chain	*c = priv;
 	struct upl_softc	*sc = c->upl_sc;
 	struct ifnet		*ifp = &sc->sc_if;
+	struct mbuf_list	ml = MBUF_LIST_INITIALIZER();
 	struct mbuf		*m;
 	int			total_len = 0;
 	int			s;
@@ -455,33 +455,17 @@ upl_rxeof(struct usbd_xfer *xfer, void *priv, usbd_status status)
 	m = c->upl_mbuf;
 	memcpy(mtod(c->upl_mbuf, char *), c->upl_buf, total_len);
 
-	ifp->if_ipackets++;
 	m->m_pkthdr.len = m->m_len = total_len;
+	ml_enqueue(&ml, m);
 
-	m->m_pkthdr.rcvif = ifp;
-
-	s = splnet();
-
-	/* XXX ugly */
 	if (upl_newbuf(sc, c, NULL) == ENOBUFS) {
 		ifp->if_ierrors++;
-		goto done1;
+		goto done;
 	}
 
-#if NBPFILTER > 0
-	if (ifp->if_bpf) {
-		bpf_mtap(ifp->if_bpf, m, BPF_DIRECTION_IN);
-	}
-#endif
-
-	DPRINTFN(10,("%s: %s: deliver %d\n", sc->sc_dev.dv_xname,
-		    __func__, m->m_len));
-
-	ether_input_mbuf(ifp, m);
-
- done1:
+	s = splnet();
+	if_input(ifp, &ml);
 	splx(s);
-
  done:
 #if 1
 	/* Setup new transfer. */
@@ -903,28 +887,5 @@ int
 upl_output(struct ifnet *ifp, struct mbuf *m, struct sockaddr *dst,
 	   struct rtentry *rt0)
 {
-	int s, len, error;
-
-	DPRINTFN(10,("%s: %s: enter\n",
-		     ((struct upl_softc *)ifp->if_softc)->sc_dev.dv_xname,
-		     __func__));
-
-	len = m->m_pkthdr.len;
-	s = splnet();
-	/*
-	 * Queue message on interface, and start output if interface
-	 * not yet active.
-	 */
-	IFQ_ENQUEUE(&ifp->if_snd, m, NULL, error);
-	if (error) {
-		/* mbuf is already freed */
-		splx(s);
-		return (error);
-	}
-	ifp->if_obytes += len;
-	if ((ifp->if_flags & IFF_OACTIVE) == 0)
-		(*ifp->if_start)(ifp);
-	splx(s);
-
-	return (0);
+	return (if_enqueue(ifp, m));
 }

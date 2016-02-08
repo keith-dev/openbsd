@@ -1,4 +1,4 @@
-/*	$OpenBSD: sys_generic.c,v 1.96 2015/02/12 22:27:04 millert Exp $	*/
+/*	$OpenBSD: sys_generic.c,v 1.100 2015/07/28 05:50:41 guenther Exp $	*/
 /*	$NetBSD: sys_generic.c,v 1.24 1996/03/29 00:25:32 cgd Exp $	*/
 
 /*
@@ -52,6 +52,7 @@
 #include <sys/stat.h>
 #include <sys/malloc.h>
 #include <sys/poll.h>
+#include <sys/tame.h>
 #ifdef KTRACE
 #include <sys/ktrace.h>
 #endif
@@ -87,9 +88,7 @@ sys_read(struct proc *p, void *v, register_t *retval)
 	struct file *fp;
 	struct filedesc *fdp = p->p_fd;
 
-	if ((fp = fd_getfile(fdp, fd)) == NULL)
-		return (EBADF);
-	if ((fp->f_flag & FREAD) == 0)
+	if ((fp = fd_getfile_mode(fdp, fd, FREAD)) == NULL)
 		return (EBADF);
 
 	iov.iov_base = SCARG(uap, buf);
@@ -116,11 +115,8 @@ sys_readv(struct proc *p, void *v, register_t *retval)
 	struct file *fp;
 	struct filedesc *fdp = p->p_fd;
 
-	if ((fp = fd_getfile(fdp, fd)) == NULL)
+	if ((fp = fd_getfile_mode(fdp, fd, FREAD)) == NULL)
 		return (EBADF);
-	if ((fp->f_flag & FREAD) == 0)
-		return (EBADF);
-
 	FREF(fp);
 
 	/* dofilereadv() will FRELE the descriptor for us */
@@ -165,6 +161,10 @@ dofilereadv(struct proc *p, int fd, struct file *fp, const struct iovec *iovp,
 		}
 		if ((error = copyin(iovp, iov, iovlen)))
 			goto done;
+#ifdef KTRACE
+		if (KTRPOINT(p, KTR_STRUCT))
+			ktriovec(p, iov, iovcnt);
+#endif
 	} else {
 		iov = (struct iovec *)iovp;		/* de-constify */
 	}
@@ -240,9 +240,7 @@ sys_write(struct proc *p, void *v, register_t *retval)
 	struct file *fp;
 	struct filedesc *fdp = p->p_fd;
 
-	if ((fp = fd_getfile(fdp, fd)) == NULL)
-		return (EBADF);
-	if ((fp->f_flag & FWRITE) == 0)
+	if ((fp = fd_getfile_mode(fdp, fd, FWRITE)) == NULL)
 		return (EBADF);
 
 	iov.iov_base = (void *)SCARG(uap, buf);
@@ -269,11 +267,8 @@ sys_writev(struct proc *p, void *v, register_t *retval)
 	struct file *fp;
 	struct filedesc *fdp = p->p_fd;
 
-	if ((fp = fd_getfile(fdp, fd)) == NULL)
+	if ((fp = fd_getfile_mode(fdp, fd, FWRITE)) == NULL)
 		return (EBADF);
-	if ((fp->f_flag & FWRITE) == 0)
-		return (EBADF);
-
 	FREF(fp);
 
 	/* dofilewritev() will FRELE the descriptor for us */
@@ -318,6 +313,10 @@ dofilewritev(struct proc *p, int fd, struct file *fp, const struct iovec *iovp,
 		}
 		if ((error = copyin(iovp, iov, iovlen)))
 			goto done;
+#ifdef KTRACE
+		if (KTRPOINT(p, KTR_STRUCT))
+			ktriovec(p, iov, iovcnt);
+#endif
 	} else {
 		iov = (struct iovec *)iovp;		/* de-constify */
 	}
@@ -394,7 +393,7 @@ sys_ioctl(struct proc *p, void *v, register_t *retval)
 	} */ *uap = v;
 	struct file *fp;
 	struct filedesc *fdp;
-	u_long com;
+	u_long com = SCARG(uap, com);
 	int error;
 	u_int size;
 	caddr_t data, memp;
@@ -403,13 +402,15 @@ sys_ioctl(struct proc *p, void *v, register_t *retval)
 	long long stkbuf[STK_PARAMS / sizeof(long long)];
 
 	fdp = p->p_fd;
-	if ((fp = fd_getfile(fdp, SCARG(uap, fd))) == NULL)
+	fp = fd_getfile_mode(fdp, SCARG(uap, fd), FREAD|FWRITE);
+
+	if (tame_ioctl_check(p, com, fp))
+		return (tame_fail(p, EPERM, _TM_IOCTL));
+
+	if (fp == NULL)
 		return (EBADF);
 
-	if ((fp->f_flag & (FREAD | FWRITE)) == 0)
-		return (EBADF);
-
-	switch (com = SCARG(uap, com)) {
+	switch (com) {
 	case FIONCLEX:
 	case FIOCLEX:
 		fdplock(fdp);
@@ -725,7 +726,7 @@ selscan(struct proc *p, fd_set *ibits, fd_set *obits, int nfd, int ni,
 	fd_mask bits;
 	struct file *fp;
 	int n = 0;
-	static const int flag[3] = { POLLIN, POLLOUT, POLLPRI };
+	static const int flag[3] = { POLLIN, POLLOUT|POLLNOHUP, POLLPRI };
 
 	for (msk = 0; msk < 3; msk++) {
 		fd_set *pibits = (fd_set *)&cibits[msk*ni];
@@ -953,8 +954,10 @@ doppoll(struct proc *p, struct pollfd *fds, u_int nfds,
 	if ((error = copyin(fds, pl, sz)) != 0)
 		goto bad;
 
-	for (i = 0; i < nfds; i++)
+	for (i = 0; i < nfds; i++) {
+		pl[i].events &= ~POLLNOHUP;
 		pl[i].revents = 0;
+	}
 
 	if (tsp != NULL) {
 		getnanouptime(&rts);

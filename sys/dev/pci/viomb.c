@@ -1,4 +1,4 @@
-/* $OpenBSD: viomb.c,v 1.12 2015/02/09 03:15:41 dlg Exp $	 */
+/* $OpenBSD: viomb.c,v 1.14 2015/06/11 04:38:23 jsg Exp $	 */
 /* $NetBSD: viomb.c,v 1.1 2011/10/30 12:12:21 hannken Exp $	 */
 
 /*
@@ -36,9 +36,6 @@
 #include <sys/sensors.h>
 
 #include <uvm/uvm_extern.h>
-
-#include <dev/pci/pcidevs.h>
-#include <dev/pci/pcivar.h>
 
 #include <dev/pci/virtioreg.h>
 #include <dev/pci/virtiovar.h>

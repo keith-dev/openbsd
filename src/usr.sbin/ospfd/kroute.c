@@ -1,4 +1,4 @@
-/*	$OpenBSD: kroute.c,v 1.98 2015/02/11 05:57:44 claudio Exp $ */
+/*	$OpenBSD: kroute.c,v 1.102 2015/07/20 23:45:39 benno Exp $ */
 
 /*
  * Copyright (c) 2004 Esben Norby <norby@openbsd.org>
@@ -1019,6 +1019,9 @@ if_change(u_short ifindex, int flags, struct if_data *ifd,
 		return;
 	}
 
+	/* notify ospfe about interface link state */
+	main_imsg_compose_ospfe(IMSG_IFINFO, 0, kif, sizeof(struct kif));
+
 	reachable = (kif->flags & IFF_UP) &&
 	    LINK_STATE_IS_UP(kif->link_state);
 
@@ -1026,9 +1029,6 @@ if_change(u_short ifindex, int flags, struct if_data *ifd,
 		return;		/* nothing changed wrt nexthop validity */
 
 	kif->nh_reachable = reachable;
-
-	/* notify ospfe about interface link state */
-	main_imsg_compose_ospfe(IMSG_IFINFO, 0, kif, sizeof(struct kif));
 
 	/* update redistribute list */
 	RB_FOREACH(kr, kroute_tree, &krt) {
@@ -1373,7 +1373,8 @@ rtmsg_process(char *buf, size_t len)
 			if ((sa = rti_info[RTAX_DST]) == NULL)
 				continue;
 
-			if (rtm->rtm_flags & RTF_LLINFO)	/* arp cache */
+			/* Skip ARP/ND cache and broadcast routes. */
+			if (rtm->rtm_flags & (RTF_LLINFO|RTF_BROADCAST))
 				continue;
 
 			if (rtm->rtm_flags & RTF_MPATH)
@@ -1414,10 +1415,19 @@ rtmsg_process(char *buf, size_t len)
 			if ((sa = rti_info[RTAX_GATEWAY]) != NULL) {
 				switch (sa->sa_family) {
 				case AF_INET:
+					if (rtm->rtm_flags & RTF_CONNECTED) {
+						flags |= F_CONNECTED;
+						break;
+					}
+
 					nexthop.s_addr = ((struct
 					    sockaddr_in *)sa)->sin_addr.s_addr;
 					break;
 				case AF_LINK:
+					/*
+					 * Traditional BSD connected routes have
+					 * a gateway of type AF_LINK.
+					 */
 					flags |= F_CONNECTED;
 					break;
 				}

@@ -1,4 +1,4 @@
-/*	$OpenBSD: ping6.c,v 1.101 2015/01/16 06:40:00 deraadt Exp $	*/
+/*	$OpenBSD: ping6.c,v 1.108 2015/05/02 17:19:42 florian Exp $	*/
 /*	$KAME: ping6.c,v 1.163 2002/10/25 02:19:06 itojun Exp $	*/
 
 /*
@@ -83,7 +83,6 @@
 #include <sys/types.h>
 #include <sys/uio.h>
 #include <sys/socket.h>
-#include <sys/time.h>
 
 #include <net/if.h>
 #include <net/route.h>
@@ -100,6 +99,7 @@
 #include <err.h>
 #include <errno.h>
 #include <fcntl.h>
+#include <time.h>
 #include <math.h>
 #include <signal.h>
 #include <stdio.h>
@@ -109,16 +109,22 @@
 #include <poll.h>
 
 #include <md5.h>
+#include <siphash.h>
 
-struct tv32 {
-	u_int32_t tv32_sec;
-	u_int32_t tv32_usec;
+struct tv64 {
+	u_int64_t tv64_sec;
+	u_int64_t tv64_nsec;
+};
+
+struct payload {
+	struct tv64	tv64;
+	u_int8_t	mac[SIPHASH_DIGEST_LENGTH];
 };
 
 #define MAXPACKETLEN	131072
 #define	IP6LEN		40
 #define ICMP6ECHOLEN	8	/* icmp echo header len excluding time */
-#define ICMP6ECHOTMLEN sizeof(struct tv32)
+#define ICMP6ECHOTMLEN sizeof(struct payload)
 #define ICMP6_NIQLEN	(ICMP6ECHOLEN + 8)
 /* FQDN case, 64 bits of nonce + 32 bits ttl */
 #define ICMP6_NIRLEN	(ICMP6ECHOLEN + 12)
@@ -197,6 +203,8 @@ double tmin = 999999999.0;	/* minimum round trip time */
 double tmax = 0.0;		/* maximum round trip time */
 double tsum = 0.0;		/* sum of all times, for doing average */
 double tsumsq = 0.0;		/* sum of all times squared, for std. dev. */
+struct tv64 tv64_offset;	/* random offset for time values */
+SIPHASH_KEY mac_key;
 
 /* for node addresses */
 u_short naflags;
@@ -236,7 +244,6 @@ void	 pr_rthdr(void *);
 int	 pr_bitrange(u_int32_t, int, int);
 void	 pr_retip(struct ip6_hdr *, u_char *);
 void	 summary(int);
-void	 tvsub(struct timeval *, struct timeval *);
 char	*nigroup(char *);
 void	 usage(void);
 
@@ -327,8 +334,7 @@ main(int argc, char *argv[])
 				errx(1, "invalid socket buffer size");
 			break;
 		case 'c':
-			npackets = (unsigned long)strtonum(optarg, 0,
-			    INT_MAX, &errstr);
+			npackets = strtonum(optarg, 0, INT_MAX, &errstr);
 			if (errstr)
 				errx(1,
 				    "number of packets to transmit is %s: %s",
@@ -358,12 +364,9 @@ main(int argc, char *argv[])
 			options |= F_HOSTNAME;
 			break;
 		case 'h':		/* hoplimit */
-			hoplimit = strtol(optarg, &e, 10);
-			if (*optarg == '\0' || *e != '\0')
-				errx(1, "illegal hoplimit %s", optarg);
-			if (255 < hoplimit || hoplimit < -1)
-				errx(1,
-				    "illegal hoplimit -- %s", optarg);
+			hoplimit = strtonum(optarg, 0, IPV6_MAXHLIM, &errstr);
+			if (errstr)
+				errx(1, "hoplimit is %s: %s", errstr, optarg);
 			break;
 		case 'I':
 			ifname = optarg;
@@ -395,9 +398,10 @@ main(int argc, char *argv[])
 				errno = EPERM;
 				errx(1, "Must be superuser to preload");
 			}
-			preload = strtol(optarg, &e, 10);
-			if (preload < 0 || *optarg == '\0' || *e != '\0')
-				errx(1, "illegal preload value -- %s", optarg);
+			preload = strtonum(optarg, 0, INT_MAX, &errstr);
+			if (errstr)
+				errx(1, "preload value is %s: %s", errstr,
+				    optarg);
 			break;
 		case 'm':
 			mflag++;
@@ -437,14 +441,10 @@ main(int argc, char *argv[])
 			options |= F_SRCADDR;
 			break;
 		case 's':		/* size of packet to send */
-			datalen = strtol(optarg, &e, 10);
-			if (datalen <= 0 || *optarg == '\0' || *e != '\0')
-				errx(1, "illegal datalen value -- %s", optarg);
-			if (datalen > MAXDATALEN) {
-				errx(1,
-				    "datalen value too large, maximum is %d",
-				    MAXDATALEN);
-			}
+			datalen = strtonum(optarg, 1, MAXDATALEN, &errstr);
+			if (errstr)
+				errx(1, "datalen value is %s: %s", errstr,
+				    optarg);
 			break;
 		case 't':
 			options &= ~F_NOUSERDATA;
@@ -454,11 +454,11 @@ main(int argc, char *argv[])
 			options |= F_VERBOSE;
 			break;
 		case 'V':
-			rtableid = (unsigned int)strtonum(optarg, 0,
-			    RT_TABLEID_MAX, &errstr);
+			rtableid = strtonum(optarg, 0, RT_TABLEID_MAX,
+			    &errstr);
 			if (errstr)
-				errx(1, "rtable value is %s: %s",
-				    errstr, optarg);
+				errx(1, "rtable value is %s: %s", errstr,
+				    optarg);
 			if (setsockopt(s, SOL_SOCKET, SO_RTABLE, &rtableid,
 			    sizeof(rtableid)) == -1)
 				err(1, "setsockopt SO_RTABLE");
@@ -578,7 +578,7 @@ main(int argc, char *argv[])
 
 
 	if ((options & F_NOUSERDATA) == 0) {
-		if (datalen >= sizeof(struct tv32)) {
+		if (datalen >= sizeof(struct payload)) {
 			/* we can time transfer */
 			timing = 1;
 		} else
@@ -803,6 +803,9 @@ main(int argc, char *argv[])
 	if (setsockopt(s, IPPROTO_IPV6, IPV6_RECVHOPLIMIT, &optval,
 	    (socklen_t)sizeof(optval)) < 0)
 		warn("setsockopt(IPV6_RECVHOPLIMIT)"); /* XXX err? */
+
+	arc4random_buf(&tv64_offset, sizeof(tv64_offset));
+	arc4random_buf(&mac_key, sizeof(mac_key));
 
 	printf("PING6(%lu=40+8+%lu bytes) ", (unsigned long)(40 + pingerlen()),
 	    (unsigned long)(pingerlen() - 8));
@@ -1072,13 +1075,27 @@ pinger(void)
 		icp->icmp6_id = htons(ident);
 		icp->icmp6_seq = ntohs(seq);
 		if (timing) {
-			struct timeval tv;
-			struct tv32 tv32;
+			SIPHASH_CTX ctx;
+			struct timespec ts;
+			struct payload payload;
+			struct tv64 *tv64 = &payload.tv64;
 
-			(void)gettimeofday(&tv, NULL);
-			tv32.tv32_sec = htonl(tv.tv_sec);	/* XXX 2038 */
-			tv32.tv32_usec = htonl(tv.tv_usec);
-			bcopy(&tv32, &outpack[ICMP6ECHOLEN], sizeof(tv32));
+			if (clock_gettime(CLOCK_MONOTONIC, &ts) == -1)
+				err(1, "clock_gettime(CLOCK_MONOTONIC)");
+			tv64->tv64_sec = htobe64((u_int64_t)ts.tv_sec +
+			    tv64_offset.tv64_sec);
+			tv64->tv64_nsec = htobe64((u_int64_t)ts.tv_nsec +
+			    tv64_offset.tv64_nsec);
+
+			SipHash24_Init(&ctx, &mac_key);
+			SipHash24_Update(&ctx, tv64, sizeof(*tv64));
+			SipHash24_Update(&ctx, &ident, sizeof(ident));
+			SipHash24_Update(&ctx,
+			    &icp->icmp6_seq, sizeof(icp->icmp6_seq));
+			SipHash24_Final(&payload.mac, &ctx);
+
+			memcpy(&outpack[ICMP6ECHOLEN],
+			    &payload, sizeof(payload));
 		}
 		cc = ICMP6ECHOLEN + datalen;
 	}
@@ -1206,8 +1223,9 @@ pr_pack(u_char *buf, int cc, struct msghdr *mhdr)
 	int fromlen;
 	u_char *cp = NULL, *dp, *end = buf + cc;
 	struct in6_pktinfo *pktinfo = NULL;
-	struct timeval tv, tp;
-	struct tv32 tv32;
+	struct timespec ts, tp;
+	struct payload payload;
+	struct tv64 *tv64;
 	double triptime = 0;
 	int dupflag;
 	size_t off;
@@ -1215,7 +1233,8 @@ pr_pack(u_char *buf, int cc, struct msghdr *mhdr)
 	u_int16_t seq;
 	char dnsname[MAXDNAME + 1];
 
-	(void)gettimeofday(&tv, NULL);
+	if (clock_gettime(CLOCK_MONOTONIC, &ts) == -1)
+		err(1, "clock_gettime(CLOCK_MONOTONIC)");
 
 	if (!mhdr || !mhdr->msg_name ||
 	    mhdr->msg_namelen != sizeof(struct sockaddr_in6) ||
@@ -1249,12 +1268,32 @@ pr_pack(u_char *buf, int cc, struct msghdr *mhdr)
 		seq = ntohs(icp->icmp6_seq);
 		++nreceived;
 		if (timing) {
-			bcopy(icp + 1, &tv32, sizeof(tv32));
-			tp.tv_sec = ntohl(tv32.tv32_sec);
-			tp.tv_usec = ntohl(tv32.tv32_usec);
-			tvsub(&tv, &tp);
-			triptime = ((double)tv.tv_sec) * 1000.0 +
-			    ((double)tv.tv_usec) / 1000.0;
+			SIPHASH_CTX ctx;
+			u_int8_t mac[SIPHASH_DIGEST_LENGTH];
+
+			memcpy(&payload, icp + 1, sizeof(payload));
+			tv64 = &payload.tv64;
+
+			SipHash24_Init(&ctx, &mac_key);
+			SipHash24_Update(&ctx, tv64, sizeof(*tv64));
+			SipHash24_Update(&ctx, &ident, sizeof(ident));
+			SipHash24_Update(&ctx,
+			    &icp->icmp6_seq, sizeof(icp->icmp6_seq));
+			SipHash24_Final(mac, &ctx);
+
+			if (timingsafe_memcmp(mac, &payload.mac,
+			    sizeof(mac)) != 0) {
+				(void)printf("signature mismatch!\n");
+				return;
+			}
+
+			tp.tv_sec = betoh64(tv64->tv64_sec) -
+			    tv64_offset.tv64_sec;
+			tp.tv_nsec = betoh64(tv64->tv64_nsec) -
+			    tv64_offset.tv64_nsec;
+			timespecsub(&ts, &tp, &ts);
+			triptime = ((double)ts.tv_sec) * 1000.0 +
+			    ((double)ts.tv_nsec) / 1000000.0;
 			tsum += triptime;
 			tsumsq += triptime * triptime;
 			if (triptime < tmin)
@@ -1861,21 +1900,6 @@ get_pathmtu(struct msghdr *mhdr)
 }
 
 /*
- * tvsub --
- *	Subtract 2 timeval structs:  out = out - in.  Out is assumed to
- * be >= in.
- */
-void
-tvsub(struct timeval *out, struct timeval *in)
-{
-	if ((out->tv_usec -= in->tv_usec) < 0) {
-		--out->tv_sec;
-		out->tv_usec += 1000000;
-	}
-	out->tv_sec -= in->tv_sec;
-}
-
-/*
  * onint --
  *	SIGINT handler.
  */
@@ -2335,7 +2359,7 @@ fill(char *bp, char *patp)
 /* xxx */
 	if (ii > 0)
 		for (kk = 0;
-		    kk <= MAXDATALEN - (8 + sizeof(struct tv32) + ii);
+		    kk <= MAXDATALEN - (8 + sizeof(struct payload) + ii);
 		    kk += ii)
 			for (jj = 0; jj < ii; ++jj)
 				bp[jj + kk] = pat[jj];
@@ -2383,7 +2407,7 @@ nigroup(char *name)
 
 	if (inet_pton(AF_INET6, "ff02::2:0000:0000", &in6) != 1)
 		return NULL;	/*XXX*/
-	bcopy(digest, &in6.s6_addr[12], 4);
+	memcpy(&in6.s6_addr[12], digest, 4);
 
 	if (inet_ntop(AF_INET6, &in6, hbuf, sizeof(hbuf)) == NULL)
 		return NULL;

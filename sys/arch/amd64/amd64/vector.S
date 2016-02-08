@@ -1,4 +1,4 @@
-/*	$OpenBSD: vector.S,v 1.36 2015/02/07 00:26:37 deraadt Exp $	*/
+/*	$OpenBSD: vector.S,v 1.43 2015/07/17 15:37:58 guenther Exp $	*/
 /*	$NetBSD: vector.S,v 1.5 2004/06/28 09:13:11 fvdl Exp $	*/
 
 /*
@@ -77,6 +77,8 @@
 #include <machine/trap.h>
 #include <machine/intr.h>
 #include <machine/psl.h>
+#include <machine/codepatch.h>
+#include <machine/specialreg.h>
 
 #include "ioapic.h"
 #include "lapic.h"
@@ -127,7 +129,7 @@ IDTVEC(trap07)
 	call	_C_LABEL(fpudna)
 	INTRFASTEXIT
 IDTVEC(trap08)
-	ZTRAP(T_DOUBLEFLT)
+	TRAP(T_DOUBLEFLT)
 IDTVEC(trap09)
 	ZTRAP(T_FPOPFLT)
 IDTVEC(trap0a)
@@ -151,14 +153,10 @@ IDTVEC(trap0d)
 	leaq	_C_LABEL(doreti_iret)(%rip),%rdi
 	cmpq	%rdi,TF_RIP(%rsp)
 	je	1f
-	testq	$SEL_UPL,TF_CS(%rsp)
+	testq	$SEL_RPL,TF_CS(%rsp)
 	jz	2f
 1:	swapgs
-2:	movw	%gs,TF_GS(%rsp)
-	movw	%fs,TF_FS(%rsp)
-	movw	%es,TF_ES(%rsp)
-	movw	%ds,TF_DS(%rsp)
-	movq	%r15,TF_R15(%rsp)
+2:	movq	%r15,TF_R15(%rsp)
 	movq	%r14,TF_R14(%rsp)
 	movq	%r13,TF_R13(%rsp)
 	movq	%r12,TF_R12(%rsp)
@@ -262,9 +260,8 @@ calltrap:
 	jz	1f
 5:	CLEAR_ASTPENDING(%r11)
 	sti
-	movl	$T_ASTFLT,TF_TRAPNO(%rsp)
 	movq	%rsp, %rdi
-	call	_C_LABEL(trap)
+	call	_C_LABEL(ast)
 	jmp	2b
 #ifndef DIAGNOSTIC
 1:	INTRFASTEXIT
@@ -309,19 +306,35 @@ calltrap:
 /* XXX See comment in locore.s */
 #define	XINTR(name,num)		Xintr_##name##num
 
+	.globl _C_LABEL(x2apic_eoi)
+_C_LABEL(x2apic_eoi):
+	pushq   %rax
+	pushq   %rcx
+	pushq   %rdx
+	mov     $MSR_X2APIC_EOI,%ecx
+	mov     $0,%eax
+	mov     $0,%edx
+	wrmsr
+	popq    %rdx
+	popq    %rcx
+	popq    %rax
+	ret
+
 #if NLAPIC > 0
 #ifdef MULTIPROCESSOR
 IDTVEC(recurse_lapic_ipi)
 	INTR_RECURSE_HWFRAME
 	pushq	$0		
-	pushq	$T_ASTFLT
+	subq	$8,%rsp			/* unused __if_trapno */
 	INTRENTRY		
 	jmp	1f
 IDTVEC(intr_lapic_ipi)
 	pushq	$0		
-	pushq	$T_ASTFLT
+	subq	$8,%rsp			/* unused __if_trapno */
 	INTRENTRY		
+	CODEPATCH_START
 	movl	$0,_C_LABEL(local_apic)+LAPIC_EOI
+	CODEPATCH_END(CPTAG_EOI)
 	movl	CPUVAR(ILEVEL),%ebx
 	cmpl	$IPL_IPI,%ebx
 	jae	2f
@@ -337,7 +350,6 @@ IDTVEC(resume_lapic_ipi)
 2:
 	movq	$(1 << LIR_IPI),%rax
 	orq	%rax,CPUVAR(IPENDING)
-	sti
 	INTRFASTEXIT
 
 IDTVEC(ipi_invltlb)
@@ -396,14 +408,16 @@ IDTVEC(ipi_invlrange)
 IDTVEC(recurse_lapic_ltimer)
 	INTR_RECURSE_HWFRAME
 	pushq	$0		
-	pushq	$T_ASTFLT
+	subq	$8,%rsp			/* unused __if_trapno */
 	INTRENTRY		
 	jmp	1f
 IDTVEC(intr_lapic_ltimer)
 	pushq	$0		
-	pushq	$T_ASTFLT
+	subq	$8,%rsp			/* unused __if_trapno */
 	INTRENTRY		
+	CODEPATCH_START
 	movl	$0,_C_LABEL(local_apic)+LAPIC_EOI
+	CODEPATCH_END(CPTAG_EOI)
 	movl	CPUVAR(ILEVEL),%ebx
 	cmpl	$IPL_CLOCK,%ebx
 	jae	2f
@@ -420,7 +434,6 @@ IDTVEC(resume_lapic_ltimer)
 2:
 	movq	$(1 << LIR_TIMER),%rax
 	orq	%rax,CPUVAR(IPENDING)
-	sti
 	INTRFASTEXIT
 #endif /* NLAPIC > 0 */
 
@@ -436,8 +449,7 @@ IDTVEC(resume_lapic_ltimer)
 #define	INTRSTUB(name, num, early_ack, late_ack, mask, unmask, level_mask) \
 IDTVEC(recurse_##name##num)						;\
 	INTR_RECURSE_HWFRAME						;\
-	subq	$8,%rsp							;\
-	pushq	$T_ASTFLT		/* trap # for doing ASTs */	;\
+	subq	$16,%rsp		/* space for __if_{trapno,err} */;\
 	INTRENTRY							;\
 IDTVEC(resume_##name##num)						\
 	movq	$IREENT_MAGIC,TF_ERR(%rsp)				;\
@@ -447,18 +459,18 @@ IDTVEC(resume_##name##num)						\
 	jmp	1f							;\
 IDTVEC(intr_##name##num)						;\
 	pushq	$0			/* dummy error code */		;\
-	pushq	$T_ASTFLT		/* trap # for doing ASTs */	;\
+	subq	$8,%rsp			/* unused __if_trapno */	;\
 	INTRENTRY							;\
 	movq	CPUVAR(ISOURCES) + (num) * 8, %r14			;\
 	mask(num)			/* mask it in hardware */	;\
 	early_ack(num)			/* and allow other intrs */	;\
+	incl	_C_LABEL(uvmexp)+V_INTR	/* statistical info */		;\
 	testq	%r14,%r14						;\
 	jz	9f			/* stray */			;\
 	movl	IS_MAXLEVEL(%r14),%ebx					;\
 	movl	CPUVAR(ILEVEL),%r13d					;\
 	cmpl	%ebx,%r13d						;\
 	jae	10f			/* currently masked; hold it */	;\
-	incl	_C_LABEL(uvmexp)+V_INTR	/* statistical info */		;\
 1:									\
 	pushq	%r13							;\
 	movl	%ebx,CPUVAR(ILEVEL)					;\
@@ -504,12 +516,10 @@ IDTVEC(intr_##name##num)						;\
 	orq	%rax,CPUVAR(IPENDING)					;\
 	level_mask(num)							;\
 	late_ack(num)							;\
-	sti								;\
 	INTRFASTEXIT							;\
 9:									\
 	unmask(num)							;\
 	late_ack(num)							;\
-	sti								;\
 	INTRFASTEXIT
 
 #define ICUADDR IO_ICU1
@@ -992,15 +1002,8 @@ IDTVEC(softtty)
 	movl	$IPL_SOFTTTY, CPUVAR(ILEVEL)
 	sti
 	incl	CPUVAR(IDEPTH)
-#ifdef MULTIPROCESSOR
-	call	_C_LABEL(x86_softintlock)
-#endif
-	movq	CPUVAR(ISOURCES) + SIR_TTY * 8, %r12
 	movl	$X86_SOFTINTR_SOFTTTY,%edi
 	call	_C_LABEL(softintr_dispatch)
-#ifdef MULTIPROCESSOR	
-	call	_C_LABEL(x86_softintunlock)
-#endif
 	decl	CPUVAR(IDEPTH)
 	jmp	*%r13
 
@@ -1008,15 +1011,8 @@ IDTVEC(softnet)
 	movl	$IPL_SOFTNET, CPUVAR(ILEVEL)
 	sti
 	incl	CPUVAR(IDEPTH)
-#ifdef MULTIPROCESSOR	
-	call	_C_LABEL(x86_softintlock)
-#endif
-	movq	CPUVAR(ISOURCES) + SIR_NET * 8, %r12
 	movl	$X86_SOFTINTR_SOFTNET,%edi
 	call	_C_LABEL(softintr_dispatch)
-#ifdef MULTIPROCESSOR	
-	call	_C_LABEL(x86_softintunlock)	
-#endif
 	decl	CPUVAR(IDEPTH)
 	jmp	*%r13
 
@@ -1024,15 +1020,7 @@ IDTVEC(softclock)
 	movl	$IPL_SOFTCLOCK, CPUVAR(ILEVEL)
 	sti
 	incl	CPUVAR(IDEPTH)
-#ifdef MULTIPROCESSOR	
-	call	_C_LABEL(x86_softintlock)
-#endif
-	movq	CPUVAR(ISOURCES) + SIR_CLOCK * 8, %r12
-
 	movl	$X86_SOFTINTR_SOFTCLOCK,%edi
 	call	_C_LABEL(softintr_dispatch)
-#ifdef MULTIPROCESSOR	
-	call	_C_LABEL(x86_softintunlock)		
-#endif
 	decl	CPUVAR(IDEPTH)
 	jmp	*%r13

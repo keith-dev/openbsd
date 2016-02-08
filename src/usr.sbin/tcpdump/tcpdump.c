@@ -1,4 +1,4 @@
-/*	$OpenBSD: tcpdump.c,v 1.68 2015/02/09 23:00:14 deraadt Exp $	*/
+/*	$OpenBSD: tcpdump.c,v 1.72 2015/07/14 20:23:40 deraadt Exp $	*/
 
 /*
  * Copyright (c) 1988, 1989, 1990, 1991, 1992, 1993, 1994, 1995, 1996, 1997
@@ -42,6 +42,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include <limits.h>
 #include <ctype.h>
 #include <err.h>
 #include <errno.h>
@@ -198,10 +199,6 @@ pcap_list_linktypes(pcap_t *p)
 	}
 }
 
-extern int optind;
-extern int opterr;
-extern char *optarg;
-
 int
 main(int argc, char **argv)
 {
@@ -213,6 +210,7 @@ main(int argc, char **argv)
 	struct bpf_program *fcode;
 	u_char *pcap_userdata;
 	u_int dirfilt = 0, dlt = (u_int) -1;
+	const char *errstr;
 
 	if ((cp = strrchr(argv[0], '/')) != NULL)
 		program_name = cp + 1;
@@ -239,9 +237,10 @@ main(int argc, char **argv)
 			break;
 
 		case 'c':
-			cnt = atoi(optarg);
-			if (cnt <= 0)
-				error("invalid packet count %s", optarg);
+			cnt = strtonum(optarg, 1, INT_MAX, &errstr);
+			if (errstr)
+				error("invalid packet count %s: %s",
+				    optarg, errstr);
 			break;
 
 		case 'D':
@@ -311,9 +310,9 @@ main(int argc, char **argv)
 			break;
 
 		case 's':
-			snaplen = atoi(optarg);
-			if (snaplen <= 0)
-				error("invalid snaplen %s", optarg);
+			snaplen = strtonum(optarg, 1, INT_MAX, &errstr);
+			if (errstr)
+				error("invalid snaplen %s: %s", optarg, errstr);
 			break;
 
 		case 'S':
@@ -516,7 +515,7 @@ cleanup(int signo)
 	/* Can't print the summary if reading from a savefile */
 	(void)write(STDERR_FILENO, "\n", 1);
 	if (pd != NULL && pcap_file(pd) == NULL) {
-		if (pcap_stats(pd, &stat) < 0) {
+		if (priv_pcap_stats(&stat) < 0) {
 			(void)snprintf(buf, sizeof buf,
 			    "pcap_stats: %s\n", pcap_geterr(pd));
 			write(STDERR_FILENO, buf, strlen(buf));
@@ -604,8 +603,10 @@ default_print_ascii(const u_char *cp, unsigned int length)
 	printf("\n");
 	for (i = 0; i < length; i++) {
 		c = cp[i];
-		c = isprint(c) || isspace(c) ? c : '.';
-		putchar(c);
+		if (isprint(c) || c == '\t' || c == '\n' || c == '\r')
+			putchar(c);
+		else
+			putchar('.');
 	}
 }
 

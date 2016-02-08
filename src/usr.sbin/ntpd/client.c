@@ -1,4 +1,4 @@
-/*	$OpenBSD: client.c,v 1.100 2015/02/12 01:54:57 reyk Exp $ */
+/*	$OpenBSD: client.c,v 1.102 2015/07/18 00:53:44 bcook Exp $ */
 
 /*
  * Copyright (c) 2003, 2004 Henning Brauer <henning@openbsd.org>
@@ -215,7 +215,7 @@ client_dispatch(struct ntp_peer *p, u_int8_t settime)
 	double			 T1, T2, T3, T4;
 	time_t			 interval;
 
-	bzero(&somsg, sizeof(somsg));
+	memset(&somsg, 0, sizeof(somsg));
 	iov[0].iov_base = buf;
 	iov[0].iov_len = sizeof(buf);
 	somsg.msg_iov = iov;
@@ -258,7 +258,7 @@ client_dispatch(struct ntp_peer *p, u_int8_t settime)
 		if (cmsg->cmsg_level == SOL_SOCKET &&
 		    cmsg->cmsg_type == SCM_TIMESTAMP) {
 			memcpy(&tv, CMSG_DATA(cmsg), sizeof(tv));
-			T4 += tv.tv_sec + JAN_1970 + 1.0e-6 * tv.tv_usec;
+			T4 += gettime_from_timeval(&tv);
 			break;
 		}
 	}

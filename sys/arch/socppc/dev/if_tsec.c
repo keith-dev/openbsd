@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_tsec.c,v 1.34 2014/12/22 02:26:53 tedu Exp $	*/
+/*	$OpenBSD: if_tsec.c,v 1.37 2015/06/24 09:40:53 mpi Exp $	*/
 
 /*
  * Copyright (c) 2008 Mark Kettenis
@@ -253,6 +253,7 @@ struct tsec_softc {
 #define sc_lladdr	sc_ac.ac_enaddr
 	struct mii_data		sc_mii;
 #define sc_media	sc_mii.mii_media
+	int			sc_link;
 
 	struct tsec_dmamem	*sc_txring;
 	struct tsec_buf		*sc_txbuf;
@@ -521,6 +522,8 @@ tsec_start(struct ifnet *ifp)
 		return;
 	if (IFQ_IS_EMPTY(&ifp->if_snd))
 		return;
+	if (!sc->sc_link)
+		return;
 
 	idx = sc->sc_tx_prod;
 	while ((sc->sc_txdesc[idx].td_status & TSEC_TX_TO1) == 0) {
@@ -688,15 +691,21 @@ tsec_mii_statchg(struct device *self)
 	case IFM_1000_CX:
 	case IFM_1000_T:
 		maccfg2 |= TSEC_MACCFG2_IF_GMII;
+		sc->sc_link = 1;
 		break;
 	case IFM_100_TX:
 		ecntrl |= TSEC_ECNTRL_R100M;
 		maccfg2 |= TSEC_MACCFG2_IF_MII;
+		sc->sc_link = 1;
 		break;
 	case IFM_10_T:
 		ecntrl &= ~TSEC_ECNTRL_R100M;
 		maccfg2 |= TSEC_MACCFG2_IF_MII;
+		sc->sc_link = 1;
 		break;
+	default:
+		sc->sc_link = 0;
+		return;
 	}
 
 	if ((sc->sc_mii.mii_media_active & IFM_GMASK) == IFM_FDX)
@@ -838,6 +847,7 @@ tsec_rx_proc(struct tsec_softc *sc)
 	struct ifnet *ifp = &sc->sc_ac.ac_if;
 	struct tsec_desc *rxd;
 	struct tsec_buf *rxb;
+	struct mbuf_list ml = MBUF_LIST_INITIALIZER();
 	struct mbuf *m;
 	int idx, len;
 
@@ -870,17 +880,9 @@ tsec_rx_proc(struct tsec_softc *sc)
 
 		m = rxb->tb_m;
 		rxb->tb_m = NULL;
-		m->m_pkthdr.rcvif = ifp;
 		m->m_pkthdr.len = m->m_len = len;
 
-		ifp->if_ipackets++;
-
-#if NBPFILTER > 0
-		if (ifp->if_bpf)
-			bpf_mtap(ifp->if_bpf, m, BPF_DIRECTION_IN);
-#endif
-
-		ether_input_mbuf(ifp, m);
+		ml_enqueue(&ml, m);
 
 		if_rxr_put(&sc->sc_rx_ring, 1);
 		if (rxd->td_status & TSEC_RX_W)
@@ -894,6 +896,8 @@ tsec_rx_proc(struct tsec_softc *sc)
 	bus_dmamap_sync(sc->sc_dmat, TSEC_DMA_MAP(sc->sc_rxring), 0,
 	    TSEC_DMA_LEN(sc->sc_rxring),
 	    BUS_DMASYNC_PREREAD | BUS_DMASYNC_PREWRITE);
+
+	if_input(ifp, &ml);
 }
 
 void

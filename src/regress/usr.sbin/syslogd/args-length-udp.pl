@@ -9,6 +9,7 @@
 use strict;
 use warnings;
 use Socket;
+use constant MAX_UDPMSG => 1180;
 
 our %args = (
     client => {
@@ -23,13 +24,13 @@ our %args = (
 	options => ["-u"],
 	loggrep => {
 	    get_charlog() => 5,
-	}
+	},
     },
     server => {
 	# >>> <13>Jan 31 00:10:11 0123456789ABC...lmn
 	loggrep => {
 	    get_charlog() => 5,
-	    qr/^>>> .{1180}$/ => 5,
+	    qr/^>>> .{19} /.generate_chars(MAX_UDPMSG-20).qr/$/ => 5,
 	},
     },
     file => {

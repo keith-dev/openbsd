@@ -1,4 +1,4 @@
-/*	$OpenBSD: iked.h,v 1.83 2015/01/16 06:39:58 deraadt Exp $	*/
+/*	$OpenBSD: iked.h,v 1.86 2015/07/07 19:13:31 markus Exp $	*/
 
 /*
  * Copyright (c) 2010-2013 Reyk Floeter <reyk@openbsd.org>
@@ -25,8 +25,8 @@
 #include "types.h"
 #include "dh.h"
 
-#ifndef _IKED_H
-#define _IKED_H
+#ifndef IKED_H
+#define IKED_H
 
 /*
  * Common IKEv1/IKEv2 header
@@ -215,7 +215,7 @@ struct iked_cfg {
 	} cfg;
 };
 
-RB_HEAD(iked_sapeers, iked_sa);
+TAILQ_HEAD(iked_sapeers, iked_sa);
 
 struct iked_lifetime {
 	u_int64_t			 lt_bytes;
@@ -363,7 +363,6 @@ struct iked_sa {
 #define IKED_SATYPE_LOCAL		 1		/* Local SA */
 
 	struct iked_addr		 sa_peer;
-	struct iked_addr		 sa_polpeer;
 	struct iked_addr		 sa_local;
 	int				 sa_fd;
 
@@ -407,6 +406,7 @@ struct iked_sa {
 	struct ibuf			*sa_1stmsg;	/* for initiator AUTH */
 	struct ibuf			*sa_2ndmsg;	/* for responder AUTH */
 	struct iked_id			 sa_localauth;	/* local AUTH message */
+	int				 sa_sigsha2;	/* use SHA2 for signatures */
 
 	struct iked_id			 sa_iid;	/* initiator id */
 	struct iked_id			 sa_rid;	/* responder id */
@@ -442,7 +442,7 @@ struct iked_sa {
 	struct iked_msgqueue		 sa_responses;	/* response queue */
 #define IKED_RESPONSE_TIMEOUT		 120		/* 2 minutes */
 
-	RB_ENTRY(iked_sa)		 sa_peer_entry;
+	TAILQ_ENTRY(iked_sa)		 sa_peer_entry;
 	RB_ENTRY(iked_sa)		 sa_entry;
 
 	struct iked_addr		*sa_addrpool;	/* address from pool */
@@ -676,19 +676,16 @@ struct iked_sa *
 void	 sa_free(struct iked *, struct iked_sa *);
 void	 sa_free_flows(struct iked *, struct iked_saflows *);
 int	 sa_address(struct iked_sa *, struct iked_addr *,
-	    struct sockaddr_storage *, int);
+	    struct sockaddr_storage *);
 void	 childsa_free(struct iked_childsa *);
 struct iked_childsa *
 	 childsa_lookup(struct iked_sa *, u_int64_t, u_int8_t);
 void	 flow_free(struct iked_flow *);
 struct iked_sa *
 	 sa_lookup(struct iked *, u_int64_t, u_int64_t, u_int);
-struct iked_sa *
-	 sa_peer_lookup(struct iked_policy *, struct sockaddr_storage *);
 struct iked_user *
 	 user_lookup(struct iked *, const char *);
 RB_PROTOTYPE(iked_sas, iked_sa, sa_entry, sa_cmp);
-RB_PROTOTYPE(iked_sapeers, iked_sa, sa_peer_entry, sa_peer_cmp);
 RB_PROTOTYPE(iked_addrpool, iked_sa, sa_addrpool_entry, sa_addrpool_cmp);
 RB_PROTOTYPE(iked_users, iked_user, user_entry, user_cmp);
 RB_PROTOTYPE(iked_activesas, iked_childsa, csa_node, childsa_cmp);
@@ -732,7 +729,7 @@ struct iked_dsa *
 struct ibuf *
 	 dsa_setkey(struct iked_dsa *, void *, size_t, u_int8_t);
 void	 dsa_free(struct iked_dsa *);
-int	 dsa_init(struct iked_dsa *);
+int	 dsa_init(struct iked_dsa *, const void *, size_t);
 size_t	 dsa_length(struct iked_dsa *);
 int	 dsa_update(struct iked_dsa *, const void *, size_t);
 ssize_t	 dsa_sign_final(struct iked_dsa *, void *, size_t);
@@ -965,4 +962,4 @@ size_t	 keylength_xf(u_int, u_int, u_int);
 size_t	 noncelength_xf(u_int, u_int);
 int	 cmdline_symset(char *);
 
-#endif /* _IKED_H */
+#endif /* IKED_H */

@@ -1,4 +1,4 @@
-#	$OpenBSD: files.macppc,v 1.80 2015/01/20 17:08:35 mpi Exp $
+#	$OpenBSD: files.macppc,v 1.83 2015/06/26 11:15:32 dlg Exp $
 
 #
 # macppc-specific configuration info
@@ -11,7 +11,6 @@ file	arch/macppc/macppc/autoconf.c
 file	arch/macppc/macppc/clock.c
 file	arch/macppc/macppc/conf.c
 file	arch/macppc/macppc/disksubr.c			disk
-file	arch/macppc/macppc/lock_machdep.c		multiprocessor
 file	arch/macppc/macppc/machdep.c
 file	arch/macppc/macppc/wscons_machdep.c
 file	arch/macppc/macppc/mem.c
@@ -86,7 +85,12 @@ include "dev/wscons/files.wscons"
 
 #file	arch/macppc/pci/bandit.c			pci
 
-#PCI-Host bridge chipsets
+# HT bridge
+device  hpb {} : pcibus
+attach	hpb at pci
+file	arch/macppc/pci/hpb.c				hpb needs-flag
+
+# PCI-Host bridge chipsets
 device  pchb: agpbus
 attach	pchb at pci
 file	arch/macppc/pci/pchb.c				pchb
@@ -162,7 +166,7 @@ device	abtn
 attach	abtn at adb
 file	arch/macppc/dev/abtn.c				abtn
 
-device	awacs: audio, auconv, mulaw
+device	awacs: audio
 attach	awacs at macobio
 file	arch/macppc/dev/awacs.c				awacs
 
@@ -192,27 +196,27 @@ attach	xlights at macobio
 file	arch/macppc/dev/xlights.c			xlights
 
 # snapper audio
-device	snapper: audio, auconv, mulaw, i2s
+device	snapper: audio, i2s
 attach	snapper at macobio
 file	arch/macppc/dev/snapper.c			snapper
 
 # tumbler audio
-device	tumbler: audio, auconv, mulaw, i2s
+device	tumbler: audio, i2s
 attach	tumbler at macobio
 file	arch/macppc/dev/tumbler.c			tumbler
 
 # onyx audio
-device	onyx: audio, auconv, mulaw, i2s
+device	onyx: audio, i2s
 attach	onyx at macobio
 file	arch/macppc/dev/onyx.c				onyx
 
 # aoa audio
-device	aoa: audio, auconv, mulaw, i2s
+device	aoa: audio, i2s
 attach	aoa at macobio
 file	arch/macppc/dev/aoa.c				aoa
 
 # daca audio
-device	daca: audio, auconv, mulaw, i2s
+device	daca: audio, i2s
 attach	daca at macobio
 file	arch/macppc/dev/daca.c				daca
 

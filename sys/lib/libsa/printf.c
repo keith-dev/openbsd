@@ -1,4 +1,4 @@
-/*	$OpenBSD: printf.c,v 1.25 2012/12/05 23:20:23 deraadt Exp $	*/
+/*	$OpenBSD: printf.c,v 1.27 2015/06/14 10:55:50 miod Exp $	*/
 /*	$NetBSD: printf.c,v 1.10 1996/11/30 04:19:21 gwr Exp $	*/
 
 /*-
@@ -228,7 +228,6 @@ reswitch:	switch (ch = *fmt++) {
 			put(ch);
 		}
 	}
-	va_end(ap);
 }
 
 void

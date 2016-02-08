@@ -1,8 +1,10 @@
 #!/bin/ksh
-#	$OpenBSD: install.sh,v 1.259 2015/01/02 22:38:50 rpe Exp $
+#	$OpenBSD: install.sh,v 1.269 2015/07/19 21:05:41 rpe Exp $
 #	$NetBSD: install.sh,v 1.5.2.8 1996/08/27 18:15:05 gwr Exp $
 #
-# Copyright (c) 1997-2009 Todd Miller, Theo de Raadt, Ken Westerback
+# Copyright (c) 1997-2015 Todd Miller, Theo de Raadt, Ken Westerback
+# Copyright (c) 2015, Robert Peichaer <rpe@openbsd.org>
+#
 # All rights reserved.
 #
 # Redistribution and use in source and binary forms, with or without
@@ -55,11 +57,52 @@
 
 #	OpenBSD installation script.
 
-# install.sub needs to know the MODE
+# install.sub needs to know the MODE.
 MODE=install
 
-# include common subroutines and initialization code
+# Include common subroutines and initialization code.
 . install.sub
+
+# Ask for/set the system hostname and add the hostname specific siteXX set. 
+ask_until "System hostname? (short form, e.g. 'foo')" "$(hostname -s)"
+[[ ${resp%%.*} != $(hostname -s) ]] && hostname $resp
+THESETS="$THESETS site$VERSION-$(hostname -s).tgz"
+
+echo
+
+# Configure the network.
+donetconfig
+
+# If there's network connectivity, fetch list of mirror servers and installer
+# choices from previous runs.
+((NIFS != 0)) && startcgiinfo
+
+echo
+while :; do
+	askpassword "Password for root account?"
+	_rootpass="$_password"
+	[[ -n "$_password" ]] && break
+	echo "The root password must be set."
+done
+
+# Ask for the root user public ssh key during autoinstall.
+rootkey=
+$AUTO && ask "Public ssh key for root account?" none &&
+	[[ $resp != none ]] && rootkey=$resp
+
+# Ask user about daemon startup on boot, X Window usage and console setup.
+questions
+
+# Gather information for setting up the initial user account.
+user_setup
+ask_root_sshd
+
+# Set TZ variable based on zonefile and user selection.
+set_timezone /var/tzlist
+echo
+
+# Get information about ROOTDISK, etc.
+get_rootinfo
 
 DISK=
 DISKS_DONE=
@@ -69,8 +112,7 @@ _fsent=
 # Remove traces of previous install attempt.
 rm -f /tmp/fstab*
 
-ask_yn "Use DUIDs rather than device names in fstab?" yes && FSTABFLAG=-F
-
+# Configure the disk(s).
 while :; do
 	DISKS_DONE=$(addel "$DISK" $DISKS_DONE)
 	_DKDEVS=$(rmel "$DISK" $_DKDEVS)
@@ -95,8 +137,7 @@ while :; do
 	# Deal with disklabels, including editing the root disklabel
 	# and labeling additional disks. This is machine-dependent since
 	# some platforms may not be able to provide this functionality.
-	# /tmp/fstab.$DISK is created here with 'disklabel -f' or
-	# 'disklabel -F' depending on the value of $FSTABFLAG.
+	# /tmp/fstab.$DISK is created here with 'disklabel -F'.
 	rm -f /tmp/*.$DISK
 	md_prep_disklabel $DISK || { DISK=; continue; }
 
@@ -186,15 +227,20 @@ for _mp in $(bsort $_fsent); do
 	echo " 1 2"
 done >>/tmp/fstab
 
+# Create a skeletal /etc/fstab which is usable for the installation process.
 munge_fstab
+
+# Use async options for faster mounts of the filesystems.
 mount_fs "-o async"
 
+# Feed the random pool some entropy before we read from it.
 feed_random
 
+# Ask the user for locations, and install whatever sets the user selected.
 install_sets
 
 # If we did not succeed at setting TZ yet, we try again
-# using the timezone names extracted from the base set
+# using the timezone names extracted from the base set.
 if [[ -z $TZ ]]; then
 	(cd /mnt/usr/share/zoneinfo
 		ls -1dF $(tar cvf /dev/null [A-Za-y]*) >/mnt/tmp/tzlist )
@@ -204,20 +250,20 @@ if [[ -z $TZ ]]; then
 fi
 
 # If we got a timestamp from the cgi server, and that time diffs by more
-# than 120 seconds, ask if the user wants to adjust the time
+# than 120 seconds, ask if the user wants to adjust the time.
 if _time=$(http_time) && _now=$(date +%s) &&
 	(( _now - _time > 120 || _time - _now > 120 )); then
 	_tz=/mnt/usr/share/zoneinfo/$TZ
 	if ask_yn "Time appears wrong.  Set to '$(TZ=$_tz date -r "$(http_time)")'?" yes; then
 		# We do not need to specify TZ below since both date
-		# invocations use the same one
+		# invocations use the same one.
 		date $(date -r "$(http_time)" "+%Y%m%d%H%M.%S") >/dev/null
-		# N.B. This will screw up SECONDS
+		# N.B. This will screw up SECONDS.
 	fi
 fi
 
 # If we managed to talk to the cgi server before, tell it what
-# location we used... so it can perform magic next time
+# location we used... so it can perform magic next time.
 if [[ -s $HTTP_LIST ]]; then
 	_i=
 	[[ -n $INSTALL ]] && _i="install=$INSTALL"
@@ -276,8 +322,10 @@ done)
 
 echo "done."
 
+# Apply configuration settings based on information from questions().
 apply
 
+# Create user account based on information from user_setup().
 if [[ -n $user ]]; then
 	_encr=$(encr_pwd "$userpass")
 	_home=/home/$user
@@ -293,24 +341,22 @@ if [[ -n $user ]]; then
 		sed "s,^To: root\$,To: ${username} <${user}>," \
 		/mnt/var/mail/root > /mnt/var/mail/$user )
 	chown -R 1000:1000 $_home /mnt/var/mail/$user
-	echo "1,s@wheel:.:0:root\$@wheel:\*:0:root,${user}@
-w
-q" | ed /mnt/etc/group 2>/dev/null
+	sed -i -e "s@^wheel:.:0:root\$@wheel:\*:0:root,${user}@" \
+		/mnt/etc/group 2>/dev/null
 
-	# Add public ssh key to authorized_keys
+	# During autoinstall, add public ssh key to authorized_keys.
 	[[ -n "$userkey" ]] &&
 		print -r -- "$userkey" >> $_home/.ssh/authorized_keys
 fi
 
+# Store root password and rebuild password database.
 if [[ -n "$_rootpass" ]]; then
 	_encr=$(encr_pwd "$_rootpass")
-	echo "1,s@^root::@root:${_encr}:@
-w
-q" | ed /mnt/etc/master.passwd 2>/dev/null
+	sed -i -e "s@^root::@root:${_encr}:@" /mnt/etc/master.passwd 2>/dev/null
 fi
-/mnt/usr/sbin/pwd_mkdb -p -d /mnt/etc /etc/master.passwd
+pwd_mkdb -p -d /mnt/etc /etc/master.passwd
 
-# Add public ssh key to authorized_keys
+# During autoinstall, add root user's public ssh key to authorized_keys.
 [[ -n "$rootkey" ]] && (
 	umask 077
 	mkdir /mnt/root/.ssh

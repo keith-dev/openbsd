@@ -1,4 +1,4 @@
-#	$OpenBSD: GENERIC,v 1.794 2015/02/06 20:05:48 stsp Exp $
+#	$OpenBSD: GENERIC,v 1.802 2015/07/23 00:38:06 deraadt Exp $
 #
 # For further information on compiling OpenBSD kernels, see the config(8)
 # man page.
@@ -42,9 +42,11 @@ acpi0	at bios?
 mpbios0	at bios0
 pcibios0 at bios0 flags 0x0000	# use 0x30 for a total verbose
 ipmi0	at mainbus? disable	# IPMI
-vmt0	at mainbus?		# VMware Tools
 esm0	at mainbus? 		# Dell Embedded Server Management
 amdmsr0	at mainbus?		# MSR access for AMD Geode LX CPUs with GP
+
+pvbus0	at mainbus0		# Paravirtual device bus
+vmt0	at pvbus?		# VMware Tools
 
 acpitimer*	at acpi?
 acpihpet*	at acpi?
@@ -229,6 +231,7 @@ usb*	at ohci?
 # USB devices
 uhub*	at usb?			# USB Hubs
 uhub*	at uhub?		# USB Hubs
+ualea*	at uhub?		# Araneus Alea II TRNG
 umodem*	at uhub?		# USB Modems/Serial
 ucom*	at umodem?
 uvisor*	at uhub?		# Handspring Visor
@@ -297,7 +300,7 @@ url*	at uhub?		# Realtek RTL8150L based adapters
 wi*	at uhub?		# WaveLAN IEEE 802.11DS
 udsbr*	at uhub?		# D-Link DSB-R100 radio
 radio*	at udsbr?		# USB radio
-uberry*	at uhub?		# Research In Motion Blackberry
+uberry*	at uhub?		# Research In Motion BlackBerry
 ugen*	at uhub?		# USB Generic driver
 uath*	at uhub?		# Atheros AR5005UG/AR5005UX
 ural*	at uhub?		# Ralink RT2500USB
@@ -371,7 +374,6 @@ agp*		at sisagp?	# AGP bridges
 agp*		at viaagp?	# AGP bridges
 #agp*		at mmuagp?	
 
-#option		DRMDEBUG
 inteldrm*	at vga?		# Intel i915, i945 DRM driver
 drm0		at inteldrm? console 1
 drm*		at inteldrm?
@@ -533,8 +535,6 @@ le0	at isa? port 0x360 irq 15 drq 6		# IsoLan, NE2100, and DEPCA
 ex0	at isa? port 0x320 irq 5		# Intel EtherExpress PRO/10
 sm0	at isa? port 0x300 irq 10		# SMC 91cxx-based ethernet
 ep*	at eisa?			# 3C579 ethernet
-lmc*	at pci?				# Lan Media Corp SSI/T3/HSSI
-san*	at pci?				# Sangoma PCI AFT card
 le*	at isapnp?
 pcn*	at pci?				# AMD PCnet-PCI Ethernet
 de*	at pci?				# DC21X4X-based ethernet
@@ -625,6 +625,7 @@ ral*	at pci?				# Ralink RT2500/RT2501/RT2600
 ral*	at cardbus?			# Ralink RT2500/RT2501/RT2600
 rtw*	at pci?				# Realtek 8180
 rtw*	at cardbus?			# Realtek 8180
+rtwn*	at pci?				# Realtek 8188CE/8192CE
 pgt*	at pci?				# Prism54 (only full-mac varients)
 pgt*	at cardbus?			# Prism54 (only full-mac varients)
 malo*	at pci?				# Marvell Libertas

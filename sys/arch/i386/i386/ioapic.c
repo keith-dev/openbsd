@@ -1,4 +1,4 @@
-/*	$OpenBSD: ioapic.c,v 1.34 2014/12/09 06:58:28 doug Exp $	*/
+/*	$OpenBSD: ioapic.c,v 1.36 2015/07/13 17:45:01 mikeb Exp $	*/
 /* 	$NetBSD: ioapic.c,v 1.7 2003/07/14 22:32:40 lukem Exp $	*/
 
 /*-
@@ -585,10 +585,6 @@ ioapic_enable(void)
 		outb(IMCR_DATA, IMCR_APIC);
 	}
 
-#if 0 /* XXX Will be removed when we have intrsource. */
-	isa_nodefaultirq();
-#endif
-			
 	for (sc = ioapics; sc != NULL; sc = sc->sc_next) {
 		if (mp_verbose)
 			printf("%s: enabling\n", sc->sc_pic.pic_name);
@@ -784,13 +780,14 @@ apic_intr_disestablish(void *arg)
 	unsigned int ioapic = APIC_IRQ_APIC(irq);
 	unsigned int intr = APIC_IRQ_PIN(irq);
 	struct ioapic_softc *sc = ioapic_find(ioapic);
-	struct ioapic_pin *pin = &sc->sc_pins[intr];
+	struct ioapic_pin *pin;
 	struct intrhand **p, *q;
 	int minlevel, maxlevel;
 	extern void intr_calculatemasks(void); /* XXX */
 
 	if (sc == NULL)
 		panic("apic_intr_disestablish: unknown ioapic %d", ioapic);
+	pin = &sc->sc_pins[intr];
 
 	if (intr >= sc->sc_apic_sz)
 		panic("apic_intr_disestablish: bogus irq");

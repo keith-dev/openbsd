@@ -1,4 +1,4 @@
-/*	$OpenBSD: smc83c170.c,v 1.18 2014/12/22 02:28:51 tedu Exp $	*/
+/*	$OpenBSD: smc83c170.c,v 1.21 2015/06/24 09:40:54 mpi Exp $	*/
 /*	$NetBSD: smc83c170.c,v 1.59 2005/02/27 00:27:02 perry Exp $	*/
 
 /*-
@@ -50,7 +50,6 @@
 #include <sys/device.h>
 
 #include <net/if.h>
-#include <net/if_dl.h>
 
 #include <netinet/in.h>
 #include <netinet/if_ether.h>
@@ -589,12 +588,12 @@ epic_intr(void *arg)
 	struct epic_rxdesc *rxd;
 	struct epic_txdesc *txd;
 	struct epic_descsoft *ds;
+	struct mbuf_list ml = MBUF_LIST_INITIALIZER();
 	struct mbuf *m;
 	u_int32_t intstat, rxstatus, txstatus;
 	int i, claimed = 0;
 	u_int len;
 
- top:
 	/*
 	 * Get the interrupt status from the EPIC.
 	 */
@@ -704,21 +703,9 @@ epic_intr(void *arg)
 				}
 			}
 
-			m->m_pkthdr.rcvif = ifp;
 			m->m_pkthdr.len = m->m_len = len;
 
-#if NBPFILTER > 0
-			/*
-			 * Pass this up to any BPF listeners, but only
-			 * pass it up the stack if its for us.
-			 */
-			if (ifp->if_bpf)
-				bpf_mtap(ifp->if_bpf, m, BPF_DIRECTION_IN);
-#endif
-
-			/* Pass it on. */
-			ether_input_mbuf(ifp, m);
-			ifp->if_ipackets++;
+			ml_enqueue(&ml, m);
 		}
 
 		/* Update the receive pointer. */
@@ -740,6 +727,8 @@ epic_intr(void *arg)
 			    COMMAND_RXQUEUED | COMMAND_START_RX);
 		}
 	}
+
+	if_input(ifp, &ml);
 
 	/*
 	 * Check for transmission complete interrupts.
@@ -831,10 +820,7 @@ epic_intr(void *arg)
 		(void) epic_init(ifp);
 	}
 
-	/*
-	 * Check for more interrupts.
-	 */
-	goto top;
+	return (claimed);
 }
 
 /*

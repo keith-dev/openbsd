@@ -1,4 +1,4 @@
-/*	$OpenBSD: bgpctl.c,v 1.177 2015/02/11 23:47:25 phessler Exp $ */
+/*	$OpenBSD: bgpctl.c,v 1.180 2015/07/19 06:57:27 guenther Exp $ */
 
 /*
  * Copyright (c) 2003 Henning Brauer <henning@openbsd.org>
@@ -95,9 +95,6 @@ void		 show_mrt_msg(struct mrt_bgp_msg *, void *);
 void		 mrt_to_bgpd_addr(union mrt_addr *, struct bgpd_addr *);
 void		 network_bulk(struct parse_result *);
 const char	*print_auth_method(enum auth_method);
-
-/* parser.c */
-int		 parse_prefix(const char *, struct bgpd_addr *, u_int8_t *);
 
 struct imsgbuf	*ibuf;
 struct mrt_parser show_mrt = { show_mrt_dump, show_mrt_state, show_mrt_msg };
@@ -901,7 +898,8 @@ fmt_timeframe_core(time_t t)
 void
 show_fib_head(void)
 {
-	printf("flags: * = valid, B = BGP, C = Connected, S = Static\n");
+	printf("flags: "
+	    "* = valid, B = BGP, C = Connected, S = Static, D = Dynamic\n");
 	printf("       N = BGP Nexthop reachable via this route\n");
 	printf("       r = reject route, b = blackhole route\n\n");
 	printf("flags prio destination          gateway\n");
@@ -934,6 +932,8 @@ show_fib_flags(u_int16_t flags)
 		printf("C");
 	else if (flags & F_STATIC)
 		printf("S");
+	else if (flags & F_DYNAMIC)
+		printf("D");
 	else
 		printf(" ");
 
@@ -1692,7 +1692,7 @@ network_bulk(struct parse_result *res)
 				if (strchr(b, '#') != NULL)
 					break;
 				bzero(&net, sizeof(net));
-				parse_prefix(b, &h, &len);
+				parse_prefix(b, strlen(b), &h, &len);
 				memcpy(&net.prefix, &h, sizeof(h));
 				net.prefixlen = len;
 
@@ -1917,9 +1917,13 @@ log_warn(const char *emsg, ...)
 }
 
 void
-fatal(const char *emsg)
+fatal(const char *emsg, ...)
 {
-	err(1, "%s", emsg);
+	va_list	 ap;
+
+	va_start(ap, emsg);
+	verr(1, emsg, ap);
+	va_end(ap);
 }
 
 void

@@ -1,4 +1,4 @@
-/*	$OpenBSD: ip_ether.c,v 1.70 2014/12/19 17:14:40 tedu Exp $  */
+/*	$OpenBSD: ip_ether.c,v 1.78 2015/07/31 15:38:10 rzalamena Exp $  */
 /*
  * The author of this code is Angelos D. Keromytis (kermit@adk.gr)
  *
@@ -129,30 +129,30 @@ etherip_input(struct mbuf *m, ...)
 
 #ifdef INET6
 int
-etherip_input6(struct mbuf **m, int *offp, int proto)
+etherip_input6(struct mbuf **mp, int *offp, int proto)
 {
 	switch (proto) {
 #if NBRIDGE > 0
 	case IPPROTO_ETHERIP:
 		/* If we do not accept EtherIP explicitly, drop. */
-		if (!etherip_allow && ((*m)->m_flags & (M_AUTH|M_CONF)) == 0) {
+		if (!etherip_allow && ((*mp)->m_flags & (M_AUTH|M_CONF)) == 0) {
 			DPRINTF(("etherip_input6(): dropped due to policy\n"));
 			etheripstat.etherip_pdrops++;
-			m_freem(*m);
+			m_freem(*mp);
 			return IPPROTO_DONE;
 		}
-		etherip_decap(*m, *offp);
+		etherip_decap(*mp, *offp);
 		return IPPROTO_DONE;
 #endif
 #ifdef MPLS
 	case IPPROTO_MPLS:
-		mplsip_decap(*m, *offp);
+		mplsip_decap(*mp, *offp);
 		return IPPROTO_DONE;
 #endif
 	default:
 		DPRINTF(("etherip_input6(): dropped, unhandled protocol\n"));
 		etheripstat.etherip_pdrops++;
-		m_freem(*m);
+		m_freem(*mp);
 		return IPPROTO_DONE;
 	}
 }
@@ -162,7 +162,6 @@ etherip_input6(struct mbuf **m, int *offp, int proto)
 void
 etherip_decap(struct mbuf *m, int iphlen)
 {
-	struct ether_header eh;
 	struct etherip_header eip;
 	struct gif_softc *sc;
 	int s;
@@ -229,26 +228,13 @@ etherip_decap(struct mbuf *m, int iphlen)
 	/* Statistics */
 	etheripstat.etherip_ibytes += m->m_pkthdr.len;
 
-	/* Copy ethernet header */
-	m_copydata(m, 0, sizeof(eh), (void *) &eh);
-
 	/* Reset the flags based on the inner packet */
-	m->m_flags &= ~(M_BCAST|M_MCAST|M_AUTH|M_CONF);
-	if (eh.ether_dhost[0] & 1) {
-		if (memcmp(etherbroadcastaddr, eh.ether_dhost,
-		    sizeof(etherbroadcastaddr)) == 0)
-			m->m_flags |= M_BCAST;
-		else
-			m->m_flags |= M_MCAST;
-	}
+	m->m_flags &= ~(M_BCAST|M_MCAST|M_AUTH|M_CONF|M_PROTO1);
 
 #if NBPFILTER > 0
 	if (sc->gif_if.if_bpf)
 		bpf_mtap_af(sc->gif_if.if_bpf, AF_LINK, m, BPF_DIRECTION_IN);
 #endif
-
-	/* Trim the beginning of the mbuf, to remove the ethernet header. */
-	m_adj(m, sizeof(struct ether_header));
 
 	/*
 	 * Tap the packet off here for a bridge. bridge_input() returns
@@ -258,13 +244,13 @@ etherip_decap(struct mbuf *m, int iphlen)
 #if NPF > 0
 	pf_pkt_addr_changed(m);
 #endif
-	m->m_pkthdr.rcvif = &sc->gif_if;
+	m->m_pkthdr.ph_ifidx = sc->gif_if.if_index;
 	m->m_pkthdr.ph_rtableid = sc->gif_if.if_rdomain;
 	if (m->m_flags & (M_BCAST|M_MCAST))
 		sc->gif_if.if_imcasts++;
 
 	s = splnet();
-	m = bridge_input(&sc->gif_if, &eh, m);
+	m = bridge_input(&sc->gif_if, m);
 	splx(s);
 	if (m == NULL)
 		return;
@@ -280,8 +266,6 @@ void
 mplsip_decap(struct mbuf *m, int iphlen)
 {
 	struct gif_softc *sc;
-	struct ifqueue *ifq;
-	int s;
 
 	etheripstat.etherip_ipackets++;
 
@@ -324,28 +308,13 @@ mplsip_decap(struct mbuf *m, int iphlen)
 		bpf_mtap_af(sc->gif_if.if_bpf, AF_MPLS, m, BPF_DIRECTION_IN);
 #endif
 
-	m->m_pkthdr.rcvif = &sc->gif_if;
+	m->m_pkthdr.ph_ifidx = sc->gif_if.if_index;
 	m->m_pkthdr.ph_rtableid = sc->gif_if.if_rdomain;
 #if NPF > 0
 	pf_pkt_addr_changed(m);
 #endif
 
-	ifq = &mplsintrq;
-	s = splnet();
-	if (IF_QFULL(ifq)) {
-		IF_DROP(ifq);
-		m_freem(m);
-		etheripstat.etherip_qfull++;
-		splx(s);
-
-		DPRINTF(("mplsip_input(): packet dropped because of full "
-		    "queue\n"));
-		return;
-	}
-	IF_ENQUEUE(ifq, m);
-	schednetisr(NETISR_MPLS);
-	splx(s);
-	return;
+	mpls_input(&sc->gif_if, m);
 }
 #endif
 

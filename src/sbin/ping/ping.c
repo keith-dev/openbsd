@@ -1,4 +1,4 @@
-/*	$OpenBSD: ping.c,v 1.114 2015/01/16 06:40:00 deraadt Exp $	*/
+/*	$OpenBSD: ping.c,v 1.124 2015/08/05 12:46:12 deraadt Exp $	*/
 /*	$NetBSD: ping.c,v 1.20 1995/08/11 22:37:58 cgd Exp $	*/
 
 /*
@@ -73,9 +73,18 @@
 #include <limits.h>
 #include <stdlib.h>
 
-struct tv32 {
-	u_int	tv32_sec;
-	u_int	tv32_usec;
+#include <siphash.h>
+#define KEYSTREAM_ONLY
+#include <crypto/chacha_private.h>
+
+struct tv64 {
+	u_int64_t	tv64_sec;
+	u_int64_t	tv64_nsec;
+};
+
+struct payload {
+	struct tv64	tv64;
+	u_int8_t	mac[SIPHASH_DIGEST_LENGTH];
 };
 
 #define	DEFDATALEN	(64 - 8)		/* default data length */
@@ -145,6 +154,7 @@ struct itimerval interstr;	/* interval structure for use with setitimer */
 
 /* timing */
 int timing;			/* flag to do timing */
+int timinginfo;
 unsigned int maxwait = MAXWAIT_DEFAULT;	/* max seconds to wait for response */
 quad_t tmin = 999999999;	/* minimum round trip time in usec */
 quad_t tmax = 0;		/* maximum round trip time in usec */
@@ -152,6 +162,10 @@ quad_t tsum = 0;		/* sum of all times in usec, for doing average */
 quad_t tsumsq = 0;		/* sum of all times squared, for std. dev. */
 
 int bufspace = IP_MAXPACKET;
+
+struct tv64 tv64_offset;
+SIPHASH_KEY mac_key;
+chacha_ctx fill_stream;
 
 void fill(char *, char *);
 void catcher(int signo);
@@ -178,7 +192,7 @@ main(int argc, char *argv[])
 	struct hostent *hp;
 	struct sockaddr_in *to;
 	struct in_addr saddr;
-	int ch, i, optval = 1, packlen, preload, maxsize, df = 0, tos = 0;
+	int ch, optval = 1, packlen, preload, maxsize, df = 0, tos = 0;
 	u_char *datap, *packet, ttl = MAXTTL, loop = 1;
 	char *target, hnamebuf[HOST_NAME_MAX+1];
 	char rspace[3 + 4 * NROUTES + 1];	/* record route space */
@@ -196,13 +210,12 @@ main(int argc, char *argv[])
 		err(1, "setresuid");
 
 	preload = 0;
-	datap = &outpack[8 + sizeof(struct tv32)];
+	datap = &outpack[8 + sizeof(struct payload)];
 	while ((ch = getopt(argc, argv,
 	    "DEI:LRS:c:defi:l:np:qs:T:t:V:vw:")) != -1)
 		switch(ch) {
 		case 'c':
-			npackets = (unsigned long)strtonum(optarg, 0,
-			    INT_MAX, &errstr);
+			npackets = strtonum(optarg, 0, INT_MAX, &errstr);
 			if (errstr)
 				errx(1,
 				    "number of packets to transmit is %s: %s",
@@ -260,7 +273,7 @@ main(int argc, char *argv[])
 		case 'l':
 			if (getuid())
 				errx(1, "%s", strerror(EPERM));
-			preload = (int)strtonum(optarg, 1, INT_MAX, &errstr);
+			preload = strtonum(optarg, 1, INT_MAX, &errstr);
 			if (errstr)
 				errx(1, "preload value is %s: %s",
 				    errstr, optarg);
@@ -279,7 +292,7 @@ main(int argc, char *argv[])
 			options |= F_RROUTE;
 			break;
 		case 's':		/* size of packet to send */
-			datalen = (unsigned int)strtonum(optarg, 0, MAXPAYLOAD, &errstr);
+			datalen = strtonum(optarg, 0, MAXPAYLOAD, &errstr);
 			if (errstr)
 				errx(1, "packet size is %s: %s",
 				    errstr, optarg);
@@ -295,21 +308,19 @@ main(int argc, char *argv[])
 			    optarg[1] == 'x')
 				tos = (int)strtol(optarg, NULL, 16);
 			else
-				tos = (int)strtonum(optarg, 0, 255,
-				    &errstr);
+				tos = strtonum(optarg, 0, 255, &errstr);
 			if (tos < 0 || tos > 255 || errstr || errno)
 				errx(1, "illegal tos value %s", optarg);
 			break;
 #endif	/* SMALL */
 		case 't':
 			options |= F_TTL;
-			ttl = (u_char)strtonum(optarg, 1, 255, &errstr);
+			ttl = strtonum(optarg, 0, MAXTTL, &errstr);
 			if (errstr)
 				errx(1, "ttl value is %s: %s", errstr, optarg);
 			break;
 		case 'V':
-			rtableid = (unsigned int)strtonum(optarg, 0,
-			    RT_TABLEID_MAX, &errstr);
+			rtableid = strtonum(optarg, 0, RT_TABLEID_MAX, &errstr);
 			if (errstr)
 				errx(1, "rtable value is %s: %s",
 				    errstr, optarg);
@@ -322,8 +333,7 @@ main(int argc, char *argv[])
 			options |= F_VERBOSE;
 			break;
 		case 'w':
-			maxwait = (unsigned int)strtonum(optarg, 1, INT_MAX,
-			    &errstr);
+			maxwait = strtonum(optarg, 1, INT_MAX, &errstr);
 			if (errstr)
 				errx(1, "maxwait value is %s: %s",
 				    errstr, optarg);
@@ -336,6 +346,9 @@ main(int argc, char *argv[])
 
 	if (argc != 1)
 		usage();
+
+	arc4random_buf(&tv64_offset, sizeof(tv64_offset));
+	arc4random_buf(&mac_key, sizeof(mac_key));
 
 	memset(&interstr, 0, sizeof(interstr));
 
@@ -367,14 +380,16 @@ main(int argc, char *argv[])
 	if ((options & F_FLOOD) && (options & (F_AUD_RECV | F_AUD_MISS)))
 		warnx("No audible output for flood pings");
 
-	if (datalen >= sizeof(struct tv32))	/* can we time transfer */
+	if (datalen >= sizeof(struct payload))	/* can we time transfer */
 		timing = 1;
 	packlen = datalen + MAXIPLEN + MAXICMPLEN;
 	if (!(packet = malloc((size_t)packlen)))
 		err(1, "malloc");
-	if (!(options & F_PINGFILLED))
-		for (i = sizeof(struct tv32); i < datalen; ++i)
-			*datap++ = i;
+	if (!(options & F_PINGFILLED) && datalen > sizeof(struct payload)) {
+		u_int8_t key[32];
+		arc4random_buf(key, sizeof(key));
+		chacha_keysetup(&fill_stream, key, sizeof(key) * 8, 0);
+	}
 
 	ident = getpid() & 0xFFFF;
 
@@ -614,13 +629,35 @@ pinger(void)
 	CLR(ntohs(icp->icmp_seq) % mx_dup_ck);
 
 	if (timing) {
-		struct timeval tv;
-		struct tv32 tv32;
+		SIPHASH_CTX ctx;
+		struct timespec ts;
+		struct payload payload;
+		struct tv64 *tv64 = &payload.tv64;
 
-		(void)gettimeofday(&tv, (struct timezone *)NULL);
-		tv32.tv32_sec = htonl(tv.tv_sec);	/* XXX 2038 */
-		tv32.tv32_usec = htonl(tv.tv_usec);
-		memcpy(&outpack[8], &tv32, sizeof tv32);
+		if (clock_gettime(CLOCK_MONOTONIC, &ts) == -1)
+			err(1, "clock_gettime(CLOCK_MONOTONIC)");
+		tv64->tv64_sec = htobe64((u_int64_t)ts.tv_sec +
+		    tv64_offset.tv64_sec);
+		tv64->tv64_nsec = htobe64((u_int64_t)ts.tv_nsec +
+		    tv64_offset.tv64_nsec);
+
+		SipHash24_Init(&ctx, &mac_key);
+		SipHash24_Update(&ctx, tv64, sizeof(*tv64));
+		SipHash24_Update(&ctx, &ident, sizeof(ident));
+		SipHash24_Update(&ctx, &icp->icmp_seq, sizeof(icp->icmp_seq));
+		SipHash24_Update(&ctx, &whereto.sin_addr,
+		    sizeof(whereto.sin_addr));
+		SipHash24_Final(&payload.mac, &ctx);
+
+		memcpy(&outpack[8], &payload, sizeof(payload));
+
+		if (!(options & F_PINGFILLED) && datalen >= sizeof(payload)) {
+			u_int8_t *dp = &outpack[8 + sizeof(payload)];
+
+			chacha_ivsetup(&fill_stream, payload.mac);
+			chacha_encrypt_bytes(&fill_stream, dp, dp,
+			    datalen - sizeof(payload));
+		}
 	}
 
 	cc = datalen + 8;			/* skips ICMP portion */
@@ -670,12 +707,14 @@ pr_pack(char *buf, int cc, struct sockaddr_in *from)
 	static int old_rrlen;
 	static char old_rr[MAX_IPOPTLEN];
 	struct ip *ip, *ip2;
-	struct timeval tv, tp;
+	struct timespec ts, tp;
 	char *pkttime;
 	quad_t triptime = 0;
 	int hlen, hlen2, dupflag;
+	struct payload payload;
 
-	(void)gettimeofday(&tv, (struct timezone *)NULL);
+	if (clock_gettime(CLOCK_MONOTONIC, &ts) == -1)
+		err(1, "clock_gettime(CLOCK_MONOTONIC)");
 
 	/* Check the IP header */
 	ip = (struct ip *)buf;
@@ -694,16 +733,37 @@ pr_pack(char *buf, int cc, struct sockaddr_in *from)
 		if (icp->icmp_id != ident)
 			return;			/* 'Twas not our ECHO */
 		++nreceived;
-		if (timing) {
-			struct tv32 tv32;
+		if (cc >= 8 + sizeof(struct payload)) {
+			SIPHASH_CTX ctx;
+			struct tv64 *tv64 = &payload.tv64;
+			u_int8_t mac[SIPHASH_DIGEST_LENGTH];
 
 			pkttime = (char *)icp->icmp_data;
-			memcpy(&tv32, pkttime, sizeof tv32);
-			tp.tv_sec = ntohl(tv32.tv32_sec);
-			tp.tv_usec = ntohl(tv32.tv32_usec);
+			memcpy(&payload, pkttime, sizeof(payload));
 
-			timersub(&tv, &tp, &tv);
-			triptime = (tv.tv_sec * 1000000) + tv.tv_usec;
+			SipHash24_Init(&ctx, &mac_key);
+			SipHash24_Update(&ctx, tv64, sizeof(*tv64));
+			SipHash24_Update(&ctx, &ident, sizeof(ident));
+			SipHash24_Update(&ctx, &icp->icmp_seq,
+			    sizeof(icp->icmp_seq));
+			SipHash24_Update(&ctx, &whereto.sin_addr,
+			    sizeof(whereto.sin_addr));
+			SipHash24_Final(mac, &ctx);
+
+			if (timingsafe_memcmp(mac, &payload.mac,
+			    sizeof(mac)) != 0) {
+				(void)printf("signature mismatch!\n");
+				return;
+			}
+			timinginfo++;
+
+			tp.tv_sec = betoh64(tv64->tv64_sec) -
+			    tv64_offset.tv64_sec;
+			tp.tv_nsec = betoh64(tv64->tv64_nsec) -
+			    tv64_offset.tv64_nsec;
+
+			timespecsub(&ts, &tp, &ts);
+			triptime = (ts.tv_sec * 1000000) + (ts.tv_nsec / 1000);
 			tsum += triptime;
 			tsumsq += triptime * triptime;
 			if (triptime < tmin)
@@ -731,18 +791,25 @@ pr_pack(char *buf, int cc, struct sockaddr_in *from)
 			    inet_ntoa(*(struct in_addr *)&from->sin_addr.s_addr),
 			    ntohs(icp->icmp_seq));
 			(void)printf(" ttl=%d", ip->ip_ttl);
-			if (timing)
+			if (cc >= 8 + sizeof(struct payload)) {
 				(void)printf(" time=%d.%03d ms",
 				    (int)(triptime / 1000),
 				    (int)(triptime % 1000));
+			}
 			if (dupflag)
 				(void)printf(" (DUP!)");
 			/* check the data */
 			if (cc - 8 < datalen)
 				(void)printf(" (TRUNC!)");
-			cp = (u_char *)&icp->icmp_data[sizeof(struct tv32)];
-			dp = &outpack[8 + sizeof(struct tv32)];
-			for (i = 8 + sizeof(struct tv32); i < cc && i < datalen;
+			cp = (u_char *)&icp->icmp_data[sizeof(struct payload)];
+			dp = &outpack[8 + sizeof(struct payload)];
+			if (!(options & F_PINGFILLED) && datalen >= sizeof(payload)) {
+				chacha_ivsetup(&fill_stream, payload.mac);
+				chacha_encrypt_bytes(&fill_stream, dp, dp,
+				    datalen - sizeof(payload));
+			}
+			for (i = 8 + sizeof(struct payload);
+			    i < cc && i < datalen;
 			    ++i, ++cp, ++dp) {
 				if (*cp != *dp) {
 					(void)printf("\nwrong data byte #%d "
@@ -949,10 +1016,9 @@ summary(int header, int insig)
 		strlcat(buf, buft, sizeof buf);
 	}
 	strlcat(buf, "\n", sizeof buf);
-	if (nreceived && timing) {
-		quad_t num = nreceived + nrepeats;
-		quad_t avg = tsum / num;
-		quad_t dev = qsqrt(tsumsq / num - avg * avg);
+	if (timinginfo) {
+		quad_t avg = tsum / timinginfo;
+		quad_t dev = qsqrt(tsumsq / timinginfo - avg * avg);
 
 		snprintf(buft, sizeof buft, "round-trip min/avg/max/std-dev = "
 		    "%d.%03d/%d.%03d/%d.%03d/%d.%03d ms\n",
@@ -1260,7 +1326,7 @@ fill(char *bp, char *patp)
 
 	if (ii > 0)
 		for (kk = 0;
-		    kk <= MAXPAYLOAD - (8 + sizeof(struct tv32) + ii);
+		    kk <= MAXPAYLOAD - (8 + sizeof(struct payload) + ii);
 		    kk += ii)
 			for (jj = 0; jj < ii; ++jj)
 				bp[jj + kk] = pat[jj];

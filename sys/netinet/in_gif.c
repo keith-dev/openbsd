@@ -1,4 +1,4 @@
-/*	$OpenBSD: in_gif.c,v 1.42 2014/12/05 15:50:04 mpi Exp $	*/
+/*	$OpenBSD: in_gif.c,v 1.45 2015/06/16 11:09:40 mpi Exp $	*/
 /*	$KAME: in_gif.c,v 1.50 2001/01/22 07:27:16 itojun Exp $	*/
 
 /*
@@ -48,13 +48,9 @@
 #include <netinet/in_gif.h>
 #include <netinet/ip_ipsp.h>
 
-#ifdef INET6
-#include <netinet/ip6.h>
-#endif
-
 #include "gif.h"
 #include "bridge.h"
-#if NBRIDGE > 0
+#if NBRIDGE > 0 || defined(MPLS)
 #include <netinet/ip_ether.h>
 #endif
 
@@ -194,7 +190,7 @@ in_gif_input(struct mbuf *m, ...)
 	}
 
 	if (gifp) {
-		m->m_pkthdr.rcvif = gifp;
+		m->m_pkthdr.ph_ifidx = gifp->if_index;
 		m->m_pkthdr.ph_rtableid = gifp->if_rdomain;
 		gifp->if_ipackets++;
 		gifp->if_ibytes += m->m_pkthdr.len;

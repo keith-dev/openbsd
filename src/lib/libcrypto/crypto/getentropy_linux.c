@@ -1,4 +1,4 @@
-/*	$OpenBSD: getentropy_linux.c,v 1.36 2014/10/11 16:44:05 bcook Exp $	*/
+/*	$OpenBSD: getentropy_linux.c,v 1.39 2015/06/13 02:33:58 bcook Exp $	*/
 
 /*
  * Copyright (c) 2014 Theo de Raadt <deraadt@openbsd.org>
@@ -27,8 +27,8 @@
 #include <sys/ioctl.h>
 #include <sys/resource.h>
 #include <sys/syscall.h>
-#ifdef HAVE_SYS_SYSCTL_H
-#include <sys/sysctl.h>
+#ifdef SYS__sysctl
+#include <linux/sysctl.h>
 #endif
 #include <sys/statvfs.h>
 #include <sys/socket.h>
@@ -51,7 +51,6 @@
 
 #include <linux/types.h>
 #include <linux/random.h>
-#include <linux/sysctl.h>
 #ifdef HAVE_GETAUXVAL
 #include <sys/auxv.h>
 #endif

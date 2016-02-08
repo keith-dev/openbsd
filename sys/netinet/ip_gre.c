@@ -1,4 +1,4 @@
-/*      $OpenBSD: ip_gre.c,v 1.52 2014/12/19 17:14:40 tedu Exp $ */
+/*      $OpenBSD: ip_gre.c,v 1.57 2015/07/29 00:04:03 rzalamena Exp $ */
 /*	$NetBSD: ip_gre.c,v 1.9 1999/10/25 19:18:11 drochner Exp $ */
 
 /*
@@ -93,8 +93,7 @@ int
 gre_input2(struct mbuf *m, int hlen, u_char proto)
 {
 	struct greip *gip;
-	int s;
-	struct ifqueue *ifq;
+	struct niqueue *ifq;
 	struct gre_softc *sc;
 	u_short flags;
 	u_int af;
@@ -111,7 +110,7 @@ gre_input2(struct mbuf *m, int hlen, u_char proto)
 	}
 	gip = mtod(m, struct greip *);
 
-	m->m_pkthdr.rcvif = &sc->sc_if;
+	m->m_pkthdr.ph_ifidx = sc->sc_if.if_index;
 	m->m_pkthdr.ph_rtableid = sc->sc_if.if_rdomain;
 
 	sc->sc_if.if_ipackets++;
@@ -145,14 +144,22 @@ gre_input2(struct mbuf *m, int hlen, u_char proto)
 			 *   GRE tunnel is precisely a IP-in-GRE tunnel that differs
 			 *   only in its protocol number.  At least, it works for me.
 			 *
-			 *   The Internet Draft can be found if you look for
+			 *   The Internet Drafts can be found if you look for
+			 *   the following:
 			 *     draft-forster-wrec-wccp-v1-00.txt
+			 *     draft-wilson-wrec-wccp-v2-01.txt
 			 *
 			 *   So yes, we're doing a fall-through (unless, of course,
 			 *   net.inet.gre.wccp is 0).
 			 */
 			if (!gre_wccp)
 				return (0);
+			/*
+			 * For WCCPv2, additionally skip the 4 byte
+			 * redirect header.
+			 */
+			if (gre_wccp == 2) 
+				hlen += 4;
 		case ETHERTYPE_IP: /* shouldn't need a schednetisr(), as */
 			ifq = &ipintrq;          /* we are in ip_input */
 			af = AF_INET;
@@ -160,7 +167,6 @@ gre_input2(struct mbuf *m, int hlen, u_char proto)
 #ifdef INET6
 		case ETHERTYPE_IPV6:
 		        ifq = &ip6intrq;
-			schednetisr(NETISR_IPV6);
 			af = AF_INET6;
 			break;
 #endif
@@ -172,10 +178,8 @@ gre_input2(struct mbuf *m, int hlen, u_char proto)
 #ifdef MPLS
 		case ETHERTYPE_MPLS:
 		case ETHERTYPE_MPLS_MCAST:
-			ifq = &mplsintrq;
-			schednetisr(NETISR_MPLS);
-			af = AF_MPLS;
-			break;
+			mpls_input(&sc->sc_if, m);
+			return (1);
 #endif
 		default:	   /* others not yet supported */
 			return (0);
@@ -201,9 +205,7 @@ gre_input2(struct mbuf *m, int hlen, u_char proto)
 	pf_pkt_addr_changed(m);
 #endif
 
-	s = splnet();		/* possible */
-	IF_INPUT_ENQUEUE(ifq, m);
-	splx(s);
+	niq_enqueue(ifq, m);
 
 	return (1);	/* packet is done, no further processing needed */
 }
@@ -263,9 +265,8 @@ gre_mobile_input(struct mbuf *m, ...)
 {
 	struct ip *ip;
 	struct mobip_h *mip;
-	struct ifqueue *ifq;
 	struct gre_softc *sc;
-	int hlen, s;
+	int hlen;
 	va_list ap;
 	u_char osrc = 0;
 	int msiz;
@@ -293,7 +294,7 @@ gre_mobile_input(struct mbuf *m, ...)
 	ip = mtod(m, struct ip *);
 	mip = mtod(m, struct mobip_h *);
 
-	m->m_pkthdr.rcvif = &sc->sc_if;
+	m->m_pkthdr.ph_ifidx = sc->sc_if.if_index;
 
 	sc->sc_if.if_ipackets++;
 	sc->sc_if.if_ibytes += m->m_pkthdr.len;
@@ -331,16 +332,12 @@ gre_mobile_input(struct mbuf *m, ...)
 	ip->ip_sum = 0;
 	ip->ip_sum = in_cksum(m,(ip->ip_hl << 2));
 
-	ifq = &ipintrq;
-
 #if NBPFILTER > 0
         if (sc->sc_if.if_bpf)
 		bpf_mtap_af(sc->sc_if.if_bpf, AF_INET, m, BPF_DIRECTION_IN);
 #endif
 
-	s = splnet();       /* possible */
-	IF_INPUT_ENQUEUE(ifq, m);
-	splx(s);
+	niq_enqueue(&ipintrq, m);
 }
 
 /*

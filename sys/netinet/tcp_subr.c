@@ -1,4 +1,4 @@
-/*	$OpenBSD: tcp_subr.c,v 1.139 2014/12/19 17:14:40 tedu Exp $	*/
+/*	$OpenBSD: tcp_subr.c,v 1.144 2015/07/16 16:12:15 mpi Exp $	*/
 /*	$NetBSD: tcp_subr.c,v 1.22 1996/02/13 23:44:00 christos Exp $	*/
 
 /*
@@ -79,7 +79,6 @@
 #include <sys/pool.h>
 
 #include <net/route.h>
-#include <net/if.h>
 
 #include <netinet/in.h>
 #include <netinet/ip.h>
@@ -298,17 +297,14 @@ tcp_template(tp)
  * In any case the ack and sequence number of the transmitted
  * segment are as specified by the parameters.
  */
-#ifdef INET6
-/* This function looks hairy, because it was so IPv4-dependent. */
-#endif /* INET6 */
 void
 tcp_respond(struct tcpcb *tp, caddr_t template, struct tcphdr *th0,
     tcp_seq ack, tcp_seq seq, int flags, u_int rtableid)
 {
 	int tlen;
 	int win = 0;
-	struct mbuf *m = 0;
-	struct route *ro = 0;
+	struct mbuf *m = NULL;
+	struct route *ro = NULL;
 	struct tcphdr *th;
 	struct ip *ip;
 #ifdef INET6
@@ -373,10 +369,6 @@ tcp_respond(struct tcpcb *tp, caddr_t template, struct tcphdr *th0,
 		flags = TH_ACK;
 #undef xchg
 
-	m->m_len = tlen;
-	m->m_pkthdr.len = tlen;
-	m->m_pkthdr.rcvif = (struct ifnet *) 0;
-	m->m_pkthdr.csum_flags |= M_TCP_CSUM_OUT;
 	th->th_seq = htonl(seq);
 	th->th_ack = htonl(ack);
 	th->th_x2 = 0;
@@ -388,6 +380,22 @@ tcp_respond(struct tcpcb *tp, caddr_t template, struct tcphdr *th0,
 		win = TCP_MAXWIN;
 	th->th_win = htons((u_int16_t)win);
 	th->th_urp = 0;
+
+	if (tp && (tp->t_flags & (TF_REQ_TSTMP|TF_NOOPT)) == TF_REQ_TSTMP &&
+	    (flags & TH_RST) == 0 && (tp->t_flags & TF_RCVD_TSTMP)) {
+		u_int32_t *lp = (u_int32_t *)(th + 1);
+		/* Form timestamp option as shown in appendix A of RFC 1323. */
+		*lp++ = htonl(TCPOPT_TSTAMP_HDR);
+		*lp++ = htonl(tcp_now + tp->ts_modulate);
+		*lp   = htonl(tp->ts_recent);
+		tlen += TCPOLEN_TSTAMP_APPA;
+		th->th_off = (sizeof(struct tcphdr) + TCPOLEN_TSTAMP_APPA) >> 2;
+	}
+
+	m->m_len = tlen;
+	m->m_pkthdr.len = tlen;
+	m->m_pkthdr.ph_ifidx = 0;
+	m->m_pkthdr.csum_flags |= M_TCP_CSUM_OUT;
 
 	/* force routing table */
 	if (tp)
@@ -402,7 +410,7 @@ tcp_respond(struct tcpcb *tp, caddr_t template, struct tcphdr *th0,
 		ip6->ip6_nxt  = IPPROTO_TCP;
 		ip6->ip6_hlim = in6_selecthlim(tp ? tp->t_inpcb : NULL, NULL);	/*XXX*/
 		ip6->ip6_plen = tlen - sizeof(struct ip6_hdr);
-		HTONS(ip6->ip6_plen);
+		ip6->ip6_plen = htons(ip6->ip6_plen);
 		ip6_output(m, tp ? tp->t_inpcb->inp_outputopts6 : NULL,
 		    (struct route_in6 *)ro, 0, NULL, NULL,
 		    tp ? tp->t_inpcb : NULL);
@@ -1098,10 +1106,10 @@ tcp_signature(struct tdb *tdb, int af, struct mbuf *m, struct tcphdr *th,
 	th0.th_sum = 0;
 
 	if (doswap) {
-		HTONL(th0.th_seq);
-		HTONL(th0.th_ack);
-		HTONS(th0.th_win);
-		HTONS(th0.th_urp);
+		th0.th_seq = htonl(th0.th_seq);
+		th0.th_ack = htonl(th0.th_ack);
+		th0.th_win = htons(th0.th_win);
+		th0.th_urp = htons(th0.th_urp);
 	}
 	MD5Update(&ctx, (char *)&th0, sizeof(th0));
 

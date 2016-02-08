@@ -1,4 +1,4 @@
-/*	$OpenBSD: ip_mroute.c,v 1.77 2015/02/09 12:18:19 claudio Exp $	*/
+/*	$OpenBSD: ip_mroute.c,v 1.79 2015/07/15 17:55:08 deraadt Exp $	*/
 /*	$NetBSD: ip_mroute.c,v 1.85 2004/04/26 01:31:57 matt Exp $	*/
 
 /*
@@ -326,7 +326,7 @@ mfc_find(struct in_addr *o, struct in_addr *g)
  * Handle MRT setsockopt commands to modify the multicast routing tables.
  */
 int
-ip_mrouter_set(struct socket *so, int optname, struct mbuf **m)
+ip_mrouter_set(struct socket *so, int optname, struct mbuf **mp)
 {
 	int error;
 
@@ -335,36 +335,36 @@ ip_mrouter_set(struct socket *so, int optname, struct mbuf **m)
 	else
 		switch (optname) {
 		case MRT_INIT:
-			error = ip_mrouter_init(so, *m);
+			error = ip_mrouter_init(so, *mp);
 			break;
 		case MRT_DONE:
 			error = ip_mrouter_done();
 			break;
 		case MRT_ADD_VIF:
-			error = add_vif(*m);
+			error = add_vif(*mp);
 			break;
 		case MRT_DEL_VIF:
-			error = del_vif(*m);
+			error = del_vif(*mp);
 			break;
 		case MRT_ADD_MFC:
-			error = add_mfc(*m);
+			error = add_mfc(*mp);
 			break;
 		case MRT_DEL_MFC:
-			error = del_mfc(*m);
+			error = del_mfc(*mp);
 			break;
 		case MRT_ASSERT:
-			error = set_assert(*m);
+			error = set_assert(*mp);
 			break;
 		case MRT_API_CONFIG:
-			error = set_api_config(*m);
+			error = set_api_config(*mp);
 			break;
 		default:
 			error = ENOPROTOOPT;
 			break;
 		}
 
-	if (*m)
-		m_free(*m);
+	if (*mp)
+		m_free(*mp);
 	return (error);
 }
 
@@ -372,27 +372,27 @@ ip_mrouter_set(struct socket *so, int optname, struct mbuf **m)
  * Handle MRT getsockopt commands
  */
 int
-ip_mrouter_get(struct socket *so, int optname, struct mbuf **m)
+ip_mrouter_get(struct socket *so, int optname, struct mbuf **mp)
 {
 	int error;
 
 	if (so != ip_mrouter)
 		error = ENOPROTOOPT;
 	else {
-		*m = m_get(M_WAIT, MT_SOOPTS);
+		*mp = m_get(M_WAIT, MT_SOOPTS);
 
 		switch (optname) {
 		case MRT_VERSION:
-			error = get_version(*m);
+			error = get_version(*mp);
 			break;
 		case MRT_ASSERT:
-			error = get_assert(*m);
+			error = get_assert(*mp);
 			break;
 		case MRT_API_SUPPORT:
-			error = get_api_support(*m);
+			error = get_api_support(*mp);
 			break;
 		case MRT_API_CONFIG:
-			error = get_api_config(*m);
+			error = get_api_config(*mp);
 			break;
 		default:
 			error = ENOPROTOOPT;
@@ -400,7 +400,7 @@ ip_mrouter_get(struct socket *so, int optname, struct mbuf **m)
 		}
 
 		if (error)
-			m_free(*m);
+			m_free(*mp);
 	}
 
 	return (error);
@@ -1370,7 +1370,7 @@ ip_mforward(struct mbuf *m, struct ifnet *ifp)
 			splx(s);
 			return (ENOBUFS);
 		}
-		mb0 = m_copy(m, 0, M_COPYALL);
+		mb0 = m_copym(m, 0, M_COPYALL, M_NOWAIT);
 		M_PULLUP(mb0, hlen);
 		if (mb0 == NULL) {
 			free(rte, M_MRTABLE, 0);
@@ -1411,7 +1411,7 @@ ip_mforward(struct mbuf *m, struct ifnet *ifp)
 			 * Make a copy of the header to send to the user level
 			 * process
 			 */
-			mm = m_copy(m, 0, hlen);
+			mm = m_copym(m, 0, hlen, M_NOWAIT);
 			M_PULLUP(mm, hlen);
 			if (mm == NULL)
 				goto fail1;
@@ -1608,7 +1608,7 @@ ip_mdq(struct mbuf *m, struct ifnet *ifp, struct mfc *rt)
 			if (delta > ASSERT_MSG_TIME) {
 				struct igmpmsg *im;
 				int hlen = ip->ip_hl << 2;
-				struct mbuf *mm = m_copy(m, 0, hlen);
+				struct mbuf *mm = m_copym(m, 0, hlen, M_NOWAIT);
 
 				M_PULLUP(mm, hlen);
 				if (mm == NULL)
@@ -1679,7 +1679,7 @@ phyint_send(struct ip *ip, struct vif *vifp, struct mbuf *m)
 	 * the IP header is actually copied, not just referenced,
 	 * so that ip_output() only scribbles on the copy.
 	 */
-	mb_copy = m_copy(m, 0, M_COPYALL);
+	mb_copy = m_copym(m, 0, M_COPYALL, M_NOWAIT);
 	M_PULLUP(mb_copy, hlen);
 	if (mb_copy == NULL)
 		return;
@@ -1708,7 +1708,7 @@ encap_send(struct ip *ip, struct vif *vifp, struct mbuf *m)
 	mb_copy->m_pkthdr.len = len;
 	mb_copy->m_len = sizeof(multicast_encap_iphdr);
 
-	if ((mb_copy->m_next = m_copy(m, 0, M_COPYALL)) == NULL) {
+	if ((mb_copy->m_next = m_copym(m, 0, M_COPYALL, M_NOWAIT)) == NULL) {
 		m_freem(mb_copy);
 		return;
 	}
@@ -1829,7 +1829,7 @@ pim_register_prepare(struct ip *ip, struct mbuf *m)
 	 * Copy the old packet & pullup its IP header into the
 	 * new mbuf so we can modify it.
 	 */
-	mb_copy = m_copy(m, 0, M_COPYALL);
+	mb_copy = m_copym(m, 0, M_COPYALL, M_NOWAIT);
 	if (mb_copy == NULL)
 		return (NULL);
 	mb_copy = m_pullup(mb_copy, ip->ip_hl << 2);
@@ -2174,7 +2174,7 @@ pim_input(struct mbuf *m, ...)
 		 * actions (e.g., send back PIM_REGISTER_STOP).
 		 * XXX: here m->m_data points to the outer IP header.
 		 */
-		mcp = m_copy(m, 0, iphlen + PIM_REG_MINLEN);
+		mcp = m_copym(m, 0, iphlen + PIM_REG_MINLEN, M_NOWAIT);
 		if (mcp == NULL) {
 			log(LOG_ERR, "pim_input: pim register: could not "
 			    "copy register head\n");

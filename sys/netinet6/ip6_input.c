@@ -1,4 +1,4 @@
-/*	$OpenBSD: ip6_input.c,v 1.139 2015/02/09 12:23:22 claudio Exp $	*/
+/*	$OpenBSD: ip6_input.c,v 1.144 2015/07/16 21:14:21 mpi Exp $	*/
 /*	$KAME: ip6_input.c,v 1.188 2001/03/29 05:34:31 itojun Exp $	*/
 
 /*
@@ -81,7 +81,6 @@
 #include <net/if.h>
 #include <net/if_var.h>
 #include <net/if_types.h>
-#include <net/if_dl.h>
 #include <net/route.h>
 #include <net/netisr.h>
 
@@ -114,7 +113,7 @@
 #endif
 
 struct in6_ifaddrhead in6_ifaddr;
-struct ifqueue ip6intrq;
+struct niqueue ip6intrq = NIQUEUE_INITIALIZER(IFQ_MAXLEN, NETISR_IPV6);
 
 struct ip6stat ip6stat;
 
@@ -135,7 +134,7 @@ ip6_init(void)
 	int i;
 
 	pr = (struct ip6protosw *)pffindproto(PF_INET6, IPPROTO_RAW, SOCK_RAW);
-	if (pr == 0)
+	if (pr == NULL)
 		panic("ip6_init");
 	for (i = 0; i < IPPROTO_MAX; i++)
 		ip6_protox[i] = pr - inet6sw;
@@ -145,7 +144,6 @@ ip6_init(void)
 		    pr->pr_protocol && pr->pr_protocol != IPPROTO_RAW &&
 		    pr->pr_protocol < IPPROTO_MAX)
 			ip6_protox[pr->pr_protocol] = pr - inet6sw;
-	IFQ_SET_MAXLEN(&ip6intrq, IFQ_MAXLEN);
 	TAILQ_INIT(&in6_ifaddr);
 	ip6_randomid_init();
 	nd6_init();
@@ -169,17 +167,10 @@ ip6_init2(void *dummy)
 void
 ip6intr(void)
 {
-	int s;
 	struct mbuf *m;
 
-	for (;;) {
-		s = splnet();
-		IF_DEQUEUE(&ip6intrq, m);
-		splx(s);
-		if (m == NULL)
-			return;
+	while ((m = niq_dequeue(&ip6intrq)) != NULL)
 		ip6_input(m);
-	}
 }
 
 extern struct	route_in6 ip6_forward_rt;
@@ -200,7 +191,9 @@ ip6_input(struct mbuf *m)
 	int srcrt = 0, isanycast = 0;
 	u_int rtableid = 0;
 
-	ifp = m->m_pkthdr.rcvif;
+	ifp = if_get(m->m_pkthdr.ph_ifidx);
+	if (ifp == NULL)
+		goto bad;
 
 	if (m->m_flags & M_EXT) {
 		if (m->m_next)
@@ -340,7 +333,7 @@ ip6_input(struct mbuf *m)
          * Packet filter
          */
 	odst = ip6->ip6_dst;
-	if (pf_test(AF_INET6, PF_IN, ifp, &m, NULL) != PF_PASS)
+	if (pf_test(AF_INET6, PF_IN, ifp, &m) != PF_PASS)
 		goto bad;
 	if (m == NULL)
 		return;
@@ -396,7 +389,7 @@ ip6_input(struct mbuf *m)
 	 * Multicast check
 	 */
 	if (IN6_IS_ADDR_MULTICAST(&ip6->ip6_dst)) {
-	  	struct	in6_multi *in6m = 0;
+		struct	in6_multi *in6m = NULL;
 
 		/*
 		 * Make sure M_MCAST is set.  It should theoretically
@@ -437,7 +430,7 @@ ip6_input(struct mbuf *m)
 	 *  Unicast check
 	 */
 	if (ip6_forward_rt.ro_rt != NULL &&
-	    (ip6_forward_rt.ro_rt->rt_flags & RTF_UP) != 0 && 
+	    (ip6_forward_rt.ro_rt->rt_flags & RTF_UP) != 0 &&
 	    IN6_ARE_ADDR_EQUAL(&ip6->ip6_dst,
 			       &ip6_forward_rt.ro_dst.sin6_addr) &&
 	    rtableid == ip6_forward_rt.ro_tableid)
@@ -541,7 +534,7 @@ ip6_input(struct mbuf *m)
 			/*
 			 * Note that if a valid jumbo payload option is
 			 * contained, ip6_hoptops_input() must set a valid
-			 * (non-zero) payload length to the variable plen. 
+			 * (non-zero) payload length to the variable plen.
 			 */
 			ip6stat.ip6s_badoptions++;
 			in6_ifstat_inc(ifp, ifs6_in_discard);
@@ -614,7 +607,7 @@ ip6_input(struct mbuf *m)
 	} else if (!ours) {
 		ip6_forward(m, srcrt);
 		return;
-	}	
+	}
 
 	/* pf might have changed things */
 	in6_proto_cksum_out(m, NULL);
@@ -722,7 +715,7 @@ ip6_check_rh0hdr(struct mbuf *m, int *offp)
 			if (off + sizeof(opt6) > lim) {
 				/*
 				 * Packet to short to make sense, we could
-				 * reject the packet but as a router we 
+				 * reject the packet but as a router we
 				 * should not do that so forward it.
 				 */
 				return (0);
@@ -798,7 +791,7 @@ ip6_hopopts_input(u_int32_t *plenp, u_int32_t *rtalertp, struct mbuf **mp,
  * opthead + hbhlen is located in continuous memory region.
  */
 int
-ip6_process_hopopts(struct mbuf *m, u_int8_t *opthead, int hbhlen, 
+ip6_process_hopopts(struct mbuf *m, u_int8_t *opthead, int hbhlen,
     u_int32_t *rtalertp, u_int32_t *plenp)
 {
 	struct ip6_hdr *ip6;
@@ -996,8 +989,7 @@ ip6_savecontrol(struct inpcb *in6p, struct mbuf *m, struct mbuf **mp)
 		bcopy(&ip6->ip6_dst, &pi6.ipi6_addr, sizeof(struct in6_addr));
 		if (IN6_IS_SCOPE_EMBED(&pi6.ipi6_addr))
 			pi6.ipi6_addr.s6_addr16[1] = 0;
-		pi6.ipi6_ifindex =
-		    (m && m->m_pkthdr.rcvif) ? m->m_pkthdr.rcvif->if_index : 0;
+		pi6.ipi6_ifindex = m ? m->m_pkthdr.ph_ifidx : 0;
 		*mp = sbcreatecontrol((caddr_t) &pi6,
 		    sizeof(struct in6_pktinfo),
 		    IS2292(IPV6_2292PKTINFO, IPV6_PKTINFO), IPPROTO_IPV6);
@@ -1171,8 +1163,8 @@ ip6_savecontrol(struct inpcb *in6p, struct mbuf *m, struct mbuf **mp)
 			m_freem(ext);
 			ext = NULL;
 		}
-	  loopend:
-	  	;
+loopend:
+		;
 	}
 }
 
@@ -1396,7 +1388,7 @@ u_char	inet6ctlerrmap[PRC_NCMDS] = {
 int *ipv6ctl_vars[IPV6CTL_MAXID] = IPV6CTL_VARS;
 
 int
-ip6_sysctl(int *name, u_int namelen, void *oldp, size_t *oldlenp, 
+ip6_sysctl(int *name, u_int namelen, void *oldp, size_t *oldlenp,
     void *newp, size_t newlen)
 {
 #ifdef MROUTING
@@ -1453,7 +1445,7 @@ ip6_sysctl(int *name, u_int namelen, void *oldp, size_t *oldlenp,
 		}
 		return (error);
 	case IPV6CTL_IFQUEUE:
-		return (sysctl_ifq(name + 1, namelen - 1,
+		return (sysctl_niq(name + 1, namelen - 1,
 		    oldp, oldlenp, newp, newlen, &ip6intrq));
 	default:
 		if (name[0] < IPV6CTL_MAXID)

@@ -1,4 +1,4 @@
-#	$OpenBSD: sys.mk,v 1.71 2015/01/01 15:50:27 deraadt Exp $
+#	$OpenBSD: sys.mk,v 1.73 2015/06/17 22:32:08 deraadt Exp $
 #	$NetBSD: sys.mk,v 1.27 1996/04/10 05:47:19 mycroft Exp $
 #	@(#)sys.mk	5.11 (Berkeley) 3/13/91
 
@@ -10,7 +10,7 @@
 
 unix=		We run OpenBSD.
 OSMAJOR=	5
-OSMINOR=	7
+OSMINOR=	8
 OSREV=		$(OSMAJOR).$(OSMINOR)
 OSrev=		$(OSMAJOR)$(OSMINOR)
 
@@ -39,7 +39,7 @@ LINK.c?=	${CC} ${CFLAGS} ${CPPFLAGS} ${LDFLAGS}
 HOSTCC?=	cc
 
 CXX?=		c++
-CXXFLAGS?=	${CFLAGS}
+CXXFLAGS?=	-O2 ${PIPE} ${DEBUG}
 COMPILE.cc?=	${CXX} ${CXXFLAGS} ${CPPFLAGS} -c
 LINK.cc?=	${CXX} ${CXXFLAGS} ${CPPFLAGS} ${LDFLAGS}
 

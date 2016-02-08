@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_tun.c,v 1.132 2015/02/10 21:56:10 miod Exp $	*/
+/*	$OpenBSD: if_tun.c,v 1.151 2015/07/20 22:54:29 mpi Exp $	*/
 /*	$NetBSD: if_tun.c,v 1.24 1996/05/07 02:40:48 thorpej Exp $	*/
 
 /*
@@ -62,7 +62,6 @@
 #include <net/netisr.h>
 
 #include <netinet/in.h>
-#include <netinet/ip.h>
 #include <netinet/if_ether.h>
 
 #ifdef PIPEX
@@ -120,6 +119,8 @@ struct	tun_softc *tun_lookup(int);
 void	tun_wakeup(struct tun_softc *);
 int	tun_switch(struct tun_softc *, int);
 
+void	tun_ifattach(struct ifnet *, int);
+void	tun_ifdetach(struct ifnet *);
 int	tuninit(struct tun_softc *);
 int	filt_tunread(struct knote *, long);
 int	filt_tunwrite(struct knote *, long);
@@ -155,26 +156,12 @@ tun_clone_create(struct if_clone *ifc, int unit)
 	return (tun_create(ifc, unit, 0));
 }
 
-int
-tun_create(struct if_clone *ifc, int unit, int flags)
+void
+tun_ifattach(struct ifnet *ifp, int flags)
 {
-	struct tun_softc	*tp;
-	struct ifnet		*ifp;
+	struct tun_softc	*tp = ifp->if_softc;
 	int			 s;
 
-	tp = malloc(sizeof(*tp), M_DEVBUF, M_NOWAIT|M_ZERO);
-	if (!tp)
-		return (ENOMEM);
-
-	tp->tun_unit = unit;
-	tp->tun_flags = TUN_INITED|TUN_STAYUP;
-
-	ifp = &tp->tun_if;
-	snprintf(ifp->if_xname, sizeof ifp->if_xname, "%s%d", ifc->ifc_name,
-	    unit);
-	ether_fakeaddr(ifp);
-
-	ifp->if_softc = tp;
 	ifp->if_ioctl = tun_ioctl;
 	ifp->if_output = tun_output;
 	ifp->if_start = tunstart;
@@ -204,8 +191,6 @@ tun_create(struct if_clone *ifc, int unit, int flags)
 		if_attach(ifp);
 		ether_ifattach(ifp);
 	}
-	/* force output function to our function */
-	ifp->if_output = tun_output;
 
 	s = splnet();
 	LIST_INSERT_HEAD(&tun_softc_list, tp, tun_list);
@@ -214,11 +199,10 @@ tun_create(struct if_clone *ifc, int unit, int flags)
 	pipex_iface_init(&tp->pipex_iface, ifp);
 #endif
 
-	return (0);
 }
 
-int
-tun_clone_destroy(struct ifnet *ifp)
+void
+tun_ifdetach(struct ifnet *ifp)
 {
 	struct tun_softc	*tp = ifp->if_softc;
 	int			 s;
@@ -241,6 +225,38 @@ tun_clone_destroy(struct ifnet *ifp)
 		ether_ifdetach(ifp);
 
 	if_detach(ifp);
+}
+
+int
+tun_create(struct if_clone *ifc, int unit, int flags)
+{
+	struct tun_softc	*tp;
+	struct ifnet		*ifp;
+
+	tp = malloc(sizeof(*tp), M_DEVBUF, M_NOWAIT|M_ZERO);
+	if (tp == NULL)
+		return (ENOMEM);
+
+	tp->tun_unit = unit;
+	tp->tun_flags = TUN_INITED|TUN_STAYUP;
+
+	ifp = &tp->tun_if;
+	snprintf(ifp->if_xname, sizeof(ifp->if_xname), "%s%d", ifc->ifc_name,
+	    unit);
+	ether_fakeaddr(ifp);
+	ifp->if_softc = tp;
+
+	tun_ifattach(ifp, flags);
+
+	return (0);
+}
+
+int
+tun_clone_destroy(struct ifnet *ifp)
+{
+	struct tun_softc	*tp = ifp->if_softc;
+
+	tun_ifdetach(ifp);
 
 	free(tp, M_DEVBUF, 0);
 	return (0);
@@ -261,7 +277,7 @@ int
 tun_switch(struct tun_softc *tp, int flags)
 {
 	struct ifnet		*ifp = &tp->tun_if;
-	int			 unit, open, r, s;
+	int			 unit, open, s;
 	struct ifg_list		*ifgl;
 	u_int			ifgr_len;
 	char			*ifgrpnames, *p;
@@ -290,24 +306,17 @@ tun_switch(struct tun_softc *tp, int flags)
 		}
 	}
 
-	/* remove old device and ... */
-	tun_clone_destroy(ifp);
-	/* attach new interface */
-	r = tun_create(&tun_cloner, unit, flags);
+	if (ifp->if_flags & IFF_UP)
+		if_down(ifp);
 
-	if (r == 0) {
-		if ((tp = tun_lookup(unit)) == NULL) {
-			/* this should never fail */
-			r = ENXIO;
-			goto abort;
-		}
+	tun_ifdetach(ifp);
+	tun_ifattach(ifp, flags);
 
-		/* rejoin groups */
-		ifp = &tp->tun_if;
-		for (p = ifgrpnames; p && *p; p += IFNAMSIZ)
-			if_addgroup(ifp, p);
-	}
-	if (open && r == 0) {
+	/* rejoin groups */
+	for (p = ifgrpnames; p && *p; p += IFNAMSIZ)
+		if_addgroup(ifp, p);
+
+	if (open) {
 		/* already opened before ifconfig tunX link0 */
 		s = splnet();
 		tp->tun_flags |= open;
@@ -316,10 +325,10 @@ tun_switch(struct tun_softc *tp, int flags)
 		splx(s);
 		TUNDEBUG(("%s: already open\n", tp->tun_if.if_xname));
 	}
- abort:
 	if (ifgrpnames)
 		free(ifgrpnames, M_TEMP, 0);
-	return (r);
+
+	return (0);
 }
 
 /*
@@ -520,7 +529,7 @@ tun_output(struct ifnet *ifp, struct mbuf *m0, struct sockaddr *dst,
     struct rtentry *rt)
 {
 	struct tun_softc	*tp = ifp->if_softc;
-	int			 s, len, error;
+	int			 s, error;
 	u_int32_t		*af;
 
 	if ((ifp->if_flags & (IFF_UP|IFF_RUNNING)) != (IFF_UP|IFF_RUNNING)) {
@@ -538,7 +547,6 @@ tun_output(struct ifnet *ifp, struct mbuf *m0, struct sockaddr *dst,
 	}
 
 	if (tp->tun_flags & TUN_LAYER2)
-		/* call ether_output and that will call tunstart at the end */
 		return (ether_output(ifp, m0, dst, rt));
 
 	M_PREPEND(m0, sizeof(*af), M_DONTWAIT);
@@ -561,16 +569,14 @@ tun_output(struct ifnet *ifp, struct mbuf *m0, struct sockaddr *dst,
 	}
 #endif
 
-	len = m0->m_pkthdr.len;
-	IFQ_ENQUEUE(&ifp->if_snd, m0, NULL, error);
+	error = if_enqueue(ifp, m0);
+	splx(s);
+
 	if (error) {
-		splx(s);
 		ifp->if_collisions++;
 		return (error);
 	}
-	splx(s);
 	ifp->if_opackets++;
-	ifp->if_obytes += len;
 
 	tun_wakeup(tp);
 	return (0);
@@ -718,11 +724,13 @@ tunread(dev_t dev, struct uio *uio, int ioflag)
 	struct ifnet		*ifp;
 	struct mbuf		*m, *m0;
 	int			 error = 0, len, s;
+	unsigned int		ifindex;
 
 	if ((tp = tun_lookup(minor(dev))) == NULL)
 		return (ENXIO);
 
 	ifp = &tp->tun_if;
+	ifindex = ifp->if_index;
 	TUNDEBUG(("%s: read\n", ifp->if_xname));
 	if ((tp->tun_flags & TUN_READY) != TUN_READY) {
 		TUNDEBUG(("%s: not ready %#x\n", ifp->if_xname, tp->tun_flags));
@@ -733,12 +741,17 @@ tunread(dev_t dev, struct uio *uio, int ioflag)
 
 	s = splnet();
 	do {
-		while ((tp->tun_flags & TUN_READY) != TUN_READY)
+		while ((tp->tun_flags & TUN_READY) != TUN_READY) {
 			if ((error = tsleep((caddr_t)tp,
 			    (PZERO + 1)|PCATCH, "tunread", 0)) != 0) {
 				splx(s);
 				return (error);
 			}
+			if ((ifp = if_get(ifindex)) == NULL) {
+				splx(s);
+				return (ENXIO);
+			}
+		}
 		IFQ_DEQUEUE(&ifp->if_snd, m0);
 		if (m0 == NULL) {
 			if (tp->tun_flags & TUN_NBIO && ioflag & IO_NDELAY) {
@@ -751,6 +764,10 @@ tunread(dev_t dev, struct uio *uio, int ioflag)
 				splx(s);
 				return (error);
 			}
+			if ((ifp = if_get(ifindex)) == NULL) {
+				splx(s);
+				return (ENXIO);
+			}
 		}
 	} while (m0 == NULL);
 	splx(s);
@@ -759,7 +776,7 @@ tunread(dev_t dev, struct uio *uio, int ioflag)
 		len = min(uio->uio_resid, m0->m_len);
 		if (len != 0)
 			error = uiomovei(mtod(m0, caddr_t), len, uio);
-		MFREE(m0, m);
+		m = m_free(m0);
 		m0 = m;
 	}
 
@@ -781,10 +798,9 @@ tunwrite(dev_t dev, struct uio *uio, int ioflag)
 {
 	struct tun_softc	*tp;
 	struct ifnet		*ifp;
-	struct ifqueue		*ifq;
+	struct niqueue		*ifq;
 	u_int32_t		*th;
 	struct mbuf		*top, **mp, *m;
-	int			 isr;
 	int			 error=0, s, tlen, mlen;
 
 	if ((tp = tun_lookup(minor(dev))) == NULL)
@@ -848,14 +864,20 @@ tunwrite(dev_t dev, struct uio *uio, int ioflag)
 		}
 	}
 	if (error) {
-		if (top != NULL)
-			m_freem(top);
+		m_freem(top);
 		ifp->if_ierrors++;
 		return (error);
 	}
 
 	top->m_pkthdr.len = tlen;
-	top->m_pkthdr.rcvif = ifp;
+
+	if (tp->tun_flags & TUN_LAYER2) {
+		struct mbuf_list ml = MBUF_LIST_INITIALIZER();
+
+		ml_enqueue(&ml, top);
+		if_input(ifp, &ml);
+		return (0);
+	}
 
 #if NBPFILTER > 0
 	if (ifp->if_bpf) {
@@ -865,35 +887,21 @@ tunwrite(dev_t dev, struct uio *uio, int ioflag)
 	}
 #endif
 
-	if (tp->tun_flags & TUN_LAYER2) {
-		/* quirk to not add randomness from a virtual device */
-		atomic_setbits_int(&netisr, (1 << NETISR_RND_DONE));
-
-		s = splnet();
-		ether_input_mbuf(ifp, top);
-		splx(s);
-
-		ifp->if_ipackets++; /* ibytes are counted in ether_input */
-
-		return (0);
-	}
-
 	th = mtod(top, u_int32_t *);
 	/* strip the tunnel header */
 	top->m_data += sizeof(*th);
 	top->m_len  -= sizeof(*th);
 	top->m_pkthdr.len -= sizeof(*th);
 	top->m_pkthdr.ph_rtableid = ifp->if_rdomain;
+	top->m_pkthdr.ph_ifidx = ifp->if_index;
 
 	switch (ntohl(*th)) {
 	case AF_INET:
 		ifq = &ipintrq;
-		isr = NETISR_IP;
 		break;
 #ifdef INET6
 	case AF_INET6:
 		ifq = &ip6intrq;
-		isr = NETISR_IPV6;
 		break;
 #endif
 	default:
@@ -901,21 +909,14 @@ tunwrite(dev_t dev, struct uio *uio, int ioflag)
 		return (EAFNOSUPPORT);
 	}
 
-	s = splnet();
-	if (IF_QFULL(ifq)) {
-		IF_DROP(ifq);
-		splx(s);
+	if (niq_enqueue(ifq, top) != 0) {
 		ifp->if_collisions++;
-		m_freem(top);
-		if (!ifq->ifq_congestion)
-			if_congestion(ifq);
 		return (ENOBUFS);
 	}
-	IF_ENQUEUE(ifq, top);
-	schednetisr(isr);
+
 	ifp->if_ipackets++;
 	ifp->if_ibytes += top->m_pkthdr.len;
-	splx(s);
+
 	return (error);
 }
 
@@ -1081,10 +1082,6 @@ filt_tunwrite(struct knote *kn, long hint)
 	return (1);
 }
 
-/*
- * Start packet transmission on the interface.
- * In layer 2 mode this function is called from ether_output.
- */
 void
 tunstart(struct ifnet *ifp)
 {

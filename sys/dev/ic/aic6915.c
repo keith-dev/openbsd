@@ -1,4 +1,4 @@
-/*	$OpenBSD: aic6915.c,v 1.14 2014/12/22 02:28:51 tedu Exp $	*/
+/*	$OpenBSD: aic6915.c,v 1.17 2015/06/24 09:40:54 mpi Exp $	*/
 /*	$NetBSD: aic6915.c,v 1.15 2005/12/24 20:27:29 perry Exp $	*/
 
 /*-
@@ -405,6 +405,7 @@ sf_start(struct ifnet *ifp)
 			if (error) {
 				printf("%s: unable to load Tx buffer, "
 				    "error = %d\n", sc->sc_dev.dv_xname, error);
+				m_freem(m);
 				break;
 			}
 		}
@@ -714,11 +715,11 @@ sf_rxintr(struct sf_softc *sc)
 	struct ifnet *ifp = &sc->sc_arpcom.ac_if;
 	struct sf_descsoft *ds;
 	struct sf_rcd_full *rcd;
+	struct mbuf_list ml = MBUF_LIST_INITIALIZER();
 	struct mbuf *m;
 	uint32_t cqci, word0;
 	int consumer, producer, bufproducer, rxidx, len;
 
- try_again:
 	cqci = sf_funcreg_read(sc, SF_CompletionQueueConsumerIndex);
 
 	consumer = CQCI_RxCompletionQ1ConsumerIndex_get(cqci);
@@ -811,21 +812,12 @@ sf_rxintr(struct sf_softc *sc)
 		    ds->ds_dmamap->dm_mapsize, BUS_DMASYNC_PREREAD);
 #endif /* __STRICT_ALIGNMENT */
 
-		m->m_pkthdr.rcvif = ifp;
 		m->m_pkthdr.len = m->m_len = len;
 
-#if NBPFILTER > 0
-		/*
-		 * Pass this up to any BPF listeners.
-		 */
-		if (ifp->if_bpf)
-			bpf_mtap(ifp->if_bpf, m, BPF_DIRECTION_IN);
-#endif /* NBPFILTER > 0 */
-
-		/* Pass it on. */
-		ether_input_mbuf(ifp, m);
-		ifp->if_ipackets++;
+		ml_enqueue(&ml, m);
 	}
+
+	if_input(ifp, &ml);
 
 	/* Update the chip's pointers. */
 	sf_funcreg_write(sc, SF_CompletionQueueConsumerIndex,
@@ -833,9 +825,6 @@ sf_rxintr(struct sf_softc *sc)
 	     CQCI_RxCompletionQ1ConsumerIndex(consumer));
 	sf_funcreg_write(sc, SF_RxDescQueue1Ptrs,
 	    RXQ1P_RxDescQ1Producer(bufproducer));
-
-	/* Double-check for any new completions. */
-	goto try_again;
 }
 
 /*
@@ -885,8 +874,6 @@ sf_stats_update(struct sf_softc *sc)
 	ifp->if_oerrors += stats.TransmitAbortDueToExcessiveCollisions +
 	    stats.TransmitAbortDueToExcessingDeferral +
 	    stats.FramesLostDueToInternalTransmitErrors;
-
-	ifp->if_ipackets += stats.ReceiveOKFrames;
 
 	ifp->if_ierrors += stats.ReceiveCRCErrors + stats.AlignmentErrors +
 	    stats.ReceiveFramesTooLong + stats.ReceiveFramesTooShort +

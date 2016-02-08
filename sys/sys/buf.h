@@ -1,4 +1,4 @@
-/*	$OpenBSD: buf.h,v 1.97 2015/01/09 05:04:22 tedu Exp $	*/
+/*	$OpenBSD: buf.h,v 1.99 2015/07/19 16:21:11 beck Exp $	*/
 /*	$NetBSD: buf.h,v 1.25 1997/04/09 21:12:17 mycroft Exp $	*/
 
 /*
@@ -106,12 +106,6 @@ void		 bufq_done(struct bufq *, struct buf *);
 void		 bufq_quiesce(void);
 void		 bufq_restart(void);
 
-/* disksort */
-struct bufq_disksort {
-	struct buf	 *bqd_actf;
-	struct buf	**bqd_actb;
-};
-
 /* fifo */
 SIMPLEQ_HEAD(bufq_fifo_head, buf);
 struct bufq_fifo {
@@ -126,7 +120,6 @@ struct bufq_nscan {
 
 /* bufq link in struct buf */
 union bufq_data {
-	struct bufq_disksort	bufq_data_disksort;
 	struct bufq_fifo	bufq_data_fifo;
 	struct bufq_nscan	bufq_data_nscan;
 };
@@ -145,16 +138,13 @@ extern struct bio_ops {
 	int	(*io_countdeps)(struct buf *, int, int);
 } bioops;
 
-/* XXX: disksort(); */
-#define b_actf	b_bufq.bufq_data_disksort.bqd_actf
-#define b_actb	b_bufq.bufq_data_disksort.bqd_actb
-
 /* The buffer header describes an I/O operation in the kernel. */
 struct buf {
 	RB_ENTRY(buf) b_rbbufs;		/* vnode "hash" tree */
 	LIST_ENTRY(buf) b_list;		/* All allocated buffers. */
 	LIST_ENTRY(buf) b_vnbufs;	/* Buffer's associated vnode. */
 	TAILQ_ENTRY(buf) b_freelist;	/* Free list position if not active. */
+	int cache;			/* which cache are we in */
 	struct  proc *b_proc;		/* Associated proc; NULL if kernel. */
 	volatile long	b_flags;	/* B_* flags. */
 	long	b_bufsize;		/* Allocated buffer size. */
@@ -184,6 +174,17 @@ struct buf {
 	int	b_validoff;		/* Offset in buffer of valid region. */
 	int	b_validend;		/* Offset of end of valid region. */
  	struct	workhead b_dep;		/* List of filesystem dependencies. */
+};
+
+TAILQ_HEAD(bufqueue, buf);
+
+struct bufcache {
+	int64_t hotbufpages;
+	int64_t warmbufpages;
+	int64_t cachepages;
+	struct bufqueue hotqueue;
+	struct bufqueue coldqueue;
+	struct bufqueue warmqueue;
 };
 
 /* Device driver compatibility definitions. */
@@ -216,14 +217,16 @@ struct buf {
 #define	B_SCANNED	0x00100000	/* Block already pushed during sync */
 #define	B_PDAEMON	0x00200000	/* I/O started by pagedaemon */
 #define	B_RELEASED	0x00400000	/* free this buffer after its kvm */
-#define	B_WARM		0x00800000	/* keep this buffer on warmqueue */
-#define	B_COLD		0x01000000	/* keep this buffer on coldqueue */
+#define	B_WARM		0x00800000	/* buffer is or has been on the warm queue */
+#define	B_COLD		0x01000000	/* buffer is on the cold queue */
+#define	B_BC		0x02000000	/* buffer is managed by the cache */
+#define	B_DMA		0x04000000	/* buffer is DMA reachable */
 
 #define	B_BITS	"\20\001AGE\002NEEDCOMMIT\003ASYNC\004BAD\005BUSY" \
     "\006CACHE\007CALL\010DELWRI\011DONE\012EINTR\013ERROR" \
     "\014INVAL\015NOCACHE\016PHYS\017RAW\020READ" \
     "\021WANTED\022WRITEINPROG\023XXX(FORMAT)\024DEFERRED" \
-    "\025SCANNED\026DAEMON\027RELEASED"
+    "\025SCANNED\026DAEMON\027RELEASED\030WARM\031COLD\032BC\033DMA"
 
 /*
  * This structure describes a clustered I/O.  It is stored in the b_saveaddr
@@ -300,7 +303,10 @@ struct buf *incore(struct vnode *, daddr_t);
 void bufcache_take(struct buf *);
 void bufcache_release(struct buf *);
 
-struct buf *bufcache_getcleanbuf(void);
+void buf_flip_high(struct buf *);
+void buf_flip_dma(struct buf *);
+struct buf *bufcache_getcleanbuf(int);
+struct buf *bufcache_getanycleanbuf(void);
 struct buf *bufcache_getdirtybuf(void);
 
 /*

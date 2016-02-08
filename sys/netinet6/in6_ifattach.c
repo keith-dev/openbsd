@@ -1,4 +1,4 @@
-/*	$OpenBSD: in6_ifattach.c,v 1.85 2015/02/05 03:01:03 mpi Exp $	*/
+/*	$OpenBSD: in6_ifattach.c,v 1.90 2015/07/18 15:05:32 mpi Exp $	*/
 /*	$KAME: in6_ifattach.c,v 1.124 2001/07/18 08:32:51 jinmei Exp $	*/
 
 /*
@@ -46,7 +46,6 @@
 #include <net/route.h>
 
 #include <netinet/in.h>
-#include <netinet/if_ether.h>
 
 #include <netinet6/in6_var.h>
 #include <netinet/ip6.h>
@@ -295,8 +294,7 @@ in6_ifattach_linklocal(struct ifnet *ifp, struct in6_addr *ifid)
 {
 	struct in6_ifaddr *ia6;
 	struct in6_aliasreq ifra;
-	struct nd_prefix pr0;
-	int i, s, error;
+	int  s, error;
 
 	/*
 	 * configure link-local address.
@@ -395,38 +393,11 @@ in6_ifattach_linklocal(struct ifnet *ifp, struct in6_addr *ifid)
 	 * and add it to the prefix list as a never-expire prefix.
 	 * XXX: this change might affect some existing code base...
 	 */
-	bzero(&pr0, sizeof(pr0));
-	pr0.ndpr_ifp = ifp;
-	/* this should be 64 at this moment. */
-	pr0.ndpr_plen = in6_mask2len(&ifra.ifra_prefixmask.sin6_addr, NULL);
-	pr0.ndpr_mask = ifra.ifra_prefixmask.sin6_addr;
-	pr0.ndpr_prefix = ifra.ifra_addr;
-	/* apply the mask for safety. (nd6_prelist_add will apply it again) */
-	for (i = 0; i < 4; i++) {
-		pr0.ndpr_prefix.sin6_addr.s6_addr32[i] &=
-		    in6mask64.s6_addr32[i];
-	}
-	/*
-	 * Initialize parameters.  The link-local prefix must always be
-	 * on-link, and its lifetimes never expire.
-	 */
-	pr0.ndpr_raf_onlink = 1;
-	pr0.ndpr_raf_auto = 1;	/* probably meaningless */
-	pr0.ndpr_vltime = ND6_INFINITE_LIFETIME;
-	pr0.ndpr_pltime = ND6_INFINITE_LIFETIME;
-	/*
-	 * Since there is no other link-local addresses, nd6_prefix_lookup()
-	 * probably returns NULL.  However, we cannot always expect the result.
-	 * For example, if we first remove the (only) existing link-local
-	 * address, and then reconfigure another one, the prefix is still
-	 * valid with referring to the old link-local address.
-	 */
-	if (nd6_prefix_lookup(&pr0) == NULL) {
-		if ((error = nd6_prelist_add(&pr0, NULL, NULL)) != 0)
-			return (error);
-	}
+	if (nd6_prefix_add(ifp, &ifra.ifra_addr, &ifra.ifra_prefixmask,
+		&ifra.ifra_lifetime, 1) == NULL)
+		return (EINVAL);
 
-	return 0;
+	return (0);
 }
 
 int
@@ -481,7 +452,7 @@ in6_ifattach_loopback(struct ifnet *ifp)
  * when ifp == NULL, the caller is responsible for filling scopeid.
  */
 int
-in6_nigroup(struct ifnet *ifp, const char *name, int namelen, 
+in6_nigroup(struct ifnet *ifp, const char *name, int namelen,
     struct sockaddr_in6 *sa6)
 {
 	const char *p;
@@ -581,7 +552,7 @@ in6_ifattach(struct ifnet *ifp)
 	}
 
 	if (ifp->if_xflags & IFXF_AUTOCONF6)
-		nd6_rs_output_set_timo(ND6_RS_OUTPUT_QUICK_INTERVAL);
+		nd6_rs_attach(ifp);
 
 	return (0);
 }
@@ -601,9 +572,6 @@ in6_ifdetach(struct ifnet *ifp)
 	ip6_mrouter_detach(ifp);
 #endif
 
-	/* remove neighbor management table */
-	nd6_purge(ifp);
-
 	/* nuke any of IPv6 addresses we have */
 	TAILQ_FOREACH_SAFE(ifa, &ifp->if_addrlist, ifa_list, next) {
 		if (ifa->ifa_addr->sa_family != AF_INET6)
@@ -613,12 +581,8 @@ in6_ifdetach(struct ifnet *ifp)
 	}
 
 	/*
-	 * remove neighbor management table.  we call it twice just to make
-	 * sure we nuke everything.  maybe we need just one call.
-	 * XXX: since the first call did not release addresses, some prefixes
-	 * might remain.  We should call nd6_purge() again to release the
-	 * prefixes after removing all addresses above.
-	 * (Or can we just delay calling nd6_purge until at this point?)
+	 * Remove neighbor management table.  Must be called after
+	 * purging addresses.
 	 */
 	nd6_purge(ifp);
 
@@ -647,12 +611,7 @@ in6_ifdetach(struct ifnet *ifp)
 	}
 
 	if (ifp->if_xflags & IFXF_AUTOCONF6) {
-		nd6_rs_timeout_count--;
-		if (nd6_rs_timeout_count == 0)
-			timeout_del(&nd6_rs_output_timer);
-		if (RS_LHCOOKIE(ifp) != NULL)
-			hook_disestablish(ifp->if_linkstatehooks,
-			    RS_LHCOOKIE(ifp));
+		nd6_rs_detach(ifp);
 		ifp->if_xflags &= ~IFXF_AUTOCONF6;
 	}
 }

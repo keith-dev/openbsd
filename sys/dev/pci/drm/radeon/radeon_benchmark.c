@@ -1,4 +1,4 @@
-/*	$OpenBSD: radeon_benchmark.c,v 1.2 2015/02/11 07:01:37 jsg Exp $	*/
+/*	$OpenBSD: radeon_benchmark.c,v 1.5 2015/07/11 04:00:46 jsg Exp $	*/
 /*
  * Copyright 2009 Jerome Glisse.
  *
@@ -33,15 +33,7 @@
 #define RADEON_BENCHMARK_ITERATIONS 1024
 #define RADEON_BENCHMARK_COMMON_MODES_N 17
 
-extern int ticks;
-
-int	radeon_benchmark_do_move(struct radeon_device *, unsigned, uint64_t,
-	    uint64_t, int, int);
-void	radeon_benchmark_log_results(int, unsigned, unsigned int, unsigned,
-	    unsigned, char *);
-
-int
-radeon_benchmark_do_move(struct radeon_device *rdev, unsigned size,
+static int radeon_benchmark_do_move(struct radeon_device *rdev, unsigned size,
 				    uint64_t saddr, uint64_t daddr,
 				    int flag, int n)
 {
@@ -50,7 +42,7 @@ radeon_benchmark_do_move(struct radeon_device *rdev, unsigned size,
 	struct radeon_fence *fence = NULL;
 	int i, r;
 
-	start_jiffies = ticks;
+	start_jiffies = jiffies;
 	for (i = 0; i < n; i++) {
 		switch (flag) {
 		case RADEON_BENCHMARK_COPY_DMA:
@@ -74,7 +66,7 @@ radeon_benchmark_do_move(struct radeon_device *rdev, unsigned size,
 			goto exit_do_move;
 		radeon_fence_unref(&fence);
 	}
-	end_jiffies = ticks;
+	end_jiffies = jiffies;
 	r = jiffies_to_msecs(end_jiffies - start_jiffies);
 
 exit_do_move:
@@ -84,8 +76,7 @@ exit_do_move:
 }
 
 
-void
-radeon_benchmark_log_results(int n, unsigned size,
+static void radeon_benchmark_log_results(int n, unsigned size,
 					 unsigned int time,
 					 unsigned sdomain, unsigned ddomain,
 					 char *kind)

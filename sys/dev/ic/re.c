@@ -1,4 +1,4 @@
-/*	$OpenBSD: re.c,v 1.175 2015/02/09 03:09:57 dlg Exp $	*/
+/*	$OpenBSD: re.c,v 1.179 2015/06/24 09:40:54 mpi Exp $	*/
 /*	$FreeBSD: if_re.c,v 1.31 2004/09/04 07:54:05 ru Exp $	*/
 /*
  * Copyright (c) 1997, 1998-2003
@@ -128,6 +128,8 @@
 #include <net/if_media.h>
 
 #include <netinet/in.h>
+#include <netinet/ip.h>
+#include <netinet/ip_var.h>
 #include <netinet/if_ether.h>
 
 #if NVLAN > 0
@@ -171,6 +173,8 @@ void	re_watchdog(struct ifnet *);
 int	re_ifmedia_upd(struct ifnet *);
 void	re_ifmedia_sts(struct ifnet *, struct ifmediareq *);
 
+void	re_set_jumbo(struct rl_softc *);
+
 void	re_eeprom_putbyte(struct rl_softc *, int);
 void	re_eeprom_getword(struct rl_softc *, int, u_int16_t *);
 void	re_read_eeprom(struct rl_softc *, caddr_t, int, int);
@@ -194,6 +198,8 @@ void	re_setup_intr(struct rl_softc *, int, int);
 int	re_wol(struct ifnet*, int);
 #endif
 
+void	in_delayed_cksum(struct mbuf *);
+
 struct cfdriver re_cd = {
 	0, "re", DV_IFNET
 };
@@ -205,6 +211,10 @@ struct cfdriver re_cd = {
 #define EE_CLR(x)					\
 	CSR_WRITE_1(sc, RL_EECMD,			\
 		CSR_READ_1(sc, RL_EECMD) & ~x)
+
+#define RL_FRAMELEN(mtu)				\
+	(mtu + ETHER_HDR_LEN + ETHER_CRC_LEN +		\
+		ETHER_VLAN_ENCAP_LEN)
 
 static const struct re_revision {
 	u_int32_t		re_chipid;
@@ -1022,8 +1032,10 @@ re_attach(struct rl_softc *sc, const char *intrstr)
 
 	/* Create DMA maps for RX buffers */
 	for (i = 0; i < RL_RX_DESC_CNT; i++) {
-		error = bus_dmamap_create(sc->sc_dmat, MCLBYTES, 1, MCLBYTES,
-		    0, 0, &sc->rl_ldata.rl_rxsoft[i].rxs_dmamap);
+		error = bus_dmamap_create(sc->sc_dmat,
+		    RL_FRAMELEN(sc->rl_max_mtu), 1,
+		    RL_FRAMELEN(sc->rl_max_mtu), 0, 0,
+		    &sc->rl_ldata.rl_rxsoft[i].rxs_dmamap);
 		if (error) {
 			printf("%s: can't create DMA map for RX\n",
 			    sc->sc_dev.dv_xname);
@@ -1038,8 +1050,7 @@ re_attach(struct rl_softc *sc, const char *intrstr)
 	ifp->if_ioctl = re_ioctl;
 	ifp->if_start = re_start;
 	ifp->if_watchdog = re_watchdog;
-	if ((sc->rl_flags & RL_FLAG_JUMBOV2) == 0)
-		ifp->if_hardmtu = sc->rl_max_mtu;
+	ifp->if_hardmtu = sc->rl_max_mtu;
 	IFQ_SET_MAXLEN(&ifp->if_snd, RL_TX_QLEN);
 	IFQ_SET_READY(&ifp->if_snd);
 
@@ -1159,7 +1170,7 @@ re_newbuf(struct rl_softc *sc)
 	u_int32_t	cmdstat;
 	int		error, idx;
 
-	m = MCLGETI(NULL, M_DONTWAIT, NULL, MCLBYTES);
+	m = MCLGETI(NULL, M_DONTWAIT, NULL, RL_FRAMELEN(sc->rl_max_mtu));
 	if (!m)
 		return (ENOBUFS);
 
@@ -1168,7 +1179,7 @@ re_newbuf(struct rl_softc *sc)
 	 * alignment so that the frame payload is
 	 * longword aligned on strict alignment archs.
 	 */
-	m->m_len = m->m_pkthdr.len = RE_RX_DESC_BUFLEN;
+	m->m_len = m->m_pkthdr.len = RL_FRAMELEN(sc->rl_max_mtu);
 	m->m_data += RE_ETHER_ALIGN;
 
 	idx = sc->rl_ldata.rl_rx_prodidx;
@@ -1307,8 +1318,12 @@ re_rxeof(struct rl_softc *sc)
 		    BUS_DMASYNC_POSTREAD);
 		bus_dmamap_unload(sc->sc_dmat, rxs->rxs_dmamap);
 
-		if (!(rxstat & RL_RDESC_STAT_EOF)) {
-			m->m_len = RE_RX_DESC_BUFLEN;
+		if ((sc->rl_flags & RL_FLAG_JUMBOV2) != 0 &&
+		    (rxstat & (RL_RDESC_STAT_SOF | RL_RDESC_STAT_EOF)) !=
+		    (RL_RDESC_STAT_SOF | RL_RDESC_STAT_EOF)) {
+			continue;
+		} else if (!(rxstat & RL_RDESC_STAT_EOF)) {
+			m->m_len = RL_FRAMELEN(sc->rl_max_mtu);
 			if (sc->rl_head == NULL)
 				sc->rl_head = sc->rl_tail = m;
 			else {
@@ -1342,8 +1357,9 @@ re_rxeof(struct rl_softc *sc)
 		 * if total_len > 2^13-1, both _RXERRSUM and _GIANT will be
 		 * set, but if CRC is clear, it will still be a valid frame.
 		 */
-		if (rxstat & RL_RDESC_STAT_RXERRSUM && !(total_len > 8191 &&
-		    (rxstat & RL_RDESC_STAT_ERRS) == RL_RDESC_STAT_GIANT)) {
+		if ((rxstat & RL_RDESC_STAT_RXERRSUM) != 0 &&
+	 	    !(rxstat & RL_RDESC_STAT_RXERRSUM && !(total_len > 8191 &&
+		    (rxstat & RL_RDESC_STAT_ERRS) == RL_RDESC_STAT_GIANT))) {
 			ifp->if_ierrors++;
 			/*
 			 * If this is part of a multi-fragment packet,
@@ -1357,9 +1373,9 @@ re_rxeof(struct rl_softc *sc)
 		}
 
 		if (sc->rl_head != NULL) {
-			m->m_len = total_len % RE_RX_DESC_BUFLEN;
+			m->m_len = total_len % RL_FRAMELEN(sc->rl_max_mtu);
 			if (m->m_len == 0)
-				m->m_len = RE_RX_DESC_BUFLEN;
+				m->m_len = RL_FRAMELEN(sc->rl_max_mtu);
 			/* 
 			 * Special case: if there's 4 bytes or less
 			 * in this buffer, the mbuf can be discarded:
@@ -1381,8 +1397,6 @@ re_rxeof(struct rl_softc *sc)
 		} else
 			m->m_pkthdr.len = m->m_len =
 			    (total_len - ETHER_CRC_LEN);
-
-		ifp->if_ipackets++;
 
 		/* Do RX checksumming */
 
@@ -1601,7 +1615,10 @@ int
 re_encap(struct rl_softc *sc, struct mbuf *m, int *idx)
 {
 	bus_dmamap_t	map;
+	struct mbuf	*mp, mh;
 	int		error, seg, nsegs, uidx, startidx, curidx, lastidx, pad;
+	int		off;
+	struct ip	*ip;
 	struct rl_desc	*d;
 	u_int32_t	cmdstat, vlanctl = 0, csum_flags = 0;
 	struct rl_txq	*txq;
@@ -1618,6 +1635,27 @@ re_encap(struct rl_softc *sc, struct mbuf *m, int *idx)
 	 * is requested.  Otherwise, RL_TDESC_CMD_TCPCSUM/
 	 * RL_TDESC_CMD_UDPCSUM does not take affect.
 	 */
+
+	if ((sc->rl_flags & RL_FLAG_JUMBOV2) &&
+	    m->m_pkthdr.len > RL_MTU &&
+	    (m->m_pkthdr.csum_flags &
+	    (M_IPV4_CSUM_OUT|M_TCP_CSUM_OUT|M_UDP_CSUM_OUT)) != 0) {
+		mp = m_getptr(m, ETHER_HDR_LEN, &off);
+		mh.m_flags = 0;
+		mh.m_data = mtod(mp, caddr_t) + off;
+		mh.m_next = mp->m_next;
+		mh.m_pkthdr.len = mp->m_pkthdr.len - ETHER_HDR_LEN;
+		mh.m_len = mp->m_len - off;
+		ip = (struct ip *)mh.m_data;
+
+		if (m->m_pkthdr.csum_flags & M_IPV4_CSUM_OUT)
+			ip->ip_sum = in_cksum(&mh, sizeof(struct ip)); 
+		if (m->m_pkthdr.csum_flags & (M_TCP_CSUM_OUT|M_UDP_CSUM_OUT))
+			in_delayed_cksum(&mh);
+
+		m->m_pkthdr.csum_flags &=
+		    ~(M_IPV4_CSUM_OUT|M_TCP_CSUM_OUT|M_UDP_CSUM_OUT);
+	}
 
 	if ((m->m_pkthdr.csum_flags &
 	    (M_IPV4_CSUM_OUT|M_TCP_CSUM_OUT|M_UDP_CSUM_OUT)) != 0) {
@@ -1914,6 +1952,9 @@ re_init(struct ifnet *ifp)
 	    htole32(*(u_int32_t *)(&eaddr.eaddr[0])));
 	CSR_WRITE_1(sc, RL_EECMD, RL_EEMODE_OFF);
 
+	if ((sc->rl_flags & RL_FLAG_JUMBOV2) != 0)
+		re_set_jumbo(sc);
+
 	/*
 	 * For C+ mode, initialize the RX descriptors and mbufs.
 	 */
@@ -1938,11 +1979,6 @@ re_init(struct ifnet *ifp)
 		    ~0x00080000);
 
 	/*
-	 * Enable transmit and receive.
-	 */
-	CSR_WRITE_1(sc, RL_COMMAND, RL_CMD_TX_ENB|RL_CMD_RX_ENB);
-
-	/*
 	 * Set the initial TX and RX configuration.
 	 */
 	CSR_WRITE_4(sc, RL_TXCFG, RL_TXCFG_CONFIG);
@@ -1956,6 +1992,11 @@ re_init(struct ifnet *ifp)
 		rxcfg |= RL_RXCFG_EARLYOFFV2;
 	CSR_WRITE_4(sc, RL_RXCFG, rxcfg);
 
+	/*
+	 * Enable transmit and receive.
+	 */
+	CSR_WRITE_1(sc, RL_COMMAND, RL_CMD_TX_ENB | RL_CMD_RX_ENB);
+
 	/* Program promiscuous mode and multicast filters. */
 	re_iff(sc);
 
@@ -1967,17 +2008,14 @@ re_init(struct ifnet *ifp)
 
 	/* Start RX/TX process. */
 	CSR_WRITE_4(sc, RL_MISSEDPKT, 0);
-#ifdef notdef
-	/* Enable receiver and transmitter. */
-	CSR_WRITE_1(sc, RL_COMMAND, RL_CMD_TX_ENB|RL_CMD_RX_ENB);
-#endif
 
 	/*
 	 * For 8169 gigE NICs, set the max allowed RX packet
 	 * size so we can receive jumbo frames.
 	 */
 	if (sc->sc_hwrev != RL_HWREV_8139CPLUS) {
-		if (sc->rl_flags & RL_FLAG_PCIE)
+		if (sc->rl_flags & RL_FLAG_PCIE &&
+		    (sc->rl_flags & RL_FLAG_JUMBOV2) == 0)
 			CSR_WRITE_2(sc, RL_MAXRXPKTLEN, RE_RX_DESC_BUFLEN);
 		else
 			CSR_WRITE_2(sc, RL_MAXRXPKTLEN, 16383);
@@ -2062,7 +2100,7 @@ re_ioctl(struct ifnet *ifp, u_long command, caddr_t data)
 		break;
 	case SIOCGIFRXR:
 		error = if_rxr_ioctl((struct if_rxrinfo *)ifr->ifr_data,
-		    NULL, MCLBYTES, &sc->rl_ldata.rl_rx_ring);
+		    NULL, RL_FRAMELEN(sc->rl_max_mtu), &sc->rl_ldata.rl_rx_ring);
  		break;
 	default:
 		error = ether_ioctl(ifp, &sc->sc_arpcom, command, data);
@@ -2280,6 +2318,29 @@ re_config_imtype(struct rl_softc *sc, int imtype)
 		panic("%s: unknown imtype %d",
 		      sc->sc_dev.dv_xname, imtype);
 	}
+}
+
+void
+re_set_jumbo(struct rl_softc *sc)
+{
+	CSR_WRITE_1(sc, RL_EECMD, RL_EEMODE_WRITECFG);
+	CSR_WRITE_1(sc, RL_CFG3, CSR_READ_1(sc, RL_CFG3) |
+	    RL_CFG3_JUMBO_EN0);
+
+	switch (sc->sc_hwrev) {
+	case RL_HWREV_8168DP:
+		break;
+	case RL_HWREV_8168E:
+		CSR_WRITE_1(sc, RL_CFG4, CSR_READ_1(sc, RL_CFG4) |
+		    RL_CFG4_8168E_JUMBO_EN1);
+		break;
+	default:
+		CSR_WRITE_1(sc, RL_CFG4, CSR_READ_1(sc, RL_CFG4) |
+		    RL_CFG4_JUMBO_EN1);
+		break;
+	}
+
+	CSR_WRITE_1(sc, RL_EECMD, RL_EEMODE_OFF);
 }
 
 void

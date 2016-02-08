@@ -1,4 +1,4 @@
-/*	$OpenBSD: ntp.c,v 1.130 2015/03/02 10:31:17 bcook Exp $ */
+/*	$OpenBSD: ntp.c,v 1.135 2015/08/14 02:00:18 millert Exp $ */
 
 /*
  * Copyright (c) 2003, 2004 Henning Brauer <henning@openbsd.org>
@@ -35,10 +35,9 @@
 #include "ntpd.h"
 
 #define	PFD_PIPE_MAIN	0
-#define	PFD_HOTPLUG	1
-#define	PFD_PIPE_DNS	2
-#define	PFD_SOCK_CTL	3
-#define	PFD_MAX		4
+#define	PFD_PIPE_DNS	1
+#define	PFD_SOCK_CTL	2
+#define	PFD_MAX		3
 
 volatile sig_atomic_t	 ntp_quit = 0;
 volatile sig_atomic_t	 ntp_report = 0;
@@ -81,7 +80,7 @@ ntp_main(int pipe_prnt[2], int fd_ctl, struct ntpd_conf *nconf,
     struct passwd *pw)
 {
 	int			 a, b, nfds, i, j, idx_peers, timeout;
-	int			 hotplugfd, nullfd, pipe_dns[2], idx_clients;
+	int			 nullfd, pipe_dns[2], idx_clients;
 	int			 ctls;
 	u_int			 pfd_elms = 0, idx2peer_elms = 0;
 	u_int			 listener_cnt, new_cnt, sent_cnt, trial_cnt;
@@ -126,9 +125,8 @@ ntp_main(int pipe_prnt[2], int fd_ctl, struct ntpd_conf *nconf,
 	if ((se = getservbyname("ntp", "udp")) == NULL)
 		fatal("getservbyname");
 
-	if ((nullfd = open(_PATH_DEVNULL, O_RDWR, 0)) == -1)
+	if ((nullfd = open("/dev/null", O_RDWR, 0)) == -1)
 		fatal(NULL);
-	hotplugfd = sensor_hotplugfd();
 
 	close(pipe_prnt[0]);
 	if (socketpair(AF_UNIX, SOCK_STREAM, PF_UNSPEC, pipe_dns) == -1)
@@ -190,7 +188,7 @@ ntp_main(int pipe_prnt[2], int fd_ctl, struct ntpd_conf *nconf,
 	TAILQ_FOREACH(p, &conf->ntp_peers, entry)
 		client_peer_init(p);
 
-	bzero(&conf->status, sizeof(conf->status));
+	memset(&conf->status, 0, sizeof(conf->status));
 
 	conf->freq.num = 0;
 	conf->freq.samples = 0;
@@ -248,13 +246,11 @@ ntp_main(int pipe_prnt[2], int fd_ctl, struct ntpd_conf *nconf,
 			pfd_elms = new_cnt;
 		}
 
-		bzero(pfd, sizeof(*pfd) * pfd_elms);
-		bzero(idx2peer, sizeof(*idx2peer) * idx2peer_elms);
+		memset(pfd, 0, sizeof(*pfd) * pfd_elms);
+		memset(idx2peer, 0, sizeof(*idx2peer) * idx2peer_elms);
 		nextaction = getmonotime() + 3600;
 		pfd[PFD_PIPE_MAIN].fd = ibuf_main->fd;
 		pfd[PFD_PIPE_MAIN].events = POLLIN;
-		pfd[PFD_HOTPLUG].fd = hotplugfd;
-		pfd[PFD_HOTPLUG].events = POLLIN;
 		pfd[PFD_PIPE_DNS].fd = ibuf_dns->fd;
 		pfd[PFD_PIPE_DNS].events = POLLIN;
 		pfd[PFD_SOCK_CTL].fd = fd_ctl;
@@ -317,21 +313,23 @@ ntp_main(int pipe_prnt[2], int fd_ctl, struct ntpd_conf *nconf,
 		}
 		idx_clients = i;
 
-		if (last_sensor_scan == 0 ||
-		    last_sensor_scan + SENSOR_SCAN_INTERVAL < getmonotime()) {
-			sensors_cnt = sensor_scan();
-			last_sensor_scan = getmonotime();
-		}
-		if (!TAILQ_EMPTY(&conf->ntp_conf_sensors) && sensors_cnt == 0 &&
-		    nextaction > last_sensor_scan + SENSOR_SCAN_INTERVAL)
-			nextaction = last_sensor_scan + SENSOR_SCAN_INTERVAL;
-		sensors_cnt = 0;
-		TAILQ_FOREACH(s, &conf->ntp_sensors, entry) {
-			if (conf->settime && s->offsets[0].offset)
-				priv_settime(s->offsets[0].offset);
-			sensors_cnt++;
-			if (s->next > 0 && s->next < nextaction)
-				nextaction = s->next;
+		if (!TAILQ_EMPTY(&conf->ntp_conf_sensors)) {
+			if (last_sensor_scan == 0 ||
+			    last_sensor_scan + SENSOR_SCAN_INTERVAL <= getmonotime()) {
+				sensors_cnt = sensor_scan();
+				last_sensor_scan = getmonotime();
+			}
+			if (sensors_cnt == 0 &&
+			    nextaction > last_sensor_scan + SENSOR_SCAN_INTERVAL)
+				nextaction = last_sensor_scan + SENSOR_SCAN_INTERVAL;
+			sensors_cnt = 0;
+			TAILQ_FOREACH(s, &conf->ntp_sensors, entry) {
+				if (conf->settime && s->offsets[0].offset)
+					priv_settime(s->offsets[0].offset);
+				sensors_cnt++;
+				if (s->next > 0 && s->next < nextaction)
+					nextaction = s->next;
+			}
 		}
 
 		if (conf->settime &&
@@ -404,11 +402,6 @@ ntp_main(int pipe_prnt[2], int fd_ctl, struct ntpd_conf *nconf,
 		if (nfds > 0 && pfd[PFD_SOCK_CTL].revents & (POLLIN|POLLERR)) {
 			nfds--;
 			ctl_cnt += control_accept(fd_ctl);
-		}
-
-		if (nfds > 0 && pfd[PFD_HOTPLUG].revents & (POLLIN|POLLERR)) {
-			nfds--;
-			sensor_hotplugevent(hotplugfd);
 		}
 
 		for (j = PFD_MAX; nfds > 0 && j < idx_peers; j++)

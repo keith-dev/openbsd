@@ -1,4 +1,4 @@
-/*	$OpenBSD: udp_usrreq.c,v 1.196 2015/03/04 11:10:55 mpi Exp $	*/
+/*	$OpenBSD: udp_usrreq.c,v 1.204 2015/07/15 22:16:42 deraadt Exp $	*/
 /*	$NetBSD: udp_usrreq.c,v 1.28 1996/03/16 23:54:03 christos Exp $	*/
 
 /*
@@ -75,6 +75,7 @@
 #include <sys/socket.h>
 #include <sys/socketvar.h>
 #include <sys/sysctl.h>
+#include <sys/domain.h>
 
 #include <net/if.h>
 #include <net/if_var.h>
@@ -132,7 +133,6 @@ struct	inpcbtable udbtable;
 struct	udpstat udpstat;
 
 int	udp_output(struct inpcb *, struct mbuf *, struct mbuf *, struct mbuf *);
-void	udp_detach(struct inpcb *);
 void	udp_notify(struct inpcb *, int);
 
 #ifndef	UDB_INITIAL_HASH_SIZE
@@ -454,7 +454,8 @@ udp_input(struct mbuf *m, ...)
 			if (last != NULL) {
 				struct mbuf *n;
 
-				if ((n = m_copy(m, 0, M_COPYALL)) != NULL) {
+				n = m_copym(m, 0, M_COPYALL, M_NOWAIT);
+				if (n != NULL) {
 #ifdef INET6
 					if (ip6 && (last->inp_flags &
 					    IN6P_CONTROLOPTS ||
@@ -474,8 +475,7 @@ udp_input(struct mbuf *m, ...)
 					    &last->inp_socket->so_rcv,
 					    &srcsa.sa, n, opts) == 0) {
 						m_freem(n);
-						if (opts)
-							m_freem(opts);
+						m_freem(opts);
 						udpstat.udps_fullsock++;
 					} else
 						sorwakeup(last->inp_socket);
@@ -614,46 +614,9 @@ udp_input(struct mbuf *m, ...)
 		udpstat.udps_nosec++;
 		goto bad;
 	}
-
-	/* Latch SA only if the socket is connected */
-	if (inp->inp_tdb_in != tdb &&
-	    (inp->inp_socket->so_state & SS_ISCONNECTED)) {
-		if (tdb) {
-			tdb_add_inp(tdb, inp, 1);
-			if (inp->inp_ipo == NULL) {
-				inp->inp_ipo = ipsec_add_policy(inp,
-				    srcsa.sa.sa_family, IPSP_DIRECTION_OUT);
-				if (inp->inp_ipo == NULL) {
-					goto bad;
-				}
-			}
-			if (inp->inp_ipo->ipo_dstid == NULL &&
-			    tdb->tdb_srcid != NULL) {
-				inp->inp_ipo->ipo_dstid = tdb->tdb_srcid;
-				tdb->tdb_srcid->ref_count++;
-			}
-			if (inp->inp_ipsec_remotecred == NULL &&
-			    tdb->tdb_remote_cred != NULL) {
-				inp->inp_ipsec_remotecred =
-				    tdb->tdb_remote_cred;
-				tdb->tdb_remote_cred->ref_count++;
-			}
-			if (inp->inp_ipsec_remoteauth == NULL &&
-			    tdb->tdb_remote_auth != NULL) {
-				inp->inp_ipsec_remoteauth =
-				    tdb->tdb_remote_auth;
-				tdb->tdb_remote_auth->ref_count++;
-			}
-		} else { /* Just reset */
-			TAILQ_REMOVE(&inp->inp_tdb_in->tdb_inp_in, inp,
-			    inp_tdb_in_next);
-			inp->inp_tdb_in = NULL;
-		}
-	}
 	/* create ipsec options while we know that tdb cannot be modified */
-	if (tdb)
-		ipsecflowinfo = tdb->tdb_spi;
-
+	if (tdb && tdb->tdb_ids)
+		ipsecflowinfo = tdb->tdb_ids->id_flow;
 #endif /*IPSEC */
 
 	opts = NULL;
@@ -700,8 +663,7 @@ udp_input(struct mbuf *m, ...)
 		if ((session = pipex_l2tp_lookup_session(m, off)) != NULL) {
 			if ((m = pipex_l2tp_input(m, off, session,
 			    ipsecflowinfo)) == NULL) {
-				if (opts)
-					m_freem(opts);
+				m_freem(opts);
 				return; /* the packet is handled by PIPEX */
 			}
 		}
@@ -718,8 +680,7 @@ udp_input(struct mbuf *m, ...)
 	return;
 bad:
 	m_freem(m);
-	if (opts)
-		m_freem(opts);
+	m_freem(opts);
 }
 
 /*
@@ -793,7 +754,7 @@ udp6_ctlinput(int cmd, struct sockaddr *sa, u_int rdomain, void *d)
 		sa6.sin6_len = sizeof(sa6);
 		sa6.sin6_addr = *ip6cp->ip6c_finaldst;
 		/* XXX: assuming M is valid in this case */
-		sa6.sin6_scope_id = in6_addr2scopeid(m->m_pkthdr.rcvif,
+		sa6.sin6_scope_id = in6_addr2scopeid(m->m_pkthdr.ph_ifidx,
 		    ip6cp->ip6c_finaldst);
 		if (in6_embedscope(ip6cp->ip6c_finaldst, &sa6, NULL, NULL)) {
 			/* should be impossible */
@@ -826,7 +787,7 @@ udp6_ctlinput(int cmd, struct sockaddr *sa, u_int rdomain, void *d)
 		sa6_src.sin6_family = AF_INET6;
 		sa6_src.sin6_len = sizeof(sa6_src);
 		sa6_src.sin6_addr = ip6->ip6_src;
-		sa6_src.sin6_scope_id = in6_addr2scopeid(m->m_pkthdr.rcvif,
+		sa6_src.sin6_scope_id = in6_addr2scopeid(m->m_pkthdr.ph_ifidx,
 		    &ip6->ip6_src);
 		if (in6_embedscope(&sa6_src.sin6_addr, &sa6_src, NULL, NULL)) {
 			/* should be impossible */
@@ -1086,8 +1047,7 @@ udp_output(struct inpcb *inp, struct mbuf *m, struct mbuf *addr,
 		error = EHOSTUNREACH;
 
 bail:
-	if (control)
-		m_freem(control);
+	m_freem(control);
 	return (error);
 
 release:
@@ -1100,13 +1060,13 @@ int
 udp_usrreq(struct socket *so, int req, struct mbuf *m, struct mbuf *addr,
     struct mbuf *control, struct proc *p)
 {
-	struct inpcb *inp = sotoinpcb(so);
+	struct inpcb *inp;
 	int error = 0;
 	int s;
 
 	if (req == PRU_CONTROL) {
 #ifdef INET6
-		if (inp->inp_flags & INP_IPV6)
+		if (sotopf(so) == PF_INET6)
 			return (in6_control(so, (u_long)m, (caddr_t)addr,
 			    (struct ifnet *)control));
 		else
@@ -1114,10 +1074,14 @@ udp_usrreq(struct socket *so, int req, struct mbuf *m, struct mbuf *addr,
 			return (in_control(so, (u_long)m, (caddr_t)addr,
 			    (struct ifnet *)control));
 	}
+
+	s = splsoftnet();
+	inp = sotoinpcb(so);
 	if (inp == NULL && req != PRU_ATTACH) {
 		error = EINVAL;
 		goto release;
 	}
+
 	/*
 	 * Note: need to block udp_input while changing
 	 * the udp pcb queue and/or pcb addresses.
@@ -1129,13 +1093,9 @@ udp_usrreq(struct socket *so, int req, struct mbuf *m, struct mbuf *addr,
 			error = EINVAL;
 			break;
 		}
-		s = splsoftnet();
 		if ((error = soreserve(so, udp_sendspace, udp_recvspace)) ||
-		    (error = in_pcballoc(so, &udbtable))) {
-			splx(s);
+		    (error = in_pcballoc(so, &udbtable)))
 			break;
-		}
-		splx(s);
 #ifdef INET6
 		if (sotoinpcb(so)->inp_flags & INP_IPV6)
 			sotoinpcb(so)->inp_ipv6.ip6_hlim = ip6_defhlim;
@@ -1145,18 +1105,16 @@ udp_usrreq(struct socket *so, int req, struct mbuf *m, struct mbuf *addr,
 		break;
 
 	case PRU_DETACH:
-		udp_detach(inp);
+		in_pcbdetach(inp);
 		break;
 
 	case PRU_BIND:
-		s = splsoftnet();
 #ifdef INET6
 		if (inp->inp_flags & INP_IPV6)
 			error = in6_pcbbind(inp, addr, p);
 		else
 #endif
 			error = in_pcbbind(inp, addr, p);
-		splx(s);
 		break;
 
 	case PRU_LISTEN:
@@ -1170,9 +1128,7 @@ udp_usrreq(struct socket *so, int req, struct mbuf *m, struct mbuf *addr,
 				error = EISCONN;
 				break;
 			}
-			s = splsoftnet();
 			error = in6_pcbconnect(inp, addr);
-			splx(s);
 		} else
 #endif /* INET6 */
 		{
@@ -1180,9 +1136,7 @@ udp_usrreq(struct socket *so, int req, struct mbuf *m, struct mbuf *addr,
 				error = EISCONN;
 				break;
 			}
-			s = splsoftnet();
 			error = in_pcbconnect(inp, addr);
-			splx(s);
 		}
 
 		if (error == 0)
@@ -1213,7 +1167,6 @@ udp_usrreq(struct socket *so, int req, struct mbuf *m, struct mbuf *addr,
 			}
 		}
 
-		s = splsoftnet();
 #ifdef INET6
 		if (inp->inp_flags & INP_IPV6)
 			inp->inp_laddr6 = in6addr_any;
@@ -1222,7 +1175,6 @@ udp_usrreq(struct socket *so, int req, struct mbuf *m, struct mbuf *addr,
 			inp->inp_laddr.s_addr = INADDR_ANY;
 		in_pcbdisconnect(inp);
 
-		splx(s);
 		so->so_state &= ~SS_ISCONNECTED;		/* XXX */
 		break;
 
@@ -1261,16 +1213,16 @@ udp_usrreq(struct socket *so, int req, struct mbuf *m, struct mbuf *addr,
 
 #ifdef INET6
 		if (inp->inp_flags & INP_IPV6)
-			return (udp6_output(inp, m, addr, control));
+			error = udp6_output(inp, m, addr, control);
 		else
-			return (udp_output(inp, m, addr, control));
-#else
-		return (udp_output(inp, m, addr, control));
 #endif
+			error = udp_output(inp, m, addr, control);
+		splx(s);
+		return (error);
 
 	case PRU_ABORT:
 		soisdisconnected(so);
-		udp_detach(inp);
+		in_pcbdetach(inp);
 		break;
 
 	case PRU_SOCKADDR:
@@ -1299,6 +1251,7 @@ udp_usrreq(struct socket *so, int req, struct mbuf *m, struct mbuf *addr,
 		 * Perhaps Path MTU might be returned for a connected
 		 * UDP socket in this case.
 		 */
+		splx(s);
 		return (0);
 
 	case PRU_SENDOOB:
@@ -1311,6 +1264,7 @@ udp_usrreq(struct socket *so, int req, struct mbuf *m, struct mbuf *addr,
 
 	case PRU_RCVD:
 	case PRU_RCVOOB:
+		splx(s);
 		return (EOPNOTSUPP);	/* do not free mbuf's */
 
 	default:
@@ -1318,21 +1272,10 @@ udp_usrreq(struct socket *so, int req, struct mbuf *m, struct mbuf *addr,
 	}
 
 release:
-	if (control) {
-		m_freem(control);
-	}
-	if (m)
-		m_freem(m);
-	return (error);
-}
-
-void
-udp_detach(struct inpcb *inp)
-{
-	int s = splsoftnet();
-
-	in_pcbdetach(inp);
 	splx(s);
+	m_freem(control);
+	m_freem(m);
+	return (error);
 }
 
 /*

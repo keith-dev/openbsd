@@ -1,4 +1,4 @@
-/*      $OpenBSD: ata_wdc.c,v 1.47 2014/09/14 14:17:24 jsg Exp $	*/
+/*      $OpenBSD: ata_wdc.c,v 1.49 2015/04/04 13:03:44 mpi Exp $	*/
 /*	$NetBSD: ata_wdc.c,v 1.21 1999/08/09 09:43:11 bouyer Exp $	*/
 
 /*
@@ -70,7 +70,6 @@
 #include <machine/intr.h>
 #include <machine/bus.h>
 
-#include <dev/ata/atareg.h>
 #include <dev/ata/atavar.h>
 #include <dev/ic/wdcreg.h>
 #include <dev/ic/wdcvar.h>
@@ -142,11 +141,7 @@ wd_hibernate_io(dev_t dev, daddr_t blkno, vaddr_t addr, size_t size, int op, voi
 
 	if (op == HIB_DONE) {
 		struct wdc_softc *wdc = chp->wdc;
-		struct device *dv = &wdc->sc_dev;
-		struct cfdata *cfd = dv->dv_cfdata;
-
-		/* The ca_activate function for the parent controller */
-		(cfd->cf_attach->ca_activate)(dv, DVACT_RESUME);
+		config_suspend(&wdc->sc_dev, DVACT_RESUME);
 		return (0);
 	}
 

@@ -1,4 +1,4 @@
-/*	$OpenBSD: pcb.h,v 1.13 2011/08/22 18:18:35 deraadt Exp $	*/
+/*	$OpenBSD: pcb.h,v 1.15 2015/07/29 18:52:44 miod Exp $	*/
 /*	$NetBSD: pcb.h,v 1.1 1996/09/30 16:34:29 ws Exp $	*/
 
 /*-
@@ -39,7 +39,6 @@
 
 typedef struct __faultbuf {
 	int	pc;
-	int	sr;
 	int	sp;
 	int	cr;
 	int	regs[20];
@@ -59,10 +58,6 @@ struct pcb {
 	struct vreg *pcb_vr;    /* Vector unit */
 	struct cpu_info *pcb_fpcpu;
 	struct cpu_info *pcb_veccpu;
-};
-
-struct md_coredump {
-	struct reg regs;
 };
 
 #ifdef	_KERNEL

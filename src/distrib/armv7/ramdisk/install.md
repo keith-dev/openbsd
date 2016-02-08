@@ -1,4 +1,4 @@
-#	$OpenBSD: install.md,v 1.6 2015/01/26 01:55:55 jsg Exp $
+#	$OpenBSD: install.md,v 1.19 2015/08/01 00:25:14 jsg Exp $
 #
 #
 # Copyright (c) 1996 The NetBSD Foundation, Inc.
@@ -50,10 +50,21 @@ if [[ $? == 0 ]]; then
 	MDPLAT=SUNXI
 	LOADADDR=0x40200000
 fi
+dmesg | grep "^vexpress0 at mainbus0:" >/dev/null
+if [[ $? == 0 ]]; then
+	dmesg | grep "^cpu0 at mainbus0: ARM Cortex A9 " >/dev/null
+	if [[ $? == 0 ]]; then
+		MDPLAT=VEXPRESSA9
+		LOADADDR=0x60300000
+	else
+		MDPLAT=VEXPRESSA15
+		LOADADDR=0x80300000
+	fi
+fi
 
-MDSETS="bsd.${MDPLAT} bsd.rd.${MDPLAT} bsd.${MDPLAT}.umg bsd.rd.${MDPLAT}.umg"
-SANESETS="bsd.${MDPLAT}"
-DEFAULTSETS=${MDSETS}
+MDSETS="bsd.${MDPLAT}.umg bsd.rd.${MDPLAT}.umg"
+SANESETS="bsd"
+DEFAULTSETS="bsd bsd.rd ${MDSETS}"
 
 NEWFSARGS_msdos="-F 16 -L boot"
 NEWFSARGS_ext2fs="-v boot"
@@ -62,23 +73,15 @@ md_installboot() {
 	local _disk=$1
 	mount /dev/${_disk}i /mnt/mnt
 
-	BEAGLE=$(scan_dmesg '/^omap0 at mainbus0: \(BeagleBoard\).*/s//\1/p')
-	BEAGLEBONE=$(scan_dmesg '/^omap0 at mainbus0: \(BeagleBone\).*/s//\1/p')
-	PANDA=$(scan_dmesg '/^omap0 at mainbus0: \(PandaBoard\)/s//\1/p')
-	IMX=$(scan_dmesg '/^imx0 at mainbus0: \(i.MX6.*\)/s//IMX/p')
-	SUNXI=$(scan_dmesg '/^sunxi0 at mainbus0: \(A.*\)/s//SUNXI/p')
+	BEAGLE=$(scan_dmesg '/^omap0 at mainbus0: TI OMAP3 \(BeagleBoard\).*/s//\1/p')
+	BEAGLEBONE=$(scan_dmesg '/^omap0 at mainbus0: TI AM335x \(BeagleBone\).*/s//\1/p')
+	PANDA=$(scan_dmesg '/^omap0 at mainbus0: TI OMAP4 \(PandaBoard\)/s//\1/p')
+	CUBOX=$(scan_dmesg '/^imx0 at mainbus0: \(SolidRun.*\)/s//CUBOX/p')
+	NITROGEN=$(scan_dmesg '/^imx0 at mainbus0: \(Freescale i.MX6 SABRE Lite.*\)/s//NITROGEN/p')
+	WANDBOARD=$(scan_dmesg '/^imx0 at mainbus0: \(Wandboard i.MX6.*\)/s//WANDBOARD/p')
 
-        if [[ -f /mnt/bsd.${MDPLAT} ]]; then
-                mv /mnt/bsd.${MDPLAT} /mnt/bsd
-        fi
         if [[ -f /mnt/bsd.${MDPLAT}.umg ]]; then
                 mv /mnt/bsd.${MDPLAT}.umg /mnt/mnt/bsd.umg
-        fi
-        if [[ -f /mnt/bsd.mp.${MDPLAT} ]]; then
-                mv /mnt/bsd.mp.${MDPLAT} /mnt/bsd.mp
-        fi
-        if [[ -f /mnt/bsd.rd.${MDPLAT} ]]; then
-                mv /mnt/bsd.rd.${MDPLAT} /mnt/bsd.rd
         fi
         if [[ -f /mnt/bsd.rd.${MDPLAT}.umg ]]; then
                 mv /mnt/bsd.rd.${MDPLAT}.umg /mnt/mnt/bsdrd.umg
@@ -90,21 +93,43 @@ md_installboot() {
 	if [[ ${MDPLAT} == "OMAP" ]]; then
 
 		if [[ -n $BEAGLE ]]; then
-			cp /mnt/usr/mdec/beagle/{mlo,u-boot.bin} /mnt/mnt/
+			cp /mnt/usr/mdec/beagle/{mlo,u-boot.img} /mnt/mnt/
 		elif [[ -n $BEAGLEBONE ]]; then
 			cp /mnt/usr/mdec/am335x/{mlo,u-boot.img} /mnt/mnt/
 		elif [[ -n $PANDA ]]; then
-			cp /mnt/usr/mdec/panda/{mlo,u-boot.bin} /mnt/mnt/
+			cp /mnt/usr/mdec/panda/{mlo,u-boot.img} /mnt/mnt/
 		fi
 		cat > /mnt/mnt/uenv.txt<<__EOT
 bootcmd=mmc rescan ; setenv loadaddr ${LOADADDR}; setenv bootargs sd0i:/bsd.umg ; fatload mmc \${mmcdev} \${loadaddr} bsd.umg ; bootm \${loadaddr} ;
 uenvcmd=boot
 __EOT
 	elif [[ ${MDPLAT} == "IMX" ]]; then
-		cat > /tmp/6x_bootscript.scr<<__EOT
-; setenv loadaddr ${LOADADDR} ; setenv bootargs sd0i:/bsd.umg ; for dtype in sata mmc ; do for disk in 0 1 ; do \${dtype} dev \${disk} ; for fs in fat ext2 ; do if \${fs}load \${dtype} \${disk}:1 \${loadaddr} bsd.umg ; then bootm \${loadaddr} ; fi ; done; done; done; echo; echo failed to load bsd.umg 
+		if [[ -n $CUBOX ]]; then
+			cat > /tmp/boot.cmd<<__EOT
+; setenv loadaddr ${LOADADDR} ; setenv bootargs sd0i:/bsd.umg ; for dtype in usb mmc ; do for disk in 0 1 ; do \${dtype} dev \${disk} ; for fs in fat ext2 ; do if \${fs}load \${dtype} \${disk}:1 \${loadaddr} bsd.umg ; then bootm \${loadaddr} ; fi ; done; done; done; echo; echo failed to load bsd.umg
 __EOT
-		mkuboot -t script -a arm -o linux /tmp/6x_bootscript.scr /mnt/mnt/6x_bootscript
+			mkuboot -t script -a arm -o linux /tmp/boot.cmd \
+			    /mnt/mnt/boot.scr
+			dd if=/mnt/usr/mdec/cubox/SPL \
+			    of=/dev/${_disk}c bs=1024 seek=1 >/dev/null
+			dd if=/mnt/usr/mdec/cubox/u-boot.img \
+			    of=/dev/${_disk}c bs=1024 seek=42 >/dev/null
+		elif [[ -n $NITROGEN ]]; then
+			cat > /tmp/6x_bootscript.scr<<__EOT
+	; setenv loadaddr ${LOADADDR} ; setenv bootargs sd0i:/bsd.umg ; for dtype in sata mmc ; do for disk in 0 1 ; do \${dtype} dev \${disk} ; for fs in fat ext2 ; do if \${fs}load \${dtype} \${disk}:1 \${loadaddr} bsd.umg ; then bootm \${loadaddr} ; fi ; done; done; done; echo; echo failed to load bsd.umg 
+__EOT
+			mkuboot -t script -a arm -o linux /tmp/6x_bootscript.scr /mnt/mnt/6x_bootscript
+		elif [[ -n $WANDBOARD ]]; then
+			cat > /tmp/boot.cmd<<__EOT
+; setenv loadaddr ${LOADADDR} ; setenv bootargs sd0i:/bsd.umg ; for dtype in mmc ; do for disk in 0 1 ; do \${dtype} dev \${disk} ; for fs in fat ext2 ; do if \${fs}load \${dtype} \${disk}:1 \${loadaddr} bsd.umg ; then bootm \${loadaddr} ; fi ; done; done; done; echo; echo failed to load bsd.umg
+__EOT
+			mkuboot -t script -a arm -o linux /tmp/boot.cmd \
+			    /mnt/mnt/boot.scr
+			dd if=/mnt/usr/mdec/wandboard/SPL \
+			    of=/dev/${_disk}c bs=1024 seek=1 >/dev/null
+			dd if=/mnt/usr/mdec/wandboard/u-boot.img \
+			    of=/dev/${_disk}c bs=1024 seek=69 >/dev/null
+		fi
 	elif [[ ${MDPLAT} == "SUNXI" ]]; then
 		cat > /mnt/mnt/uenv.txt<<__EOT
 bootargs=sd0i:/bsd
@@ -119,20 +144,29 @@ md_prep_fdisk() {
 	local _disk=$1 _q _d
 
 	local bootparttype="C"
+	local bootsectorstart="64"
+	local bootsectorsize="32768"
+	local bootsectorend
 	local bootfstype="msdos"
 	local newfs_args=${NEWFSARGS_msdos}
 
+	CUBOX=$(scan_dmesg '/^imx0 at mainbus0: \(SolidRun.*\)/s//CUBOX/p')
+	WANDBOARD=$(scan_dmesg '/^imx0 at mainbus0: \(Wandboard i.MX6.*\)/s//WANDBOARD/p')
+
 	# imx needs an ext2fs filesystem
-	IMX=$(scan_dmesg '/^imx0 at mainbus0: \(i.MX6.*\)/s//IMX/p')
-	if [[ -n $IMX ]]; then
+	if [[ ${MDPLAT} == "IMX" && ! -n $WANDBOARD ]]; then
 		bootparttype="83"
 		bootfstype="ext2fs"
 		newfs_args=${NEWFSARGS_ext2fs}
 	fi
+	if [[ -n $CUBOX || -n $WANDBOARD ]]; then
+		bootsectorstart="2048"
+	fi
+	bootsectorend=$(($bootsectorstart + $bootsectorsize))
 
 	while :; do
 		_d=whole
-		if [[ -n $(fdisk $_disk | grep 'Signature: 0xAA55') ]]; then
+		if fdisk $_disk | grep -q 'Signature: 0xAA55'; then
 			fdisk $_disk
 		else
 			echo "MBR has invalid signature; not showing it."
@@ -146,13 +180,13 @@ reinit
 e 0
 ${bootparttype}
 n
-64
-32768
+${bootsectorstart}
+${bootsectorsize}
 f 0
 e 3
 A6
 n
-32832
+${bootsectorend}
 
 write
 quit
@@ -176,7 +210,7 @@ at least 16MB and be the first 'MSDOS' partition on the disk.
 $(fdisk ${_disk})
 __EOT
 			fdisk -e ${_disk}
-			[[ -n $(fdisk $_disk | grep ' A6 ') ]] && return
+			fdisk $_disk | grep -q ' A6 ' && return
 			echo No OpenBSD partition in MBR, try again. ;;
 		o*|O*)	return ;;
 		esac
@@ -184,26 +218,12 @@ __EOT
 }
 
 md_prep_disklabel() {
-	local _disk=$1 _f _op
+	local _disk=$1 _f=/tmp/fstab.$1
 
 	md_prep_fdisk $_disk
 
-	_f=/tmp/fstab.$_disk
-	if [[ $_disk == $ROOTDISK ]]; then
-		while :; do
-			echo "The auto-allocated layout for $_disk is:"
-			disklabel -h -A $_disk | egrep "^#  |^  [a-p]:"
-			ask "Use (A)uto layout, (E)dit auto layout, or create (C)ustom layout?" a
-			case $resp in
-			a*|A*)	_op=-w ;;
-			e*|E*)	_op=-E ;;
-			c*|C*)	break ;;
-			*)	continue ;;
-			esac
-			disklabel $FSTABFLAG $_f $_op -A $_disk
-			return
-		done
-	fi
+	disklabel_autolayout $_disk $_f || return
+	[[ -s $_f ]] && return
 
 	cat <<__EOT
 
@@ -217,7 +237,7 @@ start of the disk, NOT the start of the OpenBSD MBR partition.
 
 __EOT
 
-	disklabel $FSTABFLAG $_f -E $_disk
+	disklabel -F $_f -E $_disk
 }
 
 md_congrats() {

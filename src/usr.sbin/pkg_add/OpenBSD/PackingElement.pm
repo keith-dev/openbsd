@@ -1,5 +1,5 @@
 # ex:ts=8 sw=4:
-# $OpenBSD: PackingElement.pm,v 1.239 2015/02/25 16:37:15 sthen Exp $
+# $OpenBSD: PackingElement.pm,v 1.242 2015/04/20 13:10:54 espie Exp $
 #
 # Copyright (c) 2003-2014 Marc Espie <espie@openbsd.org>
 #
@@ -1145,7 +1145,9 @@ sub new
 sub destate
 {
 	my ($self, $state) = @_;
-	$state->{owners}{$self->{name}} = $self->{uid};
+	my $uid = $self->{uid};
+	$uid =~ s/^\!//;
+	$state->{owners}{$self->{name}} = $uid;
 }
 
 sub check
@@ -1206,7 +1208,9 @@ sub new
 sub destate
 {
 	my ($self, $state) = @_;
-	$state->{groups}{$self->{name}} = $self->{gid};
+	my $gid = $self->{gid};
+	$gid =~ s/^\!//;
+	$state->{groups}{$self->{name}} = $gid;
 }
 
 sub check
@@ -1748,8 +1752,6 @@ sub stringize($)
 	return join(',', @{$self->{arches}});
 }
 
-my ($machine_arch, $arch);
-
 sub check
 {
 	my ($self, $forced_arch) = @_;
@@ -1763,16 +1765,8 @@ sub check
 				next;
 			}
 		}
-		if (!defined $machine_arch) {
-			my $cmd = OpenBSD::Paths->arch." -s";
-			chomp($machine_arch = `$cmd`);
-		}
-		return 1 if $ok eq $machine_arch;
-		if (!defined $arch) {
-			my $cmd = OpenBSD::Paths->uname." -m";
-			chomp($arch = `$cmd`);
-		}
-		return 1 if $ok eq $arch;
+		return 1 if $ok eq OpenBSD::Paths->machine_architecture;
+		return 1 if $ok eq OpenBSD::Paths->architecture;
 	}
 	return;
 }

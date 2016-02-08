@@ -1,4 +1,4 @@
-/*	$OpenBSD: elf.c,v 1.26 2015/02/06 23:21:59 millert Exp $	*/
+/*	$OpenBSD: elf.c,v 1.32 2015/06/23 15:16:34 semarie Exp $	*/
 
 /*
  * Copyright (c) 2003 Michael Shalayeff
@@ -149,7 +149,22 @@ elf_load_shdrs(const char *name, FILE *fp, off_t foff, Elf_Ehdr *head)
 
 	elf_fix_header(head);
 
-	if ((shdr = calloc(head->e_shentsize, head->e_shnum)) == NULL) {
+	if (head->e_shnum == 0) {
+		warnx("%s: no section header table", name);
+		return (NULL);
+	}
+
+	if (head->e_shstrndx >= head->e_shnum) {
+		warnx("%s: inconsistent section header table", name);
+		return (NULL);
+	}
+
+	if (head->e_shentsize < sizeof(Elf_Shdr)) {
+		warnx("%s: inconsistent section header size", name);
+		return (NULL);
+	}
+
+	if ((shdr = calloc(head->e_shnum, head->e_shentsize)) == NULL) {
 		warn("%s: malloc shdr", name);
 		return (NULL);
 	}
@@ -376,7 +391,6 @@ elf2nlist(Elf_Sym *sym, Elf_Ehdr *eh, Elf_Shdr *shdr, char *shstr, struct nlist 
 		type = elf_shn2type(eh, sym->st_shndx, NULL);
 		np->n_type = type < 0? N_TEXT : type;
 		if (ELF_ST_BIND(sym->st_info) == STB_WEAK) {
-			np->n_type = N_INDR;
 			np->n_other = 'W';
 		} else if (sn != NULL && *sn != 0 &&
 		    strcmp(sn, ELF_INIT) &&
@@ -442,7 +456,7 @@ elf_size(Elf_Ehdr *head, Elf_Shdr *shdr,
 
 int
 elf_symloadx(const char *name, FILE *fp, off_t foff, Elf_Ehdr *eh,
-    Elf_Shdr *shdr, char *shstr, struct nlist **pnames,
+    Elf_Shdr *shdr, char *shstr, long shstrsize, struct nlist **pnames,
     struct nlist ***psnames, size_t *pstabsize, int *pnrawnames,
     const char *strtab, const char *symtab)
 {
@@ -452,6 +466,10 @@ elf_symloadx(const char *name, FILE *fp, off_t foff, Elf_Ehdr *eh,
 	int i;
 
 	for (i = 0; i < eh->e_shnum; i++) {
+		if (shdr[i].sh_name >= shstrsize) {
+			warnx("%s: corrupt file", name);
+			return (1);
+		}
 		if (!strcmp(shstr + shdr[i].sh_name, strtab)) {
 			*pstabsize = shdr[i].sh_size;
 			if (*pstabsize > SIZE_MAX) {
@@ -480,6 +498,7 @@ elf_symloadx(const char *name, FILE *fp, off_t foff, Elf_Ehdr *eh,
 				warn("%s: malloc names", name);
 				if (stab)
 					MUNMAP(stab, *pstabsize);
+				*pnrawnames = 0;
 				return (1);
 			}
 			if ((*psnames = calloc(*pnrawnames, sizeof(np))) == NULL) {
@@ -487,6 +506,8 @@ elf_symloadx(const char *name, FILE *fp, off_t foff, Elf_Ehdr *eh,
 				if (stab)
 					MUNMAP(stab, *pstabsize);
 				free(*pnames);
+				*pnames = NULL;
+				*pnrawnames = 0;
 				return (1);
 			}
 
@@ -498,6 +519,9 @@ elf_symloadx(const char *name, FILE *fp, off_t foff, Elf_Ehdr *eh,
 						MUNMAP(stab, *pstabsize);
 					free(*pnames);
 					free(*psnames);
+					*pnames = NULL;
+					*psnames = NULL;
+					*pnrawnames = 0;
 					return (1);
 				}
 
@@ -551,10 +575,12 @@ elf_symload(const char *name, FILE *fp, off_t foff, Elf_Ehdr *eh,
 
 	stab = NULL;
 	*pnames = NULL; *psnames = NULL; *pnrawnames = 0;
-	elf_symloadx(name, fp, foff, eh, shdr, shstr, pnames,
-	    psnames, pstabsize, pnrawnames, ELF_STRTAB, ELF_SYMTAB);
+	if (!dynamic_only) {
+		elf_symloadx(name, fp, foff, eh, shdr, shstr, shstrsize, pnames,
+		    psnames, pstabsize, pnrawnames, ELF_STRTAB, ELF_SYMTAB);
+	}
 	if (stab == NULL) {
-		elf_symloadx(name, fp, foff, eh, shdr, shstr, pnames,
+		elf_symloadx(name, fp, foff, eh, shdr, shstr, shstrsize, pnames,
 		    psnames, pstabsize, pnrawnames, ELF_DYNSTR, ELF_DYNSYM);
 	}
 

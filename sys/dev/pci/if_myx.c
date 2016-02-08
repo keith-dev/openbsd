@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_myx.c,v 1.75 2015/02/20 23:24:30 chris Exp $	*/
+/*	$OpenBSD: if_myx.c,v 1.78 2015/06/24 09:40:54 mpi Exp $	*/
 
 /*
  * Copyright (c) 2007 Reyk Floeter <reyk@openbsd.org>
@@ -41,7 +41,6 @@
 #include <net/if.h>
 #include <net/if_dl.h>
 #include <net/if_media.h>
-#include <net/if_types.h>
 
 #if NBPFILTER > 0
 #include <net/bpf.h>
@@ -1887,11 +1886,7 @@ myx_rxeof(struct myx_softc *sc)
 			timeout_add(&sc->sc_refill, 0);
 	}
 
-	ifp->if_ipackets += ml_len(&ml);
-
-	KERNEL_LOCK();
 	if_input(ifp, &ml);
-	KERNEL_UNLOCK();
 }
 
 void

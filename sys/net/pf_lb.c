@@ -1,4 +1,4 @@
-/*	$OpenBSD: pf_lb.c,v 1.41 2015/01/06 01:49:45 jsg Exp $ */
+/*	$OpenBSD: pf_lb.c,v 1.49 2015/08/03 13:33:12 jsg Exp $ */
 
 /*
  * Copyright (c) 2001 Daniel Hartmeier
@@ -54,7 +54,6 @@
 #include <sys/stdint.h>
 
 #include <crypto/siphash.h>
-#include <crypto/md5.h>
 
 #include <net/if.h>
 #include <net/if_types.h>
@@ -75,8 +74,14 @@
 #include <netinet/in_pcb.h>
 
 #include <net/pfvar.h>
+
+#if NPFLOG > 0
 #include <net/if_pflog.h>
+#endif	/* NPFLOG > 0 */
+
+#if NPFLOW > 0
 #include <net/if_pflow.h>
+#endif	/* NPFLOW > 0 */
 
 #if NPFSYNC > 0
 #include <net/if_pfsync.h>
@@ -114,7 +119,7 @@ pf_hash(struct pf_addr *inaddr, struct pf_addr *hash,
 		uint64_t hash64;
 		uint32_t hash32[2];
 	} h;
-#endif
+#endif	/* INET6 */
 
 	switch (af) {
 	case AF_INET:
@@ -137,6 +142,8 @@ pf_hash(struct pf_addr *inaddr, struct pf_addr *hash,
 		hash->addr32[3] = ~h.hash32[0];
 		break;
 #endif /* INET6 */
+	default:
+		unhandled_af(af);
 	}
 	return (res);
 }
@@ -367,6 +374,8 @@ pf_map_addr(sa_family_t af, struct pf_rule *r, struct pf_addr *saddr,
 			rmask = &rpool->addr.p.dyn->pfid_mask6;
 			break;
 #endif /* INET6 */
+		default:
+			unhandled_af(af);
 		}
 	} else if (rpool->addr.type == PF_ADDR_TABLE) {
 		if (!PF_POOL_DYNTYPE(rpool->opts))
@@ -386,14 +395,20 @@ pf_map_addr(sa_family_t af, struct pf_rule *r, struct pf_addr *saddr,
 	case PF_POOL_RANDOM:
 		if (rpool->addr.type == PF_ADDR_TABLE) {
 			cnt = rpool->addr.p.tbl->pfrkt_cnt;
-			rpool->tblidx = (int)arc4random_uniform(cnt);
+			if (cnt == 0)
+				rpool->tblidx = 0;
+			else
+				rpool->tblidx = (int)arc4random_uniform(cnt);
 			memset(&rpool->counter, 0, sizeof(rpool->counter));
 			if (pfr_pool_get(rpool, &raddr, &rmask, af))
 				return (1);
 			PF_ACPY(naddr, &rpool->counter, af);
 		} else if (rpool->addr.type == PF_ADDR_DYNIFTL) {
 			cnt = rpool->addr.p.dyn->pfid_kt->pfrkt_cnt;
-			rpool->tblidx = (int)arc4random_uniform(cnt);
+			if (cnt == 0)
+				rpool->tblidx = 0;
+			else
+				rpool->tblidx = (int)arc4random_uniform(cnt);
 			memset(&rpool->counter, 0, sizeof(rpool->counter));
 			if (pfr_pool_get(rpool, &raddr, &rmask, af))
 				return (1);
@@ -425,6 +440,8 @@ pf_map_addr(sa_family_t af, struct pf_rule *r, struct pf_addr *saddr,
 					    htonl(arc4random());
 				break;
 #endif /* INET6 */
+			default:
+				unhandled_af(af);
 			}
 			PF_POOLMASK(naddr, raddr, rmask, &rpool->counter, af);
 			PF_ACPY(init_addr, naddr, af);
@@ -439,14 +456,20 @@ pf_map_addr(sa_family_t af, struct pf_rule *r, struct pf_addr *saddr,
 		    pf_hash(saddr, (struct pf_addr *)&hash, &rpool->key, af);
 		if (rpool->addr.type == PF_ADDR_TABLE) {
 			cnt = rpool->addr.p.tbl->pfrkt_cnt;
-			rpool->tblidx = (int)(hashidx % cnt);
+			if (cnt == 0)
+				rpool->tblidx = 0;
+			else
+				rpool->tblidx = (int)(hashidx % cnt);
 			memset(&rpool->counter, 0, sizeof(rpool->counter));
 			if (pfr_pool_get(rpool, &raddr, &rmask, af))
 				return (1);
 			PF_ACPY(naddr, &rpool->counter, af);
 		} else if (rpool->addr.type == PF_ADDR_DYNIFTL) {
 			cnt = rpool->addr.p.dyn->pfid_kt->pfrkt_cnt;
-			rpool->tblidx = (int)(hashidx % cnt);
+			if (cnt == 0)
+				rpool->tblidx = 0;
+			else
+				rpool->tblidx = (int)(hashidx % cnt);
 			memset(&rpool->counter, 0, sizeof(rpool->counter));
 			if (pfr_pool_get(rpool, &raddr, &rmask, af))
 				return (1);
@@ -656,21 +679,21 @@ pf_get_transaddr(struct pf_rule *r, struct pf_pdesc *pd,
 			PF_POOLMASK(&naddr, &naddr,  &r->rdr.addr.v.a.mask,
 			    &pd->ndaddr, pd->af);
 
-			if (r->rdr.proxy_port[1]) {
-				u_int32_t	tmp_nport;
+		if (r->rdr.proxy_port[1]) {
+			u_int32_t	tmp_nport;
 
-				tmp_nport = ((ntohs(pd->ndport) -
-				    ntohs(r->dst.port[0])) %
-				    (r->rdr.proxy_port[1] -
-				    r->rdr.proxy_port[0] + 1)) +
-				    r->rdr.proxy_port[0];
+			tmp_nport = ((ntohs(pd->ndport) -
+			    ntohs(r->dst.port[0])) %
+			    (r->rdr.proxy_port[1] -
+			    r->rdr.proxy_port[0] + 1)) +
+			    r->rdr.proxy_port[0];
 
-				/* wrap around if necessary */
-				if (tmp_nport > 65535)
-					tmp_nport -= 65535;
-				nport = htons((u_int16_t)tmp_nport);
-			} else if (r->rdr.proxy_port[0])
-				nport = htons(r->rdr.proxy_port[0]);
+			/* wrap around if necessary */
+			if (tmp_nport > 65535)
+				tmp_nport -= 65535;
+			nport = htons((u_int16_t)tmp_nport);
+		} else if (r->rdr.proxy_port[0])
+			nport = htons(r->rdr.proxy_port[0]);
 		*nr = r;
 		PF_ACPY(&pd->ndaddr, &naddr, pd->af);
 		if (nport)
@@ -715,35 +738,35 @@ pf_get_transaddr_af(struct pf_rule *r, struct pf_pdesc *pd,
 
 	if (pd->proto == IPPROTO_ICMPV6 && pd->naf == AF_INET) {
 		if (pd->dir == PF_IN) {
-			NTOHS(pd->ndport);
+			pd->ndport = ntohs(pd->ndport);
 			if (pd->ndport == ICMP6_ECHO_REQUEST)
 				pd->ndport = ICMP_ECHO;
 			else if (pd->ndport == ICMP6_ECHO_REPLY)
 				pd->ndport = ICMP_ECHOREPLY;
-			HTONS(pd->ndport);
+			pd->ndport = htons(pd->ndport);
 		} else {
-			NTOHS(pd->nsport);
+			pd->nsport = ntohs(pd->nsport);
 			if (pd->nsport == ICMP6_ECHO_REQUEST)
 				pd->nsport = ICMP_ECHO;
 			else if (pd->nsport == ICMP6_ECHO_REPLY)
 				pd->nsport = ICMP_ECHOREPLY;
-			HTONS(pd->nsport);
+			pd->nsport = htons(pd->nsport);
 		}
 	} else if (pd->proto == IPPROTO_ICMP && pd->naf == AF_INET6) {
 		if (pd->dir == PF_IN) {
-			NTOHS(pd->ndport);
+			pd->ndport = ntohs(pd->ndport);
 			if (pd->ndport == ICMP_ECHO)
 				pd->ndport = ICMP6_ECHO_REQUEST;
 			else if (pd->ndport == ICMP_ECHOREPLY)
 				pd->ndport = ICMP6_ECHO_REPLY;
-			HTONS(pd->ndport);
+			pd->ndport = htons(pd->ndport);
 		} else {
-			NTOHS(pd->nsport);
+			pd->nsport = ntohs(pd->nsport);
 			if (pd->nsport == ICMP_ECHO)
 				pd->nsport = ICMP6_ECHO_REQUEST;
 			else if (pd->nsport == ICMP_ECHOREPLY)
 				pd->nsport = ICMP6_ECHO_REPLY;
-			HTONS(pd->nsport);
+			pd->nsport = htons(pd->nsport);
 		}
 	}
 
@@ -849,6 +872,8 @@ pf_postprocess_addr(struct pf_state *cur)
 		rpool = nr->nat;
 	else if (nr->route.addr.type != PF_ADDR_NONE)
 		rpool = nr->route;
+	else
+		return (0);
 
 	if (((rpool.opts & PF_POOL_TYPEMASK) != PF_POOL_LEASTSTATES))
 		return (0);

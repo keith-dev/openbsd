@@ -1,4 +1,4 @@
-/*	$OpenBSD: intel_ringbuffer.h,v 1.3 2014/03/30 00:58:24 jsg Exp $	*/
+/*	$OpenBSD: intel_ringbuffer.h,v 1.5 2015/04/12 03:54:10 jsg Exp $	*/
 
 #ifndef _INTEL_RINGBUFFER_H_
 #define _INTEL_RINGBUFFER_H_
@@ -131,7 +131,7 @@ struct  intel_ring_buffer {
 	u32 outstanding_lazy_request;
 	bool gpu_caches_dirty;
 
-	int irq_queue;
+	wait_queue_head_t irq_queue;
 
 	/**
 	 * Do an explicit TLB flush before MI_SET_CONTEXT
@@ -206,6 +206,8 @@ static inline void intel_ring_emit(struct intel_ring_buffer *ring,
 	iowrite32(data, ring->virtual_start + ring->tail);
 	ring->tail += 4;
 }
+#else
+void intel_ring_emit(struct intel_ring_buffer *, u_int32_t);
 #endif
 void intel_ring_advance(struct intel_ring_buffer *ring);
 int intel_ring_idle(struct intel_ring_buffer *ring);

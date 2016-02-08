@@ -1,4 +1,4 @@
-/*	$OpenBSD: envy.c,v 1.58 2014/05/29 20:40:26 ratchov Exp $	*/
+/*	$OpenBSD: envy.c,v 1.61 2015/07/29 21:10:50 ratchov Exp $	*/
 /*
  * Copyright (c) 2007 Alexandre Ratchov <alex@caoua.org>
  *
@@ -30,7 +30,6 @@
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/device.h>
-#include <sys/ioctl.h>
 #include <sys/audioio.h>
 #include <sys/malloc.h>
 #include <sys/kernel.h>
@@ -1882,27 +1881,7 @@ envy_set_params(void *self, int setmode, int usemode,
 int
 envy_round_blocksize(void *self, int blksz)
 {
-	struct envy_softc *sc = (struct envy_softc *)self;
-	int mul, pmult, rmult;
-
-	/*
-	 * XXX: audio(4) layer doesn't round to the sample size
-	 * until it's fixed, roll our own rounding
-	 */
-
-	pmult = (sc->isht ? sc->card->noch : ENVY_PCHANS);
-	if (pmult == 0)
-		pmult = 1;
-	rmult = (sc->isht ? sc->card->nich : ENVY_RCHANS);
-	if (rmult == 0)
-		rmult = 1;
-	mul = pmult * rmult;
-	while ((mul & 0x1f) != 0)
-		mul <<= 1;
-	blksz -= blksz % mul;
-	if (blksz == 0)
-		blksz = mul;
-	return blksz;
+	return (blksz + 0x1f) & ~0x1f;
 }
 
 size_t
@@ -1942,6 +1921,7 @@ int
 envy_intr(void *self)
 {
 	struct envy_softc *sc = (struct envy_softc *)self;
+	unsigned int reg, hwpos, cnt;
 	int mintr, mstat, mdata;
 	int st, err, ctl;
 	int max;
@@ -1986,9 +1966,26 @@ envy_intr(void *self)
 		}
 	}
 	if (st & ENVY_MT_INTR_PACK) {
-		if (sc->oactive)
-			sc->ointr(sc->oarg);
-		else {
+		if (sc->oactive) {
+			reg = envy_mt_read_2(sc, ENVY_MT_PBUFSZ);
+			hwpos = sc->obuf.bufsz - 4 * (reg + 1);
+			if (hwpos >= sc->obuf.bufsz)
+				hwpos -= sc->obuf.bufsz;
+			DPRINTFN(2, "%s: play: reg = %u, pos: %u -> %u\n",
+			    DEVNAME(sc), reg, sc->obuf.swpos, hwpos);
+			cnt = 0;
+			while (hwpos - sc->obuf.swpos >= sc->obuf.blksz) {
+				sc->ointr(sc->oarg);
+				sc->obuf.swpos += sc->obuf.blksz;
+				if (sc->obuf.swpos == sc->obuf.bufsz)
+					sc->obuf.swpos = 0;
+				cnt++;
+			}
+			if (cnt != 1) {
+				DPRINTFN(2, "%s: play: %u intrs\n",
+				    DEVNAME(sc), cnt);
+			}
+		} else {
 			ctl = envy_mt_read_1(sc, ENVY_MT_CTL);
 			if (ctl & ENVY_MT_CTL_PSTART) {
 				envy_mt_write_1(sc,
@@ -2004,9 +2001,26 @@ envy_intr(void *self)
 		}
 	}
 	if (st & ENVY_MT_INTR_RACK) {
-		if (sc->iactive)
-			sc->iintr(sc->iarg);
-		else {
+		if (sc->iactive) {
+			reg = envy_mt_read_2(sc, ENVY_MT_RBUFSZ);
+			hwpos = sc->ibuf.bufsz - 4 * (reg + 1);
+			if (hwpos >= sc->ibuf.bufsz)
+				hwpos -= sc->ibuf.bufsz;
+			DPRINTFN(2, "%s: rec: reg = %u, pos: %u -> %u\n",
+			    DEVNAME(sc), reg, sc->ibuf.swpos, hwpos);
+			cnt = 0;
+			while (hwpos - sc->ibuf.swpos >= sc->ibuf.blksz) {
+				sc->iintr(sc->iarg);
+				sc->ibuf.swpos += sc->ibuf.blksz;
+				if (sc->ibuf.swpos == sc->ibuf.bufsz)
+					sc->ibuf.swpos = 0;
+				cnt++;
+			}
+			if (cnt != 1) {
+				DPRINTFN(2, "%s: rec: %u intrs\n",
+				    DEVNAME(sc), cnt);
+			}
+		} else {
 			ctl = envy_mt_read_1(sc, ENVY_MT_CTL);
 			if (ctl & ENVY_MT_CTL_RSTART(sc)) {
 				envy_mt_write_1(sc,
@@ -2055,6 +2069,9 @@ envy_trigger_output(void *self, void *start, void *end, int blksz,
 		nanouptime(&sc->start_ts);
 	}
 #endif
+	sc->obuf.bufsz = bufsz;
+	sc->obuf.blksz = blksz;
+	sc->obuf.swpos = 0;
 	sc->ointr = intr;
 	sc->oarg = arg;
 	sc->oactive = 1;
@@ -2098,6 +2115,9 @@ envy_trigger_input(void *self, void *start, void *end, int blksz,
 		nanouptime(&sc->start_ts);
 	}
 #endif
+	sc->ibuf.bufsz = bufsz;
+	sc->ibuf.blksz = blksz;
+	sc->ibuf.swpos = 0;
 	sc->iintr = intr;
 	sc->iarg = arg;
 	sc->iactive = 1;

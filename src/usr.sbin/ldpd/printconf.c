@@ -1,4 +1,4 @@
-/*	$OpenBSD: printconf.c,v 1.7 2013/06/04 02:25:28 claudio Exp $ */
+/*	$OpenBSD: printconf.c,v 1.11 2015/07/21 04:52:29 renato Exp $ */
 
 /*
  * Copyright (c) 2004, 2005, 2008 Esben Norby <norby@openbsd.org>
@@ -30,7 +30,10 @@
 
 void	print_mainconf(struct ldpd_conf *);
 void	print_iface(struct iface *);
-void	print_tnbr(struct tnbr *tnbr);
+void	print_tnbr(struct tnbr *);
+void	print_nbrp(struct nbr_params *);
+void	print_l2vpn(struct l2vpn *);
+void	print_pw(struct l2vpn_pw *);
 
 void
 print_mainconf(struct ldpd_conf *conf)
@@ -41,21 +44,6 @@ print_mainconf(struct ldpd_conf *conf)
 		printf("fib-update no\n");
 	else
 		printf("fib-update yes\n");
-
-	if (conf->mode & MODE_DIST_INDEPENDENT)
-		printf("distribution independent\n");
-	else
-		printf("distribution ordered\n");
-
-	if (conf->mode & MODE_RET_LIBERAL)
-		printf("retention liberal\n");
-	else
-		printf("retention conservative\n");
-
-	if (conf->mode & MODE_ADV_ONDEMAND)
-		printf("advertisement ondemand\n");
-	else
-		printf("advertisement unsolicited\n");
 
 	if (conf->flags & LDPD_FLAG_TH_ACCEPT)
 		printf("targeted-hello-accept yes\n");
@@ -84,10 +72,62 @@ print_tnbr(struct tnbr *tnbr)
 }
 
 void
+print_nbrp(struct nbr_params *nbrp)
+{
+	printf("\nneighbor %s {\n", inet_ntoa(nbrp->addr));
+	if (nbrp->auth.method == AUTH_MD5SIG)
+		printf("\tpassword XXXXXX\n");
+	printf("}\n");
+}
+
+void
+print_pw(struct l2vpn_pw *pw)
+{
+	printf("\tpseudowire %s {\n", pw->ifname);
+	if (pw->addr.s_addr != INADDR_ANY)
+		printf("\t\tneighbor %s\n", inet_ntoa(pw->addr));
+	if (pw->pwid != 0)
+		printf("\t\tpw-id %u\n", pw->pwid);
+	if (pw->flags & F_PW_STATUSTLV_CONF)
+		printf("\t\tstatus-tlv yes\n");
+	else
+		printf("\t\tstatus-tlv no\n");
+	if (pw->flags & F_PW_CONTROLWORD_CONF)
+		printf("\t\tcontrol-word yes\n");
+	else
+		printf("\t\tcontrol-word no\n");
+	printf("\t}\n");
+}
+
+void
+print_l2vpn(struct l2vpn *l2vpn)
+{
+	struct l2vpn_if	*lif;
+	struct l2vpn_pw	*pw;
+
+	printf("l2vpn %s type vpls {\n", l2vpn->name);
+	if (l2vpn->pw_type == PW_TYPE_ETHERNET)
+		printf("\tpw-type ethernet\n");
+	else
+		printf("\tpw-type ethernet-tagged\n");
+	printf("\tmtu %u\n", l2vpn->mtu);
+	printf("\n");
+	if (l2vpn->br_ifindex != 0)
+		printf("\tbridge %s\n", l2vpn->br_ifname);
+	LIST_FOREACH(lif, &l2vpn->if_list, entry)
+		printf("\tinterface %s\n", lif->ifname);
+	LIST_FOREACH(pw, &l2vpn->pw_list, entry)
+		print_pw(pw);
+	printf("}\n");
+}
+
+void
 print_config(struct ldpd_conf *conf)
 {
-	struct iface	*iface;
-	struct tnbr	*tnbr;
+	struct iface		*iface;
+	struct tnbr		*tnbr;
+	struct nbr_params	*nbrp;
+	struct l2vpn		*l2vpn;
 
 	print_mainconf(conf);
 	printf("\n");
@@ -96,5 +136,12 @@ print_config(struct ldpd_conf *conf)
 		print_iface(iface);
 	printf("\n");
 	LIST_FOREACH(tnbr, &conf->tnbr_list, entry)
-		print_tnbr(tnbr);
+		if (tnbr->flags & F_TNBR_CONFIGURED)
+			print_tnbr(tnbr);
+	printf("\n");
+	LIST_FOREACH(nbrp, &conf->nbrp_list, entry)
+		print_nbrp(nbrp);
+	printf("\n");
+	LIST_FOREACH(l2vpn, &conf->l2vpn_list, entry)
+		print_l2vpn(l2vpn);
 }

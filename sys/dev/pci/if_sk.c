@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_sk.c,v 1.173 2014/12/22 02:28:52 tedu Exp $	*/
+/*	$OpenBSD: if_sk.c,v 1.177 2015/07/19 06:28:12 yuo Exp $	*/
 
 /*
  * Copyright (c) 1997, 1998, 1999, 2000
@@ -1588,6 +1588,7 @@ sk_rxeof(struct sk_if_softc *sc_if)
 	struct ifnet		*ifp = &sc_if->arpcom.ac_if;
 	struct if_rxring	*rxr = &sc_if->sk_cdata.sk_rx_ring;
 	struct mbuf		*m;
+	struct mbuf_list	ml = MBUF_LIST_INITIALIZER();
 	struct sk_chain		*cur_rx;
 	struct sk_rx_desc	*cur_desc;
 	int			cur, total_len = 0;
@@ -1636,22 +1637,15 @@ sk_rxeof(struct sk_if_softc *sc_if)
 			continue;
 		}
 
-		m->m_pkthdr.rcvif = ifp;
 		m->m_pkthdr.len = m->m_len = total_len;
 
-		ifp->if_ipackets++;
-
-#if NBPFILTER > 0
-		if (ifp->if_bpf)
-			bpf_mtap(ifp->if_bpf, m, BPF_DIRECTION_IN);
-#endif
-
-		/* pass it on. */
-		ether_input_mbuf(ifp, m);
+		ml_enqueue(&ml, m);
 	}
 	sc_if->sk_cdata.sk_rx_cons = cur;
 
 	sk_fill_rx_ring(sc_if);
+
+	if_input(ifp, &ml);
 }
 
 void
@@ -1992,7 +1986,7 @@ sk_init_xmac(struct sk_if_softc	*sc_if)
 		SK_XM_SETBIT_2(sc_if, XM_HWCFG, XM_HWCFG_GMIIMODE);
 
 		sk_xmac_miibus_writereg((struct device *)sc_if,
-		    SK_PHYADDR_BCOM, BRGPHY_MII_BMCR, BRGPHY_BMCR_RESET);
+		    SK_PHYADDR_BCOM, MII_BMCR, BMCR_RESET);
 		DELAY(10000);
 		sk_xmac_miibus_writereg((struct device *)sc_if,
 		    SK_PHYADDR_BCOM, BRGPHY_MII_IMR, 0xFFF0);

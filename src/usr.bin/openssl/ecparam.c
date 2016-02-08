@@ -1,4 +1,4 @@
-/* $OpenBSD: ecparam.c,v 1.8 2014/12/28 15:48:52 jsing Exp $ */
+/* $OpenBSD: ecparam.c,v 1.11 2015/07/20 21:56:47 doug Exp $ */
 /*
  * Written by Nils Larsch for the OpenSSL project.
  */
@@ -361,6 +361,9 @@ ecparam_main(int argc, char **argv)
 		} else
 			nid = OBJ_sn2nid(ecparam_config.curve_name);
 
+		if (nid == 0)
+			nid = EC_curve_nist2nid(ecparam_config.curve_name);
+
 		if (nid == 0) {
 			BIO_printf(bio_err, "unknown curve name (%s)\n",
 			    ecparam_config.curve_name);
@@ -403,8 +406,6 @@ ecparam_main(int argc, char **argv)
 			goto end;
 	}
 	if (ecparam_config.check) {
-		if (group == NULL)
-			BIO_printf(bio_err, "no elliptic curve parameters\n");
 		BIO_printf(bio_err, "checking elliptic curve parameters: ");
 		if (!EC_GROUP_check(group, NULL)) {
 			BIO_printf(bio_err, "failed\n");
@@ -448,10 +449,6 @@ ecparam_main(int argc, char **argv)
 		if (!EC_GROUP_get_order(group, ec_order, NULL))
 			goto end;
 		if (!EC_GROUP_get_cofactor(group, ec_cofactor, NULL))
-			goto end;
-
-		if (!ec_p || !ec_a || !ec_b || !ec_gen ||
-		    !ec_order || !ec_cofactor)
 			goto end;
 
 		len = BN_num_bits(ec_order);

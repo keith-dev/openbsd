@@ -1,4 +1,4 @@
-/*	$OpenBSD: tcp_input.c,v 1.287 2015/02/08 04:40:50 yasuoka Exp $	*/
+/*	$OpenBSD: tcp_input.c,v 1.297 2015/07/16 16:12:15 mpi Exp $	*/
 /*	$NetBSD: tcp_input.c,v 1.23 1996/02/13 23:43:44 christos Exp $	*/
 
 /*
@@ -42,10 +42,10 @@
  *    documentation and/or other materials provided with the distribution.
  * 3. All advertising materials mentioning features or use of this software
  *    must display the following acknowledgements:
- * 	This product includes software developed by the University of
- * 	California, Berkeley and its contributors.
- * 	This product includes software developed at the Information
- * 	Technology Division, US Naval Research Laboratory.
+ *	This product includes software developed by the University of
+ *	California, Berkeley and its contributors.
+ *	This product includes software developed at the Information
+ *	Technology Division, US Naval Research Laboratory.
  * 4. Neither the name of the NRL nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
@@ -146,7 +146,7 @@ struct timeval tcp_ackdrop_ppslim_last;
 do { \
 	if (tp && tp->t_inpcb && (tp->t_inpcb->inp_flags & INP_IPV6) && \
 	    tp->t_inpcb->inp_route6.ro_rt) { \
-		nd6_nud_hint(tp->t_inpcb->inp_route6.ro_rt, NULL, 0, \
+		nd6_nud_hint(tp->t_inpcb->inp_route6.ro_rt, \
 		    tp->t_inpcb->inp_rtableid); \
 	} \
 } while (0)
@@ -177,8 +177,8 @@ do { \
 do { \
 	if ((tp)->t_flags & TF_DELACK || \
 	    (tcp_ack_on_push && (tiflags) & TH_PUSH) || \
-	    (m && (m->m_flags & M_PKTHDR) && m->m_pkthdr.rcvif && \
-	    (m->m_pkthdr.rcvif->if_flags & IFF_LOOPBACK))) \
+	    (m && (m->m_flags & M_PKTHDR) && if_get(m->m_pkthdr.ph_ifidx) && \
+	    (if_get(m->m_pkthdr.ph_ifidx)->if_flags & IFF_LOOPBACK))) \
 		tp->t_flags |= TF_ACKNOW; \
 	else \
 		TCP_SET_DELACK(tp); \
@@ -569,10 +569,10 @@ tcp_input(struct mbuf *m, ...)
 	/*
 	 * Convert TCP protocol specific fields to host format.
 	 */
-	NTOHL(th->th_seq);
-	NTOHL(th->th_ack);
-	NTOHS(th->th_win);
-	NTOHS(th->th_urp);
+	th->th_seq = ntohl(th->th_seq);
+	th->th_ack = ntohl(th->th_ack);
+	th->th_win = ntohs(th->th_win);
+	th->th_urp = ntohs(th->th_urp);
 
 	/*
 	 * Locate pcb for segment.
@@ -632,20 +632,20 @@ findpcb:
 		 * If the TCB exists but is in CLOSED state, it is embryonic,
 		 * but should either do a listen or a connect soon.
 		 */
-		if (inp == 0) {
+		if (inp == NULL) {
 			++tcpstat.tcps_noport;
 			goto dropwithreset_ratelim;
 		}
 	}
 	KASSERT(sotoinpcb(inp->inp_socket) == inp);
-	KASSERT(intotcpcb(inp)->t_inpcb == inp);
+	KASSERT(intotcpcb(inp) == NULL || intotcpcb(inp)->t_inpcb == inp);
 
 	/* Check the minimum TTL for socket. */
 	if (inp->inp_ip_minttl && inp->inp_ip_minttl > ip->ip_ttl)
 		goto drop;
 
 	tp = intotcpcb(inp);
-	if (tp == 0)
+	if (tp == NULL)
 		goto dropwithreset_ratelim;
 	if (tp->t_state == TCPS_CLOSED)
 		goto drop;
@@ -799,7 +799,7 @@ findpcb:
 				 *   (2a) "SHOULD NOT be used if alternate
 				 *        address with sufficient scope is
 				 *        available"
-				 *   (2b) nothing mentioned otherwise. 
+				 *   (2b) nothing mentioned otherwise.
 				 * Here we fall into (2b) case as we have no
 				 * choice in our source address selection - we
 				 * must obey the peer.
@@ -813,7 +813,8 @@ findpcb:
 				if (ip6 && !ip6_use_deprecated) {
 					struct in6_ifaddr *ia6;
 
-					if ((ia6 = in6ifa_ifpwithaddr(m->m_pkthdr.rcvif,
+					if ((ia6 = in6ifa_ifpwithaddr(
+					    if_get(m->m_pkthdr.ph_ifidx),
 					    &ip6->ip6_dst)) &&
 					    (ia6->ia6_flags & IN6_IFF_DEPRECATED)) {
 						tp = NULL;
@@ -895,41 +896,6 @@ findpcb:
 	if (error) {
 		tcpstat.tcps_rcvnosec++;
 		goto drop;
-	}
-
-	/* Latch SA */
-	if (inp->inp_tdb_in != tdb) {
-		if (tdb) {
-		        tdb_add_inp(tdb, inp, 1);
-			if (inp->inp_ipo == NULL) {
-				inp->inp_ipo = ipsec_add_policy(inp, af,
-				    IPSP_DIRECTION_OUT);
-				if (inp->inp_ipo == NULL) {
-					goto drop;
-				}
-			}
-			if (inp->inp_ipo->ipo_dstid == NULL &&
-			    tdb->tdb_srcid != NULL) {
-				inp->inp_ipo->ipo_dstid = tdb->tdb_srcid;
-				tdb->tdb_srcid->ref_count++;
-			}
-			if (inp->inp_ipsec_remotecred == NULL &&
-			    tdb->tdb_remote_cred != NULL) {
-				inp->inp_ipsec_remotecred =
-				    tdb->tdb_remote_cred;
-				tdb->tdb_remote_cred->ref_count++;
-			}
-			if (inp->inp_ipsec_remoteauth == NULL &&
-			    tdb->tdb_remote_auth != NULL) {
-				inp->inp_ipsec_remoteauth =
-				    tdb->tdb_remote_auth;
-				tdb->tdb_remote_auth->ref_count++;
-			}
-		} else { /* Just reset */
-		        TAILQ_REMOVE(&inp->inp_tdb_in->tdb_inp_in, inp,
-				     inp_tdb_in_next);
-			inp->inp_tdb_in = NULL;
-		}
 	}
 #endif /* IPSEC */
 
@@ -1035,16 +1001,16 @@ findpcb:
 
 				/*
 				 * If we had a pending ICMP message that
-				 * referres to data that have just been 
-				 * acknowledged, disregard the recorded ICMP 
+				 * refers to data that have just been
+				 * acknowledged, disregard the recorded ICMP
 				 * message.
 				 */
-				if ((tp->t_flags & TF_PMTUD_PEND) && 
+				if ((tp->t_flags & TF_PMTUD_PEND) &&
 				    SEQ_GT(th->th_ack, tp->t_pmtud_th_seq))
 					tp->t_flags &= ~TF_PMTUD_PEND;
 
 				/*
-				 * Keep track of the largest chunk of data 
+				 * Keep track of the largest chunk of data
 				 * acknowledged since last PMTU update
 				 */
 				if (tp->t_pmtud_mss_acked < acked)
@@ -1685,7 +1651,7 @@ trimthenstep6:
 
 #if defined(TCP_SACK) || defined(TCP_ECN)
 					if (SEQ_LT(th->th_ack, tp->snd_last)){
-					    	/*
+						/*
 						 * False fast retx after
 						 * timeout.  Do not cut window.
 						 */
@@ -1698,7 +1664,7 @@ trimthenstep6:
 					tp->snd_ssthresh = win * tp->t_maxseg;
 #ifdef TCP_SACK
 					tp->snd_last = tp->snd_max;
-                    			if (tp->sack_enable) {
+					if (tp->sack_enable) {
 						TCP_TIMER_DISARM(tp, TCPT_REXMT);
 						tp->t_rtttime = 0;
 #ifdef TCP_ECN
@@ -1807,7 +1773,7 @@ trimthenstep6:
 				/* Out of fast recovery */
 				tp->snd_cwnd = tp->snd_ssthresh;
 				if (tcp_seq_subtract(tp->snd_max, th->th_ack) <
-			  	    tp->snd_ssthresh)
+				    tp->snd_ssthresh)
 					tp->snd_cwnd =
 					    tcp_seq_subtract(tp->snd_max,
 					    th->th_ack);
@@ -1896,7 +1862,7 @@ trimthenstep6:
 		 * that have just been acknowledged, disregard the recorded
 		 * ICMP message.
 		 */
-		if ((tp->t_flags & TF_PMTUD_PEND) && 
+		if ((tp->t_flags & TF_PMTUD_PEND) &&
 		    SEQ_GT(th->th_ack, tp->t_pmtud_th_seq))
 			tp->t_flags &= ~TF_PMTUD_PEND;
 
@@ -2319,7 +2285,7 @@ tcp_dooptions(struct tcpcb *tp, u_char *cp, int cnt, struct tcphdr *th,
 			if (TCPS_HAVERCVDSYN(tp->t_state))
 				continue;
 			bcopy((char *) cp + 2, (char *) &mss, sizeof(mss));
-			NTOHS(mss);
+			mss = ntohs(mss);
 			oi->maxseg = mss;
 			break;
 
@@ -2339,9 +2305,9 @@ tcp_dooptions(struct tcpcb *tp, u_char *cp, int cnt, struct tcphdr *th,
 				continue;
 			oi->ts_present = 1;
 			bcopy(cp + 2, &oi->ts_val, sizeof(oi->ts_val));
-			NTOHL(oi->ts_val);
+			oi->ts_val = ntohl(oi->ts_val);
 			bcopy(cp + 6, &oi->ts_ecr, sizeof(oi->ts_ecr));
-			NTOHL(oi->ts_ecr);
+			oi->ts_ecr = ntohl(oi->ts_ecr);
 
 			if (!(th->th_flags & TH_SYN))
 				continue;
@@ -2594,10 +2560,10 @@ tcp_sack_option(struct tcpcb *tp, struct tcphdr *th, u_char *cp, int optlen)
 		struct sackblk sack;
 
 		bcopy(tmp_cp, (char *) &(sack.start), sizeof(tcp_seq));
-		NTOHL(sack.start);
+		sack.start = ntohl(sack.start);
 		bcopy(tmp_cp + sizeof(tcp_seq),
 		    (char *) &(sack.end), sizeof(tcp_seq));
-		NTOHL(sack.end);
+		sack.end = ntohl(sack.end);
 		tmp_olen -= TCPOLEN_SACK;
 		tmp_cp += TCPOLEN_SACK;
 		if (SEQ_LEQ(sack.end, sack.start))
@@ -2660,7 +2626,7 @@ tcp_sack_option(struct tcpcb *tp, struct tcphdr *th, u_char *cp, int optlen)
 #if defined(TCP_SACK) && defined(TCP_FACK)
 				if (SEQ_GT(sack.end, cur->rxmit))
 					tp->retran_data -=
-				    	    tcp_seq_subtract(cur->rxmit,
+					    tcp_seq_subtract(cur->rxmit,
 					    cur->start);
 				else
 					tp->retran_data -=
@@ -2885,7 +2851,7 @@ tcp_pulloutofband(struct socket *so, u_int urgent, struct mbuf *m, int off)
 		}
 		cnt -= m->m_len;
 		m = m->m_next;
-		if (m == 0)
+		if (m == NULL)
 			break;
 	}
 	panic("tcp_pulloutofband");
@@ -3097,7 +3063,7 @@ tcp_mss(struct tcpcb *tp, int offer)
 	 * If we compute a larger value, return it for use in sending
 	 * a max seg size option, but don't store it for use
 	 * unless we received an offer at least that large from peer.
-	 * 
+	 *
 	 * However, do not accept offers lower than the minimum of
 	 * the interface MTU and 216.
 	 */
@@ -3292,12 +3258,14 @@ tcp_mss_adv(struct ifnet *ifp, int af)
 		iphlen = sizeof(struct ip);
 		break;
 #ifdef INET6
-	case AF_INET6: 
+	case AF_INET6:
 		if (ifp != NULL)
 			mss = IN6_LINKMTU(ifp);
 		iphlen = sizeof(struct ip6_hdr);
 		break;
 #endif  
+	default:
+		unhandled_af(af);
 	}
 	mss = mss - iphlen - sizeof(struct tcphdr);
 	return (max(mss, tcp_mssdflt));
@@ -3706,20 +3674,6 @@ syn_cache_get(struct sockaddr *src, struct sockaddr *dst, struct tcphdr *th,
 	  struct inpcb *newinp = sotoinpcb(so);
 	  bcopy(inp->inp_seclevel, newinp->inp_seclevel,
 		sizeof(inp->inp_seclevel));
-	  newinp->inp_secrequire = inp->inp_secrequire;
-	  if (inp->inp_ipo != NULL) {
-		  newinp->inp_ipo = inp->inp_ipo;
-		  inp->inp_ipo->ipo_ref_count++;
-	  }
-	  if (inp->inp_ipsec_remotecred != NULL) {
-		  newinp->inp_ipsec_remotecred = inp->inp_ipsec_remotecred;
-		  inp->inp_ipsec_remotecred->ref_count++;
-	  }
-	  if (inp->inp_ipsec_remoteauth != NULL) {
-		  newinp->inp_ipsec_remoteauth
-		      = inp->inp_ipsec_remoteauth;
-		  inp->inp_ipsec_remoteauth->ref_count++;
-	  }
 	}
 #endif /* IPSEC */
 #ifdef INET6
@@ -3778,7 +3732,7 @@ syn_cache_get(struct sockaddr *src, struct sockaddr *dst, struct tcphdr *th,
 #ifdef INET6
 	else
 		inp->inp_route6 = sc->sc_route6;
-#endif  
+#endif
 	sc->sc_route4.ro_rt = NULL;
 
 	am = m_get(M_DONTWAIT, MT_SONAME);	/* XXX */
@@ -4086,7 +4040,7 @@ syn_cache_add(struct sockaddr *src, struct sockaddr *dst, struct tcphdr *th,
 	sc->sc_iss = issp ? *issp : arc4random();
 	sc->sc_peermaxseg = oi->maxseg;
 	sc->sc_ourmaxseg = tcp_mss_adv(m->m_flags & M_PKTHDR ?
-	    m->m_pkthdr.rcvif : NULL, sc->sc_src.sa.sa_family);
+	    if_get(m->m_pkthdr.ph_ifidx) : NULL, sc->sc_src.sa.sa_family);
 	sc->sc_win = win;
 	sc->sc_timestamp = tb.ts_recent;
 	if ((tb.t_flags & (TF_REQ_TSTMP|TF_RCVD_TSTMP)) ==
@@ -4185,8 +4139,7 @@ syn_cache_respond(struct syn_cache *sc, struct mbuf *m)
 		break;
 #endif
 	default:
-		if (m)
-			m_freem(m);
+		m_freem(m);
 		return (EAFNOSUPPORT);
 	}
 
@@ -4205,8 +4158,7 @@ syn_cache_respond(struct syn_cache *sc, struct mbuf *m)
 	/*
 	 * Create the IP+TCP header from scratch.
 	 */
-	if (m)
-		m_freem(m);
+	m_freem(m);
 #ifdef DIAGNOSTIC
 	if (max_linkhdr + tlen > MCLBYTES)
 		return (ENOBUFS);
@@ -4225,7 +4177,7 @@ syn_cache_respond(struct syn_cache *sc, struct mbuf *m)
 	/* Fixup the mbuf. */
 	m->m_data += max_linkhdr;
 	m->m_len = m->m_pkthdr.len = tlen;
-	m->m_pkthdr.rcvif = NULL;
+	m->m_pkthdr.ph_ifidx = 0;
 	m->m_pkthdr.ph_rtableid = sc->sc_rtableid;
 	memset(mtod(m, u_char *), 0, tlen);
 
@@ -4252,7 +4204,7 @@ syn_cache_respond(struct syn_cache *sc, struct mbuf *m)
 		break;
 #endif
 	default:
-		th = NULL;
+		unhandled_af(sc->sc_src.sa.sa_family);
 	}
 
 	th->th_seq = htonl(sc->sc_iss);
@@ -4328,8 +4280,7 @@ syn_cache_respond(struct syn_cache *sc, struct mbuf *m)
 		tdb = gettdbbysrcdst(rtable_l2(sc->sc_rtableid),
 		    0, &src, &dst, IPPROTO_TCP);
 		if (tdb == NULL) {
-			if (m)
-				m_freem(m);
+			m_freem(m);
 			return (EPERM);
 		}
 
@@ -4339,8 +4290,7 @@ syn_cache_respond(struct syn_cache *sc, struct mbuf *m)
 
 		if (tcp_signature(tdb, sc->sc_src.sa.sa_family, m, th,
 		    hlen, 0, optp) < 0) {
-			if (m)
-				m_freem(m);
+			m_freem(m);
 			return (EINVAL);
 		}
 		optp += 16;

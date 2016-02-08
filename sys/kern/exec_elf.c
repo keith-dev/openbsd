@@ -1,4 +1,4 @@
-/*	$OpenBSD: exec_elf.c,v 1.112 2015/02/10 23:39:57 guenther Exp $	*/
+/*	$OpenBSD: exec_elf.c,v 1.116 2015/04/30 11:15:28 jsg Exp $	*/
 
 /*
  * Copyright (c) 1996 Per Fogelstrom
@@ -362,6 +362,8 @@ ELFNAME(load_file)(struct proc *p, char *path, struct exec_package *epp,
 
 	for (i = 0; i < eh.e_phnum; i++) {
 		if (ph[i].p_type == PT_LOAD) {
+			if (ph[i].p_filesz > ph[i].p_memsz)
+				goto bad1;
 			loadmap[idx].vaddr = trunc_page(ph[i].p_vaddr);
 			loadmap[idx].memsz = round_page (ph[i].p_vaddr +
 			    ph[i].p_memsz - loadmap[idx].vaddr);
@@ -377,7 +379,8 @@ ELFNAME(load_file)(struct proc *p, char *path, struct exec_package *epp,
 	 * would (i.e. something safely out of the way).
 	 */
 	if (pos == ELFDEFNNAME(NO_ADDR)) {
-		pos = uvm_map_hint(p->p_vmspace, PROT_EXEC);
+		pos = uvm_map_hint(p->p_vmspace, PROT_EXEC,
+		    VM_MIN_ADDRESS, VM_MAXUSER_ADDRESS);
 	}
 
 	pos = ELF_ROUND(pos, file_align);
@@ -549,14 +552,20 @@ ELFNAME2(exec,makecmds)(struct proc *p, struct exec_package *epp)
 
 	for (i = 0, pp = ph; i < eh->e_phnum; i++, pp++) {
 		if (pp->p_type == PT_INTERP && !interp) {
-			if (pp->p_filesz >= MAXPATHLEN)
+			if (pp->p_filesz < 2 || pp->p_filesz > MAXPATHLEN)
 				goto bad;
 			interp = pool_get(&namei_pool, PR_WAITOK);
 			if ((error = ELFNAME(read_from)(p, epp->ep_vp,
 			    pp->p_offset, interp, pp->p_filesz)) != 0) {
 				goto bad;
 			}
+			if (interp[pp->p_filesz - 1] != '\0')
+				goto bad;
 		} else if (pp->p_type == PT_LOAD) {
+			if (pp->p_filesz > pp->p_memsz) {
+				error = EINVAL;
+				goto bad;
+			}
 			if (base_ph == NULL)
 				base_ph = pp;
 		} else if (pp->p_type == PT_PHDR) {

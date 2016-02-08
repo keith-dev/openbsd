@@ -1,4 +1,4 @@
-/*	$OpenBSD: ttm_lock.h,v 1.1 2013/08/12 04:11:53 jsg Exp $	*/
+/*	$OpenBSD: ttm_lock.h,v 1.3 2015/04/18 14:47:35 jsg Exp $	*/
 /**************************************************************************
  *
  * Copyright (c) 2007-2009 VMware, Inc., Palo Alto, CA., USA
@@ -68,8 +68,8 @@
 
 struct ttm_lock {
 	struct ttm_base_object base;
-	int queue;
-	struct mutex lock;
+	wait_queue_head_t queue;
+	spinlock_t lock;
 	int32_t rw;
 	uint32_t flags;
 	bool kill_takers;

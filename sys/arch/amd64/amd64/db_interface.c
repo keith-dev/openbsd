@@ -1,4 +1,4 @@
-/*	$OpenBSD: db_interface.c,v 1.21 2014/10/15 15:55:42 uebayasi Exp $	*/
+/*	$OpenBSD: db_interface.c,v 1.23 2015/05/18 19:59:27 guenther Exp $	*/
 /*	$NetBSD: db_interface.c,v 1.1 2003/04/26 18:39:27 fvdl Exp $	*/
 
 /*
@@ -51,7 +51,6 @@
 #include <ddb/db_sym.h>
 #include <ddb/db_command.h>
 #include <ddb/db_extern.h>
-#include <ddb/db_access.h>
 #include <ddb/db_output.h>
 #include <ddb/db_run.h>
 #include <ddb/db_var.h>
@@ -143,10 +142,6 @@ kdb_trap(int type, int code, db_regs_t *regs)
 	ddb_regs = *regs;
 
 	ddb_regs.tf_cs &= 0xffff;
-	ddb_regs.tf_ds &= 0xffff;
-	ddb_regs.tf_es &= 0xffff;
-	ddb_regs.tf_fs &= 0xffff;
-	ddb_regs.tf_gs &= 0xffff;
 	ddb_regs.tf_ss &= 0xffff;
 
 	s = splhigh();

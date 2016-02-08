@@ -1,4 +1,4 @@
-/*	$OpenBSD: locore.S,v 1.62 2015/01/16 10:17:51 sf Exp $	*/
+/*	$OpenBSD: locore.S,v 1.72 2015/07/17 15:37:58 guenther Exp $	*/
 /*	$NetBSD: locore.S,v 1.13 2004/03/25 18:33:17 drochner Exp $	*/
 
 /*
@@ -167,7 +167,7 @@ _C_LABEL(lapic_isr):
 	.space  NBPG-LAPIC_ISR
 #endif
 
-	.globl	_C_LABEL(cpu_id),_C_LABEL(cpu_vendor), _C_LABEL(cpu_brand_id)
+	.globl	_C_LABEL(cpu_id),_C_LABEL(cpu_vendor)
 	.globl	_C_LABEL(cpuid_level),_C_LABEL(cpu_feature)
 	.globl	_C_LABEL(cpu_ecxfeature),_C_LABEL(ecpu_ecxfeature)
 	.globl	_C_LABEL(cpu_perf_eax)
@@ -180,8 +180,6 @@ _C_LABEL(lapic_isr):
 	.globl	_C_LABEL(biosbasemem),_C_LABEL(biosextmem)
 	.globl	_C_LABEL(bootapiver)
 	.globl	_C_LABEL(pg_nx)
-_C_LABEL(cpu):		.long	0	# are we 386, 386sx, or 486,
-					#   or Pentium, or..
 _C_LABEL(cpu_id):	.long	0	# saved from `cpuid' instruction
 _C_LABEL(cpu_feature):	.long	0	# feature flags from 'cpuid'
 					#   instruction
@@ -195,7 +193,6 @@ _C_LABEL(cpuid_level):	.long	-1	# max. level accepted by 'cpuid'
 					#   instruction
 _C_LABEL(cpu_vendor):	.space	16	# vendor string returned by `cpuid'
 					#   instruction
-_C_LABEL(cpu_brand_id):	.long	0	# brand ID from 'cpuid' instruction
 _C_LABEL(ssym):		.quad	0	# ptr to start of syms
 _C_LABEL(esym):		.quad	0	# ptr to end of syms
 _C_LABEL(atdevbase):	.quad	0	# location of start of iomem in virtual
@@ -264,6 +261,10 @@ start:	movw	$0x1234,0x472			# warm boot
 	movl	8(%esp),%eax
 	movl	%eax, RELOC(bootdev)
 
+	/*
+	 * Syms are placed after last load and bss of the kernel.
+	 * XXX Boot ignores 2MB roundup of _end, so esyms can be < _end.
+	 */
 	movl	16(%esp), %eax
 	testl   %eax,%eax
 	jz      1f
@@ -283,8 +284,9 @@ start:	movw	$0x1234,0x472			# warm boot
 	/*
 	 * Copy the boot arguments to bootinfo[] in machdep.c.
 	 *
-	 * We are passed the size of bootinfo[] in bootinfo_size, and
-	 * we report how much data /boot passed us back in the same variable.
+	 * We are passed the size of the data /boot passed to us in
+	 * 28(%esp). We copy up to bootinfo_size bytes of data into
+	 * bootinfo and report back how much we copied in bootinfo_size.
 	 *
 	 * machdep.c can then take action if bootinfo_size >= bootinfo[]
 	 * (which would meant that we may have been passed too much data).
@@ -292,7 +294,7 @@ start:	movw	$0x1234,0x472			# warm boot
  	movl	28(%esp), %eax
 	movl	%eax, %ecx
 	cmpl	RELOC(bootinfo_size), %ecx	/* Too much? */
-	jnc	bi_size_ok
+	jb	bi_size_ok
 	movl	RELOC(bootinfo_size), %ecx	/* Only copy this much */
 bi_size_ok:
 	movl	%eax, RELOC(bootinfo_size)	/* Report full amount */
@@ -347,10 +349,6 @@ cont:
 	movl	$0x80000007,%eax
 	cpuid
 	movl	%edx,RELOC(_C_LABEL(cpu_apmi_edx))
-
-	/* Brand ID is bits 0-7 of %ebx */
-	andl	$255,%ebx
-	movl	%ebx,RELOC(cpu_brand_id)
 
 	/*
 	 * Finished with old stack; load new %esp now instead of later so we
@@ -423,6 +421,9 @@ cont:
 	testl	%eax,%eax
 	jz	1f
 	subl	$KERNBASE_LO,%eax	/* XXX */
+	/* Page tables must be after symbols and after kernel image. */
+	cmpl	%eax,%edi
+	jg	1f
 	movl	%eax,%edi
 1:
 #endif
@@ -867,6 +868,17 @@ ENTRY(cpu_switchto)
 	movq	%rbp,PCB_RBP(%r13)
 
 switch_exited:
+	/* did old proc run in userspace?  then reset the segment regs */
+	btrl	$CPUF_USERSEGS_BIT, CPUVAR(FLAGS)
+	jnc	restore_saved
+
+	/* set %ds, %es, and %fs to expected value to prevent info leak */
+	movw	$(GSEL(GUDATA_SEL, SEL_UPL)),%ax
+	movw	%ax,%ds
+	movw	%ax,%es
+	movw	%ax,%fs
+
+restore_saved:
 	/*
 	 * Restore saved context.
 	 *
@@ -987,6 +999,16 @@ IDTVEC(syscall32)
  * it can be made faster in the future.
  */
 IDTVEC(syscall)
+	/*
+	 * Enter here with interrupts blocked; %rcx contains the caller's
+	 * %rip and the original rflags has been copied to %r11.  %cs and
+	 * %ss have been updated to the kernel segments, but %rsp is still
+	 * the user-space value.
+	 * First order of business is to swap to the kernel gs.base so that
+	 * we can access our struct cpu_info and use the scratch space there
+	 * to switch to our kernel stack.  Once that's in place we can
+	 * unblock interrupts and save the rest of the syscall frame.
+	 */
 	swapgs
 	movq	%r15,CPUVAR(SCRATCH)
 	movq	CPUVAR(CURPCB),%r15
@@ -1007,41 +1029,37 @@ IDTVEC(syscall)
 	movq	CPUVAR(SCRATCH),%r15
 	subq	$32,%rsp
 	INTR_SAVE_GPRS
-	movw	%fs,TF_FS(%rsp)
-	movw	%gs,TF_GS(%rsp)
-	movw	%es,TF_ES(%rsp)
-	movw	$(GSEL(GUDATA_SEL, SEL_UPL)),TF_DS(%rsp)
 	movq	%r11, TF_RFLAGS(%rsp)	/* old rflags from syscall insn */
 	movq	$(GSEL(GUCODE_SEL, SEL_UPL)), TF_CS(%rsp)
 	movq	%rcx,TF_RIP(%rsp)
-	movq	$2,TF_ERR(%rsp)
-	movq	$T_ASTFLT, TF_TRAPNO(%rsp)
+	movq	$2,TF_ERR(%rsp)		/* ignored */
 
 	movq	CPUVAR(CURPROC),%r14
 	movq	%rsp,P_MD_REGS(%r14)	# save pointer to frame
 	andl	$~MDP_IRET,P_MD_FLAGS(%r14)
 	movq	%rsp,%rdi
 	call	_C_LABEL(syscall)
-1:	/* Check for ASTs on exit to user mode. */
+
+.Lsyscall_check_asts:
+	/* Check for ASTs on exit to user mode. */
 	cli
 	CHECK_ASTPENDING(%r11)
 	je	2f
-	/* Always returning to user mode here. */
 	CLEAR_ASTPENDING(%r11)
 	sti
-	/* Pushed T_ASTFLT into tf_trapno on entry. */
 	movq	%rsp,%rdi
-	call	_C_LABEL(trap)
-	jmp	1b
+	call	_C_LABEL(ast)
+	jmp	.Lsyscall_check_asts
+
 2:
-	sti
-	testl	$MDP_IRET, P_MD_FLAGS(%r14)
-	jne	iret_return;
-syscall_return:
 #ifdef DIAGNOSTIC
 	cmpl	$IPL_NONE,CPUVAR(ILEVEL)
-	jne	3f
+	jne	.Lsyscall_spl_not_lowered
 #endif /* DIAGNOSTIC */
+
+	/* Could registers have been changed that require an iretq? */
+	testl	$MDP_IRET, P_MD_FLAGS(%r14)
+	jne	intr_fast_exit
 
 	movq	TF_RDI(%rsp),%rdi
 	movq	TF_RSI(%rsp),%rsi
@@ -1066,7 +1084,8 @@ syscall_return:
 	sysretq
 
 #ifdef DIAGNOSTIC
-3:	movabsq	$4f, %rdi
+.Lsyscall_spl_not_lowered:
+	movabsq	$4f, %rdi
 	movl	TF_RAX(%rsp),%esi
 	movl	TF_RDI(%rsp),%edx
 	movl	%ebx,%ecx
@@ -1077,7 +1096,7 @@ syscall_return:
 	int	$3
 #endif /* DDB */
 	movl	$IPL_NONE,CPUVAR(ILEVEL)
-	jmp	1b
+	jmp	.Lsyscall_check_asts
 4:	.asciz	"WARNING: SPL NOT LOWERED ON SYSCALL %d %d EXIT %x %x\n"
 #endif
 
@@ -1089,30 +1108,14 @@ NENTRY(proc_trampoline)
 	movl	$IPL_NONE,CPUVAR(ILEVEL)
 	movq	%r13,%rdi
 	call	*%r12
-	INTRFASTEXIT
-	/* NOTREACHED */
-
-NENTRY(child_trampoline)
-#ifdef MULTIPROCESSOR
-	call	_C_LABEL(proc_trampoline_mp)
-#endif
-	movl	$IPL_NONE,CPUVAR(ILEVEL)
-	movq	%r13,%rdi
-	call	*%r12
-	jmp	syscall_return
+	movq	CPUVAR(CURPROC),%r14
+	jmp	.Lsyscall_check_asts
 
 
 /*
  * Return via iretq, for real interrupts and signal returns
  */
-iret_return:
-1:
-#ifdef DIAGNOSTIC
-	cmpl	$IPL_NONE,CPUVAR(ILEVEL)
-	jne	3f
-#endif /* DIAGNOSTIC */
-	.globl	intr_fast_exit
-intr_fast_exit:
+NENTRY(intr_fast_exit)
 	movq	TF_RDI(%rsp),%rdi
 	movq	TF_RSI(%rsp),%rsi
 	movq	TF_R8(%rsp),%r8
@@ -1125,7 +1128,7 @@ intr_fast_exit:
 	movq	TF_RBP(%rsp),%rbp
 	movq	TF_RBX(%rsp),%rbx
 
-	testq	$SEL_UPL,TF_CS(%rsp)
+	testq	$SEL_RPL,TF_CS(%rsp)
 	je	5f
 
 	INTR_RESTORE_SELECTORS
@@ -1139,19 +1142,6 @@ intr_fast_exit:
 	.globl	_C_LABEL(doreti_iret)
 _C_LABEL(doreti_iret):
 	iretq
-
-#ifdef DIAGNOSTIC
-3:	sti
-	movabsq	$4f, %rdi
-	xorq	%rax,%rax
-	call	_C_LABEL(printf)
-#ifdef DDB
-	int	$3
-#endif /* DDB */
-	movl	$IPL_NONE,CPUVAR(ILEVEL)
-	jmp	2b
-4:	.asciz	"WARNING: SPL NOT LOWERED ON SYSCALL EXIT\n"
-#endif /* DIAGNOSTIC */
 
 
 ENTRY(pagezero)

@@ -1,4 +1,4 @@
-/*	$OpenBSD: in_pcb.c,v 1.168 2015/02/10 03:07:56 claudio Exp $	*/
+/*	$OpenBSD: in_pcb.c,v 1.172 2015/07/19 02:35:35 deraadt Exp $	*/
 /*	$NetBSD: in_pcb.c,v 1.25 1996/02/13 23:41:53 christos Exp $	*/
 
 /*
@@ -79,6 +79,7 @@
 #include <sys/proc.h>
 #include <sys/domain.h>
 #include <sys/pool.h>
+#include <sys/tame.h>
 
 #include <net/if.h>
 #include <net/if_var.h>
@@ -442,6 +443,7 @@ in_pcbconnect(struct inpcb *inp, struct mbuf *nam)
 {
 	struct in_addr *ina = NULL;
 	struct sockaddr_in *sin = mtod(nam, struct sockaddr_in *);
+	struct proc *p = curproc;
 	int error;
 
 #ifdef INET6
@@ -457,6 +459,9 @@ in_pcbconnect(struct inpcb *inp, struct mbuf *nam)
 		return (EAFNOSUPPORT);
 	if (sin->sin_port == 0)
 		return (EADDRNOTAVAIL);
+
+	if (tame_dns_check(p, sin->sin_port))
+		return (tame_fail(p, EPERM, TAME_DNS));
 
 	error = in_selectsrc(&ina, sin, inp->inp_moptions, &inp->inp_route,
 	    &inp->inp_laddr, inp->inp_rtableid);
@@ -519,8 +524,7 @@ in_pcbdetach(struct inpcb *inp)
 
 	so->so_pcb = 0;
 	sofree(so);
-	if (inp->inp_options)
-		m_freem(inp->inp_options);
+	m_freem(inp->inp_options);
 	if (inp->inp_route.ro_rt)
 		rtfree(inp->inp_route.ro_rt);
 #ifdef INET6
@@ -530,21 +534,6 @@ in_pcbdetach(struct inpcb *inp)
 	} else
 #endif
 		ip_freemoptions(inp->inp_moptions);
-#ifdef IPSEC
-	/* IPsec cleanup here */
-	if (inp->inp_tdb_in)
-		TAILQ_REMOVE(&inp->inp_tdb_in->tdb_inp_in,
-			     inp, inp_tdb_in_next);
-	if (inp->inp_tdb_out)
-		TAILQ_REMOVE(&inp->inp_tdb_out->tdb_inp_out, inp,
-			     inp_tdb_out_next);
-	if (inp->inp_ipsec_remotecred)
-		ipsp_reffree(inp->inp_ipsec_remotecred);
-	if (inp->inp_ipsec_remoteauth)
-		ipsp_reffree(inp->inp_ipsec_remoteauth);
-	if (inp->inp_ipo)
-		ipsec_delete_policy(inp->inp_ipo);
-#endif
 #if NPF > 0
 	if (inp->inp_pf_sk) {
 		struct pf_state_key	*sk;

@@ -1,4 +1,4 @@
-/*	$OpenBSD: octdwctwo.c,v 1.4 2015/02/14 06:46:03 uebayasi Exp $	*/
+/*	$OpenBSD: octdwctwo.c,v 1.8 2015/07/19 00:33:36 jasper Exp $	*/
 
 /*
  * Copyright (c) 2015 Masao Uebayashi <uebayasi@tombiinc.com>
@@ -19,26 +19,18 @@
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/device.h>
-#include <sys/malloc.h>
-#include <sys/pool.h>
 
 #include <machine/intr.h>
 #include <machine/bus.h>
 #include <machine/octeonreg.h>
 #include <machine/octeonvar.h>
 
+#include <octeon/dev/iobusvar.h>
+#include <octeon/dev/octhcireg.h>
+
 #include <dev/usb/usb.h>
 #include <dev/usb/usbdi.h>
 #include <dev/usb/usbdivar.h>
-#include <dev/usb/usb_mem.h>
-#include <dev/usb/usb_quirks.h>
-
-#include <octeon/dev/usb_port.h>
-#include <octeon/dev/iobusvar.h>
-#include <octeon/dev/cn30xxusbnvar.h>
-#include <octeon/dev/cn30xxusbcvar.h>
-#include <octeon/dev/cn30xxusbnreg.h>
-#include <octeon/dev/cn30xxusbcreg.h>
 
 #include <dev/usb/dwc2/dwc2var.h>
 #include <dev/usb/dwc2/dwc2.h>
@@ -62,6 +54,15 @@ int			octdwctwo_set_dma_addr(void *, dma_addr_t, int);
 u_int64_t		octdwctwo_reg2_rd(struct octdwctwo_softc *, bus_size_t);
 void			octdwctwo_reg2_wr(struct octdwctwo_softc *, bus_size_t,
 			    u_int64_t);
+void			octdwctwo_reg_set(struct octdwctwo_softc *, bus_size_t,
+			    u_int64_t);
+void			octdwctwo_reg_clear(struct octdwctwo_softc *,
+			    bus_size_t, u_int64_t);
+u_int32_t		octdwctwo_read_4(bus_space_tag_t, bus_space_handle_t,
+			    bus_size_t);
+void			octdwctwo_write_4(bus_space_tag_t, bus_space_handle_t,
+			    bus_size_t, u_int32_t);
+
 
 const struct cfattach octdwctwo_ca = {
 	sizeof(struct octdwctwo_softc), octdwctwo_match, octdwctwo_attach,
@@ -79,7 +80,7 @@ static struct dwc2_core_params octdwctwo_params = {
 	.speed = 0,
 	.enable_dynamic_fifo = 1,
 	.en_multiple_tx_fifo = 0,
-	.host_rx_fifo_size = 128/*XXX*/,
+	.host_rx_fifo_size = 256/*XXX*/,
 	.host_nperio_tx_fifo_size = 128/*XXX*/,
 	.host_perio_tx_fifo_size = 128/*XXX*/,
 	.max_transfer_size = 65535,
@@ -103,6 +104,22 @@ static struct dwc2_core_dma_config octdwctwo_dma_config = {
 	.set_dma_addr = octdwctwo_set_dma_addr,
 };
 
+/*
+ * This bus space tag adjusts register addresses to account for
+ * dwc2 using little endian addressing.  dwc2 only does 32bit reads
+ * and writes, so only those functions are provided.
+ */
+bus_space_t octdwctwo_tag = {
+	.bus_base = PHYS_TO_XKPHYS(0, CCA_NC),
+	.bus_private = NULL,
+	._space_read_4 =	octdwctwo_read_4,
+	._space_write_4 =	octdwctwo_write_4,
+	._space_map =		iobus_space_map,
+	._space_unmap =		iobus_space_unmap,
+	._space_subregion =	generic_space_region,
+	._space_vaddr =		generic_space_vaddr
+};
+
 int
 octdwctwo_match(struct device *parent, void *match, void *aux)
 {
@@ -114,14 +131,15 @@ octdwctwo_attach(struct device *parent, struct device *self, void *aux)
 {
 	struct octdwctwo_softc *sc = (struct octdwctwo_softc *)self;
 	struct iobus_attach_args *aa = aux;
+	uint64_t clk;
 	int rc;
 
-	sc->sc_dwc2.sc_iot = aa->aa_bust;
+	sc->sc_dwc2.sc_iot = &octdwctwo_tag;
 	sc->sc_dwc2.sc_bus.pipe_size = sizeof(struct usbd_pipe);
 	sc->sc_dwc2.sc_bus.dmatag = aa->aa_dmat;
 	sc->sc_dwc2.sc_params = &octdwctwo_params;
 
-	rc = bus_space_map(aa->aa_bust, USBC_BASE, USBC_SIZE,
+	rc = bus_space_map(sc->sc_dwc2.sc_iot, USBC_BASE, USBC_SIZE,
 	    0, &sc->sc_dwc2.sc_ioh);
 	KASSERT(rc == 0);
 
@@ -133,6 +151,57 @@ octdwctwo_attach(struct device *parent, struct device *self, void *aux)
 	    0, &sc->sc_regh2);
 	KASSERT(rc == 0);
 
+	/*
+	 * Clock setup.
+	 */
+	clk = bus_space_read_8(sc->sc_bust, sc->sc_regh, USBN_CLK_CTL_OFFSET);
+	clk |= USBN_CLK_CTL_POR;
+	clk &= ~(USBN_CLK_CTL_HRST | USBN_CLK_CTL_PRST | USBN_CLK_CTL_HCLK_RST |
+	    USBN_CLK_CTL_ENABLE | USBN_CLK_CTL_P_C_SEL | USBN_CLK_CTL_P_RTYPE);
+	clk |= SET_USBN_CLK_CTL_DIVIDE(0x4ULL)
+	    | SET_USBN_CLK_CTL_DIVIDE2(0x0ULL);
+
+	bus_space_write_8(sc->sc_bust, sc->sc_regh, USBN_CLK_CTL_OFFSET, clk);
+	bus_space_read_8(sc->sc_bust, sc->sc_regh, USBN_CLK_CTL_OFFSET);
+
+	/*
+	 * Reset HCLK and wait for it to stabilize.
+	 */
+	octdwctwo_reg_set(sc, USBN_CLK_CTL_OFFSET, USBN_CLK_CTL_HCLK_RST);
+	delay(64);
+
+	octdwctwo_reg_clear(sc, USBN_CLK_CTL_OFFSET, USBN_CLK_CTL_POR);
+
+	/*
+	 * Wait for the PHY clock to start.
+	 */
+	delay(1000);
+
+	octdwctwo_reg_set(sc, USBN_USBP_CTL_STATUS_OFFSET,
+	    USBN_USBP_CTL_STATUS_ATE_RESET);
+	delay(10);
+
+	octdwctwo_reg_clear(sc, USBN_USBP_CTL_STATUS_OFFSET,
+			USBN_USBP_CTL_STATUS_ATE_RESET);
+	octdwctwo_reg_set(sc, USBN_CLK_CTL_OFFSET, USBN_CLK_CTL_PRST);
+
+	/*
+	 * Select host mode.
+	 */
+	octdwctwo_reg_clear(sc, USBN_USBP_CTL_STATUS_OFFSET,
+	    USBN_USBP_CTL_STATUS_HST_MODE);
+	delay(1);
+
+	octdwctwo_reg_set(sc, USBN_CLK_CTL_OFFSET, USBN_CLK_CTL_HRST);
+
+	/*
+	 * Enable clock.
+	 */
+	octdwctwo_reg_set(sc, USBN_CLK_CTL_OFFSET, USBN_CLK_CTL_ENABLE);
+	delay(1);
+
+	strlcpy(sc->sc_dwc2.sc_vendor, "Octeon", sizeof(sc->sc_dwc2.sc_vendor));
+
 	rc = dwc2_init(&sc->sc_dwc2);
 	if (rc != 0)
 		return;
@@ -140,14 +209,15 @@ octdwctwo_attach(struct device *parent, struct device *self, void *aux)
 	rc = dwc2_dma_config(&sc->sc_dwc2, &octdwctwo_dma_config);
 	if (rc != 0)
 		return;
+
+	printf("\n");
+
 	sc->sc_dwc2.sc_child = config_found(&sc->sc_dwc2.sc_bus.bdev,
 	    &sc->sc_dwc2.sc_bus, usbctlprint);
 
 	sc->sc_ih = octeon_intr_establish(CIU_INT_USB, IPL_USB, dwc2_intr,
 	    (void *)&sc->sc_dwc2, sc->sc_dwc2.sc_bus.bdev.dv_xname);
 	KASSERT(sc->sc_ih != NULL);
-
-	printf("\n");
 }
 
 int
@@ -177,4 +247,41 @@ octdwctwo_reg2_wr(struct octdwctwo_softc *sc, bus_size_t offset, u_int64_t value
 	bus_space_write_8(sc->sc_bust, sc->sc_regh2, offset, value);
 	/* guarantee completion of the store operation on RSL registers*/
 	bus_space_read_8(sc->sc_bust, sc->sc_regh2, offset);
+}
+
+void
+octdwctwo_reg_set(struct octdwctwo_softc *sc, bus_size_t offset,
+    u_int64_t bits)
+{
+	u_int64_t value;
+	value = bus_space_read_8(sc->sc_bust, sc->sc_regh, offset);
+	value |= bits;
+
+	bus_space_write_8(sc->sc_bust, sc->sc_regh, offset, value);
+	bus_space_read_8(sc->sc_bust, sc->sc_regh, offset);
+}
+
+void
+octdwctwo_reg_clear(struct octdwctwo_softc *sc, bus_size_t offset,
+    u_int64_t bits)
+{
+	u_int64_t value;
+	value = bus_space_read_8(sc->sc_bust, sc->sc_regh, offset);
+	value &= ~bits;
+
+	bus_space_write_8(sc->sc_bust, sc->sc_regh, offset, value);
+	bus_space_read_8(sc->sc_bust, sc->sc_regh, offset);
+}
+
+u_int32_t
+octdwctwo_read_4(bus_space_tag_t t, bus_space_handle_t h, bus_size_t o)
+{
+	return *(volatile u_int32_t *)(h + (o^4));
+}
+
+void
+octdwctwo_write_4(bus_space_tag_t t, bus_space_handle_t h, bus_size_t o,
+    u_int32_t v)
+{
+	*(volatile u_int32_t *)(h + (o^4)) = v;
 }

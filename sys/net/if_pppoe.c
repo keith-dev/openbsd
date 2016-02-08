@@ -1,4 +1,4 @@
-/* $OpenBSD: if_pppoe.c,v 1.43 2014/12/05 15:50:04 mpi Exp $ */
+/* $OpenBSD: if_pppoe.c,v 1.46 2015/06/16 11:09:39 mpi Exp $ */
 /* $NetBSD: if_pppoe.c,v 1.51 2003/11/28 08:56:48 keihan Exp $ */
 
 /*
@@ -147,8 +147,8 @@ struct pppoe_softc {
 };
 
 /* incoming traffic will be queued here */
-struct ifqueue pppoediscinq;
-struct ifqueue pppoeinq;
+struct niqueue pppoediscinq = NIQUEUE_INITIALIZER(IFQ_MAXLEN, NETISR_PPPOE);
+struct niqueue pppoeinq = NIQUEUE_INITIALIZER(IFQ_MAXLEN, NETISR_PPPOE);
 
 /* input routines */
 static void pppoe_disc_input(struct mbuf *);
@@ -181,8 +181,8 @@ static int pppoe_send_padt(struct ifnet *, u_int, const u_int8_t *);
 static int pppoe_output(struct pppoe_softc *, struct mbuf *);
 
 /* internal helper functions */
-static struct pppoe_softc *pppoe_find_softc_by_session(u_int, struct ifnet *);
-static struct pppoe_softc *pppoe_find_softc_by_hunique(u_int8_t *, size_t, struct ifnet *);
+static struct pppoe_softc *pppoe_find_softc_by_session(u_int, u_int);
+static struct pppoe_softc *pppoe_find_softc_by_hunique(u_int8_t *, size_t, u_int);
 static struct mbuf	  *pppoe_get_mbuf(size_t len);
 
 LIST_HEAD(pppoe_softc_head, pppoe_softc) pppoe_softc_list;
@@ -201,9 +201,6 @@ pppoeattach(int count)
 {
 	LIST_INIT(&pppoe_softc_list);
 	if_clone_attach(&pppoe_cloner);
-
-	IFQ_SET_MAXLEN(&pppoediscinq, IFQ_MAXLEN);
-	IFQ_SET_MAXLEN(&pppoeinq, IFQ_MAXLEN);
 }
 
 /* Create a new interface. */
@@ -298,7 +295,7 @@ pppoe_clone_destroy(struct ifnet *ifp)
  * be 1.
  */
 static struct pppoe_softc *
-pppoe_find_softc_by_session(u_int session, struct ifnet *rcvif)
+pppoe_find_softc_by_session(u_int session, u_int ifidx)
 {
 	struct pppoe_softc *sc;
 
@@ -308,7 +305,7 @@ pppoe_find_softc_by_session(u_int session, struct ifnet *rcvif)
 	LIST_FOREACH(sc, &pppoe_softc_list, sc_list) {
 		if (sc->sc_state == PPPOE_STATE_SESSION
 		    && sc->sc_session == session
-		    && sc->sc_eth_if == rcvif) {
+		    && sc->sc_eth_if->if_index == ifidx) {
 			return (sc);
 		}
 	}
@@ -320,7 +317,7 @@ pppoe_find_softc_by_session(u_int session, struct ifnet *rcvif)
  * or NULL if token is bogus.
  */
 static struct pppoe_softc *
-pppoe_find_softc_by_hunique(u_int8_t *token, size_t len, struct ifnet *rcvif)
+pppoe_find_softc_by_hunique(u_int8_t *token, size_t len, u_int ifidx)
 {
 	struct pppoe_softc *sc;
 	u_int32_t hunique;
@@ -347,7 +344,7 @@ pppoe_find_softc_by_hunique(u_int8_t *token, size_t len, struct ifnet *rcvif)
 			sc->sc_sppp.pp_if.if_xname, sc->sc_state);
 		return (NULL);
 	}
-	if (sc->sc_eth_if != rcvif) {
+	if (sc->sc_eth_if->if_index != ifidx) {
 		printf("%s: wrong interface, not accepting host unique\n",
 			sc->sc_sppp.pp_if.if_xname);
 		return (NULL);
@@ -360,27 +357,14 @@ void
 pppoeintr(void)
 {
 	struct mbuf *m;
-	int s;
 
 	splsoftassert(IPL_SOFTNET);
-	
-	for (;;) {
-		s = splnet();
-		IF_DEQUEUE(&pppoediscinq, m);
-		splx(s);
-		if (m == NULL)
-			break;
-		pppoe_disc_input(m);
-	}
 
-	for (;;) {
-		s = splnet();
-		IF_DEQUEUE(&pppoeinq, m);
-		splx(s);
-		if (m == NULL)
-			break;
+	while ((m = niq_dequeue(&pppoediscinq)) != NULL)
+		pppoe_disc_input(m);
+
+	while ((m = niq_dequeue(&pppoeinq)) != NULL)
 		pppoe_data_input(m);
-	}
 }
 
 /* Analyze and handle a single received packet while not in session state. */
@@ -500,7 +484,7 @@ static void pppoe_dispatch_disc_pkt(struct mbuf *m, int off)
 			hunique_len = len;
 #endif
 			sc = pppoe_find_softc_by_hunique(mtod(n, caddr_t) + noff,
-			    len, m->m_pkthdr.rcvif);
+			    len, m->m_pkthdr.ph_ifidx);
 			if (sc != NULL)
 				devname = sc->sc_sppp.pp_if.if_xname;
 			break;
@@ -626,7 +610,7 @@ breakbreak:
 		
 		sc = pppoe_find_softc_by_hunique(ac_cookie,
 						 ac_cookie_len,
-						 m->m_pkthdr.rcvif);
+						 m->m_pkthdr.ph_ifidx);
 		if (sc == NULL) {
 			/* be quiet if there is not a single pppoe instance */
 			if (!LIST_EMPTY(&pppoe_softc_list))
@@ -814,7 +798,7 @@ pppoe_data_input(struct mbuf *m)
 		goto drop;
 
 	session = ntohs(ph->session);
-	sc = pppoe_find_softc_by_session(session, m->m_pkthdr.rcvif);
+	sc = pppoe_find_softc_by_session(session, m->m_pkthdr.ph_ifidx);
 	if (sc == NULL) {
 #ifdef PPPOE_TERM_UNKNOWN_SESSIONS
 		printf("pppoe (data): input for unknown session 0x%x, sending PADT\n",
@@ -853,7 +837,7 @@ pppoe_data_input(struct mbuf *m)
 		goto drop;
 
 	/* fix incoming interface pointer (not the raw ethernet interface anymore) */
-	m->m_pkthdr.rcvif = &sc->sc_sppp.pp_if;
+	m->m_pkthdr.ph_ifidx = sc->sc_sppp.pp_if.if_index;
 
 	/* pass packet up and account for it */
 	sc->sc_sppp.pp_if.if_ipackets++;
@@ -1059,7 +1043,7 @@ pppoe_get_mbuf(size_t len)
 	m->m_data += sizeof(struct ether_header);
 	m->m_len = len;
 	m->m_pkthdr.len = len;
-	m->m_pkthdr.rcvif = NULL;
+	m->m_pkthdr.ph_ifidx = 0;
 
 	return (m);
 }

@@ -1,4 +1,4 @@
-/*	$OpenBSD: elink3.c,v 1.82 2014/12/29 02:33:13 brad Exp $	*/
+/*	$OpenBSD: elink3.c,v 1.86 2015/07/08 07:21:50 mpi Exp $	*/
 /*	$NetBSD: elink3.c,v 1.32 1997/05/14 00:22:00 thorpej Exp $	*/
 
 /*
@@ -46,7 +46,6 @@
 #include <sys/device.h>
 
 #include <net/if.h>
-#include <net/if_dl.h>
 #include <net/if_types.h>
 #include <net/netisr.h>
 #include <net/if_media.h>
@@ -1026,7 +1025,7 @@ startagain:
 			} else
 				bus_space_write_multi_1(iot, ioh, txreg,
 				    data, m->m_len);
-			MFREE(m, m0);
+			m0 = m_free(m);
 			m = m0;
 		}
 	} else {
@@ -1041,7 +1040,7 @@ startagain:
 			} else
 				bus_space_write_multi_1(iot, ioh, txreg,
 				    data, m->m_len);
-			MFREE(m, m0);
+			m0 = m_free(m);
 			m = m0;
 		}
 	}
@@ -1244,8 +1243,9 @@ epread(struct ep_softc *sc)
 	bus_space_tag_t iot = sc->sc_iot;
 	bus_space_handle_t ioh = sc->sc_ioh;
 	struct ifnet *ifp = &sc->sc_arpcom.ac_if;
+	struct mbuf_list ml = MBUF_LIST_INITIALIZER();
 	struct mbuf *m;
-	int len;
+	int len, error = 0;
 
 	len = bus_space_read_2(iot, ioh, ep_w1_reg(sc, EP_W1_RX_STATUS));
 
@@ -1276,11 +1276,12 @@ again:
 #endif
 
 	if (len & ERR_INCOMPLETE)
-		return;
+		goto done;
 
 	if (len & ERR_RX) {
 		++ifp->if_ierrors;
-		goto abort;
+		error = 1;
+		goto done;
 	}
 
 	len &= RX_BYTES_MASK;	/* Lower 11 bits = RX bytes. */
@@ -1289,21 +1290,11 @@ again:
 	m = epget(sc, len);
 	if (m == NULL) {
 		ifp->if_ierrors++;
-		goto abort;
+		error = 1;
+		goto done;
 	}
 
-	++ifp->if_ipackets;
-
-#if NBPFILTER > 0
-	/*
-	 * Check if there's a BPF listener on this interface.
-	 * If so, hand off the raw packet to BPF.
-	 */
-	if (ifp->if_bpf)
-		bpf_mtap(ifp->if_bpf, m, BPF_DIRECTION_IN);
-#endif
-
-	ether_input_mbuf(ifp, m);
+	ml_enqueue(&ml, m);
 
 	/*
 	 * In periods of high traffic we can actually receive enough
@@ -1332,15 +1323,14 @@ again:
 				    sc->sc_dev.dv_xname);
 #endif
 			epreset(sc);
-			return;
+			goto done;
 		}
 		goto again;
 	}
-
-	return;
-
-abort:
-	ep_discard_rxtop(iot, ioh);
+done:
+	if (error)
+		ep_discard_rxtop(iot, ioh);
+	if_input(ifp, &ml);
 }
 
 struct mbuf *
@@ -1348,7 +1338,6 @@ epget(struct ep_softc *sc, int totlen)
 {
 	bus_space_tag_t iot = sc->sc_iot;
 	bus_space_handle_t ioh = sc->sc_ioh;
-	struct ifnet *ifp = &sc->sc_arpcom.ac_if;
 	struct mbuf *m;
 	caddr_t data;
 	int len, pad, off, sh, rxreg;
@@ -1369,7 +1358,6 @@ epget(struct ep_softc *sc, int totlen)
 	sc->next_mb = (sc->next_mb + 1) % MAX_MBS;
 
 	len = MCLBYTES;
-	m->m_pkthdr.rcvif = ifp;
 	m->m_pkthdr.len = totlen;
 	m->m_len = totlen;
 	pad = ALIGN(sizeof(struct ether_header)) - sizeof(struct ether_header);

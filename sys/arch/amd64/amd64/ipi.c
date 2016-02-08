@@ -1,4 +1,4 @@
-/*	$OpenBSD: ipi.c,v 1.13 2015/01/06 12:50:47 dlg Exp $	*/
+/*	$OpenBSD: ipi.c,v 1.16 2015/07/19 18:44:15 sf Exp $	*/
 /*	$NetBSD: ipi.c,v 1.2 2003/03/01 13:05:37 fvdl Exp $	*/
 
 /*-
@@ -39,30 +39,19 @@
 #include <machine/intr.h>
 #include <machine/atomic.h>
 #include <machine/cpuvar.h>
-#include <machine/i82093var.h>
 #include <machine/i82489reg.h>
 #include <machine/i82489var.h>
 
-int
+void
 x86_send_ipi(struct cpu_info *ci, int ipimask)
 {
-	int ret;
-
 	x86_atomic_setbits_u32(&ci->ci_ipis, ipimask);
 
 	/* Don't send IPI to cpu which isn't (yet) running. */
 	if (!(ci->ci_flags & CPUF_RUNNING))
-		return ENOENT;
+		return;
 
-	ret = x86_ipi(LAPIC_IPI_VECTOR, ci->ci_apicid, LAPIC_DLMODE_FIXED);
-	if (ret != 0) {
-		printf("ipi of %x from %s to %s failed\n",
-		    ipimask,
-		    curcpu()->ci_dev->dv_xname,
-		    ci->ci_dev->dv_xname);
-	}
-
-	return ret;
+	x86_ipi(LAPIC_IPI_VECTOR, ci->ci_apicid, LAPIC_DLMODE_FIXED);
 }
 
 int
@@ -71,7 +60,9 @@ x86_fast_ipi(struct cpu_info *ci, int ipi)
 	if (!(ci->ci_flags & CPUF_RUNNING))
 		return (ENOENT);
 
-	return (x86_ipi(ipi, ci->ci_apicid, LAPIC_DLMODE_FIXED));
+	x86_ipi(ipi, ci->ci_apicid, LAPIC_DLMODE_FIXED);
+
+	return 0;
 }
 
 void

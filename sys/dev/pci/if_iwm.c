@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_iwm.c,v 1.36 2015/03/06 18:39:24 kettenis Exp $	*/
+/*	$OpenBSD: if_iwm.c,v 1.46 2015/07/19 21:40:00 stsp Exp $	*/
 
 /*
  * Copyright (c) 2014 genua mbh <info@genua.de>
@@ -347,6 +347,12 @@ void	iwm_update_sched(struct iwm_softc *, int, int, uint8_t, uint16_t);
 const struct iwm_rate *iwm_tx_fill_cmd(struct iwm_softc *, struct iwm_node *,
 			struct ieee80211_frame *, struct iwm_tx_cmd *);
 int	iwm_tx(struct iwm_softc *, struct mbuf *, struct ieee80211_node *, int);
+void	iwm_mvm_led_enable(struct iwm_softc *);
+void	iwm_mvm_led_disable(struct iwm_softc *);
+int	iwm_mvm_led_is_enabled(struct iwm_softc *);
+void	iwm_led_blink_timeout(void *);
+void	iwm_led_blink_start(struct iwm_softc *);
+void	iwm_led_blink_stop(struct iwm_softc *);
 int	iwm_mvm_beacon_filter_send_cmd(struct iwm_softc *,
 					struct iwm_beacon_filter_cmd *);
 void	iwm_mvm_beacon_filter_set_cqm_params(struct iwm_softc *,
@@ -476,7 +482,6 @@ iwm_firmware_store_section(struct iwm_softc *sc,
 	return 0;
 }
 
-/* iwlwifi: iwl-drv.c */
 struct iwm_tlv_calib_data {
 	uint32_t ucode_type;
 	struct iwm_tlv_calib_ctrl calib;
@@ -734,7 +739,6 @@ iwm_write_prph(struct iwm_softc *sc, uint32_t addr, uint32_t val)
 	IWM_WRITE(sc, IWM_HBUS_TARG_PRPH_WDAT, val);
 }
 
-/* iwlwifi: pcie/trans.c */
 int
 iwm_read_mem(struct iwm_softc *sc, uint32_t addr, void *buf, int dwords)
 {
@@ -752,7 +756,6 @@ iwm_read_mem(struct iwm_softc *sc, uint32_t addr, void *buf, int dwords)
 	return ret;
 }
 
-/* iwlwifi: pcie/trans.c */
 int
 iwm_write_mem(struct iwm_softc *sc, uint32_t addr, const void *buf, int dwords)
 {
@@ -1113,7 +1116,8 @@ iwm_alloc_tx_ring(struct iwm_softc *sc, struct iwm_tx_ring *ring, int qid)
 		paddr += sizeof(struct iwm_device_cmd);
 
 		error = bus_dmamap_create(sc->sc_dmat, MCLBYTES,
-		    IWM_NUM_OF_TBS, MCLBYTES, 0, BUS_DMA_NOWAIT, &data->map);
+		    IWM_NUM_OF_TBS - 2, MCLBYTES, 0, BUS_DMA_NOWAIT,
+		    &data->map);
 		if (error != 0) {
 			printf("%s: could not create TX buf DMA map\n", DEVNAME(sc));
 			goto fail;
@@ -1429,7 +1433,6 @@ iwm_apm_init(struct iwm_softc *sc)
 	return error;
 }
 
-/* iwlwifi/pcie/trans.c */
 void
 iwm_apm_stop(struct iwm_softc *sc)
 {
@@ -1443,7 +1446,6 @@ iwm_apm_stop(struct iwm_softc *sc)
         DPRINTF(("iwm apm stop\n"));
 }
 
-/* iwlwifi pcie/trans.c */
 int
 iwm_start_hw(struct iwm_softc *sc)
 {
@@ -1467,7 +1469,6 @@ iwm_start_hw(struct iwm_softc *sc)
 	return 0;
 }
 
-/* iwlwifi pcie/trans.c */
 
 void
 iwm_stop_device(struct iwm_softc *sc)
@@ -1538,7 +1539,6 @@ iwm_stop_device(struct iwm_softc *sc)
 	iwm_check_rfkill(sc);
 }
 
-/* iwlwifi pcie/trans.c (always main power) */
 void
 iwm_set_pwr(struct iwm_softc *sc)
 {
@@ -1546,7 +1546,6 @@ iwm_set_pwr(struct iwm_softc *sc)
 	    IWM_APMG_PS_CTRL_VAL_PWR_SRC_VMAIN, ~IWM_APMG_PS_CTRL_MSK_PWR_SRC);
 }
 
-/* iwlwifi: mvm/ops.c */
 void
 iwm_mvm_nic_config(struct iwm_softc *sc)
 {
@@ -1815,11 +1814,6 @@ iwm_post_alive(struct iwm_softc *sc)
 
 /*
  * PHY db
- * iwlwifi/iwl-phy-db.c
- */
-
-/*
- * BEGIN iwl-phy-db.c
  */
 
 enum iwm_phy_db_section_type {
@@ -2134,14 +2128,6 @@ iwm_send_phy_db_data(struct iwm_softc *sc)
 }
 
 /*
- * END iwl-phy-db.c
- */
-
-/*
- * BEGIN iwlwifi/mvm/time-event.c
- */
-
-/*
  * For the high priority TE use a time event type that has similar priority to
  * the FW's action scan priority.
  */
@@ -2256,13 +2242,8 @@ iwm_mvm_protect_session(struct iwm_softc *sc, struct iwm_node *in,
 }
 
 /*
- * END iwlwifi/mvm/time-event.c
- */
-
-/*
  * NVM read access and content parsing.  We do not support
  * external NVM or writing NVM.
- * iwlwifi/mvm/nvm.c
  */
 
 /* list of NVM sections we are allowed/need to read */
@@ -2386,8 +2367,6 @@ iwm_nvm_read_section(struct iwm_softc *sc,
 /*
  * BEGIN IWM_NVM_PARSE
  */
-
-/* iwlwifi/iwl-nvm-parse.c */
 
 /* NVM offsets (in words) definitions */
 enum wkp_nvm_offsets {
@@ -2707,7 +2686,6 @@ iwm_load_firmware(struct iwm_softc *sc, enum iwm_ucode_type ucode_type)
 	return error;
 }
 
-/* iwlwifi: pcie/trans.c */
 int
 iwm_start_fw(struct iwm_softc *sc, enum iwm_ucode_type ucode_type)
 {
@@ -2755,7 +2733,6 @@ iwm_send_tx_ant_cfg(struct iwm_softc *sc, uint8_t valid_tx_ant)
 	    IWM_CMD_SYNC, sizeof(tx_ant_cmd), &tx_ant_cmd);
 }
 
-/* iwlwifi: mvm/fw.c */
 int
 iwm_send_phy_cfg_cmd(struct iwm_softc *sc)
 {
@@ -2798,9 +2775,6 @@ iwm_mvm_load_ucode_wait_alive(struct iwm_softc *sc,
  * mvm misc bits
  */
 
-/*
- * follows iwlwifi/fw.c
- */
 int
 iwm_run_init_mvm_ucode(struct iwm_softc *sc, int justnvm)
 {
@@ -2914,7 +2888,6 @@ iwm_rx_addbuf(struct iwm_softc *sc, int size, int idx)
 	return 0;
 }
 
-/* iwlwifi: mvm/rx.c */
 #define IWM_RSSI_OFFSET 50
 int
 iwm_mvm_calc_rssi(struct iwm_softc *sc, struct iwm_rx_phy_info *phy_info)
@@ -2945,7 +2918,6 @@ iwm_mvm_calc_rssi(struct iwm_softc *sc, struct iwm_rx_phy_info *phy_info)
 	return max_rssi_dbm;
 }
 
-/* iwlwifi: mvm/rx.c */
 /*
  * iwm_mvm_get_signal_strength - use new rx PHY INFO API
  * values are reported by the fw as positive values - need to negate
@@ -3211,10 +3183,6 @@ iwm_mvm_rx_tx_cmd(struct iwm_softc *sc,
 	}
 }
 
-/*
- * BEGIN iwlwifi/mvm/binding.c
- */
-
 int
 iwm_mvm_binding_cmd(struct iwm_softc *sc, struct iwm_node *in, uint32_t action)
 {
@@ -3263,14 +3231,6 @@ iwm_mvm_binding_add_vif(struct iwm_softc *sc, struct iwm_node *in)
 {
 	return iwm_mvm_binding_update(sc, in, IWM_FW_CTXT_ACTION_ADD);
 }
-
-/*
- * END iwlwifi/mvm/binding.c
- */
-
-/*
- * BEGIN iwlwifi/mvm/phy-ctxt.c
- */
 
 /*
  * Construct the generic fields of the PHY context command
@@ -3375,10 +3335,6 @@ iwm_mvm_phy_ctxt_changed(struct iwm_softc *sc,
 	return iwm_mvm_phy_ctxt_apply(sc, ctxt,
 	    chains_static, chains_dynamic, IWM_FW_CTXT_ACTION_MODIFY, 0);
 }
-
-/*
- * END iwlwifi/mvm/phy-ctxt.c
- */
 
 /*
  * transmit side
@@ -3544,7 +3500,6 @@ iwm_send_cmd(struct iwm_softc *sc, struct iwm_host_cmd *hcmd)
 	return error;
 }
 
-/* iwlwifi: mvm/utils.c */
 int
 iwm_mvm_send_cmd_pdu(struct iwm_softc *sc, uint8_t id,
 	uint32_t flags, uint16_t len, const void *data)
@@ -3559,7 +3514,6 @@ iwm_mvm_send_cmd_pdu(struct iwm_softc *sc, uint8_t id,
 	return iwm_send_cmd(sc, &cmd);
 }
 
-/* iwlwifi: mvm/utils.c */
 int
 iwm_mvm_send_cmd_status(struct iwm_softc *sc,
 	struct iwm_host_cmd *cmd, uint32_t *status)
@@ -3601,7 +3555,6 @@ iwm_mvm_send_cmd_status(struct iwm_softc *sc,
 	return error;
 }
 
-/* iwlwifi/mvm/utils.c */
 int
 iwm_mvm_send_cmd_pdu_status(struct iwm_softc *sc, uint8_t id,
 	uint16_t len, const void *data, uint32_t *status)
@@ -3745,7 +3698,6 @@ iwm_tx(struct iwm_softc *sc, struct mbuf *m, struct ieee80211_node *ni, int ac)
 	struct iwm_tx_cmd *tx;
 	struct ieee80211_frame *wh;
 	struct ieee80211_key *k = NULL;
-	struct mbuf *m1;
 	const struct iwm_rate *rinfo;
 	uint32_t flags;
 	u_int hdrlen;
@@ -3880,35 +3832,20 @@ iwm_tx(struct iwm_softc *sc, struct mbuf *m, struct ieee80211_node *ni, int ac)
 
 	error = bus_dmamap_load_mbuf(sc->sc_dmat, data->map, m,
 	    BUS_DMA_NOWAIT | BUS_DMA_WRITE);
-	if (error != 0) {
-		if (error != EFBIG) {
-			printf("%s: can't map mbuf (error %d)\n", DEVNAME(sc),
-			    error);
-			m_freem(m);
-			return error;
-		}
+	if (error && error != EFBIG) {
+		printf("%s: can't map mbuf (error %d)\n", DEVNAME(sc), error);
+		m_freem(m);
+		return error;
+	}
+	if (error) {
 		/* Too many DMA segments, linearize mbuf. */
-		MGETHDR(m1, M_DONTWAIT, MT_DATA);
-		if (m1 == NULL) {
+		if (m_defrag(m, M_DONTWAIT)) {
 			m_freem(m);
 			return ENOBUFS;
 		}
-		if (m->m_pkthdr.len > MHLEN) {
-			MCLGET(m1, M_DONTWAIT);
-			if (!(m1->m_flags & M_EXT)) {
-				m_freem(m);
-				m_freem(m1);
-				return ENOBUFS;
-			}
-		}
-		m_copydata(m, 0, m->m_pkthdr.len, mtod(m1, void *));
-		m1->m_pkthdr.len = m1->m_len = m->m_pkthdr.len;
-		m_freem(m);
-		m = m1;
-
 		error = bus_dmamap_load_mbuf(sc->sc_dmat, data->map, m,
 		    BUS_DMA_NOWAIT | BUS_DMA_WRITE);
-		if (error != 0) {
+		if (error) {
 			printf("%s: can't map mbuf (error %d)\n", DEVNAME(sc),
 			    error);
 			m_freem(m);
@@ -3990,10 +3927,51 @@ iwm_mvm_flush_tx_path(struct iwm_softc *sc, int tfd_msk, int sync)
 }
 #endif
 
+/* Set led register on */
+void
+iwm_mvm_led_enable(struct iwm_softc *sc)
+{
+	IWM_WRITE(sc, IWM_CSR_LED_REG, IWM_CSR_LED_REG_TURN_ON);
+}
 
-/*
- * BEGIN mvm/power.c
- */
+/* Set led register off */
+void
+iwm_mvm_led_disable(struct iwm_softc *sc)
+{
+	IWM_WRITE(sc, IWM_CSR_LED_REG, IWM_CSR_LED_REG_TURN_OFF);
+}
+
+int
+iwm_mvm_led_is_enabled(struct iwm_softc *sc)
+{
+	return (IWM_READ(sc, IWM_CSR_LED_REG) == IWM_CSR_LED_REG_TURN_ON);
+}
+
+void
+iwm_led_blink_timeout(void *arg)
+{
+	struct iwm_softc *sc = arg;
+
+	if (iwm_mvm_led_is_enabled(sc))
+		iwm_mvm_led_disable(sc);
+	else
+		iwm_mvm_led_enable(sc);
+
+	timeout_add_msec(&sc->sc_led_blink_to, 200);
+}
+
+void
+iwm_led_blink_start(struct iwm_softc *sc)
+{
+	timeout_add(&sc->sc_led_blink_to, 0);
+}
+
+void
+iwm_led_blink_stop(struct iwm_softc *sc)
+{
+	timeout_del(&sc->sc_led_blink_to);
+	iwm_mvm_led_disable(sc);
+}
 
 #define IWM_POWER_KEEP_ALIVE_PERIOD_SEC    25
 
@@ -4206,14 +4184,6 @@ iwm_mvm_update_beacon_filter(struct iwm_softc *sc, struct iwm_node *in)
 }
 #endif
 
-/*
- * END mvm/power.c
- */
-
-/*
- * BEGIN mvm/sta.c
- */
-
 void
 iwm_mvm_add_sta_cmd_v6_to_v5(struct iwm_mvm_add_sta_cmd_v6 *cmd_v6,
 	struct iwm_mvm_add_sta_cmd_v5 *cmd_v5)
@@ -4360,14 +4330,6 @@ iwm_mvm_add_aux_sta(struct iwm_softc *sc)
 		memset(&sc->sc_aux_sta, 0, sizeof(sc->sc_aux_sta));
 	return ret;
 }
-
-/*
- * END mvm/sta.c
- */
-
-/*
- * BEGIN mvm/scan.c
- */
 
 #define IWM_PLCP_QUIET_THRESH 1
 #define IWM_ACTIVE_QUIET_TIME 10
@@ -4655,14 +4617,6 @@ iwm_mvm_scan_request(struct iwm_softc *sc, int flags,
 	return ret;
 }
 
-/*
- * END mvm/scan.c
- */
-
-/*
- * BEGIN mvm/mac-ctxt.c
- */
-
 void
 iwm_mvm_ack_rates(struct iwm_softc *sc, struct iwm_node *in,
 	int *cck_rates, int *ofdm_rates)
@@ -4949,14 +4903,6 @@ iwm_mvm_mac_ctxt_remove(struct iwm_softc *sc, struct iwm_node *in)
 }
 #endif
 
-/*
- * END mvm/mac-ctxt.c
- */
-
-/*
- * BEGIN mvm/quota.c
- */
-
 int
 iwm_mvm_update_quotas(struct iwm_softc *sc, struct iwm_node *in)
 {
@@ -5022,10 +4968,6 @@ iwm_mvm_update_quotas(struct iwm_softc *sc, struct iwm_node *in)
 		DPRINTF(("%s: Failed to send quota: %d\n", DEVNAME(sc), ret));
 	return ret;
 }
-
-/*
- * END mvm/quota.c
- */
 
 /*
  * aieee80211 routines
@@ -5203,7 +5145,7 @@ iwm_calib_timeout(void *arg)
 	}
 	splx(s);
 
-	timeout_add(&sc->sc_calib_to, hz/2);
+	timeout_add_msec(&sc->sc_calib_to, 500);
 }
 
 void
@@ -5343,6 +5285,9 @@ iwm_newstate_cb(void *wk)
 
 	DPRINTF(("switching state %d->%d\n", ic->ic_state, nstate));
 
+	if (ic->ic_state == IEEE80211_S_SCAN && nstate != ic->ic_state)
+		iwm_led_blink_stop(sc);
+
 	/* disable beacon filtering if we're hopping out of RUN */
 	if (ic->ic_state == IEEE80211_S_RUN && nstate != ic->ic_state) {
 		iwm_mvm_disable_beacon_filter(sc, (void *)ic->ic_bss);
@@ -5388,6 +5333,7 @@ iwm_newstate_cb(void *wk)
 			return;
 		}
 		ic->ic_state = nstate;
+		iwm_led_blink_start(sc);
 		return;
 
 	case IEEE80211_S_AUTH:
@@ -5425,8 +5371,8 @@ iwm_newstate_cb(void *wk)
 			DPRINTF(("%s: IWM_LQ_CMD failed\n", DEVNAME(sc)));
 		}
 
-		timeout_add(&sc->sc_calib_to, hz/2);
-
+		timeout_add_msec(&sc->sc_calib_to, 500);
+		iwm_mvm_led_enable(sc);
 		break; }
 
 	default:
@@ -5471,7 +5417,8 @@ iwm_endscan_cb(void *arg)
 
 	DPRINTF(("scan ended\n"));
 
-	if (sc->sc_scanband == IEEE80211_CHAN_2GHZ) {
+	if (sc->sc_scanband == IEEE80211_CHAN_2GHZ &&
+	    sc->sc_nvm.sku_cap_band_52GHz_enable) {
 		int error;
 		done = 0;
 		if ((error = iwm_mvm_scan_request(sc,
@@ -5718,6 +5665,7 @@ iwm_stop(struct ifnet *ifp, int disable)
 		ieee80211_new_state(ic, IEEE80211_S_INIT, -1);
 
 	timeout_del(&sc->sc_calib_to);
+	iwm_led_blink_stop(sc);
 	ifp->if_timer = sc->sc_tx_timer = 0;
 	iwm_stop_device(sc);
 }
@@ -5734,8 +5682,7 @@ iwm_watchdog(struct ifnet *ifp)
 #ifdef IWM_DEBUG
 			iwm_nic_error(sc);
 #endif
-			ifp->if_flags &= ~IFF_UP;
-			iwm_stop(ifp, 1);
+			task_add(systq, &sc->init_task);
 			ifp->if_oerrors++;
 			return;
 		}
@@ -5818,10 +5765,6 @@ iwm_ioctl(struct ifnet *ifp, u_long cmd, iwm_caddr_t data)
 
 /*
  * The interrupt side of things
- */
-
-/*
- * error dumping routines are from iwlwifi/mvm/utils.c
  */
 
 /*
@@ -6127,7 +6070,7 @@ iwm_notif_intr(struct iwm_softc *sc)
 			break;
 
 		/* ignore */
-		case 0x6c: /* IWM_PHY_DB_CMD, no idea why it's not in fw-api.h */
+		case 0x6c: /* IWM_PHY_DB_CMD */
 			break;
 
 		case IWM_INIT_COMPLETE_NOTIF:
@@ -6171,9 +6114,10 @@ iwm_notif_intr(struct iwm_softc *sc)
 			break;
 
 		default:
-			printf("%s: frame %d/%d %x UNHANDLED (this should "
-			    "not happen)\n", DEVNAME(sc), qid, idx,
-			    pkt->len_n_flags);
+			printf("%s: unhandled firmware response 0x%x/0x%x "
+			    "rx ring %d[%d]\n",
+			    DEVNAME(sc), pkt->hdr.code, pkt->len_n_flags, qid,
+			    idx);
 			break;
 		}
 
@@ -6360,6 +6304,8 @@ iwm_intr(void *arg)
 typedef void *iwm_match_t;
 
 static const struct pci_matchid iwm_devices[] = {
+	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_WL_3160_1 },
+	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_WL_3160_2 },
 	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_WL_7260_1 },
 	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_WL_7260_2 },
 	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_WL_7265_1 },
@@ -6401,12 +6347,17 @@ iwm_preinit(struct iwm_softc *sc)
 
 	/* Print version info and MAC address on first successful fw load. */
 	attached = 1;
-	printf("%s: hw rev: 0x%x, fw ver %d.%d (API ver %d), address %s\n",
+	printf("%s: hw rev 0x%x, fw ver %d.%d (API ver %d), address %s\n",
 	    DEVNAME(sc), sc->sc_hw_rev & IWM_CSR_HW_REV_TYPE_MSK,
 	    IWM_UCODE_MAJOR(sc->sc_fwver),
 	    IWM_UCODE_MINOR(sc->sc_fwver),
 	    IWM_UCODE_API(sc->sc_fwver),
 	    ether_sprintf(sc->sc_nvm.hw_addr));
+
+	/* not all hardware can do 5GHz band */
+	if (!sc->sc_nvm.sku_cap_band_52GHz_enable)
+		memset(&ic->ic_sup_rates[IEEE80211_MODE_11A], 0,
+		    sizeof(ic->ic_sup_rates[IEEE80211_MODE_11A]));
 
 	/* Reattach net80211 so MAC address and channel map are picked up. */
 	ieee80211_ifdetach(ifp);
@@ -6635,6 +6586,7 @@ iwm_attach(struct device *parent, struct device *self, void *aux)
 	iwm_radiotap_attach(sc);
 #endif
 	timeout_set(&sc->sc_calib_to, iwm_calib_timeout, sc);
+	timeout_set(&sc->sc_led_blink_to, iwm_led_blink_timeout, sc);
 	task_set(&sc->init_task, iwm_init_task, sc);
 
 	/*

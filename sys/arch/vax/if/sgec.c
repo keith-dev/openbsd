@@ -1,4 +1,4 @@
-/*	$OpenBSD: sgec.c,v 1.25 2014/12/22 02:26:54 tedu Exp $	*/
+/*	$OpenBSD: sgec.c,v 1.29 2015/06/24 09:40:54 mpi Exp $	*/
 /*      $NetBSD: sgec.c,v 1.5 2000/06/04 02:14:14 matt Exp $ */
 /*
  * Copyright (c) 1999 Ludd, University of Lule}, Sweden. All rights reserved.
@@ -385,7 +385,7 @@ zestart(ifp)
 		}
 		idx = sc->sc_nexttx;
 		IF_DEQUEUE(&sc->sc_if.if_snd, m);
-		if (m == 0)
+		if (m == NULL)
 			goto out;
 		/*
 		 * Count number of mbufs in chain.
@@ -464,6 +464,7 @@ sgec_rxintr(struct ze_softc *sc)
 {
 	struct ze_cdata *zc = sc->sc_zedata;
 	struct ifnet *ifp = &sc->sc_if;
+	struct mbuf_list ml = MBUF_LIST_INITIALIZER();
 	struct mbuf *m;
 	u_short rdes0;
 	int len;
@@ -483,23 +484,18 @@ sgec_rxintr(struct ze_softc *sc)
 				ifp->if_collisions++;
 			m = NULL;
 		} else {
-			ifp->if_ipackets++;
 			m = sc->sc_rxmbuf[sc->sc_nextrx];
 			len = zc->zc_recv[sc->sc_nextrx].ze_framelen;
 		}
 		ze_add_rxbuf(sc, sc->sc_nextrx);
 		if (m != NULL) {
-			m->m_pkthdr.rcvif = ifp;
 			m->m_pkthdr.len = m->m_len = len;
-#if NBPFILTER > 0
-			if (ifp->if_bpf)
-				bpf_mtap(ifp->if_bpf, m, BPF_DIRECTION_IN);
-#endif
-			ether_input_mbuf(ifp, m);
+			ml_enqueue(&ml, m);
 		}
 		if (++sc->sc_nextrx == RXDESCS)
 			sc->sc_nextrx = 0;
 	}
+	if_input(ifp, &ml);
 }
 
 void
@@ -597,6 +593,7 @@ sgec_intr(sc)
 	if (csr & ZE_NICSR5_ME) {
 		printf("%s: memory error, resetting\n", sc->sc_dev.dv_xname);
 		zeinit(sc);
+		splx(s);
 		return (1);
 	}
 

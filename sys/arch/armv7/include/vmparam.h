@@ -1,4 +1,4 @@
-/* 	$OpenBSD: vmparam.h,v 1.1 2013/09/04 14:38:29 patrick Exp $	*/
+/* 	$OpenBSD: vmparam.h,v 1.4 2015/06/24 21:35:01 miod Exp $	*/
 /*	$NetBSD: vmparam.h,v 1.23 2003/05/22 05:47:07 thorpej Exp $	*/
 
 /*
@@ -33,7 +33,7 @@
 #ifndef	_MACHINE_VMPARAM_H_
 #define	_MACHINE_VMPARAM_H_
 
-#define	ARM_KERNEL_BASE		0xc0000000
+#define	ARM_KERNEL_BASE		0xc0000000U
 
 /* Allow armv7 to have bigger DSIZ than generic arm, allow user to override */
 #ifndef	MAXDSIZ
@@ -56,6 +56,8 @@
  */
 #define	KERNEL_BASE		ARM_KERNEL_BASE
 
+#define VM_KERNEL_SPACE_SIZE	0x10000000
+
 /*
  * Override the default pager_map size, there's not enough KVA.
  */
@@ -75,7 +77,7 @@
  * max number of non-contig chunks of physical RAM you can have
  */
 
-#define	VM_PHYSSEG_MAX		1
+#define	VM_PHYSSEG_MAX		2
 #define	VM_PHYSSEG_STRAT	VM_PSTRAT_RANDOM
 
 /*

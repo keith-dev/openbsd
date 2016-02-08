@@ -1,4 +1,4 @@
-/*	$OpenBSD: uvm_page.c,v 1.136 2015/02/28 06:11:04 mlarkin Exp $	*/
+/*	$OpenBSD: uvm_page.c,v 1.140 2015/07/19 22:52:30 beck Exp $	*/
 /*	$NetBSD: uvm_page.c,v 1.44 2000/11/27 08:40:04 chs Exp $	*/
 
 /*
@@ -69,7 +69,6 @@
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/sched.h>
-#include <sys/kernel.h>
 #include <sys/vnode.h>
 #include <sys/mount.h>
 #include <sys/proc.h>
@@ -101,11 +100,6 @@ int vm_nphysseg = 0;				/* XXXCDC: uvm.nphysseg */
  * of the things necessary to do idle page zero'ing efficiently.
  * We therefore provide a way to disable it from machdep code here.
  */
-/*
- * XXX disabled until we can find a way to do this without causing
- * problems for either cpu caches or DMA latency.
- */
-boolean_t vm_page_zero_enable = FALSE;
 
 /*
  * local variables
@@ -155,7 +149,6 @@ uvm_pageinsert(struct vm_page *pg)
 static __inline void
 uvm_pageremove(struct vm_page *pg)
 {
-
 	KASSERT(pg->pg_flags & PG_TABLED);
 	RB_REMOVE(uvm_objtree, &pg->uobject->memt, pg);
 
@@ -289,9 +282,6 @@ uvm_page_init(vaddr_t *kvm_startp, vaddr_t *kvm_endp)
 	uvmexp.anonmin = uvmexp.anonminpct * 256 / 100;
 	uvmexp.vnodemin = uvmexp.vnodeminpct * 256 / 100;
 	uvmexp.vtextmin = uvmexp.vtextminpct * 256 / 100;
-
-  	/* determine if we should zero pages in the idle loop. */
-	uvm.page_idle_zero = vm_page_zero_enable;
 
 	uvm.page_init_done = TRUE;
 }
@@ -811,27 +801,30 @@ uvm_pglistfree(struct pglist *list)
  * interface used by the buffer cache to allocate a buffer at a time.
  * The pages are allocated wired in DMA accessible memory
  */
-void
+int
 uvm_pagealloc_multi(struct uvm_object *obj, voff_t off, vsize_t size,
     int flags)
 {
 	struct pglist    plist;
 	struct vm_page  *pg;
-	int              i;
+	int              i, r;
 
 
 	TAILQ_INIT(&plist);
-	(void) uvm_pglistalloc(size, dma_constraint.ucr_low,
+	r = uvm_pglistalloc(size, dma_constraint.ucr_low,
 	    dma_constraint.ucr_high, 0, 0, &plist, atop(round_page(size)),
-	    UVM_PLA_WAITOK);
-	i = 0;
-	while ((pg = TAILQ_FIRST(&plist)) != NULL) {
-		pg->wire_count = 1;
-		atomic_setbits_int(&pg->pg_flags, PG_CLEAN | PG_FAKE);
-		KASSERT((pg->pg_flags & PG_DEV) == 0);
-		TAILQ_REMOVE(&plist, pg, pageq);
-		uvm_pagealloc_pg(pg, obj, off + ptoa(i++), NULL);
+	    flags);
+	if (r == 0) {
+		i = 0;
+		while ((pg = TAILQ_FIRST(&plist)) != NULL) {
+			pg->wire_count = 1;
+			atomic_setbits_int(&pg->pg_flags, PG_CLEAN | PG_FAKE);
+			KASSERT((pg->pg_flags & PG_DEV) == 0);
+			TAILQ_REMOVE(&plist, pg, pageq);
+			uvm_pagealloc_pg(pg, obj, off + ptoa(i++), NULL);
+		}
 	}
+	return r;
 }
 
 /*
@@ -839,33 +832,36 @@ uvm_pagealloc_multi(struct uvm_object *obj, voff_t off, vsize_t size,
  * The pages are reallocated wired outside the DMA accessible region.
  *
  */
-void
+int
 uvm_pagerealloc_multi(struct uvm_object *obj, voff_t off, vsize_t size,
     int flags, struct uvm_constraint_range *where)
 {
 	struct pglist    plist;
 	struct vm_page  *pg, *tpg;
-	int              i;
+	int              i, r;
 	voff_t		offset;
 
 
 	TAILQ_INIT(&plist);
 	if (size == 0)
 		panic("size 0 uvm_pagerealloc");
-	(void) uvm_pglistalloc(size, where->ucr_low, where->ucr_high, 0,
-	    0, &plist, atop(round_page(size)), UVM_PLA_WAITOK);
-	i = 0;
-	while((pg = TAILQ_FIRST(&plist)) != NULL) {
-		offset = off + ptoa(i++);
-		tpg = uvm_pagelookup(obj, offset);
-		pg->wire_count = 1;
-		atomic_setbits_int(&pg->pg_flags, PG_CLEAN | PG_FAKE);
-		KASSERT((pg->pg_flags & PG_DEV) == 0);
-		TAILQ_REMOVE(&plist, pg, pageq);
-		uvm_pagecopy(tpg, pg);
-		uvm_pagefree(tpg);
-		uvm_pagealloc_pg(pg, obj, offset, NULL);
+	r = uvm_pglistalloc(size, where->ucr_low, where->ucr_high, 0,
+	    0, &plist, atop(round_page(size)), flags);
+	if (r == 0) {
+		i = 0;
+		while((pg = TAILQ_FIRST(&plist)) != NULL) {
+			offset = off + ptoa(i++);
+			tpg = uvm_pagelookup(obj, offset);
+			pg->wire_count = 1;
+			atomic_setbits_int(&pg->pg_flags, PG_CLEAN | PG_FAKE);
+			KASSERT((pg->pg_flags & PG_DEV) == 0);
+			TAILQ_REMOVE(&plist, pg, pageq);
+			uvm_pagecopy(tpg, pg);
+			uvm_pagefree(tpg);
+			uvm_pagealloc_pg(pg, obj, offset, NULL);
+		}
 	}
+	return r;
 }
 
 /*
@@ -1066,9 +1062,6 @@ uvm_pagefree(struct vm_page *pg)
 #endif
 
 	uvm_pmr_freepages(pg, 1);
-
-	if (uvmexp.zeropages < UVM_PAGEZERO_TARGET)
-		uvm.page_idle_zero = vm_page_zero_enable;
 }
 
 /*

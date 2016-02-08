@@ -1,4 +1,4 @@
-/*	$OpenBSD: ttm_lock.c,v 1.3 2015/02/10 10:50:49 jsg Exp $	*/
+/*	$OpenBSD: ttm_lock.c,v 1.5 2015/04/12 03:54:10 jsg Exp $	*/
 /**************************************************************************
  *
  * Copyright (c) 2007-2009 VMware, Inc., Palo Alto, CA., USA
@@ -44,9 +44,7 @@ void	 ttm_write_lock_downgrade(struct ttm_lock *);
 void ttm_lock_init(struct ttm_lock *lock)
 {
 	mtx_init(&lock->lock, IPL_NONE);
-#ifdef notyet
 	init_waitqueue_head(&lock->queue);
-#endif
 	lock->rw = 0;
 	lock->flags = 0;
 	lock->kill_takers = false;
@@ -58,7 +56,7 @@ void ttm_read_unlock(struct ttm_lock *lock)
 {
 	spin_lock(&lock->lock);
 	if (--lock->rw == 0)
-		wakeup(&lock->queue);
+		wake_up_all(&lock->queue);
 	spin_unlock(&lock->lock);
 }
 EXPORT_SYMBOL(ttm_read_unlock);
@@ -153,7 +151,7 @@ void ttm_write_unlock(struct ttm_lock *lock)
 {
 	spin_lock(&lock->lock);
 	lock->rw = 0;
-	wakeup(&lock->queue);
+	wake_up_all(&lock->queue);
 	spin_unlock(&lock->lock);
 }
 EXPORT_SYMBOL(ttm_write_unlock);
@@ -209,7 +207,7 @@ void ttm_write_lock_downgrade(struct ttm_lock *lock)
 {
 	spin_lock(&lock->lock);
 	lock->rw = 1;
-	wakeup(&lock->queue);
+	wake_up_all(&lock->queue);
 	spin_unlock(&lock->lock);
 }
 
@@ -222,7 +220,7 @@ static int __ttm_vt_unlock(struct ttm_lock *lock)
 	if (unlikely(!(lock->flags & TTM_VT_LOCK)))
 		ret = -EINVAL;
 	lock->flags &= ~TTM_VT_LOCK;
-	wakeup(&lock->queue);
+	wake_up_all(&lock->queue);
 	spin_unlock(&lock->lock);
 
 	return ret;
@@ -311,7 +309,7 @@ void ttm_suspend_unlock(struct ttm_lock *lock)
 {
 	spin_lock(&lock->lock);
 	lock->flags &= ~TTM_SUSPEND_LOCK;
-	wakeup(&lock->queue);
+	wake_up_all(&lock->queue);
 	spin_unlock(&lock->lock);
 }
 EXPORT_SYMBOL(ttm_suspend_unlock);

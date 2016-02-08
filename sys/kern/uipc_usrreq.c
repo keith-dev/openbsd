@@ -1,4 +1,4 @@
-/*	$OpenBSD: uipc_usrreq.c,v 1.79 2014/12/11 19:21:57 tedu Exp $	*/
+/*	$OpenBSD: uipc_usrreq.c,v 1.83 2015/07/28 14:20:10 bluhm Exp $	*/
 /*	$NetBSD: uipc_usrreq.c,v 1.18 1996/02/09 19:00:50 christos Exp $	*/
 
 /*
@@ -38,6 +38,7 @@
 #include <sys/filedesc.h>
 #include <sys/domain.h>
 #include <sys/protosw.h>
+#include <sys/queue.h>
 #include <sys/socket.h>
 #include <sys/socketvar.h>
 #include <sys/unpcb.h>
@@ -161,10 +162,8 @@ uipc_usrreq(struct socket *so, int req, struct mbuf *m, struct mbuf *nam,
 			 * Adjust backpressure on sender
 			 * and wakeup any waiting to write.
 			 */
-			snd->sb_mbmax += unp->unp_mbcnt - rcv->sb_mbcnt;
-			unp->unp_mbcnt = rcv->sb_mbcnt;
-			snd->sb_hiwat += unp->unp_cc - rcv->sb_cc;
-			unp->unp_cc = rcv->sb_cc;
+			snd->sb_mbcnt = rcv->sb_mbcnt;
+			snd->sb_cc = rcv->sb_cc;
 			sowwakeup(so2);
 #undef snd
 #undef rcv
@@ -227,8 +226,8 @@ uipc_usrreq(struct socket *so, int req, struct mbuf *m, struct mbuf *nam,
 			}
 			so2 = unp->unp_conn->unp_socket;
 			/*
-			 * Send to paired receive port, and then reduce
-			 * send buffer hiwater marks to maintain backpressure.
+			 * Send to paired receive port, and then raise
+			 * send buffer counts to maintain backpressure.
 			 * Wake up readers.
 			 */
 			if (control) {
@@ -238,11 +237,8 @@ uipc_usrreq(struct socket *so, int req, struct mbuf *m, struct mbuf *nam,
 				sbappendrecord(rcv, m);
 			else
 				sbappend(rcv, m);
-			snd->sb_mbmax -=
-			    rcv->sb_mbcnt - unp->unp_conn->unp_mbcnt;
-			unp->unp_conn->unp_mbcnt = rcv->sb_mbcnt;
-			snd->sb_hiwat -= rcv->sb_cc - unp->unp_conn->unp_cc;
-			unp->unp_conn->unp_cc = rcv->sb_cc;
+			snd->sb_mbcnt = rcv->sb_mbcnt;
+			snd->sb_cc = rcv->sb_cc;
 			sorwakeup(so2);
 			m = NULL;
 #undef snd
@@ -265,17 +261,6 @@ uipc_usrreq(struct socket *so, int req, struct mbuf *m, struct mbuf *nam,
 		struct stat *sb = (struct stat *)m;
 
 		sb->st_blksize = so->so_snd.sb_hiwat;
-		switch (so->so_type) {
-		case SOCK_STREAM:
-		case SOCK_SEQPACKET:
-			if (unp->unp_conn != NULL) {
-				so2 = unp->unp_conn->unp_socket;
-				sb->st_blksize += so2->so_rcv.sb_cc;
-			}
-			break;
-		default:
-			break;
-		}
 		sb->st_dev = NODEV;
 		if (unp->unp_ino == 0)
 			unp->unp_ino = unp_ino++;
@@ -380,8 +365,8 @@ unp_detach(struct unpcb *unp)
 	}
 	if (unp->unp_conn)
 		unp_disconnect(unp);
-	while (unp->unp_refs)
-		unp_drop(unp->unp_refs, ECONNRESET);
+	while (!SLIST_EMPTY(&unp->unp_refs))
+		unp_drop(SLIST_FIRST(&unp->unp_refs), ECONNRESET);
 	soisdisconnected(unp->unp_socket);
 	unp->unp_socket->so_pcb = NULL;
 	m_freem(unp->unp_addr);
@@ -524,7 +509,7 @@ unp_connect(struct socket *so, struct mbuf *nam, struct proc *p)
 		unp3 = sotounpcb(so3);
 		if (unp2->unp_addr)
 			unp3->unp_addr =
-			    m_copy(unp2->unp_addr, 0, (int)M_COPYALL);
+			    m_copym(unp2->unp_addr, 0, M_COPYALL, M_NOWAIT);
 		unp3->unp_connid.uid = p->p_ucred->cr_uid;
 		unp3->unp_connid.gid = p->p_ucred->cr_gid;
 		unp3->unp_connid.pid = p->p_p->ps_pid;
@@ -554,8 +539,7 @@ unp_connect2(struct socket *so, struct socket *so2)
 	switch (so->so_type) {
 
 	case SOCK_DGRAM:
-		unp->unp_nextref = unp2->unp_refs;
-		unp2->unp_refs = unp;
+		SLIST_INSERT_HEAD(&unp2->unp_refs, unp, unp_nextref);
 		soisconnected(so);
 		break;
 
@@ -583,27 +567,18 @@ unp_disconnect(struct unpcb *unp)
 	switch (unp->unp_socket->so_type) {
 
 	case SOCK_DGRAM:
-		if (unp2->unp_refs == unp)
-			unp2->unp_refs = unp->unp_nextref;
-		else {
-			unp2 = unp2->unp_refs;
-			for (;;) {
-				if (unp2 == NULL)
-					panic("unp_disconnect");
-				if (unp2->unp_nextref == unp)
-					break;
-				unp2 = unp2->unp_nextref;
-			}
-			unp2->unp_nextref = unp->unp_nextref;
-		}
-		unp->unp_nextref = NULL;
+		SLIST_REMOVE(&unp2->unp_refs, unp, unpcb, unp_nextref);
 		unp->unp_socket->so_state &= ~SS_ISCONNECTED;
 		break;
 
 	case SOCK_STREAM:
 	case SOCK_SEQPACKET:
+		unp->unp_socket->so_snd.sb_mbcnt = 0;
+		unp->unp_socket->so_snd.sb_cc = 0;
 		soisdisconnected(unp->unp_socket);
 		unp2->unp_conn = NULL;
+		unp2->unp_socket->so_snd.sb_mbcnt = 0;
+		unp2->unp_socket->so_snd.sb_cc = 0;
 		soisdisconnected(unp2->unp_socket);
 		break;
 	}
@@ -698,15 +673,7 @@ restart:
 	fdplock(p->p_fd);
 	if (error != 0) {
 		rp = ((struct file **)CMSG_DATA(cm));
-		for (i = 0; i < nfds; i++) {
-			fp = *rp;
-			/*
-			 * zero the pointer before calling unp_discard,
-			 * since it may end up in unp_gc()..
-			 */
-			*rp++ = NULL;
-			unp_discard(fp);
-		}
+		unp_discard(rp, nfds);
 		goto out;
 	}
 
@@ -922,7 +889,7 @@ unp_gc(void)
 				goto restart;
 			}
 #endif
-			unp_scan(so->so_rcv.sb_mb, unp_mark, 0);
+			unp_scan(so->so_rcv.sb_mb, unp_mark);
 		}
 	} while (unp_defer);
 	/*
@@ -992,16 +959,15 @@ unp_dispose(struct mbuf *m)
 {
 
 	if (m)
-		unp_scan(m, unp_discard, 1);
+		unp_scan(m, unp_discard);
 }
 
 void
-unp_scan(struct mbuf *m0, void (*op)(struct file *), int discard)
+unp_scan(struct mbuf *m0, void (*op)(struct file **, int))
 {
 	struct mbuf *m;
-	struct file **rp, *fp;
+	struct file **rp;
 	struct cmsghdr *cm;
-	int i;
 	int qfds;
 
 	while (m0) {
@@ -1014,13 +980,9 @@ unp_scan(struct mbuf *m0, void (*op)(struct file *), int discard)
 					continue;
 				qfds = (cm->cmsg_len - CMSG_ALIGN(sizeof *cm))
 				    / sizeof(struct file *);
-				rp = (struct file **)CMSG_DATA(cm);
-				for (i = 0; i < qfds; i++) {
-					fp = *rp;
-					if (discard)
-						*rp = 0;
-					(*op)(fp);
-					rp++;
+				if (qfds > 0) {
+					rp = (struct file **)CMSG_DATA(cm);
+					op(rp, qfds);
 				}
 				break;		/* XXX, but saves time */
 			}
@@ -1030,30 +992,39 @@ unp_scan(struct mbuf *m0, void (*op)(struct file *), int discard)
 }
 
 void
-unp_mark(struct file *fp)
+unp_mark(struct file **rp, int nfds)
 {
-	if (fp == NULL)
-		return;
+	int i;
 
-	if (fp->f_iflags & (FIF_MARK|FIF_DEFER))
-		return;
+	for (i = 0; i < nfds; i++) {
+		if (rp[i] == NULL)
+			continue;
 
-	if (fp->f_type == DTYPE_SOCKET) {
-		unp_defer++;
-		fp->f_iflags |= FIF_DEFER;
-	} else {
-		fp->f_iflags |= FIF_MARK;
+		if (rp[i]->f_iflags & (FIF_MARK|FIF_DEFER))
+			continue;
+
+		if (rp[i]->f_type == DTYPE_SOCKET) {
+			unp_defer++;
+			rp[i]->f_iflags |= FIF_DEFER;
+		} else {
+			rp[i]->f_iflags |= FIF_MARK;
+		}
 	}
 }
 
 void
-unp_discard(struct file *fp)
+unp_discard(struct file **rp, int nfds)
 {
+	struct file *fp;
+	int i;
 
-	if (fp == NULL)
-		return;
-	FREF(fp);
-	fp->f_msgcount--;
-	unp_rights--;
-	(void) closef(fp, NULL);
+	for (i = 0; i < nfds; i++) {
+		if ((fp = rp[i]) == NULL)
+			continue;
+		rp[i] = NULL;
+		FREF(fp);
+		fp->f_msgcount--;
+		unp_rights--;
+		(void) closef(fp, NULL);
+	}
 }

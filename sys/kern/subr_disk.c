@@ -1,4 +1,4 @@
-/*	$OpenBSD: subr_disk.c,v 1.180 2015/01/27 03:17:36 dlg Exp $	*/
+/*	$OpenBSD: subr_disk.c,v 1.187 2015/07/29 00:15:36 krw Exp $	*/
 /*	$NetBSD: subr_disk.c,v 1.17 1996/03/16 23:17:08 christos Exp $	*/
 
 /*
@@ -65,7 +65,9 @@
 #include <dev/rndvar.h>
 #include <dev/cons.h>
 
+#ifdef GPT
 #include <lib/libz/zlib.h>
+#endif
 
 #include "softraid.h"
 
@@ -530,12 +532,12 @@ notfat:
 	offset = DL_BLKOFFSET(lp, DL_SECTOBLK(lp, dospartoff) +
 	    DOS_LABELSECTOR);
 	bp->b_bcount = lp->d_secsize;
-	CLR(bp->b_flags, B_READ | B_WRITE | B_DONE);
+	bp->b_error = 0; /* B_ERROR and b_error may have stale data. */
+	CLR(bp->b_flags, B_READ | B_WRITE | B_DONE | B_ERROR);
 	SET(bp->b_flags, B_BUSY | B_READ | B_RAW);
 	(*strat)(bp);
 	if (biowait(bp))
 		return (bp->b_error);
-
 
 	error = checkdisklabel(bp->b_data + offset, lp,
 	    DL_GETBSTART((struct disklabel*)(bp->b_data+offset)),
@@ -677,7 +679,6 @@ readgptlabel(struct buf *bp, void (*strat)(struct buf *),
 		ghsize = letoh32(gh.gh_size);
 		ghpartsize = letoh32(gh.gh_part_size);
 		ghpartnum = letoh32(gh.gh_part_num);
-
 
 		if (letoh64(gh.gh_sig) != GPTSIGNATURE)
 			return (EINVAL);
@@ -838,7 +839,7 @@ readgptlabel(struct buf *bp, void (*strat)(struct buf *),
 
 	/* record the OpenBSD partition's placement for the caller */
 	if (partoffp)
-		*partoffp = gptpartoff;
+		*partoffp = DL_SECTOBLK(lp, gptpartoff);
 	else {
 		DL_SETBSTART(lp, gptpartoff);
 		DL_SETBEND(lp, (gptpartend < DL_GETDSIZE(lp)) ? gptpartend :
@@ -849,18 +850,23 @@ readgptlabel(struct buf *bp, void (*strat)(struct buf *),
 	if (spoofonly)
 		return (0);
 
-	bp->b_blkno = DL_BLKTOSEC(lp, gptpartoff + DOS_LABELSECTOR) *
-	    DL_BLKSPERSEC(lp);
-	offset = DL_BLKOFFSET(lp, gptpartoff + DOS_LABELSECTOR);
+	bp->b_blkno = DL_BLKTOSEC(lp, DL_SECTOBLK(lp, gptpartoff) +
+	    DOS_LABELSECTOR) * DL_BLKSPERSEC(lp);
+	offset = DL_BLKOFFSET(lp, DL_SECTOBLK(lp, gptpartoff) +
+	    DOS_LABELSECTOR);
 	bp->b_bcount = lp->d_secsize;
-	CLR(bp->b_flags, B_READ | B_WRITE | B_DONE);
+	bp->b_error = 0; /* B_ERROR and b_error may have stale data. */
+	CLR(bp->b_flags, B_READ | B_WRITE | B_DONE | B_ERROR);
 	SET(bp->b_flags, B_BUSY | B_READ | B_RAW);
 	(*strat)(bp);
 	if (biowait(bp))
 		return (bp->b_error);
 
-	/* sub-GPT disklabels are always at a LABELOFFSET of 0 */
-	return checkdisklabel(bp->b_data + offset, lp, gptpartoff, gptpartend);
+	error = checkdisklabel(bp->b_data + offset, lp,
+	    DL_GETBSTART((struct disklabel*)(bp->b_data+offset)),
+	    DL_GETBEND((struct disklabel *)(bp->b_data+offset)));
+
+	return (error);
 }
 
 #endif

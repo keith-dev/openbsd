@@ -1,4 +1,4 @@
-/*	$OpenBSD: drm_irq.c,v 1.59 2015/02/12 08:48:32 jsg Exp $	*/
+/*	$OpenBSD: drm_irq.c,v 1.64 2015/04/18 14:47:34 jsg Exp $	*/
 /**
  * \file drm_irq.c
  * IRQ support
@@ -54,9 +54,6 @@
  */
 #define DRM_REDUNDANT_VBLIRQ_THRESH_NS 1000000
 
-int64_t	 timeval_to_ns(const struct timeval *);
-struct timeval ns_to_timeval(const int64_t);
-
 #ifdef DRM_VBLANK_DEBUG
 #define DPRINTF(x...)	do { printf(x); } while(/* CONSTCOND */ 0)
 #else
@@ -109,44 +106,6 @@ static void clear_vblank_timestamps(struct drm_device *dev, int crtc)
 {
 	memset(&dev->_vblank_time[crtc * DRM_VBLANKTIME_RBSIZE], 0,
 		DRM_VBLANKTIME_RBSIZE * sizeof(struct timeval));
-}
-
-#define NSEC_PER_USEC	1000L
-#define NSEC_PER_SEC	1000000000L
-
-int64_t
-timeval_to_ns(const struct timeval *tv)
-{
-	return ((int64_t)tv->tv_sec * NSEC_PER_SEC) +
-		tv->tv_usec * NSEC_PER_USEC;
-}
-
-struct timeval
-ns_to_timeval(const int64_t nsec)
-{
-	struct timeval tv;
-	int32_t rem;
-
-	if (nsec == 0) {
-		tv.tv_sec = 0;
-		tv.tv_usec = 0;
-		return (tv);
-	}
-
-	tv.tv_sec = nsec / NSEC_PER_SEC;
-	rem = nsec % NSEC_PER_SEC;
-	if (rem < 0) {
-		tv.tv_sec--;
-		rem += NSEC_PER_SEC;
-	}
-	tv.tv_usec = rem / 1000;
-	return (tv);
-}
-
-static inline int64_t
-abs64(int64_t x)
-{
-	return (x < 0 ? -x : x);
 }
 
 /*
@@ -277,7 +236,7 @@ int drm_vblank_init(struct drm_device *dev, int num_crtcs)
 
 	dev->num_crtcs = num_crtcs;
 
-	dev->vbl_queue = kmalloc(sizeof(int) * num_crtcs,
+	dev->vbl_queue = kmalloc(sizeof(wait_queue_head_t) * num_crtcs,
 				 GFP_KERNEL);
 	if (!dev->vbl_queue)
 		goto err;
@@ -322,6 +281,7 @@ int drm_vblank_init(struct drm_device *dev, int num_crtcs)
 
 	/* Zero per-crtc vblank stuff */
 	for (i = 0; i < num_crtcs; i++) {
+		init_waitqueue_head(&dev->vbl_queue[i]);
 		atomic_set(&dev->_vblank_count[i], 0);
 		atomic_set(&dev->vblank_refcount[i], 0);
 	}
@@ -376,14 +336,14 @@ int drm_irq_install(struct drm_device *dev)
 	int	ret;
 
 	if (dev->irq == 0 || dev->dev_private == NULL)
-		return (EINVAL);
+		return -EINVAL;
 
 	DRM_DEBUG("irq=%d\n", dev->irq);
 
 	mutex_lock(&dev->struct_mutex);
 	if (dev->irq_enabled) {
 		mutex_unlock(&dev->struct_mutex);
-		return (EBUSY);
+		return -EBUSY;
 	}
 	dev->irq_enabled = 1;
 	mutex_unlock(&dev->struct_mutex);
@@ -398,12 +358,12 @@ int drm_irq_install(struct drm_device *dev)
 			dev->driver->irq_postinstall(dev);
 	}
 
-	return (0);
+	return 0;
 err:
 	mutex_lock(&dev->struct_mutex);
 	dev->irq_enabled = 0;
 	mutex_unlock(&dev->struct_mutex);
-	return (ret);
+	return ret;
 }
 EXPORT_SYMBOL(drm_irq_install);
 
@@ -422,7 +382,7 @@ int drm_irq_uninstall(struct drm_device *dev)
 	mutex_lock(&dev->struct_mutex);
 	if (!dev->irq_enabled) {
 		mutex_unlock(&dev->struct_mutex);
-		return (EINVAL);
+		return -EINVAL;
 	}
 
 	dev->irq_enabled = 0;
@@ -436,10 +396,10 @@ int drm_irq_uninstall(struct drm_device *dev)
 	if (dev->num_crtcs) {
 		spin_lock_irqsave(&dev->vbl_lock, irqflags);
 		for (i = 0; i < dev->num_crtcs; i++) {
-			wakeup(&dev->vbl_queue[i]);
+			DRM_WAKEUP(&dev->vbl_queue[i]);
 			dev->vblank_enabled[i] = 0;
 			dev->last_vblank[i] =
-			    dev->driver->get_vblank_counter(dev, i);
+				dev->driver->get_vblank_counter(dev, i);
 		}
 		spin_unlock_irqrestore(&dev->vbl_lock, irqflags);
 	}
@@ -448,7 +408,7 @@ int drm_irq_uninstall(struct drm_device *dev)
 
 	dev->driver->irq_uninstall(dev);
 
-	return (0);
+	return 0;
 }
 EXPORT_SYMBOL(drm_irq_uninstall);
 
@@ -466,11 +426,11 @@ EXPORT_SYMBOL(drm_irq_uninstall);
 int drm_control(struct drm_device *dev, void *data,
 		struct drm_file *file_priv)
 {
-	struct drm_control	*ctl = data;
+	struct drm_control *ctl = data;
 
 	/* Handle drivers who used to require IRQ setup no longer does. */
 	if (!(dev->driver->flags & DRIVER_IRQ))
-		return (0);
+		return 0;
 
 	switch (ctl->func) {
 	case DRM_INST_HANDLER:
@@ -478,14 +438,14 @@ int drm_control(struct drm_device *dev, void *data,
 			return 0;
 		if (dev->if_version < DRM_IF_VERSION(1, 2) &&
 		    ctl->irq != dev->irq)
-			return (EINVAL);
-		return (drm_irq_install(dev));
+			return -EINVAL;
+		return drm_irq_install(dev);
 	case DRM_UNINST_HANDLER:
 		if (drm_core_check_feature(dev, DRIVER_MODESET))
 			return 0;
-		return (drm_irq_uninstall(dev));
+		return drm_irq_uninstall(dev);
 	default:
-		return (EINVAL);
+		return -EINVAL;
 	}
 }
 
@@ -521,9 +481,9 @@ void drm_calc_timestamping_constants(struct drm_crtc *crtc)
 		 * line duration, frame duration and pixel duration in
 		 * nanoseconds:
 		 */
-		pixeldur_ns = (s64) 1000000000 / dotclock;
-		linedur_ns  = (s64) ((u64) crtc->hwmode.crtc_htotal *
-					      1000000000) / dotclock;
+		pixeldur_ns = (s64) div64_u64(1000000000, dotclock);
+		linedur_ns  = (s64) div64_u64(((u64) crtc->hwmode.crtc_htotal *
+					      1000000000), dotclock);
 		framedur_ns = (s64) crtc->hwmode.crtc_vtotal * linedur_ns;
 	} else
 		DRM_ERROR("crtc %d: Can't calculate constants, dotclock = 0!\n",
@@ -1020,6 +980,7 @@ void drm_vblank_put(struct drm_device *dev, int crtc)
 	    (drm_vblank_offdelay > 0))
 		timeout_add_msec(&dev->vblank_disable_timer, drm_vblank_offdelay);
 }
+EXPORT_SYMBOL(drm_vblank_put);
 
 /**
  * drm_vblank_off - disable vblank events on a CRTC
@@ -1039,7 +1000,7 @@ void drm_vblank_off(struct drm_device *dev, int crtc)
 
 	spin_lock_irqsave(&dev->vbl_lock, irqflags);
 	vblank_disable_and_save(dev, crtc);
-	wakeup(&dev->vbl_queue[crtc]);
+	DRM_WAKEUP(&dev->vbl_queue[crtc]);
 
 	list = &dev->vbl_events;
 	/* Send any queued vblank events, lest the natives grow disquiet */
@@ -1064,6 +1025,7 @@ void drm_vblank_off(struct drm_device *dev, int crtc)
 
 	spin_unlock_irqrestore(&dev->vbl_lock, irqflags);
 }
+EXPORT_SYMBOL(drm_vblank_off);
 
 /**
  * drm_vblank_pre_modeset - account for vblanks across mode sets
@@ -1434,7 +1396,7 @@ bool drm_handle_vblank(struct drm_device *dev, int crtc)
 			  crtc, (int) diff_ns);
 	}
 
-	wakeup(&dev->vbl_queue[crtc]);
+	DRM_WAKEUP(&dev->vbl_queue[crtc]);
 	drm_handle_vblank_events(dev, crtc);
 
 	spin_unlock_irqrestore(&dev->vblank_time_lock, irqflags);

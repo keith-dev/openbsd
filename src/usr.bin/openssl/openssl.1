@@ -1,4 +1,4 @@
-.\" $OpenBSD: openssl.1,v 1.13 2015/02/28 21:51:56 bentley Exp $
+.\" $OpenBSD: openssl.1,v 1.18 2015/08/02 12:43:44 jmc Exp $
 .\" ====================================================================
 .\" Copyright (c) 1998-2002 The OpenSSL Project.  All rights reserved.
 .\"
@@ -112,7 +112,7 @@
 .\"
 .\" OPENSSL
 .\"
-.Dd $Mdocdate: February 28 2015 $
+.Dd $Mdocdate: August 2 2015 $
 .Dt OPENSSL 1
 .Os
 .Sh NAME
@@ -389,8 +389,6 @@ GOST R 34.11-94 digest.
 MD4 digest.
 .It Cm md5
 MD5 digest.
-.It Cm mdc2
-MDC-2 digest.
 .It Cm ripemd160
 RIPEMD-160 digest.
 .It Cm sha
@@ -1416,7 +1414,7 @@ then even if a certificate is issued with CA:TRUE it will not be valid.
 .Sh CIPHERS
 .Nm openssl ciphers
 .Op Fl hVv
-.Op Fl ssl3 | tls1
+.Op Fl tls1
 .Op Ar cipherlist
 .Pp
 The
@@ -1430,8 +1428,6 @@ The options are as follows:
 .Bl -tag -width Ds
 .It Fl h , \&?
 Print a brief usage message.
-.It Fl ssl3
-Only include SSL v3 ciphers.
 .It Fl tls1
 Only include TLS v1 ciphers.
 .It Fl V
@@ -1440,14 +1436,12 @@ Like
 but include cipher suite codes in output (hex format).
 .It Fl v
 Verbose option.
-List ciphers with a complete description of protocol version
-.Pq SSLv3, which includes TLS ,
+List ciphers with a complete description of protocol version,
 key exchange, authentication, encryption and mac algorithms used along with
 any key size restrictions.
 Note that without the
 .Fl v
-option, ciphers may seem to appear twice in a cipher list;
-this is when similar ciphers are available for SSL v3/TLS v1.
+option, ciphers may seem to appear twice in a cipher list.
 .It Ar cipherlist
 A cipher list to convert to a cipher preference list.
 If it is not included, the default cipher list will be used.
@@ -1470,9 +1464,7 @@ It can represent a list of cipher suites containing a certain algorithm,
 or cipher suites of a certain type.
 For example
 .Em SHA1
-represents all cipher suites using the digest algorithm SHA1, and
-.Em SSLv3
-represents all SSL v3 algorithms.
+represents all cipher suites using the digest algorithm SHA1.
 .Pp
 Lists of cipher suites can be combined in a single
 .Em cipher string
@@ -1580,8 +1572,8 @@ Cipher suites using ephemeral DH key agreement.
 Cipher suites using RSA authentication, i.e. the certificates carry RSA keys.
 .It Ar aDSS , DSS
 Cipher suites using DSS authentication, i.e. the certificates carry DSS keys.
-.It Ar TLSv1 , SSLv3
-TLS v1.0 or SSL v3.0 cipher suites, respectively.
+.It Ar TLSv1
+TLS v1.0 cipher suites.
 .It Ar DH
 Cipher suites using DH, including anonymous DH.
 .It Ar ADH
@@ -1814,7 +1806,7 @@ install user certificates and CAs in MSIE using the Xenroll control.
 .Bk -words
 .Oo
 .Fl gost-mac | streebog256 | streebog512 | md_gost94 |
-.Fl md4 | md5 | mdc2 | ripemd160 | sha | sha1 |
+.Fl md4 | md5 | ripemd160 | sha | sha1 |
 .Fl sha224 | sha256 | sha384 | sha512 | whirlpool
 .Oc
 .Op Fl binary
@@ -1838,7 +1830,7 @@ install user certificates and CAs in MSIE using the Xenroll control.
 .Pp
 .Nm openssl
 .Cm gost-mac | streebog256 | streebog512 | md_gost94 |
-.Cm md4 | md5 | mdc2 | ripemd160 | sha | sha1 |
+.Cm md4 | md5 | ripemd160 | sha | sha1 |
 .Cm sha224 | sha256 | sha384 | sha512 | whirlpool
 .Op Fl c
 .Op Fl d
@@ -2045,7 +2037,7 @@ This option inhibits the output of the encoded version of the parameters.
 This argument specifies that a parameter set should be generated of size
 .Ar numbits .
 It must be the last option.
-If not present, a value of 512 is used.
+If not present, a value of 2048 is used.
 If this value is present, the input file is ignored and
 parameters are generated instead.
 .It Fl out Ar file
@@ -5150,8 +5142,6 @@ Acceptable values for
 are
 .Cm pkcs1
 for PKCS#1 padding;
-.Cm sslv3
-for SSLv3 padding;
 .Cm none
 for no padding;
 .Cm oaep
@@ -5509,7 +5499,7 @@ form,
 where file may be an algorithm parameter file,
 created by the
 .Cm genpkey -genparam
-command or an X.509 certificate for a key with approriate algorithm.
+command or an X.509 certificate for a key with appropriate algorithm.
 .Pp
 .Ar param : Ns Ar file
 generates a key using the parameter file or certificate
@@ -6477,7 +6467,6 @@ which it can be seen agrees with the recovered value above.
 .Op Fl msg
 .Op Fl nbio
 .Op Fl nbio_test
-.Op Fl no_ssl3
 .Op Fl no_ticket
 .Op Fl no_tls1
 .Op Fl no_tls1_1
@@ -6492,7 +6481,6 @@ which it can be seen agrees with the recovered value above.
 .Op Fl reconnect
 .Op Fl servername Ar name
 .Op Fl showcerts
-.Op Fl ssl3
 .Op Fl starttls Ar protocol
 .Op Fl state
 .Op Fl tls1
@@ -6601,10 +6589,7 @@ Show all protocol messages with hex dump.
 Turns on non-blocking I/O.
 .It Fl nbio_test
 Tests non-blocking I/O.
-.It Xo
-.Fl no_ssl3 | no_tls1 | no_tls1_1 | no_tls1_2 |
-.Fl ssl3 | tls1
-.Xc
+.It Fl no_tls1 | no_tls1_1 | no_tls1_2 | tls1
 These options disable the use of certain SSL or TLS protocols.
 By default, the initial handshake uses a method which should be compatible
 with all servers and permit them to use SSL v3 or TLS as appropriate.
@@ -6719,15 +6704,10 @@ to retrieve a web page.
 .Pp
 If the handshake fails, there are several possible causes; if it is
 nothing obvious like no client certificate, then the
-.Fl bugs , ssl3 , tls1 , no_ssl3 , no_tls1 , no_tls1_1 ,
+.Fl bugs , tls1 , no_tls1 , no_tls1_1 ,
 and
 .Fl no_tls1_2
 options can be tried in case it is a buggy server.
-In particular these options should be tried
-.Em before
-submitting a bug report to an
-.Nm OpenSSL
-mailing list.
 .Pp
 A frequent problem when attempting to get client certificates working
 is that a web client complains it has no certificates or gives an empty
@@ -6803,7 +6783,6 @@ We should really report information whenever a session is renegotiated.
 .Op Fl nbio
 .Op Fl nbio_test
 .Op Fl no_dhe
-.Op Fl no_ssl3
 .Op Fl no_tls1
 .Op Fl no_tls1_1
 .Op Fl no_tls1_2
@@ -6813,7 +6792,6 @@ We should really report information whenever a session is renegotiated.
 .Op Fl psk_hint Ar hint
 .Op Fl quiet
 .Op Fl serverpref
-.Op Fl ssl3
 .Op Fl state
 .Op Fl tls1
 .Op Fl Verify Ar depth
@@ -6954,10 +6932,7 @@ Tests non-blocking I/O.
 .It Fl no_dhe
 If this option is set, no DH parameters will be loaded, effectively
 disabling the ephemeral DH cipher suites.
-.It Xo
-.Fl no_ssl3 | no_tls1 | no_tls1_1 | no_tls1_2 |
-.Fl ssl3 | tls1
-.Xc
+.It Fl no_tls1 | no_tls1_1 | no_tls1_2 | tls1
 These options disable the use of certain SSL or TLS protocols.
 By default, the initial handshake uses a method which should be compatible
 with all servers and permit them to use SSL v3 or TLS as appropriate.
@@ -7092,7 +7067,6 @@ unknown cipher suites a client says it supports.
 .Op Fl nbio
 .Op Fl new
 .Op Fl reuse
-.Op Fl ssl3
 .Op Fl time Ar seconds
 .Op Fl verify Ar depth
 .Op Fl www Ar page
@@ -7162,21 +7136,6 @@ nor
 .Fl reuse
 are specified,
 they are both on by default and executed in sequence.
-.It Fl ssl3
-This option disables the use of certain SSL or TLS protocols.
-By default, the initial handshake uses a method
-which should be compatible with all servers and permit them to use
-SSL v3 or TLS as appropriate.
-The timing program is not as rich in options to turn protocols on and off as
-the
-.Nm s_client
-program and may not connect to all servers.
-.Pp
-Unfortunately there are a lot of ancient and broken servers in use which
-cannot handle this technique and will fail to connect.
-Some servers only work if TLS is turned off with the
-.Fl ssl3
-option.
 .It Fl time Ar seconds
 Specifies how long
 .Pq in seconds
@@ -7212,7 +7171,7 @@ can be used to measure the performance of an SSL connection.
 To connect to an SSL HTTP server and get the default page the command
 .Bd -literal -offset indent
 $ openssl s_time -connect servername:443 -www / -CApath yourdir \e
-	-CAfile yourfile.pem -cipher commoncipher [-ssl3]
+	-CAfile yourfile.pem -cipher commoncipher
 .Ed
 .Pp
 would typically be used
@@ -7226,12 +7185,7 @@ command for details.
 If the handshake fails, there are several possible causes:
 if it is nothing obvious like no client certificate, the
 .Fl bugs
-and
-.Fl ssl3
-options can be tried in case it is a buggy server.
-In particular you should play with these options
-.Em before
-submitting a bug report to an OpenSSL mailing list.
+option can be tried in case it is a buggy server.
 .Pp
 A frequent problem when attempting to get client certificates working
 is that a web client complains it has no certificates or gives an empty
@@ -7360,7 +7314,7 @@ These are described below in more detail.
 .Pp
 .Bl -tag -width "Verify return code " -compact
 .It Ar Protocol
-This is the protocol in use: TLSv1 or SSLv3.
+This is the protocol in use.
 .It Ar Cipher
 The cipher used is the actual raw SSL or TLS cipher code;
 see the SSL or TLS specifications for more information.
@@ -7499,7 +7453,7 @@ Expects a signed mail message on input and outputs the signed data.
 Both clear text and opaque signing is supported.
 .El
 .Pp
-The reamaining options are as follows:
+The remaining options are as follows:
 .Bl -tag -width "XXXX"
 .It Xo
 .Fl aes128 | aes192 | aes256 | des |
@@ -10179,17 +10133,17 @@ or similar.
 .\"
 .Sh FILES
 .Bl -tag -width "/etc/ssl/openssl.cnf" -compact
-.It /etc/ssl/
+.It Pa /etc/ssl/
 Default config directory for
 .Nm openssl .
-.It /etc/ssl/lib/
+.It Pa /etc/ssl/lib/
 Unused.
-.It /etc/ssl/private/
+.It Pa /etc/ssl/private/
 Default private key directory.
-.It /etc/ssl/openssl.cnf
+.It Pa /etc/ssl/openssl.cnf
 Default configuration file for
 .Nm openssl .
-.It /etc/ssl/x509v3.cnf
+.It Pa /etc/ssl/x509v3.cnf
 Default configuration file for
 .Nm x509
 certificates.

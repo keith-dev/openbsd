@@ -1,4 +1,4 @@
-/*	$OpenBSD: atascsi.c,v 1.122 2015/01/27 03:17:36 dlg Exp $ */
+/*	$OpenBSD: atascsi.c,v 1.124 2015/05/15 10:54:26 dlg Exp $ */
 
 /*
  * Copyright (c) 2007 David Gwynne <dlg@openbsd.org>
@@ -33,8 +33,6 @@
 
 #include <dev/ata/atascsi.h>
 #include <dev/ata/pmreg.h>
-
-#include <sys/ataio.h>
 
 struct atascsi_port;
 
@@ -279,7 +277,7 @@ atascsi_probe(struct scsi_link *link)
 			return (ENXIO);
 	}
 
-	type = as->as_methods->probe(as->as_cookie, port, link->lun);
+	type = as->as_methods->ata_probe(as->as_cookie, port, link->lun);
 	switch (type) {
 	case ATA_PORT_T_DISK:
 		break;
@@ -439,7 +437,7 @@ error:
 	free(ap, M_DEVBUF, 0);
 unsupported:
 
-	as->as_methods->free(as->as_cookie, port, link->lun);
+	as->as_methods->ata_free(as->as_cookie, port, link->lun);
 	return (rv);
 }
 
@@ -466,7 +464,7 @@ atascsi_free(struct scsi_link *link)
 	free(ap, M_DEVBUF, 0);
 	ahp->ahp_ports[link->lun] = NULL;
 
-	as->as_methods->free(as->as_cookie, port, link->lun);
+	as->as_methods->ata_free(as->as_cookie, port, link->lun);
 
 	if (link->lun == ahp->ahp_nports - 1) {
 		/* we've already freed all of ahp->ahp_ports, now

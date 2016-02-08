@@ -1,4 +1,4 @@
-/* $OpenBSD: ipifuncs.c,v 1.9 2014/09/30 06:51:58 jmatthew Exp $ */
+/* $OpenBSD: ipifuncs.c,v 1.11 2015/07/27 16:33:40 visa Exp $ */
 /* $NetBSD: ipifuncs.c,v 1.40 2008/04/28 20:23:10 martin Exp $ */
 
 /*-
@@ -42,19 +42,19 @@
 #include <machine/cpu.h>
 #include <machine/intr.h>
 
-static int	mips64_ipi_intr(void *);
-static void	mips64_ipi_nop(void);
-static void	smp_rendezvous_action(void);
-static void	mips64_ipi_ddb(void);
-static void	mips64_multicast_ipi(unsigned int, unsigned int);
-static unsigned int ipi_mailbox[MAXCPUS];
+int	mips64_ipi_intr(void *);
+void	mips64_ipi_nop(void);
+void	smp_rendezvous_action(void);
+void	mips64_ipi_ddb(void);
+void	mips64_multicast_ipi(unsigned int, unsigned int);
+unsigned int ipi_mailbox[MAXCPUS];
 
 /* Variables needed for SMP rendezvous. */
 struct mutex smp_ipi_mtx;
-static volatile unsigned long smp_rv_map;
-static void (*volatile smp_rv_action_func)(void *arg);
-static void * volatile smp_rv_func_arg;
-static volatile unsigned int smp_rv_waiters[2];
+volatile unsigned long smp_rv_map;
+void (*volatile smp_rv_action_func)(void *arg);
+void * volatile smp_rv_func_arg;
+volatile unsigned int smp_rv_waiters[2];
 
 /*
  * NOTE: This table must be kept in order with the bit definitions
@@ -90,7 +90,7 @@ mips64_ipi_init(void)
 /*
  * Process IPIs for a CPU.
  */
-static int
+int
 mips64_ipi_intr(void *arg)
 {
 	unsigned int pending_ipis, bit;
@@ -98,15 +98,12 @@ mips64_ipi_intr(void *arg)
 
 	KASSERT (cpuid == cpu_number());
 
-	/* figure out which ipi are pending */
-	pending_ipis = ipi_mailbox[cpuid];
 	/* clear ipi interrupt */
 	hw_ipi_intr_clear(cpuid);
+	/* get and clear pending ipis */
+	pending_ipis = atomic_swap_uint(&ipi_mailbox[cpuid], 0);
 	
 	if (pending_ipis > 0) {
-		/* clear pending ipi, since we're about to handle them */
-		atomic_clearbits_int(&ipi_mailbox[cpuid], pending_ipis);
-
 		for (bit = 0; bit < MIPS64_NIPIS; bit++)
 			if (pending_ipis & (1UL << bit))
 				(*ipifuncs[bit])();
@@ -128,7 +125,7 @@ mips64_send_ipi(unsigned int cpuid, unsigned int ipimask)
 	        panic("mips_send_ipi: CPU %ld not running", cpuid);
 #endif
 
-	atomic_wait_and_setbits_int(&ipi_mailbox[cpuid], ipimask);
+	atomic_setbits_int(&ipi_mailbox[cpuid], ipimask);
 
 	hw_ipi_intr_set(cpuid);
 }
@@ -152,7 +149,7 @@ mips64_multicast_ipi(unsigned int cpumask, unsigned int ipimask)
 	}
 }
 
-static void
+void
 mips64_ipi_nop(void)
 {
 #ifdef DEBUG
@@ -226,7 +223,7 @@ smp_rendezvous_cpus(unsigned long map,
 	mtx_leave(&smp_ipi_mtx);
 }
 
-static void
+void
 mips64_ipi_ddb(void)
 {
 #ifdef DDB

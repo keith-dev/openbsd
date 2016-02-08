@@ -1,4 +1,4 @@
-/* $OpenBSD: ip_ipcomp.c,v 1.39 2014/12/19 17:14:40 tedu Exp $ */
+/* $OpenBSD: ip_ipcomp.c,v 1.44 2015/07/15 22:16:42 deraadt Exp $ */
 
 /*
  * Copyright (c) 2001 Jean-Jacques Bernard-Gundol (jj@wabbitt.org)
@@ -54,12 +54,10 @@
 #include <crypto/cryptodev.h>
 #include <crypto/xform.h>
 
-#include <lib/libz/zlib.h>
-
 #include "bpfilter.h"
 
-int ipcomp_output_cb(void *);
-int ipcomp_input_cb(void *);
+int ipcomp_output_cb(struct cryptop *);
+int ipcomp_input_cb(struct cryptop *);
 
 #ifdef ENCDEBUG
 #define DPRINTF(x)      if (encdebug) printf x
@@ -174,18 +172,16 @@ ipcomp_input(m, tdb, skip, protoff)
 	crdc->crd_len = m->m_pkthdr.len - (skip + hlen);
 	crdc->crd_inject = skip;
 
-	tc->tc_ptr = 0;
-
 	/* Decompression operation */
 	crdc->crd_alg = ipcompx->type;
 
 	/* Crypto operation descriptor */
 	crp->crp_ilen = m->m_pkthdr.len - (skip + hlen);
 	crp->crp_flags = CRYPTO_F_IMBUF;
-	crp->crp_buf = (caddr_t) m;
-	crp->crp_callback = (int (*) (struct cryptop *)) ipcomp_input_cb;
+	crp->crp_buf = (caddr_t)m;
+	crp->crp_callback = ipcomp_input_cb;
 	crp->crp_sid = tdb->tdb_cryptoid;
-	crp->crp_opaque = (caddr_t) tc;
+	crp->crp_opaque = (caddr_t)tc;
 
 	/* These are passed as-is to the callback */
 	tc->tc_skip = skip;
@@ -202,19 +198,18 @@ ipcomp_input(m, tdb, skip, protoff)
  * IPComp input callback, called directly by the crypto driver
  */
 int
-ipcomp_input_cb(op)
-	void *op;
+ipcomp_input_cb(struct cryptop *crp)
 {
 	int error, s, skip, protoff, roff, hlen = IPCOMP_HLENGTH, clen;
 	u_int8_t nproto;
 	struct mbuf *m, *m1, *mo;
 	struct tdb_crypto *tc;
-	struct cryptop *crp;
 	struct tdb *tdb;
 	struct ipcomp  *ipcomp;
 	caddr_t addr;
-
-	crp = (struct cryptop *) op;
+#ifdef ENCDEBUG
+	char buf[INET6_ADDRSTRLEN];
+#endif
 
 	tc = (struct tdb_crypto *) crp->crp_opaque;
 	skip = tc->tc_skip;
@@ -295,7 +290,8 @@ ipcomp_input_cb(op)
 	if (m1 == NULL) {
 		ipcompstat.ipcomps_hdrops++;
 		DPRINTF(("ipcomp_input_cb(): bad mbuf chain, IPCA %s/%08x\n",
-		    ipsp_address(tdb->tdb_dst), ntohl(tdb->tdb_spi)));
+		    ipsp_address(&tdb->tdb_dst, buf, sizeof(buf)),
+		    ntohl(tdb->tdb_spi)));
 		error = EINVAL;
 		goto baddone;
 	}
@@ -347,15 +343,14 @@ ipcomp_input_cb(op)
 	m_copyback(m, protoff, sizeof(u_int8_t), &nproto, M_NOWAIT);
 
 	/* Back to generic IPsec input processing */
-	error = ipsec_common_input_cb(m, tdb, skip, protoff, NULL);
+	error = ipsec_common_input_cb(m, tdb, skip, protoff);
 	splx(s);
 	return error;
 
 baddone:
 	splx(s);
 
-	if (m)
-		m_freem(m);
+	m_freem(m);
 
 	crypto_freereq(crp);
 
@@ -379,6 +374,9 @@ ipcomp_output(m, tdb, mp, skip, protoff)
 	struct cryptop *crp;
 	struct tdb_crypto *tc;
 	struct mbuf    *mi, *mo;
+#ifdef ENCDEBUG
+	char buf[INET6_ADDRSTRLEN];
+#endif
 #if NBPFILTER > 0
 	struct ifnet *encif;
 
@@ -411,8 +409,9 @@ ipcomp_output(m, tdb, mp, skip, protoff)
 		 * worry
 		 */
 		if (m->m_pkthdr.len + hlen > IP_MAXPACKET) {
-			DPRINTF(("ipcomp_output(): packet in IPCA %s/%08x got too big\n",
-			    ipsp_address(tdb->tdb_dst), ntohl(tdb->tdb_spi)));
+			DPRINTF(("ipcomp_output(): packet in IPCA %s/%08x "
+			    "got too big\n", ipsp_address(&tdb->tdb_dst, buf,
+			    sizeof(buf)), ntohl(tdb->tdb_spi)));
 			m_freem(m);
 			ipcompstat.ipcomps_toobig++;
 			return EMSGSIZE;
@@ -423,8 +422,9 @@ ipcomp_output(m, tdb, mp, skip, protoff)
 	case AF_INET6:
 		/* Check for IPv6 maximum packet size violations */
 		if (m->m_pkthdr.len + hlen > IPV6_MAXPACKET) {
-			DPRINTF(("ipcomp_output(): packet in IPCA %s/%08x got too big\n",
-			    ipsp_address(tdb->tdb_dst), ntohl(tdb->tdb_spi)));
+			DPRINTF(("ipcomp_output(): packet in IPCA %s/%08x "
+			    "got too big\n", ipsp_address(&tdb->tdb_dst, buf,
+			    sizeof(buf)), ntohl(tdb->tdb_spi)));
 			m_freem(m);
 			ipcompstat.ipcomps_toobig++;
 			return EMSGSIZE;
@@ -432,8 +432,9 @@ ipcomp_output(m, tdb, mp, skip, protoff)
 #endif /* INET6 */
 
 	default:
-		DPRINTF(("ipcomp_output(): unknown/unsupported protocol family %d, IPCA %s/%08x\n",
-		    tdb->tdb_dst.sa.sa_family, ipsp_address(tdb->tdb_dst),
+		DPRINTF(("ipcomp_output(): unknown/unsupported protocol "
+		    "family %d, IPCA %s/%08x\n", tdb->tdb_dst.sa.sa_family,
+		    ipsp_address(&tdb->tdb_dst, buf, sizeof(buf)),
 		    ntohl(tdb->tdb_spi)));
 		m_freem(m);
 		ipcompstat.ipcomps_nopf++;
@@ -476,7 +477,8 @@ ipcomp_output(m, tdb, mp, skip, protoff)
 
 		if (n == NULL) {
 			DPRINTF(("ipcomp_output(): bad mbuf chain, IPCA %s/%08x\n",
-			    ipsp_address(tdb->tdb_dst), ntohl(tdb->tdb_spi)));
+			    ipsp_address(&tdb->tdb_dst, buf, sizeof(buf)),
+			    ntohl(tdb->tdb_spi)));
 			ipcompstat.ipcomps_hdrops++;
 			m_freem(m);
 			return ENOBUFS;
@@ -528,9 +530,9 @@ ipcomp_output(m, tdb, mp, skip, protoff)
 	/* Crypto operation descriptor */
 	crp->crp_ilen = m->m_pkthdr.len;	/* Total input length */
 	crp->crp_flags = CRYPTO_F_IMBUF;
-	crp->crp_buf = (caddr_t) m;
-	crp->crp_callback = (int (*) (struct cryptop *)) ipcomp_output_cb;
-	crp->crp_opaque = (caddr_t) tc;
+	crp->crp_buf = (caddr_t)m;
+	crp->crp_callback = ipcomp_output_cb;
+	crp->crp_opaque = (caddr_t)tc;
 	crp->crp_sid = tdb->tdb_cryptoid;
 
 	return crypto_dispatch(crp);
@@ -540,10 +542,8 @@ ipcomp_output(m, tdb, mp, skip, protoff)
  * IPComp output callback, called directly from the crypto driver
  */
 int
-ipcomp_output_cb(cp)
-	void *cp;
+ipcomp_output_cb(struct cryptop *crp)
 {
-	struct cryptop *crp = (struct cryptop *) cp;
 	struct tdb_crypto *tc;
 	struct tdb *tdb;
 	struct mbuf *m, *mo;
@@ -554,6 +554,9 @@ ipcomp_output_cb(cp)
 	struct ip6_hdr *ip6;
 #endif
 	struct ipcomp  *ipcomp;
+#ifdef ENCDEBUG
+	char buf[INET6_ADDRSTRLEN];
+#endif
 
 	tc = (struct tdb_crypto *) crp->crp_opaque;
 	skip = tc->tc_skip;
@@ -612,8 +615,8 @@ ipcomp_output_cb(cp)
 	mo = m_inject(m, skip, IPCOMP_HLENGTH, M_DONTWAIT);
 	if (mo == NULL) {
 		DPRINTF(("ipcomp_output_cb(): failed to inject IPCOMP header "
-		    "for IPCA %s/%08x\n",
-		    ipsp_address(tdb->tdb_dst), ntohl(tdb->tdb_spi)));
+		    "for IPCA %s/%08x\n", ipsp_address(&tdb->tdb_dst, buf,
+		     sizeof(buf)), ntohl(tdb->tdb_spi)));
 		ipcompstat.ipcomps_wrap++;
 		error = ENOBUFS;
 		goto baddone;
@@ -641,8 +644,8 @@ ipcomp_output_cb(cp)
 #endif
 	default:
 		DPRINTF(("ipcomp_output_cb(): unsupported protocol family %d, "
-		    "IPCA %s/%08x\n",
-		    tdb->tdb_dst.sa.sa_family, ipsp_address(tdb->tdb_dst),
+		    "IPCA %s/%08x\n", tdb->tdb_dst.sa.sa_family,
+		    ipsp_address(&tdb->tdb_dst, buf, sizeof(buf)),
 		    ntohl(tdb->tdb_spi)));
 		ipcompstat.ipcomps_nopf++;
 		error = EPFNOSUPPORT;
@@ -660,8 +663,7 @@ ipcomp_output_cb(cp)
 baddone:
 	splx(s);
 
-	if (m)
-		m_freem(m);
+	m_freem(m);
 
 	crypto_freereq(crp);
 

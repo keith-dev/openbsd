@@ -67,6 +67,7 @@
 ./etc/examples/ipsec.conf
 ./etc/examples/ldapd.conf
 ./etc/examples/ldpd.conf
+./etc/examples/man.conf
 ./etc/examples/mixerctl.conf
 ./etc/examples/mrouted.conf
 ./etc/examples/ntpd.conf
@@ -74,6 +75,7 @@
 ./etc/examples/ospfd.conf
 ./etc/examples/pf.conf
 ./etc/examples/printcap
+./etc/examples/radiusd.conf
 ./etc/examples/rbootd.conf
 ./etc/examples/rc.local
 ./etc/examples/rc.securelevel
@@ -169,6 +171,7 @@
 ./etc/rc.d/ospfd
 ./etc/rc.d/pflogd
 ./etc/rc.d/portmap
+./etc/rc.d/radiusd
 ./etc/rc.d/rarpd
 ./etc/rc.d/rbootd
 ./etc/rc.d/rc.subr
@@ -213,6 +216,9 @@
 ./etc/signify/openbsd-58-base.pub
 ./etc/signify/openbsd-58-fw.pub
 ./etc/signify/openbsd-58-pkg.pub
+./etc/signify/openbsd-59-base.pub
+./etc/signify/openbsd-59-fw.pub
+./etc/signify/openbsd-59-pkg.pub
 ./etc/skel
 ./etc/skel/.ssh
 ./etc/ssh
@@ -253,7 +259,6 @@
 ./sbin/isakmpd
 ./sbin/ldattach
 ./sbin/ldconfig
-./sbin/lmccontrol
 ./sbin/mkfifo
 ./sbin/mknod
 ./sbin/mount
@@ -351,6 +356,7 @@
 ./usr/bin/diff
 ./usr/bin/diff3
 ./usr/bin/dirname
+./usr/bin/doas
 ./usr/bin/du
 ./usr/bin/egrep
 ./usr/bin/enc2xs
@@ -463,7 +469,7 @@
 ./usr/bin/paste
 ./usr/bin/patch
 ./usr/bin/perl
-./usr/bin/perl5.20.1
+./usr/bin/perl5.20.2
 ./usr/bin/perlbug
 ./usr/bin/perldoc
 ./usr/bin/perlivp
@@ -535,12 +541,9 @@
 ./usr/bin/stat
 ./usr/bin/strings
 ./usr/bin/su
-./usr/bin/sudo
-./usr/bin/sudoedit
 ./usr/bin/systat
 ./usr/bin/tail
 ./usr/bin/talk
-./usr/bin/tcopy
 ./usr/bin/tcpbench
 ./usr/bin/tee
 ./usr/bin/telnet
@@ -550,7 +553,6 @@
 ./usr/bin/tftp
 ./usr/bin/tic
 ./usr/bin/time
-./usr/bin/tip
 ./usr/bin/tmux
 ./usr/bin/top
 ./usr/bin/touch
@@ -1440,8 +1442,10 @@
 ./usr/libdata/perl5/pod/perl5180delta.pod
 ./usr/libdata/perl5/pod/perl5181delta.pod
 ./usr/libdata/perl5/pod/perl5182delta.pod
+./usr/libdata/perl5/pod/perl5184delta.pod
 ./usr/libdata/perl5/pod/perl5200delta.pod
 ./usr/libdata/perl5/pod/perl5201delta.pod
+./usr/libdata/perl5/pod/perl5202delta.pod
 ./usr/libdata/perl5/pod/perl561delta.pod
 ./usr/libdata/perl5/pod/perl56delta.pod
 ./usr/libdata/perl5/pod/perl581delta.pod
@@ -1582,6 +1586,7 @@
 ./usr/libdata/perl5/pod/perltru64.pod
 ./usr/libdata/perl5/pod/perltw.pod
 ./usr/libdata/perl5/pod/perlunicode.pod
+./usr/libdata/perl5/pod/perlunicook.pod
 ./usr/libdata/perl5/pod/perlunifaq.pod
 ./usr/libdata/perl5/pod/perluniintro.pod
 ./usr/libdata/perl5/pod/perluniprops.pod
@@ -2117,6 +2122,9 @@
 ./usr/libexec/mail.local
 ./usr/libexec/makewhatis
 ./usr/libexec/ntalkd
+./usr/libexec/radiusd
+./usr/libexec/radiusd/radiusd_bsdauth
+./usr/libexec/radiusd/radiusd_radius
 ./usr/libexec/rpc.rquotad
 ./usr/libexec/rpc.rstatd
 ./usr/libexec/rpc.rusersd
@@ -2350,6 +2358,8 @@
 ./usr/sbin/quot
 ./usr/sbin/quotaoff
 ./usr/sbin/quotaon
+./usr/sbin/radiusctl
+./usr/sbin/radiusd
 ./usr/sbin/rarpd
 ./usr/sbin/rbootd
 ./usr/sbin/rcctl
@@ -2411,7 +2421,6 @@
 ./usr/sbin/userinfo
 ./usr/sbin/usermod
 ./usr/sbin/vipw
-./usr/sbin/visudo
 ./usr/sbin/watchdogd
 ./usr/sbin/ypbind
 ./usr/sbin/ypinit
@@ -4520,6 +4529,8 @@
 ./var/nsd/run
 ./var/nsd/run/xfr
 ./var/nsd/zones
+./var/nsd/zones/master
+./var/nsd/zones/slave
 ./var/quotas
 ./var/run
 ./var/spool
@@ -4530,6 +4541,12 @@
 ./var/spool/lock
 ./var/spool/output
 ./var/spool/smtpd
+./var/spool/smtpd/corrupt
+./var/spool/smtpd/incoming
+./var/spool/smtpd/offline
+./var/spool/smtpd/purge
+./var/spool/smtpd/queue
+./var/spool/smtpd/temporary
 ./var/spool/uucp
 ./var/spool/uucppublic
 ./var/tmp

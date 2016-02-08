@@ -1,4 +1,4 @@
-/*	$OpenBSD: ip_ipsp.c,v 1.203 2015/01/24 00:29:06 deraadt Exp $	*/
+/*	$OpenBSD: ip_ipsp.c,v 1.214 2015/05/23 12:38:53 markus Exp $	*/
 /*
  * The authors of this code are John Ioannidis (ji@tla.org),
  * Angelos D. Keromytis (kermit@csd.uch.gr),
@@ -65,7 +65,6 @@
 
 #include <netinet/ip_ipsp.h>
 #include <net/pfkeyv2.h>
-#include <crypto/xform.h>
 
 #ifdef DDB
 #include <ddb/db_output.h>
@@ -92,6 +91,19 @@ struct ipsec_policy_head ipsec_policy_head =
     TAILQ_HEAD_INITIALIZER(ipsec_policy_head);
 struct ipsec_acquire_head ipsec_acquire_head =
     TAILQ_HEAD_INITIALIZER(ipsec_acquire_head);
+
+u_int32_t ipsec_ids_next_flow = 1;	/* may not be zero */
+int ipsec_ids_idle = 100;		/* keep free ids for 100s */
+struct ipsec_ids_tree ipsec_ids_tree;
+struct ipsec_ids_flows ipsec_ids_flows;
+
+void ipsp_ids_timeout(void *);
+static int ipsp_ids_cmp(struct ipsec_ids *, struct ipsec_ids *);
+static int ipsp_ids_flow_cmp(struct ipsec_ids *, struct ipsec_ids *);
+RB_PROTOTYPE(ipsec_ids_tree, ipsec_ids, id_node_flow, ipsp_ids_cmp);
+RB_PROTOTYPE(ipsec_ids_flows, ipsec_ids, id_node_id, ipsp_ids_flow_cmp);
+RB_GENERATE(ipsec_ids_tree, ipsec_ids, id_node_flow, ipsp_ids_cmp);
+RB_GENERATE(ipsec_ids_flows, ipsec_ids, id_node_id, ipsp_ids_flow_cmp);
 
 /*
  * This is the proper place to define the various encapsulation transforms.
@@ -125,8 +137,9 @@ struct xformsw *xformswNXFORMSW = &xformsw[nitems(xformsw)];
 
 #define	TDB_HASHSIZE_INIT	32
 
+static SIPHASH_KEY tdbkey;
 static struct tdb **tdbh = NULL;
-static struct tdb **tdbaddr = NULL;
+static struct tdb **tdbdst = NULL;
 static struct tdb **tdbsrc = NULL;
 static u_int tdb_hashmask = TDB_HASHSIZE_INIT - 1;
 static int tdb_count;
@@ -139,34 +152,15 @@ int
 tdb_hash(u_int rdomain, u_int32_t spi, union sockaddr_union *dst,
     u_int8_t proto)
 {
-	static u_int32_t mult1 = 0, mult2 = 0;
-	u_int8_t *ptr = (u_int8_t *) dst;
-	int i, shift;
-	u_int64_t hash;
-	int val32 = 0;
+	SIPHASH_CTX ctx;
 
-	while (mult1 == 0)
-		mult1 = arc4random();
-	while (mult2 == 0)
-		mult2 = arc4random();
+	SipHash24_Init(&ctx, &tdbkey);
+	SipHash24_Update(&ctx, &rdomain, sizeof(rdomain));
+	SipHash24_Update(&ctx, &spi, sizeof(spi));
+	SipHash24_Update(&ctx, &proto, sizeof(proto));
+	SipHash24_Update(&ctx, dst, SA_LEN(&dst->sa));
 
-	hash = (spi ^ proto ^ rdomain) * mult1;
-	for (i = 0; i < SA_LEN(&dst->sa); i++) {
-		val32 = (val32 << 8) | ptr[i];
-		if (i % 4 == 3) {
-			hash ^= val32 * mult2;
-			val32 = 0;
-		}
-	}
-
-	if (i % 4 != 0)
-		hash ^= val32 * mult2;
-
-	shift = ffs(tdb_hashmask + 1);
-	while ((hash & ~tdb_hashmask) != 0)
-		hash = (hash >> shift) ^ (hash & tdb_hashmask);
-
-	return hash;
+	return (SipHash24_End(&ctx) & tdb_hashmask);
 }
 
 /*
@@ -343,42 +337,25 @@ gettdbbysrcdst(u_int rdomain, u_int32_t spi, union sockaddr_union *src,
 }
 
 /*
- * Check that credentials and IDs match. Return true if so. The t*
- * range of arguments contains information from TDBs; the p*
- * range of arguments contains information from policies or
- * already established TDBs.
+ * Check that IDs match. Return true if so. The t* range of
+ * arguments contains information from TDBs; the p* range of
+ * arguments contains information from policies or already
+ * established TDBs.
  */
 int
 ipsp_aux_match(struct tdb *tdb,
-    struct ipsec_ref *psrcid,
-    struct ipsec_ref *pdstid,
-    struct ipsec_ref *plcred,
-    struct ipsec_ref *prcred,
+    struct ipsec_ids *ids,
     struct sockaddr_encap *pfilter,
     struct sockaddr_encap *pfiltermask)
 {
-	if (psrcid != NULL)
-		if (tdb->tdb_srcid == NULL ||
-		    !ipsp_ref_match(tdb->tdb_srcid, psrcid))
-			return 0;
-
-	if (pdstid != NULL)
-		if (tdb->tdb_dstid == NULL ||
-		    !ipsp_ref_match(tdb->tdb_dstid, pdstid))
-			return 0;
-
-	if (plcred != NULL)
-		if (tdb->tdb_local_cred == NULL ||
-		   !ipsp_ref_match(tdb->tdb_local_cred, plcred))
-			return 0;
-
-	if (prcred != NULL)
-		if (tdb->tdb_remote_cred == NULL ||
-		    !ipsp_ref_match(tdb->tdb_remote_cred, prcred))
+	if (ids != NULL)
+		if (tdb->tdb_ids == NULL ||
+		    !ipsp_ids_match(tdb->tdb_ids, ids))
 			return 0;
 
 	/* Check for filter matches. */
-	if (tdb->tdb_filter.sen_type) {
+	if (pfilter != NULL && pfiltermask != NULL &&
+	    tdb->tdb_filter.sen_type) {
 		/*
 		 * XXX We should really be doing a subnet-check (see
 		 * whether the TDB-associated filter is a subset
@@ -401,27 +378,25 @@ ipsp_aux_match(struct tdb *tdb,
  * the desired IDs.
  */
 struct tdb *
-gettdbbyaddr(u_int rdomain, union sockaddr_union *dst, u_int8_t sproto,
-    struct ipsec_ref *srcid, struct ipsec_ref *dstid,
-    struct ipsec_ref *local_cred, struct mbuf *m, int af,
+gettdbbydst(u_int rdomain, union sockaddr_union *dst, u_int8_t sproto,
+    struct ipsec_ids *ids,
     struct sockaddr_encap *filter, struct sockaddr_encap *filtermask)
 {
 	u_int32_t hashval;
 	struct tdb *tdbp;
 
-	if (tdbaddr == NULL)
+	if (tdbdst == NULL)
 		return (struct tdb *) NULL;
 
 	hashval = tdb_hash(rdomain, 0, dst, sproto);
 
-	for (tdbp = tdbaddr[hashval]; tdbp != NULL; tdbp = tdbp->tdb_anext)
+	for (tdbp = tdbdst[hashval]; tdbp != NULL; tdbp = tdbp->tdb_dnext)
 		if ((tdbp->tdb_sproto == sproto) &&
 		    (tdbp->tdb_rdomain == rdomain) &&
 		    ((tdbp->tdb_flags & TDBF_INVALID) == 0) &&
 		    (!memcmp(&tdbp->tdb_dst, dst, SA_LEN(&dst->sa)))) {
-			/* Do IDs and local credentials match ? */
-			if (!ipsp_aux_match(tdbp, srcid, dstid,
-			    local_cred, NULL, filter, filtermask))
+			/* Do IDs match ? */
+			if (!ipsp_aux_match(tdbp, ids, filter, filtermask))
 				continue;
 			break;
 		}
@@ -435,9 +410,8 @@ gettdbbyaddr(u_int rdomain, union sockaddr_union *dst, u_int8_t sproto,
  */
 struct tdb *
 gettdbbysrc(u_int rdomain, union sockaddr_union *src, u_int8_t sproto,
-    struct ipsec_ref *srcid, struct ipsec_ref *dstid,
-    struct mbuf *m, int af, struct sockaddr_encap *filter,
-    struct sockaddr_encap *filtermask)
+    struct ipsec_ids *ids,
+    struct sockaddr_encap *filter, struct sockaddr_encap *filtermask)
 {
 	u_int32_t hashval;
 	struct tdb *tdbp;
@@ -453,8 +427,8 @@ gettdbbysrc(u_int rdomain, union sockaddr_union *src, u_int8_t sproto,
 		    ((tdbp->tdb_flags & TDBF_INVALID) == 0) &&
 		    (!memcmp(&tdbp->tdb_src, src, SA_LEN(&src->sa)))) {
 			/* Check whether IDs match */
-			if (!ipsp_aux_match(tdbp, dstid, srcid, NULL, NULL,
-			    filter, filtermask))
+			if (!ipsp_aux_match(tdbp, ids, filter,
+			    filtermask))
 				continue;
 			break;
 		}
@@ -585,15 +559,16 @@ tdb_soft_firstuse(void *v)
 void
 tdb_rehash(void)
 {
-	struct tdb **new_tdbh, **new_tdbaddr, **new_srcaddr, *tdbp, *tdbnp;
+	struct tdb **new_tdbh, **new_tdbdst, **new_srcaddr, *tdbp, *tdbnp;
 	u_int i, old_hashmask = tdb_hashmask;
 	u_int32_t hashval;
 
 	tdb_hashmask = (tdb_hashmask << 1) | 1;
 
+	arc4random_buf(&tdbkey, sizeof(tdbkey));
 	new_tdbh = mallocarray(tdb_hashmask + 1, sizeof(struct tdb *), M_TDB,
 	    M_WAITOK | M_ZERO);
-	new_tdbaddr = mallocarray(tdb_hashmask + 1, sizeof(struct tdb *), M_TDB,
+	new_tdbdst = mallocarray(tdb_hashmask + 1, sizeof(struct tdb *), M_TDB,
 	    M_WAITOK | M_ZERO);
 	new_srcaddr = mallocarray(tdb_hashmask + 1, sizeof(struct tdb *), M_TDB,
 	    M_WAITOK | M_ZERO);
@@ -608,13 +583,13 @@ tdb_rehash(void)
 			new_tdbh[hashval] = tdbp;
 		}
 
-		for (tdbp = tdbaddr[i]; tdbp != NULL; tdbp = tdbnp) {
-			tdbnp = tdbp->tdb_anext;
+		for (tdbp = tdbdst[i]; tdbp != NULL; tdbp = tdbnp) {
+			tdbnp = tdbp->tdb_dnext;
 			hashval = tdb_hash(tdbp->tdb_rdomain,
 			    0, &tdbp->tdb_dst,
 			    tdbp->tdb_sproto);
-			tdbp->tdb_anext = new_tdbaddr[hashval];
-			new_tdbaddr[hashval] = tdbp;
+			tdbp->tdb_dnext = new_tdbdst[hashval];
+			new_tdbdst[hashval] = tdbp;
 		}
 
 		for (tdbp = tdbsrc[i]; tdbp != NULL; tdbp = tdbnp) {
@@ -630,8 +605,8 @@ tdb_rehash(void)
 	free(tdbh, M_TDB, 0);
 	tdbh = new_tdbh;
 
-	free(tdbaddr, M_TDB, 0);
-	tdbaddr = new_tdbaddr;
+	free(tdbdst, M_TDB, 0);
+	tdbdst = new_tdbdst;
 
 	free(tdbsrc, M_TDB, 0);
 	tdbsrc = new_srcaddr;
@@ -647,9 +622,10 @@ puttdb(struct tdb *tdbp)
 	int s = splsoftnet();
 
 	if (tdbh == NULL) {
+		arc4random_buf(&tdbkey, sizeof(tdbkey));
 		tdbh = mallocarray(tdb_hashmask + 1, sizeof(struct tdb *),
 		    M_TDB, M_WAITOK | M_ZERO);
-		tdbaddr = mallocarray(tdb_hashmask + 1, sizeof(struct tdb *),
+		tdbdst = mallocarray(tdb_hashmask + 1, sizeof(struct tdb *),
 		    M_TDB, M_WAITOK | M_ZERO);
 		tdbsrc = mallocarray(tdb_hashmask + 1, sizeof(struct tdb *),
 		    M_TDB, M_WAITOK | M_ZERO);
@@ -678,8 +654,8 @@ puttdb(struct tdb *tdbp)
 
 	hashval = tdb_hash(tdbp->tdb_rdomain, 0, &tdbp->tdb_dst,
 	    tdbp->tdb_sproto);
-	tdbp->tdb_anext = tdbaddr[hashval];
-	tdbaddr[hashval] = tdbp;
+	tdbp->tdb_dnext = tdbdst[hashval];
+	tdbdst[hashval] = tdbp;
 
 	hashval = tdb_hash(tdbp->tdb_rdomain, 0, &tdbp->tdb_src,
 	    tdbp->tdb_sproto);
@@ -706,10 +682,11 @@ tdb_delete(struct tdb *tdbp)
 	if (tdbh == NULL)
 		return;
 
+	s = splsoftnet();
+
 	hashval = tdb_hash(tdbp->tdb_rdomain, tdbp->tdb_spi,
 	    &tdbp->tdb_dst, tdbp->tdb_sproto);
 
-	s = splsoftnet();
 	if (tdbh[hashval] == tdbp) {
 		tdbh[hashval] = tdbp->tdb_hnext;
 	} else {
@@ -727,17 +704,19 @@ tdb_delete(struct tdb *tdbp)
 	hashval = tdb_hash(tdbp->tdb_rdomain, 0, &tdbp->tdb_dst,
 	    tdbp->tdb_sproto);
 
-	if (tdbaddr[hashval] == tdbp) {
-		tdbaddr[hashval] = tdbp->tdb_anext;
+	if (tdbdst[hashval] == tdbp) {
+		tdbdst[hashval] = tdbp->tdb_dnext;
 	} else {
-		for (tdbpp = tdbaddr[hashval]; tdbpp != NULL;
-		    tdbpp = tdbpp->tdb_anext) {
-			if (tdbpp->tdb_anext == tdbp) {
-				tdbpp->tdb_anext = tdbp->tdb_anext;
+		for (tdbpp = tdbdst[hashval]; tdbpp != NULL;
+		    tdbpp = tdbpp->tdb_dnext) {
+			if (tdbpp->tdb_dnext == tdbp) {
+				tdbpp->tdb_dnext = tdbp->tdb_dnext;
 				break;
 			}
 		}
 	}
+
+	tdbp->tdb_dnext = NULL;
 
 	hashval = tdb_hash(tdbp->tdb_rdomain, 0, &tdbp->tdb_src,
 	    tdbp->tdb_sproto);
@@ -772,10 +751,6 @@ tdb_alloc(u_int rdomain)
 
 	tdbp = malloc(sizeof(*tdbp), M_TDB, M_WAITOK | M_ZERO);
 
-	/* Init Incoming SA-Binding Queues. */
-	TAILQ_INIT(&tdbp->tdb_inp_out);
-	TAILQ_INIT(&tdbp->tdb_inp_in);
-
 	TAILQ_INIT(&tdbp->tdb_policy_head);
 
 	/* Record establishment time. */
@@ -797,7 +772,6 @@ void
 tdb_free(struct tdb *tdbp)
 {
 	struct ipsec_policy *ipo;
-	struct inpcb *inp;
 
 	if (tdbp->tdb_xform) {
 		(*(tdbp->tdb_xform->xf_zeroize))(tdbp);
@@ -808,19 +782,6 @@ tdb_free(struct tdb *tdbp)
 	/* Cleanup pfsync references */
 	pfsync_delete_tdb(tdbp);
 #endif
-
-	/* Cleanup inp references. */
-	for (inp = TAILQ_FIRST(&tdbp->tdb_inp_in); inp;
-	    inp = TAILQ_FIRST(&tdbp->tdb_inp_in)) {
-		TAILQ_REMOVE(&tdbp->tdb_inp_in, inp, inp_tdb_in_next);
-		inp->inp_tdb_in = NULL;
-	}
-
-	for (inp = TAILQ_FIRST(&tdbp->tdb_inp_out); inp;
-	    inp = TAILQ_FIRST(&tdbp->tdb_inp_out)) {
-		TAILQ_REMOVE(&tdbp->tdb_inp_out, inp, inp_tdb_out_next);
-		inp->inp_tdb_out = NULL;
-	}
 
 	/* Cleanup SPD references. */
 	for (ipo = TAILQ_FIRST(&tdbp->tdb_policy_head); ipo;
@@ -838,34 +799,9 @@ tdb_free(struct tdb *tdbp)
 	timeout_del(&tdbp->tdb_stimer_tmo);
 	timeout_del(&tdbp->tdb_sfirst_tmo);
 
-	if (tdbp->tdb_local_auth) {
-		ipsp_reffree(tdbp->tdb_local_auth);
-		tdbp->tdb_local_auth = NULL;
-	}
-
-	if (tdbp->tdb_remote_auth) {
-		ipsp_reffree(tdbp->tdb_remote_auth);
-		tdbp->tdb_remote_auth = NULL;
-	}
-
-	if (tdbp->tdb_srcid) {
-		ipsp_reffree(tdbp->tdb_srcid);
-		tdbp->tdb_srcid = NULL;
-	}
-
-	if (tdbp->tdb_dstid) {
-		ipsp_reffree(tdbp->tdb_dstid);
-		tdbp->tdb_dstid = NULL;
-	}
-
-	if (tdbp->tdb_local_cred) {
-		ipsp_reffree(tdbp->tdb_local_cred);
-		tdbp->tdb_local_cred = NULL;
-	}
-
-	if (tdbp->tdb_remote_cred) {
-		ipsp_reffree(tdbp->tdb_remote_cred);
-		tdbp->tdb_remote_cred = NULL;
+	if (tdbp->tdb_ids) {
+		ipsp_ids_free(tdbp->tdb_ids);
+		tdbp->tdb_ids = NULL;
 	}
 
 #if NPF > 0
@@ -892,6 +828,9 @@ tdb_init(struct tdb *tdbp, u_int16_t alg, struct ipsecinit *ii)
 {
 	struct xformsw *xsp;
 	int err;
+#ifdef ENCDEBUG
+	char buf[INET6_ADDRSTRLEN];
+#endif
 
 	for (xsp = xformsw; xsp < xformswNXFORMSW; xsp++) {
 		if (xsp->xf_type == alg) {
@@ -901,95 +840,26 @@ tdb_init(struct tdb *tdbp, u_int16_t alg, struct ipsecinit *ii)
 	}
 
 	DPRINTF(("tdb_init(): no alg %d for spi %08x, addr %s, proto %d\n",
-	    alg, ntohl(tdbp->tdb_spi), ipsp_address(tdbp->tdb_dst),
-	    tdbp->tdb_sproto));
+	    alg, ntohl(tdbp->tdb_spi), ipsp_address(&tdbp->tdb_dst, buf,
+	    sizeof(buf)), tdbp->tdb_sproto));
 
 	return EINVAL;
-}
-
-/*
- * Check which transformations are required.
- */
-u_int8_t
-get_sa_require(struct inpcb *inp)
-{
-	u_int8_t sareq = 0;
-
-	if (inp != NULL) {
-		sareq |= inp->inp_seclevel[SL_AUTH] >= IPSEC_LEVEL_USE ?
-		    NOTIFY_SATYPE_AUTH : 0;
-		sareq |= inp->inp_seclevel[SL_ESP_TRANS] >= IPSEC_LEVEL_USE ?
-		    NOTIFY_SATYPE_CONF : 0;
-		sareq |= inp->inp_seclevel[SL_ESP_NETWORK] >= IPSEC_LEVEL_USE ?
-		    NOTIFY_SATYPE_TUNNEL : 0;
-	} else {
-		/*
-		 * Code left for documentation purposes, these
-		 * conditions are always evaluated to false.
-		 */
-		sareq |= IPSEC_AUTH_LEVEL_DEFAULT >= IPSEC_LEVEL_USE ?
-		    NOTIFY_SATYPE_AUTH : 0;
-		sareq |= IPSEC_ESP_TRANS_LEVEL_DEFAULT >= IPSEC_LEVEL_USE ?
-		    NOTIFY_SATYPE_CONF : 0;
-		sareq |= IPSEC_ESP_NETWORK_LEVEL_DEFAULT >= IPSEC_LEVEL_USE ?
-		    NOTIFY_SATYPE_TUNNEL : 0;
-	}
-
-	return (sareq);
-}
-
-/*
- * Add an inpcb to the list of inpcb which reference this tdb directly.
- */
-void
-tdb_add_inp(struct tdb *tdb, struct inpcb *inp, int inout)
-{
-	if (inout) {
-		if (inp->inp_tdb_in) {
-			if (inp->inp_tdb_in == tdb)
-				return;
-
-			TAILQ_REMOVE(&inp->inp_tdb_in->tdb_inp_in, inp,
-			    inp_tdb_in_next);
-		}
-
-		inp->inp_tdb_in = tdb;
-		TAILQ_INSERT_TAIL(&tdb->tdb_inp_in, inp, inp_tdb_in_next);
-	} else {
-		if (inp->inp_tdb_out) {
-			if (inp->inp_tdb_out == tdb)
-				return;
-
-			TAILQ_REMOVE(&inp->inp_tdb_out->tdb_inp_out, inp,
-			    inp_tdb_out_next);
-		}
-
-		inp->inp_tdb_out = tdb;
-		TAILQ_INSERT_TAIL(&tdb->tdb_inp_out, inp, inp_tdb_out_next);
-	}
 }
 
 #ifdef ENCDEBUG
 /* Return a printable string for the address. */
 const char *
-ipsp_address(union sockaddr_union sa)
+ipsp_address(union sockaddr_union *sa, char *buf, socklen_t size)
 {
-	static char ipspbuf[4][INET6_ADDRSTRLEN];
-	static int ipspround = 0;
-	char *buf;
-
-	ipspround = (ipspround + 1) % 4;
-	buf = ipspbuf[ipspround];
-
-	switch (sa.sa.sa_family) {
+	switch (sa->sa.sa_family) {
 	case AF_INET:
-		return inet_ntop(AF_INET, &sa.sin.sin_addr,
-		    buf, INET_ADDRSTRLEN);
+		return inet_ntop(AF_INET, &sa->sin.sin_addr,
+		    buf, (size_t)size);
 
 #ifdef INET6
 	case AF_INET6:
-		return inet_ntop(AF_INET6, &sa.sin6.sin6_addr,
-		    buf, INET6_ADDRSTRLEN);
+		return inet_ntop(AF_INET6, &sa->sin6.sin6_addr,
+		    buf, (size_t)size);
 #endif /* INET6 */
 
 	default:
@@ -1023,276 +893,118 @@ ipsp_is_unspecified(union sockaddr_union addr)
 	}
 }
 
-/* Free reference-counted structure. */
-void
-ipsp_reffree(struct ipsec_ref *ipr)
-{
-#ifdef DIAGNOSTIC
-	if (ipr->ref_count <= 0)
-		printf("ipsp_reffree: illegal reference count %d for "
-		    "object %p (len = %d, malloctype = %d)\n",
-		    ipr->ref_count, ipr, ipr->ref_len, ipr->ref_malloctype);
-#endif
-	if (--ipr->ref_count <= 0)
-		free(ipr, ipr->ref_malloctype, 0);
-}
-
-/* Mark a TDB as TDBF_SKIPCRYPTO. */
-void
-ipsp_skipcrypto_mark(struct tdb_ident *tdbi)
-{
-	struct tdb *tdb;
-	int s = splsoftnet();
-
-	tdb = gettdb(tdbi->rdomain, tdbi->spi, &tdbi->dst, tdbi->proto);
-	if (tdb != NULL) {
-		tdb->tdb_flags |= TDBF_SKIPCRYPTO;
-		tdb->tdb_last_marked = time_second;
-	}
-	splx(s);
-}
-
-/* Unmark a TDB as TDBF_SKIPCRYPTO. */
-void
-ipsp_skipcrypto_unmark(struct tdb_ident *tdbi)
-{
-	struct tdb *tdb;
-	int s = splsoftnet();
-
-	tdb = gettdb(tdbi->rdomain, tdbi->spi, &tdbi->dst, tdbi->proto);
-	if (tdb != NULL) {
-		tdb->tdb_flags &= ~TDBF_SKIPCRYPTO;
-		tdb->tdb_last_marked = time_second;
-	}
-	splx(s);
-}
-
-/* Return true if the two structures match. */
 int
-ipsp_ref_match(struct ipsec_ref *ref1, struct ipsec_ref *ref2)
+ipsp_ids_match(struct ipsec_ids *a, struct ipsec_ids *b)
 {
-	if (ref1->ref_type != ref2->ref_type ||
-	    ref1->ref_len != ref2->ref_len ||
-	    memcmp(ref1 + 1, ref2 + 1, ref1->ref_len))
-		return 0;
-
-	return 1;
+	return a == b;
 }
 
-#ifdef notyet
-/*
- * Go down a chain of IPv4/IPv6/ESP/AH/IPiP chains creating an tag for each
- * IPsec header encountered. The offset where the first header, as well
- * as its type are given to us.
- */
-struct m_tag *
-ipsp_parse_headers(struct mbuf *m, int off, u_int8_t proto)
+struct ipsec_ids *
+ipsp_ids_insert(struct ipsec_ids *ids)
 {
-	int ipv4sa = 0, s, esphlen = 0, trail = 0, i;
-	SLIST_HEAD(packet_tags, m_tag) tags;
-	unsigned char lasteight[8];
-	struct tdb_ident *tdbi;
-	struct m_tag *mtag;
-	struct tdb *tdb;
+	struct ipsec_ids *found;
+	u_int32_t start_flow;
 
-	struct ip iph;
-
-#ifdef INET6
-	struct in6_addr ip6_dst;
-#endif /* INET6 */
-
-	/* We have to start with a known network protocol. */
-	if (proto != IPPROTO_IPV4 && proto != IPPROTO_IPV6)
-		return NULL;
-
-	SLIST_INIT(&tags);
-
-	while (1) {
-		switch (proto) {
-		case IPPROTO_IPV4: /* Also IPPROTO_IPIP */
-		{
-			/*
-			 * Save the IP header (we need both the
-			 * address and ip_hl).
-			 */
-			m_copydata(m, off, sizeof(struct ip), (caddr_t) &iph);
-			ipv4sa = 1;
-			proto = iph.ip_p;
-			off += iph.ip_hl << 2;
-			break;
-		}
-
-#ifdef INET6
-		case IPPROTO_IPV6:
-		{
-			int nxtp, l;
-
-			/* Copy the IPv6 address. */
-			m_copydata(m, off + offsetof(struct ip6_hdr, ip6_dst),
-			    sizeof(struct ip6_hdr), (caddr_t) &ip6_dst);
-			ipv4sa = 0;
-
-			/*
-			 * Go down the chain of headers until we encounter a
-			 * non-option.
-			 */
-			for (l = ip6_nexthdr(m, off, proto, &nxtp); l != -1;
-			    l = ip6_nexthdr(m, off, proto, &nxtp)) {
-				off += l;
-				proto = nxtp;
-
-				/* Construct a tag. */
-				if (nxtp == IPPROTO_AH)	{
-					mtag = m_tag_get(PACKET_TAG_IPSEC_IN_CRYPTO_DONE,
-					    sizeof(struct tdb_ident),
-					    M_NOWAIT);
-
-					if (mtag == NULL)
-						return SLIST_FIRST(&tags);
-
-					tdbi = (struct tdb_ident *) (mtag + 1);
-					memset(tdbi, 0, sizeof(struct tdb_ident));
-
-					m_copydata(m, off + sizeof(u_int32_t),
-					    sizeof(u_int32_t),
-					    (caddr_t) &tdbi->spi);
-
-					tdbi->proto = IPPROTO_AH;
-					tdbi->dst.sin6.sin6_family = AF_INET6;
-					tdbi->dst.sin6.sin6_len =
-					    sizeof(struct sockaddr_in6);
-					tdbi->dst.sin6.sin6_addr = ip6_dst;
-					tdbi->rdomain =
-					    rtable_l2(m->m_pkthdr.ph_rtableid);
-					SLIST_INSERT_HEAD(&tags,
-					    mtag, m_tag_link);
-				}
-				else
-					if (nxtp == IPPROTO_IPV6)
-						m_copydata(m, off +
-						    offsetof(struct ip6_hdr,
-							ip6_dst),
-						    sizeof(struct ip6_hdr),
-						    (caddr_t) &ip6_dst);
-			}
-			break;
-		}
-#endif /* INET6 */
-
-		case IPPROTO_ESP:
-		/* Verify that this has been decrypted. */
-		{
-			union sockaddr_union su;
-			u_int32_t spi;
-
-			m_copydata(m, off, sizeof(u_int32_t), (caddr_t) &spi);
-			memset(&su, 0, sizeof(union sockaddr_union));
-
-			s = splsoftnet();
-
-			if (ipv4sa) {
-				su.sin.sin_family = AF_INET;
-				su.sin.sin_len = sizeof(struct sockaddr_in);
-				su.sin.sin_addr = iph.ip_dst;
-			}
-
-#ifdef INET6
-			if (!ipv4sa) {
-				su.sin6.sin6_family = AF_INET6;
-				su.sin6.sin6_len = sizeof(struct sockaddr_in6);
-				su.sin6.sin6_addr = ip6_dst;
-			}
-#endif /* INET6 */
-
-			tdb = gettdb(spi, &su, IPPROTO_ESP);
-			if (tdb == NULL) {
-				splx(s);
-				return SLIST_FIRST(&tags);
-			}
-
-			/* How large is the ESP header ? We use this later. */
-			esphlen = 2 * sizeof(u_int32_t) + tdb->tdb_ivlen;
-
-			/* Update the length of trailing ESP authenticators. */
-			if (tdb->tdb_authalgxform)
-				trail += tdb->tdb_authalgxform->authsize;
-
-			splx(s);
-
-			/* Copy the last 10 bytes. */
-			m_copydata(m, m->m_pkthdr.len - trail - 8, 8,
-			    lasteight);
-
-			/* Verify the self-describing padding values. */
-			if (lasteight[6] != 0) {
-				if (lasteight[6] != lasteight[5])
-					return SLIST_FIRST(&tags);
-
-				for (i = 4; lasteight[i + 1] != 1 && i >= 0;
-				    i--)
-					if (lasteight[i + 1] !=
-					    lasteight[i] + 1)
-						return SLIST_FIRST(&tags);
-			}
-		}
-		/* FALLTHROUGH */
-		case IPPROTO_AH:
-			mtag = m_tag_get(PACKET_TAG_IPSEC_IN_CRYPTO_DONE,
-			    sizeof(struct tdb_ident), M_NOWAIT);
-			if (mtag == NULL)
-				return SLIST_FIRST(&tags);
-
-			tdbi = (struct tdb_ident *) (mtag + 1);
-			memset(tdbi, 0, sizeof(struct tdb_ident));
-
-			/* Get SPI off the relevant header. */
-			if (proto == IPPROTO_AH)
-				m_copydata(m, off + sizeof(u_int32_t),
-				    sizeof(u_int32_t), (caddr_t) &tdbi->spi);
-			else /* IPPROTO_ESP */
-				m_copydata(m, off, sizeof(u_int32_t),
-				    (caddr_t) &tdbi->spi);
-
-			tdbi->proto = proto; /* AH or ESP */
-			tdbi->rdomain = rtable_l2(m->m_pkthdr.ph_rtableid);
-
-			/* Last network header was IPv4. */
-			if (ipv4sa) {
-				tdbi->dst.sin.sin_family = AF_INET;
-				tdbi->dst.sin.sin_len =
-				    sizeof(struct sockaddr_in);
-				tdbi->dst.sin.sin_addr = iph.ip_dst;
-			}
-
-#ifdef INET6
-			/* Last network header was IPv6. */
-			if (!ipv4sa) {
-				tdbi->dst.sin6.sin6_family = AF_INET6;
-				tdbi->dst.sin6.sin6_len =
-				    sizeof(struct sockaddr_in6);
-				tdbi->dst.sin6.sin6_addr = ip6_dst;
-			}
-#endif /* INET6 */
-
-			SLIST_INSERT_HEAD(&tags, mtag, m_tag_link);
-
-			/* Update next protocol/header and header offset. */
-			if (proto == IPPROTO_AH) {
-				u_int8_t foo[2];
-
-				m_copydata(m, off, 2 * sizeof(u_int8_t), foo);
-				proto = foo[0];
-				off += (foo[1] + 2) << 2;
-			} else {/* IPPROTO_ESP */
-				/* Initialized in IPPROTO_ESP case. */
-				off += esphlen;
-				proto = lasteight[7];
-			}
-			break;
-
-		default:
-			return SLIST_FIRST(&tags); /* We're done. */
+	found = RB_INSERT(ipsec_ids_tree, &ipsec_ids_tree, ids);
+	if (found) {
+		/* if refcount was zero, then timeout is running */
+		if (found->id_refcount++ == 0)
+			timeout_del(&found->id_timeout);
+		DPRINTF(("%s: ids %p count %d\n", __func__,
+		    found, found->id_refcount));
+		return found;
+	}
+	ids->id_flow = start_flow = ipsec_ids_next_flow;
+	if (++ipsec_ids_next_flow == 0)
+		ipsec_ids_next_flow = 1;
+	while (RB_INSERT(ipsec_ids_flows, &ipsec_ids_flows, ids) != NULL) {
+		ids->id_flow = ipsec_ids_next_flow;
+		if (++ipsec_ids_next_flow == 0)
+			ipsec_ids_next_flow = 1;
+		if (ipsec_ids_next_flow == start_flow) {
+			DPRINTF(("ipsec_ids_next_flow exhausted %u\n",
+			    ipsec_ids_next_flow));
+			return NULL;
 		}
 	}
+	ids->id_refcount = 1;
+	DPRINTF(("%s: new ids %p flow %u\n", __func__, ids, ids->id_flow));
+	timeout_set(&ids->id_timeout, ipsp_ids_timeout, ids);
+	return ids;
 }
-#endif /* notyet */
+
+struct ipsec_ids *
+ipsp_ids_lookup(u_int32_t ipsecflowinfo)
+{
+	struct ipsec_ids	key;
+
+	key.id_flow = ipsecflowinfo;
+	return RB_FIND(ipsec_ids_flows, &ipsec_ids_flows, &key);
+}
+
+/* free ids only from delayed timeout */
+void
+ipsp_ids_timeout(void *arg)
+{
+	struct ipsec_ids *ids = arg;
+	int s;
+
+	DPRINTF(("%s: ids %p count %d\n", __func__, ids, ids->id_refcount));
+	KASSERT(ids->id_refcount == 0);
+	s = splsoftnet();
+	RB_REMOVE(ipsec_ids_tree, &ipsec_ids_tree, ids);
+	RB_REMOVE(ipsec_ids_flows, &ipsec_ids_flows, ids);
+	free(ids->id_local, M_CREDENTIALS, 0);
+	free(ids->id_remote, M_CREDENTIALS, 0);
+	free(ids, M_CREDENTIALS, 0);
+	splx(s);
+}
+
+/* decrements refcount, actual free happens in timeout */
+void
+ipsp_ids_free(struct ipsec_ids *ids)
+{
+	/*
+	 * If the refcount becomes zero, then a timeout is started. This
+	 * timeout must be cancelled if refcount is increased from zero.
+	 */
+	DPRINTF(("%s: ids %p count %d\n", __func__, ids, ids->id_refcount));
+	KASSERT(ids->id_refcount > 0);
+	if (--ids->id_refcount == 0)
+		timeout_add_sec(&ids->id_timeout, ipsec_ids_idle);
+}
+
+static int
+ipsp_id_cmp(struct ipsec_id *a, struct ipsec_id *b)
+{
+	if (a->type > b->type)
+		return 1;
+	if (a->type < b->type)
+		return -1;
+	if (a->len > b->len)
+		return 1;
+	if (a->len < b->len)
+		return -1;
+	return memcmp(a + 1, b + 1, a->len);
+}
+
+static int
+ipsp_ids_cmp(struct ipsec_ids *a, struct ipsec_ids *b)
+{
+	int ret;
+
+	ret = ipsp_id_cmp(a->id_remote, b->id_remote);
+	if (ret != 0)
+		return ret;
+	return ipsp_id_cmp(a->id_local, b->id_local);
+}
+
+static int
+ipsp_ids_flow_cmp(struct ipsec_ids *a, struct ipsec_ids *b)
+{
+	if (a->id_flow > b->id_flow)
+		return 1;
+	if (a->id_flow < b->id_flow)
+		return -1;
+	return 0;
+}

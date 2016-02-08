@@ -1,4 +1,4 @@
-/*	$OpenBSD: db_trace.c,v 1.8 2014/07/13 12:11:01 jasper Exp $	*/
+/*	$OpenBSD: db_trace.c,v 1.13 2015/06/28 01:16:28 guenther Exp $	*/
 /*	$NetBSD: db_trace.c,v 1.1 2003/04/26 18:39:27 fvdl Exp $	*/
 
 /* 
@@ -40,7 +40,6 @@
 #include <ddb/db_access.h>
 #include <ddb/db_variables.h>
 #include <ddb/db_output.h>
-#include <ddb/db_interface.h>
 
 #if 1
 #define dbreg(xx) (long *)offsetof(db_regs_t, tf_ ## xx)
@@ -54,10 +53,6 @@ static int db_x86_64_regop(struct db_variable *, db_expr_t *, int);
  * Machine register set.
  */
 struct db_variable db_regs[] = {
-	{ "ds",		dbreg(ds),     db_x86_64_regop },
-	{ "es",		dbreg(es),     db_x86_64_regop },
-	{ "fs",		dbreg(fs),     db_x86_64_regop },
-	{ "gs",		dbreg(gs),     db_x86_64_regop },
 	{ "rdi",	dbreg(rdi),    db_x86_64_regop },
 	{ "rsi",	dbreg(rsi),    db_x86_64_regop },
 	{ "rbp",	dbreg(rbp),    db_x86_64_regop },
@@ -109,13 +104,13 @@ struct x86_64_frame {
 	struct x86_64_frame	*f_frame;
 	long			f_retaddr;
 	long			f_arg0;
-	long			f_arg1;
 };
 
 #define	NONE		0
 #define	TRAP		1
 #define	SYSCALL		2
 #define	INTERRUPT	3
+#define	AST		4
 
 db_addr_t	db_trap_symbol_value = 0;
 db_addr_t	db_syscall_symbol_value = 0;
@@ -184,6 +179,9 @@ db_nextframe(struct x86_64_frame **fp, db_addr_t *ip, long *argp, int is_trap,
 		switch (is_trap) {
 		case TRAP:
 			(*pr)("--- trap (number %d) ---\n", tf->tf_trapno);
+			break;
+		case AST:
+			(*pr)("--- ast ---\n");
 			break;
 		case SYSCALL:
 			(*pr)("--- syscall (number %ld) ---\n", tf->tf_rax);
@@ -273,13 +271,13 @@ db_stack_trace_print(db_expr_t addr, boolean_t have_addr, db_expr_t count,
 		if (INKERNEL(frame) && name) {
 			if (!strcmp(name, "trap")) {
 				is_trap = TRAP;
+			} else if (!strcmp(name, "ast")) {
+				is_trap = AST;
 			} else if (!strcmp(name, "syscall")) {
 				is_trap = SYSCALL;
 			} else if (name[0] == 'X') {
 				if (!strncmp(name, "Xintr", 5) ||
 				    !strncmp(name, "Xresume", 7) ||
-				    !strncmp(name, "Xstray", 6) ||
-				    !strncmp(name, "Xhold", 5) ||
 				    !strncmp(name, "Xrecurse", 8) ||
 				    !strcmp(name, "Xdoreti") ||
 				    !strncmp(name, "Xsoft", 5)) {
@@ -332,12 +330,17 @@ db_stack_trace_print(db_expr_t addr, boolean_t have_addr, db_expr_t count,
 			continue;
 		}
 
-		if (is_trap == INTERRUPT)
-			argp = &lastframe->f_arg1;
-		else
-			argp = &frame->f_arg0;
+		if (is_trap == INTERRUPT) {
+			/*
+			 * Interrupt routines don't update %rbp, so it still
+			 * points to the frame that was interrupted.  Pull
+			 * back to just above lastframe so we can find the
+			 * trapframe as with syscalls and traps.
+			 */
+			frame = (struct x86_64_frame *)&lastframe->f_retaddr;
+		}
 		lastframe = frame;
-		db_nextframe(&frame, &callpc, argp, is_trap, pr);
+		db_nextframe(&frame, &callpc, &frame->f_arg0, is_trap, pr);
 
 		if (frame == 0) {
 			/* end of chain */

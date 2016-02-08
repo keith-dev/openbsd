@@ -1,4 +1,4 @@
-/*	$OpenBSD: gdt.c,v 1.22 2014/12/15 01:53:45 tedu Exp $	*/
+/*	$OpenBSD: gdt.c,v 1.24 2015/05/24 01:01:49 guenther Exp $	*/
 /*	$NetBSD: gdt.c,v 1.1 2003/04/26 18:39:28 fvdl Exp $	*/
 
 /*-
@@ -41,7 +41,6 @@
 
 #include <uvm/uvm_extern.h>
 
-#include <machine/gdt.h>
 #include <machine/tss.h>
 #include <machine/pcb.h>
 
@@ -67,7 +66,7 @@ gdt_alloc_cpu(struct cpu_info *ci)
 			panic("gdt_init: no pages");
 		pmap_kenter_pa(va, VM_PAGE_TO_PHYS(pg), PROT_READ | PROT_WRITE);
 	}
-	memcpy(ci->ci_gdt, gdtstore, GDT_SIZE);
+	memcpy(ci->ci_gdt, cpu_info_primary.ci_gdt, GDT_SIZE);
 	bzero(ci->ci_tss, sizeof(*ci->ci_tss));
 }
 

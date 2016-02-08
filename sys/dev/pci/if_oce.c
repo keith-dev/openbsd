@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_oce.c,v 1.81 2014/12/22 02:28:52 tedu Exp $	*/
+/*	$OpenBSD: if_oce.c,v 1.85 2015/06/29 18:58:04 mikeb Exp $	*/
 
 /*
  * Copyright (c) 2012 Mike Belopuhov
@@ -70,7 +70,6 @@
 #include <sys/pool.h>
 
 #include <net/if.h>
-#include <net/if_dl.h>
 #include <net/if_media.h>
 
 #include <netinet/in.h>
@@ -1548,6 +1547,7 @@ oce_rxeof(struct oce_rq *rq, struct oce_nic_rx_cqe *cqe)
 	struct oce_softc *sc = rq->sc;
 	struct oce_pkt *pkt = NULL;
 	struct ifnet *ifp = &sc->sc_ac.ac_if;
+	struct mbuf_list ml = MBUF_LIST_INITIALIZER();
 	struct mbuf *m = NULL, *tail = NULL;
 	int i, len, frag_len;
 	uint16_t vtag;
@@ -1607,8 +1607,6 @@ oce_rxeof(struct oce_rq *rq, struct oce_nic_rx_cqe *cqe)
 			 goto exit;
 		}
 
-		m->m_pkthdr.rcvif = ifp;
-
 #if NVLAN > 0
 		/* This determines if vlan tag is valid */
 		if (oce_vtp_valid(sc, cqe)) {
@@ -1630,8 +1628,6 @@ oce_rxeof(struct oce_rq *rq, struct oce_nic_rx_cqe *cqe)
 		}
 #endif
 
-		ifp->if_ipackets++;
-
 #ifdef OCE_LRO
 		/* Try to queue to LRO */
 		if (IF_LRO_ENABLED(ifp) && !(m->m_flags & M_VLANTAG) &&
@@ -1646,15 +1642,10 @@ oce_rxeof(struct oce_rq *rq, struct oce_nic_rx_cqe *cqe)
 		}
 #endif
 
-#if NBPFILTER > 0
-		if (ifp->if_bpf)
-			bpf_mtap_ether(ifp->if_bpf, m, BPF_DIRECTION_IN);
-#endif
-
-		ether_input_mbuf(ifp, m);
+		ml_enqueue(&ml, m);
 	}
 exit:
-	return;
+	if_input(ifp, &ml);
 }
 
 void
@@ -1782,7 +1773,9 @@ oce_get_buf(struct oce_rq *rq)
 	}
 
 	pkt->mbuf->m_len = pkt->mbuf->m_pkthdr.len = MCLBYTES;
+#ifdef __STRICT_ALIGNMENT
 	m_adj(pkt->mbuf, ETHER_ALIGN);
+#endif
 
 	if (bus_dmamap_load_mbuf(sc->sc_dmat, pkt->map, pkt->mbuf,
 	    BUS_DMA_NOWAIT)) {

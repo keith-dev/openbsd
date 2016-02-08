@@ -1,4 +1,4 @@
-/*	$OpenBSD: print-802_11.c,v 1.16 2015/01/16 06:40:21 deraadt Exp $	*/
+/*	$OpenBSD: print-802_11.c,v 1.24 2015/07/19 02:49:54 stsp Exp $	*/
 
 /*
  * Copyright (c) 2005 Reyk Floeter <reyk@openbsd.org>
@@ -29,6 +29,7 @@
 #include <net80211/ieee80211.h>
 #include <net80211/ieee80211_radiotap.h>
 
+#include <ctype.h>
 #include <pcap.h>
 #include <stdio.h>
 #include <string.h>
@@ -78,6 +79,9 @@ int	 ieee80211_hdr(struct ieee80211_frame *);
 int	 ieee80211_data(struct ieee80211_frame *, u_int);
 void	 ieee80211_print_element(u_int8_t *, u_int);
 void	 ieee80211_print_essid(u_int8_t *, u_int);
+void	 ieee80211_print_country(u_int8_t *, u_int);
+void	 ieee80211_print_htcaps(u_int8_t *, u_int);
+void	 ieee80211_print_htop(u_int8_t *, u_int);
 int	 ieee80211_elements(struct ieee80211_frame *, u_int);
 int	 ieee80211_frame(struct ieee80211_frame *, u_int);
 int	 ieee80211_print(struct ieee80211_frame *, u_int);
@@ -230,6 +234,235 @@ ieee80211_print_essid(u_int8_t *essid, u_int len)
 		ieee80211_print_element(essid, len);
 }
 
+/* Caller checks len */
+void
+ieee80211_print_country(u_int8_t *data, u_int len)
+{
+	u_int8_t first_chan, nchan, maxpower;
+
+	if (len < 6)
+		return;
+
+	/* country string */
+	printf((isprint(data[0]) ? " '%c" : " '\\%03o"), data[0]);
+	printf((isprint(data[1]) ? "%c" : "\\%03o"), data[1]);
+	printf((isprint(data[2]) ? "%c'" : "\\%03o'"), data[2]);
+
+	len -= 3;
+	data += 3;
+
+	/* channels and corresponding TX power limits */
+	while (len > 3)	{
+		/* no pretty-printing for nonsensical zero values,
+		 * nor for operating extension IDs (values >= 201) */
+		if (data[0] == 0 || data[1] == 0 ||
+		    data[0] >= 201 || data[1] >= 201) {
+			printf(", %d %d %d", data[0], data[1], data[2]);
+			continue;
+		}
+
+		first_chan = data[0];
+		nchan = data[1];
+		maxpower = data[2];
+
+		printf(", channel%s %d", nchan == 1 ? "" : "s", first_chan);
+		if (nchan > 1)
+			printf("-%d", first_chan + nchan - 1);
+		printf(" limit %ddB", maxpower);
+
+		len -= 3;
+		data += 3;
+	}
+}
+
+/* Caller checks len */
+void
+ieee80211_print_htcaps(u_int8_t *data, u_int len)
+{
+	u_int16_t htcaps;
+	int smps, rxstbc;
+
+	if (len < 2) {
+		ieee80211_print_element(data, len);
+		return;
+	}
+
+	htcaps = (data[0]) | (data[1] << 8);
+	printf("=<");
+
+	/* channel width */
+	if (htcaps & IEEE80211_HTCAP_CBW20_40)
+		printf("20/40MHz");
+	else
+		printf("20MHz");
+
+	/* LDPC coding */
+	if (htcaps & IEEE80211_HTCAP_LDPC)
+		printf(",LDPC");
+
+	/* spatial multiplexing power save mode */
+	smps = (htcaps & IEEE80211_HTCAP_SMPS_MASK)
+	    >> IEEE80211_HTCAP_SMPS_SHIFT;
+	if (smps == 0)
+		printf(",SMPS static");
+	else if (smps == 1)
+		printf(",SMPS dynamic");
+
+	/* 11n greenfield mode */
+	if (htcaps & IEEE80211_HTCAP_GF)
+		printf(",greenfield");
+
+	/* short guard interval */
+	if (htcaps & IEEE80211_HTCAP_SGI20)
+		printf(",SGI@20MHz");
+	if (htcaps & IEEE80211_HTCAP_SGI40)
+		printf(",SGI@40MHz");
+
+	/* space-time block coding */
+	if (htcaps & IEEE80211_HTCAP_TXSTBC)
+		printf(",TXSTBC");
+	rxstbc = (htcaps & IEEE80211_HTCAP_RXSTBC_MASK)
+	    >> IEEE80211_HTCAP_RXSTBC_SHIFT;
+	if (rxstbc > 0 && rxstbc < 4)
+		printf(",RXSTBC %d stream", rxstbc);
+
+	/* delayed block-ack */
+	if (htcaps & IEEE80211_HTCAP_DELAYEDBA)
+		printf(",delayed BA");
+
+	/* max A-MSDU length */
+	if (htcaps & IEEE80211_HTCAP_AMSDU7935)
+		printf(",A-MSDU 7935");
+	else
+		printf(",A-MSDU 3839");
+
+	/* DSSS/CCK in 40MHz mode */
+	if (htcaps & IEEE80211_HTCAP_DSSSCCK40)
+		printf(",DSSS/CCK@40MHz");
+
+	/* 40MHz intolerant */
+	if (htcaps & IEEE80211_HTCAP_40INTOLERANT)
+		printf(",40MHz intolerant");
+
+	/* L-SIG TXOP protection */
+	if (htcaps & IEEE80211_HTCAP_LSIGTXOPPROT)
+		printf(",L-SIG TXOP prot");
+
+	printf(">");
+}
+
+/* Caller checks len */
+void
+ieee80211_print_htop(u_int8_t *data, u_int len)
+{
+	u_int8_t primary_chan;
+	u_int8_t htopinfo[5];
+	u_int8_t basic_mcs[16];
+	int sco, prot, i;
+
+	if (len < sizeof(primary_chan) + sizeof(htopinfo) + sizeof(basic_mcs)) {
+		ieee80211_print_element(data, len);
+		return;
+	}
+
+	htopinfo[0] = data[1];
+
+	printf("=<");
+
+	/* primary channel and secondary channel offset */
+	primary_chan = data[0];
+	sco = ((htopinfo[0] & IEEE80211_HTOP0_SCO_MASK)
+	    >> IEEE80211_HTOP0_SCO_SHIFT);
+	if (sco == 0) /* no secondary channel */
+		printf("20MHz chan %d", primary_chan);
+	else if (sco == 1) { /* secondary channel above */
+		if (primary_chan >= 1 && primary_chan <= 13) /* 2GHz */
+			printf("40MHz chan %d:%d", primary_chan,
+			    primary_chan + 1);
+		else if (primary_chan >= 34) /* 5GHz */
+			printf("40MHz chan %d:%d", primary_chan,
+			    primary_chan + 4);
+		else
+			printf("[invalid 40MHz chan %d+]", primary_chan);
+	} else if (sco == 3) { /* secondary channel below */
+		if (primary_chan >= 2 && primary_chan <= 14) /* 2GHz */
+			printf("40MHz chan %d:%d", primary_chan,
+			    primary_chan - 1);
+		else if (primary_chan >= 40) /* 5GHz */
+			printf("40MHz chan %d:%d", primary_chan,
+			    primary_chan - 4);
+		else
+			printf("[invalid 40MHz chan %d-]", primary_chan);
+	} else
+		printf("chan %d [invalid secondary channel offset %d]",
+		    primary_chan, sco);
+
+	/* STA channel width */
+	if ((htopinfo[0] & IEEE80211_HTOP0_CHW) == 0)
+		printf(",STA chanw 20MHz");
+
+	/* reduced interframe space (RIFS) permitted */
+	if (htopinfo[0] & IEEE80211_HTOP0_RIFS)
+		printf(",RIFS");
+
+	htopinfo[1] = data[2];
+
+	/* protection requirements for HT transmissions */
+	prot = ((htopinfo[1] & IEEE80211_HTOP1_PROT_MASK)
+	    >> IEEE80211_HTOP1_PROT_SHIFT);
+	if (prot == 1)
+		printf(",protect non-member");
+	else if (prot == 2)
+		printf(",protect 20MHz");
+	else if (prot == 3)
+		printf(",protect non-HT");
+
+	/* non-greenfield STA present */
+	if (htopinfo[1] & IEEE80211_HTOP1_NONGF_STA)
+		printf(",non-greenfield STA");
+
+	/* non-HT STA present */
+	if (htopinfo[1] & IEEE80211_HTOP1_OBSS_NONHT_STA)
+		printf(",non-HT STA");
+
+	htopinfo[3] = data[4];
+
+	/* dual-beacon */
+	if (htopinfo[3] & IEEE80211_HTOP2_DUALBEACON)
+		printf(",dualbeacon");
+
+	/* dual CTS protection */
+	if (htopinfo[3] & IEEE80211_HTOP2_DUALCTSPROT)
+		printf(",dualctsprot");
+
+	htopinfo[4] = data[5];
+
+	/* space-time block coding (STBC) beacon */
+	if ((htopinfo[4] << 8) & IEEE80211_HTOP2_DUALCTSPROT)
+		printf(",STBC beacon");
+
+	/* L-SIG (non-HT signal field) TX opportunity (TXOP) protection */
+	if ((htopinfo[4] << 8) & IEEE80211_HTOP2_LSIGTXOP)
+		printf(",lsigtxprot");
+
+	/* phased-coexistence operation (PCO) active */
+	if ((htopinfo[4] << 8) & IEEE80211_HTOP2_PCOACTIVE) {
+		/* PCO phase */
+		if ((htopinfo[4] << 8) & IEEE80211_HTOP2_PCOPHASE40)
+			printf(",pco40MHz");
+		else
+			printf(",pco20MHz");
+	}
+
+	/* basic MCS set */
+	memcpy(basic_mcs, &data[6], sizeof(basic_mcs));
+	printf(",basic MCS set 0x");
+	for (i = 0; i < sizeof(basic_mcs) / sizeof(basic_mcs[0]); i++)
+			printf("%x", basic_mcs[i]);
+
+	printf(">");
+}
+
 int
 ieee80211_elements(struct ieee80211_frame *wh, u_int flen)
 {
@@ -315,13 +548,17 @@ ieee80211_elements(struct ieee80211_frame *wh, u_int flen)
 			break;
 		case IEEE80211_ELEMID_COUNTRY:
 			printf(", country");
-			for (i = len; i > 0; i--, data++)
-				printf(" %u", data[0]);
+			ieee80211_print_country(data, len);
 			break;
 		case IEEE80211_ELEMID_CHALLENGE:
 			printf(", challenge");
 			if (vflag)
 				ieee80211_print_element(data, len);
+			break;
+		case IEEE80211_ELEMID_CSA:
+			ELEM_CHECK(3);
+			printf(", csa (chan %u count %u%s)", data[1], data[2],
+			    (data[0] == 1) ? " noTX" : "");
 			break;
 		case IEEE80211_ELEMID_ERP:
 			printf(", erp");
@@ -341,15 +578,37 @@ ieee80211_elements(struct ieee80211_frame *wh, u_int flen)
 				printf(" %uM",
 				    (data[0] & IEEE80211_RATE_VAL) / 2);
 			break;
-		case IEEE80211_ELEMID_TPC:
-			printf(", tpc");
+		case IEEE80211_ELEMID_TPC_REPORT:
+			printf(", tpcreport");
 			if (vflag)
 				ieee80211_print_element(data, len);
 			break;
-		case IEEE80211_ELEMID_CCKM:
-			printf(", cckm");
+		case IEEE80211_ELEMID_TPC_REQUEST:
+			printf(", tpcrequest");
 			if (vflag)
 				ieee80211_print_element(data, len);
+			break;
+		case IEEE80211_ELEMID_HTCAPS:
+			printf(", htcaps");
+			if (vflag)
+				ieee80211_print_htcaps(data, len);
+			break;
+		case IEEE80211_ELEMID_HTOP:
+			printf(", htop");
+			if (vflag)
+				ieee80211_print_htop(data, len);
+			break;
+		case IEEE80211_ELEMID_POWER_CONSTRAINT:
+			ELEM_CHECK(1);
+			printf(", power constraint %udB", data[0]);
+			break;
+		case IEEE80211_ELEMID_QBSS_LOAD:
+			ELEM_CHECK(5);
+			printf(", %u stations, %d%% utilization, "
+			    "admission capacity %uus/s",
+			    (data[0] | data[1] << 8),
+			    (data[2] * 100) / 255,
+			    (data[3] | data[4] << 8) / 32);
 			break;
 		case IEEE80211_ELEMID_VENDOR:
 			printf(", vendor");

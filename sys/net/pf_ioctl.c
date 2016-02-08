@@ -1,4 +1,4 @@
-/*	$OpenBSD: pf_ioctl.c,v 1.283 2015/02/20 11:08:31 tedu Exp $ */
+/*	$OpenBSD: pf_ioctl.c,v 1.289 2015/07/21 02:32:04 sashan Exp $ */
 
 /*
  * Copyright (c) 2001 Daniel Hartmeier
@@ -67,10 +67,6 @@
 
 #include <crypto/md5.h>
 #include <net/pfvar.h>
-
-#if NPFLOG > 0
-#include <net/if_pflog.h>
-#endif /* NPFLOG > 0 */
 
 #if NPFSYNC > 0
 #include <netinet/ip_ipsp.h>
@@ -159,12 +155,7 @@ pfattach(int num)
 	    "pfruleitem", NULL);
 	pool_init(&pf_queue_pl, sizeof(struct pf_queuespec), 0, 0, 0, 
 	    "pfqueue", NULL);
-	pool_init(&hfsc_class_pl, sizeof(struct hfsc_class), 0, 0, PR_WAITOK,
-	    "hfscclass", NULL);
-	pool_init(&hfsc_classq_pl, sizeof(struct hfsc_classq), 0, 0, PR_WAITOK,
-	    "hfscclassq", NULL);
-	pool_init(&hfsc_internal_sc_pl, sizeof(struct hfsc_internal_sc), 0, 0,
-	    PR_WAITOK, "hfscintsc", NULL);
+	hfsc_initialize();
 	pfr_initialize();
 	pfi_initialize();
 	pf_osfp_initialize();
@@ -188,7 +179,7 @@ pfattach(int num)
 	/* default rule should never be garbage collected */
 	pf_default_rule.entries.tqe_prev = &pf_default_rule.entries.tqe_next;
 	pf_default_rule.action = PF_PASS;
-	pf_default_rule.nr = -1;
+	pf_default_rule.nr = (u_int32_t)-1;
 	pf_default_rule.rtableid = -1;
 
 	/* initialize default timeouts */
@@ -258,7 +249,7 @@ void
 pf_rm_rule(struct pf_rulequeue *rulequeue, struct pf_rule *rule)
 {
 	if (rulequeue != NULL) {
-		if (rule->states_cur <= 0 && rule->src_nodes <= 0) {
+		if (rule->states_cur == 0 && rule->src_nodes == 0) {
 			/*
 			 * XXX - we need to remove the table *before* detaching
 			 * the rule to make sure the table code does not delete
@@ -274,7 +265,7 @@ pf_rm_rule(struct pf_rulequeue *rulequeue, struct pf_rule *rule)
 		}
 		TAILQ_REMOVE(rulequeue, rule, entries);
 		rule->entries.tqe_prev = NULL;
-		rule->nr = -1;
+		rule->nr = (u_int32_t)-1;
 	}
 
 	if (rule->states_cur > 0 || rule->src_nodes > 0 ||
@@ -1077,7 +1068,8 @@ pfioctl(dev_t dev, u_long cmd, caddr_t addr, int flags, struct proc *p)
 			break;
 		}
 		if ((error = pf_rule_copyin(&pr->rule, rule, ruleset))) {
-			pool_put(&pf_rule_pl, rule);
+			pf_rm_rule(NULL, rule);
+			rule = NULL;
 			break;
 		}
 		rule->cuid = p->p_ucred->cr_ruid;
@@ -1093,7 +1085,8 @@ pfioctl(dev_t dev, u_long cmd, caddr_t addr, int flags, struct proc *p)
 			break;
 #endif /* INET6 */
 		default:
-			pool_put(&pf_rule_pl, rule);
+			pf_rm_rule(NULL, rule);
+			rule = NULL;
 			error = EAFNOSUPPORT;
 			goto fail;
 		}
@@ -1200,7 +1193,7 @@ pfioctl(dev_t dev, u_long cmd, caddr_t addr, int flags, struct proc *p)
 		pf_addr_copyout(&pr->rule.route.addr);
 		for (i = 0; i < PF_SKIP_COUNT; ++i)
 			if (rule->skip[i].ptr == NULL)
-				pr->rule.skip[i].nr = -1;
+				pr->rule.skip[i].nr = (u_int32_t)-1;
 			else
 				pr->rule.skip[i].nr =
 				    rule->skip[i].ptr->nr;
@@ -1353,7 +1346,7 @@ pfioctl(dev_t dev, u_long cmd, caddr_t addr, int flags, struct proc *p)
 #if NPFSYNC > 0
 				/* don't send out individual delete messages */
 				SET(s->state_flags, PFSTATE_NOSYNC);
-#endif
+#endif	/* NPFSYNC > 0 */
 				pf_unlink_state(s);
 				killed++;
 			}
@@ -1361,7 +1354,7 @@ pfioctl(dev_t dev, u_long cmd, caddr_t addr, int flags, struct proc *p)
 		psk->psk_killed = killed;
 #if NPFSYNC > 0
 		pfsync_clear_states(pf_status.hostid, psk->psk_ifname);
-#endif
+#endif	/* NPFSYNC > 0 */
 		break;
 	}
 
@@ -1443,7 +1436,7 @@ pfioctl(dev_t dev, u_long cmd, caddr_t addr, int flags, struct proc *p)
 		error = pfsync_state_import(sp, PFSYNC_SI_IOCTL);
 		break;
 	}
-#endif
+#endif	/* NPFSYNC > 0 */
 
 	case DIOCGETSTATE: {
 		struct pfioc_state	*ps = (struct pfioc_state *)addr;
@@ -2437,7 +2430,7 @@ pf_rule_copyin(struct pf_rule *from, struct pf_rule *to,
 #if NPFLOG > 0
 	if (!to->log)
 		to->logif = 0;
-#endif
+#endif	/* NPFLOG > 0 */
 	to->quick = from->quick;
 	to->ifnot = from->ifnot;
 	to->rcvifnot = from->rcvifnot;

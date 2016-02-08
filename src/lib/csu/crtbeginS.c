@@ -1,4 +1,4 @@
-/*	$OpenBSD: crtbeginS.c,v 1.14 2013/12/28 18:38:42 kettenis Exp $	*/
+/*	$OpenBSD: crtbeginS.c,v 1.16 2015/04/07 01:27:06 guenther Exp $	*/
 /*	$NetBSD: crtbegin.c,v 1.1 1996/09/12 16:59:03 cgd Exp $	*/
 
 /*
@@ -50,13 +50,12 @@
  * java class registration hooks
  */
 
-#if (__GNUC__ > 2)
 static void *__JCR_LIST__[]
     __attribute__((section(".jcr"), aligned(sizeof(void*)))) = { };
 
 extern void _Jv_RegisterClasses (void *)
     __attribute__((weak));
-#endif
+
 
 /*
  * Include support for the __cxa_atexit/__cxa_finalize C++ abi for
@@ -66,7 +65,6 @@ extern void _Jv_RegisterClasses (void *)
  *     http://www.codesourcery.com/cxx-abi/abi.html#dso-dtor
  */
 
-#if (__GNUC__ > 2)
 void *__dso_handle = &__dso_handle;
 __asm(".hidden  __dso_handle");
 
@@ -81,7 +79,21 @@ atexit(void (*fn)(void))
 	return (__cxa_atexit((void (*)(void *))fn, NULL, &__dso_handle));
 }
 asm(".hidden atexit");
-#endif
+
+/*
+ * Ditto for pthread_atfork()
+ */
+int	_thread_atfork(void (*)(void), void (*)(void), void (*)(void), void *)
+	    __attribute__((weak));
+
+int
+pthread_atfork(void (*prep)(void), void (*parent)(void), void (*child)(void))
+{
+	return (_thread_atfork(prep, parent, child, &__dso_handle));
+}
+/* hppa doesn't permit directives in first column, so space after newline */
+asm(".hidden pthread_atfork\n .weak pthread_atfork");
+
 
 static init_f __CTOR_LIST__[1]
     __attribute__((section(".ctors"))) = { (void *)-1 };	/* XXX */
@@ -141,11 +153,8 @@ _do_init(void)
 	if (!initialized) {
 		initialized = 1;
 
-#if (__GNUC__ > 2)
 		if (__JCR_LIST__[0] && _Jv_RegisterClasses)
 			_Jv_RegisterClasses(__JCR_LIST__);
-#endif
-
 		__ctors();
 	}
 }
@@ -157,10 +166,8 @@ _do_fini(void)
 	if (!finalized) {
 		finalized = 1;
 
-#if (__GNUC__ > 2)
 		if (__cxa_finalize != NULL)
 			__cxa_finalize(__dso_handle);
-#endif
 
 		/*
 		 * since the _init() function sets up the destructors to 

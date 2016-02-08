@@ -2,7 +2,7 @@
  * THIS FILE AUTOMATICALLY GENERATED.  DO NOT EDIT.
  *
  * generated from:
- *	OpenBSD: pcidevs,v 1.1759 2015/03/03 09:09:52 brad Exp 
+ *	OpenBSD: pcidevs,v 1.1767 2015/08/04 21:19:28 tedu Exp 
  */
 
 /*	$NetBSD: pcidevs,v 1.30 1997/06/24 06:20:24 thorpej Exp $	*/
@@ -9141,7 +9141,7 @@ static const struct pci_known_product pci_known_products[] = {
 	},
 	{
 	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_WL_3160_2,
-	    "Dual Band Wirelsss AC 3160",
+	    "Dual Band Wireless AC 3160",
 	},
 	{
 	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_WL_7265_1,
@@ -9572,6 +9572,10 @@ static const struct pci_known_product pci_known_products[] = {
 	    "E5 v2 PCIE",
 	},
 	{
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_E5V2_R2PCIE,
+	    "E5 v2 R2PCIE",
+	},
+	{
 	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_E5V2_UBOX_1,
 	    "E5 v2 UBOX",
 	},
@@ -9808,6 +9812,30 @@ static const struct pci_known_product pci_known_products[] = {
 	    "Bay Trail HD Audio",
 	},
 	{
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_BAYTRAIL_SIO_DMA,
+	    "Bay Trail SIO DMA",
+	},
+	{
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_BAYTRAIL_PWM_1,
+	    "Bay Trail PWM",
+	},
+	{
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_BAYTRAIL_PWM_2,
+	    "Bay Trail PWM",
+	},
+	{
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_BAYTRAIL_HSUART_1,
+	    "Bay Trail HSUART",
+	},
+	{
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_BAYTRAIL_HSUART_2,
+	    "Bay Trail HSUART",
+	},
+	{
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_BAYTRAIL_SPI,
+	    "Bay Trail SPI",
+	},
+	{
 	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_BAYTRAIL_SMB,
 	    "Bay Trail SMBus",
 	},
@@ -9832,6 +9860,10 @@ static const struct pci_known_product pci_known_products[] = {
 	    "Bay Trail AHCI",
 	},
 	{
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_BAYTRAIL_LPA,
+	    "Bay Trail Low Power Audio",
+	},
+	{
 	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_BAYTRAIL_IGD_1,
 	    "Bay Trail Video",
 	},
@@ -9846,6 +9878,42 @@ static const struct pci_known_product pci_known_products[] = {
 	{
 	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_BAYTRAIL_XHCI,
 	    "Bay Trail xHCI",
+	},
+	{
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_BAYTRAIL_8237,
+	    "Bay Trail I2C DMA",
+	},
+	{
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_BAYTRAIL_I2C_1,
+	    "Bay Trail I2C",
+	},
+	{
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_BAYTRAIL_I2C_2,
+	    "Bay Trail I2C",
+	},
+	{
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_BAYTRAIL_I2C_3,
+	    "Bay Trail I2C",
+	},
+	{
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_BAYTRAIL_I2C_4,
+	    "Bay Trail I2C",
+	},
+	{
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_BAYTRAIL_I2C_5,
+	    "Bay Trail I2C",
+	},
+	{
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_BAYTRAIL_I2C_6,
+	    "Bay Trail I2C",
+	},
+	{
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_BAYTRAIL_I2C_7,
+	    "Bay Trail I2C",
+	},
+	{
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_BAYTRAIL_I2C_8,
+	    "Bay Trail I2C",
 	},
 	{
 	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_BAYTRAIL_PCIE_1,
@@ -13696,6 +13764,10 @@ static const struct pci_known_product pci_known_products[] = {
 	    "Dual Band Wireless AC 3165",
 	},
 	{
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_WL_3165_2,
+	    "Dual Band Wireless AC 3165",
+	},
+	{
 	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_31244,
 	    "31244 SATA",
 	},
@@ -14960,11 +15032,23 @@ static const struct pci_known_product pci_known_products[] = {
 	    "EP80579 LAN",
 	},
 	{
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_EP80579_LAN_4,
+	    "EP80579 LAN",
+	},
+	{
 	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_EP80579_LAN_2,
 	    "EP80579 LAN",
 	},
 	{
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_EP80579_LAN_5,
+	    "EP80579 LAN",
+	},
+	{
 	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_EP80579_LAN_3,
+	    "EP80579 LAN",
+	},
+	{
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_EP80579_LAN_6,
 	    "EP80579 LAN",
 	},
 	{
@@ -15718,6 +15802,10 @@ static const struct pci_known_product pci_known_products[] = {
 	{
 	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_C610_PCIE_8,
 	    "C610 PCIE",
+	},
+	{
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_C610_HDA,
+	    "C610 HD Audio",
 	},
 	{
 	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_C610_SMB,
@@ -20656,6 +20744,10 @@ static const struct pci_known_product pci_known_products[] = {
 	    "Virtio SCSI",
 	},
 	{
+	    PCI_VENDOR_QUMRANET, PCI_PRODUCT_QUMRANET_VIO_RNG,
+	    "Virtio RNG",
+	},
+	{
 	    PCI_VENDOR_RCC, PCI_PRODUCT_RCC_CMIC_LE,
 	    "CMIC-LE",
 	},
@@ -21574,6 +21666,10 @@ static const struct pci_known_product pci_known_products[] = {
 	{
 	    PCI_VENDOR_REALTEK, PCI_PRODUCT_REALTEK_RTL8187SE,
 	    "8187SE",
+	},
+	{
+	    PCI_VENDOR_REALTEK, PCI_PRODUCT_REALTEK_RT8191SE,
+	    "8191SE",
 	},
 	{
 	    PCI_VENDOR_REDHAT, PCI_PRODUCT_REDHAT_PPB,

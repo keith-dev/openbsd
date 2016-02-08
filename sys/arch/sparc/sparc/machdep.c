@@ -1,4 +1,4 @@
-/*	$OpenBSD: machdep.c,v 1.168 2015/02/09 11:52:47 miod Exp $	*/
+/*	$OpenBSD: machdep.c,v 1.172 2015/06/02 04:31:53 miod Exp $	*/
 /*	$NetBSD: machdep.c,v 1.85 1997/09/12 08:55:02 pk Exp $ */
 
 /*
@@ -100,6 +100,8 @@
 #include "led.h"
 #endif
 
+vaddr_t vm_pie_max_addr = 0;
+
 struct vm_map *exec_map = NULL;
 
 struct uvm_constraint_range  dma_constraint = { 0x0, (paddr_t)-1 }; 
@@ -115,12 +117,6 @@ int	sparc_led_blink = 1;
  * during autoconfiguration or after a panic.
  */
 int	safepri = 0;
-
-/*
- * dvmamap_extent is used to manage DVMA memory.
- */
-vaddr_t dvma_base, dvma_end;
-struct extent *dvmamap_extent;
 
 void	dumpsys(void);
 void	stackdump(void);
@@ -175,6 +171,17 @@ cpu_startup()
 	printf("real mem = %lu (%luMB)\n", ptoa(physmem),
 	    ptoa(physmem)/1024/1024);
 
+#if !defined(SMALL_KERNEL)
+	/*
+	 * uvm_km_init() has allocated all the virtual memory below the
+	 * end of the kernel image. If VM_MIN_KERNEL_ADDRESS is below
+	 * KERNBASE, we need to reclaim that range.
+	 */
+	if (vm_min_kernel_address < (vaddr_t)KERNBASE) {
+		uvm_unmap(kernel_map, vm_min_kernel_address, (vaddr_t)KERNBASE);
+	}
+#endif
+
 	/*
 	 * Allocate a submap for exec arguments.  This map effectively
 	 * limits the number of processes exec'ing at any time.
@@ -184,16 +191,14 @@ cpu_startup()
 				 16*NCARGS, VM_MAP_PAGEABLE, FALSE, NULL);
 
 	/*
-	 * Allocate a map for physio.  Others use a submap of the kernel
-	 * map, but we want one completely separate, even though it uses
-	 * the same pmap.
+	 * Set up userland PIE limits. PIE is disabled on sun4/4c/4e due
+	 * to the limited address space.
 	 */
-	dvma_base = CPU_ISSUN4M ? DVMA4M_BASE : DVMA_BASE;
-	dvma_end = CPU_ISSUN4M ? DVMA4M_END : DVMA_END;
-	dvmamap_extent = extent_create("dvmamap", dvma_base, dvma_end,
-				       M_DEVBUF, NULL, 0, EX_NOWAIT);
-	if (dvmamap_extent == NULL)
-		panic("unable to allocate extent for dvma");
+	if (CPU_ISSUN4M) {
+		vm_pie_max_addr = VM_MAXUSER_ADDRESS / 4;
+	}
+
+	dvma_init();
 
 #ifdef DEBUG
 	pmapdebug = opmapdebug;

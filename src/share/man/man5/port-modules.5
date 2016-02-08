@@ -1,4 +1,4 @@
-.\"	$OpenBSD: port-modules.5,v 1.185 2015/01/13 07:03:23 jmc Exp $
+.\"	$OpenBSD: port-modules.5,v 1.192 2015/07/19 05:58:00 bentley Exp $
 .\"
 .\" Copyright (c) 2008 Marc Espie
 .\"
@@ -24,7 +24,7 @@
 .\" (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
 .\" THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 .\"
-.Dd $Mdocdate: January 13 2015 $
+.Dd $Mdocdate: July 19 2015 $
 .Dt PORT-MODULES 5
 .Os
 .Sh NAME
@@ -433,6 +433,51 @@ post-install:
 	...
 	${MODCPAN_POST_INSTALL}
 .Ed
+.It databases/mariadb
+Adds small framework for testing ports that require running MariaDB.
+Defines
+.Ev MODMARIADB_TEST_TARGET
+which consists actual commands to run in
+.Ar do-test
+target.
+If this target isn't defined, it will be added automatically.
+.Pp
+The actual test command to be run could be specified in the
+.Ev MODMARIADB_TEST_CMD .
+Default is similar to what
+.Xr bsd.port.mk 5
+runs itself.
+.Pp
+The MariaDB server being started will listen on UNIX domain socket
+only, minimizing impact on running system.
+The path to socket is recorded in
+.Ev MODMARIADB_TEST_SOCKET .
+Any local user will be able to connect without password.
+.Pp
+If the
+.Ev MODMARIADB_TEST_DBNAME
+variable is set, the database with such name will be set up before
+running actual test command.
+Otherwise (default), the test is responsible to call
+.Xr mysqladmin 1
+itself, if needed.
+.Pp
+The
+.Pa databases/mariadb,-server
+will get added to
+.Ev TEST_DEPENDS ,
+but not to any other
+.Ev *_DEPENDS .
+The
+.Ev MODMARIADB_CLIENT_ARGS
+and
+.Ev MODMARIADB_ADMIN_ARGS
+variables hold arguments for
+.Xr mysql 1
+and
+.Xr mysqladmin 1 ,
+respectively; those argument lists could be used in test scripts
+for connecting to test server, if they aren't satisfied by environment.
 .It databases/postgresql
 Adds small framework for testing ports that require running Postgres.
 Defines
@@ -617,7 +662,7 @@ If other languages are needed, they must be listed in
 The
 .Ev MODGCC4_VERSION
 variable can be used to change the version of gcc.
-By default gcc 4.6 is used.
+By default gcc 4.9 is used.
 If
 .Ev MODGCC4_LANGS
 contains c++, this module provides
@@ -734,6 +779,121 @@ command can be specified with
 .Ev MODGHC_SETUP_CONF_ARGS
 and
 .Ev MODGHC_SETUP_CONF_ENV .
+.It lang/go
+Adds Go toolchain support.
+Requires
+.Ev ALL_TARGET
+to be set to canonical Go import path of port.
+(Module sets it automatically for ports that use
+.Ev GH_ACCOUNT
+and
+.Ev GH_PROJECT
+macros.)
+.Pp
+During execution of
+.Ar post-patch
+target module moves source code from
+.Pa ${MODGO_SUBDIR}
+to
+.Pa ${WRKSRC} ,
+subdirectory of
+.Pa ${MODGO_WORKSPACE}
+- specially-crafted Go workspace located at
+.Pa ${WRKDIR}/go .
+During
+.Ar do-build
+module calls
+.Dq go install
+with
+.Ev GOPATH
+set to
+.Pa ${MODGO_WORKSPACE} ,
+runs its output through sed to prevent writes outside
+.Ev WRKDIR
+sandbox and sends output to
+.Xr sh 1 .
+During
+.Ar do-install
+it copies executables from
+.Pa ${MODGO_WORKSPACE}/bin
+to
+.Pa ${PREFIX}/bin ,
+and/or directories
+.Pa ${MODGO_WORKSPACE}/pkg
+and
+.Pa ${MODGO_WORKSPACE}/src
+to
+.Pa ${PREFIX}/go ,
+depending on
+.Ev MODGO_TYPE
+contents.
+.Pp
+Sets
+.Ev BUILD_DEPENDS ,
+.Ev RUN_DEPENDS ,
+.Ev ALL_TARGET ,
+.Ev TEST_TARGET ,
+.Ev ONLY_FOR_ARCHS ,
+.Ev SEPARATE_BUILD ,
+and
+.Ev WRKSRC .
+.Pp
+Defines:
+.Bl -tag -width MODGO_WORKSPACE
+.It Ev MODGO_TYPE
+Type of port.
+May be any combination of:
+.Bl -tag -width lib
+.It bin
+ordinary binary, which should be installed to
+.Pa ${PREFIX}/bin ,
+.It lib
+library, which should come with source code.
+.El
+.Pp
+Defaults to
+.Ar bin .
+.It Ev MODGO_WORKSPACE
+Path to Go workspace set up for port build process.
+Defaults to
+.Pa ${WRKDIR}/go .
+See Go documentation for details.
+.It Ev MODGO_SUBDIR
+Path to Go source code within port's sources tarball.
+Defaults to
+.Pa ${WRKDIST} .
+.It Ev MODGO_SETUP_WORKSPACE
+Commands setting up Go workspace for building ports.
+By default, happens during execution of
+.Ar post-patch
+target.
+.It Ev MODGO_BUILDDEP
+Controls whether contents of
+.Ev MODGO_BUILD_DEPENDS
+are appended to port's
+.Ev BUILD_DEPENDS .
+Defaults to
+.Ar Yes .
+.El
+.Pp
+Additionally defines
+.Ev MODGO_PACKAGES ,
+.Ev MODGO_SOURCES
+and
+.Ev MODGO_TOOLS
+(paths for installed Go packages, sources and tools respectively),
+.Ev MODGO_CMD
+and
+.Ev MODGO_FLAGS
+(source code build command and flags passed as its arguments),
+.Ev MODGO_BUILD_CMD
+and
+.Ev MODGO_TEST_CMD
+(commands for building and testing go packages; normally called with canonical
+Go package names as arguments),
+.Ev MODGO_{BUILD,INSTALL,TEST}_TARGET
+and
+.Ev MODGO_{BUILD,RUN}_DEPENDS .
 .It lang/lua
 Sets
 .Ev MODLUA_BIN ,
@@ -979,6 +1139,12 @@ and
 May affect the
 .Ar test
 target.
+If
+.Ev MODPY_PI
+is set to Yes it will set
+.Ev MASTER_SITES .
+The subdirectory can be overridden with
+.Ev MODPY_PI_DIR .
 .Pp
 Python 2.x places .pyc files in the same directory as the associated .py file.
 Python 3.x places these in a separate __pycache__ directory and uses an
@@ -1288,7 +1454,7 @@ source tarball requires docbook XML/SGML/XSL definitions and stylesheets.
 If
 .Ev MODGNOME_TOOLS
 is set to gtk-update-icon-cache, a dependency on
-.Pa x11/gtk+2,-guic
+.Pa x11/gtk+3,-guic
 is appended to
 .Ev MODGNOME_RUN_DEPENDS .
 If
@@ -1686,7 +1852,7 @@ and
 If
 .Ev MODXFCE_ICON_CACHE
 is set to yes, it adds
-.Pa x11/gtk+2,-guic
+.Pa x11/gtk+3,-guic
 to
 .Ev RUN_DEPENDS .
 Unless

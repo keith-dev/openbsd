@@ -1,4 +1,4 @@
-/*	$OpenBSD: intel_sdvo.c,v 1.16 2014/03/24 17:06:49 kettenis Exp $	*/
+/*	$OpenBSD: intel_sdvo.c,v 1.18 2015/04/08 03:21:13 jsg Exp $	*/
 /*
  * Copyright 2006 Dave Airlie <airlied@linux.ie>
  * Copyright © 2006-2007 Intel Corporation
@@ -33,17 +33,6 @@
 #include <dev/pci/drm/i915_drm.h>
 #include "i915_drv.h"
 #include "intel_sdvo_regs.h"
-
-static __inline uint16_t
-hweight16(uint32_t x)
-{
-
-	x = (x & 0x5555) + ((x & 0xaaaa) >> 1);
-	x = (x & 0x3333) + ((x & 0xcccc) >> 2);
-	x = (x + (x >> 4)) & 0x0f0f;
-	x = (x + (x >> 8)) & 0x00ff;
-	return (x);
-}
 
 #define SDVO_TMDS_MASK (SDVO_OUTPUT_TMDS0 | SDVO_OUTPUT_TMDS1)
 #define SDVO_RGB_MASK  (SDVO_OUTPUT_RGB0 | SDVO_OUTPUT_RGB1)
@@ -942,10 +931,8 @@ static bool intel_sdvo_write_infoframe(struct intel_sdvo *intel_sdvo,
 
 	for (i = 0; i < hbuf_size; i += 8) {
 		memset(tmp, 0, 8);
-		if (i < length) {
-			unsigned min = 8 < length - i ? 8 : length - i;
-			memcpy(tmp, data + i, min);
-		}
+		if (i < length)
+			memcpy(tmp, data + i, min_t(unsigned, 8, length - i));
 
 		if (!intel_sdvo_set_value(intel_sdvo,
 					  SDVO_CMD_SET_HBUF_DATA,

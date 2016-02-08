@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_sis.c,v 1.123 2015/02/11 21:36:02 brad Exp $ */
+/*	$OpenBSD: if_sis.c,v 1.127 2015/06/24 09:40:54 mpi Exp $ */
 /*
  * Copyright (c) 1997, 1998, 1999
  *	Bill Paul <wpaul@ctr.columbia.edu>.  All rights reserved.
@@ -86,7 +86,6 @@
 
 #include <sys/device.h>
 
-#include <dev/mii/mii.h>
 #include <dev/mii/miivar.h>
 
 #include <dev/pci/pcireg.h>
@@ -1365,6 +1364,7 @@ sis_newbuf(struct sis_softc *sc, struct sis_desc *c)
 void
 sis_rxeof(struct sis_softc *sc)
 {
+	struct mbuf_list	ml = MBUF_LIST_INITIALIZER();
 	struct mbuf		*m;
 	struct ifnet		*ifp;
 	struct sis_desc		*cur_rx;
@@ -1423,8 +1423,7 @@ sis_rxeof(struct sis_softc *sc)
 		 */
 		{
 			struct mbuf *m0;
-			m0 = m_devget(mtod(m, char *), total_len, ETHER_ALIGN,
-			    ifp);
+			m0 = m_devget(mtod(m, char *), total_len, ETHER_ALIGN);
 			m_freem(m);
 			if (m0 == NULL) {
 				ifp->if_ierrors++;
@@ -1433,19 +1432,13 @@ sis_rxeof(struct sis_softc *sc)
 			m = m0;
 		}
 #else
-		m->m_pkthdr.rcvif = ifp;
 		m->m_pkthdr.len = m->m_len = total_len;
 #endif
-		ifp->if_ipackets++;
 
-#if NBPFILTER > 0
-		if (ifp->if_bpf)
-			bpf_mtap(ifp->if_bpf, m, BPF_DIRECTION_IN);
-#endif
-
-		/* pass it on. */
-		ether_input_mbuf(ifp, m);
+		ml_enqueue(&ml, m);
 	}
+
+	if_input(ifp, &ml);
 
 	sis_fill_rx_ring(sc);
 }

@@ -1,4 +1,4 @@
-/*	$OpenBSD: uvm_addr.c,v 1.11 2014/12/23 02:01:57 tedu Exp $	*/
+/*	$OpenBSD: uvm_addr.c,v 1.14 2015/07/17 21:56:14 kettenis Exp $	*/
 
 /*
  * Copyright (c) 2011 Ariane van der Steldt <ariane@stack.nl>
@@ -66,7 +66,9 @@ struct uaddr_bestfit_state {
 /* uvm_addr state for rnd selector. */
 struct uaddr_rnd_state {
 	struct uvm_addr_state		 ur_uaddr;
+#if 0
 	TAILQ_HEAD(, vm_map_entry)	 ur_free;
+#endif
 };
 
 /* Definition of a pivot in pivot selector. */
@@ -121,10 +123,12 @@ void			 uaddr_rnd_destroy(struct uvm_addr_state *);
 void			 uaddr_bestfit_destroy(struct uvm_addr_state *);
 void			 uaddr_pivot_destroy(struct uvm_addr_state *);
 
+#if 0
 int			 uaddr_lin_select(struct vm_map *,
 			    struct uvm_addr_state *, struct vm_map_entry **,
 			    vaddr_t *, vsize_t, vaddr_t, vaddr_t, vm_prot_t,
 			    vaddr_t);
+#endif
 int			 uaddr_kbootstrap_select(struct vm_map *,
 			    struct uvm_addr_state *, struct vm_map_entry **,
 			    vaddr_t *, vsize_t, vaddr_t, vaddr_t, vm_prot_t,
@@ -176,8 +180,10 @@ int			 uaddr_pivot_newpivot(struct vm_map *,
 #if defined(DEBUG) || defined(DDB)
 void			 uaddr_pivot_print(struct uvm_addr_state *, boolean_t,
 			    int (*)(const char *, ...));
+#if 0
 void			 uaddr_rnd_print(struct uvm_addr_state *, boolean_t,
 			    int (*)(const char *, ...));
+#endif
 #endif /* DEBUG || DDB */
 
 
@@ -281,14 +287,19 @@ uvm_addr_init(void)
 {
 	pool_init(&uaddr_pool, sizeof(struct uvm_addr_state),
 	    0, 0, PR_WAITOK, "uaddr", NULL);
+	pool_setipl(&uaddr_pool, IPL_VM);
 	pool_init(&uaddr_hint_pool, sizeof(struct uaddr_hint_state),
 	    0, 0, PR_WAITOK, "uaddrhint", NULL);
+	pool_setipl(&uaddr_hint_pool, IPL_VM);
 	pool_init(&uaddr_bestfit_pool, sizeof(struct uaddr_bestfit_state),
 	    0, 0, PR_WAITOK, "uaddrbest", NULL);
+	pool_setipl(&uaddr_bestfit_pool, IPL_VM);
 	pool_init(&uaddr_pivot_pool, sizeof(struct uaddr_pivot_state),
 	    0, 0, PR_WAITOK, "uaddrpivot", NULL);
+	pool_setipl(&uaddr_pivot_pool, IPL_VM);
 	pool_init(&uaddr_rnd_pool, sizeof(struct uaddr_rnd_state),
 	    0, 0, PR_WAITOK, "uaddrrnd", NULL);
+	pool_setipl(&uaddr_rnd_pool, IPL_VM);
 
 	uaddr_kbootstrap.uaddr_minaddr = PAGE_SIZE;
 	uaddr_kbootstrap.uaddr_maxaddr = -(vaddr_t)PAGE_SIZE;
@@ -472,8 +483,9 @@ uaddr_destroy(struct uvm_addr_state *uaddr)
 }
 
 
+#if 0
 /*
- * Lineair allocator.
+ * Linear allocator.
  * This allocator uses a first-fit algorithm.
  *
  * If hint is set, search will start at the hint position.
@@ -514,7 +526,7 @@ uaddr_lin_select(struct vm_map *map, struct uvm_addr_state *uaddr,
 	    align, offset, 1, uaddr->uaddr_minaddr, uaddr->uaddr_maxaddr - sz,
 	    0, guard_sz);
 }
-
+#endif
 
 /*
  * Randomized allocator.
@@ -528,7 +540,9 @@ const struct uvm_addr_functions uaddr_rnd_functions = {
 	.uaddr_free_remove = &uaddr_rnd_remove,
 	.uaddr_destroy = &uaddr_rnd_destroy,
 #if defined(DEBUG) || defined(DDB)
+#if 0
 	.uaddr_print = &uaddr_rnd_print,
+#endif
 #endif /* DEBUG || DDB */
 	.uaddr_name = "uaddr_rnd"
 };
@@ -542,7 +556,9 @@ uaddr_rnd_create(vaddr_t minaddr, vaddr_t maxaddr)
 	uaddr->ur_uaddr.uaddr_minaddr = minaddr;
 	uaddr->ur_uaddr.uaddr_maxaddr = maxaddr;
 	uaddr->ur_uaddr.uaddr_functions = &uaddr_rnd_functions;
+#if 0
 	TAILQ_INIT(&uaddr->ur_free);
+#endif
 	return &uaddr->ur_uaddr;
 }
 
@@ -553,6 +569,7 @@ uaddr_rnd_select(struct vm_map *map, struct uvm_addr_state *uaddr,
     vm_prot_t prot, vaddr_t hint)
 {
 	struct vmspace		*vm;
+	vaddr_t			 minaddr, maxaddr;
 	vaddr_t			 guard_sz;
 	vaddr_t			 low_addr, high_addr;
 	struct vm_map_entry	*entry, *next;
@@ -565,22 +582,25 @@ uaddr_rnd_select(struct vm_map *map, struct uvm_addr_state *uaddr,
 	/* Deal with guardpages: search for space with one extra page. */
 	guard_sz = ((map->flags & VM_MAP_GUARDPAGES) == 0 ? 0 : PAGE_SIZE);
 
+	minaddr = uvm_addr_align_forward(uaddr->uaddr_minaddr, align, offset);
+	maxaddr = uvm_addr_align_backward(uaddr->uaddr_maxaddr - sz - guard_sz,
+	    align, offset);
+
 	/* Quick fail if the allocation won't fit. */
-	if (uaddr->uaddr_maxaddr - uaddr->uaddr_minaddr < sz + guard_sz)
+	if (minaddr >= maxaddr)
 		return ENOMEM;
 
 	/* Select a hint. */
 	if (hint == 0)
-		hint = uvm_map_hint(vm, prot);
+		hint = uvm_map_hint(vm, prot, minaddr, maxaddr);
 	/* Clamp hint to uaddr range. */
-	hint = MIN(MAX(hint, uaddr->uaddr_minaddr),
-	    uaddr->uaddr_maxaddr - sz - guard_sz);
+	hint = MIN(MAX(hint, minaddr), maxaddr);
 
 	/* Align hint to align,offset parameters. */
 	tmp = hint;
 	hint = uvm_addr_align_forward(tmp, align, offset);
 	/* Check for overflow during alignment. */
-	if (hint < tmp || hint > uaddr->uaddr_maxaddr - sz - guard_sz)
+	if (hint < tmp || hint > maxaddr)
 		return ENOMEM; /* Compatibility mode: never look backwards. */
 
 	before_gap = 0;
@@ -675,6 +695,7 @@ uaddr_rnd_remove(struct vm_map *map, struct uvm_addr_state *uaddr_p,
 	return;
 }
 
+#if 0
 #if defined(DEBUG) || defined(DDB)
 void
 uaddr_rnd_print(struct uvm_addr_state *uaddr_p, boolean_t full,
@@ -716,7 +737,7 @@ uaddr_rnd_print(struct uvm_addr_state *uaddr_p, boolean_t full,
 	(*pr)("\t0x%lu entries, 0x%lx free bytes\n", count, space);
 }
 #endif /* DEBUG || DDB */
-
+#endif
 
 /*
  * An allocator that selects an address within distance of the hint.

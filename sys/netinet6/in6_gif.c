@@ -1,4 +1,4 @@
-/*	$OpenBSD: in6_gif.c,v 1.36 2015/01/24 00:29:06 deraadt Exp $	*/
+/*	$OpenBSD: in6_gif.c,v 1.40 2015/06/16 11:09:40 mpi Exp $	*/
 /*	$KAME: in6_gif.c,v 1.43 2001/01/22 07:27:17 itojun Exp $	*/
 
 /*
@@ -51,8 +51,6 @@
 #include <net/pfvar.h>
 #endif
 
-#include <netinet/ip.h>
-
 #include <netinet/ip6.h>
 #include <netinet6/ip6_var.h>
 #include <netinet6/in6_gif.h>
@@ -62,7 +60,7 @@
 #include <net/if_gif.h>
 
 #include "bridge.h"
-#if NBRIDGE > 0
+#if NBRIDGE > 0 || defined(MPLS)
 #include <netinet/ip_ether.h>
 #endif
 
@@ -122,7 +120,7 @@ in6_gif_output(struct ifnet *ifp, int family, struct mbuf **m0)
 		m_freem(m);
 		return EAFNOSUPPORT;
 	}
-	
+
 	/* encapsulate into IPv6 packet */
 	*m0 = NULL;
 #if NBRIDGE > 0
@@ -181,7 +179,7 @@ int in6_gif_input(struct mbuf **mp, int *offp, int proto)
 	}
 
 	if (gifp) {
-	        m->m_pkthdr.rcvif = gifp;
+	        m->m_pkthdr.ph_ifidx = gifp->if_index;
 		gifp->if_ipackets++;
 		gifp->if_ibytes += m->m_pkthdr.len;
 		ipip_input(m, *offp, gifp, proto);

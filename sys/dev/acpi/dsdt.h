@@ -1,4 +1,4 @@
-/* $OpenBSD: dsdt.h,v 1.62 2014/05/02 14:10:15 kettenis Exp $ */
+/* $OpenBSD: dsdt.h,v 1.64 2015/06/13 21:41:42 guenther Exp $ */
 /*
  * Copyright (c) 2005 Marco Peereboom <marco@openbsd.org>
  *
@@ -92,6 +92,8 @@ const char		*aml_nodename(struct aml_node *);
 #define SR_IOPORT		0x08
 #define SR_FIXEDPORT		0x09
 #define SR_ENDTAG		0x0F
+/* byte zero of small resources combines the tag above a length [1..7] */
+#define	SR_TAG(tag,len)		((tag << 3) + (len))
 
 #define LR_24BIT		0x81
 #define LR_GENREGISTER		0x82
@@ -277,8 +279,8 @@ int			aml_rdpciaddr(struct aml_node *pcidev,
 #ifndef SMALL_KERNEL
 void			acpi_getdevlist(struct acpi_devlist_head *,
 			    struct aml_node *, struct aml_value *, int);
-void			aml_notify_dev(const char *, int);
 #endif
+void			aml_notify_dev(const char *, int);
 
 void			acpi_freedevlist(struct acpi_devlist_head *);
 

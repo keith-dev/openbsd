@@ -1,4 +1,4 @@
-/* $OpenBSD: session.c,v 1.46 2014/10/22 23:18:53 nicm Exp $ */
+/* $OpenBSD: session.c,v 1.50 2015/06/05 18:18:32 nicm Exp $ */
 
 /*
  * Copyright (c) 2007 Nicholas Marriott <nicm@users.sourceforge.net>
@@ -27,11 +27,11 @@
 
 #include "tmux.h"
 
-/* Global session list. */
 struct sessions	sessions;
-struct sessions dead_sessions;
 u_int		next_session_id;
 struct session_groups session_groups;
+
+void	session_free(int, short, void *);
 
 struct winlink *session_next_alert(struct winlink *);
 struct winlink *session_previous_alert(struct winlink *);
@@ -70,6 +70,22 @@ session_find(const char *name)
 	return (RB_FIND(sessions, &sessions, &s));
 }
 
+/* Find session by id parsed from a string. */
+struct session *
+session_find_by_id_str(const char *s)
+{
+	const char	*errstr;
+	u_int		 id;
+
+	if (*s != '$')
+		return (NULL);
+
+	id = strtonum(s + 1, 0, UINT_MAX, &errstr);
+	if (errstr != NULL)
+		return (NULL);
+	return (session_find_by_id(id));
+}
+
 /* Find session by id. */
 struct session *
 session_find_by_id(u_int id)
@@ -93,7 +109,7 @@ session_create(const char *name, int argc, char **argv, const char *path,
 	struct winlink	*wl;
 
 	s = xmalloc(sizeof *s);
-	s->references = 0;
+	s->references = 1;
 	s->flags = 0;
 
 	if (gettimeofday(&s->creation_time, NULL) != 0)
@@ -148,6 +164,29 @@ session_create(const char *name, int argc, char **argv, const char *path,
 	return (s);
 }
 
+/* Remove a reference from a session. */
+void
+session_unref(struct session *s)
+{
+	log_debug("session %s has %d references", s->name, s->references);
+
+	s->references--;
+	if (s->references == 0)
+		event_once(-1, EV_TIMEOUT, session_free, s, NULL);
+}
+
+/* Free session. */
+void
+session_free(unused int fd, unused short events, void *arg)
+{
+	struct session	*s = arg;
+
+	log_debug("sesson %s freed (%d references)", s->name, s->references);
+
+	if (s->references == 0)
+		free(s);
+}
+
 /* Destroy a session. */
 void
 session_destroy(struct session *s)
@@ -175,7 +214,7 @@ session_destroy(struct session *s)
 
 	close(s->cwd);
 
-	RB_INSERT(sessions, &dead_sessions, s);
+	session_unref(s);
 }
 
 /* Check a session name is valid: not empty and no colons or periods. */
@@ -309,16 +348,30 @@ session_detach(struct session *s, struct winlink *wl)
 }
 
 /* Return if session has window. */
-struct winlink *
+int
 session_has(struct session *s, struct window *w)
 {
 	struct winlink	*wl;
 
 	RB_FOREACH(wl, winlinks, &s->windows) {
 		if (wl->window == w)
-			return (wl);
+			return (1);
 	}
-	return (NULL);
+	return (0);
+}
+
+/*
+ * Return 1 if a window is linked outside this session (not including session
+ * groups). The window must be in this session!
+ */
+int
+session_is_linked(struct session *s, struct window *w)
+{
+	struct session_group	*sg;
+
+	if ((sg = session_group_find(s)) != NULL)
+		return (w->references != session_group_count(sg));
+	return (w->references != 1);
 }
 
 struct winlink *

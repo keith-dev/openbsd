@@ -1,4 +1,4 @@
-/*	$OpenBSD: inet.c,v 1.140 2015/02/12 01:49:02 claudio Exp $	*/
+/*	$OpenBSD: inet.c,v 1.143 2015/06/21 12:11:13 claudio Exp $	*/
 /*	$NetBSD: inet.c,v 1.14 1995/10/03 21:42:37 thorpej Exp $	*/
 
 /*
@@ -37,7 +37,6 @@
 #include <sys/protosw.h>
 #include <sys/sysctl.h>
 #define _KERNEL
-#include <sys/ucred.h>
 #include <sys/file.h>
 #undef _KERNEL
 
@@ -1439,14 +1438,7 @@ inpcb_dump(u_long off, short protocol, int af)
 	p("%u", inp_seclevel[1], ", ");
 	p("%u", inp_seclevel[2], ", ");
 	p("%u", inp_seclevel[3], "\n ");
-	p("%#x", inp_secrequire, ", ");
-	p("%#x", inp_secresult, "\n ");
 	p("%u", inp_ip_minttl, "\n ");
-	pp("%p", inp_tdb_in, ", ");
-	pp("%p", inp_tdb_out, ", ");
-	pp("%p", inp_ipo, "\n ");
-	pp("%p", inp_ipsec_remotecred, ", ");
-	pp("%p", inp_ipsec_remoteauth, "\n ");
 	p("%d", inp_cksum6, "\n ");
 	pp("%p", inp_icmp6filt, "\n ");
 	pp("%p", inp_pf_sk, "\n ");

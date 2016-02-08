@@ -1,4 +1,4 @@
-.\" $OpenBSD: gre.4,v 1.39 2013/10/19 16:53:15 schwarze Exp $
+.\" $OpenBSD: gre.4,v 1.43 2015/07/16 15:46:41 sobrado Exp $
 .\" $NetBSD: gre.4,v 1.10 1999/12/22 14:55:49 kleink Exp $
 .\"
 .\" Copyright 1998 (c) The NetBSD Foundation, Inc.
@@ -28,7 +28,7 @@
 .\" ARISING IN ANY WAY  OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 .\" POSSIBILITY OF SUCH DAMAGE.
 .\"
-.Dd $Mdocdate: October 19 2013 $
+.Dd $Mdocdate: July 16 2015 $
 .Dt GRE 4
 .Os
 .Sh NAME
@@ -40,12 +40,12 @@
 The
 .Nm
 network interface allows tunnel construction using the Cisco GRE or
-the Mobile-IP (RFC 2004) encapsulation protocols.
+the Mobile IP (RFC 2004) encapsulation protocols.
 .Pp
 .Tn GRE ,
 .Tn WCCPv1 ,
 and
-.Tn MobileIP
+.Tn Mobile IP
 are enabled with the following
 .Xr sysctl 3
 variables respectively in
@@ -54,9 +54,14 @@ variables respectively in
 .It Va net.inet.gre.allow
 Allow GRE packets in and out of the system.
 .It Va net.inet.gre.wccp
-Allow WCCPv1-style GRE packets into the system (depends on the above).
+Set to 1 to allow WCCPv1-style GRE packets into the system;
+set to 2 to handle the packets as WCCPv2-style GRE, truncating
+the redirect header.
+This variable depends on
+.Va gre.allow
+being set.
 .It Va net.inet.mobileip.allow
-Allow MobileIP packets in and out of the system.
+Allow Mobile IP packets in and out of the system.
 .El
 .Pp
 A
@@ -70,7 +75,7 @@ configuration file for
 .Pp
 This driver currently supports the following modes of operation:
 .Bl -tag -width abc
-.It GRE encapsulation (IP protocol number 47).
+.It GRE encapsulation (IP protocol number 47)
 Encapsulated datagrams are prepended by an outer datagram and a GRE header.
 The GRE header specifies the type of the encapsulated datagram
 and thus allows for tunneling other protocols than IP like
@@ -79,11 +84,11 @@ GRE mode is the default tunnel mode on Cisco routers.
 This is also the default mode of operation of the
 .Nm
 interfaces.
-.It MOBILE encapsulation (IP protocol number 55).
+.It MOBILE encapsulation (IP protocol number 55)
 Datagrams are encapsulated into IP, but with a much smaller
 encapsulation header.
 This protocol only supports IP in IP encapsulation, and is intended
-for use with mobile IP.
+for use with Mobile IP.
 .El
 .Pp
 The network interfaces are named
@@ -235,8 +240,8 @@ The kernel must be set to forward datagrams by issuing the appropriate
 option to
 .Xr sysctl 8 .
 .Pp
-The GRE interface will accept WCCPv1-style GRE encapsulated packets
-from a Cisco router.
+The GRE interface will accept WCCPv1-style or WWCPv2-style GRE
+encapsulated packets from a Cisco router.
 Some magic with the packet filter configuration
 and a caching proxy like squid are needed to do anything useful with
 these packets.
@@ -292,6 +297,4 @@ these packets.
 .Sh BUGS
 GRE RFC not yet fully implemented (no GRE options).
 .Pp
-For the WCCP GRE encapsulated packets we can only reliably accept
-WCCPv1 format; WCCPv2 formatted packets add another header which will
-skew the decode, and results are not defined (i.e. don't do WCCPv2).
+The redirect header for WCCPv2 GRE encapsulated packets is skipped.

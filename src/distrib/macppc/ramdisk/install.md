@@ -1,4 +1,4 @@
-#	$OpenBSD: install.md,v 1.56 2014/08/20 06:52:21 phessler Exp $
+#	$OpenBSD: install.md,v 1.60 2015/08/03 10:36:41 rpe Exp $
 #
 #
 # Copyright (c) 1996 The NetBSD Foundation, Inc.
@@ -33,6 +33,7 @@
 #
 
 MDXAPERTURE=2
+MDXDM=y
 NCPU=$(sysctl -n hw.ncpufound)
 
 ((NCPU > 1)) && { DEFAULTSETS="bsd bsd.rd bsd.mp"; SANESETS="bsd bsd.mp"; }
@@ -153,7 +154,7 @@ md_prep_HFS() {
 }
 
 md_prep_disklabel() {
-	local _disk=$1 _f _op
+	local _disk=$1 _f=/tmp/fstab.$1
 
 	PARTTABLE=
 	while [[ -z $PARTTABLE ]]; do
@@ -171,22 +172,8 @@ md_prep_disklabel() {
 		esac
 	done
 
-	_f=/tmp/fstab.$_disk
-	if [[ $_disk == $ROOTDISK ]]; then
-		while :; do
-			echo "The auto-allocated layout for $_disk is:"
-			disklabel -h -A $_disk | egrep "^#  |^  [a-p]:"
-			ask "Use (A)uto layout, (E)dit auto layout, or create (C)ustom layout?" a
-			case $resp in
-			a*|A*)	_op=-w ;;
-			e*|E*)	_op=-E ;;
-			c*|C*)	break ;;
-			*)	continue ;;
-			esac
-			disklabel $FSTABFLAG $_f $_op -A $_disk
-			return
-		done
-	fi
+	disklabel_autolayout $_disk $_f || return
+	[[ -s $_f ]] && return
 
 	cat <<__EOT
 
@@ -200,7 +187,7 @@ start of the disk, NOT the start of the OpenBSD $PARTTABLE partition.
 
 __EOT
 
-	disklabel $FSTABFLAG $_f -E $_disk
+	disklabel -F $_f -E $_disk
 }
 
 md_congrats() {

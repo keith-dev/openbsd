@@ -19,12 +19,12 @@
 ./etc/mail/smtpd.conf
 ./etc/mail/spamd.conf
 ./etc/mailer.conf
-./etc/man.conf
 ./etc/master.passwd
 ./etc/motd
 ./etc/newsyslog.conf
 ./etc/npppd/npppd-users
 ./etc/npppd/npppd.conf
+./etc/ntpd.conf
 ./etc/passwd
 ./etc/pf.conf
 ./etc/ppp/chap-secrets
@@ -44,7 +44,6 @@
 ./etc/ssh/sshd_config
 ./etc/ssl/openssl.cnf
 ./etc/ssl/x509v3.cnf
-./etc/sudoers
 ./etc/syslog.conf
 ./etc/systrace/usr_sbin_lpd
 ./etc/ttys

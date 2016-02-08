@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_tht.c,v 1.129 2014/12/22 02:28:52 tedu Exp $ */
+/*	$OpenBSD: if_tht.c,v 1.132 2015/06/24 09:40:54 mpi Exp $ */
 
 /*
  * Copyright (c) 2007 David Gwynne <dlg@openbsd.org>
@@ -46,7 +46,6 @@
 #include <dev/pci/pcidevs.h>
 
 #include <net/if.h>
-#include <net/if_dl.h>
 #include <net/if_media.h>
 #include <net/if_types.h>
 
@@ -1334,6 +1333,7 @@ tht_rxd(struct tht_softc *sc)
 	struct tht_rx_desc		rxd;
 	struct tht_pkt			*pkt;
 	struct mbuf			*m;
+	struct mbuf_list		ml = MBUF_LIST_INITIALIZER();
 	int				bc;
 	u_int32_t			flags;
 
@@ -1357,17 +1357,11 @@ tht_rxd(struct tht_softc *sc)
 		bus_dmamap_unload(dmat, dmap);
 
 		m = pkt->tp_m;
-		m->m_pkthdr.rcvif = ifp;
 		m->m_pkthdr.len = m->m_len = letoh16(rxd.len);
 
 		/* XXX process type 3 rx descriptors */
 
-#if NBPFILTER > 0
-		if (ifp->if_bpf)
-			bpf_mtap(ifp->if_bpf, m, BPF_DIRECTION_IN);
-#endif
-
-		ether_input_mbuf(ifp, m);
+		ml_enqueue(&ml, m);
 
 		tht_pkt_put(&sc->sc_rx_list, pkt);
 
@@ -1377,12 +1371,11 @@ tht_rxd(struct tht_softc *sc)
 			tht_fifo_read(sc, &sc->sc_rxd, &pad, sizeof(pad));
 			bc -= sizeof(pad);
 		}
-
-		ifp->if_ipackets++;
-
 	} while (sc->sc_rxd.tf_ready >= sizeof(rxd));
 
 	tht_fifo_post(sc, &sc->sc_rxd);
+
+	if_input(ifp, &ml);
 
 	/* put more pkts on the fifo */
 	tht_rxf_fill(sc, 0);

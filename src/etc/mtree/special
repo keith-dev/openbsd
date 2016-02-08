@@ -1,4 +1,4 @@
-#	$OpenBSD: special,v 1.112 2014/12/26 21:17:32 tedu Exp $
+#	$OpenBSD: special,v 1.115 2015/08/03 04:19:25 yasuoka Exp $
 #
 # Hand-crafted mtree specification for the dangerous files.
 #
@@ -22,6 +22,7 @@ csh.logout	type=file mode=0644 uname=root gname=wheel
 daily		type=file mode=0644 uname=root gname=wheel
 daily.local	type=file mode=0644 uname=root gname=wheel optional
 dhcpd.conf	type=file mode=0644 uname=root gname=wheel optional
+doas.conf	type=file mode=0640 uname=root gname=wheel optional
 dvmrpd.conf	type=file mode=0600 uname=root gname=wheel optional
 exports		type=file mode=0644 uname=root gname=wheel optional
 fbtab		type=file mode=0644 uname=root gname=wheel
@@ -74,6 +75,7 @@ ospf6d.conf	type=file mode=0600 uname=root gname=wheel optional
 passwd		type=file mode=0644 uname=root gname=wheel
 pf.conf		type=file mode=0600 uname=root gname=wheel optional
 printcap	type=file mode=0644 uname=root gname=wheel optional
+radiusd.conf	type=file mode=0600 uname=root gname=wheel optional
 rc		type=file mode=0644 uname=root gname=wheel
 rc.conf		type=file mode=0644 uname=root gname=wheel
 rc.conf.local	type=file mode=0644 uname=root gname=wheel optional
@@ -107,7 +109,6 @@ ssh_host_rsa_key	type=file mode=0600 uname=root gname=wheel optional
 ssh_host_rsa_key.pub	type=file mode=0644 uname=root gname=wheel optional
 sshd_config	type=file mode=0644 uname=root gname=wheel
 ..	#ssh
-sudoers		type=file mode=0440 uname=root gname=wheel
 systrace	type=dir mode=0755 uname=root gname=wheel optional
 ..	#systrace
 syslog.conf	type=file mode=0644 uname=root gname=wheel

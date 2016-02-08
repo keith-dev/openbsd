@@ -1,4 +1,4 @@
-/*	$OpenBSD: nfs_socket.c,v 1.107 2015/01/17 17:49:27 deraadt Exp $	*/
+/*	$OpenBSD: nfs_socket.c,v 1.110 2015/07/15 22:16:42 deraadt Exp $	*/
 /*	$NetBSD: nfs_socket.c,v 1.27 1996/04/15 20:20:00 thorpej Exp $	*/
 
 /*
@@ -66,7 +66,6 @@
 #include <nfs/xdr_subs.h>
 #include <nfs/nfsm_subs.h>
 #include <nfs/nfsmount.h>
-#include <nfs/nfsnode.h>
 #include <nfs/nfs_var.h>
 
 /* External data, mostly RPC constants in XDR form. */
@@ -651,8 +650,7 @@ tryagain:
 			    rcvflg = 0;
 			    error =  soreceive(so, NULL, &auio, mp, &control,
 			        &rcvflg, 0);
-			    if (control)
-				m_freem(control);
+			    m_freem(control);
 			    if (error == EWOULDBLOCK && rep) {
 				if (rep->r_flags & R_SOFTTERM)
 					return (EINTR);
@@ -762,8 +760,7 @@ nfs_reply(struct nfsreq *myrep)
 			}
 			return (error);
 		}
-		if (nam)
-			m_freem(nam);
+		m_freem(nam);
 	
 		/*
 		 * Get the xid and check that it is an rpc reply
@@ -1006,9 +1003,9 @@ tryagain:
 			    error == NFSERR_TRYLATER) {
 				m_freem(info.nmi_mrep);
 				error = 0;
-				tv.tv_sec = time_second + trylater_delay;
+				tv.tv_sec = trylater_delay;
 				tv.tv_usec = 0;
-				tsleep(&tv, PSOCK, "nfsretry", hzto(&tv));
+				tsleep(&tv, PSOCK, "nfsretry", tvtohz(&tv));
 				trylater_delay *= NFS_TIMEOUTMUL;
 				if (trylater_delay > NFS_MAXTIMEO)
 					trylater_delay = NFS_MAXTIMEO;

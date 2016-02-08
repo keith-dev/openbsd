@@ -1,4 +1,4 @@
-/*	$OpenBSD: kern_timeout.c,v 1.41 2013/11/27 04:28:32 dlg Exp $	*/
+/*	$OpenBSD: kern_timeout.c,v 1.43 2015/07/20 23:47:20 uebayasi Exp $	*/
 /*
  * Copyright (c) 2001 Thomas Nordin <nordin@openbsd.org>
  * Copyright (c) 2000-2001 Artur Grabowski <art@openbsd.org>
@@ -36,7 +36,6 @@
 #ifdef DDB
 #include <machine/db_machdep.h>
 #include <ddb/db_interface.h>
-#include <ddb/db_access.h>
 #include <ddb/db_sym.h>
 #include <ddb/db_output.h>
 #endif
@@ -141,7 +140,6 @@ struct mutex timeout_mutex = MUTEX_INITIALIZER(IPL_HIGH);
  * "to->to_time - ticks". The result will always be positive for future
  * timeouts and 0 or negative for due timeouts.
  */
-extern int ticks;		/* XXX - move to sys/X.h */
 
 void
 timeout_startup(void)

@@ -1,4 +1,4 @@
-/*	$OpenBSD: autoconf.c,v 1.5 2014/07/13 18:07:38 jasper Exp $	*/
+/*	$OpenBSD: autoconf.c,v 1.7 2015/07/20 19:44:32 pirofti Exp $	*/
 /*
  * Copyright (c) 2009 Miodrag Vallat.
  *
@@ -91,9 +91,11 @@ device_register(struct device *dev, void *aux)
 
 	switch (bootdev_class) {
 	case DV_DISK:
-		if (strcmp(drvrname, "wd") == 0 && strcmp(name, bootdev) == 0)
-			bootdv = dev;
-		if (strcmp(drvrname, "octcf") == 0 && strcmp(name, bootdev) == 0)
+		if ((strcmp(drvrname, "wd") == 0 ||
+		    strcmp(drvrname, "sd") == 0 ||
+		    strcmp(drvrname, "octcf") == 0 ||
+		    strcmp(drvrname, "amdcf") == 0) &&
+		    strcmp(name, bootdev) == 0)
 			bootdv = dev;
 		break;
 	case DV_IFNET:
@@ -115,5 +117,6 @@ struct nam2blk nam2blk[] = {
 	{ "rd",		8 },
 	{ "vnd",	2 },
 	{ "octcf",	15 },
+	{ "amdcf",	19 },
 	{ NULL,		-1 }
 };

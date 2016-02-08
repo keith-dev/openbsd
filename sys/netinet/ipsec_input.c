@@ -1,4 +1,4 @@
-/*	$OpenBSD: ipsec_input.c,v 1.126 2015/01/24 00:29:06 deraadt Exp $	*/
+/*	$OpenBSD: ipsec_input.c,v 1.133 2015/06/16 11:09:40 mpi Exp $	*/
 /*
  * The authors of this code are John Ioannidis (ji@tla.org),
  * Angelos D. Keromytis (kermit@csd.uch.gr) and
@@ -119,17 +119,19 @@ ipsec_common_input(struct mbuf *m, int skip, int protoff, int af, int sproto,
 			    sproto == IPPROTO_AH ? (y)++ : (z)++)
 
 	union sockaddr_union dst_address;
-	struct timeval tv;
 	struct tdb *tdbp;
 	struct ifnet *encif;
 	u_int32_t spi;
 	u_int16_t cpi;
 	int s, error;
+#ifdef ENCDEBUG
+	char buf[INET6_ADDRSTRLEN];
+#endif
 
 	IPSEC_ISTAT(espstat.esps_input, ahstat.ahs_input,
 	    ipcompstat.ipcomps_input);
 
-	if (m == 0) {
+	if (m == NULL) {
 		DPRINTF(("ipsec_common_input(): NULL packet received\n"));
 		IPSEC_ISTAT(espstat.esps_hdrops, ahstat.ahs_hdrops,
 		    ipcompstat.ipcomps_hdrops);
@@ -232,7 +234,7 @@ ipsec_common_input(struct mbuf *m, int skip, int protoff, int af, int sproto,
 		splx(s);
 		DPRINTF(("ipsec_common_input(): could not find SA for "
 		    "packet to %s, spi %08x\n",
-		    ipsp_address(dst_address), ntohl(spi)));
+		    ipsp_address(&dst_address, buf, sizeof(buf)), ntohl(spi)));
 		m_freem(m);
 		IPSEC_ISTAT(espstat.esps_notdb, ahstat.ahs_notdb,
 		    ipcompstat.ipcomps_notdb);
@@ -241,7 +243,9 @@ ipsec_common_input(struct mbuf *m, int skip, int protoff, int af, int sproto,
 
 	if (tdbp->tdb_flags & TDBF_INVALID) {
 		splx(s);
-		DPRINTF(("ipsec_common_input(): attempted to use invalid SA %s/%08x/%u\n", ipsp_address(dst_address), ntohl(spi), tdbp->tdb_sproto));
+		DPRINTF(("ipsec_common_input(): attempted to use invalid "
+		    "SA %s/%08x/%u\n", ipsp_address(&dst_address, buf,
+		    sizeof(buf)), ntohl(spi), tdbp->tdb_sproto));
 		m_freem(m);
 		IPSEC_ISTAT(espstat.esps_invalid, ahstat.ahs_invalid,
 		    ipcompstat.ipcomps_invalid);
@@ -250,7 +254,9 @@ ipsec_common_input(struct mbuf *m, int skip, int protoff, int af, int sproto,
 
 	if (udpencap && !(tdbp->tdb_flags & TDBF_UDPENCAP)) {
 		splx(s);
-		DPRINTF(("ipsec_common_input(): attempted to use non-udpencap SA %s/%08x/%u\n", ipsp_address(dst_address), ntohl(spi), tdbp->tdb_sproto));
+		DPRINTF(("ipsec_common_input(): attempted to use non-udpencap "
+		    "SA %s/%08x/%u\n", ipsp_address(&dst_address, buf,
+		    sizeof(buf)), ntohl(spi), tdbp->tdb_sproto));
 		m_freem(m);
 		espstat.esps_udpinval++;
 		return EINVAL;
@@ -258,7 +264,9 @@ ipsec_common_input(struct mbuf *m, int skip, int protoff, int af, int sproto,
 
 	if (tdbp->tdb_xform == NULL) {
 		splx(s);
-		DPRINTF(("ipsec_common_input(): attempted to use uninitialized SA %s/%08x/%u\n", ipsp_address(dst_address), ntohl(spi), tdbp->tdb_sproto));
+		DPRINTF(("ipsec_common_input(): attempted to use uninitialized "
+		    "SA %s/%08x/%u\n", ipsp_address(&dst_address, buf,
+		    sizeof(buf)), ntohl(spi), tdbp->tdb_sproto));
 		m_freem(m);
 		IPSEC_ISTAT(espstat.esps_noxform, ahstat.ahs_noxform,
 		    ipcompstat.ipcomps_noxform);
@@ -271,8 +279,8 @@ ipsec_common_input(struct mbuf *m, int skip, int protoff, int af, int sproto,
 			splx(s);
 			DPRINTF(("ipsec_common_input(): "
 			    "no enc%u interface for SA %s/%08x/%u\n",
-			    tdbp->tdb_tap, ipsp_address(dst_address),
-			    ntohl(spi), tdbp->tdb_sproto));
+			    tdbp->tdb_tap, ipsp_address(&dst_address, buf,
+			    sizeof(buf)), ntohl(spi), tdbp->tdb_sproto));
 			m_freem(m);
 
 			IPSEC_ISTAT(espstat.esps_pdrops,
@@ -282,22 +290,18 @@ ipsec_common_input(struct mbuf *m, int skip, int protoff, int af, int sproto,
 		}
 
 		/* XXX This conflicts with the scoped nature of IPv6 */
-		m->m_pkthdr.rcvif = encif;
+		m->m_pkthdr.ph_ifidx = encif->if_index;
 	}
 
 	/* Register first use, setup expiration timer. */
 	if (tdbp->tdb_first_use == 0) {
 		tdbp->tdb_first_use = time_second;
-
-		tv.tv_usec = 0;
-
-		tv.tv_sec = tdbp->tdb_exp_first_use + tdbp->tdb_first_use;
 		if (tdbp->tdb_flags & TDBF_FIRSTUSE)
-			timeout_add(&tdbp->tdb_first_tmo, hzto(&tv));
-
-		tv.tv_sec = tdbp->tdb_first_use + tdbp->tdb_soft_first_use;
+			timeout_add_sec(&tdbp->tdb_first_tmo,
+			    tdbp->tdb_exp_first_use);
 		if (tdbp->tdb_flags & TDBF_SOFT_FIRSTUSE)
-			timeout_add(&tdbp->tdb_sfirst_tmo, hzto(&tv));
+			timeout_add_sec(&tdbp->tdb_sfirst_tmo,
+			    tdbp->tdb_soft_first_use);
 	}
 
 	/*
@@ -314,8 +318,7 @@ ipsec_common_input(struct mbuf *m, int skip, int protoff, int af, int sproto,
  * filtering and other sanity checks on the processed packet.
  */
 int
-ipsec_common_input_cb(struct mbuf *m, struct tdb *tdbp, int skip, int protoff,
-    struct m_tag *mt)
+ipsec_common_input_cb(struct mbuf *m, struct tdb *tdbp, int skip, int protoff)
 {
 	int af, sproto;
 	u_char prot;
@@ -331,6 +334,10 @@ ipsec_common_input_cb(struct mbuf *m, struct tdb *tdbp, int skip, int protoff,
 #endif /* INET6 */
 	struct m_tag *mtag;
 	struct tdb_ident *tdbi;
+
+#ifdef ENCDEBUG
+	char buf[INET6_ADDRSTRLEN];
+#endif
 
 	af = tdbp->tdb_dst.sa.sa_family;
 	sproto = tdbp->tdb_sproto;
@@ -349,8 +356,8 @@ ipsec_common_input_cb(struct mbuf *m, struct tdb *tdbp, int skip, int protoff,
 	if (af == AF_INET) {
 		if ((m->m_len < skip) && ((m = m_pullup(m, skip)) == NULL)) {
 			DPRINTF(("ipsec_common_input_cb(): processing failed "
-			    "for SA %s/%08x\n", ipsp_address(tdbp->tdb_dst),
-			    ntohl(tdbp->tdb_spi)));
+			    "for SA %s/%08x\n", ipsp_address(&tdbp->tdb_dst,
+			    buf, sizeof(buf)), ntohl(tdbp->tdb_spi)));
 			IPSEC_ISTAT(espstat.esps_hdrops, ahstat.ahs_hdrops,
 			    ipcompstat.ipcomps_hdrops);
 			return ENOBUFS;
@@ -374,37 +381,6 @@ ipsec_common_input_cb(struct mbuf *m, struct tdb *tdbp, int skip, int protoff,
 			/* ipn will now contain the inner IPv4 header */
 			m_copydata(m, skip, sizeof(struct ip),
 			    (caddr_t) &ipn);
-
-			/*
-			 * Check that the inner source address is the same as
-			 * the proxy address, if available.
-			 */
-			if ((tdbp->tdb_proxy.sa.sa_family == AF_INET &&
-			    tdbp->tdb_proxy.sin.sin_addr.s_addr !=
-			    INADDR_ANY &&
-			    ipn.ip_src.s_addr !=
-			    tdbp->tdb_proxy.sin.sin_addr.s_addr) ||
-			    (tdbp->tdb_proxy.sa.sa_family != AF_INET &&
-				tdbp->tdb_proxy.sa.sa_family != 0)) {
-#if ENCDEBUG
-				char addr[INET_ADDRSTRLEN];
-#endif
-
-				DPRINTF(("ipsec_common_input_cb(): inner "
-				    "source address %s doesn't correspond to "
-				    "expected proxy source %s, SA %s/%08x\n",
-				    inet_ntop(AF_INET, &ipn.ip_src,
-					addr, sizeof(addr)),
-				    ipsp_address(tdbp->tdb_proxy),
-				    ipsp_address(tdbp->tdb_dst),
-				    ntohl(tdbp->tdb_spi)));
-
-				m_freem(m);
-				IPSEC_ISTAT(espstat.esps_pdrops,
-				    ahstat.ahs_pdrops,
-				    ipcompstat.ipcomps_pdrops);
-				return EACCES;
-			}
 		}
 
 #ifdef INET6
@@ -420,36 +396,6 @@ ipsec_common_input_cb(struct mbuf *m, struct tdb *tdbp, int skip, int protoff,
 			/* ip6n will now contain the inner IPv6 header. */
 			m_copydata(m, skip, sizeof(struct ip6_hdr),
 			    (caddr_t) &ip6n);
-
-			/*
-			 * Check that the inner source address is the same as
-			 * the proxy address, if available.
-			 */
-			if ((tdbp->tdb_proxy.sa.sa_family == AF_INET6 &&
-			    !IN6_IS_ADDR_UNSPECIFIED(&tdbp->tdb_proxy.sin6.sin6_addr) &&
-			    !IN6_ARE_ADDR_EQUAL(&ip6n.ip6_src,
-				&tdbp->tdb_proxy.sin6.sin6_addr)) ||
-			    (tdbp->tdb_proxy.sa.sa_family != AF_INET6 &&
-				tdbp->tdb_proxy.sa.sa_family != 0)) {
-#if ENCDEBUG
-				char addr[INET6_ADDRSTRLEN];
-#endif
-
-				DPRINTF(("ipsec_common_input_cb(): inner "
-				    "source address %s doesn't correspond to "
-				    "expected proxy source %s, SA %s/%08x\n",
-				    inet_ntop(AF_INET6, &ip6n.ip6_src,
-					addr, sizeof(addr)),
-				    ipsp_address(tdbp->tdb_proxy),
-				    ipsp_address(tdbp->tdb_dst),
-				    ntohl(tdbp->tdb_spi)));
-
-				m_freem(m);
-				IPSEC_ISTAT(espstat.esps_pdrops,
-				    ahstat.ahs_pdrops,
-				    ipcompstat.ipcomps_pdrops);
-				return EACCES;
-			}
 		}
 #endif /* INET6 */
 	}
@@ -462,8 +408,8 @@ ipsec_common_input_cb(struct mbuf *m, struct tdb *tdbp, int skip, int protoff,
 		    (m = m_pullup(m, sizeof(struct ip6_hdr))) == NULL) {
 
 			DPRINTF(("ipsec_common_input_cb(): processing failed "
-			    "for SA %s/%08x\n", ipsp_address(tdbp->tdb_dst),
-			    ntohl(tdbp->tdb_spi)));
+			    "for SA %s/%08x\n", ipsp_address(&tdbp->tdb_dst,
+			    buf, sizeof(buf)), ntohl(tdbp->tdb_spi)));
 
 			IPSEC_ISTAT(espstat.esps_hdrops, ahstat.ahs_hdrops,
 			    ipcompstat.ipcomps_hdrops);
@@ -487,37 +433,6 @@ ipsec_common_input_cb(struct mbuf *m, struct tdb *tdbp, int skip, int protoff,
 			}
 			/* ipn will now contain the inner IPv4 header */
 			m_copydata(m, skip, sizeof(struct ip), (caddr_t) &ipn);
-
-			/*
-			 * Check that the inner source address is the same as
-			 * the proxy address, if available.
-			 */
-			if ((tdbp->tdb_proxy.sa.sa_family == AF_INET &&
-			    tdbp->tdb_proxy.sin.sin_addr.s_addr !=
-			    INADDR_ANY &&
-			    ipn.ip_src.s_addr !=
-				tdbp->tdb_proxy.sin.sin_addr.s_addr) ||
-			    (tdbp->tdb_proxy.sa.sa_family != AF_INET &&
-				tdbp->tdb_proxy.sa.sa_family != 0)) {
-#if ENCDEBUG
-				char addr[INET_ADDRSTRLEN];
-#endif
-
-				DPRINTF(("ipsec_common_input_cb(): inner "
-				    "source address %s doesn't correspond to "
-				    "expected proxy source %s, SA %s/%08x\n",
-				    inet_ntop(AF_INET, &ipn.ip_src,
-					addr, sizeof(addr)),
-				    ipsp_address(tdbp->tdb_proxy),
-				    ipsp_address(tdbp->tdb_dst),
-				    ntohl(tdbp->tdb_spi)));
-
-				m_freem(m);
-				IPSEC_ISTAT(espstat.esps_pdrops,
-				    ahstat.ahs_pdrops,
-				    ipcompstat.ipcomps_pdrops);
-				return EACCES;
-			}
 		}
 
 		/* IPv6-in-IP encapsulation */
@@ -532,36 +447,6 @@ ipsec_common_input_cb(struct mbuf *m, struct tdb *tdbp, int skip, int protoff,
 			/* ip6n will now contain the inner IPv6 header. */
 			m_copydata(m, skip, sizeof(struct ip6_hdr),
 			    (caddr_t) &ip6n);
-
-			/*
-			 * Check that the inner source address is the same as
-			 * the proxy address, if available.
-			 */
-			if ((tdbp->tdb_proxy.sa.sa_family == AF_INET6 &&
-			    !IN6_IS_ADDR_UNSPECIFIED(&tdbp->tdb_proxy.sin6.sin6_addr) &&
-			    !IN6_ARE_ADDR_EQUAL(&ip6n.ip6_src,
-				&tdbp->tdb_proxy.sin6.sin6_addr)) ||
-			    (tdbp->tdb_proxy.sa.sa_family != AF_INET6 &&
-				tdbp->tdb_proxy.sa.sa_family != 0)) {
-#if ENCDEBUG
-				char addr[INET6_ADDRSTRLEN];
-#endif
-
-				DPRINTF(("ipsec_common_input_cb(): inner "
-				    "source address %s doesn't correspond to "
-				    "expected proxy source %s, SA %s/%08x\n",
-				    inet_ntop(AF_INET6, &ip6n.ip6_src,
-					addr, sizeof(addr)),
-				    ipsp_address(tdbp->tdb_proxy),
-				    ipsp_address(tdbp->tdb_dst),
-				    ntohl(tdbp->tdb_spi)));
-
-				m_freem(m);
-				IPSEC_ISTAT(espstat.esps_pdrops,
-				    ahstat.ahs_pdrops,
-				    ipcompstat.ipcomps_pdrops);
-				return EACCES;
-			}
 		}
 	}
 #endif /* INET6 */
@@ -623,11 +508,7 @@ ipsec_common_input_cb(struct mbuf *m, struct tdb *tdbp, int skip, int protoff,
 
 	/*
 	 * Record what we've done to the packet (under what SA it was
-	 * processed). If we've been passed an mtag, it means the packet
-	 * was already processed by an ethernet/crypto combo card and
-	 * thus has a tag attached with all the right information, but
-	 * with a PACKET_TAG_IPSEC_IN_CRYPTO_DONE as opposed to
-	 * PACKET_TAG_IPSEC_IN_DONE type; in that case, just change the type.
+	 * processed).
 	 */
 	if (tdbp->tdb_sproto != IPPROTO_IPCOMP) {
 		mtag = m_tag_get(PACKET_TAG_IPSEC_IN_DONE,
@@ -830,28 +711,18 @@ ah4_input(struct mbuf *m, ...)
 int
 ah4_input_cb(struct mbuf *m, ...)
 {
-	struct ifqueue *ifq = &ipintrq;
-	int s = splnet();
-
 	/*
 	 * Interface pointer is already in first mbuf; chop off the
 	 * `outer' header and reschedule.
 	 */
 
-	if (IF_QFULL(ifq)) {
-		IF_DROP(ifq);
+	if (niq_enqueue(&ipintrq, m) != 0) {
 		ahstat.ahs_qfull++;
-		splx(s);
-
-		m_freem(m);
 		DPRINTF(("ah4_input_cb(): dropped packet because of full "
 		    "IP queue\n"));
 		return ENOBUFS;
 	}
 
-	IF_ENQUEUE(ifq, m);
-	schednetisr(NETISR_IP);
-	splx(s);
 	return 0;
 }
 
@@ -886,27 +757,17 @@ esp4_input(struct mbuf *m, ...)
 int
 esp4_input_cb(struct mbuf *m, ...)
 {
-	struct ifqueue *ifq = &ipintrq;
-	int s = splnet();
-
 	/*
 	 * Interface pointer is already in first mbuf; chop off the
 	 * `outer' header and reschedule.
 	 */
-	if (IF_QFULL(ifq)) {
-		IF_DROP(ifq);
+	if (niq_enqueue(&ipintrq, m) != 0) {
 		espstat.esps_qfull++;
-		splx(s);
-
-		m_freem(m);
 		DPRINTF(("esp4_input_cb(): dropped packet because of full "
 		    "IP queue\n"));
 		return ENOBUFS;
 	}
 
-	IF_ENQUEUE(ifq, m);
-	schednetisr(NETISR_IP);
-	splx(s);
 	return 0;
 }
 
@@ -928,26 +789,15 @@ ipcomp4_input(struct mbuf *m, ...)
 int
 ipcomp4_input_cb(struct mbuf *m, ...)
 {
-	struct ifqueue *ifq = &ipintrq;
-	int s = splnet();
-
 	/*
 	 * Interface pointer is already in first mbuf; chop off the
 	 * `outer' header and reschedule.
 	 */
-	if (IF_QFULL(ifq)) {
-		IF_DROP(ifq);
+	if (niq_enqueue(&ipintrq, m) != 0) {
 		ipcompstat.ipcomps_qfull++;
-		splx(s);
-
-		m_freem(m);
 		DPRINTF(("ipcomp4_input_cb(): dropped packet because of full IP queue\n"));
 		return ENOBUFS;
 	}
-
-	IF_ENQUEUE(ifq, m);
-	schednetisr(NETISR_IP);
-	splx(s);
 
 	return 0;
 }
@@ -1009,7 +859,7 @@ ipsec_common_ctlinput(u_int rdomain, int cmd, struct sockaddr *sa,
 			tdbp->tdb_mtutimeout = time_second +
 			    ip_mtudisc_timeout;
 			DPRINTF(("ipsec_common_ctlinput: "
-			    "spi %08x mtu %d adjust %d\n",
+			    "spi %08x mtu %d adjust %ld\n",
 			    ntohl(tdbp->tdb_spi), tdbp->tdb_mtu,
 			    adjust));
 		}
@@ -1068,7 +918,7 @@ udpencap_ctlinput(int cmd, struct sockaddr *sa, u_int rdomain, void *v)
 				tdbp->tdb_mtutimeout = time_second +
 				    ip_mtudisc_timeout;
 				DPRINTF(("udpencap_ctlinput: "
-				    "spi %08x mtu %d adjust %d\n",
+				    "spi %08x mtu %d adjust %ld\n",
 				    ntohl(tdbp->tdb_spi), tdbp->tdb_mtu,
 				    adjust));
 			}
@@ -1169,8 +1019,12 @@ ah6_input_cb(struct mbuf *m, int off, int protoff)
 		 * more sanity checks in header chain processing.
 		 */
 		if (m->m_pkthdr.len < off) {
+			struct ifnet *ifp;
+
 			ip6stat.ip6s_tooshort++;
-			in6_ifstat_inc(m->m_pkthdr.rcvif, ifs6_in_truncated);
+			ifp = if_get(m->m_pkthdr.ph_ifidx);
+			if (ifp != NULL)
+				in6_ifstat_inc(ifp, ifs6_in_truncated);
 			goto bad;
 		}
 		nxt = (*inet6sw[ip6_protox[nxt]].pr_input)(&m, &off, nxt);

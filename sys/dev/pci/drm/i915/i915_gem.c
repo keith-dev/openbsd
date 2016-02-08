@@ -1,4 +1,4 @@
-/*	$OpenBSD: i915_gem.c,v 1.85 2015/02/12 08:48:32 jsg Exp $	*/
+/*	$OpenBSD: i915_gem.c,v 1.99 2015/07/16 18:48:51 kettenis Exp $	*/
 /*
  * Copyright (c) 2008-2009 Owain G. Ainsworth <oga@openbsd.org>
  *
@@ -79,13 +79,6 @@ static void i915_gem_shrink_all(struct drm_i915_private *dev_priv);
 #endif
 static void i915_gem_object_truncate(struct drm_i915_gem_object *obj);
 
-static inline int timespec_to_jiffies(const struct timespec *);
-static inline int timespec_valid(const struct timespec *);
-static struct timespec ns_to_timespec(const int64_t);
-static inline int64_t timespec_to_ns(const struct timespec *);
-
-extern int ticks;
-
 static inline void i915_gem_object_fence_lost(struct drm_i915_gem_object *obj)
 {
 	if (obj->tiling_mode)
@@ -117,6 +110,8 @@ static int
 i915_gem_wait_for_error(struct drm_device *dev)
 {
 	struct drm_i915_private *dev_priv = dev->dev_private;
+	struct completion *x = &dev_priv->error_completion;
+	unsigned long flags;
 	int ret;
 
 	if (!atomic_read(&dev_priv->mm.wedged))
@@ -127,16 +122,13 @@ i915_gem_wait_for_error(struct drm_device *dev)
 	 * userspace. If it takes that long something really bad is going on and
 	 * we should simply try to bail out and fail as gracefully as possible.
 	 */
-	mtx_enter(&dev_priv->error_completion_lock);
-	while (dev_priv->error_completion == 0) {
-		ret = -msleep(&dev_priv->error_completion,
-		    &dev_priv->error_completion_lock, PCATCH, "915wco", 10*hz);
-		if (ret) {
-			mtx_leave(&dev_priv->error_completion_lock);
-			return ret;
-		}
+	ret = wait_for_completion_interruptible_timeout(x, 10*HZ);
+	if (ret == 0) {
+		DRM_ERROR("Timed out waiting for the gpu reset to complete\n");
+		return -EIO;
+	} else if (ret < 0) {
+		return ret;
 	}
-	mtx_leave(&dev_priv->error_completion_lock);
 
 	if (atomic_read(&dev_priv->mm.wedged)) {
 		/* GPU is hung, bump the completion count to account for
@@ -144,9 +136,9 @@ i915_gem_wait_for_error(struct drm_device *dev)
 		 * end up waiting upon a subsequent completion event that
 		 * will never happen.
 		 */
-		mtx_enter(&dev_priv->error_completion_lock);
-		dev_priv->error_completion++;
-		mtx_leave(&dev_priv->error_completion_lock);
+		spin_lock_irqsave(&x->wait.lock, flags);
+		x->done++;
+		spin_unlock_irqrestore(&x->wait.lock, flags);
 	}
 	return 0;
 }
@@ -230,7 +222,7 @@ i915_gem_create(struct drm_file *file,
 	int ret;
 	u32 handle;
 
-	size = round_page(size);
+	size = roundup(size, PAGE_SIZE);
 	if (size == 0)
 		return -EINVAL;
 
@@ -295,62 +287,10 @@ static int i915_gem_object_needs_bit17_swizzle(struct drm_i915_gem_object *obj)
 		obj->tiling_mode != I915_TILING_NONE;
 }
 
-#define offset_in_page(off) ((off) & PAGE_MASK)
-
-static void *
-kmap(struct vm_page *pg)
-{
-	vaddr_t va;
-
-#if defined (__HAVE_PMAP_DIRECT)
-	va = pmap_map_direct(pg);
-#else
-	va = uvm_km_valloc_wait(phys_map, PAGE_SIZE);
-	pmap_kenter_pa(va, VM_PAGE_TO_PHYS(pg), PROT_READ | PROT_WRITE);
-	pmap_update(pmap_kernel());
-#endif
-	return (void *)va;
-}
-
-static void
-kunmap(void *addr)
-{
-	vaddr_t va = (vaddr_t)addr;
-
-#if defined (__HAVE_PMAP_DIRECT)
-	pmap_unmap_direct(va);
-#else
-	pmap_kremove(va, PAGE_SIZE);
-	pmap_update(pmap_kernel());
-	uvm_km_free_wakeup(phys_map, va, PAGE_SIZE);
-#endif
-}
-
 static inline void
 drm_clflush_virt_range(void *addr, size_t len)
 {
 	pmap_flush_cache((vaddr_t)addr, len);
-}
-
-static inline unsigned long
-__copy_to_user(void *to, const void *from, unsigned len)
-{
-	if (copyout(from, to, len))
-		return len;
-	return 0;
-}
-
-static inline unsigned long
-__copy_to_user_inatomic(void *to, const void *from, unsigned len)
-{
-	struct cpu_info *ci = curcpu();
-	int error;
-
-	ci->ci_inatomic = 1;
-	error = copyout(from, to, len);
-	ci->ci_inatomic = 0;
-
-	return (error ? len : 0);
 }
 
 static inline int
@@ -377,27 +317,6 @@ __copy_to_user_swizzled(char __user *cpu_vaddr,
 	}
 
 	return 0;
-}
-
-static inline unsigned long
-__copy_from_user(void *to, const void *from, unsigned len)
-{
-	if (copyin(from, to, len))
-		return len;
-	return 0;
-}
-
-static inline unsigned long
-__copy_from_user_inatomic_nocache(void *to, const void *from, unsigned len)
-{
-	struct cpu_info *ci = curcpu();
-	int error;
-
-	ci->ci_inatomic = 1;
-	error = copyin(from, to, len);
-	ci->ci_inatomic = 0;
-
-	return (error ? len : 0);
 }
 
 static inline int
@@ -451,9 +370,6 @@ shmem_pread_fast(struct vm_page *page, int shmem_page_offset, int page_length,
 
 	return ret ? -EFAULT : 0;
 }
-
-#define round_up(x, y) ((((x) + ((y) - 1)) / (y)) * (y))
-#define round_down(x, y) (((x) / (y)) * (y))
 
 static void
 shmem_clflush_swizzled_range(char *addr, unsigned long length,
@@ -569,13 +485,11 @@ i915_gem_shmem_pread(struct drm_device *dev,
 
 #ifdef __linux__
 		page = sg_page(sg);
-		page_do_bit17_swizzling = obj_do_bit17_swizzling &&
-			(page_to_phys(page) & (1 << 17)) != 0;
 #else
 		page = obj->pages[i];
-		page_do_bit17_swizzling = obj_do_bit17_swizzling &&
-			(VM_PAGE_TO_PHYS(page) & (1 << 17)) != 0;
 #endif
+		page_do_bit17_swizzling = obj_do_bit17_swizzling &&
+			(page_to_phys(page) & (1 << 17)) != 0;
 
 		ret = shmem_pread_fast(page, shmem_page_offset, page_length,
 				       user_data, page_do_bit17_swizzling,
@@ -935,13 +849,11 @@ i915_gem_shmem_pwrite(struct drm_device *dev,
 
 #ifdef __linux__
 		page = sg_page(sg);
-		page_do_bit17_swizzling = obj_do_bit17_swizzling &&
-			(page_to_phys(page) & (1 << 17)) != 0;
 #else
 		page = obj->pages[i];
-		page_do_bit17_swizzling = obj_do_bit17_swizzling &&
-			(VM_PAGE_TO_PHYS(page) & (1 << 17)) != 0;
 #endif
+		page_do_bit17_swizzling = obj_do_bit17_swizzling &&
+			(page_to_phys(page) & (1 << 17)) != 0;
 
 		ret = shmem_pwrite_fast(page, shmem_page_offset, page_length,
 					user_data, page_do_bit17_swizzling,
@@ -960,11 +872,9 @@ i915_gem_shmem_pwrite(struct drm_device *dev,
 		mutex_lock(&dev->struct_mutex);
 
 next_page:
-#ifdef __linux__
 		set_page_dirty(page);
+#ifdef __linux__
 		mark_page_accessed(page);
-#else
-		atomic_clearbits_int(&page->pg_flags, PG_CLEAN);
 #endif
 
 		if (ret)
@@ -1067,13 +977,15 @@ i915_gem_check_wedge(struct drm_i915_private *dev_priv,
 		     bool interruptible)
 {
 	if (atomic_read(&dev_priv->mm.wedged)) {
+		struct completion *x = &dev_priv->error_completion;
 		bool recovery_complete;
+		unsigned long flags;
 
 		/* Give the error handler a chance to run. */
-		mtx_enter(&dev_priv->error_completion_lock);
-		recovery_complete = dev_priv->error_completion > 0;
-		mtx_leave(&dev_priv->error_completion_lock);
-		
+		spin_lock_irqsave(&x->wait.lock, flags);
+		recovery_complete = x->done > 0;
+		spin_unlock_irqrestore(&x->wait.lock, flags);
+
 		/* Non-interruptible callers can't handle -EAGAIN, hence return
 		 * -EIO unconditionally for these. */
 		if (!interruptible)
@@ -1144,52 +1056,26 @@ static int __wait_seqno(struct intel_ring_buffer *ring, u32 seqno,
 		return -ENODEV;
 
 	/* Record current time in case interrupted by signal, or wedged * */
-	nanouptime(&before);
+	getrawmonotonic(&before);
 
 #define EXIT_COND \
 	(i915_seqno_passed(ring->get_seqno(ring, false), seqno) || \
 	atomic_read(&dev_priv->mm.wedged))
 	do {
-		end = timeout_jiffies;
-		mtx_enter(&dev_priv->irq_lock);
-		do {
-			if (EXIT_COND) {
-				ret = 0;
-				break;
-			}
-			ret = msleep(ring, &dev_priv->irq_lock,
-			    PZERO | (interruptible ? PCATCH : 0),
-			    "gemwt", end);
-			nanouptime(&now);
-			timespecsub(&now, &before, &sleep_time);
-			if (timespeccmp(&sleep_time, &wait_time, >=)) {
-				end = 0;
-				break;
-			}
-			end = timeout_jiffies -
-			    timespec_to_jiffies(&sleep_time);
-		} while (ret == 0);
-		mtx_leave(&dev_priv->irq_lock);
-		switch (ret) {
-		case 0:
-			break;
-		case ERESTART:
-			end = -ERESTARTSYS;
-			break;
-		case EWOULDBLOCK:
-			end = 0;
-			break;
-		default:
-			end = -ret;
-			break;
-		}
+		if (interruptible)
+			end = wait_event_interruptible_timeout(ring->irq_queue,
+							       EXIT_COND,
+							       timeout_jiffies);
+		else
+			end = wait_event_timeout(ring->irq_queue, EXIT_COND,
+						 timeout_jiffies);
 
 		ret = i915_gem_check_wedge(dev_priv, interruptible);
 		if (ret)
 			end = ret;
 	} while (end == 0 && wait_forever);
 
-	nanouptime(&now);
+	getrawmonotonic(&now);
 
 	ring->irq_put(ring);
 	trace_i915_gem_request_wait_end(ring, seqno);
@@ -1207,8 +1093,8 @@ static int __wait_seqno(struct intel_ring_buffer *ring, u32 seqno,
 		return (int)end;
 	case 0: /* Timeout */
 		if (timeout)
-			timeout->tv_sec = timeout->tv_nsec = 0;
-		return -ETIMEDOUT;
+			set_normalized_timespec(timeout, 0, 0);
+		return -ETIME;
 	default: /* Completed */
 		WARN_ON(end < 0); /* We're not aware of other errors */
 		return 0;
@@ -1832,7 +1718,11 @@ i915_gem_object_truncate(struct drm_i915_gem_object *obj)
 	obj->madv = __I915_MADV_PURGED;
 }
 
-// i915_gem_object_is_purgeable
+static inline int
+i915_gem_object_is_purgeable(struct drm_i915_gem_object *obj)
+{
+	return obj->madv == I915_MADV_DONTNEED;
+}
 
 static void
 i915_gem_object_put_pages_gtt(struct drm_i915_gem_object *obj)
@@ -2268,7 +2158,7 @@ i915_add_request(struct intel_ring_buffer *ring,
 	request->seqno = intel_ring_get_seqno(ring);
 	request->ring = ring;
 	request->tail = request_ring_position;
-	request->emitted_ticks = ticks;
+	request->emitted_jiffies = jiffies;
 	was_empty = list_empty(&ring->request_list);
 	list_add_tail(&request->list, &ring->request_list);
 	request->file_priv = NULL;
@@ -2292,8 +2182,10 @@ i915_add_request(struct intel_ring_buffer *ring,
 			    DRM_I915_HANGCHECK_PERIOD);
 		}
 		if (was_empty) {
-			timeout_add_sec(&dev_priv->mm.retire_timer, 1);
-			intel_mark_busy(ring->dev);
+			queue_delayed_work(dev_priv->wq,
+					   &dev_priv->mm.retire_work,
+					   round_jiffies_up_relative(HZ));
+			intel_mark_busy(dev_priv->dev);
 		}
 	}
 
@@ -2463,20 +2355,23 @@ i915_gem_retire_requests(struct drm_device *dev)
 		i915_gem_retire_requests_ring(ring);
 }
 
-void
-i915_gem_retire_work_handler(void *arg1)
+static void
+i915_gem_retire_work_handler(struct work_struct *work)
 {
-	drm_i915_private_t *dev_priv = arg1;
+	drm_i915_private_t *dev_priv;
 	struct drm_device *dev;
 	struct intel_ring_buffer *ring;
 	bool idle;
 	int i;
 
+	dev_priv = container_of(work, drm_i915_private_t,
+				mm.retire_work.work);
 	dev = dev_priv->dev;
 
 	/* Come back later if the device is busy... */
 	if (rw_enter(&dev->struct_mutex, RW_NOSLEEP | RW_WRITE)) {
-		timeout_add_sec(&dev_priv->mm.retire_timer, 1);
+		queue_delayed_work(dev_priv->wq, &dev_priv->mm.retire_work,
+				   round_jiffies_up_relative(HZ));
 		return;
 	}
 
@@ -2494,7 +2389,8 @@ i915_gem_retire_work_handler(void *arg1)
 	}
 
 	if (!dev_priv->mm.suspended && !idle)
-		timeout_add_sec(&dev_priv->mm.retire_timer, 1);
+		queue_delayed_work(dev_priv->wq, &dev_priv->mm.retire_work,
+				   round_jiffies_up_relative(HZ));
 	if (idle)
 		intel_mark_idle(dev);
 
@@ -2586,7 +2482,7 @@ i915_gem_wait_ioctl(struct drm_device *dev, void *data, struct drm_file *file)
 	 * on this IOCTL with a 0 timeout (like busy ioctl)
 	 */
 	if (!args->timeout_ns) {
-		ret = -ETIMEDOUT;
+		ret = -ETIME;
 		goto out;
 	}
 
@@ -3093,6 +2989,42 @@ static bool i915_gem_valid_gtt_space(struct drm_device *dev,
 
 static void i915_gem_verify_gtt(struct drm_device *dev)
 {
+#if WATCH_GTT
+	struct drm_i915_private *dev_priv = dev->dev_private;
+	struct drm_i915_gem_object *obj;
+	int err = 0;
+
+	list_for_each_entry(obj, &dev_priv->mm.gtt_list, gtt_list) {
+		if (obj->gtt_space == NULL) {
+			printk(KERN_ERR "object found on GTT list with no space reserved\n");
+			err++;
+			continue;
+		}
+
+		if (obj->cache_level != obj->gtt_space->color) {
+			printk(KERN_ERR "object reserved space [%08lx, %08lx] with wrong color, cache_level=%x, color=%lx\n",
+			       obj->gtt_space->start,
+			       obj->gtt_space->start + obj->gtt_space->size,
+			       obj->cache_level,
+			       obj->gtt_space->color);
+			err++;
+			continue;
+		}
+
+		if (!i915_gem_valid_gtt_space(dev,
+					      obj->gtt_space,
+					      obj->cache_level)) {
+			printk(KERN_ERR "invalid GTT space found at [%08lx, %08lx] - color=%x\n",
+			       obj->gtt_space->start,
+			       obj->gtt_space->start + obj->gtt_space->size,
+			       obj->cache_level);
+			err++;
+			continue;
+		}
+	}
+
+	WARN_ON(err);
+#endif
 }
 
 /**
@@ -3241,9 +3173,9 @@ i915_gem_clflush_object(struct drm_i915_gem_object *obj)
 	if (obj->cache_level != I915_CACHE_NONE)
 		return;
 
-#if 0
 	trace_i915_gem_object_clflush(obj);
 
+#if 0
 	drm_clflush_sg(obj->pages);
 #else
 {
@@ -3635,7 +3567,7 @@ i915_gem_ring_throttle(struct drm_device *dev, struct drm_file *file)
 {
 	struct drm_i915_private *dev_priv = dev->dev_private;
 	struct drm_i915_file_private *file_priv = file->driver_priv;
-	unsigned long recent_enough = ticks - msecs_to_jiffies(20);
+	unsigned long recent_enough = jiffies - msecs_to_jiffies(20);
 	struct drm_i915_gem_request *request;
 	struct intel_ring_buffer *ring = NULL;
 	u32 seqno = 0;
@@ -3646,7 +3578,7 @@ i915_gem_ring_throttle(struct drm_device *dev, struct drm_file *file)
 
 	spin_lock(&file_priv->mm.lock);
 	list_for_each_entry(request, &file_priv->mm.request_list, client_list) {
-		if (time_after_eq(request->emitted_ticks, recent_enough))
+		if (time_after_eq(request->emitted_jiffies, recent_enough))
 			break;
 
 		ring = request->ring;
@@ -3659,7 +3591,7 @@ i915_gem_ring_throttle(struct drm_device *dev, struct drm_file *file)
 
 	ret = __wait_seqno(ring, seqno, true, NULL);
 	if (ret == 0)
-		timeout_add_sec(&dev_priv->mm.retire_timer, 0);
+		queue_delayed_work(dev_priv->wq, &dev_priv->mm.retire_work, 0);
 
 	return ret;
 }
@@ -3853,14 +3785,12 @@ unlock:
 	return ret;
 }
 
-#ifdef notyet
 int
 i915_gem_throttle_ioctl(struct drm_device *dev, void *data,
 			struct drm_file *file_priv)
 {
 	return i915_gem_ring_throttle(dev, file_priv);
 }
-#endif
 
 int
 i915_gem_madvise_ioctl(struct drm_device *dev, void *data,
@@ -3984,6 +3914,8 @@ void i915_gem_free_object(struct drm_gem_object *gem_obj)
 	struct drm_device *dev = obj->base.dev;
 	drm_i915_private_t *dev_priv = dev->dev_private;
 
+	trace_i915_gem_object_destroy(obj);
+
 	if (obj->phys_obj)
 		i915_gem_detach_phys_object(dev, obj);
 
@@ -4042,8 +3974,7 @@ i915_gem_idle(struct drm_device *dev)
 	mutex_unlock(&dev->struct_mutex);
 
 	/* Cancel the retire work handler, which should be idle now. */
-	timeout_del(&dev_priv->mm.retire_timer);
-	task_del(dev_priv->mm.retire_taskq, &dev_priv->mm.retire_task);
+	cancel_delayed_work_sync(&dev_priv->mm.retire_work);
 
 	return 0;
 }
@@ -4351,14 +4282,9 @@ i915_gem_load(struct drm_device *dev)
 		init_ring_lists(&dev_priv->ring[i]);
 	for (i = 0; i < I915_MAX_NUM_FENCES; i++)
 		INIT_LIST_HEAD(&dev_priv->fence_regs[i].lru_list);
-	task_set(&dev_priv->mm.retire_task, i915_gem_retire_work_handler,
-	    dev_priv);
-	timeout_set(&dev_priv->mm.retire_timer, inteldrm_timeout, dev_priv);
-#if 0
+	INIT_DELAYED_WORK(&dev_priv->mm.retire_work,
+			  i915_gem_retire_work_handler);
 	init_completion(&dev_priv->error_completion);
-#else
-	dev_priv->error_completion = 0;
-#endif
 
 	/* On GEN3 we really need to make sure the ARB C3 LP bit is set */
 	if (IS_GEN3(dev)) {
@@ -4381,9 +4307,7 @@ i915_gem_load(struct drm_device *dev)
 	i915_gem_reset_fences(dev);
 
 	i915_gem_detect_bit_6_swizzle(dev);
-#if 0
 	init_waitqueue_head(&dev_priv->pending_flip_queue);
-#endif
 
 	dev_priv->mm.interruptible = true;
 
@@ -4649,54 +4573,3 @@ i915_gem_inactive_shrink(struct shrinker *shrinker, struct shrink_control *sc)
 	return cnt;
 }
 #endif /* notyet */
-
-#define NSEC_PER_SEC	1000000000L
-
-static inline int64_t
-timespec_to_ns(const struct timespec *ts)
-{
-	return ((ts->tv_sec * NSEC_PER_SEC) + ts->tv_nsec);
-}
-
-static inline int
-timespec_to_jiffies(const struct timespec *ts)
-{
-	long long to_ticks;
-
-	to_ticks = (long long)hz * ts->tv_sec + ts->tv_nsec / (tick * 1000);
-	if (to_ticks > INT_MAX)
-		to_ticks = INT_MAX;
-
-	return ((int)to_ticks);
-}
-
-static struct timespec
-ns_to_timespec(const int64_t nsec)
-{
-	struct timespec ts;
-	int32_t rem;
-
-	if (nsec == 0) {
-		ts.tv_sec = 0;
-		ts.tv_nsec = 0;
-		return (ts);
-	}
-
-	ts.tv_sec = nsec / NSEC_PER_SEC;
-	rem = nsec % NSEC_PER_SEC;
-	if (rem < 0) {
-		ts.tv_sec--;
-		rem += NSEC_PER_SEC;
-	}
-	ts.tv_nsec = rem;
-	return (ts);
-}
-
-static inline int
-timespec_valid(const struct timespec *ts)
-{
-	if (ts->tv_sec < 0 || ts->tv_sec > 100000000 ||
-	    ts->tv_nsec < 0 || ts->tv_nsec >= 1000000000)
-		return (0);
-	return (1);
-}

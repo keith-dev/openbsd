@@ -1,4 +1,4 @@
-/* $OpenBSD: bioctl.c,v 1.123 2015/01/16 06:39:56 deraadt Exp $       */
+/* $OpenBSD: bioctl.c,v 1.129 2015/07/18 23:23:20 halex Exp $       */
 
 /*
  * Copyright (c) 2004, 2005 Marco Peereboom
@@ -53,8 +53,14 @@ struct locator {
 	int		lun;
 };
 
+struct timing {
+	int		interval;
+	int		start;
+};
+
 void			usage(void);
 const char 		*str2locator(const char *, struct locator *);
+const char 		*str2patrol(const char *, struct timing *);
 void			bio_status(struct bio_status *);
 int			bio_parse_devlist(char *, dev_t *);
 void			bio_kdf_derive(struct sr_crypto_kdfinfo *,
@@ -75,6 +81,7 @@ void			bio_changepass(char *);
 u_int32_t		bio_createflags(char *);
 char			*bio_vis(char *);
 void			bio_diskinq(char *);
+void			bio_patrol(char *);
 
 int			devh = -1;
 int			human;
@@ -106,7 +113,7 @@ main(int argc, char *argv[])
 	if (argc < 2)
 		usage();
 
-	while ((ch = getopt(argc, argv, "a:b:C:c:dH:hik:l:O:Pp:qr:R:svu:")) !=
+	while ((ch = getopt(argc, argv, "a:b:C:c:dH:hik:l:O:Pp:qr:R:st:u:v")) !=
 	    -1) {
 		switch (ch) {
 		case 'a': /* alarm */
@@ -185,6 +192,10 @@ main(int argc, char *argv[])
 		case 's':
 			rpp_flag = RPP_STDIN;
 			break;
+		case 't': /* patrol */
+			func |= BIOC_PATROL;
+			al_arg = optarg;
+			break;
 		case 'v':
 			verbose = 1;
 			break;
@@ -237,6 +248,8 @@ main(int argc, char *argv[])
 		bio_alarm(al_arg);
 	} else if (func == BIOC_BLINK) {
 		bio_setblink(devicename, bl_arg, blink);
+	} else if (func == BIOC_PATROL) {
+		bio_patrol(al_arg);
 	} else if (func == BIOC_SETSTATE) {
 		bio_setstate(al_arg, ss_func, argv[0]);
 	} else if (func == BIOC_DELETERAID && !biodev) {
@@ -264,7 +277,8 @@ usage(void)
 		"[-b channel:target[.lun]]\n"
 		"\t[-H channel:target[.lun]] "
 		"[-R device | channel:target[.lun]]\n"
-		"\t[-u channel:target[.lun]] "
+		"\t[-t patrol-function] "
+		"[-u channel:target[.lun]] "
 		"device\n"
 		"       %s [-dhiPqsv] "
 		"[-C flag[,flag,...]] [-c raidlevel] [-k keydisk]\n"
@@ -307,6 +321,39 @@ str2locator(const char *string, struct locator *location)
 	return (NULL);
 }
 
+const char *
+str2patrol(const char *string, struct timing *timing)
+{
+	const char		*errstr;
+	char			parse[80], *interval = NULL, *start = NULL;
+
+	timing->interval = 0;
+	timing->start = 0;
+
+	strlcpy(parse, string, sizeof parse);
+
+	interval = strchr(parse, '.');
+	if (interval != NULL) {
+		*interval++ = '\0';
+		start = strchr(interval, '.');
+		if (start != NULL)
+			*start++ = '\0';
+	}
+	if (interval != NULL) {
+		/* -1 == continuously */
+		timing->interval = strtonum(interval, -1, INT_MAX, &errstr);
+		if (errstr)
+			return (errstr);
+	}
+	if (start != NULL) {
+		timing->start = strtonum(start, 0, INT_MAX, &errstr);
+		if (errstr)
+			return (errstr);
+	}
+
+	return (NULL);
+}
+
 void
 bio_status(struct bio_status *bs)
 {
@@ -335,7 +382,7 @@ bio_inq(char *name)
 {
 	char 			*status, *cache;
 	char			size[64], scsiname[16], volname[32];
-	char			percent[10], seconds[20];
+	char			percent[20], seconds[20];
 	int			i, d, volheader, hotspare, unused;
 	char			encname[16], serial[32];
 	struct bioc_inq		bi;
@@ -461,6 +508,8 @@ bio_inq(char *name)
 			bd.bd_bio.bio_cookie = bio_cookie;
 			bd.bd_diskid = d;
 			bd.bd_volid = i;
+			bd.bd_patrol.bdp_percent = -1;
+			bd.bd_patrol.bdp_seconds = 0;
 
 			if (ioctl(devh, BIOCDISK, &bd))
 				err(1, "BIOCDISK");
@@ -519,12 +568,21 @@ bio_inq(char *name)
 			else
 				strlcpy(serial, "unknown serial", sizeof serial);
 
+			percent[0] = '\0';
+			seconds[0] = '\0';
+			if (bd.bd_patrol.bdp_percent != -1)
+				snprintf(percent, sizeof percent,
+				    " patrol %d%% done", bd.bd_patrol.bdp_percent);
+			if (bd.bd_patrol.bdp_seconds)
+				snprintf(seconds, sizeof seconds,
+				    " %u seconds", bd.bd_patrol.bdp_seconds);
+
 			printf("%11s %-10s %14s %-7s %-6s <%s>\n",
 			    volname, status, size, scsiname, encname,
 			    bd.bd_vendor);
 			if (verbose)
-				printf("%11s %-10s %14s %-7s %-6s '%s'\n",
-				    "", "", "", "", "", serial);
+				printf("%11s %-10s %14s %-7s %-6s '%s'%s%s\n",
+				    "", "", "", "", "", serial, percent, seconds);
 		}
 	}
 }
@@ -785,11 +843,9 @@ bio_createraid(u_int16_t level, char *dev_list, char *key_disk)
 	case 1:
 		min_disks = 2;
 		break;
-#ifdef RAID5
 	case 5:
 		min_disks = 3;
 		break;
-#endif /* RAID5 */
 	case 'C':
 		min_disks = 1;
 		break;
@@ -871,7 +927,7 @@ bio_createraid(u_int16_t level, char *dev_list, char *key_disk)
 	}
 
 	rv = ioctl(devh, BIOCCREATERAID, &create);
-	memset(&kdfinfo, 0, sizeof(kdfinfo));
+	explicit_bzero(&kdfinfo, sizeof(kdfinfo));
 	if (rv == -1)
 		err(1, "BIOCCREATERAID");
 
@@ -1066,8 +1122,8 @@ bio_changepass(char *dev)
 	rv = ioctl(devh, BIOCDISCIPLINE, &bd);
 
 	memset(&kdfhint, 0, sizeof(kdfhint));
-	memset(&kdfinfo1, 0, sizeof(kdfinfo1));
-	memset(&kdfinfo2, 0, sizeof(kdfinfo2));
+	explicit_bzero(&kdfinfo1, sizeof(kdfinfo1));
+	explicit_bzero(&kdfinfo2, sizeof(kdfinfo2));
 
 	if (rv)
 		err(1, "BIOCDISCIPLINE");
@@ -1106,6 +1162,104 @@ bio_diskinq(char *sd_dev)
 }
 
 void
+bio_patrol(char *arg)
+{
+	struct bioc_patrol	bp;
+	struct timing		timing;
+	const char		*errstr;
+
+	memset(&bp, 0, sizeof(bp));
+	bp.bp_bio.bio_cookie = bio_cookie;
+
+	switch (arg[0]) {
+	case 'a':
+		bp.bp_opcode = BIOC_SPAUTO;
+		break;
+
+	case 'm':
+		bp.bp_opcode = BIOC_SPMANUAL;
+		break;
+
+	case 'd':
+		bp.bp_opcode = BIOC_SPDISABLE;
+		break;
+
+	case 'g': /* get patrol state */
+		bp.bp_opcode = BIOC_GPSTATUS;
+		break;
+
+	case 's': /* start/stop patrol */
+		if (strncmp("sta", arg, 3) == 0)
+			bp.bp_opcode = BIOC_SPSTART;
+		else
+			bp.bp_opcode = BIOC_SPSTOP;
+		break;
+
+	default:
+		errx(1, "invalid patrol function: %s", arg);
+	}
+
+	switch (arg[0]) {
+	case 'a':
+		errstr = str2patrol(arg, &timing);
+		if (errstr)
+			errx(1, "Patrol %s: %s", arg, errstr);
+		bp.bp_autoival = timing.interval;
+		bp.bp_autonext = timing.start;
+		break;
+	}
+
+	if (ioctl(devh, BIOCPATROL, &bp))
+		err(1, "BIOCPATROL");
+
+	bio_status(&bp.bp_bio.bio_status);
+
+	if (arg[0] == 'g') {
+		const char *mode, *status;
+		char interval[40];
+
+		interval[0] = '\0';
+
+		switch (bp.bp_mode) {
+		case BIOC_SPMAUTO:
+			mode = "auto";
+			snprintf(interval, sizeof interval,
+			    " interval=%d next=%d", bp.bp_autoival,
+			    bp.bp_autonext - bp.bp_autonow);
+			break;
+		case BIOC_SPMMANUAL:
+			mode = "manual";
+			break;
+		case BIOC_SPMDISABLED:
+			mode = "disabled";
+			break;
+		default:
+			status = "unknown";
+			break;
+		}
+		switch (bp.bp_status) {
+		case BIOC_SPSSTOPPED:
+			status = "stopped";
+			break;
+		case BIOC_SPSREADY:
+			status = "ready";
+			break;
+		case BIOC_SPSACTIVE:
+			status = "active";
+			break;
+		case BIOC_SPSABORTED:
+			status = "aborted";
+			break;
+		default:
+			status = "unknown";
+			break;
+		}
+		printf("patrol mode: %s%s\n", mode, interval);
+		printf("patrol status: %s\n", status);
+	}
+}
+
+void
 derive_key_pkcs(int rounds, u_int8_t *key, size_t keysz, u_int8_t *salt,
     size_t saltsz, char *prompt, int verify)
 {
@@ -1122,9 +1276,6 @@ derive_key_pkcs(int rounds, u_int8_t *key, size_t keysz, u_int8_t *salt,
 		errx(1, "Too few rounds: %d", rounds);
 
 	/* get passphrase */
-	if (password && verify)
-		errx(1, "can't specify passphrase file during initial "
-		    "creation of crypto volume");
 	if (password) {
 		if ((f = fopen(password, "r")) == NULL)
 			err(1, "invalid passphrase file");
@@ -1151,21 +1302,21 @@ derive_key_pkcs(int rounds, u_int8_t *key, size_t keysz, u_int8_t *salt,
 			errx(1, "unable to read passphrase");
 	}
 
-	if (verify) {
+	if (verify && !password) {
 		/* request user to re-type it */
 		if (readpassphrase("Re-type passphrase: ", verifybuf,
 		    sizeof(verifybuf), rpp_flag) == NULL) {
-			memset(passphrase, 0, sizeof(passphrase));
+			explicit_bzero(passphrase, sizeof(passphrase));
 			errx(1, "unable to read passphrase");
 		}
 		if ((strlen(passphrase) != strlen(verifybuf)) ||
 		    (strcmp(passphrase, verifybuf) != 0)) {
-			memset(passphrase, 0, sizeof(passphrase));
-			memset(verifybuf, 0, sizeof(verifybuf));
+			explicit_bzero(passphrase, sizeof(passphrase));
+			explicit_bzero(verifybuf, sizeof(verifybuf));
 			errx(1, "Passphrases did not match");
 		}
 		/* forget the re-typed one */
-		memset(verifybuf, 0, strlen(verifybuf));
+		explicit_bzero(verifybuf, sizeof(verifybuf));
 	}
 
 	/* derive key from passphrase */
@@ -1174,7 +1325,7 @@ derive_key_pkcs(int rounds, u_int8_t *key, size_t keysz, u_int8_t *salt,
 		errx(1, "pbkdf2 failed");
 
 	/* forget passphrase */
-	memset(passphrase, 0, sizeof(passphrase));
+	explicit_bzero(passphrase, sizeof(passphrase));
 
 	return;
 }

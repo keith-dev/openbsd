@@ -1,4 +1,4 @@
-/*	$OpenBSD: vnode.h,v 1.129 2015/01/09 05:01:57 tedu Exp $	*/
+/*	$OpenBSD: vnode.h,v 1.132 2015/05/07 08:53:33 mpi Exp $	*/
 /*	$NetBSD: vnode.h,v 1.38 1996/02/29 20:59:05 cgd Exp $	*/
 
 /*
@@ -150,7 +150,9 @@ struct vnode {
 
 /*
  * Vnode attributes.  A field value of VNOVAL represents a field whose value
- * is unavailable (getattr) or which is not to be changed (setattr).
+ * is unavailable (getattr) or which is not to be changed (setattr).  For
+ * the timespec fields, only the tv_nsec member needs to be set to VNOVAL:
+ * if tv_nsec != VNOVAL then both tv_sec and tv_nsec are valid.
  */
 struct vattr {
 	enum vtype	va_type;	/* vnode type (for create) */
@@ -177,8 +179,9 @@ struct vattr {
 /*
  * Flags for va_vaflags.
  */
-#define	VA_UTIMES_NULL	0x01		/* utimes argument was NULL */
-#define VA_EXCLUSIVE    0x02		/* exclusive create request */
+#define	VA_UTIMES_NULL		0x01	/* utimes argument was NULL */
+#define	VA_EXCLUSIVE		0x02	/* exclusive create request */
+#define	VA_UTIMES_CHANGE	0x04	/* ctime should be updated */
 /*
  * Flags for ioflag.
  */
@@ -396,10 +399,11 @@ int VOP_IOCTL(struct vnode *, u_long, void *, int, struct ucred *,
 
 struct vop_poll_args {
 	struct vnode *a_vp;
+	int a_fflag;
 	int a_events;
 	struct proc *a_p;
 };
-int VOP_POLL(struct vnode *, int, struct proc *);
+int VOP_POLL(struct vnode *, int, int, struct proc *);
 
 struct vop_kqfilter_args {
 	struct vnode *a_vp;
@@ -650,7 +654,7 @@ void	vn_syncer_add_to_worklist(struct vnode *, int);
 /* misc */
 int	vn_isdisk(struct vnode *, int *);
 int	softdep_fsync(struct vnode *);
-int 	getvnode(struct filedesc *, int, struct file **);
+int 	getvnode(struct proc *, int, struct file **);
 
 /* uvm */
 void	uvm_vnp_setsize(struct vnode *, off_t);

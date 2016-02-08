@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_pppx.c,v 1.36 2015/02/10 21:56:10 miod Exp $ */
+/*	$OpenBSD: if_pppx.c,v 1.42 2015/07/18 15:51:16 mpi Exp $ */
 
 /*
  * Copyright (c) 2010 Claudio Jeker <claudio@openbsd.org>
@@ -63,7 +63,6 @@
 
 #include <net/if.h>
 #include <net/if_types.h>
-#include <net/radix.h>
 #include <net/netisr.h>
 #include <netinet/in.h>
 #include <netinet/if_ether.h>
@@ -89,6 +88,7 @@
 #include <crypto/arc4.h>
 
 #ifdef PIPEX
+#include <net/radix.h>
 #include <net/pipex.h>
 #include <net/pipex_local.h>
 #else
@@ -301,12 +301,11 @@ pppxread(dev_t dev, struct uio *uio, int ioflag)
 		len = min(uio->uio_resid, m0->m_len);
 		if (len != 0)
 			error = uiomovei(mtod(m0, caddr_t), len, uio);
-		MFREE(m0, m);
+		m = m_free(m0);
 		m0 = m;
 	}
 
-	if (m0 != NULL)
-		m_freem(m0);
+	m_freem(m0);
 
 	return (error);
 }
@@ -317,9 +316,9 @@ pppxwrite(dev_t dev, struct uio *uio, int ioflag)
 /*	struct pppx_dev *pxd = pppx_dev2pxd(dev);	*/
 	struct pppx_hdr *th;
 	struct mbuf *top, **mp, *m;
-	struct ifqueue *ifq;
+	struct niqueue *ifq;
 	int tlen, mlen;
-	int isr, s, error = 0;
+	int error = 0;
 
 	if (uio->uio_resid < sizeof(*th) || uio->uio_resid > MCLBYTES)
 		return (EMSGSIZE);
@@ -367,8 +366,7 @@ pppxwrite(dev_t dev, struct uio *uio, int ioflag)
 	}
 
 	if (error) {
-		if (top != NULL)
-			m_freem(top);
+		m_freem(top);
 		return (error);
 	}
 
@@ -381,12 +379,10 @@ pppxwrite(dev_t dev, struct uio *uio, int ioflag)
 	switch (ntohl(th->pppx_proto)) {
 	case AF_INET:
 		ifq = &ipintrq;
-		isr = NETISR_IP;
 		break;
 #ifdef INET6
 	case AF_INET6:
 		ifq = &ip6intrq;
-		isr = NETISR_IPV6;
 		break;
 #endif
 	default:
@@ -394,16 +390,8 @@ pppxwrite(dev_t dev, struct uio *uio, int ioflag)
 		return (EAFNOSUPPORT);
 	}
 
-	s = splnet();
-	if (IF_QFULL(ifq)) {
-		IF_DROP(ifq);
-		splx(s);
-		m_freem(top);
+	if (niq_enqueue(ifq, m) != 0)
 		return (ENOBUFS);
-	}
-	IF_ENQUEUE(ifq, top);
-	schednetisr(isr);
-	splx(s);
 
 	return (error);
 }
@@ -1044,7 +1032,7 @@ pppx_if_output(struct ifnet *ifp, struct mbuf *m, struct sockaddr *dst,
     struct rtentry *rt)
 {
 	int error = 0;
-	int proto, s;
+	int proto;
 
 	if (!ISSET(ifp->if_flags, IFF_UP)) {
 		m_freem(m);
@@ -1069,15 +1057,7 @@ pppx_if_output(struct ifnet *ifp, struct mbuf *m, struct sockaddr *dst,
 	}
 	*mtod(m, int *) = proto;
 
-	s = splnet();
-	IFQ_ENQUEUE(&ifp->if_snd, m, NULL, error);
-	if (error) {
-		splx(s);
-		goto out;
-	}
-	if_start(ifp);
-	splx(s);
-
+	error = if_enqueue(ifp, m);
 out:
 	if (error)
 		ifp->if_oerrors++;

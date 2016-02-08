@@ -1,4 +1,4 @@
-/*	$OpenBSD: vfs_subr.c,v 1.229 2015/03/02 20:46:50 guenther Exp $	*/
+/*	$OpenBSD: vfs_subr.c,v 1.232 2015/07/16 18:17:27 claudio Exp $	*/
 /*	$NetBSD: vfs_subr.c,v 1.53 1996/04/22 01:39:13 christos Exp $	*/
 
 /*
@@ -1470,8 +1470,6 @@ vfs_export_lookup(struct mount *mp, struct netexport *nep, struct mbuf *nam)
 				np = (struct netcred *)
 					(*rnh->rnh_matchaddr)((caddr_t)saddr,
 					    rnh);
-				if (np && np->netc_rnodes->rn_flags & RNF_ROOT)
-					np = NULL;
 			}
 		}
 		/*
@@ -1614,6 +1612,9 @@ vfs_syncwait(int verbose)
 	struct buf *bp;
 	int iter, nbusy, dcount, s;
 	struct proc *p;
+#ifdef MULTIPROCESSOR
+	int hold_count;
+#endif
 
 	p = curproc? curproc : &proc0;
 	sys_sync(p, (void *)0, (register_t *)0);
@@ -1648,7 +1649,17 @@ vfs_syncwait(int verbose)
 			break;
 		if (verbose)
 			printf("%d ", nbusy);
+#ifdef MULTIPROCESSOR
+		if (__mp_lock_held(&kernel_lock))
+			hold_count = __mp_release_all(&kernel_lock);
+		else
+			hold_count = 0;
+#endif
 		DELAY(40000 * iter);
+#ifdef MULTIPROCESSOR
+		if (hold_count)
+			__mp_acquire_count(&kernel_lock, hold_count);
+#endif
 	}
 
 	return nbusy;
@@ -2087,7 +2098,6 @@ vn_isdisk(struct vnode *vp, int *errp)
 #ifdef DDB
 #include <machine/db_machdep.h>
 #include <ddb/db_interface.h>
-#include <ddb/db_output.h>
 
 void
 vfs_buf_print(void *b, int full,

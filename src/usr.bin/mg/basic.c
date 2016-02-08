@@ -1,4 +1,4 @@
-/*	$OpenBSD: basic.c,v 1.43 2014/11/16 04:16:41 guenther Exp $	*/
+/*	$OpenBSD: basic.c,v 1.45 2015/03/24 22:34:39 florian Exp $	*/
 
 /* This file is in the public domain */
 
@@ -11,10 +11,15 @@
  * mark. Only moves between lines, which might make the
  * current buffer framing bad, are hard.
  */
-#include "def.h"
 
+#include <sys/queue.h>
 #include <ctype.h>
 #include <limits.h>
+#include <signal.h>
+#include <stdio.h>
+#include <stdlib.h>
+
+#include "def.h"
 
 /*
  * Go to beginning of line.
@@ -373,10 +378,11 @@ backpage(int f, int n)
 	/* Move the dot the slow way, for line nos */
 	while (curwp->w_dotp != lp2) {
                 if (curwp->w_dotline <= curwp->w_ntrows)
-                        return (TRUE);
+			goto out;
 		curwp->w_dotp = lback(curwp->w_dotp);
 		curwp->w_dotline--;
 	}
+out:
 	curwp->w_doto = 0;
 	return (TRUE);
 }

@@ -1,4 +1,4 @@
-/*	$OpenBSD: subr_log.c,v 1.28 2015/02/10 21:56:09 miod Exp $	*/
+/*	$OpenBSD: subr_log.c,v 1.30 2015/05/06 08:52:17 mpi Exp $	*/
 /*	$NetBSD: subr_log.c,v 1.11 1996/03/30 22:24:44 christos Exp $	*/
 
 /*
@@ -45,7 +45,6 @@
 #include <sys/file.h>
 #include <sys/signalvar.h>
 #include <sys/syslog.h>
-#include <sys/conf.h>
 #include <sys/poll.h>
 #include <sys/malloc.h>
 #include <sys/filedesc.h>
@@ -335,7 +334,7 @@ logioctl(dev_t dev, u_long com, caddr_t data, int flag, struct proc *p)
 	case LIOCSFD:
 		if ((error = suser(p, 0)) != 0)
 			return (error);
-		if ((error = getsock(p->p_fd, *(int *)data, &fp)) != 0)
+		if ((error = getsock(p, *(int *)data, &fp)) != 0)
 			return (error);
 		if (syslogf)
 			FRELE(syslogf, p);

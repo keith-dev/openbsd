@@ -1,4 +1,4 @@
-/*	$OpenBSD: rtl81x9.c,v 1.87 2015/01/08 00:49:18 brad Exp $ */
+/*	$OpenBSD: rtl81x9.c,v 1.91 2015/06/24 09:40:54 mpi Exp $ */
 
 /*
  * Copyright (c) 1997, 1998
@@ -96,7 +96,6 @@
 #include <sys/timeout.h>
 
 #include <net/if.h>
-#include <net/if_dl.h>
 #include <net/if_types.h>
 
 #include <netinet/in.h>
@@ -559,6 +558,7 @@ rl_rxeof(struct rl_softc *sc)
 {
 	struct ifnet	*ifp = &sc->sc_arpcom.ac_if;
 	struct mbuf	*m;
+	struct mbuf_list ml = MBUF_LIST_INITIALIZER();
 	int		total_len;
 	u_int32_t	rxstat;
 	caddr_t		rxbufpos;
@@ -643,7 +643,7 @@ rl_rxeof(struct rl_softc *sc)
 		wrap = (sc->rl_cdata.rl_rx_buf + RL_RXBUFLEN) - rxbufpos;
 
 		if (total_len > wrap) {
-			m = m_devget(rxbufpos, wrap, ETHER_ALIGN, ifp);
+			m = m_devget(rxbufpos, wrap, ETHER_ALIGN);
 			if (m != NULL) {
 				m_copyback(m, wrap, total_len - wrap,
 				    sc->rl_cdata.rl_rx_buf, M_NOWAIT);
@@ -654,7 +654,7 @@ rl_rxeof(struct rl_softc *sc)
 			}
 			cur_rx = (total_len - wrap + ETHER_CRC_LEN);
 		} else {
-			m = m_devget(rxbufpos, total_len, ETHER_ALIGN, ifp);
+			m = m_devget(rxbufpos, total_len, ETHER_ALIGN);
 			cur_rx += total_len + 4 + ETHER_CRC_LEN;
 		}
 
@@ -672,20 +672,13 @@ rl_rxeof(struct rl_softc *sc)
 			continue;
 		}
 
-		ifp->if_ipackets++;
-
-#if NBPFILTER > 0
-		/*
-		 * Handle BPF listeners. Let the BPF user see the packet.
-		 */
-		if (ifp->if_bpf)
-			bpf_mtap(ifp->if_bpf, m, BPF_DIRECTION_IN);
-#endif
-		ether_input_mbuf(ifp, m);
+		ml_enqueue(&ml, m);
 
 		bus_dmamap_sync(sc->sc_dmat, sc->sc_rx_dmamap,
 		    0, sc->sc_rx_dmamap->dm_mapsize, BUS_DMASYNC_PREREAD);
 	}
+
+	if_input(ifp, &ml);
 }
 
 /*

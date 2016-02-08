@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_loop.c,v 1.63 2015/01/27 10:20:31 mpi Exp $	*/
+/*	$OpenBSD: if_loop.c,v 1.70 2015/07/29 00:04:03 rzalamena Exp $	*/
 /*	$NetBSD: if_loop.c,v 1.15 1996/05/07 02:40:33 thorpej Exp $	*/
 
 /*
@@ -124,7 +124,6 @@
 #include <net/route.h>
 
 #include <netinet/in.h>
-#include <netinet/ip.h>
 
 #ifdef INET6
 #include <netinet/ip6.h>
@@ -204,8 +203,7 @@ int
 looutput(struct ifnet *ifp, struct mbuf *m, struct sockaddr *dst,
     struct rtentry *rt)
 {
-	int s, isr;
-	struct ifqueue *ifq = 0;
+	struct niqueue *ifq = NULL;
 
 	if ((m->m_flags & M_PKTHDR) == 0)
 		panic("looutput: no header mbuf");
@@ -218,7 +216,7 @@ looutput(struct ifnet *ifp, struct mbuf *m, struct sockaddr *dst,
 	if (ifp->if_bpf && (ifp->if_flags & IFF_LOOPBACK))
 		bpf_mtap_af(ifp->if_bpf, dst->sa_family, m, BPF_DIRECTION_OUT);
 #endif
-	m->m_pkthdr.rcvif = ifp;
+	m->m_pkthdr.ph_ifidx = ifp->if_index;
 
 	if (rt && rt->rt_flags & (RTF_REJECT|RTF_BLACKHOLE)) {
 		m_freem(m);
@@ -232,19 +230,18 @@ looutput(struct ifnet *ifp, struct mbuf *m, struct sockaddr *dst,
 
 	case AF_INET:
 		ifq = &ipintrq;
-		isr = NETISR_IP;
 		break;
 #ifdef INET6
 	case AF_INET6:
 		ifq = &ip6intrq;
-		isr = NETISR_IPV6;
 		break;
 #endif /* INET6 */
 #ifdef MPLS
 	case AF_MPLS:
-		ifq = &mplsintrq;
-		isr = NETISR_MPLS;
-		break;
+		ifp->if_ipackets++;
+		ifp->if_ibytes += m->m_pkthdr.len;
+		mpls_input(ifp, m);
+		return (0);
 #endif /* MPLS */
 	default:
 		printf("%s: can't handle af%d\n", ifp->if_xname,
@@ -252,18 +249,13 @@ looutput(struct ifnet *ifp, struct mbuf *m, struct sockaddr *dst,
 		m_freem(m);
 		return (EAFNOSUPPORT);
 	}
-	s = splnet();
-	if (IF_QFULL(ifq)) {
-		IF_DROP(ifq);
-		m_freem(m);
-		splx(s);
+
+	if (niq_enqueue(ifq, m) != 0)
 		return (ENOBUFS);
-	}
-	IF_ENQUEUE(ifq, m);
-	schednetisr(isr);
+
 	ifp->if_ipackets++;
 	ifp->if_ibytes += m->m_pkthdr.len;
-	splx(s);
+
 	return (0);
 }
 

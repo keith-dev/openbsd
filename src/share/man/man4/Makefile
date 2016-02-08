@@ -1,4 +1,4 @@
-#	$OpenBSD: Makefile,v 1.591 2015/02/06 20:19:26 stsp Exp $
+#	$OpenBSD: Makefile,v 1.597 2015/07/21 05:25:24 rzalamena Exp $
 
 MAN=	aac.4 ac97.4 acphy.4 \
 	acpi.4 acpiac.4 acpiasus.4 acpibat.4 acpibtn.4 acpicpu.4 acpidock.4 \
@@ -29,13 +29,13 @@ MAN=	aac.4 ac97.4 acphy.4 \
 	ichiic.4 ichwdt.4 icmp.4 icmp6.4 icsphy.4 ifmedia.4 \
 	iha.4 iic.4 inet.4 inet6.4 inphy.4 iophy.4 \
 	ip.4 ip6.4 ipcomp.4 ipgphy.4 ipmi.4 ips.4 ipsec.4 ipw.4 \
-	isa.4 isagpio.4 isapnp.4 isp.4 it.4 itherm.4 iwi.4 iwn.4 iwm.4 \
+	isa.4 isagpio.4 isapnp.4 it.4 itherm.4 iwi.4 iwn.4 iwm.4 \
 	ix.4 ixgb.4 jmb.4 jme.4 jmphy.4 \
 	kate.4 km.4 ksyms.4 kue.4 lc.4 lge.4 lii.4 lisa.4 lm.4 \
-	lmc.4 lmenv.4 lmn.4 lmtemp.4 lo.4 lpt.4 lxtphy.4 luphy.4 \
+	lmenv.4 lmn.4 lmtemp.4 lo.4 lpt.4 lxtphy.4 luphy.4 \
 	maestro.4 mainbus.4 malo.4 maxds.4 maxtmp.4 mbg.4 midi.4 mii.4 mfi.4 \
 	mfii.4 mlphy.4 moscom.4 mos.4 mpe.4 mpath.4 mpi.4 mpii.4 mpu.4 msk.4 \
-	msts.4 mtd.4 mtdphy.4 multicast.4 mtio.4 myx.4 \
+	mpw.4 msts.4 mtd.4 mtdphy.4 multicast.4 mtio.4 myx.4 \
 	ne.4 neo.4 nep.4 netintro.4 nfe.4 nge.4 nmea.4 \
 	nsclpcsio.4 nsgphy.4 nsphy.4 nsphyter.4 null.4 nviic.4 nvt.4 \
 	oce.4 ohci.4 options.4 onewire.4 oosiop.4 osiop.4 otus.4 \
@@ -43,11 +43,11 @@ MAN=	aac.4 ac97.4 acphy.4 \
 	owtemp.4 pcagpio.4 pcaled.4 pcdisplay.4 pchb.4 pci.4 pcib.4 pcfadc.4 \
 	pcfiic.4 pciide.4 pckbc.4 pckbd.4 pcmcia.4 pcn.4 pcppi.4 pcscp.4 \
 	pf.4 pflog.4 pflow.4 pfsync.4 pgt.4 piixpm.4 pim.4 pipex.4 \
-	pms.4 ppb.4 ppp.4 pppoe.4 pppx.4 pty.4 puc.4 pwdog.4 \
+	pms.4 ppb.4 ppp.4 pppoe.4 pppx.4 pty.4 puc.4 pvbus.4 pwdog.4 \
 	qla.4 qle.4 qlw.4 qsphy.4 radio.4 \
 	ral.4 random.4 rdomain.4 rd.4 rdac.4 re.4 rdcphy.4 rgephy.4 ricohrtc.4 \
 	rl.4 rlphy.4 route.4 rsu.4 rt.4 rtsx.4 rum.4 run.4 \
-	rtfps.4 rtii.4 rtw.4 safe.4 safte.4 san.4 sbus.4 schsio.4 \
+	rtfps.4 rtii.4 rtw.4 rtwn.4 safe.4 safte.4 sbus.4 schsio.4 \
 	scsi.4 sd.4 \
 	sdmmc.4 sdhc.4 se.4 ses.4 \
 	sf.4 sf2r.4 sfr.4 sili.4 siop.4 sis.4 sk.4 sli.4 \
@@ -55,7 +55,8 @@ MAN=	aac.4 ac97.4 acphy.4 \
 	st.4 ste.4 stge.4 sti.4 \
 	stp.4 sv.4 sym.4 systrace.4 tcic.4 tcp.4 termios.4 tht.4 ti.4 tl.4 \
 	tlphy.4 thmc.4 tqphy.4 trm.4 trunk.4 tsl.4 tty.4 tun.4 twe.4 txp.4 \
-	txphy.4 uaudio.4 uark.4 uath.4 ubcmtp.4 uberry.4 ubsa.4 ubsec.4 \
+	txphy.4 ualea.4 uaudio.4 uark.4 uath.4 ubcmtp.4 uberry.4 ubsa.4 \
+	ubsec.4 \
 	ucom.4 uchcom.4 ucycom.4 uslhcom.4 udav.4 udcf.4 udl.4 udp.4 udsbr.4 \
 	uftdi.4 ugen.4 ugl.4 ugold.4 uguru.4 uhci.4 uhid.4 uhidev.4 uipaq.4 \
 	uk.4 ukbd.4 \

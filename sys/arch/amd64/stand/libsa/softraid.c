@@ -1,4 +1,4 @@
-/*	$OpenBSD: softraid.c,v 1.8 2014/07/12 20:58:31 tedu Exp $	*/
+/*	$OpenBSD: softraid.c,v 1.11 2015/07/21 03:30:51 krw Exp $	*/
 
 /*
  * Copyright (c) 2012 Joel Sing <jsing@openbsd.org>
@@ -62,7 +62,7 @@ srprobe_meta_opt_load(struct sr_metadata *sm, struct sr_meta_opt_head *som)
 	for (i = 0; i < sm->ssdi.ssd_opt_no; i++) {
 
 #ifdef BIOS_DEBUG
-		printf("Found optional metadata of type %u, length %u\n", 
+		printf("Found optional metadata of type %u, length %u\n",
 		    omh->som_type, omh->som_length);
 #endif
 
@@ -150,7 +150,7 @@ srprobe(void)
 	SLIST_INIT(&sr_volumes);
 	SLIST_INIT(&sr_keydisks);
 
-	md = alloc(SR_META_SIZE * 512);
+	md = alloc(SR_META_SIZE * DEV_BSIZE);
 
 	TAILQ_FOREACH(dip, &disklist, list) {
 
@@ -170,13 +170,14 @@ srprobe(void)
 				continue;
 
 			/* Read softraid metadata. */
-			bzero(md, SR_META_SIZE * 512);
-			off = DL_GETPOFFSET(pp) + SR_META_OFFSET;
+			bzero(md, SR_META_SIZE * DEV_BSIZE);
+			off = DL_SECTOBLK(&dip->disklabel, DL_GETPOFFSET(pp));
+			off += SR_META_OFFSET;
 			error = biosd_io(F_READ, &dip->bios_info, off,
 			    SR_META_SIZE, md);
 			if (error)
 				continue;
-		
+
 			/* Is this valid softraid metadata? */
 			if (md->ssdi.ssd_magic != SR_MAGIC)
 				continue;
@@ -221,7 +222,7 @@ srprobe(void)
 				bv->sbv_chunk_no = md->ssdi.ssd_chunk_no;
 				bv->sbv_flags = md->ssdi.ssd_vol_flags;
 				bv->sbv_size = md->ssdi.ssd_size;
-				bv->sbv_data_offset = md->ssd_data_offset;
+				bv->sbv_data_blkno = md->ssd_data_blkno;
 				bcopy(&md->ssdi.ssd_uuid, &bv->sbv_uuid,
 				    sizeof(md->ssdi.ssd_uuid));
 				SLIST_INIT(&bv->sbv_chunks);
@@ -314,7 +315,7 @@ srprobe(void)
 			    bv->sbv_flags & BIOC_SCBOOTABLE ? "*" : "");
 	}
 
-	explicit_bzero(md, SR_META_SIZE * 512);
+	explicit_bzero(md, SR_META_SIZE * DEV_BSIZE);
 	free(md, 0);
 }
 
@@ -352,7 +353,7 @@ sr_strategy(struct sr_boot_volume *bv, int rw, daddr32_t blk, size_t size,
 
 		dip = (struct diskinfo *)bc->sbc_diskinfo;
 		dip->bsddev = bc->sbc_mm;
-		blk += bv->sbv_data_offset;
+		blk += bv->sbv_data_blkno;
 
 		/* XXX - If I/O failed we should try another chunk... */
 		return biosstrategy(dip, rw, blk, size, buf, rsize);
@@ -376,7 +377,7 @@ sr_strategy(struct sr_boot_volume *bv, int rw, daddr32_t blk, size_t size,
 		for (i = 0; i < nsect; i++) {
 			blkno = blk + i;
 			bp = ((u_char *)buf) + i * DEV_BSIZE;
-			err = biosstrategy(dip, rw, bv->sbv_data_offset + blkno,
+			err = biosstrategy(dip, rw, bv->sbv_data_blkno + blkno,
 			    DEV_BSIZE, bp, NULL);
 			if (err != 0)
 				return err;

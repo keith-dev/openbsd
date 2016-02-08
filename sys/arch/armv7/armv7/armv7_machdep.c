@@ -1,4 +1,4 @@
-/*	$OpenBSD: armv7_machdep.c,v 1.18 2015/01/18 10:17:42 jsg Exp $ */
+/*	$OpenBSD: armv7_machdep.c,v 1.24 2015/05/19 03:30:54 jsg Exp $ */
 /*	$NetBSD: lubbock_machdep.c,v 1.2 2003/07/15 00:25:06 lukem Exp $ */
 
 /*
@@ -138,15 +138,7 @@
 /* Kernel text starts 2MB in from the bottom of the kernel address space. */
 #define	KERNEL_TEXT_BASE	(KERNEL_BASE + 0x00000000)
 #define	KERNEL_VM_BASE		(KERNEL_BASE + 0x04000000)
-
-/*
- * The range 0xc1000000 - 0xccffffff is available for kernel VM space
- * Core-logic registers and I/O mappings occupy 0xfd000000 - 0xffffffff
- */
-/*
-#define KERNEL_VM_SIZE		0x0C000000
-*/
-#define KERNEL_VM_SIZE		0x10000000
+#define KERNEL_VM_SIZE		VM_KERNEL_SPACE_SIZE
 
 /*
  * Address to call from cpu_reset() to reset the machine.
@@ -217,6 +209,7 @@ int	bootstrap_bs_map(void *, bus_addr_t, bus_size_t, int,
 void	process_kernel_args(char *);
 void	parse_uboot_tags(void *);
 void	consinit(void);
+void	bootconfig_dram(BootConfig *, psize_t *, psize_t *);
 
 bs_protos(bs_notimpl);
 
@@ -391,8 +384,7 @@ copy_io_area_map(pd_entry_t *new_pd)
 u_int
 initarm(void *arg0, void *arg1, void *arg2)
 {
-	int loop;
-	int loop1;
+	int loop, loop1, i, physsegs;
 	u_int l1pagetable;
 	pv_addr_t kernel_l1pt;
 	paddr_t memstart;
@@ -412,8 +404,6 @@ initarm(void *arg0, void *arg1, void *arg2)
 	if (set_cpufuncs())
 		panic("cpu not recognized!");
 
-	platform_disable_l2_if_needed();
-
 	/*
 	 * Temporarily replace bus_space_map() functions so that
 	 * console devices can get mapped.
@@ -427,11 +417,14 @@ initarm(void *arg0, void *arg1, void *arg2)
 	armv7_a4x_bs_tag.bs_map = bootstrap_bs_map;
 	tmp_bs_tag.bs_map = bootstrap_bs_map;
 
+	platform_init();
+	platform_disable_l2_if_needed();
+
 	/* setup a serial console for very early boot */
 	consinit();
 
 	/* Talk to the user */
-	printf("\n%s booting ...\n", platform_boot_name);
+	printf("\n%s booting ...\n", platform_boot_name());
 
 	printf("arg0 %p arg1 %p arg2 %p\n", arg0, arg1, arg2);
 	parse_uboot_tags(arg2);
@@ -446,7 +439,7 @@ initarm(void *arg0, void *arg1, void *arg2)
 #endif /* RAMDISK_HOOKS */
 
 	/* normally u-boot will set up bootconfig.dramblocks */
-	platform_bootconfig_dram(&bootconfig, &memstart, &memsize);
+	bootconfig_dram(&bootconfig, &memstart, &memsize);
 
 	/*
 	 * Set up the variables that define the availablilty of
@@ -461,11 +454,13 @@ initarm(void *arg0, void *arg1, void *arg2)
 	 * XXX pmap_bootstrap() needs an enema.
 	 */
 	physical_start = bootconfig.dram[0].address;
-	physical_end = physical_start + (bootconfig.dram[0].pages * PAGE_SIZE);
+	physical_end = MIN((uint64_t)physical_start +
+	    (bootconfig.dram[0].pages * PAGE_SIZE), (paddr_t)-PAGE_SIZE);
 
 	{
 		physical_freestart = (((unsigned long)esym - KERNEL_TEXT_BASE +0xfff) & ~0xfff) + memstart;
-		physical_freeend = memstart+memsize;
+		physical_freeend = MIN((uint64_t)memstart+memsize,
+		    (paddr_t)-PAGE_SIZE);
 	}
 
 	physmem = (physical_end - physical_start) / PAGE_SIZE;
@@ -729,6 +724,17 @@ initarm(void *arg0, void *arg1, void *arg2)
 	uvm_page_physload(atop(physical_freestart), atop(physical_freeend),
 	    atop(physical_freestart), atop(physical_freeend), 0);
 
+	physsegs = MIN(bootconfig.dramblocks, VM_PHYSSEG_MAX);
+
+	for (i = 1; i < physsegs; i++) {
+		paddr_t dramstart = bootconfig.dram[i].address;
+		paddr_t dramend =  MIN((uint64_t)dramstart +
+		    bootconfig.dram[i].pages * PAGE_SIZE, (paddr_t)-PAGE_SIZE);
+		physmem += (dramend - dramstart) / PAGE_SIZE;
+		uvm_page_physload(atop(dramstart), atop(dramend),
+		    atop(dramstart), atop(dramend), 0);
+	}
+
 	/* Boot strap pmap telling it where the kernel page table is */
 #ifdef VERBOSE_INIT_ARM
 	printf("pmap ");
@@ -751,7 +757,7 @@ initarm(void *arg0, void *arg1, void *arg2)
 	if (boothowto & RB_KDB)
 		Debugger();
 #endif
-	platform_print_board_type();
+	printf("board type: %u\n", board_id);
 
 	/* We return the new stack pointer address */
 	return(kernelstack.pv_va + USPACE_SVC_STACK_TOP);
@@ -843,5 +849,23 @@ board_startup(void)
 #else
 		printf("kernel does not support -c; continuing..\n");
 #endif
+	}
+}
+
+void
+bootconfig_dram(BootConfig *bootconfig, psize_t *memstart, psize_t *memsize)
+{
+	int loop;
+
+	if (bootconfig->dramblocks == 0) 
+		panic("%s: dramblocks not set up!", __func__);
+
+	*memstart = bootconfig->dram[0].address;
+	*memsize = bootconfig->dram[0].pages * PAGE_SIZE;
+	printf("memory size derived from u-boot\n");
+	for (loop = 0; loop < bootconfig->dramblocks; loop++) {
+		printf("bootconf.mem[%d].address = %08x pages %d/0x%08x\n",
+		    loop, bootconfig->dram[loop].address, bootconfig->dram[loop].pages,
+			bootconfig->dram[loop].pages * PAGE_SIZE);
 	}
 }

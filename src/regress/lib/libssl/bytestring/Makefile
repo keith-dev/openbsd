@@ -1,14 +1,9 @@
-#	$OpenBSD: Makefile,v 1.1 2015/02/06 09:36:16 doug Exp $
+#	$OpenBSD: Makefile,v 1.3 2015/07/31 14:18:06 tobiasu Exp $
 
 PROG=	bytestringtest
 LDADD=	-lcrypto -lssl
 DPADD=	${LIBCRYPTO} ${LIBSSL}
 WARNINGS=	Yes
-CFLAGS+=	-DLIBRESSL_INTERNAL -Werror -I/usr/src/lib/libssl/src/ssl
-
-REGRESS_TARGETS=regress-bytestringtest
-
-regress-bytestringtest: ${PROG}
-	./${PROG}
+CFLAGS+=	-DLIBRESSL_INTERNAL -Wundef -Werror -I$(BSDSRCDIR)/lib/libssl/src/ssl
 
 .include <bsd.regress.mk>

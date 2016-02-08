@@ -1,4 +1,4 @@
-/*	$OpenBSD: i915_gem_tiling.c,v 1.16 2015/02/10 01:39:32 jsg Exp $	*/
+/*	$OpenBSD: i915_gem_tiling.c,v 1.18 2015/04/18 14:47:34 jsg Exp $	*/
 /*
  * Copyright (c) 2008-2009 Owain G. Ainsworth <oga@openbsd.org>
  *
@@ -472,21 +472,13 @@ i915_gem_get_tiling(struct drm_device *dev, void *data,
  * by the GPU.
  */
 static void
-i915_gem_swizzle_page(struct vm_page *pg)
+i915_gem_swizzle_page(struct vm_page *page)
 {
 	char temp[64];
 	char *vaddr;
 	int i;
-	vaddr_t	 va;
 
-#if defined (__HAVE_PMAP_DIRECT)
-	va = pmap_map_direct(pg);
-#else
-	va = uvm_km_valloc_wait(phys_map, PAGE_SIZE);
-	pmap_kenter_pa(va, VM_PAGE_TO_PHYS(pg), PROT_READ | PROT_WRITE);
-	pmap_update(pmap_kernel());
-#endif
-	vaddr = (char *)va;
+	vaddr = kmap(page);
 
 	for (i = 0; i < PAGE_SIZE; i += 128) {
 		memcpy(temp, &vaddr[i], 64);
@@ -494,13 +486,7 @@ i915_gem_swizzle_page(struct vm_page *pg)
 		memcpy(&vaddr[i + 64], temp, 64);
 	}
 
-#if defined (__HAVE_PMAP_DIRECT)
-	pmap_unmap_direct(va);
-#else
-	pmap_kremove(va, PAGE_SIZE);
-	pmap_update(pmap_kernel());
-	uvm_km_free_wakeup(phys_map, va, PAGE_SIZE);
-#endif
+	kunmap(vaddr);
 }
 
 void
@@ -514,11 +500,11 @@ i915_gem_object_do_bit_17_swizzle(struct drm_i915_gem_object *obj)
 
 	for (i = 0; i < page_count; i++) {
 		struct vm_page *page = obj->pages[i];
-		char new_bit_17 = VM_PAGE_TO_PHYS(page) >> 17;
+		char new_bit_17 = page_to_phys(page) >> 17;
 		if ((new_bit_17 & 0x1) !=
 		    (test_bit(i, obj->bit_17) != 0)) {
 			i915_gem_swizzle_page(page);
-			atomic_clearbits_int(&page->pg_flags, PG_CLEAN);
+			set_page_dirty(page);
 		}
 	}
 }
@@ -545,7 +531,7 @@ i915_gem_object_save_bit_17_swizzle(struct drm_i915_gem_object *obj)
 
 	for (i = 0; i < page_count; i++) {
 		struct vm_page *page = obj->pages[i];
-		if (VM_PAGE_TO_PHYS(page) & (1 << 17))
+		if (page_to_phys(page) & (1 << 17))
 			set_bit(i, obj->bit_17);
 		else
 			clear_bit(i, obj->bit_17);

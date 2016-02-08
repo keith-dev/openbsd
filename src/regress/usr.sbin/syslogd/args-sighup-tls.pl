@@ -19,9 +19,11 @@ our %args = (
 	loggrep => { get_between2loggrep() },
     },
     syslogd => {
-	ktrace => 1,
-	fstat => 1,
-	kdump => {
+	fstat => {
+	    # sighup must not leak a TCP socket
+	    qr/internet stream tcp/ => 1,
+	},
+	ktrace => {
 	    qr/syslogd  PSIG  SIGHUP caught handler/ => 1,
 	    qr/syslogd  RET   execve 0/ => 1,
 	},
@@ -34,7 +36,7 @@ our %args = (
 	},
     },
     server => {
-	listen => { domain => AF_INET, addr => "127.0.0.1", proto => "tls" },
+	listen => { domain => AF_INET, proto => "tls", addr => "127.0.0.1" },
 	redo => 0,
 	func => sub { read_between2logs(shift, sub {
 	    my $self = shift;
@@ -55,12 +57,6 @@ our %args = (
 	    get_between2loggrep(),
 	    qr/Signal/ => 1,
 	    qr/Accepted/ => 2,
-	},
-    },
-    fstat => {
-	loggrep => {
-	    # sighup must not leak a TCP socket
-	    qr/internet stream tcp/ => 1,
 	},
     },
 );

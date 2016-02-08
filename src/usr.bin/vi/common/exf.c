@@ -1,4 +1,4 @@
-/*	$OpenBSD: exf.c,v 1.33 2015/01/16 06:40:14 deraadt Exp $	*/
+/*	$OpenBSD: exf.c,v 1.37 2015/07/07 18:34:12 millert Exp $	*/
 
 /*-
  * Copyright (c) 1992, 1993, 1994
@@ -13,6 +13,7 @@
 
 #include <sys/queue.h>
 #include <sys/stat.h>
+#include <sys/time.h>
 
 /*
  * We include <sys/file.h>, because the flock(2) and open(2) #defines
@@ -30,6 +31,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 #include <unistd.h>
 
 #include "common.h"
@@ -183,7 +185,8 @@ file_init(SCR *sp, FREF *frp, char *rcv_name, int flags)
 		(void)snprintf(tname, sizeof(tname),
 		    "%s/vi.XXXXXXXXXX", O_STR(sp, O_TMP_DIRECTORY));
 		fd = mkstemp(tname);
-		if (fd == -1 || fchmod(fd, S_IRUSR | S_IWUSR) == -1) {
+		if (fd == -1 || fstat(fd, &sb) == -1 ||
+		    fchmod(fd, S_IRUSR | S_IWUSR) == -1) {
 			msgq(sp, M_SYSERR,
 			    "237|Unable to create temporary file");
 			if (fd != -1) {
@@ -208,8 +211,6 @@ file_init(SCR *sp, FREF *frp, char *rcv_name, int flags)
 		psize = 1024;
 		if (!LF_ISSET(FS_OPENERR))
 			F_SET(frp, FR_NEWFILE);
-
-		time(&ep->mtime);
 	} else {
 		/*
 		 * XXX
@@ -224,16 +225,17 @@ file_init(SCR *sp, FREF *frp, char *rcv_name, int flags)
 			psize = 1;
 		psize *= 1024;
 
-		F_SET(ep, F_DEVSET);
-		ep->mdev = sb.st_dev;
-		ep->minode = sb.st_ino;
-
-		ep->mtime = sb.st_mtime;
-
 		if (!S_ISREG(sb.st_mode))
 			msgq_str(sp, M_ERR, oname,
 			    "238|Warning: %s is not a regular file");
 	}
+
+	/* Save device, inode and modification time. */
+	F_SET(ep, F_DEVSET);
+	ep->mdev = sb.st_dev;
+	ep->minode = sb.st_ino;
+
+	ep->mtim = sb.st_mtim;
 
 	/* Set up recovery. */
 	memset(&oinfo, 0, sizeof(RECNOINFO));
@@ -333,7 +335,7 @@ file_init(SCR *sp, FREF *frp, char *rcv_name, int flags)
 	 * when locking is a little more reliable, this should change to be
 	 * an error.
 	 */
-	if (rcv_name == NULL)
+	if (rcv_name == NULL && !O_ISSET(sp, O_READONLY))
 		switch (file_lock(sp, oname,
 		    &ep->fcntl_fd, ep->db->fd(ep->db), 0)) {
 		case LOCK_FAILED:
@@ -341,10 +343,8 @@ file_init(SCR *sp, FREF *frp, char *rcv_name, int flags)
 			break;
 		case LOCK_UNAVAIL:
 			readonly = 1;
-			if (!O_ISSET(sp, O_READONLY)) {
-				msgq_str(sp, M_INFO, oname,
-				    "239|%s already locked, session is read-only");
-			}
+			msgq_str(sp, M_INFO, oname,
+			    "239|%s already locked, session is read-only");
 			break;
 		case LOCK_SUCCESS:
 			break;
@@ -802,7 +802,7 @@ file_write(SCR *sp, MARK *fm, MARK *tm, char *name, int flags)
 		if (noname && !LF_ISSET(FS_FORCE | FS_APPEND) &&
 		    ((F_ISSET(ep, F_DEVSET) &&
 		    (sb.st_dev != ep->mdev || sb.st_ino != ep->minode)) ||
-		    sb.st_mtime != ep->mtime)) {
+		    timespeccmp(&sb.st_mtim, &ep->mtim, !=))) {
 			msgq_str(sp, M_ERR, name, LF_ISSET(FS_POSSIBLE) ?
 "250|%s: file modified more recently than this copy; use ! to override" :
 "251|%s: file modified more recently than this copy");
@@ -822,14 +822,11 @@ file_write(SCR *sp, MARK *fm, MARK *tm, char *name, int flags)
 		return (1);
 
 	/* Open the file. */
-	SIGBLOCK;
 	if ((fd = open(name, oflags,
 	    S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP | S_IROTH | S_IWOTH)) < 0) {
 		msgq_str(sp, M_SYSERR, name, "%s");
-		SIGUNBLOCK;
 		return (1);
 	}
-	SIGUNBLOCK;
 
 	/* Try and get a lock. */
 	if (!noname && file_lock(sp, NULL, NULL, fd, 0) == LOCK_UNAVAIL)
@@ -869,13 +866,13 @@ file_write(SCR *sp, MARK *fm, MARK *tm, char *name, int flags)
 	 */
 	if (noname) {
 		if (stat(name, &sb))
-			time(&ep->mtime);
+			(void)clock_gettime(CLOCK_REALTIME, &ep->mtim);
 		else {
 			F_SET(ep, F_DEVSET);
 			ep->mdev = sb.st_dev;
 			ep->minode = sb.st_ino;
 
-			ep->mtime = sb.st_mtime;
+			ep->mtim = sb.st_mtim;
 		}
 	}
 

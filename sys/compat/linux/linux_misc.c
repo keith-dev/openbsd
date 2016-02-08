@@ -1,4 +1,4 @@
-/*	$OpenBSD: linux_misc.c,v 1.92 2014/11/16 12:30:59 deraadt Exp $	*/
+/*	$OpenBSD: linux_misc.c,v 1.94 2015/05/07 08:53:32 mpi Exp $	*/
 /*	$NetBSD: linux_misc.c,v 1.27 1996/05/20 01:59:21 fvdl Exp $	*/
 
 /*-
@@ -957,12 +957,16 @@ linux_sys_alarm(p, v, retval)
 	/*
 	 * Return how many seconds were left (rounded up)
 	 */
-	if (itp->it_value.tv_sec > LINUX_TIME_MAX)
+	if (itp->it_value.tv_sec > LINUX_TIME_MAX) {
+		splx(s);
 		return EOVERFLOW;
+	}
 	seconds_due = (linux_time_t)itp->it_value.tv_sec;
 	if (itp->it_value.tv_usec) {
-		if (seconds_due == LINUX_TIME_MAX)
+		if (seconds_due == LINUX_TIME_MAX) {
+			splx(s);
 			return EOVERFLOW;
+		}
 		seconds_due++;
 	}
 	retval[0] = seconds_due;
@@ -1183,7 +1187,7 @@ getdents_common(p, v, retval, is64bit)
 	int error;
 	int nbytes = SCARG(uap, count);
 
-	if ((error = getvnode(p->p_fd, SCARG(uap, fd), &fp)) != 0)
+	if ((error = getvnode(p, SCARG(uap, fd), &fp)) != 0)
 		return (error);
 
 	if (nbytes == 1) {	/* emulating old, broken behaviour */

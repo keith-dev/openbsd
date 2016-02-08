@@ -1,4 +1,4 @@
-/*	$OpenBSD: xinstall.c,v 1.58 2015/01/16 06:40:15 deraadt Exp $	*/
+/*	$OpenBSD: xinstall.c,v 1.62 2015/07/19 18:27:26 jasper Exp $	*/
 /*	$NetBSD: xinstall.c,v 1.9 1995/12/20 10:25:17 jonathan Exp $	*/
 
 /*
@@ -49,6 +49,7 @@
 #include <limits.h>
 #include <sysexits.h>
 #include <utime.h>
+#include <libgen.h>
 
 #include "pathnames.h"
 
@@ -61,7 +62,7 @@
 
 struct passwd *pp;
 struct group *gp;
-int dobackup, docompare, dodir, dopreserve, dostrip, safecopy;
+int dobackup, docompare, dodest, dodir, dopreserve, dostrip, safecopy;
 int mode = S_IRWXU|S_IRGRP|S_IXGRP|S_IROTH|S_IXOTH;
 char pathbuf[PATH_MAX], tempfile[PATH_MAX];
 char *suffix = BACKUP_SUFFIX;
@@ -69,9 +70,9 @@ uid_t uid;
 gid_t gid;
 
 void	copy(int, char *, int, char *, off_t, int);
-int	compare(int, const char *, size_t, int, const char *, size_t);
+int	compare(int, const char *, off_t, int, const char *, off_t);
 void	install(char *, char *, u_long, u_int);
-void	install_dir(char *);
+void	install_dir(char *, int);
 void	strip(char *);
 void	usage(void);
 int	create_newfile(char *, struct stat *);
@@ -90,7 +91,7 @@ main(int argc, char *argv[])
 	char *flags, *to_name, *group = NULL, *owner = NULL;
 
 	iflags = 0;
-	while ((ch = getopt(argc, argv, "B:bCcdf:g:m:o:pSs")) != -1)
+	while ((ch = getopt(argc, argv, "B:bCcDdf:g:m:o:pSs")) != -1)
 		switch(ch) {
 		case 'C':
 			docompare = 1;
@@ -131,6 +132,9 @@ main(int argc, char *argv[])
 		case 's':
 			dostrip = 1;
 			break;
+		case 'D':
+			dodest = 1;
+			break;
 		case 'd':
 			dodir = 1;
 			break;
@@ -163,9 +167,21 @@ main(int argc, char *argv[])
 
 	if (dodir) {
 		for (; *argv != NULL; ++argv)
-			install_dir(*argv);
+			install_dir(*argv, mode);
 		exit(EX_OK);
 		/* NOTREACHED */
+	}
+
+	if (dodest) {
+		char *dest = dirname(argv[argc - 1]);
+		if (dest == NULL)
+			errx(EX_OSERR, "cannot determine dirname");
+		/*
+		 * When -D is passed, do not chmod the directory with the mode set for
+		 * the target file. If more restrictive permissions are required then
+		 * '-d -m' ought to be used instead.
+		 */
+		install_dir(dest, 0755);
 	}
 
 	no_target = stat(to_name = argv[argc - 1], &to_sb);
@@ -202,7 +218,7 @@ void
 install(char *from_name, char *to_name, u_long fset, u_int flags)
 {
 	struct stat from_sb, to_sb;
-	struct utimbuf utb;
+	struct timespec ts[2];
 	int devnull, from_fd, to_fd, serrno, files_match = 0;
 	char *p;
 
@@ -258,8 +274,8 @@ install(char *from_name, char *to_name, u_long fset, u_int flags)
 	if (!devnull) {
 		if (docompare && !safecopy) {
 			files_match = !(compare(from_fd, from_name,
-					(size_t)from_sb.st_size, to_fd,
-					to_name, (size_t)to_sb.st_size));
+					from_sb.st_size, to_fd,
+					to_name, to_sb.st_size));
 
 			/* Truncate "to" file for copy unless we match */
 			if (!files_match) {
@@ -304,17 +320,17 @@ install(char *from_name, char *to_name, u_long fset, u_int flags)
 			errc(EX_OSERR, serrno, "%s", tempfile);
 		}
 
-		if (compare(temp_fd, tempfile, (size_t)temp_sb.st_size, to_fd,
-			    to_name, (size_t)to_sb.st_size) == 0) {
+		if (compare(temp_fd, tempfile, temp_sb.st_size, to_fd,
+			    to_name, to_sb.st_size) == 0) {
 			/*
 			 * If target has more than one link we need to
 			 * replace it in order to snap the extra links.
 			 * Need to preserve target file times, though.
 			 */
 			if (to_sb.st_nlink != 1) {
-				utb.actime = to_sb.st_atime;
-				utb.modtime = to_sb.st_mtime;
-				(void)utime(tempfile, &utb);
+				ts[0] = to_sb.st_atim;
+				ts[1] = to_sb.st_mtim;
+				futimens(temp_fd, ts);
 			} else {
 				files_match = 1;
 				(void)unlink(tempfile);
@@ -328,9 +344,9 @@ install(char *from_name, char *to_name, u_long fset, u_int flags)
 	 * Preserve the timestamp of the source file if necessary.
 	 */
 	if (dopreserve && !files_match) {
-		utb.actime = from_sb.st_atime;
-		utb.modtime = from_sb.st_mtime;
-		(void)utime(safecopy ? tempfile : to_name, &utb);
+		ts[0] = from_sb.st_atim;
+		ts[1] = from_sb.st_mtim;
+		futimens(to_fd, ts);
 	}
 
 	/*
@@ -341,7 +357,7 @@ install(char *from_name, char *to_name, u_long fset, u_int flags)
 	    fchown(to_fd, uid, gid)) {
 		serrno = errno;
 		(void)unlink(safecopy ? tempfile : to_name);
-		errx(EX_OSERR, "%s: chown/chgrp: %s", 
+		errx(EX_OSERR, "%s: chown/chgrp: %s",
 		    safecopy ? tempfile : to_name, strerror(serrno));
 	}
 	if (fchmod(to_fd, mode)) {
@@ -358,7 +374,7 @@ install(char *from_name, char *to_name, u_long fset, u_int flags)
 	if (fchflags(to_fd,
 	    flags & SETFLAGS ? fset : from_sb.st_flags & ~UF_NODUMP)) {
 		if (errno != EOPNOTSUPP || (from_sb.st_flags & ~UF_NODUMP) != 0)
-			warnx("%s: chflags: %s", 
+			warnx("%s: chflags: %s",
 			    safecopy ? tempfile :to_name, strerror(errno));
 	}
 
@@ -480,12 +496,12 @@ copy(int from_fd, char *from_name, int to_fd, char *to_name, off_t size,
  *	compare two files; non-zero means files differ
  */
 int
-compare(int from_fd, const char *from_name, size_t from_len, int to_fd,
-    const char *to_name, size_t to_len)
+compare(int from_fd, const char *from_name, off_t from_len, int to_fd,
+    const char *to_name, off_t to_len)
 {
 	caddr_t p1, p2;
-	size_t length, remainder;
-	off_t from_off, to_off;
+	size_t length;
+	off_t from_off, to_off, remainder;
 	int dfound;
 
 	if (from_len == 0 && from_len == to_len)
@@ -561,7 +577,7 @@ strip(char *to_name)
  *	build directory hierarchy
  */
 void
-install_dir(char *path)
+install_dir(char *path, int mode)
 {
 	char *p;
 	struct stat sb;
@@ -603,7 +619,7 @@ void
 usage(void)
 {
 	(void)fprintf(stderr, "\
-usage: install [-bCcdpSs] [-B suffix] [-f flags] [-g group] [-m mode] [-o owner]\n	       source ... target ...\n");
+usage: install [-bCcDdpSs] [-B suffix] [-f flags] [-g group] [-m mode] [-o owner]\n	       source ... target ...\n");
 	exit(EX_USAGE);
 	/* NOTREACHED */
 }

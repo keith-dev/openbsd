@@ -1,4 +1,4 @@
-/*	$OpenBSD: audioctl.c,v 1.25 2015/02/08 23:40:34 deraadt Exp $	*/
+/*	$OpenBSD: audioctl.c,v 1.29 2015/07/28 20:51:10 ratchov Exp $	*/
 /*	$NetBSD: audioctl.c,v 1.14 1998/04/27 16:55:23 augustss Exp $	*/
 
 /*
@@ -59,7 +59,9 @@ audio_info_t info;
 
 char encbuf[1000];
 
-int properties, fullduplex, perrors, rerrors;
+int properties, fullduplex;
+
+struct audio_pos getpos;
 
 struct field {
 	const char *name;
@@ -92,11 +94,11 @@ struct field {
 	{ "play.bps",		&info.play.bps,		UINT,	0 },
 	{ "play.msb",		&info.play.msb,		UINT,	0 },
 	{ "play.encoding",	&info.play.encoding,	ENC,	0 },
-	{ "play.samples",	&info.play.samples,	UINT,	READONLY },
 	{ "play.pause",		&info.play.pause,	UCHAR,	0 },
 	{ "play.active",	&info.play.active,	UCHAR,	READONLY },
 	{ "play.block_size",	&info.play.block_size,	UINT,	0 },
-	{ "play.errors",	&perrors,		INT,	READONLY },
+	{ "play.bytes",		&getpos.play_pos,	UINT,	READONLY },
+	{ "play.errors",	&getpos.play_xrun,	UINT,	READONLY },
 	{ "record.rate",	&info.record.sample_rate,UINT,	0 },
 	{ "record.sample_rate",	&info.record.sample_rate,UINT,	ALIAS },
 	{ "record.channels",	&info.record.channels,	UINT,	0 },
@@ -104,11 +106,11 @@ struct field {
 	{ "record.bps",		&info.record.bps,	UINT,	0 },
 	{ "record.msb",		&info.record.msb,	UINT,	0 },
 	{ "record.encoding",	&info.record.encoding,	ENC,	0 },
-	{ "record.samples",	&info.record.samples,	UINT,	READONLY },
 	{ "record.pause",	&info.record.pause,	UCHAR,	0 },
 	{ "record.active",	&info.record.active,	UCHAR,	READONLY },
 	{ "record.block_size",	&info.record.block_size,UINT,	0 },
-	{ "record.errors",	&rerrors,		INT,	READONLY },
+	{ "record.bytes",	&getpos.rec_pos,	UINT,	READONLY },
+	{ "record.errors",	&getpos.rec_xrun,	UINT,	READONLY },
 	{ 0 }
 };
 
@@ -122,20 +124,12 @@ struct {
 	{ AudioEslinear,	AUDIO_ENCODING_SLINEAR },
 	{ "linear",		AUDIO_ENCODING_SLINEAR },
 	{ AudioEulinear,	AUDIO_ENCODING_ULINEAR },
-	{ AudioEadpcm,		AUDIO_ENCODING_ADPCM },
-	{ "ADPCM",		AUDIO_ENCODING_ADPCM },
 	{ AudioEslinear_le,	AUDIO_ENCODING_SLINEAR_LE },
 	{ "linear_le",		AUDIO_ENCODING_SLINEAR_LE },
 	{ AudioEulinear_le,	AUDIO_ENCODING_ULINEAR_LE },
 	{ AudioEslinear_be,	AUDIO_ENCODING_SLINEAR_BE },
 	{ "linear_be",		AUDIO_ENCODING_SLINEAR_BE },
 	{ AudioEulinear_be,	AUDIO_ENCODING_ULINEAR_BE },
-	{ AudioEmpeg_l1_stream,	AUDIO_ENCODING_MPEG_L1_STREAM },
-	{ AudioEmpeg_l1_packets,AUDIO_ENCODING_MPEG_L1_PACKETS },
-	{ AudioEmpeg_l1_system,	AUDIO_ENCODING_MPEG_L1_SYSTEM },
-	{ AudioEmpeg_l2_stream,	AUDIO_ENCODING_MPEG_L2_STREAM },
-	{ AudioEmpeg_l2_packets,AUDIO_ENCODING_MPEG_L2_PACKETS },
-	{ AudioEmpeg_l2_system,	AUDIO_ENCODING_MPEG_L2_SYSTEM },
 	{ 0 }
 };
 
@@ -186,10 +180,7 @@ prval(u_int format, void *valp)
 		v = *(u_int *)valp;
 		cm = "";
 		if (v & AUMODE_PLAY) {
-			if (v & AUMODE_PLAY_ALL)
-				fprintf(out, "play");
-			else
-				fprintf(out, "playsync");
+			fprintf(out, "play");
 			cm = ",";
 		}
 		if (v & AUMODE_RECORD)
@@ -306,12 +297,12 @@ getinfo(int fd)
 		err(1, "AUDIO_GETFD");
 	if (ioctl(fd, AUDIO_GETPROPS, &properties) < 0)
 		err(1, "AUDIO_GETPROPS");
-	if (ioctl(fd, AUDIO_PERROR, &perrors) < 0)
-		err(1, "AUDIO_PERROR");
-	if (ioctl(fd, AUDIO_RERROR, &rerrors) < 0)
-		err(1, "AUDIO_RERROR");
+	if (ioctl(fd, AUDIO_GETPROPS, &properties) < 0)
+		err(1, "AUDIO_GETPROPS");
 	if (ioctl(fd, AUDIO_GETINFO, &info) < 0)
 		err(1, "AUDIO_GETINFO");
+	if (ioctl(fd, AUDIO_GETPOS, &getpos) < 0)
+		err(1, "AUDIO_GETPOS");
 }
 
 void

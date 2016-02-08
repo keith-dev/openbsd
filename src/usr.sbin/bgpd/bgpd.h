@@ -1,4 +1,4 @@
-/*	$OpenBSD: bgpd.h,v 1.282 2014/11/03 16:55:59 bluhm Exp $ */
+/*	$OpenBSD: bgpd.h,v 1.288 2015/07/20 16:10:38 claudio Exp $ */
 
 /*
  * Copyright (c) 2003, 2004 Henning Brauer <henning@openbsd.org>
@@ -93,7 +93,7 @@
 #define RDE_RUNNER_ROUNDS	100
 #define SESSION_CTL_QUEUE_MAX	10000
 
-enum {
+enum bgpd_process {
 	PROC_MAIN,
 	PROC_SE,
 	PROC_RDE
@@ -195,11 +195,23 @@ struct listen_addr {
 TAILQ_HEAD(listen_addrs, listen_addr);
 TAILQ_HEAD(filter_set_head, filter_set);
 
+struct rdomain;
+SIMPLEQ_HEAD(rdomain_head, rdomain);
+
+struct network;
+TAILQ_HEAD(network_head, network);
+
+struct filter_rule;
+TAILQ_HEAD(filter_head, filter_rule);
+
 struct bgpd_config {
+	struct rdomain_head			 rdomains;
+	struct network_head			 networks;
+	struct filter_head			*filters;
 	struct listen_addrs			*listen_addrs;
+	struct mrt_head				*mrt;
 	char					*csock;
 	char					*rcsock;
-	int					 opts;
 	int					 flags;
 	int					 log;
 	u_int32_t				 bgpid;
@@ -211,6 +223,8 @@ struct bgpd_config {
 	u_int16_t				 connectretry;
 	u_int8_t				 fib_priority;
 };
+
+extern int cmd_opts;
 
 enum announce_type {
 	ANNOUNCE_UNDEF,
@@ -330,8 +344,6 @@ struct network_config {
 	u_int8_t		 old;	/* used for reloading */
 };
 
-TAILQ_HEAD(network_head, network);
-
 struct network {
 	struct network_config		net;
 	TAILQ_ENTRY(network)		entry;
@@ -372,6 +384,8 @@ enum imsg_type {
 	IMSG_NETWORK_FLUSH,
 	IMSG_NETWORK_DONE,
 	IMSG_FILTER_SET,
+	IMSG_SOCKET_CONN,
+	IMSG_SOCKET_CONN_CTL,
 	IMSG_RECONF_CONF,
 	IMSG_RECONF_RIB,
 	IMSG_RECONF_PEER,
@@ -693,6 +707,7 @@ enum comp_ops {
 struct filter_peers {
 	u_int32_t	peerid;
 	u_int32_t	groupid;
+	u_int32_t	remote_as;
 	u_int16_t	ribid;
 };
 
@@ -771,8 +786,6 @@ struct filter_match {
 	struct filter_extcommunity	ext_community;
 };
 
-TAILQ_HEAD(filter_head, filter_rule);
-
 struct filter_rule {
 	TAILQ_ENTRY(filter_rule)	entry;
 	char				rib[PEER_DESCR_LEN];
@@ -838,7 +851,6 @@ struct rdomain {
 	u_int				label;
 	int				flags;
 };
-SIMPLEQ_HEAD(rdomain_head, rdomain);
 
 struct rde_rib {
 	SIMPLEQ_ENTRY(rde_rib)	entry;
@@ -923,13 +935,18 @@ void		 send_imsg_session(int, pid_t, void *, u_int16_t);
 int		 send_network(int, struct network_config *,
 		     struct filter_set_head *);
 int		 bgpd_filternexthop(struct kroute *, struct kroute6 *);
+void		 set_pollfd(struct pollfd *, struct imsgbuf *);
+int		 handle_pollfd(struct pollfd *, struct imsgbuf *);
 
 /* control.c */
 void	control_cleanup(const char *);
 int	control_imsg_relay(struct imsg *);
 
 /* config.c */
-int	 host(const char *, struct bgpd_addr *, u_int8_t *);
+struct bgpd_config	*new_config(void);
+void			free_config(struct bgpd_config *);
+void	filterlist_free(struct filter_head *);
+int	host(const char *, struct bgpd_addr *, u_int8_t *);
 
 /* kroute.c */
 int		 kr_init(void);
@@ -965,7 +982,7 @@ void		 log_warn(const char *, ...);
 void		 log_warnx(const char *, ...);
 void		 log_info(const char *, ...);
 void		 log_debug(const char *, ...);
-void		 fatal(const char *) __dead;
+void		 fatal(const char *, ...) __dead;
 void		 fatalx(const char *) __dead;
 
 /* mrt.c */

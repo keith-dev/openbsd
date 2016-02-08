@@ -1,4 +1,4 @@
-# $OpenBSD: Makefile,v 1.19 2015/02/23 17:43:24 schwarze Exp $
+# $OpenBSD: Makefile,v 1.21 2015/06/20 01:07:24 doug Exp $
 
 .include <bsd.own.mk>		# for NOMAN
 
@@ -51,9 +51,9 @@ MAN=	\
 	BN_set_bit.3 \
 	BN_swap.3 \
 	BN_zero.3 \
+	BUF_MEM_new.3 \
 
 GENMAN= \
-	BUF_MEM_new.3 \
 	CONF_modules_free.3 \
 	CONF_modules_load_file.3 \
 	CRYPTO_set_ex_data.3 \
@@ -645,7 +645,6 @@ MLINKS+=\
 	EVP_DigestInit.3 EVP_md2.3 \
 	EVP_DigestInit.3 EVP_md5.3 \
 	EVP_DigestInit.3 EVP_md_null.3 \
-	EVP_DigestInit.3 EVP_mdc2.3 \
 	EVP_DigestInit.3 EVP_ripemd160.3 \
 	EVP_DigestInit.3 EVP_sha.3 \
 	EVP_DigestInit.3 EVP_sha1.3 \

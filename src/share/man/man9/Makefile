@@ -1,4 +1,4 @@
-#	$OpenBSD: Makefile,v 1.230 2015/02/10 21:56:08 miod Exp $
+#	$OpenBSD: Makefile,v 1.237 2015/07/08 07:21:49 mpi Exp $
 #	$NetBSD: Makefile,v 1.4 1996/01/09 03:23:01 thorpej Exp $
 
 #	Makefile for section 9 (kernel function and variable) manual pages.
@@ -14,7 +14,7 @@ MAN=	aml_evalnode.9 atomic_add_int.9 atomic_cas_uint.9 \
 	domountroothooks.9 dostartuphooks.9 \
 	evcount.9 extent.9 fb_setup.9 file.9 fork1.9 \
 	getdevvp.9 getnewvnode.9 hash.9 hashinit.9 \
-	hardclock.9 hook_establish.9 hz.9 hzto.9 idgen32.9 \
+	hardclock.9 hook_establish.9 hz.9 idgen32.9 \
 	ieee80211.9 ieee80211_crypto.9 ieee80211_input.9 ieee80211_ioctl.9 \
 	ieee80211_node.9 ieee80211_output.9 ieee80211_proto.9 \
 	ieee80211_radiotap.9 \
@@ -22,16 +22,17 @@ MAN=	aml_evalnode.9 atomic_add_int.9 atomic_cas_uint.9 \
 	kern.9 km_alloc.9 knote.9 kthread.9 ktrace.9 \
 	loadfirmware.9 lock.9 log.9 \
 	malloc.9 membar_sync.9 mbuf.9 mbuf_tags.9 md5.9 mi_switch.9 \
-	microtime.9 mountroothook_establish.9 mutex.9 namei.9 \
+	microtime.9 ml_init.9 mountroothook_establish.9 mq_init.9 mutex.9 \
+	namei.9 \
 	panic.9 pci_conf_read.9 pci_intr_map.9 pfind.9 physio.9 pmap.9 \
 	pool.9 powerhook_establish.9 ppsratecheck.9 printf.9 psignal.9 \
 	radio.9 arc4random.9 rasops.9 ratecheck.9 resettodr.9 rssadapt.9 \
 	route.9 rt_ifa_add.9 rt_timer_add.9 rtalloc.9 rtable_add.9 \
 	rtlabel_id2name.9 rtrequest1.9 rwlock.9 SipHash24.9 sensor_attach.9 \
-	tsleep.9 spl.9 startuphook_establish.9 \
+	spl.9 srp_enter.9 startuphook_establish.9 \
 	socreate.9 sosplice.9 style.9 syscall.9 systrace.9 sysctl_int.9 \
-	task_add.9 tc_init.9 time.9 timeout.9 tvtohz.9 uiomove.9 uvm.9 \
-	usbd_transfer.9 \
+	task_add.9 tc_init.9 time.9 timeout.9 tsleep.9 tvtohz.9 \
+	uiomove.9 uvm.9 usbd_close_pipe.9 usbd_open_pipe.9 usbd_transfer.9 \
 	vfs.9 vfs_busy.9 \
 	vfs_cache.9 vaccess.9 vclean.9 vcount.9 vdevgone.9 vfinddev.9 vflush.9 \
 	vflushbuf.9 vget.9 vgone.9 vhold.9 vinvalbuf.9 vnode.9 vnsubr.9 \
@@ -143,14 +144,11 @@ MLINKS+=copy.9 copyin.9 copy.9 copyout.9 copy.9 copystr.9 \
 	copy.9 kcopy.9
 MLINKS+=crypto.9 crypto_get_driverid.9 \
 	crypto.9 crypto_register.9 \
-	crypto.9 crypto_kregister.9 \
 	crypto.9 crypto_unregister.9 \
 	crypto.9 crypto_done.9 \
-	crypto.9 crypto_kdone.9 \
 	crypto.9 crypto_newsession.9 \
 	crypto.9 crypto_freesession.9 \
 	crypto.9 crypto_dispatch.9 \
-	crypto.9 crypto_kdispatch.9 \
 	crypto.9 crypto_getreq.9 \
 	crypto.9 crypto_freereq.9
 MLINKS+=mi_switch.9 cpu_switchto.9
@@ -244,7 +242,7 @@ MLINKS+=log.9 addlog.9
 MLINKS+=malloc.9 mallocarray.9 malloc.9 free.9
 MLINKS+=membar_sync.9 membar_enter.9 membar_sync.9 membar_exit.9 \
 	membar_sync.9 membar_producer.9 membar_sync.9 membar_consumer.9
-MLINKS+=mbuf.9 m_copym2.9 mbuf.9 m_copym.9 mbuf.9 m_free.9 mbuf.9 MFREE.9 \
+MLINKS+=mbuf.9 m_copym2.9 mbuf.9 m_copym.9 mbuf.9 m_free.9 \
 	mbuf.9 m_get.9 mbuf.9 MGET.9 mbuf.9 m_getclr.9 mbuf.9 m_gethdr.9 \
 	mbuf.9 MGETHDR.9 mbuf.9 m_prepend.9 mbuf.9 M_PREPEND.9 \
 	mbuf.9 m_pulldown.9 mbuf.9 m_pullup.9 \
@@ -256,16 +254,7 @@ MLINKS+=mbuf.9 m_copym2.9 mbuf.9 m_copym.9 mbuf.9 m_free.9 mbuf.9 MFREE.9 \
 	mbuf.9 MEXTADD.9 mbuf.9 M_ALIGN.9 mbuf.9 MH_ALIGN.9 \
 	mbuf.9 M_READONLY.9 mbuf.9 M_LEADINGSPACE.9 \
 	mbuf.9 M_TRAILINGSPACE.9 mbuf.9 mtod.9 \
-	mbuf.9 m_dup_pkthdr.9 \
-	mbuf.9 ml_init.9 mbuf.9 ml_enqueue.9 mbuf.9 ml_dequeue.9 \
-	mbuf.9 ml_dechain.9 mbuf.9 ml_filter.9 mbuf.9 ml_len.9 \
-	mbuf.9 ml_empty.9 \
-	mbuf.9 MBUF_LIST_INITIALIZER.9 mbuf.9 MBUF_LIST_FOREACH.9 \
-	mbuf.9 mq_init.9 mbuf.9 mq_enqueue.9 mbuf.9 mq_dequeue.9 \
-	mbuf.9 mq_enlist.9 mbuf.9 mq_delist.9 mbuf.9 mq_dechain.9 \
-	mbuf.9 mq_filter.9 mbuf.9 mq_len.9 mbuf.9 mq_empty.9 \
-	mbuf.9 mq_drops.9 mbuf.9 mq_set_maxlen.9 \
-	mbuf.9 MBUF_QUEUE_INITIALIZER.9
+	mbuf.9 m_dup_pkthdr.9
 MLINKS+=mbuf_tags.9 m_tag_get.9 mbuf_tags.9 m_tag_find.9 \
 	mbuf_tags.9 m_tag_prepend.9 mbuf_tags.9 m_tag_delete.9 \
 	mbuf_tags.9 m_tag_copy.9 mbuf_tags.9 m_tag_delete_chain.9 \
@@ -277,11 +266,18 @@ MLINKS+=microtime.9 getmicrotime.9 microtime.9 microuptime.9 \
 	microtime.9 getnanotime.9 microtime.9 nanouptime.9 \
 	microtime.9 getnanouptime.9 microtime.9 bintime.9 \
 	microtime.9 binuptime.9
+MLINKS+=ml_init.9 ml_enqueue.9 ml_init.9 ml_dequeue.9 ml_init.9 ml_dechain.9 \
+	ml_init.9 ml_filter.9 ml_init.9 ml_len.9 ml_init.9 ml_empty.9 \
+	ml_init.9 MBUF_LIST_INITIALIZER.9 ml_init.9 MBUF_LIST_FOREACH.9
 MLINKS+=mountroothook_establish.9 mountroothook_disestablish.9
 MLINKS+=mutex.9 mtx_init.9 mutex.9 mtx_enter.9 mutex.9 mtx_leave.9 \
 	mutex.9 MUTEX_ASSERT_LOCKED.9 mutex.9 MUTEX_ASSERT_UNLOCKED.9 \
 	mutex.9 MUTEX_INITIALIZER.9
 MLINKS+=mutex.9 mtx_enter_try.9
+MLINKS+=mq_init.9 mq_enqueue.9 mq_init.9 mq_dequeue.9 mq_init.9 mq_enlist.9 \
+	mq_init.9 mq_delist.9 mq_init.9 mq_dechain.9 mq_init.9 mq_filter.9 \
+	mq_init.9 mq_len.9 mq_init.9 mq_empty.9 mq_init.9 mq_drops.9 \
+	mq_init.9 mq_set_maxlen.9 mq_init.9 MBUF_QUEUE_INITIALIZER.9
 MLINKS+=namei.9 vfs_lookup.9 namei.9 vfs_relookup.9 namei.9 NDINIT.9
 MLINKS+=namei.9 NDINITAT.9
 MLINKS+=pci_conf_read.9 pci_conf_write.9 pci_conf_read.9 pci_make_tag.9 \
@@ -366,6 +362,11 @@ MLINKS+=spl.9 spl0.9 spl.9 splassert.9 spl.9 splbio.9 spl.9 splclock.9 \
 	spl.9 splsoftnet.9 spl.9 splsofttty.9 \
 	spl.9 splstatclock.9 spl.9 spltty.9 spl.9 splvm.9 spl.9 splx.9
 MLINKS+=startuphook_establish.9 startuphook_disestablish.9
+MLINKS+=srp_enter.9 srp_init.9 srp_enter.9 srp_gc_init.9 \
+	srp_enter.9 srp_update.9 srp_enter.9 srp_update_locked.9 \
+	srp_enter.9 srp_leave.9 srp_enter.9 srp_get_locked.9 \
+	srp_enter.9 srp_finalize.9 \
+	srp_enter.9 SRP_INITIALIZER.9 srp_enter.9 SRP_GC_INITIALIZER.9
 MLINKS+=sysctl_int.9 sysctl_int_arr.9 sysctl_int.9 sysctl_quad.9 \
 	sysctl_int.9 sysctl_string.9 sysctl_int.9 sysctl_tstring.9 \
 	sysctl_int.9 sysctl_rdint.9 sysctl_int.9 sysctl_rdquad.9 \
@@ -393,6 +394,8 @@ MLINKS+=tsleep.9 wakeup.9 tsleep.9 wakeup_n.9 tsleep.9 wakeup_one.9 \
 	tsleep.9 msleep.9 
 MLINKS+=tvtohz.9 tstohz.9
 MLINKS+=uiomove.9 uio.9 uiomove.9 uiomovei.9
+MLINKS+=usbd_close_pipe.9 usbd_abort_pipe.9
+MLINKS+=usbd_open_pipe.9 usbd_open_pipe_intr.9
 MLINKS+=usbd_transfer.9 usbd_setup_xfer.9
 MLINKS+=uvm.9 uvm_init.9 uvm.9 uvm_init_limits.9 uvm.9 uvm_setpagesize.9 \
 	uvm.9 uvm_swap_init.9 uvm.9 uvm_map.9 uvm.9 uvm_map_pageable.9 \

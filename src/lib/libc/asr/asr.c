@@ -1,4 +1,4 @@
-/*	$OpenBSD: asr.c,v 1.35 2015/01/16 16:48:51 deraadt Exp $	*/
+/*	$OpenBSD: asr.c,v 1.38 2015/06/04 19:23:17 eric Exp $	*/
 /*
  * Copyright (c) 2010-2012 Eric Faurot <eric@openbsd.org>
  *
@@ -58,7 +58,6 @@
 #endif
 
 #define DEFAULT_CONFFILE	"/etc/resolv.conf"
-#define DEFAULT_HOSTFILE	"/etc/hosts"
 #define DEFAULT_CONF		"lookup file\n"
 #define DEFAULT_LOOKUP		"lookup bind file"
 
@@ -413,12 +412,20 @@ asr_check_reload(struct asr *asr)
 #if ASR_OPT_RELOADCONF
 	struct stat	 st;
 	struct timespec	 ts;
+	pid_t		 pid;
 #endif
 
 	if (asr->a_path == NULL)
 		return;
 
 #if ASR_OPT_RELOADCONF
+
+	pid = getpid();
+	if (pid != asr->a_pid) {
+		asr->a_pid = pid;
+		asr->a_rtime = 0;
+	}
+
 	if (clock_gettime(CLOCK_MONOTONIC, &ts) == -1)
 		return;
 
@@ -522,8 +529,6 @@ asr_ctx_create(void)
 	ac->ac_family[0] = AF_INET;
 	ac->ac_family[1] = AF_INET6;
 	ac->ac_family[2] = -1;
-
-	ac->ac_hostfile = DEFAULT_HOSTFILE;
 
 	ac->ac_nscount = 0;
 	ac->ac_nstimeout = 5;
@@ -864,7 +869,7 @@ asr_strdname(const char *_dname, char *buf, size_t max)
  * size "ntoken" and returns the number of token on the line.
  */
 int
-asr_parse_namedb_line(FILE *file, char **tokens, int ntoken)
+asr_parse_namedb_line(FILE *file, char **tokens, int ntoken, char *lbuf, size_t sz)
 {
 	size_t	  len;
 	char	 *buf;
@@ -874,8 +879,15 @@ asr_parse_namedb_line(FILE *file, char **tokens, int ntoken)
 	if ((buf = fgetln(file, &len)) == NULL)
 		return (-1);
 
+	if (len >= sz)
+		goto again;
+
 	if (buf[len - 1] == '\n')
 		len--;
+	else {
+		memcpy(lbuf, buf, len);
+		buf = lbuf;
+	}
 
 	buf[len] = '\0';
 	buf[strcspn(buf, "#")] = '\0';

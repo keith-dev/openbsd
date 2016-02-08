@@ -1,4 +1,4 @@
-/* $OpenBSD: bn_gf2m.c,v 1.18 2015/02/10 09:50:12 miod Exp $ */
+/* $OpenBSD: bn_gf2m.c,v 1.20 2015/06/11 15:55:28 jsing Exp $ */
 /* ====================================================================
  * Copyright 2002 Sun Microsystems, Inc. ALL RIGHTS RESERVED.
  *
@@ -576,7 +576,7 @@ BN_GF2m_mod_sqr_arr(BIGNUM *r, const BIGNUM *a, const int p[], BN_CTX *ctx)
 	bn_check_top(a);
 	BN_CTX_start(ctx);
 	if ((s = BN_CTX_get(ctx)) == NULL)
-		return 0;
+		goto err;
 	if (!bn_wexpand(s, 2 * a->top))
 		goto err;
 
@@ -745,8 +745,13 @@ BN_GF2m_mod_inv(BIGNUM *r, const BIGNUM *a, const BIGNUM *p, BN_CTX *ctx)
 				ubits--;
 			}
 
-			if (ubits <= BN_BITS2 && udp[0] == 1)
-				break;
+			if (ubits <= BN_BITS2) {
+				/* See if poly was reducible. */
+				if (udp[0] == 0)
+					goto err;
+				if (udp[0] == 1)
+					break;
+			}
 
 			if (ubits < vbits) {
 				i = ubits;

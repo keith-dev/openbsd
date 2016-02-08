@@ -1,4 +1,4 @@
-/*	$OpenBSD: ieee80211_output.c,v 1.93 2014/12/23 03:24:08 tedu Exp $	*/
+/*	$OpenBSD: ieee80211_output.c,v 1.97 2015/07/15 22:16:42 deraadt Exp $	*/
 /*	$NetBSD: ieee80211_output.c,v 1.13 2004/05/31 11:02:55 dyoung Exp $	*/
 
 /*-
@@ -46,7 +46,6 @@
 #include <net/if.h>
 #include <net/if_dl.h>
 #include <net/if_media.h>
-#include <net/if_arp.h>
 #include <net/if_llc.h>
 #include <net/bpf.h>
 
@@ -114,8 +113,7 @@ ieee80211_output(struct ifnet *ifp, struct mbuf *m, struct sockaddr *dst,
 {
 	struct ieee80211_frame *wh;
 	struct m_tag *mtag;
-	int s, len, error = 0;
-	u_short mflags;
+	int error = 0;
 
 	/* Interface has to be up and running */
 	if ((ifp->if_flags & (IFF_UP | IFF_RUNNING)) !=
@@ -144,38 +142,14 @@ ieee80211_output(struct ifnet *ifp, struct mbuf *m, struct sockaddr *dst,
 		    IEEE80211_FC0_TYPE_CTL)
 			return (EINVAL);
 
-		/*
-		 * Queue message on interface without adding any
-		 * further headers, and start output if interface not
-		 * yet active.
-		 */
-		mflags = m->m_flags;
-		len = m->m_pkthdr.len;
-		s = splnet();
-		IFQ_ENQUEUE(&ifp->if_snd, m, NULL, error);
-		if (error) {
-			/* mbuf is already freed */
-			splx(s);
-			printf("%s: failed to queue raw tx frame\n",
-			    ifp->if_xname);
-			return (error);
-		}
-		ifp->if_obytes += len;
-		if (mflags & M_MCAST)
-			ifp->if_omcasts++;
-		if ((ifp->if_flags & IFF_OACTIVE) == 0)
-			(*ifp->if_start)(ifp);
-		splx(s);
-
-		return (error);
+		return (if_enqueue(ifp, m));
 	}
 
  fallback:
 	return (ether_output(ifp, m, dst, rt));
 
  bad:
-	if (m)
-		m_freem(m);
+	m_freem(m);
 	return (error);
 }
 
@@ -653,8 +627,7 @@ ieee80211_encap(struct ifnet *ifp, struct mbuf *m, struct ieee80211_node **pni)
 	*pni = ni;
 	return m;
 bad:
-	if (m != NULL)
-		m_freem(m);
+	m_freem(m);
 	if (ni != NULL)
 		ieee80211_release_node(ic, ni);
 	*pni = NULL;

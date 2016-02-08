@@ -1,4 +1,4 @@
-/*	$OpenBSD: specialreg.h,v 1.32 2015/01/19 16:01:43 jsg Exp $	*/
+/*	$OpenBSD: specialreg.h,v 1.37 2015/06/07 08:11:50 guenther Exp $	*/
 /*	$NetBSD: specialreg.h,v 1.1 2003/04/26 18:39:48 fvdl Exp $	*/
 /*	$NetBSD: x86/specialreg.h,v 1.2 2003/04/25 21:54:30 fvdl Exp $	*/
 
@@ -86,10 +86,18 @@
 #define	CR4_OSXMMEXCPT	0x00000400	/* enable unmasked SSE exceptions */
 #define	CR4_VMXE	0x00002000	/* enable virtual machine operation */
 #define	CR4_SMXE	0x00004000	/* enable safe mode operation */
+#define	CR4_FSGSBASE	0x00010000	/* enable {RD,WR}{FS,GS}BASE ops */
 #define	CR4_PCIDE	0x00020000	/* enable process-context IDs */
 #define	CR4_OSXSAVE	0x00040000	/* enable XSAVE and extended states */
 #define	CR4_SMEP	0x00100000	/* supervisor mode exec protection */
 #define	CR4_SMAP	0x00200000	/* supervisor mode access prevention */
+
+/*
+ * Extended Control Register XCR0
+ */
+#define	XCR0_X87	0x00000001	/* x87 FPU/MMX state */
+#define	XCR0_SSE	0x00000002	/* SSE state */
+#define	XCR0_AVX	0x00000004	/* AVX state */
 
 /*
  * CPUID "features" bits (CPUID function 0x1):
@@ -178,6 +186,12 @@
 #define	SEFF0EBX_ADX		0x00080000 /* ADCX/ADOX instructions */
 #define	SEFF0EBX_SMAP		0x00100000 /* Supervisor mode access prevent */
 
+/*
+ * Thermal and Power Management (CPUID function 0x6) EAX bits
+ */
+#define	TPM_SENSOR	0x00000001	 /* Digital temp sensor */
+#define	TPM_ARAT	0x00000004	 /* APIC Timer Always Running */
+
  /*
   * "Architectural Performance Monitoring" bits (CPUID function 0x0a):
   * EAX bits, EBX bits, EDX bits.
@@ -249,11 +263,11 @@
 #define	CPUID2STEPPING(cpuid)	((cpuid) & 15)
 
 #define	CPUID(code, eax, ebx, ecx, edx)                         \
-	__asm("cpuid"                                           \
+	__asm volatile("cpuid"                                  \
 	    : "=a" (eax), "=b" (ebx), "=c" (ecx), "=d" (edx)    \
 	    : "a" (code));
 #define	CPUID_LEAF(code, leaf, eax, ebx, ecx, edx)		\
-	__asm("cpuid"                                           \
+	__asm volatile("cpuid"                                  \
 	    : "=a" (eax), "=b" (ebx), "=c" (ecx), "=d" (edx)    \
 	    : "a" (code), "c" (leaf));
 
@@ -268,6 +282,7 @@
 #define	MSR_CTR0		0x012	/* P5 only (trap on P6) */
 #define	MSR_CTR1		0x013	/* P5 only (trap on P6) */
 #define MSR_APICBASE		0x01b
+#define APICBASE_ENABLE_X2APIC	0x400
 #define MSR_EBL_CR_POWERON	0x02a
 #define MSR_EBC_FREQUENCY_ID    0x02c   /* Pentium 4 only */
 #define	MSR_TEST_CTL		0x033

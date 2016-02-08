@@ -1,4 +1,4 @@
-/*	$OpenBSD: i915_irq.c,v 1.21 2015/02/12 11:11:45 jsg Exp $	*/
+/*	$OpenBSD: i915_irq.c,v 1.28 2015/07/16 18:48:51 kettenis Exp $	*/
 /* i915_irq.c -- IRQ support for the I915 -*- linux-c -*-
  */
 /*
@@ -32,6 +32,7 @@
 #include <dev/pci/drm/drmP.h>
 #include <dev/pci/drm/i915_drm.h>
 #include "i915_drv.h"
+#include "i915_trace.h"
 #include "intel_drv.h"
 
 /* For display hotplug interrupt */
@@ -276,9 +277,10 @@ static int i915_get_vblank_timestamp(struct drm_device *dev, int pipe,
 /*
  * Handle hotplug events outside the interrupt handler proper.
  */
-static void i915_hotplug_work_func(void *arg1)
+static void i915_hotplug_work_func(struct work_struct *work)
 {
-	drm_i915_private_t *dev_priv = (drm_i915_private_t *)arg1;
+	drm_i915_private_t *dev_priv = container_of(work, drm_i915_private_t,
+						    hotplug_work);
 	struct drm_device *dev = dev_priv->dev;
 	struct drm_mode_config *mode_config = &dev->mode_config;
 	struct intel_encoder *encoder;
@@ -297,7 +299,7 @@ static void i915_hotplug_work_func(void *arg1)
 }
 
 /* defined intel_pm.c */
-extern struct mutex mchdev_lock;
+extern spinlock_t mchdev_lock;
 
 static void ironlake_handle_rps_change(struct drm_device *dev)
 {
@@ -347,9 +349,9 @@ static void notify_ring(struct drm_device *dev,
 	if (ring->obj == NULL)
 		return;
 
-//	trace_i915_gem_request_complete(ring, ring->get_seqno(ring, false));
+	trace_i915_gem_request_complete(ring, ring->get_seqno(ring, false));
 
-	wakeup(ring);
+	wake_up_all(&ring->irq_queue);
 	if (i915_enable_hangcheck) {
 		dev_priv->hangcheck_count = 0;
 		timeout_add_msec(&dev_priv->hangcheck_timer,
@@ -357,9 +359,10 @@ static void notify_ring(struct drm_device *dev,
 	}
 }
 
-static void gen6_pm_rps_work(void *arg1)
+static void gen6_pm_rps_work(struct work_struct *work)
 {
-	drm_i915_private_t *dev_priv = arg1;
+	drm_i915_private_t *dev_priv = container_of(work, drm_i915_private_t,
+						    rps.work);
 	u32 pm_iir, pm_imr;
 	u8 new_delay;
 
@@ -401,9 +404,10 @@ static void gen6_pm_rps_work(void *arg1)
  * this event, userspace should try to remap the bad rows since statistically
  * it is likely the same row is more likely to go bad again.
  */
-static void ivybridge_parity_work(void *arg1)
+static void ivybridge_parity_work(struct work_struct *work)
 {
-	drm_i915_private_t *dev_priv = arg1;
+	drm_i915_private_t *dev_priv = container_of(work, drm_i915_private_t,
+						    l3_parity.error_work);
 	u32 error_status, row, bank, subbank;
 //	char *parity_event[5];
 	uint32_t misccpctl;
@@ -471,7 +475,7 @@ static void ivybridge_handle_parity_error(struct drm_device *dev)
 	I915_WRITE(GTIMR, dev_priv->gt_irq_mask);
 	spin_unlock_irqrestore(&dev_priv->irq_lock, flags);
 
-	task_add(systq, &dev_priv->l3_parity.error_task);
+	queue_work(dev_priv->wq, &dev_priv->l3_parity.error_work);
 }
 
 static void snb_gt_irq_handler(struct drm_device *dev,
@@ -519,15 +523,15 @@ static void gen6_queue_rps_work(struct drm_i915_private *dev_priv,
 	POSTING_READ(GEN6_PMIMR);
 	spin_unlock_irqrestore(&dev_priv->rps.lock, flags);
 
-	task_add(systq, &dev_priv->rps.task);
+	queue_work(dev_priv->wq, &dev_priv->rps.work);
 }
 
-static int valleyview_intr(void *arg)
+static irqreturn_t valleyview_irq_handler(void *arg)
 {
 	drm_i915_private_t *dev_priv = arg;
 	struct drm_device *dev = dev_priv->dev;
 	u32 iir, gt_iir, pm_iir;
-	int ret = IRQ_NONE;
+	irqreturn_t ret = IRQ_NONE;
 	unsigned long irqflags;
 	int pipe;
 	u32 pipe_stats[I915_MAX_PIPES];
@@ -581,7 +585,8 @@ static int valleyview_intr(void *arg)
 			DRM_DEBUG_DRIVER("hotplug event received, stat 0x%08x\n",
 					 hotplug_status);
 			if (hotplug_status & dev_priv->hotplug_supported_mask)
-				task_add(systq, &dev_priv->hotplug_task);
+				queue_work(dev_priv->wq,
+					   &dev_priv->hotplug_work);
 
 			I915_WRITE(PORT_HOTPLUG_STAT, hotplug_status);
 			I915_READ(PORT_HOTPLUG_STAT);
@@ -608,7 +613,7 @@ static void ibx_irq_handler(struct drm_device *dev, u32 pch_iir)
 	int pipe;
 
 	if (pch_iir & SDE_HOTPLUG_MASK)
-		task_add(systq, &dev_priv->hotplug_task);
+		queue_work(dev_priv->wq, &dev_priv->hotplug_work);
 
 	if (pch_iir & SDE_AUDIO_POWER_MASK)
 		DRM_DEBUG_DRIVER("PCH audio power change on port %d\n",
@@ -651,7 +656,7 @@ static void cpt_irq_handler(struct drm_device *dev, u32 pch_iir)
 	int pipe;
 
 	if (pch_iir & SDE_HOTPLUG_MASK_CPT)
-		task_add(systq, &dev_priv->hotplug_task);
+		queue_work(dev_priv->wq, &dev_priv->hotplug_work);
 
 	if (pch_iir & SDE_AUDIO_POWER_MASK_CPT)
 		DRM_DEBUG_DRIVER("PCH audio power change on port %d\n",
@@ -677,12 +682,12 @@ static void cpt_irq_handler(struct drm_device *dev, u32 pch_iir)
 					 I915_READ(FDI_RX_IIR(pipe)));
 }
 
-static int ivybridge_intr(void *arg)
+static irqreturn_t ivybridge_irq_handler(void *arg)
 {
 	drm_i915_private_t *dev_priv = arg;
 	struct drm_device *dev = dev_priv->dev;
 	u32 de_iir, gt_iir, de_ier, pm_iir;
-	int ret = IRQ_NONE;
+	irqreturn_t ret = IRQ_NONE;
 	int i;
 
 //	atomic_inc(&dev_priv->irq_received);
@@ -750,7 +755,7 @@ static void ilk_gt_irq_handler(struct drm_device *dev,
 		notify_ring(dev, &dev_priv->ring[VCS]);
 }
 
-static int ironlake_intr(void *arg)
+static irqreturn_t ironlake_irq_handler(void *arg)
 {
 	drm_i915_private_t *dev_priv = arg;
 	struct drm_device *dev = dev_priv->dev;
@@ -833,9 +838,10 @@ done:
  * Fire an error uevent so userspace can see that a hang or error
  * was detected.
  */
-static void i915_error_work_func(void *arg1)
+static void i915_error_work_func(struct work_struct *work)
 {
-	drm_i915_private_t *dev_priv = arg1;
+	drm_i915_private_t *dev_priv = container_of(work, drm_i915_private_t,
+						    error_work);
 	struct drm_device *dev = dev_priv->dev;
 #if 0
 	char *error_event[] = { "ERROR=1", NULL };
@@ -852,10 +858,7 @@ static void i915_error_work_func(void *arg1)
 			atomic_set(&dev_priv->mm.wedged, 0);
 //			kobject_uevent_env(&dev->primary->kdev.kobj, KOBJ_CHANGE, reset_done_event);
 		}
-		mtx_enter(&dev_priv->error_completion_lock);
-		dev_priv->error_completion++;
-		wakeup(&dev_priv->error_completion);
-		mtx_leave(&dev_priv->error_completion_lock);
+		complete_all(&dev_priv->error_completion);
 	}
 }
 
@@ -1460,17 +1463,17 @@ void i915_handle_error(struct drm_device *dev, bool wedged)
 	i915_report_and_clear_eir(dev);
 
 	if (wedged) {
-//		INIT_COMPLETION(dev_priv->error_completion);
+		INIT_COMPLETION(dev_priv->error_completion);
 		atomic_set(&dev_priv->mm.wedged, 1);
 
 		/*
 		 * Wakeup waiting processes so they don't hang
 		 */
 		for_each_ring(ring, dev_priv, i)
-			wakeup(ring);
+			wake_up_all(&ring->irq_queue);
 	}
 
-	task_add(systq, &dev_priv->error_task);
+	queue_work(dev_priv->wq, &dev_priv->error_work);
 }
 
 static void i915_pageflip_stall_check(struct drm_device *dev, int pipe)
@@ -1673,13 +1676,13 @@ static bool i915_hangcheck_ring_idle(struct intel_ring_buffer *ring, bool *err)
 			      ring_last_seqno(ring))) {
 		/* Issue a wake-up to catch stuck h/w. */
 #ifdef notyet
-		if (wakeup(ring) > 0) {
+		if (wakeup(&ring->irq_queue) > 0) {
 			DRM_ERROR("Hangcheck timer elapsed... %s idle\n",
 				  ring->name);
 			*err = true;
 		}
 #else
-		wakeup(ring);
+		wake_up_all(&ring->irq_queue);
 #endif
 		return true;
 	}
@@ -2149,7 +2152,7 @@ static int i8xx_irq_postinstall(struct drm_device *dev)
 	return 0;
 }
 
-static int i8xx_intr(void *arg)
+static irqreturn_t i8xx_irq_handler(void *arg)
 {
 	drm_i915_private_t *dev_priv = arg;
 	struct drm_device *dev = dev_priv->dev;
@@ -2327,7 +2330,7 @@ static int i915_irq_postinstall(struct drm_device *dev)
 	return 0;
 }
 
-static int i915_intr(void *arg)
+static irqreturn_t i915_irq_handler(void *arg)
 {
 	drm_i915_private_t *dev_priv = arg;
 	struct drm_device *dev = dev_priv->dev;
@@ -2384,7 +2387,8 @@ static int i915_intr(void *arg)
 			DRM_DEBUG_DRIVER("hotplug event received, stat 0x%08x\n",
 				  hotplug_status);
 			if (hotplug_status & dev_priv->hotplug_supported_mask)
-				task_add(systq, &dev_priv->hotplug_task);
+				queue_work(dev_priv->wq,
+					   &dev_priv->hotplug_work);
 
 			I915_WRITE(PORT_HOTPLUG_STAT, hotplug_status);
 			POSTING_READ(PORT_HOTPLUG_STAT);
@@ -2564,7 +2568,7 @@ static int i965_irq_postinstall(struct drm_device *dev)
 	return 0;
 }
 
-static int i965_intr(void *arg)
+static irqreturn_t i965_irq_handler(void *arg)
 {
 	drm_i915_private_t *dev_priv = arg;
 	struct drm_device *dev = dev_priv->dev;
@@ -2621,7 +2625,8 @@ static int i965_intr(void *arg)
 			DRM_DEBUG_DRIVER("hotplug event received, stat 0x%08x\n",
 				  hotplug_status);
 			if (hotplug_status & dev_priv->hotplug_supported_mask)
-				task_add(systq, &dev_priv->hotplug_task);
+				queue_work(dev_priv->wq,
+					   &dev_priv->hotplug_work);
 
 			I915_WRITE(PORT_HOTPLUG_STAT, hotplug_status);
 			I915_READ(PORT_HOTPLUG_STAT);
@@ -2706,11 +2711,10 @@ void intel_irq_init(struct drm_device *dev)
 {
 	struct drm_i915_private *dev_priv = dev->dev_private;
 
-	task_set(&dev_priv->hotplug_task, i915_hotplug_work_func, dev_priv);
-	task_set(&dev_priv->error_task, i915_error_work_func, dev_priv);
-	task_set(&dev_priv->rps.task, gen6_pm_rps_work, dev_priv);
-	task_set(&dev_priv->l3_parity.error_task, ivybridge_parity_work,
-	    dev_priv);
+	INIT_WORK(&dev_priv->hotplug_work, i915_hotplug_work_func);
+	INIT_WORK(&dev_priv->error_work, i915_error_work_func);
+	INIT_WORK(&dev_priv->rps.work, gen6_pm_rps_work);
+	INIT_WORK(&dev_priv->l3_parity.error_work, ivybridge_parity_work);
 
 	dev->driver->get_vblank_counter = i915_get_vblank_counter;
 	dev->max_vblank_count = 0xffffff; /* only 24 bits of frame count */
@@ -2726,7 +2730,7 @@ void intel_irq_init(struct drm_device *dev)
 	dev->driver->get_scanout_position = i915_get_crtc_scanoutpos;
 
 	if (IS_VALLEYVIEW(dev)) {
-		dev->driver->irq_handler = valleyview_intr;
+		dev->driver->irq_handler = valleyview_irq_handler;
 		dev->driver->irq_preinstall = valleyview_irq_preinstall;
 		dev->driver->irq_postinstall = valleyview_irq_postinstall;
 		dev->driver->irq_uninstall = valleyview_irq_uninstall;
@@ -2734,7 +2738,7 @@ void intel_irq_init(struct drm_device *dev)
 		dev->driver->disable_vblank = valleyview_disable_vblank;
 	} else if (IS_IVYBRIDGE(dev)) {
 		/* Share pre & uninstall handlers with ILK/SNB */
-		dev->driver->irq_handler = ivybridge_intr;
+		dev->driver->irq_handler = ivybridge_irq_handler;
 		dev->driver->irq_preinstall = ironlake_irq_preinstall;
 		dev->driver->irq_postinstall = ivybridge_irq_postinstall;
 		dev->driver->irq_uninstall = ironlake_irq_uninstall;
@@ -2742,14 +2746,14 @@ void intel_irq_init(struct drm_device *dev)
 		dev->driver->disable_vblank = ivybridge_disable_vblank;
 	} else if (IS_HASWELL(dev)) {
 		/* Share interrupts handling with IVB */
-		dev->driver->irq_handler = ivybridge_intr;
+		dev->driver->irq_handler = ivybridge_irq_handler;
 		dev->driver->irq_preinstall = ironlake_irq_preinstall;
 		dev->driver->irq_postinstall = ivybridge_irq_postinstall;
 		dev->driver->irq_uninstall = ironlake_irq_uninstall;
 		dev->driver->enable_vblank = ivybridge_enable_vblank;
 		dev->driver->disable_vblank = ivybridge_disable_vblank;
 	} else if (HAS_PCH_SPLIT(dev)) {
-		dev->driver->irq_handler = ironlake_intr;
+		dev->driver->irq_handler = ironlake_irq_handler;
 		dev->driver->irq_preinstall = ironlake_irq_preinstall;
 		dev->driver->irq_postinstall = ironlake_irq_postinstall;
 		dev->driver->irq_uninstall = ironlake_irq_uninstall;
@@ -2759,18 +2763,18 @@ void intel_irq_init(struct drm_device *dev)
 		if (INTEL_INFO(dev)->gen == 2) {
 			dev->driver->irq_preinstall = i8xx_irq_preinstall;
 			dev->driver->irq_postinstall = i8xx_irq_postinstall;
-			dev->driver->irq_handler = i8xx_intr;
+			dev->driver->irq_handler = i8xx_irq_handler;
 			dev->driver->irq_uninstall = i8xx_irq_uninstall;
 		} else if (INTEL_INFO(dev)->gen == 3) {
 			dev->driver->irq_preinstall = i915_irq_preinstall;
 			dev->driver->irq_postinstall = i915_irq_postinstall;
 			dev->driver->irq_uninstall = i915_irq_uninstall;
-			dev->driver->irq_handler = i915_intr;
+			dev->driver->irq_handler = i915_irq_handler;
 		} else {
 			dev->driver->irq_preinstall = i965_irq_preinstall;
 			dev->driver->irq_postinstall = i965_irq_postinstall;
 			dev->driver->irq_uninstall = i965_irq_uninstall;
-			dev->driver->irq_handler = i965_intr;
+			dev->driver->irq_handler = i965_irq_handler;
 		}
 		dev->driver->enable_vblank = i915_enable_vblank;
 		dev->driver->disable_vblank = i915_disable_vblank;

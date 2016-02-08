@@ -1,4 +1,4 @@
-/*	$OpenBSD: ospfd.c,v 1.83 2015/02/10 05:24:48 claudio Exp $ */
+/*	$OpenBSD: ospfd.c,v 1.85 2015/07/20 23:45:39 benno Exp $ */
 
 /*
  * Copyright (c) 2005 Claudio Jeker <claudio@openbsd.org>
@@ -511,13 +511,15 @@ main_dispatch_rde(int fd, short event, void *bula)
 void
 main_imsg_compose_ospfe(int type, pid_t pid, void *data, u_int16_t datalen)
 {
-	imsg_compose_event(iev_ospfe, type, 0, pid, -1, data, datalen);
+	if (iev_ospfe)
+		imsg_compose_event(iev_ospfe, type, 0, pid, -1, data, datalen);
 }
 
 void
 main_imsg_compose_rde(int type, pid_t pid, void *data, u_int16_t datalen)
 {
-	imsg_compose_event(iev_rde, type, 0, pid, -1, data, datalen);
+	if (iev_rde)
+		imsg_compose_event(iev_rde, type, 0, pid, -1, data, datalen);
 }
 
 void
@@ -821,6 +823,8 @@ merge_interfaces(struct area *a, struct area *xa)
 			    i->name);
 			if (ospfd_process == PROC_OSPF_ENGINE)
 				if_fsm(i, IF_EVT_DOWN);
+			else if (ospfd_process == PROC_RDE_ENGINE)
+				rde_nbr_iface_del(i);
 			LIST_REMOVE(i, entry);
 			if_del(i);
 		}

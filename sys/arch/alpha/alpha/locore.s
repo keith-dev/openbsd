@@ -1,4 +1,4 @@
-/* $OpenBSD: locore.s,v 1.38 2014/01/26 17:40:09 miod Exp $ */
+/* $OpenBSD: locore.s,v 1.43 2015/07/20 07:45:23 dlg Exp $ */
 /* $NetBSD: locore.s,v 1.94 2001/04/26 03:10:44 ross Exp $ */
 
 /*-
@@ -887,27 +887,20 @@ LEAF(copystr, 4)
 
 NESTED(copyinstr, 4, 16, ra, IM_RA|IM_S0, 0)
 	LDGP(pv)
+	ldiq	t0, VM_MAX_ADDRESS		/* make sure that src addr   */
+	cmpult	a0, t0, t1			/* is in user space.	     */
+	beq	t1, copyfault			/* if it's not, error out.   */
 	lda	sp, -16(sp)			/* set up stack frame	     */
 	stq	ra, (16-8)(sp)			/* save ra		     */
 	stq	s0, (16-16)(sp)			/* save s0		     */
-	ldiq	t0, VM_MAX_ADDRESS		/* make sure that src addr   */
-	cmpult	a0, t0, t1			/* is in user space.	     */
-	beq	t1, copyerr			/* if it's not, error out.   */
 	/* Note: GET_CURPROC clobbers v0, t0, t8...t11. */
 	GET_CURPROC
-	mov	v0, s0
+	ldq	t0, 0(v0)
+	ldq	s0, P_ADDR(t0)
 	lda	v0, copyerr			/* set up fault handler.     */
-	.set noat
-	ldq	at_reg, 0(s0)
-	ldq	at_reg, P_ADDR(at_reg)
-	stq	v0, U_PCB_ONFAULT(at_reg)
-	.set at
+	stq	v0, U_PCB_ONFAULT(s0)
 	CALL(copystr)				/* do the copy.		     */
-	.set noat
-	ldq	at_reg, 0(s0)			/* kill the fault handler.   */
-	ldq	at_reg, P_ADDR(at_reg)
-	stq	zero, U_PCB_ONFAULT(at_reg)
-	.set at
+	stq	zero, U_PCB_ONFAULT(s0)		/* kill the fault handler.   */
 	ldq	ra, (16-8)(sp)			/* restore ra.		     */
 	ldq	s0, (16-16)(sp)			/* restore s0.		     */
 	lda	sp, 16(sp)			/* kill stack frame.	     */
@@ -916,27 +909,20 @@ NESTED(copyinstr, 4, 16, ra, IM_RA|IM_S0, 0)
 
 NESTED(copyoutstr, 4, 16, ra, IM_RA|IM_S0, 0)
 	LDGP(pv)
+	ldiq	t0, VM_MAX_ADDRESS		/* make sure that dest addr  */
+	cmpult	a1, t0, t1			/* is in user space.	     */
+	beq	t1, copyfault			/* if it's not, error out.   */
 	lda	sp, -16(sp)			/* set up stack frame	     */
 	stq	ra, (16-8)(sp)			/* save ra		     */
 	stq	s0, (16-16)(sp)			/* save s0		     */
-	ldiq	t0, VM_MAX_ADDRESS		/* make sure that dest addr  */
-	cmpult	a1, t0, t1			/* is in user space.	     */
-	beq	t1, copyerr			/* if it's not, error out.   */
 	/* Note: GET_CURPROC clobbers v0, t0, t8...t11. */
 	GET_CURPROC
-	mov	v0, s0
+	ldq	t0, 0(v0)
+	ldq	s0, P_ADDR(t0)
 	lda	v0, copyerr			/* set up fault handler.     */
-	.set noat
-	ldq	at_reg, 0(s0)
-	ldq	at_reg, P_ADDR(at_reg)
-	stq	v0, U_PCB_ONFAULT(at_reg)
-	.set at
+	stq	v0, U_PCB_ONFAULT(s0)
 	CALL(copystr)				/* do the copy.		     */
-	.set noat
-	ldq	at_reg, 0(s0)			/* kill the fault handler.   */
-	ldq	at_reg, P_ADDR(at_reg)
-	stq	zero, U_PCB_ONFAULT(at_reg)
-	.set at
+	stq	zero, U_PCB_ONFAULT(s0)		/* kill the fault handler.   */
 	ldq	ra, (16-8)(sp)			/* restore ra.		     */
 	ldq	s0, (16-16)(sp)			/* restore s0.		     */
 	lda	sp, 16(sp)			/* kill stack frame.	     */
@@ -961,20 +947,13 @@ NESTED(kcopy, 3, 32, ra, IM_RA|IM_S0|IM_S1, 0)
 	stq	s1, (32-24)(sp)			/* save s1		     */
 	/* Note: GET_CURPROC clobbers v0, t0, t8...t11. */
 	GET_CURPROC
-	mov	v0, s1
+	ldq	t0, 0(v0)
+	ldq	s1, P_ADDR(t0)
 	lda	v0, kcopyerr			/* set up fault handler.     */
-	.set noat
-	ldq	at_reg, 0(s1)
-	ldq	at_reg, P_ADDR(at_reg)
-	ldq	s0, U_PCB_ONFAULT(at_reg)	/* save old handler.	     */
-	stq	v0, U_PCB_ONFAULT(at_reg)
-	.set at
+	ldq	s0, U_PCB_ONFAULT(s1)		/* save old handler.	     */
+	stq	v0, U_PCB_ONFAULT(s1)
 	CALL(bcopy)				/* do the copy.		     */
-	.set noat
-	ldq	at_reg, 0(s1)			/* restore the old handler.  */
-	ldq	at_reg, P_ADDR(at_reg)
-	stq	s0, U_PCB_ONFAULT(at_reg)
-	.set at
+	stq	s0, U_PCB_ONFAULT(s1)
 	ldq	ra, (32-8)(sp)			/* restore ra.		     */
 	ldq	s0, (32-16)(sp)			/* restore s0.		     */
 	ldq	s1, (32-24)(sp)			/* restore s1.		     */
@@ -984,12 +963,7 @@ NESTED(kcopy, 3, 32, ra, IM_RA|IM_S0|IM_S1, 0)
 	END(kcopy)
 
 LEAF(kcopyerr, 0)
-	LDGP(pv)
-	.set noat
-	ldq	at_reg, 0(s1)			/* restore the old handler.  */
-	ldq	at_reg, P_ADDR(at_reg)
-	stq	s0, U_PCB_ONFAULT(at_reg)
-	.set at
+	stq	s0, U_PCB_ONFAULT(s1)		/* restore the old handler.  */
 	ldq	ra, (32-8)(sp)			/* restore ra.		     */
 	ldq	s0, (32-16)(sp)			/* restore s0.		     */
 	ldq	s1, (32-24)(sp)			/* restore s1.		     */
@@ -1000,27 +974,20 @@ END(kcopyerr)
 
 NESTED(copyin, 3, 16, ra, IM_RA|IM_S0, 0)
 	LDGP(pv)
+	ldiq	t0, VM_MAX_ADDRESS		/* make sure that src addr   */
+	cmpult	a0, t0, t1			/* is in user space.	     */
+	beq	t1, copyfault			/* if it's not, error out.   */
 	lda	sp, -16(sp)			/* set up stack frame	     */
 	stq	ra, (16-8)(sp)			/* save ra		     */
 	stq	s0, (16-16)(sp)			/* save s0		     */
-	ldiq	t0, VM_MAX_ADDRESS		/* make sure that src addr   */
-	cmpult	a0, t0, t1			/* is in user space.	     */
-	beq	t1, copyerr			/* if it's not, error out.   */
 	/* Note: GET_CURPROC clobbers v0, t0, t8...t11. */
 	GET_CURPROC
-	mov	v0, s0
+	ldq	t0, 0(v0)
+	ldq	s0, P_ADDR(t0)
 	lda	v0, copyerr			/* set up fault handler.     */
-	.set noat
-	ldq	at_reg, 0(s0)
-	ldq	at_reg, P_ADDR(at_reg)
-	stq	v0, U_PCB_ONFAULT(at_reg)
-	.set at
+	stq	v0, U_PCB_ONFAULT(s0)
 	CALL(bcopy)				/* do the copy.		     */
-	.set noat
-	ldq	at_reg, 0(s0)			/* kill the fault handler.   */
-	ldq	at_reg, P_ADDR(at_reg)
-	stq	zero, U_PCB_ONFAULT(at_reg)
-	.set at
+	stq	zero, U_PCB_ONFAULT(s0)		/* kill the fault handler.   */
 	ldq	ra, (16-8)(sp)			/* restore ra.		     */
 	ldq	s0, (16-16)(sp)			/* restore s0.		     */
 	lda	sp, 16(sp)			/* kill stack frame.	     */
@@ -1030,27 +997,21 @@ NESTED(copyin, 3, 16, ra, IM_RA|IM_S0, 0)
 
 NESTED(copyout, 3, 16, ra, IM_RA|IM_S0, 0)
 	LDGP(pv)
+	ldiq	t0, VM_MAX_ADDRESS		/* make sure that dest addr  */
+	cmpult	a1, t0, t1			/* is in user space.	     */
+	beq	t1, copyfault			/* if it's not, error out.   */
 	lda	sp, -16(sp)			/* set up stack frame	     */
 	stq	ra, (16-8)(sp)			/* save ra		     */
 	stq	s0, (16-16)(sp)			/* save s0		     */
-	ldiq	t0, VM_MAX_ADDRESS		/* make sure that dest addr  */
-	cmpult	a1, t0, t1			/* is in user space.	     */
-	beq	t1, copyerr			/* if it's not, error out.   */
 	/* Note: GET_CURPROC clobbers v0, t0, t8...t11. */
 	GET_CURPROC
-	mov	v0, s0
+	GET_CURPROC
+	ldq	t0, 0(v0)
+	ldq	s0, P_ADDR(t0)
 	lda	v0, copyerr			/* set up fault handler.     */
-	.set noat
-	ldq	at_reg, 0(s0)
-	ldq	at_reg, P_ADDR(at_reg)
-	stq	v0, U_PCB_ONFAULT(at_reg)
-	.set at
+	stq	v0, U_PCB_ONFAULT(s0)
 	CALL(bcopy)				/* do the copy.		     */
-	.set noat
-	ldq	at_reg, 0(s0)			/* kill the fault handler.   */
-	ldq	at_reg, P_ADDR(at_reg)
-	stq	zero, U_PCB_ONFAULT(at_reg)
-	.set at
+	stq	zero, U_PCB_ONFAULT(s0)		/* kill the fault handler.   */
 	ldq	ra, (16-8)(sp)			/* restore ra.		     */
 	ldq	s0, (16-16)(sp)			/* restore s0.		     */
 	lda	sp, 16(sp)			/* kill stack frame.	     */
@@ -1060,9 +1021,11 @@ NESTED(copyout, 3, 16, ra, IM_RA|IM_S0, 0)
 
 LEAF(copyerr, 0)
 	LDGP(pv)
+	stq	zero, U_PCB_ONFAULT(s0)		/* kill the fault handler.   */
 	ldq	ra, (16-8)(sp)			/* restore ra.		     */
 	ldq	s0, (16-16)(sp)			/* restore s0.		     */
 	lda	sp, 16(sp)			/* kill stack frame.	     */
+copyfault:
 	ldiq	v0, EFAULT			/* return EFAULT.	     */
 	RET
 END(copyerr)

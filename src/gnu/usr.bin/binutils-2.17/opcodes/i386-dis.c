@@ -103,6 +103,7 @@ static void BadOp (void);
 static void SEG_Fixup (int, int);
 static void VMX_Fixup (int, int);
 static void REP_Fixup (int, int);
+static void OP_0f38 (int, int);
 static void OP_0f3a (int, int);
 
 struct dis_private {
@@ -316,6 +317,8 @@ fetch_data (struct disassemble_info *info, bfd_byte *addr)
 #define VM OP_VMX, q_mode
 #define OPSUF OP_3DNowSuffix, 0
 #define OPSIMD OP_SIMD_Suffix, 0
+#define OP0FAE OP_0fae, v_mode
+#define OP0F38 OP_0f38, 0
 #define OP0F3A OP_0f3a, 0
 
 /* Used handle "rep" prefix for string instructions.  */
@@ -1469,14 +1472,14 @@ static const struct dis386 grps[][8] = {
   },
   /* GRP13 */
   {
-    { "fxsave", Ev, XX, XX },
-    { "fxrstor", Ev, XX, XX },
-    { "ldmxcsr", Ev, XX, XX },
-    { "stmxcsr", Ev, XX, XX },
-    { "xsave",	Ev, XX, XX },
-    { "xrstor", OP_0fae, v_mode, XX, XX },
-    { "xsaveopt", OP_0fae, v_mode, XX, XX },
-    { "clflush", OP_0fae, v_mode, XX, XX },
+    { "fxsave",   OP0FAE, XX, XX },
+    { "fxrstor",  OP0FAE, XX, XX },
+    { "ldmxcsr",  OP0FAE, XX, XX },
+    { "stmxcsr",  OP0FAE, XX, XX },
+    { "xsave",	  Ev, XX, XX },
+    { "xrstor",   OP0FAE, XX, XX },
+    { "xsaveopt", OP0FAE, XX, XX },
+    { "clflush",  OP0FAE, XX, XX },
   },
   /* GRP14 */
   {
@@ -2001,11 +2004,11 @@ static const struct dis386 three_byte_table[][256] = {
     { "(bad)",		XX, XX, XX },
     { "(bad)",		XX, XX, XX },
     { "(bad)",		XX, XX, XX },
-    { "aesimc",		XM, XM, XX },
-    { "aesenc",		XM, XM, XX },
-    { "aesdec",		XM, XM, XX },
-    { "aesenclast",	XM, XM, XX },
-    { "aesdeclast",	XM, XM, XX },
+    { "aesimc",		OP0F38, XX, XX },
+    { "aesenc",		OP0F38, XX, XX },
+    { "aesdec",		OP0F38, XX, XX },
+    { "aesenclast",	OP0F38, XX, XX },
+    { "aesdeclast",	OP0F38, XX, XX },
     /* e0 */
     { "(bad)",		XX, XX, XX },
     { "(bad)",		XX, XX, XX },
@@ -2116,7 +2119,7 @@ static const struct dis386 three_byte_table[][256] = {
     { "(bad)",		XX, XX, XX },
     { "(bad)",		XX, XX, XX },
     { "(bad)",		XX, XX, XX },
-    { "",		OP0F3A, XX, XX },
+    { "",		OP0F3A, XX, XX },	/* pclmul */
     { "(bad)",		XX, XX, XX },
     { "(bad)",		XX, XX, XX },
     { "(bad)",		XX, XX, XX },
@@ -2280,7 +2283,7 @@ static const struct dis386 three_byte_table[][256] = {
     { "(bad)",		XX, XX, XX },
     { "(bad)",		XX, XX, XX },
     { "(bad)",		XX, XX, XX },
-    { "",		OP0F3A, XX, XX },
+    { "",		OP0F3A, XX, XX },	/* aeskeygenassist */
     /* e0 */
     { "(bad)",		XX, XX, XX },
     { "(bad)",		XX, XX, XX },
@@ -4831,18 +4834,23 @@ OP_0fae (int bytemode, int sizeflag)
 	strcpy (obuf + strlen (obuf) - sizeof ("xsaveopt") + 1, "mfence");
       else if (reg == 5)
 	strcpy (obuf + strlen (obuf) - sizeof ("xrstor") + 1, "lfence");
-      bytemode = 0;
 
-      if (reg < 5 || rm != 0)
+      if (reg < 4 && prefixes == PREFIX_REPZ)
+        {
+	  if (reg == 0)
+	    strcpy (obuf, "rdfsbase");
+	  else if (reg == 1)
+	    strcpy (obuf, "rdgsbase");
+	  else if (reg == 2)
+	    strcpy (obuf, "wrfsbase");
+	  else
+	    strcpy (obuf, "wrgsbase");
+        }
+      else if (reg < 5 || rm != 0)
 	{
 	  BadOp ();	/* bad sfence, mfence, or lfence */
 	  return;
 	}
-    }
-  else if (reg < 5)
-    {
-      BadOp ();		/* bad sfence, mfence, or lfence */
-      return;
     }
 
   OP_E (bytemode, sizeflag);
@@ -5428,13 +5436,14 @@ OP_0f3a (bytemode, sizeflag)
   unsigned int i, xmms;
   unsigned char op, imm;
 
-  FETCH_DATA (the_info, codep + 1);
   obufp = obuf + strlen (obuf);
 
+  /* the last byte of the opcode has already been consumed by the caller */
+  codep--;
   op = *codep;
   codep++;
 
-  FETCH_DATA (the_info, codep + 1);
+  FETCH_DATA (the_info, codep + 2);
 
   /* save xmm pair */
   xmms = XMM_DST (rex, *codep) << 8;
@@ -5442,7 +5451,6 @@ OP_0f3a (bytemode, sizeflag)
   codep++;
 
   /* save immediate field */
-  FETCH_DATA (the_info, codep + 2);
   imm = *codep;
   codep++;
 
@@ -5485,4 +5493,26 @@ OP_0f3a (bytemode, sizeflag)
 
    used_prefixes |= (prefixes & PREFIX_DATA);
    USED_REX(rex);
+}
+
+static void
+OP_0f38 (int bytemode ATTRIBUTE_UNUSED, int sizeflag ATTRIBUTE_UNUSED)
+{
+  unsigned int xmms;
+
+  FETCH_DATA (the_info, codep + 1);
+
+  /* save xmm pair */
+  xmms = XMM_DST (rex, *codep) << 8;
+  xmms |= XMM_SRC (rex, *codep);
+  codep++;
+
+  sprintf (scratchbuf, "%%xmm%d,", xmms & 0xff);
+  oappend (scratchbuf);
+  sprintf (scratchbuf, "%%xmm%d", xmms >> 8);
+  oappend (scratchbuf);
+
+  /* Consume mandatory prefix */
+  used_prefixes |= (prefixes & PREFIX_DATA);
+  USED_REX(rex);
 }

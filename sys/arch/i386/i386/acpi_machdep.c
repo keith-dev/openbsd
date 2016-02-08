@@ -1,4 +1,4 @@
-/*	$OpenBSD: acpi_machdep.c,v 1.57 2014/11/16 12:30:57 deraadt Exp $	*/
+/*	$OpenBSD: acpi_machdep.c,v 1.59 2015/05/30 08:41:30 kettenis Exp $	*/
 /*
  * Copyright (c) 2005 Thorsten Lockert <tholo@sigmasoft.com>
  *
@@ -199,7 +199,7 @@ acpi_acquire_glk(uint32_t *lock)
 		new = (old & ~GL_BIT_PENDING) | GL_BIT_OWNED;
 		if ((old & GL_BIT_OWNED) != 0)
 			new |= GL_BIT_PENDING;
-	} while (i386_atomic_cas_int32(lock, old, new) != old);
+	} while (atomic_cas_uint(lock, old, new) != old);
 
 	return ((new & GL_BIT_PENDING) == 0);
 }
@@ -217,12 +217,10 @@ acpi_release_glk(uint32_t *lock)
 	do {
 		old = *lock;
 		new = old & ~(GL_BIT_PENDING | GL_BIT_OWNED);
-	} while (i386_atomic_cas_int32(lock, old, new) != old);
+	} while (atomic_cas_uint(lock, old, new) != old);
 
 	return ((old & GL_BIT_PENDING) != 0);
 }
-
-#ifndef SMALL_KERNEL
 
 void
 acpi_attach_machdep(struct acpi_softc *sc)
@@ -231,11 +229,13 @@ acpi_attach_machdep(struct acpi_softc *sc)
 
 	sc->sc_interrupt = isa_intr_establish(NULL, sc->sc_fadt->sci_int,
 	    IST_LEVEL, IPL_TTY, acpi_interrupt, sc, sc->sc_dev.dv_xname);
+	cpuresetfn = acpi_reset;
+
+#ifndef SMALL_KERNEL
 	acpiapm_open = acpiopen;
 	acpiapm_close = acpiclose;
 	acpiapm_ioctl = acpiioctl;
 	acpiapm_kqfilter = acpikqfilter;
-	cpuresetfn = acpi_reset;
 
 	/*
 	 * Sanity check before setting up trampoline.
@@ -245,7 +245,10 @@ acpi_attach_machdep(struct acpi_softc *sc)
 
 	bcopy(acpi_real_mode_resume, (caddr_t)ACPI_TRAMPOLINE,
 	    acpi_resume_end - acpi_real_mode_resume);
+#endif /* SMALL_KERNEL */
 }
+
+#ifndef SMALL_KERNEL
 
 #if NLAPIC > 0
 int	save_lapic_tpr;

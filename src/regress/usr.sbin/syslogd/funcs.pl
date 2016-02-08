@@ -1,4 +1,4 @@
-#	$OpenBSD: funcs.pl,v 1.18 2015/02/12 23:16:02 bluhm Exp $
+#	$OpenBSD: funcs.pl,v 1.23 2015/07/19 20:18:18 bluhm Exp $
 
 # Copyright (c) 2010-2015 Alexander Bluhm <bluhm@openbsd.org>
 #
@@ -63,6 +63,8 @@ sub write_log {
 	my $self = shift;
 
 	write_message($self, $testlog);
+	IO::Handle::flush(\*STDOUT);
+	${$self->{syslogd}}->loggrep($testlog, 2);
 	write_shutdown($self);
 }
 
@@ -73,6 +75,8 @@ sub write_between2logs {
 	write_message($self, $firstlog);
 	$func->($self, @_);
 	write_message($self, $testlog);
+	IO::Handle::flush(\*STDOUT);
+	${$self->{syslogd}}->loggrep($testlog, 2);
 	write_shutdown($self);
 }
 
@@ -80,18 +84,18 @@ sub write_message {
 	my $self = shift;
 
 	if (defined($self->{connectdomain})) {
+		my $msg = join("", @_);
 		if ($self->{connectproto} eq "udp") {
-			# writing udp packets works only with syswrite()
-			my $msg = join("", @_);
+			# writing UDP packets works only with syswrite()
 			defined(my $n = syswrite(STDOUT, $msg))
 			    or die ref($self), " write log line failed: $!";
 			$n == length($msg)
 			    or die ref($self), " short UDP write";
-			print STDERR $msg, "\n";
 		} else {
-			print @_;
-			print STDERR @_, "\n";
+			print $msg;
+			print "\n" if $self->{connectproto} eq "tcp";
 		}
+		print STDERR "<<< $msg\n";
 	} else {
 		syslog(LOG_INFO, @_);
 	}
@@ -121,6 +125,23 @@ sub write_lengths {
 	write_chars($self, $lenghts, $tail);
 }
 
+sub generate_chars {
+	my ($len) = @_;
+
+	my $msg = "";
+	my $char = '0';
+	for (my $i = 0; $i < $len; $i++) {
+		$msg .= $char;
+		given ($char) {
+			when(/9/)       { $char = 'A' }
+			when(/Z/)       { $char = 'a' }
+			when(/z/)       { $char = '0' }
+			default         { $char++ }
+		}
+	}
+	return $msg;
+}
+
 sub write_chars {
 	my $self = shift;
 	my ($length, $tail) = @_;
@@ -129,17 +150,7 @@ sub write_chars {
 		my $t = $tail // "";
 		substr($t, 0, length($t) - $len, "")
 		    if length($t) && length($t) > $len;
-		my $msg = "";
-		my $char = '0';
-		for (my $i = 0; $i < $len - length($t); $i++) {
-			$msg .= $char;
-			given ($char) {
-				when(/9/)       { $char = 'A' }
-				when(/Z/)       { $char = 'a' }
-				when(/z/)       { $char = '0' }
-				default         { $char++ }
-			}
-		}
+		my $msg = generate_chars($len - length($t));
 		$msg .= $t if length($t);
 		write_message($self, $msg);
 		# if client is sending too fast, syslogd will not see everything
@@ -150,14 +161,25 @@ sub write_chars {
 sub write_unix {
 	my $self = shift;
 	my $path = shift || "/dev/log";
+	my $id = shift // $path;
 
 	my $u = IO::Socket::UNIX->new(
 	    Type  => SOCK_DGRAM,
 	    Peer => $path,
 	) or die ref($self), " connect to $path unix socket failed: $!";
-	my $msg = get_testlog(). " $path unix socket";
+	my $msg = "id $id unix socket: $testlog";
 	print $u $msg;
-	print STDERR $msg, "\n";
+	print STDERR "<<< $msg\n";
+}
+
+sub write_tcp {
+	my $self = shift;
+	my $fh = shift || \*STDOUT;
+	my $id = shift // $fh;
+
+	my $msg = "id $id tcp socket: $testlog";
+	print $fh "$msg\n";
+	print STDERR "<<< $msg\n";
 }
 
 ########################################################################
@@ -191,7 +213,7 @@ sub read_message {
 	local $_;
 	for (;;) {
 		if ($self->{listenproto} eq "udp") {
-			# reading udp packets works only with sysread()
+			# reading UDP packets works only with sysread()
 			defined(my $n = sysread(STDIN, $_, 8194))
 			    or die ref($self), " read log line failed: $!";
 			last if $n == 0;
@@ -211,6 +233,10 @@ sub read_message {
 
 sub get_testlog {
 	return $testlog;
+}
+
+sub get_testgrep {
+	return qr/$testlog$/;
 }
 
 sub get_firstlog {
@@ -248,12 +274,13 @@ sub check_logs {
 
 	check_log($c, $r, $s, @$m);
 	check_out($r, %args);
-	check_stat($r, %args);
-	check_kdump($c, $r, $s);
+	check_fstat($c, $r, $s);
+	check_ktrace($c, $r, $s);
 	if (my $file = $s->{"outfile"}) {
-		my $pattern = $s->{filegrep} || $testlog;
+		my $pattern = $s->{filegrep} || get_testgrep();
 		check_pattern(ref $s, $file, $pattern, \&filegrep);
 	}
+	check_multifile(@{$args{multifile} || []});
 }
 
 sub compare($$) {
@@ -297,7 +324,7 @@ sub check_pattern {
 sub check_log {
 	foreach my $proc (@_) {
 		next unless $proc && !$proc->{nocheck};
-		my $pattern = $proc->{loggrep} || $testlog;
+		my $pattern = $proc->{loggrep} || get_testgrep();
 		check_pattern(ref $proc, $proc, $pattern, \&loggrep);
 	}
 }
@@ -318,19 +345,16 @@ sub check_out {
 	foreach my $name (qw(file pipe)) {
 		next if $args{$name}{nocheck};
 		my $file = $r->{"out$name"} or die;
-		my $pattern = $args{$name}{loggrep} || $testlog;
+		my $pattern = $args{$name}{loggrep} || get_testgrep();
 		check_pattern($name, $file, $pattern, \&filegrep);
 	}
 }
 
-sub check_stat {
-	my ($r, %args) = @_;
-
-	foreach my $name (qw(fstat)) {
-		next unless $r && $r->{$name};
-		my $file = $r->{"${name}file"} or die;
-		my $pattern = $args{$name}{loggrep} or die;
-		check_pattern($name, $file, $pattern, \&filegrep);
+sub check_fstat {
+	foreach my $proc (@_) {
+		my $pattern = $proc && $proc->{fstat} or next;
+		my $file = $proc->{fstatfile} or die;
+		check_pattern("fstat", $file, $pattern, \&filegrep);
 	}
 }
 
@@ -343,12 +367,11 @@ sub filegrep {
 	    grep { /$pattern/ } <$fh> : first { /$pattern/ } <$fh>;
 }
 
-sub check_kdump {
+sub check_ktrace {
 	foreach my $proc (@_) {
-		next unless $proc && $proc->{ktrace};
+		my $pattern = $proc && $proc->{ktrace} or next;
 		my $file = $proc->{ktracefile} or die;
-		my $pattern = $proc->{kdump} or die;
-		check_pattern(ref $proc, $file, $pattern, \&kdumpgrep);
+		check_pattern("ktrace", $file, $pattern, \&kdumpgrep);
 	}
 }
 
@@ -364,6 +387,22 @@ sub kdumpgrep {
 	    "Close pipe from '@cmd' failed: $!" :
 	    "Command '@cmd' failed: $?";
 	return wantarray ? @matches : $matches[0];
+}
+
+sub create_multifile {
+	for (my $i = 0; $i < @_; $i++) {
+		my $file = "file-$i.log";
+		open(my $fh, '>', $file)
+		    or die "Create $file failed: $!";
+	}
+}
+
+sub check_multifile {
+	for (my $i = 0; $i < @_; $i++) {
+		my $file = "file-$i.log";
+		my $pattern = $_[$i]{loggrep} or die;
+		check_pattern("multifile $i", $file, $pattern, \&filegrep);
+	}
 }
 
 1;

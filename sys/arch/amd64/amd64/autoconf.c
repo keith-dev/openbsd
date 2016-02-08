@@ -1,4 +1,4 @@
-/*	$OpenBSD: autoconf.c,v 1.41 2014/12/16 18:30:03 tedu Exp $	*/
+/*	$OpenBSD: autoconf.c,v 1.43 2015/07/17 21:53:56 mlarkin Exp $	*/
 /*	$NetBSD: autoconf.c,v 1.1 2003/04/26 18:39:26 fvdl Exp $	*/
 
 /*-
@@ -70,8 +70,6 @@
 #include <machine/cpufunc.h>
 #include <machine/biosvar.h>
 
-#include <dev/cons.h>
-
 #include "ioapic.h"
 #include "lapic.h"
 
@@ -81,13 +79,6 @@
 
 #if NLAPIC > 0
 #include <machine/i82489var.h>
-#endif
-
-#if 0
-#include "bios32.h"
-#if NBIOS32 > 0
-#include <machine/bios32.h>
-#endif
 #endif
 
 int	cold = 1;	/* if 1, still working on cold-start */
@@ -116,10 +107,6 @@ extern int	amd64_has_aesni;
 void
 cpu_configure(void)
 {
-#if NBIOS32 > 0
-	bios32_init();
-#endif
-
 	x86_64_proc0_tss_ldt_init();
 
 	if (config_rootfound("mainbus", NULL) == NULL)

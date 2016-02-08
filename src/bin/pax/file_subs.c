@@ -1,4 +1,4 @@
-/*	$OpenBSD: file_subs.c,v 1.44 2015/02/21 22:48:23 guenther Exp $	*/
+/*	$OpenBSD: file_subs.c,v 1.47 2015/03/19 05:14:24 guenther Exp $	*/
 /*	$NetBSD: file_subs.c,v 1.4 1995/03/21 09:07:18 cgd Exp $	*/
 
 /*-
@@ -56,10 +56,6 @@ mk_link(char *, struct stat *, char *, int);
  * and setting access modes, uid/gid and times of files
  */
 
-#define FILEBITS		(S_ISVTX | S_IRWXU | S_IRWXG | S_IRWXO)
-#define SETBITS			(S_ISUID | S_ISGID)
-#define ABITS			(FILEBITS | SETBITS)
-
 /*
  * file_creat()
  *	Create and open a file.
@@ -86,7 +82,7 @@ file_creat(ARCHD *arcn)
 	 * first with lstat.
 	 */
 	file_mode = arcn->sb.st_mode & FILEBITS;
-	if ((fd = open(arcn->name, O_WRONLY | O_CREAT | O_TRUNC | O_EXCL,
+	if ((fd = open(arcn->name, O_WRONLY | O_CREAT | O_EXCL,
 	    file_mode)) >= 0)
 		return(fd);
 
@@ -151,8 +147,8 @@ file_close(ARCHD *arcn, int fd)
 	if (pmode)
 		fset_pmode(arcn->name, fd, arcn->sb.st_mode);
 	if (patime || pmtime)
-		fset_ftime(arcn->name, fd, arcn->sb.st_mtime,
-		    arcn->sb.st_atime, 0);
+		fset_ftime(arcn->name, fd, &arcn->sb.st_mtim,
+		    &arcn->sb.st_atim, 0);
 	if (close(fd) < 0)
 		syswarn(0, errno, "Unable to close file descriptor on %s",
 		    arcn->name);
@@ -170,6 +166,7 @@ int
 lnk_creat(ARCHD *arcn)
 {
 	struct stat sb;
+	int res;
 
 	/*
 	 * we may be running as root, so we have to be sure that link target
@@ -187,7 +184,18 @@ lnk_creat(ARCHD *arcn)
 		return(-1);
 	}
 
-	return(mk_link(arcn->ln_name, &sb, arcn->name, 0));
+	res = mk_link(arcn->ln_name, &sb, arcn->name, 0);
+	if (res == 0) {
+		/* check for a hardlink to a placeholder symlink */
+		res = sltab_add_link(arcn->name, &sb);
+
+		if (res < 0) {
+			/* arrgh, it failed, clean up */
+			unlink(arcn->name);
+		}
+	}
+
+	return (res);
 }
 
 /*
@@ -291,6 +299,7 @@ mk_link(char *to, struct stat *to_sb, char *from, int ign)
 				syswarn(1, errno, "Unable to remove %s", from);
 				return(-1);
 			}
+			delete_dir(sb.st_dev, sb.st_ino);
 		} else if (unlink(from) < 0) {
 			if (!ign) {
 				syswarn(1, errno, "Unable to remove %s", from);
@@ -344,7 +353,7 @@ node_creat(ARCHD *arcn)
 	struct stat sb;
 	char target[PATH_MAX];
 	char *nm = arcn->name;
-	int len;
+	int len, defer_pmode = 0;
 
 	/*
 	 * create node based on type, if that fails try to unlink the node and
@@ -404,7 +413,21 @@ badlink:
 			    nm);
 			return(-1);
 		case PAX_SLK:
-			res = symlink(arcn->ln_name, nm);
+			if (arcn->ln_name[0] != '/' &&
+			    !has_dotdot(arcn->ln_name))
+				res = symlink(arcn->ln_name, nm);
+			else {
+				/*
+				 * absolute symlinks and symlinks with ".."
+				 * have to be deferred to prevent the archive
+				 * from bootstrapping itself to outside the
+				 * working directory.
+				 */
+				res = sltab_add_sym(nm, arcn->ln_name,
+				    arcn->sb.st_mode);
+				if (res == 0)
+					defer_pmode = 1;
+			}
 			break;
 		case PAX_CTG:
 		case PAX_HLK:
@@ -458,7 +481,7 @@ badlink:
 	 */
 	if (!pmode || res)
 		arcn->sb.st_mode &= ~(SETBITS);
-	if (pmode)
+	if (pmode && !defer_pmode)
 		set_pmode(nm, arcn->sb.st_mode);
 
 	if (arcn->type == PAX_DIR && strcmp(NM_CPIO, argv0) != 0) {
@@ -469,37 +492,40 @@ badlink:
 		 * rights. This allows nodes in the archive that are children
 		 * of this directory to be extracted without failure. Both time
 		 * and modes will be fixed after the entire archive is read and
-		 * before pax exits.
+		 * before pax exits.  To do that safely, we want the dev+ino
+		 * of the directory we created.
 		 */
-		if (access(nm, R_OK | W_OK | X_OK) < 0) {
-			if (lstat(nm, &sb) < 0) {
-				syswarn(0, errno,"Could not access %s (stat)",
-				    arcn->name);
-				set_pmode(nm,file_mode | S_IRWXU);
-			} else {
-				/*
-				 * We have to add rights to the dir, so we make
-				 * sure to restore the mode. The mode must be
-				 * restored AS CREATED and not as stored if
-				 * pmode is not set.
-				 */
-				set_pmode(nm,
-				    ((sb.st_mode & FILEBITS) | S_IRWXU));
-				if (!pmode)
-					arcn->sb.st_mode = sb.st_mode;
-			}
+		if (lstat(nm, &sb) < 0) {
+			syswarn(0, errno,"Could not access %s (stat)", nm);
+		} else if (access(nm, R_OK | W_OK | X_OK) < 0) {
+			/*
+			 * We have to add rights to the dir, so we make
+			 * sure to restore the mode. The mode must be
+			 * restored AS CREATED and not as stored if
+			 * pmode is not set.
+			 */
+			set_pmode(nm,
+			    ((sb.st_mode & FILEBITS) | S_IRWXU));
+			if (!pmode)
+				arcn->sb.st_mode = sb.st_mode;
 
 			/*
-			 * we have to force the mode to what was set here,
-			 * since we changed it from the default as created.
+			 * we have to force the mode to what was set
+			 * here, since we changed it from the default
+			 * as created.
 			 */
+			arcn->sb.st_dev = sb.st_dev;
+			arcn->sb.st_ino = sb.st_ino;
 			add_dir(nm, &(arcn->sb), 1);
-		} else if (pmode || patime || pmtime)
+		} else if (pmode || patime || pmtime) {
+			arcn->sb.st_dev = sb.st_dev;
+			arcn->sb.st_ino = sb.st_ino;
 			add_dir(nm, &(arcn->sb), 0);
+		}
 	}
 
 	if (patime || pmtime)
-		set_ftime(nm, arcn->sb.st_mtime, arcn->sb.st_atime, 0);
+		set_ftime(nm, &arcn->sb.st_mtim, &arcn->sb.st_atim, 0);
 	return(0);
 }
 
@@ -539,6 +565,7 @@ unlnk_exist(char *name, int type)
 			syswarn(1,errno,"Unable to remove directory %s", name);
 			return(-1);
 		}
+		delete_dir(sb.st_dev, sb.st_ino);
 		return(0);
 	}
 
@@ -649,14 +676,14 @@ chk_path(char *name, uid_t st_uid, gid_t st_gid)
  */
 
 void
-set_ftime(char *fnm, time_t mtime, time_t atime, int frc)
+set_ftime(const char *fnm, const struct timespec *mtimp,
+    const struct timespec *atimp, int frc)
 {
 	struct timespec tv[2];
 
-	tv[0].tv_sec = atime;
-	tv[0].tv_nsec = 0L;
-	tv[1].tv_sec = mtime;
-	tv[1].tv_nsec = 0L;
+	tv[0] = *atimp;
+	tv[1] = *mtimp;
+
 	if (!frc) {
 		/*
 		 * if we are not forcing, only set those times the user wants
@@ -677,14 +704,15 @@ set_ftime(char *fnm, time_t mtime, time_t atime, int frc)
 }
 
 void
-fset_ftime(char *fnm, int fd, time_t mtime, time_t atime, int frc)
+fset_ftime(const char *fnm, int fd, const struct timespec *mtimp,
+    const struct timespec *atimp, int frc)
 {
 	struct timespec tv[2];
 
-	tv[0].tv_sec = atime;
-	tv[0].tv_nsec = 0L;
-	tv[1].tv_sec = mtime;
-	tv[1].tv_nsec = 0L;
+	
+	tv[0] = *atimp;
+	tv[1] = *mtimp;
+
 	if (!frc) {
 		/*
 		 * if we are not forcing, only set those times the user wants
@@ -764,6 +792,62 @@ fset_pmode(char *fnm, int fd, mode_t mode)
 	if (fchmod(fd, mode) < 0)
 		syswarn(1, errno, "Could not set permissions on %s", fnm);
 }
+
+/*
+ * set_attr()
+ *	Given a DIRDATA, restore the mode and times as indicated, but
+ *	only after verifying that it's the directory that we wanted.
+ */
+int
+set_attr(const struct file_times *ft, int force_times, mode_t mode,
+    int do_mode, int in_sig)
+{
+	struct stat sb;
+	int fd, r;
+
+	if (!do_mode && !force_times && !patime && !pmtime)
+		return (0);
+
+	/*
+	 * We could legitimately go through a symlink here,
+	 * so do *not* use O_NOFOLLOW.  The dev+ino check will
+	 * protect us from evil.
+	 */
+	fd = open(ft->ft_name, O_RDONLY | O_DIRECTORY);
+	if (fd == -1) {
+		if (!in_sig)
+			syswarn(1, errno, "Unable to restore mode and times"
+			    " for directory: %s", ft->ft_name);
+		return (-1);
+	}
+
+	if (fstat(fd, &sb) == -1) {
+		if (!in_sig)
+			syswarn(1, errno, "Unable to stat directory: %s",
+			    ft->ft_name);
+		r = -1;
+	} else if (ft->ft_ino != sb.st_ino || ft->ft_dev != sb.st_dev) {
+		if (!in_sig)
+			paxwarn(1, "Directory vanished before restoring"
+			    " mode and times: %s", ft->ft_name);
+		r = -1;
+	} else {
+		/* Whew, it's a match!  Is there anything to change? */
+		if (do_mode && (mode & ABITS) != (sb.st_mode & ABITS))
+			fset_pmode(ft->ft_name, fd, mode);
+		if (((force_times || patime) &&
+		    timespeccmp(&ft->ft_atim, &sb.st_atim, !=)) ||
+		    ((force_times || pmtime) &&
+		    timespeccmp(&ft->ft_mtim, &sb.st_mtim, !=)))
+			fset_ftime(ft->ft_name, fd, &ft->ft_mtim,
+			    &ft->ft_atim, force_times);
+		r = 0;
+	}
+	close(fd);
+
+	return (r);
+}
+
 
 /*
  * file_write()
@@ -957,15 +1041,15 @@ rdfile_close(ARCHD *arcn, int *fd)
 	if (*fd < 0)
 		return;
 
-	(void)close(*fd);
-	*fd = -1;
-	if (!tflag)
-		return;
-
 	/*
 	 * user wants last access time reset
 	 */
-	set_ftime(arcn->org_name, arcn->sb.st_mtime, arcn->sb.st_atime, 1);
+	if (tflag)
+		fset_ftime(arcn->org_name, *fd, &arcn->sb.st_mtim,
+		    &arcn->sb.st_atim, 1);
+
+	(void)close(*fd);
+	*fd = -1;
 }
 
 /*
@@ -1019,7 +1103,7 @@ set_crc(ARCHD *arcn, int fd)
 		paxwarn(1, "File changed size %s", arcn->org_name);
 	else if (fstat(fd, &sb) < 0)
 		syswarn(1, errno, "Failed stat on %s", arcn->org_name);
-	else if (arcn->sb.st_mtime != sb.st_mtime)
+	else if (timespeccmp(&arcn->sb.st_mtim, &sb.st_mtim, !=))
 		paxwarn(1, "File %s was modified during read", arcn->org_name);
 	else if (lseek(fd, (off_t)0L, SEEK_SET) < 0)
 		syswarn(1, errno, "File rewind failed on: %s", arcn->org_name);

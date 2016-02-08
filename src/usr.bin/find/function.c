@@ -1,4 +1,4 @@
-/*	$OpenBSD: function.c,v 1.42 2015/01/16 06:40:07 deraadt Exp $	*/
+/*	$OpenBSD: function.c,v 1.44 2015/04/18 18:28:37 deraadt Exp $	*/
 
 /*-
  * Copyright (c) 1990, 1993
@@ -49,7 +49,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <tzfile.h>
 #include <unistd.h>
 
 #include "find.h"
@@ -884,8 +883,10 @@ c_group(char *gname, char ***ignored, int unused)
 
 	g = getgrnam(gname);
 	if (g == NULL) {
-		gid = atoi(gname);
-		if (gid == 0 && gname[0] != '0')
+		const char *errstr;
+
+		gid = strtonum(gname, 0, GID_MAX, &errstr);
+		if (errstr)
 			errx(1, "-group: %s: no such group", gname);
 	} else
 		gid = g->gr_gid;
@@ -1015,9 +1016,12 @@ PLAN *
 c_mindepth(char *arg, char ***ignored, int unused)
 {
 	PLAN *new;
+	const char *errstr = NULL;
 
 	new = palloc(N_MINDEPTH, f_mindepth);
-	new->min_data = atoi(arg);
+	new->min_data = strtonum(arg, 0, INT_MAX, &errstr);
+	if (errstr)
+		errx(1, "-mindepth: %s: value %s", arg, errstr);
 	return (new);
 }
 
@@ -1489,8 +1493,10 @@ c_user(char *username, char ***ignored, int unused)
 
 	p = getpwnam(username);
 	if (p == NULL) {
-		uid = atoi(username);
-		if (uid == 0 && username[0] != '0')
+		const char *errstr;
+
+		uid = strtonum(username, 0, UID_MAX, &errstr);
+		if (errstr)
 			errx(1, "-user: %s: no such user", username);
 	} else
 		uid = p->pw_uid;

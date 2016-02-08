@@ -1,4 +1,4 @@
-/*	$OpenBSD: private.h,v 1.35 2015/02/10 05:44:50 tedu Exp $	*/
+/*	$OpenBSD: private.h,v 1.37 2015/04/07 01:47:04 millert Exp $	*/
 #ifndef PRIVATE_H
 
 #define PRIVATE_H
@@ -14,6 +14,7 @@
 #define PCTS			1
 #define ALL_STATE		1
 #define STD_INSPIRED		1
+#define USG_COMPAT		1
 
 /*
 ** This header is for use ONLY with the time conversion code.
@@ -101,9 +102,5 @@
 #ifndef SECSPERREPEAT_BITS
 #define SECSPERREPEAT_BITS	34	/* ceil(log2(SECSPERREPEAT)) */
 #endif /* !defined SECSPERREPEAT_BITS */
-
-/*
-** UNIX was a registered trademark of The Open Group in 2003.
-*/
 
 #endif /* !defined PRIVATE_H */

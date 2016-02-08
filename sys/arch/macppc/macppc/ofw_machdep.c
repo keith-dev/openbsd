@@ -1,4 +1,4 @@
-/*	$OpenBSD: ofw_machdep.c,v 1.48 2015/02/11 06:19:20 mpi Exp $	*/
+/*	$OpenBSD: ofw_machdep.c,v 1.55 2015/07/21 05:58:34 jsg Exp $	*/
 /*	$NetBSD: ofw_machdep.c,v 1.1 1996/09/30 16:34:50 ws Exp $	*/
 
 /*
@@ -65,8 +65,6 @@
 #include <dev/rasops/rasops.h>
 #endif
 
-extern char *hw_prod;
-
 struct mem_region64 {
 	uint64_t start;
 	uint32_t size;
@@ -107,7 +105,7 @@ static struct ofwfb ofwfb;
 #endif
 
 int	save_ofw_mapping(void);
-void	ofw_open_inputs(int);
+void	ofw_consinit(int);
 void	ofw_read_mem_regions(int, int, int);
 
 /*
@@ -211,7 +209,7 @@ save_ofw_mapping(void)
 	if ((chosen = OF_finddevice("/chosen")) == -1)
 		return (0);
 
-	ofw_open_inputs(chosen);
+	ofw_consinit(chosen);
 
 	/* Get memory node. */
 	memory = OF_finddevice("/memory");
@@ -233,10 +231,11 @@ save_ofw_mapping(void)
 	/* Get firmware mappings. */
 	if (OF_getprop(chosen, "mmu", &mmui, sizeof(int)) != -1)
 		mmu = OF_instance_to_package(mmui);
-	if (mmu != -1)
+	if (mmu != -1) {
 		len = OF_getproplen(mmu, "translations");
-	if (len <= 0)
-		return (0);
+		if (len <= 0)
+			return (0);
+	}
 
 	switch (acells) {
 	case 2:
@@ -258,40 +257,19 @@ save_ofw_mapping(void)
 		break;
 	}
 
+	/*
+	 * Next time we'll call the firmware make sure we save and
+	 * restore our MMU settings.
+	 */
+	fwcall = &fwentry;
+
 	return (0);
 }
 
-void
-ofw_open_inputs(int chosen)
-{
-	int stdout, stdin;
-
-	if (OF_getprop(chosen, "stdin", &stdin, sizeof(int)) != sizeof(int)) 
-		return;
-
-	OF_stdin = stdin;
-	if (OF_getprop(chosen, "stdout", &stdout, sizeof(int)) != sizeof(int))
-		return;
-
-	if (stdout == 0) {
-		/* If the screen is to be console, but not active, open it */
-		stdout = OF_open("screen");
-	}
-	OF_stdout = stdout;
-
-	fwcall = &fwentry;
-}
-
-bus_space_handle_t cons_display_mem_h;
 static int display_ofh;
 int cons_brightness;
 int cons_backlight_available;
 int fbnode;
-
-struct usb_kbd_ihandles {
-        struct usb_kbd_ihandles *next;
-	int ihandle;
-};
 
 void of_display_console(void);
 
@@ -392,7 +370,7 @@ ofw_find_keyboard()
 	stdin_node = OF_instance_to_package(OF_stdin);
 	len = OF_getprop(stdin_node, "name", iname, 20);
 	iname[len] = 0;
-	printf("console in [%s] ", iname);
+	printf(" console in [%s]", iname);
 
 	/* GRR, apple removed the interface once used for keyboard
 	 * detection walk the OFW tree to find keyboards and what type.
@@ -400,21 +378,19 @@ ofw_find_keyboard()
 
 	ofw_recurse_keyboard(OF_peer(0));
 
+	len = OF_getprop(OF_peer(0), "model", iname, sizeof(iname));
+	iname[len] = 0;
 
 	if (ofw_have_kbd == (OFW_HAVE_USBKBD | OFW_HAVE_ADBKBD)) {
 		/*
-		 * On some machines, such as PowerBook6,8,
-		 * the built-in USB Bluetooth device
-		 * appears as an USB device.  Prefer
-		 * ADB (builtin) keyboard for console
-		 * for PowerBook systems.
+		 * If a PowerBook reports having ABD and USB keyboards,
+		 * use the builtin ADB one for console, the USB one is
+		 * certainly a HID device.
 		 */
-		if (strncmp(hw_prod, "PowerBook", 9) ||
-		    strncmp(hw_prod, "iBook", 5)) {
+		 if (strncmp(iname, "PowerBook", 9) == 0)
 			ofw_have_kbd = OFW_HAVE_ADBKBD;
-		} else {
+		else
 			ofw_have_kbd = OFW_HAVE_USBKBD;
-		}
 		printf("USB and ADB found");
 	}
 	if (ofw_have_kbd == OFW_HAVE_USBKBD) {
@@ -497,8 +473,8 @@ of_display_console(void)
 		cons_backlight_available = 1;
 
 #if 1
-	printf(": memaddr %x size %x, ", addr[0].phys_lo, addr[0].size_lo);
-	printf(": consaddr %x, ", cons_addr);
+	printf(": memaddr %x, size %x ", addr[0].phys_lo, addr[0].size_lo);
+	printf(": consaddr %x ", cons_addr);
 	printf(": ioaddr %x, size %x", addr[1].phys_lo, addr[1].size_lo);
 	printf(": width %d linebytes %d height %d depth %d\n",
 		cons_width, cons_linebytes, cons_height, cons_depth);
@@ -645,9 +621,17 @@ struct consdev consdev_ofw = {
 };
 
 void
-ofwconsinit()
+ofw_consinit(int chosen)
 {
-	struct consdev *cp;
-	cp = &consdev_ofw;
+	struct consdev *cp = &consdev_ofw;
+
+	OF_getprop(chosen, "stdin", &OF_stdin, sizeof(OF_stdin));
+	OF_getprop(chosen, "stdout", &OF_stdout, sizeof(OF_stdout));
+
+	/* If the screen is to be console, but not active, open it */
+	if (OF_stdout == 0)
+		OF_stdout = OF_open("screen");
+
 	cn_tab = cp;
 }
+

@@ -1,4 +1,4 @@
-/*	$OpenBSD: ieee80211_node.c,v 1.86 2014/12/23 03:24:08 tedu Exp $	*/
+/*	$OpenBSD: ieee80211_node.c,v 1.88 2015/07/15 22:16:42 deraadt Exp $	*/
 /*	$NetBSD: ieee80211_node.c,v 1.14 2004/05/09 09:18:47 dyoung Exp $	*/
 
 /*-
@@ -30,7 +30,6 @@
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include "bpfilter.h"
 #include "bridge.h"
 
 #include <sys/param.h>
@@ -49,10 +48,6 @@
 #include <net/if_dl.h>
 #include <net/if_media.h>
 #include <net/if_arp.h>
-
-#if NBPFILTER > 0
-#include <net/bpf.h>
-#endif
 
 #include <netinet/in.h>
 #include <netinet/if_ether.h>
@@ -1507,8 +1502,7 @@ ieee80211_node_leave_ht(struct ieee80211com *ic, struct ieee80211_node *ni)
 		ba = &ni->ni_rx_ba[tid];
 		if (ba->ba_buf != NULL) {
 			for (i = 0; i < IEEE80211_BA_MAX_WINSZ; i++)
-				if (ba->ba_buf[i].m != NULL)
-					m_freem(ba->ba_buf[i].m);
+				m_freem(ba->ba_buf[i].m);
 			free(ba->ba_buf, M_DEVBUF, 0);
 			ba->ba_buf = NULL;
 		}

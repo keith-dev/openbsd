@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_bge.c,v 1.365 2015/02/09 09:51:16 dlg Exp $	*/
+/*	$OpenBSD: if_bge.c,v 1.369 2015/07/19 06:28:12 yuo Exp $	*/
 
 /*
  * Copyright (c) 2001 Wind River Systems
@@ -1010,7 +1010,7 @@ bge_miibus_writereg(struct device *dev, int phy, int reg, int val)
 	int i;
 
 	if (BGE_ASICREV(sc->bge_chipid) == BGE_ASICREV_BCM5906 &&
-	    (reg == BRGPHY_MII_1000CTL || reg == BRGPHY_MII_AUXCTL))
+	    (reg == MII_100T2CR || reg == BRGPHY_MII_AUXCTL))
 		return;
 
 	if (bge_ape_lock(sc, sc->bge_phy_ape_lock) != 0)
@@ -3362,14 +3362,15 @@ bge_reset(struct bge_softc *sc)
 		 * is complete.  We expect this to fail if no SEEPROM
 		 * is fitted.
 		 */
-		for (i = 0; i < BGE_TIMEOUT; i++) {
+		for (i = 0; i < BGE_TIMEOUT * 10; i++) {
 			val = bge_readmem_ind(sc, BGE_SOFTWARE_GENCOMM);
 			if (val == ~BGE_MAGIC_NUMBER)
 				break;
 			DELAY(10);
 		}
 
-		if (i >= BGE_TIMEOUT && (!(sc->bge_flags & BGE_NO_EEPROM)))
+		if ((i >= BGE_TIMEOUT * 10) &&
+		    (!(sc->bge_flags & BGE_NO_EEPROM)))
 			printf("%s: firmware handshake timed out\n",
 			   sc->bge_dev.dv_xname);
 		/* BCM57765 A0 needs additional time before accessing. */
@@ -3497,7 +3498,6 @@ bge_rxeof(struct bge_softc *sc)
 			}
 		}
 
-		ifp->if_ipackets++;
 #ifdef __STRICT_ALIGNMENT
 		/*
 		 * The i386 allows unaligned accesses, but for other

@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_bnx.c,v 1.109 2015/01/27 03:17:36 dlg Exp $	*/
+/*	$OpenBSD: if_bnx.c,v 1.112 2015/07/24 01:19:18 dlg Exp $	*/
 
 /*-
  * Copyright (c) 2006 Broadcom Corporation
@@ -4274,6 +4274,7 @@ bnx_rx_intr(struct bnx_softc *sc)
 {
 	struct status_block	*sblk = sc->status_block;
 	struct ifnet		*ifp = &sc->arpcom.ac_if;
+	struct mbuf_list	ml = MBUF_LIST_INITIALIZER();
 	u_int16_t		hw_cons, sw_cons, sw_chain_cons;
 	u_int16_t		sw_prod, sw_chain_prod;
 	u_int32_t		sw_prod_bseq;
@@ -4412,9 +4413,6 @@ bnx_rx_intr(struct bnx_softc *sc)
 			/* Adjust the pckt length to match the received data. */
 			m->m_pkthdr.len = m->m_len = len;
 
-			/* Send the packet to the appropriate interface. */
-			m->m_pkthdr.rcvif = ifp;
-
 			DBRUN(BNX_VERBOSE_RECV,
 			    struct ether_header *eh;
 			    eh = mtod(m, struct ether_header *);
@@ -4476,12 +4474,10 @@ bnx_rx_intr(struct bnx_softc *sc)
 				m->m_flags |= M_VLANTAG;
 #else
 				m_freem(m);
+				m = NULL;
 				goto bnx_rx_int_next_rx;
 #endif			
 			}
-
-			/* Pass the mbuf off to the upper layers. */
-			ifp->if_ipackets++;
 
 bnx_rx_int_next_rx:
 			sw_prod = NEXT_RX_BD(sw_prod);
@@ -4493,19 +4489,9 @@ bnx_rx_int_next_rx:
 		if (m) {
 			sc->rx_cons = sw_cons;
 
-#if NBPFILTER > 0
-			/*
-			 * Handle BPF listeners. Let the BPF
-			 * user see the packet.
-			 */
-			if (ifp->if_bpf)
-				bpf_mtap_ether(ifp->if_bpf, m,
-				    BPF_DIRECTION_IN);
-#endif
-
 			DBPRINT(sc, BNX_VERBOSE_RECV,
 			    "%s(): Passing received frame up.\n", __FUNCTION__);
-			ether_input_mbuf(ifp, m);
+			ml_enqueue(&ml, m);
 			DBRUNIF(1, sc->rx_mbuf_alloc--);
 
 			sw_cons = sc->rx_cons;
@@ -4537,6 +4523,8 @@ bnx_rx_int_next_rx:
 		    sc->rx_bd_chain_map[i], 0,
 		    sc->rx_bd_chain_map[i]->dm_mapsize,
 		    BUS_DMASYNC_PREWRITE);
+
+	if_input(ifp, &ml);
 
 	DBPRINT(sc, BNX_INFO_RECV, "%s(exit): rx_prod = 0x%04X, "
 	    "rx_cons = 0x%04X, rx_prod_bseq = 0x%08X\n",

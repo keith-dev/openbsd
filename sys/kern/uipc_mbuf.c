@@ -1,4 +1,4 @@
-/*	$OpenBSD: uipc_mbuf.c,v 1.201 2015/02/07 02:52:09 dlg Exp $	*/
+/*	$OpenBSD: uipc_mbuf.c,v 1.206 2015/07/15 22:29:32 deraadt Exp $	*/
 /*	$NetBSD: uipc_mbuf.c,v 1.15.4.1 1996/06/13 17:11:44 cgd Exp $	*/
 
 /*
@@ -91,7 +91,6 @@
 
 #ifdef DDB
 #include <machine/db_machdep.h>
-#include <ddb/db_interface.h>
 #endif
 
 struct	mbstat mbstat;		/* mbuf stats */
@@ -279,7 +278,7 @@ m_clpool(u_int pktlen)
 }
 
 struct mbuf *
-m_clget(struct mbuf *m, int how, struct ifnet *ifp, u_int pktlen)
+m_clget(struct mbuf *m, int how, u_int pktlen)
 {
 	struct mbuf *m0 = NULL;
 	struct pool *pp;
@@ -319,6 +318,9 @@ struct mbuf *
 m_free(struct mbuf *m)
 {
 	struct mbuf *n;
+
+	if (m == NULL)
+		return (NULL);
 
 	mtx_enter(&mbstatmtx);
 	mbstat.m_mtypes[m->m_type]--;
@@ -1025,7 +1027,7 @@ extpacket:
  * Routine to copy from device local memory into mbufs.
  */
 struct mbuf *
-m_devget(char *buf, int totlen, int off, struct ifnet *ifp)
+m_devget(char *buf, int totlen, int off)
 {
 	struct mbuf	*m;
 	struct mbuf	*top, **mp;
@@ -1041,7 +1043,6 @@ m_devget(char *buf, int totlen, int off, struct ifnet *ifp)
 	if (m == NULL)
 		return (NULL);
 
-	m->m_pkthdr.rcvif = ifp;
 	m->m_pkthdr.len = totlen;
 
 	len = MHLEN;
@@ -1208,8 +1209,8 @@ m_print(void *v,
 	(*pr)("m_data: %p\tm_len: %u\n", m->m_data, m->m_len);
 	(*pr)("m_dat: %p\tm_pktdat: %p\n", m->m_dat, m->m_pktdat);
 	if (m->m_flags & M_PKTHDR) {
-		(*pr)("m_ptkhdr.rcvif: %p\tm_pkthdr.len: %i\n",
-		    m->m_pkthdr.rcvif, m->m_pkthdr.len);
+		(*pr)("m_ptkhdr.ph_ifidx: %u\tm_pkthdr.len: %i\n",
+		    m->m_pkthdr.ph_ifidx, m->m_pkthdr.len);
 		(*pr)("m_ptkhdr.tags: %p\tm_pkthdr.tagsset: %b\n",
 		    SLIST_FIRST(&m->m_pkthdr.tags),
 		    m->m_pkthdr.tagsset, MTAG_BITS);
@@ -1268,10 +1269,11 @@ ml_enqueue(struct mbuf_list *ml, struct mbuf *m)
 void
 ml_join(struct mbuf_list *mla, struct mbuf_list *mlb)
 {
-	if (mla->ml_tail == NULL)
-		*mla = *mlb;
-	else if (mlb->ml_tail != NULL) {
-		mla->ml_tail->m_nextpkt = mlb->ml_head;
+	if (!ml_empty(mlb)) {
+		if (ml_empty(mla))
+			mla->ml_head = mlb->ml_head;
+		else
+			mla->ml_tail->m_nextpkt = mlb->ml_head;
 		mla->ml_tail = mlb->ml_tail;
 		mla->ml_len += mlb->ml_len;
 

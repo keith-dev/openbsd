@@ -1,4 +1,4 @@
-/* $OpenBSD: a_bitstr.c,v 1.20 2014/07/11 08:44:47 jsing Exp $ */
+/* $OpenBSD: a_bitstr.c,v 1.22 2015/07/29 14:58:34 jsing Exp $ */
 /* Copyright (C) 1995-1998 Eric Young (eay@cryptsoft.com)
  * All rights reserved.
  *
@@ -65,7 +65,7 @@
 int
 ASN1_BIT_STRING_set(ASN1_BIT_STRING *x, unsigned char *d, int len)
 {
-	return M_ASN1_BIT_STRING_set(x, d, len);
+	return ASN1_STRING_set(x, d, len);
 }
 
 int
@@ -155,7 +155,7 @@ c2i_ASN1_BIT_STRING(ASN1_BIT_STRING **a, const unsigned char **pp, long len)
 
 	if (len-- > 1) /* using one because of the bits left byte */
 	{
-		s = malloc((int)len);
+		s = malloc(len);
 		if (s == NULL) {
 			i = ERR_R_MALLOC_FAILURE;
 			goto err;

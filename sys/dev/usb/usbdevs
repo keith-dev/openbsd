@@ -1,4 +1,4 @@
-$OpenBSD: usbdevs,v 1.645 2015/02/16 14:51:44 sthen Exp $
+$OpenBSD: usbdevs,v 1.654 2015/07/15 13:25:49 mpi Exp $
 /* $NetBSD: usbdevs,v 1.322 2003/05/10 17:47:14 hamajima Exp $ */
 
 /*
@@ -352,6 +352,7 @@ vendor EXTENDED		0x08e9	Extended Systems
 vendor MSYSTEMS		0x08ec	M-Systems
 vendor DIGIANSWER	0x08fd	Digianswer
 vendor AUTHENTEC	0x08ff	AuthenTec
+vendor SIEMENS4		0x0908	Siemens
 vendor AUDIOTECHNICA	0x0909	Audio-Technica
 vendor TRUMPION		0x090a	Trumpion Microelectronics
 vendor ALATION		0x0910	Alation Systems
@@ -462,6 +463,7 @@ vendor NORITAKE		0x0eda	Noritake itron Corp
 vendor XIRING		0x0f14	XIRING
 vendor AIRPRIME		0x0f3d	Airprime
 vendor LARSENBRUSGAARD	0x0fd8	Larsen and Brusgaard
+vendor OREGONSCI	0x0fde	Oregon Scientific
 vendor UNKNOWN4		0x0fe6	Unknown Vendor
 vendor VTECH		0x0f88	VTech
 vendor FALCOM		0x0f94	Falcom Wireless Communications
@@ -478,7 +480,7 @@ vendor MOTOROLA		0x1063	Motorola
 vendor CCYU		0x1065	CCYU Technology
 vendor HYUNDAI		0x106c	Hyundai
 vendor GCTSEMICON	0x1076	GCT Semiconductor
-vendor SILABS2		0x10a6	SILABS2
+vendor SILABS2		0x10a6	Silicon Labs
 vendor USI		0x10ab	USI
 vendor LIEBERT2		0x10af	Liebert
 vendor PLX		0x10b5	PLX
@@ -532,6 +534,7 @@ vendor SILICOM		0x1485	Silicom
 vendor RALINK		0x148f	Ralink Technology
 vendor STARTECH		0x14b0	StarTech.com
 vendor CONCEPTRONIC2	0x14b2	Conceptronic
+vendor SUPERTOP		0x14cd	SuperTop
 vendor PLANEX3		0x14ea	Planex Communications
 vendor SILICONPORTALS	0x1527	Silicon Portals
 vendor UBLOX		0x1546	U-blox
@@ -554,6 +557,7 @@ vendor ATHEROS		0x168c	Atheros Communications
 vendor CISCOLINKSYS2	0x167b	Cisco-Linksys
 vendor GIGASET		0x1690	Gigaset
 vendor GLOBALSUN	0x16ab	Global Sun Technology
+vendor VOTI		0x16c0	Van Ooijen Technische Informatica
 vendor ANYDATA		0x16d5	AnyDATA Inc.
 vendor JABLOTRON	0x16d6	Jablotron
 vendor CMOTECH		0x16d8	CMOTECH
@@ -582,6 +586,9 @@ vendor TERMINUS		0x1a40	Terminus Technology
 vendor ABBOTT		0x1a61	Abbott Labs
 vendor BAYER		0x1a79	Bayer Health Care
 vendor WCH2		0x1a86	QinHeng Electronics
+vendor SEL		0x1adb	Schweitzer Engineering Laboratories
+vendor SILABS5		0x1ba4	Silicon Labs
+vendor CORSAIR		0x1b1c	Corsair
 vendor MATRIXORB	0x1b3d	Matrix Orbital
 vendor TORADEX		0x1b67	Toradex inc.
 vendor OVISLINK		0x1b75	OvisLink
@@ -595,11 +602,13 @@ vendor LONGCHEER	0x1c9e	Longcheer Technology
 vendor DRESDENELEC	0x1cf1	Dresden Elektronic
 vendor DREAMLINK	0x1d34	Dream Link
 vendor PEGATRON		0x1d4d	Pegatron
+vendor SELUXIT		0x1d6f	Seluxit
 vendor METAGEEK		0x1dd5	MetaGeek
 vendor FESTO		0x1e29	Festo
 vendor MODACOM		0x1eb8	Modacom
 vendor AIRTIES		0x1eda	AirTies
 vendor VERTEX		0x1fe7	Vertex Wireless Co., Ltd.
+vendor LAKESHORE	0x1fb9	Lake Shore
 vendor DLINK		0x2001	D-Link
 vendor PLANEX2		0x2019	Planex Communications
 vendor ENCORE		0x203d	Encore
@@ -611,6 +620,7 @@ vendor VIALABS		0x2109	VIA Labs
 vendor MOTOROLA2	0x22b8	Motorola
 vendor ARDUINO		0x2341	Arduino SA
 vendor TPLINK		0x2357	TP-Link
+vendor WMR		0x2405	West Mountain Radio
 vendor TRIPPLITE	0x2478	Tripp-Lite
 vendor NHJ		0x2770  NHJ
 vendor ASUSTEK		0x2821	ASUSTeK Computer
@@ -1395,6 +1405,9 @@ product COREGA RTL8192CU	0x0056	RTL8192CU
 product COREGA WLUSB_11_STICK	0x7613	WLAN USB Stick 11
 product COREGA FETHER_USB_TXC	0x9601	FEther USB-TXC
 
+/* Corsair products */
+product CORSAIR CP210X		0x1c00	CP210X
+
 /* Creative Labs products */
 product CREATIVE NOMAD_II	0x1002	Nomad II
 product CREATIVE NOMAD_IIMG	0x4004	Nomad II MG
@@ -1493,6 +1506,8 @@ product DLINK DUBE100C1		0x1a02	DUB-E100 rev C1
 product DLINK DSB650TX4		0x200c	10/100 Ethernet
 product DLINK DWL120E		0x3200	DWL-120 rev E
 product DLINK DWA130C		0x3301	DWA-130 rev C
+product DLINK DWA125D1		0x330f	DWA-125 rev D1
+product DLINK DWA123D1		0x3310	DWA-123 rev D1
 product DLINK RTL8192CU_1	0x3307	RTL8192CU
 product DLINK RTL8188CU		0x3308	RTL8188CU
 product DLINK RTL8192CU_2	0x3309	RTL8192CU
@@ -1639,6 +1654,7 @@ product ELECOM MOUSE29UO	0x0002	29UO
 product ELECOM LDUSBTX0		0x200c	LD-USB/TX
 product ELECOM LDUSBTX1		0x4002	LD-USB/TX
 product ELECOM LDUSBLTX		0x4005	LD-USBL/TX
+product ELECOM WDC150SU2M	0x4008	WDC-150SU2M
 product ELECOM LDUSBTX2		0x400b	LD-USB/TX
 product ELECOM LDUSB20		0x4010	LD-USB20
 product ELECOM UCSGT		0x5003	UC-SGT Serial
@@ -2177,6 +2193,7 @@ product HUAWEI K4510		0x14c5  HUAWEI Mobile Modem
 product HUAWEI E353_INIT	0x14fe	HUAWEI Mobile E353 Initial
 product HUAWEI E392_INIT	0x1505	HUAWEI Mobile E392 Initial
 product HUAWEI K3765_INIT	0x1520	HUAWEI Mobile K3765 Initial
+product HUAWEI MU609		0x1573	HUAWEI Mobile ME906 
 product HUAWEI E173S		0x1c05	HUAWEI Mobile E173s
 product HUAWEI E173S_INIT	0x1c0b	HUAWEI Mobile E173s Initial
 product HUAWEI E303		0x1f01	HUAWEI Mobile E303
@@ -2428,6 +2445,27 @@ product KYOCERA2 KPC650		0x17da	KPC650 EVDO
 /* LaCie products */
 product LACIE HD		0xa601	Hard Disk
 product LACIE CDRW		0xa602	CD R/W
+
+/* Lake Shore products */
+product LAKESHORE M121		0x0100	Model 121
+product LAKESHORE M218A		0x0200	Model 218A
+product LAKESHORE M219		0x0201	Model 219
+product LAKESHORE M233		0x0202	Model 233
+product LAKESHORE M235		0x0203	Model 235
+product LAKESHORE M335		0x0300	Model 335
+product LAKESHORE M336		0x0301	Model 336
+product LAKESHORE M350		0x0302	Model 350
+product LAKESHORE M371		0x0303	Model 371
+product LAKESHORE M411		0x0400	Model 411
+product LAKESHORE M425		0x0401	Model 425
+product LAKESHORE M455A		0x0402	Model 455A
+product LAKESHORE M475A		0x0403	Model 475A
+product LAKESHORE M465		0x0404	Model 465
+product LAKESHORE M625A		0x0600	Model 625A
+product LAKESHORE M642A		0x0601	Model 642A
+product LAKESHORE M648		0x0602	Model 648
+product LAKESHORE M737		0x0700	Model 737
+product LAKESHORE M776		0x0701	Model 776
 
 /* Larsen and Brusgaard products */
 product LARSENBRUSGAARD ALTITRACK	0x0001	AltiTrack
@@ -2927,6 +2965,7 @@ product MSI BLUETOOTH_3		0xa97a	Bluetooth
 product MICRODIA YUREX		0x1010	YUREX
 product MICRODIA CAM_1		0x62c0	CAM_1
 product MICRODIA TEMPER		0x7401	TEMPer sensor
+product MICRODIA TEMPERHUM	0x7402	TEMPerHUM sensor
 
 /* Micronet Communications products */
 product MICRONET SP128AR	0x0003	SP128AR EtherFast
@@ -3081,6 +3120,7 @@ product NETGEAR EA101		0x1001	Ethernet
 product NETGEAR EA101X		0x1002	Ethernet
 product NETGEAR FA101		0x1020	10/100 Ethernet
 product NETGEAR FA120		0x1040	USB 2.0 Fast Ethernet
+product NETGEAR M7100		0x1100	M7100
 product NETGEAR MA111NA		0x4110  802.11b
 product NETGEAR MA111V2		0x4230  802.11b V2
 product	NETGEAR WG111V2_2	0x4240	PrismGT USB 2.0 WLAN
@@ -3103,6 +3143,7 @@ product NETGEAR2 MA101B		0x4102	MA101 Rev B
 /* Netgear(3) products */
 product NETGEAR3 WG111T		0x4250	WG111T
 product NETGEAR3 WG111T_NF	0x4251	WG111T
+product NETGEAR3 WG111T_1	0x4252	WG111T
 product NETGEAR3 WPN111		0x5f00	WPN111
 product NETGEAR3 WPN111_NF	0x5f01	WPN111
 
@@ -3198,6 +3239,9 @@ product OQO WIFI01		0x0002	model 01 WiFi
 product OQO BT01		0x0003	model 01 Bluetooth
 product OQO ETHER01PLUS		0x7720	model 01+ Ethernet
 product OQO ETHER01		0x8150	model 01 Ethernet
+
+/* Oregon Scientific */
+product OREGONSCI OWL_CM160	0xca05	OWL CM-160
 
 /* Ours Technology Inc. */
 product OTI SOLID		0x6803	Solid state disk
@@ -3485,6 +3529,7 @@ product RATOC REXUSB60		0xb000	USB serial REX-USB60
 product RATOC REXUSB60F		0xb020	REX-USB60F
 
 /* Realtek products */
+product REALTEK RTL8188ETV	0x0179	RTL8188ETV
 product REALTEK RTL8188CTV	0x018a	RTL8188CTV
 product REALTEK RTL8188RU_2	0x317f	RTL8188RU
 product REALTEK RTL8150		0x8150	RTL8150
@@ -3499,6 +3544,7 @@ product REALTEK RTL8174		0x8174	RTL8174
 product REALTEK RTL8188CU_0	0x8176	RTL8188CU
 product REALTEK RTL8191CU	0x8177	RTL8191CU
 product REALTEK RTL8192CU	0x8178	RTL8192CU
+product REALTEK RTL8188EU	0x8179	RTL8188EU
 product REALTEK RTL8188CU_1	0x817a	RTL8188CU
 product REALTEK RTL8188CU_2	0x817b	RTL8188CU
 product REALTEK RTL8192CE	0x817c	RTL8192CE
@@ -3508,6 +3554,7 @@ product REALTEK RTL8188RU_3	0x817f	RTL8188RU
 product REALTEK RTL8187		0x8187	RTL8187
 product REALTEK RTL8187B_0	0x8189	RTL8187B
 product REALTEK RTL8188CUS	0x818a	RTL8188CUS
+product REALTEK RTL8188CU_3	0x8191	RTL8188CU
 product REALTEK RTL8187B_1	0x8197	RTL8187B
 product REALTEK RTL8192U	0x8192	RTL8192U
 product REALTEK RTL8187B_2	0x8198	RTL8187B
@@ -3520,9 +3567,9 @@ product REALTEK RTL8192SU	0xc512	RTL8192SU
 product RENESAS RX610		0x0053	RX610 RX-Stick
 
 /* Research In Motion products */
-product RIM BLACKBERRY		0x0001	Blackberry
+product RIM BLACKBERRY		0x0001	BlackBerry
 product RIM PEARL_DUAL		0x0004	RIM Mass Storage Device
-product RIM PEARL		0x0006	Blackberry pearl
+product RIM PEARL		0x0006	BlackBerry pearl
 
 /* Ricoh products */
 product RICOH VGPVCC2		0x1830	VGP-VCC2 Camera
@@ -3650,6 +3697,12 @@ product SEALEVEL 2803_6		0X2863	SeaLINK+8 (2803) Port 6
 product SEALEVEL 2803_7		0X2873	SeaLINK+8 (2803) Port 7
 product SEALEVEL 2803_8		0X2883	SeaLINK+8 (2803) Port 8
 
+/* Schweitzer Engineering Laboratories */
+product SEL C662		0x0001	C662
+
+/* Seluxit products */
+product SELUXIT RF		0x0010	RF Dongle
+
 /* Senao products */
 product SENAO RT2870_3		0x0605	RT2870
 product SENAO RT2870_4		0x0615	RT2870
@@ -3722,6 +3775,9 @@ product SIEMENS3 SX1		0x0001	SX1
 product SIEMENS3 X65		0x0003	X65
 product SIEMENS3 X75		0x0004	X75
 
+/* Siemens(4) products */
+product SIEMENS4 RUGGEDCOM	0x01ff	RUGGEDCOM
+
 /* Sierra Wireless products */
 product SIERRA EM5625		0x0017	EM5625
 product SIERRA MC5720		0x0018	MC5720
@@ -3769,6 +3825,7 @@ product SILICOM U2E		0x0001	U2E
 product SILICOM GPE		0x0002	Psion Dacom Gold Port Ethernet
 
 /* Silicon Labs products */
+product SILABS5 EM358X		0x0002	EM358x
 product SILABS VSTABI		0x0f91	VStabi Controller
 product SILABS ARKHAM_DS101_M	0x1101	Arkham DS101 Monitor
 product SILABS ARKHAM_DS101_A	0x1601	Arkham DS101 Adapter
@@ -3776,7 +3833,9 @@ product SILABS BSM7DUSB		0x800a	BSM7-D-USB
 product SILABS POLOLU		0x803b	Pololu Serial
 product SILABS SB_PARAMOUNT_ME	0x8043	Software Bisque Paramount ME
 product SILABS CYGNAL_DEBUG	0x8044	Cygnal Debug Adapter
+product SILABS SB_PARAMOUNT_ME2	0x804e	Software Bisque Paramount ME
 product SILABS EDG1228		0x8053	EDG1228
+product SILABS GSM2228		0x8054	Enfora GSM2228
 product SILABS ARGUSISP		0x8066	Argussoft ISP
 product SILABS IMS_USB_RS422	0x806f	IMS USB-RS422
 product SILABS CRUMB128		0x807a	Crumb128
@@ -3807,6 +3866,7 @@ product SILABS EMS_C1007	0x81f2	EMS C1007 HF RFID reader
 product SILABS LIPOWSKY_HARP	0x8218	Lipowsky HARP-1
 product SILABS C2_EDGE_MODEM	0x822b	Commander 2 EDGE(GSM) Modem
 product SILABS CYGNAL_GPS	0x826b	Cygnal Fasttrax GPS
+product SILABS PLUGDRIVE	0x8281	Nanotec Plug & Drive
 product SILABS TELEGESIS_ETRX2	0x8293	Telegesis ETRX2USB
 product SILABS PROCYON_AVS	0x82f9	Procyon AVS
 product SILABS MC35PU		0x8341	MC35pu
@@ -3819,13 +3879,22 @@ product SILABS BEI_VCP		0x846e	BEI USB Sensor (VCP)
 product SILABS BALLUFF_RFID	0x8477	Balluff RFID reader
 product SILABS AC_SERV_IBUS	0x85ea	AC-Services IBUS
 product SILABS AC_SERV_CIS	0x85eb	AC-Services CIS-IBUS
+product SILABS PREON32		0x85f8	Virtenio Preon32
 product SILABS AC_SERV_CAN	0x8664	AC-Services CAN
 product SILABS AC_SERV_OBD	0x8665	AC-Services OBD
+product SILABS EM357LR		0x8856	CEL EM357 LR
+product SILABS EM357		0x8857	CEL EM357
+product SILABS MMB_ZIGBEE	0x88a4	MMB Networks ZigBee
+product SILABS PII_ZIGBEE	0x88a5	Planet Innovation Ingeni ZigBee
+product SILABS KETRA_N1		0x8946	Ketra N1
+product SILABS CELDEVKIT	0x8977	CEL MeshWorks DevKit
+product SILABS KCF_PRN		0x8998	KCF Technologies PRN
+product SILABS HUBZ		0x8a2a	HubZ ZigBee/Z-Wave
 product SILABS2 DCU11CLONE	0xaa26	DCU-11 clone
 product SILABS CP210X_1		0xea60	CP210x Serial
 product SILABS CP210X_2		0xea61	CP210x Serial
 product SILABS3 GPRS_MODEM	0xea61	GPRS Modem
-product SILABS4 100EU_MODEM	0xea61	GPRS Modem 100EU
+product SILABS4 100EU_MODEM	0xea6a	GPRS Modem 100EU
 product SILABS CP210X_3		0xea70	CP210x Serial
 product SILABS INFINITY_MIC	0xea71	Infinity GPS-MIC-1
 product SILABS CP2110		0xea80	CP2110 USB HID Serial
@@ -3993,6 +4062,9 @@ product SUNTAC IS96U		0x000a	Ir-Trinity
 product SUNTAC AS64LX		0x000b	U-Cable type A3
 product SUNTAC AS144L4		0x0011	U-Cable type A4
 
+/* SuperTop products */
+product SUPERTOP IDEBRIDGE	0x6600	SuperTop IDE Bridge
+
 /* System TALKS, Inc. */
 product	SYSTEMTALKS SGCX2UL	0x1920	SGC-X2UL
 
@@ -4130,6 +4202,7 @@ product TOSHIBA HSDPA		0x1302	HSDPA
 
 /* TP-Link products */
 product TPLINK RTL8192CU	0x0100	RTL8192CU
+product TPLINK RTL8812AU	0x0101	RTL8812AU
 
 /* Trek Technology products */
 product TREK THUMBDRIVE		0x1111	ThumbDrive
@@ -4227,6 +4300,10 @@ product	VALIDITY VFS300		0x0008	VFS300 Fingerprint Reader
 product	VALIDITY VFS5011	0x0011	VFS5011 Fingerprint Reader
 product	VALIDITY VFS5471	0x003c	VFS471 Fingerprint Reader
 
+/* Van Ooijen Technische Informatica products */
+product VOTI SELETEK_1		0x09b0	Lunatico Seletek
+product VOTI SELETEK_2		0x09b1	Lunatico Seletek
+
 /* Velleman products */
 product VELLEMAN K8055		0x5500	K8055 USB Experiment interface board
 
@@ -4294,6 +4371,9 @@ product WAGO SERVICECABLE	0x07a6	Service Cable 750-923
 
 /* WaveSense products */
 product WAVESENSE JAZZ		0xaaaa	Jazz blood glucose meter
+
+/* West Mountain Radio products */
+product WMR RIGBLASTER		0x0003	RIGblaster
 
 /* WIENER Plein & Baus products */
 product WIENERPLEINBAUS PL512	0x0010	PL512 PSU

@@ -1,4 +1,4 @@
-/*	$OpenBSD: vector.s,v 1.18 2013/11/28 19:30:46 brad Exp $	*/
+/*	$OpenBSD: vector.s,v 1.20 2015/06/28 01:11:27 guenther Exp $	*/
 /*	$NetBSD: vector.s,v 1.32 1996/01/07 21:29:47 mycroft Exp $	*/
 
 /*
@@ -49,10 +49,6 @@
  * If the interrupt frame is made more flexible,  INTR can push %eax first and
  * decide the ipending case with less overhead, e.g., by avoiding loading the
  * segment registers.
- *
- * XXX
- * Should we do a cld on every system entry to avoid the requirement for
- * scattered cld's?
  */
 
 	.globl	_C_LABEL(isa_strayintr)
@@ -84,8 +80,7 @@ IDTVEC(recurse_##name##num)						;\
 	pushfl								;\
 	pushl	%cs							;\
 	pushl	%esi							;\
-	pushl	$0			/* dummy error code */		;\
-	pushl	$T_ASTFLT		/* trap # for doing ASTs */	;\
+	subl	$8,%esp			/* space for tf_{err,trapno} */ ;\
 	movl	%ebx,%esi						;\
 	INTRENTRY							;\
 	MAKE_FRAME							;\
@@ -93,8 +88,7 @@ IDTVEC(recurse_##name##num)						;\
 	cli								;\
 	jmp	1f							;\
 _C_LABEL(Xintr_##name##num):						;\
-	pushl	$0			/* dummy error code */		;\
-	pushl	$T_ASTFLT		/* trap # for doing ASTs */	;\
+	subl	$8,%esp			/* space for tf_{err,trapno} */ ;\
 	INTRENTRY							;\
 	MAKE_FRAME							;\
 	mask(num)			/* mask it in hardware */	;\

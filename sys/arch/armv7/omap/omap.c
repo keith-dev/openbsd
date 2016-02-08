@@ -1,4 +1,4 @@
-/* $OpenBSD: omap.c,v 1.4 2013/11/06 19:03:07 syl Exp $ */
+/* $OpenBSD: omap.c,v 1.7 2015/05/20 00:14:56 jsg Exp $ */
 /*
  * Copyright (c) 2005,2008 Dale Rahn <drahn@openbsd.com>
  *
@@ -22,11 +22,160 @@
 
 #include <armv7/armv7/armv7var.h>
 
+int	omap_match(struct device *, void *, void *);
+void	omap3_init();
+void	omap4_init();
+void	am335x_init();
+
 struct cfattach omap_ca = {
-	sizeof(struct armv7_softc), armv7_match, armv7_attach
+	sizeof(struct armv7_softc), omap_match, armv7_attach
 };
 
 struct cfdriver omap_cd = {
 	NULL, "omap", DV_DULL
 };
 
+struct board_dev beagleboard_devs[] = {
+	{ "prcm",	0 },
+	{ "intc",	0 },
+	{ "gptimer",	0 },
+	{ "gptimer",	1 },
+	{ "omdog",	0 },
+	{ "omgpio",	0 },
+	{ "omgpio",	1 },
+	{ "omgpio",	2 },
+	{ "omgpio",	3 },
+	{ "omgpio",	4 },
+	{ "omgpio",	5 },
+	{ "ommmc",	0 },		/* HSMMC1 */
+	{ "com",	2 },		/* UART3 */
+	{ NULL,		0 }
+};
+
+struct board_dev beaglebone_devs[] = {
+	{ "prcm",	0 },
+	{ "sitaracm",	0 },
+	{ "intc",	0 },
+	{ "edma",	0 },
+	{ "dmtimer",	0 },
+	{ "dmtimer",	1 },
+	{ "omdog",	0 },
+	{ "omgpio",	0 },
+	{ "omgpio",	1 },
+	{ "omgpio",	2 },
+	{ "omgpio",	3 },
+	{ "tiiic",	0 },
+	{ "tiiic",	1 },
+	{ "tiiic",	2 },
+	{ "ommmc",	0 },		/* HSMMC0 */
+	{ "ommmc",	1 },		/* HSMMC1 */
+	{ "com",	0 },		/* UART0 */
+	{ "cpsw",	0 },
+	{ NULL,		0 }
+};
+
+struct board_dev overo_devs[] = {
+	{ "prcm",	0 },
+	{ "intc",	0 },
+	{ "gptimer",	0 },
+	{ "gptimer",	1 },
+	{ "omdog",	0 },
+	{ "omgpio",	0 },
+	{ "omgpio",	1 },
+	{ "omgpio",	2 },
+	{ "omgpio",	3 },
+	{ "omgpio",	4 },
+	{ "omgpio",	5 },
+	{ "ommmc",	0 },		/* HSMMC1 */
+	{ "com",	2 },		/* UART3 */
+	{ NULL,		0 }
+};
+
+struct board_dev pandaboard_devs[] = {
+	{ "omapid",	0 },
+	{ "prcm",	0 },
+	{ "omdog",	0 },
+	{ "omgpio",	0 },
+	{ "omgpio",	1 },
+	{ "omgpio",	2 },
+	{ "omgpio",	3 },
+	{ "omgpio",	4 },
+	{ "omgpio",	5 },
+	{ "ommmc",	0 },		/* HSMMC1 */
+	{ "com",	2 },		/* UART3 */
+	{ "ehci",	0 },
+	{ NULL,		0 }
+};
+
+struct armv7_board omap_boards[] = {
+	{
+		BOARD_ID_OMAP3_BEAGLE,
+		"TI OMAP3 BeagleBoard",
+		beagleboard_devs,
+		omap3_init,
+	},
+	{
+		BOARD_ID_AM335X_BEAGLEBONE,
+		"TI AM335x BeagleBone",
+		beaglebone_devs,
+		am335x_init,
+	},
+	{
+		BOARD_ID_OMAP3_OVERO,
+		"Gumstix OMAP3 Overo",
+		overo_devs,
+		omap3_init,
+	},
+	{
+		BOARD_ID_OMAP4_PANDA,
+		"TI OMAP4 PandaBoard",
+		pandaboard_devs,
+		omap4_init,
+	},
+	{ 0, NULL, NULL, NULL },
+};
+
+struct board_dev *
+omap_board_devs(void)
+{
+	int i;
+
+	for (i = 0; omap_boards[i].name != NULL; i++) {
+		if (omap_boards[i].board_id == board_id)
+			return (omap_boards[i].devs);
+	}
+	return (NULL);
+}
+
+void
+omap_board_init(void)
+{
+	int i;
+
+	for (i = 0; omap_boards[i].name != NULL; i++) {
+		if (omap_boards[i].board_id == board_id) {
+			omap_boards[i].init();
+			break;
+		}
+	}
+}
+
+const char *
+omap_board_name(void)
+{
+	int i;
+
+	for (i = 0; omap_boards[i].name != NULL; i++) {
+		if (omap_boards[i].board_id == board_id) {
+			return (omap_boards[i].name);
+			break;
+		}
+	}
+	return (NULL);
+}
+
+int
+omap_match(struct device *parent, void *cfdata, void *aux)
+{
+	return (omap_board_devs() != NULL);
+}

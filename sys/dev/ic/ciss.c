@@ -1,4 +1,4 @@
-/*	$OpenBSD: ciss.c,v 1.71 2014/09/14 14:17:24 jsg Exp $	*/
+/*	$OpenBSD: ciss.c,v 1.73 2015/05/03 02:10:13 jsg Exp $	*/
 
 /*
  * Copyright (c) 2005,2006 Michael Shalayeff
@@ -32,7 +32,6 @@
 #include <machine/bus.h>
 
 #include <scsi/scsi_all.h>
-#include <scsi/scsi_disk.h>
 #include <scsi/scsiconf.h>
 
 #include <dev/ic/cissreg.h>
@@ -757,8 +756,10 @@ ciss_ldmap(struct ciss_softc *sc)
 	total = sizeof(*lmap) + (sc->maxunits - 1) * sizeof(lmap->map);
 
 	ccb = scsi_io_get(&sc->sc_iopool, SCSI_POLL|SCSI_NOSLEEP);
-	if (ccb == NULL)
+	if (ccb == NULL) {
+		CISS_UNLOCK_SCRATCH(sc, lock);
 		return ENOMEM;
+	}
 
 	ccb->ccb_len = total;
 	ccb->ccb_data = lmap;
@@ -801,8 +802,10 @@ ciss_sync(struct ciss_softc *sc)
 	flush->flush = sc->sc_flush;
 
 	ccb = scsi_io_get(&sc->sc_iopool, SCSI_POLL|SCSI_NOSLEEP);
-	if (ccb == NULL)
+	if (ccb == NULL) {
+		CISS_UNLOCK_SCRATCH(sc, lock);
 		return ENOMEM;
+	}
 
 	ccb->ccb_len = sizeof(*flush);
 	ccb->ccb_data = flush;

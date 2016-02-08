@@ -1,4 +1,4 @@
-/*	$OpenBSD: sxipio.c,v 1.5 2013/11/06 19:03:07 syl Exp $	*/
+/*	$OpenBSD: sxipio.c,v 1.7 2015/05/20 03:49:23 jsg Exp $	*/
 /*
  * Copyright (c) 2010 Miodrag Vallat.
  * Copyright (c) 2013 Artturi Alm
@@ -117,10 +117,6 @@ sxipio_attach(struct device *parent, struct device *self, void *args)
 	sxipio_sc = sc;
 
 	sc->sc_irq = aa->aa_dev->irq[0];
-	sxipio_setcfg(SXIPIO_LED_GREEN, SXIPIO_OUTPUT);
-	sxipio_setcfg(SXIPIO_LED_BLUE, SXIPIO_OUTPUT);
-	sxipio_setpin(SXIPIO_LED_GREEN);
-	sxipio_setpin(SXIPIO_LED_BLUE);
 
 	config_defer(self, sxipio_attach_gpio);
 
@@ -204,7 +200,7 @@ next:
 		sc->sc_gpio_pins[port][pin].pin_state =
 		    sxipio_getpin((port * 32) + pin);
 		sc->sc_gpio_pins[port][pin].pin_flags = GPIO_PIN_SET |
-		    cfg ? GPIO_PIN_OUTPUT : GPIO_PIN_INPUT;
+		    (cfg ? GPIO_PIN_OUTPUT : GPIO_PIN_INPUT);
 	} else {
 		/* disable control of taken over pins */
 		sc->sc_gpio_pins[port][pin].pin_caps = 0;

@@ -1,4 +1,4 @@
-/*	$OpenBSD: nd6.h,v 1.41 2014/11/20 13:54:24 mpi Exp $	*/
+/*	$OpenBSD: nd6.h,v 1.44 2015/07/18 15:05:32 mpi Exp $	*/
 /*	$KAME: nd6.h,v 1.95 2002/06/08 11:31:06 itojun Exp $	*/
 
 /*
@@ -233,12 +233,6 @@ extern int nd6_debug;
 
 extern struct timeout nd6_timer_ch;
 
-#define ND6_RS_OUTPUT_INTERVAL 60
-#define ND6_RS_OUTPUT_QUICK_INTERVAL 1
-extern struct timeout nd6_rs_output_timer;
-extern int nd6_rs_output_timeout;
-extern int nd6_rs_timeout_count;
-
 union nd_opts {
 	struct nd_opt_hdr *nd_opt_array[9];
 	struct {
@@ -276,7 +270,7 @@ void nd6_setmtu(struct ifnet *);
 void nd6_llinfo_settimer(struct llinfo_nd6 *, long);
 void nd6_timer(void *);
 void nd6_purge(struct ifnet *);
-void nd6_nud_hint(struct rtentry *, struct in6_addr *, int, u_int);
+void nd6_nud_hint(struct rtentry *, u_int);
 int nd6_resolve(struct ifnet *, struct rtentry *,
 	struct mbuf *, struct sockaddr *, u_char *);
 void nd6_rtrequest(int, struct rtentry *);
@@ -299,12 +293,13 @@ void nd6_ns_output(struct ifnet *, struct in6_addr *,
 caddr_t nd6_ifptomac(struct ifnet *);
 void nd6_dad_start(struct ifaddr *, int *);
 void nd6_dad_stop(struct ifaddr *);
-
-void nd6_rs_input(struct mbuf *, int, int);
 void nd6_ra_input(struct mbuf *, int, int);
-void nd6_rs_output_set_timo(int);
-void nd6_rs_output(struct ifnet *, struct in6_ifaddr *);
-void nd6_rs_dev_state(void *);
+
+void nd6_rs_init(void);
+void nd6_rs_attach(struct ifnet *);
+void nd6_rs_detach(struct ifnet *);
+void nd6_rs_input(struct mbuf *, int, int);
+
 void prelist_del(struct nd_prefix *);
 void defrouter_addreq(struct nd_defrouter *);
 void defrouter_reset(void);
@@ -318,6 +313,9 @@ int nd6_prefix_onlink(struct nd_prefix *);
 int nd6_prefix_offlink(struct nd_prefix *);
 void pfxlist_onlink_check(void);
 struct nd_defrouter *defrouter_lookup(struct in6_addr *, struct ifnet *);
+
+struct nd_prefix *nd6_prefix_add(struct ifnet *, struct sockaddr_in6 *,
+    struct sockaddr_in6 *, struct in6_addrlifetime *, int);
 struct nd_prefix *nd6_prefix_lookup(struct nd_prefix *);
 int in6_ifdel(struct ifnet *, struct in6_addr *);
 int in6_init_prefix_ltimes(struct nd_prefix *ndpr);

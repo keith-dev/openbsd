@@ -1,4 +1,4 @@
-/*	$OpenBSD: i915_gem_execbuffer.c,v 1.35 2015/02/12 08:48:32 jsg Exp $	*/
+/*	$OpenBSD: i915_gem_execbuffer.c,v 1.38 2015/04/12 17:10:07 kettenis Exp $	*/
 /*
  * Copyright (c) 2008-2009 Owain G. Ainsworth <oga@openbsd.org>
  *
@@ -265,7 +265,7 @@ i915_gem_execbuffer_relocate_object(struct drm_i915_gem_object *obj,
 			count = ARRAY_SIZE(stack_reloc);
 		remain -= count;
 
-		if (DRM_COPY_FROM_USER(r, user_relocs, count*sizeof(r[0])))
+		if (__copy_from_user_inatomic(r, user_relocs, count*sizeof(r[0])))
 			return -EFAULT;
 
 		do {
@@ -276,7 +276,7 @@ i915_gem_execbuffer_relocate_object(struct drm_i915_gem_object *obj,
 				return ret;
 
 			if (r->presumed_offset != offset &&
-			    DRM_COPY_TO_USER(&user_relocs->presumed_offset,
+			    __copy_to_user_inatomic(&user_relocs->presumed_offset,
 						    &r->presumed_offset,
 						    sizeof(r->presumed_offset))) {
 				return -EFAULT;
@@ -542,12 +542,11 @@ i915_gem_execbuffer_relocate_slow(struct drm_device *dev,
 	for (i = 0; i < count; i++)
 		total += exec[i].relocation_count;
 
-	reloc_offset = mallocarray(count, sizeof(*reloc_offset), M_DRM,
-	    M_WAITOK);
-	reloc = mallocarray(total, sizeof(*reloc), M_DRM, M_WAITOK);
+	reloc_offset = drm_malloc_ab(count, sizeof(*reloc_offset));
+	reloc = drm_malloc_ab(total, sizeof(*reloc));
 	if (reloc == NULL || reloc_offset == NULL) {
-		drm_free(reloc);
-		drm_free(reloc_offset);
+		drm_free_large(reloc);
+		drm_free_large(reloc_offset);
 		mutex_lock(&dev->struct_mutex);
 		return -ENOMEM;
 	}
@@ -560,7 +559,7 @@ i915_gem_execbuffer_relocate_slow(struct drm_device *dev,
 
 		user_relocs = (void __user *)(uintptr_t)exec[i].relocs_ptr;
 
-		if (DRM_COPY_FROM_USER(reloc+total, user_relocs,
+		if (copy_from_user(reloc+total, user_relocs,
 				   exec[i].relocation_count * sizeof(*reloc))) {
 			ret = -EFAULT;
 			mutex_lock(&dev->struct_mutex);
@@ -577,7 +576,7 @@ i915_gem_execbuffer_relocate_slow(struct drm_device *dev,
 		 * relocations were valid.
 		 */
 		for (j = 0; j < exec[i].relocation_count; j++) {
-			if (DRM_COPY_TO_USER(&user_relocs[j].presumed_offset,
+			if (copy_to_user(&user_relocs[j].presumed_offset,
 					 &invalid_offset,
 					 sizeof(invalid_offset))) {
 				ret = -EFAULT;
@@ -633,8 +632,8 @@ i915_gem_execbuffer_relocate_slow(struct drm_device *dev,
 	 */
 
 err:
-	drm_free(reloc);
-	drm_free(reloc_offset);
+	drm_free_large(reloc);
+	drm_free_large(reloc_offset);
 	return ret;
 }
 
@@ -1094,9 +1093,9 @@ i915_gem_do_execbuffer(struct drm_device *dev, void *data,
 			goto err;
 #ifdef __linux__
 	}
+#endif
 
 	trace_i915_gem_ring_dispatch(ring, intel_ring_get_seqno(ring), flags);
-#endif
 
 	i915_gem_execbuffer_move_to_active(&objects, ring);
 	i915_gem_execbuffer_retire_commands(dev, file, ring);
@@ -1225,26 +1224,29 @@ i915_gem_execbuffer2(struct drm_device *dev, void *data,
 
 	exec2_list = kmalloc(sizeof(*exec2_list)*args->buffer_count,
 			     GFP_KERNEL | __GFP_NOWARN | __GFP_NORETRY);
+	if (exec2_list == NULL)
+		exec2_list = drm_malloc_ab(sizeof(*exec2_list),
+					   args->buffer_count);
 	if (exec2_list == NULL) {
 		DRM_DEBUG("Failed to allocate exec list for %d buffers\n",
 			  args->buffer_count);
 		return -ENOMEM;
 	}
-	ret = DRM_COPY_FROM_USER(exec2_list,
+	ret = copy_from_user(exec2_list,
 			     (struct drm_i915_relocation_entry __user *)
 			     (uintptr_t) args->buffers_ptr,
 			     sizeof(*exec2_list) * args->buffer_count);
 	if (ret != 0) {
 		DRM_DEBUG("copy %d exec entries failed %d\n",
 			  args->buffer_count, ret);
-		drm_free(exec2_list);
+		drm_free_large(exec2_list);
 		return -EFAULT;
 	}
 
 	ret = i915_gem_do_execbuffer(dev, data, file, args, exec2_list);
 	if (!ret) {
 		/* Copy the new buffer offsets back to the user's exec list. */
-		ret = DRM_COPY_TO_USER((void __user *)(uintptr_t)args->buffers_ptr,
+		ret = copy_to_user((void __user *)(uintptr_t)args->buffers_ptr,
 				   exec2_list,
 				   sizeof(*exec2_list) * args->buffer_count);
 		if (ret) {
@@ -1255,7 +1257,7 @@ i915_gem_execbuffer2(struct drm_device *dev, void *data,
 		}
 	}
 
-	drm_free(exec2_list);
+	drm_free_large(exec2_list);
 	return ret;
 }
 

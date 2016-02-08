@@ -1,4 +1,4 @@
-/* 	$OpenBSD: vmparam.h,v 1.8 2011/09/21 10:09:52 miod Exp $	*/
+/* 	$OpenBSD: vmparam.h,v 1.10 2015/06/24 21:35:00 miod Exp $	*/
 /*	$NetBSD: vmparam.h,v 1.23 2003/05/22 05:47:07 thorpej Exp $	*/
 
 /*
@@ -33,7 +33,7 @@
 #ifndef	_MACHINE_VMPARAM_H_
 #define	_MACHINE_VMPARAM_H_
 
-#define	ARM_KERNEL_BASE		0xc0000000
+#define	ARM_KERNEL_BASE		0xc0000000U
 
 /* Allow armish to have bigger DSIZ than generic arm, allow user to override */
 #ifndef	MAXDSIZ
@@ -55,6 +55,8 @@
  * Mappings >= KERNEL_BASE are constant across all processes
  */
 #define	KERNEL_BASE		ARM_KERNEL_BASE
+
+#define VM_KERNEL_SPACE_SIZE	0x20000000
 
 /*
  * Override the default pager_map size, there's not enough KVA.

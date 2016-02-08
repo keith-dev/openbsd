@@ -1,4 +1,4 @@
-/*	$OpenBSD: ac97.c,v 1.78 2014/07/12 18:48:17 tedu Exp $	*/
+/*	$OpenBSD: ac97.c,v 1.80 2015/05/11 06:46:21 ratchov Exp $	*/
 
 /*
  * Copyright (c) 1999, 2000 Constantine Sapuntzakis
@@ -64,7 +64,6 @@
 #include <sys/systm.h>
 #include <sys/kernel.h>
 #include <sys/malloc.h>
-#include <sys/device.h>
 
 #include <sys/audioio.h>
 #include <dev/audio_if.h>
@@ -78,9 +77,7 @@ const struct audio_params ac97_audio_default = {
 	16,		/* precision */
 	2,		/* bps */
 	1,		/* msb */
-	2,		/* channels */
-	NULL,		/* sw_code */
-	1		/* factor */
+	2		/* channels */
 };
 
 const struct audio_mixer_enum ac97_on_off = {

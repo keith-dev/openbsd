@@ -1,4 +1,4 @@
-/* $OpenBSD: vga_pci.c,v 1.82 2014/12/06 03:01:42 jsg Exp $ */
+/* $OpenBSD: vga_pci.c,v 1.85 2015/07/18 00:48:05 miod Exp $ */
 /* $NetBSD: vga_pci.c,v 1.3 1998/06/08 06:55:58 thorpej Exp $ */
 
 /*
@@ -81,16 +81,14 @@
 #include <dev/pci/pcivar.h>
 #include <dev/pci/pcidevs.h>
 
-#include <dev/pci/agpvar.h>
-
 #include <dev/ic/mc6845reg.h>
 #include <dev/ic/pcdisplayvar.h>
 #include <dev/ic/vgareg.h>
-#include <dev/ic/vgavar.h>
 #include <dev/pci/vga_pcivar.h>
 
 #include <dev/wscons/wsconsio.h>
 #include <dev/wscons/wsdisplayvar.h>
+#include <dev/ic/vgavar.h>
 
 #ifdef X86EMU
 #include <machine/vga_post.h>
@@ -593,6 +591,7 @@ vga_restore_state(struct vga_pci_softc *sc)
 	for (i = 0; i < sizeof(sc->sc_save_gdc); i++)
 		_vga_gdc_write(vh, i, *buf++);
 
+	vga_restore_fonts(vc);
 	vga_restore_palette(vc);
 
 	/*

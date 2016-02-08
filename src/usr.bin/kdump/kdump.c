@@ -1,4 +1,4 @@
-/*	$OpenBSD: kdump.c,v 1.98 2015/01/26 04:38:23 guenther Exp $	*/
+/*	$OpenBSD: kdump.c,v 1.103 2015/07/19 04:45:25 guenther Exp $	*/
 
 /*-
  * Copyright (c) 1988, 1993
@@ -56,6 +56,7 @@
 #include <err.h>
 #include <fcntl.h>
 #include <limits.h>
+#include <netdb.h>
 #include <poll.h>
 #include <signal.h>
 #include <stdio.h>
@@ -145,7 +146,7 @@ static void ktrnamei(const char *, size_t);
 static void ktrpsig(struct ktr_psig *);
 static void ktrsyscall(struct ktr_syscall *, size_t);
 static const char *kresolvsysctl(int, const int *);
-static void ktrsysret(struct ktr_sysret *);
+static void ktrsysret(struct ktr_sysret *, size_t);
 static void ktruser(struct ktr_user *, size_t);
 static void setemul(const char *);
 static void usage(void);
@@ -163,15 +164,28 @@ static void clockname(int);
 static void sockoptlevelname(int);
 static void ktraceopname(int);
 
+static int screenwidth;
+
 int
 main(int argc, char *argv[])
 {
 	int ch, silent;
 	size_t ktrlen, size;
 	int trpoints = ALL_POINTS;
+	const char *errstr;
 	void *m;
 
 	def_emul = current = &emulations[0];	/* native */
+
+	if (screenwidth == 0) {
+		struct winsize ws;
+
+		if (fancy && ioctl(fileno(stderr), TIOCGWINSZ, &ws) != -1 &&
+		    ws.ws_col > 8)
+			screenwidth = ws.ws_col;
+		else
+			screenwidth = 80;
+	}
 
 	while ((ch = getopt(argc, argv, "e:f:dHlm:nRp:Tt:xX")) != -1)
 		switch (ch) {
@@ -192,13 +206,17 @@ main(int argc, char *argv[])
 			tail = 1;
 			break;
 		case 'm':
-			maxdata = atoi(optarg);
+			maxdata = strtonum(optarg, 0, INT_MAX, &errstr);
+			if (errstr)
+				errx(1, "-m %s: %s", optarg, errstr);
 			break;
 		case 'n':
 			fancy = 0;
 			break;
 		case 'p':
-			pid_opt = atoi(optarg);
+			pid_opt = strtonum(optarg, 1, INT_MAX, &errstr);
+			if (errstr)
+				errx(1, "-p %s: %s", optarg, errstr);
 			break;
 		case 'R':
 			timestamp = 2;	/* relative timestamp */
@@ -263,7 +281,7 @@ main(int argc, char *argv[])
 			ktrsyscall((struct ktr_syscall *)m, ktrlen);
 			break;
 		case KTR_SYSRET:
-			ktrsysret((struct ktr_sysret *)m);
+			ktrsysret((struct ktr_sysret *)m, ktrlen);
 			break;
 		case KTR_NAMEI:
 			ktrnamei(m, ktrlen);
@@ -550,7 +568,6 @@ static void (*formatters[])(int) = {
 	rebootoptname,
 	flockname,
 	sockoptname,
-	sockdomainname,
 	sockipprotoname,
 	socktypename,
 	sockflagsname,
@@ -633,7 +650,6 @@ enum {
 	Rebootoptname,
 	Flockname,
 	Sockoptname,
-	Sockdomainname,
 	Sockipprotoname,
 	Socktypename,
 	Sockflagsname,
@@ -773,7 +789,7 @@ static const formatter scargs[][8] = {
     [SYS___thrsleep]	= { Pptr, Clockname, Pptr, Pptr, Pptr },
     [SYS_fsync]		= { Pfd },
     [SYS_setpriority]	= { Prioname, Ppid_t, Pdecint },
-    [SYS_socket]	= { Sockdomainname, Socktypename, Sockprotoname },
+    [SYS_socket]	= { Sockfamilyname, Socktypename, Sockprotoname },
     [SYS_connect]	= { Pfd, Pptr, Pucount },
     [SYS_getdents]	= { Pfd, Pptr, Pbigsize },
     [SYS_getpriority]	= { Prioname, Ppid_t },
@@ -799,7 +815,7 @@ static const formatter scargs[][8] = {
     [SYS_mkfifo]	= { Ppath, Modename },
     [SYS_sendto]	= { Pfd, Pptr, Pbigsize, Sendrecvflagsname },
     [SYS_shutdown]	= { Pfd, Shutdownhowname },
-    [SYS_socketpair]	= { Sockdomainname, Socktypename, Sockprotoname, Pptr },
+    [SYS_socketpair]	= { Sockfamilyname, Socktypename, Sockprotoname, Pptr },
     [SYS_mkdir]		= { Ppath, Modename },
     [SYS_rmdir]		= { Ppath },
     [SYS_adjtime]	= { Pptr, Pptr },
@@ -1089,17 +1105,33 @@ kresolvsysctl(int depth, const int *top)
 }
 
 static void
-ktrsysret(struct ktr_sysret *ktr)
+ktrsysret(struct ktr_sysret *ktr, size_t ktrlen)
 {
-	register_t ret = ktr->ktr_retval;
+	register_t ret = 0;
+	long long retll;
 	int error = ktr->ktr_error;
 	int code = ktr->ktr_code;
+
+	if (ktrlen < sizeof(*ktr))
+		errx(1, "sysret length %zu < ktr header length %zu",
+		    ktrlen, sizeof(*ktr));
+	ktrlen -= sizeof(*ktr);
+	if (error == 0) {
+		if (ktrlen == sizeof(ret)) {
+			memcpy(&ret, ktr+1, sizeof(ret));
+			retll = ret;
+		} else if (ktrlen == sizeof(retll))
+			memcpy(&retll, ktr+1, sizeof(retll));
+		else
+			errx(1, "sysret bogus length %zu", ktrlen);
+	}
 
 	if (code >= current->nsysnames || code < 0)
 		(void)printf("[%d] ", code);
 	else {
 		(void)printf("%s ", current->sysnames[code]);
-		if (ret > 0 && (strcmp(current->sysnames[code], "fork") == 0 ||
+		if (error == 0 && ret > 0 &&
+		    (strcmp(current->sysnames[code], "fork") == 0 ||
 		    strcmp(current->sysnames[code], "vfork") == 0 ||
 		    strcmp(current->sysnames[code], "__tfork") == 0 ||
 		    strcmp(current->sysnames[code], "clone") == 0))
@@ -1109,6 +1141,11 @@ ktrsysret(struct ktr_sysret *ktr)
 	if (error == 0) {
 		if (fancy) {
 			switch (current == &emulations[0] ? code : -1) {
+			case SYS_lseek:
+				(void)printf("%lld", retll);
+				if (retll < 0 || retll > 9)
+					(void)printf("/%#llx", retll);
+				break;
 			case SYS_sigprocmask:
 			case SYS_sigpending:
 				sigset(ret);
@@ -1132,9 +1169,9 @@ ktrsysret(struct ktr_sysret *ktr)
 			}
 		} else {
 			if (decimal)
-				(void)printf("%ld", (long)ret);
+				(void)printf("%lld", retll);
 			else
-				(void)printf("%#lx", (long)ret);
+				(void)printf("%#llx", retll);
 		}
 	} else if (error == ERESTART)
 		(void)printf("RESTART");
@@ -1173,19 +1210,9 @@ static void
 showbuf(unsigned char *dp, size_t datalen)
 {
 	int i, j;
-	static int screenwidth;
 	int col = 0, width, bpl;
 	unsigned char visbuf[5], *cp, c;
 
-	if (screenwidth == 0) {
-		struct winsize ws;
-
-		if (fancy && ioctl(fileno(stderr), TIOCGWINSZ, &ws) != -1 &&
-		    ws.ws_col > 8)
-			screenwidth = ws.ws_col;
-		else
-			screenwidth = 80;
-	}
 	if (iohex == 1) {
 		putchar('\t');
 		col = 8;
@@ -1634,16 +1661,21 @@ clockname(int clockid)
 
 /*
  * [g|s]etsockopt's level argument can either be SOL_SOCKET or a value
- * referring to a line in /etc/protocols . It might be appropriate
- * to use getprotoent(3) here.
+ * referring to a line in /etc/protocols.
  */
 static void
-sockoptlevelname(int level)
+sockoptlevelname(int optname)
 {
-	if (level == SOL_SOCKET)
-		(void)printf("SOL_SOCKET");
-	else
-		pdecint(level);
+	struct protoent *pe;
+
+	if (arg1 == SOL_SOCKET) {
+		(void)printf("SOL_SOCKET,");
+		sockoptname(optname);
+	} else {
+		pe = getprotobynumber(arg1);
+		(void)printf("%u<%s>,%d", arg1,
+		    pe != NULL ? pe->p_name : "unknown", optname);
+	}
 }
 
 static void

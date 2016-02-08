@@ -1,4 +1,4 @@
-#	$OpenBSD: GENERIC,v 1.246 2015/01/03 21:24:19 uaa Exp $g
+#	$OpenBSD: GENERIC,v 1.251 2015/06/02 13:53:43 mpi Exp $g
 #
 # For further information on compiling OpenBSD kernels, see the config(8)
 # man page.
@@ -46,10 +46,11 @@ smu*		at mainbus0
 pci*		at mpcpcibr?
 pci*		at ht?
 ppb*		at pci?		# PCI-PCI bridges
+hpb*		at pci?
 pci*		at ppb?
+pci*		at hpb?
 
 siop*		at pci?
-lmc*		at pci?		# Lan Media Corp SSI/T3/HSSI
 fxp*		at pci?
 de*		at pci?
 #vme*		at pci?
@@ -206,6 +207,7 @@ usb*	at ehci?
 # USB devices
 uhub*	at usb?			# USB Hubs
 uhub*	at uhub?		# USB Hubs
+ualea*	at uhub?		# Araneus Alea II TRNG
 umodem*	at uhub?		# USB Modems/Serial
 ucom*	at umodem?
 uvisor*	at uhub?		# Handspring Visor
@@ -272,7 +274,7 @@ url*	at uhub?		# Realtek RTL8150L based adapters
 wi*	at uhub?		# WaveLAN IEEE 802.11DS
 udsbr*	at uhub?		# D-Link DSB-R100 radio
 radio*	at udsbr?		# USB radio
-uberry*	at uhub?		# Research In Motion Blackberry
+uberry*	at uhub?		# Research In Motion BlackBerry
 ugen*	at uhub?		# USB Generic driver
 uath*	at uhub?		# Atheros AR5005UG/AR5005UX
 ural*	at uhub?		# Ralink RT2500USB
@@ -350,7 +352,6 @@ wsdisplay*	at vgafb?
 #appleagp*	at pchb?
 #agp*		at appleagp?	# AGP bridges
 
-#option		DRMDEBUG
 radeondrm*	at pci? 	# ATI Radeon DRM driver
 drm*		at radeondrm?
 wsdisplay*	at radeondrm?

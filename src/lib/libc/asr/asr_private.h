@@ -1,4 +1,4 @@
-/*	$OpenBSD: asr_private.h,v 1.27 2015/02/14 20:15:05 jca Exp $	*/
+/*	$OpenBSD: asr_private.h,v 1.31 2015/06/20 01:16:25 jca Exp $	*/
 /*
  * Copyright (c) 2012 Eric Faurot <eric@openbsd.org>
  *
@@ -132,8 +132,6 @@ struct asr_ctx {
 	char		 ac_db[ASR_MAXDB + 1];
 	int		 ac_family[3];
 
-	char		*ac_hostfile;
-
 	int		 ac_nscount;
 	int		 ac_nstimeout;
 	int		 ac_nsretries;
@@ -143,6 +141,7 @@ struct asr_ctx {
 
 struct asr {
 	char		*a_path;
+	pid_t		 a_pid;
 	time_t		 a_mtime;
 	time_t		 a_rtime;
 	struct asr_ctx	*a_ctx;
@@ -320,7 +319,7 @@ void asr_async_free(struct asr_query *);
 size_t asr_make_fqdn(const char *, const char *, char *, size_t);
 char *asr_strdname(const char *, char *, size_t);
 int asr_iter_db(struct asr_query *);
-int asr_parse_namedb_line(FILE *, char **, int);
+int asr_parse_namedb_line(FILE *, char **, int, char *, size_t);
 char *asr_hostalias(struct asr_ctx *, const char *, char *, size_t);
 
 /* *_async.c */
@@ -343,7 +342,7 @@ struct asr_query *gethostbyaddr_async_ctx(const void *, socklen_t, int,
 const char *asr_querystr(int);
 const char *asr_statestr(int);
 const char *asr_transitionstr(int);
-const char *print_sockaddr(const struct sockaddr *, char *, size_t);
+const char *asr_print_sockaddr(const struct sockaddr *, char *, size_t);
 void asr_dump_config(FILE *, struct asr *);
 void asr_dump_packet(FILE *, const void *, size_t);
 

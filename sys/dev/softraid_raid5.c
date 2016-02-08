@@ -1,4 +1,4 @@
-/* $OpenBSD: softraid_raid5.c,v 1.17 2014/11/18 02:37:30 tedu Exp $ */
+/* $OpenBSD: softraid_raid5.c,v 1.23 2015/07/21 03:30:51 krw Exp $ */
 /*
  * Copyright (c) 2014 Joel Sing <jsing@openbsd.org>
  * Copyright (c) 2009 Marco Peereboom <marco@peereboom.us>
@@ -30,7 +30,6 @@
 #include <sys/rwlock.h>
 #include <sys/queue.h>
 #include <sys/fcntl.h>
-#include <sys/disklabel.h>
 #include <sys/mount.h>
 #include <sys/sensors.h>
 #include <sys/stat.h>
@@ -58,12 +57,12 @@ int	sr_raid5_wu_done(struct sr_workunit *);
 void	sr_raid5_set_chunk_state(struct sr_discipline *, int, int);
 void	sr_raid5_set_vol_state(struct sr_discipline *);
 
-int	sr_raid5_addio(struct sr_workunit *wu, int, daddr_t, daddr_t,
+int	sr_raid5_addio(struct sr_workunit *wu, int, daddr_t, long,
 	    void *, int, int, void *);
-int	sr_raid5_regenerate(struct sr_workunit *, int, daddr_t, daddr_t,
+int	sr_raid5_regenerate(struct sr_workunit *, int, daddr_t, long,
 	    void *);
 int	sr_raid5_write(struct sr_workunit *, struct sr_workunit *, int, int,
-	    daddr_t, daddr_t, void *, int, int);
+	    daddr_t, long, void *, int, int);
 void	sr_raid5_xor(void *, void *, int);
 
 void	sr_raid5_rebuild(struct sr_discipline *);
@@ -373,22 +372,23 @@ sr_raid5_rw(struct sr_workunit *wu)
 	struct sr_discipline	*sd = wu->swu_dis;
 	struct scsi_xfer	*xs = wu->swu_xs;
 	struct sr_chunk		*scp;
-	daddr_t			blk, lba;
-	int64_t			chunk_offs, lbaoffs, phys_offs, strip_offs;
+	daddr_t			blkno, lba;
+	int64_t			chunk_offs, lbaoffs, offset, strip_offs;
 	int64_t			strip_bits, strip_no, strip_size;
 	int64_t			chunk, no_chunk;
-	int64_t			length, parity, datalen, row_size;
+	int64_t			parity, row_size;
+	long			length, datalen;
 	void			*data;
 	int			s;
 
-	/* blk and scsi error will be handled by sr_validate_io */
-	if (sr_validate_io(wu, &blk, "sr_raid5_rw"))
+	/* blkno and scsi error will be handled by sr_validate_io */
+	if (sr_validate_io(wu, &blkno, "sr_raid5_rw"))
 		goto bad;
 
-	DNPRINTF(SR_D_DIS, "%s: %s sr_raid5_rw %s: lba %lld size %d\n",
+	DNPRINTF(SR_D_DIS, "%s: %s sr_raid5_rw %s: blkno %lld size %d\n",
 	    DEVNAME(sd->sd_sc), sd->sd_meta->ssd_devname,
 	    (xs->flags & SCSI_DATA_IN) ? "read" : "write",
-	    (long long)blk, xs->datalen);
+	    (long long)blkno, xs->datalen);
 
 	strip_size = sd->sd_meta->ssdi.ssd_strip_size;
 	strip_bits = sd->mds.mdd_raid5.sr5_strip_bits;
@@ -397,7 +397,7 @@ sr_raid5_rw(struct sr_workunit *wu)
 
 	data = xs->data;
 	datalen = xs->datalen;
-	lbaoffs	= blk << DEV_BSHIFT;
+	lbaoffs	= blkno << DEV_BSHIFT;
 
 	if (xs->flags & SCSI_DATA_OUT) {
 		if ((wu_r = sr_scsi_wu_get(sd, SCSI_NOSLEEP)) == NULL){
@@ -414,8 +414,7 @@ sr_raid5_rw(struct sr_workunit *wu)
 		strip_no = lbaoffs >> strip_bits;
 		strip_offs = lbaoffs & (strip_size - 1);
 		chunk_offs = (strip_no / no_chunk) << strip_bits;
-		phys_offs = chunk_offs + strip_offs +
-		    (sd->sd_meta->ssd_data_offset << DEV_BSHIFT);
+		offset = chunk_offs + strip_offs;
 
 		/* get size remaining in this stripe */
 		length = MIN(strip_size - strip_offs, datalen);
@@ -429,7 +428,7 @@ sr_raid5_rw(struct sr_workunit *wu)
 		if (chunk >= parity)
 			chunk++;
 
-		lba = phys_offs >> DEV_BSHIFT;
+		lba = offset >> DEV_BSHIFT;
 
 		/* XXX big hammer.. exclude I/O from entire stripe */
 		if (wu->swu_blk_start == 0)
@@ -505,7 +504,7 @@ bad:
 
 int
 sr_raid5_regenerate(struct sr_workunit *wu, int chunk, daddr_t blkno,
-    daddr_t len, void *data)
+    long len, void *data)
 {
 	struct sr_discipline	*sd = wu->swu_dis;
 	int			i;
@@ -514,7 +513,7 @@ sr_raid5_regenerate(struct sr_workunit *wu, int chunk, daddr_t blkno,
 	 * Regenerate a block on a RAID 5 volume by xoring the data and parity
 	 * from all of the remaining online chunks. This requires the parity
 	 * to already be correct.
- 	 */
+	 */
 
 	DNPRINTF(SR_D_DIS, "%s: %s sr_raid5_regenerate chunk %d offline, "
 	    "regenerating block %llu\n",
@@ -538,7 +537,7 @@ bad:
 
 int
 sr_raid5_write(struct sr_workunit *wu, struct sr_workunit *wu_r, int chunk,
-    int parity, daddr_t blkno, daddr_t len, void *data, int xsflags,
+    int parity, daddr_t blkno, long len, void *data, int xsflags,
     int ccbflags)
 {
 	struct sr_discipline	*sd = wu->swu_dis;
@@ -581,7 +580,7 @@ sr_raid5_write(struct sr_workunit *wu, struct sr_workunit *wu_r, int chunk,
 	 */
 
 	DNPRINTF(SR_D_DIS, "%s: %s sr_raid5_write chunk %i parity %i "
-	    "blk %llu\n", DEVNAME(sd->sd_sc), sd->sd_meta->ssd_devname,
+	    "blkno %llu\n", DEVNAME(sd->sd_sc), sd->sd_meta->ssd_devname,
 	    chunk, parity, (unsigned long long)blkno);
 
 	chunk_online = sr_raid5_chunk_online(sd, chunk);
@@ -724,14 +723,14 @@ sr_raid5_wu_done(struct sr_workunit *wu)
 
 int
 sr_raid5_addio(struct sr_workunit *wu, int chunk, daddr_t blkno,
-    daddr_t len, void *data, int xsflags, int ccbflags, void *xorbuf)
+    long len, void *data, int xsflags, int ccbflags, void *xorbuf)
 {
 	struct sr_discipline	*sd = wu->swu_dis;
 	struct sr_ccb		*ccb;
 
 	DNPRINTF(SR_D_DIS, "sr_raid5_addio: %s chunk %d block %lld "
-	    "length %lld %s\n", (xsflags & SCSI_DATA_IN) ? "read" : "write",
-	    chunk, (long long)blkno, (long long)len, xorbuf ? "X0R" : "-");
+	    "length %ld %s\n", (xsflags & SCSI_DATA_IN) ? "read" : "write",
+	    chunk, (long long)blkno, len, xorbuf ? "X0R" : "-");
 
 	/* Allocate temporary buffer. */
 	if (data == NULL) {
@@ -766,7 +765,7 @@ sr_raid5_xor(void *a, void *b, int len)
 void
 sr_raid5_rebuild(struct sr_discipline *sd)
 {
-	int64_t strip_no, strip_size, strip_bits, i, psz, rb;
+	int64_t strip_no, strip_size, strip_bits, i, psz, rb, restart;
 	int64_t chunk_count, chunk_strips, chunk_lba, chunk_size, row_size;
 	struct sr_workunit *wu_r, *wu_w;
 	int s, slept, percent = 0, old_percent = -1;
@@ -790,16 +789,31 @@ sr_raid5_rebuild(struct sr_discipline *sd)
 	chunk_strips = (chunk_size << DEV_BSHIFT) >> strip_bits;
 	row_size = (chunk_count << strip_bits) >> DEV_BSHIFT;
 
-	/* XXX - handle restarts. */
 	DNPRINTF(SR_D_REBUILD, "%s: %s sr_raid5_rebuild volume size = %lld, "
 	    "chunk count = %lld, chunk size = %lld, chunk strips = %lld, "
 	    "row size = %lld\n", DEVNAME(sd->sd_sc), sd->sd_meta->ssd_devname,
 	    sd->sd_meta->ssdi.ssd_size, chunk_count, chunk_size, chunk_strips,
 	    row_size);
 
-	for (strip_no = 0; strip_no < chunk_strips; strip_no++) {
-		chunk_lba = (strip_size >> DEV_BSHIFT) * strip_no +
-		    sd->sd_meta->ssd_data_offset;
+	restart = sd->sd_meta->ssd_rebuild / row_size;
+	if (restart > chunk_strips) {
+		printf("%s: bogus rebuild restart offset, starting from 0\n",
+		    DEVNAME(sd->sd_sc));
+		restart = 0;
+	}
+	if (restart != 0) {
+		psz = sd->sd_meta->ssdi.ssd_size;
+		rb = sd->sd_meta->ssd_rebuild;
+		if (rb > 0)
+			percent = 100 - ((psz * 100 - rb * 100) / psz) - 1;
+		else
+			percent = 0;
+		printf("%s: resuming rebuild on %s at %d%%\n",
+		    DEVNAME(sd->sd_sc), sd->sd_meta->ssd_devname, percent);
+	}
+
+	for (strip_no = restart; strip_no < chunk_strips; strip_no++) {
+		chunk_lba = (strip_size >> DEV_BSHIFT) * strip_no;
 
 		DNPRINTF(SR_D_REBUILD, "%s: %s rebuild strip %lld, "
 		    "chunk lba = %lld\n", DEVNAME(sd->sd_sc),
@@ -851,8 +865,7 @@ sr_raid5_rebuild(struct sr_discipline *sd)
 		sr_scsi_wu_put(sd, wu_r);
 		sr_scsi_wu_put(sd, wu_w);
 
-		sd->sd_meta->ssd_rebuild =
-		    (chunk_lba - sd->sd_meta->ssd_data_offset) * chunk_count;
+		sd->sd_meta->ssd_rebuild = chunk_lba * chunk_count;
 
 		psz = sd->sd_meta->ssdi.ssd_size;
 		rb = sd->sd_meta->ssd_rebuild;

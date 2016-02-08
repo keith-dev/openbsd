@@ -1,4 +1,4 @@
-/* $OpenBSD: pk7_lib.c,v 1.14 2014/07/12 16:03:37 miod Exp $ */
+/* $OpenBSD: pk7_lib.c,v 1.16 2015/07/29 14:58:34 jsing Exp $ */
 /* Copyright (C) 1995-1998 Eric Young (eay@cryptsoft.com)
  * All rights reserved.
  *
@@ -380,7 +380,7 @@ PKCS7_SIGNER_INFO_set(PKCS7_SIGNER_INFO *p7i, X509 *x509, EVP_PKEY *pkey,
 	 * things the ugly way. */
 	M_ASN1_INTEGER_free(p7i->issuer_and_serial->serial);
 	if (!(p7i->issuer_and_serial->serial =
-	    M_ASN1_INTEGER_dup(X509_get_serialNumber(x509))))
+	    ASN1_STRING_dup(X509_get_serialNumber(x509))))
 		goto err;
 
 	/* lets keep the pkey around for a while */
@@ -460,6 +460,8 @@ PKCS7_set_digest(PKCS7 *p7, const EVP_MD *md)
 STACK_OF(PKCS7_SIGNER_INFO) *
 PKCS7_get_signer_info(PKCS7 *p7)
 {
+	if (p7 == NULL || p7->d.ptr == NULL)
+		return (NULL);
 	if (PKCS7_type_is_signed(p7)) {
 		return (p7->d.sign->signer_info);
 	} else if (PKCS7_type_is_signedAndEnveloped(p7)) {
@@ -543,7 +545,7 @@ PKCS7_RECIP_INFO_set(PKCS7_RECIP_INFO *p7i, X509 *x509)
 
 	M_ASN1_INTEGER_free(p7i->issuer_and_serial->serial);
 	if (!(p7i->issuer_and_serial->serial =
-	    M_ASN1_INTEGER_dup(X509_get_serialNumber(x509))))
+	    ASN1_STRING_dup(X509_get_serialNumber(x509))))
 		return 0;
 
 	pkey = X509_get_pubkey(x509);

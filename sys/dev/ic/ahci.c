@@ -1,4 +1,4 @@
-/*	$OpenBSD: ahci.c,v 1.19 2015/02/11 07:13:44 jmatthew Exp $ */
+/*	$OpenBSD: ahci.c,v 1.21 2015/03/21 13:42:06 mpi Exp $ */
 
 /*
  * Copyright (c) 2006 David Gwynne <dlg@openbsd.org>
@@ -196,10 +196,10 @@ ahci_attach(struct ahci_softc *sc)
 			gen = "1 (1.5Gbps)";
 			break;
 		case AHCI_REG_CAP_ISS_G2:
-			gen = "2 (3Gbps)";
+			gen = "2 (3.0Gb/s)";
 			break;
 		case AHCI_REG_CAP_ISS_G3:
-			gen = "3 (6Gbps)";
+			gen = "3 (6.0Gb/s)";
 			break;
 		default:
 			gen = "unknown";
@@ -447,6 +447,7 @@ ahci_port_alloc(struct ahci_softc *sc, u_int port)
 	u_int32_t			cmd;
 	struct ahci_cmd_hdr		*hdr;
 	struct ahci_cmd_table		*table;
+	const char			*speed;
 	int				i, rc = ENOMEM;
 
 	ap = malloc(sizeof(*ap), M_DEVBUF, M_NOWAIT | M_ZERO);
@@ -640,6 +641,24 @@ nomem:
 
 	DPRINTF(AHCI_D_VERBOSE, "%s: detected device on port %d; %d\n",
 	    DEVNAME(sc), port, rc);
+
+	/* Read current link speed */
+	switch(ahci_pread(ap, AHCI_PREG_SSTS) & AHCI_PREG_SSTS_SPD) {
+	case AHCI_PREG_SSTS_SPD_GEN1:
+		speed = "1.5Gb/s";
+		break;
+	case AHCI_PREG_SSTS_SPD_GEN2:
+		speed = "3.0Gb/s";
+		break;
+	case AHCI_PREG_SSTS_SPD_GEN3:
+		speed = "6.0Gb/s";
+		break;
+	default:
+		speed = NULL;
+		break;
+	}
+	if (speed != NULL)
+		printf("%s: port %d: %s\n", PORTNAME(ap), port, speed);
 
 	/* Enable command transfers on port */
 	if (ahci_port_start(ap, 0)) {

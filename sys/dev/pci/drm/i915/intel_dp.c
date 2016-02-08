@@ -1,4 +1,4 @@
-/*	$OpenBSD: intel_dp.c,v 1.22 2015/02/10 03:39:41 jsg Exp $	*/
+/*	$OpenBSD: intel_dp.c,v 1.25 2015/06/24 08:32:39 kettenis Exp $	*/
 /*
  * Copyright © 2008 Intel Corporation
  *
@@ -549,7 +549,7 @@ intel_dp_aux_native_read(struct intel_dp *intel_dp,
 		ret = intel_dp_aux_ch(intel_dp, msg, msg_bytes,
 				      reply, reply_bytes);
 		if (ret == 0)
-			return -EIO;
+			return -EPROTO;
 		if (ret < 0)
 			return ret;
 		ack = reply[0];
@@ -631,7 +631,7 @@ intel_dp_i2c_aux_ch(struct i2c_controller *adapter, int mode,
 			break;
 		case AUX_NATIVE_REPLY_NACK:
 			DRM_DEBUG_KMS("aux_ch native nack\n");
-			return -EIO;
+			return -EREMOTEIO;
 		case AUX_NATIVE_REPLY_DEFER:
 			/*
 			 * For now, just give more slack to branch devices. We
@@ -649,7 +649,7 @@ intel_dp_i2c_aux_ch(struct i2c_controller *adapter, int mode,
 		default:
 			DRM_ERROR("aux_ch invalid native reply 0x%02x\n",
 				  reply[0]);
-			return -EIO;
+			return -EREMOTEIO;
 		}
 
 		switch (reply[0] & AUX_I2C_REPLY_MASK) {
@@ -660,19 +660,19 @@ intel_dp_i2c_aux_ch(struct i2c_controller *adapter, int mode,
 			return reply_bytes - 1;
 		case AUX_I2C_REPLY_NACK:
 			DRM_DEBUG_KMS("aux_i2c nack\n");
-			return -EIO;
+			return -EREMOTEIO;
 		case AUX_I2C_REPLY_DEFER:
 			DRM_DEBUG_KMS("aux_i2c defer\n");
 			udelay(100);
 			break;
 		default:
 			DRM_ERROR("aux_i2c invalid reply 0x%02x\n", reply[0]);
-			return -EIO;
+			return -EREMOTEIO;
 		}
 	}
 
 	DRM_ERROR("too many retries, giving up\n");
-	return -EIO;
+	return -EREMOTEIO;
 }
 
 static int
@@ -1000,22 +1000,17 @@ static void ironlake_wait_panel_status(struct intel_dp *intel_dp,
 {
 	struct drm_device *dev = intel_dp_to_dev(intel_dp);
 	struct drm_i915_private *dev_priv = dev->dev_private;
-	int retries;
 
 	DRM_DEBUG_KMS("mask %08x value %08x status %08x control %08x\n",
 		      mask, value,
 		      I915_READ(PCH_PP_STATUS),
 		      I915_READ(PCH_PP_CONTROL));
 
-	for (retries = 5000; retries > 0; retries--) {
-		if ((I915_READ(PCH_PP_STATUS) & mask) == value)
-			break;
-		DELAY(1000);
-	}
-	if (retries == 0)
+	if (_wait_for((I915_READ(PCH_PP_STATUS) & mask) == value, 5000, 10)) {
 		DRM_ERROR("Panel status timeout: status %08x control %08x\n",
 			  I915_READ(PCH_PP_STATUS),
 			  I915_READ(PCH_PP_CONTROL));
+	}
 }
 
 static void ironlake_wait_panel_on(struct intel_dp *intel_dp)
@@ -1109,22 +1104,15 @@ static void ironlake_panel_vdd_off_sync(struct intel_dp *intel_dp)
 	}
 }
 
-static void ironlake_panel_vdd_work(void *arg1)
+static void ironlake_panel_vdd_work(struct work_struct *__work)
 {
-	struct intel_dp *intel_dp = arg1;
+	struct intel_dp *intel_dp = container_of(to_delayed_work(__work),
+						 struct intel_dp, panel_vdd_work);
 	struct drm_device *dev = intel_dp_to_dev(intel_dp);
 
 	mutex_lock(&dev->mode_config.mutex);
 	ironlake_panel_vdd_off_sync(intel_dp);
 	mutex_unlock(&dev->mode_config.mutex);
-}
-
-static void
-ironlake_panel_vdd_tick(void *arg)
-{
-	struct intel_dp *intel_dp = arg;
-
-	task_add(systq, &intel_dp->panel_vdd_task);
 }
 
 void ironlake_edp_panel_vdd_off(struct intel_dp *intel_dp, bool sync)
@@ -1145,7 +1133,8 @@ void ironlake_edp_panel_vdd_off(struct intel_dp *intel_dp, bool sync)
 		 * time from now (relative to the power down delay)
 		 * to keep the panel power up across a sequence of operations
 		 */
-		timeout_add_msec(&intel_dp->panel_vdd_to, intel_dp->panel_power_cycle_delay * 5);
+		schedule_delayed_work(&intel_dp->panel_vdd_work,
+				      msecs_to_jiffies(intel_dp->panel_power_cycle_delay * 5));
 	}
 }
 
@@ -1728,7 +1717,6 @@ intel_dp_set_link_train(struct intel_dp *intel_dp,
 	enum port port = intel_dig_port->port;
 	int ret;
 	uint32_t temp;
-	int retries;
 
 	if (IS_HASWELL(dev)) {
 		temp = I915_READ(DP_TP_CTL(port));
@@ -1744,13 +1732,8 @@ intel_dp_set_link_train(struct intel_dp *intel_dp,
 			temp |= DP_TP_CTL_LINK_TRAIN_IDLE;
 			I915_WRITE(DP_TP_CTL(port), temp);
 
-			for (retries = 100; retries > 0; retries--) {
-				if (I915_READ(DP_TP_STATUS(port)) &
-				    DP_TP_STATUS_IDLE_DONE)
-					break;
-				DELAY(100);
-			}
-			if (retries == 0)
+			if (wait_for((I915_READ(DP_TP_STATUS(port)) &
+				      DP_TP_STATUS_IDLE_DONE), 1))
 				DRM_ERROR("Timed out waiting for DP idle patterns\n");
 
 			temp &= ~DP_TP_CTL_LINK_TRAIN_MASK;
@@ -2551,8 +2534,7 @@ void intel_dp_encoder_destroy(struct drm_encoder *encoder)
 #endif
 	drm_encoder_cleanup(encoder);
 	if (is_edp(intel_dp)) {
-		timeout_del(&intel_dp->panel_vdd_to);
-		task_del(systq, &intel_dp->panel_vdd_task);
+		cancel_delayed_work_sync(&intel_dp->panel_vdd_work);
 		ironlake_panel_vdd_off_sync(intel_dp);
 	}
 	kfree(intel_dig_port);
@@ -2819,8 +2801,8 @@ intel_dp_init_connector(struct intel_digital_port *intel_dig_port,
 	connector->interlace_allowed = true;
 	connector->doublescan_allowed = 0;
 
-	task_set(&intel_dp->panel_vdd_task, ironlake_panel_vdd_work, intel_dp);
-	timeout_set(&intel_dp->panel_vdd_to, ironlake_panel_vdd_tick, intel_dp);
+	INIT_DELAYED_WORK(&intel_dp->panel_vdd_work,
+			  ironlake_panel_vdd_work);
 
 	intel_connector_attach_encoder(intel_connector, intel_encoder);
 	drm_sysfs_connector_add(connector);

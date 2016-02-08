@@ -1,4 +1,4 @@
-/* $OpenBSD: cmd-join-pane.c,v 1.17 2014/10/20 22:29:25 nicm Exp $ */
+/* $OpenBSD: cmd-join-pane.c,v 1.19 2015/06/18 23:56:01 nicm Exp $ */
 
 /*
  * Copyright (c) 2011 George Nachman <tmux@georgester.com>
@@ -36,7 +36,7 @@ enum cmd_retval	 join_pane(struct cmd *, struct cmd_q *, int);
 const struct cmd_entry cmd_join_pane_entry = {
 	"join-pane", "joinp",
 	"bdhvp:l:s:t:", 0, 0,
-	"[-bdhv] [-p percentage|-l size] [-s src-pane] [-t dst-pane]",
+	"[-bdhv] [-p percentage|-l size] " CMD_SRCDST_PANE_USAGE,
 	0,
 	cmd_join_pane_exec
 };
@@ -44,7 +44,7 @@ const struct cmd_entry cmd_join_pane_entry = {
 const struct cmd_entry cmd_move_pane_entry = {
 	"move-pane", "movep",
 	"bdhvp:l:s:t:", 0, 0,
-	"[-bdhv] [-p percentage|-l size] [-s src-pane] [-t dst-pane]",
+	"[-bdhv] [-p percentage|-l size] " CMD_SRCDST_PANE_USAGE,
 	0,
 	cmd_join_pane_exec
 };
@@ -75,7 +75,7 @@ join_pane(struct cmd *self, struct cmd_q *cmdq, int not_same_window)
 	dst_idx = dst_wl->idx;
 	server_unzoom_window(dst_w);
 
-	src_wl = cmd_find_pane(cmdq, args_get(args, 's'), NULL, &src_wp);
+	src_wl = cmd_find_pane_marked(cmdq, args_get(args, 's'), NULL, &src_wp);
 	if (src_wl == NULL)
 		return (CMD_RETURN_ERROR);
 	src_w = src_wl->window;

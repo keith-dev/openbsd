@@ -1,4 +1,4 @@
-/* $OpenBSD: acpitz.c,v 1.47 2014/07/12 02:44:49 mlarkin Exp $ */
+/* $OpenBSD: acpitz.c,v 1.49 2015/05/06 01:41:55 jsg Exp $ */
 /*
  * Copyright (c) 2006 Can Erkin Acar <canacar@openbsd.org>
  * Copyright (c) 2005 Marco Peereboom <marco@openbsd.org>
@@ -27,7 +27,6 @@
 
 #include <machine/bus.h>
 
-#include <dev/acpi/acpireg.h>
 #include <dev/acpi/acpivar.h>
 #include <dev/acpi/acpidev.h>
 #include <dev/acpi/amltypes.h>
@@ -94,7 +93,7 @@ extern int	perflevel;
 
 #define ACPITZ_TRIPS	(1L << 0)
 #define ACPITZ_DEVLIST	(1L << 1)
-#define ACPITZ_INIT	ACPITZ_TRIPS+ACPITZ_DEVLIST
+#define ACPITZ_INIT	(ACPITZ_TRIPS|ACPITZ_DEVLIST)
 
 extern struct aml_node aml_root;
 

@@ -1,4 +1,4 @@
-/*	$OpenBSD: constraint.c,v 1.6 2015/02/22 15:09:54 jsing Exp $	*/
+/*	$OpenBSD: constraint.c,v 1.14 2015/07/18 21:50:47 bluhm Exp $	*/
 
 /*
  * Copyright (c) 2015 Reyk Floeter <reyk@openbsd.org>
@@ -53,8 +53,6 @@ int	 constraint_close(int);
 void	 constraint_update(void);
 void	 constraint_reset(void);
 int	 constraint_cmp(const void *, const void *);
-void	 constraint_add(struct constraint *);
-void	 constraint_remove(struct constraint *);
 
 struct httpsdate *
 	 httpsdate_init(const char *, const char *, const char *,
@@ -68,6 +66,7 @@ void	*httpsdate_query(const char *, const char *, const char *,
 char	*tls_readline(struct tls *, size_t *, size_t *, struct timeval *);
 
 extern u_int constraint_cnt;
+extern u_int peer_cnt;
 
 struct httpsdate {
 	char			*tls_host;
@@ -87,6 +86,7 @@ constraint_init(struct constraint *cstr)
 	cstr->fd = -1;
 	cstr->last = getmonotime();
 	cstr->constraint = 0;
+	cstr->senderrors = 0;
 
 	return (constraint_addr_init(cstr));
 }
@@ -148,7 +148,7 @@ constraint_query(struct constraint *cstr)
 		break;
 	case STATE_DNS_TEMPFAIL:
 		/* Retry resolving the address */
-		constraint_init(cstr);		
+		constraint_init(cstr);
 		return (-1);
 	case STATE_QUERY_SENT:
 		if (cstr->last + CONSTRAINT_SCAN_TIMEOUT > now) {
@@ -195,9 +195,6 @@ constraint_query(struct constraint *cstr)
 		close(pipes[1]);
 		return (-1);
 	case 0:
-		tzset();
-		log_init(conf->debug);
-
 		setproctitle("constraint from %s", hname);
 
 		/* Child process */
@@ -253,8 +250,7 @@ constraint_check_child(void)
 {
 	struct constraint	*cstr;
 	int			 status;
-	int			 fail;
-	char			*cause;
+	int			 fail, sig;
 	pid_t			 pid;
 
 	do {
@@ -262,21 +258,20 @@ constraint_check_child(void)
 		if (pid <= 0)
 			continue;
 
-		fail = 0;
+		fail = sig = 0;
 		if (WIFSIGNALED(status)) {
-			fail = 1;
-			asprintf(&cause, "terminated; signal %d",
-			    WTERMSIG(status));
+			sig = WTERMSIG(status);
 		} else if (WIFEXITED(status)) {
-			if (WEXITSTATUS(status) != 0) {
+			if (WEXITSTATUS(status) != 0)
 				fail = 1;
-				asprintf(&cause, "exited abnormally");
-			} else
-				asprintf(&cause, "exited okay");
 		} else
 			fatalx("unexpected cause of SIGCHLD");
 
 		if ((cstr = constraint_bypid(pid)) != NULL) {
+			if (sig)
+				fatalx("constraint %s, signal %d",
+				    log_sockaddr((struct sockaddr *)
+				    &cstr->addr->ss), sig);
 			if (fail) {
 				log_debug("no constraint reply from %s"
 				    " received in time, next query %ds",
@@ -284,12 +279,11 @@ constraint_check_child(void)
 				    &cstr->addr->ss), CONSTRAINT_SCAN_INTERVAL);
 			}
 
-			if (fail || cstr->state < STATE_REPLY_RECEIVED) {
+			if (fail || cstr->state < STATE_QUERY_SENT) {
 				cstr->senderrors++;
 				constraint_close(cstr->fd);
 			}
 		}
-		free(cause);
 	} while (pid > 0 || (pid == -1 && errno == EINTR));
 }
 
@@ -345,21 +339,27 @@ constraint_close(int fd)
 	msgbuf_clear(&cstr->ibuf.w);
 	close(cstr->fd);
 	cstr->fd = -1;
-	if (cstr->senderrors)
-		cstr->state = STATE_INVALID;
-	else if (cstr->state >= STATE_QUERY_SENT)
-		cstr->state = STATE_DNS_DONE;
-
 	cstr->last = getmonotime();
 
-	return (1);
+	if (cstr->addr == NULL || (cstr->addr = cstr->addr->next) == NULL) {
+		/* Either a pool or all addresses have been tried */
+		cstr->addr = cstr->addr_head.a;
+		if (cstr->senderrors)
+			cstr->state = STATE_INVALID;
+		else if (cstr->state >= STATE_QUERY_SENT)
+			cstr->state = STATE_DNS_DONE;
+
+		return (1);
+	}
+
+	/* Go on and try the next resolved address for this constraint */
+	return (constraint_init(cstr));
 }
 
 void
 constraint_add(struct constraint *cstr)
 {
 	TAILQ_INSERT_TAIL(&conf->constraints, cstr, entry);
-	constraint_cnt += constraint_init(cstr);
 }
 
 void
@@ -369,7 +369,6 @@ constraint_remove(struct constraint *cstr)
 	free(cstr->addr_head.name);
 	free(cstr->addr_head.path);
 	free(cstr);
-	constraint_cnt--;
 }
 
 int
@@ -432,7 +431,7 @@ constraint_dispatch_msg(struct pollfd *pfd)
 void
 constraint_dns(u_int32_t id, u_int8_t *data, size_t len)
 {
-	struct constraint	*cstr, *ncstr;
+	struct constraint	*cstr, *ncstr = NULL;
 	u_int8_t		*p;
 	struct ntp_addr		*h;
 
@@ -461,18 +460,25 @@ constraint_dns(u_int32_t id, u_int8_t *data, size_t len)
 		p += sizeof(h->ss);
 		len -= sizeof(h->ss);
 
-		ncstr = new_constraint();
-		ncstr->addr = h;
-		ncstr->addr_head.a = h;
-		ncstr->addr_head.name = strdup(cstr->addr_head.name);
-		ncstr->addr_head.path = strdup(cstr->addr_head.path);
-		if (ncstr->addr_head.name == NULL ||
-		    ncstr->addr_head.path == NULL)
-			fatal("calloc name");
-		ncstr->addr_head.pool = cstr->addr_head.pool;
-
-		constraint_add(ncstr);
-	} while (len && cstr->addr_head.pool);
+		if (ncstr == NULL || cstr->addr_head.pool) {
+			ncstr = new_constraint();
+			ncstr->addr = h;
+			ncstr->addr_head.a = h;
+			ncstr->addr_head.name = strdup(cstr->addr_head.name);
+			ncstr->addr_head.path = strdup(cstr->addr_head.path);
+			if (ncstr->addr_head.name == NULL ||
+			    ncstr->addr_head.path == NULL)
+				fatal("calloc name");
+			ncstr->addr_head.pool = cstr->addr_head.pool;
+			ncstr->state = STATE_DNS_DONE;
+			constraint_add(ncstr);
+			constraint_cnt += constraint_init(ncstr);
+		} else {
+			h->next = ncstr->addr;
+			ncstr->addr = h;
+			ncstr->addr_head.a = h;
+		}
+	} while (len);
 
 	constraint_remove(cstr);
 }
@@ -556,7 +562,8 @@ constraint_check(double val)
 	if (((val - constraint) > CONSTRAINT_MARGIN) ||
 	    ((constraint - val) > CONSTRAINT_MARGIN)) {
 		/* XXX get new constraint if too many errors happened */
-		if (conf->constraint_errors++ > CONSTRAINT_ERROR_MARGIN) {
+		if (conf->constraint_errors++ >
+		    (CONSTRAINT_ERROR_MARGIN * peer_cnt)) {
 			constraint_reset();
 		}
 
@@ -634,8 +641,9 @@ httpsdate_free(void *arg)
 int
 httpsdate_request(struct httpsdate *httpsdate, struct timeval *when)
 {
-	size_t	 outlen = 0, maxlength = CONSTRAINT_MAXHEADERLENGTH;
-	char	*line, *p;
+	size_t	 outlen = 0, maxlength = CONSTRAINT_MAXHEADERLENGTH, len;
+	char	*line, *p, *buf;
+	int	 ret;
 
 	if ((httpsdate->tls_ctx = tls_client()) == NULL)
 		goto fail;
@@ -650,10 +658,17 @@ httpsdate_request(struct httpsdate *httpsdate, struct timeval *when)
 		goto fail;
 	}
 
-	if (tls_write(httpsdate->tls_ctx,
-	    httpsdate->tls_request, strlen(httpsdate->tls_request),
-	    &outlen) == -1)
-		goto fail;
+	buf = httpsdate->tls_request;
+	len = strlen(httpsdate->tls_request);
+	while (len > 0) {
+		ret = tls_write(httpsdate->tls_ctx, buf, len, &outlen);
+		if (ret == TLS_READ_AGAIN || ret == TLS_WRITE_AGAIN)
+			continue;
+		if (ret < 0)
+			goto fail;
+		buf += outlen;
+		len -= outlen;
+	}
 
 	while ((line = tls_readline(httpsdate->tls_ctx, &outlen,
 	    &maxlength, when)) != NULL) {
@@ -747,6 +762,7 @@ tls_readline(struct tls *tls, size_t *lenp, size_t *maxlength,
 			goto again;
 		if (ret != 0) {
 			/* SSL read error, ignore */
+			free(buf);
 			return (NULL);
 		}
 

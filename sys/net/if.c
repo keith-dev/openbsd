@@ -1,4 +1,4 @@
-/*	$OpenBSD: if.c,v 1.320 2015/03/03 07:54:32 brad Exp $	*/
+/*	$OpenBSD: if.c,v 1.357 2015/08/13 07:19:58 mpi Exp $	*/
 /*	$NetBSD: if.c,v 1.35 1996/05/07 05:26:04 thorpej Exp $	*/
 
 /*
@@ -81,9 +81,10 @@
 #include <sys/sysctl.h>
 #include <sys/task.h>
 
+#include <dev/rndvar.h>
+
 #include <net/if.h>
 #include <net/if_dl.h>
-#include <net/if_media.h>
 #include <net/if_types.h>
 #include <net/route.h>
 #include <net/netisr.h>
@@ -127,7 +128,6 @@ void	if_attachsetup(struct ifnet *);
 void	if_attachdomain1(struct ifnet *);
 void	if_attach_common(struct ifnet *);
 
-void	if_detach_queues(struct ifnet *, struct ifqueue *);
 void	if_detached_start(struct ifnet *);
 int	if_detached_ioctl(struct ifnet *, u_long, caddr_t);
 
@@ -139,10 +139,11 @@ int	if_setgroupattribs(caddr_t);
 int	if_clone_list(struct if_clonereq *);
 struct if_clone	*if_clone_lookup(const char *, int *);
 
-void	if_congestion_clear(void *);
 int	if_group_egress_build(void);
 
 void	if_link_state_change_task(void *);
+
+void	if_input_process(void *);
 
 #ifdef DDB
 void	ifa_print_all(void);
@@ -155,6 +156,9 @@ int if_cloners_count;
 struct timeout net_tick_to;
 void	net_tick(void *);
 int	net_livelocked(void);
+int	ifq_congestion;
+
+struct taskq *softnettq;
 
 /*
  * Network interface utility routines.
@@ -166,6 +170,11 @@ void
 ifinit()
 {
 	timeout_set(&net_tick_to, net_tick, &net_tick_to);
+
+	softnettq = taskq_create("softnet", 1, IPL_NET,
+	    TASKQ_MPSAFE | TASKQ_CANTSLEEP);
+	if (softnettq == NULL)
+		panic("unable to create softnet taskq");
 
 	net_tick(&net_tick_to);
 }
@@ -364,24 +373,8 @@ if_attachhead(struct ifnet *ifp)
 void
 if_attach(struct ifnet *ifp)
 {
-#if NCARP > 0
-	struct ifnet *before = NULL;
-#endif
-
 	if_attach_common(ifp);
-
-#if NCARP > 0
-	if (ifp->if_type != IFT_CARP)
-		TAILQ_FOREACH(before, &ifnet, if_list)
-			if (before->if_type == IFT_CARP)
-				break;
-	if (before == NULL)
-		TAILQ_INSERT_TAIL(&ifnet, ifp, if_list);
-	else
-		TAILQ_INSERT_BEFORE(before, ifp, if_list);
-#else
 	TAILQ_INSERT_TAIL(&ifnet, ifp, if_list);
-#endif
 	if_attachsetup(ifp);
 }
 
@@ -432,28 +425,124 @@ if_start(struct ifnet *ifp)
 	}
 }
 
+int
+if_enqueue(struct ifnet *ifp, struct mbuf *m)
+{
+	int s, length, error = 0;
+	unsigned short mflags;
+
+#if NBRIDGE > 0
+	if (ifp->if_bridgeport && (m->m_flags & M_PROTO1) == 0)
+		return (bridge_output(ifp, m, NULL, NULL));
+	m->m_flags &= ~M_PROTO1;	/* Loop prevention */
+#endif
+
+	length = m->m_pkthdr.len;
+	mflags = m->m_flags;
+
+	s = splnet();
+
+	/*
+	 * Queue message on interface, and start output if interface
+	 * not yet active.
+	 */
+	IFQ_ENQUEUE(&ifp->if_snd, m, NULL, error);
+	if (error) {
+		splx(s);
+		return (error);
+	}
+
+	ifp->if_obytes += length;
+	if (mflags & M_MCAST)
+		ifp->if_omcasts++;
+
+	if_start(ifp);
+
+	splx(s);
+
+	return (0);
+}
+
+struct mbuf_queue if_input_queue = MBUF_QUEUE_INITIALIZER(8192, IPL_NET);
+struct task if_input_task = TASK_INITIALIZER(if_input_process, &if_input_queue);
+
 void
 if_input(struct ifnet *ifp, struct mbuf_list *ml)
 {
 	struct mbuf *m;
-	struct ifih *ifih;
+	size_t ibytes = 0;
 
-	splassert(IPL_NET);
-
-	while ((m = ml_dequeue(ml)) != NULL) {
-		m->m_pkthdr.rcvif = ifp;
+	MBUF_LIST_FOREACH(ml, m) {
+		m->m_pkthdr.ph_ifidx = ifp->if_index;
 		m->m_pkthdr.ph_rtableid = ifp->if_rdomain;
+		ibytes += m->m_pkthdr.len;
+	}
+
+	ifp->if_ipackets += ml_len(ml);
+	ifp->if_ibytes += ibytes;
 
 #if NBPFILTER > 0
-		if (ifp->if_bpf)
+	if (ifp->if_bpf) {
+		KERNEL_LOCK();
+		MBUF_LIST_FOREACH(ml, m)
 			bpf_mtap_ether(ifp->if_bpf, m, BPF_DIRECTION_IN);
+		KERNEL_UNLOCK();
+	}
 #endif
 
+	mq_enlist(&if_input_queue, ml);
+	task_add(softnettq, &if_input_task);
+}
+
+void
+if_input_process(void *xmq)
+{
+	struct mbuf_queue *mq = xmq;
+	struct mbuf_list ml;
+	struct mbuf *m;
+	struct ifnet *ifp;
+	struct ifih *ifih;
+	int s;
+
+	mq_delist(mq, &ml);
+	if (ml_empty(&ml))
+		return;
+
+	add_net_randomness(ml_len(&ml));
+
+	KERNEL_LOCK();
+	s = splnet();
+	while ((m = ml_dequeue(&ml)) != NULL) {
+		sched_pause();
+
+		ifp = if_get(m->m_pkthdr.ph_ifidx);
+		if (ifp == NULL) {
+			m_freem(m);
+			continue;
+		}
+
+#if NBRIDGE > 0
+		if (ifp->if_bridgeport && (m->m_flags & M_PROTO1) == 0) {
+			m = bridge_input(ifp, m);
+			if (m == NULL)
+				continue;
+		}
+		m->m_flags &= ~M_PROTO1;	/* Loop prevention */
+#endif
+
+		/*
+		 * Pass this mbuf to all input handlers of its
+		 * interface until it is consumed.
+		 */
 		SLIST_FOREACH(ifih, &ifp->if_inputs, ifih_next) {
-			if ((*ifih->ifih_input)(ifp, NULL, m))
+			if ((*ifih->ifih_input)(ifp, m))
 				break;
 		}
+		if (ifih == NULL)
+			m_freem(m);
 	}
+	splx(s);
+	KERNEL_UNLOCK();
 }
 
 void
@@ -471,22 +560,12 @@ nettxintr(void)
 	splx(s);
 }
 
-/*
- * Detach an interface from everything in the kernel.  Also deallocate
- * private resources.
- */
 void
-if_detach(struct ifnet *ifp)
+if_deactivate(struct ifnet *ifp)
 {
-	struct ifaddr *ifa;
-	struct ifg_list *ifg;
-	int s = splnet();
-	struct domain *dp;
+	int s;
 
-	ifp->if_flags &= ~IFF_OACTIVE;
-	ifp->if_start = if_detached_start;
-	ifp->if_ioctl = if_detached_ioctl;
-	ifp->if_watchdog = NULL;
+	s = splnet();
 
 	/*
 	 * Call detach hooks from head to tail.  To make sure detach
@@ -494,12 +573,6 @@ if_detach(struct ifnet *ifp)
 	 * the hooks have to be added to the head!
 	 */
 	dohooks(ifp->if_detachhooks, HOOK_REMOVE | HOOK_FREE);
-
-	/* Remove the watchdog timeout */
-	timeout_del(ifp->if_slowtimo);
-
-	/* Remove the link state task */
-	task_del(systq, ifp->if_linkstatetask);
 
 #if NBRIDGE > 0
 	/* Remove the interface from any bridge it is part of.  */
@@ -512,6 +585,36 @@ if_detach(struct ifnet *ifp)
 	if (ifp->if_carp && ifp->if_type != IFT_CARP)
 		carp_ifdetach(ifp);
 #endif
+
+	splx(s);
+}
+
+/*
+ * Detach an interface from everything in the kernel.  Also deallocate
+ * private resources.
+ */
+void
+if_detach(struct ifnet *ifp)
+{
+	struct ifaddr *ifa;
+	struct ifg_list *ifg;
+	struct domain *dp;
+	int s;
+
+	/* Undo pseudo-driver changes. */
+	if_deactivate(ifp);
+
+	s = splnet();
+	ifp->if_flags &= ~IFF_OACTIVE;
+	ifp->if_start = if_detached_start;
+	ifp->if_ioctl = if_detached_ioctl;
+	ifp->if_watchdog = NULL;
+
+	/* Remove the watchdog timeout */
+	timeout_del(ifp->if_slowtimo);
+
+	/* Remove the link state task */
+	task_del(systq, ifp->if_linkstatetask);
 
 #if NBPFILTER > 0
 	bpfdetach(ifp);
@@ -529,27 +632,9 @@ if_detach(struct ifnet *ifp)
 #ifdef INET6
 	in6_ifdetach(ifp);
 #endif
-
 #if NPF > 0
 	pfi_detach_ifnet(ifp);
 #endif
-
-	/*
-	 * remove packets came from ifp, from software interrupt queues.
-	 * net/netisr_dispatch.h is not usable, as some of them use
-	 * strange queue names.
-	 */
-#define IF_DETACH_QUEUES(x) \
-do { \
-	extern struct ifqueue x; \
-	if_detach_queues(ifp, & x); \
-} while (0)
-	IF_DETACH_QUEUES(arpintrq);
-	IF_DETACH_QUEUES(ipintrq);
-#ifdef INET6
-	IF_DETACH_QUEUES(ip6intrq);
-#endif
-#undef IF_DETACH_QUEUES
 
 	/* Remove the interface from the list of all interfaces.  */
 	TAILQ_REMOVE(&ifnet, ifp, if_list);
@@ -591,41 +676,6 @@ do { \
 
 	ifindex2ifnet[ifp->if_index] = NULL;
 	splx(s);
-}
-
-void
-if_detach_queues(struct ifnet *ifp, struct ifqueue *q)
-{
-	struct mbuf *m, *prev = NULL, *next;
-	int prio;
-
-	for (prio = 0; prio <= IFQ_MAXPRIO; prio++) {
-		for (m = q->ifq_q[prio].head; m; m = next) {
-			next = m->m_nextpkt;
-#ifdef DIAGNOSTIC
-			if ((m->m_flags & M_PKTHDR) == 0) {
-				prev = m;
-				continue;
-			}
-#endif
-			if (m->m_pkthdr.rcvif != ifp) {
-				prev = m;
-				continue;
-			}
-
-			if (prev)
-				prev->m_nextpkt = m->m_nextpkt;
-			else
-				q->ifq_q[prio].head = m->m_nextpkt;
-			if (q->ifq_q[prio].tail == m)
-				q->ifq_q[prio].tail = prev;
-			q->ifq_len--;
-
-			m->m_nextpkt = NULL;
-			m_freem(m);
-			IF_DROP(q);
-		}
-	}
 }
 
 /*
@@ -787,33 +837,22 @@ if_clone_list(struct if_clonereq *ifcr)
 }
 
 /*
- * set queue congestion marker and register timeout to clear it
+ * set queue congestion marker
  */
 void
-if_congestion(struct ifqueue *ifq)
+if_congestion(void)
 {
-	/* Not currently needed, all callers check this */
-	if (ifq->ifq_congestion)
-		return;
+	extern int ticks;
 
-	ifq->ifq_congestion = malloc(sizeof(struct timeout), M_TEMP, M_NOWAIT);
-	if (ifq->ifq_congestion == NULL)
-		return;
-	timeout_set(ifq->ifq_congestion, if_congestion_clear, ifq);
-	timeout_add(ifq->ifq_congestion, hz / 100);
+	ifq_congestion = ticks;
 }
 
-/*
- * clear the congestion flag
- */
-void
-if_congestion_clear(void *arg)
+int
+if_congested(void)
 {
-	struct ifqueue *ifq = arg;
-	struct timeout *to = ifq->ifq_congestion;
+	extern int ticks;
 
-	ifq->ifq_congestion = NULL;
-	free(to, M_TEMP, sizeof(*to));
+	return (ticks - ifq_congestion <= (hz / 100));
 }
 
 #define	equal(a1, a2)	\
@@ -1347,21 +1386,12 @@ ifioctl(struct socket *so, u_long cmd, caddr_t data, struct proc *p)
 
 		if ((ifr->ifr_flags & IFXF_AUTOCONF6) &&
 		    !(ifp->if_xflags & IFXF_AUTOCONF6)) {
-			nd6_rs_timeout_count++;
-			RS_LHCOOKIE(ifp) = hook_establish(
-			    ifp->if_linkstatehooks, 1, nd6_rs_dev_state, ifp);
-			if (!timeout_pending(&nd6_rs_output_timer))
-				nd6_rs_output_set_timo(
-				    ND6_RS_OUTPUT_QUICK_INTERVAL);
+			nd6_rs_attach(ifp);
 		}
 
 		if ((ifp->if_xflags & IFXF_AUTOCONF6) &&
 		    !(ifr->ifr_flags & IFXF_AUTOCONF6)) {
-			hook_disestablish(ifp->if_linkstatehooks,
-			    RS_LHCOOKIE(ifp));
-			nd6_rs_timeout_count--;
-			if (nd6_rs_timeout_count == 0)
-				timeout_del(&nd6_rs_output_timer);
+			nd6_rs_detach(ifp);
 		}
 #endif	/* INET6 */
 
@@ -1754,15 +1784,7 @@ ifconf(u_long cmd, caddr_t data)
 void
 if_detached_start(struct ifnet *ifp)
 {
-	struct mbuf *m;
-
-	while (1) {
-		IF_DEQUEUE(&ifp->if_snd, m);
-
-		if (m == NULL)
-			return;
-		m_freem(m);
-	}
+	IFQ_PURGE(&ifp->if_snd);
 }
 
 int
@@ -2054,7 +2076,8 @@ if_group_egress_build(void)
 	bzero(&sa_in, sizeof(sa_in));
 	sa_in.sin_len = sizeof(sa_in);
 	sa_in.sin_family = AF_INET;
-	if ((rt = rt_lookup(sintosa(&sa_in), sintosa(&sa_in), 0)) != NULL) {
+	rt = rtable_lookup(0, sintosa(&sa_in), sintosa(&sa_in));
+	if (rt != NULL) {
 		do {
 			if (rt->rt_ifp)
 				if_addgroup(rt->rt_ifp, IFG_EGRESS);
@@ -2068,7 +2091,8 @@ if_group_egress_build(void)
 
 #ifdef INET6
 	bcopy(&sa6_any, &sa_in6, sizeof(sa_in6));
-	if ((rt = rt_lookup(sin6tosa(&sa_in6), sin6tosa(&sa_in6), 0)) != NULL) {
+	rt = rtable_lookup(0, sin6tosa(&sa_in6), sin6tosa(&sa_in6));
+	if (rt != NULL) {
 		do {
 			if (rt->rt_ifp)
 				if_addgroup(rt->rt_ifp, IFG_EGRESS);
@@ -2123,8 +2147,8 @@ ifpromisc(struct ifnet *ifp, int pswitch)
 }
 
 int
-sysctl_ifq(int *name, u_int namelen, void *oldp, size_t *oldlenp,
-    void *newp, size_t newlen, struct ifqueue *ifq)
+sysctl_mq(int *name, u_int namelen, void *oldp, size_t *oldlenp,
+    void *newp, size_t newlen, struct mbuf_queue *mq)
 {
 	/* All sysctl names at this level are terminal. */
 	if (namelen != 1)
@@ -2132,12 +2156,12 @@ sysctl_ifq(int *name, u_int namelen, void *oldp, size_t *oldlenp,
 
 	switch (name[0]) {
 	case IFQCTL_LEN:
-		return (sysctl_rdint(oldp, oldlenp, newp, ifq->ifq_len));
+		return (sysctl_rdint(oldp, oldlenp, newp, mq_len(mq)));
 	case IFQCTL_MAXLEN:
 		return (sysctl_int(oldp, oldlenp, newp, newlen,
-		    &ifq->ifq_maxlen));
+		    &mq->mq_maxlen)); /* XXX directly accessing maxlen */
 	case IFQCTL_DROPS:
-		return (sysctl_rdint(oldp, oldlenp, newp, ifq->ifq_drops));
+		return (sysctl_rdint(oldp, oldlenp, newp, mq_drops(mq)));
 	default:
 		return (EOPNOTSUPP);
 	}
@@ -2189,16 +2213,12 @@ ifa_print_all(void)
 				    addr, sizeof(addr)));
 				break;
 #endif
-			case AF_LINK:
-				printf("%s",
-				    ether_sprintf(ifa->ifa_addr->sa_data));
-				break;
 			}
 			printf(" on %s\n", ifa->ifa_ifp->if_xname);
 		}
 	}
 }
-#endif /* SMALL_KERNEL */
+#endif /* DDB */
 
 void
 ifnewlladdr(struct ifnet *ifp)
@@ -2362,4 +2382,49 @@ if_rxr_ioctl(struct if_rxrinfo *ifri, const char *name, u_int size,
 	ifr.ifr_info = *rxr;
 
 	return (if_rxr_info_ioctl(ifri, 1, &ifr));
+}
+
+/*
+ * Network stack input queues.
+ */
+
+void
+niq_init(struct niqueue *niq, u_int maxlen, u_int isr)
+{
+	mq_init(&niq->ni_q, maxlen, IPL_NET);
+	niq->ni_isr = isr;
+}
+
+int
+niq_enqueue(struct niqueue *niq, struct mbuf *m)
+{
+	int rv;
+
+	rv = mq_enqueue(&niq->ni_q, m);
+	if (rv == 0)
+		schednetisr(niq->ni_isr);
+	else
+		if_congestion();
+
+	return (rv);
+}
+
+int
+niq_enlist(struct niqueue *niq, struct mbuf_list *ml)
+{
+	int rv;
+
+	rv = mq_enlist(&niq->ni_q, ml);
+	if (rv == 0)
+		schednetisr(niq->ni_isr);
+	else
+		if_congestion();
+
+	return (rv);
+}
+
+__dead void
+unhandled_af(int af)
+{
+	panic("unhandled af %d", af);
 }

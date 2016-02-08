@@ -1,4 +1,4 @@
-/* $OpenBSD: tls_client.c,v 1.15 2015/02/11 07:01:10 jsing Exp $ */
+/* $OpenBSD: tls_client.c,v 1.17 2015/03/31 12:21:27 jsing Exp $ */
 /*
  * Copyright (c) 2014 Joel Sing <jsing@openbsd.org>
  *
@@ -246,7 +246,7 @@ tls_connect_fds(struct tls *ctx, int fd_read, int fd_write,
 
  connecting:
 	if ((ret = SSL_connect(ctx->ssl_conn)) != 1) {
-		err = tls_ssl_error(ctx, ret, "connect");
+		err = tls_ssl_error(ctx, ctx->ssl_conn, ret, "connect");
 		if (err == TLS_READ_AGAIN || err == TLS_WRITE_AGAIN) {
 			ctx->flags |= TLS_CONNECTING;
 			return (err);
@@ -267,6 +267,7 @@ tls_connect_fds(struct tls *ctx, int fd_read, int fd_write,
 				    " server certificate", servername);
 			goto err;
 		}
+		X509_free(cert);
 	}
 
 	return (0);

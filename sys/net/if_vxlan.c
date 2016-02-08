@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_vxlan.c,v 1.21 2015/01/24 00:29:06 deraadt Exp $	*/
+/*	$OpenBSD: if_vxlan.c,v 1.27 2015/07/20 22:54:30 mpi Exp $	*/
 
 /*
  * Copyright (c) 2013 Reyk Floeter <reyk@openbsd.org>
@@ -31,7 +31,6 @@
 
 #include <net/if.h>
 #include <net/if_var.h>
-#include <net/if_dl.h>
 #include <net/if_media.h>
 #include <net/route.h>
 
@@ -469,6 +468,7 @@ int
 vxlan_lookup(struct mbuf *m, struct udphdr *uh, int iphlen,
     struct sockaddr *srcsa)
 {
+	struct mbuf_list	 ml = MBUF_LIST_INITIALIZER();
 	struct vxlan_softc	*sc = NULL;
 	struct vxlan_header	 v;
 	u_int32_t		 vni;
@@ -507,7 +507,6 @@ vxlan_lookup(struct mbuf *m, struct udphdr *uh, int iphlen,
  found:
 	m_adj(m, skip);
 	ifp = &sc->sc_ac.ac_if;
-	m->m_pkthdr.rcvif = ifp;
 
 	if ((eh = mtod(m, struct ether_header *)) == NULL)
 		return (EINVAL);
@@ -526,19 +525,12 @@ vxlan_lookup(struct mbuf *m, struct udphdr *uh, int iphlen,
 	    !ETHER_IS_MULTICAST(eh->ether_dhost))
 		m->m_flags &= ~M_MCAST;
 
-#if NBPFILTER > 0
-	if (ifp->if_bpf)
-		bpf_mtap(ifp->if_bpf, m, BPF_DIRECTION_IN);
-#endif
-
-	m_adj(m, ETHER_HDR_LEN);
-
 #if NPF > 0
 	pf_pkt_addr_changed(m);
 #endif
 
-	ifp->if_ipackets++;
-	ether_input(ifp, eh, m);
+	ml_enqueue(&ml, m);
+	if_input(ifp, &ml);
 
 	/* success */
 	return (1);

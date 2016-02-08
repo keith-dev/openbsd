@@ -1,4 +1,4 @@
-/*	$OpenBSD: mainbus.c,v 1.27 2013/05/30 16:15:01 deraadt Exp $	*/
+/*	$OpenBSD: mainbus.c,v 1.30 2015/07/21 20:12:00 reyk Exp $	*/
 /*	$NetBSD: mainbus.c,v 1.1 2003/04/26 18:39:29 fvdl Exp $	*/
 
 /*
@@ -48,20 +48,19 @@
 #include "ipmi.h"
 #include "bios.h"
 #include "mpbios.h"
-#include "vmt.h"
+#include "pvbus.h"
 
 #include <machine/cpuvar.h>
 #include <machine/i82093var.h>
 
-#include <dev/acpi/acpireg.h>
 #include <dev/acpi/acpivar.h>
 
 #if NIPMI > 0
 #include <dev/ipmivar.h>
 #endif
 
-#if NVMT > 0
-#include <dev/vmtvar.h>
+#if NPVBUS > 0
+#include <dev/pv/pvvar.h>
 #endif
 
 #if NBIOS > 0
@@ -92,6 +91,9 @@ union mainbus_attach_args {
 #endif
 #if NBIOS > 0
 	struct bios_attach_args mba_bios;
+#endif
+#if NPVBUS > 0
+	struct pvbus_attach_args mba_pvba;
 #endif
 };
 
@@ -171,13 +173,6 @@ mainbus_attach(struct device *parent, struct device *self, void *aux)
 	}
 #endif
 
-#if NVMT > 0
-	if (vmt_probe()) {
-		mba.mba_busname = "vmt";
-		config_found(self, &mba.mba_busname, mainbus_print);
-	}
-#endif
-
 	if ((cpu_info_primary.ci_flags & CPUF_PRESENT) == 0) {
 		struct cpu_attach_args caa;
 
@@ -200,6 +195,14 @@ mainbus_attach(struct device *parent, struct device *self, void *aux)
 
 #ifdef MULTIPROCESSOR
 	mp_setperf_init();
+#endif
+
+#if NPVBUS > 0
+	/* Probe first to hide the "not configured" message */
+	if (pvbus_probe()) {
+		mba.mba_pvba.pvba_busname = "pvbus";
+		config_found(self, &mba.mba_pvba.pvba_busname, mainbus_print);
+	}
 #endif
 
 #if NPCI > 0

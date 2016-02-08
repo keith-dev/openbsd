@@ -1,33 +1,25 @@
-/*	$OpenBSD: user.c,v 1.36 2015/02/09 04:27:15 krw Exp $	*/
+/*	$OpenBSD: user.c,v 1.44 2015/04/02 18:00:55 krw Exp $	*/
 
 /*
  * Copyright (c) 1997 Tobias Weingartner
- * All rights reserved.
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in the
- *    documentation and/or other materials provided with the distribution.
+ * Permission to use, copy, modify, and distribute this software for any
+ * purpose with or without fee is hereby granted, provided that the above
+ * copyright notice and this permission notice appear in all copies.
  *
- * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
- * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
- * OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.
- * IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT
- * NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
- * DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
- * THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
- * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
- * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ * THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES
+ * WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF
+ * MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR
+ * ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
+ * WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN
+ * ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
+ * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
 
 #include <sys/types.h>
 #include <sys/fcntl.h>
 #include <sys/disklabel.h>
+#include <err.h>
 #include <stdio.h>
 #include <string.h>
 #include <unistd.h>
@@ -59,29 +51,11 @@ struct cmd cmd_table[] = {
 	{NULL,     NULL,	NULL}
 };
 
-int
-USER_init(struct disk *disk, struct mbr *tt, int preserve)
-{
-	char *query;
-
-	if (preserve) {
-		MBR_pcopy(disk, tt);
-		query = "Do you wish to write new MBR?";
-	} else {
-		MBR_init(disk, tt);
-		query = "Do you wish to write new MBR and partition table?";
-	}
-
-	if (ask_yn(query))
-		Xwrite(NULL, disk, tt, NULL, 0); 
-
-	return (0);
-}
 
 int modified;
 
-int
-USER_edit(struct disk *disk, struct mbr *tt, off_t offset, off_t reloff)
+void
+USER_edit(off_t offset, off_t reloff)
 {
 	static int editlevel;
 	struct dos_mbr dos_mbr;
@@ -93,26 +67,26 @@ USER_edit(struct disk *disk, struct mbr *tt, off_t offset, off_t reloff)
 	editlevel += 1;
 
 	/* Read MBR & partition */
-	fd = DISK_open(disk->name, O_RDONLY);
+	fd = DISK_open(disk.name, O_RDONLY);
 	error = MBR_read(fd, offset, &dos_mbr);
 	close(fd);
 	if (error == -1)
 		goto done;
 
 	/* Parse the sucker */
-	MBR_parse(disk, &dos_mbr, offset, reloff, &mbr);
+	MBR_parse(&dos_mbr, offset, reloff, &mbr);
 
 	printf("Enter 'help' for information\n");
 
 	/* Edit cycle */
-	do {
 again:
+	do {
 		printf("fdisk:%c%d> ", (modified)?'*':' ', editlevel);
 		fflush(stdout);
 		ask_cmd(&cmd, &args);
 
 		if (cmd[0] == '\0')
-			goto again;
+			continue;
 		for (i = 0; cmd_table[i].cmd != NULL; i++)
 			if (strstr(cmd_table[i].cmd, cmd) == cmd_table[i].cmd)
 				break;
@@ -128,7 +102,7 @@ again:
 		}
 
 		/* Call function */
-		st = cmd_table[i].fcn(args, disk, &mbr, tt, offset);
+		st = cmd_table[i].fcn(args, &mbr);
 
 		/* Update status */
 		if (st == CMD_EXIT)
@@ -144,7 +118,7 @@ again:
 	/* Write out MBR */
 	if (modified) {
 		if (st == CMD_SAVE) {
-			if (Xwrite(NULL, disk, &mbr, NULL, offset) == CMD_CONT) 
+			if (Xwrite(NULL, &mbr) == CMD_CONT)
 				goto again;
 			close(fd);
 		} else
@@ -154,30 +128,27 @@ again:
 done:
 	/* One level less */
 	editlevel -= 1;
-
-	return (0);
 }
 
-int
-USER_print_disk(struct disk *disk)
+void
+USER_print_disk(void)
 {
 	off_t offset, firstoff;
 	int fd, i, error;
 	struct dos_mbr dos_mbr;
 	struct mbr mbr;
 
-	fd = DISK_open(disk->name, O_RDONLY);
+	fd = DISK_open(disk.name, O_RDONLY);
 	offset = firstoff = 0;
 
-	DISK_printgeometry(disk, NULL);
+	DISK_printgeometry(NULL);
 
 	do {
 		error = MBR_read(fd, offset, &dos_mbr);
 		if (error == -1)
 			break;
-		MBR_parse(disk, &dos_mbr, offset, firstoff, &mbr);
+		MBR_parse(&dos_mbr, offset, firstoff, &mbr);
 
-		printf("Offset: %lld\t", offset);
 		MBR_print(&mbr, NULL);
 
 		/* Print out extended partitions too */
@@ -190,5 +161,7 @@ USER_print_disk(struct disk *disk)
 			}
 	} while (offset);
 
-	return (close(fd));
+	error = close(fd);
+	if (error == -1)
+		err(1, "Unable to close disk");
 }

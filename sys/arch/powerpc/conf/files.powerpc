@@ -1,11 +1,11 @@
-#	$OpenBSD: files.powerpc,v 1.50 2015/01/20 18:34:00 mpi Exp $
+#	$OpenBSD: files.powerpc,v 1.52 2015/07/17 22:52:29 tedu Exp $
 #
 
 file	arch/powerpc/powerpc/setjmp.S			ddb
 file	arch/powerpc/powerpc/copystr.c
 file	arch/powerpc/powerpc/cpu_subr.c
 file	arch/powerpc/powerpc/fpu.c
-file	arch/powerpc/powerpc/in_cksum.c			inet
+file	arch/powerpc/powerpc/in_cksum.c
 file	arch/powerpc/powerpc/bus_dma.c
 file	arch/powerpc/powerpc/bus_space.c
 file	arch/powerpc/powerpc/pmap.c
@@ -13,6 +13,7 @@ file	arch/powerpc/powerpc/process_machdep.c
 file	arch/powerpc/powerpc/sys_machdep.c
 file	arch/powerpc/powerpc/trap.c
 file	arch/powerpc/powerpc/vm_machdep.c
+file	arch/powerpc/powerpc/lock_machdep.c		multiprocessor
 file	arch/powerpc/powerpc/mutex.S
 file	arch/powerpc/powerpc/intr.c
 file	arch/powerpc/powerpc/softintr.c

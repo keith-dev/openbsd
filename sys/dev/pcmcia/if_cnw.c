@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_cnw.c,v 1.26 2014/12/22 02:28:52 tedu Exp $	*/
+/*	$OpenBSD: if_cnw.c,v 1.32 2015/07/08 07:21:50 mpi Exp $	*/
 /*-
  * Copyright (c) 1998 The NetBSD Foundation, Inc.
  * All rights reserved.
@@ -61,7 +61,6 @@
 
 #include <dev/pcmcia/if_cnwreg.h>
 
-#include <dev/pcmcia/pcmciareg.h>
 #include <dev/pcmcia/pcmciavar.h>
 #include <dev/pcmcia/pcmciadevs.h>
 
@@ -463,7 +462,7 @@ cnw_start(ifp)
 		}
 
 		IFQ_DEQUEUE(&ifp->if_snd, m0);
-		if (m0 == 0)
+		if (m0 == NULL)
 			return;
 
 #if NBPFILTER > 0
@@ -527,7 +526,7 @@ cnw_transmit(sc, m0)
 			mptr += n;
 			mbytes -= n;
 		}
-		MFREE(m, m0);
+		m0 = m_free(m);
 		m = m0;
 	}
 
@@ -558,9 +557,8 @@ cnw_read(sc)
 	bufptr = 0; /* XXX make gcc happy */
 
 	MGETHDR(m, M_DONTWAIT, MT_DATA);
-	if (m == 0)
+	if (m == NULL)
 		return (0);
-	m->m_pkthdr.rcvif = &sc->sc_arpcom.ac_if;
 	m->m_pkthdr.len = totbytes;
 	mbytes = MHLEN;
 	top = 0;
@@ -569,7 +567,7 @@ cnw_read(sc)
 	while (totbytes > 0) {
 		if (top) {
 			MGET(m, M_DONTWAIT, MT_DATA);
-			if (m == 0) {
+			if (m == NULL) {
 				m_freem(top);
 				return (0);
 			}
@@ -633,15 +631,15 @@ cnw_recv(sc)
 {
 	int rser;
 	struct ifnet *ifp = &sc->sc_arpcom.ac_if;
+	struct mbuf_list ml = MBUF_LIST_INITIALIZER();
 	struct mbuf *m;
-	struct ether_header *eh;
 
 	for (;;) {
 		WAIT_WOC(sc);
 		rser = bus_space_read_1(sc->sc_memt, sc->sc_memh,
 					sc->sc_memoff + CNW_EREG_RSER);
 		if (!(rser & CNW_RSER_RXAVAIL))
-			return;
+			break;
 
 		/* Pull packet off card */
 		m = cnw_read(sc);
@@ -650,32 +648,14 @@ cnw_recv(sc)
 		CNW_CMD0(sc, CNW_CMD_SRP);
 
 		/* Did we manage to get the packet from the interface? */
-		if (m == 0) {
+		if (m == NULL) {
 			++ifp->if_ierrors;
-			return;
+			break;
 		}
-		++ifp->if_ipackets;
-
-#if NBPFILTER > 0
-		if (ifp->if_bpf)
-			bpf_mtap(ifp->if_bpf, m, BPF_DIRECTION_IN);
-#endif
-
-		/*
-		 * Check that the packet is for us or {multi,broad}cast. Maybe
-		 * there's a fool-poof hardware check for this, but I don't
-		 * really know...
-		 */
-		eh = mtod(m, struct ether_header *);
-		if ((eh->ether_dhost[0] & 1) == 0 && /* !mcast and !bcast */
-		    bcmp(sc->sc_arpcom.ac_enaddr, eh->ether_dhost,
-			sizeof(eh->ether_dhost)) != 0) {
-			m_freem(m);
-			continue;
-		}
-
-		ether_input_mbuf(ifp, m);
+		ml_enqueue(&ml, m);
 	}
+
+	if_input(ifp, &ml);
 }
 
 

@@ -14,7 +14,11 @@ our %args = (
 	connect => { domain => AF_INET, addr => "127.0.0.1", port => 514 },
     },
     syslogd => {
-	fstat => 1,
+	fstat => {
+	    qr/^root .* internet/ => 0,
+	    qr/^_syslogd .* internet/ => 1,
+	    qr/ internet6 / => 0,
+	},
 	loghost => '@127.0.0.1:$connectport',
 	options => ["-4nu"],
     },
@@ -22,12 +26,7 @@ our %args = (
 	listen => { domain => AF_INET, addr => "127.0.0.1" },
     },
     file => {
-	loggrep => qr/ 127.0.0.1 /. get_testlog(),
-    },
-    fstat => {
-	loggrep => {
-	    qr/ internet6 / => 0,
-	},
+	loggrep => qr/ 127.0.0.1 /. get_testgrep(),
     },
 );
 

@@ -1,4 +1,4 @@
-/*	$OpenBSD: pfvar.h,v 1.413 2015/02/15 10:40:53 sthen Exp $ */
+/*	$OpenBSD: pfvar.h,v 1.419 2015/07/20 01:18:33 mcbride Exp $ */
 
 /*
  * Copyright (c) 2001 Daniel Hartmeier
@@ -225,27 +225,6 @@ struct pfi_dynaddr {
  * Address manipulation macros
  */
 
-#ifdef _KERNEL
-#ifndef INET6
-#define PF_INET_ONLY
-#endif /* ! INET6 */
-
-#ifdef INET6
-#endif /* INET6 */
-
-#ifdef INET6
-#define PF_INET_INET6
-#endif /* INET6 */
-
-#else
-
-#define PF_INET_INET6
-
-#endif /* _KERNEL */
-
-/* Both IPv4 and IPv6 */
-#ifdef PF_INET_INET6
-
 #define PF_AEQ(a, b, c) \
 	((c == AF_INET && (a)->addr32[0] == (b)->addr32[0]) || \
 	(c == AF_INET6 && \
@@ -280,76 +259,6 @@ struct pfi_dynaddr {
 #define PF_POOLMASK(a, b, c, d, f) \
 	pf_poolmask(a, b, c, d, f)
 
-#else
-
-/* Just IPv6 */
-
-#ifdef PF_INET6_ONLY
-
-#define PF_AEQ(a, b, c) \
-	((a)->addr32[3] == (b)->addr32[3] && \
-	(a)->addr32[2] == (b)->addr32[2] && \
-	(a)->addr32[1] == (b)->addr32[1] && \
-	(a)->addr32[0] == (b)->addr32[0]) \
-
-#define PF_ANEQ(a, b, c) \
-	((a)->addr32[3] != (b)->addr32[3] || \
-	(a)->addr32[2] != (b)->addr32[2] || \
-	(a)->addr32[1] != (b)->addr32[1] || \
-	(a)->addr32[0] != (b)->addr32[0]) \
-
-#define PF_AZERO(a, c) \
-	(!(a)->addr32[0] && \
-	!(a)->addr32[1] && \
-	!(a)->addr32[2] && \
-	!(a)->addr32[3] ) \
-
-#define PF_MATCHA(n, a, m, b, f) \
-	pf_match_addr(n, a, m, b, f)
-
-#define PF_ACPY(a, b, f) \
-	pf_addrcpy(a, b, f)
-
-#define PF_AINC(a, f) \
-	pf_addr_inc(a, f)
-
-#define PF_POOLMASK(a, b, c, d, f) \
-	pf_poolmask(a, b, c, d, f)
-
-#else
-
-/* Just IPv4 */
-#ifdef PF_INET_ONLY
-
-#define PF_AEQ(a, b, c) \
-	((a)->addr32[0] == (b)->addr32[0])
-
-#define PF_ANEQ(a, b, c) \
-	((a)->addr32[0] != (b)->addr32[0])
-
-#define PF_AZERO(a, c) \
-	(!(a)->addr32[0])
-
-#define PF_MATCHA(n, a, m, b, f) \
-	pf_match_addr(n, a, m, b, f)
-
-#define PF_ACPY(a, b, f) \
-	(a)->v4.s_addr = (b)->v4.s_addr
-
-#define PF_AINC(a, f) \
-	do { \
-		(a)->addr32[0] = htonl(ntohl((a)->addr32[0]) + 1); \
-	} while (0)
-
-#define PF_POOLMASK(a, b, c, d, f) \
-	do { \
-		(a)->addr32[0] = ((b)->addr32[0] & (c)->addr32[0]) | \
-		(((c)->addr32[0] ^ 0xffffffff ) & (d)->addr32[0]); \
-	} while (0)
-
-#endif /* PF_INET_ONLY */
-#endif /* PF_INET6_ONLY */
-#endif /* PF_INET_INET6 */
 
 #define	PF_MISMATCHAW(aw, x, af, neg, ifp, rtid)			\
 	(								\
@@ -1255,8 +1164,6 @@ struct pf_pdesc {
 
 	struct pfi_kif	*kif;		/* incoming interface */
 	struct mbuf	*m;		/* mbuf containing the packet */
-	struct ether_header
-			*eh;
 	struct pf_addr	*src;		/* src address */
 	struct pf_addr	*dst;		/* dst address */
 	u_int16_t	*pcksum;	/* proto cksum */
@@ -1316,7 +1223,8 @@ struct pf_pdesc {
 #define PFRES_SRCLIMIT	13		/* Source node/conn limit */
 #define PFRES_SYNPROXY	14		/* SYN proxy */
 #define PFRES_TRANSLATE	15		/* No translation address available */
-#define PFRES_MAX	16		/* total+1 */
+#define PFRES_NOROUTE	16		/* No route found for PBR action */
+#define PFRES_MAX	17		/* total+1 */
 
 #define PFRES_NAMES { \
 	"match", \
@@ -1335,6 +1243,7 @@ struct pf_pdesc {
 	"src-limit", \
 	"synproxy", \
 	"translate", \
+	"no-route", \
 	NULL \
 }
 
@@ -1760,8 +1669,6 @@ extern struct pool		 pf_src_tree_pl, pf_sn_item_pl, pf_rule_pl;
 extern struct pool		 pf_state_pl, pf_state_key_pl, pf_state_item_pl,
 				    pf_rule_item_pl, pf_queue_pl;
 extern struct pool		 pf_state_scrub_pl;
-extern struct pool		 hfsc_class_pl, hfsc_classq_pl,
-				    hfsc_internal_sc_pl;
 extern void			 pf_purge_thread(void *);
 extern void			 pf_purge_expired_src_nodes(int);
 extern void			 pf_purge_expired_states(u_int32_t);
@@ -1793,7 +1700,7 @@ extern void			 pf_print_flags(u_int8_t);
 extern struct ifnet		*sync_ifp;
 extern struct pf_rule		 pf_default_rule;
 extern void			 pf_addrcpy(struct pf_addr *, struct pf_addr *,
-				    u_int8_t);
+				    sa_family_t);
 void				 pf_rm_rule(struct pf_rulequeue *,
 				    struct pf_rule *);
 void				 pf_purge_rule(struct pf_ruleset *,
@@ -1804,8 +1711,7 @@ int				 pf_setup_pdesc(struct pf_pdesc *, void *,
 				    sa_family_t, int, struct pfi_kif *,
 				    struct mbuf *, u_short *);
 
-int	pf_test(sa_family_t, int, struct ifnet *, struct mbuf **,
-	    struct ether_header *);
+int	pf_test(sa_family_t, int, struct ifnet *, struct mbuf **);
 
 void	pf_poolmask(struct pf_addr *, struct pf_addr*,
 	    struct pf_addr *, struct pf_addr *, sa_family_t);
@@ -1828,14 +1734,13 @@ int	pf_match_port(u_int8_t, u_int16_t, u_int16_t, u_int16_t);
 int	pf_match_uid(u_int8_t, uid_t, uid_t, uid_t);
 int	pf_match_gid(u_int8_t, gid_t, gid_t, gid_t);
 
-int	pf_refragment6(struct mbuf **, struct m_tag *mtag, int);
+int	pf_refragment6(struct mbuf **, struct m_tag *mtag);
 void	pf_normalize_init(void);
 int	pf_normalize_ip(struct pf_pdesc *, u_short *);
 int	pf_normalize_ip6(struct pf_pdesc *, u_short *);
 int	pf_normalize_tcp(struct pf_pdesc *);
 void	pf_normalize_tcp_cleanup(struct pf_state *);
-int	pf_normalize_tcp_init(struct pf_pdesc *, struct pf_state_peer *,
-	    struct pf_state_peer *);
+int	pf_normalize_tcp_init(struct pf_pdesc *, struct pf_state_peer *);
 int	pf_normalize_tcp_stateful(struct pf_pdesc *, u_short *,
 	    struct pf_state *, struct pf_state_peer *, struct pf_state_peer *,
 	    int *);
@@ -1987,7 +1892,7 @@ struct pf_os_fingerprint *
 	pf_osfp_validate(void);
 
 #ifdef _KERNEL
-void			 pf_print_host(struct pf_addr *, u_int16_t, u_int8_t);
+void			 pf_print_host(struct pf_addr *, u_int16_t, sa_family_t);
 
 int			 pf_get_transaddr(struct pf_rule *, struct pf_pdesc *,
 			    struct pf_src_node **, struct pf_rule **);

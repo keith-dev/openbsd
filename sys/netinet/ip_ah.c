@@ -1,4 +1,4 @@
-/*	$OpenBSD: ip_ah.c,v 1.114 2014/12/28 10:02:37 tedu Exp $ */
+/*	$OpenBSD: ip_ah.c,v 1.118 2015/07/15 22:16:42 deraadt Exp $ */
 /*
  * The authors of this code are John Ioannidis (ji@tla.org),
  * Angelos D. Keromytis (kermit@csd.uch.gr) and
@@ -76,8 +76,8 @@
 #define DPRINTF(x)
 #endif
 
-int	ah_output_cb(void *);
-int	ah_input_cb(void *);
+int	ah_output_cb(struct cryptop *);
+int	ah_input_cb(struct cryptop *);
 int	ah_massage_headers(struct mbuf **, int, int, int, int);
 
 struct ahstat ahstat;
@@ -529,10 +529,12 @@ ah_input(struct mbuf *m, struct tdb *tdb, int skip, int protoff)
 {
 	struct auth_hash *ahx = (struct auth_hash *) tdb->tdb_authalgxform;
 	struct tdb_crypto *tc;
-	struct m_tag *mtag;
 	u_int32_t btsx, esn;
 	u_int8_t hl;
 	int rplen;
+#ifdef ENCDEBUG
+	char buf[INET6_ADDRSTRLEN];
+#endif
 
 	struct cryptodesc *crda = NULL;
 	struct cryptop *crp;
@@ -555,29 +557,30 @@ ah_input(struct mbuf *m, struct tdb *tdb, int skip, int protoff)
 		case 1:
 			m_freem(m);
 			DPRINTF(("ah_input(): replay counter wrapped for "
-			    "SA %s/%08x\n", ipsp_address(tdb->tdb_dst),
-			    ntohl(tdb->tdb_spi)));
+			    "SA %s/%08x\n", ipsp_address(&tdb->tdb_dst, buf,
+			    sizeof(buf)), ntohl(tdb->tdb_spi)));
 			ahstat.ahs_wrap++;
 			return ENOBUFS;
 		case 2:
 			m_freem(m);
 			DPRINTF(("ah_input(): old packet received in "
-			    "SA %s/%08x\n", ipsp_address(tdb->tdb_dst),
-			    ntohl(tdb->tdb_spi)));
+			    "SA %s/%08x\n", ipsp_address(&tdb->tdb_dst, buf,
+			    sizeof(buf)), ntohl(tdb->tdb_spi)));
 			ahstat.ahs_replay++;
 			return ENOBUFS;
 		case 3:
 			m_freem(m);
 			DPRINTF(("ah_input(): duplicate packet received in "
-			    "SA %s/%08x\n", ipsp_address(tdb->tdb_dst),
-			    ntohl(tdb->tdb_spi)));
+			    "SA %s/%08x\n", ipsp_address(&tdb->tdb_dst, buf,
+			    sizeof(buf)), ntohl(tdb->tdb_spi)));
 			ahstat.ahs_replay++;
 			return ENOBUFS;
 		default:
 			m_freem(m);
 			DPRINTF(("ah_input(): bogus value from "
 			    "checkreplaywindow() in SA %s/%08x\n",
-			    ipsp_address(tdb->tdb_dst), ntohl(tdb->tdb_spi)));
+			    ipsp_address(&tdb->tdb_dst, buf, sizeof(buf)),
+			    ntohl(tdb->tdb_spi)));
 			ahstat.ahs_replay++;
 			return ENOBUFS;
 		}
@@ -585,9 +588,10 @@ ah_input(struct mbuf *m, struct tdb *tdb, int skip, int protoff)
 
 	/* Verify AH header length. */
 	if (hl * sizeof(u_int32_t) != ahx->authsize + rplen - AH_FLENGTH) {
-		DPRINTF(("ah_input(): bad authenticator length %d for packet "
+		DPRINTF(("ah_input(): bad authenticator length %ld for packet "
 		    "in SA %s/%08x\n", hl * sizeof(u_int32_t),
-		    ipsp_address(tdb->tdb_dst), ntohl(tdb->tdb_spi)));
+		    ipsp_address(&tdb->tdb_dst, buf, sizeof(buf)),
+		    ntohl(tdb->tdb_spi)));
 
 		ahstat.ahs_badauthl++;
 		m_freem(m);
@@ -642,31 +646,9 @@ ah_input(struct mbuf *m, struct tdb *tdb, int skip, int protoff)
 		crda->crd_flags |= CRD_F_ESN;
 	}
 
-#ifdef notyet
-	/* Find out if we've already done crypto. */
-	for (mtag = m_tag_find(m, PACKET_TAG_IPSEC_IN_CRYPTO_DONE, NULL);
-	     mtag != NULL;
-	     mtag = m_tag_find(m, PACKET_TAG_IPSEC_IN_CRYPTO_DONE, mtag)) {
-		struct tdb_ident *tdbi;
-
-		tdbi = (struct tdb_ident *) (mtag + 1);
-		if (tdbi->proto == tdb->tdb_sproto &&
-		    tdbi->spi == tdb->tdb_spi &&
-		    tdbi->rdomain == tdb->tdb_rdomain &&
-		    !memcmp(&tdbi->dst, &tdb->tdb_dst,
-			sizeof(union sockaddr_union)))
-			break;
-	}
-#else
-	mtag = NULL;
-#endif
-
 	/* Allocate IPsec-specific opaque crypto info. */
-	if (mtag == NULL)
-		tc = malloc(sizeof(*tc) + skip + rplen + ahx->authsize, M_XDATA,
-		    M_NOWAIT | M_ZERO);
-	else /* Hash verification has already been done successfully. */
-		tc = malloc(sizeof(*tc), M_XDATA, M_NOWAIT | M_ZERO);
+	tc = malloc(sizeof(*tc) + skip + rplen + ahx->authsize, M_XDATA,
+	    M_NOWAIT | M_ZERO);
 	if (tc == NULL) {
 		m_freem(m);
 		crypto_freereq(crp);
@@ -675,76 +657,64 @@ ah_input(struct mbuf *m, struct tdb *tdb, int skip, int protoff)
 		return ENOBUFS;
 	}
 
-	/* Only save information if crypto processing is needed. */
-	if (mtag == NULL) {
-		/*
-		 * Save the authenticator, the skipped portion of the packet,
-		 * and the AH header.
-		 */
-		m_copydata(m, 0, skip + rplen + ahx->authsize,
-		    (caddr_t) (tc + 1));
+	/*
+	 * Save the authenticator, the skipped portion of the packet,
+	 * and the AH header.
+	 */
+	m_copydata(m, 0, skip + rplen + ahx->authsize, (caddr_t) (tc + 1));
 
-		/* Zeroize the authenticator on the packet. */
-		m_copyback(m, skip + rplen, ahx->authsize, ipseczeroes,
-		    M_NOWAIT);
+	/* Zeroize the authenticator on the packet. */
+	m_copyback(m, skip + rplen, ahx->authsize, ipseczeroes, M_NOWAIT);
 
-		/* "Massage" the packet headers for crypto processing. */
-		if ((btsx = ah_massage_headers(&m, tdb->tdb_dst.sa.sa_family,
-		    skip, ahx->type, 0)) != 0) {
-			/* mbuf will be free'd by callee. */
-			free(tc, M_XDATA, 0);
-			crypto_freereq(crp);
-			return btsx;
-		}
+	/* "Massage" the packet headers for crypto processing. */
+	if ((btsx = ah_massage_headers(&m, tdb->tdb_dst.sa.sa_family,
+	    skip, ahx->type, 0)) != 0) {
+		/* mbuf will be free'd by callee. */
+		free(tc, M_XDATA, 0);
+		crypto_freereq(crp);
+		return btsx;
 	}
 
 	/* Crypto operation descriptor. */
 	crp->crp_ilen = m->m_pkthdr.len; /* Total input length. */
 	crp->crp_flags = CRYPTO_F_IMBUF;
-	crp->crp_buf = (caddr_t) m;
-	crp->crp_callback = (int (*) (struct cryptop *)) ah_input_cb;
+	crp->crp_buf = (caddr_t)m;
+	crp->crp_callback = ah_input_cb;
 	crp->crp_sid = tdb->tdb_cryptoid;
-	crp->crp_opaque = (caddr_t) tc;
+	crp->crp_opaque = (caddr_t)tc;
 
 	/* These are passed as-is to the callback. */
 	tc->tc_skip = skip;
 	tc->tc_protoff = protoff;
 	tc->tc_spi = tdb->tdb_spi;
 	tc->tc_proto = tdb->tdb_sproto;
-	tc->tc_ptr = (caddr_t) mtag; /* Save the mtag we've identified. */
 	tc->tc_rdomain = tdb->tdb_rdomain;
 	bcopy(&tdb->tdb_dst, &tc->tc_dst, sizeof(union sockaddr_union));
 
-	if (mtag == NULL)
-		return crypto_dispatch(crp);
-	else
-		return ah_input_cb(crp);
+	return crypto_dispatch(crp);
 }
 
 /*
  * AH input callback, called directly by the crypto driver.
  */
 int
-ah_input_cb(void *op)
+ah_input_cb(struct cryptop *crp)
 {
 	int s, roff, rplen, error, skip, protoff;
 	unsigned char calc[AH_ALEN_MAX];
 	struct mbuf *m1, *m0, *m;
 	struct auth_hash *ahx;
 	struct tdb_crypto *tc;
-	struct cryptop *crp;
-	struct m_tag *mtag;
 	struct tdb *tdb;
 	u_int32_t btsx, esn;
-	u_int8_t prot;
 	caddr_t ptr;
-
-	crp = (struct cryptop *) op;
+#ifdef ENCDEBUG
+	char buf[INET6_ADDRSTRLEN];
+#endif
 
 	tc = (struct tdb_crypto *) crp->crp_opaque;
 	skip = tc->tc_skip;
 	protoff = tc->tc_protoff;
-	mtag = (struct m_tag *) tc->tc_ptr;
 
 	m = (struct mbuf *) crp->crp_buf;
 	if (m == NULL) {
@@ -794,36 +764,27 @@ ah_input_cb(void *op)
 	/* Copy authenticator off the packet. */
 	m_copydata(m, skip + rplen, ahx->authsize, calc);
 
-	/*
-	 * If we have an mtag, we don't need to verify the authenticator --
-	 * it has been verified by an IPsec-aware NIC.
-	 */
-	if (mtag == NULL) {
-		ptr = (caddr_t) (tc + 1);
+	ptr = (caddr_t) (tc + 1);
 
-		/* Verify authenticator. */
-		if (timingsafe_bcmp(ptr + skip + rplen, calc, ahx->authsize)) {
-			free(tc, M_XDATA, 0);
+	/* Verify authenticator. */
+	if (timingsafe_bcmp(ptr + skip + rplen, calc, ahx->authsize)) {
+		free(tc, M_XDATA, 0);
 
-			DPRINTF(("ah_input(): authentication failed for "
-			    "packet in SA %s/%08x\n",
-			    ipsp_address(tdb->tdb_dst), ntohl(tdb->tdb_spi)));
+		DPRINTF(("ah_input(): authentication failed for "
+		    "packet in SA %s/%08x\n",
+		    ipsp_address(&tdb->tdb_dst, buf, sizeof(buf)),
+		    ntohl(tdb->tdb_spi)));
 
-			ahstat.ahs_badauth++;
-			error = EACCES;
-			goto baddone;
-		}
-
-		/* Fix the Next Protocol field. */
-		((u_int8_t *) ptr)[protoff] = ((u_int8_t *) ptr)[skip];
-
-		/* Copyback the saved (uncooked) network headers. */
-		m_copyback(m, 0, skip, ptr, M_NOWAIT);
-	} else {
-		/* Fix the Next Protocol field. */
-		m_copydata(m, skip, sizeof(u_int8_t), &prot);
-		m_copyback(m, protoff, sizeof(u_int8_t), &prot, M_NOWAIT);
+		ahstat.ahs_badauth++;
+		error = EACCES;
+		goto baddone;
 	}
+
+	/* Fix the Next Protocol field. */
+	((u_int8_t *) ptr)[protoff] = ((u_int8_t *) ptr)[skip];
+
+	/* Copyback the saved (uncooked) network headers. */
+	m_copyback(m, 0, skip, ptr, M_NOWAIT);
 
 	free(tc, M_XDATA, 0);
 
@@ -841,29 +802,30 @@ ah_input_cb(void *op)
 			break;
 		case 1:
 			DPRINTF(("ah_input(): replay counter wrapped for "
-			    "SA %s/%08x\n", ipsp_address(tdb->tdb_dst),
-			    ntohl(tdb->tdb_spi)));
+			    "SA %s/%08x\n", ipsp_address(&tdb->tdb_dst, buf,
+			    sizeof(buf)), ntohl(tdb->tdb_spi)));
 			ahstat.ahs_wrap++;
 			error = ENOBUFS;
 			goto baddone;
 		case 2:
 			DPRINTF(("ah_input_cb(): old packet received in "
-			    "SA %s/%08x\n", ipsp_address(tdb->tdb_dst),
-			    ntohl(tdb->tdb_spi)));
+			    "SA %s/%08x\n", ipsp_address(&tdb->tdb_dst, buf,
+			    sizeof(buf)), ntohl(tdb->tdb_spi)));
 			ahstat.ahs_replay++;
 			error = ENOBUFS;
 			goto baddone;
 		case 3:
 			DPRINTF(("ah_input_cb(): duplicate packet received in "
-			    "SA %s/%08x\n", ipsp_address(tdb->tdb_dst),
-			    ntohl(tdb->tdb_spi)));
+			    "SA %s/%08x\n", ipsp_address(&tdb->tdb_dst, buf,
+			    sizeof(buf)), ntohl(tdb->tdb_spi)));
 			ahstat.ahs_replay++;
 			error = ENOBUFS;
 			goto baddone;
 		default:
 			DPRINTF(("ah_input_cb(): bogus value from "
 			    "checkreplaywindow() in SA %s/%08x\n",
-			    ipsp_address(tdb->tdb_dst), ntohl(tdb->tdb_spi)));
+			    ipsp_address(&tdb->tdb_dst, buf, sizeof(buf)),
+			    ntohl(tdb->tdb_spi)));
 			ahstat.ahs_replay++;
 			error = ENOBUFS;
 			goto baddone;
@@ -878,7 +840,7 @@ ah_input_cb(void *op)
 		m_freem(m);
 
 		DPRINTF(("ah_input(): bad mbuf chain for packet in SA "
-		    "%s/%08x\n", ipsp_address(tdb->tdb_dst),
+		    "%s/%08x\n", ipsp_address(&tdb->tdb_dst, buf, sizeof(buf)),
 		    ntohl(tdb->tdb_spi)));
 
 		return EINVAL;
@@ -942,15 +904,14 @@ ah_input_cb(void *op)
 			m->m_pkthdr.len -= rplen + ahx->authsize;
 		}
 
-	error = ipsec_common_input_cb(m, tdb, skip, protoff, mtag);
+	error = ipsec_common_input_cb(m, tdb, skip, protoff);
 	splx(s);
 	return (error);
 
  baddone:
 	splx(s);
 
-	if (m != NULL)
-		m_freem(m);
+	m_freem(m);
 
 	if (crp != NULL)
 		crypto_freereq(crp);
@@ -976,6 +937,9 @@ ah_output(struct mbuf *m, struct tdb *tdb, struct mbuf **mp, int skip,
 	struct ah *ah;
 #if NBPFILTER > 0
 	struct ifnet *encif;
+#ifdef ENCDEBUG
+	char buf[INET6_ADDRSTRLEN];
+#endif
 
 	if ((encif = enc_getif(tdb->tdb_rdomain, tdb->tdb_tap)) != NULL) {
 		encif->if_opackets++;
@@ -1004,7 +968,8 @@ ah_output(struct mbuf *m, struct tdb *tdb, struct mbuf **mp, int skip,
 	 */
 	if ((tdb->tdb_rpl == 0) && (tdb->tdb_wnd > 0)) {
 		DPRINTF(("ah_output(): SA %s/%08x should have expired\n",
-		    ipsp_address(tdb->tdb_dst), ntohl(tdb->tdb_spi)));
+		    ipsp_address(&tdb->tdb_dst, buf, sizeof(buf)),
+		    ntohl(tdb->tdb_spi)));
 		m_freem(m);
 		ahstat.ahs_wrap++;
 		return EINVAL;
@@ -1018,7 +983,8 @@ ah_output(struct mbuf *m, struct tdb *tdb, struct mbuf **mp, int skip,
 		if (rplen + ahx->authsize + m->m_pkthdr.len > IP_MAXPACKET) {
 			DPRINTF(("ah_output(): packet in SA %s/%08x got too "
 			    "big\n",
-			    ipsp_address(tdb->tdb_dst), ntohl(tdb->tdb_spi)));
+			    ipsp_address(&tdb->tdb_dst, buf, sizeof(buf)),
+			    ntohl(tdb->tdb_spi)));
 			m_freem(m);
 			ahstat.ahs_toobig++;
 			return EMSGSIZE;
@@ -1030,8 +996,8 @@ ah_output(struct mbuf *m, struct tdb *tdb, struct mbuf **mp, int skip,
 		/* Check for IPv6 maximum packet size violations. */
 		if (rplen + ahx->authsize + m->m_pkthdr.len > IPV6_MAXPACKET) {
 			DPRINTF(("ah_output(): packet in SA %s/%08x "
-			    "got too big\n", ipsp_address(tdb->tdb_dst),
-			    ntohl(tdb->tdb_spi)));
+			    "got too big\n", ipsp_address(&tdb->tdb_dst, buf,
+			    sizeof(buf)), ntohl(tdb->tdb_spi)));
 			m_freem(m);
 			ahstat.ahs_toobig++;
 			return EMSGSIZE;
@@ -1042,7 +1008,8 @@ ah_output(struct mbuf *m, struct tdb *tdb, struct mbuf **mp, int skip,
 	default:
 		DPRINTF(("ah_output(): unknown/unsupported protocol "
 		    "family %d, SA %s/%08x\n", tdb->tdb_dst.sa.sa_family,
-		    ipsp_address(tdb->tdb_dst), ntohl(tdb->tdb_spi)));
+		    ipsp_address(&tdb->tdb_dst, buf, sizeof(buf)),
+		    ntohl(tdb->tdb_spi)));
 		m_freem(m);
 		ahstat.ahs_nopf++;
 		return EPFNOSUPPORT;
@@ -1101,7 +1068,7 @@ ah_output(struct mbuf *m, struct tdb *tdb, struct mbuf **mp, int skip,
 	mi = m_inject(m, skip, rplen + ahx->authsize, M_DONTWAIT);
 	if (mi == NULL) {
 		DPRINTF(("ah_output(): failed to inject AH header for SA "
-		    "%s/%08x\n", ipsp_address(tdb->tdb_dst),
+		    "%s/%08x\n", ipsp_address(&tdb->tdb_dst, buf, sizeof(buf)),
 		    ntohl(tdb->tdb_spi)));
 
 		m_freem(m);
@@ -1160,10 +1127,7 @@ ah_output(struct mbuf *m, struct tdb *tdb, struct mbuf **mp, int skip,
 	}
 
 	/* Allocate IPsec-specific opaque crypto info. */
-	if ((tdb->tdb_flags & TDBF_SKIPCRYPTO) == 0)
-		tc = malloc(sizeof(*tc) + skip, M_XDATA, M_NOWAIT | M_ZERO);
-	else
-		tc = malloc(sizeof(*tc), M_XDATA, M_NOWAIT | M_ZERO);
+	tc = malloc(sizeof(*tc) + skip, M_XDATA, M_NOWAIT | M_ZERO);
 	if (tc == NULL) {
 		m_freem(m);
 		crypto_freereq(crp);
@@ -1173,64 +1137,58 @@ ah_output(struct mbuf *m, struct tdb *tdb, struct mbuf **mp, int skip,
 	}
 
 	/* Save the skipped portion of the packet. */
-	if ((tdb->tdb_flags & TDBF_SKIPCRYPTO) == 0) {
-		m_copydata(m, 0, skip, (caddr_t) (tc + 1));
+	m_copydata(m, 0, skip, (caddr_t) (tc + 1));
 
-		/*
-		 * Fix IP header length on the header used for
-		 * authentication. We don't need to fix the original
-		 * header length as it will be fixed by our caller.
-		 */
-		switch (tdb->tdb_dst.sa.sa_family) {
-		case AF_INET:
-			bcopy(((caddr_t)(tc + 1)) +
-			    offsetof(struct ip, ip_len),
-			    (caddr_t) &iplen, sizeof(u_int16_t));
-			iplen = htons(ntohs(iplen) + rplen + ahx->authsize);
-			m_copyback(m, offsetof(struct ip, ip_len),
-			    sizeof(u_int16_t), &iplen, M_NOWAIT);
-			break;
+	/*
+	 * Fix IP header length on the header used for
+	 * authentication. We don't need to fix the original
+	 * header length as it will be fixed by our caller.
+	 */
+	switch (tdb->tdb_dst.sa.sa_family) {
+	case AF_INET:
+		bcopy(((caddr_t)(tc + 1)) +
+		    offsetof(struct ip, ip_len),
+		    (caddr_t) &iplen, sizeof(u_int16_t));
+		iplen = htons(ntohs(iplen) + rplen + ahx->authsize);
+		m_copyback(m, offsetof(struct ip, ip_len),
+		    sizeof(u_int16_t), &iplen, M_NOWAIT);
+		break;
 
 #ifdef INET6
-		case AF_INET6:
-			bcopy(((caddr_t)(tc + 1)) +
-			    offsetof(struct ip6_hdr, ip6_plen),
-			    (caddr_t) &iplen, sizeof(u_int16_t));
-			iplen = htons(ntohs(iplen) + rplen + ahx->authsize);
-			m_copyback(m, offsetof(struct ip6_hdr, ip6_plen),
-			    sizeof(u_int16_t), &iplen, M_NOWAIT);
-			break;
+	case AF_INET6:
+		bcopy(((caddr_t)(tc + 1)) +
+		    offsetof(struct ip6_hdr, ip6_plen),
+		    (caddr_t) &iplen, sizeof(u_int16_t));
+		iplen = htons(ntohs(iplen) + rplen + ahx->authsize);
+		m_copyback(m, offsetof(struct ip6_hdr, ip6_plen),
+		    sizeof(u_int16_t), &iplen, M_NOWAIT);
+		break;
 #endif /* INET6 */
-		}
+	}
 
-		/* Fix the Next Header field in saved header. */
-		((u_int8_t *) (tc + 1))[protoff] = IPPROTO_AH;
+	/* Fix the Next Header field in saved header. */
+	((u_int8_t *) (tc + 1))[protoff] = IPPROTO_AH;
 
-		/* Update the Next Protocol field in the IP header. */
-		prot = IPPROTO_AH;
-		m_copyback(m, protoff, sizeof(u_int8_t), &prot, M_NOWAIT);
+	/* Update the Next Protocol field in the IP header. */
+	prot = IPPROTO_AH;
+	m_copyback(m, protoff, sizeof(u_int8_t), &prot, M_NOWAIT);
 
-		/* "Massage" the packet headers for crypto processing. */
-		if ((len = ah_massage_headers(&m, tdb->tdb_dst.sa.sa_family,
-		    skip, ahx->type, 1)) != 0) {
-			/* mbuf will be free'd by callee. */
-			free(tc, M_XDATA, 0);
-			crypto_freereq(crp);
-			return len;
-		}
-	} else {
-		/* Update the Next Protocol field in the IP header. */
-		prot = IPPROTO_AH;
-		m_copyback(m, protoff, sizeof(u_int8_t), &prot, M_NOWAIT);
+	/* "Massage" the packet headers for crypto processing. */
+	if ((len = ah_massage_headers(&m, tdb->tdb_dst.sa.sa_family,
+	    skip, ahx->type, 1)) != 0) {
+		/* mbuf will be free'd by callee. */
+		free(tc, M_XDATA, 0);
+		crypto_freereq(crp);
+		return len;
 	}
 
 	/* Crypto operation descriptor. */
 	crp->crp_ilen = m->m_pkthdr.len; /* Total input length. */
 	crp->crp_flags = CRYPTO_F_IMBUF;
-	crp->crp_buf = (caddr_t) m;
-	crp->crp_callback = (int (*) (struct cryptop *)) ah_output_cb;
+	crp->crp_buf = (caddr_t)m;
+	crp->crp_callback = ah_output_cb;
 	crp->crp_sid = tdb->tdb_cryptoid;
-	crp->crp_opaque = (caddr_t) tc;
+	crp->crp_opaque = (caddr_t)tc;
 
 	/* These are passed as-is to the callback. */
 	tc->tc_skip = skip;
@@ -1240,27 +1198,22 @@ ah_output(struct mbuf *m, struct tdb *tdb, struct mbuf **mp, int skip,
 	tc->tc_rdomain = tdb->tdb_rdomain;
 	bcopy(&tdb->tdb_dst, &tc->tc_dst, sizeof(union sockaddr_union));
 
-	if ((tdb->tdb_flags & TDBF_SKIPCRYPTO) == 0)
-		return crypto_dispatch(crp);
-	else
-		return ah_output_cb(crp);
+	return crypto_dispatch(crp);
 }
 
 /*
  * AH output callback, called directly from the crypto handler.
  */
 int
-ah_output_cb(void *op)
+ah_output_cb(struct cryptop *crp)
 {
 	int skip, error;
 	struct tdb_crypto *tc;
-	struct cryptop *crp;
 	struct tdb *tdb;
 	struct mbuf *m;
 	caddr_t ptr;
 	int err, s;
 
-	crp = (struct cryptop *) op;
 	tc = (struct tdb_crypto *) crp->crp_opaque;
 	skip = tc->tc_skip;
 	ptr = (caddr_t) (tc + 1);
@@ -1307,8 +1260,7 @@ ah_output_cb(void *op)
 	 * Copy original headers (with the new protocol number) back
 	 * in place.
 	 */
-	if ((tdb->tdb_flags & TDBF_SKIPCRYPTO) == 0)
-		m_copyback(m, 0, skip, ptr, M_NOWAIT);
+	m_copyback(m, 0, skip, ptr, M_NOWAIT);
 
 	free(tc, M_XDATA, 0);
 
@@ -1322,8 +1274,7 @@ ah_output_cb(void *op)
  baddone:
 	splx(s);
 
-	if (m != NULL)
-		m_freem(m);
+	m_freem(m);
 
 	crypto_freereq(crp);
 

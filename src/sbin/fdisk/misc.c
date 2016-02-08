@@ -1,28 +1,19 @@
-/*	$OpenBSD: misc.c,v 1.42 2014/03/31 19:50:52 krw Exp $	*/
+/*	$OpenBSD: misc.c,v 1.51 2015/03/30 17:11:49 krw Exp $	*/
 
 /*
  * Copyright (c) 1997 Tobias Weingartner
- * All rights reserved.
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in the
- *    documentation and/or other materials provided with the distribution.
+ * Permission to use, copy, modify, and distribute this software for any
+ * purpose with or without fee is hereby granted, provided that the above
+ * copyright notice and this permission notice appear in all copies.
  *
- * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
- * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
- * OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.
- * IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT
- * NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
- * DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
- * THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
- * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
- * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ * THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES
+ * WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF
+ * MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR
+ * ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
+ * WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN
+ * ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
+ * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
 
 #include <sys/types.h>
@@ -39,18 +30,20 @@
 #include "part.h"
 
 struct unit_type unit_types[] = {
-	{"b", 1			, "Bytes"},
-	{" ", 0			, "Sectors"},	/* Filled in from disklabel. */
-	{"K", 1024		, "Kilobytes"},
-	{"M", 1024 * 1024	, "Megabytes"},
-	{"G", 1024 * 1024 *1024	, "Gigabytes"},
-	{NULL, 0		, NULL },
+	{ "b"	, 1LL				, "Bytes"	},
+	{ " "	, 0LL				, "Sectors"	},
+	{ "K"	, 1024LL			, "Kilobytes"	},
+	{ "M"	, 1024LL * 1024			, "Megabytes"	},
+	{ "G"	, 1024LL * 1024 *1024		, "Gigabytes"	},
+	{ "T"	, 1024LL * 1024 * 1024 * 1024	, "Terabytes"	},
+	{ NULL	, 0				, NULL		},
 };
 
 int
 unit_lookup(char *units)
 {
 	int i = 0;
+
 	if (units == NULL)
 		return (SECTORS);
 
@@ -128,12 +121,14 @@ ask_num(const char *str, int dflt, int low, int high)
 }
 
 int
-ask_pid(int dflt)
+ask_pid(int dflt, int low, int high)
 {
 	char lbuf[100], *cp;
 	size_t lbuflen;
 	int num = -1;
-	const int low = 0, high = 0xff;
+
+	if (low == 1)
+		low = 0;	/* Show continguous range */
 
 	if (dflt < low)
 		dflt = low;
@@ -166,6 +161,8 @@ ask_pid(int dflt)
 		if (*cp != '\0') {
 			printf("'%s' is not a valid number.\n", lbuf);
 			num = low - 1;
+		} else if (num == 0) {
+			break;
 		} else if (num < low || num > high) {
 			printf("'%x' is out of range.\n", num);
 		}
@@ -199,12 +196,13 @@ ask_yn(const char *str)
 /*
  * adapted from sbin/disklabel/editor.c
  */
-u_int32_t
-getuint(struct disk *disk, char *prompt, u_int32_t oval, u_int32_t maxval)
+u_int64_t
+getuint64(char *prompt, u_int64_t oval, u_int64_t maxval)
 {
+	const int secsize = unit_types[SECTORS].conversion;
 	char buf[BUFSIZ], *endptr, *p, operator = '\0';
 	size_t n;
-	int mult = 1, secsize = unit_types[SECTORS].conversion;
+	int64_t mult = 1;
 	double d, d2;
 	int secpercyl, saveerr;
 	char unit;
@@ -212,10 +210,10 @@ getuint(struct disk *disk, char *prompt, u_int32_t oval, u_int32_t maxval)
 	if (oval > maxval)
 		oval = maxval;
 
-	secpercyl = disk->sectors * disk->heads;
+	secpercyl = disk.sectors * disk.heads;
 
 	do {
-		printf("%s: [%u] ", prompt, oval);
+		printf("%s: [%llu] ", prompt, oval);
 
 		if (fgets(buf, sizeof(buf), stdin) == NULL)
 			errx(1, "eof");
@@ -239,7 +237,7 @@ getuint(struct disk *disk, char *prompt, u_int32_t oval, u_int32_t maxval)
 			break;
 		case 'b':
 			unit = 'b';
-			mult = -secsize;
+			mult = -(int64_t)secsize;
 			buf[--n] = '\0';
 			break;
 		case 's':
@@ -250,19 +248,24 @@ getuint(struct disk *disk, char *prompt, u_int32_t oval, u_int32_t maxval)
 		case 'k':
 			unit = 'k';
 			if (secsize > 1024)
-				mult = -secsize / 1024;
+				mult = -(int64_t)secsize / 1024LL;
 			else
-				mult = 1024 / secsize;
+				mult = 1024LL / secsize;
 			buf[--n] = '\0';
 			break;
 		case 'm':
 			unit = 'm';
-			mult = 1048576 / secsize;
+			mult = (1024LL * 1024) / secsize;
 			buf[--n] = '\0';
 			break;
 		case 'g':
 			unit = 'g';
-			mult = 1073741824 / secsize;
+			mult = (1024LL * 1024 * 1024) / secsize;
+			buf[--n] = '\0';
+			break;
+		case 't':
+			unit = 't';
+			mult = (1024LL * 1024 * 1024 * 1024) / secsize;
 			buf[--n] = '\0';
 			break;
 		default:
@@ -309,5 +312,55 @@ getuint(struct disk *disk, char *prompt, u_int32_t oval, u_int32_t maxval)
 		}
 	} while (1);
 
-	return ((u_int32_t)d);
+	return((u_int64_t)d);
+}
+
+char *
+ask_string(const char *prompt, const char *oval)
+{
+	static char buf[BUFSIZ];
+	int n;
+
+	buf[0] = '\0';
+	do {
+		printf("%s: [%s] ", prompt, oval ? oval : "");
+		if (fgets(buf, sizeof(buf), stdin) == NULL) {
+			buf[0] = '\0';
+			if (feof(stdin)) {
+				clearerr(stdin);
+				putchar('\n');
+				return(NULL);
+			}
+		}
+		n = strlen(buf);
+		if (n > 0 && buf[n-1] == '\n')
+			buf[--n] = '\0';
+		else if (oval != NULL && buf[0] == '\0')
+			strlcpy(buf, oval, sizeof(buf));
+	} while (buf[0] == '?');
+
+	return(&buf[0]);
+}
+
+/*
+ * Adapted from Hacker's Delight crc32b().
+ */
+u_int32_t
+crc32(const u_char *buf, const u_int32_t size)
+{
+	int j;
+	u_int32_t i, byte, crc, mask;
+
+	crc = 0xFFFFFFFF;
+
+	for (i = 0; i < size; i++) {
+		byte = buf[i];			/* Get next byte. */
+		crc = crc ^ byte;
+		for (j = 7; j >= 0; j--) {	/* Do eight times. */
+			mask = -(crc & 1);
+			crc = (crc >> 1) ^ (0xEDB88320 & mask);
+		}
+	}
+
+	return ~crc;
 }

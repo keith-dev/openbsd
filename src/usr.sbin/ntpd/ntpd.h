@@ -1,4 +1,4 @@
-/*	$OpenBSD: ntpd.h,v 1.119 2015/02/12 01:54:57 reyk Exp $ */
+/*	$OpenBSD: ntpd.h,v 1.121 2015/05/20 13:32:39 reyk Exp $ */
 
 /*
  * Copyright (c) 2003, 2004 Henning Brauer <henning@openbsd.org>
@@ -341,6 +341,8 @@ void	client_log_error(struct ntp_peer *, const char *, int);
 void	set_next(struct ntp_peer *, time_t);
 
 /* constraint.c */
+void	 constraint_add(struct constraint *);
+void	 constraint_remove(struct constraint *);
 int	 constraint_init(struct constraint *);
 int	 constraint_query(struct constraint *);
 int	 constraint_dispatch_msg(struct pollfd *);
@@ -365,8 +367,6 @@ char			*print_rtable(int);
 void			sensor_init(void);
 int			sensor_scan(void);
 void			sensor_query(struct ntp_sensor *);
-int			sensor_hotplugfd(void);
-void			sensor_hotplugevent(int);
 
 /* ntp_dns.c */
 pid_t	ntp_dns(int[2], struct ntpd_conf *, struct passwd *);

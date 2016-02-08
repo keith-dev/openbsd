@@ -1,4 +1,4 @@
-/*	$OpenBSD: ftree.c,v 1.36 2015/02/21 22:48:23 guenther Exp $	*/
+/*	$OpenBSD: ftree.c,v 1.38 2015/03/19 05:14:24 guenther Exp $	*/
 /*	$NetBSD: ftree.c,v 1.4 1995/03/21 09:07:21 cgd Exp $	*/
 
 /*-
@@ -337,8 +337,6 @@ int
 next_file(ARCHD *arcn)
 {
 	int cnt;
-	time_t atime;
-	time_t mtime;
 
 	/*
 	 * ftree_sel() might have set the ftree_skip flag if the user has the
@@ -393,10 +391,10 @@ next_file(ARCHD *arcn)
 			 * remember to force the time (this is -t on a read
 			 * directory, not a created directory).
 			 */
-			if (!tflag || (get_atdir(ftent->fts_statp->st_dev,
-			    ftent->fts_statp->st_ino, &mtime, &atime) < 0))
+			if (!tflag)
 				continue;
-			set_ftime(ftent->fts_path, mtime, atime, 1);
+			do_atdir(ftent->fts_path, ftent->fts_statp->st_dev,
+			    ftent->fts_statp->st_ino);
 			continue;
 		case FTS_DC:
 			/*
@@ -445,8 +443,8 @@ next_file(ARCHD *arcn)
 			if (!tflag)
 				break;
 			add_atdir(ftent->fts_path, arcn->sb.st_dev,
-			    arcn->sb.st_ino, arcn->sb.st_mtime,
-			    arcn->sb.st_atime);
+			    arcn->sb.st_ino, &arcn->sb.st_mtim,
+			    &arcn->sb.st_atim);
 			break;
 		case S_IFCHR:
 			arcn->type = PAX_CHR;

@@ -1,4 +1,4 @@
-/*	$OpenBSD: date.c,v 1.44 2015/02/07 02:09:13 deraadt Exp $	*/
+/*	$OpenBSD: date.c,v 1.47 2015/04/17 16:47:47 deraadt Exp $	*/
 /*	$NetBSD: date.c,v 1.11 1995/09/07 06:21:05 jtc Exp $	*/
 
 /*
@@ -42,7 +42,6 @@
 #include <locale.h>
 #include <syslog.h>
 #include <time.h>
-#include <tzfile.h>
 #include <unistd.h>
 #include <util.h>
 
@@ -60,6 +59,7 @@ int
 main(int argc, char *argv[])
 {
 	struct timezone tz;
+	const char *errstr;
 	struct tm *tp;
 	int ch, rflag;
 	char *format, buf[1024], *outzone = NULL;
@@ -88,12 +88,10 @@ main(int argc, char *argv[])
 				err(1, "cannot unsetenv TZ");
 			break;
 		case 't':		/* minutes west of GMT */
-					/* error check; don't allow "PST" */
-			if (isdigit((unsigned char)*optarg)) {
-				tz.tz_minuteswest = atoi(optarg);
-				break;
-			}
-			/* FALLTHROUGH */
+			tz.tz_minuteswest = strtonum(optarg, 0, 24*60-1, &errstr);
+			if (errstr)
+				errx(1, "-t %s: %s", optarg, errstr);
+			break;
 		case 'z':
 			outzone = optarg;
 			break;
@@ -183,7 +181,7 @@ setthetime(char *p)
 
 	switch (strlen(p)) {
 	case 12:				/* cc */
-		lt->tm_year = ATOI2(p) * 100 - TM_YEAR_BASE;
+		lt->tm_year = (ATOI2(p) * 100) - 1900;
 		yearset = 1;
 		/* FALLTHROUGH */
 	case 10:				/* yy */

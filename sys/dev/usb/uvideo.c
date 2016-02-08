@@ -1,4 +1,4 @@
-/*	$OpenBSD: uvideo.c,v 1.179 2015/01/06 17:27:58 armani Exp $ */
+/*	$OpenBSD: uvideo.c,v 1.181 2015/07/09 14:58:32 mpi Exp $ */
 
 /*
  * Copyright (c) 2008 Robert Nagy <robert@openbsd.org>
@@ -56,6 +56,62 @@ int uvideo_debug = 1;
 
 #define byteof(x) ((x) >> 3)
 #define bitof(x)  (1L << ((x) & 0x7))
+
+struct uvideo_softc {
+	struct device				 sc_dev;
+	struct usbd_device			*sc_udev;
+	int					 sc_nifaces;
+	struct usbd_interface			**sc_ifaces;
+
+	struct device				*sc_videodev;
+
+	int					 sc_enabled;
+	int					 sc_max_fbuf_size;
+	int					 sc_negotiated_flag;
+	int					 sc_frame_rate;
+
+	struct uvideo_frame_buffer		 sc_frame_buffer;
+
+	struct uvideo_mmap			 sc_mmap[UVIDEO_MAX_BUFFERS];
+	uint8_t					*sc_mmap_buffer;
+	q_mmap					 sc_mmap_q;
+	int					 sc_mmap_count;
+	int					 sc_mmap_cur;
+	int					 sc_mmap_flag;
+
+	struct vnode				*sc_vp;
+	struct usb_task				 sc_task_write;
+
+	int					 sc_nframes;
+	struct usb_video_probe_commit		 sc_desc_probe;
+	struct usb_video_header_desc_all	 sc_desc_vc_header;
+	struct usb_video_input_header_desc_all	 sc_desc_vs_input_header;
+
+#define UVIDEO_MAX_PU				 8
+	int					 sc_desc_vc_pu_num;
+	struct usb_video_vc_processing_desc	*sc_desc_vc_pu_cur;
+	struct usb_video_vc_processing_desc	*sc_desc_vc_pu[UVIDEO_MAX_PU];
+
+#define UVIDEO_MAX_FORMAT			 8
+	int					 sc_fmtgrp_idx;
+	int					 sc_fmtgrp_num;
+	struct uvideo_format_group		*sc_fmtgrp_cur;
+	struct uvideo_format_group		 sc_fmtgrp[UVIDEO_MAX_FORMAT];
+
+#define	UVIDEO_MAX_VS_NUM			 8
+	struct uvideo_vs_iface			*sc_vs_cur;
+	struct uvideo_vs_iface			 sc_vs_coll[UVIDEO_MAX_VS_NUM];
+
+	void					*sc_uplayer_arg;
+	int					*sc_uplayer_fsize;
+	uint8_t					*sc_uplayer_fbuffer;
+	void					 (*sc_uplayer_intr)(void *);
+
+	struct uvideo_devs			*sc_quirk;
+	usbd_status				(*sc_decode_stream_header)
+						    (struct uvideo_softc *,
+						    uint8_t *, int);
+};
 
 int		uvideo_enable(void *);
 void		uvideo_disable(void *);
@@ -122,7 +178,7 @@ usbd_status	uvideo_vs_decode_stream_header(struct uvideo_softc *,
 		    uint8_t *, int); 
 usbd_status	uvideo_vs_decode_stream_header_isight(struct uvideo_softc *,
 		    uint8_t *, int);
-void		uvideo_mmap_queue(struct uvideo_softc *, uint8_t *, int);
+int		uvideo_mmap_queue(struct uvideo_softc *, uint8_t *, int);
 void		uvideo_read(struct uvideo_softc *, uint8_t *, int);
 usbd_status	uvideo_usb_control(struct uvideo_softc *sc, uint8_t rt, uint8_t r,
 		    uint16_t value, uint8_t *data, size_t length);
@@ -2076,7 +2132,8 @@ uvideo_vs_decode_stream_header(struct uvideo_softc *sc, uint8_t *frame,
 #endif
 			if (sc->sc_mmap_flag) {
 				/* mmap */
-				uvideo_mmap_queue(sc, fb->buf, fb->offset);
+				if (uvideo_mmap_queue(sc, fb->buf, fb->offset))
+					return (USBD_NOMEM);
 			} else {
 				/* read */
 				uvideo_read(sc, fb->buf, fb->offset);
@@ -2129,7 +2186,8 @@ uvideo_vs_decode_stream_header_isight(struct uvideo_softc *sc, uint8_t *frame,
 	if (header) {
 		if (sc->sc_mmap_flag) {
 			/* mmap */
-			uvideo_mmap_queue(sc, fb->buf, fb->offset);
+			if (uvideo_mmap_queue(sc, fb->buf, fb->offset))
+				return (USBD_NOMEM);
 		} else {
 			/* read */
 			uvideo_read(sc, fb->buf, fb->offset);
@@ -2147,7 +2205,7 @@ uvideo_vs_decode_stream_header_isight(struct uvideo_softc *sc, uint8_t *frame,
 	return (USBD_NORMAL_COMPLETION);
 }
 
-void
+int
 uvideo_mmap_queue(struct uvideo_softc *sc, uint8_t *buf, int len)
 {
 	if (sc->sc_mmap_cur < 0 || sc->sc_mmap_count == 0 ||
@@ -2162,8 +2220,11 @@ uvideo_mmap_queue(struct uvideo_softc *sc, uint8_t *buf, int len)
 		/* not ready for queueing, try next */
 		sc->sc_mmap_cur++;
 	}
-	if (sc->sc_mmap_cur == sc->sc_mmap_count)
-		panic("uvideo_mmap_queue: mmap queue is full!");
+	if (sc->sc_mmap_cur == sc->sc_mmap_count) {
+		DPRINTF(1, "%s: %s: mmap queue is full!",
+		    DEVNAME(sc), __func__);
+		return ENOMEM;
+	}
 
 	/* copy frame to mmap buffer and report length */
 	bcopy(buf, sc->sc_mmap[sc->sc_mmap_cur].buf, len);
@@ -2191,6 +2252,8 @@ uvideo_mmap_queue(struct uvideo_softc *sc, uint8_t *buf, int len)
 	 * ready to dequeue.
 	 */
 	sc->sc_uplayer_intr(sc->sc_uplayer_arg);
+
+	return 0;
 }
 
 void
@@ -3096,7 +3159,8 @@ uvideo_reqbufs(void *v, struct v4l2_requestbuffers *rb)
 		return (EINVAL);
 
 	if (sc->sc_mmap_count > 0 || sc->sc_mmap_buffer != NULL) {
-		printf("%s: mmap buffers already allocated\n", __func__);
+		DPRINTF(1, "%s: %s: mmap buffers already allocated\n",
+		    DEVNAME(sc), __func__);
 		return (EINVAL);
 	}
 

@@ -1,4 +1,4 @@
-/* $OpenBSD: dsdt.c,v 1.214 2014/09/14 14:17:24 jsg Exp $ */
+/* $OpenBSD: dsdt.c,v 1.217 2015/05/04 10:42:06 jmatthew Exp $ */
 /*
  * Copyright (c) 2005 Jordan Hargrave <jordan@openbsd.org>
  *
@@ -25,7 +25,6 @@
 
 #ifdef DDB
 #include <machine/db_machdep.h>
-#include <ddb/db_command.h>
 #endif
 
 #include <dev/acpi/acpireg.h>
@@ -517,7 +516,6 @@ aml_setbit(u_int8_t *pb, int bit, int val)
 /*
  * @@@: Notify functions
  */
-#ifndef SMALL_KERNEL
 void
 acpi_poll(void *arg)
 {
@@ -531,7 +529,6 @@ acpi_poll(void *arg)
 
 	timeout_add_sec(&acpi_softc->sc_dev_timeout, 10);
 }
-#endif
 
 void
 aml_notify_task(void *node, int notify_value)
@@ -579,7 +576,6 @@ aml_notify(struct aml_node *node, int notify_value)
 	acpi_addtask(acpi_softc, aml_notify_task, node, notify_value);
 }
 
-#ifndef SMALL_KERNEL
 void
 aml_notify_dev(const char *pnpid, int notify_value)
 {
@@ -602,7 +598,6 @@ acpi_poll_notify_task(void *arg0, int arg1)
 		if (pdata->cbproc && pdata->poll)
 			pdata->cbproc(pdata->node, 0, pdata->cbarg);
 }
-#endif
 
 /*
  * @@@: Namespace functions
@@ -2291,6 +2286,9 @@ aml_rwgas(struct aml_value *rgn, int bpos, int blen, struct aml_value *val,
 		} else {
 			/* Write to a large field.. create or convert buffer */
 			val = aml_convert(val, AML_OBJTYPE_BUFFER, -1);
+
+			if (blen > (val->length << 3))
+				blen = val->length << 3;
 		}
 		vbit = val->v_buffer;
 	} else {

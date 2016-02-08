@@ -1,4 +1,4 @@
-/*	$OpenBSD: ip_icmp.c,v 1.132 2015/02/05 03:01:03 mpi Exp $	*/
+/*	$OpenBSD: ip_icmp.c,v 1.136 2015/06/16 11:09:40 mpi Exp $	*/
 /*	$NetBSD: ip_icmp.c,v 1.19 1996/02/13 23:42:22 christos Exp $	*/
 
 /*
@@ -257,7 +257,7 @@ icmp_do_error(struct mbuf *n, int type, int code, u_int32_t dest, int destmtu)
 	m->m_data -= sizeof(struct ip);
 	m->m_len += sizeof(struct ip);
 	m->m_pkthdr.len = m->m_len;
-	m->m_pkthdr.rcvif = n->m_pkthdr.rcvif;
+	m->m_pkthdr.ph_ifidx = n->m_pkthdr.ph_ifidx;
 	nip = mtod(m, struct ip *);
 	/* ip_v set in ip_output */
 	nip->ip_hl = sizeof(struct ip) >> 2;
@@ -319,7 +319,9 @@ icmp_input(struct mbuf *m, ...)
 	hlen = va_arg(ap, int);
 	va_end(ap);
 
-	ifp = m->m_pkthdr.rcvif;
+	ifp = if_get(m->m_pkthdr.ph_ifidx);
+	if (ifp == NULL)
+		goto freeit;
 
 	/*
 	 * Locate icmp structure in mbuf, and check
@@ -551,7 +553,7 @@ icmp_input(struct mbuf *m, ...)
 		if (ifp == NULL)
 			break;
 		ia = ifatoia(ifaof_ifpforaddr(sintosa(&sin), ifp));
-		if (ia == 0)
+		if (ia == NULL)
 			break;
 		icp->icmp_type = ICMP_MASKREPLY;
 		icp->icmp_mask = ia->ia_sockmask.sin_addr.s_addr;
@@ -687,7 +689,7 @@ int
 icmp_reflect(struct mbuf *m, struct mbuf **op, struct in_ifaddr *ia)
 {
 	struct ip *ip = mtod(m, struct ip *);
-	struct mbuf *opts = 0;
+	struct mbuf *opts = NULL;
 	struct sockaddr_in sin;
 	struct rtentry *rt;
 	int optlen = (ip->ip_hl << 2) - sizeof(struct ip);
@@ -928,8 +930,10 @@ icmp_mtudisc_clone(struct in_addr dst, u_int rtableid)
 
 	/* Check if the route is actually usable */
 	if (rt->rt_flags & (RTF_REJECT | RTF_BLACKHOLE) ||
-	    (rt->rt_flags & RTF_UP) == 0)
+	    (rt->rt_flags & RTF_UP) == 0) {
+		rtfree(rt);
 		return (NULL);
+	}
 
 	/* If we didn't get a host route, allocate one */
 
@@ -974,7 +978,7 @@ icmp_mtudisc(struct icmp *icp, u_int rtableid)
 	u_long mtu = ntohs(icp->icmp_nextmtu);  /* Why a long?  IPv6 */
 
 	rt = icmp_mtudisc_clone(icp->icmp_ip.ip_dst, rtableid);
-	if (rt == 0)
+	if (rt == NULL)
 		return;
 
 	if (mtu == 0) {
@@ -1103,7 +1107,7 @@ icmp_do_exthdr(struct mbuf *m, u_int16_t class, u_int8_t ctype, void *buf,
 	    icp->icmp_type != ICMP_PARAMPROB)
 		/* exthdr not supported */
 		return (0);
-	
+
 	if (icp->icmp_length != 0)
 		/* exthdr already present, giving up */
 		return (0);

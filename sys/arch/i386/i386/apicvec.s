@@ -1,4 +1,4 @@
-/* $OpenBSD: apicvec.s,v 1.29 2015/02/07 00:26:37 deraadt Exp $ */
+/* $OpenBSD: apicvec.s,v 1.31 2015/07/16 05:10:14 guenther Exp $ */
 /* $NetBSD: apicvec.s,v 1.1.2.2 2000/02/21 21:54:01 sommerfeld Exp $ */
 
 /*-
@@ -42,8 +42,7 @@
 #ifdef MULTIPROCESSOR
 	.globl	XINTR(ipi)
 XINTR(ipi):
-	pushl	$0
-	pushl	$T_ASTFLT
+	subl	$8,%esp			/* space for tf_{err,trapno} */
 	INTRENTRY
 	MAKE_FRAME
 	pushl	CPL
@@ -156,8 +155,7 @@ XINTR(ipi_reloadcr3):
 	 */
 	.globl	XINTR(ltimer)
 XINTR(ltimer):
-	pushl	$0
-	pushl	$T_ASTFLT
+	subl	$8,%esp			/* space for tf_{err,trapno} */
 	INTRENTRY
 	MAKE_FRAME
 	pushl	CPL
@@ -175,8 +173,7 @@ XINTR(ltimer):
 
 	.globl	XINTR(softclock), XINTR(softnet), XINTR(softtty)
 XINTR(softclock):
-	pushl	$0
-	pushl	$T_ASTFLT
+	subl	$8,%esp			/* space for tf_{err,trapno} */
 	INTRENTRY
 	MAKE_FRAME
 	pushl	CPL
@@ -185,21 +182,14 @@ XINTR(softclock):
 	ioapic_asm_ack()
 	sti
 	incl	CPUVAR(IDEPTH)
-#ifdef MULTIPROCESSOR
-	call	_C_LABEL(i386_softintlock)
-#endif
 	pushl	$I386_SOFTINTR_SOFTCLOCK
 	call	_C_LABEL(softintr_dispatch)
 	addl	$4,%esp
-#ifdef MULTIPROCESSOR
-	call	_C_LABEL(i386_softintunlock)
-#endif
 	decl	CPUVAR(IDEPTH)
 	jmp	_C_LABEL(Xdoreti)
 
 XINTR(softnet):
-	pushl	$0
-	pushl	$T_ASTFLT
+	subl	$8,%esp			/* space for tf_{err,trapno} */
 	INTRENTRY
 	MAKE_FRAME
 	pushl	CPL
@@ -208,22 +198,15 @@ XINTR(softnet):
 	ioapic_asm_ack()
 	sti
 	incl	CPUVAR(IDEPTH)
-#ifdef MULTIPROCESSOR
-	call	_C_LABEL(i386_softintlock)
-#endif
 	pushl	$I386_SOFTINTR_SOFTNET
 	call	_C_LABEL(softintr_dispatch)
 	addl	$4,%esp
-#ifdef MULTIPROCESSOR
-	call	_C_LABEL(i386_softintunlock)
-#endif
 	decl	CPUVAR(IDEPTH)
 	jmp	_C_LABEL(Xdoreti)
 #undef DONETISR
 
 XINTR(softtty):
-	pushl	$0
-	pushl	$T_ASTFLT
+	subl	$8,%esp			/* space for tf_{err,trapno} */
 	INTRENTRY
 	MAKE_FRAME
 	pushl	CPL
@@ -232,15 +215,9 @@ XINTR(softtty):
 	ioapic_asm_ack()
 	sti
 	incl	CPUVAR(IDEPTH)
-#ifdef MULTIPROCESSOR
-	call	_C_LABEL(i386_softintlock)
-#endif
 	pushl	$I386_SOFTINTR_SOFTTTY
 	call	_C_LABEL(softintr_dispatch)
 	addl	$4,%esp
-#ifdef MULTIPROCESSOR
-	call	_C_LABEL(i386_softintunlock)
-#endif
 	decl	CPUVAR(IDEPTH)
 	jmp	_C_LABEL(Xdoreti)
 
@@ -258,8 +235,7 @@ XINTR(softtty):
 
 #define APICINTR(name, num, early_ack, late_ack, mask, unmask, level_mask) \
 _C_LABEL(Xintr_##name##num):						\
-	pushl	$0							;\
-	pushl	$T_ASTFLT						;\
+	subl	$8,%esp			/* space for tf_{err,trapno} */	;\
 	INTRENTRY							;\
 	MAKE_FRAME							;\
 	pushl	CPL							;\

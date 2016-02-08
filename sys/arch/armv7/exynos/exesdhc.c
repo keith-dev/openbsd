@@ -1,4 +1,4 @@
-/*	$OpenBSD: exesdhc.c,v 1.1 2015/01/26 02:48:24 bmercer Exp $	*/
+/*	$OpenBSD: exesdhc.c,v 1.3 2015/05/30 02:17:36 jsg Exp $	*/
 /*
  * Copyright (c) 2009 Dale Rahn <drahn@openbsd.org>
  * Copyright (c) 2006 Uwe Stuehler <uwe@openbsd.org>
@@ -19,6 +19,7 @@
 
 /* i.MX SD/MMC support derived from /sys/dev/sdmmc/sdhc.c */
 
+#include "fdt.h"
 
 #include <sys/param.h>
 #include <sys/device.h>
@@ -27,7 +28,9 @@
 #include <sys/malloc.h>
 #include <sys/systm.h>
 #include <machine/bus.h>
+#if NFDT > 0
 #include <machine/fdt.h>
+#endif
 
 #include <dev/sdmmc/sdmmcchip.h>
 #include <dev/sdmmc/sdmmcvar.h>
@@ -248,10 +251,12 @@ struct cfattach exesdhc_fdt_ca = {
 int
 exesdhc_match(struct device *parent, void *v, void *aux)
 {
+#if NFDT > 0
 	struct armv7_attach_args *aa = aux;
 
 	if (fdt_node_compatible("samsung,exynos5250-dw-mshc", aa->aa_node))
 		return 1;
+#endif
 
 	return 0;
 }
@@ -261,19 +266,21 @@ exesdhc_attach(struct device *parent, struct device *self, void *args)
 {
 	struct exesdhc_softc		*sc = (struct exesdhc_softc *) self;
 	struct armv7_attach_args	*aa = args;
-	struct fdt_memory		 mem;
 	struct sdmmcbus_attach_args	 saa;
+	struct armv7mem			 mem;
 	int				 error = 1, irq;
 	uint32_t			 caps;
 
 	sc->sc_iot = aa->aa_iot;
+#if NFDT > 0
 	if (aa->aa_node) {
+		struct fdt_memory fdtmem;
 		static int unit = 0;
 		uint32_t ints[3];
 
 		sc->unit = unit++;
 
-		if (fdt_get_memory_address(aa->aa_node, 0, &mem))
+		if (fdt_get_memory_address(aa->aa_node, 0, &fdtmem))
 			panic("%s: could not extract memory data from FDT",
 			    __func__);
 
@@ -283,8 +290,13 @@ exesdhc_attach(struct device *parent, struct device *self, void *args)
 			panic("%s: could not extract interrupt data from FDT",
 			    __func__);
 
+		mem.addr = fdtmem.addr;
+		mem.size = fdtmem.size;
+
 		irq = ints[1];
-	} else {
+	} else
+#endif
+	{
 		irq = aa->aa_dev->irq[0];
 		mem.addr = aa->aa_dev->mem[0].addr;
 		mem.size = aa->aa_dev->mem[0].size;
@@ -590,7 +602,7 @@ exesdhc_wait_state(struct exesdhc_softc *sc, uint32_t mask, uint32_t value)
 			return 0;
 		delay(10);
 	}
-	DPRINTF(0,("%s: timeout waiting for %x\n", HDEVNAME(sc),
+	DPRINTF(0,("%s: timeout waiting for %x, state %x\n", HDEVNAME(sc),
 	    value, state));
 	return ETIMEDOUT;
 }
@@ -665,7 +677,7 @@ exesdhc_start_command(struct exesdhc_softc *sc, struct sdmmc_command *cmd)
 	int error;
 	int s;
 
-	DPRINTF(1,("%s: start cmd %u arg=%#x data=%#x dlen=%d flags=%#x "
+	DPRINTF(1,("%s: start cmd %u arg=%#x data=%p dlen=%d flags=%#x "
 	    "proc=\"%s\"\n", HDEVNAME(sc), cmd->c_opcode, cmd->c_arg,
 	    cmd->c_data, cmd->c_datalen, cmd->c_flags, curproc ?
 	    curproc->p_comm : ""));
@@ -956,7 +968,7 @@ exesdhc_intr(void *arg)
 	/* Acknowledge the interrupts we are about to handle. */
 	HWRITE4(sc, SDHC_INT_STATUS, status);
 	DPRINTF(2,("%s: interrupt status=0x%08x\n", HDEVNAME(sc),
-	    status, status));
+	    status));
 
 	/*
 	 * Service error interrupts.

@@ -1,4 +1,4 @@
-/*	$OpenBSD: fpu.c,v 1.29 2014/05/06 11:50:13 mpi Exp $	*/
+/*	$OpenBSD: fpu.c,v 1.32 2015/03/25 21:05:18 kettenis Exp $	*/
 /*	$NetBSD: fpu.c,v 1.1 2003/04/26 18:39:28 fvdl Exp $	*/
 
 /*-
@@ -54,7 +54,6 @@
 #include <machine/fpu.h>
 #include <machine/lock.h>
 
-#include <dev/isa/isareg.h>
 #include <dev/isa/isavar.h>
 
 /*
@@ -85,8 +84,40 @@
 #define	clts()			__asm("clts")
 #define	stts()			lcr0(rcr0() | CR0_TS)
 
+/*
+ * The mask of enabled XSAVE features.
+ */
+uint64_t	xsave_mask;
+
+static inline void
+xsave(struct savefpu *addr, uint64_t mask)
+{
+	uint32_t lo, hi;
+
+	lo = mask;
+	hi = mask >> 32;
+	__asm volatile("xsave %0" : "=m" (*addr) : "a" (lo), "d" (hi) :
+	    "memory");
+}
+
+static inline void
+xrstor(struct savefpu *addr, uint64_t mask)
+{
+	uint32_t lo, hi;
+
+	lo = mask;
+	hi = mask >> 32;
+	__asm volatile("xrstor %0" : : "m" (*addr), "a" (lo), "d" (hi));
+}
+
 void fpudna(struct cpu_info *);
 static int x86fpflags_to_siginfo(u_int32_t);
+
+/*
+ * Size of the area needed to save the FPU state and other
+ * XSAVE-supported state components.
+ */
+size_t		fpu_save_len = sizeof(struct fxsave64);
 
 /*
  * The mxcsr_mask for this host, taken from fxsave() on the primary CPU
@@ -254,15 +285,19 @@ fpudna(struct cpu_info *ci)
 		fxrstor(&sfp->fp_fxsave);
 		p->p_md.md_flags |= MDP_USEDFPU;
 	} else {
-		static double	zero = 0.0;
+		if (xsave_mask) {
+			xrstor(sfp, xsave_mask);
+		} else {
+			static double	zero = 0.0;
 
-		/*
-		 * amd fpu does not restore fip, fdp, fop on fxrstor
-		 * thus leaking other process's execution history.
-		 */
-		fnclex();
-		__asm volatile("ffree %%st(7)\n\tfldl %0" : : "m" (zero));
-		fxrstor(sfp);
+			/*
+			 * amd fpu does not restore fip, fdp, fop on fxrstor
+			 * thus leaking other process's execution history.
+			 */
+			fnclex();
+			__asm volatile("ffree %%st(7)\n\tfldl %0" : : "m" (zero));
+			fxrstor(sfp);
+		}
 	}
 }
 
@@ -291,7 +326,10 @@ fpusave_cpu(struct cpu_info *ci, int save)
 		  */
 		clts();
 		ci->ci_fpsaving = 1;
-		fxsave(&p->p_addr->u_pcb.pcb_savefpu);
+		if (xsave_mask)
+			xsave(&p->p_addr->u_pcb.pcb_savefpu, xsave_mask);
+		else
+			fxsave(&p->p_addr->u_pcb.pcb_savefpu);
 		ci->ci_fpsaving = 0;
 	}
 

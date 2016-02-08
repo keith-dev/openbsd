@@ -1,4 +1,4 @@
-#	$OpenBSD: install.md,v 1.42 2014/11/22 15:02:27 deraadt Exp $
+#	$OpenBSD: install.md,v 1.45 2015/06/02 19:54:07 rpe Exp $
 #	$NetBSD: install.md,v 1.3.2.5 1996/08/26 15:45:28 gwr Exp $
 #
 #
@@ -49,24 +49,11 @@ md_installboot() {
 }
 
 md_prep_disklabel() {
-	local _disk=$1 _f _op
+	local _disk=$1 _f=/tmp/fstab.$1
 
-	_f=/tmp/fstab.$_disk
-	if [[ $_disk == $ROOTDISK ]]; then
-		while :; do
-			echo "The auto-allocated layout for $_disk is:"
-			disklabel -h -A $_disk | egrep "^#  |^  [a-p]:"
-			ask "Use (A)uto layout, (E)dit auto layout, or create (C)ustom layout?" a
-			case $resp in
-			a*|A*)	_op=-w ;;
-			e*|E*)	_op=-E ;;
-			c*|C*)	break ;;
-			*)	continue ;;
-			esac
-			disklabel $FSTABFLAG $_f $_op -A $_disk
-			return
-		done
-	fi
+	disklabel_autolayout $_disk $_f || return
+	[[ -s $_f ]] && return
+
 	cat <<__EOT
 
 You will now create a Sun-style disklabel on the disk.  The disklabel defines
@@ -76,7 +63,7 @@ in this program.
 
 __EOT
 
-	disklabel $FSTABFLAG $_f -E $_disk
+	disklabel -F $_f -E $_disk
 }
 
 md_congrats() {

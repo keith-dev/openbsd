@@ -1,4 +1,4 @@
-/* $OpenBSD: s_server.c,v 1.9 2014/12/14 14:42:06 jsing Exp $ */
+/* $OpenBSD: s_server.c,v 1.14 2015/07/20 18:31:01 doug Exp $ */
 /* Copyright (C) 1995-1998 Eric Young (eay@cryptsoft.com)
  * All rights reserved.
  *
@@ -202,8 +202,6 @@ static int accept_socket = -1;
 #define TEST_CERT	"server.pem"
 #define TEST_CERT2	"server2.pem"
 
-extern int verify_depth, verify_return_error;
-
 static char *cipher = NULL;
 static int s_server_verify = SSL_VERIFY_NONE;
 static int s_server_session_id_context = 1;	/* anything will do */
@@ -228,7 +226,6 @@ static int s_quiet = 0;
 static char *keymatexportlabel = NULL;
 static int keymatexportlen = 20;
 
-static int hack = 0;
 #ifndef OPENSSL_NO_ENGINE
 static char *engine_id = NULL;
 #endif
@@ -265,7 +262,6 @@ s_server_init(void)
 	s_debug = 0;
 	s_msg = 0;
 	s_quiet = 0;
-	hack = 0;
 #ifndef OPENSSL_NO_ENGINE
 	engine_id = NULL;
 #endif
@@ -314,7 +310,6 @@ sv_usage(void)
 	BIO_printf(bio_err, " -cipher arg   - play with 'openssl ciphers' to see what goes here\n");
 	BIO_printf(bio_err, " -serverpref   - Use server's cipher preferences\n");
 	BIO_printf(bio_err, " -quiet        - Inhibit printing of session and certificate information\n");
-	BIO_printf(bio_err, " -ssl3         - Just talk SSLv3\n");
 	BIO_printf(bio_err, " -tls1_2       - Just talk TLSv1.2\n");
 	BIO_printf(bio_err, " -tls1_1       - Just talk TLSv1.1\n");
 	BIO_printf(bio_err, " -tls1         - Just talk TLSv1\n");
@@ -778,8 +773,6 @@ s_server_main(int argc, char *argv[])
 		}
 		else if (strcmp(*argv, "-msg") == 0) {
 			s_msg = 1;
-		} else if (strcmp(*argv, "-hack") == 0) {
-			hack = 1;
 		} else if (strcmp(*argv, "-state") == 0) {
 			state = 1;
 		} else if (strcmp(*argv, "-crlf") == 0) {
@@ -812,12 +805,8 @@ s_server_main(int argc, char *argv[])
 			off |= SSL_OP_NO_TLSv1_2;
 		} else if (strcmp(*argv, "-no_comp") == 0) {
 			off |= SSL_OP_NO_COMPRESSION;
-		}
-		else if (strcmp(*argv, "-no_ticket") == 0) {
+		} else if (strcmp(*argv, "-no_ticket") == 0) {
 			off |= SSL_OP_NO_TICKET;
-		}
-		else if (strcmp(*argv, "-ssl3") == 0) {
-			meth = SSLv3_server_method();
 		} else if (strcmp(*argv, "-tls1") == 0) {
 			meth = TLSv1_server_method();
 		} else if (strcmp(*argv, "-tls1_1") == 0) {
@@ -1031,8 +1020,6 @@ bad:
 	SSL_CTX_set_quiet_shutdown(ctx, 1);
 	if (bugs)
 		SSL_CTX_set_options(ctx, SSL_OP_ALL);
-	if (hack)
-		SSL_CTX_set_options(ctx, SSL_OP_NETSCAPE_DEMO_CIPHER_CHANGE_BUG);
 	SSL_CTX_set_options(ctx, off);
 	/*
 	 * DTLS: partial reads end up discarding unread UDP bytes :-( Setting
@@ -1090,8 +1077,6 @@ bad:
 		SSL_CTX_set_quiet_shutdown(ctx2, 1);
 		if (bugs)
 			SSL_CTX_set_options(ctx2, SSL_OP_ALL);
-		if (hack)
-			SSL_CTX_set_options(ctx2, SSL_OP_NETSCAPE_DEMO_CIPHER_CHANGE_BUG);
 		SSL_CTX_set_options(ctx2, off);
 		/*
 		 * DTLS: partial reads end up discarding unread UDP bytes :-(
@@ -1147,7 +1132,10 @@ bad:
 
 		if (ctx2) {
 			if (!dhfile) {
-				DH *dh2 = load_dh_param(s_cert_file2);
+				DH *dh2 = NULL;
+
+				if (s_cert_file2 != NULL)
+					dh2 = load_dh_param(s_cert_file2);
 				if (dh2 != NULL) {
 					BIO_printf(bio_s_out, "Setting temp DH parameters\n");
 					(void) BIO_flush(bio_s_out);
@@ -1702,10 +1690,6 @@ init_ssl_connection(SSL * con)
 #endif
 	if (SSL_cache_hit(con))
 		BIO_printf(bio_s_out, "Reused session-id\n");
-	if (SSL_ctrl(con, SSL_CTRL_GET_FLAGS, 0, NULL) &
-	    TLS1_FLAGS_TLS_PADDING_BUG)
-		BIO_printf(bio_s_out,
-		    "Peer has incorrect TLSv1 block padding\n");
 	BIO_printf(bio_s_out, "Secure Renegotiation IS%s supported\n",
 	    SSL_get_secure_renegotiation_support(con) ? "" : " NOT");
 	if (keymatexportlabel != NULL) {
@@ -1813,26 +1797,6 @@ www_body(char *hostname, int s, unsigned char *context)
 		SSL_set_msg_callback_arg(con, bio_s_out);
 	}
 	for (;;) {
-		if (hack) {
-			i = SSL_accept(con);
-			switch (SSL_get_error(con, i)) {
-			case SSL_ERROR_NONE:
-				break;
-			case SSL_ERROR_WANT_WRITE:
-			case SSL_ERROR_WANT_READ:
-			case SSL_ERROR_WANT_X509_LOOKUP:
-				continue;
-			case SSL_ERROR_SYSCALL:
-			case SSL_ERROR_SSL:
-			case SSL_ERROR_ZERO_RETURN:
-				ret = 1;
-				goto err;
-				/* break; */
-			}
-
-			SSL_renegotiate(con);
-			SSL_write(con, NULL, 0);
-		}
 		i = BIO_gets(io, buf, bufsize - 1);
 		if (i < 0) {	/* error */
 			if (!BIO_should_retry(io)) {

@@ -1,4 +1,4 @@
-/*	$OpenBSD: drm_crtc.c,v 1.12 2015/02/12 02:12:02 kettenis Exp $	*/
+/*	$OpenBSD: drm_crtc.c,v 1.17 2015/05/05 02:01:10 jsg Exp $	*/
 /*
  * Copyright (c) 2006-2008 Intel Corporation
  * Copyright (c) 2007 Dave Airlie <airlied@linux.ie>
@@ -288,7 +288,7 @@ struct drm_mode_object *drm_mode_object_find(struct drm_device *dev,
 	
 	obj = han->obj;
 	if (obj->type != type) {
-		return NULL;
+		obj = NULL;
 	}
 	rw_exit_write(&dev->mode_config.idr_rwl);
 
@@ -626,13 +626,11 @@ EXPORT_SYMBOL(drm_connector_cleanup);
 
 void drm_connector_unplug_all(struct drm_device *dev)
 {
-#ifdef notyet
 	struct drm_connector *connector;
 
 	/* taking the mode config mutex ends up in a clash with sysfs */
 	list_for_each_entry(connector, &dev->mode_config.connector_list, head)
 		drm_sysfs_connector_remove(connector);
-#endif
 }
 EXPORT_SYMBOL(drm_connector_unplug_all);
 
@@ -693,7 +691,6 @@ int drm_plane_init(struct drm_device *dev, struct drm_plane *plane,
 	plane->funcs = funcs;
 	plane->format_types = kmalloc(sizeof(uint32_t) * format_count,
 				      GFP_KERNEL);
-
 	if (!plane->format_types) {
 		DRM_DEBUG_KMS("out of memory when allocating plane\n");
 		drm_mode_object_put(dev, &plane->base);
@@ -1142,14 +1139,12 @@ EXPORT_SYMBOL(drm_mode_config_cleanup);
 static void drm_crtc_convert_to_umode(struct drm_mode_modeinfo *out,
 				      const struct drm_display_mode *in)
 {
-#ifdef notyet
 	WARN(in->hdisplay > USHRT_MAX || in->hsync_start > USHRT_MAX ||
 	     in->hsync_end > USHRT_MAX || in->htotal > USHRT_MAX ||
 	     in->hskew > USHRT_MAX || in->vdisplay > USHRT_MAX ||
 	     in->vsync_start > USHRT_MAX || in->vsync_end > USHRT_MAX ||
 	     in->vtotal > USHRT_MAX || in->vscan > USHRT_MAX,
 	     "timing values too large for mode info\n");
-#endif
 
 	out->clock = in->clock;
 	out->hdisplay = in->hdisplay;
@@ -1298,8 +1293,7 @@ int drm_mode_getresources(struct drm_device *dev, void *data,
 		copied = 0;
 		fb_id = (uint32_t __user *)(unsigned long)card_res->fb_id_ptr;
 		list_for_each_entry(fb, &file_priv->fbs, filp_head) {
-			if (copyout(&fb->base.id, fb_id + copied,
-			    sizeof(fb->base.id)) != 0) {
+			if (put_user(fb->base.id, fb_id + copied)) {
 				ret = -EFAULT;
 				goto out;
 			}
@@ -1312,28 +1306,30 @@ int drm_mode_getresources(struct drm_device *dev, void *data,
 	if (card_res->count_crtcs >= crtc_count) {
 		copied = 0;
 		crtc_id = (uint32_t __user *)(unsigned long)card_res->crtc_id_ptr;
-		/* if (file_priv->master->minor->type == DRM_MINOR_CONTROL) { */
+#if 0
+		if (file_priv->master->minor->type == DRM_MINOR_CONTROL) {
+#endif
 			list_for_each_entry(crtc, &dev->mode_config.crtc_list,
 					    head) {
 				DRM_DEBUG_KMS("[CRTC:%d]\n", crtc->base.id);
-				if (copyout(&crtc->base.id, crtc_id + copied,
-				    sizeof(crtc->base.id)) != 0) {
+				if (put_user(crtc->base.id, crtc_id + copied)) {
 					ret = -EFAULT;
 					goto out;
 				}
 				copied++;
 			}
-		/* } else {
+#if 0
+		} else {
 			for (i = 0; i < mode_group->num_crtcs; i++) {
-				if (copyout(&mode_group->id_list[i],
-				    crtc_id + copied,
-				    sizeof(mode_group->id_list[i])) != 0) {
+				if (put_user(mode_group->id_list[i],
+					     crtc_id + copied)) {
 					ret = -EFAULT;
 					goto out;
 				}
 				copied++;
 			}
-		} */
+		}
+#endif
 	}
 	card_res->count_crtcs = crtc_count;
 
@@ -1349,8 +1345,8 @@ int drm_mode_getresources(struct drm_device *dev, void *data,
 					    head) {
 				DRM_DEBUG_KMS("[ENCODER:%d:%s]\n", encoder->base.id,
 						drm_get_encoder_name(encoder));
-				if (copyout(&encoder->base.id, encoder_id +
-				    copied, sizeof(encoder->base.id)) != 0) {
+				if (put_user(encoder->base.id, encoder_id +
+					     copied)) {
 					ret = -EFAULT;
 					goto out;
 				}
@@ -1359,9 +1355,8 @@ int drm_mode_getresources(struct drm_device *dev, void *data,
 #if 0
 		} else {
 			for (i = mode_group->num_crtcs; i < mode_group->num_crtcs + mode_group->num_encoders; i++) {
-				if (copyout(&mode_group->id_list[i],
-				    encoder_id + copied,
-				    sizeof(mode_group->id_list[i])) != 0) {
+				if (put_user(mode_group->id_list[i],
+					     encoder_id + copied)) {
 					ret = -EFAULT;
 					goto out;
 				}
@@ -1386,9 +1381,8 @@ int drm_mode_getresources(struct drm_device *dev, void *data,
 				DRM_DEBUG_KMS("[CONNECTOR:%d:%s]\n",
 					connector->base.id,
 					drm_get_connector_name(connector));
-				if (copyout(&connector->base.id,
-				    connector_id + copied,
-				    sizeof(connector->base.id)) != 0) {
+				if (put_user(connector->base.id,
+					     connector_id + copied)) {
 					ret = -EFAULT;
 					goto out;
 				}
@@ -1399,9 +1393,8 @@ int drm_mode_getresources(struct drm_device *dev, void *data,
 			int start = mode_group->num_crtcs +
 				mode_group->num_encoders;
 			for (i = start; i < start + mode_group->num_connectors; i++) {
-				if (copyout(&mode_group->id_list[i],
-				    connector_id + copied,
-				    sizeof(mode_grou->id_list[i])) != 0) {
+				if (put_user(mode_group->id_list[i],
+					     connector_id + copied)) {
 					ret = -EFAULT;
 					goto out;
 				}
@@ -1572,8 +1565,8 @@ int drm_mode_getconnector(struct drm_device *dev, void *data,
 		mode_ptr = (struct drm_mode_modeinfo __user *)(unsigned long)out_resp->modes_ptr;
 		list_for_each_entry(mode, &connector->modes, head) {
 			drm_crtc_convert_to_umode(&u_mode, mode);
-			if (copyout(&u_mode, mode_ptr + copied,
-			    sizeof(u_mode)) != 0) {
+			if (copy_to_user(mode_ptr + copied,
+					 &u_mode, sizeof(u_mode))) {
 				ret = -EFAULT;
 				goto out;
 			}
@@ -1587,16 +1580,14 @@ int drm_mode_getconnector(struct drm_device *dev, void *data,
 		prop_ptr = (uint32_t __user *)(unsigned long)(out_resp->props_ptr);
 		prop_values = (uint64_t __user *)(unsigned long)(out_resp->prop_values_ptr);
 		for (i = 0; i < connector->properties.count; i++) {
-			if (copyout(&connector->properties.ids[i],
-			    prop_ptr + copied,
-			    sizeof(connector->properties.ids[i])) != 0) {
+			if (put_user(connector->properties.ids[i],
+				     prop_ptr + copied)) {
 				ret = -EFAULT;
 				goto out;
 			}
 
-			if (copyout(&connector->properties.values[i],
-			    prop_values + copied,
-			    sizeof(connector->properties.values[i])) != 0) {
+			if (put_user(connector->properties.values[i],
+				     prop_values + copied)) {
 				ret = -EFAULT;
 				goto out;
 			}
@@ -1610,9 +1601,8 @@ int drm_mode_getconnector(struct drm_device *dev, void *data,
 		encoder_ptr = (uint32_t __user *)(unsigned long)(out_resp->encoders_ptr);
 		for (i = 0; i < DRM_CONNECTOR_MAX_ENCODER; i++) {
 			if (connector->encoder_ids[i] != 0) {
-				if (copyout(&connector->encoder_ids[i],
-				    encoder_ptr + copied,
-				    sizeof(connector->encoder_ids[i])) != 0) {
+				if (put_user(connector->encoder_ids[i],
+					     encoder_ptr + copied)) {
 					ret = -EFAULT;
 					goto out;
 				}
@@ -1696,8 +1686,7 @@ int drm_mode_getplane_res(struct drm_device *dev, void *data,
 		plane_ptr = (uint32_t __user *)(unsigned long)plane_resp->plane_id_ptr;
 
 		list_for_each_entry(plane, &config->plane_list, head) {
-			if (copyout(&plane->base.id, plane_ptr + copied,
-			    sizeof(plane->base.id))) {
+			if (put_user(plane->base.id, plane_ptr + copied)) {
 				ret = -EFAULT;
 				goto out;
 			}
@@ -1765,9 +1754,9 @@ int drm_mode_getplane(struct drm_device *dev, void *data,
 	if (plane->format_count &&
 	    (plane_resp->count_format_types >= plane->format_count)) {
 		format_ptr = (uint32_t __user *)(unsigned long)plane_resp->format_type_ptr;
-		if (copyout(format_ptr,
-		    plane->format_types,
-		    sizeof(uint32_t) * plane->format_count)) {
+		if (copy_to_user(format_ptr,
+				 plane->format_types,
+				 sizeof(uint32_t) * plane->format_count)) {
 			ret = -EFAULT;
 			goto out;
 		}
@@ -2051,8 +2040,7 @@ int drm_mode_setcrtc(struct drm_device *dev, void *data,
 
 		for (i = 0; i < crtc_req->count_connectors; i++) {
 			set_connectors_ptr = (uint32_t __user *)(unsigned long)crtc_req->set_connectors_ptr;
-			if (copyin(&set_connectors_ptr[i], &out_id,
-			    sizeof(out_id)) != 0) {
+			if (get_user(out_id, &set_connectors_ptr[i])) {
 				ret = -EFAULT;
 				goto out;
 			}
@@ -2575,9 +2563,8 @@ int drm_mode_dirtyfb_ioctl(struct drm_device *dev,
 			goto out_err1;
 		}
 
-		ret = copyin(clips_ptr, clips,
-		    num_clips * sizeof(*clips));
-
+		ret = copy_from_user(clips, clips_ptr,
+				     num_clips * sizeof(*clips));
 		if (ret) {
 			ret = -EFAULT;
 			goto out_err2;
@@ -3080,7 +3067,7 @@ int drm_mode_getproperty_ioctl(struct drm_device *dev,
 	if ((out_resp->count_values >= value_count) && value_count) {
 		values_ptr = (uint64_t __user *)(unsigned long)out_resp->values_ptr;
 		for (i = 0; i < value_count; i++) {
-			if (copyout(&property->values[i], values_ptr + i, sizeof(uint64_t)) != 0) {
+			if (copy_to_user(values_ptr + i, &property->values[i], sizeof(uint64_t))) {
 				ret = -EFAULT;
 				goto done;
 			}
@@ -3094,16 +3081,13 @@ int drm_mode_getproperty_ioctl(struct drm_device *dev,
 			enum_ptr = (struct drm_mode_property_enum __user *)(unsigned long)out_resp->enum_blob_ptr;
 			list_for_each_entry(prop_enum, &property->enum_blob_list, head) {
 
-				if (copyout(&prop_enum->value,
-				    &enum_ptr[copied].value,
-				    sizeof(uint64_t)) != 0) {
+				if (copy_to_user(&enum_ptr[copied].value, &prop_enum->value, sizeof(uint64_t))) {
 					ret = -EFAULT;
 					goto done;
 				}
 
-				if (copyout(&prop_enum->name,
-				    &enum_ptr[copied].name,
-				    DRM_PROP_NAME_LEN) != 0) {
+				if (copy_to_user(&enum_ptr[copied].name,
+						 &prop_enum->name, DRM_PROP_NAME_LEN)) {
 					ret = -EFAULT;
 					goto done;
 				}
@@ -3120,16 +3104,12 @@ int drm_mode_getproperty_ioctl(struct drm_device *dev,
 			blob_length_ptr = (uint32_t __user *)(unsigned long)out_resp->values_ptr;
 
 			list_for_each_entry(prop_blob, &property->enum_blob_list, head) {
-				if (copyout(&prop_blob->base.id,
-				    blob_id_ptr + copied,
-				    sizeof(prop_blob->base.id)) != 0) {
+				if (put_user(prop_blob->base.id, blob_id_ptr + copied)) {
 					ret = -EFAULT;
 					goto done;
 				}
 
-				if (copyout(&prop_blob->length,
-				    blob_length_ptr + copied,
-				    sizeof(prop_blob->length)) != 0) {
+				if (put_user(prop_blob->length, blob_length_ptr + copied)) {
 					ret = -EFAULT;
 					goto done;
 				}
@@ -3201,7 +3181,7 @@ int drm_mode_getblob_ioctl(struct drm_device *dev,
 
 	if (out_resp->length == blob->length) {
 		blob_ptr = (void __user *)(unsigned long)out_resp->data;
-		if (copyout(blob->data, blob_ptr, blob->length) != 0) {
+		if (copy_to_user(blob_ptr, blob->data, blob->length)){
 			ret = -EFAULT;
 			goto done;
 		}
@@ -3373,15 +3353,13 @@ int drm_mode_obj_get_properties_ioctl(struct drm_device *dev, void *data,
 		prop_values_ptr = (uint64_t __user *)(unsigned long)
 				  (arg->prop_values_ptr);
 		for (i = 0; i < props_count; i++) {
-			if (copyout(&obj->properties->ids[i],
-			    props_ptr + copied,
-			    sizeof(obj->properties->ids[i])) != 0) {
+			if (put_user(obj->properties->ids[i],
+				     props_ptr + copied)) {
 				ret = -EFAULT;
 				goto out;
 			}
-			if (copyout(&obj->properties->values[i],
-			    prop_values_ptr + copied,
-			    sizeof(obj->properties->values[i])) != 0) {
+			if (put_user(obj->properties->values[i],
+				     prop_values_ptr + copied)) {
 				ret = -EFAULT;
 				goto out;
 			}
@@ -3528,22 +3506,19 @@ int drm_mode_gamma_set_ioctl(struct drm_device *dev,
 
 	size = crtc_lut->gamma_size * (sizeof(uint16_t));
 	r_base = crtc->gamma_store;
-	if (copyin((void __user *)(unsigned long)crtc_lut->red,
-	    r_base, size) != 0) {
+	if (copy_from_user(r_base, (void __user *)(unsigned long)crtc_lut->red, size)) {
 		ret = -EFAULT;
 		goto out;
 	}
 
 	g_base = r_base + size;
-	if (copyin((void __user *)(unsigned long)crtc_lut->green,
-	    g_base, size) != 0) {
+	if (copy_from_user(g_base, (void __user *)(unsigned long)crtc_lut->green, size)) {
 		ret = -EFAULT;
 		goto out;
 	}
 
 	b_base = g_base + size;
-	if (copyin((void __user *)(unsigned long)crtc_lut->blue,
-	    b_base, size) != 0) {
+	if (copy_from_user(b_base, (void __user *)(unsigned long)crtc_lut->blue, size)) {
 		ret = -EFAULT;
 		goto out;
 	}
@@ -3585,22 +3560,19 @@ int drm_mode_gamma_get_ioctl(struct drm_device *dev,
 
 	size = crtc_lut->gamma_size * (sizeof(uint16_t));
 	r_base = crtc->gamma_store;
-	if (copyout(r_base,
-	    (void __user *)(unsigned long)crtc_lut->red, size) != 0) {
+	if (copy_to_user((void __user *)(unsigned long)crtc_lut->red, r_base, size)) {
 		ret = -EFAULT;
 		goto out;
 	}
 
 	g_base = r_base + size;
-	if (copyout(g_base,
-	    (void __user *)(unsigned long)crtc_lut->green, size) != 0) {
+	if (copy_to_user((void __user *)(unsigned long)crtc_lut->green, g_base, size)) {
 		ret = -EFAULT;
 		goto out;
 	}
 
 	b_base = g_base + size;
-	if (copyout(b_base,
-	    (void __user *)(unsigned long)crtc_lut->blue, size) != 0) {
+	if (copy_to_user((void __user *)(unsigned long)crtc_lut->blue, b_base, size)) {
 		ret = -EFAULT;
 		goto out;
 	}

@@ -1,4 +1,4 @@
-/*	$OpenBSD: identcpu.c,v 1.60 2015/02/08 04:41:48 deraadt Exp $	*/
+/*	$OpenBSD: identcpu.c,v 1.63 2015/07/21 03:38:22 reyk Exp $	*/
 /*	$NetBSD: identcpu.c,v 1.1 2003/04/26 18:39:28 fvdl Exp $	*/
 
 /*
@@ -38,7 +38,6 @@
 
 #include <sys/param.h>
 #include <sys/systm.h>
-#include <sys/kernel.h>
 #include <sys/sysctl.h>
 #include <machine/cpu.h>
 #include <machine/cpufunc.h>
@@ -56,6 +55,11 @@ int amd64_has_xcrypt;
 int amd64_has_aesni;
 #endif
 int has_rdrand;
+
+#include "pvbus.h"
+#if NPVBUS > 0
+#include <dev/pv/pvvar.h>
+#endif
 
 const struct {
 	u_int32_t	bit;
@@ -162,6 +166,9 @@ const struct {
 	{ SEFF0EBX_RDSEED,	"RDSEED" },
 	{ SEFF0EBX_ADX,		"ADX" },
 	{ SEFF0EBX_SMAP,	"SMAP" },
+}, cpu_tpm_eaxfeatures[] = {
+	{ TPM_SENSOR,		"SENSOR" },
+	{ TPM_ARAT,		"ARAT" },
 }, cpu_cpuid_perf_eax[] = {
 	{ CPUIDEAX_VERID,	"PERF" },
 }, cpu_cpuid_apmi_edx[] = {
@@ -523,6 +530,14 @@ identifycpu(struct cpu_info *ci)
 				printf(",%s", cpu_seff0_ebxfeatures[i].str);
 	}
 
+	if (!strcmp(cpu_vendor, "GenuineIntel") && cpuid_level >= 0x06 ) {
+		CPUID(0x06, ci->ci_feature_tpmflags, dummy, dummy, dummy);
+		for (i = 0; i < nitems(cpu_tpm_eaxfeatures); i++)
+			if (ci->ci_feature_tpmflags &
+			    cpu_tpm_eaxfeatures[i].bit)
+				printf(",%s", cpu_tpm_eaxfeatures[i].str);
+	}
+
 	printf("\n");
 
 	x86_print_cacheinfo(ci);
@@ -551,6 +566,11 @@ identifycpu(struct cpu_info *ci)
 		if (cpu_ecxfeature & CPUIDECX_RDRAND)
 			has_rdrand = 1;
 
+#if NPVBUS > 0
+		if (cpu_ecxfeature & CPUIDECX_HV)
+			has_hv_cpuid = 1;
+#endif
+
 		if (ci->ci_feature_sefflags & SEFF0EBX_SMAP)
 			replacesmap();
 	}
@@ -562,17 +582,13 @@ identifycpu(struct cpu_info *ci)
 		ci->ci_cflushsz = ((cflushsz >> 8) & 0xff) * 8;
 	}
 
-	if (CPU_IS_PRIMARY(ci) && !strcmp(cpu_vendor, "GenuineIntel") &&
-	    cpuid_level >= 0x06 ) {
-		CPUID(0x06, val, dummy, dummy, dummy);
-		if (val & 0x1) {
-			strlcpy(ci->ci_sensordev.xname, ci->ci_dev->dv_xname,
-			    sizeof(ci->ci_sensordev.xname));
-			ci->ci_sensor.type = SENSOR_TEMP;
-			sensor_task_register(ci, intelcore_update_sensor, 5);
-			sensor_attach(&ci->ci_sensordev, &ci->ci_sensor);
-			sensordev_install(&ci->ci_sensordev);
-		}
+	if (CPU_IS_PRIMARY(ci) && (ci->ci_feature_tpmflags & TPM_SENSOR)) {
+		strlcpy(ci->ci_sensordev.xname, ci->ci_dev->dv_xname,
+		    sizeof(ci->ci_sensordev.xname));
+		ci->ci_sensor.type = SENSOR_TEMP;
+		sensor_task_register(ci, intelcore_update_sensor, 5);
+		sensor_attach(&ci->ci_sensordev, &ci->ci_sensor);
+		sensordev_install(&ci->ci_sensordev);
 	}
 
 #endif

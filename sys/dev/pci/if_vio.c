@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_vio.c,v 1.24 2015/02/09 03:09:57 dlg Exp $	*/
+/*	$OpenBSD: if_vio.c,v 1.33 2015/06/24 09:40:54 mpi Exp $	*/
 
 /*
  * Copyright (c) 2012 Stefan Fritsch, Alexander Fiveg.
@@ -27,6 +27,7 @@
  */
 
 #include "bpfilter.h"
+#include "vlan.h"
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -37,9 +38,6 @@
 #include <sys/sockio.h>
 #include <sys/timeout.h>
 
-#include <dev/pci/pcidevs.h>
-#include <dev/pci/pcireg.h>
-#include <dev/pci/pcivar.h>
 #include <dev/pci/virtioreg.h>
 #include <dev/pci/virtiovar.h>
 
@@ -50,6 +48,14 @@
 
 #include <netinet/in.h>
 #include <netinet/if_ether.h>
+#include <netinet/ip.h>
+#include <netinet/tcp.h>
+#include <netinet/udp.h>
+
+#if NVLAN > 0
+#include <net/if_types.h>
+#include <net/if_vlan_var.h>
+#endif
 
 #if NBPFILTER > 0
 #include <net/bpf.h>
@@ -272,7 +278,7 @@ void	vio_rxtick(void *);
 int	vio_tx_intr(struct virtqueue *);
 int	vio_txeof(struct virtqueue *);
 void	vio_tx_drain(struct vio_softc *);
-int	vio_encap(struct vio_softc *, int, struct mbuf *, struct mbuf **);
+int	vio_encap(struct vio_softc *, int, struct mbuf *);
 void	vio_txtick(void *);
 
 /* other control */
@@ -526,7 +532,7 @@ vio_attach(struct device *parent, struct device *self, void *aux)
 
 	features = VIRTIO_NET_F_MAC | VIRTIO_NET_F_STATUS |
 	    VIRTIO_NET_F_CTRL_VQ | VIRTIO_NET_F_CTRL_RX |
-	    VIRTIO_NET_F_MRG_RXBUF;
+	    VIRTIO_NET_F_MRG_RXBUF | VIRTIO_NET_F_CSUM;
 	/*
 	 * VIRTIO_F_RING_EVENT_IDX can be switched off by setting bit 2 in the
 	 * driver flags, see config(8)
@@ -590,6 +596,8 @@ vio_attach(struct device *parent, struct device *self, void *aux)
 	ifp->if_start = vio_start;
 	ifp->if_ioctl = vio_ioctl;
 	ifp->if_capabilities = IFCAP_VLAN_MTU;
+	if (features & VIRTIO_NET_F_CSUM)
+		ifp->if_capabilities |= IFCAP_CSUM_TCPv4|IFCAP_CSUM_UDPv4;
 	IFQ_SET_MAXLEN(&ifp->if_snd, vsc->sc_vqs[1].vq_num - 1);
 	IFQ_SET_READY(&ifp->if_snd);
 	ifmedia_init(&sc->sc_media, 0, vio_media_change, vio_media_status);
@@ -722,6 +730,8 @@ vio_start(struct ifnet *ifp)
 
 	if ((ifp->if_flags & (IFF_RUNNING|IFF_OACTIVE)) != IFF_RUNNING)
 		return;
+	if (IFQ_IS_EMPTY(&ifp->if_snd))
+		return;
 
 again:
 	for (;;) {
@@ -739,15 +749,41 @@ again:
 		}
 		if (r != 0)
 			panic("enqueue_prep for a tx buffer: %d", r);
-		r = vio_encap(sc, slot, m, &sc->sc_tx_mbufs[slot]);
-		if (r != 0) {
-#if VIRTIO_DEBUG
-			if (r != ENOBUFS)
-				printf("%s: error %d\n", __func__, r);
+
+		hdr = &sc->sc_tx_hdrs[slot];
+		memset(hdr, 0, sc->sc_hdr_size);
+		if (m->m_pkthdr.csum_flags & (M_TCP_CSUM_OUT|M_UDP_CSUM_OUT)) {
+			struct mbuf *mip;
+			struct ip *ip;
+			int ehdrlen = ETHER_HDR_LEN;
+			int ipoff;
+#if NVLAN > 0
+			struct ether_vlan_header *eh;
+
+			eh = mtod(m, struct ether_vlan_header *);
+			if (eh->evl_encap_proto == htons(ETHERTYPE_VLAN))
+				ehdrlen += ETHER_VLAN_ENCAP_LEN;
 #endif
+
+			if (m->m_pkthdr.csum_flags & M_TCP_CSUM_OUT)
+				hdr->csum_offset = offsetof(struct tcphdr, th_sum);
+			else
+				hdr->csum_offset = offsetof(struct udphdr, uh_sum);
+
+			mip = m_getptr(m, ehdrlen, &ipoff);
+			KASSERT(mip != NULL && mip->m_len - ipoff >= sizeof(*ip));
+			ip = (struct ip *)(mip->m_data + ipoff);
+			hdr->csum_start = ehdrlen + (ip->ip_hl << 2);
+			hdr->flags = VIRTIO_NET_HDR_F_NEEDS_CSUM;
+		}
+
+		r = vio_encap(sc, slot, m);
+		if (r != 0) {
 			virtio_enqueue_abort(vq, slot);
-			ifp->if_flags |= IFF_OACTIVE;
-			break;
+			IFQ_DEQUEUE(&ifp->if_snd, m);
+			m_freem(m);
+			ifp->if_oerrors++;
+			continue;
 		}
 		r = virtio_enqueue_reserve(vq, slot,
 		    sc->sc_tx_dmamaps[slot]->dm_nsegs + 1);
@@ -759,13 +795,7 @@ again:
 			break;
 		}
 		IFQ_DEQUEUE(&ifp->if_snd, m);
-		if (m != sc->sc_tx_mbufs[slot]) {
-			m_freem(m);
-			m = sc->sc_tx_mbufs[slot];
-		}
 
-		hdr = &sc->sc_tx_hdrs[slot];
-		memset(hdr, 0, sc->sc_hdr_size);
 		bus_dmamap_sync(vsc->sc_dmat, sc->sc_tx_dmamaps[slot], 0,
 		    sc->sc_tx_dmamaps[slot]->dm_mapsize, BUS_DMASYNC_PREWRITE);
 		VIO_DMAMEM_SYNC(vsc, sc, hdr, sc->sc_hdr_size,
@@ -1009,7 +1039,6 @@ vio_rxeof(struct vio_softc *sc)
 		}
 
 		if (bufs_left == 0) {
-			ifp->if_ipackets++;
 			ml_enqueue(&ml, m0);
 			m0 = NULL;
 		}
@@ -1093,8 +1122,7 @@ vio_tx_intr(struct virtqueue *vq)
 	int r;
 
 	r = vio_txeof(vq);
-	if (!IFQ_IS_EMPTY(&ifp->if_snd))
-		vio_start(ifp);
+	vio_start(ifp);
 	return r;
 }
 
@@ -1145,44 +1173,28 @@ vio_txeof(struct virtqueue *vq)
 }
 
 int
-vio_encap(struct vio_softc *sc, int slot, struct mbuf *m,
-	      struct mbuf **mnew)
+vio_encap(struct vio_softc *sc, int slot, struct mbuf *m)
 {
 	struct virtio_softc	*vsc = sc->sc_virtio;
 	bus_dmamap_t		 dmap= sc->sc_tx_dmamaps[slot];
-	struct mbuf		*m0 = NULL;
 	int			 r;
 
 	r = bus_dmamap_load_mbuf(vsc->sc_dmat, dmap, m,
 	    BUS_DMA_WRITE|BUS_DMA_NOWAIT);
-	if (r == 0) {
-		*mnew = m;
-		return r;
-	}
-	if (r != EFBIG)
-		return r;
-	/* EFBIG: mbuf chain is too fragmented */
-	MGETHDR(m0, M_DONTWAIT, MT_DATA);
-	if (m0 == NULL)
-		return ENOBUFS;
-	if (m->m_pkthdr.len > MHLEN) {
-		MCLGETI(m0, M_DONTWAIT, NULL, m->m_pkthdr.len);
-		if (!(m0->m_flags & M_EXT)) {
-			m_freem(m0);
-			return ENOBUFS;
-		}
-	}
-	m_copydata(m, 0, m->m_pkthdr.len, mtod(m0, caddr_t));
-	m0->m_pkthdr.len = m0->m_len = m->m_pkthdr.len;
-	r = bus_dmamap_load_mbuf(vsc->sc_dmat, dmap, m0,
-	    BUS_DMA_NOWAIT|BUS_DMA_WRITE);
-	if (r != 0) {
-		m_freem(m0);
-		printf("%s: tx dmamap load error %d\n", sc->sc_dev.dv_xname,
-		    r);
+	switch (r) {
+	case 0:
+		break;
+	case EFBIG:
+		if (m_defrag(m, M_DONTWAIT) == 0 &&
+		    bus_dmamap_load_mbuf(vsc->sc_dmat, dmap, m,
+		    BUS_DMA_WRITE|BUS_DMA_NOWAIT) == 0)
+			break;
+
+		/* FALLTHROUGH */
+	default:
 		return ENOBUFS;
 	}
-	*mnew = m0;
+	sc->sc_tx_mbufs[slot] = m;
 	return 0;
 }
 

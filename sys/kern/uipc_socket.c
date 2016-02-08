@@ -1,4 +1,4 @@
-/*	$OpenBSD: uipc_socket.c,v 1.136 2015/02/10 21:56:10 miod Exp $	*/
+/*	$OpenBSD: uipc_socket.c,v 1.141 2015/07/08 07:21:50 mpi Exp $	*/
 /*	$NetBSD: uipc_socket.c,v 1.21 1996/02/04 02:17:52 christos Exp $	*/
 
 /*
@@ -47,7 +47,6 @@
 #include <sys/unpcb.h>
 #include <sys/socketvar.h>
 #include <sys/signalvar.h>
-#include <sys/resourcevar.h>
 #include <net/if.h>
 #include <sys/pool.h>
 
@@ -487,7 +486,7 @@ restart:
 					MGETHDR(m, M_WAIT, MT_DATA);
 					mlen = MHLEN;
 					m->m_pkthdr.len = 0;
-					m->m_pkthdr.rcvif = (struct ifnet *)0;
+					m->m_pkthdr.ph_ifidx = 0;
 				} else {
 					MGET(m, M_WAIT, MT_DATA);
 					mlen = MLEN;
@@ -752,7 +751,7 @@ dontblock:
 		orig_resid = 0;
 		if (flags & MSG_PEEK) {
 			if (paddr)
-				*paddr = m_copy(m, 0, m->m_len);
+				*paddr = m_copym(m, 0, m->m_len, M_NOWAIT);
 			m = m->m_next;
 		} else {
 			sbfree(&so->so_rcv, m);
@@ -762,7 +761,7 @@ dontblock:
 				m->m_next = 0;
 				m = so->so_rcv.sb_mb;
 			} else {
-				MFREE(m, so->so_rcv.sb_mb);
+				so->so_rcv.sb_mb = m_free(m);
 				m = so->so_rcv.sb_mb;
 			}
 			sbsync(&so->so_rcv, nextrecord);
@@ -771,7 +770,7 @@ dontblock:
 	while (m && m->m_type == MT_CONTROL && error == 0) {
 		if (flags & MSG_PEEK) {
 			if (controlp)
-				*controlp = m_copy(m, 0, m->m_len);
+				*controlp = m_copym(m, 0, m->m_len, M_NOWAIT);
 			m = m->m_next;
 		} else {
 			sbfree(&so->so_rcv, m);
@@ -873,7 +872,7 @@ dontblock:
 					so->so_rcv.sb_mb = m = m->m_next;
 					*mp = NULL;
 				} else {
-					MFREE(m, so->so_rcv.sb_mb);
+					so->so_rcv.sb_mb = m_free(m);
 					m = so->so_rcv.sb_mb;
 				}
 				/*
@@ -1077,7 +1076,7 @@ sosplice(struct socket *so, int fd, off_t max, struct timeval *tv)
 		return (EINVAL);
 
 	/* Find sosp, the drain socket where data will be spliced into. */
-	if ((error = getsock(curproc->p_fd, fd, &fp)) != 0)
+	if ((error = getsock(curproc, fd, &fp)) != 0)
 		return (error);
 	sosp = fp->f_data;
 	if (sosp->so_sp == NULL)
@@ -1272,7 +1271,7 @@ somove(struct socket *so, int wait)
 		 */
 		m = so->so_rcv.sb_mb;
 		sbfree(&so->so_rcv, m);
-		MFREE(m, so->so_rcv.sb_mb);
+		so->so_rcv.sb_mb = m_free(m);
 		sbsync(&so->so_rcv, nextrecord);
 	}
 	/*
@@ -1282,7 +1281,7 @@ somove(struct socket *so, int wait)
 	m = so->so_rcv.sb_mb;
 	while (m && m->m_type == MT_CONTROL) {
 		sbfree(&so->so_rcv, m);
-		MFREE(m, so->so_rcv.sb_mb);
+		so->so_rcv.sb_mb = m_free(m);
 		m = so->so_rcv.sb_mb;
 		sbsync(&so->so_rcv, nextrecord);
 	}

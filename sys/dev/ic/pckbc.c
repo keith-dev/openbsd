@@ -1,4 +1,4 @@
-/* $OpenBSD: pckbc.c,v 1.43 2014/12/19 07:23:57 deraadt Exp $ */
+/* $OpenBSD: pckbc.c,v 1.49 2015/05/24 10:57:47 miod Exp $ */
 /* $NetBSD: pckbc.c,v 1.5 2000/06/09 04:58:35 soda Exp $ */
 
 /*
@@ -34,7 +34,6 @@
 #include <sys/malloc.h>
 #include <sys/errno.h>
 #include <sys/queue.h>
-#include <sys/lock.h>
 
 #include <machine/bus.h>
 #include <machine/cpu.h>
@@ -154,7 +153,7 @@ pckbc_poll_data1(bus_space_tag_t iot, bus_space_handle_t ioh_d,
 			KBD_DELAY;
 			CPU_BUSY_CYCLE();
 			c = bus_space_read_1(iot, ioh_d, 0);
-			if (checkaux && (stat & 0x20)) { /* aux data */
+			if (checkaux && (stat & KBS_AUXDATA)) {
 				if (slot != PCKBC_AUX_SLOT) {
 					DPRINTF("lost aux 0x%x\n", c);
 					continue;
@@ -271,12 +270,24 @@ pckbc_attach_slot(struct pckbc_softc *sc, pckbc_slot_t slot, int force)
 	found = (config_found_sm((struct device *)sc, &pa, pckbcprint,
 	    force ? pckbc_submatch_locators : pckbc_submatch) != NULL);
 
-	if (found && !t->t_slotdata[slot]) {
+	if ((found || slot == PCKBC_AUX_SLOT) && !t->t_slotdata[slot]) {
 		t->t_slotdata[slot] = malloc(sizeof(struct pckbc_slotdata),
 					     M_DEVBUF, M_NOWAIT);
 		if (t->t_slotdata[slot] == NULL)
 			return 0;
 		pckbc_init_slotdata(t->t_slotdata[slot]);
+
+		if (!found && slot == PCKBC_AUX_SLOT) {
+			/*
+			 * Some machines don't handle disabling the aux slot
+			 * completely and still generate data when the mouse is
+			 * moved, so setup a dummy interrupt handler to discard
+			 * this slot's data.
+			 */
+			pckbc_set_inputhandler(t, PCKBC_AUX_SLOT, NULL, sc,
+			    NULL);
+			found = 1;
+		}
 	}
 	return (found);
 }
@@ -938,8 +949,6 @@ pckbc_set_inputhandler(pckbc_tag_t self, pckbc_slot_t slot, pckbc_inputfcn func,
 	if (slot >= PCKBC_NSLOTS)
 		panic("pckbc_set_inputhandler: bad slot %d", slot);
 
-	(*sc->intr_establish)(sc, slot);
-
 	sc->inputhandler[slot] = func;
 	sc->inputarg[slot] = arg;
 	sc->subname[slot] = name;
@@ -987,7 +996,7 @@ pckbcintr_internal(struct pckbc_internal *t, struct pckbc_softc *sc)
 
 		served = 1;
 
-		slot = (t->t_haveaux && (stat & 0x20)) ?
+		slot = (t->t_haveaux && (stat & KBS_AUXDATA)) ?
 		    PCKBC_AUX_SLOT : PCKBC_KBD_SLOT;
 		q = t->t_slotdata[slot];
 

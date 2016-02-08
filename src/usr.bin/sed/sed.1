@@ -1,4 +1,4 @@
-.\"	$OpenBSD: sed.1,v 1.44 2014/10/22 23:23:22 schwarze Exp $
+.\"	$OpenBSD: sed.1,v 1.46 2015/07/18 09:33:00 jmc Exp $
 .\"
 .\" Copyright (c) 1992, 1993
 .\"	The Regents of the University of California.  All rights reserved.
@@ -32,7 +32,7 @@
 .\"
 .\"	from: @(#)sed.1	8.2 (Berkeley) 12/30/93
 .\"
-.Dd $Mdocdate: October 22 2014 $
+.Dd $Mdocdate: July 18 2015 $
 .Dt SED 1
 .Os
 .Sh NAME
@@ -41,12 +41,14 @@
 .Sh SYNOPSIS
 .Nm sed
 .Op Fl aEnru
+.Op Fl i Ns Op Ar extension
 .Ar command
 .Op Ar
 .Nm sed
 .Op Fl aEnru
 .Op Fl e Ar command
 .Op Fl f Ar command_file
+.Op Fl i Ns Op Ar extension
 .Op Ar
 .Sh DESCRIPTION
 The
@@ -94,6 +96,16 @@ Append the editing commands found in the file
 .Ar command_file
 to the list of commands.
 The editing commands should each be listed on a separate line.
+.It Fl i Ns Op Ar extension
+Edit files in place, saving backups with the specified
+.Ar extension .
+If a zero length
+.Ar extension
+is given, no backup will be saved.
+It is not recommended to give a zero length
+.Ar extension
+when in place editing files, as it risks corruption or partial content
+in situations where disk space is exhausted, etc.
 .It Fl r
 An alias for
 .Fl E ,
@@ -543,7 +555,7 @@ utility is compliant with the
 specification.
 .Pp
 The flags
-.Op Fl aEru
+.Op Fl aEiru
 are extensions to that specification.
 .Pp
 The use of newlines to separate multiple commands on the command line

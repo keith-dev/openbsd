@@ -1,4 +1,4 @@
-/*	$OpenBSD: adjacency.c,v 1.3 2013/10/15 20:21:24 renato Exp $ */
+/*	$OpenBSD: adjacency.c,v 1.7 2015/07/21 04:52:29 renato Exp $ */
 
 /*
  * Copyright (c) 2009 Michele Marchetto <michele@openbsd.org>
@@ -41,8 +41,7 @@ void	 tnbr_start_hello_timer(struct tnbr *);
 void	 tnbr_stop_hello_timer(struct tnbr *);
 
 struct adj *
-adj_new(struct nbr *nbr, struct hello_source *source, u_int16_t holdtime,
-    struct in_addr addr)
+adj_new(struct nbr *nbr, struct hello_source *source, struct in_addr addr)
 {
 	struct adj	*adj;
 
@@ -149,11 +148,14 @@ adj_itimer(int fd, short event, void *arg)
 		LIST_REMOVE(adj, iface_entry);
 		break;
 	case HELLO_TARGETED:
-		adj->source.target->adj = NULL;
-		if (!(adj->source.target->flags & F_TNBR_CONFIGURED)) {
+		if (!(adj->source.target->flags & F_TNBR_CONFIGURED) &&
+		    adj->source.target->pw_count == 0) {
+			/* remove dynamic targeted neighbor */
 			LIST_REMOVE(adj->source.target, entry);
 			tnbr_del(adj->source.target);
+			return;
 		}
+		adj->source.target->adj = NULL;
 		break;
 	}
 
@@ -183,7 +185,7 @@ adj_stop_itimer(struct adj *adj)
 /* targeted neighbors */
 
 struct tnbr *
-tnbr_new(struct ldpd_conf *xconf, struct in_addr addr, int configured)
+tnbr_new(struct ldpd_conf *xconf, struct in_addr addr)
 {
 	struct tnbr		*tnbr;
 
@@ -191,12 +193,8 @@ tnbr_new(struct ldpd_conf *xconf, struct in_addr addr, int configured)
 		fatal("tnbr_new");
 
 	tnbr->addr.s_addr = addr.s_addr;
-	if (configured)
-		tnbr->flags |= F_TNBR_CONFIGURED;
-	else {
-		tnbr->hello_holdtime = xconf->thello_holdtime;
-		tnbr->hello_interval = xconf->thello_interval;
-	}
+	tnbr->hello_holdtime = xconf->thello_holdtime;
+	tnbr->hello_interval = xconf->thello_interval;
 
 	return (tnbr);
 }
@@ -210,6 +208,19 @@ tnbr_del(struct tnbr *tnbr)
 	free(tnbr);
 }
 
+struct tnbr *
+tnbr_check(struct tnbr *tnbr)
+{
+	if (!(tnbr->flags & (F_TNBR_CONFIGURED|F_TNBR_DYNAMIC)) &&
+	    tnbr->pw_count == 0) {
+		LIST_REMOVE(tnbr, entry);
+		tnbr_del(tnbr);
+		return (NULL);
+	}
+
+	return (tnbr);
+}
+
 void
 tnbr_init(struct ldpd_conf *xconf, struct tnbr *tnbr)
 {
@@ -221,11 +232,11 @@ tnbr_init(struct ldpd_conf *xconf, struct tnbr *tnbr)
 }
 
 struct tnbr *
-tnbr_find(struct in_addr addr)
+tnbr_find(struct ldpd_conf *xconf, struct in_addr addr)
 {
 	struct tnbr *tnbr;
 
-	LIST_FOREACH(tnbr, &leconf->tnbr_list, entry)
+	LIST_FOREACH(tnbr, &xconf->tnbr_list, entry)
 		if (addr.s_addr == tnbr->addr.s_addr)
 			return (tnbr);
 

@@ -1,4 +1,4 @@
-/*    $OpenBSD: if_el.c,v 1.24 2014/12/22 02:28:51 tedu Exp $       */
+/*    $OpenBSD: if_el.c,v 1.27 2015/06/24 09:40:54 mpi Exp $       */
 /*	$NetBSD: if_el.c,v 1.39 1996/05/12 23:52:32 mycroft Exp $	*/
 
 /*
@@ -314,7 +314,7 @@ elstart(ifp)
 		IFQ_DEQUEUE(&ifp->if_snd, m0);
 
 		/* If there's nothing to send, return. */
-		if (m0 == 0)
+		if (m0 == NULL)
 			break;
 
 #if NBPFILTER > 0
@@ -490,6 +490,7 @@ elread(sc, len)
 	int len;
 {
 	struct ifnet *ifp = &sc->sc_arpcom.ac_if;
+	struct mbuf_list ml = MBUF_LIST_INITIALIZER();
 	struct mbuf *m;
 
 	if (len <= sizeof(struct ether_header) ||
@@ -502,23 +503,13 @@ elread(sc, len)
 
 	/* Pull packet off interface. */
 	m = elget(sc, len);
-	if (m == 0) {
+	if (m == NULL) {
 		ifp->if_ierrors++;
 		return;
 	}
 
-	ifp->if_ipackets++;
-
-#if NBPFILTER > 0
-	/*
-	 * Check if there's a BPF listener on this interface.
-	 * If so, hand off the raw packet to BPF.
-	 */
-	if (ifp->if_bpf)
-		bpf_mtap(ifp->if_bpf, m, BPF_DIRECTION_IN);
-#endif
-
-	ether_input_mbuf(ifp, m);
+	ml_enqueue(&ml, m);
+	if_input(ifp, &ml);
 }
 
 /*
@@ -531,15 +522,13 @@ elget(sc, totlen)
 	struct el_softc *sc;
 	int totlen;
 {
-	struct ifnet *ifp = &sc->sc_arpcom.ac_if;
 	int iobase = sc->sc_iobase;
 	struct mbuf *top, **mp, *m;
 	int len;
 
 	MGETHDR(m, M_DONTWAIT, MT_DATA);
-	if (m == 0)
+	if (m == NULL)
 		return 0;
-	m->m_pkthdr.rcvif = ifp;
 	m->m_pkthdr.len = totlen;
 	len = MHLEN;
 	top = 0;
@@ -551,7 +540,7 @@ elget(sc, totlen)
 	while (totlen > 0) {
 		if (top) {
 			MGET(m, M_DONTWAIT, MT_DATA);
-			if (m == 0) {
+			if (m == NULL) {
 				m_freem(top);
 				return 0;
 			}

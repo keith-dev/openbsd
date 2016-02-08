@@ -1,4 +1,4 @@
-/*	$OpenBSD: ip_ipip.c,v 1.56 2014/12/19 17:14:40 tedu Exp $ */
+/*	$OpenBSD: ip_ipip.c,v 1.63 2015/07/16 16:12:15 mpi Exp $ */
 /*
  * The authors of this code are John Ioannidis (ji@tla.org),
  * Angelos D. Keromytis (kermit@csd.uch.gr) and
@@ -91,17 +91,17 @@ struct ipipstat ipipstat;
  * Really only a wrapper for ipip_input(), for use with IPv6.
  */
 int
-ip4_input6(struct mbuf **m, int *offp, int proto)
+ip4_input6(struct mbuf **mp, int *offp, int proto)
 {
 	/* If we do not accept IP-in-IP explicitly, drop.  */
-	if (!ipip_allow && ((*m)->m_flags & (M_AUTH|M_CONF)) == 0) {
+	if (!ipip_allow && ((*mp)->m_flags & (M_AUTH|M_CONF)) == 0) {
 		DPRINTF(("ip4_input6(): dropped due to policy\n"));
 		ipipstat.ipips_pdrops++;
-		m_freem(*m);
+		m_freem(*mp);
 		return IPPROTO_DONE;
 	}
 
-	ipip_input(*m, *offp, NULL, proto);
+	ipip_input(*mp, *offp, NULL, proto);
 	return IPPROTO_DONE;
 }
 #endif /* INET6 */
@@ -136,8 +136,9 @@ ip4_input(struct mbuf *m, ...)
 /*
  * ipip_input gets called when we receive an IP{46} encapsulated packet,
  * either because we got it at a real interface, or because AH or ESP
- * were being used in tunnel mode (in which case the rcvif element will
- * contain the address of the encX interface associated with the tunnel.
+ * were being used in tunnel mode (in which case the ph_ifidx element
+ * will contain the index of the encX interface associated with the
+ * tunnel.
  */
 
 void
@@ -146,15 +147,14 @@ ipip_input(struct mbuf *m, int iphlen, struct ifnet *gifp, int proto)
 	struct sockaddr_in *sin;
 	struct ifnet *ifp;
 	struct ifaddr *ifa;
-	struct ifqueue *ifq = NULL;
+	struct niqueue *ifq = NULL;
 	struct ip *ipo;
 	u_int rdomain;
 #ifdef INET6
 	struct sockaddr_in6 *sin6;
 	struct ip6_hdr *ip6;
 #endif
-	int isr;
-	int mode, hlen, s;
+	int mode, hlen;
 	u_int8_t itos, otos;
 	u_int8_t v;
 	sa_family_t af;
@@ -295,9 +295,8 @@ ipip_input(struct mbuf *m, int iphlen, struct ifnet *gifp, int proto)
 	}
 
 	/* Check for local address spoofing. */
-	if ((m->m_pkthdr.rcvif == NULL ||
-	    !(m->m_pkthdr.rcvif->if_flags & IFF_LOOPBACK)) &&
-	    ipip_allow != 2) {
+	if (((ifp = if_get(m->m_pkthdr.ph_ifidx)) == NULL ||
+	    !(ifp->if_flags & IFF_LOOPBACK)) && ipip_allow != 2) {
 		rdomain = rtable_l2(m->m_pkthdr.ph_rtableid);
 		TAILQ_FOREACH(ifp, &ifnet, if_list) {
 			if (ifp->if_rdomain != rdomain)
@@ -352,13 +351,11 @@ ipip_input(struct mbuf *m, int iphlen, struct ifnet *gifp, int proto)
 	switch (proto) {
 	case IPPROTO_IPV4:
 		ifq = &ipintrq;
-		isr = NETISR_IP;
 		af = AF_INET;
 		break;
 #ifdef INET6
 	case IPPROTO_IPV6:
 		ifq = &ip6intrq;
-		isr = NETISR_IPV6;
 		af = AF_INET6;
 		break;
 #endif
@@ -374,23 +371,12 @@ ipip_input(struct mbuf *m, int iphlen, struct ifnet *gifp, int proto)
 	pf_pkt_addr_changed(m);
 #endif
 
-	s = splnet();			/* isn't it already? */
-	if (IF_QFULL(ifq)) {
-		IF_DROP(ifq);
-		m_freem(m);
+	if (niq_enqueue(ifq, m) != 0) {
 		ipipstat.ipips_qfull++;
-
-		splx(s);
-
 		DPRINTF(("ipip_input(): packet dropped because of full "
 		    "queue\n"));
 		return;
 	}
-
-	IF_ENQUEUE(ifq, m);
-	schednetisr(isr);
-	splx(s);
-	return;
 }
 
 int
@@ -405,6 +391,9 @@ ipip_output(struct mbuf *m, struct tdb *tdb, struct mbuf **mp, int dummy,
 #ifdef INET6
 	struct ip6_hdr *ip6, *ip6o;
 #endif /* INET6 */
+#ifdef ENCDEBUG
+	char buf[INET6_ADDRSTRLEN];
+#endif
 
 	/* XXX Deal with empty TDB source/destination addresses. */
 
@@ -419,7 +408,8 @@ ipip_output(struct mbuf *m, struct tdb *tdb, struct mbuf **mp, int dummy,
 
 			DPRINTF(("ipip_output(): unspecified tunnel endpoind "
 			    "address in SA %s/%08x\n",
-			    ipsp_address(tdb->tdb_dst), ntohl(tdb->tdb_spi)));
+			    ipsp_address(&tdb->tdb_dst, buf, sizeof(buf)),
+			    ntohl(tdb->tdb_spi)));
 
 			ipipstat.ipips_unspec++;
 			m_freem(m);
@@ -428,7 +418,7 @@ ipip_output(struct mbuf *m, struct tdb *tdb, struct mbuf **mp, int dummy,
 		}
 
 		M_PREPEND(m, sizeof(struct ip), M_DONTWAIT);
-		if (m == 0) {
+		if (m == NULL) {
 			DPRINTF(("ipip_output(): M_PREPEND failed\n"));
 			ipipstat.ipips_hdrops++;
 			*mp = NULL;
@@ -467,9 +457,9 @@ ipip_output(struct mbuf *m, struct tdb *tdb, struct mbuf **mp, int dummy,
 			m_copydata(m, sizeof(struct ip) +
 			    offsetof(struct ip, ip_off),
 			    sizeof(u_int16_t), (caddr_t) &ipo->ip_off);
-			NTOHS(ipo->ip_off);
+			ipo->ip_off = ntohs(ipo->ip_off);
 			ipo->ip_off &= ~(IP_DF | IP_MF | IP_OFFMASK);
-			HTONS(ipo->ip_off);
+			ipo->ip_off = htons(ipo->ip_off);
 		}
 #ifdef INET6
 		else if (tp == (IPV6_VERSION >> 4)) {
@@ -504,7 +494,8 @@ ipip_output(struct mbuf *m, struct tdb *tdb, struct mbuf **mp, int dummy,
 
 			DPRINTF(("ipip_output(): unspecified tunnel endpoind "
 			    "address in SA %s/%08x\n",
-			    ipsp_address(tdb->tdb_dst), ntohl(tdb->tdb_spi)));
+			    ipsp_address(&tdb->tdb_dst, buf, sizeof(buf)),
+			    ntohl(tdb->tdb_spi)));
 
 			ipipstat.ipips_unspec++;
 			m_freem(m);
@@ -523,7 +514,7 @@ ipip_output(struct mbuf *m, struct tdb *tdb, struct mbuf **mp, int dummy,
 		}
 
 		M_PREPEND(m, sizeof(struct ip6_hdr), M_DONTWAIT);
-		if (m == 0) {
+		if (m == NULL) {
 			DPRINTF(("ipip_output(): M_PREPEND failed\n"));
 			ipipstat.ipips_hdrops++;
 			*mp = NULL;
@@ -632,8 +623,7 @@ ipe4_input(struct mbuf *m, ...)
 {
 	/* This is a rather serious mistake, so no conditional printing. */
 	printf("ipe4_input(): should never be called\n");
-	if (m)
-		m_freem(m);
+	m_freem(m);
 }
 #endif	/* IPSEC */
 

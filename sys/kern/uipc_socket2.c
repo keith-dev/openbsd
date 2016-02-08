@@ -1,4 +1,4 @@
-/*	$OpenBSD: uipc_socket2.c,v 1.59 2014/12/11 19:21:57 tedu Exp $	*/
+/*	$OpenBSD: uipc_socket2.c,v 1.62 2015/07/08 07:21:50 mpi Exp $	*/
 /*	$NetBSD: uipc_socket2.c,v 1.11 1996/02/04 02:17:55 christos Exp $	*/
 
 /*
@@ -35,7 +35,6 @@
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/file.h>
-#include <sys/buf.h>
 #include <sys/malloc.h>
 #include <sys/mbuf.h>
 #include <sys/protosw.h>
@@ -453,7 +452,7 @@ sbrelease(struct sockbuf *sb)
  *
  * Reliable protocols may use the socket send buffer to hold data
  * awaiting acknowledgement.  Data is normally copied from a socket
- * send buffer in a protocol with m_copy for output to a peer,
+ * send buffer in a protocol with m_copym for output to a peer,
  * and then removing the data from the socket buffer with sbdrop()
  * or sbdroprecord() when the data is acknowledged by the peer.
  */
@@ -868,12 +867,12 @@ sbdrop(struct sockbuf *sb, int len)
 		}
 		len -= m->m_len;
 		sbfree(sb, m);
-		MFREE(m, mn);
+		mn = m_free(m);
 		m = mn;
 	}
 	while (m && m->m_len == 0) {
 		sbfree(sb, m);
-		MFREE(m, mn);
+		mn = m_free(m);
 		m = mn;
 	}
 	if (m) {
@@ -908,7 +907,7 @@ sbdroprecord(struct sockbuf *sb)
 		sb->sb_mb = m->m_nextpkt;
 		do {
 			sbfree(sb, m);
-			MFREE(m, mn);
+			mn = m_free(m);
 		} while ((m = mn) != NULL);
 	}
 	SB_EMPTY_FIXUP(sb);

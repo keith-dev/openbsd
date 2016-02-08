@@ -1,4 +1,4 @@
-#	$OpenBSD: install.md,v 1.6 2014/03/05 20:03:01 jasper Exp $
+#	$OpenBSD: install.md,v 1.10 2015/06/02 19:54:06 rpe Exp $
 #
 #
 # Copyright (c) 1996 The NetBSD Foundation, Inc.
@@ -53,9 +53,9 @@ md_prep_fdisk() {
 
 	while :; do
 		_d=whole
-		if [[ -n $(fdisk $_disk | grep 'Signature: 0xAA55') ]]; then
+		if fdisk $_disk | grep -q 'Signature: 0xAA55'; then
 			fdisk $_disk
-			if [[ -n $(fdisk $_disk | grep '^..: A6 ') ]]; then
+			if fdisk $_disk | grep -q '^..: A6 '; then
 				_q=", use the (O)penBSD area,"
 				_d=OpenBSD
 			fi
@@ -101,7 +101,7 @@ at least 16MB and be the first 'MSDOS' partition on the disk.
 $(fdisk ${_disk})
 __EOT
 			fdisk -e ${_disk}
-			[[ -n $(fdisk $_disk | grep ' A6 ') ]] && return
+			fdisk $_disk | grep -q ' A6 ' && return
 			echo No OpenBSD partition in MBR, try again. ;;
 		o*|O*)	return ;;
 		esac
@@ -109,26 +109,12 @@ __EOT
 }
 
 md_prep_disklabel() {
-	local _disk=$1 _f _op
+	local _disk=$1 _f=/tmp/fstab.$1
 
 	md_prep_fdisk $_disk
 
-	_f=/tmp/fstab.$_disk
-	if [[ $_disk == $ROOTDISK ]]; then
-		while :; do
-			echo "The auto-allocated layout for $_disk is:"
-			disklabel -h -A $_disk | egrep "^#  |^  [a-p]:"
-			ask "Use (A)uto layout, (E)dit auto layout, or create (C)ustom layout?" a
-			case $resp in
-			a*|A*)	_op=-w ;;
-			e*|E*)	_op=-E ;;
-			c*|C*)	break ;;
-			*)	continue ;;
-			esac
-			disklabel $FSTABFLAG $_f $_op -A $_disk
-			return
-		done
-	fi
+	disklabel_autolayout $_disk $_f || return
+	[[ -s $_f ]] && return
 
 	cat <<__EOT
 
@@ -142,7 +128,7 @@ start of the disk, NOT the start of the OpenBSD MBR partition.
 
 __EOT
 
-	disklabel $FSTABFLAG $_f -E $_disk
+	disklabel -F $_f -E $_disk
 }
 
 md_congrats() {

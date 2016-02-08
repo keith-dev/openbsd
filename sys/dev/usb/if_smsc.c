@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_smsc.c,v 1.14 2014/12/22 02:28:52 tedu Exp $	*/
+/*	$OpenBSD: if_smsc.c,v 1.20 2015/06/24 09:40:54 mpi Exp $	*/
 /* $FreeBSD: src/sys/dev/usb/net/if_smsc.c,v 1.1 2012/08/15 04:03:55 gonzo Exp $ */
 /*-
  * Copyright (c) 2012
@@ -84,7 +84,6 @@
 #include <netinet/in.h>
 #include <netinet/if_ether.h>
 
-#include <dev/mii/mii.h>
 #include <dev/mii/miivar.h>
 
 #include <dev/usb/usb.h>
@@ -261,9 +260,9 @@ smsc_miibus_readreg(struct device *dev, int phy, int reg)
 		smsc_warn_printf(sc, "MII read timeout\n");
 
 	smsc_read_reg(sc, SMSC_MII_DATA, &val);
-	smsc_unlock_mii(sc);
-	
+
 done:
+	smsc_unlock_mii(sc);
 	return (val & 0xFFFF);
 }
 
@@ -279,6 +278,7 @@ smsc_miibus_writereg(struct device *dev, int phy, int reg, int val)
 	smsc_lock_mii(sc);
 	if (smsc_wait_for_bits(sc, SMSC_MII_ADDR, SMSC_MII_BUSY) != 0) {
 		smsc_warn_printf(sc, "MII is busy\n");
+		smsc_unlock_mii(sc);
 		return;
 	}
 
@@ -911,11 +911,11 @@ smsc_match(struct device *parent, void *match, void *aux)
 {
 	struct usb_attach_arg *uaa = aux;
 
-	if (uaa->iface != NULL)
+	if (uaa->iface == NULL || uaa->configno != 1)
 		return UMATCH_NONE;
 
 	return (usb_lookup(smsc_devs, uaa->vendor, uaa->product) != NULL) ?
-	    UMATCH_VENDOR_PRODUCT : UMATCH_NONE;
+	    UMATCH_VENDOR_PRODUCT_CONF_IFACE : UMATCH_NONE;
 }
 
 void
@@ -923,17 +923,15 @@ smsc_attach(struct device *parent, struct device *self, void *aux)
 {
 	struct smsc_softc *sc = (struct smsc_softc *)self;
 	struct usb_attach_arg *uaa = aux;
-	struct usbd_device *dev = uaa->device;
 	usb_interface_descriptor_t *id;
 	usb_endpoint_descriptor_t *ed;
 	struct mii_data *mii;
 	struct ifnet *ifp;
-	int err, s, i;
 	uint32_t mac_h, mac_l;
+	int s, i;
 
-	sc->sc_udev = dev;
-
-	err = usbd_set_config_no(dev, SMSC_CONFIG_INDEX, 1);
+	sc->sc_udev = uaa->device;
+	sc->sc_iface = uaa->iface;
 
 	/* Setup the endpoints for the SMSC LAN95xx device(s) */
 	usb_init_task(&sc->sc_tick_task, smsc_tick_task, sc,
@@ -941,13 +939,6 @@ smsc_attach(struct device *parent, struct device *self, void *aux)
 	rw_init(&sc->sc_mii_lock, "smscmii");
 	usb_init_task(&sc->sc_stop_task, (void (*)(void *))smsc_stop, sc,
 	    USB_TASK_TYPE_GENERIC);
-
-	err = usbd_device2interface_handle(dev, SMSC_IFACE_IDX, &sc->sc_iface);
-	if (err) {
-		printf("%s: getting interface handle failed\n",
-		    sc->sc_dev.dv_xname);
-		return;
-	}
 
 	id = usbd_get_interface_descriptor(sc->sc_iface);
 
@@ -1150,6 +1141,7 @@ smsc_rxeof(struct usbd_xfer *xfer, void *priv, usbd_status status)
 	u_char			*buf = c->sc_buf;
 	uint32_t		total_len;
 	uint16_t		pktlen = 0;
+	struct mbuf_list	ml = MBUF_LIST_INITIALIZER();
 	struct mbuf		*m;
 	int			s;
 	uint32_t		rxhdr;
@@ -1219,25 +1211,18 @@ smsc_rxeof(struct usbd_xfer *xfer, void *priv, usbd_status status)
 			goto done;
 		}
 
-		ifp->if_ipackets++;
-		m->m_pkthdr.rcvif = ifp;
 		m->m_pkthdr.len = m->m_len = pktlen;
 		m_adj(m, ETHER_ALIGN);
 
 		memcpy(mtod(m, char *), buf, pktlen);
 
-		/* push the packet up */
-		s = splnet();
-#if NBPFILTER > 0
-		if (ifp->if_bpf)
-			bpf_mtap(ifp->if_bpf, m, BPF_DIRECTION_IN);
-#endif
-		ether_input_mbuf(ifp, m);
-
-		splx(s);
+		ml_enqueue(&ml, m);
 	} while (total_len > 0);
 
 done:
+	s = splnet();
+	if_input(ifp, &ml);
+	splx(s);
 	memset(c->sc_buf, 0, sc->sc_bufsz);
 
 	/* Setup new transfer. */

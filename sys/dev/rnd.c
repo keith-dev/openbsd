@@ -1,4 +1,4 @@
-/*	$OpenBSD: rnd.c,v 1.172 2015/02/17 22:34:59 tedu Exp $	*/
+/*	$OpenBSD: rnd.c,v 1.175 2015/05/25 03:07:07 deraadt Exp $	*/
 
 /*
  * Copyright (c) 2011 Theo de Raadt.
@@ -60,7 +60,7 @@
  * source material which is mixed on occasion using a CRC-like function
  * into the "entropy pool".  This is not cryptographically strong, but
  * it is adequate assuming the randomness is not chosen maliciously,
- * and it very fast because the interrupt-time event is only to add
+ * and it is very fast because the interrupt-time event is only to add
  * a small random token to the "rnd states" queue.
  *
  * When random bytes are desired, they are obtained by pulling from
@@ -112,7 +112,6 @@
 
 #include <sys/param.h>
 #include <sys/systm.h>
-#include <sys/conf.h>
 #include <sys/disk.h>
 #include <sys/event.h>
 #include <sys/limits.h>
@@ -554,7 +553,7 @@ resume_randomness(char *buf, size_t buflen)
 	struct timespec ts;
 
 	if (buf && buflen)
-		_rs_seed(buf, sizeof(buf));
+		_rs_seed(buf, buflen);
 	getnanotime(&ts);
 	add_true_randomness(ts.tv_sec);
 	add_true_randomness(ts.tv_nsec);

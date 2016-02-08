@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_nep.c,v 1.16 2015/01/10 22:14:30 kettenis Exp $	*/
+/*	$OpenBSD: if_nep.c,v 1.19 2015/06/24 09:40:54 mpi Exp $	*/
 /*
  * Copyright (c) 2014, 2015 Mark Kettenis
  *
@@ -588,9 +588,8 @@ nep_attach(struct device *parent, struct device *self, void *aux)
 #ifdef __sparc64__
 	if (OF_getprop(PCITAG_NODE(pa->pa_tag), "local-mac-address",
 	    sc->sc_lladdr, ETHER_ADDR_LEN) <= 0)
-#else
-		nep_pci_enaddr(sc, pa);
 #endif
+		nep_pci_enaddr(sc, pa);
 
 	printf(", address %s\n", ether_sprintf(sc->sc_lladdr));
 
@@ -975,6 +974,7 @@ void
 nep_rx_proc(struct nep_softc *sc)
 {
 	struct ifnet *ifp = &sc->sc_ac.ac_if;
+	struct mbuf_list ml = MBUF_LIST_INITIALIZER();
 	uint64_t val;
 	uint16_t count;
 	uint16_t pktread, ptrread;
@@ -1026,18 +1026,10 @@ nep_rx_proc(struct nep_softc *sc)
 		} else {
 			MEXTADD(m, block + off, PAGE_SIZE, M_EXTWR,
 			    nep_extfree, block);
-			m->m_pkthdr.rcvif = ifp;
 			m->m_pkthdr.len = m->m_len = len;
 			m->m_data += ETHER_ALIGN;
 
-			ifp->if_ipackets++;
-
-#if NBPFILTER > 0
-			if (ifp->if_bpf)
-				bpf_mtap(ifp->if_bpf, m, BPF_DIRECTION_IN);
-#endif
-
-			ether_input_mbuf(ifp, m);
+			ml_enqueue(&ml, m);
 		}
 
 		if_rxr_put(&sc->sc_rx_ring, 1);
@@ -1053,6 +1045,8 @@ nep_rx_proc(struct nep_softc *sc)
 
 	bus_dmamap_sync(sc->sc_dmat, NEP_DMA_MAP(sc->sc_rcring), 0,
 	    NEP_DMA_LEN(sc->sc_rcring), BUS_DMASYNC_PREREAD);
+
+	if_input(ifp, &ml);
 
 	nep_fill_rx_ring(sc);
 

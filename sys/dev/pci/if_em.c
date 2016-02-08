@@ -31,7 +31,7 @@ POSSIBILITY OF SUCH DAMAGE.
 
 ***************************************************************************/
 
-/* $OpenBSD: if_em.c,v 1.295 2015/02/11 23:21:47 brad Exp $ */
+/* $OpenBSD: if_em.c,v 1.299 2015/06/24 09:40:54 mpi Exp $ */
 /* $FreeBSD: if_em.c,v 1.46 2004/09/29 18:28:28 mlaier Exp $ */
 
 #include <dev/pci/if_em.h>
@@ -187,7 +187,10 @@ const struct pci_matchid em_devices[] = {
 	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_ICH10_R_BM_V },
 	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_EP80579_LAN_1 },
 	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_EP80579_LAN_2 },
-	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_EP80579_LAN_3 }
+	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_EP80579_LAN_3 },
+	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_EP80579_LAN_4 },
+	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_EP80579_LAN_5 },
+	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_EP80579_LAN_6 }
 };
 
 /*********************************************************************
@@ -298,6 +301,8 @@ em_defer_attach(struct device *self)
 	pci_chipset_tag_t	pc = pa->pa_pc;
 	void *gcu;
 
+	INIT_DEBUGOUT("em_defer_attach: begin");
+
 	if ((gcu = em_lookup_gcu(self)) == 0) {
 		printf("%s: No GCU found, defered attachment failed\n",
 		    sc->sc_dv.dv_xname);
@@ -321,9 +326,9 @@ em_defer_attach(struct device *self)
 
 	em_setup_interface(sc);			
 
-	em_update_link_status(sc);		
-
 	em_setup_link(&sc->hw);			
+
+	em_update_link_status(sc);
 }
 
 /*********************************************************************
@@ -1775,7 +1780,8 @@ em_hardware_init(struct em_softc *sc)
 	sc->tx_fifo_head = 0;
 
 	/* Make sure we have a good EEPROM before we read from it */
-	if (em_validate_eeprom_checksum(&sc->hw) < 0) {
+	if (em_get_flash_presence_i210(&sc->hw) &&
+	    em_validate_eeprom_checksum(&sc->hw) < 0) {
 		/*
 		 * Some PCIe parts fail the first check due to
 		 * the link being in sleep state, call it again,
@@ -1788,7 +1794,8 @@ em_hardware_init(struct em_softc *sc)
 		}
 	}
 
-	if (em_read_part_num(&sc->hw, &(sc->part_num)) < 0) {
+	if (em_get_flash_presence_i210(&sc->hw) &&
+	    em_read_part_num(&sc->hw, &(sc->part_num)) < 0) {
 		printf("%s: EEPROM read error while reading part number\n",
 		       sc->sc_dv.dv_xname);
 		return (EIO);
@@ -2597,6 +2604,7 @@ int
 em_setup_receive_structures(struct em_softc *sc)
 {
 	struct ifnet *ifp = &sc->interface_data.ac_if;
+	u_int lwm;
 
 	memset(sc->rx_desc_base, 0,
 	    sizeof(struct em_rx_desc) * sc->num_rx_desc);
@@ -2608,8 +2616,8 @@ em_setup_receive_structures(struct em_softc *sc)
 	sc->next_rx_desc_to_check = 0;
 	sc->last_rx_desc_filled = sc->num_rx_desc - 1;
 
-	if_rxr_init(&sc->rx_ring, 2 * ((ifp->if_hardmtu / MCLBYTES) + 1),
-	    sc->num_rx_desc);
+	lwm = max(4, 2 * ((ifp->if_hardmtu / MCLBYTES) + 1));
+	if_rxr_init(&sc->rx_ring, lwm, sc->num_rx_desc);
 
 	if (em_rxfill(sc) == 0) {
 		printf("%s: unable to fill any rx descriptors\n",
@@ -2961,8 +2969,6 @@ em_rxeof(struct em_softc *sc)
 			}
 
 			if (eop) {
-				ifp->if_ipackets++;
-
 				m = sc->fmp;
 
 				em_receive_checksum(sc, desc, m);

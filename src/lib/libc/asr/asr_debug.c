@@ -1,4 +1,4 @@
-/*	$OpenBSD: asr_debug.c,v 1.17 2014/03/26 18:13:15 eric Exp $	*/
+/*	$OpenBSD: asr_debug.c,v 1.19 2015/06/20 01:16:25 jca Exp $	*/
 /*
  * Copyright (c) 2012 Eric Faurot <eric@openbsd.org>
  *
@@ -219,7 +219,7 @@ asr_dump_packet(FILE *f, const void *data, size_t len)
 }
 
 const char *
-print_sockaddr(const struct sockaddr *sa, char *buf, size_t len)
+asr_print_sockaddr(const struct sockaddr *sa, char *buf, size_t len)
 {
 	char	h[256];
 	int	portno;
@@ -300,9 +300,8 @@ asr_dump_config(FILE *f, struct asr *a)
 		    ac->ac_nstimeout,
 		    ac->ac_nsretries);
 	for (i = 0; i < ac->ac_nscount; i++)
-		fprintf(f, "	%s\n", print_sockaddr(ac->ac_ns[i], buf,
+		fprintf(f, "	%s\n", asr_print_sockaddr(ac->ac_ns[i], buf,
 		    sizeof buf));
-	fprintf(f, "HOSTFILE %s\n", ac->ac_hostfile);
 	fprintf(f, "LOOKUP %s", ac->ac_db);
 	fprintf(f, "\n------------------------------------\n");
 }

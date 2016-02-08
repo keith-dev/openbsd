@@ -1,4 +1,4 @@
-/*	$OpenBSD: openpic.c,v 1.76 2015/01/04 13:01:42 mpi Exp $	*/
+/*	$OpenBSD: openpic.c,v 1.82 2015/06/25 08:56:33 mpi Exp $	*/
 
 /*-
  * Copyright (c) 2008 Dale Rahn <drahn@openbsd.org>
@@ -37,15 +37,16 @@
  *	@(#)isa.c	7.2 (Berkeley) 5/12/91
  */
 
+#include "hpb.h"
+
 #include <sys/param.h>
 #include <sys/device.h>
 #include <sys/systm.h>
 #include <sys/malloc.h>
+#include <sys/atomic.h>
 
 #include <uvm/uvm_extern.h>
-#include <ddb/db_var.h>
 
-#include <machine/atomic.h>
 #include <machine/autoconf.h>
 #include <machine/intr.h>
 #include <machine/psl.h>
@@ -53,6 +54,12 @@
 #include <dev/ofw/openfirm.h>
 
 #include <macppc/dev/openpicreg.h>
+
+#ifdef OPENPIC_DEBUG
+#define DPRINTF(x...)	do { printf(x); } while(0)
+#else
+#define DPRINTF(x...)
+#endif
 
 #define ICU_LEN 128
 int openpic_numirq = ICU_LEN;
@@ -62,59 +69,76 @@ int openpic_pri_share[IPL_NUM];
 
 struct intrq openpic_handler[ICU_LEN];
 
-void openpic_calc_mask(void);
-
-ppc_splraise_t openpic_splraise;
-ppc_spllower_t openpic_spllower;
-ppc_splx_t openpic_splx;
-
-/* IRQ vector used for inter-processor interrupts. */
-#define IPI_VECTOR_NOP	64
-#define IPI_VECTOR_DDB	65
-#ifdef MULTIPROCESSOR
-static struct evcount ipi_ddb[PPC_MAXPROCS];
-static struct evcount ipi_nop[PPC_MAXPROCS];
-static int ipi_nopirq = IPI_VECTOR_NOP;
-static int ipi_ddbirq = IPI_VECTOR_DDB;
-#endif
-struct evcount openpic_spurious;
-int openpic_spurious_irq = 255;
-
-void	openpic_enable_irq(int, int);
-void	openpic_disable_irq(int);
-void	openpic_init(void);
-void	openpic_set_priority(int, int);
-void	openpic_ipi_ddb(void);
-void	*openpic_intr_establish(void *, int, int, int, int (*)(void *),
-    void *, const char *);
-
-typedef void  (void_f) (void);
-extern void_f *pending_int_f;
-
-vaddr_t openpic_base;
-void	openpic_intr_disestablish( void *lcp, void *arg);
-void	openpic_collect_preconf_intr(void);
-int	openpic_big_endian;
-#ifdef MULTIPROCESSOR
-intr_send_ipi_t openpic_send_ipi;
-#endif
-
-u_int openpic_read(int reg);
-void openpic_write(int reg, u_int val);
-
 struct openpic_softc {
 	struct device sc_dev;
 };
 
+vaddr_t openpic_base;
+int	openpic_big_endian;
+struct	evcount openpic_spurious;
+int	openpic_spurious_irq = 255;
+
 int	openpic_match(struct device *parent, void *cf, void *aux);
 void	openpic_attach(struct device *, struct device *, void *);
+
+int	openpic_splraise(int);
+int	openpic_spllower(int);
+void	openpic_splx(int);
+
+u_int	openpic_read(int reg);
+void	openpic_write(int reg, u_int val);
+
+void	openpic_acknowledge_irq(int, int);
+void	openpic_enable_irq(int, int, int);
+void	openpic_disable_irq(int, int);
+
+void	openpic_calc_mask(void);
+void	openpic_set_priority(int, int);
+void	*openpic_intr_establish(void *, int, int, int, int (*)(void *), void *,
+	    const char *);
+void	openpic_intr_disestablish(void *, void *);
 void	openpic_collect_preconf_intr(void);
 void	openpic_ext_intr(void);
+int	openpic_ext_intr_handler(struct intrhand *, int, int *);
 
-struct cfattach openpic_ca = {
-	sizeof(struct openpic_softc),
-	openpic_match,
-	openpic_attach
+/* Generic IRQ management routines. */
+void	openpic_gen_acknowledge_irq(int, int);
+void	openpic_gen_enable_irq(int, int, int);
+void	openpic_gen_disable_irq(int, int);
+
+#if NHPB > 0
+/* CPC945 IRQ management routines. */
+void	openpic_cpc945_acknowledge_irq(int, int);
+void	openpic_cpc945_enable_irq(int, int, int);
+void	openpic_cpc945_disable_irq(int, int);
+#endif /* NHPB */
+
+struct openpic_ops {
+	void	(*acknowledge_irq)(int, int);
+	void	(*enable_irq)(int, int, int);
+	void	(*disable_irq)(int, int);
+} openpic_ops = {
+	openpic_gen_acknowledge_irq,
+	openpic_gen_enable_irq,
+	openpic_gen_disable_irq
+};
+
+#ifdef MULTIPROCESSOR
+void	openpic_ipi_ddb(void);
+
+/* IRQ vector used for inter-processor interrupts. */
+#define IPI_VECTOR_NOP	64
+#define IPI_VECTOR_DDB	65
+
+static struct evcount ipi_count;
+
+static int ipi_irq = IPI_VECTOR_NOP;
+
+intr_send_ipi_t openpic_send_ipi;
+#endif /* MULTIPROCESSOR */
+
+const struct cfattach openpic_ca = {
+	sizeof(struct openpic_softc), openpic_match, openpic_attach
 };
 
 struct cfdriver openpic_cd = {
@@ -126,7 +150,7 @@ openpic_read(int reg)
 {
 	char *addr = (void *)(openpic_base + reg);
 
-	asm volatile("eieio"::: "memory");
+	membar_sync();
 	if (openpic_big_endian)
 		return in32(addr);
 	else
@@ -142,7 +166,7 @@ openpic_write(int reg, u_int val)
 		out32(addr, val);
 	else
 		out32rb(addr, val);
-	asm volatile("eieio"::: "memory");
+	membar_sync();
 }
 
 static inline int
@@ -185,18 +209,27 @@ openpic_match(struct device *parent, void *cf, void *aux)
 }
 
 void
-openpic_attach(struct device *parent, struct device  *self, void *aux)
+openpic_attach(struct device *parent, struct device *self, void *aux)
 {
 	struct cpu_info *ci = curcpu();
 	struct confargs *ca = aux;
-	u_int32_t reg;
+	struct intrq *iq;
+	uint32_t reg = 0;
+	int i, irq;
+	u_int x;
 
-	reg = 0;
 	if (OF_getprop(ca->ca_node, "big-endian", &reg, sizeof reg) == 0)
 		openpic_big_endian = 1;
 
 	openpic_base = (vaddr_t) mapiodev (ca->ca_baseaddr +
 			ca->ca_reg[0], 0x40000);
+
+	/* Reset the PIC */
+	x = openpic_read(OPENPIC_CONFIG) | OPENPIC_CONFIG_RESET;
+	openpic_write(OPENPIC_CONFIG, x);
+
+	while (openpic_read(OPENPIC_CONFIG) & OPENPIC_CONFIG_RESET)
+		delay(100);
 
 	/* openpic may support more than 128 interupts but driver doesn't */
 	openpic_numirq = ((openpic_read(OPENPIC_FEATURE) >> 16) & 0x7f)+1;
@@ -206,12 +239,81 @@ openpic_attach(struct device *parent, struct device  *self, void *aux)
 	    openpic_read(OPENPIC_FEATURE),
 		openpic_big_endian ? "BE" : "LE" );
 
-	openpic_init();
+	openpic_set_priority(ci->ci_cpuid, 15);
+
+	/* disable all interrupts */
+	for (irq = 0; irq < openpic_numirq; irq++)
+		openpic_write(OPENPIC_SRC_VECTOR(irq), OPENPIC_IMASK);
+
+	for (i = 0; i < openpic_numirq; i++) {
+		iq = &openpic_handler[i];
+		TAILQ_INIT(&iq->iq_list);
+	}
+
+	/* we don't need 8259 pass through mode */
+	x = openpic_read(OPENPIC_CONFIG);
+	x |= OPENPIC_CONFIG_8259_PASSTHRU_DISABLE;
+	openpic_write(OPENPIC_CONFIG, x);
+
+	/* initialize all vectors to something sane */
+	for (irq = 0; irq < ICU_LEN; irq++) {
+		x = irq;
+		x |= OPENPIC_IMASK;
+		x |= OPENPIC_POLARITY_NEGATIVE;
+		x |= OPENPIC_SENSE_LEVEL;
+		x |= 8 << OPENPIC_PRIORITY_SHIFT;
+		openpic_write(OPENPIC_SRC_VECTOR(irq), x);
+	}
+
+	/* send all interrupts to cpu 0 */
+	for (irq = 0; irq < openpic_numirq; irq++)
+		openpic_write(OPENPIC_IDEST(irq), 1 << 0);
+
+	/* clear all pending interrunts */
+	for (irq = 0; irq < ICU_LEN; irq++) {
+		openpic_read_irq(ci->ci_cpuid);
+		openpic_eoi(ci->ci_cpuid);
+	}
+
+#ifdef MULTIPROCESSOR
+	/* Set up inter-processor interrupts. */
+	/* IPI0 - NOP */
+	x = IPI_VECTOR_NOP;
+	x |= 15 << OPENPIC_PRIORITY_SHIFT;
+	openpic_write(OPENPIC_IPI_VECTOR(0), x);
+	/* IPI1 - DDB */
+	x = IPI_VECTOR_DDB;
+	x |= 15 << OPENPIC_PRIORITY_SHIFT;
+	openpic_write(OPENPIC_IPI_VECTOR(1), x);
+
+	evcount_attach(&ipi_count, "ipi", &ipi_irq);
+#endif
+
+	/* clear all pending interrunts */
+	for (irq = 0; irq < ICU_LEN; irq++) {
+		openpic_read_irq(0);
+		openpic_eoi(0);
+	}
+
+#if 0
+	openpic_write(OPENPIC_SPURIOUS_VECTOR, 255);
+#endif
+
+#if NHPB > 0
+	/* Only U4 systems have a big-endian MPIC. */
+	if (openpic_big_endian) {
+		openpic_ops.acknowledge_irq = openpic_cpc945_acknowledge_irq;
+		openpic_ops.enable_irq = openpic_cpc945_enable_irq;
+		openpic_ops.disable_irq = openpic_cpc945_disable_irq;
+	}
+#endif
+
+	install_extint(openpic_ext_intr);
+
+	openpic_set_priority(ci->ci_cpuid, 0);
 
 	intr_establish_func  = openpic_intr_establish;
-	intr_disestablish_func  = openpic_intr_disestablish;
-	mac_intr_establish_func  = openpic_intr_establish;
-	mac_intr_disestablish_func  = openpic_intr_disestablish;
+	intr_disestablish_func = openpic_intr_disestablish;
 #ifdef MULTIPROCESSOR
 	intr_send_ipi_func = openpic_send_ipi;
 #endif
@@ -293,12 +395,10 @@ openpic_collect_preconf_intr()
 {
 	int i;
 	for (i = 0; i < ppc_configed_intr_cnt; i++) {
-#ifdef DEBUG
-		printf("\n\t%s irq %d level %d fun %x arg %x",
+		DPRINTF("\n\t%s irq %d level %d fun %p arg %p",
 		    ppc_configed_intr[i].ih_what, ppc_configed_intr[i].ih_irq,
 		    ppc_configed_intr[i].ih_level, ppc_configed_intr[i].ih_fun,
 		    ppc_configed_intr[i].ih_arg);
-#endif
 		openpic_intr_establish(NULL, ppc_configed_intr[i].ih_irq,
 		    IST_LEVEL, ppc_configed_intr[i].ih_level,
 		    ppc_configed_intr[i].ih_fun, ppc_configed_intr[i].ih_arg,
@@ -315,7 +415,7 @@ openpic_intr_establish(void *lcv, int irq, int type, int level,
 {
 	struct intrhand *ih;
 	struct intrq *iq;
-	int s;
+	int s, flags;
 
 	if (!LEGAL_IRQ(irq) || type == IST_NONE) {
 		printf("%s: bogus irq %d or type %d", __func__, irq, type);
@@ -326,8 +426,8 @@ openpic_intr_establish(void *lcv, int irq, int type, int level,
 	ih = malloc(sizeof *ih, M_DEVBUF, cold ? M_NOWAIT : M_WAITOK);
 	if (ih == NULL)
 		panic("%s: can't malloc handler info", __func__);
-	iq = &openpic_handler[irq];
 
+	iq = &openpic_handler[irq];
 	switch (iq->iq_ist) {
 	case IST_NONE:
 		iq->iq_ist = type;
@@ -346,9 +446,15 @@ openpic_intr_establish(void *lcv, int irq, int type, int level,
 		break;
 	}
 
+	flags = level & IPL_MPSAFE;
+	level &= ~IPL_MPSAFE;
+
+	KASSERT(level <= IPL_TTY || level >= IPL_CLOCK || flags & IPL_MPSAFE);
+
 	ih->ih_fun = ih_fun;
 	ih->ih_arg = ih_arg;
 	ih->ih_level = level;
+	ih->ih_flags = flags;
 	ih->ih_irq = irq;
 
 	evcount_attach(&ih->ih_count, name, &ih->ih_irq);
@@ -436,12 +542,12 @@ openpic_calc_mask()
 		if (maxipl == IPL_NONE) {
 			minipl = IPL_NONE; /* Interrupt not enabled */
 
-			openpic_disable_irq(irq);
+			openpic_disable_irq(irq, iq->iq_ist);
 		} else {
 			for (i = minipl; i <= maxipl; i++) {
 				openpic_pri_share[i] = maxipl;
 			}
-			openpic_enable_irq(irq, maxipl);
+			openpic_enable_irq(irq, iq->iq_ist, maxipl);
 		}
 
 		iq->iq_ipl = maxipl;
@@ -452,13 +558,19 @@ openpic_calc_mask()
 }
 
 void
-openpic_enable_irq(int irq, int pri)
+openpic_gen_acknowledge_irq(int irq, int cpuid)
+{
+	openpic_eoi(cpuid);
+}
+
+void
+openpic_gen_enable_irq(int irq, int ist, int pri)
 {
 	u_int x;
-	struct intrq *iq = &openpic_handler[irq];
 
 	x = irq;
-	if (iq->iq_ist == IST_LEVEL)
+
+	if (ist == IST_LEVEL)
 		x |= OPENPIC_SENSE_LEVEL;
 	else
 		x |= OPENPIC_SENSE_EDGE;
@@ -468,7 +580,7 @@ openpic_enable_irq(int irq, int pri)
 }
 
 void
-openpic_disable_irq(int irq)
+openpic_gen_disable_irq(int irq, int ist)
 {
 	u_int x;
 
@@ -483,30 +595,11 @@ openpic_set_priority(int cpu, int pri)
 	openpic_write(OPENPIC_CPU_PRIORITY(cpu), pri);
 }
 
-#ifdef MULTIPROCESSOR
-void
-openpic_send_ipi(struct cpu_info *ci, int id)
-{
-	switch (id) {
-	case PPC_IPI_NOP:
-		id = 0;
-		break;
-	case PPC_IPI_DDB:
-		id = 1;
-		break;
-	default:
-		panic("invalid ipi send to cpu %d %d", ci->ci_cpuid, id);
-	}
-		
-	openpic_write(OPENPIC_IPI(curcpu()->ci_cpuid, id), 1 << ci->ci_cpuid);
-}
-
-#endif
-
 int openpic_irqnest[PPC_MAXPROCS];
 int openpic_irqloop[PPC_MAXPROCS];
+
 void
-openpic_ext_intr()
+openpic_ext_intr(void)
 {
 	struct cpu_info *ci = curcpu();
 	int irq, pcpl, ret;
@@ -523,7 +616,7 @@ openpic_ext_intr()
 
 	while (irq != 255) {
 		openpic_irqloop[ci->ci_cpuid]++;
-#ifdef DEBUG
+#ifdef OPENPIC_DEBUG
 		if (openpic_irqloop[ci->ci_cpuid] > 20 ||
 		    openpic_irqnest[ci->ci_cpuid] > 3) {
 			printf("irqloop %d irqnest %d\n",
@@ -532,60 +625,47 @@ openpic_ext_intr()
 		}
 #endif
 		if (openpic_irqloop[ci->ci_cpuid] > 20) {
-#ifdef DEBUG
-			printf("irqloop %d irqnest %d: returning\n",
+			DPRINTF("irqloop %d irqnest %d: returning\n",
 			    openpic_irqloop[ci->ci_cpuid],
 			    openpic_irqnest[ci->ci_cpuid]);
-#endif
 			openpic_irqnest[ci->ci_cpuid]--;
 			return;
 		}
 #ifdef MULTIPROCESSOR
-		if (irq == IPI_VECTOR_NOP) {
-			ipi_nop[ci->ci_cpuid].ec_count++;
+		if (irq == IPI_VECTOR_NOP || irq == IPI_VECTOR_DDB) {
+			ipi_count.ec_count++;
 			openpic_eoi(ci->ci_cpuid);
-			irq = openpic_read_irq(ci->ci_cpuid);
-			continue;
-		}
-		if (irq == IPI_VECTOR_DDB) {
-			ipi_ddb[ci->ci_cpuid].ec_count++;
-			openpic_eoi(ci->ci_cpuid);
-			openpic_ipi_ddb();
+			if (irq == IPI_VECTOR_DDB)
+				openpic_ipi_ddb();
 			irq = openpic_read_irq(ci->ci_cpuid);
 			continue;
 		}
 #endif
 		iq = &openpic_handler[irq];
 
-		if (iq->iq_ipl <= ci->ci_cpl)
+#ifdef OPENPIC_DEBUG
+		if (iq->iq_ipl <= pcpl)
 			printf("invalid interrupt %d lvl %d at %d hw %d\n",
-			    irq, iq->iq_ipl, ci->ci_cpl,
+			    irq, iq->iq_ipl, pcpl,
 			    openpic_read(OPENPIC_CPU_PRIORITY(ci->ci_cpuid)));
+#endif
+
 		if (iq->iq_ipl > maxipl)
 			maxipl = iq->iq_ipl;
 		openpic_splraise(iq->iq_ipl);
-		openpic_eoi(ci->ci_cpuid);
+		openpic_acknowledge_irq(irq, ci->ci_cpuid);
 
 		spurious = 1;
 		TAILQ_FOREACH(ih, &iq->iq_list, ih_list) {
 			ppc_intr_enable(1);
-			KERNEL_LOCK();
-			ret = (*ih->ih_fun)(ih->ih_arg);
-			if (ret) {
-				ih->ih_count.ec_count++;
-				spurious = 0;
- 			}
-			KERNEL_UNLOCK();
-
+			ret = openpic_ext_intr_handler(ih, pcpl, &spurious);
 			(void)ppc_intr_disable();
 			if (intr_shared_edge == 00 && ret == 1)
 				break;
  		}
 		if (spurious) {
 			openpic_spurious.ec_count++;
-#ifdef OPENPIC_NOISY
-			printf("spurious intr %d\n", irq);
-#endif
+			DPRINTF("spurious intr %d\n", irq);
 		}
 
 		uvmexp.intrs++;
@@ -598,91 +678,114 @@ openpic_ext_intr()
 	openpic_irqnest[ci->ci_cpuid]--;
 }
 
-void
-openpic_init()
+int
+openpic_ext_intr_handler(struct intrhand *ih, int pcpl, int *spurious)
 {
-	struct cpu_info *ci = curcpu();
-	struct intrq *iq;
-	int irq;
-	u_int x;
-	int i;
+	int ret;
+#ifdef MULTIPROCESSOR
+	int need_lock;
 
-	openpic_set_priority(ci->ci_cpuid, 15);
+	if (ih->ih_flags & IPL_MPSAFE)
+		need_lock = 0;
+	else
+		need_lock = pcpl < IPL_SCHED;
 
-	/* disable all interrupts */
-	for (irq = 0; irq < openpic_numirq; irq++)
-		openpic_write(OPENPIC_SRC_VECTOR(irq), OPENPIC_IMASK);
+	if (need_lock)
+		KERNEL_LOCK();
+#endif
 
-	for (i = 0; i < openpic_numirq; i++) {
-		iq = &openpic_handler[i];
-		TAILQ_INIT(&iq->iq_list);
-	}
-
-	/* we don't need 8259 pass through mode */
-	x = openpic_read(OPENPIC_CONFIG);
-	x |= OPENPIC_CONFIG_8259_PASSTHRU_DISABLE;
-	openpic_write(OPENPIC_CONFIG, x);
-
-	/* initialize all vectors to something sane */
-	for (irq = 0; irq < ICU_LEN; irq++) {
-		x = irq;
-		x |= OPENPIC_IMASK;
-		x |= OPENPIC_POLARITY_NEGATIVE;
-		x |= OPENPIC_SENSE_LEVEL;
-		x |= 8 << OPENPIC_PRIORITY_SHIFT;
-		openpic_write(OPENPIC_SRC_VECTOR(irq), x);
-	}
-
-	/* send all interrupts to cpu 0 */
-	for (irq = 0; irq < openpic_numirq; irq++)
-		openpic_write(OPENPIC_IDEST(irq), 1 << 0);
-
-	/* clear all pending interrunts */
-	for (irq = 0; irq < ICU_LEN; irq++) {
-		openpic_read_irq(ci->ci_cpuid);
-		openpic_eoi(ci->ci_cpuid);
+	ret = (*ih->ih_fun)(ih->ih_arg);
+	if (ret) {
+		ih->ih_count.ec_count++;
+		*spurious = 0;
 	}
 
 #ifdef MULTIPROCESSOR
-	/* Set up inter-processor interrupts. */
-	/* IPI0 - NOP */
-	x = IPI_VECTOR_NOP;
-	x |= 15 << OPENPIC_PRIORITY_SHIFT;
-	openpic_write(OPENPIC_IPI_VECTOR(0), x);
-	/* IPI1 - DDB */
-	x = IPI_VECTOR_DDB;
-	x |= 15 << OPENPIC_PRIORITY_SHIFT;
-	openpic_write(OPENPIC_IPI_VECTOR(1), x);
-
-	/* XXX - ncpus */
-	evcount_attach(&ipi_nop[0], "ipi_nop0", &ipi_nopirq);
-	evcount_attach(&ipi_nop[1], "ipi_nop1", &ipi_nopirq);
-	evcount_attach(&ipi_ddb[0], "ipi_ddb0", &ipi_ddbirq);
-	evcount_attach(&ipi_ddb[1], "ipi_ddb1", &ipi_ddbirq);
+	if (need_lock)
+		KERNEL_UNLOCK();
 #endif
 
-	/* clear all pending interrunts */
-	for (irq = 0; irq < ICU_LEN; irq++) {
-		openpic_read_irq(0);
-		openpic_eoi(0);
-	}
-
-#if 0
-	openpic_write(OPENPIC_SPURIOUS_VECTOR, 255);
-#endif
-
-	install_extint(openpic_ext_intr);
-
-	openpic_set_priority(ci->ci_cpuid, 0);
+	return (ret);
 }
 
 void
-openpic_ipi_ddb()
+openpic_acknowledge_irq(int irq, int cpuid)
 {
-#ifdef OPENPIC_NOISY
-	printf("ipi_ddb() called\n");
-#endif
+	(openpic_ops.acknowledge_irq)(irq, cpuid);
+}
+
+void
+openpic_enable_irq(int irq, int ist, int pri)
+{
+	(openpic_ops.enable_irq)(irq, ist, pri);
+}
+
+void
+openpic_disable_irq(int irq, int ist)
+{
+	(openpic_ops.disable_irq)(irq, ist);
+}
+
+#ifdef MULTIPROCESSOR
+void
+openpic_send_ipi(struct cpu_info *ci, int id)
+{
+	switch (id) {
+	case PPC_IPI_NOP:
+		id = 0;
+		break;
+	case PPC_IPI_DDB:
+		id = 1;
+		break;
+	default:
+		panic("invalid ipi send to cpu %d %d", ci->ci_cpuid, id);
+	}
+
+	openpic_write(OPENPIC_IPI(curcpu()->ci_cpuid, id), 1 << ci->ci_cpuid);
+}
+
+void
+openpic_ipi_ddb(void)
+{
 #ifdef DDB
 	Debugger();
 #endif
 }
+#endif /* MULTIPROCESSOR */
+
+#if NHPB > 0
+extern int	hpb_enable_irq(int, int);
+extern int	hpb_disable_irq(int, int);
+extern void	hpb_eoi(int);
+
+void
+openpic_cpc945_acknowledge_irq(int irq, int cpuid)
+{
+	hpb_eoi(irq);
+	openpic_gen_acknowledge_irq(irq, cpuid);
+}
+
+void
+openpic_cpc945_enable_irq(int irq, int ist, int pri)
+{
+	if (hpb_enable_irq(irq, ist)) {
+		u_int x = irq;
+
+		x |= OPENPIC_SENSE_EDGE;
+		x |= OPENPIC_POLARITY_POSITIVE;
+		x |= pri << OPENPIC_PRIORITY_SHIFT;
+		openpic_write(OPENPIC_SRC_VECTOR(irq), x);
+
+		hpb_eoi(irq);
+	} else
+		openpic_gen_enable_irq(irq, ist, pri);
+}
+
+void
+openpic_cpc945_disable_irq(int irq, int ist)
+{
+	hpb_disable_irq(irq, ist);
+	openpic_gen_disable_irq(irq, ist);
+}
+#endif /* NHPB */
+

@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_var.h,v 1.20 2015/02/09 03:09:57 dlg Exp $	*/
+/*	$OpenBSD: if_var.h,v 1.34 2015/07/02 09:40:02 mpi Exp $	*/
 /*	$NetBSD: if.h,v 1.23 1996/05/07 02:40:27 thorpej Exp $	*/
 
 /*
@@ -37,6 +37,7 @@
 #define _NET_IF_VAR_H_
 
 #include <sys/queue.h>
+#include <sys/mbuf.h>
 #ifdef _KERNEL
 #include <net/hfsc.h>
 #endif
@@ -68,8 +69,6 @@
 
 #include <sys/time.h>
 
-struct mbuf;
-struct mbuf_list;
 struct proc;
 struct rtentry;
 struct socket;
@@ -108,7 +107,6 @@ struct	ifqueue {
 	int			 ifq_maxlen;
 	int			 ifq_drops;
 	struct hfsc_if		*ifq_hfsc;
-	struct timeout		*ifq_congestion;
 };
 
 /*
@@ -116,7 +114,8 @@ struct	ifqueue {
  */
 struct ifih {
 	SLIST_ENTRY(ifih) ifih_next;
-	int		(*ifih_input)(struct ifnet *, void *, struct mbuf *);
+	int		(*ifih_input)(struct ifnet *, struct mbuf *);
+	int		  ifih_refcnt;
 };
 
 /*
@@ -154,7 +153,6 @@ struct ifnet {				/* and the entries */
 	int	if_xflags;		/* extra softnet flags */
 	struct	if_data if_data;	/* stats and other data about if */
 	u_int32_t if_hardmtu;		/* maximum MTU device supports */
-	u_int	if_rdomain;		/* routing instance */
 	char	if_description[IFDESCRSIZE]; /* interface description */
 	u_short	if_rtlabelid;		/* next route label */
 	u_int8_t if_priority;
@@ -205,6 +203,7 @@ struct ifnet {				/* and the entries */
 #define	if_noproto	if_data.ifi_noproto
 #define	if_lastchange	if_data.ifi_lastchange
 #define	if_capabilities	if_data.ifi_capabilities
+#define	if_rdomain	if_data.ifi_rdomain
 
 /*
  * The ifaddr structure contains information about one address
@@ -315,17 +314,6 @@ do {									\
 	} while (!(m) && --if_dequeue_prio >= 0);			\
 } while (/* CONSTCOND */0)
 
-#define	IF_INPUT_ENQUEUE(ifq, m)					\
-do {									\
-	if (IF_QFULL(ifq)) {						\
-		IF_DROP(ifq);						\
-		m_freem(m);						\
-		if (!(ifq)->ifq_congestion)				\
-			if_congestion(ifq);				\
-	} else								\
-		IF_ENQUEUE(ifq, m);					\
-} while (/* CONSTCOND */0)
-
 #define	IF_PURGE(ifq)							\
 do {									\
 	struct mbuf *__m0;						\
@@ -392,19 +380,43 @@ do {									\
 /* default interface priorities */
 #define IF_WIRED_DEFAULT_PRIORITY	0
 #define IF_WIRELESS_DEFAULT_PRIORITY	4
+#define IF_CARP_DEFAULT_PRIORITY	15
+
+/*
+ * Network stack input queues.
+ */
+struct	niqueue {
+	struct mbuf_queue	ni_q;
+	u_int			ni_isr;
+};
+
+#define NIQUEUE_INITIALIZER(_len, _isr) \
+    { MBUF_QUEUE_INITIALIZER((_len), IPL_NET), (_isr) }
+
+void		niq_init(struct niqueue *, u_int, u_int);
+int		niq_enqueue(struct niqueue *, struct mbuf *);
+int		niq_enlist(struct niqueue *, struct mbuf_list *);
+
+#define niq_dequeue(_q)			mq_dequeue(&(_q)->ni_q)
+#define niq_dechain(_q)			mq_dechain(&(_q)->ni_q)
+#define niq_delist(_q, _ml)		mq_delist(&(_q)->ni_q, (_ml))
+#define niq_filter(_q, _f, _c)		mq_filter(&(_q)->ni_q, (_f), (_c))
+#define niq_len(_q)			mq_len(&(_q)->ni_q)
+#define niq_drops(_q)			mq_drops(&(_q)->ni_q)
+#define sysctl_niq(_n, _l, _op, _olp, _np, _nl, _niq) \
+    sysctl_mq((_n), (_l), (_op), (_olp), (_np), (_nl), &(_niq)->ni_q)
 
 extern struct ifnet_head ifnet;
 extern struct ifnet *lo0ifp;
 
 void	if_start(struct ifnet *);
+int	if_enqueue(struct ifnet *, struct mbuf *);
 void	if_input(struct ifnet *, struct mbuf_list *);
-
-#define	ether_input_mbuf(ifp, m)        ether_input((ifp), NULL, (m))
 
 void	ether_ifattach(struct ifnet *);
 void	ether_ifdetach(struct ifnet *);
 int	ether_ioctl(struct ifnet *, struct arpcom *, u_long, caddr_t);
-int	ether_input(struct ifnet *, void *, struct mbuf *);
+int	ether_input(struct ifnet *, struct mbuf *);
 int	ether_output(struct ifnet *,
 	    struct mbuf *, struct sockaddr *, struct rtentry *);
 char	*ether_sprintf(u_char *);
@@ -423,9 +435,8 @@ void	if_clone_detach(struct if_clone *);
 int	if_clone_create(const char *);
 int	if_clone_destroy(const char *);
 
-void	if_congestion(struct ifqueue *);
-int     sysctl_ifq(int *, u_int, void *, size_t *, void *, size_t,
-	    struct ifqueue *);
+int     sysctl_mq(int *, u_int, void *, size_t *, void *, size_t,
+	    struct mbuf_queue *);
 
 int	loioctl(struct ifnet *, u_long, caddr_t);
 void	loopattach(int);

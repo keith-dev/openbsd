@@ -1,4 +1,4 @@
-/*	$OpenBSD: pat_rep.c,v 1.37 2015/02/21 22:48:23 guenther Exp $	*/
+/*	$OpenBSD: pat_rep.c,v 1.39 2015/03/17 03:23:17 guenther Exp $	*/
 /*	$NetBSD: pat_rep.c,v 1.4 1995/03/21 09:07:33 cgd Exp $	*/
 
 /*-
@@ -583,6 +583,25 @@ range_match(char *pattern, int test)
 }
 
 /*
+ * has_dotdot()
+ *	Returns true iff the supplied path contains a ".." component.
+ */
+
+int
+has_dotdot(const char *path)
+{
+	const char *p = path;
+
+	while ((p = strstr(p, "..")) != NULL) {
+		if ((p == path || p[-1] == '/') &&
+		    (p[2] == '/' || p[2] == '\0'))
+			return (1);
+		p += 2;
+	}
+	return (0);
+}
+
+/*
  * mod_name()
  *	modify a selected file name. first attempt to apply replacement string
  *	expressions, then apply interactive file rename. We apply replacement
@@ -619,7 +638,7 @@ mod_name(ARCHD *arcn)
 		}
 	}
 	while (rmleadslash && arcn->ln_name[0] == '/' &&
-	    (arcn->type == PAX_HLK || arcn->type == PAX_HRG)) {
+	    PAX_IS_HARDLINK(arcn->type)) {
 		if (arcn->ln_name[1] == '\0') {
 			arcn->ln_name[0] = '.';
 		} else {
@@ -630,6 +649,30 @@ mod_name(ARCHD *arcn)
 		if (rmleadslash < 2) {
 			rmleadslash = 2;
 			paxwarn(0, "Removing leading / from absolute path names in the archive");
+		}
+	}
+	if (rmleadslash) {
+		const char *last = NULL;
+		const char *p = arcn->name;
+
+		while ((p = strstr(p, "..")) != NULL) {
+			if ((p == arcn->name || p[-1] == '/') &&
+			    (p[2] == '/' || p[2] == '\0'))
+				last = p + 2;
+			p += 2;
+		}
+		if (last != NULL) {
+			last++;
+			paxwarn(1, "Removing leading \"%.*s\"",
+			    (int)(last - arcn->name), arcn->name);
+			arcn->nlen = strlen(last);
+			if (arcn->nlen > 0)
+				memmove(arcn->name, last, arcn->nlen + 1);
+			else {
+				arcn->name[0] = '.';
+				arcn->name[1] = '\0';
+				arcn->nlen = 1;
+			}
 		}
 	}
 
@@ -660,10 +703,11 @@ mod_name(ARCHD *arcn)
 		if ((res = rep_name(arcn->name, sizeof(arcn->name), &(arcn->nlen), 1)) != 0)
 			return(res);
 
-		if (((arcn->type == PAX_SLK) || (arcn->type == PAX_HLK) ||
-		    (arcn->type == PAX_HRG)) &&
-		    ((res = rep_name(arcn->ln_name, sizeof(arcn->ln_name), &(arcn->ln_nlen), 0)) != 0))
-			return(res);
+		if (PAX_IS_LINK(arcn->type)) {
+			if ((res = rep_name(arcn->ln_name,
+			    sizeof(arcn->ln_name), &(arcn->ln_nlen), 0)) != 0)
+				return(res);
+		}
 	}
 
 	if (iflag) {
@@ -672,9 +716,9 @@ mod_name(ARCHD *arcn)
 		 */
 		if ((res = tty_rename(arcn)) != 0)
 			return(res);
-		if ((arcn->type == PAX_SLK) || (arcn->type == PAX_HLK) ||
-		    (arcn->type == PAX_HRG))
-			sub_name(arcn->ln_name, &(arcn->ln_nlen), sizeof(arcn->ln_name));
+		if (PAX_IS_LINK(arcn->type))
+			sub_name(arcn->ln_name, &(arcn->ln_nlen),
+			    sizeof(arcn->ln_name));
 	}
 	return(res);
 }
@@ -767,7 +811,7 @@ set_dest(ARCHD *arcn, char *dest_dir, int dir_len)
 	 * if the name they point was moved (or will be moved). It is best to
 	 * leave them alone.
 	 */
-	if ((arcn->type != PAX_HLK) && (arcn->type != PAX_HRG))
+	if (!PAX_IS_HARDLINK(arcn->type))
 		return(0);
 
 	if (fix_path(arcn->ln_name, &(arcn->ln_nlen), dest_dir, dir_len) < 0)

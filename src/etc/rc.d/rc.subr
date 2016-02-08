@@ -1,4 +1,4 @@
-#	$OpenBSD: rc.subr,v 1.92 2015/01/02 14:44:05 ajacoutot Exp $
+#	$OpenBSD: rc.subr,v 1.99 2015/07/15 13:48:16 ajacoutot Exp $
 #
 # Copyright (c) 2010, 2011, 2014 Antoine Jacoutot <ajacoutot@openbsd.org>
 # Copyright (c) 2010, 2011 Ingo Schwarze <schwarze@openbsd.org>
@@ -16,21 +16,29 @@
 # ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
 # OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 
+_rc_actions="start stop restart reload check"
+readonly _rc_actions
+
 _rc_err() {
-	echo "$1" 1>&2
+	[ -n "${1}" ] && echo "${1}" 1>&2
 	[ -n "${2}" ] && exit "${2}" || exit 1
 }
 
-_rc_is_supported() {
-	local _enotsup
-	eval _enotsup=\${rc_$1}
-	[ X"${_enotsup}" != X"NO" ]
+_rc_not_supported() {
+	local _a _enotsup
+	for _a in ${_rc_actions}; do
+		if [ "${1}" == "${_a}" ]; then
+			eval _enotsup=\${rc_$1}
+			break
+		fi
+	done
+	[ X"${_enotsup}" == X"NO" ]
 }
 
 _rc_usage() {
 	local _a _allsup
-	for _a in start stop restart reload check; do
-		_rc_is_supported ${_a} && _allsup="${_allsup:+$_allsup|}${_a}"
+	for _a in ${_rc_actions}; do
+		_rc_not_supported ${_a} || _allsup="${_allsup:+$_allsup|}${_a}"
 	done
 	_rc_err "usage: $0 [-df] ${_allsup}"
 }
@@ -117,8 +125,7 @@ _rc_parse_conf() {
 	set -A _allowed_keys -- \
 		spamd_black pf ipsec check_quotas accounting \
 		multicast_host multicast_router amd_master \
-		pf_rules ipsec_rules shlib_dirs pkg_scripts \
-		nfs_server
+		shlib_dirs pkg_scripts nfs_server
 
 	[ $# -gt 0 ] || set -- /etc/rc.conf /etc/rc.conf.local
 	for _rcfile; do
@@ -150,15 +157,15 @@ rc_start() {
 }
 
 rc_check() {
-	pgrep -q -f "^${pexp}"
+	pgrep -q -xf "${pexp}"
 }
 
 rc_reload() {
-	pkill -HUP -f "^${pexp}"
+	pkill -HUP -xf "${pexp}"
 }
 
 rc_stop() {
-	pkill -f "^${pexp}"
+	pkill -xf "${pexp}"
 }
 
 rc_cmd() {
@@ -168,11 +175,11 @@ rc_cmd() {
 		[ X"${rc_usercheck}" != X"NO" -a X"$1" = "Xcheck" ] || \
 		_rc_err "$0: need root privileges"
 
-	if ! (_rc_is_supported start && _rc_is_supported stop); then
+	if _rc_not_supported start || _rc_not_supported stop; then
 		rc_restart=NO
 	fi
 
-	if ! _rc_is_supported $1; then
+	if _rc_not_supported $1; then
 		[ -n "${INRC}" ] && exit 1
 		_rc_err "$0: $1 is not supported"
 	fi
@@ -191,7 +198,6 @@ rc_cmd() {
 	start)
 		if [ X"${daemon_flags}" = X"NO" ]; then
 			_rc_err "$0: need -f to force $1 since ${_name}_flags=NO"
-			exit 1
 		fi
 		[ -z "${INRC}" ] && _rc_do rc_check && exit 0
 		echo $_n "${INRC:+ }${_name}"
@@ -264,15 +270,16 @@ eval _rcflags=\${${_name}_flags}
 eval _rcuser=\${${_name}_user}
 eval _rctimeout=\${${_name}_timeout}
 
-getcap -f /etc/login.conf ${_name} 1>/dev/null 2>&1 && \
-	daemon_class=${_name}
-
 # set default values; duplicated in rcctl(8)
-[ -z "${daemon_class}" ] && daemon_class=daemon
+getcap -f /etc/login.conf ${_name} 1>/dev/null 2>&1 && \
+	daemon_class=${_name} || daemon_class=daemon
 [ -z "${daemon_user}" ] && daemon_user=root
 [ -z "${daemon_timeout}" ] && daemon_timeout=30
 
-[ -n "${_RC_FORCE}" ] && [ X"${_rcflags}" = X"NO" ] && unset _rcflags
+# use flags from the rc.d script if daemon is not enabled
+[ -n "${_RC_FORCE}" -o "$1" != "start" ] && [ X"${_rcflags}" = X"NO" ] && \
+	unset _rcflags
+
 [ -n "${_rcflags}" ] && daemon_flags=${_rcflags}
 [ -n "${_rcuser}" ] && daemon_user=${_rcuser}
 [ -n "${_rctimeout}" ] && daemon_timeout=${_rctimeout}

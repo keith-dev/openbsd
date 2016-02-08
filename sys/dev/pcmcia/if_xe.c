@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_xe.c,v 1.46 2014/12/22 02:28:52 tedu Exp $	*/
+/*	$OpenBSD: if_xe.c,v 1.52 2015/07/08 07:21:50 mpi Exp $	*/
 
 /*
  * Copyright (c) 1999 Niklas Hallqvist, Brandon Creighton, Job de Haas
@@ -57,7 +57,6 @@
 #include <sys/syslog.h>
 
 #include <net/if.h>
-#include <net/if_dl.h>
 #include <net/if_media.h>
 #include <net/if_types.h>
 
@@ -686,7 +685,6 @@ xe_intr(arg)
 		}
 		tempint = xe_get(sc);
 		recvcount += tempint;
-		ifp->if_ibytes += tempint;
 		esr = bus_space_read_1(sc->sc_bst, sc->sc_bsh,
 		    sc->sc_offset + ESR);
 		rsr = bus_space_read_1(sc->sc_bst, sc->sc_bsh,
@@ -752,6 +750,7 @@ xe_get(sc)
 {
 	u_int8_t rsr;
 	struct mbuf *top, **mp, *m;
+	struct mbuf_list ml = MBUF_LIST_INITIALIZER();
 	struct ifnet *ifp = &sc->sc_arpcom.ac_if;
 	u_int16_t pktlen, len, recvcount = 0;
 	u_int8_t *data;
@@ -772,9 +771,8 @@ xe_get(sc)
 	recvcount += pktlen;
 
 	MGETHDR(m, M_DONTWAIT, MT_DATA);
-	if (m == 0)
+	if (m == NULL)
 		return (recvcount);
-	m->m_pkthdr.rcvif = ifp;
 	m->m_pkthdr.len = pktlen;
 	len = MHLEN;
 	top = 0;
@@ -783,7 +781,7 @@ xe_get(sc)
 	while (pktlen > 0) {
 		if (top) {
 			MGET(m, M_DONTWAIT, MT_DATA);
-			if (m == 0) {
+			if (m == NULL) {
 				m_freem(top);
 				return (recvcount);
 			}
@@ -824,15 +822,10 @@ xe_get(sc)
 	/* Skip Rx packet. */
 	bus_space_write_2(sc->sc_bst, sc->sc_bsh, sc->sc_offset + DO0,
 	    DO_SKIP_RX_PKT);
-	
-	ifp->if_ipackets++;
-	
-#if NBPFILTER > 0
-	if (ifp->if_bpf)
-		bpf_mtap(ifp->if_bpf, top, BPF_DIRECTION_IN);
-#endif
-	
-	ether_input_mbuf(ifp, top);
+
+	ml_enqueue(&ml, top);
+	if_input(ifp, &ml);
+
 	return (recvcount);
 }
 
@@ -1098,7 +1091,7 @@ xe_start(ifp)
 
 	/* Peek at the next packet. */
 	IFQ_POLL(&ifp->if_snd, m0);
-	if (m0 == 0)
+	if (m0 == NULL)
 		return;
 
 	/* We need to use m->m_pkthdr.len, so require the header. */
@@ -1142,7 +1135,7 @@ xe_start(ifp)
 		if (m->m_len & 1)
 			bus_space_write_1(bst, bsh, offset + EDP,
 			    *(mtod(m, u_int8_t *) + m->m_len - 1));
-		MFREE(m, m0);
+		m0 = m_free(m);
 		m = m0;
 	}
 	if (sc->sc_flags & XEF_MOHAWK)

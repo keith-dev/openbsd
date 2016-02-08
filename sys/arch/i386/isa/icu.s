@@ -1,4 +1,4 @@
-/*	$OpenBSD: icu.s,v 1.31 2010/12/21 14:56:23 claudio Exp $	*/
+/*	$OpenBSD: icu.s,v 1.33 2015/07/16 05:10:14 guenther Exp $	*/
 /*	$NetBSD: icu.s,v 1.45 1996/01/07 03:59:34 mycroft Exp $	*/
 
 /*-
@@ -103,10 +103,8 @@ IDTVEC(doreti)
 	jz	3f
 4:	CLEAR_ASTPENDING(%ecx)
 	sti
-	movl	$T_ASTFLT,TF_TRAPNO(%esp)	/* XXX undo later. */
-	/* Pushed T_ASTFLT into tf_trapno on entry. */
 	pushl	%esp
-	call	_C_LABEL(trap)
+	call	_C_LABEL(ast)
 	addl	$4,%esp
 	cli
 	jmp	2b
@@ -121,30 +119,18 @@ IDTVEC(softtty)
 	movl	$IPL_SOFTTTY,%eax
 	movl	%eax,CPL
 	sti
-#ifdef MULTIPROCESSOR
-	call	_C_LABEL(i386_softintlock)
-#endif
 	pushl	$I386_SOFTINTR_SOFTTTY
 	call	_C_LABEL(softintr_dispatch)
 	addl	$4,%esp
-#ifdef MULTIPROCESSOR	
-	call	_C_LABEL(i386_softintunlock)
-#endif
 	jmp	*%esi
 
 IDTVEC(softnet)
 	movl	$IPL_SOFTNET,%eax
 	movl	%eax,CPL
 	sti
-#ifdef MULTIPROCESSOR
-	call	_C_LABEL(i386_softintlock)
-#endif
 	pushl	$I386_SOFTINTR_SOFTNET
 	call	_C_LABEL(softintr_dispatch)
 	addl	$4,%esp
-#ifdef MULTIPROCESSOR	
-	call	_C_LABEL(i386_softintunlock)
-#endif
 	jmp	*%esi
 #undef DONETISR
 
@@ -152,14 +138,8 @@ IDTVEC(softclock)
 	movl	$IPL_SOFTCLOCK,%eax
 	movl	%eax,CPL
 	sti
-#ifdef MULTIPROCESSOR
-	call	_C_LABEL(i386_softintlock)
-#endif
 	pushl	$I386_SOFTINTR_SOFTCLOCK
 	call	_C_LABEL(softintr_dispatch)
 	addl	$4,%esp
-#ifdef MULTIPROCESSOR	
-	call	_C_LABEL(i386_softintunlock)
-#endif
 	jmp	*%esi
 

@@ -1,4 +1,4 @@
-/*	$OpenBSD: mpi.c,v 1.199 2015/01/27 03:17:36 dlg Exp $ */
+/*	$OpenBSD: mpi.c,v 1.201 2015/05/04 03:59:42 jsg Exp $ */
 
 /*
  * Copyright (c) 2005, 2006, 2009 David Gwynne <dlg@openbsd.org>
@@ -23,7 +23,6 @@
 #include <sys/systm.h>
 #include <sys/buf.h>
 #include <sys/device.h>
-#include <sys/ioctl.h>
 #include <sys/malloc.h>
 #include <sys/kernel.h>
 #include <sys/mutex.h>
@@ -1542,7 +1541,7 @@ mpi_load_xs(struct mpi_ccb *ccb)
 
 	error = bus_dmamap_load(sc->sc_dmat, dmap,
 	    xs->data, xs->datalen, NULL, BUS_DMA_STREAMING |
-	    (xs->flags & SCSI_NOSLEEP) ? BUS_DMA_NOWAIT : BUS_DMA_WAITOK);
+	    ((xs->flags & SCSI_NOSLEEP) ? BUS_DMA_NOWAIT : BUS_DMA_WAITOK));
 	if (error) {
 		printf("%s: error %d loading dmamap\n", DEVNAME(sc), error);
 		return (1);

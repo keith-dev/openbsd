@@ -1,4 +1,4 @@
-/*	$OpenBSD: kern_exec.c,v 1.160 2015/02/09 11:52:47 miod Exp $	*/
+/*	$OpenBSD: kern_exec.c,v 1.163 2015/07/22 05:31:33 deraadt Exp $	*/
 /*	$NetBSD: kern_exec.c,v 1.75 1996/02/09 18:59:28 christos Exp $	*/
 
 /*-
@@ -60,8 +60,6 @@
 #include <sys/syscallargs.h>
 
 #include <uvm/uvm_extern.h>
-
-#include <machine/reg.h>
 
 #ifdef __HAVE_MD_TCB
 # include <machine/tcb.h>
@@ -501,6 +499,8 @@ sys_execve(struct proc *p, void *v, register_t *retval)
 	fdcloseexec(p);		/* handle close on exec */
 	execsigs(p);		/* reset caught signals */
 	TCB_SET(p, NULL);	/* reset the TCB address */
+	pr->ps_kbind_addr = 0;	/* reset the kbind bits */
+	pr->ps_kbind_cookie = 0;
 
 	/* set command name & other accounting info */
 	memset(p->p_comm, 0, sizeof(p->p_comm));
@@ -785,12 +785,12 @@ exec_abort:
 
 free_pack_abort:
 	free(pack.ep_hdr, M_EXEC, 0);
+	if (pathbuf != NULL)
+		pool_put(&namei_pool, pathbuf);
 	exit1(p, W_EXITCODE(0, SIGABRT), EXIT_NORMAL);
 
 	/* NOTREACHED */
 	atomic_clearbits_int(&pr->ps_flags, PS_INEXEC);
-	if (pathbuf != NULL)
-		pool_put(&namei_pool, pathbuf);
 
 	return (0);
 }

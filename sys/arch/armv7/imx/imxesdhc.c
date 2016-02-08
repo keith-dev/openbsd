@@ -1,4 +1,4 @@
-/*	$OpenBSD: imxesdhc.c,v 1.5 2015/01/02 01:57:33 jsg Exp $	*/
+/*	$OpenBSD: imxesdhc.c,v 1.12 2015/05/30 03:20:54 jsg Exp $	*/
 /*
  * Copyright (c) 2009 Dale Rahn <drahn@openbsd.org>
  * Copyright (c) 2006 Uwe Stuehler <uwe@openbsd.org>
@@ -127,6 +127,7 @@
 #define SDHC_PROT_CTRL_DMASEL_SDMA_MASK		(0x3 << 8)
 #define SDHC_HOST_CTRL_CAP_MBL_SHIFT		16
 #define SDHC_HOST_CTRL_CAP_MBL_MASK		0x7
+#define SDHC_HOST_CTRL_CAP_HSS			(1 << 21)
 #define SDHC_HOST_CTRL_CAP_VS33			(1 << 24)
 #define SDHC_HOST_CTRL_CAP_VS30			(1 << 25)
 #define SDHC_HOST_CTRL_CAP_VS18			(1 << 26)
@@ -321,6 +322,8 @@ imxesdhc_attach(struct device *parent, struct device *self, void *args)
 	saa.saa_busname = "sdmmc";
 	saa.sct = &imxesdhc_functions;
 	saa.sch = sc;
+	if (caps & SDHC_HOST_CTRL_CAP_HSS)
+		saa.caps |= SMC_CAPS_MMC_HIGHSPEED;
 
 	sc->sdmmc = config_found(&sc->sc_dev, &saa, NULL);
 	if (sc->sdmmc == NULL) {
@@ -437,21 +440,27 @@ imxesdhc_card_detect(sdmmc_chipset_handle_t sch)
 	{
 	case BOARD_ID_IMX6_CUBOXI:
 	case BOARD_ID_IMX6_HUMMINGBOARD:
-		gpio = 0*32 + 4;
-		imxgpio_set_dir(gpio, IMXGPIO_DIR_IN);
-		return imxgpio_get_bit(gpio) ? 0 : 1;
-		break;
-	case BOARD_ID_IMX6_PHYFLEX:
 		switch (sc->unit) {
 			case 1:
-				gpio = 0*32 + 2;
-				break;
-			case 2:
-				gpio = 4*32 + 22;
+				gpio = 0*32 + 4;
 				break;
 			default:
 				return 0;
 		}
+		imxgpio_set_dir(gpio, IMXGPIO_DIR_IN);
+		return imxgpio_get_bit(gpio) ? 0 : 1;
+	case BOARD_ID_IMX6_PHYFLEX:
+		switch (sc->unit) {
+			case 1:
+				gpio = 0*32 + 4;
+				break;
+			case 2:
+				gpio = 0*32 + 27;
+				break;
+			default:
+				return 0;
+		}
+		imxgpio_set_dir(gpio, IMXGPIO_DIR_IN);
 		return imxgpio_get_bit(gpio) ? 0 : 1;
 	case BOARD_ID_IMX6_SABRELITE:
 		switch (sc->unit) {
@@ -464,29 +473,48 @@ imxesdhc_card_detect(sdmmc_chipset_handle_t sch)
 			default:
 				return 0;
 		}
+		imxgpio_set_dir(gpio, IMXGPIO_DIR_IN);
 		return imxgpio_get_bit(gpio) ? 0 : 1;
-	case BOARD_ID_IMX6_UDOO:
+	case BOARD_ID_IMX6_SABRESD:
 		switch (sc->unit) {
-			/*
-			 * One of these is the SD card, another the wifi
-			 * the third is not connected (?)
-			 */
-			case 0:
 			case 1:
-			case 2:
-			case 3:
-				gpio = 3*32 + 9;
+				gpio = 1*32 + 2;
 				break;
+			case 2:
+				gpio = 1*32 + 0;
+				break;
+			case 3:
 				return 1;
 			default:
 				return 0;
 		}
-		return 1;
+		imxgpio_set_dir(gpio, IMXGPIO_DIR_IN);
+		return imxgpio_get_bit(gpio) ? 0 : 1;
+	case BOARD_ID_IMX6_UDOO:
+		switch (sc->unit) {
+			case 2:
+				return 1;
+			default:
+				return 0;
+		}
 	case BOARD_ID_IMX6_UTILITE:
 		switch (sc->unit) {
 			case 2:
 				gpio = 6*32 + 1;
 				break;
+			default:
+				return 0;
+		}
+		imxgpio_set_dir(gpio, IMXGPIO_DIR_IN);
+		return imxgpio_get_bit(gpio) ? 0 : 1;
+	case BOARD_ID_IMX6_NOVENA:
+		switch (sc->unit) {
+			case 1:
+				gpio = 0*32 + 4;
+				break;
+			/* no card detect */
+			case 2:
+				return 1;
 			default:
 				return 0;
 		}
@@ -498,11 +526,12 @@ imxesdhc_card_detect(sdmmc_chipset_handle_t sch)
 				gpio = 0*32 + 2;
 				break;
 			case 2:
-				gpio = 3*32 + 9;
+				gpio = 2*32 + 9;
 				break;
 			default:
 				return 0;
 		}
+		imxgpio_set_dir(gpio, IMXGPIO_DIR_IN);
 		return imxgpio_get_bit(gpio) ? 0 : 1;
 	default:
 		printf("%s: unhandled board\n", __func__);
@@ -609,7 +638,7 @@ imxesdhc_wait_state(struct imxesdhc_softc *sc, uint32_t mask, uint32_t value)
 			return 0;
 		delay(10);
 	}
-	DPRINTF(0,("%s: timeout waiting for %x\n", HDEVNAME(sc),
+	DPRINTF(0,("%s: timeout waiting for %x, state %x\n", HDEVNAME(sc),
 	    value, state));
 	return ETIMEDOUT;
 }
@@ -684,7 +713,7 @@ imxesdhc_start_command(struct imxesdhc_softc *sc, struct sdmmc_command *cmd)
 	int error;
 	int s;
 
-	DPRINTF(1,("%s: start cmd %u arg=%#x data=%#x dlen=%d flags=%#x "
+	DPRINTF(1,("%s: start cmd %u arg=%#x data=%p dlen=%d flags=%#x "
 	    "proc=\"%s\"\n", HDEVNAME(sc), cmd->c_opcode, cmd->c_arg,
 	    cmd->c_data, cmd->c_datalen, cmd->c_flags, curproc ?
 	    curproc->p_comm : ""));
@@ -975,7 +1004,7 @@ imxesdhc_intr(void *arg)
 	/* Acknowledge the interrupts we are about to handle. */
 	HWRITE4(sc, SDHC_INT_STATUS, status);
 	DPRINTF(2,("%s: interrupt status=0x%08x\n", HDEVNAME(sc),
-	    status, status));
+	    status));
 
 	/*
 	 * Service error interrupts.

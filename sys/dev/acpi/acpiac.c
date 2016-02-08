@@ -1,4 +1,4 @@
-/* $OpenBSD: acpiac.c,v 1.28 2010/08/07 16:55:38 canacar Exp $ */
+/* $OpenBSD: acpiac.c,v 1.30 2015/07/17 20:15:52 jcs Exp $ */
 /*
  * Copyright (c) 2005 Marco Peereboom <marco@openbsd.org>
  *
@@ -27,7 +27,6 @@
 #include <dev/acpi/acpireg.h>
 #include <dev/acpi/acpivar.h>
 #include <dev/acpi/acpidev.h>
-#include <dev/acpi/amltypes.h>
 #include <dev/acpi/dsdt.h>
 
 #include <sys/sensors.h>
@@ -125,7 +124,7 @@ acpiac_notify(struct aml_node *node, int notify_type, void *arg)
 	struct acpiac_softc *sc = arg;
 
 	dnprintf(10, "acpiac_notify: %.2x %s\n", notify_type,
-	    sc->sc_devnode->name);
+	    DEVNAME(sc));
 
 	switch (notify_type) {
 	case 0x00:

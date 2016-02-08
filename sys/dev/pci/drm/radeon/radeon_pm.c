@@ -1,4 +1,4 @@
-/*	$OpenBSD: radeon_pm.c,v 1.10 2015/02/10 06:19:36 jsg Exp $	*/
+/*	$OpenBSD: radeon_pm.c,v 1.13 2015/07/11 04:00:46 jsg Exp $	*/
 /*
  * Permission is hereby granted, free of charge, to any person obtaining a
  * copy of this software and associated documentation files (the "Software"),
@@ -40,26 +40,12 @@ static const char *radeon_pm_state_type_name[5] = {
 };
 #endif
 
-#ifdef notyet
 static void radeon_dynpm_idle_work_handler(struct work_struct *work);
-#endif
-int radeon_debugfs_pm_init(struct radeon_device *rdev);
+static int radeon_debugfs_pm_init(struct radeon_device *rdev);
 static bool radeon_pm_in_vbl(struct radeon_device *rdev);
 static bool radeon_pm_debug_check_in_vbl(struct radeon_device *rdev, bool finish);
 static void radeon_pm_update_profile(struct radeon_device *rdev);
 static void radeon_pm_set_clocks(struct radeon_device *rdev);
-
-void	 radeon_pm_acpi_event_handler(struct radeon_device *);
-ssize_t	 radeon_get_pm_profile(struct device *, struct device_attribute *, char *);
-ssize_t	 radeon_get_pm_method(struct device *, struct device_attribute *, char *);
-ssize_t	 radeon_set_pm_profile(struct device *, struct device_attribute *,
-	     const char *, size_t);
-ssize_t	 radeon_set_pm_method(struct device *, struct device_attribute *,
-	     const char *, size_t);
-void	 radeon_dynpm_idle_tick(void *);
-void	 radeon_dynpm_idle_work_handler(void *);
-
-extern int ticks;
 
 int radeon_pm_get_type_index(struct radeon_device *rdev,
 			     enum radeon_pm_state_type ps_type,
@@ -89,15 +75,6 @@ void radeon_pm_acpi_event_handler(struct radeon_device *rdev)
 			mutex_unlock(&rdev->pm.mutex);
 		}
 	}
-}
-
-int	power_supply_is_system_supplied(void);
-
-int
-power_supply_is_system_supplied(void)
-{
-	/* XXX return 0 if on battery */
-	return (1);
 }
 
 static void radeon_pm_update_profile(struct radeon_device *rdev)
@@ -352,8 +329,7 @@ static void radeon_pm_print_states(struct radeon_device *rdev)
 }
 
 #ifdef notyet
-ssize_t
-radeon_get_pm_profile(struct device *dev,
+static ssize_t radeon_get_pm_profile(struct device *dev,
 				     struct device_attribute *attr,
 				     char *buf)
 {
@@ -368,8 +344,7 @@ radeon_get_pm_profile(struct device *dev,
 			(cp == PM_PROFILE_HIGH) ? "high" : "default");
 }
 
-ssize_t
-radeon_set_pm_profile(struct device *dev,
+static ssize_t radeon_set_pm_profile(struct device *dev,
 				     struct device_attribute *attr,
 				     const char *buf,
 				     size_t count)
@@ -404,8 +379,7 @@ fail:
 	return count;
 }
 
-ssize_t
-radeon_get_pm_method(struct device *dev,
+static ssize_t radeon_get_pm_method(struct device *dev,
 				    struct device_attribute *attr,
 				    char *buf)
 {
@@ -417,8 +391,7 @@ radeon_get_pm_method(struct device *dev,
 			(pm == PM_METHOD_DYNPM) ? "dynpm" : "profile");
 }
 
-ssize_t
-radeon_set_pm_method(struct device *dev,
+static ssize_t radeon_set_pm_method(struct device *dev,
 				    struct device_attribute *attr,
 				    const char *buf,
 				    size_t count)
@@ -440,8 +413,7 @@ radeon_set_pm_method(struct device *dev,
 		rdev->pm.dynpm_planned_action = DYNPM_ACTION_NONE;
 		rdev->pm.pm_method = PM_METHOD_PROFILE;
 		mutex_unlock(&rdev->pm.mutex);
-		timeout_del(&rdev->pm.dynpm_idle_to);
-		task_del(systq, &rdev->pm.dynpm_idle_task);
+		cancel_delayed_work_sync(&rdev->pm.dynpm_idle_work);
 	} else {
 		count = -EINVAL;
 		goto fail;
@@ -571,8 +543,7 @@ void radeon_pm_suspend(struct radeon_device *rdev)
 	}
 	mutex_unlock(&rdev->pm.mutex);
 
-	timeout_del(&rdev->pm.dynpm_idle_to);
-	task_del(systq, &rdev->pm.dynpm_idle_task);
+	cancel_delayed_work_sync(&rdev->pm.dynpm_idle_work);
 }
 
 void radeon_pm_resume(struct radeon_device *rdev)
@@ -605,7 +576,8 @@ void radeon_pm_resume(struct radeon_device *rdev)
 	if (rdev->pm.pm_method == PM_METHOD_DYNPM
 	    && rdev->pm.dynpm_state == DYNPM_STATE_SUSPENDED) {
 		rdev->pm.dynpm_state = DYNPM_STATE_ACTIVE;
-		timeout_add_msec(&rdev->pm.dynpm_idle_to, RADEON_IDLE_LOOP_MS);
+		schedule_delayed_work(&rdev->pm.dynpm_idle_work,
+				      msecs_to_jiffies(RADEON_IDLE_LOOP_MS));
 	}
 	mutex_unlock(&rdev->pm.mutex);
 	radeon_pm_compute_clocks(rdev);
@@ -657,9 +629,7 @@ int radeon_pm_init(struct radeon_device *rdev)
 	if (ret)
 		return ret;
 
-	task_set(&rdev->pm.dynpm_idle_task, radeon_dynpm_idle_work_handler,
-	    rdev);
-	timeout_set(&rdev->pm.dynpm_idle_to, radeon_dynpm_idle_tick, rdev);
+	INIT_DELAYED_WORK(&rdev->pm.dynpm_idle_work, radeon_dynpm_idle_work_handler);
 
 	if (rdev->pm.num_power_states > 1) {
 #ifdef notyet
@@ -670,11 +640,10 @@ int radeon_pm_init(struct radeon_device *rdev)
 		ret = device_create_file(rdev->dev, &dev_attr_power_method);
 		if (ret)
 			DRM_ERROR("failed to create device file for power method\n");
-
+#endif
 		if (radeon_debugfs_pm_init(rdev)) {
 			DRM_ERROR("Failed to register debugfs file for PM!\n");
 		}
-#endif
 
 #ifdef DRMDEBUG
 		DRM_INFO("radeon: power management initialized\n");
@@ -700,8 +669,7 @@ void radeon_pm_fini(struct radeon_device *rdev)
 		}
 		mutex_unlock(&rdev->pm.mutex);
 
-		timeout_del(&rdev->pm.dynpm_idle_to);
-		task_del(systq, &rdev->pm.dynpm_idle_task);
+		cancel_delayed_work_sync(&rdev->pm.dynpm_idle_work);
 
 #ifdef notyet
 		device_remove_file(rdev->dev, &dev_attr_power_profile);
@@ -744,8 +712,7 @@ void radeon_pm_compute_clocks(struct radeon_device *rdev)
 		if (rdev->pm.dynpm_state != DYNPM_STATE_DISABLED) {
 			if (rdev->pm.active_crtc_count > 1) {
 				if (rdev->pm.dynpm_state == DYNPM_STATE_ACTIVE) {
-					timeout_del(&rdev->pm.dynpm_idle_to);
-					task_del(systq, &rdev->pm.dynpm_idle_task);
+					cancel_delayed_work(&rdev->pm.dynpm_idle_work);
 
 					rdev->pm.dynpm_state = DYNPM_STATE_PAUSED;
 					rdev->pm.dynpm_planned_action = DYNPM_ACTION_DEFAULT;
@@ -763,16 +730,17 @@ void radeon_pm_compute_clocks(struct radeon_device *rdev)
 					radeon_pm_get_dynpm_state(rdev);
 					radeon_pm_set_clocks(rdev);
 
-					timeout_add_msec(&rdev->pm.dynpm_idle_to, RADEON_IDLE_LOOP_MS);
+					schedule_delayed_work(&rdev->pm.dynpm_idle_work,
+							      msecs_to_jiffies(RADEON_IDLE_LOOP_MS));
 				} else if (rdev->pm.dynpm_state == DYNPM_STATE_PAUSED) {
 					rdev->pm.dynpm_state = DYNPM_STATE_ACTIVE;
-					timeout_add_msec(&rdev->pm.dynpm_idle_to, RADEON_IDLE_LOOP_MS);
+					schedule_delayed_work(&rdev->pm.dynpm_idle_work,
+							      msecs_to_jiffies(RADEON_IDLE_LOOP_MS));
 					DRM_DEBUG_DRIVER("radeon: dynamic power management activated\n");
 				}
 			} else { /* count == 0 */
 				if (rdev->pm.dynpm_state != DYNPM_STATE_MINIMUM) {
-					timeout_del(&rdev->pm.dynpm_idle_to);
-					task_del(systq, &rdev->pm.dynpm_idle_task);
+					cancel_delayed_work(&rdev->pm.dynpm_idle_work);
 
 					rdev->pm.dynpm_state = DYNPM_STATE_MINIMUM;
 					rdev->pm.dynpm_planned_action = DYNPM_ACTION_MINIMUM;
@@ -819,19 +787,12 @@ static bool radeon_pm_debug_check_in_vbl(struct radeon_device *rdev, bool finish
 	return in_vbl;
 }
 
-void
-radeon_dynpm_idle_tick(void *arg)
+static void radeon_dynpm_idle_work_handler(struct work_struct *work)
 {
-	struct radeon_device *rdev = arg;
-
-	task_add(systq, &rdev->pm.dynpm_idle_task);
-}
-
-void
-radeon_dynpm_idle_work_handler(void *arg1)
-{
-	struct radeon_device *rdev = arg1;
+	struct radeon_device *rdev;
 	int resched;
+	rdev = container_of(work, struct radeon_device,
+				pm.dynpm_idle_work.work);
 
 	resched = ttm_bo_lock_delayed_workqueue(&rdev->mman.bdev);
 	mutex_lock(&rdev->pm.mutex);
@@ -856,7 +817,7 @@ radeon_dynpm_idle_work_handler(void *arg1)
 				   rdev->pm.dynpm_can_upclock) {
 				rdev->pm.dynpm_planned_action =
 					DYNPM_ACTION_UPCLOCK;
-				rdev->pm.dynpm_action_timeout = ticks +
+				rdev->pm.dynpm_action_timeout = jiffies +
 				msecs_to_jiffies(RADEON_RECLOCK_DELAY_MS);
 			}
 		} else if (not_processed == 0) { /* should downclock */
@@ -866,7 +827,7 @@ radeon_dynpm_idle_work_handler(void *arg1)
 				   rdev->pm.dynpm_can_downclock) {
 				rdev->pm.dynpm_planned_action =
 					DYNPM_ACTION_DOWNCLOCK;
-				rdev->pm.dynpm_action_timeout = ticks +
+				rdev->pm.dynpm_action_timeout = jiffies +
 				msecs_to_jiffies(RADEON_RECLOCK_DELAY_MS);
 			}
 		}
@@ -875,12 +836,13 @@ radeon_dynpm_idle_work_handler(void *arg1)
 		 * to false since we want to wait for vbl to avoid flicker.
 		 */
 		if (rdev->pm.dynpm_planned_action != DYNPM_ACTION_NONE &&
-		    ticks - rdev->pm.dynpm_action_timeout > 0) {
+		    jiffies > rdev->pm.dynpm_action_timeout) {
 			radeon_pm_get_dynpm_state(rdev);
 			radeon_pm_set_clocks(rdev);
 		}
 
-		timeout_add_msec(&rdev->pm.dynpm_idle_to, RADEON_IDLE_LOOP_MS);
+		schedule_delayed_work(&rdev->pm.dynpm_idle_work,
+				      msecs_to_jiffies(RADEON_IDLE_LOOP_MS));
 	}
 	mutex_unlock(&rdev->pm.mutex);
 	ttm_bo_unlock_delayed_workqueue(&rdev->mman.bdev, resched);
@@ -919,8 +881,7 @@ static struct drm_info_list radeon_pm_info_list[] = {
 };
 #endif
 
-int
-radeon_debugfs_pm_init(struct radeon_device *rdev)
+static int radeon_debugfs_pm_init(struct radeon_device *rdev)
 {
 #if defined(CONFIG_DEBUG_FS)
 	return radeon_debugfs_add_files(rdev, radeon_pm_info_list, ARRAY_SIZE(radeon_pm_info_list));

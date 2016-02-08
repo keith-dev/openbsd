@@ -1,4 +1,4 @@
-/* $OpenBSD: pmap.c,v 1.75 2015/02/02 09:29:53 mlarkin Exp $ */
+/* $OpenBSD: pmap.c,v 1.78 2015/07/20 00:16:16 kettenis Exp $ */
 /* $NetBSD: pmap.c,v 1.154 2000/12/07 22:18:55 thorpej Exp $ */
 
 /*-
@@ -268,12 +268,12 @@ struct pool pmap_pv_pool;
  * mappings, so that invalidation of all user mappings does not invalidate
  * kernel mappings (which are consistent across all processes).
  *
- * pmap_next_asn always indicates to the next ASN to use.  When
- * pmap_next_asn exceeds pmap_max_asn, we start a new ASN generation.
+ * pma_asn always indicates to the next ASN to use.  When
+ * pma_asn exceeds pmap_max_asn, we start a new ASN generation.
  *
  * When a new ASN generation is created, the per-process (i.e. non-PG_ASM)
  * TLB entries and the I-cache are flushed, the generation number is bumped,
- * and pmap_next_asn is changed to indicate the first non-reserved ASN.
+ * and pma_asn is changed to indicate the first non-reserved ASN.
  *
  * We reserve ASN #0 for pmaps that use the global kernel_lev1map.  This
  * prevents the following scenario:
@@ -386,7 +386,7 @@ struct pmap_tlb_shootdown_job {
 struct pmap_tlb_shootdown_q {
 	TAILQ_HEAD(, pmap_tlb_shootdown_job) pq_head;
 	TAILQ_HEAD(, pmap_tlb_shootdown_job) pq_free;
-	int pq_pte;			/* aggregate PTE bits */
+	int pq_pte;			/* aggregate low PTE bits */
 	int pq_tbia;			/* pending global flush */
 	struct mutex pq_mtx;		/* queue lock */
 	struct pmap_tlb_shootdown_job pq_jobs[PMAP_TLB_SHOOTDOWN_MAXJOBS];
@@ -1190,7 +1190,9 @@ pmap_remove(pmap_t pmap, vaddr_t sva, vaddr_t eva)
 		printf("pmap_remove(%p, %lx, %lx)\n", pmap, sva, eva);
 #endif
 
+	KERNEL_LOCK();
 	pmap_do_remove(pmap, sva, eva, TRUE);
+	KERNEL_UNLOCK();
 }
 
 /*
@@ -1393,7 +1395,7 @@ pmap_page_protect(struct vm_page *pg, vm_prot_t prot)
 
 #ifdef DEBUG
 		if (pmap_pte_v(pmap_l2pte(pv->pv_pmap, pv->pv_va, NULL)) == 0 ||
-		    pmap_pte_pa(pv->pv_pte) != pa)
+		    pmap_pte_pa(pv->pv_pte) != VM_PAGE_TO_PHYS(pg))
 			panic("pmap_page_protect: bad mapping");
 #endif
 		if (pmap_remove_mapping(pmap, pv->pv_va, pv->pv_pte,
@@ -2452,7 +2454,7 @@ pmap_changebit(struct vm_page *pg, u_long set, u_long mask, cpuid_t cpu_id)
 #ifdef DEBUG
 	if (pmapdebug & PDB_BITS)
 		printf("pmap_changebit(0x%lx, 0x%lx, 0x%lx)\n",
-		    pa, set, mask);
+		    VM_PAGE_TO_PHYS(pg), set, mask);
 #endif
 
 	/*
@@ -2536,17 +2538,49 @@ pmap_emulate_reference(struct proc *p, vaddr_t v, int user, int type)
 #ifdef DEBUG				/* These checks are more expensive */
 	if (!pmap_pte_v(pte))
 		panic("pmap_emulate_reference: invalid pte");
+#ifndef MULTIPROCESSOR
+	/*
+	 * Quoting the Alpha ARM 14.3.1.4/5/6:
+	 * ``The Translation Buffer may reload and cache the old PTE value
+	 *   between the time the FOR (resp. FOW, FOE) fault invalidates the
+	 *   old value from the Translation Buffer and the time software
+	 *   updates the PTE in memory.  Software that depends on the
+	 *   processor-provided invalidate must thus be prepared to take
+	 *   another FOR (resp. FOW, FOE) fault on a page after clearing the
+	 *   page's PTE<FOR(resp. FOW, FOE)> bit. The second fault will
+	 *   invalidate the stale PTE from the Translation Buffer, and the
+	 *   processor cannot load another stale copy. Thus, in the worst case,
+	 *   a multiprocessor system will take an initial FOR (resp. FOW, FOE)
+	 *   fault and then an additional FOR (resp. FOW, FOE) fault on each
+	 *   processor. In practice, even a single repetition is unlikely.''
+	 *
+	 * In practice, spurious faults on the other processors happen, at
+	 * least on fast 21264 or better processors.
+	 */
 	if (type == ALPHA_MMCSR_FOW) {
-		if (!(*pte & (user ? PG_UWE : PG_UWE | PG_KWE)))
-			panic("pmap_emulate_reference: write but unwritable");
-		if (!(*pte & PG_FOW))
-			panic("pmap_emulate_reference: write but not FOW");
+		if (!(*pte & (user ? PG_UWE : PG_UWE | PG_KWE))) {
+			panic("pmap_emulate_reference(%d,%d): "
+			    "write but unwritable pte 0x%lx",
+			    user, type, *pte);
+		}
+		if (!(*pte & PG_FOW)) {
+			panic("pmap_emulate_reference(%d,%d): "
+			    "write but not FOW pte 0x%lx",
+			    user, type, *pte);
+		}
 	} else {
-		if (!(*pte & (user ? PG_URE : PG_URE | PG_KRE)))
-			panic("pmap_emulate_reference: !write but unreadable");
-		if (!(*pte & (PG_FOR | PG_FOE)))
-			panic("pmap_emulate_reference: !write but not FOR|FOE");
+		if (!(*pte & (user ? PG_URE : PG_URE | PG_KRE))) {
+			panic("pmap_emulate_reference(%d,%d): "
+			    "!write but unreadable pte 0x%lx",
+			    user, type, *pte);
+		}
+		if (!(*pte & (PG_FOR | PG_FOE))) {
+			panic("pmap_emulate_reference(%d,%d): "
+			    "!write but not FOR|FOE pte 0x%lx",
+			    user, type, *pte);
+		}
 	}
+#endif /* MULTIPROCESSOR */
 	/* Other diagnostics? */
 #endif
 	pa = pmap_pte_pa(pte);
@@ -2559,9 +2593,11 @@ pmap_emulate_reference(struct proc *p, vaddr_t v, int user, int type)
 	pg = PHYS_TO_VM_PAGE(pa);
 
 #ifdef DIAGNOSTIC
-	if (pg == NULL)
+	if (pg == NULL) {
 		panic("pmap_emulate_reference(%p, 0x%lx, %d, %d): "
-		    "pa 0x%lx not managed", p, v, user, type, pa);
+		    "pa 0x%lx (pte %p 0x%08lx) not managed",
+		    p, v, user, type, pa, pte, *pte);
+	}
 #endif
 
 	/*
@@ -2665,7 +2701,7 @@ pmap_pv_enter(pmap_t pmap, struct vm_page *pg, vaddr_t va, pt_entry_t *pte,
 	newpv->pv_pte = pte;
 
 #ifdef DEBUG
-	{
+    {
 	pv_entry_t pv;
 	/*
 	 * Make sure the entry doesn't already exist.
@@ -2676,6 +2712,7 @@ pmap_pv_enter(pmap_t pmap, struct vm_page *pg, vaddr_t va, pt_entry_t *pte,
 			panic("pmap_pv_enter: already in pv table");
 		}
 	}
+    }
 #endif
 
 	/*
@@ -3514,9 +3551,8 @@ pmap_do_tlb_shootdown(struct cpu_info *ci, struct trapframe *framep)
 			    pj->pj_pmap->pm_cpus & cpu_mask, cpu_id);
 			pmap_tlb_shootdown_job_put(pq, pj);
 		}
-
-		pq->pq_pte = 0;
 	}
+	pq->pq_pte = 0;
 
 	PSJQ_UNLOCK(pq, s);
 }
@@ -3539,7 +3575,6 @@ pmap_tlb_shootdown_q_drain(struct pmap_tlb_shootdown_q *pq)
 		TAILQ_REMOVE(&pq->pq_head, pj, pj_list);
 		pmap_tlb_shootdown_job_put(pq, pj);
 	}
-	pq->pq_pte = 0;
 }
 
 /*

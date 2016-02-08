@@ -1,4 +1,4 @@
-#	$OpenBSD: files.i386,v 1.220 2014/12/10 05:42:25 jsg Exp $
+#	$OpenBSD: files.i386,v 1.225 2015/07/21 03:38:22 reyk Exp $
 #
 # new style config file for i386 architecture
 #
@@ -19,7 +19,7 @@ file	arch/i386/i386/db_trace.c	ddb
 file	arch/i386/i386/disksubr.c	disk
 file	arch/i386/i386/est.c		!small_kernel
 file	arch/i386/i386/gdt.c
-file	arch/i386/i386/in_cksum.s	inet
+file	arch/i386/i386/in_cksum.s
 file	arch/i386/i386/machdep.c
 file	arch/i386/i386/hibernate_machdep.c hibernate
 file	arch/i386/i386/via.c
@@ -32,6 +32,7 @@ file	arch/i386/i386/k6_mem.c		mtrr
 file 	arch/i386/i386/mtrr.c		mtrr
 file	arch/i386/i386/p4tcc.c		!small_kernel
 file	arch/i386/i386/pmap.c
+file	arch/i386/i386/pmapae.c
 file	arch/i386/i386/powernow.c	!small_kernel
 file	arch/i386/i386/powernow-k7.c	!small_kernel
 file	arch/i386/i386/powernow-k8.c	!small_kernel
@@ -84,6 +85,8 @@ define mainbus {[apid = -1]}
 device	mainbus: isabus, eisabus, pcibus, mainbus
 attach	mainbus at root
 file	arch/i386/i386/mainbus.c	mainbus
+
+file   arch/i386/i386/codepatch.c
 
 #device	mca at root {...}
 
@@ -259,9 +262,6 @@ file	arch/i386/i386/kvm86call.S		kvm86
 include "compat/linux/files.linux"
 file	arch/i386/i386/linux_machdep.c		compat_linux
 
-# OSS audio driver compatibility
-include "compat/ossaudio/files.ossaudio"
-
 device	bios {}
 attach	bios at mainbus
 file	arch/i386/i386/bios.c		bios needs-count
@@ -392,8 +392,10 @@ file	arch/i386/i386/acpi_wakecode.S		acpi & !small_kernel
 #
 attach	ipmi at mainbus
 
-# VMware Tools
-attach	vmt at mainbus
+#
+# Paravirtual device bus
+#
+include "dev/pv/files.pv"
 
 # Dell Embedded Systems Management
 device	esm

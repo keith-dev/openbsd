@@ -1,4 +1,4 @@
-/*	$OpenBSD: relay.c,v 1.191 2015/02/06 01:37:11 reyk Exp $	*/
+/*	$OpenBSD: relay.c,v 1.198 2015/07/28 10:24:26 reyk Exp $	*/
 
 /*
  * Copyright (c) 2006 - 2014 Reyk Floeter <reyk@openbsd.org>
@@ -647,6 +647,7 @@ relay_connected(int fd, short sig, void *arg)
 {
 	struct rsession		*con = arg;
 	struct relay		*rlay = con->se_relay;
+	struct protocol		*proto = rlay->rl_proto;
 	evbuffercb		 outrd = relay_read;
 	evbuffercb		 outwr = relay_write;
 	struct bufferevent	*bev;
@@ -713,7 +714,11 @@ relay_connected(int fd, short sig, void *arg)
 
 	bufferevent_settimeout(bev,
 	    rlay->rl_conf.timeout.tv_sec, rlay->rl_conf.timeout.tv_sec);
+	bufferevent_setwatermark(bev, EV_WRITE,
+		RELAY_MIN_PREFETCHED * proto->tcpbufsiz, 0);
 	bufferevent_enable(bev, EV_READ|EV_WRITE);
+	if (con->se_in.bev)
+		bufferevent_enable(con->se_in.bev, EV_READ);
 
 	if (relay_splice(&con->se_out) == -1)
 		relay_close(con, strerror(errno));
@@ -723,6 +728,7 @@ void
 relay_input(struct rsession *con)
 {
 	struct relay	*rlay = con->se_relay;
+	struct protocol	*proto = rlay->rl_proto;
 	evbuffercb	 inrd = relay_read;
 	evbuffercb	 inwr = relay_write;
 
@@ -759,6 +765,8 @@ relay_input(struct rsession *con)
 
 	bufferevent_settimeout(con->se_in.bev,
 	    rlay->rl_conf.timeout.tv_sec, rlay->rl_conf.timeout.tv_sec);
+	bufferevent_setwatermark(con->se_in.bev, EV_WRITE,
+		RELAY_MIN_PREFETCHED * proto->tcpbufsiz, 0);
 	bufferevent_enable(con->se_in.bev, EV_READ|EV_WRITE);
 
 	if (relay_splice(&con->se_in) == -1)
@@ -777,6 +785,9 @@ relay_write(struct bufferevent *bev, void *arg)
 		goto done;
 	if (relay_splice(cre->dst) == -1)
 		goto fail;
+	if (cre->dst->bev)
+		bufferevent_enable(cre->dst->bev, EV_READ);
+
 	return;
  done:
 	relay_close(con, "last write (done)");
@@ -808,6 +819,7 @@ relay_read(struct bufferevent *bev, void *arg)
 {
 	struct ctl_relay_event	*cre = arg;
 	struct rsession		*con = cre->con;
+	struct protocol		*proto = con->se_relay->rl_proto;
 	struct evbuffer		*src = EVBUFFER_INPUT(bev);
 
 	getmonotime(&con->se_tv_last);
@@ -821,6 +833,10 @@ relay_read(struct bufferevent *bev, void *arg)
 		goto done;
 	if (cre->dst->bev)
 		bufferevent_enable(cre->dst->bev, EV_READ);
+	if (cre->dst->bev && EVBUFFER_LENGTH(EVBUFFER_OUTPUT(cre->dst->bev)) >
+	    (size_t)RELAY_MAX_PREFETCH * proto->tcpbufsiz)
+		bufferevent_disable(bev, EV_READ);
+
 	return;
  done:
 	relay_close(con, "last read (done)");
@@ -829,6 +845,12 @@ relay_read(struct bufferevent *bev, void *arg)
 	relay_close(con, strerror(errno));
 }
 
+/*
+ * Splice sockets from cre to cre->dst if applicable.  Returns:
+ * -1 socket splicing has failed
+ * 0 socket splicing is currently not possible
+ * 1 socket splicing was successful
+ */
 int
 relay_splice(struct ctl_relay_event *cre)
 {
@@ -848,7 +870,7 @@ relay_splice(struct ctl_relay_event *cre)
 	if (cre->bev == NULL || cre->dst->bev == NULL)
 		return (0);
 
-	if (! (cre->toread == TOREAD_UNLIMITED || cre->toread > 0)) {
+	if (!(cre->toread == TOREAD_UNLIMITED || cre->toread > 0)) {
 		DPRINTF("%s: session %d: splice dir %d, nothing to read %lld",
 		    __func__, con->se_id, cre->dir, cre->toread);
 		return (0);
@@ -878,7 +900,7 @@ relay_splice(struct ctl_relay_event *cre)
 	DPRINTF("%s: session %d: splice dir %d, maximum %lld, successful",
 	    __func__, con->se_id, cre->dir, cre->toread);
 
-	return (0);
+	return (1);
 }
 
 int
@@ -988,7 +1010,7 @@ relay_error(struct bufferevent *bev, short error, void *arg)
 			dst = EVBUFFER_OUTPUT(cre->dst->bev);
 			if (EVBUFFER_LENGTH(dst))
 				return;
-		} else
+		} else if (cre->toread == TOREAD_UNLIMITED || cre->toread == 0)
 			return;
 
 		relay_close(con, "done");
@@ -1041,6 +1063,12 @@ relay_accept(int fd, short event, void *arg)
 	if ((con = calloc(1, sizeof(*con))) == NULL)
 		goto err;
 
+	/* Pre-allocate log buffer */
+	con->se_haslog = 0;
+	con->se_log = evbuffer_new();
+	if (con->se_log == NULL)
+		goto err;
+
 	con->se_in.s = s;
 	con->se_in.ssl = NULL;
 	con->se_out.s = -1;
@@ -1091,14 +1119,6 @@ relay_accept(int fd, short event, void *arg)
 	con->se_out.output = evbuffer_new();
 	if (con->se_out.output == NULL) {
 		relay_close(con, "failed to allocate output buffer");
-		return;
-	}
-
-	/* Pre-allocate log buffer */
-	con->se_haslog = 0;
-	con->se_log = evbuffer_new();
-	if (con->se_log == NULL) {
-		relay_close(con, "failed to allocate log buffer");
 		return;
 	}
 
@@ -1265,7 +1285,7 @@ relay_from_table(struct rsession *con)
 			return (-1);
 	}
 	host = rlt->rlt_host[idx];
-	DPRINTF("%s: session %d: table %s host %s, p 0x%08x, idx %d",
+	DPRINTF("%s: session %d: table %s host %s, p 0x%016llx, idx %d",
 	    __func__, con->se_id, table->conf.name, host->conf.name, p, idx);
 	while (host != NULL) {
 		DPRINTF("%s: session %d: host %s", __func__,
@@ -1404,8 +1424,10 @@ relay_connect_retry(int fd, short sig, void *arg)
 	struct relay	*rlay = con->se_relay;
 	int		 bnds = -1;
 
-	if (relay_inflight < 1)
-		fatalx("relay_connect_retry: no connection in flight");
+	if (relay_inflight < 1) {
+		log_warnx("relay_connect_retry: no connection in flight");
+		relay_inflight = 1;
+	}
 
 	DPRINTF("%s: retry %d of %d, inflight: %d",__func__,
 	    con->se_retrycount, con->se_retry, relay_inflight);
@@ -1462,6 +1484,10 @@ relay_connect_retry(int fd, short sig, void *arg)
 		return;
 	}
 
+	if (rlay->rl_conf.flags & F_TLSINSPECT)
+		con->se_out.state = STATE_PRECONNECT;
+	else
+		con->se_out.state = STATE_CONNECTED;
 	relay_inflight--;
 	DPRINTF("%s: inflight decremented, now %d",__func__, relay_inflight);
 
@@ -1480,9 +1506,14 @@ relay_connect_retry(int fd, short sig, void *arg)
 int
 relay_preconnect(struct rsession *con)
 {
+	int rv;
+
 	log_debug("%s: session %d: process %d", __func__,
 	    con->se_id, privsep_process);
-	return (relay_connect(con));
+	rv = relay_connect(con);
+	if (con->se_out.state == STATE_CONNECTED)
+		con->se_out.state = STATE_PRECONNECT;
+	return (rv);
 }
 
 int
@@ -1492,18 +1523,28 @@ relay_connect(struct rsession *con)
 	struct timeval	 evtpause = { 1, 0 };
 	int		 bnds = -1, ret;
 
+	/* relay_connect should only be called once per relay */
+	if (con->se_out.state == STATE_CONNECTED) {
+		log_debug("%s: connect already called once", __func__);
+		return (0);
+	}
+
 	/* Connection is already established but session not active */
-	if ((rlay->rl_conf.flags & F_TLSINSPECT) && con->se_out.s != -1) {
+	if ((rlay->rl_conf.flags & F_TLSINSPECT) &&
+	    con->se_out.state == STATE_PRECONNECT) {
 		if (con->se_out.ssl == NULL) {
 			log_debug("%s: tls connect failed", __func__);
 			return (-1);
 		}
 		relay_connected(con->se_out.s, EV_WRITE, con);
+		con->se_out.state = STATE_CONNECTED;
 		return (0);
 	}
 
-	if (relay_inflight < 1)
-		fatalx("relay_connect: no connection in flight");
+	if (relay_inflight < 1) {
+		log_warnx("relay_connect: no connection in flight");
+		relay_inflight = 1;
+	}
 
 	getmonotime(&con->se_tv_start);
 
@@ -1551,6 +1592,9 @@ relay_connect(struct rsession *con)
 			event_del(&rlay->rl_ev);
 			evtimer_add(&con->se_inflightevt, &evtpause);
 			evtimer_add(&rlay->rl_evt, &evtpause);
+
+			/* this connect is pending */
+			con->se_out.state = STATE_PENDING;
 			return (0);
 		} else {
 			if (con->se_retry) {
@@ -1568,6 +1612,7 @@ relay_connect(struct rsession *con)
 		}
 	}
 
+	con->se_out.state = STATE_CONNECTED;
 	relay_inflight--;
 	DPRINTF("%s: inflight decremented, now %d",__func__,
 	    relay_inflight);
@@ -1669,6 +1714,7 @@ relay_close(struct rsession *con, const char *msg)
 			event_add(&rlay->rl_ev, NULL);
 		}
 	}
+	con->se_out.state = STATE_INIT;
 
 	if (con->se_out.buf != NULL)
 		free(con->se_out.buf);

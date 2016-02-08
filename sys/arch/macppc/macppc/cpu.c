@@ -1,4 +1,4 @@
-/*	$OpenBSD: cpu.c,v 1.79 2014/10/09 13:58:40 mpi Exp $ */
+/*	$OpenBSD: cpu.c,v 1.82 2015/06/04 18:01:44 kettenis Exp $ */
 
 /*
  * Copyright (c) 1997 Per Fogelstrom
@@ -37,6 +37,7 @@
 #include <sys/systm.h>
 #include <sys/proc.h>
 #include <sys/sysctl.h>
+#include <sys/task.h>
 #include <sys/device.h>
 #include <dev/rndvar.h>
 
@@ -45,7 +46,7 @@
 #include <dev/ofw/openfirm.h>
 
 #include <machine/autoconf.h>
-#include <machine/bat.h>
+#include <powerpc/bat.h>
 #include <machine/cpu.h>
 #include <machine/trap.h>
 #include <powerpc/hid.h>
@@ -155,10 +156,13 @@ ppc64_scale_frequency(u_int freq_scale)
 
 extern int perflevel;
 
+struct task ppc64_setperf_task;
+int ppc64_perflevel;
+
 void
-ppc64_setperf(int speed)
+ppc64_do_setperf(void *arg)
 {
-	if (speed <= 50) {
+	if (ppc64_perflevel <= 50) {
 		if (ppc_curfreq == ppc_maxfreq / 2)
 			return;
 
@@ -175,52 +179,11 @@ ppc64_setperf(int speed)
 	}
 }
 
-int ppc_proc_is_64b;
-extern u_int32_t rfi_inst, rfid_inst, nop_inst;
-struct patch {
-	u_int32_t *s;
-	u_int32_t *e;
-};
-extern struct patch rfi_start;
-extern struct patch nop32_start;
-extern struct patch nop64_start;
-
-
 void
-ppc_check_procid()
+ppc64_setperf(int level)
 {
-	u_int32_t cpu, pvr;
-	u_int32_t *inst;
-	struct patch *p;
-
-	pvr = ppc_mfpvr();
-	cpu = pvr >> 16;
-
-	switch (cpu) {
-	case PPC_CPU_IBM970:
-	case PPC_CPU_IBM970FX:
-	case PPC_CPU_IBM970MP:
-		ppc_proc_is_64b = 1;
-		for (p = &rfi_start; p->s; p++) {
-			for (inst = p->s; inst < p->e; inst++)
-				*inst = rfid_inst;
-			syncicache(p->s, (p->e - p->s) * sizeof(*p->e));
-		}
-		for (p = &nop64_start; p->s; p++) {
-			for (inst = p->s; inst < p->e; inst++)
-				*inst = nop_inst;
-			syncicache(p->s, (p->e - p->s) * sizeof(*p->e));
-		}
-
-		break;
-	default:
-		ppc_proc_is_64b = 0;
-		for (p = &nop32_start; p->s; p++) {
-			for (inst = p->s; inst < p->e; inst++)
-				*inst = nop_inst;
-			syncicache(p->s, (p->e - p->s) * sizeof(*p->e));
-		}
-	}
+	ppc64_perflevel = level;
+	task_add(systq, &ppc64_setperf_task);
 }
 
 void
@@ -366,8 +329,10 @@ cpuattach(struct device *parent, struct device *dev, void *aux)
 		}
 
 		if (OF_getprop(qhandle, "power-mode-data",
-		    &ppc_power_mode_data, sizeof ppc_power_mode_data) >= 8)
+		    &ppc_power_mode_data, sizeof ppc_power_mode_data) >= 8) {
+			task_set(&ppc64_setperf_task, ppc64_do_setperf, NULL);
 			cpu_setperf = ppc64_setperf;
+		}
 	}
 
 	/* power savings mode */
@@ -577,7 +542,6 @@ struct cpu_hatch_data {
 	uint64_t hid4;
 	uint64_t hid5;
 	int l2cr;
-	int sdr1;
 	int running;
 };
 
@@ -629,7 +593,6 @@ cpu_spinup(struct device *self, struct cpu_info *ci)
 	h->ci = ci;
 	h->running = 0;
 	h->hid0 = ppc_mfhid0();
-	h->sdr1 = ppc_mfsdr1();
 	if (ppc_proc_is_64b) {
 		h->hid1 = ppc64_mfhid1();
 		h->hid4 = ppc64_mfhid4();
@@ -720,8 +683,7 @@ void
 cpu_hatch(void)
 {
 	volatile struct cpu_hatch_data *h = cpu_hatch_data;
-	int intrstate;
-	int scratch, i, s;
+	int intrstate, s;
 
         /* Initialize timebase. */
 	ppc_mttb(0);
@@ -729,10 +691,6 @@ cpu_hatch(void)
 	/* Initialize curcpu(). */
 	ppc_mtsprg0((u_int)h->ci);
 
-	/*
-	 * Initialize BAT registers to unmapped to not generate
-	 * overlapping mappings below.
-	 */
 	ppc_mtibat0u(0);
 	ppc_mtibat1u(0);
 	ppc_mtibat2u(0);
@@ -741,26 +699,6 @@ cpu_hatch(void)
 	ppc_mtdbat1u(0);
 	ppc_mtdbat2u(0);
 	ppc_mtdbat3u(0);
-
-	/*
-	 * Now setup fixed bat registers
-	 *
-	 * Note that we still run in real mode, and the BAT
-	 * registers were cleared above.
-	 */
-	/* IBAT0 used for initial 256 MB segment */
-	ppc_mtibat0l(battable[0].batl);
-	ppc_mtibat0u(battable[0].batu);
-
-	/* DBAT0 used similar */
-	ppc_mtdbat0l(battable[0].batl);
-	ppc_mtdbat0u(battable[0].batu);
-
-	/*
-	 * Initialize segment registers.
-	 */
-	for (i = 0; i < 16; i++)
-		ppc_mtsrin(PPC_KERNEL_SEG0 + i, i << ADDR_SR_SHIFT);
 
 	if (ppc_proc_is_64b) {
 		/*
@@ -791,13 +729,11 @@ cpu_hatch(void)
 
 		ppc_mtl2cr(h->l2cr);
 	}
-	ppc_mtsdr1(h->sdr1);
 
 	/*
 	 * Now enable translation (and machine checks/recoverable interrupts).
 	 */
-	__asm__ volatile ("eieio; mfmsr %0; ori %0,%0,%1; mtmsr %0; sync;isync"
-		      : "=r"(scratch) : "K"(PSL_IR|PSL_DR|PSL_ME|PSL_RI));
+	pmap_enable_mmu();
 
 	/* XXX OpenPIC */
 	{

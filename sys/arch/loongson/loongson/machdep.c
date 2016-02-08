@@ -1,4 +1,4 @@
-/*	$OpenBSD: machdep.c,v 1.61 2014/12/10 15:29:53 mikeb Exp $ */
+/*	$OpenBSD: machdep.c,v 1.63 2015/05/07 01:55:43 jsg Exp $ */
 
 /*
  * Copyright (c) 2009, 2010, 2014 Miodrag Vallat.
@@ -62,7 +62,6 @@
 #ifdef SYSVSEM
 #include <sys/sem.h>
 #endif
-#include <sys/kcore.h>
 
 #include <net/if.h>
 
@@ -303,11 +302,11 @@ loongson_identify(const char *version, int envtype)
 					}
 				}
 
-				if (p != NULL) {
-					pmon_printf("Attempting to match as "
-					    "%s %s\n", p->vendor, p->product);
-					return p;
-				}
+			if (p != NULL) {
+				pmon_printf("Attempting to match as "
+				    "%s %s\n", p->vendor, p->product);
+				return p;
+			}
 		}
 	}
 

@@ -1,4 +1,4 @@
-/*	$OpenBSD: pmap.h,v 1.54 2015/02/19 03:19:11 mlarkin Exp $	*/
+/*	$OpenBSD: pmap.h,v 1.57 2015/06/29 02:54:51 mlarkin Exp $	*/
 /*	$NetBSD: pmap.h,v 1.1 2003/04/26 18:39:46 fvdl Exp $	*/
 
 /*
@@ -74,6 +74,7 @@
 #include <machine/cpufunc.h>
 #include <machine/segments.h>
 #endif /* _KERNEL */
+#include <sys/mutex.h>
 #include <uvm/uvm_object.h>
 #include <machine/pte.h>
 #endif
@@ -128,17 +129,6 @@
  * The unused space can be used if needed, but it adds a little more
  * complexity to the calculations.
  */
-
-/*
- * The first generation of Hammer processors can use 48 bits of
- * virtual memory, and 40 bits of physical memory. This will be
- * more for later generations. These defines can be changed to
- * variable names containing the # of bits, extracted from an
- * extended cpuid instruction (variables are harder to use during
- * bootstrap, though)
- */
-#define VIRT_BITS	48
-#define PHYS_BITS	40
 
 /*
  * Mask to get rid of the sign-extended part of addresses.
@@ -284,18 +274,11 @@ LIST_HEAD(pmap_head, pmap); /* struct pmap_head: head of a pmap list */
  *
  * note that the pm_obj contains the reference count,
  * page list, and number of PTPs within the pmap.
- *
- * pm_lock is the same as the spinlock for vm object 0. Changes to
- * the other objects may only be made if that lock has been taken
- * (the other object locks are only used when uvm_pagealloc is called)
  */
 
 struct pmap {
+	struct mutex pm_mtx;
 	struct uvm_object pm_obj[PTP_LEVELS-1]; /* objects for lvl >= 1) */
-#define	pm_lock	pm_obj[0].vmobjlock
-#define pm_obj_l1 pm_obj[0]
-#define pm_obj_l2 pm_obj[1]
-#define pm_obj_l3 pm_obj[2]
 	LIST_ENTRY(pmap) pm_list;	/* list (lck by pm_list lock) */
 	pd_entry_t *pm_pdir;		/* VA of PD (lck by object lock) */
 	paddr_t pm_pdirpa;		/* PA of PD (read-only after create) */
@@ -519,10 +502,12 @@ kvtopte(vaddr_t va)
 #ifndef _LOCORE
 struct pv_entry;
 struct vm_page_md {
+	struct mutex pv_mtx;
 	struct pv_entry *pv_list;
 };
 
 #define VM_MDPAGE_INIT(pg) do {		\
+	mtx_init(&(pg)->mdpage.pv_mtx, IPL_VM); \
 	(pg)->mdpage.pv_list = NULL;	\
 } while (0)
 #endif	/* !_LOCORE */

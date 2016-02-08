@@ -1,4 +1,4 @@
-/*	$OpenBSD: vfs_syscalls.c,v 1.216 2014/12/16 18:30:04 tedu Exp $	*/
+/*	$OpenBSD: vfs_syscalls.c,v 1.222 2015/07/20 21:31:57 deraadt Exp $	*/
 /*	$NetBSD: vfs_syscalls.c,v 1.71 1996/04/23 10:29:02 mycroft Exp $	*/
 
 /*
@@ -52,7 +52,6 @@
 #include <sys/uio.h>
 #include <sys/malloc.h>
 #include <sys/pool.h>
-#include <sys/dirent.h>
 #include <sys/dkio.h>
 #include <sys/disklabel.h>
 #include <sys/ktrace.h>
@@ -592,7 +591,7 @@ sys_fstatfs(struct proc *p, void *v, register_t *retval)
 	struct statfs *sp;
 	int error;
 
-	if ((error = getvnode(p->p_fd, SCARG(uap, fd), &fp)) != 0)
+	if ((error = getvnode(p, SCARG(uap, fd), &fp)) != 0)
 		return (error);
 	mp = ((struct vnode *)fp->f_data)->v_mount;
 	if (!mp) {
@@ -844,6 +843,15 @@ doopenat(struct proc *p, int fd, const char *path, int oflags, mode_t mode,
 	int type, indx, error, localtrunc = 0;
 	struct flock lf;
 	struct nameidata nd;
+
+	switch (oflags & O_ACCMODE) {
+	case O_WRONLY:
+	case O_RDWR:
+		p->p_tamenote |= TMN_WRITE;
+		break;
+	}
+	if (oflags & O_CREAT)
+		p->p_tamenote |= TMN_CREAT;
 
 	fdplock(fdp);
 
@@ -1187,6 +1195,7 @@ sys_mknod(struct proc *p, void *v, register_t *retval)
 		syscallarg(int) dev;
 	} */ *uap = v;
 
+	p->p_tamenote |= TMN_IMODIFY;
 	return (domknodat(p, AT_FDCWD, SCARG(uap, path), SCARG(uap, mode),
 	    SCARG(uap, dev)));
 }
@@ -1281,6 +1290,7 @@ sys_mkfifo(struct proc *p, void *v, register_t *retval)
 		syscallarg(mode_t) mode;
 	} */ *uap = v;
 
+	p->p_tamenote |= TMN_CREAT;
 	return (domknodat(p, AT_FDCWD, SCARG(uap, path),
 	    (SCARG(uap, mode) & ALLPERMS) | S_IFIFO, 0));
 }
@@ -1310,6 +1320,7 @@ sys_link(struct proc *p, void *v, register_t *retval)
 		syscallarg(const char *) link;
 	} */ *uap = v;
 
+	p->p_tamenote |= TMN_CREAT;
 	return (dolinkat(p, AT_FDCWD, SCARG(uap, path), AT_FDCWD,
 	    SCARG(uap, link), AT_SYMLINK_FOLLOW));
 }
@@ -1383,6 +1394,7 @@ sys_symlink(struct proc *p, void *v, register_t *retval)
 		syscallarg(const char *) link;
 	} */ *uap = v;
 
+	p->p_tamenote |= TMN_CREAT;
 	return (dosymlinkat(p, SCARG(uap, path), AT_FDCWD, SCARG(uap, link)));
 }
 
@@ -1443,6 +1455,7 @@ sys_unlink(struct proc *p, void *v, register_t *retval)
 		syscallarg(const char *) path;
 	} */ *uap = v;
 
+	p->p_tamenote |= TMN_CREAT;
 	return (dounlinkat(p, AT_FDCWD, SCARG(uap, path), 0));
 }
 
@@ -1836,6 +1849,7 @@ sys_chflags(struct proc *p, void *v, register_t *retval)
 		syscallarg(u_int) flags;
 	} */ *uap = v;
 
+	p->p_tamenote |= TMN_IMODIFY;
 	return (dochflagsat(p, AT_FDCWD, SCARG(uap, path),
 	    SCARG(uap, flags), 0));
 }
@@ -1884,7 +1898,7 @@ sys_fchflags(struct proc *p, void *v, register_t *retval)
 	struct vnode *vp;
 	int error;
 
-	if ((error = getvnode(p->p_fd, SCARG(uap, fd), &fp)) != 0)
+	if ((error = getvnode(p, SCARG(uap, fd), &fp)) != 0)
 		return (error);
 	vp = fp->f_data;
 	vref(vp);
@@ -1934,6 +1948,7 @@ sys_chmod(struct proc *p, void *v, register_t *retval)
 		syscallarg(mode_t) mode;
 	} */ *uap = v;
 
+	p->p_tamenote |= TMN_IMODIFY;
 	return (dofchmodat(p, AT_FDCWD, SCARG(uap, path), SCARG(uap, mode), 0));
 }
 
@@ -2000,7 +2015,7 @@ sys_fchmod(struct proc *p, void *v, register_t *retval)
 	if (SCARG(uap, mode) & ~(S_IFMT | ALLPERMS))
 		return (EINVAL);
 
-	if ((error = getvnode(p->p_fd, SCARG(uap, fd), &fp)) != 0)
+	if ((error = getvnode(p, SCARG(uap, fd), &fp)) != 0)
 		return (error);
 	vp = (struct vnode *)fp->f_data;
 	vn_lock(vp, LK_EXCLUSIVE | LK_RETRY, p);
@@ -2029,6 +2044,7 @@ sys_chown(struct proc *p, void *v, register_t *retval)
 		syscallarg(gid_t) gid;
 	} */ *uap = v;
 
+	p->p_tamenote |= TMN_IMODIFY;
 	return (dofchownat(p, AT_FDCWD, SCARG(uap, path), SCARG(uap, uid),
 	    SCARG(uap, gid), 0));
 }
@@ -2112,6 +2128,7 @@ sys_lchown(struct proc *p, void *v, register_t *retval)
 	uid_t uid = SCARG(uap, uid);
 	gid_t gid = SCARG(uap, gid);
 
+	p->p_tamenote |= TMN_IMODIFY;
 	NDINIT(&nd, LOOKUP, NOFOLLOW, UIO_USERSPACE, SCARG(uap, path), p);
 	if ((error = namei(&nd)) != 0)
 		return (error);
@@ -2162,7 +2179,7 @@ sys_fchown(struct proc *p, void *v, register_t *retval)
 	uid_t uid = SCARG(uap, uid);
 	gid_t gid = SCARG(uap, gid);
 
-	if ((error = getvnode(p->p_fd, SCARG(uap, fd), &fp)) != 0)
+	if ((error = getvnode(p, SCARG(uap, fd), &fp)) != 0)
 		return (error);
 	vp = (struct vnode *)fp->f_data;
 	vn_lock(vp, LK_EXCLUSIVE | LK_RETRY, p);
@@ -2208,6 +2225,7 @@ sys_utimes(struct proc *p, void *v, register_t *retval)
 	const struct timeval *tvp;
 	int error;
 
+	p->p_tamenote |= TMN_IMODIFY;
 	tvp = SCARG(uap, tptr);
 	if (tvp != NULL) {
 		error = copyin(tvp, tv, sizeof(tv));
@@ -2284,6 +2302,10 @@ dovutimens(struct proc *p, struct vnode *vp, struct timespec ts[2])
 #endif
 
 	VATTR_NULL(&vattr);
+
+	/*  make sure ctime is updated even if neither mtime nor atime is */
+	vattr.va_vaflags = VA_UTIMES_CHANGE;
+
 	if (ts[0].tv_nsec == UTIME_NOW || ts[1].tv_nsec == UTIME_NOW) {
 		if (ts[0].tv_nsec == UTIME_NOW && ts[1].tv_nsec == UTIME_NOW)
 			vattr.va_vaflags |= VA_UTIMES_NULL;
@@ -2295,29 +2317,22 @@ dovutimens(struct proc *p, struct vnode *vp, struct timespec ts[2])
 			ts[1] = now;
 	}
 
-	/*
-	 * XXX: Ideally the filesystem code would check tv_nsec ==
-	 * UTIME_OMIT instead of tv_sec == VNOVAL, but until then we
-	 * need to fudge tv_sec if it happens to equal VNOVAL.
-	 */
-	if (ts[0].tv_nsec == UTIME_OMIT)
-		ts[0].tv_sec = VNOVAL;
-	else if (ts[0].tv_sec == VNOVAL)
-		ts[0].tv_sec = VNOVAL - 1;
-
-	if (ts[1].tv_nsec == UTIME_OMIT)
-		ts[1].tv_sec = VNOVAL;
-	else if (ts[1].tv_sec == VNOVAL)
-		ts[1].tv_sec = VNOVAL - 1;
+	if (ts[0].tv_nsec != UTIME_OMIT) {
+		if (ts[0].tv_nsec < 0 || ts[0].tv_nsec >= 1000000000)
+			return (EINVAL);
+		vattr.va_atime = ts[0];
+	}
+	if (ts[1].tv_nsec != UTIME_OMIT) {
+		if (ts[1].tv_nsec < 0 || ts[1].tv_nsec >= 1000000000)
+			return (EINVAL);
+		vattr.va_mtime = ts[1];
+	}
 
 	vn_lock(vp, LK_EXCLUSIVE | LK_RETRY, p);
 	if (vp->v_mount->mnt_flag & MNT_RDONLY)
 		error = EROFS;
-	else {
-		vattr.va_atime = ts[0];
-		vattr.va_mtime = ts[1];
+	else
 		error = VOP_SETATTR(vp, &vattr, p->p_ucred, p);
-	}
 	vput(vp);
 	return (error);
 }
@@ -2380,7 +2395,7 @@ dofutimens(struct proc *p, int fd, struct timespec ts[2])
 	struct vnode *vp;
 	int error;
 
-	if ((error = getvnode(p->p_fd, fd, &fp)) != 0)
+	if ((error = getvnode(p, fd, &fp)) != 0)
 		return (error);
 	vp = (struct vnode *)fp->f_data;
 	vref(vp);
@@ -2406,6 +2421,7 @@ sys_truncate(struct proc *p, void *v, register_t *retval)
 	int error;
 	struct nameidata nd;
 
+	p->p_tamenote |= TMN_IMODIFY;
 	NDINIT(&nd, LOOKUP, FOLLOW, UIO_USERSPACE, SCARG(uap, path), p);
 	if ((error = namei(&nd)) != 0)
 		return (error);
@@ -2441,7 +2457,7 @@ sys_ftruncate(struct proc *p, void *v, register_t *retval)
 	off_t len;
 	int error;
 
-	if ((error = getvnode(p->p_fd, SCARG(uap, fd), &fp)) != 0)
+	if ((error = getvnode(p, SCARG(uap, fd), &fp)) != 0)
 		return (error);
 	len = SCARG(uap, length);
 	if ((fp->f_flag & FWRITE) == 0 || len < 0) {
@@ -2477,7 +2493,7 @@ sys_fsync(struct proc *p, void *v, register_t *retval)
 	struct file *fp;
 	int error;
 
-	if ((error = getvnode(p->p_fd, SCARG(uap, fd), &fp)) != 0)
+	if ((error = getvnode(p, SCARG(uap, fd), &fp)) != 0)
 		return (error);
 	vp = (struct vnode *)fp->f_data;
 	vn_lock(vp, LK_EXCLUSIVE | LK_RETRY, p);
@@ -2505,6 +2521,7 @@ sys_rename(struct proc *p, void *v, register_t *retval)
 		syscallarg(const char *) to;
 	} */ *uap = v;
 
+	p->p_tamenote |= TMN_IMODIFY;
 	return (dorenameat(p, AT_FDCWD, SCARG(uap, from), AT_FDCWD,
 	    SCARG(uap, to)));
 }
@@ -2613,6 +2630,7 @@ sys_mkdir(struct proc *p, void *v, register_t *retval)
 		syscallarg(mode_t) mode;
 	} */ *uap = v;
 
+	p->p_tamenote |= TMN_CREAT;
 	return (domkdirat(p, AT_FDCWD, SCARG(uap, path), SCARG(uap, mode)));
 }
 
@@ -2671,6 +2689,7 @@ sys_rmdir(struct proc *p, void *v, register_t *retval)
 		syscallarg(const char *) path;
 	} */ *uap = v;
 
+	p->p_tamenote |= TMN_CREAT;
 	return (dounlinkat(p, AT_FDCWD, SCARG(uap, path), AT_REMOVEDIR));
 }
 
@@ -2696,7 +2715,7 @@ sys_getdents(struct proc *p, void *v, register_t *retval)
 
 	if (buflen > INT_MAX)
 		return EINVAL;
-	if ((error = getvnode(p->p_fd, SCARG(uap, fd), &fp)) != 0)
+	if ((error = getvnode(p, SCARG(uap, fd), &fp)) != 0)
 		return (error);
 	if ((fp->f_flag & FREAD) == 0) {
 		error = EBADF;
@@ -2765,6 +2784,7 @@ sys_revoke(struct proc *p, void *v, register_t *retval)
 	int error;
 	struct nameidata nd;
 
+	p->p_tamenote |= TMN_CREAT;
 	NDINIT(&nd, LOOKUP, FOLLOW, UIO_USERSPACE, SCARG(uap, path), p);
 	if ((error = namei(&nd)) != 0)
 		return (error);
@@ -2787,12 +2807,12 @@ out:
  * On return *fpp is FREF:ed.
  */
 int
-getvnode(struct filedesc *fdp, int fd, struct file **fpp)
+getvnode(struct proc *p, int fd, struct file **fpp)
 {
 	struct file *fp;
 	struct vnode *vp;
 
-	if ((fp = fd_getfile(fdp, fd)) == NULL)
+	if ((fp = fd_getfile(p->p_fd, fd)) == NULL)
 		return (EBADF);
 
 	if (fp->f_type != DTYPE_VNODE)
@@ -2828,9 +2848,7 @@ sys_pread(struct proc *p, void *v, register_t *retval)
 	off_t offset;
 	int fd = SCARG(uap, fd);
 
-	if ((fp = fd_getfile(fdp, fd)) == NULL)
-		return (EBADF);
-	if ((fp->f_flag & FREAD) == 0)
+	if ((fp = fd_getfile_mode(fdp, fd, FREAD)) == NULL)
 		return (EBADF);
 
 	vp = (struct vnode *)fp->f_data;
@@ -2871,9 +2889,7 @@ sys_preadv(struct proc *p, void *v, register_t *retval)
 	off_t offset;
 	int fd = SCARG(uap, fd);
 
-	if ((fp = fd_getfile(fdp, fd)) == NULL)
-		return (EBADF);
-	if ((fp->f_flag & FREAD) == 0)
+	if ((fp = fd_getfile_mode(fdp, fd, FREAD)) == NULL)
 		return (EBADF);
 
 	vp = (struct vnode *)fp->f_data;
@@ -2913,9 +2929,7 @@ sys_pwrite(struct proc *p, void *v, register_t *retval)
 	off_t offset;
 	int fd = SCARG(uap, fd);
 
-	if ((fp = fd_getfile(fdp, fd)) == NULL)
-		return (EBADF);
-	if ((fp->f_flag & FWRITE) == 0)
+	if ((fp = fd_getfile_mode(fdp, fd, FWRITE)) == NULL)
 		return (EBADF);
 
 	vp = (struct vnode *)fp->f_data;
@@ -2956,9 +2970,7 @@ sys_pwritev(struct proc *p, void *v, register_t *retval)
 	off_t offset;
 	int fd = SCARG(uap, fd);
 
-	if ((fp = fd_getfile(fdp, fd)) == NULL)
-		return (EBADF);
-	if ((fp->f_flag & FWRITE) == 0)
+	if ((fp = fd_getfile_mode(fdp, fd, FWRITE)) == NULL)
 		return (EBADF);
 
 	vp = (struct vnode *)fp->f_data;
