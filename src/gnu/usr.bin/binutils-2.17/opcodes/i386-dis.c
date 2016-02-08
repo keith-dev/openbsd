@@ -5069,6 +5069,16 @@ PNI_Fixup (int extrachar ATTRIBUTE_UNUSED, int sizeflag)
 
       codep++;
     }
+  else if (mod == 3 && reg == 1 && rm <= 3)
+    {
+      size_t olen = strlen (obuf);
+      char *p = obuf + olen - 4;
+      if (*codep == 0xca)
+        strcpy (p, "clac");
+      else if (*codep == 0xcb)
+        strcpy (p, "stac");
+      codep++;
+    }
   else
     OP_M (0, sizeflag);
 }
@@ -5259,14 +5269,22 @@ VMX_Fixup (int extrachar ATTRIBUTE_UNUSED, int sizeflag)
 static void
 OP_VMX (int bytemode, int sizeflag)
 {
-  used_prefixes |= (prefixes & (PREFIX_DATA | PREFIX_REPZ));
-  if (prefixes & PREFIX_DATA)
-    strcpy (obuf, "vmclear");
-  else if (prefixes & PREFIX_REPZ)
-    strcpy (obuf, "vmxon");
+  if (mod == 3)
+    {
+      strcpy (obuf, "rdrand");
+      OP_E (v_mode, sizeflag);
+    }
   else
-    strcpy (obuf, "vmptrld");
-  OP_E (bytemode, sizeflag);
+    {
+      used_prefixes |= (prefixes & (PREFIX_DATA | PREFIX_REPZ));
+      if (prefixes & PREFIX_DATA)
+	strcpy (obuf, "vmclear");
+      else if (prefixes & PREFIX_REPZ)
+	strcpy (obuf, "vmxon");
+      else
+	strcpy (obuf, "vmptrld");
+      OP_E (bytemode, sizeflag);
+    }
 }
 
 static void

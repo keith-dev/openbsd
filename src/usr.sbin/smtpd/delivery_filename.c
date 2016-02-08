@@ -1,7 +1,7 @@
-/*	$OpenBSD: delivery_filename.c,v 1.5 2012/05/25 13:51:41 chl Exp $	*/
+/*	$OpenBSD: delivery_filename.c,v 1.8 2013/01/26 09:37:23 gilles Exp $	*/
 
 /*
- * Copyright (c) 2011 Gilles Chehade <gilles@openbsd.org>
+ * Copyright (c) 2011 Gilles Chehade <gilles@poolp.org>
  *
  * Permission to use, copy, modify, and distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -45,14 +45,14 @@ extern char	**environ;
 static void delivery_filename_open(struct deliver *);
 
 struct delivery_backend delivery_backend_filename = {
-	delivery_filename_open
+	0, delivery_filename_open
 };
 
 
 static void
 delivery_filename_open(struct deliver *deliver)
 {
-	struct stat 	 sb;
+	struct stat	 sb;
 	time_t		 now;
 	size_t		 len;
 	int		 fd;
@@ -61,7 +61,7 @@ delivery_filename_open(struct deliver *deliver)
 	char		*msg;
 	int		 n;
 
-#define error(m)	{ msg = m; goto err; }	
+#define error(m)	{ msg = m; goto err; }
 #define error2(m)	{ msg = m; goto err2; }
 
 	setproctitle("file delivery");
@@ -92,8 +92,10 @@ delivery_filename_open(struct deliver *deliver)
 	putc('\n', fp);
 	if (fflush(fp) == EOF || ferror(fp))
 		error2("write error");
-	if (fsync(fd) < 0)
-		error2("fsync");
+	if (fsync(fd) == -1) {
+		if (errno != EINVAL)
+			error2("fsync");
+	}
 	if (fclose(fp) == EOF)
 		error2("fclose");
 	_exit(0);

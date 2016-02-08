@@ -1,6 +1,6 @@
 define(MACHINE,macppc)dnl
 vers(__file__,
-	{-$OpenBSD: MAKEDEV.md,v 1.49 2012/04/06 15:18:41 jsing Exp $-},
+	{-$OpenBSD: MAKEDEV.md,v 1.52 2012/12/04 10:44:20 mpi Exp $-},
 etc.MACHINE)dnl
 dnl
 dnl Copyright (c) 2001-2006 Todd T. Fries <todd@OpenBSD.org>
@@ -18,8 +18,11 @@ dnl ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
 dnl OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 dnl
 dnl
+__devitem(agp, agp*, AGP bridge)dnl
 __devitem(s64_tzs, tty[a-z]*, Zilog 8530 serial ports,zs)dnl
 __devitem(s64_czs, cua[a-z]*, Zilog 8530 serial ports,zs)dnl
+_mkdev(agp, agp*, {-M agp$U c major_agp_c $U
+	MKlist[${#MKlist[*]}]=";[ -e agpgart ] || ln -s agp$U agpgart"-})dnl
 _mkdev(s64_tzs, {-tty[a-z]-}, {-u=${i#tty*}
 	case $u in
 	a) n=0 ;;
@@ -82,12 +85,13 @@ _DEV(bpf, 22)
 _DEV(bthub, 81)
 _DEV(cry, 47)
 _DEV(diskmap, 84)
+_DEV(agp, 86)
+_DEV(drm, 87)
 _DEV(fdesc, 21)
 _DEV(gpio, 79)
 _DEV(hotplug, 78)
 _DEV(iop, 73)
 _DEV(lkm, 24)
-_DEV(nnpfs, 51)
 _DEV(pci, 71)
 _DEV(pf, 39)
 _DEV(pppx, 85)
@@ -116,7 +120,6 @@ twrget(all, au, audio, 0, 1, 2)dnl
 twrget(all, s64_tzs, tty, a, b)dnl
 twrget(all, s64_czs, cua, a, b)dnl
 target(all, ch, 0)dnl
-target(all, nnpfs, 0)dnl
 target(all, vscsi, 0)dnl
 target(all, diskmap)dnl
 twrget(all, flo, fd, 0, 0B, 0C, 0D, 0E, 0F, 0G, 0H)dnl
@@ -132,6 +135,7 @@ target(all, vnd, 0, 1, 2, 3)dnl
 target(all, gpio, 0, 1, 2)dnl
 target(all, bio)dnl
 target(all, bthub, 0, 1, 2)dnl
+target(all, drm, 0)dnl
 target(ramd, ttya, 0, 1)dnl
 target(ramd, ttyb, 0, 1)dnl
 target(ramd, pty, 0)dnl

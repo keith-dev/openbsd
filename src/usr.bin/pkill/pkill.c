@@ -1,4 +1,4 @@
-/*	$OpenBSD: pkill.c,v 1.28 2012/07/10 12:48:08 halex Exp $	*/
+/*	$OpenBSD: pkill.c,v 1.31 2012/12/12 22:25:21 halex Exp $	*/
 /*	$NetBSD: pkill.c,v 1.5 2002/10/27 11:49:34 kleink Exp $	*/
 
 /*-
@@ -83,6 +83,7 @@ int	pgrep;
 int	signum = SIGTERM;
 int	newest;
 int	oldest;
+int 	quiet;
 int	inverse;
 int	longfmt;
 int	matchargs;
@@ -152,7 +153,7 @@ main(int argc, char **argv)
 
 	criteria = 0;
 
-	while ((ch = getopt(argc, argv, "G:P:T:U:d:fg:lnos:t:u:vx")) != -1)
+	while ((ch = getopt(argc, argv, "G:P:T:U:d:fg:lnoqs:t:u:vx")) != -1)
 		switch (ch) {
 		case 'G':
 			makelist(&rgidlist, LT_GROUP, optarg);
@@ -192,6 +193,9 @@ main(int argc, char **argv)
 		case 'o':
 			oldest = 1;
 			criteria = 1;
+			break;
+		case 'q':
+			quiet = 1;
 			break;
 		case 's':
 			makelist(&sidlist, LT_SID, optarg);
@@ -415,12 +419,20 @@ main(int argc, char **argv)
 		if (selected[i] == inverse)
 			continue;
 
-		if ((*action)(kp, j++) == -1)
+		switch ((*action)(kp, j++)) {
+		case STATUS_MATCH:
+			if (rv != STATUS_ERROR)
+				rv = STATUS_MATCH;
+			break;
+		case STATUS_NOMATCH:
+			j--;
+			break;
+		case STATUS_ERROR:
 			rv = STATUS_ERROR;
-		else if (rv != STATUS_ERROR)
-			rv = STATUS_MATCH;
+			break;
+		}
 	}
-	if (pgrep && j)
+	if (pgrep && j && !quiet)
 		putchar('\n');
 
 	exit(rv);
@@ -432,9 +444,9 @@ usage(void)
 	const char *ustr;
 
 	if (pgrep)
-		ustr = "[-flnovx] [-d delim]";
+		ustr = "[-flnoqvx] [-d delim]";
 	else
-		ustr = "[-signal] [-flnovx]";
+		ustr = "[-signal] [-flnoqvx]";
 
 	fprintf(stderr, "usage: %s %s [-G gid] [-g pgrp] [-P ppid] [-s sid]"
 	    "\n\t[-T rtable] [-t tty] [-U uid] [-u euid] [pattern ...]\n",
@@ -446,14 +458,16 @@ usage(void)
 int
 killact(struct kinfo_proc *kp, int dummy)
 {
-	if (longfmt)
+	if (longfmt && !quiet)
 		printf("%d %s\n", (int)kp->p_pid, kp->p_comm);
 
-	if (kill(kp->p_pid, signum) == -1 && errno != ESRCH) {
+	if (kill(kp->p_pid, signum) == -1) {
+		if (errno == ESRCH)
+			return (STATUS_NOMATCH);
 		warn("signalling pid %d", (int)kp->p_pid);
-		return (-1);
+		return (STATUS_ERROR);
 	}
-	return (0);
+	return (STATUS_MATCH);
 }
 
 int
@@ -461,12 +475,14 @@ grepact(struct kinfo_proc *kp, int printdelim)
 {
 	char **argv;
 
+	if (quiet)
+		return (STATUS_MATCH);
+	if (longfmt && matchargs)
+		if ((argv = kvm_getargv(kd, kp, 0)) == NULL)
+			return (errno == ESRCH ? STATUS_NOMATCH : STATUS_ERROR);
 	if (printdelim)
 		fputs(delim, stdout);
 	if (longfmt && matchargs) {
-		if ((argv = kvm_getargv(kd, kp, 0)) == NULL)
-			return (-1);
-
 		printf("%d ", (int)kp->p_pid);
 		for (; *argv != NULL; argv++) {
 			printf("%s", *argv);
@@ -478,7 +494,7 @@ grepact(struct kinfo_proc *kp, int printdelim)
 	else
 		printf("%d", (int)kp->p_pid);
 
-	return (0);
+	return (STATUS_MATCH);
 }
 
 void

@@ -1,4 +1,4 @@
-#	$OpenBSD: Makefile,v 1.319 2012/06/20 18:33:58 matthew Exp $
+#	$OpenBSD: Makefile,v 1.328 2013/02/01 09:06:40 phessler Exp $
 
 TZDIR=		/usr/share/zoneinfo
 LOCALTIME=	Canada/Mountain
@@ -50,12 +50,13 @@ BIN2=	motd
 # -r-xr-xr-x
 RCDAEMONS=	amd apmd bgpd bootparamd cron dhcpd dhcrelay dvmrpd \
 		ftpd ftpproxy hostapd hotplugd httpd identd ifstated iked \
-		inetd isakmpd ldapd ldattach ldpd lpd mopd mrouted named nginx \
-		nsd ntpd ospfd ospf6d portmap pflogd rarpd rbootd relayd ripd \
-		route6d rtadvd rtsold rwhod sasyncd sendmail sensorsd smtpd \
-		snmpd spamd sshd syslogd watchdogd wsmoused xdm ypbind ypldap \
-		yppasswdd ypserv kdc kadmind kpasswdd nfsd mountd lockd statd \
-		spamlogd sndiod popa3d tftpd
+		inetd isakmpd ldapd npppd ldattach ldpd lpd mopd mrouted \
+		named nginx nsd ntpd ospfd ospf6d portmap pflogd rarpd rbootd \
+		relayd ripd route6d rtadvd rtsold rwhod sasyncd sendmail \
+		sensorsd smtpd snmpd spamd sshd syslogd watchdogd wsmoused \
+		xdm ypbind ypldap yppasswdd ypserv kdc kadmind kpasswdd nfsd \
+		mountd lockd statd spamlogd sndiod popa3d tftpd tftpproxy \
+		ldomd
 
 MISETS=	base${OSrev}.tgz comp${OSrev}.tgz \
 	man${OSrev}.tgz game${OSrev}.tgz etc${OSrev}.tgz
@@ -190,17 +191,6 @@ distribution-etc-root-var: distrib-dirs
 		    ${DESTDIR}/etc/ppp; \
 		${INSTALL} -c -o root -g wheel -m 644 ppp.secret.sample \
 		    ${DESTDIR}/etc/ppp
-	cd afs; \
-		${INSTALL} -c -o root -g wheel -m 644 afsd.conf \
-		    ${DESTDIR}/etc/afs; \
-		${INSTALL} -c -o root -g wheel -m 644 ThisCell \
-		    ${DESTDIR}/etc/afs; \
-		${INSTALL} -c -o root -g wheel -m 644 CellServDB \
-		    ${DESTDIR}/etc/afs; \
-		${INSTALL} -c -o root -g wheel -m 644 SuidCells \
-		    ${DESTDIR}/etc/afs; \
-		${INSTALL} -c -o root -g wheel -m 644 README \
-		    ${DESTDIR}/etc/afs
 	cd systrace; \
 		${INSTALL} -c -o root -g wheel -m 600 usr_sbin_lpd \
 		    ${DESTDIR}/etc/systrace; \
@@ -271,6 +261,7 @@ distribution-etc-root-var: distrib-dirs
 	cd ../usr.bin/mail && exec ${MAKE} distribution
 	cd ../usr.sbin/ldapd && exec ${MAKE} distribution
 	cd ../usr.sbin/nginx && exec ${MAKE} -f Makefile.bsd-wrapper distribution
+	cd ../usr.sbin/npppd && exec ${MAKE} distribution
 	cd mail && exec ${MAKE} distribution
 	${INSTALL} -c -o root -g wheel -m 600 root/root.mail \
 	    ${DESTDIR}/var/mail/root
@@ -318,7 +309,7 @@ sha:
 release: sha
 sha: distrib
 distrib: release-sets kernels
-release-sets: distribution
+release-sets: distribution kernels
 
 .endif
 
@@ -328,25 +319,37 @@ distrib:
 	cd ../distrib && \
 	    ${MAKE} && exec ${SUDO} ${MAKE} install
 
+# Because the moduli sizes > 4096 are not commonly used, and because they
+# take a long time to generate we update the <= 4096 ones more frequently.
 DHSIZE=1024 1536 2048 3072 4096
-update-moduli:
+update-moduli: moduli.6144 moduli.8192
 	( \
 		echo -n '#    $$Open'; echo 'BSD$$'; \
 		echo '# Time Type Tests Tries Size Generator Modulus'; \
 		( for i in ${DHSIZE}; do \
 			ssh-keygen -b $$i -G /dev/stdout; \
 		done) | \
-		ssh-keygen -T /dev/stdout \
+		ssh-keygen -T /dev/stdout ; \
+		cat moduli.6144 ; \
+		cat moduli.8192 ; \
 	) > moduli
+
+# These two will probably take days, so if you're going to regen them
+# run it in a tmux session or something.
+moduli.6144:
+	ssh-keygen -b 6144 -G /dev/stdout | ssh-keygen -T moduli.6144
+
+moduli.8192:
+	ssh-keygen -b 8192 -G /dev/stdout | ssh-keygen -T moduli.8192
 
 .PHONY: distribution-etc-root-var distribution distrib-dirs \
 	release allarchs kernels release-sets m4 install-mtree \
 	bootblocks ${ALL_KERNELS}
 	
 
-SUBDIR+= etc.alpha etc.amd64 etc.armish etc.aviion etc.hp300 etc.hppa
-SUBDIR+= etc.hppa64 etc.i386 etc.landisk etc.loongson etc.luna88k 
-SUBDIR+= etc.macppc etc.mvme68k etc.mvme88k etc.palm 
+SUBDIR+= etc.alpha etc.amd64 etc.armish etc.aviion etc.beagle etc.hp300
+SUBDIR+= etc.hppa etc.hppa64 etc.i386 etc.landisk etc.loongson etc.luna88k 
+SUBDIR+= etc.macppc etc.mvme68k etc.mvme88k etc.palm
 SUBDIR+= etc.sgi etc.socppc etc.sparc etc.sparc64 etc.vax etc.zaurus
 
 .include <bsd.subdir.mk>

@@ -33,10 +33,24 @@ DDEESSCCRRIIPPTTIIOONN
             x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x
             x x x x x x x
 
-     a      b
+     Trailing white space in the head:
 
      a      b
 
      a      b
 
-OpenBSD                        October 28, 2009                        OpenBSD
+     a      b
+
+     Non-numeric width specification:
+
+     tag  text
+
+     tag         text
+
+     Embedded paragraph:
+
+     tag     first paragraph
+
+             second paragraph
+
+OpenBSD                        December 31, 2012                       OpenBSD

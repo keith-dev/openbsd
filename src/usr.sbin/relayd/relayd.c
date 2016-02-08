@@ -1,4 +1,4 @@
-/*	$OpenBSD: relayd.c,v 1.108 2012/05/08 15:10:15 benno Exp $	*/
+/*	$OpenBSD: relayd.c,v 1.115 2013/01/17 20:34:18 bluhm Exp $	*/
 
 /*
  * Copyright (c) 2007, 2008 Reyk Floeter <reyk@openbsd.org>
@@ -104,8 +104,9 @@ parent_sig_handler(int sig, short event, void *arg)
 
 			for (id = 0; id < PROC_MAX; id++)
 				if (pid == ps->ps_pid[id]) {
-					log_warnx("lost child: %s %s",
-					    ps->ps_title[id], cause);
+					if (fail)
+						log_warnx("lost child: %s %s",
+						    ps->ps_title[id], cause);
 					break;
 				}
 
@@ -182,7 +183,6 @@ main(int argc, char *argv[])
 	log_init(debug ? debug : 1);	/* log to stderr until daemonized */
 
 	argc -= optind;
-	argv += optind;
 	if (argc > 0)
 		usage();
 
@@ -564,6 +564,7 @@ void
 purge_relay(struct relayd *env, struct relay *rlay)
 {
 	struct rsession		*con;
+	struct relay_table	*rlt;
 
 	/* shutdown and remove relay */
 	if (event_initialized(&rlay->rl_ev))
@@ -590,6 +591,11 @@ purge_relay(struct relayd *env, struct relay *rlay)
 		free(rlay->rl_ssl_key);
 	if (rlay->rl_ssl_ca != NULL)
 		free(rlay->rl_ssl_ca);
+
+	while ((rlt = TAILQ_FIRST(&rlay->rl_tables))) {
+		TAILQ_REMOVE(&rlay->rl_tables, rlt, rlt_entry);
+		free(rlt);
+	}
 
 	free(rlay);
 }
@@ -944,7 +950,7 @@ protonode_header(enum direction dir, struct protocol *proto,
 	pn = RB_FIND(proto_tree, tree, pk);
 	if (pn != NULL)
 		return (pn);
-	if ((pn = (struct protonode *)calloc(1, sizeof(*pn))) == NULL) {
+	if ((pn = calloc(1, sizeof(*pn))) == NULL) {
 		log_warn("%s: calloc", __func__);
 		return (NULL);
 	}
@@ -1178,7 +1184,7 @@ socket_rlimit(int maxfd)
 
 	if (getrlimit(RLIMIT_NOFILE, &rl) == -1)
 		fatal("socket_rlimit: failed to get resource limit");
-	log_debug("%s: max open files %d", __func__, rl.rlim_max);
+	log_debug("%s: max open files %llu", __func__, rl.rlim_max);
 
 	/*
 	 * Allow the maximum number of open file descriptors for this
@@ -1219,4 +1225,23 @@ get_data(u_int8_t *ptr, size_t len)
 	memcpy(data, ptr, len);
 
 	return (data);
+}
+
+int
+accept_reserve(int sockfd, struct sockaddr *addr, socklen_t *addrlen,
+    int reserve, volatile int *counter)
+{
+	int ret;
+	if (getdtablecount() + reserve +
+	    *counter >= getdtablesize()) {
+		errno = EMFILE;
+		return -1;
+	}
+
+	if ((ret = accept(sockfd, addr, addrlen)) > -1) {
+		(*counter)++;
+		DPRINTF("%s: inflight incremented, now %d",__func__,
+		    *counter);
+	}
+	return ret;
 }

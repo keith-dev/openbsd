@@ -1,4 +1,4 @@
-/*	$OpenBSD: tfork_thread.S,v 1.2 2012/06/21 00:56:59 guenther Exp $	*/
+/*	$OpenBSD: tfork_thread.S,v 1.5 2013/01/23 18:59:32 miod Exp $	*/
 
 /*
  * Copyright (c) 2005, Miodrag Vallat
@@ -31,23 +31,24 @@
  * int __tfork_thread(const struct __tfork *param, size_t psize, void (*func)(void *), void *arg);
  */
 ENTRY(__tfork_thread)
-	or	r13, r0,  __SYSCALLNAME(SYS_,__tfork)
-	tb0	0,   r0,  128	/* corrupts r2 and r3 in the child */
-	br	__cerror
+	or	%r13, %r0,  __SYSCALLNAME(SYS_,__tfork)
+	tb0	0,    %r0,  450	/* corrupts r2 and r3 in the child */
+	br	CERROR
 
-	bcnd	eq0, r2,  1f
+	bcnd	eq0,  %r2,  1f
 
 	/*
 	 * In parent process: just return.
 	 */
-	jmp	r1
+	jmp	%r1
 
 1:
 	/*
 	 * In child process: invoke function, then exit.
 	 */
-	jsr.n	r4		/* func */
-	 or	r2,  r5,  r0	/* arg */
+	jsr.n	%r4		/* func */
+	 or	%r2,  %r5,  %r0	/* arg */
 
-	or	r13, r0,  __SYSCALLNAME(SYS_,__threxit)
-	tb0	0,   r0,  128
+	or	%r13, %r0,  __SYSCALLNAME(SYS_,__threxit)
+	tb0	0,    %r0,  450
+END(__tfork_thread)

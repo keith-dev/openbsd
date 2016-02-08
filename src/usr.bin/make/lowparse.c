@@ -1,4 +1,4 @@
-/*	$OpenBSD: lowparse.c,v 1.27 2012/03/22 13:50:30 espie Exp $ */
+/*	$OpenBSD: lowparse.c,v 1.32 2012/11/07 14:18:41 espie Exp $ */
 
 /* low-level parsing functions. */
 
@@ -42,6 +42,7 @@
 #include "error.h"
 #include "lst.h"
 #include "memory.h"
+#include "pathnames.h"
 #ifndef LOCATION_TYPE
 #include "location.h"
 #endif
@@ -72,6 +73,9 @@ static struct input_stream *current;	/* the input_stream being parsed. */
 
 static LIST input_stack;	/* Stack of input_stream waiting to be parsed
 				 * (includes and loop reparses) */
+
+/* record gnode location for proper reporting at runtime */
+static Location *post_parse = NULL;
 
 /* input_stream ctors.
  *
@@ -113,6 +117,39 @@ static void read_logical_line(Buffer, int);
  *	(e.g., not a backslash or a space. */
 static int skip_empty_lines_and_read_char(Buffer);
 
+const char *curdir;
+size_t curdir_len;
+
+void
+Parse_setcurdir(const char *dir)
+{
+	curdir = dir;
+	curdir_len = strlen(dir);
+}
+
+static bool
+startswith(const char *f, const char *s, size_t len)
+{
+	return strncmp(f, s, len) == 0 && f[len] == '/';
+}
+
+static const char *
+simplify(const char *filename)
+{
+	if (startswith(filename, curdir, curdir_len))
+		return filename + curdir_len + 1;
+	else if (startswith(filename, _PATH_DEFSYSPATH, 
+	    sizeof(_PATH_DEFSYSPATH)-1)) {
+	    	size_t sz;
+		char *buf;
+		sz = strlen(filename) - sizeof(_PATH_DEFSYSPATH)+3;
+		buf = emalloc(sz);
+		snprintf(buf, sz, "<%s>", filename+sizeof(_PATH_DEFSYSPATH));
+		return buf;
+	} else
+		return filename;
+}
+
 static struct input_stream *
 new_input_file(const char *name, FILE *stream)
 {
@@ -122,7 +159,7 @@ new_input_file(const char *name, FILE *stream)
 #endif
 
 	istream = emalloc(sizeof(*istream));
-	istream->origin.fname = name;
+	istream->origin.fname = simplify(name);
 	istream->str = NULL;
 	/* Naturally enough, we start reading at line 0. */
 	istream->origin.lineno = 0;
@@ -242,11 +279,9 @@ Parse_ReadNextConditionalLine(Buffer linebuf)
 				if (c == '\n')
 					current->origin.lineno++;
 			}
-			if (c == EOF) {
-				Parse_Error(PARSE_FATAL,
-				    "Unclosed conditional");
+			if (c == EOF)
+				/* Unclosed conditional, reported by cond.c */
 				return NULL;
-			}
 		}
 		current->origin.lineno++;
 	}
@@ -415,7 +450,6 @@ Parse_ReadNormalLine(Buffer linebuf)
 		return NULL;
 	else {
 		read_logical_line(linebuf, c);
-		Buf_KillTrailingSpaces(linebuf);
 		return Buf_Retrieve(linebuf);
 	}
 }
@@ -433,42 +467,27 @@ Parse_Getfilename(void)
 }
 
 void
+Parse_SetLocation(Location *origin)
+{
+	post_parse = origin;
+}
+
+void
 Parse_FillLocation(Location *origin)
 {
-	origin->lineno = Parse_Getlineno();
-	origin->fname = Parse_Getfilename();
+	if (post_parse) {
+		*origin = *post_parse;
+	} else {
+		origin->lineno = Parse_Getlineno();
+		origin->fname = Parse_Getfilename();
+	}
 }
-
-#ifdef CLEANUP
-void
-LowParse_Init(void)
-{
-	Static_Lst_Init(&input_stack);
-	current = NULL;
-}
-
-void
-LowParse_End(void)
-{
-	Lst_Destroy(&input_stack, NOFREE);	/* Should be empty now */
-#if 0
-	Lst_Destroy(&fileNames, (SimpleProc)free);
-#endif
-}
-#endif
-
 
 void
 Parse_ReportErrors(void)
 {
-	if (fatal_errors) {
-#ifdef CLEANUP
-		while (Parse_NextFile())
-			;
-#endif
-		fprintf(stderr,
-		    "Fatal errors encountered -- cannot continue\n");
+	if (fatal_errors)
 		exit(1);
-	} else
+	else
 		assert(current == NULL);
 }

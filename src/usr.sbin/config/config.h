@@ -1,4 +1,4 @@
-/*	$OpenBSD: config.h,v 1.23 2007/11/25 08:26:59 deraadt Exp $	*/
+/*	$OpenBSD: config.h,v 1.25 2012/12/05 23:20:26 deraadt Exp $	*/
 /*	$NetBSD: config.h,v 1.30 1997/02/02 21:12:30 thorpej Exp $	*/
 
 /*
@@ -49,7 +49,6 @@
 #include <sys/param.h>
 
 #if !defined(MAKE_BOOTSTRAP) && defined(BSD)
-#include <sys/cdefs.h>
 #include <paths.h>
 #endif /* ...BSD */
 
@@ -229,7 +228,7 @@ struct files {
 	const char *fi_base;	/* tail minus ".c" (or whatever) */
 	struct  nvlist *fi_optx;/* options expression */
 	struct  nvlist *fi_optf;/* flattened version of above, if needed */
-	const char *fi_mkrule[2];/* special make rules, if any */
+	const char *fi_mkrule;/* special make rules, if any */
 };
 
 /*
@@ -319,7 +318,7 @@ void	initfiles(void);
 void	checkfiles(void);
 int	fixfiles(void);		/* finalize */
 int	fixobjects(void);
-void	addfile(struct nvlist *, struct nvlist *, int, const char *, const char *);
+void	addfile(struct nvlist *, struct nvlist *, int, const char *);
 void	addobject(const char *, struct nvlist *, int);
 
 /* hash.c */

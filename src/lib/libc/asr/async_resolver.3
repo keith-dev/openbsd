@@ -1,4 +1,4 @@
-.\"	$OpenBSD: async_resolver.3,v 1.2 2012/04/15 15:08:12 jmc Exp $
+.\"	$OpenBSD: async_resolver.3,v 1.6 2012/09/06 08:38:15 eric Exp $
 .\"
 .\" Copyright (c) 2012, Eric Faurot <eric@openbsd.org>
 .\"
@@ -14,7 +14,7 @@
 .\" ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
 .\" OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 .\"
-.Dd $Mdocdate: April 15 2012 $
+.Dd $Mdocdate: September 6 2012 $
 .Dt ASYN_RESOLVER 3
 .Os
 .Sh NAME
@@ -30,7 +30,6 @@
 .Nm gethostbyname_async ,
 .Nm gethostbyname2_async ,
 .Nm gethostbyaddr_async ,
-.Nm freehostent ,
 .Nm getnetbyname_async ,
 .Nm getnetbyaddr_async ,
 .Nm freenetent ,
@@ -61,13 +60,10 @@
 .Fn gethostbyname2_async "const char *name" "int af" "struct asr *asr"
 .Ft struct async*
 .Fn gethostbyaddr_async "const void *addr" "socklen_t len" "int af" "struct asr *asr"
-.Ft void
-.Fn freehostent "struct hostent *h"
+.Ft struct async*
 .Fn getnetbyname_async "const char *name" "struct asr *asr"
 .Ft struct async*
 .Fn getnetbyaddr_async "in_addr_t net" "int type" "struct asr *asr"
-.Ft void
-.Fn freenetent "struct netent *n"
 .Ft struct async*
 .Fn getaddrinfo_async "const char *hostname" "const char *servname" "const struct addrinfo *hints" "struct asr *asr"
 .Ft struct async*
@@ -148,31 +144,30 @@ parameter, which must be a valid pointer to user allocated memory.
 is defined as:
 .Bd -literal -offset indent
 struct async_res {
-	int			 ar_cond;
-	int			 ar_fd;
-	int			 ar_timeout;
+	int	 ar_cond;
+	int	 ar_fd;
+	int	 ar_timeout;
 
-	int			 ar_errno;
-	int			 ar_h_errno;
-	int			 ar_gai_errno;
-	int			 ar_rrset_errno;
+	int	 ar_errno;
+	int	 ar_h_errno;
+	int	 ar_gai_errno;
+	int	 ar_rrset_errno;
 
-	int			 ar_rcode;
-	void			*ar_data;
-	int			 ar_datalen;
+	int	 ar_count;
+
+	int	 ar_rcode;
+	void	*ar_data;
+	int	 ar_datalen;
 	union {
 		struct sockaddr		sa;
 		struct sockaddr_in	sain;
 		struct sockaddr_in6	sain6;
-	}			 ar_sa;
+	}	 ar_sa;
 
-	char			*ar_cname;
-	int			 ar_count;
-
-	struct addrinfo		*ar_addrinfo;
-	struct rrsetinfo	*ar_rrsetinfo;
-	struct hostent		*ar_hostent;
-	struct netent		*ar_netent;
+	struct addrinfo	 *ar_addrinfo;
+	struct rrsetinfo *ar_rrsetinfo;
+	struct hostent	 *ar_hostent;
+	struct netent	 *ar_netent;
 };
 .Ed
 .Pp
@@ -212,6 +207,13 @@ are set accordingly and the resolving process can be resumed by calling
 .Fn async_run .
 .El
 .Pp
+Note that although the query itself may fail (the error being properly reported
+in the
+.Fa ar
+structure), the
+.Fn async_run
+function itself cannot fail and it always preserves errno.
+.Pp
 The
 .Fn async_run_sync
 function is a wrapper around
@@ -220,6 +222,7 @@ that handles the read/write conditions, thus falling back to a blocking
 interface.
 It only returns partial and complete results through ASYNC_YIELD and ASYNC_DONE
 respectively.
+It also preserves errno.
 .Pp
 The
 .Fn async_abort
@@ -300,10 +303,8 @@ in the
 .Ar ar_hostent
 field.
 Note that unlike their blocking counterparts, these functions always return a
-pointer to newly allocated memory.
-Therefore, the pointer must be freed through the new
-.Fn freehostent
-call.
+pointer to newly allocated memory, which must be released by the caller using
+.Xr free 3 .
 .Pp
 Similarly, the
 .Fn getnetbyname_async
@@ -317,7 +318,7 @@ in the
 .Ar ar_netent
 field.
 The memory there is also allocated for the request, and it must be freed by
-.Fn freenetent .
+.Xr free 3 .
 .Pp
 The
 .Fn getaddrinfo_async
@@ -355,5 +356,3 @@ contains the number of elements in the list.
 .Sh CAVEATS
 This DNS resolver implementation doesn't support
 the EDNS0 protocol extension yet.
-.Pp
-The current implementation does not handle YP databases.

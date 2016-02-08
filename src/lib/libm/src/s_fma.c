@@ -1,4 +1,4 @@
-/*	$OpenBSD: s_fma.c,v 1.1 2011/07/06 00:02:42 martynas Exp $	*/
+/*	$OpenBSD: s_fma.c,v 1.3 2013/01/13 03:45:00 martynas Exp $	*/
 
 /*-
  * Copyright (c) 2005 David Schultz <das@FreeBSD.ORG>
@@ -25,13 +25,6 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  */
-
-/* LINTLIBRARY */
-
-#include <sys/cdefs.h>
-#if 0
-__FBSDID("$FreeBSD: src/lib/msun/src/s_fma.c,v 1.5 2008/04/03 06:14:51 das Exp $");
-#endif
 
 #include <fenv.h>
 #include <float.h>
@@ -209,10 +202,5 @@ fma(double x, double y, double z)
 #endif	/* LDBL_MANT_DIG != 113 */
 
 #if	LDBL_MANT_DIG == 53
-#ifdef	lint
-/* PROTOLIB1 */
-long double fmal(long double, long double, long double);
-#else	/* lint */
 __weak_alias(fmal, fma);
-#endif	/* lint */
 #endif	/* LDBL_MANT_DIG == 53 */

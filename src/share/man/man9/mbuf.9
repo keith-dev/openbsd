@@ -1,4 +1,4 @@
-.\"     $OpenBSD: mbuf.9,v 1.56 2011/12/02 10:57:16 dlg Exp $
+.\"     $OpenBSD: mbuf.9,v 1.59 2013/01/03 07:53:22 jmc Exp $
 .\"
 .\" Copyright (c) 2001 Jean-Jacques Bernard-Gundol <jjbg@openbsd.org>
 .\" All rights reserved.
@@ -25,7 +25,7 @@
 .\" (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
 .\" THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 .\"
-.Dd $Mdocdate: December 2 2011 $
+.Dd $Mdocdate: January 3 2013 $
 .Dt MBUF 9
 .Os
 .Sh NAME
@@ -64,7 +64,7 @@
 .Ft void
 .Fn m_adj "struct mbuf *mp" "int req_len"
 .Ft int
-.Fn m_copyback "struct mbuf *m0" "int off" "int len" "caddr_t cp" "int wait"
+.Fn m_copyback "struct mbuf *m0" "int off" "int len" "const void *cp" "int wait"
 .Ft void
 .Fn m_freem "struct mbuf *m"
 .Ft void
@@ -76,8 +76,6 @@
 .Ft struct mbuf *
 .Fn m_devget "char *buf" "int totlen" "int off" "struct ifnet *ifp" \
 "void (*func)(const void *, void *, size_t)"
-.Ft void
-.Fn m_zero "struct mbuf *m"
 .Ft int
 .Fn m_apply "struct mbuf *m" "int off" "int len" \
 "int (*func)(caddr_t, caddr_t, unsigned int)" "caddr_t fstate"
@@ -112,31 +110,38 @@ struct m_hdr {
 };
 
 struct pkthdr {
-        struct  ifnet *rcvif;
-        SLIST_HEAD(packet_tags, m_tag) tags;
-        int     len;
-        u_int16_t csum_flags;
-        u_int16_t ether_vtag;
+	struct  ifnet *rcvif;
+	SLIST_HEAD(packet_tags, m_tag) tags;
+	int     len;
+	u_int16_t tagsset;
+	u_int16_t pad;
+	u_int16_t csum_flags;
+	u_int16_t ether_vtag;
+	u_int	rdomain;
 	struct	pkthdr_pf pf;
 };
 
 struct pkthdr_pf {
 	void	 *hdr;
-	u_int	  rtableid;
+	void	 *statekey;
 	u_int32_t qid;
 	u_int16_t tag;
 	u_int8_t  flags;
 	u_int8_t  routed;
+	u_int8_t  prio;
+	u_int8_t  pad[3];
 };
 
-struct m_ext {
-        caddr_t ext_buf;
-        void    (*ext_free)(caddr_t, u_int, void *);
-        void    *ext_arg;
-        u_int   ext_size;
-        int     ext_type;
-        struct mbuf *ext_nextref;
-        struct mbuf *ext_prevref;
+struct mbuf_ext {
+	caddr_t ext_buf;
+	void    (*ext_free)(caddr_t, u_int, void *);
+	void    *ext_arg;
+	u_int   ext_size;
+	int     ext_type;
+	struct ifnet* ext_ifp;
+	int     ext_backend;
+	struct mbuf *ext_nextref;
+	struct mbuf *ext_prevref;
 };
 
 struct mbuf {
@@ -145,7 +150,7 @@ struct mbuf {
                 struct {
                         struct  pkthdr MH_pkthdr;
                         union {
-                                struct  m_ext MH_ext;
+                                struct  mbuf_ext MH_ext;
                                 char    MH_databuf[MHLEN];
                         } MH_dat;
                 } MH;
@@ -248,6 +253,9 @@ packet was encrypted (ESP-transport).
 packet was authenticated (AH or ESP).
 .It Dv M_AUTH_AH
 header was authenticated (AH).
+.It Dv M_ZEROIZE
+Zero the data part of the mbufs in the mbuf chain pointed to by
+.Nm m_free .
 .It Dv M_TUNNEL
 header was IP-in-IP encapsulated by tunnel mode IPsec.
 .It Dv M_LINK0
@@ -577,9 +585,6 @@ The data is copied into an mbuf chain at offset
 .Fa off
 and a pointer to the head of the chain is returned.
 Returns NULL on failure.
-.It Fn m_zero "struct mbuf *m"
-Zeroize the data part of the mbufs in the mbuf chain pointed to by
-.Fa m .
 .It Fn m_apply "struct mbuf *m" "int off" "int len" \
 "int (*func)(caddr_t, caddr_t, unsigned int)" "caddr_t fstate"
 Apply the function

@@ -18,7 +18,6 @@
 ./usr/bin/lorder
 ./usr/bin/mkstr
 ./usr/bin/objdump
-./usr/bin/pmdb
 ./usr/bin/ranlib
 ./usr/bin/rpcgen
 ./usr/bin/strip
@@ -173,6 +172,8 @@
 ./usr/include/dev/ic/advlib.h
 ./usr/include/dev/ic/adw.h
 ./usr/include/dev/ic/adwlib.h
+./usr/include/dev/ic/ahcireg.h
+./usr/include/dev/ic/ahcivar.h
 ./usr/include/dev/ic/aic6360reg.h
 ./usr/include/dev/ic/aic6360var.h
 ./usr/include/dev/ic/aic6915.h
@@ -350,6 +351,8 @@
 ./usr/include/dev/ic/rtl80x9var.h
 ./usr/include/dev/ic/rtl81x9reg.h
 ./usr/include/dev/ic/rtl8225reg.h
+./usr/include/dev/ic/rtsxreg.h
+./usr/include/dev/ic/rtsxvar.h
 ./usr/include/dev/ic/rtwreg.h
 ./usr/include/dev/ic/rtwvar.h
 ./usr/include/dev/ic/s3_617.h
@@ -516,6 +519,7 @@
 ./usr/include/dev/pci/drm/drm.h
 ./usr/include/dev/pci/drm/drmP.h
 ./usr/include/dev/pci/drm/drm_atomic.h
+./usr/include/dev/pci/drm/drm_mode.h
 ./usr/include/dev/pci/drm/drm_sarea.h
 ./usr/include/dev/pci/drm/i915_drm.h
 ./usr/include/dev/pci/drm/i915_drv.h
@@ -581,6 +585,7 @@
 ./usr/include/dev/pci/if_nfereg.h
 ./usr/include/dev/pci/if_nfevar.h
 ./usr/include/dev/pci/if_ngereg.h
+./usr/include/dev/pci/if_ocereg.h
 ./usr/include/dev/pci/if_san_common.h
 ./usr/include/dev/pci/if_san_front_end.h
 ./usr/include/dev/pci/if_san_obsd.h
@@ -610,6 +615,7 @@
 ./usr/include/dev/pci/ixgbe_type.h
 ./usr/include/dev/pci/lofnreg.h
 ./usr/include/dev/pci/lofnvar.h
+./usr/include/dev/pci/mpiireg.h
 ./usr/include/dev/pci/musyccreg.h
 ./usr/include/dev/pci/musyccvar.h
 ./usr/include/dev/pci/neoreg.h
@@ -659,6 +665,9 @@
 ./usr/include/dev/pci/ubsecreg.h
 ./usr/include/dev/pci/ubsecvar.h
 ./usr/include/dev/pci/vga_pcivar.h
+./usr/include/dev/pci/vioblkreg.h
+./usr/include/dev/pci/virtioreg.h
+./usr/include/dev/pci/virtiovar.h
 ./usr/include/dev/pci/ydsreg.h
 ./usr/include/dev/pci/ydsvar.h
 ./usr/include/dev/pckbc
@@ -759,6 +768,7 @@
 ./usr/include/dev/usb/if_rumreg.h
 ./usr/include/dev/usb/if_rumvar.h
 ./usr/include/dev/usb/if_runvar.h
+./usr/include/dev/usb/if_smscreg.h
 ./usr/include/dev/usb/if_uathreg.h
 ./usr/include/dev/usb/if_uathvar.h
 ./usr/include/dev/usb/if_udavreg.h
@@ -790,6 +800,7 @@
 ./usr/include/dev/usb/umidi_quirks.h
 ./usr/include/dev/usb/umidireg.h
 ./usr/include/dev/usb/umidivar.h
+./usr/include/dev/usb/uoak.h
 ./usr/include/dev/usb/uowreg.h
 ./usr/include/dev/usb/urio.h
 ./usr/include/dev/usb/usb.h
@@ -1139,29 +1150,6 @@
 ./usr/include/nfs/xdr_subs.h
 ./usr/include/nl_types.h
 ./usr/include/nlist.h
-./usr/include/nnpfs
-./usr/include/nnpfs/afssysdefs.h
-./usr/include/nnpfs/nnnpfs.h
-./usr/include/nnpfs/nnpfs_attr.h
-./usr/include/nnpfs/nnpfs_common.h
-./usr/include/nnpfs/nnpfs_config.h
-./usr/include/nnpfs/nnpfs_deb.h
-./usr/include/nnpfs/nnpfs_debug.h
-./usr/include/nnpfs/nnpfs_dev.h
-./usr/include/nnpfs/nnpfs_extern.h
-./usr/include/nnpfs/nnpfs_fs.h
-./usr/include/nnpfs/nnpfs_global.h
-./usr/include/nnpfs/nnpfs_locl.h
-./usr/include/nnpfs/nnpfs_message.h
-./usr/include/nnpfs/nnpfs_msg_locl.h
-./usr/include/nnpfs/nnpfs_node.h
-./usr/include/nnpfs/nnpfs_pioctl.h
-./usr/include/nnpfs/nnpfs_queue.h
-./usr/include/nnpfs/nnpfs_syscalls.h
-./usr/include/nnpfs/nnpfs_vfsops-bsd.h
-./usr/include/nnpfs/nnpfs_vfsops.h
-./usr/include/nnpfs/nnpfs_vnodeops.h
-./usr/include/nnpfs/nnpfs_vopdefs.h
 ./usr/include/ntfs
 ./usr/include/ntfs/ntfs.h
 ./usr/include/ntfs/ntfs_compr.h
@@ -1185,7 +1173,6 @@
 ./usr/include/ocurses.h
 ./usr/include/ohash.h
 ./usr/include/openssl
-./usr/include/openssl/acss.h
 ./usr/include/openssl/aes.h
 ./usr/include/openssl/asn1.h
 ./usr/include/openssl/asn1_mac.h
@@ -1196,6 +1183,7 @@
 ./usr/include/openssl/buffer.h
 ./usr/include/openssl/camellia.h
 ./usr/include/openssl/cast.h
+./usr/include/openssl/cmac.h
 ./usr/include/openssl/cms.h
 ./usr/include/openssl/comp.h
 ./usr/include/openssl/conf.h
@@ -1246,6 +1234,8 @@
 ./usr/include/openssl/safestack.h
 ./usr/include/openssl/seed.h
 ./usr/include/openssl/sha.h
+./usr/include/openssl/srp.h
+./usr/include/openssl/srtp.h
 ./usr/include/openssl/ssl.h
 ./usr/include/openssl/ssl2.h
 ./usr/include/openssl/ssl23.h
@@ -1412,7 +1402,6 @@
 ./usr/include/sys/exec_aout.h
 ./usr/include/sys/exec_ecoff.h
 ./usr/include/sys/exec_elf.h
-./usr/include/sys/exec_olf.h
 ./usr/include/sys/exec_script.h
 ./usr/include/sys/extent.h
 ./usr/include/sys/fcntl.h
@@ -1485,6 +1474,7 @@
 ./usr/include/sys/stdint.h
 ./usr/include/sys/swap.h
 ./usr/include/sys/syscall.h
+./usr/include/sys/syscall_mi.h
 ./usr/include/sys/syscallargs.h
 ./usr/include/sys/sysctl.h
 ./usr/include/sys/syslimits.h
@@ -1775,7 +1765,6 @@
 ./usr/share/man/man1/mkstr.1
 ./usr/share/man/man1/objcopy.1
 ./usr/share/man/man1/objdump.1
-./usr/share/man/man1/pmdb.1
 ./usr/share/man/man1/protoize.1
 ./usr/share/man/man1/ranlib.1
 ./usr/share/man/man1/readelf.1
@@ -3142,8 +3131,6 @@
 ./usr/share/man/man3/acoshf.3
 ./usr/share/man/man3/acoshl.3
 ./usr/share/man/man3/acosl.3
-./usr/share/man/man3/acss.3
-./usr/share/man/man3/acss_setkey.3
 ./usr/share/man/man3/add_wch.3
 ./usr/share/man/man3/add_wchnstr.3
 ./usr/share/man/man3/add_wchstr.3
@@ -3636,6 +3623,7 @@
 ./usr/share/man/man3/dn_comp.3
 ./usr/share/man/man3/dn_expand.3
 ./usr/share/man/man3/doupdate.3
+./usr/share/man/man3/dprintf.3
 ./usr/share/man/man3/drand48.3
 ./usr/share/man/man3/drem.3
 ./usr/share/man/man3/dremf.3
@@ -4039,6 +4027,7 @@
 ./usr/share/man/man3/globfree.3
 ./usr/share/man/man3/gmtime.3
 ./usr/share/man/man3/gmtime_r.3
+./usr/share/man/man3/grantpt.3
 ./usr/share/man/man3/group_from_gid.3
 ./usr/share/man/man3/gss_accept_sec_context.3
 ./usr/share/man/man3/gss_acquire_cred.3
@@ -5324,6 +5313,7 @@
 ./usr/share/man/man3/pem.3
 ./usr/share/man/man3/perror.3
 ./usr/share/man/man3/pidfile.3
+./usr/share/man/man3/pkcs5_pbkdf2.3
 ./usr/share/man/man3/pmap_getmaps.3
 ./usr/share/man/man3/pmap_getport.3
 ./usr/share/man/man3/pmap_rmtcall.3
@@ -5335,6 +5325,7 @@
 ./usr/share/man/man3/pos_menu_cursor.3
 ./usr/share/man/man3/posix2time.3
 ./usr/share/man/man3/posix_memalign.3
+./usr/share/man/man3/posix_openpt.3
 ./usr/share/man/man3/posix_spawn.3
 ./usr/share/man/man3/posix_spawn_file_actions_addclose.3
 ./usr/share/man/man3/posix_spawn_file_actions_adddup2.3
@@ -5458,6 +5449,7 @@
 ./usr/share/man/man3/pthread_testcancel.3
 ./usr/share/man/man3/pthread_yield.3
 ./usr/share/man/man3/pthreads.3
+./usr/share/man/man3/ptsname.3
 ./usr/share/man/man3/put8.3
 ./usr/share/man/man3/putc.3
 ./usr/share/man/man3/putc_unlocked.3
@@ -6004,6 +5996,7 @@
 ./usr/share/man/man3/ungetch.3
 ./usr/share/man/man3/ungetmouse.3
 ./usr/share/man/man3/ungetwc.3
+./usr/share/man/man3/unlockpt.3
 ./usr/share/man/man3/unparse_time.3
 ./usr/share/man/man3/unparse_time_approx.3
 ./usr/share/man/man3/unpost_form.3
@@ -6032,6 +6025,7 @@
 ./usr/share/man/man3/varargs.3
 ./usr/share/man/man3/vasprintf.3
 ./usr/share/man/man3/vax/infnan.3
+./usr/share/man/man3/vdprintf.3
 ./usr/share/man/man3/verr.3
 ./usr/share/man/man3/verrx.3
 ./usr/share/man/man3/vfprintf.3
@@ -6384,6 +6378,7 @@
 ./usr/share/man/man9/bus_space_copy_8.9
 ./usr/share/man/man9/bus_space_free.9
 ./usr/share/man/man9/bus_space_map.9
+./usr/share/man/man9/bus_space_mmap.9
 ./usr/share/man/man9/bus_space_read_1.9
 ./usr/share/man/man9/bus_space_read_2.9
 ./usr/share/man/man9/bus_space_read_4.9
@@ -6392,6 +6387,9 @@
 ./usr/share/man/man9/bus_space_read_multi_2.9
 ./usr/share/man/man9/bus_space_read_multi_4.9
 ./usr/share/man/man9/bus_space_read_multi_8.9
+./usr/share/man/man9/bus_space_read_raw_2.9
+./usr/share/man/man9/bus_space_read_raw_4.9
+./usr/share/man/man9/bus_space_read_raw_8.9
 ./usr/share/man/man9/bus_space_read_raw_multi_2.9
 ./usr/share/man/man9/bus_space_read_raw_multi_4.9
 ./usr/share/man/man9/bus_space_read_raw_multi_8.9
@@ -6421,6 +6419,9 @@
 ./usr/share/man/man9/bus_space_write_multi_2.9
 ./usr/share/man/man9/bus_space_write_multi_4.9
 ./usr/share/man/man9/bus_space_write_multi_8.9
+./usr/share/man/man9/bus_space_write_raw_2.9
+./usr/share/man/man9/bus_space_write_raw_4.9
+./usr/share/man/man9/bus_space_write_raw_8.9
 ./usr/share/man/man9/bus_space_write_raw_multi_2.9
 ./usr/share/man/man9/bus_space_write_raw_multi_4.9
 ./usr/share/man/man9/bus_space_write_raw_multi_8.9
@@ -6651,7 +6652,6 @@
 ./usr/share/man/man9/m_tag_init.9
 ./usr/share/man/man9/m_tag_next.9
 ./usr/share/man/man9/m_tag_prepend.9
-./usr/share/man/man9/m_zero.9
 ./usr/share/man/man9/malloc.9
 ./usr/share/man/man9/max.9
 ./usr/share/man/man9/mbuf.9
@@ -6879,7 +6879,6 @@
 ./usr/share/man/man9/uiomove.9
 ./usr/share/man/man9/ulmax.9
 ./usr/share/man/man9/ulmin.9
-./usr/share/man/man9/untimeout.9
 ./usr/share/man/man9/uprintf.9
 ./usr/share/man/man9/uvm.9
 ./usr/share/man/man9/uvm_chgkprot.9
@@ -6935,6 +6934,7 @@
 ./usr/share/man/man9/vclean.9
 ./usr/share/man/man9/vcount.9
 ./usr/share/man/man9/vdevgone.9
+./usr/share/man/man9/vdrop.9
 ./usr/share/man/man9/vfinddev.9
 ./usr/share/man/man9/vflush.9
 ./usr/share/man/man9/vflushbuf.9

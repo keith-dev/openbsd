@@ -1,4 +1,4 @@
-/*	$OpenBSD: bgpd.h,v 1.270 2012/05/27 18:52:07 claudio Exp $ */
+/*	$OpenBSD: bgpd.h,v 1.275 2013/01/09 08:04:25 phessler Exp $ */
 
 /*
  * Copyright (c) 2003, 2004 Henning Brauer <henning@openbsd.org>
@@ -38,7 +38,7 @@
 #define	CONFFILE			"/etc/bgpd.conf"
 #define	BGPD_USER			"_bgpd"
 #define	PEER_DESCR_LEN			32
-#define	PFTABLE_LEN			16
+#define	PFTABLE_LEN			32
 #define	TCP_MD5_KEY_LEN			80
 #define	IPSEC_ENC_KEY_LEN		32
 #define	IPSEC_AUTH_KEY_LEN		20
@@ -132,6 +132,7 @@ extern const struct aid aid_vals[];
 #define	AID_INET6	2
 #define	AID_VPN_IPv4	3
 #define	AID_MAX		4
+#define	AID_MIN		1	/* skip AID_UNSPEC since that is a dummy */
 
 #define AID_VALS	{					\
 	/* afi, af, safii, name */				\
@@ -253,11 +254,24 @@ struct peer_auth {
 };
 
 struct capabilities {
-	int8_t	mp[AID_MAX];	/* multiprotocol extensions, RFC 4760 */
-	int8_t	refresh;	/* route refresh, RFC 2918 */
-	int8_t	restart;	/* graceful restart, RFC 4724 */
-	int8_t	as4byte;	/* draft-ietf-idr-as4bytes-13 */
+	struct {
+		int16_t	timeout;	/* graceful restart timeout */
+		int8_t	flags[AID_MAX];	/* graceful restart per AID flags */
+		int8_t	restart;	/* graceful restart, RFC 4724 */
+	}	grestart;
+	int8_t	mp[AID_MAX];		/* multiprotocol extensions, RFC 4760 */
+	int8_t	refresh;		/* route refresh, RFC 2918 */
+	int8_t	as4byte;		/* 4-byte ASnum, RFC 4893 */
 };
+
+#define	CAPA_GR_PRESENT		0x01
+#define	CAPA_GR_RESTART		0x02
+#define	CAPA_GR_FORWARD		0x04
+#define	CAPA_GR_RESTARTING	0x08
+
+#define	CAPA_GR_TIMEMASK	0x0fff
+#define	CAPA_GR_R_FLAG		0x8000
+#define	CAPA_GR_F_FLAG		0x80
 
 struct peer_config {
 	struct bgpd_addr	 remote_addr;
@@ -373,6 +387,9 @@ enum imsg_type {
 	IMSG_SESSION_ADD,
 	IMSG_SESSION_UP,
 	IMSG_SESSION_DOWN,
+	IMSG_SESSION_STALE,
+	IMSG_SESSION_FLUSH,
+	IMSG_SESSION_RESTARTED,
 	IMSG_MRT_OPEN,
 	IMSG_MRT_REOPEN,
 	IMSG_MRT_CLOSE,
@@ -400,6 +417,7 @@ enum ctl_results {
 	CTL_RES_DENIED,
 	CTL_RES_NOCAP,
 	CTL_RES_PARSE_ERROR,
+	CTL_RES_PENDING,
 	CTL_RES_NOMEM
 };
 
@@ -550,6 +568,7 @@ struct ctl_neighbor {
 #define	F_PREF_ACTIVE	0x02
 #define	F_PREF_INTERNAL	0x04
 #define	F_PREF_ANNOUNCE	0x08
+#define	F_PREF_STALE	0x10
 
 struct ctl_show_rib {
 	struct bgpd_addr	true_nexthop;
@@ -561,6 +580,7 @@ struct ctl_show_rib {
 	u_int32_t		remote_id;
 	u_int32_t		local_pref;
 	u_int32_t		med;
+	u_int32_t		weight;
 	u_int16_t		aspath_len;
 	u_int16_t		flags;
 	u_int8_t		prefixlen;
@@ -729,6 +749,13 @@ struct filter_prefix {
 	u_int8_t		len;
 };
 
+struct filter_nexthop {
+	struct bgpd_addr	addr;
+	u_int8_t		flags;
+#define FILTER_NEXTHOP_ADDR	1
+#define FILTER_NEXTHOP_NEIGHBOR	2
+};
+
 struct filter_prefixlen {
 	enum comp_ops		op;
 	u_int8_t		aid;
@@ -739,6 +766,7 @@ struct filter_prefixlen {
 struct filter_match {
 	struct filter_prefix		prefix;
 	struct filter_prefixlen		prefixlen;
+	struct filter_nexthop		nexthop;
 	struct filter_as		as;
 	struct filter_aslen		aslen;
 	struct filter_community		community;

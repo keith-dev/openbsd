@@ -1,11 +1,11 @@
-#	$OpenBSD: bsd.dep.mk,v 1.9 2010/03/27 03:47:59 oga Exp $
+#	$OpenBSD: bsd.dep.mk,v 1.11 2012/10/15 11:14:38 espie Exp $
 #	$NetBSD: bsd.dep.mk,v 1.12 1995/09/27 01:15:09 christos Exp $
 
 # some of the rules involve .h sources, so remove them from mkdep line
 .if !target(depend)
-depend: beforedepend .depend subdirdepend afterdepend
-.ORDER: beforedepend .depend subdirdepend afterdepend
-subdirdepend: _SUBDIRUSE
+depend: beforedepend .depend realdepend afterdepend
+.ORDER: beforedepend .depend realdepend afterdepend
+realdepend: _SUBDIRUSE
 
 .  if defined(SRCS) && !empty(SRCS)
 .depend: ${SRCS} ${_LEXINTM} ${_YACCINTM}
@@ -52,4 +52,4 @@ cleandepend:
 	rm -f .depend ${.CURDIR}/tags
 .endif
 
-.PHONY: beforedepend depend afterdepend cleandepend subdirdepend
+.PHONY: beforedepend depend afterdepend cleandepend realdepend

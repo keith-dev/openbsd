@@ -1,4 +1,4 @@
-/*	$OpenBSD: ospf6d.h,v 1.23 2011/07/07 00:36:13 claudio Exp $ */
+/*	$OpenBSD: ospf6d.h,v 1.26 2013/01/14 14:39:38 florian Exp $ */
 
 /*
  * Copyright (c) 2004, 2007 Esben Norby <norby@openbsd.org>
@@ -56,7 +56,9 @@
 #define	F_DOWN			0x0010
 #define	F_STATIC		0x0020
 #define	F_DYNAMIC		0x0040
-#define	F_REDISTRIBUTED		0x0100
+#define	F_REJECT		0x0080
+#define	F_BLACKHOLE		0x0100
+#define	F_REDISTRIBUTED		0x0200
 
 struct imsgev {
 	struct imsgbuf		 ibuf;
@@ -535,6 +537,10 @@ void		 kr_dispatch_msg(int, short, void *);
 void		 kr_show_route(struct imsg *);
 void		 kr_reload(void);
 
+void		 embedscope(struct sockaddr_in6 *);
+void		 recoverscope(struct sockaddr_in6 *);
+void		 addscope(struct sockaddr_in6 *, u_int32_t);
+void		 clearscope(struct in6_addr *);
 u_int8_t	 mask2prefixlen(struct sockaddr_in6 *);
 struct in6_addr	*prefixlen2mask(u_int8_t);
 void		inet6applymask(struct in6_addr *, const struct in6_addr *, int);

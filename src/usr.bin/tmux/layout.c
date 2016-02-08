@@ -1,4 +1,4 @@
-/* $OpenBSD: layout.c,v 1.14 2012/07/10 11:53:01 nicm Exp $ */
+/* $OpenBSD: layout.c,v 1.16 2013/01/17 00:11:22 nicm Exp $ */
 
 /*
  * Copyright (c) 2009 Nicholas Marriott <nicm@users.sourceforge.net>
@@ -19,7 +19,6 @@
 #include <sys/types.h>
 
 #include <stdlib.h>
-#include <string.h>
 
 #include "tmux.h"
 
@@ -488,50 +487,51 @@ layout_resize_pane(struct window_pane *wp, enum layout_type type, int change)
 }
 
 void
-layout_resize_pane_mouse(struct client *c, struct mouse_event *mouse)
+layout_resize_pane_mouse(struct client *c)
 {
 	struct window		*w;
 	struct window_pane	*wp;
+	struct mouse_event	*m = &c->tty.mouse;
 	int		      	 pane_border;
 
 	w = c->session->curw->window;
 
 	pane_border = 0;
-	if ((c->last_mouse.b & MOUSE_BUTTON) != MOUSE_UP &&
-	    (c->last_mouse.b & MOUSE_RESIZE_PANE)) {
+	if (m->event & MOUSE_EVENT_DRAG && m->flags & MOUSE_RESIZE_PANE) {
 		TAILQ_FOREACH(wp, &w->panes, entry) {
-			if (wp->xoff + wp->sx == c->last_mouse.x &&
-			    wp->yoff <= 1 + c->last_mouse.y &&
-			    wp->yoff + wp->sy >= c->last_mouse.y) {
+			if (wp->xoff + wp->sx == m->lx &&
+			    wp->yoff <= 1 + m->ly &&
+			    wp->yoff + wp->sy >= m->ly) {
 				layout_resize_pane(wp, LAYOUT_LEFTRIGHT,
-				    mouse->x - c->last_mouse.x);
+				    m->x - m->lx);
 				pane_border = 1;
 			}
-			if (wp->yoff + wp->sy == c->last_mouse.y &&
-			    wp->xoff <= 1 + c->last_mouse.x &&
-			    wp->xoff + wp->sx >= c->last_mouse.x) {
+			if (wp->yoff + wp->sy == m->ly &&
+			    wp->xoff <= 1 + m->lx &&
+			    wp->xoff + wp->sx >= m->lx) {
 				layout_resize_pane(wp, LAYOUT_TOPBOTTOM,
-				    mouse->y - c->last_mouse.y);
+				    m->y - m->ly);
 				pane_border = 1;
 			}
 		}
 		if (pane_border)
 			server_redraw_window(w);
-	} else if (mouse->b != MOUSE_UP &&
-	    mouse->b == (mouse->b & MOUSE_BUTTON)) {
+	} else if (~m->event & MOUSE_EVENT_UP) {
 		TAILQ_FOREACH(wp, &w->panes, entry) {
-			if ((wp->xoff + wp->sx == mouse->x &&
-			    wp->yoff <= 1 + mouse->y &&
-			    wp->yoff + wp->sy >= mouse->y) ||
-			    (wp->yoff + wp->sy == mouse->y &&
-			    wp->xoff <= 1 + mouse->x &&
-			    wp->xoff + wp->sx >= mouse->x)) {
+			if ((wp->xoff + wp->sx == m->x &&
+			    wp->yoff <= 1 + m->y &&
+			    wp->yoff + wp->sy >= m->y) ||
+			    (wp->yoff + wp->sy == m->y &&
+			    wp->xoff <= 1 + m->x &&
+			    wp->xoff + wp->sx >= m->x)) {
 				pane_border = 1;
 			}
 		}
 	}
 	if (pane_border)
-		mouse->b |= MOUSE_RESIZE_PANE;
+		m->flags |= MOUSE_RESIZE_PANE;
+	else
+		m->flags &= ~MOUSE_RESIZE_PANE;
 }
 
 int
@@ -745,75 +745,4 @@ layout_close_pane(struct window_pane *wp)
 		layout_fix_panes(wp->window, wp->window->sx, wp->window->sy);
 	}
 	notify_window_layout_changed(wp->window);
-}
-
-/* Add layout to list. */
-void
-layout_list_add(struct window *w)
-{
-	struct last_layout	*ll, *ll_last;
-	char			*layout;
-	u_int			 limit;
-
-	layout = layout_dump(w);
-
-	ll_last = w->layout_list_last;
-	if (ll_last != NULL && strcmp(ll_last->layout, layout) == 0) {
-		free(layout);
-		return;
-	}
-
-	ll = xmalloc(sizeof *ll);
-	ll->layout = layout;
-	if (ll_last == NULL)
-		TAILQ_INSERT_TAIL(&w->layout_list, ll, entry);
-	else
-		TAILQ_INSERT_AFTER(&w->layout_list, ll_last, ll, entry);
-	w->layout_list_size++;
-	w->layout_list_last = ll;
-
-	limit = options_get_number(&w->options, "layout-history-limit");
-	while (w->layout_list_size > limit) {
-		ll = TAILQ_LAST(&w->layout_list, last_layouts);
-		if (ll == w->layout_list_last)
-			ll = TAILQ_FIRST(&w->layout_list);
-
-		TAILQ_REMOVE(&w->layout_list, ll, entry);
-		w->layout_list_size--;
-
-		free(ll->layout);
-		free(ll);
-	}
-}
-
-/* Apply next layout from list. */
-const char *
-layout_list_redo(struct window *w)
-{
-	struct last_layout	*ll, *ll_last;
-
-	ll_last = w->layout_list_last;
-	if (ll_last == NULL)
-		return (NULL);
-	ll = TAILQ_NEXT(ll_last, entry);
-	if (ll == NULL)
-		return (NULL);
-	w->layout_list_last = ll;
-	return (ll->layout);
-}
-
-/* Apply previous layout from list. */
-const char *
-layout_list_undo(struct window *w)
-{
-	struct last_layout	*ll, *ll_last;
-
-	ll_last = w->layout_list_last;
-	if (ll_last == NULL)
-		return (NULL);
-	ll = TAILQ_PREV(ll_last, last_layouts, entry);
-	if (ll == NULL)
-		return (NULL);
-	w->layout_list_last = ll;
-	return (ll->layout);
 }

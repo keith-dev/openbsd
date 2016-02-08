@@ -1,8 +1,7 @@
-/*	$OpenBSD: eap.c,v 1.5 2011/05/27 12:01:02 reyk Exp $	*/
-/*	$vantronix: eap.c,v 1.12 2010/05/31 11:30:08 reyk Exp $	*/
+/*	$OpenBSD: eap.c,v 1.8 2013/01/08 10:38:19 reyk Exp $	*/
 
 /*
- * Copyright (c) 2010 Reyk Floeter <reyk@vantronix.net>
+ * Copyright (c) 2010-2013 Reyk Floeter <reyk@openbsd.org>
  *
  * Permission to use, copy, modify, and distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -93,7 +92,6 @@ eap_challenge_request(struct iked *env, struct iked_sa *sa,
 {
 	struct eap_message		*eap;
 	struct eap_mschap_challenge	*ms;
-	ssize_t				 len = 0;
 	const char			*name;
 	int				 ret = -1;
 	struct ibuf			*e;
@@ -122,7 +120,6 @@ eap_challenge_request(struct iked *env, struct iked_sa *sa,
 		arc4random_buf(ms->msc_challenge, sizeof(ms->msc_challenge));
 		if (ibuf_add(e, name, strlen(name)) == -1)
 			goto done;
-		len = betoh16(eap->eap_length);
 
 		/* Store the EAP challenge value */
 		sa->sa_eap.id_type = eap->eap_type;

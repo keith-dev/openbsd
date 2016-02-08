@@ -1,4 +1,4 @@
-/*	$OpenBSD: error.c,v 1.21 2012/03/22 13:50:30 espie Exp $ */
+/*	$OpenBSD: error.c,v 1.24 2012/10/18 17:54:43 espie Exp $ */
 
 /*
  * Copyright (c) 2001 Marc Espie.
@@ -42,9 +42,9 @@
 #endif
 
 #include "lowparse.h"
+#include "dump.h"
 
 int fatal_errors = 0;
-bool supervise_jobs = false;
 
 static void ParseVErrorInternal(const Location *, int, const char *, va_list);
 /*-
@@ -77,8 +77,7 @@ Fatal(char *fmt, ...)
 {
 	va_list ap;
 
-	if (supervise_jobs)
-		Job_Wait();
+	Job_Wait();
 
 	va_start(ap, fmt);
 	(void)vfprintf(stderr, fmt, ap);
@@ -86,7 +85,7 @@ Fatal(char *fmt, ...)
 	(void)fprintf(stderr, "\n");
 
 	if (DEBUG(GRAPH2))
-		Targ_PrintGraph(2);
+		post_mortem();
 	exit(2);		/* Not 1 so -q can distinguish error */
 }
 
@@ -102,38 +101,36 @@ Fatal(char *fmt, ...)
 void
 Punt(char *fmt, ...)
 {
-	va_list ap;
+	if (fmt) {
+		va_list ap;
 
-	va_start(ap, fmt);
-	(void)fprintf(stderr, "make: ");
-	(void)vfprintf(stderr, fmt, ap);
-	va_end(ap);
-	(void)fprintf(stderr, "\n");
+		va_start(ap, fmt);
+		(void)fprintf(stderr, "make: ");
+		(void)vfprintf(stderr, fmt, ap);
+		va_end(ap);
+		(void)fprintf(stderr, "\n");
+	}
 
 	Job_AbortAll();
 	if (DEBUG(GRAPH2))
-		Targ_PrintGraph(2);
+		post_mortem();
 	exit(2);		/* Not 1, so -q can distinguish error */
 }
 
 /*
  * Finish --
- *	Called when aborting due to errors in child shell to signal
- *	abnormal exit.
+ *	Called when aborting due to errors in command or fatal signal
  *
  * Side Effects:
  *	The program exits
  */
 void
-Finish(int errors) /* number of errors encountered in Make_Make */
+Finish()
 {
 	Job_Wait();
-	if (errors != 0) {
-		Error("Stop in %s:", Var_Value(".CURDIR"));
-	}
 	print_errors();
 	if (DEBUG(GRAPH2))
-		Targ_PrintGraph(2);
+		post_mortem();
 	exit(2);		/* Not 1 so -q can distinguish error */
 }
 
@@ -152,13 +149,19 @@ static void
 ParseVErrorInternal(const Location *origin, int type, const char *fmt, 
     va_list ap)
 {
-	if (origin->fname)
-	    (void)fprintf(stderr, "\"%s\", line %lu: ", origin->fname, origin->lineno);
-	if (type == PARSE_WARNING)
-		(void)fprintf(stderr, "warning: ");
-	(void)vfprintf(stderr, fmt, ap);
+	static bool first = true;
+	fprintf(stderr, "*** %s",
+	    type == PARSE_WARNING ? "Warning" : "Parse error");
+	if (first) {
+		fprintf(stderr, " in %s: ", Var_Value(".CURDIR"));
+		first = false;
+	} else
+		fprintf(stderr, ": ");
+	vfprintf(stderr, fmt, ap);
 	va_end(ap);
-	(void)fprintf(stderr, "\n");
+	if (origin->fname)
+	    	fprintf(stderr, " (%s:%lu)", origin->fname, origin->lineno);
+	fprintf(stderr, "\n");
 	if (type == PARSE_FATAL)
 		fatal_errors ++;
 }
@@ -180,4 +183,3 @@ Parse_Error(int type, const char *fmt, ...)
 	ParseVErrorInternal(&l, type, fmt, ap);
 	va_end(ap);
 }
-

@@ -1,4 +1,4 @@
-/* $OpenBSD: xmodem.c,v 1.2 2012/07/11 06:39:32 nicm Exp $ */
+/* $OpenBSD: xmodem.c,v 1.4 2013/01/17 21:10:24 nicm Exp $ */
 
 /*
  * Copyright (c) 2012 Nicholas Marriott <nicm@openbsd.org>
@@ -150,7 +150,7 @@ xmodem_send(const char *file)
 		if (i == XMODEM_RETRIES) {
 			cu_warnx("%s: too many retries", file);
 			goto out;
-		};
+		}
 
 		if (len < XMODEM_BLOCK)
 			break;
@@ -173,5 +173,5 @@ out:
 
 	sigaction(SIGINT, &oact, NULL);
 
-	return;
+	fclose(f);
 }

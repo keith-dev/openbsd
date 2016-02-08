@@ -1,8 +1,8 @@
-/*	$OpenBSD: rde.h,v 1.142 2011/09/21 08:59:01 claudio Exp $ */
+/*	$OpenBSD: rde.h,v 1.145 2012/10/28 13:16:11 claudio Exp $ */
 
 /*
  * Copyright (c) 2003, 2004 Claudio Jeker <claudio@openbsd.org> and
- *                          Andre Oppermann <oppermann@pipeline.ch>
+ *                          Andre Oppermann <oppermann@networx.ch>
  *
  * Permission to use, copy, modify, and distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -59,10 +59,13 @@ struct rde_peer {
 	struct uplist_attr		 updates[AID_MAX];
 	struct uplist_prefix		 withdraws[AID_MAX];
 	struct capabilities		 capa;
+	time_t				 staletime[AID_MAX];
 	u_int64_t			 prefix_rcvd_update;
 	u_int64_t			 prefix_rcvd_withdraw;
+	u_int64_t			 prefix_rcvd_eor;
 	u_int64_t			 prefix_sent_update;
 	u_int64_t			 prefix_sent_withdraw;
+	u_int64_t			 prefix_sent_eor;
 	u_int32_t			 prefix_cnt; /* # of prefixes */
 	u_int32_t			 remote_bgpid; /* host byte order! */
 	u_int32_t			 up_pcnt;
@@ -118,6 +121,9 @@ enum attrtypes {
 #define ATTR_PARTIAL		0x20
 #define ATTR_TRANSITIVE		0x40
 #define ATTR_OPTIONAL		0x80
+#define ATTR_RESERVED		0x0f
+/* by default mask the reserved bits and the ext len bit */
+#define ATTR_DEFMASK		(ATTR_RESERVED | ATTR_EXTLEN)
 
 /* default attribute flags for well known attributes */
 #define ATTR_WELL_KNOWN		ATTR_TRANSITIVE
@@ -427,6 +433,7 @@ int		 path_update(struct rib *, struct rde_peer *,
 int		 path_compare(struct rde_aspath *, struct rde_aspath *);
 struct rde_aspath *path_lookup(struct rde_aspath *, struct rde_peer *);
 void		 path_remove(struct rde_aspath *);
+void		 path_remove_stale(struct rde_aspath *, u_int8_t);
 void		 path_destroy(struct rde_aspath *);
 int		 path_empty(struct rde_aspath *);
 struct rde_aspath *path_copy(struct rde_aspath *);

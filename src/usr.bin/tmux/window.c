@@ -1,4 +1,4 @@
-/* $OpenBSD: window.c,v 1.82 2012/07/10 11:53:01 nicm Exp $ */
+/* $OpenBSD: window.c,v 1.89 2013/02/05 11:08:59 nicm Exp $ */
 
 /*
  * Copyright (c) 2007 Nicholas Marriott <nicm@users.sourceforge.net>
@@ -182,13 +182,8 @@ winlink_remove(struct winlinks *wwl, struct winlink *wl)
 	free(wl->status_text);
 	free(wl);
 
-	if (w != NULL) {
-		if (w->references == 0)
-			fatal("bad reference count");
-		w->references--;
-		if (w->references == 0)
-			window_destroy(w);
-	}
+	if (w != NULL)
+		window_remove_ref(w);
 }
 
 struct winlink *
@@ -291,7 +286,6 @@ window_create1(u_int sx, u_int sy)
 
 	w->lastlayout = -1;
 	w->layout_root = NULL;
-	TAILQ_INIT(&w->layout_list);
 
 	w->sx = sx;
 	w->sy = sy;
@@ -360,6 +354,16 @@ window_destroy(struct window *w)
 
 	free(w->name);
 	free(w);
+}
+
+void
+window_remove_ref(struct window *w)
+{
+	if (w->references == 0)
+		fatal("bad reference count");
+	w->references--;
+	if (w->references == 0)
+		window_destroy(w);
 }
 
 void
@@ -849,7 +853,7 @@ window_pane_resize(struct window_pane *wp, u_int sx, u_int sy)
 	ws.ws_col = sx;
 	ws.ws_row = sy;
 
-	screen_resize(&wp->base, sx, sy);
+	screen_resize(&wp->base, sx, sy, wp->saved_grid == NULL);
 	if (wp->mode != NULL)
 		wp->mode->resize(wp, sx, sy);
 
@@ -862,7 +866,8 @@ window_pane_resize(struct window_pane *wp, u_int sx, u_int sy)
  * history is not updated
  */
 void
-window_pane_alternate_on(struct window_pane *wp, struct grid_cell *gc)
+window_pane_alternate_on(struct window_pane *wp, struct grid_cell *gc,
+    int cursor)
 {
 	struct screen	*s = &wp->base;
 	u_int		 sx, sy;
@@ -876,8 +881,10 @@ window_pane_alternate_on(struct window_pane *wp, struct grid_cell *gc)
 
 	wp->saved_grid = grid_create(sx, sy, 0);
 	grid_duplicate_lines(wp->saved_grid, 0, s->grid, screen_hsize(s), sy);
-	wp->saved_cx = s->cx;
-	wp->saved_cy = s->cy;
+	if (cursor) {
+		wp->saved_cx = s->cx;
+		wp->saved_cy = s->cy;
+	}
 	memcpy(&wp->saved_cell, gc, sizeof wp->saved_cell);
 
 	grid_view_clear(s->grid, 0, 0, sx, sy);
@@ -889,7 +896,8 @@ window_pane_alternate_on(struct window_pane *wp, struct grid_cell *gc)
 
 /* Exit alternate screen mode and restore the copied grid. */
 void
-window_pane_alternate_off(struct window_pane *wp, struct grid_cell *gc)
+window_pane_alternate_off(struct window_pane *wp, struct grid_cell *gc,
+    int cursor)
 {
 	struct screen	*s = &wp->base;
 	u_int		 sx, sy;
@@ -906,14 +914,16 @@ window_pane_alternate_off(struct window_pane *wp, struct grid_cell *gc)
 	 * before copying back.
 	 */
 	if (sy > wp->saved_grid->sy)
-		screen_resize(s, sx, wp->saved_grid->sy);
+		screen_resize(s, sx, wp->saved_grid->sy, 1);
 
 	/* Restore the grid, cursor position and cell. */
 	grid_duplicate_lines(s->grid, screen_hsize(s), wp->saved_grid, 0, sy);
-	s->cx = wp->saved_cx;
+	if (cursor)
+		s->cx = wp->saved_cx;
 	if (s->cx > screen_size_x(s) - 1)
 		s->cx = screen_size_x(s) - 1;
-	s->cy = wp->saved_cy;
+	if (cursor)
+		s->cy = wp->saved_cy;
 	if (s->cy > screen_size_y(s) - 1)
 		s->cy = screen_size_y(s) - 1;
 	memcpy(gc, &wp->saved_cell, sizeof *gc);
@@ -923,8 +933,8 @@ window_pane_alternate_off(struct window_pane *wp, struct grid_cell *gc)
 	 * the current size.
 	 */
 	wp->base.grid->flags |= GRID_HISTORY;
-	if (sy > wp->saved_grid->sy)
-		screen_resize(s, sx, sy);
+	if (sy > wp->saved_grid->sy || sx != wp->saved_grid->sx)
+		screen_resize(s, sx, sy, 1);
 
 	grid_destroy(wp->saved_grid);
 	wp->saved_grid = NULL;
@@ -1006,7 +1016,7 @@ window_pane_mouse(
 		    options_get_number(&wp->window->options, "mode-mouse"))
 			wp->mode->mouse(wp, sess, m);
 	} else if (wp->fd != -1)
-		input_mouse(wp, m);
+		input_mouse(wp, sess, m);
 }
 
 int
@@ -1182,4 +1192,14 @@ winlink_clear_flags(struct winlink *wl)
 			server_status_session(s);
 		}
 	}
+}
+
+/* Set the grid_cell with fg/bg/attr information when window is in a mode. */
+void
+window_mode_attrs(struct grid_cell *gc, struct options *oo)
+{
+	memcpy(gc, &grid_default_cell, sizeof *gc);
+	colour_set_fg(gc, options_get_number(oo, "mode-fg"));
+	colour_set_bg(gc, options_get_number(oo, "mode-bg"));
+	gc->attr |= options_get_number(oo, "mode-attr");
 }

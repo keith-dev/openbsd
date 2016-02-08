@@ -42,6 +42,9 @@ Boston, MA 02111-1307, USA.  */
     }						\
   while (0)
 
+/* We don't use profile counters.  */
+#define NO_DEFERRED_PROFILE_COUNTERS 1
+
 /* Define the strings used for the special svr4 .type and .size directives.
    These strings generally do not vary from one system running svr4 to
    another, but if a given system (e.g. m88k running svr) needs to use
@@ -150,16 +153,15 @@ Boston, MA 02111-1307, USA.  */
 #undef TARGET_SCHED_DEFAULT
 #define TARGET_SCHED_DEFAULT PROCESSOR_700
 
-/* XXX Why doesn't PA support -R  like everyone ??? */
 #undef LINK_SPEC
 #define LINK_SPEC \
-  "%{EB} %{EL} %{shared} %{non_shared} \
-   %{call_shared} %{no_archive} %{exact_version} \
-   %{!shared: %{!non_shared: %{!call_shared: -non_shared}}} \
-   %{!dynamic-linker:-dynamic-linker /usr/libexec/ld.so} \
-   %{!nostdlib:%{!r*:%{!e*:-e __start}}} -dc -dp \
-   %{static:-Bstatic} %{!static:-Bdynamic} %{rdynamic:-export-dynamic} \
-   %{assert*}"
+  "%{!shared:%{!nostdlib:%{!r*:%{!e*:-e __start}}}} \
+   %{shared:-shared} %{R*} \
+   %{static:-Bstatic} \
+   %{!static:-Bdynamic} \
+   %{rdynamic:-export-dynamic} \
+   %{assert*} \
+   %{!dynamic-linker:-dynamic-linker /usr/libexec/ld.so}"
 
 /* Layout of source language data types. */
 

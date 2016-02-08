@@ -1,4 +1,4 @@
-/*	$OpenBSD: s_cabs.c,v 1.2 2011/07/08 19:25:31 martynas Exp $	*/
+/*	$OpenBSD: s_cabs.c,v 1.4 2013/01/13 03:45:00 martynas Exp $	*/
 /*
  * Copyright (c) 2008 Martynas Venckus <martynas@openbsd.org>
  *
@@ -15,9 +15,6 @@
  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
 
-/* LINTLIBRARY */
-
-#include <sys/cdefs.h>
 #include <complex.h>
 #include <float.h>
 #include <math.h>
@@ -29,10 +26,5 @@ cabs(double complex z)
 }
 
 #if	LDBL_MANT_DIG == 53
-#ifdef	lint
-/* PROTOLIB1 */
-long double cabsl(long double complex);
-#else	/* lint */
 __weak_alias(cabsl, cabs);
-#endif	/* lint */
 #endif	/* LDBL_MANT_DIG == 53 */

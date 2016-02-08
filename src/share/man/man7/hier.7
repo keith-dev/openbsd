@@ -1,4 +1,4 @@
-.\"	$OpenBSD: hier.7,v 1.102 2012/04/08 17:36:21 jmc Exp $
+.\"	$OpenBSD: hier.7,v 1.106 2012/12/09 18:21:44 jmc Exp $
 .\"	$NetBSD: hier.7,v 1.7 1994/11/30 19:07:10 jtc Exp $
 .\"
 .\" Copyright (c) 1990, 1993
@@ -30,7 +30,7 @@
 .\"
 .\"	@(#)hier.7	8.1 (Berkeley) 6/5/93
 .\"
-.Dd $Mdocdate: April 8 2012 $
+.Dd $Mdocdate: December 9 2012 $
 .Dt HIER 7
 .Os
 .Sh NAME
@@ -88,8 +88,6 @@ Local time zone information (see
 .Xr ctime 3 ) .
 .It X11/
 Configuration files for the X11 window system.
-.It afs/
-AFS configuration files.
 .It amd/
 Contains map files for
 .Xr amd 8 .
@@ -119,17 +117,19 @@ Configuration files for the Kerberos version V subsystem (see
 Certificates and schema definition files for
 .Xr ldapd 8 .
 .It mail/
-.Xr sendmail 8
-configuration files (including
-.Xr aliases 5 ) .
+System mail configuration files.
 .It mtree/
-.Xr mtree
-configuration files (see
-.Xr mtree 8 ) .
+.Xr mtree 8
+configuration files.
+.It nginx/
+.Xr nginx 8
+configuration files.
+.It npppd/
+.Xr npppd 8
+configuration files.
 .It ppp/
-.Xr pppd
-configuration files (see
-.Xr pppd 8 ) .
+.Xr pppd 8
+configuration files.
 .It raddb/servers/
 List of radius servers and their associated shared secrets for
 .Xr login_radius 8 .

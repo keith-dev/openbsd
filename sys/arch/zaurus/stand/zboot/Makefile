@@ -1,4 +1,4 @@
-#	$OpenBSD: Makefile,v 1.9 2007/11/26 10:26:03 deraadt Exp $
+#	$OpenBSD: Makefile,v 1.11 2012/09/11 17:12:05 deraadt Exp $
 
 MAN=	boot.8
 MANSUBDIR=zaurus
@@ -6,7 +6,7 @@ MLINKS=	boot.8 boot.conf.5
 
 .if ${MACHINE} == "zaurus"
 PROG=	zboot
-LDFLAGS+=-nostdlib -Bstatic
+LDFLAGS+=-nostdlib -Bstatic -nopie
 INSTALL_STRIP=
 
 SRCS=	crt0.c
@@ -39,6 +39,9 @@ SRCS+=	alloc.c cmd.c devopen.c diskprobe.c exec.c exit.c loadfile.c \
 .PATH:	${S}/stand/boot
 .PATH:	${S}/lib/libsa
 
+${PROG}: ${OBJS} ${LIBSA}
+	${LD} ${LDFLAGS} -o ${PROG} ${OBJS} ${LIBSA}
+
 .else
 NOPROG=
 .endif
@@ -48,4 +51,5 @@ NOPROG=
 AFLAGS+=-D_LOCORE
 CPPFLAGS+=-D_STANDALONE
 CPPFLAGS+=-I${S}/stand/boot -I${S}/lib/libsa -I. -I${.CURDIR} -I${S}
-CFLAGS+=-fno-stack-protector -fno-builtin -fpack-struct
+CFLAGS+=-fno-stack-protector -fno-builtin -fpack-struct -fno-pie
+AFLAGS+= -fno-pie

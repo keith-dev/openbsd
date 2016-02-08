@@ -1,7 +1,7 @@
-/*	$OpenBSD: makemap.c,v 1.32 2011/05/16 21:27:38 jasper Exp $	*/
+/*	$OpenBSD: makemap.c,v 1.43 2013/01/31 18:34:43 eric Exp $	*/
 
 /*
- * Copyright (c) 2008 Gilles Chehade <gilles@openbsd.org>
+ * Copyright (c) 2008 Gilles Chehade <gilles@poolp.org>
  * Copyright (c) 2008-2009 Jacek Masiulaniec <jacekm@dobremiasto.net>
  *
  * Permission to use, copy, modify, and distribute this software for any
@@ -58,7 +58,8 @@ char	*source;
 char	*oflag;
 int	 dbputs;
 
-struct smtpd	*env = NULL;
+struct smtpd	smtpd;
+struct smtpd	*env = &smtpd;
 
 enum program {
 	P_MAKEMAP,
@@ -75,15 +76,9 @@ enum output_type {
  * Stub functions so that makemap compiles using minimum object files.
  */
 void
-purge_config(u_int8_t what)
+purge_config(uint8_t what)
 {
 	bzero(env, sizeof(struct smtpd));
-}
-
-int
-ssl_load_certfile(const char *name, u_int8_t flags)
-{
-	return (0);
 }
 
 int
@@ -94,21 +89,31 @@ main(int argc, char *argv[])
 	char		*opts;
 	char		*conf;
 	int		 ch;
-	struct smtpd	 smtpd;
-
-	env = &smtpd;
+	DBTYPE		 dbtype = DB_HASH;
+	char		*p;
+	mode_t		 omode;
 
 	log_init(1);
 
 	mode = strcmp(__progname, "newaliases") ? P_MAKEMAP : P_NEWALIASES;
 	conf = CONF_FILE;
 	type = T_PLAIN;
-	opts = "ho:t:";
+	opts = "ho:t:d:";
 	if (mode == P_NEWALIASES)
 		opts = "f:h";
 
 	while ((ch = getopt(argc, argv, opts)) != -1) {
 		switch (ch) {
+		case 'd':
+			if (strcmp(optarg, "hash") == 0)
+				dbtype = DB_HASH;
+			else if (strcmp(optarg, "btree") == 0)
+				dbtype = DB_BTREE;
+			else if (strcmp(optarg, "dbm") == 0)
+				dbtype = DB_RECNO;
+			else
+				errx(1, "unsupported DB type '%s'", optarg);
+			break;
 		case 'f':
 			conf = optarg;
 			break;
@@ -130,6 +135,28 @@ main(int argc, char *argv[])
 	argc -= optind;
 	argv += optind;
 
+	/* sendmail-compat makemap ... re-execute using proper interface */
+	if (argc == 2) {
+		if (oflag)
+			usage();
+
+		p = strstr(argv[1], ".db");
+		if (p == NULL || strcmp(p, ".db") != 0) {
+			if (! bsnprintf(dbname, sizeof dbname, "%s.db",
+				argv[1]))
+				errx(1, "database name too long");
+		}
+		else {
+			if (strlcpy(dbname, argv[1], sizeof dbname)
+			    >= sizeof dbname)
+				errx(1, "database name too long");
+		}
+
+		execlp("makemap", "makemap", "-d", argv[0], "-o", dbname, "-",
+		    NULL);
+		err(1, "execlp");
+	}
+
 	if (mode == P_NEWALIASES) {
 		if (geteuid())
 			errx(1, "need root privileges");
@@ -146,25 +173,30 @@ main(int argc, char *argv[])
 	if (oflag == NULL && asprintf(&oflag, "%s.db", source) == -1)
 		err(1, "asprintf");
 
-	if (stat(source, &sb) == -1)
-		err(1, "stat: %s", source);
+	if (strcmp(source, "-") != 0)
+		if (stat(source, &sb) == -1)
+			err(1, "stat: %s", source);
 
 	if (! bsnprintf(dbname, sizeof(dbname), "%s.XXXXXXXXXXX", oflag))
 		errx(1, "path too long");
+	omode = umask(7077);
 	if (mkstemp(dbname) == -1)
 		err(1, "mkstemp");
+	umask(omode);
 
-	db = dbopen(dbname, O_EXLOCK|O_RDWR|O_SYNC, 0644, DB_HASH, NULL);
+	db = dbopen(dbname, O_EXLOCK|O_RDWR|O_SYNC, 0644, dbtype, NULL);
 	if (db == NULL) {
 		warn("dbopen: %s", dbname);
 		goto bad;
 	}
 
-	if (fchmod(db->fd(db), sb.st_mode) == -1 ||
-	    fchown(db->fd(db), sb.st_uid, sb.st_gid) == -1) {
-		warn("couldn't carry ownership and perms to %s", dbname);
-		goto bad;
-	}
+	if (strcmp(source, "-") != 0)
+		if (fchmod(db->fd(db), sb.st_mode) == -1 ||
+		    fchown(db->fd(db), sb.st_uid, sb.st_gid) == -1) {
+			warn("couldn't carry ownership and perms to %s",
+			    dbname);
+			goto bad;
+		}
 
 	if (! parse_map(source))
 		goto bad;
@@ -199,13 +231,16 @@ parse_map(char *filename)
 	size_t	 lineno = 0;
 	char	 delim[] = { '\\', 0, 0 };
 
-	fp = fopen(filename, "r");
+	if (strcmp(filename, "-") == 0)
+		fp = fdopen(0, "r");
+	else
+		fp = fopen(filename, "r");
 	if (fp == NULL) {
 		warn("%s", filename);
 		return 0;
 	}
 
-	if (flock(fileno(fp), LOCK_SH|LOCK_NB) == -1) {
+	if (!isatty(fileno(fp)) && flock(fileno(fp), LOCK_SH|LOCK_NB) == -1) {
 		if (errno == EWOULDBLOCK)
 			warnx("%s is locked", filename);
 		else
@@ -266,6 +301,8 @@ parse_mapentry(char *line, size_t len, size_t lineno)
 	/* Check for dups. */
 	key.data = keyp;
 	key.size = strlen(keyp) + 1;
+
+	xlowercase(key.data, key.data, strlen(key.data) + 1);
 	if (db->get(db, &key, &val, 0) == 0) {
 		warnx("%s:%zd: duplicate entry for %s", source, lineno, keyp);
 		return 0;
@@ -276,7 +313,6 @@ parse_mapentry(char *line, size_t len, size_t lineno)
 			goto bad;
 	}
 	else if (type == T_ALIASES) {
-		lowercase(key.data, key.data, strlen(key.data) + 1);
 		if (! make_aliases(&val, valp))
 			goto bad;
 	}
@@ -316,6 +352,7 @@ parse_setentry(char *line, size_t len, size_t lineno)
 	/* Check for dups. */
 	key.data = keyp;
 	key.size = strlen(keyp) + 1;
+	xlowercase(key.data, key.data, strlen(key.data) + 1);
 	if (db->get(db, &key, &val, 0) == 0) {
 		warnx("%s:%zd: duplicate entry for %s", source, lineno, keyp);
 		return 0;
@@ -324,7 +361,7 @@ parse_setentry(char *line, size_t len, size_t lineno)
 	if (db->put(db, &key, &val, 0) == -1) {
 		warn("dbput");
 		return 0;
-	}	
+	}
 
 	dbputs++;
 
@@ -334,10 +371,7 @@ parse_setentry(char *line, size_t len, size_t lineno)
 int
 make_plain(DBT *val, char *text)
 {
-	val->data = strdup(text);
-	if (val->data == NULL)
-		err(1, "malloc");
-
+	val->data = xstrdup(text, "make_plain");
 	val->size = strlen(text) + 1;
 
 	return (val->size);
@@ -346,17 +380,15 @@ make_plain(DBT *val, char *text)
 int
 make_aliases(DBT *val, char *text)
 {
-	struct expandnode	expnode;
-	char	       	*subrcpt;
-	char	       	*endp;
-	char		*origtext;
+	struct expandnode	xn;
+	char		       *subrcpt;
+	char		       *endp;
+	char		       *origtext;
 
 	val->data = NULL;
 	val->size = 0;
 
-	origtext = strdup(text);
-	if (origtext == NULL)
-		fatal("strdup");
+	origtext = xstrdup(text, "make_aliases");
 
 	while ((subrcpt = strsep(&text, ",")) != NULL) {
 		/* subrcpt: strip initial whitespace. */
@@ -370,8 +402,7 @@ make_aliases(DBT *val, char *text)
 		while (subrcpt < endp && isspace((int)*endp))
 			*endp-- = '\0';
 
-		bzero(&expnode, sizeof(struct expandnode));
-		if (! alias_parse(&expnode, subrcpt))
+		if (! text_to_expandnode(&xn, subrcpt))
 			goto error;
 	}
 
@@ -388,25 +419,23 @@ error:
 char *
 conf_aliases(char *cfgpath)
 {
-	struct map	*map;
+	struct table	*table;
 	char		*path;
 	char		*p;
 
 	if (parse_config(env, cfgpath, 0))
 		exit(1);
 
-	map = map_findbyname("aliases");
-	if (map == NULL)
+	table = table_findbyname("aliases");
+	if (table == NULL)
 		return (PATH_ALIASES);
 
-	path = strdup(map->m_config);
-	if (path == NULL)
-		err(1, NULL);
+	path = xstrdup(table->t_config, "conf_aliases");
 	p = strstr(path, ".db");
-	if (p == NULL || p[3] != '\0')
-		errx(1, "%s: %s: no .db suffix present", cfgpath, path);
+	if (p == NULL || strcmp(p, ".db") != 0) {
+		return (path);
+	}
 	*p = '\0';
-
 	return (path);
 }
 
@@ -416,7 +445,7 @@ usage(void)
 	if (mode == P_NEWALIASES)
 		fprintf(stderr, "usage: %s [-f file]\n", __progname);
 	else
-		fprintf(stderr, "usage: %s [-o dbfile] [-t type] file\n",
-		    __progname);
+		fprintf(stderr, "usage: %s [-d dbtype] [-o dbfile] "
+		    "[-t type] file\n", __progname);
 	exit(1);
 }

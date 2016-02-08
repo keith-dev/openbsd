@@ -10,8 +10,6 @@
  * ====================================================
  */
 
-/* LINTLIBRARY */
-
 /* log(x)
  * Return the logarithm of x
  *
@@ -63,7 +61,6 @@
  * to produce the hexadecimal values shown.
  */
 
-#include <sys/cdefs.h>
 #include <float.h>
 #include <math.h>
 
@@ -135,10 +132,5 @@ log(double x)
 }
 
 #if	LDBL_MANT_DIG == 53
-#ifdef	lint
-/* PROTOLIB1 */
-long double logl(long double);
-#else	/* lint */
 __weak_alias(logl, log);
-#endif	/* lint */
 #endif	/* LDBL_MANT_DIG == 53 */

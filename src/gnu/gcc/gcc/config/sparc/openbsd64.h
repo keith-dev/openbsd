@@ -48,15 +48,20 @@ Boston, MA 02110-1301, USA.  */
 #undef MD_EXEC_PREFIX
 #undef MD_STARTFILE_PREFIX
 
-/* Inherited from sp64-elf.  */
-#undef NO_IMPLICIT_EXTERN_C
-
 #undef ASM_SPEC
+#ifdef PIE_DEFAULT
+#define ASM_SPEC "\
+%{v:-V} -s %{fpic|fPIC:-K PIC} %{!fno-pie: %{!p: %{!pg: -K PIC}}} \
+%{mlittle-endian:-EL} \
+%(asm_cpu) %(asm_arch) \
+"
+#else
 #define ASM_SPEC "\
 %{v:-V} -s %{fpic|fPIC|fpie|fPIE:-K PIC} \
 %{mlittle-endian:-EL} \
 %(asm_cpu) %(asm_arch) \
 "
+#endif
 
 /* Layout of source language data types.  */
 #undef WCHAR_TYPE

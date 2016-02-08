@@ -1,4 +1,4 @@
-/* $OpenBSD: tty-keys.c,v 1.42 2012/07/10 11:53:01 nicm Exp $ */
+/* $OpenBSD: tty-keys.c,v 1.47 2012/11/22 14:41:11 nicm Exp $ */
 
 /*
  * Copyright (c) 2007 Nicholas Marriott <nicm@users.sourceforge.net>
@@ -533,6 +533,7 @@ partial_key:
 	 * timer has expired, give up waiting and send the escape.
 	 */
 	if ((tty->flags & TTY_ESCAPE) &&
+	    evtimer_initialized(&tty->key_timer) &&
 	    !evtimer_pending(&tty->key_timer, NULL)) {
 		evbuffer_drain(tty->event->input, 1);
 		key = '\033';
@@ -543,7 +544,8 @@ partial_key:
 
 start_timer:
 	/* If already waiting for timer, do nothing. */
-	if (evtimer_pending(&tty->key_timer, NULL))
+	if (evtimer_initialized(&tty->key_timer) &&
+	    evtimer_pending(&tty->key_timer, NULL))
 		return (0);
 
 	/* Start the timer and wait for expiry or more data. */
@@ -609,7 +611,7 @@ tty_keys_mouse(struct tty *tty, const char *buf, size_t len, size_t *size)
 {
 	struct mouse_event	*m = &tty->mouse;
 	struct utf8_data	 utf8data;
-	u_int			 i, value;
+	u_int			 i, value, x, y, b;
 
 	/*
 	 * Standard mouse sequences are \033[M followed by three characters
@@ -620,6 +622,7 @@ tty_keys_mouse(struct tty *tty, const char *buf, size_t len, size_t *size)
 	 */
 
 	*size = 0;
+	x = y = b  = 0;
 
 	/* First three bytes are always \033[M. */
 	if (buf[0] != '\033')
@@ -659,21 +662,58 @@ tty_keys_mouse(struct tty *tty, const char *buf, size_t len, size_t *size)
 		}
 
 		if (i == 0)
-			m->b = value;
+			b = value;
 		else if (i == 1)
-			m->x = value;
+			x = value;
 		else
-			m->y = value;
+			y = value;
 	}
 	log_debug("mouse input: %.*s", (int) *size, buf);
 
 	/* Check and return the mouse input. */
-	if (m->b < 32 || m->x < 33 || m->y < 33)
+	if (b < 32 || x < 33 || y < 33)
 		return (-1);
-	m->b -= 32;
-	m->x -= 33;
-	m->y -= 33;
-	log_debug("mouse position: x=%u y=%u b=%u", m->x, m->y, m->b);
+	b -= 32;
+	x -= 33;
+	y -= 33;
+	log_debug("mouse position: x=%u y=%u b=%u", x, y, b);
+
+	/* Fill in mouse structure. */
+	if (~m->event & MOUSE_EVENT_WHEEL) {
+		m->lx = m->x;
+		m->ly = m->y;
+	}
+	m->xb = b;
+	if (b & 64) { /* wheel button */
+		b &= 3;
+		if (b == 0)
+			m->wheel = MOUSE_WHEEL_UP;
+		else if (b == 1)
+			m->wheel = MOUSE_WHEEL_DOWN;
+		m->event = MOUSE_EVENT_WHEEL;
+	} else if ((b & 3) == 3) {
+		if (~m->event & MOUSE_EVENT_DRAG && x == m->x && y == m->y) {
+			m->event = MOUSE_EVENT_CLICK;
+		} else
+			m->event = MOUSE_EVENT_DRAG;
+		m->event |= MOUSE_EVENT_UP;
+	} else {
+		if (b & 32) /* drag motion */
+			m->event = MOUSE_EVENT_DRAG;
+		else {
+			if (m->event & MOUSE_EVENT_UP && x == m->x && y == m->y)
+				m->clicks = (m->clicks + 1) % 3;
+			else
+				m->clicks = 0;
+			m->sx = x;
+			m->sy = y;
+			m->event = MOUSE_EVENT_DOWN;
+		}
+		m->button = (b & 3);
+	}
+	m->x = x;
+	m->y = y;
+
 	return (0);
 }
 
@@ -684,18 +724,17 @@ tty_keys_mouse(struct tty *tty, const char *buf, size_t len, size_t *size)
 int
 tty_keys_device(struct tty *tty, const char *buf, size_t len, size_t *size)
 {
-	u_int i, a, b;
+	u_int i, class;
 	char  tmp[64], *endptr;
 
 	/*
 	 * Primary device attributes are \033[?a;b and secondary are
-	 * \033[>a;b;c. We only request attributes on xterm, so we only care
-	 * about the middle values which is the xterm version.
+	 * \033[>a;b;c.
 	 */
 
 	*size = 0;
 
-	/* First three bytes are always \033[>. */
+	/* First three bytes are always \033[?. */
 	if (buf[0] != '\033')
 		return (-1);
 	if (len == 1)
@@ -720,21 +759,17 @@ tty_keys_device(struct tty *tty, const char *buf, size_t len, size_t *size)
 	tmp[i] = '\0';
 	*size = 4 + i;
 
-	/* Only secondary is of interest. */
-	if (buf[2] != '>')
+	/* Only primary is of interest. */
+	if (buf[2] != '?')
 		return (0);
 
-	/* Convert version numbers. */
-	a = strtoul(tmp, &endptr, 10);
-	if (*endptr == ';') {
-		b = strtoul(endptr + 1, &endptr, 10);
-		if (*endptr != '\0' && *endptr != ';')
-			b = 0;
-	} else
-		a = b = 0;
+	/* Convert service class. */
+	class = strtoul(tmp, &endptr, 10);
+	if (*endptr != ';')
+		class = 0;
 
-	log_debug("received xterm version %u", b);
-	tty_set_version(tty, b);
+	log_debug("received service class %u", class);
+	tty_set_class(tty, class);
 
 	return (0);
 }

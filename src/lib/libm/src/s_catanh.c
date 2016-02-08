@@ -1,4 +1,4 @@
-/*	$OpenBSD: s_catanh.c,v 1.2 2011/07/08 19:25:31 martynas Exp $	*/
+/*	$OpenBSD: s_catanh.c,v 1.4 2013/01/13 03:45:00 martynas Exp $	*/
 /*
  * Copyright (c) 2008 Stephen L. Moshier <steve@moshier.net>
  *
@@ -14,8 +14,6 @@
  * ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
-
-/* LINTLIBRARY */
 
 /*							catanh
  *
@@ -44,7 +42,6 @@
  *
  */
 
-#include <sys/cdefs.h>
 #include <complex.h>
 #include <float.h>
 #include <math.h>
@@ -59,10 +56,5 @@ catanh(double complex z)
 }
 
 #if	LDBL_MANT_DIG == 53
-#ifdef	lint
-/* PROTOLIB1 */
-long double complex catanhl(long double complex);
-#else	/* lint */
 __weak_alias(catanhl, catanh);
-#endif	/* lint */
 #endif	/* LDBL_MANT_DIG == 53 */

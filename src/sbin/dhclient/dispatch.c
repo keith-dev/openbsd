@@ -1,4 +1,4 @@
-/*	$OpenBSD: dispatch.c,v 1.53 2012/07/26 18:42:58 krw Exp $	*/
+/*	$OpenBSD: dispatch.c,v 1.75 2013/02/18 15:57:08 krw Exp $	*/
 
 /*
  * Copyright 2004 Henning Brauer <henning@openbsd.org>
@@ -40,6 +40,7 @@
  */
 
 #include "dhcpd.h"
+#include "privsep.h"
 
 #include <sys/ioctl.h>
 
@@ -47,14 +48,11 @@
 #include <ifaddrs.h>
 #include <poll.h>
 
-struct timeout timeout;
-static int interfaces_invalidated;
+struct dhcp_timeout timeout;
 
 /*
- * Use getifaddrs() to get a list of all the attached interfaces.  For
- * each interface that's of type INET and not the loopback interface,
- * register that interface with the network I/O software, figure out
- * what subnet it's on, and add it to the list of interfaces.
+ * Use getifaddrs() to get a list of all the attached interfaces.  Find
+ * our interface on the list and store the interesting information about it.
  */
 void
 discover_interface(void)
@@ -76,8 +74,7 @@ discover_interface(void)
 			continue;
 
 		/*
-		 * If we have the capability, extract link information
-		 * and record it in a linked list.
+		 * If we have the capability, extract & save link information.
 		 */
 		if (ifa->ifa_addr->sa_family == AF_LINK) {
 			struct sockaddr_dl *foo =
@@ -100,47 +97,39 @@ discover_interface(void)
 	if (!ifi->ifp)
 		error("%s: not found", ifi->name);
 
-	/* Register the interface... */
-	if_register_receive();
-	if_register_send();
 	freeifaddrs(ifap);
 }
 
-void
-reinitialize_interface(void)
-{
-	interfaces_invalidated = 1;
-}
-
 /*
- * Wait for packets to come in using poll().  When a packet comes in, call
- * receive_packet to receive the packet and possibly strip hardware addressing
- * information from it, and then call do_packet to try to do something with it.
+ * Loop waiting for packets, timeouts or routing messages.
  */
 void
 dispatch(void)
 {
 	int count, to_msec;
-	struct pollfd fds[2];
-	time_t howlong;
+	struct pollfd fds[3];
+	time_t cur_time, howlong;
 	void (*func)(void);
 
-	do {
+	while (quit == 0) {
 		/*
 		 * Call expired timeout, and then if there's still
 		 * a timeout registered, time out the select call then.
 		 */
 another:
-		if (!ifi)
-			error("No interfaces available");
-			
-		if (!ifi->linkstat)
-			interfaces_invalidated = 0;
+		if (!ifi) {
+			warning("No interfaces available");
+			quit = INTERNALSIG;
+			continue;
+		}
 
-		if (ifi->rdomain != get_rdomain(ifi->name))
-			error("Interface %s:"
+		if (ifi->rdomain != get_rdomain(ifi->name)) {
+			warning("Interface %s:"
 			    " rdomain changed out from under us",
 			    ifi->name);
+			quit = INTERNALSIG;
+			continue;
+		}
 
 		if (timeout.func) {
 			time(&cur_time);
@@ -164,22 +153,32 @@ another:
 			to_msec = -1;
 
 		/* Set up the descriptors to be polled. */
-		if (!ifi || ifi->rfdesc == -1)
-			error("No live interface to poll on");
+		if (!ifi || ifi->rfdesc == -1) {
+			warning("No live interface to poll on");
+			quit = INTERNALSIG;
+			continue;
+		}
 
 		fds[0].fd = ifi->rfdesc;
 		fds[1].fd = routefd; /* Could be -1, which will be ignored. */
-		fds[0].events = fds[1].events = POLLIN;
+		fds[2].fd = unpriv_ibuf->fd;
+		fds[0].events = fds[1].events = fds[2].events = POLLIN;
 
-		/* Wait for a packet or a timeout... XXX */
-		count = poll(fds, 2, to_msec);
+		if (unpriv_ibuf->w.queued)
+			fds[2].events |= POLLOUT;
+
+		/* Wait for a packet or a timeout or unpriv_ibuf->fd ... XXX */
+		count = poll(fds, 3, to_msec);
 
 		/* Not likely to be transitory... */
 		if (count == -1) {
 			if (errno == EAGAIN || errno == EINTR) {
 				continue;
-			} else
-				error("poll: %m");
+			} else {
+				warning("poll: %s", strerror(errno));
+				quit = INTERNALSIG;
+				continue;
+			}
 		}
 
 		if ((fds[0].revents & (POLLIN | POLLHUP))) {
@@ -187,12 +186,32 @@ another:
 				got_one();
 		}
 		if ((fds[1].revents & (POLLIN | POLLHUP))) {
-			if (ifi && !interfaces_invalidated)
+			if (ifi)
 				routehandler();
 		}
+		if (fds[2].revents & POLLOUT) {
+			if (msgbuf_write(&unpriv_ibuf->w) == -1) {
+				warning("pipe write error to [priv]");
+				quit = INTERNALSIG;
+				continue;
+			}
+		}
+		if ((fds[2].revents & (POLLIN | POLLHUP))) {
+			/* Pipe to [priv] closed. Assume it emitted error. */
+			quit = INTERNALSIG;
+			continue;
+		}
+	}
 
-		interfaces_invalidated = 0;
-	} while (1);
+	if (quit == SIGHUP) {
+		/* Tell [priv] process that HUP has occurred. */
+		sendhup(client->active);
+		warning("%s; restarting", strsignal(quit));
+		exit (0);
+	} else if (quit != INTERNALSIG) {
+		warning("%s; exiting", strsignal(quit));
+		exit(1);
+	}
 }
 
 void
@@ -200,7 +219,7 @@ got_one(void)
 {
 	struct sockaddr_in from;
 	struct hardware hfrom;
-	struct iaddr ifrom;
+	struct in_addr ifrom;
 	ssize_t result;
 
 	if ((result = receive_packet(&from, &hfrom)) == -1) {
@@ -218,13 +237,12 @@ got_one(void)
 	if (result == 0)
 		return;
 
-	ifrom.len = 4;
-	memcpy(ifrom.iabuf, &from.sin_addr, ifrom.len);
+	memcpy(&ifrom, &from.sin_addr, sizeof(ifrom));
 
 	do_packet(result, from.sin_port, ifrom, &hfrom);
 }
 
-int
+void
 interface_link_forceup(char *ifname)
 {
 	struct ifreq ifr;
@@ -236,21 +254,30 @@ interface_link_forceup(char *ifname)
 	memset(&ifr, 0, sizeof(ifr));
 	strlcpy(ifr.ifr_name, ifname, sizeof(ifr.ifr_name));
 	if (ioctl(sock, SIOCGIFFLAGS, (caddr_t)&ifr) == -1) {
+		note("interface_link_forceup: SIOCGIFFLAGS failed (%s)",
+		    strerror(errno));
 		close(sock);
-		return (-1);
+		return;
 	}
 
-	if ((ifr.ifr_flags & (IFF_UP|IFF_RUNNING)) != (IFF_UP|IFF_RUNNING)) {
-		ifr.ifr_flags |= IFF_UP;
-		if (ioctl(sock, SIOCSIFFLAGS, (caddr_t)&ifr) == -1) {
-			close(sock);
-			return (-1);
-		}
+	/* Force it down and up so others notice link state change. */
+	ifr.ifr_flags &= ~IFF_UP;
+	if (ioctl(sock, SIOCSIFFLAGS, (caddr_t)&ifr) == -1) {
+		note("interface_link_forceup: SIOCSIFFLAGS DOWN failed (%s)",
+		    strerror(errno));
 		close(sock);
-		return (0);
+		return;
 	}
+
+	ifr.ifr_flags |= IFF_UP;
+	if (ioctl(sock, SIOCSIFFLAGS, (caddr_t)&ifr) == -1) {
+		note("interface_link_forceup: SIOCSIFFLAGS UP failed (%s)",
+		    strerror(errno));
+		close(sock);
+		return;
+	}
+
 	close(sock);
-	return (1);
 }
 
 int
@@ -267,7 +294,8 @@ interface_status(char *ifname)
 	memset(&ifr, 0, sizeof(ifr));
 	strlcpy(ifr.ifr_name, ifname, sizeof(ifr.ifr_name));
 	if (ioctl(sock, SIOCGIFFLAGS, &ifr) == -1) {
-		error("ioctl(SIOCGIFFLAGS) on %s: %m", ifname);
+		error("ioctl(SIOCGIFFLAGS) on %s: %s", ifname,
+		    strerror(errno));
 	}
 
 	/*
@@ -289,7 +317,8 @@ interface_status(char *ifname)
 		 */
 #ifdef DEBUG
 		if (errno != EINVAL && errno != ENOTTY)
-			debug("ioctl(SIOCGIFMEDIA) on %s: %m", ifname);
+			debug("ioctl(SIOCGIFMEDIA) on %s: %s", ifname,
+			    strerror(errno));
 #endif
 
 		ifi->noifmedia = 1;
@@ -320,6 +349,13 @@ set_timeout(time_t when, void (*where)(void))
 }
 
 void
+set_timeout_interval(time_t secs, void (*where)(void))
+{
+	timeout.when = time(NULL) + secs; 
+	timeout.func = where;
+}
+
+void
 cancel_timeout(void)
 {
 	timeout.when = 0;
@@ -330,12 +366,12 @@ int
 get_rdomain(char *name)
 {
 	int rv = 0, s;
-	struct  ifreq ifr;
+	struct ifreq ifr;
 
 	if ((s = socket(AF_INET, SOCK_DGRAM, 0)) == -1)
-	    error("get_rdomain socket: %m");
+	    error("get_rdomain socket: %s", strerror(errno));
 
-	bzero(&ifr, sizeof(ifr));
+	memset(&ifr, 0, sizeof(ifr));
 	strlcpy(ifr.ifr_name, name, sizeof(ifr.ifr_name));
 	if (ioctl(s, SIOCGIFRDOMAIN, (caddr_t)&ifr) != -1)
 	    rv = ifr.ifr_rdomainid;
@@ -343,3 +379,63 @@ get_rdomain(char *name)
 	close(s);
 	return rv;
 }
+
+int
+subnet_exists(struct client_lease *l)
+ {
+	struct ifaddrs *ifap, *ifa;
+	struct in_addr mymask, myaddr, mynet, hismask, hisaddr, hisnet;
+	int myrdomain, hisrdomain;
+
+	memset(&mymask, 0, sizeof(mymask));
+	memcpy(&mymask.s_addr, l->options[DHO_SUBNET_MASK].data,
+	    l->options[DHO_SUBNET_MASK].len);
+	myaddr.s_addr = l->address.s_addr;
+	mynet.s_addr = mymask.s_addr & myaddr.s_addr;
+
+	myrdomain = get_rdomain(ifi->name);
+
+	if (getifaddrs(&ifap) != 0)
+		error("getifaddrs failed");
+
+	for (ifa = ifap; ifa != NULL; ifa = ifa->ifa_next) {
+		if (strcmp(ifi->name, ifa->ifa_name) == 0)
+			continue;
+
+		if (ifa->ifa_addr->sa_family != AF_INET)
+			continue;
+
+		hisrdomain = get_rdomain(ifi->name);
+		if (hisrdomain != myrdomain)
+			continue;
+
+		memcpy(&hismask,
+		    &((struct sockaddr_in *)ifa->ifa_netmask)->sin_addr,
+		    sizeof(hismask));
+		memcpy(&hisaddr,
+		    &((struct sockaddr_in *)ifa->ifa_addr)->sin_addr,
+		    sizeof(hisaddr));
+		hisnet.s_addr = hisaddr.s_addr & hismask.s_addr;
+
+		if (hisnet.s_addr == INADDR_ANY)
+			continue;
+
+		/* Would his packets go out *my* interface? */
+		if (mynet.s_addr == (hisaddr.s_addr & mymask.s_addr)) {
+			note("interface %s already has the offered subnet!",
+			    ifa->ifa_name);
+			return (1);
+		}
+		
+		/* Would my packets go out *his* interface? */
+		if (hisnet.s_addr == (myaddr.s_addr & hismask.s_addr)) {
+			note("interface %s already has the offered subnet!",
+			    ifa->ifa_name);
+			return (1);
+		}
+	}
+
+	freeifaddrs(ifap);
+
+	return (0);
+ }

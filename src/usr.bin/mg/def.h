@@ -1,4 +1,4 @@
-/*	$OpenBSD: def.h,v 1.124 2012/06/14 17:21:22 lum Exp $	*/
+/*	$OpenBSD: def.h,v 1.134 2012/12/27 18:51:52 florian Exp $	*/
 
 /* This file is in the public domain. */
 
@@ -36,6 +36,8 @@ typedef int	(*PF)(int, int);	/* generally useful type */
 #define FALSE	0		/* False, no, bad, etc.		 */
 #define TRUE	1		/* True, yes, good, etc.	 */
 #define ABORT	2		/* Death, ^G, abort, etc.	 */
+#define UERROR	3		/* User Error.			 */
+#define REVERT	4		/* Revert the buffer		 */
 
 #define KCLEAR	2		/* clear echo area		 */
 
@@ -258,7 +260,6 @@ struct buffer {
 	char		 b_cwd[NFILEN]; /* working directory		 */
 	struct fileinfo	 b_fi;		/* File attributes		 */
 	struct undoq	 b_undo;	/* Undo actions list		 */
-	int		 b_undopos;	/* Where we were during last undo */
 	struct undo_rec *b_undoptr;
 	int		 b_dotline;	/* Line number of dot */
 	int		 b_markline;	/* Line number of mark */
@@ -334,6 +335,7 @@ void		 dirinit(void);
 int		 changedir(int, int);
 int		 showcwdir(int, int);
 int		 getcwdir(char *, size_t);
+int		 makedir(int, int);
 
 /* dired.c */
 struct buffer	*dired_(char *);
@@ -413,6 +415,9 @@ int		 notmodified(int, int);
 int		 popbuftop(struct buffer *, int);
 int		 getbufcwd(char *, size_t);
 int		 checkdirty(struct buffer *);
+int		 revertbuffer(int, int);
+int		 dorevert(void);
+int		 diffbuffer(int, int);
 
 /* display.c */
 int		vtresize(int, int, int);
@@ -420,10 +425,12 @@ void		vtinit(void);
 void		vttidy(void);
 void		update(void);
 int		linenotoggle(int, int);
+int		colnotoggle(int, int);
 
 /* echo.c X */
 void		 eerase(void);
 int		 eyorn(const char *);
+int		 eynorr(const char *);
 int		 eyesno(const char *);
 void		 ewprintf(const char *fmt, ...);
 char		*ereply(const char *, char *, size_t, ...);
@@ -448,6 +455,7 @@ int		 fchecktime(struct buffer *);
 int		 fupdstat(struct buffer *);
 int		 backuptohomedir(int, int);
 int		 toggleleavetmp(int, int);
+char		*expandtilde(const char *);
 
 /* kbd.c X */
 int		 do_meta(int, int);
@@ -493,6 +501,7 @@ int		 setmark(int, int);
 int		 clearmark(int, int);
 int		 swapmark(int, int);
 int		 gotoline(int, int);
+int		 setlineno(int);
 
 /* random.c X */
 int		 showcpos(int, int);
@@ -583,6 +592,8 @@ int		 region_get_data(struct region *, char *, int);
 void		 region_put_data(const char *, int);
 int		 markbuffer(int, int);
 int		 piperegion(int, int);
+int		 pipeio(const char * const, char * const[], char * const, int,
+		     struct buffer *);
 
 /* search.c X */
 int		 forwsearch(int, int);

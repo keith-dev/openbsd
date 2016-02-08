@@ -1,4 +1,4 @@
-/*	$OpenBSD: nd6_rtr.c,v 1.60 2012/07/14 17:23:16 sperreault Exp $	*/
+/*	$OpenBSD: nd6_rtr.c,v 1.65 2012/09/26 14:53:23 markus Exp $	*/
 /*	$KAME: nd6_rtr.c,v 1.97 2001/02/07 11:09:13 itojun Exp $	*/
 
 /*
@@ -1045,7 +1045,7 @@ prelist_update(struct nd_prefix *new, struct nd_defrouter *dr, struct mbuf *m)
 	struct nd_prefix *pr;
 	int s = splsoftnet();
 	int error = 0;
-	int tempaddr_preferred = 0, autoconf = 0;
+	int tempaddr_preferred = 0, autoconf = 0, statique = 0;
 	int auth;
 	struct in6_addrlifetime lt6_tmp;
 
@@ -1055,7 +1055,7 @@ prelist_update(struct nd_prefix *new, struct nd_defrouter *dr, struct mbuf *m)
 		 * Authenticity for NA consists authentication for
 		 * both IP header and IP datagrams, doesn't it ?
 		 */
-		auth = ((m->m_flags & M_AUTH_AH) && (m->m_flags & M_AUTH));
+		auth = (m->m_flags & M_AUTH);
 	}
 
 	if ((pr = nd6_prefix_lookup(new)) != NULL) {
@@ -1185,8 +1185,10 @@ prelist_update(struct nd_prefix *new, struct nd_defrouter *dr, struct mbuf *m)
 		if (ia6_match == NULL) /* remember the first one */
 			ia6_match = ifa6;
 
-		if ((ifa6->ia6_flags & IN6_IFF_AUTOCONF) == 0)
+		if ((ifa6->ia6_flags & IN6_IFF_AUTOCONF) == 0) {
+			statique = 1;
 			continue;
+		}
 
 		/*
 		 * An already autoconfigured address matched.  Now that we
@@ -1272,12 +1274,14 @@ prelist_update(struct nd_prefix *new, struct nd_defrouter *dr, struct mbuf *m)
 		ifa6->ia6_updatetime = time_second;
 	}
 
-	if ((!autoconf || ((ifp->if_xflags & IFXF_INET6_PRIVACY) &&
-	    !tempaddr_preferred)) && new->ndpr_vltime != 0) {
+	if ((!autoconf || ((ifp->if_xflags & IFXF_INET6_NOPRIVACY) == 0 &&
+	    !tempaddr_preferred)) && new->ndpr_vltime != 0 &&
+	    !((ifp->if_xflags & IFXF_INET6_NOPRIVACY) && statique)) {
 		/*
 		 * There is no SLAAC address and/or there is no preferred RFC
 		 * 4941 temporary address. And the valid prefix lifetime is
-		 * non-zero. Create new addresses in process context.
+		 * non-zero. And there is no static address in the same prefix.
+		 * Create new addresses in process context.
 		 */
 		pr->ndpr_refcnt++;
 		if (workq_add_task(NULL, 0, nd6_addr_add, pr, NULL))
@@ -1295,10 +1299,12 @@ nd6_addr_add(void *prptr, void *arg2)
 	struct nd_prefix *pr = (struct nd_prefix *)prptr;
 	struct in6_ifaddr *ia6 = NULL;
 	struct ifaddr *ifa;
-	int ifa_plen, autoconf, privacy;
+	int ifa_plen, autoconf, privacy, s;
+
+	s = splsoftnet();
 
 	autoconf = 1;
-	privacy = (pr->ndpr_ifp->if_xflags & IFXF_INET6_PRIVACY) != 0;
+	privacy = (pr->ndpr_ifp->if_xflags & IFXF_INET6_NOPRIVACY) == 0;
 
 	/* Because prelist_update() runs in interrupt context it may run
 	 * again before this work queue task is run, causing multiple work
@@ -1359,6 +1365,8 @@ nd6_addr_add(void *prptr, void *arg2)
 		pfxlist_onlink_check();
 
 	pr->ndpr_refcnt--;
+
+	splx(s);
 }
 
 /*

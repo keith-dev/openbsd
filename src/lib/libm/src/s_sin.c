@@ -41,9 +41,6 @@
  *	TRIG(x) returns trig(x) nearly rounded 
  */
 
-/* LINTLIBRARY */
-
-#include <sys/cdefs.h>
 #include <float.h>
 #include <math.h>
 
@@ -79,10 +76,5 @@ sin(double x)
 }
 
 #if	LDBL_MANT_DIG == 53
-#ifdef	lint
-/* PROTOLIB1 */
-long double sinl(long double);
-#else	/* lint */
 __weak_alias(sinl, sin);
-#endif	/* lint */
 #endif	/* LDBL_MANT_DIG == 53 */

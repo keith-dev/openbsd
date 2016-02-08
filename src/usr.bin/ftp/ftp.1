@@ -1,4 +1,4 @@
-.\" 	$OpenBSD: ftp.1,v 1.82 2012/04/30 13:41:26 haesbaert Exp $
+.\" 	$OpenBSD: ftp.1,v 1.87 2013/02/19 03:02:34 lteo Exp $
 .\" 	$NetBSD: ftp.1,v 1.22 1997/08/18 10:20:22 lukem Exp $
 .\"
 .\" Copyright (c) 1985, 1989, 1990, 1993
@@ -30,12 +30,12 @@
 .\"
 .\"	@(#)ftp.1	8.3 (Berkeley) 10/9/94
 .\"
-.Dd $Mdocdate: April 30 2012 $
+.Dd $Mdocdate: February 19 2013 $
 .Dt FTP 1
 .Os
 .Sh NAME
 .Nm ftp
-.Nd ARPANET file transfer program
+.Nd Internet file transfer program
 .Sh SYNOPSIS
 .Nm ftp
 .Op Fl 46AadEegimnptVv
@@ -61,17 +61,8 @@
 .Op Fl o Ar output
 .Op Fl s Ar srcaddr
 .Sm off
-.No http:// Ar host Oo : Ar port
-.Oc No / Ar file
-.Sm on
-.Ar ...
-.Nm ftp
-.Op Fl C
-.Op Fl c Ar cookie
-.Op Fl o Ar output
-.Op Fl s Ar srcaddr
-.Sm off
-.No https:// Ar host Oo : Ar port
+.No http[s]:// Oo Ar user : password No @
+.Oc Ar host Oo : Ar port
 .Oc No / Ar file
 .Sm on
 .Ar ...
@@ -94,13 +85,12 @@
 .Ar ...
 .Sh DESCRIPTION
 .Nm
-is the user interface to the
-.Tn ARPANET
-standard File Transfer Protocol (FTP).
+is the user interface to the Internet standard File Transfer
+Protocol (FTP).
 The program allows a user to transfer files to and from a
 remote network site.
 .Pp
-The latter five usage formats will fetch a file using either the
+The latter four usage formats will fetch a file using either the
 FTP, HTTP, or HTTPS protocols into the current directory.
 This is ideal for scripts.
 Refer to
@@ -664,7 +654,8 @@ on the remote machine.
 A synonym for
 .Ic page .
 .It Xo Ic mput
-.Op Fl c
+.Op Fl cr
+.Op Fl d Ar depth
 .Ar local-files
 .Xc
 Expand wild cards in the list of local files given as arguments
@@ -683,9 +674,21 @@ settings.
 If the
 .Fl c
 flag is specified then
+The options are as follows:
+.Bl -tag -width Ds
+.It Fl c
+Use
 .Ic reput
-is used instead of
+instead of
 .Ic put .
+.It Fl d Ar depth
+Specify the maximum recursion level
+.Ar depth .
+The default is 0, which means unlimited.
+.It Fl r
+Recursively descend the directory tree, transferring all files and
+directories.
+.El
 .It Xo Ic msend
 .Op Fl c
 .Ar local-files
@@ -1270,25 +1273,52 @@ An FTP URL, retrieved using the FTP protocol if
 isn't defined.
 Otherwise, transfer using HTTP via the proxy defined in
 .Ev ftp_proxy .
-If
-.Ar user : Ns Ar password Ns @
-is given and
+If a
+.Ar user
+and
+.Ar password
+are given and
 .Ev ftp_proxy
-isn't defined, log in as
+isn't defined,
+log in as
 .Ar user
 with a password of
 .Ar password .
-.It http://host[:port]/file
+.It http://[user:password@]host[:port]/file
 An HTTP URL, retrieved using the HTTP protocol.
 If
 .Ev http_proxy
 is defined, it is used as a URL to an HTTP proxy server.
-.It https://host[:port]/file
+If a
+.Ar user
+and
+.Ar password
+are given and
+.Ev http_proxy
+isn't defined,
+log in as
+.Ar user
+with a password of
+.Ar password
+using Basic authentication.
+.It https://[user:password@]host[:port]/file
 An HTTPS URL, retrieved using the HTTPS protocol.
 If
 .Ev http_proxy
 is defined, this HTTPS proxy server will be used to fetch the
 file using the CONNECT method.
+If a
+.Ar user
+and
+.Ar password
+are given and
+.Ev http_proxy
+isn't defined,
+log in as
+.Ar user
+with a password of
+.Ar password
+using Basic authentication.
 .It file:file
 .Ar file
 is retrieved from a mounted file system.
@@ -1677,6 +1707,21 @@ and
 .Xr services 5 ,
 .Xr ftp-proxy 8 ,
 .Xr ftpd 8
+.Sh STANDARDS
+.Rs
+.%A J. Postel
+.%A J. Reynolds
+.%D October 1985
+.%R RFC 959
+.%T FILE TRANSFER PROTOCOL (FTP)
+.Re
+.Pp
+.Rs
+.%A P. Hethmon
+.%D March 2007
+.%R RFC 3659
+.%T Extensions to FTP
+.Re
 .Sh HISTORY
 The
 .Nm

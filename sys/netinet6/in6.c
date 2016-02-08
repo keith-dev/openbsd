@@ -1,4 +1,4 @@
-/*	$OpenBSD: in6.c,v 1.98 2012/07/14 17:23:16 sperreault Exp $	*/
+/*	$OpenBSD: in6.c,v 1.101 2012/11/30 13:48:12 stsp Exp $	*/
 /*	$KAME: in6.c,v 1.372 2004/06/14 08:14:21 itojun Exp $	*/
 
 /*
@@ -85,6 +85,9 @@
 #include <netinet/in.h>
 #include <netinet/in_var.h>
 #include <netinet/if_ether.h>
+#if NBRIDGE > 0
+#include <net/if_bridge.h>
+#endif
 
 #include <netinet/ip6.h>
 #include <netinet6/ip6_var.h>
@@ -1887,7 +1890,7 @@ in6ifa_ifpwithaddr(struct ifnet *ifp, struct in6_addr *addr)
 }
 
 /*
- * Check wether an interface has a prefix by looking up the cloning route.
+ * Check whether an interface has a prefix by looking up the cloning route.
  */
 int
 in6_ifpprefix(const struct ifnet *ifp, const struct in6_addr *addr)
@@ -1907,8 +1910,7 @@ in6_ifpprefix(const struct ifnet *ifp, const struct in6_addr *addr)
 	if ((rt->rt_flags & (RTF_CLONING | RTF_CLONED)) == 0 ||
 	    (rt->rt_ifp != ifp &&
 #if NBRIDGE > 0
-	    (rt->rt_ifp->if_bridge == NULL || ifp->if_bridge == NULL ||
-	    rt->rt_ifp->if_bridge != ifp->if_bridge) &&
+	    !SAME_BRIDGE(rt->rt_ifp->if_bridgeport, ifp->if_bridgeport) &&
 #endif
 #if NCARP > 0
 	    (ifp->if_type != IFT_CARP || rt->rt_ifp != ifp->if_carpdev) &&
@@ -2154,8 +2156,7 @@ in6_ifawithscope(struct ifnet *oifp, struct in6_addr *dst, u_int rdomain)
 	 * Comparing an interface with the outgoing interface will be done
 	 * only at the final stage of tiebreaking.
 	 */
-	for (ifp = TAILQ_FIRST(&ifnet); ifp; ifp = TAILQ_NEXT(ifp, if_list))
-	{
+	TAILQ_FOREACH(ifp, &ifnet, if_list) {
 		if (ifp->if_rdomain != rdomain)
 			continue;
 
@@ -2462,8 +2463,7 @@ in6_setmaxmtu(void)
 	unsigned long maxmtu = 0;
 	struct ifnet *ifp;
 
-	for (ifp = TAILQ_FIRST(&ifnet); ifp; ifp = TAILQ_NEXT(ifp, if_list))
-	{
+	TAILQ_FOREACH(ifp, &ifnet, if_list) {
 		/* this function can be called during ifnet initialization */
 		if (!ifp->if_afdata[AF_INET6])
 			continue;

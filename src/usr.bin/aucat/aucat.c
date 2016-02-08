@@ -1,4 +1,4 @@
-/*	$OpenBSD: aucat.c,v 1.137 2012/06/27 06:53:13 ratchov Exp $	*/
+/*	$OpenBSD: aucat.c,v 1.141 2012/12/03 15:35:25 ratchov Exp $	*/
 /*
  * Copyright (c) 2008 Alexandre Ratchov <alex@caoua.org>
  *
@@ -23,6 +23,7 @@
 #include <err.h>
 #include <errno.h>
 #include <fcntl.h>
+#include <grp.h>
 #include <limits.h>
 #include <pwd.h>
 #include <signal.h>
@@ -49,12 +50,16 @@
 /*
  * unprivileged user name
  */
+#ifndef SNDIO_USER
 #define SNDIO_USER	"_sndio"
+#endif
 
 /*
  * priority when run as root
  */
+#ifndef SNDIO_PRIO
 #define SNDIO_PRIO	(-20)
+#endif
 
 #define PROG_AUCAT	"aucat"
 #define PROG_SNDIOD	"sndiod"
@@ -92,11 +97,10 @@ volatile sig_atomic_t debug_level = 1;
 #endif
 volatile sig_atomic_t quit_flag = 0;
 
-char aucat_usage[] = "usage: " PROG_AUCAT " [-dn] [-b nframes] "
-    "[-C min:max] [-c min:max] [-e enc]\n\t"
-    "[-f device] [-h fmt] [-i file] [-j flag] [-m mode] [-o file]\n\t"
-    "[-q port] [-r rate] [-t mode] [-v volume] [-w flag] [-x policy]\n\t"
-    "[-z nframes]\n";
+char aucat_usage[] = "usage: " PROG_AUCAT " [-dMn] "
+    "[-C min:max] [-c min:max] [-e enc] [-f device]\n\t"
+    "[-h fmt] [-i file] [-j flag] [-m mode] [-o file] [-q port]\n\t"
+    "[-r rate] [-t mode] [-v volume] [-w flag] [-x policy]\n";
 
 char sndiod_usage[] = "usage: " PROG_SNDIOD " [-dM] [-a flag] [-b nframes] "
     "[-C min:max] [-c min:max] [-e enc]\n\t"
@@ -319,14 +323,9 @@ void
 privdrop(void)
 {
 	struct passwd *pw;
-	struct stat sb;
 
 	if ((pw = getpwnam(SNDIO_USER)) == NULL)
 		errx(1, "unknown user %s", SNDIO_USER);
-	if (stat(pw->pw_dir, &sb) < 0)
-		err(1, "stat(\"%s\")", pw->pw_dir);
-	if (sb.st_uid != 0 || (sb.st_mode & 022) != 0)
-		errx(1, "%s has wrong permissions", pw->pw_dir);
 	if (setpriority(PRIO_PROCESS, 0, SNDIO_PRIO) < 0)
 		err(1, "setpriority");
 	if (setgroups(1, &pw->pw_gid) ||
@@ -428,13 +427,13 @@ main(int argc, char **argv)
 	else
 		prog++;
 	if (strcmp(prog, PROG_AUCAT) == 0) {
-		optstr = "b:c:C:de:f:h:i:j:m:no:q:r:t:v:w:x:z:";
+ 		optstr = "a:b:c:C:de:f:h:i:j:L:m:Mno:q:r:s:t:U:v:w:x:z:";
 		usagestr = aucat_usage;
+		hold = 1;
 	} else if (strcmp(prog, PROG_SNDIOD) == 0) {
 		optstr = "a:b:c:C:de:f:j:L:m:Mq:r:s:t:U:v:w:x:z:";
 		usagestr = sndiod_usage;
 		background = 1;
-		hold = 0;
 	} else
 		errx(1, "%s: can't determine program to run", prog);
 

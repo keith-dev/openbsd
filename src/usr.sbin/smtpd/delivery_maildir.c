@@ -1,7 +1,7 @@
-/*	$OpenBSD: delivery_maildir.c,v 1.7 2012/07/12 08:51:43 chl Exp $	*/
+/*	$OpenBSD: delivery_maildir.c,v 1.11 2013/01/26 09:37:23 gilles Exp $	*/
 
 /*
- * Copyright (c) 2011 Gilles Chehade <gilles@openbsd.org>
+ * Copyright (c) 2011 Gilles Chehade <gilles@poolp.org>
  *
  * Permission to use, copy, modify, and distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -45,7 +45,7 @@ extern char	**environ;
 static void delivery_maildir_open(struct deliver *);
 
 struct delivery_backend delivery_backend_maildir = {
-	delivery_maildir_open
+	1, delivery_maildir_open
 };
 
 
@@ -58,11 +58,11 @@ delivery_maildir_open(struct deliver *deliver)
 	char	*msg;
 	int	 n;
 
-#define error(m)	{ msg = m; goto err; }	
+#define error(m)	{ msg = m; goto err; }
 #define error2(m)	{ msg = m; goto err2; }
 
 	setproctitle("maildir delivery");
-	if (mkdir_p(deliver->to, 0700) < 0 && errno != EEXIST)
+	if (mkdirs(deliver->to, 0700) < 0 && errno != EEXIST)
 		error("cannot mkdir maildir");
 	if (chdir(deliver->to) < 0)
 		error("cannot cd to maildir");

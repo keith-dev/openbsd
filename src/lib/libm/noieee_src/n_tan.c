@@ -1,4 +1,4 @@
-/*	$OpenBSD: n_tan.c,v 1.10 2011/05/30 18:34:38 martynas Exp $	*/
+/*	$OpenBSD: n_tan.c,v 1.12 2013/01/13 03:44:59 martynas Exp $	*/
 /*	$NetBSD: n_tan.c,v 1.1 1995/10/10 23:37:07 ragge Exp $	*/
 /*
  * Copyright (c) 1987, 1993
@@ -29,9 +29,6 @@
  * SUCH DAMAGE.
  */
 
-/* LINTLIBRARY */
-
-#include <sys/cdefs.h>
 #include <math.h>
 
 #include "mathimpl.h"
@@ -68,9 +65,4 @@ tan(double x)
 		return c/(x+x*ss);		/* ... cos/sin */
 }
 
-#ifdef	lint
-/* PROTOLIB1 */
-long double tanl(long double);
-#else	/* lint */
 __weak_alias(tanl, tan);
-#endif	/* lint */

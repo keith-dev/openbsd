@@ -10,8 +10,6 @@
  * ====================================================
  */
 
-/* LINTLIBRARY */
-
 /* atanh(x)
  * Method :
  *    1.Reduced x to positive by atanh(-x) = -atanh(x)
@@ -30,7 +28,6 @@
  *
  */
 
-#include <sys/cdefs.h>
 #include <float.h>
 #include <math.h>
 
@@ -62,10 +59,5 @@ atanh(double x)
 }
 
 #if	LDBL_MANT_DIG == 53
-#ifdef	lint
-/* PROTOLIB1 */
-long double atanhl(long double);
-#else	/* lint */
 __weak_alias(atanhl, atanh);
-#endif	/* lint */
 #endif	/* LDBL_MANT_DIG == 53 */

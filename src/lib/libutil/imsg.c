@@ -1,4 +1,4 @@
-/*	$OpenBSD: imsg.c,v 1.2 2012/06/02 21:46:53 gilles Exp $	*/
+/*	$OpenBSD: imsg.c,v 1.4 2013/02/01 15:22:18 gilles Exp $	*/
 
 /*
  * Copyright (c) 2003, 2004 Henning Brauer <henning@openbsd.org>
@@ -74,6 +74,7 @@ again:
 	    (CMSG_SPACE(sizeof(int))-CMSG_SPACE(0))/sizeof(int)
 	    >= getdtablesize()) {
 		errno = EAGAIN;
+		free(ifd);
 		return (-1);
 	}
 	
@@ -103,7 +104,7 @@ again:
 			    (char *)CMSG_DATA(cmsg)) / sizeof(int);
 			for (i = 0; i < j; i++) {
 				fd = ((int *)CMSG_DATA(cmsg))[i];
-				if (i == 0) {
+				if (ifd != NULL) {
 					ifd->fd = fd;
 					TAILQ_INSERT_TAIL(&ibuf->fds, ifd,
 					    entry);

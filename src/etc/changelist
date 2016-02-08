@@ -1,9 +1,9 @@
-#	$OpenBSD: changelist,v 1.75 2011/10/06 20:49:25 deraadt Exp $
+#	$OpenBSD: changelist,v 1.78 2012/12/31 22:04:20 schwarze Exp $
 #
 # List of files which the security script backs up and checks
 # for modifications.
 #
-# Files prefixed with a '+' will have their md5 checksums stored,
+# Files prefixed with a '+' will have their checksums stored,
 # not the actual files.
 #
 
@@ -78,7 +78,7 @@
 /etc/man.conf
 /etc/master.passwd
 /etc/mk.conf
-/etc/moduli
++/etc/moduli
 /etc/monthly
 /etc/monthly.local
 /etc/motd
@@ -93,6 +93,8 @@
 /etc/netstart
 /etc/networks
 /etc/newsyslog.conf
+/etc/npppd/npppd.conf
++/etc/npppd/npppd-users
 /etc/nsd.conf
 /etc/ntpd.conf
 /etc/ospf6d.conf

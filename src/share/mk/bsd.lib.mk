@@ -1,4 +1,4 @@
-#	$OpenBSD: bsd.lib.mk,v 1.64 2012/07/08 08:44:55 espie Exp $
+#	$OpenBSD: bsd.lib.mk,v 1.68 2012/09/16 20:41:16 kettenis Exp $
 #	$NetBSD: bsd.lib.mk,v 1.67 1996/01/17 20:39:26 mycroft Exp $
 #	@(#)bsd.lib.mk	5.26 (Berkeley) 5/2/91
 
@@ -26,6 +26,11 @@ SHLIB_MINOR=${minor}
 # .m for objective c files.
 .SUFFIXES:
 .SUFFIXES: .out .o .go .po .so .S .s .c .cc .C .cxx .f .y .l .m4 .m
+
+.if defined(NOPIE)
+CFLAGS+=	${NOPIE_FLAGS}
+AFLAGS+=	${NOPIE_FLAGS}
+.endif
 
 .c.o:
 	@echo "${COMPILE.c} ${.IMPSRC} -o ${.TARGET}"
@@ -101,34 +106,30 @@ SHLIB_MINOR=${minor}
 	@rm -f ${.TARGET}.o
 
 .S.o .s.o:
-	@echo "${CPP} ${CPPFLAGS} ${CFLAGS:M-[ID]*} ${AINC} ${.IMPSRC} | \
-		${AS} -o ${.TARGET}"
-	@${CPP} ${CPPFLAGS} ${CFLAGS:M-[ID]*} ${AINC} ${.IMPSRC} | \
-	    ${AS} -o ${.TARGET}.o
+	@echo "${COMPILE.S} ${CFLAGS:M-[ID]*} ${AINC} ${.IMPSRC} -o ${.TARGET}"
+	@${COMPILE.S} ${CFLAGS:M-[ID]*} ${AINC} ${.IMPSRC} -o ${.TARGET}.o
 	@${LD} -X -r ${.TARGET}.o -o ${.TARGET}
 	@rm -f ${.TARGET}.o
 
 .S.go .s.go:
-	@echo "${CPP} ${CPPFLAGS} ${CFLAGS:M-[ID]*} ${AINC} ${.IMPSRC} |\
-	    ${AS} -o ${.TARGET}"
-	@${CPP} ${CPPFLAGS} ${CFLAGS:M-[ID]*} ${AINC} ${.IMPSRC} | \
-	    ${AS} -o ${.TARGET}.o
+	@echo "${COMPILE.S} ${CFLAGS:M-[ID]*} ${AINC} ${.IMPSRC} -o ${.TARGET}"
+	@${COMPILE.S} ${CFLAGS:M-[ID]*} ${AINC} ${.IMPSRC} -o ${.TARGET}.o
 	@${LD} -X -r ${.TARGET}.o -o ${.TARGET}
 	@rm -f ${.TARGET}.o
 
 .S.po .s.po:
-	@echo "${CPP} -DPROF ${CPPFLAGS} ${CFLAGS:M-[ID]*} ${AINC} ${.IMPSRC} |\
-	    ${AS} -o ${.TARGET}"
-	@${CPP} -DPROF ${CPPFLAGS} ${CFLAGS:M-[ID]*} ${AINC} ${.IMPSRC} | \
-	    ${AS} -o ${.TARGET}.o
+	@echo "${COMPILE.S} -DPROF ${CFLAGS:M-[ID]*} ${AINC} ${.IMPSRC} \
+	    -o ${.TARGET}"
+	@${COMPILE.S} -DPROF ${CFLAGS:M-[ID]*} ${AINC} ${.IMPSRC} \
+	    -o ${.TARGET}.o
 	@${LD} -X -r ${.TARGET}.o -o ${.TARGET}
 	@rm -f ${.TARGET}.o
 
 .S.so .s.so:
-	@echo "${CPP} -DPIC ${CPPFLAGS} ${CFLAGS:M-[ID]*} ${AINC} ${.IMPSRC} | \
-	    ${AS} ${ASPICFLAG} -o ${.TARGET}"
-	@${CPP} -DPIC ${CPPFLAGS} ${CFLAGS:M-[ID]*} ${AINC} ${.IMPSRC} | \
-	    ${AS} ${ASPICFLAG} -o ${.TARGET}.o
+	@echo "${COMPILE.S} ${PICFLAG} ${CFLAGS:M-[ID]*} ${AINC} ${.IMPSRC} \
+	    -o ${.TARGET}"
+	@${COMPILE.S} ${PICFLAG} ${CFLAGS:M-[ID]*} ${AINC} ${.IMPSRC} \
+	    -o ${.TARGET}.o
 	@${LD} -X -r ${.TARGET}.o -o ${.TARGET}
 	@rm -f ${.TARGET}.o
 
@@ -139,9 +140,7 @@ CXXFLAGS+=	${CXXDIAGFLAGS}
 CFLAGS+=	${COPTS}
 CXXFLAGS+=	${CXXOPTS}
 
-.if ${MACHINE} != "zaurus"
 DEBUG?=	-g
-.endif
 
 _LIBS=lib${LIB}.a
 .if (${DEBUGLIBS:L} == "yes")
@@ -152,9 +151,6 @@ _LIBS+=lib${LIB}_p.a
 .endif
 
 .if !defined(NOPIC)
-.if (${MACHINE_CPU} != "mips64")
-_LIBS+=lib${LIB}_pic.a
-.endif
 .if defined(SHLIB_MAJOR) && defined(SHLIB_MINOR)
 _LIBS+=lib${LIB}.so.${SHLIB_MAJOR}.${SHLIB_MINOR}
 .endif
@@ -185,12 +181,6 @@ lib${LIB}_p.a: ${POBJS}
 	${RANLIB} lib${LIB}_p.a
 
 SOBJS+=	${OBJS:.o=.so}
-lib${LIB}_pic.a: ${SOBJS}
-	@echo building shared object ${LIB} library
-	@rm -f lib${LIB}_pic.a
-	@${AR} cq lib${LIB}_pic.a `${LORDER} ${SOBJS} | tsort -q`
-	${RANLIB} lib${LIB}_pic.a
-
 lib${LIB}.so.${SHLIB_MAJOR}.${SHLIB_MINOR}: ${SOBJS} ${DPADD}
 	@echo building shared ${LIB} library \(version ${SHLIB_MAJOR}.${SHLIB_MINOR}\)
 	@rm -f lib${LIB}.so.${SHLIB_MAJOR}.${SHLIB_MINOR}
@@ -204,7 +194,7 @@ clean: _SUBDIRUSE
 	rm -f lib${LIB}.a ${OBJS}
 	rm -f lib${LIB}_g.a ${GOBJS}
 	rm -f lib${LIB}_p.a ${POBJS}
-	rm -f lib${LIB}_pic.a lib${LIB}.so.*.* ${SOBJS}
+	rm -f lib${LIB}.so.*.* ${SOBJS}
 .endif
 
 cleandir: _SUBDIRUSE clean
@@ -251,15 +241,6 @@ realinstall:
 	${RANLIB} -t ${DESTDIR}${LIBDIR}/lib${LIB}_p.a
 .endif
 	chmod ${LIBMODE} ${DESTDIR}${LIBDIR}/lib${LIB}_p.a
-.endif
-.if !defined(NOPIC) && (${MACHINE_CPU} != "mips64") 
-#	ranlib lib${LIB}_pic.a
-	${INSTALL} ${INSTALL_COPY} -S -o ${LIBOWN} -g ${LIBGRP} -m 600 \
-	    lib${LIB}_pic.a ${DESTDIR}${LIBDIR}
-.if (${INSTALL_COPY} != "-p")
-	${RANLIB} -t ${DESTDIR}${LIBDIR}/lib${LIB}_pic.a
-.endif
-	chmod ${LIBMODE} ${DESTDIR}${LIBDIR}/lib${LIB}_pic.a
 .endif
 .if !defined(NOPIC) && defined(SHLIB_MAJOR) && defined(SHLIB_MINOR)
 	${INSTALL} ${INSTALL_COPY} -S -o ${LIBOWN} -g ${LIBGRP} -m ${LIBMODE} \

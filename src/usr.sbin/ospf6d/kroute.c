@@ -1,4 +1,4 @@
-/*	$OpenBSD: kroute.c,v 1.36 2011/07/07 18:39:11 claudio Exp $ */
+/*	$OpenBSD: kroute.c,v 1.41 2013/01/14 14:39:38 florian Exp $ */
 
 /*
  * Copyright (c) 2004 Esben Norby <norby@openbsd.org>
@@ -393,9 +393,11 @@ kr_redist_eval(struct kroute *kr, struct rroute *rr)
 	    IN6_IS_ADDR_V4COMPAT(&kr->prefix))
 		goto dont_redistribute;
 	/*
-	 * Consider networks with nexthop loopback as not redistributable.
+	 * Consider networks with nexthop loopback as not redistributable
+	 * unless it is a reject or blackhole route.
 	 */
-	if (IN6_IS_ADDR_LOOPBACK(&kr->nexthop))
+	if (IN6_IS_ADDR_LOOPBACK(&kr->nexthop) &&
+	    !(kr->flags & (F_BLACKHOLE|F_REJECT)))
 		goto dont_redistribute;
 
 	/* Should we redistrubute this route? */
@@ -693,87 +695,6 @@ protect_lo(void)
 	return (0);
 }
 
-u_int8_t
-mask2prefixlen(struct sockaddr_in6 *sa_in6)
-{
-	u_int8_t	l = 0, *ap, *ep;
-
-	/*
-	 * sin6_len is the size of the sockaddr so substract the offset of
-	 * the possibly truncated sin6_addr struct.
-	 */
-	ap = (u_int8_t *)&sa_in6->sin6_addr;
-	ep = (u_int8_t *)sa_in6 + sa_in6->sin6_len;
-	for (; ap < ep; ap++) {
-		/* this "beauty" is adopted from sbin/route/show.c ... */
-		switch (*ap) {
-		case 0xff:
-			l += 8;
-			break;
-		case 0xfe:
-			l += 7;
-			return (l);
-		case 0xfc:
-			l += 6;
-			return (l);
-		case 0xf8:
-			l += 5;
-			return (l);
-		case 0xf0:
-			l += 4;
-			return (l);
-		case 0xe0:
-			l += 3;
-			return (l);
-		case 0xc0:
-			l += 2;
-			return (l);
-		case 0x80:
-			l += 1;
-			return (l);
-		case 0x00:
-			return (l);
-		default:
-			fatalx("non contiguous inet6 netmask");
-		}
-	}
-
-	return (l);
-}
-
-struct in6_addr *
-prefixlen2mask(u_int8_t prefixlen)
-{
-	static struct in6_addr	mask;
-	int			i;
-
-	bzero(&mask, sizeof(mask));
-	for (i = 0; i < prefixlen / 8; i++)
-		mask.s6_addr[i] = 0xff;
-	i = prefixlen % 8;
-	if (i)
-		mask.s6_addr[prefixlen / 8] = 0xff00 >> i;
-
-	return (&mask);
-}
-
-void
-inet6applymask(struct in6_addr *dest, const struct in6_addr *src, int prefixlen)
-{
-	struct in6_addr	mask;
-	int		i;
-
-	bzero(&mask, sizeof(mask));
-	for (i = 0; i < prefixlen / 8; i++)
-		mask.s6_addr[i] = 0xff;
-	i = prefixlen % 8;
-	if (i)
-		mask.s6_addr[prefixlen / 8] = 0xff00 >> i;
-
-	for (i = 0; i < 16; i++)
-		dest->s6_addr[i] = src->s6_addr[i] & mask.s6_addr[i];
-}
-
 #define ROUNDUP(a) \
 	((a) > 0 ? (1 + (((a) - 1) | (sizeof(long) - 1))) : sizeof(long))
 
@@ -859,11 +780,7 @@ if_newaddr(u_short ifindex, struct sockaddr_in6 *ifa, struct sockaddr_in6 *mask,
 	    IN6_IS_ADDR_V4COMPAT(&ifa->sin6_addr))
 		return;
 
-	/* XXX thanks, KAME, for this ugliness... adopted from route/show.c */
-	if (IN6_IS_ADDR_LINKLOCAL(&ifa->sin6_addr)) {
-		ifa->sin6_addr.s6_addr[2] = 0;
-		ifa->sin6_addr.s6_addr[3] = 0;
-	}
+	clearscope(&ifa->sin6_addr);
 
 	if (IN6_IS_ADDR_LINKLOCAL(&ifa->sin6_addr) ||
 	    iface->flags & IFF_LOOPBACK)
@@ -937,11 +854,7 @@ if_deladdr(u_short ifindex, struct sockaddr_in6 *ifa, struct sockaddr_in6 *mask,
 	    IN6_IS_ADDR_V4COMPAT(&ifa->sin6_addr))
 		return;
 
-	/* XXX thanks, KAME, for this ugliness... adopted from route/show.c */
-	if (IN6_IS_ADDR_LINKLOCAL(&ifa->sin6_addr)) {
-		ifa->sin6_addr.s6_addr[2] = 0;
-		ifa->sin6_addr.s6_addr[3] = 0;
-	}
+	clearscope(&ifa->sin6_addr);
 
 	for (ia = TAILQ_FIRST(&iface->ifa_list); ia != NULL; ia = nia) {
 		nia = TAILQ_NEXT(ia, entry);
@@ -1046,19 +959,15 @@ send_rtmsg(int fd, int action, struct kroute *kroute)
 		nexthop.addr.sin6_len = sizeof(struct sockaddr_in6);
 		nexthop.addr.sin6_family = AF_INET6;
 		nexthop.addr.sin6_addr = kroute->nexthop;
+		nexthop.addr.sin6_scope_id = kroute->scope;
 		/*
 		 * XXX we should set the sin6_scope_id but the kernel
 		 * XXX does not expect it that way. It must be fiddled
 		 * XXX into the sin6_addr. Welcome to the typical
 		 * XXX IPv6 insanity and all without wine bottles.
 		 */
-		if (IN6_IS_ADDR_LINKLOCAL(&nexthop.addr.sin6_addr)) {
-			/* nexthop.addr.sin6_scope_id = kroute->scope; */
-			nexthop.addr.sin6_addr.s6_addr[2] =
-			    (kroute->scope >> 8) & 0xff;
-			nexthop.addr.sin6_addr.s6_addr[3] =
-			    kroute->scope & 0xff;
-		}
+		embedscope(&nexthop.addr);
+
 		/* adjust header */
 		hdr.rtm_flags |= RTF_GATEWAY;
 		hdr.rtm_addrs |= RTA_GATEWAY;
@@ -1075,7 +984,7 @@ send_rtmsg(int fd, int action, struct kroute *kroute)
 		bzero(&ifp, sizeof(ifp));
 		ifp.addr.sdl_len = sizeof(struct sockaddr_dl);
 		ifp.addr.sdl_family = AF_LINK;
-		
+
 		ifp.addr.sdl_index  = kroute->ifindex;
 		/* adjust header */
 		hdr.rtm_flags |= RTF_CLONING;
@@ -1199,6 +1108,10 @@ fetchtable(void)
 			sa_in6 = (struct sockaddr_in6 *)rti_info[RTAX_NETMASK];
 			if (rtm->rtm_flags & RTF_STATIC)
 				kr->r.flags |= F_STATIC;
+			if (rtm->rtm_flags & RTF_BLACKHOLE)
+				kr->r.flags |= F_BLACKHOLE;
+			if (rtm->rtm_flags & RTF_REJECT)
+				kr->r.flags |= F_REJECT;
 			if (rtm->rtm_flags & RTF_DYNAMIC)
 				kr->r.flags |= F_DYNAMIC;
 			if (rtm->rtm_flags & RTF_PROTO1)
@@ -1222,10 +1135,14 @@ fetchtable(void)
 		if ((sa = rti_info[RTAX_GATEWAY]) != NULL)
 			switch (sa->sa_family) {
 			case AF_INET6:
-				kr->r.nexthop =
-				    ((struct sockaddr_in6 *)sa)->sin6_addr;
-				kr->r.scope =
-				    ((struct sockaddr_in6 *)sa)->sin6_scope_id;
+				sa_in6 = (struct sockaddr_in6 *)sa;
+				/*
+				 * XXX The kernel provides the scope via the
+				 * XXX kame hack instead of the scope_id field.
+				 */
+				recoverscope(sa_in6);
+				kr->r.nexthop = sa_in6->sin6_addr;
+				kr->r.scope = sa_in6->sin6_scope_id;
 				break;
 			case AF_LINK:
 				kr->r.flags |= F_CONNECTED;
@@ -1397,6 +1314,10 @@ dispatch_rtmsg(void)
 					fatalx("classful IPv6 address?!!");
 				if (rtm->rtm_flags & RTF_STATIC)
 					flags |= F_STATIC;
+				if (rtm->rtm_flags & RTF_BLACKHOLE)
+					flags |= F_BLACKHOLE;
+				if (rtm->rtm_flags & RTF_REJECT)
+					flags |= F_REJECT;
 				if (rtm->rtm_flags & RTF_DYNAMIC)
 					flags |= F_DYNAMIC;
 				if (rtm->rtm_flags & RTF_PROTO1)
@@ -1410,10 +1331,15 @@ dispatch_rtmsg(void)
 			if ((sa = rti_info[RTAX_GATEWAY]) != NULL) {
 				switch (sa->sa_family) {
 				case AF_INET6:
-					nexthop = ((struct sockaddr_in6 *)
-					    sa)->sin6_addr;
-					scope = ((struct sockaddr_in6 *)
-					    sa)->sin6_scope_id;
+					sa_in6 = (struct sockaddr_in6 *)sa;
+					/*
+					 * XXX The kernel provides the scope
+					 * XXX via the kame hack instead of
+					 * XXX the scope_id field.
+					 */
+					recoverscope(sa_in6);
+					nexthop = sa_in6->sin6_addr;
+					scope = sa_in6->sin6_scope_id;
 					break;
 				case AF_LINK:
 					flags |= F_CONNECTED;

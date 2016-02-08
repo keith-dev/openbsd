@@ -1,5 +1,5 @@
 #!/usr/bin/perl
-# $OpenBSD: pkg-config,v 1.72 2012/07/04 08:44:07 espie Exp $
+# $OpenBSD: pkg-config,v 1.77 2012/12/10 10:12:12 jasper Exp $
 # $CSK: pkgconfig.pl,v 1.39 2006/11/27 16:26:20 ckuethe Exp $
 
 # Copyright (c) 2006 Chris Kuethe <ckuethe@openbsd.org>
@@ -46,7 +46,7 @@ my $allow_uninstalled =
 	defined $ENV{PKG_CONFIG_DISABLE_UNINSTALLED} ? 0 : 1;
 my $found_uninstalled = 0;
 
-my $version = 0.26; # pretend to be this version of pkgconfig
+my $version = '0.27.1'; # pretend to be this version of pkgconfig
 
 my %configs = ();
 setup_self();
@@ -154,6 +154,13 @@ if ($mode{list}) {
 my $cfg_full_list = [];
 my $top_config = [];
 
+# When we got here we're supposed to have had at least one
+# package as argument.
+if (!@ARGV){
+	say_error("No package name(s) specified.");
+	exit 1;
+}
+
 while (@ARGV){
 	my $p = shift @ARGV;
 	my $op = undef;
@@ -208,7 +215,7 @@ if ($mode{exactversion}) {
 	exit $rc;
 }
 
-if ($mode{minversion}) {
+if ($mode{maxversion}) {
 	my $v = $mode{maxversion};
 	for my $pkg (@$top_config) {
 		$rc = 1 unless versionmatch($configs{$pkg}, '<=', $v);
@@ -280,7 +287,8 @@ sub handle_config
 
 	if (defined $mode{cflags}
 	    or ($mode{static} && $mode{libs})
-	    or $mode{printrequiresprivate}) {
+	    or $mode{printrequiresprivate}
+    	    or $mode{exists}) {
 		&$get_props("Requires.private");
 	}
 	&$get_props("Requires");
@@ -581,6 +589,8 @@ Usage: $0 [options]
 --uninstalled - allow for uninstalled versions to be used
 --static - adjust output for static linking
 --atleast-version [version] - require a certain version of a package
+--exact-version [version] - require exactly the specified version of a package
+--max-version [version] - require at most a certain version of a package
 --modversion [package] - query the version of a package
 --variable var package - return the definition of <var> in <package>
 EOF

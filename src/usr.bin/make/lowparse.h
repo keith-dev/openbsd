@@ -1,7 +1,7 @@
 #ifndef LOWPARSE_H
 #define LOWPARSE_H
 
-/* $OpenBSD: lowparse.h,v 1.8 2012/03/22 13:47:12 espie Exp $ */
+/* $OpenBSD: lowparse.h,v 1.11 2012/10/02 10:29:31 espie Exp $ */
 
 /*
  * Copyright (c) 1999 Marc Espie.
@@ -46,15 +46,6 @@
  * } while (Parse_NextFile());
  */
 
-/* Initialization and cleanup */
-#ifdef CLEANUP
-extern void LowParse_Init(void);
-extern void LowParse_End(void);
-#else
-#define LowParse_Init()
-#define LowParse_End()
-#endif
-
 /* Selection of input stream */
 /* Parse_FromFile(filename, filehandle);
  *	Push given filehandle on the input stack, using filename for diagnostic
@@ -80,6 +71,13 @@ extern const char *Parse_Getfilename(void);
 /* Parse_FillLocation(origin)
  * 	Fill the location pointed by origin with the current location. */
 extern void Parse_FillLocation(Location *);
+
+/* Parse_SetLocation(origin)
+ *	Set the "parse location" to a given origin.
+ *	Used for parse errors that occur during variable expansion at
+ *	runtime.
+ */
+extern void Parse_SetLocation(Location *);
 
 /* continue = Parse_NextFile();
  *	Advance parsing to the next file in the input stack. Returns true
@@ -107,4 +105,6 @@ extern char *Parse_ReadUnparsedLine(Buffer, const char *);
  *	At end of parsing, report on fatal errors.
  */
 extern void Parse_ReportErrors(void);
+
+extern void Parse_setcurdir(const char *);
 #endif

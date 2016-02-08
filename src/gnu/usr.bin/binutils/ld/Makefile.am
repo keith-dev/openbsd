@@ -171,6 +171,8 @@ ALL_EMULATIONS = \
 	eelf32lppc.o \
 	eelf32lppcnto.o \
 	eelf32lppcsim.o \
+	eelf32m88k.o \
+	eelf32m88k_obsd.o \
 	eelf32mcore.o \
 	eelf32mipswindiss.o \
 	eelf32openrisc.o \
@@ -249,12 +251,14 @@ ALL_EMULATIONS = \
 	em68kcoff.o \
 	em68kelf.o \
 	em68kelfnbsd.o \
+	em68kelfobsd.o \
 	em68klinux.o \
 	em68klynx.o \
 	em68knbsd.o \
 	em68kobsd.o \
 	em68kpsos.o \
 	em88kbcs.o \
+	em88kopenbsd.o \
 	emcorepe.o \
 	emipsbig.o \
 	emipsbsd.o \
@@ -722,6 +726,14 @@ eelf32lppcsim.c: $(srcdir)/emulparams/elf32lppcsim.sh \
   $(srcdir)/emultempl/ppc32elf.em \
   $(srcdir)/emultempl/elf32.em $(srcdir)/scripttempl/elf.sc ${GEN_DEPENDS}
 	${GENSCRIPTS} elf32lppcsim "$(tdir_elf32lppcsim)"
+eelf32m88k.c: $(srcdir)/emulparams/elf32m88k.sh \
+  $(srcdir)/emultempl/elf32.em $(srcdir)/scripttempl/elf.sc ${GEN_DEPENDS}
+	${GENSCRIPTS} elf32m88k "$(tdir_elf32m88k)"
+eelf32m88k_obsd.c: $(srcdir)/emulparams/elf32m88k_obsd.sh \
+  $(srcdir)/emulparams/elf32m88k.sh \
+  $(srcdir)/emultempl/elf32.em $(srcdir)/scripttempl/elf.sc ${GEN_DEPENDS}
+	${GENSCRIPTS} elf32m88k_obsd "$(tdir_elf32m88k_obsd)"
+eelf32ppcnto.c: $(srcdir)/emulparams/elf32ppcnto.sh \
 eelf32ppcnto.c: $(srcdir)/emulparams/elf32ppcnto.sh \
   $(srcdir)/emulparams/elf32ppc.sh $(srcdir)/emultempl/ppc32elf.em \
   $(srcdir)/emultempl/elf32.em $(srcdir)/scripttempl/elf.sc ${GEN_DEPENDS}
@@ -1067,6 +1079,11 @@ em68kelfnbsd.c: $(srcdir)/emulparams/m68kelfnbsd.sh \
   $(srcdir)/emultempl/elf32.em $(srcdir)/emultempl/m68kelf.em \
   $(srcdir)/scripttempl/elf.sc ${GEN_DEPENDS}
 	${GENSCRIPTS} m68kelfnbsd "$(tdir_m68kelfnbsd)"
+em68kelfobsd.c: $(srcdir)/emulparams/m68kelfobsd.sh \
+  $(srcdir)/emulparams/m68kelf.sh $(srcdir)/emulparams/elf_obsd.sh \
+  $(srcdir)/emultempl/elf32.em $(srcdir)/emultempl/m68kelf.em \
+  $(srcdir)/scripttempl/elf.sc ${GEN_DEPENDS}
+	${GENSCRIPTS} m68kelfobsd "$(tdir_m68kelfobsd)"
 em68klinux.c: $(srcdir)/emulparams/m68klinux.sh \
   $(srcdir)/emultempl/linux.em $(srcdir)/scripttempl/aout.sc ${GEN_DEPENDS}
 	${GENSCRIPTS} m68klinux "$(tdir_m68klinux)"
@@ -1085,6 +1102,9 @@ em68kpsos.c:	$(srcdir)/emulparams/m68kpsos.sh \
 em88kbcs.c: $(srcdir)/emulparams/m88kbcs.sh \
   $(srcdir)/emultempl/generic.em $(srcdir)/scripttempl/m88kbcs.sc ${GEN_DEPENDS}
 	${GENSCRIPTS} m88kbcs "$(tdir_m88kbcs)"
+em88kopenbsd.c: $(srcdir)/emulparams/m88kopenbsd.sh \
+  $(srcdir)/emultempl/generic.em $(srcdir)/scripttempl/aout.sc ${GEN_DEPENDS}
+	${GENSCRIPTS} m88kopenbsd "$(tdir_m88kopenbsd)"
 emcorepe.c: $(srcdir)/emulparams/mcorepe.sh \
   $(srcdir)/emultempl/pe.em $(srcdir)/scripttempl/pe.sc ${GEN_DEPENDS}
 	${GENSCRIPTS} mcorepe "$(tdir_mcorepe)"

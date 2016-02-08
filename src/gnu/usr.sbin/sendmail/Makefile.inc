@@ -1,11 +1,8 @@
-#	$OpenBSD: Makefile.inc,v 1.17 2006/02/04 09:46:23 mbalmer Exp $
+#	$OpenBSD: Makefile.inc,v 1.19 2013/01/09 22:17:58 matthieu Exp $
 
 .include <bsd.own.mk>
 .include <bsd.obj.mk>
 
-.if (${MACHINE_ARCH} != "vax")
-ENVDEF+=-DSM_OMIT_BOGUS_WARNINGS
-.endif
 ENVDEF+= -DNEWDB -DMAP_REGEX
 ENVDEF+= -DNETINET6 -DNEEDSGETIPNODE -DSM_CONF_SHM
 .if (${YP:L} == "yes")
@@ -57,7 +54,7 @@ LDADD+= -lwrap
 .if defined(WANT_LDAP)
 .if !defined(LIB) || (${LIB} != "milter")
 ENVDEF+= -DLDAPMAP
-LDADD+=-lldap -llber
+LDADD+=-lldap -llber -lsasl2
 CFLAGS+=-I/usr/local/include
 LDFLAGS+=-L/usr/local/lib
 .endif

@@ -1,8 +1,7 @@
-/*	$OpenBSD: iked.c,v 1.11 2011/05/09 11:15:18 reyk Exp $	*/
-/*	$vantronix: iked.c,v 1.22 2010/06/02 14:43:30 reyk Exp $	*/
+/*	$OpenBSD: iked.c,v 1.16 2013/01/08 10:38:19 reyk Exp $	*/
 
 /*
- * Copyright (c) 2010 Reyk Floeter <reyk@vantronix.net>
+ * Copyright (c) 2010-2013 Reyk Floeter <reyk@openbsd.org>
  *
  * Permission to use, copy, modify, and distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -65,7 +64,7 @@ usage(void)
 {
 	extern char	*__progname;
 
-	fprintf(stderr, "usage: %s [-dnSTv] [-D macro=value] "
+	fprintf(stderr, "usage: %s [-6dnSTtv] [-D macro=value] "
 	    "[-f file]\n", __progname);
 	exit(1);
 }
@@ -82,8 +81,11 @@ main(int argc, char *argv[])
 
 	log_init(1);
 
-	while ((c = getopt(argc, argv, "dD:nf:vST")) != -1) {
+	while ((c = getopt(argc, argv, "6dD:nf:vSTt")) != -1) {
 		switch (c) {
+		case '6':
+			opts |= IKED_OPT_NOIPV6BLOCKING;
+			break;
 		case 'd':
 			debug++;
 			break;
@@ -109,13 +111,13 @@ main(int argc, char *argv[])
 		case 'T':
 			opts |= IKED_OPT_NONATT;
 			break;
+		case 't':
+			opts |= IKED_OPT_NATT;
+			break;
 		default:
 			usage();
 		}
 	}
-
-	argv += optind;
-	argc -= optind;
 
 	if ((env = calloc(1, sizeof(*env))) == NULL)
 		fatal("calloc: env");
@@ -124,6 +126,10 @@ main(int argc, char *argv[])
 
 	ps = &env->sc_ps;
 	ps->ps_env = env;
+
+	if ((opts & (IKED_OPT_NONATT|IKED_OPT_NATT)) ==
+	    (IKED_OPT_NONATT|IKED_OPT_NATT))
+		errx(1, "conflicting NAT-T options");
 
 	if (strlcpy(env->sc_conffile, conffile, MAXPATHLEN) >= MAXPATHLEN)
 		errx(1, "config file exceeds MAXPATHLEN");
@@ -204,14 +210,18 @@ parent_configure(struct iked *env)
 	bzero(&ss, sizeof(ss));
 	ss.ss_family = AF_INET;
 
-	config_setsocket(env, &ss, ntohs(IKED_IKE_PORT), PROC_IKEV2);
-	config_setsocket(env, &ss, ntohs(IKED_NATT_PORT), PROC_IKEV2);
+	if ((env->sc_opts & IKED_OPT_NATT) == 0)
+		config_setsocket(env, &ss, ntohs(IKED_IKE_PORT), PROC_IKEV2);
+	if ((env->sc_opts & IKED_OPT_NONATT) == 0)
+		config_setsocket(env, &ss, ntohs(IKED_NATT_PORT), PROC_IKEV2);
 
 	bzero(&ss, sizeof(ss));
 	ss.ss_family = AF_INET6;
 
-	config_setsocket(env, &ss, ntohs(IKED_IKE_PORT), PROC_IKEV2);
-	config_setsocket(env, &ss, ntohs(IKED_NATT_PORT), PROC_IKEV2);
+	if ((env->sc_opts & IKED_OPT_NATT) == 0)
+		config_setsocket(env, &ss, ntohs(IKED_IKE_PORT), PROC_IKEV2);
+	if ((env->sc_opts & IKED_OPT_NONATT) == 0)
+		config_setsocket(env, &ss, ntohs(IKED_NATT_PORT), PROC_IKEV2);
 
 	config_setcoupled(env, env->sc_decoupled ? 0 : 1);
 	config_setmode(env, env->sc_passive ? 1 : 0);
@@ -300,8 +310,9 @@ parent_sig_handler(int sig, short event, void *arg)
 
 			for (id = 0; id < PROC_MAX; id++)
 				if (pid == ps->ps_pid[id]) {
-					log_warnx("lost child: %s %s",
-					    ps->ps_title[id], cause);
+					if (fail)
+						log_warnx("lost child: %s %s",
+						    ps->ps_title[id], cause);
 					break;
 				}
 

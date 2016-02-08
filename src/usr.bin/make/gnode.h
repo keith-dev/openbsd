@@ -1,6 +1,6 @@
 #ifndef GNODE_H
 #define GNODE_H
-/*	$OpenBSD: gnode.h,v 1.19 2012/04/11 18:27:30 espie Exp $ */
+/*	$OpenBSD: gnode.h,v 1.23 2012/10/09 19:45:34 espie Exp $ */
 
 /*
  * Copyright (c) 2001 Marc Espie.
@@ -40,7 +40,6 @@
 #include "symtable.h"
 #endif
 
-struct Suff_;
 /*-
  * The structure for an individual graph node. Each node has several
  * pieces of data associated with it.
@@ -79,6 +78,8 @@ struct Suff_;
 #define CYCLE		6
 #define ENDCYCLE	7
 #define NOSUCHNODE	8
+#define BUILDING	9
+#define HELDBACK	10
 
 #define SPECIAL_NONE	0U
 #define SPECIAL_PATH		21U
@@ -86,6 +87,31 @@ struct Suff_;
 #define SPECIAL_TARGET		64U
 #define SPECIAL_SOURCE		128U
 #define SPECIAL_TARGETSOURCE	(SPECIAL_TARGET|SPECIAL_SOURCE)
+
+#define	SPECIAL_EXEC		4U
+#define SPECIAL_IGNORE		5U
+#define SPECIAL_NOTHING 	6U
+#define	SPECIAL_INVISIBLE	8U
+#define SPECIAL_JOIN		9U
+#define SPECIAL_MADE		11U
+#define SPECIAL_MAIN		12U
+#define SPECIAL_MAKE		13U
+#define SPECIAL_MFLAGS		14U
+#define	SPECIAL_NOTMAIN		15U
+#define	SPECIAL_NOTPARALLEL	16U
+#define	SPECIAL_OPTIONAL	18U
+#define SPECIAL_ORDER		19U
+#define SPECIAL_PARALLEL	20U
+#define SPECIAL_PHONY		22U
+#define SPECIAL_PRECIOUS	23U
+#define SPECIAL_SILENT		25U
+#define SPECIAL_SUFFIXES	27U
+#define	SPECIAL_USE		28U
+#define SPECIAL_WAIT		29U
+#define SPECIAL_NOPATH		30U
+#define SPECIAL_ERROR		31U
+#define SPECIAL_CHEAP		32U
+#define SPECIAL_EXPENSIVE	33U
 
 struct GNode_ {
     unsigned int special_op;	/* special op to apply */
@@ -97,6 +123,7 @@ struct GNode_ {
 			 * on this node:
 			 *  UNKNOWN - Not examined yet
 			 *  BEINGMADE - Target is currently being made.
+			 *  BUILDING - There is a job running
 			 *  MADE - Was out-of-date and has been made
 			 *  UPTODATE - Was already up-to-date
 			 *  ERROR - An error occurred while it was being
@@ -111,7 +138,6 @@ struct GNode_ {
 			 *	printed. Go back and unmark all its
 			 *	members.
 			 */
-    char build_lock;	/* for parallel build in siblings */
     char *path;		/* The full pathname of the file */
     unsigned int type;	/* Its type (see the OP flags, below) */
     int order;		/* Its wait weight */
@@ -130,17 +156,23 @@ struct GNode_ {
     LIST preds;		/* Nodes that must be made before this one */
 
     SymTable context;	/* The local variables */
-    Location origin;	/* First line number and file name of commands. */
     LIST commands;	/* Creation commands */
-    LIST expanded;	/* Expanded commands */
-    struct Suff_ *suffix;/* Suffix for the node (determined by
+    Suff *suffix;	/* Suffix for the node (determined by
 			 * Suff_FindDeps and opaque to everyone
 			 * but the Suff module) */
-    struct GNode_ *sibling;	/* equivalent targets */
+    GNode *sibling;	/* equivalent targets */
+    GNode *groupling;	/* target lists */
+    GNode *watched;	/* the node currently building */
     /* stuff for target name equivalence */
     char *basename;	/* pointer to name stripped of path */
-    struct GNode_ *next;
+    GNode *next;
     char name[1];	/* The target's name */
+};
+
+struct command
+{
+	Location location;
+	char string[1];
 };
 
 #define has_been_built(gn) \
@@ -198,7 +230,7 @@ struct GNode_ {
 /* Attributes applied by PMake */
 #define OP_TRANSFORM	0x00040000  /* The node is a transformation rule */
 #define OP_MEMBER	0x00080000  /* Target is a member of an archive */
-#define OP_LIB		0x00100000  /* Target is a library */
+#define OP_DOUBLE	0x00100000  /* normal op with double commands */
 #define OP_ARCHV	0x00200000  /* Target is an archive construct */
 #define OP_HAS_COMMANDS 0x00400000  /* Target has all the commands it should.
 				     * Used when parsing to catch multiple

@@ -10,8 +10,6 @@
  * ====================================================
  */
 
-/* LINTLIBRARY */
-
 /* remainder(x,p)
  * Return :                  
  * 	returns  x REM p  =  x - [x/p]*p as if in infinite 
@@ -21,7 +19,6 @@
  *	Based on fmod() return x-[x/p]chopped*p exactlp.
  */
 
-#include <sys/cdefs.h>
 #include <float.h>
 #include <math.h>
 
@@ -73,10 +70,5 @@ remainder(double x, double p)
 }
 
 #if	LDBL_MANT_DIG == 53
-#ifdef	lint
-/* PROTOLIB1 */
-long double remainderl(long double, long double);
-#else	/* lint */
 __weak_alias(remainderl, remainder);
-#endif	/* lint */
 #endif	/* LDBL_MANT_DIG == 53 */

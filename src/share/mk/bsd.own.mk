@@ -1,4 +1,4 @@
-#	$OpenBSD: bsd.own.mk,v 1.116 2012/04/12 11:22:14 jsg Exp $
+#	$OpenBSD: bsd.own.mk,v 1.136 2013/02/10 20:27:18 miod Exp $
 #	$NetBSD: bsd.own.mk,v 1.24 1996/04/13 02:08:09 thorpej Exp $
 
 # Host-specific overrides
@@ -19,30 +19,30 @@ YP?=		yes
 # Set `TCP_WRAPPERS' to `yes' to build certain networking daemons with
 # integrated support for libwrap.
 TCP_WRAPPERS?=	yes
-# Set `AFS` to `yes' to build with AFS support.
-AFS?=		yes
 # Set `DEBUGLIBS' to `yes' to build libraries with debugging symbols
 DEBUGLIBS?=	no
 # Set toolchain to be able to know differences.
-.if ${MACHINE_ARCH} == "m68k" || ${MACHINE_ARCH} == "m88k" || \
-    ${MACHINE_ARCH} == "vax"
+.if ${MACHINE_ARCH} == "vax"
 ELF_TOOLCHAIN?=	no
 .else
 ELF_TOOLCHAIN?=	yes
 .endif
 
-GCC2_ARCH=m68k m88k vax
-GCC4_ARCH=alpha amd64 arm avr32 hppa hppa64 i386 ia64 mips64 mips64el powerpc sparc sparc64 sh
-BINUTILS217_ARCH=avr32 hppa64 ia64
+GCC2_ARCH=vax
+GCC4_ARCH=alpha amd64 arm hppa hppa64 i386 ia64 mips64 mips64el powerpc sh sparc sparc64
+BINUTILS217_ARCH=hppa64 ia64
+
+# i386 PIE works; but there are RAMDISK fitting problems.
+# powerpc has problems on some "embedded" powerpc.
+# arm needs binutils-2.17, which still lacks W^X support
+PIE_ARCH=alpha amd64 hppa mips64 mips64el sh sparc64
 
 .for _arch in ${MACHINE_ARCH}
 .if !empty(GCC2_ARCH:M${_arch})
-USE_GCC3?=no
 COMPILER_VERSION?=gcc2
 .elif !empty(GCC4_ARCH:M${_arch})
 COMPILER_VERSION?=gcc4
 .else
-USE_GCC3?=yes
 COMPILER_VERSION?=gcc3
 .endif
 
@@ -51,7 +51,20 @@ BINUTILS_VERSION=binutils-2.17
 .else
 BINUTILS_VERSION=binutils
 .endif
+
+.if !empty(PIE_ARCH:M${_arch})
+NOPIE_FLAGS=-fno-pie
+NOPIE_LDFLAGS=-nopie
+PIE_DEFAULT=${DEFAULT_PIE_DEF}
+.else
+NOPIE_FLAGS=
+PIE_DEFAULT=
+.endif
 .endfor
+
+.if ${COMPILER_VERSION} == "gcc4"
+VISIBILITY_HIDDEN?=-fvisibility=hidden
+.endif
 
 # where the system object and source trees are kept; can be configurable
 # by the user in case they want them in ~/foosrc and ~/fooobj, for example
@@ -79,10 +92,10 @@ LIBGRP?=	${BINGRP}
 LIBOWN?=	${BINOWN}
 LIBMODE?=	${NONBINMODE}
 
-DOCDIR?=        /usr/share/doc
+DOCDIR?=	/usr/share/doc
 DOCGRP?=	bin
 DOCOWN?=	root
-DOCMODE?=       ${NONBINMODE}
+DOCMODE?=	${NONBINMODE}
 
 LKMDIR?=	/usr/lkm
 LKMGRP?=	${BINGRP}
@@ -98,6 +111,15 @@ LOCALEDIR?=	/usr/share/locale
 LOCALEGRP?=	wheel
 LOCALEOWN?=	root
 LOCALEMODE?=	${NONBINMODE}
+
+.if !defined(CDIAGFLAGS)
+CDIAGFLAGS=	-Wall -Wpointer-arith -Wuninitialized -Wstrict-prototypes
+CDIAGFLAGS+=	-Wmissing-prototypes -Wunused -Wsign-compare -Wbounded
+CDIAGFLAGS+=	-Wshadow
+.  if ${COMPILER_VERSION} == "gcc4"
+CDIAGFLAGS+=	-Wdeclaration-after-statement
+.  endif
+.endif
 
 # Shared files for system gnu configure, not used yet
 GNUSYSTEM_AUX_DIR?=${BSDSRCDIR}/share/gnu
@@ -118,7 +140,7 @@ STATIC?=	-static
 
 # don't try to generate PIC versions of libraries on machines
 # which don't support PIC.
-.if ${MACHINE_ARCH} == "m88k" || ${MACHINE_ARCH} == "vax"
+.if ${MACHINE_ARCH} == "vax"
 NOPIC=
 .endif
 
@@ -127,19 +149,21 @@ NOPIC=
 PICFLAG?=-fPIC
 .else
 PICFLAG?=-fpic
-. if ${MACHINE_ARCH} == "m68k"
-# Function CSE makes gas -k not recognize external function calls as lazily
-# resolvable symbols, thus sometimes making ld.so report undefined symbol
-# errors on symbols found in shared library members that would never be
-# called.  Ask niklas@openbsd.org for details.
-PICFLAG+=-fno-function-cse
-. endif
 .endif
 
 .if ${MACHINE_ARCH} == "sparc" || ${MACHINE_ARCH} == "sparc64"
 ASPICFLAG=-KPIC
 .elif ${ELF_TOOLCHAIN:L} == "no"
 ASPICFLAG=-k
+.endif
+
+.if ${MACHINE_ARCH} == "alpha" || ${MACHINE_ARCH} == "powerpc" || \
+    ${MACHINE_ARCH} == "sparc64"
+# big PIE
+DEFAULT_PIE_DEF=-DPIE_DEFAULT=2
+.else
+# small pie
+DEFAULT_PIE_DEF=-DPIE_DEFAULT=1
 .endif
 
 # don't try to generate PROFILED versions of libraries on machines

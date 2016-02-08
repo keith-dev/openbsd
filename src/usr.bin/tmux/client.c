@@ -1,4 +1,4 @@
-/* $OpenBSD: client.c,v 1.58 2012/07/10 11:53:01 nicm Exp $ */
+/* $OpenBSD: client.c,v 1.60 2012/09/03 08:48:57 nicm Exp $ */
 
 /*
  * Copyright (c) 2007 Nicholas Marriott <nicm@users.sourceforge.net>
@@ -189,7 +189,7 @@ client_main(int argc, char **argv, int flags)
 		 * flag.
 		 */
 		if ((cmdlist = cmd_list_parse(argc, argv, &cause)) == NULL) {
-			log_warnx("%s", cause);
+			fprintf(stderr, "%s\n", cause);
 			return (1);
 		}
 		cmdflags &= ~CMD_STARTSERVER;
@@ -281,7 +281,6 @@ client_main(int argc, char **argv, int flags)
 
 	/* Set the event and dispatch. */
 	client_update_event();
-	event_add (&client_stdin, NULL);
 	event_dispatch();
 
 	/* Print the exit message, if any, and exit. */
@@ -515,6 +514,12 @@ client_dispatch_wait(void *data)
 
 			event_del(&client_stdin);
 			client_attached = 1;
+			break;
+		case MSG_STDIN:
+			if (datalen != 0)
+				fatalx("bad MSG_STDIN size");
+
+			event_add(&client_stdin, NULL);
 			break;
 		case MSG_STDOUT:
 			if (datalen != sizeof stdoutdata)

@@ -2,7 +2,7 @@
  * Written by Michael Shalayeff. Public Domain
  */
 
-#include "math.h"
+#include <math.h>
 
 double
 remainder(double x, double p)
@@ -11,3 +11,5 @@ remainder(double x, double p)
 
 	return (x);
 }
+
+__weak_alias(remainderl, remainder);

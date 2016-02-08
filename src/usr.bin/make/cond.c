@@ -1,4 +1,4 @@
-/*	$OpenBSD: cond.c,v 1.44 2012/03/22 13:47:12 espie Exp $	*/
+/*	$OpenBSD: cond.c,v 1.48 2012/11/24 11:04:55 espie Exp $	*/
 /*	$NetBSD: cond.c,v 1.7 1996/11/06 17:59:02 christos Exp $	*/
 
 /*
@@ -70,12 +70,14 @@
  *	T -> exists(file)
  *	T -> empty(varspec)
  *	T -> target(name)
+ *	T -> commands(name)
  *	T -> symbol
  *	T -> $(varspec) op value
  *	T -> $(varspec) == "string"
  *	T -> $(varspec) != "string"
  *	T -> "string" == "string"
  *	T -> "string" != "string"
+ *	T -> number op number
  *	T -> ( E )
  *	T -> ! T
  *	op -> == | != | > | < | >= | <=
@@ -104,6 +106,7 @@ static bool CondDoDefined(struct Name *);
 static bool CondDoMake(struct Name *);
 static bool CondDoExists(struct Name *);
 static bool CondDoTarget(struct Name *);
+static bool CondDoTargetWithCommands(struct Name *);
 static bool CondCvtArg(const char *, double *);
 static Token CondToken(bool);
 static Token CondT(bool);
@@ -113,6 +116,7 @@ static Token CondHandleVarSpec(bool);
 static Token CondHandleDefault(bool);
 static Token CondHandleComparison(char *, bool, bool);
 static Token CondHandleString(bool);
+static Token CondHandleNumber(bool);
 static const char *find_cond(const char *);
 
 
@@ -194,40 +198,42 @@ CondGetArg(const char **linePtr, struct Name *arg, const char *func,
 	const char *cp;
 
 	cp = *linePtr;
+	/* Set things up to return faster in case of problem */
+	arg->s = cp;
+	arg->e = cp;
+	arg->tofree = false;
+
+	/* make and defined are not really keywords, so if CondGetArg doesn't
+	 * work...
+	 */
 	if (parens) {
-		while (*cp != '(' && *cp != '\0')
+		while (isspace(*cp))
 			cp++;
 		if (*cp == '(')
 			cp++;
+		else
+			return false;
 	}
 
-	if (*cp == '\0') {
-		/* No arguments whatsoever. Because 'make' and 'defined' aren't
-		 * really "reserved words", we don't print a message. I think
-		 * this is better than hitting the user with a warning message
-		 * every time s/he uses the word 'make' or 'defined' at the
-		 * beginning of a symbol...  */
-		arg->s = cp;
-		arg->e = cp;
-		arg->tofree = false;
+	if (*cp == '\0')
 		return false;
-	}
 
-	while (*cp == ' ' || *cp == '\t')
+	while (isspace(*cp))
 		cp++;
-
 
 	cp = VarName_Get(cp, arg, NULL, true, find_cond);
 
-	while (*cp == ' ' || *cp == '\t')
+	while (isspace(*cp))
 		cp++;
-	if (parens && *cp != ')') {
-		Parse_Error(PARSE_WARNING,
-		    "Missing closing parenthesis for %s()", func);
-	    return false;
-	} else if (parens)
-		/* Advance pointer past close parenthesis.  */
-		cp++;
+	if (parens) {
+		if (*cp == ')')
+			cp++;
+		else {
+			Parse_Error(PARSE_WARNING,
+			    "Missing closing parenthesis for %s()", func);
+			return false;
+	    	}
+	}
 
 	*linePtr = cp;
 	return true;
@@ -308,10 +314,31 @@ CondDoExists(struct Name *arg)
 static bool
 CondDoTarget(struct Name *arg)
 {
-    GNode *gn;
+	GNode *gn;
 
 	gn = Targ_FindNodei(arg->s, arg->e, TARG_NOCREATE);
 	if (gn != NULL && !OP_NOP(gn->type))
+		return true;
+	else
+		return false;
+}
+
+/*-
+ *-----------------------------------------------------------------------
+ * CondDoTargetWithCommands --
+ *	See if the given node exists and has commands.
+ *
+ * Results:
+ *	true if the node is complete and false if it does not.
+ *-----------------------------------------------------------------------
+ */
+static bool
+CondDoTargetWithCommands(struct Name *arg)
+{
+	GNode *gn;
+
+	gn = Targ_FindNodei(arg->s, arg->e, TARG_NOCREATE);
+	if (gn != NULL && !OP_NOP(gn->type) && (gn->type & OP_HAS_COMMANDS))
 		return true;
 	else
 		return false;
@@ -360,6 +387,20 @@ CondCvtArg(const char *str, double *value)
 	}
 }
 
+
+static Token
+CondHandleNumber(bool doEval)
+{
+	const char *end;
+	char *lhs;
+
+	end = condExpr;
+	while (!isspace(*end) && strchr("!=><", *end) == NULL)
+		end++;
+	lhs = Str_dupi(condExpr, end);
+	condExpr = end;
+	return CondHandleComparison(lhs, true, doEval);
+}
 
 static Token
 CondHandleVarSpec(bool doEval)
@@ -601,6 +642,7 @@ static struct operator {
 	{S("make"), CondDoMake},
 	{S("exists"), CondDoExists},
 	{S("target"), CondDoTarget},
+	{S("commands"), CondDoTargetWithCommands},
 	{NULL, 0, NULL}
 };
 
@@ -707,7 +749,7 @@ CondToken(bool doEval)
 		return t;
 	}
 
-	while (*condExpr == ' ' || *condExpr == '\t')
+	while (isspace(*condExpr))
 		condExpr++;
 	switch (*condExpr) {
 	case '(':
@@ -736,6 +778,9 @@ CondToken(bool doEval)
 		return CondHandleString(doEval);
 	case '$':
 		return CondHandleVarSpec(doEval);
+	case '0': case '1': case '2': case '3': case '4':
+	case '5': case '6': case '7': case '8': case '9':
+		return CondHandleNumber(doEval);
 	default:
 		return CondHandleDefault(doEval);
 	}
@@ -1121,8 +1166,9 @@ Cond_End(void)
 		    condTop == 0 ? "at least ": "", MAXIF-condTop,
 		    MAXIF-condTop == 1 ? "" : "s");
 		for (i = MAXIF-1; i >= condTop; i--) {
-			fprintf(stderr, "\t at line %lu of %s\n",
-			    condStack[i].origin.lineno, condStack[i].origin.fname);
+			fprintf(stderr, "\t(%s:%lu)\n", 
+			    condStack[i].origin.fname, 
+			    condStack[i].origin.lineno);
 		}
 	}
 	condTop = MAXIF;

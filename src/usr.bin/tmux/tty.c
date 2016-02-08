@@ -1,4 +1,4 @@
-/* $OpenBSD: tty.c,v 1.138 2012/07/10 11:53:01 nicm Exp $ */
+/* $OpenBSD: tty.c,v 1.147 2013/01/18 02:16:21 nicm Exp $ */
 
 /*
  * Copyright (c) 2007 Nicholas Marriott <nicm@users.sourceforge.net>
@@ -44,21 +44,14 @@ void	tty_colours_fg(struct tty *, const struct grid_cell *);
 void	tty_colours_bg(struct tty *, const struct grid_cell *);
 
 int	tty_large_region(struct tty *, const struct tty_ctx *);
-void	tty_cra_pane(struct tty *,
-    const struct tty_ctx *, u_int, u_int, u_int, u_int, u_int, u_int);
-void	tty_era_pane(struct tty *,
-    const struct tty_ctx *, u_int, u_int, u_int, u_int);
 void	tty_redraw_region(struct tty *, const struct tty_ctx *);
 void	tty_emulate_repeat(
 	    struct tty *, enum tty_code_code, enum tty_code_code, u_int);
 void	tty_repeat_space(struct tty *, u_int);
-void	tty_cell(struct tty *,
-	    const struct grid_cell *, const struct grid_utf8 *);
+void	tty_cell(struct tty *, const struct grid_cell *);
 
 #define tty_use_acs(tty) \
 	(tty_term_has((tty)->term, TTYC_ACSC) && !((tty)->flags & TTY_UTF8))
-#define tty_use_rect(tty) \
-	((tty)->xterm_version > 270)
 
 #define tty_pane_full_width(tty, ctx) \
 	((ctx)->xoff == 0 && screen_size_x((ctx)->wp->screen) >= (tty)->sx)
@@ -230,7 +223,7 @@ tty_start_tty(struct tty *tty)
 		tty_puts(tty, "\033[?1000l");
 
 	if (tty_term_has(tty->term, TTYC_XT))
-		tty_puts(tty, "\033[>c");
+		tty_puts(tty, "\033[c");
 
 	tty->cx = UINT_MAX;
 	tty->cy = UINT_MAX;
@@ -246,24 +239,11 @@ tty_start_tty(struct tty *tty)
 }
 
 void
-tty_set_version(struct tty *tty, u_int version)
+tty_set_class(struct tty *tty, u_int class)
 {
-	if (tty->xterm_version != 0)
+	if (tty->class != 0)
 		return;
-	tty->xterm_version = version;
-
-	if (tty->xterm_version > 270) {
-		tty_puts(tty, "\033[65;1\"p");
-
-		tty_putcode(tty, TTYC_RMACS);
-		memcpy(&tty->cell, &grid_default_cell, sizeof tty->cell);
-
-		tty->cx = UINT_MAX;
-		tty->cy = UINT_MAX;
-
-		tty->rupper = UINT_MAX;
-		tty->rlower = UINT_MAX;
-	}
+	tty->class = class;
 }
 
 void
@@ -308,9 +288,6 @@ tty_stop_tty(struct tty *tty)
 		tty_raw(tty, "\033[?1000l");
 
 	tty_raw(tty, tty_term_string(tty->term, TTYC_RMCUP));
-
-	if (tty->xterm_version > 270)
-		tty_raw(tty, "\033[61;1\"p");
 }
 
 void
@@ -438,15 +415,12 @@ tty_putc(struct tty *tty, u_char ch)
 }
 
 void
-tty_pututf8(struct tty *tty, const struct grid_utf8 *gu)
+tty_putn(struct tty *tty, const void *buf, size_t len, u_int width)
 {
-	size_t	size;
-
-	size = grid_utf8_size(gu);
-	bufferevent_write(tty->event, gu->data, size);
+	bufferevent_write(tty->event, buf, len);
 	if (tty->log_fd != -1)
-		write(tty->log_fd, gu->data, size);
-	tty->cx += gu->width;
+		write(tty->log_fd, buf, len);
+	tty->cx += width;
 }
 
 void
@@ -604,7 +578,7 @@ tty_draw_line(struct tty *tty, struct screen *s, u_int py, u_int ox, u_int oy)
 	const struct grid_cell	*gc;
 	struct grid_line	*gl;
 	struct grid_cell	 tmpgc;
-	const struct grid_utf8	*gu;
+	struct utf8_data	 ud;
 	u_int			 i, sx;
 
 	tty_update_mode(tty, tty->mode & ~MODE_CURSOR, s);
@@ -629,21 +603,17 @@ tty_draw_line(struct tty *tty, struct screen *s, u_int py, u_int ox, u_int oy)
 
 	for (i = 0; i < sx; i++) {
 		gc = grid_view_peek_cell(s->grid, i, py);
-
-		gu = NULL;
-		if (gc->flags & GRID_FLAG_UTF8)
-			gu = grid_view_peek_utf8(s->grid, i, py);
-
 		if (screen_check_selection(s, i, py)) {
 			memcpy(&tmpgc, &s->sel.cell, sizeof tmpgc);
-			tmpgc.data = gc->data;
+			grid_cell_get(gc, &ud);
+			grid_cell_set(&tmpgc, &ud);
 			tmpgc.flags = gc->flags &
 			    ~(GRID_FLAG_FG256|GRID_FLAG_BG256);
 			tmpgc.flags |= s->sel.cell.flags &
 			    (GRID_FLAG_FG256|GRID_FLAG_BG256);
-			tty_cell(tty, &tmpgc, gu);
+			tty_cell(tty, &tmpgc);
 		} else
-			tty_cell(tty, gc, gu);
+			tty_cell(tty, gc);
 	}
 
 	if (sx >= tty->sx) {
@@ -667,7 +637,6 @@ tty_write(
 {
 	struct window_pane	*wp = ctx->wp;
 	struct client		*c;
-	struct session		*s;
 	u_int		 	 i;
 
 	/* wp can be NULL if updating the screen but not the terminal. */
@@ -681,58 +650,22 @@ tty_write(
 
 	for (i = 0; i < ARRAY_LENGTH(&clients); i++) {
 		c = ARRAY_ITEM(&clients, i);
-		if (c == NULL || c->session == NULL)
+		if (c == NULL || c->session == NULL || c->tty.term == NULL)
 			continue;
 		if (c->flags & CLIENT_SUSPENDED)
 			continue;
-		s = c->session;
+		if (c->tty.flags & TTY_FREEZE)
+			continue;
+		if (c->session->curw->window != wp->window)
+			continue;
 
-		if (s->curw->window == wp->window) {
-			if (c->tty.term == NULL)
-				continue;
-			if (c->tty.flags & TTY_FREEZE)
-				continue;
+		ctx->xoff = wp->xoff;
+		ctx->yoff = wp->yoff;
+		if (status_at_line(c) == 0)
+			ctx->yoff++;
 
-			ctx->xoff = wp->xoff;
-			ctx->yoff = wp->yoff;
-			if (status_at_line(c) == 0)
-				ctx->yoff++;
-
-			cmdfn(&c->tty, ctx);
-		}
+		cmdfn(&c->tty, ctx);
 	}
-}
-
-void
-tty_cra_pane(struct tty *tty, const struct tty_ctx *ctx,
-    u_int t, u_int l, u_int b, u_int r, u_int tt, u_int tl)
-{
-	char	 tmp[64];
-
-	snprintf(tmp, sizeof tmp,
-		 "\033[%u;%u;%u;%u;1;%u;%u;1$v",
-		 ctx->yoff + t + 1,
-		 ctx->xoff + l + 1,
-		 ctx->yoff + b + 1,
-		 ctx->xoff + r + 1,
-		 ctx->yoff + tt + 1,
-		 ctx->xoff + tl + 1);
-	tty_puts(tty, tmp);
-}
-
-void
-tty_era_pane(struct tty *tty, const struct tty_ctx *ctx,
-    u_int t, u_int l, u_int b, u_int r)
-{
-	char	 tmp[64];
-
-	snprintf(tmp, sizeof tmp,
-		 "\033[%u;%u;%u;%u$z",
-		 ctx->yoff + t + 1,
-		 ctx->xoff + l + 1,
-		 ctx->yoff + b + 1,
-		 ctx->xoff + r + 1);
-	tty_puts(tty, tmp);
 }
 
 void
@@ -775,6 +708,23 @@ tty_cmd_deletecharacter(struct tty *tty, const struct tty_ctx *ctx)
 	if (tty_term_has(tty->term, TTYC_DCH) ||
 	    tty_term_has(tty->term, TTYC_DCH1))
 		tty_emulate_repeat(tty, TTYC_DCH, TTYC_DCH1, ctx->num);
+}
+
+void
+tty_cmd_clearcharacter(struct tty *tty, const struct tty_ctx *ctx)
+{
+	u_int	i;
+
+	tty_reset(tty);
+
+	tty_cursor_pane(tty, ctx, ctx->ocx, ctx->ocy);
+
+	if (tty_term_has(tty->term, TTYC_ECH))
+		tty_putcode1(tty, TTYC_ECH, ctx->num);
+	else {
+		for (i = 0; i < ctx->num; i++)
+			tty_putc(tty, ' ');
+	}
 }
 
 void
@@ -884,7 +834,6 @@ void
 tty_cmd_linefeed(struct tty *tty, const struct tty_ctx *ctx)
 {
 	struct window_pane	*wp = ctx->wp;
-	struct screen		*s = wp->screen;
 
 	if (ctx->ocy != ctx->orlower)
 		return;
@@ -893,12 +842,7 @@ tty_cmd_linefeed(struct tty *tty, const struct tty_ctx *ctx)
 	    !tty_term_has(tty->term, TTYC_CSR)) {
 		if (tty_large_region(tty, ctx))
 			wp->flags |= PANE_REDRAW;
-		else if (tty_use_rect(tty)) {
-			tty_cra_pane (tty, ctx, ctx->orupper + 1, 0,
-			    ctx->orlower, screen_size_x(s) - 1,
-			    ctx->orupper, 0);
-			tty_cmd_clearline(tty, ctx);
-		} else
+		else
 			tty_redraw_region(tty, ctx);
 		return;
 	}
@@ -1032,17 +976,11 @@ tty_cmd_cell(struct tty *tty, const struct tty_ctx *ctx)
 	struct screen		*s = wp->screen;
 	u_int			 cx;
 	u_int			 width;
-	const struct grid_cell	*gc = ctx->cell;
-	const struct grid_utf8	*gu = ctx->utf8;
-
-	if (gc->flags & GRID_FLAG_UTF8)
-		width = gu->width;
-	else
-		width = 1;
 
 	tty_region_pane(tty, ctx, ctx->orupper, ctx->orlower);
 
 	/* Is the cursor in the very last position? */
+	width = grid_cell_width(ctx->cell);
 	if (ctx->ocx > wp->sx - width) {
 		if (ctx->xoff != 0 || wp->sx != tty->sx) {
 			/*
@@ -1059,17 +997,14 @@ tty_cmd_cell(struct tty *tty, const struct tty_ctx *ctx)
 			 * move as far left as possible and redraw the last
 			 * cell to move into the last position.
 			 */
-			if (ctx->last_cell.flags & GRID_FLAG_UTF8)
-				cx = screen_size_x(s) - ctx->last_utf8.width;
-			else
-				cx = screen_size_x(s) - 1;
+			cx = screen_size_x(s) - grid_cell_width(&ctx->last_cell);
 			tty_cursor_pane(tty, ctx, cx, ctx->ocy);
-			tty_cell(tty, &ctx->last_cell, &ctx->last_utf8);
+			tty_cell(tty, &ctx->last_cell);
 		}
 	} else
 		tty_cursor_pane(tty, ctx, ctx->ocx, ctx->ocy);
 
-	tty_cell(tty, ctx->cell, ctx->utf8);
+	tty_cell(tty, ctx->cell);
 }
 
 void
@@ -1110,13 +1045,19 @@ tty_cmd_rawstring(struct tty *tty, const struct tty_ctx *ctx)
 
 	for (i = 0; i < ctx->num; i++)
 		tty_putc(tty, str[i]);
+
+	tty->cx = tty->cy = UINT_MAX;
+	tty->rupper = tty->rlower = UINT_MAX;
+
+	tty_reset(tty);
+	tty_cursor(tty, 0, 0);
 }
 
 void
-tty_cell(
-    struct tty *tty, const struct grid_cell *gc, const struct grid_utf8 *gu)
+tty_cell(struct tty *tty, const struct grid_cell *gc)
 {
-	u_int	i;
+	struct utf8_data	ud;
+	u_int			i;
 
 	/* Skip last character if terminal is stupid. */
 	if (tty->term->flags & TERM_EARLYWRAP &&
@@ -1130,23 +1071,24 @@ tty_cell(
 	/* Set the attributes. */
 	tty_attributes(tty, gc);
 
-	/* If not UTF-8, write directly. */
-	if (!(gc->flags & GRID_FLAG_UTF8)) {
-		if (gc->data < 0x20 || gc->data == 0x7f)
+	/* Get the cell and if ASCII write with putc to do ACS translation. */
+	grid_cell_get(gc, &ud);
+	if (ud.size == 1) {
+		if (*ud.data < 0x20 || *ud.data == 0x7f)
 			return;
-		tty_putc(tty, gc->data);
+		tty_putc(tty, *ud.data);
 		return;
 	}
 
-	/* If the terminal doesn't support UTF-8, write underscores. */
+	/* If not UTF-8, write _. */
 	if (!(tty->flags & TTY_UTF8)) {
-		for (i = 0; i < gu->width; i++)
+		for (i = 0; i < ud.width; i++)
 			tty_putc(tty, '_');
 		return;
 	}
 
-	/* Otherwise, write UTF-8. */
-	tty_pututf8(tty, gu);
+	/* Write the data. */
+	tty_putn(tty, ud.data, ud.size, ud.width);
 }
 
 void

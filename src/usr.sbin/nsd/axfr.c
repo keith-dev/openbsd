@@ -60,8 +60,7 @@ query_axfr(struct nsd *nsd, struct query *query)
 			return QUERY_PROCESSED;
 		}
 
-		query->axfr_current_domain
-			= (domain_type *) rbtree_first(nsd->db->domains->names_to_domains);
+		query->axfr_current_domain = query->domain;
 		query->axfr_current_rrset = NULL;
 		query->axfr_current_rr = 0;
 		if(query->tsig.status == TSIG_OK) {
@@ -93,7 +92,7 @@ query_axfr(struct nsd *nsd, struct query *query)
 	/* Add zone RRs until answer is full.  */
 	assert(query->axfr_current_domain);
 
-	while ((rbnode_t *) query->axfr_current_domain != RBTREE_NULL) {
+	do {
 		if (!query->axfr_current_rrset) {
 			query->axfr_current_rrset = domain_find_any_rrset(
 				query->axfr_current_domain,
@@ -123,6 +122,10 @@ query_axfr(struct nsd *nsd, struct query *query)
 		query->axfr_current_domain
 			= (domain_type *) rbtree_next((rbnode_t *) query->axfr_current_domain);
 	}
+	while ((rbnode_t *) query->axfr_current_domain != RBTREE_NULL
+			&& dname_is_subdomain(
+				domain_dname(query->axfr_current_domain),
+				domain_dname(query->axfr_zone->apex)));
 
 	/* Add terminating SOA RR.  */
 	assert(query->axfr_zone->soa_rrset->rr_count == 1);
@@ -157,13 +160,12 @@ return_answer:
 query_state_type
 answer_axfr_ixfr(struct nsd *nsd, struct query *q)
 {
-	acl_options_t *acl;
+	acl_options_t *acl = NULL;
 	/* Is it AXFR? */
 	switch (q->qtype) {
 	case TYPE_AXFR:
 		if (q->tcp) {
-			zone_options_t* zone_opt;
-			zone_opt = zone_options_find(nsd->options, q->qname);
+			zone_options_t* zone_opt = zone_options_find(nsd->options, q->qname);
 			if(!zone_opt ||
 			   acl_check_incoming(zone_opt->provide_xfr, q, &acl)==-1)
 			{
@@ -190,6 +192,7 @@ answer_axfr_ixfr(struct nsd *nsd, struct query *q)
 				acl->ip_address_spec, acl->key_name?acl->key_name:"NOKEY"));
 			return query_axfr(nsd, q);
 		}
+		/** Fallthrough: AXFR over UDP queries are discarded. */
 	case TYPE_IXFR:
 		RCODE_SET(q->packet, RCODE_IMPL);
 		return QUERY_PROCESSED;

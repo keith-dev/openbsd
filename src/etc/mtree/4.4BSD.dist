@@ -1,4 +1,4 @@
-#	$OpenBSD: 4.4BSD.dist,v 1.224 2012/07/07 16:00:55 robert Exp $
+#	$OpenBSD: 4.4BSD.dist,v 1.227 2012/09/20 12:51:43 yasuoka Exp $
 
 /set type=dir uname=root gname=wheel mode=0755
 # .
@@ -22,11 +22,6 @@ dev
 
 # ./etc
 etc
-
-# ./etc/afs
-afs
-# ./etc/afs
-..
 
 # ./etc/amd
 amd
@@ -191,6 +186,11 @@ mtree
 # ./etc/nginx
 nginx
 # ./etc/nginx
+..
+
+# ./etc/npppd
+npppd
+# ./etc/npppd
 ..
 
 # ./etc/ppp
@@ -1292,6 +1292,8 @@ amd64
 armish
 ..
 aviion
+..
+beagle
 ..
 hp300
 ..

@@ -1,4 +1,4 @@
-/* $OpenBSD: cmd-new-session.c,v 1.45 2012/07/11 07:10:15 nicm Exp $ */
+/* $OpenBSD: cmd-new-session.c,v 1.47 2012/12/09 23:17:35 nicm Exp $ */
 
 /*
  * Copyright (c) 2007 Nicholas Marriott <nicm@users.sourceforge.net>
@@ -36,8 +36,8 @@ enum cmd_retval	 cmd_new_session_exec(struct cmd *, struct cmd_ctx *);
 const struct cmd_entry cmd_new_session_entry = {
 	"new-session", "new",
 	"dn:s:t:x:y:", 0, 1,
-	"[-d] [-n window-name] [-s session-name] [-t target-session] "
-	"[-x width] [-y height] [command]",
+	"[-d] [-n window-name] [-s session-name] " CMD_TARGET_SESSION_USAGE
+	" [-x width] [-y height] [command]",
 	CMD_STARTSERVER|CMD_CANTNEST|CMD_SENDENVIRON,
 	NULL,
 	cmd_new_session_check,
@@ -58,14 +58,13 @@ cmd_new_session_exec(struct cmd *self, struct cmd_ctx *ctx)
 	struct args		*args = self->args;
 	struct session		*s, *old_s, *groupwith;
 	struct window		*w;
-	struct window_pane	*wp;
 	struct environ		 env;
 	struct termios		 tio, *tiop;
 	struct passwd		*pw;
 	const char		*newname, *target, *update, *cwd, *errstr;
 	char			*cmd, *cause;
 	int			 detached, idx;
-	u_int			 sx, sy, i;
+	u_int			 sx, sy;
 
 	newname = args_get(args, 's');
 	if (newname != NULL) {
@@ -257,17 +256,8 @@ cmd_new_session_exec(struct cmd *self, struct cmd_ctx *ctx)
 	 * If there are still configuration file errors to display, put the new
 	 * session's current window into more mode and display them now.
 	 */
-	if (cfg_finished && !ARRAY_EMPTY(&cfg_causes)) {
-		wp = s->curw->window->active;
-		window_pane_set_mode(wp, &window_copy_mode);
-		window_copy_init_for_output(wp);
-		for (i = 0; i < ARRAY_LENGTH(&cfg_causes); i++) {
-			cause = ARRAY_ITEM(&cfg_causes, i);
-			window_copy_add(wp, "%s", cause);
-			free(cause);
-		}
-		ARRAY_FREE(&cfg_causes);
-	}
+	if (cfg_finished)
+		show_cfg_causes(s);
 
 	return (detached ? CMD_RETURN_NORMAL : CMD_RETURN_ATTACH);
 }

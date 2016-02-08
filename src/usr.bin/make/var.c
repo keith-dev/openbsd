@@ -1,4 +1,4 @@
-/*	$OpenBSD: var.c,v 1.89 2012/03/22 13:47:12 espie Exp $	*/
+/*	$OpenBSD: var.c,v 1.93 2013/02/15 18:34:25 espie Exp $	*/
 /*	$NetBSD: var.c,v 1.18 1997/03/18 19:24:46 christos Exp $	*/
 
 /*
@@ -83,6 +83,8 @@
 #include "memory.h"
 #include "symtable.h"
 #include "gnode.h"
+#include "dump.h"
+#include "lowparse.h"
 
 /*
  * This is a harmless return value for Var_Parse that can be used by Var_Subst
@@ -156,6 +158,28 @@ static char *varnames[] = {
 	FMEMBER,
 	DMEMBER
 };
+
+static bool xtlist[] = {
+	false,	/* GLOBAL_INDEX */
+	true,	/* $@ */
+	false,	/* $* */
+	false,	/* $! */
+	true,	/* $% */
+	false,	/* $? */
+	false,	/* $> */
+	true,	/* $< */
+	true,	/* ${@F} */
+	true,	/* ${@D} */
+	false,	/* ${*F} */
+	false,	/* ${*D} */
+	false,	/* ${!F} */
+	false,	/* ${!D} */
+	true,	/* ${%F} */
+	true,	/* ${%D} */
+};
+
+/* so that we can access tlist[-1] */
+static bool *tlist = xtlist+1;
 
 /* hashed names of dynamic variables */
 #include    "varhashconsts.h"
@@ -438,20 +462,6 @@ SymTable_Init(SymTable *ctxt)
 	static SymTable sym_template;
 	memcpy(ctxt, &sym_template, sizeof(*ctxt));
 }
-
-/* free symtable.
- */
-#ifdef CLEANUP
-void
-SymTable_Destroy(SymTable *ctxt)
-{
-	int i;
-
-	for (i = 0; i < LOCAL_SIZE; i++)
-		if (ctxt->locals[i] != NULL)
-			delete_var(ctxt->locals[i]);
-}
-#endif
 
 /***
  ***	Global variable handling.
@@ -761,11 +771,12 @@ parse_base_variable_name(const char **pstr, struct Name *name, SymTable *ctxt)
 	case '{':
 		/* Find eventual modifiers in the variable */
 		tstr = VarName_Get(str+2, name, ctxt, false, find_pos(str[1]));
-		if (*tstr == ':')
+		if (*tstr == '\0')
+			 Parse_Error(PARSE_FATAL, "Unterminated variable spec in %s", *pstr);
+		else if (*tstr == ':')
 			has_modifier = true;
-		else if (*tstr != '\0') {
+		else
 			tstr++;
-		}
 		break;
 	default:
 		name->s = str+1;
@@ -787,6 +798,10 @@ Var_ParseSkip(const char **pstr, SymTable *ctxt)
 	bool has_modifier;
 	const char *tstr = str;
 
+	if (str[1] == 0) {
+		*pstr = str+1;
+		return false;
+	}
 	has_modifier = parse_base_variable_name(&tstr, &name, ctxt);
 	VarName_Free(&name);
 	result = true;
@@ -930,6 +945,12 @@ Var_Parse(const char *str,	/* The string to parse */
 
 	tstr = str;
 
+	if (str[1] == 0) {
+		*lengthPtr = 1;
+		*freePtr = false;
+		return err ? var_Error : varNoError;
+	}
+
 	has_modifier = parse_base_variable_name(&tstr, &name, ctxt);
 
 	idx = classify_var(name.s, &name.e, &k);
@@ -947,25 +968,22 @@ Var_Parse(const char *str,	/* The string to parse */
 				*freePtr = true;
 				val = Str_dupi(str, tstr);
 			} else {
-			/* somehow, this should have been expanded already. */
-				GNode *n;
+				Location origin;
 
-				/* XXX */
-				n = (GNode *)(((char *)ctxt) -
-				    offsetof(GNode, context));
+				Parse_FillLocation(&origin);
 				if (idx >= LOCAL_SIZE)
 					idx = EXTENDED2SIMPLE(idx);
 				switch(idx) {
 				case IMPSRC_INDEX:
 					Fatal(
 "Using $< in a non-suffix rule context is a GNUmake idiom (line %lu of %s)",
-					    n->origin.lineno, n->origin.fname);
+					    origin.lineno, origin.fname);
 					break;
 				default:
 					Error(
 "Using undefined dynamic variable $%s (line %lu of %s)",
-					    varnames[idx], n->origin.lineno, 
-					    n->origin.fname);
+					    varnames[idx], origin.lineno, 
+					    origin.fname);
 					break;
 				}
 			}
@@ -1046,6 +1064,51 @@ Var_Subst(const char *str,	/* the string in which to substitute */
 		}
 	}
 	return  Buf_Retrieve(&buf);
+}
+
+/* Very quick version of the variable scanner that just looks for target
+ * variables, and never ever errors out
+ */
+bool
+Var_Check_for_target(const char *str)
+{
+	bool seen_target = false;
+
+	for (;;) {
+		const char *tstr;
+		uint32_t k;
+		int idx;
+		bool has_modifier;
+		struct Name name;
+
+		/* skip over uninteresting stuff */
+		for (; *str != '\0' && *str != '$'; str++)
+			;
+		if (*str == '\0')
+			break;
+		if (str[1] == '$') {
+			/* A $ may be escaped with another $. */
+			str += 2;
+			continue;
+		}
+
+		tstr = str;
+
+		has_modifier = parse_base_variable_name(&tstr, &name, NULL);
+		idx = classify_var(name.s, &name.e, &k);
+		if (has_modifier) {
+			bool doFree = false;
+			char *val = VarModifiers_Apply(NULL, NULL, NULL, false, 
+			    &doFree, &tstr, str[1]);
+			if (doFree)
+				free(val);
+		}
+		if (tlist[idx])
+			seen_target = true;
+		VarName_Free(&name);
+		str = tstr;
+	}
+	return seen_target;
 }
 
 static BUFFER subst_buffer;
@@ -1232,19 +1295,6 @@ Var_Init(void)
 }
 
 
-#ifdef CLEANUP
-void
-Var_End(void)
-{
-	Var *v;
-	unsigned int i;
-
-	for (v = ohash_first(&global_variables, &i); v != NULL;
-	    v = ohash_next(&global_variables, &i))
-		delete_var(v);
-}
-#endif
-
 static const char *interpret(int);
 
 static const char *
@@ -1263,17 +1313,65 @@ print_var(Var *v)
 	    (v->flags & VAR_DUMMY) == 0 ? var_get_value(v) : "(none)");
 }
 
+
 void
 Var_Dump(void)
 {
-	Var *v;
+	Var **t;
+
 	unsigned int i;
+	const char *banner;
+	bool first = true;
 
-	printf("#*** Global Variables:\n");
+	t = sort_ohash_by_name(&global_variables);
+/* somewhat dirty, but does the trick */
 
-	for (v = ohash_first(&global_variables, &i); v != NULL;
-	    v = ohash_next(&global_variables, &i))
-		print_var(v);
+#define LOOP(mask, value, do_stuff) \
+	for (i = 0; t[i] != NULL; i++) \
+		if ((t[i]->flags & (mask)) == (value)) { \
+			if (banner) { \
+				if (first) \
+					first = false; \
+				else \
+					putchar('\n'); \
+				fputs(banner, stdout); \
+				banner = NULL; \
+			} \
+		    do_stuff; \
+		}
+
+	banner = "#variables from command line:\n";
+	LOOP(VAR_FROM_CMD | VAR_DUMMY, VAR_FROM_CMD, print_var(t[i]));
+
+	banner = "#global variables:\n";
+	LOOP(VAR_FROM_ENV| VAR_FROM_CMD | VAR_DUMMY, 0, print_var(t[i]));
+
+	banner = "#variables from env:\n";
+	LOOP(VAR_FROM_ENV|VAR_DUMMY, VAR_FROM_ENV, print_var(t[i]));
+
+	banner = "#variable name seen, but not defined:";
+	LOOP(VAR_DUMMY|POISONS, VAR_DUMMY, printf(" %s", t[i]->name));
+
+#undef LOOP
+
+	printf("\n\n");
+
+	for (i = 0; t[i] != NULL; i++)
+		switch(t[i]->flags & POISONS) {
+		case POISON_NORMAL:
+			printf(".poison %s\n", t[i]->name);
+			break;
+		case POISON_EMPTY:
+			printf(".poison empty(%s)\n", t[i]->name);
+			break;
+		case POISON_NOT_DEFINED:
+			printf(".poison !defined(%s)\n", t[i]->name);
+			break;
+		default:
+			break;
+		}
+	free(t);
+	printf("\n");
 }
 
 static const char *quotable = " \t\n\\'\"";

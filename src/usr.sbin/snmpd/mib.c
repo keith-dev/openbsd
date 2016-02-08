@@ -1,8 +1,8 @@
-/*	$OpenBSD: mib.c,v 1.56 2012/07/08 11:24:43 blambert Exp $	*/
+/*	$OpenBSD: mib.c,v 1.63 2012/12/18 21:28:45 millert Exp $	*/
 
 /*
  * Copyright (c) 2012 Joel Knight <joel@openbsd.org>
- * Copyright (c) 2007, 2008 Reyk Floeter <reyk@vantronix.net>
+ * Copyright (c) 2007, 2008, 2012 Reyk Floeter <reyk@openbsd.org>
  *
  * Permission to use, copy, modify, and distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -19,6 +19,7 @@
 
 #include <sys/queue.h>
 #include <sys/param.h>
+#include <sys/proc.h>
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <sys/socket.h>
@@ -330,6 +331,79 @@ mib_setsnmp(struct oid *oid, struct ber_oid *o, struct ber_element **elm)
 }
 
 /*
+ * Defined in SNMP-USER-BASED-SM-MIB.txt (RFC 3414)
+ */
+int	 mib_engine(struct oid *, struct ber_oid *, struct ber_element **);
+int	 mib_usmstats(struct oid *, struct ber_oid *, struct ber_element **);
+
+static struct oid usm_mib[] = {
+	{ MIB(snmpEngine),			OID_MIB },
+	{ MIB(snmpEngineID),			OID_RD, mib_engine },
+	{ MIB(snmpEngineBoots),			OID_RD, mib_engine },
+	{ MIB(snmpEngineTime),			OID_RD, mib_engine },
+	{ MIB(snmpEngineMaxMsgSize),		OID_RD, mib_engine },
+	{ MIB(usmStats),			OID_MIB },
+	{ MIB(usmStatsUnsupportedSecLevels),	OID_RD, mib_usmstats },
+	{ MIB(usmStatsNotInTimeWindow),		OID_RD, mib_usmstats },
+	{ MIB(usmStatsUnknownUserNames),	OID_RD, mib_usmstats },
+	{ MIB(usmStatsUnknownEngineId),		OID_RD, mib_usmstats },
+	{ MIB(usmStatsWrongDigests),		OID_RD, mib_usmstats },
+	{ MIB(usmStatsDecryptionErrors),	OID_RD, mib_usmstats },
+	{ MIBEND }
+};
+
+int
+mib_engine(struct oid *oid, struct ber_oid *o, struct ber_element **elm)
+{
+	switch (oid->o_oid[OIDIDX_snmpEngine]) {
+	case 1:
+		*elm = ber_add_nstring(*elm, env->sc_engineid,
+		    env->sc_engineid_len);
+		break;
+	case 2:
+		*elm = ber_add_integer(*elm, env->sc_engine_boots);
+		break;
+	case 3:
+		*elm = ber_add_integer(*elm, snmpd_engine_time());
+		break;
+	case 4:
+		*elm = ber_add_integer(*elm, READ_BUF_SIZE);
+		break;
+	default:
+		return -1;
+	}
+	return 0;
+}
+
+int
+mib_usmstats(struct oid *oid, struct ber_oid *o, struct ber_element **elm)
+{
+	struct snmp_stats	*stats = &env->sc_stats;
+	long long		 i;
+	struct statsmap {
+		u_int8_t	 m_id;
+		u_int32_t	*m_ptr;
+	}			 mapping[] = {
+		{ OIDVAL_usmErrSecLevel,	&stats->snmp_usmbadseclevel },
+		{ OIDVAL_usmErrTimeWindow,	&stats->snmp_usmtimewindow },
+		{ OIDVAL_usmErrUserName,	&stats->snmp_usmnosuchuser },
+		{ OIDVAL_usmErrEngineId,	&stats->snmp_usmnosuchengine },
+		{ OIDVAL_usmErrDigest,		&stats->snmp_usmwrongdigest },
+		{ OIDVAL_usmErrDecrypt,		&stats->snmp_usmdecrypterr },
+	};
+
+	for (i = 0; (u_int)i < (sizeof(mapping) / sizeof(mapping[0])); i++) {
+		if (oid->o_oid[OIDIDX_usmStats] == mapping[i].m_id) {
+			*elm = ber_add_integer(*elm, *mapping[i].m_ptr);
+			ber_set_header(*elm, BER_CLASS_APPLICATION,
+			    SNMP_T_COUNTER32);
+			return (0);
+		}
+	}
+	return (-1);
+}
+
+/*
  * Defined in HOST-RESOURCES-MIB.txt (RFC 2790)
  */
 
@@ -381,15 +455,15 @@ static struct oid hr_mib[] = {
 int
 mib_hrsystemuptime(struct oid *oid, struct ber_oid *o, struct ber_element **elm)
 {
-	struct timeval  boottime;
-	int		mib[] = { CTL_KERN, KERN_BOOTTIME };
-	time_t 		now;
-	size_t		len;
+	struct timeval   boottime;
+	int		 mib[] = { CTL_KERN, KERN_BOOTTIME };
+	time_t		 now;
+	size_t		 len;
 
 	(void)time(&now);
 	len = sizeof(boottime);
 
-	if (sysctl(mib, 2, &boottime, &len, NULL, 0) == -1) 
+	if (sysctl(mib, 2, &boottime, &len, NULL, 0) == -1)
 		return (-1);
 
 	*elm = ber_add_integer(*elm, (now - boottime.tv_sec) * 100);
@@ -723,7 +797,7 @@ mib_hrswrun(struct oid *oid, struct ber_oid *o, struct ber_element **elm)
 
 	/* Get and verify the current row index */
 	if (kinfo_proc(o->bo_id[OIDIDX_hrSWRunEntry], &kinfo) == -1)
-		return (-1);
+		return (1);
 
 	if (kinfo == NULL)
 		return (1);
@@ -1096,7 +1170,15 @@ mib_iftable(struct oid *oid, struct ber_oid *o, struct ber_element **elm)
 		ber_set_header(ber, BER_CLASS_APPLICATION, SNMP_T_COUNTER32);
 		break;
 	case 13:
-		ber = ber_add_integer(ber, (u_int32_t)kif->if_iqdrops);
+		mib[3] = IPCTL_IFQUEUE;
+		mib[4] = IFQCTL_DROPS;
+		len = sizeof(ifq);
+		if (sysctl(mib, sizeofa(mib), &ifq, &len, 0, 0) == -1) {
+			log_info("mib_iftable: %s: invalid ifq: %s",
+			    kif->if_name, strerror(errno));
+			return (-1);
+		}
+		ber = ber_add_integer(ber, ifq);
 		ber_set_header(ber, BER_CLASS_APPLICATION, SNMP_T_COUNTER32);
 		break;
 	case 14:
@@ -1120,15 +1202,7 @@ mib_iftable(struct oid *oid, struct ber_oid *o, struct ber_element **elm)
 		ber_set_header(ber, BER_CLASS_APPLICATION, SNMP_T_COUNTER32);
 		break;
 	case 19:
-		mib[3] = IPCTL_IFQUEUE;
-		mib[4] = IFQCTL_DROPS;
-		len = sizeof(ifq);
-		if (sysctl(mib, sizeofa(mib), &ifq, &len, 0, 0) == -1) {
-			log_info("mib_iftable: %s: invalid ifq: %s",
-			    kif->if_name, strerror(errno));
-			return (-1);
-		}
-		ber = ber_add_integer(ber, ifq);
+		ber = ber_add_integer(ber, 0);
 		ber_set_header(ber, BER_CLASS_APPLICATION, SNMP_T_COUNTER32);
 		break;
 	case 20:
@@ -1409,7 +1483,7 @@ static struct oid openbsd_mib[] = {
 	{ MIB(pfLimitStates),		OID_RD, mib_pflimits },
 	{ MIB(pfLimitSourceNodes),	OID_RD, mib_pflimits },
 	{ MIB(pfLimitFragments),	OID_RD, mib_pflimits },
-	{ MIB(pfLimitMaxTables), 	OID_RD, mib_pflimits },
+	{ MIB(pfLimitMaxTables),	OID_RD, mib_pflimits },
 	{ MIB(pfLimitMaxTableEntries),	OID_RD, mib_pflimits },
 	{ MIB(pfTimeoutTcpFirst),	OID_RD, mib_pftimeouts },
 	{ MIB(pfTimeoutTcpOpening),	OID_RD, mib_pftimeouts },
@@ -1641,7 +1715,7 @@ mib_pfcounters(struct oid *oid, struct ber_oid *o, struct ber_element **elm)
 			ber_set_header(*elm, BER_CLASS_APPLICATION,
 			    SNMP_T_COUNTER64);
 			return (0);
-		}	
+		}
 	}
 	return (-1);
 }
@@ -1668,7 +1742,7 @@ mib_pfscounters(struct oid *oid, struct ber_oid *o, struct ber_element **elm)
 		*elm = ber_add_integer(*elm, s.states);
 		ber_set_header(*elm, BER_CLASS_APPLICATION, SNMP_T_UNSIGNED32);
 		break;
-	default:	
+	default:
 		for (i = 0;
 		    (u_int)i < (sizeof(mapping) / sizeof(mapping[0])); i++) {
 			if (oid->o_oid[OIDIDX_pfstatus] == mapping[i].m_id) {
@@ -1676,7 +1750,7 @@ mib_pfscounters(struct oid *oid, struct ber_oid *o, struct ber_element **elm)
 				ber_set_header(*elm, BER_CLASS_APPLICATION,
 				    SNMP_T_COUNTER64);
 				return (0);
-			}	
+			}
 		}
 		return (-1);
 	}
@@ -1714,7 +1788,7 @@ mib_pflogif(struct oid *oid, struct ber_oid *o, struct ber_element **elm)
 	case 1:
 		*elm = ber_add_string(*elm, s.ifname);
 		break;
-	default:	
+	default:
 		for (i = 0;
 		    (u_int)i < (sizeof(mapping) / sizeof(mapping[0])); i++) {
 			if (oid->o_oid[OIDIDX_pfstatus] == mapping[i].m_id) {
@@ -1722,7 +1796,7 @@ mib_pflogif(struct oid *oid, struct ber_oid *o, struct ber_element **elm)
 				ber_set_header(*elm, BER_CLASS_APPLICATION,
 				    SNMP_T_COUNTER64);
 				return (0);
-			}	
+			}
 		}
 		return (-1);
 	}
@@ -1752,7 +1826,7 @@ mib_pfsrctrack(struct oid *oid, struct ber_oid *o, struct ber_element **elm)
 		*elm = ber_add_integer(*elm, s.src_nodes);
 		ber_set_header(*elm, BER_CLASS_APPLICATION, SNMP_T_UNSIGNED32);
 		break;
-	default:	
+	default:
 		for (i = 0;
 		    (u_int)i < (sizeof(mapping) / sizeof(mapping[0])); i++) {
 			if (oid->o_oid[OIDIDX_pfstatus] == mapping[i].m_id) {
@@ -1760,7 +1834,7 @@ mib_pfsrctrack(struct oid *oid, struct ber_oid *o, struct ber_element **elm)
 				ber_set_header(*elm, BER_CLASS_APPLICATION,
 				    SNMP_T_COUNTER64);
 				return (0);
-			}	
+			}
 		}
 		return (-1);
 	}
@@ -1793,7 +1867,7 @@ mib_pflimits(struct oid *oid, struct ber_oid *o, struct ber_element **elm)
 		if (oid->o_oid[OIDIDX_pfstatus] == mapping[i].m_id) {
 			pl.index = mapping[i].m_limit;
 			break;
-		}	
+		}
 	}
 
 	if (pl.index == PF_LIMIT_MAX)
@@ -1849,7 +1923,7 @@ mib_pftimeouts(struct oid *oid, struct ber_oid *o, struct ber_element **elm)
 		if (oid->o_oid[OIDIDX_pfstatus] == mapping[i].m_id) {
 			pt.timeout = mapping[i].m_tm;
 			break;
-		}	
+		}
 	}
 
 	if (pt.timeout == PFTM_MAX)
@@ -1980,7 +2054,7 @@ mib_pfiftable(struct oid *oid, struct ber_oid *o, struct ber_element **elm)
 	default:
 		return (1);
 	}
-	
+
 	return (0);
 }
 
@@ -2199,7 +2273,7 @@ mib_pftableaddrstable(struct oid *oid, struct ber_oid *o, struct ber_oid *no)
 	tblidx = no->bo_id[OIDIDX_pfTblAddr + 1];
 	mps_decodeinaddr(no, &as.pfras_a.pfra_ip4addr, OIDIDX_pfTblAddr + 2);
 	as.pfras_a.pfra_net = no->bo_id[OIDIDX_pfTblAddr + 6];
-	
+
 	if (tblidx == 0) {
 		if (pfta_get_first(&as))
 			return (NULL);
@@ -2346,10 +2420,10 @@ int
 mib_pfsyncstats(struct oid *oid, struct ber_oid *o, struct ber_element **elm)
 {
 	int			 i;
-	int 			 mib[] = { CTL_NET, AF_INET, IPPROTO_PFSYNC, 
+	int			 mib[] = { CTL_NET, AF_INET, IPPROTO_PFSYNC,
 				    PFSYNCCTL_STATS };
 	size_t			 len = sizeof(struct pfsyncstats);
-	struct pfsyncstats 	 s;
+	struct pfsyncstats	 s;
 	struct statsmap {
 		u_int8_t	 m_id;
 		u_int64_t	*m_ptr;
@@ -2371,7 +2445,7 @@ mib_pfsyncstats(struct oid *oid, struct ber_oid *o, struct ber_element **elm)
 		{ 15, &s.pfsyncs_onomem },
 		{ 16, &s.pfsyncs_oerrors }
 	};
-	
+
 	if (sysctl(mib, 4, &s, &len, NULL, 0) == -1) {
 		log_warn("sysctl");
 		return (-1);
@@ -2381,9 +2455,10 @@ mib_pfsyncstats(struct oid *oid, struct ber_oid *o, struct ber_element **elm)
 	    (u_int)i < (sizeof(mapping) / sizeof(mapping[0])); i++) {
 		if (oid->o_oid[OIDIDX_pfstatus] == mapping[i].m_id) {
 			*elm = ber_add_integer(*elm, *mapping[i].m_ptr);
-			ber_set_header(*elm, BER_CLASS_APPLICATION, SNMP_T_COUNTER64);
+			ber_set_header(*elm, BER_CLASS_APPLICATION,
+			    SNMP_T_COUNTER64);
 			return (0);
-		}	
+		}
 	}
 
 	return (-1);
@@ -2506,7 +2581,8 @@ static const char * const sensor_drive_s[SENSOR_DRIVE_STATES] = {
 
 static const char * const sensor_unit_s[SENSOR_MAX_TYPES + 1] = {
 	"degC",	"RPM", "V DC", "V AC", "Ohm", "W", "A", "Wh", "Ah",
-	"", "", "%", "lx", "", "sec", "%RH", "Hz", "degree", ""
+	"", "", "%", "lx", "", "sec", "%RH", "Hz", "degree", 
+	"mm", "Pa", "m/s^2", ""
 };
 
 const char *
@@ -2537,6 +2613,7 @@ mib_sensorvalue(struct sensor *s)
 	case SENSOR_AMPHOUR:
 	case SENSOR_LUX:
 	case SENSOR_FREQ:
+	case SENSOR_ACCEL:
 		ret = asprintf(&v, "%.2f", s->value / 1000000.0);
 		break;
 	case SENSOR_INDICATOR:
@@ -2545,6 +2622,10 @@ mib_sensorvalue(struct sensor *s)
 	case SENSOR_PERCENT:
 	case SENSOR_HUMIDITY:
 		ret = asprintf(&v, "%.2f%%", s->value / 1000.0);
+		break;
+	case SENSOR_DISTANCE:
+	case SENSOR_PRESSURE:
+		ret = asprintf(&v, "%.2f", s->value / 1000.0);
 		break;
 	case SENSOR_TIMEDELTA:
 		ret = asprintf(&v, "%.6f", s->value / 1000000000.0);
@@ -2588,10 +2669,10 @@ mib_carpsysctl(struct oid *oid, struct ber_oid *o, struct ber_element **elm)
 int
 mib_carpstats(struct oid *oid, struct ber_oid *o, struct ber_element **elm)
 {
-	int	 		 mib[] = { CTL_NET, PF_INET, IPPROTO_CARP,
+	int			 mib[] = { CTL_NET, PF_INET, IPPROTO_CARP,
 				    CARPCTL_STATS };
 	size_t			 len;
-	struct	 		 carpstats stats;
+	struct			 carpstats stats;
 	int			 i;
 	struct statsmap {
 		u_int8_t	 m_id;
@@ -2626,7 +2707,7 @@ mib_carpstats(struct oid *oid, struct ber_oid *o, struct ber_element **elm)
 			ber_set_header(*elm, BER_CLASS_APPLICATION,
 			    SNMP_T_COUNTER64);
 			return (0);
-		}	
+		}
 	}
 
 	return (-1);
@@ -2712,7 +2793,7 @@ int
 mib_carpiftable(struct oid *oid, struct ber_oid *o, struct ber_element **elm)
 {
 	u_int32_t		 idx;
-	struct carpif 		*cif;
+	struct carpif		*cif;
 
 	/* Get and verify the current row index */
 	idx = o->bo_id[OIDIDX_carpIfEntry];
@@ -3059,15 +3140,22 @@ mib_ipaddrtable(struct oid *oid, struct ber_oid *o, struct ber_oid *no)
 	}
 
 	mps_decodeinaddr(no, &addr.sin_addr, OIDIDX_ipAddr + 1);
-	if (addr.sin_addr.s_addr == INADDR_ANY)
+	if (o->bo_n <= (OIDIDX_ipAddr + 1))
 		ka = kr_getaddr(NULL);
 	else
 		ka = kr_getnextaddr((struct sockaddr *)&addr);
-	if (ka == NULL || ka->addr.sa.sa_family != AF_INET)
-		addr.sin_addr.s_addr = 0;
-	else
+	if (ka == NULL || ka->addr.sa.sa_family != AF_INET) {
+		/*
+		 * Encode invalid "last address" marker which will tell
+		 * mib_ipaddr() to fail and the SNMP engine to find the
+		 * next OID.
+		 */
+		mps_encodeinaddr(no, NULL, OIDIDX_ipAddr + 1);
+	} else {
+		/* Encode real IPv4 address */
 		addr.sin_addr.s_addr = ka->addr.sin.sin_addr.s_addr;
-	mps_encodeinaddr(no, &addr.sin_addr, OIDIDX_ipAddr + 1);
+		mps_encodeinaddr(no, &addr.sin_addr, OIDIDX_ipAddr + 1);
+	}
 	smi_oidlen(o);
 
 	return (no);
@@ -3085,7 +3173,11 @@ mib_ipaddr(struct oid *oid, struct ber_oid *o, struct ber_element **elm)
 	addr.sin_family = AF_INET;
 	addr.sin_len = sizeof(addr);
 
-	mps_decodeinaddr(o, &addr.sin_addr, OIDIDX_ipAddr + 1);
+	if (mps_decodeinaddr(o, &addr.sin_addr, OIDIDX_ipAddr + 1) == -1) {
+		/* Strip invalid address and fail */
+		o->bo_n = OIDIDX_ipAddr + 1;
+		return (1);
+	}
 	ka = kr_getaddr((struct sockaddr *)&addr);
 	if (ka == NULL || ka->addr.sa.sa_family != AF_INET)
 		return (1);
@@ -3163,7 +3255,7 @@ mib_ipfnroutes(struct oid *oid, struct ber_oid *o, struct ber_element **elm)
 {
 	*elm = ber_add_integer(*elm, kr_routenumber());
 	ber_set_header(*elm, BER_CLASS_APPLICATION, SNMP_T_GAUGE32);
-	
+
 	return (0);
 }
 
@@ -3224,7 +3316,7 @@ mib_ipfroutetable(struct oid *oid, struct ber_oid *o, struct ber_oid *no)
 		prio = kr->priority;
 	}
 
-	switch(addr.sin_family) {
+	switch (addr.sin_family) {
 	case AF_INET:
 		atype = 1;
 		break;
@@ -3532,6 +3624,9 @@ mib_init(void)
 
 	/* SNMPv2-MIB */
 	smi_mibtree(base_mib);
+
+	/* SNMP-USER-BASED-SM-MIB */
+	smi_mibtree(usm_mib);
 
 	/* HOST-RESOURCES-MIB */
 	smi_mibtree(hr_mib);

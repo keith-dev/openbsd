@@ -1,4 +1,4 @@
-/* $OpenBSD: drm_drv.c,v 1.96 2011/07/03 18:34:14 oga Exp $ */
+/* $OpenBSD: drm_drv.c,v 1.99 2012/12/06 15:05:21 mpi Exp $ */
 /*-
  * Copyright 2007-2009 Owain G. Ainsworth <oga@openbsd.org>
  * Copyright © 2008 Intel Corporation
@@ -51,10 +51,8 @@
 #include "drm.h"
 #include "drm_sarea.h"
 
-#ifdef DRM_DEBUG_DEFAULT_ON
+#ifdef DRMDEBUG
 int drm_debug_flag = 1;
-#else
-int drm_debug_flag = 0;
 #endif
 
 int	 drm_firstopen(struct drm_device *);
@@ -187,8 +185,10 @@ drm_attach(struct device *parent, struct device *self, void *aux)
 	}
 
 	if (dev->driver->flags & DRIVER_AGP) {
+#if __OS_HAS_AGP
 		if (da->is_agp)
 			dev->agp = drm_agp_init();
+#endif
 		if (dev->driver->flags & DRIVER_AGP_REQUIRE &&
 		    dev->agp == NULL) {
 			printf(": couldn't find agp\n");
@@ -348,7 +348,9 @@ drm_lastclose(struct drm_device *dev)
 	if (dev->irq_enabled)
 		drm_irq_uninstall(dev);
 
+#if __OS_HAS_AGP
 	drm_agp_takedown(dev);
+#endif
 	drm_dma_takedown(dev);
 
 	DRM_LOCK();
@@ -637,8 +639,10 @@ drmioctl(dev_t kdev, u_long cmd, caddr_t data, int flags,
 			return (drm_freebufs(dev, data, file_priv));
 		case DRM_IOCTL_DMA:
 			return (drm_dma(dev, data, file_priv));
+#if __OS_HAS_AGP
 		case DRM_IOCTL_AGP_INFO:
 			return (drm_agp_info_ioctl(dev, data, file_priv));
+#endif
 		case DRM_IOCTL_GEM_FLINK:
 			return (drm_gem_flink_ioctl(dev, data, file_priv));
 		case DRM_IOCTL_GEM_OPEN:
@@ -666,6 +670,7 @@ drmioctl(dev_t kdev, u_long cmd, caddr_t data, int flags,
 			return (drm_addbufs(dev, (struct drm_buf_desc *)data));
 		case DRM_IOCTL_CONTROL:
 			return (drm_control(dev, data, file_priv));
+#if __OS_HAS_AGP
 		case DRM_IOCTL_AGP_ACQUIRE:
 			return (drm_agp_acquire_ioctl(dev, data, file_priv));
 		case DRM_IOCTL_AGP_RELEASE:
@@ -680,6 +685,7 @@ drmioctl(dev_t kdev, u_long cmd, caddr_t data, int flags,
 			return (drm_agp_bind_ioctl(dev, data, file_priv));
 		case DRM_IOCTL_AGP_UNBIND:
 			return (drm_agp_unbind_ioctl(dev, data, file_priv));
+#endif
 		case DRM_IOCTL_SG_ALLOC:
 			return (drm_sg_alloc_ioctl(dev, data, file_priv));
 		case DRM_IOCTL_SG_FREE:
@@ -900,9 +906,11 @@ drmmmap(dev_t kdev, off_t offset, int prot)
 	DRM_UNLOCK();
 
 	switch (type) {
+	case _DRM_AGP:
+		return agp_mmap(dev->agp->agpdev,
+		    offset + map->offset - dev->agp->base, prot);
 	case _DRM_FRAME_BUFFER:
 	case _DRM_REGISTERS:
-	case _DRM_AGP:
 		return (offset + map->offset);
 		break;
 	/* XXX unify all the bus_dmamem_mmap bits */

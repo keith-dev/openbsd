@@ -1,4 +1,4 @@
-/*	$OpenBSD: bpf.c,v 1.21 2012/01/15 13:05:23 phessler Exp $	*/
+/*	$OpenBSD: bpf.c,v 1.26 2013/02/14 20:39:46 krw Exp $	*/
 
 /* BPF socket interface code, originally contributed by Archie Cobbs. */
 
@@ -48,7 +48,6 @@
 #include <netinet/in_systm.h>
 #include <netinet/ip.h>
 #include <netinet/udp.h>
-#include <netinet/if_ether.h>
 
 #define BPF_FORMAT "/dev/bpf%d"
 
@@ -71,15 +70,16 @@ if_register_bpf(void)
 			if (errno == EBUSY)
 				continue;
 			else
-				error("Can't find free bpf: %m");
+				error("Can't find free bpf: %s",
+				    strerror(errno));
 		} else
 			break;
 	}
 
 	/* Set the BPF device to point at this interface. */
 	if (ioctl(sock, BIOCSETIF, ifi->ifp) < 0)
-		error("Can't attach interface %s to bpf device %s: %m",
-		    ifi->name, filename);
+		error("Can't attach interface %s to bpf device %s: %s",
+		    ifi->name, filename, strerror(errno));
 
 	return (sock);
 }
@@ -99,13 +99,13 @@ if_register_send(void)
 	 * Use raw socket for unicast send.
 	 */
 	if ((sock = socket(AF_INET, SOCK_RAW, IPPROTO_UDP)) == -1)
-		error("socket(SOCK_RAW): %m");
+		error("socket(SOCK_RAW): %s", strerror(errno));
 	if (setsockopt(sock, IPPROTO_IP, IP_HDRINCL, &on,
 	    sizeof(on)) == -1)
-		error("setsockopt(IP_HDRINCL): %m");
+		error("setsockopt(IP_HDRINCL): %s", strerror(errno));
 	if (setsockopt(sock, IPPROTO_IP, SO_RTABLE, &ifi->rdomain,
 	    sizeof(ifi->rdomain)) == -1)
-		error("setsockopt(SO_RTABLE): %m");
+		error("setsockopt(SO_RTABLE): %s", strerror(errno));
 
 	ifi->ufdesc = sock;
 }
@@ -194,10 +194,11 @@ if_register_receive(void)
 
 	/* Open a BPF device and hang it on this interface... */
 	ifi->rfdesc = if_register_bpf();
+	fcntl(ifi->rfdesc, F_SETFD, FD_CLOEXEC);
 
 	/* Make sure the BPF version is in range... */
 	if (ioctl(ifi->rfdesc, BIOCVERSION, &v) < 0)
-		error("Can't get BPF version: %m");
+		error("Can't get BPF version: %s", strerror(errno));
 
 	if (v.bv_major != BPF_MAJOR_VERSION ||
 	    v.bv_minor < BPF_MINOR_VERSION)
@@ -209,14 +210,16 @@ if_register_receive(void)
 	 * with packets.
 	 */
 	if (ioctl(ifi->rfdesc, BIOCIMMEDIATE, &flag) < 0)
-		error("Can't set immediate mode on bpf device: %m");
+		error("Can't set immediate mode on bpf device: %s",
+		    strerror(errno));
 
 	if (ioctl(ifi->rfdesc, BIOCSFILDROP, &flag) < 0)
-		error("Can't set filter-drop mode on bpf device: %m");
+		error("Can't set filter-drop mode on bpf device: %s",
+		    strerror(errno));
 
 	/* Get the required BPF buffer length from the kernel. */
 	if (ioctl(ifi->rfdesc, BIOCGBLEN, &sz) < 0)
-		error("Can't get bpf buffer length: %m");
+		error("Can't get bpf buffer length: %s", strerror(errno));
 	ifi->rbuf_max = sz;
 	ifi->rbuf = malloc(ifi->rbuf_max);
 	if (!ifi->rbuf)
@@ -237,7 +240,8 @@ if_register_receive(void)
 	dhcp_bpf_filter[8].k = LOCAL_PORT;
 
 	if (ioctl(ifi->rfdesc, BIOCSETF, &p) < 0)
-		error("Can't install packet filter program: %m");
+		error("Can't install packet filter program: %s",
+		    strerror(errno));
 
 	/* Set up the bpf write filter program structure. */
 	p.bf_len = dhcp_bpf_wfilter_len;
@@ -247,7 +251,8 @@ if_register_receive(void)
 		dhcp_bpf_wfilter[7].k = htons(IP_MF|IP_OFFMASK);
 
 	if (ioctl(ifi->rfdesc, BIOCSETWF, &p) < 0)
-		error("Can't install write filter program: %m");
+		error("Can't install write filter program: %s",
+		    strerror(errno));
 
 	if (ioctl(ifi->rfdesc, BIOCLOCK, NULL) < 0)
 		error("Cannot lock bpf");
@@ -269,13 +274,13 @@ send_packet(struct in_addr from, struct sockaddr_in *to,
 
 	assemble_udp_ip_header(buf, &bufp, from.s_addr,
 	    to->sin_addr.s_addr, to->sin_port,
-	    (unsigned char *)&client->packet,
-	    client->packet_length);
+	    (unsigned char *)&client->bootrequest_packet,
+	    client->bootrequest_packet_length);
 
 	iov[0].iov_base = (char *)buf;
 	iov[0].iov_len = bufp;
-	iov[1].iov_base = (char *)&client->packet;
-	iov[1].iov_len = client->packet_length;
+	iov[1].iov_base = (char *)&client->bootrequest_packet;
+	iov[1].iov_len = client->bootrequest_packet_length;
 
 	if (to->sin_addr.s_addr == INADDR_BROADCAST) {
 		result = writev(ifi->wfdesc, iov, IOVCNT);
@@ -289,7 +294,7 @@ send_packet(struct in_addr from, struct sockaddr_in *to,
 	}
 
 	if (result == -1)
-		warning("send_packet: %m");
+		warning("send_packet: %s", strerror(errno));
 	return (result);
 }
 
@@ -375,7 +380,7 @@ receive_packet(struct sockaddr_in *from, struct hardware *hfrom)
 
 		/* Decode the IP and UDP headers... */
 		offset = decode_udp_ip_header(ifi->rbuf,
-		    ifi->rbuf_offset, from, NULL, hdr.bh_caplen);
+		    ifi->rbuf_offset, from, hdr.bh_caplen);
 
 		/* If the IP or UDP checksum was bad, skip the packet... */
 		if (offset < 0) {

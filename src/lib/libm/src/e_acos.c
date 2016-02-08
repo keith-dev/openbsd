@@ -34,9 +34,6 @@
  * Function needed: sqrt
  */
 
-/* LINTLIBRARY */
-
-#include <sys/cdefs.h>
 #include <float.h>
 #include <math.h>
 
@@ -104,10 +101,5 @@ acos(double x)
 }
 
 #if	LDBL_MANT_DIG == 53
-#ifdef	lint
-/* PROTOLIB1 */
-long double acosl(long double);
-#else	/* lint */
 __weak_alias(acosl, acos);
-#endif	/* lint */
 #endif	/* LDBL_MANT_DIG == 53 */

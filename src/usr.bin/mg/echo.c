@@ -1,4 +1,4 @@
-/*	$OpenBSD: echo.c,v 1.50 2012/04/12 04:47:59 lum Exp $	*/
+/*	$OpenBSD: echo.c,v 1.54 2012/11/03 16:28:14 florian Exp $	*/
 
 /* This file is in the public domain. */
 
@@ -67,6 +67,36 @@ eyorn(const char *sp)
 		if (s == CCHR('G'))
 			return (ctrlg(FFRAND, 1));
 		ewprintf("Please answer y or n.  %s? (y or n) ", sp);
+	}
+	/* NOTREACHED */
+}
+
+/*
+ * Ask a "yes", "no" or "revert" question.  Return ABORT if the user answers
+ * the question with the abort ("^G") character.  Return FALSE for "no",
+ * TRUE for "yes" and REVERT for "revert". No formatting services are
+ * available.  No newline required.
+ */
+int
+eynorr(const char *sp)
+{
+	int	 s;
+
+	if (inmacro)
+		return (TRUE);
+
+	ewprintf("%s? (y, n or r) ", sp);
+	for (;;) {
+		s = getkey(FALSE);
+		if (s == 'y' || s == 'Y' || s == ' ')
+			return (TRUE);
+		if (s == 'n' || s == 'N' || s == CCHR('M'))
+			return (FALSE);
+		if (s == 'r' || s == 'R')
+			return (REVERT);
+		if (s == CCHR('G'))
+			return (ctrlg(FFRAND, 1));
+		ewprintf("Please answer y, n or r.");
 	}
 	/* NOTREACHED */
 }
@@ -184,7 +214,7 @@ veread(const char *fp, char *buf, size_t nbuf, int flag, va_list ap)
 	ttflush();
 	for (;;) {
 		c = getkey(FALSE);
-		if ((flag & EFAUTO) != 0 && (c == ' ' || c == CCHR('I'))) {
+		if ((flag & EFAUTO) != 0 && c == CCHR('I')) {
 			if (cplflag == TRUE) {
 				complt_list(flag, buf, cpos);
 				cwin = TRUE;
@@ -238,7 +268,6 @@ veread(const char *fp, char *buf, size_t nbuf, int flag, va_list ap)
 		case CCHR('D'):
 			if (cpos != epos) {
 				tteeol();
-				y = buf[cpos];
 				epos--;
 				rr = ttrow;
 				cc = ttcol;
@@ -680,8 +709,10 @@ complt_list(int flags, char *buf, int cpos)
 	 * it fills, and then put into the help buffer.
 	 */
 	linesize = MAX(ncol, maxwidth) + 1;
-	if ((linebuf = malloc(linesize)) == NULL)
+	if ((linebuf = malloc(linesize)) == NULL) {
+		free_file_list(wholelist);
 		return (FALSE);
+	}
 	width = 0;
 
 	/*

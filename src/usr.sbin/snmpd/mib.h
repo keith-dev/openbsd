@@ -1,7 +1,7 @@
-/*	$OpenBSD: mib.h,v 1.26 2012/06/14 17:31:32 matthew Exp $	*/
+/*	$OpenBSD: mib.h,v 1.29 2012/10/01 12:15:07 reyk Exp $	*/
 
 /*
- * Copyright (c) 2007, 2008 Reyk Floeter <reyk@vantronix.net>
+ * Copyright (c) 2007, 2008 Reyk Floeter <reyk@openbsd.org>
  *
  * Permission to use, copy, modify, and distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -105,6 +105,32 @@
 #define MIB_linkUp			MIB_snmpTraps, 4
 #define MIB_authenticationFailure	MIB_snmpTraps, 5
 #define MIB_egpNeighborLoss		MIB_snmpTraps, 6
+
+/* SNMP-USER-BASED-SM-MIB */
+#define MIB_framework			MIB_snmpModules, 10
+#define MIB_frameworkObjects		MIB_framework, 2
+#define OIDIDX_snmpEngine		9
+#define MIB_snmpEngine			MIB_frameworkObjects, 1
+#define MIB_snmpEngineID		MIB_snmpEngine, 1
+#define MIB_snmpEngineBoots		MIB_snmpEngine, 2
+#define MIB_snmpEngineTime		MIB_snmpEngine, 3
+#define MIB_snmpEngineMaxMsgSize	MIB_snmpEngine, 4
+#define MIB_usm				MIB_snmpModules, 15
+#define MIB_usmObjects			MIB_usm, 1
+#define MIB_usmStats			MIB_usmObjects, 1
+#define OIDIDX_usmStats			9
+#define OIDVAL_usmErrSecLevel		1
+#define OIDVAL_usmErrTimeWindow		2
+#define OIDVAL_usmErrUserName		3
+#define OIDVAL_usmErrEngineId		4
+#define OIDVAL_usmErrDigest		5
+#define OIDVAL_usmErrDecrypt		6
+#define MIB_usmStatsUnsupportedSecLevels MIB_usmStats, OIDVAL_usmErrSecLevel
+#define MIB_usmStatsNotInTimeWindow	MIB_usmStats, OIDVAL_usmErrTimeWindow
+#define MIB_usmStatsUnknownUserNames	MIB_usmStats, OIDVAL_usmErrUserName
+#define MIB_usmStatsUnknownEngineId	MIB_usmStats, OIDVAL_usmErrEngineId
+#define MIB_usmStatsWrongDigests	MIB_usmStats, OIDVAL_usmErrDigest
+#define MIB_usmStatsDecryptionErrors	MIB_usmStats, OIDVAL_usmErrDecrypt
 
 /* HOST-RESOURCES-MIB */
 #define MIB_host			MIB_mib_2, 25
@@ -357,9 +383,11 @@
  *
  * This is not the complete list of private enterprise numbers, it only
  * includes some well-known companies and especially network companies
- * that are very common in the datacenters around the world. It would
- * be an overkill to include ~30.000 entries for all the organizations
- * from the official list.
+ * that are very common in the datacenters around the world, other
+ * companies that contributed to snmpd or OpenBSD in some way, or just
+ * any other organizations that we wanted to include. It would be an
+ * overkill to include ~30.000 entries for all the organizations from
+ * the official list.
  */
 #define MIB_ibm				MIB_enterprises, 2
 #define MIB_cmu				MIB_enterprises, 3
@@ -374,12 +402,21 @@
 #define MIB_enterasys			MIB_enterprises, 52
 #define MIB_sgi				MIB_enterprises, 59
 #define MIB_apple			MIB_enterprises, 63
+#define MIB_nasa			MIB_enterprises, 71
 #define MIB_att				MIB_enterprises, 74
 #define MIB_nokia			MIB_enterprises, 94
 #define MIB_cern			MIB_enterprises, 96
+#define MIB_oracle			MIB_enterprises, 111
+#define MIB_motorola			MIB_enterprises, 161
+#define MIB_ncr				MIB_enterprises, 191
+#define MIB_ericsson			MIB_enterprises, 193
 #define MIB_fsc				MIB_enterprises, 231
 #define MIB_compaq			MIB_enterprises, 232
+#define MIB_bmw				MIB_enterprises, 513
 #define MIB_dell			MIB_enterprises, 674
+#define MIB_iij				MIB_enterprises, 770
+#define MIB_sandia			MIB_enterprises, 1400
+#define MIB_mercedesBenz		MIB_enterprises, 1635
 #define MIB_alteon			MIB_enterprises, 1872
 #define MIB_extremeNetworks		MIB_enterprises, 1916
 #define MIB_foundryNetworks		MIB_enterprises, 1991
@@ -387,15 +424,24 @@
 #define MIB_ucDavis			MIB_enterprises, 2021
 #define MIB_checkPoint			MIB_enterprises, 2620
 #define MIB_juniper			MIB_enterprises, 2636
+#define MIB_audi			MIB_enterprises, 3195
+#define MIB_volkswagen			MIB_enterprises, 3210
+#define MIB_genua			MIB_enterprises, 3717
+#define MIB_amazon			MIB_enterprises, 4843
 #define MIB_force10Networks		MIB_enterprises, 6027
+#define MIB_vMware			MIB_enterprises, 6876
 #define MIB_alcatelLucent		MIB_enterprises, 7483
 #define MIB_snom			MIB_enterprises, 7526
 #define MIB_google			MIB_enterprises, 11129
 #define MIB_f5Networks			MIB_enterprises, 12276
 #define MIB_sFlow			MIB_enterprises, 14706
 #define MIB_microSystems		MIB_enterprises, 18623
+#define MIB_paloAltoNetworks		MIB_enterprises, 25461
+#define MIB_h3c				MIB_enterprises, 25506
 #define MIB_vantronix			MIB_enterprises, 26766
-#define MIB_openBSD			MIB_enterprises, 30155
+#define OIDVAL_openBSD_eid		30155
+#define MIB_openBSD			MIB_enterprises, OIDVAL_openBSD_eid
+#define MIB_nicira			MIB_enterprises, 39961
 
 /* UCD-DISKIO-MIB */
 #define MIB_ucdExperimental		MIB_ucDavis, 13
@@ -728,6 +774,23 @@
 	{ MIBDECL(linkUp) },				\
 	{ MIBDECL(authenticationFailure) },		\
 	{ MIBDECL(egpNeighborLoss) },			\
+							\
+	{ MIBDECL(framework) },				\
+	{ MIBDECL(frameworkObjects) },			\
+	{ MIBDECL(snmpEngine) },			\
+	{ MIBDECL(snmpEngineID) },			\
+	{ MIBDECL(snmpEngineBoots) },			\
+	{ MIBDECL(snmpEngineTime) },			\
+	{ MIBDECL(snmpEngineMaxMsgSize) },		\
+	{ MIBDECL(usm) },				\
+	{ MIBDECL(usmObjects) },			\
+	{ MIBDECL(usmStats) },				\
+	{ MIBDECL(usmStatsUnsupportedSecLevels) },	\
+	{ MIBDECL(usmStatsNotInTimeWindow) },		\
+	{ MIBDECL(usmStatsUnknownUserNames) },		\
+	{ MIBDECL(usmStatsUnknownEngineId) },		\
+	{ MIBDECL(usmStatsWrongDigests) },		\
+	{ MIBDECL(usmStatsDecryptionErrors) },		\
 							\
 	{ MIBDECL(host) },				\
 	{ MIBDECL(hrSystem) },				\

@@ -1,4 +1,4 @@
-/*	$OpenBSD: exec_elf.c,v 1.86 2012/03/09 13:01:28 ariane Exp $	*/
+/*	$OpenBSD: exec_elf.c,v 1.90 2013/01/15 01:34:27 deraadt Exp $	*/
 
 /*
  * Copyright (c) 1996 Per Fogelstrom
@@ -78,7 +78,6 @@
 #include <sys/core.h>
 #include <sys/exec.h>
 #include <sys/exec_elf.h>
-#include <sys/exec_olf.h>
 #include <sys/file.h>
 #include <sys/ptrace.h>
 #include <sys/syscall.h>
@@ -98,7 +97,7 @@
 
 struct ELFNAME(probe_entry) {
 	int (*func)(struct proc *, struct exec_package *, char *,
-	    u_long *, u_int8_t *);
+	    u_long *);
 } ELFNAME(probes)[] = {
 	/* XXX - bogus, shouldn't be size independent.. */
 #ifdef COMPAT_LINUX
@@ -129,6 +128,9 @@ extern char *syscallnames[];
  * be a reasonable limit for ELF, the most we have seen so far is 12
  */
 #define ELF_MAX_VALID_PHDR 32
+
+/* Limit on total PT_OPENBSD_RANDOMIZE bytes. */
+#define ELF_RANDOMIZE_LIMIT 1024
 
 /*
  * This is the basic elf emul. elf_probe_funcs may change to other emuls.
@@ -327,6 +329,7 @@ ELFNAME(load_file)(struct proc *p, char *path, struct exec_package *epp,
 	Elf_Addr pos = *last;
 	int file_align;
 	int loop;
+	size_t randomizequota = ELF_RANDOMIZE_LIMIT;
 
 	NDINIT(&nd, LOOKUP, FOLLOW | LOCKLEAF, UIO_SYSSPACE, path, p);
 	if ((error = namei(&nd)) != 0) {
@@ -469,6 +472,16 @@ ELFNAME(load_file)(struct proc *p, char *path, struct exec_package *epp,
 		case PT_NOTE:
 			break;
 
+		case PT_OPENBSD_RANDOMIZE:
+			if (ph[i].p_memsz > randomizequota) {
+				error = ENOMEM;
+				goto bad1;
+			}
+			randomizequota -= ph[i].p_memsz;
+			NEW_VMCMD(&epp->ep_vmcmds, vmcmd_randomize,
+			    ph[i].p_memsz, ph[i].p_vaddr + pos, NULLVP, 0, 0);
+			break;
+
 		default:
 			break;
 		}
@@ -505,7 +518,7 @@ ELFNAME2(exec,makecmds)(struct proc *p, struct exec_package *epp)
 	int error, i;
 	char *interp = NULL;
 	u_long pos = 0, phsize;
-	u_int8_t os = OOS_NULL;
+	size_t randomizequota = ELF_RANDOMIZE_LIMIT;
 
 	if (epp->ep_hdrvalid < sizeof(Elf_Ehdr))
 		return (ENOEXEC);
@@ -579,23 +592,13 @@ ELFNAME2(exec,makecmds)(struct proc *p, struct exec_package *epp)
 	 * set the ep_emul field in the exec package structure.
 	 */
 	error = ENOEXEC;
-	p->p_os = OOS_OPENBSD;
-#ifdef NATIVE_EXEC_ELF
-	if (ELFNAME(os_pt_note)(p, epp, epp->ep_hdr, "OpenBSD", 8, 4) == 0) {
-		goto native;
+	if (eh->e_ident[EI_OSABI] != ELFOSABI_OPENBSD &&
+	    ELFNAME(os_pt_note)(p, epp, epp->ep_hdr, "OpenBSD", 8, 4) != 0) {
+		for (i = 0; ELFNAME(probes)[i].func != NULL && error; i++)
+			error = (*ELFNAME(probes)[i].func)(p, epp, interp, &pos);
+		if (error)
+			goto bad;
 	}
-#endif
-	for (i = 0; ELFNAME(probes)[i].func != NULL && error; i++) {
-		error = (*ELFNAME(probes)[i].func)(p, epp, interp, &pos, &os);
-	}
-	if (!error)
-		p->p_os = os;
-#ifndef NATIVE_EXEC_ELF
-	else
-		goto bad;
-#else
-native:
-#endif /* NATIVE_EXEC_ELF */
 
 	/*
 	 * Load all the necessary sections
@@ -692,6 +695,16 @@ native:
 			phdr = pp->p_vaddr;
 			break;
 
+		case PT_OPENBSD_RANDOMIZE:
+			if (ph[i].p_memsz > randomizequota) {
+				error = ENOMEM;
+				goto bad;
+			}
+			randomizequota -= ph[i].p_memsz;
+			NEW_VMCMD(&epp->ep_vmcmds, vmcmd_randomize,
+			    ph[i].p_memsz, ph[i].p_vaddr + exe_base, NULLVP, 0, 0);
+			break;
+
 		default:
 			/*
 			 * Not fatal, we don't need to understand everything
@@ -735,7 +748,6 @@ native:
 		ap->arg_phentsize = eh->e_phentsize;
 		ap->arg_phnum = eh->e_phnum;
 		ap->arg_entry = eh->e_entry + exe_base;
-		ap->arg_os = os;
 
 		epp->ep_emul_arg = ap;
 		epp->ep_interp_pos = pos;
@@ -1059,6 +1071,9 @@ ELFNAMEEND(coredump)(struct proc *p, void *cookie)
 		    psections[i].p_filesz);
 		if (error)
 			goto out;
+
+		coredump_unmap(cookie, (vaddr_t)psections[i].p_vaddr,
+		    (vaddr_t)psections[i].p_vaddr + psections[i].p_filesz);
 
 #ifdef DIAGNOSTIC
 		offset += psections[i].p_filesz;

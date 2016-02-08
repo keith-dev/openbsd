@@ -1,6 +1,6 @@
-#	$OpenBSD: Relayd.pm,v 1.2 2011/09/02 10:45:36 bluhm Exp $
+#	$OpenBSD: Relayd.pm,v 1.6 2013/01/21 20:16:57 bluhm Exp $
 
-# Copyright (c) 2010,2011 Alexander Bluhm <bluhm@openbsd.org>
+# Copyright (c) 2010-2012 Alexander Bluhm <bluhm@openbsd.org>
 #
 # Permission to use, copy, modify, and distribute this software for any
 # purpose with or without fee is hereby granted, provided that the above
@@ -46,7 +46,9 @@ sub new {
 	$self->{connectport}
 	    or croak "$class connect port not given";
 
-	my $test = basename($self->{test} || "");
+	my $test = basename($self->{testfile} || "");
+	# ssl does not allow a too long session id, so truncate it
+	substr($test, 25, length($test) - 25, "") if length($test) > 25;
 	open(my $fh, '>', $self->{conffile})
 	    or die ref($self), " conf file $self->{conffile} create failed: $!";
 	print $fh "log all\n";
@@ -88,20 +90,14 @@ sub up {
 	return $self;
 }
 
-sub down {
-	my $self = shift;
-	my @sudo = $ENV{SUDO} || ();
-	my @cmd = (@sudo, '/bin/kill', $self->{pid});
-	system(@cmd);
-	return Proc::down($self, @_);
-}
-
 sub child {
 	my $self = shift;
 	print STDERR $self->{up}, "\n";
-	my @sudo = $ENV{SUDO} || ();
-	my $relayd = $ENV{RELAYD} || "relayd";
-	my @cmd = (@sudo, $relayd, '-dvv', '-f', $self->{conffile});
+	my @sudo = $ENV{SUDO} ? $ENV{SUDO} : ();
+	my @ktrace = $ENV{KTRACE} ? ($ENV{KTRACE}, "-i") : ();
+	my $relayd = $ENV{RELAYD} ? $ENV{RELAYD} : "relayd";
+	my @cmd = (@sudo, @ktrace, $relayd, '-dvv', '-f', $self->{conffile});
+	print STDERR "execute: @cmd\n";
 	exec @cmd;
 	die "Exec @cmd failed: $!";
 }

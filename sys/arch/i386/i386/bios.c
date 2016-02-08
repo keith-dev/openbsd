@@ -1,4 +1,4 @@
-/*	$OpenBSD: bios.c,v 1.95 2012/06/04 15:19:47 jsing Exp $	*/
+/*	$OpenBSD: bios.c,v 1.97 2012/10/09 12:58:07 jsing Exp $	*/
 
 /*
  * Copyright (c) 1997-2001 Michael Shalayeff
@@ -74,6 +74,11 @@
 #include <sys/tty.h>
 #include <dev/ic/comvar.h>
 #include <dev/ic/comreg.h>
+#endif
+
+#include "softraid.h"
+#if NSOFTRAID > 0
+#include <dev/softraidvar.h>
 #endif
 
 struct bios_softc {
@@ -257,7 +262,7 @@ biosattach(struct device *parent, struct device *self, void *aux)
 			if (va[0] != '_' && va[1] != 'D' && va[2] != 'M' &&
 			    va[3] != 'I' && va[4] != '_')
 				continue;
-			for (chksum = 0, i = 0xf; i--; chksum += va[i]);
+			for (chksum = 0, i = 0xf; i--; chksum += va[i])
 				;
 			if (chksum != 0)
 				continue;
@@ -456,6 +461,7 @@ bios_getopt()
 	bootarg_t *q;
 	bios_ddb_t *bios_ddb;
 	bios_bootduid_t *bios_bootduid;
+	bios_bootsr_t *bios_bootsr;
 
 #ifdef BIOS_DEBUG
 	printf("bootargv:");
@@ -552,6 +558,17 @@ bios_getopt()
 		case BOOTARG_BOOTDUID:
 			bios_bootduid = (bios_bootduid_t *)q->ba_arg;
 			bcopy(bios_bootduid, bootduid, sizeof(bootduid));
+			break;
+
+		case BOOTARG_BOOTSR:
+			bios_bootsr = (bios_bootsr_t *)q->ba_arg;
+#if NSOFTRAID > 0
+			bcopy(&bios_bootsr->uuid, &sr_bootuuid,
+			    sizeof(sr_bootuuid));
+			bcopy(&bios_bootsr->maskkey, &sr_bootkey,
+			    sizeof(sr_bootkey));
+#endif
+			explicit_bzero(bios_bootsr, sizeof(bios_bootsr_t));
 			break;
 
 		default:

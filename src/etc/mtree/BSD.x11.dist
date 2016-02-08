@@ -1,4 +1,4 @@
-#       $OpenBSD: BSD.x11.dist,v 1.26 2012/04/08 10:06:22 matthieu Exp $
+#       $OpenBSD: BSD.x11.dist,v 1.28 2012/10/06 17:44:52 shadchin Exp $
 
 /set type=dir uname=root gname=wheel mode=0755
 .
@@ -83,8 +83,6 @@
             lib
                 X11
                     app-defaults
-                    ..
-                    config
                     ..
                     fonts
                         100dpi
@@ -293,17 +291,7 @@
                             sgi_vndr
                             ..
                         ..
-                        keymap
-                           digital_vndr
-                           ..
-                           sgi_vndr
-                           ..
-                           sun_vndr
-                           ..
-                        ..
                         rules
-                        ..
-                        semantics
                         ..
                         symbols
                             digital_vndr
@@ -319,6 +307,8 @@
                             nokia_vndr
                             ..
                             sgi_vndr
+                            ..
+                            sharp_vndr
                             ..
                             sony_vndr
                             ..

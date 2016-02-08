@@ -1,11 +1,11 @@
-.\"	$OpenBSD: mrouted.8,v 1.22 2010/04/05 16:47:01 deraadt Exp $
+.\"	$OpenBSD: mrouted.8,v 1.24 2013/01/17 21:39:29 jmc Exp $
 .\" The mrouted program is covered by the license in the accompanying file
 .\" named "LICENSE".  Use of the mrouted program represents acceptance of
 .\" the terms and conditions listed in that file.
 .\"
 .\" The mrouted program is COPYRIGHT 1989 by The Board of Trustees of
 .\" Leland Stanford Junior University.
-.Dd $Mdocdate: April 5 2010 $
+.Dd $Mdocdate: January 17 2013 $
 .Dt MROUTED 8
 .Os
 .Sh NAME
@@ -428,7 +428,7 @@ Multicast Routing Cache Table (147 entries)
  Origin             Mcast-group     CTmr  Age Ptmr IVif Forwvifs
  13.2.116/22        224.2.127.255     3m   2m    -  0    1
 \*(Gt13.2.116.19
-\*(Gr13.2.116.196
+\*(Gt13.2.116.196
  138.96.48/21       224.2.127.255     5m   2m    -  0    1
 \*(Gt138.96.48.108
  128.9.160/20       224.2.127.255     3m   2m    -  0    1
@@ -469,9 +469,11 @@ Note that there can be many sources in one subnet.
 .Xr map-mbone 8 ,
 .Xr mrinfo 8 ,
 .Xr mtrace 8
-.Pp
-DVMRP is described, along with other multicast routing algorithms, in the
-paper "Multicast Routing in Internetworks and Extended LANs" by S. Deering,
-in the Proceedings of the ACM SIGCOMM '88 Conference.
+.Sh STANDARDS
+.Rs
+.%A S. Deering
+.%O Proceedings of the ACM SIGCOMM '88 Conference
+.%T Multicast Routing in Internetworks and Extended LANs
+.Re
 .Sh AUTHORS
 Steve Deering, Ajit Thyagarajan, Bill Fenner

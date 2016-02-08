@@ -1,4 +1,4 @@
-#	$OpenBSD: Makefile,v 1.5 2005/09/11 13:36:00 deraadt Exp $
+#	$OpenBSD: Makefile,v 1.7 2012/12/01 21:08:50 miod Exp $
 
 S=	${.CURDIR}/../../../..
 INCL?= -I${.CURDIR} -I${.CURDIR}/../libsa -I${S}/lib/libsa -I${S}
@@ -11,17 +11,18 @@ SRCS=   sboot.c clock.c etherfun.c if_le.c
 OBJS=	${SRCS:S/.c/.o/g}
 CLEANFILES+=XBUG.o XSRT0.o oc_cksum.o sboot.tmp rboot.tmp srec sboot rboot
 MDEC_DIR?=/usr/mdec
+NOPIE=
 
 all:	sboot rboot
 
 sboot.tmp:	XSRT0.o oc_cksum.o ${OBJS} ${LIBSA}
 	ld -N -s -static -T 0x4000 XSRT0.o ${OBJS} oc_cksum.o \
-	    -o sboot.tmp ${LIBSA} `cc -print-libgcc-file-name`
+	    -o sboot.tmp ${LIBSA} # `cc -print-libgcc-file-name`
 
 rboot.tmp:	XBUG.o XSRT0.o oc_cksum.o ${OBJS} ${LIBSA}
 	ld -N -s -static -Ttext 0xffa00000 -Tdata 0x4000 \
 	    XBUG.o XSRT0.o ${OBJS} oc_cksum.o -o rboot.tmp ${LIBSA} \
-	    `cc -print-libgcc-file-name`
+	    # `cc -print-libgcc-file-name`
 
 srec:	srec.c
 	${CC} ${.CURDIR}/srec.c -o srec

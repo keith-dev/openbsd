@@ -10,8 +10,6 @@
  * ====================================================
  */
 
-/* LINTLIBRARY */
-
 /* log10(x)
  * Return the base 10 logarithm of x
  * 
@@ -45,7 +43,6 @@
  * shown.
  */
 
-#include <sys/cdefs.h>
 #include <float.h>
 #include <math.h>
 
@@ -87,10 +84,5 @@ log10(double x)
 }
 
 #if	LDBL_MANT_DIG == 53
-#ifdef	lint
-/* PROTOLIB1 */
-long double log10l(long double);
-#else	/* lint */
 __weak_alias(log10l, log10);
-#endif	/* lint */
 #endif	/* LDBL_MANT_DIG == 53 */

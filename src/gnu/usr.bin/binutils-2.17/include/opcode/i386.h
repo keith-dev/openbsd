@@ -1501,6 +1501,13 @@ static const template i386_optab[] =
 {"pclmullqhqdq", 2, 0x660f3a44, 0x10, CpuPCLMUL, FP|Modrm|IgnoreSize|NoSuf|ImmExt, { RegXMM|LLongMem, RegXMM } },
 {"pclmulhqhqdq", 2, 0x660f3a44, 0x11, CpuPCLMUL, FP|Modrm|IgnoreSize|NoSuf|ImmExt, { RegXMM|LLongMem, RegXMM } },
 
+/* Intel Random Number Generator extensions */
+{"rdrand", 1, 0x0fc7, 0x6, CpuRdRnd, Modrm|NoSuf, { Reg16|Reg32|Reg64 } },
+
+/* Intel Supervisor Mode Access Prevention extensions */
+{"clac", 0, 0x0f01, 0xca, CpuSMAP, NoSuf|ImmExt, { 0, 0, 0 } },
+{"stac", 0, 0x0f01, 0xcb, CpuSMAP, NoSuf|ImmExt, { 0, 0, 0 } },
+
 /* sentinel */
 {NULL, 0, 0, 0, 0, 0, { 0, 0, 0} }
 };

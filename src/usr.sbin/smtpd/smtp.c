@@ -1,7 +1,7 @@
-/*	$OpenBSD: smtp.c,v 1.102 2012/06/01 14:55:09 eric Exp $	*/
+/*	$OpenBSD: smtp.c,v 1.123 2013/01/26 09:37:23 gilles Exp $	*/
 
 /*
- * Copyright (c) 2008 Gilles Chehade <gilles@openbsd.org>
+ * Copyright (c) 2008 Gilles Chehade <gilles@poolp.org>
  * Copyright (c) 2008 Pierre-Yves Ritschard <pyr@openbsd.org>
  * Copyright (c) 2009 Jacek Masiulaniec <jacekm@dobremiasto.net>
  *
@@ -36,139 +36,85 @@
 #include <string.h>
 #include <unistd.h>
 
+#include <openssl/ssl.h>
+
 #include "smtpd.h"
 #include "log.h"
+#include "ssl.h"
 
-static void smtp_imsg(struct imsgev *, struct imsg *);
+static void smtp_imsg(struct mproc *, struct imsg *);
 static void smtp_shutdown(void);
 static void smtp_sig_handler(int, short, void *);
 static void smtp_setup_events(void);
 static void smtp_pause(void);
-static int smtp_enqueue(uid_t *);
+static void smtp_resume(void);
 static void smtp_accept(int, short, void *);
-static struct session *smtp_new(struct listener *);
-static struct session *session_lookup(u_int64_t);
+static int smtp_enqueue(uid_t *);
+static int smtp_can_accept(void);
 
+#define	SMTP_FD_RESERVE	5
+static size_t	sessions;
 
 static void
-smtp_imsg(struct imsgev *iev, struct imsg *imsg)
+smtp_imsg(struct mproc *p, struct imsg *imsg)
 {
-	struct session		 skey;
-	struct submit_status	*ss;
-	struct listener		*l;
-	struct session		*s;
-	struct auth		*auth;
-	struct ssl		*ssl;
-	struct dns		*dns;
+	struct listener	*l;
+	struct ssl	*ssl;
+	struct msg	 m;
+	int		 v;
 
-	log_imsg(PROC_SMTP, iev->proc, imsg);
-
-	if (iev->proc == PROC_LKA) {
+	if (p->proc == PROC_LKA) {
 		switch (imsg->hdr.type) {
 		case IMSG_DNS_PTR:
-			dns = imsg->data;
-			s = session_lookup(dns->id);
-			if (s == NULL)
-				fatalx("smtp: impossible quit");
-			strlcpy(s->s_hostname,
-			    dns->error ? "<unknown>" : dns->host,
-			    sizeof s->s_hostname);
-			strlcpy(s->s_msg.hostname, s->s_hostname,
-			    sizeof s->s_msg.hostname);
-			session_pickup(s, NULL);
+		case IMSG_LKA_EXPAND_RCPT:
+		case IMSG_LKA_AUTHENTICATE:
+		case IMSG_LKA_SSL_INIT:
+		case IMSG_LKA_SSL_VERIFY:
+			smtp_session_imsg(p, imsg);
 			return;
 		}
 	}
 
-	if (iev->proc == PROC_MFA) {
+	if (p->proc == PROC_MFA) {
 		switch (imsg->hdr.type) {
-		case IMSG_MFA_CONNECT:
-		case IMSG_MFA_HELO:
-		case IMSG_MFA_MAIL:
-		case IMSG_MFA_RCPT:
-		case IMSG_MFA_DATALINE:
-		case IMSG_MFA_QUIT:
-		case IMSG_MFA_RSET:
-			ss = imsg->data;
-			s = session_lookup(ss->id);
-			if (s == NULL)
-				return;
-			session_pickup(s, ss);
-			return;
-		case IMSG_MFA_CLOSE:
+		case IMSG_MFA_SMTP_DATA:
+		case IMSG_MFA_SMTP_RESPONSE:
+			smtp_session_imsg(p, imsg);
 			return;
 		}
 	}
 
-	if (iev->proc == PROC_QUEUE) {
-		ss = imsg->data;
-
+	if (p->proc == PROC_QUEUE) {
 		switch (imsg->hdr.type) {
 		case IMSG_QUEUE_CREATE_MESSAGE:
-			s = session_lookup(ss->id);
-			if (s == NULL)
-				return;
-			s->s_msg.id = ((u_int64_t)ss->u.msgid) << 32;
-			session_pickup(s, ss);
-			return;
-
 		case IMSG_QUEUE_MESSAGE_FILE:
-			s = session_lookup(ss->id);
-			if (s == NULL) {
-				close(imsg->fd);
-				return;
-			}
-			s->datafp = fdopen(imsg->fd, "w");
-			if (s->datafp == NULL) {
-				/* queue may have experienced tempfail. */
-				if (ss->code != 421)
-					fatalx("smtp: fdopen");
-				close(imsg->fd);
-			}
-			session_pickup(s, ss);
-			return;
-
-		case IMSG_QUEUE_TEMPFAIL:
-			skey.s_id = ss->id;
-			/* do not use lookup since this is not a expected imsg -- eric@ */
-			s = SPLAY_FIND(sessiontree, &env->sc_sessions, &skey);
-			if (s == NULL)
-				fatalx("smtp: session is gone");
-			s->s_dstatus |= DS_TEMPFAILURE;
-			return;
-
+		case IMSG_QUEUE_SUBMIT_ENVELOPE:
 		case IMSG_QUEUE_COMMIT_ENVELOPES:
-			s = session_lookup(ss->id);
-			if (s == NULL)
-				return;
-			session_pickup(s, ss);
-			return;
-
 		case IMSG_QUEUE_COMMIT_MESSAGE:
-			s = session_lookup(ss->id);
-			if (s == NULL)
-				return;
-			session_pickup(s, ss);
+			smtp_session_imsg(p, imsg);
 			return;
 
-		case IMSG_SMTP_ENQUEUE:
-			imsg_compose_event(iev, IMSG_SMTP_ENQUEUE, 0, 0,
+		case IMSG_SMTP_ENQUEUE_FD:
+			m_compose(p, IMSG_SMTP_ENQUEUE_FD, 0, 0,
 			    smtp_enqueue(NULL), imsg->data,
-			    sizeof(struct envelope));
+			    imsg->hdr.len - sizeof imsg->hdr);
 			return;
 		}
 	}
 
-	if (iev->proc == PROC_PARENT) {
+	if (p->proc == PROC_PARENT) {
 		switch (imsg->hdr.type) {
 
 		case IMSG_CONF_START:
 			if (env->sc_flags & SMTPD_CONFIGURING)
 				return;
 			env->sc_flags |= SMTPD_CONFIGURING;
-			env->sc_listeners = calloc(1, sizeof *env->sc_listeners);
-			env->sc_ssl = calloc(1, sizeof *env->sc_ssl);
-			if (env->sc_listeners == NULL || env->sc_ssl == NULL)
+			env->sc_listeners = calloc(1,
+			    sizeof *env->sc_listeners);
+			if (env->sc_listeners == NULL)
+				fatal(NULL);
+			env->sc_ssl_dict = calloc(1, sizeof *env->sc_ssl_dict);
+			if (env->sc_ssl_dict == NULL)
 				fatal(NULL);
 			TAILQ_INIT(env->sc_listeners);
 			return;
@@ -180,30 +126,22 @@ smtp_imsg(struct imsgev *iev, struct imsg *imsg)
 			if (ssl == NULL)
 				fatal(NULL);
 			*ssl = *(struct ssl *)imsg->data;
-			ssl->ssl_cert = strdup((char *)imsg->data +
-			    sizeof *ssl);
-			if (ssl->ssl_cert == NULL)
-				fatal(NULL);
-			ssl->ssl_key = strdup((char *)imsg->data + sizeof *ssl +
-			    ssl->ssl_cert_len);
-			if (ssl->ssl_key == NULL)
-				fatal(NULL);
+			ssl->ssl_cert = xstrdup((char *)imsg->data +
+			    sizeof *ssl, "smtp:ssl_cert");
+			ssl->ssl_key = xstrdup((char *)imsg->data +
+			    sizeof *ssl + ssl->ssl_cert_len, "smtp:ssl_key");
 			if (ssl->ssl_dhparams_len) {
-				ssl->ssl_dhparams = strdup((char *)imsg->data
+				ssl->ssl_dhparams = xstrdup((char *)imsg->data
 				    + sizeof *ssl + ssl->ssl_cert_len +
-				    ssl->ssl_key_len);
-				if (ssl->ssl_dhparams == NULL)
-					fatal(NULL);
+				    ssl->ssl_key_len, "smtp:ssl_dhparams");
 			}
 			if (ssl->ssl_ca_len) {
-				ssl->ssl_ca = strdup((char *)imsg->data
+				ssl->ssl_ca = xstrdup((char *)imsg->data
 				    + sizeof *ssl + ssl->ssl_cert_len +
-				    ssl->ssl_key_len + ssl->ssl_dhparams_len);
-				if (ssl->ssl_ca == NULL)
-					fatal(NULL);
+				    ssl->ssl_key_len + ssl->ssl_dhparams_len,
+				    "smtp:ssl_ca");
 			}
-
-			SPLAY_INSERT(ssltree, env->sc_ssl, ssl);
+			dict_set(env->sc_ssl_dict, ssl->ssl_name, ssl);
 			return;
 
 		case IMSG_CONF_LISTENER:
@@ -216,15 +154,11 @@ smtp_imsg(struct imsgev *iev, struct imsg *imsg)
 			l->fd = imsg->fd;
 			if (l->fd < 0)
 				fatalx("smtp: listener pass failed");
-			if (l->flags & F_SSL) {
-				struct ssl key;
-
-				strlcpy(key.ssl_name, l->ssl_cert_name,
-				    sizeof key.ssl_name);
-				l->ssl = SPLAY_FIND(ssltree, env->sc_ssl, &key);
-				if (l->ssl == NULL)
-					fatalx("smtp: ssltree out of sync");
-			}
+                        if (l->flags & F_SSL) {
+				l->ssl = dict_get(env->sc_ssl_dict, l->ssl_cert_name);
+                                if (l->ssl == NULL)
+                                        fatalx("smtp: ssltree out of sync");
+                        }
 			TAILQ_INSERT_TAIL(env->sc_listeners, l, entry);
 			return;
 
@@ -232,45 +166,41 @@ smtp_imsg(struct imsgev *iev, struct imsg *imsg)
 			if (!(env->sc_flags & SMTPD_CONFIGURING))
 				return;
 			smtp_setup_events();
-			if (env->sc_flags & SMTPD_SMTP_PAUSED)
-				smtp_pause();
 			env->sc_flags &= ~SMTPD_CONFIGURING;
 			return;
 
-		case IMSG_PARENT_AUTHENTICATE:
-			auth = imsg->data;
-			s = session_lookup(auth->id);
-			if (s == NULL)
-				return;
-			if (auth->success) {
-				s->s_flags |= F_AUTHENTICATED;
-				s->s_msg.flags |= DF_AUTHENTICATED;
-			} else {
-				s->s_flags &= ~F_AUTHENTICATED;
-				s->s_msg.flags &= ~DF_AUTHENTICATED;
-			}
-			session_pickup(s, NULL);
+		case IMSG_CTL_VERBOSE:
+			m_msg(&m, imsg);
+			m_get_int(&m, &v);
+			m_end(&m);
+			log_verbose(v);
 			return;
 
-		case IMSG_CTL_VERBOSE:
-			log_verbose(*(int *)imsg->data);
+		case IMSG_CTL_PROFILE:
+			m_msg(&m, imsg);
+			m_get_int(&m, &v);
+			m_end(&m);
+			profiling = v;
 			return;
 		}
 	}
 
-	if (iev->proc == PROC_CONTROL) {
+	if (p->proc == PROC_CONTROL) {
 		switch (imsg->hdr.type) {
-		case IMSG_SMTP_ENQUEUE:
-			imsg_compose_event(iev, IMSG_SMTP_ENQUEUE,
-			    imsg->hdr.peerid, 0, smtp_enqueue(imsg->data),
-			    NULL, 0);
+		case IMSG_SMTP_ENQUEUE_FD:
+			m_compose(p, IMSG_SMTP_ENQUEUE_FD, imsg->hdr.peerid, 0,
+			    smtp_enqueue(imsg->data), NULL, 0);
 			return;
 
-		case IMSG_SMTP_PAUSE:
+		case IMSG_CTL_PAUSE_SMTP:
+			log_debug("debug: smtp: pausing listening sockets");
 			smtp_pause();
+			env->sc_flags |= SMTPD_SMTP_PAUSED;
 			return;
 
-		case IMSG_SMTP_RESUME:
+		case IMSG_CTL_RESUME_SMTP:
+			log_debug("debug: smtp: resuming listening sockets");
+			env->sc_flags &= ~SMTPD_SMTP_PAUSED;
 			smtp_resume();
 			return;
 		}
@@ -295,7 +225,7 @@ smtp_sig_handler(int sig, short event, void *p)
 static void
 smtp_shutdown(void)
 {
-	log_info("smtp server exiting");
+	log_info("info: smtp server exiting");
 	_exit(0);
 }
 
@@ -304,28 +234,19 @@ smtp(void)
 {
 	pid_t		 pid;
 	struct passwd	*pw;
-
 	struct event	 ev_sigint;
 	struct event	 ev_sigterm;
-
-	struct peer peers[] = {
-		{ PROC_PARENT,	imsg_dispatch },
-		{ PROC_MFA,	imsg_dispatch },
-		{ PROC_QUEUE,	imsg_dispatch },
-		{ PROC_LKA,	imsg_dispatch },
-		{ PROC_CONTROL,	imsg_dispatch }
-	};
 
 	switch (pid = fork()) {
 	case -1:
 		fatal("smtp: cannot fork");
 	case 0:
+		env->sc_pid = getpid();
 		break;
 	default:
 		return (pid);
 	}
 
-	ssl_init();
 	purge_config(PURGE_EVERYTHING);
 
 	pw = env->sc_pw;
@@ -335,8 +256,7 @@ smtp(void)
 	if (chdir("/") == -1)
 		fatal("smtp: chdir(\"/\")");
 
-	smtpd_process = PROC_SMTP;
-	setproctitle("%s", env->sc_title[smtpd_process]);
+	config_process(PROC_SMTP);
 
 	if (setgroups(1, &pw->pw_gid) ||
 	    setresgid(pw->pw_gid, pw->pw_gid, pw->pw_gid) ||
@@ -353,12 +273,14 @@ smtp(void)
 	signal(SIGPIPE, SIG_IGN);
 	signal(SIGHUP, SIG_IGN);
 
-	/* Initial limit for use by IMSG_SMTP_ENQUEUE, will be tuned later once
-	 * the listening sockets arrive. */
-	env->sc_maxconn = availdesc() / 2;
+	fdlimit(1.0);
 
-	config_pipes(peers, nitems(peers));
-	config_peers(peers, nitems(peers));
+	config_peer(PROC_CONTROL);
+	config_peer(PROC_PARENT);
+	config_peer(PROC_LKA);
+	config_peer(PROC_MFA);
+	config_peer(PROC_QUEUE);
+	config_done();
 
 	if (event_dispatch() < 0)
 		fatal("event_dispatch");
@@ -371,10 +293,10 @@ static void
 smtp_setup_events(void)
 {
 	struct listener *l;
-	int avail = availdesc();
+	struct ssl	*ssl, key;
 
 	TAILQ_FOREACH(l, env->sc_listeners, entry) {
-		log_debug("smtp: listen on %s port %d flags 0x%01x"
+		log_debug("debug: smtp: listen on %s port %d flags 0x%01x"
 		    " cert \"%s\"", ss_to_text(&l->ss), ntohs(l->port),
 		    l->flags, l->ssl_cert_name);
 
@@ -382,16 +304,26 @@ smtp_setup_events(void)
 		if (listen(l->fd, SMTPD_BACKLOG) == -1)
 			fatal("listen");
 		event_set(&l->ev, l->fd, EV_READ|EV_PERSIST, smtp_accept, l);
-		event_add(&l->ev, NULL);
-		ssl_setup(l);
-		avail--;
+
+		if (!(env->sc_flags & SMTPD_SMTP_PAUSED))
+			event_add(&l->ev, NULL);
+
+		if (!(l->flags & F_SSL))
+			continue;
+
+		if (strlcpy(key.ssl_name, l->ssl_cert_name, sizeof(key.ssl_name))
+		    >= sizeof(key.ssl_name))
+			fatal("smtp_setup_events: certificate name truncated");
+		if ((ssl = dict_get(env->sc_ssl_dict, l->ssl_cert_name)) == NULL)
+			fatal("smtp_setup_events: certificate tree corrupted");
+		if (! ssl_setup((SSL_CTX **)&l->ssl_ctx, ssl))
+			fatal("smtp_setup_events: ssl_setup failure");
 	}
 
-	/* guarantee 2 fds to each accepted client */
-	if ((env->sc_maxconn = avail / 2) < 1)
-		fatalx("smtp_setup_events: fd starvation");
+	purge_config(PURGE_SSL);
 
-	log_debug("smtp: will accept at most %d clients", env->sc_maxconn);
+	log_debug("debug: smtp: will accept at most %d clients",
+	    (getdtablesize() - getdtablecount())/2 - SMTP_FD_RESERVE);
 }
 
 static void
@@ -399,20 +331,20 @@ smtp_pause(void)
 {
 	struct listener *l;
 
-	log_debug("smtp: pausing listening sockets");
-	env->sc_flags |= SMTPD_SMTP_PAUSED;
+	if (env->sc_flags & (SMTPD_SMTP_DISABLED|SMTPD_SMTP_PAUSED))
+		return;
 
 	TAILQ_FOREACH(l, env->sc_listeners, entry)
 		event_del(&l->ev);
 }
 
-void
+static void
 smtp_resume(void)
 {
 	struct listener *l;
 
-	log_debug("smtp: resuming listening sockets");
-	env->sc_flags &= ~SMTPD_SMTP_PAUSED;
+	if (env->sc_flags & (SMTPD_SMTP_DISABLED|SMTPD_SMTP_PAUSED))
+		return;
 
 	TAILQ_FOREACH(l, env->sc_listeners, entry)
 		event_add(&l->ev, NULL);
@@ -421,25 +353,15 @@ smtp_resume(void)
 static int
 smtp_enqueue(uid_t *euid)
 {
-	static struct listener		 local, *l;
-	static struct sockaddr_storage	 sa;
-	struct session			*s;
-	int				 fd[2];
+	static struct listener	 local, *listener = NULL;
+	char			 buf[MAXHOSTNAMELEN], *hostname;
+	int			 fd[2];
 
-	if (l == NULL) {
-		struct addrinfo hints, *res;
-
-		l = &local;
-		strlcpy(l->tag, "local", sizeof(l->tag));
-
-		bzero(&hints, sizeof(hints));
-		hints.ai_family = PF_UNSPEC;
-		hints.ai_flags = AI_NUMERICHOST;
-
-		if (getaddrinfo("::1", NULL, &hints, &res))
-			fatal("getaddrinfo");
-		memcpy(&sa, res->ai_addr, res->ai_addrlen);
-		freeaddrinfo(res);
+	if (listener == NULL) {
+		listener = &local;
+		strlcpy(listener->tag, "local", sizeof(listener->tag));
+		listener->ss.ss_family = AF_LOCAL;
+		listener->ss.ss_len = sizeof(struct sockaddr *);
 	}
 
 	/*
@@ -450,28 +372,25 @@ smtp_enqueue(uid_t *euid)
 	if (env->sc_flags & SMTPD_SMTP_PAUSED)
 		return (-1);
 
-	if ((s = smtp_new(l)) == NULL)
-		return (-1);
-
+	/* XXX dont' fatal here */
 	if (socketpair(AF_UNIX, SOCK_STREAM, PF_UNSPEC, fd))
 		fatal("socketpair");
 
-	s->s_io.sock = fd[0];
-	s->s_ss = sa;
-	s->s_msg.flags |= DF_ENQUEUED;
-
-	if (euid)
-		bsnprintf(s->s_hostname, sizeof(s->s_hostname), "%d@localhost",
-		    *euid);
-	else {
-		strlcpy(s->s_hostname, "localhost", sizeof(s->s_hostname));
-		s->s_msg.flags |= DF_BOUNCE;
+	hostname = "localhost";
+	if (euid) {
+		snprintf(buf, sizeof(buf), "%d@localhost", *euid);
+		hostname = buf;
 	}
 
-	strlcpy(s->s_msg.hostname, s->s_hostname,
-	    sizeof(s->s_msg.hostname));
+	if ((smtp_session(listener, fd[0], &listener->ss, hostname)) == -1) {
+		close(fd[0]);
+		close(fd[1]);
+		return (-1);
+	}
 
-	session_pickup(s, NULL);
+	sessions++;
+	stat_increment("smtp.session", 1);
+	stat_increment("smtp.session.local", 1);
 
 	return (fd[1]);
 }
@@ -479,78 +398,76 @@ smtp_enqueue(uid_t *euid)
 static void
 smtp_accept(int fd, short event, void *p)
 {
-	struct listener		*l = p;
-	struct session		*s;
+	struct listener		*listener = p;
+	struct sockaddr_storage	 ss;
 	socklen_t		 len;
+	int			 sock;
 
-	if ((s = smtp_new(l)) == NULL)
-		return;
+	if (env->sc_flags & SMTPD_SMTP_PAUSED)
+		fatalx("smtp_session: unexpected client");
 
-	len = sizeof(s->s_ss);
-	if ((s->s_io.sock = accept(fd, (struct sockaddr *)&s->s_ss, &len)) == -1) {
+	if (! smtp_can_accept()) {
+		log_warnx("warn: Disabling incoming SMTP connections: "
+		    "Client limit reached");
+		goto pause;
+	}
+
+	len = sizeof(ss);
+	if ((sock = accept(fd, (struct sockaddr *)&ss, &len)) == -1) {
+		if (errno == ENFILE || errno == EMFILE) {
+			log_warn("warn: Disabling incoming SMTP connections");
+			goto pause;
+		}
 		if (errno == EINTR || errno == ECONNABORTED)
 			return;
 		fatal("smtp_accept");
 	}
 
-	io_set_timeout(&s->s_io, SMTPD_SESSION_TIMEOUT * 1000);
-	io_set_write(&s->s_io);
-	dns_query_ptr(&s->s_ss, s->s_id);
-}
-
-
-static struct session *
-smtp_new(struct listener *l)
-{
-	struct session	*s;
-
-	log_debug("smtp: new client on listener: %p", l);
-
-	if (env->sc_flags & SMTPD_SMTP_PAUSED)
-		fatalx("smtp_new: unexpected client");
-
-	if ((s = calloc(1, sizeof(*s))) == NULL)
-		fatal(NULL);
-	s->s_id = generate_uid();
-	s->s_l = l;
-	strlcpy(s->s_msg.tag, l->tag, sizeof(s->s_msg.tag));
-	SPLAY_INSERT(sessiontree, &env->sc_sessions, s);
-
-	if (stat_increment(STATS_SMTP_SESSION) >= env->sc_maxconn) {
-		log_warnx("client limit hit, disabling incoming connections");
-		smtp_pause();
+	if (smtp_session(listener, sock, &ss, NULL) == -1) {
+		log_warn("warn: Failed to create SMTP session");
+		close(sock);
+		return;
 	}
 
-	if (s->s_l->ss.ss_family == AF_INET)
-		stat_increment(STATS_SMTP_SESSION_INET4);
-	if (s->s_l->ss.ss_family == AF_INET6)
-		stat_increment(STATS_SMTP_SESSION_INET6);
+	sessions++;
+	stat_increment("smtp.session", 1);
+	if (listener->ss.ss_family == AF_LOCAL)
+		stat_increment("smtp.session.local", 1);
+	if (listener->ss.ss_family == AF_INET)
+		stat_increment("smtp.session.inet4", 1);
+	if (listener->ss.ss_family == AF_INET6)
+		stat_increment("smtp.session.inet6", 1);
+	return;
 
-	iobuf_init(&s->s_iobuf, MAX_LINE_SIZE, MAX_LINE_SIZE);
-	io_init(&s->s_io, -1, s, session_io, &s->s_iobuf);
-	s->s_state = S_CONNECTED;
-
-	return (s);
+pause:
+	smtp_pause();
+	env->sc_flags |= SMTPD_SMTP_DISABLED;
+	return;
 }
 
-/*
- * Helper function for handling IMSG replies.
- */
-static struct session *
-session_lookup(u_int64_t id)
+static int
+smtp_can_accept(void)
 {
-	struct session	 key;
-	struct session	*s;
+	size_t max;
 
-	key.s_id = id;
-	s = SPLAY_FIND(sessiontree, &env->sc_sessions, &key);
-	if (s == NULL)
-		fatalx("session_lookup: session is gone");
+	max = (getdtablesize() - getdtablecount()) / 2 - SMTP_FD_RESERVE;
 
-	if (s->s_flags & F_ZOMBIE) {
-		session_destroy(s, "(finalizing)");
-		s = NULL;
+	return (sessions < max);
+}
+
+void
+smtp_collect(void)
+{
+	sessions--;
+	stat_decrement("smtp.session", 1);
+
+	if (!smtp_can_accept())
+		return;
+
+	if (env->sc_flags & SMTPD_SMTP_DISABLED) {
+		log_warnx("warn: smtp: "
+		    "fd exaustion over, re-enabling incoming connections");
+		env->sc_flags &= ~SMTPD_SMTP_DISABLED;
+		smtp_resume();
 	}
-
-	return (s);
 }

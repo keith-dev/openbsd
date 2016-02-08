@@ -1,4 +1,4 @@
-/*	$OpenBSD: machdep.c,v 1.138 2012/03/23 15:51:26 guenther Exp $	*/
+/*	$OpenBSD: machdep.c,v 1.145 2013/02/17 17:36:49 kettenis Exp $	*/
 /*	$NetBSD: machdep.c,v 1.85 1997/09/12 08:55:02 pk Exp $ */
 
 /*
@@ -208,9 +208,6 @@ cpu_startup()
 	 * Set up buffers, so they can be used to read disk labels.
 	 */
 	bufinit();
-
-	/* Early interrupt handlers initialization */
-	intr_init();
 }
 
 /*
@@ -273,8 +270,7 @@ setregs(p, pack, stack, retval)
 	bzero((caddr_t)tf, sizeof *tf);
 	tf->tf_psr = psr;
 	tf->tf_npc = pack->ep_entry & ~3;
-	tf->tf_global[1] = (int)PS_STRINGS;
-	tf->tf_global[2] = tf->tf_global[7] = tf->tf_npc;
+	tf->tf_global[2] = tf->tf_npc;
 	/* XXX exec of init(8) returns via proc_trampoline() */
 	if (p->p_pid == 1) {
 		tf->tf_pc = tf->tf_npc;
@@ -287,7 +283,7 @@ setregs(p, pack, stack, retval)
 
 #ifdef DEBUG
 int sigdebug = 0;
-int sigpid = 0;
+pid_t sigpid = 0;
 #define SDB_FOLLOW	0x01
 #define SDB_KSTACK	0x02
 #define SDB_FPSTATE	0x04
@@ -377,22 +373,21 @@ sendsig(catcher, sig, mask, code, type, val)
 	struct sigacts *psp = p->p_sigacts;
 	struct sigframe *fp;
 	struct trapframe *tf;
-	int caddr, oonstack, oldsp, newsp;
+	int caddr, oldsp, newsp;
 	struct sigframe sf;
 
 	tf = p->p_md.md_tf;
 	oldsp = tf->tf_out[6];
-	oonstack = p->p_sigstk.ss_flags & SS_ONSTACK;
+
 	/*
 	 * Compute new user stack addresses, subtract off
 	 * one signal frame, and align.
 	 */
-	if ((p->p_sigstk.ss_flags & SS_DISABLE) == 0 && !oonstack &&
-	    (psp->ps_sigonstack & sigmask(sig))) {
+	if ((p->p_sigstk.ss_flags & SS_DISABLE) == 0 &&
+	    !sigonstack(oldsp) && (psp->ps_sigonstack & sigmask(sig)))
 		fp = (struct sigframe *)(p->p_sigstk.ss_sp +
 					 p->p_sigstk.ss_size);
-		p->p_sigstk.ss_flags |= SS_ONSTACK;
-	} else
+	else
 		fp = (struct sigframe *)oldsp;
 	fp = (struct sigframe *)((int)(fp - 1) & ~7);
 
@@ -406,13 +401,13 @@ sendsig(catcher, sig, mask, code, type, val)
 	 * and then copy it out.  We probably ought to just build it
 	 * directly in user space....
 	 */
+	bzero(&sf, sizeof(sf));
 	sf.sf_signo = sig;
 	sf.sf_sip = NULL;
 
 	/*
 	 * Build the signal context to be used by sigreturn.
 	 */
-	sf.sf_sc.sc_onstack = oonstack;
 	sf.sf_sc.sc_mask = mask;
 	sf.sf_sc.sc_sp = oldsp;
 	sf.sf_sc.sc_pc = tf->tf_pc;
@@ -521,10 +516,6 @@ sys_sigreturn(p, v, retval)
 	tf->tf_global[1] = ksc.sc_g1;
 	tf->tf_out[0] = ksc.sc_o0;
 	tf->tf_out[6] = ksc.sc_sp;
-	if (ksc.sc_onstack & 1)
-		p->p_sigstk.ss_flags |= SS_ONSTACK;
-	else
-		p->p_sigstk.ss_flags &= ~SS_ONSTACK;
 	p->p_sigmask = ksc.sc_mask & ~sigcantmask;
 	return (EJUSTRETURN);
 }
@@ -577,8 +568,8 @@ boot(howto)
 		dumpsys();
 
 haltsys:
-	/* Run any shutdown hooks */
 	doshutdownhooks();
+	config_suspend(TAILQ_FIRST(&alldevs), DVACT_POWERDOWN);
 
 	if ((howto & RB_HALT) || (howto & RB_POWERDOWN)) {
 #if defined(SUN4M)
@@ -790,10 +781,9 @@ stackdump()
 	printf("Frame pointer is at %p\n", fp);
 	printf("Call traceback:\n");
 	while (fp && ((u_long)fp >> PGSHIFT) == ((u_long)sfp >> PGSHIFT)) {
-		printf("  pc = 0x%x  args = (0x%x, 0x%x, 0x%x, 0x%x, 0x%x, 0x%x, 0x%x) fp = %p\n",
+		printf("  pc = 0x%x  args = (0x%x, 0x%x, 0x%x, 0x%x, 0x%x, 0x%x) fp = %p\n",
 		    fp->fr_pc, fp->fr_arg[0], fp->fr_arg[1], fp->fr_arg[2],
-		    fp->fr_arg[3], fp->fr_arg[4], fp->fr_arg[5], fp->fr_arg[6],
-		    fp->fr_fp);
+		    fp->fr_arg[3], fp->fr_arg[4], fp->fr_arg[5], fp->fr_fp);
 		fp = fp->fr_fp;
 	}
 }
@@ -874,9 +864,9 @@ oldmon_w_trace(va)
 	printf("stop at 0x%lx\n", stop);
 	fp = (struct frame *) va;
 	while (round_page((u_long) fp) == stop) {
-		printf("  0x%x(0x%x, 0x%x, 0x%x, 0x%x, 0x%x, 0x%x, 0x%x) fp %p\n", fp->fr_pc,
+		printf("  0x%x(0x%x, 0x%x, 0x%x, 0x%x, 0x%x, 0x%x) fp %p\n", fp->fr_pc,
 		    fp->fr_arg[0], fp->fr_arg[1], fp->fr_arg[2], fp->fr_arg[3],
-		    fp->fr_arg[4], fp->fr_arg[5], fp->fr_arg[6], fp->fr_fp);
+		    fp->fr_arg[4], fp->fr_arg[5], fp->fr_fp);
 		fp = fp->fr_fp;
 		if (fp == NULL)
 			break;

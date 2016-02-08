@@ -1,4 +1,4 @@
-/*	$OpenBSD: compat.c,v 1.76 2012/03/22 13:47:12 espie Exp $	*/
+/*	$OpenBSD: compat.c,v 1.78 2012/11/24 11:03:45 espie Exp $	*/
 /*	$NetBSD: compat.c,v 1.14 1996/11/06 17:59:01 christos Exp $	*/
 
 /*
@@ -43,6 +43,7 @@
 #include "defines.h"
 #include "dir.h"
 #include "engine.h"
+#include "job.h"
 #include "compat.h"
 #include "suff.h"
 #include "var.h"
@@ -85,6 +86,12 @@ CompatMake(void *gnp,	/* The node to make */
 	 */
 	if (gn == pgn)
 		return;
+	/* handle .USE right away */
+	if (gn->type & OP_USE) {
+		Make_HandleUse(gn, pgn);
+		return;
+	}
+
 	look_harder_for_target(gn);
 
 	if (pgn != NULL && is_sibling(gn, pgn))
@@ -102,9 +109,8 @@ CompatMake(void *gnp,	/* The node to make */
 		} while (sib != gn);
 	}
 
-	if (gn->type & OP_USE) {
-		Make_HandleUse(gn, pgn);
-	} else if (gn->built_status == UNKNOWN) {
+	switch(gn->built_status) {
+	case UNKNOWN: 
 		/* First mark ourselves to be made, then apply whatever
 		 * transformations the suffix module thinks are necessary.
 		 * Once that's done, we can descend and make all our children.
@@ -161,7 +167,7 @@ CompatMake(void *gnp,	/* The node to make */
 			 * the $> variable using Make_DoAllVar().
 			 */
 			Make_DoAllVar(sib);
-			cmdsOk = Job_CheckCommands(sib);
+			cmdsOk = node_find_valid_commands(sib);
 			if (cmdsOk || (gn->type & OP_OPTIONAL))
 				break;
 
@@ -179,7 +185,7 @@ CompatMake(void *gnp,	/* The node to make */
 					Job_Touch(gn);
 			}
 		} else {
-			job_failure(gn, Fatal);
+			node_failure(gn);
 			sib->built_status = ERROR;
 		}
 
@@ -228,41 +234,32 @@ CompatMake(void *gnp,	/* The node to make */
 		} else if (keepgoing)
 			pgn->must_make = false;
 		else {
-
-			if (gn->origin.lineno)
-				printf("\n\nStop in %s (line %lu of %s).\n",
-				    Var_Value(".CURDIR"),
-				    (unsigned long)gn->origin.lineno,
-				    gn->origin.fname);
-			else
-				printf("\n\nStop in %s.\n",
-				    Var_Value(".CURDIR"));
+			print_errors();
 			exit(1);
 		}
-	} else if (gn->built_status == ERROR)
+		break;
+	case ERROR:
 		/* Already had an error when making this beastie. Tell the
 		 * parent to abort.  */
 		pgn->must_make = false;
-	else {
-		switch (gn->built_status) {
-		case BEINGMADE:
-			Error("Graph cycles through %s", gn->name);
-			gn->built_status = ERROR;
-			pgn->must_make = false;
-			break;
-		case MADE:
-			if ((gn->type & OP_EXEC) == 0) {
-				pgn->childMade = true;
-				Make_TimeStamp(pgn, gn);
-			}
-			break;
-		case UPTODATE:
-			if ((gn->type & OP_EXEC) == 0)
-				Make_TimeStamp(pgn, gn);
-			break;
-		default:
-			break;
+		break;
+	case BEINGMADE:
+		Error("Graph cycles through %s", gn->name);
+		gn->built_status = ERROR;
+		pgn->must_make = false;
+		break;
+	case MADE:
+		if ((gn->type & OP_EXEC) == 0) {
+			pgn->childMade = true;
+			Make_TimeStamp(pgn, gn);
 		}
+		break;
+	case UPTODATE:
+		if ((gn->type & OP_EXEC) == 0)
+			Make_TimeStamp(pgn, gn);
+		break;
+	default:
+		break;
 	}
 }
 
@@ -271,16 +268,6 @@ Compat_Run(Lst targs)		/* List of target nodes to re-create */
 {
 	GNode	  *gn = NULL;	/* Current root target */
 	int 	  errors;   	/* Number of targets not remade due to errors */
-
-	setup_engine(0);
-	/* If the user has defined a .BEGIN target, execute the commands
-	 * attached to it.  */
-	if (!queryFlag) {
-		if (run_gnode(begin_node) == ERROR) {
-			printf("\n\nStop.\n");
-			exit(1);
-		}
-	}
 
 	/* For each entry in the list of targets to create, call CompatMake on
 	 * it to create the thing. CompatMake will leave the 'built_status'

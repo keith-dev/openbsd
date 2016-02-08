@@ -1,4 +1,4 @@
-/* $OpenBSD: bwx.c,v 1.4 2003/10/06 22:29:45 miod Exp $ */
+/* $OpenBSD: bwx.c,v 1.6 2012/12/20 21:05:07 naddy Exp $ */
 /*-
  * Copyright (c) 1998 Doug Rabson
  * All rights reserved.
@@ -25,8 +25,6 @@
  * SUCH DAMAGE.
  */
 
-#include <sys/cdefs.h>
-
 #define vm_page_size (sysconf(_SC_PAGESIZE)) /* XXX  */
 #include <sys/param.h>
 #include <sys/mman.h>
@@ -35,6 +33,7 @@
 #include <err.h>
 #include <paths.h>
 #include <machine/bwx.h>
+#include <machine/cpu.h>
 #include <machine/sysarch.h>
 #include <stdlib.h>
 #include <unistd.h>

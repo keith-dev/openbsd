@@ -1,7 +1,7 @@
-/*	$OpenBSD: delivery_mda.c,v 1.4 2012/03/07 23:04:00 gilles Exp $	*/
+/*	$OpenBSD: delivery_mda.c,v 1.7 2013/01/26 09:37:23 gilles Exp $	*/
 
 /*
- * Copyright (c) 2011 Gilles Chehade <gilles@openbsd.org>
+ * Copyright (c) 2011 Gilles Chehade <gilles@poolp.org>
  *
  * Permission to use, copy, modify, and distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -42,7 +42,7 @@ extern char	**environ;
 static void delivery_mda_open(struct deliver *);
 
 struct delivery_backend delivery_backend_mda = {
-	delivery_mda_open
+	0, delivery_mda_open
 };
 
 
@@ -50,7 +50,7 @@ static void
 delivery_mda_open(struct deliver *deliver)
 {
 	char	*environ_new[2];
-	
+
 	environ_new[0] = "PATH=" _PATH_DEFPATH;
 	environ_new[1] = (char *)NULL;
 	environ = environ_new;

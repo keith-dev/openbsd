@@ -1,5 +1,5 @@
 # ex:ts=8 sw=4:
-# $OpenBSD: PackingElement.pm,v 1.207 2012/07/12 08:57:02 espie Exp $
+# $OpenBSD: PackingElement.pm,v 1.211 2013/02/18 20:24:11 okan Exp $
 #
 # Copyright (c) 2003-2010 Marc Espie <espie@openbsd.org>
 #
@@ -177,7 +177,7 @@ sub finish
 	OpenBSD::PackingElement::Fontdir->finish($state);
 	OpenBSD::PackingElement::RcScript->report($state);
 	if ($state->{readmes}) {
-		$state->say("Look in /usr/local/share/doc/pkg-readmes for extra documentation.");
+		$state->say("Look in #1/share/doc/pkg-readmes for extra documentation.", $state->{localbase});
 	}
 }
 
@@ -1861,6 +1861,17 @@ sub new
 	return bless {dir => $dir,
 		mandatory => {map {($_, 1)} @mandatory},
 	}, $class;
+}
+
+sub fullpkgpath
+{
+	my ($self) = @_;
+	if(%{$self->{mandatory}}) {
+		my $m = join(",", keys %{$self->{mandatory}});
+		return "$self->{dir},$m";
+	} else {
+		return $self->{dir};
+	}
 }
 
 # a pkgpath has a dir, and some flavors/multi parts. To match, we must

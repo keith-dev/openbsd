@@ -1,4 +1,4 @@
-/* $OpenBSD: cmd.c,v 1.69 2012/07/11 07:10:15 nicm Exp $ */
+/* $OpenBSD: cmd.c,v 1.74 2013/01/18 02:10:29 nicm Exp $ */
 
 /*
  * Copyright (c) 2007 Nicholas Marriott <nicm@users.sourceforge.net>
@@ -35,6 +35,7 @@ const struct cmd_entry *cmd_table[] = {
 	&cmd_capture_pane_entry,
 	&cmd_choose_buffer_entry,
 	&cmd_choose_client_entry,
+	&cmd_choose_list_entry,
 	&cmd_choose_session_entry,
 	&cmd_choose_tree_entry,
 	&cmd_choose_window_entry,
@@ -115,6 +116,7 @@ const struct cmd_entry *cmd_table[] = {
 	NULL
 };
 
+int		 cmd_session_better(struct session *, struct session *, int);
 struct session	*cmd_choose_session_list(struct sessionslist *);
 struct session	*cmd_choose_session(int);
 struct client	*cmd_choose_client(struct clients *);
@@ -370,6 +372,24 @@ cmd_current_session(struct cmd_ctx *ctx, int prefer_unattached)
 	return (cmd_choose_session(prefer_unattached));
 }
 
+/* Is this session better? */
+int
+cmd_session_better(struct session *s, struct session *best,
+    int prefer_unattached)
+{
+	if (best == NULL)
+		return (1);
+	if (prefer_unattached) {
+		if (!(best->flags & SESSION_UNATTACHED) &&
+		    (s->flags & SESSION_UNATTACHED))
+			return (1);
+		else if ((best->flags & SESSION_UNATTACHED) &&
+		    !(s->flags & SESSION_UNATTACHED))
+			return (0);
+	}
+	return (timercmp(&s->activity_time, &best->activity_time, >));
+}
+
 /*
  * Find the most recently used session, preferring unattached if the flag is
  * set.
@@ -377,21 +397,14 @@ cmd_current_session(struct cmd_ctx *ctx, int prefer_unattached)
 struct session *
 cmd_choose_session(int prefer_unattached)
 {
-	struct session	*s, *sbest;
-	struct timeval	*tv = NULL;
+	struct session	*s, *best;
 
-	sbest = NULL;
+	best = NULL;
 	RB_FOREACH(s, sessions, &sessions) {
-		if (tv == NULL || timercmp(&s->activity_time, tv, >) ||
-		    (prefer_unattached &&
-		    !(sbest->flags & SESSION_UNATTACHED) &&
-		    (s->flags & SESSION_UNATTACHED))) {
-			sbest = s;
-			tv = &s->activity_time;
-		}
+		if (cmd_session_better(s, best, prefer_unattached))
+			best = s;
 	}
-
-	return (sbest);
+	return (best);
 }
 
 /* Find the most recently used session from a list. */
@@ -850,6 +863,10 @@ cmd_find_window(struct cmd_ctx *ctx, const char *arg, struct session **sp)
 		wl = s->curw;
 	else if (winptr[0] == '!' && winptr[1] == '\0')
 		wl = TAILQ_FIRST(&s->lastw);
+	else if (winptr[0] == '^' && winptr[1] == '\0')
+		wl = RB_MIN(winlinks, &s->windows);
+	else if (winptr[0] == '$' && winptr[1] == '\0')
+		wl = RB_MAX(winlinks, &s->windows);
 	else if (winptr[0] == '+' || winptr[0] == '-')
 		wl = cmd_find_window_offset(winptr, s, &ambiguous);
 	else
@@ -1297,7 +1314,7 @@ cmd_get_default_path(struct cmd_ctx *ctx, const char *cwd)
 		if (ctx->cmdclient != NULL && ctx->cmdclient->cwd != NULL)
 			root = ctx->cmdclient->cwd;
 		else if (ctx->curclient != NULL && s->curw != NULL)
-			root = get_proc_cwd(s->curw->window->active->pid);
+			root = get_proc_cwd(s->curw->window->active->fd);
 		else
 			return (s->cwd);
 		skip = 0;

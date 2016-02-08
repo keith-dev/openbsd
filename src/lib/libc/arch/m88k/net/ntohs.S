@@ -1,4 +1,4 @@
-/*	$OpenBSD: ntohs.S,v 1.5 2009/10/28 06:49:55 deraadt Exp $	*/
+/*	$OpenBSD: ntohs.S,v 1.7 2013/01/11 21:23:24 miod Exp $	*/
 
 /*-
  * Copyright (c) 1990 The Regents of the University of California.
@@ -38,5 +38,6 @@
 /* hostorder = ntohs(netorder) */
 
 ENTRY(ntohs)
-	jmp.n	r1
-	 clr	r2,r2,16<16>	/* clear the top 16 bits */
+	jmp.n	%r1
+	 clr	%r2,%r2,16<16>	/* clear the top 16 bits */
+END(ntohs)

@@ -1,4 +1,4 @@
-/*	$OpenBSD: ehci.c,v 1.124 2012/07/07 12:54:04 mpi Exp $ */
+/*	$OpenBSD: ehci.c,v 1.128 2012/10/09 13:41:04 deraadt Exp $ */
 /*	$NetBSD: ehci.c,v 1.66 2004/06/30 03:11:56 mycroft Exp $	*/
 
 /*
@@ -374,9 +374,6 @@ ehci_init(ehci_softc_t *sc)
 		    sc->sc_bus.bdev.dv_xname);
 		return (USBD_IOERROR);
 	}
-
-	/* XXX need proper intr scheduling */
-	sc->sc_rand = 96;
 
 	/* frame list size at default, read back what we got and use that */
 	switch (EHCI_CMD_FLS(EOREAD4(sc, EHCI_USBCMD))) {
@@ -1040,9 +1037,6 @@ ehci_detach(struct ehci_softc *sc, int flags)
 
 	timeout_del(&sc->sc_tmo_intrlist);
 
-	if (sc->sc_shutdownhook != NULL)
-		shutdownhook_disestablish(sc->sc_shutdownhook);
-
 	usb_delay_ms(&sc->sc_bus, 300); /* XXX let stray task complete */
 
 	/* XXX free other data structures XXX */
@@ -1103,6 +1097,9 @@ ehci_activate(struct device *self, int act)
 			    sc->sc_bus.bdev.dv_xname);
 
 		sc->sc_bus.use_polling--;
+		break;
+	case DVACT_POWERDOWN:
+		ehci_shutdown(sc);
 		break;
 	case DVACT_RESUME:
 		sc->sc_bus.use_polling++;
@@ -3041,6 +3038,7 @@ ehci_device_ctrl_start(usbd_xfer_handle xfer)
 
 	if (sc->sc_bus.use_polling)
 		ehci_waitintr(sc, xfer);
+
 	return (USBD_IN_PROGRESS);
 }
 
@@ -3401,12 +3399,7 @@ ehci_device_setintr(ehci_softc_t *sc, ehci_soft_qh_t *sqh, int ival)
 
 	/* Pick an interrupt slot at the right level. */
 	/* XXX could do better than picking at random */
-	if (cold) {
-		/* XXX prevent panics at boot by not using arc4random */
-		sc->sc_rand = (sc->sc_rand + 192) % sc->sc_flsize;
-		islot = EHCI_IQHIDX(lev, sc->sc_rand);
-	} else
-		islot = EHCI_IQHIDX(lev, arc4random());
+	islot = EHCI_IQHIDX(lev, arc4random());
 
 	sqh->islot = islot;
 	isp = &sc->sc_islots[islot];
@@ -3883,7 +3876,7 @@ ehci_device_isoc_start(usbd_xfer_handle xfer)
 	splx(s);
 
 	if (sc->sc_bus.use_polling) {
-		printf("Starting ehci isoc xfer with polling. Bad idea?\n");
+		DPRINTF(("Starting ehci isoc xfer with polling. Bad idea?\n"));
 		ehci_waitintr(sc, xfer);
 	}
 

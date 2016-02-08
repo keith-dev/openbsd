@@ -1,8 +1,7 @@
-/*	$OpenBSD: types.h,v 1.11 2012/07/08 11:48:20 deraadt Exp $	*/
-/*	$vantronix: types.h,v 1.24 2010/05/11 12:05:56 reyk Exp $	*/
+/*	$OpenBSD: types.h,v 1.17 2013/01/08 10:38:19 reyk Exp $	*/
 
 /*
- * Copyright (c) 2010 Reyk Floeter <reyk@vantronix.net>
+ * Copyright (c) 2010-2013 Reyk Floeter <reyk@openbsd.org>
  *
  * Permission to use, copy, modify, and distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -20,7 +19,9 @@
 #ifndef _IKED_TYPES_H
 #define _IKED_TYPES_H
 
+#ifndef IKED_USER
 #define IKED_USER	"_iked"
+#endif
 
 #ifndef IKED_CONFIG
 #define IKED_CONFIG	"/etc/iked.conf"
@@ -33,14 +34,16 @@
 #define IKED_CA_DIR	"ca/"
 #define IKED_CRL_DIR	"crls/"
 #define IKED_CERT_DIR	"certs/"
-#define IKED_PUBKEY_DIR	"pubkey/"
+#define IKED_PUBKEY_DIR	"pubkeys/"
 #define IKED_PRIVKEY	IKED_CA "private/local.key"
 #define IKED_PUBKEY	"local.pub"
 
 #define IKED_OPT_VERBOSE	0x00000001
 #define IKED_OPT_NOACTION	0x00000002
 #define IKED_OPT_NONATT		0x00000004
-#define IKED_OPT_PASSIVE	0x00000008
+#define IKED_OPT_NATT		0x00000008
+#define IKED_OPT_PASSIVE	0x00000010
+#define IKED_OPT_NOIPV6BLOCKING	0x00000020
 
 #define IKED_IKE_PORT		500
 #define IKED_NATT_PORT		4500

@@ -1,8 +1,7 @@
-/*	$OpenBSD: ikev2_msg.c,v 1.20 2012/06/27 15:36:36 mikeb Exp $	*/
-/*	$vantronix: ikev2.c,v 1.101 2010/06/03 07:57:33 reyk Exp $	*/
+/*	$OpenBSD: ikev2_msg.c,v 1.24 2013/01/08 10:38:19 reyk Exp $	*/
 
 /*
- * Copyright (c) 2010 Reyk Floeter <reyk@vantronix.net>
+ * Copyright (c) 2010-2013 Reyk Floeter <reyk@openbsd.org>
  *
  * Permission to use, copy, modify, and distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -136,11 +135,15 @@ ikev2_msg_copy(struct iked *env, struct iked_message *msg)
 {
 	struct iked_message		*m = NULL;
 	struct ibuf			*buf;
+	ssize_t				 len;
+	void				*ptr;
 
-	if ((m = malloc(sizeof(*m))) == NULL ||
+	if ((len = ibuf_size(msg->msg_data) - msg->msg_offset) <= 0 ||
+	    (ptr = ibuf_seek(msg->msg_data, msg->msg_offset, len)) == NULL ||
+	    (m = malloc(sizeof(*m))) == NULL ||
 	    (buf = ikev2_msg_init(env, m, &msg->msg_peer, msg->msg_peerlen,
 	     &msg->msg_local, msg->msg_locallen, msg->msg_response)) == NULL ||
-	    ibuf_add(buf, ibuf_data(msg->msg_data), ibuf_size(msg->msg_data)))
+	    ibuf_add(buf, ptr, len))
 		return (NULL);
 
 	m->msg_fd = msg->msg_fd;
@@ -253,6 +256,7 @@ ikev2_msg_send(struct iked *env, struct iked_message *msg)
 	struct iked_sa		*sa = msg->msg_sa;
 	struct ibuf		*buf = msg->msg_data;
 	u_int32_t		 natt = 0x00000000;
+	int			 isnatt = 0;
 	struct ike_header	*hdr;
 	struct iked_message	*m;
 
@@ -260,13 +264,15 @@ ikev2_msg_send(struct iked *env, struct iked_message *msg)
 	    msg->msg_offset, sizeof(*hdr))) == NULL)
 		return (-1);
 
-	log_info("%s: %s from %s to %s, %ld bytes", __func__,
+	isnatt = (msg->msg_natt || (msg->msg_sa && msg->msg_sa->sa_natt));
+
+	log_info("%s: %s from %s to %s, %ld bytes%s", __func__,
 	    print_map(hdr->ike_exchange, ikev2_exchange_map),
 	    print_host(&msg->msg_local, NULL, 0),
 	    print_host(&msg->msg_peer, NULL, 0),
-	    ibuf_length(buf));
+	    ibuf_length(buf), isnatt ? ", NAT-T" : "");
 
-	if (msg->msg_natt || (msg->msg_sa && msg->msg_sa->sa_natt)) {
+	if (isnatt) {
 		if (ibuf_prepend(buf, &natt, sizeof(natt)) == -1) {
 			log_debug("%s: failed to set NAT-T", __func__);
 			return (-1);
@@ -322,7 +328,7 @@ ikev2_msg_encrypt(struct iked *env, struct iked_sa *sa, struct ibuf *src)
 	size_t			 len, ivlen, encrlen, integrlen, blocklen,
 				    outlen;
 	u_int8_t		*buf, pad = 0, *ptr;
-	struct ibuf		*integr, *encr, *dst = NULL, *out = NULL;
+	struct ibuf		*encr, *dst = NULL, *out = NULL;
 
 	buf = ibuf_data(src);
 	len = ibuf_size(src);
@@ -337,13 +343,10 @@ ikev2_msg_encrypt(struct iked *env, struct iked_sa *sa, struct ibuf *src)
 		goto done;
 	}
 
-	if (sa->sa_hdr.sh_initiator) {
+	if (sa->sa_hdr.sh_initiator)
 		encr = sa->sa_key_iencr;
-		integr = sa->sa_key_iauth;
-	} else {
+	else
 		encr = sa->sa_key_rencr;
-		integr = sa->sa_key_rauth;
-	}
 
 	blocklen = cipher_length(sa->sa_encr);
 	ivlen = cipher_ivlength(sa->sa_encr);
@@ -366,7 +369,7 @@ ikev2_msg_encrypt(struct iked *env, struct iked_sa *sa, struct ibuf *src)
 	print_hex(ibuf_data(src), 0, ibuf_size(src));
 
 	cipher_setkey(sa->sa_encr, encr->buf, ibuf_length(encr));
-	cipher_setiv(sa->sa_encr, NULL, 0);	/* new IV */
+	cipher_setiv(sa->sa_encr, NULL, 0);	/* XXX ivlen */
 	cipher_init_encrypt(sa->sa_encr);
 
 	if ((dst = ibuf_dup(sa->sa_encr->encr_iv)) == NULL)
@@ -406,7 +409,7 @@ ikev2_msg_integr(struct iked *env, struct iked_sa *sa, struct ibuf *src)
 {
 	int			 ret = -1;
 	size_t			 integrlen, tmplen;
-	struct ibuf		*integr, *prf, *tmp = NULL;
+	struct ibuf		*integr, *tmp = NULL;
 	u_int8_t		*ptr;
 
 	log_debug("%s: message length %d", __func__, ibuf_size(src));
@@ -418,13 +421,10 @@ ikev2_msg_integr(struct iked *env, struct iked_sa *sa, struct ibuf *src)
 		return (-1);
 	}
 
-	if (sa->sa_hdr.sh_initiator) {
+	if (sa->sa_hdr.sh_initiator)
 		integr = sa->sa_key_iauth;
-		prf = sa->sa_key_iprf;
-	} else {
+	else
 		integr = sa->sa_key_rauth;
-		prf = sa->sa_key_rprf;
-	}
 
 	integrlen = hash_length(sa->sa_integr);
 
@@ -874,13 +874,13 @@ ikev2_msg_frompeer(struct iked_message *msg)
 }
 
 struct iked_socket *
-ikev2_msg_getsocket(struct iked *env, int af)
+ikev2_msg_getsocket(struct iked *env, int af, int natt)
 {
 	switch (af) {
 	case AF_INET:
-		return (env->sc_sock4);
+		return (env->sc_sock4[natt ? 1 : 0]);
 	case AF_INET6:
-		return (env->sc_sock6);
+		return (env->sc_sock6[natt ? 1 : 0]);
 	}
 
 	log_debug("%s: af socket %d not available", __func__, af);

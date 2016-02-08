@@ -1,4 +1,4 @@
-/*	$OpenBSD: netstat.h,v 1.62 2011/11/01 17:30:04 mikeb Exp $	*/
+/*	$OpenBSD: netstat.h,v 1.64 2012/12/05 23:20:25 deraadt Exp $	*/
 /*	$NetBSD: netstat.h,v 1.6 1996/05/07 02:55:05 thorpej Exp $	*/
 
 /*
@@ -32,8 +32,6 @@
  *	from: @(#)netstat.h	8.2 (Berkeley) 1/4/94
  */
 
-#include <sys/cdefs.h>
-
 /* What is the max length of a pointer printed with %p (including 0x)? */
 #define PLEN	(LONG_BIT / 4 + 2)
 
@@ -44,6 +42,7 @@ int	bflag;		/* show bytes instead of packets */
 int	dflag;		/* show i/f dropped packets */
 int	Fflag;		/* show routes whose gateways are in specified AF */
 int	gflag;		/* show group (multicast) routing or stats */
+int	hflag;		/* print human numbers */
 int	iflag;		/* show interfaces */
 int	lflag;		/* show routing table with use and ref */
 int	mflag;		/* show memory stats */

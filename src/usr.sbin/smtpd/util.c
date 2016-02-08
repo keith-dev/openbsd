@@ -1,9 +1,10 @@
-/*	$OpenBSD: util.c,v 1.66 2012/07/12 08:51:43 chl Exp $	*/
+/*	$OpenBSD: util.c,v 1.92 2013/02/05 11:45:18 gilles Exp $	*/
 
 /*
  * Copyright (c) 2000,2001 Markus Friedl.  All rights reserved.
- * Copyright (c) 2008 Gilles Chehade <gilles@openbsd.org>
+ * Copyright (c) 2008 Gilles Chehade <gilles@poolp.org>
  * Copyright (c) 2009 Jacek Masiulaniec <jacekm@dobremiasto.net>
+ * Copyright (c) 2012 Eric Faurot <eric@openbsd.org>
  *
  * Permission to use, copy, modify, and distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -16,37 +17,6 @@
  * WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN
  * ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
- */
-
-/* the mkdir_p() function is based on bin/mkdir/mkdir.c that is covered
- * by the following license: */
-/*
- * Copyright (c) 1983, 1992, 1993
- *	The Regents of the University of California.  All rights reserved.
- *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in the
- *    documentation and/or other materials provided with the distribution.
- * 3. Neither the name of the University nor the names of its contributors
- *    may be used to endorse or promote products derived from this software
- *    without specific prior written permission.
- *
- * THIS SOFTWARE IS PROVIDED BY THE REGENTS AND CONTRIBUTORS ``AS IS'' AND
- * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
- * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
- * ARE DISCLAIMED.  IN NO EVENT SHALL THE REGENTS OR CONTRIBUTORS BE LIABLE
- * FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
- * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
- * OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
- * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
- * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
- * SUCH DAMAGE.
  */
 
 #include <sys/types.h>
@@ -67,6 +37,7 @@
 #include <fcntl.h>
 #include <fts.h>
 #include <imsg.h>
+#include <inttypes.h>
 #include <libgen.h>
 #include <netdb.h>
 #include <pwd.h>
@@ -83,7 +54,90 @@
 const char *log_in6addr(const struct in6_addr *);
 const char *log_sockaddr(struct sockaddr *);
 
-static int temp_inet_net_pton_ipv6(const char *, void *, size_t);
+void *
+xmalloc(size_t size, const char *where)
+{
+	void	*r;
+
+	if ((r = malloc(size)) == NULL)
+		errx(1, "%s: malloc(%zu)", where, size);
+
+	return (r);
+}
+
+void *
+xcalloc(size_t nmemb, size_t size, const char *where)
+{
+	void	*r;
+
+	if ((r = calloc(nmemb, size)) == NULL)
+		errx(1, "%s: calloc(%zu, %zu)", where, nmemb, size);
+
+	return (r);
+}
+
+char *
+xstrdup(const char *str, const char *where)
+{
+	char	*r;
+
+	if ((r = strdup(str)) == NULL)
+		errx(1, "%s: strdup(%p)", where, str);
+
+	return (r);
+}
+
+void *
+xmemdup(const void *ptr, size_t size, const char *where)
+{
+	void	*r;
+
+	if ((r = malloc(size)) == NULL)
+		errx(1, "%s: malloc(%zu)", where, size);
+	memmove(r, ptr, size);
+
+	return (r);
+}
+
+#if !defined(NO_IO)
+void
+iobuf_xinit(struct iobuf *io, size_t size, size_t max, const char *where)
+{
+	if (iobuf_init(io, size, max) == -1)
+		errx(1, "%s: iobuf_init(%p, %zu, %zu)", where, io, size, max);
+}
+
+void
+iobuf_xfqueue(struct iobuf *io, const char *where, const char *fmt, ...)
+{
+	va_list	ap;
+	int	len;
+
+	va_start(ap, fmt);
+	len = iobuf_vfqueue(io, fmt, ap);
+	va_end(ap);
+
+	if (len == -1)
+		errx(1, "%s: iobuf_xfqueue(%p, %s, ...)", where, io, fmt);
+}
+#endif
+
+char *
+strip(char *s)
+{
+	size_t	 l;
+
+	while (*s == ' ' || *s == '\t')
+		s++;
+
+	for (l = strlen(s); l; l--) {
+		if (s[l-1] != ' ' && s[l-1] != '\t')
+			break;
+		s[l-1] = '\0';
+	}
+
+	return (s);
+}
 
 int
 bsnprintf(char *str, size_t size, const char *format, ...)
@@ -100,58 +154,66 @@ bsnprintf(char *str, size_t size, const char *format, ...)
 	return 1;
 }
 
-/*
- * mkdir -p. Based on bin/mkdir/mkdir.c:mkpath()
- */
-int
-mkdir_p(char *path, mode_t mode)
+
+static int
+mkdirs_component(char *path, mode_t mode)
 {
-	struct stat	 sb;
-	char		*slash;
-	int		 done, exists;
-	mode_t		 dir_mode;
+	struct stat	sb;
 
-	dir_mode = mode | S_IWUSR | S_IXUSR;
+	if (stat(path, &sb) == -1) {
+		if (errno != ENOENT)
+			return 0;
+		if (mkdir(path, mode | S_IWUSR | S_IXUSR) == -1)
+			return 0;
+	}
+	else if (! S_ISDIR(sb.st_mode))
+		return 0;
 
-	slash = path;
+	return 1;
+}
 
-	for (;;) {
-		slash += strspn(slash, "/");
-		slash += strcspn(slash, "/");
+int
+mkdirs(char *path, mode_t mode)
+{
+	char	 buf[MAXPATHLEN];
+	int	 i = 0;
+	int	 done = 0;
+	char	*p;
 
-		done = (*slash == '\0');
-		*slash = '\0';
+	/* absolute path required */
+	if (*path != '/')
+		return 0;
 
-		/* skip existing path components */
-		exists = !stat(path, &sb);
-		if (!done && exists && S_ISDIR(sb.st_mode)) {
-			*slash = '/';
+	/* make sure we don't exceed MAXPATHLEN */
+	if (strlen(path) >= sizeof buf)
+		return 0;
+
+	bzero(buf, sizeof buf);
+	for (p = path; *p; p++) {
+		if (*p == '/') {
+			if (buf[0] != '\0')
+				if (! mkdirs_component(buf, mode))
+					return 0;
+			while (*p == '/')
+				p++;
+			buf[i++] = '/';
+			buf[i++] = *p;
+			if (*p == '\0' && ++done)
+				break;
 			continue;
 		}
-
-		if (mkdir(path, done ? mode : dir_mode) == 0) {
-			if (mode > 0777 && chmod(path, mode) < 0)
-				return (-1);
-		} else {
-			if (!exists) {
-				/* Not there */
-				return (-1);
-			}
-			if (!S_ISDIR(sb.st_mode)) {
-				/* Is there, but isn't a directory */
-				errno = ENOTDIR;
-				return (-1);
-			}
-		}
-
-		if (done)
-			break;
-
-		*slash = '/';
+		buf[i++] = *p;
 	}
+	if (! done)
+		if (! mkdirs_component(buf, mode))
+			return 0;
 
-	return (0);
+	if (chmod(path, mode) == -1)
+		return 0;
+
+	return 1;
 }
+
 
 int
 ckdir(const char *path, mode_t mode, uid_t owner, gid_t group, int create)
@@ -228,33 +290,35 @@ rmtree(char *path, int keepdir)
 	path_argv[0] = path;
 	path_argv[1] = NULL;
 	ret = 0;
-	depth = 1;
+	depth = 0;
 
-	if ((fts = fts_open(path_argv, FTS_PHYSICAL, NULL)) == NULL) {
+	fts = fts_open(path_argv, FTS_PHYSICAL | FTS_NOCHDIR, NULL);
+	if (fts == NULL) {
 		warn("fts_open: %s", path);
 		return (-1);
 	}
 
 	while ((e = fts_read(fts)) != NULL) {
-		if (e->fts_number) {
+		switch (e->fts_info) {
+		case FTS_D:
+			depth++;
+			break;
+		case FTS_DP:
+		case FTS_DNR:
 			depth--;
-			if (keepdir && e->fts_number == 1)
+			if (keepdir && depth == 0)
 				continue;
 			if (rmdir(e->fts_path) == -1) {
 				warn("rmdir: %s", e->fts_path);
 				ret = -1;
 			}
-			continue;
-		}
+			break;
 
-		if (S_ISDIR(e->fts_statp->st_mode)) {
-			e->fts_number = depth++;
-			continue;
-		}
-
-		if (unlink(e->fts_path) == -1) {
-			warn("unlink: %s", e->fts_path);
-			ret = -1;
+		case FTS_F:
+			if (unlink(e->fts_path) == -1) {
+				warn("unlink: %s", e->fts_path);
+				ret = -1;
+			}
 		}
 	}
 
@@ -296,6 +360,26 @@ mvpurge(char *from, char *to)
 }
 
 
+int
+mktmpfile(void)
+{
+	char		path[MAXPATHLEN];
+	int		fd;
+	mode_t		omode;
+
+	if (! bsnprintf(path, sizeof(path), "%s/smtpd.XXXXXXXXXX",
+	    PATH_TEMPORARY))
+		err(1, "snprintf");
+
+	omode = umask(7077);
+	if ((fd = mkstemp(path)) == -1)
+		err(1, "cannot create temporary file %s", path);
+	umask(omode);
+	unlink(path);
+	return (fd);
+}
+
+
 /* Close file, signifying temporary error condition (if any) to the caller. */
 int
 safe_fclose(FILE *fp)
@@ -319,7 +403,7 @@ safe_fclose(FILE *fp)
 }
 
 int
-hostname_match(char *hostname, char *pattern)
+hostname_match(const char *hostname, const char *pattern)
 {
 	while (*pattern != '\0' && *hostname != '\0') {
 		if (*pattern == '*') {
@@ -347,22 +431,22 @@ valid_localpart(const char *s)
  * RFC 5322 defines theses characters as valid: !#$%&'*+-/=?^_`{|}~
  * some of them are potentially dangerous, and not so used after all.
  */
-#define IS_ATEXT(c)     (isalnum((int)(c)) || strchr("%+-=_", (c)))
+#define IS_ATEXT(c)     (isalnum((int)(c)) || strchr("%+-/=_", (c)))
 nextatom:
-        if (! IS_ATEXT(*s) || *s == '\0')
-                return 0;
-        while (*(++s) != '\0') {
-                if (*s == '.')
-                        break;
-                if (IS_ATEXT(*s))
-                        continue;
-                return 0;
-        }
-        if (*s == '.') {
-                s++;
-                goto nextatom;
-        }
-        return 1;
+	if (! IS_ATEXT(*s) || *s == '\0')
+		return 0;
+	while (*(++s) != '\0') {
+		if (*s == '.')
+			break;
+		if (IS_ATEXT(*s))
+			continue;
+		return 0;
+	}
+	if (*s == '.') {
+		s++;
+		goto nextatom;
+	}
+	return 1;
 }
 
 int
@@ -390,245 +474,24 @@ valid_domainpart(const char *s)
 	}
 
 nextsub:
-        if (!isalnum((int)*s))
-                return 0;
-        while (*(++s) != '\0') {
-                if (*s == '.')
-                        break;
-                if (isalnum((int)*s) || *s == '-')
-                        continue;
-                return 0;
-        }
-        if (s[-1] == '-')
-                return 0;
-        if (*s == '.') {
-		s++;
-                goto nextsub;
-	}
-        return 1;
-}
-
-int
-email_to_mailaddr(struct mailaddr *maddr, char *email)
-{
-	char *username;
-	char *hostname;
-
-	username = email;
-	hostname = strrchr(username, '@');
-
-	if (username[0] == '\0') {
-		*maddr->user = '\0';
-		*maddr->domain = '\0';
-		return 1;
-	}
-
-	if (hostname == NULL) {
-		if (strcasecmp(username, "postmaster") != 0)
-			return 0;
-		hostname = "localhost";
-	} else {
-		*hostname++ = '\0';
-	}
-
-	if (strlcpy(maddr->user, username, sizeof(maddr->user))
-	    >= sizeof(maddr->user))
+	if (!isalnum((int)*s))
 		return 0;
-
-	if (strlcpy(maddr->domain, hostname, sizeof(maddr->domain))
-	    >= sizeof(maddr->domain))
-		return 0;
-
-	return 1;
-}
-
-char *
-ss_to_text(struct sockaddr_storage *ss)
-{
-	static char	 buf[NI_MAXHOST + 5];
-	char		*p;
-
-	buf[0] = '\0';
-	p = buf;
-
-	if (ss->ss_family == PF_INET) {
-		in_addr_t addr;
-		
-		addr = ((struct sockaddr_in *)ss)->sin_addr.s_addr;
-                addr = ntohl(addr);
-                bsnprintf(p, NI_MAXHOST,
-                    "%d.%d.%d.%d",
-                    (addr >> 24) & 0xff,
-                    (addr >> 16) & 0xff,
-                    (addr >> 8) & 0xff,
-                    addr & 0xff);
-	}
-
-	if (ss->ss_family == PF_INET6) {
-		struct sockaddr_in6 *in6 = (struct sockaddr_in6 *)ss;
-		struct in6_addr	*in6_addr;
-
-		strlcpy(buf, "IPv6:", sizeof(buf));
-		p = buf + 5;
-		in6_addr = &in6->sin6_addr;
-		bsnprintf(p, NI_MAXHOST, "%s", log_in6addr(in6_addr));
-	}
-
-	return (buf);
-}
-
-char *
-time_to_text(time_t when)
-{
-	struct tm *lt;
-	static char buf[40]; 
-	char *day[] = {"Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"};
-	char *month[] = {"Jan","Feb","Mar","Apr","May","Jun",
-		       "Jul","Aug","Sep","Oct","Nov","Dec"};
-
-	lt = localtime(&when);
-	if (lt == NULL || when == 0) 
-		fatalx("time_to_text: localtime");
-
-	/* We do not use strftime because it is subject to locale substitution*/
-	if (! bsnprintf(buf, sizeof(buf), "%s, %d %s %d %02d:%02d:%02d %c%02d%02d (%s)",
-		day[lt->tm_wday], lt->tm_mday, month[lt->tm_mon],
-		lt->tm_year + 1900,
-		lt->tm_hour, lt->tm_min, lt->tm_sec,
-		lt->tm_gmtoff >= 0 ? '+' : '-',
-		abs((int)lt->tm_gmtoff / 3600),
-		abs((int)lt->tm_gmtoff % 3600) / 60,
-		lt->tm_zone))
-		fatalx("time_to_text: bsnprintf");
-	
-	return buf;
-}
-
-int
-text_to_netaddr(struct netaddr *netaddr, char *s)
-{
-	struct sockaddr_storage	ss;
-	struct sockaddr_in	ssin;
-	struct sockaddr_in6	ssin6;
-	int			bits;
-
-	if (strncmp("IPv6:", s, 5) == 0)
-		s += 5;
-
-	if (strchr(s, '/') != NULL) {
-		/* dealing with netmask */
-
-		bzero(&ssin, sizeof(struct sockaddr_in));
-		bits = inet_net_pton(AF_INET, s, &ssin.sin_addr,
-		    sizeof(struct in_addr));
-
-		if (bits != -1) {
-			ssin.sin_family = AF_INET;
-			memcpy(&ss, &ssin, sizeof(ssin));
-			ss.ss_len = sizeof(struct sockaddr_in);
-		}
-		else {
-			bzero(&ssin6, sizeof(struct sockaddr_in6));
-			bits = inet_net_pton(AF_INET6, s, &ssin6.sin6_addr,
-			    sizeof(struct in6_addr));
-			if (bits == -1) {
-
-				/* XXX - until AF_INET6 support gets in base */
-				if (errno != EAFNOSUPPORT) {
-					log_warn("inet_net_pton");
-					return 0;
-				}
-				bits = temp_inet_net_pton_ipv6(s,
-				    &ssin6.sin6_addr,
-				    sizeof(struct in6_addr));
-			}
-			if (bits == -1) {
-				log_warn("inet_net_pton");
-				return 0;
-			}
-			ssin6.sin6_family = AF_INET6;
-			memcpy(&ss, &ssin6, sizeof(ssin6));
-			ss.ss_len = sizeof(struct sockaddr_in6);
-		}
-	}
-	else {
-		/* IP address ? */
-		if (inet_pton(AF_INET, s, &ssin.sin_addr) == 1) {
-			ssin.sin_family = AF_INET;
-			bits = 32;
-			memcpy(&ss, &ssin, sizeof(ssin));
-			ss.ss_len = sizeof(struct sockaddr_in);
-		}
-		else if (inet_pton(AF_INET6, s, &ssin6.sin6_addr) == 1) {
-			ssin6.sin6_family = AF_INET6;
-			bits = 128;
-			memcpy(&ss, &ssin6, sizeof(ssin6));
-			ss.ss_len = sizeof(struct sockaddr_in6);
-		}
-		else return 0;
-	}
-
-	netaddr->ss   = ss;
-	netaddr->bits = bits;
-	return 1;
-}
-
-int
-text_to_relayhost(struct relayhost *relay, char *s)
-{
-	u_int32_t		 i;
-	struct schema {
-		char		*name;
-		u_int8_t	 flags;
-	} schemas [] = {
-		{ "smtp://",		0				},
-		{ "smtps://",		F_SMTPS				},
-		{ "tls://",		F_STARTTLS			},
-		{ "smtps+auth://",     	F_SMTPS|F_AUTH			},
-		{ "tls+auth://",	F_STARTTLS|F_AUTH		},
-		{ "ssl://",		F_SMTPS|F_STARTTLS		},
-		{ "ssl+auth://",	F_SMTPS|F_STARTTLS|F_AUTH	}
-	};
-	const char	*errstr = NULL;
-	char	*p;
-	char	*sep;
-	int	 len;
-
-	for (i = 0; i < nitems(schemas); ++i)
-		if (strncasecmp(schemas[i].name, s, strlen(schemas[i].name)) == 0)
+	while (*(++s) != '\0') {
+		if (*s == '.')
 			break;
-
-	if (i == nitems(schemas)) {
-		/* there is a schema, but it's not recognized */
-		if (strstr(s, "://"))
-			return 0;
-
-		/* no schema, default to smtp:// */
-		i = 0;
-		p = s;
-	}
-	else
-		p = s + strlen(schemas[i].name);
-
-	relay->flags = schemas[i].flags;
-
-	if ((sep = strrchr(p, ':')) != NULL) {
-		relay->port = strtonum(sep+1, 1, 0xffff, &errstr);
-		if (errstr)
-			return 0;
-		len = sep - p;
-	}
-	else 
-		len = strlen(p);
-
-	if (strlcpy(relay->hostname, p, sizeof (relay->hostname))
-	    >= sizeof (relay->hostname))
+		if (isalnum((int)*s) || *s == '-')
+			continue;
 		return 0;
-
-	relay->hostname[len] = 0;
-
+	}
+	if (s[-1] == '-')
+		return 0;
+	if (*s == '.') {
+		s++;
+		goto nextsub;
+	}
 	return 1;
 }
+
 
 /*
  * Check file for security. Based on usr.bin/ssh/auth.c.
@@ -685,7 +548,7 @@ addargs(arglist *args, char *fmt, ...)
 {
 	va_list ap;
 	char *cp;
-	u_int nalloc;
+	uint nalloc;
 	int r;
 
 	va_start(ap, fmt);
@@ -711,19 +574,31 @@ addargs(arglist *args, char *fmt, ...)
 	args->list[args->num] = NULL;
 }
 
-void
-lowercase(char *buf, char *s, size_t len)
+int
+lowercase(char *buf, const char *s, size_t len)
 {
 	if (len == 0)
-		fatalx("lowercase: len == 0");
+		return 0;
 
 	if (strlcpy(buf, s, len) >= len)
-		fatalx("lowercase: truncation");
+		return 0;
 
 	while (*buf != '\0') {
 		*buf = tolower((int)*buf);
 		buf++;
 	}
+
+	return 1;
+}
+
+void
+xlowercase(char *buf, const char *s, size_t len)
+{
+	if (len == 0)
+		fatalx("lowercase: len == 0");
+
+	if (! lowercase(buf, s, len))
+		fatalx("lowercase: truncation");
 }
 
 void
@@ -733,7 +608,8 @@ sa_set_port(struct sockaddr *sa, int port)
 	struct addrinfo hints, *res;
 	int error;
 
-	error = getnameinfo(sa, sa->sa_len, hbuf, sizeof(hbuf), NULL, 0, NI_NUMERICHOST);
+	error = getnameinfo(sa, sa->sa_len, hbuf, sizeof(hbuf), NULL, 0,
+	    NI_NUMERICHOST);
 	if (error)
 		fatalx("sa_set_port: getnameinfo failed");
 
@@ -752,12 +628,16 @@ sa_set_port(struct sockaddr *sa, int port)
 	freeaddrinfo(res);
 }
 
-u_int64_t
+uint64_t
 generate_uid(void)
 {
-	static u_int32_t id = 0;
+	static uint32_t id;
+	uint64_t	uid;
 
-	return ((uint64_t)(id++) << 32 | arc4random());
+	while ((uid = ((uint64_t)(id++) << 32 | arc4random())) == 0)
+		;
+
+	return (uid);
 }
 
 void
@@ -772,19 +652,6 @@ fdlimit(double percent)
 	rl.rlim_cur = percent * rl.rlim_max;
 	if (setrlimit(RLIMIT_NOFILE, &rl) == -1)
 		fatal("fdlimit: setrlimit");
-}
-
-int
-availdesc(void)
-{
-	int avail;
-
-	avail = getdtablesize();
-	avail -= 3;		/* stdin, stdout, stderr */
-	avail -= PROC_COUNT;	/* imsg channels */
-	avail -= 5;		/* safety buffer */
-
-	return (avail);
 }
 
 void
@@ -828,53 +695,6 @@ session_socket_error(int fd)
 }
 
 const char *
-log_in6addr(const struct in6_addr *addr)
-{
-	struct sockaddr_in6	sa_in6;
-	u_int16_t		tmp16;
-
-	bzero(&sa_in6, sizeof(sa_in6));
-	sa_in6.sin6_len = sizeof(sa_in6);
-	sa_in6.sin6_family = AF_INET6;
-	memcpy(&sa_in6.sin6_addr, addr, sizeof(sa_in6.sin6_addr));
-
-	/* XXX thanks, KAME, for this ugliness... adopted from route/show.c */
-	if (IN6_IS_ADDR_LINKLOCAL(&sa_in6.sin6_addr) ||
-	    IN6_IS_ADDR_MC_LINKLOCAL(&sa_in6.sin6_addr)) {
-		memcpy(&tmp16, &sa_in6.sin6_addr.s6_addr[2], sizeof(tmp16));
-		sa_in6.sin6_scope_id = ntohs(tmp16);
-		sa_in6.sin6_addr.s6_addr[2] = 0;
-		sa_in6.sin6_addr.s6_addr[3] = 0;
-	}
-
-	return (log_sockaddr((struct sockaddr *)&sa_in6));
-}
-
-const char *
-log_sockaddr(struct sockaddr *sa)
-{
-	static char	buf[NI_MAXHOST];
-
-	if (getnameinfo(sa, sa->sa_len, buf, sizeof(buf), NULL, 0,
-	    NI_NUMERICHOST))
-		return ("(unknown)");
-	else
-		return (buf);
-}
-
-u_int32_t
-evpid_to_msgid(u_int64_t evpid)
-{
-	return (evpid >> 32);
-}
-
-u_int64_t
-msgid_to_evpid(u_int32_t msgid)
-{
-	return ((u_int64_t)msgid << 32);
-}
-
-const char *
 parse_smtp_response(char *line, size_t len, char **msg, int *cont)
 {
 	size_t	 i;
@@ -906,36 +726,4 @@ parse_smtp_response(char *line, size_t len, char **msg, int *cont)
 			return "non-printable character in reply";
 
 	return NULL;
-}
-
-static int
-temp_inet_net_pton_ipv6(const char *src, void *dst, size_t size)
-{
-	int	ret;
-	int	bits;
-	char	buf[sizeof("xxxx:xxxx:xxxx:xxxx:xxxx:xxxx:255:255:255:255/128")];
-	char		*sep;
-	const char	*errstr;
-
-	if (strlcpy(buf, src, sizeof buf) >= sizeof buf) {
-		errno = EMSGSIZE;
-		return (-1);
-	}
-
-	sep = strchr(buf, '/');
-	if (sep != NULL)
-		*sep++ = '\0';
-
-	ret = inet_pton(AF_INET6, buf, dst);
-	if (ret != 1)
-		return (-1);
-
-	if (sep == NULL)
-		return 128;
-
-	bits = strtonum(sep, 0, 128, &errstr);
-	if (errstr)
-		return (-1);
-
-	return bits;
 }

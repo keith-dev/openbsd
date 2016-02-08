@@ -1,4 +1,4 @@
-/*	$OpenBSD: midi.c,v 1.43 2012/04/25 07:21:41 ratchov Exp $	*/
+/*	$OpenBSD: midi.c,v 1.45 2012/10/27 08:31:59 ratchov Exp $	*/
 /*
  * Copyright (c) 2008 Alexandre Ratchov <alex@caoua.org>
  *
@@ -95,7 +95,7 @@ midi_cb(void *addr)
 }
 
 void
-midi_msg_info(struct aproc *p, int slot, char *msg)
+midi_msg_info(struct aproc *p, int slot, unsigned char *msg)
 {
 	struct ctl_slot *s;
 	struct sysex *x = (struct sysex *)msg;
@@ -107,7 +107,7 @@ midi_msg_info(struct aproc *p, int slot, char *msg)
 	x->id0 = SYSEX_AUCAT;
 	x->id1 = SYSEX_AUCAT_MIXINFO;
 	if (*s->name != '\0') {
-		snprintf(x->u.mixinfo.name,
+		snprintf((char *)x->u.mixinfo.name,
 		    SYSEX_NAMELEN, "%s%u", s->name, s->unit);
 	}
 	x->u.mixinfo.chan = slot;
@@ -115,7 +115,7 @@ midi_msg_info(struct aproc *p, int slot, char *msg)
 }
 
 void
-midi_msg_vol(struct aproc *p, int slot, char *msg)
+midi_msg_vol(struct aproc *p, int slot, unsigned char *msg)
 {
 	struct ctl_slot *s;
 
@@ -126,7 +126,7 @@ midi_msg_vol(struct aproc *p, int slot, char *msg)
 }
 
 void
-midi_msg_master(struct aproc *p, char *msg)
+midi_msg_master(struct aproc *p, unsigned char *msg)
 {
 	struct sysex *x = (struct sysex *)msg;
 
@@ -420,6 +420,7 @@ midi_onvoice(struct aproc *p, struct abuf *ibuf)
 #endif
 	if ((ibuf->r.midi.msg[0] & MIDI_CMDMASK) == MIDI_CTL &&
 	    (ibuf->r.midi.msg[1] == MIDI_CTLVOL)) {
+		midi_send(p, ibuf, ibuf->r.midi.msg, 3);
 		chan = ibuf->r.midi.msg[0] & MIDI_CHANMASK;
 		if (chan >= CTL_NSLOT)
 			return;
@@ -461,8 +462,10 @@ midi_onsysex(struct aproc *p, struct abuf *ibuf)
 	switch (x->type) {
 	case SYSEX_TYPE_RT:
 		if (x->id0 == SYSEX_CONTROL && x->id1 == SYSEX_MASTER) {
-			if (len == SYSEX_SIZE(master))
+			if (len == SYSEX_SIZE(master)) {
 				dev_master(p->u.midi.dev, x->u.master.coarse);
+				midi_send(p, ibuf, (unsigned char *)x, len);
+			}
 			return;
 		}
 		if (x->id0 != SYSEX_MMC)

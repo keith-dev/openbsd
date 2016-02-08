@@ -1,4 +1,4 @@
-/*	$OpenBSD: asr_private.h,v 1.3 2012/07/07 20:41:52 eric Exp $	*/
+/*	$OpenBSD: asr_private.h,v 1.10 2012/11/24 15:12:48 eric Exp $	*/
 /*
  * Copyright (c) 2012 Eric Faurot <eric@openbsd.org>
  *
@@ -14,9 +14,12 @@
  * ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
+
 #include <stdio.h>
 
+#ifndef ASRNODEBUG
 #define DEBUG
+#endif
 
 #define QR_MASK		(0x1 << 15)
 #define OPCODE_MASK	(0xf << 11)
@@ -31,8 +34,15 @@
 #define RCODE(v)	((v) & RCODE_MASK)
 
 
-struct packed {
-	char		*data;
+struct pack {
+	char		*buf;
+	size_t		 len;
+	size_t		 offset;
+	const char	*err;
+};
+
+struct unpack {
+	const char	*buf;
 	size_t		 len;
 	size_t		 offset;
 	const char	*err;
@@ -109,7 +119,6 @@ enum async_type {
 	ASR_GETNETBYADDR,
 	ASR_GETADDRINFO,
 	ASR_GETNAMEINFO,
-	ASR_HOSTADDR,
 };
 
 enum asr_db_type {
@@ -249,6 +258,7 @@ struct async {
 			}		 sa;
 
 			struct addrinfo	 hints;
+			char		*fqdn;
 			struct addrinfo	*aifirst;
 			struct addrinfo	*ailast;
 			struct async	*subq;
@@ -268,49 +278,21 @@ struct async {
 			int		 flags;
 			struct async	*subq;
 		} ni;
-
-		struct {
-			char		*name;
-			int		 family;
-			int		 aiflags;
-			union {
-				struct sockaddr		sa;
-				struct sockaddr_in	sain;
-				struct sockaddr_in6	sain6;
-			}		 sa;
-
-			struct async	*subq;
-			int		 class;
-			int		 type;
-			int		 ancount;
-			unsigned char	*pkt;
-			size_t		 pktlen;
-			size_t		 pktpos;
-			FILE		*file;
 #define MAXTOKEN 10
-			char		*tokens[MAXTOKEN];
-			int		 token_count;
-			int		 token_idx;
-		} host;
 	} as;
 
 };
 
 #define AS_DB(p) ((p)->as_ctx->ac_db[(p)->as_db_idx - 1])
 #define AS_FAMILY(p) ((p)->as_ctx->ac_family[(p)->as_family_idx])
- 
+
 enum asr_state {
 	ASR_STATE_INIT,
-	ASR_STATE_SEARCH_DOMAIN,
-	ASR_STATE_LOOKUP_DOMAIN,
 	ASR_STATE_NEXT_DOMAIN,
 	ASR_STATE_NEXT_DB,
 	ASR_STATE_SAME_DB,
 	ASR_STATE_NEXT_FAMILY,
-	ASR_STATE_LOOKUP_FAMILY,
 	ASR_STATE_NEXT_NS,
-	ASR_STATE_READ_RR,
-	ASR_STATE_READ_FILE,
 	ASR_STATE_UDP_SEND,
 	ASR_STATE_UDP_RECV,
 	ASR_STATE_TCP_WRITE,
@@ -323,12 +305,14 @@ enum asr_state {
 
 
 /* asr_utils.c */
-void	packed_init(struct packed*, char*, size_t);
-int	pack_header(struct packed*, const struct header*);
-int	pack_query(struct packed*, uint16_t, uint16_t, const char*);
-int	unpack_header(struct packed*, struct header*);
-int	unpack_query(struct packed*, struct query*);
-int	unpack_rr(struct packed*, struct rr*);
+void	pack_init(struct pack *, char *, size_t);
+int	pack_header(struct pack*, const struct header*);
+int	pack_query(struct pack*, uint16_t, uint16_t, const char*);
+
+void	unpack_init(struct unpack *, const char *, size_t);
+int	unpack_header(struct unpack*, struct header*);
+int	unpack_query(struct unpack*, struct query*);
+int	unpack_rr(struct unpack*, struct rr*);
 int	sockaddr_from_str(struct sockaddr *, int, const char *);
 ssize_t dname_from_fqdn(const char*, char*, size_t);
 
@@ -352,24 +336,38 @@ struct async *res_search_async_ctx(const char *, int, int, unsigned char *, int,
     struct asr_ctx *);
 struct async *gethostbyaddr_async_ctx(const void *, socklen_t, int,
     struct asr_ctx *);
-struct async *hostaddr_async_ctx(const char *, int, int, struct asr_ctx *);
 
 #ifdef DEBUG
 
-extern int asr_debug;
+#define DPRINT(...)		do { if(asr_debug) {		\
+		fprintf(asr_debug, __VA_ARGS__);		\
+	} } while (0)
+#define DPRINT_PACKET(n, p, s)	do { if(asr_debug) {		\
+		fprintf(asr_debug, "----- %s -----\n", n);	\
+		asr_dump_packet(asr_debug, (p), (s));		\
+		fprintf(asr_debug, "--------------\n");		\
+	} } while (0)
 
-/* asr_debug.h */
 const char *asr_querystr(int);
+const char *asr_statestr(int);
 const char *asr_transitionstr(int);
-void asr_dump(struct asr *);
-void asr_dump_async(struct async *);
-void asr_dump_packet(FILE *, const void *, size_t, int);
-void asr_printf(const char *fmt, ...);
-void async_set_state(struct async *, int);
-char *asr_print_addr(const struct sockaddr *, char *, size_t);
+const char *print_sockaddr(const struct sockaddr *, char *, size_t);
+void asr_dump_config(FILE *, struct asr *);
+void asr_dump_packet(FILE *, const void *, size_t);
+
+extern FILE * asr_debug;
 
 #else /* DEBUG */
 
-#define async_set_state(a, s) do { (a)->as_state = (s); } while (0)
+#define DPRINT(...)
+#define DPRINT_PACKET(...)
 
 #endif /* DEBUG */
+
+#define async_set_state(a, s) do {		\
+	DPRINT("asr: [%s@%p] %s -> %s\n",	\
+		asr_querystr((a)->as_type),	\
+		as,				\
+		asr_statestr((a)->as_state),	\
+		asr_statestr((s)));		\
+	(a)->as_state = (s); } while (0)

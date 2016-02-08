@@ -1,8 +1,7 @@
-/*	$OpenBSD: ikeca.c,v 1.21 2012/07/08 11:48:20 deraadt Exp $	*/
-/*	$vantronix: ikeca.c,v 1.13 2010/06/03 15:52:52 reyk Exp $	*/
+/*	$OpenBSD: ikeca.c,v 1.25 2013/01/08 10:38:19 reyk Exp $	*/
 
 /*
- * Copyright (c) 2010 Jonathan Gray <jsg@vantronix.net>
+ * Copyright (c) 2010 Jonathan Gray <jsg@openbsd.org>
  *
  * Permission to use, copy, modify, and distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -38,15 +37,29 @@
 #include "types.h"
 #include "parser.h"
 
-#define SSL_CNF		"/etc/ssl/openssl.cnf"
-#define X509_CNF	"/etc/ssl/x509v3.cnf"
-#define IKECA_CNF	"/etc/ssl/ikeca.cnf"
-#define KEYBASE		"/etc/iked"
-#define EXPDIR		"/usr/share/iked"
+#ifndef PREFIX
+#define PREFIX		""
+#endif
+#ifndef SSLDIR
+#define SSLDIR		PREFIX "/etc/ssl"
+#endif
+#define SSL_CNF		SSLDIR "/openssl.cnf"
+#define X509_CNF	SSLDIR "/x509v3.cnf"
+#define IKECA_CNF	SSLDIR "/ikeca.cnf"
+#define KEYBASE		PREFIX "/etc/iked"
+#ifndef EXPDIR
+#define EXPDIR		PREFIX "/usr/share/iked"
+#endif
 
+#ifndef PATH_OPENSSL
 #define PATH_OPENSSL	"/usr/sbin/openssl"
+#endif
+#ifndef PATH_ZIP
 #define PATH_ZIP	"/usr/local/bin/zip"
+#endif
+#ifndef PATH_TAR
 #define PATH_TAR	"/bin/tar"
+#endif
 
 struct ca {
 	char		 sslpath[PATH_MAX];
@@ -802,8 +815,7 @@ ca_setup(char *caname, int create, int quiet, char *pass)
 		err(1, "calloc");
 
 	ca->caname = strdup(caname);
-	strlcpy(ca->sslpath, "/etc/ssl/", sizeof(ca->sslpath));
-	strlcat(ca->sslpath, caname, sizeof(ca->sslpath));
+	snprintf(ca->sslpath, sizeof(ca->sslpath), SSLDIR "/%s", caname);
 	strlcpy(ca->passfile, ca->sslpath, sizeof(ca->passfile));
 	strlcat(ca->passfile, "/ikeca.passwd", sizeof(ca->passfile));
 

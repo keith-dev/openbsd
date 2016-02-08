@@ -28,12 +28,10 @@
 #include "dns.h"
 #include "packet.h"
 #include "query.h"
-#include "rdata.h"
 #include "region-allocator.h"
 #include "tsig.h"
 #include "tsig-openssl.h"
 #include "util.h"
-#include "zonec.h"
 
 
 /*
@@ -166,6 +164,27 @@ connection, including optional source port.\n"
 		"  server       The name or IP address of the master server.\n"
 		"\nVersion %s. Report bugs to <%s>.\n", PACKAGE_VERSION, PACKAGE_BUGREPORT);
 	exit(XFER_FAIL);
+}
+
+
+/*
+ * Find an HMAC algorithm based on its id.
+ */
+static tsig_algorithm_type *
+tsig_get_algorithm_by_id(uint8_t alg)
+{
+	if (alg == TSIG_HMAC_MD5)
+		return tsig_get_algorithm_by_name("hmac-md5");
+#ifdef HAVE_EVP_SHA1
+	if (alg == TSIG_HMAC_SHA1)
+		return tsig_get_algorithm_by_name("hmac-sha1");
+#endif /* HAVE_EVP_SHA1 */
+#ifdef HAVE_EVP_SHA256
+	if (alg == TSIG_HMAC_SHA256)
+		return tsig_get_algorithm_by_name("hmac-sha256");
+#endif /* HAVE_EVP_SHA256 */
+
+        return NULL;
 }
 
 

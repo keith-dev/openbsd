@@ -1,4 +1,4 @@
-/*	$OpenBSD: pfctl_parser.c,v 1.289 2012/07/10 09:39:26 henning Exp $ */
+/*	$OpenBSD: pfctl_parser.c,v 1.292 2013/01/16 01:49:20 henning Exp $ */
 
 /*
  * Copyright (c) 2001 Daniel Hartmeier
@@ -34,8 +34,6 @@
 #include <sys/types.h>
 #include <sys/ioctl.h>
 #include <sys/socket.h>
-#include <sys/param.h>
-#include <sys/proc.h>
 #include <net/if.h>
 #include <netinet/in.h>
 #include <netinet/in_systm.h>
@@ -843,16 +841,23 @@ print_rule(struct pf_rule *r, const char *anchor_call, int opts)
 	if (r->tos)
 		printf(" tos 0x%2.2x", r->tos);
 
-	if (r->set_prio[0] != PF_PRIO_NOTSET ||
-	    r->scrub_flags & PFSTATE_SETTOS) {
+	if (r->scrub_flags & PFSTATE_SETMASK || r->qname[0]) {
 		char *comma = "";
 		printf(" set (");
-		if (r->set_prio[0] != PF_PRIO_NOTSET) {
+		if (r->scrub_flags & PFSTATE_SETPRIO) {
 			if (r->set_prio[0] == r->set_prio[1])
 				printf("%s prio %u", comma, r->set_prio[0]);
 			else
 				printf("%s prio(%u, %u)", comma, r->set_prio[0],
 				    r->set_prio[1]);
+			comma = ",";
+		}
+		if (r->qname[0]) {
+			if (r->pqname[0])
+				printf("%s queue(%s, %s)", comma, r->qname,
+				    r->pqname);
+			else
+				printf("%s queue %s", comma, r->qname);
 			comma = ",";
 		}
 		if (r->scrub_flags & PFSTATE_SETTOS) {
@@ -1038,10 +1043,6 @@ print_rule(struct pf_rule *r, const char *anchor_call, int opts)
 		printf(" label \"%s\"", r->label);
 	if (r->rule_flag & PFRULE_ONCE)
 		printf(" once");
-	if (r->qname[0] && r->pqname[0])
-		printf(" queue(%s, %s)", r->qname, r->pqname);
-	else if (r->qname[0])
-		printf(" queue %s", r->qname);
 	if (r->tagname[0])
 		printf(" tag %s", r->tagname);
 	if (r->match_tagname[0]) {

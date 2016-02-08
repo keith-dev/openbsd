@@ -1,8 +1,7 @@
-/*	$OpenBSD: parse.y,v 1.26 2012/06/30 14:51:31 naddy Exp $	*/
-/*	$vantronix: parse.y,v 1.22 2010/06/03 11:08:34 reyk Exp $	*/
+/*	$OpenBSD: parse.y,v 1.29 2013/01/08 10:38:19 reyk Exp $	*/
 
 /*
- * Copyright (c) 2010 Reyk Floeter <reyk@vantronix.net>
+ * Copyright (c) 2010-2013 Reyk Floeter <reyk@openbsd.org>
  * Copyright (c) 2004, 2005 Hans-Joerg Hoexer <hshoexer@openbsd.org>
  * Copyright (c) 2002, 2003, 2004 Henning Brauer <henning@openbsd.org>
  * Copyright (c) 2001 Markus Friedl.  All rights reserved.
@@ -115,6 +114,39 @@ struct ipsec_mode {
 	struct ipsec_transforms	*xfs;
 	u_int8_t		 ike_exch;
 };
+
+struct iked_transform ikev2_default_ike_transforms[] = {
+	{ IKEV2_XFORMTYPE_ENCR, IKEV2_XFORMENCR_AES_CBC, 256 },
+	{ IKEV2_XFORMTYPE_ENCR, IKEV2_XFORMENCR_AES_CBC, 192 },
+	{ IKEV2_XFORMTYPE_ENCR, IKEV2_XFORMENCR_AES_CBC, 128 },
+	{ IKEV2_XFORMTYPE_ENCR, IKEV2_XFORMENCR_3DES },
+	{ IKEV2_XFORMTYPE_PRF,	IKEV2_XFORMPRF_HMAC_SHA2_256 },
+	{ IKEV2_XFORMTYPE_PRF,	IKEV2_XFORMPRF_HMAC_SHA1 },
+	{ IKEV2_XFORMTYPE_PRF,	IKEV2_XFORMPRF_HMAC_MD5 },
+	{ IKEV2_XFORMTYPE_INTEGR, IKEV2_XFORMAUTH_HMAC_SHA2_256_128 },
+	{ IKEV2_XFORMTYPE_INTEGR, IKEV2_XFORMAUTH_HMAC_SHA1_96 },
+	{ IKEV2_XFORMTYPE_INTEGR, IKEV2_XFORMAUTH_HMAC_MD5_96 },
+	{ IKEV2_XFORMTYPE_DH,	IKEV2_XFORMDH_MODP_2048_256 },
+	{ IKEV2_XFORMTYPE_DH,	IKEV2_XFORMDH_MODP_2048 },
+	{ IKEV2_XFORMTYPE_DH,	IKEV2_XFORMDH_MODP_1536 },
+	{ IKEV2_XFORMTYPE_DH,	IKEV2_XFORMDH_MODP_1024 },
+	{ 0 }
+};
+size_t ikev2_default_nike_transforms = ((sizeof(ikev2_default_ike_transforms) /
+    sizeof(ikev2_default_ike_transforms[0])) - 1);
+
+struct iked_transform ikev2_default_esp_transforms[] = {
+	{ IKEV2_XFORMTYPE_ENCR, IKEV2_XFORMENCR_AES_CBC, 256 },
+	{ IKEV2_XFORMTYPE_ENCR, IKEV2_XFORMENCR_AES_CBC, 192 },
+	{ IKEV2_XFORMTYPE_ENCR, IKEV2_XFORMENCR_AES_CBC, 128 },
+	{ IKEV2_XFORMTYPE_INTEGR, IKEV2_XFORMAUTH_HMAC_SHA2_256_128 },
+	{ IKEV2_XFORMTYPE_INTEGR, IKEV2_XFORMAUTH_HMAC_SHA1_96 },
+	{ IKEV2_XFORMTYPE_ESN,	IKEV2_XFORMESN_ESN },
+	{ IKEV2_XFORMTYPE_ESN,	IKEV2_XFORMESN_NONE },
+	{ 0 }
+};
+size_t ikev2_default_nesp_transforms = ((sizeof(ikev2_default_esp_transforms) /
+    sizeof(ikev2_default_esp_transforms[0])) - 1);
 
 const struct ipsec_xf authxfs[] = {
 	{ "hmac-md5",		IKEV2_XFORMAUTH_HMAC_MD5_96,		16 },

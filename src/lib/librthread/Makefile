@@ -1,21 +1,21 @@
-#	$OpenBSD: Makefile,v 1.30 2012/05/03 09:07:17 pirofti Exp $
+#	$OpenBSD: Makefile,v 1.34 2012/11/22 19:10:27 miod Exp $
 
-# For ``COMPILER_VERSION''
+# For ``COMPILER_VERSION'' and ``ELF_TOOLCHAIN''
 .include <bsd.own.mk>
 
 LIB=pthread
-WANTLINT=
-LINTFLAGS=-z
 LIBCSRCDIR=	${.CURDIR}/../libc
 
 CFLAGS+=-Wall -g -Werror -Wshadow
-.if ${COMPILER_VERSION:L} == "gcc3" || ${COMPILER_VERSION:L} == "gcc4"
+.if ${COMPILER_VERSION:L} == "gcc4" || \
+    (${COMPILER_VERSION:L} == "gcc3" && ${ELF_TOOLCHAIN:L} == "yes")
 CFLAGS+=-Wmissing-prototypes
 .endif
 CFLAGS+=-Wstrict-prototypes
 CFLAGS+=-Wsign-compare
 CFLAGS+=-I${LIBCSRCDIR}/arch/${MACHINE_CPU} -I${LIBCSRCDIR}/include
-LDADD = -Wl,-znodelete,-zinitfirst
+CDIAGFLAGS=
+LDADD = -Wl,-znodelete,-zinitfirst,-znodlopen
 
 .PATH: ${.CURDIR}/arch/${MACHINE_CPU}
 SRCS=	rthread.c \

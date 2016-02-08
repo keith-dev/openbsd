@@ -1,4 +1,4 @@
-/*	$OpenBSD: inet.c,v 1.119 2011/11/01 00:00:01 mikeb Exp $	*/
+/*	$OpenBSD: inet.c,v 1.121 2013/02/05 13:58:02 bluhm Exp $	*/
 /*	$NetBSD: inet.c,v 1.14 1995/10/03 21:42:37 thorpej Exp $	*/
 
 /*
@@ -34,7 +34,6 @@
 #include <sys/queue.h>
 #include <sys/socket.h>
 #include <sys/socketvar.h>
-#include <sys/mbuf.h>
 #include <sys/domain.h>
 #include <sys/protosw.h>
 #include <sys/sysctl.h>
@@ -1230,6 +1229,7 @@ sockbuf_dump(struct sockbuf *sb, const char *name)
 	p("%lu", sb_mbmax, ", ");
 	p("%ld", sb_lowat, "\n ");
 	printf("%s ", name);
+	p("%#0.8x", sb_flagsintr, ", ");
 	p("%#0.4x", sb_flags, ", ");
 	p("%u", sb_timeo, "\n ");
 #undef	p

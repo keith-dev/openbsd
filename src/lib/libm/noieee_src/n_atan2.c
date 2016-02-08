@@ -1,4 +1,4 @@
-/*	$OpenBSD: n_atan2.c,v 1.14 2011/05/30 18:34:38 martynas Exp $	*/
+/*	$OpenBSD: n_atan2.c,v 1.16 2013/01/13 03:44:59 martynas Exp $	*/
 /*	$NetBSD: n_atan2.c,v 1.1 1995/10/10 23:36:37 ragge Exp $	*/
 /*
  * Copyright (c) 1985, 1993
@@ -103,9 +103,6 @@
  * shown.
  */
 
-/* LINTLIBRARY */
-
-#include <sys/cdefs.h>
 #include <math.h>
 
 #include "mathimpl.h"
@@ -241,9 +238,4 @@ begin:
 	return(copysign((signx>zero)?z:PI-z,signy));
 }
 
-#ifdef	lint
-/* PROTOLIB1 */
-long double atan2l(long double, long double);
-#else	/* lint */
 __weak_alias(atan2l, atan2);
-#endif	/* lint */

@@ -1,4 +1,4 @@
-#	$OpenBSD: rc,v 1.400 2012/04/06 15:11:30 jsing Exp $
+#	$OpenBSD: rc,v 1.405 2012/11/18 18:29:10 ajacoutot Exp $
 
 # System startup script run by init on autoboot
 # or after single-user.
@@ -232,7 +232,7 @@ fi
 if [ X"$1" = X"shutdown" ]; then
 	dd if=/dev/arandom of=/var/db/host.random bs=65536 count=1 >/dev/null 2>&1
 	chmod 600 /var/db/host.random >/dev/null 2>&1
-	local _c=$?
+	_c=$?
 	if [ ${_c} -eq 0 -a -n "${pkg_scripts}" ]; then
 		echo -n 'stopping package daemons:'
 		while [ -n "${pkg_scripts}" ]; do
@@ -387,7 +387,7 @@ make_keys
 
 echo -n 'starting early daemons:'
 start_daemon syslogd ldattach pflogd named nsd ntpd isakmpd iked sasyncd
-start_daemon ldapd
+start_daemon ldapd npppd
 echo '.'
 
 if [ X"${ipsec}" != X"NO" ]; then
@@ -481,7 +481,7 @@ fi
 echo 'preserving editor files.';	/usr/libexec/vi.recover
 
 echo -n 'starting network daemons:'
-start_daemon sshd snmpd ldpd ripd ospfd ospf6d bgpd ifstated
+start_daemon ldomd sshd snmpd ldpd ripd ospfd ospf6d bgpd ifstated
 start_daemon relayd dhcpd dhcrelay mrouted dvmrpd
 
 if ifconfig lo0 inet6 >/dev/null 2>&1; then
@@ -493,9 +493,9 @@ if ifconfig lo0 inet6 >/dev/null 2>&1; then
 	fi
 fi
 
-start_daemon hostapd rwhod lpd sendmail smtpd httpd ftpd ftpproxy tftpd
-start_daemon identd inetd rarpd bootparamd rbootd mopd popa3d
-start_daemon spamd spamlogd kdc kadmind kpasswdd sndiod
+start_daemon hostapd rwhod lpd sendmail smtpd httpd nginx ftpd ftpproxy
+start_daemon tftpd tftpproxy identd inetd rarpd bootparamd rbootd mopd
+start_daemon popa3d spamd spamlogd kdc kadmind kpasswdd sndiod
 echo '.'
 
 if [ X"${spamd_flags}" != X"NO" ]; then

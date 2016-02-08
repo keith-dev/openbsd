@@ -1,4 +1,4 @@
-/* $OpenBSD: cmd-display-message.c,v 1.15 2012/07/11 07:10:15 nicm Exp $ */
+/* $OpenBSD: cmd-display-message.c,v 1.17 2012/12/09 23:17:35 nicm Exp $ */
 
 /*
  * Copyright (c) 2009 Tiago Cunha <me@tiagocunha.org>
@@ -32,7 +32,8 @@ enum cmd_retval	 cmd_display_message_exec(struct cmd *, struct cmd_ctx *);
 const struct cmd_entry cmd_display_message_entry = {
 	"display-message", "display",
 	"c:pt:F:", 0, 1,
-	"[-p] [-c target-client] [-t target-pane] [-F format] [message]",
+	"[-p] [-c target-client] [-F format] " CMD_TARGET_PANE_USAGE
+	" [message]",
 	0,
 	NULL,
 	NULL,
@@ -76,7 +77,7 @@ cmd_display_message_exec(struct cmd *self, struct cmd_ctx *ctx)
 	if (args->argc != 0)
 		template = args->argv[0];
 	if (template == NULL)
-		template = DEFAULT_DISPLAY_MESSAGE_TEMPLATE;
+		template = DISPLAY_MESSAGE_TEMPLATE;
 
 	ft = format_create();
 	format_client(ft, c);

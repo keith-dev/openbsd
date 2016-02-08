@@ -1,4 +1,4 @@
-/*	$OpenBSD: aucat.c,v 1.54 2012/04/11 06:05:43 ratchov Exp $	*/
+/*	$OpenBSD: aucat.c,v 1.56 2012/11/23 07:03:28 ratchov Exp $	*/
 /*
  * Copyright (c) 2008 Alexandre Ratchov <alex@caoua.org>
  *
@@ -444,8 +444,7 @@ aucat_open(struct aucat *hdl, const char *str, unsigned int mode,
 		DPRINTF("%s: junk at end of dev name\n", p);
 		return 0;
 	}
-	if (type)
-		devnum += 16; /* XXX */
+	devnum += type * 16; /* XXX */
 	DPRINTF("aucat_open: host=%s unit=%u devnum=%u opt=%s\n",
 	    host, unit, devnum, opt);
 	if (host[0] != '\0') {
@@ -463,6 +462,7 @@ aucat_open(struct aucat *hdl, const char *str, unsigned int mode,
 	hdl->rtodo = sizeof(struct amsg);
 	hdl->wstate = WSTATE_IDLE;
 	hdl->wtodo = 0xdeadbeef;
+	hdl->maxwrite = 0;
 
 	/*
 	 * say hello to server

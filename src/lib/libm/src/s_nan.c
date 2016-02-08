@@ -1,4 +1,4 @@
-/*	$OpenBSD: s_nan.c,v 1.7 2011/05/30 18:34:38 martynas Exp $	*/
+/*	$OpenBSD: s_nan.c,v 1.9 2013/01/13 03:45:00 martynas Exp $	*/
 /*-
  * Copyright (c) 2007 David Schultz
  * All rights reserved.
@@ -27,9 +27,6 @@
  * $FreeBSD: src/lib/msun/src/s_nan.c,v 1.2 2007/12/18 23:46:32 das Exp $
  */
 
-/* LINTLIBRARY */
-
-#include <sys/cdefs.h>
 #include <sys/types.h>
 #include <sys/endian.h>
 #include <ctype.h>
@@ -126,10 +123,5 @@ nanf(const char *s)
 }
 
 #if	LDBL_MANT_DIG == 53
-#ifdef	lint
-/* PROTOLIB1 */
-long double nanl(const char *);
-#else	/* lint */
 __weak_alias(nanl, nan);
-#endif	/* lint */
 #endif	/* LDBL_MANT_DIG == 53 */

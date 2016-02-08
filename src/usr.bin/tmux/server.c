@@ -1,4 +1,4 @@
-/* $OpenBSD: server.c,v 1.105 2012/07/10 11:53:01 nicm Exp $ */
+/* $OpenBSD: server.c,v 1.107 2012/12/06 12:49:13 nicm Exp $ */
 
 /*
  * Copyright (c) 2007 Nicholas Marriott <nicm@users.sourceforge.net>
@@ -106,11 +106,8 @@ server_create_socket(void)
 int
 server_start(int lockfd, char *lockfile)
 {
-	struct window_pane	*wp;
-	int	 		 pair[2];
-	char			*cause;
-	struct timeval		 tv;
-	u_int			 i;
+	int	 	pair[2];
+	struct timeval	tv;
 
 	/* The first client is special and gets a socketpair; create it. */
 	if (socketpair(AF_UNIX, SOCK_STREAM, PF_UNSPEC, pair) != 0)
@@ -169,7 +166,7 @@ server_start(int lockfd, char *lockfile)
 		load_cfg(SYSTEM_CFG, NULL, &cfg_causes);
 	else if (errno != ENOENT) {
 		cfg_add_cause(
-		    &cfg_causes, "%s: %s", strerror(errno), SYSTEM_CFG);
+		    &cfg_causes, "%s: %s", SYSTEM_CFG, strerror(errno));
 	}
 	if (cfg_file != NULL)
 		load_cfg(cfg_file, NULL, &cfg_causes);
@@ -178,17 +175,9 @@ server_start(int lockfd, char *lockfile)
 	 * If there is a session already, put the current window and pane into
 	 * more mode.
 	 */
-	if (!RB_EMPTY(&sessions) && !ARRAY_EMPTY(&cfg_causes)) {
-		wp = RB_MIN(sessions, &sessions)->curw->window->active;
-		window_pane_set_mode(wp, &window_copy_mode);
-		window_copy_init_for_output(wp);
-		for (i = 0; i < ARRAY_LENGTH(&cfg_causes); i++) {
-			cause = ARRAY_ITEM(&cfg_causes, i);
-			window_copy_add(wp, "%s", cause);
-			free(cause);
-		}
-		ARRAY_FREE(&cfg_causes);
-	}
+	if (!RB_EMPTY(&sessions) && !ARRAY_EMPTY(&cfg_causes))
+		show_cfg_causes(RB_MIN(sessions, &sessions));
+
 	cfg_finished = 1;
 
 	server_add_accept(0);

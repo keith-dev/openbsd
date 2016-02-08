@@ -64,6 +64,15 @@ struct nsd_options {
 	const char* nsid;
 	int xfrd_reload_timeout;
 
+#ifdef RATELIMIT
+	/** number of buckets in rrl hashtable */
+	size_t rrl_size;
+	/** max qps for queries, 0 is nolimit */
+	size_t rrl_ratelimit;
+	/** max qps for whitelisted queries, 0 is nolimit */
+	size_t rrl_whitelist_ratelimit;
+#endif
+
 	region_type* region;
 };
 
@@ -87,6 +96,9 @@ struct zone_options {
 	acl_options_t* notify;
 	acl_options_t* provide_xfr;
 	acl_options_t* outgoing_interface;
+#ifdef RATELIMIT
+	uint16_t rrl_whitelist; /* bitmap with rrl types */
+#endif
 	uint8_t allow_axfr_fallback;
 	uint8_t notify_retry;
 };
@@ -188,6 +200,7 @@ void key_options_tsig_add(nsd_options_t* opt);
 /* the reason why (the acl) is returned too (or NULL) */
 int acl_check_incoming(acl_options_t* acl, struct query* q,
 	acl_options_t** reason);
+int acl_addr_matches_host(acl_options_t* acl, acl_options_t* host);
 int acl_addr_matches(acl_options_t* acl, struct query* q);
 int acl_key_matches(acl_options_t* acl, struct query* q);
 int acl_addr_match_mask(uint32_t* a, uint32_t* b, uint32_t* mask, size_t sz);

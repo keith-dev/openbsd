@@ -1,9 +1,5 @@
 ./.cshrc
 ./.profile
-./etc/afs/CellServDB
-./etc/afs/SuidCells
-./etc/afs/ThisCell
-./etc/afs/afsd.conf
 ./etc/amd/master.sample
 ./etc/authpf
 ./etc/bgpd.conf
@@ -90,6 +86,8 @@
 ./etc/nginx/scgi_params
 ./etc/nginx/uwsgi_params
 ./etc/nginx/win-utf
+./etc/npppd/npppd-users
+./etc/npppd/npppd.conf
 ./etc/nsd.conf
 ./etc/ntpd.conf
 ./etc/ospf6d.conf
@@ -130,6 +128,7 @@
 ./etc/rc.d/kpasswdd
 ./etc/rc.d/ldapd
 ./etc/rc.d/ldattach
+./etc/rc.d/ldomd
 ./etc/rc.d/ldpd
 ./etc/rc.d/lockd
 ./etc/rc.d/lpd
@@ -139,6 +138,7 @@
 ./etc/rc.d/named
 ./etc/rc.d/nfsd
 ./etc/rc.d/nginx
+./etc/rc.d/npppd
 ./etc/rc.d/nsd
 ./etc/rc.d/ntpd
 ./etc/rc.d/ospf6d
@@ -167,6 +167,7 @@
 ./etc/rc.d/statd
 ./etc/rc.d/syslogd
 ./etc/rc.d/tftpd
+./etc/rc.d/tftpproxy
 ./etc/rc.d/watchdogd
 ./etc/rc.d/wsmoused
 ./etc/rc.d/xdm
@@ -252,6 +253,7 @@
 ./var/www/conf/httpd.conf
 ./var/www/conf/magic
 ./var/www/conf/mime.types
+./var/www/htdocs/50x.html
 ./var/www/htdocs/apache_pb.gif
 ./var/www/htdocs/bgplg/index.html
 ./var/www/htdocs/bgplg/openbgpd.gif

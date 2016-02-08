@@ -1,8 +1,7 @@
-/*	$OpenBSD: config.c,v 1.15 2012/07/02 13:03:24 mikeb Exp $	*/
-/*	$vantronix: config.c,v 1.30 2010/05/28 15:34:35 reyk Exp $	*/
+/*	$OpenBSD: config.c,v 1.19 2013/01/08 10:38:19 reyk Exp $	*/
 
 /*
- * Copyright (c) 2010 Reyk Floeter <reyk@vantronix.net>
+ * Copyright (c) 2010-2013 Reyk Floeter <reyk@openbsd.org>
  *
  * Permission to use, copy, modify, and distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -504,7 +503,7 @@ int
 config_getsocket(struct iked *env, struct imsg *imsg,
     void (*cb)(int, short, void *))
 {
-	struct iked_socket	*sock, **sptr;
+	struct iked_socket	*sock, **sptr, **nptr;
 
 	log_debug("%s: received socket fd %d", __func__, imsg->fd);
 
@@ -519,10 +518,12 @@ config_getsocket(struct iked *env, struct imsg *imsg,
 
 	switch (sock->sock_addr.ss_family) {
 	case AF_INET:
-		sptr = &env->sc_sock4;
+		sptr = &env->sc_sock4[0];
+		nptr = &env->sc_sock4[1];
 		break;
 	case AF_INET6:
-		sptr = &env->sc_sock6;
+		sptr = &env->sc_sock6[0];
+		nptr = &env->sc_sock6[1];
 		break;
 	default:
 		fatal("config_getsocket: socket af");
@@ -530,6 +531,9 @@ config_getsocket(struct iked *env, struct imsg *imsg,
 	}
 	if (*sptr == NULL)
 		*sptr = sock;
+	if (*nptr == NULL &&
+	    socket_getport(&sock->sock_addr) == IKED_NATT_PORT)
+		*nptr = sock;
 
 	event_set(&sock->sock_ev, sock->sock_fd,
 	    EV_READ|EV_PERSIST, cb, sock);
@@ -603,7 +607,6 @@ config_setpolicy(struct iked *env, struct iked_policy *pol,
 		iovcnt += prop->prop_nxforms + 1;
 	}
 
-	size += pol->pol_nflows * sizeof(*flow);
 	iovcnt += pol->pol_nflows;
 
 	if (iovcnt > IOV_MAX) {

@@ -1,4 +1,4 @@
-.\" $OpenBSD: bgpd.conf.5,v 1.120 2012/07/07 08:22:57 claudio Exp $
+.\" $OpenBSD: bgpd.conf.5,v 1.124 2013/01/02 15:06:46 florian Exp $
 .\"
 .\" Copyright (c) 2004 Claudio Jeker <claudio@openbsd.org>
 .\" Copyright (c) 2003, 2004 Henning Brauer <henning@openbsd.org>
@@ -16,7 +16,7 @@
 .\" ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
 .\" OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 .\"
-.Dd $Mdocdate: July 7 2012 $
+.Dd $Mdocdate: January 2 2013 $
 .Dt BGPD.CONF 5
 .Os
 .Sh NAME
@@ -512,7 +512,6 @@ should be set to a number or IP that was assigned by an appropriate authority.
 Whereas
 .Ar local
 can be chosen by the local operator.
-.Pp
 .El
 .Sh NEIGHBORS AND GROUPS
 .Xr bgpd 8
@@ -660,13 +659,13 @@ The default is
 .Pq Ic yes Ns | Ns Ic no
 .Xc
 If set to
-.Ic yes ,
-the graceful restart capability is announced.
+.Ic no ,
+the graceful restart capability is not announced.
 Currently only the End-of-RIB marker is supported and announced by the
 .Ic restart
 capability.
 The default is
-.Ic no .
+.Ic yes .
 .Pp
 .It Ic demote Ar group
 Increase the
@@ -877,7 +876,7 @@ Set the AS number of the remote system.
 Bind the neighbor to the specified RIB.
 .Pp
 .It Ic route-reflector Op Ar address
-Act as an RFC 2796
+Act as an RFC 4456
 .Em route-reflector
 for this neighbor.
 An optional cluster ID can be specified; otherwise the BGP ID will be used.
@@ -1174,6 +1173,19 @@ where a single
 is repeated more than
 .Ar len
 times.
+.Pp
+.It Ic nexthop Ar address
+This rule applies only to
+.Em UPDATES
+where the nexthop is equal to
+.Ar address .
+The
+.Ar address
+can be set to
+.Em neighbor
+in which case the nexthop is compared against the address of the neighbor.
+Nexthop filtering is not supported on locally announced networks and one must
+take into consideration previous rules overwriting nexthops.
 .Pp
 .It Xo
 .Ic prefix

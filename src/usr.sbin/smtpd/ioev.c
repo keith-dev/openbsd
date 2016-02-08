@@ -1,4 +1,4 @@
-/*	$OpenBSD: ioev.c,v 1.3 2012/05/25 13:52:33 chl Exp $	*/
+/*	$OpenBSD: ioev.c,v 1.11 2013/02/05 11:45:18 gilles Exp $	*/
 /*      
  * Copyright (c) 2012 Eric Faurot <eric@openbsd.org>
  *
@@ -32,7 +32,8 @@
 #include "iobuf.h"
 
 #ifdef IO_SSL
-#	include <openssl/ssl.h>
+#include <openssl/err.h>
+#include <openssl/ssl.h>
 #endif
 
 enum {
@@ -63,6 +64,7 @@ void	io_frame_leave(struct io *);
 #ifdef IO_SSL
 void	ssl_error(const char *); /* XXX external */
 
+static const char* io_ssl_error(void);
 void	io_dispatch_accept_ssl(int, short, void *);
 void	io_dispatch_connect_ssl(int, short, void *);
 void	io_dispatch_read_ssl(int, short, void *);
@@ -81,10 +83,28 @@ const char*
 io_strio(struct io *io)
 {
 	static char	buf[128];
+	char		ssl[128];
 
-	snprintf(buf, sizeof buf, "<io:%p fd=%i to=%i fl=%s ib=%zu ob=%zu>",
-			io, io->sock, io->timeout, io_strflags(io->flags),
-			io_pending(io), io_queued(io));
+	ssl[0] = '\0';
+#ifdef IO_SSL
+	if (io->ssl) {
+		snprintf(ssl, sizeof ssl, " ssl=%s:%s:%i",
+		    SSL_get_cipher_version(io->ssl),
+		    SSL_get_cipher_name(io->ssl),
+		    SSL_get_cipher_bits(io->ssl, NULL));
+	}
+#endif
+
+	if (io->iobuf == NULL)
+		snprintf(buf, sizeof buf,
+		    "<io:%p fd=%i to=%i fl=%s%s>",
+		    io, io->sock, io->timeout, io_strflags(io->flags), ssl);
+	else
+		snprintf(buf, sizeof buf,
+		    "<io:%p fd=%i to=%i fl=%s%s ib=%zu ob=%zu>",
+		    io, io->sock, io->timeout, io_strflags(io->flags), ssl,
+		    io_pending(io), io_queued(io));
+
 	return (buf);
 }
 
@@ -95,7 +115,7 @@ io_strevent(int evt)
 {
 	static char buf[32];
 
-	switch(evt) {
+	switch (evt) {
 	CASE(IO_CONNECTED);
 	CASE(IO_TLSREADY);
 	CASE(IO_DATAIN);
@@ -404,7 +424,7 @@ io_reset(struct io *io, short events, void (*dispatch)(int, short, void*))
 	} else
 		ptv = NULL;
 
-        event_add(&io->ev, ptv);
+	event_add(&io->ev, ptv);
 }
 
 size_t
@@ -426,7 +446,7 @@ io_strflags(int flags)
 
 	buf[0] = '\0';
 
-	switch(flags & IO_RW) {
+	switch (flags & IO_RW) {
 	case 0:
 		strlcat(buf, "rw", sizeof buf);
 		break;
@@ -465,8 +485,6 @@ io_evstr(short ev)
 	}
 
 	if (ev & EV_TIMEOUT) {
-		if (n)
-			strlcat(buf, "|", sizeof(buf));
 		strlcat(buf, "EV_TIMEOUT", sizeof(buf));
 		ev &= ~EV_TIMEOUT;
 		n++;
@@ -513,6 +531,7 @@ io_dispatch(int fd, short ev, void *humppa)
 	struct io	*io = humppa;
 	size_t		 w;
 	ssize_t		 n;
+	int		 saved_errno;
 
 	io_frame_enter("io_dispatch", io, ev);
 
@@ -523,25 +542,40 @@ io_dispatch(int fd, short ev, void *humppa)
 
 	if (ev & EV_WRITE && (w = io_queued(io))) {
 		if ((n = iobuf_write(io->iobuf, io->sock)) < 0) {
-			io_callback(io, n == IOBUF_CLOSED ?
-				IO_DISCONNECTED : IO_ERROR);
+			if (n == IOBUF_WANT_WRITE) /* kqueue bug? */
+				goto read;
+			if (n == IOBUF_CLOSED)
+				io_callback(io, IO_DISCONNECTED);
+			else {
+				saved_errno = errno;
+				io->error = strerror(errno);
+				errno = saved_errno;
+				io_callback(io, IO_ERROR);
+			}
 			goto leave;
 		}
 		if (w > io->lowat && w - n <= io->lowat)
 			io_callback(io, IO_LOWAT);
 	}
+    read:
 
 	if (ev & EV_READ) {
 		if ((n = iobuf_read(io->iobuf, io->sock)) < 0) {
-			io_callback(io, n == IOBUF_CLOSED ?
-			    IO_DISCONNECTED : IO_ERROR);
+			if (n == IOBUF_CLOSED)
+				io_callback(io, IO_DISCONNECTED);
+			else {
+				saved_errno = errno;
+				io->error = strerror(errno);
+				errno = saved_errno;
+				io_callback(io, IO_ERROR);
+			}
 			goto leave;
 		}
 		if (n)
 			io_callback(io, IO_DATAIN);
 	}
 
-   leave:
+leave:
 	io_frame_leave(io);
 }
 
@@ -552,7 +586,7 @@ io_callback(struct io *io, int evt)
 }
 
 int
-io_connect(struct io *io, const struct sockaddr *sa)
+io_connect(struct io *io, const struct sockaddr *sa, const struct sockaddr *bsa)
 {
 	int	sock, errno_save;
 
@@ -561,6 +595,9 @@ io_connect(struct io *io, const struct sockaddr *sa)
 
 	io_set_blocking(sock, 0);
 	io_set_linger(sock, 0);
+
+	if (bsa && bind(sock, bsa, bsa->sa_len) == -1)
+		goto fail;
 
 	if (connect(sock, sa, sa->sa_len) == -1)
 		if (errno != EINPROGRESS)
@@ -576,6 +613,7 @@ io_connect(struct io *io, const struct sockaddr *sa)
 		errno_save = errno;
 		close(sock);
 		errno = errno_save;
+		io->error = strerror(errno);
 	}
 	return (-1);
 }
@@ -600,6 +638,21 @@ io_dispatch_connect(int fd, short ev, void *humppa)
 }
 
 #ifdef IO_SSL
+
+static const char*
+io_ssl_error(void)
+{
+	static char	buf[128];
+	unsigned long	e;
+
+	e = ERR_peek_last_error();
+	if (e) {
+		ERR_error_string(e, buf);
+		return (buf);
+	}
+
+	return ("No SSL error");
+}
 
 int
 io_start_tls(struct io *io, void *ssl)
@@ -659,6 +712,7 @@ io_dispatch_accept_ssl(int fd, short event, void *humppa)
 		io_reset(io, EV_WRITE, io_dispatch_accept_ssl);
 		break;
 	default:
+		io->error = io_ssl_error();
 		ssl_error("io_dispatch_accept_ssl:SSL_accept");
 		io_callback(io, IO_ERROR);
 		break;
@@ -695,6 +749,8 @@ io_dispatch_connect_ssl(int fd, short event, void *humppa)
 		io_reset(io, EV_WRITE, io_dispatch_connect_ssl);
 		break;
 	default:
+		io->error = io_ssl_error();
+		ssl_error("io_dispatch_connect_ssl:SSL_connect");
 		io_callback(io, IO_ERROR);
 		break;
 	}
@@ -707,7 +763,7 @@ void
 io_dispatch_read_ssl(int fd, short event, void *humppa)
 {
 	struct io	*io = humppa;
-	int		 n;
+	int		 n, saved_errno;
 
 	io_frame_enter("io_dispatch_read_ssl", io, event);
 
@@ -727,6 +783,14 @@ io_dispatch_read_ssl(int fd, short event, void *humppa)
 		io_callback(io, IO_DISCONNECTED);
 		break;
 	case IOBUF_ERROR:
+		saved_errno = errno;
+		io->error = strerror(errno);
+		errno = saved_errno;
+		io_callback(io, IO_ERROR);
+		break;
+	case IOBUF_SSLERROR:
+		io->error = io_ssl_error();
+		ssl_error("io_dispatch_read_ssl:SSL_read");
 		io_callback(io, IO_ERROR);
 		break;
 	default:
@@ -742,7 +806,7 @@ void
 io_dispatch_write_ssl(int fd, short event, void *humppa)
 {
 	struct io	*io = humppa;
-	int		 n;
+	int		 n, saved_errno;
 	size_t		 w2, w;
 
 	io_frame_enter("io_dispatch_write_ssl", io, event);
@@ -764,6 +828,14 @@ io_dispatch_write_ssl(int fd, short event, void *humppa)
 		io_callback(io, IO_DISCONNECTED);
 		break;
 	case IOBUF_ERROR:
+		saved_errno = errno;
+		io->error = strerror(errno);
+		errno = saved_errno;
+		io_callback(io, IO_ERROR);
+		break;
+	case IOBUF_SSLERROR:
+		io->error = io_ssl_error();
+		ssl_error("io_dispatch_write_ssl:SSL_write");
 		io_callback(io, IO_ERROR);
 		break;
 	default:
@@ -783,7 +855,7 @@ io_reload_ssl(struct io *io)
 {
 	void	(*dispatch)(int, short, void*) = NULL;
 
-	switch(io->state) {
+	switch (io->state) {
 	case IO_STATE_CONNECT_SSL:
 		dispatch = io_dispatch_connect_ssl;
 		break;

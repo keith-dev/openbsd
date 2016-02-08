@@ -3,9 +3,9 @@
 # THIS FILE AUTOMATICALLY GENERATED.  DO NOT EDIT.
 # generated from:
 #
-#	OpenBSD: etc.macppc/MAKEDEV.md,v 1.49 2012/04/06 15:18:41 jsing Exp 
-#	OpenBSD: MAKEDEV.common,v 1.59 2012/04/06 15:18:41 jsing Exp 
-#	OpenBSD: MAKEDEV.mi,v 1.80 2011/04/18 16:52:10 thib Exp 
+#	OpenBSD: etc.macppc/MAKEDEV.md,v 1.52 2012/12/04 10:44:20 mpi Exp 
+#	OpenBSD: MAKEDEV.common,v 1.60 2012/08/23 06:15:28 deraadt Exp 
+#	OpenBSD: MAKEDEV.mi,v 1.81 2012/11/05 08:07:09 jasper Exp 
 #	OpenBSD: MAKEDEV.sub,v 1.14 2005/02/07 06:14:18 david Exp 
 #
 #
@@ -71,12 +71,13 @@
 #	bthub*	Bluetooth Hubs
 #	crypto	Hardware crypto access driver
 #	diskmap	Disk mapper
+#	agp*	AGP bridge
+#	drm*	Direct Rendering Manager
 #	fd	fd/* nodes
 #	gpio*	General Purpose Input/Output
 #	hotplug	devices hot plugging
 #	iop*	I2O controller devices
 #	lkm	Loadable kernel modules interface
-#	nnpfs*	NNPFS filesystem node
 #	pci*	PCI bus devices
 #	pf*	Packet Filter
 #	pppx*	PPP Multiplexer
@@ -189,19 +190,19 @@ M() {
 	mkl ${5-666} $1 $2 $3 $4
 	G=${6:-wheel}
 	[ "$7" ] && {
-		MKlist[${#MKlist[*]}]=";chown $7:$G $1"
+		MKlist[${#MKlist[*]}]="&& chown $7:$G $1"
 	} || {
 		case $G in
 		wheel)
-			[ ${#whlist[*]} = 0 ] && whlist[0]=";chgrp wheel"
+			[ ${#whlist[*]} = 0 ] && whlist[0]="&& chgrp wheel"
 			whlist[${#whlist[*]}]="$1"
 		;;
 		operator)
-			[ ${#oplist[*]} = 0 ] && oplist[0]=";chgrp operator"
+			[ ${#oplist[*]} = 0 ] && oplist[0]="&& chgrp operator"
 			oplist[${#oplist[*]}]="$1"
 		;;
 		*)
-			MKlist[${#MKlist[*]}]=";chgrp $G $1";
+			MKlist[${#MKlist[*]}]="&& chgrp $G $1";
 		esac
 	}
 	return 0
@@ -295,10 +296,6 @@ pci*)
 	MKlist[${#MKlist[*]}]=";[ -h pci ] || ln -sf pci0 pci"
 	;;
 
-nnpfs*)
-	M nnpfs$U c 51 $U 600
-	;;
-
 lkm)
 	M lkm c 24 0 640 _lkm
 	;;
@@ -319,6 +316,15 @@ fd)
 	RMlist[${#RMlist[*]}]=";mkdir -p fd;rm -f" n=0
 	while [ $n -lt 64 ];do M fd/$n c 21 $n;n=$(($n+1));done
 	MKlist[${#MKlist[*]}]=";chmod 555 fd"
+	;;
+
+drm*)
+	M drm$U c 87 $U 660
+	;;
+
+agp*)
+	M agp$U c 86 $U
+	MKlist[${#MKlist[*]}]=";[ -e agpgart ] || ln -s agp$U agpgart"
 	;;
 
 diskmap)
@@ -530,12 +536,12 @@ ramdisk)
 	;;
 
 all)
-	R bthub0 bthub1 bthub2 bio gpio0 gpio1 gpio2 vnd0 vnd1 vnd2
-	R vnd3 sd0 sd1 sd2 sd3 sd4 sd5 sd6 sd7 sd8 sd9 cd0 cd1 rd0
-	R tun0 tun1 tun2 tun3 bpf0 bpf1 bpf2 bpf3 bpf4 bpf5 bpf6 bpf7
-	R bpf8 bpf9 pty0 diskmap vscsi0 nnpfs0 ch0 cuaa cuab ttya ttyb
-	R audio0 audio1 audio2 hotplug ptm local wscons pci0 pci1 pci2
-	R pci3 iop0 iop1 uall rmidi0 rmidi1 rmidi2 rmidi3 rmidi4
+	R drm0 bthub0 bthub1 bthub2 bio gpio0 gpio1 gpio2 vnd0 vnd1
+	R vnd2 vnd3 sd0 sd1 sd2 sd3 sd4 sd5 sd6 sd7 sd8 sd9 cd0 cd1
+	R rd0 tun0 tun1 tun2 tun3 bpf0 bpf1 bpf2 bpf3 bpf4 bpf5 bpf6
+	R bpf7 bpf8 bpf9 pty0 diskmap vscsi0 ch0 cuaa cuab ttya ttyb
+	R audio0 audio1 audio2 pppx hotplug ptm local wscons pci0 pci1
+	R pci2 pci3 iop0 iop1 uall rmidi0 rmidi1 rmidi2 rmidi3 rmidi4
 	R rmidi5 rmidi6 rmidi7 tuner0 radio0 music0 video0 video1 uk0
 	R random lkm tty00 tty01 tty02 tty03 apm crypto pf systrace
 	R wd0 wd1 wd2 wd3 std st0 st1 fd

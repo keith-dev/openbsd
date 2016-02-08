@@ -1,7 +1,7 @@
-/*	$OpenBSD: scheduler_backend.c,v 1.1 2012/07/09 09:57:53 gilles Exp $	*/
+/*	$OpenBSD: scheduler_backend.c,v 1.8 2013/01/26 09:37:23 gilles Exp $	*/
 
 /*
- * Copyright (c) 2012 Gilles Chehade <gilles@openbsd.org>
+ * Copyright (c) 2012 Gilles Chehade <gilles@poolp.org>
  *
  * Permission to use, copy, modify, and distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -35,10 +35,13 @@
 #include "log.h"
 
 extern struct scheduler_backend scheduler_backend_ramqueue;
+extern struct scheduler_backend scheduler_backend_null;
 
 struct scheduler_backend *
 scheduler_backend_lookup(const char *name)
 {
+	if (!strcmp(name, "null"))
+		return &scheduler_backend_null;
 	if (!strcmp(name, "ramqueue"))
 		return &scheduler_backend_ramqueue;
 
@@ -48,11 +51,27 @@ scheduler_backend_lookup(const char *name)
 void
 scheduler_info(struct scheduler_info *sched, struct envelope *evp)
 {
-	strlcpy(sched->destination, evp->dest.domain, sizeof sched->destination);
-
 	sched->evpid = evp->id;
+	sched->type = evp->type;
 	sched->creation = evp->creation;
-	sched->lasttry  = evp->lasttry;
-	sched->expire   = evp->expire;
-	sched->retry    = evp->retry;
+	sched->retry = evp->retry;
+	sched->expire = evp->expire;
+	sched->lasttry = evp->lasttry;
+	sched->lastbounce = evp->lastbounce;
+	sched->nexttry	= 0;
+}
+
+time_t
+scheduler_compute_schedule(struct scheduler_info *sched)
+{
+	time_t	delay;
+
+	if (sched->type == D_MTA)
+		delay = 800;
+	else
+		delay = 10;
+
+	delay = ((delay * sched->retry) * sched->retry) / 2;
+
+	return (sched->creation + delay);
 }

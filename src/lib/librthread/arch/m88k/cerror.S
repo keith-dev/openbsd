@@ -1,4 +1,4 @@
-/*	$OpenBSD: cerror.S,v 1.1 2012/02/18 17:10:10 miod Exp $	*/
+/*	$OpenBSD: cerror.S,v 1.4 2013/01/27 09:56:05 miod Exp $	*/
 
 /*-
  * Copyright (c) 1990 The Regents of the University of California.
@@ -33,23 +33,28 @@
  * SUCH DAMAGE.
  */
 
-#include <machine/asm.h>
+#include "DEFS.h"
 
 	.globl	_C_LABEL(__errno)
 
 ASENTRY(__cerror)
-	subu	r31,r31,16
-	st	r25,r0,r31
-	st	r1,r31,4
+	subu	%r31,%r31,16
+	st	%r25,%r0,%r31
+	st	%r1,%r31,4
 
+#ifdef __PIC__
+	bsr.n	_C_LABEL(__errno)#plt
+#else
 	bsr.n	_C_LABEL(__errno)
-	 or	r25,r0,r2
-	st	r25,r0,r2
+#endif
+	 or	%r25,%r0,%r2
+	st	%r25,%r0,%r2
 
-	subu	r2,r0,1
-	or	r3, r0, r2
+	subu	%r2,%r0,1
+	or	%r3, %r0, %r2
 
-	ld	r1,r31,4
-	ld	r25,r0,r31
-	jmp.n	r1
-	 addu	r31,r31,16
+	ld	%r1,%r31,4
+	ld	%r25,%r0,%r31
+	jmp.n	%r1
+	 addu	%r31,%r31,16
+END(__cerror)

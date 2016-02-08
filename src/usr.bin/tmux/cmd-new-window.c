@@ -1,4 +1,4 @@
-/* $OpenBSD: cmd-new-window.c,v 1.26 2012/07/11 07:10:15 nicm Exp $ */
+/* $OpenBSD: cmd-new-window.c,v 1.29 2012/12/09 23:17:35 nicm Exp $ */
 
 /*
  * Copyright (c) 2007 Nicholas Marriott <nicm@users.sourceforge.net>
@@ -26,13 +26,13 @@
  * Create a new window.
  */
 
-int	cmd_new_window_exec(struct cmd *, struct cmd_ctx *);
+enum cmd_retval	cmd_new_window_exec(struct cmd *, struct cmd_ctx *);
 
 const struct cmd_entry cmd_new_window_entry = {
 	"new-window", "neww",
 	"ac:dF:kn:Pt:", 0, 1,
 	"[-adkP] [-c start-directory] [-F format] [-n window-name] "
-	"[-t target-window] [command]",
+	CMD_TARGET_WINDOW_USAGE " [command]",
 	0,
 	NULL,
 	NULL,
@@ -123,7 +123,7 @@ cmd_new_window_exec(struct cmd *self, struct cmd_ctx *ctx)
 
 	if (args_has(args, 'P')) {
 		if ((template = args_get(args, 'F')) == NULL)
-			template = DEFAULT_PANE_INFO_TEMPLATE;
+			template = NEW_WINDOW_TEMPLATE;
 
 		ft = format_create();
 		if ((c = cmd_find_client(ctx, NULL)) != NULL)

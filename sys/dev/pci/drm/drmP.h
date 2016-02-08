@@ -1,4 +1,4 @@
-/* $OpenBSD: drmP.h,v 1.129 2012/04/11 17:42:53 mikeb Exp $ */
+/* $OpenBSD: drmP.h,v 1.133 2012/12/06 15:05:21 mpi Exp $ */
 /* drmP.h -- Private header for Direct Rendering Manager -*- linux-c -*-
  * Created: Mon Jan  4 10:05:05 1999 by faith@precisioninsight.com
  */
@@ -72,6 +72,15 @@
 
 #include "drm.h"
 #include "drm_atomic.h"
+#include "agp.h"
+
+#define __OS_HAS_AGP		(NAGP > 0)
+
+#if BYTE_ORDER == BIG_ENDIAN
+#define __BIG_ENDIAN
+#else
+#define __LITTLE_ENDIAN
+#endif
 
 #define DRM_KERNEL_CONTEXT    0	 /* Change drm_resctx if changed	  */
 #define DRM_RESERVED_CONTEXTS 1	 /* Change drm_resctx if changed	  */
@@ -80,8 +89,6 @@
 
 				/* Internal types and structures */
 #define DRM_IF_VERSION(maj, min) (maj << 16 | min)
-
-#define __OS_HAS_AGP	1
 
 #define DRM_CURRENTPID		curproc->p_pid
 #define DRM_LOCK()		rw_enter_write(&dev->dev_lock)
@@ -131,6 +138,10 @@ typedef u_int8_t u8;
 #define DRM_WRITEMEMORYBARRIER()	__asm __volatile("" : : : "memory");
 #define DRM_MEMORYBARRIER()		__asm __volatile( \
 					"lock; addl $0,0(%%rsp)" : : : "memory");
+#elif defined(__powerpc__)
+#define DRM_READMEMORYBARRIER()		DRM_MEMORYBARRIER() 
+#define DRM_WRITEMEMORYBARRIER()	DRM_MEMORYBARRIER()
+#define DRM_MEMORYBARRIER()		__asm __volatile("sync" : : : "memory");
 #endif
 
 #define	DRM_COPY_TO_USER(user, kern, size)	copyout(kern, user, size)
@@ -286,7 +297,7 @@ struct drm_agp_mem {
 };
 
 struct drm_agp_head {
-	struct device				*agpdev;
+	struct agp_softc			*agpdev;
 	const char				*chipset;
 	TAILQ_HEAD(agp_memlist, drm_agp_mem)	 memory;
 	struct agp_info				 info;
@@ -574,7 +585,7 @@ void	 drm_free(void *);
 /* XXX until we get PAT support */
 #define drm_core_ioremap_wc drm_core_ioremap
 void	drm_core_ioremap(struct drm_local_map *, struct drm_device *);
-void	drm_core_ioremapfree(struct drm_local_map *);
+void	drm_core_ioremapfree(struct drm_local_map *, struct drm_device *);
 
 int	drm_mtrr_add(unsigned long, size_t, int);
 int	drm_mtrr_del(int, unsigned long, size_t, int);

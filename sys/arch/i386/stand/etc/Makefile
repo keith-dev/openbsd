@@ -1,4 +1,4 @@
-#	$OpenBSD: Makefile,v 1.9 1998/05/28 20:52:37 mickey Exp $
+#	$OpenBSD: Makefile,v 1.11 2012/08/29 22:23:08 pascal Exp $
 
 S=	${.CURDIR}/../../../..
 I386=	${.CURDIR}/../..

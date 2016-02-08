@@ -1,4 +1,4 @@
-/*	$OpenBSD: ldasm.S,v 1.7 2006/11/14 19:47:50 drahn Exp $ */
+/*	$OpenBSD: ldasm.S,v 1.9 2012/11/01 10:25:33 kettenis Exp $ */
 
 /*
  * Copyright (c) 2006 Dale Rahn
@@ -86,7 +86,7 @@ ENTRY(_dl_start)
 	shll2	r6
 	add	r5, r6			// calc envp
 	jmp	@r0
-	 nop
+	 mov	#0, r7
 
 	.align 2
 .L_boot_bind:
@@ -192,7 +192,6 @@ DL_SYSCALL(read)
 	 nop
 
 DL_SYSCALL(write)
-DL_SYSCALL(stat)
 DL_SYSCALL(fstat)
 DL_SYSCALL(fcntl)
 DL_SYSCALL(gettimeofday)

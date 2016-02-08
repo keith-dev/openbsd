@@ -1,4 +1,4 @@
-# $OpenBSD: Makefile.cross,v 1.53 2012/07/13 15:54:10 jsing Exp $
+# $OpenBSD: Makefile.cross,v 1.60 2013/02/02 13:38:41 miod Exp $
 
 cross-tools:	cross-includes cross-binutils cross-gcc cross-lib
 cross-distrib:	cross-tools cross-bin cross-share cross-sys cross-etc-root-var
@@ -88,19 +88,15 @@ CROSSGCC=	${CROSSDIR}/.gcc_done
 
 .include <bsd.own.mk>
 
-OLD_BINUTILS_ARCH=m68k m88k vax
+OLD_BINUTILS_ARCH=vax
 
 .for _arch in ${TARGET_ARCH}
 .if !empty(GCC2_ARCH:M${_arch})
-USE_GCC3?=no
-TARGET_USE_GCC3=No
-COMPILER_VERSION?=gcc2
+COMPILER_VERSION=gcc2
 .elif !empty(GCC4_ARCH:M${_arch})
-TARGET_USE_GCC4=Yes
-COMPILER_VERSION?=gcc4
+COMPILER_VERSION=gcc4
 .else
-TARGET_USE_GCC3=Yes
-COMPILER_VERSION?=gcc3
+COMPILER_VERSION=gcc3
 .endif
 
 .if !empty(BINUTILS217_ARCH:M${_arch})
@@ -124,8 +120,6 @@ BINUTILS_DIR=gnu/usr.bin/${BINUTILS_VERSION}
 #NO_CROSS+=	dc login_krb5 login_krb5-or-pwd passwd ppp tcpdump telnet \
 #		ftp gzsig sasyncd vnconfig
 		
-# need host setup for ydr
-NO_CROSS+=afs
 # explicit cross-compile
 NO_CROSS+=bind
 NO_CROSS+=httpd
@@ -356,13 +350,13 @@ ${CROSSGCC}:		${CROSSBINUTILS}
 	    --enable-languages="c,c++" --enable-cpp --disable-nls \
 	    --with-gxx-include-dir=${CROSSDIR}/usr/include/g++ && \
 	    PATH=${CROSSPATH} ${MAKE} BISON=yacc LANGUAGES="${CROSSLANGS}" \
-	    CFLAGS="${CFLAGS} -I${.CURDIR}/gnu/lib/libiberty/include" \
+	    CFLAGS="${CFLAGS} -DOPENBSD_CROSS -I${.CURDIR}/gnu/lib/libiberty/include" \
 	    LIBIBERTY_INCLUDES=${.CURDIR}/gnu/lib/libiberty/include \
 	    DEMANGLER_PROG= DEMANGLE_H= LDFLAGS="${LDSTATIC}" build_infodir=. \
 	    GCC_FOR_TARGET="./xgcc -B./ -I${CROSSDIR}/usr/include" && \
 	    ${MAKE} BISON=yacc LANGUAGES="${CROSSLANGS}" LDFLAGS="${LDSTATIC}" \
 	    GCC_FOR_TARGET="./xgcc -B./ -I${CROSSDIR}/usr/include" \
-	    CFLAGS="${CFLAGS} -I${.CURDIR}/gnu/lib/libiberty/include" \
+	    CFLAGS="${CFLAGS} -DOPENBSD_CROSS -I${.CURDIR}/gnu/lib/libiberty/include" \
 	    LIBIBERTY_INCLUDES=${.CURDIR}/gnu/lib/libiberty/include \
 	    build_infodir=. INSTALL_MAN= INSTALL_HEADERS_DIR= install)
 	mv -f ${CROSSDIR}/usr/bin/cpp ${CROSSDIR}/usr/${TARGET_CANON}/bin/${TARGET_CANON}-libexeccpp
@@ -393,16 +387,16 @@ cross-lib:	${CROSSGCC}
 	    for lib in csu libc; do \
 	    (cd $$lib; \
 	        eval ${CROSSENV} MAKEOBJDIR=obj.${MACHINE}.${TARGET} \
-		    ${MAKE} WANTLINT=no depend all ;\
+		    ${MAKE} depend all ;\
 	        eval ${CROSSENV} MAKEOBJDIR=obj.${MACHINE}.${TARGET} DESTDIR=${CROSSDIR} \
-		    ${MAKE} WANTLINT=no install); \
+		    ${MAKE} install); \
 	    done; \
 	    eval ${CROSSENV} MAKEOBJDIR=obj.${MACHINE}.${TARGET} \
 	        SKIPDIR=\"${NO_CROSS} libocurses/PSD.doc\" \
-	        ${MAKE} WANTLINT=no depend all ; \
+	        ${MAKE} depend all ; \
 	    eval ${CROSSENV} MAKEOBJDIR=obj.${MACHINE}.${TARGET} DESTDIR=${CROSSDIR} \
 	        SKIPDIR=\"${NO_CROSS} libocurses/PSD.doc\" \
-	        ${MAKE} WANTLINT=no install)
+	        ${MAKE} install)
 
 cross-bin:	${CROSSOBJ}
 	MACHINE=${TARGET} \

@@ -1,4 +1,4 @@
-/*	$OpenBSD: clparse.c,v 1.38 2011/12/10 17:15:27 krw Exp $	*/
+/*	$OpenBSD: clparse.c,v 1.53 2013/02/09 23:37:21 krw Exp $	*/
 
 /* Parser for dhclient config and lease files... */
 
@@ -66,7 +66,6 @@ read_client_conf(void)
 	config->backoff_cutoff = 15;
 	config->initial_interval = 3;
 	config->bootp_policy = ACCEPT;
-	config->script_name = _PATH_DHCLIENT_SCRIPT;
 	config->requested_options
 	    [config->requested_option_count++] = DHO_SUBNET_MASK;
 	config->requested_options
@@ -139,13 +138,13 @@ read_client_leases(void)
  *	hardware-declaration |
  *	TOK_REQUEST option-list |
  *	TOK_REQUIRE option-list |
+ *	TOK_IGNORE option-list |
  *	TOK_TIMEOUT number |
  *	TOK_RETRY number |
  *	TOK_SELECT_TIMEOUT number |
  *	TOK_REBOOT number |
  *	TOK_BACKOFF_CUTOFF number |
  *	TOK_INITIAL_INTERVAL number |
- *	TOK_SCRIPT string |
  *	interface-declaration |
  *	TOK_LEASE client-lease-statement |
  *	TOK_ALIAS client-lease-statement |
@@ -154,7 +153,8 @@ read_client_leases(void)
 void
 parse_client_statement(FILE *cfile)
 {
-	int token, code;
+	u_int8_t optlist[256];
+	int token, code, count;
 
 	switch (next_token(NULL, cfile)) {
 	case TOK_SEND:
@@ -187,13 +187,28 @@ parse_client_statement(FILE *cfile)
 		parse_hardware_param(cfile, &ifi->hw_address);
 		return;
 	case TOK_REQUEST:
-		config->requested_option_count =
-			parse_option_list(cfile, config->requested_options);
+		count = parse_option_list(cfile, optlist, sizeof(optlist));
+		if (count != -1) {
+			config->requested_option_count = count;
+			memcpy(config->requested_options, optlist,
+			    sizeof(config->requested_options));
+		}
 		return;
 	case TOK_REQUIRE:
-		memset(config->required_options, 0,
-		    sizeof(config->required_options));
-		parse_option_list(cfile, config->required_options);
+		count = parse_option_list(cfile, optlist, sizeof(optlist));
+		if (count != -1) {
+			config->required_option_count = count;
+			memcpy(config->required_options, optlist,
+			    sizeof(config->required_options));
+		}
+		return;
+	case TOK_IGNORE:
+		count = parse_option_list(cfile, optlist, sizeof(optlist));
+		if (count != -1) {
+			config->ignored_option_count = count;
+			memcpy(config->ignored_options, optlist,
+			    sizeof(config->ignored_options));
+		}
 		return;
 	case TOK_LINK_TIMEOUT:
 		parse_lease_time(cfile, &config->link_timeout);
@@ -215,9 +230,6 @@ parse_client_statement(FILE *cfile)
 		return;
 	case TOK_INITIAL_INTERVAL:
 		parse_lease_time(cfile, &config->initial_interval);
-		return;
-	case TOK_SCRIPT:
-		config->script_name = parse_string(cfile);
 		return;
 	case TOK_INTERFACE:
 		parse_interface_declaration(cfile);
@@ -293,43 +305,57 @@ parse_X(FILE *cfile, u_int8_t *buf, int max)
  *		   option_list COMMA option_name
  */
 int
-parse_option_list(FILE *cfile, u_int8_t *list)
+parse_option_list(FILE *cfile, u_int8_t *list, size_t sz)
 {
-	int	 ix, i;
+	int	 ix, i, j;
 	int	 token;
 	char	*val;
 
+	memset(list, DHO_PAD, sz);
 	ix = 0;
 	do {
 		token = next_token(&val, cfile);
-		if (!is_identifier(token)) {
-			parse_warn("expected option name.");
-			skip_to_semi(cfile);
+		if (token == ';' && ix == 0) {
+			/* Empty list. */
 			return (0);
 		}
-		for (i = 0; i < 256; i++)
+		if (!is_identifier(token)) {
+			parse_warn("expected option name.");
+			goto syntaxerror;
+		}
+		/*
+		 * 0 (DHO_PAD) and 255 (DHO_END) are not valid in option
+		 * lists.  They are not really options and it makes no sense
+		 * to request, require or ignore them.
+		 */
+		for (i = 1; i < DHO_END; i++)
 			if (!strcasecmp(dhcp_options[i].name, val))
 				break;
 
-		if (i == 256) {
-			parse_warn("%s: unexpected option name.", val);
-			skip_to_semi(cfile);
-			return (0);
+		if (i == DHO_END) {
+			parse_warn("unexpected option name.");
+			goto syntaxerror;
 		}
-		list[ix++] = i;
-		if (ix == 256) {
-			parse_warn("%s: too many options.", val);
-			skip_to_semi(cfile);
-			return (0);
+		if (ix == sz) {
+			parse_warn("too many options.");
+			goto syntaxerror;
 		}
+		/* Avoid storing duplicate options in the list. */
+		for (j = 0; j < ix && list[j] != i; j++)
+			;
+		if (j == ix)
+			list[ix++] = i;
 		token = next_token(&val, cfile);
 	} while (token == ',');
 	if (token != ';') {
 		parse_warn("expecting semicolon.");
-		skip_to_semi(cfile);
-		return (0);
+		goto syntaxerror;
 	}
 	return (ix);
+
+syntaxerror:
+	skip_to_semi(cfile);
+	return (-1);
 }
 
 /*
@@ -406,6 +432,7 @@ parse_client_lease_statement(FILE *cfile, int is_static)
 		token = peek_token(NULL, cfile);
 		if (token == EOF) {
 			parse_warn("unterminated lease declaration.");
+			free(lease);
 			return;
 		}
 		if (token == '}')
@@ -413,14 +440,6 @@ parse_client_lease_statement(FILE *cfile, int is_static)
 		parse_client_lease_declaration(cfile, lease);
 	} while (1);
 	token = next_token(NULL, cfile);
-
-	/* If the lease declaration didn't include an interface
-	 * declaration that we recognized, it's of no use to us.
-	 */
-	if (!ifi) {
-		free_client_lease(lease);
-		return;
-	}
 
 	/*
 	 * The new lease may supersede a lease that's not the active
@@ -430,7 +449,7 @@ parse_client_lease_statement(FILE *cfile, int is_static)
 	 */
 	pl = NULL;
 	for (lp = client->leases; lp; lp = lp->next) {
-		if (addr_eq(lp->address, lease->address)) {
+		if (lp->address.s_addr == lease->address.s_addr) {
 			if (pl)
 				pl->next = lp->next;
 			else
@@ -466,9 +485,10 @@ parse_client_lease_statement(FILE *cfile, int is_static)
 	 * active.
 	 */
 	if (client->active) {
-		if (client->active->expiry < cur_time)
+		if (client->active->expiry < time(NULL))
 			free_client_lease(client->active);
-		else if (addr_eq(client->active->address, lease->address))
+		else if (client->active->address.s_addr ==
+		    lease->address.s_addr)
 			free_client_lease(client->active);
 		else {
 			client->active->next = client->leases;
@@ -510,8 +530,7 @@ parse_client_lease_declaration(FILE *cfile, struct client_lease *lease)
 			break;
 		}
 		if (strcmp(ifi->name, val) != 0) {
-			parse_warn("wrong interface name. Expecting '%s'.",
-			   ifi->name);
+			parse_warn("wrong interface name.");
 			skip_to_semi(cfile);
 			break;
 		}
@@ -562,7 +581,7 @@ parse_option_decl(FILE *cfile, struct option_data *options)
 	u_int8_t	 hunkbuf[1024];
 	int		 hunkix = 0;
 	char		*fmt;
-	struct iaddr	 ip_addr;
+	struct in_addr	 ip_addr;
 	u_int8_t	*dp;
 	int		 len, code;
 	int		 nul_term = 0;
@@ -582,7 +601,7 @@ parse_option_decl(FILE *cfile, struct option_data *options)
 			break;
 
 	if (code > 255) {
-		parse_warn("no option named %s", val);
+		parse_warn("unknown option name.");
 		skip_to_semi(cfile);
 		return (-1);
 	}
@@ -607,7 +626,7 @@ parse_option_decl(FILE *cfile, struct option_data *options)
 				}
 				len = strlen(val);
 				if (hunkix + len + 1 > sizeof(hunkbuf)) {
-					parse_warn("option data buffer %s",
+					parse_warn("option data buffer "
 					    "overflow");
 					skip_to_semi(cfile);
 					return (-1);
@@ -619,8 +638,8 @@ parse_option_decl(FILE *cfile, struct option_data *options)
 			case 'I': /* IP address. */
 				if (!parse_ip_addr(cfile, &ip_addr))
 					return (-1);
-				len = ip_addr.len;
-				dp = ip_addr.iabuf;
+				len = sizeof(ip_addr);
+				dp = (char *)&ip_addr;
 alloc:
 				if (hunkix + len > sizeof(hunkbuf)) {
 					parse_warn("option data buffer "
@@ -712,8 +731,8 @@ bad_flag:
 void
 parse_reject_statement(FILE *cfile)
 {
-	struct iaddrlist *list;
-	struct iaddr addr;
+	struct reject_elem *list;
+	struct in_addr addr;
 	int token;
 
 	do {
@@ -723,7 +742,7 @@ parse_reject_statement(FILE *cfile)
 			return;
 		}
 
-		list = malloc(sizeof(struct iaddrlist));
+		list = malloc(sizeof(struct reject_elem));
 		if (!list)
 			error("no memory for reject list!");
 

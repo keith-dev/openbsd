@@ -1,5 +1,5 @@
 # ex:ts=8 sw=4:
-# $OpenBSD: Link.pm,v 1.20 2012/07/18 09:33:16 espie Exp $
+# $OpenBSD: Link.pm,v 1.24 2013/01/10 21:34:29 millert Exp $
 #
 # Copyright (c) 2007-2010 Steven Mestdagh <steven@openbsd.org>
 # Copyright (c) 2012 Marc Espie <espie@openbsd.org>
@@ -135,6 +135,7 @@ sub run
 	    'dlpreopen:',
 	    'export-dynamic',
 	    'export-symbols:',
+	    '-export-symbols:', sub { shortdie "the option is -export-symbols.\n--export-symbols wil be ignored by gnu libtool"; },
 	    'export-symbols-regex:',
 	    'module',
 	    'no-fast-install',
@@ -185,9 +186,6 @@ sub run
 		$gp->handle_permuted_options('x:!');
 	}
 	tsay {"linkmode: $linkmode"};
-
-	# eat multiple version-info arguments, we only accept the first.
-	map { $_ = '' if ($_ =~ m/\d+:\d+:\d+/); } @ARGV;
 
 	my @objs;
 	my @sobjs;
@@ -553,6 +551,10 @@ sub internal_parse_linkargs1
 		tsay {"  processing $_"};
 		if (!$_ || $_ eq '' || m/^\s+$/) {
 			# skip empty arguments
+		} elsif (m/^-Wc,(.*)/) {
+			push(@$result, $1);
+		} elsif ($_ eq '-Xcompiler') {
+			next;
 		} elsif ($_ eq '-pthread') {
 			$self->{pthread} = 1;
 		} elsif (m/^-L(.*)/) {
@@ -802,6 +804,46 @@ sub infer_libparameter
 		$lib = $k;
 	}
 	return "-l$lib";
+}
+
+sub export_symbols
+{
+	my ($self, $ltconfig, $base, $gp, @o) = @_;
+	my $symbolsfile;
+	my $comment;
+	if ($gp->export_symbols) {
+		$symbolsfile = $gp->export_symbols;
+		$comment = "/* version script derived from $symbolsfile */\n\n";
+	} elsif ($gp->export_symbols_regex) {
+		($symbolsfile = $base) =~ s/\.la$/.exp/;
+		LT::Archive->get_symbollist($symbolsfile, $gp->export_symbols_regex, \@o);
+		$comment = "/* version script generated from\n * ".join(' ', @o)."\n * using regexp ".$gp->export_symbols_regex. " */\n\n";
+	} else {
+		return ();
+	}
+	my $scriptfile;
+	($scriptfile = $base) =~ s/(\.la)?$/.ver/;
+	if ($ltconfig->{elf}) {
+		open my $fh, ">", $scriptfile or die;
+		open my $fh2, '<', $symbolsfile or die;
+		print $fh $comment;
+		print $fh "{\n";
+		my $first = 1;
+		while (<$fh2>) {
+			chomp;
+			if ($first) {
+				print $fh "\tglobal:\n";
+				$first = 0;
+			}
+			print $fh "\t\t$_;\n";
+		}
+		print $fh "\tlocal:\n\t\t\*;\n};\n";
+		close($fh);
+		close($fh2);
+		return ("--version-script", $scriptfile);
+	} else {
+		return ("-retain-symbols-file", $symbolsfile);
+	}
 }
 
 1;

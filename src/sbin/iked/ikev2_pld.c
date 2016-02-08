@@ -1,8 +1,7 @@
-/*	$OpenBSD: ikev2_pld.c,v 1.26 2012/06/22 16:06:31 mikeb Exp $	*/
-/*	$vantronix: ikev2.c,v 1.101 2010/06/03 07:57:33 reyk Exp $	*/
+/*	$OpenBSD: ikev2_pld.c,v 1.30 2013/01/08 10:38:19 reyk Exp $	*/
 
 /*
- * Copyright (c) 2010 Reyk Floeter <reyk@vantronix.net>
+ * Copyright (c) 2010-2013 Reyk Floeter <reyk@openbsd.org>
  *
  * Permission to use, copy, modify, and distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -666,7 +665,7 @@ ikev2_pld_notify(struct iked *env, struct ikev2_payload *pld,
 	switch (type) {
 	case IKEV2_N_NAT_DETECTION_SOURCE_IP:
 	case IKEV2_N_NAT_DETECTION_DESTINATION_IP:
-		if (ikev2_nat_detection(msg, md, sizeof(md), type) == -1)
+		if (ikev2_nat_detection(env, msg, md, sizeof(md), type) == -1)
 			return (-1);
 		if (len != sizeof(md) || memcmp(buf, md, len) != 0) {
 			log_debug("%s: %s detected NAT, enabling "
@@ -838,7 +837,7 @@ ikev2_pld_delete(struct iked *env, struct ikev2_payload *pld,
 
 		log_debug("%s: spi %s", __func__, print_spi(spi, sz));
 
-		if (!ikev2_msg_frompeer(msg))
+		if (peersas == NULL || sa == NULL)
 			continue;
 
 		if ((peersas[i] = childsa_lookup(sa, spi,
@@ -864,7 +863,7 @@ ikev2_pld_delete(struct iked *env, struct ikev2_payload *pld,
 	if (!ikev2_msg_frompeer(msg))
 		goto done;
 
-	if (ikev2_msg_frompeer(msg) && (sa->sa_stateflags & IKED_REQ_DELETE)) {
+	if (sa && (sa->sa_stateflags & IKED_REQ_DELETE)) {
 		/* Finish rekeying */
 		sa->sa_stateflags &= ~IKED_REQ_DELETE;
 		ret = 0;
@@ -923,7 +922,6 @@ int
 ikev2_pld_ts(struct iked *env, struct ikev2_payload *pld,
     struct iked_message *msg, off_t offset, u_int payload)
 {
-	u_int8_t			*ptr;
 	struct ikev2_tsp		 tsp;
 	struct ikev2_ts			 ts;
 	size_t				 len, i;
@@ -935,7 +933,6 @@ ikev2_pld_ts(struct iked *env, struct ikev2_payload *pld,
 	memcpy(&tsp, msgbuf + offset, sizeof(tsp));
 	offset += sizeof(tsp);
 
-	ptr = msgbuf + offset;
 	len = betoh16(pld->pld_length) - sizeof(*pld) - sizeof(tsp);
 
 	log_debug("%s: count %d length %d", __func__,

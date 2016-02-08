@@ -1,4 +1,4 @@
-/*	$OpenBSD: last.c,v 1.36 2009/10/27 23:59:39 deraadt Exp $	*/
+/*	$OpenBSD: last.c,v 1.38 2013/02/18 10:40:12 fgsch Exp $	*/
 /*	$NetBSD: last.c,v 1.6 1994/12/24 16:49:02 cgd Exp $	*/
 
 /*
@@ -36,6 +36,7 @@
 #include <ctype.h>
 #include <err.h>
 #include <fcntl.h>
+#include <libgen.h>
 #include <paths.h>
 #include <signal.h>
 #include <stdio.h>
@@ -407,8 +408,8 @@ wtmp(void)
 			    asctime(gmtime(&total))+11);
 	}
 	ct = ctime(&buf[0].ut_time);
-	printf("\nwtmp begins %10.10s %*.*s %4.4s\n", ct, timesize, timesize,
-	    ct + 11, ct + 20);
+	printf("\n%s begins %10.10s %*.*s %4.4s\n", basename(file), ct,
+	    timesize, timesize, ct + 11, ct + 20);
 }
 
 /*

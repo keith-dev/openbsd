@@ -1,4 +1,4 @@
-/*	$OpenBSD: sio.c,v 1.10 2012/05/23 19:25:11 ratchov Exp $	*/
+/*	$OpenBSD: sio.c,v 1.12 2013/02/01 09:02:16 ratchov Exp $	*/
 /*
  * Copyright (c) 2008 Alexandre Ratchov <alex@caoua.org>
  *
@@ -161,6 +161,7 @@ sio_setpar(struct sio_hdl *hdl, struct sio_par *par)
 	if (par->bufsz != ~0U) {
 		DPRINTF("sio_setpar: setting bufsz is deprecated\n");
 		par->appbufsz = par->bufsz;
+		par->bufsz = ~0U;
 	}
 	if (par->rate != ~0U && par->appbufsz == ~0U)
 		par->appbufsz = par->rate * 200 / 1000;
@@ -207,11 +208,16 @@ sio_psleep(struct sio_hdl *hdl, int event)
 {
 	struct pollfd pfd[SIO_MAXNFDS];
 	int revents;
-	nfds_t nfds;
+	int nfds;
 
 	nfds = sio_nfds(hdl);
+	if (nfds > SIO_MAXNFDS) {
+		DPRINTF("sio_psleep: %d: too many descriptors\n", nfds);
+		hdl->eof = 1;
+		return 0;
+	}
 	for (;;) {
-		sio_pollfd(hdl, pfd, event);
+		nfds = sio_pollfd(hdl, pfd, event);
 		while (poll(pfd, nfds, -1) < 0) {
 			if (errno == EINTR)
 				continue;

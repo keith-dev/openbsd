@@ -7,7 +7,7 @@
  *
  */
 
-#include <config.h>
+#include "config.h"
 #include <assert.h>
 #include <string.h>
 #include <unistd.h>
@@ -85,7 +85,6 @@ diff_write_packet(const char* zone, uint32_t new_serial, uint16_t id,
 		log_msg(LOG_ERR, "could not write to file %s: %s",
 			filename, strerror(errno));
 	}
-	fflush(df);
 	fclose(df);
 }
 
@@ -439,8 +438,8 @@ delete_RR(namedb_type* db, const dname_type* dname,
 		}
 		rrnum = find_rr_num(rrset, type, klass, rdatas, rdata_num);
 		if(rrnum == -1) {
-			log_msg(LOG_WARNING, "diff: RR %s does not exist",
-				dname_to_string(dname,0));
+			log_msg(LOG_WARNING, "diff: RR <%s, %s> does not exist",
+				dname_to_string(dname,0), rrtype_to_string(type));
 			return 1; /* not fatal error */
 		}
 #ifdef NSEC3
@@ -532,8 +531,8 @@ add_RR(namedb_type* db, const dname_type* dname,
 	}
 	rrnum = find_rr_num(rrset, type, klass, rdatas, rdata_num);
 	if(rrnum != -1) {
-		DEBUG(DEBUG_XFRD, 2, (LOG_ERR, "diff: RR %s already exists",
-			dname_to_string(dname,0)));
+		DEBUG(DEBUG_XFRD, 2, (LOG_ERR, "diff: RR <%s, %s> already exists",
+			dname_to_string(dname,0), rrtype_to_string(type)));
 		/* ignore already existing RR: lenient accepting of messages */
 		return 1;
 	}
@@ -636,6 +635,7 @@ find_zone(namedb_type* db, const dname_type* zone_name, nsd_options_t* opt,
 {
 	domain_type *domain;
 	zone_type* zone;
+	zone_options_t* opts;
 	domain = domain_table_find(db->domains, zone_name);
 	if(!domain) {
 		DEBUG(DEBUG_XFRD,1, (LOG_INFO, "xfr: creating domain %s",
@@ -654,6 +654,13 @@ find_zone(namedb_type* db, const dname_type* zone_name, nsd_options_t* opt,
 			return zone;
 		}
 	}
+	/* lookup in config */
+	opts = zone_options_find(opt, domain_dname(domain));
+	if(!opts) {
+		log_msg(LOG_ERR, "xfr: zone %s not in config.",
+			dname_to_string(zone_name,0));
+		return 0;
+	}
 	/* create the zone */
 	DEBUG(DEBUG_XFRD,1, (LOG_INFO, "xfr: creating zone_type %s",
 		dname_to_string(zone_name,0)));
@@ -663,6 +670,7 @@ find_zone(namedb_type* db, const dname_type* zone_name, nsd_options_t* opt,
 		exit(1);
 	}
 	zone->next = db->zones;
+	zone->opts = opts;
 	db->zones = zone;
 	db->zone_count++;
 	zone->apex = domain;
@@ -679,12 +687,6 @@ find_zone(namedb_type* db, const dname_type* zone_name, nsd_options_t* opt,
 		exit(1);
 	}
 	memset(zone->dirty, 0, sizeof(uint8_t)*child_count);
-	zone->opts = zone_options_find(opt, domain_dname(zone->apex));
-	if(!zone->opts) {
-		log_msg(LOG_ERR, "xfr: zone %s not in config.",
-			dname_to_string(zone_name,0));
-		return 0;
-	}
 #ifdef NSEC3
 #ifndef FULL_PREHASH
 	zone->nsec3_domains = NULL;
@@ -1291,8 +1293,6 @@ read_sure_part(namedb_type* db, FILE *in, nsd_options_t* opt,
 		int is_axfr=0, delete_mode=0, rr_count=0;
 		off_t resume_pos;
 
-		DEBUG(DEBUG_XFRD,1, (LOG_INFO, "processing xfr: %s", log_buf));
-
 #ifdef NSEC3
 #ifndef FULL_PREHASH
 		struct region *region;
@@ -1325,6 +1325,8 @@ read_sure_part(namedb_type* db, FILE *in, nsd_options_t* opt,
 		}
 #endif /* !FULL_PREHASH */
 #endif /* NSEC3 */
+
+		DEBUG(DEBUG_XFRD,1, (LOG_INFO, "processing xfr: %s", log_buf));
 
 		resume_pos = ftello(in);
 		if(resume_pos == -1) {
@@ -1509,6 +1511,7 @@ diff_read_file(namedb_type* db, nsd_options_t* opt, struct diff_log** log,
 		log_msg(LOG_ERR, "difffile %s bad first part: no timestamp",
 			filename);
 		region_destroy(data->region);
+		fclose(df);
 		return 0;
 	}
 	else if (curr_timestamp[0] != timestamp[0] ||
@@ -1533,6 +1536,7 @@ diff_read_file(namedb_type* db, nsd_options_t* opt, struct diff_log** log,
 		log_msg(LOG_INFO, "could not fseeko file %s: %s.", filename,
 				strerror(errno));
 		region_destroy(data->region);
+		fclose(df);
 		return 0;
 	}
 	if(db->diff_skip) {
@@ -1548,6 +1552,7 @@ diff_read_file(namedb_type* db, nsd_options_t* opt, struct diff_log** log,
 	if(startpos == -1) {
 		log_msg(LOG_INFO, "could not ftello: %s.", strerror(errno));
 		region_destroy(data->region);
+		fclose(df);
 		return 0;
 	}
 
@@ -1563,6 +1568,7 @@ diff_read_file(namedb_type* db, nsd_options_t* opt, struct diff_log** log,
 			log_msg(LOG_INFO, "could not read timestamp: %s.",
 				strerror(errno));
 			region_destroy(data->region);
+			fclose(df);
 			return 0;
 		}
 
@@ -1571,12 +1577,14 @@ diff_read_file(namedb_type* db, nsd_options_t* opt, struct diff_log** log,
 		{
 			log_msg(LOG_INFO, "error processing diff file");
 			region_destroy(data->region);
+			fclose(df);
 			return 0;
 		}
 		startpos = ftello(df);
 		if(startpos == -1) {
 			log_msg(LOG_INFO, "could not ftello: %s.", strerror(errno));
 			region_destroy(data->region);
+			fclose(df);
 			return 0;
 		}
 	}

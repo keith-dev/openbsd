@@ -1,4 +1,4 @@
-/*	$OpenBSD: parse.y,v 1.262 2012/07/13 15:25:37 claudio Exp $ */
+/*	$OpenBSD: parse.y,v 1.265 2012/11/13 09:47:20 claudio Exp $ */
 
 /*
  * Copyright (c) 2002, 2003, 2004 Henning Brauer <henning@openbsd.org>
@@ -1038,7 +1038,7 @@ peeropts	: REMOTEAS as4number	{
 			curpeer->conf.capabilities.refresh = $3;
 		}
 		| ANNOUNCE RESTART yesno {
-			curpeer->conf.capabilities.restart = $3;
+			curpeer->conf.capabilities.grestart.restart = $3;
 		}
 		| ANNOUNCE AS4BYTE yesno {
 			curpeer->conf.capabilities.as4byte = $3;
@@ -1699,6 +1699,26 @@ filter_elm	: filter_prefix_h	{
 				YYERROR;
 			}
 			fmopts.aid = AID_INET6;
+		}
+		| NEXTHOP address 	{
+			if (fmopts.m.nexthop.flags) {
+				yyerror("nexthop already specified");
+				YYERROR;
+			}
+			if (fmopts.aid && fmopts.aid != $2.aid) {
+				yyerror("nexthop address family doesn't match "
+				    "rule address family");
+				YYERROR;
+			}
+			fmopts.m.nexthop.addr = $2;
+			fmopts.m.nexthop.flags = FILTER_NEXTHOP_ADDR;
+		}
+		| NEXTHOP NEIGHBOR 	{
+			if (fmopts.m.nexthop.flags) {
+				yyerror("nexthop already specified");
+				YYERROR;
+			}
+			fmopts.m.nexthop.flags = FILTER_NEXTHOP_NEIGHBOR;
 		}
 		;
 
@@ -3019,7 +3039,7 @@ alloc_peer(void)
 	for (i = 0; i < AID_MAX; i++)
 		p->conf.capabilities.mp[i] = -1;
 	p->conf.capabilities.refresh = 1;
-	p->conf.capabilities.restart = 0;
+	p->conf.capabilities.grestart.restart = 1;
 	p->conf.capabilities.as4byte = 1;
 	p->conf.local_as = conf->as;
 	p->conf.local_short_as = conf->short_as;

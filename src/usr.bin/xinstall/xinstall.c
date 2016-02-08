@@ -1,4 +1,4 @@
-/*	$OpenBSD: xinstall.c,v 1.51 2012/04/11 14:19:35 millert Exp $	*/
+/*	$OpenBSD: xinstall.c,v 1.53 2013/02/18 22:15:11 miod Exp $	*/
 /*	$NetBSD: xinstall.c,v 1.9 1995/12/20 10:25:17 jonathan Exp $	*/
 
 /*
@@ -235,6 +235,11 @@ install(char *from_name, char *to_name, u_long fset, u_int flags)
 		docompare = 0;
 	}
 
+	if (!devnull) {
+		if ((from_fd = open(from_name, O_RDONLY, 0)) < 0)
+			err(EX_OSERR, "%s", from_name);
+	}
+
 	if (safecopy) {
 		to_fd = create_tempfile(to_name, tempfile, sizeof(tempfile));
 		if (to_fd < 0)
@@ -248,12 +253,6 @@ install(char *from_name, char *to_name, u_long fset, u_int flags)
 	}
 
 	if (!devnull) {
-		if ((from_fd = open(from_name, O_RDONLY, 0)) < 0) {
-			serrno = errno;
-			(void)unlink(safecopy ? tempfile : to_name);
-			errx(EX_OSERR, "%s: %s", from_name, strerror(serrno));
-		}
-
 		if (docompare && !safecopy) {
 			files_match = !(compare(from_fd, from_name,
 					(size_t)from_sb.st_size, to_fd,
@@ -640,10 +639,12 @@ create_newfile(char *path, struct stat *sbp)
 		/* It is ok for the target file not to exist. */
 		if (rename(path, backup) < 0 && errno != ENOENT)
 			err(EX_OSERR, "rename: %s to %s (errno %d)", path, backup, errno);
-	} else
-		(void)unlink(path);
+	} else {
+		if (unlink(path) < 0 && errno != ENOENT)
+			err(EX_OSERR, "%s", path);
+	}
 
-	return(open(path, O_CREAT | O_RDWR | O_TRUNC, S_IRUSR | S_IWUSR));
+	return(open(path, O_CREAT | O_RDWR | O_EXCL, S_IRUSR | S_IWUSR));
 }
 
 /*

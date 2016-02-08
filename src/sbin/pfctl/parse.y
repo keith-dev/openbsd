@@ -1,4 +1,4 @@
-/*	$OpenBSD: parse.y,v 1.618 2012/07/10 09:29:36 bluhm Exp $	*/
+/*	$OpenBSD: parse.y,v 1.621 2013/01/16 01:49:20 henning Exp $	*/
 
 /*
  * Copyright (c) 2001 Markus Friedl.  All rights reserved.
@@ -892,8 +892,8 @@ anchorrule	: ANCHOR anchorname dir quick interface af proto fromto
 			if ($9.marker & FOM_SETPRIO) {
 				r.set_prio[0] = $9.set_prio[0];
 				r.set_prio[1] = $9.set_prio[1];
-			} else
-				r.set_prio[0] = r.set_prio[1] = PF_PRIO_NOTSET;
+				r.scrub_flags |= PFSTATE_SETPRIO;
+			}
 
 			decide_address_family($8.src.host, &r.af);
 			decide_address_family($8.dst.host, &r.af);
@@ -1025,7 +1025,6 @@ antispoof	: ANTISPOOF logquick antispoof_ifspc af antispoof_opts {
 				r.logif = $2.logif;
 				r.quick = $2.quick;
 				r.af = $4;
-				r.set_prio[0] = r.set_prio[1] = PF_PRIO_NOTSET;
 				if (rule_label(&r, $5.label))
 					YYERROR;
 				r.rtableid = $5.rtableid;
@@ -1710,8 +1709,8 @@ pfrule		: action dir logquick interface af proto fromto
 			if ($8.marker & FOM_SETPRIO) {
 				r.set_prio[0] = $8.set_prio[0];
 				r.set_prio[1] = $8.set_prio[1];
-			} else
-				r.set_prio[0] = r.set_prio[1] = PF_PRIO_NOTSET;
+				r.scrub_flags |= PFSTATE_SETPRIO;
+			}
 			if ($8.marker & FOM_ONCE)
 				r.rule_flag |= PFRULE_ONCE;
 			if ($8.marker & FOM_AFTO)
@@ -2021,24 +2020,6 @@ pfrule		: action dir logquick interface af proto fromto
 				    $8.route.host->addr.type == PF_ADDR_TABLE ||
 				    DYNIF_MULTIADDR($8.route.host->addr)))
 					r.route.opts |= PF_POOL_ROUNDROBIN;
-				if (((r.route.opts & PF_POOL_TYPEMASK) !=
-				    PF_POOL_ROUNDROBIN) &&
-				    ((r.route.opts & PF_POOL_TYPEMASK) !=
-				    PF_POOL_LEASTSTATES) &&
-				    disallow_table($8.route.host,
-				    "tables are only "
-				    "supported in round-robin or "
-				    "least-states routing pools"))
-					YYERROR;
-				if (((r.route.opts & PF_POOL_TYPEMASK) !=
-				    PF_POOL_ROUNDROBIN) &&
-				    ((r.route.opts & PF_POOL_TYPEMASK) !=
-				    PF_POOL_LEASTSTATES) &&
-				    disallow_alias($8.route.host,
-				    "interface (%s) "
-				    "is only supported in round-robin or "
-				    "least-states routing pools"))
-					YYERROR;
 				if ($8.route.host->next != NULL) {
 					if (((r.route.opts & PF_POOL_TYPEMASK) !=
 					    PF_POOL_ROUNDROBIN) &&
@@ -2390,6 +2371,13 @@ filter_set	: prio {
 			filter_opts.marker |= FOM_SETPRIO;
 			filter_opts.set_prio[0] = $1.b1;
 			filter_opts.set_prio[1] = $1.b2;
+		}
+		| QUEUE qname	{
+			if (filter_opts.queues.qname) {
+				yyerror("queue cannot be redefined");
+				YYERROR;
+			}
+			filter_opts.queues = $2;
 		}
 		| TOS tos {
 			if (filter_opts.marker & FOM_SETTOS) {
@@ -4829,6 +4817,14 @@ apply_redirspec(struct pf_pool *rpool, struct pf_rule *r, struct redirspec *rs,
 	if (rpool->addr.type == PF_ADDR_TABLE ||
 	    DYNIF_MULTIADDR(rpool->addr))
 		rpool->opts |= PF_POOL_ROUNDROBIN;
+
+	if (((rpool->opts & PF_POOL_TYPEMASK) != PF_POOL_ROUNDROBIN) &&
+	    ((rpool->opts & PF_POOL_TYPEMASK) != PF_POOL_LEASTSTATES) &&
+	    (disallow_table(rs->rdr->host, "tables are only supported "
+	    "in round-robin or least-states address pools") ||
+	    disallow_alias(rs->rdr->host, "interface (%s) is only supported "
+	    "in round-robin or least-states address pools")))
+		return (1);
 
 	if (rs->pool_opts.key != NULL)
 		memcpy(&rpool->key, rs->pool_opts.key,

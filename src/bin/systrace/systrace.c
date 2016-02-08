@@ -1,4 +1,4 @@
-/*	$OpenBSD: systrace.c,v 1.56 2007/11/26 09:28:33 martynas Exp $	*/
+/*	$OpenBSD: systrace.c,v 1.58 2012/12/04 02:24:47 deraadt Exp $	*/
 /*
  * Copyright 2002 Niels Provos <provos@citi.umich.edu>
  * All rights reserved.
@@ -30,7 +30,6 @@
  */
 
 #include <sys/types.h>
-#include <sys/param.h>
 #include <sys/wait.h>
 #include <sys/tree.h>
 #include <sys/socket.h>
@@ -762,10 +761,10 @@ main(int argc, char **argv)
 		args[i] = NULL;
 
 		if (setcredentials)
-			trpid = intercept_run(background, trfd,
+			trpid = intercept_run(background, &trfd,
 			    cr_uid, cr_gid, args[0], args);
 		else
-			trpid = intercept_run(background, trfd, 0, 0,
+			trpid = intercept_run(background, &trfd, 0, 0,
 			    args[0], args);
 		if (trpid == -1)
 			err(1, "fork");

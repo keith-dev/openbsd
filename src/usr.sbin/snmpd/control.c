@@ -1,4 +1,4 @@
-/*	$OpenBSD: control.c,v 1.15 2012/04/11 08:33:53 deraadt Exp $	*/
+/*	$OpenBSD: control.c,v 1.17 2012/11/29 14:53:24 yasuoka Exp $	*/
 
 /*
  * Copyright (c) 2003, 2004 Henning Brauer <henning@openbsd.org>
@@ -173,6 +173,7 @@ control_accept(int listenfd, short event, void *arg)
 	imsg_init(&c->iev.ibuf, connfd);
 	c->iev.handler = control_dispatch_imsg;
 	c->iev.events = EV_READ;
+	c->iev.data = cs;
 	event_set(&c->iev.ev, c->iev.ibuf.fd, c->iev.events,
 	    c->iev.handler, cs);
 	event_add(&c->iev.ev, NULL);
@@ -279,8 +280,8 @@ control_dispatch_imsg(int fd, short event, void *arg)
 			if (c->flags & CTL_CONN_NOTIFY) {
 				log_debug("control_dispatch_imsg: "
 				    "client requested notify more than once");
-				imsg_compose(&c->iev.ibuf, IMSG_CTL_FAIL, 0, 0, -1,
-				    NULL, 0);
+				imsg_compose(&c->iev.ibuf, IMSG_CTL_FAIL,
+				    0, 0, -1, NULL, 0);
 				break;
 			}
 			c->flags |= CTL_CONN_NOTIFY;
@@ -317,8 +318,9 @@ control_imsg_forward(struct imsg *imsg)
 
 	TAILQ_FOREACH(c, &ctl_conns, entry)
 		if (c->flags & CTL_CONN_NOTIFY)
-			imsg_compose(&c->iev.ibuf, imsg->hdr.type, 0, imsg->hdr.pid,
-			    -1, imsg->data, imsg->hdr.len - IMSG_HEADER_SIZE);
+			imsg_compose(&c->iev.ibuf, imsg->hdr.type, 0,
+			    imsg->hdr.pid, -1, imsg->data,
+			    imsg->hdr.len - IMSG_HEADER_SIZE);
 }
 
 void

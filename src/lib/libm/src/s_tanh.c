@@ -10,8 +10,6 @@
  * ====================================================
  */
 
-/* LINTLIBRARY */
-
 /* Tanh(x)
  * Return the Hyperbolic Tangent of x
  *
@@ -22,21 +20,20 @@
  *				       x    -x
  *				      e  + e
  *	1. reduce x to non-negative by tanh(-x) = -tanh(x).
- *	2.  0      <= x <= 2**-55 : tanh(x) := x*(one+x)
+ *	2.  0      <= x <  2**-55 : tanh(x) := x*(one+x)
  *					        -t
- *	    2**-55 <  x <=  1     : tanh(x) := -----; t = expm1(-2x)
+ *	    2**-55 <= x <  1      : tanh(x) := -----; t = expm1(-2x)
  *					       t + 2
  *						     2
- *	    1      <= x <=  22.0  : tanh(x) := 1-  ----- ; t=expm1(2x)
+ *	    1      <= x <  22.0   : tanh(x) := 1-  ----- ; t=expm1(2x)
  *						   t + 2
- *	    22.0   <  x <= INF    : tanh(x) := 1.
+ *	    22.0   <= x <= INF    : tanh(x) := 1.
  *
  * Special cases:
  *	tanh(NaN) is NaN;
  *	only tanh(0)=0 is exact for finite argument.
  */
 
-#include <sys/cdefs.h>
 #include <float.h>
 #include <math.h>
 
@@ -73,7 +70,7 @@ tanh(double x)
 	        t = expm1(-two*fabs(x));
 	        z= -t/(t+two);
 	    }
-    /* |x| > 22, return +-1 */
+    /* |x| >= 22, return +-1 */
 	} else {
 	    z = one - tiny;		/* raised inexact flag */
 	}
@@ -81,10 +78,5 @@ tanh(double x)
 }
 
 #if	LDBL_MANT_DIG == 53
-#ifdef	lint
-/* PROTOLIB1 */
-long double tanhl(long double);
-#else	/* lint */
 __weak_alias(tanhl, tanh);
-#endif	/* lint */
 #endif	/* LDBL_MANT_DIG == 53 */

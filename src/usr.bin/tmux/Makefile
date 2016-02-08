@@ -1,4 +1,4 @@
-# $OpenBSD: Makefile,v 1.59 2012/07/08 16:04:38 nicm Exp $
+# $OpenBSD: Makefile,v 1.62 2013/01/18 02:16:21 nicm Exp $
 
 PROG=	tmux
 SRCS=	arguments.c \
@@ -12,6 +12,7 @@ SRCS=	arguments.c \
 	cmd-capture-pane.c \
 	cmd-choose-buffer.c \
 	cmd-choose-client.c \
+	cmd-choose-list.c \
 	cmd-choose-tree.c \
 	cmd-clear-history.c \
 	cmd-clock-mode.c \
@@ -81,9 +82,10 @@ SRCS=	arguments.c \
 	cmd.c \
 	colour.c \
 	control.c \
+	control-notify.c \
 	environ.c \
 	format.c \
-	grid-utf8.c \
+	grid-cell.c \
 	grid-view.c \
 	grid.c \
 	input-keys.c \

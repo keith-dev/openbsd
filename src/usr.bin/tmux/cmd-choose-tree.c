@@ -1,4 +1,4 @@
-/* $OpenBSD: cmd-choose-tree.c,v 1.5 2012/07/12 13:03:42 nicm Exp $ */
+/* $OpenBSD: cmd-choose-tree.c,v 1.13 2013/01/17 03:51:21 nicm Exp $ */
 
 /*
  * Copyright (c) 2012 Thomas Adam <thomas@xteddy.org>
@@ -27,22 +27,20 @@
 
 #define CMD_CHOOSE_TREE_WINDOW_ACTION "select-window -t '%%'"
 #define CMD_CHOOSE_TREE_SESSION_ACTION "switch-client -t '%%'"
-#define CMD_CHOOSE_TREE_WINDOW_TEMPLATE \
-    DEFAULT_WINDOW_TEMPLATE " \"#{pane_title}\""
 
 /*
  * Enter choice mode to choose a session and/or window.
  */
 
-int	cmd_choose_tree_exec(struct cmd *, struct cmd_ctx *);
+enum cmd_retval	cmd_choose_tree_exec(struct cmd *, struct cmd_ctx *);
 
 void	cmd_choose_tree_callback(struct window_choose_data *);
 void	cmd_choose_tree_free(struct window_choose_data *);
 
 const struct cmd_entry cmd_choose_tree_entry = {
 	"choose-tree", NULL,
-	"S:W:swb:c:t:", 0, 1,
-	"[-sw] [-b session-template] [-c window template] [-S format] " \
+	"S:W:swub:c:t:", 0, 1,
+	"[-swu] [-b session-template] [-c window template] [-S format] " \
 	"[-W format] " CMD_TARGET_WINDOW_USAGE,
 	0,
 	NULL,
@@ -78,9 +76,11 @@ cmd_choose_tree_exec(struct cmd *self, struct cmd_ctx *ctx)
 	struct session			*s, *s2;
 	struct window_choose_data	*wcd = NULL;
 	const char			*ses_template, *win_template;
-	char				*final_win_action, *final_win_template;
+	char				*final_win_action, *cur_win_template;
+	char				*final_win_template_middle;
+	char				*final_win_template_last;
 	const char			*ses_action, *win_action;
-	u_int				 cur_win, idx_ses, win_ses;
+	u_int				 cur_win, idx_ses, win_ses, win_max;
 	u_int				 wflag, sflag;
 
 	ses_template = win_template = NULL;
@@ -104,7 +104,7 @@ cmd_choose_tree_exec(struct cmd *self, struct cmd_ctx *ctx)
 	if (self->entry == &cmd_choose_session_entry) {
 		sflag = 1;
 		if ((ses_template = args_get(args, 'F')) == NULL)
-			ses_template = DEFAULT_SESSION_TEMPLATE;
+			ses_template = CHOOSE_TREE_SESSION_TEMPLATE;
 
 		if (args->argc != 0)
 			ses_action = args->argv[0];
@@ -113,7 +113,7 @@ cmd_choose_tree_exec(struct cmd *self, struct cmd_ctx *ctx)
 	} else if (self->entry == &cmd_choose_window_entry) {
 		wflag = 1;
 		if ((win_template = args_get(args, 'F')) == NULL)
-			win_template = CMD_CHOOSE_TREE_WINDOW_TEMPLATE;
+			win_template = CHOOSE_TREE_WINDOW_TEMPLATE;
 
 		if (args->argc != 0)
 			win_action = args->argv[0];
@@ -130,10 +130,10 @@ cmd_choose_tree_exec(struct cmd *self, struct cmd_ctx *ctx)
 			win_action = CMD_CHOOSE_TREE_WINDOW_ACTION;
 
 		if ((ses_template = args_get(args, 'S')) == NULL)
-			ses_template = DEFAULT_SESSION_TEMPLATE;
+			ses_template = CHOOSE_TREE_SESSION_TEMPLATE;
 
 		if ((win_template = args_get(args, 'W')) == NULL)
-			win_template = CMD_CHOOSE_TREE_WINDOW_TEMPLATE;
+			win_template = CHOOSE_TREE_WINDOW_TEMPLATE;
 	}
 
 	/*
@@ -148,12 +148,16 @@ cmd_choose_tree_exec(struct cmd *self, struct cmd_ctx *ctx)
 	 * window template, otherwise just render the windows as a flat list
 	 * without any padding.
 	 */
-	if (wflag && sflag)
-		xasprintf(&final_win_template, "    --> %s", win_template);
-	else if (wflag)
-		final_win_template = xstrdup(win_template);
-	else
-		final_win_template = NULL;
+	if (wflag && sflag) {
+		xasprintf(&final_win_template_middle,
+		    " \001tq\001> %s", win_template);
+		xasprintf(&final_win_template_last,
+		    " \001mq\001> %s", win_template);
+	} else if (wflag) {
+		final_win_template_middle = xstrdup(win_template);
+		final_win_template_last = xstrdup(win_template);
+	} else
+		final_win_template_middle = final_win_template_last = NULL;
 
 	idx_ses = cur_win = -1;
 	RB_FOREACH(s2, sessions, &sessions) {
@@ -171,7 +175,7 @@ cmd_choose_tree_exec(struct cmd *self, struct cmd_ctx *ctx)
 		}
 
 		wcd = window_choose_add_session(wl->window->active,
-			ctx, s2, ses_template, (char *)ses_action, idx_ses);
+		    ctx, s2, ses_template, (char *)ses_action, idx_ses);
 
 		/* If we're just choosing sessions, skip choosing windows. */
 		if (sflag && !wflag) {
@@ -180,7 +184,9 @@ cmd_choose_tree_exec(struct cmd *self, struct cmd_ctx *ctx)
 			continue;
 		}
 windows_only:
-		win_ses = -1;
+		win_ses = win_max = -1;
+		RB_FOREACH(wm, winlinks, &s2->windows)
+			win_max++;
 		RB_FOREACH(wm, winlinks, &s2->windows) {
 			win_ses++;
 			if (sflag && wflag)
@@ -199,14 +205,21 @@ windows_only:
 			}
 
 			xasprintf(&final_win_action, "%s ; %s", win_action,
-				wcd ? wcd->command : "");
+			    wcd ? wcd->command : "");
+
+			if (win_ses != win_max)
+				cur_win_template = final_win_template_middle;
+			else
+				cur_win_template = final_win_template_last;
 
 			window_choose_add_window(wl->window->active,
-				ctx, s2, wm, final_win_template,
-				final_win_action, idx_ses);
+			    ctx, s2, wm, cur_win_template,
+			    final_win_action,
+			    (wflag && !sflag) ? win_ses : idx_ses);
 
 			free(final_win_action);
 		}
+
 		/*
 		 * If we're just drawing windows, don't consider moving on to
 		 * other sessions as we only list windows in this session.
@@ -214,10 +227,14 @@ windows_only:
 		if (wflag && !sflag)
 			break;
 	}
-	free(final_win_template);
+	free(final_win_template_middle);
+	free(final_win_template_last);
 
 	window_choose_ready(wl->window->active, cur_win,
 		cmd_choose_tree_callback, cmd_choose_tree_free);
+
+	if (args_has(args, 'u'))
+		window_choose_expand_all(wl->window->active);
 
 	return (CMD_RETURN_NORMAL);
 }
@@ -244,5 +261,4 @@ cmd_choose_tree_free(struct window_choose_data *cdata)
 	free(cdata->command);
 	format_free(cdata->ft);
 	free(cdata);
-
 }

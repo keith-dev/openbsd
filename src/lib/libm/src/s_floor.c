@@ -10,8 +10,6 @@
  * ====================================================
  */
 
-/* LINTLIBRARY */
-
 /*
  * floor(x)
  * Return x rounded toward -inf to integral value
@@ -21,7 +19,6 @@
  *	Inexact flag raised if x not equal to floor(x).
  */
 
-#include <sys/cdefs.h>
 #include <float.h>
 #include <math.h>
 
@@ -74,10 +71,5 @@ floor(double x)
 }
 
 #if	LDBL_MANT_DIG == 53
-#ifdef	lint
-/* PROTOLIB1 */
-long double floorl(long double);
-#else	/* lint */
 __weak_alias(floorl, floor);
-#endif	/* lint */
 #endif	/* LDBL_MANT_DIG == 53 */

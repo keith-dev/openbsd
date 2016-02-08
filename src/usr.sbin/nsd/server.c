@@ -12,6 +12,7 @@
 #include <sys/types.h>
 #include <sys/param.h>
 #include <sys/socket.h>
+#include <sys/uio.h>
 #include <sys/wait.h>
 
 #include <netinet/in.h>
@@ -33,6 +34,8 @@
 #define SHUT_WR 1
 #endif
 
+#include <openssl/rand.h>
+
 #include "axfr.h"
 #include "namedb.h"
 #include "netio.h"
@@ -41,6 +44,8 @@
 #include "difffile.h"
 #include "nsec3.h"
 #include "ipc.h"
+#include "lookup3.h"
+#include "rrl.h"
 
 /*
  * Data for the UDP handlers.
@@ -86,17 +91,17 @@ struct tcp_handler_data
 	 * data, including this structure.  This region is destroyed
 	 * when the connection is closed.
 	 */
-	region_type     *region;
+	region_type*		region;
 
 	/*
 	 * The global nsd structure.
 	 */
-	struct nsd      *nsd;
+	struct nsd*			nsd;
 
 	/*
 	 * The current query data for this TCP connection.
 	 */
-	query_type      *query;
+	query_type*			query;
 
 	/*
 	 * These fields are used to enable the TCP accept handlers
@@ -111,7 +116,7 @@ struct tcp_handler_data
 	 * AXFR, if we're done processing, or if we should discard the
 	 * query and connection.
 	 */
-	query_state_type query_state;
+	query_state_type	query_state;
 
 	/*
 	 * The bytes_transmitted field is used to remember the number
@@ -119,7 +124,7 @@ struct tcp_handler_data
 	 * packet.  The count includes the two additional bytes used
 	 * to specify the packet length on a TCP connection.
 	 */
-	size_t           bytes_transmitted;
+	size_t				bytes_transmitted;
 
 	/*
 	 * The number of queries handled by this specific TCP connection.
@@ -524,6 +529,23 @@ server_init(struct nsd *nsd)
 int
 server_prepare(struct nsd *nsd)
 {
+#ifdef RATELIMIT
+	/* set secret modifier for hashing (udb ptr buckets and rate limits) */
+#ifdef HAVE_ARC4RANDOM
+	srandom(arc4random());
+	hash_set_raninit(arc4random());
+#else
+	uint32_t v = getpid() ^ time(NULL);
+	srandom((unsigned long)v);
+	if(RAND_status() && RAND_bytes((unsigned char*)&v, sizeof(v)) > 0)
+		hash_set_raninit(v);
+	else	hash_set_raninit(random());
+#endif
+	rrl_mmap_init(nsd->child_count, nsd->options->rrl_size,
+		nsd->options->rrl_ratelimit,
+		nsd->options->rrl_whitelist_ratelimit);
+#endif /* RATELIMIT */
+
 	/* Open the database... */
 	if ((nsd->db = namedb_open(nsd->dbfile, nsd->options, nsd->child_count)) == NULL) {
 		log_msg(LOG_ERR, "unable to open the database %s: %s",
@@ -590,7 +612,7 @@ close_all_sockets(struct nsd_socket sockets[], size_t n)
  * Does not return.
  *
  */
-static void
+void
 server_shutdown(struct nsd *nsd)
 {
 	size_t i;
@@ -750,6 +772,9 @@ server_reload(struct nsd *nsd, region_type* server_region, netio_type* netio,
 			log_msg(LOG_ERR, "unable to reload the database: %s", strerror(errno));
 			exit(1);
 		}
+#if defined(NSEC3) && !defined(FULL_PREHASH)
+		prehash(nsd->db, 0);
+#endif
 	}
 	if(!diff_read_file(nsd->db, nsd->options, NULL, nsd->child_count)) {
 		log_msg(LOG_ERR, "unable to load the diff file: %s", nsd->options->difffile);
@@ -808,7 +833,7 @@ server_reload(struct nsd *nsd, region_type* server_region, netio_type* netio,
 	/* Send quit command to parent: blocking, wait for receipt. */
 	do {
 		DEBUG(DEBUG_IPC,1, (LOG_INFO, "reload: ipc send quit to main"));
-		if (write_socket(cmdsocket, &cmd, sizeof(cmd)) == -1)
+		if (!write_socket(cmdsocket, &cmd, sizeof(cmd)))
 		{
 			log_msg(LOG_ERR, "problems sending command from reload %d to oldnsd %d: %s",
 				(int)nsd->pid, (int)old_pid, strerror(errno));
@@ -964,6 +989,10 @@ server_main(struct nsd *nsd)
 	pid_t xfrd_pid = -1;
 	sig_atomic_t mode;
 
+#ifdef RATELIMIT
+	rrl_init((nsd->this_child - nsd->children)/sizeof(nsd->children[0]));
+#endif
+
 	/* Ensure we are the main process */
 	assert(nsd->server_kind == NSD_SERVER_MAIN);
 
@@ -1020,8 +1049,7 @@ server_main(struct nsd *nsd)
 					reload_listener.fd = -1;
 					reload_listener.event_types = NETIO_EVENT_NONE;
 					/* inform xfrd reload attempt ended */
-					if(!write_socket(xfrd_listener.fd,
-						&cmd, sizeof(cmd)) == -1) {
+					if(!write_socket(xfrd_listener.fd, &cmd, sizeof(cmd))) {
 						log_msg(LOG_ERR, "problems "
 						  "sending SOAEND to xfrd: %s",
 						  strerror(errno));
@@ -1174,9 +1202,9 @@ server_main(struct nsd *nsd)
 	/* Truncate the pid file.  */
 	if ((fd = open(nsd->pidfile, O_WRONLY | O_TRUNC, 0644)) == -1) {
 		log_msg(LOG_ERR, "can not truncate the pid file %s: %s", nsd->pidfile, strerror(errno));
+	} else {
+		close(fd);
 	}
-	close(fd);
-
 	/* Unlink it if possible... */
 	unlinkpid(nsd->pidfile);
 
@@ -1369,6 +1397,20 @@ server_child(struct nsd *nsd)
 	server_shutdown(nsd);
 }
 
+static query_state_type
+server_process_query_udp(struct nsd *nsd, struct query *query)
+{
+#ifdef RATELIMIT
+	if(query_process(query, nsd) != QUERY_DISCARDED) {
+		if(rrl_process_query(query))
+			return rrl_slip(query);
+		else	return QUERY_PROCESSED;
+	}
+	return QUERY_DISCARDED;
+#else
+	return query_process(query, nsd);
+#endif
+}
 
 static void
 handle_udp(netio_type *ATTR_UNUSED(netio),
@@ -1413,18 +1455,23 @@ handle_udp(netio_type *ATTR_UNUSED(netio),
 		buffer_flip(q->packet);
 
 		/* Process and answer the query... */
-		if (server_process_query(data->nsd, q) != QUERY_DISCARDED) {
+		if (server_process_query_udp(data->nsd, q) != QUERY_DISCARDED) {
 #ifdef BIND8_STATS
 			if (RCODE(q->packet) == RCODE_OK && !AA(q->packet)) {
 				STATUP(data->nsd, nona);
-				ZTATUP(q->zone, nona);
+# ifdef USE_ZONE_STATS
+				if (q->zone)
+					ZTATUP(q->zone, nona);
+# endif
 			}
 
 # ifdef USE_ZONE_STATS
-			if (data->socket->addr->ai_family == AF_INET) {
+			if (q->zone) {
+			  if (data->socket->addr->ai_family == AF_INET) {
 				ZTATUP(q->zone, qudp);
-			} else if (data->socket->addr->ai_family == AF_INET6) {
+			  } else if (data->socket->addr->ai_family == AF_INET6) {
 				ZTATUP(q->zone, qudp6);
+			  }
 			}
 # endif
 #endif
@@ -1443,17 +1490,27 @@ handle_udp(netio_type *ATTR_UNUSED(netio),
 			if (sent == -1) {
 				log_msg(LOG_ERR, "sendto failed: %s", strerror(errno));
 				STATUP(data->nsd, txerr);
-				ZTATUP(q->zone, txerr);
+
+#ifdef USE_ZONE_STATS
+				if (q->zone)
+					ZTATUP(q->zone, txerr);
+#endif
 			} else if ((size_t) sent != buffer_remaining(q->packet)) {
 				log_msg(LOG_ERR, "sent %d in place of %d bytes", sent, (int) buffer_remaining(q->packet));
 #ifdef BIND8_STATS
 			} else {
 				/* Account the rcode & TC... */
 				STATUP2(data->nsd, rcode, RCODE(q->packet));
-				ZTATUP2(q->zone, rcode, RCODE(q->packet));
+# ifdef USE_ZONE_STATS
+				if (q->zone)
+					ZTATUP2(q->zone, rcode, RCODE(q->packet));
+# endif
 				if (TC(q->packet)) {
 					STATUP(data->nsd, truncated);
-					ZTATUP(q->zone, truncated);
+# ifdef USE_ZONE_STATS
+					if (q->zone)
+						ZTATUP(q->zone, truncated);
+# endif
 				}
 #endif /* BIND8_STATS */
 			}
@@ -1665,12 +1722,16 @@ handle_tcp_reading(netio_type *netio,
 	    && !AA(data->query->packet))
 	{
 		STATUP(data->nsd, nona);
-		ZTATUP(data->query->zone, nona);
+# ifdef USE_ZONE_STATS
+		if (data->query->zone)
+			ZTATUP(data->query->zone, nona);
+# endif
 	}
 
 # ifdef USE_ZONE_STATS
+	if (data->query->zone) {
 #  ifndef INET6
-	ZTATUP(data->query->zone, ctcp);
+		ZTATUP(data->query->zone, ctcp);
 #  else
 	if (data->query->addr.ss_family == AF_INET) {
 		ZTATUP(data->query->zone, ctcp);
@@ -1678,6 +1739,7 @@ handle_tcp_reading(netio_type *netio,
 		ZTATUP(data->query->zone, ctcp6);
 	}
 #  endif
+	}
 # endif /* USE_ZONE_STATS */
 
 #endif /* BIND8_STATS */
@@ -1718,9 +1780,18 @@ handle_tcp_writing(netio_type *netio,
 	if (data->bytes_transmitted < sizeof(q->tcplen)) {
 		/* Writing the response packet length.  */
 		uint16_t n_tcplen = htons(q->tcplen);
+#ifdef HAVE_WRITEV
+		struct iovec iov[2];
+		iov[0].iov_base = (uint8_t*)&n_tcplen + data->bytes_transmitted;
+		iov[0].iov_len = sizeof(n_tcplen) - data->bytes_transmitted; 
+		iov[1].iov_base = buffer_begin(q->packet);
+		iov[1].iov_len = buffer_limit(q->packet);
+		sent = writev(handler->fd, iov, 2);
+#else /* HAVE_WRITEV */
 		sent = write(handler->fd,
 			     (const char *) &n_tcplen + data->bytes_transmitted,
 			     sizeof(n_tcplen) - data->bytes_transmitted);
+#endif /* HAVE_WRITEV */
 		if (sent == -1) {
 			if (errno == EAGAIN || errno == EINTR) {
 				/*
@@ -1750,10 +1821,12 @@ handle_tcp_writing(netio_type *netio,
 			return;
 		}
 
-		assert(data->bytes_transmitted == sizeof(q->tcplen));
+#ifdef HAVE_WRITEV
+		sent -= sizeof(n_tcplen);
+		/* handle potential 'packet done' code */
+		goto packet_could_be_done;
+#endif
 	}
-
-	assert(data->bytes_transmitted < q->tcplen + sizeof(q->tcplen));
 
 	sent = write(handler->fd,
 		     buffer_current(q->packet),
@@ -1778,8 +1851,11 @@ handle_tcp_writing(netio_type *netio,
 		}
 	}
 
-	buffer_skip(q->packet, sent);
 	data->bytes_transmitted += sent;
+#ifdef HAVE_WRITEV
+  packet_could_be_done:
+#endif
+	buffer_skip(q->packet, sent);
 	if (data->bytes_transmitted < q->tcplen + sizeof(q->tcplen)) {
 		/*
 		 * Still more data to write when socket becomes

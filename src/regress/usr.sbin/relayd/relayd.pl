@@ -1,7 +1,7 @@
 #!/usr/bin/perl
-#	$OpenBSD: relayd.pl,v 1.4 2011/09/04 12:19:44 bluhm Exp $
+#	$OpenBSD: relayd.pl,v 1.8 2013/02/07 22:56:27 bluhm Exp $
 
-# Copyright (c) 2010,2011 Alexander Bluhm <bluhm@openbsd.org>
+# Copyright (c) 2010-2013 Alexander Bluhm <bluhm@openbsd.org>
 #
 # Permission to use, copy, modify, and distribute this software for any
 # purpose with or without fee is hereby granted, provided that the above
@@ -45,7 +45,7 @@ my $s = Server->new(
     listenaddr          => "127.0.0.1",
     listenport          => $sport,
     %{$args{server}},
-);
+) unless $args{server}{noserver};
 my $r = Relayd->new(
     forward             => $ARGV[0],
     listendomain        => AF_INET,
@@ -55,7 +55,7 @@ my $r = Relayd->new(
     connectaddr         => "127.0.0.1",
     connectport         => $sport,
     %{$args{relayd}},
-    test                => $test,
+    testfile            => $test,
 );
 my $c = Client->new(
     func                => \&write_char,
@@ -65,53 +65,15 @@ my $c = Client->new(
     %{$args{client}},
 );
 
-$s->run;
+$s->run unless $args{server}{noserver};
 $r->run;
 $r->up;
 $c->run->up;
-$s->up;
+$s->up unless $args{server}{noserver};
 
 $c->down;
-$s->down;
+$s->down unless $args{server}{noserver};
+$r->kill_child;
 $r->down;
 
-foreach ([ client => $c ], [ relayd => $r ], [ server => $s ]) {
-	my($name, $proc) = @$_;
-	my $pattern = $args{$name}{loggrep} or next;
-	$pattern = [ $pattern ] unless ref($pattern) eq 'ARRAY';
-	foreach my $pat (@$pattern) {
-		$proc->loggrep($pat)
-		    or die "$name log missing pattern: $pat";
-	}
-}
-
-exit if $args{nocheck};
-
-my @clen = $c->loggrep(qr/^LEN: /) or die "no client len"
-    unless $args{client}{nocheck};
-my @slen = $s->loggrep(qr/^LEN: /) or die "no server len"
-    unless $args{server}{nocheck};
-!@clen || !@slen || @clen ~~ @slen
-    or die "client: @clen", "server: @slen", "len mismatch";
-!defined($args{len}) || !$clen[0] || $clen[0] eq "LEN: $args{len}\n"
-    or die "client: $clen[0]", "len $args{len} expected";
-!defined($args{len}) || !$slen[0] || $slen[0] eq "LEN: $args{len}\n"
-    or die "server: $slen[0]", "len $args{len} expected";
-foreach my $len (@{$args{lengths} || []}) {
-	my $clen = shift @clen;
-	$clen eq "LEN: $len\n"
-	    or die "client: $clen", "len $len expected";
-	my $slen = shift @slen;
-	$slen eq "LEN: $len\n"
-	    or die "server: $slen", "len $len expected";
-}
-
-my $cmd5 = $c->loggrep(qr/^MD5: /) unless $args{client}{nocheck};
-my $smd5 = $s->loggrep(qr/^MD5: /) unless $args{server}{nocheck};
-!$cmd5 || !$smd5 || ref($args{md5}) eq 'ARRAY' || $cmd5 eq $smd5
-    or die "client: $cmd5", "server: $smd5", "md5 mismatch";
-my $md5 = ref($args{md5}) eq 'ARRAY' ? join('|', @{$args{md5}}) : $args{md5};
-!$md5 || !$cmd5 || $cmd5 =~ /^MD5: ($md5)$/
-    or die "client: $cmd5", "md5 $md5 expected";
-!$md5 || !$smd5 || $smd5 =~ /^MD5: ($md5)$/
-    or die "server: $smd5", "md5 $md5 expected";
+check_logs($c, $r, $s, %args);

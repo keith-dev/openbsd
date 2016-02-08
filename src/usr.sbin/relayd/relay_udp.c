@@ -1,4 +1,4 @@
-/*	$OpenBSD: relay_udp.c,v 1.24 2011/05/09 12:08:47 reyk Exp $	*/
+/*	$OpenBSD: relay_udp.c,v 1.27 2013/01/17 20:34:18 bluhm Exp $	*/
 
 /*
  * Copyright (c) 2007, 2008 Reyk Floeter <reyk@openbsd.org>
@@ -172,7 +172,7 @@ relay_udp_socket(struct sockaddr_storage *ss, in_port_t port,
 void
 relay_udp_response(int fd, short sig, void *arg)
 {
-	struct rsession		*con = (struct rsession *)arg;
+	struct rsession		*con = arg;
 	struct relay		*rlay = con->se_relay;
 	struct protocol		*proto = rlay->rl_proto;
 	void			*priv = NULL;
@@ -208,7 +208,7 @@ relay_udp_response(int fd, short sig, void *arg)
 void
 relay_udp_server(int fd, short sig, void *arg)
 {
-	struct relay *rlay = (struct relay *)arg;
+	struct relay *rlay = arg;
 	struct protocol *proto = rlay->rl_proto;
 	struct rsession *con = NULL;
 	struct ctl_natlook *cnl = NULL;
@@ -232,8 +232,7 @@ relay_udp_server(int fd, short sig, void *arg)
 	    (priv = (*proto->validate)(NULL, rlay, &ss, buf, len)) == NULL)
 		return;
 
-	if ((con = (struct rsession *)
-	    calloc(1, sizeof(struct rsession))) == NULL) {
+	if ((con = calloc(1, sizeof(*con))) == NULL) {
 		free(priv);
 		return;
 	}
@@ -249,7 +248,6 @@ relay_udp_server(int fd, short sig, void *arg)
 	con->se_in.con = con;
 	con->se_out.con = con;
 	con->se_relay = rlay;
-	con->se_hashkey = rlay->rl_dstkey;
 	con->se_id = ++relay_conid;
 	con->se_in.tree = &proto->request_tree;
 	con->se_out.tree = &proto->response_tree;
@@ -296,8 +294,7 @@ relay_udp_server(int fd, short sig, void *arg)
 	}
 
 	if (rlay->rl_conf.flags & F_NATLOOK) {
-		if ((cnl = (struct ctl_natlook *)
-		    calloc(1, sizeof(struct ctl_natlook))) == NULL) {
+		if ((cnl = calloc(1, sizeof(*cnl))) == NULL) {
 			relay_close(con, "failed to allocate natlookup");
 			return;
 		}
@@ -311,7 +308,7 @@ relay_udp_server(int fd, short sig, void *arg)
 		return;
 	}
 
-	if (rlay->rl_conf.flags & F_NATLOOK && cnl != NULL) {
+	if (cnl != NULL) {
 		con->se_cnl = cnl;
 		bzero(cnl, sizeof(*cnl));
 		cnl->in = -1;
@@ -336,7 +333,7 @@ relay_udp_server(int fd, short sig, void *arg)
 void
 relay_udp_timeout(int fd, short sig, void *arg)
 {
-	struct rsession		*con = (struct rsession *)arg;
+	struct rsession		*con = arg;
 
 	if (sig != EV_TIMEOUT)
 		fatalx("invalid timeout event");
@@ -442,7 +439,7 @@ relay_dns_validate(struct rsession *con, struct relay *rlay,
 		    relay_cmp_af(ss, &con->se_out.ss) == 0)
 			relay_dns_result(con, buf, len);
 	} else {
-		priv = (struct relay_dns_priv *)con->se_priv;
+		priv = con->se_priv;
 		if (priv == NULL || key != priv->dp_inkey) {
 			relay_close(con, "invalid response");
 			return (NULL);
@@ -459,8 +456,8 @@ relay_dns_validate(struct rsession *con, struct relay *rlay,
 int
 relay_dns_request(struct rsession *con)
 {
-	struct relay		*rlay = (struct relay *)con->se_relay;
-	struct relay_dns_priv	*priv = (struct relay_dns_priv *)con->se_priv;
+	struct relay		*rlay = con->se_relay;
+	struct relay_dns_priv	*priv = con->se_priv;
 	u_int8_t		*buf = EVBUFFER_DATA(con->se_out.output);
 	size_t			 len = EVBUFFER_LENGTH(con->se_out.output);
 	struct relay_dnshdr	*hdr;
@@ -474,7 +471,7 @@ relay_dns_request(struct rsession *con)
 	if (gettimeofday(&con->se_tv_start, NULL) == -1)
 		return (-1);
 
-	if (rlay->rl_dsttable != NULL) {
+	if (!TAILQ_EMPTY(&rlay->rl_tables)) {
 		if (relay_from_table(con) != 0)
 			return (-1);
 	} else if (con->se_out.ss.ss_family == AF_UNSPEC) {
@@ -516,8 +513,8 @@ relay_dns_request(struct rsession *con)
 void
 relay_dns_result(struct rsession *con, u_int8_t *buf, size_t len)
 {
-	struct relay		*rlay = (struct relay *)con->se_relay;
-	struct relay_dns_priv	*priv = (struct relay_dns_priv *)con->se_priv;
+	struct relay		*rlay = con->se_relay;
+	struct relay_dns_priv	*priv = con->se_priv;
 	struct relay_dnshdr	*hdr;
 	socklen_t		 slen;
 
@@ -546,8 +543,8 @@ relay_dns_result(struct rsession *con, u_int8_t *buf, size_t len)
 int
 relay_dns_cmp(struct rsession *a, struct rsession *b)
 {
-	struct relay_dns_priv	*ap = (struct relay_dns_priv *)a->se_priv;
-	struct relay_dns_priv	*bp = (struct relay_dns_priv *)b->se_priv;
+	struct relay_dns_priv	*ap = a->se_priv;
+	struct relay_dns_priv	*bp = b->se_priv;
 
 	if (ap == NULL || bp == NULL)
 		fatalx("relay_dns_cmp: invalid session");

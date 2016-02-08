@@ -10,15 +10,12 @@
  * ====================================================
  */
 
-/* LINTLIBRARY */
-
 /* 
  * fmod(x,y)
  * Return x mod y in exact arithmetic
  * Method: shift and subtract
  */
 
-#include <sys/cdefs.h>
 #include <float.h>
 #include <math.h>
 
@@ -133,10 +130,5 @@ fmod(double x, double y)
 }
 
 #if	LDBL_MANT_DIG == 53
-#ifdef	lint
-/* PROTOLIB1 */
-long double fmodl(long double, long double);
-#else	/* lint */
 __weak_alias(fmodl, fmod);
-#endif	/* lint */
 #endif	/* LDBL_MANT_DIG == 53 */

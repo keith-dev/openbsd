@@ -1,4 +1,4 @@
-#  $OpenBSD: Makefile,v 1.98 2011/09/22 04:56:09 schwarze Exp $
+#  $OpenBSD: Makefile,v 1.101 2012/09/15 13:15:22 miod Exp $
 #  $NetBSD: Makefile,v 1.28 1995/11/20 22:06:19 jtc Exp $
 #
 #  @(#)Makefile 5.1beta 93/09/24 
@@ -90,7 +90,6 @@ ARCH_SRCS = n_atan2.S n_cbrt.S n_hypot.S n_sincos.S n_support.S n_tan.S
 .PATH:	${.CURDIR}/noieee_src
 
 LIB=	m
-WANTLINT=
 COMMON_SRCS = b_exp__D.c b_log__D.c b_tgamma.c \
 	e_acos.c e_acosf.c e_acosh.c e_acoshf.c e_asin.c e_asinf.c \
 	e_atan2.c e_atan2f.c e_atanh.c e_atanhf.c e_cosh.c e_coshf.c e_exp.c \
@@ -162,7 +161,7 @@ SRCS=	${NOIEEE_SRCS} ${NOIEEE_ARCH}
 .else
 SRCS=	${COMMON_SRCS}
 .if (${MACHINE_ARCH} == "amd64") || (${MACHINE_ARCH} == "i386") || \
-	(${MACHINE_ARCH} == "m68k") || (${MACHINE_ARCH} == "m88k")
+	(${MACHINE_ARCH} == "m68k")
 .PATH:		${.CURDIR}/src/ld80
 CPPFLAGS+=	-I${.CURDIR}/src -I${.CURDIR}/src/ld80
 SRCS+=		${LONG_SRCS}
@@ -177,13 +176,11 @@ SRCS+=		${LONG_SRCS}
 # Substitute common sources with any arch specific sources 
 .for i in ${ARCH_SRCS}
     SRCS:=${SRCS:S/${i:S/.S/.c/}/$i/}
-    LSRCS+=${i:S/.S/.c/}
 .endfor
 
 .if (${MACHINE_ARCH} == "vax")
 .for i in ${NOIEEE_ARCH}
     SRCS:=${SRCS:S/${i:S/.S/.c/}/$i/}
-    LSRCS+=${i:S/.S/.c/}
 .endfor
 .endif
 

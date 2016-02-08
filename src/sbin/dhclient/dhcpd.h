@@ -1,4 +1,4 @@
-/*	$OpenBSD: dhcpd.h,v 1.76 2012/07/09 16:21:21 krw Exp $	*/
+/*	$OpenBSD: dhcpd.h,v 1.111 2013/02/18 15:57:08 krw Exp $	*/
 
 /*
  * Copyright (c) 2004 Henning Brauer <henning@openbsd.org>
@@ -72,6 +72,7 @@
 
 #define	LOCAL_PORT	68
 #define	REMOTE_PORT	67
+#define	INTERNALSIG	INT_MAX
 
 struct option {
 	char *name;
@@ -83,19 +84,9 @@ struct option_data {
 	u_int8_t	*data;
 };
 
-struct string_list {
-	struct string_list	*next;
-	char			string[1];	/* Actually bigger. */
-};
-
-struct iaddr {
-	int len;
-	unsigned char iabuf[16];
-};
-
-struct iaddrlist {
-	struct iaddrlist *next;
-	struct iaddr addr;
+struct reject_elem {
+	struct reject_elem	*next;
+	struct in_addr		 addr;
 };
 
 struct hardware {
@@ -107,9 +98,10 @@ struct hardware {
 struct client_lease {
 	struct client_lease	*next;
 	time_t			 expiry, renewal, rebind;
-	struct iaddr		 address;
+	struct in_addr		 address;
 	char			*server_name;
 	char			*filename;
+	char			*resolv_conf;
 	unsigned int		 is_static : 1;
 	unsigned int		 is_bootp : 1;
 	struct option_data	 options[256];
@@ -138,7 +130,10 @@ struct client_config {
 	struct option_data	 send_options[256];
 	u_int8_t		 required_options[256];
 	u_int8_t		 requested_options[256];
+	u_int8_t		 ignored_options[256];
 	int			 requested_option_count;
+	int			 required_option_count;
+	int			 ignored_option_count;
 	time_t			 timeout;
 	time_t			 initial_interval;
 	time_t			 link_timeout;
@@ -146,58 +141,58 @@ struct client_config {
 	time_t			 select_interval;
 	time_t			 reboot_timeout;
 	time_t			 backoff_cutoff;
-	char			*script_name;
 	enum { IGNORE, ACCEPT, PREFER }
 				 bootp_policy;
-	struct iaddrlist	*reject_list;
+	struct reject_elem	*reject_list;
+	char			*resolv_tail;
 };
 
 struct client_state {
-	struct client_lease	 *active;
-	struct client_lease	 *new;
-	struct client_lease	 *offered_leases;
-	struct client_lease	 *leases;
-	enum dhcp_state		  state;
-	struct iaddr		  destination;
-	u_int32_t		  xid;
-	u_int16_t		  secs;
-	time_t			  first_sending;
-	time_t			  interval;
-	struct dhcp_packet	  packet;
-	int			  packet_length;
-	struct iaddr		  requested_address;
-	char			**scriptEnv;
-	int			  scriptEnvsize;
+	struct client_lease	*active;
+	struct client_lease	*new;
+	struct client_lease	*offered_leases;
+	struct client_lease	*leases;
+	enum dhcp_state		 state;
+	struct in_addr		 destination;
+	u_int32_t		 xid;
+	u_int16_t		 secs;
+	time_t			 first_sending;
+	time_t			 interval;
+	struct dhcp_packet	 packet;
+	struct dhcp_packet	 bootrequest_packet;
+	int			 bootrequest_packet_length;
+	struct in_addr		 requested_address;
 };
 
 struct interface_info {
-	struct hardware		 hw_address;
-	struct in_addr		 primary_address;
-	char			 name[IFNAMSIZ];
-	int			 rfdesc;
-	int			 wfdesc;
-	int			 ufdesc; /* unicast */
-	unsigned char		*rbuf;
-	size_t			 rbuf_max;
-	size_t			 rbuf_offset;
-	size_t			 rbuf_len;
-	struct ifreq		*ifp;
-	int			 noifmedia;
-	int			 errors;
-	u_int16_t		 index;
-	int			 linkstat;
-	int			 rdomain;
+	struct hardware	 hw_address;
+	struct in_addr	 primary_address;
+	char		 name[IFNAMSIZ];
+	int		 rfdesc;
+	int		 wfdesc;
+	int		 ufdesc; /* unicast */
+	unsigned char	*rbuf;
+	size_t		 rbuf_max;
+	size_t		 rbuf_offset;
+	size_t		 rbuf_len;
+	struct ifreq	*ifp;
+	int		 noifmedia;
+	int		 errors;
+	u_int16_t	 index;
+	int		 linkstat;
+	int		 rdomain;
+	int		 flags;
+#define IFI_NEW_LLADDR	0x00000001
+#define IFI_HUP		0x00000002
 };
 
-struct timeout {
-	struct timeout	*next;
-	time_t		 when;
-	void		 (*func)(void);
+struct dhcp_timeout {
+	time_t	 when;
+	void	 (*func)(void);
 };
 
 #define	_PATH_DHCLIENT_CONF	"/etc/dhclient.conf"
 #define	_PATH_DHCLIENT_DB	"/var/db/dhclient.leases"
-#define	_PATH_DHCLIENT_SCRIPT	"/sbin/dhclient-script"
 #define	DHCPD_LOG_FACILITY	LOG_DAEMON
 
 /* External definitions... */
@@ -205,11 +200,16 @@ struct timeout {
 extern struct interface_info *ifi;
 extern struct client_state *client;
 extern struct client_config *config;
+extern struct imsgbuf *unpriv_ibuf;
+extern struct in_addr deleting;
+extern struct in_addr adding;
+extern struct in_addr active_addr;
+extern volatile sig_atomic_t quit;
 
 /* options.c */
 int cons_options(struct option_data *);
-char *pretty_print_option(unsigned int, unsigned char *, int, int, int);
-void do_packet(int, unsigned int, struct iaddr, struct hardware *);
+char *pretty_print_option(unsigned int, struct option_data *, int);
+void do_packet(int, unsigned int, struct in_addr, struct hardware *);
 
 /* errwarn.c */
 extern int warnings_occurred;
@@ -219,7 +219,7 @@ int note(char *, ...) __attribute__ ((__format__ (__printf__, 1, 2)));
 #ifdef DEBUG
 int debug(char *, ...) __attribute__ ((__format__ (__printf__, 1, 2)));
 #endif
-int parse_warn(char *, ...) __attribute__ ((__format__ (__printf__, 1, 2)));
+int parse_warn(char *);
 
 /* conflex.c */
 extern int lexline, lexchar;
@@ -232,7 +232,7 @@ int peek_token(char **, FILE *);
 void skip_to_semi(FILE *);
 int parse_semi(FILE *);
 char *parse_string(FILE *);
-int parse_ip_addr(FILE *, struct iaddr *);
+int parse_ip_addr(FILE *, struct in_addr *);
 void parse_hardware_param(FILE *, struct hardware *);
 void parse_lease_time(FILE *, time_t *);
 int parse_numeric_aggregate(FILE *, unsigned char *, int, int, int);
@@ -248,14 +248,15 @@ ssize_t receive_packet(struct sockaddr_in *, struct hardware *);
 
 /* dispatch.c */
 void discover_interface(void);
-void reinitialize_interface(void);
 void dispatch(void);
 void got_one(void);
 void set_timeout(time_t, void (*)(void));
+void set_timeout_interval(time_t, void (*)(void));
 void cancel_timeout(void);
+void interface_link_forceup(char *);
 int interface_status(char *);
-int interface_link_forceup(char *);
 int get_rdomain(char *);
+int subnet_exists(struct client_lease *);
 
 /* tables.c */
 extern const struct option dhcp_options[256];
@@ -270,22 +271,16 @@ void putLong(unsigned char *, int32_t);
 void putUShort(unsigned char *, unsigned int);
 void putShort(unsigned char *, int);
 
-/* inet.c */
-struct iaddr subnet_number(struct iaddr, struct iaddr);
-struct iaddr broadcast_addr(struct iaddr, struct iaddr);
-int addr_eq(struct iaddr, struct iaddr);
-char *piaddr(struct iaddr);
-
 /* dhclient.c */
 extern char *path_dhclient_conf;
 extern char *path_dhclient_db;
-extern time_t cur_time;
+extern char path_option_db[MAXPATHLEN];
 extern int log_perror;
 extern int routefd;
 
-void dhcpoffer(struct iaddr, struct option_data *);
-void dhcpack(struct iaddr, struct option_data *);
-void dhcpnak(struct iaddr, struct option_data *);
+void dhcpoffer(struct in_addr, struct option_data *, char *);
+void dhcpack(struct in_addr, struct option_data *, char *);
+void dhcpnak(struct in_addr, struct option_data *, char *);
 
 void send_discover(void);
 void send_request(void);
@@ -305,23 +300,15 @@ void make_decline(struct client_lease *);
 
 void free_client_lease(struct client_lease *);
 void rewrite_client_leases(void);
-void write_client_lease(struct client_lease *);
+void rewrite_option_db(struct client_lease *, struct client_lease *);
+char *lease_as_string(char *, struct client_lease *);
 
-void	 priv_script_init(char *);
-void	 priv_script_write_params(char *, struct client_lease *);
-int	 priv_script_go(void);
-
-void script_init(char *);
-void script_write_params(char *, struct client_lease *);
-int script_go(void);
-void script_set_env(const char *, const char *, const char *);
-void script_flush_env(void);
-int dhcp_option_ev_name(char *, size_t, const struct option *);
-
-struct client_lease *packet_to_lease(struct iaddr, struct option_data *);
+struct client_lease *packet_to_lease(struct in_addr, struct option_data *);
 void go_daemon(void);
 
 void routehandler(void);
+
+void sendhup(struct client_lease *);
 
 /* packet.c */
 void assemble_hw_header(unsigned char *, int *, struct hardware *);
@@ -329,17 +316,26 @@ void assemble_udp_ip_header(unsigned char *, int *, u_int32_t, u_int32_t,
     unsigned int, unsigned char *, int);
 ssize_t decode_hw_header(unsigned char *, int, struct hardware *);
 ssize_t decode_udp_ip_header(unsigned char *, int, struct sockaddr_in *,
-    unsigned char *, int);
+    int);
 
 /* clparse.c */
 int read_client_conf(void);
 void read_client_leases(void);
 void parse_client_statement(FILE *);
 int parse_X(FILE *, u_int8_t *, int);
-int parse_option_list(FILE *, u_int8_t *);
+int parse_option_list(FILE *, u_int8_t *, size_t);
 void parse_interface_declaration(FILE *);
 void parse_client_lease_statement(FILE *, int);
 void parse_client_lease_declaration(FILE *, struct client_lease *);
 int parse_option_decl(FILE *, struct option_data *);
-void parse_string_list(FILE *, struct string_list **, int);
 void parse_reject_statement(FILE *);
+
+/* kroute.c */
+void delete_addresses(char *, int);
+void delete_address(char *, int, struct in_addr);
+
+void add_address(char *, int, struct in_addr, struct in_addr);
+
+void flush_routes_and_arp_cache(char *, int);
+
+void add_default_route(int, struct in_addr, struct in_addr);

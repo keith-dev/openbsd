@@ -1,8 +1,7 @@
-/*	$OpenBSD: ca.c,v 1.17 2011/05/27 12:01:02 reyk Exp $	*/
-/*	$vantronix: ca.c,v 1.29 2010/06/02 12:22:58 reyk Exp $	*/
+/*	$OpenBSD: ca.c,v 1.21 2013/01/08 10:38:19 reyk Exp $	*/
 
 /*
- * Copyright (c) 2010 Reyk Floeter <reyk@vantronix.net>
+ * Copyright (c) 2010-2013 Reyk Floeter <reyk@openbsd.org>
  *
  * Permission to use, copy, modify, and distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -248,7 +247,7 @@ ca_setreq(struct iked *env, struct iked_sahdr *sh,
 
 	/* Convert to a static Id */
 	bzero(&id, sizeof(id));
-	if (ikev2_policy2id(localid, &id, 0) != 0)
+	if (ikev2_policy2id(localid, &id, 1) != 0)
 		return (-1);
 
 	bzero(&idb, sizeof(idb));
@@ -523,7 +522,7 @@ ca_reload(struct iked *env)
 
 		if (!X509_load_cert_file(store->ca_calookup, file,
 		    X509_FILETYPE_PEM)) {
-			log_debug("%s: failed to load ca file %s", __func__,
+			log_warn("%s: failed to load ca file %s", __func__,
 			    entry->d_name);
 			ca_sslerror();
 			continue;
@@ -549,7 +548,7 @@ ca_reload(struct iked *env)
 
 		if (!X509_load_crl_file(store->ca_calookup, file,
 		    X509_FILETYPE_PEM)) {
-			log_debug("%s: failed to load crl file %s", __func__,
+			log_warn("%s: failed to load crl file %s", __func__,
 			    entry->d_name);
 			ca_sslerror();
 			continue;
@@ -619,7 +618,7 @@ ca_reload(struct iked *env)
 
 		if (!X509_load_cert_file(store->ca_certlookup, file,
 		    X509_FILETYPE_PEM)) {
-			log_debug("%s: failed to load cert file %s", __func__,
+			log_warn("%s: failed to load cert file %s", __func__,
 			    entry->d_name);
 			ca_sslerror();
 			continue;

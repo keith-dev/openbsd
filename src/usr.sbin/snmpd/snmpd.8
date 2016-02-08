@@ -1,6 +1,6 @@
-.\" $OpenBSD: snmpd.8,v 1.13 2010/05/24 19:44:23 jmc Exp $
+.\" $OpenBSD: snmpd.8,v 1.17 2012/09/26 16:19:45 jmc Exp $
 .\"
-.\" Copyright (c) 2007, 2008 Reyk Floeter <reyk@vantronix.net>
+.\" Copyright (c) 2007, 2008 Reyk Floeter <reyk@openbsd.org>
 .\"
 .\" Permission to use, copy, modify, and distribute this software for any
 .\" purpose with or without fee is hereby granted, provided that the above
@@ -14,7 +14,7 @@
 .\" ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
 .\" OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 .\"
-.Dd $Mdocdate: May 24 2010 $
+.Dd $Mdocdate: September 26 2012 $
 .Dt SNMPD 8
 .Os
 .Sh NAME
@@ -81,20 +81,41 @@ Management Information Base definitions
 .Sh SEE ALSO
 .Xr snmpd.conf 5 ,
 .Xr snmpctl 8
+.Sh STANDARDS
 .Rs
-.%R RFC 1157
-.%T A Simple Network Management Protocol (SNMP)
-.%D May 1990
-.Re
-.Rs
-.%R http://www.ibr.cs.tu-bs.de/projects/snmpv3/
-.%T SNMP Version 3 (SNMPv3)
-.%D March 2002
-.Re
-.Rs
-.%R RFC 3410
-.%T Introduction and Applicability Statements for Internet Standard Management Framework
+.%A U. Blumenthal
+.%A B. Wijnen
 .%D December 2002
+.%R RFC 3414
+.%T User-based Security Model (USM) for version 3 of the Simple Network Management Protocol (SNMPv3)
+.Re
+.Pp
+.Rs
+.%A R. Presuhn
+.%D December 2002
+.%R RFC 3416
+.%T Version 2 of the Protocol Operations for the Simple Network Management Protocol (SNMP)
+.Re
+.Pp
+.Rs
+.%A R. Presuhn
+.%D December 2002
+.%R RFC 3417
+.%T Transport Mappings for the Simple Network Management Protocol (SNMP)
+.Re
+.Pp
+.Rs
+.%A R. Presuhn
+.%D December 2002
+.%R RFC 3418
+.%T Management Information Base (MIB) for the Simple Network Management Protocol (SNMP)
+.Re
+.Pp
+.Rs
+.%A U. Blumenthal
+.%D June 2004
+.%R RFC 3826
+.%T The Advanced Encryption Standard (AES) Cipher Algorithm in the SNMP User-based Security Model
 .Re
 .Sh HISTORY
 The
@@ -105,7 +126,7 @@ program first appeared in
 The
 .Nm
 program was written by
-.An Reyk Floeter Aq reyk@vantronix.net .
+.An Reyk Floeter Aq reyk@openbsd.org .
 .Sh CAVEATS
 .Nm
 does not fully work yet.

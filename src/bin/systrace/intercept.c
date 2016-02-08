@@ -1,4 +1,4 @@
-/*	$OpenBSD: intercept.c,v 1.58 2011/10/18 20:01:28 matthew Exp $	*/
+/*	$OpenBSD: intercept.c,v 1.60 2012/12/04 02:24:47 deraadt Exp $	*/
 /*
  * Copyright 2002 Niels Provos <provos@citi.umich.edu>
  * All rights reserved.
@@ -31,7 +31,6 @@
 
 
 #include <sys/types.h>
-#include <sys/param.h>
 #include <sys/tree.h>
 #include <sys/wait.h>
 #include <sys/stat.h>
@@ -266,7 +265,7 @@ intercept_setpid(struct intercept_pid *icpid, uid_t uid, gid_t gid)
 }
 
 pid_t
-intercept_run(int bg, int fd, uid_t uid, gid_t gid,
+intercept_run(int bg, int *fdp, uid_t uid, gid_t gid,
     char *path, char *const argv[])
 {
 	struct intercept_pid *icpid;
@@ -285,6 +284,13 @@ intercept_run(int bg, int fd, uid_t uid, gid_t gid,
 	if (ohandler == SIG_ERR)
 		err(1, "signal");
 
+	/*
+	 * If systrace process will be the child then we must reopen
+	 * the fd in the child after the fork
+	 */
+	if (bg)
+		close(*fdp);
+
 	pid = getpid();
 	cpid = fork();
 	if (cpid == -1)
@@ -295,9 +301,6 @@ intercept_run(int bg, int fd, uid_t uid, gid_t gid,
 	 * the parent, or vice versa.
 	 */
 	if ((!bg && cpid == 0) || (bg && cpid != 0)) {
-		/* Needs to be closed */
-		close(fd);
-
 		if (bg) {
 			/* Wait for child to "detach" */
 			cpid = wait(&status);
@@ -365,6 +368,10 @@ intercept_run(int bg, int fd, uid_t uid, gid_t gid,
 		if (daemon(1, 1) == -1) {
 			kill(pid, SIGKILL);
 			err(1, "daemon");
+		}
+		if ((*fdp = intercept_open()) == -1) {
+			kill(pid, SIGKILL);
+			err(1, "intercept_open");
 		}
 	}
 

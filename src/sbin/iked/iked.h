@@ -1,8 +1,7 @@
-/*	$OpenBSD: iked.h,v 1.52 2012/07/02 13:03:24 mikeb Exp $	*/
-/*	$vantronix: iked.h,v 1.61 2010/06/03 07:57:33 reyk Exp $	*/
+/*	$OpenBSD: iked.h,v 1.56 2013/01/08 10:38:19 reyk Exp $	*/
 
 /*
- * Copyright (c) 2010 Reyk Floeter <reyk@vantronix.net>
+ * Copyright (c) 2010-2013 Reyk Floeter <reyk@openbsd.org>
  *
  * Permission to use, copy, modify, and distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -141,6 +140,7 @@ struct iked_flow {
 
 	u_int8_t			 flow_saproto;
 	u_int8_t			 flow_ipproto;
+	u_int8_t			 flow_type;
 
 	struct iked_id			*flow_srcid;
 	struct iked_id			*flow_dstid;
@@ -526,8 +526,8 @@ struct iked {
 	u_int8_t			 sc_certreqtype;
 	struct ibuf			*sc_certreq;
 
-	struct iked_socket		*sc_sock4;
-	struct iked_socket		*sc_sock6;
+	struct iked_socket		*sc_sock4[2];
+	struct iked_socket		*sc_sock6[2];
 
 	struct iked_timer		 sc_inittmr;
 #define IKED_INITIATOR_INITIAL		 2
@@ -689,7 +689,8 @@ struct ibuf *
 	 ikev2_prfplus(struct iked_hash *, struct ibuf *, struct ibuf *,
 	    size_t);
 ssize_t	 ikev2_psk(struct iked_sa *, u_int8_t *, size_t, u_int8_t **);
-ssize_t	 ikev2_nat_detection(struct iked_message *, void *, size_t, u_int);
+ssize_t	 ikev2_nat_detection(struct iked *, struct iked_message *,
+	    void *, size_t, u_int);
 int	 ikev2_send_informational(struct iked *, struct iked_message *);
 int	 ikev2_send_ike_e(struct iked *, struct iked_sa *, struct ibuf *,
 	    u_int8_t, u_int8_t, int);
@@ -737,7 +738,7 @@ struct ibuf *
 int	 ikev2_msg_integr(struct iked *, struct iked_sa *, struct ibuf *);
 int	 ikev2_msg_frompeer(struct iked_message *);
 struct iked_socket *
-	 ikev2_msg_getsocket(struct iked *, int);
+	 ikev2_msg_getsocket(struct iked *, int, int);
 int	 ikev2_msg_retransmit_response(struct iked *, struct iked_sa *,
 	    struct iked_message *);
 void	 ikev2_msg_prevail(struct iked *, struct iked_msgqueue *,
@@ -761,6 +762,7 @@ int	 eap_parse(struct iked *, struct iked_sa *, void *, int);
 int	 pfkey_couple(int, struct iked_sas *, int);
 int	 pfkey_flow_add(int fd, struct iked_flow *);
 int	 pfkey_flow_delete(int fd, struct iked_flow *);
+int	 pfkey_block(int, int, u_int);
 int	 pfkey_sa_init(int, struct iked_childsa *, u_int32_t *);
 int	 pfkey_sa_add(int, struct iked_childsa *, struct iked_childsa *);
 int	 pfkey_sa_delete(int, struct iked_childsa *);

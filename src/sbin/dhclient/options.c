@@ -1,4 +1,4 @@
-/*	$OpenBSD: options.c,v 1.41 2012/06/26 14:46:42 krw Exp $	*/
+/*	$OpenBSD: options.c,v 1.51 2013/02/14 20:39:46 krw Exp $	*/
 
 /* DHCP options parsing and reassembly. */
 
@@ -39,8 +39,6 @@
  * see ``http://www.vix.com/isc''.  To learn more about Vixie
  * Enterprises, see ``http://www.vix.com''.
  */
-
-#include <ctype.h>
 
 #include "dhcpd.h"
 
@@ -148,11 +146,11 @@ parse_option_buffer(struct option_data *options, unsigned char *buffer,
 int
 cons_options(struct option_data *options)
 {
-	unsigned char *buf = client->packet.options;
+	unsigned char *buf = client->bootrequest_packet.options;
 	int buflen = 576 - DHCP_FIXED_LEN;
 	int ix, incr, length, bufix, code, lastopt = -1;
 
-	bzero(buf, buflen);
+	memset(buf, 0, buflen);
 
 	memcpy(buf, DHCP_OPTIONS_COOKIE, 4);
 	if (options[DHO_DHCP_MESSAGE_TYPE].data) {
@@ -198,22 +196,28 @@ cons_options(struct option_data *options)
  * Format the specified option so that a human can easily read it.
  */
 char *
-pretty_print_option(unsigned int code, unsigned char *data, int len,
-    int emit_commas, int emit_quotes)
+pretty_print_option(unsigned int code, struct option_data *option,
+    int emit_punct)
 {
 	static char optbuf[32768]; /* XXX */
 	int hunksize = 0, numhunk = -1, numelem = 0;
 	char fmtbuf[32], *op = optbuf;
 	int i, j, k, opleft = sizeof(optbuf);
+	unsigned char *data = option->data;
 	unsigned char *dp = data;
+	int len = option->len;
 	struct in_addr foo;
 	char comma;
 
-	/* Code should be between 0 and 255. */
-	if (code > 255)
-		error("pretty_print_option: bad code %d", code);
+	memset(optbuf, 0, sizeof(optbuf));
 
-	if (emit_commas)
+	/* Code should be between 0 and 255. */
+	if (code > 255) {
+		warning("pretty_print_option: bad code %d", code);
+		goto done;
+	}
+
+	if (emit_punct)
 		comma = ',';
 	else
 		comma = ' ';
@@ -224,7 +228,7 @@ pretty_print_option(unsigned int code, unsigned char *data, int len,
 			warning("%s: Excess information in format string: %s",
 			    dhcp_options[code].name,
 			    &(dhcp_options[code].format[i]));
-			break;
+			goto done;
 		}
 		numelem++;
 		fmtbuf[i] = dhcp_options[code].format[i];
@@ -238,7 +242,7 @@ pretty_print_option(unsigned int code, unsigned char *data, int len,
 				    " in format string: %s",
 				    dhcp_options[code].name,
 				    dhcp_options[code].format);
-				return ("<fmt error>");
+				goto done;
 			}
 			break;
 		case 'X':
@@ -282,7 +286,7 @@ pretty_print_option(unsigned int code, unsigned char *data, int len,
 			warning("%s: garbage in format string: %s",
 			    dhcp_options[code].name,
 			    &(dhcp_options[code].format[i]));
-			break;
+			goto done;
 		}
 	}
 
@@ -290,20 +294,24 @@ pretty_print_option(unsigned int code, unsigned char *data, int len,
 	if (hunksize > len) {
 		warning("%s: expecting at least %d bytes; got %d",
 		    dhcp_options[code].name, hunksize, len);
-		return ("<error>");
+		goto done;
 	}
 	/* Check for too many bytes... */
-	if (numhunk == -1 && hunksize < len)
-		warning("%s: %d extra bytes",
-		    dhcp_options[code].name, len - hunksize);
+	if (numhunk == -1 && hunksize < len) {
+		warning("%s: expecting only %d bytes: got %d",
+		    dhcp_options[code].name, hunksize, len);
+		goto done;
+	}
 
 	/* If this is an array, compute its size. */
 	if (!numhunk)
 		numhunk = len / hunksize;
 	/* See if we got an exact number of hunks. */
-	if (numhunk > 0 && numhunk * hunksize < len)
-		warning("%s: %d extra bytes at end of array",
-		    dhcp_options[code].name, len - numhunk * hunksize);
+	if (numhunk > 0 && numhunk * hunksize != len) {
+		warning("%s: expecting %d bytes: got %d",
+		    dhcp_options[code].name, numhunk * hunksize, len);
+		goto done;
+	}
 
 	/* A one-hunk array prints the same as a single hunk. */
 	if (numhunk < 0)
@@ -316,7 +324,7 @@ pretty_print_option(unsigned int code, unsigned char *data, int len,
 			size_t oplen;
 			switch (fmtbuf[j]) {
 			case 't':
-				if (emit_quotes) {
+				if (emit_punct) {
 					*op++ = '"';
 					opleft--;
 				}
@@ -345,7 +353,7 @@ pretty_print_option(unsigned int code, unsigned char *data, int len,
 						opleft--;
 					}
 				}
-				if (emit_quotes) {
+				if (emit_punct) {
 					*op++ = '"';
 					opleft--;
 				}
@@ -439,22 +447,25 @@ pretty_print_option(unsigned int code, unsigned char *data, int len,
 			goto toobig;
 
 	}
+
+done:
 	return (optbuf);
- toobig:
-	warning("dhcp option too large");
-	return ("<error>");
+
+toobig:
+	memset(optbuf, 0, sizeof(optbuf));
+	return (optbuf);
 }
 
 void
-do_packet(int len, unsigned int from_port, struct iaddr from,
+do_packet(int len, unsigned int from_port, struct in_addr from,
     struct hardware *hfrom)
 {
 	struct dhcp_packet *packet = &client->packet;
 	struct option_data options[256];
-	struct iaddrlist *ap;
-	void (*handler)(struct iaddr, struct option_data *);
-	char *type;
-	int i, options_valid = 1;
+	struct reject_elem *ap;
+	void (*handler)(struct in_addr, struct option_data *, char *);
+	char *type, *info;
+	int i, rslt, options_valid = 1;
 
 	if (packet->hlen > sizeof(packet->chaddr)) {
 		note("Discarding packet with invalid hlen.");
@@ -492,7 +503,7 @@ do_packet(int len, unsigned int from_port, struct iaddr from,
 		}
 	}
 
-	type = "";
+	type = "<unknown>";
 	handler = NULL;
 
 	if (options[DHO_DHCP_MESSAGE_TYPE].data) {
@@ -518,23 +529,31 @@ do_packet(int len, unsigned int from_port, struct iaddr from,
 		type = "BOOTREPLY";
 	}
 
-	if (handler && client->xid == client->packet.xid) {
-		if (hfrom->hlen == 6)
-			note("%s from %s (%s)", type, piaddr(from),
-			    ether_ntoa((struct ether_addr *)hfrom->haddr));
-		else
-			note("%s from %s", type, piaddr(from));
-	} else
+	if (hfrom->hlen == 6)
+		rslt = asprintf(&info, "%s from %s (%s)", type, inet_ntoa(from),
+		    ether_ntoa((struct ether_addr *)hfrom->haddr));
+	else
+		rslt = asprintf(&info, "%s from %s", type, inet_ntoa(from));
+	if (rslt == -1)
+		error("no memory for info string");
+
+	if (client->xid != client->packet.xid) {
+#ifdef DEBUG
+		debug("XID mismatch on %s", info);
+#endif
 		handler = NULL;
+	}
 
 	for (ap = config->reject_list; ap && handler; ap = ap->next)
-		if (addr_eq(from, ap->addr)) {
-			note("%s from %s rejected.", type, piaddr(from));
+		if (from.s_addr == ap->addr.s_addr) {
+			note("Rejected %s.", info);
 			handler = NULL;
 		}
 
 	if (handler)
-		(*handler)(from, options);
+		(*handler)(from, options, info);
+
+	free(info);
 
 	for (i = 0; i < 256; i++)
 		if (options[i].len && options[i].data)

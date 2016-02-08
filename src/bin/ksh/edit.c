@@ -1,4 +1,4 @@
-/*	$OpenBSD: edit.c,v 1.34 2010/05/20 01:13:07 fgsch Exp $	*/
+/*	$OpenBSD: edit.c,v 1.37 2013/01/21 10:13:24 halex Exp $	*/
 
 /*
  * Command line editing - common code
@@ -20,7 +20,7 @@
 
 
 static void x_sigwinch(int);
-static volatile sig_atomic_t got_sigwinch;
+volatile sig_atomic_t got_sigwinch;
 static void check_sigwinch(void);
 
 static int	x_file_glob(int, const char *, int, char ***);
@@ -348,7 +348,7 @@ x_file_glob(int flags, const char *str, int slen, char ***wordsp)
 {
 	char *toglob;
 	char **words;
-	int nwords, i, idx, escaping;
+	int nwords;
 	XPtrV w;
 	struct source *s, *sold;
 
@@ -357,20 +357,6 @@ x_file_glob(int flags, const char *str, int slen, char ***wordsp)
 
 	toglob = add_glob(str, slen);
 
-	/* remove all escaping backward slashes */
-	escaping = 0;
-	for (i = 0, idx = 0; toglob[i]; i++) {
-		if (toglob[i] == '\\' && !escaping) {
-			escaping = 1;
-			continue;
-		}
-
-		toglob[idx] = toglob[i];
-		idx++;
-		if (escaping) escaping = 0;
-	}
-	toglob[idx] = '\0';
-
 	/*
 	 * Convert "foo*" (toglob) to an array of strings (words)
 	 */
@@ -378,7 +364,7 @@ x_file_glob(int flags, const char *str, int slen, char ***wordsp)
 	s = pushs(SWSTR, ATEMP);
 	s->start = s->str = toglob;
 	source = s;
-	if (yylex(ONEWORD) != LWORD) {
+	if (yylex(ONEWORD|UNESCAPE) != LWORD) {
 		source = sold;
 		internal_errorf(0, "fileglob: substitute error");
 		return 0;
@@ -394,15 +380,12 @@ x_file_glob(int flags, const char *str, int slen, char ***wordsp)
 	if (nwords == 1) {
 		struct stat statb;
 
-		/* Check if globbing failed (returned glob pattern),
-		 * but be careful (E.g. toglob == "ab*" when the file
-		 * "ab*" exists is not an error).
-		 * Also, check for empty result - happens if we tried
-		 * to glob something which evaluated to an empty
-		 * string (e.g., "$FOO" when there is no FOO, etc).
+		/* Check if file exists, also, check for empty
+		 * result - happens if we tried to glob something
+		 * which evaluated to an empty string (e.g.,
+		 * "$FOO" when there is no FOO, etc).
 		 */
-		if ((strcmp(words[0], toglob) == 0 &&
-		    stat(words[0], &statb) < 0) ||
+		 if ((lstat(words[0], &statb) < 0) ||
 		    words[0][0] == '\0') {
 			x_free_words(nwords, words);
 			words = NULL;

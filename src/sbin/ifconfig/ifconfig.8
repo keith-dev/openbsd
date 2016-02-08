@@ -1,4 +1,4 @@
-.\"	$OpenBSD: ifconfig.8,v 1.228 2012/05/31 17:50:59 deraadt Exp $
+.\"	$OpenBSD: ifconfig.8,v 1.231 2013/02/06 22:58:18 sthen Exp $
 .\"	$NetBSD: ifconfig.8,v 1.11 1996/01/04 21:27:29 pk Exp $
 .\"     $FreeBSD: ifconfig.8,v 1.16 1998/02/01 07:03:29 steve Exp $
 .\"
@@ -31,7 +31,7 @@
 .\"
 .\"     @(#)ifconfig.8	8.4 (Berkeley) 6/1/94
 .\"
-.Dd $Mdocdate: May 31 2012 $
+.Dd $Mdocdate: February 6 2013 $
 .Dt IFCONFIG 8
 .Os
 .Sh NAME
@@ -230,6 +230,11 @@ is a member of the
 .Em ppp
 interface family group.
 .It
+.Xr pppx 4
+interfaces are members of the
+.Em pppx
+interface group.
+.It
 The interface(s) the default route(s) point to are members of the
 .Em egress
 interface group.
@@ -256,10 +261,13 @@ As above, for TCP in IPv4 datagrams.
 .It Sy CSUM_UDPv4
 As above, for UDP.
 .It Sy VLAN_MTU
-MTU can be configured on a per-vlan basis.
+The device can handle full sized frames, plus the size
+of the
+.Xr vlan 4
+tag.
 .It Sy VLAN_HWTAGGING
 On transmit, the device can prepend the
-.Xr vlan
+.Xr vlan 4
 tag.
 .It Sy CSUM_TCPv6
 As CSUM_TCPv4, but supports IPv6 datagrams.
@@ -267,6 +275,8 @@ As CSUM_TCPv4, but supports IPv6 datagrams.
 As above, for UDP.
 .It Sy WOL
 The device supports Wake on LAN (WoL).
+.It Sy hardmtu
+The maximum MTU supported.
 .El
 .It Fl inet6
 Disable
@@ -424,7 +434,6 @@ This may be used to enable an interface after an
 It happens automatically when setting the first address on an interface.
 If the interface was reset when previously marked down,
 the hardware will be re-initialized.
-.Pp
 .It Cm wol
 Enable Wake on LAN (WoL).
 When enabled, reception of a WoL frame will cause the network card to

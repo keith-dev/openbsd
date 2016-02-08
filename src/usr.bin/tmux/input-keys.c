@@ -1,4 +1,4 @@
-/* $OpenBSD: input-keys.c,v 1.26 2012/07/10 11:53:01 nicm Exp $ */
+/* $OpenBSD: input-keys.c,v 1.30 2012/11/27 20:22:12 nicm Exp $ */
 
 /*
  * Copyright (c) 2007 Nicholas Marriott <nicm@users.sourceforge.net>
@@ -200,22 +200,23 @@ input_key(struct window_pane *wp, int key)
 
 /* Translate mouse and output. */
 void
-input_mouse(struct window_pane *wp, struct mouse_event *m)
+input_mouse(struct window_pane *wp, struct session *s, struct mouse_event *m)
 {
-	char	buf[10];
-	size_t	len;
+	char			 buf[10];
+	size_t			 len;
+	struct paste_buffer	*pb;
 
 	if (wp->screen->mode & ALL_MOUSE_MODES) {
 		if (wp->screen->mode & MODE_MOUSE_UTF8) {
 			len = xsnprintf(buf, sizeof buf, "\033[M");
-			len += utf8_split2(m->b + 32, &buf[len]);
+			len += utf8_split2(m->xb + 32, &buf[len]);
 			len += utf8_split2(m->x + 33, &buf[len]);
 			len += utf8_split2(m->y + 33, &buf[len]);
 		} else {
-			if (m->b > 223 || m->x >= 222 || m->y > 222)
+			if (m->xb > 223 || m->x >= 222 || m->y > 222)
 				return;
 			len = xsnprintf(buf, sizeof buf, "\033[M");
-			buf[len++] = m->b + 32;
+			buf[len++] = m->xb + 32;
 			buf[len++] = m->x + 33;
 			buf[len++] = m->y + 33;
 		}
@@ -223,13 +224,19 @@ input_mouse(struct window_pane *wp, struct mouse_event *m)
 		return;
 	}
 
-	if ((m->b & 3) != 1 &&
+	if (m->button == 1 && (m->event & MOUSE_EVENT_CLICK) &&
+	    options_get_number(&wp->window->options, "mode-mouse") == 1) {
+		pb = paste_get_top(&global_buffers);
+		if (pb != NULL) {
+			paste_send_pane(pb, wp, "\r",
+			    wp->screen->mode & MODE_BRACKETPASTE);
+		}
+	} else if ((m->xb & 3) != 1 &&
 	    options_get_number(&wp->window->options, "mode-mouse") == 1) {
 		if (window_pane_set_mode(wp, &window_copy_mode) == 0) {
 			window_copy_init_from_pane(wp);
 			if (wp->mode->mouse != NULL)
-				wp->mode->mouse(wp, NULL, m);
+				wp->mode->mouse(wp, s, m);
 		}
-		return;
 	}
 }

@@ -17,7 +17,6 @@
 #include <ctype.h>
 #include <errno.h>
 #include <limits.h>
-#include <netdb.h>
 #include <stddef.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -226,6 +225,10 @@ query_reset(query_type *q, size_t maxlen, int is_tcp)
 	q->axfr_current_domain = NULL;
 	q->axfr_current_rrset = NULL;
 	q->axfr_current_rr = 0;
+
+#ifdef RATELIMIT
+	q->wildcard_domain = NULL;
+#endif
 }
 
 /* get a temporary domain number (or 0=failure) */
@@ -360,8 +363,9 @@ process_tsig(struct query* q)
 		return NSD_RC_FORMAT;
 	if(q->tsig.status == TSIG_OK) {
 		if(!tsig_from_query(&q->tsig)) {
-			log_msg(LOG_ERR, "query tsig unknown key/algorithm");
-			return NSD_RC_REFUSE;
+			log_msg(LOG_ERR, "query: bad tsig (%s)",
+				tsig_error(q->tsig.error_code));
+			return NSD_RC_NOTAUTH;
 		}
 		buffer_set_limit(q->packet, q->tsig.position);
 		ARCOUNT_SET(q->packet, ARCOUNT(q->packet) - 1);
@@ -370,7 +374,7 @@ process_tsig(struct query* q)
 		if(!tsig_verify(&q->tsig)) {
 			log_msg(LOG_ERR, "query: bad tsig signature for key %s",
 				dname_to_string(q->tsig.key->name, NULL));
-			return NSD_RC_REFUSE;
+			return NSD_RC_NOTAUTH;
 		}
 		DEBUG(DEBUG_XFRD,1, (LOG_INFO, "query good tsig signature for %s",
 			dname_to_string(q->tsig.key->name, NULL)));
@@ -384,7 +388,7 @@ process_tsig(struct query* q)
 static query_state_type
 answer_notify(struct nsd* nsd, struct query *query)
 {
-	int acl_num;
+	int acl_num, acl_num_xfr;
 	acl_options_t *why;
 	nsd_rc_type rc;
 
@@ -415,8 +419,15 @@ answer_notify(struct nsd* nsd, struct query *query)
 		int s = nsd->this_child->parent_fd;
 		uint16_t sz;
 		uint32_t acl_send = htonl(acl_num);
+		uint32_t acl_xfr;
 		size_t pos;
 		assert(why);
+
+		/* Find priority candidate for request XFR. -1 if no match */
+		acl_num_xfr = acl_check_incoming(
+			zone_opt->request_xfr, query, NULL);
+		acl_xfr = htonl(acl_num_xfr);
+
 		DEBUG(DEBUG_XFRD,1, (LOG_INFO, "got notify %s passed acl %s %s",
 			dname_to_string(query->qname, NULL),
 			why->ip_address_spec,
@@ -432,7 +443,8 @@ answer_notify(struct nsd* nsd, struct query *query)
 			!write_socket(s, &sz, sizeof(sz)) ||
 			!write_socket(s, buffer_begin(query->packet),
 				buffer_limit(query->packet)) ||
-			!write_socket(s, &acl_send, sizeof(acl_send))) {
+			!write_socket(s, &acl_send, sizeof(acl_send)) ||
+			!write_socket(s, &acl_xfr, sizeof(acl_xfr))) {
 			log_msg(LOG_ERR, "error in IPC notify server2main, %s",
 				strerror(errno));
 			return query_error(query, NSD_RC_SERVFAIL);
@@ -855,10 +867,8 @@ answer_nodata(struct query *query, answer_type *answer, domain_type *original)
 static void
 answer_nxdomain(query_type *query, answer_type *answer)
 {
-	if (query->cname_count == 0) {
-		RCODE_SET(query->packet, RCODE_NXDOMAIN);
-		answer_soa(query, answer);
-	}
+	RCODE_SET(query->packet, RCODE_NXDOMAIN);
+	answer_soa(query, answer);
 }
 
 
@@ -1031,6 +1041,9 @@ answer_authoritative(struct nsd   *nsd,
 	} else if (domain_wildcard_child(closest_encloser)) {
 		/* Generate the domain from the wildcard.  */
 		domain_type *wildcard_child = domain_wildcard_child(closest_encloser);
+#ifdef RATELIMIT
+		q->wildcard_domain = wildcard_child;
+#endif
 
 		match = (domain_type *) region_alloc(q->region,
 						     sizeof(domain_type));
@@ -1209,9 +1222,13 @@ answer_query(struct nsd *nsd, struct query *q)
 	answer_lookup_zone(nsd, q, &answer, 0, exact, closest_match,
 		closest_encloser, q->qname);
 
-	ZTATUP2(q->zone, opcode, q->opcode);
-	ZTATUP2(q->zone, qtype, q->qtype);
-	ZTATUP2(q->zone, opcode, q->qclass);
+#ifdef USE_ZONE_STATS
+	if (q->zone) {
+		ZTATUP2(q->zone, opcode, q->opcode);
+		ZTATUP2(q->zone, qtype, q->qtype);
+		ZTATUP2(q->zone, opcode, q->qclass);
+	}
+#endif
 
 	offset = dname_label_offsets(q->qname)[domain_dname(closest_encloser)->label_count - 1] + QHEADERSZ;
 	query_add_compression_domain(q, closest_encloser, offset);
@@ -1403,7 +1420,11 @@ query_add_optional(query_type *q, nsd_type *nsd)
 		}
 		ARCOUNT_SET(q->packet, ARCOUNT(q->packet) + 1);
 		STATUP(nsd, edns);
-		ZTATUP(q->zone, edns);
+#ifdef USE_ZONE_STATS
+		if (q->zone) {
+			ZTATUP(q->zone, edns);
+		}
+#endif
 		break;
 	case EDNS_ERROR:
 		if (q->edns.dnssec_ok)	edns->error[7] = 0x80;
@@ -1412,7 +1433,11 @@ query_add_optional(query_type *q, nsd_type *nsd)
 		buffer_write(q->packet, edns->rdata_none, OPT_RDATA);
 		ARCOUNT_SET(q->packet, ARCOUNT(q->packet) + 1);
 		STATUP(nsd, ednserr);
-		ZTATUP(q->zone, ednserr);
+#ifdef USE_ZONE_STATS
+		if (q->zone) {
+			ZTATUP(q->zone, ednserr);
+		}
+#endif
 		break;
 	}
 

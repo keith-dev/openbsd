@@ -1,4 +1,4 @@
-/*	$OpenBSD: util.c,v 1.21 2010/10/30 15:36:32 deraadt Exp $	*/
+/*	$OpenBSD: util.c,v 1.25 2013/01/23 19:01:44 miod Exp $	*/
 
 /*
  * Copyright (c) 1998 Per Fogelstrom, Opsycon AB
@@ -38,7 +38,8 @@
  * Ideally, a scheme to compile these stubs from libc should be used, but
  * this would end up dragging too much code from libc here.
  */
-long __guard[8] = {0, 0, 0, 0, 0, 0, 0, 0};
+long __guard[8] __dso_public __attribute__((section(".openbsd.randomdata")));
+long __guard_local __dso_hidden __attribute__((section(".openbsd.randomdata")));
 
 void __stack_smash_handler(char [], int);
 
@@ -73,7 +74,7 @@ _dl_strdup(const char *orig)
  * because we only free memory when 'dlclose()' is called and we can
  * reuse at least the memory allocated for the object descriptor. We have
  * one dynamic string allocated, the library name and it is likely that
- * we can reuse that one to without a lot of complex colapsing code.
+ * we can reuse that one too without a lot of complex collapsing code.
  */
 void *
 _dl_malloc(size_t need)
@@ -128,19 +129,17 @@ _dl_free(void *p)
 }
 
 
+void
+_dl_randombuf(void *buf, size_t buflen)
+{
+	int mib[2] = { CTL_KERN, KERN_ARND };
+	_dl_sysctl(mib, 2, buf, &buflen, NULL, 0);
+}
+
 unsigned int
 _dl_random(void)
 {
-	int mib[2];
 	unsigned int rnd;
-	size_t len;
-
-	mib[0] = CTL_KERN;
-	mib[1] = KERN_ARND;
-	len = sizeof(rnd);
-	_dl_sysctl(mib, 2, &rnd, &len, NULL, 0);
-
+	_dl_randombuf(&rnd, sizeof(rnd));
 	return (rnd);
 }
-
-

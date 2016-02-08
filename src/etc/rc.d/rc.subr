@@ -1,4 +1,4 @@
-#	$OpenBSD: rc.subr,v 1.58 2012/07/07 10:28:07 ajacoutot Exp $
+#	$OpenBSD: rc.subr,v 1.68 2012/11/19 07:10:59 ajacoutot Exp $
 #
 # Copyright (c) 2010, 2011 Antoine Jacoutot <ajacoutot@openbsd.org>
 # Copyright (c) 2010, 2011 Ingo Schwarze <schwarze@openbsd.org>
@@ -40,7 +40,7 @@ rc_read_runfile() {
 }
 
 rc_rm_runfile() {
-	[ -f ${_RC_RUNFILE} ] && rm -f ${_RC_RUNFILE}
+	rm -f ${_RC_RUNFILE}
 }
 
 rc_start() {
@@ -48,7 +48,7 @@ rc_start() {
 }
 
 rc_check() {
-	pkill -0 -f "^${pexp}"
+	pgrep -q -f "^${pexp}"
 }
 
 rc_reload() {
@@ -68,6 +68,7 @@ rc_do() {
 }
 
 rc_exit() {
+	local _pfix
 	[ -z "${INRC}" -o X"$1" != X"ok" ] && _pfix="($1)"
 	echo ${INRC:+'-n'} "${_pfix}"
 	[ X"$1" = X"ok" ] && exit 0 || exit 1
@@ -94,19 +95,17 @@ rc_wait() {
 }
 
 rc_cmd() {
-	local _bg _n
+	local _bg _enotsup _n
 
-	if [ -z "${_RC_FORCE}" ] && [ X"${daemon_flags}" = X"NO" ]
-	then
-		if [ -n "${_RC_DEBUG}" ]
-		then
-			rc_err "$0: no $1 without -f, ${_name}_flags=NO"
-		fi
-		exit 1
-	fi
+	[ "$(id -u)" -eq 0 ] || \
+		[ X"${rc_usercheck}" != X"NO" -a X"$1" = "Xcheck" ] || \
+		rc_err "$0: need root privileges"
 
 	eval _enotsup=\${rc_${1}}
-	[ X"${_enotsup}" != X"NO" ] || rc_err "$0: $1 is not supported"
+	if [ X"${_enotsup}" = X"NO" ]; then
+		[ -n "${INRC}" ] && exit 1
+		rc_err "$0: $1 is not supported"
+	fi
 
 	[ X"${rc_bg}" = X"YES" ] && _bg="&"
 	[ -n "${_RC_DEBUG}" ] || _n="-n"
@@ -118,6 +117,10 @@ rc_cmd() {
 		rc_do rc_check
 		;;
 	start)
+		if [ X"${daemon_flags}" = X"NO" ]; then
+			rc_err "$0: no $1 without -f, ${_name}_flags=NO"
+			exit 1
+		fi
 		[ -z "${INRC}" ] && rc_do rc_check && exit 0
 		echo $_n "${INRC:+ }${_name}"
 		while true; do  # no real loop, only needed to break
@@ -158,8 +161,8 @@ rc_cmd() {
 		rc_exit ok
 		;;
 	restart)
-		/etc/rc.d/${_name} ${_RC_DEBUG} ${_RC_FORCE} stop &&
-			/etc/rc.d/${_name} ${_RC_DEBUG} ${_RC_FORCE} start
+		$0 ${_RC_DEBUG} ${_RC_FORCE} stop &&
+			$0 ${_RC_DEBUG} ${_RC_FORCE} start
 		;;
 	*)
 		rc_usage
@@ -167,9 +170,7 @@ rc_cmd() {
 	esac
 }
 
-[ $(id -u) -eq 0 ] || rc_err "$0: need root privileges"
-
-[ -z "${local_rcconf}" ] && . /etc/rc.conf
+. /etc/rc.conf
 
 [ -n "${daemon}" ] || rc_err "$0: daemon is not set"
 
@@ -200,7 +201,11 @@ getcap -f /etc/login.conf ${_name} 1>/dev/null 2>&1 && \
 [ -n "${_rcflags}" ] && daemon_flags=${_rcflags}
 [ -n "${_rcuser}"  ] && daemon_user=${_rcuser}
 
+# sanitize
 daemon_flags=$(printf ' %s' ${daemon_flags})
 daemon_flags=${daemon_flags## }
+readonly daemon_class
+unset _rcflags _rcuser
+
 pexp="${daemon}${daemon_flags:+ ${daemon_flags}}"
 rcexec="su -l -c ${daemon_class} -s /bin/sh ${daemon_user} -c"

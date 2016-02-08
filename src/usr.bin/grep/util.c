@@ -1,4 +1,4 @@
-/*	$OpenBSD: util.c,v 1.42 2011/07/17 19:39:21 aschrijver Exp $	*/
+/*	$OpenBSD: util.c,v 1.45 2012/12/29 01:32:44 millert Exp $	*/
 
 /*-
  * Copyright (c) 1999 James Howard and Dag-Erling Coïdan Smørgrav
@@ -72,7 +72,9 @@ grep_tree(char **argv)
 		case FTS_DNR:
 			break;
 		case FTS_ERR:
-			errx(2, "%s: %s", p->fts_path, strerror(p->fts_errno));
+			file_err = 1;
+			if(!sflag)
+				warnx("%s: %s", p->fts_path, strerror(p->fts_errno));
 			break;
 		case FTS_DP:
 			break;
@@ -101,6 +103,7 @@ procfile(char *fn)
 		f = grep_open(fn, "r");
 	}
 	if (f == NULL) {
+		file_err = 1;
 		if (!sflag)
 			warn("%s", fn);
 		return 0;
@@ -194,7 +197,7 @@ redo:
 			pmatch.rm_eo += offset;
 		} else {
 			pmatch.rm_so = offset;
-			pmatch.rm_eo = l->len - offset;
+			pmatch.rm_eo = l->len;
 			r = regexec(&r_pattern[i], l->dat, 1, &pmatch, eflags);
 		}
 		if (r == 0 && xflag) {
@@ -203,7 +206,7 @@ redo:
 		}
 		if (r == 0) {
 			c = 1;
-			if (oflag)
+			if (oflag && pmatch.rm_so != pmatch.rm_eo)
 				goto print;
 			break;
 		}

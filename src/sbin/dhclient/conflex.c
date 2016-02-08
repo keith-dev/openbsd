@@ -1,4 +1,4 @@
-/*	$OpenBSD: conflex.c,v 1.14 2011/12/10 17:36:40 krw Exp $	*/
+/*	$OpenBSD: conflex.c,v 1.18 2012/11/15 14:54:18 krw Exp $	*/
 
 /* Lexical scanner for dhclient config file... */
 
@@ -40,8 +40,6 @@
  * Enterprises, see ``http://www.vix.com''.
  */
 
-#include <ctype.h>
-
 #include "dhcpd.h"
 #include "dhctoken.h"
 
@@ -79,9 +77,9 @@ new_parse(char *name)
 	 * new file, 'name'.
 	 */
 
-	bzero(line1, sizeof(line1));
-	bzero(line2, sizeof(line2));
-	bzero(tokbuf, sizeof(tokbuf));
+	memset(line1, 0, sizeof(line1));
+	memset(line2, 0, sizeof(line2));
+	memset(tokbuf, 0, sizeof(tokbuf));
 
 	lpos = line = 1;
 	tlpos = tline = token = ugflag = 0;
@@ -337,6 +335,7 @@ static const struct keywords {
 	{ "filename",				TOK_FILENAME },
 	{ "fixed-address",			TOK_FIXED_ADDR },
 	{ "hardware",				TOK_HARDWARE },
+	{ "ignore",				TOK_IGNORE },
 	{ "initial-interval",			TOK_INITIAL_INTERVAL },
 	{ "interface",				TOK_INTERFACE },
 	{ "lease",				TOK_LEASE },
@@ -352,7 +351,6 @@ static const struct keywords {
 	{ "request",				TOK_REQUEST },
 	{ "require",				TOK_REQUIRE },
 	{ "retry",				TOK_RETRY },
-	{ "script",				TOK_SCRIPT },
 	{ "select-timeout",			TOK_SELECT_TIMEOUT },
 	{ "send",				TOK_SEND },
 	{ "server-name",			TOK_SERVER_NAME },

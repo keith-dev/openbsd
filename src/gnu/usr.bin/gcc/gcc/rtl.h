@@ -1441,7 +1441,6 @@ extern void end_full_sequence		PARAMS ((rtx*, rtx*));
 
 /* In varasm.c  */
 extern rtx immed_double_const		PARAMS ((HOST_WIDE_INT, HOST_WIDE_INT, enum machine_mode));
-extern rtx mem_for_const_double		PARAMS ((rtx));
 extern rtx force_const_mem		PARAMS ((enum machine_mode, rtx));
 
 /* In varasm.c  */
@@ -2133,6 +2132,8 @@ extern void regclass			PARAMS ((rtx, int, FILE *));
 extern void reg_scan			PARAMS ((rtx, unsigned int, int));
 extern void reg_scan_update		PARAMS ((rtx, rtx, unsigned int));
 extern void fix_register		PARAMS ((const char *, int, int));
+extern void init_subregs_of_mode	PARAMS ((void));
+extern void record_subregs_of_mode	PARAMS ((rtx));
 #ifdef HARD_CONST
 extern void cannot_change_mode_set_regs PARAMS ((HARD_REG_SET *,
 						 enum machine_mode,
