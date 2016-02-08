@@ -1,0 +1,12 @@
+#	$OpenBSD$
+
+CFLAGS += -I${.CURDIR}/.. -I.
+
+NOMAN = I mean it!
+
+SRCS = mkdctype.c ebc_disp.c ectype.c
+PROG = mkdctype
+
+.include <bsd.prog.mk>
+
+.PATH: ${.CURDIR}/../../api

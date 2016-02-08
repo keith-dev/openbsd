@@ -1,0 +1,5 @@
+#	$OpenBSD: Makefile,v 1.1.1.1 1995/10/18 08:45:26 deraadt Exp $
+
+PROG=	join
+
+.include <bsd.prog.mk>
