@@ -33,24 +33,70 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- *	$OpenBSD: SYS.h,v 1.3 1996/08/19 08:12:12 tholo Exp $
+ *	$OpenBSD: SYS.h,v 1.5 1999/01/06 05:36:17 d Exp $
  */
 
 #include <machine/asm.h>
 #include <sys/syscall.h>
 
 #ifdef __STDC__
-
-#define	SYSCALL(x)	.text; .align 2; 2: jmp PIC_PLT(cerror); ENTRY(x); movl $(SYS_ ## x),%eax; int $0x80; jc 2b
-#define	RSYSCALL(x)	SYSCALL(x); ret
-#define	PSEUDO(x,y)	ENTRY(x); movl $(SYS_ ## y),%eax; int $0x80; ret
-
-#else /* !__STDC__ */
-
-#define	SYSCALL(x)	.text; .align 2; 2: jmp PIC_PLT(cerror); ENTRY(x); movl $(SYS_/**/x),%eax; int $0x80; jc 2b
-#define	RSYSCALL(x)	SYSCALL(x); ret
-#define	PSEUDO(x,y)	ENTRY(x); movl $(SYS_/**/y),%eax; int $0x80; ret
-
+# define    __ENTRY(p,x)	ENTRY(p##x)
+# define    __DO_SYSCALL(x)				\
+				movl $(SYS_##x),%eax;	\
+				int $0x80
+# define    __LABEL2(p,x)	_C_LABEL(p##x)
+#else
+# define    __ENTRY(p,x)	ENTRY(p/**/x)
+# define    __DO_SYSCALL(x)				\
+				movl $(SYS_/**/x),%eax;	\
+				int $0x80
+# define    __LABEL2(p,x)	_C_LABEL(p/**/x)
 #endif
 
+/* perform a syscall, set errno */
+#define	    __SYSCALL(p,x)				\
+			.text;				\
+			.align 2;			\
+		2:					\
+			jmp PIC_PLT(cerror);		\
+		__ENTRY(p,x);				\
+			__DO_SYSCALL(x);		\
+			jc 2b
+
+/* perform a syscall, set errno, return */
+# define    __RSYSCALL(p,x)	__SYSCALL(p,x); ret
+
+/* perform a syscall, return */
+# define    __PSEUDO(p,x,y)				\
+		__ENTRY(p,x);				\
+			__DO_SYSCALL(y);		\
+			ret
+
+/*
+ * Design note:
+ *
+ * When the syscalls need to be renamed so they can be handled
+ * specially by the threaded library, these macros insert `_thread_sys_'
+ * in front of their name. This avoids the need to #ifdef _THREAD_SAFE 
+ * everywhere that the renamed function needs to be called.
+ */
+#ifdef _THREAD_SAFE
+/*
+ * For the thread_safe versions, we prepend _thread_sys_ to the function
+ * name so that the 'C' wrapper can go around the real name.
+ */
+# define SYSCALL(x)	__SYSCALL(_thread_sys_,x)
+# define RSYSCALL(x)	__RSYSCALL(_thread_sys_,x)
+# define PSEUDO(x,y)	__PSEUDO(_thread_sys_,x,y)
+# define SYSENTRY(x)	__ENTRY(_thread_sys_,x)
+#else _THREAD_SAFE
+/*
+ * The non-threaded library defaults to traditional syscalls where
+ * the function name matches the syscall name.
+ */
+# define SYSCALL(x)	__SYSCALL(,x)
+# define RSYSCALL(x)	__RSYSCALL(,x)
+# define PSEUDO(x,y)	__PSEUDO(,x,y)
+# define SYSENTRY(x)	__ENTRY(,x)
+#endif _THREAD_SAFE
 	.globl	cerror

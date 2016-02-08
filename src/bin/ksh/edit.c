@@ -1,4 +1,4 @@
-/*	$OpenBSD: edit.c,v 1.7 1998/06/25 19:01:50 millert Exp $	*/
+/*	$OpenBSD: edit.c,v 1.9 1999/01/10 17:55:02 millert Exp $	*/
 
 /*
  * Command line editing - common code
@@ -292,9 +292,10 @@ x_mode(onoff)
 			x_emacs_keys(&edchars);
 #endif
 		}
-	} else
+	} else {
 		/* TF_WAIT doesn't seem to be necessary when leaving xmode */
 		set_tty(tty_fd, &tty_state, TF_NONE);
+	}
 
 	return prev;
 }
@@ -706,7 +707,7 @@ x_command_glob(flags, str, slen, wordsp)
 	return nwords;
 }
 
-#define IS_WORDC(c)	!isspace(c)
+#define IS_WORDC(c)	!(ctype(c, C_LEX1) || (c) == '\'' || (c) == '"')
 
 static int
 x_locate_word(buf, buflen, pos, startp, is_commandp)

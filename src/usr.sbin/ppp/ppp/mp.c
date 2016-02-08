@@ -23,10 +23,10 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- *	$Id: mp.c,v 1.2 1998/09/04 18:27:47 brian Exp $
+ *	$Id: mp.c,v 1.4 1999/02/06 03:22:42 brian Exp $
  */
 
-#include <sys/types.h>
+#include <sys/param.h>
 #include <netinet/in.h>
 #include <netinet/in_systm.h>
 #include <netinet/ip.h>
@@ -71,6 +71,9 @@
 #include "chap.h"
 #include "cbcp.h"
 #include "datalink.h"
+#ifndef NORADIUS
+#include "radius.h"
+#endif
 #include "bundle.h"
 #include "ip.h"
 #include "prompt.h"
@@ -774,9 +777,20 @@ mp_SetEnddisc(struct cmdargs const *arg)
   struct mp *mp = &arg->bundle->ncp.mp;
   struct in_addr addr;
 
-  if (bundle_Phase(arg->bundle) != PHASE_DEAD) {
-    log_Printf(LogWARN, "set enddisc: Only available at phase DEAD\n");
-    return 1;
+  switch (bundle_Phase(arg->bundle)) {
+    case PHASE_DEAD:
+      break;
+    case PHASE_ESTABLISH:
+      /* Make sure none of our links are DATALINK_LCP or greater */
+      if (bundle_HighestState(arg->bundle) >= DATALINK_LCP) {
+        log_Printf(LogWARN, "enddisc: Only changable before"
+                   " LCP negotiations\n");
+        return 1;
+      }
+      break;
+    default:
+      log_Printf(LogWARN, "enddisc: Only changable at phase DEAD/ESTABLISH\n");
+      return 1;
   }
 
   if (arg->argc == arg->argn) {

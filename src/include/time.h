@@ -1,4 +1,4 @@
-/*	$OpenBSD: time.h,v 1.3 1998/02/08 18:50:05 deraadt Exp $	*/
+/*	$OpenBSD: time.h,v 1.5 1999/03/10 02:43:10 pjanzen Exp $	*/
 /*	$NetBSD: time.h,v 1.9 1994/10/26 00:56:35 cgd Exp $	*/
 
 /*
@@ -77,7 +77,7 @@ struct tm {
 	int	tm_year;	/* years since 1900 */
 	int	tm_wday;	/* days since Sunday [0-6] */
 	int	tm_yday;	/* days since January 1 [0-365] */
-	int	tm_isdst;	/* Daylight Savings Time flag */
+	int	tm_isdst;	/* Daylight Saving Time flag */
 	long	tm_gmtoff;	/* offset from CUT in seconds */
 	char	*tm_zone;	/* timezone abbreviation */
 };
@@ -95,6 +95,10 @@ time_t mktime __P((struct tm *));
 size_t strftime __P((char *, size_t, const char *, const struct tm *));
 char *strptime __P((const char *, const char *, struct tm *));
 time_t time __P((time_t *));
+char *asctime_r __P((const struct tm *, char *));
+char *ctime_r __P((const time_t *, char *));
+struct tm *gmtime_r __P((const time_t *, struct tm *));
+struct tm *localtime_r __P((const time_t *, struct tm *));
 
 #if !defined(_ANSI_SOURCE)
 #define CLK_TCK		100

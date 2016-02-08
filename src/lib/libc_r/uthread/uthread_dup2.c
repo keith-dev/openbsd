@@ -29,7 +29,9 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
+ * $OpenBSD: uthread_dup2.c,v 1.3 1999/01/06 05:29:23 d Exp $
  */
+#include <errno.h>
 #include <unistd.h>
 #ifdef _THREAD_SAFE
 #include <pthread.h>
@@ -39,11 +41,20 @@ int
 dup2(int fd, int newfd)
 {
 	int             ret;
+	int		newfd_opened;
+
+	/* Check if the file descriptor is out of range: */
+	if (newfd < 0 || newfd >= _thread_dtablesize) {
+		/* Return a bad file descriptor error: */
+		errno = EBADF;
+		ret = -1;
+	}
 
 	/* Lock the file descriptor: */
-	if ((ret = _FD_LOCK(fd, FD_RDWR, NULL)) == 0) {
+	else if ((ret = _FD_LOCK(fd, FD_RDWR, NULL)) == 0) {
 		/* Lock the file descriptor: */
-		if ((ret = _FD_LOCK(newfd, FD_RDWR, NULL)) == 0) {
+		if (!(newfd_opened = (_thread_fd_table[newfd] != NULL)) || 
+		    (ret = _FD_LOCK(newfd, FD_RDWR, NULL)) == 0) {
 			/* Perform the 'dup2' syscall: */
 			if ((ret = _thread_sys_dup2(fd, newfd)) < 0) {
 			}
@@ -63,7 +74,8 @@ dup2(int fd, int newfd)
 			}
 
 			/* Unlock the file descriptor: */
-			_FD_UNLOCK(newfd, FD_RDWR);
+			if (newfd_opened)
+				_FD_UNLOCK(newfd, FD_RDWR);
 		}
 		/* Unlock the file descriptor: */
 		_FD_UNLOCK(fd, FD_RDWR);

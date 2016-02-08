@@ -18,7 +18,7 @@ void* new_thread(void* arg)
 	printf("New thread was passed arg address %p\n", arg);
 	printf("New thread stack at %p\n", &i);
 	return(NULL);
-	PANIC();
+	PANIC("return");
 }
 
 int
@@ -28,11 +28,8 @@ main()
 	int i;
 
 	printf("Original thread stack at %p\n", &i);
-	if (pthread_create(&thread, NULL, new_thread, (void *)0xdeadbeef)) {
-		printf("Error: creating new thread\n");
-	}
-	pthread_exit(NULL);
-	PANIC();
-	return(1);
-	PANIC();
+	CHECKr(pthread_create(&thread, NULL, new_thread, 
+	    (void *)0xdeadbeef));
+	CHECKr(pthread_join(thread, NULL));
+	SUCCEED;
 }

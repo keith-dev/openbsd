@@ -49,7 +49,6 @@ Transport Protocol
 .Ft int
 .Fn socket "[AF_INET, AF_ISO]" SOCK_SEQPACKET 0
 .Sh DESCRIPTION
-.Pp
 The
 .Tn TP
 protocol provides reliable, flow-controlled, two-way
@@ -590,7 +589,6 @@ set when expedited data are present
 Reserved.
 .El
 .Sh ERROR VALUES
-.Pp
 The
 .Tn TP
 entity returns
@@ -693,7 +691,7 @@ do not use transport expedited data.
 The problem is this:
 the expedited data acknowledgment TPDU
 has no field for conveying
-credit, thus it is not possible for a
+credit, so it is not possible for a
 .Tn TP
 entity to inform its peer
 that "I received your expedited data but have no room to receive more."

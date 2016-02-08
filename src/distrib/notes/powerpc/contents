@@ -34,23 +34,23 @@ Bootable installation/upgrade floppy:
 
 DistributionDescription
 
-OpenBSDbase(35.8M,89.0M)
+OpenBSDbase(40.4M,101.3M)
 
-OpenBSDcomp(12.3M,40.4M)
+OpenBSDcomp(14.3M,48.3M)
 
-OpenBSDetc(131K,620K)
+OpenBSDetc(164.4K,740.0K)
 
-OpenBSDgame(5.3M,12.2M)
+OpenBSDgame(6.1M,14.2M)
 
-OpenBSDman(3.2M,12.1M)
+OpenBSDman(3.4M,13.1M)
 
-OpenBSDmisc(1.5M,5.4M)
+OpenBSDmisc(1.6M,5.4M)
 
-OpenBSDtext(1.7M,5.4M)
+OpenBSDxbase(35.2M,85.6M)
 
-OpenBSDxbase
+OpenBSDxshare(1.4M,8.3M)
 
-OpenBSDxfont
+OpenBSDxfont(1.4M,8.3M)
 
-OpenBSDxserv
+OpenBSDxserv(2.7M,7.4M)
 

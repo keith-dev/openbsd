@@ -77,6 +77,12 @@ string operators,
 character tests and character operators,
 des encryption routines,
 storage allocation, time functions, signal handling and more.
+.It Xr libc_r Pq Fl l Ns Ar c_r
+Reentrant C library. Contains POSIX 1003.1c
+.Xr pthreads 3
+API and thread scheduler, as well as all of the functions
+found in
+.Xr libc .
 .It Xo
 .Xr libcurses
 .Pf ( Fl l Ns Ar curses
@@ -135,27 +141,28 @@ The library for
 .Sh FILES
 .Bl -tag -width /usr/lib/libm_p.a -compact
 .It Pa /usr/lib/libc.a
-the C library
+C library
 .It Pa /usr/lib/libm.a
-the math library
+math library
 .It Pa /usr/lib/libc_p.a
-the C library compiled for profiling
+C library compiled for profiling
 .It Pa /usr/lib/libm_p.a
-the math library compiled for profiling
+math library compiled for profiling
 .El
 .Sh SEE ALSO
-.Xr stdio 3 ,
-.Xr math 3 ,
-.Xr intro 2 ,
 .Xr cc 1 ,
 .Xr ld 1 ,
-.Xr nm 1
+.Xr nm 1 ,
+.Xr intro 2 ,
+.Xr math 3 ,
+.Xr pthreads 3 ,
+.Xr stdio 3
 .\" .Sh LIST OF FUNCTIONS
 .\" .Bl -column "strncasecmpxxx" "system"
 .\" .Sy Name	Description
 .\" .El
 .Sh HISTORY
 An
-.Nm intro
+.Nm
 manual appeared in
 .At v7 .

@@ -23,16 +23,16 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- *	$Id: bundle.c,v 1.2 1998/08/31 08:16:34 brian Exp $
+ *	$Id: bundle.c,v 1.13 1999/03/25 11:37:16 brian Exp $
  */
 
 #include <sys/param.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <net/if.h>
+#include <net/if_tun.h>
 #include <arpa/inet.h>
 #include <net/route.h>
-#include <net/if_dl.h>
 #include <netinet/in_systm.h>
 #include <netinet/ip.h>
 #include <sys/un.h>
@@ -76,6 +76,9 @@
 #include "ccp.h"
 #include "link.h"
 #include "mp.h"
+#ifndef NORADIUS
+#include "radius.h"
+#endif
 #include "bundle.h"
 #include "async.h"
 #include "physical.h"
@@ -89,6 +92,7 @@
 #include "cbcp.h"
 #include "datalink.h"
 #include "ip.h"
+#include "iface.h"
 
 #define SCATTER_SEGMENTS 4	/* version, datalink, name, physical */
 #define SOCKET_OVERHEAD	100	/* additional buffer space for large */
@@ -133,7 +137,6 @@ bundle_NewPhase(struct bundle *bundle, u_int new)
     break;
 
   case PHASE_NETWORK:
-    ipcp_Setup(&bundle->ncp.ipcp);
     fsm_Up(&bundle->ncp.ipcp.fsm);
     fsm_Open(&bundle->ncp.ipcp.fsm);
     bundle->phase = new;
@@ -146,49 +149,6 @@ bundle_NewPhase(struct bundle *bundle, u_int new)
     log_DisplayPrompts();
     break;
   }
-}
-
-static int
-bundle_CleanInterface(const struct bundle *bundle)
-{
-  int s;
-  struct ifreq ifrq;
-  struct ifaliasreq ifra;
-
-  s = ID0socket(AF_INET, SOCK_DGRAM, 0);
-  if (s < 0) {
-    log_Printf(LogERROR, "bundle_CleanInterface: socket(): %s\n",
-              strerror(errno));
-    return (-1);
-  }
-  strncpy(ifrq.ifr_name, bundle->ifp.Name, sizeof ifrq.ifr_name - 1);
-  ifrq.ifr_name[sizeof ifrq.ifr_name - 1] = '\0';
-  while (ID0ioctl(s, SIOCGIFADDR, &ifrq) == 0) {
-    memset(&ifra.ifra_mask, '\0', sizeof ifra.ifra_mask);
-    strncpy(ifra.ifra_name, bundle->ifp.Name, sizeof ifra.ifra_name - 1);
-    ifra.ifra_name[sizeof ifra.ifra_name - 1] = '\0';
-    ifra.ifra_addr = ifrq.ifr_addr;
-    if (ID0ioctl(s, SIOCGIFDSTADDR, &ifrq) < 0) {
-      if (ifra.ifra_addr.sa_family == AF_INET)
-        log_Printf(LogERROR, "Can't get dst for %s on %s !\n",
-                  inet_ntoa(((struct sockaddr_in *)&ifra.ifra_addr)->sin_addr),
-                  bundle->ifp.Name);
-      close(s);
-      return 0;
-    }
-    ifra.ifra_broadaddr = ifrq.ifr_dstaddr;
-    if (ID0ioctl(s, SIOCDIFADDR, &ifra) < 0) {
-      if (ifra.ifra_addr.sa_family == AF_INET)
-        log_Printf(LogERROR, "Can't delete %s address on %s !\n",
-                  inet_ntoa(((struct sockaddr_in *)&ifra.ifra_addr)->sin_addr),
-                  bundle->ifp.Name);
-      close(s);
-      return 0;
-    }
-  }
-  close(s);
-
-  return 1;
 }
 
 static void
@@ -269,6 +229,7 @@ bundle_StartAutoLoadTimer(struct bundle *bundle, int up)
   struct datalink *dl;
 
   timer_Stop(&bundle->autoload.timer);
+  bundle->autoload.comingup = up ? 1 : 0;
 
   if (bundle->CleaningUp || bundle->phase != PHASE_NETWORK) {
     dl = NULL;
@@ -314,8 +275,6 @@ bundle_StartAutoLoadTimer(struct bundle *bundle, int up)
 
     bundle->autoload.running = 1;
   }
-
-  bundle->autoload.comingup = up ? 1 : 0;
 }
 
 static void
@@ -387,14 +346,14 @@ bundle_LayerUp(void *v, struct fsm *fp)
     if (bundle->ncp.mp.active) {
       struct datalink *dl;
 
-      bundle->ifp.Speed = 0;
+      bundle->ifSpeed = 0;
       for (dl = bundle->links; dl; dl = dl->next)
         if (dl->state == DATALINK_OPEN)
-          bundle->ifp.Speed += modem_Speed(dl->physical);
+          bundle->ifSpeed += modem_Speed(dl->physical);
       tun_configure(bundle, bundle->ncp.mp.peer_mrru);
       bundle->autoload.running = 1;
     } else {
-      bundle->ifp.Speed = modem_Speed(p);
+      bundle->ifSpeed = modem_Speed(p);
       tun_configure(bundle, fsm2lcp(fp)->his_mru);
     }
   } else if (fp->proto == PROTO_IPCP) {
@@ -424,15 +383,15 @@ bundle_LayerDown(void *v, struct fsm *fp)
       struct datalink *dl;
       struct datalink *lost;
 
-      bundle->ifp.Speed = 0;
+      bundle->ifSpeed = 0;
       lost = NULL;
       for (dl = bundle->links; dl; dl = dl->next)
         if (fp == &dl->physical->link.lcp.fsm)
           lost = dl;
         else if (dl->state == DATALINK_OPEN)
-          bundle->ifp.Speed += modem_Speed(dl->physical);
+          bundle->ifSpeed += modem_Speed(dl->physical);
 
-      if (bundle->ifp.Speed)
+      if (bundle->ifSpeed)
         /* Don't configure down to a speed of 0 */
         tun_configure(bundle, bundle->ncp.mp.link.lcp.his_mru);
 
@@ -567,8 +526,9 @@ bundle_UpdateSet(struct descriptor *d, fd_set *r, fd_set *w, fd_set *e, int *n)
         else if (bundle->autoload.timer.state != TIMER_RUNNING ||
                  bundle->autoload.comingup)
           bundle_StartAutoLoadTimer(bundle, 0);
-      } else if (bundle->autoload.timer.state != TIMER_RUNNING ||
-                 !bundle->autoload.comingup)
+      } else if ((bundle_Phase(bundle) == PHASE_NETWORK || queued) &&
+                 (bundle->autoload.timer.state != TIMER_RUNNING ||
+                  !bundle->autoload.comingup))
         bundle_StartAutoLoadTimer(bundle, 1);
     }
 
@@ -598,6 +558,10 @@ bundle_UpdateSet(struct descriptor *d, fd_set *r, fd_set *w, fd_set *e, int *n)
     }
   }
 
+#ifndef NORADIUS
+  result += descriptor_UpdateSet(&bundle->radius.desc, r, w, e, n);
+#endif
+
   /* Which links need a select() ? */
   for (dl = bundle->links; dl; dl = dl->next)
     result += descriptor_UpdateSet(&dl->desc, r, w, e, n);
@@ -622,6 +586,11 @@ bundle_IsSet(struct descriptor *d, const fd_set *fdset)
     if (descriptor_IsSet(&dl->desc, fdset))
       return 1;
 
+#ifndef NORADIUS
+  if (descriptor_IsSet(&bundle->radius.desc, fdset))
+    return 1;
+#endif
+
   if (descriptor_IsSet(&bundle->ncp.mp.server.desc, fdset))
     return 1;
 
@@ -640,6 +609,11 @@ bundle_DescriptorRead(struct descriptor *d, struct bundle *bundle,
   for (dl = bundle->links; dl; dl = dl->next)
     if (descriptor_IsSet(&dl->desc, fdset))
       descriptor_Read(&dl->desc, bundle, fdset);
+
+#ifndef NORADIUS
+  if (descriptor_IsSet(&bundle->radius.desc, fdset))
+    descriptor_Read(&bundle->radius.desc, bundle, fdset);
+#endif
 
   if (FD_ISSET(bundle->dev.fd, fdset)) {
     struct tun_data tun;
@@ -667,12 +641,6 @@ bundle_DescriptorRead(struct descriptor *d, struct bundle *bundle,
         if (pri >= 0) {
           struct mbuf *bp;
 
-#ifndef NOALIAS
-          if (bundle->AliasEnabled) {
-            PacketAliasIn(tun.data, sizeof tun.data);
-            n = ntohs(((struct ip *)tun.data)->ip_len);
-          }
-#endif
           bp = mbuf_Alloc(n, MB_IPIN);
           memcpy(MBUF_CTOP(bp), tun.data, n);
           ip_Input(bundle, bp);
@@ -769,10 +737,14 @@ struct bundle *
 bundle_Create(const char *prefix, int type, const char **argv)
 {
   int s, enoentcount, err;
+  const char *ifname;
   struct ifreq ifrq;
   static struct bundle bundle;		/* there can be only one */
+#ifdef TUNSIFMODE
+  int iff;
+#endif
 
-  if (bundle.ifp.Name != NULL) {	/* Already allocated ! */
+  if (bundle.iface != NULL) {	/* Already allocated ! */
     log_Printf(LogALERT, "bundle_Create:  There's only one BUNDLE !\n");
     return NULL;
   }
@@ -803,6 +775,8 @@ bundle_Create(const char *prefix, int type, const char **argv)
 
   log_SetTun(bundle.unit);
   bundle.argv = argv;
+  bundle.argv0 = argv[0];
+  bundle.argv1 = argv[1];
 
   s = socket(AF_INET, SOCK_DGRAM, 0);
   if (s < 0) {
@@ -811,24 +785,40 @@ bundle_Create(const char *prefix, int type, const char **argv)
     return NULL;
   }
 
-  bundle.ifp.Name = strrchr(bundle.dev.Name, '/');
-  if (bundle.ifp.Name == NULL)
-    bundle.ifp.Name = bundle.dev.Name;
+  ifname = strrchr(bundle.dev.Name, '/');
+  if (ifname == NULL)
+    ifname = bundle.dev.Name;
   else
-    bundle.ifp.Name++;
+    ifname++;
+
+  bundle.iface = iface_Create(ifname);
+  if (bundle.iface == NULL) {
+    close(s);
+    close(bundle.dev.fd);
+    return NULL;
+  }
+
+#ifdef TUNSIFMODE
+  /* Make sure we're POINTOPOINT */
+  iff = IFF_POINTOPOINT;
+  if (ID0ioctl(bundle.dev.fd, TUNSIFMODE, &iff) < 0)
+    log_Printf(LogERROR, "bundle_Create: ioctl(TUNSIFMODE): %s\n",
+	       strerror(errno));
+#endif
 
   /*
    * Now, bring up the interface.
    */
   memset(&ifrq, '\0', sizeof ifrq);
-  strncpy(ifrq.ifr_name, bundle.ifp.Name, sizeof ifrq.ifr_name - 1);
+  strncpy(ifrq.ifr_name, ifname, sizeof ifrq.ifr_name - 1);
   ifrq.ifr_name[sizeof ifrq.ifr_name - 1] = '\0';
   if (ID0ioctl(s, SIOCGIFFLAGS, &ifrq) < 0) {
     log_Printf(LogERROR, "bundle_Create: ioctl(SIOCGIFFLAGS): %s\n",
 	      strerror(errno));
     close(s);
+    iface_Destroy(bundle.iface);
+    bundle.iface = NULL;
     close(bundle.dev.fd);
-    bundle.ifp.Name = NULL;
     return NULL;
   }
   ifrq.ifr_flags |= IFF_UP;
@@ -836,22 +826,17 @@ bundle_Create(const char *prefix, int type, const char **argv)
     log_Printf(LogERROR, "bundle_Create: ioctl(SIOCSIFFLAGS): %s\n",
 	      strerror(errno));
     close(s);
+    iface_Destroy(bundle.iface);
+    bundle.iface = NULL;
     close(bundle.dev.fd);
-    bundle.ifp.Name = NULL;
     return NULL;
   }
 
   close(s);
 
-  if ((bundle.ifp.Index = GetIfIndex(bundle.ifp.Name)) < 0) {
-    log_Printf(LogERROR, "Can't find interface index.\n");
-    close(bundle.dev.fd);
-    bundle.ifp.Name = NULL;
-    return NULL;
-  }
-  log_Printf(LogPHASE, "Using interface: %s\n", bundle.ifp.Name);
+  log_Printf(LogPHASE, "Using interface: %s\n", ifname);
 
-  bundle.ifp.Speed = 0;
+  bundle.ifSpeed = 0;
 
   bundle.routing_seq = 0;
   bundle.phase = PHASE_DEAD;
@@ -882,8 +867,9 @@ bundle_Create(const char *prefix, int type, const char **argv)
   bundle.links = datalink_Create("deflink", &bundle, type);
   if (bundle.links == NULL) {
     log_Printf(LogALERT, "Cannot create data link: %s\n", strerror(errno));
+    iface_Destroy(bundle.iface);
+    bundle.iface = NULL;
     close(bundle.dev.fd);
-    bundle.ifp.Name = NULL;
     return NULL;
   }
 
@@ -915,9 +901,12 @@ bundle_Create(const char *prefix, int type, const char **argv)
   bundle.autoload.done = 0;
   bundle.autoload.running = 0;
   memset(&bundle.choked.timer, '\0', sizeof bundle.choked.timer);
+#ifndef NORADIUS
+  radius_Init(&bundle.radius);
+#endif
 
   /* Clean out any leftover crud */
-  bundle_CleanInterface(&bundle);
+  iface_Clear(bundle.iface, IFACE_CLEAR_ALL);
 
   bundle_LockTun(&bundle);
 
@@ -939,7 +928,7 @@ bundle_DownInterface(struct bundle *bundle)
   }
 
   memset(&ifrq, '\0', sizeof ifrq);
-  strncpy(ifrq.ifr_name, bundle->ifp.Name, sizeof ifrq.ifr_name - 1);
+  strncpy(ifrq.ifr_name, bundle->iface->name, sizeof ifrq.ifr_name - 1);
   ifrq.ifr_name[sizeof ifrq.ifr_name - 1] = '\0';
   if (ID0ioctl(s, SIOCGIFFLAGS, &ifrq) < 0) {
     log_Printf(LogERROR, "bundle_DownInterface: ioctl(SIOCGIFFLAGS): %s\n",
@@ -974,6 +963,11 @@ bundle_Destroy(struct bundle *bundle)
   ipcp_CleanInterface(&bundle->ncp.ipcp);
   bundle_DownInterface(bundle);
 
+#ifndef NORADIUS
+  /* Tell the radius server the bad news */
+  radius_Destroy(&bundle->radius);
+#endif
+
   /* Again, these are all DATALINK_CLOSED unless we're abending */
   dl = bundle->links;
   while (dl)
@@ -985,7 +979,8 @@ bundle_Destroy(struct bundle *bundle)
   /* In case we never made PHASE_NETWORK */
   bundle_Notify(bundle, EX_ERRDEAD);
 
-  bundle->ifp.Name = NULL;
+  iface_Destroy(bundle->iface);
+  bundle->iface = NULL;
 }
 
 struct rtmsg {
@@ -1021,6 +1016,17 @@ bundle_SetRoute(struct bundle *bundle, int cmd, struct in_addr dst,
   rtmes.m_rtm.rtm_pid = getpid();
   rtmes.m_rtm.rtm_flags = RTF_UP | RTF_GATEWAY | RTF_STATIC;
 
+  if (cmd == RTM_ADD || cmd == RTM_CHANGE) {
+    if (bundle->ncp.ipcp.cfg.sendpipe > 0) {
+      rtmes.m_rtm.rtm_rmx.rmx_sendpipe = bundle->ncp.ipcp.cfg.sendpipe;
+      rtmes.m_rtm.rtm_inits |= RTV_SPIPE;
+    }
+    if (bundle->ncp.ipcp.cfg.recvpipe > 0) {
+      rtmes.m_rtm.rtm_rmx.rmx_recvpipe = bundle->ncp.ipcp.cfg.recvpipe;
+      rtmes.m_rtm.rtm_inits |= RTV_RPIPE;
+    }
+  }
+
   memset(&rtdata, '\0', sizeof rtdata);
   rtdata.sin_len = sizeof rtdata;
   rtdata.sin_family = AF_INET;
@@ -1032,24 +1038,11 @@ bundle_SetRoute(struct bundle *bundle, int cmd, struct in_addr dst,
   cp += rtdata.sin_len;
   if (cmd == RTM_ADD) {
     if (gateway.s_addr == INADDR_ANY) {
-      /* Add a route through the interface */
-      struct sockaddr_dl dl;
-      const char *iname;
-      int ilen;
-
-      iname = Index2Nam(bundle->ifp.Index);
-      ilen = strlen(iname);
-      dl.sdl_len = sizeof dl - sizeof dl.sdl_data + ilen;
-      dl.sdl_family = AF_LINK;
-      dl.sdl_index = bundle->ifp.Index;
-      dl.sdl_type = 0;
-      dl.sdl_nlen = ilen;
-      dl.sdl_alen = 0;
-      dl.sdl_slen = 0;
-      strncpy(dl.sdl_data, iname, sizeof dl.sdl_data);
-      memcpy(cp, &dl, dl.sdl_len);
-      cp += dl.sdl_len;
-      rtmes.m_rtm.rtm_addrs |= RTA_GATEWAY;
+      if (!ssh)
+        log_Printf(LogERROR, "bundle_SetRoute: Cannot add a route with"
+                   " destination 0.0.0.0\n");
+      close(s);
+      return result;
     } else {
       rtdata.sin_addr = gateway;
       memcpy(cp, &rtdata, rtdata.sin_len);
@@ -1082,7 +1075,7 @@ failed:
                            (rtmes.m_rtm.rtm_errno == 0 && errno == EEXIST))) {
       if (!bang) {
         log_Printf(LogWARN, "Add route failed: %s already exists\n",
-                  inet_ntoa(dst));
+		  dst.s_addr == 0 ? "default" : inet_ntoa(dst));
         result = 0;	/* Don't add to our dynamic list */
       } else {
         rtmes.m_rtm.rtm_type = cmd = RTM_CHANGE;
@@ -1158,9 +1151,9 @@ bundle_Open(struct bundle *bundle, const char *name, int mask, int force)
       if ((mask & dl->physical->type) &&
           (dl->state == DATALINK_CLOSED ||
            (force && dl->state == DATALINK_OPENING &&
-            dl->dial_timer.state == TIMER_RUNNING))) {
-        if (force)
-          timer_Stop(&dl->dial_timer);
+            dl->dial.timer.state == TIMER_RUNNING))) {
+        if (force)	/* Ignore redial timeout ? */
+          timer_Stop(&dl->dial.timer);
         datalink_Up(dl, 1, 1);
         if (mask == PHYS_AUTO)
           /* Only one AUTO link at a time (see the AutoLoad timer) */
@@ -1239,9 +1232,10 @@ bundle_ShowStatus(struct cmdargs const *arg)
   int remaining;
 
   prompt_Printf(arg->prompt, "Phase %s\n", bundle_PhaseName(arg->bundle));
+  prompt_Printf(arg->prompt, " Title:         %s\n", arg->bundle->argv[0]);
   prompt_Printf(arg->prompt, " Device:        %s\n", arg->bundle->dev.Name);
   prompt_Printf(arg->prompt, " Interface:     %s @ %lubps\n",
-                arg->bundle->ifp.Name, arg->bundle->ifp.Speed);
+                arg->bundle->iface->name, arg->bundle->ifSpeed);
 
   prompt_Printf(arg->prompt, "\nDefaults:\n");
   prompt_Printf(arg->prompt, " Label:         %s\n", arg->bundle->cfg.label);
@@ -1265,6 +1259,11 @@ bundle_ShowStatus(struct cmdargs const *arg)
 
   prompt_Printf(arg->prompt, " Choked Timer:  %ds\n",
                 arg->bundle->cfg.choked.timeout);
+
+#ifndef NORADIUS
+  radius_Show(&arg->bundle->radius, arg->prompt);
+#endif
+
   prompt_Printf(arg->prompt, " Idle Timer:    ");
   if (arg->bundle->cfg.idle_timeout) {
     prompt_Printf(arg->prompt, "%ds", arg->bundle->cfg.idle_timeout);
@@ -1280,6 +1279,17 @@ bundle_ShowStatus(struct cmdargs const *arg)
   else
     prompt_Printf(arg->prompt, "unspecified\n");
 
+  prompt_Printf(arg->prompt, " sendpipe:      ");
+  if (arg->bundle->ncp.ipcp.cfg.sendpipe > 0)
+    prompt_Printf(arg->prompt, "%ld\n", arg->bundle->ncp.ipcp.cfg.sendpipe);
+  else
+    prompt_Printf(arg->prompt, "unspecified\n");
+  prompt_Printf(arg->prompt, " recvpipe:      ");
+  if (arg->bundle->ncp.ipcp.cfg.recvpipe > 0)
+    prompt_Printf(arg->prompt, "%ld\n", arg->bundle->ncp.ipcp.cfg.recvpipe);
+  else
+    prompt_Printf(arg->prompt, "unspecified\n");
+
   prompt_Printf(arg->prompt, " Sticky Routes: %s\n",
                 optval(arg->bundle, OPT_SROUTES));
   prompt_Printf(arg->prompt, " ID check:      %s\n",
@@ -1290,10 +1300,14 @@ bundle_ShowStatus(struct cmdargs const *arg)
                 optval(arg->bundle, OPT_PASSWDAUTH));
   prompt_Printf(arg->prompt, " Proxy:         %s\n",
                 optval(arg->bundle, OPT_PROXY));
+  prompt_Printf(arg->prompt, " Proxyall:      %s\n",
+                optval(arg->bundle, OPT_PROXYALL));
   prompt_Printf(arg->prompt, " Throughput:    %s\n",
                 optval(arg->bundle, OPT_THROUGHPUT));
   prompt_Printf(arg->prompt, " Utmp Logging:  %s\n",
                 optval(arg->bundle, OPT_UTMP));
+  prompt_Printf(arg->prompt, " Iface-Alias:   %s\n",
+                optval(arg->bundle, OPT_IFACEALIAS));
 
   return 0;
 }
@@ -1636,11 +1650,6 @@ bundle_SetMode(struct bundle *bundle, struct datalink *dl, int mode)
   /* Regenerate phys_type and adjust autoload & idle timers */
   bundle_LinksRemoved(bundle);
 
-  if (omode == PHYS_AUTO && !(bundle->phys_type.all & PHYS_AUTO) &&
-      bundle->phase != PHASE_NETWORK)
-    /* No auto links left */
-    ipcp_CleanInterface(&bundle->ncp.ipcp);
-
   return 1;
 }
 
@@ -1669,9 +1678,9 @@ bundle_setsid(struct bundle *bundle, int holdsession)
       close(fds[1]);
       return;
     case 0:
-      close(fds[0]);
-      read(fds[1], &done, 1);		/* uu_locks are mine ! */
       close(fds[1]);
+      read(fds[0], &done, 1);		/* uu_locks are mine ! */
+      close(fds[0]);
       if (pipe(fds) == -1) {
         log_Printf(LogERROR, "pipe(2): %s\n", strerror(errno));
         return;
@@ -1683,36 +1692,36 @@ bundle_setsid(struct bundle *bundle, int holdsession)
           close(fds[1]);
           return;
         case 0:
-          close(fds[0]);
-          bundle_LockTun(bundle);	/* update pid */
-          read(fds[1], &done, 1);	/* uu_locks are mine ! */
           close(fds[1]);
+          bundle_LockTun(bundle);	/* update pid */
+          read(fds[0], &done, 1);	/* uu_locks are mine ! */
+          close(fds[0]);
           setsid();
           log_Printf(LogPHASE, "%d -> %d: %s session control\n",
                      (int)orig, (int)getpid(),
                      holdsession ? "Passed" : "Dropped");
-          timer_InitService();
+          timer_InitService(0);		/* Start the Timer Service */
           break;
         default:
-          close(fds[1]);
+          close(fds[0]);
           /* Give away all our modem locks (to the final process) */
           for (dl = bundle->links; dl; dl = dl->next)
             if (dl->state != DATALINK_CLOSED)
               modem_ChangedPid(dl->physical, pid);
-          write(fds[0], "!", 1);	/* done */
-          close(fds[0]);
+          write(fds[1], "!", 1);	/* done */
+          close(fds[1]);
           exit(0);
           break;
       }
       break;
     default:
-      close(fds[1]);
+      close(fds[0]);
       /* Give away all our modem locks (to the intermediate process) */
       for (dl = bundle->links; dl; dl = dl->next)
         if (dl->state != DATALINK_CLOSED)
           modem_ChangedPid(dl->physical, pid);
-      write(fds[0], "!", 1);	/* done */
-      close(fds[0]);
+      write(fds[1], "!", 1);	/* done */
+      close(fds[1]);
       if (holdsession) {
         int fd, status;
 
@@ -1747,4 +1756,31 @@ bundle_setsid(struct bundle *bundle, int holdsession)
       exit(0);
       break;
   }
+}
+
+int
+bundle_HighestState(struct bundle *bundle)
+{
+  struct datalink *dl;
+  int result = DATALINK_CLOSED;
+
+  for (dl = bundle->links; dl; dl = dl->next)
+    if (result < dl->state)
+      result = dl->state;
+
+  return result;
+}
+
+int
+bundle_Exception(struct bundle *bundle, int fd)
+{
+  struct datalink *dl;
+
+  for (dl = bundle->links; dl; dl = dl->next)
+    if (dl->physical->fd == fd) {
+      datalink_Down(dl, CLOSE_NORMAL);
+      return 1;
+    }
+
+  return 0;
 }

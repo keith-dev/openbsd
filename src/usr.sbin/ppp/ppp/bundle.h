@@ -23,7 +23,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- *	$Id: bundle.h,v 1.1 1998/08/31 00:22:16 brian Exp $
+ *	$Id: bundle.h,v 1.4 1999/02/06 03:22:31 brian Exp $
  */
 
 #define	PHASE_DEAD		0	/* Link is dead */
@@ -33,13 +33,15 @@
 #define	PHASE_TERMINATE		4	/* Terminating link */
 
 /* cfg.opt bit settings */
-#define OPT_IDCHECK	0x01
-#define OPT_LOOPBACK	0x02
-#define OPT_PASSWDAUTH	0x04
-#define OPT_PROXY	0x08
-#define OPT_SROUTES	0x10
-#define OPT_THROUGHPUT	0x20
-#define OPT_UTMP	0x40
+#define OPT_IDCHECK	0x0001
+#define OPT_IFACEALIAS	0x0002
+#define OPT_LOOPBACK	0x0004
+#define OPT_PASSWDAUTH	0x0008
+#define OPT_PROXY	0x0010
+#define OPT_PROXYALL	0x0020
+#define OPT_SROUTES	0x0040
+#define OPT_THROUGHPUT	0x0080
+#define OPT_UTMP	0x0100
 
 #define MAX_ENDDISC_CLASS 5
 
@@ -51,22 +53,22 @@ struct physical;
 struct link;
 struct server;
 struct prompt;
+struct iface;
 
 struct bundle {
   struct descriptor desc;     /* really all our datalinks */
   int unit;                   /* The device/interface unit number */
   const char **argv;          /* From main() */
+  const char *argv0;          /* Original */
+  const char *argv1;          /* Original */
 
   struct {
     char Name[20];            /* The /dev/XXXX name */
     int fd;                   /* The /dev/XXXX descriptor */
   } dev;
 
-  struct {
-    u_long Speed;             /* struct tuninfo speed */
-    int Index;                /* The interface index */
-    char *Name;               /* The interface name */
-  } ifp;
+  u_long ifSpeed;             /* struct tuninfo speed */
+  struct iface *iface;        /* Interface information */
 
   int routing_seq;            /* The current routing sequence number */
   u_int phase;                /* Curent phase */
@@ -85,8 +87,8 @@ struct bundle {
   struct {
     int idle_timeout;         /* NCP Idle timeout value */
     struct {
-      char name[50];          /* PAP/CHAP system name */
-      char key[50];           /* PAP/CHAP key */
+      char name[AUTHLEN];     /* PAP/CHAP system name */
+      char key[AUTHLEN];      /* PAP/CHAP key */
     } auth;
     unsigned opt;             /* Uses OPT_ bits from above */
     char label[50];           /* last thing `load'ed */
@@ -100,7 +102,7 @@ struct bundle {
     } autoload;
 
     struct {
-      int timeout;		/* How long to leave the output queue choked */
+      int timeout;            /* How long to leave the output queue choked */
     } choked;
   } cfg;
 
@@ -110,19 +112,19 @@ struct bundle {
   } ncp;
 
   struct {
-    struct filter in;		/* incoming packet filter */
-    struct filter out;		/* outgoing packet filter */
-    struct filter dial;		/* dial-out packet filter */
-    struct filter alive;	/* keep-alive packet filter */
+    struct filter in;         /* incoming packet filter */
+    struct filter out;        /* outgoing packet filter */
+    struct filter dial;       /* dial-out packet filter */
+    struct filter alive;      /* keep-alive packet filter */
   } filter;
 
   struct {
-    struct pppTimer timer;      /* timeout after cfg.idle_timeout */
+    struct pppTimer timer;    /* timeout after cfg.idle_timeout */
     time_t done;
   } idle;
 
   struct {
-    int fd;                     /* write status here */
+    int fd;                   /* write status here */
   } notify;
 
   struct {
@@ -133,8 +135,12 @@ struct bundle {
   } autoload;
 
   struct {
-    struct pppTimer timer;      /* choked output queue timer */
+    struct pppTimer timer;    /* choked output queue timer */
   } choked;
+
+#ifndef NORADIUS
+  struct radius radius;       /* Info retrieved from radius server */
+#endif
 };
 
 #define descriptor2bundle(d) \
@@ -181,3 +187,5 @@ extern int bundle_RenameDatalink(struct bundle *, struct datalink *,
                                  const char *);
 extern void bundle_setsid(struct bundle *, int);
 extern void bundle_LockTun(struct bundle *);
+extern int bundle_HighestState(struct bundle *);
+extern int bundle_Exception(struct bundle *, int);

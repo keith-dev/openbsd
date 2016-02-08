@@ -2,10 +2,10 @@
  * The code in this file was written by Eivind Eklund <perhaps@yes.no>,
  * who places it in the public domain without restriction.
  *
- *	$Id: alias_cmd.c,v 1.2 1998/08/31 08:16:27 brian Exp $
+ *	$Id: alias_cmd.c,v 1.5 1999/03/25 23:36:52 brian Exp $
  */
 
-#include <sys/types.h>
+#include <sys/param.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include <netdb.h>
@@ -44,12 +44,16 @@
 #include "link.h"
 #include "mp.h"
 #include "filter.h"
+#ifndef NORADIUS
+#include "radius.h"
+#endif
 #include "bundle.h"
 
 
 static int StrToAddr(const char *, struct in_addr *);
-static int StrToPort(const char *, u_short *, const char *);
-static int StrToAddrAndPort(const char *, struct in_addr *, u_short *, const char *);
+static int StrToPortRange(const char *, u_short *, u_short *, const char *);
+static int StrToAddrAndPort(const char *, struct in_addr *, u_short *,
+                            u_short *, const char *);
 
 
 int
@@ -58,11 +62,14 @@ alias_RedirectPort(struct cmdargs const *arg)
   if (!arg->bundle->AliasEnabled) {
     prompt_Printf(arg->prompt, "Alias not enabled\n");
     return 1;
-  } else if (arg->argc == arg->argn+3) {
+  } else if (arg->argc == arg->argn + 3) {
     char proto_constant;
     const char *proto;
-    u_short local_port;
-    u_short alias_port;
+    u_short hlocalport;
+    u_short llocalport;
+    u_short haliasport;
+    u_short laliasport;
+    u_short port;
     int error;
     struct in_addr local_addr;
     struct in_addr null_addr;
@@ -76,37 +83,51 @@ alias_RedirectPort(struct cmdargs const *arg)
     } else {
       prompt_Printf(arg->prompt, "port redirect: protocol must be"
                     " tcp or udp\n");
-      prompt_Printf(arg->prompt, "Usage: alias %s %s\n", arg->cmd->name,
-		    arg->cmd->syntax);
-      return 1;
+      return -1;
     }
 
-    error = StrToAddrAndPort(arg->argv[arg->argn+1], &local_addr, &local_port,
-                             proto);
+    error = StrToAddrAndPort(arg->argv[arg->argn+1], &local_addr, &llocalport,
+                             &hlocalport, proto);
     if (error) {
-      prompt_Printf(arg->prompt, "port redirect: error reading"
-                    " local addr:port\n");
-      prompt_Printf(arg->prompt, "Usage: alias %s %s\n", arg->cmd->name,
-                    arg->cmd->syntax);
-      return 1;
+      prompt_Printf(arg->prompt, "alias port: error reading localaddr:port\n");
+      return -1;
     }
-    error = StrToPort(arg->argv[arg->argn+2], &alias_port, proto);
+    error = StrToPortRange(arg->argv[arg->argn+2], &laliasport, &haliasport,
+                           proto);
     if (error) {
-      prompt_Printf(arg->prompt, "port redirect: error reading alias port\n");
-      prompt_Printf(arg->prompt, "Usage: alias %s %s\n", arg->cmd->name,
-                    arg->cmd->syntax);
-      return 1;
+      prompt_Printf(arg->prompt, "alias port: error reading alias port\n");
+      return -1;
     }
     null_addr.s_addr = INADDR_ANY;
 
-    link = PacketAliasRedirectPort(local_addr, local_port,
-				   null_addr, 0,
-				   null_addr, alias_port,
-				   proto_constant);
+    if (llocalport > hlocalport) {
+      port = llocalport;
+      llocalport = hlocalport;
+      hlocalport = port;
+    }
 
-    if (link == NULL)
-      prompt_Printf(arg->prompt, "port redirect: error returned by packed"
-	      " aliasing engine (code=%d)\n", error);
+    if (laliasport > haliasport) {
+      port = laliasport;
+      laliasport = haliasport;
+      haliasport = port;
+    }
+
+    if (haliasport - laliasport != hlocalport - llocalport) {
+      prompt_Printf(arg->prompt, "alias port: Port ranges must be equal\n");
+      return -1;
+    }
+
+    for (port = laliasport; port <= haliasport; port++) {
+      link = PacketAliasRedirectPort(local_addr,
+                                     htons(llocalport + (port - laliasport)),
+				     null_addr, 0, null_addr, htons(port),
+				     proto_constant);
+
+      if (link == NULL) {
+        prompt_Printf(arg->prompt, "alias port: %d: error %d\n", port, error);
+        return 1;
+      }
+    }
   } else
     return -1;
 
@@ -173,28 +194,51 @@ StrToAddr(const char *str, struct in_addr *addr)
 static int
 StrToPort(const char *str, u_short *port, const char *proto)
 {
-  int iport;
   struct servent *sp;
   char *end;
 
-  iport = strtol(str, &end, 10);
-  if (end != str) {
-    *port = htons(iport);
-    return 0;
+  *port = strtol(str, &end, 10);
+  if (*end != '\0') {
+    sp = getservbyname(str, proto);
+    if (sp == NULL) {
+      log_Printf(LogWARN, "StrToAddr: Unknown port or service %s/%s.\n",
+	        str, proto);
+      return -1;
+    }
+    *port = ntohs(sp->s_port);
   }
-  sp = getservbyname(str, proto);
-  if (!sp) {
-    log_Printf(LogWARN, "StrToAddr: Unknown port or service %s/%s.\n",
-	      str, proto);
-    return -1;
-  }
-  *port = sp->s_port;
+
   return 0;
 }
 
+static int
+StrToPortRange(const char *str, u_short *low, u_short *high, const char *proto)
+{
+  char *minus;
+  int res;
+
+  minus = strchr(str, '-');
+  if (minus)
+    *minus = '\0';		/* Cheat the const-ness ! */
+
+  res = StrToPort(str, low, proto);
+
+  if (minus)
+    *minus = '-';		/* Cheat the const-ness ! */
+
+  if (res == 0) {
+    if (minus)
+      res = StrToPort(minus + 1, high, proto);
+    else
+      *high = *low;
+  }
+
+  return res;
+}
 
 static int
-StrToAddrAndPort(const char *str, struct in_addr *addr, u_short *port, const char *proto)
+StrToAddrAndPort(const char *str, struct in_addr *addr, u_short *low,
+                 u_short *high, const char *proto)
 {
   char *colon;
   int res;
@@ -211,5 +255,52 @@ StrToAddrAndPort(const char *str, struct in_addr *addr, u_short *port, const cha
   if (res != 0)
     return -1;
 
-  return StrToPort(colon+1, port, proto);
+  return StrToPortRange(colon + 1, low, high, proto);
+}
+
+int
+alias_ProxyRule(struct cmdargs const *arg)
+{
+  char cmd[LINE_LEN];
+  int f, pos;
+  size_t len;
+
+  if (arg->argn >= arg->argc)
+    return -1;
+
+  for (f = arg->argn, pos = 0; f < arg->argc; f++) {
+    len = strlen(arg->argv[f]);
+    if (sizeof cmd - pos < len + (f ? 1 : 0))
+      break;
+    if (f)
+      cmd[pos++] = ' ';
+    strcpy(cmd + pos, arg->argv[f]);
+    pos += len;
+  }
+
+  return PacketAliasProxyRule(cmd);
+}
+
+int
+alias_Pptp(struct cmdargs const *arg)
+{
+  struct in_addr addr;
+
+  if (arg->argc == arg->argn) {
+    addr.s_addr = INADDR_NONE;
+    PacketAliasPptp(addr);
+    return 0;
+  }
+
+  if (arg->argc != arg->argn + 1)
+    return -1;
+
+  addr = GetIpAddr(arg->argv[arg->argn]);
+  if (addr.s_addr == INADDR_NONE) {
+    log_Printf(LogWARN, "%s: invalid address\n", arg->argv[arg->argn]);
+    return 1;
+  }
+
+  PacketAliasPptp(addr);
+  return 0;
 }

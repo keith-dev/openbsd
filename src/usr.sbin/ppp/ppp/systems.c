@@ -17,7 +17,7 @@
  * IMPLIED WARRANTIES, INCLUDING, WITHOUT LIMITATION, THE IMPLIED
  * WARRANTIES OF MERCHANTIBILITY AND FITNESS FOR A PARTICULAR PURPOSE.
  *
- * $Id: systems.c,v 1.1 1998/08/31 00:22:28 brian Exp $
+ * $Id: systems.c,v 1.6 1999/03/09 20:37:39 brian Exp $
  *
  *  TODO:
  */
@@ -156,7 +156,10 @@ DecodeCtrlCommand(char *line, char *arg)
   return CTRL_UNKNOWN;
 }
 
-/* Initialised in system_IsValid(), set in ReadSystem(), used by system_IsValid() */
+/*
+ * Initialised in system_IsValid(), set in ReadSystem(),
+ * used by system_IsValid()
+ */
 static int modeok;
 static int userok;
 static int modereq;
@@ -241,9 +244,16 @@ xgets(char *buf, int buflen, FILE *fp)
   return n;
 }
 
+/* Values for ``how'' in ReadSystem */
+#define SYSTEM_EXISTS	1
+#define SYSTEM_VALIDATE	2
+#define SYSTEM_EXEC	3
+
+/* Returns -2 for ``file not found'' and -1 for ``label not found'' */
+
 static int
 ReadSystem(struct bundle *bundle, const char *name, const char *file,
-           int doexec, struct prompt *prompt, struct datalink *cx)
+           struct prompt *prompt, struct datalink *cx, int how)
 {
   FILE *fp;
   char *cp, *wp;
@@ -264,7 +274,7 @@ ReadSystem(struct bundle *bundle, const char *name, const char *file,
   fp = ID0fopen(filename, "r");
   if (fp == NULL) {
     log_Printf(LogDEBUG, "ReadSystem: Can't open %s.\n", filename);
-    return (-1);
+    return -2;
   }
   log_Printf(LogDEBUG, "ReadSystem: Checking %s (%s).\n", name, filename);
 
@@ -284,7 +294,7 @@ ReadSystem(struct bundle *bundle, const char *name, const char *file,
       switch (DecodeCtrlCommand(cp+1, arg)) {
       case CTRL_INCLUDE:
         log_Printf(LogCOMMAND, "%s: Including \"%s\"\n", filename, arg);
-        n = ReadSystem(bundle, name, arg, doexec, prompt, cx);
+        n = ReadSystem(bundle, name, arg, prompt, cx, how);
         log_Printf(LogCOMMAND, "%s: Done include of \"%s\"\n", filename, arg);
         if (!n)
           return 0;	/* got it */
@@ -307,6 +317,8 @@ ReadSystem(struct bundle *bundle, const char *name, const char *file,
 
       if (strcmp(cp, name) == 0) {
         /* We're in business */
+        if (how == SYSTEM_EXISTS)
+	  return 0;
 	while ((n = xgets(line, sizeof line, fp))) {
           linenum += n;
           indent = issep(*line);
@@ -315,13 +327,19 @@ ReadSystem(struct bundle *bundle, const char *name, const char *file,
           if (*cp == '\0')  /* empty / comment */
             continue;
 
-          if (!indent)      /* start of next section */
+          if (!indent) {    /* start of next section */
+            wp = strchr(cp, ':');
+            if ((how == SYSTEM_EXEC) && (wp == NULL || wp[1] != '\0'))
+	      log_Printf(LogWARN, "Unindented command (%s line %d) - ignored\n",
+		         filename, linenum);
             break;
+          }
 
           len = strlen(cp);
           argc = command_Interpret(cp, len, argv);
           allowcmd = argc > 0 && !strcasecmp(argv[0], "allow");
-          if ((!doexec && allowcmd) || (doexec && !allowcmd))
+          if ((!(how == SYSTEM_EXEC) && allowcmd) ||
+              ((how == SYSTEM_EXEC) && !allowcmd))
 	    command_Run(bundle, argc, (char const *const *)argv, prompt,
                         name, cx);
         }
@@ -336,22 +354,47 @@ ReadSystem(struct bundle *bundle, const char *name, const char *file,
   return -1;
 }
 
-int
+const char *
 system_IsValid(const char *name, struct prompt *prompt, int mode)
 {
   /*
    * Note:  The ReadSystem() calls only result in calls to the Allow*
    * functions.  arg->bundle will be set to NULL for these commands !
    */
-  if (ID0realuid() == 0)
-    return userok = modeok = 1;
+  int def, how, rs;
+
+  def = !strcmp(name, "default");
+  how = ID0realuid() == 0 ? SYSTEM_EXISTS : SYSTEM_VALIDATE;
   userok = 0;
   modeok = 1;
   modereq = mode;
-  ReadSystem(NULL, "default", CONFFILE, 0, prompt, NULL);
-  if (name != NULL)
-    ReadSystem(NULL, name, CONFFILE, 0, prompt, NULL);
-  return userok && modeok;
+
+  rs = ReadSystem(NULL, "default", CONFFILE, prompt, NULL, how);
+
+  if (!def) {
+    if (rs == -1)
+      rs = 0;		/* we don't care that ``default'' doesn't exist */
+
+    if (rs == 0)
+      rs = ReadSystem(NULL, name, CONFFILE, prompt, NULL, how);
+
+    if (rs == -1)
+      return "Configuration label not found";
+
+    if (rs == -2)
+      return _PATH_PPP "/" CONFFILE ": File not found";
+  }
+
+  if (how == SYSTEM_EXISTS)
+    userok = modeok = 1;
+
+  if (!userok)
+    return "User access denied";
+
+  if (!modeok)
+    return "Mode denied for this label";
+
+  return NULL;
 }
 
 int
@@ -360,5 +403,5 @@ system_Select(struct bundle *bundle, const char *name, const char *file,
 {
   userok = modeok = 1;
   modereq = PHYS_ALL;
-  return ReadSystem(bundle, name, file, 1, prompt, cx);
+  return ReadSystem(bundle, name, file, prompt, cx, SYSTEM_EXEC);
 }

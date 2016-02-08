@@ -1,7 +1,8 @@
-/*	$OpenBSD: parse.c,v 1.8 1998/09/15 02:42:44 millert Exp $	*/
+/*	$OpenBSD: parse.c,v 1.12 1999/03/30 17:26:21 millert Exp $	*/
 
 /*
- *  CU sudo version 1.5.6
+ *  CU sudo version 1.5.9
+ *  Copyright (c) 1996, 1998, 1999 Todd C. Miller <Todd.Miller@courtesan.com>
  *
  *  This program is free software; you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License as published by
@@ -26,10 +27,6 @@
  * Chris Jepeway <jepeway@cs.utk.edu>
  */
 
-#ifndef lint
-static char rcsid[] = "$From: parse.c,v 1.91 1998/09/07 02:41:33 millert Exp $";
-#endif /* lint */
-
 #include "config.h"
 
 #include <stdio.h>
@@ -52,9 +49,6 @@ static char rcsid[] = "$From: parse.c,v 1.91 1998/09/07 02:41:33 millert Exp $";
 #    include "emul/fnmatch.h"
 #  endif /* HAVE_FNMATCH */
 #endif /* HAVE_FNMATCH_H */
-#if defined(HAVE_MALLOC_H) && !defined(STDC_HEADERS)
-#  include <malloc.h>
-#endif /* HAVE_MALLOC_H && !STDC_HEADERS */
 #ifdef HAVE_NETGROUP_H
 #  include <netgroup.h>
 #endif /* HAVE_NETGROUP_H */
@@ -85,7 +79,10 @@ static char rcsid[] = "$From: parse.c,v 1.91 1998/09/07 02:41:33 millert Exp $";
 #endif
 
 #include "sudo.h"
-#include <options.h>
+
+#ifndef lint
+static const char rcsid[] = "$Sudo: parse.c,v 1.103 1999/03/30 17:17:53 millert Exp $";
+#endif /* lint */
 
 /*
  * Globals
@@ -159,19 +156,20 @@ int validate(check_cmnd)
      */
     if (check_cmnd == FALSE)
 	while (top) {
-	    if (host_matches == TRUE)
+	    if (host_matches == TRUE) {
 		/* user may always do validate or list on allowed hosts */
 		if (no_passwd == TRUE)
 		    return(VALIDATE_OK_NOPASS);
 		else
 		    return(VALIDATE_OK);
+	    }
 	    top--;
 	}
     else
 	while (top) {
 	    if (host_matches == TRUE) {
-		if (cmnd_matches == TRUE) {
-		   if (runas_matches == TRUE) {
+		if (runas_matches == TRUE) {
+		    if (cmnd_matches == TRUE) {
 		    	/*
 			 * User was granted access to cmnd on host.
 		    	 * If no passwd required return as such.
@@ -180,10 +178,10 @@ int validate(check_cmnd)
 			    return(VALIDATE_OK_NOPASS);
 		    	else
 			    return(VALIDATE_OK);
+		    } else if (cmnd_matches == FALSE) {
+			/* User was explicitly denied acces to cmnd on host. */
+			return(VALIDATE_NOT_OK);
 		    }
-		} else if (cmnd_matches == FALSE) {
-		    /* User was explicitly denied acces to cmnd on host. */
-		    return(VALIDATE_NOT_OK);
 		}
 	    }
 	    top--;
@@ -254,7 +252,6 @@ int command_matches(cmnd, user_args, path, sudoers_args)
 	    return(FALSE);
     } else {
 	if (path[plen - 1] != '/') {
-#ifdef FAST_MATCH
 	    char *p;
 
 	    /* Only proceed if the basenames of cmnd and path are the same */
@@ -264,7 +261,6 @@ int command_matches(cmnd, user_args, path, sudoers_args)
 		p++;
 	    if (strcmp(c, p))
 		return(FALSE);
-#endif /* FAST_MATCH */
 
 	    if (stat(path, &pst) < 0)
 		return(FALSE);
@@ -299,11 +295,10 @@ int command_matches(cmnd, user_args, path, sudoers_args)
 		continue;
 	    strcpy(buf, path);
 	    strcat(buf, dent->d_name);
-#ifdef FAST_MATCH
+
 	    /* only stat if basenames are not the same */
 	    if (strcmp(c, dent->d_name))
 		continue;
-#endif /* FAST_MATCH */
 	    if (stat(buf, &pst) < 0)
 		continue;
 	    if (cmnd_st.st_dev == pst.st_dev && cmnd_st.st_ino == pst.st_ino)
@@ -361,23 +356,27 @@ int usergr_matches(group, user)
     char *group;
     char *user;
 {
-    struct group *grpent;
+    struct group *grp;
+    struct passwd *pw;
     char **cur;
 
     /* make sure we have a valid usergroup, sudo style */
     if (*group++ != '%')
 	return(FALSE);
 
-    if ((grpent = getgrnam(group)) == NULL) 
+    if ((grp = getgrnam(group)) == NULL) 
 	return(FALSE);
 
     /*
      * Check against user's real gid as well as group's user list
      */
-    if (grpent->gr_gid == user_gid)
+    if ((pw = getpwnam(user)) == NULL)
+	return(FALSE);
+
+    if (grp->gr_gid == pw->pw_gid)
 	return(TRUE);
 
-    for (cur=grpent->gr_mem; *cur; cur++) {
+    for (cur=grp->gr_mem; *cur; cur++) {
 	if (strcmp(*cur, user) == 0)
 	    return(TRUE);
     }
@@ -410,12 +409,7 @@ int netgr_matches(netgr, host, user)
 #ifdef HAVE_GETDOMAINNAME
     /* get the domain name (if any) */
     if (domain == (char *) -1) {
-	if ((domain = (char *) malloc(MAXHOSTNAMELEN)) == NULL) {
-	    perror("malloc");
-	    (void) fprintf(stderr, "%s: cannot allocate memory!\n", Argv[0]);
-	    exit(1);
-	}
-
+	domain = (char *) emalloc(MAXHOSTNAMELEN);
 	if (getdomainname(domain, MAXHOSTNAMELEN) != 0 || *domain == '\0') {
 	    (void) free(domain);
 	    domain = NULL;

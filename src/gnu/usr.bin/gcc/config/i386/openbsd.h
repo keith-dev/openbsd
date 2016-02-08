@@ -1,18 +1,24 @@
-/* This goes away when the math-emulator is fixed */
-#define TARGET_CPU_DEFAULT 0400		/* TARGET_NO_FANCY_MATH_387 */
-
 /* This is tested by i386gas.h.  */
 #define YES_UNDERSCORES
 
 #include <i386/gstabs.h>
 
+/* Remove when the math-emulator is fixed.  */
+/* XXX i386 TARGET_DEFAULT/TARGET_CPU_DEFAULT is weird...
+   This must be defined as TARGET_DEFAULT, and after including gstabs.h
+	to override unix.h TARGET_DEFAULT definition.
+	In effect, this adds MASK_NO_FANCY_MATH_387 to the usual definition.  */
+#undef TARGET_DEFAULT
+#define TARGET_DEFAULT \
+	(MASK_NO_FANCY_MATH_387 | MASK_80387 | MASK_IEEE_FP | MASK_FLOAT_RETURNS)
+
 /* Get perform_* macros to build libgcc.a.  */
 #include <i386/perform.h>
 
+#define OBSD_OLD_GAS
 /* Get generic OpenBSD definitions.  */
 #include <openbsd.h>
 
-#undef CPP_PREDEFINES
 #define CPP_PREDEFINES "-Dunix -Di386 -D__OpenBSD__ -Asystem(unix) -Asystem(OpenBSD) -Acpu(i386) -Amachine(i386)"
 
 #undef SIZE_TYPE
@@ -30,7 +36,7 @@
 #undef WCHAR_TYPE_SIZE
 #define WCHAR_TYPE_SIZE 32
 
-/*	$OpenBSD: openbsd.h,v 1.5 1997/03/28 20:47:21 deraadt Exp $	*/
+/*	$OpenBSD: openbsd.h,v 1.7 1999/04/01 21:24:41 espie Exp $	*/
 
 /* There are conflicting reports about whether this system uses
    a different assembler syntax.  wilson@cygnus.com says # is right.  */

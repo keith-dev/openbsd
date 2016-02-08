@@ -1,4 +1,4 @@
-/*	$OpenBSD: ypwhich.c,v 1.9 1998/01/18 20:13:08 maja Exp $	*/
+/*	$OpenBSD: ypwhich.c,v 1.11 1999/03/20 15:36:12 maja Exp $	*/
 /*	$NetBSD: ypwhich.c,v 1.6 1996/05/13 02:43:48 thorpej Exp $	*/
 
 /*
@@ -34,7 +34,7 @@
  */
 
 #ifndef LINT
-static char rcsid[] = "$Id: ypwhich.c,v 1.9 1998/01/18 20:13:08 maja Exp $";
+static char rcsid[] = "$Id: ypwhich.c,v 1.11 1999/03/20 15:36:12 maja Exp $";
 #endif
 
 #include <sys/param.h>
@@ -221,9 +221,7 @@ main(argc, argv)
 	if (argc > 1)
 		usage();
 
-	if (host == NULL) {
-		client = yp_bind_local(YPPROG,YPVERS);
-	} else {
+	if (host != NULL) {
 		client = yp_bind_host(host,YPPROG,YPVERS,0,1);
 	}
 	
@@ -233,7 +231,11 @@ main(argc, argv)
 			if (strcmp(map, ypaliases[i].alias) == 0)
 				map = ypaliases[i].name;
 
-		r = yp_master_host(client, domain, map, &master);
+		if (host != NULL) {
+			r = yp_master_host(client, domain, map, &master);
+		} else {
+			r = yp_master(domain, map, &master);
+		}
 		switch (r) {
 		case 0:
 			printf("%s\n", master);
@@ -251,13 +253,22 @@ main(argc, argv)
 	}
 
 	ypml = NULL;
-	r = yp_maplist_host(client, domain, &ypml);
+	if (host != NULL) {
+		r = yp_maplist_host(client, domain, &ypml);
+	} else {
+		r = yp_maplist(domain, &ypml);
+	}
 	r = 0;
 	switch(r) {
 	case 0:
 		for (y = ypml; y; ) {
 			ypml = y;
-			r = yp_master_host(client, domain, ypml->map, &master);
+			if (host != NULL) {
+				r = yp_master_host(client,
+						   domain, ypml->map, &master);
+			} else {
+				r = yp_master(domain, ypml->map, &master);
+			}
 			switch(r) {
 			case 0:
 				printf("%s %s\n", ypml->map, master);

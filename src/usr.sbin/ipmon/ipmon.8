@@ -1,11 +1,11 @@
-.\"     $OpenBSD: ipmon.8,v 1.5 1998/09/15 10:01:39 pattonme Exp $          
+.\"     $OpenBSD: ipmon.8,v 1.10 1999/03/10 21:25:30 pjanzen Exp $          
 .TH ipmon 8
 .SH NAME
 ipmon \- monitors /dev/ipl for logged packets
 .SH SYNOPSIS
 .B ipmon
 [
-.B \-aFhnstvxX
+.B \-aDFhnstvxX
 ] [
 .B "\-o [NSI]"
 ] [
@@ -23,7 +23,7 @@ ipmon \- monitors /dev/ipl for logged packets
 .LP
 \fBipmon\fP opens \fB/dev/ipl\fP for reading and awaits data to be saved from
 the packet filter.  The binary data read from the device is reprinted in
-human readable for, however, IP#'s are not mapped back to hostnames, nor are
+human readable form; however, IP#'s are not mapped back to hostnames, nor are
 ports mapped back to service names.  The output goes to standard output by
 default or a filename, if given on the command line.  Should the \fB\-s\fP
 option be used, output is instead sent to \fBsyslogd(8)\fP.  Messages sent
@@ -38,6 +38,9 @@ are displayed to the same output 'device' (stderr or syslog).
 .B "\-f <device>"
 specify an alternative device/file from which to read the log information
 for normal IP Filter log records.
+.TP
+.B \-D
+When set ipmon will fork and become a daemon.
 .TP
 .B \-F
 Flush the current packet log buffer.  The number of bytes flushed is displayed,
@@ -57,12 +60,13 @@ equivalent to using \fB-o NSI\fP.
 .TP
 .B \-O
 Specify which log files you do not wish to read from.  This is most sensibly
-used with the \fB-a\fP.  Letters available as paramters to this are the same
+used with the \fB-a\fP.  Letters available as parameters to this are the same
 as for \fB-o\fP.
 .TP
 .B \-s
 Packet information read in will be sent through syslogd rather than
-saved to a file.  The following levels are used:
+saved to a file.  The default facility when compiled and installed is
+\fBlocal0\fP.  The following levels are used:
 .IP
 .B LOG_INFO
 \- packets logged using the "log" keyword as the action rather
@@ -87,6 +91,9 @@ Set the logfile to be opened for reading state log records from to <device>.
 .B \-t
 read the input file/device in a manner akin to tail(1).
 .TP
+.B \-v
+show tcp window, ack and sequence fields.
+.TP
 .B \-x
 show the packet data in hex.
 .TP
@@ -103,7 +110,7 @@ recorded data.
 .br
 /dev/ipstate
 .SH SEE ALSO
-ipf(1), ipftest(1), ipnat(1), ipf(4), ipl(4), ipnat(4), ipf(5), ipnat(5), ipfstat(8)
+ipf(8), ipftest(1), ipnat(8), ipf(4), ipl(4), ipnat(4), ipf(5), ipnat(5), ipfstat(8)
 .br
 http://coombs.anu.edu.au/ipfilter/
 .SH BUGS

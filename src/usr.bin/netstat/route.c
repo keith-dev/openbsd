@@ -1,4 +1,4 @@
-/*	$OpenBSD: route.c,v 1.25 1998/06/23 22:40:40 millert Exp $	*/
+/*	$OpenBSD: route.c,v 1.27 1999/03/15 15:59:08 deraadt Exp $	*/
 /*	$NetBSD: route.c,v 1.15 1996/05/07 02:55:06 thorpej Exp $	*/
 
 /*
@@ -38,7 +38,7 @@
 #if 0
 static char sccsid[] = "from: @(#)route.c	8.3 (Berkeley) 3/9/94";
 #else
-static char *rcsid = "$OpenBSD: route.c,v 1.25 1998/06/23 22:40:40 millert Exp $";
+static char *rcsid = "$OpenBSD: route.c,v 1.27 1999/03/15 15:59:08 deraadt Exp $";
 #endif
 #endif /* not lint */
 
@@ -75,7 +75,8 @@ static char *rcsid = "$OpenBSD: route.c,v 1.25 1998/06/23 22:40:40 millert Exp $
 #define INET
 #endif
 
-#include <net/encap.h>
+#include <sys/socket.h>
+#include <netinet/ip_ipsp.h>
 #include "netstat.h"
 
 #define kget(p, d) (kread((u_long)(p), (char *)&(d), sizeof (d)))
@@ -159,7 +160,7 @@ routepr(rtree)
 			} else if (af == AF_UNSPEC || af == i) {
 				pr_family(i);
 				do_rtent = 1;
-				if (i != AF_ENCAP)
+				if (i != PF_KEY)
 					pr_rthdr();
 				else
 					pr_encaphdr();
@@ -194,7 +195,7 @@ pr_family(af)
 	case AF_CCITT:
 		afname = "X.25";
 		break;
-	case AF_ENCAP:
+	case PF_KEY:
 		afname = "Encap";
 		break;
 	case AF_APPLETALK:
@@ -230,7 +231,7 @@ pr_rthdr()
 }
 
 /*
- * Print header for AF_ENCAP entries.
+ * Print header for PF_KEY entries.
  */
 void
 pr_encaphdr()
@@ -532,7 +533,7 @@ p_rtentry(rt)
 	
 	bcopy(kgetsa(rt_key(rt)), sa, sizeof(struct sockaddr));
 
-	if (sa->sa_family == AF_ENCAP) {
+	if (sa->sa_family == PF_KEY) {
 		encap_print(rt);
 		return;
 	}
@@ -626,12 +627,12 @@ netname(in, mask)
 	if (cp) {
 		strncpy(line, cp, sizeof(line) - 1);
 		line[sizeof(line) - 1] = '\0';
-	} else if ((in & 0xffffff) == 0)
+	} else if (mbits < 9)
 		snprintf(line, sizeof line, "%u/%d", C(in >> 24), mbits);
-	else if ((in & 0xffff) == 0)
+	else if (mbits < 17)
 		snprintf(line, sizeof line, "%u.%u/%d",
 		    C(in >> 24) , C(in >> 16), mbits);
-	else if ((in & 0xff) == 0)
+	else if (mbits < 25)
 		snprintf(line, sizeof line, "%u.%u.%u/%d",
 		    C(in >> 24), C(in >> 16), C(in >> 8), mbits);
 	else

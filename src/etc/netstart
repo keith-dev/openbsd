@@ -1,6 +1,20 @@
 #!/bin/sh -
 #
-#	$OpenBSD: netstart,v 1.44 1998/10/06 23:25:21 deraadt Exp $
+#	$OpenBSD: netstart,v 1.48 1999/03/29 22:09:58 niklas Exp $
+
+# Returns true if $1 contains only alphanumerics
+isalphanumeric() {
+	local _n
+	_n=$1
+	while [ ${#_n} != 0 ]; do
+		case $_n in
+			[A-Za-z0-9]*)	;;
+			*)		return 1;;
+		esac
+		_n=${_n#?}
+	done
+	return 0
+}
 
 # /etc/myname contains my symbolic name
 #
@@ -40,7 +54,12 @@ route -n add -net 127 127.0.0.1 -reject
 #
 # OR
 #
-# dhcp 
+# dhcp
+#
+# OR
+#
+# bridge
+# brconfig-arguments [ several lines if needed ]
 #
 # addr_family is the address family of the interface, generally inet
 # hostname is the host name that belongs to the interface, in /etc/hosts.
@@ -52,63 +71,101 @@ route -n add -net 127 127.0.0.1 -reject
 # has a "destination" (i.e. it's a point-to-point link, like SLIP).
 # dest_addr is the hostname of the other end of the link, in /etc/hosts
 #
+# the only required contents of the file in this mode are the addr_family field
+# and the hostname.
+#
 # dhcp is simply the string "dhcp" (no quotes, though) if the interface
 # is to be configured using DHCP.  See dhclient(8) and dhclient.conf(5)
 # for details.
 #
-# the only required contents of the file are the addr_family field
-# and the hostname.
+# bridge is the string "bridge" (still no quotes).  Bridge interfaces
+# are just configured "up" and then brconfig(8) is called for each
+# line of arguments following this first line.
 
-(
-    tmp="$IFS"
-    IFS="$IFS."
-    set -- `echo /etc/hostname*`
-    IFS=$tmp
-    unset tmp
+for hn in /etc/hostname.*; do
+    # Strip off /etc/hostname. prefix
+    if=${hn#/etc/hostname.}
 
-    while [ $# -ge 2 ] ; do
-        shift            # get rid of "hostname"
-        (
-            read af name mask bcaddr extras
+    # Interface names must be alphanumeric only.  We check to avoid
+    # configuring backup or temp files, and to catch the "*" case.
+    if ! isalphanumeric "$if"; then
+        continue
+    fi
+
+    # Now parse the hostname.* file
+    {
+        read af name mask bcaddr extras
+
+	# $af can be either "bridge", "dhcp", "up" or an address family.
+	case "$af" in
+	"bridge")
+	    ifconfig $if up
+	    cmd=`sed "s/\(.*\)/brconfig $if \1;/"`
+ 	    ;;
+	"dhcp")
+	    ifconfig $if $extras down
+	    cmd="/sbin/dhclient $if"
+	    ;;
+	"up")
+	    # The only one of these guaranteed to be set is $if
+	    cmd="ifconfig $if $name $mask $bcaddr $extras up"
+ 	    ;;
+ 	*)
             read dt dtaddr
-
-	    # check to see if device should be configure by dhcp
-	    if [ "$af" = "dhcp" ]; then
-		ifconfig $1 $extras down
-		cmd="/sbin/dhclient $1";
-	    else
-		if [ ! -n "$name" ]; then
-		    echo "/etc/hostname.$1: invalid network configuration file"
-		    exit
-		fi
-
-		cmd="ifconfig $1 $af $name "
-		if [ "${dt}" = "dest" ]; then cmd="$cmd $dtaddr"; fi
-		if [ -n "$mask" ]; then cmd="$cmd netmask $mask"; fi
-		if [ -n "$bcaddr" -a "X$bcaddr" != "XNONE" ]; then
-		    cmd="$cmd broadcast $bcaddr";
-		fi
-		cmd="$cmd $extras";
+	    if [ ! -n "$name" ]; then
+		echo "/etc/hostname.$if: invalid network configuration file"
+		exit
 	    fi
 
-	    $cmd
-        ) < /etc/hostname.$1
-        shift
-    done
-)
+	    cmd="ifconfig $if $af $name "
+	    if [ "${dt}" = "dest" ]; then cmd="$cmd $dtaddr"; fi
+	    if [ -n "$mask" ]; then cmd="$cmd netmask $mask"; fi
+	    if [ -n "$bcaddr" -a "X$bcaddr" != "XNONE" ]; then
+		cmd="$cmd broadcast $bcaddr";
+	    fi
+	    cmd="$cmd $extras";
+	    ;;
+	esac
+
+	eval "$cmd"
+    } < /etc/hostname.$if
+done
 
 # /etc/mygate, if it exists, contains the name of my gateway host
 # that name must be in /etc/hosts.
 if [ -f /etc/mygate ]; then
 	route -n add -host default `cat /etc/mygate`
-
-	# default multicast route for hosts with a gateway
-	route -n add -net 224.0.0.0 -interface default
-else
-	# default multicast route
-	route -n add -net 224.0.0.0 -interface $hostname
 fi
 
+# Multicast routing.
+#
+# The routing to the 224.0.0.0/4 net is setup according to these rules:
+# multicast_host	multicast_router	route		comment
+# NO			NO			-reject		no multicast
+# NO			YES			none installed	daemon will run
+# YES/interface		NO			-interface	YES=def. iface
+#	   Any other combination		-reject		config error
+case "$multicast_host:$multicast_router" in
+NO:NO)
+	route -n add -net 224.0.0.0/4 -interface 127.0.0.1 -reject;;
+NO:YES)
+	;;
+*:NO)
+	set `if [ $multicast_host = YES ]; then
+		ed -s '!route -n show' <<EOF
+/^default/p
+EOF
+	else
+		ed -s "!ifconfig $multicast_host" <<EOF
+/^	inet /p
+EOF
+	fi`
+	route -n add -net 224.0.0.0/4 -interface $2;;
+*:*)
+	echo 'config error, multicasting disabled until rc.conf is fixed'
+	route -n add -net 224.0.0.0/4 -interface 127.0.0.1 -reject;;
+esac
+	
 # Configure NAT after configuring network interfaces
 if [ "${ipnat}" = "YES" -a "${ipfilter}" = "YES" -a -f "${ipnat_rules}" ]; then
 	echo 'configuring NAT'
@@ -116,4 +173,3 @@ if [ "${ipnat}" = "YES" -a "${ipfilter}" = "YES" -a -f "${ipnat_rules}" ]; then
 else
 	ipnat=NO
 fi
-

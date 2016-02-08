@@ -29,8 +29,8 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- * $Id: uthread_kern.c,v 1.1 1998/08/27 09:01:08 d Exp $
- * $OpenBSD: uthread_kern.c,v 1.1 1998/08/27 09:01:08 d Exp $
+ * $FreeBSD: uthread_kern.c,v 1.15 1998/11/15 09:58:26 jb Exp $
+ * $OpenBSD: uthread_kern.c,v 1.7 1999/02/01 08:23:46 d Exp $
  *
  */
 #include <errno.h>
@@ -43,6 +43,7 @@
 #include <sys/stat.h>
 #include <sys/time.h>
 #include <sys/socket.h>
+#include <sys/resource.h>
 #include <sys/uio.h>
 #include <sys/syscall.h>
 #include <fcntl.h>
@@ -60,14 +61,16 @@ _thread_kern_sched(struct sigcontext * scp)
 	int             prio = -1;
 	pthread_t       pthread;
 	pthread_t       pthread_h = NULL;
-	pthread_t       pthread_nxt = NULL;
-	pthread_t       pthread_prv = NULL;
 	pthread_t       pthread_s = NULL;
 	struct itimerval itimer;
 	struct timespec ts;
 	struct timespec ts1;
 	struct timeval  tv;
 	struct timeval  tv1;
+#ifdef _THREAD_RUSAGE
+	struct rusage	ru;
+	static struct rusage ru_prev;
+#endif
 
 	/*
 	 * Flag the pthread kernel as executing scheduler code
@@ -91,7 +94,7 @@ _thread_kern_sched(struct sigcontext * scp)
 		_thread_run->sig_saved = 1;
 	}
 	/* Save the state of the current thread: */
-	else if (setjmp(_thread_run->saved_jmp_buf) != 0) {
+	else if (_thread_machdep_setjmp(_thread_run->saved_jmp_buf) != 0) {
 		/*
 		 * This point is reached when a longjmp() is called to
 		 * restore the state of a thread. 
@@ -100,94 +103,44 @@ _thread_kern_sched(struct sigcontext * scp)
 		 */
 		_thread_kern_in_sched = 0;
 
+		if (!(_thread_run->flags & PTHREAD_AT_CANCEL_POINT) &&
+		    (_thread_run->canceltype == PTHREAD_CANCEL_ASYNCHRONOUS)) {
+			/* 
+			 * Cancelations override signals.
+			 *
+			 * Stick a cancellation point at the start of
+			 * each async-cancellable thread's resumption.
+			 *
+			 * We allow threads woken at cancel points to do their
+			 * own checks.
+			 */
+			_thread_cancellation_point();
+		}
+
 		/*
 		 * There might be pending signals for this thread, so
 		 * dispatch any that aren't blocked:
 		 */
 		_dispatch_signals();
 		return;
-	} else {
+	} else
 		/* Flag the jump buffer was the last state saved: */
 		_thread_run->sig_saved = 0;
-	}
 
 	/* Save errno. */
 	_thread_run->error = errno;
 
-	/* Point to the first dead thread (if there are any): */
-	pthread = _thread_dead;
-
-	/* There is no previous dead thread: */
-	pthread_prv = NULL;
-
-	/* Enter a loop to cleanup after dead threads: */
-	while (pthread != NULL) {
-		/* Save a pointer to the next thread: */
-		pthread_nxt = pthread->nxt;
-
-		/* Check if this thread is one which is running: */
-		if (pthread == _thread_run || pthread == _thread_initial) {
-			/*
-			 * Don't destroy the running thread or the initial
-			 * thread. 
-			 */
-			pthread_prv = pthread;
-		}
-		/*
-		 * Check if this thread has detached:
-		 */
-		else if ((pthread->attr.flags & PTHREAD_DETACHED) != 0) {
-			/* Check if there is no previous dead thread: */
-			if (pthread_prv == NULL) {
-				/*
-				 * The dead thread is at the head of the
-				 * list: 
-				 */
-				_thread_dead = pthread_nxt;
-			} else {
-				/*
-				 * The dead thread is not at the head of the
-				 * list: 
-				 */
-				pthread_prv->nxt = pthread->nxt;
-			}
-
-			/*
-			 * Check if the stack was not specified by the caller
-			 * to pthread_create and has not been destroyed yet: 
-			 */
-			if (pthread->attr.stackaddr_attr == NULL && pthread->stack != NULL) {
-				/* Free the stack of the dead thread: */
-				free(pthread->stack);
-			}
-			/* Free the memory allocated to the thread structure: */
-			free(pthread);
-		} else {
-			/*
-			 * This thread has not detached, so do not destroy
-			 * it: 
-			 */
-			pthread_prv = pthread;
-
-			/*
-			 * Check if the stack was not specified by the caller
-			 * to pthread_create and has not been destroyed yet: 
-			 */
-			if (pthread->attr.stackaddr_attr == NULL && pthread->stack != NULL) {
-				/* Free the stack of the dead thread: */
-				free(pthread->stack);
-
-				/*
-				 * NULL the stack pointer now that the memory
-				 * has been freed: 
-				 */
-				pthread->stack = NULL;
-			}
-		}
-
-		/* Point to the next thread: */
-		pthread = pthread_nxt;
-	}
+#ifdef _THREAD_RUSAGE
+	/* Accumulate time spent */
+	if (getrusage(RUSAGE_SELF, &ru))
+		PANIC("Cannot get resource usage");
+	timersub(&ru.ru_utime, &ru_prev.ru_utime, &tv);
+	timeradd(&tv, &_thread_run->ru_utime, &_thread_run->ru_utime);
+	timersub(&ru.ru_stime, &ru_prev.ru_stime, &tv);
+	timeradd(&tv, &_thread_run->ru_stime, &_thread_run->ru_stime);
+	memcpy(&ru_prev.ru_utime, &ru.ru_utime, sizeof ru_prev.ru_utime);
+	memcpy(&ru_prev.ru_stime, &ru.ru_stime, sizeof ru_prev.ru_stime);
+#endif /* _THREAD_RUSAGE */
 
 	/*
 	 * Enter a the scheduling loop that finds the next thread that is
@@ -268,7 +221,7 @@ _thread_kern_sched(struct sigcontext * scp)
 		}
 
 		/* Check if there is a current thread: */
-		if (_thread_run != &_thread_kern_thread) {
+		if (_thread_run != _thread_kern_threadp) {
 			/*
 			 * Save the current time as the time that the thread
 			 * became inactive: 
@@ -280,10 +233,20 @@ _thread_kern_sched(struct sigcontext * scp)
 			 * Accumulate the number of microseconds that this
 			 * thread has run for: 
 			 */
-			_thread_run->slice_usec += (_thread_run->last_inactive.tv_sec -
-				_thread_run->last_active.tv_sec) * 1000000 +
-				_thread_run->last_inactive.tv_usec -
-				_thread_run->last_active.tv_usec;
+			if (_thread_run->slice_usec != -1) {
+				if (timerisset(&_thread_run->last_active)) {
+					struct timeval s;
+
+					timersub(&_thread_run->last_inactive,
+					    &_thread_run->last_active,
+					    &s);
+					_thread_run->slice_usec = 
+					    s.tv_usec + 1000000 * s.tv_sec;
+					if (_thread_run->slice_usec < 0)
+						PANIC("slice_usec");
+				} else
+					_thread_run->slice_usec = -1;
+                        }
 
 			/*
 			 * Check if this thread has reached its allocated
@@ -316,7 +279,7 @@ _thread_kern_sched(struct sigcontext * scp)
 				 * the last incremental priority check was
 				 * made: 
 				 */
-				else if (timercmp(&_thread_run->last_inactive, &kern_inc_prio_time, <)) {
+				else if (timercmp(&pthread->last_inactive, &kern_inc_prio_time, <)) {
 					/*
 					 * Increment the incremental priority
 					 * for this thread in the hope that
@@ -469,7 +432,7 @@ _thread_kern_sched(struct sigcontext * scp)
 			 * the running thread to point to the global kernel
 			 * thread structure: 
 			 */
-			_thread_run = &_thread_kern_thread;
+			_thread_run = _thread_kern_threadp;
 
 			/*
 			 * There are no threads ready to run, so wait until
@@ -516,8 +479,7 @@ _thread_kern_sched(struct sigcontext * scp)
 				 * times out. The interval time needs to be
 				 * calculated every time. 
 				 */
-				itimer.it_interval.tv_sec = 0;
-				itimer.it_interval.tv_usec = 0;
+				timerclear(&itimer.it_interval);
 
 				/*
 				 * Enter a loop to look for threads waiting
@@ -550,9 +512,8 @@ _thread_kern_sched(struct sigcontext * scp)
 						 * Check if the current time
 						 * is after the wakeup time: 
 						 */
-						else if ((ts.tv_sec > pthread->wakeup_time.tv_sec) ||
-							 ((ts.tv_sec == pthread->wakeup_time.tv_sec) &&
-							  (ts.tv_nsec > pthread->wakeup_time.tv_nsec))) {
+						else if (timespeccmp(&ts,
+						    &pthread->wakeup_time, > )){
 						} else {
 							/*
 							 * Calculate the time
@@ -561,44 +522,15 @@ _thread_kern_sched(struct sigcontext * scp)
 							 * for the clock
 							 * resolution: 
 							 */
-							ts1.tv_sec = pthread->wakeup_time.tv_sec - ts.tv_sec;
-							ts1.tv_nsec = pthread->wakeup_time.tv_nsec - ts.tv_nsec +
-								CLOCK_RES_NSEC;
-
-							/*
-							 * Check for
-							 * underflow of the
-							 * nanosecond field: 
-							 */
-							if (ts1.tv_nsec < 0) {
-								/*
-								 * Allow for
-								 * the
-								 * underflow
-								 * of the
-								 * nanosecond
-								 * field: 
-								 */
-								ts1.tv_sec--;
-								ts1.tv_nsec += 1000000000;
-							}
-							/*
-							 * Check for overflow
-							 * of the nanosecond
-							 * field: 
-							 */
-							if (ts1.tv_nsec >= 1000000000) {
-								/*
-								 * Allow for
-								 * the
-								 * overflow
-								 * of the
-								 * nanosecond
-								 * field: 
-								 */
-								ts1.tv_sec++;
-								ts1.tv_nsec -= 1000000000;
-							}
+							struct timespec
+							 clock_res
+							  = {0,CLOCK_RES_NSEC};
+							timespecsub(
+							  &pthread->wakeup_time,
+							  &ts, &ts1);
+							timespecadd(
+							  &ts1, &clock_res,
+							  &ts1);
 							/*
 							 * Convert the
 							 * timespec structure
@@ -639,17 +571,21 @@ _thread_kern_sched(struct sigcontext * scp)
 					PANIC("Cannot set virtual timer");
 				}
 			}
+
 			/* Restore errno. */
 			errno = _thread_run->error;
+
 			/* Check if a signal context was saved: */
 			if (_thread_run->sig_saved == 1) {
 
 				/* Restore the floating point state: */
 				_thread_machdep_restore_float_state(_thread_run);
+
 				/*
 				 * Do a sigreturn to restart the thread that
 				 * was interrupted by a signal: 
 				 */
+		                _thread_kern_in_sched = 0;
 				_thread_sys_sigreturn(&_thread_run->saved_sigcontext);
 			} else
 				/*
@@ -657,7 +593,7 @@ _thread_kern_sched(struct sigcontext * scp)
 				 * was context switched out (by a longjmp to
 				 * a different thread): 
 				 */
-				longjmp(_thread_run->saved_jmp_buf, 1);
+				_thread_machdep_longjmp(_thread_run->saved_jmp_buf, 1);
 
 			/* This point should not be reached. */
 			PANIC("Thread has returned from sigreturn or longjmp");
@@ -669,12 +605,28 @@ _thread_kern_sched(struct sigcontext * scp)
 }
 
 void
-_thread_kern_sched_state(enum pthread_state state, char *fname, int lineno)
+_thread_kern_sched_state(enum pthread_state state, const char *fname, int lineno)
 {
 	/* Change the state of the current thread: */
 	_thread_run->state = state;
 	_thread_run->fname = fname;
 	_thread_run->lineno = lineno;
+
+	/* Schedule the next thread that is ready: */
+	_thread_kern_sched(NULL);
+	return;
+}
+
+void
+_thread_kern_sched_state_unlock(enum pthread_state state,
+    spinlock_t *lock, char *fname, int lineno)
+{
+	/* Change the state of the current thread: */
+	_thread_run->state = state;
+	_thread_run->fname = fname;
+	_thread_run->lineno = lineno;
+
+	_SPINUNLOCK(lock);
 
 	/* Schedule the next thread that is ready: */
 	_thread_kern_sched(NULL);
@@ -750,6 +702,7 @@ _thread_kern_select(int wait_reqd)
 		case PS_STATE_MAX:
 		case PS_WAIT_WAIT:
 		case PS_SUSPENDED:
+		case PS_SIGSUSPEND:
 			/* Nothing to do here. */
 			break;
 
@@ -1080,6 +1033,7 @@ _thread_kern_select(int wait_reqd)
 			case PS_SIGTHREAD:
 			case PS_STATE_MAX:
 			case PS_SUSPENDED:
+			case PS_SIGSUSPEND:
 				/* Nothing to do here. */
 				break;
 

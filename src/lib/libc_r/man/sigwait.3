@@ -1,6 +1,7 @@
-.\" $OpenBSD: sigwait.3,v 1.1 1998/08/27 09:00:48 d Exp $
+.\" $OpenBSD: sigwait.3,v 1.5 1999/03/22 04:20:05 d Exp $
+.\" David Leonard <d@openbsd.org>, 1998. Public domain.
 .Dd August 20, 1998
-.Os Ox
+.Os
 .Dt SIGWAIT 3
 .Sh NAME
 .Nm sigwait
@@ -53,7 +54,7 @@ stores the signal number of the recived signal at the location referenced by
 and returns zero.
 .Sh ERRORS
 On error,
-.Fn Sigwait
+.Fn sigwait
 returns one of these error values:
 .Bl -tag -width Er
 .It Bq Er EINVAL
@@ -62,12 +63,12 @@ The
 argument contains an invalid or unsupported signal number
 .El
 .Sh SEE ALSO
-.Xr pause
-.Xr sigaction
-.Xr sigpending
-.Xr sigsuspend
-.Xr pthreads
-.Xr pthread_sigmask
+.Xr pause 3 ,
+.Xr sigaction 2 ,
+.Xr sigpending 2 ,
+.Xr sigsuspend 2 ,
+.Xr pthreads 3 ,
+.Xr pthread_sigmask 3
 .Sh STANDARDS
 .Fn sigwait
 conforms to ISO/IEC 9945-1 ANSI/IEEE

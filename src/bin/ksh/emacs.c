@@ -1,4 +1,4 @@
-/*	$OpenBSD: emacs.c,v 1.5 1998/06/25 19:01:51 millert Exp $	*/
+/*	$OpenBSD: emacs.c,v 1.8 1999/01/19 20:41:52 millert Exp $	*/
 
 /*
  *  Emacs-like command line editing and history
@@ -310,7 +310,7 @@ static	struct x_defbindings const x_defbindings[] = {
 	{ XFUNC_mv_forw,		3,	'M'  },
 	{ XFUNC_next_com,		3,	'P'  },
 	{ XFUNC_prev_com,		3,	'H'  },
-#else /* OS2 */
+#endif /* OS2 */
 	/* These for ansi arrow keys: arguablely shouldn't be here by
 	 * default, but its simpler/faster/smaller than using termcap
 	 * entries.
@@ -320,7 +320,6 @@ static	struct x_defbindings const x_defbindings[] = {
 	{ XFUNC_next_com,		2,	'B'  },
 	{ XFUNC_mv_forw,		2,	'C'  },
 	{ XFUNC_mv_back,		2,	'D'  },
-#endif /* OS2 */
 };
 
 int
@@ -680,7 +679,7 @@ static void
 x_bs(c)
 	int c;
 {
-	register i;
+	register int i;
 	i = x_size(c);
 	while (i--)
 		x_e_putc('\b');
@@ -690,7 +689,7 @@ static int
 x_size_str(cp)
 	register char *cp;
 {
-	register size = 0;
+	register int size = 0;
 	while (*cp)
 		size += x_size(*cp++);
 	return size;
@@ -1480,7 +1479,7 @@ x_init_emacs()
 		for (j = 0; j < X_TABSZ; j++)
 			x_tab[i][j] = XFUNC_error;
 	for (i = 0; i < NELEM(x_defbindings); i++)
-		x_tab[x_defbindings[i].xdb_tab][x_defbindings[i].xdb_char]
+		x_tab[(unsigned char)x_defbindings[i].xdb_tab][x_defbindings[i].xdb_char]
 			= x_defbindings[i].xdb_func;
 
 	x_atab = (char *(*)[X_TABSZ]) alloc(sizeofN(*x_atab, X_NTABS), AEDIT);
@@ -2014,7 +2013,9 @@ x_prev_histword(c)
   char *cp;
 
   cp = *histptr;
-  if (x_arg_defaulted) {
+  if (!cp)
+    x_e_putc(BEL);
+  else if (x_arg_defaulted) {
     rcp = &cp[strlen(cp) - 1];
     /*
      * ignore white-space after the last word

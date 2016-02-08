@@ -29,11 +29,14 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
+ * $OpenBSD: uthread_exit.c,v 1.7 1999/01/06 05:29:23 d Exp $
  */
 #include <errno.h>
 #include <unistd.h>
 #include <fcntl.h>
 #include <string.h>
+#include <stdio.h>
+#include <stdlib.h>
 #ifdef _THREAD_SAFE
 #include <pthread.h>
 #include "pthread_private.h"
@@ -74,22 +77,54 @@ void _exit(int status)
 	_thread_sys__exit(status);
 }
 
+/*
+ * Append a small number onto the end of a string.
+ * This avoids the need to use sprintf, which is unsafe sometimes.
+ */
+static void
+numlcat(char *s, int num, size_t size)
+{
+	int i;
+	char digit[7];
+
+	if (num<0) {
+		num = -num;
+		strlcat(s, "-", size);
+	}
+	digit[sizeof digit - 1] = '\0';
+	for (i = sizeof digit - 2; i >= 0; i--) {
+		digit[i] = '0' + (num % 10);
+		num /= 10;
+		if (num == 0)
+			break;
+	}
+	if (i<0)
+		strlcat(s, "inf", size);
+	else
+		strlcat(s, &digit[i], size);
+}
+
 void
-_thread_exit(char *fname, int lineno, char *string)
+_thread_exit(const char *fname, int lineno, const char *string)
 {
 	char            s[256];
 
 	/* Prepare an error message string: */
-	strcpy(s, "Fatal error '");
-	strcat(s, string);
-	strcat(s, "' at line ? ");
-	strcat(s, "in file ");
-	strcat(s, fname);
-	strcat(s, " (errno = ?");
-	strcat(s, ")\n");
+	strlcpy(s, "Fatal error '", sizeof s);
+	strlcat(s, string, sizeof s);
+	strlcat(s, "' at line ", sizeof s);
+	numlcat(s, lineno, sizeof s);
+	strlcat(s, " in file ", sizeof s);
+	strlcat(s, fname, sizeof s);
+	strlcat(s, " (errno = ", sizeof s);
+	numlcat(s, errno, sizeof s);
+	strlcat(s, ")\n", sizeof s);
 
 	/* Write the string to the standard error file descriptor: */
 	_thread_sys_write(2, s, strlen(s));
+
+	/* Write a dump of the current thread status: */
+	_thread_dump_info();
 
 	/* Force this process to exit: */
 	_exit(1);
@@ -98,14 +133,12 @@ _thread_exit(char *fname, int lineno, char *string)
 void
 pthread_exit(void *status)
 {
-	int             sig;
-	long            l;
 	pthread_t       pthread;
 
 	/* Check if this thread is already in the process of exiting: */
 	if ((_thread_run->flags & PTHREAD_EXITING) != 0) {
 		char msg[128];
-		snprintf(msg,"Thread %p has called pthread_exit() from a destructor. POSIX 1003.1 1996 s16.2.5.2 does not allow this!",_thread_run);
+		snprintf(msg,sizeof msg,"Thread %p has called pthread_exit() from a destructor. POSIX 1003.1 1996 s16.2.5.2 does not allow this!",_thread_run);
 		PANIC(msg);
 	}
 
@@ -133,56 +166,29 @@ pthread_exit(void *status)
 		PTHREAD_NEW_STATE(pthread,PS_RUNNING);
 	}
 
-	/* Lock the thread list: */
-	_lock_thread_list();
-
-	/* Check if the running thread is at the head of the linked list: */
-	if (_thread_link_list == _thread_run) {
-		/* There is no previous thread: */
-		_thread_link_list = _thread_run->nxt;
-	} else {
-		/* Point to the first thread in the list: */
-		pthread = _thread_link_list;
-
-		/*
-		 * Enter a loop to find the thread in the linked list before
-		 * the running thread: 
-		 */
-		while (pthread != NULL && pthread->nxt != _thread_run) {
-			/* Point to the next thread: */
-			pthread = pthread->nxt;
-		}
-
-		/* Check that a previous thread was found: */
-		if (pthread != NULL) {
-			/*
-			 * Point the previous thread to the one after the
-			 * running thread: 
-			 */
-			pthread->nxt = _thread_run->nxt;
-		}
-	}
-
-	/* Unlock the thread list: */
-	_unlock_thread_list();
-
-	/* Lock the dead thread list: */
-	_lock_dead_thread_list();
-
 	/*
-	 * This thread will never run again. Add it to the list of dead
-	 * threads: 
+	 * Lock the garbage collector mutex to ensure that the garbage
+	 * collector is not using the dead thread list.
 	 */
-	_thread_run->nxt = _thread_dead;
+	if (pthread_mutex_lock(&_gc_mutex) != 0)
+		PANIC("Cannot lock gc mutex");
+
+	/* Add this thread to the list of dead threads. */
+	_thread_run->nxt_dead = _thread_dead;
 	_thread_dead = _thread_run;
 
-	/* Unlock the dead thread list: */
-	_unlock_dead_thread_list();
-
 	/*
-	 * The running thread is no longer in the thread link list so it will
-	 * now die: 
+	 * Signal the garbage collector thread that there is something
+	 * to clean up.
 	 */
+	if (pthread_cond_signal(&_gc_cond) != 0)
+		PANIC("Cannot signal gc cond");
+
+	/* Unlock the garbage collector mutex: */
+	if (pthread_mutex_unlock(&_gc_mutex) != 0)
+		PANIC("Cannot lock gc mutex");
+
+	/* This thread will never be re-scheduled. */
 	_thread_kern_sched_state(PS_DEAD, __FILE__, __LINE__);
 
 	/* This point should not be reached. */

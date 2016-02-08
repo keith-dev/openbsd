@@ -1,4 +1,4 @@
-.\"	$OpenBSD: mount_fdesc.8,v 1.4 1998/06/15 17:55:42 mickey Exp $
+.\"	$OpenBSD: mount_fdesc.8,v 1.6 1998/12/15 01:20:35 aaron Exp $
 .\"	$NetBSD: mount_fdesc.8,v 1.6 1995/12/17 18:50:19 ghudson Exp $
 .\"
 .\" Copyright (c) 1992, 1993, 1994
@@ -50,7 +50,7 @@
 .Ar mount_point
 .Sh DESCRIPTION
 The
-.Nm mount_fdesc
+.Nm
 command attaches an instance of the per-process file descriptor
 namespace to the global filesystem namespace.
 The conventional mount point is
@@ -152,6 +152,6 @@ the real controlling terminal device.
 This filesystem may not be NFS-exported.
 .Sh HISTORY
 The
-.Nm mount_fdesc
+.Nm
 utility first appeared in
 .Bx 4.4 .

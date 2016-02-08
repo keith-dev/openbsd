@@ -1,4 +1,4 @@
-/*	$OpenBSD: inetd.c,v 1.49 1998/07/15 17:51:14 deraadt Exp $	*/
+/*	$OpenBSD: inetd.c,v 1.56 1999/02/24 12:31:30 deraadt Exp $	*/
 /*	$NetBSD: inetd.c,v 1.11 1996/02/22 11:14:41 mycroft Exp $	*/
 /*
  * Copyright (c) 1983,1991 The Regents of the University of California.
@@ -41,7 +41,7 @@ char copyright[] =
 
 #ifndef lint
 /*static char sccsid[] = "from: @(#)inetd.c	5.30 (Berkeley) 6/3/91";*/
-static char rcsid[] = "$OpenBSD: inetd.c,v 1.49 1998/07/15 17:51:14 deraadt Exp $";
+static char rcsid[] = "$OpenBSD: inetd.c,v 1.56 1999/02/24 12:31:30 deraadt Exp $";
 #endif /* not lint */
 
 /*
@@ -73,7 +73,7 @@ static char rcsid[] = "$OpenBSD: inetd.c,v 1.49 1998/07/15 17:51:14 deraadt Exp 
  *	socket type			stream/dgram/raw/rdm/seqpacket
  *	protocol			must be in /etc/protocols
  *	wait/nowait[.max]		single-threaded/multi-threaded, max #
- *	user[.group]			user/group to run daemon as
+ *	user[.group] or user[:group]	user/group to run daemon as
  *	server program			full path name
  *	server program arguments	maximum of MAXARGS (20)
  *
@@ -82,7 +82,7 @@ static char rcsid[] = "$OpenBSD: inetd.c,v 1.49 1998/07/15 17:51:14 deraadt Exp 
  *	socket type			stream/dgram/raw/rdm/seqpacket
  *	protocol			must be in /etc/protocols
  *	wait/nowait[.max]		single-threaded/multi-threaded
- *	user[.group]			user to run daemon as
+ *	user[.group] or user[:group]	user to run daemon as
  *	server program			full path name
  *	server program arguments	maximum of MAXARGS (20)
  *
@@ -114,7 +114,7 @@ static char rcsid[] = "$OpenBSD: inetd.c,v 1.49 1998/07/15 17:51:14 deraadt Exp 
  */
 
 /*
- * Here's the scoop concerning the user.group feature:
+ * Here's the scoop concerning the user[.:]group feature:
  *
  * 1) set-group-option off.
  * 
@@ -212,7 +212,7 @@ struct	servtab {
 	int	se_rpcversl;		/* rpc program lowest version */
 	int	se_rpcversh;		/* rpc program highest version */
 #define isrpcservice(sep)	((sep)->se_rpcversl != 0)
-	short	se_wait;		/* single threaded server */
+	pid_t	se_wait;		/* single threaded server */
 	short	se_checked;		/* looked at during merge */
 	char	*se_user;		/* user name to run as */
 	char	*se_group;		/* group name to run as */
@@ -321,13 +321,12 @@ main(argc, argv, envp)
 			debug = 1;
 			options |= SO_DEBUG;
 			break;
-		case '?':
 		case 'R': {	/* invocation rate */
 			char *p;
 			int val;
 
 			val = strtoul(optarg, &p, 0);
-			if (val >= 1 && p == NULL) {
+			if (val >= 1 && *p == NULL) {
 				toomany = val;
 				break;
 			}
@@ -336,8 +335,9 @@ main(argc, argv, envp)
 			    optarg);
 			break;
 		}
+		case '?':
 		default:
-			fprintf(stderr, "usage: %s [-R rate] [-d] [conf]",
+			fprintf(stderr, "usage: %s [-R rate] [-d] [conf]\n",
 			    progname);
 			exit(1);
 		}
@@ -1188,6 +1188,8 @@ more:
 		sep->se_family = AF_INET;
 		if (strncmp(sep->se_proto, "rpc/", 4) == 0) {
 			char *cp, *ccp;
+			long l;
+
 			cp = strchr(sep->se_service, '/');
 			if (cp == 0) {
 				syslog(LOG_ERR, "%s: no rpc version",
@@ -1195,20 +1197,23 @@ more:
 				goto more;
 			}
 			*cp++ = '\0';
-			sep->se_rpcversl =
-				sep->se_rpcversh = strtol(cp, &ccp, 0);
-			if (ccp == cp) {
+			l = strtol(cp, &ccp, 0);
+			if (ccp == cp || l < 0 || l > INT_MAX) {
 		badafterall:
 				syslog(LOG_ERR, "%s/%s: bad rpc version",
 				    sep->se_service, cp);
 				goto more;
 			}
+			sep->se_rpcversl = sep->se_rpcversh = l;
 			if (*ccp == '-') {
 				cp = ccp + 1;
-				sep->se_rpcversh = strtol(cp, &ccp, 0); 
-				if (ccp == cp)
+				l = strtol(cp, &ccp, 0); 
+				if (ccp == cp || l < 0 || l > INT_MAX ||
+				    l < sep->se_rpcversl || *ccp)
 					goto badafterall;
-			}
+				sep->se_rpcversh = l;
+			} else if (*ccp != '\0')
+				goto badafterall;
 		}
 	}
 	arg = skip(&cp);
@@ -1225,6 +1230,8 @@ more:
 	sep->se_wait = strcmp(arg, "wait") == 0;
 	sep->se_user = newstr(skip(&cp));
 	arg = strchr(sep->se_user, '.');
+	if (arg == NULL)
+		arg = strchr(sep->se_user, ':');
 	if (arg) {
 		*arg++ = '\0';
 		sep->se_group = newstr(arg);
@@ -1849,7 +1856,7 @@ print_service(action, sep)
 		fprintf(stderr, "proto=%s,", sep->se_proto);
 
 	fprintf(stderr,
-	    " wait.max=%hd.%d user.group=%s.%s builtin=%lx server=%s\n",
+	    " wait.max=%hd.%d user:group=%s.%s builtin=%lx server=%s\n",
 	    sep->se_wait, sep->se_max, sep->se_user, sep->se_group,
 	    (long)sep->se_bi, sep->se_server);
 }

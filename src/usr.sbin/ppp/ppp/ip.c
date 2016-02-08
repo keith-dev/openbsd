@@ -17,13 +17,13 @@
  * IMPLIED WARRANTIES, INCLUDING, WITHOUT LIMITATION, THE IMPLIED
  * WARRANTIES OF MERCHANTIBILITY AND FITNESS FOR A PARTICULAR PURPOSE.
  *
- * $Id: ip.c,v 1.2 1998/08/31 08:16:38 brian Exp $
+ * $Id: ip.c,v 1.5 1999/03/29 08:20:32 brian Exp $
  *
  *	TODO:
  *		o Return ICMP message for filterd packet
  *		  and optionaly record it into log.
  */
-#include <sys/types.h>
+#include <sys/param.h>
 #ifdef __OpenBSD__
 #include <sys/socket.h>
 #endif
@@ -66,6 +66,9 @@
 #include "ccp.h"
 #include "link.h"
 #include "mp.h"
+#ifndef NORADIUS
+#include "radius.h"
+#endif
 #include "bundle.h"
 #include "vjcomp.h"
 #include "tun.h"
@@ -160,10 +163,14 @@ FilterCheck(struct ip *pip, struct filter *filter)
 		estab = (th->th_flags & TH_ACK);
 		syn = (th->th_flags & TH_SYN);
 		finrst = (th->th_flags & (TH_FIN|TH_RST));
-                if (log_IsKept(LogDEBUG) && !estab)
-		  snprintf(dbuff, sizeof dbuff,
-                           "flags = %02x, sport = %d, dport = %d",
-                           th->th_flags, sport, dport);
+                if (log_IsKept(LogDEBUG)) {
+                  if (!estab)
+		    snprintf(dbuff, sizeof dbuff,
+                             "flags = %02x, sport = %d, dport = %d",
+                             th->th_flags, sport, dport);
+                  else
+                    *dbuff = '\0';
+                }
 		break;
 	      default:
 		return (A_DENY);       /* We'll block unknown type of packet */
@@ -546,7 +553,7 @@ ip_FlushPacket(struct link *l, struct bundle *bundle)
 
   for (queue = &ipcp->Queue[PRI_FAST]; queue >= ipcp->Queue; queue--)
     if (queue->top) {
-      bp = mbuf_Dequeue(queue);
+      bp = mbuf_Contiguous(mbuf_Dequeue(queue));
       if (bp) {
         struct ip *pip = (struct ip *)MBUF_CTOP(bp);
 

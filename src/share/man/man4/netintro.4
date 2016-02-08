@@ -1,4 +1,4 @@
-.\"	$OpenBSD: netintro.4,v 1.8 1998/09/05 17:41:49 deraadt Exp $
+.\"	$OpenBSD: netintro.4,v 1.11 1999/02/26 19:56:32 jason Exp $
 .\"	$NetBSD: netintro.4,v 1.4 1995/10/19 08:03:40 jtc Exp $
 .\"
 .\" Copyright (c) 1983, 1990, 1991, 1993
@@ -309,10 +309,11 @@ will set
 to the size that
 .Ar ifc_buf
 needs to be to fit the entire configuration list and not
-fill in the other paramaters.
+fill in the other parameters.
 This is useful for determining the exact size that
 .Ar ifc_buf
-needs to be in advance.
+needs to be in advance.  Note, however, that this is an extension
+that not all operating systems support.
 .El
 .Bd -literal
 /*
@@ -347,8 +348,9 @@ struct ifconf {
 .Xr socket 2 ,
 .Xr ioctl 2 ,
 .Xr intro 4 ,
-.Xr config 8 ,
+.Xr bridge 4 ,
 .Xr ifmedia 4 ,
+.Xr config 8 ,
 .Xr routed 8
 .Sh HISTORY
 The

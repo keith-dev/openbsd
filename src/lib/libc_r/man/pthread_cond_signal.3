@@ -27,7 +27,7 @@
 .\"
 .Dd July 28, 1998
 .Dt PTHREAD_COND_SIGNAL 3
-.Os BSD 4
+.Os
 .Sh NAME
 .Nm pthread_cond_signal
 .Nd unblock a thread waiting for a condition variable
@@ -56,12 +56,11 @@ is invalid.
 .El
 .Pp
 .Sh SEE ALSO
-.Xr pthreads 3 ,
-.Xr pthread_cond_init 3 ,
+.Xr pthread_cond_broadcast 3 ,
 .Xr pthread_cond_destroy 3 ,
-.Xr pthread_cond_wait 3 ,
+.Xr pthread_cond_init 3 ,
 .Xr pthread_cond_timedwait 3 ,
-.Xr pthread_cond_broadcast 3
+.Xr pthread_cond_wait 3
 .Sh STANDARDS
 .Fn pthread_cond_signal
 conforms to ISO/IEC 9945-1 ANSI/IEEE

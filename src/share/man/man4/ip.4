@@ -46,7 +46,7 @@
 .Fn socket AF_INET SOCK_RAW proto
 .Sh DESCRIPTION
 .Tn IP 
-is the transport layer protocol used
+is the network layer protocol used
 by the Internet protocol family.
 Options may be set at the
 .Tn IP
@@ -365,7 +365,7 @@ an internal data structure;
 when an attempt is made to create a 
 socket with a network address for which no network interface
 exists.
-.It Bq Er EACESS
+.It Bq Er EACCES
 when an attempt is made to create
 a raw IP socket by a non-privileged process.
 .El
@@ -387,7 +387,7 @@ or longer than the option buffer provided.
 .Xr getsockopt 2 ,
 .Xr send 2 ,
 .Xr recv 2 ,
-.Xr intro 4 ,
+.Xr netintro 4 ,
 .Xr icmp 4 ,
 .Xr inet 4
 .Sh HISTORY

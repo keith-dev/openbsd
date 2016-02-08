@@ -1,4 +1,4 @@
-.\"	$OpenBSD: sysctl.8,v 1.19 1998/06/15 17:56:21 mickey Exp $
+.\"	$OpenBSD: sysctl.8,v 1.24 1999/04/11 19:41:40 niklas Exp $
 .\"	$NetBSD: sysctl.8,v 1.4 1995/09/30 07:12:49 thorpej Exp $
 .\"
 .\" Copyright (c) 1993
@@ -146,14 +146,18 @@ privilege can change the value.
 .It net.inet.ip.forwarding	integer	yes
 .It net.inet.ip.redirect	integer	yes
 .It net.inet.ip.ttl	integer	yes
+.\" .It net.inet.ip.mtu	integer	yes
 .It net.inet.ip.sourceroute	integer	yes
 .It net.inet.ip.directed-broadcast	integer	yes
 .It net.inet.ip.portfirst	integer	yes
 .It net.inet.ip.portlast	integer	yes
 .It net.inet.ip.porthifirst	integer	yes
 .It net.inet.ip.porthilast	integer	yes
-.It net.inet.ip.portfirst	integer	yes
+.It net.inet.ip.maxqueue	integer	yes
+.It net.inet.ip.encdebug	integer	yes
 .It net.inet.icmp.maskrepl	integer	yes
+.It net.inet.icmp.bmcastecho	integer	yes
+.It net.inet.ip4.allow	integer	yes
 .It net.inet.tcp.rfc1323	integer	yes
 .It net.inet.tcp.keepinittime	integer	yes
 .It net.inet.tcp.keepidle	integer	yes
@@ -162,9 +166,10 @@ privilege can change the value.
 .It net.inet.tcp.baddynamic	array	yes
 .It net.inet.udp.checksum	integer	yes
 .It net.inet.udp.baddynamic	array	yes
+.It net.inet.esp.enable	integer	yes
+.It net.inet.ah.enable	integer	yes
 .It net.ipx.ipx.recvspace	integer	yes
 .It net.ipx.ipx.sendspace	integer	yes
-.It net.ipsec.encap.encdebug	integer	yes
 .It debug.syncprt	integer	yes
 .It debug.busyprt	integer	yes
 .It debug.doclusterread	integer	yes
@@ -180,6 +185,7 @@ privilege can change the value.
 .It hw.usermem	integer	no
 .It hw.pagesize	integer	no
 .It machdep.console_device	dev_t	no
+.It machdep.apmwarn	integer	yes (i386 only)
 .It user.cs_path	string	no
 .It user.bc_base_max	integer	no
 .It user.bc_dim_max	integer	no

@@ -1,4 +1,4 @@
-/*	$OpenBSD: inet.c,v 1.24 1998/03/18 02:43:04 angelos Exp $	*/
+/*	$OpenBSD: inet.c,v 1.33 1999/04/11 19:41:40 niklas Exp $	*/
 /*	$NetBSD: inet.c,v 1.14 1995/10/03 21:42:37 thorpej Exp $	*/
 
 /*
@@ -38,7 +38,7 @@
 #if 0
 static char sccsid[] = "from: @(#)inet.c	8.4 (Berkeley) 4/20/94";
 #else
-static char *rcsid = "$OpenBSD: inet.c,v 1.24 1998/03/18 02:43:04 angelos Exp $";
+static char *rcsid = "$OpenBSD: inet.c,v 1.33 1999/04/11 19:41:40 niklas Exp $";
 #endif
 #endif /* not lint */
 
@@ -68,6 +68,7 @@ static char *rcsid = "$OpenBSD: inet.c,v 1.24 1998/03/18 02:43:04 angelos Exp $"
 #include <netinet/tcp_debug.h>
 #include <netinet/udp.h>
 #include <netinet/udp_var.h>
+#include <netinet/ip_ipsp.h>
 #include <netinet/ip_ah.h>
 #include <netinet/ip_esp.h>
 #include <netinet/ip_ip4.h>
@@ -140,10 +141,10 @@ protopr(off, name)
 				printf(" (including servers)");
 			putchar('\n');
 			if (Aflag)
-				printf("%-*.*s %-5.5s %-6.6s %-6.6s  %-*.*s %-*.*s %s\n",
+				printf("%-*.*s %-5.5s %-6.6s %-6.6s  %-18.18s %-18.18s %s\n",
 				    PLEN, PLEN, "PCB", "Proto", "Recv-Q",
-				    "Send-Q", PLEN, PLEN, "Local Address",
-				    PLEN, PLEN, "Foreign Address", "(state)");
+				    "Send-Q", "Local Address",
+				    "Foreign Address", "(state)");
 			else
 				printf("%-5.5s %-6.6s %-6.6s  %-22.22s %-22.22s %s\n",
 				    "Proto", "Recv-Q", "Send-Q",
@@ -197,6 +198,7 @@ tcp_stats(off, name)
 		"\t\t%ld data packet%s (%qd byte%s)\n");
 	p2(tcps_sndrexmitpack, tcps_sndrexmitbyte,
 		"\t\t%ld data packet%s (%qd byte%s) retransmitted\n");
+	p(tcps_sndrexmitfast, "\t\t%qd fast retransmitted packet%s\n");
 	p2(tcps_sndacks, tcps_delack,
 		"\t\t%ld ack-only packet%s (%ld delayed)\n");
 	p(tcps_sndurg, "\t\t%ld URG only packet%s\n");
@@ -224,6 +226,7 @@ tcp_stats(off, name)
 	p(tcps_rcvbadsum, "\t\t%ld discarded for bad checksum%s\n");
 	p(tcps_rcvbadoff, "\t\t%ld discarded for bad header offset field%s\n");
 	p(tcps_rcvshort, "\t\t%ld discarded because packet too short\n");
+	p(tcps_rcvnosec, "\t\t%ld discarded for missing IPSec protection\n");
 	p(tcps_connattempt, "\t%ld connection request%s\n");
 	p(tcps_accepts, "\t%ld connection accept%s\n");
 	p(tcps_connects, "\t%ld connection%s established (including accepts)\n");
@@ -268,8 +271,10 @@ udp_stats(off, name)
 	p(udps_hdrops, "\t%lu with incomplete header\n");
 	p(udps_badlen, "\t%lu with bad data length field\n");
 	p(udps_badsum, "\t%lu with bad checksum\n");
+	p(udps_nosum, "\t%lu with no checksum\n");
 	p(udps_noport, "\t%lu dropped due to no socket\n");
 	p(udps_noportbcast, "\t%lu broadcast/multicast datagram%s dropped due to no socket\n");
+	p(udps_nosec, "\t%lu dropped due to missing IPSec protection\n");
 	p(udps_fullsock, "\t%lu dropped due to full socket buffers\n");
 	delivered = udpstat.udps_ipackets -
 		    udpstat.udps_hdrops -
@@ -328,6 +333,7 @@ ip_stats(off, name)
 	p(ips_fragmented, "\t%lu output datagram%s fragmented\n");
 	p(ips_ofragments, "\t%lu fragment%s created\n");
 	p(ips_cantfrag, "\t%lu datagram%s that can't be fragmented\n");
+	p(ips_rcvmemdrop, "\t%lu fragment floods\n");
 #undef p
 }
 
@@ -618,6 +624,7 @@ ah_stats(off, name)
 	p(ahs_input, "\t%u input AH packets\n");
 	p(ahs_output, "\t%u output AH packets\n");
         p(ahs_hdrops, "\t%u packet%s shorter than header shows\n");
+        p(ahs_pdrops, "\t%u packet%s dropped due to policy\n");
         p(ahs_notdb, "\t%u packet%s for which no TDB was found\n");
         p(ahs_badkcr, "\t%u input packet%s that failed to be processed\n");
         p(ahs_badauth, "\t%u packet%s that failed verification received\n");
@@ -627,6 +634,7 @@ ah_stats(off, name)
         p(ahs_replay, "\t%u possibly replayed packet%s received\n");
         p(ahs_badauthl, "\t%u packet%s with bad authenticator length received\n");
 	p(ahs_invalid, "\t%u packet%s attempted to use an invalid tdb\n");
+	p(ahs_toobig, "\t%u packet%s got larger than max IP packet size\n");
 	p(ahs_ibytes, "\t%qu input byte%s\n");
 	p(ahs_obytes, "\t%qu output byte%s\n");
 
@@ -655,6 +663,7 @@ esp_stats(off, name)
 	p(esps_input, "\t%u input ESP packets\n");
 	p(esps_output, "\t%u output ESP packets\n");
         p(esps_hdrops, "\t%u packet%s shorter than header shows\n");
+        p(esps_pdrops, "\t%u packet%s dropped due to policy\n");
         p(esps_notdb, "\t%u packet%s for which no TDB was found\n");
         p(esps_badkcr, "\t%u input packet%s that failed to be processed\n");
         p(esps_badauth, "\t%u packet%s that failed verification received\n");
@@ -664,6 +673,7 @@ esp_stats(off, name)
         p(esps_replay, "\t%u possibly replayed packet%s received\n"); 
         p(esps_badilen, "\t%u packet%s with payload not a multiple of 8 received\n");
 	p(esps_invalid, "\t%u packet%s attempted to use an invalid tdb\n");
+	p(esps_toobig, "\t%u packet%s got larger than max IP packet size\n");
 	p(esps_ibytes, "\t%qu input byte%s\n");
 	p(esps_obytes, "\t%qu output byte%s\n");
 
@@ -691,6 +701,8 @@ ip4_stats(off, name)
         p(ip4s_ipackets, "\t%u total input packet%s\n");
         p(ip4s_opackets, "\t%u total output packet%s\n");
         p(ip4s_hdrops, "\t%u packet%s shorter than header shows\n");
+        p(ip4s_pdrops, "\t%u packet%s dropped due to policy\n");
+        p(ip4s_spoof, "\t%u packet%s with possibly spoofed local addresses\n");
         p(ip4s_notip4, "\t%u packet%s with internal header not IPv4 received\n");
         p(ip4s_qfull, "\t%u packet%s were dropped due to full output queue\n");
 	p(ip4s_ibytes, "\t%qu input byte%s\n");

@@ -5,11 +5,97 @@ CONFFILES= \
 	conf/srm.conf-dist conf/access.conf-dist conf/httpd.conf-dist \
 	conf/mime.types conf/access.conf conf/httpd.conf conf/srm.conf 
 HTDOCS= \
-	htdocs/apache_pb.gif htdocs/index.html htdocs/openbsdpower.gif
+	htdocs/apache_pb.gif htdocs/index.html htdocs/openbsdpower.gif \
+	htdocs/blowfish.jpg htdocs/bsd_small.gif htdocs/lock.gif \
+	htdocs/logo23.jpg htdocs/logo24.jpg htdocs/smalltitle.gif 
 CGIFILES= \
 	cgi-bin/printenv cgi-bin/test-cgi	
 MANUALFILES= \
-	manual/mod/mod_cgi.html  \
+	manual/images/custom_errordocs.gif \
+	manual/images/home.gif \
+	manual/images/index.gif \
+	manual/images/mod_rewrite_fig1.fig \
+	manual/images/mod_rewrite_fig1.gif \
+	manual/images/mod_rewrite_fig2.fig \
+	manual/images/mod_rewrite_fig2.gif \
+	manual/images/sub.gif \
+	manual/images/apache_pb.gif \
+	manual/images/mod_ssl_sb.gif \
+	manual/images/ssleay.gif \
+	manual/LICENSE \
+	manual/bind.html \
+	manual/cgi_path.html \
+	manual/content-negotiation.html \
+	manual/custom-error.html \
+	manual/dns-caveats.html \
+	manual/dso.html \
+	manual/ebcdic.html \
+	manual/env.html \
+	manual/footer.html \
+	manual/handler.html \
+	manual/header.html \
+	manual/index.html \
+	manual/install.html \
+	manual/install-tpf.html \
+	manual/invoking.html \
+	manual/keepalive.html \
+	manual/location.html \
+	manual/man-template.html \
+	manual/multilogs.html \
+	manual/new_features_1_0.html \
+	manual/new_features_1_1.html \
+	manual/new_features_1_2.html \
+	manual/new_features_1_3.html \
+	manual/process-model.html \
+	manual/readme-tpf.html \
+	manual/sections.html \
+	manual/sourcereorg.html \
+	manual/stopping.html \
+	manual/suexec_1_2.html \
+	manual/suexec.html \
+	manual/unixware.html \
+	manual/upgrading_to_1_3.html \
+	manual/windows.html \
+	manual/misc/API.html \
+	manual/misc/FAQ.html \
+	manual/misc/HTTP_Features.tsv \
+	manual/misc/client_block_api.html \
+	manual/misc/compat_notes.html \
+	manual/misc/custom_errordocs.html \
+	manual/misc/descriptors.html \
+	manual/misc/fin_wait_2.html \
+	manual/misc/footer.html \
+	manual/misc/header.html \
+	manual/misc/howto.html \
+	manual/misc/index.html \
+	manual/misc/known_client_problems.html \
+	manual/misc/nopgp.html \
+	manual/misc/perf-bsd44.html \
+	manual/misc/perf-dec.html \
+	manual/misc/perf-hp.html \
+	manual/misc/perf-tuning.html \
+	manual/misc/perf.html \
+	manual/misc/security_tips.html \
+	manual/misc/vif-info.html \
+	manual/misc/windoz_keepalive.html \
+	manual/mod/core.html \
+	manual/mod/directive-dict.html \
+	manual/mod/directives.html \
+	manual/mod/footer.html \
+	manual/mod/header.html \
+	manual/mod/index.html \
+	manual/mod/mod_access.html \
+	manual/mod/mod_actions.html \
+	manual/mod/mod_alias.html \
+	manual/mod/mod_asis.html \
+	manual/mod/mod_auth.html \
+	manual/mod/mod_auth_anon.html \
+	manual/mod/mod_auth_db.html \
+	manual/mod/mod_auth_dbm.html \
+	manual/mod/mod_autoindex.html \
+	manual/mod/mod_browser.html \
+	manual/mod/mod_cern_meta.html \
+	manual/mod/mod_cgi.html \
 	manual/mod/mod_cookies.html \
 	manual/mod/mod_digest.html \
 	manual/mod/mod_dir.html \
@@ -40,67 +126,6 @@ MANUALFILES= \
 	manual/mod/mod_unique_id.html \
 	manual/mod/mod_userdir.html \
 	manual/mod/mod_usertrack.html \
-	manual/LICENSE \
-	manual/bind.html \
-	manual/cgi_path.html \
-	manual/content-negotiation.html \
-	manual/custom-error.html \
-	manual/dns-caveats.html \
-	manual/dso.html \
-	manual/ebcdic.html \
-	manual/env.html \
-	manual/footer.html \
-	manual/handler.html \
-	manual/header.html \
-	manual/index.html \
-	manual/install.html \
-	manual/invoking.html \
-	manual/keepalive.html \
-	manual/location.html \
-	manual/man-template.html \
-	manual/multilogs.html \
-	manual/new_features_1_0.html \
-	manual/new_features_1_1.html \
-	manual/new_features_1_2.html \
-	manual/new_features_1_3.html \
-	manual/process-model.html \
-	manual/sections.html \
-	manual/sourcereorg.html \
-	manual/stopping.html \
-	manual/suexec.html \
-	manual/unixware.html \
-	manual/upgrading_to_1_3.html \
-	manual/windows.html \
-	manual/images/custom_errordocs.gif \
-	manual/images/home.gif \
-	manual/images/index.gif \
-	manual/images/mod_rewrite_fig1.fig \
-	manual/images/mod_rewrite_fig1.gif \
-	manual/images/mod_rewrite_fig2.fig \
-	manual/images/mod_rewrite_fig2.gif \
-	manual/images/sub.gif \
-	manual/misc/API.html \
-	manual/misc/FAQ.html \
-	manual/misc/HTTP_Features.tsv \
-	manual/misc/client_block_api.html \
-	manual/misc/compat_notes.html \
-	manual/misc/custom_errordocs.html \
-	manual/misc/descriptors.html \
-	manual/misc/fin_wait_2.html \
-	manual/misc/footer.html \
-	manual/misc/header.html \
-	manual/misc/howto.html \
-	manual/misc/index.html \
-	manual/misc/known_client_problems.html \
-	manual/misc/nopgp.html \
-	manual/misc/perf-bsd44.html \
-	manual/misc/perf-dec.html \
-	manual/misc/perf-hp.html \
-	manual/misc/perf-tuning.html \
-	manual/misc/perf.html \
-	manual/misc/security_tips.html \
-	manual/misc/vif-info.html \
-	manual/misc/windoz_keepalive.html \
 	manual/vhosts/details.html \
 	manual/vhosts/details_1_2.html \
 	manual/vhosts/examples.html \
@@ -112,7 +137,52 @@ MANUALFILES= \
 	manual/vhosts/ip-based.html \
 	manual/vhosts/name-based.html \
 	manual/vhosts/vhosts-in-depth.html \
-	manual/vhosts/virtual-host.html
+	manual/vhosts/virtual-host.html \
+	manual/mod/mod_ssl/index.html \
+	manual/mod/mod_ssl/ssl_compat.gfont000.gif \
+	manual/mod/mod_ssl/ssl_compat.html \
+	manual/mod/mod_ssl/ssl_cover_logo.jpg \
+	manual/mod/mod_ssl/ssl_cover_title.gif \
+	manual/mod/mod_ssl/ssl_faq.gfont000.gif \
+	manual/mod/mod_ssl/ssl_faq.html \
+	manual/mod/mod_ssl/ssl_glossary.html \
+	manual/mod/mod_ssl/ssl_howto.gfont000.gif \
+	manual/mod/mod_ssl/ssl_howto.html \
+	manual/mod/mod_ssl/ssl_intro.gfont000.gif \
+	manual/mod/mod_ssl/ssl_intro.html \
+	manual/mod/mod_ssl/ssl_intro_fig1.gif \
+	manual/mod/mod_ssl/ssl_intro_fig2.gif \
+	manual/mod/mod_ssl/ssl_intro_fig3.gif \
+	manual/mod/mod_ssl/ssl_overview.gfont000.gif \
+	manual/mod/mod_ssl/ssl_overview.html \
+	manual/mod/mod_ssl/ssl_overview_fig1.gif \
+	manual/mod/mod_ssl/ssl_reference.gfont000.gif \
+	manual/mod/mod_ssl/ssl_reference.html \
+	manual/mod/mod_ssl/ssl_template.head-chapter.gif \
+	manual/mod/mod_ssl/ssl_template.head-num-1.gif \
+	manual/mod/mod_ssl/ssl_template.head-num-2.gif \
+	manual/mod/mod_ssl/ssl_template.head-num-3.gif \
+	manual/mod/mod_ssl/ssl_template.head-num-4.gif \
+	manual/mod/mod_ssl/ssl_template.head-num-5.gif \
+	manual/mod/mod_ssl/ssl_template.head-num-6.gif \
+	manual/mod/mod_ssl/ssl_template.head-num-7.gif \
+	manual/mod/mod_ssl/ssl_template.imgdot-1x1-000000.gif \
+	manual/mod/mod_ssl/ssl_template.imgdot-1x1-transp.gif \
+	manual/mod/mod_ssl/ssl_template.navbut-next-n.gif \
+	manual/mod/mod_ssl/ssl_template.navbut-next-s.gif \
+	manual/mod/mod_ssl/ssl_template.navbut-prev-n.gif \
+	manual/mod/mod_ssl/ssl_template.navbut-prev-s.gif \
+	manual/mod/mod_ssl/ssl_template.title-abstract.gif \
+	manual/mod/mod_ssl/ssl_template.title-compat.gif \
+	manual/mod/mod_ssl/ssl_template.title-faq.gif \
+	manual/mod/mod_ssl/ssl_template.title-gloss.gif \
+	manual/mod/mod_ssl/ssl_template.title-howto.gif \
+	manual/mod/mod_ssl/ssl_template.title-intro.gif \
+	manual/mod/mod_ssl/ssl_template.title-over.gif \
+	manual/mod/mod_ssl/ssl_template.title-preface.gif \
+	manual/mod/mod_ssl/ssl_template.title-ref.gif \
+	manual/mod/mod_ssl/ssl_template.title-toc.gif \
+	manual/mod/mod_ssl/ssl_template.title-tutor.gif
 
 ICONFILES= \
 	icons/README icons/c.gif icons/hand.right.gif icons/pie2.gif	\
@@ -138,7 +208,23 @@ ICONFILES= \
 	icons/box2.gif icons/generic.gif icons/pdf.gif			\
 	icons/script.gif icons/broken.gif icons/generic.red.gif		\
 	icons/pie0.gif icons/sound1.gif icons/burst.gif			\
-	icons/generic.sec.gif icons/pie1.gif icons/sound2.gif
+	icons/generic.sec.gif icons/pie1.gif icons/sound2.gif		\
+	icons/small/uu.gif icons/small/back.gif icons/small/binary.gif	\
+	icons/small/binhex.gif icons/small/blank.gif 			\
+	icons/small/broken.gif icons/small/burst.gif 			\
+	icons/small/comp1.gif icons/small/comp2.gif 			\
+	icons/small/compressed.gif icons/small/continued.gif		\
+	icons/small/dir.gif icons/small/dir2.gif 			\
+	icons/small/forward.gif icons/small/generic.gif			\
+	icons/small/generic2.gif icons/small/generic3.gif		\
+	icons/small/image.gif icons/small/image2.gif 			\
+	icons/small/index.gif icons/small/key.gif icons/small/movie.gif \
+	icons/small/rainbow.gif icons/small/sound.gif			\
+	icons/small/sound2.gif icons/small/tar.gif icons/small/text.gif \
+	icons/small/transfer.gif icons/small/unknown.gif		\
+	icons/small/README.txt
+
+
 
 distribution:
 	@-for i in ${CONFFILES}; do \
@@ -174,4 +260,7 @@ distribution:
 
 .include <bsd.obj.mk>
 .include <bsd.subdir.mk>
+.include <bsd.own.mk>	# for NOMAN if it's there
+.ifndef NOMAN
 .include <bsd.man.mk>
+.endif

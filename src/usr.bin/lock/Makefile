@@ -1,4 +1,4 @@
-#	$OpenBSD: Makefile,v 1.6 1997/04/19 21:26:26 millert Exp $
+#	$OpenBSD: Makefile,v 1.8 1999/03/06 20:27:39 millert Exp $
 
 PROG=	lock
 BINOWN= root

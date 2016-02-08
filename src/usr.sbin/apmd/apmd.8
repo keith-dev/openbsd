@@ -24,7 +24,7 @@
 .\" ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 .\" POSSIBILITY OF SUCH DAMAGE.
 .\"
-.\"	$Id: apmd.8,v 1.5 1998/07/21 04:06:29 marc Exp $
+.\"	$Id: apmd.8,v 1.8 1999/02/23 04:17:34 marc Exp $
 .\"
 .Dd March 24, 1996
 .Dt APMD 8
@@ -33,7 +33,7 @@
 .Nm apmd
 .Nd Advanced Power Management monitor daemon
 .Sh SYNOPSIS
-.Nm
+.Nm apmd
 .Op Fl dsaqepm
 .Op Fl t Ar seconds
 .Op Fl S Ar sockname
@@ -126,7 +126,15 @@ unconditionally enables power status messages.
 causes power status messages to be displayed only when the
 battery life expectancy changes.  This minimized message output
 for those devices that are constantly updating the estimated time
-remaining based upon current processor load.
+remaining based upon current processor load.  However, in no case
+will power status messages be displayed until the battery life
+goes below the percentage in the
+.Xr sysctl 8
+state variable
+.Dv machdep.apmwarn .
+Setting
+.Dv machdep.apmwarn
+to zero disables all warnings.
 .Pp
 When a client requests a suspend or stand-by mode,
 .Nm
@@ -188,7 +196,7 @@ flag may be used to specify an alternate device file name.
 .Xr apm 4 ,
 .Xr speaker 4 ,
 .Xr apm 8 ,
-.Xr syslogd 8 .
+.Xr syslogd 8
 .Sh REFERENCES
 Advanced Power Management (APM) BIOS Interface Specification (revision
 1.1), Intel Corporation and Microsoft Corporation.

@@ -1,7 +1,8 @@
-/*	$OpenBSD: goodpath.c,v 1.6 1998/09/15 02:42:44 millert Exp $	*/
+/*	$OpenBSD: goodpath.c,v 1.9 1999/03/29 20:29:03 millert Exp $	*/
 
 /*
- *  CU sudo version 1.5.6
+ *  CU sudo version 1.5.9
+ *  Copyright (c) 1996, 1998, 1999 Todd C. Miller <Todd.Miller@courtesan.com>
  *
  *  This program is free software; you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License as published by
@@ -27,12 +28,8 @@
  *  if the path is stat(2)'able, a regular file, and executable by
  *  root.  The string's size should be <= MAXPATHLEN.
  *
- *  Todd C. Miller (millert@colorado.edu) Sat Mar 25 21:58:17 MST 1995
+ *  Todd C. Miller <Todd.Miller@courtesan.com> Sat Mar 25 21:58:17 MST 1995
  */
-
-#ifndef lint
-static char rcsid[] = "$From: goodpath.c,v 1.22 1998/04/06 03:35:35 millert Exp $";
-#endif /* lint */
 
 #include "config.h"
 
@@ -53,12 +50,14 @@ static char rcsid[] = "$From: goodpath.c,v 1.22 1998/04/06 03:35:35 millert Exp 
 #include <netinet/in.h>
 
 #include "sudo.h"
-#include <options.h>
 
 #ifndef STDC_HEADERS
 extern int stat		__P((const char *, struct stat *));
 #endif /* !STDC_HEADERS */
 
+#ifndef lint
+static const char rcsid[] = "$Sudo: goodpath.c,v 1.31 1999/03/29 04:05:08 millert Exp $";
+#endif /* lint */
 
 /******************************************************************
  *

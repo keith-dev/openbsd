@@ -13,75 +13,72 @@
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
+#include <unistd.h>
+#include <string.h>
+#include "test.h"
 
 struct sockaddr_in a_sout;
 
 #define MESSAGE5 "This should be message #5"
 #define MESSAGE6 "This should be message #6"
 
-void * sock_connect(void* arg)
+void * 
+sock_connect(arg)
+	void *arg;
 {
 	char buf[1024];
-	int fd, tmp;
+	int fd;
 	short port;
 
 	port = 3276;
  	a_sout.sin_family = AF_INET;
  	a_sout.sin_port = htons(port);
-	a_sout.sin_addr.s_addr = htonl(0x7f000001); /* loopback */
+	a_sout.sin_addr.s_addr = htonl(INADDR_LOOPBACK); /* loopback */
 
-	if ((fd = socket(AF_INET, SOCK_STREAM, 0)) < 0) {
-		perror("Error: sock_connect:socket()");
-		exit(1);
-	}
+	CHECKe(fd = socket(AF_INET, SOCK_STREAM, 0));
 
-	printf("This should be message #2\n");
-	if (connect(fd, (struct sockaddr *) &a_sout, sizeof(a_sout)) < 0) {
-		perror("Error: sock_connect:connect()");
-		exit(1);
-	}
-	close(fd); 
+	printf("%d: This should be message #2\n", getpid());
+
+	CHECKe(connect(fd, (struct sockaddr *) &a_sout, sizeof(a_sout))); 
+	CHECKe(close(fd)); 
 		
-	if ((fd = socket(AF_INET, SOCK_STREAM, 0)) < 0) {
-		perror("Error: sock_connect:socket()");
-		exit(1);
-	}
+	CHECKe(fd = socket(AF_INET, SOCK_STREAM, 0));
 
-	printf("This should be message #3\n");
+	printf("%d: This should be message #3\n", getpid());
 
-	if (connect(fd, (struct sockaddr *) &a_sout, sizeof(a_sout)) < 0) {
-		perror("Error: sock_connect:connect()");
-		exit(1);
-	}
+	CHECKe(connect(fd, (struct sockaddr *) &a_sout, sizeof(a_sout)));
 
 	/* Ensure sock_read runs again */
 
-	if ((tmp = read(fd, buf, 1024)) <= 0) {
-		printf("Error: sock_connect:read() == %d %s\n", tmp, strerror(errno));
-		exit(1);
-	}
-	write(fd, MESSAGE6, sizeof(MESSAGE6));
-	printf("%s\n", buf);
-	close(fd);
+	CHECKe(read(fd, buf, 1024));
+	CHECKe(write(fd, MESSAGE6, sizeof(MESSAGE6)));
+
+	printf("%d: %s\n", getpid(), buf);
+
+	CHECKe(close(fd));
+	return (NULL);
 }
 
-main(int argc, char **argv)
+int
+main(argc, argv)
+	int argc;
+	char **argv;
 {
 	pthread_t thread;
-	int i;
 
 	if (argv[1] && (!strcmp(argv[1], "fork okay"))) {
 		sleep(1);
 		setbuf(stdout, NULL);
 		setbuf(stderr, NULL);
 
-		if (pthread_create(&thread, NULL, sock_connect, (void *)0xdeadbeaf)) {
-			perror("Error: main:pthread_create(sock_connect)");
-			exit(1);
-		}
- 		pthread_exit(NULL);
+		CHECKr(pthread_create(&thread, NULL, sock_connect, 
+		    (void *)0xdeadbeaf));
+		CHECKr(pthread_join(thread, NULL));
+		SUCCEED;
+	} else {
+		fprintf(stderr, "test_sock_2a needs to be exec'ed from "
+		    "test_sock_2.\n");
+		fprintf(stderr, "It is not a stand alone test.\n");
+		PANIC("usage");
 	}
-	printf("test_sock_2a needs to be execed from test_sock_2.\n");
-	printf("It is not a stand alone test.\n");
-	exit(1);
 }

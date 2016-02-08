@@ -29,6 +29,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
+ * $OpenBSD: uthread_mattr_kind_np.c,v 1.3 1999/01/06 05:29:24 d Exp $
  */
 #include <errno.h>
 #ifdef _THREAD_SAFE
@@ -58,6 +59,20 @@ pthread_mutexattr_getkind_np(pthread_mutexattr_t attr)
 		ret = -1;
 	} else {
 		ret = attr->m_type;
+	}
+	return(ret);
+}
+
+int
+pthread_mutexattr_settype(pthread_mutexattr_t *attr, int type)
+{
+	int	ret;
+	if (attr == NULL || *attr == NULL || type >= MUTEX_TYPE_MAX) {
+		errno = EINVAL;
+		ret = -1;
+	} else {
+		(*attr)->m_type = type;
+		ret = 0;
 	}
 	return(ret);
 }

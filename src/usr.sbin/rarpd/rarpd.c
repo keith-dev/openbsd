@@ -1,4 +1,4 @@
-/*	$OpenBSD: rarpd.c,v 1.23 1998/08/15 17:25:32 deraadt Exp $ */
+/*	$OpenBSD: rarpd.c,v 1.25 1999/02/04 00:23:48 millert Exp $ */
 /*	$NetBSD: rarpd.c,v 1.25 1998/04/23 02:48:33 mrg Exp $	*/
 
 /*
@@ -28,7 +28,7 @@ char    copyright[] =
 #endif				/* not lint */
 
 #ifndef lint
-static char rcsid[] = "$OpenBSD: rarpd.c,v 1.23 1998/08/15 17:25:32 deraadt Exp $";
+static char rcsid[] = "$OpenBSD: rarpd.c,v 1.25 1999/02/04 00:23:48 millert Exp $";
 #endif
 
 
@@ -585,16 +585,24 @@ rarp_process(ii, pkt)
 	u_char *pkt;
 {
 	struct ether_header *ep;
+	struct ether_addr *ea;
 	struct hostent *hp;
 	u_int32_t  target_ipaddr;
 	char    ename[MAXHOSTNAMELEN];
 	struct	in_addr in;
 
 	ep = (struct ether_header *) pkt;
+	ea = (struct ether_addr *) &ep->ether_shost;
 
-	if (ether_ntohost(ename, (struct ether_addr *)&ep->ether_shost) != 0 ||
-	    (hp = gethostbyname(ename)) == 0)
+	debug(ether_ntoa(ea));
+	if (ether_ntohost(ename, ea) != 0) {
+		debug("ether_ntohost failed");
 		return;
+	}
+	if ((hp = gethostbyname(ename)) == 0) {
+		debug("gethostbyname (%s) failed", ename);
+		return;
+	}
 
 	/* Choose correct address from list. */
 	if (hp->h_addrtype != AF_INET) {
@@ -614,6 +622,7 @@ rarp_process(ii, pkt)
 	if (rarp_bootable(htonl(target_ipaddr)))
 #endif
 		rarp_reply(ii, ep, target_ipaddr, hp);
+	debug("reply sent");
 }
 /*
  * Lookup the ethernet address of the interface attached to the BPF

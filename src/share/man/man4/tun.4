@@ -1,4 +1,4 @@
-.\"	$OpenBSD: tun.4,v 1.5 1998/09/06 22:23:20 aaron Exp $
+.\"	$OpenBSD: tun.4,v 1.8 1999/03/01 05:41:13 aaron Exp $
 .Dd March 10, 1996
 .Dt TUN 4
 .Os OpenBSD 1.2
@@ -334,11 +334,8 @@ or MTU, for
 .Ql m .
 (The MTU must not be less than 1; attempts to set it so return
 .Er EIO . )
-.Pp
-This interface is useful for command-line reconfiguration, such as
-setting the interface type at boot time, with 
 .Sh SEE ALSO
-.Xr intro 4 ,
+.Xr netintro 4 ,
 .Xr inet 4
 .Sh BUGS
 The
@@ -364,5 +361,5 @@ bit set.)
 Very old versions of the tunnel device did not include the address
 family at the start of the packet.  More recent versions passed the
 address family as a single byte, but this caused problems with bpf,
-hence the currect version passes a u_int32_t of address family.
+hence the current version passes a u_int32_t of address family.
 

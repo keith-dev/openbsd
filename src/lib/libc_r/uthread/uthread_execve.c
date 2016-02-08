@@ -29,6 +29,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
+ * $OpenBSD: uthread_execve.c,v 1.3 1999/01/06 05:29:23 d Exp $
  */
 #include <errno.h>
 #include <fcntl.h>
@@ -97,7 +98,7 @@ execve(const char *name, char *const * argv, char *const * envp)
 		}
 	}
 
-	/* Execute the process: */
+	/* Set the signal mask: */
 	_thread_sys_sigprocmask(SIG_SETMASK, &_thread_run->sigmask, NULL);
 
 	/* Execute the process: */

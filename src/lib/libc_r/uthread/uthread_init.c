@@ -29,26 +29,31 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
+ * $OpenBSD: uthread_init.c,v 1.8 1999/01/17 23:57:27 d Exp $
  */
 
 #include <errno.h>
 #include <stdlib.h>
 #include <string.h>
 #include <fcntl.h>
+#include <paths.h>
 #include <unistd.h>
 #include <sys/time.h>
-#include <paths.h>
+#include <sys/ttycom.h>
 #include <sys/param.h>
+#include <sys/ioctl.h>
 #include <signal.h>
 #ifdef _THREAD_SAFE
 #include <machine/reg.h>
 #include <pthread.h>
+#include <pthread_np.h>
 #include "pthread_private.h"
 
 /* Allocate space for global thread variables here: */
 
-struct pthread		  _thread_kern_thread;
-struct pthread * volatile _thread_run = &_thread_kern_thread;
+static struct pthread	  kern_thread;
+struct pthread * volatile _thread_kern_threadp = &kern_thread;
+struct pthread * volatile _thread_run = &kern_thread;
 struct pthread * volatile _thread_single = NULL;
 struct pthread * volatile _thread_link_list = NULL;
 int             	  _thread_kern_pipe[2] = { -1, -1 };
@@ -78,7 +83,12 @@ struct pthread_cond_attr pthread_condattr_default = {
 int			  _pthread_stdio_flags[3];
 struct fd_table_entry **  _thread_fd_table = NULL;
 int    			  _thread_dtablesize = NOFILE_MAX;
+pthread_mutex_t		  _gc_mutex = NULL;
+pthread_cond_t		  _gc_cond = NULL;
 struct  sigaction 	  _thread_sigact[NSIG];
+
+/* Automatic init module. */
+extern int _thread_autoinit_dummy_decl;
 
 #ifdef GCC_2_8_MADE_THREAD_AWARE
 /* see src/gnu/usr.bin/gcc/libgcc2.c */
@@ -112,6 +122,7 @@ static void ***dynamic_allocator_handler_fn()
 void
 _thread_init(void)
 {
+	int		fd;
 	int             flags;
 	int             i;
 	struct sigaction act;
@@ -121,33 +132,30 @@ _thread_init(void)
 		/* Only initialise the threaded application once. */
 		return;
 
-#ifdef __FreeBSD__
 	/*
 	 * Check for the special case of this process running as
 	 * or in place of init as pid = 1:
 	 */
 	if (getpid() == 1) {
-		int		fd;
 		/*
 		 * Setup a new session for this process which is
 		 * assumed to be running as root.
 		 */
-		if (setsid() == -1)
+    		if (setsid() == -1)
 			PANIC("Can't set session ID");
-		if (revoke(_PATH_CONSOLE) != 0)
+    		if (revoke(_PATH_CONSOLE) != 0)
 			PANIC("Can't revoke console");
-		if ((fd = _thread_sys_open(_PATH_CONSOLE, O_RDWR)) < 0)
+    		if ((fd = _thread_sys_open(_PATH_CONSOLE, O_RDWR)) < 0)
 			PANIC("Can't open console");
-		if (setlogin("root") == -1)
+    		if (setlogin("root") == -1)
 			PANIC("Can't set login to root");
-		if (_thread_sys_ioctl(fd,TIOCSCTTY, (char *) NULL) == -1)
+    		if (_thread_sys_ioctl(fd,TIOCSCTTY, (char *) NULL) == -1)
 			PANIC("Can't set controlling terminal");
-		if (_thread_sys_dup2(fd,0) == -1 ||
-		    _thread_sys_dup2(fd,1) == -1 ||
-		    _thread_sys_dup2(fd,2) == -1)
+    		if (_thread_sys_dup2(fd,0) == -1 ||
+    		    _thread_sys_dup2(fd,1) == -1 ||
+    		    _thread_sys_dup2(fd,2) == -1)
 			PANIC("Can't dup2");
 	}
-#endif __FreeBSD__
 
 	/* Get the standard I/O flags before messing with them : */
 	for (i = 0; i < 3; i++)
@@ -181,7 +189,7 @@ _thread_init(void)
 	/* Make the write pipe non-blocking: */
 	else if (_thread_sys_fcntl(_thread_kern_pipe[1], F_SETFL, flags | O_NONBLOCK) == -1) {
 		/* Abort this application: */
-		PANIC("Cannot get kernel write pipe flags");
+		PANIC("Cannot make kernel write pipe non-blocking");
 	}
 	/* Allocate memory for the thread structure of the initial thread: */
 	else if ((_thread_initial = (pthread_t) malloc(sizeof(struct pthread))) == NULL) {
@@ -192,7 +200,11 @@ _thread_init(void)
 		PANIC("Cannot allocate memory for initial thread");
 	} else {
 		/* Zero the global kernel thread structure: */
-		memset(&_thread_kern_thread, 0, sizeof(struct pthread));
+		memset(_thread_kern_threadp, 0, sizeof(struct pthread));
+		_thread_kern_threadp->magic = PTHREAD_MAGIC;
+		pthread_set_name_np(_thread_kern_threadp, "kern");
+
+		/* Zero the initial thread: */
 		memset(_thread_initial, 0, sizeof(struct pthread));
 
 		/* Default the priority of the initial thread: */
@@ -212,6 +224,11 @@ _thread_init(void)
 		_thread_initial->nxt = NULL;
 		_thread_initial->flags = 0;
 		_thread_initial->error = 0;
+		_thread_initial->cancelstate = PTHREAD_CANCEL_ENABLE;
+		_thread_initial->canceltype = PTHREAD_CANCEL_DEFERRED;
+		_thread_initial->magic = PTHREAD_MAGIC;
+		pthread_set_name_np(_thread_initial, "init");
+		_SPINUNLOCK(&_thread_initial->lock);
 		_thread_link_list = _thread_initial;
 		_thread_run = _thread_initial;
 
@@ -287,22 +304,15 @@ _thread_init(void)
 	__set_dynamic_handler_allocator( dynamic_allocator_handler_fn );
 #endif /* GCC_2_8_MADE_THREAD_AWARE */
 
+	/* Initialise the garbage collector mutex and condition variable. */
+	if (pthread_mutex_init(&_gc_mutex,NULL) != 0 ||
+	    pthread_cond_init(&_gc_cond,NULL) != 0)
+		PANIC("Failed to initialise garbage collector mutex or condvar");
+
+	/* Pull in automatic thread unit. */
+	_thread_autoinit_dummy_decl = 1;
+
 	return;
 }
-
-#if 0
-/*
- * Special start up code for NetBSD/Alpha 
- */
-int 
-main(int argc, char *argv[], char *env);
-
-int
-_thread_main(int argc, char *argv[], char *env)
-{
-	_thread_init();
-	return (main(argc, argv, env));
-}
-#endif alpha_special_code
 
 #endif _THREAD_SAFE

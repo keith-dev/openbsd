@@ -1,7 +1,7 @@
-/*	$OpenBSD: show.c,v 1.4 1998/10/13 23:09:51 marc Exp $	*/
+/*	$OpenBSD: show.c,v 1.7 1999/03/08 02:01:02 marc Exp $	*/
 
 #ifndef lint
-static const char *rcsid = "$OpenBSD: show.c,v 1.4 1998/10/13 23:09:51 marc Exp $";
+static const char *rcsid = "$OpenBSD: show.c,v 1.7 1999/03/08 02:01:02 marc Exp $";
 #endif
 
 /*
@@ -39,7 +39,7 @@ typedef struct show_t {
 /* the entries in this table must be ordered the same as pl_ent_t constants */
 static show_t	showv[] = {
 	{	PLIST_FILE,	"%s",		"File: %s" },
-	{	PLIST_CWD,	"@cwd: %s",	"\tCWD to: %s" },
+	{	PLIST_CWD,	"@cwd %s",	"\tCWD to: %s" },
 	{	PLIST_CMD,	"@exec %s",	"\tEXEC '%s'" },
 	{	PLIST_CHMOD,	"@chmod %s",	"\tCHMOD to %s" },
 	{	PLIST_CHOWN,	"@chown %s",	"\tCHOWN to %s" },
@@ -87,21 +87,26 @@ show_index(char *title, char *fname)
 	FILE *fp;
 	char line[MAXINDEXSIZE+2];
 
+	strcpy(line, "???\n");
+
 	if (!Quiet) {
-		printf("%s%s", InfoPrefix, title);
+		printf("%s%-19s", InfoPrefix, title);
 	}
 	if ((fp = fopen(fname, "r")) == (FILE *) NULL) {
-		warnx("show_file: can't open '%s' for reading", fname);
-		return;
-	}
-	if (fgets(line, MAXINDEXSIZE+1, fp)) {
-		if (line[MAXINDEXSIZE-1] != '\n') {
-			line[MAXINDEXSIZE] = '\n';
+		warnx("show_file (%s): can't open '%s' for reading", title, fname);
+	} 
+	else {
+		if (fgets(line, MAXINDEXSIZE+1, fp)) {
+			int  line_length = strlen(line);
+
+			if (line[line_length-1] != '\n') {
+				line[line_length] = '\n';
+				line[line_length+1] = 0;
+			}
 		}
-		line[MAXINDEXSIZE+1] = 0;
-		(void) fputs(line, stdout);
+		(void) fclose(fp);
 	}
-	(void) fclose(fp);
+        (void) fputs(line, stdout);
 }
 
 /* Show a packing list item type.  If type is PLIST_SHOW_ALL, show all */

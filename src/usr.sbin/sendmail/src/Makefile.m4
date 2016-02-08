@@ -2,7 +2,7 @@
 #  This Makefile is designed to work on any reasonably current version of
 #  "make" program.
 #
-#	@(#)Makefile.m4	8.23 (Berkeley) 6/16/98
+#	@(#)Makefile.m4	8.26 (Berkeley) 1/23/1999
 #
 
 # C compiler
@@ -68,9 +68,9 @@ COPTS=	-I. ${INCDIRS} ${MAPDEF} ${ENVDEF}
 CFLAGS=	$O ${COPTS}
 
 BEFORE= confBEFORE
-OBJS=	alias.o arpadate.o clock.o collect.o conf.o convtime.o daemon.o \
-	deliver.o domain.o envelope.o err.o headers.o macro.o main.o \
-	map.o mci.o mime.o parseaddr.o queue.o readcf.o recipient.o \
+OBJS=	alias.o arpadate.o clock.o collect.o conf.o control.o convtime.o \
+	daemon.o deliver.o domain.o envelope.o err.o headers.o macro.o \
+	main.o map.o mci.o mime.o parseaddr.o queue.o readcf.o recipient.o \
 	safefile.o savemail.o snprintf.o srvrsmtp.o stab.o stats.o \
 	sysexits.o trace.o udb.o usersmtp.o util.o version.o ${OBJADD}
 
@@ -103,15 +103,17 @@ MAN8=	${MANROOT}ifdef(`confMAN8', `confMAN8', `8')
 MAN8EXT=ifdef(`confMAN8EXT', `confMAN8EXT', `8')
 MAN8SRC=ifdef(`confMAN8SRC', `confMAN8SRC', `0')
 
-ALL=	sendmail aliases.${MAN5SRC} mailq.${MAN1SRC} newaliases.${MAN1SRC} sendmail.${MAN8SRC}
+ALL=	sendmail sendmail.st aliases.${MAN5SRC} mailq.${MAN1SRC} newaliases.${MAN1SRC} sendmail.${MAN8SRC}
 
 all: ${ALL}
 
 sendmail: ${BEFORE} ${OBJS}
 	${CC} -o sendmail ${LDOPTS} ${LIBDIRS} ${OBJS} ${LIBS}
-	cp /dev/null sendmail.st
 
 undivert(3)
+
+sendmail.st:
+	cp /dev/null sendmail.st
 
 aliases.${MAN5SRC}: aliases.5
 	${NROFF} ${MANDOC} aliases.5 > aliases.${MAN5SRC}
@@ -130,7 +132,8 @@ install: install-sendmail install-docs
 install-sendmail: sendmail
 	${INSTALL} -c -o ${BINOWN} -g ${BINGRP} -m ${BINMODE} sendmail ${BINDIR}
 	for i in ${LINKS}; do rm -f $$i; ln -s ${BINDIR}/sendmail $$i; done
-	${INSTALL} -c -o ${BINOWN} -g ${BINGRP} -m 444 sendmail.hf ${HFDIR}
+	${INSTALL} -c -o ${BINOWN} -g ${BINGRP} -m 444 sendmail.hf \
+	    ${HFDIR}/sendmail.hf
 	${INSTALL} -c -o ${BINOWN} -g ${BINGRP} -m 644 sendmail.st \
 	    ${STDIR}/sendmail.st
 

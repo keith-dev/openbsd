@@ -1,4 +1,4 @@
-.\"	$OpenBSD: newfs.8,v 1.10 1998/09/23 01:20:24 aaron Exp $
+.\"	$OpenBSD: newfs.8,v 1.15 1999/04/10 04:09:23 millert Exp $
 .\"	$NetBSD: newfs.8,v 1.12 1995/03/18 14:58:41 cgd Exp $
 .\"
 .\" Copyright (c) 1983, 1987, 1991, 1993, 1994
@@ -38,8 +38,7 @@
 .Dt NEWFS 8
 .Os BSD 4.2
 .Sh NAME
-.Nm newfs ,
-.Nm mount_mfs
+.Nm newfs , mount_mfs
 .Nd construct a new file system
 .Sh SYNOPSIS
 .Nm newfs
@@ -58,6 +57,7 @@
 .Op Fl n Ar nrpos
 .Op Fl o Ar optimization
 .Op Fl p Ar sectors
+.Op Fl q
 .Op Fl r Ar revolutions
 .Op Fl s Ar size
 .Op Fl t Ar fstype
@@ -65,6 +65,7 @@
 .Op Fl x Ar sectors
 .Op Fl z Ar tracks
 .Ar special
+.Pp
 .Nm mount_mfs
 .Op Fl N
 .Op Fl a Ar maxcontig
@@ -79,23 +80,23 @@
 .Op Fl s Ar size
 .Ar special node
 .Sh DESCRIPTION
-.Nm newfs
+.Nm
 replaces the more obtuse
 .Xr mkfs 8
 program.
 Before running 
-.Nm newfs
+.Nm
 or
 .Nm mount_mfs ,
 the disk must be labeled using 
 .Xr disklabel 8 .
-.Nm newfs
+.Nm
 builds a file system on the specified
 .Ar special
 device,
 basing its defaults on the information in the disk label.
-Typically the defaults are reasonable, however
-.Nm newfs
+Typically the defaults are reasonable, although
+.Nm
 has numerous options to allow the defaults to be selectively overridden.
 .Pp
 .Nm mount_mfs
@@ -119,7 +120,8 @@ a set of configuration parameters for the memory based file system.
 The special file is typically that of the primary swap area,
 since that is where the file system will be backed up when
 free memory gets low and the memory supporting
-the file system has to be paged.  If the keyword ``swap''
+the file system has to be paged.  If the keyword
+.Dq swap
 is used instead of a special file name, default configuration parameters
 will be used.  (This option is useful when trying to use
 .Nm mount_mfs
@@ -147,6 +149,10 @@ Creates a
 format filesystem.
 This options is primarily used to build root filesystems
 that can be understood by older boot ROMs.
+.It Fl q
+Operate in quiet mode.  With this option,
+.Nm
+will not print extraneous information like superblock backups.
 .It Fl a Ar maxcontig
 This specifies the maximum number of contiguous blocks that will be
 laid out before forcing a rotational delay (see the
@@ -193,7 +199,9 @@ for more details on how to set this option.
 .It Fl n Ar number of rotational positions
 The number of distinct rotational positions.  The default is 1.
 .It Fl o Ar optimization\ preference
-.Pq ``space'' or ``time''
+.Ar space
+or
+.Ar time .
 The file system can either be instructed to try to minimize the time spent
 allocating blocks, or to try to minimize the space fragmentation on the disk.
 Unless an optimization has been specified, if the value of minfree
@@ -210,7 +218,7 @@ The size of the file system in sectors.
 The following options override the standard sizes for the disk geometry. 
 Their default values are taken from the disk label.
 Changing these defaults is useful only when using
-.Nm newfs
+.Nm
 to build a file system whose raw image will eventually be used on a
 different type of disk than the one on which it is initially created
 (for example on a write-once disk).
@@ -247,7 +255,7 @@ The number of tracks/cylinder available for data allocation by the file
 system.
 .It Fl t Ar fstype
 Set the filesystem type of which filesystem you wish to create.
-.Nm newfs
+.Nm
 will be smart enough to run the alternate newfs_XXX program instead.
 .It Fl u Ar sectors/track
 The number of sectors per track available for data allocation by the file
@@ -268,7 +276,7 @@ system for data allocation.
 The options to the
 .Nm mount_mfs
 command are as described for the
-.Nm newfs
+.Nm
 command, except for the
 .Fl o
 option.

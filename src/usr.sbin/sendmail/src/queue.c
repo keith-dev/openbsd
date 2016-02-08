@@ -14,9 +14,9 @@
 
 #ifndef lint
 #if QUEUE
-static char sccsid[] = "@(#)queue.c	8.202 (Berkeley) 6/15/98 (with queueing)";
+static char sccsid[] = "@(#)queue.c	8.211 (Berkeley) 1/25/1999 (with queueing)";
 #else
-static char sccsid[] = "@(#)queue.c	8.202 (Berkeley) 6/15/98 (without queueing)";
+static char sccsid[] = "@(#)queue.c	8.211 (Berkeley) 1/25/1999 (without queueing)";
 #endif
 #endif /* not lint */
 
@@ -348,8 +348,7 @@ queueup(e, announce)
 	{
 		extern bool bitzerop __P((BITMAP));
 
-		/* don't output null headers */
-		if (h->h_value == NULL || h->h_value[0] == '\0')
+		if (h->h_value == NULL)
 			continue;
 
 		/* don't output resent headers on non-resent messages */
@@ -611,7 +610,7 @@ runqueue(forkflag, verbose)
 		{
 			/* parent -- pick up intermediate zombie */
 			(void) blocksignal(SIGALRM);
-			proc_list_add(pid);
+			proc_list_add(pid, "Queue runner");
 			(void) releasesignal(SIGALRM);
 			releasesignal(SIGCHLD);
 			if (QueueIntvl != 0)
@@ -619,13 +618,17 @@ runqueue(forkflag, verbose)
 			return TRUE;
 		}
 		/* child -- double fork and clean up signals */
+		clrcontrol();
 		proc_list_clear();
+
+		/* Add parent process as first child item */
+		proc_list_add(getpid(), "Queue runner child process");
 		releasesignal(SIGCHLD);
 		(void) setsignal(SIGCHLD, SIG_DFL);
 		(void) setsignal(SIGHUP, intsig);
 	}
 
-	setproctitle("running queue: %s", QueueDir);
+	sm_setproctitle(TRUE, "running queue: %s", QueueDir);
 
 	if (LogLevel > 69)
 		sm_syslog(LOG_DEBUG, NOQID,
@@ -750,7 +753,6 @@ runqueue(forkflag, verbose)
 		else
 		{
 			pid_t pid;
-			extern pid_t dowork __P((char *, bool, bool, ENVELOPE *));
 
 			if (Verbose)
 			{
@@ -771,7 +773,7 @@ runqueue(forkflag, verbose)
 
 	/* exit without the usual cleanup */
 	e->e_id = NULL;
-	finis();
+	finis(TRUE, ExitStat);
 	/*NOTREACHED*/
 	return TRUE;
 }
@@ -893,7 +895,16 @@ orderq(doall)
 			continue;
 
 		if (strlen(d->d_name) > MAXQFNAME)
+		{
+			if (Verbose)
+				printf("orderq: %s too long, %d max characters\n",
+					d->d_name, MAXQFNAME);
+			if (LogLevel > 0)
+				sm_syslog(LOG_ALERT, NOQID,
+					"orderq: %s too long, %d max characters",
+					d->d_name, MAXQFNAME);
 			continue;
+		}
 
 		check = QueueLimitId;
 		while (check != NULL)
@@ -1443,6 +1454,16 @@ dowork(id, forkflag, requeueflag, e)
 		{
 			/* child -- error messages to the transcript */
 			QuickAbort = OnlyOneError = FALSE;
+
+			/*
+			**  Since the delivery may happen in a child and the
+			**  parent does not wait, the parent may close the
+			**  maps thereby removing any shared memory used by
+			**  the map.  Therefore, open a copy of the maps for
+			**  the delivery process.
+			*/
+		
+			initmaps(FALSE, e);
 		}
 	}
 	else
@@ -1474,7 +1495,7 @@ dowork(id, forkflag, requeueflag, e)
 			disconnect(1, e);
 			OpMode = MD_DELIVER;
 		}
-		setproctitle("%s: from queue", id);
+		sm_setproctitle(TRUE, "%s: from queue", id);
 		if (LogLevel > 76)
 			sm_syslog(LOG_DEBUG, e->e_id,
 				"dowork, pid=%d",
@@ -1490,7 +1511,7 @@ dowork(id, forkflag, requeueflag, e)
 				printf("readqf(%s) failed\n", e->e_id);
 			e->e_id = NULL;
 			if (forkflag)
-				exit(EX_OK);
+				finis(FALSE, EX_OK);
 			else
 				return 0;
 		}
@@ -1506,7 +1527,7 @@ dowork(id, forkflag, requeueflag, e)
 
 		/* finish up and exit */
 		if (forkflag)
-			finis();
+			finis(TRUE, ExitStat);
 		else
 			dropenvelope(e, TRUE);
 	}
@@ -1777,7 +1798,6 @@ readqf(e)
 			    curtime() < e->e_dtime + MinQueueAge)
 			{
 				char *howlong = pintvl(curtime() - e->e_dtime, TRUE);
-				extern void unlockqueue __P((ENVELOPE *));
 
 				if (Verbose || tTd(40, 8))
 					printf("%s: too young (%s)\n",
@@ -2185,7 +2205,7 @@ queuename(e, type)
 					continue;
 				syserr("queuename: Cannot create \"%s\" in \"%s\" (euid=%d)",
 					qf, QueueDir, geteuid());
-				exit(EX_UNAVAILABLE);
+				finis(FALSE, EX_UNAVAILABLE);
 			}
 			do
 			{
@@ -2212,7 +2232,7 @@ queuename(e, type)
 			{
 				syserr("queuename: Cannot lock \"%s\" in \"%s\" (euid=%d)",
 					qf, QueueDir, geteuid());
-				exit(EX_OSERR);
+				finis(FALSE, EX_OSERR);
 			}
 
 			/* a reader got the file; abandon it and try again */
@@ -2222,7 +2242,7 @@ queuename(e, type)
 		{
 			syserr("queuename: Cannot create \"%s\" in \"%s\" (euid=%d)",
 				qf, QueueDir, geteuid());
-			exit(EX_OSERR);
+			finis(FALSE, EX_OSERR);
 		}
 		e->e_id = newstr(&qf[2]);
 		define('i', e->e_id, e);

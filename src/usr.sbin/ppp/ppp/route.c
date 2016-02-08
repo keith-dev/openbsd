@@ -17,11 +17,11 @@
  * IMPLIED WARRANTIES, INCLUDING, WITHOUT LIMITATION, THE IMPLIED
  * WARRANTIES OF MERCHANTIBILITY AND FITNESS FOR A PARTICULAR PURPOSE.
  *
- * $Id: route.c,v 1.1 1998/08/31 00:22:27 brian Exp $
+ * $Id: route.c,v 1.3 1999/02/06 03:22:46 brian Exp $
  *
  */
 
-#include <sys/types.h>
+#include <sys/param.h>
 #include <sys/socket.h>
 #include <net/if_types.h>
 #include <net/route.h>
@@ -58,9 +58,13 @@
 #include "filter.h"
 #include "descriptor.h"
 #include "mp.h"
+#ifndef NORADIUS
+#include "radius.h"
+#endif
 #include "bundle.h"
 #include "route.h"
 #include "prompt.h"
+#include "iface.h"
 
 static void
 p_sockaddr(struct prompt *prompt, struct sockaddr *phost,
@@ -361,7 +365,7 @@ route_IfDelete(struct bundle *bundle, int all)
   char *sp, *cp, *ep;
   int mib[6];
 
-  log_Printf(LogDEBUG, "route_IfDelete (%d)\n", bundle->ifp.Index);
+  log_Printf(LogDEBUG, "route_IfDelete (%d)\n", bundle->iface->index);
   sa_none.s_addr = INADDR_ANY;
 
   mib[0] = CTL_NET;
@@ -407,7 +411,7 @@ route_IfDelete(struct bundle *bundle, int all)
                 Index2Nam(rtm->rtm_index), rtm->rtm_flags,
 	        inet_ntoa(((struct sockaddr_in *) sa)->sin_addr));
       if (rtm->rtm_addrs & RTA_DST && rtm->rtm_addrs & RTA_GATEWAY &&
-	  rtm->rtm_index == bundle->ifp.Index &&
+	  rtm->rtm_index == bundle->iface->index &&
 	  (all || (rtm->rtm_flags & RTF_GATEWAY))) {
         sa_dst.s_addr = ((struct sockaddr_in *)sa)->sin_addr.s_addr;
         sa = (struct sockaddr *)((char *)sa + sa->sa_len);
@@ -485,29 +489,29 @@ void
 route_Add(struct sticky_route **rp, int type, struct in_addr dst,
           struct in_addr mask, struct in_addr gw)
 {
-  if (type != ROUTE_STATIC) {
-    struct sticky_route *r;
-    int dsttype = type & ROUTE_DSTANY;
+  struct sticky_route *r;
+  int dsttype = type & ROUTE_DSTANY;
 
-    r = NULL;
-    while (*rp) {
-      if ((dsttype && dsttype == ((*rp)->type & ROUTE_DSTANY)) ||
-          (!dsttype && (*rp)->dst.s_addr == dst.s_addr)) {
-        r = *rp;
-        *rp = r->next;
-      } else
-        rp = &(*rp)->next;
-    }
-
-    if (!r)
-      r = (struct sticky_route *)malloc(sizeof(struct sticky_route));
-    r->type = type;
-    r->next = NULL;
-    r->dst = dst;
-    r->mask = mask;
-    r->gw = gw;
-    *rp = r;
+  r = NULL;
+  while (*rp) {
+    if ((dsttype && dsttype == ((*rp)->type & ROUTE_DSTANY)) ||
+        (!dsttype && (*rp)->dst.s_addr == dst.s_addr)) {
+      /* Oops, we already have this route - unlink it */
+      free(r);			/* impossible really  */
+      r = *rp;
+      *rp = r->next;
+    } else
+      rp = &(*rp)->next;
   }
+
+  if (!r)
+    r = (struct sticky_route *)malloc(sizeof(struct sticky_route));
+  r->type = type;
+  r->next = NULL;
+  r->dst = dst;
+  r->mask = mask;
+  r->gw = gw;
+  *rp = r;
 }
 
 void
@@ -540,15 +544,22 @@ route_DeleteAll(struct sticky_route **rp)
 }
 
 void
-route_ShowSticky(struct prompt *p, struct sticky_route *r)
+route_ShowSticky(struct prompt *p, struct sticky_route *r, const char *tag,
+                 int indent)
 {
   int def;
+  int tlen = strlen(tag);
 
-  prompt_Printf(p, "Sticky routes:\n");
+  if (tlen + 2 > indent)
+    prompt_Printf(p, "%s:\n%*s", tag, indent, "");
+  else
+    prompt_Printf(p, "%s:%*s", tag, indent - tlen - 1, "");
+
   for (; r; r = r->next) {
     def = r->dst.s_addr == INADDR_ANY && r->mask.s_addr == INADDR_ANY;
 
-    prompt_Printf(p, " add ");
+    prompt_Printf(p, "%*sadd ", tlen ? 0 : indent, "");
+    tlen = 0;
     if (r->type & ROUTE_DSTMYADDR)
       prompt_Printf(p, "MYADDR");
     else if (r->type & ROUTE_DSTHISADDR)

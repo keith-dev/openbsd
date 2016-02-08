@@ -34,7 +34,7 @@
  * SUCH DAMAGE.
  *
  *	from: @(#)SYS.h	8.1 (Berkeley) 6/4/93
- *      $Id: SYS.h,v 1.2 1998/07/04 23:57:40 rahnds Exp $ 
+ *      $Id: SYS.h,v 1.5 1999/03/12 04:37:20 rahnds Exp $ 
  */
 
 #include <sys/syscall.h>
@@ -45,26 +45,40 @@
 #include "machine/asm.h"
 
 #ifdef __STDC__
-#define PSEUDO_PREFIX(x,y)	.extern cerror ; \
-			ENTRY(x) \
+#define _CONCAT(x,y)	x##y
+#define PSEUDO_PREFIX(p,x,y)	.extern cerror ; \
+			ENTRY(p##x) \
 				li 0, SYS_##y ; \
 				/* sc */
 #else /* !__STDC__ */
-#define PSEUDO_PREFIX(x,y)	.extern cerror ; \
-			ENTRY(x) \
+#define _CONCAT(x,y)	x/**/y
+#define PSEUDO_PREFIX(p,x,y)	.extern cerror ; \
+			ENTRY(p/**/x) \
 				li 0, SYS_/**/y ; \
 				/* sc */
 #endif /* !__STDC__ */
 #define PSEUDO_SUFFIX		cmpwi 0, 0 ; \
 				beqlr+ ; \
-				b cerror 
+				b PIC_PLT(_ASM_LABEL(cerror))
 
-#define PREFIX(x)		PSEUDO_PREFIX(x,x)
 
 #define SUFFIX			PSEUDO_SUFFIX
 
-#define	PSEUDO(x,y)		PSEUDO_PREFIX(x,y) ; \
+#ifndef _THREAD_SAFE
+#define PREFIX(x)		PSEUDO_PREFIX(,x,x)
+#define PREFIX2(x,y)		PSEUDO_PREFIX(,x,y)
+#define	PSEUDO(x,y)		PSEUDO_PREFIX(,x,y) ; \
 				sc ; \
 				PSEUDO_SUFFIX
 
 #define RSYSCALL(x)		PSEUDO(x,x)
+#else /* _THREAD_SAFE */
+#define PREFIX(x)		PSEUDO_PREFIX(_thread_sys_,x,x)
+#define PREFIX2(x,y)		PSEUDO_PREFIX(_thread_sys_,x,y)
+#define	PSEUDO(x,y)		PSEUDO_PREFIX(_thread_sys_,x,y) ; \
+				sc ; \
+				PSEUDO_SUFFIX
+
+#define RSYSCALL(x)		PSEUDO(x,x)
+
+#endif /* _THREAD_SAFE */

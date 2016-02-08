@@ -1,4 +1,4 @@
-/*	$OpenBSD: main.c,v 1.24 1998/08/22 07:44:03 mickey Exp $	*/
+/*	$OpenBSD: main.c,v 1.26 1999/02/20 21:46:05 deraadt Exp $	*/
 /*	$NetBSD: main.c,v 1.14 1997/06/05 11:13:24 lukem Exp $	*/
 
 /*-
@@ -409,10 +409,10 @@ main(argc, argv)
 	dev_bsize = sblock->fs_fsize / fsbtodb(sblock, 1);
 	dev_bshift = ffs(dev_bsize) - 1;
 	if (dev_bsize != (1 << dev_bshift))
-		quit("dev_bsize (%d) is not a power of 2", dev_bsize);
+		quit("dev_bsize (%d) is not a power of 2\n", dev_bsize);
 	tp_bshift = ffs(TP_BSIZE) - 1;
 	if (TP_BSIZE != (1 << tp_bshift))
-		quit("TP_BSIZE (%d) is not a power of 2", TP_BSIZE);
+		quit("TP_BSIZE (%d) is not a power of 2\n", TP_BSIZE);
 #ifdef FS_44INODEFMT
 	if (sblock->fs_inodefmt >= FS_44INODEFMT)
 		spcl.c_flags |= DR_NEWINODEFMT;
@@ -479,7 +479,7 @@ main(argc, argv)
 		tapesize += (etapes - 1) *
 			(howmany(mapsize * sizeof(char), TP_BSIZE) + 1);
 		tapesize += etapes + 10;	/* headers + 10 trailer blks */
-		msg("estimated %ld tape blocks on %3.2f tape(s).\n",
+		msg("estimated %qd tape blocks on %3.2f tape(s).\n",
 		    tapesize, fetapes);
 	}
 

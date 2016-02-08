@@ -1,5 +1,5 @@
 #!/bin/sh
-#	$OpenBSD: install.sh,v 1.41 1998/10/13 21:23:30 deraadt Exp $
+#	$OpenBSD: install.sh,v 1.53 1999/04/10 04:38:30 deraadt Exp $
 #	$NetBSD: install.sh,v 1.5.2.8 1996/08/27 18:15:05 gwr Exp $
 #
 # Copyright (c) 1997,1998 Todd Miller, Theo de Raadt
@@ -84,7 +84,6 @@ MODE="install"
 #	md_get_cddevs()		- return available CD-ROM devices
 #	md_get_partition_range() - return range of valid partition letters
 #	md_installboot()	- install boot-blocks on disk
-#	md_labeldisk()		- put label on a disk
 #	md_prep_disklabel()	- label the root disk
 #	md_welcome_banner()	- display friendly message
 #	md_not_going_to_install() - display friendly message
@@ -110,7 +109,7 @@ if [ "`df /`" = "`df /mnt`" ]; then
 	echo -n "Proceed with installation? [n] "
 else
 	echo "You seem to be trying to restart an interrupted installation!"
-	echo ""
+	echo
 	echo "You can try to skip the disk preparation steps and continue,"
 	echo "otherwise you should reboot the miniroot and start over..."
 	echo -n "Skip disk initialization? [n] "
@@ -118,7 +117,7 @@ fi
 getresp "n"
 case "$resp" in
 	y*|Y*)
-		echo	""
+		echo
 		echo	"Cool!  Let's get to it..."
 		;;
 	*)
@@ -206,11 +205,15 @@ __get_filesystems_1
 			_ps=`echo ${_p} | sed 's/^.//'`
 			_partitions[${_npartitions}]=${_pp}
 			_psizes[${_npartitions}]=${_ps}
+			# If the user assigned a mount point, use it.
+			if [ -f /tmp/fstab.${DISK} ]; then
+				_mount_points[${_npartitions}]=`sed -n "s:^/dev/$DISK$_pp[ 	]*\([^ 	]*\).*:\1:p" < /tmp/fstab.${DISK}`
+			fi
 			_npartitions=$(( ${_npartitions} + 1 ))
 		done
 
 		# Now prompt the user for the mount points.  Loop until "done"
-		echo	""
+		echo
 		_i=0
 		resp="X"
 		while [ $_npartitions -gt 0 -a X${resp} != X"done" ]; do
@@ -247,13 +250,14 @@ __get_filesystems_1
 			fi
 			_i=$(( ${_i} + 1 ))
 		done
+		rm -f /tmp/fstab.${DISK}
 	done
 
-	echo	""
+	echo
 	echo	"You have configured the following devices and mount points:"
-	echo	""
+	echo
 	cat ${FILESYSTEMS}
-	echo	""
+	echo
 	echo	"Filesystems will now be created on these devices."
 	echo 	"If you made any mistakes, you may edit this now."
 	echo -n	"Edit using ${EDITOR}? [n] "
@@ -273,9 +277,9 @@ __get_filesystems_1
 		while read _device_name _junk; do
 			echo -n "${_device_name} "
 		done
-		echo ""
+		echo
 	) < ${FILESYSTEMS}
-	echo	""
+	echo
 
 	echo -n	"Are you really sure that you're ready to proceed? [n] "
 	getresp "n"
@@ -292,7 +296,7 @@ __get_filesystems_1
 	echo	"Creating filesystems..."
 	(
 		while read _device_name _junk; do
-			newfs /dev/r${_device_name}
+			newfs -q /dev/r${_device_name}
 		done
 	) < ${FILESYSTEMS}
 else
@@ -340,11 +344,11 @@ case "$resp" in
 		done
 		FQDN=$resp
 
-		echo ""
+		echo
 		echo "If you have any devices being configured by a DHCP server"
 		echo "it is recommended that you do not enter a default route or"
 		echo "any name servers."
-		echo ""
+		echo
 
 		configurenetwork
 
@@ -414,9 +418,9 @@ case "$resp" in
 		fi
 
 		if [ ! -f /tmp/resolv.conf.shadow ]; then 
-			echo ""
+			echo
 			echo "The host table is as follows:"
-			echo ""
+			echo
 			cat /tmp/hosts
 		cat << __hosts_table_1
 
@@ -476,7 +480,7 @@ if [ "`df /`" = "`df /mnt`" ]; then
 # XXX after the install is complete.
 #
 #	echo	"The fstab is configured as follows:"
-#	echo	""
+#	echo
 #	cat /tmp/fstab
 #	cat << \__fstab_config_1
 #
@@ -495,7 +499,7 @@ if [ "`df /`" = "`df /mnt`" ]; then
 #			;;
 #	esac
 #
-#	echo ""
+#	echo
 
 	munge_fstab /tmp/fstab /tmp/fstab.shadow
 	mount_fs /tmp/fstab.shadow
@@ -519,38 +523,38 @@ done
 
 resp=""		# force one iteration
 echo
-echo 'Please enter the initial password that the root acount will have.'
+echo 'Please enter the initial password that the root account will have.'
 while [ "X${resp}" = X"" ]; do
 	echo -n "Password (will not echo): "
 	stty -echo
 	getresp "${_password}"
 	stty echo
-	echo ""
+	echo
 	_password=$resp
 
 	echo -n "Password (again): "
 	stty -echo
 	getresp ""
 	stty echo
-	echo ""
+	echo
 	if [ "${_password}" != "${resp}" ]; then
 		echo "Passwords do not match, try again."
 		resp=""
 	fi
 done
 
-md_copy_kernel
-
 install_sets $THESETS
+
+md_copy_kernel
 
 # Copy in configuration information and make devices in target root.
 
 if [ ! -d /mnt/etc -o ! -d /mnt/usr/share/zoneinfo -o ! -d /mnt/dev ]; then
 	echo "Something needed to complete the installation seems"
 	echo "to be missing, did you forget to extract a required set?"
-	echo ""
+	echo
 	echo "Please review the installation notes and try again..."
-	echo ""
+	echo
 	echo "You *may* be able to correct the problem and type 'install'"
 	echo "without having to extract all of the distribution sets again."
 	exit
@@ -561,6 +565,7 @@ for file in fstab hostname.* hosts myname mygate resolv.conf; do
 	if [ -f $file ]; then
 		echo -n "Copying $file..."
 		cp $file /mnt/etc/$file
+		rm -f $file
 		echo "done."
 	fi
 done
@@ -592,10 +597,8 @@ if [ ! -x /mnt/dev/MAKEDEV ]; then
 fi
 
 echo -n "Making all device nodes (by running /dev/MAKEDEV all) ..."
-#pid=`twiddle`
 cd /mnt/dev
 sh MAKEDEV all
-#kill $pid
 echo "... done."
 cd /
 

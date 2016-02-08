@@ -30,7 +30,7 @@
 .\"
 .Dd April 4, 1996
 .Dt PTHREAD_SETSPECIFIC 3
-.Os BSD 4
+.Os
 .Sh NAME
 .Nm pthread_setspecific
 .Nd set a thread-specific data value
@@ -60,7 +60,7 @@ has been deleted with
 is undefined.
 .Pp
 .Fn pthread_setspecific
-may be called from a thread-specific data destructor function, however this
+may be called from a thread-specific data destructor function; however, this
 may result in lost storage or infinite loops.
 .Sh RETURN VALUES
 If successful,  the
@@ -81,7 +81,6 @@ value is invalid.
 .El
 .Pp
 .Sh SEE ALSO
-.Xr pthreads 3 ,
 .Xr pthread_getspecific 3 ,
 .Xr pthread_key_create 3 ,
 .Xr pthread_key_delete 3

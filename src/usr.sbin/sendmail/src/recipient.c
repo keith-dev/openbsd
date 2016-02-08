@@ -11,7 +11,7 @@
  */
 
 #ifndef lint
-static char sccsid[] = "@(#)recipient.c	8.154 (Berkeley) 6/24/98";
+static char sccsid[] = "@(#)recipient.c	8.163 (Berkeley) 1/23/1999";
 #endif /* not lint */
 
 # include "sendmail.h"
@@ -331,8 +331,11 @@ recipient(a, sendq, aliaslevel, e)
 	}
 
 	/* add address on list */
-	*pq = a;
-	a->q_next = NULL;
+	if (pq != NULL)
+	{
+		*pq = a;
+		a->q_next = NULL;
+	}
 
 	/*
 	**  Alias the name and handle special mailer types.
@@ -340,7 +343,10 @@ recipient(a, sendq, aliaslevel, e)
 
   trylocaluser:
 	if (tTd(29, 7))
-		printf("at trylocaluser %s\n", a->q_user);
+	{
+		printf("at trylocaluser: ");
+		printaddr(a, FALSE);
+	}
 
 	if (bitset(QDONTSEND|QBADADDR|QVERIFIED, a->q_flags))
 		goto testselfdestruct;
@@ -931,7 +937,7 @@ include(fname, forwarding, ctladdr, sendq, aliaslevel, e)
 		       (int) getuid(), (int) geteuid());
 
 	if (forwarding)
-		sfflags |= SFF_MUSTOWN|SFF_ROOTOK|SFF_NOSLINK;
+		sfflags |= SFF_MUSTOWN|SFF_ROOTOK|SFF_NOWLINK;
 
 	ca = getctladdr(ctladdr);
 	if (ca == NULL)
@@ -1189,13 +1195,14 @@ resetuid:
 	{
 		/* don't do any more now */
 		ctladdr->q_flags |= QVERIFIED;
+		ctladdr->q_flags &= ~QDONTSEND;
 		e->e_nrcpts++;
 		xfclose(fp, "include", fname);
 		return rval;
 	}
 
 	/*
-	** Check to see if some bad guy can write this file
+	**  Check to see if some bad guy can write this file
 	**
 	**	Group write checking could be more clever, e.g.,
 	**	guessing as to which groups are actually safe ("sys"
@@ -1403,6 +1410,8 @@ self_reference(a, e)
 	c = a;
 	while (c != NULL)
 	{
+		if (tTd(27, 10))
+			printf("  %s", c->q_user);
 		if (bitnset(M_HASPWENT, c->q_mailer->m_flags))
 		{
 			if (tTd(27, 2))
@@ -1421,6 +1430,22 @@ self_reference(a, e)
 			if (tTd(27, 2))
 				printf("failed\n");
 		}
+		else
+		{
+			/* if local delivery, compare usernames */
+			if (bitnset(M_LOCALMAILER, c->q_mailer->m_flags) &&
+			    b->q_mailer == c->q_mailer)
+			{
+				if (tTd(27, 2))
+					printf("\t... local match (%s)\n", c->q_user);
+				if (sameaddr(b, c))
+					return b;
+				else
+					return c;
+			}
+		}
+		if (tTd(27, 10))
+			printf("\n");
 		c = c->q_alias;
 	}
 

@@ -30,6 +30,7 @@ ab: ab.o
 
 apxs: apxs.pl
 	sed <apxs.pl >apxs \
+	    -e 's%@TARGET@%$(TARGET)%g' \
 	    -e 's%@CC@%$(CC)%g' \
 	    -e 's%@CFLAGS@%$(CFLAGS)%g' \
 	    -e 's%@CFLAGS_SHLIB@%$(CFLAGS_SHLIB)%g' \
@@ -39,6 +40,12 @@ apxs: apxs.pl
 
 suexec: suexec.o
 	$(CC) $(CFLAGS) suexec.o -o suexec $(LDFLAGS) $(LIBS)
+
+ca-fix: ca-fix.c
+	$(CC) $(INCLUDES) $(CFLAGS) $(SSL_CFLAGS) \
+	      $(LDFLAGS) $(SSL_LDFLAGS) \
+	      -o ca-fix ca-fix.c \
+	      $(LIBS) $(SSL_LIBS)
 
 clean:
 	rm -f $(TARGETS) *.o

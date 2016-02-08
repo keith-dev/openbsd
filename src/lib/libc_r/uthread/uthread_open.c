@@ -29,8 +29,8 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- * $Id: uthread_open.c,v 1.1 1998/08/27 09:01:15 d Exp $
- * $OpenBSD: uthread_open.c,v 1.1 1998/08/27 09:01:15 d Exp $
+ * $FreeBSD: uthread_open.c,v 1.4 1998/04/29 09:59:07 jb Exp $
+ * $OpenBSD: uthread_open.c,v 1.3 1999/01/17 23:57:27 d Exp $
  *
  */
 #include <stdarg.h>
@@ -48,6 +48,8 @@ open(const char *path, int flags,...)
 	int             fd;
 	int             mode = 0;
 	va_list         ap;
+
+	_thread_enter_cancellation_point();
 
 	/* Check if the file is being created: */
 	if (flags & O_CREAT) {
@@ -67,6 +69,8 @@ open(const char *path, int flags,...)
 		/* Reset the file descriptor: */
 		fd = -1;
 	}
+
+	_thread_leave_cancellation_point();
 
 	/* Return the file descriptor or -1 on error: */
 	return (fd);

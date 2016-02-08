@@ -27,7 +27,7 @@
 .\"
 .Dd July 30, 1998
 .Dt PTHREAD_MUTEX_LOCK 3
-.Os BSD 4
+.Os
 .Sh NAME
 .Nm pthread_mutex_lock
 .Nd lock a mutex
@@ -61,11 +61,10 @@ A deadlock would occur if the thread blocked waiting for
 .El
 .Pp
 .Sh SEE ALSO
-.Xr pthreads 3 ,
-.Xr pthread_mutex_unlock 3 ,
-.Xr pthread_mutex_trylock 3 ,
+.Xr pthread_mutex_destroy 3 ,
 .Xr pthread_mutex_init 3 ,
-.Xr pthread_mutex_destroy 3
+.Xr pthread_mutex_trylock 3 ,
+.Xr pthread_mutex_unlock 3
 .Sh STANDARDS
 .Fn pthread_mutex_lock
 conforms to ISO/IEC 9945-1 ANSI/IEEE

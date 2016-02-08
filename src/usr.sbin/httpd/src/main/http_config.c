@@ -1,5 +1,5 @@
 /* ====================================================================
- * Copyright (c) 1995-1998 The Apache Group.  All rights reserved.
+ * Copyright (c) 1995-1999 The Apache Group.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -479,7 +479,7 @@ int ap_invoke_handler(request_rec *r)
     const char *handler;
     char *p;
     size_t handler_len;
-    int result = NOT_IMPLEMENTED;
+    int result = HTTP_INTERNAL_SERVER_ERROR;
 
     if (r->handler) {
 	handler = r->handler;
@@ -509,7 +509,7 @@ int ap_invoke_handler(request_rec *r)
         }
     }
 
-    if (result == NOT_IMPLEMENTED && r->handler) {
+    if (result == HTTP_INTERNAL_SERVER_ERROR && r->handler) {
         ap_log_rerror(APLOG_MARK, APLOG_NOERRNO|APLOG_WARNING, r,
             "handler \"%s\" not found for: %s", r->handler, r->filename);
     }
@@ -526,7 +526,7 @@ int ap_invoke_handler(request_rec *r)
          }
     }
 
-    return NOT_IMPLEMENTED;
+    return HTTP_INTERNAL_SERVER_ERROR;
 }
 
 /* One-time setup for precompiled modules --- NOT to be done on restart */
@@ -539,8 +539,8 @@ API_EXPORT(void) ap_add_module(module *m)
      */
 
     if (m->version != MODULE_MAGIC_NUMBER_MAJOR) {
-	fprintf(stderr, "httpd: module \"%s\" is not compatible with this "
-		"version of Apache.\n", m->name);
+	fprintf(stderr, "%s: module \"%s\" is not compatible with this "
+		"version of Apache.\n", ap_server_argv0, m->name);
 	fprintf(stderr, "Please contact the vendor for the correct version.\n");
 	exit(1);
     }
@@ -554,8 +554,8 @@ API_EXPORT(void) ap_add_module(module *m)
 	dynamic_modules++;
 
 	if (dynamic_modules > DYNAMIC_MODULE_LIMIT) {
-	    fprintf(stderr, "httpd: module \"%s\" could not be loaded, because"
-		    " the dynamic\n", m->name);
+	    fprintf(stderr, "%s: module \"%s\" could not be loaded, because"
+		    " the dynamic\n", ap_server_argv0, m->name);
 	    fprintf(stderr, "module limit was reached. Please increase "
 		    "DYNAMIC_MODULE_LIMIT and recompile.\n");
 	    exit(1);
@@ -580,6 +580,20 @@ API_EXPORT(void) ap_add_module(module *m)
 	m->name = tmp;
     }
 #endif /*_OSD_POSIX*/
+
+#ifdef EAPI
+    /*
+     * Invoke the `add_module' hook inside the now existing set
+     * of modules to let them all now that this module was added.
+     */
+    {
+        module *m2;
+        for (m2 = top_module; m2 != NULL; m2 = m2->next)
+            if (m2->magic == MODULE_MAGIC_COOKIE_EAPI)
+                if (m2->add_module != NULL)
+                    (*m2->add_module)(m);
+    }
+#endif /* EAPI */
 }
 
 /* 
@@ -593,6 +607,21 @@ API_EXPORT(void) ap_add_module(module *m)
 API_EXPORT(void) ap_remove_module(module *m)
 {
     module *modp;
+
+#ifdef EAPI
+    /*
+     * Invoke the `remove_module' hook inside the now existing
+     * set of modules to let them all now that this module is
+     * beeing removed.
+     */
+    {
+        module *m2;
+        for (m2 = top_module; m2 != NULL; m2 = m2->next)
+            if (m2->magic == MODULE_MAGIC_COOKIE_EAPI)
+                if (m2->remove_module != NULL)
+                    (*m2->remove_module)(m);
+    }
+#endif /* EAPI */
 
     modp = top_module;
     if (modp == m) {
@@ -960,6 +989,27 @@ CORE_EXPORT(const char *) ap_handle_command(cmd_parms *parms, void *config, cons
     const command_rec *cmd;
     module *mod = top_module;
 
+#ifdef EAPI
+    /*
+     * Invoke the `rewrite_command' of modules to allow
+     * they to rewrite the directive line before we
+     * process it.
+     */
+    {
+        module *m;
+        char *cp;
+        for (m = top_module; m != NULL; m = m->next) {
+            if (m->magic == MODULE_MAGIC_COOKIE_EAPI) {
+                if (m->rewrite_command != NULL) {
+                    cp = (m->rewrite_command)(parms, config, l);
+                    if (cp != NULL)
+                        l = cp;
+                }
+            }
+        }
+    }
+#endif /* EAPI */
+
     if ((l[0] == '#') || (!l[0]))
 	return NULL;
 
@@ -1179,8 +1229,8 @@ void ap_process_resource_config(server_rec *s, char *fname, pool *p, pool *ptemp
 
     if (!(parms.config_file = ap_pcfg_openfile(p,fname))) {
 	perror("fopen");
-	fprintf(stderr, "httpd: could not open document config file %s\n",
-		fname);
+	fprintf(stderr, "%s: could not open document config file %s\n",
+		ap_server_argv0, fname);
 	exit(1);
     }
 
@@ -1188,7 +1238,7 @@ void ap_process_resource_config(server_rec *s, char *fname, pool *p, pool *ptemp
 
     if (errmsg) {
 	fprintf(stderr, "Syntax error on line %d of %s:\n",
-		parms.config_file->line_number, fname);
+		parms.config_file->line_number, parms.config_file->name);
 	fprintf(stderr, "%s\n", errmsg);
 	exit(1);
     }
@@ -1319,6 +1369,10 @@ CORE_EXPORT(const char *) ap_init_virtual_host(pool *p, const char *hostname,
     s->limit_req_fieldsize = main_server->limit_req_fieldsize;
     s->limit_req_fields = main_server->limit_req_fields;
 
+#ifdef EAPI
+    s->ctx = ap_ctx_new(p);
+#endif /* EAPI */
+
     *ps = s;
 
     return ap_parse_vhost_addrs(p, hostname, s);
@@ -1430,6 +1484,10 @@ static server_rec *init_server_config(pool *p)
     s->module_config = create_server_config(p, s);
     s->lookup_defaults = create_default_per_dir_config(p);
 
+#ifdef EAPI
+    s->ctx = ap_ctx_new(p);
+#endif /* EAPI */
+
     return s;
 }
 
@@ -1476,6 +1534,23 @@ server_rec *ap_read_config(pool *p, pool *ptemp, char *confname)
     return s;
 }
 
+void ap_single_module_configure(pool *p, server_rec *s, module *m)
+{
+    if (m->create_server_config)
+        ap_set_module_config(s->module_config, m,
+                             (*m->create_server_config)(p, s));
+    if (m->create_dir_config)
+        ap_set_module_config(s->lookup_defaults, m,
+                             (*m->create_dir_config)(p, NULL));
+}
+
+void ap_single_module_init(pool *p, server_rec *s, module *m)
+{
+    if (m->init)
+        (*m->init)(s, p);
+    build_method_shortcuts();
+    init_handlers(p);
+}
 
 void ap_init_modules(pool *p, server_rec *s)
 {
@@ -1540,9 +1615,9 @@ static void show_overrides(const command_rec *pc, module *pm)
 	 ((pc->req_override & (ACCESS_CONF | OR_AUTHCFG | OR_LIMIT)))))
 	printf("anywhere");
     else if (pc->req_override & RSRC_CONF)
-	printf("only outside <Directory> or <Location>");
+	printf("only outside <Directory>, <Files> or <Location>");
     else
-	printf("only inside <Directory> or <Location>");
+	printf("only inside <Directory>, <Files> or <Location>");
 
     /* Warn if the directive is allowed inside <Directory> or .htaccess
      * but module doesn't support per-dir configuration */

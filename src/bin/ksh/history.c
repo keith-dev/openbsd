@@ -1,4 +1,4 @@
-/*	$OpenBSD: history.c,v 1.8 1998/06/25 19:01:58 millert Exp $	*/
+/*	$OpenBSD: history.c,v 1.10 1999/01/10 17:55:02 millert Exp $	*/
 
 /*
  * command history
@@ -240,8 +240,10 @@ c_fc(wp)
 		return 1;
 	}
 
-	if (!Flag(FSH))
+	if (!Flag(FSH)) {
+		/* SETSTR: ignore fail (arbitrary) */
 		setstr(local("_", FALSE), tf->name);
+	}
 
 	/* XXX: source should not get trashed by this.. */
 	{
@@ -633,9 +635,9 @@ histsave(lno, cmd, dowrite)
  * commands
  */
 void
-histappend(cmd, nl_seperate)
+histappend(cmd, nl_separate)
 	const char *cmd;
-	int	nl_seperate;
+	int	nl_separate;
 {
 	int	hlen, clen;
 	char	*p;
@@ -646,7 +648,7 @@ histappend(cmd, nl_seperate)
 		clen--;
 	p = *histptr = (char *) aresize(*histptr, hlen + clen + 2, APERM);
 	p += hlen;
-	if (nl_seperate)
+	if (nl_separate)
 		*p++ = '\n';
 	memcpy(p, cmd, clen);
 	p[clen] = '\0';

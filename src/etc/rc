@@ -1,4 +1,4 @@
-#	$OpenBSD: rc,v 1.90 1998/10/12 03:02:57 art Exp $
+#	$OpenBSD: rc,v 1.95 1998/12/28 06:58:30 deraadt Exp $
 
 # System startup script run by init on autoboot
 # or after single-user.
@@ -143,6 +143,13 @@ if [ "X${photurisd_flags}" != X"NO" -a -e /etc/photuris/photuris.conf ]; then
 	echo 'starting photurisd';	photurisd ${photurisd_flags}
 fi
 
+# $isakmpd_flags is imported from /etc/rc.conf;
+# If $isakmpd_flags == NO or /etc/isakmpd.conf doesn't exist, then
+# isakmpd isn't run.
+if [ "X${isakmpd_flags}" != X"NO" -a -e /etc/isakmpd.conf ]; then
+	echo 'starting isakmpd';	isakmpd ${isakmpd_flags}
+fi
+
 echo -n 'starting rpc daemons:'
 
 # $portmap is imported from /etc/rc.conf;
@@ -222,7 +229,7 @@ fi
 
 if [ "X${afs}" = X"YES" -a -c ${afs_device} -a -d ${afs_mount_point} ]; then
 	echo -n 'mounting afs:'
-	mount -t afs ${afs_device} ${afs_mount_point}
+	mount -t xfs ${afs_device} ${afs_mount_point}
 	/usr/libexec/afsd ${afsd_flags} -d ${afs_device}
 	echo ' done.'
 fi
@@ -235,9 +242,12 @@ if [ "X${check_quotas}" = X"YES" ]; then
 fi
 
 # build ps databases
-echo 'building databases...'
+echo -n 'building ps databases:'
+echo -n " kvm"
 kvm_mkdb
+echo -n " dev"
 dev_mkdb
+echo "."
 
 chmod 666 /dev/tty[pqrs]*
 
@@ -373,6 +383,10 @@ if [ "X${httpd_flags}" != X"NO"  ]; then
 	echo -n ' httpd';		/usr/sbin/httpd ${httpd_flags}
 fi
 
+if [ "X${ftpd_flags}" != X"NO" ]; then
+	echo -n ' ftpd';		/usr/libexec/ftpd ${ftpd_flags}
+fi
+
 # $smtpfwdd_flags is imported from /etc/rc.conf;
 # If $smtpfwdd_flags == NO, smtpfwdd isn't run.
 if [ "X${smtpfwdd_flags}" != X"NO" ]; then
@@ -467,7 +481,7 @@ date
 
 # Alternatively, on some architectures, xdm may be started in /etc/ttys.
 if [ "X${xdm_flags}" != X"NO" ]; then
-	echo 'starting xdm...';		/usr/X11R6/bin/xdm
+	echo 'starting xdm...';		/usr/X11R6/bin/xdm ${xdm_flags}
 fi
 
 exit 0

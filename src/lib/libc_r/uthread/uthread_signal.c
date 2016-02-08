@@ -29,6 +29,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
+ * $OpenBSD: uthread_signal.c,v 1.3 1999/01/06 05:29:28 d Exp $
  */
 #include <signal.h>
 #ifdef _THREAD_SAFE
@@ -44,7 +45,7 @@ _thread_sys_signal(int s, sig_t a)
 	/* Initialise the signal action structure: */
 	sigemptyset(&sa.sa_mask);
 	sa.sa_handler = a;
-	sa.sa_flags = SA_RESTART;
+	sa.sa_flags = 0;
 
 	/* Perform the sigaction syscall: */
 	if (_thread_sys_sigaction(s, &sa, &osa) < 0) {

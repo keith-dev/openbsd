@@ -1,4 +1,4 @@
-/*	$OpenBSD: afssys.c,v 1.7 1998/09/23 21:25:39 art Exp $	*/
+/*	$OpenBSD: afssys.c,v 1.10 1999/03/19 10:43:33 art Exp $	*/
 /*	$KTH: afssys.c,v 1.57 1998/05/09 17:19:03 joda Exp $	*/
 
 /*
@@ -85,5 +85,15 @@ k_setpag(void)
 int
 k_hasafs(void)
 {
-    return xfspioctl(AFSCALL_PROBE, NULL, 0, NULL, 0) == 0;
+    struct ViceIoctl parms;
+
+    bzero(&parms, sizeof(struct ViceIoctl));
+
+    k_pioctl(NULL, VIOCSETTOK, &parms, 0);
+
+    /*
+     * An ENOSYS means failure. Anything else is success (including EINVAL).
+     */
+
+    return errno != ENOSYS;
 }

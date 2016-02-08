@@ -1,4 +1,4 @@
-/*	$OpenBSD: mtree.c,v 1.8 1998/08/20 20:11:41 marc Exp $	*/
+/*	$OpenBSD: mtree.c,v 1.10 1999/01/24 10:26:54 rohee Exp $	*/
 /*	$NetBSD: mtree.c,v 1.7 1996/09/05 23:29:22 thorpej Exp $	*/
 
 /*-
@@ -44,7 +44,7 @@ static char copyright[] =
 #if 0
 static char sccsid[] = "@(#)mtree.c	8.1 (Berkeley) 6/6/93";
 #else
-static char rcsid[] = "$OpenBSD: mtree.c,v 1.8 1998/08/20 20:11:41 marc Exp $";
+static char rcsid[] = "$OpenBSD: mtree.c,v 1.10 1999/01/24 10:26:54 rohee Exp $";
 #endif
 #endif /* not lint */
 
@@ -151,7 +151,7 @@ main(argc, argv)
 	if (dir && chdir(dir))
 		error("%s: %s", dir, strerror(errno));
 
-	if ((cflag || sflag) && !getwd(fullpath))
+	if ((cflag || sflag) && !getcwd(fullpath, sizeof fullpath))
 		error("%s", fullpath);
 
 	if (cflag) {
@@ -168,6 +168,6 @@ static void
 usage()
 {
 	(void)fprintf(stderr,
-"usage: mtree [-cdeinrtUux] [-f spec] [-K key] [-k key] [-p path] [-s seed]\n");
+"usage: mtree [-cdeinqrtUux] [-f spec] [-K key] [-k key] [-p path] [-s seed]\n");
 	exit(1);
 }

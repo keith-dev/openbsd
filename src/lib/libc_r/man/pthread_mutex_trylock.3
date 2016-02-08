@@ -27,7 +27,7 @@
 .\"
 .Dd July 30, 1998
 .Dt PTHREAD_MUTEX_TRYLOCK 3
-.Os BSD 4
+.Os
 .Sh NAME
 .Nm pthread_mutex_trylock
 .Nd attempt to lock a mutex without blocking
@@ -57,16 +57,15 @@ The value specified by
 .Fa mutex
 is invalid.
 .It Bq Er EBUSY
-.Fa Mutex
+.Fa mutex
 is already locked.
 .El
 .Pp
 .Sh SEE ALSO
-.Xr pthreads 3 ,
-.Xr pthread_mutex_lock 3 ,
-.Xr pthread_mutex_unlock 3 ,
+.Xr pthread_mutex_destroy 3 ,
 .Xr pthread_mutex_init 3 ,
-.Xr pthread_mutex_destroy 3
+.Xr pthread_mutex_lock 3 ,
+.Xr pthread_mutex_unlock 3
 .Sh STANDARDS
 .Fn pthread_mutex_trylock
 conforms to ISO/IEC 9945-1 ANSI/IEEE

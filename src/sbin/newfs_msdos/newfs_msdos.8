@@ -1,4 +1,4 @@
-.\" $OpenBSD: newfs_msdos.8,v 1.5 1998/09/17 04:14:57 aaron Exp $
+.\" $OpenBSD: newfs_msdos.8,v 1.8 1998/12/15 01:20:40 aaron Exp $
 .\"
 .\" Copyright (c) 1995, 1996 Joerg Wunsch
 .\"
@@ -39,7 +39,7 @@
 .Bq Fl L Ar vollabel
 .Ar device
 .Sh DESCRIPTION
-.Nm newfs_msdos
+.Nm
 establishes a file system structure on
 .Ar device
 that is understood by
@@ -71,7 +71,7 @@ for the more common situations.
 Use
 .Ar vollabel
 to describe the file system, instead of the default
-.Ql 4.4BSD .
+.Dq 4.4BSD .
 .El
 .Pp
 The file system structure consists of three major areas:
@@ -99,7 +99,7 @@ one file.  There are usually two identical copies of the FAT.
 The final structure is the root directory for this medium.  It is
 merely a space reservation, padded with 0s, and unfortunately fixed
 in its size.
-.Nm newfs_msdos
+.Nm
 initializes it to empty, and enters a volume label record into the
 very first directory slot.
 .Sh DIAGNOSTICS
@@ -120,12 +120,12 @@ should be added to the table of known formats, too.
 .Pp
 No attempt is made to handle media defects.  However, this is beyond
 the scope of
-.Nm newfs_msdos
+.Nm
 and should better be handled by the (nonexistent)
 .Xr dosfsck 1
 utility.
 .Sh HISTORY
-.Nm newfs_msdos
+.Nm
 appeared in
 .Em FreeBSD 2.2 .
 .Sh AUTHOR

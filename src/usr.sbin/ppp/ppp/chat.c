@@ -23,10 +23,10 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- *	$Id: chat.c,v 1.1 1998/08/31 00:22:18 brian Exp $
+ *	$Id: chat.c,v 1.4 1999/02/12 00:53:08 brian Exp $
  */
 
-#include <sys/types.h>
+#include <sys/param.h>
 #include <netinet/in.h>
 #include <netinet/in_systm.h>
 #include <netinet/ip.h>
@@ -65,7 +65,11 @@
 #include "ipcp.h"
 #include "filter.h"
 #include "cbcp.h"
+#include "command.h"
 #include "datalink.h"
+#ifndef NORADIUS
+#include "radius.h"
+#endif
 #include "bundle.h"
 
 #define BUFLEFT(c) (sizeof (c)->buf - ((c)->bufend - (c)->buf))
@@ -429,6 +433,7 @@ chat_Read(struct descriptor *d, struct bundle *bundle, const fd_set *fdset)
       if (begin >= ebegin && begin < eend &&
           !strncmp(begin, c->argptr, c->arglen)) {
         /* Got it ! */
+        timer_Stop(&c->timeout);
         if (memchr(begin + c->arglen - 1, '\n',
             c->bufend - begin - c->arglen + 1) == NULL) { 
           /* force it into the log */
@@ -720,11 +725,13 @@ ExecStr(struct physical *physical, char *command, char *out, int olen)
 {
   pid_t pid;
   int fids[2];
-  char *vector[MAXARGS], *startout, *endout;
-  int stat, nb;
+  char *argv[MAXARGS], *vector[MAXARGS], *startout, *endout;
+  int stat, nb, argc;
 
   log_Printf(LogCHAT, "Exec: %s\n", command);
-  MakeArgs(command, vector, VECSIZE(vector));
+  argc = MakeArgs(command, vector, VECSIZE(vector));
+  command_Expand(argv, argc, (char const *const *)vector,
+                 physical->dl->bundle, 0);
 
   if (pipe(fids) < 0) {
     log_Printf(LogCHAT, "Unable to create pipe in ExecStr: %s\n",
@@ -745,8 +752,8 @@ ExecStr(struct physical *physical, char *command, char *out, int olen)
     else
       fcntl(3, F_SETFD, 1);	/* Set close-on-exec flag */
     setuid(geteuid());
-    execvp(vector[0], vector);
-    fprintf(stderr, "execvp failed: %s: %s\n", vector[0], strerror(errno));
+    execvp(argv[0], argv);
+    fprintf(stderr, "execvp: %s: %s\n", argv[0], strerror(errno));
     exit(127);
   } else {
     char *name = strdup(vector[0]);

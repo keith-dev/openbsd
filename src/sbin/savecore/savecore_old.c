@@ -1,4 +1,4 @@
-/*	$OpenBSD: savecore_old.c,v 1.12 1998/10/04 16:36:13 millert Exp $	*/
+/*	$OpenBSD: savecore_old.c,v 1.14 1999/02/23 07:40:29 deraadt Exp $	*/
 /*	$NetBSD: savecore_old.c,v 1.1.1.1 1996/03/16 10:25:11 leo Exp $	*/
 
 /*-
@@ -44,7 +44,7 @@ static char copyright[] =
 #if 0
 static char sccsid[] = "@(#)savecore.c	8.3 (Berkeley) 1/2/94";
 #else
-static char rcsid[] = "$OpenBSD: savecore_old.c,v 1.12 1998/10/04 16:36:13 millert Exp $";
+static char rcsid[] = "$OpenBSD: savecore_old.c,v 1.14 1999/02/23 07:40:29 deraadt Exp $";
 #endif
 #endif /* not lint */
 
@@ -66,6 +66,7 @@ static char rcsid[] = "$OpenBSD: savecore_old.c,v 1.12 1998/10/04 16:36:13 mille
 #include <string.h>
 #include <tzfile.h>
 #include <unistd.h>
+#include <vis.h>
 
 extern FILE *zopen __P((const char *fname, const char *mode, int bits));
 
@@ -234,8 +235,11 @@ kmem_setup()
 	} else {
 		current_sys = _PATH_UNIX;
 	}
-	if ((nlist(current_sys, current_nl)) == -1)
+	if ((nlist(current_sys, current_nl)) == -1) {
 		syslog(LOG_ERR, "%s: nlist: %m", current_sys);
+		if (errno == ENOENT)
+			exit(1);
+	}
 	for (i = 0; cursyms[i] != -1; i++)
 		if (current_nl[cursyms[i]].n_value == 0) {
 			syslog(LOG_ERR, "%s: %s not in namelist",
@@ -245,8 +249,11 @@ kmem_setup()
 
 	dump_sys = kernel ? kernel : _PATH_UNIX;
 
-	if ((nlist(dump_sys, dump_nl)) == -1)
-		syslog(LOG_ERR, "%s: nlist: %s", dump_sys, strerror(errno));
+	if ((nlist(dump_sys, dump_nl)) == -1) {
+		syslog(LOG_ERR, "%s: nlist: %m", dump_sys);
+		if (errno == ENOENT)
+			exit(1);
+	}
 	for (i = 0; dumpsyms[i] != -1; i++)
 		if (dump_nl[dumpsyms[i]].n_value == 0) {
 			syslog(LOG_ERR, "%s: %s not in namelist",
@@ -298,19 +305,39 @@ check_kmem()
 	}
 	fseek(fp, (off_t)(dumplo + ok(dump_nl[X_VERSION].n_value)), SEEK_SET);
 	fgets(core_vers, sizeof(core_vers), fp);
-	if (strcmp(vers, core_vers) && kernel == 0)
+
+	if (strcmp(vers, core_vers) && kernel == 0) {
+		char *p;
+
+		p = strchr(vers, '\n');
+		if (p)
+			*p = '\0';
+		p = strchr(core_vers, '\n');
+		if (p)
+			*p = '\0';
 		syslog(LOG_WARNING,
 		    "warning: %s version mismatch:\n\t%s\nand\t%s\n",
 		    _PATH_UNIX, vers, core_vers);
+	}
+
 	(void)fseek(fp,
 	    (off_t)(dumplo + ok(dump_nl[X_PANICSTR].n_value)), SEEK_SET);
 	(void)fread(&panicstr, sizeof(panicstr), 1, fp);
 	if (panicstr) {
+		char	c, visout[5];
+
+		cp       = panic_mesg;
 		(void)fseek(fp, dumplo + ok(panicstr), SEEK_SET);
 		cp = panic_mesg;
-		do
-			*cp = getc(fp);
-		while (*cp++ && cp < &panic_mesg[sizeof(panic_mesg)]);
+		do {
+			c = getc(fp);
+			vis(visout, c, VIS_SAFE|VIS_NOSLASH, 0);
+			if (c && cp + strlen(visout) <
+			    &panic_mesg[sizeof(panic_mesg)]) {
+				strcat(cp, visout);
+				cp += strlen(visout);
+			}
+		} while (c && cp < &panic_mesg[sizeof(panic_mesg)]);
 	}
 	/* Don't fclose(fp), we use dumpfd later. */
 }
@@ -377,7 +404,7 @@ save_core()
 		goto err1;
 	if (fgets(buf, sizeof(buf), fp) == NULL) {
 		if (ferror(fp))
-err1:			syslog(LOG_WARNING, "%s: %s", path, strerror(errno));
+err1:			syslog(LOG_WARNING, "%s: %m", path);
 		bounds = 0;
 	} else
 		bounds = atoi(buf);
@@ -396,7 +423,7 @@ err1:			syslog(LOG_WARNING, "%s: %s", path, strerror(errno));
 	    dirname, _PATH_UNIX, bounds, compress ? ".Z" : "");
 	if (compress) {
 		if ((fp = zopen(path, "w", 0)) == NULL) {
-			syslog(LOG_ERR, "%s: %s", path, strerror(errno));
+			syslog(LOG_ERR, "%s: %m", path);
 			exit(1);
 		}
 	} else
@@ -452,7 +479,7 @@ err2:			syslog(LOG_WARNING,
 	    dirname, _PATH_UNIX, bounds, compress ? ".Z" : "");
 	if (compress) {
 		if ((fp = zopen(path, "w", 0)) == NULL) {
-			syslog(LOG_ERR, "%s: %s", path, strerror(errno));
+			syslog(LOG_ERR, "%s: %m", path);
 			exit(1);
 		}
 	} else
@@ -473,10 +500,8 @@ err2:			syslog(LOG_WARNING,
 		}
 	}
 	if (nr < 0) {
-		syslog(LOG_ERR, "%s: %s",
-		    kernel ? kernel : _PATH_UNIX, strerror(errno));
-		syslog(LOG_WARNING,
-		    "WARNING: kernel may be incomplete");
+		syslog(LOG_ERR, "%s: %m", kernel ? kernel : _PATH_UNIX);
+		syslog(LOG_WARNING, "WARNING: kernel may be incomplete");
 		exit(1);
 	}
 	if (compress)
@@ -497,14 +522,14 @@ find_dev(dev, type)
 	char *dp, devname[MAXPATHLEN + 1];
 
 	if ((dfd = opendir(_PATH_DEV)) == NULL) {
-		syslog(LOG_ERR, "%s: %s", _PATH_DEV, strerror(errno));
+		syslog(LOG_ERR, "%s: %m", _PATH_DEV);
 		exit(1);
 	}
 	(void)strcpy(devname, _PATH_DEV);
 	while ((dir = readdir(dfd))) {
 		(void)strcpy(devname + sizeof(_PATH_DEV) - 1, dir->d_name);
 		if (lstat(devname, &sb)) {
-			syslog(LOG_ERR, "%s: %s", devname, strerror(errno));
+			syslog(LOG_ERR, "%s: %m", devname);
 			continue;
 		}
 		if ((sb.st_mode & S_IFMT) != type)
@@ -512,7 +537,7 @@ find_dev(dev, type)
 		if (dev == sb.st_rdev) {
 			closedir(dfd);
 			if ((dp = strdup(devname)) == NULL) {
-				syslog(LOG_ERR, "%s", strerror(errno));
+				syslog(LOG_ERR, "%s", strerror(ENOMEM));
 				exit(1);
 			}
 			return (dp);
@@ -536,7 +561,7 @@ rawname(s)
 	}
 	(void)snprintf(name, sizeof(name), "%.*s/r%s", sl - s, s, sl + 1);
 	if ((sl = strdup(name)) == NULL) {
-		syslog(LOG_ERR, "%s", strerror(errno));
+		syslog(LOG_ERR, "%s", strerror(ENOMEM));
 		exit(1);
 	}
 	return (sl);

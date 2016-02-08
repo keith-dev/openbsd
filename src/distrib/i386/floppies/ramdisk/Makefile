@@ -1,4 +1,4 @@
-#	$OpenBSD: Makefile,v 1.29 1998/10/24 23:28:35 deraadt Exp $
+#	$OpenBSD: Makefile,v 1.32 1999/04/10 02:16:13 deraadt Exp $
 
 TOP=		${.CURDIR}/..
 
@@ -45,7 +45,7 @@ ${FS}:	bsd.gz
 	rm ${REALIMAGE}
 
 DISKTYPE=       rdroot
-NBLKS=          3560
+NBLKS=          3510
 # minfree, opt, b/i  trks, sects, cpg
 NEWFSARGS= -m 0 -o space -c 16 -i 4096
 
@@ -92,6 +92,7 @@ unconfig:
 .PRECIOUS:	${IMAGE}
 
 install:
+	cp bsd.rd ${DESTDIR}/snapshot/bsd.rd
 	cp ${FS} ${DESTDIR}/snapshot/${FS}
 
 ${CBIN}.mk ${CBIN}.cache ${CBIN}.c: ${CRUNCHCONF}

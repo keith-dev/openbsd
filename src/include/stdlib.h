@@ -1,4 +1,4 @@
-/*	$OpenBSD: stdlib.h,v 1.7 1998/02/07 02:16:26 millert Exp $	*/
+/*	$OpenBSD: stdlib.h,v 1.9 1999/02/25 21:40:15 millert Exp $	*/
 /*	$NetBSD: stdlib.h,v 1.25 1995/12/27 21:19:08 jtc Exp $	*/
 
 /*-
@@ -105,6 +105,7 @@ void	*malloc __P((size_t));
 void	 qsort __P((void *, size_t, size_t,
 	    int (*)(const void *, const void *)));
 int	 rand __P((void));
+int	 rand_r __P((unsigned int *));
 void	*realloc __P((void *, size_t));
 void	 srand __P((unsigned));
 double	 strtod __P((const char *, char **));
@@ -128,16 +129,16 @@ void  *alloca __P((size_t));
 #endif /* __GNUC__ */ 
 
 char	*getbsize __P((int *, long *));
-char	*cgetcap __P((char *, char *, int));
+char	*cgetcap __P((char *, const char *, int));
 int	 cgetclose __P((void));
-int	 cgetent __P((char **, char **, char *));
+int	 cgetent __P((char **, char **, const char *));
 int	 cgetfirst __P((char **, char **));
-int	 cgetmatch __P((char *, char *));
+int	 cgetmatch __P((char *, const char *));
 int	 cgetnext __P((char **, char **));
-int	 cgetnum __P((char *, char *, long *));
-int	 cgetset __P((char *));
-int	 cgetstr __P((char *, char *, char **));
-int	 cgetustr __P((char *, char *, char **));
+int	 cgetnum __P((char *, const char *, long *));
+int	 cgetset __P((const char *));
+int	 cgetstr __P((char *, const char *, char **));
+int	 cgetustr __P((char *, const char *, char **));
 
 int	 daemon __P((int, int));
 char	*devname __P((int, int));

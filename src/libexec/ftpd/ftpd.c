@@ -1,4 +1,4 @@
-/*	$OpenBSD: ftpd.c,v 1.49 1998/07/23 08:13:38 deraadt Exp $	*/
+/*	$OpenBSD: ftpd.c,v 1.53 1999/02/26 00:15:54 art Exp $	*/
 /*	$NetBSD: ftpd.c,v 1.15 1995/06/03 22:46:47 mycroft Exp $	*/
 
 /*
@@ -106,7 +106,7 @@ static char rcsid[] = "$NetBSD: ftpd.c,v 1.15 1995/06/03 22:46:47 mycroft Exp $"
 #include <varargs.h>
 #endif
 
-static char version[] = "Version 6.3/OpenBSD";
+static char version[] = "Version 6.4/OpenBSD";
 
 extern	off_t restart_point;
 extern	char cbuf[];
@@ -231,9 +231,9 @@ void	 logxfer __P((char *, off_t, time_t));
 static char *
 curdir()
 {
-	static char path[MAXPATHLEN+1+1];	/* path + '/' + '\0' */
+	static char path[MAXPATHLEN+1];	/* path + '/' */
 
-	if (getcwd(path, sizeof(path)-2) == NULL)
+	if (getcwd(path, sizeof(path)-1) == NULL)
 		return ("");
 	if (path[1] != '\0')		/* special case for root dir. */
 		strcat(path, "/");
@@ -309,7 +309,7 @@ main(argc, argv, envp)
 			long val = 0;
 
 			val = strtol(optarg, &optarg, 8);
-			if (*optarg != '\0' || val < 0)
+			if (*optarg != '\0' || val < 0 || (val & ~ACCESSPERMS))
 				warnx("bad value for -u");
 			else
 				defumask = val;
@@ -483,16 +483,16 @@ main(argc, argv, envp)
 	/* Make sure hostname is fully qualified. */
 	hp = gethostbyname(hostname);
 	if (hp != NULL)
-		strcpy (hostname, hp->h_name);
+		strcpy(hostname, hp->h_name);
 
 	if (multihome) {
 		hp = gethostbyaddr((char *) &ctrl_addr.sin_addr,
-				   sizeof (struct in_addr), AF_INET);
+		    sizeof (struct in_addr), AF_INET);
 		if (hp != NULL) {
-			strcpy (dhostname, hp->h_name);
+			strcpy(dhostname, hp->h_name);
 		} else {
 			/* Default. */
-			strcpy (dhostname, inet_ntoa(ctrl_addr.sin_addr));
+			strcpy(dhostname, inet_ntoa(ctrl_addr.sin_addr));
 		}
 	}
 
@@ -827,14 +827,14 @@ skip:
 			struct stat ts;
 
 			/* Compute root directory. */
-			snprintf (rootdir, sizeof(rootdir), "%s/%s",
+			snprintf(rootdir, sizeof(rootdir), "%s/%s",
 				  pw->pw_dir, dhostname);
 			if (stat(rootdir, &ts) < 0) {
-				snprintf (rootdir, sizeof(rootdir), "%s/%s",
+				snprintf(rootdir, sizeof(rootdir), "%s/%s",
 					  pw->pw_dir, hostname);
 			}
 		} else
-			strcpy (rootdir, pw->pw_dir);
+			strcpy(rootdir, pw->pw_dir);
 	}
 	if (guest) {
 		/*
@@ -1719,9 +1719,9 @@ removedir(name)
 void
 pwd()
 {
-	char path[MAXPATHLEN + 1];
+	char path[MAXPATHLEN];
 
-	if (getwd(path) == (char *)NULL)
+	if (getcwd(path, sizeof path) == (char *)NULL)
 		reply(550, "%s.", path);
 	else
 		replydirname(path, "is current directory.");

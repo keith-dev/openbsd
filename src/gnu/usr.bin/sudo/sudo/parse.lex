@@ -1,8 +1,9 @@
 %{
-/*      $OpenBSD: parse.lex,v 1.6 1998/09/15 02:42:44 millert Exp $     */
+/*	$OpenBSD: parse.lex,v 1.10 1999/03/29 20:29:05 millert Exp $	*/
 
 /*
- *  CU sudo version 1.5.6
+ *  CU sudo version 1.5.9
+ *  Copyright (c) 1996, 1998, 1999 Todd C. Miller <Todd.Miller@courtesan.com>
  *
  *  This program is free software; you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License as published by
@@ -27,10 +28,6 @@
  * Chris Jepeway <jepeway@cs.utk.edu>
  */
 
-#ifndef lint
-static char rcsid[] = "$From: parse.lex,v 1.78 1998/09/07 03:09:49 millert Exp $";
-#endif /* lint */
-
 #include "config.h"
 
 #ifdef STDC_HEADERS
@@ -50,8 +47,11 @@ static char rcsid[] = "$From: parse.lex,v 1.78 1998/09/07 03:09:49 millert Exp $
 #include <sys/param.h>
 #include <netinet/in.h>
 #include "sudo.h"
-#include <options.h>
 #include "sudo.tab.h"
+
+#ifndef lint
+static const char rcsid[] = "$Sudo: parse.lex,v 1.88 1999/03/29 04:05:10 millert Exp $";
+#endif /* lint */
 
 #undef yywrap		/* guard against a yywrap macro */
 
@@ -124,7 +124,7 @@ WORD			[[:alnum:]_-]+
 			    return(COMMENT);
 			}			/* return comments */
 
-<GOTCMND>[^:\, \t\n]+ {
+<GOTCMND>[^\\:, \t\n]+ {
 			    LEXTRACE("ARG ");
 			    fill_args(yytext, yyleng, sawspace);
 			    sawspace = FALSE;
@@ -325,9 +325,11 @@ static void fill_args(s, len, addspace)
 	    while (new_len >= (arg_size += COMMANDARGINC))
 		;
 
-	    yylval.command.args = (char *) realloc(yylval.command.args, arg_size);
-	    if (yylval.command.args == NULL)
+	    if ((p = (char *) realloc(yylval.command.args, arg_size)) == NULL) {
+		(void) free(yylval.command.args);
 		yyerror("unable to allocate memory");
+	    } else
+		yylval.command.args = p;
 	}
     }
 

@@ -1,4 +1,4 @@
-#	$OpenBSD: install.md,v 1.41 1998/10/07 18:42:08 millert Exp $
+#	$OpenBSD: install.md,v 1.48 1999/04/07 22:58:12 millert Exp $
 #
 #
 # Copyright rc) 1996 The NetBSD Foundation, Inc.
@@ -41,19 +41,18 @@
 #
 
 # Machine-dependent install sets
-MDSETS="kernel"
+MDSETS=kernel
 
 md_set_term() {
-	if [ ! -z "$TERM" ]; then
-		return
-	fi
+	test -n "$TERM" && return
 	echo -n "Specify terminal type [pcvt25]: "
-	getresp "pcvt25"
-	TERM="$resp"
+	getresp pcvt25
+	TERM=$resp
 	export TERM
 }
 
 md_makerootwritable() {
+	:
 }
 
 md_machine_arch() {
@@ -72,17 +71,17 @@ md_get_cddevs() {
 
 md_get_partition_range() {
     # return range of valid partition letters
-    echo "[a-p]"
+    echo [a-p]
 }
 
 md_installboot() {
-	echo "Installing boot block..."
+	echo Installing boot block...
 	cp /usr/mdec/boot /mnt/boot
 	/usr/mdec/installboot -v /mnt/boot /usr/mdec/biosboot ${1}
 
 	echo
-	echo -n "Do you expect to run X windows on this machine? [y or n] "
-	getresp "n"
+	echo -n "Do you expect to run the X Window System on this machine? [y or n] "
+	getresp n
 	case "$resp" in
 		y*|Y*)
 			echo "Enabling machdep.allowaperture. Read xf86(4) for more information."
@@ -98,11 +97,11 @@ q' | ed /mnt/etc/sysctl.conf 2> /dev/null
 }
 
 md_native_fstype() {
-    echo "msdos"
+    echo msdos
 }
 
 md_native_fsopts() {
-    echo "ro"
+    echo ro
 }
 
 md_checkfordisklabel() {
@@ -124,14 +123,22 @@ md_checkfordisklabel() {
 
 md_prep_fdisk()
 {
-	local _disk
-	local _done
+	local _disk=$1 _whole=$2
 
-	_disk=$1
+	if [ -n "$_whole" ]; then
+		echo
+		echo Updating MBR based on BIOS geometry.
+		fdisk -e ${_disk} << __EOC
+reinit
+update
+write
+quit
+__EOC
 
-	_done=0
-	echo
-	cat << \__md_prep_fdisk_1
+	else
+
+		echo
+		cat << __EOT
 A single OpenBSD partition with id 'A6' ('OpenBSD') should exist in the MBR.
 All of your OpenBSD partitions will be contained _within_ this partition,
 including your swap space.  In the normal case it should be the only partition
@@ -141,12 +148,13 @@ other.  [If this is a new install, you are most likely going to want to type
 the following fdisk commands: reinit, update, write, quit. Use the 'manual'
 command to read a full description.]  The current partition information is:
 
-__md_prep_fdisk_1
-	fdisk ${_disk}
-	echo
-	fdisk -e ${_disk}
+__EOT
+		fdisk ${_disk}
+		echo
+		fdisk -e ${_disk}
+	fi
 
-	echo "Here is the partition information you chose:"
+	echo Here is the partition information you chose:
 	echo
 	fdisk ${_disk}
 	echo
@@ -154,12 +162,16 @@ __md_prep_fdisk_1
 
 md_prep_disklabel()
 {
-	local _disk
+	local _disk=$1
 
-	_disk=$1
-	md_prep_fdisk ${_disk}
+	echo -n 'Do you want to use the *entire* disk for OpenBSD? [no] '
+	getresp "no"
+	case $resp in
+		y*|Y*)	md_prep_fdisk ${_disk} Y ;;
+		*)	md_prep_fdisk ${_disk} ;;
+	esac
 
-	cat << \__md_prep_disklabel_1
+	cat << __EOT
 
 Inside the BIOS 'A6' ('OpenBSD') partition you just created, there resides an
 OpenBSD partition table which defines how this BIOS partition is to be split
@@ -168,66 +180,64 @@ space, and any other partitions you might create.  (NOTE: The OpenBSD disk
 label offsets are absolute, ie. relative to the start of the disk... NOT
 relative to the start of the BIOS 'A6' partition).
 
-__md_prep_disklabel_1
+__EOT
 
 	md_checkfordisklabel $_disk
 	case $? in
 	0)
 		;;
 	1)
-		echo "WARNING: Disk $_disk has no label. You will be creating a new one."
+		echo WARNING: Disk $_disk has no label. You will be creating a new one.
 		echo
 		;;
 	2)
-		echo "WARNING: Label on disk $_disk is corrupted. You will be repairing."
+		echo WARNING: Label on disk $_disk is corrupted. You will be repairing.
 		echo
 		;;
 	esac
 
 	# display example
-	cat << \__md_prep_disklabel_1
+	cat << __EOT
 If this disk is shared with other operating systems, those operating systems
 should have a BIOS partition entry that spans the space they occupy completely.
 For safety, also make sure all OpenBSD file systems are within the offset and
 size specified in the 'A6' BIOS partition table.  (By default, the disklabel
 editor will try to enforce this).  If you are unsure of how to use multiple
-partitions properly (ie. seperating /,  /usr, /tmp, /var, /usr/local, and other
+partitions properly (ie. separating /,  /usr, /tmp, /var, /usr/local, and other
 things) just split the space into a root and swap partition for now.
 
-__md_prep_disklabel_1
-	disklabel -E ${_disk}
+__EOT
+	disklabel -f /tmp/fstab.${_disk} -E ${_disk}
 }
 
 md_copy_kernel() {
-	#echo -n "Copying kernel..."
-	#cp -p /bsd /mnt/bsd
-	#echo "done."
+	check_kernel
 }
 
 md_welcome_banner() {
 {
-	if [ "$MODE" = "install" ]; then
-		echo "Welcome to the OpenBSD/i386 ${VERSION_MAJOR}.${VERSION_MINOR} installation program."
-		cat << \__welcome_banner_1
+	if [ "$MODE" = install ]; then
+		cat << __EOT
+Welcome to the OpenBSD/i386 ${VERSION_MAJOR}.${VERSION_MINOR} installation program.
 
 This program is designed to help you put OpenBSD on your disk in a simple and
 rational way.
-__welcome_banner_1
+__EOT
 
 	else
-		echo ""
-		echo "Welcome to the OpenBSD/i386 ${VERSION_MAJOR}.${VERSION_MINOR} upgrade program."
-		cat << \__welcome_banner_2
+		cat << __EOT
+Welcome to the OpenBSD/i386 ${VERSION_MAJOR}.${VERSION_MINOR} upgrade program.
 
 This program is designed to help you upgrade your OpenBSD system in a simple
-and rational way.  As a reminder, installing the `etc' binary set is NOT
+and rational way.  As a reminder, installing the 'etc' binary set is NOT
 recommended.  Once the rest of your system has been upgraded, you should
-manually merge any changes to files in the `etc' set into those files which
+manually merge any changes to files in the 'etc' set into those files which
 already exist on your system.
-__welcome_banner_2
+
+__EOT
 	fi
 
-cat << \__welcome_banner_3
+cat << __EOT
 
 As with anything which modifies your disk's contents, this program can cause
 SIGNIFICANT data loss, and you are advised to make sure your data is backed
@@ -239,39 +249,39 @@ to hit return.  Also, quitting in the middle of installation may leave your
 system in an inconsistent state.  If you hit Control-C and restart the
 install, the install program will remember many of your old answers.
 
-__welcome_banner_3
+__EOT
 } | more
 }
 
 md_not_going_to_install() {
-	cat << \__not_going_to_install_1
+	cat << __EOT
 
-OK, then.  Enter `halt' at the prompt to halt the machine.  Once the machine
+OK, then.  Enter 'halt' at the prompt to halt the machine.  Once the machine
 has halted, power-cycle the system to load new boot code.
 
-__not_going_to_install_1
+__EOT
 }
 
 md_congrats() {
 	local what;
-	if [ "$MODE" = "install" ]; then
-		what="installed";
+	if [ "$MODE" = install ]; then
+		what=installed
 	else
-		what="upgraded";
+		what=upgraded
 	fi
-	cat << __congratulations_1
+	cat << __EOT
 
 CONGRATULATIONS!  You have successfully $what OpenBSD!  To boot the
 installed system, enter halt at the command prompt. Once the system has
 halted, reset the machine and boot from the disk.
 
-__congratulations_1
+__EOT
 }
 
 hostname() {
 	case $# in
 		0)      cat /kern/hostname ;;
 		1)      echo "$1" > /kern/hostname ;;
-		*)      echo "usage: hostname [name-of-host]"
+		*)      echo usage: hostname [name-of-host]
 	esac
 }

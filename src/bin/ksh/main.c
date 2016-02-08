@@ -1,4 +1,4 @@
-/*	$OpenBSD: main.c,v 1.10 1998/06/25 19:02:10 millert Exp $	*/
+/*	$OpenBSD: main.c,v 1.13 1999/01/10 17:55:03 millert Exp $	*/
 
 /*
  * startup, main loop, enviroments and error handling
@@ -37,10 +37,22 @@ static const char version_param[] =
 #endif /* KSH */
 	;
 
+/*
+MAILCHECK:
+    typeset -i MAILCHECK
+    : "${MAILCHECK=600}"
+SECONDS:
+    typeset -i SECONDS
+    initialize seconds to $SECONDS
+TMOUT:
+    typeset -i
+    do setspec
+*/
+
 static const char *const initcoms [] = {
 	"typeset", "-x", "SHELL", "PATH", "HOME", NULL,
 	"typeset", "-r", version_param, NULL,
-	"typeset", "-ri", "PPID", NULL,
+	"typeset", "-i", "PPID", NULL,
 	"typeset", "-i", "OPTIND=1",
 #ifdef KSH
 	    "MAILCHECK=600", "RANDOM", "SECONDS=0", "TMOUT=0",
@@ -94,6 +106,7 @@ main(argc, argv)
 	int restricted, errexit;
 	char **wp;
 	struct env env;
+	pid_t ppid;
 
 #ifdef MEM_DEBUG
 	chmem_set_defaults("ct", 1);
@@ -173,6 +186,7 @@ main(argc, argv)
 	 */
 	{
 		struct tbl *vp = global("PATH");
+		/* SETSTR: can't fail */
 		setstr(vp, def_path);
 	}
 
@@ -239,12 +253,15 @@ main(argc, argv)
 		 * bogus value
 		 */
 		if (current_wd[0] || pwd != null)
+			/* SETSTR: can't fail */
 			setstr(pwd_v, current_wd);
 	}
-	setint(global("PPID"), (long) getppid());
+	ppid = getppid();
+	setint(global("PPID"), (long) ppid);
 #ifdef KSH
-	setint(global("RANDOM"), (long) time((time_t *)0));
+	setint(global("RANDOM"), (long) (time((time_t *)0) * kshpid * ppid));
 #endif /* KSH */
+	/* SETSTR: can't fail */
 	setstr(global(version_param), ksh_version);
 
 	/* execute initialization statements */
@@ -265,6 +282,7 @@ main(argc, argv)
 		 */
 		if (!(vp->flag & ISSET)
 		    || (!ksheuid && !strchr(str_val(vp), '#')))
+			/* SETSTR: can't fail */
 			setstr(vp, safe_prompt);
 	}
 
@@ -579,11 +597,12 @@ shell(s, toplevel)
 		if (trap)
 			runtraps(0);
 
-		if (s->next == NULL)
+		if (s->next == NULL) {
 			if (Flag(FVERBOSE))
 				s->flags |= SF_ECHO;
 			else
 				s->flags &= ~SF_ECHO;
+		}
 
 		if (interactive) {
 			j_notify();

@@ -1,4 +1,4 @@
-/*	$OpenBSD: tape.c,v 1.7 1998/04/26 18:11:04 deraadt Exp $	*/
+/*	$OpenBSD: tape.c,v 1.10 1999/02/28 06:50:14 deraadt Exp $	*/
 /*	$NetBSD: tape.c,v 1.11 1997/06/05 11:13:26 lukem Exp $	*/
 
 /*-
@@ -38,7 +38,7 @@
 #if 0
 static char sccsid[] = "@(#)tape.c	8.2 (Berkeley) 3/17/94";
 #else
-static char rcsid[] = "$OpenBSD: tape.c,v 1.7 1998/04/26 18:11:04 deraadt Exp $";
+static char rcsid[] = "$OpenBSD: tape.c,v 1.10 1999/02/28 06:50:14 deraadt Exp $";
 #endif
 #endif /* not lint */
 
@@ -287,7 +287,7 @@ statussig(notused)
 	deltat = tstart_writing - tnow + (1.0 * (tnow - tstart_writing))
 		/ blockswritten * tapesize;
 	(void)snprintf(msgbuf, sizeof(msgbuf),
-	    "%3.2f%% done at %ld KB/s, finished in %d:%02d\n",
+	    "%3.2f%% done at %d KB/s, finished in %d:%02d\n",
 	    (blockswritten * 100.0) / tapesize,
 	    (spcl.c_tapea - tapea_volume) / (tnow - tstart_volume),
 	    (int)(deltat / 3600), (int)((deltat % 3600) / 60));
@@ -481,7 +481,7 @@ rollforward()
 			q += q->count;
 		}
 		if (prev == NULL)
-			quit("rollforward: protocol botch");
+			quit("rollforward: protocol botch\n");
 		if (prev->dblk != 0)
 			prev->count -= 1;
 		else
@@ -794,8 +794,10 @@ killall()
 	register int i;
 
 	for (i = 0; i < SLAVES; i++)
-		if (slaves[i].pid > 0)
+		if (slaves[i].pid > 0) {
 			(void) kill(slaves[i].pid, SIGKILL);
+			slaves[i].pid = 0;
+		}
 }
 
 /*
@@ -811,7 +813,8 @@ doslave(cmd, slave_number)
         int slave_number;
 {
 	register int nread;
-	int nextslave, size, wrote, eot_count;
+	int nextslave, size, eot_count;
+	volatile int wrote;
 	sigset_t sigset;
 
 	/*

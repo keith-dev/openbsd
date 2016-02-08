@@ -1,7 +1,8 @@
-/*	$OpenBSD: tgetpass.c,v 1.10 1998/09/15 02:42:45 millert Exp $	*/
+/*	$OpenBSD: tgetpass.c,v 1.14 1999/03/29 20:29:07 millert Exp $	*/
 
 /*
- *  CU sudo version 1.5.6
+ *  CU sudo version 1.5.9
+ *  Copyright (c) 1996, 1998, 1999 Todd C. Miller <Todd.Miller@courtesan.com>
  *
  *  This program is free software; you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License as published by
@@ -27,10 +28,6 @@
  *
  *  Todd C. Miller  Sun Jun  5 17:22:31 MDT 1994
  */
-
-#ifndef lint
-static char rcsid[] = "$From: tgetpass.c,v 1.63 1998/09/09 00:43:49 millert Exp $";
-#endif /* lint */
 
 #include "config.h"
 
@@ -58,6 +55,7 @@ static char rcsid[] = "$From: tgetpass.c,v 1.63 1998/09/09 00:43:49 millert Exp 
 #include <sys/select.h>
 #endif /* HAVE_SYS_SELECT_H */
 #include <sys/time.h>
+#include <errno.h>
 #include <signal.h>
 #include <fcntl.h>
 #ifdef HAVE_TERMIOS_H
@@ -70,14 +68,14 @@ static char rcsid[] = "$From: tgetpass.c,v 1.63 1998/09/09 00:43:49 millert Exp 
 #include <sys/ioctl.h>
 #endif /* HAVE_TERMIO_H */
 #endif /* HAVE_TERMIOS_H */
-#if (SHADOW_TYPE == SPW_SECUREWARE)
+#ifdef HAVE_GETPRPWNAM
 #  ifdef __hpux
 #    include <hpsecurity.h>
 #  else
 #    include <sys/security.h>
-#  endif /* __hpux */ 
-#  include <prot.h>
-#endif /* SPW_SECUREWARE */
+#  endif /* __hpux */
+#  include <prot.h>			/* for AUTH_MAX_PASSWD_LENGTH */
+#endif /* HAVE_GETPRPWNAM */
 
 #include <pathnames.h>
 #include "compat.h"
@@ -85,6 +83,10 @@ static char rcsid[] = "$From: tgetpass.c,v 1.63 1998/09/09 00:43:49 millert Exp 
 #ifndef TCSASOFT
 #define TCSASOFT	0
 #endif /* TCSASOFT */
+
+#ifndef lint
+static const char rcsid[] = "$Sudo: tgetpass.c,v 1.76 1999/03/29 04:05:13 millert Exp $";
+#endif /* lint */
 
 
 /******************************************************************
@@ -96,11 +98,9 @@ static char rcsid[] = "$From: tgetpass.c,v 1.63 1998/09/09 00:43:49 millert Exp 
  *  and input will time out based on the value of timeout.
  */
 
-char * tgetpass(prompt, timeout, user, host)
+char * tgetpass(prompt, timeout)
     const char *prompt;
     int timeout;
-    char *user;
-    char *host;
 {
 #ifdef HAVE_TERMIOS_H
     struct termios term;
@@ -122,7 +122,6 @@ char * tgetpass(prompt, timeout, user, host)
     static char buf[_PASSWD_LEN + 1];
     fd_set *readfds;
     struct timeval tv;
-    char *p;
 
     /*
      * mask out SIGINT and SIGTSTP, should probably just catch and deal.
@@ -145,30 +144,12 @@ char * tgetpass(prompt, timeout, user, host)
 	output = stderr;
     } else {
 	output = input;
+	setbuf(output, NULL);
     }
 
-    /*
-     * print the prompt
-     */
-    if (prompt) {
-	p = (char *) prompt;
-	do {
-	    /* expand %u -> username, %h -> host */
-	    switch (*p) {
-		case '%':   if (user && *(p+1) == 'u') {
-				(void) fputs(user, output);
-				p++;
-				break;
-			    } else if (host && *(p+1) == 'h') {
-				(void) fputs(host, output);
-				p++;
-				break;
-			    }
-
-		default:    (void) fputc(*p, output);
-	    }
-	} while (*(++p));
-    }
+    /* print the prompt */
+    if (prompt)
+	fputs(prompt, output);
 
     /* rewind if necesary */
     if (input == output) {
@@ -223,8 +204,10 @@ char * tgetpass(prompt, timeout, user, host)
 	 * get password or return empty string if nothing to read by timeout
 	 */
 	buf[0] = '\0';
-	if (select(fileno(input) + 1, readfds, 0, 0, &tv) > 0 &&
-	    fgets(buf, sizeof(buf), input)) {
+	while ((n = select(fileno(input) + 1, readfds, 0, 0, &tv)) == -1 &&
+	    errno == EINTR)
+	    ;
+	if (n != 0 && fgets(buf, sizeof(buf), input)) {
 	    n = strlen(buf);
 	    if (buf[n - 1] == '\n')
 		buf[n - 1] = '\0';

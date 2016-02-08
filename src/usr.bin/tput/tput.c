@@ -1,4 +1,4 @@
-/*	$OpenBSD: tput.c,v 1.5 1997/06/24 02:40:15 dgregor Exp $	*/
+/*	$OpenBSD: tput.c,v 1.7 1999/03/06 20:27:42 millert Exp $	*/
 /*	$NetBSD: tput.c,v 1.8 1995/08/31 22:11:37 jtc Exp $	*/
 
 /*-
@@ -44,7 +44,7 @@ static char copyright[] =
 #if 0
 static char sccsid[] = "@(#)tput.c	8.3 (Berkeley) 4/28/95";
 #endif
-static char rcsid[] = "$OpenBSD: tput.c,v 1.5 1997/06/24 02:40:15 dgregor Exp $";
+static char rcsid[] = "$OpenBSD: tput.c,v 1.7 1999/03/06 20:27:42 millert Exp $";
 #endif /* not lint */
 
 #include <termios.h>

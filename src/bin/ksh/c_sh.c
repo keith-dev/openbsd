@@ -1,4 +1,4 @@
-/*	$OpenBSD: c_sh.c,v 1.7 1998/06/25 19:01:46 millert Exp $	*/
+/*	$OpenBSD: c_sh.c,v 1.11 1999/01/10 17:55:02 millert Exp $	*/
 
 /*
  * built-in Bourne commands
@@ -394,7 +394,7 @@ c_read(wp)
 		}
 		if (Flag(FEXPORT))
 			typeset(*wp, EXPORT, 0, 0, 0);
-		setstr(vp, Xstring(cs, cp));
+		setstr(vp, Xstring(cs, cp)); /* SETSTR: fail */
 	}
 
 	shf_flush(shf);
@@ -424,8 +424,24 @@ c_eval(wp)
 
 	if (ksh_getopt(wp, &builtin_opt, null) == '?')
 		return 1;
+	/* XXX what is this?
+	{
+	    int i;
+	    for (i = builtin_opt.optind; wp[i]; i++)
+		shellf("eval[%s]\n", wp[i]);
+	}
+	*/
 	s = pushs(SWORDS, ATEMP);
 	s->u.strv = wp + builtin_opt.optind;
+	/*
+	 * Handle case where command is empty due to failed
+	 * command substitution, eg, eval "$(false)".
+	 * In this case, shell() will not set/change exstat (cause
+	 * compiled tree is empty), so will use this value.  subst_exstat
+	 * is cleared in execute(), so should be 0 if there were no
+	 * substitutions.
+	 */
+	exstat = subst_exstat;
 	return shell(s, FALSE);
 }
 
@@ -468,13 +484,18 @@ c_trap(wp)
 		return 0;
 	}
 
-	s = (gettrap(*wp) == NULL) ? *wp++ : NULL; /* get command */
+	/*
+	 * Use case sensitive lookup for first arg so the
+	 * command 'exit' isn't confused with the pseudo-signal
+	 * 'EXIT'.
+	 */
+	s = (gettrap(*wp, FALSE) == NULL) ? *wp++ : NULL; /* get command */
 	if (s != NULL && s[0] == '-' && s[1] == '\0')
 		s = NULL;
 
 	/* set/clear traps */
 	while (*wp != NULL) {
-		p = gettrap(*wp++);
+		p = gettrap(*wp++, TRUE);
 		if (p == NULL) {
 			bi_errorf("bad signal %s", wp[-1]);
 			return 1;
@@ -489,15 +510,19 @@ c_exitreturn(wp)
 	char **wp;
 {
 	int how = LEXIT;
+	int n;
 	char *arg;
 
 	if (ksh_getopt(wp, &builtin_opt, null) == '?')
 		return 1;
 	arg = wp[builtin_opt.optind];
 
-	if (arg != NULL && !getn(arg, &exstat)) {
-		exstat = 1;
-		warningf(TRUE, "%s: bad number", arg);
+	if (arg) {
+	    if (!getn(arg, &n)) {
+		    exstat = 1;
+		    warningf(TRUE, "%s: bad number", arg);
+	    } else
+		    exstat = n;
 	}
 	if (wp[0][0] == 'r') { /* return */
 		struct env *ep;

@@ -29,6 +29,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
+ * $OpenBSD: uthread_detach.c,v 1.3 1999/01/06 05:29:23 d Exp $
  */
 #include <errno.h>
 #ifdef _THREAD_SAFE
@@ -39,7 +40,6 @@ int
 pthread_detach(pthread_t pthread)
 {
 	int             rval = 0;
-	int             status;
 	pthread_t       next_thread;
 
 	/* Check for invalid calling parameters: */

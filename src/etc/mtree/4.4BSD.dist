@@ -1,4 +1,4 @@
-#	$OpenBSD: 4.4BSD.dist,v 1.61 1998/10/16 05:19:58 deraadt Exp $
+#	$OpenBSD: 4.4BSD.dist,v 1.70 1999/03/16 07:15:43 beck Exp $
 
 /set type=dir uname=root gname=wheel mode=0755
 # .
@@ -68,11 +68,15 @@ ssl
 
 # ./etc/ssl/private
 private		uname=root mode=0700
-
-# ./etc/ssl
+# ./etc/ssl/private
 ..
 
-# ./etc
+# ./etc/ssl/lib
+lib
+# ./etc/ssl/lib
+..
+
+# ./etc/ssl
 ..
 
 # ./etc/uucp
@@ -413,6 +417,12 @@ keystrokes
 ..
 
 # ./usr/share/doc/html/lynx_help
+..
+
+# ./usr/share/doc/html/curses
+curses
+
+# ./usr/share/doc/html/curses
 ..
 
 # ./usr/share/doc/html
@@ -955,6 +965,11 @@ amiga
 # ./usr/share/man/cat4/amiga
 ..
 
+# ./usr/share/man/cat4/arc
+arc
+# ./usr/share/man/cat4/arc
+..
+
 # ./usr/share/man/cat4/arm32
 arm32
 # ./usr/share/man/cat4/arm32
@@ -1167,6 +1182,11 @@ amiga
 # ./usr/share/man/man4/amiga
 ..
 
+# ./usr/share/man/man4/arc
+arc
+# ./usr/share/man/man4/arc
+..
+
 # ./usr/share/man/man4/arm32
 arm32
 # ./usr/share/man/man4/arm32
@@ -1258,9 +1278,9 @@ man7
 # ./usr/share/man/man8
 man8
 
-# ./usr/share/man/man8/amiga
+# ./usr/share/man/man8/alpha
 alpha
-# ./usr/share/man/man8/amiga
+# ./usr/share/man/man8/alpha
 ..
 
 # ./usr/share/man/man8/amiga
@@ -1629,7 +1649,7 @@ msgs
 ..
 
 # ./var/named
-named		uname=named gname=bin mode=0755
+named
 
 # ./var/named/dev
 dev
@@ -1639,6 +1659,11 @@ dev
 # ./var/named/etc
 etc
 # ./var/named/etc
+..
+
+# ./var/named/namedb
+namedb		uname=named gname=bin mode=0755
+# ./var/named/namedb
 ..
 
 # ./var/named
@@ -1754,6 +1779,12 @@ www type=dir uname=root gname=daemon mode=755
 
 # ./www/icons
 icons  type=dir uname=root gname=daemon mode=755
+
+# ./www/icons/small
+small  type=dir uname=root gname=daemon mode=755
+# ./www/icons/small
+..
+
 # ./www/icons
 ..
 
@@ -1770,6 +1801,12 @@ manual  type=dir uname=root gname=daemon mode=755
 
 #./www/htdocs/manual/mod
 mod  type=dir uname=root gname=daemon mode=755
+
+#./www/htdocs/manual/mod/mod_ssl
+mod_ssl  type=dir uname=root gname=daemon mode=755
+#./www/htdocs/manual/mod/mod_ssl
+..
+
 #./www/htdocs/manual/mod
 ..
 
@@ -1805,6 +1842,16 @@ conf  type=dir uname=root gname=daemon mode=755
 ..
 
 #./www
+..
+
+#./var/ssyslog
+ssyslog	type=dir uname=root gname=daemon mode=700
+#./var/ssyslog
+..
+
+#./var/audit
+audit type=dir uname=root gname=wheel mode=2770
+#./var/audit
 ..
 
 # ./var

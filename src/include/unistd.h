@@ -1,4 +1,4 @@
-/*	$OpenBSD: unistd.h,v 1.22 1998/06/30 23:03:09 deraadt Exp $ */
+/*	$OpenBSD: unistd.h,v 1.24 1998/11/20 11:18:26 d Exp $ */
 /*	$NetBSD: unistd.h,v 1.26.4.1 1996/05/28 02:31:51 mrg Exp $	*/
 
 /*-
@@ -76,8 +76,10 @@ uid_t	 geteuid __P((void));
 gid_t	 getgid __P((void));
 int	 getgroups __P((int, gid_t *));
 char	*getlogin __P((void));
+int	 getlogin_r __P((char *, size_t));
 pid_t	 getpgrp __P((void));
 pid_t	 getpid __P((void));
+pid_t	 getpgid __P((pid_t));
 pid_t	 getppid __P((void));
 uid_t	 getuid __P((void));
 int	 isatty __P((int));
@@ -97,6 +99,7 @@ long	 sysconf __P((int));
 pid_t	 tcgetpgrp __P((int));
 int	 tcsetpgrp __P((int, pid_t));
 char	*ttyname __P((int));
+int	 ttyname_r __P((int, char *, size_t));
 int	 unlink __P((const char *));
 ssize_t	 write __P((int, const void *, size_t));
 

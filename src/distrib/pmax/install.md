@@ -1,4 +1,4 @@
-#	$OpenBSD: install.md,v 1.9 1998/09/11 22:55:44 millert Exp $
+#	$OpenBSD: install.md,v 1.11 1999/04/01 21:30:41 deraadt Exp $
 #	$NetBSD: install.md,v 1.3.2.5 1996/08/26 15:45:28 gwr Exp $
 #
 #
@@ -188,12 +188,12 @@ md_prep_disklabel()
 	cat << \__md_prep_disklabel_1
 
 If you are unsure of how to use multiple partitions properly
-(ie. seperating /, /usr, /tmp, /var, /usr/local, and other things)
+(ie. separating /, /usr, /tmp, /var, /usr/local, and other things)
 just split the space into a root and swap partition for now.
 __md_prep_disklabel_1
 
 	disklabel -W ${_disk}
-	disklabel -E ${_disk}
+	disklabel -f /tmp/fstab.${_disk} -E ${_disk}
 }
 
 md_copy_kernel() {

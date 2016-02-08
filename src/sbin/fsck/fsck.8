@@ -1,4 +1,4 @@
-.\"	$OpenBSD: fsck.8,v 1.10 1998/10/07 02:57:17 deraadt Exp $
+.\"	$OpenBSD: fsck.8,v 1.13 1998/12/15 01:20:30 aaron Exp $
 .\"	$NetBSD: fsck.8,v 1.14 1996/10/03 20:08:29 christos Exp $
 .\"
 .\" Copyright (c) 1996 Christos Zoulas.  All rights reserved.
@@ -43,7 +43,7 @@
 .Ar special | node ...
 .Sh DESCRIPTION
 The
-.Nm fsck
+.Nm
 command invokes filesystem-specific programs to check the 
 special devices listed in the 
 .Xr fstab 5
@@ -69,7 +69,8 @@ Cause
 .Nm
 to assume
 .Dq no
-as the answer to all operator questions, except "CONTINUE?".
+as the answer to all operator questions, except
+.Dq CONTINUE? .
 This is assumed to be the default when dealing with filesystems currently
 mounted writeable.
 .It Fl p

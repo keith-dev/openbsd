@@ -1,4 +1,4 @@
-/*	$OpenBSD: newsyslog.c,v 1.14 1998/09/24 03:36:58 millert Exp $	*/
+/*	$OpenBSD: newsyslog.c,v 1.18 1999/03/08 03:16:34 millert Exp $	*/
 
 /*
  * Copyright (c) 1997, Jason Downs.  All rights reserved.
@@ -61,7 +61,7 @@ provided "as is" without express or implied warranty.
  */
 
 #ifndef lint
-static char rcsid[] = "$OpenBSD: newsyslog.c,v 1.14 1998/09/24 03:36:58 millert Exp $";
+static char rcsid[] = "$OpenBSD: newsyslog.c,v 1.18 1999/03/08 03:16:34 millert Exp $";
 #endif /* not lint */
 
 #ifndef CONF
@@ -129,8 +129,7 @@ int     noaction = 0;           /* Don't do anything, just show it */
 int	monitor = 0;		/* Don't do monitoring by default */
 char    *conf = CONF;           /* Configuration file to use */
 time_t  timenow;
-#define MIN_PID		3
-#define MAX_PID		30000
+#define MIN_PID		4
 char    hostname[MAXHOSTNAMELEN]; /* hostname */
 char    *daytime;               /* timenow in human readable form */
 
@@ -151,23 +150,30 @@ int isnumberstr __P((char *));
 void domonitor __P((char *, char *));
 FILE *openmail __P((void));
 void closemail __P((FILE *));
+void child_killer __P((int));
 
 int main(argc, argv)
         int argc;
         char **argv;
 {
         struct conf_entry *p, *q;
+	int status;
         
         PRS(argc,argv);
         if (needroot && getuid() && geteuid())
 		errx(1, "You must be root.");
         p = q = parse_file();
+	signal(SIGCHLD, child_killer);
         while (p) {
                 do_entry(p);
                 p=p->next;
                 free(q);
                 q=p;
         }
+
+	/* Wait for children to finish, then exit */
+	while (waitpid(-1, &status, 0) != -1)
+		;
         exit(0);
 }
 
@@ -355,7 +361,7 @@ struct conf_entry *parse_file()
 
                 q = parse = missing_field(sob(++parse),errline);
                 *(parse = son(parse)) = '\0';
-                if (!sscanf(q,"%d",&working->numlogs))
+                if (!sscanf(q,"%d",&working->numlogs) || working->numlogs < 0)
 			errx(1, "Error in config file; bad number: %s", q);
 
                 q = parse = missing_field(sob(++parse),errline);
@@ -509,21 +515,21 @@ void dotrim(log, numdays, flags, perm, owner_uid, group_gid, daemon_pid)
                 (void) chmod(log,perm);
         if (noaction)
                 printf("kill -HUP %d\n",daemon_pid);
-        else if (daemon_pid < MIN_PID || daemon_pid > MAX_PID)
+        else if (daemon_pid < MIN_PID)
 		warnx("preposterous process number: %d", daemon_pid);
         else if (kill(daemon_pid,SIGHUP))
-                        warnx("warning - could not HUP daemon");
-        if (flags & CE_COMPACT) {
-                if (noaction)
-                        printf("Compress %s.0\n",log);
-                else
-                        compress_log(log);
-        }
+		warnx("warning - could not HUP daemon");
+	if (flags & CE_COMPACT) {
+		if (noaction)
+			printf("Compress %s.0\n",log);
+		else
+			compress_log(log);
+	}
 }
 
 /* Log the fact that the logs were turned over */
 int log_trim(log)
-        char    *log;
+	char    *log;
 {
         FILE    *f;
         if ((f = fopen(log,"a")) == NULL)
@@ -536,7 +542,7 @@ int log_trim(log)
         return(0);
 }
 
-/* Fork of /usr/ucb/compress to compress the old log file */
+/* Fork off compress or gzip to compress the old log file */
 void compress_log(log)
         char    *log;
 {
@@ -549,7 +555,8 @@ void compress_log(log)
 		err(1, "fork");
         } else if (!pid) {
                 (void) execl(COMPRESS,"compress","-f",tmp,0);
-		err(1, COMPRESS);
+		warn(COMPRESS);
+		_exit(1);
         }
 }
 
@@ -735,4 +742,13 @@ void closemail(pfp)
 	FILE *pfp;
 {
 	pclose(pfp);
+}
+
+void child_killer(signum)
+	int signum;
+{
+	int status;
+
+	while (waitpid(-1, &status, WNOHANG) > 0)
+		;
 }

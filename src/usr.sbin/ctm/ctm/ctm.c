@@ -6,7 +6,7 @@
  * this stuff is worth it, you can buy me a beer in return.   Poul-Henning Kamp
  * ----------------------------------------------------------------------------
  *
- * $Id: ctm.c,v 1.1.1.1 1996/10/30 17:32:58 graichen Exp $
+ * $Id: ctm.c,v 1.3 1998/11/23 04:35:25 millert Exp $
  *
  * This is the client program of 'CTM'.  It will apply a CTM-patch to a
  * collection of files.
@@ -166,17 +166,26 @@ Proc(char *filename, unsigned applied)
 
     /* If we cannot seek, we're doomed, so copy to a tmp-file in that case */
     if(!p &&  -1 == fseek(f,0,SEEK_END)) {
-	char *fn = tempnam(TmpDir,"CTMclient");
-	FILE *f2 = fopen(fn,"w+");
-	int i;
+	char *fn;
+	FILE *f2;
+	int fd;
 
-	if(!f2) {
+	if (asprintf(&fn, "%s/CTMclient.XXXXXXXX", TmpDir) == -1) {
+	    fprintf(stderr, "Cannot allocate memory\n");
+	    fclose(f);
+	    return Exit_Broke;
+	}
+	if ((fd = mkstemp(fn)) == -1 || (f2 = fdopen(fd, "w+")) == NULL) {
 	    perror(fn);
+	    free(fn);
+	    if (fd != -1)
+		close(fd);
 	    fclose(f);
 	    return Exit_Broke;
 	}
 	unlink(fn);
 	fprintf(stderr,"Writing tmp-file \"%s\"\n",fn);
+	free(fn);
 	while(EOF != (i=getc(f)))
 	    if(EOF == putc(i,f2)) {
 		fclose(f2);

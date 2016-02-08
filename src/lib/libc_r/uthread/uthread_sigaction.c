@@ -29,6 +29,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
+ * $OpenBSD: uthread_sigaction.c,v 1.3 1999/01/06 05:29:27 d Exp $
  */
 #include <signal.h>
 #include <errno.h>
@@ -75,7 +76,7 @@ sigaction(int sig, const struct sigaction * act, struct sigaction * oact)
 		    sig != SIGINFO) {
 			/* Initialise the global signal action structure: */
 			gact.sa_mask = act->sa_mask;
-			gact.sa_flags = act->sa_flags | SA_RESTART;
+			gact.sa_flags = 0;
 
 			/*
 			 * Check if the signal handler is being set to

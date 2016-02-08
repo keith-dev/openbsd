@@ -1,7 +1,8 @@
-/*	$OpenBSD: sudo.c,v 1.10 1998/09/15 02:42:45 millert Exp $	*/
+/*	$OpenBSD: sudo.c,v 1.14 1999/03/30 06:25:25 millert Exp $	*/
 
 /*
- * CU sudo version 1.5.6 (based on Root Group sudo version 1.1)
+ * CU sudo version 1.5.9 (based on Root Group sudo version 1.1)
+ * Copyright (c) 1994,1996,1998,1999 Todd C. Miller <Todd.Miller@courtesan.com>
  *
  * This software comes with no waranty whatsoever, use at your own risk.
  *
@@ -52,10 +53,6 @@
  *		Todd Miller  <Todd.Miller@courtesan.com>
  */
 
-#ifndef lint
-static char rcsid[] = "$From: sudo.c,v 1.197 1998/09/13 19:32:48 millert Exp $";
-#endif /* lint */
-
 #define MAIN
 
 #include "config.h"
@@ -73,43 +70,31 @@ static char rcsid[] = "$From: sudo.c,v 1.197 1998/09/13 19:32:48 millert Exp $";
 #ifdef HAVE_STRINGS_H
 #include <strings.h>
 #endif /* HAVE_STRINGS_H */
-#if defined(HAVE_MALLOC_H) && !defined(STDC_HEADERS)
-#include <malloc.h>   
-#endif /* HAVE_MALLOC_H && !STDC_HEADERS */
 #include <pwd.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <sys/types.h>
 #include <sys/stat.h>
-#include <sys/time.h>
 #include <sys/param.h>
 #include <netinet/in.h>
 #include <netdb.h>
-#if (SHADOW_TYPE == SPW_SECUREWARE)
-#  ifdef __hpux
-#    include <hpsecurity.h>
-#  else
-#    include <sys/security.h>
-#  endif /* __hpux */
-#  include <prot.h>
-#endif /* SPW_SECUREWARE */
 #ifdef HAVE_DCE
 #include <pthread.h>
 #endif /* HAVE_DCE */
+#ifdef HAVE_KERB5
+#include <krb5.h>
+#endif /* HAVE_KERB5 */
 
 #include "sudo.h"
-#include <options.h>
 #include "version.h"
 
 #ifndef STDC_HEADERS
-#ifndef __GNUC__		/* gcc has its own malloc */
-extern char *malloc	__P((size_t));
-#endif /* __GNUC__ */
-#ifdef HAVE_STRDUP
-extern char *strdup	__P((const char *));
-#endif /* HAVE_STRDUP */
 extern char *getenv	__P((char *));
 #endif /* STDC_HEADERS */
+
+#ifndef lint
+static const char rcsid[] = "$Sudo: sudo.c,v 1.223 1999/03/30 06:01:46 millert Exp $";
+#endif /* lint */
 
 
 /*
@@ -126,6 +111,7 @@ struct env_table {
  */
 static int  parse_args			__P((void));
 static void usage			__P((int));
+static void usage_excl			__P((int));
 static void load_globals		__P((int));
 static int check_sudoers		__P((void));
 static int load_cmnd			__P((int));
@@ -157,6 +143,12 @@ static char *runas_homedir = NULL;
 extern struct interface *interfaces;
 extern int num_interfaces;
 extern int printmatches;
+int arg_prompt = 0;	/* was -p used? */
+#ifdef HAVE_KERB5
+krb5_context sudo_context = NULL;
+char *realm = NULL;
+int xrealm = 0;
+#endif /* HAVE_KERB5 */
 
 /*
  * Table of "bad" envariables to remove and len for strncmp()
@@ -173,7 +165,10 @@ struct env_table badenv_table[] = {
 #endif /* _AIX */
 #ifdef HAVE_KERB4
     { "KRB_CONF", 8 },
-#endif
+#endif /* HAVE_KERB4 */
+#ifdef HAVE_KERB5
+    { "KRB5_CONFIG", 11 },
+#endif /* HAVE_KERB5 */
     { "ENV=", 4 },
     { "BASH_ENV=", 9 },
     { (char *) NULL, 0 }
@@ -191,13 +186,17 @@ int main(argc, argv)
     int argc;
     char **argv;
 {
-    int rtn, found_cmnd;
+    int rtn, serrno;
+    int cmnd_status = FOUND;
     int sudo_mode = MODE_RUN;
     extern char ** environ;
 
-#if (SHADOW_TYPE == SPW_SECUREWARE) && defined(HAVE_SET_AUTH_PARAMETERS)
+#if defined(HAVE_GETPRPWNAM) && defined(HAVE_SET_AUTH_PARAMETERS)
     (void) set_auth_parameters(argc, argv);
-#endif /* SPW_SECUREWARE */
+#  ifdef HAVE_INITPRIVS
+    initprivs();
+#  endif
+#endif /* HAVE_GETPRPWNAM && HAVE_SET_AUTH_PARAMETERS */
 
     Argv = argv;
     Argc = argc;
@@ -266,12 +265,7 @@ int main(argc, argv)
     if ((sudo_mode & MODE_SHELL)) {
 	char **dst, **src = NewArgv;
 
-	NewArgv = (char **) malloc (sizeof(char *) * (++NewArgc + 1));
-	if (NewArgv == NULL) {
-	    perror("malloc");
-	    (void) fprintf(stderr, "%s: cannot allocate memory!\n", Argv[0]);
-	    exit(1);
-	}
+	NewArgv = (char **) emalloc (sizeof(char *) * (++NewArgc + 1));
 
 	/* add the shell as argv[0] */
 	if (user_shell && *user_shell) {
@@ -288,8 +282,10 @@ int main(argc, argv)
 
     rtn = check_sudoers();	/* check mode/owner on _PATH_SUDO_SUDOERS */
     if (rtn != ALL_SYSTEMS_GO) {
+	serrno = errno;
 	log_error(rtn);
 	set_perms(PERM_FULL_USER, sudo_mode);
+	errno = serrno;
 	inform_user(rtn);
 	exit(1);
     }
@@ -297,14 +293,13 @@ int main(argc, argv)
 #ifdef SECURE_PATH
     /* replace the PATH envariable with a secure one */
     if (!user_is_exempt() && sudo_setenv("PATH", SECURE_PATH)) {
-	perror("malloc");
 	(void) fprintf(stderr, "%s: cannot allocate memory!\n", Argv[0]);
 	exit(1);
     }
 #endif /* SECURE_PATH */
 
     if ((sudo_mode & MODE_RUN)) {
-	found_cmnd = load_cmnd(sudo_mode); /* load the cmnd global variable */
+	cmnd_status = load_cmnd(sudo_mode); /* load the cmnd global variable */
     } else if (sudo_mode == MODE_KILL) {
 	remove_timestamp();	/* remove the timestamp ticket file */
 	exit(0);
@@ -312,20 +307,23 @@ int main(argc, argv)
 
     add_env(!(sudo_mode & MODE_SHELL));	/* add in SUDO_* envariables */
 
-    /* validate the user but don't search for "validate" */
+    /* validate the user but don't search for pseudo-commands */
     rtn = validate((sudo_mode != MODE_VALIDATE && sudo_mode != MODE_LIST));
 
     switch (rtn) {
 
 	case VALIDATE_OK:
-	case VALIDATE_OK_NOPASS:
-	    if (rtn != VALIDATE_OK_NOPASS) 
-		check_user();
+	    check_user();
+	    /* fallthrough */
 
+	case VALIDATE_OK_NOPASS:
 	    /* finally tell the user if the command did not exist */
-	    if ((sudo_mode & MODE_RUN) && !found_cmnd) {
+	    if (cmnd_status == NOT_FOUND_DOT) {
+		(void) fprintf(stderr, "%s: ignoring `%s' found in '.'\nUse `sudo ./%s' if this is the `%s' you wish to run.\n", Argv[0], cmnd, cmnd, cmnd);
+		exit(1);
+	    } else if (cmnd_status == NOT_FOUND) {
 		(void) fprintf(stderr, "%s: %s: command not found\n", Argv[0],
-			       cmnd);
+		    cmnd);
 		exit(1);
 	    }
 
@@ -383,9 +381,24 @@ int main(argc, argv)
 	    exit(-1);
 	    break;
 
+	case VALIDATE_NOT_OK:
+	    check_user();
+
+#ifndef DONT_LEAK_PATH_INFO
+	    log_error(rtn);
+	    if (cmnd_status == NOT_FOUND_DOT)
+		(void) fprintf(stderr, "%s: ignoring `%s' found in '.'\nUse `sudo ./%s' if this is the `%s' you wish to run.\n", Argv[0], cmnd, cmnd, cmnd);
+	    else if (cmnd_status == NOT_FOUND)
+		(void) fprintf(stderr, "%s: %s: command not found\n", Argv[0],
+		    cmnd);
+	    else
+		inform_user(rtn);
+	    exit(1);
+	    break;
+#endif /* DONT_LEAK_PATH_INFO */
+
 	default:
 	    log_error(rtn);
-	    set_perms(PERM_FULL_USER, sudo_mode);
 	    inform_user(rtn);
 	    exit(1);
 	    break;
@@ -409,6 +422,17 @@ static void load_globals(sudo_mode)
 #ifdef FQDN
     struct hostent *h_ent;
 #endif /* FQDN */
+#ifdef HAVE_KERB5 
+    krb5_error_code retval;
+    char *lrealm;
+#endif /* HAVE_KERB5 */
+
+#ifdef HOST_IN_LOG
+    /*
+     * Logging routines may use shost so set to a dummy value for now.
+     */
+    shost = strcpy(host, "localhost");
+#endif
 
     /*
      * Get a local copy of the user's struct passwd with the shadow password
@@ -417,20 +441,48 @@ static void load_globals(sudo_mode)
      */
     if ((user_pw_ent = sudo_getpwuid(getuid())) == NULL) {
 	/* need to make a fake user_pw_ent */
-	struct passwd pw_ent;
+	struct passwd pw;
 	char pw_name[MAX_UID_T_LEN + 1];
 
 	/* fill in uid and name fields with the uid */
-	pw_ent.pw_uid = getuid();
-	(void) sprintf(pw_name, "%ld", (long) pw_ent.pw_uid);
-	pw_ent.pw_name = pw_name;
-	user_pw_ent = &pw_ent;
+	pw.pw_uid = getuid();
+	(void) sprintf(pw_name, "%ld", (long) pw.pw_uid);
+	pw.pw_name = pw_name;
+	user_pw_ent = &pw;
 
 	/* complain, log, and die */
 	log_error(GLOBAL_NO_PW_ENT);
 	inform_user(GLOBAL_NO_PW_ENT);
 	exit(1);
     }
+
+#ifdef HAVE_KERB5
+    if (retval = krb5_init_context(&sudo_context)) {
+	log_error(GLOBAL_KRB5_INIT_ERR);
+	inform_user(GLOBAL_KRB5_INIT_ERR);
+	exit(1);
+    }
+    krb5_init_ets(sudo_context);
+
+    if (retval = krb5_get_default_realm(sudo_context, &lrealm)) {
+	log_error(GLOBAL_KRB5_INIT_ERR);
+	inform_user(GLOBAL_KRB5_INIT_ERR);
+	exit(1);
+    }
+
+    if (realm) {
+	if (strcmp(realm, lrealm) != 0)
+	    xrealm = 1; /* User supplied realm is not the system default */
+	free(lrealm);
+    } else
+	realm = lrealm;
+
+    if (!arg_prompt) {
+	p = emalloc(strlen(user_name) + strlen(realm) + 17);
+	sprintf(p, "Password for %s@%s: ", user_name, realm);
+	prompt = p;
+    }
+#endif /* HAVE_KERB5 */
 
     /* Set euid == user and ruid == root */
     set_perms(PERM_ROOT, sudo_mode);
@@ -446,16 +498,12 @@ static void load_globals(sudo_mode)
     if ((p = (char *) ttyname(0)) || (p = (char *) ttyname(1))) {
 	if (strncmp(p, _PATH_DEV, sizeof(_PATH_DEV) - 1) == 0)
 	    p += sizeof(_PATH_DEV) - 1;
-	if ((tty = (char *) strdup(p)) == NULL) {
-	    perror("malloc");
-	    (void) fprintf(stderr, "%s: cannot allocate memory!\n", Argv[0]);
-	    exit(1);
-	}
+	tty = estrdup(p);
     }
 
-#ifdef UMASK
-    (void) umask((mode_t)UMASK);
-#endif /* UMASK */
+#ifdef SUDO_UMASK
+    (void) umask((mode_t)SUDO_UMASK);
+#endif /* SUDO_UMASK */
 
 #ifdef NO_ROOT_SUDO
     if (user_uid == 0) {
@@ -472,7 +520,7 @@ static void load_globals(sudo_mode)
 	/* try as root... */
 	set_perms(PERM_ROOT, sudo_mode);
 	if (!getcwd(cwd, sizeof(cwd))) {
-	    (void) fprintf(stderr, "%s:  Can't get working directory!\n",
+	    (void) fprintf(stderr, "%s: Can't get working directory!\n",
 			   Argv[0]);
 	    (void) strcpy(cwd, "unknown");
 	}
@@ -502,11 +550,7 @@ static void load_globals(sudo_mode)
      */
     if ((p = strchr(host, '.'))) {
 	*p = '\0';
-	if ((shost = strdup(host)) == NULL) {
-	    perror("malloc");
-	    (void) fprintf(stderr, "%s: cannot allocate memory!\n", Argv[0]);
-	    exit(1);
-	}
+	shost = estrdup(host);
 	*p = '.';
     } else {
 	shost = &host[0];
@@ -553,16 +597,27 @@ static int parse_args()
 	    usage(1);
 	}
 
-	if (excl)
-	    usage(1);			/* only one -? option allowed */
-
 	switch (NewArgv[0][1]) {
+#ifdef HAVE_KERB5
+	    case 'r':
+		/* must have an associated realm */
+		if (NewArgv[1] == NULL)
+		    usage(1);
+
+		realm = NewArgv[1];
+
+		/* shift Argv over and adjust Argc */
+		NewArgc--;
+		NewArgv++;
+		break;
+#endif /* HAVE_KERB5 */
 	    case 'p':
 		/* must have an associated prompt */
 		if (NewArgv[1] == NULL)
 		    usage(1);
 
 		prompt = NewArgv[1];
+		arg_prompt = 1;
 
 		/* shift Argv over and adjust Argc */
 		NewArgc--;
@@ -584,23 +639,33 @@ static int parse_args()
 		break;
 	    case 'v':
 		ret = MODE_VALIDATE;
-		excl++;
+		if (excl && excl != 'v')
+		    usage_excl(1);
+		excl = 'v';
 		break;
 	    case 'k':
 		ret = MODE_KILL;
-		excl++;
+		if (excl && excl != 'k')
+		    usage_excl(1);
+		excl = 'k';
 		break;
 	    case 'l':
 		ret = MODE_LIST;
-		excl++;
+		if (excl && excl != 'l')
+		    usage_excl(1);
+		excl = 'l';
 		break;
 	    case 'V':
 		ret = MODE_VERSION;
-		excl++;
+		if (excl && excl != 'V')
+		    usage_excl(1);
+		excl = 'V';
 		break;
 	    case 'h':
 		ret = MODE_HELP;
-		excl++;
+		if (excl && excl != 'h')
+		    usage_excl(1);
+		excl = 'h';
 		break;
 	    case 's':
 		ret |= MODE_SHELL;
@@ -643,6 +708,20 @@ static int parse_args()
 
 /**********************************************************************
  *
+ * usage_excl()
+ *
+ *  Tell which options are mutually exclusive and exit
+ */
+
+static void usage_excl(exit_val)
+    int exit_val;
+{
+    (void) fprintf(stderr, "Only one of the -v, -k, -l, -V and -h options may be used\n");
+    usage(exit_val);
+}
+
+/**********************************************************************
+ *
  * usage()
  *
  *  this function just gives you instructions and exits
@@ -651,7 +730,13 @@ static int parse_args()
 static void usage(exit_val)
     int exit_val;
 {
-    (void) fprintf(stderr, "usage: %s -V | -h | -l | -v | -k | -H | [-b] [-p prompt] [-u username/#uid] -s | <command>\n", Argv[0]);
+    (void) fprintf(stderr,
+		   "usage: %s -V | -h | -l | -v | -k | -H | [-b] [-p prompt] ",
+		   Argv[0]);
+#ifdef HAVE_KERB5
+    (void) fprintf(stderr, "[-r realm] ");
+#endif /* HAVE_KERB5 */
+    (void) fprintf(stderr, "[-u username/#uid] -s | <command>\n");
     exit(exit_val);
 }
 
@@ -684,11 +769,7 @@ static void add_env(contiguous)
 		size += strlen(*from) + 1;
 	}
 
-	if ((buf = (char *) malloc(size)) == NULL) {
-	    perror("malloc");
-	    (void) fprintf(stderr, "%s: cannot allocate memory!\n", Argv[0]);
-	    exit(1);
-	}
+	buf = (char *) emalloc(size);
 
 	/*
 	 * Copy the command and it's arguments info buf
@@ -704,7 +785,6 @@ static void add_env(contiguous)
 	buf = cmnd;
     }
     if (sudo_setenv("SUDO_COMMAND", buf)) {
-	perror("malloc");
 	(void) fprintf(stderr, "%s: cannot allocate memory!\n", Argv[0]);
 	exit(1);
     }
@@ -721,7 +801,6 @@ static void add_env(contiguous)
 
     /* add the SUDO_USER envariable */
     if (sudo_setenv("SUDO_USER", user_name)) {
-	perror("malloc");
 	(void) fprintf(stderr, "%s: cannot allocate memory!\n", Argv[0]);
 	exit(1);
     }
@@ -729,7 +808,6 @@ static void add_env(contiguous)
     /* add the SUDO_UID envariable */
     (void) sprintf(idstr, "%ld", (long) user_uid);
     if (sudo_setenv("SUDO_UID", idstr)) {
-	perror("malloc");
 	(void) fprintf(stderr, "%s: cannot allocate memory!\n", Argv[0]);
 	exit(1);
     }
@@ -737,7 +815,6 @@ static void add_env(contiguous)
     /* add the SUDO_GID envariable */
     (void) sprintf(idstr, "%ld", (long) user_gid);
     if (sudo_setenv("SUDO_GID", idstr)) {
-	perror("malloc");
 	(void) fprintf(stderr, "%s: cannot allocate memory!\n", Argv[0]);
 	exit(1);
     }
@@ -745,7 +822,6 @@ static void add_env(contiguous)
     /* set PS1 if SUDO_PS1 is set */
     if ((buf = getenv("SUDO_PS1")))
 	if (sudo_setenv("PS1", buf)) {
-	    perror("malloc");
 	    (void) fprintf(stderr, "%s: cannot allocate memory!\n", Argv[0]);
 	    exit(1);
 	}
@@ -764,6 +840,8 @@ static void add_env(contiguous)
 static int load_cmnd(sudo_mode)
     int sudo_mode;
 {
+    int retval;
+
     if (strlen(NewArgv[0]) >= MAXPATHLEN) {
 	errno = ENAMETOOLONG;
 	(void) fprintf(stderr, "%s: %s: Pathname too long\n", Argv[0],
@@ -774,11 +852,9 @@ static int load_cmnd(sudo_mode)
     /*
      * Resolve the path
      */
-    if ((cmnd = find_path(NewArgv[0])) == NULL) {
+    if ((retval = find_path(NewArgv[0], &cmnd)) != FOUND)
 	cmnd = NewArgv[0];
-	return(0);
-    } else
-	return(1);
+    return(retval);
 }
 
 
@@ -835,7 +911,7 @@ static int check_sudoers()
      */
     set_perms(PERM_SUDOERS, 0);
 
-    if (lstat(_PATH_SUDO_SUDOERS, &statbuf) != 0 && rootstat != 0)
+    if (rootstat != 0 && lstat(_PATH_SUDO_SUDOERS, &statbuf) != 0)
 	rtn = NO_SUDOERS_FILE;
     else if (!S_ISREG(statbuf.st_mode))
 	rtn = SUDOERS_NOT_FILE;
@@ -882,7 +958,7 @@ void set_perms(perm, sudo_mode)
     int perm;
     int sudo_mode;
 {
-    struct passwd *pw_ent;
+    struct passwd *pw;
 
     switch (perm) {
 	case PERM_ROOT:
@@ -931,27 +1007,35 @@ void set_perms(perm, sudo_mode)
 					exit(1);
 				    }
 				} else {
-				    if (!(pw_ent = getpwnam(runas_user))) {
+				    if (!(pw = getpwnam(runas_user))) {
 					(void) fprintf(stderr,
 					    "%s: no passwd entry for %s!\n",
 					    Argv[0], runas_user);
 					exit(1);
 				    }
 
-				    if (setgid(pw_ent->pw_gid)) {
+				    /* Set $USER to match target user */
+				    if (sudo_setenv("USER", pw->pw_name)) {
+					(void) fprintf(stderr,
+					    "%s: cannot allocate memory!\n",
+					    Argv[0]);
+					exit(1);
+				    }
+
+				    if (setgid(pw->pw_gid)) {
 					(void) fprintf(stderr,
 					    "%s: cannot set gid to %d: ",  
-					    Argv[0], pw_ent->pw_gid);
+					    Argv[0], pw->pw_gid);
 					perror("");
 					exit(1);
 				    }
 
 				    /*
-				     * Initialize group vector only if
-				     * we are going to be a non-root user.
+				     * Initialize group vector only if are
+				     * going to run as a non-root user.
 				     */
 				    if (strcmp(runas_user, "root") != 0 &&
-					initgroups(runas_user, pw_ent->pw_gid)
+					initgroups(runas_user, pw->pw_gid)
 					== -1) {
 					(void) fprintf(stderr,
 					    "%s: cannot set group vector ",
@@ -960,15 +1044,15 @@ void set_perms(perm, sudo_mode)
 					exit(1);
 				    }
 
-				    if (setuid(pw_ent->pw_uid)) {
+				    if (setuid(pw->pw_uid)) {
 					(void) fprintf(stderr,
 					    "%s: cannot set uid to %d: ",  
-					    Argv[0], pw_ent->pw_uid);
+					    Argv[0], pw->pw_uid);
 					perror("");
 					exit(1);
 				    }
 				    if (sudo_mode & MODE_RESET_HOME)
-					runas_homedir = pw_ent->pw_dir;
+					runas_homedir = pw->pw_dir;
 				}
 
 				break;

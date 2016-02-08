@@ -1,4 +1,4 @@
-/* * $OpenBSD: skey.c,v 1.10 1997/07/17 05:48:40 millert Exp $*/
+/* * $OpenBSD: skey.c,v 1.12 1999/03/06 20:27:41 millert Exp $*/
 /*
  * S/KEY v1.1b (skey.c)
  *

@@ -29,6 +29,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
+ * $OpenBSD: uthread_sigsuspend.c,v 1.3 1999/01/06 05:29:28 d Exp $
  */
 #include <signal.h>
 #include <errno.h>
@@ -44,14 +45,14 @@ sigsuspend(const sigset_t * set)
 
 	/* Check if a new signal set was provided by the caller: */
 	if (set != NULL) {
-		/* Save the current sigmal mask: */
+		/* Save the current signal mask: */
 		oset = _thread_run->sigmask;
 
-		/* Combine the caller's mask with the current one: */
-		_thread_run->sigmask |= *set;
+		/* Change the caller's mask: */
+		_thread_run->sigmask = *set;
 
 		/* Wait for a signal: */
-		_thread_kern_sched_state(PS_SIGWAIT, __FILE__, __LINE__);
+		_thread_kern_sched_state(PS_SIGSUSPEND, __FILE__, __LINE__);
 
 		/* Always return an interrupted error: */
 		errno = EINTR;

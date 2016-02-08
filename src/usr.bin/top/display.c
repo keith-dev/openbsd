@@ -1,4 +1,4 @@
-/*	$OpenBSD: display.c,v 1.2 1997/08/22 07:16:27 downsj Exp $	*/
+/*	$OpenBSD: display.c,v 1.4 1999/03/06 20:27:42 millert Exp $	*/
 
 /*
  *  Top users/processes display for Unix

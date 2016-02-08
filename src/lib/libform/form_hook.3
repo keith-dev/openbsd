@@ -1,5 +1,5 @@
 '\" t
-.\" $OpenBSD: form_hook.3,v 1.6 1998/09/17 04:14:36 millert Exp $
+.\" $OpenBSD: form_hook.3,v 1.9 1999/03/28 18:01:03 millert Exp $
 .\"
 .\"***************************************************************************
 .\" Copyright (c) 1998 Free Software Foundation, Inc.                        *
@@ -29,7 +29,7 @@
 .\" authorization.                                                           *
 .\"***************************************************************************
 .\"
-.\" $From: form_hook.3x,v 1.4 1998/08/27 21:21:04 Rick.Ohnemus Exp $
+.\" $From: form_hook.3x,v 1.6 1999/03/20 22:37:15 Todd.Miller Exp $
 .TH form_hook 3 ""
 .SH NAME
 \fBform_hook\fR - set hooks for automatic invocation by applications
@@ -71,7 +71,7 @@ just after a page change once it is posted.  \fBform_init\fR returns the
 current form init hook, if any (\fBNULL\fR if there is no such hook).
 
 The function \fBset_form_term\fR sets a hook to be called at form-unpost time
-and just before a page change change once it is posted.  \fBform_init\fR
+and just before a page change once it is posted.  \fBform_init\fR
 returns the current form term hook, if any (\fBNULL\fR if there is no such
 hook).
 .SH RETURN VALUE

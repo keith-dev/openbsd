@@ -9,16 +9,20 @@
 
 #include <pthread.h>
 #include <stdio.h>
+#include "test.h"
 
 void* new_thread(void * new_buf)
 {
 	int i;
 
+	printf("yielding:");
 	for (i = 0; i < 10; i++) {
+		printf(" %d", i);
+		fflush(stdout);
 		pthread_yield();
 	}
-	printf("test_preemption PASSED\n");
-	exit(0);
+	printf("\n");
+	SUCCEED;
 }
 
 int
@@ -26,13 +30,9 @@ main()
 {
 	pthread_t thread;
 
-	printf("test_preemption START\n");
+	CHECKr(pthread_create(&thread, NULL, new_thread, NULL));
 
-	if (pthread_create(&thread, NULL, new_thread, NULL)) {
-		printf("pthread_create failed\n");
-		exit(2);
-	}
-
-	while(1);
-	exit(1);
+	while(1)
+		;
+	PANIC("while");
 }

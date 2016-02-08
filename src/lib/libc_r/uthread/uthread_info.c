@@ -29,14 +29,19 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
+ * $OpenBSD: uthread_info.c,v 1.7 1999/02/01 08:23:46 d Exp $
  */
 #include <stdio.h>
 #include <fcntl.h>
 #include <string.h>
 #include <unistd.h>
+#include <stdlib.h>
+#include <stddef.h>
 #ifdef _THREAD_SAFE
 #include <pthread.h>
 #include "pthread_private.h"
+
+extern int _thread_sig_statistics[];
 
 struct s_thread_info {
 	enum pthread_state state;
@@ -45,33 +50,52 @@ struct s_thread_info {
 
 /* Static variables: */
 static const struct s_thread_info thread_info[] = {
-	{PS_RUNNING	, "Running"},
-	{PS_SIGTHREAD	, "Waiting on signal thread"},
-	{PS_MUTEX_WAIT	, "Waiting on a mutex"},
-	{PS_COND_WAIT	, "Waiting on a condition variable"},
-	{PS_FDLR_WAIT	, "Waiting for a file read lock"},
-	{PS_FDLW_WAIT	, "Waiting for a file write lock"},
-	{PS_FDR_WAIT	, "Waiting for read"},
-	{PS_FDW_WAIT	, "Waiting for write"},
-	{PS_FILE_WAIT	, "Waiting for FILE lock"},
-	{PS_SELECT_WAIT	, "Waiting on select"},
-	{PS_SLEEP_WAIT	, "Sleeping"},
-	{PS_WAIT_WAIT	, "Waiting process"},
-	{PS_SIGWAIT	, "Waiting for a signal"},
-	{PS_JOIN	, "Waiting to join"},
-	{PS_SUSPENDED	, "Suspended"},
-	{PS_DEAD	, "Dead"},
-	{PS_STATE_MAX	, "Not a real state!"}
+	{PS_RUNNING	, "running"},
+	{PS_SIGTHREAD	, "sigthread"},
+	{PS_MUTEX_WAIT	, "mutex_wait"},
+	{PS_COND_WAIT	, "cond_wait"},
+	{PS_FDLR_WAIT	, "fdlr_wait"},
+	{PS_FDLW_WAIT	, "fdlw_wait"},
+	{PS_FDR_WAIT	, "fdr_wait"},
+	{PS_FDW_WAIT	, "fdw_wait"},
+	{PS_FILE_WAIT	, "file_wait"},
+	{PS_SELECT_WAIT	, "select_wait"},
+	{PS_SLEEP_WAIT	, "sleep_wait"},
+	{PS_WAIT_WAIT	, "wait_wait"},
+	{PS_SIGSUSPEND	, "sigsuspend"},
+	{PS_SIGWAIT	, "sigwait"},
+	{PS_JOIN	, "join"},
+	{PS_SUSPENDED	, "suspended"},
+	{PS_DEAD	, "dead"},
+	{PS_STATE_MAX	, "xxx"}
 };
+
+const static char info_lead[] = "               -";
+
+/* Determine a filename for display purposes: */
+static const char *
+truncname(const char *name, int maxlen)
+{
+	int len;
+
+	if (name == NULL)
+		name = "(null)";
+	len = strlen(name);
+	if (len > maxlen)
+		return name + len - maxlen;
+	else
+		return name;
+}
 
 void
 _thread_dump_info(void)
 {
-	char            s[128];
+	char            s[512];
 	int             fd;
 	int             i;
 	int             j;
 	pthread_t       pthread;
+	const char	*state;
 
 	/* Open either the controlling tty or the dump file */
 
@@ -79,112 +103,229 @@ _thread_dump_info(void)
 	if (fd < 0)
 		fd = _thread_sys_open(INFO_DUMP_FILE, 
 			O_WRONLY | O_APPEND | O_CREAT, 0666);
-	if (fd >= 0) {
-		/* Output a header for active threads: */
-		strcpy(s, "\n\n=============\nACTIVE THREADS\n\n");
+	if (fd < 0)
+		return;
+
+	/* Display a list of active threads */
+
+	snprintf(s, sizeof s, 
+#ifdef _THREAD_RUSAGE
+	    " %8s%c%-11s %2s %5s %-8s %5s %5s %s\n", 
+#else
+	    " %8s%c%-11s %2s %5s %-8s %s\n", 
+#endif
+	    "id", ' ',  "state", "pr", "flag", "name",
+#ifdef _THREAD_RUSAGE
+	    "utime", "stime",
+#endif
+	    "location");
+	_thread_sys_write(fd, s, strlen(s));
+
+	for (pthread = _thread_link_list; pthread != NULL;
+	    pthread = pthread->nxt)
+	{
+		char location[30];
+
+		/* Find last known file:line checkpoint: */
+		if (pthread->fname && pthread->state != PS_RUNNING)
+			snprintf(location, sizeof location, "%s:%d",
+			    truncname(pthread->fname, 21), pthread->lineno);
+		else
+			location[0] = '\0';
+
+		/* Find the state: */
+		for (j = 0; j < (sizeof(thread_info) /
+		    sizeof(struct s_thread_info)) - 1; j++)
+			if (thread_info[j].state == pthread->state)
+				break;
+		state = thread_info[j].name;
+
+		/* Output a record for the current thread: */
+		s[0] = 0;
+		snprintf(s, sizeof(s), 
+#ifdef _THREAD_RUSAGE
+		    " %8p%c%-11s %2d %c%c%c%c%c %-8.8s %5.2f %5.2f %s\n",
+#else
+		    " %8p%c%-11s %2d %c%c%c%c%c %-8.8s %s\n",
+#endif
+		    (void *)pthread,
+		    (pthread == _thread_run)     ? '*' : ' ',
+		    state,
+		    pthread->pthread_priority,
+		    (pthread->flags & PTHREAD_EXITING)		  ? 'E' :
+		    (pthread->flags & PTHREAD_CANCELLING)	  ? 'C' :
+		    (pthread->flags & PTHREAD_AT_CANCEL_POINT)	  ? 'c' : ' ',
+		    (pthread->attr.flags & PTHREAD_DETACHED)      ? 'D' : ' ',
+		    (pthread->attr.flags & PTHREAD_SCOPE_SYSTEM)  ? 'S' : ' ',
+		    (pthread->attr.flags & PTHREAD_INHERIT_SCHED) ? 'I' : ' ',
+		    (pthread->attr.flags & PTHREAD_NOFLOAT)       ? 'F' : ' ',
+		    (pthread->name == NULL) ? "" : pthread->name,
+#ifdef _THREAD_RUSAGE
+		    pthread->ru_utime.tv_sec + 
+			(double)pthread->ru_utime.tv_usec / 1000000.0,
+		    pthread->ru_stime.tv_sec + 
+			(double)pthread->ru_stime.tv_usec / 1000000.0,
+#endif
+		    location
+		);
 		_thread_sys_write(fd, s, strlen(s));
 
-		/* Enter a loop to report each thread in the global list: */
-		for (pthread = _thread_link_list; pthread != NULL; pthread = pthread->nxt) {
-			/* Find the state: */
-			for (j = 0; j < (sizeof(thread_info) / sizeof(struct s_thread_info)) - 1; j++)
-				if (thread_info[j].state == pthread->state)
-					break;
-			/* Output a record for the current thread: */
-			sprintf(s, "--------------------\nThread %p (%s) prio %3d state %s [%s:%d]\n",
-				pthread, (pthread->name == NULL) ? "":pthread->name, pthread->pthread_priority, thread_info[j].name,pthread->fname,pthread->lineno);
+		/* Process according to thread state: */
+		switch (pthread->state) {
+		/* File descriptor read lock wait: */
+		case PS_FDLR_WAIT:
+		case PS_FDLW_WAIT:
+		case PS_FDR_WAIT:
+		case PS_FDW_WAIT:
+			/* Write the lock details: */
+			snprintf(s, sizeof(s), "%s fd %d [%s:%d]\n",
+			    info_lead,
+			    pthread->data.fd.fd, 
+			    truncname(pthread->data.fd.fname, 32),
+			    pthread->data.fd.branch);
 			_thread_sys_write(fd, s, strlen(s));
-
-			/* Check if this is the running thread: */
-			if (pthread == _thread_run) {
-				/* Output a record for the running thread: */
-				strcpy(s, "This is the running thread\n");
-				_thread_sys_write(fd, s, strlen(s));
-			}
-			/* Check if this is the initial thread: */
-			if (pthread == _thread_initial) {
-				/* Output a record for the initial thread: */
-				strcpy(s, "This is the initial thread\n");
-				_thread_sys_write(fd, s, strlen(s));
-			}
-			/* Process according to thread state: */
-			switch (pthread->state) {
-			/* File descriptor read lock wait: */
-			case PS_FDLR_WAIT:
-			case PS_FDLW_WAIT:
-			case PS_FDR_WAIT:
-			case PS_FDW_WAIT:
-				/* Write the lock details: */
-				sprintf(s, "fd %d[%s:%d]", pthread->data.fd.fd, pthread->data.fd.fname, pthread->data.fd.branch);
-				_thread_sys_write(fd, s, strlen(s));
-				sprintf(s, "owner %pr/%pw\n", _thread_fd_table[pthread->data.fd.fd]->r_owner, _thread_fd_table[pthread->data.fd.fd]->w_owner);
-				_thread_sys_write(fd, s, strlen(s));
-				break;
-			case PS_SIGWAIT:
-				sprintf(s, "sigmask 0x%08lx\n", (unsigned long)pthread->sigmask);
-				_thread_sys_write(fd, s, strlen(s));
-				break;
-
-			/*
-			 * Trap other states that are not explicitly
-			 * coded to dump information: 
-			 */
-			default:
-				/* Nothing to do here. */
-				break;
-			}
-		}
-
-		/* Check if there are no dead threads: */
-		if (_thread_dead == NULL) {
-			/* Output a record: */
-			strcpy(s, "\n\nTHERE ARE NO DEAD THREADS\n");
+			s[0] = 0;
+			snprintf(s, sizeof(s), "%s owner %pr/%pw\n",
+			    info_lead,
+			    _thread_fd_table[pthread->data.fd.fd]->r_owner,
+			    _thread_fd_table[pthread->data.fd.fd]->w_owner);
 			_thread_sys_write(fd, s, strlen(s));
-		} else {
-			/* Output a header for dead threads: */
-			strcpy(s, "\n\nDEAD THREADS\n\n");
+			break;
+		case PS_SIGWAIT:
+			snprintf(s, sizeof(s), "%s sigmask 0x%08lx\n",
+			    info_lead,
+			    (unsigned long)pthread->sigmask);
 			_thread_sys_write(fd, s, strlen(s));
-
-			/*
-			 * Enter a loop to report each thread in the global
-			 * dead thread list: 
-			 */
-			for (pthread = _thread_dead; pthread != NULL; pthread = pthread->nxt) {
-				/* Output a record for the current thread: */
-				sprintf(s, "Thread %p prio %3d [%s:%d]\n", pthread, pthread->pthread_priority,pthread->fname,pthread->lineno);
+			break;
+		case PS_MUTEX_WAIT:
+			snprintf(s, sizeof(s), 
+			    "%s mutex %p\n",
+			    info_lead,
+			    pthread->data.mutex);
+			_thread_sys_write(fd, s, strlen(s));
+			if (pthread->data.mutex) {
+				snprintf(s, sizeof(s), 
+				    "%s owner %p\n",
+				    info_lead,
+				    (*pthread->data.mutex)->m_owner);
 				_thread_sys_write(fd, s, strlen(s));
 			}
-		}
+			break;
+		case PS_COND_WAIT:
+			snprintf(s, sizeof(s), 
+			    "%s cond %p\n",
+			    info_lead,
+			    pthread->data.cond);
+			_thread_sys_write(fd, s, strlen(s));
+			break;
+		case PS_JOIN:
+			if (pthread->queue) {
+				struct pthread *t;
 
-		/* Output a header for file descriptors: */
-		snprintf(s, sizeof(s), "\n\n=============\nFILE DESCRIPTOR TABLE (table size %d)\n\n",_thread_dtablesize);
-		_thread_sys_write(fd, s, strlen(s));
-
-		/* Enter a loop to report file descriptor lock usage: */
-		for (i = 0; i < _thread_dtablesize; i++) {
-			/*
-			 * Check if memory is allocated for this file
-			 * descriptor: 
-			 */
-			if (_thread_fd_table[i] != NULL) {
-				/* Report the file descriptor lock status: */
-				sprintf(s, "fd[%3d] read owner %p count %d [%s:%d]\n        write owner %p count %d [%s:%d]\n",
-					i,
-					_thread_fd_table[i]->r_owner,
-					_thread_fd_table[i]->r_lockcount,
-					_thread_fd_table[i]->r_fname,
-					_thread_fd_table[i]->r_lineno,
-					_thread_fd_table[i]->w_owner,
-					_thread_fd_table[i]->w_lockcount,
-					_thread_fd_table[i]->w_fname,
-					_thread_fd_table[i]->w_lineno);
+				/* Locate the thread through its queue: */
+				t = (struct pthread*)((
+				    (char *)pthread->queue) -
+				    offsetof(struct pthread, join_queue));
+				snprintf(s, sizeof(s), 
+				    "%s thread %p\n", info_lead, t);
 				_thread_sys_write(fd, s, strlen(s));
 			}
-		}
+			break;
+		case PS_SLEEP_WAIT:
+			{
+				struct timeval tv;
+				struct timespec current_time;
+				struct timespec remaining_time;
+				double remain;
 
-		/* Close the dump file: */
-		_thread_sys_close(fd);
+				gettimeofday(&tv, NULL);
+				TIMEVAL_TO_TIMESPEC(&tv, &current_time);
+				timespecsub(&pthread->wakeup_time, 
+				    &current_time, &remaining_time);
+				remain = remaining_time.tv_sec
+					+ (double)remaining_time.tv_nsec / 1e9;
+				snprintf(s, sizeof(s), 
+				    "%s wake in %f sec\n", 
+				    info_lead, remain);
+				_thread_sys_write(fd, s, strlen(s));
+			}
+			break;
+		case PS_SELECT_WAIT:
+			/* XXX information in pthread->data.select_data */
+			break;
+		default:
+			/* Nothing to do here. */
+			break;
+		}
 	}
+
+	/* Output a header for file descriptors: */
+	snprintf(s, sizeof(s), "file descriptor table, size %d\n", 
+	    _thread_dtablesize);
+	_thread_sys_write(fd, s, strlen(s));
+
+	snprintf(s, sizeof s,
+		" %3s %8s %4s %21s %8s %4s %21s\n",
+		"fd", "rdowner", "rcnt", "rdcode",
+		"wrowner", "wcnt", "wrcode");
+	_thread_sys_write(fd, s, strlen(s));
+
+	/* Enter a loop to report file descriptor lock usage: */
+	for (i = 0; i < _thread_dtablesize; i++) {
+		/*
+		 * Check if memory is allocated for this file
+		 * descriptor: 
+		 */
+		char rcode[22], wcode[22];
+
+		if (_thread_fd_table[i] != NULL) {
+
+			/* Find the reader's last file:line: */
+			if (_thread_fd_table[i]->r_owner)
+				snprintf(rcode, sizeof rcode, "%s:%d", 
+				    truncname(_thread_fd_table[i]->r_fname, 16),
+				    _thread_fd_table[i]->r_lineno);
+			else
+				rcode[0] = '\0';
+
+			/* Find the writer's last file:line: */
+			if (_thread_fd_table[i]->w_owner)
+				snprintf(wcode, sizeof wcode, "%s:%d", 
+				    truncname(_thread_fd_table[i]->w_fname, 16),
+				    _thread_fd_table[i]->w_lineno);
+			else
+				wcode[0] = '\0';
+
+			/* Report the file descriptor lock status: */
+			snprintf(s, sizeof(s),
+			    " %3d %8p %4d %21s %8p %4d %21s\n",
+			    i, 
+			    _thread_fd_table[i]->r_owner,
+			    _thread_fd_table[i]->r_lockcount,
+			    rcode,
+			    _thread_fd_table[i]->w_owner,
+			    _thread_fd_table[i]->w_lockcount,
+			    wcode
+			);
+			_thread_sys_write(fd, s, strlen(s));
+		}
+	}
+
+	/* Show signal counter statistics: */
+	snprintf(s, sizeof s, "sig:");
+	for (i = 0; i < NSIG; i++) {
+		char buf[16] = " xx:xxxxx";
+		if (_thread_sig_statistics[i]) {
+			snprintf(buf, sizeof buf, " %d:%d", i, 
+			    _thread_sig_statistics[i]);
+			strlcat(s, buf, sizeof s);
+		}
+	}
+	strlcat(s, "\n", sizeof s);
+	_thread_sys_write(fd, s, strlen(s));
+
+	/* Close the dump file: */
+	_thread_sys_close(fd);
 	return;
 }
 
@@ -193,8 +334,11 @@ void
 pthread_set_name_np(pthread_t thread, char *name)
 {
 	/* Check if the caller has specified a valid thread: */
-	if (thread != NULL && thread->magic == PTHREAD_MAGIC)
+	if (thread != NULL && thread->magic == PTHREAD_MAGIC) {
+		if (thread->name != NULL)
+			free(thread->name);
 		thread->name = strdup(name);
+	}
 	return;
 }
 #endif

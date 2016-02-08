@@ -1,4 +1,4 @@
-#	$OpenBSD: Makefile,v 1.56 1998/10/07 02:36:48 deraadt Exp $
+#	$OpenBSD: Makefile,v 1.63 1999/03/29 03:07:39 rahnds Exp $
 #	$NetBSD: Makefile,v 1.59 1996/05/15 21:36:43 jtc Exp $
 
 #	@(#)Makefile	5.45.1.1 (Berkeley) 5/6/91
@@ -9,16 +9,17 @@
 # Missing: mp.h
 
 FILES=	a.out.h ar.h assert.h bitstring.h blf.h bm.h cast.h cpio.h ctype.h \
-	curses.h db.h des.h dirent.h disktab.h elf_abi.h err.h fnmatch.h \
+	curses.h db.h dbm.h des.h dirent.h disktab.h elf_abi.h err.h fnmatch.h \
 	fstab.h fts.h glob.h grp.h ieeefp.h inttypes.h iso646.h kvm.h \
 	langinfo.h libgen.h limits.h locale.h malloc.h math.h md4.h md5.h \
 	memory.h mpool.h ndbm.h netdb.h netgroup.h nlist.h nl_types.h \
 	olf_abi.h paths.h poll.h pwd.h ranlib.h re_comp.h regex.h resolv.h \
-	rmd160.h search.h setjmp.h sgtty.h sha1.h signal.h stab.h stddef.h \
-	stdio.h stdlib.h string.h strings.h struct.h sysexits.h tar.h time.h \
-	ttyent.h tzfile.h unistd.h utime.h utmp.h vis.h
+	rmd160.h search.h setjmp.h sgtty.h sha1.h skipjack.h signal.h stab.h \
+	stddef.h stdio.h stdlib.h string.h strings.h struct.h sysexits.h \
+	tar.h time.h ttyent.h tzfile.h unistd.h utime.h utmp.h vis.h
 
-.if (${MACHINE_ARCH} != "alpha") && (${MACHINE_ARCH} != "mips")
+.if (${MACHINE_ARCH} != "alpha") && (${MACHINE_ARCH} != "mips") && \
+	(${MACHINE_ARCH} != "powerpc")
 FILES+=	dlfcn.h link.h
 .endif
 
@@ -30,18 +31,27 @@ MFILES+= link.h dlfcn.h
 .endif
 
 DIRS=	arpa protocols rpc rpcsvc
-LDIRS=	dev net netinet netccitt netiso netns netipx nfs sys ufs vm ddb \
+LDIRS=	dev net netinet netinet6 netccitt netiso netns netipx nfs sys ufs vm ddb \
 	scsi netatalk isofs xfs
 
-RDIRS=	../lib/libcom_err ../lib/libcompat ../lib/libcurses ../lib/libform \
-	../lib/libmenu ../lib/libocurses ../lib/libossaudio ../lib/libpanel \
-	../lib/librpcsvc ../lib/libskey ../lib/libedit \
+# Directories with an includes target
+RDIRS=	../lib/libc_r ../lib/libcom_err ../lib/libcompat ../lib/libcurses \
+        ../lib/libform ../lib/libmenu ../lib/libocurses ../lib/libossaudio \
+	../lib/libpanel ../lib/librpcsvc ../lib/libskey ../lib/libedit \
 	../lib/libpcap ../lib/libutil ../lib/libwrap ../lib/libz \
 	../sys/arch/${MACHINE}
 
+# Places using Makefile that needs a prerequisite target met before includes
+PRDIRS=
+
+# Directories with an includes target that use Makefile.bsd-wrapper
 WDIRS=	../lib/libssl ../gnu/lib/libg++/libg++ ../gnu/lib/libg++/libio \
 	../gnu/lib/libg++/librx ../gnu/lib/libg++/libstdc++ \
 	../gnu/usr.bin/gcc ../gnu/lib/libgmp
+
+# Places using Makefile.bsd-wrapper that needs a prerequisite target met
+# before includes
+PWDIRS=	../lib/libssl
 
 NOOBJ=	noobj
 
@@ -50,7 +60,18 @@ NOOBJ=	noobj
 SYS_INCLUDE?=	copies
 .if (${KERBEROS} == "yes")
 RDIRS+=	../kerberosIV/include ../kerberosIV/kadm ../kerberosIV/krb
+PRDIRS+=../kerberosIV/kadm ../kerberosIV/krb
 .endif
+
+prereq:
+	@-for i in ${PRDIRS}; do \
+		echo preparing in ${.CURDIR}/$$i; \
+		(cd ${.CURDIR}/$$i; ${MAKE} prereq) \
+	done
+	@-for i in ${PWDIRS}; do \
+		echo preparing in ${.CURDIR}/$$i; \
+		(cd ${.CURDIR}/$$i; ${MAKE} -f Makefile.bsd-wrapper prereq) \
+	done
 
 includes:
 	@echo installing ${FILES}

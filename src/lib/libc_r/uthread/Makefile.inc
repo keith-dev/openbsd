@@ -1,5 +1,5 @@
-#	$Id: Makefile.inc,v 1.1 1998/08/27 09:00:49 d Exp $
-#	$OpenBSD: Makefile.inc,v 1.1 1998/08/27 09:00:49 d Exp $
+#	$Id: Makefile.inc,v 1.6 1999/01/18 00:00:32 d Exp $
+#	$OpenBSD: Makefile.inc,v 1.6 1999/01/18 00:00:32 d Exp $
 
 # uthread sources
 .PATH: ${.CURDIR}/uthread
@@ -8,16 +8,21 @@ CFLAGS += -I${.CURDIR}/arch/${MACHINE_ARCH}
 
 SRCS+= \
 	uthread_accept.c \
+	uthread_atfork.c \
 	uthread_attr_destroy.c \
 	uthread_attr_init.c \
 	uthread_attr_getdetachstate.c \
 	uthread_attr_getstackaddr.c \
 	uthread_attr_getstacksize.c \
+	uthread_attr_priosched.c \
 	uthread_attr_setcreatesuspend_np.c \
 	uthread_attr_setdetachstate.c \
 	uthread_attr_setstackaddr.c \
 	uthread_attr_setstacksize.c \
+	uthread_autoinit.c \
 	uthread_bind.c \
+	uthread_fchflags.c \
+	uthread_cancel.c \
 	uthread_clean.c \
 	uthread_close.c \
 	uthread_cond.c \
@@ -31,6 +36,7 @@ SRCS+= \
 	uthread_equal.c \
 	uthread_execve.c \
 	uthread_exit.c \
+	uthread_fchflags.c \
 	uthread_fchmod.c \
 	uthread_fchown.c \
 	uthread_fcntl.c \
@@ -39,9 +45,11 @@ SRCS+= \
 	uthread_find_thread.c \
 	uthread_flock.c \
 	uthread_fork.c \
+	uthread_fpathconf.c \
 	uthread_fstat.c \
 	uthread_fstatfs.c \
 	uthread_fsync.c \
+	uthread_gc.c \
 	uthread_getdirentries.c \
 	uthread_getpeername.c \
 	uthread_getprio.c \
@@ -56,6 +64,7 @@ SRCS+= \
 	uthread_listen.c \
 	uthread_mattr_init.c \
 	uthread_mattr_kind_np.c \
+	uthread_msync.c \
 	uthread_multi_np.c \
 	uthread_mutex.c \
 	uthread_mutexattr_destroy.c \
@@ -63,12 +72,15 @@ SRCS+= \
 	uthread_once.c \
 	uthread_open.c \
 	uthread_pipe.c \
+	uthread_poll.c \
 	uthread_queue.c \
 	uthread_read.c \
 	uthread_readv.c \
 	uthread_recvfrom.c \
 	uthread_recvmsg.c \
 	uthread_resume_np.c \
+	uthread_rwlock.c \
+	uthread_rwlockattr.c \
 	uthread_select.c \
 	uthread_self.c \
 	uthread_sendmsg.c \
@@ -79,6 +91,7 @@ SRCS+= \
 	uthread_shutdown.c \
 	uthread_sig.c \
 	uthread_sigaction.c \
+	uthread_sigaltstack.c \
 	uthread_sigblock.c \
 	uthread_sigmask.c \
 	uthread_sigprocmask.c \
@@ -91,6 +104,7 @@ SRCS+= \
 	uthread_spec.c \
 	uthread_spinlock.c \
 	uthread_suspend_np.c \
+	uthread_vfork.c \
 	uthread_wait4.c \
 	uthread_write.c \
 	uthread_writev.c \

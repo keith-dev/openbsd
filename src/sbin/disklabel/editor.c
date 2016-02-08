@@ -1,7 +1,7 @@
-/*	$OpenBSD: editor.c,v 1.45 1998/10/11 20:49:17 millert Exp $	*/
+/*	$OpenBSD: editor.c,v 1.63 1999/04/07 22:57:26 millert Exp $	*/
 
 /*
- * Copyright (c) 1997-1998 Todd C. Miller <Todd.Miller@courtesan.com>
+ * Copyright (c) 1997-1999 Todd C. Miller <Todd.Miller@courtesan.com>
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -28,13 +28,21 @@
  */
 
 #ifndef lint
-static char rcsid[] = "$OpenBSD: editor.c,v 1.45 1998/10/11 20:49:17 millert Exp $";
+static char rcsid[] = "$OpenBSD: editor.c,v 1.63 1999/04/07 22:57:26 millert Exp $";
 #endif /* not lint */
 
 #include <sys/types.h>
 #include <sys/param.h>
+#include <sys/stat.h>
+#include <sys/ioctl.h>
 #define	DKTYPENAMES
 #include <sys/disklabel.h>
+#include <sys/reboot.h>
+#include <sys/sysctl.h>
+#include <machine/cpu.h>
+#ifdef CPU_BIOS
+#include <machine/biosvar.h>
+#endif
 
 #include <ufs/ffs/fs.h>
 
@@ -63,26 +71,46 @@ struct diskchunk {
 	u_int32_t stop;
 };
 
+/* used when sorting mountpoints in mpsave() */
+struct mountinfo {
+	char *mountpoint;
+	int partno;
+};
+
 void	edit_parms __P((struct disklabel *, u_int32_t *));
-int	editor __P((struct disklabel *, int, char *));
-void	editor_add __P((struct disklabel *, u_int32_t *, char *));
+int	editor __P((struct disklabel *, int, char *, char *));
+void	editor_add __P((struct disklabel *, char **, u_int32_t *, char *));
 void	editor_change __P((struct disklabel *, u_int32_t *, char *));
 void	editor_countfree __P((struct disklabel *, u_int32_t *));
-void	editor_delete __P((struct disklabel *, u_int32_t *, char *));
-void	editor_display __P((struct disklabel *, u_int32_t *, char));
+void	editor_delete __P((struct disklabel *, char **, u_int32_t *, char *));
+void	editor_display __P((struct disklabel *, char **, u_int32_t *, char));
 void	editor_help __P((char *));
-void	editor_modify __P((struct disklabel *, u_int32_t *, char *));
-char	*getstring __P((struct disklabel *, char *, char *, char *));
-u_int32_t getuint __P((struct disklabel *, int, char *, char *, u_int32_t, u_int32_t, int));
+void	editor_modify __P((struct disklabel *, char **, u_int32_t *, char *));
+void	editor_name __P((struct disklabel *, char **, char *));
+char	*getstring __P((char *, char *, char *));
+u_int32_t getuint __P((struct disklabel *, int, char *, char *, u_int32_t, u_int32_t, u_int32_t, int));
 int	has_overlap __P((struct disklabel *, u_int32_t *, int));
 void	make_contiguous __P((struct disklabel *));
 u_int32_t next_offset __P((struct disklabel *, struct partition *));
 int	partition_cmp __P((const void *, const void *));
 struct partition **sort_partitions __P((struct disklabel *, u_int16_t *));
 void	getdisktype __P((struct disklabel *, char *, char *));
-void	find_bounds __P((struct disklabel *));
+void	find_bounds __P((struct disklabel *, struct disklabel *));
 void	set_bounds __P((struct disklabel *, u_int32_t *));
 struct diskchunk *free_chunks __P((struct disklabel *));
+char **	mpcopy __P((char **, char **));
+int	micmp __P((const void *, const void *));
+int	mpequal __P((char **, char **));
+int	mpsave __P((struct disklabel *, char **, char *, char *));
+int	get_bsize __P((struct disklabel *, int));
+int	get_cpg __P((struct disklabel *, int));
+int	get_fsize __P((struct disklabel *, int));
+int	get_fstype __P((struct disklabel *, int));
+int	get_mp __P((struct disklabel *, char **, int));
+int	get_offset __P((struct disklabel *, int));
+int	get_size __P((struct disklabel *, int, u_int32_t *, int));
+void	get_geometry __P((int, struct disklabel **, struct disklabel **));
+void	set_geometry __P((struct disklabel *, struct disklabel *, struct disklabel *, struct disklabel *, char *));
 
 static u_int32_t starting_sector;
 static u_int32_t ending_sector;
@@ -90,7 +118,7 @@ static u_int32_t ending_sector;
 /* from disklabel.c */
 int	checklabel __P((struct disklabel *));
 void	display __P((FILE *, struct disklabel *));
-void	display_partition __P((FILE *, struct disklabel *, int, char, int));
+void	display_partition __P((FILE *, struct disklabel *, char **, int, char, int));
 int	width_partition __P((struct disklabel *, int));
 
 struct disklabel *readlabel __P((int));
@@ -99,29 +127,43 @@ int	writelabel __P((int, char *, struct disklabel *));
 extern	char *bootarea, *specname;
 extern	int donothing;
 #ifdef DOSLABEL
-struct dos_partition *dosdp;	/* DOS partition, if found */
+extern	struct dos_partition *dosdp;	/* DOS partition, if found */
 #endif
 
 /*
  * Simple partition editor.  Primarily intended for new labels.
  */
 int
-editor(lp, f, dev)
+editor(lp, f, dev, fstabfile)
 	struct disklabel *lp;
 	int f;
 	char *dev;
+	char *fstabfile;
 {
 	struct disklabel lastlabel, tmplabel, label = *lp;
+	struct disklabel *disk_geop, *bios_geop;
 	struct partition *pp;
 	u_int32_t freesectors;
 	FILE *fp;
 	char buf[BUFSIZ], *cmd, *arg;
+	char **mountpoints = NULL, **omountpoints, **tmpmountpoints;
+
+	/* Alloc and init mount point info */
+	if (fstabfile) {
+		if (!(mountpoints = calloc(MAXPARTITIONS, sizeof(char *))) ||
+		    !(omountpoints = calloc(MAXPARTITIONS, sizeof(char *))) ||
+		    !(tmpmountpoints = calloc(MAXPARTITIONS, sizeof(char *))))
+			errx(4, "out of memory");
+	}
 
 	/* Don't allow disk type of "unknown" */
 	getdisktype(&label, "You need to specify a type for this disk.", dev);
 
+	/* Get the on-disk and BIOS geometries if possible */
+	get_geometry(f, &disk_geop, &bios_geop);
+
 	/* How big is the OpenBSD portion of the disk?  */
-	find_bounds(&label);
+	find_bounds(&label, bios_geop);
 
 	/* Set freesectors based on bounds and initial label */
 	editor_countfree(&label, &freesectors);
@@ -131,7 +173,7 @@ editor(lp, f, dev)
 		errx(1, "can't run when there is partition overlap.");
 
 	/* If we don't have a 'c' partition, create one. */
-	pp = &label.d_partitions[2];
+	pp = &label.d_partitions[RAW_PART];
 	if (label.d_npartitions < 3 || pp->p_size == 0) {
 		puts("No 'c' partition found, adding one that spans the disk.");
 		if (label.d_npartitions < 3)
@@ -146,13 +188,11 @@ editor(lp, f, dev)
 	puts("This platform requires that partition offsets/sizes be on cylinder boundaries.\nPartition offsets/sizes will be rounded to the nearest cylinder automatically.");
 #endif
 
-	/* Set d_bbsize and d_sbsize as neccesary */
-	if (strcmp(label.d_packname, "fictitious") == 0) {
-		if (label.d_bbsize == 0)
-			label.d_bbsize = BBSIZE;
-		if (label.d_sbsize == 0)
-			label.d_sbsize = SBSIZE;
-	}
+	/* Set d_bbsize and d_sbsize as necessary */
+	if (label.d_bbsize == 0)
+		label.d_bbsize = BBSIZE;
+	if (label.d_sbsize == 0)
+		label.d_sbsize = SBSIZE;
 
 	/* Interleave must be >= 1 */
 	if (label.d_interleave == 0)
@@ -183,9 +223,15 @@ editor(lp, f, dev)
 		case 'a':
 			tmplabel = lastlabel;
 			lastlabel = label;
-			editor_add(&label, &freesectors, arg);
+			if (mountpoints != NULL) {
+				mpcopy(tmpmountpoints, omountpoints);
+				mpcopy(omountpoints, mountpoints);
+			}
+			editor_add(&label, mountpoints, &freesectors, arg);
 			if (memcmp(&label, &lastlabel, sizeof(label)) == 0)
 				lastlabel = tmplabel;
+			if (mountpoints != NULL && mpequal(omountpoints, tmpmountpoints))
+				mpcopy(omountpoints, tmpmountpoints);
 			break;
 
 		case 'b':
@@ -207,7 +253,21 @@ editor(lp, f, dev)
 		case 'd':
 			tmplabel = lastlabel;
 			lastlabel = label;
-			editor_delete(&label, &freesectors, arg);
+			if (mountpoints != NULL) {
+				mpcopy(tmpmountpoints, omountpoints);
+				mpcopy(omountpoints, mountpoints);
+			}
+			editor_delete(&label, mountpoints, &freesectors, arg);
+			if (memcmp(&label, &lastlabel, sizeof(label)) == 0)
+				lastlabel = tmplabel;
+			if (mountpoints != NULL && mpequal(omountpoints, tmpmountpoints))
+				mpcopy(omountpoints, tmpmountpoints);
+			break;
+
+		case 'g':
+			tmplabel = lastlabel;
+			lastlabel = label;
+			set_geometry(&label, disk_geop, bios_geop, lp, arg);
 			if (memcmp(&label, &lastlabel, sizeof(label)) == 0)
 				lastlabel = tmplabel;
 			break;
@@ -215,13 +275,33 @@ editor(lp, f, dev)
 		case 'm':
 			tmplabel = lastlabel;
 			lastlabel = label;
-			editor_modify(&label, &freesectors, arg);
+			if (mountpoints != NULL) {
+				mpcopy(tmpmountpoints, omountpoints);
+				mpcopy(omountpoints, mountpoints);
+			}
+			editor_modify(&label, mountpoints, &freesectors, arg);
 			if (memcmp(&label, &lastlabel, sizeof(label)) == 0)
 				lastlabel = tmplabel;
+			if (mountpoints != NULL && mpequal(omountpoints, tmpmountpoints))
+				mpcopy(omountpoints, tmpmountpoints);
+			break;
+
+		case 'n':
+			if (mountpoints == NULL) {
+				fputs("This option is not valid when run "
+				    "without the -F flag.\n", stderr);
+				break;
+			}
+			mpcopy(tmpmountpoints, omountpoints);
+			mpcopy(omountpoints, mountpoints);
+			editor_name(&label, mountpoints, arg);
+			if (mpequal(omountpoints, tmpmountpoints))
+				mpcopy(omountpoints, tmpmountpoints);
 			break;
 
 		case 'p':
-			editor_display(&label, &freesectors, arg ? *arg : 0);
+			editor_display(&label, mountpoints, &freesectors,
+			    arg ? *arg : 0);
 			break;
 
 		case 'M': {
@@ -246,19 +326,24 @@ editor(lp, f, dev)
 				puts("In no change mode, not writing label.");
 				return(1);
 			}
+			/* Save mountpoint info if there is any. */
+			if (mountpoints != NULL)
+				mpsave(&label, mountpoints, dev, fstabfile);
 			if (memcmp(lp, &label, sizeof(label)) == 0) {
-				puts("No changes.");
+				puts("No label changes.");
 				return(1);
 			}
 			do {
-				arg = getstring(lp, "Save changes?",
-				    "Save changes you have made to the label?",
-				    "n");
+				arg = getstring("Write new label?",
+				    "Write the modified label to disk?",
+				    "y");
 			} while (arg && tolower(*arg) != 'y' && tolower(*arg) != 'n');
 			if (arg && tolower(*arg) == 'y') {
-				*lp = label;
-				if (writelabel(f, bootarea, lp) == 0)
+				if (writelabel(f, bootarea, &label) == 0) {
+					*lp = label;
 					return(0);
+				}
+				warnx("unable to write label");
 			}
 			return(1);
 			/* NOTREACHED */
@@ -272,7 +357,7 @@ editor(lp, f, dev)
 
 		case 's':
 			if (arg == NULL) {
-				arg = getstring(lp, "Filename",
+				arg = getstring("Filename",
 				    "Name of the file to save label into.",
 				    NULL);
 				if (arg == NULL && *arg == '\0')
@@ -287,7 +372,9 @@ editor(lp, f, dev)
 			break;
 
 		case 'u':
-			if (memcmp(&label, &lastlabel, sizeof(label)) == 0) {
+			if (memcmp(&label, &lastlabel, sizeof(label)) == 0 &&
+			    mountpoints != NULL &&
+			    mpequal(mountpoints, omountpoints)) {
 				puts("Nothing to undo!");
 			} else {
 				tmplabel = label;
@@ -295,15 +382,24 @@ editor(lp, f, dev)
 				lastlabel = tmplabel;
 				/* Recalculate free space */
 				editor_countfree(&label, &freesectors);
+				/* Restore mountpoints */
+				if (mountpoints != NULL)
+					mpcopy(mountpoints, omountpoints);
 				puts("Last change undone.");
 			}
 			break;
 
 		case 'w':
-			if (donothing)
+			if (donothing)  {
 				puts("In no change mode, not writing label.");
-			else if (memcmp(lp, &label, sizeof(label)) == 0)
-				puts("No changes.");
+				break;
+			}
+			/* Save mountpoint info if there is any. */
+			if (mountpoints != NULL)
+				mpsave(&label, mountpoints, dev, fstabfile);
+			/* Save label if it has changed. */
+			if (memcmp(lp, &label, sizeof(label)) == 0)
+				puts("No label changes.");
 			else if (writelabel(f, bootarea, &label) != 0)
 				warnx("unable to write label");
 			else
@@ -336,8 +432,9 @@ editor(lp, f, dev)
  * Add a new partition.
  */
 void
-editor_add(lp, freep, p)
+editor_add(lp, mp, freep, p)
 	struct disklabel *lp;
+	char **mp;
 	u_int32_t *freep;
 	char *p;
 {
@@ -382,7 +479,7 @@ editor_add(lp, freep, p)
 		} else
 			p = NULL;
 		for (;;) {
-			p = getstring(lp, "partition",
+			p = getstring("partition",
 			    "The letter of the new partition, a - p.", p);
 			if (p == NULL)
 				return;
@@ -426,31 +523,10 @@ editor_add(lp, freep, p)
 
 getoff1:
 	/* Get offset */
-	for (;;) {
-		ui = getuint(lp, partno, "offset",
-		   "Starting sector for this partition.", pp->p_offset,
-		   pp->p_offset, DO_CONVERSIONS |
-		   (pp->p_fstype == FS_BSDFFS ? DO_ROUNDING : 0));
-		if (ui == UINT_MAX - 1) {
-			fputs("Command aborted\n", stderr);
-			pp->p_size = 0;		/* effective delete */
-			return;
-		} else if (ui == UINT_MAX)
-			fputs("Invalid entry\n", stderr);
-		else if (ui < starting_sector)
-			fprintf(stderr, "The OpenBSD portion of the disk starts"
-			    " at sector %u, you tried to add a partition at %u."
-			    "  You can use the 'b' command to change the size "
-			    "of the OpenBSD portion.\n" , starting_sector, ui);
-		else if (ui >= ending_sector)
-			fprintf(stderr, "The OpenBSD portion of the disk ends "
-			    "at sector %u, you tried to add a partition at %u."
-			    "  You can use the 'b' command to change the size "
-			    "of the OpenBSD portion.\n", ending_sector, ui);
-		else
-			break;
+	if (get_offset(lp, partno) != 0) {
+		pp->p_size = 0;			/* effective delete */
+		return;
 	}
-	pp->p_offset = ui;
 
 	/* Recompute recommended size based on new offset */
 	ui = pp->p_fstype;
@@ -466,33 +542,10 @@ getoff1:
 	pp->p_fstype = ui;
 	
 	/* Get size */
-	for (;;) {
-		ui = getuint(lp, partno, "size", "Size of the partition.",
-		    pp->p_size, *freep, DO_CONVERSIONS |
-		    ((pp->p_fstype == FS_BSDFFS || pp->p_fstype == FS_SWAP) ?
-		    DO_ROUNDING : 0));
-		if (ui == UINT_MAX - 1) {
-			fputs("Command aborted\n", stderr);
-			pp->p_size = 0;		/* effective delete */
-			return;
-		} else if (ui == UINT_MAX)
-			fputs("Invalid entry\n", stderr);
-		else if (ui > *freep)
-			/* XXX - prompt user to steal space from another partition */
-			fprintf(stderr,"Sorry, there are only %u sectors left\n",
-			    *freep);
-		else if (pp->p_offset + ui > ending_sector)
-			fprintf(stderr, "The OpenBSD portion of the disk ends "
-			    "at sector %u, you tried to add a partition ending "
-			    "at sector %u.  You can use the 'b' command to "
-			    "change the size of the OpenBSD portion.\n",
-			    ending_sector, pp->p_offset + ui);
-		else
-			break;
-	}
-	pp->p_size = ui;
-	if (pp->p_size == 0)
+	if (get_size(lp, partno, freep, 1) != 0 || pp->p_size == 0) {
+		pp->p_size = 0;			/* effective delete */
 		return;
+	}
 
 	/* Check for overlap */
 	if (has_overlap(lp, freep, 0)) {
@@ -503,108 +556,21 @@ getoff1:
 		goto getoff1;		/* Yeah, I know... */
 	}
 
-	/* Get fstype */
-	if (pp->p_fstype < FSMAXTYPES) {
-		p = getstring(lp, "FS type",
-		    "Filesystem type (usually 4.2BSD or swap)",
-		    fstypenames[pp->p_fstype]);
-		if (p == NULL) {
-			fputs("Command aborted\n", stderr);
-			pp->p_size = 0;		/* effective delete */
+	/* Get filesystem type and mountpoint */
+	if (get_fstype(lp, partno) != 0 || get_mp(lp, mp, partno) != 0) {
+		pp->p_size = 0;			/* effective delete */
+		return;
+	}
+
+	if (pp->p_fstype == FS_BSDFFS) {
+		/* Get fsize, bsize, and cpg */
+		if (get_fsize(lp, partno) != 0 || get_bsize(lp, partno) != 0 ||
+		    get_cpg(lp, partno) != 0) {
+			pp->p_size = 0;			/* effective delete */
 			return;
 		}
-		for (i = 0; i < FSMAXTYPES; i++) {
-			if (!strcasecmp(p, fstypenames[i])) {
-				pp->p_fstype = i;
-				break;
-			}
-		}
-		if (i >= FSMAXTYPES) {
-			printf("Unrecognized filesystem type '%s', treating as 'unknown'\n", p);
-			pp->p_fstype = FS_OTHER;
-		}
-	} else {
-		for (;;) {
-			ui = getuint(lp, partno, "FS type (decimal)",
-			    "Filesystem type as a decimal number; usually 7 (4.2BSD) or 1 (swap).",
-			    pp->p_fstype, pp->p_fstype, 0);
-			if (ui == UINT_MAX - 1) {
-				fputs("Command aborted\n", stderr);
-				pp->p_size = 0;		/* effective delete */
-				return;
-			} if (ui == UINT_MAX)
-				fputs("Invalid entry\n", stderr);
-			else
-				break;
-		}
-		pp->p_fstype = ui;
 	}
 
-	if (pp->p_fstype == FS_BSDFFS || pp->p_fstype == FS_UNUSED) {
-		/* get fsize */
-		for (;;) {
-			ui = getuint(lp, partno, "fragment size",
-			    "Size of fs block fragments.  Usually 1024 or 512.",
-			    pp->p_fsize, pp->p_fsize, 0);
-			if (ui == UINT_MAX - 1) {
-				fputs("Command aborted\n", stderr);
-				pp->p_size = 0;		/* effective delete */
-				return;
-			} else if (ui == UINT_MAX)
-				fputs("Invalid entry\n", stderr);
-			else
-				break;
-		}
-		pp->p_fsize = ui;
-		if (pp->p_fsize == 0)
-			puts("Zero fragment size implies zero block size");
-
-		/* get bsize */
-		/* XXX - do before frag size? */
-		for (; pp->p_fsize > 0;) {
-			ui = getuint(lp, partno, "block size",
-			    "Size of filesystem blocks.  Usually 8192 or 4096.",
-			    pp->p_fsize * pp->p_frag, pp->p_fsize * pp->p_frag,
-			    0);
-
-			/* sanity checks */
-			if (ui == UINT_MAX - 1) {
-				fputs("Command aborted\n", stderr);
-				pp->p_size = 0;		/* effective delete */
-				return;
-			} else if (ui == UINT_MAX)
-				fputs("Invalid entry\n", stderr);
-			else if (ui < getpagesize())
-				fprintf(stderr,
-				    "Error: block size must be at least as big "
-				    "as page size (%d).\n", getpagesize());
-			else if (ui % pp->p_fsize != 0)
-				fputs("Error: block size must be a multiple of the fragment size.\n", stderr);
-			else if (ui / pp->p_fsize < 1)
-				fputs("Error: block size must be at least as big as fragment size.\n", stderr);
-			else
-				break;
-		}
-		pp->p_frag = ui / pp->p_fsize;
-
-		if (pp->p_fstype == FS_BSDFFS) {
-			/* get cpg */
-			for (;;) {
-				ui = getuint(lp, partno, "cpg",
-				    "Number of filesystem cylinders per group.  Usually 16 or 8.",
-				    pp->p_cpg, pp->p_cpg, 0);
-				if (ui == UINT_MAX - 1) {
-					fputs("Command aborted\n", stderr);
-					pp->p_size = 0;	/* effective delete */
-					return;
-				} else if (ui == UINT_MAX)
-					fputs("Invalid entry\n", stderr);
-				else
-					break;
-			}
-			pp->p_cpg = ui;
-		}
-	}
 	/* Update free sector count and make sure things stay contiguous. */
 	*freep -= pp->p_size;
 	if (pp->p_size + pp->p_offset > ending_sector ||
@@ -613,21 +579,65 @@ getoff1:
 }
 
 /*
- * Change an existing partition.
+ * Set the mountpoint of an existing partition ('name').
  */
 void
-editor_modify(lp, freep, p)
+editor_name(lp, mp, p)
 	struct disklabel *lp;
-	u_int32_t *freep;
+	char **mp;
 	char *p;
 {
-	struct partition origpart, *pp;
-	u_int32_t ui;
+	struct partition *pp;
 	int partno;
 
 	/* Change which partition? */
 	if (p == NULL) {
-		p = getstring(lp, "partition to modify",
+		p = getstring("partition to name",
+		    "The letter of the partition to name, a - p.", NULL);
+	}
+	if (p == NULL) {
+		fputs("Command aborted\n", stderr);
+		return;
+	}
+	partno = p[0] - 'a';
+	pp = &lp->d_partitions[partno];
+	if (partno < 0 || partno >= lp->d_npartitions) {
+		fprintf(stderr, "Partition must be between 'a' and '%c'.\n",
+		    'a' + lp->d_npartitions - 1);
+		return;
+	} else if (partno >= lp->d_npartitions ||
+	    (pp->p_fstype == FS_UNUSED && pp->p_size == 0)) {
+		fprintf(stderr, "Partition '%c' is not in use.\n", 'a' + partno);
+		return;
+	}
+	
+	/* Not all fstypes can be named */
+	if (pp->p_fstype == FS_UNUSED || pp->p_fstype == FS_SWAP ||
+	    pp->p_fstype == FS_BOOT || pp->p_fstype == FS_OTHER) {
+		fprintf(stderr, "You cannot name a filesystem of type %s.\n",
+		    fstypenames[lp->d_partitions[partno].p_fstype]);
+		return;
+	}
+
+	get_mp(lp, mp, partno);
+}
+
+/*
+ * Change an existing partition.
+ */
+void
+editor_modify(lp, mp, freep, p)
+	struct disklabel *lp;
+	char **mp;
+	u_int32_t *freep;
+	char *p;
+{
+	struct partition origpart, *pp;
+	int partno;
+
+	/* Change which partition? */
+	if (p == NULL) {
+		p = getstring("partition to modify",
 		    "The letter of the partition to modify, a - p.", NULL);
 	}
 	if (p == NULL) {
@@ -648,40 +658,9 @@ editor_modify(lp, freep, p)
 	}
 	
 	/* Get filesystem type */
-	if (pp->p_fstype < FSMAXTYPES) {
-		p = getstring(lp, "FS type",
-		    "Filesystem type (usually 4.2BSD or swap)",
-		    fstypenames[pp->p_fstype]);
-		if (p == NULL) {
-			fputs("Command aborted\n", stderr);
-			pp->p_size = 0;		/* effective delete */
-			return;
-		}
-		for (ui = 0; ui < FSMAXTYPES; ui++) {
-			if (!strcasecmp(p, fstypenames[ui])) {
-				pp->p_fstype = ui;
-				break;
-			}
-		}
-		if (ui >= FSMAXTYPES) {
-			printf("Unrecognized filesystem type '%s', treating as 'unknown'\n", p);
-			pp->p_fstype = FS_OTHER;
-		}
-	} else {
-		for (;;) {
-			ui = getuint(lp, partno, "FS type (decimal)",
-			    "Filesystem type as a decimal number; usually 7 (4.2BSD) or 1 (swap).",
-			    pp->p_fstype, pp->p_fstype, 0);
-			if (ui == UINT_MAX - 1) {
-				fputs("Command aborted\n", stderr);
-				pp->p_size = 0;		/* effective delete */
-				return;
-			} else if (ui == UINT_MAX)
-				fputs("Invalid entry\n", stderr);
-			else
-				break;
-		}
-		pp->p_fstype = ui;
+	if (get_fstype(lp, partno) != 0) {
+		*pp = origpart;			/* undo changes */
+		return;
 	}
 
 	/* Did they disable/enable the partition? */
@@ -703,69 +682,16 @@ editor_modify(lp, freep, p)
 
 getoff2:
 	/* Get offset */
-	for (;;) {
-		ui = getuint(lp, partno, "offset",
-		    "Starting sector for this partition.", pp->p_offset,
-		    pp->p_offset, DO_CONVERSIONS |
-		    (pp->p_fstype == FS_BSDFFS ? DO_ROUNDING : 0));
-		if (ui == UINT_MAX - 1) {
-			fputs("Command aborted\n", stderr);
-			*pp = origpart;		/* undo changes */
-			return;
-		} else if (ui == UINT_MAX)
-			fputs("Invalid entry\n", stderr);
-		else if (partno != 2 && ui + ui < starting_sector) {
-			fprintf(stderr, "The OpenBSD portion of the disk starts"
-			    " at sector %u, you tried to start at %u."
-			    "  You can use the 'b' command to change the size "
-			    "of the OpenBSD portion.\n", starting_sector, ui);
-		} else
-			break;
+	if (get_offset(lp, partno) != 0) {
+		*pp = origpart;			/* undo changes */
+		return;
 	}
-	pp->p_offset = ui;
 
 	/* Get size */
-	/* XXX - this loop sucks */
-	for (;;) {
-		ui = getuint(lp, partno, "size", "Size of the partition.",
-		    pp->p_size, *freep, 1);
-
-		if (ui == pp->p_size)
-			break;			/* no change */
-
-		if (ui == UINT_MAX - 1) {
-			fputs("Command aborted\n", stderr);
-			*pp = origpart;		/* undo changes */
-			return;
-		} else if (ui == UINT_MAX) {
-			fputs("Invalid entry\n", stderr);
-			continue;
-		} else if (partno == 2 && ui + pp->p_offset > lp->d_secperunit) {
-			fputs("'c' partition may not be larger than the disk\n",
-			    stderr);
-			continue;
-		}
-
-		if (pp->p_fstype == FS_UNUSED || pp->p_fstype == FS_BOOT) {
-			pp->p_size = ui;	/* don't care what's free */
-			break;
-		} else {
-			if (ui > pp->p_size + *freep)
-				/* XXX - prompt user to steal space from another partition */
-				fprintf(stderr,
-				    "Size may not be larger than %u sectors\n",
-				    pp->p_size + *freep);
-			else {
-				*freep += pp->p_size - ui;
-				pp->p_size = ui;
-				break;
-			}
-		}
-	}
-	/* XXX - if (ui % lp->d_secpercyl == 0) make ui + offset on cyl bound */
-	pp->p_size = ui;
-	if (pp->p_size == 0)
+	if (get_size(lp, partno, freep, 0) != 0 || pp->p_size == 0) {
+		pp->p_size = 0;			/* effective delete */
 		return;
+	}
 
 	/* Check for overlap and restore if not resolved */
 	if (has_overlap(lp, freep, 0)) {
@@ -775,66 +701,31 @@ getoff2:
 		goto getoff2;		/* Yeah, I know... */
 	}
 
+	/* get mount point */
+	if (get_mp(lp, mp, partno) != 0) {
+		*pp = origpart;			/* undo changes */
+		return;
+	}
+
 	if (pp->p_fstype == FS_BSDFFS || pp->p_fstype == FS_UNUSED) {
 		/* get fsize */
-		for (;;) {
-			ui = getuint(lp, partno, "fragment size",
-			    "Size of fs block fragments.  Usually 1024 or 512.",
-			    pp->p_fsize ? pp->p_fsize : 1024, 1024, 0);
-			if (ui == UINT_MAX - 1) {
-				fputs("Command aborted\n", stderr);
-				*pp = origpart;		/* undo changes */
-				return;
-			} else if (ui == UINT_MAX)
-				fputs("Invalid entry\n", stderr);
-			else
-				break;
+		if (get_fsize(lp, partno) != 0) {
+			*pp = origpart;		/* undo changes */
+			return;
 		}
-		pp->p_fsize = ui;
-		if (pp->p_fsize == 0)
-			puts("Zero fragment size implies zero block size");
 
 		/* get bsize */
-		for (; pp->p_fsize > 0;) {
-			ui = getuint(lp, partno, "block size",
-			    "Size of filesystem blocks.  Usually 8192 or 4096.",
-			    pp->p_frag ? pp->p_fsize * pp->p_frag : 8192,
-			    8192, 0);
-
-			/* sanity check */
-			if (ui == UINT_MAX - 1) {
-				fputs("Command aborted\n", stderr);
-				*pp = origpart;		/* undo changes */
-				return;
-			} else if (ui == UINT_MAX)
-				fputs("Invalid entry\n", stderr);
-			else if (ui % pp->p_fsize != 0)
-				puts("Error: block size must be a multiple of the fragment size.");
-			else if (ui / pp->p_fsize < 1)
-				puts("Error: block size must be at least as big as fragment size.");
-			else {
-				pp->p_frag = ui / pp->p_fsize;
-				break;
-			}
+		if (get_bsize(lp, partno) != 0) {
+			*pp = origpart;		/* undo changes */
+			return;
 		}
 
 		if (pp->p_fstype == FS_BSDFFS) {
 			/* get cpg */
-			for (;;) {
-				ui = getuint(lp, partno, "cpg",
-				    "Number of filesystem cylinders per group."
-				    "  Usually 16 or 8.",
-				    pp->p_cpg ? pp->p_cpg : 16, 16, 0);
-				if (ui == UINT_MAX - 1) {
-					fputs("Command aborted\n", stderr);
-					*pp = origpart;	/* undo changes */
-					return;
-				} else if (ui == UINT_MAX)
-					fputs("Invalid entry\n", stderr);
-				else
-					break;
+			if (get_cpg(lp, partno) != 0) {
+				*pp = origpart;	/* undo changes */
+				return;
 			}
-			pp->p_cpg = ui;
 		}
 	}
 
@@ -848,19 +739,37 @@ getoff2:
  * Delete an existing partition.
  */
 void
-editor_delete(lp, freep, p)
+editor_delete(lp, mp, freep, p)
 	struct disklabel *lp;
+	char **mp;
 	u_int32_t *freep;
 	char *p;
 {
 	int c;
 
 	if (p == NULL) {
-		p = getstring(lp, "partition to delete",
-		    "The letter of the partition to delete, a - p.", NULL);
+		p = getstring("partition to delete",
+		    "The letter of the partition to delete, a - p, or '*'.",
+		    NULL);
 	}
 	if (p == NULL) {
 		fputs("Command aborted\n", stderr);
+		return;
+	}
+	if (p[0] == '*') {
+		for (c = 0; c < lp->d_npartitions; c++) {
+			if (c == 2)
+				continue;
+
+			/* Update free sector count. */
+			if (lp->d_partitions[c].p_fstype != FS_UNUSED &&
+			    lp->d_partitions[c].p_fstype != FS_BOOT &&
+			    lp->d_partitions[c].p_size != 0)
+				*freep += lp->d_partitions[c].p_size;
+
+			(void)memset(&lp->d_partitions[c], 0,
+			    sizeof(lp->d_partitions[c]));
+		}
 		return;
 	}
 	c = p[0] - 'a';
@@ -875,15 +784,11 @@ editor_delete(lp, freep, p)
 "You may not delete the 'c' partition.  The 'c' partition must exist and\n"
 "should span the entire disk.  By default it is of type 'unused' and so\n"
 "does not take up any space.\n", stderr);
-	else if (lp->d_partitions[c].p_offset >= ending_sector ||
-	    lp->d_partitions[c].p_offset < starting_sector)
-		fprintf(stderr, "The OpenBSD portion of the disk ends at sector"
-		    " %u.\nYou can't remove a partition outside the OpenBSD "
-		    "part of the disk.  You can use the 'b' command to change "
-		    "the size of the OpenBSD portion.\n", ending_sector);
 	else {
 		/* Update free sector count. */
-		if (lp->d_partitions[c].p_fstype != FS_UNUSED &&
+		if (lp->d_partitions[c].p_offset < ending_sector &&
+		    lp->d_partitions[c].p_offset >= starting_sector &&
+		    lp->d_partitions[c].p_fstype != FS_UNUSED &&
 		    lp->d_partitions[c].p_fstype != FS_BOOT &&
 		    lp->d_partitions[c].p_size != 0)
 			*freep += lp->d_partitions[c].p_size;
@@ -892,14 +797,19 @@ editor_delete(lp, freep, p)
 		(void)memset(&lp->d_partitions[c], 0,
 		    sizeof(lp->d_partitions[c]));
 	}
+	if (mp != NULL && mp[c] != NULL) {
+		free(mp[c]);
+		mp[c] = NULL;
+	}
 }
 
 /*
  * Simplified display() for use with the builtin editor.
  */
 void
-editor_display(lp, freep, unit)
+editor_display(lp, mp, freep, unit)
 	struct disklabel *lp;
+	char **mp;
 	u_int32_t *freep;
 	char unit;
 {
@@ -923,7 +833,7 @@ editor_display(lp, freep, unit)
 	printf("#    %*.*s %*.*s    fstype   [fsize bsize   cpg]\n",
 		width, width, "size", width, width, "offset");
 	for (i = 0; i < lp->d_npartitions; i++)
-		display_partition(stdout, lp, i, unit, width);
+		display_partition(stdout, lp, mp, i, unit, width);
 }
 
 /*
@@ -1002,9 +912,10 @@ editor_change(lp, freep, p)
 {
 	int partno;
 	u_int32_t newsize;
+	struct partition *pp;
 
 	if (p == NULL) {
-		p = getstring(lp, "partition to change size",
+		p = getstring("partition to change size",
 		    "The letter of the partition to change size, a - p.", NULL);
 	}
 	if (p == NULL) {
@@ -1021,48 +932,46 @@ editor_change(lp, freep, p)
 		fprintf(stderr, "Partition '%c' is not in use.\n", 'a' + partno);
 		return;
 	}
+	pp = &lp->d_partitions[partno];
 
 	printf("Partition %c is currently %u sectors in size (%u free).\n",
-	    partno + 'a', lp->d_partitions[partno].p_size, *freep);
+	    partno + 'a', pp->p_size, *freep);
 	/* XXX - make maxsize lp->d_secperunit if FS_UNUSED/FS_BOOT? */
 	newsize = getuint(lp, partno, "new size", "Size of the partition.  "
 	    "You may also say +/- amount for a relative change.",
-	    lp->d_partitions[partno].p_size,
-	    lp->d_partitions[partno].p_size + *freep, DO_CONVERSIONS |
-	    (lp->d_partitions[partno].p_fstype == FS_BSDFFS ? DO_ROUNDING : 0));
+	    pp->p_size, pp->p_size + *freep, pp->p_offset, DO_CONVERSIONS |
+	    (pp->p_fstype == FS_BSDFFS ? DO_ROUNDING : 0));
 	if (newsize == UINT_MAX - 1) {
 		fputs("Command aborted\n", stderr);
 		return;
 	} else if (newsize == UINT_MAX) {
 		fputs("Invalid entry\n", stderr);
 		return;
-	} else if (newsize == lp->d_partitions[partno].p_size)
+	} else if (newsize == pp->p_size)
 		return;
 
-	if (lp->d_partitions[partno].p_fstype != FS_UNUSED &&
-	    lp->d_partitions[partno].p_fstype != FS_BOOT) {
-		if (newsize > lp->d_partitions[partno].p_size) {
-			if (newsize - lp->d_partitions[partno].p_size > *freep) {
+	if (pp->p_fstype != FS_UNUSED && pp->p_fstype != FS_BOOT) {
+		if (newsize > pp->p_size) {
+			if (newsize - pp->p_size > *freep) {
 				fprintf(stderr,
 				    "Only %u sectors free, you asked for %u\n",
-				    *freep,
-				    newsize - lp->d_partitions[partno].p_size);
+				    *freep, newsize - pp->p_size);
 				return;
 			}
-			*freep -= newsize - lp->d_partitions[partno].p_size;
-		} else if (newsize < lp->d_partitions[partno].p_size) {
-			*freep += lp->d_partitions[partno].p_size - newsize;
+			*freep -= newsize - pp->p_size;
+		} else if (newsize < pp->p_size) {
+			*freep += pp->p_size - newsize;
 		}
 	} else {
 		if (partno == 2 && newsize +
-		    lp->d_partitions[partno].p_offset > lp->d_secperunit) {
+		    pp->p_offset > lp->d_secperunit) {
 			fputs("'c' partition may not be larger than the disk\n",
 			    stderr);
 			return;
 		}
 	}
-	lp->d_partitions[partno].p_size = newsize;
-	if (newsize + lp->d_partitions[partno].p_offset > ending_sector ||
+	pp->p_size = newsize;
+	if (newsize + pp->p_offset > ending_sector ||
 	    has_overlap(lp, freep, -1))
 		make_contiguous(lp);
 }
@@ -1108,8 +1017,7 @@ partition_cmp(e1, e2)
 }
 
 char *
-getstring(lp, prompt, helpstring, oval)
-	struct disklabel *lp;
+getstring(prompt, helpstring, oval)
 	char *prompt;
 	char *helpstring;
 	char *oval;
@@ -1145,16 +1053,17 @@ getstring(lp, prompt, helpstring, oval)
 
 /*
  * Returns UINT_MAX on error
- * XXX - there are way too many parameters here.  Use inline helper functions
+ * Usually only called by helper functions.
  */
 u_int32_t
-getuint(lp, partno, prompt, helpstring, oval, maxval, flags)
+getuint(lp, partno, prompt, helpstring, oval, maxval, offset, flags)
 	struct disklabel *lp;
 	int partno;
 	char *prompt;
 	char *helpstring;
 	u_int32_t oval;
 	u_int32_t maxval;		/* XXX - used inconsistently */
+	u_int32_t offset;
 	int flags;
 {
 	char buf[BUFSIZ], *endptr, *p, operator = '\0';
@@ -1162,6 +1071,9 @@ getuint(lp, partno, prompt, helpstring, oval, maxval, flags)
 	size_t n;
 	int mult = 1;
 	double d;
+
+	/* We only care about the remainder */
+	offset = offset % lp->d_secpercyl;
 
 	buf[0] = '\0';
 	do {
@@ -1253,13 +1165,15 @@ getuint(lp, partno, prompt, helpstring, oval, maxval, flags)
 			/* If we round up past the end, round down instead */
 			cyls = (u_int32_t)((rval / (double)lp->d_secpercyl)
 			    + 0.5);
-			if (cyls * lp->d_secpercyl > maxval)
-				cyls--;
+			if (cyls != 0 && lp->d_secpercyl != 0) {
+				if ((cyls * lp->d_secpercyl) - offset > maxval)
+					cyls--;
 
-			if (rval != cyls * lp->d_secpercyl) {
-				rval = cyls * lp->d_secpercyl;
-				printf("Rounding to nearest cylinder: %u\n",
-				    rval);
+				if (rval != (cyls * lp->d_secpercyl) - offset) {
+					rval = (cyls * lp->d_secpercyl) - offset;
+					printf("Rounding to nearest cylinder: %u\n",
+					    rval);
+				}
 			}
 		}
 	}
@@ -1310,8 +1224,8 @@ has_overlap(lp, freep, resolve)
 				printf("\nError, partitions %c and %c overlap:\n",
 				    'a' + i, 'a' + j);
 				puts("         size   offset    fstype   [fsize bsize   cpg]");
-				display_partition(stdout, lp, i, 0, 0);
-				display_partition(stdout, lp, j, 0, 0);
+				display_partition(stdout, lp, NULL, i, 0, 0);
+				display_partition(stdout, lp, NULL, j, 0, 0);
 
 				/* Did they ask us to resolve it ourselves? */
 				if (resolve != 1) {
@@ -1358,7 +1272,7 @@ edit_parms(lp, freep)
 
 	/* disk type */
 	for (;;) {
-		p = getstring(lp, "disk type",
+		p = getstring("disk type",
 		    "What kind of disk is this?  Usually SCSI, ESDI, ST506, or "
 		    "floppy (use ESDI for IDE).", dktypenames[lp->d_type]);
 		if (p == NULL) {
@@ -1387,7 +1301,7 @@ edit_parms(lp, freep)
 	lp->d_type = ui;
 
 	/* pack/label id */
-	p = getstring(lp, "label name",
+	p = getstring("label name",
 	    "15 char string that describes this label, usually the disk name.",
 	    lp->d_packname);
 	if (p == NULL) {
@@ -1402,7 +1316,7 @@ edit_parms(lp, freep)
 	for (;;) {
 		ui = getuint(lp, 0, "sectors/track",
 		    "The Numer of sectors per track.", lp->d_nsectors,
-		    lp->d_nsectors, 0);
+		    lp->d_nsectors, 0, 0);
 		if (ui == UINT_MAX - 1) {
 			fputs("Command aborted\n", stderr);
 			*lp = oldlabel;		/* undo damage */
@@ -1418,7 +1332,7 @@ edit_parms(lp, freep)
 	for (;;) {
 		ui = getuint(lp, 0, "tracks/cylinder",
 		    "The number of tracks per cylinder.", lp->d_ntracks,
-		    lp->d_ntracks, 0);
+		    lp->d_ntracks, 0, 0);
 		if (ui == UINT_MAX - 1) {
 			fputs("Command aborted\n", stderr);
 			*lp = oldlabel;		/* undo damage */
@@ -1434,7 +1348,8 @@ edit_parms(lp, freep)
 	for (;;) {
 		ui = getuint(lp, 0, "sectors/cylinder",
 		    "The number of sectors per cylinder (Usually sectors/track "
-		    "* tracks/cylinder).", lp->d_secpercyl, lp->d_secpercyl, 0);
+		    "* tracks/cylinder).", lp->d_secpercyl, lp->d_secpercyl,
+		    0, 0);
 		if (ui == UINT_MAX - 1) {
 			fputs("Command aborted\n", stderr);
 			*lp = oldlabel;		/* undo damage */
@@ -1450,7 +1365,7 @@ edit_parms(lp, freep)
 	for (;;) {
 		ui = getuint(lp, 0, "number of cylinders",
 		    "The total number of cylinders on the disk.",
-		    lp->d_ncylinders, lp->d_ncylinders, 0);
+		    lp->d_ncylinders, lp->d_ncylinders, 0, 0);
 		if (ui == UINT_MAX - 1) {
 			fputs("Command aborted\n", stderr);
 			*lp = oldlabel;		/* undo damage */
@@ -1468,7 +1383,7 @@ edit_parms(lp, freep)
 		    "The total number of sectors on the disk.",
 		    lp->d_secperunit ? lp->d_secperunit :
 		    lp->d_ncylinders * lp->d_ncylinders,
-		    lp->d_ncylinders * lp->d_ncylinders, 0);
+		    lp->d_ncylinders * lp->d_ncylinders, 0, 0);
 		if (ui == UINT_MAX - 1) {
 			fputs("Command aborted\n", stderr);
 			*lp = oldlabel;		/* undo damage */
@@ -1506,7 +1421,7 @@ edit_parms(lp, freep)
 	for (;;) {
 		ui = getuint(lp, 0, "rpm",
 		  "The rotational speed of the disk in revolutions per minute.",
-		  lp->d_rpm, lp->d_rpm, 0);
+		  lp->d_rpm, lp->d_rpm, 0, 0);
 		if (ui == UINT_MAX - 1) {
 			fputs("Command aborted\n", stderr);
 			*lp = oldlabel;		/* undo damage */
@@ -1522,7 +1437,7 @@ edit_parms(lp, freep)
 	for (;;) {
 		ui = getuint(lp, 0, "interleave",
 		  "The physical sector interleave, set when formatting.  Almost always 1.",
-		  lp->d_interleave, lp->d_interleave, 0);
+		  lp->d_interleave, lp->d_interleave, 0, 0);
 		if (ui == UINT_MAX - 1) {
 			fputs("Command aborted\n", stderr);
 			*lp = oldlabel;		/* undo damage */
@@ -1594,17 +1509,17 @@ getdisktype(lp, banner, dev)
 		char *dev;
 		char *type;
 	} dtypes[] = {
-		"sd",	"SCSI",
-		"rz",	"SCSI",
-		"wd",	"IDE",
-		"fd",	"FLOPPY",
-		"xd",	"SMD",
-		"xy",	"SMD",
-		"hd",	"HP-IB",
-		"ccd",	"CCD",
-		"vnd",	"VND",
-		"svnd",	"VND",
-		NULL,	NULL
+		{ "sd",   "SCSI" },
+		{ "rz",   "SCSI" },
+		{ "wd",   "IDE" },
+		{ "fd",   "FLOPPY" },
+		{ "xd",   "SMD" },
+		{ "xy",   "SMD" },
+		{ "hd",   "HP-IB" },
+		{ "ccd",  "CCD" },
+		{ "vnd",  "VND" },
+		{ "svnd", "VND" },
+		{ NULL,   NULL }
 	};
 
 	if ((s = basename(dev)) != NULL) {
@@ -1633,7 +1548,7 @@ getdisktype(lp, banner, dev)
 		putchar('\n');
 
 		for (;;) {
-			s = getstring(lp, "Disk type",
+			s = getstring("Disk type",
 			    "What kind of disk is this?  Usually SCSI, IDE, "
 			    "ESDI, CCD, ST506, or floppy.", def);
 			if (s == NULL)
@@ -1675,7 +1590,7 @@ set_bounds(lp, freep)
 	do {
 		ui = getuint(lp, 0, "Starting sector",
 		  "The start of the OpenBSD portion of the disk.",
-		  starting_sector, lp->d_secperunit, 0);
+		  starting_sector, lp->d_secperunit, 0, 0);
 		if (ui == UINT_MAX - 1) {
 			fputs("Command aborted\n", stderr);
 			return;
@@ -1688,7 +1603,7 @@ set_bounds(lp, freep)
 		ui = getuint(lp, 0, "Size ('*' for entire disk)",
 		  "The size of the OpenBSD portion of the disk ('*' for the "
 		  "entire disk).", ending_sector - starting_sector,
-		  lp->d_secperunit - start_temp, 0);
+		  lp->d_secperunit - start_temp, 0, 0);
 		if (ui == UINT_MAX - 1) {
 			fputs("Command aborted\n", stderr);
 			return;
@@ -1761,10 +1676,11 @@ free_chunks(lp)
  * What is the OpenBSD portion of the disk?  Uses the MBR if applicable.
  */
 void
-find_bounds(lp)
+find_bounds(lp, bios_lp)
 	struct disklabel *lp;
+	struct disklabel *bios_lp;
 {
-	struct  partition *pp = &lp->d_partitions[2];
+	struct partition *pp = &lp->d_partitions[RAW_PART];
 
 	/* Defaults */
 	/* XXX - reserve a cylinder for hp300? */
@@ -1772,20 +1688,70 @@ find_bounds(lp)
 	ending_sector = lp->d_secperunit;
 
 #ifdef DOSLABEL
-	/* If we have an MBR, use values from the OpenBSD/FreeBSD parition. */
-	if (dosdp && pp->p_size &&
-	    (dosdp->dp_typ == DOSPTYP_OPENBSD ||
-	    dosdp->dp_typ == DOSPTYP_FREEBSD ||
-	    dosdp->dp_typ == DOSPTYP_NETBSD)) {
-		starting_sector = get_le(&dosdp->dp_start);
-		ending_sector = starting_sector + get_le(&dosdp->dp_size);
+	/*
+	 * If we have an MBR, use values from the {Open,Free,Net}BSD partition
+	 */
+	if (dosdp) {
+	    if (dosdp->dp_typ == DOSPTYP_OPENBSD ||
+		    dosdp->dp_typ == DOSPTYP_FREEBSD ||
+		    dosdp->dp_typ == DOSPTYP_NETBSD) {
+			u_int32_t i, new_end;
+
+			/* Set start and end based on fdisk partition bounds */
+			starting_sector = get_le(&dosdp->dp_start);
+			ending_sector = starting_sector + get_le(&dosdp->dp_size);
+
+			/*
+			 * If the ending sector of the BSD fdisk partition
+			 * is equal to the ending sector of the BIOS geometry
+			 * but the real sector count > BIOS sector count,
+			 * adjust the bounds accordingly.  We do this because
+			 * the BIOS geometry is limited to disks of ~4gig.
+			 */
+			if (bios_lp && ending_sector == bios_lp->d_secperunit &&
+			    lp->d_secperunit > bios_lp->d_secperunit)
+				ending_sector = lp->d_secperunit;
+
+			/*
+			 * If there are any BSD or SWAP partitions beyond
+			 * ending_sector we extend ending_sector to include
+			 * them.  This is done because the BIOS geometry is
+			 * generally different from the disk geometry.
+			 */
+			for (i = new_end = 0; i < lp->d_npartitions; i++) {
+				pp = &lp->d_partitions[i];
+				if ((pp->p_fstype == FS_BSDFFS ||
+				    pp->p_fstype == FS_SWAP) &&
+				    pp->p_size + pp->p_offset > new_end)
+					new_end = pp->p_size + pp->p_offset;
+			}
+			if (new_end > ending_sector)
+				ending_sector = new_end;
+
+			/*
+			 * If we are honoring the fdisk partitions, we should
+			 * use the BIOS geometry unless ending_sector is beyond
+			 * the end of the BIOS geometry, in which case we know
+			 * the BIOS geometry is bogus.
+			 */
+			if (bios_lp != NULL && ending_sector <= bios_lp->d_secperunit) {
+				lp->d_secsize = bios_lp->d_secsize;
+				lp->d_nsectors = bios_lp->d_nsectors;
+				lp->d_ntracks = bios_lp->d_ntracks;
+				lp->d_ncylinders = bios_lp->d_ncylinders;
+				lp->d_secpercyl = bios_lp->d_secpercyl;
+				lp->d_secperunit = bios_lp->d_secperunit;
+				puts("Using BIOS geometry...\nYou can use the "
+				    "'g' command to change this.");
+			}
+		} else {
+			/* Don't trounce the MBR */
+			starting_sector = 63;
+		}
+
 		printf("\nTreating sectors %u-%u as the OpenBSD portion of the "
 		    "disk.\nYou can use the 'b' command to change this.\n",
 		    starting_sector, ending_sector);
-		/*
-		 * XXX - check to see if any BSD/SWAP partitions go beyond
-		 *	 ending_sector and prompt to extend ending_sector if so.
-		 */
 	}
 #endif
 }
@@ -1881,6 +1847,12 @@ editor_help(arg)
 "partition as 'c' must always exist and by default is marked as 'unused' (so\n"
 "it does not take up any space).\n");
 		break;
+	case 'g':
+		puts(
+"The 'g' command is used select which disk geometry to use, the disk, BIOS, or\n"
+"user geometry.  It takes as an optional argument ``d'', ``b'', or ``u''.  If \n"
+"you do not specify the type as an argument, you will be prompted for it.\n");
+		break;
 	case 'm':
 		puts(
 "The 'm' command is used to modify an existing partition.  It takes as an\n"    "optional argument the partition letter to change.  If you do not specify a\n"
@@ -1888,6 +1860,13 @@ editor_help(arg)
 "to change the filesystem type, starting offset, partition size, block fragment\n"
 "size, block size, and cylinders per group for the specified partition (not all\n"
 "parameters are configurable for non-BSD partitions).\n");
+		break;
+	case 'n':
+		puts(
+"The 'm' command is used to set the mount point for a partition (ie: name it).\n"
+"It takes as an optional argument the partition letter to name.  If you do\n"
+"not specify a partition letter, you will be prompted for one.  This option\n"
+"is only valid if disklabel was invoked with the -F flag.\n");
 		break;
 	case 'r':
 		puts(
@@ -1931,7 +1910,9 @@ editor_help(arg)
 		puts("\tb         - set OpenBSD disk boundaries.");
 		puts("\tc [part]  - change partition size.");
 		puts("\td [part]  - delete partition.");
+		puts("\tg [d|b]   - Use [d]isk or [b]ios geometry.");
 		puts("\tm [part]  - modify existing partition.");
+		puts("\tn [part]  - set the mount point for a partition.");
 		puts("\tr         - recalculate free space.");
 		puts("\tu         - undo last change.");
 		puts("\ts [path]  - save label to file.");
@@ -1945,6 +1926,537 @@ editor_help(arg)
 "'g' for gigabytes or no suffix for sectors (usually 512 bytes).\n\t"
 "Non-sector units will be rounded to the nearest cylinder.\n"
 "Entering '?' at most prompts will give you (simple) context sensitive help.");
+		break;
+	}
+}
+
+char **
+mpcopy(to, from)
+	char **to;
+	char **from;
+{
+	int i;
+
+	for (i = 0; i < MAXPARTITIONS; i++) {
+		if (from[i] != NULL) {
+			to[i] = realloc(to[i], strlen(from[i]) + 1);
+			if (to[i] == NULL)
+				errx(4, "out of memory");
+			(void)strcpy(to[i], from[i]);
+		} else if (to[i] != NULL) {
+			free(to[i]);
+			to[i] = NULL;
+		}
+	}
+	return(to);
+}
+
+int
+mpequal(mp1, mp2)
+	char **mp1;
+	char **mp2;
+{
+	int i;
+
+	for (i = 0; i < MAXPARTITIONS; i++) {
+		if (mp1[i] == NULL && mp2[i] == NULL)
+			continue;
+
+		if ((mp1[i] != NULL && mp2[i] == NULL) ||
+		    (mp1[i] == NULL && mp2[i] != NULL) ||
+		    (strcmp(mp1[i], mp2[i]) != 0))
+			return(0);
+	}
+	return(1);
+}
+
+int
+mpsave(lp, mp, cdev, fstabfile)
+	struct disklabel *lp;
+	char **mp;
+	char *cdev;
+	char *fstabfile;
+{
+	int i, j, mpset;
+	char bdev[MAXPATHLEN], *p;
+	struct mountinfo mi[MAXPARTITIONS];
+	FILE *fp;
+
+	memset(&mi, 0, sizeof(mi));
+
+	for (i = 0, mpset = 0; i < MAXPARTITIONS; i++) {
+		if (mp[i] != NULL) {
+			mi[i].mountpoint = mp[i];
+			mi[i].partno = i;
+			mpset = 1;
+		}
+	}
+	/* Exit if there is nothing to do... */
+	if (!mpset)
+		return(0);
+
+	/* Convert cdev to bdev */
+	if (strncmp(_PATH_DEV, cdev, sizeof(_PATH_DEV) - 1) == 0 &&
+	    cdev[sizeof(_PATH_DEV) - 1] == 'r') {
+		snprintf(bdev, sizeof(bdev), "%s%s", _PATH_DEV,
+		    &cdev[sizeof(_PATH_DEV)]);
+	} else {
+		if ((p = strrchr(cdev, '/')) == NULL || *(++p) != 'r')
+			return(1);
+		*p = '\0';
+		snprintf(bdev, sizeof(bdev), "%s%s", cdev, p + 1);
+		*p = 'r';
+	}
+	bdev[strlen(bdev) - 1] = '\0';
+
+	/* Sort mountpoints so we don't try to mount /usr/local before /usr */ 
+	qsort((void *)mi, MAXPARTITIONS, sizeof(struct mountinfo), micmp);
+
+	if ((fp = fopen(fstabfile, "w")) == NULL)
+		return(1);
+
+	for (i = 0; i < MAXPARTITIONS && mi[i].mountpoint != NULL; i++) {
+		j =  mi[i].partno;
+		fprintf(fp, "%s%c %s %s rw 1 %d\n", bdev, 'a' + j,
+		    mi[i].mountpoint,
+		    fstypesnames[lp->d_partitions[j].p_fstype],
+		    j == 0 ? 1 : 2);
+	}
+	fclose(fp);
+	return(0);
+}
+
+int
+get_offset(lp, partno)
+	struct disklabel *lp;
+	int partno;
+{
+	u_int32_t ui;
+	struct partition *pp = &lp->d_partitions[partno];
+
+	for (;;) {
+		ui = getuint(lp, partno, "offset",
+		   "Starting sector for this partition.", pp->p_offset,
+		   pp->p_offset, 0, DO_CONVERSIONS |
+		   (pp->p_fstype == FS_BSDFFS ? DO_ROUNDING : 0));
+		if (ui == UINT_MAX - 1) {
+			fputs("Command aborted\n", stderr);
+			return(1);
+		} else if (ui == UINT_MAX)
+			fputs("Invalid entry\n", stderr);
+		else if (ui < starting_sector)
+			fprintf(stderr, "The OpenBSD portion of the disk starts"
+			    " at sector %u, you tried to add a partition at %u."
+			    "  You can use the 'b' command to change the size "
+			    "of the OpenBSD portion.\n" , starting_sector, ui);
+		else if (ui >= ending_sector)
+			fprintf(stderr, "The OpenBSD portion of the disk ends "
+			    "at sector %u, you tried to add a partition at %u."
+			    "  You can use the 'b' command to change the size "
+			    "of the OpenBSD portion.\n", ending_sector, ui);
+		else
+			break;
+	}
+	pp->p_offset = ui;
+	return(0);
+}
+
+int
+get_size(lp, partno, freep, new)
+	struct disklabel *lp;
+	int partno;
+	u_int32_t *freep;
+	int new;
+{
+	u_int32_t ui;
+	struct partition *pp = &lp->d_partitions[partno];
+
+	for (;;) {
+		ui = getuint(lp, partno, "size", "Size of the partition.",
+		    pp->p_size, *freep, pp->p_offset, DO_CONVERSIONS |
+		    ((pp->p_fstype == FS_BSDFFS || pp->p_fstype == FS_SWAP) ?
+		    DO_ROUNDING : 0));
+		if (ui == UINT_MAX - 1) {
+			fputs("Command aborted\n", stderr);
+			return(1);
+		} else if (ui == UINT_MAX) {
+			fputs("Invalid entry\n", stderr);
+			continue;
+		}
+		if (new) {
+			if (ui > *freep)
+				/* XXX - steal space from another partition */
+				fprintf(stderr,"Sorry, there are only %u "
+				    "sectors left\n", *freep);
+			else if (pp->p_offset + ui > ending_sector)
+				fprintf(stderr, "The OpenBSD portion of the "
+				    "disk ends at sector %u, you tried to add "
+				    "a partition ending at sector %u.  You can "
+				    "use the 'b' command to change the size of "
+				    "the OpenBSD portion.\n",
+				    ending_sector, pp->p_offset + ui);
+			else
+				break;			/* ok */
+		} else {
+			if (ui == pp->p_size)
+				break;			/* no change */
+			if (partno == 2 && ui + pp->p_offset > lp->d_secperunit) {
+				fputs("'c' partition may not be larger than the disk\n",
+				    stderr);
+			} else if (pp->p_fstype == FS_UNUSED ||
+			    pp->p_fstype == FS_BOOT) {
+				/* don't care what's free */
+				pp->p_size = ui;
+				break;
+			} else {
+				if (ui > pp->p_size + *freep)
+					/* XXX - steal from another partition */
+					fprintf(stderr,
+					    "Size may not be larger than %u "
+					    "sectors\n", pp->p_size + *freep);
+				else {
+					*freep += pp->p_size - ui;
+					pp->p_size = ui;
+					break;			/* ok */
+				}
+			}
+		}
+	}
+	pp->p_size = ui;
+	return(0);
+}
+
+int
+get_fsize(lp, partno)
+	struct disklabel *lp;
+	int partno;
+{
+	u_int32_t ui;
+	struct partition *pp = &lp->d_partitions[partno];
+
+	for (;;) {
+		ui = getuint(lp, partno, "fragment size",
+		    "Size of fs block fragments.  Usually 1024 or 512.",
+		    pp->p_fsize, pp->p_fsize, 0, 0);
+		if (ui == UINT_MAX - 1) {
+			fputs("Command aborted\n", stderr);
+			return(1);
+		} else if (ui == UINT_MAX)
+			fputs("Invalid entry\n", stderr);
+		else
+			break;
+	}
+	if (ui == 0)
+		puts("Zero fragment size implies zero block size");
+	pp->p_fsize = ui;
+	return(0);
+}
+
+int
+get_bsize(lp, partno)
+	struct disklabel *lp;
+	int partno;
+{
+	u_int32_t ui;
+	struct partition *pp = &lp->d_partitions[partno];
+
+	/* Avoid dividing by zero... */
+	if (pp->p_fsize == 0) {
+		pp->p_frag = 0;
+		return(1);
+	}
+
+	for (;;) {
+		ui = getuint(lp, partno, "block size",
+		    "Size of filesystem blocks.  Usually 8192 or 4096.",
+		    pp->p_fsize * pp->p_frag, pp->p_fsize * pp->p_frag,
+		    0, 0);
+
+		/* sanity checks */
+		if (ui == UINT_MAX - 1) {
+			fputs("Command aborted\n", stderr);
+			return(1);
+		} else if (ui == UINT_MAX)
+			fputs("Invalid entry\n", stderr);
+		else if (ui < getpagesize())
+			fprintf(stderr,
+			    "Error: block size must be at least as big "
+			    "as page size (%d).\n", getpagesize());
+		else if (ui % pp->p_fsize != 0)
+			fputs("Error: block size must be a multiple of the "
+			    "fragment size.\n", stderr);
+		else if (ui / pp->p_fsize < 1)
+			fputs("Error: block size must be at least as big as "
+			    "fragment size.\n", stderr);
+		else
+			break;
+	}
+	pp->p_frag = ui / pp->p_fsize;
+	return(0);
+}
+
+int
+get_cpg(lp, partno)
+	struct disklabel *lp;
+	int partno;
+{
+	u_int32_t ui;
+	struct partition *pp = &lp->d_partitions[partno];
+
+	for (;;) {
+		ui = getuint(lp, partno, "cpg",
+		    "Number of filesystem cylinders per group."
+		    "  Usually 16 or 8.",
+		    pp->p_cpg ? pp->p_cpg : 16, 16, 0, 0);
+		if (ui == UINT_MAX - 1) {
+			fputs("Command aborted\n", stderr);
+			return(1);
+		} else if (ui == UINT_MAX)
+			fputs("Invalid entry\n", stderr);
+		else
+			break;
+	}
+	pp->p_cpg = ui;
+	return(0);
+}
+
+int
+get_fstype(lp, partno)
+	struct disklabel *lp;
+	int partno;
+{
+	char *p;
+	u_int32_t ui;
+	struct partition *pp = &lp->d_partitions[partno];
+
+	if (pp->p_fstype < FSMAXTYPES) {
+		p = getstring("FS type",
+		    "Filesystem type (usually 4.2BSD or swap)",
+		    fstypenames[pp->p_fstype]);
+		if (p == NULL) {
+			fputs("Command aborted\n", stderr);
+			return(1);
+		}
+		for (ui = 0; ui < FSMAXTYPES; ui++) {
+			if (!strcasecmp(p, fstypenames[ui])) {
+				pp->p_fstype = ui;
+				break;
+			}
+		}
+		if (ui >= FSMAXTYPES) {
+			printf("Unrecognized filesystem type '%s', treating as 'unknown'\n", p);
+			pp->p_fstype = FS_OTHER;
+		}
+	} else {
+		for (;;) {
+			ui = getuint(lp, partno, "FS type (decimal)",
+			    "Filesystem type as a decimal number; usually 7 (4.2BSD) or 1 (swap).",
+			    pp->p_fstype, pp->p_fstype, 0, 0);
+			if (ui == UINT_MAX - 1) {
+				fputs("Command aborted\n", stderr);
+				return(1);
+			} if (ui == UINT_MAX)
+				fputs("Invalid entry\n", stderr);
+			else
+				break;
+		}
+		pp->p_fstype = ui;
+	}
+	return(0);
+}
+
+int
+get_mp(lp, mp, partno)
+	struct disklabel *lp;
+	char **mp;
+	int partno;
+{
+	char *p;
+	struct partition *pp = &lp->d_partitions[partno];
+
+	if (mp != NULL && pp->p_fstype != FS_UNUSED &&
+	    pp->p_fstype != FS_SWAP && pp->p_fstype != FS_BOOT &&
+	    pp->p_fstype != FS_OTHER) {
+		for (;;) {
+			p = getstring("mount point",
+			    "Where to mount this filesystem (ie: / /var /usr)",
+			    mp[partno] ? mp[partno] : "none");
+			if (p == NULL) {
+				fputs("Command aborted\n", stderr);
+				return(1);
+			}
+			if (strcasecmp(p, "none") == 0) {
+				if (mp[partno] != NULL) {
+					free(mp[partno]);
+					mp[partno] = NULL;
+				}
+				break;
+			}
+			if (*p == '/') {
+				/* XXX - might as well realloc */
+				if (mp[partno] != NULL)
+					free(mp[partno]);
+				if ((mp[partno] = strdup(p)) == NULL)
+					errx(4, "out of memory");
+				break;
+			}
+			fputs("Mount points must start with '/'\n", stderr);
+		}
+	}
+	return(0);
+}
+
+int
+micmp(a1, a2)
+	const void *a1;
+	const void *a2;
+{
+	struct mountinfo *mi1 = (struct mountinfo *)a1;
+	struct mountinfo *mi2 = (struct mountinfo *)a2;
+
+	/* We want all the NULLs at the end... */
+	if (mi1->mountpoint == NULL && mi2->mountpoint == NULL)
+		return(0);
+	else if (mi1->mountpoint == NULL)
+		return(1);
+	else if (mi2->mountpoint == NULL)
+		return(-1);
+	else
+		return(strcmp(mi1->mountpoint, mi2->mountpoint));
+}
+
+void
+get_geometry(f, dgpp, bgpp)
+	int f;
+	struct disklabel **dgpp;
+	struct disklabel **bgpp;
+{
+#ifdef CPU_BIOS
+	int mib[4]; 
+	size_t size;
+	dev_t devno;
+	bios_diskinfo_t di;
+#endif
+	struct stat st;
+	struct disklabel *disk_geop;
+	struct disklabel *bios_geop;
+
+	if (fstat(f, &st) == -1)
+		err(4, "Can't stat device");
+
+	/* Get disk geometry */
+	if ((disk_geop = calloc(1, sizeof(struct disklabel))) == NULL)
+		errx(4, "out of memory");
+	if (ioctl(f, DIOCGPDINFO, disk_geop) < 0 &&
+	    ioctl(f, DIOCGDINFO, disk_geop) < 0)
+		err(4, "ioctl DIOCGDINFO");
+	*dgpp = disk_geop;
+
+	/* Get BIOS geometry */
+	*bgpp = NULL;
+#ifdef CPU_BIOS
+	mib[0] = CTL_MACHDEP;
+	mib[1] = CPU_CHR2BLK;
+	mib[2] = st.st_rdev;
+	size = sizeof(devno);
+	if (sysctl(mib, 3, &devno, &size, NULL, 0) == -1) {
+		warn("sysctl(machdep.chr2blk)");
+		return;
+	}
+	devno = MAKEBOOTDEV(major(devno), 0, 0, DISKUNIT(devno), RAW_PART);
+
+	mib[0] = CTL_MACHDEP;
+	mib[1] = CPU_BIOS;
+	mib[2] = BIOS_DISKINFO;
+	mib[3] = devno;
+	size = sizeof(di);
+	if (sysctl(mib, 4, &di, &size, NULL, 0) == -1) {
+		warn("Can't get bios geometry");
+		return;
+	}
+	if ((bios_geop = calloc(1, sizeof(struct disklabel))) == NULL)
+		errx(4, "out of memory");
+
+	bios_geop->d_secsize = DEV_BSIZE;
+	bios_geop->d_nsectors = di.bios_sectors;
+	bios_geop->d_ntracks = di.bios_heads;
+	bios_geop->d_ncylinders = di.bios_cylinders;
+	bios_geop->d_secpercyl = di.bios_sectors * di.bios_heads;
+	bios_geop->d_secperunit = di.bios_cylinders *
+	    di.bios_heads * di.bios_sectors;
+	*bgpp = bios_geop;
+#endif
+}
+
+void
+set_geometry(lp, dgp, bgp, ugp, p)
+	struct disklabel *lp;
+	struct disklabel *dgp;
+	struct disklabel *bgp;
+	struct disklabel *ugp;
+	char *p;
+{
+	if (p == NULL) {
+		p = getstring("[d]isk, [b]ios, or [u]ser geometry",
+		    "Enter 'd' to use the geometry based on what the disk "
+		    "itself thinks it is, 'b' to use what the BIOS says,"
+		    "or 'u' to use the geometry that was found on in the label.",
+		    "d");
+	}
+	if (p == NULL) {
+		fputs("Command aborted\n", stderr);
+		return;
+	}
+	switch (*p) {
+	case 'b':
+	case 'B':
+		if (bgp == NULL)
+			fputs("BIOS geometry not defined.\n", stderr);
+		else {
+			lp->d_secsize = bgp->d_secsize;
+			lp->d_nsectors = bgp->d_nsectors;
+			lp->d_ntracks = bgp->d_ntracks;
+			lp->d_ncylinders = bgp->d_ncylinders;
+			lp->d_secpercyl = bgp->d_secpercyl;
+			lp->d_secperunit = bgp->d_secperunit;
+		}
+		break;
+	case 'd':
+	case 'D':
+		if (dgp == NULL)
+			fputs("BIOS geometry not defined.\n", stderr);
+		else {
+			lp->d_secsize = dgp->d_secsize;
+			lp->d_nsectors = dgp->d_nsectors;
+			lp->d_ntracks = dgp->d_ntracks;
+			lp->d_ncylinders = dgp->d_ncylinders;
+			lp->d_secpercyl = dgp->d_secpercyl;
+			lp->d_secperunit = dgp->d_secperunit;
+		}
+		break;
+	case 'u':
+	case 'U':
+		if (ugp == NULL)
+			fputs("BIOS geometry not defined.\n", stderr);
+		else {
+			lp->d_secsize = ugp->d_secsize;
+			lp->d_nsectors = ugp->d_nsectors;
+			lp->d_ntracks = ugp->d_ntracks;
+			lp->d_ncylinders = ugp->d_ncylinders;
+			lp->d_secpercyl = ugp->d_secpercyl;
+			lp->d_secperunit = ugp->d_secperunit;
+			if (dgp != NULL && ugp->d_secsize == dgp->d_secsize &&
+			    ugp->d_nsectors == dgp->d_nsectors &&
+			    ugp->d_ntracks == dgp->d_ntracks &&
+			    ugp->d_ncylinders == dgp->d_ncylinders &&
+			    ugp->d_secpercyl == dgp->d_secpercyl &&
+			    ugp->d_secperunit == dgp->d_secperunit)
+				fputs("Note: user geometry is the same as disk "
+				    "geometry.\n", stderr);
+		}
+		break;
+	default:
+		fputs("You must enter either 'd', 'b', or 'u'.\n", stderr);
 		break;
 	}
 }

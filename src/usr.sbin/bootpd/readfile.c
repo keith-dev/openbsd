@@ -21,7 +21,7 @@ SOFTWARE.
 ************************************************************************/
 
 #ifndef lint
-static char rcsid[] = "$Id: readfile.c,v 1.2 1996/06/23 10:22:26 deraadt Exp $";
+static char rcsid[] = "$Id: readfile.c,v 1.4 1998/12/20 21:16:51 millert Exp $";
 #endif
 
 
@@ -344,7 +344,7 @@ readtab(force)
 #ifdef DEBUG
 	if (debug > 3) {
 		char timestr[28];
-		strcpy(timestr, ctime(&(st.st_mtime)));
+		strlcpy(timestr, ctime(&(st.st_mtime)), sizeof(timestr));
 		/* zap the newline */
 		timestr[24] = '\0';
 		report(LOG_INFO, "bootptab mtime: %s",
@@ -819,7 +819,7 @@ eval_symbol(symbol, hp)
 	if ((*symbol)[0] == 'T') {	/* generic symbol */
 		(*symbol)++;
 		value = get_u_long(symbol);
-		sprintf(current_tagname, "T%d", value);
+		snprintf(current_tagname, sizeof(current_tagname), "T%d", value);
 		eat_whitespace(symbol);
 		if ((*symbol)[0] != '=') {
 			return E_SYNTAX_ERROR;

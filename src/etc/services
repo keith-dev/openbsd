@@ -1,4 +1,4 @@
-#	$OpenBSD: services,v 1.17 1998/09/01 22:57:11 art Exp $
+#	$OpenBSD: services,v 1.19 1999/01/08 17:06:23 art Exp $
 #
 # Network services, Internet style
 #
@@ -125,6 +125,7 @@ nnsp		433/tcp		usenet		# Network News Transfer
 https		443/tcp				# secure http (SSL)
 photuris	468/tcp				# Photuris Key Management
 photuris	468/udp
+isakmp		500/udp				# ISAKMP key management
 #
 # UNIX specific services
 #
@@ -213,6 +214,7 @@ afs3-rmtsys         	7009/udp	# ?
 # Unofficial services
 #
 supfilesrv	871/tcp			# SUP server
+rsync		873/tcp			# rsync server
 cddb		888/tcp			# Audio CD Database
 supfiledbg	1127/tcp		# SUP debugging
 radius		1645/udp		# radius authentication

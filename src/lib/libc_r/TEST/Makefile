@@ -10,38 +10,47 @@
 
 LIBC_R?=	/usr/lib/libc_r.a
 
-CFLAGS +=	-pthread
-CFLAGS +=	-ggdb -Wall # -Werror
+CFLAGS +=	-Wall # -Werror
+DEBUG =		-ggdb
 CFLAGS +=	-DSRCDIR='"${.CURDIR}"'
-LDLIBS +=	-lm
+LDLIBS +=	-pthread -lm  ${LDSTATIC}
 DPADD +=	${LIBC_R}
+MKDEP =		-p -pthread
 
 # This list used to include test_select, but that test doesn't terminate.
 TESTS = test_create test_pthread_join test_switch test_sleep test_readdir \
-	test_fork test_execve test_preemption test_preemption_float \
+	test_fork test_execve test_preemption \
 	test_sock_1 test_sock_2 test_stdio_1 test_pthread_mutex \
-	test_pthread_cond_timedwait test_netdb test_pw test_cwd
+	test_pthread_cond_timedwait test_netdb test_pw test_cwd \
+	test_sock_2a test_cancel test_sigsuspend test_sigwait
 
-# This list used to include p_bench_semaphore, but the semaphore support isn't
-# defined for all targets (or used for any).
-BENCHMARKS = p_bench_read p_bench_mutex p_bench_yield \
-	p_bench_getpid p_bench_pthread_create
+SRCS =		${TESTS:=.c}
+CLEANFILES +=	${TESTS} 
+SKIP_TESTS +=	test_sock_2a
 
-CLEANFILES += ${TESTS} ${BENCHMARKS} 
-
-all : tests # benchmarks
+all : tests
 
 tests : ${TESTS}
-	@for i in ${.ALLSRC} ; do \
-	  echo ; echo "*** $$i ***"; \
-	  if ${.OBJDIR}/$$i; then \
-		  echo "-- $$i passed"; \
-	  else \
-		  echo "-- $$i FAILED (exit code $$?)"; \
-		  exit 1; \
-	  fi; \
-	done; exit 0
-
-benchmarks: ${BENCHMARKS}
+	@faillist= ; ulimit -t 5; \
+	for i in ${.ALLSRC} ; do \
+	  case " ${SKIP_TESTS} " in \
+	  *" $$i "*) \
+		  : skip ;; \
+	  *) \
+		  echo ; echo "*** $$i ***"; \
+		  if ${.OBJDIR}/$$i; then \
+			  echo "-- $$i passed"; \
+		  else \
+			  echo "-- $$i FAILED (exit code $$?)"; \
+			  faillist="$$faillist $$i"; \
+		  fi;; \
+	  esac; \
+	done; \
+	if test -n "$$faillist"; then \
+		echo; echo "*** tests that failed:$$faillist"; exit 1; \
+	else \
+		echo; echo "All tests passed OK."; exit 0; \
+	fi
 
 .include <bsd.prog.mk>
+.include <bsd.dep.mk>

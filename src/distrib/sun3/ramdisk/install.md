@@ -1,6 +1,6 @@
 #!/bin/sh
 #
-#	$OpenBSD: install.md,v 1.2 1998/09/11 22:55:44 millert Exp $
+#	$OpenBSD: install.md,v 1.5 1998/11/09 04:00:10 millert Exp $
 #	$NetBSD: install.md,v 1.1.2.4 1996/08/26 15:45:14 gwr Exp $
 #
 # Copyright (c) 1996 The NetBSD Foundation, Inc.
@@ -302,55 +302,6 @@ __explain_motives_2
 	return
 }
 
-md_labeldisk() {
-	# $1 is the disk to label
-
-	# Check to see if there is a disklabel present on the device.
-	# If so, we can just edit it.  If not, we must first install
-	# a default label.
-	md_checkfordisklabel $1
-	case $? in
-		0)
-			# Go ahead and just edit the disklabel.
-			disklabel -W $1
-			disklabel -E $1
-			;;
-
-		*)
-		echo -n "No disklabel present, installing a default for type: "
-			case "$1" in
-				sd*)
-					echo "SCSI"
-					sun3_init_label_scsi_disk $1
-					;;
-
-				*)
-					# Shouldn't happen, but...
-					echo "unknown?!  Giving up."
-					return;
-					;;
-			esac
-
-			# Check to see if installing the default was
-			# successful.  If so, go ahead and pop into the
-			# disklabel editor.
-			if [ "X${rval}" != X"0" ]; then
-				echo "Sorry, can't label this disk."
-				echo ""
-				return;
-			fi
-
-			# We have some defaults installed.  Pop into
-			# the disklabel editor.
-			disklabel -W $1
-			if ! disklabel -E $1; then
-				echo ""
-				echo "ERROR: couldn't set partition map for $1"
-				echo ""
-			fi
-	esac
-}
-
 md_prep_disklabel()
 {
 	local _disk
@@ -374,7 +325,7 @@ md_prep_disklabel()
 	cat << \__md_prep_disklabel_1
 
 If you are unsure of how to use multiple partitions properly
-(ie. seperating /, /usr, /tmp, /var, /usr/local, and other things)
+(ie. separating /, /usr, /tmp, /var, /usr/local, and other things)
 just split the space into a root and swap partition for now.
 __md_prep_disklabel_1
 
@@ -383,23 +334,7 @@ __md_prep_disklabel_1
 }
 
 md_copy_kernel() {
-	if [ ! -s /mnt/bsd ]; then
-		echo    ""
-		echo    "Warning, no kernel installed!"
-		echo    "You did not unpack a file set containing a kernel."
-		echo    "This is needed to boot.  Please note that the install"
-		echo    "install kernel is not suitable for general use."
-		echo -n "Escape to shell add /mnt/bsd by hand? [y] "
-		getresp "y"
-		case "$resp" in
-			y*|Y*)
-				echo "Type 'exit' to return to install."
-				sh
-				;;
-			*)
-				;;
-		esac
-	fi
+	check_kernel
 }
 
 # Note, while they might not seem machine-dependent, the

@@ -1,7 +1,7 @@
-/*	$OpenBSD: inp.c,v 1.6 1997/09/22 05:45:26 millert Exp $	*/
+/*	$OpenBSD: inp.c,v 1.8 1999/01/03 05:33:48 millert Exp $	*/
 
 #ifndef lint
-static char rcsid[] = "$OpenBSD: inp.c,v 1.6 1997/09/22 05:45:26 millert Exp $";
+static char rcsid[] = "$OpenBSD: inp.c,v 1.8 1999/01/03 05:33:48 millert Exp $";
 #endif /* not lint */
 
 #include "EXTERN.h"
@@ -10,6 +10,8 @@ static char rcsid[] = "$OpenBSD: inp.c,v 1.6 1997/09/22 05:45:26 millert Exp $";
 #include "pch.h"
 #include "INTERN.h"
 #include "inp.h"
+
+extern bool check_only;
 
 /* Input-file-with-indexable-lines abstract type */
 
@@ -76,14 +78,25 @@ char *filename;
     Reg2 LINENUM iline;
     char lbuf[MAXLINELEN];
 
+    if (!filename || *filename == '\0')
+	return FALSE;
+
     statfailed = stat(filename, &filestat);
     if (statfailed && ok_to_create_file) {
 	if (verbose)
 	    say2("(Creating file %s...)\n",filename);
+	    /* in check_patch case, we still display `Creating file' even
+	       though we're not. The rule is that -C should be as similar
+	       to normal patch behavior as possible
+	     */
+	if (check_only) 
+	    return TRUE;
 	makedirs(filename, TRUE);
 	close(creat(filename, 0666));
 	statfailed = stat(filename, &filestat);
     }
+    if (statfailed && check_only)
+        fatal2("%s not found, -C mode, can't probe further\n", filename);
     /* For nonexistent or read-only files, look for RCS or SCCS versions.  */
     if (statfailed
 	/* No one can write to it.  */
@@ -92,26 +105,23 @@ char *filename;
 	|| ((filestat.st_mode & 0022) == 0 && filestat.st_uid != myuid)) {
 	struct stat cstat;
 	char *cs = Nullch;
-	char *filebase;
-	int pathlen;
+	char *filebase, *filedir;
 
 	filebase = basename(filename);
-	pathlen = filebase - filename;
+	filedir = dirname(filename);
 
-	/* Put any leading path into `s'.
-	   Leave room in lbuf for the diff command.  */
+	/* Leave room in lbuf for the diff command.  */
 	s = lbuf + 20;
-	strncpy(s, filename, pathlen);
 
-#define try(f, a1, a2) (Snprintf(s + pathlen, sizeof lbuf - (s + pathlen - lbuf), f, a1, a2), stat(s, &cstat) == 0)
-	if (   try("RCS/%s%s", filebase, RCSSUFFIX)
-	    || try("RCS/%s"  , filebase,         0)
-	    || try(    "%s%s", filebase, RCSSUFFIX)) {
+#define try(f, a1, a2, a3) (Snprintf(s, sizeof lbuf - 20, f, a1, a2, a3), stat(s, &cstat) == 0)
+	if (   try("%s/RCS/%s%s", filedir, filebase, RCSSUFFIX)
+	    || try("%s/RCS/%s%s", filedir, filebase,         "")
+	    || try(    "%s/%s%s", filedir, filebase, RCSSUFFIX)) {
 	    Snprintf(buf, sizeof buf, CHECKOUT, filename);
 	    Snprintf(lbuf, sizeof lbuf, RCSDIFF, filename);
 	    cs = "RCS";
-	} else if (   try("SCCS/%s%s", SCCSPREFIX, filebase)
-		   || try(     "%s%s", SCCSPREFIX, filebase)) {
+	} else if (   try("%s/SCCS/%s%s", filedir, SCCSPREFIX, filebase)
+		   || try(     "%s/%s%s", filedir, SCCSPREFIX, filebase)) {
 	    Snprintf(buf, sizeof buf, GET, s);
 	    Snprintf(lbuf, sizeof lbuf, SCCSDIFF, s, filename);
 	    cs = "SCCS";

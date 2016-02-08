@@ -1,4 +1,4 @@
-/*	$OpenBSD: disklabel.c,v 1.56 1998/10/03 22:01:47 millert Exp $	*/
+/*	$OpenBSD: disklabel.c,v 1.63 1999/04/07 22:57:25 millert Exp $	*/
 /*	$NetBSD: disklabel.c,v 1.30 1996/03/14 19:49:24 ghudson Exp $	*/
 
 /*
@@ -44,7 +44,7 @@ static char copyright[] =
 #endif /* not lint */
 
 #ifndef lint
-static char rcsid[] = "$OpenBSD: disklabel.c,v 1.56 1998/10/03 22:01:47 millert Exp $";
+static char rcsid[] = "$OpenBSD: disklabel.c,v 1.63 1999/04/07 22:57:25 millert Exp $";
 #endif /* not lint */
 
 #include <sys/param.h>
@@ -107,7 +107,7 @@ enum {
 	UNSPEC, EDIT, EDITOR, READ, RESTORE, SETWRITEABLE, WRITE, WRITEBOOT
 } op = UNSPEC;
 
-int	pflag;
+int	dflag;
 int	rflag;
 int	tflag;
 int	nwflag;
@@ -126,15 +126,16 @@ void	l_perror __P((char *));
 struct disklabel *readlabel __P((int));
 struct disklabel *makebootarea __P((char *, struct disklabel *, int));
 void	display __P((FILE *, struct disklabel *));
-void	display_partition __P((FILE *, struct disklabel *, int, char, int));
+void	display_partition __P((FILE *, struct disklabel *, char **, int, char, int));
 int	width_partition __P((struct disklabel *, int));
-int	editor __P((struct disklabel *, int, char *));
+int	editor __P((struct disklabel *, int, char *, char *));
 int	edit __P((struct disklabel *, int));
 int	editit __P((void));
 char	*skip __P((char *));
 char	*word __P((char *));
 int	getasciilabel __P((FILE *, struct disklabel *));
 int	checklabel __P((struct disklabel *));
+int	cmplabel __P((struct disklabel *, struct disklabel *));
 void	setbootflag __P((struct disklabel *));
 void	usage __P((void));
 u_short	dkcksum __P((struct disklabel *));
@@ -145,10 +146,11 @@ main(argc, argv)
 	char *argv[];
 {
 	int ch, f, writeable, error = 0;
+	char *fstabfile = NULL;
 	struct disklabel *lp;
 	FILE *t;
 
-	while ((ch = getopt(argc, argv, "BENRWb:enprs:tvw")) != -1)
+	while ((ch = getopt(argc, argv, "BEFf:NRWb:denrs:tvw")) != -1)
 		switch (ch) {
 #if NUMBOOT > 0
 		case 'B':
@@ -163,11 +165,6 @@ main(argc, argv)
 			break;
 #endif
 #endif
-		case 'E':
-			if (op != UNSPEC)
-				usage();
-			op = EDITOR;
-			break;
 		case 'N':
 			if (op != UNSPEC)
 				usage();
@@ -185,13 +182,21 @@ main(argc, argv)
 			writeable = 1;
 			op = SETWRITEABLE;
 			break;
+		case 'd':
+			++dflag;
+			break;
 		case 'e':
 			if (op != UNSPEC)
 				usage();
 			op = EDIT;
 			break;
-		case 'p':
-			++pflag;
+		case 'E':
+			if (op != UNSPEC)
+				usage();
+			op = EDITOR;
+			break;
+		case 'f':
+			fstabfile = optarg;
 			break;
 		case 'r':
 			++rflag;
@@ -231,7 +236,7 @@ main(argc, argv)
 		op = READ;
 #endif
 
-	if (argc < 1)
+	if (argc < 1 || (rflag && dflag) || (fstabfile && op != EDITOR))
 		usage();
 
 	dkname = argv[0];
@@ -265,7 +270,7 @@ main(argc, argv)
 			usage();
 		if ((lp = readlabel(f)) == NULL)
 			exit(1);
-		error = editor(lp, f, specname);
+		error = editor(lp, f, specname, fstabfile);
 		break;
 	case READ:
 		if (argc != 1)
@@ -586,6 +591,7 @@ readmbr(f)
 {
 	static int mbr[DEV_BSIZE / sizeof(int)];
 	struct dos_partition *dp;
+	u_int16_t signature;
 	int part;
 
 	/*
@@ -596,7 +602,8 @@ readmbr(f)
 	if (lseek(f, (off_t)DOSBBSECTOR * DEV_BSIZE, SEEK_SET) < 0 ||
 	    read(f, mbr, sizeof(mbr)) < sizeof(mbr))
 		err(4, "can't read master boot record");
-
+	signature = *((u_char *)mbr + DOSMBR_SIGNATURE_OFF) |
+	    (*((u_char *)mbr + DOSMBR_SIGNATURE_OFF + 1) << 8);
 	bcopy((char *)mbr+DOSPARTOFF, (char *)mbr, sizeof(*dp) * NDOSPART);
 		
 	/*
@@ -641,6 +648,13 @@ readmbr(f)
 		}
 	}
 
+	/*
+	 * If there is no signature and no OpenBSD partition this is probably
+	 * not an MBR.
+	 */
+	if (signature != DOSMBR_SIGNATURE)
+		return (NULL);
+
 	/* If no OpenBSD partition, find first used partition. */
 	for (part = 0; part < NDOSPART; part++) {
 		if (get_le(&dp[part].dp_size)) {
@@ -649,7 +663,7 @@ readmbr(f)
 		}
 	}
 	/* Table appears to be empty. */
-	return (0);
+	return (NULL);
 }
 #endif
 
@@ -716,7 +730,7 @@ readlabel(f)
 		}
 		warnx(msg);
 		return(NULL);
-	} else if (pflag) {
+	} else if (dflag) {
 		lp = &lab;
 		if (ioctl(f, DIOCGPDINFO, lp) < 0)
 			err(4, "ioctl DIOCGPDINFO");
@@ -869,7 +883,7 @@ makedisktab(f, lp)
 	FILE *f;
 	struct disklabel *lp;
 {
-	int i, j;
+	int i;
 	char *did = "\\\n\t:";
 	struct partition *pp;
 
@@ -970,9 +984,10 @@ width_partition(lp, unit)
  * Display a particular partion.
  */
 void
-display_partition(f, lp, i, unit, width)
+display_partition(f, lp, mp, i, unit, width)
 	FILE *f;
 	struct disklabel *lp;
+	char **mp;
 	int i;
 	char unit;
 	int width;
@@ -1039,10 +1054,13 @@ display_partition(f, lp, i, unit, width)
 			break;
 
 		default:
-			fprintf(f, "%20.20s", "");
+			fprintf(f, "%22.22s", "");
 			break;
 		}
-		if (lp->d_secpercyl) {
+		if (mp != NULL) {
+			if (mp[i] != NULL)
+				fprintf(f, " # %s", mp[i]);
+		} else if (lp->d_secpercyl) {
 			fprintf(f, "\t# (Cyl. %4d",
 			    pp->p_offset / lp->d_secpercyl);
 			if (pp->p_offset % lp->d_secpercyl)
@@ -1053,7 +1071,7 @@ display_partition(f, lp, i, unit, width)
 			    (pp->p_offset + 
 			    pp->p_size + lp->d_secpercyl - 1) /
 			    lp->d_secpercyl - 1);
-			if (pp->p_size % lp->d_secpercyl)
+			if ((pp->p_offset + pp->p_size) % lp->d_secpercyl)
 				putc('*', f);
 			putc(')', f);
 		}
@@ -1112,7 +1130,7 @@ display(f, lp)
 	    "#    %*.*s %*.*s    fstype   [fsize bsize   cpg]\n",
 	    width, width, "size", width, width, "offset");
 	for (i = 0; i < lp->d_npartitions; i++)
-		display_partition(f, lp, i, 0, width);
+		display_partition(f, lp, NULL, i, 0, width);
 	fflush(f);
 }
 
@@ -1151,6 +1169,12 @@ edit(lp, f)
 		}
 		memset(&label, 0, sizeof(label));
 		if (getasciilabel(fp, &label)) {
+			if (cmplabel(lp, &label) == 0) {
+				puts("No changes.");
+				fclose(fp);
+				(void) unlink(tmpfil);
+				return (0);
+			}
 			*lp = label;
 			if (writelabel(f, bootarea, lp) == 0) {
 				fclose(fp);
@@ -1174,7 +1198,7 @@ edit(lp, f)
 int
 editit()
 {
-	int pid, xpid;
+	pid_t pid, xpid;
 	int stat;
 	extern char *getenv();
 	char *argp[] = {"sh", "-c", NULL, NULL};
@@ -1684,6 +1708,24 @@ setbootflag(lp)
 }
 #endif
 
+int
+cmplabel(lp1, lp2)
+	struct disklabel *lp1;
+	struct disklabel *lp2;
+{
+	struct disklabel lab1 = *lp1;
+	struct disklabel lab2 = *lp2;
+
+	/* We don't compare these fields */
+	lab1.d_magic = lab2.d_magic;
+	lab1.d_magic2 = lab2.d_magic2;
+	lab1.d_checksum = lab2.d_checksum;
+	lab1.d_bbsize = lab2.d_bbsize;
+	lab1.d_sbsize = lab2.d_sbsize;
+
+	return (memcmp(&lab1, &lab2, sizeof(struct disklabel)));
+}
+
 void
 usage()
 {
@@ -1699,14 +1741,14 @@ usage()
 
 	fprintf(stderr, "usage:\n");
 	fprintf(stderr,
-	    "  disklabel [-nv] [-r] [-t] disk%s         (read)\n",
+	    "  disklabel [-nv] [-r|-d] [-t] disk%s      (read)\n",
 	    blank);
 	fprintf(stderr,
-	    "  disklabel [-nv] [-r] -e disk%s           (edit)\n",
+	    "  disklabel [-nv] [-r|-d] -e disk%s        (edit)\n",
 	    blank);
 	fprintf(stderr,
-	    "  disklabel [-nv] [-r] -E disk%s           (simple editor)\n",
-	    blank);
+	    "  disklabel [-nv] [-r|-d] [-f temp] -E disk%.*s  (simple editor)\n",
+	    strlen(blank) - 4, blank);
 	fprintf(stderr,
 	    "  disklabel [-nv] [-r]%s -R disk proto     (restore)\n",
 	    boot);
@@ -1714,7 +1756,7 @@ usage()
 	    "  disklabel [-nv] [-r]%s -w disk dtab [id] (write)\n",
 	    boot);
 	fprintf(stderr,
-	    "  disklabel [-nv] -[NW] disk%s             (protect)\n", blank);
+	    "  disklabel [-nv] [-N|-W] disk%s           (protect)\n", blank);
 	fprintf(stderr,
 	    "`disk' may be of the forms: sd0 or /dev/rsd0%c.\n", 'a'+RAW_PART);
 	fprintf(stderr,

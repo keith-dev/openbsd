@@ -1,4 +1,4 @@
-.\"	$OpenBSD: mount_msdos.8,v 1.6 1998/09/17 04:14:55 aaron Exp $
+.\"	$OpenBSD: mount_msdos.8,v 1.9 1998/12/15 01:20:36 aaron Exp $
 .\"	$NetBSD: mount_msdos.8,v 1.10 1996/01/19 21:14:43 leo Exp $
 .\"
 .\" Copyright (c) 1993,1994 Christopher G. Demetriou
@@ -49,7 +49,7 @@
 .Ar node
 .Sh DESCRIPTION
 The
-.Nm mount_msdos
+.Nm
 command attaches the MS-DOS filesystem residing on
 the device
 .Ar special
@@ -109,7 +109,7 @@ If neither
 nor
 .Fl l
 are given,
-.Nm mount_msdos
+.Nm
 searches the root directory of the filesystem to
 be mounted for any existing Windows 95/98 long filenames.
 If no such entries are found,
@@ -150,14 +150,9 @@ on empty DOS filesystems use
 .Pp
 Note that Windows 95/98 handles only access dates,
 but not access times.
-.Pp
-Also note that 
-.Nm mount_msdos
-will only handle FAT16 filesystems. FAT32 filesystems, as
-provided by Windows 95 (OSR2) and Windows 98, are not supported.
 .Sh HISTORY
 The
-.Nm mount_msdos
+.Nm
 utility first appeared in NetBSD 0.9.
 Its predecessor, the
 .Nm mount_pcfs

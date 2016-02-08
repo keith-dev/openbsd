@@ -1,4 +1,4 @@
-.\"	$OpenBSD: getpeername.2,v 1.4 1998/07/06 18:27:32 deraadt Exp $
+.\"	$OpenBSD: getpeername.2,v 1.7 1999/02/27 21:56:21 deraadt Exp $
 .\"	$NetBSD: getpeername.2,v 1.6 1995/10/12 15:40:56 jtc Exp $
 .\"
 .\" Copyright (c) 1983, 1991, 1993
@@ -34,18 +34,19 @@
 .\"
 .\"     @(#)getpeername.2	8.1 (Berkeley) 6/4/93
 .\"
-.Dd June 4, 1993
+.Dd February 15, 1999
 .Dt GETPEERNAME 2
 .Os BSD 4.2
 .Sh NAME
 .Nm getpeername
 .Nd get name of connected peer
 .Sh SYNOPSIS
+.Fd #include <sys/types.h>
 .Fd #include <sys/socket.h>
 .Ft int
-.Fn getpeername "int s" "struct sockaddr *name" "int *namelen"
+.Fn getpeername "int s" "struct sockaddr *name" "socklen_t *namelen"
 .Sh DESCRIPTION
-.Fn Getpeername
+.Fn getpeername
 returns the name of the peer connected to
 socket
 .Fa s .

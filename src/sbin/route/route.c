@@ -1,4 +1,4 @@
-/*	$OpenBSD: route.c,v 1.27 1998/09/21 08:31:46 deraadt Exp $	*/
+/*	$OpenBSD: route.c,v 1.30 1999/02/24 22:56:01 angelos Exp $	*/
 /*	$NetBSD: route.c,v 1.16 1996/04/15 18:27:05 cgd Exp $	*/
 
 /*
@@ -44,7 +44,7 @@ static char copyright[] =
 #if 0
 static char sccsid[] = "@(#)route.c	8.3 (Berkeley) 3/19/94";
 #else
-static char rcsid[] = "$OpenBSD: route.c,v 1.27 1998/09/21 08:31:46 deraadt Exp $";
+static char rcsid[] = "$OpenBSD: route.c,v 1.30 1999/02/24 22:56:01 angelos Exp $";
 #endif
 #endif /* not lint */
 
@@ -76,7 +76,6 @@ static char rcsid[] = "$OpenBSD: route.c,v 1.27 1998/09/21 08:31:46 deraadt Exp 
 
 #include "keywords.h"
 
-struct	ortentry route;
 union	sockunion {
 	struct	sockaddr sa;
 	struct	sockaddr_in sin;
@@ -259,7 +258,7 @@ flushroutes(argc, argv)
 				af = AF_ISO;
 				break;
 			case K_ENCAP:
-				af = AF_ENCAP;
+				af = PF_KEY;
 				break;
 			case K_X25:
 				af = AF_CCITT;
@@ -364,6 +363,7 @@ routename(sa)
 	struct hostent *hp;
 	static char domain[MAXHOSTNAMELEN];
 	static int first = 1;
+	struct in_addr ina;
 	char *ns_print();
 	char *ipx_print();
 
@@ -727,9 +727,7 @@ newroute(argc, argv)
 		if (*gateway) {
 			(void) printf(": gateway %s", gateway);
 			if (attempts > 1 && ret == 0 && af == AF_INET)
-			    (void) printf(" (%s)",
-				inet_ntoa(((struct sockaddr_in *)
-					   &route.rt_gateway)->sin_addr));
+			    (void) printf(" (%s)", routename(&so_gate.sa));
 		}
 		if (ret == 0)
 			(void) printf("\n");

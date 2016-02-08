@@ -1,4 +1,4 @@
-.\"	$OpenBSD: routed.8,v 1.16 1998/09/23 01:20:25 aaron Exp $
+.\"	$OpenBSD: routed.8,v 1.21 1999/03/16 02:46:51 deraadt Exp $
 .\"
 .\" Copyright (c) 1983, 1991, 1993
 .\"	The Regents of the University of California.  All rights reserved.
@@ -40,7 +40,7 @@
 .Nm routed
 .Nd network RIP and router discovery routing daemon
 .Sh SYNOPSIS
-.Nm
+.Nm routed
 .Op Fl sqdghmpAt
 .Op Fl T Ar tracefile
 .Oo
@@ -49,7 +49,7 @@
 .Oc
 .Op Fl P Ar parms
 .Sh DESCRIPTION
-.Nm routed
+.Nm
 is a dameon invoked at boot time to manage the network
 routing tables.
 It uses Routing Information Protocol, RIPv1 (RFC\ 1058),
@@ -79,7 +79,8 @@ When started (or when a network interface is later turned on),
 .Nm
 uses an AF_ROUTE address family facility to find those
 directly connected interfaces configured into the
-system and marked ``up''.
+system and marked
+.Dq up .
 It adds necessary routes for the interfaces
 to the kernel routing table.
 Soon after being first started, and provided there is at least one
@@ -183,7 +184,7 @@ support multicasting.
 If no response is received on a remote interface, if there are errors
 while sending responses,
 or if there are more errors than input or output (see
-.Xr netstat 8 ),
+.Xr netstat 1 ),
 then the cable or some other part of the interface is assumed to be
 disconnected or broken, and routes are adjusted appropriately.
 .Pp
@@ -265,7 +266,7 @@ This is typically used on a gateway to the Internet,
 or on a gateway that uses another routing protocol whose routes
 are not reported to other local routers.
 Notice that because a metric of 1 is used, this feature is
-dangerous.  It is more commonly accidentally used to create chaos with routing
+dangerous.  It is more commonly accidentally used to create chaos with a routing
 loop than to solve problems.
 .It Fl h
 Causes host or point-to-point routes to not be advertised,
@@ -298,7 +299,7 @@ does not care about authentication.
 Increases the debugging level to at least 1 and
 causes debugging information to be appended to the trace file.
 Note that because of security concerns, it is wisest to not run
-.Nm routed
+.Nm
 routinely with tracing directed to a file.
 .It Fl t
 Increases the debugging level, which causes more information to be logged
@@ -531,7 +532,7 @@ discovery advertisements with
 or
 .Fl s
 Causes
-.Nm routed
+.Nm
 to act as a client router discovery daemon, not advertising.
 .It Cm no_ripv1_in
 Causes RIPv1 received responses to be ignored.
@@ -581,7 +582,7 @@ That serves as a "poor man's router discovery" protocol.
 .Pp
 Note that the netmask associated with point-to-point links (such as SLIP
 or PPP, with the IFF_POINTOPOINT flag) is used by
-.Nm routed
+.Nm
 to infer the netmask used by the remote system when RIPv1 is used.
 .Pp
 .Sh FILES

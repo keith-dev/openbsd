@@ -1,4 +1,4 @@
-/*	$OpenBSD: date.c,v 1.11 1998/09/01 04:57:27 pjanzen Exp $	*/
+/*	$OpenBSD: date.c,v 1.13 1999/02/01 07:52:09 d Exp $	*/
 /*	$NetBSD: date.c,v 1.11 1995/09/07 06:21:05 jtc Exp $	*/
 
 /*
@@ -44,7 +44,7 @@ static char copyright[] =
 #if 0
 static char sccsid[] = "@(#)date.c	8.2 (Berkeley) 4/28/95";
 #else
-static char rcsid[] = "$OpenBSD: date.c,v 1.11 1998/09/01 04:57:27 pjanzen Exp $";
+static char rcsid[] = "$OpenBSD: date.c,v 1.13 1999/02/01 07:52:09 d Exp $";
 #endif
 #endif /* not lint */
 
@@ -100,7 +100,7 @@ main(argc, argv)
 			rflag = 1;
 			tval = atol(optarg);
 			break;
-		case 'u':		/* do everything in GMT */
+		case 'u':		/* do everything in UTC */
 			(void)setenv("TZ", "GMT0", 1);
 			break;
 		case 't':		/* minutes west of GMT */
@@ -182,7 +182,7 @@ setthetime(p)
 		lt->tm_sec = 0;
 
 	switch (strlen(p)) {
-	case 12:				/* yyyy */
+	case 12:				/* cc */
 		bigyear = ATOI2(p);
 		lt->tm_year = bigyear * 100 - TM_YEAR_BASE;
 		yearset = 1;
@@ -191,9 +191,11 @@ setthetime(p)
 		if (yearset) {
 			lt->tm_year += ATOI2(p);
 		} else {
-			lt->tm_year = ATOI2(p) + 1900 - TM_YEAR_BASE;
+			lt->tm_year = ATOI2(p);
 			if (lt->tm_year < 69)		/* hack for 2000 ;-} */
-				lt->tm_year += 100;
+				lt->tm_year += (2000 - TM_YEAR_BASE);
+			else
+				lt->tm_year += (1900 - TM_YEAR_BASE);
 		}
 		/* FALLTHROUGH */
 	case 8:					/* mm */
@@ -221,7 +223,7 @@ setthetime(p)
 		badformat();
 	}
 
-	/* convert broken-down time to GMT clock time */
+	/* convert broken-down time to UTC clock time */
 	if ((tval = mktime(lt)) < 0)
 		errx(1, "specified date is outside allowed range");
 

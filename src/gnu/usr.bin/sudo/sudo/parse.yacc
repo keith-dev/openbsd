@@ -1,8 +1,9 @@
 %{
-/*      $OpenBSD: parse.yacc,v 1.10 1998/09/15 02:42:44 millert Exp $    */
+/*	$OpenBSD: parse.yacc,v 1.15 1999/03/30 17:26:21 millert Exp $	*/
 
 /*
- *  CU sudo version 1.5.6
+ *  CU sudo version 1.5.9
+ *  Copyright (c) 1996, 1998, 1999 Todd C. Miller <Todd.Miller@courtesan.com>
  *
  *  This program is free software; you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License as published by
@@ -26,10 +27,6 @@
  *
  * Chris Jepeway <jepeway@cs.utk.edu>
  */
-
-#ifndef lint
-static char rcsid[] = "$From: parse.yacc,v 1.115 1998/09/15 02:25:48 millert Exp $";
-#endif /* lint */
 
 #include "config.h"
 #include <stdio.h>
@@ -56,7 +53,6 @@ static char rcsid[] = "$From: parse.yacc,v 1.115 1998/09/15 02:25:48 millert Exp
 #include <search.h>
 #endif /* HAVE_LSEARCH */
 
-#include <options.h>
 #include "sudo.h"
 
 #ifndef HAVE_LSEARCH
@@ -66,6 +62,10 @@ static char rcsid[] = "$From: parse.yacc,v 1.115 1998/09/15 02:25:48 millert Exp
 #ifndef HAVE_STRCASECMP
 #define strcasecmp(a,b)		strcmp(a,b)
 #endif /* !HAVE_STRCASECMP */
+
+#ifndef lint
+static const char rcsid[] = "$Sudo: parse.yacc,v 1.135 1999/03/30 17:17:53 millert Exp $";
+#endif /* lint */
 
 /*
  * Globals
@@ -93,12 +93,7 @@ int top = 0, stacksize = 0;
     { \
 	if (top >= stacksize) { \
 	    while ((stacksize += STACKINCREMENT) < top); \
-	    match = (struct matchstack *) realloc(match, sizeof(struct matchstack) * stacksize); \
-	    if (match == NULL) { \
-		perror("malloc"); \
-		(void) fprintf(stderr, "%s: cannot allocate memory!\n", Argv[0]); \
-		exit(1); \
-	    } \
+	    match = (struct matchstack *) erealloc(match, sizeof(struct matchstack) * stacksize); \
 	} \
 	match[top].user   = -1; \
 	match[top].cmnd   = -1; \
@@ -150,9 +145,10 @@ void yyerror(s)
 {
     /* save the line the first error occured on */
     if (errorlineno == -1)
-	errorlineno = sudolineno;
+	errorlineno = sudolineno ? sudolineno - 1 : 0;
 #ifndef TRACELEXER
-    (void) fprintf(stderr, ">>> sudoers file: %s, line %d <<<\n", s, sudolineno);
+    (void) fprintf(stderr, ">>> sudoers file: %s, line %d <<<\n", s,
+	sudolineno ? sudolineno - 1 : 0);
 #else
     (void) fprintf(stderr, "<*> ");
 #endif
@@ -271,12 +267,23 @@ cmndspeclist	:	cmndspec
 		|	cmndspeclist ',' cmndspec
 		;
 
-cmndspec	:	runasspec nopasswd opcmnd {
-			    if ($1 > 0 && $3 == TRUE) {
+cmndspec	:	{   /* Push a new entry onto the stack if needed */
+			    if (user_matches == TRUE && host_matches == TRUE &&
+				cmnd_matches != -1 && runas_matches == TRUE) {
+				push;
+				user_matches = TRUE;
+				host_matches = TRUE;
+			    } else {
+				cmnd_matches = -1;
+				runas_matches = -1;
+				no_passwd = -1;
+			    }
+			} runasspec nopasswd opcmnd {
+			    if ($2 > 0)
 				runas_matches = TRUE;
-				if ($2 == TRUE)
-				    no_passwd = TRUE;
-			    } else if (printmatches == TRUE) {
+			    if ($3 == TRUE)
+				no_passwd = TRUE;
+			    if (($2 == -1 || $4 == -1) && printmatches == TRUE) {
 				cm_list[cm_list_len].runas_len = 0;
 				cm_list[cm_list_len].cmnd_len = 0;
 				cm_list[cm_list_len].nopasswd = FALSE;
@@ -512,12 +519,7 @@ cmndalias	:	ALIAS {
 				in_alias = TRUE;
 				/* Allocate space for ga_list if necesary. */
 				expand_ga_list();
-				if (!(ga_list[ga_list_len-1].alias = strdup($1))){
-				    perror("malloc");
-				    (void) fprintf(stderr,
-				      "%s: cannot allocate memory!\n", Argv[0]);
-				    exit(1);
-				 }
+				ga_list[ga_list_len-1].alias = estrdup($1);
 			     }
 			} '=' cmndlist {
 			    if (cmnd_matches == TRUE &&
@@ -546,12 +548,7 @@ runasalias	:	ALIAS {
 				in_alias = TRUE;
 				/* Allocate space for ga_list if necesary. */
 				expand_ga_list();
-				if (!(ga_list[ga_list_len-1].alias = strdup($1))){
-				    perror("malloc");
-				    (void) fprintf(stderr,
-				      "%s: cannot allocate memory!\n", Argv[0]);
-				    exit(1);
-				}
+				ga_list[ga_list_len-1].alias = estrdup($1);
 			    }
 			} '=' runaslist {
 			    if ($4 > 0 && add_alias($1, RUNAS_ALIAS) == FALSE)
@@ -849,6 +846,8 @@ void list_matches()
     }
     (void) free(cm_list);
     cm_list = NULL;
+    cm_list_len = 0;
+    cm_list_size = 0;
 }
 
 
@@ -871,12 +870,7 @@ static void append(src, dstp, dst_len, dst_size, separator)
 
     /* Assumes dst will be NULL if not set. */
     if (dst == NULL) {
-	if ((dst = (char *) malloc(BUFSIZ)) == NULL) {
-	    perror("malloc");
-	    (void) fprintf(stderr, "%s: cannot allocate memory!\n", Argv[0]);
-	    exit(1);
-	}
-
+	dst = (char *) emalloc(BUFSIZ);
 	*dst_size = BUFSIZ;
 	*dst_len = 0;
 	*dstp = dst;
@@ -887,11 +881,7 @@ static void append(src, dstp, dst_len, dst_size, separator)
 	while (*dst_size <= *dst_len + src_len)
 	    *dst_size += BUFSIZ;
 
-	if (!(dst = (char *) realloc(dst, *dst_size))) {
-	    perror("malloc");
-	    (void) fprintf(stderr, "%s: cannot allocate memory!\n", Argv[0]);
-	    exit(1);
-	}
+	dst = (char *) erealloc(dst, *dst_size);
 	*dstp = dst;
     }
 
@@ -914,8 +904,10 @@ static void append(src, dstp, dst_len, dst_size, separator)
 
 void reset_aliases()
 {
-    if (aliases)
+    if (aliases) {
 	(void) free(aliases);
+	aliases = NULL;
+    }
     naliases = nslots = 0;
 }
 
@@ -929,23 +921,11 @@ void reset_aliases()
 
 static void expand_ga_list()
 {
-    if (++ga_list_len > ga_list_size) {
-	while ((ga_list_size += STACKINCREMENT) < ga_list_len);
-	if (ga_list == NULL) {
-	    if ((ga_list = (struct generic_alias *)
-		malloc(sizeof(struct generic_alias) * ga_list_size)) == NULL) {
-		perror("malloc");
-		(void) fprintf(stderr, "%s: cannot allocate memory!\n", Argv[0]);
-		exit(1);
-	    }
-	} else {
-	    if ((ga_list = (struct generic_alias *) realloc(ga_list,
-		sizeof(struct generic_alias) * ga_list_size)) == NULL) {
-		perror("malloc");
-		(void) fprintf(stderr, "%s: cannot allocate memory!\n", Argv[0]);
-		exit(1);
-	    }
-	}
+    if (++ga_list_len >= ga_list_size) {
+	while ((ga_list_size += STACKINCREMENT) < ga_list_len)
+	    ;
+	ga_list = (struct generic_alias *)
+	    erealloc(ga_list, sizeof(struct generic_alias) * ga_list_size);
     }
 
     ga_list[ga_list_len - 1].entries = NULL;
@@ -961,24 +941,13 @@ static void expand_ga_list()
 
 static void expand_match_list()
 {
-    if (++cm_list_len > cm_list_size) {
-	while ((cm_list_size += STACKINCREMENT) < cm_list_len);
-	if (cm_list == NULL) {
-	    if ((cm_list = (struct command_match *)
-		malloc(sizeof(struct command_match) * cm_list_size)) == NULL) {
-		perror("malloc");
-		(void) fprintf(stderr, "%s: cannot allocate memory!\n", Argv[0]);
-		exit(1);
-	    }
-	    cm_list_len = 0;
-	} else {
-	    if ((cm_list = (struct command_match *) realloc(cm_list,
-		sizeof(struct command_match) * cm_list_size)) == NULL) {
-		perror("malloc");
-		(void) fprintf(stderr, "%s: cannot allocate memory!\n", Argv[0]);
-		exit(1);
-	    }
-	}
+    if (++cm_list_len >= cm_list_size) {
+	while ((cm_list_size += STACKINCREMENT) < cm_list_len)
+	    ;
+	if (cm_list == NULL)
+	    cm_list_len = 0;		/* start at 0 since it is a subscript */
+	cm_list = (struct command_match *)
+	    erealloc(cm_list, sizeof(struct command_match) * cm_list_size);
     }
 
     cm_list[cm_list_len].runas = cm_list[cm_list_len].cmnd = NULL;
@@ -1008,12 +977,7 @@ void init_parser()
 
     /* Allocate space for the matching stack. */
     stacksize = STACKINCREMENT;
-    match = (struct matchstack *) malloc(sizeof(struct matchstack) * stacksize);
-    if (match == NULL) {
-	perror("malloc");
-	(void) fprintf(stderr, "%s: cannot allocate memory!\n", Argv[0]);
-	exit(1);
-    }
+    match = (struct matchstack *) emalloc(sizeof(struct matchstack) * stacksize);
 
     /* Allocate space for the match list (for `sudo -l'). */
     if (printmatches == TRUE)

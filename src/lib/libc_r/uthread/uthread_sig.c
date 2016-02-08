@@ -29,6 +29,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
+ * $OpenBSD: uthread_sig.c,v 1.4 1999/01/06 05:29:27 d Exp $
  */
 #include <signal.h>
 #include <fcntl.h>
@@ -39,10 +40,10 @@
 #include "pthread_private.h"
 
 /* Static variables: */
-static int		volatile yield_on_unlock_dead	= 0;
 static int		volatile yield_on_unlock_thread	= 0;
-static spinlock_t	thread_dead_lock	= _SPINLOCK_INITIALIZER;
 static spinlock_t	thread_link_list_lock	= _SPINLOCK_INITIALIZER;
+
+int _thread_sig_statistics[NSIG];
 
 /* Lock the thread list: */
 void
@@ -50,14 +51,6 @@ _lock_thread_list()
 {
 	/* Lock the thread list: */
 	_SPINLOCK(&thread_link_list_lock);
-}
-
-/* Lock the dead thread list: */
-void
-_lock_dead_thread_list()
-{
-	/* Lock the dead thread list: */
-	_SPINLOCK(&thread_dead_lock);
 }
 
 /* Lock the thread list: */
@@ -80,32 +73,17 @@ _unlock_thread_list()
 	}
 }
 
-/* Lock the dead thread list: */
-void
-_unlock_dead_thread_list()
-{
-	/* Unlock the dead thread list: */
-	_SPINUNLOCK(&thread_dead_lock);
-
-	/*
-	 * Check if a scheduler interrupt occurred while the dead
-	 * thread list was locked:
-	 */
-	if (yield_on_unlock_dead) {
-		/* Reset the interrupt flag: */
-		yield_on_unlock_dead = 0;
-
-		/* This thread has overstayed it's welcome: */
-		sched_yield();
-	}
-}
-
 void
 _thread_sig_handler(int sig, int code, struct sigcontext * scp)
 {
 	char            c;
 	int             i;
 	pthread_t       pthread;
+
+	/*
+	 * Record the number of times this signal has been received
+	 */
+	_thread_sig_statistics[sig]++;
 
 	/*
 	 * Check if the pthread kernel has unblocked signals (or is about to)
@@ -136,25 +114,13 @@ _thread_sig_handler(int sig, int code, struct sigcontext * scp)
 		 * unfortunate time which one of the threads is
 		 * modifying the thread list:
 		 */
-		if (thread_link_list_lock.access_lock)
+		if (_atomic_is_locked(&thread_link_list_lock.access_lock))
 			/*
 			 * Set a flag so that the thread that has
 			 * the lock yields when it unlocks the
 			 * thread list:
 			 */
 			yield_on_unlock_thread = 1;
-
-		/* Check if the scheduler interrupt has come at an
-		 * unfortunate time which one of the threads is
-		 * modifying the dead thread list:
-		 */
-		if (thread_dead_lock.access_lock)
-			/*
-			 * Set a flag so that the thread that has
-			 * the lock yields when it unlocks the
-			 * dead thread list:
-			 */
-			yield_on_unlock_dead = 1;
 
 		/*
 		 * Check if the kernel has not been interrupted while
@@ -198,7 +164,7 @@ _thread_sig_handler(int sig, int code, struct sigcontext * scp)
 
 		/*
 		 * POSIX says that pending SIGCONT signals are
-		 * discarded when one of there signals occurs.
+		 * discarded when one of these signals occurs.
 		 */
 		if (sig == SIGTSTP || sig == SIGTTIN || sig == SIGTTOU) {
 			/*
@@ -221,7 +187,7 @@ _thread_sig_handler(int sig, int code, struct sigcontext * scp)
 		for (pthread = _thread_link_list; pthread != NULL;
 		    pthread = pthread->nxt) {
 			if ((pthread->state == PS_SIGWAIT) &&
-			    sigismember(&pthread->sigmask, sig)) {
+			    sigismember(pthread->data.sigwait, sig)) {
 				/* Change the state of the thread to run: */
 				PTHREAD_NEW_STATE(pthread,PS_RUNNING);
 
@@ -318,6 +284,21 @@ _thread_signal(pthread_t pthread, int sig)
 			/* Flag the operation as interrupted: */
 			pthread->interrupted = 1;
 
+			/* Change the state of the thread to run: */
+			PTHREAD_NEW_STATE(pthread,PS_RUNNING);
+
+			/* Return the signal number: */
+			pthread->signo = sig;
+		}
+		break;
+
+	case PS_SIGSUSPEND:
+		/*
+		 * Only wake up the thread if the signal is unblocked
+		 * and there is a handler installed for the signal.
+		 */
+		if (!sigismember(&pthread->sigmask, sig) &&
+		    _thread_sigact[sig - 1].sa_handler != SIG_DFL) {
 			/* Change the state of the thread to run: */
 			PTHREAD_NEW_STATE(pthread,PS_RUNNING);
 

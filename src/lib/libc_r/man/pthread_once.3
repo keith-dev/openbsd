@@ -30,16 +30,18 @@
 .\"
 .Dd April 4, 1996
 .Dt PTHREAD_ONCE 3
-.Os BSD 4
+.Os
 .Sh NAME
 .Nm pthread_once
 .Nd dynamic package initialization
 .Sh SYNOPSIS
 .Fd #include <pthread.h>
 .Pp
-pthread_once
+.Ft pthread_once_t
 .Fa once_control
-= PTHREAD_ONCE_INIT;
+\&=
+.Dv PTHREAD_ONCE_INIT ;
+.Pp
 .Ft int
 .Fn pthread_once "pthread_once_t *once_control" "void (*init_routine)(void)"
 .Sh DESCRIPTION
@@ -93,8 +95,6 @@ indicate the error.
 .Sh ERRORS
 None.
 .Pp
-.Sh SEE ALSO
-.Xr pthreads 3
 .Sh STANDARDS
 .Fn pthread_once
 conforms to ISO/IEC 9945-1 ANSI/IEEE

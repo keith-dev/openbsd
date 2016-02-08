@@ -1,4 +1,4 @@
-.\"	$OpenBSD: mount.2,v 1.7 1998/06/08 17:17:15 deraadt Exp $
+.\"	$OpenBSD: mount.2,v 1.10 1999/03/05 10:37:18 deraadt Exp $
 .\"	$NetBSD: mount.2,v 1.12 1996/02/29 23:47:48 jtc Exp $
 .\"
 .\" Copyright (c) 1980, 1989, 1993
@@ -112,7 +112,7 @@ The
 argument defines the type of the filesystem.
 The types of filesystems known to the system are defined in
 .Aq Pa sys/mount.h .
-.Fa Data
+.Fa data
 is a pointer to a structure that contains the type
 specific arguments to mount.
 The currently supported types of filesystems and
@@ -161,7 +161,7 @@ struct mfs_args {
 .Ed
 .Pp
 The
-.Fn umount
+.Fn unmount
 function call disassociates the filesystem from the specified
 mount point
 .Fa dir .
@@ -183,8 +183,8 @@ and the variable
 .Va errno
 is set to indicate the error.
 .Pp
-.Nm umount
-returns the value 0 if the umount succeeded; otherwise -1 is returned
+.Fn unmount
+returns the value 0 if the unmount succeeded; otherwise -1 is returned
 and the variable
 .Va errno
 is set to indicate the error.
@@ -219,8 +219,11 @@ A pathname contains a character with the high-order bit set.
 Another process currently holds a reference to
 .Fa dir .
 .It Bq Er EFAULT
-.Fa Dir
+.Fa dir
 points outside the process's allocated address space.
+.It Bq Er EOPNOTSUPP
+.Fa type
+is not supported by the kernel.
 .El
 .Pp
 The following errors can occur for a
@@ -290,7 +293,7 @@ cylinder group information.
 points outside the process's allocated address space.
 .El
 .Pp
-.Nm umount
+.Fn unmount
 may fail with one of the following errors:
 .Bl -tag -width [ENAMETOOLONG]
 .It Bq Er EPERM
@@ -315,7 +318,7 @@ on the filesystem.
 .It Bq Er EIO
 An I/O error occurred while writing cached filesystem information.
 .It Bq Er EFAULT
-.Fa Dir
+.Fa dir
 points outside the process's allocated address space.
 .El
 .Pp
@@ -334,6 +337,6 @@ Some of the error codes need translation to more obvious messages.
 .Sh HISTORY
 .Fn mount
 and
-.Fn umount
+.Fn unmount
 function calls appeared in
 .At v6 .

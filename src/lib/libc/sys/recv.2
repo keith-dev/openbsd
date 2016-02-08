@@ -1,4 +1,4 @@
-.\"	$OpenBSD: recv.2,v 1.10 1998/08/17 17:35:14 deraadt Exp $
+.\"	$OpenBSD: recv.2,v 1.14 1999/02/27 21:56:42 deraadt Exp $
 .\"	$NetBSD: recv.2,v 1.6 1995/02/27 12:36:08 cgd Exp $
 .\"
 .\" Copyright (c) 1983, 1990, 1991, 1993
@@ -34,7 +34,7 @@
 .\"
 .\"     @(#)recv.2	8.3 (Berkeley) 2/21/94
 .\"
-.Dd July 27, 1998
+.Dd February 15, 1999
 .Dt RECV 2
 .Os BSD 4.3r
 .Sh NAME
@@ -48,11 +48,11 @@
 .Ft ssize_t
 .Fn recv "int s" "void *buf" "size_t len" "int flags"
 .Ft ssize_t
-.Fn recvfrom "int s" "void *buf" "size_t len" "int flags" "struct sockaddr *from" "int *fromlen"
+.Fn recvfrom "int s" "void *buf" "size_t len" "int flags" "struct sockaddr *from" "socklen_t *fromlen"
 .Ft ssize_t
 .Fn recvmsg "int s" "struct msghdr *msg" "int flags"
 .Sh DESCRIPTION
-.Fn Recvfrom
+.Fn recvfrom
 and
 .Fn recvmsg
 are used to receive messages from a socket,
@@ -63,7 +63,7 @@ If
 .Fa from
 is non-nil, and the socket is not connection-oriented,
 the source address of the message is filled in.
-.Fa Fromlen
+.Fa fromlen
 is a value-result parameter, initialized to the size of
 the buffer associated with
 .Fa from ,
@@ -149,13 +149,13 @@ This structure has the following form, as defined in
 .Pp
 .Bd -literal
 struct msghdr {
-	caddr_t	msg_name;	/* optional address */
-	u_int	msg_namelen;	/* size of address */
-	struct	iovec *msg_iov;	/* scatter/gather array */
-	u_int	msg_iovlen;	/* # elements in msg_iov */
-	caddr_t	msg_control;	/* ancillary data, see below */
-	u_int	msg_controllen; /* ancillary data buffer len */
-	int	msg_flags;	/* flags on received message */
+	caddr_t		msg_name;	/* optional address */
+	socklen_t	msg_namelen;	/* size of address */
+	struct		iovec *msg_iov;	/* scatter/gather array */
+	u_int		msg_iovlen;	/* # elements in msg_iov */
+	caddr_t		msg_control;	/* ancillary data, see below */
+	socklen_t	msg_controllen; /* ancillary data buffer len */
+	int		msg_flags;	/* flags on received message */
 };
 .Ed
 .Pp
@@ -166,12 +166,12 @@ and
 specify the source address if the socket is unconnected;
 .Fa msg_name
 may be given as a null pointer if no names are desired or required.
-.Fa Msg_iov
+.Fa msg_iov
 and
 .Fa msg_iovlen
 describe scatter gather locations, as discussed in
 .Xr read 2 .
-.Fa Msg_control ,
+.Fa msg_control ,
 which has length
 .Fa msg_controllen ,
 points to a buffer for other protocol control related messages
@@ -179,11 +179,10 @@ or other miscellaneous ancillary data.
 The messages are of the form:
 .Bd -literal
 struct cmsghdr {
-	u_int	cmsg_len;	/* data byte count, including hdr */
-	int	cmsg_level;	/* originating protocol */
-	int	cmsg_type;	/* protocol-specific type */
-/* followed by
-	u_char	cmsg_data[]; */
+	socklen_t	cmsg_len;   /* data byte count, including hdr */
+	int		cmsg_level; /* originating protocol */
+	int		cmsg_type;  /* protocol-specific type */
+/* followed by u_char	cmsg_data[]; */
 };
 .Ed
 .Pp
@@ -206,27 +205,34 @@ set to
 .Pp
 The
 .Fa msg_flags
-field is set on return according to the message received.
-.Dv MSG_EOR
-indicates end-of-record;
+field is set on return according to the message received.  It will contain
+zero or more of the following values:
+.Bl -column MSG_CTRUNC -offset indent
+.It Dv MSG_EOR Ta
+Indicates end-of-record;
 the data returned completed a record (generally used with sockets of type
 .Dv SOCK_SEQPACKET ) .
-.Dv MSG_TRUNC
-indicates that
+.It Dv MSG_TRUNC Ta
+Indicates that
 the trailing portion of a datagram was discarded because the datagram
 was larger than the buffer supplied.
-.Dv MSG_CTRUNC
-indicates that some
+.It Dv MSG_CTRUNC Ta
+Indicates that some
 control data were discarded due to lack of space in the buffer
 for ancillary data.
-.Dv MSG_OOB
-is returned to indicate that expedited or out-of-band data were received.
+.It Dv MSG_OOB Ta
+Returned to indicate that expedited or out-of-band data was received.
+.It Dv MSG_BCAST Ta
+Indicates that the packet was received as broadcast.
+.It Dv MSG_MCAST Ta
+Indicates that the packet was received as multicast.
+.El
 .Pp
 .Sh RETURN VALUES
 These calls return the number of bytes received, or -1
 if an error occurred.
 .Sh ERRORS
-.Fn Recv ,
+.Fn recv ,
 .Fn recvfrom ,
 and
 .Fn recvmsg

@@ -1,5 +1,5 @@
 /* ====================================================================
- * Copyright (c) 1995-1998 The Apache Group.  All rights reserved.
+ * Copyright (c) 1995-1999 The Apache Group.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -109,7 +109,7 @@ int initgroups(const char *name, gid_t basegid)
 #define AP_ENVBUF 256
 
 extern char **environ;
-static FILE *log;
+static FILE *log = NULL;
 
 char *safe_env_lst[] =
 {
@@ -214,7 +214,13 @@ static void clean_env(void)
     cidx++;
 
     for (ep = environ; *ep && cidx < AP_ENVBUF-1; ep++) {
+#ifdef MOD_SSL
+	if (!strncmp(*ep, "HTTP_", 5) || 
+	    !strncmp(*ep, "HTTPS", 5) ||
+	    !strncmp(*ep, "SSL_", 4)) {
+#else
 	if (!strncmp(*ep, "HTTP_", 5)) {
+#endif
 	    cleanenv[cidx] = *ep;
 	    cidx++;
 	}
@@ -500,10 +506,16 @@ int main(int argc, char *argv[])
     /* 
      * Be sure to close the log file so the CGI can't
      * mess with it.  If the exec fails, it will be reopened 
-     * automatically when log_err is called.
+     * automatically when log_err is called.  Note that the log
+     * might not actually be open if LOG_EXEC isn't defined.
+     * However, the "log" cell isn't ifdef'd so let's be defensive
+     * and assume someone might have done something with it
+     * outside an ifdef'd LOG_EXEC block.
      */
-    fclose(log);
-    log = NULL;
+    if (log != NULL) {
+	fclose(log);
+	log = NULL;
+    }
 
     /*
      * Execute the command, replacing our image with its own.

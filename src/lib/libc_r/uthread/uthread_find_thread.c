@@ -29,6 +29,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
+ * $OpenBSD: uthread_find_thread.c,v 1.3 1999/01/06 05:29:23 d Exp $
  */
 #include <errno.h>
 #ifdef _THREAD_SAFE
@@ -76,8 +77,12 @@ _find_dead_thread(pthread_t pthread)
 		/* Invalid thread: */
 		return(EINVAL);
 
-	/* Lock the dead thread list: */
-	_lock_dead_thread_list();
+	/*
+	 * Lock the garbage collector mutex to ensure that the garbage
+	 * collector is not using the dead thread list.
+	 */
+	if (pthread_mutex_lock(&_gc_mutex) != 0)
+		PANIC("Cannot lock gc mutex");
 
 	/* Point to the first thread in the list: */
 	pthread1 = _thread_dead;
@@ -85,11 +90,12 @@ _find_dead_thread(pthread_t pthread)
 	/* Search for the thread to join to: */
 	while (pthread1 != NULL && pthread1 != pthread) {
 		/* Point to the next thread: */
-		pthread1 = pthread1->nxt;
+		pthread1 = pthread1->nxt_dead;
 	}
 
-	/* Unlock the dead thread list: */
-	_unlock_dead_thread_list();
+	/* Unlock the garbage collector mutex: */
+	if (pthread_mutex_unlock(&_gc_mutex) != 0)
+		PANIC("Cannot lock gc mutex");
 
 	/* Return zero if the thread exists: */
 	return ((pthread1 != NULL) ? 0:ESRCH);

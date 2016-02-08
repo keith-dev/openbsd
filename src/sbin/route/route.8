@@ -1,4 +1,4 @@
-.\"	$OpenBSD: route.8,v 1.9 1998/09/23 01:20:25 aaron Exp $
+.\"	$OpenBSD: route.8,v 1.14 1999/03/16 02:46:51 deraadt Exp $
 .\"	$NetBSD: route.8,v 1.6 1995/03/18 15:00:13 cgd Exp $
 .\"
 .\" Copyright (c) 1983, 1991, 1993
@@ -49,7 +49,7 @@
 .Ar args
 .Oc
 .Sh DESCRIPTION
-.Nm route
+.Nm
 is a utility used to manually manipulate the network
 routing tables.  It normally is not needed, as a
 system routing table management daemon such as
@@ -57,13 +57,12 @@ system routing table management daemon such as
 should tend to this task.
 .Pp
 The
-.Nm route
+.Nm
 utility supports a limited number of general options,
 but a rich command language enables the user to specify
 any arbitrary request that could be delivered via the
 programmatic interface discussed in 
 .Xr route 4 .
-.Pp
 .Bl -tag -width Ds
 .It Fl d
 Run in debug-only mode, i.e. don't actually modify the routing table.
@@ -80,7 +79,7 @@ Suppress all output.
 .El
 .Pp
 The
-.Nm route
+.Nm
 utility provides several commands:
 .Pp
 .Bl -tag -width Fl -compact
@@ -96,7 +95,7 @@ Change aspects of a route (such as its gateway).
 Lookup and display the route for a destination.
 .It Cm show
 Print out the route table similar to "netstat \-r" (see
-.Xr netstat 8 ).
+.Xr netstat 1 ).
 .It Cm monitor
 Continuously report any changes to the routing information base,
 routing lookup misses, or suspected network partitionings.
@@ -120,8 +119,10 @@ The flush command has the syntax
 If the 
 .Cm flush
 command is specified, 
-.Nm route
-will ``flush'' the routing tables of all gateway entries.
+.Nm
+will
+.Dq flush
+the routing tables of all gateway entries.
 When the address family may is specified by any of the
 .Fl osi ,
 .Fl xns ,
@@ -156,8 +157,10 @@ and
 force the destination to be interpreted as a network or a host, respectively.
 Otherwise, if the 
 .Ar destination
-has a ``local address part'' of
-INADDR_ANY,
+has a
+.Dq local address part
+of
+.Dv INADDR_ANY ,
 or if the
 .Ar destination
 is the symbolic name of a network, then the route is
@@ -216,7 +219,9 @@ netmasks different from that of the implied network interface
 (as would otherwise be communicated using the OSPF or ISIS routing protocols).
 One specifies an additional ensuing address parameter
 (to be interpreted as a network mask).
-The implicit network mask generated in the AF_INET case
+The implicit network mask generated in the
+.Dv AF_INET
+case
 can be overridden by making sure this option follows the destination parameter.
 .Pp
 Routes have associated flags which influence operation of the protocols
@@ -281,7 +286,7 @@ If this lookup fails,
 .Xr getnetbyname 3
 is then used to interpret the name as that of a network.
 .Pp
-.Nm route
+.Nm
 uses a routing socket and the new message types
 RTM_ADD,
 RTM_DELETE,
@@ -329,9 +334,7 @@ to create the new entry.
 .Xr esis 4 ,
 .Xr netintro 4 ,
 .Xr route 4 ,
-.Xr routed 8 ,
-.Xr IPXrouted 8 ,
-.Xr XNSrouted 8
+.Xr routed 8
 .Sh HISTORY
 The
 .Nm

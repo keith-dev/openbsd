@@ -17,7 +17,7 @@
  * IMPLIED WARRANTIES, INCLUDING, WITHOUT LIMITATION, THE IMPLIED
  * WARRANTIES OF MERCHANTIBILITY AND FITNESS FOR A PARTICULAR PURPOSE.
  *
- * $Id: ipcp.c,v 1.4 1998/09/04 18:42:08 brian Exp $
+ * $Id: ipcp.c,v 1.9 1999/03/03 23:01:10 brian Exp $
  *
  *	TODO:
  *		o More RFC1772 backward compatibility
@@ -28,9 +28,8 @@
 #include <netinet/ip.h>
 #include <arpa/inet.h>
 #include <sys/socket.h>
+#include <net/route.h>
 #include <netdb.h>
-#include <net/if.h>
-#include <sys/sockio.h>
 #include <sys/un.h>
 
 #include <fcntl.h>
@@ -71,12 +70,16 @@
 #include "link.h"
 #include "physical.h"
 #include "mp.h"
+#ifndef NORADIUS
+#include "radius.h"
+#endif
 #include "bundle.h"
 #include "id.h"
 #include "arp.h"
 #include "systems.h"
 #include "prompt.h"
 #include "route.h"
+#include "iface.h"
 
 #undef REJECTED
 #define	REJECTED(p, x)	((p)->peer_reject & (1<<(x)))
@@ -93,7 +96,7 @@ static int IpcpLayerUp(struct fsm *);
 static void IpcpLayerDown(struct fsm *);
 static void IpcpLayerStart(struct fsm *);
 static void IpcpLayerFinish(struct fsm *);
-static void IpcpInitRestartCounter(struct fsm *);
+static void IpcpInitRestartCounter(struct fsm *, int);
 static void IpcpSendConfigReq(struct fsm *);
 static void IpcpSentTerminateReq(struct fsm *);
 static void IpcpSendTerminateAck(struct fsm *, u_char);
@@ -275,17 +278,22 @@ ipcp_Show(struct cmdargs const *arg)
 
   if (ipcp->route) {
     prompt_Printf(arg->prompt, "\n");
-    route_ShowSticky(arg->prompt, ipcp->route);
+    route_ShowSticky(arg->prompt, ipcp->route, "Sticky routes", 1);
   }
 
   prompt_Printf(arg->prompt, "\nDefaults:\n");
+  prompt_Printf(arg->prompt, " FSM retry = %us, max %u Config"
+                " REQ%s, %u Term REQ%s\n", ipcp->cfg.fsm.timeout,
+                ipcp->cfg.fsm.maxreq, ipcp->cfg.fsm.maxreq == 1 ? "" : "s",
+                ipcp->cfg.fsm.maxtrm, ipcp->cfg.fsm.maxtrm == 1 ? "" : "s");
   prompt_Printf(arg->prompt, " My Address:      %s/%d",
 	        inet_ntoa(ipcp->cfg.my_range.ipaddr), ipcp->cfg.my_range.width);
-
+  prompt_Printf(arg->prompt, ", netmask %s\n", inet_ntoa(ipcp->cfg.netmask));
   if (ipcp->cfg.HaveTriggerAddress)
-    prompt_Printf(arg->prompt, " (trigger with %s)",
+    prompt_Printf(arg->prompt, " Trigger address: %s\n",
                   inet_ntoa(ipcp->cfg.TriggerAddress));
-  prompt_Printf(arg->prompt, "\n VJ compression:  %s (%d slots %s slot "
+
+  prompt_Printf(arg->prompt, " VJ compression:  %s (%d slots %s slot "
                 "compression)\n", command_ShowNegval(ipcp->cfg.vj.neg),
                 ipcp->cfg.vj.slots, ipcp->cfg.vj.slotcomp ? "with" : "without");
 
@@ -345,7 +353,7 @@ ipcp_Init(struct ipcp *ipcp, struct bundle *bundle, struct link *l,
   static const char *timer_names[] =
     {"IPCP restart", "IPCP openmode", "IPCP stopped"};
 
-  fsm_Init(&ipcp->fsm, "IPCP", PROTO_IPCP, 1, IPCP_MAXCODE, 10, LogIPCP,
+  fsm_Init(&ipcp->fsm, "IPCP", PROTO_IPCP, 1, IPCP_MAXCODE, LogIPCP,
            bundle, l, parent, &ipcp_Callbacks, timer_names);
 
   ipcp->route = NULL;
@@ -354,11 +362,8 @@ ipcp_Init(struct ipcp *ipcp, struct bundle *bundle, struct link *l,
   memset(&ipcp->cfg.my_range, '\0', sizeof ipcp->cfg.my_range);
   if (gethostname(name, sizeof name) == 0) {
     hp = gethostbyname(name);
-    if (hp && hp->h_addrtype == AF_INET) {
+    if (hp && hp->h_addrtype == AF_INET)
       memcpy(&ipcp->cfg.my_range.ipaddr.s_addr, hp->h_addr, hp->h_length);
-      ipcp->cfg.peer_range.mask.s_addr = INADDR_BROADCAST;
-      ipcp->cfg.peer_range.width = 32;
-    }
   }
   ipcp->cfg.netmask.s_addr = INADDR_ANY;
   memset(&ipcp->cfg.peer_range, '\0', sizeof ipcp->cfg.peer_range);
@@ -371,17 +376,16 @@ ipcp_Init(struct ipcp *ipcp, struct bundle *bundle, struct link *l,
   ipcp->cfg.ns.nbns[0].s_addr = INADDR_ANY;
   ipcp->cfg.ns.nbns[1].s_addr = INADDR_ANY;
 
-  ipcp->cfg.fsmretry = DEF_FSMRETRY;
+  ipcp->cfg.fsm.timeout = DEF_FSMRETRY;
+  ipcp->cfg.fsm.maxreq = DEF_FSMTRIES;
+  ipcp->cfg.fsm.maxtrm = DEF_FSMTRIES;
   ipcp->cfg.vj.neg = NEG_ENABLED|NEG_ACCEPTED;
 
   memset(&ipcp->vj, '\0', sizeof ipcp->vj);
 
-  ipcp->my_ifip.s_addr = INADDR_ANY;
-  ipcp->peer_ifip.s_addr = INADDR_ANY;
-
   throughput_init(&ipcp->throughput);
   memset(ipcp->Queue, '\0', sizeof ipcp->Queue);
-  ipcp_Setup(ipcp);
+  ipcp_Setup(ipcp, INADDR_NONE);
 }
 
 void
@@ -391,19 +395,28 @@ ipcp_SetLink(struct ipcp *ipcp, struct link *l)
 }
 
 void
-ipcp_Setup(struct ipcp *ipcp)
+ipcp_Setup(struct ipcp *ipcp, u_int32_t mask)
 {
-  int pos;
+  struct iface *iface = ipcp->fsm.bundle->iface;
+  int pos, n;
 
   ipcp->fsm.open_mode = 0;
-  ipcp->fsm.maxconfig = 10;
+  ipcp->ifmask.s_addr = mask == INADDR_NONE ? ipcp->cfg.netmask.s_addr : mask;
 
   if (iplist_isvalid(&ipcp->cfg.peer_list)) {
-    if (ipcp->my_ifip.s_addr != INADDR_ANY &&
-        (pos = iplist_ip2pos(&ipcp->cfg.peer_list, ipcp->my_ifip)) != -1)
-      ipcp->cfg.peer_range.ipaddr = iplist_setcurpos(&ipcp->cfg.peer_list, pos);
-    else
+    /* Try to give the peer a previously configured IP address */
+    for (n = 0; n < iface->in_addrs; n++) {
+      pos = iplist_ip2pos(&ipcp->cfg.peer_list, iface->in_addr[n].brd);
+      if (pos != -1) {
+        ipcp->cfg.peer_range.ipaddr =
+          iplist_setcurpos(&ipcp->cfg.peer_list, pos);
+        break;
+      }
+    }
+    if (n == iface->in_addrs)
+      /* Ok, so none of 'em fit.... pick a random one */
       ipcp->cfg.peer_range.ipaddr = iplist_setrandpos(&ipcp->cfg.peer_list);
+
     ipcp->cfg.peer_range.mask.s_addr = INADDR_BROADCAST;
     ipcp->cfg.peer_range.width = 32;
   }
@@ -422,19 +435,29 @@ ipcp_Setup(struct ipcp *ipcp)
     ipcp->my_ip = ipcp->cfg.TriggerAddress;
     log_Printf(LogIPCP, "Using trigger address %s\n",
               inet_ntoa(ipcp->cfg.TriggerAddress));
-  } else if ((ipcp->my_ifip.s_addr & ipcp->cfg.my_range.mask.s_addr) ==
-             (ipcp->cfg.my_range.ipaddr.s_addr &
-              ipcp->cfg.my_range.mask.s_addr))
+  } else {
     /*
-     * Otherwise, if we've been assigned an IP number before, we really
-     * want to keep the same IP number so that we can keep any existing
-     * connections that are bound to that IP.
+     * Otherwise, if we've used an IP number before and it's still within
+     * the network specified on the ``set ifaddr'' line, we really
+     * want to keep that IP number so that we can keep any existing
+     * connections that are bound to that IP (assuming we're not
+     * ``iface-alias''ing).
      */
-    ipcp->my_ip = ipcp->my_ifip;
-  else
-    ipcp->my_ip = ipcp->cfg.my_range.ipaddr;
+    for (n = 0; n < iface->in_addrs; n++)
+      if ((iface->in_addr[n].ifa.s_addr & ipcp->cfg.my_range.mask.s_addr) ==
+          (ipcp->cfg.my_range.ipaddr.s_addr & ipcp->cfg.my_range.mask.s_addr)) {
+        ipcp->my_ip = iface->in_addr[n].ifa;
+        break;
+      }
+    if (n == iface->in_addrs)
+      ipcp->my_ip = ipcp->cfg.my_range.ipaddr;
+  }
 
-  if (IsEnabled(ipcp->cfg.vj.neg))
+  if (IsEnabled(ipcp->cfg.vj.neg)
+#ifndef NORADIUS
+      || (ipcp->fsm.bundle->radius.valid && ipcp->fsm.bundle->radius.vj)
+#endif
+     )
     ipcp->my_compproto = (PROTO_VJCOMP << 16) +
                          ((ipcp->cfg.vj.slots - 1) << 8) +
                          ipcp->cfg.vj.slotcomp;
@@ -447,84 +470,88 @@ ipcp_Setup(struct ipcp *ipcp)
 }
 
 static int
+ipcp_doproxyall(struct bundle *bundle,
+                int (*proxyfun)(struct bundle *, struct in_addr, int), int s)
+{
+  int n, ret;
+  struct sticky_route *rp;
+  struct in_addr addr;
+  struct ipcp *ipcp;
+
+  ipcp = &bundle->ncp.ipcp;
+  for (rp = ipcp->route; rp != NULL; rp = rp->next) {
+    if (rp->mask.s_addr == INADDR_BROADCAST)
+        continue;
+    n = ntohl(INADDR_BROADCAST) - ntohl(rp->mask.s_addr) - 1;
+    if (n > 0 && n <= 254 && rp->dst.s_addr != INADDR_ANY) {
+      addr = rp->dst;
+      while (n--) {
+        addr.s_addr = htonl(ntohl(addr.s_addr) + 1);
+	log_Printf(LogDEBUG, "ipcp_doproxyall: %s\n", inet_ntoa(addr));
+	ret = (*proxyfun)(bundle, addr, s);
+	if (!ret)
+	  return ret;
+      }
+    }
+  }
+
+  return 0;
+}
+
+static int
 ipcp_SetIPaddress(struct bundle *bundle, struct in_addr myaddr,
                   struct in_addr hisaddr, int silent)
 {
-  struct sockaddr_in *sock_in;
-  int s;
-  u_int32_t mask, addr;
-  struct ifaliasreq ifra;
+  static struct in_addr none = { INADDR_ANY };
+  struct in_addr mask, oaddr;
 
-  /* If given addresses are alreay set, then ignore this request */
-  if (bundle->ncp.ipcp.my_ifip.s_addr == myaddr.s_addr &&
-      bundle->ncp.ipcp.peer_ifip.s_addr == hisaddr.s_addr)
-    return 0;
+  mask = addr2mask(myaddr);
 
-  ipcp_CleanInterface(&bundle->ncp.ipcp);
+  if (bundle->ncp.ipcp.ifmask.s_addr != INADDR_ANY &&
+      (bundle->ncp.ipcp.ifmask.s_addr & mask.s_addr) == mask.s_addr)
+    mask.s_addr = bundle->ncp.ipcp.ifmask.s_addr;
 
-  s = ID0socket(AF_INET, SOCK_DGRAM, 0);
-  if (s < 0) {
-    log_Printf(LogERROR, "SetIPaddress: socket(): %s\n", strerror(errno));
-    return (-1);
-  }
+  oaddr.s_addr = bundle->iface->in_addrs ?
+                 bundle->iface->in_addr[0].ifa.s_addr : INADDR_ANY;
+  if (!iface_inAdd(bundle->iface, myaddr, mask, hisaddr,
+                 IFACE_ADD_FIRST|IFACE_FORCE_ADD))
+    return -1;
 
-  memset(&ifra, '\0', sizeof ifra);
-  strncpy(ifra.ifra_name, bundle->ifp.Name, sizeof ifra.ifra_name - 1);
-  ifra.ifra_name[sizeof ifra.ifra_name - 1] = '\0';
+  if (!Enabled(bundle, OPT_IFACEALIAS) && bundle->iface->in_addrs > 1
+      && myaddr.s_addr != oaddr.s_addr)
+    /* Nuke the old one */
+    iface_inDelete(bundle->iface, oaddr);
 
-  /* Set interface address */
-  sock_in = (struct sockaddr_in *)&ifra.ifra_addr;
-  sock_in->sin_family = AF_INET;
-  sock_in->sin_addr = myaddr;
-  sock_in->sin_len = sizeof *sock_in;
-
-  /* Set destination address */
-  sock_in = (struct sockaddr_in *)&ifra.ifra_broadaddr;
-  sock_in->sin_family = AF_INET;
-  sock_in->sin_addr = hisaddr;
-  sock_in->sin_len = sizeof *sock_in;
-
-  addr = ntohl(myaddr.s_addr);
-  if (IN_CLASSA(addr))
-    mask = IN_CLASSA_NET;
-  else if (IN_CLASSB(addr))
-    mask = IN_CLASSB_NET;
-  else
-    mask = IN_CLASSC_NET;
-
-  /* if subnet mask is given, use it instead of class mask */
-  if (bundle->ncp.ipcp.cfg.netmask.s_addr != INADDR_ANY &&
-      (ntohl(bundle->ncp.ipcp.cfg.netmask.s_addr) & mask) == mask)
-    mask = ntohl(bundle->ncp.ipcp.cfg.netmask.s_addr);
-
-  sock_in = (struct sockaddr_in *)&ifra.ifra_mask;
-  sock_in->sin_family = AF_INET;
-  sock_in->sin_addr.s_addr = htonl(mask);
-  sock_in->sin_len = sizeof *sock_in;
-
-  if (ID0ioctl(s, SIOCAIFADDR, &ifra) < 0) {
-    if (!silent)
-      log_Printf(LogERROR, "SetIPaddress: ioctl(SIOCAIFADDR): %s\n",
-		strerror(errno));
-    close(s);
-    return (-1);
-  }
+  if (bundle->ncp.ipcp.cfg.sendpipe > 0 || bundle->ncp.ipcp.cfg.recvpipe > 0)
+    bundle_SetRoute(bundle, RTM_CHANGE, hisaddr, myaddr, none, 0, 0);
 
   if (Enabled(bundle, OPT_SROUTES))
     route_Change(bundle, bundle->ncp.ipcp.route, myaddr, hisaddr);
 
-  bundle->ncp.ipcp.peer_ifip.s_addr = hisaddr.s_addr;
-  bundle->ncp.ipcp.my_ifip.s_addr = myaddr.s_addr;
+#ifndef NORADIUS
+  if (bundle->radius.valid)
+    route_Change(bundle, bundle->radius.routes, myaddr, hisaddr);
+#endif
 
-  if (Enabled(bundle, OPT_PROXY))
-    arp_SetProxy(bundle, bundle->ncp.ipcp.peer_ifip, s);
+  if (Enabled(bundle, OPT_PROXY) || Enabled(bundle, OPT_PROXYALL)) {
+    int s = ID0socket(AF_INET, SOCK_DGRAM, 0);
+    if (s < 0)
+      log_Printf(LogERROR, "ipcp_SetIPaddress: socket(): %s\n",
+                 strerror(errno));
+    else {
+      if (Enabled(bundle, OPT_PROXYALL))
+        ipcp_doproxyall(bundle, arp_SetProxy, s);
+      else if (Enabled(bundle, OPT_PROXY))
+        arp_SetProxy(bundle, hisaddr, s);
+      close(s);
+    }
+  }
 
-  close(s);
-  return (0);
+  return 0;
 }
 
 static struct in_addr
-ChooseHisAddr(struct bundle *bundle, const struct in_addr gw)
+ChooseHisAddr(struct bundle *bundle, struct in_addr gw)
 {
   struct in_addr try;
   u_long f;
@@ -548,13 +575,23 @@ ChooseHisAddr(struct bundle *bundle, const struct in_addr gw)
 }
 
 static void
-IpcpInitRestartCounter(struct fsm * fp)
+IpcpInitRestartCounter(struct fsm *fp, int what)
 {
   /* Set fsm timer load */
   struct ipcp *ipcp = fsm2ipcp(fp);
 
-  fp->FsmTimer.load = ipcp->cfg.fsmretry * SECTICKS;
-  fp->restart = DEF_REQs;
+  fp->FsmTimer.load = ipcp->cfg.fsm.timeout * SECTICKS;
+  switch (what) {
+    case FSM_REQ_TIMER:
+      fp->restart = ipcp->cfg.fsm.maxreq;
+      break;
+    case FSM_TRM_TIMER:
+      fp->restart = ipcp->cfg.fsm.maxtrm;
+      break;
+    default:
+      fp->restart = 1;
+      break;
+  }
 }
 
 static void
@@ -580,7 +617,12 @@ IpcpSendConfigReq(struct fsm *fp)
       ua_htons(&proto, o->data);
       INC_LCP_OPT(TY_COMPPROTO, 4, o);
     } else {
-      ua_htonl(&ipcp->my_compproto, o->data);
+      struct compreq req;
+
+      req.proto = htons(ipcp->my_compproto >> 16);
+      req.slots = (ipcp->my_compproto >> 8) & 255;
+      req.compcid = ipcp->my_compproto & 1;
+      memcpy(o->data, &req, 4);
       INC_LCP_OPT(TY_COMPPROTO, 6, o);
     }
   }
@@ -600,7 +642,7 @@ IpcpSendConfigReq(struct fsm *fp)
 }
 
 static void
-IpcpSentTerminateReq(struct fsm * fp)
+IpcpSentTerminateReq(struct fsm *fp)
 {
   /* Term REQ just sent by FSM */
 }
@@ -621,8 +663,7 @@ IpcpLayerStart(struct fsm *fp)
   log_Printf(LogIPCP, "%s: LayerStart.\n", fp->link->name);
   throughput_start(&ipcp->throughput, "IPCP throughput",
                    Enabled(fp->bundle, OPT_THROUGHPUT));
-
-  /* This is where we should be setting up the interface in AUTO mode */
+  fp->more.reqs = fp->more.naks = fp->more.rejs = ipcp->cfg.fsm.maxreq * 3;
 }
 
 static void
@@ -639,40 +680,26 @@ IpcpLayerFinish(struct fsm *fp)
 void
 ipcp_CleanInterface(struct ipcp *ipcp)
 {
-  struct ifaliasreq ifra;
-  struct sockaddr_in *me, *peer;
-  int s;
-
-  s = ID0socket(AF_INET, SOCK_DGRAM, 0);
-  if (s < 0) {
-    log_Printf(LogERROR, "ipcp_CleanInterface: socket: %s\n", strerror(errno));
-    return;
-  }
+  struct iface *iface = ipcp->fsm.bundle->iface;
 
   route_Clean(ipcp->fsm.bundle, ipcp->route);
 
-  if (Enabled(ipcp->fsm.bundle, OPT_PROXY))
-    arp_ClearProxy(ipcp->fsm.bundle, ipcp->peer_ifip, s);
-
-  if (ipcp->my_ifip.s_addr != INADDR_ANY ||
-      ipcp->peer_ifip.s_addr != INADDR_ANY) {
-    memset(&ifra, '\0', sizeof ifra);
-    strncpy(ifra.ifra_name, ipcp->fsm.bundle->ifp.Name,
-            sizeof ifra.ifra_name - 1);
-    ifra.ifra_name[sizeof ifra.ifra_name - 1] = '\0';
-    me = (struct sockaddr_in *)&ifra.ifra_addr;
-    peer = (struct sockaddr_in *)&ifra.ifra_broadaddr;
-    me->sin_family = peer->sin_family = AF_INET;
-    me->sin_len = peer->sin_len = sizeof(struct sockaddr_in);
-    me->sin_addr = ipcp->my_ifip;
-    peer->sin_addr = ipcp->peer_ifip;
-    if (ID0ioctl(s, SIOCDIFADDR, &ifra) < 0)
-      log_Printf(LogERROR, "ipcp_CleanInterface: ioctl(SIOCDIFADDR): %s\n",
-                strerror(errno));
-    ipcp->my_ifip.s_addr = ipcp->peer_ifip.s_addr = INADDR_ANY;
+  if (iface->in_addrs && (Enabled(ipcp->fsm.bundle, OPT_PROXY) ||
+                          Enabled(ipcp->fsm.bundle, OPT_PROXYALL))) {
+    int s = ID0socket(AF_INET, SOCK_DGRAM, 0);
+    if (s < 0)
+      log_Printf(LogERROR, "ipcp_CleanInterface: socket: %s\n",
+                 strerror(errno));
+    else {
+      if (Enabled(ipcp->fsm.bundle, OPT_PROXYALL))
+        ipcp_doproxyall(ipcp->fsm.bundle, arp_ClearProxy, s);
+      else if (Enabled(ipcp->fsm.bundle, OPT_PROXY))
+        arp_ClearProxy(ipcp->fsm.bundle, iface->in_addr[0].brd, s);
+      close(s);
+    }
   }
 
-  close(s);
+  iface_inClear(ipcp->fsm.bundle->iface, IFACE_CLEAR_ALL);
 }
 
 static void
@@ -682,7 +709,10 @@ IpcpLayerDown(struct fsm *fp)
   struct ipcp *ipcp = fsm2ipcp(fp);
   const char *s;
 
-  s = inet_ntoa(ipcp->peer_ifip);
+  if (ipcp->fsm.bundle->iface->in_addrs)
+    s = inet_ntoa(ipcp->fsm.bundle->iface->in_addr[0].ifa);
+  else
+    s = "Interface configuration error !";
   log_Printf(LogIPCP, "%s: LayerDown: %s\n", fp->link->name, s);
 
   /*
@@ -698,10 +728,7 @@ IpcpLayerDown(struct fsm *fp)
       system_Select(fp->bundle, "MYADDR", LINKDOWNFILE, NULL, NULL);
   }
 
-  if (!(ipcp->fsm.bundle->phys_type.all & PHYS_AUTO))
-    ipcp_CleanInterface(ipcp);
-
-  ipcp_Setup(ipcp);
+  ipcp_Setup(ipcp, INADDR_NONE);
 }
 
 int
@@ -725,11 +752,12 @@ IpcpLayerUp(struct fsm *fp)
 {
   /* We're now up */
   struct ipcp *ipcp = fsm2ipcp(fp);
-  char tbuff[100];
+  char tbuff[16];
 
   log_Printf(LogIPCP, "%s: LayerUp.\n", fp->link->name);
-  snprintf(tbuff, sizeof tbuff, "myaddr = %s ", inet_ntoa(ipcp->my_ip));
-  log_Printf(LogIPCP, " %s hisaddr = %s\n", tbuff, inet_ntoa(ipcp->peer_ip));
+  snprintf(tbuff, sizeof tbuff, "%s", inet_ntoa(ipcp->my_ip));
+  log_Printf(LogIPCP, "myaddr %s hisaddr = %s\n",
+             tbuff, inet_ntoa(ipcp->peer_ip));
 
   if (ipcp->peer_compproto >> 16 == PROTO_VJCOMP)
     sl_compress_init(&ipcp->vj.cslc, (ipcp->peer_compproto >> 8) & 255);
@@ -741,8 +769,7 @@ IpcpLayerUp(struct fsm *fp)
    * XXX this stuff should really live in the FSM.  Our config should
    * associate executable sections in files with events.
    */
-  if (system_Select(fp->bundle, inet_ntoa(ipcp->my_ifip), LINKUPFILE,
-                    NULL, NULL) < 0) {
+  if (system_Select(fp->bundle, tbuff, LINKUPFILE, NULL, NULL) < 0) {
     if (bundle_GetLabel(fp->bundle)) {
       if (system_Select(fp->bundle, bundle_GetLabel(fp->bundle),
                        LINKUPFILE, NULL, NULL) < 0)
@@ -751,12 +778,14 @@ IpcpLayerUp(struct fsm *fp)
       system_Select(fp->bundle, "MYADDR", LINKUPFILE, NULL, NULL);
   }
 
+  fp->more.reqs = fp->more.naks = fp->more.rejs = ipcp->cfg.fsm.maxreq * 3;
   log_DisplayPrompts();
+
   return 1;
 }
 
 static int
-AcceptableAddr(struct in_range *prange, struct in_addr ipaddr)
+AcceptableAddr(const struct in_range *prange, struct in_addr ipaddr)
 {
   /* Is the given IP in the given range ? */
   return (prange->ipaddr.s_addr & prange->mask.s_addr) ==
@@ -768,13 +797,13 @@ IpcpDecodeConfig(struct fsm *fp, u_char * cp, int plen, int mode_type,
                  struct fsm_decode *dec)
 {
   /* Deal with incoming PROTO_IPCP */
+  struct iface *iface = fp->bundle->iface;
   struct ipcp *ipcp = fsm2ipcp(fp);
-  int type, length;
+  int type, length, gotdns, gotdnsnak, n;
   u_int32_t compproto;
   struct compreq *pcomp;
   struct in_addr ipaddr, dstipaddr, have_ip, dns[2], dnsnak[2];
   char tbuff[100], tbuff2[100];
-  int gotdns, gotdnsnak;
 
   gotdns = 0;
   gotdnsnak = 0;
@@ -810,14 +839,19 @@ IpcpDecodeConfig(struct fsm *fp, u_char * cp, int plen, int mode_type,
                                 ipaddr, 1)) {
             log_Printf(LogIPCP, "%s: Address invalid or already in use\n",
                       inet_ntoa(ipaddr));
-            if (iplist_ip2pos(&ipcp->cfg.peer_list, ipcp->peer_ifip) >= 0)
-              /*
-               * If we've already got a valid address configured for the peer
-               * (in AUTO mode), try NAKing with that so that we don't
-               * have to upset things too much.
-               */
-              ipcp->peer_ip = ipcp->peer_ifip;
-            else
+            /*
+             * If we've already had a valid address configured for the peer,
+             * try NAKing with that so that we don't have to upset things
+             * too much.
+             */
+            for (n = 0; n < iface->in_addrs; n++)
+              if (iplist_ip2pos(&ipcp->cfg.peer_list, iface->in_addr[n].brd)
+                  >=0) {
+                ipcp->peer_ip = iface->in_addr[n].brd;
+                break;
+              }
+
+            if (n == iface->in_addrs)
               /* Just pick an IP number from our list */
               ipcp->peer_ip = ChooseHisAddr
                 (fp->bundle, ipcp->cfg.my_range.ipaddr);
@@ -827,7 +861,7 @@ IpcpDecodeConfig(struct fsm *fp, u_char * cp, int plen, int mode_type,
 	      dec->rejend += length;
             } else {
 	      memcpy(dec->nakend, cp, 2);
-	      memcpy(dec->nakend+2, &ipcp->peer_ip.s_addr, length - 2);
+	      memcpy(dec->nakend + 2, &ipcp->peer_ip.s_addr, length - 2);
 	      dec->nakend += length;
             }
 	    break;
@@ -838,13 +872,20 @@ IpcpDecodeConfig(struct fsm *fp, u_char * cp, int plen, int mode_type,
 	   * want to use.
 	   */
 	  memcpy(dec->nakend, cp, 2);
-          if ((ipcp->peer_ifip.s_addr & ipcp->cfg.peer_range.mask.s_addr) ==
-             (ipcp->cfg.peer_range.ipaddr.s_addr &
-              ipcp->cfg.peer_range.mask.s_addr))
-            /* We prefer the already-configured address */
-	    memcpy(dec->nakend+2, &ipcp->peer_ifip.s_addr, length - 2);
-          else
-	    memcpy(dec->nakend+2, &ipcp->peer_ip.s_addr, length - 2);
+          for (n = 0; n < iface->in_addrs; n++)
+            if ((iface->in_addr[n].brd.s_addr &
+                 ipcp->cfg.peer_range.mask.s_addr)
+                == (ipcp->cfg.peer_range.ipaddr.s_addr &
+                    ipcp->cfg.peer_range.mask.s_addr)) {
+              /* We prefer the already-configured address */
+	      memcpy(dec->nakend + 2, &iface->in_addr[n].brd.s_addr,
+                     length - 2);
+              break;
+            }
+
+          if (n == iface->in_addrs)
+	    memcpy(dec->nakend + 2, &ipcp->peer_ip.s_addr, length - 2);
+
 	  dec->nakend += length;
 	  break;
 	}
@@ -852,6 +893,7 @@ IpcpDecodeConfig(struct fsm *fp, u_char * cp, int plen, int mode_type,
 	memcpy(dec->ackend, cp, length);
 	dec->ackend += length;
 	break;
+
       case MODE_NAK:
 	if (AcceptableAddr(&ipcp->cfg.my_range, ipaddr)) {
 	  /* Use address suggested by peer */
@@ -865,13 +907,17 @@ IpcpDecodeConfig(struct fsm *fp, u_char * cp, int plen, int mode_type,
           fsm_Close(&ipcp->fsm);
 	}
 	break;
+
       case MODE_REJ:
 	ipcp->peer_reject |= (1 << type);
 	break;
       }
       break;
+
     case TY_COMPPROTO:
-      memcpy(&compproto, cp + 2, 4);
+      pcomp = (struct compreq *)(cp + 2);
+      compproto = (ntohs(pcomp->proto) << 16) + (pcomp->slots << 8) +
+                  pcomp->compcid;
       log_Printf(LogIPCP, "%s %s\n", tbuff, vj2asc(compproto));
 
       switch (mode_type) {
@@ -880,11 +926,11 @@ IpcpDecodeConfig(struct fsm *fp, u_char * cp, int plen, int mode_type,
 	  memcpy(dec->rejend, cp, length);
 	  dec->rejend += length;
 	} else {
-	  pcomp = (struct compreq *) (cp + 2);
 	  switch (length) {
 	  case 4:		/* RFC1172 */
 	    if (ntohs(pcomp->proto) == PROTO_VJCOMP) {
-	      log_Printf(LogWARN, "Peer is speaking RFC1172 compression protocol !\n");
+	      log_Printf(LogWARN, "Peer is speaking RFC1172 compression "
+                         "protocol !\n");
 	      ipcp->heis1172 = 1;
 	      ipcp->peer_compproto = compproto;
 	      memcpy(dec->ackend, cp, length);
@@ -897,18 +943,29 @@ IpcpDecodeConfig(struct fsm *fp, u_char * cp, int plen, int mode_type,
 	    }
 	    break;
 	  case 6:		/* RFC1332 */
-	    if (ntohs(pcomp->proto) == PROTO_VJCOMP
-		&& pcomp->slots <= MAX_VJ_STATES
-                && pcomp->slots >= MIN_VJ_STATES) {
-	      ipcp->peer_compproto = compproto;
-	      ipcp->heis1172 = 0;
-	      memcpy(dec->ackend, cp, length);
-	      dec->ackend += length;
+	    if (ntohs(pcomp->proto) == PROTO_VJCOMP) {
+              if (pcomp->slots <= MAX_VJ_STATES
+                  && pcomp->slots >= MIN_VJ_STATES) {
+                /* Ok, we can do that */
+	        ipcp->peer_compproto = compproto;
+	        ipcp->heis1172 = 0;
+	        memcpy(dec->ackend, cp, length);
+	        dec->ackend += length;
+	      } else {
+                /* Get as close as we can to what he wants */
+	        ipcp->heis1172 = 0;
+	        memcpy(dec->nakend, cp, 2);
+	        pcomp->slots = pcomp->slots < MIN_VJ_STATES ?
+                               MIN_VJ_STATES : MAX_VJ_STATES;
+	        memcpy(dec->nakend+2, &pcomp, sizeof pcomp);
+	        dec->nakend += length;
+              }
 	    } else {
+              /* What we really want */
 	      memcpy(dec->nakend, cp, 2);
 	      pcomp->proto = htons(PROTO_VJCOMP);
 	      pcomp->slots = DEF_VJ_STATES;
-	      pcomp->compcid = 0;
+	      pcomp->compcid = 1;
 	      memcpy(dec->nakend+2, &pcomp, sizeof pcomp);
 	      dec->nakend += length;
 	    }
@@ -920,16 +977,28 @@ IpcpDecodeConfig(struct fsm *fp, u_char * cp, int plen, int mode_type,
 	  }
 	}
 	break;
+
       case MODE_NAK:
+	if (ntohs(pcomp->proto) == PROTO_VJCOMP) {
+          if (pcomp->slots > MAX_VJ_STATES)
+            pcomp->slots = MAX_VJ_STATES;
+          else if (pcomp->slots < MIN_VJ_STATES)
+            pcomp->slots = MIN_VJ_STATES;
+          compproto = (ntohs(pcomp->proto) << 16) + (pcomp->slots << 8) +
+                      pcomp->compcid;
+        } else
+          compproto = 0;
 	log_Printf(LogIPCP, "%s changing compproto: %08x --> %08x\n",
 		  tbuff, ipcp->my_compproto, compproto);
-	ipcp->my_compproto = compproto;
+        ipcp->my_compproto = compproto;
 	break;
+
       case MODE_REJ:
 	ipcp->peer_reject |= (1 << type);
 	break;
       }
       break;
+
     case TY_IPADDRS:		/* RFC1172 */
       memcpy(&ipaddr.s_addr, cp + 2, 4);
       memcpy(&dstipaddr.s_addr, cp + 6, 4);
@@ -943,6 +1012,7 @@ IpcpDecodeConfig(struct fsm *fp, u_char * cp, int plen, int mode_type,
 	memcpy(dec->ackend, cp, length);
 	dec->ackend += length;
 	break;
+
       case MODE_NAK:
         snprintf(tbuff2, sizeof tbuff2, "%s changing address: %s", tbuff,
 		 inet_ntoa(ipcp->my_ip));
@@ -950,6 +1020,7 @@ IpcpDecodeConfig(struct fsm *fp, u_char * cp, int plen, int mode_type,
 	ipcp->my_ip = ipaddr;
 	ipcp->peer_ip = dstipaddr;
 	break;
+
       case MODE_REJ:
 	ipcp->peer_reject |= (1 << type);
 	break;
@@ -995,12 +1066,14 @@ IpcpDecodeConfig(struct fsm *fp, u_char * cp, int plen, int mode_type,
 	  dec->ackend += length;
         }
 	break;
+
       case MODE_NAK:		/* what does this mean?? */
         if (IsEnabled(ipcp->cfg.ns.dns_neg)) {
           gotdnsnak = 1;
           memcpy(&dnsnak[type == TY_PRIMARY_DNS ? 0 : 1].s_addr, cp + 2, 4);
 	}
 	break;
+
       case MODE_REJ:		/* Can't do much, stop asking */
         ipcp->peer_reject |= (1 << (type - TY_ADJUST_NS));
 	break;
@@ -1034,9 +1107,11 @@ IpcpDecodeConfig(struct fsm *fp, u_char * cp, int plen, int mode_type,
 	  dec->ackend += length;
         }
 	break;
+
       case MODE_NAK:
 	log_Printf(LogIPCP, "MS NBNS req %d - NAK??\n", type);
 	break;
+
       case MODE_REJ:
 	log_Printf(LogIPCP, "MS NBNS req %d - REJ??\n", type);
 	break;
@@ -1087,6 +1162,23 @@ ipcp_Input(struct ipcp *ipcp, struct bundle *bundle, struct mbuf *bp)
 }
 
 int
+ipcp_UseHisIPaddr(struct bundle *bundle, struct in_addr hisaddr)
+{
+  struct ipcp *ipcp = &bundle->ncp.ipcp;
+
+  memset(&ipcp->cfg.peer_range, '\0', sizeof ipcp->cfg.peer_range);
+  iplist_reset(&ipcp->cfg.peer_list);
+  ipcp->peer_ip = ipcp->cfg.peer_range.ipaddr = hisaddr;
+  ipcp->cfg.peer_range.mask.s_addr = INADDR_BROADCAST;
+  ipcp->cfg.peer_range.width = 32;
+
+  if (ipcp_SetIPaddress(bundle, ipcp->cfg.my_range.ipaddr, hisaddr, 0) < 0)
+    return 0;
+
+  return 1;	/* Ok */
+}
+
+int
 ipcp_UseHisaddr(struct bundle *bundle, const char *hisaddr, int setaddr)
 {
   struct ipcp *ipcp = &bundle->ncp.ipcp;
@@ -1110,19 +1202,29 @@ ipcp_UseHisaddr(struct bundle *bundle, const char *hisaddr, int setaddr)
       log_Printf(LogWARN, "%s: Invalid range !\n", hisaddr);
       return 0;
     }
-  } else if (ParseAddr(ipcp, 1, &hisaddr, &ipcp->cfg.peer_range.ipaddr,
+  } else if (ParseAddr(ipcp, hisaddr, &ipcp->cfg.peer_range.ipaddr,
 		       &ipcp->cfg.peer_range.mask,
                        &ipcp->cfg.peer_range.width) != 0) {
     ipcp->peer_ip.s_addr = ipcp->cfg.peer_range.ipaddr.s_addr;
 
     if (setaddr && ipcp_SetIPaddress(bundle, ipcp->cfg.my_range.ipaddr,
-                                     ipcp->cfg.peer_range.ipaddr, 0) < 0) {
-      ipcp->cfg.my_range.ipaddr.s_addr = INADDR_ANY;
-      ipcp->cfg.peer_range.ipaddr.s_addr = INADDR_ANY;
+                                     ipcp->cfg.peer_range.ipaddr, 0) < 0)
       return 0;
-    }
   } else
     return 0;
 
   return 1;
+}
+
+struct in_addr
+addr2mask(struct in_addr addr)
+{
+  u_int32_t haddr = ntohl(addr.s_addr);
+
+  haddr = IN_CLASSA(haddr) ? IN_CLASSA_NET :
+          IN_CLASSB(haddr) ? IN_CLASSB_NET :
+          IN_CLASSC_NET;
+  addr.s_addr = htonl(haddr);
+
+  return addr;
 }

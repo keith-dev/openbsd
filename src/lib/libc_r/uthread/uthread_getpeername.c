@@ -29,6 +29,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
+ * $OpenBSD: uthread_getpeername.c,v 1.3 1999/02/16 16:40:00 deraadt Exp $
  */
 #include <sys/types.h>
 #include <sys/socket.h>
@@ -37,7 +38,7 @@
 #include "pthread_private.h"
 
 int
-getpeername(int fd, struct sockaddr * peer, int *paddrlen)
+getpeername(int fd, struct sockaddr *peer, socklen_t *paddrlen)
 {
 	int             ret;
 

@@ -1,4 +1,4 @@
-#	$OpenBSD: Makefile,v 1.9 1997/07/06 21:05:10 mickey Exp $
+#	$OpenBSD: Makefile,v 1.12 1999/02/25 04:24:28 millert Exp $
 #	$NetBSD: Makefile,v 1.17 1995/10/24 22:18:34 jtc Exp $
 
 PROG=	gzip
@@ -9,7 +9,7 @@ CFLAGS+=-DSTDC_HEADERS=1 -DHAVE_UNISTD_H=1 -DDIRENT=1
 
 .if (${MACHINE_ARCH} == "m68k" || ${MACHINE_ARCH} == "i386")
 SRCS+=	match.S
-CFLAGS+=-DASMV
+CFLAGS+=-DASMV 
 .else
 CFLAGS+=-DDYN_ALLOC
 .endif
@@ -20,12 +20,15 @@ LDSTATIC= ${STATIC}
 
 MAKEINFO=	makeinfo
 
-MLINKS+= gzip.1 gunzip.1 gzip.1 gzcat.1 gzip.1
+MLINKS+= gzip.1 gunzip.1 gzip.1 gzcat.1
 MLINKS+= zdiff.1 zcmp.1
+MLINKS+= zgrep.1 zegrep.1 zgrep.1 zfgrep.1
 #MLINKS+= gzip.1 uncompress.1
 LINKS+= ${BINDIR}/gzip ${BINDIR}/gunzip
 LINKS+= ${BINDIR}/gzip ${BINDIR}/gzcat
 LINKS+=	${BINDIR}/zdiff ${BINDIR}/zcmp
+LINKS+=	${BINDIR}/zgrep ${BINDIR}/zegrep
+LINKS+=	${BINDIR}/zgrep ${BINDIR}/zfgrep
 #LINKS+= ${BINDIR}/gzip ${BINDIR}/uncompress
 
 all:	gzip.info
@@ -45,7 +48,7 @@ afterinstall:
 
 .if (${MACHINE_ARCH} == "m68k" || ${MACHINE_ARCH} == "i386")
 match.o: ${.CURDIR}/match.S
-	$(CPP) -D__OpenBSD__ ${.CURDIR}/match.S >_match.s
+	$(CPP) -D__OpenBSD__ -D${MACHINE_ARCH} ${.CURDIR}/match.S >_match.s
 	$(CC) -c _match.s
 	mv _match.o match.o
 	rm -f _match.s

@@ -1,4 +1,4 @@
-#	$OpenBSD: Makefile,v 1.92 1998/09/19 00:48:33 todd Exp $
+#	$OpenBSD: Makefile,v 1.96 1999/03/17 18:26:07 deraadt Exp $
 
 TZDIR=		/usr/share/zoneinfo
 LOCALTIME=	US/Pacific
@@ -24,7 +24,7 @@ BIN1=	aliases bootptab changelist ccd.conf csh.cshrc csh.login csh.logout \
 # -rw-rw-r--
 BIN2=	motd
 
-NAMEDB=	localhost.rev named.boot root.cache
+NAMEDB=	localhost.rev root.cache
 PCS=	pcs750.bin
 WCS1=	wcs fppwcs poc poc1 poc2 fppoc
 WCS2=	fpevent fppwcs fppwcs_dual hdcwcs load_diags start_fpp wcs wcs_dual
@@ -140,8 +140,11 @@ distribution-etc-root-var: distrib-dirs
 		    ${DESTDIR}/etc/afs; \
 		${INSTALL} -c -o root -g wheel -m 644 README \
 		    ${DESTDIR}/etc/afs)
-	cd namedb; ${INSTALL} -c -o named -g ${BINGRP} -m 644 ${NAMEDB} \
-	    ${DESTDIR}/var/named
+	(cd namedb; \
+	    ${INSTALL} -c -o root -g ${BINGRP} -m 644 named.boot \
+		${DESTDIR}/var/named; \
+	    ${INSTALL} -c -o named -g ${BINGRP} -m 644 ${NAMEDB} \
+		${DESTDIR}/var/named/namedb)
 	/bin/rm -f ${DESTDIR}/etc/localtime
 	ln -s ${TZDIR}/${LOCALTIME} ${DESTDIR}/etc/localtime
 	/bin/rm -f ${DESTDIR}/etc/rmt
@@ -196,6 +199,7 @@ distribution-etc-root-var: distrib-dirs
 	(cd ../usr.sbin/sendmail/cf/cf; ${MAKE} distribution)
 	(cd ../usr.sbin/ypserv/ypinit; ${MAKE} distribution)
 	(cd ../usr.sbin/httpd; ${MAKE} distribution)
+	(cd ../lib/libssl; ${MAKE} -f Makefile.bsd-wrapper distribution)
 	(cd ../gnu/usr.bin/lynx; ${MAKE} -f Makefile.bsd-wrapper distribution)
 	(cd ../usr.bin/mail; ${MAKE} distribution)
 	/usr/sbin/sendmail -C${DESTDIR}/etc/sendmail.cf -bi -O AliasFile=${DESTDIR}/etc/aliases
@@ -207,11 +211,11 @@ distribution: distribution-etc-root-var
 
 distrib-dirs:
 	${INSTALL} -d -o root -g wheel -m 755 ${DESTDIR}
-	-mtree -def mtree/4.4BSD.dist -p ${DESTDIR}/ -u
+	-mtree -qdef mtree/4.4BSD.dist -p ${DESTDIR}/ -u
 	if [ ! -d ${DESTDIR}/usr/src ]; then \
 		${INSTALL} -d -o root -g wsrc -m 775 ${DESTDIR}/usr/src; \
 	fi
-	cd ${DESTDIR}; rm -f sys; ln -s usr/src/sys sys
+	cd ${DESTDIR}/; rm -f sys; ln -s usr/src/sys sys
 
 .ifndef RELEASEDIR
 release:

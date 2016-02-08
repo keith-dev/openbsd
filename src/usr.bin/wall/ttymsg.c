@@ -1,4 +1,4 @@
-/*	$OpenBSD: ttymsg.c,v 1.3 1996/10/25 06:06:30 downsj Exp $	*/
+/*	$OpenBSD: ttymsg.c,v 1.6 1998/11/18 16:47:01 deraadt Exp $	*/
 /*	$NetBSD: ttymsg.c,v 1.3 1994/11/17 07:17:55 jtc Exp $	*/
 
 /*
@@ -38,7 +38,7 @@
 #if 0
 static char sccsid[] = "@(#)ttymsg.c	8.2 (Berkeley) 11/16/93";
 #endif
-static char rcsid[] = "$OpenBSD: ttymsg.c,v 1.3 1996/10/25 06:06:30 downsj Exp $";
+static char rcsid[] = "$OpenBSD: ttymsg.c,v 1.6 1998/11/18 16:47:01 deraadt Exp $";
 #endif /* not lint */
 
 #include <sys/types.h>
@@ -52,6 +52,7 @@ static char rcsid[] = "$OpenBSD: ttymsg.c,v 1.3 1996/10/25 06:06:30 downsj Exp $
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
+#include <sys/stat.h>
 
 /*
  * Display the contents of a uio structure on a terminal.  Used by wall(1),
@@ -72,6 +73,7 @@ ttymsg(iov, iovcnt, line, tmout)
 	register int cnt, fd, left, wret;
 	struct iovec localiov[6];
 	int forked = 0;
+	struct stat st;
 
 	if (iovcnt > sizeof(localiov) / sizeof(localiov[0]))
 		return ("too many iov's (change code in wall/ttymsg.c)");
@@ -89,6 +91,13 @@ ttymsg(iov, iovcnt, line, tmout)
 		(void) snprintf(errbuf, sizeof(errbuf), "'/' in \"%s\"",
 		    device);
 		return (errbuf);
+	}
+
+	if (getuid()) {
+		if (stat(device, &st) < 0)
+			return (NULL);
+		if ((st.st_mode & S_IWGRP) == 0)
+			return (NULL);
 	}
 
 	/*

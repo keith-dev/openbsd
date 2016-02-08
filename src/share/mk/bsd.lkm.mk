@@ -1,4 +1,4 @@
-#	$OpenBSD: bsd.lkm.mk,v 1.12 1997/04/27 21:38:29 millert Exp $
+#	$OpenBSD: bsd.lkm.mk,v 1.14 1998/12/31 23:49:45 millert Exp $
 
 .if exists(${.CURDIR}/../Makefile.inc)
 .include "${.CURDIR}/../Makefile.inc"

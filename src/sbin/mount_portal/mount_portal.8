@@ -1,4 +1,4 @@
-.\"	$OpenBSD: mount_portal.8,v 1.5 1998/09/17 04:14:56 aaron Exp $
+.\"	$OpenBSD: mount_portal.8,v 1.8 1998/12/15 01:20:38 aaron Exp $
 .\"	$NetBSD: mount_portal.8,v 1.6 1995/08/18 15:01:19 pk Exp $
 .\"
 .\" Copyright (c) 1993, 1994
@@ -51,7 +51,7 @@
 .Ar mount_point
 .Sh DESCRIPTION
 The
-.Nm mount_portal
+.Nm
 command attaches an instance of the portal daemon
 to the global filesystem namespace.
 The conventional mount point is
@@ -108,7 +108,9 @@ a chrooted environment.
 The configuration file contains a list of rules.
 Each rule takes one line and consists of two or more
 whitespace separated fields.
-A hash (``#'') character causes the remainder of a line to
+A hash
+.Pq Sq #
+character causes the remainder of a line to
 be ignored.  Blank lines are ignored.
 .Pp
 The first field is a pathname prefix to match
@@ -134,7 +136,7 @@ fs/		file fs/
 This filesystem may not be NFS-exported.
 .Sh HISTORY
 The
-.Nm mount_portal
+.Nm
 utility first appeared in
 .Bx 4.4 .
 

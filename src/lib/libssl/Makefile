@@ -1,5 +1,4 @@
 .include <bsd.own.mk>
-
 ECHO= /bin/echo
 
 .if exists(${.OBJDIR}/src-patent)

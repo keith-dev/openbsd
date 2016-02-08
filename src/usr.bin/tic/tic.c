@@ -1,7 +1,7 @@
-/*	$OpenBSD: tic.c,v 1.1 1998/07/24 19:37:35 millert Exp $	*/
+/*	$OpenBSD: tic.c,v 1.10 1999/03/22 18:43:19 millert Exp $	*/
 
 /****************************************************************************
- * Copyright (c) 1998 Free Software Foundation, Inc.                        *
+ * Copyright (c) 1998,1999 Free Software Foundation, Inc.                   *
  *                                                                          *
  * Permission is hereby granted, free of charge, to any person obtaining a  *
  * copy of this software and associated documentation files (the            *
@@ -44,14 +44,34 @@
 #include <dump_entry.h>
 #include <term_entry.h>
 
-MODULE_ID("$From: tic.c,v 1.30 1998/03/28 20:04:11 tom Exp $")
+MODULE_ID("$From: tic.c,v 1.50 1999/03/16 01:12:04 tom Exp $")
 
 const char *_nc_progname = "tic";
 
 static	FILE	*log_fp;
+static	FILE	*tmp_fp;
 static	bool	showsummary = FALSE;
+static	const char *to_remove;
 
-static	const	char usage_string[] = "[-h] [-v[n]] [-e names] [-CILNRTcfrsw1] source-file\n";
+static	void	(*save_check_termtype)(TERMTYPE *);
+static	void	check_termtype(TERMTYPE *tt);
+
+static	const	char usage_string[] = "[-h] [-v[n]] [-e names] [-CILNRTcfrswx1] source-file\n";
+
+static void cleanup(void)
+{
+	if (tmp_fp != 0)
+		fclose(tmp_fp);
+	if (to_remove != 0)
+		remove(to_remove);
+}
+
+static void failed(const char *msg)
+{
+	perror(msg);
+	cleanup();
+	exit(EXIT_FAILURE);
+}
 
 static void usage(void)
 {
@@ -66,12 +86,17 @@ static void usage(void)
 	"  -T         remove size-restrictions on compiled description",
 	"  -c         check only, validate input without compiling or translating",
 	"  -f         format complex strings for readability",
+	"  -G         format %{number} to %'char'",
+	"  -g         format %'char' to %{number}",
 	"  -e<names>  translate/compile only entries named by comma-separated list",
 	"  -o<dir>    set output directory for compiled entry writes",
 	"  -r         force resolution of all use entries in source translation",
 	"  -s         print summary statistics",
 	"  -v[n]      set verbosity level",
 	"  -w[n]      set format width for translation output",
+#if NCURSES_XNAMES
+	"  -x         treat unknown capabilities as user-defined",
+#endif
 	"",
 	"Parameters:",
 	"  <file>     file to translate or compile"
@@ -84,7 +109,60 @@ static void usage(void)
 	exit(EXIT_FAILURE);
 }
 
-static bool immedhook(ENTRY *ep)
+#define L_BRACE '{'
+#define R_BRACE '}'
+#define S_QUOTE '\'';
+
+static void write_it(ENTRY *ep)
+{
+	unsigned n;
+	int ch;
+	char *s, *d, *t;
+	char result[MAX_ENTRY_SIZE];
+
+	/*
+	 * Look for strings that contain %{number}, convert them to %'char',
+	 * which is shorter and runs a little faster.
+	 */
+	for (n = 0; n < STRCOUNT; n++) {
+		s = ep->tterm.Strings[n];
+		if (VALID_STRING(s)
+		 && strchr(s, L_BRACE) != 0) {
+			d = result;
+			t = s;
+			while ((ch = *t++) != 0) {
+				*d++ = ch;
+				if (ch == '\\') {
+					*d++ = *t++;
+				} else if ((ch == '%')
+				 && (*t == L_BRACE)) {
+					char *v = 0;
+					long value = strtol(t+1, &v, 0);
+					if (v != 0
+					 && *v == R_BRACE
+					 && value > 0
+					 && value != '\\'	/* FIXME */
+					 && value < 127
+					 && isprint((int)value)) {
+						*d++ = S_QUOTE;
+						*d++ = (int)value;
+						*d++ = S_QUOTE;
+						t = (v + 1);
+					}
+				}
+			}
+			*d = 0;
+			if (strlen(result) < strlen(s))
+				strcpy(s, result);
+		}
+	}
+
+	_nc_set_type(_nc_first_name(ep->tterm.term_names));
+	_nc_curr_line = ep->startline;
+	_nc_write_entry(&ep->tterm);
+}
+
+static bool immedhook(ENTRY *ep GCC_UNUSED)
 /* write out entries with no use capabilities immediately to save storage */
 {
 #ifndef HAVE_BIG_CORE
@@ -125,16 +203,13 @@ static bool immedhook(ENTRY *ep)
     {
 	int	oldline = _nc_curr_line;
 
-	_nc_set_type(_nc_first_name(ep->tterm.term_names));
-	_nc_curr_line = ep->startline;
-	_nc_write_entry(&ep->tterm);
+	write_it(ep);
 	_nc_curr_line = oldline;
 	free(ep->tterm.str_table);
 	return(TRUE);
     }
-    else
 #endif /* HAVE_BIG_CORE */
-	return(FALSE);
+    return(FALSE);
 }
 
 static void put_translate(int c)
@@ -220,15 +295,16 @@ static const char **make_namelist(char *src)
 	const char **dst = 0;
 
 	char *s, *base;
-	size_t pass, n, nn;
+	unsigned pass, n, nn;
 	char buffer[BUFSIZ];
 
-	if (strchr(src, '/') != 0) {	/* a filename */
+	if (src == 0) {
+		/* EMPTY */;
+	} else if (strchr(src, '/') != 0) {	/* a filename */
 		FILE *fp = fopen(src, "r");
-		if (fp == 0) {
-			perror(src);
-			exit(EXIT_FAILURE);
-		}
+		if (fp == 0)
+			failed(src);
+
 		for (pass = 1; pass <= 2; pass++) {
 			nn = 0;
 			while (fgets(buffer, sizeof(buffer), fp) != 0) {
@@ -297,6 +373,7 @@ static bool matches(const char **needle, const char *haystack)
 
 int main (int argc, char *argv[])
 {
+char	my_tmpname[PATH_MAX];
 int	v_opt = -1, debug_level;
 int	smart_defaults = TRUE;
 char    *termcap;
@@ -307,8 +384,10 @@ int	this_opt, last_opt = '?';
 int	outform = F_TERMINFO;	/* output format */
 int	sortmode = S_TERMINFO;	/* sort_mode */
 
+int	fd;
 int	width = 60;
 bool	formatted = FALSE;	/* reformat complex strings? */
+int	numbers = 0;		/* format "%'char'" to/from "%{number}" */
 bool	infodump = FALSE;	/* running as captoinfo? */
 bool	capdump = FALSE;	/* running as infotocap? */
 bool	forceresolve = FALSE;	/* force resolution */
@@ -328,13 +407,16 @@ bool	check_only = FALSE;
 
 	infodump = (strcmp(_nc_progname, "captoinfo") == 0);
 	capdump = (strcmp(_nc_progname, "infotocap") == 0);
+#if NCURSES_XNAMES
+	use_extended_names(FALSE);
+#endif
 
 	/*
 	 * Processing arguments is a little complicated, since someone made a
 	 * design decision to allow the numeric values for -w, -v options to
 	 * be optional.
 	 */
-	while ((this_opt = getopt(argc, argv, "0123456789CILNR:TVce:fo:rsvw")) != EOF) {
+	while ((this_opt = getopt(argc, argv, "0123456789CILNR:TVce:fGgo:rsvwx")) != -1) {
 		if (isdigit(this_opt)) {
 			switch (last_opt) {
 			case 'v':
@@ -388,6 +470,12 @@ bool	check_only = FALSE;
 		case 'f':
 			formatted = TRUE;
 			break;
+		case 'G':
+			numbers = 1;
+			break;
+		case 'g':
+			numbers = -1;
+			break;
 		case 'o':
 			outdir = optarg;
 			break;
@@ -403,6 +491,11 @@ bool	check_only = FALSE;
 		case 'w':
 			width = 0;
 			break;
+#if NCURSES_XNAMES
+		case 'x':
+			use_extended_names(TRUE);
+			break;
+#endif
 		default:
 			usage();
 		}
@@ -411,6 +504,32 @@ bool	check_only = FALSE;
 
 	debug_level = (v_opt > 0) ? v_opt : (v_opt == 0);
 	_nc_tracing = (1 << debug_level) - 1;
+
+	if (_nc_tracing)
+	{
+		save_check_termtype = _nc_check_termtype;
+		_nc_check_termtype = check_termtype;
+	}
+
+#ifndef HAVE_BIG_CORE
+	/*
+	 * Aaargh! immedhook seriously hoses us!
+	 *
+	 * One problem with immedhook is it means we can't do -e.  Problem
+	 * is that we can't guarantee that for each terminal listed, all the
+	 * terminals it depends on will have been kept in core for reference
+	 * resolution -- in fact it's certain the primitive types at the end
+	 * of reference chains *won't* be in core unless they were explicitly
+	 * in the select list themselves.
+	 */
+	if (namelst && (!infodump && !capdump))
+	{
+	    (void) fprintf(stderr,
+			   "Sorry, -e can't be used without -I or -C\n");
+	    cleanup();
+	    return EXIT_FAILURE;
+	}
+#endif /* HAVE_BIG_CORE */
 
 	if (optind < argc) {
 		source_file = argv[optind++];
@@ -425,11 +544,22 @@ bool	check_only = FALSE;
 	} else {
 		if (infodump == TRUE) {
 			/* captoinfo's no-argument case */
-			source_file = "/etc/termcap";
-			if ((termcap = getenv("TERMCAP")) != NULL) {
+			source_file = "/usr/share/misc/termcap";
+			if ((termcap = getenv("TERMCAP")) != 0
+			 && (namelst = make_namelist(getenv("TERM"))) != 0) {
 				if (access(termcap, F_OK) == 0) {
 					/* file exists */
 					source_file = termcap;
+				} else
+				if (strcpy(my_tmpname, "/tmp/tic.XXXXXXXX")
+				 && (fd = mkstemp(my_tmpname)) != -1
+				 && (tmp_fp = fdopen(fd, "w")) != 0) {
+					fprintf(tmp_fp, "%s\n", termcap);
+					fclose(tmp_fp);
+					tmp_fp = fopen(source_file, "r");
+					to_remove = source_file;
+				} else {
+					failed("mkstemp");
 				}
 			}
 		} else {
@@ -439,11 +569,13 @@ bool	check_only = FALSE;
 				_nc_progname,
 				_nc_progname,
 				usage_string);
+			cleanup();
 			return EXIT_FAILURE;
 		}
 	}
 
-	if (freopen(source_file, "r", stdin) == NULL) {
+	if (tmp_fp == 0
+	 && (tmp_fp = fopen(source_file, "r")) == 0) {
 		fprintf (stderr, "%s: Can't open %s\n", _nc_progname, source_file);
 		return EXIT_FAILURE;
 	}
@@ -465,33 +597,17 @@ bool	check_only = FALSE;
 	if (!(check_only || infodump || capdump))
 	    _nc_set_writedir(outdir);
 #endif /* HAVE_BIG_CORE */
-	_nc_read_entry_source(stdin, (char *)NULL,
+	_nc_read_entry_source(tmp_fp, (char *)NULL,
 			      !smart_defaults, FALSE,
 			      (check_only || infodump || capdump) ? NULLHOOK : immedhook);
 
 	/* do use resolution */
-	if (check_only || (!infodump && !capdump) || forceresolve)
-	    if (!_nc_resolve_uses() && !check_only)
+	if (check_only || (!infodump && !capdump) || forceresolve) {
+	    if (!_nc_resolve_uses() && !check_only) {
+		cleanup();
 		return EXIT_FAILURE;
-
-#ifndef HAVE_BIG_CORE
-	/*
-	 * Aaargh! immedhook seriously hoses us!
-	 *
-	 * One problem with immedhook is it means we can't do -e.  Problem
-	 * is that we can't guarantee that for each terminal listed, all the
-	 * terminals it depends on will have been kept in core for reference
-	 * resolution -- in fact it's certain the primitive types at the end
-	 * of reference chains *won't* be in core unless they were explicitly
-	 * in the select list themselves.
-	 */
-	if (namelst && (!infodump && !capdump))
-	{
-	    (void) fprintf(stderr,
-			   "Sorry, -e can't be used without -I or -C\n");
-	    return EXIT_FAILURE;
+	    }
 	}
-#endif /* HAVE_BIG_CORE */
 
 	/* length check */
 	if (check_only && (capdump || infodump))
@@ -500,7 +616,7 @@ bool	check_only = FALSE;
 	    {
 		if (matches(namelst, qp->tterm.term_names))
 		{
-		    int	len = fmt_entry(&qp->tterm, NULL, TRUE, infodump);
+		    int	len = fmt_entry(&qp->tterm, NULL, TRUE, infodump, numbers);
 
 		    if (len>(infodump?MAX_TERMINFO_LENGTH:MAX_TERMCAP_LENGTH))
 			    (void) fprintf(stderr,
@@ -519,11 +635,7 @@ bool	check_only = FALSE;
 		_nc_set_writedir(outdir);
 		for_entry_list(qp)
 		    if (matches(namelst, qp->tterm.term_names))
-		    {
-			_nc_set_type(_nc_first_name(qp->tterm.term_names));
-			_nc_curr_line = qp->startline;
-			_nc_write_entry(&qp->tterm);
-		    }
+			write_it(qp);
 	    }
 	    else
 	    {
@@ -539,14 +651,14 @@ bool	check_only = FALSE;
 			/* this is in case infotocap() generates warnings */
 			_nc_set_type(_nc_first_name(qp->tterm.term_names));
 
-			(void) fseek(stdin, qp->cstart, SEEK_SET);
+			(void) fseek(tmp_fp, qp->cstart, SEEK_SET);
 			while (j-- )
 			    if (infodump)
-				(void) putchar(getchar());
+				(void) putchar(fgetc(tmp_fp));
 			    else
-				put_translate(getchar());
+				put_translate(fgetc(tmp_fp));
 
-			len = dump_entry(&qp->tterm, limited, NULL);
+			len = dump_entry(&qp->tterm, limited, numbers, NULL);
 			for (j = 0; j < qp->nuses; j++)
 			    len += dump_uses((char *)(qp->uses[j].parent), infodump);
 			(void) putchar('\n');
@@ -559,8 +671,8 @@ bool	check_only = FALSE;
 		    bool in_comment = FALSE;
 		    bool trailing_comment = FALSE;
 
-		    (void) fseek(stdin, _nc_tail->cend, SEEK_SET);
-		    while ((c = getchar()) != EOF)
+		    (void) fseek(tmp_fp, _nc_tail->cend, SEEK_SET);
+		    while ((c = fgetc(tmp_fp)) != EOF)
 		    {
 			if (oldc == '\n') {
 			    if (c == '#') {
@@ -592,5 +704,108 @@ bool	check_only = FALSE;
 		else
 			fprintf(log_fp, "No entries written\n");
 	}
+	cleanup();
 	return(EXIT_SUCCESS);
+}
+
+/*
+ * This bit of legerdemain turns all the terminfo variable names into
+ * references to locations in the arrays Booleans, Numbers, and Strings ---
+ * precisely what's needed (see comp_parse.c).
+ */
+
+TERMINAL *cur_term;	/* tweak to avoid linking lib_cur_term.c */
+
+#undef CUR
+#define CUR tp->
+
+/* other sanity-checks (things that we don't want in the normal
+ * logic that reads a terminfo entry)
+ */
+static void check_termtype(TERMTYPE *tp)
+{
+	bool conflict = FALSE;
+	unsigned j, k;
+	char  fkeys[STRCOUNT];
+
+	/*
+	 * A terminal entry may contain more than one keycode assigned to
+	 * a given string (e.g., KEY_END and KEY_LL).  But curses will only
+	 * return one (the last one assigned).
+	 */
+	memset(fkeys, 0, sizeof(fkeys));
+	for (j = 0; _nc_tinfo_fkeys[j].code; j++) {
+	    char *a = tp->Strings[_nc_tinfo_fkeys[j].offset];
+	    bool first = TRUE;
+	    if (!VALID_STRING(a))
+		continue;
+	    for (k = j+1; _nc_tinfo_fkeys[k].code; k++) {
+		char *b = tp->Strings[_nc_tinfo_fkeys[k].offset];
+		if (!VALID_STRING(b)
+		 || fkeys[k])
+		    continue;
+		if (!strcmp(a,b)) {
+		    fkeys[j] = 1;
+		    fkeys[k] = 1;
+		    if (first) {
+			if (!conflict) {
+			    _nc_warning("Conflicting key definitions (using the last)");
+			    conflict = TRUE;
+			}
+			fprintf(stderr, "... %s is the same as %s",
+				keyname(_nc_tinfo_fkeys[j].code),
+				keyname(_nc_tinfo_fkeys[k].code));
+			first = FALSE;
+		    } else {
+			fprintf(stderr, ", %s",
+				keyname(_nc_tinfo_fkeys[k].code));
+		    }
+		}
+	    }
+	    if (!first)
+		fprintf(stderr, "\n");
+	}
+
+	/*
+	 * Quick check for color.  We could also check if the ANSI versus
+	 * non-ANSI strings are misused.
+	 */
+	if ((max_colors > 0) != (max_pairs > 0)
+	 || (max_colors > max_pairs))
+		_nc_warning("inconsistent values for max_colors and max_pairs");
+
+	PAIRED(set_foreground,                  set_background)
+	PAIRED(set_a_foreground,                set_a_background)
+
+	/*
+	 * These may be mismatched because the terminal description relies on
+	 * restoring the cursor visibility by resetting it.
+	 */
+	ANDMISSING(cursor_invisible,            cursor_normal)
+	ANDMISSING(cursor_visible,              cursor_normal)
+
+	/*
+	 * From XSI & O'Reilly, we gather that sc/rc are required if csr is
+	 * given, because the cursor position after the scrolling operation is
+	 * performed is undefined.
+	 */
+	ANDMISSING(change_scroll_region,	save_cursor)
+	ANDMISSING(change_scroll_region,	restore_cursor)
+
+	/*
+	 * Some standard applications (e.g., vi) and some non-curses
+	 * applications (e.g., jove) get confused if we have both ich/ich1 and
+	 * smir/rmir.  Let's be nice and warn about that, too, even though
+	 * ncurses handles it.
+	 */
+	if ((PRESENT(enter_insert_mode) || PRESENT(exit_insert_mode))
+	 && (PRESENT(insert_character)  || PRESENT(parm_ich))) {
+	   _nc_warning("non-curses applications may be confused by ich/ich1 with smir/rmir");
+	}
+
+	/*
+	 * Finally, do the non-verbose checks
+	 */
+	if (save_check_termtype != 0)
+	    save_check_termtype(tp);
 }

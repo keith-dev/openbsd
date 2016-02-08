@@ -1,5 +1,5 @@
 /* ====================================================================
- * Copyright (c) 1995-1998 The Apache Group.  All rights reserved.
+ * Copyright (c) 1995-1999 The Apache Group.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -70,6 +70,15 @@ extern "C" {
 
 #include "ap_config.h"
 #include "alloc.h"
+/*
+ * Include the Extended API headers.
+ * Don't move the position. It has to be after alloc.h because it uses the
+ * pool stuff but before buff.h because the buffer stuff uses the EAPI, too. 
+ */
+#ifdef EAPI
+#include "ap_hook.h"
+#include "ap_ctx.h"
+#endif /* EAPI */
 #include "buff.h"
 #include "ap.h"
 
@@ -98,7 +107,7 @@ extern "C" {
 /* Set default for OS/2 file system */
 #define DOCUMENT_LOCATION  HTTPD_ROOT "/docs"
 #else
-#define DOCUMENT_LOCATION  HTTPD_ROOT "/var/www/htdocs"
+#define DOCUMENT_LOCATION  HTTPD_ROOT "/htdocs"
 #endif
 #endif /* DOCUMENT_LOCATION */
 
@@ -109,6 +118,11 @@ extern "C" {
 
 /* Default administrator's address */
 #define DEFAULT_ADMIN "[no address given]"
+
+/* The target name of the installed Apache */
+#ifndef TARGET
+#define TARGET "httpd"
+#endif
 
 /* 
  * --------- You shouldn't have to edit anything below this line ----------
@@ -131,8 +145,13 @@ extern "C" {
 #define DEFAULT_HTTP_PORT	80
 #define DEFAULT_HTTPS_PORT	443
 #define ap_is_default_port(port,r)	((port) == ap_default_port(r))
+#ifdef EAPI
+#define ap_http_method(r)   (ap_ctx_get((r)->ctx, "ap::http::method") != NULL ? ((char *)ap_ctx_get((r)->ctx, "ap::http::method")) : "http")
+#define ap_default_port(r)  (ap_ctx_get((r)->ctx, "ap::default::port") != NULL ? atoi((char *)ap_ctx_get((r)->ctx, "ap::default::port")) : DEFAULT_HTTP_PORT)
+#else /* EAPI */
 #define ap_http_method(r)	"http"
 #define ap_default_port(r)	DEFAULT_HTTP_PORT
+#endif /* EAPI */
 
 /* --------- Default user name and group name running standalone ---------- */
 /* --- These may be specified as numbers by placing a # before a number --- */
@@ -410,7 +429,7 @@ extern "C" {
  * Example: "Apache/1.1.0 MrWidget/0.1-alpha" 
  */
 
-#define SERVER_BASEVERSION "Apache/1.3.3"	/* SEE COMMENTS ABOVE */
+#define SERVER_BASEVERSION "Apache/1.3.4"       /* SEE COMMENTS ABOVE */
 #define SERVER_VERSION  SERVER_BASEVERSION
 enum server_token_type {
     SrvTk_MIN,		/* eg: Apache/1.3.0 */
@@ -421,13 +440,15 @@ enum server_token_type {
 API_EXPORT(const char *) ap_get_server_version(void);
 API_EXPORT(void) ap_add_version_component(const char *component);
 API_EXPORT(const char *) ap_get_server_built(void);
+#ifdef EAPI
+API_EXPORT(void) ap_add_config_define(const char *define);
+#endif /* EAPI */
 
-/* Numeric release version identifier: major minor bugfix betaseq
+/* Numeric release version identifier: MMNNFFRBB: major minor fix final beta
  * Always increases along the same track as the source branch.
- * For a final release, 'betaseq' should be set to '99'.
- * For example, Apache 1.4.2 should be '1040299'
+ * For example, Apache 1.4.2 would be '10402100', 2.5b7 would be '20500007'.
  */
-#define APACHE_RELEASE 1030399
+#define APACHE_RELEASE 10304100
 
 #define SERVER_PROTOCOL "HTTP/1.1"
 #ifndef SERVER_SUPPORT
@@ -447,7 +468,7 @@ API_EXPORT(const char *) ap_get_server_built(void);
  * all of the potential response status-lines (a sparse table).
  * A future version should dynamically generate the table at startup.
  */
-#define RESPONSE_CODES 54
+#define RESPONSE_CODES 55
 
 #define HTTP_CONTINUE                      100
 #define HTTP_SWITCHING_PROTOCOLS           101
@@ -487,6 +508,7 @@ API_EXPORT(const char *) ap_get_server_built(void);
 #define HTTP_EXPECTATION_FAILED            417
 #define HTTP_UNPROCESSABLE_ENTITY          422
 #define HTTP_LOCKED                        423
+#define HTTP_FAILED_DEPENDENCY             424
 #define HTTP_INTERNAL_SERVER_ERROR         500
 #define HTTP_NOT_IMPLEMENTED               501
 #define HTTP_BAD_GATEWAY                   502
@@ -494,6 +516,7 @@ API_EXPORT(const char *) ap_get_server_built(void);
 #define HTTP_GATEWAY_TIME_OUT              504
 #define HTTP_VERSION_NOT_SUPPORTED         505
 #define HTTP_VARIANT_ALSO_VARIES           506
+#define HTTP_INSUFFICIENT_STORAGE          507
 #define HTTP_NOT_EXTENDED                  510
 
 #define DOCUMENT_FOLLOWS    HTTP_OK
@@ -522,7 +545,8 @@ API_EXPORT(const char *) ap_get_server_built(void);
 #define ap_is_HTTP_CLIENT_ERROR(x) (((x) >= 400)&&((x) < 500))
 #define ap_is_HTTP_SERVER_ERROR(x) (((x) >= 500)&&((x) < 600))
 
-#define status_drops_connection(x) (((x) == HTTP_BAD_REQUEST)           || \
+#define ap_status_drops_connection(x) \
+                                   (((x) == HTTP_BAD_REQUEST)           || \
                                     ((x) == HTTP_REQUEST_TIME_OUT)      || \
                                     ((x) == HTTP_LENGTH_REQUIRED)       || \
                                     ((x) == HTTP_REQUEST_ENTITY_TOO_LARGE) || \
@@ -531,16 +555,28 @@ API_EXPORT(const char *) ap_get_server_built(void);
                                     ((x) == HTTP_SERVICE_UNAVAILABLE) || \
 				    ((x) == HTTP_NOT_IMPLEMENTED))
 
+/* Methods recognized (but not necessarily handled) by the server.
+ * These constants are used in bit shifting masks of size int, so it is
+ * unsafe to have more methods than bits in an int.  HEAD == M_GET.
+ */
+#define M_GET        0
+#define M_PUT        1
+#define M_POST       2
+#define M_DELETE     3
+#define M_CONNECT    4
+#define M_OPTIONS    5
+#define M_TRACE      6
+#define M_PATCH      7
+#define M_PROPFIND   8
+#define M_PROPPATCH  9
+#define M_MKCOL     10
+#define M_COPY      11
+#define M_MOVE      12
+#define M_LOCK      13
+#define M_UNLOCK    14
 
-#define METHODS 8
-#define M_GET 0
-#define M_PUT 1
-#define M_POST 2
-#define M_DELETE 3
-#define M_CONNECT 4
-#define M_OPTIONS 5
-#define M_TRACE 6
-#define M_INVALID 7
+#define METHODS     15
+#define M_INVALID   31
 
 #define CGI_MAGIC_TYPE "application/x-httpd-cgi"
 #define INCLUDES_MAGIC_TYPE "text/x-server-parsed-html"
@@ -692,6 +728,7 @@ struct request_rec {
     long read_length;		/* bytes that have been read */
     int read_body;		/* how the request body should be read */
     int read_chunked;		/* reading chunked transfer-coding */
+    unsigned expecting_100;	/* is client waiting for a 100 response? */
 
     /* MIME header environments, in and out.  Also, an array containing
      * environment variables to be passed to subprocesses, so people can
@@ -721,6 +758,8 @@ struct request_rec {
     const char *content_encoding;
     const char *content_language;	/* for back-compat. only -- do not use */
     array_header *content_languages;	/* array of (char*) */
+
+    char *vlist_validator;      /* variant list validator (if negotiated) */
 
     int no_cache;
     int no_local_copy;
@@ -758,7 +797,10 @@ struct request_rec {
  * record to improve 64bit alignment the next time we need to break
  * binary compatibility for some other reason.
  */
-    unsigned expecting_100;     /* is client waiting for a 100 response? */
+
+#ifdef EAPI
+    ap_ctx *ctx;
+#endif /* EAPI */
 };
 
 
@@ -803,6 +845,10 @@ struct conn_rec {
     signed int double_reverse:2;/* have we done double-reverse DNS?
 				 * -1 yes/failure, 0 not yet, 1 yes/success */
     int keepalives;		/* How many times have we used it? */
+
+#ifdef EAPI
+    ap_ctx *ctx;
+#endif /* EAPI */
 };
 
 /* Per-vhost config... */
@@ -875,6 +921,10 @@ struct server_rec {
     int limit_req_line;      /* limit on size of the HTTP request line    */
     int limit_req_fieldsize; /* limit on size of any request header field */
     int limit_req_fields;    /* limit on number of request header fields  */
+
+#ifdef EAPI
+    ap_ctx *ctx;
+#endif /* EAPI */
 };
 
 /* These are more like real hosts than virtual hosts */
@@ -923,7 +973,7 @@ API_EXPORT(void) ap_no2slash(char *name);
 API_EXPORT(void) ap_getparents(char *name);
 API_EXPORT(char *) ap_escape_path_segment(pool *p, const char *s);
 API_EXPORT(char *) ap_os_escape_path(pool *p, const char *path, int partial);
-#define escape_uri(ppool,path) ap_os_escape_path(ppool,path,1)
+#define ap_escape_uri(ppool,path) ap_os_escape_path(ppool,path,1)
 API_EXPORT(char *) ap_escape_html(pool *p, const char *s);
 API_EXPORT(char *) ap_construct_server(pool *p, const char *hostname,
 				    unsigned port, const request_rec *r);
@@ -997,14 +1047,26 @@ API_EXPORT(int) ap_can_exec(const struct stat *);
 API_EXPORT(void) ap_chdir_file(const char *file);
 
 #ifndef HAVE_CANONICAL_FILENAME
+/*
+ *  We can't define these in os.h because of dependence on pool pointer.
+ */
 #define ap_os_canonical_filename(p,f)  (f)
+#define ap_os_case_canonical_filename(p,f)  (f)
+#define ap_os_systemcase_filename(p,f)  (f)
 #else
 API_EXPORT(char *) ap_os_canonical_filename(pool *p, const char *file);
+#ifdef WIN32
+API_EXPORT(char *) ap_os_case_canonical_filename(pool *pPool, const char *szFile);
+API_EXPORT(char *) ap_os_systemcase_filename(pool *pPool, const char *szFile);
+#else
+#define ap_os_case_canonical_filename(p,f) ap_os_canonical_filename(p,f)
+#define ap_os_systemcase_filename(p,f) ap_os_canonical_filename(p,f)
+#endif
 #endif
 
 #ifdef _OSD_POSIX
 extern const char *os_set_account(pool *p, const char *account);
-extern int os_init_job_environment(server_rec *s, const char *user_name);
+extern int os_init_job_environment(server_rec *s, const char *user_name, int one_process);
 #endif /* _OSD_POSIX */
 
 char *ap_get_local_host(pool *);
@@ -1051,7 +1113,7 @@ API_EXPORT(char *) ap_escape_quotes(pool *p, const char *instr);
  */
 API_EXPORT(void) ap_log_assert(const char *szExp, const char *szFile, int nLine)
 			    __attribute__((noreturn));
-#define ap_assert(exp) (void)( (exp) || (ap_log_assert(#exp, __FILE__, __LINE__), 0) )
+#define ap_assert(exp) ((exp) ? (void)0 : ap_log_assert(#exp,__FILE__,__LINE__))
 
 /* The optimized timeout code only works if we're not MULTITHREAD and we're
  * also not using a scoreboard file

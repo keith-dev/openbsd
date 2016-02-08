@@ -1,6 +1,6 @@
 #!/bin/sh -
 #
-#	$OpenBSD: MAKEDEV,v 1.26 1998/10/15 21:24:53 art Exp $
+#	$OpenBSD: MAKEDEV,v 1.30 1998/11/25 04:58:54 millert Exp $
 #	@(#)MAKEDEV	8.1 (Berkeley) 6/9/93
 #
 
@@ -118,6 +118,12 @@ all)
 	sh $this xfs0
 	sh $this fb0 fb1 fb2
        ;;
+
+raminst)
+	sh $this std
+	sh $this rz0 rz1 rz2 rz3 rz4 tz0 tz1 rd0 pty0
+	sh $this fb0 fb1 fb2
+	;;
 
 std)
 	mknod console		c 0 0
@@ -291,6 +297,17 @@ vnd*)
 	umask 77
 	;;
 
+rd*)
+	umask 2 ; unit=`expr $i : '.*d\(.*\)'`
+	mknod rd${unit}a b 25 `expr $unit '*' 16 + 0`
+	mknod rd${unit}c b 25 `expr $unit '*' 16 + 2`
+	mknod rrd${unit}a c 92 `expr $unit '*' 16 + 0`
+	mknod rrd${unit}c c 92 `expr $unit '*' 16 + 2`
+	chown root.operator rd${unit}[ac] rrd${unit}[ac]
+	chmod 640 rd${unit}[ac] rrd${unit}[ac]
+	umask 77
+	;;
+
 dc*)
 	unit=`expr $i : 'dc\(.*\)'`
 	case $unit in
@@ -329,12 +346,22 @@ pty*)
 	1) offset=16 name=q;;
 	2) offset=32 name=r;;
 	3) offset=48 name=s;;
-# Note that telnetd, rlogind, and xterm (at least) only look at p-s.
 	4) offset=64 name=t;;
+	5) offset=80 name=u;;
+	6) offset=96 name=v;;
+	7) offset=112 name=w;;
+	8) offset=128 name=x;;
+	9) offset=144 name=y;;
+	10) offset=160 name=z;;
+	11) offset=176 name=P;;
+	12) offset=192 name=Q;;
+	13) offset=208 name=R;;
+	14) offset=224 name=S;;
+	15) offset=240 name=T;;
 	*) echo bad unit for pty in: $i;;
 	esac
 	case $class in
-	0|1|2|3|4)
+	0|1|2|3|4|5|6|7|8|9|10|11|12|13|14|15)
 		umask 0
 		n=0
 		while [ $n -lt 16 ]

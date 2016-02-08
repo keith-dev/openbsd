@@ -29,6 +29,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
+ * $OpenBSD: uthread_sendto.c,v 1.3 1999/02/16 16:41:13 millert Exp $
  */
 #include <errno.h>
 #include <sys/types.h>
@@ -39,7 +40,7 @@
 #include "pthread_private.h"
 
 ssize_t
-sendto(int fd, const void *msg, size_t len, int flags, const struct sockaddr * to, int to_len)
+sendto(int fd, const void *msg, size_t len, int flags, const struct sockaddr *to, socklen_t to_len)
 {
 	int             ret;
 

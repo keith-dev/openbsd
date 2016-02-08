@@ -1,4 +1,4 @@
-/*	$OpenBSD: jobs.c,v 1.7 1998/06/25 19:02:02 millert Exp $	*/
+/*	$OpenBSD: jobs.c,v 1.13 1999/01/19 20:41:53 millert Exp $	*/
 
 /*
  * Process and job control
@@ -125,6 +125,7 @@ struct proc {
 #define JF_ZOMBIE	0x100	/* known, unwaited process */
 #define JF_REMOVE	0x200	/* flaged for removal (j_jobs()/j_noityf()) */
 #define JF_USETTYMODE	0x400	/* tty mode saved if process exits normally */
+#define JF_SAVEDTTYPGRP	0x800	/* j->saved_ttypgrp is valid */
 
 typedef struct job Job;
 struct job {
@@ -145,6 +146,7 @@ struct job {
 #endif /* KSH */
 #ifdef TTY_PGRP
 	TTY_state ttystate;	/* saved tty state for stopped jobs */
+	pid_t	saved_ttypgrp;	/* saved tty process group for stopped jobs */
 #endif /* TTY_PGRP */
 };
 
@@ -632,6 +634,10 @@ exchild(t, flags, close_fd)
 		Flag(FMONITOR) = 0;
 #endif /* JOBS */
 		Flag(FTALKING) = 0;
+#ifdef OS2
+		if (tty_fd >= 0)
+			flags |= XINTACT;
+#endif /* OS2 */
 		tty_close();
 		cleartraps();
 		execute(t, (flags & XERROK) | XEXEC); /* no return */
@@ -641,6 +647,8 @@ exchild(t, flags, close_fd)
 	}
 
 	/* shell (parent) stuff */
+	/* Ensure next child gets a (slightly) different $RANDOM sequence */
+	change_random();
 	if (!(flags & XPIPEO)) {	/* last process in a job */
 #ifdef TTY_PGRP
 		/* YYY: Is this needed? (see also YYY above)
@@ -774,9 +782,9 @@ waitfor(cp, sigp)
 #ifdef JOB_SIGS
 		sigprocmask(SIG_SETMASK, &omask, (sigset_t *) 0);
 #endif /* JOB_SIGS */
-		if (ecode == JL_NOSUCH)
-			return -1;
-		bi_errorf("%s: %s", cp, lookup_msgs[ecode]);
+		if (ecode != JL_NOSUCH)
+			bi_errorf("%s: %s", cp, lookup_msgs[ecode]);
+		return -1;
 	}
 
 	/* at&t ksh will wait for stopped jobs - we don't */
@@ -895,13 +903,15 @@ j_resume(cp, bg)
 			if (ttypgrp_ok && (j->flags & JF_SAVEDTTY)) {
 				set_tty(tty_fd, &j->ttystate, TF_NONE);
 			}
-			if (ttypgrp_ok && tcsetpgrp(tty_fd, j->pgrp) < 0) {
-				if (j->flags & JF_SAVEDTTY)
+			/* See comment in j_waitj regarding saved_ttypgrp. */
+			if (ttypgrp_ok && tcsetpgrp(tty_fd, (j->flags & JF_SAVEDTTYPGRP) ? j->saved_ttypgrp : j->pgrp) < 0) {
+				if (j->flags & JF_SAVEDTTY) {
 					set_tty(tty_fd, &tty_state, TF_NONE);
+				}
 				sigprocmask(SIG_SETMASK, &omask,
 					(sigset_t *) 0);
 				bi_errorf("1st tcsetpgrp(%d, %d) failed: %s",
-					tty_fd, (int) j->pgrp, strerror(errno));
+					tty_fd, (int) ((j->flags & JF_SAVEDTTYPGRP) ? j->saved_ttypgrp : j->pgrp), strerror(errno));
 				return 1;
 			}
 		}
@@ -918,8 +928,9 @@ j_resume(cp, bg)
 		if (!bg) {
 			j->flags &= ~JF_FG;
 # ifdef TTY_PGRP
-			if (ttypgrp_ok && (j->flags & JF_SAVEDTTY))
+			if (ttypgrp_ok && (j->flags & JF_SAVEDTTY)) {
 				set_tty(tty_fd, &tty_state, TF_NONE);
+			}
 			if (ttypgrp_ok && tcsetpgrp(tty_fd, our_pgrp) < 0) {
 				warningf(TRUE,
 				"fg: 2nd tcsetpgrp(%d, %d) failed: %s",
@@ -936,7 +947,7 @@ j_resume(cp, bg)
 	if (!bg) {
 # ifdef TTY_PGRP
 		if (ttypgrp_ok) {
-			j->flags &= ~JF_SAVEDTTY;
+			j->flags &= ~(JF_SAVEDTTY | JF_SAVEDTTYPGRP);
 		}
 # endif /* TTY_PGRP */
 		rv = j_waitj(j, JW_NONE, "jw:resume");
@@ -1198,6 +1209,20 @@ j_waitj(j, flags, where)
 		j->flags &= ~JF_FG;
 #ifdef TTY_PGRP
 		if (Flag(FMONITOR) && ttypgrp_ok && j->pgrp) {
+			/*
+			 * Save the tty's current pgrp so it can be restored
+			 * when the job is foregrounded.  This is to
+			 * deal with things like the GNU su which does
+			 * a fork/exec instead of an exec (the fork means
+			 * the execed shell gets a different pid from its
+			 * pgrp, so naturally it sets its pgrp and gets hosed
+			 * when it gets forgrounded by the parent shell, which
+			 * has restored the tty's pgrp to that of the su
+			 * process).
+			 */
+			if (j->state == PSTOPPED
+			    && (j->saved_ttypgrp = tcgetpgrp(tty_fd)) >= 0)
+				j->flags |= JF_SAVEDTTYPGRP;
 			if (tcsetpgrp(tty_fd, our_pgrp) < 0) {
 				warningf(TRUE,
 				"j_waitj: tcsetpgrp(%d, %d) failed: %s",
@@ -1536,11 +1561,12 @@ j_print(j, how, shf)
 			break;
 		}
 
-		if (how != JP_SHORT)
+		if (how != JP_SHORT) {
 			if (p == j->proc_list)
 				shf_fprintf(shf, "[%d] %c ", j->job, jobchar);
 			else
 				shf_fprintf(shf, "%s", filler);
+		}
 
 		if (how == JP_LONG)
 			shf_fprintf(shf, "%5d ", p->pid);

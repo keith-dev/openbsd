@@ -14,7 +14,7 @@
 # include <string.h>
 
 #ifndef lint
-static char sccsid[] = "@(#)mime.c	8.66 (Berkeley) 5/19/98";
+static char sccsid[] = "@(#)mime.c	8.71 (Berkeley) 1/18/1999";
 #endif /* not lint */
 
 /*
@@ -308,7 +308,7 @@ mime8to7(mci, header, e, boundaries, flags)
 			collect(e->e_dfp, FALSE, &hdr, e);
 			if (tTd(43, 101))
 				putline("+++after collect", mci);
-			putheader(mci, hdr, e);
+			putheader(mci, hdr, e, flags);
 			if (tTd(43, 101))
 				putline("+++after putheader", mci);
 			bt = mime8to7(mci, hdr, e, boundaries, flags);
@@ -360,7 +360,7 @@ mime8to7(mci, header, e, boundaries, flags)
 			collect(e->e_dfp, FALSE, &hdr, e);
 			if (tTd(43, 101))
 				putline("+++after collect", mci);
-			putheader(mci, hdr, e);
+			putheader(mci, hdr, e, flags);
 			if (tTd(43, 101))
 				putline("+++after putheader", mci);
 			if (hvalue("MIME-Version", hdr) == NULL)
@@ -442,8 +442,18 @@ mime8to7(mci, header, e, boundaries, flags)
 	if (sectionhighbits == 0)
 	{
 		/* no encoding necessary */
-		if (cte != NULL)
+		if (cte != NULL &&
+		    bitset(MCIF_INMIME, mci->mci_flags) &&
+		    !bitset(M87F_NO8TO7, flags))
 		{
+			/*
+			**  Skip _unless_ in MIME mode and potentially
+			**  converting from 8 bit to 7 bit MIME.  See
+			**  putheader() for the counterpart where the
+			**  CTE header is skipped in the opposite
+			**  situation.
+			*/
+
 			snprintf(buf, sizeof buf,
 				"Content-Transfer-Encoding: %.200s", cte);
 			putline(buf, mci);
@@ -663,15 +673,22 @@ mime_getchar(fp, boundaries, btp)
 	static bool atbol = TRUE;	/* at beginning of line */
 	static int bt = MBT_SYNTAX;	/* boundary type of next EOF */
 	static u_char buf[128];		/* need not be a full line */
+	int start = 0;			/* indicates position of - in buffer */
 
-	if (buflen > 0)
+	if (buflen == 1 && *bp == '\n')
+	{
+		/* last \n in buffer may be part of next MIME boundary */
+		c = *bp;
+	}
+	else if (buflen > 0)
 	{
 		buflen--;
 		return *bp++;
 	}
+	else 
+		c = getc(fp);
 	bp = buf;
 	buflen = 0;
-	c = getc(fp);
 	if (c == '\n')
 	{
 		/* might be part of a MIME boundary */
@@ -683,6 +700,7 @@ mime_getchar(fp, boundaries, btp)
 			ungetc(c, fp);
 			return c;
 		}
+		start = 1;
 	}
 	if (c != EOF)
 		*bp++ = c;
@@ -711,7 +729,7 @@ mime_getchar(fp, boundaries, btp)
 			*bp++ = c;
 		}
 		*bp = '\0';
-		bt = mimeboundary((char *) &buf[1], boundaries);
+		bt = mimeboundary((char *) &buf[start], boundaries);
 		switch (bt)
 		{
 		  case MBT_FINAL:

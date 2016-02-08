@@ -1,4 +1,5 @@
 # Build wrapper for SSLeay.
+# $OpenBSD: Makefile.bsd-wrapper,v 1.9 1999/03/17 18:25:56 deraadt Exp $
 
 # Our lndir is hacked; specify a full path to avoid potential conflicts
 # with the one installed with X11.
@@ -23,6 +24,9 @@ SSLCONF=	OpenBSD-alpha
 .if ${MACHINE_ARCH} == "sparc"
 SSLCONF=	OpenBSD-bigendian
 .else
+.if ${MACHINE_ARCH} == "m88k"
+SSLCONF=	OpenBSD-bigendian
+.else
 ##UNTESTED!	
 SSLCONF=	OpenBSD-bigendian
 .endif
@@ -30,7 +34,7 @@ SSLCONF=	OpenBSD-bigendian
 .endif
 .endif
 .endif
-
+.endif
 
 MUNGEDFILES =  	${.OBJDIR}/${SSL_SRC}/crypto/bf/bf_locl.h \
 		${.OBJDIR}/${SSL_SRC}/crypto/bn/bn.h \
@@ -51,28 +55,30 @@ SSL_SRC=src-patent
 SSL_SRC=src
 .endif 	  
 
-all: 	${.OBJDIR}/${SSL_SRC}/crypto/md2/md2.h 
-	(cd ${.OBJDIR}; ${MAKE})
+all: 	prereq
+	cd ${.OBJDIR} && ${MAKE}
 
-includes: ${.OBJDIR}/${SSL_SRC}/crypto/md2/md2.h
-	(cd ${.OBJDIR}; ${MAKE} includes)
+includes: prereq
+	cd ${.OBJDIR} && ${MAKE} includes
+
+prereq:	${.OBJDIR}/${SSL_SRC}/crypto/md2/md2.h
 
 install:
-	(cd ${.OBJDIR}; ${MAKE} install)
+	cd ${.OBJDIR} && ${MAKE} install
 
 ${.OBJDIR}/${SSL_SRC}/crypto/md2/md2.h : ${.OBJDIR}/${SSL_SRC}/Makefile.ssl
-	(cd ${.OBJDIR}/${SSL_SRC}; /usr/bin/perl Configure ${SSLCONF}) 
+	cd ${.OBJDIR}/${SSL_SRC} && /usr/bin/perl Configure ${SSLCONF}
 
 .if !exists(${.OBJDIR}/${SSL_SRC}/Makefile.ssl)
 ${.OBJDIR}/${SSL_SRC}/Makefile.ssl: ${.CURDIR}/${SSL_SRC}/Makefile.ssl
-	(${LNDIR} -s -e obj -e obj.${MACHINE_ARCH} -e Makefile.bsd-wrapper -e Makefile.ssl ${.CURDIR}; cp ${.CURDIR}/${SSL_SRC}/Makefile.ssl ${.OBJDIR}/${SSL_SRC})
+	${LNDIR} -s -e obj -e obj.${MACHINE_ARCH} -e Makefile.bsd-wrapper -e Makefile.ssl ${.CURDIR} && cp ${.CURDIR}/${SSL_SRC}/Makefile.ssl ${.OBJDIR}/${SSL_SRC}
 .endif
 
 clean:	${.OBJDIR}/${SSL_SRC}/Makefile.ssl
-	(cd ${.OBJDIR}; ${MAKE} clean)
+	cd ${.OBJDIR} && ${MAKE} clean
 
 cleandir: ${.OBJDIR}/${SSL_SRC}/Makefile.ssl
-	(cd ${.OBJDIR}; rm -f ${MUNGEDFILES}; ${MAKE} cleandir)
+	cd ${.OBJDIR} && rm -f ${MUNGEDFILES} && ${MAKE} cleandir
 
 test:
 	# Nothing here so far...
@@ -86,10 +92,9 @@ lint:
 tags:
 	# Nothing here so far...
 
+distribution:
+	${INSTALL} ${INSTALL_COPY} -g ${BINGRP} -m 444 \
+	   ${.CURDIR}/ssleay.cnf ${DESTDIR}/etc/ssl/lib/ssleay.cnf
+
 .include <bsd.obj.mk>
 .include <bsd.subdir.mk>
-
-
-
-
-

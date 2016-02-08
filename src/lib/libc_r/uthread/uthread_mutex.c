@@ -29,6 +29,8 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
+ * $OpenBSD: uthread_mutex.c,v 1.6 1999/01/06 05:29:25 d Exp $
+ *
  */
 #include <stdlib.h>
 #include <errno.h>
@@ -53,7 +55,7 @@ pthread_mutex_init(pthread_mutex_t * mutex,
 		/* Check if default mutex attributes: */
 		if (mutex_attr == NULL || *mutex_attr == NULL)
 			/* Default to a fast mutex: */
-			type = MUTEX_TYPE_FAST;
+			type = PTHREAD_MUTEX_DEFAULT;
 
 		else if ((*mutex_attr)->m_type >= MUTEX_TYPE_MAX)
 			/* Return an invalid argument error: */
@@ -74,12 +76,14 @@ pthread_mutex_init(pthread_mutex_t * mutex,
 				/* Process according to mutex type: */
 				switch (type) {
 				/* Fast mutex: */
-				case MUTEX_TYPE_FAST:
+				case PTHREAD_MUTEX_DEFAULT:
+				case PTHREAD_MUTEX_NORMAL:
+				case PTHREAD_MUTEX_ERRORCHECK:
 					/* Nothing to do here. */
 					break;
 
 				/* Counting mutex: */
-				case MUTEX_TYPE_COUNTING_FAST:
+				case PTHREAD_MUTEX_RECURSIVE:
 					/* Reset the mutex count: */
 					pmutex->m_data.m_count = 0;
 					break;
@@ -96,8 +100,7 @@ pthread_mutex_init(pthread_mutex_t * mutex,
 					pmutex->m_flags |= MUTEX_FLAGS_INITED;
 					pmutex->m_owner = NULL;
 					pmutex->m_type = type;
-					memset(&pmutex->lock, 0,
-					    sizeof(pmutex->lock));
+					_SPINUNLOCK(&pmutex->lock);
 					*mutex = pmutex;
 				} else {
 					free(pmutex);
@@ -174,7 +177,9 @@ pthread_mutex_trylock(pthread_mutex_t * mutex)
 		/* Process according to mutex type: */
 		switch ((*mutex)->m_type) {
 		/* Fast mutex: */
-		case MUTEX_TYPE_FAST:
+		case PTHREAD_MUTEX_NORMAL:
+		case PTHREAD_MUTEX_DEFAULT:
+		case PTHREAD_MUTEX_ERRORCHECK:
 			/* Check if this mutex is not locked: */
 			if ((*mutex)->m_owner == NULL) {
 				/* Lock the mutex for the running thread: */
@@ -186,7 +191,7 @@ pthread_mutex_trylock(pthread_mutex_t * mutex)
 			break;
 
 		/* Counting mutex: */
-		case MUTEX_TYPE_COUNTING_FAST:
+		case PTHREAD_MUTEX_RECURSIVE:
 			/* Check if this mutex is locked: */
 			if ((*mutex)->m_owner != NULL) {
 				/*
@@ -239,8 +244,27 @@ pthread_mutex_lock(pthread_mutex_t * mutex)
 
 		/* Process according to mutex type: */
 		switch ((*mutex)->m_type) {
+		/* What SS2 define as a 'normal' mutex.  This has to deadlock
+		   on attempts to get a lock you already own. */
+		case PTHREAD_MUTEX_NORMAL:
+			if ((*mutex)->m_owner == _thread_run) {
+				/* Intentionally deadlock: */
+				_thread_run->data.mutex = mutex;
+				for (;;)
+					_thread_kern_sched_state(PS_MUTEX_WAIT, __FILE__, __LINE__);
+			}
+			goto COMMON_LOCK;
+			
+		 /* Return error (not OK) on attempting to re-lock */
+		case PTHREAD_MUTEX_ERRORCHECK:
+			if ((*mutex)->m_owner == _thread_run) {
+				ret = EDEADLK;
+				break;
+			}
+			
 		/* Fast mutexes do not check for any error conditions: */
-		case MUTEX_TYPE_FAST:
+		case PTHREAD_MUTEX_DEFAULT:
+		COMMON_LOCK:
 			/*
 			 * Enter a loop to wait for the mutex to be locked by the
 			 * current thread: 
@@ -256,12 +280,12 @@ pthread_mutex_lock(pthread_mutex_t * mutex)
 					 * the mutex: 
 					 */
 					_thread_queue_enq(&(*mutex)->m_queue, _thread_run);
+					_thread_run->data.mutex = mutex;
 
-					/* Unlock the mutex structure: */
-					_SPINUNLOCK(&(*mutex)->lock);
-
-					/* Block signals: */
-					_thread_kern_sched_state(PS_MUTEX_WAIT, __FILE__, __LINE__);
+					/* Wait for the mutex: */
+					_thread_kern_sched_state_unlock(
+					    PS_MUTEX_WAIT, &(*mutex)->lock,
+					    __FILE__, __LINE__);
 
 					/* Lock the mutex again: */
 					_SPINLOCK(&(*mutex)->lock);
@@ -270,7 +294,7 @@ pthread_mutex_lock(pthread_mutex_t * mutex)
 			break;
 
 		/* Counting mutex: */
-		case MUTEX_TYPE_COUNTING_FAST:
+		case PTHREAD_MUTEX_RECURSIVE:
 			/*
 			 * Enter a loop to wait for the mutex to be locked by the
 			 * current thread: 
@@ -289,12 +313,12 @@ pthread_mutex_lock(pthread_mutex_t * mutex)
 					 * the mutex: 
 					 */
 					_thread_queue_enq(&(*mutex)->m_queue, _thread_run);
+					_thread_run->data.mutex = mutex;
 
-					/* Unlock the mutex structure: */
-					_SPINUNLOCK(&(*mutex)->lock);
-
-					/* Block signals: */
-					_thread_kern_sched_state(PS_MUTEX_WAIT, __FILE__, __LINE__);
+					/* Wait for the mutex: */
+					_thread_kern_sched_state_unlock(
+					    PS_MUTEX_WAIT, &(*mutex)->lock,
+					    __FILE__, __LINE__);
 
 					/* Lock the mutex again: */
 					_SPINLOCK(&(*mutex)->lock);
@@ -333,12 +357,15 @@ pthread_mutex_unlock(pthread_mutex_t * mutex)
 
 		/* Process according to mutex type: */
 		switch ((*mutex)->m_type) {
-		/* Fast mutexes do not check for any error conditions: */
-		case MUTEX_TYPE_FAST:
+		/* Default & normal mutexes do not really need to check for
+		   any error conditions: */
+		case PTHREAD_MUTEX_NORMAL:
+		case PTHREAD_MUTEX_DEFAULT:
+		case PTHREAD_MUTEX_ERRORCHECK:
 			/* Check if the running thread is not the owner of the mutex: */
 			if ((*mutex)->m_owner != _thread_run) {
-				/* Return an invalid argument error: */
-				ret = EINVAL;
+				/* This thread doesn't have permission: */
+				ret = EPERM;
 			}
 			/*
 			 * Get the next thread from the queue of threads waiting on
@@ -351,24 +378,26 @@ pthread_mutex_unlock(pthread_mutex_t * mutex)
 			break;
 
 		/* Counting mutex: */
-		case MUTEX_TYPE_COUNTING_FAST:
+		case PTHREAD_MUTEX_RECURSIVE:
 			/* Check if the running thread is not the owner of the mutex: */
 			if ((*mutex)->m_owner != _thread_run) {
 				/* Return an invalid argument error: */
 				ret = EINVAL;
 			}
 			/* Check if there are still counts: */
-			else if ((*mutex)->m_data.m_count) {
+			else if ((*mutex)->m_data.m_count > 1) {
 				/* Decrement the count: */
 				(*mutex)->m_data.m_count--;
-			}
-			/*
-			 * Get the next thread from the queue of threads waiting on
-			 * the mutex: 
-			 */
-			else if (((*mutex)->m_owner = _thread_queue_deq(&(*mutex)->m_queue)) != NULL) {
-				/* Allow the new owner of the mutex to run: */
-				PTHREAD_NEW_STATE((*mutex)->m_owner,PS_RUNNING);
+			} else {
+				(*mutex)->m_data.m_count = 0;
+				/*
+				 * Get the next thread from the queue of threads waiting on
+				 * the mutex: 
+				 */
+				if (((*mutex)->m_owner = _thread_queue_deq(&(*mutex)->m_queue)) != NULL) {
+					/* Allow the new owner of the mutex to run: */
+					PTHREAD_NEW_STATE((*mutex)->m_owner,PS_RUNNING);
+				}
 			}
 			break;
 

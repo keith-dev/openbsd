@@ -1,4 +1,4 @@
-$OpenBSD: NOTES,v 1.4 1998/06/25 19:01:37 millert Exp $
+$OpenBSD: NOTES,v 1.6 1999/01/08 20:24:57 millert Exp $
 
 General features of at&t ksh88 that are not (yet) in pdksh:
     - exported aliases and functions (not in ksh93).
@@ -33,8 +33,15 @@ Known bugs (see also BUG-REPORTS and PROJECTS files):
 	  does not.  pdksh exits for neither.  Don't think POSIX requires
 	  an exit, but not sure.
 	- `echo foo | read bar; echo $bar' prints foo in at&t ksh, nothing
-	  in pdksh (ie, the read is done in a seperate process in pdksh).
+	  in pdksh (ie, the read is done in a separate process in pdksh).
     Misc:
+
+Known problems not caused by ksh:
+    - after stoping a job, emacs/vi is not re-entered.  Hitting return
+      prints the prompt and everything is fine again.  Problem (often
+      involving a pager like less) is related to order of process
+      scheduling (shell runs before `stop'ed (sub) processes have had a chance
+      to clean up the screen/terminal).
 
 Known differences between pdksh & at&t ksh (that may change)
     - vi:
@@ -137,7 +144,7 @@ Known differences between pdksh & at&t ksh (that are not likely to change)
       and tracked aliases and normal aliases live in the same name space
       (eg, "alias" will list both tracked and normal aliases).
       in pdksh, -t does not imply -x (since -x doesn't do anything yet), and
-      tracked/normal aliases live in seperate name spaces.
+      tracked/normal aliases live in separate name spaces.
       in at&t ksh, alias accepts + options (eg, +x, +t) - pdksh does not.
       in pdksh, alias has a -d option to allow examination/changing of
       cached ~ entries, also unalias has -d and -t options (unalias -d
@@ -187,6 +194,17 @@ Known differences between pdksh & at&t ksh (that are not likely to change)
     - co-processes: if ksh93, the write portion of the co-process output is
       closed when the most recently started co-process exits. pdksh closes
       it when all the co-processes using it have exited.
+    - pdksh accepts empty command lists for while and for statements, while
+      at&t ksh (and sh) don't.  Eg., pdksh likes
+	while false ; do done
+      but ksh88 doesn't like it.
+    - pdksh bumps RANDOM in parent after a fork, at&t ksh bumps it in both
+      parent and child:
+	RANDOM=1
+	echo child: `echo $RANDOM`
+	echo parent: $RANDOM
+      will produce "child: 16838 parent: 5758" in pdksh, while at&t ksh
+      will produce "child: 5758 parent: 5758".
 
 Oddities in ksh (pd & at&t):
     - array references inside (())/$(()) are strange:

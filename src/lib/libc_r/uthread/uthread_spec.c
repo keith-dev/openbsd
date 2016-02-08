@@ -29,6 +29,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
+ * $OpenBSD: uthread_spec.c,v 1.4 1999/01/06 05:29:29 d Exp $
  */
 #include <signal.h>
 #include <stdlib.h>
@@ -95,10 +96,10 @@ _thread_cleanupspecific(void)
 	for (itr = 0; itr < PTHREAD_DESTRUCTOR_ITERATIONS; itr++) {
 		for (key = 0; key < PTHREAD_KEYS_MAX; key++) {
 			if (_thread_run->specific_data_count) {
-				destructor = data = NULL;
-
 				/* Lock the key table entry: */
 				_SPINLOCK(&key_table[key].lock);
+				destructor = data = NULL;
+
 				if (key_table[key].allocated) {
 					if (_thread_run->specific_data[key]) {
 						data = (void *) _thread_run->specific_data[key];
@@ -119,10 +120,12 @@ _thread_cleanupspecific(void)
 					destructor(data);
 			} else {
 				free(_thread_run->specific_data);
+				_thread_run->specific_data = NULL;
 				return;
 			}
 		}
 	}
+	_thread_run->specific_data = NULL;
 	free(_thread_run->specific_data);
 }
 

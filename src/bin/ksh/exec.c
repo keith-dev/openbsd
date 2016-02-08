@@ -1,4 +1,4 @@
-/*	$OpenBSD: exec.c,v 1.12 1998/06/27 15:23:29 deraadt Exp $	*/
+/*	$OpenBSD: exec.c,v 1.16 1999/01/19 20:41:52 millert Exp $	*/
 
 /*
  * execute command tree
@@ -104,7 +104,7 @@ execute(t, flags)
  
 	if (t->type == TCOM) {
 		/* Clear subst_exstat before argument expansion.  Used by
-		 * null commands (see comexec()) and by c_set().
+		 * null commands (see comexec() and c_eval()) and by c_set().
 		 */
 		subst_exstat = 0;
 
@@ -326,6 +326,9 @@ execute(t, flags)
 				vq = global(t->str);
 				if (vq->flag & RDONLY)
 					errorf("%s is read only", t->str);
+				/* SETSTR: fail (put readonly check in setstr,
+				 * controlled by a flag?)
+				 */
 				setstr(vq, *ap++);
 				rv = execute(t->left, flags & XERROK);
 			}
@@ -343,6 +346,9 @@ execute(t, flags)
 				vq = global(t->str);
 				if (vq->flag & RDONLY)
 					errorf("%s is read only", t->str);
+				/* SETSTR: fail (put readonly check in setstr,
+				 * controlled by a flag?)
+				 */
 				setstr(vq, cp);
 				rv = execute(t->left, flags & XERROK);
 			}
@@ -418,7 +424,8 @@ execute(t, flags)
 #endif
 		restoresigs();
 		cleanup_proc_env();
-		ksh_execve(t->str, t->args, ap);
+		/* XINTACT bit is for OS2 */
+		ksh_execve(t->str, t->args, ap, (flags & XINTACT) ? 1 : 0);
 		if (errno == ENOEXEC)
 			scriptexec(t, ap);
 		else
@@ -429,7 +436,7 @@ execute(t, flags)
 
 	quitenv();		/* restores IO */
 	if ((flags&XEXEC))
-		exit(rv);	/* exit child */
+		unwind(LEXIT);	/* exit child */
 	if (rv != 0 && !(flags & XERROK)) {
 		if (Flag(FERREXIT))
 			unwind(LERROR);
@@ -471,7 +478,8 @@ comexec(t, tp, ap, flags)
 	if (!Flag(FSH) && Flag(FTALKING) && *(lastp = ap)) {
 		while (*++lastp)
 			;
-		setstr(typeset("_", LOCAL, 0, 0, 0), *--lastp);
+		/* SETSTR: can't fail */
+		setstr(typeset("_", LOCAL, 0, INTEGER, 0), *--lastp);
 	}
 #endif /* KSH */
 
@@ -716,6 +724,7 @@ comexec(t, tp, ap, flags)
 #ifdef KSH
 		if (!Flag(FSH)) {
 			/* set $_ to program's full path */
+			/* SETSTR: can't fail */
 			setstr(typeset("_", LOCAL|EXPORT, 0, 0, 0), tp->val.s);
 		}
 #endif /* KSH */
@@ -816,8 +825,14 @@ scriptexec(tp, ap)
 					if (a1)
 						*tp->args-- = a1;
 # ifdef OS2
-					if (a0 != a2 && search_access(a0, X_OK, (int *) 0))
-						a0 = a2;
+					if (a0 != a2) {
+						char *tmp_a0 = str_nsave(a0,
+							strlen(a0) + 5, ATEMP);
+						if (search_access(tmp_a0, X_OK,
+								(int *) 0))
+							a0 = a2;
+						afree(tmp_a0, ATEMP);
+					}
 # endif /* OS2 */
 					shell = a0;
 				}
@@ -846,7 +861,7 @@ scriptexec(tp, ap)
 #endif	/* SHARPBANG */
 	*tp->args = shell;
 
-	ksh_execve(tp->args[0], tp->args, ap);
+	ksh_execve(tp->args[0], tp->args, ap, 0);
 
 	/* report both the program that was run and the bogus shell */
 	errorf("%s: %s: %s", tp->str, shell, strerror(errno));
@@ -1083,7 +1098,7 @@ flushcom(all)
 				tp->flag &= ~(ALLOC|ISSET);
 				afree(tp->val.s, APERM);
 			}
-			tp->flag = ~ISSET;
+			tp->flag &= ~ISSET;
 		}
 }
 
@@ -1103,9 +1118,10 @@ search_access(path, mode, errnop)
 	ret = eaccess(path, mode);
 	if (ret < 0)
 		err = errno; /* File exists, but we can't access it */
-	else if (mode == X_OK && (!S_ISREG(statb.st_mode)
-		/* This 'cause access() says root can execute everything */
-		   || !(statb.st_mode & (S_IXUSR|S_IXGRP|S_IXOTH))))
+	else if (mode == X_OK
+		 && (!S_ISREG(statb.st_mode)
+		     /* This 'cause access() says root can execute everything */
+		     || !(statb.st_mode & (S_IXUSR|S_IXGRP|S_IXOTH))))
 	{
 		ret = -1;
 		err = S_ISDIR(statb.st_mode) ? EISDIR : EACCES;

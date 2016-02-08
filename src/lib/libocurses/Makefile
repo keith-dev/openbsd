@@ -1,4 +1,4 @@
-#	$OpenBSD: Makefile,v 1.4 1998/07/23 21:10:24 millert Exp $
+#	$OpenBSD: Makefile,v 1.7 1998/12/02 15:45:43 espie Exp $
 
 CFLAGS+=#-DTFILE=\"/dev/ttyp0\"
 CFLAGS+=-D_CURSES_PRIVATE -I${.CURDIR}
@@ -11,7 +11,7 @@ SRCS=	addbytes.c addch.c addnstr.c box.c clear.c clrtobot.c clrtoeol.c \
 	overwrite.c printw.c putchar.c refresh.c scanw.c scroll.c setterm.c \
 	standout.c toucholap.c touchwin.c tscroll.c tstp.c tty.c unctrl.c
 SRCS+=	termcap.c tgoto.c tputs.c
-MAN=	ocurses.3
+MAN=	ocurses.3 otermcap.3
 
 .if make(install)
 SUBDIR+= PSD.doc
@@ -22,11 +22,12 @@ includes:
 	    ${INSTALL} ${INSTALL_COPY} -o ${BINOWN} -g ${BINGRP} -m 444 \
 	    curses.h ${DESTDIR}/usr/include/ocurses.h
 
-# Link libtermcap to libocurses so we don't break people's Makefiles
+# Link libotermcap to libocurses for programs that need full compatibility
+# with the old termcap behavior
 afterinstall:
 	-cd ${DESTDIR}/usr/lib; \
 	for i in ${_LIBS}; do \
-	    ln -f $$i `echo $$i | sed 's/ocurses/termcap/'`; \
+	    ln -f $$i `echo $$i | sed 's/ocurses/otermcap/'`; \
 	done
 
 .include <bsd.lib.mk>

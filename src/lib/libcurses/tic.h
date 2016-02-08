@@ -1,4 +1,4 @@
-/*	$OpenBSD: tic.h,v 1.1 1998/07/23 21:20:06 millert Exp $	*/
+/*	$OpenBSD: tic.h,v 1.5 1999/03/12 04:36:02 millert Exp $	*/
 
 /****************************************************************************
  * Copyright (c) 1998 Free Software Foundation, Inc.                        *
@@ -100,7 +100,7 @@ extern "C" {
 #define PRIVATE_INFO	"%s/.terminfo"	/* plug getenv("HOME") into %s */
 
 #ifdef TRACE
-#define DEBUG(n, a)	if (_nc_tracing & (1 << (n - 1))) _tracef a 
+#define DEBUG(n, a)	if (_nc_tracing & (1 << (n - 1))) _tracef a
 #else
 #define DEBUG(n, a)	/*nothing*/
 #endif
@@ -141,6 +141,27 @@ struct token
 extern	struct token	_nc_curr_token;
 
 	/*
+	 * List of keynames with their corresponding code.
+	 */
+struct kn {
+	const char *name;
+	int code;
+};
+
+extern const struct kn _nc_key_names[];
+
+	/*
+	 * Offsets to string capabilities, with the corresponding functionkey
+	 * codes.
+	 */
+struct tinfo_fkeys {
+	unsigned offset;
+	chtype code;
+	};
+
+extern struct tinfo_fkeys _nc_tinfo_fkeys[];
+
+	/*
 	 * The file comp_captab.c contains an array of these structures, one
 	 * per possible capability.  These are indexed by a hash table array of
 	 * pointers to the same structures for use by the parser.
@@ -168,6 +189,7 @@ extern const struct alias _nc_capalias_table[];
 extern const struct alias _nc_infoalias_table[];
 
 extern const struct name_table_entry	*_nc_get_table(bool);
+extern const struct name_table_entry	* const *_nc_get_hash_table(bool);
 
 #define NOTFOUND	((struct name_table_entry *) 0)
 
@@ -226,7 +248,7 @@ extern void _nc_warning(const char *const,...) GCC_PRINTFLIKE(1,2);
 extern bool _nc_suppress_warnings;
 
 /* comp_expand.c: expand string into readable form */
-extern char *_nc_tic_expand(const char *, bool);
+extern char *_nc_tic_expand(const char *, bool, int);
 
 /* comp_scan.c: decode string from readable form */
 extern char _nc_trans_string(char *);

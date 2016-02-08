@@ -1,4 +1,4 @@
-.\"	$OpenBSD: slattach.8,v 1.4 1998/09/17 04:15:02 aaron Exp $
+.\"	$OpenBSD: slattach.8,v 1.7 1998/12/15 01:20:45 aaron Exp $
 .\"	$NetBSD: slattach.8,v 1.12 1995/03/18 15:01:12 cgd Exp $
 .\"
 .\" Copyright (c) 1986, 1991, 1993
@@ -46,7 +46,7 @@
 .Op Fl s Ar baudrate
 .Ar ttyname
 .Sh DESCRIPTION
-.Nm slattach
+.Nm
 is used to assign a tty line to a network interface,
 and to define the network source and destination addresses.
 The following operands are supported by
@@ -64,9 +64,9 @@ default of 9600 is used.
 Specifies the name of the tty device.
 .Ar ttyname
 should be a string of the form
-.Ql ttyXX ,
+.Dq ttyXX ,
 or
-.Ql /dev/ttyXX .
+.Dq /dev/ttyXX .
 .El
 .Pp
 In addition, the following flags to
@@ -93,7 +93,7 @@ Only the super-user may attach a network interface.
 To detach the interface, use
 .Dq Li ifconfig interface-name down
 after killing off the
-.Nm slattach
+.Nm
 process.
 .Ar interface-name
 is the name that is shown by

@@ -1,4 +1,4 @@
-#	$OpenBSD: Makefile,v 1.8 1998/07/25 21:30:49 millert Exp $
+#	$OpenBSD: Makefile,v 1.10 1999/03/06 20:27:42 millert Exp $
 
 PROG=	tput
 CFLAGS+= -D_USE_OLD_CURSES_

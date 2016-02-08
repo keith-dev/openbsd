@@ -29,16 +29,16 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- * $Id: uthread_spinlock.c,v 1.1 1998/08/27 09:01:25 d Exp $
- * $OpenBSD: uthread_spinlock.c,v 1.1 1998/08/27 09:01:25 d Exp $
+ * $FreeBSD: uthread_spinlock.c,v 1.4 1998/06/09 23:13:10 jb Exp $
+ * $OpenBSD: uthread_spinlock.c,v 1.4 1999/01/10 23:13:24 d Exp $
  *
  */
 
 #include <stdio.h>
 #include <sched.h>
 #include <unistd.h>
-#include <string.h>
 #include <pthread.h>
+#include <string.h>
 #include "pthread_private.h"
 
 extern char *__progname;
@@ -61,12 +61,12 @@ _spinlock(spinlock_t *lck)
 		sched_yield();
 
 		/* Check if already locked by the running thread: */
-		if (lck->lock_owner == (long) _thread_run)
+		if (lck->lock_owner == _thread_run)
 			return;
 	}
 
 	/* The running thread now owns the lock: */
-	lck->lock_owner = (long) _thread_run;
+	lck->lock_owner = _thread_run;
 }
 
 /*
@@ -80,7 +80,7 @@ _spinlock(spinlock_t *lck)
  * returning.
  */
 void
-_spinlock_debug(spinlock_t *lck, char *fname, int lineno)
+_spinlock_debug(spinlock_t *lck, const char *fname, int lineno)
 {
 	/*
 	 * Try to grab the lock and loop if another thread grabs
@@ -91,7 +91,7 @@ _spinlock_debug(spinlock_t *lck, char *fname, int lineno)
 		sched_yield();
 
 		/* Check if already locked by the running thread: */
-		if (lck->lock_owner == (long) _thread_run) {
+		if (lck->lock_owner == _thread_run) {
 			char str[256];
 			snprintf(str, sizeof(str), "%s - Warning: Thread %p attempted to lock %p from %s (%d) which it had already locked in %s (%d)\n", __progname, _thread_run, lck, fname, lineno, lck->fname, lck->lineno);
 			_thread_sys_write(2,str,strlen(str));
@@ -103,7 +103,7 @@ _spinlock_debug(spinlock_t *lck, char *fname, int lineno)
 	}
 
 	/* The running thread now owns the lock: */
-	lck->lock_owner = (long) _thread_run;
+	lck->lock_owner = _thread_run;
 	lck->fname = fname;
 	lck->lineno = lineno;
 }

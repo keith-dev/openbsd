@@ -1,4 +1,4 @@
-#	$OpenBSD: install.md,v 1.8 1998/09/11 22:55:44 millert Exp $
+#	$OpenBSD: install.md,v 1.10 1999/04/01 21:30:24 deraadt Exp $
 #
 #
 # Copyright rc) 1996 The NetBSD Foundation, Inc.
@@ -346,13 +346,11 @@ __md_prep_disklabel_1
 	disklabel ${_disk} >/tmp/label.$$
 	disklabel -r -R ${_disk} /tmp/label.$$
 	rm -f /tmp/label.$$
-	disklabel -E ${_disk}
+	disklabel -f /tmp/fstab.${_disk} -E ${_disk}
 }
 
 md_copy_kernel() {
-	#echo -n "Copying kernel..."
-	#cp -p /bsd /mnt/bsd
-	#echo "done."
+	check_kernel
 }
 
 md_welcome_banner() {

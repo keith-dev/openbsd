@@ -17,11 +17,11 @@
  * IMPLIED WARRANTIES, INCLUDING, WITHOUT LIMITATION, THE IMPLIED
  * WARRANTIES OF MERCHANTIBILITY AND FITNESS FOR A PARTICULAR PURPOSE.
  *
- * $Id: hdlc.c,v 1.1 1998/08/31 00:22:20 brian Exp $
+ * $Id: hdlc.c,v 1.4 1999/03/29 08:20:32 brian Exp $
  *
  *	TODO:
  */
-#include <sys/types.h>
+#include <sys/param.h>
 #include <netinet/in.h>
 #include <netinet/in_systm.h>
 #include <netinet/ip.h>
@@ -48,12 +48,12 @@
 #include "vjcomp.h"
 #include "auth.h"
 #include "pap.h"
-#include "chap.h"
 #include "lcp.h"
 #include "async.h"
 #include "ccp.h"
 #include "link.h"
 #include "descriptor.h"
+#include "chap.h"
 #include "physical.h"
 #include "prompt.h"
 #include "chat.h"
@@ -61,6 +61,9 @@
 #include "cbcp.h"
 #include "datalink.h"
 #include "filter.h"
+#ifndef NORADIUS
+#include "radius.h"
+#endif
 #include "bundle.h"
 
 static u_int16_t const fcstab[256] = {
@@ -171,7 +174,7 @@ hdlc_Output(struct link *l, int pri, u_short proto, struct mbuf *bp)
     mhp->cnt += 2;
   }
 
-  mhp->next = bp;
+  mhp->next = bp = mbuf_Contiguous(bp);
 
   if (!p) {
     /*
@@ -185,11 +188,7 @@ hdlc_Output(struct link *l, int pri, u_short proto, struct mbuf *bp)
     return;
   }
 
-  /* Tack mfcs onto the end, then set bp back to the start of the data */
-  while (bp->next != NULL)
-    bp = bp->next;
-  bp->next = mfcs;
-  bp = mhp->next;
+  bp->next = mfcs;		/* Tack mfcs onto the end */
 
   p->hdlc.lqm.OutOctets += mbuf_Length(mhp) + 1;
   p->hdlc.lqm.OutPackets++;
@@ -390,7 +389,7 @@ hdlc_DecodePacket(struct bundle *bundle, u_short proto, struct mbuf * bp,
     break;
   case PROTO_PAP:
     if (p)
-      pap_Input(bundle, bp, p);
+      pap_Input(p, bp);
     else {
       log_Printf(LogERROR, "DecodePacket: PAP: Not a physical link !\n");
       mbuf_Free(bp);
@@ -415,7 +414,7 @@ hdlc_DecodePacket(struct bundle *bundle, u_short proto, struct mbuf * bp,
     break;
   case PROTO_CHAP:
     if (p)
-      chap_Input(bundle, bp, p);
+      chap_Input(p, bp);
     else {
       log_Printf(LogERROR, "DecodePacket: CHAP: Not a physical link !\n");
       mbuf_Free(bp);

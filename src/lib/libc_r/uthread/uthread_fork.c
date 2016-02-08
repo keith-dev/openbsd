@@ -29,12 +29,13 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
+ * $OpenBSD: uthread_fork.c,v 1.4 1999/01/17 23:46:26 d Exp $
  */
 #include <errno.h>
 #include <string.h>
 #include <unistd.h>
-#include <stdlib.h>
 #include <fcntl.h>
+#include <stdlib.h>
 #ifdef _THREAD_SAFE
 #include <pthread.h>
 #include "pthread_private.h"
@@ -43,10 +44,12 @@ pid_t
 fork(void)
 {
 	int             flags;
-	int             status;
 	pid_t           ret;
 	pthread_t	pthread;
 	pthread_t	pthread_next;
+
+	/* Call atfork handlers: */
+	_thread_atfork(PTHREAD_ATFORK_PREPARE);
 
 	/* Lock the thread list: */
 	_lock_thread_list();
@@ -54,6 +57,8 @@ fork(void)
 	/* Fork a new process: */
 	if ((ret = _thread_sys_fork()) != 0) {
 		/* Parent process or error. Nothing to do here. */
+		if (ret > 0)
+			_thread_atfork(PTHREAD_ATFORK_PARENT);
 	} else {
 		/* Close the pthread kernel pipe: */
 		_thread_sys_close(_thread_kern_pipe[0]);
@@ -105,21 +110,23 @@ fork(void)
 					pthread->nxt = NULL;
 				} else {
 					if (pthread->attr.stackaddr_attr ==
-					    NULL && pthread->stack != NULL) {
+					    NULL && pthread->stack != NULL)
 						/*
 						 * Free the stack of the
 						 * dead thread:
 						 */
 						free(pthread->stack);
-					}
+
 					if (pthread->specific_data != NULL)
 						free(pthread->specific_data);
+
 					free(pthread);
 				}
 
 				/* Point to the next thread: */
 				pthread = pthread_next;
 			}
+			_thread_atfork(PTHREAD_ATFORK_CHILD);
 		}
 	}
 

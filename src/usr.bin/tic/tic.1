@@ -1,7 +1,7 @@
-.\" $OpenBSD: tic.1,v 1.2 1998/07/24 19:52:53 millert Exp $
+.\" $OpenBSD: tic.1,v 1.6 1999/03/11 21:08:09 millert Exp $
 .\"
 .\"***************************************************************************
-.\" Copyright (c) 1998 Free Software Foundation, Inc.                        *
+.\" Copyright (c) 1998,1999 Free Software Foundation, Inc.                   *
 .\"                                                                          *
 .\" Permission is hereby granted, free of charge, to any person obtaining a  *
 .\" copy of this software and associated documentation files (the            *
@@ -28,7 +28,7 @@
 .\" authorization.                                                           *
 .\"***************************************************************************
 .\"
-.\" $From: tic.1m,v 1.21 1998/05/17 00:23:46 tom Exp $
+.\" $From: tic.1m,v 1.25 1999/03/07 02:07:06 tom Exp $
 .TH tic 1 ""
 .ds n 5
 .ds d /usr/share/terminfo
@@ -36,7 +36,7 @@
 \fBtic\fR - the \fIterminfo\fR entry-description compiler
 .SH SYNOPSIS
 \fBtic\fR
-[\fB-\
+[\fB\-\
 1\
 C\
 I\
@@ -106,6 +106,10 @@ names, but also translates terminfo strings to termcap format.  Capabilities
 that are not translatable are left in the entry under their terminfo names
 but commented out with two preceding dots.
 .TP
+\fB-G\fR
+Display constant literals in decimal form
+rather than their character equivalents.
+.TP
 \fB-I\fR
 Force source translation to terminfo format.
 .TP
@@ -157,6 +161,10 @@ contains a '/'.
 \fB-f\fR
 Display complex terminfo strings which contain if/then/else/endif expressions
 indented for readability.
+.TP
+\fB-g\fR
+Display constant character literals in quoted form
+rather than their decimal equivalents.
 .TP
 \fB-s\fR
 Summarize the compile by showing the directory into which entries
@@ -240,7 +248,20 @@ compiled entries.
 The error messages from this \fBtic\fR have the same format as GNU C
 error messages, and can be parsed by GNU Emacs's compile facility.
 
-The -o, -I, -C, -N, -R, -e, -f, -T, -r and -s options
+The
+\fB-o\fR,
+\fB-G\fR,
+\fB-I\fR,
+\fB-C\fR,
+\fB-N\fR,
+\fB-R\fR,
+\fB-e\fR,
+\fB-f\fR,
+\fB-g\fR,
+\fB-T\fR,
+\fB-r\fR and
+\fB-s\fR
+options
 are not supported under SVr4.
 The SVr4 -c mode does not report bad use links.
 
@@ -251,7 +272,7 @@ System V does not compile entries to or read entries from your
 \fB\*d/?/*\fR
 Compiled terminal description database.
 .SH SEE ALSO
-\fBcaptoinfo\fR(1), \fBcurses\fR(3), \fBterminfo\fR(\*n).
+\fBinfocmp\fR(1), \fBcaptoinfo\fR(1), \fBcurses\fR(3), \fBterminfo\fR(\*n).
 .\"#
 .\"# The following sets edit modes for GNU EMACS
 .\"# Local Variables:

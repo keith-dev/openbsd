@@ -15,7 +15,7 @@
  * IMPLIED WARRANTIES, INCLUDING, WITHOUT LIMITATION, THE IMPLIED
  * WARRANTIES OF MERCHANTIBILITY AND FITNESS FOR A PARTICULAR PURPOSE.
  *
- * $Id: ipcp.h,v 1.1 1998/08/31 00:22:22 brian Exp $
+ * $Id: ipcp.h,v 1.5 1999/03/03 23:01:11 brian Exp $
  *
  *	TODO:
  */
@@ -53,9 +53,12 @@ struct ipcp {
     } vj;
 
     struct in_range  my_range;		/* MYADDR spec */
-    struct in_addr   netmask;		/* netmask (unused by most OSs) */
+    struct in_addr   netmask;		/* Iface netmask (unused by most OSs) */
     struct in_range  peer_range;	/* HISADDR spec */
     struct iplist    peer_list;		/* Ranges of HISADDR values */
+
+    u_long sendpipe;			/* route sendpipe size */
+    u_long recvpipe;			/* route recvpipe size */
 
     struct in_addr   TriggerAddress;	/* Address to suggest in REQ */
     unsigned HaveTriggerAddress : 1;	/* Trigger address specified */
@@ -66,7 +69,7 @@ struct ipcp {
       struct in_addr nbns[2];		/* NetBIOS NS addresses offered */
     } ns;
 
-    u_int fsmretry;			/* FSM retry frequency */
+    struct fsm_retry fsm;	/* How often/frequently to resend requests */
   } cfg;
 
   struct {
@@ -81,14 +84,13 @@ struct ipcp {
   struct in_addr peer_ip;		/* IP address he's willing to use */
   u_int32_t peer_compproto;		/* VJ params he's willing to use */
 
+  struct in_addr ifmask;		/* Interface netmask */
+
   struct in_addr my_ip;			/* IP address I'm willing to use */
   u_int32_t my_compproto;		/* VJ params I'm willing to use */
 
   u_int32_t peer_reject;		/* Request codes rejected by peer */
   u_int32_t my_reject;			/* Request codes I have rejected */
-
-  struct in_addr my_ifip;		/* My configured interface address */
-  struct in_addr peer_ifip;		/* My congigured destination address */
 
   struct pppThroughput throughput;	/* throughput statistics */
   struct mqueue Queue[PRI_FAST + 1];	/* Output packet queues */
@@ -102,14 +104,16 @@ struct cmdargs;
 
 extern void ipcp_Init(struct ipcp *, struct bundle *, struct link *,
                       const struct fsm_parent *);
-extern void ipcp_Setup(struct ipcp *);
+extern void ipcp_Setup(struct ipcp *, u_int32_t);
 extern void ipcp_SetLink(struct ipcp *, struct link *);
 
 extern int  ipcp_Show(struct cmdargs const *);
 extern void ipcp_Input(struct ipcp *, struct bundle *, struct mbuf *);
 extern void ipcp_AddInOctets(struct ipcp *, int);
 extern void ipcp_AddOutOctets(struct ipcp *, int);
+extern int  ipcp_UseHisIPaddr(struct bundle *, struct in_addr);
 extern int  ipcp_UseHisaddr(struct bundle *, const char *, int);
 extern int  ipcp_vjset(struct cmdargs const *);
 extern void ipcp_CleanInterface(struct ipcp *);
 extern int  ipcp_InterfaceUp(struct ipcp *);
+extern struct in_addr addr2mask(struct in_addr);

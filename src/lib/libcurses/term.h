@@ -1,4 +1,4 @@
-/*	$OpenBSD: term.h,v 1.3 1998/09/13 19:16:30 millert Exp $	*/
+/*	$OpenBSD: term.h,v 1.6 1999/03/02 06:23:27 millert Exp $	*/
 
 /****************************************************************************
  * Copyright (c) 1998 Free Software Foundation, Inc.                        *
@@ -33,28 +33,29 @@
 /*    and: Eric S. Raymond <esr@snark.thyrsus.com>                          */
 /****************************************************************************/
 
-/* $From: MKterm.h.awk.in,v 1.25 1998/09/05 22:19:41 tom Exp $ */
+/* $From: MKterm.h.awk.in,v 1.35 1999/02/24 01:04:55 tom Exp $ */
 
 /*
 **	term.h -- Definition of struct term
 */
 
-#ifndef _TERM_H
-#define _TERM_H
+#ifndef _NCU_TERM_H
+#define _NCU_TERM_H 1
 
 #ifdef _USE_OLD_CURSES_
-#error	Cannot mix new term.h with old curses.h
+#error Cannot mix new term.h with old curses.h
 #endif
 
 #undef  NCURSES_VERSION
-#define NCURSES_VERSION "4.2"
+#define NCURSES_VERSION "5.0"
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
 /* Make this file self-contained by providing defaults for the HAVE_TERMIO[S]_H
- * and BROKEN_LINKER definition (based on the system for which this was configured).
+ * and BROKEN_LINKER definition (based on the system for which this was
+ * configured).
  */
 
 #ifdef __OpenBSD__
@@ -67,52 +68,84 @@ extern "C" {
 
 #else
 
-#ifndef HAVE_TERMIOS_H
+#undef  HAVE_TERMIOS_H
 #define HAVE_TERMIOS_H 1
-#endif
 
-#ifndef HAVE_TERMIO_H
+#undef  HAVE_TERMIO_H
 #define HAVE_TERMIO_H 0
-#endif
 
-#ifndef HAVE_TCGETATTR
+#undef  HAVE_TCGETATTR
 #define HAVE_TCGETATTR 1
-#endif
 
-#ifndef BROKEN_LINKER
+#undef  BROKEN_LINKER
 #define BROKEN_LINKER 0
-#endif
 
-#ifndef NCURSES_CONST
+#undef  NCURSES_CONST
 #define NCURSES_CONST /*nothing*/
-#endif
+
+#undef  NCURSES_XNAMES
+#define NCURSES_XNAMES 0
+
+/* We will use these symbols to hide differences between
+ * termios/termio/sgttyb interfaces.
+ */
+#undef  TTY
+#undef  SET_TTY
+#undef  GET_TTY
 
 /* Assume Posix termio if we have the header and function */
 #if HAVE_TERMIOS_H && HAVE_TCGETATTR
-#ifndef TERMIOS
+
+#undef  TERMIOS
 #define TERMIOS 1
-#endif
+
 #include <termios.h>
 #define TTY struct termios
 
 #else /* !HAVE_TERMIOS_H */
 
 #if HAVE_TERMIO_H
-#ifndef TERMIOS
+
+#undef  TERMIOS
 #define TERMIOS 1
-#endif
+
 #include <termio.h>
 #define TTY struct termio
+
+/* Add definitions to make termio look like termios.
+ * But ifdef it, since there are some implementations
+ * that try to do this for us in a fake <termio.h>.
+ */
+#ifndef TCSANOW
 #define TCSANOW TCSETA
+#endif
+#ifndef TCSADRAIN
 #define TCSADRAIN TCSETAW
+#endif
+#ifndef TCSAFLUSH
 #define TCSAFLUSH TCSETAF
+#endif
+#ifndef tcsetattr
 #define tcsetattr(fd, cmd, arg) ioctl(fd, cmd, arg)
+#endif
+#ifndef tcgetattr
 #define tcgetattr(fd, arg) ioctl(fd, TCGETA, arg)
+#endif
+#ifndef cfgetospeed
 #define cfgetospeed(t) ((t)->c_cflag & CBAUD)
+#endif
+#ifndef TCIFLUSH 
 #define TCIFLUSH 0
+#endif
+#ifndef TCOFLUSH 
 #define TCOFLUSH 1
+#endif
+#ifndef TCIOFLUSH 
 #define TCIOFLUSH 2
+#endif
+#ifndef tcflush
 #define tcflush(fd, arg) ioctl(fd, TCFLSH, arg)
+#endif
 
 #else /* !HAVE_TERMIO_H */
 
@@ -197,7 +230,7 @@ extern "C" {
 #define dot_horz_spacing               CUR Numbers[18]
 #define max_micro_address              CUR Numbers[19]
 #define max_micro_jump                 CUR Numbers[20]
-#define micro_char_size                CUR Numbers[21]
+#define micro_col_size                 CUR Numbers[21]
 #define micro_line_size                CUR Numbers[22]
 #define number_of_pins                 CUR Numbers[23]
 #define output_res_char                CUR Numbers[24]
@@ -601,77 +634,93 @@ extern "C" {
 #define enter_right_hl_mode            CUR Strings[389]
 #define enter_top_hl_mode              CUR Strings[390]
 #define enter_vertical_hl_mode         CUR Strings[391]
+#define set_a_attributes               CUR Strings[392]
+#define set_pglen_inch                 CUR Strings[393]
 
 #define BOOLWRITE 37
 #define NUMWRITE  33
-#define STRWRITE  392
+#define STRWRITE  394
 
 /* older synonyms for some capabilities */
 #define beehive_glitch	no_esc_ctlc
 #define teleray_glitch	dest_tabs_magic_smso
-
-/* XSI synonyms */
-#define micro_col_size	micro_char_size
+#define micro_char_size micro_col_size
 
 #ifdef __INTERNAL_CAPS_VISIBLE
-#define termcap_init2                  CUR Strings[392]
-#define termcap_reset                  CUR Strings[393]
+#define termcap_init2                  CUR Strings[394]
+#define termcap_reset                  CUR Strings[395]
 #define magic_cookie_glitch_ul         CUR Numbers[33]
 #define backspaces_with_bs             CUR Booleans[37]
 #define crt_no_scrolling               CUR Booleans[38]
 #define no_correctly_working_cr        CUR Booleans[39]
 #define carriage_return_delay          CUR Numbers[34]
 #define new_line_delay                 CUR Numbers[35]
-#define linefeed_if_not_lf             CUR Strings[394]
-#define backspace_if_not_bs            CUR Strings[395]
+#define linefeed_if_not_lf             CUR Strings[396]
+#define backspace_if_not_bs            CUR Strings[397]
 #define gnu_has_meta_key               CUR Booleans[40]
 #define linefeed_is_newline            CUR Booleans[41]
 #define backspace_delay                CUR Numbers[36]
 #define horizontal_tab_delay           CUR Numbers[37]
 #define number_of_function_keys        CUR Numbers[38]
-#define other_non_function_keys        CUR Strings[396]
-#define arrow_key_map                  CUR Strings[397]
+#define other_non_function_keys        CUR Strings[398]
+#define arrow_key_map                  CUR Strings[399]
 #define has_hardware_tabs              CUR Booleans[42]
 #define return_does_clr_eol            CUR Booleans[43]
-#define acs_ulcorner                   CUR Strings[398]
-#define acs_llcorner                   CUR Strings[399]
-#define acs_urcorner                   CUR Strings[400]
-#define acs_lrcorner                   CUR Strings[401]
-#define acs_ltee                       CUR Strings[402]
-#define acs_rtee                       CUR Strings[403]
-#define acs_btee                       CUR Strings[404]
-#define acs_ttee                       CUR Strings[405]
-#define acs_hline                      CUR Strings[406]
-#define acs_vline                      CUR Strings[407]
-#define acs_plus                       CUR Strings[408]
-#define memory_lock                    CUR Strings[409]
-#define memory_unlock                  CUR Strings[410]
-#define box_chars_1                    CUR Strings[411]
+#define acs_ulcorner                   CUR Strings[400]
+#define acs_llcorner                   CUR Strings[401]
+#define acs_urcorner                   CUR Strings[402]
+#define acs_lrcorner                   CUR Strings[403]
+#define acs_ltee                       CUR Strings[404]
+#define acs_rtee                       CUR Strings[405]
+#define acs_btee                       CUR Strings[406]
+#define acs_ttee                       CUR Strings[407]
+#define acs_hline                      CUR Strings[408]
+#define acs_vline                      CUR Strings[409]
+#define acs_plus                       CUR Strings[410]
+#define memory_lock                    CUR Strings[411]
+#define memory_unlock                  CUR Strings[412]
+#define box_chars_1                    CUR Strings[413]
 #endif /* __INTERNAL_CAPS_VISIBLE */
 
 
+/*
+ * Predefined terminfo array sizes
+ */
 #define BOOLCOUNT 44
 #define NUMCOUNT  39
-#define STRCOUNT  412
+#define STRCOUNT  414
 
 typedef struct termtype {	/* in-core form of terminfo data */
     char  *term_names;		/* str_table offset of term names */
     char  *str_table;		/* pointer to string table */
-    char  Booleans[BOOLCOUNT];	/* array of values */
-    short Numbers[NUMCOUNT];	/* array of values */
-    char  *Strings[STRCOUNT];	/* array of string offsets */
+    char  *Booleans;		/* array of boolean values */
+    short *Numbers;		/* array of integer values */
+    char  **Strings;		/* array of string offsets */
+
+#if NCURSES_XNAMES
+    char  *ext_str_table;	/* pointer to extended string table */
+    char  **ext_Names;		/* corresponding names */
+
+    unsigned short num_Booleans;/* count total Booleans */
+    unsigned short num_Numbers;	/* count total Numbers */
+    unsigned short num_Strings;	/* count total Strings */
+
+    unsigned short ext_Booleans;/* count extensions to Booleans */
+    unsigned short ext_Numbers;	/* count extensions to Numbers */
+    unsigned short ext_Strings;	/* count extensions to Strings */
+#endif /* NCURSES_XNAMES */
+
 } TERMTYPE;
 
 typedef struct term {		/* describe an actual terminal */
     TERMTYPE	type;		/* terminal type description */
     short 	Filedes;	/* file description being written to */
-    TTY          Ottyb,		/* original state of the terminal */
-                 Nttyb;		/* current state of the terminal */
-    int          _baudrate;      /* used to compute padding */
+    TTY		Ottyb,		/* original state of the terminal */
+		Nttyb;		/* current state of the terminal */
+    int		_baudrate;	/* used to compute padding */
 } TERMINAL;
 
 extern TERMINAL	*cur_term;
-
 
 #if BROKEN_LINKER
 #define boolnames  _nc_boolnames()
@@ -709,8 +758,8 @@ extern NCURSES_CONST char *const strfnames[];
 #endif
 
 /* internals */
-extern int _nc_set_curterm(TTY *buf);
-extern int _nc_get_curterm(TTY *buf);
+extern int _nc_set_tty_mode(TTY *buf);
+extern int _nc_get_tty_mode(TTY *buf);
 extern int _nc_read_entry(const char * const, char * const, TERMTYPE *const);
 extern int _nc_read_file_entry(const char *const, TERMTYPE *);
 extern char *_nc_first_name(const char *const);
@@ -723,29 +772,31 @@ extern TERMINAL *set_curterm(TERMINAL *);
 extern int del_curterm(TERMINAL *);
 
 /* miscellaneous entry points */
-extern int restartterm(const char *, int, int *);
-extern int setupterm(const char *,int,int *);
-extern int tputs(const char *, int, int (*)(int));
+extern int restartterm(NCURSES_CONST char *, int, int *);
+extern int setupterm(NCURSES_CONST char *,int,int *);
 
 /* terminfo entry points, also declared in curses.h */
-#if !defined(__NCURSES_H) && !defined(_TERMCAP_H)
-extern char ttytype[];
+#if !defined(__NCURSES_H)
 extern char *tigetstr(NCURSES_CONST char *);
 extern char *tparm(NCURSES_CONST char *, ...);
+extern char ttytype[];
 extern int putp(const char *);
 extern int tigetflag(NCURSES_CONST char *);
 extern int tigetnum(NCURSES_CONST char *);
 #endif /* __NCURSES_H */
 
 /* termcap database emulation (XPG4 uses const only for 2nd param of tgetent) */
-extern char *tgetstr(const char *, char **);
+#if !defined(_NCU_TERMCAP_H)
+extern char *tgetstr(NCURSES_CONST char *, char **);
 extern char *tgoto(const char *, int, int);
 extern int tgetent(char *, const char *);
-extern int tgetflag(const char *);
-extern int tgetnum(const char *);
+extern int tgetflag(NCURSES_CONST char *);
+extern int tgetnum(NCURSES_CONST char *);
+extern int tputs(const char *, int, int (*)(int));
+#endif /* _NCU_TERMCAP_H */
 
 #ifdef __cplusplus
 }
 #endif
 
-#endif /* TERM_H */
+#endif /* _NCU_TERM_H */

@@ -29,6 +29,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
+ * $OpenBSD: uthread_create.c,v 1.8 1999/03/10 10:06:22 d Exp $
  */
 #include <errno.h>
 #include <stdlib.h>
@@ -38,15 +39,17 @@
 #include <sys/time.h>
 #ifdef _THREAD_SAFE
 #include <machine/reg.h>
+#include <pthread.h>
+#include "pthread_private.h"
 #include "thread_private.h"
 
 int
 pthread_create(pthread_t * thread, const pthread_attr_t * attr,
 	       void *(*start_routine) (void *), void *arg)
 {
-	int             i;
+	int		f_gc = 0;
 	int             ret = 0;
-	int             status;
+	pthread_t       gc_thread;
 	pthread_t       new_thread;
 	pthread_attr_t	pattr;
 	void           *stack;
@@ -88,6 +91,14 @@ pthread_create(pthread_t * thread, const pthread_attr_t * attr,
 			new_thread->stack = stack;
 			new_thread->start_routine = start_routine;
 			new_thread->arg = arg;
+#ifdef _THREAD_RUSAGE
+			timerclear(&new_thread->ru_utime);
+			timerclear(&new_thread->ru_stime);
+#endif
+			_SPINUNLOCK(&new_thread->lock);
+
+			new_thread->cancelstate = PTHREAD_CANCEL_ENABLE;
+			new_thread->canceltype = PTHREAD_CANCEL_DEFERRED;
 
 			/*
 			 * Write a magic value to the thread structure
@@ -105,7 +116,7 @@ pthread_create(pthread_t * thread, const pthread_attr_t * attr,
 			new_thread->sigmask = _thread_run->sigmask;
 
 			/* Initialise the jump buffer: */
-			setjmp(new_thread->saved_jmp_buf);
+			_thread_machdep_setjmp(new_thread->saved_jmp_buf);
 
 			/*
 			 * Set up new stack frame so that it looks like it
@@ -149,6 +160,12 @@ pthread_create(pthread_t * thread, const pthread_attr_t * attr,
 			/* Lock the thread list: */
 			_lock_thread_list();
 
+			/*
+			 * Check if the garbage collector thread
+			 * needs to be started.
+			 */
+			f_gc = (_thread_link_list == _thread_initial);
+
 			/* Add the thread to the linked list of all threads: */
 			new_thread->nxt = _thread_link_list;
 			_thread_link_list = new_thread;
@@ -161,6 +178,14 @@ pthread_create(pthread_t * thread, const pthread_attr_t * attr,
 
 			/* Schedule the new user thread: */
 			_thread_kern_sched(NULL);
+
+			/*
+			 * Start a garbage collector thread
+			 * if necessary.
+			 */
+			if (f_gc && pthread_create(&gc_thread,NULL,
+				    _thread_gc,NULL) != 0)
+				PANIC("Can't create gc thread");
 		}
 	}
 
@@ -171,6 +196,9 @@ pthread_create(pthread_t * thread, const pthread_attr_t * attr,
 void
 _thread_start(void)
 {
+	/* We just left the scheduler via longjmp: */
+	_thread_kern_in_sched = 0;
+
 	/* Run the current thread's start routine with argument: */
 	pthread_exit(_thread_run->start_routine(_thread_run->arg));
 

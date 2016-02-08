@@ -8,7 +8,7 @@
  */
 
 #if defined(LIBC_SCCS) && !defined(lint)
-static char rcsid[] = "$OpenBSD: malloc.c,v 1.32 1998/08/06 16:26:32 millert Exp $";
+static char rcsid[] = "$OpenBSD: malloc.c,v 1.35 1999/02/03 03:58:05 d Exp $";
 #endif /* LIBC_SCCS and not lint */
 
 /*
@@ -87,15 +87,36 @@ static char rcsid[] = "$OpenBSD: malloc.c,v 1.32 1998/08/06 16:26:32 millert Exp
 #endif /* __OpenBSD__ */
 
 #ifdef _THREAD_SAFE
-#include <pthread.h>
-static pthread_mutex_t malloc_lock;
-#define THREAD_LOCK()		pthread_mutex_lock(&malloc_lock)
-#define THREAD_UNLOCK()		pthread_mutex_unlock(&malloc_lock)
-#define THREAD_LOCK_INIT()	pthread_mutex_init(&malloc_lock, 0);
+# include "thread_private.h"
+# if 0
+   /* kernel threads */
+#  include <pthread.h>
+   static pthread_mutex_t malloc_lock;
+#  define THREAD_LOCK()		pthread_mutex_lock(&malloc_lock)
+#  define THREAD_UNLOCK()	pthread_mutex_unlock(&malloc_lock)
+#  define THREAD_LOCK_INIT()	pthread_mutex_init(&malloc_lock, 0);
+# else
+   /* user threads */
+#  include "spinlock.h"
+   static spinlock_t malloc_lock = _SPINLOCK_INITIALIZER;
+#  define THREAD_LOCK()		if (__isthreaded) _SPINLOCK(&malloc_lock)
+#  define THREAD_UNLOCK()	if (__isthreaded) _SPINUNLOCK(&malloc_lock)
+#  define THREAD_LOCK_INIT()	
+   /*
+    * Malloc can't use the wrapped write() if it fails very early, so
+    * we use the unwrapped syscall _thread_sys_write()
+    */
+#  define write _thread_sys_write
+   ssize_t write __P((int, const void *, size_t));
+#   undef malloc
+#   undef realloc
+#   undef free
+# endif
 #else
-#define THREAD_LOCK()
-#define THREAD_UNLOCK()
-#define THREAD_LOCK_INIT()
+  /* no threads */
+# define THREAD_LOCK()
+# define THREAD_UNLOCK()
+# define THREAD_LOCK_INIT()
 #endif
 
 /*

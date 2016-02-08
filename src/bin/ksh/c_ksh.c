@@ -1,4 +1,4 @@
-/*	$OpenBSD: c_ksh.c,v 1.8 1998/06/25 19:01:44 millert Exp $	*/
+/*	$OpenBSD: c_ksh.c,v 1.11 1999/01/10 17:55:01 millert Exp $	*/
 
 /*
  * built-in Korn commands: c_*
@@ -125,9 +125,11 @@ c_cd(wp)
 	/* Clear out tracked aliases with relative paths */
 	flushcom(0);
 
-	/* Set OLDPWD */
+	/* Set OLDPWD (note: unsetting OLDPWD does not disable this
+	 * setting in at&t ksh)
+	 */
 	if (current_wd[0])
-		setstr(oldpwd_s, current_wd);
+		setstr(oldpwd_s, current_wd); /* SETSTR no die, don't set */
 
 	if (!ISABSPATH(Xstring(xs, xp))) {
 #ifdef OS2
@@ -148,7 +150,7 @@ c_cd(wp)
 	/* Set PWD */
 	if (pwd) {
 		set_current_wd(pwd);
-		setstr(pwd_s, pwd);
+		setstr(pwd_s, pwd);	/* SETSTR no die, leave unchanged */
 	} else {
 		set_current_wd(null);
 		pwd = Xstring(xs, xp);
@@ -601,7 +603,7 @@ c_typeset(wp)
 	 * to get a number that is used with -L, -R, -Z or -i (eg, -1R2
 	 * sets right justify in a field of 12).  This allows options
 	 * to be grouped in an order (eg, -Lu12), but disallows -i8 -L3 and
-	 * does not allow the number to be specified as a seperate argument
+	 * does not allow the number to be specified as a separate argument
 	 * Here, the number must follow the RLZi option, but is optional
 	 * (see the # kludge in ksh_getopt()).
 	 */
@@ -765,15 +767,37 @@ c_typeset(wp)
 	    }
 	} else {
 	    for (l = e->loc; l; l = l->next) {
-		for (p = tsort(&l->vars); (vp = *p++); )
+		for (p = tsort(&l->vars); (vp = *p++); ) {
+		    struct tbl *tvp;
+		    int any_set = 0;
+		    /*
+		     * See if the parameter is set (for arrays, if any
+		     * element is set).
+		     */
+		    for (tvp = vp; tvp; tvp = tvp->u.array)
+			if (tvp->flag & ISSET) {
+			    any_set = 1;
+			    break;
+			}
+		    /*
+		     * Check attributes - note that all array elements
+		     * have (should have?) the same attributes, so checking
+		     * the first is sufficient.
+		     *
+		     * Report an unset param only if the user has
+		     * explicitly given it some attribute (like export);
+		     * otherwise, after "echo $FOO", we would report FOO...
+		     */
+		    if (!any_set && !(vp->flag & USERATTRIB))
+			continue;
+		    if (flag && (vp->flag & flag) == 0)
+			continue;
 		    for (; vp; vp = vp->u.array) {
-			/* Report an unset param only if the user has
-			 * explicitly given it some attribute (like export);
-			 * otherwise, after "echo $FOO", we would report FOO...
+			/* Ignore array elements that aren't set unless there
+			 * are no set elements, in which case the first is
+			 * reported on
 			 */
-			if (!(vp->flag & ISSET) && !(vp->flag & USERATTRIB))
-			    continue;
-			if (flag && (vp->flag & flag) == 0)
+			if ((vp->flag&ARRAY) && any_set && !(vp->flag & ISSET))
 			    continue;
 			/* no arguments */
 			if (thing == 0 && flag == 0) {
@@ -802,15 +826,14 @@ c_typeset(wp)
 				shprintf("-u ");
 			    if ((vp->flag&INT_U)) 
 				shprintf("-U ");
+			    shprintf("%s\n", vp->name);
 			    if (vp->flag&ARRAY)
-				shprintf("%s[%d]\n", vp->name, vp->index);
-			    else
-				shprintf("%s\n", vp->name);
+				break;
 			} else {
 			    if (pflag)
 				shprintf("%s ",
 				    (flag & EXPORT) ?  "export" : "readonly");
-			    if (vp->flag&ARRAY)
+			    if ((vp->flag&ARRAY) && any_set)
 				shprintf("%s[%d]", vp->name, vp->index);
 			    else
 				shprintf("%s", vp->name);
@@ -827,7 +850,13 @@ c_typeset(wp)
 			    }
 			    shprintf(newline);
 			}
+			/* Only report first `element' of an array with
+			 * no set elements.
+			 */
+			if (!any_set)
+			    break;
 		    }
+		}
 	    }
 	}
 	return 0;
@@ -1071,13 +1100,14 @@ c_jobs(wp)
 			return 1;
 		}
 	wp += builtin_opt.optind;
-	if (!*wp)
+	if (!*wp) {
 		if (j_jobs((char *) 0, flag, nflag))
 			rv = 1;
-	else
+	} else {
 		for (; *wp; wp++)
 			if (j_jobs(*wp, flag, nflag))
 				rv = 1;
+	}
 	return rv;
 }
 
@@ -1150,7 +1180,7 @@ c_kill(wp)
 
 	/* assume old style options if -digits or -UPPERCASE */
 	if ((p = wp[1]) && *p == '-' && (digit(p[1]) || isupper(p[1]))) {
-		if (!(t = gettrap(p + 1))) {
+		if (!(t = gettrap(p + 1, TRUE))) {
 			bi_errorf("bad signal `%s'", p + 1);
 			return 1;
 		}
@@ -1164,7 +1194,7 @@ c_kill(wp)
 				lflag = 1;
 				break;
 			  case 's':
-				if (!(t = gettrap(builtin_opt.optarg))) {
+				if (!(t = gettrap(builtin_opt.optarg, TRUE))) {
 					bi_errorf("bad signal `%s'",
 						builtin_opt.optarg);
 					return 1;
@@ -1337,7 +1367,7 @@ c_getopts(wp)
 	if (user_opt.optarg == (char *) 0)
 		unset(global("OPTARG"), 0);
 	else
-		setstr(global("OPTARG"), user_opt.optarg);
+		setstr(global("OPTARG"), user_opt.optarg); /* SETSTR: no fail, cause exit code to be non-zero */
 
 	vq = global(var);
 	if (vq->flag & RDONLY) {
@@ -1346,7 +1376,7 @@ c_getopts(wp)
 	}
 	if (Flag(FEXPORT))
 		typeset(var, EXPORT, 0, 0, 0);
-	setstr(vq, buf);
+	setstr(vq, buf);	/* SETSTR: no fail, cause exit code to be !0 */
 
 	return optc < 0 ? 1 : 0;
 }

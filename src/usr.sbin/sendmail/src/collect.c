@@ -11,7 +11,7 @@
  */
 
 #ifndef lint
-static char sccsid[] = "@(#)collect.c	8.89 (Berkeley) 6/4/98";
+static char sccsid[] = "@(#)collect.c	8.93 (Berkeley) 1/26/1999";
 #endif /* not lint */
 
 # include <errno.h>
@@ -57,6 +57,7 @@ static EVENT	*CollectTimeout;
 #define MS_UFROM	0	/* reading Unix from line */
 #define MS_HEADER	1	/* reading message header */
 #define MS_BODY		2	/* reading message body */
+#define MS_DISCARD	3	/* discarding rest of message */
 
 void
 collect(fp, smtpmode, hdrp, e)
@@ -77,11 +78,11 @@ collect(fp, smtpmode, hdrp, e)
 	volatile int istate;
 	volatile int mstate;
 	u_char *volatile pbp;
+	int hdrslen = 0;
 	u_char peekbuf[8];
 	char dfname[MAXQFNAME];
 	char bufbuf[MAXLINE];
 	extern bool isheader __P((char *));
-	extern void eatheader __P((ENVELOPE *, bool));
 	extern void tferror __P((FILE *volatile, ENVELOPE *));
 
 	headeronly = hdrp != NULL;
@@ -101,7 +102,7 @@ collect(fp, smtpmode, hdrp, e)
 		{
 			syserr("Cannot create %s", dfname);
 			e->e_flags |= EF_NO_BODY_RETN;
-			finis();
+			finis(TRUE, ExitStat);
 		}
 		if (fstat(fileno(tf), &stbuf) < 0)
 			e->e_dfino = -1;
@@ -159,8 +160,6 @@ collect(fp, smtpmode, hdrp, e)
 
 	for (;;)
 	{
-		extern int chompheader __P((char *, bool, HDR **, ENVELOPE *));
-
 		if (tTd(30, 35))
 			printf("top, istate=%d, mstate=%d\n", istate, mstate);
 		for (;;)
@@ -265,12 +264,17 @@ collect(fp, smtpmode, hdrp, e)
 bufferchar:
 			if (!headeronly)
 				e->e_msgsize++;
-			if (mstate == MS_BODY)
+			switch (mstate)
 			{
+			  case MS_BODY:
 				/* just put the character out */
 				if (MaxMessageSize <= 0 ||
 				    e->e_msgsize <= MaxMessageSize)
 					putc(c, tf);
+
+				/* fall through */
+
+			  case MS_DISCARD:
 				continue;
 			}
 
@@ -301,7 +305,23 @@ bufferchar:
 #endif
 			}
 			else if (c != '\0')
+			{
 				*bp++ = c;
+				if (MaxHeadersLength > 0 &&
+				    ++hdrslen > MaxHeadersLength)
+				{
+					sm_syslog(LOG_NOTICE, e->e_id,
+						  "headers too large (%d max) from %s during message collect",
+						  MaxHeadersLength,
+						  CurHostName != NULL ? CurHostName : "localhost");
+					errno = 0;
+					e->e_flags |= EF_CLRQUEUE;
+					e->e_status = "5.6.0";
+					usrerr("552 Headers too large (%d max)",
+						MaxHeadersLength);
+					mstate = MS_DISCARD;
+				}
+			}
 			if (istate == IS_BOL)
 				break;
 		}
@@ -353,6 +373,7 @@ nextstate:
 			if (*--bp != '\n' || *--bp != '\r')
 				bp++;
 			*bp = '\0';
+
 			if (bitset(H_EOH, chompheader(buf, FALSE, hdrp, e)))
 			{
 				mstate = MS_BODY;
@@ -414,7 +435,7 @@ readerr:
 	{
 		tferror(tf, e);
 		flush_errors(TRUE);
-		finis();
+		finis(TRUE, ExitStat);
 	}
 
 	/* An EOF when running SMTP is an error */
@@ -456,7 +477,7 @@ readerr:
 		/* and don't try to deliver the partial message either */
 		if (InChild)
 			ExitStat = EX_QUIT;
-		finis();
+		finis(TRUE, ExitStat);
 	}
 
 	/*
@@ -504,7 +525,6 @@ readerr:
 		/* no valid recipient headers */
 		register ADDRESS *q;
 		char *hdr = NULL;
-		extern void addheader __P((char *, char *, HDR **));
 
 		/* create an Apparently-To: field */
 		/*    that or reject the message.... */
@@ -577,7 +597,7 @@ readerr:
 	{
 		/* we haven't acked receipt yet, so just chuck this */
 		syserr("Cannot reopen %s", dfname);
-		finis();
+		finis(TRUE, ExitStat);
 	}
 }
 

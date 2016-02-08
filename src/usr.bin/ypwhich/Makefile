@@ -1,4 +1,4 @@
-#	$OpenBSD: Makefile,v 1.4 1998/01/18 20:13:07 maja Exp $
+#	$OpenBSD: Makefile,v 1.6 1999/03/20 15:36:12 maja Exp $
 #	from: @(#)Makefile	5.8 (Berkeley) 7/28/90
 
 PROG=	ypwhich

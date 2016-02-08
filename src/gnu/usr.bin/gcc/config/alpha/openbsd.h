@@ -83,8 +83,45 @@ Boston, MA 02111-1307, USA.  */
 
 #include "alpha/alpha.h"
 
+/* Don't tell collect2 we use COFF as we don't have (yet ?) a dynamic ld
+   library with the proper functions to handle this -> collect2 will
+   default to using nm. */
+#undef OBJECT_FORMAT_COFF
+#undef EXTENDED_COFF
+
+/* This is how we tell the assembler that a symbol is weak.  */
+#define ASM_OUTPUT_WEAK_ALIAS(FILE,NAME,VALUE)	\
+ do {						\
+  fputs ("\t.weakext\t", FILE);			\
+  assemble_name (FILE, NAME);			\
+  if (VALUE)					\
+    {						\
+      fputs (", ", FILE);			\
+      assemble_name (FILE, VALUE);		\
+    }						\
+  fputc ('\n', FILE);				\
+ } while (0)
+
+#define ASM_WEAKEN_LABEL(FILE,NAME) ASM_OUTPUT_WEAK_ALIAS(FILE,NAME,0)
+
 /* Since gas and gld are standard on OpenBSD, we don't need this */
 #undef ASM_FINAL_SPEC
 
 /* We're not ELF yet */
 #undef HAS_INIT_SECTION
+
+/* Special handling, refer to defaults.h for the logic behind it:
+   if INCOMING_RETURN_ADDR_RTX is defined and DWARF2_UNWIND_INFO is
+   not, DWARF2_UNWIND_INFO becomes the default. Logically, this should
+   depend on the output format being/not being ELF. But we can't check
+   that directly. And INCOMING_RETURN_ADDR_RTX was added to alpha.h post
+   2.8.1. The following construct should work for all gcc versions.
+ */
+
+/* We dont't default to dwarf2-style exception handling as we're not 
+   elf... */
+#ifdef INCOMING_RETURN_ADDR_RTX
+#undef DWARF2_UNWIND_INFO
+#define DWARF2_UNWIND_INFO 0
+#endif
+

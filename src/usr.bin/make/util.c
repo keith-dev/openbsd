@@ -1,4 +1,4 @@
-/*	$OpenBSD: util.c,v 1.8 1998/06/03 17:00:04 deraadt Exp $	*/
+/*	$OpenBSD: util.c,v 1.10 1998/12/20 23:38:11 deraadt Exp $	*/
 /*	$NetBSD: util.c,v 1.10 1996/12/31 17:56:04 christos Exp $	*/
 
 /*
@@ -6,7 +6,7 @@
  */
 
 #ifndef lint
-static char rcsid[] = "$OpenBSD: util.c,v 1.8 1998/06/03 17:00:04 deraadt Exp $";
+static char rcsid[] = "$OpenBSD: util.c,v 1.10 1998/12/20 23:38:11 deraadt Exp $";
 #endif
 
 #include <stdio.h>
@@ -150,7 +150,7 @@ signal(s, a)) ()
 #endif
 
     if (sigvector(s, &sv, (struct sigvec *) 0) == -1)
-        return (BADSIG);
+        return (SIG_ERR);
     return (osv.sv_handler);
 }
 
