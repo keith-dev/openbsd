@@ -8,11 +8,9 @@
  *
  */
 
-#ifndef lint
-static char id[] = "@(#)$Sendmail: handler.c,v 8.19.4.3 2000/12/29 19:45:39 gshapiro Exp $";
-#endif /* ! lint */
+#include <sm/gen.h>
+SM_RCSID("@(#)$Sendmail: handler.c,v 8.26 2001/09/11 04:04:45 gshapiro Exp $")
 
-#if _FFR_MILTER
 #include "libmilter.h"
 
 
@@ -64,4 +62,3 @@ mi_handle_session(ctx)
 	ctx = NULL;
 	return ret;
 }
-#endif /* _FFR_MILTER */

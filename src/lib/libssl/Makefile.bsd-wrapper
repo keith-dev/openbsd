@@ -1,5 +1,5 @@
 # Build wrapper for OpenSSL
-# $OpenBSD: Makefile.bsd-wrapper,v 1.35 2001/04/17 19:55:19 beck Exp $
+# $OpenBSD: Makefile.bsd-wrapper,v 1.39 2001/09/18 17:18:28 deraadt Exp $
 
 # Our lndir is hacked; specify a full path to avoid potential conflicts
 # with the one installed with X11.
@@ -9,26 +9,8 @@ LNDIR=	/usr/bin/lndir
 # needs to be tested on all architectures.
 
 OPENSSLDIR=	/etc/ssl
+SSLCONF=	--openssldir="${OPENSSLDIR}" OpenBSD-${MACHINE_ARCH}
 
-.if ${MACHINE_ARCH} == "alpha"
-SSLCONF=	--openssldir="${OPENSSLDIR}" OpenBSD-alpha
-.elif ${MACHINE_ARCH} == "m68k"
-SSLCONF=	--openssldir="${OPENSSLDIR}" OpenBSD-m68k
-.elif ${MACHINE_ARCH} == "i386"
-SSLCONF=	--openssldir="${OPENSSLDIR}" OpenBSD-x86
-.elif ${MACHINE_ARCH} == "mips"
-SSLCONF=	--openssldir="${OPENSSLDIR}" OpenBSD-mips
-.elif ${MACHINE_ARCH} == "vax"
-SSLCONF=	--openssldir="${OPENSSLDIR}" OpenBSD-vax
-.else
-.if ${MACHINE_ARCH} == "m88k" || \
-${MACHINE_ARCH} == "powerpc" || ${MACHINE_ARCH} == "sparc"
-SSLCONF=	--openssldir="${OPENSSLDIR}" OpenBSD
-.else
-##UNTESTED!	
-SSLCONF=	--openssldir="${OPENSSLDIR}" OpenBSD
-.endif
-.endif
 MUNGEDFILES= \
 	${.OBJDIR}/${SSL_SRC}/crypto/opensslconf.h \
 	${.OBJDIR}/${SSL_SRC}/crypto/objects/obj_dat.h \
@@ -99,7 +81,7 @@ PSALL=	${MANALL:S/.cat1/.ps1/g:S/.cat2/.ps2/g:S/.cat3/.ps3/g:S/.cat4/.ps4/g:S/.c
 # ERR_get_next_error_library
 #
 # rand.pod -> RAND_bytes.pod
-# RAND_pseudo_bytes RAND_seed RAND_add RAND_status
+# RAND_pseudo_bytes RAND_seed RAND_add RAND_status RAND_event
 # RAND_screen RAND_load_file RAND_write_file RAND_file_name RAND_egd
 # RAND_set_rand_method RAND_get_rand_method RAND_SSLeay RAND_cleanup
 
@@ -260,6 +242,7 @@ MLINKS+=BN_CTX_new.3 BN_CTX_init.3 BN_CTX_new.3 BN_CTX_free.3 \
 	BN_num_bytes.3 BN_num_bits.3 \
 	BN_num_bytes.3 BN_num_bits_word.3 \
 	BN_rand.3 BN_pseudo_rand.3 \
+	BN_rand.3 BN_rand_range.3 \
 	BN_set_bit.3 BN_clear_bit.3 BN_set_bit.3 BN_is_bit_set.3 \
 	BN_set_bit.3 BN_mask_bits.3 BN_set_bit.3 BN_lshift.3 \
 	BN_set_bit.3 BN_lshift1.3 BN_set_bit.3 BN_rshift.3 \
@@ -276,11 +259,14 @@ MLINKS+=BN_CTX_new.3 BN_CTX_init.3 BN_CTX_new.3 BN_CTX_free.3 \
 	DH_set_method.3 DH_get_default_method.3 \
 	DH_set_method.3 DH_new_method.3 \
 	DH_set_method.3 DH_OpenSSL.3 \
+	DH_set_method.3 DH_set_default_openssl_method.3 \
+	DH_set_method.3 DH_get_default_openssl_method.3 \
 	ERR_GET_LIB.3 ERR_GET_FUNC.3 \
 	ERR_GET_LIB.3 ERR_GET_REASON.3 \
 	ERR_error_string.3 ERR_lib_error_string.3 \
 	ERR_error_string.3 ERR_func_error_string.3 \
 	ERR_error_string.3 ERR_reason_error_string.3 \
+	ERR_error_string.3 ERR_error_string_n.3 \
 	ERR_get_error.3 ERR_peek_error.3 \
 	ERR_get_error.3 ERR_get_error_line.3 \
 	ERR_get_error.3 ERR_peek_error_line.3 \
@@ -293,10 +279,13 @@ MLINKS+=BN_CTX_new.3 BN_CTX_init.3 BN_CTX_new.3 BN_CTX_free.3 \
 	ERR_print_errors.3 ERR_print_errors_fp.3 \
 	ERR_put_error.3 ERR_add_error_data.3 \
 	OPENSSL_VERSION_NUMBER.3 SSLeay.3 \
+	OPENSSL_VERSION_NUMBER.3 SSLeay_version.3 \
 	OpenSSL_add_all_algorithms.3 OpenSSL_add_all_ciphers.3 \
 	OpenSSL_add_all_algorithms.3 OpenSSL_add_all_digests.3 \
 	OpenSSL_add_all_algorithms.3 EVP_cleanup.3 \
-	RAND_add.3 RAND_seed.3 RAND_add.3 RAND_status.3 RAND_add.3 RAND_screen.3 \
+	RAND_add.3 RAND_seed.3 RAND_add.3 RAND_status.3 \
+	RAND_add.3 RAND_event.3 RAND_add.3 RAND_screen.3 \
+	RAND_egd.3 RAND_egd_bytes.3 \
 	RAND_bytes.3 RAND_pseudo_bytes.3 \
 	RAND_load_file.3 RAND_file_name.3 RAND_load_file.3 RAND_write_file.3 \
 	RAND_set_rand_method.3 RAND_get_rand_method.3 \
@@ -327,6 +316,8 @@ MLINKS+=BN_CTX_new.3 BN_CTX_init.3 BN_CTX_new.3 BN_CTX_free.3 \
 	RSA_set_method.3 RSA_null_method.3 \
 	RSA_set_method.3 RSA_flags.3 \
 	RSA_set_method.3 RSA_new_method.3 \
+	RSA_set_method.3 RSA_set_default_openssl_method.3 \
+	RSA_set_method.3 RSA_get_default_openssl_method.3 \
 	RSA_sign.3 RSA_verify.3 \
 	RSA_sign_ASN1_OCTET_STRING.3 RSA_verify_ASN1_OCTET_STRING.3 \
 	BUF_MEM_new.3 BUF_MEM_free.3 \
@@ -360,9 +351,11 @@ MLINKS+=BN_CTX_new.3 BN_CTX_init.3 BN_CTX_new.3 BN_CTX_free.3 \
 	des_random_key.3 des_string_to_key.3 des_random_key.3 des_string_to_2keys.3 \
 	des_random_key.3 des_fcrypt.3 des_random_key.3 des_crypt.3 \
 	des_random_key.3 des_enc_read.3 des_random_key.3 des_enc_write.3 \
-	MD5.3 MD2.3 MD5.3 MD2_Init.3 MD5.3 MD2_Update.3 \
-	MD5.3 MD2_Final.3 MD5.3 MD5_Init.3 \
-	MD5.3 MD5_Update.3 MD5.3 MD5_Final.3 \
+	MD5.3 MD2.3 \
+	MD5.3 MD2_Init.3 MD5.3 MD2_Update.3 MD5.3 MD2_Final.3 \
+	MD5.3 MD4.3 \
+	MD5.3 MD4_Init.3 MD5.3 MD4_Update.3 MD5.3 MD4_Final.3 \
+	MD5.3 MD5_Init.3 MD5.3 MD5_Update.3 MD5.3 MD5_Final.3 \
 	bn_internal.3 bn_mul_words.3 \
 	bn_internal.3 bn_mul_add_words.3 \
 	bn_internal.3 bn_sqr_words.3 \
@@ -445,6 +438,8 @@ MLINKS+=BN_CTX_new.3 BN_CTX_init.3 BN_CTX_new.3 BN_CTX_free.3 \
 	EVP_EncryptInit.3 EVP_CIPHER_CTX_cipher.3 \
 	EVP_EncryptInit.3 EVP_CIPHER_param_to_asn1.3 \
 	EVP_EncryptInit.3 EVP_CIPHER_asn1_to_param.3 \
+	EVP_EncryptInit.3 EVP_CIPHER_CTX_ctrl.3 \
+	EVP_EncryptInit.3 EVP_CIPHER_CTX_set_key_length.3 \
 	EVP_OpenInit.3 EVP_OpenUpdate.3 \
 	EVP_OpenInit.3 EVP_OpenFinal.3 \
 	EVP_SealInit.3 EVP_SealUpdate.3 \
@@ -466,6 +461,8 @@ MLINKS+=BN_CTX_new.3 BN_CTX_init.3 BN_CTX_new.3 BN_CTX_free.3 \
 	DSA_set_method.3 DSA_get_default_method.3 \
 	DSA_set_method.3 DSA_new_method.3 \
 	DSA_set_method.3 DSA_OpenSSL.3 \
+	DSA_set_method.3 DSA_get_default_openssl_method.3 \
+	DSA_set_method.3 DSA_set_default_openssl_method.3 \
 	dsa.3 DSA_free.3 dsa.3 DSA_sign_setup.3 \
 	dsa.3 DSA_verify.3 dsa.3 DSA_set_default_method.3 \
 	dsa.3 DSA_get_default_method.3 dsa.3 DSA_new_method.3 \
@@ -501,6 +498,18 @@ MLINKS+=BN_CTX_new.3 BN_CTX_init.3 BN_CTX_new.3 BN_CTX_free.3 \
 	RAND_set_rand_method.3 RAND_SSLeay.3 \
 	CRYPTO_set_locking_callback.3 CRYPTO_set_id_callback.3 \
 	CRYPTO_set_locking_callback.3 CRYPTO_num_locks.3 \
+	CRYPTO_set_locking_callback.3 CRYPTO_set_dynlock_create_callback.3 \
+	CRYPTO_set_locking_callback.3 CRYPTO_set_dynlock_lock_callback.3 \
+	CRYPTO_set_locking_callback.3 CRYPTO_set_dynlock_destroy_callback.3 \
+	CRYPTO_set_locking_callback.3 CRYPTO_get_new_dynlockid.3 \
+	CRYPTO_set_locking_callback.3 CRYPTO_destroy_dynlockid.3 \
+	CRYPTO_set_locking_callback.3 CRYPTO_lock.3 \
+	CRYPTO_set_locking_callback.3 CRYPTO_w_lock.3 \
+	CRYPTO_set_locking_callback.3 CRYPTO_w_unlock.3 \
+	CRYPTO_set_locking_callback.3 CRYPTO_r_lock.3 \
+	CRYPTO_set_locking_callback.3 CRYPTO_r_unlock.3 \
+	CRYPTO_set_locking_callback.3 CRYPTO_add.3 \
+	CRYPTO_set_locking_callback.3 CRYPTO_add_lock.3 \
 	RIPEMD160.3 RIPEMD160_Init.3 RIPEMD160.3 RIPEMD160_Update.3 \
 	RIPEMD160.3 RIPEMD160_Final.3 \
 

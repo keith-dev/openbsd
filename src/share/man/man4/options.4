@@ -1,4 +1,4 @@
-.\"	$OpenBSD: options.4,v 1.63 2001/04/05 04:01:56 aaron Exp $
+.\"	$OpenBSD: options.4,v 1.85 2001/10/14 14:39:03 art Exp $
 .\"	$NetBSD: options.4,v 1.21 1997/06/25 03:13:00 thorpej Exp $
 .\"
 .\" Copyright (c) 1998 Theo de Raadt
@@ -54,6 +54,29 @@ options are passed to the compile process as
 flags to the C compiler.
 .Ss Compatibility Options
 .Bl -ohang
+.It Cd option COMPAT_23
+Enables compatibility with
+.Ox 2.3 .
+This makes it possible to run binaries that use old versions of the
+.Xr msgctl 2 ,
+.Xr shmctl 2
+and
+.Xr __semctl
+system calls which changed semantics in
+.Ox 2.4 .
+.It Cd option COMPAT_25
+Enables compatibility with
+.Ox 2.5 .
+This makes it possible to run binaries that use old versions of the
+.Xr statfs 2 ,
+.Xr fstatfs 2
+and
+.Xr getfsstat 2
+system calls which were replaced in
+.Ox 2.6
+when
+.Li struct stat
+was expanded.
 .It Cd option COMPAT_SVR4
 On those architectures that support it, this enables binary
 compatibility with
@@ -125,6 +148,13 @@ applications built for the same architecture.
 This option is available on the i386 architecture.
 See
 .Xr compat_ibcs2 8 .
+.It Cd option COMPAT_NETBSD
+On those architectures that support it, this enables binary
+compatibility with
+.Em NetBSD
+applications built for the same architecture.
+See
+.Xr compat_freebsd 8 .
 .It Cd option COMPAT_OSF1
 On those architectures that support it, this enables binary
 compatibility with
@@ -136,7 +166,7 @@ This option is available on the alpha architecture.
 See
 .Xr compat_osf1 8 .
 .It Cd option COMPAT_NOMID
-Enable compatibility with a.out executables that lack a machine ID.
+Enables compatibility with a.out executables that lack a machine ID.
 On the i386, this includes
 .Nx
 0.8's ZMAGIC format, 386BSD and BSDI's
@@ -190,7 +220,7 @@ using the
 .Dq remote target
 feature of gdb.
 See
-.Xr gdb 1
+.Xr kgdb 7
 for details.
 .Em Note:
 not available on all architectures.
@@ -202,13 +232,13 @@ flag causes
 to be built in addition to
 .Pa bsd .
 .Pa bsd.gdb
-is useful for debugging kernel crash dumps with gdb.
+is useful for debugging kernels and their crashdumps with gdb.
 Note that
 .Xr gdb Ns 's
 .Fl k
 flag
 is obsolete and should not be used.
-Instead, the kernel can be debugged by starting
+Instead, a crashdump can be debugged by starting
 .Xr gdb
 with the kernel name as an argument (no core file) and then use the
 .Xr gdb
@@ -234,6 +264,10 @@ which may decrease system performance.
 Adds code to the kernel that does internal consistency checks.
 This code will cause the kernel to panic if corruption of internal data
 structures is detected.
+.It Cd option SMALL_KERNEL
+Removes some optimizations from the kernel to reduce the size of the
+resulting kernel binary.
+This option can decrease system performance.
 .It Cd option GPROF
 Adds code to the kernel for kernel profiling with
 .Xr kgmon 8 .
@@ -257,6 +291,15 @@ for details.
 Includes code implementing the Berkeley Fast File System
 .Em ( FFS ) .
 Most machines need this if they are not running diskless.
+.It Cd option ADOSFS
+Includes code implementing the AmigaDOS Fast File System
+.Em ( ADOSFS ) .
+Note that the Professional and Smart File Systems are 
+.Em not
+supported.
+See
+.Xr mount_ados 8
+for details.
 .It Cd option EXT2FS
 Includes code implementing the Second Extended File System
 .Em ( EXT2FS ) .
@@ -455,25 +498,6 @@ Adds support for
 style FIFOs (i.e.,
 .Dq named pipes ) .
 This option is recommended in almost all cases as many programs use these.
-.It Cd option NVNODE=integer
-This option sets the size of the cache used by the name-to-inode translation
-routines, (a.k.a. the
-.Fn namei
-cache, though called by many other names in the kernel source).
-By default,
-this cache has
-.Dv NPROC
-(set as 20 + 16 * MAXUSERS) * (80 + NPROC / 8) entries.
-A reasonable way to derive a value of
-.Dv NVNODE ,
-should a large number of namei cache misses be noticed with a tool such as
-.Xr systat 1 ,
-is to examine the system's current computed value with
-.Xr sysctl 8 ,
-(which calls this parameter "kern.maxvnodes") and to increase this value
-until either the namei cache hit rate improves or it is determined that
-the system does not benefit substantially from an increase in the size of
-the namei cache.
 .It Cd option EXT2FS_SYSTEM_FLAGS
 This option changes the behavior of the APPEND and IMMUTABLE flags
 for a file on an
@@ -494,6 +518,8 @@ Makes the boot process more verbose for PCI peripherals
 Makes the boot process more verbose for EISA peripherals.
 .It Cd option PCMCIAVERBOSE
 Makes the boot process more verbose for PCMCIA peripherals.
+.It Cd option MACOBIOVERBOSE
+Makes the boot process more verbose for Mac OBIO peripherals.
 .It Cd option APERTURE
 Provide in-kernel support for VGA framebuffer mapping by user-processes
 (such as an X windows server).
@@ -501,7 +527,7 @@ This option is supported in the i386 architecture.
 .It Cd option XSERVER
 Support for X windows in the console driver.
 .It Cd option LKM
-Enable support for loadable kernel modules.
+Enables support for loadable kernel modules.
 See
 .Xr lkm 4
 for details.
@@ -531,21 +557,6 @@ See also
 .Xr sysctl 8
 and
 .Xr sysctl 3 .
-.It Cd option MACHINE_NONCONTIG
-This option changes part of the VM/pmap interface, to allow for
-non-contiguous memory.
-On some ports it is not an option.
-These ports typically only use one of the interfaces.
-.It Cd option RAM_DISK_HOOKS
-This option allows for some machine dependent functions to be called
-when the ramdisk driver is configured.
-This can result in automatically loading a ramdisk from floppy on open (among
-other things).
-.It Cd option RAM_DISK_IS_ROOT
-Forces the ramdisk to be the root device.
-This can only be overridden when the kernel is booted in the
-.Dq ask-for-root
-mode.
 .It Cd option CCDNBUF=integer
 The
 .Xr ccd 4
@@ -585,7 +596,7 @@ option.
 Adds support for the
 .Fl c
 boot option (User Kernel Config).
-Allows modification of kernel settings (i.e., device parameters) before
+Allows modification of kernel settings (e.g., device parameters) before
 booting the system.
 .It Cd option UVM_SWAP_ENCRYPT
 Enables kernel support for encrypting pages that are written out to
@@ -601,6 +612,17 @@ See
 and
 .Xr sysctl 3
 for details.
+.It Cd option USER_PCICONF
+Enables the user level acces to the PCI bus configuration space
+through ioctls on the
+.Pa /dev/pci
+device.
+It's used by the
+.Xr XFree86 1
+server on some architectures.
+See
+.Xr pci 4
+for details.
 .El
 .Ss Networking Options
 .Bl -ohang
@@ -608,7 +630,7 @@ for details.
 Enables
 .Em IPFORWARDING
 and (on most ports) increases the size of
-.Em NMBCLUSTERS.
+.Em NMBCLUSTERS .
 In general,
 .Em GATEWAY
 is used to indicate that a system should act as a router, and
@@ -749,19 +771,6 @@ Internet backbone routers to provide per-packet authentication for the TCP
 packets used to communicate BGP routing information.
 You will also need a
 routing daemon that supports this option in order to actually use it.
-.It Cd option IPFILTER
-This option enables the IP filtering on the packet level using
-Darren Reed's ip-filter package.
-.It Cd option IPFILTER_LOG
-This option, in conjunction with
-.Cm option IPFILTER ,
-enables logging of IP packets using ip-filter.
-.It Cd option IPFILTER_DEFAULT_BLOCK
-This option sets the default policy of ip-filter to block packets that
-exit the rule-set unmatched.
-Otherwise they are silently passed. See
-.Xr ipf 8
-for details.
 .It Cd option PPP_FILTER
 This option turns on
 .Xr pcap 3
@@ -802,6 +811,78 @@ for details.
 Enables PFKEYv2 (RFC 2367) support.
 While not IP specific, this option is usually used in conjunction with option
 .Em IPSEC .
+.It Cd option ALTQ
+Enables ALTQ (Alternate Queueing).
+For simple rate-limiting, use
+.Xr tbrconfig 8
+to set up the interface transmission rate.
+To use queueing disciplines, their options should also be defined.
+Queueing disciplines are managed by
+.Xr altqd 8 .
+See
+.Xr altq 9
+for details on ALTQ.
+.It Cd option ALTQ_CBQ
+Enables ALTQ's CBQ (Class-based Queueing) module.
+CBQ achieves both partitioning and sharing of link bandwidth by hierarchically
+structured classes.
+Each class has its own queue and is assigned its share of bandwidth.
+A child class can borrow bandwidth from its parent class as long as excess
+bandwidth is available.
+.It Cd option ALTQ_HFSC
+Enables ALTQ's HFSC (Hierarchical Fair Service Curve) module.
+HFSC supports both link-sharing and guaranteed real-time services.
+H-FSC employs a service curve based QoS model, and its unique feature
+is an ability to decouple delay and bandwidth allocation.
+.It Cd option ALTQ_PRIQ
+Enables ALTQ's PRIQ (Priority Queueing) module.
+PRIQ implements a simple priority-based queueing.
+A higher priority class is always served first.
+.It Cd option ALTQ_WFQ
+Enables ALTQ's WFQ (Weighted Fair Queueing) module.
+WFQ implements a weighted-round robin scheduler for a set of queues.
+A weight can be assigned to each queue to give a different proportion
+of the link capacity.
+A hash function is used to map a flow to one of a set of queues.
+.It Cd option ALTQ_FIFOQ
+Enables ALTQ's FIFO queue module.
+FIFOQ is a simple drop-tail FIFO queue.
+.It Cd option ALTQ_RED
+Enables ALTQ's RED (Random Early Detection) module.
+RED is an implicit congestion notification mechanism that exercises
+packet dropping or packet marking stochastically according to the
+average queue length.
+RED can be viewed as an active buffer management mechanism and can be
+integrated into other queueing disciplines.
+.It Cd option ALTQ_RIO
+Enables ALTQ's RIO (RED with In/Oout) module.
+The original RIO has 2 sets of RED parameters; one for in-profile
+packets and the other for out-of-profile packets.
+At the ingress of the network, profile meters tag packets as IN or
+OUT based on contracted profiles for customers.
+Inside the network, IN packets receive preferential treatment by
+the RIO dropper.
+ALTQ/RIO has 3 drop precedence levels defined for the Assured Forwarding
+PHB of DiffServ (RFC2597).
+.It Cd option ALTQ_BLUE
+Enables ALTQ's Blue module.
+Blue is another active buffer management mechanism.
+.It Cd option ALTQ_FLOWVALVE
+Enables ALTQ's Flowvalve module.
+Flowvalve is a simple implementation of a RED penalty box that identifies
+and punishes misbehaving flows.
+.It Cd option ALTQ_CDNR
+Enables ALTQ's CDNR (diffserfv traffic conditioner) module.
+Traffic conditioners are components to meter, mark, or drop incoming
+packets according to some rules.
+As opposed to queueing disciplines, traffic conditioners handle incoming
+packets at an input interface.
+.It Cd option ALTQ_NOPCC
+Disables use of processor cycle counter (e.g., Pentium TSC on i386 and
+PCC on alpha) to measure time in ALTQ.
+This option should be defined for a non-Pentium i386 CPU which does not
+have TSC, SMP (per-CPU counters are not in sync), or power management
+which affects processor cycle counter.
 .El
 .Ss SCSI Subsystem Options
 .Bl -ohang
@@ -811,9 +892,6 @@ This omits the table for decoding ASC/ASCQ info, saving about 8 bytes or so.
 .It Cd option SCSIDEBUG
 Prints extra debugging info for the SCSI subsystem to the console.
 .El
-.Ss PCVT Options (i386 Architecture)
-See
-.Xr pcvt 4 .
 .Ss System V IPC Options
 .Bl -ohang
 .It Cd option SYSVMSG
@@ -852,27 +930,29 @@ Default value is 1024 on most ports.
 See
 .Pa /usr/include/machine/vmparam.h
 for the default.
+.It Cd option SEMMNI=value
+Number of semaphore identifiers (also called semaphore handles
+and semaphore sets) available in the system.
+Default value is 10.
+The kernel allocates memory for the control structures at startup,
+so you should avoid arbitrarily large values. 
+.It Cd option SEMMNS=value
+Maximum number of semaphores in all sets in the system.
+Default value is 60.
+.It Cd option SEMMNU=value
+Maximum number of semaphore undo structures in the system.
+Default value is 30. 
+.It Cd option SEMUME=value
+Maximum number of per-process undo operation entries in the 
+system.
+Semaphore undo operations are invoked by the kernel when
+.Xr semop 2
+is called with the SEM_UNDO flag and the process holding
+the semaphores terminates unexpectedly.
+Default value is 10.
 .El
 .Ss Operation Related Options
 .Bl -ohang
-.It Cd option SWAPPAGER
-Turns on paging.
-(To be specific, this enables the virtual memory module responsible for
-handling page faults for
-.Dq anonymous
-objects (i.e., BSS pages)).
-.Em MANDATORY
--- the system cannot actually run without this
-.Dq option .
-.It Cd option DEVPAGER
-Support for mmap()ing of devices.
-(Specifically, this enables the virtual memory module responsible for
-handling page faults on mapped devices
-.Pf ( Dq cdev
-vnodes)).
-.Em MANDATORY
--- the system cannot actually run without this
-.Dq option .
 .It Cd option NMBCLUSTERS=value
 Size of kernel mbuf cluster map,
 .Em mb_map ,
@@ -883,7 +963,7 @@ See
 .Pa /usr/include/machine/param.h
 for exact default information.
 Increase this value if
-.Dq mb_map full
+.Dq mclpool limit reached
 messages appear.
 .It Cd option NKMEMCLUSTERS=value
 Size of kernel malloc area in CLBYTES-sized logical pages.
@@ -902,8 +982,7 @@ These options set the number of pages available for the buffer cache.
 Their default value is a machine dependent value, often calculated as
 between 5% and 10% of total available RAM.
 .It Cd option NTP
-Modify the scheduler code to add hooks necessary for running an NTP
-daemon.
+Modify the scheduler code to add hooks necessary for running an NTP daemon.
 .Xr xntpd 8
 is available as part of the port collection.
 .It Cd option APM_NOPRINT
@@ -917,6 +996,14 @@ status can still be obtained using
 .Xr apm 8
 and/or
 .Xr apmd 8 .
+.It Cd RFORK_FDSHARE
+This option enables sharing of filedescriptor tables between processes that
+request it.
+It is needed for the
+.Xr rfork
+system call to work properly and for some programs run under Linux emulation.
+It's disabled by default for security reasons because it allows any malicious
+user to crash the system.
 .El
 .\" The following requests should be uncommented and used where appropriate.
 .\" .Sh FILES
@@ -946,6 +1033,7 @@ and/or
 .Xr iso 4 ,
 .Xr lkm 4 ,
 .Xr ns 4 ,
+.Xr pci 4 ,
 .Xr xf86 4 ,
 .Xr apm 8 ,
 .Xr apmd 8 ,
@@ -967,7 +1055,8 @@ and/or
 .Xr quotaon 8 ,
 .Xr rpc.rquotad 8 ,
 .Xr sysctl 8 ,
-.Xr xntpd 8
+.Xr xntpd 8 ,
+.Xr altq 9
 .Sh HISTORY
 The
 .Nm

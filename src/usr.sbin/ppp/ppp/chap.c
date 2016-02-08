@@ -1,30 +1,38 @@
-/*
- *			PPP CHAP Module
+/*-
+ * Copyright (c) 1996 - 2001 Brian Somers <brian@Awfulhak.org>
+ *          based on work by Toshiharu OHNO <tony-o@iij.ad.jp>
+ *                           Internet Initiative Japan, Inc (IIJ)
+ * All rights reserved.
  *
- *	    Written by Toshiharu OHNO (tony-o@iij.ad.jp)
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in the
+ *    documentation and/or other materials provided with the distribution.
  *
- *   Copyright (C) 1993, Internet Initiative Japan, Inc. All rights reserverd.
+ * THIS SOFTWARE IS PROVIDED BY THE AUTHOR AND CONTRIBUTORS ``AS IS'' AND
+ * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+ * ARE DISCLAIMED.  IN NO EVENT SHALL THE AUTHOR OR CONTRIBUTORS BE LIABLE
+ * FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+ * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
+ * OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
+ * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
+ * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
+ * SUCH DAMAGE.
  *
- * Redistribution and use in source and binary forms are permitted
- * provided that the above copyright notice and this paragraph are
- * duplicated in all such forms and that any documentation,
- * advertising materials, and other materials related to such
- * distribution and use acknowledge that the software was developed
- * by the Internet Initiative Japan, Inc.  The name of the
- * IIJ may not be used to endorse or promote products derived
- * from this software without specific prior written permission.
- * THIS SOFTWARE IS PROVIDED ``AS IS'' AND WITHOUT ANY EXPRESS OR
- * IMPLIED WARRANTIES, INCLUDING, WITHOUT LIMITATION, THE IMPLIED
- * WARRANTIES OF MERCHANTIBILITY AND FITNESS FOR A PARTICULAR PURPOSE.
- *
- * $OpenBSD: chap.c,v 1.26 2001/04/01 22:41:23 brian Exp $
- *
- *	TODO:
+ * $OpenBSD: chap.c,v 1.30 2001/08/19 23:22:17 brian Exp $
  */
+
 #include <sys/param.h>
 #include <netinet/in.h>
 #include <netinet/in_systm.h>
 #include <netinet/ip.h>
+#include <sys/socket.h>
 #include <sys/un.h>
 
 #include <errno.h>
@@ -59,6 +67,8 @@
 #include "chap.h"
 #include "iplist.h"
 #include "slcompress.h"
+#include "ncpaddr.h"
+#include "ip.h"
 #include "ipcp.h"
 #include "filter.h"
 #include "ccp.h"
@@ -68,6 +78,8 @@
 #ifndef NORADIUS
 #include "radius.h"
 #endif
+#include "ipv6cp.h"
+#include "ncp.h"
 #include "bundle.h"
 #include "chat.h"
 #include "cbcp.h"
@@ -542,7 +554,7 @@ chap_Success(struct authinfo *authp)
 #endif
     msg = "Welcome!!";
 
-  ChapOutput(authp->physical, CHAP_SUCCESS, authp->id, msg, strlen(msg) + 1,
+  ChapOutput(authp->physical, CHAP_SUCCESS, authp->id, msg, strlen(msg),
              NULL);
 
   authp->physical->link.lcp.auth_ineed = 0;
@@ -737,6 +749,11 @@ chap_Input(struct bundle *bundle, struct link *l, struct mbuf *bp)
         }
         *ans = chap->auth.id;
         bp = mbuf_Read(bp, ans + 1, alen);
+        if (p->link.lcp.want_authtype == 0x81 && ans[alen] != '\0') {
+          log_Printf(LogWARN, "%s: Compensating for corrupt (Win98/WinME?) "
+                     "CHAP81 RESPONSE\n", l->name);
+          ans[alen] = '\0';
+        }
         ans[alen+1] = '\0';
         bp = auth_ReadName(&chap->auth, bp, len);
 #ifdef HAVE_DES
@@ -890,8 +907,8 @@ chap_Input(struct bundle *bundle, struct link *l, struct mbuf *bp)
             if (p->link.lcp.his_authtype == 0x81) {
               if (strncmp(ans, chap->authresponse, 42)) {
                 datalink_AuthNotOk(p->dl);
-	        log_Printf(LogDEBUG, "CHAP81: AuthenticatorResponse: (%s)"
-                           " != ans: (%s)\n", chap->authresponse, ans);
+	        log_Printf(LogWARN, "CHAP81: AuthenticatorResponse: (%.42s)"
+                           " != ans: (%.42s)\n", chap->authresponse, ans);
                 
               } else {
                 /* Successful login */

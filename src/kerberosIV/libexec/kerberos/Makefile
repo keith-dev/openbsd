@@ -1,4 +1,4 @@
-# $OpenBSD: Makefile,v 1.4 2001/01/09 02:41:19 angelos Exp $
+# $OpenBSD: Makefile,v 1.8 2001/07/28 01:25:02 hugh Exp $
 
 PROG	= kerberos
 
@@ -8,7 +8,8 @@ KRBDEPTH=../..
 .PATH:	${KRBSRC}/server
 
 CFLAGS	+= -I. -I${KRBSRC}/lib/kadm -I${KRBSRC}/lib/acl -I${KRBSRC}/lib/kdb
-LDADD	+= ${LIBROKEN} -lkafs -lkdb -lkrb -ldes
+LDADD	+= -lkafs -lkrb5 -lkdb -lkrb -lkadm -ldes -lasn1 -lcom_err \
+	    -lacl -lcrypto ${LIBROKEN}
 
 SRCS	= kerberos.c
 

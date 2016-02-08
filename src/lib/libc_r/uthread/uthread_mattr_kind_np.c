@@ -1,4 +1,4 @@
-/*	$OpenBSD: uthread_mattr_kind_np.c,v 1.5 1999/11/25 07:01:38 d Exp $	*/
+/*	$OpenBSD: uthread_mattr_kind_np.c,v 1.7 2001/08/10 14:37:20 fgsch Exp $	*/
 /*
  * Copyright (c) 1996 Jeffrey Hsu <hsu@freebsd.org>.
  * All rights reserved.
@@ -42,8 +42,7 @@ pthread_mutexattr_setkind_np(pthread_mutexattr_t *attr, int kind)
 {
 	int	ret;
 	if (attr == NULL || *attr == NULL) {
-		errno = EINVAL;
-		ret = -1;
+		ret = EINVAL;
 	} else {
 		(*attr)->m_type = kind;
 		ret = 0;
@@ -56,8 +55,7 @@ pthread_mutexattr_getkind_np(pthread_mutexattr_t attr)
 {
 	int	ret;
 	if (attr == NULL) {
-		errno = EINVAL;
-		ret = -1;
+		ret = EINVAL;
 	} else {
 		ret = attr->m_type;
 	}
@@ -69,12 +67,26 @@ pthread_mutexattr_settype(pthread_mutexattr_t *attr, int type)
 {
 	int	ret;
 	if (attr == NULL || *attr == NULL || type >= MUTEX_TYPE_MAX) {
-		errno = EINVAL;
-		ret = -1;
+		ret = EINVAL;
 	} else {
 		(*attr)->m_type = type;
 		ret = 0;
 	}
 	return(ret);
+}
+
+int
+pthread_mutexattr_gettype(pthread_mutexattr_t *attr, int *type)
+{
+	int	ret;
+
+	if (attr == NULL || *attr == NULL || (*attr)->m_type >=
+	    MUTEX_TYPE_MAX) {
+		ret = EINVAL;
+	} else {
+		*type = (*attr)->m_type;
+		ret = 0;
+	}
+	return ret;
 }
 #endif

@@ -1,4 +1,4 @@
-/*	$OpenBSD: sysent.h,v 1.3 1997/04/01 07:35:52 todd Exp $	*/
+/*	$OpenBSD: sysent.h,v 1.6 2001/07/25 16:54:11 deraadt Exp $	*/
 
 /*
  * Copyright (c) 1991 Carnegie Mellon University
@@ -25,6 +25,22 @@
  * to redistribute these changes.
  */
 /*
+ **********************************************************************
+ * HISTORY
+ * Revision 2.4  89/12/05  16:02:00  mrt
+ * 	Removed include of sys/features.h as it is no longer
+ * 	exported or needed.
+ * 	[89/12/05            mrt]
+ * 
+ * Revision 2.3  89/01/20  15:44:24  gm0w
+ * 	Added externs to the non-STDC case for functions that do not
+ * 	have int return values.
+ * 	[88/12/17            gm0w]
+ * 
+ * Revision 2.2  88/12/14  23:35:52  mja
+ * 	Created.
+ * 	[88/01/06            jjk]
+ * 
  **********************************************************************
  */
 
@@ -61,7 +77,7 @@ extern gid_t getegid(void);
 extern int getgroups(int, int *);
 extern long gethostid(void);
 extern int sethostid(long);
-extern int gethostname(char *, int);
+extern int gethostname(char *, size_t);
 extern int sethostname(const char *, int);
 extern int getpagesize(void);
 extern int getpgrp(int);
@@ -102,7 +118,6 @@ extern int truncate(const char *, off_t);
 extern int ftruncate(int, off_t);
 extern int umask(int);
 extern int unlink(const char *);
-extern int vfork(void);
 extern void vhangup(void);
 extern int write(int, void *, int);
 
@@ -118,7 +133,7 @@ extern int iwrite(int, int, int, int, void *, int);
 extern int pioctl(const char *, unsigned long, struct ViceIoctl *, int);
 extern int setpag(void);
 #endif
-#else defined(__STDC__)
+#else	/* defined(__STDC__) */
 extern gid_t getgid();
 extern gid_t getegid();
 extern long gethostid();

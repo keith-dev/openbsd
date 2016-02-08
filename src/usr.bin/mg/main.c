@@ -1,10 +1,12 @@
-/*	$OpenBSD: main.c,v 1.6 2001/01/29 01:58:08 niklas Exp $	*/
+/*	$OpenBSD: main.c,v 1.14 2001/06/23 04:22:44 art Exp $	*/
 
 /*
  *	Mainline.
  */
 
 #include	"def.h"
+#include	"kbd.h"
+#include	"funmap.h"
 
 #ifndef NO_MACRO
 #include	"macro.h"
@@ -16,15 +18,15 @@ int		 curgoal;			/* goal column		*/
 BUFFER		*curbp;				/* current buffer	*/
 BUFFER		*bheadp;			/* BUFFER listhead	*/
 MGWIN		*curwp;				/* current window	*/
-MGWIN		*wheadp = (MGWIN *)NULL;	/* MGWIN listhead	*/
+MGWIN		*wheadp;			/* MGWIN listhead	*/
 char		 pat[NPAT];			/* pattern		*/
 
-static VOID	 edinit		__P((VOID));
+static void	 edinit		__P((void));
 
 int
 main(argc, argv)
-	int    argc;
-	char **argv;
+	int	argc;
+	char	**argv;
 {
 	char	*cp;
 
@@ -36,7 +38,21 @@ main(argc, argv)
 	dirinit();		/* Get current directory.	*/
 #endif	/* !NO_DIR */
 	edinit();		/* Buffers, windows.		*/
+	maps_init();		/* Keymaps and modes.		*/
+	funmap_init();		/* Functions.			*/
 	ttykeymapinit();	/* Symbols, bindings.		*/
+
+	/*
+	 * This is where we initialize standalone extensions that should
+	 * be loaded dynamically sometime in the future.
+	 */
+	{
+		extern void grep_init(void);
+		extern void theo_init(void);
+
+		grep_init();
+		theo_init();
+	}
 
 	/*
 	 * doing update() before reading files causes the error messages from
@@ -47,21 +63,20 @@ main(argc, argv)
 
 #ifndef NO_STARTUP
 	/* user startup file */
-	if ((cp = startupfile((char *)NULL)) != NULL)
-		(VOID)load(cp);
+	if ((cp = startupfile(NULL)) != NULL)
+		(void)load(cp);
 #endif	/* !NO_STARTUP */
 	while (--argc > 0) {
 		cp = adjustname(*++argv);
 		curbp = findbuffer(cp);
-		(VOID)showbuffer(curbp, curwp, 0);
-		(VOID)readin(cp);
+		(void)showbuffer(curbp, curwp, 0);
+		(void)readin(cp);
 	}
 
 	/* fake last flags */
 	thisflag = 0;
 	for (;;) {
 #ifndef NO_DPROMPT
-		*(promptp = prompt) = '\0';
 		if (epresf == KPROMPT)
 			eerase();
 #endif	/* !NO_DPROMPT */
@@ -88,7 +103,7 @@ main(argc, argv)
 /*
  * Initialize default buffer and window.
  */
-static VOID
+static void
 edinit()
 {
 	BUFFER	*bp;
@@ -140,7 +155,7 @@ quit(f, n)
 }
 
 /*
- * User abort.  Should be called by any input routine that sees a C-g to abort 
+ * User abort.  Should be called by any input routine that sees a C-g to abort
  * whatever C-g is aborting these days. Currently does nothing.
  */
 /* ARGSUSED */

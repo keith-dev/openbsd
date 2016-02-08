@@ -1,4 +1,4 @@
-/* $OpenBSD: wsconscfg.c,v 1.4 2001/03/14 02:51:36 mickey Exp $ */
+/* $OpenBSD: wsconscfg.c,v 1.6 2001/07/27 20:34:36 pvalchev Exp $ */
 /* $NetBSD: wsconscfg.c,v 1.4 1999/07/29 18:24:10 augustss Exp $ */
 
 /*
@@ -34,6 +34,7 @@
  */
 
 #include <stdio.h>
+#include <string.h>
 #include <fcntl.h>
 #include <unistd.h>
 #include <sys/types.h>
@@ -54,7 +55,7 @@ usage()
 	extern char *__progname;
 
 	(void)fprintf(stderr,
-		      "Usage: %s [-f wsdev] [-d [-F]] [-k] [-m] [-t type]"
+		      "Usage: %s [-f wsdev] [-d [-F]] [-k] [-m] [-t type] "
 		      "[-e emul] {vt | [kbd] | [mux]}\n", __progname);
 	exit(1);
 }

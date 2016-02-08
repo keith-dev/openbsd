@@ -23,13 +23,14 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- *	$OpenBSD: datalink.c,v 1.34 2001/02/04 01:14:24 brian Exp $
+ *	$OpenBSD: datalink.c,v 1.37 2001/08/19 23:22:17 brian Exp $
  */
 
 #include <sys/param.h>
 #include <netinet/in.h>
 #include <netinet/in_systm.h>
 #include <netinet/ip.h>
+#include <sys/socket.h>
 #include <sys/un.h>
 
 #include <ctype.h>
@@ -56,12 +57,16 @@
 #include "physical.h"
 #include "iplist.h"
 #include "slcompress.h"
+#include "ncpaddr.h"
+#include "ip.h"
 #include "ipcp.h"
 #include "filter.h"
 #include "mp.h"
 #ifndef NORADIUS
 #include "radius.h"
 #endif
+#include "ipv6cp.h"
+#include "ncp.h"
 #include "bundle.h"
 #include "chat.h"
 #include "auth.h"
@@ -93,19 +98,16 @@ datalink_StartDialTimer(struct datalink *dl, int Timeout)
 
   timer_Stop(&dl->dial.timer);
   if (Timeout) {
-    if (Timeout > 0)
-      dl->dial.timer.load = Timeout * SECTICKS;
-    else {
+    if (Timeout < 0)
       result = (random() % DIAL_TIMEOUT) + 1;
-      dl->dial.timer.load = result * SECTICKS;
-    }
+    dl->dial.timer.load = result * SECTICKS;
     dl->dial.timer.func = datalink_OpenTimeout;
     dl->dial.timer.name = "dial";
     dl->dial.timer.arg = dl;
     timer_Start(&dl->dial.timer);
     if (dl->state == DATALINK_OPENING)
       log_Printf(LogPHASE, "%s: Enter pause (%d) for redialing.\n",
-                dl->name, Timeout);
+                dl->name, result);
   }
   return result;
 }
@@ -573,7 +575,8 @@ datalink_LayerUp(void *v, struct fsm *fp)
         auth_StartReq(&dl->chap.auth);
     } else
       datalink_AuthOk(dl);
-  }
+  } else if (fp->proto == PROTO_CCP)
+    (*dl->parent->LayerUp)(dl->parent->object, &dl->physical->link.ccp.fsm);
 }
 
 static void
@@ -624,7 +627,7 @@ datalink_NCPUp(struct datalink *dl)
     return;
   } else {
     dl->bundle->ncp.mp.peer = dl->peer;
-    ipcp_SetLink(&dl->bundle->ncp.ipcp, &dl->physical->link);
+    ncp_SetLink(&dl->bundle->ncp, &dl->physical->link);
     auth_Select(dl->bundle, dl->peer.authname);
   }
 

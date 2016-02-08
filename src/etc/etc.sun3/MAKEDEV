@@ -1,5 +1,5 @@
 #!/bin/sh -
-#	$OpenBSD: MAKEDEV,v 1.33 2001/02/15 01:41:49 todd Exp $
+#	$OpenBSD: MAKEDEV,v 1.38 2001/09/06 19:45:34 todd Exp $
 #
 # Copyright (c) 1990 The Regents of the University of California.
 # All rights reserved.
@@ -70,7 +70,7 @@
 #	tun*	network tunnel driver
 #	*random	inkernal random data source
 #	xfs*	XFS filesystem devices
-#	ipl 	IP filter log
+#	altq	ALTQ control interface
 
 PATH=/sbin:/bin:/usr/bin:/usr/sbin
 this=$0
@@ -180,17 +180,16 @@ unit=`unt $i`
 case $i in
 
 all)
-	sh $this std sd0 sd1 sd2 sd3 sd4 xd0 xd1 xd2 xd3 xy0 xy1 xy2 xy3
+	sh $this std fd sd0 sd1 sd2 sd3 sd4 xd0 xd1 xd2 xd3 xy0 xy1 xy2 xy3
 	sh $this cd0 st0 st1 rd0
 	sh $this uk0 uk1
 	sh $this ss0 ss1
-	sh $this pty0 vnd0 vnd1 vnd2 vnd3 tun0 tun1 tun2 tun3
+	sh $this pty0 vnd0 vnd1 vnd2 vnd3 pf tun0 tun1 tun2 tun3
 	sh $this ccd0 ccd1 ccd2 ccd3
 	sh $this bpf0 bpf1 bpf2 bpf3 bpf4 bpf5 bpf6 bpf7 bpf8 bpf9
-	sh $this ipl
 	sh $this bwtwo0 cgtwo0 cgfour0
 	sh $this random local
-	sh $this xfs0
+	sh $this xfs0 altq
 	;;
 
 ramdisk)
@@ -273,13 +272,11 @@ bpf*)
 	chown root.wheel bpf$unit
 	;;
 
-ipl)
-	rm -f ipl ipnat ipstate ipauth
-	mknod ipl c 75 0
-	mknod ipnat c 75 1
-	mknod ipstate c 75 2
-	mknod ipauth c 75 3
-	chown root.wheel ipl ipnat ipstate ipauth
+pf)
+	rm -f pf
+	mknod pf c 75 0
+	chown root.wheel pf
+	chmod 600 pf
 	;;
 
 tun*)
@@ -484,6 +481,19 @@ ss*)
 #	backwards compatibility with older PINTs
 	rm -f scan$unit
 	ln -s ss$unit scan$unit
+	;;
+
+altq)
+	mkdir -p altq
+	chmod 755 altq
+	unit=0
+	for dev in altq cbq wfq afm fifoq red rio localq hfsc \
+	    cdnr blue priq; do
+		rm -f altq/$dev
+		mknod altq/$dev c 85 $unit
+		chmod 644 altq/$dev
+		unit=$(($unit + 1))
+	done
 	;;
 
 local)

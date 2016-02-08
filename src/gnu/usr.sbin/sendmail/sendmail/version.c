@@ -11,8 +11,8 @@
  *
  */
 
-#ifndef lint
-static char id[] = "@(#)$Sendmail: version.c,v 8.43.4.30 2001/02/27 19:22:31 gshapiro Exp $";
-#endif /* ! lint */
+#include <sm/gen.h>
 
-char	Version[] = "8.11.3";
+SM_RCSID("@(#)$Sendmail: version.c,v 8.83 2001/09/29 01:47:38 ca Exp $")
+
+char	Version[] = "8.12.1";

@@ -1,13 +1,13 @@
-/*	$OpenBSD: match.c,v 1.4 2001/01/29 01:58:08 niklas Exp $	*/
+/*	$OpenBSD: match.c,v 1.7 2001/05/24 03:05:24 mickey Exp $	*/
 
 /*
  *	Limited parenthesis matching routines
  *
- * The hacks in this file implement automatic matching * of (), [], {}, and 
- * other characters.  It would be better to have a full-blown syntax table, 
+ * The hacks in this file implement automatic matching * of (), [], {}, and
+ * other characters.  It would be better to have a full-blown syntax table,
  * but there's enough overhead in the editor as it is.
  *
- * Since I often edit Scribe code, I've made it possible to blink arbitrary 
+ * Since I often edit Scribe code, I've made it possible to blink arbitrary
  * characters -- just bind delimiter characters to "blink-matching-paren-hack"
  */
 
@@ -15,7 +15,7 @@
 #include "key.h"
 
 static int	balance		__P((void));
-static VOID	displaymatch	__P((LINE *, int));
+static void	displaymatch	__P((LINE *, int));
 
 /*
  * Balance table. When balance() encounters a character that is to be
@@ -45,7 +45,7 @@ static struct balance {
 };
 
 /*
- * Hack to show matching paren.  Self-insert character, then show matching 
+ * Hack to show matching paren.  Self-insert character, then show matching
  * character, if any.  Bound to "blink-matching-paren-command".
  */
 int
@@ -81,7 +81,7 @@ balance()
 	int	 cbo;
 	int	 c;
 	int	 i;
-	int	 rbal; 
+	int	 rbal;
 	int	 lbal;
 	int	 depth;
 
@@ -140,12 +140,12 @@ balance()
 
 
 /*
- * Display matching character.  Matching characters that are not in the 
- * current window are displayed in the echo line. If in the current window, 
+ * Display matching character.  Matching characters that are not in the
+ * current window are displayed in the echo line. If in the current window,
  * move dot to the matching character, sit there a while, then move back.
  */
 
-static VOID
+static void
 displaymatch(clp, cbo)
 	LINE *clp;
 	int cbo;
@@ -163,23 +163,23 @@ displaymatch(clp, cbo)
 	 * searching from the top of the window to dot.
 	 */
 	inwindow = FALSE;
-	for (tlp = curwp->w_linep; tlp != lforw(curwp->w_dotp); 
+	for (tlp = curwp->w_linep; tlp != lforw(curwp->w_dotp);
 	    tlp = lforw(tlp))
 		if (tlp == clp)
 			inwindow = TRUE;
 
 	if (inwindow == TRUE) {
-		tlp = curwp->w_dotp;	/* save current position	*/
+		tlp = curwp->w_dotp;	/* save current position */
 		tbo = curwp->w_doto;
 
-		curwp->w_dotp = clp;	/* move to new position		*/
+		curwp->w_dotp = clp;	/* move to new position */
 		curwp->w_doto = cbo;
 		curwp->w_flag |= WFMOVE;
 
-		update();		/* show match			*/
-		sleep(1);		/* wait a bit			*/
+		update();		/* show match */
+		ttwait(1000);		/* wait for key or 1 second */
 
-		curwp->w_dotp = tlp;	/* return to old position	*/
+		curwp->w_dotp = tlp;	/* return to old position */
 		curwp->w_doto = tbo;
 		curwp->w_flag |= WFMOVE;
 		update();

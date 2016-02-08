@@ -1,4 +1,4 @@
-/*	$OpenBSD: errmsg.c,v 1.4 1997/09/16 11:01:15 deraadt Exp $	*/
+/*	$OpenBSD: errmsg.c,v 1.7 2001/05/04 22:16:15 millert Exp $	*/
 
 /*
  * Copyright (c) 1991 Carnegie Mellon University
@@ -36,24 +36,24 @@
 #include "supcdefs.h"
 #include "supextern.h"
 
-#if !defined(__NetBSD__) && !defined(__OpenBSD__)
-static char *itoa __P((char *, unsigned));
+#ifndef HAS_STRERROR
+static char *itoa __P((char *, unsigned int));
 
-static char *itoa(p,n)
-char *p;
-unsigned n;
+static char *itoa(p, n)
+	char *p;
+	unsigned int n;
 {
-    if (n >= 10)
-	p =itoa(p,n/10);
-    *p++ = (n%10)+'0';
-    return(p);
+	if (n >= 10)
+		p = itoa(p, n/10);
+	*p++ = (n % 10) + '0';
+	return(p);
 }
 #endif
 
-char *errmsg(cod)
-int cod;
+const char *errmsg(cod)
+	int cod;
 {
-#if !defined(__NetBSD__) && !defined(__OpenBSD__)
+#ifndef HAS_STRERROR
 	extern int	errno;
 	extern int	sys_nerr;
 	extern char	*sys_errlist[];
@@ -65,12 +65,11 @@ int cod;
 	if((cod >= 0) && (cod < sys_nerr))
 	    return(sys_errlist[cod]);
 
-	strncpy(unk,unkmsg,sizeof unk-1);
-	unk[sizeof unk-1] = '\0';
+	strlcpy(unk,unkmsg,sizeof unk);
 	*itoa(&unk[sizeof(unkmsg)-1],cod) = '\0';
 
 	return(unk);
 #else
-	return strerror(cod);
+	return strerror(cod < 0 ? errno : cod);
 #endif
 }

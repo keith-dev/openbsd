@@ -1,7 +1,7 @@
 .\" tbl | readme.ms | [tn]roff -ms | ...
 .\" note the "C" (courier) and "CB" fonts: you will probably have to
 .\" change these.
-.\" $Id: readme.ms,v 1.4 2000/04/06 17:05:35 millert Exp $
+.\" $Id: readme.ms,v 1.5 2001/05/24 18:35:16 millert Exp $
 
 .de P1
 .br

@@ -14,7 +14,7 @@
  */
 
 #ifndef lint
-static char rcsid[] = "$Id: ac.c,v 1.7 1997/10/09 15:07:17 deraadt Exp $";
+static char rcsid[] = "$Id: ac.c,v 1.9 2001/05/24 03:02:32 pvalchev Exp $";
 #endif
 
 #include <sys/types.h>
@@ -104,7 +104,9 @@ file(name)
 {
 	FILE *fp;
 
-	if ((fp = fopen(name, "r")) == NULL)
+	if (strcmp(name, "-") == 0)
+		fp = stdin;
+	else if ((fp = fopen(name, "r")) == NULL)
 		err(1, "%s", name);
 	/* in case we want to discriminate */
 	if (strcmp(_PATH_WTMP, name))
@@ -129,8 +131,7 @@ add_tty(name)
 		tp->ret = 0;
 		name++;
 	}
-	(void)strncpy(tp->name, name, sizeof (tp->name) - 1);
-	tp->name[sizeof (tp->name) - 1] = '\0';
+	strlcpy(tp->name, name, sizeof (tp->name));
 	if ((rcp = strchr(tp->name, '*')) != NULL) {	/* wild card */
 		*rcp = '\0';
 		tp->len = strlen(tp->name);	/* match len bytes only */
@@ -210,8 +211,7 @@ update_user(head, name, secs)
 	if ((up = NEW(struct user_list)) == NULL)
 		err(1, "malloc");
 	up->next = head;
-	(void)strncpy(up->name, name, sizeof (up->name) - 1);
-	up->name[sizeof (up->name) - 1] = '\0';	/* paranoid! */
+	strlcpy(up->name, name, sizeof (up->name));
 	up->secs = secs;
 	Total += secs;
 	return up;
@@ -420,8 +420,7 @@ log_in(head, up)
 		/*
 		 * this allows us to pick the right logout
 		 */
-		(void)strncpy(up->ut_line, Console, sizeof (up->ut_line) - 1);
-		up->ut_line[sizeof (up->ut_line) - 1] = '\0'; /* paranoid! */
+		strlcpy(up->ut_line, Console, sizeof (up->ut_line));
 	}
 #endif
 	/*
@@ -548,11 +547,14 @@ ac(fp)
 void
 usage()
 {
+	extern char *__progname;
 	(void)fprintf(stderr,
 #ifdef CONSOLE_TTY
-	    "ac [-dp] [-c console] [-t tty] [-w wtmp] [users ...]\n");
+	    "%s [-d | -p] [-c console] [-t tty] [-w wtmp] [users ...]\n",
+	    __progname);
 #else
-	    "ac [-dp] [-t tty] [-w wtmp] [users ...]\n");
+	    "%s [-d | -p] [-t tty] [-w wtmp] [users ...]\n",
+	    __progname);
 #endif
 	exit(1);
 }

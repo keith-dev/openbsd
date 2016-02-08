@@ -8,7 +8,7 @@
  */
 
 #if defined(LIBC_SCCS) && !defined(lint)
-static char rcsid[] = "$OpenBSD: malloc.c,v 1.40 2000/04/10 19:36:29 deraadt Exp $";
+static char rcsid[] = "$OpenBSD: malloc.c,v 1.42 2001/05/11 15:30:14 art Exp $";
 #endif /* LIBC_SCCS and not lint */
 
 /*
@@ -243,7 +243,7 @@ static int malloc_silent;
 /* always realloc ?  */
 static int malloc_realloc;
 
-#ifdef __FreeBSD__
+#if defined(__FreeBSD__) || (defined(__OpenBSD__) && defined(MADV_FREE))
 /* pass the kernel a hint on free pages ?  */
 static int malloc_hint;
 #endif
@@ -485,7 +485,7 @@ extend_pgdir(index)
 
     /* Get new pages */
     new = (struct pginfo**) MMAP(i * malloc_pagesize);
-    if (new == (struct pginfo **)-1)
+    if (new == MAP_FAILED)
 	return 0;
 
     /* Copy the old stuff */
@@ -547,7 +547,7 @@ malloc_init ()
 		case 'd': malloc_stats   = 0; break;
 		case 'D': malloc_stats   = 1; break;
 #endif /* MALLOC_STATS */
-#ifdef __FreeBSD__
+#if defined(__FreeBSD__) || (defined(__OpenBSD__) && defined(MADV_FREE))
 		case 'h': malloc_hint    = 0; break;
 		case 'H': malloc_hint    = 1; break;
 #endif /* __FreeBSD__ */
@@ -592,7 +592,7 @@ malloc_init ()
     /* Allocate one page for the page directory */
     page_dir = (struct pginfo **) MMAP(malloc_pagesize);
 
-    if (page_dir == (struct pginfo **) -1)
+    if (page_dir == MAP_FAILED)
 	wrterror("mmap(2) failed, check limits.\n");
 
     /*
@@ -1004,7 +1004,7 @@ free_pages(ptr, index, info)
     if (malloc_junk)
 	memset(ptr, SOME_JUNK, l);
 
-#ifdef __FreeBSD__
+#if defined(__FreeBSD__) || (defined(__OpenBSD__) && defined(MADV_FREE))
     if (malloc_hint)
 	madvise(ptr, l, MADV_FREE);
 #endif

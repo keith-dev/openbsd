@@ -1,4 +1,4 @@
-.\"     $OpenBSD: ie.4,v 1.4 1999/07/09 13:35:42 aaron Exp $
+.\"     $OpenBSD: ie.4,v 1.6 2001/10/05 14:45:54 mpech Exp $
 .\"
 .\" Copyright (c) 1998 The OpenBSD Project
 .\" All rights reserved.
@@ -22,7 +22,8 @@ The
 interface provides access to the 10 Mb/s Ethernet network via the
 .Tn Intel
 82586
-Ethernet chip set.  The
+Ethernet chip set.
+The
 .Nm
 is found as an on-board interface on Sun 4/100, and 4/200 workstations.
 The
@@ -39,7 +40,6 @@ interface employs the address resolution protocol described in
 .Xr arp 4
 to dynamically map between Internet and Ethernet addresses on the local
 network.
-.Pp
 .Sh SEE ALSO
 .Xr arp 4 ,
 .Xr be 4 ,

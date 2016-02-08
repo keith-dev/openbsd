@@ -1,4 +1,4 @@
-/*	$OpenBSD: cmds.c,v 1.10 2000/11/21 07:22:53 deraadt Exp $	*/
+/*	$OpenBSD: cmds.c,v 1.14 2001/08/30 17:38:13 millert Exp $	*/
 
 /*
  * Copyright (c) 1983, 1993
@@ -35,16 +35,16 @@
  */
 
 #ifndef lint
-static char copyright[] =
+static const char copyright[] =
 "@(#) Copyright (c) 1983, 1993\n\
 	The Regents of the University of California.  All rights reserved.\n";
 #endif /* not lint */
 
 #ifndef lint
 #if 0
-static char sccsid[] = "@(#)cmds.c	8.2 (Berkeley) 4/28/95";
+static const char sccsid[] = "@(#)cmds.c	8.2 (Berkeley) 4/28/95";
 #else
-static char rcsid[] = "$OpenBSD: cmds.c,v 1.10 2000/11/21 07:22:53 deraadt Exp $";
+static const char rcsid[] = "$OpenBSD: cmds.c,v 1.14 2001/08/30 17:38:13 millert Exp $";
 #endif
 #endif /* not lint */
 
@@ -97,8 +97,8 @@ doabort(argc, argv)
 	int argc;
 	char *argv[];
 {
-	register int c, status;
-	register char *cp1, *cp2;
+	int c, status;
+	char *cp1, *cp2;
 	char prbuf[100];
 
 	if (argc == 1) {
@@ -111,7 +111,7 @@ doabort(argc, argv)
 			cp1 = prbuf;
 			cp2 = bp;
 			while ((c = *cp2++) && c != '|' && c != ':' &&
-			    (cp1 - prbuf) < sizeof(prbuf))
+			    (cp1 - prbuf) < sizeof(prbuf) - 1)
 				*cp1++ = c;
 			*cp1 = '\0';
 			abortpr(1);
@@ -136,7 +136,7 @@ void
 abortpr(dis)
 	int dis;
 {
-	register FILE *fp;
+	FILE *fp;
 	struct stat stbuf;
 	int pid, fd;
 
@@ -205,7 +205,7 @@ void
 upstat(msg)
 	char *msg;
 {
-	register int fd;
+	int fd;
 	char statfile[MAXPATHLEN];
 
 	if (cgetstr(bp, "st", &ST) == -1)
@@ -233,8 +233,8 @@ clean(argc, argv)
 	int argc;
 	char *argv[];
 {
-	register int c, status;
-	register char *cp1, *cp2;
+	int c, status;
+	char *cp1, *cp2;
 	char prbuf[100];
 
 	if (argc == 1) {
@@ -247,7 +247,7 @@ clean(argc, argv)
 			cp1 = prbuf;
 			cp2 = bp;
 			while ((c = *cp2++) && c != '|' && c != ':' &&
-			    (cp1 - prbuf) < sizeof(prbuf))
+			    (cp1 - prbuf) < sizeof(prbuf) - 1)
 				*cp1++ = c;
 			*cp1 = '\0';
 			cleanpr();
@@ -312,8 +312,8 @@ sortq(a, b)
 void
 cleanpr()
 {
-	register int i, n;
-	register char *cp, *cp1, *lp;
+	int i, n;
+	char *cp, *cp1, *lp;
 	struct dirent **queue;
 	int nitems;
 
@@ -324,6 +324,10 @@ cleanpr()
 	for (lp = line, cp = SD; (lp - line) < sizeof(line) && (*lp++ = *cp++);)
 		;
 	lp[-1] = '/';
+	if (lp - line >= sizeof(line)) {
+		printf("\tspool directory name too long\n");
+		return;
+	}
 
 	seteuid(euid);
 	nitems = scandir(SD, &queue, doselect, sortq);
@@ -347,9 +351,11 @@ cleanpr()
 				n++;
 			}
 			if (n == 0) {
-				strncpy(lp, cp, sizeof(line) - strlen(line) - 1);
-				line[sizeof(line) - 1] = '\0';
-				unlinkf(line);
+				if (strlcpy(lp, cp, sizeof(line) - (lp - line)) >=
+				    sizeof(line) - (lp - line))
+					printf("\tpath too long, %s/%s", SD, cp);
+				else
+					unlinkf(line);
 			}
 		} else {
 			/*
@@ -357,9 +363,11 @@ cleanpr()
 			 * been skipped above) or a tf file (which can always
 			 * be removed).
 			 */
-			strncpy(lp, cp, sizeof(line) - strlen(line) - 1);
-			line[sizeof(line) - 1] = '\0';
-			unlinkf(line);
+			if (strlcpy(lp, cp, sizeof(line) - (lp - line)) >=
+			    sizeof(line) - (lp - line))
+				printf("\tpath too long, %s/%s", SD, cp);
+			else
+				unlinkf(line);
 		}
      	} while (++i < nitems);
 }
@@ -384,8 +392,8 @@ enable(argc, argv)
 	int argc;
 	char *argv[];
 {
-	register int c, status;
-	register char *cp1, *cp2;
+	int c, status;
+	char *cp1, *cp2;
 	char prbuf[100];
 
 	if (argc == 1) {
@@ -398,7 +406,7 @@ enable(argc, argv)
 			cp1 = prbuf;
 			cp2 = bp;
 			while ((c = *cp2++) && c != '|' && c != ':' &&
-			    (cp1 - prbuf) < sizeof(prbuf))
+			    (cp1 - prbuf) < sizeof(prbuf) - 1)
 				*cp1++ = c;
 			*cp1 = '\0';
 			enablepr();
@@ -453,8 +461,8 @@ disable(argc, argv)
 	int argc;
 	char *argv[];
 {
-	register int c, status;
-	register char *cp1, *cp2;
+	int c, status;
+	char *cp1, *cp2;
 	char prbuf[100];
 
 	if (argc == 1) {
@@ -467,7 +475,7 @@ disable(argc, argv)
 			cp1 = prbuf;
 			cp2 = bp;
 			while ((c = *cp2++) && c != '|' && c != ':' &&
-			    (cp1 - prbuf) < sizeof(prbuf))
+			    (cp1 - prbuf) < sizeof(prbuf) - 1)
 				*cp1++ = c;
 			*cp1 = '\0';
 			disablepr();
@@ -492,7 +500,7 @@ disable(argc, argv)
 void
 disablepr()
 {
-	register int fd;
+	int fd;
 	struct stat stbuf;
 
 	if (cgetstr(bp, "sd", &SD) == -1)
@@ -531,8 +539,8 @@ down(argc, argv)
 	int argc;
 	char *argv[];
 {
-	register int c, status;
-	register char *cp1, *cp2;
+	int c, status;
+	char *cp1, *cp2;
 	char prbuf[100];
 
 	if (argc == 1) {
@@ -545,7 +553,7 @@ down(argc, argv)
 			cp1 = prbuf;
 			cp2 = bp;
 			while ((c = *cp2++) && c != '|' && c != ':' &&
-			    (cp1 - prbuf) < sizeof(prbuf))
+			    (cp1 - prbuf) < sizeof(prbuf) - 1)
 				*cp1++ = c;
 			*cp1 = '\0';
 			putmsg(argc - 2, argv + 2);
@@ -570,8 +578,8 @@ putmsg(argc, argv)
 	int argc;
 	char **argv;
 {
-	register int fd;
-	register char *cp1, *cp2;
+	int fd;
+	char *cp1, *cp2;
 	char buf[1024];
 	struct stat stbuf;
 
@@ -624,7 +632,7 @@ putmsg(argc, argv)
 	cp1 = buf;
 	while (--argc >= 0) {
 		cp2 = *argv++;
-		while ((cp1 - buf) < sizeof(buf) && (*cp1++ = *cp2++))
+		while ((cp1 - buf) < sizeof(buf) - 1 && (*cp1++ = *cp2++))
 			;
 		cp1[-1] = ' ';
 	}
@@ -653,8 +661,8 @@ restart(argc, argv)
 	int argc;
 	char *argv[];
 {
-	register int c, status;
-	register char *cp1, *cp2;
+	int c, status;
+	char *cp1, *cp2;
 	char prbuf[100];
 
 	if (argc == 1) {
@@ -667,7 +675,7 @@ restart(argc, argv)
 			cp1 = prbuf;
 			cp2 = bp;
 			while ((c = *cp2++) && c != '|' && c != ':' &&
-			    (cp1 - prbuf) < sizeof(prbuf))
+			    (cp1 - prbuf) < sizeof(prbuf) - 1)
 				*cp1++ = c;
 			*cp1 = '\0';
 			abortpr(0);
@@ -699,8 +707,8 @@ startcmd(argc, argv)
 	int argc;
 	char *argv[];
 {
-	register int c, status;
-	register char *cp1, *cp2;
+	int c, status;
+	char *cp1, *cp2;
 	char prbuf[100];
 
 	if (argc == 1) {
@@ -713,7 +721,7 @@ startcmd(argc, argv)
 			cp1 = prbuf;
 			cp2 = bp;
 			while ((c = *cp2++) && c != '|' && c != ':' &&
-			    (cp1 - prbuf) < sizeof(prbuf))
+			    (cp1 - prbuf) < sizeof(prbuf) - 1)
 				*cp1++ = c;
 			*cp1 = '\0';
 			startpr(1);
@@ -773,17 +781,17 @@ status(argc, argv)
 	int argc;
 	char *argv[];
 {
-	register int c, status;
-	register char *cp1, *cp2;
+	int c, status;
+	char *cp1, *cp2;
 	char prbuf[100];
 
-	if (argc == 1 || argc == 2 && !strcmp(argv[1], "all")) {
+	if (argc == 1 || (argc == 2 && !strcmp(argv[1], "all"))) {
 		printer = prbuf;
 		while (cgetnext(&bp, printcapdb) > 0) {
 			cp1 = prbuf;
 			cp2 = bp;
 			while ((c = *cp2++) && c != '|' && c != ':' &&
-			    (cp1 - prbuf) < sizeof(prbuf))
+			    (cp1 - prbuf) < sizeof(prbuf) - 1)
 				*cp1++ = c;
 			*cp1 = '\0';
 			prstat();
@@ -812,8 +820,8 @@ void
 prstat()
 {
 	struct stat stbuf;
-	register int fd, i;
-	register struct dirent *dp;
+	int fd, i;
+	struct dirent *dp;
 	DIR *dirp;
 
 	if (cgetstr(bp, "sd", &SD) == -1)
@@ -876,8 +884,8 @@ stop(argc, argv)
 	int argc;
 	char *argv[];
 {
-	register int c, status;
-	register char *cp1, *cp2;
+	int c, status;
+	char *cp1, *cp2;
 	char prbuf[100];
 
 	if (argc == 1) {
@@ -890,7 +898,7 @@ stop(argc, argv)
 			cp1 = prbuf;
 			cp2 = bp;
 			while ((c = *cp2++) && c != '|' && c != ':' &&
-			    (cp1 - prbuf) < sizeof(prbuf))
+			    (cp1 - prbuf) < sizeof(prbuf) - 1)
 				*cp1++ = c;
 			*cp1 = '\0';
 			stoppr();
@@ -915,7 +923,7 @@ stop(argc, argv)
 void
 stoppr()
 {
-	register int fd;
+	int fd;
 	struct stat stbuf;
 
 	if (cgetstr(bp, "sd", &SD) == -1)
@@ -961,7 +969,7 @@ topq(argc, argv)
 	int argc;
 	char *argv[];
 {
-	register int i;
+	int i;
 	struct stat stbuf;
 	int status, changed;
 
@@ -1052,9 +1060,9 @@ int
 doarg(job)
 	char *job;
 {
-	register struct queue **qq;
-	register int jobnum, n;
-	register char *cp, *machine;
+	struct queue **qq;
+	int jobnum, n;
+	char *cp, *machine;
 	int cnt = 0;
 	FILE *fp;
 
@@ -1125,8 +1133,8 @@ up(argc, argv)
 	int argc;
 	char *argv[];
 {
-	register int c, status;
-	register char *cp1, *cp2;
+	int c, status;
+	char *cp1, *cp2;
 	char prbuf[100];
 
 	if (argc == 1) {
@@ -1139,7 +1147,7 @@ up(argc, argv)
 			cp1 = prbuf;
 			cp2 = bp;
 			while ((c = *cp2++) && c != '|' && c != ':' &&
-			    (cp1 - prbuf) < sizeof(prbuf))
+			    (cp1 - prbuf) < sizeof(prbuf) - 1)
 				*cp1++ = c;
 			*cp1 = '\0';
 			startpr(2);

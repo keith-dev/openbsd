@@ -1,4 +1,4 @@
-/* $OpenBSD: parse_assertion.c,v 1.9 2000/06/13 19:16:16 angelos Exp $ */
+/* $OpenBSD: parse_assertion.c,v 1.11 2001/09/03 20:14:51 deraadt Exp $ */
 /*
  * The author of this code is Angelos D. Keromytis (angelos@dsl.cis.upenn.edu)
  *
@@ -7,7 +7,7 @@
  *
  * Copyright (C) 1998, 1999 by Angelos D. Keromytis.
  *	
- * Permission to use, copy, and modify this software without fee
+ * Permission to use, copy, and modify this software with or without fee
  * is hereby granted, provided that this entire notice is included in
  * all copies of any software which is or includes a copy or
  * modification of this software. 
@@ -609,7 +609,6 @@ keynote_parse_assertion(char *buf, int len, int assertion_flags)
 	    for (k = 1; te + k < as->as_buf + len && *(te + k) != '\n'; k++)   
 	      if (!isspace((int) *(te + k)))
 	      {
-		  printf("here %c\n", *(te + k));
 		  keynote_free_assertion(as);
 		  keynote_errno = ERROR_SYNTAX;
 		  return (struct assertion *) NULL;

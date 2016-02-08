@@ -1,4 +1,4 @@
-/*	$OpenBSD: calendar.h,v 1.4 1998/12/13 07:31:07 pjanzen Exp $	*/
+/*	$OpenBSD: calendar.h,v 1.7 2001/09/27 18:19:20 mickey Exp $	*/
 
 /*
  * Copyright (c) 1989, 1993, 1994
@@ -36,10 +36,12 @@
 
 extern struct passwd *pw;
 extern int doall;
+extern int bodun_always;
 extern time_t f_time;
 extern struct iovec header[];
 extern struct tm *tp;
 extern char *calendarFile;
+extern char *calendarHome;
 extern char *optarg;
 
 struct fixs {
@@ -58,6 +60,7 @@ struct event {
 struct match {
 	time_t	when;
 	char	print_date[30];
+	int	bodun;
 	int	var;
 	struct match	*next;
 };
@@ -79,7 +82,7 @@ int	 getmonth __P((char *));
 int	 easter __P((int));
 int	 paskha __P((int));
 void	 insert __P((struct event **, struct event *));
-struct match	*isnow __P((char *));
+struct match	*isnow __P((char *, int));
 FILE	*opencal __P((void));
 void	 settime __P((time_t *));
 time_t	 Mktime __P((char *));
@@ -108,3 +111,9 @@ extern int f_dayBefore;	/* days before current date */
 
 #define NUMEV 2	/* Total number of such special events */
 extern struct specialev spev[NUMEV];
+
+/* For calendar -a, specify a maximum time (in seconds) to spend parsing
+ * each user's calendar files.  This prevents them from hanging calendar
+ * (e.g. by using named pipes)
+ */
+#define USERTIMEOUT 20

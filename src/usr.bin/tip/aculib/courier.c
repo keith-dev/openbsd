@@ -1,4 +1,4 @@
-/*	$OpenBSD: courier.c,v 1.6 1997/09/01 23:24:28 deraadt Exp $	*/
+/*	$OpenBSD: courier.c,v 1.8 2001/09/26 06:07:28 pvalchev Exp $	*/
 /*	$NetBSD: courier.c,v 1.7 1997/02/11 09:24:16 mrg Exp $	*/
 
 /*
@@ -38,7 +38,7 @@
 #if 0
 static char sccsid[] = "@(#)courier.c	8.1 (Berkeley) 6/6/93";
 #endif
-static char rcsid[] = "$OpenBSD: courier.c,v 1.6 1997/09/01 23:24:28 deraadt Exp $";
+static char rcsid[] = "$OpenBSD: courier.c,v 1.8 2001/09/26 06:07:28 pvalchev Exp $";
 #endif /* not lint */
 
 /*
@@ -57,7 +57,6 @@ static	int connected = 0;
 static	jmp_buf timeoutbuf, intbuf;
 static	int coursync(), cour_connect(), cour_swallow();
 void	cour_nap();
-static	void cour_napx();
 
 void cour_disconnect __P((void));
 
@@ -109,7 +108,7 @@ badsynch:
 	connected = cour_connect();
 #ifdef ACULOG
 	if (timeout) {
-		(void)sprintf(line, "%d second dial timeout",
+		(void)sprintf(line, "%ld second dial timeout",
 			number(value(DIALTIMEOUT)));
 		logent(value(HOST), num, "cour", line);
 	}
@@ -256,9 +255,7 @@ again:
 			putchar(c);
 #endif
 	}
-error1:
 	printf("%s\r\n", dialer_buf);
-error:
 	signal(SIGALRM, f);
 	return (0);
 }
@@ -309,6 +306,7 @@ coursync()
 	return (0);
 }
 
+static void
 cour_write(fd, cp, n)
 int fd;
 char *cp;
@@ -343,46 +341,14 @@ cour_verbose_read()
 }
 #endif
 
-/*
- * Code stolen from /usr/src/lib/libc/gen/sleep.c
- */
-#define mask(s) (1<<((s)-1))
-#define setvec(vec, a) \
-        vec.sv_handler = a; vec.sv_mask = vec.sv_onstack = 0
-
-static napms = 50; /* Give the courier 50 milliseconds between characters */
-
-static int ringring;
-
+/* Give the courier 50 milliseconds between characters */
 void
 cour_nap()
 {
-	int omask;
-        struct itimerval itv, oitv;
-        register struct itimerval *itp = &itv;
-        struct sigvec vec, ovec;
+	struct timespec ts;
 
-        timerclear(&itp->it_interval);
-        timerclear(&itp->it_value);
-        if (setitimer(ITIMER_REAL, itp, &oitv) < 0)
-                return;
-        setvec(ovec, SIG_DFL);
-        omask = sigblock(mask(SIGALRM));
-        itp->it_value.tv_sec = napms/1000;
-	itp->it_value.tv_usec = ((napms%1000)*1000);
-        setvec(vec, cour_napx);
-        ringring = 0;
-        (void) sigvec(SIGALRM, &vec, &ovec);
-        (void) setitimer(ITIMER_REAL, itp, (struct itimerval *)0);
-        while (!ringring)
-                sigpause(omask &~ mask(SIGALRM));
-        (void) sigvec(SIGALRM, &ovec, (struct sigvec *)0);
-        (void) setitimer(ITIMER_REAL, &oitv, (struct itimerval *)0);
-	(void) sigsetmask(omask);
-}
+	ts.tv_sec = 0;
+	ts.tv_nsec = 50 * 1000000;
 
-static void
-cour_napx()
-{
-        ringring = 1;
+	nanosleep(&ts, NULL);
 }

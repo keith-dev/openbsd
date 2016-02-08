@@ -28,6 +28,8 @@
 
 #include <sys/param.h>
 
+#include <sys/socket.h>
+#include <net/route.h>
 #include <netinet/in_systm.h>
 #include <netinet/in.h>
 #include <netinet/ip.h>
@@ -50,13 +52,18 @@
 #include "link.h"
 #include "iplist.h"
 #include "slcompress.h"
+#include "ncpaddr.h"
+#include "ip.h"
 #include "ipcp.h"
 #include "filter.h"
 #include "descriptor.h"
 #include "mp.h"
+#include "iface.h"
 #ifndef NORADIUS
 #include "radius.h"
 #endif
+#include "ipv6cp.h"
+#include "ncp.h"
 #include "bundle.h"
 
 
@@ -66,37 +73,6 @@
  */
 #define MAXMSS(mtu) (mtu - sizeof(struct ip) - sizeof(struct tcphdr)) 
 
-
-static void MSSFixup(struct tcphdr *, ssize_t, u_int16_t);
-
-
-static struct mbuf *
-tcpmss_LayerPush(struct bundle *bundle, struct link *l, struct mbuf *bp,
-                 int pri, u_short *proto)
-{
-  struct ip *pip;
-  int hlen, plen;
-
-  if (!Enabled(bundle, OPT_TCPMSSFIXUP))
-    return bp;
-
-  bp = m_pullup(bp);
-  plen = m_length(bp);
-  pip = (struct ip *)MBUF_CTOP(bp);
-  hlen = pip->ip_hl << 2;
-
-  /*
-   * Check for MSS option only for TCP packets with zero fragment offsets
-   * and correct total and header lengths.
-   */
-  if (pip->ip_p == IPPROTO_TCP && (ntohs(pip->ip_off) & IP_OFFMASK) == 0 &&
-      ntohs(pip->ip_len) == plen && hlen <= plen &&
-      plen - hlen >= sizeof(struct tcphdr))
-    MSSFixup((struct tcphdr *)(MBUF_CTOP(bp) + hlen), plen - hlen,
-             MAXMSS(bundle->mtu));
-
-  return bp;
-}
 
 /*-
  * The following macro is used to update an
@@ -165,4 +141,46 @@ MSSFixup(struct tcphdr *tc, ssize_t pktlen, u_int16_t maxmss)
   }
 }
 
-struct layer tcpmsslayer = { LAYER_PROTO, "tcpmss", tcpmss_LayerPush, NULL };
+static struct mbuf *
+tcpmss_Check(struct bundle *bundle, struct mbuf *bp)
+{
+  struct ip *pip;
+  int hlen, plen;
+
+  if (!Enabled(bundle, OPT_TCPMSSFIXUP))
+    return bp;
+
+  bp = m_pullup(bp);
+  plen = m_length(bp);
+  pip = (struct ip *)MBUF_CTOP(bp);
+  hlen = pip->ip_hl << 2;
+
+  /*
+   * Check for MSS option only for TCP packets with zero fragment offsets
+   * and correct total and header lengths.
+   */
+  if (pip->ip_p == IPPROTO_TCP && (ntohs(pip->ip_off) & IP_OFFMASK) == 0 &&
+      ntohs(pip->ip_len) == plen && hlen <= plen &&
+      plen - hlen >= sizeof(struct tcphdr))
+    MSSFixup((struct tcphdr *)(MBUF_CTOP(bp) + hlen), plen - hlen,
+             MAXMSS(bundle->iface->mtu));
+
+  return bp;
+}
+
+static struct mbuf *
+tcpmss_LayerPush(struct bundle *bundle, struct link *l, struct mbuf *bp,
+                 int pri, u_short *proto)
+{
+	return tcpmss_Check(bundle, bp);
+}
+
+static struct mbuf *
+tcpmss_LayerPull(struct bundle *bundle, struct link *l, struct mbuf *bp,
+                 u_short *proto)
+{
+	return tcpmss_Check(bundle, bp);
+}
+
+struct layer tcpmsslayer =
+  { LAYER_PROTO, "tcpmss", tcpmss_LayerPush, tcpmss_LayerPull };

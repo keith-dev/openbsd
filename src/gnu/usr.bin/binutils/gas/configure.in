@@ -10,7 +10,7 @@ AC_INIT(as.h)
 
 AC_CANONICAL_SYSTEM
 
-AM_INIT_AUTOMAKE(gas, 2.10)
+AM_INIT_AUTOMAKE(gas, 2.10.1)
 
 AM_PROG_LIBTOOL
 
@@ -159,6 +159,7 @@ changequote([,])dnl
       arm-*-linux*aout*)	        fmt=aout em=linux ;;
       arm*-*-linux-gnu*)		fmt=elf  em=linux ;;
       arm-*-netbsd*)	                fmt=aout em=nbsd bfd_gas=yes ;;
+      arm-*-openbsd*)			fmt=aout em=nbsd bfd_gas=yes ;;
       arm-*-oabi | thumb-*-oabi)        fmt=elf ;;
       arm-epoc-pe | thumb-epoc-pe)      fmt=coff em=epoc-pe ;;
       arm-*-wince)          fmt=coff em=wince-pe bfd_gas=yes;;
@@ -350,9 +351,21 @@ changequote([,])dnl
       sparc-fujitsu-none)   fmt=aout ;;
       sparc-*-elf | sparc-*-sysv4* | sparc-*-solaris*)
 			    fmt=elf ;;
-      sparc-*-netbsd*)      fmt=aout em=nbsd ;;
-      sparc-*-openbsd*)     fmt=aout em=nbsd ;;
-
+      sparc-*-netbsd*)      em=nbsd bfd_gas=yes
+                            case ${cpu} in
+                                sparc) case ${os} in
+                                           *elf*) fmt=elf ;;
+                                           *)     fmt=aout ;;
+                                       esac ;;
+                                sparc64) fmt=elf ;;
+                            esac
+                            ;;
+      sparc-*-openbsd*)     em=nbsd
+			    case ${cpu} in
+				sparc) fmt=aout ;;
+				sparc64) fmt=elf ;;
+                            esac
+			    ;;
       strongarm-*-coff)     fmt=coff ;;
       strongarm-*-elf)      fmt=elf ;;
 

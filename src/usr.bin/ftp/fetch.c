@@ -1,4 +1,4 @@
-/*	$OpenBSD: fetch.c,v 1.33 2000/06/30 16:00:15 millert Exp $	*/
+/*	$OpenBSD: fetch.c,v 1.35 2001/10/03 18:49:39 heko Exp $	*/
 /*	$NetBSD: fetch.c,v 1.14 1997/08/18 10:20:20 lukem Exp $	*/
 
 /*-
@@ -38,7 +38,7 @@
  */
 
 #ifndef lint
-static char rcsid[] = "$OpenBSD: fetch.c,v 1.33 2000/06/30 16:00:15 millert Exp $";
+static char rcsid[] = "$OpenBSD: fetch.c,v 1.35 2001/10/03 18:49:39 heko Exp $";
 #endif /* not lint */
 
 /*
@@ -98,13 +98,14 @@ url_get(origline, proxyenv, outfile)
 {
 	struct addrinfo hints, *res0, *res;
 	int error;
-	int i, out, isftpurl, isfileurl;
-	volatile int s;
+	int i, isftpurl, isfileurl;
+	volatile int s, out;
 	size_t len;
 	char c, *cp, *ep, *portnum, *path, buf[4096];
 	char pbuf[NI_MAXSERV];
-	const char *savefile;
-	char *line, *proxy, *host, *port;
+	const char * volatile savefile;
+	char *line, *host, *port;
+	char * volatile proxy;
 	char *hosttail;
 	volatile sig_t oldintr;
 	off_t hashbytes;
@@ -114,12 +115,6 @@ url_get(origline, proxyenv, outfile)
 	proxy = NULL;
 	isftpurl = 0;
 	isfileurl = 0;
-
-#ifdef __GNUC__				/* XXX: to shut up gcc warnings */
-	(void)&out;
-	(void)&proxy;
-	(void)&savefile;
-#endif
 
 	line = strdup(origline);
 	if (line == NULL)
@@ -367,17 +362,34 @@ again:
 				errx(1, "Can't allocate memory.");
 			if ((p = strchr(h, '%')) != NULL)
 				*p = '\0';
-			snprintf(buf, sizeof(buf),
-			    "GET /%s HTTP/1.0\r\nHost: [%s]%s%s\r\n\r\n",
-			    path, h, port ? ":" : "", port ? port : "");
+			/*
+			 * Send port number only if it's specified and does not equal
+			 * 80. Some broken HTTP servers get confused if you explicitly
+			 * send them the port number.
+			 */
+			if (port && strcmp(port, "80") != 0)
+				snprintf(buf, sizeof(buf),
+				    "GET /%s HTTP/1.0\r\nHost: [%s]:%s\r\n\r\n", 
+				    path, h, port);
+			else
+				snprintf(buf, sizeof(buf),
+				    "GET /%s HTTP/1.0\r\nHost: [%s]\r\n\r\n", 
+				    path, h);
 			free(h);
 		} else {
-			snprintf(buf, sizeof(buf),
-			    "GET /%s HTTP/1.0\r\nHost: %s%s%s\r\n\r\n",
-			    path, host, port ? ":" : "", port ? port : "");
+			if (port && strcmp(port, "80") != 0)
+				snprintf(buf, sizeof(buf),
+				    "GET /%s HTTP/1.0\r\nHost: %s:%s\r\n\r\n", 
+				    path, host, port);
+			else
+				snprintf(buf, sizeof(buf),
+				    "GET /%s HTTP/1.0\r\nHost: %s\r\n\r\n", 
+				    path, host);
 		}
 	}
 	len = strlen(buf);
+	if (debug)
+		fprintf(ttyout, "Sending request:\n%s", buf);
 	if (write(s, buf, len) < len) {
 		warn("Writing HTTP request");
 		goto cleanup_url_get;

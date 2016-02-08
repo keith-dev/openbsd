@@ -1,5 +1,5 @@
+/*	$OpenBSD: rcp.c,v 1.24 2001/10/01 08:06:28 markus Exp $	*/
 /*	$NetBSD: rcp.c,v 1.9 1995/03/21 08:19:06 cgd Exp $	*/
-/*	$OpenBSD: rcp.c,v 1.19 2001/04/06 16:46:59 deraadt Exp $	*/
 
 /*
  * Copyright (c) 1983, 1990, 1992, 1993
@@ -80,7 +80,7 @@ static char rcsid[] = "$NetBSD: rcp.c,v 1.9 1995/03/21 08:19:06 cgd Exp $";
 char	dst_realm_buf[REALM_SZ];
 char	*dest_realm = NULL;
 int	use_kerberos = 1;
-CREDENTIALS 	cred;
+CREDENTIALS	cred;
 Key_schedule	schedule;
 extern	char	*krb_realmofhost();
 int	doencrypt = 0;
@@ -134,8 +134,7 @@ main(argc, argv)
 #ifdef	KERBEROS
 		case 'k':
 			dest_realm = dst_realm_buf;
-			(void)strncpy(dst_realm_buf, optarg, REALM_SZ-1);
-			dst_realm_buf[REALM_SZ-1] = '\0';
+			strlcpy(dst_realm_buf, optarg, sizeof(dst_realm_buf));
 			break;
 		case 'x':
 			doencrypt = 1;
@@ -193,14 +192,14 @@ main(argc, argv)
 		(void)seteuid(userid);
 		(void)setuid(userid);
 		source(argc, argv);
-		exit(errs);
+		exit(errs != 0);
 	}
 
 	if (tflag) {			/* Receive data. */
 		(void)seteuid(userid);
 		(void)setuid(userid);
 		sink(argc, argv);
-		exit(errs);
+		exit(errs != 0);
 	}
 
 	if (argc < 2)
@@ -230,7 +229,7 @@ main(argc, argv)
 		if (targetshouldbedirectory)
 			verifydir(argv[argc - 1]);
 	}
-	exit(errs);
+	exit(errs != 0);
 }
 
 void
@@ -410,6 +409,11 @@ source(argc, argv)
 		len = strlen(name);
 		while (len > 1 && name[len-1] == '/')
 			name[--len] = '\0';
+		if (strchr(name, '\n') != NULL) {
+			run_err("%s: skipping, filename contains a newline",
+			    name);
+			goto next;
+		}
 		if ((fd = open(name, O_RDONLY, 0)) < 0)
 			goto syserr;
 		if (fstat(fd, &stb)) {
@@ -853,12 +857,14 @@ void
 usage()
 {
 #ifdef KERBEROS
-	(void)fprintf(stderr, "%s\n%s\n",
-	    "usage: rcp [-Kpx] [-k realm] f1 f2",
-	    "   or: rcp [-Kprx] [-k realm] f1 ... fn directory");
+	(void)fprintf(stderr, "usage: %s [-Kpx] [-k realm] f1 f2\n", 
+            __progname);
+ 	(void)fprintf(stderr, "       %s [-Kprx] [-k realm] f1 ... fn directory\n",
+            __progname);
 #else
 	(void)fprintf(stderr,
-	    "usage: rcp [-p] f1 f2; or: rcp [-pr] f1 ... fn directory\n");
+	    "usage: %s [-p] f1 f2; or: rcp [-pr] f1 ... fn directory\n",
+             __progname);
 #endif
 	exit(1);
 }
@@ -907,23 +913,29 @@ run_err(fmt, va_alist)
 {
 	static FILE *fp;
 	va_list ap;
-#ifdef __STDC__
-	va_start(ap, fmt);
-#else
-	va_start(ap);
-#endif
 
 	++errs;
 	if (fp == NULL && !(fp = fdopen(rem, "w")))
 		return;
 	(void)fprintf(fp, "%c", 0x01);
 	(void)fprintf(fp, "rcp: ");
+#ifdef __STDC__
+	va_start(ap, fmt);
+#else
+	va_start(ap);
+#endif
 	(void)vfprintf(fp, fmt, ap);
+	va_end(ap);
 	(void)fprintf(fp, "\n");
 	(void)fflush(fp);
 
-	if (!iamremote)
+	if (!iamremote) {
+#ifdef __STDC__
+		va_start(ap, fmt);
+#else
+		va_start(ap);
+#endif
 		vwarnx(fmt, ap);
-
-	va_end(ap);
+		va_end(ap);
+	}
 }

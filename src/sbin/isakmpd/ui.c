@@ -1,9 +1,9 @@
-/*	$OpenBSD: ui.c,v 1.18 2001/04/09 21:21:57 ho Exp $	*/
+/*	$OpenBSD: ui.c,v 1.22 2001/10/05 08:18:37 ho Exp $	*/
 /*	$EOM: ui.c,v 1.43 2000/10/05 09:25:12 niklas Exp $	*/
 
 /*
  * Copyright (c) 1998, 1999, 2000 Niklas Hallqvist.  All rights reserved.
- * Copyright (c) 1999, 2000 Håkan Olsson.  All rights reserved.
+ * Copyright (c) 1999, 2000, 2001 Håkan Olsson.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -59,12 +59,15 @@
 
 #define BUF_SZ 256
 
+/* from isakmpd.c */
+void daemon_shutdown_now (int);
+
 char *ui_fifo = FIFO;
 int ui_socket;
 
 /* Create and open the FIFO used for user control.  */
 void
-ui_init ()
+ui_init (void)
 {
   struct stat st;
 
@@ -108,6 +111,7 @@ ui_connect (char *cmd)
       log_print ("ui_connect: command \"%s\" malformed", cmd);
       return;
     }
+  log_print ("ui_connect: setup connection \"%s\"", name);
   connection_setup (name);
 }
 
@@ -123,6 +127,7 @@ ui_teardown (char *cmd)
       log_print ("ui_teardown: command \"%s\" malformed", cmd);
       return;
     }
+  log_print ("ui_teardown: teardown connection \"%s\"", name);
   connection_teardown (name);
   while ((sa = sa_lookup_by_name (name, 2)) != 0)
     sa_delete (sa, 1);
@@ -165,6 +170,7 @@ ui_config (char *cmd)
   else
     goto fail;
 
+  log_print ("ui_config: \"%s\"", cmd);
   conf_end (trans, 1);
   return;
 
@@ -207,6 +213,8 @@ ui_delete (char *cmd)
       log_print ("ui_delete: command \"%s\" found no SA", cmd);
       return;
     }
+  log_print ("ui_delete: deleting SA for cookie \"%s\" msgid \"%s\"",
+	     cookies_str, message_id_str);
   sa_delete (sa, 1);
 }
 
@@ -216,13 +224,35 @@ static void
 ui_debug (char *cmd)
 {
   int cls, level;
+  char subcmd[3];
 
-  if (sscanf (cmd, "D %d %d", &cls, &level) != 2)
+  if (sscanf (cmd, "D %d %d", &cls, &level) == 2)
     {
-      log_print ("ui_debug: command \"%s\" malformed", cmd);
+      log_debug_cmd (cls, level);
       return;
     }
-  log_debug_cmd (cls, level);
+  else if (sscanf (cmd, "D %2s %d", subcmd, &level) == 2)
+    {
+      switch (subcmd[0])
+	{
+	case 'A':
+	  for (cls = 0; cls < LOG_ENDCLASS; cls++)
+	    log_debug_cmd (cls, level);
+	  return;
+	}
+    }
+  else if (sscanf (cmd, "D %2s", subcmd) == 1)
+    {
+      switch (subcmd[0])
+	{
+	case 'T':
+	  log_debug_toggle ();
+	  return;
+	}
+    }
+
+  log_print ("ui_debug: command \"%s\" malformed", cmd);
+  return;
 }
 
 static void
@@ -251,6 +281,18 @@ ui_packetlog (char *cmd)
   log_print ("ui_packetlog: command \"%s\" malformed", cmd);
 }
 #endif /* USE_DEBUG */
+
+static void
+ui_shutdown_daemon (char *cmd)
+{
+  if (strlen (cmd) == 1)
+    {
+      log_print ("ui_shutdown_daemon: received shutdown command");
+      daemon_shutdown_now (0);
+    }
+  else
+    log_print ("ui_shutdown_daemon: command \"%s\" malformed", cmd);
+}
 
 /* Report SAs and ongoing exchanges.  */
 void
@@ -293,6 +335,16 @@ ui_handle_command (char *line)
       break;
 #endif
 
+#ifdef USE_DEBUG
+    case 'p':
+      ui_packetlog (line);
+      break;
+#endif
+
+    case 'Q':
+      ui_shutdown_daemon (line);
+      break;
+
     case 'r':
       ui_report (line);
       break;
@@ -300,12 +352,6 @@ ui_handle_command (char *line)
     case 't':
       ui_teardown (line);
       break;
-
-#ifdef USE_DEBUG
-    case 'p':
-      ui_packetlog (line);
-      break;
-#endif
 
     default:
       log_print ("ui_handle_messages: unrecognized command: '%c'", line[0]);
@@ -318,7 +364,7 @@ ui_handle_command (char *line)
  * troubles with non-blocking fifos.
  */
 void
-ui_handler ()
+ui_handler (void)
 {
   static char *buf = 0;
   static char *p;

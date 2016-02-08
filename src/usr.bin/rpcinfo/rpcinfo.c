@@ -1,9 +1,9 @@
-/*	$OpenBSD: rpcinfo.c,v 1.5 2000/07/31 16:55:37 deraadt Exp $	*/
+/*	$OpenBSD: rpcinfo.c,v 1.7 2001/07/17 02:24:00 pvalchev Exp $	*/
 
 #ifndef lint
 /*static char sccsid[] = "from: @(#)rpcinfo.c 1.22 87/08/12 SMI";*/
 /*static char sccsid[] = "from: @(#)rpcinfo.c	2.2 88/08/11 4.0 RPCSRC";*/
-static char rcsid[] = "$OpenBSD: rpcinfo.c,v 1.5 2000/07/31 16:55:37 deraadt Exp $";
+static char rcsid[] = "$OpenBSD: rpcinfo.c,v 1.7 2001/07/17 02:24:00 pvalchev Exp $";
 #endif
 
 /*
@@ -51,6 +51,9 @@ static char rcsid[] = "$OpenBSD: rpcinfo.c,v 1.5 2000/07/31 16:55:37 deraadt Exp
 #include <rpc/pmap_prot.h>
 #include <rpc/pmap_clnt.h>
 #include <signal.h>
+#include <string.h>
+#include <stdlib.h>
+#include <unistd.h>
 #include <ctype.h>
 #include <errno.h>
 #include <arpa/inet.h>
@@ -64,7 +67,7 @@ void	udpping(u_short portflag, int argc, char **argv);
 void	tcpping(u_short portflag, int argc, char **argv);
 int	pstatus(CLIENT *client, u_long prognum, u_long vers);
 void	pmapdump(int argc, char **argv);
-bool_t	reply_proc(void *res, struct sockaddr_in *who);
+bool_t	reply_proc(caddr_t res, struct sockaddr_in *who);
 void	brdcst(int argc, char **argv);
 void	deletereg(int argc, char **argv);
 void	setreg(int argc, char **argv);
@@ -563,7 +566,7 @@ pmapdump(argc, argv)
 /*ARGSUSED*/
 bool_t
 reply_proc(res, who)
-	void *res;			/* Nothing comes back */
+	caddr_t res;			/* Nothing comes back */
 	struct sockaddr_in *who;	/* Who sent us the reply */
 {
 	register struct hostent *hp;
@@ -591,8 +594,7 @@ brdcst(argc, argv)
 		usage("version number out of range");
 		
 	rpc_stat = clnt_broadcast(prognum, vers_num, NULLPROC, xdr_void,
-	    (char *)NULL, xdr_void, (char *)NULL,
-	    reply_proc);
+	    (char *)NULL, xdr_void, (char *)NULL, reply_proc);
 	if ((rpc_stat != RPC_SUCCESS) && (rpc_stat != RPC_TIMEDOUT)) {
 		fprintf(stderr, "rpcinfo: broadcast failed: %s\n",
 		    clnt_sperrno(rpc_stat));
@@ -673,7 +675,6 @@ getprognum(arg, ulp)
 	u_long *ulp;
 {
 	register struct rpcent *rpc;
-	register u_long prognum;
 
 	if (isalpha(*arg)) {
 		rpc = getrpcbyname(arg);

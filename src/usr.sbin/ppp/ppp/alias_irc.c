@@ -1,3 +1,31 @@
+/*-
+ * Copyright (c) 2001 Charles Mott <cmott@scientech.com>
+ * All rights reserved.
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in the
+ *    documentation and/or other materials provided with the distribution.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE AUTHOR AND CONTRIBUTORS ``AS IS'' AND
+ * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+ * ARE DISCLAIMED.  IN NO EVENT SHALL THE AUTHOR OR CONTRIBUTORS BE LIABLE
+ * FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+ * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
+ * OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
+ * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
+ * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
+ * SUCH DAMAGE.
+ *
+ * $OpenBSD: alias_irc.c,v 1.9 2001/09/13 10:32:56 brian Exp $
+ */
+
 /* Alias_irc.c intercepts packages contain IRC CTCP commands, and
 	changes DCC commands to export a port on the aliasing host instead
 	of an aliased host.
@@ -10,17 +38,12 @@
 	 The handling of this is copied more-or-less verbatim from
 	 ftp_alias.c
 
-    This software is placed into the public domain with no restrictions
-    on its distribution.
-
 	 Initial version: Eivind Eklund <perhaps@yes.no> (ee) 97-01-29
 
          Version 2.1:  May, 1997 (cjm)
              Very minor changes to conform with
              local/global/function naming conventions
              withing the packet alising module.
-
-    $OpenBSD: alias_irc.c,v 1.4 2000/11/02 00:53:47 brian Exp $
 */
 
 /* Includes */
@@ -213,6 +236,12 @@ lFOUND_CTCP:
 			 true_addr.s_addr = htonl(org_addr);
 			 destaddr.s_addr = 0;
 
+			 /* Sanity/Security checking */
+			 if (!org_addr || !org_port ||
+			     pip->ip_src.s_addr != true_addr.s_addr ||
+			     org_port < IPPORT_RESERVED)
+				 goto lBAD_CTCP;
+
 			 /* Steal the FTP_DATA_PORT - it doesn't really matter, and this
 				 would probably allow it through at least _some_
 				 firewalls. */
@@ -223,6 +252,7 @@ lFOUND_CTCP:
 			 if ( dcc_link ) {
 				 struct in_addr alias_address;	/* Address from aliasing */
 				 u_short alias_port;	/* Port given by aliasing */
+				 int n;
 
 #ifndef NO_FW_PUNCH
 				 /* Generate firewall hole as appropriate */
@@ -230,17 +260,26 @@ lFOUND_CTCP:
 #endif
 
 				 alias_address = GetAliasAddress(link);
-				 iCopy += snprintf(&newpacket[iCopy],
+				 n = snprintf(&newpacket[iCopy],
 										 sizeof(newpacket)-iCopy, 
 										 "%lu ", (u_long)htonl(alias_address.s_addr));
-				 if( iCopy >= sizeof(newpacket) ) { /* Truncated/fit exactly - bad news */
+				 if( n < 0 ) {
+					 DBprintf(("DCC packet construct failure.\n"));
+					 goto lBAD_CTCP;
+				 }
+				 if( (iCopy += n) >= sizeof(newpacket) ) { /* Truncated/fit exactly - bad news */
 					 DBprintf(("DCC constructed packet overflow.\n"));
 					 goto lBAD_CTCP;
 				 }
 				 alias_port = GetAliasPort(dcc_link);
-				 iCopy += snprintf(&newpacket[iCopy],
+				 n = snprintf(&newpacket[iCopy],
 										 sizeof(newpacket)-iCopy, 
 										 "%u", htons(alias_port) );
+				 if( n < 0 ) {
+					 DBprintf(("DCC packet construct failure.\n"));
+					 goto lBAD_CTCP;
+				 }
+				 iCopy += n;
 				 /* Done - truncated cases will be taken care of by lBAD_CTCP */
 				 DBprintf(("Aliased IP %lu and port %u\n", alias_address.s_addr, (unsigned)alias_port));
 			 }

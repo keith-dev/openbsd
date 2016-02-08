@@ -1,4 +1,4 @@
-/*	$OpenBSD: pass2.c,v 1.8 2001/03/02 08:33:55 art Exp $	*/
+/*	$OpenBSD: pass2.c,v 1.10 2001/07/07 18:26:12 deraadt Exp $	*/
 /*	$NetBSD: pass2.c,v 1.17 1996/09/27 22:45:15 christos Exp $	*/
 
 /*
@@ -38,7 +38,7 @@
 #if 0
 static char sccsid[] = "@(#)pass2.c	8.6 (Berkeley) 10/27/94";
 #else
-static char rcsid[] = "$OpenBSD: pass2.c,v 1.8 2001/03/02 08:33:55 art Exp $";
+static char rcsid[] = "$OpenBSD: pass2.c,v 1.10 2001/07/07 18:26:12 deraadt Exp $";
 #endif
 #endif /* not lint */
 
@@ -86,7 +86,7 @@ void
 pass2()
 {
 	register struct dinode *dp;
-	register struct inoinfo **inpp, *inp;
+	register struct inoinfo **inpp, *inp, *pinp;
 	struct inoinfo **inpend;
 	struct inodesc curino;
 	struct dinode dino;
@@ -143,6 +143,7 @@ pass2()
 	default:
 		errexit("BAD STATE %d FOR ROOT INODE", statemap[ROOTINO]);
 	}
+	statemap[ROOTINO] = DFOUND;
 	if (newinofmt) {
 		statemap[WINO] = FSTATE;
 		typemap[WINO] = DT_WHT;
@@ -177,12 +178,12 @@ pass2()
 		} else if ((inp->i_isize & (DIRBLKSIZ - 1)) != 0) {
 			getpathname(pathbuf, inp->i_number, inp->i_number);
 			if (usedsoftdep)
-			        pfatal("%s %s: LENGTH %d NOT MULTIPLE of %d",
-				       "DIRECTORY", pathbuf, inp->i_isize,
+			        pfatal("%s %s: LENGTH %ld NOT MULTIPLE of %d",
+				       "DIRECTORY", pathbuf, (long)inp->i_isize,
 				       DIRBLKSIZ);
 			else
-				pwarn("%s %s: LENGTH %d NOT MULTIPLE OF %d",
-				      "DIRECTORY", pathbuf, inp->i_isize,
+				pwarn("%s %s: LENGTH %ld NOT MULTIPLE OF %d",
+				      "DIRECTORY", pathbuf, (long)inp->i_isize,
 				      DIRBLKSIZ);
 			if (preen)
 				printf(" (ADJUSTED)\n");
@@ -235,9 +236,23 @@ pass2()
 	}
 	info_fn = NULL;
 	/*
+	 * Create a list of children for each directory.
+	 */
+	inpend = &inpsort[inplast];
+	for (inpp = inpsort; inpp < inpend; inpp++) {
+		inp = *inpp;
+		if (inp->i_parent == 0 ||
+		    inp->i_number == ROOTINO)
+			continue;
+		pinp = getinoinfo(inp->i_parent);
+		inp->i_parentp = pinp;
+		inp->i_sibling = pinp->i_child;
+		pinp->i_child = inp;
+	}
+	/*
 	 * Mark all the directories that can be found from the root.
 	 */
-	propagate();
+	propagate(ROOTINO);
 }
 
 static int
@@ -467,7 +482,7 @@ again:
 					n = 1;
 					break;
 				}
-				else if ((n = reply("REMOVE")) == 1)
+				if ((n = reply("REMOVE")) == 1)
 					break;
 			}
 			if (idesc->id_entryno > 2)

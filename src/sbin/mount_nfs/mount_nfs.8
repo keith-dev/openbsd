@@ -1,4 +1,4 @@
-.\"	$OpenBSD: mount_nfs.8,v 1.21 2000/11/09 17:53:00 aaron Exp $
+.\"	$OpenBSD: mount_nfs.8,v 1.25 2001/10/03 18:50:07 hin Exp $
 .\"	$NetBSD: mount_nfs.8,v 1.3 1996/02/18 11:59:10 fvdl Exp $
 .\"
 .\" Copyright (c) 1992, 1993, 1994, 1995
@@ -42,14 +42,13 @@
 .Nd mount nfs file systems
 .Sh SYNOPSIS
 .Nm mount_nfs
-.Op Fl 23KPTUbcdilqs
+.Op Fl 23PTUbcdilqs
 .Op Fl D Ar deadthresh
 .Op Fl I Ar readdirsize
 .Op Fl L Ar leaseterm
 .Op Fl R Ar retrycnt
 .Op Fl a Ar maxreadahead
 .Op Fl g Ar maxgroups
-.Op Fl m Ar realm
 .Op Fl o Ar options
 .Op Fl r Ar readsize
 .Op Fl t Ar timeout
@@ -79,34 +78,10 @@ Use the NFS Version 2 protocol.
 Use the NFS Version 3 protocol.
 The default is to try version 3 first, and
 fall back to version 2 if the mount fails.
-.It Fl D Ar deadthresh
-Used with NQNFS to set the
-.Dq "dead server threshold"
-to the specified number of round trip timeout intervals.
-After a
-.Dq "dead server threshold"
-of retransmit timeouts,
-cached data for the unresponsive server is assumed to still be valid.
-Values may be set in the range of 1 - 9, with 9 referring to an
-.Dq "infinite dead threshold"
-(i.e., never assume cached data still valid).
-This option is not generally recommended and is really an experimental
-feature.
 .It Fl I Ar readdirsize
 Set the readdir read size to the specified value.
 The value should normally
 be a multiple of DIRBLKSIZ that is <= the read size for the mount.
-.It Fl K
-Pass Kerberos authenticators to the server for client-to-server
-user-credential mapping.
-This requires that the kernel be built with the NFSKERB option.
-(Refer to the INTERNET-DRAFT titled
-.%T "Authentication Mechanisms for ONC RPC" ,
-for more information.)
-.It Fl L Ar leaseterm
-Used with NQNFS to set the lease term to the specified number of seconds.
-Only use this argument for mounts with a large round trip delay.
-Values are normally in the 10-30 second range.
 .It Fl P
 The kernel always uses a reserved port number to communicate with
 clients.
@@ -159,7 +134,7 @@ Make the mount interruptible, which implies that file system calls that
 are delayed due to an unresponsive server will fail with EINTR when a
 termination signal is posted for the process.
 .It Fl l
-Used with NQNFS and NFSV3 to specify that the \fBReaddirPlus\fR RPC should
+Used with NFSV3 to specify that the \fBReaddirPlus\fR RPC should
 be used.
 This option reduces RPC traffic for cases such as
 .Dq "ls -l" ,
@@ -168,11 +143,6 @@ Try this option and see whether performance improves or degrades.
 Probably
 most useful for client to server network interconnects with a large bandwidth
 times delay product.
-.It Fl m Ar realm
-Set the Kerberos realm to the string argument.
-Used with the
-.Fl K
-option for mounts to other realms.
 .It Fl o Ar options
 Options are specified with a
 .Fl o
@@ -185,17 +155,9 @@ The following NFS specific option is also available:
 .It port=portnumber
 Use specified port number for NFS requests.
 The default is to query the portmapper for the NFS port.
+.It noac
+Turn off attribute caching for both directories and files
 .El
-.It Fl q
-Use the leasing extensions to the NFS Version 3 protocol
-to maintain cache consistency.
-This protocol version 2 revision to Not Quite Nfs (NQNFS)
-is only supported by this updated release of NFS code.
-It is not backwards compatible with the version 1 NQNFS protocol
-that was part of the first release of 4.4BSD-Lite.
-To interoperate with a first release 4.4BSD-Lite NFS system you will have to
-avoid this option until you have had an opportunity to upgrade the NFS code
-to release 2 of 4.4BSD-Lite on all your systems.
 .It Fl r Ar readsize
 Set the read data size to the specified value.
 It should normally be a power of 2 greater than or equal to 1024.
@@ -248,7 +210,7 @@ Set the retransmit timeout count for soft mounts to the specified value.
 In versions prior to
 .Ox 2.7
 .Nm nfsiod
-daemons were running to improve perfomance of client NFS I/O.
+daemons were running to improve performance of client NFS I/O.
 This is no longer done this way.
 Use
 .Xr sysctl 8

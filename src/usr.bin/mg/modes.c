@@ -1,8 +1,8 @@
-/*	$OpenBSD: modes.c,v 1.4 2001/01/29 01:58:09 niklas Exp $	*/
+/*	$OpenBSD: modes.c,v 1.6 2001/05/24 10:43:21 art Exp $	*/
 
 /*
- * Commands to toggle modes.   Without an argument, these functions will 
- * toggle the given mode.  A negative or zero argument will turn the mode 
+ * Commands to toggle modes.   Without an argument, these functions will
+ * toggle the given mode.  A negative or zero argument will turn the mode
  * off.  A positive argument will turn the mode on.
  */
 
@@ -12,7 +12,7 @@
 static int	changemode	__P((int, int, char *));
 
 int	 defb_nmodes = 0;
-MAPS	*defb_modes[PBMODES] = { &map_table[0] };
+MAPS	*defb_modes[PBMODES] = { &fundamental_mode };
 int	 defb_flag = 0;
 
 static int
@@ -47,7 +47,7 @@ changemode(f, n, mode)
 		curbp->b_modes[++(curbp->b_nmodes)] = m;
 	} else {
 		/* fundamental is b_modes[0] and can't be unset */
-		for (i = 1; i <= curbp->b_nmodes && m != curbp->b_modes[i]; 
+		for (i = 1; i <= curbp->b_nmodes && m != curbp->b_modes[i];
 		    i++);
 		if (i > curbp->b_nmodes)
 			return TRUE;	/* mode wasn't set */
@@ -160,9 +160,9 @@ set_default_mode(f, n)
 		defb_nmodes--;
 	}
 	if (strcmp(mode, "overwrite") == 0) {
-		if (n <= 0) 
+		if (n <= 0)
 			defb_flag &= ~BFOVERWRITE;
-		else 
+		else
 			defb_flag |= BFOVERWRITE;
 	}
 #ifdef NOTAB

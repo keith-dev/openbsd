@@ -1,4 +1,4 @@
-.\"	$OpenBSD: bpf.4,v 1.7 2001/03/26 05:36:06 aaron Exp $
+.\"	$OpenBSD: bpf.4,v 1.12 2001/10/05 14:45:53 mpech Exp $
 .\"     $NetBSD: bpf.4,v 1.7 1995/09/27 18:31:50 thorpej Exp $
 .\"
 .\" Copyright (c) 1990 The Regents of the University of California.
@@ -125,9 +125,9 @@ Sets the buffer length for reads on
 files.
 The buffer must be set before the file is attached to an interface with
 .Dv BIOCSETIF .
-If the requested buffer size cannot be accomodated, the closest allowable
+If the requested buffer size cannot be accommodated, the closest allowable
 size will be set and returned in the argument.
-A read call will reseult in
+A read call will result in
 .Er EIO
 if it is passed a buffer that is not this size.
 .It Dv BIOCGDLT Pf ( Li u_int Ns No )
@@ -238,7 +238,7 @@ for an explanation of the filter language.
 .It Dv BIOCVERSION Pf ( Li "struct bpf_version" Ns No )
 Returns the major and minor version numbers of the filter language currently
 recognized by the kernel.
-Before installating a filter, applications must check that the current version
+Before installing a filter, applications must check that the current version
 is compatible with the running kernel.
 Version numbers are compatible if the major numbers match and the application
 minor is less than or equal to the kernel minor.
@@ -260,7 +260,7 @@ from
 An incompatible filter may result in undefined behavior (most likely, an
 error returned by
 .Xr ioctl 2
-or haphazard packet mactching).
+or haphazard packet matching).
 .It Xo Dv BIOCSRSIG , Dv BIOCGRSIG (
 .Li u_int Ns No )
 .Xc
@@ -269,6 +269,15 @@ This signal will be sent to the process or process group specified by
 .Dv FIOSETOWN .
 It defaults to
 .Dv SIGIO .
+.It Xo Dv BIOCSHDRCMPLT , Dv BIOCGHDRCMPLT (
+.Li u_int Ns No )
+.Xc
+Set or get the status of the ``header complete'' flag.
+Set to zero if the link level source address should be filled in
+automatically by the the interface output routine.
+Set to one if the link level source address will be written,
+as provided, to the wire.
+This flag is initialized to zero by default.
 .El
 .Ss Standard ioctls
 .Nm
@@ -320,11 +329,12 @@ The following structure is prepended to each packet returned by
 .Xr read 2 :
 .Pp
 .Bd -literal -offset indent
+
 struct bpf_hdr {
-	struct timeval bh_tstamp;
-	u_long bh_caplen;
-	u_long bh_datalen;
-	u_short bh_hdrlen;
+	struct bpf_timeval bh_tstamp;
+	u_int32_t	bh_caplen;
+	u_int32_t	bh_datalen;
+	u_int16_t	bh_hdrlen;
 };
 .Ed
 .Pp
@@ -354,7 +364,7 @@ improves performance on many other architectures.
 The packet filter ensures that the
 .Fa bpf_hdr
 and the network layer header will be word aligned.
-Suitable precuations must be taken when accessing the link layer protocol
+Suitable precautions must be taken when accessing the link layer protocol
 fields on alignment restricted machines.
 (This isn't a problem on an Ethernet, since the type field is a
 .Li short
@@ -398,10 +408,10 @@ The following structure defines the instruction format:
 .Pp
 .Bd -literal -offset indent
 struct bpf_insn {
-	u_short code;
-	u_char jt;
-	u_char jf;
-	long k;
+	u_int16_t	code;
+	u_char		jt;
+	u_char		jf;
+	u_int32_t	k;
 };
 .Ed
 .Pp
@@ -530,7 +540,7 @@ A <- M[k]
 .El
 .It Dv BPF_LDX
 These instructions load a value into the index register.
-Note that the addressign modes are more restricted than those of the
+Note that the addressing modes are more restricted than those of the
 accumulator loads, but they include
 .Dv BPF_MSH ,
 a hack for efficiently loading the IP header length.
@@ -761,7 +771,7 @@ pc += (A & X) ? jt : jf
 The return instructions terminate the filter program and specify the amount
 of packet to accept (i.e., they return the truncation amount).
 A return value of zero indicates that the packet should be ignored.
-The return value is either a constnat
+The return value is either a constant
 .Pf ( Dv BPF_K )
 of the accumulator
 .Pf ( Dv BPF_A ) .
@@ -878,7 +888,7 @@ struct bpf_insn insns[] = {
 BPF devices
 .El
 .Sh AUTHORS
-Steve McCanne of Lawrence Berkeley Laboratary implemented BPF in Summer 1990.
+Steve McCanne of Lawrence Berkeley Laboratory implemented BPF in Summer 1990.
 Much of the design is due to Van Jacobson.
 .Sh HISTORY
 The Enet packet filter was created in 1980 by Mike Accetta and Rick Rashid
@@ -895,17 +905,10 @@ ioctl).
 A file that does not request promiscuous mode may receive promiscuously
 received packets as a side effect of another file requesting this mode on
 the same hardware interface.
-This could be fixed in the kernel with additional processing overead.
+This could be fixed in the kernel with additional processing overhead.
 However, we favor the model where all files must assume that the interface
 is promiscuous, and if so desired, must utilize a filter to reject foreign
 packets.
 .Pp
 Data link protocols with variable length headers are not currently supported.
 .Pp
-Under SunOS, if a
-.Nm
-application reads more than 2^31 bytes of data, read will fail with
-.Er EINVAL .
-You can either fix the bug in SunOS, or lseek to 0 when read fails for this
-reason.
-

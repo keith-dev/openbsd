@@ -1,4 +1,4 @@
-/*	$OpenBSD: transport.h,v 1.7 2000/08/03 07:23:55 niklas Exp $	*/
+/*	$OpenBSD: transport.h,v 1.10 2001/08/23 23:11:02 angelos Exp $	*/
 /*	$EOM: transport.h,v 1.16 2000/07/17 18:57:59 provos Exp $	*/
 
 /*
@@ -61,6 +61,9 @@ struct transport_vtbl {
   /* Create a transport instance of this method.  */
   struct transport *(*create) (char *);
 
+  /* Reinitialize specific transport.  */
+  void (*reinit) (void);
+
   /* Remove a transport instance of this method.  */
   void (*remove) (struct transport *);
 
@@ -84,15 +87,15 @@ struct transport_vtbl {
 
   /*
    * Fill out a sockaddr structure with the transport's destination end's
-   * address info.  XXX Why not size_t * instead of int *?
+   * address info.
    */
-  void (*get_dst) (struct transport *, struct sockaddr **, int *);
+  void (*get_dst) (struct transport *, struct sockaddr **);
 
   /*
    * Fill out a sockaddr structure with the transport's source end's
-   * address info.  XXX Why not size_t * instead of int *?
+   * address info.
    */
-  void (*get_src) (struct transport *, struct sockaddr **, int *);
+  void (*get_src) (struct transport *, struct sockaddr **);
 
   /*
    * Return a string with decoded src and dst information
@@ -119,6 +122,8 @@ struct transport {
 
 /* Set if this is a transport we want to listen on.  */
 #define TRANSPORT_LISTEN	1
+/* Used for mark-and-sweep-type garbage collection of transports */
+#define TRANSPORT_MARK		2
 
 extern void transport_add (struct transport *);
 extern struct transport *transport_create (char *, char *);
@@ -132,5 +137,5 @@ extern void transport_reference (struct transport *);
 extern void transport_release (struct transport *);
 extern void transport_report (void);
 extern void transport_send_messages (fd_set *);
-
+extern void transport_reinit (void);
 #endif /* _TRANSPORT_H_ */

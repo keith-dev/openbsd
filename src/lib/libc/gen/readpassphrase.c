@@ -26,7 +26,7 @@
  */
 
 #if defined(LIBC_SCCS) && !defined(lint)
-static char rcsid[] = "$OpenBSD: readpassphrase.c,v 1.2 2000/11/29 18:41:12 millert Exp $";
+static const char rcsid[] = "$OpenBSD: readpassphrase.c,v 1.7 2001/08/07 19:34:11 millert Exp $";
 #endif /* LIBC_SCCS and not lint */
 
 #include <ctype.h>
@@ -47,9 +47,9 @@ readpassphrase(prompt, buf, bufsiz, flags)
 	size_t bufsiz;
 	int flags;
 {
-	struct termios term;
+	struct termios term, oterm;
 	char ch, *p, *end;
-	int echo, input, output;
+	int input, output;
 	sigset_t oset, nset;
 
 	/* I suppose we could alloc on demand in this case (XXX). */
@@ -82,13 +82,16 @@ readpassphrase(prompt, buf, bufsiz, flags)
 	(void)sigprocmask(SIG_BLOCK, &nset, &oset);
 
 	/* Turn off echo if possible. */
-	echo = 0;
-	if (!(flags & RPP_ECHO_ON)) {
-		if (tcgetattr(input, &term) == 0 && (term.c_lflag & ECHO)) {
-			echo = 1;
+	if (tcgetattr(input, &oterm) == 0) {
+		memcpy(&term, &oterm, sizeof(term));
+		if (!(flags & RPP_ECHO_ON) && (term.c_lflag & ECHO))
 			term.c_lflag &= ~ECHO;
-			(void)tcsetattr(input, TCSAFLUSH|TCSASOFT, &term);
-		}
+		if (term.c_cc[VSTATUS] != _POSIX_VDISABLE)
+			term.c_cc[VSTATUS] = _POSIX_VDISABLE;
+		(void)tcsetattr(input, TCSAFLUSH|TCSASOFT, &term);
+	} else {
+		memset(&term, 0, sizeof(term));
+		memset(&oterm, 0, sizeof(oterm));
 	}
 
 	(void)write(output, prompt, strlen(prompt));
@@ -96,7 +99,7 @@ readpassphrase(prompt, buf, bufsiz, flags)
 	for (p = buf; read(input, &ch, 1) == 1 && ch != '\n' && ch != '\r';) {
 		if (p < end) {
 			if ((flags & RPP_SEVENBIT))
-				ch = ch &= 0x7f;
+				ch &= 0x7f;
 			if (isalpha(ch)) {
 				if ((flags & RPP_FORCELOWER))
 					ch = tolower(ch);
@@ -107,11 +110,12 @@ readpassphrase(prompt, buf, bufsiz, flags)
 		}
 	}
 	*p = '\0';
-	if (echo) {
+	if (!(term.c_lflag & ECHO))
 		(void)write(output, "\n", 1);
-		term.c_lflag |= ECHO;
-		(void)tcsetattr(input, TCSAFLUSH|TCSASOFT, &term);
-	}
+
+	/* Restore old terminal settings and signal mask. */
+	if (memcmp(&term, &oterm, sizeof(term)) != 0)
+		(void)tcsetattr(input, TCSAFLUSH|TCSASOFT, &oterm);
 	(void)sigprocmask(SIG_SETMASK, &oset, NULL);
 	if (input != STDIN_FILENO)
 		(void)close(input);

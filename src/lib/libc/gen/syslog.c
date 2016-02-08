@@ -32,7 +32,7 @@
  */
 
 #if defined(LIBC_SCCS) && !defined(lint)
-static char rcsid[] = "$OpenBSD: syslog.c,v 1.9 2000/01/02 23:35:58 hugh Exp $";
+static char rcsid[] = "$OpenBSD: syslog.c,v 1.11 2001/08/18 22:56:22 deraadt Exp $";
 #endif /* LIBC_SCCS and not lint */
 
 #include <sys/types.h>
@@ -142,7 +142,9 @@ vsyslog(pri, fmt, ap)
 	
 #define	DEC()	\
 	do {					\
-		if (prlen >= tbuf_left)		\
+		if (prlen < 0)			\
+			prlen = 0;		\
+		else if (prlen >= tbuf_left)	\
 			prlen = tbuf_left - 1;	\
 		p += prlen;			\
 		tbuf_left -= prlen;		\
@@ -278,9 +280,8 @@ connectlog()
 		memset(&SyslogAddr, '\0', sizeof(SyslogAddr));
 		SyslogAddr.sun_len = sizeof(SyslogAddr);
 		SyslogAddr.sun_family = AF_UNIX;
-		(void)strncpy(SyslogAddr.sun_path, _PATH_LOG,
-		    sizeof(SyslogAddr.sun_path) - 1);
-		SyslogAddr.sun_path[sizeof(SyslogAddr.sun_path) - 1] = '\0';
+		strlcpy(SyslogAddr.sun_path, _PATH_LOG,
+		    sizeof(SyslogAddr.sun_path));
 		if (connect(LogFile, (struct sockaddr *)&SyslogAddr,
 		    sizeof(SyslogAddr)) == -1) {
 			(void)close(LogFile);

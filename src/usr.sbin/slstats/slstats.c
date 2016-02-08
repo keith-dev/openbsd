@@ -1,4 +1,4 @@
-/*	$OpenBSD: slstats.c,v 1.9 1998/07/08 22:13:30 deraadt Exp $	*/
+/*	$OpenBSD: slstats.c,v 1.12 2001/08/09 08:45:32 deraadt Exp $	*/
 /*	$NetBSD: slstats.c,v 1.6.6.1 1996/06/07 01:42:30 thorpej Exp $	*/
 
 /*
@@ -25,7 +25,7 @@
  */
 
 #ifndef lint
-static char rcsid[] = "$OpenBSD: slstats.c,v 1.9 1998/07/08 22:13:30 deraadt Exp $";
+static char rcsid[] = "$OpenBSD: slstats.c,v 1.12 2001/08/09 08:45:32 deraadt Exp $";
 #endif
 
 #define INET
@@ -34,6 +34,7 @@ static char rcsid[] = "$OpenBSD: slstats.c,v 1.9 1998/07/08 22:13:30 deraadt Exp
 #include <sys/mbuf.h>
 #include <sys/types.h>
 #include <sys/socket.h>
+#include <sys/ioctl.h>
 #include <sys/file.h>
 
 #include <net/if.h>
@@ -49,7 +50,6 @@ static char rcsid[] = "$OpenBSD: slstats.c,v 1.9 1998/07/08 22:13:30 deraadt Exp
 #include <err.h>
 #include <errno.h>
 #include <fcntl.h>
-#include <kvm.h>
 #include <limits.h>
 #include <signal.h>
 #include <stdio.h>
@@ -59,22 +59,13 @@ static char rcsid[] = "$OpenBSD: slstats.c,v 1.9 1998/07/08 22:13:30 deraadt Exp
 #include <string.h>
 #include <unistd.h>
 
-struct nlist nl[] = {
-#define N_SOFTC 0
-	{ "_sl_softc" },
-	"",
-};
-
 extern	char *__progname;	/* from crt0.o */
 
-char	*kernel;		/* kernel for namelist */
-char	*kmemf;			/* memory file */
-
-kvm_t	*kd;
-
 int	vflag;
-unsigned interval = 5;
+u_int	interval = 5;
 int	unit;
+int	s;
+char    interface[IFNAMSIZ];
 
 void	catchalarm __P((void));
 void	intpr __P((void));
@@ -85,8 +76,10 @@ main(argc, argv)
 	int argc;
 	char *argv[];
 {
-	char errbuf[_POSIX2_LINE_MAX];
+	struct ifreq ifr;
 	int ch;
+
+	(void)strlcpy(interface, "sl0", sizeof(interface));
 
 	while ((ch = getopt(argc, argv, "i:M:N:v")) != -1) {
 		switch (ch) {
@@ -94,14 +87,6 @@ main(argc, argv)
 			interval = atoi(optarg);
 			if (interval <= 0)
 				usage();
-			break;
-
-		case 'M':
-			kmemf = optarg;
-			break;
-
-		case 'N':
-			kernel = optarg;
 			break;
 
 		case 'v':
@@ -118,55 +103,53 @@ main(argc, argv)
 	if (argc > 1)
 		usage();
 
-	while (argc--) {
-		if (isdigit(*argv[0])) {
-			unit = atoi(*argv);
-			if (unit < 0)
-				usage();
-			continue;
-		}
+	if (argc > 0)
+		(void)strlcpy(interface, argv[0], sizeof(interface));
 
-		/* Fall to here, we have bogus arguments. */
-		usage();
-	}
+	if (sscanf(interface, "sl%d", &unit) != 1 || unit < 0)
+		errx(1, "invalid interface '%s' specified", interface);
 
-	/*
-	 * Discard setgid privileges if not the running kernel so that bad
-	 * guys can't print interesting stuff from kernel memory.
-	 */
-	if (kmemf != NULL || kernel != NULL) {
-		setegid(getgid());
-		setgid(getgid());
-	}
-
-	memset(errbuf, 0, sizeof(errbuf));
-	if ((kd = kvm_openfiles(kernel, kmemf, NULL, O_RDONLY, errbuf)) == NULL)
-		errx(1, "can't open kvm: %s", errbuf);
-
-	setegid(getgid());
-	setgid(getgid());
-
-	if (kvm_nlist(kd, nl) < 0 || nl[0].n_type == 0)
-		errx(1, "%s: SLIP symbols not in namelist",
-		    kernel == NULL ? _PATH_UNIX : kernel);
+	s = socket(AF_INET, SOCK_DGRAM, 0);
+	if (s < 0)
+		err(1, "couldn't create IP socket");
+	(void)strlcpy(ifr.ifr_name, interface, sizeof(ifr.ifr_name));
+	if (ioctl(s, SIOCGIFFLAGS, (caddr_t)&ifr) < 0)
+		errx(1, "nonexistent interface '%s' specified", interface);
 
 	intpr();
 	exit(0);
 }
 
-#define V(offset) ((line % 20)? sc->offset - osc->offset : sc->offset)
-#define AMT (sizeof(*sc) - 2 * sizeof(sc->sc_comp.tstate))
+#define V(offset) ((line % 20)? cur.offset - old.offset : cur.offset)
 
 void
 usage()
 {
 
-	fprintf(stderr, "usage: %s [-M core] [-N system] [-i interval] %s",
+	fprintf(stderr, "usage: %s [-i interval] %s",
 	    __progname, "[-v] [unit]\n");
 	exit(1);
 }
 
-u_char	signalled;			/* set if alarm goes off "early" */
+sig_atomic_t	signalled;			/* set if alarm goes off "early" */
+
+static void
+get_sl_stats(curp)
+	struct sl_stats *curp;
+{
+	struct ifslstatsreq req;
+
+	memset(&req, 0, sizeof(req));
+	(void)strlcpy(req.ifr_name, interface, sizeof(req.ifr_name));
+
+	if (ioctl(s, SIOCGSLSTATS, &req) < 0) {
+		if (errno == ENOTTY)
+			errx(1, "kernel support missing");
+		else
+			err(1, "couldn't get slip statistics");
+	}
+	*curp = req.stats;
+}
 
 /*
  * Print a running summary of interface statistics.
@@ -177,19 +160,13 @@ u_char	signalled;			/* set if alarm goes off "early" */
 void
 intpr()
 {
-	register int line = 0;
-	int oldmask;
-	struct sl_softc *sc, *osc;
-	u_long addr;
+	struct sl_stats cur, old;
+	sigset_t mask, oldmask;
+	int line = 0;
 
-	addr = nl[N_SOFTC].n_value + unit * sizeof(struct sl_softc);
-	sc = (struct sl_softc *)malloc(AMT);
-	osc = (struct sl_softc *)malloc(AMT);
-	bzero((char *)osc, AMT);
-
+	bzero(&old, sizeof(old));
 	while (1) {
-		if (kvm_read(kd, addr, (char *)sc, AMT) != AMT)
-			errx(1, "kvm_read: %s", kvm_geterr(kd));
+		get_sl_stats(&cur);
 
 		(void)signal(SIGALRM, (void (*)())catchalarm);
 		signalled = 0;
@@ -197,50 +174,45 @@ intpr()
 
 		if ((line % 20) == 0) {
 			printf("%8.8s %6.6s %6.6s %6.6s %6.6s",
-				"IN", "PACK", "COMP", "UNCOMP", "ERR");
+			    "IN", "PACK", "COMP", "UNCOMP", "ERR");
 			if (vflag)
 				printf(" %6.6s %6.6s", "TOSS", "IP");
 			printf(" | %8.8s %6.6s %6.6s %6.6s %6.6s",
-				"OUT", "PACK", "COMP", "UNCOMP", "IP");
+			    "OUT", "PACK", "COMP", "UNCOMP", "IP");
 			if (vflag)
 				printf(" %6.6s %6.6s", "SEARCH", "MISS");
 			putchar('\n');
 		}
-		printf("%8u %6d %6u %6u %6u",
-			V(sc_if.if_ibytes),
-			V(sc_if.if_ipackets),
-			V(sc_comp.sls_compressedin),
-			V(sc_comp.sls_uncompressedin),
-			V(sc_comp.sls_errorin));
+		printf("%8u %6d %6u %6u %6u", V(sl.sl_ibytes),
+		    V(sl.sl_ipackets), V(vj.vjs_compressedin),
+		    V(vj.vjs_uncompressedin), V(vj.vjs_errorin));
 		if (vflag)
-			printf(" %6u %6u",
-				V(sc_comp.sls_tossed),
-				V(sc_if.if_ipackets) -
-				  V(sc_comp.sls_compressedin) -
-				  V(sc_comp.sls_uncompressedin) -
-				  V(sc_comp.sls_errorin));
-		printf(" | %8u %6d %6u %6u %6u",
-			V(sc_if.if_obytes),
-			V(sc_if.if_opackets),
-			V(sc_comp.sls_compressed),
-			V(sc_comp.sls_packets) - V(sc_comp.sls_compressed),
-			V(sc_if.if_opackets) - V(sc_comp.sls_packets));
+			printf(" %6u %6u", V(vj.vjs_tossed),
+			    V(sl.sl_ipackets) - V(vj.vjs_compressedin) -
+			    V(vj.vjs_uncompressedin) - V(vj.vjs_errorin));
+		printf(" | %8u %6d %6u %6u %6u", V(sl.sl_obytes),
+		    V(sl.sl_opackets), V(vj.vjs_compressed),
+		    V(vj.vjs_packets) - V(vj.vjs_compressed),
+		    V(sl.sl_opackets) - V(vj.vjs_packets));
 		if (vflag)
-			printf(" %6u %6u",
-				V(sc_comp.sls_searches),
-				V(sc_comp.sls_misses));
+			printf(" %6u %6u", V(vj.vjs_searches),
+			    V(vj.vjs_misses));
 
 		putchar('\n');
 		fflush(stdout);
 		line++;
-		oldmask = sigblock(sigmask(SIGALRM));
-		if (! signalled) {
-			sigpause(0);
+
+		sigemptyset(&mask);
+		sigaddset(&mask, SIGALRM);
+		sigprocmask(SIG_BLOCK, &mask, &oldmask);
+		if (!signalled) {
+			sigemptyset(&mask);
+			sigsuspend(&mask);
 		}
-		sigsetmask(oldmask);
+		sigprocmask(SIG_BLOCK, &oldmask, NULL);
 		signalled = 0;
 		(void)alarm(interval);
-		bcopy((char *)sc, (char *)osc, AMT);
+		old = cur;
 	}
 }
 

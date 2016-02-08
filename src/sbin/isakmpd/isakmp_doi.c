@@ -1,8 +1,8 @@
-/*	$OpenBSD: isakmp_doi.c,v 1.11 2000/10/07 06:59:24 niklas Exp $	*/
+/*	$OpenBSD: isakmp_doi.c,v 1.14 2001/07/05 12:36:52 ho Exp $	*/
 /*	$EOM: isakmp_doi.c,v 1.42 2000/09/12 16:29:41 ho Exp $	*/
 
 /*
- * Copyright (c) 1998, 1999 Niklas Hallqvist.  All rights reserved.
+ * Copyright (c) 1998, 1999, 2001 Niklas Hallqvist.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -36,7 +36,7 @@
 
 /*
  * XXX This DOI is very fuzzily defined, and should perhaps be short-circuited
- * to the IPSEC DOI instead.  At the moment I will have it as its own DOI,
+ * to the IPsec DOI instead.  At the moment I will have it as its own DOI,
  * as the ISAKMP architecture seems to imply it should be done like this.
  */
 
@@ -47,6 +47,7 @@
 #include "doi.h"
 #include "exchange.h"
 #include "isakmp.h"
+#include "isakmp_doi.h"
 #include "ipsec.h"
 #include "log.h"
 #include "message.h"
@@ -112,7 +113,7 @@ static struct doi isakmp_doi = {
 
 /* Requires doi_init to already have been called.  */
 void
-isakmp_doi_init ()
+isakmp_doi_init (void)
 {
   doi_register (&isakmp_doi);
 }
@@ -254,6 +255,11 @@ isakmp_responder (struct message *msg)
 	  p->flags |= PL_MARK;
 	}
       return 0;
+
+#ifdef USE_ISAKMP_CFG
+    case ISAKMP_EXCH_TRANSACTION:
+      /* return 0 isakmp_cfg_responder (msg); */
+#endif /* USE_ISAKMP_CFG */
 
     default:
       /* XXX So far we don't accept any proposals.  */

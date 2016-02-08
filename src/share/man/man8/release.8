@@ -1,4 +1,4 @@
-.\"	$OpenBSD: release.8,v 1.14 2001/04/24 19:20:35 todd Exp $
+.\"	$OpenBSD: release.8,v 1.19 2001/10/05 14:45:54 mpech Exp $
 .\"
 .\"	Copyright (c) 2000 Marco S. Hyman
 .\"
@@ -40,7 +40,6 @@ Make the third party packages.
 .Pp
 The following sections describe each of the required steps in detail.
 .Ss "1. Update sources"
-.Pp
 A
 .Nm
 should always start from a known set of
@@ -95,9 +94,7 @@ tags use the commands:
 .Pp
 Replace
 .Va XF4SRC
-with the path to your
-.Tn X11R6
-sources.
+with the path to your X Window System sources.
 Replace
 .Va PORTSPATH
 with the path to your ports tree sources, typically
@@ -117,7 +114,6 @@ See
 for more information.
 .Ed
 .Ss "2. Build and install a new kernel"
-.Pp
 For safety, you should always build and install a new kernel before
 building the programs that will use the kernel.
 This ensures that any new system calls, for example, will be present
@@ -170,7 +166,6 @@ is your friend.
 If the system does not come up you can boot using
 .Pa bsd.old .
 .Ss "3. Build a new system"
-.Pp
 Now that you are running using your new kernel you can build a new system.
 It's safer (but slower) to remove and re-build your object directories
 and re-building them before the build.
@@ -209,7 +204,6 @@ by hand.
 At this point your system is up-to-date and running the code that you
 are going to make into a release.
 .Ss "4. Make and validate the system release"
-.Pp
 The system release consists of a generic kernel, one
 .Tn CD\-ROM
 and two floppy boot-able file-systems, the release
@@ -222,10 +216,8 @@ They are:
 .It Va DESTDIR
 This is the name of a directory which will be the root of a a complete
 .Ox
-installation, thus it must be on a disk partition large enough to
-store the entire operating system (less
-.Tn X11R6
-and any third party
+installation, thus it must be on a disk partition large enough to store the
+entire operating system (less the X Window System and any third party
 .Sq packages ) .
 The directory can be removed once the release is created.
 In any case the release process ensures the directory is empty before starting.
@@ -289,11 +281,9 @@ pretty much match the contents of the release
 At this point you have most of an
 .Ox
 release.
-The only thing missing is
-.Va X11R6
+The only thing missing is the X Window System
 (which is covered in the next section).
 .Ss "5. Build and install XF4"
-.Pp
 The
 .Va XF4
 tree is primarily
@@ -305,14 +295,11 @@ directory mechanism that comes with Berkeley
 While the tree can be built in place, it's better to refrain from
 polluting the cvs sources.
 An alternate build location needs to be selected, large enough to hold the
-.Tn X11R6
-object files, libraries, and binaries.
+X Window System object files, libraries, and binaries.
 Call this location
 .Va XF4BLD .
 .Va XF4SRC
-is the path to your
-.Tn X11R6
-sources.
+is the path to your X Window System source files.
 Once you've selected
 .Va XF4BLD
 the build process is:
@@ -332,7 +319,9 @@ the build process is:
 .Pa XF86Setup ,
 built and installed above, requires version 8.3 of the
 .Pa tcl/tk
-libraries.   They must be installed to do a proper build. Version 8.3 of
+libraries.
+They must be installed to do a proper build.
+Version 8.3 of
 .Pa tcl/tk
 can be found in the ports tree at
 .Pa /usr/ports/lang/tcl/8.3/
@@ -346,15 +335,15 @@ The above method mimics a
 in the
 .Pa /usr/src
 directory.
-.Pa X11R6
-is created and installed in
+The X Window System is created and installed in
 .Pa
 /usr/X11R6 .
 However, the install phase of the build does
 .Em not
 overwrite
 .Pa /etc/X11/xdm .
-That directory must be installed by hand.   Or you can
+That directory must be installed by hand.
+Or you can
 .Ic "cd /etc/X11 && mv xdm xdm-"
 before the build and copy any local configuration from
 .Pa xdm-
@@ -362,8 +351,7 @@ to
 .Pa xdm
 after the build.
 .Ss "6. Make and validate the XF4 release"
-.Pp
-.Va X11R6
+.Va XF4
 uses the same
 .Va DESTDIR
 and
@@ -372,7 +360,8 @@ mechanism noted in the section on building a system release, above.
 They may be the same values used above, but be warned that the
 contents of
 .Va DESTDIR
-will be removed if you follow this procedure.   However,
+will be removed if you follow this procedure.
+However,
 .Va DESTDIR
 should not be the same directory used to build the system release.  
 It may be the same if you don't care to keep the contents of the
@@ -398,12 +387,12 @@ The steps to build the release are (assuming you are still root, and still in
 .Li "unset RELEASEDIR DESTDIR"
 .El
 .Pp
-At this point you have both system and
-.Tn X11R6
+At this point you have both
+.Ox
+system and X Window System
 .Sq tarballs
 in your release directory.
 .Ss "7. Make the third party packages"
-.Pp
 The
 .Sq ports
 sub-system of contributed applications is described in

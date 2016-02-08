@@ -1,4 +1,4 @@
-.\"	$OpenBSD: fxp.4,v 1.16 2000/10/18 02:38:22 aaron Exp $
+.\"	$OpenBSD: fxp.4,v 1.20 2001/10/05 14:45:53 mpech Exp $
 .\"
 .\" Copyright (c) 1997 David E. O'Brien
 .\"
@@ -37,10 +37,10 @@
 The
 .Nm
 device driver supports the Intel EtherExpress 100 family of Ethernet cards
-based on the i82557, i82558, and i82559 chipsets. These come in several
-different varieties, including dual-port cards, and as built-in Ethernet
-solutions on certain motherboards. This includes, among others, the following
-models:
+based on the i82557, i82558, and i82559 chipsets.
+These come in several different varieties, including dual-port cards, and
+as built-in Ethernet solutions on certain motherboards.
+This includes, among others, the following models:
 .Pp
 .Bl -item -offset indent -compact
 .It
@@ -53,6 +53,10 @@ Intel EtherExpress PRO/100+ PCI
 Intel EtherExpress PRO/100 Dual-Port PCI
 .It
 Intel PRO/100 CardBus II PC Card
+.It
+Intel PRO/100 VE
+.It
+Intel PRO/100 VM
 .El
 .Pp
 Other models of Intel network cards are supported by the
@@ -60,7 +64,8 @@ Other models of Intel network cards are supported by the
 and
 .Xr iy 4
 drivers.
-This list is not exhaustive. In particular, the
+This list is not exhaustive.
+In particular, the
 .Nm
 driver should support any card by any manufacturer which is based on one of the
 aforementioned chipsets.
@@ -86,8 +91,8 @@ If no media options are present, the
 .Nm
 driver places the card into autoselect mode.
 .Pp
-These cards also come with a variety of PHYs. Models exist with PHYs supported
-by both the
+These cards also come with a variety of PHYs.
+Models exist with PHYs supported by both the
 .Xr inphy 4
 and
 .Xr nsphy 4
@@ -99,7 +104,7 @@ A fatal initialization error has occurred.
 .It "fxp%d: couldn't map interrupt"
 A fatal initialization error has occurred.
 .It "fxp%d: Failed to malloc memory"
-There are not enough mbuf's available for allocation.
+There are not enough mbufs available for allocation.
 .It "fxp%d: device timeout"
 The device has stopped responding to the network, or there is a problem with
 the network connection (cable).
@@ -109,9 +114,9 @@ the network connection (cable).
 .Xr ie 4 ,
 .Xr ifmedia 4 ,
 .Xr inphy 4 ,
-.Xr iy 4 ,
 .Xr intro 4 ,
 .Xr iophy 4 ,
+.Xr iy 4 ,
 .Xr netintro 4 ,
 .Xr nsphy 4 ,
 .Xr ifconfig 8

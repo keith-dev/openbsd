@@ -1,4 +1,4 @@
-/*	$OpenBSD: sysdep.h,v 1.9 2001/02/24 03:59:56 angelos Exp $	*/
+/*	$OpenBSD: sysdep.h,v 1.12 2001/06/29 22:01:26 ho Exp $	*/
 /*	$EOM: sysdep.h,v 1.17 2000/12/04 04:46:35 angelos Exp $	*/
 
 /*
@@ -47,15 +47,16 @@ struct sockaddr;
 
 extern void sysdep_app_handler (int);
 extern int sysdep_app_open (void);
-extern int sysdep_cleartext (int);
+extern int sysdep_cleartext (int, int);
 extern void sysdep_connection_check (char *);
 extern int sysdep_ipsec_delete_spi (struct sa *, struct proto *, int);
 extern int sysdep_ipsec_enable_sa (struct sa *, struct sa *);
 extern u_int8_t *sysdep_ipsec_get_spi (size_t *, u_int8_t, struct sockaddr *,
-				       int, struct sockaddr *, int, u_int32_t);
+				       struct sockaddr *, u_int32_t);
 extern int sysdep_ipsec_group_spis (struct sa *, struct proto *,
 				    struct proto *, int);
-extern int sysdep_ipsec_set_spi (struct sa *, struct proto *, int);
+extern int sysdep_ipsec_set_spi (struct sa *, struct proto *, int,
+				 struct sa *);
 extern char *sysdep_progname (void);
 extern u_int32_t sysdep_random (void);
 

@@ -1,7 +1,7 @@
-/*	$OpenBSD: skeyinfo.c,v 1.6 2001/02/05 16:58:11 millert Exp $	*/
+/*	$OpenBSD: skeyinfo.c,v 1.9 2001/06/19 01:49:45 millert Exp $	*/
 
 /*
- * Copyright (c) 1997 Todd C. Miller <Todd.Miller@courtesan.com>
+ * Copyright (c) 1997, 2001 Todd C. Miller <Todd.Miller@courtesan.com>
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -28,34 +28,34 @@
  */
 
 #include <err.h>
-#include <limits.h>
-#include <paths.h>
 #include <pwd.h>
 #include <stdio.h>
-#include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
 #include <skey.h>
+#include <login_cap.h>
+#include <bsd_auth.h>
 
 extern char *__progname;
 
-void usage __P((void));
+void usage(void);
 
 int
-main(argc, argv)
-	int argc;
-	char **argv;
+main(int argc, char **argv)
 {
 	struct passwd *pw;
-	struct skey key;
-	char *name = NULL;
-	int error, ch, verbose = 0;
+	char *style, *challenge, *cp, *name;
+	int ch, verbose = 0;
+	login_cap_t *lc;
+	auth_session_t *as;
 
-	if (geteuid() != 0)
-		errx(1, "must be setuid root");
-
-	while ((ch = getopt(argc, argv, "v")) != -1)
+	name = NULL;
+	style = "skey";
+	while ((ch = getopt(argc, argv, "a:v")) != -1)
 		switch(ch) {
+		case 'a':
+			style = optarg;
+			break;
 		case 'v':
 			verbose = 1;
 			break;
@@ -84,27 +84,43 @@ main(argc, argv)
 	if ((name = strdup(pw->pw_name)) == NULL)
 		err(1, "cannot allocate memory");
 
-	error = skeylookup(&key, name);
-	switch (error) {
-		case 0:		/* Success! */
-			if (verbose)
-				(void)printf("otp-%s ", skey_get_algorithm());
-			(void)printf("%d %s\n", key.n - 1, key.seed);
-			break;
-		case -1:	/* File error */
-			warn("cannot open %s", _PATH_SKEYKEYS);
-			break;
-		case 1:		/* Unknown user */
-			warnx("%s is not listed in %s", name, _PATH_SKEYKEYS);
-	}
-	(void)fclose(key.keyfile);
+	if ((lc = login_getclass(pw->pw_class)) == NULL)
+		errx(1, "unable to classify user %s", name);
 
-	exit(error ? 1 : 0);
+	if ((cp = login_getstyle(lc, style, NULL)) == NULL)
+		errx(1, "unknown authentication method %s", style);
+
+	as = auth_userchallenge(name, cp, NULL, &challenge);
+	if (as == NULL || challenge == NULL) {
+		if (as)
+			auth_close(as);
+		errx(1, "unable to retrieve challenge for %s", name);
+	}
+
+	/*
+	 * We only want the first line of the challenge so stop after a newline.
+	 * If the user wants the full challenge including the hash type
+	 * or if the challenge didn't start with 'otp-', print it verbatim.
+	 * Otherwise, strip off the first word.
+	 */
+	if ((cp = strchr(challenge, '\n')))
+		*cp = '\0';
+	cp = strchr(challenge, ' ');
+	if (verbose || *challenge != 'o' || !cp)
+		cp = challenge;
+	else
+		cp++;
+	puts(cp);
+
+	auth_close(as);
+	exit(0);
 }
 
 void
-usage()
+usage(void)
 {
-	(void)fprintf(stderr, "Usage: %s [-v] [user]\n", __progname);
+
+	(void)fprintf(stderr, "Usage: %s [-a auth-type] [-v] [user]\n",
+	    __progname);
 	exit(1);
 }

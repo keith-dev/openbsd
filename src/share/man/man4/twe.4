@@ -1,4 +1,4 @@
-.\"	$OpenBSD: twe.4,v 1.10 2001/04/24 00:16:16 mickey Exp $
+.\"	$OpenBSD: twe.4,v 1.13 2001/08/05 22:32:34 brad Exp $
 .\"
 .\" Copyright (c) 2000,2001 Michael Shalayeff.  All rights reserved.
 .\"
@@ -15,7 +15,7 @@
 .Sh DESCRIPTION
 The
 .Nm
-driver provides support for Escalade family of raid controllers,
+driver provides support for Escalade family of RAID controllers,
 including the
 .Tn 3W-5x00 and
 .Tn 3W-6x00
@@ -36,7 +36,7 @@ and/or RAID sets appear as
 The
 .Nm
 driver was written by
-.An Michael Shalayeff Aq mickey@opensbd.org ,
+.An Michael Shalayeff Aq mickey@openbsd.org ,
 inspired by the
 .Fx
 driver by
@@ -56,7 +56,7 @@ cards in the lowest numbered slot before other SCSI or RAID disk controllers.
 .Pp
 The current 3ware firmware is known to fail if a redundant configuration
 is selected (RAID0 or RAID10) and the array is heavily used
-(e.g. installation) before the controller has finished initialising the array.
+(e.g. installation) before the controller has finished initializing the array.
 In this case, create the array, boot the installation media and
 leave the array idle until all controller activity has ceased.
 .Pp

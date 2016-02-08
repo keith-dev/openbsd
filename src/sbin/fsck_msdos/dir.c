@@ -1,4 +1,4 @@
-/*	$OpenBSD: dir.c,v 1.11 1999/09/06 12:40:52 espie Exp $	*/
+/*	$OpenBSD: dir.c,v 1.13 2001/07/07 18:26:12 deraadt Exp $	*/
 /*	$NetBSD: dir.c,v 1.11 1997/10/17 11:19:35 ws Exp $	*/
 
 /*
@@ -37,7 +37,7 @@
 
 
 #ifndef lint
-static char rcsid[] = "$OpenBSD: dir.c,v 1.11 1999/09/06 12:40:52 espie Exp $";
+static char rcsid[] = "$OpenBSD: dir.c,v 1.13 2001/07/07 18:26:12 deraadt Exp $";
 #endif /* not lint */
 
 #include <stdio.h>
@@ -246,7 +246,7 @@ resetDosDirSection(boot, fat)
 	(void)memset(rootDir, 0, sizeof *rootDir);
 	if (boot->flags & FAT32) {
 		if (boot->RootCl < CLUST_FIRST || boot->RootCl >= boot->NumClusters) {
-			pfatal("Root directory starts with cluster out of range(%u)",
+			pfatal("Root directory starts with cluster out of range(%u)\n",
 			       boot->RootCl);
 			return (FSFATAL);
 		}
@@ -260,7 +260,7 @@ resetDosDirSection(boot, fat)
 				pwarn("Root directory starts with cluster marked %s\n",
 				      rsrvdcltype(cl));
 			else {
-				pfatal("Root directory doesn't start a cluster chain");
+				pfatal("Root directory doesn't start a cluster chain\n");
 				return (FSFATAL);
 			}
 			if (ask(1, "Fix")) {
@@ -804,7 +804,7 @@ readDosDirSection(f, boot, fat, dir)
 					continue;
 				}
 				if (strcmp(dirent.name, "..") == 0) {
-					if (dir->parent)		/* XXX */
+					if (dir->parent) {		/* XXX */
 						if (!dir->parent->parent) {
 							if (dirent.head) {
 								pwarn("`..' entry in %s has non-zero start cluster\n",
@@ -833,6 +833,7 @@ readDosDirSection(f, boot, fat, dir)
 							} else
 								mod |= FSERROR;
 						}
+					}
 					continue;
 				}
 

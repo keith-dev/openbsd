@@ -1,4 +1,4 @@
-/*	$OpenBSD: pwd_mkdb.c,v 1.23 2000/11/26 19:35:46 millert Exp $	*/
+/*	$OpenBSD: pwd_mkdb.c,v 1.26 2001/09/17 14:30:39 mpech Exp $	*/
 
 /*-
  * Copyright (c) 1991, 1993, 1994
@@ -45,7 +45,7 @@ static char copyright[] =
 #if 0
 static char sccsid[] = "from: @(#)pwd_mkdb.c	8.5 (Berkeley) 4/20/94";
 #else
-static char *rcsid = "$OpenBSD: pwd_mkdb.c,v 1.23 2000/11/26 19:35:46 millert Exp $";
+static char *rcsid = "$OpenBSD: pwd_mkdb.c,v 1.26 2001/09/17 14:30:39 mpech Exp $";
 #endif
 #endif /* not lint */
 
@@ -110,12 +110,12 @@ main(argc, argv)
 	struct passwd pwd;
 	sigset_t set;
 	uid_t olduid;
-	int ch, tfd, makeold, flags = 0, checkonly = 0;
+	int ch, tfd, makeold, secureonly, flags, checkonly;
 	char *username, buf[MAX(MAXPATHLEN, LINE_MAX * 2)];
 
-	makeold = 0;
+	flags = checkonly = makeold = secureonly = 0;
 	username = NULL;
-	while ((ch = getopt(argc, argv, "cd:pu:v")) != -1)
+	while ((ch = getopt(argc, argv, "cd:psu:v")) != -1)
 		switch(ch) {
 		case 'c':			/* verify only */
 			checkonly = 1;
@@ -127,6 +127,9 @@ main(argc, argv)
 			break;
 		case 'p':			/* create V7 "file.orig" */
 			makeold = 1;
+			break;
+		case 's':			/* only update spwd.db */
+			secureonly = 1;
 			break;
 		case 'u':			/* only update this record */
 			username = optarg;
@@ -140,7 +143,8 @@ main(argc, argv)
 	argc -= optind;
 	argv += optind;
 
-	if (argc != 1 || (username && (*username == '+' || *username == '-')))
+	if (argc != 1 || (makeold && secureonly) ||
+	    (username && (*username == '+' || *username == '-')))
 		usage();
 
 	/*
@@ -197,8 +201,9 @@ main(argc, argv)
 			char *p = (char *)data.data;
 			/* Skip to uid field */
 			while (*p++ != '\0')
-				while (*p++ != '\0')
-					;
+				;
+			while (*p++ != '\0')
+				;
 			memcpy(&olduid, p, sizeof(olduid));
 		} else
 			olduid = UID_MAX;
@@ -221,19 +226,22 @@ main(argc, argv)
 	clean |= FILE_SECURE;
 
 	/* Open the temporary insecure password database. */
-	(void)snprintf(buf, sizeof(buf), "%s.tmp",
-	    changedir(_PATH_MP_DB, basedir));
-	if (username) {
-		cp(changedir(_PATH_MP_DB, basedir), buf, PERM_INSECURE);
-		dp = dbopen(buf,
-		    O_RDWR, PERM_INSECURE, DB_HASH, &openinfo);
-	} else {
-		dp = dbopen(buf,
-		    O_RDWR|O_CREAT|O_EXCL, PERM_INSECURE, DB_HASH, &openinfo);
-	}
-	if (dp == NULL)
-		error(buf);
-	clean |= FILE_INSECURE;
+	if (!secureonly) {
+		(void)snprintf(buf, sizeof(buf), "%s.tmp",
+		    changedir(_PATH_MP_DB, basedir));
+		if (username) {
+			cp(changedir(_PATH_MP_DB, basedir), buf, PERM_INSECURE);
+			dp = dbopen(buf, O_RDWR, PERM_INSECURE, DB_HASH,
+			    &openinfo);
+		} else {
+			dp = dbopen(buf, O_RDWR|O_CREAT|O_EXCL, PERM_INSECURE,
+			    DB_HASH, &openinfo);
+		}
+		if (dp == NULL)
+			error(buf);
+		clean |= FILE_INSECURE;
+	} else
+		dp = NULL;
 
 	/*
 	 * Open file for old password file.  Minor trickiness -- don't want to
@@ -285,18 +293,18 @@ main(argc, argv)
 		data.data = (u_char *)NULL;
 		data.size = 0;
 
-		if ((dp->put)(edp, &key, &data, R_NOOVERWRITE) == -1)
+		if ((edp->put)(edp, &key, &data, R_NOOVERWRITE) == -1)
 			error("put");
-		if ((dp->put)(dp, &key, &data, R_NOOVERWRITE) == -1)
+
+		if (dp && (dp->put)(dp, &key, &data, R_NOOVERWRITE) == -1)
 			error("put");
 	}
 
 	if ((edp->close)(edp))
 		error("close edp");
-	if ((dp->close)(dp))
+	if (dp && (dp->close)(dp))
 		error("close dp");
 	if (makeold) {
-		(void)fflush(oldfp);
 		if (fclose(oldfp) == EOF)
 			error("close old");
 	}
@@ -307,9 +315,11 @@ main(argc, argv)
 		error("fclose");
 
 	/* Install as the real password files. */
-	(void)snprintf(buf, sizeof(buf), "%s.tmp",
-	    changedir(_PATH_MP_DB, basedir));
-	mv(buf, changedir(_PATH_MP_DB, basedir));
+	if (!secureonly) {
+		(void)snprintf(buf, sizeof(buf), "%s.tmp",
+		    changedir(_PATH_MP_DB, basedir));
+		mv(buf, changedir(_PATH_MP_DB, basedir));
+	}
 	(void)snprintf(buf, sizeof(buf), "%s.tmp",
 	    changedir(_PATH_SMP_DB, basedir));
 	mv(buf, changedir(_PATH_SMP_DB, basedir));
@@ -454,7 +464,7 @@ usage()
 {
 
 	(void)fprintf(stderr,
-	    "usage: pwd_mkdb [-cp] [-d basedir] [-u username] file\n");
+	    "usage: pwd_mkdb [-c] [-p | -s] [-d basedir] [-u username] file\n");
 	exit(1);
 }
 
@@ -538,8 +548,9 @@ db_store(fp, oldfp, edp, dp, pw, keytype, username, olduid)
 				tbuf[0] = _PW_KEYBYUID;
 				memcpy(tbuf + 1, &olduid, sizeof(olduid));
 				key.size = sizeof(olduid) + 1;
-				(edp->del)(dp, &key, 0);
-				(dp->del)(dp, &key, 0);
+				(edp->del)(edp, &key, 0);
+				if (dp)
+					(dp->del)(dp, &key, 0);
 			}
 			/* XXX - should check to see if line number changed. */
 		}
@@ -586,15 +597,19 @@ db_store(fp, oldfp, edp, dp, pw, keytype, username, olduid)
 		data.size = p - buf;
 
 		/* Write the secure record. */
-		if ((dp->put)(edp, &key, &data, dbmode) == -1)
+		if ((edp->put)(edp, &key, &data, dbmode) == -1)
 			error("put");
+
+		if (dp == NULL)
+			continue;
 
 		/* Star out password to make insecure record. */
 		p = buf + strlen(pw->pw_name) + 1;	/* skip pw_name */
 		len = strlen(pw->pw_passwd);
 		memset(p, 0, len);			/* zero pw_passwd */
 		t = p + len + 1;			/* skip pw_passwd */
-		*p++ = '*';
+		if (len != 0)
+			*p++ = '*';
 		*p++ = '\0';
 		memmove(p, t, data.size - (t - buf));
 		data.size -= len - 1;

@@ -1,10 +1,10 @@
-.\"	$OpenBSD: crypto.9,v 1.8 2000/11/17 04:07:18 angelos Exp $
+.\"	$OpenBSD: crypto.9,v 1.13 2001/08/03 15:21:17 mpech Exp $
 .\"
 .\" The author of this man page is Angelos D. Keromytis (angelos@cis.upenn.edu)
 .\"
-.\" Copyright (c) 2000 Angelos D. Keromytis
+.\" Copyright (c) 2000, 2001 Angelos D. Keromytis
 .\"
-.\" Permission to use, copy, and modify this software without fee
+.\" Permission to use, copy, and modify this software with or without fee
 .\" is hereby granted, provided that this entire notice is included in
 .\" all source code copies of any software which is or includes a copy or
 .\" modification of this software.
@@ -22,7 +22,7 @@
 .Nm crypto
 .Nd API for cryptographic services in the kernel
 .Sh SYNOPSIS
-.Fd #include <crypto/crypto>
+.Fd #include <crypto/crypto.h>
 .Ft int32_t
 .Fn crypto_get_driverid "void"
 .Ft int
@@ -357,7 +357,6 @@ callback routine to do the necessary cleanups associated with the
 opaque field in the
 .Fa cryptop
 structure.
-.Pp
 .Sh DRIVER-SIDE API
 The
 .Fn crypto_get_driverid ,
@@ -429,7 +428,6 @@ When the request is completed, or an error is detected, the
 routine should invoked
 .Fn crypto_done .
 Session migration may be performed, as mentioned previously.
-.Pp
 .Sh RETURN VALUES
 .Fn crypto_register ,
 .Fn crypto_unregister ,
@@ -464,6 +462,10 @@ most of the framework code
 .Xr pcmcia 4 ,
 .Xr malloc 9 ,
 .Xr tsleep 9
+.Sh HISTORY
+The cryptographic framework first appeared in
+.Ox 2.7
+and was written by Angelos D. Keromytis <angelos@openbsd.org>.
 .Sh BUGS
 The framework currently assumes that all the algorithms in a
 .Fn crypto_newsession
@@ -485,12 +487,6 @@ at some software
 .Xr spl 9
 level, to avoid overall system latency issues, and potential kernel
 stack exhaustion while processing a callback.
-.Pp
-We need a userland device for exposing the framework to userland.
-This will be particularly useful for public key operations in hardware.
-.Pp
-We have not experimented yet with public key operations hardware.
-The framework should support this.
 .Pp
 When SMP time comes, we will support use of a second processor (or
 more) as a crypto device (this is actually AMP, but we need the same

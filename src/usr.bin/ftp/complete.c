@@ -1,4 +1,4 @@
-/*	$OpenBSD: complete.c,v 1.10 2001/03/09 17:01:02 millert Exp $	*/
+/*	$OpenBSD: complete.c,v 1.12 2001/08/03 22:43:16 millert Exp $	*/
 /*	$NetBSD: complete.c,v 1.10 1997/08/18 10:20:18 lukem Exp $	*/
 
 /*-
@@ -39,7 +39,7 @@
 
 #ifndef SMALL
 #ifndef lint
-static char rcsid[] = "$OpenBSD: complete.c,v 1.10 2001/03/09 17:01:02 millert Exp $";
+static char rcsid[] = "$OpenBSD: complete.c,v 1.12 2001/08/03 22:43:16 millert Exp $";
 #endif /* not lint */
 
 /*
@@ -113,8 +113,7 @@ complete_ambiguous(word, list, words)
 				matchlen = j;
 		}
 		if (matchlen > wordlen) {
-			(void)strncpy(insertstr, lastmatch, matchlen);
-			insertstr[matchlen] = '\0';
+			(void)strlcpy(insertstr, lastmatch, matchlen+1);
 			if (el_insertstr(el, insertstr + wordlen) == -1)
 				return (CC_ERROR);
 			else	
@@ -183,8 +182,7 @@ complete_local(word, list)
 			dir[0] = '/';
 			dir[1] = '\0';
 		} else {
-			(void)strncpy(dir, word, (size_t)(file - word));
-			dir[file - word] = '\0';
+			(void)strlcpy(dir, word, (size_t)(file - word) + 1);
 		}
 		file++;
 	}
@@ -241,8 +239,7 @@ complete_remote(word, list)
 		cp = file;
 		while (*cp == '/' && cp > word)
 			cp--;
-		(void)strncpy(dir, word, (size_t)(cp - word + 1));
-		dir[cp - word + 1] = '\0';
+		(void)strlcpy(dir, word, (size_t)(cp - word + 2));
 		file++;
 	}
 
@@ -317,8 +314,7 @@ complete(el, ch)
 	len = lf->lastchar - lf->buffer;
 	if (len >= sizeof(line))
 		return (CC_ERROR);
-	(void)strncpy(line, lf->buffer, len);
-	line[len] = '\0';
+	(void)strlcpy(line, lf->buffer, len+1);
 	cursor_pos = line + (lf->cursor - lf->buffer);
 	lastc_argc = cursor_argc;	/* remember last cursor pos */
 	lastc_argo = cursor_argo;
@@ -332,8 +328,8 @@ complete(el, ch)
 	if (lastc_argc == cursor_argc && lastc_argo == cursor_argo
 	    && strncmp(word, margv[cursor_argc], cursor_argo) == 0)
 		dolist = 1;
-	else
-	    (void)strncpy(word, margv[cursor_argc], cursor_argo);
+	else if (cursor_argo)
+		memcpy(word, margv[cursor_argc], cursor_argo);
 	word[cursor_argo] = '\0';
 
 	if (cursor_argc == 0)

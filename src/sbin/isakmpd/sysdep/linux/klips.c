@@ -1,4 +1,4 @@
-/*	$OpenBSD: klips.c,v 1.4 2001/02/24 04:42:49 angelos Exp $	*/
+/*	$OpenBSD: klips.c,v 1.8 2001/06/29 19:08:12 ho Exp $	*/
 
 /*
  * Copyright (c) 1999 Niklas Hallqvist.  All rights reserved.
@@ -135,8 +135,8 @@ klips_write (struct encap_msghdr *em)
  * SRC, SRCLEN, DST & DSTLEN.  Stash the SPI size in SZ.
  */
 u_int8_t *
-klips_get_spi (size_t *sz, u_int8_t proto, struct sockaddr *src, int srclen,
-	       struct sockaddr *dst, int dstlen, u_int32_t seq)
+klips_get_spi (size_t *sz, u_int8_t proto, struct sockaddr *src,
+	       struct sockaddr *dst, u_int32_t seq)
 {
   u_int8_t *spi;
   u_int32_t spinum;
@@ -163,7 +163,6 @@ klips_group_spis (struct sa *sa, struct proto *proto1, struct proto *proto2,
 {
   struct encap_msghdr *emsg = 0;
   struct sockaddr *dst;
-  int dstlen;
 
   emsg = calloc (1, EMT_GRPSPIS_FLEN + 2 * EMT_GRPSPIS_COMPLEN);
   if (!emsg)
@@ -182,9 +181,9 @@ klips_group_spis (struct sa *sa, struct proto *proto1, struct proto *proto2,
   memcpy (&emsg->em_rel[1].emr_spi, proto2->spi[incoming],
 	  sizeof emsg->em_rel[1].emr_spi);
   if (incoming)
-    sa->transport->vtbl->get_src (sa->transport, &dst, &dstlen);
+    sa->transport->vtbl->get_src (sa->transport, &dst);
   else
-    sa->transport->vtbl->get_dst (sa->transport, &dst, &dstlen);
+    sa->transport->vtbl->get_dst (sa->transport, &dst);
   emsg->em_rel[0].emr_dst
     = emsg->em_rel[1].emr_dst = ((struct sockaddr_in *)dst)->sin_addr;
   /* XXX What if IPCOMP etc. comes along?  */
@@ -209,12 +208,13 @@ klips_group_spis (struct sa *sa, struct proto *proto1, struct proto *proto2,
 
 /* Store/update a SPI with full information into the kernel.  */
 int
-klips_set_spi (struct sa *sa, struct proto *proto, int incoming)
+klips_set_spi (struct sa *sa, struct proto *proto, int incoming,
+	       struct sa *isakmp_sa)
 {
   struct encap_msghdr *emsg = 0;
   struct ipsec_proto *iproto = proto->data;
   struct sockaddr *dst, *src;
-  int dstlen, srclen, keylen, hashlen;
+  int keylen, hashlen;
   size_t len;
   struct ipe4_xdata *ip4x;
 
@@ -332,8 +332,8 @@ klips_set_spi (struct sa *sa, struct proto *proto, int incoming)
   /*
    * XXX Addresses has to be thought through.  Assumes IPv4.
    */
-  sa->transport->vtbl->get_dst (sa->transport, &dst, &dstlen);
-  sa->transport->vtbl->get_src (sa->transport, &src, &srclen);
+  sa->transport->vtbl->get_dst (sa->transport, &dst);
+  sa->transport->vtbl->get_src (sa->transport, &src);
   emsg->em_dst
     = ((struct sockaddr_in *)(incoming ? src : dst))->sin_addr;
 
@@ -384,7 +384,7 @@ klips_set_spi (struct sa *sa, struct proto *proto, int incoming)
       free (emsg);
 
       /*
-       * Grouping the IP-in-IP SA with the IPSec one means we must be careful
+       * Grouping the IP-in-IP SA with the IPsec one means we must be careful
        * in klips_group_spis so that we'll remove duplicate IP-in-IP SAs
        * and get everything grouped in the right order.
        *
@@ -426,7 +426,7 @@ klips_set_spi (struct sa *sa, struct proto *proto, int incoming)
 }
  
 /*
- * Delete the IPSec SA represented by the INCOMING direction in protocol PROTO
+ * Delete the IPsec SA represented by the INCOMING direction in protocol PROTO
  * of the IKE security association SA.
  */
 int
@@ -434,7 +434,6 @@ klips_delete_spi (struct sa *sa, struct proto *proto, int incoming)
 {
   struct encap_msghdr *emsg = 0;
   struct sockaddr *dst;
-  int dstlen;
   struct ipsec_proto *iproto = proto->data;
 
   emsg = calloc (1, EMT_SETSPI_FLEN);
@@ -446,9 +445,9 @@ klips_delete_spi (struct sa *sa, struct proto *proto, int incoming)
 
   memcpy (&emsg->em_spi, proto->spi[incoming], sizeof emsg->em_spi);
   if (incoming)
-    sa->transport->vtbl->get_src (sa->transport, &dst, &dstlen);
+    sa->transport->vtbl->get_src (sa->transport, &dst);
   else
-    sa->transport->vtbl->get_dst (sa->transport, &dst, &dstlen);
+    sa->transport->vtbl->get_dst (sa->transport, &dst);
   emsg->em_dst = ((struct sockaddr_in *)dst)->sin_addr;
   /* XXX What if IPCOMP etc. comes along?  */
   emsg->em_proto
@@ -551,14 +550,13 @@ klips_enable_sa (struct sa *sa, struct sa *isakmp_sa)
 {
   struct ipsec_sa *isa = sa->data;
   struct sockaddr *dst;
-  int dstlen;
   struct proto *proto = TAILQ_FIRST (&sa->protos);
   struct ipsec_proto *iproto = proto->data;
   struct encap_msghdr emsg;
   int s = -1;
   struct rtentry rt;
 
-  sa->transport->vtbl->get_dst (sa->transport, &dst, &dstlen);
+  sa->transport->vtbl->get_dst (sa->transport, &dst);
 
   /* XXX Is this needed?  */
   memset (&emsg, '\0', sizeof emsg);

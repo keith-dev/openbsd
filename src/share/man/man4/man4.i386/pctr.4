@@ -1,12 +1,11 @@
-.\"	$OpenBSD: pctr.4,v 1.12 2001/04/10 08:17:55 deraadt Exp $
+.\"	$OpenBSD: pctr.4,v 1.15 2001/08/03 14:30:26 mpech Exp $
 .\"
 .\" Pentium performance counter driver for OpenBSD.
 .\" Copyright 1996 David Mazieres <dm@lcs.mit.edu>.
 .\"
 .\" Modification and redistribution in source and binary forms is
 .\" permitted provided that due credit is given to the author and the
-.\" OpenBSD project (for instance by leaving this copyright notice
-.\" intact).
+.\" OpenBSD project by leaving this copyright notice intact. 
 .\"
 .Dd August 15, 1996
 .Dt PCTR 4 i386
@@ -38,7 +37,7 @@ All require the following includes:
 #include <machine/cpu.h>
 #include <machine/pctr.h>
 .Ed
-
+.Pp
 The current state of all counters can be read with the
 .Dv PCIOCRD
 .Em ioctl ,
@@ -53,7 +52,7 @@ struct pctrst {
 	pctrval pctr_idl;
 };
 .Ed
-
+.Pp
 In this structure,
 .Dv ctr_fn
 contains the functions of the two counters, as previously set by the
@@ -68,7 +67,7 @@ is a free-running, 64-bit cycle counter.
 Finally,
 .Dv pctr_idl
 is a 64-bit count of idle-loop iterations.
-
+.Pp
 The functions of the two counters can be programmed with ioctls
 .Dv PCIOCS0
 and
@@ -325,7 +324,7 @@ Number of cycles during which the divider is busy.
 .It 0x21 L2_ADS
 Number of L2 address strobes.
 .It 0x22 L2_DBUS_BUSY
-Number of cycles durring which the data bus was busy.
+Number of cycles during which the data bus was busy.
 .It 0x23 L2_DBUS_BUSY_RD
 Number of cycles during which the data bus was busy transferring data
 from L2 to the processor.
@@ -436,7 +435,7 @@ Number of hardware interrupts received.
 .It 0xc9 BR_TAKEN_RETIRED
 Number of taken branches retired.
 .It 0xca BR_MISS_PRED_TAKEN_RET
-Number of taken mispredictioned branches retired.
+Number of taken mispredicted branches retired.
 .It 0xd0 INST_DECODER
 Number of instructions decoded.
 .It 0xd2 PARTIAL_RAT_STALLS

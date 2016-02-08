@@ -1,4 +1,4 @@
-/*	$OpenBSD: kbd.c,v 1.4 2001/01/29 01:58:07 niklas Exp $	*/
+/*	$OpenBSD: kbd.c,v 1.10 2001/05/24 03:05:23 mickey Exp $	*/
 
 /*
  *	Terminal independent keyboard handling.
@@ -21,7 +21,7 @@
 
 #ifndef NO_DPROMPT
 #define PROMPTL 80
-char	 prompt[PROMPTL], *promptp;
+char	 prompt[PROMPTL] = "", *promptp = prompt;
 #endif /* !NO_DPROMPT */
 
 static int	 use_metakey = TRUE;
@@ -64,9 +64,9 @@ bsmap(f, n)
 }
 #endif /* BSMAP */
 
-VOID
+void
 ungetkey(c)
-	int     c;
+	int	c;
 {
 #ifdef DO_METAKEY
 	if (use_metakey && pushed && c == CCHR('['))
@@ -85,7 +85,7 @@ getkey(flag)
 
 #ifndef NO_DPROMPT
 	if (flag && !pushed) {
-		if (prompt[0] != '\0' && ttwait()) {
+		if (prompt[0] != '\0' && ttwait(2000)) {
 			/* avoid problems with % */
 			ewprintf("%s", prompt);
 			/* put the cursor back */
@@ -117,7 +117,8 @@ getkey(flag)
 #endif /* DO_METAKEY */
 #ifndef NO_DPROMPT
 	if (flag && promptp < &prompt[PROMPTL - 5]) {
-		promptp = keyname(promptp, c);
+		promptp = keyname(promptp,
+		    sizeof(prompt) - (promptp - prompt) - 1, c);
 		*promptp++ = '-';
 		*promptp = '\0';
 	}
@@ -131,12 +132,14 @@ getkey(flag)
  * keymap element the keyboard was found in as a side effect.
  */
 PF
-doscan(map, c)
-	KEYMAP *map;
-	int     c;
+doscan(map, c, newmap)
+	KEYMAP	*map;
+	int	c;
+	KEYMAP	**newmap;
 {
 	MAP_ELEMENT	*elec = &map->map_element[0];
 	MAP_ELEMENT	*last = &map->map_element[map->map_num];
+	PF		ret;
 
 	while (elec < last && c > elec->k_num)
 		elec++;
@@ -144,8 +147,13 @@ doscan(map, c)
 	/* used by prefix and binding code */
 	ele = elec;
 	if (elec >= last || c < elec->k_base)
-		return map->map_default;
-	return elec->k_funcp[c - elec->k_base];
+		ret = map->map_default;
+	else
+		ret = elec->k_funcp[c - elec->k_base];
+	if (ret == NULL && newmap != NULL)
+		*newmap = elec->k_prefmap;
+
+	return ret;
 }
 
 int
@@ -160,8 +168,8 @@ doin()
 	curmap = curbp->b_modes[curbp->b_nmodes]->p_map;
 	key.k_count = 0;
 	while ((funct = doscan(curmap, (key.k_chars[key.k_count++] =
-	    getkey(TRUE)))) == prefix)
-		curmap = ele->k_prefmap;
+	    getkey(TRUE)), &curmap)) == NULL)
+		/*nothing*/;
 #ifndef NO_MACRO
 	if (macrodef && macrocount < MAXMACRO)
 		macro[macrocount++].m_funct = funct;
@@ -184,21 +192,20 @@ rescan(f, n)
 			c = TOLOWER(key.k_chars[key.k_count - 1]);
 			curmap = curbp->b_modes[mode]->p_map;
 			for (i = 0; i < key.k_count - 1; i++) {
-				if ((fp = doscan(curmap, (key.k_chars[i]))) 
-				    != prefix)
+				if ((fp = doscan(curmap, (key.k_chars[i]), &curmap))
+				    != NULL)
 					break;
-				curmap = ele->k_prefmap;
 			}
-			if (fp == prefix) {
-				if ((fp = doscan(curmap, c)) == prefix)
+			if (fp == NULL) {
+				if ((fp = doscan(curmap, c, NULL)) == NULL)
 					while ((fp = doscan(curmap,
 					    key.k_chars[key.k_count++] =
-					    getkey(TRUE))) == prefix)
-						curmap = ele->k_prefmap;
+					    getkey(TRUE), &curmap)) == NULL)
+						/*nothing*/;
 				if (fp != rescan) {
 #ifndef NO_MACRO
 					if (macrodef && macrocount <= MAXMACRO)
-						macro[macrocount - 1].m_funct 
+						macro[macrocount - 1].m_funct
 						    = fp;
 #endif /* !NO_MACRO */
 					return (*fp)(f, n);
@@ -210,14 +217,13 @@ rescan(f, n)
 			return ABORT;
 		curmap = curbp->b_modes[mode]->p_map;
 		for (i = 0; i < key.k_count; i++) {
-			if ((fp = doscan(curmap, (key.k_chars[i]))) != prefix)
+			if ((fp = doscan(curmap, (key.k_chars[i]), &curmap)) != NULL)
 				break;
-			curmap = ele->k_prefmap;
 		}
-		if (fp == prefix) {
-			while ((fp = doscan(curmap, key.k_chars[i++] = 
-			    getkey(TRUE))) == prefix)
-				curmap = ele->k_prefmap;
+		if (fp == NULL) {
+			while ((fp = doscan(curmap, key.k_chars[i++] =
+			    getkey(TRUE), &curmap)) == NULL)
+				/*nothing*/;
 			key.k_count = i;
 		}
 		if (fp != rescan && i >= key.k_count - 1) {
@@ -236,7 +242,7 @@ universal_argument(f, n)
 {
 	KEYMAP	*curmap;
 	PF	 funct;
-	int	 c; 
+	int	 c;
 	int	 nn = 4;
 
 	if (f & FFUNIV)
@@ -249,8 +255,7 @@ universal_argument(f, n)
 		if (c >= '0' && c <= '9')
 			return digit_argument(f, nn);
 		curmap = curbp->b_modes[curbp->b_nmodes]->p_map;
-		while ((funct = doscan(curmap, c)) == prefix) {
-			curmap = ele->k_prefmap;
+		while ((funct = doscan(curmap, c, &curmap)) == NULL) {
 			key.k_chars[key.k_count++] = c = getkey(TRUE);
 		}
 		if (funct != universal_argument) {
@@ -288,8 +293,7 @@ digit_argument(f, n)
 	key.k_chars[0] = c;
 	key.k_count = 1;
 	curmap = curbp->b_modes[curbp->b_nmodes]->p_map;
-	while ((funct = doscan(curmap, c)) == prefix) {
-		curmap = ele->k_prefmap;
+	while ((funct = doscan(curmap, c, &curmap)) == NULL) {
 		key.k_chars[key.k_count++] = c = getkey(TRUE);
 	}
 #ifndef NO_MACRO
@@ -328,8 +332,7 @@ negative_argument(f, n)
 	key.k_chars[0] = c;
 	key.k_count = 1;
 	curmap = curbp->b_modes[curbp->b_nmodes]->p_map;
-	while ((funct = doscan(curmap, c)) == prefix) {
-		curmap = ele->k_prefmap;
+	while ((funct = doscan(curmap, c, &curmap)) == NULL) {
 		key.k_chars[key.k_count++] = c = getkey(TRUE);
 	}
 #ifndef NO_MACRO
@@ -378,9 +381,9 @@ selfinsert(f, n)
 				lp->l_fp = maclcur->l_fp;
 				lp->l_bp = maclcur->l_bp;
 				lp->l_fp->l_bp = lp->l_bp->l_fp = lp;
-				bcopy(maclcur->l_text, lp->l_text, 
+				bcopy(maclcur->l_text, lp->l_text,
 				    maclcur->l_used);
-				for (count = maclcur->l_used; 
+				for (count = maclcur->l_used;
 				    count < lp->l_used; count++)
 					lp->l_text[count] = c;
 				free((char *)maclcur);

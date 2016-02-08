@@ -1,6 +1,4 @@
-# $OpenBSD: Makefile.inc,v 1.11 2000/05/15 18:24:43 hin Exp $
-
-KRBVERSION = "krb4-1.0"
+# $OpenBSD: Makefile.inc,v 1.14 2001/07/08 17:56:52 brad Exp $
 
 KRBDIR	= ${.CURDIR}/${KRBDEPTH}
 KRBSRC	= ${.CURDIR}/${KRBDEPTH}/src
@@ -9,6 +7,7 @@ CFLAGS	+= -DHAVE_CONFIG_H -DBINDIR=\"/usr/bin\" -DSBINDIR=\"/usr/sbin\" \
 	   -I${DESTDIR}/usr/include/kerberosIV \
 	   -I${KRBSRC}/include -I${KRBSRC}/lib/roken \
 	   -I${KRBDIR}/lib/roken -I${KRBSRC}/lib/sl 
+CFLAGS+=-Wall
 
 LIBROKEN= -L${KRBDEPTH}/lib/roken -lroken
 LIBSL	= -L${KRBDEPTH}/lib/sl -lsl
@@ -17,8 +16,4 @@ LIBSL	= -L${KRBDEPTH}/lib/sl -lsl
 
 COMPILE_ET	= /usr/bin/compile_et
 
-.if (${MACHINE_ARCH} != "mips")
 COM_ERR=	-lcom_err_pic
-.else
-COM_ERR=	-lcom_err
-.endif

@@ -1,4 +1,4 @@
-/*	$OpenBSD: crunchide.c,v 1.12 2000/03/01 22:10:03 todd Exp $	*/
+/*	$OpenBSD: crunchide.c,v 1.14 2001/09/18 21:23:41 jason Exp $	*/
 
 /*
  * Copyright (c) 1994 University of Maryland
@@ -213,7 +213,7 @@ struct nlist *symbase;
 #define IS_GLOBAL_DEFINED(sp) \
 		  (((sp)->n_type & N_EXT) && ((sp)->n_type & N_TYPE) != N_UNDF)
 
-#ifdef __sparc__
+#if defined(__sparc__) && !defined(__sparc64__)
 /* is the relocation entry dependent on a symbol? */
 #define IS_SYMBOL_RELOC(rp)   \
 	((rp)->r_extern || \
@@ -258,7 +258,7 @@ void hide_syms(char *filename)
     }
 
     if((buf = mmap(NULL, infstat.st_size, PROT_READ|PROT_WRITE,
-		   MAP_FILE|MAP_SHARED, inf, 0)) == (char *)-1) {
+		   MAP_FILE|MAP_SHARED, inf, 0)) == MAP_FAILED) {
 	fprintf(stderr, "%s: cannot map\n", filename);
 	close(inf);
 	return;

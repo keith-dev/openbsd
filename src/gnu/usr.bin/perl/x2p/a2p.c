@@ -3,16 +3,16 @@ static char yysccsid[] = "@(#)yaccpar 1.8 (Berkeley) 01/20/91";
 #endif
 #define YYBYACC 1
 #line 2 "a2p.y"
-/* $RCSfile: a2p.c,v $$Revision: 1.4 $$Date: 2000/04/06 17:09:13 $
+/* $RCSfile: a2p.c,v $$Revision: 1.5 $$Date: 2001/05/24 18:36:39 $
  *
- *    Copyright (c) 1991-1997, Larry Wall
+ *    Copyright (c) 1991-2001, Larry Wall
  *
  *    You may distribute under the terms of either the GNU General Public
  *    License or the Artistic License, as specified in the README file.
  *
  * $Log: a2p.c,v $
- * Revision 1.4  2000/04/06 17:09:13  millert
- * perl-5.6.0 + local changes
+ * Revision 1.5  2001/05/24 18:36:39  millert
+ * merge in perl 5.6.1 with our local changes
  *
  */
 

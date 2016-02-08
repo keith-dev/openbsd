@@ -33,7 +33,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- *      $OpenBSD: SYS.h,v 1.5 1999/01/19 01:38:54 d Exp $ 
+ *      $OpenBSD: SYS.h,v 1.7 2001/09/20 20:52:09 millert Exp $ 
  */
 
 #include <sys/syscall.h>
@@ -57,13 +57,19 @@
 # define __CLABEL2(p,x)	_C_LABEL(p/**/x)
 #endif
 
+#define __PSEUDO_NOERROR(p,x,y)				\
+		__LEAF2(p,x);				\
+			__DO_SYSCALL(y);		\
+			j	ra;			\
+		__END2(p,x)
+
 #define __PSEUDO(p,x,y)   				\
 		__LEAF2(p,x);				\
 			__DO_SYSCALL(y);		\
-			bne	a3,zero,err;	\
-			j	ra;		\
+			bne	a3,zero,err;		\
+			j	ra;			\
 		err:	la	t9,_C_LABEL(cerror);	\
-			jr	t9;		\
+			jr	t9;			\
 		__END2(p,x)
 
 #define __RSYSCALL(p,x)   __PSEUDO(p,x,x)
@@ -73,10 +79,10 @@
 # define PSEUDO(x,y)	__PSEUDO(_thread_sys_,x,y)
 # define SYSLEAF(x)	__LEAF2(_thread_sys_,x)
 # define SYSEND(x)	__END2(_thread_sys_,x)
-#else _THREAD_SAFE
+#else /* _THREAD_SAFE */
 # define RSYSCALL(x)	__RSYSCALL(,x)
 # define PSEUDO(x,y)	__PSEUDO(,x,y)
 # define SYSLEAF(x)	__LEAF2(,x)
 # define SYSEND(x)	__END2(,x)
-#endif _THREAD_SAFE
+#endif /* _THREAD_SAFE */
 

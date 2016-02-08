@@ -26,8 +26,8 @@ divert(-1)
 #
 
 divert(0)dnl
-VERSIONID(`$Sendmail: tcpproto.mc,v 8.13.22.1 2000/08/03 15:25:20 ca Exp $')
-OSTYPE(`unknown')
+VERSIONID(`$Sendmail: tcpproto.mc,v 8.14 2000/08/03 15:26:50 ca Exp $')
+OSTYPE(`openbsd')
 FEATURE(`nouucp', `reject')
 MAILER(`local')
 MAILER(`smtp')

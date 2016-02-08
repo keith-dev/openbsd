@@ -1,4 +1,4 @@
-/*	$OpenBSD: io.c,v 1.10 2000/12/07 19:36:37 deraadt Exp $	*/
+/*	$OpenBSD: io.c,v 1.18 2001/10/03 18:17:48 deraadt Exp $	*/
 
 /*
  * Copyright (c) 1989, 1993, 1994
@@ -43,7 +43,7 @@ static const char copyright[] =
 #if 0
 static const char sccsid[] = "@(#)calendar.c  8.3 (Berkeley) 3/25/94";
 #else
-static char rcsid[] = "$OpenBSD: io.c,v 1.10 2000/12/07 19:36:37 deraadt Exp $";
+static char rcsid[] = "$OpenBSD: io.c,v 1.18 2001/10/03 18:17:48 deraadt Exp $";
 #endif
 #endif /* not lint */
 
@@ -53,11 +53,11 @@ static char rcsid[] = "$OpenBSD: io.c,v 1.10 2000/12/07 19:36:37 deraadt Exp $";
 #include <sys/types.h>
 #include <sys/uio.h>
 #include <sys/wait.h>
-#include <sys/file.h>
 
 #include <ctype.h>
 #include <err.h>
 #include <errno.h>
+#include <fcntl.h>
 #include <locale.h>
 #include <pwd.h>
 #include <stdio.h>
@@ -70,10 +70,6 @@ static char rcsid[] = "$OpenBSD: io.c,v 1.10 2000/12/07 19:36:37 deraadt Exp $";
 #include "calendar.h"
 
 
-char *calendarFile = "calendar";  /* default calendar file */
-char *calendarHome = ".calendar"; /* HOME */
-char *calendarNoMail = "nomail";  /* don't sent mail if this file exist */
-
 struct iovec header[] = {
 	{"From: ", 6},
 	{NULL, 0},
@@ -85,17 +81,15 @@ struct iovec header[] = {
 };
 
 
-int	openf(char *path);
-
 void
 cal()
 {
 	register int printing;
 	register char *p;
 	FILE *fp;
-	int ch, l, i;
+	int ch, l, i, bodun = 0, bodun_maybe = 0;
 	int var;
-	char buf[2048 + 1];
+	char buf[2048 + 1], *prefix = NULL;
 	struct event *events, *cur_evt, *ev1, *tmp;
 	struct match *m;
 
@@ -116,7 +110,24 @@ cal()
 		if (strncmp(buf, "LANG=", 5) == 0) {
 			(void) setlocale(LC_ALL, buf + 5);
 			setnnames();
+			if (!strcmp(buf + 5, "ru_RU.KOI8-R") ||
+			    !strcmp(buf + 5, "uk_UA.KOI8-U") ||
+			    !strcmp(buf + 5, "by_BY.KOI8-B")) {
+				bodun_maybe++;
+				bodun = 0;
+				if (prefix)
+					free(prefix);
+				prefix = NULL;
+			} else
+				bodun_maybe = 0;
 			continue;
+		}
+		if (bodun_maybe && strncmp(buf, "BODUN=", 6) == 0) {
+			bodun++;
+			if (prefix)
+				free(prefix);
+			if ((prefix = strdup(buf + 6)) == NULL)
+				err(1, NULL);
 		}
 		/* User defined names for special events */
 		if ((p = strchr(buf, '='))) {
@@ -127,7 +138,7 @@ cal()
 				if (spev[i].uname != NULL)
 					free(spev[i].uname);
 				if ((spev[i].uname = strdup(p)) == NULL)
-					errx(1, "cannot allocate memory");
+					err(1, NULL);
 				spev[i].ulen = strlen(p);
 				i = NUMEV + 1;
 			}
@@ -136,7 +147,7 @@ cal()
 			continue;
 		}
 		if (buf[0] != '\t') {
-			printing = (m = isnow(buf)) ? 1 : 0;
+			printing = (m = isnow(buf, bodun)) ? 1 : 0;
 			if ((p = strchr(buf, '\t')) == NULL) {
 				printing = 0;
 				continue;
@@ -154,7 +165,7 @@ cal()
 				while (m) {
 				cur_evt = (struct event *) malloc(sizeof(struct event));
 				if (cur_evt == NULL)
-					errx(1, "cannot allocate memory");
+					err(1, NULL);
 
 				cur_evt->when = m->when;
 				snprintf(cur_evt->print_date,
@@ -164,8 +175,17 @@ cal()
 					cur_evt->desc = ev1->desc;
 					cur_evt->ldesc = NULL;
 				} else {
-					if ((cur_evt->ldesc = strdup(p)) == NULL)
-						errx(1, "cannot allocate memory");
+					if (m->bodun && prefix) {
+						int l1 = strlen(prefix);
+						int l2 = strlen(p);
+						if ((cur_evt->ldesc =
+						    malloc(l1 + l2)) == NULL)
+							err(1, "malloc");
+						sprintf(cur_evt->ldesc,
+						    "\t%s %s", prefix, p + 1);
+					} else if ((cur_evt->ldesc =
+					    strdup(p)) == NULL)
+						err(1, NULL);
 					cur_evt->desc = &(cur_evt->ldesc);
 					ev1 = cur_evt;
 				}
@@ -179,7 +199,7 @@ cal()
 		else if (printing) {
 			if ((ev1->ldesc = realloc(ev1->ldesc,
 			    (2 + strlen(ev1->ldesc) + strlen(buf)))) == NULL)
-				errx(1, "cannot allocate memory");
+				err(1, NULL);
 			strcat(ev1->ldesc, "\n");
 			strcat(ev1->ldesc, buf);
 		}
@@ -293,55 +313,23 @@ getfield(p, endp, flags)
 	return (val);
 }
 
-char path[MAXPATHLEN];
-
-int
-openf(path)
-	char *path;
-{
-	struct stat st;
-	int fd;
-
-	fd = open(path, O_RDONLY|O_NONBLOCK);
-	if (fd == -1)
-		return (-1);
-	if (fstat(fd, &st) == -1) {
-		close(fd);
-		return (-1);
-	}
-	if ((st.st_mode & S_IFMT) != S_IFREG) {
-		close (fd);
-		return (-1);
-	}
-
-	fcntl(fd, F_SETFD, fcntl(fd, F_GETFD, 0) &~ O_NONBLOCK);
-	return (fd);
-}
 
 FILE *
 opencal()
 {
-	int fd, pdes[2];
+	int pdes[2];
 	int fdin;
-	struct stat sbuf;
 
 	/* open up calendar file as stdin */
-	if ((fdin = openf(calendarFile)) == -1) {
-		if (doall) {
-			if (chdir(calendarHome) != 0)
-				return (NULL);
-			if (stat(calendarNoMail, &sbuf) == 0)
-				return (NULL);
-			if ((fdin = openf(calendarFile)) == -1)
-				return (NULL);
-		} else {
+	if ((fdin = open(calendarFile, O_RDONLY)) == -1) {
+		if (!doall) {
 			char *home = getenv("HOME");
 			if (home == NULL || *home == '\0')
 				errx(1, "cannot get home directory");
 			if (!(chdir(home) == 0 &&
 			    chdir(calendarHome) == 0 &&
-			    (fdin = openf(calendarFile)) != -1))
-				errx(1, "no calendar file: ``%s'' or ``~/%s/%s",
+			    (fdin = open(calendarFile, O_RDONLY)) != -1))
+				errx(1, "no calendar file: ``%s'' or ``~/%s/%s''",
 				    calendarFile, calendarHome, calendarFile);
 		}
 	}
@@ -360,9 +348,18 @@ opencal()
 			(void)close(pdes[1]);
 		}
 		(void)close(pdes[0]);
-		(void)setuid(geteuid());
-		(void)setgid(getegid());
-		execl(_PATH_CPP, "cpp", "-P", "-I.", _PATH_INCLUDE, NULL);
+		/* Set stderr to /dev/null.  Necessary so that cron does not
+		 * wait for cpp to finish if it's running calendar -a.
+		 */
+		if (doall) {
+			int fderr;
+			fderr = open(_PATH_DEVNULL, O_WRONLY, 0);
+			if (fderr == -1)
+				_exit(0);
+			(void)dup2(fderr, STDERR_FILENO);
+			(void)close(fderr);
+		}
+		execl(_PATH_CPP, "cpp", "-P", "-I.", _PATH_INCLUDE, (char *)NULL);
 		warn(_PATH_CPP);
 		_exit(1);
 	}
@@ -376,10 +373,7 @@ opencal()
 		return (stdout);
 
 	/* set output to a temporary file, so if no output don't send mail */
-	(void)snprintf(path, sizeof(path), "%s/_calXXXXXX", _PATH_TMP);
-	if ((fd = mkstemp(path)) < 0)
-		return (NULL);
-	return (fdopen(fd, "w+"));
+	return(tmpfile());
 }
 
 void
@@ -410,10 +404,8 @@ closecal(fp)
 			(void)close(pdes[0]);
 		}
 		(void)close(pdes[1]);
-		(void)setuid(geteuid());
-		(void)setgid(getegid());
 		execl(_PATH_SENDMAIL, "sendmail", "-i", "-t", "-F",
-		    "\"Reminder Service\"", NULL);
+		    "\"Reminder Service\"", (char *)NULL);
 		warn(_PATH_SENDMAIL);
 		_exit(1);
 	}
@@ -427,7 +419,6 @@ closecal(fp)
 		(void)write(pdes[1], buf, nread);
 	(void)close(pdes[1]);
 done:	(void)fclose(fp);
-	(void)unlink(path);
 	while (wait(&status) >= 0)
 		;
 }

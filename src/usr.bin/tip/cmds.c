@@ -1,4 +1,4 @@
-/*	$OpenBSD: cmds.c,v 1.8 2000/04/20 06:19:33 deraadt Exp $	*/
+/*	$OpenBSD: cmds.c,v 1.12 2001/09/26 06:07:28 pvalchev Exp $	*/
 /*	$NetBSD: cmds.c,v 1.7 1997/02/11 09:24:03 mrg Exp $	*/
 
 /*
@@ -38,11 +38,13 @@
 #if 0
 static char sccsid[] = "@(#)cmds.c	8.1 (Berkeley) 6/6/93";
 #endif
-static char rcsid[] = "$OpenBSD: cmds.c,v 1.8 2000/04/20 06:19:33 deraadt Exp $";
+static char rcsid[] = "$OpenBSD: cmds.c,v 1.12 2001/09/26 06:07:28 pvalchev Exp $";
 #endif /* not lint */
 
 #include "tip.h"
 #include "pathnames.h"
+
+#include <vis.h>
 
 /*
  * tip
@@ -374,11 +376,12 @@ out:
 	stop_t = time(0);
 	fclose(fd);
 	signal(SIGINT, f);
-	if (boolean(value(VERBOSE)))
+	if (boolean(value(VERBOSE))) {
 		if (boolean(value(RAWFTP)))
 			prtime(" chars transferred in ", stop_t-start_t);
 		else
 			prtime(" lines transferred in ", stop_t-start_t);
+	}
 	write(fildes[1], (char *)&ccc, 1);
 	tcsetattr(0, TCSAFLUSH, &term);
 }
@@ -594,7 +597,7 @@ shell()
 		else
 			cp++;
 		shell_uid();
-		execl(value(SHELL), cp, 0);
+		execl(value(SHELL), cp, (char *)NULL);
 		printf("\r\ncan't execl!\r\n");
 		exit(1);
 	}
@@ -690,7 +693,7 @@ execute(s)
 	else
 		cp++;
 	shell_uid();
-	execl(value(SHELL), cp, "-c", s, 0);
+	execl(value(SHELL), cp, "-c", s, (char *)NULL);
 }
 
 int
@@ -724,7 +727,7 @@ prtime(s, a)
 	char *s;
 	time_t a;
 {
-	register i;
+	register int i;
 	int nums[3];
 
 	for (i = 0; i < 3; i++) {
@@ -781,6 +784,40 @@ variable()
 		vtable[PARITY].v_access &= ~CHANGED;
 		setparity(NOSTR);
 	}
+}
+
+void
+listvariables()
+{
+	value_t *p;
+	char buf[BUFSIZ];
+
+	puts("v\r");
+	for (p = vtable; p->v_name; p++) {
+		fputs(p->v_name, stdout);
+		switch (p->v_type&TMASK) {
+		case STRING:
+			if (p->v_value) {
+				strnvis(buf, p->v_value, sizeof(buf),
+				    VIS_WHITE|VIS_OCTAL);
+				printf(" %s", buf);
+			}
+			putchar('\r');
+			putchar('\n');
+			break;
+		case NUMBER:
+			printf(" %ld\r\n", number(p->v_value));
+			break;
+		case BOOL:
+			printf(" %s\r\n",
+			    boolean(p->v_value) == '!' ? "false" : "true");
+			break;
+		case CHAR:
+			vis(buf, character(p->v_value), VIS_WHITE|VIS_OCTAL, 0);
+			printf(" %s\r\n", buf);
+			break;
+		}
+        }
 }
 
 /*
@@ -862,7 +899,7 @@ expand(name)
 		close(pivec[1]);
 		close(2);
 		shell_uid();
-		execl(Shell, Shell, "-c", cmdbuf, 0);
+		execl(Shell, Shell, "-c", cmdbuf, (char *)NULL);
 		_exit(1);
 	}
 	if (pid == -1) {

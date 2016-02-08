@@ -1,4 +1,4 @@
-# $OpenBSD: Makefile.inc,v 1.8 2000/01/06 07:10:26 d Exp $
+# $OpenBSD: Makefile.inc,v 1.11 2001/08/19 03:35:31 pvalchev Exp $
 # $FreeBSD: Makefile.inc,v 1.6 1999/08/28 00:03:02 peter Exp $
 
 # POSIX thread man files
@@ -27,6 +27,8 @@ MAN+=	\
 	pthread_join.3 \
 	pthread_key_create.3 \
 	pthread_key_delete.3 \
+	pthread_main_np.3 \
+	pthread_mutexattr.3 \
 	pthread_mutex_destroy.3 \
 	pthread_mutex_init.3 \
 	pthread_mutex_lock.3 \
@@ -42,6 +44,7 @@ MAN+=	\
 	pthread_rwlockattr_getpshared.3 \
 	pthread_rwlockattr_init.3 \
 	pthread_rwlockattr_setpshared.3 \
+	pthread_schedparam.3 \
 	pthread_self.3 \
 	pthread_set_name_np.3 \
 	pthread_setspecific.3 \
@@ -69,5 +72,17 @@ MLINKS+=flockfile.3 funlockfile.3 \
 	pthread_attr_init.3 pthread_attr_destroy.3 \
 	pthread_attr_setstackaddr.3 pthread_attr_getstackaddr.3 \
 	pthread_attr_setstacksize.3 pthread_attr_getstacksize.3 \
-	pthread_attr_setdetachstate.3 pthread_attr_getdetachstate.3
-	
+	pthread_attr_setdetachstate.3 pthread_attr_getdetachstate.3 \
+	pthread_mutexattr.3 pthread_mutexattr_init.3 \
+	pthread_mutexattr.3 pthread_mutexattr_destroy.3 \
+	pthread_mutexattr.3 pthread_mutexattr_getprioceiling.3 \
+	pthread_mutexattr.3 pthread_mutexattr_getprotocol.3 \
+	pthread_mutexattr.3 pthread_mutexattr_getpshared.3 \
+	pthread_mutexattr.3 pthread_mutexattr_gettype.3 \
+	pthread_mutexattr.3 pthread_mutexattr_setprioceiling.3 \
+	pthread_mutexattr.3 pthread_mutexattr_setprotocol.3 \
+	pthread_mutexattr.3 pthread_mutexattr_setpshared.3 \
+	pthread_mutexattr.3 pthread_mutexattr_settype.3 \
+	pthread_schedparam.3 pthread_getschedparam.3 \
+	pthread_schedparam.3 pthread_setschedparam.3
+

@@ -1,4 +1,4 @@
-/*	$OpenBSD: printjob.c,v 1.21 2001/02/15 05:20:35 deraadt Exp $ */
+/*	$OpenBSD: printjob.c,v 1.26 2001/09/19 10:58:08 mpech Exp $ */
 /*	$NetBSD: printjob.c,v 1.9.4.3 1996/07/12 22:31:39 jtc Exp $	*/
 
 /*
@@ -36,13 +36,13 @@
  */
 
 #ifndef lint
-static char copyright[] =
+static const char copyright[] =
 "@(#) Copyright (c) 1983, 1993\n\
 	The Regents of the University of California.  All rights reserved.\n";
 #endif /* not lint */
 
 #ifndef lint
-static char sccsid[] = "@(#)printjob.c	8.7 (Berkeley) 5/10/95";
+static const char sccsid[] = "@(#)printjob.c	8.7 (Berkeley) 5/10/95";
 #endif /* not lint */
 
 
@@ -70,6 +70,7 @@ static char sccsid[] = "@(#)printjob.c	8.7 (Berkeley) 5/10/95";
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
+#include <ctype.h>
 #include "lp.h"
 #include "lp.local.h"
 #include "pathnames.h"
@@ -103,12 +104,12 @@ static char	 title[80];	/* ``pr'' title */
 static int	 tof;		/* true if at top of form */
 
 static char	class[32];		/* classification field */
-static char	fromhost[32];		/* user's host machine */
+static char	fromhost[MAXHOSTNAMELEN]; /* user's host machine */
 				/* indentation size in static characters */
 static char	indent[10] = "-i0"; 
-static char	jobname[100];		/* job or file name */
+static char	jobname[NAME_MAX];	/* job or file name */
 static char	length[10] = "-l";	/* page length in lines */
-static char	logname[MAXLOGNAME];		/* user's login name */
+static char	logname[MAXLOGNAME];	/* user's login name */
 static char	pxlength[10] = "-y";	/* page length in pixels */
 static char	pxwidth[10] = "-x";	/* page width in pixels */
 static char	tempfile[] = "errsXXXXXXXXXX"; /* file name for filter output */
@@ -138,9 +139,9 @@ void
 printjob()
 {
 	struct stat stb;
-	register struct queue *q, **qp;
+	struct queue *q, **qp;
 	struct queue **queue;
-	register int i, nitems;
+	int i, nitems;
 	off_t pidoff;
 	int errcnt, count = 0;
 
@@ -315,7 +316,7 @@ static int
 printit(file)
 	char *file;
 {
-	register int i;
+	int i;
 	char *cp;
 	int bombed = OK;
 
@@ -376,17 +377,14 @@ printit(file)
 	while (getline(cfp))
 		switch (line[0]) {
 		case 'H':
-			strncpy(fromhost, line+1, sizeof(fromhost)-1);
-			fromhost[sizeof(fromhost)-1] = '\0';
+			strlcpy(fromhost, line+1, sizeof(fromhost));
 			if (class[0] == '\0') {
-				strncpy(class, line+1, sizeof(class)-1);
-				class[sizeof(class)-1] = '\0';
+				strlcpy(class, line+1, sizeof(class));
 			}
 			continue;
 
 		case 'P':
-			strncpy(logname, line+1, sizeof(logname)-1);
-			logname[sizeof(logname)-1] = '\0';
+			strlcpy(logname, line+1, sizeof(logname));
 			if (RS) {			/* restricted */
 				if (getpwnam(logname) == NULL) {
 					bombed = NOACCT;
@@ -411,23 +409,20 @@ printit(file)
 
 		case 'J':
 			if (line[1] != '\0') {
-				strncpy(jobname, line+1, sizeof(jobname)-1);
-				jobname[sizeof(jobname)-1] = '\0';
+				strlcpy(jobname, line+1, sizeof(jobname));
 			} else
 				strcpy(jobname, " ");
 			continue;
 
 		case 'C':
 			if (line[1] != '\0')
-				strncpy(class, line+1, sizeof(class)-1);
+				strlcpy(class, line+1, sizeof(class));
 			else if (class[0] == '\0')
 				gethostname(class, sizeof(class));
-			class[sizeof(class)-1] = '\0';
 			continue;
 
 		case 'T':	/* header title for pr */
-			strncpy(title, line+1, sizeof(title)-1);
-			title[sizeof(title)-1] = '\0';
+			strlcpy(title, line+1, sizeof(title));
 			continue;
 
 		case 'L':	/* identification line */
@@ -440,20 +435,17 @@ printit(file)
 		case '3':
 		case '4':
 			if (line[1] != '\0') {
-				strncpy(fonts[line[0]-'1'], line+1,
-				    50-1);
-				fonts[line[0]-'1'][50-1] = '\0';
+				strlcpy(fonts[line[0]-'1'], line+1,
+				    50);
 			}
 			continue;
 
 		case 'W':	/* page width */
-			strncpy(width+2, line+1, sizeof(width)-3);
-			width[2+sizeof(width)-3] = '\0';
+			strlcpy(width+2, line+1, sizeof(width)-2);
 			continue;
 
 		case 'I':	/* indent amount */
-			strncpy(indent+2, line+1, sizeof(indent)-3);
-			indent[2+sizeof(indent)-3] = '\0';
+			strlcpy(indent+2, line+1, sizeof(indent)-2);
 			continue;
 
 		default:	/* some file to print */
@@ -512,7 +504,7 @@ pass2:
 /*
  * Print a file.
  * Set up the chain [ PR [ | {IF, OF} ] ] or {IF, RF, TF, NF, DF, CF, VF}.
- * Return -1 if a non-recoverable error occured,
+ * Return -1 if a non-recoverable error occurred,
  * 2 if the filter detected some errors (but printed the job anyway),
  * 1 if we should try to reprint this job and
  * 0 if all is well.
@@ -524,8 +516,8 @@ print(format, file)
 	int format;
 	char *file;
 {
-	register int n;
-	register char *prog;
+	int n;
+	char *prog;
 	int fi, fo;
 	FILE *fp;
 	char *av[15], buf[BUFSIZ];
@@ -578,7 +570,7 @@ print(format, file)
 			for (n = 3, nofile = sysconf(_SC_OPEN_MAX); n < nofile; n++)
 				(void) close(n);
 			execl(_PATH_PR, "pr", width, length,
-			    "-h", *title ? title : " ", 0);
+			    "-h", *title ? title : " ", (char *)NULL);
 			syslog(LOG_ERR, "cannot execl %s", _PATH_PR);
 			exit(2);
 		}
@@ -748,14 +740,14 @@ start:
 
 /*
  * Send the daemon control file (cf) and any data files.
- * Return -1 if a non-recoverable error occured, 1 if a recoverable error and
+ * Return -1 if a non-recoverable error occurred, 1 if a recoverable error and
  * 0 if all is well.
  */
 static int
 sendit(file)
 	char *file;
 {
-	register int i, err = OK;
+	int i, err = OK;
 	char *cp, last[BUFSIZ];
 
 	/*
@@ -842,7 +834,7 @@ sendfile(type, file)
 	int type;
 	char *file;
 {
-	register int f, i, amt;
+	int f, i, amt;
 	struct stat stb;
 	char buf[BUFSIZ];
 	int sizerr, resp;
@@ -964,11 +956,11 @@ banner(name1, name2)
 
 static char *
 scnline(key, p, c)
-	register int key;
-	register char *p;
+	int key;
+	char *p;
 	int c;
 {
-	register scnwidth;
+	int scnwidth;
 
 	for (scnwidth = WIDTH; --scnwidth;) {
 		key <<= 1;
@@ -984,8 +976,8 @@ scan_out(scfd, scsp, dlm)
 	int scfd, dlm;
 	char *scsp;
 {
-	register char *strp;
-	register nchrs, j;
+	char *strp;
+	int nchrs, j;
 	char outbuf[LINELEN+1], *sp, c, cc;
 	int d, scnhgt;
 	extern char scnkey[][HEIGHT];	/* in lpdchar.c */
@@ -1043,9 +1035,9 @@ sendmail(user, bombed)
 	char *user;
 	int bombed;
 {
-	register int i, nofile;
+	int i, nofile;
 	int p[2], s;
-	register char *cp = NULL;
+	char *cp = NULL;
 	struct stat stb;
 	FILE *fp;
 
@@ -1061,7 +1053,7 @@ sendmail(user, bombed)
 			cp++;
 		else
 			cp = _PATH_SENDMAIL;
-		execl(_PATH_SENDMAIL, cp, "-t", 0);
+		execl(_PATH_SENDMAIL, cp, "-t", (char *)NULL);
 		exit(0);
 	} else if (s > 0) {				/* parent */
 		dup2(p[1], 1);
@@ -1122,7 +1114,7 @@ static int
 dofork(action)
 	int action;
 {
-	register int i, pid;
+	int i, pid;
 	struct passwd *pw;
 
 	for (i = 0; i < 20; i++) {
@@ -1263,7 +1255,7 @@ init()
 static void
 openpr()
 {
-	register int i, nofile;
+	int i, nofile;
 	char *cp;
 
 	if (!remote && *LP) {
@@ -1297,7 +1289,7 @@ openpr()
 				cp = OF;
 			else
 				cp++;
-			execl(OF, cp, width, length, 0);
+			execl(OF, cp, width, length, (char *)NULL);
 			syslog(LOG_ERR, "%s: %s: %m", printer, OF);
 			exit(1);
 		}
@@ -1317,7 +1309,7 @@ static void
 opennet(cp)
 	char *cp;
 {
-	register int i;
+	int i;
 	int resp, port;
 	char save_ch;
 
@@ -1361,7 +1353,7 @@ opennet(cp)
 static void
 opentty()
 {
-	register int i;
+	int i;
 
 	for (i = 1; ; i = i < 32 ? i << 1 : i) {
 		pfd = open(LP, RW ? O_RDWR : O_WRONLY);
@@ -1389,7 +1381,7 @@ opentty()
 static void
 openrem()
 {
-	register int i, n;
+	int i, n;
 	int resp;
 
 	for (i = 1; ; i = i < 256 ? i << 1 : i) {
@@ -1465,7 +1457,7 @@ setty()
 #if defined(__NetBSD__) || defined(__OpenBSD__)
 		cfsetspeed(&i.t, BR);
 #else
-		register struct bauds *bp;
+		struct bauds *bp;
 		for (bp = bauds; bp->baud; bp++)
 			if (BR == bp->baud)
 				break;
@@ -1551,7 +1543,7 @@ pstatus(msg, va_alist)
         va_dcl
 #endif
 {
-	register int fd;
+	int fd;
 	char buf[BUFSIZ];
 	va_list ap;
 #ifdef __STDC__

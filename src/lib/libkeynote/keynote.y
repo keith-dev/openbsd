@@ -1,4 +1,4 @@
-/* $OpenBSD: keynote.y,v 1.8 2000/10/09 23:41:46 angelos Exp $ */
+/* $OpenBSD: keynote.y,v 1.11 2001/09/03 20:14:51 deraadt Exp $ */
 /*
  * The author of this code is Angelos D. Keromytis (angelos@dsl.cis.upenn.edu)
  *
@@ -7,7 +7,7 @@
  *
  * Copyright (C) 1998, 1999 by Angelos D. Keromytis.
  *	
- * Permission to use, copy, and modify this software without fee
+ * Permission to use, copy, and modify this software with or without fee
  * is hereby granted, provided that this entire notice is included in
  * all copies of any software which is or includes a copy or
  * modification of this software. 
@@ -530,10 +530,10 @@ stringexp: str EQ str {
 		      if (i == 0)
 		      {
 #if !defined(HAVE_SNPRINTF)
-			  sprintf(grp, "%d", preg.re_nsub);
+			  sprintf(grp, "%lu", (unsigned long)preg.re_nsub);
 #else /* !HAVE_SNPRINTF */
-			  snprintf(grp, 3, "%d", preg.re_nsub);
-#endif /* !HAVE_SNPRINTF */
+			  snprintf(grp, 3, "%lu", (unsigned long)preg.re_nsub);
+#endif /* !HAVE_SNPRINTF */	
 			  if (keynote_env_add("_0", grp, &keynote_temp_list,
 					      1, 0) != RESULT_TRUE)
 			  {

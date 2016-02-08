@@ -1,4 +1,4 @@
-/*	$OpenBSD: conf.c,v 1.30 2001/03/27 15:46:29 ho Exp $	*/
+/*	$OpenBSD: conf.c,v 1.34 2001/10/05 05:59:06 ho Exp $	*/
 /*	$EOM: conf.c,v 1.48 2000/12/04 02:04:29 angelos Exp $	*/
 
 /*
@@ -38,7 +38,10 @@
 #include <sys/param.h>
 #include <sys/mman.h>
 #include <sys/queue.h>
+#include <sys/socket.h>
 #include <sys/stat.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
 #include <ctype.h>
 #include <fcntl.h>
 #include <stdio.h>
@@ -53,6 +56,12 @@
 #include "conf.h"
 #include "log.h"
 #include "util.h"
+
+static char *conf_get_trans_str (int, char *, char *);
+static void conf_load_defaults (int);
+#if 0
+static int conf_find_trans_xf (int, char *);
+#endif
 
 struct conf_trans {
   TAILQ_ENTRY (conf_trans) link;
@@ -134,7 +143,7 @@ conf_remove_now (char *section, char *tag)
 	  && strcasecmp (cb->tag, tag) == 0)
 	{
 	  LIST_REMOVE (cb, link);
-	  LOG_DBG ((LOG_MISC, 70, "[%s]:%s->%s removed", section, tag,
+	  LOG_DBG ((LOG_MISC, 95, "[%s]:%s->%s removed", section, tag,
 		    cb->value));
 	  free (cb->section);
 	  free (cb->tag);
@@ -159,7 +168,7 @@ conf_remove_section_now (char *section)
 	{
 	  unseen = 0;
 	  LIST_REMOVE (cb, link);
-	  LOG_DBG ((LOG_MISC, 70, "[%s]:%s->%s removed", section, cb->tag,
+	  LOG_DBG ((LOG_MISC, 95, "[%s]:%s->%s removed", section, cb->tag,
 		    cb->value));
 	  free (cb->section);
 	  free (cb->tag);
@@ -202,7 +211,7 @@ conf_set_now (char *section, char *tag, char *value, int override,
   node->is_default = is_default;
 
   LIST_INSERT_HEAD (&conf_bindings[conf_hash (section)], node, link);
-  LOG_DBG ((LOG_MISC, 70, "conf_set: [%s]:%s->%s", node->section, node->tag,
+  LOG_DBG ((LOG_MISC, 95, "conf_set: [%s]:%s->%s", node->section, node->tag,
 	    node->value));
   return 0;
 }
@@ -316,26 +325,28 @@ conf_parse (int trans, char *buf, size_t sz)
  * XXX No EC2N DH support here yet.
  */
 
-/* Find the value for a section+tag in the transaction list */
-char *
+/* Find the value for a section+tag in the transaction list.  */
+static char *
 conf_get_trans_str (int trans, char *section, char *tag)
 {
   struct conf_trans *node, *nf = 0;
-  
+
   for (node = TAILQ_FIRST (&conf_trans_queue); node;
        node = TAILQ_NEXT (node, link))
-    if (node->trans == trans && strcmp (section, node->section) == 0 && 
-	strcmp (tag, node->tag) == 0)
+    if (node->trans == trans && strcmp (section, node->section) == 0
+	&& strcmp (tag, node->tag) == 0)
       {
 	if (!nf)
 	  nf = node;
 	else if (node->override)
 	  nf = node;
       }
-  return nf ? nf->value : NULL;
+  return nf ? nf->value : 0;
 }
 
-int
+#if 0
+/* XXX Currently unused.  */
+static int
 conf_find_trans_xf (int phase, char *xf)
 {
   struct conf_trans *node;
@@ -356,26 +367,27 @@ conf_find_trans_xf (int phase, char *xf)
       }
   return 0;
 }
+#endif
 
-void
+static void
 conf_load_defaults (int tr)
 {
   int enc, auth, hash, proto, mode, pfs;
   char sect[256], *dflt;
 
-  char *mm_auth[]   = { "PRE_SHARED", "DSS", "RSA_SIG", NULL };
-  char *mm_hash[]   = { "MD5", "SHA", NULL };
+  char *mm_auth[]   = { "PRE_SHARED", "DSS", "RSA_SIG", 0 };
+  char *mm_hash[]   = { "MD5", "SHA", 0 };
   char *mm_enc[]    = { "DES_CBC", "BLOWFISH_CBC", "3DES_CBC",
-			"CAST_CBC", NULL };
-  char *dh_group[]  = { "MODP_768", "MODP_1024", "MODP_1536", NULL };
-  char *qm_enc[]    = { "DES", "3DES", "CAST", "BLOWFISH", "AES", NULL };
-  char *qm_hash[]   = { "HMAC_MD5", "HMAC_SHA", "HMAC_RIPEMD", "NONE", NULL };
+			"CAST_CBC", 0 };
+  char *dh_group[]  = { "MODP_768", "MODP_1024", "MODP_1536", 0 };
+  char *qm_enc[]    = { "DES", "3DES", "CAST", "BLOWFISH", "AES", 0 };
+  char *qm_hash[]   = { "HMAC_MD5", "HMAC_SHA", "HMAC_RIPEMD", "NONE", 0 };
 
   /* Abbreviations to make section names a bit shorter.  */
-  char *mm_auth_p[] = { "", "-DSS", "-RSA_SIG", NULL };
-  char *mm_enc_p[]  = { "DES", "BLF", "3DES", "CAST", NULL };
-  char *qm_enc_p[]  = { "-DES", "-3DES", "-CAST", "-BLF", "-AES", NULL };
-  char *qm_hash_p[] = { "-MD5", "-SHA", "-RIPEMD", "", NULL };
+  char *mm_auth_p[] = { "", "-DSS", "-RSA_SIG", 0 };
+  char *mm_enc_p[]  = { "DES", "BLF", "3DES", "CAST", 0 };
+  char *qm_enc_p[]  = { "-DES", "-3DES", "-CAST", "-BLF", "-AES", 0 };
+  char *qm_hash_p[] = { "-MD5", "-SHA", "-RIPEMD", "", 0 };
 
   /* Helper #defines, incl abbreviations.  */
 #define PROTO(x)  ((x) ? "AH" : "ESP")
@@ -428,7 +440,7 @@ conf_load_defaults (int tr)
 	    continue;
 #endif
 
-	  LOG_DBG ((LOG_MISC, 40, "conf_load_defaults : main mode %s", sect));
+	  LOG_DBG ((LOG_MISC, 90, "conf_load_defaults : main mode %s", sect));
 
 	  conf_set (tr, sect, "ENCRYPTION_ALGORITHM", mm_enc[enc], 0, 1);
 	  if (strcmp (mm_enc[enc], "BLOWFISH_CBC") == 0)
@@ -481,7 +493,7 @@ conf_load_defaults (int tr)
 		  continue;
 #endif
 
-		LOG_DBG ((LOG_MISC, 40, "conf_load_defaults : quick mode %s",
+		LOG_DBG ((LOG_MISC, 90, "conf_load_defaults : quick mode %s",
 			  sect));
 
 		conf_set (tr, sect, "Protocols", tmp, 0, 1);
@@ -615,6 +627,24 @@ conf_get_num (char *section, char *tag, int def)
   return def;
 }
 
+/*
+ * Return the socket endpoint address denoted by TAG in SECTION as a
+ * struct sockaddr.  It is the callers responsibility to deallocate
+ * this structure when it is finished with it.
+ */
+struct sockaddr *
+conf_get_address (char *section, char *tag)
+{
+  char *value = conf_get_str (section, tag);
+  struct sockaddr *sa;
+
+  if (!value)
+    return 0;
+  if (text2sockaddr (value, 0, &sa) == -1)
+    return 0;
+  return sa;
+}
+
 /* Validate X according to the range denoted by TAG in section SECTION.  */
 int
 conf_match_num (char *section, char *tag, int x)
@@ -653,11 +683,11 @@ conf_get_str (char *section, char *tag)
     if (strcasecmp (section, cb->section) == 0
 	&& strcasecmp (tag, cb->tag) == 0)
       {
-	LOG_DBG ((LOG_MISC, 60, "conf_get_str: [%s]:%s->%s", section,
+	LOG_DBG ((LOG_MISC, 95, "conf_get_str: [%s]:%s->%s", section,
 		  tag, cb->value));
 	return cb->value;
       }
-  LOG_DBG ((LOG_MISC, 60,
+  LOG_DBG ((LOG_MISC, 95,
 	    "conf_get_str: configuration value not found [%s]:%s", section,
 	    tag));
   return 0;
@@ -1014,7 +1044,7 @@ conf_end (int transaction, int commit)
 
 /*
  * Dump running configuration upon SIGUSR1.
- * XXX Configuration is "stored in reverse order", so reverse it.
+ * Configuration is "stored in reverse order", so reverse it again.
  */
 struct dumper {
   char *s, *v;
@@ -1044,7 +1074,7 @@ conf_report_dump (struct dumper *node)
 void
 conf_report (void)
 {
-  struct conf_binding *cb, *last = NULL;
+  struct conf_binding *cb, *last = 0;
   int i;
   char *current_section = (char *)0;
   struct dumper *dumper, *dnode;
@@ -1061,7 +1091,7 @@ conf_report (void)
       {
 	if (!cb->is_default)
 	  {
-	    /* Dump this entry */
+	    /* Dump this entry.  */
 	    if (!current_section || strcmp (cb->section, current_section))
 	      {
 		if (current_section)
@@ -1109,8 +1139,8 @@ conf_report (void)
   return;
 
  mem_fail:
-  LOG_DBG ((LOG_REPORT, 0, "conf_report: memory allocation failure."));
-  while ((dnode = dumper) != NULL)
+  log_error ("conf_report: malloc/calloc failed");
+  while ((dnode = dumper) != 0)
     {
       dumper = dumper->next;
       if (dnode->s)

@@ -1,4 +1,4 @@
-/*	$OpenBSD: buffer.c,v 1.5 2001/01/29 01:58:06 niklas Exp $	*/
+/*	$OpenBSD: buffer.c,v 1.16 2001/08/18 21:36:11 deraadt Exp $	*/
 
 /*
  *		Buffer handling.
@@ -6,8 +6,8 @@
 
 #include "def.h"
 #include "kbd.h"		/* needed for modes */
+#include <stdarg.h>
 
-static RSIZE    itor		__P((char *, int, RSIZE));
 static BUFFER  *makelist	__P((void));
 
 /*
@@ -206,15 +206,9 @@ listbuffers(f, n)
 static BUFFER *
 makelist()
 {
-	char   *cp1;
-	char   *cp2;
-	int     c;
-	BUFFER *bp;
+	int	w = ncol / 2;
+	BUFFER *bp, *blp;
 	LINE   *lp;
-	RSIZE   nbytes;
-	BUFFER *blp;
-	char    b[6 + 1];
-	char    line[128];
 
 	if ((blp = bfind("*Buffer List*", TRUE)) == NULL)
 		return NULL;
@@ -222,32 +216,13 @@ makelist()
 		return NULL;
 	blp->b_flag &= ~BFCHG;		/* Blow away old.	 */
 
-	(VOID) strcpy(line, " MR Buffer");
-	cp1 = line + 10;
-	while (cp1 < line + 4 + NBUFN + 1)
-		*cp1++ = ' ';
-	(VOID) strcpy(cp1, "Size   File");
-	if (addline(blp, line) == FALSE)
+	if (addlinef(blp, "%-*s%s", w, " MR Buffer", "Size   File") == FALSE ||
+	    addlinef(blp, "%-*s%s", w, " -- ------", "----   ----") == FALSE)
 		return NULL;
-	(VOID) strcpy(line, " -- ------");
-	cp1 = line + 10;
-	while (cp1 < line + 4 + NBUFN + 1)
-		*cp1++ = ' ';
-	(VOID) strcpy(cp1, "----   ----");
-	if (addline(blp, line) == FALSE)
-		return NULL;
-	bp = bheadp;				/* For all buffers	 */
-	while (bp != NULL) {
-		cp1 = &line[0];			/* Start at left edge	 */
-		*cp1++ = (bp == curbp) ? '.' : ' ';
-		*cp1++ = ((bp->b_flag & BFCHG) != 0) ? '*' : ' ';
-		*cp1++ = ' ';			/* Gap.			 */
-		*cp1++ = ' ';
-		cp2 = &bp->b_bname[0];		/* Buffer name		 */
-		while ((c = *cp2++) != 0)
-			*cp1++ = c;
-		while (cp1 < &line[4 + NBUFN + 1])
-			*cp1++ = ' ';
+
+	for (bp = bheadp; bp != NULL; bp = bp->b_bufp) {
+		RSIZE nbytes;
+
 		nbytes = 0;			/* Count bytes in buf.	 */
 		if (bp != blp) {
 			lp = lforw(bp->b_linep);
@@ -258,22 +233,17 @@ makelist()
 			if (nbytes)
 				nbytes--;	/* no bonus newline	 */
 		}
-		(VOID) itor(b, 6, nbytes);	/* 6 digit buffer size. */
-		cp2 = &b[0];
-		while ((c = *cp2++) != 0)
-			*cp1++ = c;
-		*cp1++ = ' ';			/* Gap..		 */
-		cp2 = &bp->b_fname[0];		/* File name		 */
-		if (*cp2 != 0) {
-			while ((c = *cp2++) != 0) {
-				if (cp1 < &line[128 - 1])
-					*cp1++ = c;
-			}
-		}
-		*cp1 = 0;	/* Add to the buffer.	 */
-		if (addline(blp, line) == FALSE)
+
+		if (addlinef(blp, "%c%c%c %-*s%-6d %-*s",
+		    (bp == curbp) ? '.' : ' ',	/* current buffer ? */
+		    ((bp->b_flag & BFCHG) != 0) ? '*' : ' ',	/* changed ? */
+		    ' ',			/* no readonly buffers yet */
+		    w - 4,		/* four chars already written */
+		    bp->b_bname,	/* buffer name */
+		    nbytes,		/* buffer size */
+		    w - 7,		/* seven chars already written */
+		    bp->b_fname) == FALSE)
 			return NULL;
-		bp = bp->b_bufp;
 	}
 	blp->b_dotp = lforw(blp->b_linep);	/* put dot at beginning of
 						 * buffer */
@@ -282,58 +252,37 @@ makelist()
 }
 
 /*
- * Used above.
- */
-static RSIZE 
-itor(buf, width, num)
-	char  *buf;
-	int    width;
-	RSIZE  num;
-{
-	RSIZE  r;
-
-	if (num / 10 == 0) {
-		buf[0] = (num % 10) + '0';
-		for (r = 1; r < width; buf[r++] = ' ');
-		buf[width] = '\0';
-		return 1;
-	} else {
-		buf[r = itor(buf, width, num / (RSIZE) 10)] =
-			(num % (RSIZE) 10) + '0';
-		return r + 1;
-	}
-	/* NOTREACHED */
-}
-
-/*
- * The argument "text" points to a string.  Append this line to the
+ * The argument "text" points to a format string.  Append this line to the
  * buffer. Handcraft the EOL on the end.  Return TRUE if it worked and
  * FALSE if you ran out of room.
  */
 int
-addline(bp, text)
-	BUFFER *bp;
-	char   *text;
+addlinef(BUFFER *bp, char *fmt, ...)
 {
+	va_list ap;
 	LINE  *lp;
-	int    i;
 	int    ntext;
+	char   dummy[1];
 
-	ntext = strlen(text);
-	if ((lp = lalloc(ntext)) == NULL)
+	va_start(ap, fmt);
+	ntext = vsnprintf(dummy, 1, fmt, ap) + 1;
+	if (ntext == -1) {
+		va_end(ap);
 		return FALSE;
-	for (i = 0; i < ntext; ++i)
-		lputc(lp, i, text[i]);
+	}
+	if ((lp = lalloc(ntext)) == NULL) {
+		va_end(ap);
+		return FALSE;
+	}
+	vsnprintf(lp->l_text, ntext, fmt, ap);
+	lp->l_used--;
+	va_end(ap);
+
 	bp->b_linep->l_bp->l_fp = lp;		/* Hook onto the end	 */
 	lp->l_bp = bp->b_linep->l_bp;
 	bp->b_linep->l_bp = lp;
 	lp->l_fp = bp->b_linep;
-#ifdef CANTHAPPEN
-	if (bp->b_dotp == bp->b_linep)		/* If "." is at the end	 */
-		bp->b_dotp = lp;		/* move it to new line	 */
-	if (bp->b_markp == bp->b_linep)		/* ditto for mark	 */
-		bp->b_markp = lp;
-#endif
+
 	return TRUE;
 }
 
@@ -354,8 +303,7 @@ anycb(f)
 	for (bp = bheadp; bp != NULL; bp = bp->b_bufp) {
 		if (*(bp->b_fname) != '\0'
 		    && (bp->b_flag & BFCHG) != 0) {
-			(VOID) strcpy(prompt, "Save file ");
-			(VOID) strcpy(prompt + 10, bp->b_fname);
+			sprintf(prompt, "Save file %s", bp->b_fname);
 			if ((f == TRUE || (save = eyorn(prompt)) == TRUE)
 			    && buffsave(bp) == TRUE) {
 				bp->b_flag &= ~BFCHG;
@@ -386,11 +334,11 @@ bfind(bname, cflag)
 {
 	BUFFER	*bp;
 	LINE	*lp;
-	int	 i; 
+	int	 i;
 
 	bp = bheadp;
 	while (bp != NULL) {
-		if (fncmp(bname, bp->b_bname) == 0)
+		if (strcmp(bname, bp->b_bname) == 0)
 			return bp;
 		bp = bp->b_bufp;
 	}
@@ -426,7 +374,7 @@ bfind(bname, cflag)
 	} while (i++ < defb_nmodes);
 	bp->b_fname[0] = '\0';
 	bzero(&bp->b_fi, sizeof(bp->b_fi));
-	(VOID) strcpy(bp->b_bname, bname);
+	(void) strcpy(bp->b_bname, bname);
 	lp->l_fp = lp;
 	lp->l_bp = lp;
 	bp->b_bufp = bheadp;
@@ -553,11 +501,9 @@ bufferinsert(f, n)
 	/* Get buffer to use from user */
 	if (curbp->b_altb != NULL)
 		s = eread("Insert buffer: (default %s) ", bufn, NBUFN,
-			  EFNEW | EFBUF, &(curbp->b_altb->b_bname),
-			  (char *) NULL);
+			  EFNEW | EFBUF, &(curbp->b_altb->b_bname), NULL);
 	else
-		s = eread("Insert buffer: ", bufn, NBUFN, EFNEW | EFBUF,
-			  (char *) NULL);
+		s = eread("Insert buffer: ", bufn, NBUFN, EFNEW | EFBUF, NULL);
 	if (s == ABORT)
 		return (s);
 	if (s == FALSE && curbp->b_altb != NULL)

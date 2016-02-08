@@ -1,4 +1,4 @@
-/*	$OpenBSD: misc.c,v 1.20 2000/07/27 17:44:33 espie Exp $	*/
+/*	$OpenBSD: misc.c,v 1.25 2001/10/10 11:17:37 espie Exp $	*/
 /*	$NetBSD: misc.c,v 1.6 1995/09/28 05:37:41 tls Exp $	*/
 
 /*
@@ -41,7 +41,7 @@
 #if 0
 static char sccsid[] = "@(#)misc.c	8.1 (Berkeley) 6/6/93";
 #else
-static char rcsid[] = "$OpenBSD: misc.c,v 1.20 2000/07/27 17:44:33 espie Exp $";
+static char rcsid[] = "$OpenBSD: misc.c,v 1.25 2001/10/10 11:17:37 espie Exp $";
 #endif
 #endif /* not lint */
 
@@ -61,7 +61,7 @@ static char rcsid[] = "$OpenBSD: misc.c,v 1.20 2000/07/27 17:44:33 espie Exp $";
 
 char *ep;		/* first free char in strspace */
 static char *strspace;	/* string space for evaluation */
-static char *endest;	/* end of string space	       */
+char *endest;		/* end of string space	       */
 static size_t strsize = STRSPMAX;
 static size_t bufsize = BUFSIZE;
 
@@ -69,11 +69,9 @@ char *buf;			/* push-back buffer	       */
 char *bufbase;			/* the base for current ilevel */
 char *bbase[MAXINP];		/* the base for each ilevel    */
 char *bp; 			/* first available character   */
-static char *endpbb;			/* end of push-back buffer     */
+char *endpbb;			/* end of push-back buffer     */
 
 
-static void enlarge_bufspace __P((void));
-static void enlarge_strspace __P((void));
 /*
  * find the index of second str in the first str.
  */
@@ -170,7 +168,7 @@ initspaces()
 		bbase[i] = buf;
 }
 
-static void 
+void 
 enlarge_strspace()
 {
 	char *newstrspace;
@@ -191,7 +189,7 @@ enlarge_strspace()
 	endest = strspace + strsize;
 }
 
-static void
+void
 enlarge_bufspace()
 {
 	char *newbuf;
@@ -243,7 +241,9 @@ void
 onintr(signo)
 	int signo;
 {
-	errx(1, "interrupted.");
+#define intrmessage	"m4: interrupted.\n"
+	write(STDERR_FILENO, intrmessage, sizeof(intrmessage));
+	_exit(1);
 }
 
 /*
@@ -353,5 +353,29 @@ void
 doprintfilename(f)
 	struct input_file *f;
 {
+	pbstr(rquote);
 	pbstr(f->name);
+	pbstr(lquote);
+}
+
+/* 
+ * buffer_mark/dump_buffer: allows one to save a mark in a buffer,
+ * and later dump everything that was added since then to a file.
+ */
+size_t
+buffer_mark()
+{
+	return bp - buf;
+}
+
+
+void
+dump_buffer(f, m)
+	FILE *f;
+	size_t m;
+{
+	char *s;
+
+	for (s = bp; s-buf > m;)
+		fputc(*--s, f);
 }

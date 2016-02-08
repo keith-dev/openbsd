@@ -1,4 +1,4 @@
-/*	$OpenBSD: mdef.h,v 1.17 2000/07/24 23:08:25 espie Exp $	*/
+/*	$OpenBSD: mdef.h,v 1.21 2001/09/27 11:40:33 espie Exp $	*/
 /*	$NetBSD: mdef.h,v 1.7 1996/01/13 23:25:27 pk Exp $	*/
 
 /*
@@ -80,9 +80,11 @@
 #define LINETYPE	39
 #define REGEXPTYPE	40
 #define ESYSCMDTYPE	41
+#define TRACEONTYPE	42
+#define TRACEOFFTYPE	43
+
  
 #define TYPEMASK	63	/* Keep bits really corresponding to a type. */
-#define STATIC          128	/* Name is statically allocated, don't free. */
 #define RECDEF		256	/* Pure recursive def, don't expand it */
 #define NOARGS		512	/* builtin needs no args */
 #define NEEDARGS	1024	/* mark builtin that need args with this */
@@ -111,11 +113,10 @@
 #define EOS             '\0'
 #define MAXINP          10              /* maximum include files   	    */
 #define MAXOUT          10              /* maximum # of diversions 	    */
-#define MAXSTR          512             /* maximum size of string  	    */
 #define BUFSIZE         4096            /* starting size of pushback buffer */
 #define INITSTACKMAX    4096           	/* starting size of call stack      */
 #define STRSPMAX        4096            /* starting size of string space    */
-#define MAXTOK          MAXSTR          /* maximum chars in a tokn 	    */
+#define MAXTOK          512          	/* maximum chars in a tokn 	    */
 #define HASHSIZE        199             /* maximum size of hashtab 	    */
 #define MAXCCHARS	5		/* max size of comment/quote delim  */
  
@@ -175,7 +176,7 @@ struct input_file {
 			enlarge_stack();\
 		mstack[sp].sfra = (x);	\
 		sstack[sp] = 0; \
-	} while (0);
+	} while (0)
 
 #define pushs(x) 			\
 	do {				\
@@ -183,7 +184,7 @@ struct input_file {
 			enlarge_stack();\
 		mstack[sp].sstr = (x);	\
 		sstack[sp] = 1; \
-	} while (0);
+	} while (0)
 
 #define pushs1(x) 			\
 	do {				\
@@ -191,7 +192,7 @@ struct input_file {
 			enlarge_stack();\
 		mstack[sp].sstr = (x);	\
 		sstack[sp] = 0; \
-	} while (0);
+	} while (0)
 
 /*
  *	    .				   .

@@ -1,4 +1,4 @@
-/* OpenBSD.h
+/* netbsd.h
 
    System dependencies for OpenBSD... */
 
@@ -91,6 +91,6 @@ extern int h_errno;
 #  define USE_BPF
 #endif
 
-#ifdef __alpha__
+#if defined(__alpha__) || (defined(__sparc64__) && defined(__arch64__))
 #define PTRSIZE_64BIT
 #endif

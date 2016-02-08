@@ -1,4 +1,4 @@
-#	$OpenBSD: bsd.own.mk,v 1.41 2001/04/03 23:00:09 espie Exp $
+#	$OpenBSD: bsd.own.mk,v 1.59 2001/09/27 07:27:52 art Exp $
 #	$NetBSD: bsd.own.mk,v 1.24 1996/04/13 02:08:09 thorpej Exp $
 
 # Host-specific overrides
@@ -8,19 +8,14 @@
 .include "/etc/mk.conf"
 .endif
 
-# XXX - This is temporary until everyone uses UVM
-.if (${MACHINE_ARCH} == "sparc") || (${MACHINE_ARCH} == "i386") || (${MACHINE_ARCH} == "vax") || (${MACHINE} == "amiga") || (${MACHINE_ARCH} == "alpha") || (${MACHINE_ARCH} == "powerpc") || (${MACHINE_ARCH} == "m88k")
-UVM?=		yes
-.else
-UVM?=		no
-.endif
-
+# Set `WARNINGS' to `yes' to add appropriate warnings to each compilation
+WARNINGS?=	no
 # Set `SKEY' to `yes' to build with support for S/key authentication.
 SKEY?=		yes
 # Set `KERBEROS' to `yes' to build with support for Kerberos authentication.
 KERBEROS?=	yes
 # Set `KERBEROS5' to `yes' to build with support for Kerberos5 authentication.
-KERBEROS5?=	no
+KERBEROS5?=	yes
 # Set `YP' to `yes' to build with support for NIS/YP.
 YP?=		yes
 # Set `TCP_WRAPPERS' to `yes' to build certain networking daemons with
@@ -34,6 +29,12 @@ AFS?=		yes
 .endif
 # Set `DEBUGLIBS' to `yes' to build libraries with debugging symbols
 DEBUGLIBS?=	no
+# Set toolchain for libdl and other "differences"
+.if (${MACHINE_ARCH} == "alpha" || ${MACHINE_ARCH} == "powerpc" || ${MACHINE_ARCH} == "sparc64")
+ELF_TOOLCHAIN?=	yes
+.else
+ELF_TOOLCHAIN?=	no
+.endif
 
 # where the system object and source trees are kept; can be configurable
 # by the user in case they want them in ~/foosrc and ~/fooobj, for example
@@ -88,6 +89,9 @@ NLSGRP?=	bin
 NLSOWN?=	root
 NLSMODE?=	${NONBINMODE}
 
+# Shared files for system gnu configure, not used yet
+GNUSYSTEM_AUX_DIR?=${BSDSRCDIR}/share/gnu
+
 INSTALL_COPY?=	-c
 .ifndef DEBUG
 INSTALL_STRIP?=	-s
@@ -104,9 +108,17 @@ STATIC?=	-static
 
 # don't try to generate PIC versions of libraries on machines
 # which don't support PIC.
-.if (${MACHINE_ARCH} == "alpha") || (${MACHINE_ARCH} == "vax") || \
+.if (${MACHINE_ARCH} == "vax") || \
     (${MACHINE_ARCH} == "hppa") || (${MACHINE_ARCH} == "m88k")
 NOPIC=
+.endif
+
+#pic relocation flags.
+.if (${MACHINE_ARCH} == "sparc64")
+PICFLAG=-fPIC
+ASPICFLAG=-KPIC
+.else
+ASPICFLAG=-k
 .endif
 
 # don't try to generate PROFILED versions of libraries on machines

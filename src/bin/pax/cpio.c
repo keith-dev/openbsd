@@ -1,4 +1,4 @@
-/*	$OpenBSD: cpio.c,v 1.5 1997/07/25 18:58:28 mickey Exp $	*/
+/*	$OpenBSD: cpio.c,v 1.7 2001/05/26 00:32:21 millert Exp $	*/
 /*	$NetBSD: cpio.c,v 1.5 1995/03/21 09:07:13 cgd Exp $	*/
 
 /*-
@@ -42,7 +42,7 @@
 #if 0
 static char sccsid[] = "@(#)cpio.c	8.1 (Berkeley) 5/31/93";
 #else
-static char rcsid[] = "$OpenBSD: cpio.c,v 1.5 1997/07/25 18:58:28 mickey Exp $";
+static char rcsid[] = "$OpenBSD: cpio.c,v 1.7 2001/05/26 00:32:21 millert Exp $";
 #endif
 #endif /* not lint */
 
@@ -97,7 +97,7 @@ cpio_strd()
  *	mode; looking for a valid header), and cnt (which starts at zero)
  *	which is used to count the number of empty blocks we have seen so far.
  * Return:
- *	0 if a valid trailer, -1 if not a valid trailer, 
+ *	0 if a valid trailer, -1 if not a valid trailer,
  */
 
 #ifdef __STDC__
@@ -258,7 +258,7 @@ rd_ln_nm(arcn)
 	 */
 	if ((arcn->sb.st_size == 0) ||
 	    (arcn->sb.st_size >= sizeof(arcn->ln_name))) {
-#		ifdef NET2_STAT
+#		ifdef LONG_OFF_T
 		paxwarn(1, "Cpio link name length is invalid: %lu",
 		    arcn->sb.st_size);
 #		else
@@ -361,7 +361,7 @@ cpio_rd(arcn, buf)
 	arcn->sb.st_mtime = (time_t)asc_ul(hd->c_mtime, sizeof(hd->c_mtime),
 	    OCT);
 	arcn->sb.st_ctime = arcn->sb.st_atime = arcn->sb.st_mtime;
-#	ifdef NET2_STAT
+#	ifdef LONG_OFF_T
 	arcn->sb.st_size = (off_t)asc_ul(hd->c_filesize,sizeof(hd->c_filesize),
 	    OCT);
 #	else
@@ -381,8 +381,8 @@ cpio_rd(arcn, buf)
 
 	if (((arcn->sb.st_mode&C_IFMT) != C_ISLNK)||(arcn->sb.st_size == 0)) {
 		/*
-	 	 * no link name to read for this file
-	 	 */
+		 * no link name to read for this file
+		 */
 		arcn->ln_nlen = 0;
 		arcn->ln_name[0] = '\0';
 		return(com_rd(arcn));
@@ -478,7 +478,7 @@ cpio_wr(arcn)
 		/*
 		 * set data size for file data
 		 */
-#		ifdef NET2_STAT
+#		ifdef LONG_OFF_T
 		if (ul_asc((u_long)arcn->sb.st_size, hd->c_filesize,
 		    sizeof(hd->c_filesize), OCT)) {
 #		else
@@ -576,7 +576,7 @@ cpio_wr(arcn)
 /*
  * vcpio_id()
  *      determine if a block given to us is a valid system VR4 cpio header
- *	WITHOUT crc. WATCH it the magic cookies are in OCTAL, the header 
+ *	WITHOUT crc. WATCH it the magic cookies are in OCTAL, the header
  *	uses HEX
  * Return:
  *      0 if a valid header, -1 otherwise
@@ -688,7 +688,7 @@ vcpio_rd(arcn, buf)
 	arcn->sb.st_gid = (gid_t)asc_ul(hd->c_gid, sizeof(hd->c_gid), HEX);
 	arcn->sb.st_mtime = (time_t)asc_ul(hd->c_mtime,sizeof(hd->c_mtime),HEX);
 	arcn->sb.st_ctime = arcn->sb.st_atime = arcn->sb.st_mtime;
-#	ifdef NET2_STAT
+#	ifdef LONG_OFF_T
 	arcn->sb.st_size = (off_t)asc_ul(hd->c_filesize,
 	    sizeof(hd->c_filesize), HEX);
 #	else
@@ -825,13 +825,13 @@ vcpio_wr(arcn)
 	 */
 	if (docrc) {
 		if (ul_asc((u_long)VCMAGIC, hd->c_magic, sizeof(hd->c_magic),
-	    		OCT) ||
+			OCT) ||
 		    ul_asc((u_long)arcn->crc,hd->c_chksum,sizeof(hd->c_chksum),
-	    		HEX))
+			HEX))
 			goto out;
 	} else {
 		if (ul_asc((u_long)VMAGIC, hd->c_magic, sizeof(hd->c_magic),
-	    		OCT) ||
+			OCT) ||
 		    ul_asc((u_long)0L, hd->c_chksum, sizeof(hd->c_chksum),HEX))
 			goto out;
 	}
@@ -845,7 +845,7 @@ vcpio_wr(arcn)
 		 * much to pad.
 		 */
 		arcn->pad = VCPIO_PAD(arcn->sb.st_size);
-#		ifdef NET2_STAT
+#		ifdef LONG_OFF_T
 		if (ul_asc((u_long)arcn->sb.st_size, hd->c_filesize,
 		    sizeof(hd->c_filesize), HEX)) {
 #		else
@@ -888,11 +888,11 @@ vcpio_wr(arcn)
 	    ul_asc((u_long)arcn->sb.st_uid, hd->c_uid, sizeof(hd->c_uid),
 		HEX) ||
 	    ul_asc((u_long)arcn->sb.st_gid, hd->c_gid, sizeof(hd->c_gid),
-    		HEX) ||
+		HEX) ||
 	    ul_asc((u_long)arcn->sb.st_mtime, hd->c_mtime, sizeof(hd->c_mtime),
-    		HEX) ||
+		HEX) ||
 	    ul_asc((u_long)arcn->sb.st_nlink, hd->c_nlink, sizeof(hd->c_nlink),
-    		HEX) ||
+		HEX) ||
 	    ul_asc((u_long)MAJOR(arcn->sb.st_dev),hd->c_maj, sizeof(hd->c_maj),
 		HEX) ||
 	    ul_asc((u_long)MINOR(arcn->sb.st_dev),hd->c_min, sizeof(hd->c_min),

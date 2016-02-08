@@ -1,4 +1,4 @@
-/*     $OpenBSD: supextern.h,v 1.2 1997/09/16 11:01:22 deraadt Exp $  */
+/*     $OpenBSD: supextern.h,v 1.5 2001/05/05 15:56:04 millert Exp $  */
 
 #ifndef __P
 #ifdef __STDC__
@@ -17,7 +17,7 @@ int ci __P((char *, FILE *, int, CIENTRY *, char *, char *));
 #endif
 
 /* errmsg.c */
-char *errmsg __P((int));
+const char *errmsg __P((int));
 
 /* expand.c */
 int expand __P((char *, char **, int));
@@ -33,6 +33,10 @@ void logopen __P((char *));
 void logquit __P((int, char *, ...));
 void logerr __P((char *, ...));
 void loginfo __P((char *, ...));
+#ifdef LIBWRAP
+void logdeny __P((char *, ...));
+void logallow __P((char *, ...));
+#endif
 
 /* netcryptvoid.c */
 int netcrypt __P((char *));
@@ -49,15 +53,16 @@ void path __P((char *, char *, char *, int));
 /* quit.c */
 void quit __P((int, char *, ...));
 
+/* read_line.c */
+char *read_line __P((FILE *, size_t *, size_t *, const char[3], int));
+
 /* run.c */
 int run __P((char *, ...));
 int runv __P((char *, char **));
 int runp __P((char *, ...));
 int runvp __P((char *, char **));
 int runio __P((char *const[], const char *, const char *, const char *));
-
-/* salloc.c */
-char *salloc __P((char *));
+int runiofd __P((char *const[], const int, const int, const int));
 
 /* scan.c */
 int getrelease __P((char *));
@@ -66,6 +71,7 @@ void getscanlists __P((void));
 void cdprefix __P((char *));
 
 /* scm.c */
+int lock_host_file __P((char *));
 int servicesetup __P((char *));
 int service __P((void));
 int serviceprep __P((void));
@@ -122,7 +128,7 @@ TREE *getcollhost __P((int *, int *, long *, int *));
 void getcoll __P((void));
 int signon __P((TREE *, int, int *));
 int setup __P((TREE *));
-void login __P((void));
+void suplogin __P((void));
 void listfiles __P((void));
 void recvfiles __P((void));
 int prepare __P((char *, int, int *, struct stat *));
@@ -137,8 +143,9 @@ void goaway __P((char *, ...));
 /* supcmisc.c */
 void prtime __P((void));
 int establishdir __P((char *));
+int makedir __P((char *, int, struct stat *));
 int estabd __P((char *, char *));
-void ugconvert __P((char *, char *, int *, int *, int *));
+void ugconvert __P((char *, char *, uid_t *, gid_t *, int *));
 void notify __P((char *, ...));
 void lockout __P((int));
 char *fmttime __P((time_t));
@@ -172,7 +179,11 @@ int msgxpatch __P((void));
 int msgcompress __P((void));
 
 /* vprintf.c */
+/* XXX already in system headers included already - but with different
+   argument declarations! */
+#if 0
 int vprintf __P((const char *, va_list));
 int vfprintf __P((FILE *, const char *, va_list));
 int vsprintf __P((char *, const char *, va_list));
 int vsnprintf __P((char *, size_t, const char *, va_list));
+#endif

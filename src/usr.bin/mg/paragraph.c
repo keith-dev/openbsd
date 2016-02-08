@@ -1,4 +1,4 @@
-/*	$OpenBSD: paragraph.c,v 1.4 2001/01/29 01:58:09 niklas Exp $	*/
+/*	$OpenBSD: paragraph.c,v 1.6 2001/05/24 03:05:25 mickey Exp $	*/
 
 /*
  * Code for dealing with paragraphs and filling. Adapted from MicroEMACS 3.6
@@ -12,8 +12,8 @@ static int	fillcol = 70;
 #define MAXWORD 256
 
 /*
- * Move to start of paragraph.  Go back to the begining of the current 
- * paragraph here we look for a <NL><NL> or <NL><TAB> or <NL><SPACE> 
+ * Move to start of paragraph.  Go back to the begining of the current
+ * paragraph here we look for a <NL><NL> or <NL><TAB> or <NL><SPACE>
  * combination to delimit the begining of a paragraph.
  */
 /* ARGSUSED */
@@ -51,9 +51,9 @@ gotobop(f, n)
 						 * beond end of buffer,
 						 * cleanup time
 						 */
-						curwp->w_dotp = 
+						curwp->w_dotp =
 						    lback(curwp->w_dotp);
-						curwp->w_doto = 
+						curwp->w_doto =
 						    llength(curwp->w_dotp);
 					}
 				}
@@ -66,8 +66,8 @@ gotobop(f, n)
 }
 
 /*
- * Move to end of paragraph.  Go forword to the end of the current paragraph 
- * here we look for a <NL><NL> or <NL><TAB> or <NL><SPACE> combination to 
+ * Move to end of paragraph.  Go forword to the end of the current paragraph
+ * here we look for a <NL><NL> or <NL><TAB> or <NL><SPACE> combination to
  * delimit the begining of a paragraph.
  */
 /* ARGSUSED */
@@ -111,7 +111,7 @@ gotoeop(f, n)
 }
 
 /*
- * Justify a paragraph.  Fill the current paragraph according to the current 
+ * Justify a paragraph.  Fill the current paragraph according to the current
  * fill column.
  */
 /* ARGSUSED */
@@ -131,16 +131,16 @@ fillpara(f, n)
 	char	 wbuf[MAXWORD];	/* buffer for current word		*/
 
 	/* record the pointer to the line just past the EOP */
-	(VOID)gotoeop(FFRAND, 1);
+	(void)gotoeop(FFRAND, 1);
 	if (curwp->w_doto != 0) {
 		/* paragraph ends at end of buffer */
-		(VOID)lnewline();
+		(void)lnewline();
 		eopline = lforw(curwp->w_dotp);
 	} else
 		eopline = curwp->w_dotp;
 
 	/* and back top the begining of the paragraph */
-	(VOID)gotobop(FFRAND, 1);
+	(void)gotobop(FFRAND, 1);
 
 	/* initialize various info */
 	while (inword() == NULL && forwchar(FFRAND, 1));
@@ -187,10 +187,10 @@ fillpara(f, n)
 			 * if at end of line or at doublespace and previous
 			 * character was one of '.','?','!' doublespace here.
 			 */
-			if ((eolflag || 
-			    curwp->w_doto == llength(curwp->w_dotp) || 
+			if ((eolflag ||
+			    curwp->w_doto == llength(curwp->w_dotp) ||
 			    (c = lgetc(curwp->w_dotp, curwp->w_doto)) == ' '
-			    || c == '\t') && ISEOSP(wbuf[wordlen - 1]) && 
+			    || c == '\t') && ISEOSP(wbuf[wordlen - 1]) &&
 			    wordlen < MAXWORD - 1)
 				wbuf[wordlen++] = ' ';
 
@@ -198,7 +198,7 @@ fillpara(f, n)
 			if (newlength <= fillcol) {
 				/* add word to current line */
 				if (!firstflag) {
-					(VOID)linsert(1, ' ');
+					(void)linsert(1, ' ');
 					++clength;
 				}
 				firstflag = FALSE;
@@ -206,34 +206,34 @@ fillpara(f, n)
 				if (curwp->w_doto > 0 &&
 				    lgetc(curwp->w_dotp, curwp->w_doto - 1) == ' ') {
 					curwp->w_doto -= 1;
-					(VOID)ldelete((RSIZE) 1, KNONE);
+					(void)ldelete((RSIZE) 1, KNONE);
 				}
 				/* start a new line */
-				(VOID)lnewline();
+				(void)lnewline();
 				clength = 0;
 			}
 
 			/* and add the word in in either case */
 			for (i = 0; i < wordlen; i++) {
-				(VOID)linsert(1, wbuf[i]);
+				(void)linsert(1, wbuf[i]);
 				++clength;
 			}
 			wordlen = 0;
 		}
 	}
 	/* and add a last newline for the end of our new paragraph */
-	(VOID)lnewline();
+	(void)lnewline();
 
 	/*
 	 * we realy should wind up where we started, (which is hard to keep
 	 * track of) but I think the end of the last line is better than the
 	 * begining of the blank line.
 	 */
-	(VOID)backchar(FFRAND, 1);
+	(void)backchar(FFRAND, 1);
 	return TRUE;
 }
 
-/* 
+/*
  * Delete a paragraph.  Delete n paragraphs starting with the current one.
  */
 /* ARGSUSED */
@@ -247,14 +247,14 @@ killpara(f, n)
 	while (n--) {
 
 		/* mark out the end and begining of the para to delete */
-		(VOID)gotoeop(FFRAND, 1);
+		(void)gotoeop(FFRAND, 1);
 
 		/* set the mark here */
 		curwp->w_markp = curwp->w_dotp;
 		curwp->w_marko = curwp->w_doto;
 
 		/* go to the begining of the paragraph */
-		(VOID)gotobop(FFRAND, 1);
+		(void)gotobop(FFRAND, 1);
 
 		/* force us to the beginning of line */
 		curwp->w_doto = 0;
@@ -264,7 +264,7 @@ killpara(f, n)
 			return status;
 
 		/* and clean up the 2 extra lines */
-		(VOID)ldelete((RSIZE) 1, KFORW);
+		(void)ldelete((RSIZE) 1, KFORW);
 	}
 	return TRUE;
 }
@@ -295,7 +295,7 @@ fillword(f, n)
 			++col;
 	}
 	if (curwp->w_doto != llength(curwp->w_dotp)) {
-		(VOID)selfinsert(f, n);
+		(void)selfinsert(f, n);
 		nce = llength(curwp->w_dotp) - curwp->w_doto;
 	} else
 		nce = 0;
@@ -303,18 +303,18 @@ fillword(f, n)
 
 	if ((c = lgetc(curwp->w_dotp, curwp->w_doto)) != ' ' && c != '\t')
 		do {
-			(VOID)backchar(FFRAND, 1);
+			(void)backchar(FFRAND, 1);
 		} while ((c = lgetc(curwp->w_dotp, curwp->w_doto)) != ' '
 		    && c != '\t' && curwp->w_doto > 0);
 
 	if (curwp->w_doto == 0)
 		do {
-			(VOID)forwchar(FFRAND, 1);
+			(void)forwchar(FFRAND, 1);
 		} while ((c = lgetc(curwp->w_dotp, curwp->w_doto)) != ' '
 		    && c != '\t' && curwp->w_doto < llength(curwp->w_dotp));
 
-	(VOID)delwhite(FFRAND, 1);
-	(VOID)lnewline();
+	(void)delwhite(FFRAND, 1);
+	(void)lnewline();
 	i = llength(curwp->w_dotp) - nce;
 	curwp->w_doto = i > 0 ? i : 0;
 	curwp->w_flag |= WFMOVE;

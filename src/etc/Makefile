@@ -1,4 +1,4 @@
-#	$OpenBSD: Makefile,v 1.119 2001/04/01 19:40:16 deraadt Exp $
+#	$OpenBSD: Makefile,v 1.132 2001/09/21 22:13:51 deraadt Exp $
 
 TZDIR=		/usr/share/zoneinfo
 LOCALTIME=	US/Pacific
@@ -15,12 +15,17 @@ BINGRP= wheel
 BIN1=	bootptab changelist ccd.conf csh.cshrc csh.login csh.logout \
 	daily dhcpd.conf dhcpd.interfaces dm.conf exports ftpusers \
 	ftpchroot gettytab group hosts hosts.lpd inetd.conf \
-	ipf.rules ksh.kshrc locate.rc man.conf monthly motd mrouted.conf \
-	myname ipnat.rules netstart networks newsyslog.conf passwd.conf \
+	ksh.kshrc locate.rc man.conf monthly motd mrouted.conf \
+	myname netstart networks newsyslog.conf pf.conf nat.conf \
 	phones printcap protocols rbootd.conf rc rc.conf rc.local \
 	rc.securelevel rc.shutdown remote rpc security services \
 	shells syslog.conf weekly etc.${MACHINE}/disktab dhclient.conf \
 	mailer.conf
+
+.if (${MACHINE} == "alpha" || ${MACHINE} == "hppa" || \
+     ${MACHINE} == "i386" || ${MACHINE} == "macppc")
+BIN1+=	wsconsctl.conf
+.endif
 
 # -rw-rw-r--
 BIN2=	motd
@@ -70,7 +75,7 @@ distribution-etc-root-var: distrib-dirs
 	${INSTALL} -c -o root -g wheel -m 644 login.conf ${DESTDIR}/etc
 	${INSTALL} -c -o root -g wheel -m 600 master.passwd ${DESTDIR}/etc
 	pwd_mkdb -p -d ${DESTDIR}/etc /etc/master.passwd
-	${INSTALL} -c -o root -g wheel -m 644 primes ${DESTDIR}/etc
+	${INSTALL} -c -o root -g wheel -m 644 moduli ${DESTDIR}/etc
 	${INSTALL} -c -o ${BINOWN} -g ${BINGRP} -m 555 \
 	     MAKEDEV.local etc.${MACHINE}/MAKEDEV ${DESTDIR}/dev
 	(cd root; \
@@ -102,7 +107,16 @@ distribution-etc-root-var: distrib-dirs
 		${INSTALL} -c -o root -g wheel -m 644 krb.conf \
 		    ${DESTDIR}/etc/kerberosIV; \
 		${INSTALL} -c -o root -g wheel -m 644 krb.realms \
+		    ${DESTDIR}/etc/kerberosIV; \
+		${INSTALL} -c -o root -g wheel -m 644 krb.extra \
+		    ${DESTDIR}/etc/kerberosIV; \
+		${INSTALL} -c -o root -g wheel -m 644 krb.equiv \
 		    ${DESTDIR}/etc/kerberosIV)
+	(cd kerberosV; \
+		${INSTALL} -c -o root -g wheel -m 644 README \
+		    ${DESTDIR}/etc/kerberosV; \
+		${INSTALL} -c -o root -g wheel -m 644 krb5.conf.example \
+		    ${DESTDIR}/etc/kerberosV)
 	(cd amd; \
 		${INSTALL} -c -o root -g wheel -m 644 master.sample \
 		    ${DESTDIR}/etc/amd)
@@ -183,8 +197,6 @@ distribution-etc-root-var: distrib-dirs
 		${DESTDIR}/var/log/daemon
 	${INSTALL} -c -o ${BINOWN} -g wheel -m 640 /dev/null \
 		${DESTDIR}/var/log/ftpd
-	${INSTALL} -c -o ${BINOWN} -g wheel -m 640 /dev/null \
-		${DESTDIR}/var/log/ipflog
 	${INSTALL} -c -o ${BINOWN} -g wheel -m 644 /dev/null \
 		${DESTDIR}/var/log/lastlog
 	${INSTALL} -c -o ${BINOWN} -g wheel -m 640 /dev/null \
@@ -203,13 +215,6 @@ distribution-etc-root-var: distrib-dirs
 		${DESTDIR}/var/msgs/bounds
 	${INSTALL} -c -o ${BINOWN} -g utmp -m 664 /dev/null \
 		${DESTDIR}/var/run/utmp
-.if (${MACHINE_ARCH} == "mips")
-	(cd etc.${MACHINE}; ${INSTALL} -c -o ${BINOWN} -g wheel -m 444 \
-	    ld.so.conf ${DESTDIR}/etc)
-.endif
-.ifndef NOMAKEDEV
-	(cd ${DESTDIR}/dev; ./MAKEDEV all)
-.endif
 .if ${MACHINE} == "vax"
 	(cd etc.vax; ${INSTALL} -c -o ${BINOWN} -g ${BINGRP} -m 444 ${PCS} \
 	    ${DESTDIR}/)
@@ -228,6 +233,8 @@ distribution-etc-root-var: distrib-dirs
 	    -O DontBlameSendmail=mapinunsafedirpath
 	${INSTALL} -c -o root -g wheel -m 600 root/root.mail \
 		${DESTDIR}/var/mail/root
+	${INSTALL} -c -o root -g wheel -m 440 ../usr.bin/sudo/sudoers \
+		${DESTDIR}/etc/sudoers
 
 distribution: distribution-etc-root-var
 	(cd ..; ${MAKE} install)

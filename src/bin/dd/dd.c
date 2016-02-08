@@ -1,4 +1,4 @@
-/*	$OpenBSD: dd.c,v 1.8 1998/04/30 05:55:02 deraadt Exp $	*/
+/*	$OpenBSD: dd.c,v 1.11 2001/10/06 22:31:54 millert Exp $	*/
 /*	$NetBSD: dd.c,v 1.6 1996/02/20 19:29:06 jtc Exp $	*/
 
 /*-
@@ -48,7 +48,7 @@ static char copyright[] =
 #if 0
 static char sccsid[] = "@(#)dd.c	8.5 (Berkeley) 4/2/94";
 #else
-static char rcsid[] = "$OpenBSD: dd.c,v 1.8 1998/04/30 05:55:02 deraadt Exp $";
+static char rcsid[] = "$OpenBSD: dd.c,v 1.11 2001/10/06 22:31:54 millert Exp $";
 #endif
 #endif /* not lint */
 
@@ -97,8 +97,10 @@ main(argc, argv)
 
 	atexit(summary);
 
-	while (files_cnt--)
-		dd_in();
+	if (cpy_cnt != (size_t)-1) {
+		while (files_cnt--)
+			dd_in();
+	}
 
 	dd_close();
 	exit(0);
@@ -206,7 +208,8 @@ setup()
 #endif	/* NO_CONV */
 	}
 
-	(void)time(&st.start);			/* Statistics timestamp. */
+	/* Statistics timestamp. */
+	(void)gettimeofday(&st.startv, (struct timezone *)NULL);
 }
 
 static void

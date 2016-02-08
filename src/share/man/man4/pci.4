@@ -1,4 +1,4 @@
-.\"	$OpenBSD: pci.4,v 1.35 2001/04/16 02:08:14 jason Exp $
+.\"	$OpenBSD: pci.4,v 1.48 2001/10/08 22:18:19 deraadt Exp $
 .\"	$NetBSD: pci.4,v 1.29 2000/04/01 00:32:23 tsarna Exp $
 .\"
 .\" Copyright (c) 2000 Theo de Raadt.  All rights reserved.
@@ -67,12 +67,12 @@ devices not listed here are machine-dependent.
 Consult your system's
 .Xr intro 4
 for additional information.
-.Pp
 .Ss Details specific to the i386
 Note that interrupt mappings on the i386 may require that you configure
 your BIOS to reserve sufficient interrupts as "PCI/ISAPnP" so that there
 are sufficient interrupts remaining to configure the discovered PCI
-devices.  For more information, see
+devices.
+For more information, see
 .Xr pcibios 4 .
 .Sh SUPPORTED DEVICES
 The system includes machine-independent
@@ -118,7 +118,8 @@ Adaptec "FSA" family (Adaptec AAC, Dell PERC, HP NetRaid)
 .Tn RAID
 controllers.
 .It Xr ami 4
-American Megatrends Inc. MegaRAID family
+American Megatrends Inc.
+MegaRAID family
 .Tn RAID
 controllers.
 .It Xr cac 4
@@ -132,7 +133,13 @@ controllers.
 .It Xr gdt 4
 ICP-Vortex GDT
 .Tn RAID
-conttrollers.
+controllers.
+.It Xr iop 4
+Generic
+.Tn I2O
+specification
+.Tn RAID
+controllers.
 .It Xr twe 4
 3ware Escalade
 .Tn RAID
@@ -142,6 +149,8 @@ controllers.
 .Bl -tag -width 10n -offset ind
 .It Xr an 4
 Aironet Communications 4500/4800 IEEE 802.11DS wireless network adapter.
+.It Xr bge 4
+Broadcom BCM570x PCI gigabit ethernet.
 .It Xr dc 4
 Various Tulip-like Ethernet
 interfaces such as the DEC/Intel 21143;
@@ -169,7 +178,8 @@ instances on the
 .Tn PCI
 bus on the other side of the bridge.
 .It Xr en 4
-Midway-based Efficient Networks Inc. and Adaptec ATM interfaces.
+Midway-based Efficient Networks Inc.
+and Adaptec ATM interfaces.
 .It Xr ep 4
 3Com 3c590 and 3c595 Ethernet interfaces.
 .It Xr fpa 4
@@ -181,12 +191,16 @@ interfaces.
 Intel EtherExpress PRO 10+/100B Ethernet interfaces.
 .It Xr le 4
 PCNet-PCI Ethernet interfaces.
+.It Xr lge 4
+Level 1 LXT1001 NetCellerator PCI Gigabit Ethernet.
 .It Xr lmc 4
 Lan Media Corporation
 .Tn SSI/DS1/HSSI/DS3
 interfaces.
 .It Xr ne 4
 NE2000-compatible Ethernet interfaces.
+.It Xr nge 4
+National Semiconductor DP83820 and DP83821 based Gigabit Ethernet.
 .It Xr rl 4
 RealTek 8129/8139 Ethernet interfaces.
 .It Xr sf 4
@@ -209,6 +223,8 @@ SMC 9432 10/100 Mbps Ethernet interfaces.
 VIA Technologies VT3043 and VT86C100A Ethernet interfaces.
 .It Xr wb 4
 Winbond W89C840F Ethernet interfaces.
+.It Xr wi 4
+WaveLAN/IEEE and PRISM-II 802.11DS wireless network interfaces.
 .It Xr wx 4
 Intel Gigabit Ethernet interfaces.
 .It Xr xl 4
@@ -220,7 +236,7 @@ Intel Gigabit Ethernet interfaces.
 Hi/fn 7751
 Symmetric Encryption Accelerator.
 .It Xr ubsec 4
-Broadcom Bluesteelnet uBsec 5501, 5601, and 5805.
+Broadcom Bluesteelnet uBsec 5501, 5601, 5805, and 5820.
 .It Xr ises 4
 Pijnenburg PCC-ISES hardware crypto accelerator.
 .El
@@ -228,6 +244,8 @@ Pijnenburg PCC-ISES hardware crypto accelerator.
 .Bl -tag -width 10n -offset ind
 .It Xr cy 4
 Cyclades Cyclom-4Y, -8Y, and -16Y asynchronous serial communications devices.
+.It Xr cz 4
+Cyclades-Z series multi-port serial adapter device driver.
 .El
 .Ss Display adapters
 .Bl -tag -width 10n -offset ind
@@ -298,11 +316,75 @@ USB UHCI host controller.
 .It Xr wdt 4
 ICS PCI-WDT500/501 watchdog timer devices.
 .El
+.Sh IOCTLS
+If the kernel is compiled with the
+.Cd option USER_PCICONF
+kernel option, the following
+.Xr ioctl 2
+calls are supported by the
+.Nm
+driver.
+They are defined in the header file
+.Aq Pa sys/pciio.h .
+.Bl -tag -width 012345678901234
+.Pp
+.It PCIOCREAD
+This
+.Xr ioctl 2
+reads the
+.Tn PCI
+configuration registers specified by the passed-in
+.Va pci_io
+structure.
+The
+.Va pci_io
+structure consists of the following fields:
+.Bl -tag -width pi_width
+.It pi_sel
+A
+.Va pcisel
+structure which specifies the bus, slot and function the user would like to
+query.
+.It pi_reg
+The
+.Tn PCI
+configuration register the user would like to access.
+.It pi_width
+The width, in bytes, of the data the user would like to read.
+This value may be either 1, 2, or 4.  3-byte reads and reads larger than
+4 bytes are not supported.
+.It pi_data
+The data returned by the kernel.
+.El
+.It PCIOCWRITE
+This
+.Xr ioctl 2
+allows users to write to the
+.Tn PCI
+specified in the passed-in
+.Va pci_io
+structure.
+The
+.Va pci_io
+structure is described above.
+The limitations on data width described for
+reading registers, above, also apply to writing
+.Tn PCI
+configuration registers.
+.El
+.Sh FILES
+.Bl -tag -width /dev/pci -compact
+.It Pa /dev/pci
+Character device for the
+.Nm
+driver.
+.El
 .Sh SEE ALSO
 .Xr cardbus 4 ,
 .Xr intro 4 ,
 .Xr isa 4 ,
 .Xr isapnp 4 ,
+.Xr options 4 ,
 .Xr pchb 4 ,
 .Xr pcmcia 4 ,
 .Xr usb 4
@@ -311,3 +393,6 @@ The machine-independent
 .Tn PCI
 subsystem appeared in
 .Ox 2.0 .
+Support for device listing and matching was re-implemented by
+Kenneth Merry, and first appeared in
+.Fx 3.0 .

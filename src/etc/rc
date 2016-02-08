@@ -1,4 +1,4 @@
-#	$OpenBSD: rc,v 1.167 2001/04/19 04:00:15 deraadt Exp $
+#	$OpenBSD: rc,v 1.185 2001/10/09 18:44:17 angelos Exp $
 
 # System startup script run by init on autoboot
 # or after single-user.
@@ -64,6 +64,8 @@ for dev in 0 1 2 3; do
 	fi
 done
 
+swapctl -A -t blk
+
 if [ -e /fastboot ]; then
 	echo "Fast boot: skipping disk checks."
 elif [ $1x = autobootx ]; then
@@ -102,16 +104,29 @@ fi
 
 trap "echo 'Boot interrupted.'; exit 1" 3
 
-swapon -a
-
 umount -a >/dev/null 2>&1
 mount -a -t nonfs
 mount -uw /		# root on nfs requires this, others aren't hurt
 rm -f /fastboot		# XXX (root now writeable)
 
+# pick up option configuration
+. /etc/rc.conf
+
 # set flags on ttys.  (do early, in case they use tty for SLIP in netstart)
 echo 'setting tty flags'
 ttyflags -a
+
+if [ "X$pf" != X"NO" ]; then
+	RULES="block in all\nblock out all"
+	case `sysctl vfs.mounts.nfs` in
+	*[1-9]*)
+		# don't kill NFS
+		RULES="$RULES\npass in proto udp from any port { 111, 2049 } to any"
+		RULES="$RULES\npass out proto udp from any to any port { 111, 2049 }"
+		;;
+	esac
+	echo $RULES | pfctl -R - -e
+fi
 
 if [ -f /etc/sysctl.conf ]; then
 (
@@ -127,6 +142,15 @@ fi
 # set hostname, turn on network
 echo 'starting network'
 . /etc/netstart
+
+if [ "X$pf" != X"NO" ]; then
+	if [ -f ${nat_rules} ]; then
+		pfctl -N ${nat_rules}
+	fi
+	if [ -f ${pf_rules} ]; then
+		pfctl -R ${pf_rules}
+	fi
+fi
 
 mount /usr >/dev/null 2>&1
 mount /var >/dev/null 2>&1
@@ -165,6 +189,11 @@ if [ "X${named_flags}" != X"NO" -a "X${named_chroot}" != "X" ]; then
 fi
 syslogd ${syslogd_flags}
 
+if [ "X$pf" != X"NO" ]; then
+	ifconfig pflog0 up
+	pflogd ${pflogd_flags}
+fi
+
 # $named_flags, $named_user, and $named_chroot are imported from /etc/rc.conf;
 # if $named_flags != NO, named is run.
 if [ "X${named_flags}" != X"NO" ]; then
@@ -184,10 +213,6 @@ if [ "X${named_flags}" != X"NO" ]; then
 	echo 'starting named';		named $named_flags
 fi
 
-if [ X"${ipfilter}" = X"YES" -a X"${ipmon_flags}" != X"NO" ]; then
-	echo 'starting ipmon';		ipmon ${ipmon_flags}
-fi
-
 # $photurisd_flags is imported from /etc/rc.conf;
 # If $photurisd_flags == NO or /etc/photuris/photuris.conf doesn't exist, then
 # photurisd isn't run.
@@ -196,9 +221,9 @@ if [ "X${photurisd_flags}" != X"NO" -a -e /etc/photuris/photuris.conf ]; then
 fi
 
 # $isakmpd_flags is imported from /etc/rc.conf;
-# If $isakmpd_flags == NO or /etc/isakmpd/isakmpd.conf doesn't exist, then
+# If $isakmpd_flags == NO or /etc/isakmpd/isakmpd.policy doesn't exist, then
 # isakmpd isn't run.
-if [ "X${isakmpd_flags}" != X"NO" -a -e /etc/isakmpd/isakmpd.conf ]; then
+if [ "X${isakmpd_flags}" != X"NO" -a -e /etc/isakmpd/isakmpd.policy ]; then
 	echo 'starting isakmpd';	isakmpd ${isakmpd_flags}
 fi
 
@@ -210,7 +235,7 @@ if [ X"${portmap}" = X"YES" ]; then
 	echo -n ' portmap';		portmap
 fi
 
-if [ -d /var/yp/binding ]; then
+if [ -d /var/yp/binding -a X`domainname` != X ]; then
 	if [ -d /var/yp/`domainname` ]; then
 		# yp server capabilities needed...
 		echo -n ' ypserv';		ypserv ${ypserv_flags}
@@ -271,6 +296,8 @@ fi
 echo '.'
 
 mount -a -t nfs
+
+swapctl -A -t noblk
 
 # /var/crash should be a directory or a symbolic link
 # to the crash directory if core dumps are to be saved.
@@ -347,10 +374,10 @@ fi
 if [ -f /sbin/ldconfig ]; then
 	echo 'creating runtime link editor directory cache.'
 	if [ -d /usr/local/lib ]; then
-		shlib_dirs="$shlib_dirs /usr/local/lib"
+		shlib_dirs="/usr/local/lib $shlib_dirs"
 	fi
 	if [ -d /usr/X11R6/lib ]; then
-		shlib_dirs="$shlib_dirs /usr/X11R6/lib"
+		shlib_dirs="/usr/X11R6/lib $shlib_dirs"
 	fi
 	ldconfig $shlib_dirs
 fi
@@ -397,6 +424,12 @@ if [ "X${mrouted_flags}" != X"NO" ]; then
 	echo -n ' mrouted';		mrouted $mrouted_flags
 fi
 
+# $altqd_flags is imported from /etc/rc.conf;
+# If $altqd_flags == NO, then altqd isn't run.
+if [ "X${altqd_flags}" != X"NO" ]; then
+	echo -n ' altqd';		altqd $altqd_flags
+fi
+
 # $dhcpd_flags is imported from /etc/rc.conf
 # If $dhcpd_flags == NO or /etc/dhcpd.conf doesn't exist, then dhcpd isn't run.
 if [ "X${dhcpd_flags}" != X"NO" -a -f /etc/dhcpd.conf ]; then
@@ -439,8 +472,8 @@ if [ X${rwhod} = X"YES" ]; then
 fi
 
 
-if [ X${lpd} = X"YES" ]; then
-	echo -n ' printer';		lpd
+if [ X${lpd_flags} != X"NO" ]; then
+	echo -n ' printer';		lpd ${lpd_flags}
 fi
 
 # $sendmail_flags is imported from /etc/rc.conf;
@@ -511,23 +544,49 @@ fi
 
 echo '.'
 
+if [ -f /etc/wsconsctl.conf ]; then
+(
+	# delete comments and blank lines
+	set -- `stripcom /etc/wsconsctl.conf`
+	while [ $# -ge 1 ] ; do
+		wsconsctl -w $1
+		shift
+	done
+)
+fi
+
 if [ -f /sbin/kbd -a -f /etc/kbdtype ]; then
 	kbd `cat /etc/kbdtype`
 fi
 
-# Kerberos runs ONLY on the Kerberos servers
-# Kadmin runs only on the main server
-if [ X${kerberos_server} = X"YES" ]; then
-	echo 'kerberos server'
+# KerberosIV runs ONLY on the KDC servers
+# Kadmin runs only on the master server
+if [ X${krb4_master_kdc} = X"YES" ]; then
+	echo 'KerberosIV KDC'
 	/usr/libexec/kerberos >> /var/log/kerberos.log &
 	/usr/libexec/kadmind -n >> /var/log/kadmind.log &
 fi
 
 # Kpropd runs only on Kerberos slave servers
-if [ X${kerberos_slave} = X"YES" ]; then
+if [ X${krb4_slave_kdc} = X"YES" ]; then
 	echo 'kerberos slave server'
 	/usr/libexec/kerberos -s >> /var/log/kerberos.log &
 	/usr/libexec/kpropd -i &
+fi
+
+# KerberosV master KDC
+if [ X${krb5_master_kdc} = X"YES" ]; then
+	echo 'KerberosV master KDC'
+	/usr/libexec/kdc &
+	/usr/libexec/kadmind &
+	/usr/libexec/kpasswdd &
+fi
+
+# KerberosV slave KDC
+if [ X${krb5_slave_kdc} = X"YES" ]; then
+	echo 'KerberosV slave KDC'
+	/usr/libexec/kdc &
+	# Remember to enable hpropd in inetd.conf
 fi
 
 [ -f /etc/rc.local ] && . /etc/rc.local
@@ -550,8 +609,8 @@ echo '.'
 
 date
 
-if [ "X${moused_flags}" != X"NO" -a -x /usr/sbin/moused ]; then
-	echo 'starting moused...';	/usr/sbin/moused ${moused_flags}
+if [ "X${wsmoused_flags}" != X"NO" -a -x /usr/sbin/wsmoused ]; then
+	echo 'starting wsmoused...';	/usr/sbin/wsmoused ${wsmoused_flags}
 fi
 
 # Alternatively, on some architectures, xdm may be started in /etc/ttys.

@@ -1,4 +1,4 @@
-/*	$OpenBSD: commands.c,v 1.34 2000/11/08 21:49:44 aaron Exp $	*/
+/*	$OpenBSD: commands.c,v 1.38 2001/09/03 05:28:51 itojun Exp $	*/
 /*	$NetBSD: commands.c,v 1.14 1996/03/24 22:03:48 jtk Exp $	*/
 
 /*
@@ -1382,9 +1382,9 @@ shell(argc, argv)
 	    else
 		shellname++;
 	    if (argc > 1)
-		execl(shellp, shellname, "-c", &saveline[1], 0);
+		execl(shellp, shellname, "-c", &saveline[1], (char *)NULL);
 	    else
-		execl(shellp, shellname, 0);
+		execl(shellp, shellname, (char *)NULL);
 	    perror("Execl");
 	    _exit(1);
 	}
@@ -2370,10 +2370,12 @@ tn(argc, argv)
 	hints.ai_flags = AI_CANONNAME;
 	if (portp == NULL) {
 	    portp = "telnet";
+	    telnetport = 1;
 	} else if (*portp == '-') {
 	    portp++;
 	    telnetport = 1;
-	}
+	} else
+	    telnetport = 0;
 	h_errno = 0;
 	error = getaddrinfo(hostp, portp, &hints, &res0);
 	if (error) {
@@ -2414,7 +2416,6 @@ tn(argc, argv)
 	    if (error) {
 		warn("%s: %s", aliasp, gai_strerror(error));
 		close(net);
-		freeaddrinfo(ares);
 		continue;
 	    }
 	    if (bind(net, ares->ai_addr, ares->ai_addrlen) < 0) {
@@ -2710,7 +2711,7 @@ help(argc, argv)
 		printf("Commands may be abbreviated.  Commands are:\r\n\r\n");
 		for (c = cmdtab; c->name; c++)
 			if (c->help) {
-				printf("%-*s\t%s\r\n", HELPINDENT, c->name,
+				printf("%-*s\t%s\r\n", (int)HELPINDENT, c->name,
 								    c->help);
 			}
 		return 0;

@@ -1,6 +1,6 @@
 #!/bin/sh -
 #
-#	$OpenBSD: MAKEDEV,v 1.29 2000/03/22 07:34:29 niklas Exp $
+#	$OpenBSD: MAKEDEV,v 1.33 2001/06/28 02:58:55 kjc Exp $
 #
 # Copyright (c) 1990 The Regents of the University of California.
 # All rights reserved.
@@ -33,7 +33,7 @@
 # OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
 # SUCH DAMAGE.
 #
-#	$OpenBSD: MAKEDEV,v 1.29 2000/03/22 07:34:29 niklas Exp $
+#	$OpenBSD: MAKEDEV,v 1.33 2001/06/28 02:58:55 kjc Exp $
 #
 # Device "make" file.  Valid arguments:
 #	all	makes all known devices, including local devices,
@@ -71,6 +71,7 @@
 #	tun*	network tunnel driver
 #	uk*	unknown SCSI
 #	ss*	SCSI scanners
+#	altq	ALTQ control interface
 #
 # Machine specific devices:
 #	sram	static ram available on some models.
@@ -90,15 +91,15 @@ all)
 	sh MAKEDEV tty00 tty01 tty02 tty03
 	sh MAKEDEV ttyw0
 	sh MAKEDEV sd0 sd1 sd2 sd3 sd4 sd5 sd6 sd7 sd8 sd9
-	sh MAKEDEV vnd0 vnd1 pty0 cd0 ipl
+	sh MAKEDEV vnd0 vnd1 pty0 cd0
 	sh MAKEDEV bpf0 bpf1 bpf2 bpf3 bpf4 bpf5 bpf6 bpf7 bpf8 bpf9
 	#sh MAKEDEV ccd0 ccd1 ccd2 ccd3
-	sh MAKEDEV tun0 tun1 lkm local
+	sh MAKEDEV pf tun0 tun1 lkm local
 	sh MAKEDEV sram0 nvram0 flash0 vmel0 vmes0
 	#sh MAKEDEV lp0 lptwo0
 	sh MAKEDEV random
 	sh MAKEDEV uk0 uk1
-	sh MAKEDEV ss0
+	sh MAKEDEV ss0 altq
 	;;
 
 std)
@@ -398,13 +399,11 @@ bpf*)
 	chown root.wheel bpf$unit
 	;;
 
-ipl)
-	rm -f ipl ipnat ipstate ipauth
-	mknod ipl c 39 0
-	mknod ipnat c 39 1
-	mknod ipstate c 39 2
-	mknod ipauth c 39 3
-	chown root.wheel ipl ipnat ipstate ipauth
+pf)
+	rm -f pf
+	mknod pf c 39 0
+	chown root.wheel pf
+	chmod 600 pf
 	;;
 
 tun*)
@@ -475,6 +474,19 @@ ss*)
 #	backwards compatibility with older PINTs
 	rm -f scan$unit
 	ln -s ss$unit scan$unit
+	;;
+
+altq)
+	mkdir -p altq
+	chmod 755 altq
+	unit=0
+	for dev in altq cbq wfq afm fifoq red rio localq hfsc \
+	    cdnr blue priq; do
+		rm -f altq/$dev
+		mknod altq/$dev c 52 $unit
+		chmod 644 altq/$dev
+		unit=$(($unit + 1))
+	done
 	;;
 
 local)

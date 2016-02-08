@@ -1,4 +1,4 @@
-/*	$OpenBSD: disklabel.c,v 1.69 2000/06/30 16:00:08 millert Exp $	*/
+/*	$OpenBSD: disklabel.c,v 1.71 2001/09/03 16:14:27 millert Exp $	*/
 
 /*
  * Copyright (c) 1987, 1993
@@ -37,13 +37,13 @@
  */
 
 #ifndef lint
-static char copyright[] =
+static const char copyright[] =
 "@(#) Copyright (c) 1987, 1993\n\
 	The Regents of the University of California.  All rights reserved.\n";
 #endif /* not lint */
 
 #ifndef lint
-static char rcsid[] = "$OpenBSD: disklabel.c,v 1.69 2000/06/30 16:00:08 millert Exp $";
+static const char rcsid[] = "$OpenBSD: disklabel.c,v 1.71 2001/09/03 16:14:27 millert Exp $";
 #endif /* not lint */
 
 #include <sys/param.h>
@@ -332,6 +332,8 @@ main(argc, argv)
 		break;
 	}
 #endif
+	default:
+		break;
 	}
 	exit(error);
 }
@@ -482,9 +484,9 @@ writelabel(f, boot, lp)
 			}
 		}
 		if (verbose)
-			printf("writing label to block %qd (0x%qx)\n",
-			    sectoffset/DEV_BSIZE,
-			    sectoffset/DEV_BSIZE);
+			printf("writing label to block %lld (0x%qx)\n",
+			    (long long)sectoffset/DEV_BSIZE,
+			    (long long)sectoffset/DEV_BSIZE);
 		if (!donothing) {
 			if (lseek(f, sectoffset, SEEK_SET) < 0) {
 				perror("lseek");
@@ -694,8 +696,8 @@ readlabel(f)
 			    DEV_BSIZE;
 #endif
 		if (verbose)
-			printf("reading label from block %qd, offset %qd\n",
-			    sectoffset/DEV_BSIZE,
+			printf("reading label from block %lld, offset %lld\n",
+			    (long long)sectoffset/DEV_BSIZE,
 			    sectoffset/DEV_BSIZE +
 			    (LABELSECTOR * DEV_BSIZE) + LABELOFFSET);
 		if (lseek(f, sectoffset, SEEK_SET) < 0 ||
@@ -725,8 +727,8 @@ readlabel(f)
 			    lp->d_magic2 == DISKMAGIC) {
 				if (lp->d_npartitions <= MAXPARTITIONS &&
 				    dkcksum(lp) == 0) {
-					warnx("found at 0x%x", (char *)lp
-					    - bootarea);
+					warnx("found at 0x%lx",
+					    (long)((char *)lp - bootarea));
 					return (lp);
 				}
 				msg = "disk label corrupted";
@@ -762,9 +764,9 @@ makebootarea(boot, dp, f)
 {
 	struct disklabel *lp;
 	char *p;
-	int b;
 #if NUMBOOT > 0
 	char *dkbasename;
+	int b;
 #if NUMBOOT == 1
 	struct stat sb;
 #endif
@@ -896,10 +898,10 @@ makedisktab(f, lp)
 	struct partition *pp;
 
 	if (lp->d_packname[0])
-		(void)fprintf(f, "%.*s|", sizeof(lp->d_packname),
+		(void)fprintf(f, "%.*s|", (int)sizeof(lp->d_packname),
 		    lp->d_packname);
 	if (lp->d_typename[0])
-		(void)fprintf(f, "%.*s|", sizeof(lp->d_typename),
+		(void)fprintf(f, "%.*s|", (int)sizeof(lp->d_typename),
 		    lp->d_typename);
 	(void)fputs("Automatically generated label:\\\n\t:dt=", f);
 	if ((unsigned) lp->d_type < DKMAXTYPES)
@@ -907,11 +909,12 @@ makedisktab(f, lp)
 	else
 		(void)fprintf(f, "unknown%d:", lp->d_type);
 
-	(void)fprintf(f, "se#%d:", lp->d_secsize);
-	(void)fprintf(f, "ns#%d:", lp->d_nsectors);
-	(void)fprintf(f, "nt#%d:", lp->d_ntracks);
-	(void)fprintf(f, "sc#%d:", lp->d_secpercyl);
-	(void)fprintf(f, "nc#%d:", lp->d_ncylinders);
+	(void)fprintf(f, "se#%u:", lp->d_secsize);
+	(void)fprintf(f, "ns#%u:", lp->d_nsectors);
+	(void)fprintf(f, "nt#%u:", lp->d_ntracks);
+	(void)fprintf(f, "nc#%u:", lp->d_ncylinders);
+	(void)fprintf(f, "sc#%u:", lp->d_secpercyl);
+	(void)fprintf(f, "su#%u:", lp->d_secperunit);
 
 	if (lp->d_rpm != 3600) {
 		(void)fprintf(f, "%srm#%d:", did, lp->d_rpm);
@@ -930,24 +933,24 @@ makedisktab(f, lp)
 		did = "";
 	}
 	if (lp->d_headswitch != 0) {
-		(void)fprintf(f, "%shs#%d:", did, lp->d_headswitch);
+		(void)fprintf(f, "%shs#%u:", did, lp->d_headswitch);
 		did = "";
 	}
 	if (lp->d_trkseek != 0) {
-		(void)fprintf(f, "%sts#%d:", did, lp->d_trkseek);
+		(void)fprintf(f, "%sts#%u:", did, lp->d_trkseek);
 		did = "";
 	}
 	for (i = 0; i < NDDATA; i++)
 		if (lp->d_drivedata[i])
-			(void)fprintf(f, "d%d#%d", lp->d_drivedata[i]);
+			(void)fprintf(f, "d%d#%u", i, lp->d_drivedata[i]);
 	pp = lp->d_partitions;
 	for (i = 0; i < lp->d_npartitions; i++, pp++) {
 		if (pp->p_size) {
 			char c = 'a' + i;
 
 			(void)fprintf(f, "\\\n\t:");
-			(void)fprintf(f, "p%c#%d:", c, pp->p_size);
-			(void)fprintf(f, "o%c#%d:", c, pp->p_offset);
+			(void)fprintf(f, "p%c#%u:", c, pp->p_size);
+			(void)fprintf(f, "o%c#%u:", c, pp->p_offset);
 			if (pp->p_fstype != FS_UNUSED) {
 				if ((unsigned) pp->p_fstype < FSMAXTYPES)
 					(void)fprintf(f, "t%c=%s:", c, 
@@ -962,9 +965,9 @@ makedisktab(f, lp)
 				break;
 
 			case FS_BSDFFS:
-				(void)fprintf(f, "b%c#%d:", c,
+				(void)fprintf(f, "b%c#%u:", c,
 				    pp->p_fsize * pp->p_frag);
-				(void)fprintf(f, "f%c#%d:", c, pp->p_fsize);
+				(void)fprintf(f, "f%c#%u:", c, pp->p_fsize);
 				break;
 
 			default:
@@ -1034,6 +1037,7 @@ display_partition(f, lp, mp, i, unit, width)
 
 	default:
 		p_size = -1;			/* no conversion */
+		p_offset = 0;
 		break;
 	}
 
@@ -1075,7 +1079,7 @@ display_partition(f, lp, mp, i, unit, width)
 				putc('*', f);
 			else
 				putc(' ', f);
-			fprintf(f, "- %d",
+			fprintf(f, "- %u",
 			    (pp->p_offset + 
 			    pp->p_size + lp->d_secpercyl - 1) /
 			    lp->d_secpercyl - 1);
@@ -1763,7 +1767,7 @@ usage()
 	    blank);
 	fprintf(stderr,
 	    "  disklabel [-nv] [-r|-cd] [-f temp] -E disk%.*s  (simple editor)\n",
-	    strlen(blank) - 5, blank);
+	    (int)strlen(blank) - 5, blank);
 	fprintf(stderr,
 	    "  disklabel [-nv] [-r]%s -R disk proto     (restore)\n",
 	    boot);

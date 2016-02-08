@@ -1,4 +1,4 @@
-/*	$OpenBSD: x509.c,v 1.49 2001/04/12 15:50:02 ho Exp $	*/
+/*	$OpenBSD: x509.c,v 1.65 2001/08/25 22:17:13 niklas Exp $	*/
 /*	$EOM: x509.c,v 1.54 2001/01/16 18:42:16 ho Exp $	*/
 
 /*
@@ -66,7 +66,13 @@
 #include "math_mp.h"
 #include "policy.h"
 #include "sa.h"
+#include "util.h"
 #include "x509.h"
+
+static u_int16_t x509_hash (u_int8_t *, size_t);
+static void x509_hash_init (void);
+static X509 *x509_hash_find (u_int8_t *, size_t);
+static int x509_hash_enter (X509 *);
 
 /*
  * X509_STOREs do not support subjectAltNames, so we have to build
@@ -102,7 +108,7 @@ static int bucket_mask;
  * XXX RSA-specific.
  */
 int
-x509_generate_kn (X509 *cert)
+x509_generate_kn (int id, X509 *cert)
 {
   char *fmt = "Authorizer: \"rsa-hex:%s\"\nLicensees: \"rsa-hex:%s\"\n"
     "Conditions: %s >= \"%s\" && %s <= \"%s\";\n";
@@ -115,7 +121,6 @@ x509_generate_kn (X509 *cert)
   X509_OBJECT obj;
   X509 *icert;
   RSA *key;
-  char **new_asserts;
   time_t tt;
   char before[15], after[15];
   ASN1_TIME *tm;
@@ -233,7 +238,7 @@ x509_generate_kn (X509 *cert)
   if (((tm = X509_get_notBefore (cert)) == NULL) ||
       (tm->type != V_ASN1_UTCTIME && tm->type != V_ASN1_GENERALIZEDTIME))
     {
-      tt = time ((time_t) NULL);
+      tt = time (0);
       strftime (before, 14, "%G%m%d%H%M%S", localtime (&tt));
       timecomp = "LocalTimeOfDay";
     }
@@ -464,7 +469,7 @@ x509_generate_kn (X509 *cert)
   free (ikey);
   free (skey);
 
-  if (LK (kn_add_assertion, (keynote_sessid, buf, strlen (buf),
+  if (LK (kn_add_assertion, (id, buf, strlen (buf),
 			     ASSERT_FLAG_LOCAL)) == -1)
     {
       LOG_DBG ((LOG_POLICY, 30,
@@ -474,6 +479,7 @@ x509_generate_kn (X509 *cert)
     }
 
   /* We could print the assertion here, but log_print() truncates...  */
+  LOG_DBG ((LOG_POLICY, 60, "x509_generate_kn: added credential"));
 
   free (buf);
 
@@ -501,7 +507,7 @@ x509_generate_kn (X509 *cert)
 
   sprintf (buf, fmt2, isname, subname, timecomp, before, timecomp2, after);
 
-  if (LK (kn_add_assertion, (keynote_sessid, buf, strlen (buf),
+  if (LK (kn_add_assertion, (id, buf, strlen (buf),
 			     ASSERT_FLAG_LOCAL)) == -1)
     {
       LOG_DBG ((LOG_POLICY, 30,
@@ -509,62 +515,15 @@ x509_generate_kn (X509 *cert)
       free (buf);
       return 0;
     }
-  else
-    LOG_DBG ((LOG_POLICY, 80, "x509_generate_kn: added policy:\n%s", buf));
 
-  /* Store the X509-derived assertion so we can use it as a policy.  */
-  if (x509_policy_asserts_num == 0)
-    {
-      x509_policy_asserts = calloc (4, sizeof (char *));
-      if (!x509_policy_asserts)
-	{
-	  log_error ("x509_generate_kn: failed to allocate %d bytes",
-		     4 * sizeof (char *));
-	  free (buf);
-	  return 0;
-	}
+  LOG_DBG ((LOG_POLICY, 80, "x509_generate_kn: added credential:\n%s", buf));
 
-      x509_policy_asserts_num_alloc = 4;
-      x509_policy_asserts_num = 1;
-      x509_policy_asserts[0] = buf;
-    }
-  else
-    {
-      if (x509_policy_asserts_num + 1 > x509_policy_asserts_num_alloc)
-	{
-	  x509_policy_asserts_num_alloc *= 2;
-	  new_asserts = realloc (x509_policy_asserts,
-				 x509_policy_asserts_num_alloc
-				 * sizeof (char *));
-	  if (!new_asserts)
-	    {
-	      x509_policy_asserts_num_alloc /= 2;
-	      log_error ("x509_generate_kn: failed to allocate %d bytes",
-			 x509_policy_asserts_num_alloc * sizeof (char *));
-	      free (buf);
-	      return 0;
-	    }
-
-	  x509_policy_asserts = new_asserts;
-	}
-
-      /* Assign to the next available.  */
-      x509_policy_asserts[x509_policy_asserts_num++] = buf;
-    }
-
-  /*
-   * XXX Should add a remove-assertion event set to the expiration of the
-   * X509 cert (and remove such events when we reinit and close the keynote
-   * session)  -- that's relevant only for really long-lived daemons.
-   * Alternatively (and preferably), we can encode the X509 expiration
-   * in the KeyNote Conditions.
-   */
-
+  free (buf);
   return 1;
 }
 #endif /* USE_POLICY */
 
-u_int16_t
+static u_int16_t
 x509_hash (u_int8_t *id, size_t len)
 {
   int i;
@@ -585,8 +544,8 @@ x509_hash (u_int8_t *id, size_t len)
   return bucket;
 }
 
-void
-x509_hash_init ()
+static void
+x509_hash_init (void)
 {
   struct x509_hash *certh;
   int i;
@@ -618,12 +577,12 @@ x509_hash_init ()
 }
 
 /* Lookup a certificate by an ID blob.  */
-X509 *
+static X509 *
 x509_hash_find (u_int8_t *id, size_t len)
 {
   struct x509_hash *cert;
   u_int8_t **cid;
-  size_t *clen;
+  u_int32_t *clen;
   int n, i, id_found;
 
   for (cert = LIST_FIRST (&x509_tab[x509_hash (id, len)]); cert;
@@ -658,7 +617,7 @@ x509_hash_find (u_int8_t *id, size_t len)
   return 0;
 }
 
-int
+static int
 x509_hash_enter (X509 *cert)
 {
   u_int16_t bucket = 0;
@@ -731,6 +690,22 @@ x509_read_from_dir (X509_STORE *ctx, char *name, int hash)
 
   while ((file = readdir (dir)) != NULL)
     {
+      strncpy (fullname + off, file->d_name, size);
+      fullname[off + size] = 0;
+
+      if (file->d_type != DT_UNKNOWN)
+      {
+	 if (file->d_type != DT_REG && file->d_type != DT_LNK)
+	   continue;
+      }
+      else
+      {
+	struct stat sb;
+
+	if (stat(fullname, &sb) == -1 || !(sb.st_mode & S_IFREG))
+          continue;
+      }
+
       if (file->d_type != DT_REG && file->d_type != DT_LNK)
 	continue;
 
@@ -743,9 +718,6 @@ x509_read_from_dir (X509_STORE *ctx, char *name, int hash)
 	  log_error ("x509_read_from_dir: BIO_new (BIO_s_file ()) failed");
 	  continue;
 	}
-
-      strncpy (fullname + off, file->d_name, size);
-      fullname[off + size] = 0;
 
       if (LC (BIO_read_filename, (certh, fullname)) == -1)
 	{
@@ -764,7 +736,7 @@ x509_read_from_dir (X509_STORE *ctx, char *name, int hash)
       LC (BIO_free, (certh));
       if (cert == NULL)
 	{
-	  log_error ("x509_read_from_dir: PEM_read_bio_X509 failed for %s",
+	  log_print ("x509_read_from_dir: PEM_read_bio_X509 failed for %s",
 		     file->d_name);
 	  continue;
 	}
@@ -782,21 +754,9 @@ x509_read_from_dir (X509_STORE *ctx, char *name, int hash)
 	}
 
       if (hash)
-	{
-
-	  if (!x509_hash_enter (cert))
-	    log_print ("x509_read_from_dir: x509_hash_enter (%s) failed",
-		       file->d_name);
-#ifdef USE_POLICY
-#ifdef USE_KEYNOTE
-	  if (x509_generate_kn (cert) == 0)
-#else
-	    if (libkeynote && x509_generate_kn (cert) == 0)
-#endif
-	      LOG_DBG ((LOG_POLICY, 50,
-			"x509_read_from_dir: x509_generate_kn failed"));
-#endif /* USE_POLICY */
-	}
+	if (!x509_hash_enter (cert))
+	  log_print ("x509_read_from_dir: x509_hash_enter (%s) failed",
+		     file->d_name);
     }
 
   closedir (dir);
@@ -809,9 +769,6 @@ int
 x509_cert_init (void)
 {
   char *dirname;
-#if defined(USE_KEYNOTE) || defined(USE_POLICY)
-  int i;
-#endif
 
   x509_hash_init ();
 
@@ -859,21 +816,6 @@ x509_cert_init (void)
       return 0;
     }
 
-#if defined(USE_KEYNOTE) || defined(USE_POLICY)
-  /* Cleanup */
-  if (x509_policy_asserts)
-    {
-      for (i = 0; i < x509_policy_asserts_num; i++)
-        if (x509_policy_asserts[i])
-          free (x509_policy_asserts[i]);
-
-      free (x509_policy_asserts);
-    }
-
-  x509_policy_asserts = 0;
-  x509_policy_asserts_num = x509_policy_asserts_num_alloc = 0;
-#endif
-
   if (!x509_read_from_dir (x509_certs, dirname, 1))
     {
       log_print ("x509_cert_init: x509_read_from_dir failed");
@@ -905,7 +847,7 @@ x509_cert_validate (void *scert)
   X509_NAME *issuer, *subject;
   X509 *cert = (X509 *)scert;
   EVP_PKEY *key;
-  int res;
+  int res, err;
 
   /*
    * Validate the peer certificate by checking with the CA certificates we
@@ -913,11 +855,19 @@ x509_cert_validate (void *scert)
    */
   LC (X509_STORE_CTX_init, (&csc, x509_cas, cert, NULL));
   res = LC (X509_verify_cert, (&csc));
+  err = csc.error;
   LC (X509_STORE_CTX_cleanup, (&csc));
 
   /* Return if validation succeeded or self-signed certs are not accepted.  */
-  if (res || !conf_get_str ("X509-certificates", "Accept-self-signed"))
-    return res;
+  if (res)
+    return 1;
+  else if (!conf_get_str ("X509-certificates", "Accept-self-signed"))
+    {
+      if (err)
+	log_print ("x509_cert_validate: %.100s",
+		   LC (X509_verify_cert_error_string, (err)));
+      return res;
+    }
 
   issuer = LC (X509_get_issuer_name, (cert));
   subject = LC (X509_get_subject_name, (cert));
@@ -927,10 +877,17 @@ x509_cert_validate (void *scert)
 
   key = LC (X509_get_pubkey, (cert));
   if (!key)
-    return 0;
+    {
+      log_print ("x509_cert_validate: could not get public key from "
+		 "self-signed cert");
+      return 0;
+    }
 
   if (LC (X509_verify, (cert, key)) == -1)
-    return 0;
+    {
+      log_print ("x509_cert_validate: self-signed cert is bad");
+      return 0;
+    }
 
   return 1;
 }
@@ -950,9 +907,9 @@ x509_cert_insert (int id, void *scert)
 
 #ifdef USE_POLICY
 #ifdef USE_KEYNOTE
-  if (x509_generate_kn (cert) == 0)
+  if (x509_generate_kn (id, cert) == 0)
 #else
-    if (libkeynote && x509_generate_kn (cert) == 0)
+    if (libkeynote && x509_generate_kn (id, cert) == 0)
 #endif
       {
 	LOG_DBG ((LOG_POLICY, 50,
@@ -1028,7 +985,7 @@ x509_certreq_decode (u_int8_t *asn, u_int32_t len)
   if (!asn_template_clone (&aca, 1)
       || (asn = asn_decode_sequence (asn, len, &aca)) == 0)
     {
-      log_print ("x509_certreq_validate: can not decode 'acceptable CA' info");
+      log_print ("x509_certreq_decode: can not decode 'acceptable CA' info");
       goto fail;
     }
   memset (&naca, 0, sizeof (naca));
@@ -1121,7 +1078,6 @@ x509_cert_obtain (u_int8_t *id, size_t id_len, void *data, u_int8_t **cert,
 {
   struct x509_aca *aca = data;
   X509 *scert;
-  u_char *p;
 
   if (aca)
     LOG_DBG ((LOG_CRYPTO, 60,
@@ -1138,15 +1094,9 @@ x509_cert_obtain (u_int8_t *id, size_t id_len, void *data, u_int8_t **cert,
   if (!scert)
     return 0;
 
-  *certlen = LC (i2d_X509, (scert, NULL));
-  p = *cert = malloc (*certlen);
-  if (!p)
-    {
-      log_error ("x509_cert_obtain: malloc (%d) failed", *certlen);
-      return 0;
-    }
-  *certlen = LC (i2d_X509, (scert, &p));
-
+  x509_serialize (scert, cert, certlen);
+  if (!*cert)
+    return 0;
   return 1;
 }
 
@@ -1347,4 +1297,108 @@ x509_cert_get_key (void *scert, void *keyp)
   return *(RSA **)keyp == NULL ? 0 : 1;
 }
 
+void *
+x509_cert_dup (void *scert)
+{
+  return LC (X509_dup, (scert));
+}
+
+void
+x509_serialize (void *scert, u_int8_t **data, u_int32_t *datalen)
+{
+  u_int8_t *p;
+
+  *datalen = LC (i2d_X509, ((X509 *) scert, NULL));
+  *data = p = malloc (*datalen);
+  if (!p)
+    {
+      log_error ("x509_serialize: malloc (%d) failed", *datalen);
+      return;
+    }
+
+  *datalen = LC (i2d_X509, ((X509 *)scert, &p));
+}
+
+/* From cert to printable */
+char *
+x509_printable (void *cert)
+{
+  char *s;
+  u_int8_t *data;
+  u_int32_t datalen;
+  int i;
+
+  x509_serialize (cert, &data, &datalen);
+  if (!data)
+    return 0;
+
+  s = malloc (datalen * 2);
+  if (!s)
+    {
+      free (data);
+      log_error ("x509_printable: malloc (%d) failed", datalen * 2);
+      return 0;
+    }
+
+  for (i = 0; i < datalen; i++)
+    sprintf (s + (2 * i), "%02x", data[i]);
+  free (data);
+  return s;
+}
+
+/* From printable to cert */
+void *
+x509_from_printable (char *cert)
+{
+  u_int8_t *buf;
+  int plen, ret;
+  void *foo;
+
+  plen = (strlen (cert) + 1) / 2;
+  buf = malloc (plen);
+  if (!buf)
+    {
+      log_error ("x509_from_printable: malloc (%d) failed", plen);
+      return 0;
+    }
+
+  ret = hex2raw (cert, buf, plen);
+  if (ret == -1)
+    {
+      free (buf);
+      log_print ("x509_from_printable: badly formatted cert");
+      return 0;
+    }
+
+  foo = x509_cert_get (buf, plen);
+  free (buf);
+  if (!foo)
+    log_print ("x509_from_printable: could not retrieve certificate");
+  return foo;
+}
+
+char *
+x509_DN_string (u_int8_t *asn1, size_t sz)
+{
+  X509_NAME *name;
+  u_int8_t *p = asn1;
+  /* XXX Just a guess at a maximum length.  */
+  char buf[256];
+
+  name = LC (d2i_X509_NAME, (NULL, &p, sz));
+  if (!name)
+    {
+      log_print ("x509_DN_string: d2i_X509_NAME failed");
+      return 0;
+    }
+  if (!LC (X509_NAME_oneline, (name, buf, sizeof buf - 1)))
+    {
+      log_print ("x509_DN_string: X509_NAME_oneline failed");
+      LC (X509_NAME_free, (name));
+      return 0;
+    }
+  LC (X509_NAME_free, (name));
+  buf[sizeof buf - 1] = '\0';
+  return strdup (buf);
+}
 #endif /* USE_X509 */

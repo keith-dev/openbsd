@@ -1,4 +1,4 @@
-.\"	$OpenBSD: ises.4,v 1.1 2001/01/29 08:47:28 ho Exp $
+.\"	$OpenBSD: ises.4,v 1.4 2001/06/28 20:49:45 brad Exp $
 .\"
 .\" Copyright (c) 2000 Håkan Olsson (ho@crt.se)
 .\" All rights reserved.
@@ -31,30 +31,25 @@
 .Os
 .Sh NAME
 .Nm ises
-.Nd Pijnenburg PCC-ISES hardware crypto accelerator
+.Nd Securealink PCC-ISES hardware crypto accelerator
 .Sh SYNOPSIS
 .Cd "ises* at pci? dev ? function ?"
 .Sh DESCRIPTION
 The
 .Nm
-driver supports cards containing the Pijnenburg PCC-ISES chipset.
+driver supports cards containing the Securealink PCC-ISES chipset.
 .Pp
 The
 .Nm
-driver registers itself to accelerate DES, Triple-DES, MD5-HMAC96,
-SHA1-HMAC96 and RMD160-HMAC96 operations in
-.Xr ipsec 4 ,
-as well as provide strong random data for the system entropy pool.
+driver at the moment only provides strong random data to the
+.Xr random 4
+subsystem.
 .Sh BUGS
 The cryptographic functions are not yet supported.
 Also not yet supported are the chip's two LNAUs (Large Number Arithmetic
 Units), which would be useful in OpenSSL applications.
 .Sh SEE ALSO
-.Xr crypto 9 ,
-.Xr crypt 3 ,
-.Xr ipsec 4 ,
-.Xr random 9 ,
-.Xr openssl 1
+.Xr random 4
 .Sh HISTORY
 The
 .Nm

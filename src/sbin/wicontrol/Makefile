@@ -1,16 +1,16 @@
-#	$OpenBSD: Makefile,v 1.2 2000/05/18 13:49:51 espie Exp $
+#	$OpenBSD: Makefile,v 1.5 2001/09/01 16:21:16 drahn Exp $
 #	From: Makefile,v 1.1 1999/05/05 07:37:06 wpaul Exp $
 
-.if ${MACHINE} == "i386"
+.if (${MACHINE} == "i386") || (${MACHINE_ARCH} == "powerpc") || \
+    (${MACHINE} == "alpha")
 PROG=	wicontrol
 SRCS=	wicontrol.c
-
-CFLAGS+= -Wall
 .else
-NOPROG=yes
+NOPROG=
 .endif
 
+CFLAGS+= -Wall
+
 MAN=	wicontrol.8
-MANSUBDIR=i386
 
 .include <bsd.prog.mk>

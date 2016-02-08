@@ -1,4 +1,4 @@
-.\"	$OpenBSD: ne.4,v 1.6 2001/03/28 10:56:06 jj Exp $
+.\"	$OpenBSD: ne.4,v 1.8 2001/10/05 14:45:53 mpech Exp $
 .\"	$NetBSD: ne.4,v 1.4 1998/02/22 05:21:20 enami Exp $
 .\"
 .\" Copyright (c) 1997 The NetBSD Foundation, Inc.
@@ -56,11 +56,13 @@ cards.
 .Sh MEDIA SELECTION
 The RealTek 8019 (ISA, ISAPnP, some PCMCIA) and RealTek 8029 (PCI)
 NE2000-compatible Ethernet chips include support for software media
-selection.  If one of these chips is detected by the driver, the list
-of supported media will be displayed.
+selection.
+If one of these chips is detected by the driver, the list of supported media
+will be displayed.
 .Pp
-Media selection is not currently supported by this driver.  Any media
-selection must be performed either via card jumper settings or
+For all other chips supported by the
+.Nm
+driver, media selection must be performed either via card jumper settings or
 by vendor-supplied configuration programs.
 .Sh DIAGNOSTICS
 .Bl -diag
@@ -69,6 +71,7 @@ The driver found the card, but was unable to make the card respond
 to complete the configuration sequence.
 .El
 .Sh SEE ALSO
+.Xr ifmedia 4 ,
 .Xr intro 4 ,
 .Xr isa 4 ,
 .Xr isapnp 4 ,

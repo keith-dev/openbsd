@@ -25,7 +25,7 @@ $header = "perl5db.pl version $VERSION";
 # if caller() is called from the package DB, it provides some
 # additional data.
 #
-# The array @{$main::{'_<'.$filename} is the line-by-line contents of
+# The array @{$main::{'_<'.$filename}} is the line-by-line contents of
 # $filename.
 #
 # The hash %{'_<'.$filename} contains breakpoints and action (it is
@@ -34,15 +34,15 @@ $header = "perl5db.pl version $VERSION";
 # interpreter, though the values used by perl5db.pl have the form
 # "$break_condition\0$action". Values are magical in numeric context.
 #
-# The scalar ${'_<'.$filename} contains "_<$filename".
+# The scalar ${'_<'.$filename} contains $filename.
 #
 # Note that no subroutine call is possible until &DB::sub is defined
 # (for subroutines defined outside of the package DB). In fact the same is
 # true if $deep is not defined.
 #
 # $Log: perl5db.pl,v $
-# Revision 1.4  2000/04/06 17:06:15  millert
-# perl-5.6.0 + local changes
+# Revision 1.5  2001/05/24 18:35:25  millert
+# merge in perl 5.6.1 with our local changes
 #
 
 #
@@ -404,6 +404,12 @@ if ($notty) {
     $console = "/dev/tty";
   } elsif ($^O eq 'dos' or -e "con" or $^O eq 'MSWin32') {
     $console = "con";
+  } elsif ($^O eq 'MacOS') {
+    if ($MacPerl::Version !~ /MPW/) {
+      $console = "Dev:Console:Perl Debug"; # Separate window for application
+    } else {
+      $console = "Dev:Console";
+    }
   } else {
     $console = "sys\$command";
   }
@@ -429,7 +435,7 @@ if ($notty) {
                                  PeerAddr => $remoteport,
                                  Proto    => 'tcp',
                                );
-    if (!$OUT) { die "Could not create socket to connect to remote host."; }
+    if (!$OUT) { die "Unable to connect to remote host: $remoteport\n"; }
     $IN = $OUT;
   }
   else {
@@ -620,7 +626,7 @@ EOP
 			    next CMD;
 			} 
 		    }
-		    $cmd =~ /^q$/ && ($exiting = 1) && exit 0;
+                   $cmd =~ /^q$/ && ($fall_off_end = 1) && exit $?;
 		    $cmd =~ /^h$/ && do {
 			print_help($help);
 			next CMD; };
@@ -902,9 +908,9 @@ EOP
 			print $OUT "Will stop on load of `@{[join '\', `', sort keys %break_on_load]}'.\n";
 			next CMD; };
 		    $cmd =~ /^b\b\s*(postpone|compile)\b\s*([':A-Za-z_][':\w]*)\s*(.*)/ && do {
-			my $cond = $3 || '1';
+			my $cond = length $3 ? $3 : '1';
 			my ($subname, $break) = ($2, $1 eq 'postpone');
-			$subname =~ s/\'/::/;
+			$subname =~ s/\'/::/g;
 			$subname = "${'package'}::" . $subname
 			  unless $subname =~ /::/;
 			$subname = "main".$subname if substr($subname,0,2) eq "::";
@@ -913,8 +919,8 @@ EOP
 			next CMD; };
 		    $cmd =~ /^b\b\s*([':A-Za-z_][':\w]*(?:\[.*\])?)\s*(.*)/ && do {
 			$subname = $1;
-			$cond = $2 || '1';
-			$subname =~ s/\'/::/;
+			$cond = length $2 ? $2 : '1';
+			$subname =~ s/\'/::/g;
 			$subname = "${'package'}::" . $subname
 			  unless $subname =~ /::/;
 			$subname = "main".$subname if substr($subname,0,2) eq "::";
@@ -934,7 +940,7 @@ EOP
 			next CMD; };
 		    $cmd =~ /^b\b\s*(\d*)\s*(.*)/ && do {
 			$i = $1 || $line;
-			$cond = $2 || '1';
+			$cond = length $2 ? $2 : '1';
 			if ($dbline[$i] == 0) {
 			    print $OUT "Line $i not breakable.\n";
 			} else {
@@ -944,8 +950,12 @@ EOP
 			next CMD; };
 		    $cmd =~ /^d\b\s*(\d*)/ && do {
 			$i = $1 || $line;
-			$dbline{$i} =~ s/^[^\0]*//;
-			delete $dbline{$i} if $dbline{$i} eq '';
+                        if ($dbline[$i] == 0) {
+                            print $OUT "Line $i not breakable.\n";
+                        } else {
+			    $dbline{$i} =~ s/^[^\0]*//;
+			    delete $dbline{$i} if $dbline{$i} eq '';
+                        }
 			next CMD; };
 		    $cmd =~ /^A$/ && do {
 		      print $OUT "Deleting all actions...\n";
@@ -983,18 +993,18 @@ EOP
 			next CMD; };
 		    $cmd =~ /^<\s*(.*)/ && do {
 			unless ($1) {
-			    print OUT "All < actions cleared.\n";
+			    print $OUT "All < actions cleared.\n";
 			    $pre = [];
 			    next CMD;
 			} 
 			if ($1 eq '?') {
 			    unless (@$pre) {
-				print OUT "No pre-prompt Perl actions.\n";
+				print $OUT "No pre-prompt Perl actions.\n";
 				next CMD;
 			    } 
-			    print OUT "Perl commands run before each prompt:\n";
+			    print $OUT "Perl commands run before each prompt:\n";
 			    for my $action ( @$pre ) {
-				print "\t< -- $action\n";
+				print $OUT "\t< -- $action\n";
 			    } 
 			    next CMD;
 			} 
@@ -1002,18 +1012,18 @@ EOP
 			next CMD; };
 		    $cmd =~ /^>\s*(.*)/ && do {
 			unless ($1) {
-			    print OUT "All > actions cleared.\n";
+			    print $OUT "All > actions cleared.\n";
 			    $post = [];
 			    next CMD;
 			}
 			if ($1 eq '?') {
 			    unless (@$post) {
-				print OUT "No post-prompt Perl actions.\n";
+				print $OUT "No post-prompt Perl actions.\n";
 				next CMD;
 			    } 
-			    print OUT "Perl commands run after each prompt:\n";
+			    print $OUT "Perl commands run after each prompt:\n";
 			    for my $action ( @$post ) {
-				print "\t> -- $action\n";
+				print $OUT "\t> -- $action\n";
 			    } 
 			    next CMD;
 			} 
@@ -1021,7 +1031,7 @@ EOP
 			next CMD; };
 		    $cmd =~ /^\{\{\s*(.*)/ && do {
 			if ($cmd =~ /^\{.*\}$/ && unbalanced(substr($cmd,2))) { 
-			    print OUT "{{ is now a debugger command\n",
+			    print $OUT "{{ is now a debugger command\n",
 				"use `;{{' if you mean Perl code\n";
 			    $cmd = "h {{";
 			    redo CMD;
@@ -1030,23 +1040,23 @@ EOP
 			next CMD; };
 		    $cmd =~ /^\{\s*(.*)/ && do {
 			unless ($1) {
-			    print OUT "All { actions cleared.\n";
+			    print $OUT "All { actions cleared.\n";
 			    $pretype = [];
 			    next CMD;
 			}
 			if ($1 eq '?') {
 			    unless (@$pretype) {
-				print OUT "No pre-prompt debugger actions.\n";
+				print $OUT "No pre-prompt debugger actions.\n";
 				next CMD;
 			    } 
-			    print OUT "Debugger commands run before each prompt:\n";
+			    print $OUT "Debugger commands run before each prompt:\n";
 			    for my $action ( @$pretype ) {
-				print "\t{ -- $action\n";
+				print $OUT "\t{ -- $action\n";
 			    } 
 			    next CMD;
 			} 
 			if ($cmd =~ /^\{.*\}$/ && unbalanced(substr($cmd,1))) { 
-			    print OUT "{ is now a debugger command\n",
+			    print $OUT "{ is now a debugger command\n",
 				"use `;{' if you mean Perl code\n";
 			    $cmd = "h {";
 			    redo CMD;
@@ -1429,7 +1439,7 @@ EOP
 		$piped= "";
 	    }
 	}			# CMD:
-	$exiting = 1 unless defined $cmd;
+       $fall_off_end = 1 unless defined $cmd; # Emulate `q' on EOF
 	foreach $evalarg (@$post) {
 	  &eval;
 	}
@@ -1510,6 +1520,7 @@ sub eval {
 	local $otrace = $trace;
 	local $osingle = $single;
 	local $od = $^D;
+	{ ($evalarg) = $evalarg =~ /(.*)/s; }
 	@res = eval "$usercontext $evalarg;\n"; # '\n' for nice recursive debug
 	$trace = $otrace;
 	$single = $osingle;
@@ -1701,8 +1712,6 @@ sub unbalanced {
 }
 
 sub gets {
-    local($.);
-    #<IN>;
     &readline("cont: ");
 }
 
@@ -1807,6 +1816,7 @@ EOP
 }
 
 sub readline {
+  local $.;
   if (@typeahead) {
     my $left = @typeahead;
     my $got = shift @typeahead;
@@ -1818,7 +1828,7 @@ sub readline {
   local $frame = 0;
   local $doret = -2;
   if (ref $OUT and UNIVERSAL::isa($OUT, 'IO::Socket::INET')) {
-    print $OUT @_;
+    $OUT->write(join('', @_));
     my $stuff;
     $IN->recv( $stuff, 2048 );  # XXX: what's wrong with sysread?
     $stuff;
@@ -2164,8 +2174,8 @@ B<W>		Delete all watch-expressions.
 B<V> [I<pkg> [I<vars>]]	List some (default all) variables in package (default current).
 		Use B<~>I<pattern> and B<!>I<pattern> for positive and negative regexps.
 B<X> [I<vars>]	Same as \"B<V> I<currentpackage> [I<vars>]\".
-B<x> I<expr>		Evals expression in array context, dumps the result.
-B<m> I<expr>		Evals expression in array context, prints methods callable
+B<x> I<expr>		Evals expression in list context, dumps the result.
+B<m> I<expr>		Evals expression in list context, prints methods callable
 		on the first element of the result.
 B<m> I<class>		Prints methods callable via the given class.
 
@@ -2260,7 +2270,7 @@ I<Debugger controls:>                        B<L>           List break/watch/act
   B<|>[B<|>]I<db_cmd>  Send output to pager        B<$psh>\[B<$psh>\] I<syscmd> Run cmd in a subprocess
   B<q> or B<^D>     Quit			  B<R>	      Attempt a restart
 I<Data Examination:>	      B<expr>     Execute perl code, also see: B<s>,B<n>,B<t> I<expr>
-  B<x>|B<m> I<expr>	Evals expr in array context, dumps the result or lists methods.
+  B<x>|B<m> I<expr>	Evals expr in list context, dumps the result or lists methods.
   B<p> I<expr>	Print expression (uses script's current package).
   B<S> [[B<!>]I<pat>]	List subroutine names [not] matching pattern
   B<V> [I<Pk> [I<Vars>]]	List Variables in Package.  Vars can be ~pattern or !pattern.
@@ -2683,10 +2693,11 @@ sub end_report {
 }
 
 END {
-  $finished = $inhibit_exit;	# So that some keys may be disabled.
+  $finished = 1 if $inhibit_exit;      # So that some keys may be disabled.
+  $fall_off_end = 1 unless $inhibit_exit;
   # Do not stop in at_exit() and destructors on exit:
-  $DB::single = !$exiting && !$runnonstop;
-  DB::fake::at_exit() unless $exiting or $runnonstop;
+  $DB::single = !$fall_off_end && !$runnonstop;
+  DB::fake::at_exit() unless $fall_off_end or $runnonstop;
 }
 
 package DB::fake;

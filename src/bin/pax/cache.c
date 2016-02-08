@@ -1,4 +1,4 @@
-/*	$OpenBSD: cache.c,v 1.7 1999/04/08 03:50:58 deraadt Exp $	*/
+/*	$OpenBSD: cache.c,v 1.9 2001/06/26 14:19:33 lebel Exp $	*/
 /*	$NetBSD: cache.c,v 1.4 1995/03/21 09:07:10 cgd Exp $	*/
 
 /*-
@@ -42,7 +42,7 @@
 #if 0
 static char sccsid[] = "@(#)cache.c	8.1 (Berkeley) 5/31/93";
 #else
-static char rcsid[] = "$OpenBSD: cache.c,v 1.7 1999/04/08 03:50:58 deraadt Exp $";
+static char rcsid[] = "$OpenBSD: cache.c,v 1.9 2001/06/26 14:19:33 lebel Exp $";
 #endif
 #endif /* not lint */
 
@@ -246,12 +246,8 @@ name_uid(uid, frc)
 			return("");
 		ptr->uid = uid;
 		ptr->valid = INVALID;
-#		ifdef NET2_STAT
-		(void)snprintf(ptr->name, sizeof(ptr->name), "%u", uid);
-#		else
 		(void)snprintf(ptr->name, sizeof(ptr->name), "%lu",
 			       (unsigned long)uid);
-#		endif
 		if (frc == 0)
 			return("");
 	} else {
@@ -261,8 +257,7 @@ name_uid(uid, frc)
 		if (ptr == NULL)
 			return(pw->pw_name);
 		ptr->uid = uid;
-		(void)strncpy(ptr->name, pw->pw_name, UNMLEN-1);
-		ptr->name[UNMLEN-1] = '\0';
+		(void)strlcpy(ptr->name, pw->pw_name, UNMLEN);
 		ptr->valid = VALID;
 	}
 	return(ptr->name);
@@ -324,12 +319,8 @@ name_gid(gid, frc)
 			return("");
 		ptr->gid = gid;
 		ptr->valid = INVALID;
-#		ifdef NET2_STAT
-		(void)snprintf(ptr->name, sizeof(ptr->name), "%u", gid);
-#		else
 		(void)snprintf(ptr->name, sizeof(ptr->name), "%lu",
 			       (unsigned long)gid);
-#		endif
 		if (frc == 0)
 			return("");
 	} else {
@@ -339,8 +330,7 @@ name_gid(gid, frc)
 		if (ptr == NULL)
 			return(gr->gr_name);
 		ptr->gid = gid;
-		(void)strncpy(ptr->name, gr->gr_name, GNMLEN-1);
-		ptr->name[GNMLEN-1] = '\0';
+		(void)strlcpy(ptr->name, gr->gr_name, GNMLEN);
 		ptr->valid = VALID;
 	}
 	return(ptr->name);
@@ -406,8 +396,7 @@ uid_name(name, uid)
 		*uid = pw->pw_uid;
 		return(0);
 	}
-	(void)strncpy(ptr->name, name, UNMLEN-1);
-	ptr->name[UNMLEN-1] = '\0';
+	(void)strlcpy(ptr->name, name, UNMLEN);
 	if ((pw = getpwnam(name)) == NULL) {
 		ptr->valid = INVALID;
 		return(-1);
@@ -477,8 +466,7 @@ gid_name(name, gid)
 		return(0);
 	}
 
-	(void)strncpy(ptr->name, name, GNMLEN-1);
-	ptr->name[GNMLEN-1] = '\0';
+	(void)strlcpy(ptr->name, name, GNMLEN);
 	if ((gr = getgrnam(name)) == NULL) {
 		ptr->valid = INVALID;
 		return(-1);

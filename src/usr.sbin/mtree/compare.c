@@ -1,5 +1,5 @@
 /*	$NetBSD: compare.c,v 1.11 1996/09/05 09:56:48 mycroft Exp $	*/
-/*	$OpenBSD: compare.c,v 1.10 1998/05/18 19:10:06 deraadt Exp $	*/
+/*	$OpenBSD: compare.c,v 1.13 2001/10/01 16:48:18 jakob Exp $	*/
 
 /*-
  * Copyright (c) 1989, 1993
@@ -36,9 +36,9 @@
 
 #ifndef lint
 #if 0
-static char sccsid[] = "@(#)compare.c	8.1 (Berkeley) 6/6/93";
+static const char sccsid[] = "@(#)compare.c	8.1 (Berkeley) 6/6/93";
 #else
-static char rcsid[] = "$OpenBSD: compare.c,v 1.10 1998/05/18 19:10:06 deraadt Exp $";
+static const char rcsid[] = "$OpenBSD: compare.c,v 1.13 2001/10/01 16:48:18 jakob Exp $";
 #endif
 #endif /* not lint */
 
@@ -56,7 +56,7 @@ static char rcsid[] = "$OpenBSD: compare.c,v 1.10 1998/05/18 19:10:06 deraadt Ex
 #include "mtree.h"
 #include "extern.h"
 
-extern int tflag, uflag;
+extern int lflag, tflag, uflag;
 
 static char *ftype __P((u_int));
 
@@ -72,6 +72,15 @@ static char *ftype __P((u_int));
 			(void)printf("%*s", INDENTNAMELEN - (int)len, ""); \
 		} \
 	}
+
+#define REPLACE_COMMA(x)						\
+	do {								\
+		char *l;						\
+		for (l = x; *l; l++) {					\
+			if (*l == ',')					\
+				*l = ' ';				\
+		}							\
+	} while (0)							\
 
 int
 compare(name, s, p)
@@ -148,6 +157,21 @@ typeerr:		LABEL;
 	}
 	if (s->flags & F_MODE &&
 	    s->st_mode != (p->fts_statp->st_mode & MBITS)) {
+		if (lflag) {
+			mode_t tmode, mode;
+
+			tmode = s->st_mode;
+			mode = p->fts_statp->st_mode & MBITS;
+			/*
+			 * if none of the suid/sgid/etc bits are set,
+			 * then if the mode is a subset of the target,
+			 * skip.
+			 */
+			if (!((tmode & ~(S_IRWXU|S_IRWXG|S_IRWXO)) ||
+			    (mode & ~(S_IRWXU|S_IRWXG|S_IRWXO))))
+				if ((mode | tmode) == tmode)
+					goto skip;
+		}
 		LABEL;
 		(void)printf("%spermissions (%#o, %#o",
 		    tab, s->st_mode, p->fts_statp->st_mode & MBITS);
@@ -160,6 +184,7 @@ typeerr:		LABEL;
 		else
 			(void)printf(")\n");
 		tab = "\t";
+	skip:
 	}
 	if (s->flags & F_NLINK && s->type != F_DIR &&
 	    s->st_nlink != p->fts_statp->st_nlink) {
@@ -206,7 +231,7 @@ typeerr:		LABEL;
 			tab = "\t";   
 		}
 	}
-	if (s->flags & F_CKSUM)
+	if (s->flags & F_CKSUM) {
 		if ((fd = open(p->fts_accpath, O_RDONLY, 0)) < 0) {
 			LABEL;
 			(void)printf("%scksum: %s: %s\n",
@@ -227,6 +252,7 @@ typeerr:		LABEL;
 			}
 			tab = "\t";
 		}
+	}
 	if (s->flags & F_MD5) {
 		char *new_digest, buf[33];
 
@@ -278,6 +304,43 @@ typeerr:		LABEL;
 	if (s->flags & F_SLINK && strcmp(cp = rlink(name), s->slink)) {
 		LABEL;
 		(void)printf("%slink ref (%s, %s)\n", tab, cp, s->slink);
+	}
+	if (s->flags & F_FLAGS && s->file_flags != p->fts_statp->st_flags) {
+		char *db_flags = NULL;
+		char *cur_flags = NULL;
+
+		if ((db_flags = fflagstostr(s->file_flags)) == NULL ||
+		    (cur_flags = fflagstostr(p->fts_statp->st_flags)) == NULL) {
+			LABEL;
+			(void)printf("%sflags: %s %s\n", tab, p->fts_accpath,
+				     strerror(errno));
+			tab = "\t";
+			if (db_flags != NULL)
+				free(db_flags);
+			if (cur_flags != NULL)
+				free(cur_flags);
+		} else {
+			LABEL;
+			REPLACE_COMMA(db_flags);
+			REPLACE_COMMA(cur_flags);
+			printf("%sflags (%s, %s", tab, (*db_flags == '\0') ?
+						  "-" : db_flags,
+						  (*cur_flags == '\0') ? 
+						  "-" : cur_flags);
+				tab = "\t";
+			if (uflag)
+				if (chflags(p->fts_accpath, s->file_flags))
+					(void)printf(", not modified: %s)\n",
+						strerror(errno));
+				else	
+					(void)printf(", modified)\n");
+			else
+				(void)printf(")\n");
+			tab = "\t"; 
+
+			free(db_flags);
+			free(cur_flags);
+		}
 	}
 	return (label);
 }

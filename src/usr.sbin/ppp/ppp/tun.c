@@ -23,14 +23,16 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- *	$OpenBSD: tun.c,v 1.11 2001/03/24 01:06:08 brian Exp $
+ *	$OpenBSD: tun.c,v 1.13 2001/08/19 23:22:18 brian Exp $
  */
 
 #include <sys/param.h>
-#ifndef __FreeBSD__
+
 #include <sys/socket.h>		/* For IFF_ defines */
+#ifndef __FreeBSD__
 #include <net/if.h>		/* For IFF_ defines */
 #endif
+#include <net/route.h>
 #include <netinet/in.h>
 #include <net/if_types.h>
 #include <net/if_tun.h>
@@ -61,6 +63,8 @@
 #include "throughput.h"
 #include "iplist.h"
 #include "slcompress.h"
+#include "ncpaddr.h"
+#include "ip.h"
 #include "ipcp.h"
 #include "filter.h"
 #include "descriptor.h"
@@ -68,9 +72,12 @@
 #include "ccp.h"
 #include "link.h"
 #include "mp.h"
+#include "iface.h"
 #ifndef NORADIUS
 #include "radius.h"
 #endif
+#include "ipv6cp.h"
+#include "ncp.h"
 #include "bundle.h"
 #include "tun.h"
 
@@ -89,7 +96,7 @@ tun_configure(struct bundle *bundle)
   }
 
   sprintf(ifr.ifr_name, "tun%d", bundle->unit);
-  ifr.ifr_mtu = bundle->mtu;
+  ifr.ifr_mtu = bundle->iface->mtu;
   if (ioctl(s, SIOCSIFMTU, &ifr) < 0)
       log_Printf(LogERROR, "tun_configure: ioctl(SIOCSIFMTU): %s\n",
              strerror(errno));
@@ -100,11 +107,11 @@ tun_configure(struct bundle *bundle)
 
   memset(&info, '\0', sizeof info);
   info.type = IFT_PPP;
-  info.mtu = bundle->mtu;
+  info.mtu = bundle->iface->mtu;
   
   info.baudrate = bundle->bandwidth;
 #ifdef __OpenBSD__
-  info.flags = IFF_UP|IFF_POINTOPOINT;                             
+  info.flags = IFF_UP|IFF_POINTOPOINT|IFF_MULTICAST;
 #endif
   if (ID0ioctl(bundle->dev.fd, TUNSIFINFO, &info) < 0)
     log_Printf(LogERROR, "tun_configure: ioctl(TUNSIFINFO): %s\n",

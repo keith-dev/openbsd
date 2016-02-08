@@ -1,4 +1,4 @@
-/*	$OpenBSD: echo.c,v 1.4 2001/01/29 01:58:07 niklas Exp $	*/
+/*	$OpenBSD: echo.c,v 1.16 2001/05/24 09:47:33 art Exp $	*/
 
 /*
  *	Echo line reading and writing.
@@ -13,29 +13,26 @@
 #include "macro.h"
 #endif /* !NO_MACRO */
 
-#ifdef	__STDC__
+#include "funmap.h"
+
 #include <stdarg.h>
-#else /* __STDC__ */
-#include <varargs.h>
-#endif /* __STDC__ */
 
 static int	veread		__P((const char *, char *buf, int, int, va_list));
-static int      complt		__P((int, int, char *, int));
-static int      complt_list	__P((int, int, char *, int));
-static VOID     eformat		__P((const char *, va_list));
-static VOID     eputi		__P((int, int));
-static VOID     eputl		__P((long, int));
-static VOID     eputs		__P((char *));
-static VOID     eputc		__P((char));
-static VOID	free_file_list	__P((LIST *));
-static LIST    *copy_list	__P((LIST *));
+static int	complt		__P((int, int, char *, int));
+static int	complt_list	__P((int, int, char *, int));
+static void	eformat		__P((const char *, va_list));
+static void	eputi		__P((int, int));
+static void	eputl		__P((long, int));
+static void	eputs		__P((char *));
+static void	eputc		__P((char));
+static LIST	*copy_list	__P((LIST *));
 
-int             epresf = FALSE;		/* stuff in echo line flag */
+int		epresf = FALSE;		/* stuff in echo line flag */
 
 /*
  * Erase the echo line.
  */
-VOID
+void
 eerase()
 {
 	ttcolor(CTEXT);
@@ -46,9 +43,9 @@ eerase()
 }
 
 /*
- * Ask a "yes" or "no" question.  Return ABORT if the user answers the 
- * question with the abort ("^G") character.  Return FALSE for "no" and 
- * TRUE for "yes".  No formatting services are available.  No newline 
+ * Ask a "yes" or "no" question.  Return ABORT if the user answers the
+ * question with the abort ("^G") character.  Return FALSE for "no" and
+ * TRUE for "yes".  No formatting services are available.  No newline
  * required.
  */
 int
@@ -121,81 +118,44 @@ eyesno(sp)
 }
 
 /*
- * Write out a prompt and read back a reply.  The prompt is now written 
- * out with full "ewprintf" formatting, although the arguments are in a 
+ * Write out a prompt and read back a reply.  The prompt is now written
+ * out with full "ewprintf" formatting, although the arguments are in a
  * rather strange place.  This is always a new message, there is no auto
  * completion, and the return is echoed as such.
  */
 /* VARARGS */
 int
-#ifdef __STDC__
 ereply(const char *fmt, char *buf, int nbuf, ...)
-#else /* __STDC__ */
-ereply(va_alist)
-	va_dcl
-#endif /* __STDC__ */
 {
 	va_list	 ap;
 	int	 i;
-#ifdef __STDC__
 	va_start(ap, nbuf);
-#else /* __STDC__ */
-	char	*fmt, *buf;
-	int	 nbuf;
-
-	va_start(ap);
-	fmt = va_arg(ap, char *);
-	buf = va_arg(ap, char *);
-	nbuf = va_arg(ap, int);
-#endif /* __STDC__ */
 	i = veread(fmt, buf, nbuf, EFNEW | EFCR, ap);
 	va_end(ap);
 	return i;
 }
 
 /*
- * This is the general "read input from the echo line" routine.  The basic 
+ * This is the general "read input from the echo line" routine.  The basic
  * idea is that the prompt string "prompt" is written to the echo line, and
- * a one line reply is read back into the supplied "buf" (with maximum 
- * length "len"). The "flag" contains EFNEW (a new prompt), an EFFUNC 
+ * a one line reply is read back into the supplied "buf" (with maximum
+ * length "len"). The "flag" contains EFNEW (a new prompt), an EFFUNC
  * (autocomplete), or EFCR (echo the carriage return as CR).
  */
 /* VARARGS */
 int
-#ifdef __STDC__
 eread(const char *fmt, char *buf, int nbuf, int flag, ...)
-#else /* __STDC__ */
-eread(va_alist)
-	char *fmt, *buf;
-	int   buf, flag;
-	va_dcl
-#endif /* __STDC__ */
 {
 	int	 i;
 	va_list	 ap;
-#ifdef __STDC__
 	va_start(ap, flag);
-#else /* __STDC__ */
-	char	*fmt, *buf;
-	int	 nbuf;
-
-	va_start(ap);
-	fmt = va_arg(ap, char *);
-	buf = va_arg(ap, char *);
-	nbuf = va_arg(ap, int);
-	flag = va_arg(ap, int);
-#endif /* __STDC__ */
 	i = veread(fmt, buf, nbuf, flag, ap);
 	va_end(ap);
 	return i;
 }
 
 static int
-veread(fp, buf, nbuf, flag, ap)
-	const char *fp;
-	char       *buf;
-	int         nbuf, flag;
-	va_list     ap;
+veread(const char *fp, char *buf, int nbuf, int flag, va_list ap)
 {
 	int	 cpos;
 	int	 i;
@@ -217,6 +177,10 @@ veread(fp, buf, nbuf, flag, ap)
 	} else
 		eputc(' ');
 	eformat(fp, ap);
+	if ((flag & EFDEF) != 0) {
+		eputs(buf);
+		cpos += strlen(buf);
+	}
 	tteeol();
 	ttflush();
 	for (;;) {
@@ -261,11 +225,11 @@ veread(fp, buf, nbuf, flag, ap)
 			goto done;
 		case CCHR('G'):			/* bell, abort */
 			eputc(CCHR('G'));
-			(VOID)ctrlg(FFRAND, 0);
+			(void)ctrlg(FFRAND, 0);
 			ttflush();
 			return ABORT;
 		case CCHR('H'):			/* rubout, erase */
-		case CCHR('?'):	
+		case CCHR('?'):
 			if (cpos != 0) {
 				ttputc('\b');
 				ttputc(' ');
@@ -335,7 +299,8 @@ veread(fp, buf, nbuf, flag, ap)
 			}
 		}
 	}
-done:	return buf[0] != '\0';
+done:
+	return buf[0] != '\0';
 }
 
 /*
@@ -356,85 +321,58 @@ complt(flags, c, buf, cpos)
 
 	if ((flags & EFFUNC) != 0) {
 		buf[cpos] = '\0';
-		i = complete_function(buf, c);
-		if (i > 0) {
-			eputs(&buf[cpos]);
-			ttflush();
-			return i;
-		}
-		switch (i) {
-		case -3:
-			msg = " [Ambiguous]";
-			break;
-		case -2:
-			i = 0;
-			msg = " [No match]";
-			break;
-		case -1:
-		case 0:
-			return i;
-		default:
-			msg = " [Internal error]";
-			break;
-		}
-	} else {
-		if ((flags & EFBUF) != 0)
-			lh = &(bheadp->b_list);
-		else if ((flags & EFFILE) != 0) {
-			buf[cpos] = '\0';
-			wholelist = lh = make_file_list(buf, 0);
-		} else
-			panic("broken complt call: flags");
+		wholelist = lh = complete_function_list(buf, c);
+	} else if ((flags & EFBUF) != 0) {
+		lh = &(bheadp->b_list);
+	} else if ((flags & EFFILE) != 0) {
+		buf[cpos] = '\0';
+		wholelist = lh = make_file_list(buf);
+	} else
+		panic("broken complt call: flags");
 
-		if (c == ' ')
-			wflag = TRUE;
-		else if (c != '\t' && c != CCHR('M'))
-			panic("broken complt call: c");
+	if (c == ' ')
+		wflag = TRUE;
+	else if (c != '\t' && c != CCHR('M'))
+		panic("broken complt call: c");
 
-		nhits = 0;
-		nxtra = HUGE;
+	nhits = 0;
+	nxtra = HUGE;
 
-		while (lh != NULL) {
-			for (i = 0; i < cpos; ++i) {
-				if (buf[i] != lh->l_name[i])
-					break;
-			}
-			if (i == cpos) {
-				if (nhits == 0)
-					lh2 = lh;
-				++nhits;
-				if (lh->l_name[i] == '\0')
-					nxtra = -1;
-				else {
-					bxtra = getxtra(lh, lh2, cpos, wflag);
-					if (bxtra < nxtra)
-						nxtra = bxtra;
-					lh2 = lh;
-				}
-			}
-			lh = lh->l_next;
-		}
+	for (; lh != NULL; lh = lh->l_next) {
+		if (memcmp(buf, lh->l_name, cpos) != 0)
+			continue;
 		if (nhits == 0)
-			msg = " [No match]";
-		else if (nhits > 1 && nxtra == 0)
-			msg = " [Ambiguous]";
+			lh2 = lh;
+		++nhits;
+		if (lh->l_name[cpos] == '\0')
+			nxtra = -1;
 		else {
-			/*
-			 * Being lazy - ought to check length, but all things
-			 * autocompleted have known types/lengths.
-			 */
-			if (nxtra < 0 && nhits > 1 && c == ' ')
-				nxtra = 1;
-			for (i = 0; i < nxtra; ++i) {
-				buf[cpos] = lh2->l_name[cpos];
-				eputc(buf[cpos++]);
-			}
-			ttflush();
-			free_file_list(wholelist);
-			if (nxtra < 0 && c != CCHR('M'))
-				return 0;
-			return nxtra;
+			bxtra = getxtra(lh, lh2, cpos, wflag);
+			if (bxtra < nxtra)
+				nxtra = bxtra;
+			lh2 = lh;
 		}
+	}
+	if (nhits == 0)
+		msg = " [No match]";
+	else if (nhits > 1 && nxtra == 0)
+		msg = " [Ambiguous]";
+	else {
+		/*
+		 * Being lazy - ought to check length, but all things
+		 * autocompleted have known types/lengths.
+		 */
+		if (nxtra < 0 && nhits > 1 && c == ' ')
+			nxtra = 1;
+		for (i = 0; i < nxtra; ++i) {
+			buf[cpos] = lh2->l_name[cpos];
+			eputc(buf[cpos++]);
+		}
+		ttflush();
+		free_file_list(wholelist);
+		if (nxtra < 0 && c != CCHR('M'))
+			return 0;
+		return nxtra;
 	}
 
 	/*
@@ -511,7 +449,7 @@ complt_list(flags, c, buf, cpos)
 			wholelist = lh = complete_function_list(buf, c);
 		} else if ((flags & EFFILE) != 0) {
 			buf[cpos] = '\0';
-			wholelist = lh = make_file_list(buf, 1);
+			wholelist = lh = make_file_list(buf);
 			/*
 			 * We don't want to display stuff up to the / for file
 			 * names preflen is the list of a prefix of what the
@@ -613,8 +551,8 @@ complt_list(flags, c, buf, cpos)
 
 /*
  * The "lp1" and "lp2" point to list structures.  The "cpos" is a horizontal
- * position in the name.  Return the longest block of characters that can be 
- * autocompleted at this point.  Sometimes the two symbols are the same, but 
+ * position in the name.  Return the longest block of characters that can be
+ * autocompleted at this point.  Sometimes the two symbols are the same, but
  * this is normal.
  */
 int
@@ -639,35 +577,22 @@ getxtra(lp1, lp2, cpos, wflag)
 }
 
 /*
- * Special "printf" for the echo line.  Each call to "ewprintf" starts a 
- * new line in the echo area, and ends with an erase to end of the echo 
- * line.  The formatting is done by a call to the standard formatting 
+ * Special "printf" for the echo line.  Each call to "ewprintf" starts a
+ * new line in the echo area, and ends with an erase to end of the echo
+ * line.  The formatting is done by a call to the standard formatting
  * routine.
  */
 /* VARARGS */
-VOID
-#ifdef __STDC__
+void
 ewprintf(const char *fmt, ...)
-#else /* __STDC__ */
-ewprintf(va_alist)
-	va_dcl
-#endif /* __STDC__ */
 {
 	va_list	 ap;
-#ifndef __STDC__
-	char	*fmt;
-#endif /* !__STDC__ */
 
 #ifndef NO_MACRO
 	if (inmacro)
 		return;
 #endif /* !NO_MACRO */
-#ifdef __STDC__
 	va_start(ap, fmt);
-#else /* __STDC__ */
-	va_start(ap);
-	fmt = va_arg(ap, char *);
-#endif /* __STDC__ */
 	ttcolor(CTEXT);
 	ttmove(nrow - 1, 0);
 	eformat(fmt, ap);
@@ -678,21 +603,18 @@ ewprintf(va_alist)
 }
 
 /*
- * Printf style formatting. This is called by both "ewprintf" and "ereply" 
- * to provide formatting services to their clients.  The move to the start 
- * of the echo line, and the erase to the end of the echo line, is done by 
+ * Printf style formatting. This is called by both "ewprintf" and "ereply"
+ * to provide formatting services to their clients.  The move to the start
+ * of the echo line, and the erase to the end of the echo line, is done by
  * the caller.
  * Note: %c works, and prints the "name" of the character.
  * %k prints the name of a key (and takes no arguments).
  */
-static VOID
-eformat(fp, ap)
-	const char *fp;
-	va_list     ap;
+static void
+eformat(const char *fp, va_list ap)
 {
-	int	 c;
-	char	 kname[NKNAME];
-	char	*cp;
+	char	kname[NKNAME], *cp;
+	int	c;
 
 	while ((c = *fp++) != '\0') {
 		if (c != '%')
@@ -701,17 +623,17 @@ eformat(fp, ap)
 			c = *fp++;
 			switch (c) {
 			case 'c':
-				(VOID)keyname(kname, va_arg(ap, int));
+				keyname(kname, sizeof(kname), va_arg(ap, int));
 				eputs(kname);
 				break;
 
 			case 'k':
-				cp = kname;
-				for (c = 0; c < key.k_count; c++) {
-					cp = keyname(cp, key.k_chars[c]);
-					*cp++ = ' ';
+				for (cp = kname, c = 0; c < key.k_count; c++) {
+					if (c)
+						*cp++ = ' ';
+					cp = keyname(cp, sizeof(kname) -
+					    (cp - kname) - 1, key.k_chars[c]);
 				}
-				*--cp = '\0';
 				eputs(kname);
 				break;
 
@@ -732,7 +654,7 @@ eformat(fp, ap)
 				c = *fp++;
 				switch (c) {
 				case 'd':
-					eputl((long)va_arg(ap, long), 10);
+					eputl(va_arg(ap, long), 10);
 					break;
 				default:
 					eputc(c);
@@ -750,7 +672,7 @@ eformat(fp, ap)
 /*
  * Put integer, in radix "r".
  */
-static VOID
+static void
 eputi(i, r)
 	int i, r;
 {
@@ -768,7 +690,7 @@ eputi(i, r)
 /*
  * Put long, in radix "r".
  */
-static VOID
+static void
 eputl(l, r)
 	long l;
 	int  r;
@@ -787,7 +709,7 @@ eputl(l, r)
 /*
  * Put string.
  */
-static VOID
+static void
 eputs(s)
 	char *s;
 {
@@ -798,10 +720,10 @@ eputs(s)
 }
 
 /*
- * Put character.  Watch for control characters, and for the line getting 
+ * Put character.  Watch for control characters, and for the line getting
  * too long.
  */
-static VOID
+static void
 eputc(c)
 	char	 c;
 {
@@ -815,7 +737,7 @@ eputc(c)
 	}
 }
 
-static VOID
+void
 free_file_list(lp)
 	LIST *lp;
 {

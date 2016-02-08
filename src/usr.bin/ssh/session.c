@@ -9,7 +9,7 @@
  * called by a name other than "ssh" or "Secure Shell".
  *
  * SSH2 support by Markus Friedl.
- * Copyright (c) 2000 Markus Friedl.  All rights reserved.
+ * Copyright (c) 2000, 2001 Markus Friedl.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -33,7 +33,7 @@
  */
 
 #include "includes.h"
-RCSID("$OpenBSD: session.c,v 1.74 2001/04/17 19:34:25 markus Exp $");
+RCSID("$OpenBSD: session.c,v 1.108 2001/10/11 13:45:21 markus Exp $");
 
 #include "ssh.h"
 #include "ssh1.h"
@@ -46,7 +46,6 @@ RCSID("$OpenBSD: session.c,v 1.74 2001/04/17 19:34:25 markus Exp $");
 #include "uidswap.h"
 #include "compat.h"
 #include "channels.h"
-#include "nchan.h"
 #include "bufaux.h"
 #include "auth.h"
 #include "auth-options.h"
@@ -65,7 +64,8 @@ typedef struct Session Session;
 struct Session {
 	int	used;
 	int	self;
-	struct	passwd *pw;
+	struct passwd *pw;
+	Authctxt *authctxt;
 	pid_t	pid;
 	/* tty */
 	char	*term;
@@ -86,18 +86,23 @@ struct Session {
 /* func */
 
 Session *session_new(void);
-void	session_set_fds(Session *s, int fdin, int fdout, int fderr);
-void	session_pty_cleanup(Session *s);
-void	session_proctitle(Session *s);
-void	do_exec_pty(Session *s, const char *command);
-void	do_exec_no_pty(Session *s, const char *command);
-void	do_login(Session *s, const char *command);
-void	do_child(Session *s, const char *command);
+void	session_set_fds(Session *, int, int, int);
+static void	session_pty_cleanup(void *);
+void	session_proctitle(Session *);
+int	session_setup_x11fwd(Session *);
+void	do_exec_pty(Session *, const char *);
+void	do_exec_no_pty(Session *, const char *);
+void	do_exec(Session *, const char *);
+void	do_login(Session *, const char *);
+void	do_child(Session *, const char *);
 void	do_motd(void);
-int	check_quietlogin(Session *s, const char *command);
+int	check_quietlogin(Session *, const char *);
 
-void	do_authenticated1(Authctxt *authctxt);
-void	do_authenticated2(Authctxt *authctxt);
+static void do_authenticated1(Authctxt *);
+static void do_authenticated2(Authctxt *);
+
+static void session_close(Session *);
+static int session_pty_req(Session *);
 
 /* import */
 extern ServerOptions options;
@@ -108,11 +113,8 @@ extern u_int utmp_len;
 extern int startup_pipe;
 extern void destroy_sensitive_data(void);
 
-/* Local Xauthority file. */
-static char *xauthfile;
-
 /* original command from peer. */
-char *original_command = NULL;
+const char *original_command = NULL;
 
 /* data */
 #define MAX_SESSIONS 10
@@ -154,48 +156,18 @@ do_authenticated(Authctxt *authctxt)
 		do_authenticated2(authctxt);
 	else
 		do_authenticated1(authctxt);
-}
 
-/*
- * Remove local Xauthority file.
- */
-void
-xauthfile_cleanup_proc(void *ignore)
-{
-	debug("xauthfile_cleanup_proc called");
-
-	if (xauthfile != NULL) {
-		char *p;
-		unlink(xauthfile);
-		p = strrchr(xauthfile, '/');
-		if (p != NULL) {
-			*p = '\0';
-			rmdir(xauthfile);
-		}
-		xfree(xauthfile);
-		xauthfile = NULL;
-	}
-}
-
-/*
- * Function to perform cleanup if we get aborted abnormally (e.g., due to a
- * dropped connection).
- */
-void
-pty_cleanup_proc(void *session)
-{
-	Session *s=session;
-	if (s == NULL)
-		fatal("pty_cleanup_proc: no session");
-	debug("pty_cleanup_proc: %s", s->tty);
-
-	if (s->pid != 0) {
-		/* Record that the user has logged out. */
-		record_logout(s->pid, s->tty);
-	}
-
-	/* Release the pseudo-tty. */
-	pty_release(s->tty);
+	/* remove agent socket */
+	if (auth_get_socket_name())
+		auth_sock_cleanup_proc(authctxt->pw);
+#ifdef KRB4
+	if (options.kerberos_ticket_cleanup)
+		krb4_cleanup_proc(authctxt);
+#endif
+#ifdef KRB5
+	if (options.kerberos_ticket_cleanup)
+		krb5_cleanup_proc(authctxt);
+#endif
 }
 
 /*
@@ -204,16 +176,17 @@ pty_cleanup_proc(void *session)
  * terminals are allocated, X11, TCP/IP, and authentication agent forwardings
  * are requested, etc.
  */
-void
+static void
 do_authenticated1(Authctxt *authctxt)
 {
 	Session *s;
 	char *command;
-	int success, type, fd, n_bytes, plen, screen_flag, have_pty = 0;
+	int success, type, plen, screen_flag;
 	int compression_level = 0, enable_compression_after_reply = 0;
 	u_int proto_len, data_len, dlen;
 
 	s = session_new();
+	s->authctxt = authctxt;
 	s->pw = authctxt->pw;
 
 	/*
@@ -242,70 +215,10 @@ do_authenticated1(Authctxt *authctxt)
 			break;
 
 		case SSH_CMSG_REQUEST_PTY:
-			if (no_pty_flag) {
-				debug("Allocating a pty not permitted for this authentication.");
-				break;
-			}
-			if (have_pty)
-				packet_disconnect("Protocol error: you already have a pty.");
-
-			debug("Allocating pty.");
-
-			/* Allocate a pty and open it. */
-			if (!pty_allocate(&s->ptyfd, &s->ttyfd, s->tty,
-			    sizeof(s->tty))) {
-				error("Failed to allocate pty.");
-				break;
-			}
-			fatal_add_cleanup(pty_cleanup_proc, (void *)s);
-			pty_setowner(s->pw, s->tty);
-
-			/* Get TERM from the packet.  Note that the value may be of arbitrary length. */
-			s->term = packet_get_string(&dlen);
-			packet_integrity_check(dlen, strlen(s->term), type);
-			/* packet_integrity_check(plen, 4 + dlen + 4*4 + n_bytes, type); */
-			/* Remaining bytes */
-			n_bytes = plen - (4 + dlen + 4 * 4);
-
-			if (strcmp(s->term, "") == 0) {
-				xfree(s->term);
-				s->term = NULL;
-			}
-			/* Get window size from the packet. */
-			s->row = packet_get_int();
-			s->col = packet_get_int();
-			s->xpixel = packet_get_int();
-			s->ypixel = packet_get_int();
-			pty_change_window_size(s->ptyfd, s->row, s->col, s->xpixel, s->ypixel);
-
-			/* Get tty modes from the packet. */
-			tty_parse_modes(s->ttyfd, &n_bytes);
-			packet_integrity_check(plen, 4 + dlen + 4 * 4 + n_bytes, type);
-
-			session_proctitle(s);
-
-			/* Indicate that we now have a pty. */
-			success = 1;
-			have_pty = 1;
+			success = session_pty_req(s);
 			break;
 
 		case SSH_CMSG_X11_REQUEST_FORWARDING:
-			if (!options.x11_forwarding) {
-				packet_send_debug("X11 forwarding disabled in server configuration file.");
-				break;
-			}
-			if (!options.xauth_location) {
-				packet_send_debug("No xauth program; cannot forward with spoofing.");
-				break;
-			}
-			if (no_x11_forwarding_flag) {
-				packet_send_debug("X11 forwarding not permitted for this authentication.");
-				break;
-			}
-			debug("Received request for X11 forwarding with auth spoofing.");
-			if (s->display != NULL)
-				packet_disconnect("Protocol error: X11 display already set.");
-
 			s->auth_proto = packet_get_string(&proto_len);
 			s->auth_data = packet_get_string(&data_len);
 
@@ -317,39 +230,18 @@ do_authenticated1(Authctxt *authctxt)
 				if (!screen_flag)
 					debug2("Buggy client: "
 					    "X11 screen flag missing");
-				packet_integrity_check(plen,
-				    4 + proto_len + 4 + data_len + 4, type);
 				s->screen = packet_get_int();
 			} else {
-				packet_integrity_check(plen,
-				    4 + proto_len + 4 + data_len, type);
 				s->screen = 0;
 			}
-			s->display = x11_create_display_inet(s->screen, options.x11_display_offset);
-
-			if (s->display == NULL)
-				break;
-
-			/* Setup to always have a local .Xauthority. */
-			xauthfile = xmalloc(MAXPATHLEN);
-			strlcpy(xauthfile, "/tmp/ssh-XXXXXXXX", MAXPATHLEN);
-			temporarily_use_uid(s->pw);
-			if (mkdtemp(xauthfile) == NULL) {
-				restore_uid();
-				error("private X11 dir: mkdtemp %s failed: %s",
-				    xauthfile, strerror(errno));
-				xfree(xauthfile);
-				xauthfile = NULL;
-				/* XXXX remove listening channels */
-				break;
+			packet_done();
+			success = session_setup_x11fwd(s);
+			if (!success) {
+				xfree(s->auth_proto);
+				xfree(s->auth_data);
+				s->auth_proto = NULL;
+				s->auth_data = NULL;
 			}
-			strlcat(xauthfile, "/cookies", MAXPATHLEN);
-			fd = open(xauthfile, O_RDWR|O_CREAT|O_EXCL, 0600);
-			if (fd >= 0)
-				close(fd);
-			restore_uid();
-			fatal_add_cleanup(xauthfile_cleanup_proc, NULL);
-			success = 1;
 			break;
 
 		case SSH_CMSG_AGENT_REQUEST_FORWARDING:
@@ -379,32 +271,71 @@ do_authenticated1(Authctxt *authctxt)
 			if (packet_set_maxsize(packet_get_int()) > 0)
 				success = 1;
 			break;
+			
+#if defined(AFS) || defined(KRB5)
+		case SSH_CMSG_HAVE_KERBEROS_TGT:
+			if (!options.kerberos_tgt_passing) {
+				verbose("Kerberos TGT passing disabled.");
+			} else {
+				char *kdata = packet_get_string(&dlen);
+				packet_integrity_check(plen, 4 + dlen, type);
+				
+				/* XXX - 0x41, see creds_to_radix version */
+				if (kdata[0] != 0x41) {
+#ifdef KRB5
+					krb5_data tgt;
+					tgt.data = kdata;
+					tgt.length = dlen;
+					
+					if (auth_krb5_tgt(s->authctxt, &tgt))
+						success = 1;
+					else
+						verbose("Kerberos v5 TGT refused for %.100s", s->authctxt->user);
+#endif /* KRB5 */
+				} else {
+#ifdef AFS
+					if (auth_krb4_tgt(s->authctxt, kdata))
+						success = 1;
+					else
+						verbose("Kerberos v4 TGT refused for %.100s", s->authctxt->user);
+#endif /* AFS */
+				}
+				xfree(kdata);
+			}
+			break;
+#endif /* AFS || KRB5 */
+			
+#ifdef AFS
+		case SSH_CMSG_HAVE_AFS_TOKEN:
+			if (!options.afs_token_passing || !k_hasafs()) {
+				verbose("AFS token passing disabled.");
+			} else {
+				/* Accept AFS token. */
+				char *token = packet_get_string(&dlen);
+				packet_integrity_check(plen, 4 + dlen, type);
+				
+				if (auth_afs_token(s->authctxt, token))
+					success = 1;
+				else
+					verbose("AFS token refused for %.100s",
+					    s->authctxt->user);
+				xfree(token);
+			}
+			break;
+#endif /* AFS */
 
 		case SSH_CMSG_EXEC_SHELL:
 		case SSH_CMSG_EXEC_CMD:
 			if (type == SSH_CMSG_EXEC_CMD) {
 				command = packet_get_string(&dlen);
 				debug("Exec command '%.500s'", command);
-				packet_integrity_check(plen, 4 + dlen, type);
-			} else {
-				command = NULL;
-				packet_integrity_check(plen, 0, type);
-			}
-			if (forced_command != NULL) {
-				original_command = command;
-				command = forced_command;
-				debug("Forced command '%.500s'", forced_command);
-			}
-			if (have_pty)
-				do_exec_pty(s, command);
-			else
-				do_exec_no_pty(s, command);
-
-			if (command != NULL)
+				do_exec(s, command);
 				xfree(command);
-			/* Cleanup user's local Xauthority file. */
-			if (xauthfile)
-				xauthfile_cleanup_proc(NULL);
+			} else {
+				do_exec(s, NULL);
+			}
+			packet_done();
+			session_close(s);
 			return;
 
 		default:
@@ -563,26 +494,22 @@ do_exec_pty(Session *s, const char *command)
 
 	/* Fork the child. */
 	if ((pid = fork()) == 0) {
+
 		/* Child.  Reinitialize the log because the pid has changed. */
 		log_init(__progname, options.log_level, options.log_facility, log_stderr);
-
 		/* Close the master side of the pseudo tty. */
 		close(ptyfd);
 
 		/* Make the pseudo tty our controlling tty. */
 		pty_make_controlling_tty(&ttyfd, s->tty);
 
-		/* Redirect stdin from the pseudo tty. */
-		if (dup2(ttyfd, fileno(stdin)) < 0)
-			error("dup2 stdin failed: %.100s", strerror(errno));
-
-		/* Redirect stdout to the pseudo tty. */
-		if (dup2(ttyfd, fileno(stdout)) < 0)
-			error("dup2 stdin failed: %.100s", strerror(errno));
-
-		/* Redirect stderr to the pseudo tty. */
-		if (dup2(ttyfd, fileno(stderr)) < 0)
-			error("dup2 stdin failed: %.100s", strerror(errno));
+		/* Redirect stdin/stdout/stderr from the pseudo tty. */
+		if (dup2(ttyfd, 0) < 0)
+			error("dup2 stdin: %s", strerror(errno));
+		if (dup2(ttyfd, 1) < 0)
+			error("dup2 stdout: %s", strerror(errno));
+		if (dup2(ttyfd, 2) < 0)
+			error("dup2 stderr: %s", strerror(errno));
 
 		/* Close the extra descriptor for the pseudo tty. */
 		close(ttyfd);
@@ -624,9 +551,30 @@ do_exec_pty(Session *s, const char *command)
 	} else {
 		server_loop(pid, ptyfd, fdout, -1);
 		/* server_loop _has_ closed ptyfd and fdout. */
-		session_pty_cleanup(s);
 	}
 }
+
+/*
+ * This is called to fork and execute a command.  If another command is
+ * to be forced, execute that instead.
+ */
+void
+do_exec(Session *s, const char *command)
+{
+	if (forced_command) {
+		original_command = command;
+		command = forced_command;
+		debug("Forced command '%.900s'", command);
+	}
+
+	if (s->ttyfd != -1)
+		do_exec_pty(s, command);
+	else
+		do_exec_no_pty(s, command);
+
+	original_command = NULL;
+}
+
 
 /* administrative, login(1)-like work */
 void
@@ -714,7 +662,7 @@ int
 check_quietlogin(Session *s, const char *command)
 {
 	char buf[256];
-	struct passwd * pw = s->pw;
+	struct passwd *pw = s->pw;
 	struct stat st;
 
 	/* Return 1 if .hushlogin exists or a command given. */
@@ -735,7 +683,7 @@ check_quietlogin(Session *s, const char *command)
  * Sets the value of the given variable in the environment.  If the variable
  * already exists, its value is overriden.
  */
-void
+static void
 child_set_env(char ***envp, u_int *envsizep, const char *name,
 	      const char *value)
 {
@@ -776,7 +724,7 @@ child_set_env(char ***envp, u_int *envsizep, const char *name,
  * Otherwise, it must consist of empty lines, comments (line starts with '#')
  * and assignments of the form name=value.  No other forms are allowed.
  */
-void
+static void
 read_environment_file(char ***env, u_int *envsize,
 		      const char *filename)
 {
@@ -820,7 +768,7 @@ void
 do_child(Session *s, const char *command)
 {
 	const char *shell, *hostname = NULL, *cp = NULL;
-	struct passwd * pw = s->pw;
+	struct passwd *pw = s->pw;
 	char buf[256];
 	char cmd[1024];
 	FILE *f = NULL;
@@ -829,7 +777,10 @@ do_child(Session *s, const char *command)
 	extern char **environ;
 	struct stat st;
 	char *argv[10];
-	int do_xauth = s->auth_proto != NULL && s->auth_data != NULL;
+	int do_xauth;
+
+	do_xauth =
+	    s->display != NULL && s->auth_proto != NULL && s->auth_data != NULL;
 
 	/* remove hostkey from the child's memory */
 	destroy_sensitive_data();
@@ -896,18 +847,6 @@ do_child(Session *s, const char *command)
 	shell = login_getcapstr(lc, "shell", (char *)shell, (char *)shell);
 #endif
 
-#ifdef AFS
-	/* Try to get AFS tokens for the local cell. */
-	if (k_hasafs()) {
-		char cell[64];
-
-		if (k_afs_cell_of_file(pw->pw_dir, cell, sizeof(cell)) == 0)
-			krb_afslog(cell, 0);
-
-		krb_afslog(0, 0);
-	}
-#endif /* AFS */
-
 	/* Initialize the environment. */
 	envsize = 100;
 	env = xmalloc(envsize * sizeof(char *));
@@ -963,18 +902,16 @@ do_child(Session *s, const char *command)
 	if (original_command)
 		child_set_env(&env, &envsize, "SSH_ORIGINAL_COMMAND",
 		    original_command);
-
 #ifdef KRB4
-	{
-		extern char *ticket;
-
-		if (ticket)
-			child_set_env(&env, &envsize, "KRBTKFILE", ticket);
-	}
-#endif /* KRB4 */
-
-	if (xauthfile)
-		child_set_env(&env, &envsize, "XAUTHORITY", xauthfile);
+	if (s->authctxt->krb4_ticket_file)
+		child_set_env(&env, &envsize, "KRBTKFILE",
+			      s->authctxt->krb4_ticket_file);
+#endif
+#ifdef KRB5
+	if (s->authctxt->krb5_ticket_file)
+		child_set_env(&env, &envsize, "KRB5CCNAME",
+			      s->authctxt->krb5_ticket_file);
+#endif
 	if (auth_get_socket_name() != NULL)
 		child_set_env(&env, &envsize, SSH_AUTHSOCKET_ENV_NAME,
 			      auth_get_socket_name());
@@ -1030,21 +967,33 @@ do_child(Session *s, const char *command)
 	for (i = 3; i < 64; i++)
 		close(i);
 
-	/* Change current directory to the user\'s home directory. */
-	if (chdir(pw->pw_dir) < 0) {
-		fprintf(stderr, "Could not chdir to home directory %s: %s\n",
-			pw->pw_dir, strerror(errno));
-#ifdef HAVE_LOGIN_CAP
-		if (login_getcapbool(lc, "requirehome", 0))
-			exit(1);
-#endif
-	}
-
 	/*
 	 * Must take new environment into use so that .ssh/rc, /etc/sshrc and
 	 * xauth are run in the proper environment.
 	 */
 	environ = env;
+
+#ifdef AFS
+	/* Try to get AFS tokens for the local cell. */
+	if (k_hasafs()) {
+		char cell[64];
+		
+		if (k_afs_cell_of_file(pw->pw_dir, cell, sizeof(cell)) == 0)
+			krb_afslog(cell, 0);
+		
+		krb_afslog(0, 0);
+	}
+#endif /* AFS */
+
+	/* Change current directory to the user\'s home directory. */
+	if (chdir(pw->pw_dir) < 0) {
+		fprintf(stderr, "Could not chdir to home directory %s: %s\n",
+		    pw->pw_dir, strerror(errno));
+#ifdef HAVE_LOGIN_CAP
+		if (login_getcapbool(lc, "requirehome", 0))
+			exit(1);
+#endif
+	}
 
 	/*
 	 * Run $HOME/.ssh/rc, /etc/sshrc, or xauth (whichever is found first
@@ -1053,10 +1002,11 @@ do_child(Session *s, const char *command)
 	if (!options.use_login) {
 		/* ignore _PATH_SSH_USER_RC for subsystems */
 		if (!s->is_subsystem && (stat(_PATH_SSH_USER_RC, &st) >= 0)) {
+			snprintf(cmd, sizeof cmd, "%s -c '%s %s'",
+			    shell, _PATH_BSHELL, _PATH_SSH_USER_RC);
 			if (debug_flag)
-				fprintf(stderr, "Running %s %s\n", _PATH_BSHELL,
-				    _PATH_SSH_USER_RC);
-			f = popen(_PATH_BSHELL " " _PATH_SSH_USER_RC, "w");
+				fprintf(stderr, "Running %s\n", cmd);
+			f = popen(cmd, "w");
 			if (f) {
 				if (do_xauth)
 					fprintf(f, "%s %s\n", s->auth_proto,
@@ -1133,25 +1083,6 @@ do_child(Session *s, const char *command)
 		if (!options.use_login) {
 			char buf[256];
 
-			/*
-			 * Check for mail if we have a tty and it was enabled
-			 * in server options.
-			 */
-			if (s->ttyfd != -1 && options.check_mail) {
-				char *mailbox;
-				struct stat mailstat;
-
-				mailbox = getenv("MAIL");
-				if (mailbox != NULL) {
-					if (stat(mailbox, &mailstat) != 0 ||
-					    mailstat.st_size == 0)
-						printf("No mail.\n");
-					else if (mailstat.st_mtime < mailstat.st_atime)
-						printf("You have mail.\n");
-					else
-						printf("You have new mail.\n");
-				}
-			}
 			/* Start the shell.  Set initial character to '-'. */
 			buf[0] = '-';
 			strncpy(buf + 1, cp, sizeof(buf) - 1);
@@ -1170,7 +1101,7 @@ do_child(Session *s, const char *command)
 			/* Launch login(1). */
 
 			execl("/usr/bin/login", "login", "-h", hostname,
-			     "-p", "-f", "--", pw->pw_name, NULL);
+			     "-p", "-f", "--", pw->pw_name, (char *)NULL);
 
 			/* Login couldn't be executed, die. */
 
@@ -1200,7 +1131,6 @@ session_new(void)
 		debug("session_new: init");
 		for(i = 0; i < MAX_SESSIONS; i++) {
 			sessions[i].used = 0;
-			sessions[i].self = i;
 		}
 		did_init = 1;
 	}
@@ -1212,6 +1142,7 @@ session_new(void)
 			s->ptyfd = -1;
 			s->ttyfd = -1;
 			s->used = 1;
+			s->self = i;
 			debug("session_new: session %d", i);
 			return s;
 		}
@@ -1219,7 +1150,7 @@ session_new(void)
 	return NULL;
 }
 
-void
+static void
 session_dump(void)
 {
 	int i;
@@ -1235,7 +1166,7 @@ session_dump(void)
 }
 
 int
-session_open(int chanid)
+session_open(Authctxt *authctxt, int chanid)
 {
 	Session *s = session_new();
 	debug("session_open: channel %d", chanid);
@@ -1243,7 +1174,8 @@ session_open(int chanid)
 		error("no more sessions");
 		return 0;
 	}
-	s->pw = auth_get_user();
+	s->authctxt = authctxt;
+	s->pw = authctxt->pw;
 	if (s->pw == NULL)
 		fatal("no user for session %d", s->self);
 	debug("session_open: session %d: link with channel %d", s->self, chanid);
@@ -1251,7 +1183,7 @@ session_open(int chanid)
 	return 1;
 }
 
-Session *
+static Session *
 session_by_channel(int id)
 {
 	int i;
@@ -1267,7 +1199,7 @@ session_by_channel(int id)
 	return NULL;
 }
 
-Session *
+static Session *
 session_by_pid(pid_t pid)
 {
 	int i;
@@ -1282,7 +1214,7 @@ session_by_pid(pid_t pid)
 	return NULL;
 }
 
-int
+static int
 session_window_change_req(Session *s)
 {
 	s->col = packet_get_int();
@@ -1294,19 +1226,30 @@ session_window_change_req(Session *s)
 	return 1;
 }
 
-int
+static int
 session_pty_req(Session *s)
 {
 	u_int len;
 	int n_bytes;
 
-	if (no_pty_flag)
+	if (no_pty_flag) {
+		debug("Allocating a pty not permitted for this authentication.");
 		return 0;
-	if (s->ttyfd != -1)
+	}
+	if (s->ttyfd != -1) {
+		packet_disconnect("Protocol error: you already have a pty.");
 		return 0;
+	}
+
 	s->term = packet_get_string(&len);
-	s->col = packet_get_int();
-	s->row = packet_get_int();
+
+	if (compat20) {
+		s->col = packet_get_int();
+		s->row = packet_get_int();
+	} else {
+		s->row = packet_get_int();
+		s->col = packet_get_int();
+	}
 	s->xpixel = packet_get_int();
 	s->ypixel = packet_get_int();
 
@@ -1314,9 +1257,12 @@ session_pty_req(Session *s)
 		xfree(s->term);
 		s->term = NULL;
 	}
+
 	/* Allocate a pty and open it. */
+	debug("Allocating pty.");
 	if (!pty_allocate(&s->ptyfd, &s->ttyfd, s->tty, sizeof(s->tty))) {
-		xfree(s->term);
+		if (s->term)
+			xfree(s->term);
 		s->term = NULL;
 		s->ptyfd = -1;
 		s->ttyfd = -1;
@@ -1324,71 +1270,66 @@ session_pty_req(Session *s)
 		return 0;
 	}
 	debug("session_pty_req: session %d alloc %s", s->self, s->tty);
+
+	/* for SSH1 the tty modes length is not given */
+	if (!compat20)
+		n_bytes = packet_remaining();
+	tty_parse_modes(s->ttyfd, &n_bytes);
+
 	/*
 	 * Add a cleanup function to clear the utmp entry and record logout
 	 * time in case we call fatal() (e.g., the connection gets closed).
 	 */
-	fatal_add_cleanup(pty_cleanup_proc, (void *)s);
+	fatal_add_cleanup(session_pty_cleanup, (void *)s);
 	pty_setowner(s->pw, s->tty);
-	/* Get window size from the packet. */
+
+	/* Set window size from the packet. */
 	pty_change_window_size(s->ptyfd, s->row, s->col, s->xpixel, s->ypixel);
 
-	/* Get tty modes from the packet. */
-	tty_parse_modes(s->ttyfd, &n_bytes);
 	packet_done();
-
 	session_proctitle(s);
-
 	return 1;
 }
 
-int
+static int
 session_subsystem_req(Session *s)
 {
+	struct stat st;
 	u_int len;
 	int success = 0;
-	char *subsys = packet_get_string(&len);
+	char *cmd, *subsys = packet_get_string(&len);
 	int i;
 
 	packet_done();
 	log("subsystem request for %s", subsys);
 
 	for (i = 0; i < options.num_subsystems; i++) {
-		if(strcmp(subsys, options.subsystem_name[i]) == 0) {
-			debug("subsystem: exec() %s", options.subsystem_command[i]);
+		if (strcmp(subsys, options.subsystem_name[i]) == 0) {
+			cmd = options.subsystem_command[i];
+			if (stat(cmd, &st) < 0) {
+				error("subsystem: cannot stat %s: %s", cmd,
+				    strerror(errno));
+				break;
+			}
+			debug("subsystem: exec() %s", cmd);
 			s->is_subsystem = 1;
-			do_exec_no_pty(s, options.subsystem_command[i]);
+			do_exec(s, cmd);
 			success = 1;
 		}
 	}
 
 	if (!success)
-		log("subsystem request for %s failed, subsystem not found", subsys);
+		log("subsystem request for %s failed, subsystem not found",
+		    subsys);
 
 	xfree(subsys);
 	return success;
 }
 
-int
+static int
 session_x11_req(Session *s)
 {
-	int fd;
-	if (no_x11_forwarding_flag) {
-		debug("X11 forwarding disabled in user configuration file.");
-		return 0;
-	}
-	if (!options.x11_forwarding) {
-		debug("X11 forwarding disabled in server configuration file.");
-		return 0;
-	}
-	if (xauthfile != NULL) {
-		debug("X11 fwd already started.");
-		return 0;
-	}
-
-	debug("Received request for X11 forwarding with auth spoofing.");
-	if (s->display != NULL)
-		packet_disconnect("Protocol error: X11 display already set.");
+	int success;
 
 	s->single_connection = packet_get_char();
 	s->auth_proto = packet_get_string(NULL);
@@ -1396,69 +1337,36 @@ session_x11_req(Session *s)
 	s->screen = packet_get_int();
 	packet_done();
 
-	s->display = x11_create_display_inet(s->screen, options.x11_display_offset);
-	if (s->display == NULL) {
+	success = session_setup_x11fwd(s);
+	if (!success) {
 		xfree(s->auth_proto);
 		xfree(s->auth_data);
-		return 0;
+		s->auth_proto = NULL;
+		s->auth_data = NULL;
 	}
-	xauthfile = xmalloc(MAXPATHLEN);
-	strlcpy(xauthfile, "/tmp/ssh-XXXXXXXX", MAXPATHLEN);
-	temporarily_use_uid(s->pw);
-	if (mkdtemp(xauthfile) == NULL) {
-		restore_uid();
-		error("private X11 dir: mkdtemp %s failed: %s",
-		    xauthfile, strerror(errno));
-		xfree(xauthfile);
-		xauthfile = NULL;
-		xfree(s->auth_proto);
-		xfree(s->auth_data);
-		/* XXXX remove listening channels */
-		return 0;
-	}
-	strlcat(xauthfile, "/cookies", MAXPATHLEN);
-	fd = open(xauthfile, O_RDWR|O_CREAT|O_EXCL, 0600);
-	if (fd >= 0)
-		close(fd);
-	restore_uid();
-	fatal_add_cleanup(xauthfile_cleanup_proc, s);
-	return 1;
+	return success;
 }
 
-int
+static int
 session_shell_req(Session *s)
 {
-	/* if forced_command == NULL, the shell is execed */
-	char *shell = forced_command;
 	packet_done();
-	if (s->ttyfd == -1)
-		do_exec_no_pty(s, shell);
-	else
-		do_exec_pty(s, shell);
+	do_exec(s, NULL);
 	return 1;
 }
 
-int
+static int
 session_exec_req(Session *s)
 {
 	u_int len;
 	char *command = packet_get_string(&len);
 	packet_done();
-	if (forced_command) {
-		original_command = command;
-		command = forced_command;
-		debug("Forced command '%.500s'", forced_command);
-	}
-	if (s->ttyfd == -1)
-		do_exec_no_pty(s, command);
-	else
-		do_exec_pty(s, command);
-	if (forced_command == NULL)
-		xfree(command);
+	do_exec(s, command);
+	xfree(command);
 	return 1;
 }
 
-int
+static int
 session_auth_agent_req(Session *s)
 {
 	static int called = 0;
@@ -1547,19 +1455,27 @@ session_set_fds(Session *s, int fdin, int fdout, int fderr)
 	    1);
 }
 
-void
-session_pty_cleanup(Session *s)
+/*
+ * Function to perform pty cleanup. Also called if we get aborted abnormally
+ * (e.g., due to a dropped connection).
+ */
+static void
+session_pty_cleanup(void *session)
 {
-	if (s == NULL || s->ttyfd == -1)
+	Session *s = session;
+
+	if (s == NULL) {
+		error("session_pty_cleanup: no session");
+		return;
+	}
+	if (s->ttyfd == -1)
 		return;
 
 	debug("session_pty_cleanup: session %d release %s", s->self, s->tty);
 
-	/* Cancel the cleanup function. */
-	fatal_remove_cleanup(pty_cleanup_proc, (void *)s);
-
 	/* Record that the user has logged out. */
-	record_logout(s->pid, s->tty);
+	if (s->pid != 0)
+		record_logout(s->pid, s->tty);
 
 	/* Release the pseudo-tty. */
 	pty_release(s->tty);
@@ -1571,9 +1487,12 @@ session_pty_cleanup(Session *s)
 	 */
 	if (close(s->ptymaster) < 0)
 		error("close(s->ptymaster): %s", strerror(errno));
+
+	/* unlink pty from session */
+	s->ttyfd = -1;
 }
 
-void
+static void
 session_exit_message(Session *s, int status)
 {
 	Channel *c;
@@ -1581,7 +1500,7 @@ session_exit_message(Session *s, int status)
 		fatal("session_close: no session");
 	c = channel_lookup(s->chanid);
 	if (c == NULL)
-		fatal("session_close: session %d: no channel %d",
+		fatal("session_exit_message: session %d: no channel %d",
 		    s->self, s->chanid);
 	debug("session_exit_message: session %d channel %d pid %d",
 	    s->self, s->chanid, s->pid);
@@ -1618,10 +1537,14 @@ session_exit_message(Session *s, int status)
 	s->chanid = -1;
 }
 
-void
-session_free(Session *s)
+static void
+session_close(Session *s)
 {
-	debug("session_free: session %d pid %d", s->self, s->pid);
+	debug("session_close: session %d pid %d", s->self, s->pid);
+	if (s->ttyfd != -1) {
+		fatal_remove_cleanup(session_pty_cleanup, (void *)s);
+		session_pty_cleanup(s);
+	}
 	if (s->term)
 		xfree(s->term);
 	if (s->display)
@@ -1631,13 +1554,6 @@ session_free(Session *s)
 	if (s->auth_proto)
 		xfree(s->auth_proto);
 	s->used = 0;
-}
-
-void
-session_close(Session *s)
-{
-	session_pty_cleanup(s);
-	session_free(s);
 	session_proctitle(s);
 }
 
@@ -1646,7 +1562,7 @@ session_close_by_pid(pid_t pid, int status)
 {
 	Session *s = session_by_pid(pid);
 	if (s == NULL) {
-		debug("session_close_by_pid: no session for pid %d", s->pid);
+		debug("session_close_by_pid: no session for pid %d", pid);
 		return;
 	}
 	if (s->chanid != -1)
@@ -1663,26 +1579,40 @@ session_close_by_channel(int id, void *arg)
 {
 	Session *s = session_by_channel(id);
 	if (s == NULL) {
-		debug("session_close_by_channel: no session for channel %d", id);
+		debug("session_close_by_channel: no session for id %d", id);
 		return;
 	}
-	/* disconnect channel */
+	debug("session_close_by_channel: channel %d child %d", id, s->pid);
+	if (s->pid != 0) {
+		debug("session_close_by_channel: channel %d: has child", id);
+		/*
+		 * delay detach of session, but release pty, since
+		 * the fd's to the child are already closed
+		 */
+		if (s->ttyfd != -1) {
+			fatal_remove_cleanup(session_pty_cleanup, (void *)s);
+			session_pty_cleanup(s);
+		}
+		return;
+	}
+	/* detach by removing callback */
 	channel_cancel_cleanup(s->chanid);
 	s->chanid = -1;
+	session_close(s);
+}
 
-	debug("session_close_by_channel: channel %d kill %d", id, s->pid);
-	if (s->pid == 0) {
-		/* close session immediately */
-		session_close(s);
-	} else {
-		/* notify child, delay session cleanup */
-		if (kill(s->pid, (s->ttyfd == -1) ? SIGTERM : SIGHUP) < 0)
-			error("session_close_by_channel: kill %d: %s",
-			    s->pid, strerror(errno));
+void
+session_destroy_all(void)
+{
+	int i;
+	for(i = 0; i < MAX_SESSIONS; i++) {
+		Session *s = &sessions[i];
+		if (s->used) 
+			session_close(s);
 	}
 }
 
-char *
+static char *
 session_tty_list(void)
 {
 	static char buf[1024];
@@ -1710,11 +1640,43 @@ session_proctitle(Session *s)
 		setproctitle("%s@%s", s->pw->pw_name, session_tty_list());
 }
 
-void
+int
+session_setup_x11fwd(Session *s)
+{
+	struct stat st;
+
+	if (no_x11_forwarding_flag) {
+		packet_send_debug("X11 forwarding disabled in user configuration file.");
+		return 0;
+	}
+	if (!options.x11_forwarding) {
+		debug("X11 forwarding disabled in server configuration file.");
+		return 0;
+	}
+	if (!options.xauth_location ||
+	    (stat(options.xauth_location, &st) == -1)) {
+		packet_send_debug("No xauth program; cannot forward with spoofing.");
+		return 0;
+	}
+	if (options.use_login) {
+		packet_send_debug("X11 forwarding disabled; "
+		    "not compatible with UseLogin=yes.");
+		return 0;
+	}
+	if (s->display != NULL) {
+		debug("X11 display already set.");
+		return 0;
+	}
+	s->display = x11_create_display_inet(s->screen, options.x11_display_offset);
+	if (s->display == NULL) {
+		debug("x11_create_display_inet failed.");
+		return 0;
+	}
+	return 1;
+}
+
+static void
 do_authenticated2(Authctxt *authctxt)
 {
-
-	server_loop2();
-	if (xauthfile)
-		xauthfile_cleanup_proc(NULL);
+	server_loop2(authctxt);
 }

@@ -1,4 +1,4 @@
-/*	$OpenBSD: transport.c,v 1.13 2001/04/09 22:09:53 ho Exp $	*/
+/*	$OpenBSD: transport.c,v 1.15 2001/10/05 05:54:50 ho Exp $	*/
 /*	$EOM: transport.c,v 1.43 2000/10/10 12:36:39 provos Exp $	*/
 
 /*
@@ -53,6 +53,17 @@
 LIST_HEAD (transport_list, transport) transport_list;
 LIST_HEAD (transport_method_list, transport_vtbl) transport_method_list;
 
+/* Call the reinit function of the various transports.  */
+void
+transport_reinit (void)
+{
+  struct transport_vtbl *method;
+
+  for (method = LIST_FIRST (&transport_method_list); method;
+       method = LIST_NEXT (method, link))
+    method->reinit ();
+}
+
 /* Initialize the transport maintenance module.  */
 void
 transport_init (void)
@@ -77,7 +88,7 @@ void
 transport_reference (struct transport *t)
 {
   t->refcnt++;
-  LOG_DBG ((LOG_TRANSPORT, 90,
+  LOG_DBG ((LOG_TRANSPORT, 95,
 	    "transport_reference: transport %p now has %d references", t,
 	    t->refcnt));
 }
@@ -88,7 +99,7 @@ transport_reference (struct transport *t)
 void
 transport_release (struct transport *t)
 {
-  LOG_DBG ((LOG_TRANSPORT, 90,
+  LOG_DBG ((LOG_TRANSPORT, 95,
 	    "transport_release: transport %p had %d references", t,
 	    t->refcnt));
   if (--t->refcnt)

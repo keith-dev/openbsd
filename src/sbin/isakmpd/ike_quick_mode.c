@@ -1,4 +1,4 @@
-/*	$OpenBSD: ike_quick_mode.c,v 1.47 2001/04/09 12:34:37 ho Exp $	*/
+/*	$OpenBSD: ike_quick_mode.c,v 1.55 2001/10/05 05:57:06 ho Exp $	*/
 /*	$EOM: ike_quick_mode.c,v 1.139 2001/01/26 10:43:17 niklas Exp $	*/
 
 /*
@@ -39,7 +39,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#if defined(USE_POLICY) || defined(USE_KEYNOTE)
+#if defined (USE_POLICY) || defined (USE_KEYNOTE)
 #include <sys/types.h>
 #include <regex.h>
 #include <keynote.h>
@@ -64,6 +64,8 @@
 #include "sa.h"
 #include "transport.h"
 #include "util.h"
+#include "key.h"
+
 #ifdef USE_X509
 #include "x509.h"
 #endif
@@ -106,14 +108,13 @@ static int
 check_policy (struct exchange *exchange, struct sa *sa, struct sa *isakmp_sa)
 {
   char *return_values[RETVALUES_NUM];
-  char **principal = NULL;
+  char **principal = 0;
   int i, result = 0, nprinc = 0;
-  int *x509_ids = NULL, *keynote_ids = NULL;
+  int *x509_ids = 0, *keynote_ids = 0;
   unsigned char hashbuf[20]; /* Set to the largest digest result */
 #ifdef USE_X509
   struct keynote_deckey dc;
   X509_NAME *subject;
-  RSA *key;
 #endif
 
   /* Initialize if necessary -- e.g., if pre-shared key auth was used */
@@ -152,31 +153,12 @@ check_policy (struct exchange *exchange, struct sa *sa, struct sa *isakmp_sa)
         }
     }
 
-  if (x509_policy_asserts_num)
-    {
-      x509_ids = calloc (x509_policy_asserts_num, sizeof *x509_ids);
-      if (!x509_ids)
-        {
-          log_error ("check_policy: "
-		     "failed to allocate %d bytes for book keeping",
-		     x509_policy_asserts_num * sizeof *x509_ids);
-          free (keynote_ids);
-          return 0;
-        }
-    }
-
   /* Add the policy assertions */
   for (i = 0; i < keynote_policy_asserts_num; i++)
     keynote_ids[i] = LK (kn_add_assertion, (isakmp_sa->policy_id,
 					    keynote_policy_asserts[i],
 					    strlen (keynote_policy_asserts[i]),
 					    ASSERT_FLAG_LOCAL));
-
-  for (i = 0; i < x509_policy_asserts_num; i++)
-    x509_ids[i] = LK (kn_add_assertion, (isakmp_sa->policy_id,
-					 x509_policy_asserts[i],
-					 strlen (x509_policy_asserts[i]),
-					 ASSERT_FLAG_LOCAL));
 
   /* Initialize -- we'll let the callback do all the work.  */
   policy_exchange = exchange;
@@ -197,54 +179,56 @@ check_policy (struct exchange *exchange, struct sa *sa, struct sa *isakmp_sa)
        */
       nprinc = 3;
       principal = calloc (nprinc, sizeof *principal);
-      if (principal == NULL)
+      if (!principal)
         {
-	  log_error ("check_policy: failed to allocate %d bytes",
-		     nprinc * sizeof *principal);
+	  log_error ("check_policy: calloc (%d, %d) failed", nprinc,
+		     sizeof *principal);
 	  goto policydone;
 	}
 
-      principal[0] = calloc (isakmp_sa->recv_certlen + 1 +
-			     strlen ("passphrase:"), sizeof (char));
-      if (principal[0] == NULL)
+      principal[0] = calloc (strlen (isakmp_sa->recv_key)
+			     + sizeof "passphrase:", sizeof (char));
+      if (!principal[0])
         {
-	  log_error ("check_policy: failed to allocate %d bytes",
-		     isakmp_sa->recv_certlen + 1 + strlen ("passphrase:"));
+	  log_error ("check_policy: calloc (%d, %d) failed",
+		     strlen (isakmp_sa->recv_key) + sizeof "passphrase:",
+		     sizeof (char));
 	  goto policydone;
 	}
 
+      /* XXX Consider changing the magic hash lengths with constants.  */
       strcpy (principal[0], "passphrase:");
-      memcpy (principal[0] + strlen ("passphrase:"), isakmp_sa->recv_cert,
-	      isakmp_sa->recv_certlen);
+      memcpy (principal[0] + sizeof "passphrase:" - 1, isakmp_sa->recv_key,
+	      strlen (isakmp_sa->recv_key));
 
-      principal[1] = calloc (strlen ("passphrase-md5-hex:") +
-			     32 + 1, sizeof (char));
-      if (principal[1] == NULL)
+      principal[1] = calloc (sizeof "passphrase-md5-hex:" + 2 * 16,
+			     sizeof (char));
+      if (!principal[1])
         {
-	  log_error ("check_policy: failed to allocate %d bytes",
-		     strlen ("passphrase-md5-hex:") + 33);
+	  log_error ("check_policy: calloc (%d, %d) failed",
+		     sizeof "passphrase-md5-hex:" + 2 * 16, sizeof (char));
 	  goto policydone;
 	}
 
       strcpy (principal[1], "passphrase-md5-hex:");
-      MD5 (isakmp_sa->recv_cert, isakmp_sa->recv_certlen, hashbuf);
+      MD5 (isakmp_sa->recv_key, strlen (isakmp_sa->recv_key), hashbuf);
       for (i = 0; i < 16; i++)
-	sprintf (principal[1] + (2 * i) + strlen ("passphrase-md5-hex:"),
+	sprintf (principal[1] + 2 * i + sizeof "passphrase-md5-hex:" - 1,
 		 "%02x", hashbuf[i]);
-      
-      principal[2] = calloc (strlen ("passphrase-sha1-hex:") +
-			     32 + 1, sizeof (char));
-      if (principal[2] == NULL)
+
+      principal[2] = calloc (sizeof "passphrase-sha1-hex:" + 2 * 20,
+			     sizeof (char));
+      if (!principal[2])
         {
-	  log_error ("check_policy: failed to allocate %d bytes",
-		     strlen ("passphrase-sha1-hex:") + 33);
+	  log_error ("check_policy: calloc (%d, %d) failed",
+		     sizeof "passphrase-sha1-hex:" + 2 * 20, sizeof (char));
 	  goto policydone;
 	}
 
       strcpy (principal[2], "passphrase-sha1-hex:");
-      SHA1 (isakmp_sa->recv_cert, isakmp_sa->recv_certlen, hashbuf);
+      SHA1 (isakmp_sa->recv_key, strlen (isakmp_sa->recv_key), hashbuf);
       for (i = 0; i < 20; i++)
-	sprintf (principal[2] + (2 * i) + strlen ("passphrase-sha1-hex:"),
+	sprintf (principal[2] + 2 * i + sizeof "passphrase-sha1-hex:" - 1,
 		 "%02x", hashbuf[i]);
       break;
 
@@ -253,19 +237,19 @@ check_policy (struct exchange *exchange, struct sa *sa, struct sa *isakmp_sa)
       nprinc = 1;
 
       principal = calloc (nprinc, sizeof *principal);
-      if (principal == NULL)
+      if (!principal)
         {
-	  log_error ("check_policy: failed to allocate %d bytes",
-		     nprinc * sizeof *principal);
+	  log_error ("check_policy: calloc (%d, %d) failed", nprinc,
+		     sizeof *principal);
 	  goto policydone;
 	}
 
       /* Dup the keys */
-      principal[0] = strdup (isakmp_sa->recv_key);
-      if (principal[0] == NULL)
+      principal[0] = strdup (isakmp_sa->keynote_key);
+      if (!principal[0])
         {
-	  log_error ("check_policy: failed to allocate %d bytes",
-		     strlen (isakmp_sa->recv_key));
+	  log_error ("check_policy: calloc (%d, %d) failed",
+		     strlen (isakmp_sa->keynote_key), sizeof (char));
 	  goto policydone;
 	}
 #endif
@@ -273,64 +257,60 @@ check_policy (struct exchange *exchange, struct sa *sa, struct sa *isakmp_sa)
 
     case ISAKMP_CERTENC_X509_SIG:
 #ifdef USE_X509
-      /* Retrieve key from certificate.  */
-      if (!x509_cert_get_key (isakmp_sa->recv_cert, &key))
-	{
-	  log_print ("check_policy: failed to get key from X509 cert");
-	  goto policydone;
-	}
-
       principal = calloc (2, sizeof *principal);
-      if (principal == NULL)
+      if (!principal)
         {
-	  log_error ("check_policy: failed to get memory for principal");
+	  log_error ("check_policy: calloc (2, %d) failed", sizeof *principal);
 	  goto policydone;
 	}
 
-      /* XXX RSA-specific.  */
-      dc.dec_algorithm = KEYNOTE_ALGORITHM_RSA;
-      dc.dec_key = (void *) key;
+      if (isakmp_sa->recv_keytype == ISAKMP_KEY_RSA)
+	dc.dec_algorithm = KEYNOTE_ALGORITHM_RSA;
+      else
+	{
+	  log_error ("check_policy: unknown/unsupported public key algorithm "
+		     "%d", isakmp_sa->recv_keytype);
+	  goto policydone;
+	}
+
+      dc.dec_key = isakmp_sa->recv_key;
       principal[0] = LK (kn_encode_key, (&dc, INTERNAL_ENC_PKCS1, ENCODING_HEX,
 					 KEYNOTE_PUBLIC_KEY));
       if (LKV (keynote_errno) == ERROR_MEMORY)
 	{
 	  log_print ("check_policy: failed to get memory for public key");
-	  LC (RSA_free, (key));
 	  goto policydone;
 	}
 
-      if (principal[0] == NULL)
+      if (!principal[0])
 	{
 	  log_print ("check_policy: failed to allocate memory for principal");
-	  LC (RSA_free, (key));
 	  goto policydone;
 	}
 
-      principal[1] = calloc (strlen (principal[0]) + strlen ("rsa-hex:") + 1,
+      principal[1] = calloc (strlen (principal[0]) + sizeof "rsa-hex:",
 			     sizeof (char));
-      if (principal[1] == NULL)
+      if (!principal[1])
 	{
-	  log_error ("check_policy: failed to allocate memory for principal");
-	  LC (RSA_free, (key));
+	  log_error ("check_policy: calloc (%d, %d) failed",
+		     strlen (principal[0]) + sizeof "rsa-hex:", sizeof (char));
 	  goto policydone;
 	}
 
-      strcpy (principal[1], "rsa-hex:");
-      strcpy (principal[1] + strlen ("rsa-hex:"), principal[0]);
+      sprintf (principal[1], "rsa-hex:%s", principal[0]);
       free (principal[0]);
-      LC (RSA_free, (key));
       principal[0] = principal[1];
-      principal[1] = NULL;
+      principal[1] = 0;
 
-      /* Generate a "DN:" principal */
+      /* Generate a "DN:" principal.  */
       subject = LC (X509_get_subject_name, (isakmp_sa->recv_cert));
       if (subject)
 	{
           principal[1] = calloc (259, sizeof (char));
-          if (principal[1] == NULL)
+          if (!principal[1])
             {
-	      log_error ("check_policy: failed to allocate memory for principal[1]");
-	      LC (RSA_free, (key));
+	      log_error ("check_policy: calloc (259, %d) failed",
+			 sizeof (char));
 	      goto policydone;
             }
 	  strcpy (principal[1], "DN:");
@@ -396,7 +376,7 @@ check_policy (struct exchange *exchange, struct sa *sa, struct sa *isakmp_sa)
     }
 
   free (principal);
-  principal = NULL;
+  principal = 0;
   nprinc = 0;
 
   /* Check what policy said.  */
@@ -420,12 +400,6 @@ check_policy (struct exchange *exchange, struct sa *sa, struct sa *isakmp_sa)
     {
       if (keynote_ids[i] != -1)
 	LK (kn_remove_assertion, (isakmp_sa->policy_id, keynote_ids[i]));
-    }
-
-  for (i = 0; i < x509_policy_asserts_num; i++)
-    {
-      if (x509_ids[i] != -1)
-	LK (kn_remove_assertion, (isakmp_sa->policy_id, x509_ids[i]));
     }
 
   if (keynote_ids)
@@ -479,7 +453,6 @@ initiator_send_HASH_SA_NONCE (struct message *msg)
   struct ipsec_sa *isa = msg->isakmp_sa->data;
   struct hash *hash = hash_get (isa->hash);
   struct sockaddr *src;
-  socklen_t srclen;
 
   if (!ipsec_add_hash_payload (msg, hash->hashsize))
     return -1;
@@ -906,10 +879,10 @@ initiator_send_HASH_SA_NONCE (struct message *msg)
 	       exchange->name);
   else if (remote_id)
     /* This code supports the "road warrior" case, where the initiator doesn't
-     * have a fixed IP address, but wants to specify a particular remote 
+     * have a fixed IP address, but wants to specify a particular remote
      * network to talk to.
      * -- Adrian Close <adrian@esec.com.au>
-     */ 
+     */
     {
       log_print ("initiator_send_HASH_SA_NONCE: "
 	       "Remote-ID given without Local-ID for \"%s\"",
@@ -917,21 +890,32 @@ initiator_send_HASH_SA_NONCE (struct message *msg)
 
       /* If we're here, then we are the initiator, so use initiator
 	address for local ID */
-      msg->transport->vtbl->get_src (msg->transport, &src, &srclen);
-
-      sz = ISAKMP_ID_SZ 
-	+ sizeof (((struct sockaddr_in *)src)->sin_addr.s_addr);
+      msg->transport->vtbl->get_src (msg->transport, &src);
+      sz = ISAKMP_ID_SZ + sockaddr_len (src);
 
       id = calloc (sz, sizeof (char));
       if (!id)
 	{
 	  log_error ("initiator_send_HASH_SA_NONCE: malloc(%d) failed", sz);
 	  return -1;
-	}  
-      SET_ISAKMP_ID_TYPE (id, IPSEC_ID_IPV4_ADDR);
+	}
 
-      encode_32 (id + ISAKMP_ID_DATA_OFF,
-	      ntohl (((struct sockaddr_in *)src)->sin_addr.s_addr));
+      switch (src->sa_family)
+	{
+	case AF_INET6:
+	  SET_ISAKMP_ID_TYPE (id, IPSEC_ID_IPV6_ADDR);
+	  break;
+	case AF_INET:
+	  SET_ISAKMP_ID_TYPE (id, IPSEC_ID_IPV4_ADDR);
+	  break;
+	default:
+	  log_error ("initiator_send_HASH_SA_NONCE: unknown sa_family %d",
+		     src->sa_family);
+	  free (id);
+	  return -1;
+	}
+      memcpy (id + ISAKMP_ID_DATA_OFF, sockaddr_data (src),
+	      sockaddr_len (src));
 
       LOG_DBG_BUF ((LOG_NEGOTIATION, 90, "initiator_send_HASH_SA_NONCE: IDic",
 		    id, sz));
@@ -953,7 +937,6 @@ initiator_send_HASH_SA_NONCE (struct message *msg)
 	  return -1;
 	}
     }
-
 
   if (ipsec_fill_in_hash (msg))
     goto bail_out;
@@ -1024,7 +1007,6 @@ initiator_recv_HASH_SA_NONCE (struct message *msg)
   u_int8_t *rest;
   size_t rest_len;
   struct sockaddr *src, *dst;
-  socklen_t srclen, dstlen;
 
   /* Allocate the prf and start calculating our HASH(1).  XXX Share?  */
   LOG_DBG_BUF ((LOG_NEGOTIATION, 90, "initiator_recv_HASH_SA_NONCE: SKEYID_a",
@@ -1034,7 +1016,7 @@ initiator_recv_HASH_SA_NONCE (struct message *msg)
     return -1;
 
   prf->Init (prf->prfctx);
-  LOG_DBG_BUF ((LOG_NEGOTIATION, 90, 
+  LOG_DBG_BUF ((LOG_NEGOTIATION, 90,
 		"initiator_recv_HASH_SA_NONCE: message_id",
 		exchange->message_id, ISAKMP_HDR_MESSAGE_ID_LEN));
   prf->Update (prf->prfctx, exchange->message_id, ISAKMP_HDR_MESSAGE_ID_LEN);
@@ -1140,37 +1122,56 @@ initiator_recv_HASH_SA_NONCE (struct message *msg)
 
       ie->flags = IPSEC_EXCH_FLAG_NO_ID;
 
-      /* Get responder address.  */
-      msg->transport->vtbl->get_dst (msg->transport, &dst, &dstlen);
-      ie->id_cr_sz = ISAKMP_ID_DATA_OFF
-	+ sizeof ((struct sockaddr_in *)dst)->sin_addr.s_addr;
+      /* Get initiator and responder addresses.  */
+      msg->transport->vtbl->get_src (msg->transport, &src);
+      msg->transport->vtbl->get_dst (msg->transport, &dst);
+      ie->id_ci_sz = ISAKMP_ID_DATA_OFF + sockaddr_len (src);
+      ie->id_cr_sz = ISAKMP_ID_DATA_OFF + sockaddr_len (dst);
+      ie->id_ci = calloc (ie->id_ci_sz, sizeof (char));
       ie->id_cr = calloc (ie->id_cr_sz, sizeof (char));
-      if (!ie->id_cr)
+
+      if (!ie->id_ci || !ie->id_cr)
 	{
 	  log_error ("initiator_recv_HASH_SA_NONCE: malloc (%d) failed",
 		     ie->id_cr_sz);
+	  if (ie->id_ci)
+	    free (ie->id_ci);
+	  if (ie->id_cr)
+	    free (ie->id_cr);
 	  return -1;
 	}
-      SET_ISAKMP_ID_TYPE (ie->id_cr, IPSEC_ID_IPV4_ADDR);
-      memcpy (ie->id_cr + ISAKMP_ID_DATA_OFF,
-	      &((struct sockaddr_in *)dst)->sin_addr.s_addr,
-	      sizeof ((struct sockaddr_in *)dst)->sin_addr.s_addr);
 
-      /* Get initiator address.  */
-      msg->transport->vtbl->get_src (msg->transport, &src, &srclen);
-      ie->id_ci_sz = ISAKMP_ID_DATA_OFF
-	+ sizeof ((struct sockaddr_in *)dst)->sin_addr.s_addr;
-      ie->id_ci = calloc (ie->id_ci_sz, sizeof (char));
-      if (!ie->id_ci)
+      if (src->sa_family != dst->sa_family)
 	{
-	  log_error ("initiator_recv_HASH_SA_NONCE: malloc (%d) failed",
-		     ie->id_ci_sz);
+	  log_error ("initiator_recv_HASH_SA_NONCE: sa_family mismatch");
+	  free (ie->id_ci);
+	  free (ie->id_cr);
 	  return -1;
 	}
-      SET_ISAKMP_ID_TYPE (ie->id_ci, IPSEC_ID_IPV4_ADDR);
-      memcpy (ie->id_ci + ISAKMP_ID_DATA_OFF,
-	      &((struct sockaddr_in *)src)->sin_addr.s_addr,
-	      sizeof ((struct sockaddr_in *)src)->sin_addr.s_addr);
+
+      switch (src->sa_family)
+	{
+	case AF_INET:
+	  SET_ISAKMP_ID_TYPE (ie->id_ci, IPSEC_ID_IPV4_ADDR);
+	  SET_ISAKMP_ID_TYPE (ie->id_cr, IPSEC_ID_IPV4_ADDR);
+	  break;
+
+	case AF_INET6:
+	  SET_ISAKMP_ID_TYPE (ie->id_ci, IPSEC_ID_IPV6_ADDR);
+	  SET_ISAKMP_ID_TYPE (ie->id_cr, IPSEC_ID_IPV6_ADDR);
+	  break;
+
+	default:
+	  log_error ("initiator_recv_HASH_SA_NONCE: unknown sa_family %d",
+		     src->sa_family);
+	  free (ie->id_ci);
+	  free (ie->id_cr);
+	  return -1;
+	}
+      memcpy (ie->id_ci + ISAKMP_ID_DATA_OFF, sockaddr_data (src),
+	      sockaddr_len (src));
+      memcpy (ie->id_cr + ISAKMP_ID_DATA_OFF, sockaddr_data (dst),
+	      sockaddr_len (dst));
     }
 
   /* Build the protection suite in our SA.  */
@@ -1258,7 +1259,7 @@ initiator_send_HASH (struct message *msg)
     }
 
   /* Allocate the prf and start calculating our HASH(3).  XXX Share?  */
-  LOG_DBG_BUF ((LOG_NEGOTIATION, 90, "initiator_send_HASH: SKEYID_a", 
+  LOG_DBG_BUF ((LOG_NEGOTIATION, 90, "initiator_send_HASH: SKEYID_a",
 		isa->skeyid_a, isa->skeyid_len));
   prf = prf_alloc (isa->prf_type, isa->hash, isa->skeyid_a, isa->skeyid_len);
   if (!prf)
@@ -1365,8 +1366,8 @@ post_quick_mode (struct message *msg)
 		  /* If PFS is used hash in g^xy.  */
 		  if (ie->g_xy)
 		    {
-		      LOG_DBG_BUF ((LOG_NEGOTIATION, 90, 
-				    "post_quick_mode: g^xy", ie->g_xy, 
+		      LOG_DBG_BUF ((LOG_NEGOTIATION, 90,
+				    "post_quick_mode: g^xy", ie->g_xy,
 				    ie->g_x_len));
 		      prf->Update (prf->prfctx, ie->g_xy, ie->g_x_len);
 		    }
@@ -1417,7 +1418,6 @@ responder_recv_HASH_SA_NONCE (struct message *msg)
   int retval = -1;
   struct proto *proto;
   struct sockaddr *src, *dst;
-  socklen_t srclen, dstlen;
   char *name;
 
   hashp = TAILQ_FIRST (&msg->payload[ISAKMP_PAYLOAD_HASH]);
@@ -1450,7 +1450,7 @@ responder_recv_HASH_SA_NONCE (struct message *msg)
   if (!prf)
     goto cleanup;
   prf->Init (prf->prfctx);
-  LOG_DBG_BUF ((LOG_NEGOTIATION, 90, 
+  LOG_DBG_BUF ((LOG_NEGOTIATION, 90,
 		"responder_recv_HASH_SA_NONCE: message_id",
 		exchange->message_id, ISAKMP_HDR_MESSAGE_ID_LEN));
   prf->Update (prf->prfctx, exchange->message_id, ISAKMP_HDR_MESSAGE_ID_LEN);
@@ -1486,7 +1486,7 @@ responder_recv_HASH_SA_NONCE (struct message *msg)
 	{
 	  /* XXX Is this a good notify type?  */
 	  message_drop (msg, ISAKMP_NOTIFY_PAYLOAD_MALFORMED, 0, 1, 0);
-	  return -1;
+	  goto cleanup;
 	}
 
       ie->id_ci_sz = GET_ISAKMP_GEN_LENGTH (idp->p);
@@ -1536,37 +1536,49 @@ responder_recv_HASH_SA_NONCE (struct message *msg)
 
       ie->flags = IPSEC_EXCH_FLAG_NO_ID;
 
-      /* Get initiator address.  */
-      msg->transport->vtbl->get_dst (msg->transport, &dst, &dstlen);
-      ie->id_ci_sz = ISAKMP_ID_DATA_OFF
-	+ sizeof ((struct sockaddr_in *)dst)->sin_addr.s_addr;
+      /* Get initiator and responder addresses.  */
+      msg->transport->vtbl->get_src (msg->transport, &src);
+      msg->transport->vtbl->get_dst (msg->transport, &dst);
+      ie->id_ci_sz = ISAKMP_ID_DATA_OFF + sockaddr_len (src);
+      ie->id_cr_sz = ISAKMP_ID_DATA_OFF + sockaddr_len (dst);
       ie->id_ci = calloc (ie->id_ci_sz, sizeof (char));
-      if (!ie->id_ci)
+      ie->id_cr = calloc (ie->id_cr_sz, sizeof (char));
+
+      if (!ie->id_ci || !ie->id_cr)
 	{
 	  log_error ("responder_recv_HASH_SA_NONCE: malloc (%d) failed",
 		     ie->id_ci_sz);
 	  goto cleanup;
 	}
-      SET_ISAKMP_ID_TYPE (ie->id_ci, IPSEC_ID_IPV4_ADDR);
-      memcpy (ie->id_ci + ISAKMP_ID_DATA_OFF,
-	      &((struct sockaddr_in *)dst)->sin_addr.s_addr,
-	      sizeof ((struct sockaddr_in *)dst)->sin_addr.s_addr);
 
-      /* Get responder address.  */
-      msg->transport->vtbl->get_src (msg->transport, &src, &srclen);
-      ie->id_cr_sz = ISAKMP_ID_DATA_OFF
-	+ sizeof ((struct sockaddr_in *)dst)->sin_addr.s_addr;
-      ie->id_cr = calloc (ie->id_cr_sz, sizeof (char));
-      if (!ie->id_cr)
+      if (src->sa_family != dst->sa_family)
 	{
-	  log_error ("responder_recv_HASH_SA_NONCE: malloc (%d) failed",
-		     ie->id_cr_sz);
+	  log_error ("initiator_recv_HASH_SA_NONCE: sa_family mismatch");
 	  goto cleanup;
 	}
-      SET_ISAKMP_ID_TYPE (ie->id_cr, IPSEC_ID_IPV4_ADDR);
-      memcpy (ie->id_cr + ISAKMP_ID_DATA_OFF,
-	      &((struct sockaddr_in *)src)->sin_addr.s_addr,
-	      sizeof ((struct sockaddr_in *)src)->sin_addr.s_addr);
+
+      switch (src->sa_family)
+	{
+	case AF_INET:
+	  SET_ISAKMP_ID_TYPE (ie->id_ci, IPSEC_ID_IPV4_ADDR);
+	  SET_ISAKMP_ID_TYPE (ie->id_cr, IPSEC_ID_IPV4_ADDR);
+	  break;
+
+	case AF_INET6:
+	  SET_ISAKMP_ID_TYPE (ie->id_ci, IPSEC_ID_IPV6_ADDR);
+	  SET_ISAKMP_ID_TYPE (ie->id_cr, IPSEC_ID_IPV6_ADDR);
+	  break;
+
+	default:
+	  log_error ("initiator_recv_HASH_SA_NONCE: unknown sa_family %d",
+		     src->sa_family);
+	  goto cleanup;
+	}
+
+      memcpy (ie->id_cr + ISAKMP_ID_DATA_OFF, sockaddr_data (src),
+	      sockaddr_len (src));
+      memcpy (ie->id_ci + ISAKMP_ID_DATA_OFF, sockaddr_data (dst),
+	      sockaddr_len (dst));
     }
 
 #ifdef USE_POLICY
@@ -1699,6 +1711,10 @@ cleanup:
       proto_free (proto);
   if (my_hash)
     free (my_hash);
+  if (ie->id_ci)
+    free (ie->id_ci);
+  if (ie->id_cr)
+    free (ie->id_cr);
   return -1;
 }
 
@@ -1785,7 +1801,7 @@ responder_send_HASH_SA_NONCE (struct message *msg)
     }
 
   /* Allocate the prf and start calculating our HASH(2).  XXX Share?  */
-  LOG_DBG ((LOG_NEGOTIATION, 95, "responder_recv_HASH: isakmp_sa %p isa %p",
+  LOG_DBG ((LOG_NEGOTIATION, 90, "responder_recv_HASH: isakmp_sa %p isa %p",
 	    isakmp_sa, isa));
   LOG_DBG_BUF ((LOG_NEGOTIATION, 90, "responder_send_HASH_SA_NONCE: SKEYID_a",
 		isa->skeyid_a, isa->skeyid_len));
@@ -1793,8 +1809,8 @@ responder_send_HASH_SA_NONCE (struct message *msg)
   if (!prf)
     return -1;
   prf->Init (prf->prfctx);
-  LOG_DBG_BUF ((LOG_NEGOTIATION, 90, 
-		"responder_send_HASH_SA_NONCE: message_id", 
+  LOG_DBG_BUF ((LOG_NEGOTIATION, 90,
+		"responder_send_HASH_SA_NONCE: message_id",
 		exchange->message_id, ISAKMP_HDR_MESSAGE_ID_LEN));
   prf->Update (prf->prfctx, exchange->message_id, ISAKMP_HDR_MESSAGE_ID_LEN);
   LOG_DBG_BUF ((LOG_NEGOTIATION, 90, "responder_send_HASH_SA_NONCE: NONCE_I_b",
@@ -1872,7 +1888,7 @@ responder_recv_HASH (struct message *msg)
     }
 
   /* Allocate the prf and start calculating our HASH(3).  XXX Share?  */
-  LOG_DBG ((LOG_NEGOTIATION, 95, "responder_recv_HASH: isakmp_sa %p isa %p",
+  LOG_DBG ((LOG_NEGOTIATION, 90, "responder_recv_HASH: isakmp_sa %p isa %p",
 	    isakmp_sa, isa));
   LOG_DBG_BUF ((LOG_NEGOTIATION, 90, "responder_recv_HASH: SKEYID_a",
 		isa->skeyid_a, isa->skeyid_len));

@@ -1,6 +1,6 @@
 #!/bin/sh -
 #
-#	$OpenBSD: MAKEDEV,v 1.91 2001/04/17 16:20:24 todd Exp $
+#	$OpenBSD: MAKEDEV,v 1.104 2001/10/04 22:38:13 gluk Exp $
 #	$NetBSD: MAKEDEV,v 1.40 1996/03/31 00:50:47 perry Exp $
 #
 # Copyright (c) 1990 The Regents of the University of California.
@@ -60,6 +60,7 @@
 # Terminal ports:
 #	tty*	PC COM ports
 #	ttyc*	Cyclades serial ports
+#	ttyZ*	Cyclades-Ze serial ports
 #
 # Pseudo terminals:
 #	pty*	set of 16 master and slave pseudo terminals
@@ -85,6 +86,7 @@
 #	speaker	pc speaker				(XXX - installed)
 #	lkm	loadable kernel modules interface
 #	audio*	audio device
+#	radio*	FM tuner device
 #	apm	power management device
 #	tun*	network tunnel driver
 #	joy*	joystick driver
@@ -97,6 +99,8 @@
 #	bktr0	video capturing
 #	tuner0	tuner device
 #	wdt0	watchdog timer
+#	altq	ALTQ control interface
+#	iop	I2O controller device
 #
 
 PATH=/sbin:/usr/sbin:/bin:/usr/bin
@@ -189,15 +193,15 @@ all)
 	sh $this ttyC0 ttyC1 ttyC2 ttyC3 ttyC4 ttyC5 ttyC6 ttyC7 ttyC8 ttyC9
 	sh $this ttyCa ttyCb
 	sh $this wscons
-	sh $this ipl tun0 tun1 tun2
+	sh $this pf tun0 tun1 tun2
 	sh $this bpf0 bpf1 bpf2 bpf3 bpf4 bpf5 bpf6 bpf7 bpf8 bpf9
-	sh $this speaker lkm audio0 joy0 joy1 apm local
+	sh $this speaker lkm audio0 radio0 joy0 joy1 apm local
 	sh $this random ses0 uk0 uk1 ss0 ss1 pctr bktr0 tuner0 wdt0
 	sh $this fd0 fd0B fd0C fd0D fd0E fd0F fd0G fd0H 
 	sh $this fd1 fd1B fd1C fd1D fd1E fd1F fd1G fd1H
-	sh $this xfs0 music
+	sh $this xfs0 music0 altq
 	sh $this rmidi0 rmidi1 rmidi2 rmidi3 rmidi4 rmidi5 rmidi6 rmidi7
-	sh $this usbs
+	sh $this usbs crypto iop0 iop1
 # MISSING:
 #	sh $this mouse-?
 	;;
@@ -222,21 +226,32 @@ usbs)
 	;;
 
 std)
-	rm -f console drum mem kmem xf86 null zero io tty klog stdin stdout stderr ksyms
+	rm -f console drum mem kmem null xf86 zero io tty klog stdin stdout stderr ksyms
 	mknod console		c 0 0
 	mknod drum		c 4 0	; chmod 640 drum ; chown root.kmem drum
-	mknod kmem		c 2 1	; chmod 640 kmem ; chown root.kmem kmem
 	mknod mem		c 2 0	; chmod 640 mem	; chown root.kmem mem
+	mknod kmem		c 2 1	; chmod 640 kmem ; chown root.kmem kmem
 	mknod null		c 2 2	; chmod 666 null
 	mknod xf86		c 2 4   ; chmod 600 xf86 ; chown root xf86
 	mknod zero		c 2 12	; chmod 666 zero
-	mknod io		c 2 14	; chmod 640 io ; chown root.kmem io
 	mknod tty		c 1 0	; chmod 666 tty
 	mknod klog		c 7 0	; chmod 600 klog
 	mknod stdin		c 22 0	; chmod 666 stdin
 	mknod stdout		c 22 1	; chmod 666 stdout
 	mknod stderr		c 22 2	; chmod 666 stderr
 	mknod ksyms		c 50 0  ; chmod 640 ksyms ; chown root.kmem ksyms
+	;;
+
+crypto)
+	rm -f crypto
+	mknod crypto		c 70 0	; chmod 666 crypto	
+	;;
+
+iop*)
+	rm -f iop$unit
+	mknod iop$unit c 75 $unit
+	chown root.wheel iop$unit
+	chmod 660 iop$unit
 	;;
 
 usb*)
@@ -335,6 +350,16 @@ ttyc*)
 	mknod cuac$unit c 38 $(( $unit + 128 ))
 	chown uucp.dialer ttyc$unit cuac$unit
 	chmod 660 ttyc$unit cuac$unit
+	;;
+
+ttyZ*)
+	major=71
+	minor=$unit
+	rm -f ttyZ$minor cuaZ$minor
+	mknod ttyZ$minor c $major $(($minor  ))
+	mknod cuaZ$minor c $major $(($minor + 128 ))
+	chown uucp.wheel ttyZ$minor cuaZ$minor
+	chmod 600 ttyZ$minor cuaZ$minor
 	;;
 
 fd)
@@ -445,7 +470,7 @@ vnd*)
 
 tty0*)
 	unit=${i##tty0}
-	rm -f com0$unit tty0$unit cua0$unit
+	rm -f tty0$unit cua0$unit
 	mknod tty0$unit c 8 $unit
 	mknod cua0$unit c 8 $(( $unit + 128 ))
 	chown uucp.dialer tty0$unit cua0$unit
@@ -557,13 +582,11 @@ bpf*|tun[0-9]*)
 	chown root.wheel $name$unit
 	;;
 
-ipl)
-	rm -f ipl ipnat ipstate ipauth
-	mknod ipl c 44 0
-	mknod ipnat c 44 1
-	mknod ipstate c 44 2
-	mknod ipauth c 44 3
-	chown root.wheel ipl ipnat ipstate ipauth
+pf)
+	rm -f pf
+	mknod pf c 73 0
+	chown root.wheel pf
+	chmod 600 pf
 	;;
 
 speaker)					# (XXX - installed)
@@ -579,48 +602,13 @@ lkm)
 	chmod 640 lkm
 	;;
 
-#mms*|lms*)
-#	case $i in
-#	mms*) name=mms; chr=35;;
-#	lms*) name=lms; chr=36;;
-#	esac
-#	rm -f $name$unit
-#	mknod $name$unit c $chr $unit
-#	chown root.wheel $name$unit
-#	;;
-
-#pms*)
-#	rm -f pms${unit}
-#	rm -f psm${unit}
-#	mknod pms${unit} c 37 0
-#	mknod psm${unit} c 37 1
-#	chown root.wheel pms${unit}
-#	chown root.wheel psm${unit}
-#	;;
-
-#mouse*)					# (XXX)
-#	case $i in
-#	mouse-*)
-#		name=${i##mouse-}
-#		if [ ! -c $name ]; then
-#			/bin/sh $0 $name	# make the appropriate device
-#		fi
-#		rm -f mouse
-#		ln -s $name mouse
-#		;;
-#	*)
-#		echo no such device: use mouse-\${dev}, e.g. mouse-cua00
-#		;;
-#	esac
-#	;;
-
 audio*)
 	major=42
-	audio=audio$n
-	sound=sound$n
-	mixer=mixer$n
-	audioctl=audioctl$n
-	rm -f $audio $sound $mixer $audioctl
+	audio=audio$unit
+	sound=sound$unit
+	mixer=mixer$unit
+	audioctl=audioctl$unit
+	rm -f $sound $audio $mixer $audioctl
 	mknod $sound    c $major $unit
 	mknod $audio    c $major $(( $unit + 128 ))
 	mknod $mixer    c $major $(( $unit + 16 ))
@@ -631,6 +619,16 @@ audio*)
 	[ -e mixer ] || ln -s $mixer mixer
 	[ -e sound ] || ln -s $sound sound
 	[ -e audioctl ] || ln -s $audioctl audioctl
+	;;
+
+radio*)
+	major=76
+	radio=radio$unit
+	rm -f $radio
+	mknod $radio c $major $unit
+	chown root.wheel $radio
+	chmod 644 $radio
+	[ -e radio ] || ln -s $radio radio
 	;;
 
 joy*)
@@ -657,15 +655,16 @@ rmidi*)
 	;;
 
 music*)
-	[ "$unit" = "0" ] && n= || n=$unit
-	music=music$n
-	sequencer=sequencer$n
 	major=53
-	rm -f $sequencer $music
+	music=music$unit
+	sequencer=sequencer$unit
+	rm -f $music $sequencer
 	mknod $music     c $major $(( $unit + 0 ))
 	mknod $sequencer c $major $(( $unit + 128 ))
 	chown root.wheel $music $sequencer
 	chmod 666 $music $sequencer
+	[ -e music ] || ln -s $music music
+	[ -e sequencer ] || ln -s $sequencer sequencer
 	;;
 
 apm*)
@@ -744,7 +743,7 @@ ss*)
 	;;
 
 pctr)
-	rm -f pctr;
+	rm -f pctr
 	mknod pctr c 46 0
 	chown root.wheel pctr
 	chmod 0644 pctr
@@ -769,6 +768,26 @@ wdt*)
 	mknod wdt$unit c 55 $unit
 	chown root.operator wdt$unit
 	chmod 0440 wdt$unit
+	;;
+
+pci*)
+	rm -f pci
+	mknod pci c 72 0
+	chown root.kmem pci
+	chmod 664 pci
+	;;
+
+altq)
+	mkdir -p altq
+	chmod 755 altq
+	unit=0
+	for dev in altq cbq wfq afm fifoq red rio localq hfsc \
+	    cdnr blue priq; do
+		rm -f altq/$dev
+		mknod altq/$dev c 74 $unit
+		chmod 644 altq/$dev
+		unit=$(($unit + 1))
+	done
 	;;
 
 local)

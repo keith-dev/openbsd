@@ -1,4 +1,4 @@
-/*	$OpenBSD: print-icmp.c,v 1.8 2000/10/03 14:31:57 ho Exp $	*/
+/*	$OpenBSD: print-icmp.c,v 1.12 2001/09/02 12:06:57 jakob Exp $	*/
 
 /*
  * Copyright (c) 1988, 1989, 1990, 1991, 1993, 1994, 1995, 1996
@@ -23,7 +23,7 @@
 
 #ifndef lint
 static const char rcsid[] =
-    "@(#) $Header: /cvs/src/usr.sbin/tcpdump/print-icmp.c,v 1.8 2000/10/03 14:31:57 ho Exp $ (LBL)";
+    "@(#) $Header: /cvs/src/usr.sbin/tcpdump/print-icmp.c,v 1.12 2001/09/02 12:06:57 jakob Exp $ (LBL)";
 #endif
 
 #include <sys/param.h>
@@ -187,6 +187,19 @@ icmp_print(register const u_char *bp, register const u_char *bp2)
 	TCHECK(dp->icmp_code);
 	switch (dp->icmp_type) {
 
+	case ICMP_ECHOREPLY:
+	case ICMP_ECHO:
+		if (vflag) {
+			TCHECK(dp->icmp_seq);
+			(void)snprintf(buf, sizeof buf,
+				       "echo %s (id:%d seq:%d)",
+				       (dp->icmp_type == ICMP_ECHO)?
+				       "request": "reply",
+				       dp->icmp_id, dp->icmp_seq);
+		} else
+			str = tok2str(icmp2str, "type-#%d", dp->icmp_type);
+		break;
+
 	case ICMP_UNREACH:
 		TCHECK(dp->icmp_ip.ip_dst);
 		switch (dp->icmp_code) {
@@ -333,15 +346,19 @@ icmp_print(register const u_char *bp, register const u_char *bp2)
 		break;
 
 	case ICMP_PARAMPROB:
-		if (dp->icmp_code)
-			(void)snprintf(buf, sizeof buf,
-				"parameter problem - code %d",
-				dp->icmp_code);
-		else {
+		switch (dp->icmp_code) {
+		case ICMP_PARAMPROB_OPTABSENT:
+			str = "requested option absent";
+			break;
+		case ICMP_PARAMPROB_LENGTH:
+			snprintf(buf, sizeof buf, "bad length %d", dp->icmp_pptr);
+			break;
+		default:
 			TCHECK(dp->icmp_pptr);
 			(void)snprintf(buf, sizeof buf,
 				"parameter problem - octet %d",
 				dp->icmp_pptr);
+			break;
 		}
 		break;
 

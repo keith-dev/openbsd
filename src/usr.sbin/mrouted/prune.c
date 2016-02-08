@@ -1944,7 +1944,6 @@ dump_cache(fp2)
     register struct rtentry *r;
     register struct gtable *gt;
     register struct stable *st;
-    register struct ptable *pt;
     register vifi_t i;
     register time_t thyme = time(0);
 
@@ -2051,7 +2050,7 @@ accept_mtrace(src, dst, group, data, no, datalen)
     }
     else {
 	log(LOG_WARNING, 0, "%s from %s to %s",
-	    "Non decipherable traceroute request recieved",
+	    "Non decipherable traceroute request received",
 	    inet_fmt(src, s1), inet_fmt(dst, s2));
 	return;
     }
@@ -2092,7 +2091,7 @@ accept_mtrace(src, dst, group, data, no, datalen)
 	    /*
 	     * If the multicast router is a member of the group being
 	     * queried, and the query is multicasted, then the router can
-	     * recieve multiple copies of the same query.  If we have already
+	     * receive multiple copies of the same query.  If we have already
 	     * replied to this traceroute, just ignore it this time.
 	     *
 	     * This is not a total solution, but since if this fails you

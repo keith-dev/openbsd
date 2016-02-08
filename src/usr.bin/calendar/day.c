@@ -1,4 +1,4 @@
-/*	$OpenBSD: day.c,v 1.10 1999/11/25 03:46:46 pjanzen Exp $	*/
+/*	$OpenBSD: day.c,v 1.13 2001/09/27 18:19:20 mickey Exp $	*/
 
 /*
  * Copyright (c) 1989, 1993, 1994
@@ -43,7 +43,7 @@ static const char copyright[] =
 #if 0
 static const char sccsid[] = "@(#)calendar.c  8.3 (Berkeley) 3/25/94";
 #else
-static char rcsid[] = "$OpenBSD: day.c,v 1.10 1999/11/25 03:46:46 pjanzen Exp $";
+static char rcsid[] = "$OpenBSD: day.c,v 1.13 2001/09/27 18:19:20 mickey Exp $";
 #endif
 #endif /* not lint */
 
@@ -108,7 +108,7 @@ void setnnames(void)
 		if (ndays[i].name != NULL)
 			free(ndays[i].name);
 		if ((ndays[i].name = strdup(buf)) == NULL)
-			errx(1, "cannot allocate memory");
+			err(1, NULL);
 		ndays[i].len = strlen(buf);
 
 		l = strftime(buf, sizeof(buf), "%A", &tm);
@@ -118,7 +118,7 @@ void setnnames(void)
 		if (fndays[i].name != NULL)
 			free(fndays[i].name);
 		if ((fndays[i].name = strdup(buf)) == NULL)
-			errx(1, "cannot allocate memory");
+			err(1, NULL);
 		fndays[i].len = strlen(buf);
 	}
 
@@ -131,7 +131,7 @@ void setnnames(void)
 		if (nmonths[i].name != NULL)
 			free(nmonths[i].name);
 		if ((nmonths[i].name = strdup(buf)) == NULL)
-			errx(1, "cannot allocate memory");
+			err(1, NULL);
 		nmonths[i].len = strlen(buf);
 
 		l = strftime(buf, sizeof(buf), "%B", &tm);
@@ -141,7 +141,7 @@ void setnnames(void)
 		if (fnmonths[i].name != NULL)
 			free(fnmonths[i].name);
 		if ((fnmonths[i].name = strdup(buf)) == NULL)
-			errx(1, "cannot allocate memory");
+			err(1, NULL);
 		fnmonths[i].len = strlen(buf);
 	}
 	/* Hardwired special events */
@@ -153,7 +153,7 @@ void setnnames(void)
 	spev[1].getev = paskha;
 	for (i = 0; i < NUMEV; i++) {
 		if (spev[i].name == NULL)
-			errx(1, "cannot allocate memory");
+			err(1, NULL);
 		spev[i].uname = NULL;
 	}
 }
@@ -253,8 +253,9 @@ time_t Mktime (date)
  * with \t, is shown along with the matched line.
  */
 struct match *
-isnow(endp)
+isnow(endp, bodun)
 	char	*endp;
+	int	bodun;
 {
 	int day = 0, flags = 0, month = 0, v1, v2, i;
 	int monthp, dayp, varp = 0;
@@ -279,6 +280,10 @@ isnow(endp)
 	if (!(v1 = getfield(endp, &endp, &flags)))
 		return (NULL);
 
+	/* adjust bodun rate */
+	if (bodun && !bodun_always)
+		bodun = !(arc4random() % 3);
+		
 	/* Easter or Easter depending days */
 	if (flags & F_SPECIAL)
 		vwd = v1;
@@ -423,18 +428,28 @@ isnow(endp)
 				if ((v2 += isleap(tp->tm_year + TM_YEAR_BASE) ? 366 : 365)
 				    <= v1)
 					tmtmp.tm_year++;
-				else
+				else if(!bodun || (day - tp->tm_yday) != -1)
 					return(NULL);
 			}
 			if ((tmp = malloc(sizeof(struct match))) == NULL)
-				errx(1, "cannot allocate memory");
-			tmp->when = f_time + v2 * SECSPERDAY;
+				err(1, NULL);
+
+			if (bodun && (day - tp->tm_yday) == -1) {
+				tmp->when = f_time - 1 * SECSPERDAY;
+				tmtmp.tm_mday++;
+				tmp->bodun = 1;
+			} else {
+				tmp->when = f_time + v2 * SECSPERDAY;
+				tmp->bodun = 0;
+			}
+
 			(void)mktime(&tmtmp);
 			if (strftime(tmp->print_date,
 			    sizeof(tmp->print_date),
 			/*    "%a %b %d", &tm);  Skip weekdays */
 			    "%b %d", &tmtmp) == 0)
 				tmp->print_date[sizeof(tmp->print_date) - 1] = '\0';
+
 			tmp->var   = varp;
 			tmp->next  = NULL;
 			return(tmp);
@@ -517,16 +532,19 @@ isnow(endp)
 				warnx("time out of range: %s", endp);
 			else {
 				tdiff = difftime(ttmp, f_time)/ SECSPERDAY;
-				if (tdiff <= offset + f_dayAfter) {
-					if (tdiff >=  0) {
+				if (tdiff <= offset + f_dayAfter ||
+				    (bodun && tdiff == -1)) {
+					if (tdiff >=  0 ||
+					    (bodun && tdiff == -1)) {
 					if ((tmp = malloc(sizeof(struct match))) == NULL)
-						errx(1, "cannot allocate memory");
+						err(1, NULL);
 					tmp->when = ttmp;
 					if (strftime(tmp->print_date,
 					    sizeof(tmp->print_date),
 					/*    "%a %b %d", &tm);  Skip weekdays */
 					    "%b %d", &tmtmp) == 0)
 						tmp->print_date[sizeof(tmp->print_date) - 1] = '\0';
+					tmp->bodun = bodun && tdiff == -1;
 					tmp->var   = varp;
 					tmp->next  = NULL;
 					if (tmp2)

@@ -1,4 +1,4 @@
-.\"	$OpenBSD: ksh.1tbl,v 1.39 2001/04/12 02:51:09 aaron Exp $
+.\"	$OpenBSD: ksh.1tbl,v 1.47 2001/09/24 19:15:11 camield Exp $
 .\"
 .\" Copyright (c) 1980, 1990, 1993
 .\"     The Regents of the University of California.  All rights reserved.
@@ -49,7 +49,7 @@
 .Xc
 .Op Ar argument ... Oc
 .Sh DESCRIPTION
-.Nm ksh
+.Nm
 is a command interpreter intended for both interactive and shell
 script use.
 Its command language is a superset of the
@@ -59,7 +59,7 @@ shell language.
 The following options can be specified only on the command line:
 .Bl -tag -width Ds
 .It Fl c Ar command-string
-.Nm ksh
+.Nm
 will execute the command(s) contained in
 .Ar command-string .
 .It Fl i
@@ -870,8 +870,6 @@ The following command aliases are defined automatically by the shell:
 .It
 .Ic login='exec login'
 .It
-.Ic newgrp='exec newgrp'
-.It
 .Ic nohup='nohup '
 .It
 .Ic r='fc -e -'
@@ -1056,7 +1054,7 @@ or
 .Pc
 is set, in which case an error occurs.
 .Pp
-Parameters can be assigned valued in a number of ways.
+Parameters can be assigned values in a number of ways.
 First, the shell implicitly sets some parameters like
 .Ic # , PWD ,
 etc.; this is the only way the special single character parameters are set.
@@ -1571,7 +1569,7 @@ assigned an integer value, the number of seconds since the assignment plus the
 value that was assigned.
 .It Ev TMOUT
 If set to a positive integer in an interactive shell, it specifies the maximum
-number of seconds the shell will wait for input after priting the primary
+number of seconds the shell will wait for input after printing the primary
 prompt
 .Pq Ev PS1 .
 If the time is exceeded, the shell exits.
@@ -2579,7 +2577,7 @@ special and regular commands.
 Once the type of the command has been determined, any command-line parameter
 assignments are performed and exported for the duration of the command.
 .Pp
-The following described the special and regular built-in commands:
+The following describes the special and regular built-in commands:
 .Bl -tag -width Ds
 .It Ic \&. Ar file Op Ar arg1 ...
 Execute the commands in
@@ -2919,7 +2917,7 @@ is specified, all occurrences of
 are replaced with
 .Ar new .
 This command is usually accessed with the predefined
-.Ic alias r='fx -e -' .
+.Ic alias r='fc -e -' .
 .It Ic fg Op Ar job ...
 Resume the specified job(s) in the foreground.
 If no jobs are specified,
@@ -3955,7 +3953,7 @@ Parameters (or functions) are placed in the environment of
 any executed commands.
 Exported functions are not yet implemented.
 .El
-.It Xo Ic ulimit Op Fl acdfHlmnpsStvw
+.It Xo Ic ulimit Op Fl acdfHlmnpsSt
 .Op Ar value
 .Xc
 Display or set process limits.
@@ -4020,15 +4018,6 @@ Impose a time limit of
 .Ar n
 .Tn CPU
 seconds to be used by each process.
-.It Fl v Ar n
-Impose a limit of
-.Ar n
-kbytes on the amount of virtual memory used; on some systems this is the
-maximum allowable virtual address (in bytes, not kbytes).
-.It Fl w Ar n
-Impose a limit of
-.Ar n
-kbytes on the amount of swap space used.
 .El
 .Pp
 As far as
@@ -4050,7 +4039,7 @@ When used, they describe what permissions may be made available (as opposed to
 octal masks in which a set bit means the corresponding bit is to be cleared).
 For example,
 .Dq ug=rwx,o=
-sets the mask so files with not be readable, writable or executable by
+sets the mask so files will not be readable, writable or executable by
 .Dq others ,
 and is equivalent (on most systems) to the octal mask
 .Dq 007 .
@@ -4441,7 +4430,7 @@ unique, a space is printed after its completion, unless it is a directory name
 in which case
 .Ql /
 is appended.
-If there is no command or file name with the current partialword
+If there is no command or file name with the current partial word
 as its prefix, a bell character is output (usually causing a beep to be
 sounded).
 .It Ic complete-command ^X^[
@@ -4537,12 +4526,12 @@ is not specified; otherwise deletes characters between the cursor and column
 .It Ic list ^[?
 Prints a sorted, columnated list of command named or file names (if any) that
 can complete the partial word containing the cursor.
-Directoary names have
+Directory names have
 .Ql /
 appended to them.
 .It Ic list-command ^X?
 Prints a sorted, columnated list of command names (if any) that can complete
-the partial word containg the cursor.
+the partial word containing the cursor.
 .It Ic list-file ^X^Y
 Prints a sorted, comunated list of file names (if any) that can complete the
 partial word containing the cursor.
@@ -4600,7 +4589,7 @@ are discarded as necessary.
 .It Ic set-mark-command ^[ Ns No <space>
 Set the mark at the cursor position.
 .It Ic stuff
-On systems supporting it, puhses the bound character back onto the terminal
+On systems supporting it, pushes the bound character back onto the terminal
 input where it may receive special processing by the terminal handler.
 This is useful for the BRL ^T mini-systat feature, for example.
 .It Ic stuff-reset
@@ -5104,13 +5093,15 @@ deleted and a new prompt to be printed.
 .Xr environ 5
 .Pp
 .Rs
-.%A Morris Bolsky and David Korn
+.%A Morris Bolsky
+.%A David Korn
 .%T "The KornShell Command and Programming Language"
 .%D 1983
 .%O "ISBN 0-13-516972-0"
 .Re
 .Rs
-.%A Stephen G. Kochan and Patrick H. Wood
+.%A Stephen G. Kochan
+.%A Patrick H. Wood
 .%T "UNIX Shell Programming"
 .%O "Hayden"
 .Re

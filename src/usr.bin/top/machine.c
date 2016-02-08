@@ -1,4 +1,4 @@
-/*	$OpenBSD: machine.c,v 1.23 2001/02/22 03:10:24 deraadt Exp $	*/
+/*	$OpenBSD: machine.c,v 1.25 2001/07/12 05:17:26 deraadt Exp $	*/
 
 /*
  * top - a top users display for Unix
@@ -47,7 +47,6 @@
 #include <err.h>
 #endif
 
-static int getkval __P((unsigned long, int *, int, char *));
 static int swapmode __P((int *, int *));
 
 #include "top.h"
@@ -94,10 +93,6 @@ char *state_abbrev[] = {
 
 
 static int stathz;
-
-/* these are offsets obtained via nlist and used in the get_ functions */
-
-static unsigned long cp_time_offset;
 
 /* these are for calculating cpu state percentages */
 static long cp_time[CPUSTATES];
@@ -163,8 +158,7 @@ int
 machine_init(statics)
 	struct statics *statics;
 {
-	char    errbuf[_POSIX2_LINE_MAX];
-	int pagesize, i = 0;
+	int pagesize;
 
 	stathz = getstathz();
 	if (stathz == -1)
@@ -274,18 +268,20 @@ getprocs(op, arg, cnt)
 	int op, arg;
 	int *cnt;
 {
-	size_t size = 0;
+	size_t size = sizeof(int);
 	int mib[4] = {CTL_KERN, KERN_PROC, op, arg};
-	int st, nprocs;
+	int smib[2] = {CTL_KERN, KERN_NPROCS};
 	static struct kinfo_proc *procbase;
+	int st;
 
-	st = sysctl(mib, 4, NULL, &size, NULL, 0);
+	st = sysctl(smib, 2, cnt, &size, NULL, 0);
 	if (st == -1) {
 		/* _kvm_syserr(kd, kd->program, "kvm_getprocs"); */
 		return (0);
 	}
 	if (procbase)
 		free(procbase);
+	size = (6 * (*cnt) * sizeof(struct kinfo_proc)) / 5;
 	procbase = (struct kinfo_proc *)malloc(size);
 	if (procbase == NULL)
 		return (0);
@@ -300,7 +296,6 @@ getprocs(op, arg, cnt)
 		    size, sizeof(struct kinfo_proc)); */
 		return (0);
 	}
-	*cnt = size / sizeof(struct kinfo_proc);
 	return (procbase);
 }
 

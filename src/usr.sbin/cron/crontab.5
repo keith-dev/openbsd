@@ -15,7 +15,7 @@
 .\" ACTION, ARISING OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS
 .\" SOFTWARE.
 .\"
-.\" $OpenBSD: crontab.5,v 1.12 2001/02/18 19:48:32 millert Exp $
+.\" $OpenBSD: crontab.5,v 1.16 2001/08/22 23:14:27 hugh Exp $
 .\"
 .Dd June 8, 1999
 .Dt CRONTAB 5
@@ -162,18 +162,8 @@ no
 mail will be sent.
 Otherwise mail is sent to the owner of the
 .Nm crontab .
-This option is useful if you decide on
-.Pa /bin/mail
-instead of
-.Pa /usr/lib/sendmail
-as
-your mailer when you install
-.Xr cron 8
-\(em
-.Pa /bin/mail
-doesn't do aliasing, and
-.Tn UUCP
-usually doesn't read its mail.
+This option is useful for pseudo-users that lack an alias
+that would otherwise redirect the mail to a real person.
 .Pp
 .Em cron Commands
 .Pp
@@ -183,7 +173,7 @@ command is very much the V7 standard, with a number of
 upward-compatible extensions.
 Lines in the system
 .Nm
-have six fields in the form:
+have six fixed fields plus a command in the form:
 .Bd -ragged -offset indent
 .Ar minute
 .Ar hour
@@ -194,9 +184,9 @@ have six fields in the form:
 .Ar command
 .Ed
 .Pp
-while lines in a user
+While lines in a user
 .Nm
-have five fields in the form:
+have five fixed fields plus a command in the form:
 .Bd -ragged -offset indent
 .Ar minute
 .Ar hour
@@ -207,6 +197,7 @@ have five fields in the form:
 .Ed
 .Pp
 Fields are separated by blanks or tabs.
+The command may be one or more fields long.
 The allowed values for the fields are:
 .Pp
 .Bl -tag -width "day-of-month" -compact -offset indent
@@ -417,5 +408,5 @@ All of the
 .Ql @
 commands that can appear in place of the first five fields
 are extensions.
-.Sh AUTHOR
+.Sh AUTHORS
 Paul Vixie <paul@vix.com>

@@ -1,4 +1,4 @@
-/*	$OpenBSD: time.c,v 1.6 2000/04/29 16:46:36 millert Exp $	*/
+/*	$OpenBSD: time.c,v 1.9 2001/07/12 05:17:23 deraadt Exp $	*/
 /*	$NetBSD: time.c,v 1.7 1995/06/27 00:34:00 jtc Exp $	*/
 
 /*
@@ -44,16 +44,18 @@ static char copyright[] =
 #if 0
 static char sccsid[] = "@(#)time.c	8.1 (Berkeley) 6/6/93";
 #endif
-static char rcsid[] = "$OpenBSD: time.c,v 1.6 2000/04/29 16:46:36 millert Exp $";
+static char rcsid[] = "$OpenBSD: time.c,v 1.9 2001/07/12 05:17:23 deraadt Exp $";
 #endif /* not lint */
 
-#include <sys/types.h>
+#include <sys/param.h>
 #include <sys/time.h>
 #include <sys/resource.h>
 #include <sys/wait.h>
+#include <sys/sysctl.h>
 #include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <err.h>
 #include <unistd.h>
 #include <errno.h>
 
@@ -134,8 +136,19 @@ main(argc, argv)
 	}
 
 	if (lflag) {
-		int hz = 100;			/* XXX */
+		int hz;
 		long ticks;
+		int mib[2];
+		struct clockinfo clkinfo;
+		size_t size;
+
+		mib[0] = CTL_KERN;
+		mib[1] = KERN_CLOCKRATE;
+		size = sizeof(clkinfo);
+		if (sysctl(mib, 2, &clkinfo, &size, NULL, 0) < 0)
+			err(1, "sysctl");
+
+		hz = clkinfo.hz;
 
 		ticks = hz * (ru.ru_utime.tv_sec + ru.ru_stime.tv_sec) +
 		     hz * (ru.ru_utime.tv_usec + ru.ru_stime.tv_usec) / 1000000;
@@ -149,9 +162,9 @@ main(argc, argv)
 		fprintf(stderr, "%10ld  %s\n", ticks ? ru.ru_isrss / ticks : 0,
 			"average unshared stack size");
 		fprintf(stderr, "%10ld  %s\n",
-			ru.ru_minflt, "page reclaims");
+			ru.ru_minflt, "minor page faults");
 		fprintf(stderr, "%10ld  %s\n",
-			ru.ru_majflt, "page faults");
+			ru.ru_majflt, "major page faults");
 		fprintf(stderr, "%10ld  %s\n",
 			ru.ru_nswap, "swaps");
 		fprintf(stderr, "%10ld  %s\n",

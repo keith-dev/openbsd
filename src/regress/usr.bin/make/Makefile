@@ -1,9 +1,10 @@
-# $OpenBSD: Makefile,v 1.6 2000/12/31 16:44:14 espie Exp $
+# $OpenBSD: Makefile,v 1.11 2001/07/11 13:12:18 espie Exp $
 
 NOMAN=
 NOPROG=
 
-regress: t1 t2 t3 t4 t5 t6 t7 t8 t9 t10
+# We don't pass t7 and t13...
+regress: t1 t2 t3 t4 t5 t6 t8 t9 t10 t11 t12 t7 t13
 
 MALLOC_OPTIONS?=AZJ
 t1: t1.out
@@ -38,6 +39,7 @@ t5:
 t6:
 	cd ${.CURDIR} && env -i PATH=${PATH} MALLOC_OPTIONS=${MALLOC_OPTIONS} ${MAKE} A=good -r -f mk6 | diff - t6.out
 
+# This test currently fails, and will until the cond parser is rewritten.
 t7:
 	if cd ${.CURDIR} && env -i PATH=${PATH} MALLOC_OPTIONS=${MALLOC_OPTIONS} ${MAKE} -r -f mk7 2>/dev/null; then false; fi
 
@@ -53,13 +55,26 @@ t9:
 t10:	z.a
 	cd ${.CURDIR} && env -i PATH=${PATH} MALLOC_OPTIONS=${MALLOC_OPTIONS} ${MAKE} -r -f mk10 |diff - t10.out
 	
+# check for substitution parser in some confusing situations
+t11:
+	cd ${.CURDIR} && env -i PATH=${PATH} MALLOC_OPTIONS=${MALLOC_OPTIONS} ${MAKE} -r -f mk11 |diff - t11.out
+	cd ${.CURDIR} && env -i PATH=${PATH} MALLOC_OPTIONS=${MALLOC_OPTIONS} ${MAKE} -r -f mk11 A=t|diff - t11.out2
+
+# Check for filename expansions.
+t12:
+	cd ${.CURDIR} && env -i PATH=${PATH} MALLOC_OPTIONS=${MALLOC_OPTIONS} ${MAKE} -r -f mk12 |diff - t12.out
+
+# Verify whitespace handling. Currently failing.
+t13:
+	cd ${.CURDIR} && env -i PATH=${PATH} MALLOC_OPTIONS=${MALLOC_OPTIONS} ${MAKE} -r -f mk13 |diff - t13.out
+
 z.a:
 	touch $@
 
 t1.out:
 	echo MACHINE_ARCH=${MACHINE_ARCH} >$@
 
-.PHONY: t1 t2 t3 t4 t5 t6 t7 t8 t9 t10 regress
+.PHONY: t1 t2 t3 t4 t5 t6 t7 t8 t9 t10 t11 regress
 
 CLEANFILES+=t1.out z.a
 

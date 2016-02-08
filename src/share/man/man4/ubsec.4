@@ -1,4 +1,4 @@
-.\"	$OpenBSD: ubsec.4,v 1.6 2001/03/01 16:11:19 aaron Exp $
+.\"	$OpenBSD: ubsec.4,v 1.9 2001/06/23 00:40:29 jason Exp $
 .\"
 .\" Copyright (c) 2000 Jason L. Wright (jason@thought.net)
 .\" All rights reserved.
@@ -34,21 +34,27 @@
 .Os
 .Sh NAME
 .Nm ubsec
-.Nd Broadcom (BlueSteel) uBsec 5x0x encryption accelerator
+.Nd Broadcom (BlueSteel) uBsec 5x0x crypto accelerator
 .Sh SYNOPSIS
 .Cd "ubsec* at pci? dev ? function ?"
 .Sh DESCRIPTION
 The
 .Nm
-driver supports cards containing the Broadcom 5501, 5601, or 5805.
+driver supports cards containing any of the following chips:
+.Bl -tag -width namenamenamena -offset indent -compact
+.It Bluesteel 5501
+.It Bluesteel 5601
+.It Broadcom 5805
+.It Broadcom 5820
+.El
 .Pp
 The
 .Nm
 driver registers itself to accelerate DES, Triple-DES, MD5-HMAC96,
 and SHA1-HMAC96 operations in
 .Xr ipsec 4 .
-On models which support it, this driver also registers itself to
-provide random data to the
+On all models except the Bluesteel 5501, the driver also registers
+itself to provide random data to the
 .Xr random 4
 subsystem.
 .Sh SEE ALSO

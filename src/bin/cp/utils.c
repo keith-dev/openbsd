@@ -1,4 +1,4 @@
-/*	$OpenBSD: utils.c,v 1.14 1999/05/06 17:19:47 millert Exp $	*/
+/*	$OpenBSD: utils.c,v 1.17 2001/09/06 13:29:08 mpech Exp $	*/
 /*	$NetBSD: utils.c,v 1.6 1997/02/26 14:40:51 cgd Exp $	*/
 
 /*-
@@ -38,7 +38,7 @@
 #if 0
 static char sccsid[] = "@(#)utils.c	8.3 (Berkeley) 4/1/94";
 #else
-static char rcsid[] = "$OpenBSD: utils.c,v 1.14 1999/05/06 17:19:47 millert Exp $";
+static char rcsid[] = "$OpenBSD: utils.c,v 1.17 2001/09/06 13:29:08 mpech Exp $";
 #endif
 #endif /* not lint */
 
@@ -124,7 +124,7 @@ copy_file(entp, dne)
 #ifdef VM_AND_BUFFER_CACHE_SYNCHRONIZED
 	if (fs->st_size <= 8 * 1048576) {
 		if ((p = mmap(NULL, (size_t)fs->st_size, PROT_READ,
-		    0, from_fd, (off_t)0)) == MAP_FAILED) {
+		    MAP_FILE|MAP_SHARED, from_fd, (off_t)0)) == MAP_FAILED) {
 			warn("mmap: %s", entp->fts_path);
 			rval = 1;
 		} else {
@@ -169,7 +169,7 @@ copy_file(entp, dne)
 	 */
 #define	RETAINBITS \
 	(S_ISUID | S_ISGID | S_ISVTX | S_IRWXU | S_IRWXG | S_IRWXO)
-	else if (fs->st_mode & (S_ISUID | S_ISGID) && fs->st_uid == myuid)
+	else if (fs->st_mode & (S_ISUID | S_ISGID) && fs->st_uid == myuid) {
 		if (fstat(to_fd, &to_stat)) {
 			warn("%s", to.p_path);
 			rval = 1;
@@ -178,6 +178,7 @@ copy_file(entp, dne)
 			warn("%s", to.p_path);
 			rval = 1;
 		}
+	}
 	(void)close(from_fd);
 	if (close(to_fd)) {
 		warn("%s", to.p_path);
@@ -314,8 +315,10 @@ setlink(fs)
 void
 usage()
 {
-	(void)fprintf(stderr, "%s\n%s\n",
-	    "usage: cp [-R [-H | -L | -P]] [-fip] src target",
-	    "       cp [-R [-H | -L | -P]] [-fip] src1 ... srcN directory");
+	(void)fprintf(stderr,
+            "usage: %s [-R [-H | -L | -P]] [-fip] src target\n", __progname);
+	(void)fprintf(stderr,
+            "       %s [-R [-H | -L | -P]] [-fip] src1 ... srcN directory\n",
+             __progname);
 	exit(1);
 }

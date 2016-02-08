@@ -1,4 +1,4 @@
-/*	$OpenBSD: check_expire.c,v 1.1 2000/11/26 01:27:19 millert Exp $	*/
+/*	$OpenBSD: check_expire.c,v 1.3 2001/08/16 18:39:20 millert Exp $	*/
 
 /*
  * Copyright (c) 1997 Berkeley Software Design, Inc. All rights reserved.
@@ -46,10 +46,10 @@
 #include <syslog.h>
 #include <time.h>
 #include <tzfile.h>
-#include <util.h>
-
 #include <login_cap.h>
 #include <bsd_auth.h>
+
+#include "util.h"
 
 static char *pwd_update __P((struct passwd *));
 
@@ -182,7 +182,7 @@ pwd_update(pwd)
 	}
 
 	pw_copy(pfd, tfd, pwd);
-	if (pw_mkdb(pwd->pw_name) < 0) {
+	if (pw_mkdb(pwd->pw_name, 0) < 0) {
 		pw_abort();
 		return("unable to update password database");
 	}

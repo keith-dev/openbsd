@@ -1,4 +1,8 @@
-/* $OpenBSD: lowparse.h,v 1.2 2000/06/23 16:40:50 espie Exp $ */
+#ifndef LOWPARSE_H
+#define LOWPARSE_H
+
+/* $OpenPackages$ */
+/* $OpenBSD: lowparse.h,v 1.4 2001/05/23 12:34:45 espie Exp $ */
 
 /*
  * Copyright (c) 1999 Marc Espie.
@@ -26,15 +30,78 @@
  * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
-#ifndef LOWPARSE_H
-#define LOWPARSE_H
-extern void Parse_FromFile __P((char *, FILE *));
-extern Boolean Parse_NextFile __P((void));
+/* low-level parsing module:
+ *	select input stream to parse, and do high-speed processing of
+ *	lines: skipping comments, handling continuation lines, or skipping
+ *	over dead conditionals.
+ *
+ * Basic template:
+ *
+ * Parse_Fromxxx(source);
+ * do {
+ * 	while ((line = Parse_ReadNormalLine(&buf)) != NULL) {
+ *		handle line, use Parse_Fromxxx to push includes, 
+ *		Parse_ReadNextConditional to get over non-conditional lines.
+ *		or Parse_ReadUnparsedLine to handle special cases manually.
+ * 	}
+ * } while (Parse_NextFile());
+ */
+
+/* Initialization and cleanup */
 #ifdef CLEANUP
-extern void LowParse_Init __P((void));
-extern void LowParse_End __P((void));
+extern void LowParse_Init(void);
+extern void LowParse_End(void);
+#else
+#define LowParse_Init()
+#define LowParse_End()
 #endif
-extern char *ParseReadLine __P((void));
-extern char *ParseSkipLine __P((int));
-extern void Finish_Errors __P((void));
+
+/* Selection of input stream */
+/* Parse_FromFile(filename, filehandle);
+ *	Push given filehandle on the input stack, using filename for diagnostic
+ *	messages.  The module assumes ownership of the filehandle and of
+ *	the filename: provide copies if necessary.  */
+extern void Parse_FromFile(const char *, FILE *);
+/* Parse_FromString(str, lineno);
+ *	Push expanded string str on the input stack, assuming it starts at
+ *	lineno in the current file.  This is used to reparse .for loops
+ *	after the variable has been expanded, hence no need to respecify
+ *	the filename. The module assumes ownership of the string: provide a
+ *	copy if necessary.  */
+extern void Parse_FromString(char *, unsigned long);
+
+/* Error reporting, and tagging of read structures. */
+/* lineno = Parse_Getlineno();
+ *	Returns the current lineno. */
+extern unsigned long Parse_Getlineno(void);
+/* name = Parse_Getfilename();
+ *	Returns the current filename.  Safe to keep without copying.  */
+extern const char *Parse_Getfilename(void);
+
+/* continue = Parse_NextFile();
+ *	Advance parsing to the next file in the input stack. Returns true
+ *	if there is parsing left to do.
+ */
+extern bool Parse_NextFile(void);
+
+
+/* line = Parse_ReadNormalLine(buf);
+ *	Reads next line into buffer and return its contents.  Handles line
+ *	continuation, remove extra blanks, and skip trivial comments.  tabs at
+ *	beginning of line are left alone, to be able to recognize target
+ *	lines. */
+extern char *Parse_ReadNormalLine(Buffer);
+
+/* line = ParseReadNextConditionalLine(buf);
+ *	Returns next conditional line, skipping over everything else. */
+extern char *Parse_ReadNextConditionalLine(Buffer);
+/* line = ParseReadUnparsedLine(buf, type);
+ *	Reads line without parsing anything beyond continuations.
+ *	Handle special cases such as conditional lines, or lines that
+ *	need a reparse (loops). */
+extern char *Parse_ReadUnparsedLine(Buffer, const char *);
+/* Parse_ReportErrors();
+ *	At end of parsing, report on fatal errors.
+ */
+extern void Parse_ReportErrors(void);
 #endif

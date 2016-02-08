@@ -1,4 +1,4 @@
-/*	$OpenBSD: util.c,v 1.8 2001/01/15 19:54:56 deraadt Exp $	*/
+/*	$OpenBSD: util.c,v 1.10 2001/08/29 20:44:03 markus Exp $	*/
 /*	$NetBSD: util.c,v 1.2 1995/03/21 08:19:08 cgd Exp $	*/
 
 /*-
@@ -38,7 +38,7 @@
 #if 0
 static char sccsid[] = "@(#)util.c	8.2 (Berkeley) 4/2/94";
 #else
-static char rcsid[] = "$OpenBSD: util.c,v 1.8 2001/01/15 19:54:56 deraadt Exp $";
+static char rcsid[] = "$OpenBSD: util.c,v 1.10 2001/08/29 20:44:03 markus Exp $";
 #endif
 #endif /* not lint */
 
@@ -124,7 +124,7 @@ susystem(s, userid)
 	case 0:
 		(void)seteuid(userid);
 		(void)setuid(userid);
-		execl(_PATH_BSHELL, "sh", "-c", s, NULL);
+		execl(_PATH_BSHELL, "sh", "-c", s, (char *)NULL);
 		_exit(127);
 	}
 	istat = signal(SIGINT, SIG_IGN);
@@ -162,6 +162,7 @@ allocbuf(bp, fd, blksize)
 		run_err("%s", strerror(errno));
 		return (0);
 	}
+	memset(p, 0, size);
 	bp->buf = p;
 	bp->cnt = size;
 	return (bp);

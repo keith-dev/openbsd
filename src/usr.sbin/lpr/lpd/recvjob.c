@@ -1,4 +1,4 @@
-/*	$OpenBSD: recvjob.c,v 1.13 2001/02/07 20:40:46 todd Exp $	*/
+/*	$OpenBSD: recvjob.c,v 1.15 2001/08/30 17:38:13 millert Exp $	*/
 
 /*
  * Copyright (c) 1983, 1993
@@ -35,16 +35,16 @@
  */
 
 #ifndef lint
-static char copyright[] =
+static const char copyright[] =
 "@(#) Copyright (c) 1983, 1993\n\
 	The Regents of the University of California.  All rights reserved.\n";
 #endif /* not lint */
 
 #ifndef lint
 #if 0
-static char sccsid[] = "@(#)recvjob.c	8.2 (Berkeley) 4/27/95";
+static const char sccsid[] = "@(#)recvjob.c	8.2 (Berkeley) 4/27/95";
 #else
-static char rcsid[] = "$OpenBSD: recvjob.c,v 1.13 2001/02/07 20:40:46 todd Exp $";
+static const char rcsid[] = "$OpenBSD: recvjob.c,v 1.15 2001/08/30 17:38:13 millert Exp $";
 #endif
 #endif /* not lint */
 
@@ -139,8 +139,8 @@ recvjob()
 static int
 readjob()
 {
-	register int size, nfiles;
-	register char *cp;
+	int size, nfiles;
+	char *cp;
 
 	ack();
 	nfiles = 0;
@@ -178,10 +178,8 @@ readjob()
 			 * something different than what gethostbyaddr()
 			 * returns
 			 */
-			strncpy(cp + 6, from, sizeof(line) + line - cp - 7);
-			line[sizeof(line) -1 ] = '\0';
-			strncpy(tfname, cp, sizeof tfname-1);
-			tfname[sizeof tfname-1] = '\0';
+			strlcpy(cp + 6, from, sizeof(line) + line - cp - 6);
+			strlcpy(tfname, cp, sizeof tfname);
 			tfname[0] = 't';
 			if (strchr(tfname, '/'))
 				frecverr("readjob: %s: illegal path name",
@@ -211,8 +209,7 @@ readjob()
 				(void) write(1, "\2", 1);
 				continue;
 			}
-			(void) strncpy(dfname, cp, sizeof dfname-1);
-			dfname[sizeof dfname-1] = '\0';
+			(void) strlcpy(dfname, cp, sizeof dfname);
 			if (strchr(dfname, '/'))
 				frecverr("readjob: %s: illegal path name",
 					dfname);
@@ -231,9 +228,9 @@ readfile(file, size)
 	char *file;
 	int size;
 {
-	register char *cp;
+	char *cp;
 	char buf[BUFSIZ];
-	register int i, j, amt;
+	int i, j, amt;
 	int fd, err;
 
 	fd = open(file, O_CREAT|O_EXCL|O_WRONLY, FILMOD);
@@ -312,7 +309,7 @@ read_number(fn)
 	char *fn;
 {
 	char lin[80];
-	register FILE *fp;
+	FILE *fp;
 
 	if ((fp = fopen(fn, "r")) == NULL)
 		return (0);

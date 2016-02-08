@@ -1,4 +1,4 @@
-.\"	$OpenBSD: MAKEDEV.8,v 1.13 2001/01/27 22:53:43 brad Exp $
+.\"	$OpenBSD: MAKEDEV.8,v 1.16 2001/10/04 10:28:20 wilfried Exp $
 .\"
 .\" Copyright (c) 1997, Jason Downs.  All rights reserved.
 .\"
@@ -128,7 +128,7 @@ SCSI tape drives
 .Dq winchester
 disk drives (ST506, IDE, ESDI, RLL etc.)
 .It Ar wt#
-QIC-interfaced (e.g. not SCSI) 3M cartridge tape
+QIC-interfaced (i.e. not SCSI) 3M cartridge tape
 .It Ar vnd#
 .Dq file
 pseudo-disks
@@ -156,7 +156,7 @@ loadable kernel modules interface
 .It Ar audio
 audio device
 .It Ar apm
-power management device
+power management devices
 .It Ar tun#
 network tunnel driver
 .It Ar joy#
@@ -164,7 +164,7 @@ joystick driver
 .It Ar pcmcia#
 PCMCIA card drivers
 .It Ar random
-inkernel random number generator
+in-kernel random number generator
 .It Ar uk#
 .Dq unknown SCSI
 devices

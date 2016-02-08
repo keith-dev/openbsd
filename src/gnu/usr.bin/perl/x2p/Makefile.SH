@@ -27,20 +27,17 @@ esac
 echo "Extracting x2p/Makefile (with variable substitutions)"
 rm -f Makefile
 cat >Makefile <<!GROK!THIS!
-# $RCSfile: Makefile.SH,v $$Revision: 1.6 $$Date: 2000/04/06 17:09:13 $
+# $RCSfile: Makefile.SH,v $$Revision: 1.7 $$Date: 2001/05/24 18:36:39 $
 #
 # $Log: Makefile.SH,v $
-# Revision 1.6  2000/04/06 17:09:13  millert
-# perl-5.6.0 + local changes
+# Revision 1.7  2001/05/24 18:36:39  millert
+# merge in perl 5.6.1 with our local changes
 #
 
 CC = $cc
 BYACC = $byacc
 LDFLAGS = $ldflags
-SMALL = $small
-LARGE = $large $split
-# XXX Perl malloc temporarily unusable (declaration collisions with
-# stdlib.h)
+# XXX Perl malloc temporarily unusable (declaration collisions with stdlib.h)
 #mallocsrc = $mallocsrc
 #mallocobj = $mallocobj
 shellflags = $shellflags
@@ -132,14 +129,17 @@ a2p.c: a2p.y
 
 a2p$(OBJ_EXT): a2p.c a2py.c a2p.h EXTERN.h util.h INTERN.h \
 		../handy.h ../config.h str.h hash.h
-	$(CCCMD) $(LARGE) a2p.c
+	$(CCCMD) a2p.c
 
 clean:
 	rm -f a2p *$(OBJ_EXT) $(plexe) $(plc) $(plm)
 
 realclean: clean
-	rm -f *.orig core $(addedbyconf) all malloc.c
+	rm -f core $(addedbyconf) all malloc.c
 	rm -f $(FIRSTMAKEFILE) $(FIRSTMAKEFILE).old
+
+veryclean: realclean
+	rm -f *~ *.orig
 
 # The following lint has practically everything turned on.  Unfortunately,
 # you have to wade through a lot of mumbo jumbo that can't be suppressed.

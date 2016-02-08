@@ -1,13 +1,16 @@
-/* $RCSfile: util.c,v $$Revision: 1.4 $$Date: 2000/04/06 17:09:17 $
+/* $RCSfile: util.c,v $$Revision: 1.6 $$Date: 2001/09/05 22:32:30 $
  *
- *    Copyright (c) 1991-1997, Larry Wall
+ *    Copyright (c) 1991-2001, Larry Wall
  *
  *    You may distribute under the terms of either the GNU General Public
  *    License or the Artistic License, as specified in the README file.
  *
  * $Log: util.c,v $
- * Revision 1.4  2000/04/06 17:09:17  millert
- * perl-5.6.0 + local changes
+ * Revision 1.6  2001/09/05 22:32:30  deraadt
+ * make sure that va_start() has matching va_end()
+ *
+ * Revision 1.5  2001/05/24 18:36:41  millert
+ * merge in perl 5.6.1 with our local changes
  *
  */
 
@@ -186,6 +189,7 @@ croak(char *pat,...)
 
     va_start(args, pat);
     vfprintf(stderr,pat,args);
+    va_end(args);
 #else
     fprintf(stderr,pat,a1,a2,a3,a4);
 #endif
@@ -200,6 +204,7 @@ fatal(char *pat,...)
 
     va_start(args, pat);
     vfprintf(stderr,pat,args);
+    va_end(args);
 #else
     fprintf(stderr,pat,a1,a2,a3,a4);
 #endif
@@ -217,6 +222,7 @@ warn(char *pat,...)
 
     va_start(args, pat);
     vfprintf(stderr,pat,args);
+    va_end(args);
 #else
     fprintf(stderr,pat,a1,a2,a3,a4);
 #endif

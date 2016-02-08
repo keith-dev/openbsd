@@ -1,4 +1,4 @@
-.\"	$OpenBSD: tcpdump.8,v 1.26 2001/03/21 16:27:00 aaron Exp $
+.\"	$OpenBSD: tcpdump.8,v 1.29 2001/09/03 13:27:14 jakob Exp $
 .\"
 .\" Copyright (c) 1987, 1988, 1989, 1990, 1991, 1992, 1994, 1995, 1996
 .\"	The Regents of the University of California.  All rights reserved.
@@ -200,6 +200,8 @@ sequence numbers.
 Do not print a timestamp on each dump line.
 .It Fl tt
 Print an unformatted timestamp on each dump line.
+.It Fl ttt
+Print day and month in timestamp.
 .It Fl v
 (Slightly more) verbose output.
 For example, the time to live
@@ -825,7 +827,6 @@ Generally, if the expression contains shell metacharacters, it is
 easier to pass it as a single, quoted argument.
 Multiple arguments are concatenated with spaces before being parsed.
 .Sh EXAMPLES
-.Pp
 To print all packets arriving at or departing from sundown:
 .Bd -ragged -offset indent
 .Nm
@@ -938,7 +939,6 @@ packets that are not echo requests/replies (i.e., not ping packets):
 .Ed
 .El
 .Sh OUTPUT FORMAT
-.Pp
 The output of
 .Nm
 is protocol dependent.
@@ -951,6 +951,12 @@ If the
 option is given, the link level header is printed out.
 On Ethernets, the source and destination addresses, protocol,
 and packet length are printed.
+.Pp
+On the packet filter logging interface
+.Pa pflog ,
+logging reason (rule match, bad-offset, fragment, short,
+normalize, memory), action taken (pass/block), direction (in/out) and interface
+information is printed out for each packet.
 .Pp
 On
 .Tn FDDI

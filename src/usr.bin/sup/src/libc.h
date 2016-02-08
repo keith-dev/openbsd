@@ -1,4 +1,4 @@
-/*	$OpenBSD: libc.h,v 1.3 1997/04/01 07:35:06 todd Exp $	*/
+/*	$OpenBSD: libc.h,v 1.7 2001/05/04 22:16:15 millert Exp $	*/
 
 /*
  * Copyright (c) 1991 Carnegie Mellon University
@@ -27,6 +27,34 @@
 /*
  **********************************************************************
  * HISTORY
+
+ * Revision 1.7  89/04/03  11:10:45  vanryzin
+ * 	Changed definition of qsort for c++ to indicate the procedure
+ * 	passed to qsort has parameters.  Since we were unsure if ANSI C
+ * 	could handle the syntax I placed the new definition within #if
+ * 	defined(c_plusplus) conditionals.  This may not be necessary
+ * 	and perhaps should be fixed at a later time.
+ * 	[89/04/03            vanryzin]
+ * 
+ * Revision 1.6  89/02/05  15:55:57  gm0w
+ * 	Added extern char *errmsg().
+ * 	[89/02/04            gm0w]
+ * 
+ * Revision 1.5  89/01/20  15:34:40  gm0w
+ * 	Moved all of the STDC changes to other existing include files
+ * 	back into this one.  Added non-STDC extern declarations for
+ * 	all functions without int return values to match those defined
+ * 	by STDC.  Added include of sysent.h.  Removed obsolete cdate
+ * 	extern declaration.
+ * 	[88/12/17            gm0w]
+ * 
+ * Revision 1.4  88/12/22  16:58:56  mja
+ * 	Correct __STDC__ parameter type for getenv().
+ * 	[88/12/20            dld]
+ * 
+ * Revision 1.3  88/12/14  23:31:42  mja
+ * 	Made file reentrant.  Added declarations for __STDC__.
+ * 	[88/01/06            jjk]
  * 
  * 30-Apr-88  Glenn Marcy (gm0w) at Carnegie-Mellon University
  *	Added pathof() extern.
@@ -61,9 +89,9 @@
 #include <stdio.h>
 #endif	/* FILE */
 
-#ifndef	_STRINGS_H_
-#include <strings.h>
-#endif	/* _STRINGS_H_ */
+#ifndef	_STRING_H_
+#include <string.h>
+#endif	/* _STRING_H_ */
 
 #ifndef	_TIME_H_
 #include <time.h>
@@ -128,7 +156,6 @@ extern float getfloat(), floatarg();
 extern double getdouble(), doublearg();
 extern unsigned int getoct(), octarg(), gethex(), hexarg();
 extern unsigned int atoo(), atoh();
-extern char *salloc();
 extern char *concat();
 #endif	/* __STDC__ */
 
@@ -136,11 +163,11 @@ extern char *concat();
 #if defined(__STDC__)
 extern char *getname(int);
 extern char *pathof(char *);
-extern char *errmsg(int);
+extern const char *errmsg(int);
 #else	/* __STDC__ */
 extern char *getname();
 extern char *pathof();
-extern char *errmsg();
+extern const char *errmsg();
 #endif	/* __STDC__ */
 
 /*  CMU time additions */
@@ -166,9 +193,10 @@ extern int abs(int);
 extern double atof(const char *);
 extern int atoi(const char *);
 extern long atol(const char *);
-extern void bcopy(const void *, void *, int);
-extern int bcmp(const void *, const void *, int);
-extern void bzero(void *, int);
+extern void memcpy(void *, const void *, size_t);
+extern void memmove(void *, const void *, size_t);
+extern int memcmp(const void *, const void *, size_t);
+extern void memset(void *, int, size_t);
 extern int ffs(int);
 extern char *crypt(const char *, const char *);
 extern void setkey(char *);

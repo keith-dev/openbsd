@@ -83,12 +83,12 @@
 #include <openssl/err.h>
 #include <openssl/engine.h>
 
-#if defined(__FreeBSD__)
+#if defined(__FreeBSD__) || defined(__NetBSD__) || defined(__OpenBSD__)
 # define USE_TOD
 #elif !defined(MSDOS) && (!defined(VMS) || defined(__DECC))
 # define TIMES
 #endif
-#if !defined(_UNICOS) && !defined(__OpenBSD__) && !defined(sgi) && !defined(__FreeBSD__) && !(defined(__bsdi) || defined(__bsdi__)) && !defined(_AIX) && !defined(MPE)
+#if !defined(_UNICOS) && !defined(__OpenBSD__) && !defined(sgi) && !defined(__FreeBSD__) && !(defined(__bsdi) || defined(__bsdi__)) && !defined(_AIX) && !defined(MPE) && !defined(__NetBSD__)
 # define TIMEB
 #endif
 
@@ -865,6 +865,7 @@ int MAIN(int argc, char **argv)
 		}
 #endif
 
+#ifndef NO_DSA
 	dsa_c[R_DSA_512][0]=count/1000;
 	dsa_c[R_DSA_512][1]=count/1000/2;
 	for (i=1; i<DSA_NUM; i++)
@@ -882,6 +883,7 @@ int MAIN(int argc, char **argv)
 				}
 			}				
 		}
+#endif
 
 #define COND(d)	(count < (d))
 #define COUNT(d) (d)
@@ -1207,7 +1209,7 @@ int MAIN(int argc, char **argv)
 			{
 			BIO_printf(bio_err,"RSA verify failure.  No RSA verify will be done.\n");
 			ERR_print_errors(bio_err);
-			dsa_doit[j] = 0;
+			rsa_doit[j] = 0;
 			}
 		else
 			{

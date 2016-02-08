@@ -1,6 +1,6 @@
 #!/usr/bin/perl
 #
-#	$OpenBSD: adduser.perl,v 1.29 2001/04/09 18:31:36 deraadt Exp $
+#	$OpenBSD: adduser.perl,v 1.34 2001/10/09 18:25:31 millert Exp $
 #
 # Copyright (c) 1995-1996 Wolfram Schneider <wosch@FreeBSD.org>. Berlin.
 # All rights reserved.
@@ -48,7 +48,7 @@ $SIG{'TERM'} = 'cleanup';
 &parse_arguments(@ARGV);	# parse arguments
 
 if (!$check_only &&  $#batch < 0) {
-    &copyright; &hints;
+    &hints;
 }
 
 # check
@@ -89,7 +89,7 @@ sub variables {
     $group = "/etc/group";
     $pwd_mkdb = "pwd_mkdb -p";	# program for building passwd database
     $encryptionmethod = "blowfish";
-    $rcsid = '$OpenBSD: adduser.perl,v 1.29 2001/04/09 18:31:36 deraadt Exp $';
+    $rcsid = '$OpenBSD: adduser.perl,v 1.34 2001/10/09 18:25:31 millert Exp $';
 
     # List of directories where shells located
     @path = ('/bin', '/usr/bin', '/usr/local/bin');
@@ -103,23 +103,23 @@ sub variables {
     $defaultgroup = $group_uniq;# login groupname, $group_uniq means username
 
     $uid_start = 1000;		# new users get this uid
-    $uid_end   = 2147483648;	# max. uid
+    $uid_end   = 2147483647;	# max. uid
 
     # global variables
     # passwd
-    $username = '';		# $username{username} = uid
-    $uid = '';			# $uid{uid} = username
-    $pwgid = '';		# $pwgid{pwgid} = username; gid from passwd db
+    %username = ();		# $username{username} = uid
+    %uid = ();			# $uid{uid} = username
+    %pwgid = ();		# $pwgid{pwgid} = username; gid from passwd db
 
     $password = '';		# password for new users
 
     # group
-    $groupname ='';		# $groupname{groupname} = gid
-    $groupmembers = '';		# $groupmembers{gid} = members of group/kommalist
-    $gid = '';			# $gid{gid} = groupname;    gid form group db
+    %groupname = ();		# $groupname{groupname} = gid
+    %groupmembers = ();		# $groupmembers{gid} = members of group/kommalist
+    %gid = ();			# $gid{gid} = groupname;    gid form group db
 
     # shell
-    $shell = '';		# $shell{`basename sh`} = sh
+    %shell = ();		# $shell{`basename sh`} = sh
 
     # only for me (=Wolfram)
     if ($test) {
@@ -136,10 +136,10 @@ sub variables {
     umask 022;			# don't give login group write access
 
     $ENV{'PATH'} = "/sbin:/bin:/usr/sbin:/usr/bin";
-    @passwd_backup = '';
-    @group_backup = '';
-    @message_buffer = '';
-    @user_variable_list = '';	# user variables in /etc/adduser.conf
+    @passwd_backup = ();
+    @group_backup = ();
+    @message_buffer = ();
+    @user_variable_list = ();	# user variables in /etc/adduser.conf
     $do_not_delete = '## DO NOT DELETE THIS LINE!';
 }
 
@@ -149,7 +149,7 @@ sub shells_read {
     local($err) = 0;
 
     print "Reading $etc_shells\n" if $verbose;
-    open(S, $etc_shells) || die "$etc_shells:$!\n";
+    open(S, $etc_shells) || die "$etc_shells: $!\n";
 
     while(<S>) {
 	if (/^\s*\//) {
@@ -262,7 +262,7 @@ sub home_partition_valid {
 
     $h = &stripdir($h);
     # all right (I hope)
-    return $h if $h =~ "^/" && -e $h && -w $h && (-d $h || -l $h);
+    return $h if $h =~ "^/" && -e $h && -w _ && (-d _ || -l $h);
 
     # Errors or todo
     if ($h !~ "^/") {
@@ -291,10 +291,10 @@ sub passwd_check {
 
 # read /etc/passwd
 sub passwd_read {
-    local($p_username, $pw, $p_uid, $p_gid, $sh, %shlist);
+    local($p_username, $pw, $p_uid, $p_gid, $sh);
 
     print "Check $etc_passwd\n" if $verbose;
-    open(P, "$etc_passwd") || die "$passwd: $!\n";
+    open(P, "$etc_passwd") || die "$etc_passwd: $!\n";
 
     # we only use this to lock the password file
     sysopen(PTMP, $etc_ptmp, O_RDWR|O_CREAT|O_EXCL, 0600) ||
@@ -379,7 +379,7 @@ sub new_users_name_valid {
     local($name) = @_;
 
     if ($name !~ /^[a-z0-9_][a-z0-9_\-]*$/ || $name eq "a-z0-9_-") {
-	warn "Wrong username. " .
+	warn "Illegal username. " .
 	    "Please use only lowercase characters or digits\a\n";
 	return 0;
     } elsif ($username{$name}) {
@@ -458,8 +458,8 @@ sub add_group {
     # Longer lines will be skiped.
     if ($#l >= 200 || 
 	length($groupmembers{$gid}) > 1024 - 50) { # 50 is for group name
-	warn "WARNING, maybe group line ``$gid{$gid}'' is to long or to\n" .
-	    "much users in group, see group(5)\a\n";
+	warn "WARNING, group line ``$gid{$gid}'' is either too long or has\n" .
+	    "too many users in the group, see group(5)\a\n";
     }
     return $name;
 }
@@ -618,8 +618,7 @@ sub new_users_group_update {
     local($e, @a);
 
     # Add *new* group
-    if (!defined($groupname{$group_login}) &&
-	!defined($gid{$groupname{$group_login}})) {
+    if (!defined($groupname{$group_login}) && !defined($gid{$g_id})) {
 	push(@group_backup, "$group_login:*:$g_id:");
 	$groupname{$group_login} = $g_id;
 	$gid{$g_id} = $group_login;
@@ -896,7 +895,7 @@ USAGE
 # uniq(1)
 sub uniq {
     local(@list) = @_;
-    local($e, $last, @array);
+    local($e, $last = "", @array);
 
     foreach $e (sort @list) {
 	push(@array, $e) unless $e eq $last;
@@ -941,7 +940,6 @@ sub salt {
 sub encrypt {
     local($pass, $salt) = ($_[0], $_[1]);
     local($args, $crypt);
-    local($goodpass);
 
     if ($encryptionmethod eq "des" || $encryptionmethod eq "old") {
         $args = "-s $salt";
@@ -959,11 +957,6 @@ sub encrypt {
     chomp $crypt;
     die "encrypt failed" if (wait == -1 || $? != 0);
     return($crypt);
-}
-
-# print banner
-sub copyright {
-    return;
 }
 
 # hints
@@ -1000,7 +993,7 @@ sub parse_arguments {
 	    die "batch: too few arguments\n" if $#batch < 0;
 	}
 	# see &config_read
-	elsif (/^--?(config_create)$/)	{ &copyright; &hints; &create_conf; exit(0); }
+	elsif (/^--?(config_create)$/)	{ &hints; &create_conf; exit(0); }
 	elsif (/^--?(noconfig)$/)	{ $config_read = 0; }
 	elsif (/^--?(e|encryption)$/) {
 	    $encryptionmethod = $argv[0];
@@ -1028,7 +1021,7 @@ sub dirname {
 
 # return 1 if $file is a readable file or link
 sub filetest {
-    local($file, $verb) = @_;
+    local($file, $verbose) = @_;
 
     if (-e $file) {
 	if (-f $file || -l $file) {
@@ -1102,7 +1095,7 @@ sub home_create {
     # copy files from  $dotdir to $homedir
     # rename 'dot.foo' files to '.foo'
     print "Copy files from $dotdir to $homedir\n" if $verbose;
-    system("cp", "-r", $dotdir, $homedir);
+    system("cp", "-R", $dotdir, $homedir);
     system("chmod", "-R", "u+wrX,go-w", $homedir);
     system("chown", "-R", "$name:$group", $homedir);
 
@@ -1362,13 +1355,13 @@ sub append_file {
     print "Lock $file.\n" if $verbose > 1;
     while(!flock(F, LOCK_EX | LOCK_NB)) {
 	warn "Cannot lock file: $file\a\n";
-	die "Sorry, give up\n"
+	die "Sorry, gave up\n"
 	    unless &confirm_yn("Try again?", "yes");
     }
     print F join("\n", @list) . "\n";
-    close F;
     print "Unlock $file.\n" if $verbose > 1;
     flock(F, LOCK_UN);
+    close F;
 }
 
 # return free uid+gid
@@ -1390,7 +1383,7 @@ sub next_id {
 	$gid_start = $groupname{$group};
     }
     # gid is in use, looking for another gid.
-    # Note: uid an gid are not equal
+    # Note: uid and gid are not equal
     elsif ($gid{$uid_start}) {
 	while($gid{$gid_start} || $uid{$gid_start}) {
 	    $gid_start--;
@@ -1402,7 +1395,7 @@ sub next_id {
 
 # read config file - typically /etc/adduser.conf
 sub config_read {
-    local($opt) = @_;
+    local($opt) = join " ", @_;
     local($user_flag) = 0;
 
     # don't read config file
@@ -1525,8 +1518,6 @@ EOF
 
 # check for sane variables
 sub variable_check {
-	local($abort) = 0;
-
 	# Check uid_start & uid_end
 	warn "WARNING: uid_start < 1000!\n" if($uid_start < 1000);
 	die "ERROR: uid_start >= uid_end!\n" if($uid_start >= $uid_end);
@@ -1543,7 +1534,8 @@ sub cleanup {
 }
 
 END {
-    if (-e $etc_ptmp) {
+    if (-e $etc_ptmp && defined PTMP) {
+	    close PTMP;
 	    unlink($etc_ptmp) || warn "Error: unable to remove $etc_ptmp: $!\nPlease verify that $etc_ptmp no longer exists!\n";
     }
 }

@@ -1,4 +1,4 @@
-.\"	$OpenBSD: random.4,v 1.10 2000/06/19 03:21:51 deraadt Exp $
+.\"	$OpenBSD: random.4,v 1.13 2001/10/05 14:45:53 mpech Exp $
 .\"
 .\" Copyright (c) 1996, 1997 Michael Shalayeff
 .\"
@@ -50,13 +50,13 @@ devices produce random output data with different random qualities.
 Entropy data is collected from system activity (like disk and
 network device interrupts and such), and then run through various
 hash or message digest functions to generate the output.
-.Pp
 .Bl -hang -width /dev/srandomX
 .It /dev/random
 This device is reserved for future support of hardware
 random generators.
 .It /dev/srandom
-Strong random data.  This device returns reliable random data.
+Strong random data.
+This device returns reliable random data.
 If sufficient entropy is not currently available (i.e., the entropy
 pool quality starts to run low), the driver pauses while more of
 such data is collected.
@@ -71,6 +71,8 @@ Simple pseudo-random generator.
 .It /dev/arandom
 As required, entropy pool data re-seeds an ARC4 generator,
 which then generates high-quality pseudo-random output data.
+.El
+.Pp
 The
 .Xr arc4random 3
 function in userland libraries seeds itself from this device,
@@ -83,14 +85,19 @@ providing a second level of ARC4 hashed data.
 .Xr md5 9 ,
 .Xr random 9
 .Sh FILES
-.Bl -tag -width /dev/srandom
-.It Pa /dev/random, /dev/srandom, /dev/urandom, /dev/prandom, /dev/arandom
+.Bl -tag -width /dev/srandom -compact
+.It Pa /dev/random
+.It Pa /dev/srandom
+.It Pa /dev/urandom
+.It Pa /dev/prandom
+.It Pa /dev/arandom
 .El
 .Sh BUGS
 No randomness testing suite provided.
 .Sh HISTORY
 A
 .Nm
-device first appeared in Linux operating system.  This is a cloned interface.
+device first appeared in Linux operating system.
+This is a cloned interface.
 .Pp
 ARC4 routines added by David Mazieres.

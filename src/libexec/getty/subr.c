@@ -1,4 +1,4 @@
-/*	$OpenBSD: subr.c,v 1.11 2001/01/28 19:34:28 niklas Exp $	*/
+/*	$OpenBSD: subr.c,v 1.13 2001/07/08 21:18:08 deraadt Exp $	*/
 
 /*
  * Copyright (c) 1983, 1993
@@ -35,7 +35,7 @@
 
 #ifndef lint
 /*static char sccsid[] = "from: @(#)subr.c	8.1 (Berkeley) 6/4/93";*/
-static char rcsid[] = "$OpenBSD: subr.c,v 1.11 2001/01/28 19:34:28 niklas Exp $";
+static char rcsid[] = "$OpenBSD: subr.c,v 1.13 2001/07/08 21:18:08 deraadt Exp $";
 #endif /* not lint */
 
 /*
@@ -99,8 +99,8 @@ gettable(name, buf)
 	for (np = gettynums; np->field; np++)
 		printf("cgetnum: %s=%d\n", np->field, np->value);
 	for (fp = gettyflags; fp->field; fp++)
-		printf("cgetflags: %s='%c' set='%c'\n", fp->field, 
-		       fp->value + '0', fp->set + '0');
+		printf("cgetflags: %s='%c' set='%c'\n", fp->field,
+		    fp->value + '0', fp->set + '0');
 	exit(1);
 #endif /* DEBUG */
 }
@@ -260,7 +260,7 @@ setflags(n)
 			CLR(cflag, PARODD);
 			if (AP)
 				CLR(iflag, INPCK);
-		} else if (AP || EP && OP) {
+		} else if (AP || (EP && OP)) {
 			CLR(iflag, INPCK|IGNPAR);
 			CLR(cflag, PARODD);
 		}
@@ -603,10 +603,9 @@ edithost(pat)
 		pat++;
 	}
 	if (*host)
-		strncpy(res, host, sizeof editedhost - (res - editedhost) - 1);
+		strlcpy(res, host, sizeof editedhost - (res - editedhost));
 	else
 		*res = '\0';
-	editedhost[sizeof editedhost - 1] = '\0';
 }
 
 void

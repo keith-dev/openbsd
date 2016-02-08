@@ -1,4 +1,4 @@
-/*	$OpenBSD: eval.c,v 1.28 2000/07/27 17:44:32 espie Exp $	*/
+/*	$OpenBSD: eval.c,v 1.41 2001/10/10 23:25:31 espie Exp $	*/
 /*	$NetBSD: eval.c,v 1.7 1996/11/10 21:21:29 pk Exp $	*/
 
 /*
@@ -41,7 +41,7 @@
 #if 0
 static char sccsid[] = "@(#)eval.c	8.2 (Berkeley) 4/27/95";
 #else
-static char rcsid[] = "$OpenBSD: eval.c,v 1.28 2000/07/27 17:44:32 espie Exp $";
+static char rcsid[] = "$OpenBSD: eval.c,v 1.41 2001/10/10 23:25:31 espie Exp $";
 #endif
 #endif /* not lint */
 
@@ -65,21 +65,32 @@ static char rcsid[] = "$OpenBSD: eval.c,v 1.28 2000/07/27 17:44:32 espie Exp $";
 #include "extern.h"
 #include "pathnames.h"
 
+#define BUILTIN_MARKER	"__builtin_"
+
 static void	dodefn __P((const char *));
 static void	dopushdef __P((const char *, const char *));
 static void	dodump __P((const char *[], int));
+static void	dotrace __P((const char *[], int, int));
 static void	doifelse __P((const char *[], int));
 static int	doincl __P((const char *));
 static int	dopaste __P((const char *));
+static void	gnu_dochq __P((const char *[], int));
 static void	dochq __P((const char *[], int));
+static void	gnu_dochc __P((const char *[], int));
 static void	dochc __P((const char *[], int));
 static void	dodiv __P((int));
 static void	doundiv __P((const char *[], int));
 static void	dosub __P((const char *[], int));
 static void	map __P((char *, const char *, const char *, const char *));
 static const char *handledash __P((char *, char *, const char *));
+static void	expand_builtin __P((const char *[], int, int));
+static void	expand_macro __P((const char *[], int));
+static void	dump_one_def __P((ndptr));
+
+unsigned long	expansion_id;
+
 /*
- * eval - evaluate built-in macros.
+ * eval - eval all macros and builtins calls
  *	  argc - number of elements in argv.
  *	  argv - element vector :
  *			argv[0] = definition of a user
@@ -90,20 +101,46 @@ static const char *handledash __P((char *, char *, const char *));
  *			   .	  macro or built-in.
  *			   .
  *
- * Note that the minimum value for argc is 3. A call in the form
- * of macro-or-builtin() will result in:
+ * A call in the form of macro-or-builtin() will result in:
  *			argv[0] = nullstr
  *			argv[1] = macro-or-builtin
  *			argv[2] = nullstr
+ *
+ * argc is 3 for macro-or-builtin() and 2 for macro-or-builtin
  */
-
 void
 eval(argv, argc, td)
 	const char *argv[];
 	int argc;
 	int td;
 {
+	ssize_t mark = -1;
+
+	expansion_id++;
+	if (td & RECDEF) 
+		errx(1, "%s at line %lu: expanding recursive definition for %s",
+			CURRENT_NAME, CURRENT_LINE, argv[1]);
+	if (traced_macros && is_traced(argv[1]))
+		mark = trace(argv, argc, infile+ilevel);
+	if (td == MACRTYPE)
+		expand_macro(argv, argc);
+	else
+		expand_builtin(argv, argc, td);
+    	if (mark != -1)
+		finish_trace(mark);
+}
+
+/*
+ * expand_builtin - evaluate built-in macros.
+ */
+void
+expand_builtin(argv, argc, td)
+	const char *argv[];
+	int argc;
+	int td;
+{
 	int c, n;
+	int ac;
 	static int sysval = 0;
 
 #ifdef DEBUG
@@ -112,14 +149,13 @@ eval(argv, argc, td)
 		printf("argv[%d] = %s\n", n, argv[n]);
 #endif
 
-	if (td & RECDEF) 
-		errx(1, "%s at line %lu: expanding recursive definition for %s",
-			CURRENT_NAME, CURRENT_LINE, argv[1]);
  /*
   * if argc == 3 and argv[2] is null, then we
   * have macro-or-builtin() type call. We adjust
   * argc to avoid further checking..
   */
+  	ac = argc;
+
 	if (argc == 3 && !*(argv[2]))
 		argc--;
 
@@ -137,6 +173,14 @@ eval(argv, argc, td)
 
 	case DUMPTYPE:
 		dodump(argv, argc);
+		break;
+
+	case TRACEONTYPE:
+		dotrace(argv, argc, 1);
+		break;
+
+	case TRACEOFFTYPE:
+		dotrace(argv, argc, 0);
 		break;
 
 	case EXPRTYPE:
@@ -239,11 +283,17 @@ eval(argv, argc, td)
 		break;
 #endif
 	case CHNQTYPE:
-		dochq(argv, argc);
+		if (mimic_gnu)
+			gnu_dochq(argv, ac);
+		else
+			dochq(argv, argc);
 		break;
 
 	case CHNCTYPE:
-		dochc(argv, argc);
+		if (mimic_gnu)
+			gnu_dochc(argv, ac);
+		else
+			dochc(argv, argc);
 		break;
 
 	case SUBSTYPE:
@@ -443,13 +493,11 @@ eval(argv, argc, td)
 	}
 }
 
-char *dumpfmt = "`%s'\t`%s'\n";	       /* format string for dumpdef   */
-
 /*
- * expand - user-defined macro expansion
+ * expand_macro - user-defined macro expansion
  */
 void
-expand(argv, argc)
+expand_macro(argv, argc)
 	const char *argv[];
 	int argc;
 {
@@ -465,7 +513,7 @@ expand(argv, argc)
 	p--;			       /* last character of defn */
 	while (p > t) {
 		if (*(p - 1) != ARGFLAG)
-			putback(*p);
+			PUTBACK(*p);
 		else {
 			switch (*p) {
 
@@ -486,26 +534,30 @@ expand(argv, argc)
 					pbstr(argv[argno + 1]);
 				break;
 			case '*':
-				for (n = argc - 1; n > 2; n--) {
-					pbstr(argv[n]);
-					putback(COMMA);
-				}
-				pbstr(argv[2]);
+				if (argc > 2) {
+					for (n = argc - 1; n > 2; n--) {
+						pbstr(argv[n]);
+						putback(COMMA);
+					}
+					pbstr(argv[2]);
+			    	}
 				break;
                         case '@':
-                                for (n = argc - 1; n > 2; n--) {
-                                        pbstr(rquote);
-                                        pbstr(argv[n]);
-                                        pbstr(lquote);
-					putback(COMMA);
-                                }
-				pbstr(rquote);
-                                pbstr(argv[2]);
-				pbstr(lquote);
+				if (argc > 2) {
+					for (n = argc - 1; n > 2; n--) {
+						pbstr(rquote);
+						pbstr(argv[n]);
+						pbstr(lquote);
+						putback(COMMA);
+					}
+					pbstr(rquote);
+					pbstr(argv[2]);
+					pbstr(lquote);
+				}
                                 break;
 			default:
-				putback(*p);
-				putback('$');
+				PUTBACK(*p);
+				PUTBACK('$');
 				break;
 			}
 			p--;
@@ -513,7 +565,7 @@ expand(argv, argc)
 		p--;
 	}
 	if (p == t)		       /* do last character */
-		putback(*p);
+		PUTBACK(*p);
 }
 
 /*
@@ -525,6 +577,7 @@ dodefine(name, defn)
 	const char *defn;
 {
 	ndptr p;
+	int n;
 
 	if (!*name)
 		errx(1, "%s at line %lu: null definition.", CURRENT_NAME,
@@ -533,6 +586,16 @@ dodefine(name, defn)
 		p = addent(name);
 	else if (p->defn != null)
 		free((char *) p->defn);
+	if (strncmp(defn, BUILTIN_MARKER, sizeof(BUILTIN_MARKER)-1) == 0) {
+		n = builtin_type(defn+sizeof(BUILTIN_MARKER)-1);
+		if (n != -1) {
+			p->type = n & TYPEMASK;
+			if ((n & NOARGS) == 0)
+				p->type |= NEEDARGS;
+			p->defn = null;
+			return;
+		}
+	}
 	if (!*defn)
 		p->defn = null;
 	else
@@ -551,11 +614,17 @@ dodefn(name)
 	const char *name;
 {
 	ndptr p;
+	char *real;
 
-	if ((p = lookup(name)) != nil && p->defn != null) {
-		pbstr(rquote);
-		pbstr(p->defn);
-		pbstr(lquote);
+	if ((p = lookup(name)) != nil) {
+		if (p->defn != null) {
+			pbstr(rquote);
+			pbstr(p->defn);
+			pbstr(lquote);
+		} else if ((real = builtin_realname(p->type)) != NULL) {
+			pbstr(real);
+			pbstr(BUILTIN_MARKER);
+		}
 	}
 }
 
@@ -587,6 +656,28 @@ dopushdef(name, defn)
 }
 
 /*
+ * dump_one_def - dump the specified definition.
+ */
+static void
+dump_one_def(p)
+	ndptr p;
+{
+	char *real;
+
+	if (mimic_gnu) {
+		if ((p->type & TYPEMASK) == MACRTYPE)
+			fprintf(traceout, "%s:\t%s\n", p->name, p->defn);
+		else {
+			real = builtin_realname(p->type);
+			if (real == NULL)
+				real = null;
+			fprintf(traceout, "%s:\t<%s>\n", p->name, real);
+	    	}
+	} else
+		fprintf(traceout, "`%s'\t`%s'\n", p->name, p->defn);
+}
+
+/*
  * dodumpdef - dump the specified definitions in the hash
  *      table to stderr. If nothing is specified, the entire
  *      hash table is dumped.
@@ -602,14 +693,30 @@ dodump(argv, argc)
 	if (argc > 2) {
 		for (n = 2; n < argc; n++)
 			if ((p = lookup(argv[n])) != nil)
-				fprintf(stderr, dumpfmt, p->name,
-					p->defn);
+				dump_one_def(p);
 	} else {
 		for (n = 0; n < HASHSIZE; n++)
 			for (p = hashtab[n]; p != nil; p = p->nxtptr)
-				fprintf(stderr, dumpfmt, p->name,
-					p->defn);
+				dump_one_def(p);
 	}
+}
+
+/*
+ * dotrace - mark some macros as traced/untraced depending upon on.
+ */
+static void
+dotrace(argv, argc, on)
+	const char *argv[];
+	int argc;
+	int on;
+{
+	int n;
+
+	if (argc > 2) {
+		for (n = 2; n < argc; n++)
+			mark_traced(argv[n], on);
+	} else
+		mark_traced(NULL, on);
 }
 
 /*
@@ -674,6 +781,25 @@ dopaste(pfile)
 }
 #endif
 
+static void
+gnu_dochq(argv, ac)
+	const char *argv[];
+	int ac;
+{
+	/* In gnu-m4 mode, the only way to restore quotes is to have no
+	 * arguments at all. */
+	if (ac == 2) {
+		lquote[0] = LQUOTE, lquote[1] = EOS;
+		rquote[0] = RQUOTE, rquote[1] = EOS;
+	} else {
+		strlcpy(lquote, argv[2], sizeof(lquote));
+		if(ac > 3)
+			strlcpy(rquote, argv[3], sizeof(rquote));
+		else
+			rquote[0] = EOS;
+	}
+}
+
 /*
  * dochq - change quote characters
  */
@@ -682,15 +808,6 @@ dochq(argv, argc)
 	const char *argv[];
 	int argc;
 {
-	/* In gnu-m4 mode, having two empty arguments means no quotes at
-	 * all.  */
-	if (mimic_gnu) {
-		if (argc > 3 && !*argv[2] && !*argv[3]) {
-			lquote[0] = EOS;
-			rquote[0] = EOS;
-			return;
-		}
-	}
 	if (argc > 2) {
 		if (*argv[2])
 			strlcpy(lquote, argv[2], sizeof(lquote));
@@ -709,6 +826,27 @@ dochq(argv, argc)
 	}
 }
 
+static void
+gnu_dochc(argv, ac)
+	const char *argv[];
+	int ac;
+{
+	/* In gnu-m4 mode, no arguments mean no comment
+	 * arguments at all. */
+	if (ac == 2) {
+		scommt[0] = EOS;
+		ecommt[0] = EOS;
+	} else {
+		if (*argv[2])
+			strlcpy(scommt, argv[2], sizeof(scommt));
+		else
+			scommt[0] = SCOMMT, scommt[1] = EOS;
+		if(ac > 3 && *argv[3])
+			strlcpy(ecommt, argv[3], sizeof(ecommt));
+		else
+			ecommt[0] = ECOMMT, ecommt[1] = EOS;
+	}
+}
 /*
  * dochc - change comment characters
  */
@@ -801,22 +939,21 @@ dosub(argv, argc)
 	const char *ap, *fc, *k;
 	int nc;
 
-	if (argc < 5)
-		nc = MAXTOK;
-	else
-#ifdef EXPR
-		nc = expr(argv[4]);
-#else
-		nc = atoi(argv[4]);
-#endif
 	ap = argv[2];		       /* target string */
 #ifdef EXPR
 	fc = ap + expr(argv[3]);       /* first char */
 #else
 	fc = ap + atoi(argv[3]);       /* first char */
 #endif
+	nc = strlen(fc);
+	if (argc >= 5)
+#ifdef EXPR
+		nc = min(nc, expr(argv[4]));
+#else
+		nc = min(nc, atoi(argv[4]));
+#endif
 	if (fc >= ap && fc < ap + strlen(ap))
-		for (k = fc + min(nc, strlen(fc)) - 1; k >= fc; k--)
+		for (k = fc + nc - 1; k >= fc; k--)
 			putback(*k);
 }
 

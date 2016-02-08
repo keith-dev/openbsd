@@ -1,4 +1,4 @@
-.\"	$OpenBSD: mtrr.4,v 1.6 2001/03/06 19:56:51 brad Exp $
+.\"	$OpenBSD: mtrr.4,v 1.10 2001/10/04 16:56:51 mpech Exp $
 .\"
 .\" Pentium MTRR  driver for OpenBSD.
 .\" Copyright 1999 Matthieu Herrb <matthieu@openbsd.org>
@@ -21,7 +21,6 @@ The
 .Nm
 device provides access to the memory range attributes supported by the
 MTRRs on Pentiums.
-.Pp
 .Ss IOCTL INTERFACE
 Several architectures allow attributes to be associated with ranges of physical
 memory.
@@ -32,7 +31,7 @@ calls performed on
 or
 .Pa /dev/xf86 .
 Declarations and data types are to be found in
-.Aq Pa memrange.h
+.Aq Pa sys/memrange.h
 .Pp
 The specific attributes, and number of programmable ranges may vary between
 architectures.
@@ -114,7 +113,6 @@ flag may not be removed or updated.
 .Fa mo_arg[0]
 should be set to MEMRANGE_SET_UPDATE to update an existing
 or establish a new range, or to MEMRANGE_SET_REMOVE to remove a range.
-.Pp
 .Sh RETURN VALUES
 .Bl -tag -width Er
 .It Bq Er EOPNOTSUPP
@@ -132,7 +130,7 @@ An attempt to create a new range failed due to a shortage of hardware
 resources (e.g., descriptor slots).
 .It Bq Er ENOENT
 An attempt to remove a range failed because no range matches the descriptor
-base/length supplued.
+base/length supplied.
 .It Bq Er EPERM
 An attempt to remove a range failed because the range is permanently
 enabled.

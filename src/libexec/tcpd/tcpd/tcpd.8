@@ -1,4 +1,4 @@
-.\"	$OpenBSD: tcpd.8,v 1.9 2000/12/15 14:31:19 aaron Exp $
+.\"	$OpenBSD: tcpd.8,v 1.12 2001/09/06 15:04:34 mpech Exp $
 .\"
 .\" Copyright (c) 1997, Jason Downs.  All rights reserved.
 .\"
@@ -112,7 +112,7 @@ If any discrepancy is detected,
 .Nm
 concludes that it is dealing with a host that pretends to have someone
 elses host name.
-.Pp
+.\" .Pp
 .\" If the sources are compiled with -DPARANOID,
 .\" .Nm tcpd
 .\" will drop the connection in case of a host name/address mismatch.
@@ -226,8 +226,8 @@ Access control table (deny list)
 .Sh SEE ALSO
 .Xr hosts_access 5 ,
 .Xr inetd.conf 5 ,
-.Xr syslog.conf 5 .
-.Sh AUTHOR
+.Xr syslog.conf 5
+.Sh AUTHORS
 .Bd -unfilled -offset indent
 Wietse Venema (wietse@wzv.win.tue.nl),
 Department of Mathematics and Computing Science,

@@ -1,4 +1,4 @@
-#	$OpenBSD: bsd.prog.mk,v 1.23 2001/01/31 06:41:18 art Exp $
+#	$OpenBSD: bsd.prog.mk,v 1.30 2001/08/23 16:39:33 art Exp $
 #	$NetBSD: bsd.prog.mk,v 1.55 1996/04/08 21:19:26 jtc Exp $
 #	@(#)bsd.prog.mk	5.26 (Berkeley) 6/25/91
 
@@ -10,14 +10,18 @@
 
 .SUFFIXES: .out .o .c .cc .C .cxx .y .l .s .8 .7 .6 .5 .4 .3 .2 .1 .0
 
+.if ${WARNINGS:L} == "yes"
+CFLAGS+=       ${CDIAGFLAGS}
+CXXFLAGS+=     ${CXXDIAGFLAGS}
+.endif
 CFLAGS+=	${COPTS}
+CXXFLAGS+=     ${CXXOPTS}
 
-.if (${MACHINE_ARCH} == "powerpc") || (${MACHINE_ARCH} == "alpha")
+.if (${MACHINE_ARCH} == "powerpc") || (${MACHINE_ARCH} == "alpha") || (${MACHINE_ARCH} == "sparc64")
 CRTBEGIN?=       ${DESTDIR}/usr/lib/crtbegin.o
 CRTEND?=         ${DESTDIR}/usr/lib/crtend.o
 .endif
 
-LIBATALK?=	${DESTDIR}/usr/lib/libatalk.a
 LIBCRT0?=	${DESTDIR}/usr/lib/crt0.o
 LIBC?=		${DESTDIR}/usr/lib/libc.a
 LIBCOMPAT?=	${DESTDIR}/usr/lib/libcompat.a
@@ -136,16 +140,12 @@ realinstall:
 
 install: maninstall _SUBDIRUSE
 .if defined(LINKS) && !empty(LINKS)
-	@set ${LINKS}; \
-	while test $$# -ge 2; do \
-		l=${DESTDIR}$$1; \
-		shift; \
-		t=${DESTDIR}$$1; \
-		shift; \
-		echo $$t -\> $$l; \
-		rm -f $$t; \
-		ln $$l $$t; \
-	done; true
+.  for lnk file in ${LINKS}
+	@l=${DESTDIR}${lnk}; \
+	 t=${DESTDIR}${file}; \
+	 echo $$t -\> $$l; \
+	 rm -f $$t; ln $$l $$t
+.  endfor
 .endif
 
 maninstall: afterinstall

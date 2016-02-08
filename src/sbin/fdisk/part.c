@@ -1,4 +1,4 @@
-/*	$OpenBSD: part.c,v 1.19 2001/03/16 19:02:14 markus Exp $	*/
+/*	$OpenBSD: part.c,v 1.24 2001/07/02 13:51:18 millert Exp $	*/
 
 /*
  * Copyright (c) 1997 Tobias Weingartner
@@ -33,6 +33,7 @@
 #include <err.h>
 #include <util.h>
 #include <stdio.h>
+#include <string.h>
 #include <unistd.h>
 #include <sys/fcntl.h>
 #include <sys/types.h>
@@ -44,9 +45,9 @@
 #include "mbr.h"
 
 
-static struct part_type {
+static const struct part_type {
 	int	type;
-	char	*sname;
+	char	sname[14];
 	char	*lname;
 } part_types[] = {
 	{ 0x00, "unused      ", "unused"},
@@ -65,21 +66,41 @@ static struct part_type {
 	{ 0x0E, "DOS FAT-16  ", "Primary DOS w/ 16-bit FAT, CHS-mapped"},
 	{ 0x0F, "Extended LBA", "Extended DOS LBA-mapped"},
 	{ 0x10, "OPUS        ", "OPUS"},
+	{ 0x11, "OS/2 hidden ", "OS/2 BM: hidden DOS 12-bit FAT"},
 	{ 0x12, "Compaq Diag.", "Compaq Diagnostics"},
+	{ 0x14, "OS/2 hidden ", "OS/2 BM: hidden DOS 16-bit FAT <32M or Novell DOS 7.0 bug"},
+	{ 0x16, "OS/2 hidden ", "OS/2 BM: hidden DOS 16-bit FAT >=32M"},
+	{ 0x17, "OS/2 hidden ", "OS/2 BM: hidden IFS"},
+	{ 0x18, "AST swap    ", "AST Windows swapfile"},
+	{ 0x19, "Willowtech  ", "Willowtech Photon coS"},
+	{ 0x20, "Willowsoft  ", "Willowsoft OFS1"},
+	{ 0x24, "NEC DOS     ", "NEC DOS"},
+	{ 0x38, "Theos       ", "Theos"},
 	{ 0x39, "Plan 9      ",	"Plan 9"},
-	{ 0x40, "VENIX 286   ", "VENIX 286"},
-	{ 0x4d, "QNX 4.2 Pri ", "QNX 4.2 Primary"},
-	{ 0x4e, "QNX 4.2 Sec ", "QNX 4.2 Secondary"},
-	{ 0x4f, "QNX 4.2 Ter ", "QNX 4.2 Tertiary"},
-	{ 0x50, "DM          ", "DM"},
-	{ 0x51, "DM          ", "DM"},
+	{ 0x40, "VENIX 286   ", "VENIX 286 or LynxOS"},
+	{ 0x41, "Lin/Minux DR", "Linux/MINIX (sharing disk with DRDOS) or Personal RISC boot"},
+	{ 0x42, "LinuxSwap DR", "SFS or Linux swap (sharing disk with DRDOS)"},
+	{ 0x43, "Linux DR    ", "Linux native (sharing disk with DRDOS)"},
+	{ 0x4D, "QNX 4.2 Pri ", "QNX 4.2 Primary"},
+	{ 0x4E, "QNX 4.2 Sec ", "QNX 4.2 Secondary"},
+	{ 0x4F, "QNX 4.2 Ter ", "QNX 4.2 Tertiary"},
+	{ 0x50, "DM          ", "DM (disk manager)"},
+	{ 0x51, "DM          ", "DM6 Aux1 (or Novell)"},
 	{ 0x52, "CP/M or SysV", "CP/M or Microport SysV/AT"},
+	{ 0x53, "DM          ", "DM6 Aux3"},
 	{ 0x54, "Ontrack     ", "Ontrack"},
-	{ 0x56, "GB          ", "GB"},
-	{ 0x61, "Speed       ", "Speed"},
+	{ 0x55, "EZ-Drive    ", "EZ-Drive (disk manager)"},
+	{ 0x56, "Golden Bow  ", "Golden Bow (disk manager)"},
+	{ 0x5C, "Priam       ", "Priam Edisk (disk manager)"},
+	{ 0x61, "SpeedStor   ", "SpeedStor"},
 	{ 0x63, "ISC, HURD, *", "ISC, System V/386, GNU HURD or Mach"},
 	{ 0x64, "Netware 2.xx", "Novell Netware 2.xx"},
 	{ 0x65, "Netware 3.xx", "Novell Netware 3.xx"},
+	{ 0x66, "Netware 386 ", "Novell 386 Netware"},
+	{ 0x67, "Novell      ", "Novell"},
+	{ 0x68, "Novell      ", "Novell"},
+	{ 0x69, "Novell      ", "Novell"},
+	{ 0x70, "DiskSecure  ", "DiskSecure Multi-Boot"},
 	{ 0x75, "PCIX        ", "PCIX"},
 	{ 0x80, "Minix (old) ", "Minix 1.1 ... 1.4a"},
 	{ 0x81, "Minix (new) ", "Minix 1.4b ... 1.5.10"},
@@ -87,7 +108,14 @@ static struct part_type {
 	{ 0x83, "Linux files*", "Linux filesystem"},
 	{ 0x93, "Amoeba file*", "Amoeba filesystem"},
 	{ 0x94, "Amoeba BBT  ", "Amoeba bad block table"},
-	{ 0x9f, "BSDI        ", "BSDI BSD/OS"},
+	{ 0x84, "OS/2 hidden ", "OS/2 hidden C: drive"},
+	{ 0x85, "Linux ext.  ", "Linux extended"},
+	{ 0x86, "NT FAT VS   ", "NT FAT volume set"},
+	{ 0x87, "NTFS VS     ", "NTFS volume set or HPFS mirrored"},
+	{ 0x93, "Amoeba FS   ", "Amoeba filesystem"},
+	{ 0x94, "Amoeba BBT  ", "Amoeba bad block table"},
+	{ 0x99, "Mylex       ", "Mylex EISA SCSI"},
+	{ 0x9F, "BSDI        ", "BSDI BSD/OS"},
 	{ 0xA0, "NotebookSave", "Phoenix NoteBIOS save-to-disk"},
 	{ 0xA5, "FreeBSD     ",	"FreeBSD"},
 	{ 0xA6, "OpenBSD     ", "OpenBSD"},
@@ -95,15 +123,20 @@ static struct part_type {
 	{ 0xA9, "NetBSD      ",	"NetBSD"},
 	{ 0xB7, "BSDI filesy*", "BSDI BSD/386 filesystem"},
 	{ 0xB8, "BSDI swap   ", "BSDI BSD/386 swap"},
+	{ 0xC0, "CTOS        ", "CTOS"},
+	{ 0xC1, "DRDOSs FAT12", "DRDOS/sec (FAT-12)"},
+	{ 0xC4, "DRDOSs < 32M", "DRDOS/sec (FAT-16, < 32M)"},
+	{ 0xC6, "DRDOSs >=32M", "DRDOS/sec (FAT-16, >= 32M)"},
+	{ 0xC7, "HPFS Disbled", "Syrinx (Cyrnix?) or HPFS disabled"},
 	{ 0xDB, "CPM/C.DOS/C*", "Concurrent CPM or C.DOS or CTOS"},
-	{ 0xE1, "Speed       ", "Speed"},
-	{ 0xE3, "Speed       ", "Speed"},
-	{ 0xE4, "Speed       ", "Speed"},
+	{ 0xE1, "SpeedStor   ", "DOS access or SpeedStor 12-bit FAT extended partition"},
+	{ 0xE3, "SpeedStor   ", "DOS R/O or SpeedStor or Storage Dimensions"},
+	{ 0xE4, "SpeedStor   ", "SpeedStor 16-bit FAT extended partition < 1024 cyl."},
 	{ 0xEB, "BeOS/i386   ", "BeOS for Intel"},
-	{ 0xF1, "Speed       ", "Speed"},
+	{ 0xF1, "SpeedStor   ", "SpeedStor or Storage Dimensions"},
 	{ 0xF2, "DOS 3.3+ Sec", "DOS 3.3+ Secondary"},
-	{ 0xF4, "Speed       ", "Speed"},
-	{ 0xFF, "BBT         ", "BBT (Bad Blocks Table)"},
+	{ 0xF4, "SpeedStor   ", "SpeedStor >1024 cyl. or LANstep or IBM PS/2 IML"},
+	{ 0xFF, "Xenix BBT   ", "Xenix Bad Block Table"},
 };
 
 void
@@ -129,7 +162,7 @@ PRT_printall()
 	}
 }
 
-char *
+const char *
 PRT_ascii_id(id)
 	int id;
 {
@@ -208,10 +241,10 @@ PRT_make(partn, offset, reloff, prt)
 
 	tmp.shead = partn->shead;
 	tmp.ssect = partn->ssect;
-	tmp.scyl = (partn->scyl > 1024)? 1023: partn->scyl; 
+	tmp.scyl = (partn->scyl > 1023)? 1023: partn->scyl; 
 	tmp.ehead = partn->ehead;
 	tmp.esect = partn->ssect;
-	tmp.ecyl = (partn->ecyl > 1024)? 1023: partn->ecyl; 
+	tmp.ecyl = (partn->ecyl > 1023)? 1023: partn->ecyl; 
 	if (!PRT_check_chs(partn) && PRT_check_chs(&tmp)) {
 		partn->shead = tmp.shead;
 		partn->ssect = tmp.ssect;
@@ -262,11 +295,11 @@ PRT_print(num, partn)
 {
 
 	if (partn == NULL) {
-		printf("         Starting        Ending\n");
-		printf(" #: id  cyl  hd sec -   cyl  hd sec [     start -       size]\n");
-		printf("-------------------------------------------------------------------------\n");
+		printf("         Starting       Ending\n");
+		printf(" #: id  cyl  hd sec -  cyl  hd sec [     start -       size]\n");
+		printf("------------------------------------------------------------------------\n");
 	} else {
-		printf("%c%1d: %.2X %4d %3d %3d - %5d %3d %3d [%10d - %10d] %s\n",
+		printf("%c%1d: %.2X %4d %3d %3d - %4d %3d %3d [%10d - %10d] %s\n",
 			(partn->flag == 0x80)?'*':' ',
 			num, partn->id,
 			partn->scyl, partn->shead, partn->ssect,
@@ -285,6 +318,12 @@ PRT_fix_BN(disk, part, pn)
 	int spt, tpc, spc;
 	int start = 0;
 	int end = 0;
+
+	/* Zero out entry if not used */
+	if (part->id == DOSPTYP_UNUSED ) {
+		memset(part, 0, sizeof(*part));
+		return;
+	}
 
 	/* Disk metrics */
 	spt = disk->real->sectors;
@@ -316,6 +355,12 @@ PRT_fix_CHS(disk, part, pn)
 	int spt, tpc, spc;
 	int start, end, size;
 	int cyl, head, sect;
+
+	/* Zero out entry if not used */
+	if (part->id == DOSPTYP_UNUSED ) {
+		memset(part, 0, sizeof(*part));
+		return;
+	}
 
 	/* Disk metrics */
 	spt = disk->real->sectors;

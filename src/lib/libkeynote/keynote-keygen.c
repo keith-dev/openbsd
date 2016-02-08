@@ -1,4 +1,4 @@
-/* $OpenBSD: keynote-keygen.c,v 1.12 2001/03/08 21:50:11 angelos Exp $ */
+/* $OpenBSD: keynote-keygen.c,v 1.17 2001/09/13 17:55:10 angelos Exp $ */
 /*
  * The author of this code is Angelos D. Keromytis (angelos@dsl.cis.upenn.edu)
  *
@@ -7,7 +7,7 @@
  *
  * Copyright (C) 1998, 1999 by Angelos D. Keromytis.
  *	
- * Permission to use, copy, and modify this software without fee
+ * Permission to use, copy, and modify this software with or without fee
  * is hereby granted, provided that this entire notice is included in
  * all copies of any software which is or includes a copy or
  * modification of this software. 
@@ -162,7 +162,8 @@ keynote_keygen(int argc, char *argv[])
     if (strlen(algname) + 2 > prlen)
     {
 	fprintf(stderr, "Parameter ``print-length'' should be larger "
-		"than the length of AlgorithmName (%d)\n", strlen(algname));
+		"than the length of AlgorithmName (%lu)\n",
+		(unsigned long) strlen(algname));
 	exit(1);
     }
 
@@ -180,11 +181,7 @@ keynote_keygen(int argc, char *argv[])
 	(ienc == INTERNAL_ENC_ASN1) &&
 	((enc == ENCODING_HEX) || (enc == ENCODING_BASE64)))
     {
-        if (RAND_bytes(seed, SEED_LEN) == 0)
-        {
-            fprintf(stderr, "Failed to acquire %d random bytes\n", SEED_LEN);
-            exit(1);
-        }
+        RAND_bytes(seed, SEED_LEN);
 
 	dsa = DSA_generate_parameters(len, seed, SEED_LEN, &counter, &h, NULL
 #if SSLEAY_VERSION_NUMBER >= 0x0900

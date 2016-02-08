@@ -1,4 +1,4 @@
-.\"	$OpenBSD: shutdown.8,v 1.25 2001/01/28 19:25:25 marc Exp $
+.\"	$OpenBSD: shutdown.8,v 1.30 2001/10/11 19:54:29 miod Exp $
 .\"	$NetBSD: shutdown.8,v 1.6 1995/03/18 15:01:07 cgd Exp $
 .\"
 .\" Copyright (c) 1988, 1991, 1993
@@ -39,7 +39,7 @@
 .Os
 .Sh NAME
 .Nm shutdown
-.Nd "close down the system at a given time"
+.Nd close down the system at a given time
 .Sh SYNOPSIS
 .Nm shutdown
 .Op Fl
@@ -114,7 +114,7 @@ The
 flag is passed on to
 .Xr halt 8 ,
 causing machines which support automatic power down to do so after halting.
-(Currently supported on some i386, sparc, and mac68k platforms.)
+(Currently supported on some i386, mac68k, macppc, sparc and sparc64 platforms.)
 .It Ar time
 .Ar time
 is the time at which
@@ -171,6 +171,10 @@ are placed in
 and should be used to
 inform the users about when the system will be back up
 and why it is going down (or anything else).
+.Pp
+You can cancel a scheduled shutdown with the
+.Xr kill 1
+command by killing the shutdown process.
 .Sh FILES
 .Bl -tag -width /etc/rc.shutdown -compact
 .It Pa /etc/nologin
@@ -187,11 +191,12 @@ run by
 before the system is shutdown
 .El
 .Sh SEE ALSO
+.Xr kill 1 ,
 .Xr login 1 ,
 .Xr wall 1 ,
 .Xr halt 8 ,
-.Xr reboot 8 ,
-.Xr rc.shutdown 8
+.Xr rc.shutdown 8 ,
+.Xr reboot 8
 .Sh COMPATIBILITY
 The hours and minutes in the second time format may be separated by
 a colon

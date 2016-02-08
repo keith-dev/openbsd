@@ -1,9 +1,10 @@
-/*	$OpenBSD: ike_phase_1.c,v 1.23 2001/03/13 14:05:18 ho Exp $	*/
+/*	$OpenBSD: ike_phase_1.c,v 1.30 2001/07/01 20:11:53 niklas Exp $	*/
 /*	$EOM: ike_phase_1.c,v 1.31 2000/12/11 23:47:56 niklas Exp $	*/
 
 /*
  * Copyright (c) 1999, 2000 Niklas Hallqvist.  All rights reserved.
  * Copyright (c) 1999, 2000 Angelos D. Keromytis.  All rights reserved.
+ * Copyright (c) 2001 Håkan Olsson.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -37,6 +38,7 @@
 
 #include <sys/types.h>
 #include <netinet/in.h>
+#include <arpa/inet.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -598,8 +600,8 @@ ike_phase_1_post_exchange_KE_NONCE (struct message *msg)
 		 "dh_create_shared failed");
       return -1;
     }
-  LOG_DBG_BUF ((LOG_NEGOTIATION, 80, 
-		"ike_phase_1_post_exchange_KE_NONCE: g^xy", ie->g_xy, 
+  LOG_DBG_BUF ((LOG_NEGOTIATION, 80,
+		"ike_phase_1_post_exchange_KE_NONCE: g^xy", ie->g_xy,
 		ie->g_x_len));
 
   /* Compute the SKEYID depending on the authentication method.  */
@@ -609,7 +611,7 @@ ike_phase_1_post_exchange_KE_NONCE (struct message *msg)
       /* XXX Log and teardown?  */
       return -1;
     }
-  LOG_DBG_BUF ((LOG_NEGOTIATION, 80, 
+  LOG_DBG_BUF ((LOG_NEGOTIATION, 80,
 		"ike_phase_1_post_exchange_KE_NONCE: SKEYID", ie->skeyid,
 		ie->skeyid_len));
 
@@ -633,7 +635,7 @@ ike_phase_1_post_exchange_KE_NONCE (struct message *msg)
   prf->Update (prf->prfctx, exchange->cookies, ISAKMP_HDR_COOKIES_LEN);
   prf->Update (prf->prfctx, "\0", 1);
   prf->Final (ie->skeyid_d, prf->prfctx);
-  LOG_DBG_BUF ((LOG_NEGOTIATION, 80, 
+  LOG_DBG_BUF ((LOG_NEGOTIATION, 80,
 		"ike_phase_1_post_exchange_KE_NONCE: SKEYID_d",	ie->skeyid_d,
 		ie->skeyid_len));
 
@@ -652,7 +654,7 @@ ike_phase_1_post_exchange_KE_NONCE (struct message *msg)
   prf->Update (prf->prfctx, exchange->cookies, ISAKMP_HDR_COOKIES_LEN);
   prf->Update (prf->prfctx, "\1", 1);
   prf->Final (ie->skeyid_a, prf->prfctx);
-  LOG_DBG_BUF ((LOG_NEGOTIATION, 80, 
+  LOG_DBG_BUF ((LOG_NEGOTIATION, 80,
 		"ike_phase_1_post_exchange_KE_NONCE: SKEYID_a",	ie->skeyid_a,
 		ie->skeyid_len));
 
@@ -673,8 +675,8 @@ ike_phase_1_post_exchange_KE_NONCE (struct message *msg)
   prf->Update (prf->prfctx, "\2", 1);
   prf->Final (ie->skeyid_e, prf->prfctx);
   prf_free (prf);
-  LOG_DBG_BUF ((LOG_NEGOTIATION, 80, 
-		"ike_phase_1_post_exchange_KE_NONCE: SKEYID_e",	ie->skeyid_e, 
+  LOG_DBG_BUF ((LOG_NEGOTIATION, 80,
+		"ike_phase_1_post_exchange_KE_NONCE: SKEYID_e",	ie->skeyid_e,
 		ie->skeyid_len));
 
   /* Key length determination.  */
@@ -783,7 +785,6 @@ ike_phase_1_send_ID (struct message *msg)
   char header[80];
   ssize_t sz;
   struct sockaddr *src;
-  int src_len;
   int initiator = exchange->initiator;
   u_int8_t **id;
   size_t *id_len;
@@ -800,7 +801,8 @@ ike_phase_1_send_ID (struct message *msg)
   if (!my_id)
     my_id = conf_get_str ("General", "Default-phase-1-ID");
 
-  sz = my_id ? ipsec_id_size (my_id, &id_type) : sizeof (in_addr_t);
+  msg->transport->vtbl->get_src (msg->transport, &src);
+  sz = my_id ? ipsec_id_size (my_id, &id_type) : sockaddr_len (src);
   if (sz == -1)
     return -1;
 
@@ -820,19 +822,19 @@ ike_phase_1_send_ID (struct message *msg)
       switch (id_type)
 	{
 	case IPSEC_ID_IPV4_ADDR:
-      	  msg->transport->vtbl->get_src (msg->transport, &src, &src_len);
-
+	case IPSEC_ID_IPV6_ADDR:
       	  /* Already in network byteorder.  */
-      	  memcpy (buf + ISAKMP_ID_DATA_OFF,
-	      	  &((struct sockaddr_in *)src)->sin_addr.s_addr,
-	      	  sizeof (in_addr_t));
+      	  memcpy (buf + ISAKMP_ID_DATA_OFF, sockaddr_data (src),
+		  sockaddr_len (src));
 	  break;
+
 	case IPSEC_ID_FQDN:
 	case IPSEC_ID_USER_FQDN:
 	case IPSEC_ID_KEY_ID:
 	  memcpy (buf + ISAKMP_ID_DATA_OFF, conf_get_str (my_id, "Name"),
 		  sz - ISAKMP_ID_DATA_OFF);
 	  break;
+
 	default:
 	  log_print ("ike_phase_1_send_ID: unsupported ID type %d", id_type);
 	  free (buf);
@@ -841,13 +843,18 @@ ike_phase_1_send_ID (struct message *msg)
     }
   else
     {
-      msg->transport->vtbl->get_src (msg->transport, &src, &src_len);
-      /* XXX Assumes IPv4.  */
-      SET_ISAKMP_ID_TYPE (buf, IPSEC_ID_IPV4_ADDR);
+      switch (src->sa_family)
+	{
+	case AF_INET:
+	  SET_ISAKMP_ID_TYPE (buf, IPSEC_ID_IPV4_ADDR);
+	  break;
+	case AF_INET6:
+	  SET_ISAKMP_ID_TYPE (buf, IPSEC_ID_IPV6_ADDR);
+	  break;
+	}
       /* Already in network byteorder.  */
-      memcpy (buf + ISAKMP_ID_DATA_OFF,
-	      &((struct sockaddr_in *)src)->sin_addr.s_addr,
-	      sizeof (in_addr_t));
+      memcpy (buf + ISAKMP_ID_DATA_OFF, sockaddr_data (src),
+	      sockaddr_len (src));
     }
 
   if (message_add_payload (msg, ISAKMP_PAYLOAD_ID, buf, sz, 1))
@@ -910,23 +917,106 @@ ike_phase_1_recv_ID (struct message *msg)
 {
   struct exchange *exchange = msg->exchange;
   struct payload *payload;
-  char header[80];
+  char header[80], *rs = 0, *rid = 0, *p;
   int initiator = exchange->initiator;
-  u_int8_t **id;
-  size_t *id_len;
+  u_int8_t **id, id_type;
+  size_t *id_len, sz;
+  struct sockaddr *sa;
 
-  /*
-   * XXX Here, we could be checking that the received ID matches what
-   * we expect it to be (if anything). That information is contained
-   * in the [[exchange->name]:Remote-ID] section.
-   */
+  payload = TAILQ_FIRST (&msg->payload[ISAKMP_PAYLOAD_ID]);
+
+  if (exchange->name)
+    rs = conf_get_str (exchange->name, "Remote-ID");
+
+  if (rs)
+    {
+      sz = ipsec_id_size (rs, &id_type);
+      if (sz == -1)
+	{
+	  log_print ("ike_phase_1_recv_ID: could not handle specified "
+		     "Remote-ID [%s]", rs);
+	  return -1;
+	}
+
+      rid = malloc (sz);
+      if (!rid)
+	{
+	  log_error ("ike_phase_1_recv_ID: malloc (%d) failed", sz);
+	  return -1;
+	}
+
+      switch (id_type)
+	{
+	case IPSEC_ID_IPV4_ADDR:
+	case IPSEC_ID_IPV6_ADDR:
+	  p = conf_get_str (rs, "Address");
+	  if (!p)
+	    {
+	      log_print ("ike_phase_1_recv_ID: "
+			 "failed to get Address in Remote-ID section [%s]",
+			 rs);
+	      free (rid);
+	      return -1;
+	    }
+
+	  if (text2sockaddr (p, 0, &sa) == -1)
+	    {
+	      log_print ("ike_phase_1_recv_ID: failed to parse address %s", p);
+	      free (rid);
+	      return -1;
+	    }
+
+	  if ((id_type == IPSEC_ID_IPV4_ADDR && sa->sa_family != AF_INET)
+	      || (id_type == IPSEC_ID_IPV6_ADDR && sa->sa_family != AF_INET6))
+	    {
+	      log_print ("ike_phase_1_recv_ID: "
+			 "address %s not of expected family", p);
+	      free (rid);
+	      free (sa);
+	      return -1;
+	    }
+
+	  memcpy (rid, sockaddr_data (sa), sockaddr_len (sa));
+	  free (sa);
+	  break;
+
+	case IPSEC_ID_FQDN:
+	case IPSEC_ID_USER_FQDN:
+	case IPSEC_ID_KEY_ID:
+	  p = conf_get_str (rs, "Name");
+	  if (!p)
+	    {
+	      log_print ("ike_phase_1_recv_ID: "
+			 "failed to get Name in Remote-ID section [%s]", rs);
+	      free (rid);
+	      return -1;
+	    }
+
+	  memcpy (rid, p, sz);
+	  break;
+
+	default:
+	  log_print ("ike_phase_1_recv_ID: unsupported ID type %d", id_type);
+	  free (rid);
+	  return -1;
+	}
+
+      /* Compare expected/desired and received remote ID */
+      if (bcmp(rid, payload->p + ISAKMP_ID_DATA_OFF, sz))
+	{
+	  free (rid);
+	  log_print ("ike_phase_1_recv_ID: "
+		     "received remote ID other than expected %s", p);
+	  return -1;
+	}
+
+      free (rid);
+    }
 
   /* Choose the right fields to fill in */
   id = initiator ? &exchange->id_r : &exchange->id_i;
   id_len = initiator ? &exchange->id_r_len : &exchange->id_i_len;
 
-  /* XXX Do I really have to save the ID in the SA?  */
-  payload = TAILQ_FIRST (&msg->payload[ISAKMP_PAYLOAD_ID]);
   *id_len = GET_ISAKMP_GEN_LENGTH (payload->p) - ISAKMP_GEN_SZ;
   *id = malloc (*id_len);
   if (!*id)
@@ -1123,7 +1213,7 @@ attribute_unacceptable (u_int16_t type, u_int8_t *value, u_int16_t len,
 
   if (!tag)
     {
-      LOG_DBG ((LOG_NEGOTIATION, 60, 
+      LOG_DBG ((LOG_NEGOTIATION, 60,
 		"attribute_unacceptable: attribute type %d not known", type));
       return 1;
     }
@@ -1165,8 +1255,8 @@ attribute_unacceptable (u_int16_t type, u_int8_t *value, u_int16_t len,
 	  LIST_INSERT_HEAD (&vs->attrs, node, link);
 	  return 0;
 	}
-      LOG_DBG ((LOG_NEGOTIATION, 70, 
-		"attribute_unacceptable: %s: got %s, expected %s", tag, 
+      LOG_DBG ((LOG_NEGOTIATION, 70,
+		"attribute_unacceptable: %s: got %s, expected %s", tag,
 		constant_lookup (map, decode_16 (value)), str));
       return 1;
 
@@ -1223,7 +1313,7 @@ attribute_unacceptable (u_int16_t type, u_int8_t *value, u_int16_t len,
 		  goto bail_out;
 		}
 	    }
-	  LOG_DBG ((LOG_NEGOTIATION, 70, 
+	  LOG_DBG ((LOG_NEGOTIATION, 70,
 		    "attribute_unacceptable: unrecognized LIFE_TYPE %d",
 		    decode_16 (value)));
 	  vs->life = 0;

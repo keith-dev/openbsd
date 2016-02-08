@@ -1,4 +1,4 @@
-#	$OpenBSD: Makefile,v 1.65 2001/03/28 22:52:22 todd Exp $
+#	$OpenBSD: Makefile,v 1.81 2001/09/25 10:26:39 espie Exp $
 
 #
 # For more information on building in tricky environments, please see
@@ -42,6 +42,10 @@ SUBDIR+= sys lkm
 SUBDIR+= kerberosIV
 .endif
 
+.if (${KERBEROS5:L} == "yes")
+SUBDIR+= kerberosV
+.endif
+
 .if   make(clean) || make(cleandir) || make(obj)
 SUBDIR+= distrib
 .endif
@@ -53,48 +57,45 @@ SUBDIR+= regress
 
 regression-tests:
 	@echo Running regression tests...
-	@(cd ${.CURDIR}/regress && ${MAKE} regress)
+	@cd ${.CURDIR}/regress && exec ${MAKE} regress
 .endif
 
 includes:
-	(cd ${.CURDIR}/include; ${MAKE} prereq; ${MAKE} includes)
+	cd ${.CURDIR}/include && ${MAKE} prereq && exec ${SUDO} ${MAKE} includes
 
 beforeinstall:
-.ifndef DESTDIR
-	(cd ${.CURDIR}/etc && ${MAKE} DESTDIR= distrib-dirs)
-.else
-	(cd ${.CURDIR}/etc && ${MAKE} distrib-dirs)
-.endif
-	(cd ${.CURDIR}/include; ${MAKE} includes)
+	cd ${.CURDIR}/etc && exec ${MAKE} DESTDIR=${DESTDIR} distrib-dirs
+	cd ${.CURDIR}/include && exec ${MAKE} includes
 
 afterinstall:
 .ifndef NOMAN
-	(cd ${.CURDIR}/share/man && ${MAKE} makedb)
+	cd ${.CURDIR}/share/man && exec ${MAKE} makedb
 .endif
 
 build:
 .ifdef GLOBAL_AUTOCONF_CACHE
 	cp /dev/null ${GLOBAL_AUTOCONF_CACHE}
 .endif
-	(cd ${.CURDIR}/share/mk && ${SUDO} ${MAKE} install)
-	(cd ${.CURDIR}/include; ${MAKE} prereq; ${SUDO} ${MAKE} includes)
+	cd ${.CURDIR}/share/mk && exec ${SUDO} ${MAKE} install
+	cd ${.CURDIR}/include && ${MAKE} prereq && exec ${SUDO} ${MAKE} includes
 	${SUDO} ${MAKE} cleandir
-	(cd ${.CURDIR}/lib && ${MAKE} depend && ${MAKE} && \
-	    NOMAN=1 ${SUDO} ${MAKE} install)
-	(cd ${.CURDIR}/gnu/lib && ${MAKE} depend && ${MAKE} && \
-	    NOMAN=1 ${SUDO} ${MAKE} install)
+	cd ${.CURDIR}/lib && ${MAKE} depend && ${MAKE} && \
+	    NOMAN=1 exec ${SUDO} ${MAKE} install
+	cd ${.CURDIR}/gnu/lib && ${MAKE} depend && ${MAKE} && \
+	    NOMAN=1 exec ${SUDO} ${MAKE} install
 .if (${KERBEROS:L} == "yes")
-	(cd ${.CURDIR}/kerberosIV/lib && ${MAKE} depend && ${MAKE} && \
-	    NOMAN=1 ${SUDO} ${MAKE} install)
+	cd ${.CURDIR}/kerberosIV/lib && ${MAKE} depend && ${MAKE} && \
+	    NOMAN=1 exec ${SUDO} ${MAKE} install
 .endif
-	(cd ${.CURDIR}/gnu/usr.bin/perl && \
+.if (${KERBEROS5:L} == "yes")
+	cd ${.CURDIR}/kerberosV/lib && ${MAKE} depend && ${MAKE} && \
+	    NOMAN=1 exec ${SUDO} ${MAKE} install
+.endif
+	cd ${.CURDIR}/gnu/usr.bin/perl && \
 	    ${MAKE} -f Makefile.bsd-wrapper depend && \
 	    ${MAKE} -f Makefile.bsd-wrapper perl.lib && \
-	    ${SUDO} ${MAKE} -f Makefile.bsd-wrapper install.lib)
-.if (${MACHINE_ARCH} == "mips")
-	ldconfig -R
-.endif
-	${MAKE} depend && ${MAKE} && ${SUDO} ${MAKE} install
+	    exec ${SUDO} ${MAKE} -f Makefile.bsd-wrapper install.lib
+	${MAKE} depend && ${MAKE} && exec ${SUDO} ${MAKE} install
 
 .if !defined(TARGET)
 cross-tools:
@@ -106,42 +107,47 @@ cross-tools:	cross-helpers cross-dirs cross-includes cross-binutils \
 CROSSDIR=	${DESTDIR}/usr/cross/${TARGET}
 CROSSENV=	AR=${CROSSDIR}/usr/bin/ar AS=${CROSSDIR}/usr/bin/as \
 		CC=${CROSSDIR}/usr/bin/cc CPP=${CROSSDIR}/usr/bin/cpp \
+		CXX=${CROSSDIR}/usr/bin/c++ \
 		LD=${CROSSDIR}/usr/bin/ld NM=${CROSSDIR}/usr/bin/nm \
-		LORDER=${CROSSDIR}/usr/bin/lorder \
-		RANLIB=${CROSSDIR}/usr/bin/ranlib \
+		LORDER=/usr/bin/lorder RANLIB=${CROSSDIR}/usr/bin/ranlib \
 		SIZE=${CROSSDIR}/usr/bin/size STRIP=${CROSSDIR}/usr/bin/strip \
 		HOSTCC=cc
 CROSSPATH=	${PATH}:${CROSSDIR}/usr/bin
 
+cross-env:
+	@echo ${CROSSENV} DESTDIR=${CROSSDIR} MACHINE=${TARGET} MACHINE_ARCH=`cat ${CROSSDIR}/TARGET_ARCH`
+
 cross-helpers:
-	mkdir -p ${CROSSDIR}
-	echo _MACHINE_ARCH | \
-	    cat ${.CURDIR}/sys/arch/${TARGET}/include/param.h - | \
-	    ${CPP} -E -I${.CURDIR}/sys/arch | \
-	    sed -n '$$p' >${CROSSDIR}/TARGET_ARCH
-# GROSS KLUDGE  MACHINE_ARCH is mips, but we use mipsel for gnu tools.
-.if ${TARGET} == "arc" || ${TARGET} == "pmax"
-	eval `grep '^osr=' sys/conf/newvers.sh`; \
-	   sed "s/\$$/el-unknown-openbsd$$osr/" ${CROSSDIR}/TARGET_ARCH > \
-	   ${CROSSDIR}/TARGET_CANON
-.else
-	eval `grep '^osr=' sys/conf/newvers.sh`; \
+	@-mkdir -p ${CROSSDIR}
+	@case ${TARGET} in \
+		sparc|i386|m68k|alpha|hppa|powerpc|sparc64|m88k|vax) \
+			echo ${TARGET} ;;\
+		amiga|sun3|mac68k|hp300|mvme68k) \
+			echo m68k ;;\
+		mvme88k) \
+			echo m88k ;;\
+		mvmeppc|macppc) \
+			echo powerpc ;;\
+		*) \
+			(echo Unknown arch ${TARGET} >&2) ; exit 1;; \
+	esac > ${CROSSDIR}/TARGET_ARCH
+	@echo TARGET_ARCH is `cat ${CROSSDIR}/TARGET_ARCH`
+	@eval `grep '^osr=' sys/conf/newvers.sh`; \
 	   sed "s/\$$/-unknown-openbsd$$osr/" ${CROSSDIR}/TARGET_ARCH > \
 	   ${CROSSDIR}/TARGET_CANON
-.endif
 
 cross-dirs:	${CROSSDIR}/stamp.dirs
 	@-mkdir -p ${CROSSDIR}
 	@-mkdir -p ${CROSSDIR}/usr/obj
 	@-mkdir -p ${CROSSDIR}/usr/bin
-	@-mkdir -p ${CROSSDIR}/usr/include
 	@-mkdir -p ${CROSSDIR}/usr/include/kerberosIV
-	@-mkdir -p ${CROSSDIR}/usr/lib
+	@-mkdir -p ${CROSSDIR}/usr/include/kerberosV
+	@-mkdir -p ${CROSSDIR}/usr/lib/apache/include/xml
 	@-mkdir -p ${CROSSDIR}/usr/libexec
 	@-mkdir -p ${CROSSDIR}/var/db
 	@-mkdir -p ${CROSSDIR}/usr/`cat ${CROSSDIR}/TARGET_CANON`
 	@ln -sf ${CROSSDIR}/usr/include \
-		${CROSSDIR}/usr/`cat ${CROSSDIR}/TARGET_CANON`/include
+	    ${CROSSDIR}/usr/`cat ${CROSSDIR}/TARGET_CANON`/include
 	@ln -sf ${CROSSDIR}/usr/lib \
 	    ${CROSSDIR}/usr/`cat ${CROSSDIR}/TARGET_CANON`/lib
 	@-mkdir -p ${CROSSDIR}/usr/obj
@@ -158,14 +164,14 @@ cross-includes:	cross-dirs
 	    MACHINE=${TARGET} MACHINE_ARCH=`cat ${CROSSDIR}/TARGET_ARCH` \
 	    ${MAKE} DESTDIR=${CROSSDIR} includes
 
-.if ${TARGET} == "powerpc" || ${TARGET} == "alpha" || ${TARGET} == "arc" || \
-    ${TARGET} == "pmax" || ${TARGET} == "wgrisc" || ${TARGET} == "hppa"
-cross-binutils: cross-binutils-new
+.if ${TARGET} == "macppc" || ${TARGET} == "alpha" || ${TARGET} == "hppa" || \
+    ${TARGET} == "sparc64"|| ${TARGET} == "mvmeppc"
+cross-binutils: cross-binutils-new cross-binutils-links
 .else
-cross-binutils: cross-binutils-old
+cross-binutils: cross-binutils-old cross-binutils-links
 .endif
 
-cross-binutils-new:	cross-dirs
+cross-binutils-new:	cross-dirs 
 	export BSDSRCDIR=`pwd`; \
 	    (cd ${.CURDIR}/gnu/usr.bin/binutils; \
 	    BSDOBJDIR=${CROSSDIR}/usr/obj \
@@ -176,25 +182,30 @@ cross-binutils-new:	cross-dirs
 	    --prefix ${CROSSDIR}/usr \
 	    --disable-nls --disable-gdbtk --disable-commonbfdlib \
 	    --target `cat ${CROSSDIR}/TARGET_CANON` && \
-	    ${MAKE} CFLAGS=${CFLAGS} && ${MAKE} install ) && \
-	${INSTALL} -c -o ${BINOWN} -g ${BINGRP} -m 755 \
-	    ${.CURDIR}/usr.bin/lorder/lorder.sh \
-	    ${CROSSDIR}/usr/bin/lorder
+	    ${MAKE} CFLAGS="${CFLAGS}" && ${MAKE} install )
 
 cross-binutils-old: cross-gas cross-ar cross-ld cross-strip cross-size \
 	cross-ranlib cross-nm
+
+cross-binutils-links: cross-dirs
 	for cmd in ar as ld nm ranlib size strip; do \
-	    ln -sf $$cmd \
-	    ${CROSSDIR}/usr/bin/`cat ${CROSSDIR}/TARGET_CANON`-$$cmd; done
+	    if [ ! -e ${CROSSDIR}/usr/bin/$$cmd -a -e ${CROSSDIR}/usr/bin/`cat ${CROSSDIR}/TARGET_CANON`-$$cmd ]; then \
+		ln -sf ${CROSSDIR}/usr/bin/`cat ${CROSSDIR}/TARGET_CANON`-$$cmd \
+		${CROSSDIR}/usr/bin/$$cmd ;\
+	    elif [ -e ${CROSSDIR}/usr/bin/$$cmd -a ! -e ${CROSSDIR}/usr/bin/`cat ${CROSSDIR}/TARGET_CANON`-$$cmd ]; then \
+		ln -sf ${CROSSDIR}/usr/bin/$$cmd \
+		${CROSSDIR}/usr/bin/`cat ${CROSSDIR}/TARGET_CANON`-$$cmd; \
+	    fi ;\
+	done
 
 cross-gas:	cross-dirs
 	(cd ${.CURDIR}/gnu/usr.bin/gas; \
 	    BSDOBJDIR=${CROSSDIR}/usr/obj \
 	    BSDSRCDIR=${.CURDIR} MAKEOBJDIR=obj.${MACHINE}.${TARGET} \
 	    ${MAKE} obj; \
-	    TARGET_MACHINE_ARCH=${TARGET} MAKEOBJDIR=obj.${MACHINE}.${TARGET} \
-	    ${MAKE}; \
-	    TARGET_MACHINE_ARCH=${TARGET} \
+	    TARGET_MACHINE_ARCH=`cat ${CROSSDIR}/TARGET_ARCH` \
+	    MAKEOBJDIR=obj.${MACHINE}.${TARGET} ${MAKE} depend all; \
+	    TARGET_MACHINE_ARCH=`cat ${CROSSDIR}/TARGET_ARCH` \
 	    DESTDIR=${CROSSDIR} MAKEOBJDIR=obj.${MACHINE}.${TARGET} \
 	    ${MAKE} NOMAN= install)
 	ln -sf ${CROSSDIR}/usr/bin/as \
@@ -205,9 +216,9 @@ cross-ld:	cross-dirs
 	    BSDOBJDIR=${CROSSDIR}/usr/obj \
 	    BSDSRCDIR=${.CURDIR} MAKEOBJDIR=obj.${MACHINE}.${TARGET} \
 	    ${MAKE} obj; \
-	    TARGET_MACHINE_ARCH=${TARGET} MAKEOBJDIR=obj.${MACHINE}.${TARGET} \
-	    ${MAKE} NOMAN=; \
-	    TARGET_MACHINE_ARCH=${TARGET} \
+	    TARGET_MACHINE_ARCH=`cat ${CROSSDIR}/TARGET_ARCH` \
+	    MAKEOBJDIR=obj.${MACHINE}.${TARGET} ${MAKE} NOMAN= depend all; \
+	    TARGET_MACHINE_ARCH=`cat ${CROSSDIR}/TARGET_ARCH` \
 	    DESTDIR=${CROSSDIR} MAKEOBJDIR=obj.${MACHINE}.${TARGET} \
 	    ${MAKE} NOMAN= install)
 	ln -sf ${CROSSDIR}/usr/bin/ld \
@@ -218,7 +229,7 @@ cross-ar:	cross-dirs
 	    BSDOBJDIR=${CROSSDIR}/usr/obj \
 	    BSDSRCDIR=${.CURDIR} MAKEOBJDIR=obj.${MACHINE}.${TARGET} \
 	    ${MAKE} obj; \
-	    MAKEOBJDIR=obj.${MACHINE}.${TARGET} ${MAKE} NOMAN=; \
+	    MAKEOBJDIR=obj.${MACHINE}.${TARGET} ${MAKE} NOMAN= depend all; \
 	    DESTDIR=${CROSSDIR} MAKEOBJDIR=obj.${MACHINE}.${TARGET} \
 	    ${MAKE} NOMAN= install)
 	ln -sf ${CROSSDIR}/usr/bin/ar \
@@ -229,7 +240,7 @@ cross-ranlib:	cross-dirs
 	    BSDOBJDIR=${CROSSDIR}/usr/obj \
 	    BSDSRCDIR=${.CURDIR} MAKEOBJDIR=obj.${MACHINE}.${TARGET} \
 	    ${MAKE} obj; \
-	    MAKEOBJDIR=obj.${MACHINE}.${TARGET} ${MAKE} NOMAN=; \
+	    MAKEOBJDIR=obj.${MACHINE}.${TARGET} ${MAKE} NOMAN= depend all; \
 	    DESTDIR=${CROSSDIR} MAKEOBJDIR=obj.${MACHINE}.${TARGET} \
 	    ${MAKE} NOMAN= install)
 	ln -sf ${CROSSDIR}/usr/bin/ranlib \
@@ -241,9 +252,11 @@ cross-strip:	cross-dirs
 	    BSDSRCDIR=${.CURDIR} MAKEOBJDIR=obj.${MACHINE}.${TARGET} \
 	    ${MAKE} obj; \
 	    MAKEOBJDIR=obj.${MACHINE}.${TARGET} \
-	    ${MAKE} TARGET_MACHINE_ARCH=${TARGET} NOMAN=; \
+	    ${MAKE} TARGET_MACHINE_ARCH=`cat ${CROSSDIR}/TARGET_ARCH` \
+	    NOMAN= depend all; \
 	    DESTDIR=${CROSSDIR} MAKEOBJDIR=obj.${MACHINE}.${TARGET} \
-	    ${MAKE} TARGET_MACHINE_ARCH=${TARGET} NOMAN= install)
+	    ${MAKE} TARGET_MACHINE_ARCH=`cat ${CROSSDIR}/TARGET_ARCH` \
+	    NOMAN= install)
 	ln -sf ${CROSSDIR}/usr/bin/strip \
 	    ${CROSSDIR}/usr/`cat ${CROSSDIR}/TARGET_CANON`/bin/strip
 
@@ -253,7 +266,8 @@ cross-size:	cross-dirs
 	    BSDSRCDIR=${.CURDIR} MAKEOBJDIR=obj.${MACHINE}.${TARGET} \
 	    ${MAKE} obj; \
 	    MAKEOBJDIR=obj.${MACHINE}.${TARGET} \
-	    ${MAKE} TARGET_MACHINE_ARCH=${TARGET} NOMAN=; \
+	    ${MAKE} TARGET_MACHINE_ARCH=`cat ${CROSSDIR}/TARGET_ARCH` \
+	    NOMAN= depend all; \
 	    DESTDIR=${CROSSDIR} MAKEOBJDIR=obj.${MACHINE}.${TARGET} \
 	    ${MAKE} NOMAN= install)
 	ln -sf ${CROSSDIR}/usr/bin/size \
@@ -265,7 +279,8 @@ cross-nm:	cross-dirs
 	    BSDSRCDIR=${.CURDIR} MAKEOBJDIR=obj.${MACHINE}.${TARGET} \
 	    ${MAKE} obj; \
 	    MAKEOBJDIR=obj.${MACHINE}.${TARGET} \
-	    ${MAKE} TARGET_MACHINE_ARCH=${TARGET} NOMAN=; \
+	    ${MAKE} TARGET_MACHINE_ARCH=`cat ${CROSSDIR}/TARGET_ARCH` \
+	    NOMAN= depend all; \
 	    DESTDIR=${CROSSDIR} MAKEOBJDIR=obj.${MACHINE}.${TARGET} \
 	    ${MAKE} NOMAN= install)
 	ln -sf ${CROSSDIR}/usr/bin/nm \
@@ -279,17 +294,20 @@ cross-gcc:	cross-dirs
 	(cd ${CROSSDIR}/usr/obj/gnu/egcs/gcc; \
 	    /bin/sh ${.CURDIR}/gnu/egcs/gcc/configure \
 	    --prefix ${CROSSDIR}/usr \
-	    --target `cat ${CROSSDIR}/TARGET_CANON` && \
-	    PATH=${CROSSPATH} ${MAKE} BISON=yacc LANGUAGES=c \
+	    --target `cat ${CROSSDIR}/TARGET_CANON` \
+	    --with-gxx-include-dir=${CROSSDIR}/usr/include/g++ && \
+	    PATH=${CROSSPATH} ${MAKE} BISON=yacc LANGUAGES="c c++" \
 	    LDFLAGS=${LDSTATIC} build_infodir=. \
 	    GCC_FOR_TARGET="./xgcc -B./ -I${CROSSDIR}/usr/include" && \
-	    ${MAKE} BISON=yacc LANGUAGES=c LDFLAGS=${LDSTATIC} \
+	    ${MAKE} BISON=yacc LANGUAGES="c c++" LDFLAGS=${LDSTATIC} \
 	    GCC_FOR_TARGET="./xgcc -B./ -I${CROSSDIR}/usr/include" \
 	    build_infodir=. INSTALL_MAN= INSTALL_HEADERS_DIR= install)
 	ln -sf ${CROSSDIR}/usr/bin/`cat ${CROSSDIR}/TARGET_CANON`-gcc \
 	    ${CROSSDIR}/usr/bin/cc
+	ln -sf ${CROSSDIR}/usr/bin/`cat ${CROSSDIR}/TARGET_CANON`-g++ \
+	    ${CROSSDIR}/usr/bin/c++
 	${INSTALL} -c -o ${BINOWN} -g ${BINGRP} -m ${BINMODE} \
-	    ${CROSSDIR}/usr/obj/gnu/egcs/gcc/xcpp \
+	    ${CROSSDIR}/usr/obj/gnu/egcs/gcc/cpp \
 	    ${CROSSDIR}/usr/libexec/cpp
 	sed -e 's#/usr/libexec/cpp#${CROSSDIR}/usr/libexec/cpp#' \
 	    -e 's#/usr/include#${CROSSDIR}/usr/include#' \
@@ -324,6 +342,18 @@ cross-lib:	cross-dirs
 	MACHINE=${TARGET} MACHINE_ARCH=`cat ${CROSSDIR}/TARGET_ARCH`; \
 	export MACHINE MACHINE_ARCH; \
 	cd kerberosIV/lib; \
+	BSDOBJDIR=${CROSSDIR}/usr/obj BSDSRCDIR=${.CURDIR} \
+	    MAKEOBJDIR=obj.${MACHINE}.${TARGET} ${MAKE} obj; \
+	${CROSSENV} MAKEOBJDIR=obj.${MACHINE}.${TARGET} \
+	    ${MAKE} NOMAN= depend; \
+	${CROSSENV} MAKEOBJDIR=obj.${MACHINE}.${TARGET} ${MAKE} NOMAN=; \
+	${CROSSENV} DESTDIR=${CROSSDIR} MAKEOBJDIR=obj.${MACHINE}.${TARGET} \
+	    ${MAKE} NOMAN= install
+.endif
+.if (${KERBEROS5:L} == "yes")
+	MACHINE=${TARGET} MACHINE_ARCH=`cat ${CROSSDIR}/TARGET_ARCH`; \
+	export MACHINE MACHINE_ARCH; \
+	cd kerberosV/lib; \
 	BSDOBJDIR=${CROSSDIR}/usr/obj BSDSRCDIR=${.CURDIR} \
 	    MAKEOBJDIR=obj.${MACHINE}.${TARGET} ${MAKE} obj; \
 	${CROSSENV} MAKEOBJDIR=obj.${MACHINE}.${TARGET} \

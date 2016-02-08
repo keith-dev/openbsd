@@ -1,11 +1,12 @@
-#	$OpenBSD: Makefile,v 1.56 2001/04/17 05:09:21 drahn Exp $
+#	$OpenBSD: Makefile,v 1.62 2001/08/21 22:29:14 deraadt Exp $
 
 # Not ported: XNSrouted enpload scsiformat startslip
 # Missing: icheck
 
 SUBDIR= atactl badsect brconfig ccdconfig disklabel dmesg fsck ifconfig init \
-	ipf ipfstat ipnat ipsecadm isakmpd kbd lmccontrol mknod modload \
-	modunload mount mountd ncheck_ffs nfsd nologin photurisd ping \
+	iopctl ipsecadm isakmpd kbd lmccontrol mknod modload \
+	modunload mount mountd ncheck_ffs nfsd nologin pfctl pflogd \
+	photurisd ping \
 	quotacheck raidctl reboot route routed savecore scan_ffs scsi \
 	shutdown slattach startkey swapctl sysctl ttyflags umount
 
@@ -31,9 +32,6 @@ SUBDIR+= mount_tcfs
 SUBDIR+= ping6 rtsol
 
 # Man pages (and manpages to do)
-SUBDIR+= fdisk pdisk ancontrol wicontrol edlabel wsconsctl
-
-
-# Add bim if we resurrect pc532
+SUBDIR+= fdisk pdisk ancontrol wicontrol wsconsctl
 
 .include <bsd.subdir.mk>

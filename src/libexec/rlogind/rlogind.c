@@ -1,4 +1,4 @@
-/*	$OpenBSD: rlogind.c,v 1.27 2001/01/28 19:34:31 niklas Exp $	*/
+/*	$OpenBSD: rlogind.c,v 1.29 2001/07/08 21:18:09 deraadt Exp $	*/
 
 /*-
  * Copyright (c) 1983, 1988, 1989, 1993
@@ -41,7 +41,7 @@ static char copyright[] =
 
 #ifndef lint
 /* from: static char sccsid[] = "@(#)rlogind.c	8.1 (Berkeley) 6/4/93"; */
-static char *rcsid = "$OpenBSD: rlogind.c,v 1.27 2001/01/28 19:34:31 niklas Exp $";
+static char *rcsid = "$OpenBSD: rlogind.c,v 1.29 2001/07/08 21:18:09 deraadt Exp $";
 #endif /* not lint */
 
 /*
@@ -70,6 +70,7 @@ static char *rcsid = "$OpenBSD: rlogind.c,v 1.27 2001/01/28 19:34:31 niklas Exp 
 
 #include <pwd.h>
 #include <syslog.h>
+#include <util.h>
 #include <errno.h>
 #include <stdio.h>
 #include <unistd.h>
@@ -204,7 +205,7 @@ doit(f, fromp)
 	int master, pid, on = 1;
 	int authenticated = 0;
 	char hostname[MAXHOSTNAMELEN];
-	int good = 0;
+	int good;
 	char c;
 	char naddr[NI_MAXHOST];
 	char saddr[NI_MAXHOST];
@@ -248,18 +249,18 @@ doit(f, fromp)
 		exit(1);
 	}
 
+	good = 0;
 	if (getnameinfo((struct sockaddr *)fromp, fromp->sa_len,
 	    saddr, sizeof(saddr), NULL, 0, NI_NAMEREQD) == 0) {
-		strncpy(hostname, saddr, sizeof(hostname)-1);
+		strlcpy(hostname, saddr, sizeof(hostname));
 		if (check_all) {
-			good = 0;
 			memset(&hints, 0, sizeof(hints));
 			hints.ai_family = fromp->sa_family;
 			hints.ai_socktype = SOCK_STREAM;
 			hints.ai_flags = AI_CANONNAME;
 			res0 = NULL;
 			gaierror = getaddrinfo(hostname, "0", &hints, &res0);
-			for (res = res0; good == 0 && res; res = res->ai_next) {
+			for (res = res0; !good && res; res = res->ai_next) {
 				if (res->ai_family != fromp->sa_family)
 					continue;
 				if (res->ai_addrlen != fromp->sa_len)
@@ -273,12 +274,10 @@ doit(f, fromp)
 				freeaddrinfo(res0);
 		} else
 			good = 1;
-	} else
-		good = 0;
+	}
 	/* aha, the DNS looks spoofed */
-	if (good == 0)
-		strncpy(hostname, naddr, sizeof(hostname)-1);
-	hostname[sizeof(hostname)-1] = '\0';
+	if (!good)
+		strlcpy(hostname, naddr, sizeof(hostname));
 
 
 #ifdef	KERBEROS
@@ -418,7 +417,7 @@ protocol(f, p)
 	register int f, p;
 {
 	char pibuf[1024+1], fibuf[1024], *pbp, *fbp;
-	register pcc = 0, fcc = 0;
+	register int pcc = 0, fcc = 0;
 	int cc, nfd, n;
 	char cntl;
 
@@ -449,12 +448,13 @@ protocol(f, p)
 			omask = &obits;
 		} else
 			FD_SET(f, &ibits);
-		if (pcc >= 0)
+		if (pcc >= 0) {
 			if (pcc) {
 				FD_SET(f, &obits);
 				omask = &obits;
 			} else
 				FD_SET(p, &ibits);
+		}
 		FD_SET(p, &ebits);
 		if ((n = select(nfd, &ibits, omask, &ebits, 0)) < 0) {
 			if (errno == EINTR)

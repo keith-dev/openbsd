@@ -1,4 +1,4 @@
-.\"     $OpenBSD: txp.4,v 1.1 2001/04/16 02:08:14 jason Exp $
+.\"     $OpenBSD: txp.4,v 1.9 2001/10/05 14:45:53 mpech Exp $
 .\"
 .\" Copyright (c) 2001 Jason L. Wright (jason@thought.net)
 .\" All rights reserved.
@@ -34,7 +34,7 @@
 .Os
 .Sh NAME
 .Nm txp
-.Nd 3Com 3XP Typhoon/Sidewinder (3C990) Ethernet interface
+.Nd 3Com 3XP Typhoon/Sidewinder (3CR990) Ethernet interface
 .Sh SYNOPSIS
 .Cd "txp* at pci? dev ? function ?"
 .Sh DESCRIPTION
@@ -45,6 +45,7 @@ interface provides access to the 10Mb/s and 100Mb/s Ethernet networks via the
 .Tn Typhoon/Sidewinder
 chipset.
 This driver supports the following cards:
+.Pp
 .Bl -bullet -offset indent -compact
 .It
 3Com 3CR990-TX-95
@@ -56,19 +57,32 @@ This driver supports the following cards:
 3Com 3CR990SVR97
 .El
 .Pp
-Only basic Ethernet functions are provided.
-There is no support currently for
+Basic Ethernet functions are provided as well as support for
 .Xr vlan 4
-hardware tagging assistance,
+tag removal and insertion assistance, receive
 .Xr ip 4 ,
 .Xr tcp 4 ,
 and
-.Xr udp 4 ,
+.Xr udp 4
+checksum offloading,
+and
+transmit
+.Xr ip 4
+checksum offloading.
+There is currently no support for
+transmit
+.Xr tcp 4
+or
+.Xr udp 4
 checksum offloading,
 .Xr tcp 4
-segmentation offloading, nor
+segmentation, nor
 .Xr ipsec 4
 acceleration.
+Note that hardware checksumming is only used when the interface is not
+in
+.Xr bridge 4
+mode.
 .Pp
 Each of the host's network addresses
 is specified at boot time with an
@@ -84,9 +98,9 @@ network.
 When a
 .Nm
 interface is brought up, by default, it will attempt to auto-negotiate the
-link speed and duplex mode.  The speeds, in order of attempt, are:
-100Mb/s Full Duplex, 100Mb/s Half Duplex, 10 Mb/s Full Duplex, and
-10 Mb/s Half Duplex.
+link speed and duplex mode.
+The speeds, in order of attempt, are: 100Mb/s Full Duplex, 100Mb/s Half Duplex,
+10 Mb/s Full Duplex, and 10 Mb/s Half Duplex.
 .Pp
 The
 .Nm
@@ -117,8 +131,7 @@ Use 10baseT, half duplex
 .Xr vlan 4 ,
 .Xr ifconfig 8
 .Sh HISTORY
-.Ox
-support for the
+The
 .Nm
-first appeared in
+driver first appeared in
 .Ox 2.9 .

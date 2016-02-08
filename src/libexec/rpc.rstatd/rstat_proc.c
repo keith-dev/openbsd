@@ -1,4 +1,4 @@
-/*	$OpenBSD: rstat_proc.c,v 1.13 2001/01/24 11:42:37 deraadt Exp $	*/
+/*	$OpenBSD: rstat_proc.c,v 1.17 2001/10/02 01:14:42 millert Exp $	*/
 
 /*
  * Sun RPC is a product of Sun Microsystems, Inc. and is provided for
@@ -31,7 +31,7 @@
 #ifndef lint
 /*static char sccsid[] = "from: @(#)rpc.rstatd.c 1.1 86/09/25 Copyr 1984 Sun Micro";*/
 /*static char sccsid[] = "from: @(#)rstat_proc.c	2.2 88/08/01 4.0 RPCSRC";*/
-static char rcsid[] = "$OpenBSD: rstat_proc.c,v 1.13 2001/01/24 11:42:37 deraadt Exp $";
+static char rcsid[] = "$OpenBSD: rstat_proc.c,v 1.17 2001/10/02 01:14:42 millert Exp $";
 #endif
 
 /*
@@ -40,33 +40,25 @@ static char rcsid[] = "$OpenBSD: rstat_proc.c,v 1.13 2001/01/24 11:42:37 deraadt
  * Copyright (c) 1984 by Sun Microsystems, Inc.
  */
 
+#include <sys/param.h>
+#include <sys/vmmeter.h>
+#include <sys/dkstat.h>
+#include <sys/socket.h>
+#include <sys/sysctl.h>
+#include <net/if.h>
+#include <vm/vm.h>
+#include <uvm/uvm_extern.h>
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <signal.h>
-#include <fcntl.h>
-#include <kvm.h>
-#include <limits.h>
-#include <rpc/rpc.h>
-#include <sys/socket.h>
-#include <nlist.h>
 #include <syslog.h>
-#include <sys/errno.h>
-#include <sys/param.h>
-#ifdef BSD
-#include <sys/vmmeter.h>
-#include <sys/dkstat.h>
+#include <fcntl.h>
+#include <limits.h>
+#include <errno.h>
+#include <ifaddrs.h>
 #include "dkstats.h"
-#else
-#include <sys/dk.h>
-#endif
-#include <net/if.h>
-
-#if defined(UVM)
-#include <vm/vm.h>
-#include <sys/sysctl.h>
-#include <uvm/uvm_extern.h>
-#endif
 
 #undef FSHIFT			 /* Use protocol's shift and scale values */
 #undef FSCALE
@@ -79,49 +71,16 @@ static char rcsid[] = "$OpenBSD: rstat_proc.c,v 1.13 2001/01/24 11:42:37 deraadt
 #undef if_collisions
 #include <rpcsvc/rstat.h>
 
-#ifdef BSD
-#define BSD_CPUSTATES	5	/* Use protocol's idea of CPU states */
 int	cp_xlat[CPUSTATES] = { CP_USER, CP_NICE, CP_SYS, CP_IDLE };
-#endif
 
-struct nlist nl[] = {
-#define	X_IFNET		0
-	{ "_ifnet" },
-#define	X_BOOTTIME	1
-	{ "_boottime" },
-#ifndef BSD
-#define	X_HZ		2
-	{ "_hz" },
-#define	X_CPTIME	3
-	{ "_cp_time" },
-#define	X_DKXFER	4
-	{ "_dk_xfer" },
-#define	X_CNT		5
-	{ "_cnt" },
-#else
-#ifndef UVM
-#define	X_CNT		2
-	{ "_cnt" },
-#endif
-#endif
-	{ NULL },
-};
-
-#ifdef BSD
 extern int dk_ndrive;		/* from dkstats.c */
 extern struct _disk cur, last;
 char *memf = NULL, *nlistf = NULL;
-#endif
 int hz;
-
-struct ifnet_head ifnetq;	/* chain of ethernet interfaces */
-int numintfs;
-int stats_service();
 
 extern int from_inetd;
 int sincelastreq = 0;		/* number of alarms since last request */
 extern int closedown;
-kvm_t *kfd;
 
 union {
 	struct stats s1;
@@ -129,19 +88,22 @@ union {
 	struct statstime s3;
 } stats_all;
 
-void updatestat();
-static stat_is_init = 0;
-extern int errno;
+int stats_service();
+void updatestat(int);
+void setup(void);
+
+static int stat_is_init = 0;
 
 #ifndef FSCALE
 #define FSCALE (1 << 8)
 #endif
 
+void
 stat_init()
 {
 	stat_is_init = 1;
 	setup();
-	updatestat();
+	updatestat(0);
 	(void) signal(SIGALRM, updatestat);	/* XXX huge signal race */
 	alarm(1);
 }
@@ -189,7 +151,7 @@ rstatproc_havedisk_3_svc(arg, rqstp)
 	if (!stat_is_init)
 		stat_init();
 	sincelastreq = 0;
-	have = havedisk();
+	have = dk_ndrive != 0;
 	return (&have);
 }
 
@@ -210,23 +172,16 @@ rstatproc_havedisk_1_svc(arg, rqstp)
 }
 
 void
-updatestat()
+updatestat(int sig)
 {
-	long off;
-	int i, save_errno = errno;
-#ifdef UVM
+	int i, mib[2], save_errno = errno;
 	struct uvmexp uvmexp;
-	int mib[2];
 	size_t len;
-#else
-	struct vmmeter cnt;
-#endif
-	struct ifnet ifnet;
+	struct if_data *ifdp;
+	struct ifaddrs *ifaddrs, *ifa;
 	double avrun[3];
 	struct timeval tm, btm;
-#ifdef BSD
 	long *cp_time = cur.cp_time;
-#endif
 
 #ifdef DEBUG
 	syslog(LOG_DEBUG, "entering updatestat");
@@ -236,9 +191,10 @@ updatestat()
 		syslog(LOG_DEBUG, "about to closedown");
 #endif
 		if (from_inetd)
-			exit(0);
+			_exit(0);
 		else {
 			stat_is_init = 0;
+			errno = save_errno;
 			return;
 		}
 	}
@@ -253,33 +209,18 @@ updatestat()
 	for (i = 0; i < dk_ndrive && i < DK_NDRIVE; i++)
 		stats_all.s1.dk_xfer[i] = cur.dk_xfer[i];
 	
-#ifdef BSD
 	for (i = 0; i < CPUSTATES; i++)
 		stats_all.s1.cp_time[i] = cp_time[cp_xlat[i]];
-#else
-	if (kvm_read(kfd, (long)nl[X_HZ].n_value, (char *)&hz, sizeof hz) !=
-	    sizeof hz) {
-		syslog(LOG_ERR, "can't read hz from kmem");
-		exit(1);
-	}
- 	if (kvm_read(kfd, (long)nl[X_CPTIME].n_value,
-	    (char *)stats_all.s1.cp_time, sizeof (stats_all.s1.cp_time))
-	    != sizeof (stats_all.s1.cp_time)) {
-		syslog(LOG_ERR, "can't read cp_time from kmem");
-		exit(1);
-	}
-#endif
-#ifdef BSD
 	(void)getloadavg(avrun, sizeof(avrun) / sizeof(avrun[0]));
-#endif
 	stats_all.s2.avenrun[0] = avrun[0] * FSCALE;
 	stats_all.s2.avenrun[1] = avrun[1] * FSCALE;
 	stats_all.s2.avenrun[2] = avrun[2] * FSCALE;
- 	if (kvm_read(kfd, (long)nl[X_BOOTTIME].n_value,
-	    (char *)&btm, sizeof (stats_all.s2.boottime))
-	    != sizeof (stats_all.s2.boottime)) {
-		syslog(LOG_ERR, "can't read boottime from kmem");
-		exit(1);
+	mib[0] = CTL_KERN;
+	mib[1] = KERN_BOOTTIME;
+	len = sizeof(btm);
+	if (sysctl(mib, 2, &btm, &len, NULL, 0) < 0) {
+		syslog(LOG_ERR, "can't sysctl kern.boottime: %m");
+		_exit(1);
 	}
 	stats_all.s2.boottime.tv_sec = btm.tv_sec;
 	stats_all.s2.boottime.tv_usec = btm.tv_usec;
@@ -291,13 +232,12 @@ updatestat()
 	    stats_all.s1.cp_time[3]);
 #endif
 
-#ifdef UVM
 	mib[0] = CTL_VM;
 	mib[1] = VM_UVMEXP;
 	len = sizeof(uvmexp);
 	if (sysctl(mib, 2, &uvmexp, &len, NULL, 0) < 0) {
-		syslog(LOG_ERR, "can't sysctl vm.uvmexp");
-		exit(1);
+		syslog(LOG_ERR, "can't sysctl vm.uvmexp: %m");
+		_exit(1);
 	}
 	stats_all.s1.v_pgpgin = uvmexp.fltanget;
 	stats_all.s1.v_pgpgout = uvmexp.pdpageouts;
@@ -308,121 +248,36 @@ updatestat()
 	gettimeofday(&tm, (struct timezone *) 0);
 	stats_all.s1.v_intr -= hz*(tm.tv_sec - btm.tv_sec) +
 	    hz*(tm.tv_usec - btm.tv_usec)/1000000;
-#else
- 	if (kvm_read(kfd, (long)nl[X_CNT].n_value, (char *)&cnt, sizeof cnt) !=
-	    sizeof cnt) {
-		syslog(LOG_ERR, "can't read cnt from kmem");
-		exit(1);
-	}
-	stats_all.s1.v_pgpgin = cnt.v_pgpgin;
-	stats_all.s1.v_pgpgout = cnt.v_pgpgout;
-	stats_all.s1.v_pswpin = cnt.v_pswpin;
-	stats_all.s1.v_pswpout = cnt.v_pswpout;
-	stats_all.s1.v_intr = cnt.v_intr;
-	gettimeofday(&tm, (struct timezone *) 0);
-	stats_all.s1.v_intr -= hz*(tm.tv_sec - btm.tv_sec) +
-	    hz*(tm.tv_usec - btm.tv_usec)/1000000;
-	stats_all.s2.v_swtch = cnt.v_swtch;
-#endif
-
-#ifndef BSD
- 	if (kvm_read(kfd, (long)nl[X_DKXFER].n_value,
-	    (char *)stats_all.s1.dk_xfer, sizeof (stats_all.s1.dk_xfer))
-	    != sizeof (stats_all.s1.dk_xfer)) {
-		syslog(LOG_ERR, "can't read dk_xfer from kmem");
-		exit(1);
-	}
-#endif
-
 	stats_all.s1.if_ipackets = 0;
 	stats_all.s1.if_opackets = 0;
 	stats_all.s1.if_ierrors = 0;
 	stats_all.s1.if_oerrors = 0;
 	stats_all.s1.if_collisions = 0;
-	for (off = (long)ifnetq.tqh_first, i = 0; off && i < numintfs; i++) {
-		if (kvm_read(kfd, off, (char *)&ifnet, sizeof ifnet) !=
-		    sizeof ifnet) {
-			syslog(LOG_ERR, "can't read ifnet from kmem");
-			exit(1);
-		}
-		stats_all.s1.if_ipackets += ifnet.if_data.ifi_ipackets;
-		stats_all.s1.if_opackets += ifnet.if_data.ifi_opackets;
-		stats_all.s1.if_ierrors += ifnet.if_data.ifi_ierrors;
-		stats_all.s1.if_oerrors += ifnet.if_data.ifi_oerrors;
-		stats_all.s1.if_collisions += ifnet.if_data.ifi_collisions;
-		off = (long)ifnet.if_list.tqe_next;
+	if (getifaddrs(&ifaddrs) == -1) {
+		syslog(LOG_ERR, "can't getifaddrs: %m");
+		_exit(1);
 	}
+	for (ifa = ifaddrs; ifa != NULL; ifa = ifa->ifa_next) {
+		if (ifa->ifa_addr->sa_family != AF_LINK)
+			continue;
+		ifdp = (struct if_data *)ifa->ifa_data;
+		stats_all.s1.if_ipackets += ifdp->ifi_ipackets;
+		stats_all.s1.if_opackets += ifdp->ifi_opackets;
+		stats_all.s1.if_ierrors += ifdp->ifi_ierrors;
+		stats_all.s1.if_oerrors += ifdp->ifi_oerrors;
+		stats_all.s1.if_collisions += ifdp->ifi_collisions;
+	}
+	freeifaddrs(ifaddrs);
 	gettimeofday((struct timeval *)&stats_all.s3.curtime,
-		(struct timezone *) 0);
+	    (struct timezone *) 0);
 	alarm(1);
 	errno = save_errno;
 }
 
+void
 setup()
 {
-	struct ifnet ifnet;
-	long off;
-	char errbuf[_POSIX2_LINE_MAX];
-
-	kfd = kvm_openfiles(NULL, NULL, NULL, O_RDONLY, errbuf);
-	if (kfd == NULL) {
-		syslog(LOG_ERR, "%s", errbuf);
-		exit (1);
-	}
-
-	if (kvm_nlist(kfd, nl) != 0) {
-		syslog(LOG_ERR, "can't get namelist");
-		exit (1);
-	}
-
-	if (kvm_read(kfd, (long)nl[X_IFNET].n_value, &ifnetq,
-	    sizeof ifnetq) != sizeof ifnetq) {
-		syslog(LOG_ERR, "can't read ifnet queue head from kmem");
-		exit(1);
-	}
-
-	numintfs = 0;
-	for (off = (long)ifnetq.tqh_first; off;) {
-		if (kvm_read(kfd, off, (char *)&ifnet, sizeof ifnet) !=
-		    sizeof ifnet) {
-			syslog(LOG_ERR, "can't read ifnet from kmem");
-			exit(1);
-		}
-		numintfs++;
-		off = (long)ifnet.if_list.tqe_next;
-	}
-#ifdef BSD
 	dkinit(0);
-#endif
-}
-
-/*
- * returns true if have a disk
- */
-int
-havedisk()
-{
-#ifdef BSD
-	return dk_ndrive != 0;
-#else
-	int i, cnt;
-	long  xfer[DK_NDRIVE];
-
-	if (kvm_nlist(kfd, nl) != 0) {
-		syslog(LOG_ERR, "can't get namelist");
-		exit (1);
-	}
-
-	if (kvm_read(kfd, (long)nl[X_DKXFER].n_value,
-		     (char *)xfer, sizeof xfer) != sizeof xfer) {
-		syslog(LOG_ERR, "can't read dk_xfer from kmem");
-		exit(1);
-	}
-	cnt = 0;
-	for (i=0; i < DK_NDRIVE; i++)
-		cnt += xfer[i];
-	return (cnt != 0);
-#endif
 }
 
 void

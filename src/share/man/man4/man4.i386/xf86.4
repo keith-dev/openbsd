@@ -1,4 +1,4 @@
-.\"	$OpenBSD: xf86.4,v 1.13 2001/03/13 21:21:55 deraadt Exp $
+.\"	$OpenBSD: xf86.4,v 1.16 2001/10/05 14:45:54 mpech Exp $
 .\"
 .\" Copyright (c) 1998 Matthieu Herrb
 .\" All rights reserved.
@@ -30,8 +30,7 @@
 .Os
 .Sh NAME
 .Nm xf86
-.Nd
-XFree86 aperture driver
+.Nd XFree86 aperture driver
 .Sh SYNOPSIS
 .Cd "option APERTURE"
 .Sh DESCRIPTION
@@ -57,7 +56,8 @@ The possible values for
 are:
 .Bl -tag -width Ds
 .It 0
-the aperture driver is disabled. Opening it returns
+the aperture driver is disabled.
+Opening it returns
 .Dv EPERM. 
 .It 1
 the aperture driver allows access to standard VGA framebuffer and
@@ -78,7 +78,8 @@ memory.
 .Xr sysctl 8
 .Sh HISTORY
 .Pa /dev/xf86
-was introduced as a loadable kernel module for NetBSD 0.9C
+was introduced as a loadable kernel module for
+.Nx 0.9 c
 with XFree86 3.1.
 It was integrated as an in-kernel device on
 .Ox 2.3 .

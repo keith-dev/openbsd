@@ -1,4 +1,4 @@
-/*	$OpenBSD: SYS.h,v 1.4 1999/01/06 06:10:12 d Exp $	*/
+/*	$OpenBSD: SYS.h,v 1.7 2001/09/20 20:52:09 millert Exp $	*/
 /*	$NetBSD: SYS.h,v 1.4 1996/10/17 03:03:53 cgd Exp $	*/
 
 /*
@@ -56,7 +56,7 @@ __LEAF(p,name,0);			/* XXX # of args? */	\
 
 
 #define __RSYSCALL(p,name)					\
-	__SYSCALL(p,name);						\
+	__SYSCALL(p,name);					\
 	RET;							\
 __END(p,name)
 
@@ -67,6 +67,12 @@ __END(p,name)
 
 
 #define	__PSEUDO(p,label,name)					\
+__LEAF(p,label,0);			/* XXX # of args? */	\
+	CALLSYS_ERROR(name);					\
+	RET;							\
+__END(p,label);
+
+#define	__PSEUDO_NOERROR(p,label,name)				\
 __LEAF(p,label,0);			/* XXX # of args? */	\
 	CALLSYS_NOERROR(name);					\
 	RET;							\
@@ -83,9 +89,10 @@ __END(p,label);
 # define RSYSCALL(x)		__RSYSCALL(_thread_sys_,x)
 # define RSYSCALL_NOERROR(x)	__RSYSCALL_NOERROR(_thread_sys_,x)
 # define PSEUDO(x,y)		__PSEUDO(_thread_sys_,x,y)
+# define PSEUDO_NOERROR(x,y)	__PSEUDO_NOERROR(_thread_sys_,x,y)
 # define SYSLEAF(x,e)		__LEAF(_thread_sys_,x,e)
 # define SYSEND(x)		__END(_thread_sys_,x)
-#else _THREAD_SAFE
+#else /* _THREAD_SAFE */
 /*
  * The non-threaded library defaults to traditional syscalls where
  * the function name matches the syscall name.
@@ -95,6 +102,7 @@ __END(p,label);
 # define RSYSCALL(x)		__RSYSCALL(,x)
 # define RSYSCALL_NOERROR(x)	__RSYSCALL_NOERROR(,x)
 # define PSEUDO(x,y)		__PSEUDO(,x,y)
+# define PSEUDO_NOERROR(x,y)	__PSEUDO_NOERROR(,x,y)
 # define SYSLEAF(x,e)		__LEAF(,x,e)
 # define SYSEND(x)		__END(,x)
-#endif _THREAD_SAFE
+#endif /* _THREAD_SAFE */

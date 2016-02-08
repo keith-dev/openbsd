@@ -1,4 +1,4 @@
-/*	$OpenBSD: supmsg.h,v 1.4 1997/04/01 07:35:47 todd Exp $	*/
+/*	$OpenBSD: supmsg.h,v 1.6 2001/04/29 21:52:17 millert Exp $	*/
 
 /*
  * Copyright (c) 1992 Carnegie Mellon University
@@ -16,7 +16,7 @@
  *
  * Carnegie Mellon requests users of this software to return to
  *
- *  Software Distribution Coordinator  or  Software_Distribution@CS.CMU.EDU
+ *  Software Distribution Coordinator  or  Software.Distribution@CS.CMU.EDU
  *  School of Computer Science
  *  Carnegie Mellon University
  *  Pittsburgh PA 15213-3890
@@ -34,6 +34,14 @@
  *	Modified SUP to use gzip based compression when sending files
  *	across the network to save BandWidth
  *
+ * Revision 1.7  92/08/11  12:08:20  mrt
+ * 	Added copyright.
+ * 	[92/08/10            mrt]
+ * 
+ * Revision 1.6  89/08/23  14:56:42  gm0w
+ * 	Changed MSGF to MSG constants.
+ * 	[89/08/23            gm0w]
+ * 
  * 27-Dec-87  Glenn Marcy (gm0w) at Carnegie-Mellon University
  *	Added crosspatch support.  Removed nameserver support.
  *
@@ -104,13 +112,13 @@
 extern int	server;			/* true if we are the server */
 extern int	protver;		/* protocol version of partner */
 
-#else	MSGSUBR
+#else	/* MSGSUBR */
 
 #ifdef	MSGFILE
 #define	EXTERN
-#else	MSGFILE
+#else	/* MSGFILE */
 #define	EXTERN	extern
-#endif	MSGFILE
+#endif	/* MSGFILE */
 
 /* used in all msg routines */
 EXTERN	int	server;			/* true if we are the server */
@@ -175,4 +183,4 @@ EXTERN	char 	*donereason;		/* set if indicated by doneack */
 
 #undef	EXTERN
 
-#endif	MSGSUBR
+#endif	/* MSGSUBR */

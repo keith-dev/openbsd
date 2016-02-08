@@ -1,4 +1,4 @@
-/*	$OpenBSD: policy.h,v 1.7 2000/10/07 06:57:08 niklas Exp $	*/
+/*	$OpenBSD: policy.h,v 1.9 2001/08/15 13:06:53 ho Exp $	*/
 /*	$EOM: policy.h,v 1.12 2000/09/28 12:53:27 niklas Exp $ */
 
 /*
@@ -56,7 +56,7 @@
 #define LKV(sym) !!libkeynote called but no USE_KEYNOTE nor HAVE_DLOPEN!!
 #endif
 
-#if defined(HAVE_DLOPEN) && !defined(USE_KEYNOTE) && 0
+#if defined (HAVE_DLOPEN) && !defined (USE_KEYNOTE) && 0
 struct keynote_deckey;
 
 extern void *libkeynote;
@@ -104,4 +104,8 @@ extern int keynote_cert_obtain (u_int8_t *, size_t, void *,
 extern int keynote_cert_get_subjects (void *, int *, u_int8_t ***,
 				      u_int32_t **);
 extern int keynote_cert_get_key (void *, void *);
+extern void *keynote_cert_dup (void *);
+extern void keynote_serialize (void *, u_int8_t **, u_int32_t *);
+extern char *keynote_printable (void *);
+extern void *keynote_from_printable (char *);
 #endif /* _POLICY_H_ */

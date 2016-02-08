@@ -1,4 +1,4 @@
-/*	$OpenBSD: tftpd.c,v 1.16 2001/03/08 02:23:56 deraadt Exp $	*/
+/*	$OpenBSD: tftpd.c,v 1.19 2001/07/31 14:32:15 mpech Exp $	*/
 
 /*
  * Copyright (c) 1983 Regents of the University of California.
@@ -41,7 +41,7 @@ char copyright[] =
 
 #ifndef lint
 /*static char sccsid[] = "from: @(#)tftpd.c	5.13 (Berkeley) 2/26/91";*/
-static char rcsid[] = "$OpenBSD: tftpd.c,v 1.16 2001/03/08 02:23:56 deraadt Exp $: tftpd.c,v 1.6 1997/02/16 23:49:21 deraadt Exp $";
+static char rcsid[] = "$OpenBSD: tftpd.c,v 1.19 2001/07/31 14:32:15 mpech Exp $: tftpd.c,v 1.6 1997/02/16 23:49:21 deraadt Exp $";
 #endif /* not lint */
 
 /*
@@ -140,7 +140,7 @@ main(argc, argv)
 	int i, j;
 	int c;
 
-	openlog("tftpd", LOG_PID | LOG_NDELAY, LOG_DAEMON);
+	openlog(__progname, LOG_PID | LOG_NDELAY, LOG_DAEMON);
 
 	while ((c = getopt(argc, argv, "cs")) != -1)
 		switch (c) {
@@ -373,7 +373,7 @@ validate_access(filename, mode)
 	}
 
 	/*
-	 * We use different a different permissions scheme if `cancreate' is
+	 * We use a different permissions scheme if `cancreate' is
 	 * set.
 	 */
 	wmode = O_TRUNC;
@@ -590,7 +590,7 @@ struct errmsg {
 	{ EBADID,	"Unknown transfer ID" },
 	{ EEXISTS,	"File already exists" },
 	{ ENOUSER,	"No such user" },
-	{ -1,		0 }
+	{ -1,		NULL }
 };
 
 /*
@@ -617,10 +617,9 @@ nak(error)
 		pe->e_msg = strerror(error - 100);
 		tp->th_code = EUNDEF;   /* set 'undef' errorcode */
 	}
-	strcpy(tp->th_msg, pe->e_msg);
-	length = strlen(pe->e_msg);
-	tp->th_msg[length] = '\0';
-	length += 5;
+	length = strlcpy(tp->th_msg, pe->e_msg, sizeof(buf)) + 5;
+	if (length > sizeof(buf))
+		length = sizeof(buf);
 	if (send(peer, buf, length, 0) != length)
 		syslog(LOG_ERR, "nak: %m");
 }

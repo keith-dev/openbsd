@@ -1,4 +1,4 @@
-/*	$OpenBSD: top.c,v 1.7 2001/01/18 07:29:28 deraadt Exp $	*/
+/*	$OpenBSD: top.c,v 1.11 2001/09/05 06:25:39 deraadt Exp $	*/
 
 const char copyright[] = "Copyright (c) 1984 through 1996, William LeFebvre";
 
@@ -25,8 +25,6 @@ const char copyright[] = "Copyright (c) 1984 through 1996, William LeFebvre";
  * The following preprocessor variables, when defined, are used to
  * distinguish between different Unix implementations:
  *
- *	SIGHOLD  - use SVR4 sighold function when defined
- *	SIGRELSE - use SVR4 sigrelse function when defined
  *	FD_SET   - macros FD_SET and FD_ZERO are used when defined
  */
 
@@ -55,9 +53,6 @@ const char copyright[] = "Copyright (c) 1984 through 1996, William LeFebvre";
 
 /* The buffer that stdio will use */
 char stdoutbuf[Buffersize];
-
-/* build Signal masks */
-#define Smask(s)	(1 << ((s) - 1))
 
 /* imported from screen.c */
 extern int overstrike;
@@ -120,7 +115,7 @@ char *argv[];
 
     static char tempbuf1[50];
     static char tempbuf2[50];
-    int old_sigmask;		/* only used for BSD-style signals */
+    sigset_t mask, oldmask;
     int topn = Default_TOPN;
     int delay = Default_DELAY;
     int displays = 0;		/* indicates unspecified */
@@ -457,14 +452,12 @@ Usage: %s [-ISbinqu] [-d x] [-s x] [-o field] [-U username] [number]\n",
 	displays = smart_terminal ? Infinity : 1;
     }
 
-    /* hold interrupt signals while setting up the screen and the handlers */
-#ifdef SIGHOLD
-    sighold(SIGINT);
-    sighold(SIGQUIT);
-    sighold(SIGTSTP);
-#else
-    old_sigmask = sigblock(Smask(SIGINT) | Smask(SIGQUIT) | Smask(SIGTSTP));
-#endif
+    /* block interrupt signals while setting up the screen and the handlers */
+    sigemptyset(&mask);
+    sigaddset(&mask, SIGINT);
+    sigaddset(&mask, SIGQUIT);
+    sigaddset(&mask, SIGTSTP);
+    sigprocmask(SIG_BLOCK, &mask, &oldmask);
     init_screen();
     (void) signal(SIGINT, leave);
     (void) signal(SIGQUIT, leave);
@@ -472,13 +465,7 @@ Usage: %s [-ISbinqu] [-d x] [-s x] [-o field] [-U username] [number]\n",
 #ifdef SIGWINCH
     (void) signal(SIGWINCH, winch);
 #endif
-#ifdef SIGRELSE
-    sigrelse(SIGINT);
-    sigrelse(SIGQUIT);
-    sigrelse(SIGTSTP);
-#else
-    (void) sigsetmask(old_sigmask);
-#endif
+    sigprocmask(SIG_SETMASK, &oldmask, NULL);
     if (warnings)
     {
 	fputs("....", stderr);
@@ -536,7 +523,8 @@ restart:
 	    }
 	    else
 	    {
-		putchar('\n');
+		if (putchar('\n') == EOF)
+		    exit(1);
 	    }
 	    dostates = Yes;
 	}
@@ -621,7 +609,7 @@ restart:
 
 		/* set up arguments for select with timeout */
 		FD_ZERO(&readfds);
-		FD_SET(1, &readfds);		/* for standard input */
+		FD_SET(STDIN_FILENO, &readfds);	/* for standard input */
 		timeout.tv_sec  = delay;
 		timeout.tv_usec = 0;
 
@@ -639,11 +627,9 @@ restart:
 		    (void) signal(SIGTSTP, SIG_DFL);
 
 		    /* unblock the signal and send ourselves one */
-#ifdef SIGRELSE
-		    sigrelse(SIGTSTP);
-#else
-		    (void) sigsetmask(sigblock(0) & ~(1 << (SIGTSTP - 1)));
-#endif
+		    sigemptyset(&mask);
+		    sigaddset(&mask, SIGTSTP);
+		    sigprocmask(SIG_UNBLOCK, &mask, NULL);
 		    (void) kill(0, SIGTSTP);
 
 		    /* reset the signal handler */
@@ -672,7 +658,8 @@ restart:
 		}
 
 		/* wait for either input or the end of the delay period */
-		if (select(32, &readfds, (fd_set *)NULL, (fd_set *)NULL, &timeout) > 0)
+		if (select(STDIN_FILENO + 1, &readfds, (fd_set *)NULL,
+		  (fd_set *)NULL, &timeout) > 0)
 		{
 		    int newval;
 		    char *errmsg;
@@ -687,7 +674,8 @@ restart:
 		    {
 			/* illegal command */
 			new_message(MT_standout, " Command not understood");
-			putchar('\r');
+			if (putchar('\r') == EOF)
+			    exit(1);
 			no_command = Yes;
 		    }
 		    else
@@ -698,7 +686,8 @@ restart:
 			    /* error */
 			    new_message(MT_standout,
 			    " Command cannot be handled by this terminal");
-			    putchar('\r');
+			    if (putchar('\r') == EOF)
+			        exit(1);
 			    no_command = Yes;
 			}
 			else switch(change)
@@ -737,7 +726,8 @@ restart:
 				{
 				    new_message(MT_standout,
 					" Currently no errors to report.");
-				    putchar('\r');
+				    if (putchar('\r') == EOF)
+				        exit(1);
 				    no_command = Yes;
 				}
 				else
@@ -763,7 +753,8 @@ restart:
 					new_message(MT_standout | MT_delayed,
 					  " This terminal can only display %d processes.",
 					  max_topn);
-					putchar('\r');
+					if (putchar('\r') == EOF)
+					    exit(1);
 				    }
 
 				    if (newval == 0)
@@ -813,7 +804,8 @@ restart:
 				    if ((errmsg = kill_procs(tempbuf2)) != NULL)
 				    {
 					new_message(MT_standout, "%s", errmsg);
-					putchar('\r');
+					if (putchar('\r') == EOF)
+					    exit(1);
 					no_command = Yes;
 				    }
 				}
@@ -830,7 +822,8 @@ restart:
 				    if ((errmsg = renice_procs(tempbuf2)) != NULL)
 				    {
 					new_message(MT_standout, "%s", errmsg);
-					putchar('\r');
+					if (putchar('\r') == EOF)
+					    exit(1);
 					no_command = Yes;
 				    }
 				}
@@ -846,7 +839,8 @@ restart:
 				new_message(MT_standout | MT_delayed,
 				    " %sisplaying idle processes.",
 				    ps.idle ? "D" : "Not d");
-				putchar('\r');
+				if (putchar('\r') == EOF)
+				    exit(1);
 				break;
 
 			    case CMD_user:
@@ -869,7 +863,8 @@ restart:
 				    {
 					ps.uid = i;
 				    }
-				    putchar('\r');
+				    if (putchar('\r') == EOF)
+				        exit(1);
 				}
 				else
 				{
@@ -893,7 +888,8 @@ restart:
 				    {
 					order_index = i;
 				    }
-				    putchar('\r');
+				    if (putchar('\r') == EOF)
+				        exit(1);
 				}
 				else
 				{
@@ -904,7 +900,8 @@ restart:
 	    
 			    default:
 				new_message(MT_standout, " BAD CASE IN SWITCH!");
-				putchar('\r');
+				if (putchar('\r') == EOF)
+				    exit(1);
 			}
 		    }
 
@@ -917,6 +914,7 @@ restart:
 
     quit(0);
     /*NOTREACHED*/
+    return(0);
 }
 
 /*

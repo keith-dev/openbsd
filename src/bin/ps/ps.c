@@ -1,4 +1,4 @@
-/*	$OpenBSD: ps.c,v 1.19 2001/04/17 21:12:07 millert Exp $	*/
+/*	$OpenBSD: ps.c,v 1.23 2001/09/27 12:53:47 mpech Exp $	*/
 /*	$NetBSD: ps.c,v 1.15 1995/05/18 20:33:25 mycroft Exp $	*/
 
 /*-
@@ -44,7 +44,7 @@ static char copyright[] =
 #if 0
 static char sccsid[] = "@(#)ps.c	8.4 (Berkeley) 4/2/94";
 #else
-static char rcsid[] = "$OpenBSD: ps.c,v 1.19 2001/04/17 21:12:07 millert Exp $";
+static char rcsid[] = "$OpenBSD: ps.c,v 1.23 2001/09/27 12:53:47 mpech Exp $";
 #endif
 #endif /* not lint */
 
@@ -73,6 +73,8 @@ static char rcsid[] = "$OpenBSD: ps.c,v 1.19 2001/04/17 21:12:07 millert Exp $";
 #include <limits.h>
 
 #include "ps.h"
+
+extern char *__progname;
 
 KINFO *kinfo;
 struct varent *vhead, *vtail;
@@ -115,9 +117,10 @@ main(argc, argv)
 	dev_t ttydev;
 	pid_t pid;
 	uid_t uid;
-	int all, ch, flag, i, fmt, lineno, nentries;
+	int all, ch, flag, i, fmt, lineno, nentries, mib[4], mibcnt, nproc;
 	int prtheader, wflag, kflag, what, xflg;
 	char *nlistf, *memf, *swapf, errbuf[_POSIX2_LINE_MAX];
+	size_t size;
 
 	if ((ioctl(STDOUT_FILENO, TIOCGWINSZ, (char *)&ws) == -1 &&
 	     ioctl(STDERR_FILENO, TIOCGWINSZ, (char *)&ws) == -1 &&
@@ -283,7 +286,7 @@ main(argc, argv)
 	}
 
 	kd = kvm_openfiles(nlistf, memf, swapf, O_RDONLY, errbuf);
-	if (kd == 0)
+	if (kd == NULL && (nlistf != NULL || memf != NULL || swapf != NULL))
 		errx(1, "%s", errbuf);
 
 	setegid(getgid());
@@ -305,26 +308,51 @@ main(argc, argv)
 	 * get proc list
 	 */
 	if (uid != (uid_t) -1) {
-		what = KERN_PROC_UID;
-		flag = uid;
+		what = mib[2] = KERN_PROC_UID;
+		flag = mib[3] = uid;
+		mibcnt = 4;
 	} else if (ttydev != NODEV) {
-		what = KERN_PROC_TTY;
-		flag = ttydev;
+		what = mib[2] = KERN_PROC_TTY;
+		flag = mib[3] = ttydev;
+		mibcnt = 4;
 	} else if (pid != -1) {
-		what = KERN_PROC_PID;
-		flag = pid;
+		what = mib[2] = KERN_PROC_PID;
+		flag = mib[3] = pid;
+		mibcnt = 4;
 	} else if (kflag) {
-		what = KERN_PROC_KTHREAD;
+		what = mib[2] = KERN_PROC_KTHREAD;
 		flag = 0;
+		mibcnt = 3;
 	} else {
-		what = KERN_PROC_ALL;
+		what = mib[2] = KERN_PROC_ALL;
 		flag = 0;
+		mibcnt = 3;
 	}
 	/*
 	 * select procs
 	 */
-	if ((kp = kvm_getprocs(kd, what, flag, &nentries)) == 0)
-		errx(1, "%s", kvm_geterr(kd));
+	if (kd != NULL) {
+		if ((kp = kvm_getprocs(kd, what, flag, &nentries)) == 0)
+			errx(1, "%s", kvm_geterr(kd));
+	}
+	else {
+		mib[0] = CTL_KERN;
+		mib[1] = KERN_NPROCS;
+		size = sizeof (nproc);
+		if (sysctl(mib, 2, &nproc, &size, NULL, 0) < 0)
+			err(1, "could not get kern.nproc");
+		/* Allocate more memory than is needed, just in case */
+		size = (5 * nproc * sizeof(struct kinfo_proc)) / 4;
+		kp = calloc(size, sizeof(char));
+		if (kp == NULL)
+			err(1,
+			    "failed to allocated memory for proc structures");
+		mib[1] = KERN_PROC;
+		if (sysctl(mib, mibcnt, kp, &size, NULL, 0) < 0)
+			err(1, "could not read kern.proc");
+		nentries = size / sizeof(struct kinfo_proc);
+	}
+
 	if ((kinfo = malloc(nentries * sizeof(*kinfo))) == NULL)
 		err(1, NULL);
 	for (i = nentries; --i >= 0; ++kp) {
@@ -493,11 +521,11 @@ kludge_oldps_options(s)
 static void
 usage()
 {
-
 	(void)fprintf(stderr,
-	    "usage:\t%s\n\t   %s\n\t%s\n",
-	    "ps [-][aChjlmrSTuvwx] [-O|o fmt] [-p pid] [-t tty] [-U user]",
-	    "[-M core] [-N system] [-W swap]",
-	    "ps [-L]");
+            "usage: %s [-][aChjlmrSTuvwx] [-O|o fmt] [-p pid] [-t tty] [-U user]\n",
+	     __progname);	
+	(void)fprintf(stderr,
+	    "%-*s[-M core] [-N system] [-W swap]\n", strlen(__progname) + 8, "");
+	(void)fprintf(stderr, "       %s [-L]\n", __progname);
 	exit(1);
 }

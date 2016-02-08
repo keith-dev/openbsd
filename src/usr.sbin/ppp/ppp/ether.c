@@ -23,7 +23,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- *	$OpenBSD: ether.c,v 1.9 2001/03/28 09:52:54 brian Exp $
+ *	$OpenBSD: ether.c,v 1.14 2001/09/13 10:32:57 brian Exp $
  */
 
 #include <sys/param.h>
@@ -83,11 +83,15 @@
 #include "datalink.h"
 #include "slcompress.h"
 #include "iplist.h"
+#include "ncpaddr.h"
+#include "ip.h"
 #include "ipcp.h"
 #include "filter.h"
 #ifndef NORADIUS
 #include "radius.h"
 #endif
+#include "ipv6cp.h"
+#include "ncp.h"
 #include "bundle.h"
 #include "id.h"
 #include "iface.h"
@@ -226,7 +230,7 @@ ether_MessageIn(struct etherdevice *dev)
   if (ret <= 0)
     return;
 
-  if (NgRecvMsg(dev->cs, rep, sizeof msgbuf, NULL) < 0)
+  if (NgRecvMsg(dev->cs, rep, sizeof msgbuf, NULL) <= 0)
     return;
 
   if (rep->header.version != NG_VERSION) {
@@ -285,6 +289,7 @@ ether_AwaitCarrier(struct physical *p)
 static const struct device baseetherdevice = {
   ETHER_DEVICE,
   "ether",
+  1492,
   { CD_REQUIRED, DEF_ETHERCDDELAY },
   ether_AwaitCarrier,
   ether_RemoveFromSet,
@@ -423,8 +428,8 @@ ether_Create(struct physical *p)
     p->fd--;				/* We own the device - change fd */
 
 #if defined(__FreeBSD__) && !defined(NOKLDLOAD)
-    if (modfind("netgraph") == -1) {
-      log_Printf(LogWARN, "Netgraph is not built into the kernel\n");
+    if (modfind("netgraph") == -1 && ID0kldload("netgraph") == -1) {
+      log_Printf(LogWARN, "kldload: netgraph: %s\n", strerror(errno));
       return NULL;
     }
 
@@ -434,6 +439,11 @@ ether_Create(struct physical *p)
        * built in as part of the netgraph node itself.
        */
       log_Printf(LogWARN, "kldload: ng_ether: %s\n", strerror(errno));
+
+    if (modfind("ng_pppoe") == -1 && ID0kldload("ng_pppoe") == -1) {
+      log_Printf(LogWARN, "kldload: ng_pppoe: %s\n", strerror(errno));
+      return NULL;
+    }
 
     if (modfind("ng_socket") == -1 && ID0kldload("ng_socket") == -1) {
       log_Printf(LogWARN, "kldload: ng_socket: %s\n", strerror(errno));
@@ -501,7 +511,7 @@ ether_Create(struct physical *p)
 
     /* Get our list back */
     resp = (struct ng_mesg *)rbuf;
-    if (NgRecvMsg(dev->cs, resp, sizeof rbuf, NULL) < 0) {
+    if (NgRecvMsg(dev->cs, resp, sizeof rbuf, NULL) <= 0) {
       log_Printf(LogWARN, "Cannot get netgraph response: %s\n",
                  strerror(errno));
       return ether_Abandon(dev, p);
@@ -589,6 +599,12 @@ ether_Create(struct physical *p)
       return ether_Abandon(dev, p);
     }
 
+    /* Bring the Ethernet interface up */
+    path[ifacelen] = '\0';	/* Remove the trailing ':' */
+    if (!iface_SetFlags(path, IFF_UP))
+      log_Printf(LogWARN, "%s: Failed to set the IFF_UP flag on %s\n",
+                 p->link.name, path);
+
     /* And finally, request a connection to the given provider */
 
     data = (struct ngpppoe_init_data *)alloca(sizeof *data + providerlen);
@@ -669,26 +685,6 @@ ether_Create(struct physical *p)
 
   if (dev) {
     physical_SetupStack(p, dev->dev.name, PHYSICAL_FORCE_SYNCNOACF);
-
-    /* Moan about (and fix) invalid LCP configurations */
-    if (p->link.lcp.cfg.mru > 1492) {
-      log_Printf(LogWARN, "%s: Reducing MRU to 1492\n", p->link.name);
-      p->link.lcp.cfg.mru = 1492;
-    }
-    if (p->dl->bundle->cfg.mtu > 1492) {
-      log_Printf(LogWARN, "%s: Reducing MTU to 1492\n", p->link.name);
-      p->dl->bundle->cfg.mtu = 1492;
-    }
-
-    if (path != NULL) {
-      /* Mark the interface as UP if it's not already */
-
-      path[ifacelen] = '\0';		/* Remove the trailing ':' */
-      if (!iface_SetFlags(path, IFF_UP))
-        log_Printf(LogWARN, "%s: Failed to set the IFF_UP flag on %s\n",
-                   p->link.name, path);
-    }
-
     return &dev->dev;
   }
 

@@ -1,4 +1,4 @@
-#	$OpenBSD: Makefile,v 1.13 1999/11/26 22:49:08 millert Exp $
+#	$OpenBSD: Makefile,v 1.15 2001/09/11 22:31:29 heko Exp $
 #	@(#)Makefile.in	8.75 (Berkeley) 10/23/96
 
 PROG=	vi
@@ -59,10 +59,10 @@ perl.c: ${.CURDIR}/../perl_api/perl.xs ${.CURDIR}/../perl_api/typemap
 	(perl  -ne 'print "sub $$1 {\$$curscr->$$1(\@_)}\n" \
 	    if /newXS\("VI::([^":]*)"/;' ${.TARGET} ; echo "1;") > VI.pm
 
-.include <bsd.prog.mk>
 .include "../../Makefile.inc"
+.include <bsd.prog.mk>
 
-CATALOGS=	dutch english french german ru_SU.KOI8-R spanish swedish
+CATALOGS=	dutch english french german ru_RU.KOI8-R spanish swedish
 afterinstall:
 	${INSTALL} -d ${DESTDIR}${SHAREDIR}/vi/catalog
 	(cd ${.CURDIR}/../catalog && ${INSTALL} -m ${NONBINMODE} -c ${CATALOGS} ${DESTDIR}/usr/share/vi/catalog )

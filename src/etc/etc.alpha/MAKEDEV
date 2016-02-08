@@ -1,5 +1,5 @@
 #!/bin/sh -
-#	$OpenBSD: MAKEDEV,v 1.50 2001/03/08 02:37:15 ericj Exp $
+#	$OpenBSD: MAKEDEV,v 1.60 2001/07/05 02:54:06 mickey Exp $
 #	$NetBSD: MAKEDEV,v 1.8.4.1 1996/06/18 00:41:56 cgd Exp $
 #
 # Copyright (c) 1990 The Regents of the University of California.
@@ -75,6 +75,7 @@
 #	bpf*	Berkeley Packet Filter
 #	fd	makes fd/* for the fdescfs.
 #	lkm	loadable kernel modules interface
+#	audio*	audio device
 #	tun*	network tunnel driver
 #	mmclock	memory mapped clock
 #	kbd	keyboard (provides events, for X11)
@@ -82,7 +83,8 @@
 #	*random	inkernal random data source
 #	uk*	SCSI Unknown device
 #	ss*	SCSI scanners
-#	ipl	IP filter log
+#	altq	ALTQ control interface
+#	iop	I2O controller device
 
 PATH=/sbin:/bin:/usr/bin:/usr/sbin
 this=$0
@@ -157,13 +159,13 @@ all)
 	sh $this ccd0 ccd1 ccd2 ccd3 wd0 wd1 wd2 wd3
 	sh $this raid0 raid1 raid2 raid3
 	sh $this bpf0 bpf1 bpf2 bpf3 bpf4 bpf5 bpf6 bpf7 bpf8 bpf9
-	sh $this tun0 tun1 tun2 tun3
+	sh $this pf audio0 tun0 tun1 tun2 tun3
 	sh $this ttyB0 ttyB1 tty00 tty01 lkm
-	sh $this mmclock lpa0 lpt0 random ipl
+	sh $this mmclock lpa0 lpt0 random
 	sh $this uk0 uk1 ss0 ss1
 	sh $this ttyc0 ttyc1 ttyc2 ttyc3 ttyc4 ttyc5 ttyc6 ttyc7
-	sh $this local xfs0
-	sh $this usbs wscons ttyCcfg 
+	sh $this local xfs0 altq
+	sh $this usbs wscons ttyCcfg iop0 iop1
 	;;
 
 raminst)
@@ -191,6 +193,13 @@ wsmux|wskbd|wsmouse)
         chmod 600 wsmouse wskbd
         ;;
 
+iop*)
+	rm -f iop$unit
+	mknod iop$unit c 54 $unit
+	chown root.wheel iop$unit
+	chmod 660 iop$unit
+	;;
+
 usbs)
 	sh $this usb usb0 usb1
 	sh $this uhid0 uhid1 uhid2 uhid3
@@ -199,7 +208,7 @@ usbs)
 	sh $this utty0 utty1
 	;;
 std)
-	rm -f console drum mem kmem null zero io tty klog stdin stdout stderr ksyms
+	rm -f console drum mem kmem null zero tty klog stdin stdout stderr ksyms
 	mknod console		c 0 0
 	mknod drum		c 3 0	; chmod 640 drum ; chown root.kmem drum
 	mknod kmem		c 2 1	; chmod 640 kmem ; chown root.kmem kmem
@@ -481,6 +490,13 @@ bpf*)
 	chown root.wheel bpf$unit
 	;;
 
+pf)
+	rm -f pf
+	mknod pf c 35 0
+	chown root.wheel pf
+	chmod 600 pf
+	;;
+
 tun*)
 	rm -f tun$unit
 	mknod tun$unit c 7 $unit
@@ -493,6 +509,25 @@ lkm)
 	mknod lkm c 16 0
 	chown root.kmem lkm
 	chmod 640 lkm
+	;;
+
+audio*)
+	major=24
+	audio=audio$unit
+	sound=sound$unit
+	mixer=mixer$unit
+	audioctl=audioctl$unit
+	rm -f $sound $audio $mixer $audioctl
+	mknod $sound    c $major $unit
+	mknod $audio    c $major $(( $unit + 128 ))
+	mknod $mixer    c $major $(( $unit + 16 ))
+	mknod $audioctl c $major $(( $unit + 192 ))
+	chown root.wheel $audio $sound $mixer $audioctl
+	chmod 666 $audio $sound $mixer $audioctl
+	[ -e audio ] || ln -s $audio audio
+	[ -e mixer ] || ln -s $mixer mixer
+	[ -e sound ] || ln -s $sound sound
+	[ -e audioctl ] || ln -s $audioctl audioctl
 	;;
 
 mmclock)
@@ -538,15 +573,6 @@ random|srandom|urandom|prandom|arandom)
 	chmod 644 random srandom urandom prandom arandom
 	;;
 
-ipl)
-	rm -f ipl ipnat ipstate ipauth
-	mknod ipl c 35 0
-	mknod ipnat c 35 1
-	mknod ipstate c 35 2
-	mknod ipauth c 35 3
-	chown root.wheel ipl ipnat ipstate ipauth
-	;;
-
 uk*)
 	rm -f uk$unit
 	mknod uk$unit c 33 $unit
@@ -568,6 +594,19 @@ xfs*)
 	mknod xfs$unit c 51 $unit 
 	chmod 600 xfs$unit 
 	chown root.wheel xfs$unit
+	;;
+
+altq)
+	mkdir -p altq
+	chmod 755 altq
+	unit=0
+	for dev in altq cbq wfq afm fifoq red rio localq hfsc \
+	    cdnr blue priq; do
+		rm -f altq/$dev
+		mknod altq/$dev c 53 $unit
+		chmod 644 altq/$dev
+		unit=$(($unit + 1))
+	done
 	;;
 
 local)

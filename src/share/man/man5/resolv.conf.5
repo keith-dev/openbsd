@@ -1,4 +1,4 @@
-.\"	$OpenBSD: resolv.conf.5,v 1.14 2000/10/26 00:37:05 aaron Exp $
+.\"	$OpenBSD: resolv.conf.5,v 1.19 2001/10/04 10:28:20 wilfried Exp $
 .\"	$NetBSD: resolv.conf.5,v 1.7 1996/03/06 18:22:16 scottr Exp $
 .\"
 .\" Copyright (c) 1986, 1991 The Regents of the University of California.
@@ -149,7 +149,7 @@ A
 is specified by IP address netmask pairs.
 The netmask is optional and defaults to the natural netmask of the net.
 The IP address and optional network pairs are separated by slashes.
-Up to 10 pairs may be specified, i.e.:
+Up to 10 pairs may be specified, e.g.:
 .Pp
 .Sy sortlist 130.155.160.0/255.255.240.0 130.155.0.0
 .It Sy options
@@ -159,15 +159,32 @@ The syntax is:
 .Sy options option ...
 .Pp
 where option is one of the following:
-.Bl -tag -width ndots:n
+.Bl -tag -width insecure1
 .It Sy debug
 Sets RES_DEBUG in _res.options.
+.It Sy edns0
+attach OPT pseudo-RR for ENDS0 extension specified in RFC2671,
+to inform DNS server of our receive buffer size.
+The option will allow DNS servers to take advantage of non-default receive
+buffer size, and to send larger replies.
+DNS query packets with EDNS0 extension is not compatible with
+non-EDNS0 DNS servers.
+The option must be used only when all the DNS servers listed in
+.Sy nameserver
+lines are able to handle EDNS0 extension.
 .It Sy inet6
 Enables support for IPv6-only applications, by setting RES_USE_INET6 in
 _res.options (see
 .Xr resolver 3 ) .
 Use of this option is discouraged, and meaningless on
 .Ox .
+.It Sy insecure1
+Do not require IP source address on the reply packet to be equal to the
+servers' address.
+.It Sy insecure2
+Do not check if the query section of the reply packet is equal
+to that of the query packet.
+For testing purposes only.
 .It Sy ndots:n
 Sets a threshold for the number of dots which
 must appear in a name given to res_query (see

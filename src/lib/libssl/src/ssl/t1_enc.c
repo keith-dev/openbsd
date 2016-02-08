@@ -420,7 +420,7 @@ int tls1_enc(SSL *s, int send)
 	if ((s->session == NULL) || (ds == NULL) ||
 		(enc == NULL))
 		{
-		memcpy(rec->data,rec->input,rec->length);
+		memmove(rec->data,rec->input,rec->length);
 		rec->input=rec->data;
 		}
 	else
@@ -447,11 +447,21 @@ int tls1_enc(SSL *s, int send)
 			rec->length+=i;
 			}
 
+		if (!send)
+			{
+			if (l == 0 || l%bs != 0)
+				{
+				SSLerr(SSL_F_TLS1_ENC,SSL_R_BLOCK_CIPHER_PAD_IS_WRONG);
+				ssl3_send_alert(s,SSL3_AL_FATAL,SSL_AD_DECRYPT_ERROR);
+				return(0);
+				}
+			}
+		
 		EVP_Cipher(ds,rec->data,rec->input,l);
 
 		if ((bs != 1) && !send)
 			{
-			ii=i=rec->data[l-1];
+			ii=i=rec->data[l-1]; /* padding_length */
 			i++;
 			if (s->options&SSL_OP_TLS_BLOCK_PADDING_BUG)
 				{
@@ -462,6 +472,8 @@ int tls1_enc(SSL *s, int send)
 				if (s->s3->flags & TLS1_FLAGS_TLS_PADDING_BUG)
 					i--;
 				}
+			/* TLS 1.0 does not bound the number of padding bytes by the block size.
+			 * All of them must have value 'padding_length'. */
 			if (i > (int)rec->length)
 				{
 				SSLerr(SSL_F_TLS1_ENC,SSL_R_BLOCK_CIPHER_PAD_IS_WRONG);
@@ -572,7 +584,10 @@ printf("rec=");
 #endif
 
 	for (i=7; i>=0; i--)
-		if (++seq[i]) break; 
+		{
+		++seq[i];
+		if (seq[i] != 0) break; 
+		}
 
 #ifdef TLS_DEBUG
 {unsigned int z; for (z=0; z<md_size; z++) printf("%02X ",md[z]); printf("\n"); }

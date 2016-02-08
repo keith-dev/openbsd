@@ -6,7 +6,7 @@ divert(-1)
 #
 
 divert(0)dnl
-VERSIONID(`$OpenBSD: courtesan-lists.mc,v 1.2 2000/05/15 03:38:25 millert Exp $')
+VERSIONID(`$OpenBSD: courtesan-lists.mc,v 1.4 2001/09/11 19:02:48 millert Exp $')
 OSTYPE(openbsd)dnl
 dnl
 dnl Advertise ourselves as ``lists.courtesan.com''
@@ -26,6 +26,10 @@ dnl
 dnl Always use fully qualified domains
 FEATURE(always_add_domain)
 dnl
+dnl Some broken nameservers will return SERVFAIL (a temporary failure)
+dnl on T_AAAA (IPv6) lookups.
+define(`confBIND_OPTS', `WorkAroundBrokenAAAA')dnl
+dnl
 dnl Need to add domo and mailman as "trusted users" to rewrite From lines
 define(`confTRUSTED_USERS', `domo mailman')dnl
 dnl
@@ -42,10 +46,9 @@ dnl
 dnl Spam blocking features
 FEATURE(access_db)dnl
 FEATURE(blacklist_recipients)dnl
-FEATURE(dnsbl, `rbl.maps.vix.com', `Rejected - see http://www.mail-abuse.org/rbl/')dnl
-FEATURE(dnsbl, `dul.maps.vix.com', `Dialup - see http://www.mail-abuse.org/dul/')dnl
-FEATURE(dnsbl, `relays.mail-abuse.org', `Open spam relay - see http://www.mail-abuse.org/rss/')dnl
-dnl FEATURE(dnsbl, `relays.orbs.org', `Open spam relay - see http://www.orbs.org/')dnl
+dnl FEATURE(dnsbl, `rbl.maps.vix.com', `Rejected - see http://www.mail-abuse.org/rbl/')dnl
+dnl FEATURE(dnsbl, `dul.maps.vix.com', `Dialup - see http://www.mail-abuse.org/dul/')dnl
+dnl FEATURE(dnsbl, `relays.mail-abuse.org', `Open spam relay - see http://www.mail-abuse.org/rss/')dnl
 dnl
 dnl List the mailers we support
 MAILER(local)dnl

@@ -1,4 +1,4 @@
-/*	$OpenBSD: x509test.c,v 1.15 2001/01/27 12:03:39 niklas Exp $	*/
+/*	$OpenBSD: x509test.c,v 1.17 2001/07/05 12:37:05 ho Exp $	*/
 /*	$EOM: x509test.c,v 1.9 2000/12/21 15:24:25 ho Exp $	*/
 
 /*
@@ -68,9 +68,13 @@
 #include "math_mp.h"
 #include "x509.h"
 
+static int x509_check_subjectaltname (u_char *, u_int, X509 *);
+
 u_int32_t file_sz;
 
-u_int8_t *
+#if 0
+/* XXX Currently unused.  */
+static u_int8_t *
 open_file (char *name)
 {
   int fd;
@@ -85,18 +89,19 @@ open_file (char *name)
     log_fatal ("open (\"%s\", O_RDONLY)", name);
   addr = mmap (0, file_sz, PROT_READ | PROT_WRITE, MAP_FILE | MAP_PRIVATE,
 	       fd, 0);
-  if (!addr)
+  if (addr == MAP_FAILED)
     log_fatal ("mmap (0, %d, PROT_READ | PROT_WRITE, MAP_FILE | MAP_PRIVATE,"
 	       "%d, 0)", file_sz, fd);
   close (fd);
 
   return addr;
 }
+#endif
 
 /*
  * Check that a certificate has a subjectAltName and that it matches our ID.
  */
-int
+static int
 x509_check_subjectaltname (u_char *id, u_int id_len, X509 *scert)
 {
   u_int8_t *altname;

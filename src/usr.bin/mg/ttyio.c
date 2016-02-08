@@ -1,4 +1,4 @@
-/*	$OpenBSD: ttyio.c,v 1.13 2001/01/29 01:58:10 niklas Exp $	*/
+/*	$OpenBSD: ttyio.c,v 1.16 2001/05/24 03:05:27 mickey Exp $	*/
 
 /*
  * POSIX terminal I/O.
@@ -40,7 +40,7 @@ ttopen()
 {
 
 	if (!isatty(STDIN_FILENO) || !isatty(STDOUT_FILENO))
-		panic("standard input and output must be a terminal");  
+		panic("standard input and output must be a terminal");
 
 	if (ttraw() == FALSE)
 		panic("aborting due to terminal initialize failure");
@@ -202,7 +202,7 @@ typeahead()
 /*
  * panic - just exit, as quickly as we can.
  */
-VOID
+void
 panic(s)
 	char *s;
 {
@@ -213,25 +213,23 @@ panic(s)
 	exit(1);
 }
 
-#ifndef NO_DPROMPT
 /*
- * A program to return TRUE if we wait for 2 seconds without anything
- * happening, else return FALSE.  Cribbed from mod.sources xmodem.
+ * This function returns FALSE if any characters have showed up on the
+ * tty before 'msec' miliseconds.
  */
 int
-ttwait()
+ttwait(int msec)
 {
 	fd_set		readfds;
 	struct timeval	tmout;
 
-	FD_ZERO(&readfds);   
+	FD_ZERO(&readfds);
 	FD_SET(0, &readfds);
 
-	tmout.tv_sec = 2;
-	tmout.tv_usec = 0;
+	tmout.tv_sec = msec/1000;
+	tmout.tv_usec = msec - tmout.tv_sec * 1000;
 
 	if ((select(1, &readfds, NULL, NULL, &tmout)) == 0)
 		return (TRUE);
 	return (FALSE);
 }
-#endif /* NO_DPROMPT */

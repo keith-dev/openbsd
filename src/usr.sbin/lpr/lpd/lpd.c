@@ -1,4 +1,4 @@
-/*	$OpenBSD: lpd.c,v 1.16 1998/08/03 16:53:16 millert Exp $ */
+/*	$OpenBSD: lpd.c,v 1.21 2001/09/05 00:22:49 deraadt Exp $ */
 /*	$NetBSD: lpd.c,v 1.7 1996/04/24 14:54:06 mrg Exp $	*/
 
 /*
@@ -36,16 +36,16 @@
  */
 
 #ifndef lint
-static char copyright[] =
+static const char copyright[] =
 "@(#) Copyright (c) 1983, 1993, 1994\n\
 	The Regents of the University of California.  All rights reserved.\n";
 #endif /* not lint */
 
 #ifndef lint
 #if 0
-static char sccsid[] = "@(#)lpd.c	8.7 (Berkeley) 5/10/95";
+static const char sccsid[] = "@(#)lpd.c	8.7 (Berkeley) 5/10/95";
 #else
-static char rcsid[] = "$OpenBSD: lpd.c,v 1.16 1998/08/03 16:53:16 millert Exp $";
+static const char rcsid[] = "$OpenBSD: lpd.c,v 1.21 2001/09/05 00:22:49 deraadt Exp $";
 #endif
 #endif /* not lint */
 
@@ -86,6 +86,7 @@ static char rcsid[] = "$OpenBSD: lpd.c,v 1.16 1998/08/03 16:53:16 millert Exp $"
 #include <sys/stat.h>
 #include <sys/file.h>
 #include <netinet/in.h>
+#include <arpa/inet.h>
 
 #include <netdb.h>
 #include <unistd.h>
@@ -122,11 +123,12 @@ main(argc, argv)
 	int argc;
 	char **argv;
 {
-	int f, funix, finet, options, fromlen;
+	int f, lfd, funix, finet, options, fromlen;
 	fd_set defreadfds;
+	int maxfd = 0;
 	struct sockaddr_un un, fromunix;
 	struct sockaddr_in sin, frominet;
-	int omask, lfd;
+	sigset_t mask, omask;
 
 	euid = geteuid();	/* these shouldn't be different */
 	uid = getuid();
@@ -195,8 +197,12 @@ main(argc, argv)
 		syslog(LOG_ERR, "socket: %m");
 		exit(1);
 	}
-#define	mask(s)	(1 << ((s) - 1))
-	omask = sigblock(mask(SIGHUP)|mask(SIGINT)|mask(SIGQUIT)|mask(SIGTERM));
+	sigemptyset(&mask);
+	sigaddset(&mask, SIGHUP);
+	sigaddset(&mask, SIGINT);
+	sigaddset(&mask, SIGQUIT);
+	sigaddset(&mask, SIGTERM);
+	sigprocmask(SIG_BLOCK, &mask, &omask);
 	(void) umask(07);
 	signal(SIGHUP, mcleanup);
 	signal(SIGINT, mcleanup);
@@ -213,9 +219,11 @@ main(argc, argv)
 		exit(1);
 	}
 	(void) umask(0);
-	sigsetmask(omask);
+	sigprocmask(SIG_SETMASK, &omask, NULL);
 	FD_ZERO(&defreadfds);
 	FD_SET(funix, &defreadfds);
+	if (funix > maxfd)
+		maxfd = funix;
 	listen(funix, 5);
 	finet = socket(AF_INET, SOCK_STREAM, 0);
 	if (finet >= 0) {
@@ -243,6 +251,8 @@ main(argc, argv)
 			mcleanup(0);
 		}
 		FD_SET(finet, &defreadfds);
+		if (finet > maxfd)
+			maxfd = finet;
 		listen(finet, 5);
 	}
 	/*
@@ -255,7 +265,7 @@ main(argc, argv)
 		fd_set readfds;
 
 		FD_COPY(&defreadfds, &readfds);
-		nfds = select(20, &readfds, 0, 0, 0);
+		nfds = select(maxfd + 1, &readfds, 0, 0, 0);
 		if (nfds <= 0) {
 			if (nfds < 0 && errno != EINTR)
 				syslog(LOG_WARNING, "select: %m");
@@ -287,8 +297,10 @@ main(argc, argv)
 			signal(SIGTERM, SIG_IGN);
 			(void) close(funix);
 			(void) close(finet);
-			dup2(s, 1);
-			(void) close(s);
+			if (s != STDOUT_FILENO) {
+				dup2(s, STDOUT_FILENO);
+				(void) close(s);
+			}
 			if (domain == AF_INET) {
 				from_remote = 1;
 				chkhost(&frominet);
@@ -346,8 +358,8 @@ char	*cmdnames[] = {
 static void
 doit()
 {
-	register char *cp;
-	register int n;
+	char *cp;
+	int n;
 
 	for (;;) {
 		cp = cbuf;
@@ -455,7 +467,7 @@ static void
 startup()
 {
 	char *buf;
-	register char *cp;
+	char *cp;
 	int pid;
 
 	/*
@@ -494,7 +506,7 @@ static int
 ckqueue(cap)
 	char *cap;
 {
-	register struct dirent *d;
+	struct dirent *d;
 	DIR *dirp;
 	char *spooldir;
 
@@ -521,8 +533,8 @@ static void
 chkhost(f)
 	struct sockaddr_in *f;
 {
-	register struct hostent *hp;
-	register FILE *hostf;
+	struct hostent *hp;
+	FILE *hostf;
 	int first = 1;
 	int good = 0;
 
@@ -533,8 +545,7 @@ chkhost(f)
 		fatal("Host name for your address (%s) unknown",
 			inet_ntoa(f->sin_addr));
 
-	(void) strncpy(fromb, hp->h_name, sizeof(fromb)-1);
-	from[sizeof(fromb) - 1] = '\0';
+	(void) strlcpy(fromb, hp->h_name, sizeof(fromb));
 	from = fromb;
 
 	/* Check for spoof, ala rlogind */

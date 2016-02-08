@@ -1,5 +1,7 @@
-/*	$OpenBSD: ancontrol.c,v 1.14 2001/04/16 07:51:01 ericj Exp $	*/
+/*	$OpenBSD: ancontrol.c,v 1.18 2001/09/29 21:57:15 mickey Exp $	*/
 /*
+ * Copyright (c) 2001 Eric Jackson <ericj@monkey.org>
+ *
  * Copyright 1997, 1998, 1999
  *	Bill Paul <wpaul@ee.columbia.edu>.  All rights reserved.
  *
@@ -118,18 +120,17 @@ int main		__P((int, char **));
 #define ACT_SET_MYNAME 29
 #define ACT_SET_MAC 30
 
-#define ACT_DUMPCACHE 31
-#define ACT_ZEROCACHE 32
-
 #define ACT_ENABLE_WEP 33
 #define ACT_SET_KEY_TYPE 34
 #define ACT_SET_KEYS 35
 #define ACT_ENABLE_TX_KEY 36
 
 #ifdef ANCACHE
-#define OPTIONS "a:b:c:d:e:f:j:k:l:m:n:o:p:r:s:t:v:w:ACIK:NQST:W:Z"
+#define ACT_DUMPCACHE 31
+#define ACT_ZEROCACHE 32
+#define OPTIONS "a:b:c:d:e:f:j:k:l:m:n:o:p:r:s:t:v:w:ACIK:NQSTW:Z"
 #else
-#define OPTIONS "a:b:c:d:e:f:j:k:l:m:n:o:p:r:s:t:v:w:ACIK:NST:W:"
+#define OPTIONS "a:b:c:d:e:f:j:k:l:m:n:o:p:r:s:t:v:w:ACIK:NSTW:"
 #endif /* ANCACHE */
 
 int s;			/* Global socket for ioctl's */
@@ -792,7 +793,7 @@ static void
 usage()
 {
 	fprintf(stderr,
-	    "usage: ancontrol interface [-A] [-N] [-S] [-I] [-T] [-C] [-t 0|1|2|3|4]\n"
+	    "usage: ancontrol interface [-ACINSTh] [-t 0|1|2|3|4]\n"
 	    "       [-s 0|1|2|3] [-v 1|2|3|4] [-a AP] [-b beacon period] [-v 0|1]\n"
 	    "       [-d 1|2|3|4] [-e 0|1|2|3] [-j netjoin timeout] [-v 0|1|2|3|4|5|6|7[\n"
 	    "       [-k key] [-K 0|1|2] [-l station name] [-m macaddress] [-v 1|2|3]\n"
@@ -1119,10 +1120,7 @@ an_readcache()
 				        ((sc->ipsrc >> 8) & 0xff),
 				        ((sc->ipsrc >> 16) & 0xff),
 				        ((sc->ipsrc >> 24) & 0xff));
-		printf(" sig: %d, noise: %d, qual: %d\n",
-		   			sc->signal,
-		   			sc->noise,
-		   			sc->quality);
+		printf(" sig: %d\n", sc->signal);
 		sc++;
 	}
 
@@ -1306,7 +1304,7 @@ main(argc, argv)
 			optind = 1;
 		}
 	}
-	opterr = optreset =1;
+	opterr = optreset = 1;
 
 	/* Grab a socket to do our ioctl's */
 	getsock();
@@ -1363,6 +1361,7 @@ main(argc, argv)
 			default:
 				errx(1, "bad modifier %d", modifier);
 			}
+			modifier = 0;
 			break;
 		case 'b':
 			an_setconfig(ACT_SET_BEACON_PERIOD, optarg);
@@ -1381,12 +1380,16 @@ main(argc, argv)
 			default:
 				errx(1, "must specify RX or TX diversity");
 			}
+			modifier = 0;
 			break;
 		case 'e':
 			an_enable_tx_key(optarg);
 			break;
 		case 'f':
 			an_setconfig(ACT_SET_FRAG_THRESH, optarg);
+			break;
+		case 'h':
+			usage();
 			break;
 		case 'j':
 			an_setconfig(ACT_SET_NETJOIN, optarg);
@@ -1415,6 +1418,7 @@ main(argc, argv)
 			default:
 				errx(1, "bad modifier %d", modifier);
 			}
+			modifier = 0;
 			break;
 		case 'o':
 			an_setconfig(ACT_SET_OPMODE, optarg);
@@ -1464,12 +1468,11 @@ main(argc, argv)
 			an_dumpstatus();
 		if (print_stat & STAT_DUMPSTATS)
 			an_dumpstats();
-
-		exit(0);
 	}
 
 	/* Close our socket */
 	if (s)
 		close(s);
-	exit(0);
+
+	return (0);
 }

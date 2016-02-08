@@ -1,4 +1,4 @@
-/*	$OpenBSD: rpc_cout.c,v 1.4 1997/10/11 21:10:41 deraadt Exp $	*/
+/*	$OpenBSD: rpc_cout.c,v 1.6 2001/07/18 22:26:00 deraadt Exp $	*/
 /*	$NetBSD: rpc_cout.c,v 1.6 1996/10/01 04:13:53 cgd Exp $	*/
 /*
  * Sun RPC is a product of Sun Microsystems, Inc. and is provided for

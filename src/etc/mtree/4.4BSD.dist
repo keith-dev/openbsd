@@ -1,4 +1,4 @@
-#	$OpenBSD: 4.4BSD.dist,v 1.105 2001/03/30 08:12:39 beck Exp $
+#	$OpenBSD: 4.4BSD.dist,v 1.117 2001/09/25 10:26:39 espie Exp $
 
 /set type=dir uname=root gname=wheel mode=0755
 # .
@@ -16,11 +16,6 @@ bin
 
 # ./dev
 dev
-
-# ./dev/fd
-fd		mode=0555
-# ./dev/fd
-..
 
 # ./dev
 ..
@@ -74,6 +69,11 @@ kerberosIV
 # ./etc/kerberosIV
 ..
 
+# ./etc/kerberosV
+kerberosV
+# ./etc/kerberosV
+..
+
 # ./etc/mail
 mail
 # ./etc/mail
@@ -123,11 +123,6 @@ lib
 # ./etc/tcfs
 tcfs
 # ./etc/tcfs
-..
-
-# ./etc/uucp
-uucp
-# ./etc/uucp
 ..
 
 # ./etc
@@ -292,6 +287,11 @@ site_perl
 # ./usr/libdata/perl5
 ..
 
+# ./usr/libdata/ssh
+ssh
+# ./usr/libdata/ssh
+..
+
 # ./usr/libdata
 ..
 
@@ -316,11 +316,6 @@ lpr
 # ./libexec/sendmail
 sendmail	type=dir uname=root gname=wheel mode=0755
 # ./libexec/sendmail
-..
-
-# ./usr/libexec/uucp
-uucp
-# ./usr/libexec/uucp
 ..
 
 # ./usr/libexec
@@ -1073,15 +1068,17 @@ i386
 ..
 mac68k
 ..
+macppc
+..
 mvme68k
 ..
 mvme88k
 ..
-pmax
-..
-powerpc
+mvmeppc
 ..
 sparc
+..
+sparc64
 ..
 sun3
 ..
@@ -1120,15 +1117,17 @@ i386
 ..
 mac68k
 ..
+macppc
+..
 mvme68k
 ..
 mvme88k
 ..
-pmax
-..
-powerpc
+mvmeppc
 ..
 sparc
+..
+sparc64
 ..
 sun3
 ..
@@ -1160,15 +1159,17 @@ i386
 ..
 mac68k
 ..
+macppc
+..
 mvme68k
 ..
 mvme88k
 ..
-pmax
-..
-powerpc
+mvmeppc
 ..
 sparc
+..
+sparc64
 ..
 sun3
 ..
@@ -1195,15 +1196,17 @@ i386
 ..
 mac68k
 ..
+macppc
+..
 mvme68k
 ..
 mvme88k
 ..
-pmax
-..
-powerpc
+mvmeppc
 ..
 sparc
+..
+sparc64
 ..
 sun3
 ..
@@ -1240,15 +1243,17 @@ i386
 ..
 mac68k
 ..
+macppc
+..
 mvme68k
 ..
 mvme88k
 ..
-pmax
-..
-powerpc
+mvmeppc
 ..
 sparc
+..
+sparc64
 ..
 sun3
 ..
@@ -1275,15 +1280,17 @@ i386
 ..
 mac68k
 ..
+macppc
+..
 mvme68k
 ..
 mvme88k
 ..
-pmax
-..
-powerpc
+mvmeppc
 ..
 sparc
+..
+sparc64
 ..
 sun3
 ..
@@ -1310,15 +1317,17 @@ i386
 ..
 mac68k
 ..
+macppc
+..
 mvme68k
 ..
 mvme88k
 ..
-pmax
-..
-powerpc
+mvmeppc
 ..
 sparc
+..
+sparc64
 ..
 sun3
 ..
@@ -1357,15 +1366,17 @@ i386
 ..
 mac68k
 ..
+macppc
+..
 mvme68k
 ..
 mvme88k
 ..
-pmax
-..
-powerpc
+mvmeppc
 ..
 sparc
+..
+sparc64
 ..
 sun3
 ..
@@ -1397,15 +1408,17 @@ i386
 ..
 mac68k
 ..
+macppc
+..
 mvme68k
 ..
 mvme88k
 ..
-pmax
-..
-powerpc
+mvmeppc
 ..
 sparc
+..
+sparc64
 ..
 sun3
 ..
@@ -1432,15 +1445,17 @@ i386
 ..
 mac68k
 ..
+macppc
+..
 mvme68k
 ..
 mvme88k
 ..
-pmax
-..
-powerpc
+mvmeppc
 ..
 sparc
+..
+sparc64
 ..
 sun3
 ..
@@ -1477,15 +1492,17 @@ i386
 ..
 mac68k
 ..
+macppc
+..
 mvme68k
 ..
 mvme88k
 ..
-pmax
-..
-powerpc
+mvmeppc
 ..
 sparc
+..
+sparc64
 ..
 sun3
 ..
@@ -1512,15 +1529,17 @@ i386
 ..
 mac68k
 ..
+macppc
+..
 mvme68k
 ..
 mvme88k
 ..
-pmax
-..
-powerpc
+mvmeppc
 ..
 sparc
+..
+sparc64
 ..
 sun3
 ..
@@ -1547,15 +1566,17 @@ i386
 ..
 mac68k
 ..
+macppc
+..
 mvme68k
 ..
 mvme88k
 ..
-pmax
-..
-powerpc
+mvmeppc
 ..
 sparc
+..
+sparc64
 ..
 sun3
 ..
@@ -1597,15 +1618,17 @@ i386
 ..
 mac68k
 ..
+macppc
+..
 mvme68k
 ..
 mvme88k
 ..
-pmax
-..
-powerpc
+mvmeppc
 ..
 sparc
+..
+sparc64
 ..
 sun3
 ..
@@ -1647,15 +1670,17 @@ i386
 ..
 mac68k
 ..
+macppc
+..
 mvme68k
 ..
 mvme88k
 ..
-pmax
-..
-powerpc
+mvmeppc
 ..
 sparc
+..
+sparc64
 ..
 sun3
 ..
@@ -1831,6 +1856,11 @@ account
 # ./var/account
 ..
 
+# ./var/empty
+empty		mode=0755
+# ./var/empty
+..
+
 # ./var/at
 at		gname=daemon
 
@@ -1991,6 +2021,11 @@ rwho
 # ./var/spool
 spool
 
+# ./var/spool/clientmqueue
+clientmqueue	mode=0770 uname=smmsp gname=smmsp
+# ./var/spool/clientmqueue
+..
+
 # ./var/spool/ftp
 ftp		mode=0555
 
@@ -2028,7 +2063,7 @@ lpd
 ..
 
 # ./var/spool/mqueue
-mqueue
+mqueue		mode=0700
 # ./var/spool/mqueue
 ..
 
@@ -2043,6 +2078,11 @@ output
 #..
 
 /set uname=uucp gname=daemon
+# ./var/spool/smtpd
+smtpd
+# ./var/spool/smtpd
+..
+
 # ./var/spool/uucp
 uucp
 # ./var/spool/uucp

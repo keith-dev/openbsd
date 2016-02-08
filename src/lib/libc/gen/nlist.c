@@ -32,7 +32,7 @@
  */
 
 #if defined(LIBC_SCCS) && !defined(lint)
-static char rcsid[] = "$OpenBSD: nlist.c,v 1.36 2001/02/03 02:37:27 art Exp $";
+static char rcsid[] = "$OpenBSD: nlist.c,v 1.40 2001/07/09 06:57:43 deraadt Exp $";
 #endif /* LIBC_SCCS and not lint */
 
 #include <sys/types.h>
@@ -67,26 +67,27 @@ __aout_fdnlist(fd, list)
 {
 	register struct nlist *p, *s;
 	register char *strtab;
-	register off_t symoff;
+	register off_t symoff, stroff;
 	register u_long symsize;
 	register int nent, cc;
 	int strsize, usemalloc = 0;
 	struct nlist nbuf[1024];
 	struct exec exec;
 
-	if (lseek(fd, (off_t)0, SEEK_SET) == -1 ||
-	    read(fd, &exec, sizeof(exec)) != sizeof(exec) ||
+	if (pread(fd, &exec, sizeof(exec), (off_t)0) != sizeof(exec) ||
 	    N_BADMAG(exec) || exec.a_syms == NULL)
 		return (-1);
 
+	stroff = N_STROFF(exec);
 	symoff = N_SYMOFF(exec);
 	symsize = exec.a_syms;
 
 	/* Read in the size of the string table. */
-	if (lseek(fd, N_STROFF(exec), SEEK_SET) == -1)
+	if (pread(fd, (void *)&strsize, sizeof(strsize), stroff) !=
+	    sizeof(strsize))
 		return (-1);
-	if (read(fd, (void *)&strsize, sizeof(strsize)) != sizeof(strsize))
-		return (-1);
+	else
+		stroff += sizeof(strsize);
 
 	/*
 	 * Read in the string table.  We try mmap, but that will fail
@@ -94,14 +95,14 @@ __aout_fdnlist(fd, list)
 	 * returns memory to the system on free this does not cause bloat.
 	 */
 	strsize -= sizeof(strsize);
-	strtab = mmap(NULL, (size_t)strsize, PROT_READ, MAP_COPY|MAP_FILE,
-	    fd, lseek(fd, 0, SEEK_CUR));
+	strtab = mmap(NULL, (size_t)strsize, PROT_READ, MAP_SHARED|MAP_FILE,
+	    fd, stroff);
 	if (strtab == MAP_FAILED) {
 		usemalloc = 1;
 		if ((strtab = (char *)malloc(strsize)) == NULL)
 			return (-1);
 		errno = EIO;
-		if (read(fd, strtab, strsize) != strsize) {
+		if (pread(fd, strtab, strsize, stroff) != strsize) {
 			nent = -1;
 			goto aout_done;
 		}
@@ -125,16 +126,13 @@ __aout_fdnlist(fd, list)
 		p->n_value = 0;
 		++nent;
 	}
-	if (lseek(fd, symoff, SEEK_SET) == -1) {
-		nent = -1;
-		goto aout_done;
-	}
 
 	while (symsize > 0) {
 		cc = MIN(symsize, sizeof(nbuf));
-		if (read(fd, nbuf, cc) != cc)
+		if (pread(fd, nbuf, cc, symoff) != cc)
 			break;
 		symsize -= cc;
+		symoff += cc;
 		for (s = nbuf; cc > 0; ++s, cc -= sizeof(*s)) {
 			char *sname = strtab + s->n_un.n_strx - sizeof(int);
 
@@ -196,7 +194,7 @@ __ecoff_fdnlist(fd, list)
 		BAD;
 	}
 	mappedsize = st.st_size;
-	mappedfile = mmap(NULL, mappedsize, PROT_READ, MAP_COPY|MAP_FILE,
+	mappedfile = mmap(NULL, mappedsize, PROT_READ, MAP_SHARED|MAP_FILE,
 	    fd, 0);
 	if (mappedfile == MAP_FAILED)
 		BAD;
@@ -321,10 +319,8 @@ __elf_fdnlist(fd, list)
 	int usemalloc = 0;
 
 	/* Make sure obj is OK */
-	if (lseek(fd, (off_t)0, SEEK_SET) == -1 ||
-	    read(fd, &ehdr, sizeof(Elf_Ehdr)) != sizeof(Elf_Ehdr) ||
-	    !__elf_is_okay__(&ehdr) ||
-	    fstat(fd, &st) < 0)
+	if (pread(fd, &ehdr, sizeof(Elf_Ehdr), (off_t)0) != sizeof(Elf_Ehdr) ||
+	    !__elf_is_okay__(&ehdr) || fstat(fd, &st) < 0)
 		return (-1);
 
 	/* calculate section header table size */
@@ -338,7 +334,7 @@ __elf_fdnlist(fd, list)
 
 	/* mmap section header table */
 	shdr = (Elf_Shdr *)mmap(NULL, (size_t)shdr_size, PROT_READ,
-	    MAP_COPY|MAP_FILE, fd, (off_t) ehdr.e_shoff);
+	    MAP_SHARED|MAP_FILE, fd, (off_t) ehdr.e_shoff);
 	if (shdr == MAP_FAILED) {
 		usemalloc = 1;
 		if ((shdr = malloc(shdr_size)) == NULL)
@@ -392,7 +388,7 @@ __elf_fdnlist(fd, list)
 		}
 	} else {
 		strtab = mmap(NULL, (size_t)symstrsize, PROT_READ,
-		    MAP_COPY|MAP_FILE, fd, (off_t) symstroff);
+		    MAP_SHARED|MAP_FILE, fd, (off_t) symstroff);
 		if (strtab == MAP_FAILED)
 			return (-1);
 	}
@@ -420,14 +416,9 @@ __elf_fdnlist(fd, list)
 	if (symoff == 0)
 		goto elf_done;
 
-	if (lseek(fd, (off_t) symoff, SEEK_SET) == -1) {
-		nent = -1;
-		goto elf_done;
-	}
-
 	while (symsize > 0) {
 		cc = MIN(symsize, sizeof(sbuf));
-		if (read(fd, sbuf, cc) != cc)
+		if (pread(fd, sbuf, cc, symoff) != cc)
 			break;
 		symsize -= cc;
 		symoff += cc;
@@ -438,7 +429,6 @@ __elf_fdnlist(fd, list)
 				continue;
 			for (p = list; !ISLAST(p); p++) {
 				char *sym;
-				int again = 0;
 
 				/*
 				 * First we check for the symbol as it was

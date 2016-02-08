@@ -1,4 +1,4 @@
-/*	$OpenBSD: tc-i386.c,v 1.7 1999/06/15 10:28:49 espie Exp $	*/
+/*	$OpenBSD: tc-i386.c,v 1.9 2001/09/17 15:41:24 espie Exp $	*/
 
 /* i386.c -- Assemble code for the Intel 80386
    Copyright (C) 1989, 1991, 1992 Free Software Foundation.
@@ -27,7 +27,7 @@
   */
 
 #ifndef lint
-static char rcsid[] = "$OpenBSD: tc-i386.c,v 1.7 1999/06/15 10:28:49 espie Exp $";
+static char rcsid[] = "$OpenBSD: tc-i386.c,v 1.9 2001/09/17 15:41:24 espie Exp $";
 #endif
 
 #include "as.h"
@@ -1462,7 +1462,7 @@ char *operand_string;
 			break;
 		default:
 		seg_unimplemented:
-			as_bad("Unimplemented segment type %d in parse_operand", exp_seg);
+			as_bad("Unimplemented segment type %d in parse_operand(%s)", exp_seg, operand_string);
 			return 0;
 		}
 		/* shorten this type of this operand if the instruction wants
@@ -2258,20 +2258,6 @@ symbolS *
     md_undefined_symbol (name)
 char *name;
 {
-#ifdef PIC
-	/* gcc bug work-around:
-	 * old versions of gcc don't heed YES_UNDERSCORES,
-	 * and always generate _GLOBAL_OFFSET_TABLE_.
-	 * On OpenBSD, this is a bug, as this collides with
-	 * the user namespace.
-	 *
-	 * This code will no longer be needed once the switch to a recent 
-	 * egcs is complete.
-	 */
-	if (*name == '_' && *(name+1) == 'G' &&
-				strcmp(name, "_GLOBAL_OFFSET_TABLE_") == 0)
-		return symbol_find(GLOBAL_OFFSET_TABLE_NAME);
-#endif
 	return 0;
 }
 

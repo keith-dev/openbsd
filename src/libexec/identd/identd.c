@@ -1,4 +1,4 @@
-/*	$OpenBSD: identd.c,v 1.18 2001/04/15 23:48:15 hugh Exp $	*/
+/*	$OpenBSD: identd.c,v 1.21 2001/09/19 10:58:07 mpech Exp $	*/
 
 /*
  * This program is in the public domain and may be used freely by anyone
@@ -76,7 +76,7 @@ usage()
  * Return the name of the connecting host, or the IP number as a string.
  */
 char   *
-gethost(addr)
+gethost4_addr(addr)
 	struct in_addr *addr;
 {
 	struct hostent *hp;
@@ -85,6 +85,27 @@ gethost(addr)
 	if (hp)
 		return hp->h_name;
 	return inet_ntoa(*addr);
+}
+
+char   *
+gethost(ss)
+	struct sockaddr_storage *ss;
+{
+	if (ss->ss_family == AF_INET6)
+		return (gethost6((struct sockaddr_in6 *)ss));
+	return (gethost4((struct sockaddr_in *)ss));
+}
+
+char   *
+gethost4(sin)
+	struct sockaddr_in *sin;
+{
+	struct hostent *hp;
+
+	hp = gethostbyaddr((char *)&sin->sin_addr, sizeof(struct in_addr), AF_INET);
+	if (hp)
+		return hp->h_name;
+	return inet_ntoa(sin->sin_addr);
 }
 
 /*
@@ -353,11 +374,11 @@ main(argc, argv)
 				if (timeout)
 					nfds = poll(pfd, 1, timeout * 1000);
 				else
-					nfds = poll(pfd, 1, -1);
+					nfds = poll(pfd, 1, INFTIM);
 			} while (nfds < 0 && errno == EINTR);
 
 			/*
-			 * An error occured in select? Just die
+			 * An error occurred in select? Just die
 			 */
 			if (nfds < 0)
 				ERROR("main: select");
@@ -432,7 +453,7 @@ main(argc, argv)
 #else
 		openlog("identd", LOG_PID);
 #endif
-		syslog(LOG_INFO, "Connection from %s", gethost(&faddr));
+		syslog(LOG_INFO, "Connection from %s", gethost(&sa));
 	}
 	/*
 	 * Get local internet address

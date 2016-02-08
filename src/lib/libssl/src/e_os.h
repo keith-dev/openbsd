@@ -223,6 +223,7 @@ extern "C" {
 #  define SSLEAY_CONF	OPENSSL_CONF
 #  define NUL_DEV	"nul"
 #  define RFILE		".rnd"
+#  define DEFAULT_HOME  "C:"
 
 #else /* The non-microsoft world world */
 
@@ -340,12 +341,14 @@ extern HINSTANCE _hInstance;
 #    if defined(VMS) && !defined(__DECC)
 #      include <socket.h>
 #      include <in.h>
+#      include <inet.h>
 #    else
 #      include <sys/socket.h>
 #      ifdef FILIO_H
 #        include <sys/filio.h> /* Added for FIONBIO under unixware */
 #      endif
 #      include <netinet/in.h>
+#      include <arpa/inet.h>
 #    endif
 
 #    if defined(NeXT) || defined(_NEXT_SOURCE)

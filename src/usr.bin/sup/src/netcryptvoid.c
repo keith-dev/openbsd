@@ -1,4 +1,4 @@
-/*	$OpenBSD: netcryptvoid.c,v 1.3 1997/04/01 07:35:10 todd Exp $	*/
+/*	$OpenBSD: netcryptvoid.c,v 1.6 2001/05/04 22:16:15 millert Exp $	*/
 
 /*
  * Copyright (c) 1992 Carnegie Mellon University
@@ -16,7 +16,7 @@
  *
  * Carnegie Mellon requests users of this software to return to
  *
- *  Software Distribution Coordinator  or  Software_Distribution@CS.CMU.EDU
+ *  Software Distribution Coordinator  or  Software.Distribution@CS.CMU.EDU
  *  School of Computer Science
  *  Carnegie Mellon University
  *  Pittsburgh PA 15213-3890
@@ -26,6 +26,9 @@
  */
 /**********************************************************************
  * HISTORY
+ * Revision 2.2  92/09/09  22:04:34  mrt
+ * 	Created.
+ * 	[92/09/09            mrt]
  * 
  */
 /*
@@ -50,39 +53,38 @@
  ***    G L O B A L   V A R I A B L E S    ***
  *********************************************/
 
-int cryptflag = 0;		/* whether to encrypt/decrypt data */
+int cryptflag;			/* whether to encrypt/decrypt data */
 char *cryptbuf;			/* buffer for data encryption/decryption */
 
 int netcrypt (pword)
-char *pword;
+	char *pword;
 {
 	if (pword == NULL || (strcmp(pword,PSWDCRYPT) == 0)) {
 		cryptflag = 0;
-		(void) getcryptbuf (0);
+		(void) getcryptbuf(0);
 		return (SCMOK);
 	}
 	return (SCMERR);
 }
-int getcryptbuf (x)
-int x;
-{
-	static int cryptsize = 0;	/* size of current cryptbuf */
 
-	if (cryptflag == 0) {
+int getcryptbuf(x)
+	int x;
+{
+	if (cryptflag == 0)
 		return(SCMOK);
-	} else 
+	else 
 		return (SCMERR);
 }
 
 void decode (in,out,count)
-char *in,*out;
-int count;
+	char *in,*out;
+	int count;
 {
 }
 
 
 void encode (in,out,count)
-char *in,*out;
-int count;
+	char *in,*out;
+	int count;
 {
 }

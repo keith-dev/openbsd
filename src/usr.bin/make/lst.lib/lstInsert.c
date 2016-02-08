@@ -1,4 +1,5 @@
-/*	$OpenBSD: lstInsert.c,v 1.11 2000/09/14 13:32:09 espie Exp $	*/
+/*	$OpenPackages$ */
+/*	$OpenBSD: lstInsert.c,v 1.14 2001/05/29 12:53:46 espie Exp $	*/
 /*	$NetBSD: lstInsert.c,v 1.5 1996/11/06 17:59:44 christos Exp $	*/
 
 /*
@@ -42,16 +43,10 @@
  *	Insert a new datum before an old one
  */
 
-#include	"lstInt.h"
-#ifndef lint
-#if 0
-static char sccsid[] = "@(#)lstInsert.c	8.1 (Berkeley) 6/6/93";
-#else
-UNUSED
-static char rcsid[] = "$OpenBSD: lstInsert.c,v 1.11 2000/09/14 13:32:09 espie Exp $";
-#endif
-#endif /* not lint */
-
+#include "lstInt.h"
+#include <sys/types.h>
+#include <stdlib.h>
+#include "memory.h"
 
 /*-
  *-----------------------------------------------------------------------
@@ -67,27 +62,22 @@ static char rcsid[] = "$OpenBSD: lstInsert.c,v 1.11 2000/09/14 13:32:09 espie Ex
  */
 void
 Lst_Insert(l, ln, d)
-    Lst	    	  	l;	/* list to manipulate */
-    LstNode	  	ln;	/* node before which to insert d */
+    Lst 		l;	/* list to manipulate */
+    LstNode		ln;	/* node before which to insert d */
     void		*d;	/* datum to be inserted */
 {
-    LstNode	nLNode;	/* new lnode for d */
+    LstNode		nLNode; /* new lnode for d */
 
 
-    /*
-     * check validity of arguments
-     */
-    if (LstIsEmpty(l) && ln == NULL)
-	goto ok;
-
-    if (LstIsEmpty(l) || !LstNodeValid(ln, l))
+    if (ln == NULL && !Lst_IsEmpty(l))
 	return;
 
-    ok:
+    if (ln != NULL && Lst_IsEmpty(l))
+	return;
+
     PAlloc(nLNode, LstNode);
 
     nLNode->datum = d;
-    nLNode->useCount = nLNode->flags = 0;
 
     if (ln == NULL) {
 	nLNode->prevPtr = nLNode->nextPtr = NULL;
@@ -105,3 +95,21 @@ Lst_Insert(l, ln, d)
     }
 }
 
+void
+Lst_AtFront(l, d)
+    Lst 	l;
+    void	*d;
+{
+    LstNode	ln;
+
+    PAlloc(ln, LstNode);
+    ln->datum = d;
+
+    ln->nextPtr = l->firstPtr;
+    ln->prevPtr = NULL;
+    if (l->firstPtr == NULL)
+	l->lastPtr = ln;
+    else
+	l->firstPtr->prevPtr = ln;
+    l->firstPtr = ln;
+}

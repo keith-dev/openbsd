@@ -1,4 +1,4 @@
-.\"	$OpenBSD: diskless.8,v 1.12 2000/12/28 22:24:00 miod Exp $
+.\"	$OpenBSD: diskless.8,v 1.16 2001/10/05 14:45:54 mpech Exp $
 .\"	$NetBSD: diskless.8,v 1.7.4.1 1996/05/30 18:58:10 cgd Exp $
 .\"
 .\"
@@ -44,7 +44,6 @@ This file provides a general description of the interactions between
 a client and its server when a client is booting over the network.
 The general description is followed by specific instructions for
 configuring a server for diskless Sun clients.
-.Pp
 .Sh OPERATION
 When booting a system over the network, there are three
 phases of interaction between client and server:
@@ -79,8 +78,8 @@ Other machines may load a
 network boot program either from diskette or
 using a special PROM on the network card.
 .Pp
-In phase 2, the boot program loads a kernel.  Operation in
-this phase depends on the design of the boot program.
+In phase 2, the boot program loads a kernel.
+Operation in this phase depends on the design of the boot program.
 The boot program:
 .Pp
 .Bl -tag -width 2.2 -compact
@@ -193,7 +192,9 @@ manual page for more information.
 If booting a Sun or Motorola client, install a copy of the
 appropriate diskless boot loader (such as
 .Pa boot.net
-from the root directory of the OpenBSD sparc tree) in the
+from the root directory of the
+.Ox
+sparc tree) in the
 .Pa /tftpboot
 directory.
 Make a link such that the boot program is
@@ -205,9 +206,10 @@ For example:
 # ln -s boot.net C0C5600C.SUN4
 .Ed
 .Pp
-For a Sun3 machine, the name would be just C0C5600C
-(the sun3 PROM does not append the architecture name). The name
-used is architecture dependent, it simply has to match what the
+Some architectures, such as the Sun3 and Ultrasparc machines, do not append the
+architecture name.
+It this case, the name would be just C0C5600C.
+The name used is architecture dependent, it simply has to match what the
 booting client's PROM wishes to it to be.
 If the client's PROM fails to fetch the expected file,
 .Xr tcpdump 8
@@ -229,10 +231,10 @@ Add myclient to the bootparams database
 myclient  root=server:/export/myclient/root \\
           swap=server:/export/myclient/swap
 .Ed
-Note that some bootparam servers are somewhat sensitive.  Some require
-fully qualified hostnames or partially qualified hostnames (which can
-be solved by having both fully and partially qualified entries). Other
-servers are case sensitive.
+Note that some bootparam servers are somewhat sensitive.
+Some require fully qualified hostnames or partially qualified hostnames
+(which can be solved by having both fully and partially qualified entries).
+Other servers are case sensitive.
 .Pp
 .It 6.
 Build the swap file for myclient:
@@ -246,8 +248,10 @@ This creates a 16 Megabyte swap file.
 .It 7.
 Populate myclient's
 .Pa /
-filesystem on the server.  How this is done depends on the
-client architecture and the version of the OpenBSD distribution.
+filesystem on the server.
+How this is done depends on the client architecture and the version of the 
+.Ox
+distribution.
 It can be as simple as copying and modifying the server's root
 filesystem, or perhaps you need to get those files out of the
 standard binary distribution.

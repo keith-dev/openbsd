@@ -1,4 +1,4 @@
-/*	$OpenBSD: du.c,v 1.7 2001/02/23 19:14:21 pjanzen Exp $	*/
+/*	$OpenBSD: du.c,v 1.10 2001/07/30 00:53:38 deraadt Exp $	*/
 /*	$NetBSD: du.c,v 1.11 1996/10/18 07:20:35 thorpej Exp $	*/
 
 /*
@@ -47,7 +47,7 @@ static char copyright[] =
 #if 0
 static char sccsid[] = "@(#)du.c	8.5 (Berkeley) 5/4/95";
 #else
-static char rcsid[] = "$OpenBSD: du.c,v 1.7 2001/02/23 19:14:21 pjanzen Exp $";
+static char rcsid[] = "$OpenBSD: du.c,v 1.10 2001/07/30 00:53:38 deraadt Exp $";
 #endif
 #endif /* not lint */
 
@@ -110,7 +110,6 @@ main(argc, argv)
 			hflag = 1;
 			break;
 		case 'k':
-			blocksize = 1024;
 			kflag = 1;
 			break;
 		case 's':
@@ -164,7 +163,11 @@ main(argc, argv)
 		argv[1] = NULL;
 	}
 
-	if (!kflag || hflag)
+	if (hflag)
+		blocksize = 512;
+	else if (kflag)
+		blocksize = 1024;
+	else
 		(void)getbsize(&notused, &blocksize);
 	blocksize /= 512;
 
@@ -296,13 +299,13 @@ prtout(size, path, hflag)
 	double bytes;
 
 	if (!hflag)
-		(void)printf("%qd\t%s\n", size, path);
+		(void)printf("%lld\t%s\n", (long long)size, path);
 	else {
 		bytes = (double)size * 512.0;
 		unit = unit_adjust(&bytes);
 
 		if (bytes == 0)
-			(void)printf("     0B\t%s\n", path);
+			(void)printf("0B\t%s\n", path);
 		else if (bytes > 10)
 			(void)printf("%.0f%c\t%s\n", bytes, "BKMGTPE"[unit], path);
 		else

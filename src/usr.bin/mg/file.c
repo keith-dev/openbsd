@@ -1,12 +1,11 @@
-/*	$OpenBSD: file.c,v 1.5 2001/01/29 01:58:07 niklas Exp $	*/
+/*	$OpenBSD: file.c,v 1.9 2001/05/24 03:05:22 mickey Exp $	*/
 
 /*
  *	File commands.
  */
 
+#include <libgen.h>
 #include "def.h"
-
-static char	*itos	__P((char *, unsigned int));
 
 /*
  * Insert a file into the current buffer.  Real easy - just call the
@@ -23,14 +22,14 @@ fileinsert(f, n)
 	s = eread("Insert file: ", fname, NFILEN, EFNEW | EFCR | EFFILE);
 	if (s != TRUE)
 		return (s);
-	return insertfile(adjustname(fname), (char *)NULL, FALSE);
+	return insertfile(adjustname(fname), NULL, FALSE);
 	/* don't set buffer name */
 }
 
 /*
- * Select a file for editing.  Look around to see if you can find the file 
+ * Select a file for editing.  Look around to see if you can find the file
  * in another buffer; if you can find it, just switch to the buffer.  If
- * you cannot find the file, create a new buffer, read in the text, and 
+ * you cannot find the file, create a new buffer, read in the text, and
  * switch to the new buffer.
  */
 /* ARGSUSED */
@@ -100,41 +99,21 @@ findbuffer(fname)
 	unsigned int	 count = 1;
 
 	for (bp = bheadp; bp != NULL; bp = bp->b_bufp) {
-		if (fncmp(bp->b_fname, fname) == 0)
+		if (strcmp(bp->b_fname, fname) == 0)
 			return bp;
 	}
 	/* new buffer name */
-	makename(bname, fname);
+	strcpy(bname, basename(fname));
 	cp = bname + strlen(bname);
-	while (bfind(bname, FALSE) != NULL) {
-		/* add "<count>" to the name */
-		*cp = '<';
-		(VOID)strcpy(itos(cp, ++count) + 1, ">");
-	}
+	for (count = 1; bfind(bname, FALSE) != NULL; count++)
+		sprintf(cp, "<%d>", count);
 	return bfind(bname, TRUE);
 }
 
 /*
- * Put the decimal representation of num into a buffer.  Hacked to be
- * faster, smaller, and less general.
- */
-static char *
-itos(bufp, num)
-	char		*bufp;
-	unsigned int	 num;
-{
-	if (num >= 10) {
-		bufp = itos(bufp, num / 10);
-		num %= 10;
-	}
-	*++bufp = '0' + num;
-	return bufp;
-}
-
-/*
- * Read the file "fname" into the current buffer.  Make all of the text 
- * in the buffer go away, after checking for unsaved changes.  This is 
- * called by the "read" command, the "visit" command, and the mainline 
+ * Read the file "fname" into the current buffer.  Make all of the text
+ * in the buffer go away, after checking for unsaved changes.  This is
+ * called by the "read" command, the "visit" command, and the mainline
  * (for "uemacs file").
  */
 int
@@ -170,16 +149,16 @@ readin(fname)
  */
 
 /*
- * Insert a file in the current buffer, after dot.  Set mark at the end of 
- * the text inserted; point at the beginning.  Return a standard status. 
- * Print a summary (lines read, error message) out as well.  If the BACKUP 
- * conditional is set, then this routine also does the read end of backup 
- * processing.  The BFBAK flag, if set in a buffer, says that a backup 
- * should be taken.  It is set when a file is read in, but not on a new 
+ * Insert a file in the current buffer, after dot.  Set mark at the end of
+ * the text inserted; point at the beginning.  Return a standard status.
+ * Print a summary (lines read, error message) out as well.  If the BACKUP
+ * conditional is set, then this routine also does the read end of backup
+ * processing.  The BFBAK flag, if set in a buffer, says that a backup
+ * should be taken.  It is set when a file is read in, but not on a new
  * file.  (You don't need to make a backup copy of nothing.)
  */
-static char    *line = NULL;
-static int      linesize = 0;
+static char	*line = NULL;
+static int	linesize = 0;
 
 int
 insertfile(fname, newname, needinfo)
@@ -202,11 +181,11 @@ insertfile(fname, newname, needinfo)
 
 	/* cheap */
 	bp = curbp;
-	if (newname != (char *)NULL)
-		(VOID)strcpy(bp->b_fname, newname);
+	if (newname != NULL)
+		(void)strcpy(bp->b_fname, newname);
 
 	/* hard file open */
-	if ((s = ffropen(fname, needinfo ? bp : (BUFFER *) NULL)) == FIOERR)
+	if ((s = ffropen(fname, needinfo ? bp : NULL)) == FIOERR)
 		goto out;
 	if (s == FIOFNF) {
 		/* file not found */
@@ -219,11 +198,11 @@ insertfile(fname, newname, needinfo)
 	opos = curwp->w_doto;
 
 	/* open a new line, at point, and start inserting after it */
-	(VOID)lnewline();
+	(void)lnewline();
 	olp = lback(curwp->w_dotp);
 	if (olp == curbp->b_linep) {
 		/* if at end of buffer, create a line to insert before */
-		(VOID)lnewline();
+		(void)lnewline();
 		curwp->w_dotp = lback(curwp->w_dotp);
 	}
 
@@ -253,8 +232,8 @@ doneread:
 			break;
 		case FIOLONG:{
 				/* a line too long to fit in our buffer */
-				char           *cp;
-				int             newsize;
+				char	*cp;
+				int	newsize;
 
 				newsize = linesize * 2;
 				if (newsize < 0 ||
@@ -267,7 +246,7 @@ doneread:
 				bcopy(line, cp, linesize);
 				free(line);
 				line = cp;
-				s = ffgetline(line + linesize, linesize, 
+				s = ffgetline(line + linesize, linesize,
 				    &nbytes);
 				nbytes += linesize;
 				linesize = newsize;
@@ -283,7 +262,7 @@ doneread:
 	}
 endoffile:
 	/* ignore errors */
-	(VOID)ffclose((BUFFER *)NULL);
+	ffclose(NULL);
 	/* don't zap an error */
 	if (s == FIOEOF) {
 		if (nline == 1)
@@ -294,7 +273,7 @@ endoffile:
 	/* set mark at the end of the text */
 	curwp->w_dotp = curwp->w_markp = lback(curwp->w_dotp);
 	curwp->w_marko = llength(curwp->w_markp);
-	(VOID)ldelnewline();
+	(void)ldelnewline();
 	curwp->w_dotp = olp;
 	curwp->w_doto = opos;
 	if (olp == curbp->b_linep)
@@ -319,7 +298,7 @@ endoffile:
 		lp2 = curwp->w_dotp;
 	} else {
 		/* delete extraneous newline */
-		(VOID)ldelnewline();
+		(void)ldelnewline();
 out:		lp2 = NULL;
 	}
 	for (wp = wheadp; wp != NULL; wp = wp->w_wndp) {
@@ -340,46 +319,8 @@ out:		lp2 = NULL;
 }
 
 /*
- * Fabriacte a buffer name from a given filename.  This routing knows
- * about the syntax of file names on the target system.
- * BDC1		left scan delimiter.
- * BDC2		optional second left scan delimiter.
- * BDC3		optional right scan delimiter.
- */
-VOID
-makename(bname, fname)
-	char *bname, *fname;
-{
-	char *cp1, *cp2;
-
-	cp1 = &fname[0];
-	while (*cp1 != 0)
-		++cp1;
-
-	/* insure at least 1 character */
-	--cp1;
-#ifdef BDC2
-	while (cp1 != &fname[0] && cp1[-1] != BDC1 && cp1[-1] != BDC2)
-		--cp1;
-#else /* BDC2 */
-	while (cp1 != &fname[0] && cp1[-1] != BDC1)
-		--cp1;
-#endif /* BDC2 */
-	cp2 = &bname[0];
-
-#ifdef BDC3
-	while (cp2 != &bname[NBUFN - 1] && *cp1 != 0 && *cp1 != BDC3)
-		*cp2++ = *cp1++;
-#else /* BDC3 */
-	while (cp2 != &bname[NBUFN - 1] && *cp1 != 0)
-		*cp2++ = *cp1++;
-#endif /* BDC3 */
-	*cp2 = 0;
-}
-
-/*
- * Ask for a file name and write the contents of the current buffer to that 
- * file.  Update the remembered file name and clear the buffer changed flag. 
+ * Ask for a file name and write the contents of the current buffer to that
+ * file.  Update the remembered file name and clear the buffer changed flag.
  * This handling of file names is different from the earlier versions and
  * is more compatable with Gosling EMACS than with ITS EMACS.
  */
@@ -399,7 +340,7 @@ filewrite(f, n)
 	/* old attributes are no longer current */
 	bzero(&curbp->b_fi, sizeof(curbp->b_fi));
 	if ((s = writeout(curbp, adjfname)) == TRUE) {
-		(VOID)strcpy(curbp->b_fname, adjfname);
+		(void)strcpy(curbp->b_fname, adjfname);
 #ifndef NO_BACKUP
 		curbp->b_flag &= ~(BFBAK | BFCHG);
 #else /* !NO_BACKUP */
@@ -417,7 +358,7 @@ filewrite(f, n)
 #ifndef	MAKEBACKUP
 #define	MAKEBACKUP TRUE
 #endif /* !MAKEBACKUP */
-static int      makebackup = MAKEBACKUP;
+static int	makebackup = MAKEBACKUP;
 #endif /* !NO_BACKUP */
 
 /* ARGSUSED */
@@ -429,11 +370,11 @@ filesave(f, n)
 }
 
 /*
- * Save the contents of the buffer argument into its associated file.  Do 
- * nothing if there have been no changes (is this a bug, or a feature?). 
- * Error if there is no remembered file name. If this is the first write 
+ * Save the contents of the buffer argument into its associated file.  Do
+ * nothing if there have been no changes (is this a bug, or a feature?).
+ * Error if there is no remembered file name. If this is the first write
  * since the read or visit, then a backup copy of the file is made.
- * Allow user to select whether or not to make backup files by looking at 
+ * Allow user to select whether or not to make backup files by looking at
  * the value of makebackup.
  */
 int
@@ -461,7 +402,7 @@ buffsave(bp)
 		if (s == ABORT)
 			return FALSE;
 		/* softer error */
-		if (s == FALSE && 
+		if (s == FALSE &&
 		    (s = eyesno("Backup error, save anyway")) != TRUE)
 			return s;
 	}
@@ -509,8 +450,8 @@ makebkfile(f, n)
  */
 
 /*
- * This function performs the details of file writing; writing the file 
- * in buffer bp to file fn. Uses the file management routines in the 
+ * This function performs the details of file writing; writing the file
+ * in buffer bp to file fn. Uses the file management routines in the
  * "fileio.c" package. Most of the grief is checking of some sort.
  */
 int
@@ -531,7 +472,7 @@ writeout(bp, fn)
 			ewprintf("Wrote %s", fn);
 	} else
 		/* ignore close error if it is a write error */
-		(VOID)ffclose(bp);
+		(void)ffclose(bp);
 	return s == FIOSUC;
 }
 
@@ -539,7 +480,7 @@ writeout(bp, fn)
  * Tag all windows for bp (all windows if bp == NULL) as needing their
  * mode line updated.
  */
-VOID
+void
 upmodes(bp)
 	BUFFER *bp;
 {

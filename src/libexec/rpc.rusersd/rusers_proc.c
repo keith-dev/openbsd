@@ -1,4 +1,4 @@
-/*	$OpenBSD: rusers_proc.c,v 1.8 2001/01/28 19:34:31 niklas Exp $	*/
+/*	$OpenBSD: rusers_proc.c,v 1.11 2001/08/18 21:38:55 deraadt Exp $	*/
 
 /*-
  *  Copyright (c) 1993 John Brezak
@@ -29,19 +29,20 @@
  */
 
 #ifndef lint
-static char rcsid[] = "$OpenBSD: rusers_proc.c,v 1.8 2001/01/28 19:34:31 niklas Exp $";
+static char rcsid[] = "$OpenBSD: rusers_proc.c,v 1.11 2001/08/18 21:38:55 deraadt Exp $";
 #endif /* not lint */
 
-#include <signal.h>
+#include <sys/param.h>
+#include <sys/socket.h>
+#include <sys/stat.h>
 #include <sys/types.h>
 #include <sys/time.h>
+#include <signal.h>
 #include <utmp.h>
 #include <stdio.h>
 #include <syslog.h>
+#include <string.h>
 #include <rpc/rpc.h>
-#include <sys/socket.h>
-#include <sys/param.h>
-#include <sys/stat.h>
 #ifdef XIDLE
 #include <setjmp.h>
 #include <X11/Xlib.h>
@@ -74,9 +75,9 @@ static char rcsid[] = "$OpenBSD: rusers_proc.c,v 1.8 2001/01/28 19:34:31 niklas 
 #define UT_HOSTSIZE sizeof(((struct utmp *)0)->ut_host)
 #endif
 
-typedef char ut_line_t[UT_LINESIZE];
-typedef char ut_name_t[UT_NAMESIZE];
-typedef char ut_host_t[UT_HOSTSIZE];
+typedef char ut_line_t[UT_LINESIZE+1];
+typedef char ut_name_t[UT_NAMESIZE+1];
+typedef char ut_host_t[UT_HOSTSIZE+1];
 
 struct rusers_utmp utmps[MAXUSERS];
 struct utmpidle *utmp_idlep[MAXUSERS];
@@ -250,11 +251,14 @@ do_names_3(int all)
 			utmps[nusers].ut_idle =
 				getidle(usr.ut_line, usr.ut_host);
 			utmps[nusers].ut_line = line[nusers];
-			strncpy(line[nusers], usr.ut_line, sizeof(line[nusers]));
+			memset(line[nusers], 0, sizeof(line[nusers]));
+			strlcpy(line[nusers], usr.ut_line, sizeof(line[nusers]));
 			utmps[nusers].ut_user = name[nusers];
-			strncpy(name[nusers], usr.ut_name, sizeof(name[nusers]));
+			memset(name[nusers], 0, sizeof(name[nusers]));
+			strlcpy(name[nusers], usr.ut_name, sizeof(name[nusers]));
 			utmps[nusers].ut_host = host[nusers];
-			strncpy(host[nusers], usr.ut_host, sizeof(host[nusers]));
+			memset(host[nusers], 0, sizeof(host[nusers]));
+			strlcpy(host[nusers], usr.ut_host, sizeof(host[nusers]));
 			nusers++;
 		}
 	ut.utmp_array_len = nusers;
@@ -312,11 +316,14 @@ do_names_2(int all)
 			utmp_idle[nusers].ui_idle =
 				getidle(usr.ut_line, usr.ut_host);
 			utmp_idle[nusers].ui_utmp.ut_line = line[nusers];
-			strncpy(line[nusers], usr.ut_line, sizeof(line[nusers]));
+			memset(line[nusers], 0, sizeof(line[nusers]));
+			strlcpy(line[nusers], usr.ut_line, sizeof(line[nusers]));
 			utmp_idle[nusers].ui_utmp.ut_name = name[nusers];
-			strncpy(name[nusers], usr.ut_name, sizeof(name[nusers]));
+			memset(name[nusers], 0, sizeof(name[nusers]));
+			strlcpy(name[nusers], usr.ut_name, sizeof(name[nusers]));
 			utmp_idle[nusers].ui_utmp.ut_host = host[nusers];
-			strncpy(host[nusers], usr.ut_host, sizeof(host[nusers]));
+			memset(host[nusers], 0, sizeof(host[nusers]));
+			strlcpy(host[nusers], usr.ut_host, sizeof(host[nusers]));
 			nusers++;
 		}
 
@@ -371,11 +378,11 @@ do_names_1(int all)
 			ru_utmpp[nusers] = &ru_utmp[nusers];
 			ru_utmp[nusers].ut_time = usr.ut_time;
 			ru_utmp[nusers].ut_line = line[nusers];
-			strncpy(line[nusers], usr.ut_line, sizeof(line[nusers]));
+			strlcpy(line[nusers], usr.ut_line, sizeof(line[nusers]));
 			ru_utmp[nusers].ut_name = name[nusers];
-			strncpy(name[nusers], usr.ut_name, sizeof(name[nusers]));
+			strlcpy(name[nusers], usr.ut_name, sizeof(name[nusers]));
 			ru_utmp[nusers].ut_host = host[nusers];
-			strncpy(host[nusers], usr.ut_host, sizeof(host[nusers]));
+			strlcpy(host[nusers], usr.ut_host, sizeof(host[nusers]));
 			nusers++;
 		}
 

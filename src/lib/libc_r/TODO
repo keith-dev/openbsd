@@ -1,3 +1,4 @@
+$OpenBSD: TODO,v 1.16 2001/09/05 02:54:12 fgsch Exp $
 
 This is a list of things that still need to be done:
 
@@ -40,7 +41,7 @@ This is a list of things that still need to be done:
   straightforward.
 
 * Keep a handle on how netbsd are going with their kernel threads
-  [argumnet is that obsd is not multi-processor, so user threads will
+  [argument is that openbsd is not multi-processor, so user threads will
    retain stability and still give reasonable performance. talked to mwp@]
 
 * Look into how asynchronous I/O can help us. In particular, the
@@ -61,7 +62,7 @@ This is a list of things that still need to be done:
 * Figure out what to do with the configuration system variables (_SC_*)
   that are defined by POSIX 1003.1c (at least update sysconf(3))
 
-* Compare with PTL (http://www3.media.osaka-cu.ac.jp/~k-abe/PTL/)
+* Compare with PTL (http://www.media.osaka-cu.ac.jp/~k-abe/PTL/)
   [snarfed some sparc md stuff]
 
 * Verify that threads work with:
@@ -70,10 +71,20 @@ This is a list of things that still need to be done:
 	- ssl (in-tree) [triv]
 	- gdb
 	- ports
-		- lang/python [yes, but a SIGCONT problem?]
+		- audio/xmms
+		- bechmarks/iozone
 		- databases/mysql
-		- net/mrtd
 		- devel/glib [yes]
+		- devel/sdl [yes]
+		- graphics/ggi
+		- graphics/gii
+		- lang/tcl/8.3
+		- lang/python [yes, but a SIGCONT problem?]
+		- lang/python15
+		- net/icecast [partially]
+		- net/mrtd
+		- net/xchat
+		- net/pdnsd
 		- www/squid
 
 * Some ideas:
@@ -88,4 +99,9 @@ This is a list of things that still need to be done:
 
 * Clean up the way that signals are delivered to threads. Yuk.
 
-$OpenBSD: TODO,v 1.11 2000/02/10 12:28:56 d Exp $
+* Make getaddrinfo(3) thread-safe.
+
+* What to do with gethostby*_r(3)?
+
+* Look into getpw*_r(3).
+

@@ -1,4 +1,4 @@
-/*	$OpenBSD: supcmain.c,v 1.8 1998/06/03 16:20:36 deraadt Exp $	*/
+/*	$OpenBSD: supcmain.c,v 1.12 2001/09/19 10:58:07 mpech Exp $	*/
 
 /*
  * Copyright (c) 1992 Carnegie Mellon University
@@ -16,7 +16,7 @@
  *
  * Carnegie Mellon requests users of this software to return to
  *
- *  Software Distribution Coordinator  or  Software_Distribution@CS.CMU.EDU
+ *  Software Distribution Coordinator  or  Software.Distribution@CS.CMU.EDU
  *  School of Computer Science
  *  Carnegie Mellon University
  *  Pittsburgh PA 15213-3890
@@ -44,6 +44,11 @@
  *			When this flag is given, Sup will print the time
  *			that each collection was last upgraded, rather than
  *			performing actual upgrades.
+ *
+ *	-u	"utimes" flag
+ *			When this flag is given sup will not attempt to
+ *			restore access and modification files on the
+ *			collection files from the server.
  *
  *	-R	"resource pause" flag
  *			Sup will not disable resource pausing and will not
@@ -175,6 +180,20 @@
  *	Modified SUP to use gzip based compression when sending files
  *	across the network to save BandWidth
  *
+ * Revision 1.6  92/08/11  12:06:59  mrt
+ * 	Merged in Brad's changes. Made resource pausing code conditional
+ * 	on MACH, rather than CMUCS. Fixed some calls to sprintf to
+ * 	return void.
+ * 	[92/08/09            mrt]
+ * 
+ * Revision 1.5  92/02/08  19:01:18  mja
+ * 	Correct oldsigsys type when ANSI C.
+ * 	[92/02/08  18:59:47  mja]
+ * 
+ * Revision 1.4  92/02/08  18:24:01  mja
+ * 	Added -k and -K switches.
+ * 	[92/01/17            vdelvecc]
+ * 
  * 27-Dec-87  Glenn Marcy (gm0w) at Carnegie-Mellon University
  *	Added crosspatch support (is currently ignored).
  *
@@ -229,7 +248,7 @@
  *
  * 03-Feb-86  Glenn Marcy (gm0w) at Carnegie-Mellon University
  *	Fixed small bug in signon that didn't retry connections if an
- *	error occured on the first attempt to connect. [V5.12]
+ *	error occurred on the first attempt to connect. [V5.12]
  *
  * 26-Jan-86  Glenn Marcy (gm0w) at Carnegie-Mellon University
  *	New command interface.  Added -bBDEO flags and "delete",
@@ -312,14 +331,15 @@
 char program[] = "SUP";			/* program name for SCM messages */
 int progpid = -1;			/* and process id */
 
-COLLECTION *firstC,*thisC;		/* collection list pointer */
+COLLECTION *firstC, *thisC;		/* collection list pointer */
 
 extern int dontjump;			/* disable longjmp */
 extern int scmdebug;			/* SCM debugging flag */
 
-int silent;				/* Silent run, print only errors */
+int silent;				/* silent run, print only errors */
 int sysflag;				/* system upgrade flag */
 int timeflag;				/* print times flag */
+int noutime;				/* don't preserve utimes */
 #if	MACH
 int rpauseflag;				/* don't disable resource pausing */
 #endif	/* MACH */
@@ -336,12 +356,12 @@ static char *init __P((int, char **));
  *************************************/
 
 int
-main (argc, argv)
-int argc;
-char **argv;
+main(argc, argv)
+	int argc;
+	char **argv;
 {
-	char *progname,*supfname;
-	int restart,sfdev = 0,sfino = 0, sfmtime = 0;
+	char *progname, *supfname;
+	int restart, sfdev = 0, sfino = 0, sfmtime = 0;
 	struct stat sbuf;
 	struct sigaction ign;
 
@@ -350,15 +370,14 @@ char **argv;
 	server = FALSE;			/* export that we're not a server */
 	collname = NULL;		/* no current collection yet */
 	dontjump = TRUE;		/* clear setjmp buffer */
-	progname = salloc (argv[0]);
+	progname = strdup(argv[0]);
 
-	supfname = init (argc,argv);
+	supfname = init(argc, argv);
 	restart = -1;			/* don't make restart checks */
 	if (*progname == '/' && *supfname == '/') {
-		if (stat (supfname,&sbuf) < 0) {
-			logerr ("Can't stat supfile %s",supfname);
-		}
-		else {
+		if (stat(supfname, &sbuf) < 0) {
+			logerr("Can't stat supfile %s", supfname);
+		} else {
 			sfdev = sbuf.st_dev;
 			sfino = sbuf.st_ino;
 			sfmtime = sbuf.st_mtime;
@@ -367,20 +386,20 @@ char **argv;
 	}
 	if (timeflag) {
 		for (thisC = firstC; thisC; thisC = thisC->Cnext)
-			prtime ();
+			prtime();
 	} else {
 		/* ignore network pipe signals */
 		memset(&ign, 0, sizeof ign);
 		ign.sa_handler = SIG_IGN;
 		ign.sa_flags = 0;
 		sigemptyset(&ign.sa_mask);
-		(void) sigaction (SIGPIPE,&ign,NULL);
-		getnams ();		/* find unknown repositories */
+		(void) sigaction(SIGPIPE,&ign,NULL);
+		getnams();		/* find unknown repositories */
 		for (thisC = firstC; thisC; thisC = thisC->Cnext) {
-			getcoll ();	/* upgrade each collection */
+			getcoll();	/* upgrade each collection */
 			if (restart == 0) {
-				if (stat (supfname,&sbuf) < 0)
-					logerr ("Can't stat supfile %s",
+				if (stat(supfname,&sbuf) < 0)
+					logerr("Can't stat supfile %s",
 						supfname);
 				else if (sfmtime != sbuf.st_mtime ||
 					 sfino != sbuf.st_ino ||
@@ -390,32 +409,40 @@ char **argv;
 				}
 			}
 		}
-		endpwent ();		/* close /etc/passwd */
-		(void) endgrent ();	/* close /etc/group */
+		endpwent();		/* close /etc/passwd */
+		endgrent();		/* close /etc/group */
 		if (restart == 1) {
 			int fd;
+
 			if (!silent)
 				loginfo("SUP Restarting %s with new supfile %s",
-					progname,supfname);
-			for (fd = getdtablesize (); fd > 3; fd--)
-				(void) close (fd);
-			execv (progname,argv);
-			logquit (1,"Restart failed");
+					progname, supfname);
+			for (fd = getdtablesize(); fd > 3; fd--)
+				(void) close(fd);
+			execv(progname, argv);
+			logquit(1, "Restart failed");
 		}
 	}
 	while ((thisC = firstC) != NULL) {
 		firstC = firstC->Cnext;
-		free (thisC->Cname);
-		Tfree (&thisC->Chtree);
-		free (thisC->Cbase);
-		if (thisC->Chbase)  free (thisC->Chbase);
-		if (thisC->Cprefix)  free (thisC->Cprefix);
-		if (thisC->Crelease)  free (thisC->Crelease);
-		if (thisC->Cnotify)  free (thisC->Cnotify);
-		if (thisC->Clogin)  free (thisC->Clogin);
-		if (thisC->Cpswd)  free (thisC->Cpswd);
-		if (thisC->Ccrypt)  free (thisC->Ccrypt);
-		free ((char *)thisC);
+		free(thisC->Cname);
+		Tfree(&thisC->Chtree);
+		free(thisC->Cbase);
+		if (thisC->Chbase)
+			free(thisC->Chbase);
+		if (thisC->Cprefix)
+			free(thisC->Cprefix);
+		if (thisC->Crelease)
+			free(thisC->Crelease);
+		if (thisC->Cnotify)
+			free(thisC->Cnotify);
+		if (thisC->Clogin)
+			free(thisC->Clogin);
+		if (thisC->Cpswd)
+			free(thisC->Cpswd);
+		if (thisC->Ccrypt)
+			free(thisC->Ccrypt);
+		free (thisC);
 	}
 	exit (0);
 }
@@ -423,7 +450,8 @@ char **argv;
 /*****************************************
  ***    I N I T I A L I Z A T I O N    ***
  *****************************************/
-/* Set up collection list from supfile.  Check all fields except
+/*
+ * Set up collection list from supfile.  Check all fields except
  * hostname to be sure they make sense.
  */
 
@@ -432,20 +460,21 @@ char **argv;
 #define Twant	Tuid
 #define Tcount	Tgid
 
-static void doswitch (argp,collTp,oflagsp,aflagsp)
-char *argp;
-register TREE **collTp;
-int *oflagsp,*aflagsp;
+static void
+doswitch(argp, collTp, oflagsp, aflagsp)
+	char *argp;
+	TREE **collTp;
+	int *oflagsp, *aflagsp;
 {
-	register TREE *t;
-	register char *coll;
-	register int oflags,aflags;
+	TREE *t;
+	char *coll;
+	int oflags,aflags;
 
 	oflags = aflags = 0;
 	for (;;) {
 		switch (*argp) {
 		default:
-			logerr ("Invalid flag '%c' ignored",*argp);
+			logerr("Invalid flag '%c' ignored", *argp);
 			break;
 		case '\0':
 		case '=':
@@ -457,13 +486,13 @@ int *oflagsp,*aflagsp;
 				return;
 			}
 			do {
-				coll = nxtarg (&argp,", \t");
-				t = Tinsert (collTp,coll,TRUE);
+				coll = nxtarg(&argp, ", \t");
+				t = Tinsert(collTp, coll, TRUE);
 				t->Toflags |= oflags;
 				t->Toflags &= ~aflags;
 				t->Taflags |= aflags;
 				t->Taflags &= ~oflags;
-				argp = skipover (argp,", \t");
+				argp = skipover(argp, ", \t");
 			} while (*argp);
 			return;
 		case 'N':
@@ -541,6 +570,9 @@ int *oflagsp,*aflagsp;
 			oflags &= ~CFOLD;
 			aflags |= CFOLD;
 			break;
+		case 'u':
+			noutime = TRUE;
+			break;
 		case 'v':
 			oflags |= CFVERBOSE;
 			break;
@@ -555,21 +587,22 @@ int *oflagsp,*aflagsp;
 	}
 }
 
-static char *init (argc,argv)
-int argc;
-char **argv;
+static char *
+init(argc, argv)
+	int argc;
+	char **argv;
 {
-	char buf[STRINGLENGTH],*p;
+	char buf[STRINGLENGTH], *p, *q;
 	char username[STRINGLENGTH];
-	register char *supfname,*q,*arg;
-	register COLLECTION *c,*lastC;
-	register FILE *f;
-	register int bogus;
-	register struct passwd *pw;
-	register TREE *t;
+	char *supfname, *arg;
+	COLLECTION *c, *lastC;
+	FILE *f;
+	int bogus;
+	struct passwd *pw;
+	TREE *t;
 	TREE *collT;			/* collections we are interested in */
 	time_t timenow;			/* startup time */
-	int oflags,aflags;
+	int oflags, aflags;
 	int cwant;
 #ifdef	MACH
 #ifdef	__STDC__
@@ -591,72 +624,73 @@ char **argv;
 	collT = NULL;
 	oflags = aflags = 0;
 	while (argc > 1 && argv[1][0] == '-' && argv[1][1] != '\0') {
-		doswitch (&argv[1][1],&collT,&oflags,&aflags);
+		doswitch(&argv[1][1], &collT, &oflags, &aflags);
 		--argc;
 		argv++;
 	}
 	if (argc == 1 && !sysflag)
-		logquit (1,"Need either -s or supfile");
+		logquit (1, "Need either -s or supfile");
 #if	MACH
-	oldsigsys = signal (SIGSYS,SIG_IGN);
+	oldsigsys = signal(SIGSYS,SIG_IGN);
 	if (rpauseflag != TRUE)
-		if (syscall (SYS_rpause,ENOSPC,RPAUSE_ALL,RPAUSE_DISABLE) < 0)
+		if (syscall(SYS_rpause, ENOSPC, RPAUSE_ALL, RPAUSE_DISABLE) < 0)
 		rpauseflag = TRUE;
-	(void) signal (SIGSYS,oldsigsys);
+	(void) signal(SIGSYS, oldsigsys);
 #endif	/* MACH */
 	if (sysflag) {
-		(void) snprintf (buf,sizeof buf,
-			timeflag?FILESUPTDEFAULT:FILESUPDEFAULT,
-			DEFDIR);
+		(void) snprintf (buf, sizeof buf,
+			timeflag ? FILESUPTDEFAULT : FILESUPDEFAULT, DEFDIR);
 		supfname = buf;
 	} else {
 		supfname = argv[1];
-		if (strcmp (supfname,"-") == 0)
+		if (strcmp(supfname, "-") == 0)
 			supfname = "";
 		--argc;
 		argv++;
 	}
 	cwant = argc > 1;
 	while (argc > 1) {
-		t = Tinsert (&collT,argv[1],TRUE);
+		t = Tinsert(&collT, argv[1], TRUE);
 		t->Twant = TRUE;
 		--argc;
 		argv++;
 	}
-	if ((p = (char *)getlogin()) ||
-	    ((pw = getpwuid ((int)getuid())) && (p = pw->pw_name))) {
-		(void) strncpy (username,p, sizeof username-1);
-		username[sizeof username-1] = '\0';
+	if ((p = getlogin()) ||
+	    ((pw = getpwuid(getuid())) && (p = pw->pw_name))) {
+		(void) strlcpy(username, p, sizeof username);
 	} else
 		*username = '\0';
 	if (*supfname) {
-		f = fopen (supfname,"r");
+		f = fopen(supfname, "r");
 		if (f == NULL)
-			logquit (1,"Can't open supfile %s",supfname);
+			logquit(1, "Can't open supfile %s", supfname);
 	} else
 		f = stdin;
 	firstC = NULL;
 	lastC = NULL;
 	bogus = FALSE;
-	while ((p = fgets (buf,STRINGLENGTH,f)) != NULL) {
-		q = strchr (p,'\n');
-		if (q)  *q = '\0';
-		if (strchr ("#;:",*p))  continue;
-		arg = nxtarg (&p," \t");
+	while ((p = fgets(buf, sizeof(buf), f)) != NULL) {
+		if ((q = strchr(p, '\n')))
+			*q = '\0';
+		if (strchr("#;:", *p))
+			continue;
+		arg = nxtarg (&p, " \t");
 		if (*arg == '\0') {
-			logerr ("Missing collection name in supfile");
+			logerr("Missing collection name in supfile");
 			bogus = TRUE;
 			continue;
 		}
 		if (cwant) {
-			register TREE *t;
-			if ((t = Tsearch (collT,arg)) == NULL)
+			TREE *t;
+			if ((t = Tsearch(collT, arg)) == NULL)
 				continue;
 			t->Tcount++;
 		}
-		c = (COLLECTION *) malloc (sizeof(COLLECTION));
-		if (firstC == NULL)  firstC = c;
-		if (lastC != NULL) lastC->Cnext = c;
+		c = (COLLECTION *) malloc(sizeof(COLLECTION));
+		if (firstC == NULL)
+			firstC = c;
+		if (lastC != NULL)
+			lastC->Cnext = c;
 		lastC = c;
 		if (parsecoll(c,arg,p) < 0) {
 			bogus = TRUE;
@@ -664,51 +698,56 @@ char **argv;
 		}
 		c->Cflags |= oflags;
 		c->Cflags &= ~aflags;
-		if ((t = Tsearch (collT,c->Cname)) != NULL) {
+		if ((t = Tsearch(collT, c->Cname)) != NULL) {
 			c->Cflags |= t->Toflags;
 			c->Cflags &= ~t->Taflags;
 		}
 		if ((c->Cflags&CFMAIL) && c->Cnotify == NULL) {
 			if (*username == '\0')
-				logerr ("User unknown, notification disabled");
+				logerr("User unknown, notification disabled");
 			else
-				c->Cnotify = salloc (username);
+				c->Cnotify = strdup(username);
 		}
 		if (c->Cbase == NULL) {
-			(void) snprintf (buf,sizeof buf,
-				FILEBASEDEFAULT,c->Cname);
-			c->Cbase = salloc (buf);
+			(void) snprintf(buf, sizeof buf,
+				FILEBASEDEFAULT, c->Cname);
+			c->Cbase = strdup(buf);
 		}
 	}
-	if (bogus)  logquit (1,"Aborted due to supfile errors");
-	if (f != stdin)  (void) fclose (f);
-	if (cwant)  (void) Tprocess (collT,checkcoll, NULL);
+	if (bogus)
+		logquit(1, "Aborted due to supfile errors");
+	if (f != stdin)
+		(void) fclose(f);
+	if (cwant)
+		(void) Tprocess(collT, checkcoll, NULL);
 	Tfree (&collT);
-	if (firstC == NULL)  logquit (1,"No collections to upgrade");
-	timenow = time ((time_t *)NULL);
+	if (firstC == NULL)
+		logquit(1, "No collections to upgrade");
+	timenow = time(NULL);
 	if (*supfname == '\0')
 		p = "standard input";
 	else if (sysflag)
 		p = "system software";
 	else {
-		(void) snprintf (buf,sizeof buf,"file %s",supfname);
+		(void) snprintf(buf, sizeof buf, "file %s", supfname);
 		p = buf;
 	}
 	if (!silent)
-	    loginfo ("SUP %d.%d (%s) for %s at %s",PROTOVERSION,PGMVERSION,
-		    scmversion,p,fmttime (timenow));
-	return (salloc (supfname));
+		loginfo("SUP %d.%d (%s) for %s at %s", PROTOVERSION, PGMVERSION,
+			scmversion, p, fmttime(timenow));
+	return (strdup(supfname));
 }
 
 static int
-checkcoll (t, dummy)
-register TREE *t;
-void *dummy;
+checkcoll(t, dummy)
+	TREE *t;
+	void *dummy;
 {
-	if (!t->Twant)  return (SCMOK);
+	if (!t->Twant)
+		return (SCMOK);
 	if (t->Tcount == 0)
-		logerr ("Collection %s not found",t->Tname);
+		logerr("Collection %s not found",t->Tname);
 	if (t->Tcount > 1)
-		logerr ("Collection %s found more than once",t->Tname);
+		logerr("Collection %s found more than once", t->Tname);
 	return (SCMOK);
 }

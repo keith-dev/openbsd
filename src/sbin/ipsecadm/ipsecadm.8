@@ -1,4 +1,4 @@
-.\" $OpenBSD: ipsecadm.8,v 1.37 2001/03/22 03:35:19 angelos Exp $
+.\" $OpenBSD: ipsecadm.8,v 1.44 2001/09/06 06:34:13 jufi Exp $
 .\"
 .\" Copyright 1997 Niels Provos <provos@physnet.uni-hamburg.de>
 .\" All rights reserved.
@@ -35,7 +35,7 @@
 .Os
 .Sh NAME
 .Nm ipsecadm
-.Nd interface to setup IPSec
+.Nd interface to setup IPsec
 .Sh SYNOPSIS
 .Nm ipsecadm
 .Op command
@@ -43,19 +43,20 @@
 .Sh NOTE
 Before
 .Xr ipsecadm 8
-can be used, IPSec must be enabled by setting one or more of the following
+can be used, IPsec must be enabled by setting one or more of the following
 .Xr sysctl 3
 variables:
-.Bl -tag -width xxxxxxxxxxxxxxxxxxxxx
+.Bl -tag -width xxxxxxxxxxxxxxxxxxxxxx
 .It net.inet.esp.enable
-Enable the ESP IPSec protocol
+Enable the ESP IPsec protocol
 .It net.inet.ah.enable
-Enable the AH IPSec protocol
+Enable the AH IPsec protocol
+.It net.inet.ipcomp.enable
+Enable the IPComp protocol
 .El
 .Pp
 To enable these operations across reboots, see
 .Pa /etc/sysctl.conf .
-.Pp
 .Sh DESCRIPTION
 The
 .Nm ipsecadm
@@ -64,7 +65,7 @@ to be used with
 .Xr ipsec 4 .
 It can be used to specify the encryption and authentication
 algorithms and key material for the network layer security
-provided by IPSec.
+provided by IPsec.
 The possible commands are:
 .Bl -tag -width new_esp
 .It new esp
@@ -251,7 +252,7 @@ A
 .Nm bypass
 or
 .Nm permit
-flow is used to specify a flow for which IPSec processing will be
+flow is used to specify a flow for which IPsec processing will be
 bypassed, i.e packets will/need not be processed by any SAs.
 For
 .Nm permit
@@ -272,7 +273,7 @@ flow is used to specify classes of packets that must be dropped
 takes the same additional modifiers as
 .Nm bypass .
 .It flush
-Flush SAs from from kernel.
+Flush SAs from kernel.
 This includes flushing any flows and
 routing entries associated with the SAs.
 Allowed modifiers are:
@@ -280,10 +281,27 @@ Allowed modifiers are:
 .Fl esp ,
 .Fl oldah ,
 .Fl oldesp ,
+.Fl ip4 ,
 and
-.Fl ip4 .
+.Fl ipcomp .
 Default action is to flush all types of security associations
 from the kernel.
+.It ipcomp
+Setup an IP Compression Association (IPCA) which will use the IPcomp
+transforms. Just like an SA, an IPCA consists of the destination
+address, a Compression Parameter Index (CPI) and a protocol (which is
+fixed to IPcomp). Compression algorithms are applied. Allowed
+modifiers are: 
+.Fl dst ,
+.Fl src ,
+.Fl cpi ,
+.Fl comp ,
+and
+.Fl forcetunnel .
+To create an IPsec SA using compression, an IPCA and an SA must first
+be created. After this a IPCA/SA bundle must be created using the 
+.Nm group
+keyword. The IPCA must be applied first. 
 .El
 .Pp
 If no command is given
@@ -320,6 +338,8 @@ The Security Parameter Index (SPI), given as a hexadecimal number.
 .It Fl spi2
 The second SPI used by
 .Nm group .
+.It Fl cpi
+The Compression Parameter Index (CPI), given as a hexadecimal number.
 .It Fl tunnel
 This option has been deprecated.
 The arguments are ignored, and it otherwise has the same effect as the
@@ -381,6 +401,10 @@ for both old and new ah and also new esp.
 Also
 .Nm rmd160
 for both new ah and esp.
+.It Fl comp
+The compression algorithm to be used with the IPCA. The only possible value
+currently is:
+.Nm deflate .
 .It Fl key
 The secret symmetric key used for encryption and authentication.
 The size for
@@ -464,6 +488,8 @@ otherwise takes the same values as
 The source address, source network mask, destination address and destination
 network mask against which packets need to match to use the specified
 Security Association.
+Alternatively, addresses and masks can be specified as
+.Dq Li source/prefixlen destination/prefixlen .
 All addresses must be of the same address family
 (IPv4 or IPv6).
 .It Fl transport
@@ -533,7 +559,7 @@ For
 create or delete a
 .Nm bypass
 flow.
-Packets matching this flow will not be processed by IPSec.
+Packets matching this flow will not be processed by IPsec.
 .It Fl deny
 For
 .Nm flow ,

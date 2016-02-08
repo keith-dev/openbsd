@@ -1,4 +1,4 @@
-/*	$OpenBSD: getifaddrs.c,v 1.3 2000/11/24 08:26:47 itojun Exp $	*/
+/*	$OpenBSD: getifaddrs.c,v 1.6 2001/08/20 02:27:10 itojun Exp $	*/
 
 /*
  * Copyright (c) 1995, 1999
@@ -43,6 +43,7 @@
 #include <ifaddrs.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 
 #if !defined(AF_LINK)
 #define	SA_LEN(sa)	sizeof(struct sockaddr)
@@ -97,17 +98,17 @@ getifaddrs(struct ifaddrs **pif)
 	struct ifa_msghdr *ifam;
 	struct sockaddr_dl *dl;
 	struct sockaddr *sa;
-	struct ifaddrs *ifa, *ift;
 	u_short index = 0;
+	size_t len, alen;
 #else	/* NET_RT_IFLIST */
 	char buf[1024];
-	int m, sock;
+	int sock;
 	struct ifconf ifc;
 	struct ifreq *ifr;
 	struct ifreq *lifr;
 #endif	/* NET_RT_IFLIST */
+	struct ifaddrs *ifa, *ift;
 	int i;
-	size_t len, alen;
 	char *data;
 	char *names;
 
@@ -212,7 +213,10 @@ getifaddrs(struct ifaddrs **pif)
 		dcnt += SA_RLEN(sa);
 		ncnt += sizeof(ifr->ifr_name) + 1;
 		
-		ifr = (struct ifreq *)(((char *)sa) + SA_LEN(sa));
+		if (SA_LEN(sa) < sizeof(*sa))
+			ifr = (struct ifreq *)(((char *)sa) + sizeof(*sa));
+		else
+			ifr = (struct ifreq *)(((char *)sa) + SA_LEN(sa));
 	}
 #endif	/* NET_RT_IFLIST */
 
@@ -353,8 +357,7 @@ getifaddrs(struct ifaddrs **pif)
 		struct sockaddr *sa;
 
 		ift->ifa_name = names;
-		names[sizeof(ifr->ifr_name)] = 0;
-		strncpy(names, ifr->ifr_name, sizeof(ifr->ifr_name));
+		strlcpy(names, ifr->ifr_name, sizeof(ifr->ifr_name));
 		while (*names++)
 			;
 

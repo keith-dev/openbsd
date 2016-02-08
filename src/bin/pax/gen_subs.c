@@ -1,4 +1,4 @@
-/*	$OpenBSD: gen_subs.c,v 1.9 2001/02/12 13:51:15 danh Exp $	*/
+/*	$OpenBSD: gen_subs.c,v 1.12 2001/07/17 18:19:49 millert Exp $	*/
 /*	$NetBSD: gen_subs.c,v 1.5 1995/03/21 09:07:26 cgd Exp $	*/
 
 /*-
@@ -42,7 +42,7 @@
 #if 0
 static char sccsid[] = "@(#)gen_subs.c	8.1 (Berkeley) 5/31/93";
 #else
-static char rcsid[] = "$OpenBSD: gen_subs.c,v 1.9 2001/02/12 13:51:15 danh Exp $";
+static char rcsid[] = "$OpenBSD: gen_subs.c,v 1.12 2001/07/17 18:19:49 millert Exp $";
 #endif
 #endif /* not lint */
 
@@ -56,6 +56,7 @@ static char rcsid[] = "$OpenBSD: gen_subs.c,v 1.9 2001/02/12 13:51:15 danh Exp $
 #include <unistd.h>
 #include <stdlib.h>
 #include <string.h>
+#include <vis.h>
 #include "pax.h"
 #include "extern.h"
 
@@ -98,7 +99,8 @@ ls_list(arcn, now, fp)
 	 * if not verbose, just print the file name
 	 */
 	if (!vflag) {
-		(void)fprintf(fp, "%s\n", arcn->name);
+		safe_print(arcn->name, fp);
+		(void)putc('\n', fp);
 		(void)fflush(fp);
 		return;
 	}
@@ -127,21 +129,21 @@ ls_list(arcn, now, fp)
 	if (strftime(f_date,DATELEN,timefrmt,localtime(&(sbp->st_mtime))) == 0)
 		f_date[0] = '\0';
 	(void)fprintf(fp, "%s%2u %-*.*s %-*.*s ", f_mode, sbp->st_nlink,
-		NAME_WIDTH, UT_NAMESIZE, name_uid(sbp->st_uid, 1), 
+		NAME_WIDTH, UT_NAMESIZE, name_uid(sbp->st_uid, 1),
 		NAME_WIDTH, UT_NAMESIZE, name_gid(sbp->st_gid, 1));
 
 	/*
 	 * print device id's for devices, or sizes for other nodes
 	 */
 	if ((arcn->type == PAX_CHR) || (arcn->type == PAX_BLK))
-#		ifdef NET2_STAT
+#		ifdef LONG_OFF_T
 		(void)fprintf(fp, "%4u,%4u ", MAJOR(sbp->st_rdev),
 #		else
 		(void)fprintf(fp, "%4lu,%4lu ", (unsigned long)MAJOR(sbp->st_rdev),
 #		endif
 		    (unsigned long)MINOR(sbp->st_rdev));
 	else {
-#		ifdef NET2_STAT
+#		ifdef LONG_OFF_T
 		(void)fprintf(fp, "%9lu ", sbp->st_size);
 #		else
 		(void)fprintf(fp, "%9qu ", sbp->st_size);
@@ -151,20 +153,24 @@ ls_list(arcn, now, fp)
 	/*
 	 * print name and link info for hard and soft links
 	 */
-	(void)fprintf(fp, "%s %s", f_date, arcn->name);
-	if ((arcn->type == PAX_HLK) || (arcn->type == PAX_HRG))
-		(void)fprintf(fp, " == %s\n", arcn->ln_name);
-	else if (arcn->type == PAX_SLK)
-		(void)fprintf(fp, " => %s\n", arcn->ln_name);
-	else
-		(void)putc('\n', fp);
+	(void)fputs(f_date, fp);
+	(void)putc(' ', fp);
+	safe_print(arcn->name, fp);
+	if ((arcn->type == PAX_HLK) || (arcn->type == PAX_HRG)) {
+		fputs(" == ", fp);
+		safe_print(arcn->ln_name, fp);
+	} else if (arcn->type == PAX_SLK) {
+		fputs(" => ", fp);
+		safe_print(arcn->ln_name, fp);
+	}
+	(void)putc('\n', fp);
 	(void)fflush(fp);
 	return;
 }
 
 /*
  * tty_ls()
- * 	print a short summary of file to tty.
+ *	print a short summary of file to tty.
  */
 
 #ifdef __STDC__
@@ -202,37 +208,30 @@ ls_tty(arcn)
 	return;
 }
 
-/*
- * l_strncpy()
- *	copy src to dest up to len chars (stopping at first '\0').
- *	when src is shorter than len, pads to len with '\0'. 
- * Return:
- *	number of chars copied. (Note this is a real performance win over
- *	doing a strncpy(), a strlen(), and then a possible memset())
- */
-
 #ifdef __STDC__
-int
-l_strncpy(register char *dest, register char *src, int len)
+void
+safe_print(char *str, FILE *fp)
 #else
-int
-l_strncpy(dest, src, len)
-	register char *dest;
-	register char *src;
-	int len;
+void
+safe_print(str, fp)
+	char *str;
+	FILE *fp;
 #endif
 {
-	register char *stop;
-	register char *start;
+	char visbuf[5];
+	char *cp;
 
-	stop = dest + len;
-	start = dest;
-	while ((dest < stop) && (*src != '\0'))
-		*dest++ = *src++;
-	len = dest - start;
-	while (dest < stop)
-		*dest++ = '\0';
-	return(len);
+	/*
+	 * if printing to a tty, use vis(3) to print special characters.
+	 */
+	if (isatty(fileno(fp))) {
+		for (cp = str; *cp; cp++) {
+			(void)vis(visbuf, cp[0], VIS_CSTYLE, cp[1]);
+			(void)fputs(visbuf, fp);
+		}
+	} else {
+		(void)fputs(str, fp);
+	}
 }
 
 /*
@@ -283,7 +282,7 @@ asc_ul(str, len, base)
 				break;
 		}
 	} else {
- 		while ((str < stop) && (*str >= '0') && (*str <= '7'))
+		while ((str < stop) && (*str >= '0') && (*str <= '7'))
 			tval = (tval << 3) + (*str++ - '0');
 	}
 	return(tval);
@@ -348,7 +347,7 @@ ul_asc(val, str, len, base)
 	return(0);
 }
 
-#ifndef NET2_STAT
+#ifndef LONG_OFF_T
 /*
  * asc_uqd()
  *	convert hex/octal character string into a u_quad_t. We do not have to
@@ -397,7 +396,7 @@ asc_uqd(str, len, base)
 				break;
 		}
 	} else {
- 		while ((str < stop) && (*str >= '0') && (*str <= '7'))
+		while ((str < stop) && (*str >= '0') && (*str <= '7'))
 			tval = (tval << 3) + (*str++ - '0');
 	}
 	return(tval);

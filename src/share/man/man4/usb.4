@@ -1,4 +1,4 @@
-.\"	$OpenBSD: usb.4,v 1.8 2001/03/02 22:28:44 deraadt Exp $
+.\"	$OpenBSD: usb.4,v 1.13 2001/10/04 10:28:20 wilfried Exp $
 .\"	$NetBSD: usb.4,v 1.15 1999/07/29 14:20:32 augustss Exp $
 .\"
 .\" Copyright (c) 1999 The NetBSD Foundation, Inc.
@@ -64,10 +64,10 @@ The
 driver has three layers (like
 .Xr scsi 4
 and
-.Xr pcmcia 4 ):
+.Xr pcmcia 4 ) :
 the controller, the bus, and the device layer.
 The controller attaches to a physical bus (like
-.Xr pci 4 ).
+.Xr pci 4 ) .
 The
 .Tn USB
 bus attaches to the controller and the root hub attaches
@@ -88,7 +88,6 @@ device controls
 hubs and must always be present since there is at least one root hub in any
 .Tn USB
 system.
-.Pp
 .Sh SUPPORTED DEVICES
 .Ox
 includes machine-independent
@@ -115,7 +114,7 @@ Generic driver for Human Interface Devices.
 Printers.
 .It Xr umass 4
 .Tn USB
-Mass Storage Devices, i.e., external disk drives.
+Mass Storage Devices, e.g., external disk drives.
 .It Xr umodem 4
 .Tn USB
 Modems.
@@ -190,7 +189,7 @@ The bus enumeration of the
 bus proceeds in several steps:
 .Bl -enum
 .It
-Any device specific driver can to attach to the device.
+Any device-specific driver can attach to the device.
 .It
 If none is found, any device class specific driver can attach.
 .It
@@ -350,7 +349,6 @@ The
 specifications can be found at:
 .Pp
 .Dl http://www.usb.org/developers/docs.html
-.Pp
 .Sh HISTORY
 The
 .Nm

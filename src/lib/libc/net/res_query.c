@@ -1,4 +1,4 @@
-/*	$OpenBSD: res_query.c,v 1.13 1999/09/27 23:58:26 alex Exp $	*/
+/*	$OpenBSD: res_query.c,v 1.16 2001/07/31 22:02:18 jakob Exp $	*/
 
 /*
  * ++Copyright++ 1988, 1993
@@ -60,7 +60,7 @@
 static char sccsid[] = "@(#)res_query.c	8.1 (Berkeley) 6/4/93";
 static char rcsid[] = "$From: res_query.c,v 8.9 1996/09/22 00:13:28 vixie Exp $";
 #else
-static char rcsid[] = "$OpenBSD: res_query.c,v 1.13 1999/09/27 23:58:26 alex Exp $";
+static char rcsid[] = "$OpenBSD: res_query.c,v 1.16 2001/07/31 22:02:18 jakob Exp $";
 #endif
 #endif /* LIBC_SCCS and not lint */
 
@@ -87,6 +87,7 @@ static char rcsid[] = "$OpenBSD: res_query.c,v 1.13 1999/09/27 23:58:26 alex Exp
 
 const char *hostalias __P((const char *));
 int h_errno;
+extern int res_opt __P((int, u_char *, int, int));
 
 /*
  * Formulate a normal query, send, and await answer.
@@ -122,6 +123,11 @@ res_query(name, class, type, answer, anslen)
 
 	n = res_mkquery(QUERY, name, class, type, NULL, 0, NULL,
 			buf, sizeof(buf));
+	if (n > 0 && ((_res.options & RES_USE_EDNS0) ||
+	    (_res.options & RES_USE_DNSSEC))) {
+		n = res_opt(n, buf, sizeof(buf), anslen);
+	}
+
 	if (n <= 0) {
 #ifdef DEBUG
 		if (_res.options & RES_DEBUG)
@@ -387,8 +393,8 @@ hostalias(name)
 				break;
 			for (cp2 = cp1 + 1; *cp2 && !isspace(*cp2); ++cp2)
 				;
-			strncpy(abuf, cp1, sizeof(abuf) - 1);
-			abuf[sizeof(abuf) - 1] = *cp2 = '\0';
+			*cp2 = '\0';
+			strlcpy(abuf, cp1, sizeof(abuf));
 			fclose(fp);
 			return (abuf);
 		}

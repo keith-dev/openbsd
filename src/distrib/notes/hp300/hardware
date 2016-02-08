@@ -29,7 +29,7 @@ The following HP hardware is supported:
 		98638 8-port (dcm).
 		400-series Apollo 3-port serial/keyboard mux (apci).
 		[Note:  Support is incomplete.  The first port is typically
-		configured as a dca device.]
+		configured as a dca device, except on the 425e.]
 
 	Network interfaces:
 		98643 built-in and add-on LAN cards.
@@ -57,6 +57,9 @@ The following HP hardware is supported:
 
 (*) 400-series machines configured for Domain/OS are not fully supported,
     notably, the keyboard doesn't work and the ROMs must be in `HP-UX mode'.
+
+    The 425e is only supported with a serial console on the first serial
+    port.
 
 (**) SCSI-II drives are known to work, though this may require changing a
      jumper on some drives.  See your disk's documentation for details.

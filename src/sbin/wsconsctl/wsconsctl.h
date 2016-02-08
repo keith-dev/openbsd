@@ -1,4 +1,4 @@
-/*	$OpenBSD: wsconsctl.h,v 1.1 2000/07/01 23:52:45 mickey Exp $	*/
+/*	$OpenBSD: wsconsctl.h,v 1.3 2001/06/30 02:12:57 mickey Exp $	*/
 /*	$NetBSD: wsconsctl.h 1.1 1998/12/28 14:01:17 hannken Exp $ */
 
 /*-
@@ -43,6 +43,7 @@ struct field {
 	char *name;
 	void *valp;
 #define FMT_UINT	1		/* unsigned integer */
+#define FMT_BOOL	2		/* boolean on/off */
 #define FMT_KBDTYPE	101		/* keyboard type */
 #define FMT_MSTYPE	102		/* mouse type */
 #define FMT_DPYTYPE	103		/* display type */
@@ -58,20 +59,19 @@ struct field {
 	int flags;
 };
 
-void field_setup __P((struct field *, int));
-struct field *field_by_name __P((char *));
-struct field *field_by_value __P((void *));
-void pr_field __P((struct field *, char *));
+struct field *field_by_name __P((struct field *, char *));
+struct field *field_by_value __P((struct field *, void *));
+void pr_field __P((const char *, struct field *, const char *));
 void rd_field __P((struct field *, char *, int));
 int name2ksym __P((char *));
 char *ksym2name __P((int));
 keysym_t ksym_upcase __P((keysym_t));
-void keyboard_get_values __P((int));
-void keyboard_put_values __P((int));
-void mouse_get_values __P((int));
-void mouse_put_values __P((int));
-void display_get_values __P((int));
-void display_put_values __P((int));
+void keyboard_get_values __P((const char *,int));
+void keyboard_put_values __P((const char *,int));
+void mouse_get_values __P((const char *,int));
+void mouse_put_values __P((const char *,int));
+void display_get_values __P((const char *,int));
+void display_put_values __P((const char *,int));
 int yyparse __P((void));
 void yyerror __P((char *));
 int yylex __P((void));

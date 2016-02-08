@@ -1,6 +1,6 @@
 #!/bin/sh -
 #
-#	$OpenBSD: netstart,v 1.77 2001/03/13 21:15:09 deraadt Exp $
+#	$OpenBSD: netstart,v 1.82 2001/07/31 08:27:35 hugh Exp $
 
 # Returns true if $1 contains only alphanumerics
 isalphanumeric() {
@@ -16,23 +16,15 @@ isalphanumeric() {
 	return 0
 }
 
+# Re-read /etc/rc.conf
+. /etc/rc.conf
+
 # /etc/myname contains my symbolic name
 #
 hostname=`cat /etc/myname`
 hostname $hostname
 if [ -f /etc/defaultdomain ]; then
 	domainname `cat /etc/defaultdomain`
-fi
-
-# pick up option configuration
-. /etc/rc.conf
-
-# Configure the IP filter before configuring network interfaces
-if [ X"${ipfilter}" = X"YES" -a -f "${ipfilter_rules}" ]; then
-	echo 'configuring IP filter'
-	ipf -Fa -f ${ipfilter_rules}
-else
-	ipfilter=NO
 fi
 
 # set the address for the loopback interface
@@ -260,13 +252,13 @@ fi
 #	   Any other combination		-reject		config error
 case "$multicast_host:$multicast_router" in
 NO:NO)
-	route -n add -net 224.0.0.0/4 -interface 127.0.0.1 -reject> /dev/null
+	route -n add -net 224.0.0.0/4 -interface 127.0.0.1 -reject > /dev/null
 	;;
 NO:YES)
 	;;
 *:NO)
 	set `if [ $multicast_host = YES ]; then
-		ed -s '!route -n show' <<EOF
+		ed -s '!route -n show -inet' <<EOF
 /^default/p
 EOF
 	else
@@ -281,11 +273,3 @@ EOF
 	route -n add -net 224.0.0.0/4 -interface 127.0.0.1 -reject > /dev/null
 	;;
 esac
-
-# Configure NAT after configuring network interfaces
-if [ "${ipnat}" = "YES" -a "${ipfilter}" = "YES" -a -f "${ipnat_rules}" ]; then
-	echo 'configuring NAT'
-	ipnat -CF -f ${ipnat_rules}
-else
-	ipnat=NO
-fi

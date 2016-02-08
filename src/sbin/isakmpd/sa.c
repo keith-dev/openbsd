@@ -1,4 +1,4 @@
-/*	$OpenBSD: sa.c,v 1.41 2001/04/24 07:27:37 niklas Exp $	*/
+/*	$OpenBSD: sa.c,v 1.48 2001/08/15 13:06:53 ho Exp $	*/
 /*	$EOM: sa.c,v 1.112 2000/12/12 00:22:52 niklas Exp $	*/
 
 /*
@@ -39,7 +39,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#if defined(USE_KEYNOTE) || defined(USE_POLICY)
+#if defined (USE_KEYNOTE) || defined (USE_POLICY)
 #include <regex.h>
 #include <keynote.h>
 #endif /* USE_KEYNOTE || USE_POLICY */
@@ -58,6 +58,7 @@
 #include "util.h"
 #include "cert.h"
 #include "policy.h"
+#include "key.h"
 
 #ifndef SA_LEN
 #define SA_LEN(x)		(x)->sa_len
@@ -73,6 +74,9 @@
  */
 #define MAX_BUCKET_BITS 16
 
+#if 0
+static void sa_resize (void);
+#endif
 static void sa_dump (char *, struct sa *);
 static void sa_soft_expire (void *);
 static void sa_hard_expire (void *);
@@ -83,7 +87,7 @@ static LIST_HEAD (sa_list, sa) *sa_tab;
 static int bucket_mask;
 
 void
-sa_init ()
+sa_init (void)
 {
   int i;
 
@@ -96,12 +100,12 @@ sa_init ()
     {
       LIST_INIT (&sa_tab[i]);
     }
- 
 }
 
+#if 0
 /* XXX We don't yet resize.  */
-void
-sa_resize ()
+static void
+sa_resize (void)
 {
   int new_mask = (bucket_mask + 1) * 2 - 1;
   int i;
@@ -119,6 +123,7 @@ sa_resize ()
 
   /* XXX Rehash existing entries.  */
 }
+#endif
 
 /* Lookup an SA with the help from a user-supplied checking function.  */
 struct sa *
@@ -195,14 +200,14 @@ sa_check_peer (struct sa *sa, void *v_addr)
 {
   struct addr_arg *addr = v_addr;
   struct sockaddr *dst;
-  socklen_t dstlen;
 
   if (!sa->transport || (sa->flags & SA_FLAG_READY) == 0
       || (addr->phase && addr->phase != sa->phase))
     return 0;
 
-  sa->transport->vtbl->get_dst (sa->transport, &dst, &dstlen);
-  return dstlen == addr->len && memcmp (dst, addr->addr, dstlen) == 0;
+  sa->transport->vtbl->get_dst (sa->transport, &dst);
+  return dst->sa_len == addr->len
+    && memcmp (dst, addr->addr, dst->sa_len) == 0;
 }
 
 struct dst_isakmpspi_arg {
@@ -219,14 +224,13 @@ isakmp_sa_check (struct sa *sa, void *v_arg)
 {
   struct dst_isakmpspi_arg *arg = v_arg;
   struct sockaddr *dst, *src;
-  int dstlen, srclen;
 
   if (sa->phase != 1 || !(sa->flags & SA_FLAG_READY))
     return 0;
 
   /* verify address is either src or dst for this sa */
-  sa->transport->vtbl->get_dst (sa->transport, &dst, &dstlen);
-  sa->transport->vtbl->get_src (sa->transport, &src, &srclen);
+  sa->transport->vtbl->get_dst (sa->transport, &dst);
+  sa->transport->vtbl->get_src (sa->transport, &src);
   if (memcmp (src, arg->dst, SA_LEN(src)) &&
       memcmp (dst, arg->dst, SA_LEN(dst)))
     return 0;
@@ -238,8 +242,8 @@ isakmp_sa_check (struct sa *sa, void *v_arg)
   return 0;
 }
 
-/* 
- * Find an ISAKMP SA with a "name" of DST & SPI. 
+/*
+ * Find an ISAKMP SA with a "name" of DST & SPI.
  */
 struct sa *
 sa_lookup_isakmp_sa (struct sockaddr *dst, u_int8_t *spi)
@@ -308,7 +312,7 @@ sa_lookup_by_header (u_int8_t *msg, int phase2)
 
 /*
  * Lookup the SA given by the COOKIES and possibly the MESSAGE_ID unless
- * NULL, meaning we are looking for phase 1 SAs.
+ * a null pointer, meaning we are looking for phase 1 SAs.
  */
 struct sa *
 sa_lookup (u_int8_t *cookies, u_int8_t *message_id)
@@ -375,6 +379,7 @@ sa_create (struct exchange *exchange, struct transport *t)
   memcpy (sa->cookies, exchange->cookies, ISAKMP_HDR_COOKIES_LEN);
   memcpy (sa->message_id, exchange->message_id, ISAKMP_HDR_MESSAGE_ID_LEN);
   sa->doi = exchange->doi;
+  sa->policy_id = -1;
 
   if (sa->doi->sa_size)
     {
@@ -412,36 +417,36 @@ sa_dump (char *header, struct sa *sa)
   char spi_header[80];
   int i;
 
-  LOG_DBG ((LOG_REPORT, 0, "%s: %p %s phase %d doi %d flags 0x%x", 
-	    header, sa, sa->name ? sa->name : "<unnamed>", sa->phase, 
+  LOG_DBG ((LOG_REPORT, 0, "%s: %p %s phase %d doi %d flags 0x%x",
+	    header, sa, sa->name ? sa->name : "<unnamed>", sa->phase,
 	    sa->doi->id, sa->flags));
-  LOG_DBG ((LOG_REPORT, 0, 
+  LOG_DBG ((LOG_REPORT, 0,
 	    "%s: icookie %08x%08x rcookie %08x%08x", header,
 	    decode_32 (sa->cookies), decode_32 (sa->cookies + 4),
 	    decode_32 (sa->cookies + 8), decode_32 (sa->cookies + 12)));
-  LOG_DBG ((LOG_REPORT, 0, "%s: msgid %08x refcnt %d", header, 
+  LOG_DBG ((LOG_REPORT, 0, "%s: msgid %08x refcnt %d", header,
 	    decode_32 (sa->message_id), sa->refcnt));
   for (proto = TAILQ_FIRST (&sa->protos); proto;
        proto = TAILQ_NEXT (proto, link))
     {
-      LOG_DBG ((LOG_REPORT, 0, 
+      LOG_DBG ((LOG_REPORT, 0,
 		"%s: suite %d proto %d", header, proto->no, proto->proto));
-      LOG_DBG ((LOG_REPORT, 0, 
+      LOG_DBG ((LOG_REPORT, 0,
 		"%s: spi_sz[0] %d spi[0] %p spi_sz[1] %d spi[1] %p", header,
 		proto->spi_sz[0], proto->spi[0], proto->spi_sz[1],
 		proto->spi[1]));
       LOG_DBG ((LOG_REPORT, 0, "%s: %s, %s", header,
-		sa->doi == NULL ? "<nodoi>"
-		: sa->doi->decode_ids ("initiator id: %s, responder id: %s", 
-				     sa->id_i, sa->id_i_len, 
+		!sa->doi ? "<nodoi>"
+		: sa->doi->decode_ids ("initiator id: %s, responder id: %s",
+				     sa->id_i, sa->id_i_len,
 				     sa->id_r, sa->id_r_len, 0),
-		sa->transport == NULL ? "<no transport>" :
+		!sa->transport ? "<no transport>" :
 		sa->transport->vtbl->decode_ids (sa->transport)));
       for (i = 0; i < 2; i++)
 	if (proto->spi[i])
 	  {
 	    snprintf (spi_header, 80, "%s: spi[%d]", header, i);
-	    LOG_DBG_BUF ((LOG_REPORT, 0, spi_header, proto->spi[i], 
+	    LOG_DBG_BUF ((LOG_REPORT, 0, spi_header, proto->spi[i],
 			  proto->spi_sz[i]));
 	  }
     }
@@ -530,7 +535,7 @@ sa_release (struct sa *sa)
 {
   struct proto *proto;
   struct cert_handler *handler;
-  
+
   LOG_DBG ((LOG_SA, 80, "sa_release: SA %p had %d references",
 	    sa, sa->refcnt));
 
@@ -556,12 +561,20 @@ sa_release (struct sa *sa)
 	handler = cert_get (sa->recv_certtype);
 	if (handler)
 	  handler->cert_free (sa->recv_cert);
-	else if (sa->recv_certtype == ISAKMP_CERTENC_NONE)
-	  free (sa->recv_cert);
+    }
+  if (sa->sent_cert)
+    {
+	handler = cert_get (sa->sent_certtype);
+	if (handler)
+	  handler->cert_free (sa->sent_cert);
     }
   if (sa->recv_key)
-    free (sa->recv_key);
-#if defined(USE_POLICY) || defined(USE_KEYNOTE)
+    key_free (sa->recv_keytype, ISAKMP_KEYTYPE_PUBLIC, sa->recv_key);
+  if (sa->sent_key)
+    key_free (sa->sent_keytype, ISAKMP_KEYTYPE_PRIVATE, sa->sent_key);
+  if (sa->keynote_key)
+    free (sa->keynote_key); /* This is just a string */
+#if defined (USE_POLICY) || defined (USE_KEYNOTE)
   if (sa->policy_id != -1)
     LK (kn_close, (sa->policy_id));
 #endif
@@ -662,7 +675,7 @@ sa_add_transform (struct sa *sa, struct payload *xf, int initiator,
 	    "proto %p no %d proto %d chosen %p sa %p id %d",
 	    proto, proto->no, proto->proto, proto->chosen, proto->sa,
 	    proto->id));
-	     
+
   return 0;
 
  cleanup:
@@ -768,7 +781,7 @@ sa_setup_expirations (struct sa *sa)
   u_int64_t seconds = sa->seconds;
   struct timeval expiration;
 
-  /* 
+  /*
    * Set the soft timeout to a random percentage between 85 & 95 of
    * the negotiated lifetime to break strictly synchronized
    * renegotiations.  This works better when the randomization is on the

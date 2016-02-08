@@ -1,4 +1,4 @@
-/*	$OpenBSD: mountd.c,v 1.35 2001/01/17 19:27:11 deraadt Exp $	*/
+/*	$OpenBSD: mountd.c,v 1.38 2001/10/03 18:54:29 hin Exp $	*/
 /*	$NetBSD: mountd.c,v 1.31 1996/02/18 11:57:53 fvdl Exp $	*/
 
 /*
@@ -102,7 +102,6 @@ struct dirlist {
 /* dp_flag bits */
 #define	DP_DEFSET	0x1
 #define DP_HOSTSET	0x2
-#define DP_KERB		0x4
 
 struct exportlist {
 	struct exportlist *ex_next;
@@ -211,7 +210,6 @@ int opt_flags;
 /* Bits for above */
 #define	OP_MAPROOT	0x01
 #define	OP_MAPALL	0x02
-#define	OP_KERB		0x04
 #define	OP_MASK		0x08
 #define	OP_NET		0x10
 #define	OP_ALLDIRS	0x40
@@ -259,11 +257,7 @@ main(argc, argv)
 	exphead = NULL;
 	mlhead = NULL;
 
-	if (argc == 1)
-		strncpy(exname, *argv, sizeof(exname)-1);
-	else
-		strncpy(exname, _PATH_EXPORTS, sizeof exname-1);
-	exname[sizeof(exname)-1] = '\0';
+	strlcpy(exname, argc == 1? *argv : _PATH_EXPORTS, sizeof(exname));
 
 	openlog("mountd", LOG_PID, LOG_DAEMON);
 	if (debug)
@@ -555,10 +549,7 @@ xdr_fhs(xdrsp, cp)
 			return (0);
 		if (!xdr_opaque(xdrsp, (caddr_t)&fhrp->fhr_fh, len))
 			return (0);
-		if (fhrp->fhr_flag & DP_KERB)
-			auth = RPCAUTH_KERB4;
-		else
-			auth = RPCAUTH_UNIX;
+		auth = RPCAUTH_UNIX;
 		len = 1;
 		if (!xdr_long(xdrsp, &len))
 			return (0);
@@ -1146,12 +1137,8 @@ hang_dirp(dp, grp, ep, flags)
 			ep->ex_defdir = dp;
 		if (grp == NULL) {
 			ep->ex_defdir->dp_flag |= DP_DEFSET;
-			if (flags & OP_KERB)
-				ep->ex_defdir->dp_flag |= DP_KERB;
 		} else while (grp) {
 			hp = get_ht();
-			if (flags & OP_KERB)
-				hp->ht_flag |= DP_KERB;
 			hp->ht_grp = grp;
 			hp->ht_next = ep->ex_defdir->dp_hosts;
 			ep->ex_defdir->dp_hosts = hp;
@@ -1208,8 +1195,6 @@ add_dlist(dpp, newdp, grp, flags)
 		 */
 		do {
 			hp = get_ht();
-			if (flags & OP_KERB)
-				hp->ht_flag |= DP_KERB;
 			hp->ht_grp = grp;
 			hp->ht_next = dp->dp_hosts;
 			dp->dp_hosts = hp;
@@ -1217,8 +1202,6 @@ add_dlist(dpp, newdp, grp, flags)
 		} while (grp);
 	} else {
 		dp->dp_flag |= DP_DEFSET;
-		if (flags & OP_KERB)
-			dp->dp_flag |= DP_KERB;
 	}
 }
 
@@ -1384,11 +1367,9 @@ do_opt(cpp, endcpp, ep, grp, has_hostp, exflagsp, cr)
 				opt_flags |= OP_MAPALL;
 			} else
 				opt_flags |= OP_MAPROOT;
-		} else if (!strcmp(cpopt, "kerb") || !strcmp(cpopt, "k")) {
-			*exflagsp |= MNT_EXKERB;
-			opt_flags |= OP_KERB;
-		} else if (cpoptarg && (!strcmp(cpopt, "mask") ||
-		    !strcmp(cpopt, "m"))) {
+		} else 
+		    if (cpoptarg && (!strcmp(cpopt, "mask") ||
+				     !strcmp(cpopt, "m"))) {
 			if (get_net(cpoptarg, &grp->gr_ptr.gt_net, 1)) {
 				syslog(LOG_ERR, "Bad mask: %s", cpoptarg);
 				return (1);
@@ -1941,10 +1922,8 @@ get_mountlist()
 		if (host == NULL || dirp == NULL)
 			continue;
 		mlp = (struct mountlist *)malloc(sizeof (*mlp));
-		strncpy(mlp->ml_host, host, RPCMNT_NAMELEN);
-		mlp->ml_host[RPCMNT_NAMELEN] = '\0';
-		strncpy(mlp->ml_dirp, dirp, RPCMNT_PATHLEN);
-		mlp->ml_dirp[RPCMNT_PATHLEN] = '\0';
+		strlcpy(mlp->ml_host, host, sizeof(mlp->ml_host));
+		strlcpy(mlp->ml_dirp, dirp, sizeof(mlp->ml_dirp));
 		mlp->ml_next = NULL;
 		*mlpp = mlp;
 		mlpp = &mlp->ml_next;
@@ -2006,10 +1985,8 @@ add_mlist(hostp, dirp)
 		mlp = mlp->ml_next;
 	}
 	mlp = (struct mountlist *)malloc(sizeof (*mlp));
-	strncpy(mlp->ml_host, hostp, RPCMNT_NAMELEN);
-	mlp->ml_host[RPCMNT_NAMELEN] = '\0';
-	strncpy(mlp->ml_dirp, dirp, RPCMNT_PATHLEN);
-	mlp->ml_dirp[RPCMNT_PATHLEN] = '\0';
+	strlcpy(mlp->ml_host, hostp, sizeof(mlp->ml_host));
+	strlcpy(mlp->ml_dirp, dirp, sizeof(mlp->ml_dirp));
 	mlp->ml_next = NULL;
 	*mlpp = mlp;
 	if ((mlfile = fopen(_PATH_RMOUNTLIST, "a")) == NULL) {
@@ -2073,10 +2050,8 @@ check_options(dp)
 
 	if (dp == NULL)
 		return (1);
-	if ((opt_flags & (OP_MAPROOT | OP_MAPALL)) == (OP_MAPROOT | OP_MAPALL) ||
-	    (opt_flags & (OP_MAPROOT | OP_KERB)) == (OP_MAPROOT | OP_KERB) ||
-	    (opt_flags & (OP_MAPALL | OP_KERB)) == (OP_MAPALL | OP_KERB)) {
-		syslog(LOG_ERR, "-mapall, -maproot and -kerb mutually exclusive");
+	if ((opt_flags & (OP_MAPROOT | OP_MAPALL)) == (OP_MAPROOT | OP_MAPALL)) {
+		syslog(LOG_ERR, "-mapall and -maproot mutually exclusive");
 		return (1);
 	}
 	if ((opt_flags & OP_MASK) && (opt_flags & OP_NET) == 0) {

@@ -1,4 +1,4 @@
-/*	$OpenBSD: sysdep.c,v 1.8 2001/02/24 03:59:58 angelos Exp $	*/
+/*	$OpenBSD: sysdep.c,v 1.20 2001/08/23 19:07:00 niklas Exp $	*/
 /*	$EOM: sysdep.c,v 1.9 2000/12/04 04:46:35 angelos Exp $	*/
 
 /*
@@ -34,6 +34,7 @@
  * This code was written under funding by Ericsson Radio Systems.
  */
 
+#include <sys/errno.h>
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
@@ -53,13 +54,9 @@
 #ifdef USE_PF_KEY_V2
 #include "pf_key_v2.h"
 #define KEY_API(x) pf_key_v2_##x
-#else
-#include <net/encap.h>
-#include "pf_encap.h"
-#define KEY_API(x) pf_encap_##x
 #endif
 
-#endif NEED_SYSDEP_APP
+#endif /* NEED_SYSDEP_APP */
 #include "log.h"
 
 extern char *__progname;
@@ -119,8 +116,7 @@ sysdep_connection_check (char *name)
  */
 u_int8_t *
 sysdep_ipsec_get_spi (size_t *sz, u_int8_t proto, struct sockaddr *src,
-		      int srclen, struct sockaddr *dst, int dstlen,
-                      u_int32_t seq)
+		      struct sockaddr *dst, u_int32_t seq)
 {
   if (app_none)
     {
@@ -128,44 +124,99 @@ sysdep_ipsec_get_spi (size_t *sz, u_int8_t proto, struct sockaddr *src,
       /* XXX should be random instead I think.  */
       return strdup ("\x12\x34\x56\x78");
     }
-  return KEY_API (get_spi) (sz, proto, src, srclen, dst, dstlen, seq);
+  return KEY_API (get_spi) (sz, proto, src, dst, seq);
 }
 
 /* Force communication on socket FD to go in the clear.  */
 int
-sysdep_cleartext (int fd)
+sysdep_cleartext (int fd, int af)
 {
-  int level;
-
+  int level, sw;
+  struct { 
+    int ip_proto;		/* IP protocol */
+    int auth_level;
+    int esp_trans_level;
+    int esp_network_level;
+    int ipcomp_level;
+  } optsw[] =
+    { 
+      {
+	IPPROTO_IP,
+	IP_AUTH_LEVEL,
+	IP_ESP_TRANS_LEVEL,
+	IP_ESP_NETWORK_LEVEL,
+#ifdef IP_IPCOMP_LEVEL
+	IP_IPCOMP_LEVEL
+#else
+	0
+#endif
+      },
+      {
+	IPPROTO_IPV6,
+	IPV6_AUTH_LEVEL,
+	IPV6_ESP_TRANS_LEVEL,
+	IPV6_ESP_NETWORK_LEVEL,
+#ifdef IPV6_IPCOMP_LEVEL
+	IPV6_IPCOMP_LEVEL
+#else
+	0
+#endif
+      },
+    };
+  
   if (app_none)
     return 0;
+
+  switch (af)
+    {
+    case AF_INET:
+      sw = 0;
+      break;
+    case AF_INET6:
+      sw = 1;
+      break;
+    default:
+      log_print ("sysdep_cleartext: unsupported protocol family %d", af);
+      return -1;
+    }
 
   /*
    * Need to bypass system security policy, so I can send and
    * receive key management datagrams in the clear.
    */
   level = IPSEC_LEVEL_BYPASS;
-  if (setsockopt (fd, IPPROTO_IP, IP_AUTH_LEVEL, (char *)&level, sizeof level)
-      == -1)
-    {
-      log_error ("sysdep_cleartext: "
-		 "setsockopt (%d, IPPROTO_IP, IP_AUTH_LEVEL, ...) failed", fd);
-      return -1;
-    }
-  if (setsockopt (fd, IPPROTO_IP, IP_ESP_TRANS_LEVEL, (char *)&level,
+  if (setsockopt (fd, optsw[sw].ip_proto, optsw[sw].auth_level, (char *)&level,
 		  sizeof level) == -1)
     {
       log_error ("sysdep_cleartext: "
-		 "setsockopt (%d, IPPROTO_IP, IP_ESP_TRANS_LEVEL, ...) "
-		 "failed", fd);
+		 "setsockopt (%d, %d, IP_AUTH_LEVEL, ...) failed", fd,
+		 optsw[sw].ip_proto);
       return -1;
     }
-  if (setsockopt (fd, IPPROTO_IP, IP_ESP_NETWORK_LEVEL, (char *)&level,
-		  sizeof level) == -1)
+  if (setsockopt (fd, optsw[sw].ip_proto, optsw[sw].esp_trans_level,
+		  (char *)&level, sizeof level) == -1)
+    {
+      log_error ("sysdep_cleartext: "
+		 "setsockopt (%d, %d, IP_ESP_TRANS_LEVEL, ...) failed", fd,
+		 optsw[sw].ip_proto);
+      return -1;
+    }
+  if (setsockopt (fd, optsw[sw].ip_proto, optsw[sw].esp_network_level,
+		  (char *)&level, sizeof level) == -1)
     {
       log_error("sysdep_cleartext: "
-		"setsockopt (%d, IPPROTO_IP, IP_ESP_NETWORK_LEVEL, ...) "
-		 "failed", fd);
+		"setsockopt (%d, %d, IP_ESP_NETWORK_LEVEL, ...) failed", fd,
+		optsw[sw].ip_proto);
+      return -1;
+    }
+  if (optsw[sw].ipcomp_level
+      && setsockopt (fd, optsw[sw].ip_proto, optsw[sw].ipcomp_level,
+		     (char *)&level, sizeof level) == -1
+      && errno != ENOPROTOOPT)
+    {
+      log_error("sysdep_cleartext: "
+		"setsockopt (%d, %d, IP_IPCOMP_LEVEL, ...) failed,", fd,
+		optsw[sw].ip_proto);
       return -1;
     }
   return 0;
@@ -197,10 +248,11 @@ sysdep_ipsec_group_spis (struct sa *sa, struct proto *proto1,
 }
 
 int
-sysdep_ipsec_set_spi (struct sa *sa, struct proto *proto, int incoming)
+sysdep_ipsec_set_spi (struct sa *sa, struct proto *proto, int incoming,
+		      struct sa *isakmp_sa)
 {
   if (app_none)
     return 0;
-  return KEY_API (set_spi) (sa, proto, incoming);
+  return KEY_API (set_spi) (sa, proto, incoming, isakmp_sa);
 }
 #endif

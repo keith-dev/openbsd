@@ -1,4 +1,4 @@
-.\"	$OpenBSD: gtsc.4,v 1.6 2000/03/02 14:46:44 todd Exp $
+.\"	$OpenBSD: gtsc.4,v 1.9 2001/10/05 14:45:53 mpech Exp $
 .\"
 .\" Copyright (c) 1994 Christian E. Hopps
 .\" All rights reserved.
@@ -41,9 +41,10 @@
 The
 .Tn Amiga
 architecture uses a common machine independent scsi sub-system
-provided in the kernel source.  The machine independent
-drivers that use this code access the hardware through a
-common interface. (see
+provided in the kernel source.
+The machine independent drivers that use this code access the hardware
+through a common interface.
+(see
 .Xr scsibus 4 )
 This common interface interacts with a machine dependent interface,
 such as
@@ -69,21 +70,17 @@ withing the SCSI chip.
 .It gtsc%d: abort %s: csr = 0x%02x, asr = 0x%02x
 A SCSI operation %s was aborted due to an error.
 .It gtsc%d: csr == 0x%02i
-<<<<<<< gtsc.4
-A error has occurred within the SCSI chip code.
-=======
 An error has occurred within the SCSI chip code.
->>>>>>> 1.3
 .It gtsc%d: unexpected phase %d in icmd from %d
 The target described by
 .Sq from %d
 has taken the SCSI bus into a phase which is not
-expected durring polled IO.
+expected during polled IO.
 .It gtsc%d: unexpected phase %d in icmd from %d
 The target described by
 .Sq from %d
 has taken the SCSI bus into a phase which is not
-expected durring DMA IO setup.
+expected during DMA IO setup.
 .El
 .Sh SEE ALSO
 .Xr scsibus 4

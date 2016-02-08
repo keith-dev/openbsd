@@ -1,4 +1,4 @@
-.\"	$OpenBSD: passwd.1,v 1.14 2000/11/09 17:52:28 aaron Exp $
+.\"	$OpenBSD: passwd.1,v 1.20 2001/08/27 02:57:07 millert Exp $
 .\"
 .\" Copyright (c) 1990 The Regents of the University of California.
 .\" All rights reserved.
@@ -44,6 +44,7 @@
 .Op Fl l
 .Op Fl y
 .Op Fl k
+.Op Fl K
 .Op Fl n Ar name
 .Op Fl i Ar instance
 .Op Fl r Ar realm
@@ -52,7 +53,7 @@
 .\" This should really be: passwd [-l] [-y] [-k [-n name] [-i instance] [-r realm] [-u username[.instance][@realm]]] [user]
 .Sh DESCRIPTION
 .Nm
-changes the user's local, Kerberos, or YP password.
+changes the user's local, KerberosIV, KerberosV, or YP password.
 First, the user is prompted for their current password.
 If the current password is correctly typed, a new password is requested.
 The new password must be entered twice to avoid typing errors.
@@ -65,9 +66,11 @@ Its total length must be less than
 A mixture of both lower and uppercase letters, numbers, and
 meta-characters is encouraged.
 .Pp
-The quality of the password can be enforced by providing an external
-checking program in 
-.Xr passwd.conf 5 .
+The quality of the password can be enforced by specifying an external
+checking program via the
+.Dq passwordcheck
+variable in
+.Xr login.conf 5 .
 .Pp
 The options are as follows:
 .Bl -tag -width Ds
@@ -83,11 +86,11 @@ The
 .Xr rpc.yppasswdd 8
 daemon should be running on the YP master server.
 .It Fl k
-Forces the change to affect the Kerberos database, even
+Forces the change to affect the KerberosIV database, even
 if the user has a password in the local database.
 Once the password has been verified,
 .Nm
-communicates the new password information to the Kerberos authenticating host.
+communicates the new password information to the KerberosIV authenticating host.
 .El
 .Pp
 The following flags are only used when the
@@ -111,18 +114,20 @@ Specifies a
 .Ar realm
 instead of the local realm.
 .It Fl u Ar username[.instance][@realm]
-Specifies a fully qualified Kerberos principal.
+Specifies a fully qualified KerberosIV principal.
+.It Fl K Ar principal@REALM
+Changes a users KerberosV password.
 .El
 .Pp
 This is the behavior if no flags are specified:
-if Kerberos is active then
+if KerberosIV is active then
 .Nm
-will talk to the Kerberos server (even if the user has an entry
+will talk to the KerberosIV server (even if the user has an entry
 in the local database).
 If the password is not in the local password database, then
 an attempt is made to use the YP database.
 .Pp
-To change another user's Kerberos password, one must first run
+To change another user's KerberosIV password, one must first run
 .Xr kinit 1
 followed by
 .Xr passwd 1 .
@@ -131,26 +136,49 @@ if only the local password is modified.
 .Pp
 Which type of cipher is used to encrypt the password information
 depends on the configuration in
-.Xr passwd.conf 5 .
-It can be different for local and YP passwords.
+.Xr login.conf 5 .
+It can be different for local
+.Po Do localcipher Dc Pc
+and YP
+.Po Do ypcipher Dc Pc
+passwords.
 .Sh DIAGNOSTICS
 .Bl -diag
-.It "the passwd file is busy"
-The password file is currently locked by another process, or a
-process previously holding the lock was prematurely terminated.
-In the latter case, it is safe to remove the
+.It "Attempting lock password file, please wait or press ^C to abort"
+.Pp
+The password file is currently locked by another process;
+.Nm
+will keep trying to lock the password file until it succeeds or
+you hit the interupt character (control-C by default).
+If
+.Nm
+is interrupted while trying to gain the lock the password changed will
+be lost.
+.Pp
+If the process holding the lock was prematurely terminated the lock
+file may be stale and
+.Nm
+will wait forever trying to lock the password file.
+To determine whether a live process is actually holding the lock, the
+admin may run the following:
+.Bd -literal -offset indent
+fstat /etc/ptmp
+.Ed
+.Pp
+If no process is listed, it is safe to remove the
 .Pa /etc/ptmp
-file to get rid of this error.
+file to clear the error.
+.El
 .Sh FILES
 .Bl -tag -width /etc/master.passwd -compact
+.It /etc/login.conf
+configuration options
 .It Pa /etc/master.passwd
 user database
 .It Pa /etc/passwd
 a Version 7 format password file
 .It Pa /etc/passwd.XXXXXX
 temporary copy of the password file
-.It /etc/passwd.conf
-configuration options
 .It /etc/ptmp
 lock file for the passwd database
 .El
@@ -159,8 +187,8 @@ lock file for the passwd database
 .Xr kerberos 1 ,
 .Xr kinit 1 ,
 .Xr login 1 ,
+.Xr login.conf 5 ,
 .Xr passwd 5 ,
-.Xr passwd.conf 5 ,
 .Xr pwd_mkdb 8 ,
 .Xr vipw 8
 .Rs

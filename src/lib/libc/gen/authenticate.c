@@ -1,4 +1,4 @@
-/*	$OpenBSD: authenticate.c,v 1.1 2000/11/21 00:51:16 millert Exp $	*/
+/*	$OpenBSD: authenticate.c,v 1.5 2001/07/09 06:57:42 deraadt Exp $	*/
 
 /*-
  * Copyright (c) 1997 Berkeley Software Design, Inc. All rights reserved.
@@ -103,9 +103,6 @@ auth_mkvalue(char *value)
 void
 auth_checknologin(login_cap_t *lc)
 {
-	struct stat sb;
-	char *nologin;
-
 	if (_auth_checknologin(lc, 1))
 		exit(1);
 }
@@ -179,17 +176,18 @@ auth_approval(auth_session_t *as, login_cap_t *lc, char *name, char *type)
 	if (as != NULL)
 		pwd = auth_getpwd(as);
 
-	if (pwd == NULL)
+	if (pwd == NULL) {
 		if (name != NULL)
 			pwd = getpwnam(name);
 		else {
 			if ((pwd = getpwuid(getuid())) == NULL) {
 				syslog(LOG_ERR, "no such user id %d", getuid());
-				warnx("cannot approve who we don't recognize");
+				_warnx("cannot approve who we don't recognize");
 				return (0);
 			}
 			name = pwd->pw_name;
 		}
+	}
 
 	if (name == NULL)
 		name = pwd->pw_name;
@@ -198,7 +196,7 @@ auth_approval(auth_session_t *as, login_cap_t *lc, char *name, char *type)
 		if (strlen(name) >= MAXPATHLEN) {
 			syslog(LOG_ERR, "username to login %.*s...",
 			    MAXPATHLEN, name);
-			warnx("username too long");
+			_warnx("username too long");
 			return (0);
 		}
 		if (pwd == NULL && (approve = strchr(name, '.')) != NULL) {
@@ -208,7 +206,7 @@ auth_approval(auth_session_t *as, login_cap_t *lc, char *name, char *type)
 		}
 		lc = login_getclass(pwd ? pwd->pw_class : NULL);
 		if (lc == NULL) {
-			warnx("unable to classify user");
+			_warnx("unable to classify user");
 			return (0);
 		}
 	}
@@ -229,7 +227,7 @@ auth_approval(auth_session_t *as, login_cap_t *lc, char *name, char *type)
 		if (close_lc_on_exit)
 			login_close(lc);
 		syslog(LOG_ERR, "Invalid %s script: %s", s, approve);
-		warnx("invalid path to approval script");
+		_warnx("invalid path to approval script");
 		return (0);
 	}
 
@@ -237,14 +235,14 @@ auth_approval(auth_session_t *as, login_cap_t *lc, char *name, char *type)
 		if (close_lc_on_exit)
 			login_close(lc);
 		syslog(LOG_ERR, "%m");
-		warnx(NULL);
+		_warn(NULL);
 		return (0);
 	}
 
 	auth_setstate(as, AUTH_OKAY);
 	if (auth_setitem(as, AUTHV_NAME, name) < 0) {
 		syslog(LOG_ERR, "%m");
-		warnx(NULL);
+		_warn(NULL);
 		goto out;
 	}
 	if (auth_check_expire(as))	/* is this account expired */
@@ -286,7 +284,7 @@ auth_usercheck(char *name, char *style, char *type, char *password)
 	auth_session_t *as;
 	login_cap_t *lc;
 	struct passwd *pwd;
-	char *dot;
+	char *sep, save;
 
 	if (strlen(name) >= sizeof(namebuf))
 		return (NULL);
@@ -300,18 +298,19 @@ auth_usercheck(char *name, char *style, char *type, char *password)
 		*style++ = '\0';
 
 	/*
-	 * Cope with user.instance.  We are only using this to get
-	 * the class so it is okay if we strip a .root instance
+	 * Cope with user[./]instance.  We are only using this to get
+	 * the class so it is okay if we strip a root instance
 	 * The actual login script will pay attention to the instance.
 	 */
 	if ((pwd = getpwnam(name)) == NULL) {
-		if ((dot = strchr(name, '.')) != NULL) {
-			dot = '\0';
+		if ((sep = strpbrk(name, "./")) != NULL) {
+			save = *sep;
+			*sep = '\0';
 			pwd = getpwnam(name);
-			*dot = '.';
+			*sep = save;
 		}
 	}
-	if (pwd == NULL || (lc = login_getclass(pwd->pw_class)) == NULL)
+	if ((lc = login_getclass(pwd ? pwd->pw_class : NULL)) == NULL)
 		return (NULL);
 
 	if ((style = login_getstyle(lc, style, type)) == NULL) {
@@ -329,7 +328,7 @@ auth_usercheck(char *name, char *style, char *type, char *password)
 		auth_setdata(as, password, strlen(password) + 1);
 	} else
 		as = NULL;
-	as = auth_verify(as, style, name, pwd->pw_class, NULL);
+	as = auth_verify(as, style, name, lc->lc_class, NULL);
 	login_close(lc);
 	return (as);
 }
@@ -338,6 +337,7 @@ int
 auth_userokay(char *name, char *style, char *type, char *password)
 {
 	auth_session_t *as;
+
 	as = auth_usercheck(name, style, type, password);
 
 	return (as != NULL ? auth_close(as) : 0);
@@ -350,7 +350,7 @@ auth_userchallenge(char *name, char *style, char *type, char **challengep)
 	auth_session_t *as;
 	login_cap_t *lc;
 	struct passwd *pwd;
-	char *dot;
+	char *sep, save;
 
 	if (strlen(name) >= sizeof(namebuf))
 		return (NULL);
@@ -364,18 +364,19 @@ auth_userchallenge(char *name, char *style, char *type, char **challengep)
 		*style++ = '\0';
 
 	/*
-	 * Cope with user.instance.  We are only using this to get
-	 * the class so it is okay if we strip a .root instance
+	 * Cope with user[./]instance.  We are only using this to get
+	 * the class so it is okay if we strip a root instance
 	 * The actual login script will pay attention to the instance.
 	 */
 	if ((pwd = getpwnam(name)) == NULL) {
-		if ((dot = strchr(name, '.')) != NULL) {
-			dot = '\0';
+		if ((sep = strpbrk(name, "./")) != NULL) {
+			save = *sep;
+			*sep = '\0';
 			pwd = getpwnam(name);
-			*dot = '.';
+			*sep = save;
 		}
 	}
-	if (pwd == NULL || (lc = login_getclass(pwd->pw_class)) == NULL)
+	if ((lc = login_getclass(pwd ? pwd->pw_class : NULL)) == NULL)
 		return (NULL);
 
 	if ((style = login_getstyle(lc, style, type)) == NULL ||
@@ -385,7 +386,7 @@ auth_userchallenge(char *name, char *style, char *type, char **challengep)
 	}
 	if (auth_setitem(as, AUTHV_STYLE, style) < 0 ||
 	    auth_setitem(as, AUTHV_NAME, name) < 0 ||
-	    auth_setitem(as, AUTHV_CLASS, pwd->pw_class) < 0) {
+	    auth_setitem(as, AUTHV_CLASS, lc->lc_class) < 0) {
 		auth_close(as);
 		login_close(lc);
 		return (NULL);

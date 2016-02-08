@@ -1,4 +1,4 @@
-/*	$OpenBSD: supcparse.c,v 1.4 1997/09/16 10:42:57 deraadt Exp $	*/
+/*	$OpenBSD: supcparse.c,v 1.7 2001/05/04 22:16:16 millert Exp $	*/
 
 /*
  * Copyright (c) 1992 Carnegie Mellon University
@@ -16,7 +16,7 @@
  *
  * Carnegie Mellon requests users of this software to return to
  *
- *  Software Distribution Coordinator  or  Software_Distribution@CS.CMU.EDU
+ *  Software Distribution Coordinator  or  Software.Distribution@CS.CMU.EDU
  *  School of Computer Science
  *  Carnegie Mellon University
  *  Pittsburgh PA 15213-3890
@@ -32,6 +32,20 @@
  * 7-July-93  Nate Williams at Montana State University
  *	Modified SUP to use gzip based compression when sending files
  *	across the network to save BandWidth
+ *
+ * Revision 1.6  92/08/11  12:07:38  mrt
+ * 	Added use-rel-suffix option corresponding to -u switch.
+ * 	[92/07/26            mrt]
+ * 
+ * Revision 1.5  92/02/08  18:24:19  mja
+ * 	Added "keep" supfile option, corresponding to -k switch.
+ * 	[92/01/17            vdelvecc]
+ * 
+ * Revision 1.4  91/05/16  14:49:50  ern
+ * 	Change default timeout from none to 3 hours so we don't accumalute 
+ * 	processes running sups to dead hosts especially for users.
+ * 	[91/05/16  14:49:21  ern]
+ * 
  *
  * 10-Feb-88  Glenn Marcy (gm0w) at Carnegie-Mellon University
  *	Added timeout to backoff.
@@ -87,26 +101,28 @@ struct option {
 
 static void passdelim __P((char **, int ));
 
-static void passdelim (ptr,delim)		/* skip over delimiter */
-char **ptr,delim;
+static void
+passdelim(ptr, delim)		/* skip over delimiter */
+	char **ptr, delim;
 {
-	*ptr = skipover (*ptr, " \t");
+	*ptr = skipover(*ptr, " \t");
 	if (_argbreak != delim && **ptr == delim) {
 		(*ptr)++;
-		*ptr = skipover (*ptr, " \t");
+		*ptr = skipover(*ptr, " \t");
 	}
 }
 
-int parsecoll(c,collname,args)
-COLLECTION *c;
-char *collname,*args;
+int
+parsecoll(c, collname, args)
+	COLLECTION *c;
+	char *collname, *args;
 {
-	register char *arg,*p;
-	register OPTION option;
+	char *arg, *p;
+	OPTION option;
 	int opno;
 
 	c->Cnext = NULL;
-	c->Cname = salloc (collname);
+	c->Cname = strdup(collname);
 	c->Chost = NULL;
 	c->Chtree = NULL;
 	c->Cbase = NULL;
@@ -121,67 +137,68 @@ char *collname,*args;
 	c->Cflags = 0;
 	c->Cnogood = FALSE;
 	c->Clockfd = -1;
-	args = skipover (args," \t");
-	while (*(arg=nxtarg(&args," \t="))) {
+	args = skipover(args, " \t");
+	while (*(arg = nxtarg(&args, " \t="))) {
 		for (opno = 0; opno < sizeofA(options); opno++)
-			if (strcmp (arg,options[opno].op_name) == 0)
+			if (strcmp(arg, options[opno].op_name) == 0)
 				break;
 		if (opno == sizeofA(options)) {
-			logerr ("Invalid supfile option %s for collection %s",
-				arg,c->Cname);
-			return(-1);
+			logerr("Invalid supfile option %s for collection %s",
+			    arg, c->Cname);
+			return (-1);
 		}
 		option = options[opno].op_enum;
 		switch (option) {
 		case OHOST:
-			passdelim (&args,'=');
+			passdelim(&args, '=');
 			do {
-				arg = nxtarg (&args,", \t");
-				(void) Tinsert (&c->Chtree,arg,FALSE);
+				arg = nxtarg(&args, ", \t");
+				(void) Tinsert(&c->Chtree, arg, FALSE);
 				arg = args;
-				p = skipover (args," \t");
-				if (*p++ == ',')  args = p;
+				p = skipover(args, " \t");
+				if (*p++ == ',')
+					args = p;
 			} while (arg != args);
 			break;
 		case OBASE:
-			passdelim (&args,'=');
-			arg = nxtarg (&args," \t");
-			c->Cbase = salloc (arg);
+			passdelim (&args, '=');
+			arg = nxtarg (&args, " \t");
+			c->Cbase = strdup(arg);
 			break;
 		case OHOSTBASE:
-			passdelim (&args,'=');
-			arg = nxtarg (&args," \t");
-			c->Chbase = salloc (arg);
+			passdelim(&args, '=');
+			arg = nxtarg(&args, " \t");
+			c->Chbase = strdup(arg);
 			break;
 		case OPREFIX:
-			passdelim (&args,'=');
-			arg = nxtarg (&args," \t");
-			c->Cprefix = salloc (arg);
+			passdelim(&args, '=');
+			arg = nxtarg(&args, " \t");
+			c->Cprefix = strdup(arg);
 			break;
 		case ORELEASE:
-			passdelim (&args,'=');
-			arg = nxtarg (&args," \t");
-			c->Crelease = salloc (arg);
+			passdelim(&args, '=');
+			arg = nxtarg (&args, " \t");
+			c->Crelease = strdup(arg);
 			break;
 		case ONOTIFY:
-			passdelim (&args,'=');
-			arg = nxtarg (&args," \t");
-			c->Cnotify = salloc (arg);
+			passdelim(&args, '=');
+			arg = nxtarg(&args, " \t");
+			c->Cnotify = strdup(arg);
 			break;
 		case OLOGIN:
-			passdelim (&args,'=');
-			arg = nxtarg (&args," \t");
-			c->Clogin = salloc (arg);
+			passdelim(&args, '=');
+			arg = nxtarg(&args, " \t");
+			c->Clogin = strdup(arg);
 			break;
 		case OPASSWORD:
-			passdelim (&args,'=');
-			arg = nxtarg (&args," \t");
-			c->Cpswd = salloc (arg);
+			passdelim(&args, '=');
+			arg = nxtarg(&args, " \t");
+			c->Cpswd = strdup(arg);
 			break;
 		case OCRYPT:
-			passdelim (&args,'=');
-			arg = nxtarg (&args," \t");
-			c->Ccrypt = salloc (arg);
+			passdelim(&args, '=');
+			arg = nxtarg(&args, " \t");
+			c->Ccrypt = strdup(arg);
 			break;
 		case OBACKUP:
 			c->Cflags |= CFBACKUP;
@@ -205,15 +222,14 @@ char *collname,*args;
 			c->Cflags |= CFCOMPRESS;
 			break;
 		case OTIMEOUT:
-			passdelim (&args,'=');
-			arg = nxtarg (&args," \t");
-			c->Ctimeout = atoi (arg);
+			passdelim(&args, '=');
+			arg = nxtarg(&args, " \t");
+			c->Ctimeout = atoi(arg);
 			break;
 		}
 	}
-	return(0);
+	return (0);
 }
-
 
 time_t
 getwhen(collection, relsuffix)
@@ -224,7 +240,7 @@ getwhen(collection, relsuffix)
 	FILE *fp;
 	time_t tstamp;
 
-	(void) snprintf (buf,sizeof buf,FILEWHEN,collection,relsuffix);
+	(void) snprintf(buf, sizeof buf, FILEWHEN, collection, relsuffix);
 
 	if ((fp = fopen(buf, "r")) == NULL)
 		return 0;
@@ -237,9 +253,9 @@ getwhen(collection, relsuffix)
 	(void) fclose(fp);
 
 	if ((tstamp = strtol(buf, &ep, 0)) == -1 || *ep != '\n')
-		return 0;
+		return (0);
 
-	return tstamp;
+	return (tstamp);
 }
 
 int
@@ -249,10 +265,10 @@ putwhen(fname, tstamp)
 {
 	FILE *fp;
 	if ((fp = fopen(fname, "w")) == NULL)
-		return 0;
-	if (fprintf(fp, "%ld\n", tstamp) < 0)
-		return 0;
+		return (0);
+	if (fprintf(fp, "%u\n", tstamp) < 0)
+		return (0);
 	if (fclose(fp) != 0)
-		return 0;
-	return 1;
+		return (0);
+	return (1);
 }

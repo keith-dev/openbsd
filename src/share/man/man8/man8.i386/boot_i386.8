@@ -1,4 +1,4 @@
-.\"	$OpenBSD: boot_i386.8,v 1.1 2000/11/09 03:57:34 deraadt Exp $
+.\"	$OpenBSD: boot_i386.8,v 1.5 2001/10/04 16:56:52 mpech Exp $
 .\"
 .\" Copyright (c) 1997 Tobias Weingartner
 .\"
@@ -37,13 +37,13 @@
 .Sh NAME
 .Nm boot
 .Nd
+.Tn i386-specific
 system bootstrapping procedures
 .Sh DESCRIPTION
 .Ss Power fail and crash recovery
 Normally, the system will reboot itself at power-up or after crashes.
 An automatic consistency check of the file systems will be performed,
 and unless this fails, the system will resume multi-user operations.
-.Pp
 .Ss Cold starts
 The
 .Tn "PC AT"
@@ -60,7 +60,6 @@ clones attempt to boot off the drive specified in the BIOS setup, or
 if it is an older BIOS, it will start with checking for a disk in floppy
 drive A (otherwise known as drive 0) first, and failing that, attempt to
 boot the hard disk C (otherwise known as hard disk controller 1, drive 0).
-.Pp
 .Ss Warm starts
 The BIOS loads the first block (at physical location: track 0, head 0,
 sector 1) off the boot device into memory, and if the last two bytes in the
@@ -87,7 +86,7 @@ such a huge space should be able to be partitioned into separate drives,
 and this is when the MBR was invented.
 .Pp
 The MBR relocates itself upon being loaded and invoked by the BIOS.
-Embeded within the MBR is a partition table, with four partition table
+Embedded within the MBR is a partition table, with four partition table
 entries.
 The MBR code traverses this table (which was loaded with the
 MBR by the BIOS), looking for an active entry, and then loads the MBR or
@@ -159,7 +158,7 @@ system second stage bootstrap
 The
 .Dq PC BIOS Architecture
 makes this process very prone to weird and
-wonderful interactions between differing operating systems.
+wonderful interactions between different operating systems.
 There is no published standard to the MBR and PBR,
 which makes coding these a nightmare.
 Somebody *please* write me a decent BIOS, and make them (the masses) use it!

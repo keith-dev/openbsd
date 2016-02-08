@@ -1,4 +1,4 @@
-.\"	$OpenBSD: awi.4,v 1.7 2000/12/21 21:01:14 aaron Exp $
+.\"	$OpenBSD: awi.4,v 1.9 2001/07/03 22:19:28 millert Exp $
 .\"     $NetBSD: awi.4,v 1.1 1999/11/04 19:36:01 sommerfeld Exp $
 .\"
 .Dd October 31, 1999
@@ -6,14 +6,14 @@
 .Os
 .Sh NAME
 .Nm awi
-.Nd Bay Networks BayStack 650 IEEE 802.11FH PCMCIA driver
+.Nd BayStack 650 IEEE 802.11FH PCMCIA wireless network driver
 .Sh SYNOPSIS
 .Cd "awi* at pcmcia? function ?"
 .Sh DESCRIPTION
 The
 .Nm
-driver provides support for BayStack 650 IEEE 802.11 Frequency Hopping
-PCCARD adapters.
+driver provides support for Bay Networks BayStack 650 IEEE 802.11
+Frequency Hopping PCCARD adapters.
 .Pp
 The BayStack 650 is based on an AMD 79c930 controller, which provides
 access to 32kb of memory shared between the controller and the host.
@@ -78,12 +78,12 @@ The access point the card was most recently associated with has
 forgotten about us.
 .El
 .Sh SEE ALSO
-.Xr ray 4 ,
 .Xr arp 4 ,
 .Xr netintro 4 ,
 .Xr pcmcia 4 ,
-.Xr ifconfig 8 ,
-.Xr awiconfig 8
+.Xr ray 4 ,
+.Xr awiconfig 8 ,
+.Xr ifconfig 8
 .Rs
 .%T Am79C930 PCnet Mobile Single-Chip Wireless LAN Media Access Controller
 .%O http://www.amd.com

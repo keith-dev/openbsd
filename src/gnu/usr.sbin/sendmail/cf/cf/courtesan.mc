@@ -4,7 +4,7 @@ divert(-1)
 #
 
 divert(0)dnl
-VERSIONID(`$OpenBSD: courtesan.mc,v 1.3 2001/01/15 21:08:51 millert Exp $')
+VERSIONID(`$OpenBSD: courtesan.mc,v 1.7 2001/09/11 19:02:48 millert Exp $')
 OSTYPE(openbsd)
 dnl
 dnl First, we override some default values
@@ -13,6 +13,10 @@ define(`confSMTP_LOGIN_MSG', `$m Sendmail $v/$Z/courtesan ready at $b')dnl
 define(`confMAX_HOP', `20')dnl
 define(`confMAX_MIME_HEADER_LENGTH', `256/128')dnl
 dnl
+dnl Some broken nameservers will return SERVFAIL (a temporary failure)
+dnl on T_AAAA (IPv6) lookups.
+define(`confBIND_OPTS', `WorkAroundBrokenAAAA')dnl
+dnl
 dnl Next, we define the features we want
 FEATURE(nouucp, `reject')dnl
 FEATURE(always_add_domain)dnl
@@ -20,7 +24,9 @@ FEATURE(use_cw_file)dnl
 FEATURE(redirect)dnl
 MASQUERADE_AS(courtesan.com)dnl
 FEATURE(masquerade_envelope)dnl
-FEATURE(mailnametable)dnl
+FEATURE(genericstable, `hash -o /etc/mail/mailnames')dnl
+FEATURE(generics_entire_domain)dnl
+GENERICS_DOMAIN(`courtesan.com')dnl
 dnl
 dnl Virtual domains
 FEATURE(stickyhost)dnl
@@ -29,14 +35,17 @@ dnl
 dnl Spam blocking features
 FEATURE(access_db)dnl
 FEATURE(blacklist_recipients)dnl
-FEATURE(dnsbl, `rbl.maps.vix.com', `Rejected - see http://www.mail-abuse.org/rbl/')dnl
-FEATURE(dnsbl, `dul.maps.vix.com', `Dialup - see http://www.mail-abuse.org/dul/')dnl
-FEATURE(dnsbl, `relays.mail-abuse.org', `Open spam relay - see http://www.mail-abuse.org/rss/')dnl
-dnl FEATURE(dnsbl, `relays.orbs.org', `Open spam relay - see http://www.orbs.org/')dnl
+dnl FEATURE(dnsbl, `rbl.maps.vix.com', `Rejected - see http://www.mail-abuse.org/rbl/')dnl
+dnl FEATURE(dnsbl, `dul.maps.vix.com', `Dialup - see http://www.mail-abuse.org/dul/')dnl
+dnl FEATURE(dnsbl, `relays.mail-abuse.org', `Open spam relay - see http://www.mail-abuse.org/rss/')dnl
 dnl
 dnl Then, we enumerate which mailers we support
 MAILER(local)
 MAILER(smtp)
+dnl
+dnl We want to support IPv6
+DAEMON_OPTIONS(`Family=inet, address=0.0.0.0, Name=MTA')dnl
+DAEMON_OPTIONS(`Family=inet6, address=::, Name=MTA6, M=O')dnl
 dnl
 dnl Finally, we have the local cf-style goo
 LOCAL_CONFIG

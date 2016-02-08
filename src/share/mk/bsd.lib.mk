@@ -1,4 +1,4 @@
-#	$OpenBSD: bsd.lib.mk,v 1.28 2001/04/03 23:00:09 espie Exp $
+#	$OpenBSD: bsd.lib.mk,v 1.36 2001/09/25 14:33:44 drahn Exp $
 #	$NetBSD: bsd.lib.mk,v 1.67 1996/01/17 20:39:26 mycroft Exp $
 #	@(#)bsd.lib.mk	5.26 (Berkeley) 5/2/91
 
@@ -9,8 +9,9 @@
 .endif
 
 .if exists(${.CURDIR}/shlib_version)
-SHLIB_MAJOR != . ${.CURDIR}/shlib_version ; echo $$major
-SHLIB_MINOR != . ${.CURDIR}/shlib_version ; echo $$minor
+.include "${.CURDIR}/shlib_version"
+SHLIB_MAJOR=${major}
+SHLIB_MINOR=${minor}
 .endif
 
 .MAIN: all
@@ -98,13 +99,18 @@ SHLIB_MINOR != . ${.CURDIR}/shlib_version ; echo $$minor
 
 .S.so .s.so:
 	@echo "${CPP} -DPIC ${CPPFLAGS} ${CFLAGS:M-[ID]*} ${AINC} ${.IMPSRC} | \
-	    ${AS} -k -o ${.TARGET}"
+	    ${AS} ${ASPICFLAG} -o ${.TARGET}"
 	@${CPP} -DPIC ${CPPFLAGS} ${CFLAGS:M-[ID]*} ${AINC} ${.IMPSRC} | \
-	    ${AS} -k -o ${.TARGET}.o
+	    ${AS} ${ASPICFLAG} -o ${.TARGET}.o
 	@${LD} -x -r ${.TARGET}.o -o ${.TARGET}
 	@rm -f ${.TARGET}.o
 
+.if ${WARNINGS:L} == "yes"
+CFLAGS+=	${CDIAGFLAGS}
+CXXFLAGS+=	${CXXDIAGFLAGS}
+.endif
 CFLAGS+=	${COPTS}
+CXXFLAGS+=	${CXXOPTS}
 
 .if !defined(PICFLAG) && (${MACHINE_ARCH} != "mips")
 PICFLAG=-fpic
@@ -169,21 +175,12 @@ lib${LIB}_pic.a:: ${SOBJS}
 	@${AR} cq lib${LIB}_pic.a `${LORDER} ${SOBJS} | tsort -q`
 	${RANLIB} lib${LIB}_pic.a
 
-.if (${MACHINE_ARCH} == "mips")
-lib${LIB}.so.${SHLIB_MAJOR}.${SHLIB_MINOR}: ${OBJS} ${DPADD}
-	@echo building shared ${LIB} library \(version ${SHLIB_MAJOR}.${SHLIB_MINOR}\)
-	@rm -f lib${LIB}.so.${SHLIB_MAJOR}.${SHLIB_MINOR}
-	${CC} -shared ${PICFLAG} -Wl,-soname,lib${LIB}.so.${SHLIB_MAJOR} \
-	    -o lib${LIB}.so.${SHLIB_MAJOR}.${SHLIB_MINOR} \
-	    `${LORDER} ${OBJS}|tsort -q` ${LDADD}
-.else
 lib${LIB}.so.${SHLIB_MAJOR}.${SHLIB_MINOR}: ${SOBJS} ${DPADD}
 	@echo building shared ${LIB} library \(version ${SHLIB_MAJOR}.${SHLIB_MINOR}\)
 	@rm -f lib${LIB}.so.${SHLIB_MAJOR}.${SHLIB_MINOR}
 	${CC} -shared ${PICFLAG} \
 	    -o lib${LIB}.so.${SHLIB_MAJOR}.${SHLIB_MINOR} \
 	    `${LORDER} ${SOBJS}|tsort -q` ${LDADD}
-.endif
 
 LOBJS+=	${LSRCS:.c=.ln} ${SRCS:M*.c:.c=.ln}
 # the following looks XXX to me... -- cgd
@@ -266,16 +263,12 @@ realinstall:
 	    llib-l${LIB}.ln ${DESTDIR}${LINTLIBDIR}
 .endif
 .if defined(LINKS) && !empty(LINKS)
-	@set ${LINKS}; \
-	while test $$# -ge 2; do \
-		l=${DESTDIR}${BINDIR}/$$1; \
-		shift; \
-		t=${DESTDIR}${BINDIR}/$$1; \
-		shift; \
-		echo $$t -\> $$l; \
-		rm -f $$t; \
-		ln $$l $$t; \
-	done; true
+.  for lnk file in ${LINKS}
+	@l=${DESTDIR}${lnk}; \
+	 t=${DESTDIR}${file}; \
+	 echo $$t -\> $$l; \
+	 rm -f $$t; ln $$l $$t
+.  endfor
 .endif
 
 install: maninstall _SUBDIRUSE

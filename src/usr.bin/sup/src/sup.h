@@ -1,4 +1,4 @@
-/*	$OpenBSD: sup.h,v 1.4 1997/07/28 09:47:36 deraadt Exp $	*/
+/*	$OpenBSD: sup.h,v 1.8 2001/05/04 22:16:16 millert Exp $	*/
 
 /*
  * Copyright (c) 1992 Carnegie Mellon University
@@ -16,7 +16,7 @@
  *
  * Carnegie Mellon requests users of this software to return to
  *
- *  Software Distribution Coordinator  or  Software_Distribution@CS.CMU.EDU
+ *  Software Distribution Coordinator  or  Software.Distribution@CS.CMU.EDU
  *  School of Computer Science
  *  Carnegie Mellon University
  *  Pittsburgh PA 15213-3890
@@ -40,6 +40,19 @@
  *	Modified SUP to use gzip based compression when sending files
  *	across the network to save BandWidth
  *
+ * Revision 1.10  92/08/11  12:06:42  mrt
+ * 	Added definition for DEBUGFPORTNUM, the debugging port number.
+ * 	Changed so that last and when file names could include
+ * 	the relase name if any.
+ * 	[92/07/23            mrt]
+ * 
+ * Revision 1.9  91/04/29  14:39:03  mja
+ * 	Reduce MAXCHILDREN from 8 to 3.
+ * 
+ * Revision 1.8  89/08/23  14:55:30  gm0w
+ * 	Moved coll.dir from supservers to supfiles.
+ * 	[89/08/23            gm0w]
+ * 
  * 18-Mar-88  Glenn Marcy (gm0w) at Carnegie-Mellon University
  *	Added host=<hostfile> support to releases file.
  *
@@ -107,15 +120,15 @@ extern char scmversion[];		/* string version of scm */
 #define FILESUPDEFAULT	"%s/supfiles/coll.list"
 #define FILESUPTDEFAULT	"%s/supfiles/coll.what"
 #define FILEHOSTS	"%s/supfiles/coll.host"
-#else  EE_XXX
+#else  /* EE_XXX */
 #define FILESUPDEFAULT	"%s/lib/supfiles/coll.list"
 #define FILESUPTDEFAULT	"%s/lib/supfiles/coll.what"
 #define FILEHOSTS	"%s/lib/supfiles/coll.host"
-#endif EE_XXX
+#endif /* EE_XXX */
 #define FILEBKDIR	"%s/BACKUP"
 #define FILEBACKUP	"%s/BACKUP/%s"
 #define FILELAST	"sup/%s/last%s"
-#define FILELASTTEMP	"sup/%s/last.temp%s"
+#define FILELASTTEMP	"sup/%s/last%s.temp"
 #define FILELOCK	"sup/%s/lock"	/* also supfilesrv */
 #define FILEREFUSE	"sup/%s/refuse"
 #define FILEWHEN	"sup/%s/when%s"
@@ -124,9 +137,9 @@ extern char scmversion[];		/* string version of scm */
 #define FILEXPATCH	"%s/sup/xpatch.host"
 #ifdef EE_XXX
 #define FILEDIRS	"%s/supfiles/coll.dir" /* also supscan */
-#else  EE_XXX
+#else  /* EE_XXX */
 #define FILEDIRS	"%s/lib/supfiles/coll.dir" /* also supscan */
-#endif EE_XXX
+#endif /* EE_XXX */
 #define FILECRYPT	"sup/%s/crypt"
 #define FILELOGFILE	"sup/%s/logfile"
 #define FILEPREFIX	"sup/%s/prefix"	/* also supscan */
@@ -144,15 +157,15 @@ extern char scmversion[];		/* string version of scm */
 #ifndef	DEFDIR
 #ifdef EE_XXX
 #define DEFDIR		"/etc"
-#else  EE_XXX
+#else	/* EE_XXX */
 #define DEFDIR		"/usr"
-#endif EE_XXX
-#endif	DEFDIR
+#endif	/* EE_XXX */
+#endif	/* DEFDIR */
 
 /* Default login account for file server */
 #ifndef	DEFUSER
 #define DEFUSER		"anon"
-#endif	DEFUSER
+#endif	/* DEFUSER */
 
 /* subroutine return codes */
 #define SCMOK		(1)		/* routine performed correctly */
@@ -167,9 +180,9 @@ struct treestruct {
 	int Tflags;			/* flags of file */
 	int Tmode;			/* st_mode of file */
 	char *Tuser;			/* owner of file */
-	int Tuid;			/* owner id of file */
+	uid_t Tuid;			/* owner id of file */
 	char *Tgroup;			/* group of file */
-	int Tgid;			/* group id of file */
+	gid_t Tgid;			/* group id of file */
 	int Tctime;			/* inode modification time */
 	int Tmtime;			/* data modification time */
 	struct treestruct *Tlink;	/* tree of link names */

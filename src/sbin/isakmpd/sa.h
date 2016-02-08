@@ -1,4 +1,4 @@
-/*	$OpenBSD: sa.h,v 1.21 2001/04/24 07:27:37 niklas Exp $	*/
+/*	$OpenBSD: sa.h,v 1.24 2001/06/27 00:48:21 angelos Exp $	*/
 /*	$EOM: sa.h,v 1.58 2000/10/10 12:39:01 provos Exp $	*/
 
 /*
@@ -146,17 +146,41 @@ struct sa {
   /* Policy session ID, where applicable, copied over from the exchange */
   int policy_id;
 
-  /* Certs or other information from Phase 1 */  
-  int recv_certtype, recv_certlen, recv_certid;
+  /*
+   * The key used to authenticate phase 1, in printable format, used only by
+   * KeyNote.
+   */
+  char *keynote_key;
+
+  /*
+   * Certificates or other information from Phase 1; these are copied from the
+   * exchange, so look at exchange.h for an explanation of their use.
+   */  
+  int recv_certtype, recv_keytype;
+  /* Certificate received from peer, native format.  */
   void *recv_cert;
-  void *recv_key; /* Key used to authenticate, in KeyNote */
-    
+  /* Key peer used to authenticate, native format.  */
+  void *recv_key;
+
+  /*
+   * Certificates or other information we used to authenticate to the peer,
+   * Phase 1.
+   */
+  int sent_certtype, sent_keytype;
+  /* Certificate (to be) sent to peer, native format.  */
+  void *sent_cert;
+  /* Key we'll use to authenticate to peer, native format.  */
+  void *sent_key;
+
   /* DOI-specific opaque data.  */
   void *data;
 
   /* Lifetime data.  */
   u_int64_t seconds;
   u_int64_t kilobytes;
+
+  /* ACQUIRE sequence number */
+  u_int32_t seq;
 
   /* The events that will occur when an SA has timed out.  */
   struct event *soft_death;

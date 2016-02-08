@@ -1,4 +1,4 @@
-/*	$OpenBSD: extern.h,v 1.21 2000/07/27 17:44:33 espie Exp $	*/
+/*	$OpenBSD: extern.h,v 1.28 2001/10/10 18:12:00 espie Exp $	*/
 /*	$NetBSD: extern.h,v 1.3 1996/01/13 23:25:24 pk Exp $	*/
 
 /*-
@@ -41,15 +41,15 @@
 
 /* eval.c */
 extern void	eval __P((const char *[], int, int));
-extern void	expand __P((const char *[], int));
 extern void	dodefine __P((const char *, const char *));
+extern unsigned long expansion_id;
 
 /* expr.c */
 extern int	expr __P((const char *));
 
 /* gnum4.c */
-extern void 	addtoincludepath __P((const char *dirname));
-extern struct input_file *fopen_trypath __P((struct input_file *, const char *filename));
+extern void 	addtoincludepath __P((const char *));
+extern struct input_file *fopen_trypath __P((struct input_file *, const char *));
 extern void doindir __P((const char *[], int));
 extern void dobuiltin __P((const char *[], int));
 extern void dopatsubst __P((const char *[], int));
@@ -70,6 +70,7 @@ extern void	remhash __P((const char *, int));
 /* main.c */
 extern void outputstr __P((const char *));
 extern int builtin_type __P((const char *));
+extern char *builtin_realname __P((int));
 
 /* misc.c */
 extern void	chrsave __P((int));
@@ -86,12 +87,44 @@ extern void	putback __P((int));
 extern void	*xalloc __P((size_t));
 extern char	*xstrdup __P((const char *));
 extern void	usage __P((void));
-extern void	resizedivs __P((int n));
+extern void	resizedivs __P((int));
+extern size_t	buffer_mark __P((void));
+extern void	dump_buffer __P((FILE *, size_t));
 
 extern int 	obtain_char __P((struct input_file *));
 extern void	set_input __P((struct input_file *, FILE *, const char *));
 extern void	release_input __P((struct input_file *));
 
+/* speeded-up versions of chrsave/putback */
+#define PUTBACK(c)				\
+	do {					\
+		if (bp >= endpbb)		\
+			enlarge_bufspace();	\
+		*bp++ = (c);			\
+	} while(0)
+	
+#define CHRSAVE(c)				\
+	do {					\
+		if (ep >= endest)		\
+			enlarge_strspace();	\
+		*ep++ = (c);			\
+	} while(0)
+
+/* and corresponding exposure for local symbols */
+extern void enlarge_bufspace __P((void));
+extern void enlarge_strspace __P((void));
+extern char *endpbb;
+extern char *endest;
+
+/* trace.c */
+extern void mark_traced __P((const char *, int));
+extern int is_traced __P((const char *));
+extern void trace_file __P((const char *));
+extern ssize_t trace __P((const char **, int, struct input_file *));
+extern void finish_trace __P((size_t));
+extern int traced_macros;
+extern void set_trace_flags __P((const char *));
+extern FILE *traceout;
 
 extern ndptr hashtab[];		/* hash table for macros etc. */
 extern stae *mstack;		/* stack of m4 machine */

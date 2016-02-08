@@ -1,4 +1,4 @@
-/*	$OpenBSD: ccdconfig.c,v 1.14 2000/09/30 16:06:33 aaron Exp $	*/
+/*	$OpenBSD: ccdconfig.c,v 1.16 2001/07/07 18:26:10 deraadt Exp $	*/
 /*	$NetBSD: ccdconfig.c,v 1.6 1996/05/16 07:11:18 thorpej Exp $	*/
 
 /*-
@@ -178,25 +178,20 @@ main(argc, argv)
 	case CCD_UNCONFIG:
 		setegid(getgid());
 		setgid(getgid());
-
-		exit(do_single(argc, argv, action));
-		/* NOTREACHED */
+		return (do_single(argc, argv, action));
 
 	case CCD_CONFIGALL:
 	case CCD_UNCONFIGALL:
-
 		setegid(getgid());
 		setgid(getgid());
-
-		exit(do_all(action));
-		/* NOTREACHED */
+		return (do_all(action));
 
 	case CCD_DUMP:
-		exit(dump_ccd(argc, argv));
-		/* NOTREACHED */
+		return (dump_ccd(argc, argv));
 	}
 	/* NOTREACHED */
-	exit(0);
+
+	return (0);
 }
 
 static int
@@ -232,7 +227,7 @@ do_single(argc, argv, action)
 	}
 
 	/* Make sure there are enough arguments. */
-	if (argc < 4)
+	if (argc < 4) {
 		if (argc == 3) {
 			/* Assume that no flags are specified. */
 			noflags = 1;
@@ -243,6 +238,7 @@ do_single(argc, argv, action)
 			} else
 				usage();
 		}
+	}
 
 	/* First argument is the ccd to configure. */
 	cp = *argv++; --argc;

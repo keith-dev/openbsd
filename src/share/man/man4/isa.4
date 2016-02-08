@@ -1,4 +1,4 @@
-.\"	$OpenBSD: isa.4,v 1.4 2000/04/11 14:08:03 aaron Exp $
+.\"	$OpenBSD: isa.4,v 1.12 2001/10/05 14:45:53 mpech Exp $
 .\"	$NetBSD: isa.4,v 1.19 2000/03/18 16:54:37 augustss Exp $
 .\"
 .\" Copyright (c) 2000 Theo de Raadt.  All rights reserved.
@@ -38,7 +38,6 @@
 .Nm isa
 .Nd introduction to ISA bus support
 .Sh SYNOPSIS
-.Pp
 .Cd "isa0 at mainbus0"
 .Cd "isa0 at pcib?"
 .Pp
@@ -73,10 +72,8 @@ for
 or
 .Xr isapnp 4
 devices instead.
-.Pp
 .Sh SUPPORTED DEVICES
 At least the following devices are supported:
-.Pp
 .Ss SCSI controllers
 .Bl -tag -width speaker -offset ind
 .It Xr aha 4
@@ -117,13 +114,13 @@ interfaces.
 Mitsumi CD-ROM drives.
 .It Xr wdc 4
 Standard Western Digital type hard drive controllers: MFM, RLL, ESDI,
-and IDE/ATAPI.  See also the
+and IDE/ATAPI.
+See also the
 .Xr pciide 4
 device driver which is used instead on machines with PCI IDE controllers.
 .It Xr wt 4
 Wangtek and compatible QIC-02 and QIC-36 tape drives.
 .El
-.Pp
 .Ss Serial and parallel interfaces
 .Bl -tag -width speaker -offset ind
 .It Xr com 4 , Xr pccom 4
@@ -132,6 +129,8 @@ The
 .Xr pccom 4
 driver is used on the i386; all the rest use
 .Xr com 4 .
+.It Xr addcom 4
+Addonics FlexPort 8S serial communication cards.
 .It Xr ast 4
 Multi-port serial communications card first made by AST.
 .It Xr boca 4
@@ -145,11 +144,14 @@ parallel port interface.
 .It Xr rtfps 4
 IBM RT four-port serial cards.
 .El
-.Pp
 .Ss Network interfaces
 .Bl -tag -width speaker -offset ind
 .It Xr ec 4
 3Com Etherlink II (3c503)
+.Tn Ethernet
+interfaces.
+.It Xr ef 4
+3Com Fast Etherlink III (3c515)
 .Tn Ethernet
 interfaces.
 .It Xr eg 4
@@ -169,6 +171,10 @@ Ethernet interfaces based on Intel 82586
 .Tn Ethernet
 chip,
 including AT&T Starlan-10, AT&T EN100, AT&T Starlan Fibre, and 3Com 3c507.
+.It Xr lc 4
+DEC EtherWORKS III (DE203, DE204 & DE205)
+.Tn Ethernet
+interfaces.
 .It Xr le 4
 Ethernet interfaces based on the AMD LANCE chip,
 including BICC Isolan, Novell NE2100, Digital DEPCA, and PCnet-ISA.

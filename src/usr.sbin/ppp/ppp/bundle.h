@@ -23,7 +23,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- *	$OpenBSD: bundle.h,v 1.20 2001/04/05 02:24:05 brian Exp $
+ *	$OpenBSD: bundle.h,v 1.22 2001/08/19 23:22:17 brian Exp $
  */
 
 #define	PHASE_DEAD		0	/* Link is dead */
@@ -36,15 +36,19 @@
 #define OPT_FILTERDECAP	0x0001
 #define OPT_IDCHECK	0x0002
 #define OPT_IFACEALIAS	0x0004
-#define OPT_KEEPSESSION	0x0008
-#define OPT_LOOPBACK	0x0010
-#define OPT_PASSWDAUTH	0x0020
-#define OPT_PROXY	0x0040
-#define OPT_PROXYALL	0x0080
-#define OPT_SROUTES	0x0100
-#define OPT_TCPMSSFIXUP	0x0200
-#define OPT_THROUGHPUT	0x0400
-#define OPT_UTMP	0x0800
+#ifndef NOINET6
+#define OPT_IPCP	0x0008
+#define OPT_IPV6CP	0x0010
+#endif
+#define OPT_KEEPSESSION	0x0020
+#define OPT_LOOPBACK	0x0040
+#define OPT_PASSWDAUTH	0x0080
+#define OPT_PROXY	0x0100
+#define OPT_PROXYALL	0x0200
+#define OPT_SROUTES	0x0400
+#define OPT_TCPMSSFIXUP	0x0800
+#define OPT_THROUGHPUT	0x1000
+#define OPT_UTMP	0x2000
 
 #define MAX_ENDDISC_CLASS 5
 
@@ -73,7 +77,6 @@ struct bundle {
   } dev;
 
   u_long bandwidth;           /* struct tuninfo speed */
-  int mtu;                    /* struct tuninfo MTU */
   struct iface *iface;        /* Interface information */
 
   int routing_seq;            /* The current routing sequence number */
@@ -103,7 +106,6 @@ struct bundle {
     } auth;
     unsigned opt;             /* Uses OPT_ bits from above */
     char label[50];           /* last thing `load'ed */
-    u_short mtu;              /* Required interface MTU */
     u_short ifqueue;          /* Interface queue size */
 
     struct {
@@ -111,10 +113,7 @@ struct bundle {
     } choked;
   } cfg;
 
-  struct {
-    struct ipcp ipcp;         /* Our IPCP FSM */
-    struct mp mp;             /* Our MP */
-  } ncp;
+  struct ncp ncp;
 
   struct {
     struct filter in;         /* incoming packet filter */
@@ -151,7 +150,6 @@ extern const char *bundle_PhaseName(struct bundle *);
 #define bundle_Phase(b) ((b)->phase)
 extern void bundle_NewPhase(struct bundle *, u_int);
 extern void bundle_LinksRemoved(struct bundle *);
-extern int  bundle_LinkIsUp(const struct bundle *);
 extern void bundle_Close(struct bundle *, const char *, int);
 extern void bundle_Down(struct bundle *, int);
 extern void bundle_Open(struct bundle *, const char *, int, int);
@@ -186,9 +184,9 @@ extern void bundle_setsid(struct bundle *, int);
 extern void bundle_LockTun(struct bundle *);
 extern int bundle_HighestState(struct bundle *);
 extern int bundle_Exception(struct bundle *, int);
-extern void bundle_AdjustFilters(struct bundle *, struct in_addr *,
-                                 struct in_addr *);
-extern void bundle_AdjustDNS(struct bundle *, struct in_addr [2]);
+extern void bundle_AdjustFilters(struct bundle *, struct ncpaddr *,
+                                 struct ncpaddr *);
+extern void bundle_AdjustDNS(struct bundle *);
 extern void bundle_CalculateBandwidth(struct bundle *);
 extern void bundle_AutoAdjust(struct bundle *, int, int);
 extern int bundle_WantAutoloadTimer(struct bundle *);

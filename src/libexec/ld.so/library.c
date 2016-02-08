@@ -1,4 +1,4 @@
-/*	$OpenBSD: library.c,v 1.5 2001/04/02 23:11:20 drahn Exp $ */
+/*	$OpenBSD: library.c,v 1.10 2001/09/22 04:33:36 drahn Exp $ */
 
 /*
  * Copyright (c) 1998 Per Fogelstrom, Opsycon AB
@@ -55,9 +55,10 @@ char * _dl_findhint(char *name, int major, int minor, char *prefered_path);
 
 /*
  *  Load a shared object. Search order is:
- *	If the name contains a '/' use the name exactly as is.
- *	Otherwise first check DT_RPATH paths,
- *	then try the LD_LIBRARY_PATH specification and
+ *	If the name contains a '/' use the name exactly as is. (only)
+ *	try the LD_LIBRARY_PATH specification (if present)
+ *	check DT_RPATH paths, (if present)
+ *	check /var/run/ld.so.hints cache
  *	last look in /usr/lib.
  */
 
@@ -70,15 +71,6 @@ _dl_load_shlib(const char *libname, elf_object_t *parent, int type)
 	elf_object_t *object;
 	struct sod sodp;
 	char *hint;
-
-	_dl_build_sod(libname, &sodp);
-	if ((hint = _dl_findhint((char *)sodp.sod_name, sodp.sod_major,
-		sodp.sod_minor, NULL)) != NULL)
-	{
-		object = _dl_tryload_shlib(hint, type);
-		return(object);
-		
-	}
 
 	if(_dl_strchr(libname, '/')) {
 		object = _dl_tryload_shlib(libname, type);
@@ -128,9 +120,6 @@ _dl_load_shlib(const char *libname, elf_object_t *parent, int type)
 		if(*(path - 1) != '/') {/* Make sure '/' after dir path */
 			*path++ = '/';
 		}
-		if(*pp) {		/* ':' if not end. skip over. */
-			pp++;
-		}
 		while(path < lp + PATH_MAX && (*path++ = *ln++)) {};
 		if(path < lp + PATH_MAX) {
 			object = _dl_tryload_shlib(lp, type);
@@ -145,6 +134,16 @@ _dl_load_shlib(const char *libname, elf_object_t *parent, int type)
 			pp = 0;
 		}
 	}
+
+	_dl_build_sod(libname, &sodp);
+	if ((hint = _dl_findhint((char *)sodp.sod_name, sodp.sod_major,
+		sodp.sod_minor, NULL)) != NULL)
+	{
+		object = _dl_tryload_shlib(hint, type);
+		return(object);
+		
+	}
+
 
 	/*
 	 *  Check '/usr/lib'
@@ -257,7 +256,7 @@ _dl_tryload_shlib(const char *libname, int type)
 	 *  space required. Map it unaccessible to start with.
 	 */
 	libaddr = (Elf_Addr)_dl_mmap(0, maxva - minva, PROT_NONE,
-					MAP_COPY|MAP_ANON, -1, 0);
+					MAP_PRIVATE|MAP_ANON, -1, 0);
 	if(_dl_check_error(libaddr)) {
 		_dl_printf("%s: rtld mmap failed mapping %s.\n",
 				_dl_progname, libname);
@@ -275,7 +274,7 @@ _dl_tryload_shlib(const char *libname, int type)
 			char *start = (char *)(phdp->p_vaddr & ~align) + loff;
 			int size  = (phdp->p_vaddr & align) + phdp->p_filesz;
 			res = _dl_mmap(start, size, PFLAGS(phdp->p_flags),
-					MAP_FIXED|MAP_COPY, libfile,
+					MAP_FIXED|MAP_PRIVATE, libfile,
 					phdp->p_offset & ~align);
 			next_load = (load_list_t *)_dl_malloc(
 					sizeof(load_list_t));
@@ -293,7 +292,7 @@ _dl_tryload_shlib(const char *libname, int type)
 				_dl_load_list_free(load_list);
 				return(0);
 			}
-			if(phdp->p_flags & PF_W) {
+			if (phdp->p_flags & PF_W) {
 				if(size & align) {
 					_dl_memset(start + size, 0,
 						_dl_pagesz - (size & align));
@@ -303,7 +302,7 @@ _dl_tryload_shlib(const char *libname, int type)
 				size  = phdp->p_memsz - size;
 				res = _dl_mmap(start, size,
 					       PFLAGS(phdp->p_flags),
-					       MAP_FIXED|MAP_COPY|MAP_ANON,
+					       MAP_FIXED|MAP_PRIVATE|MAP_ANON,
 						-1, 0);
 				if(_dl_check_error(res)) {
 					_dl_printf("%s: rtld mmap failed mapping %s.\n",
@@ -324,8 +323,7 @@ _dl_tryload_shlib(const char *libname, int type)
 	if(object) {
 		object->load_size = maxva - minva;	/*XXX*/
 		object->load_list = load_list;
-	}
-	else {
+	} else {
 		_dl_munmap((void *)libaddr, maxva - minva);
 		_dl_load_list_free(load_list);
 	}

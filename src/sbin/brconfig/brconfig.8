@@ -1,4 +1,4 @@
-.\"	$OpenBSD: brconfig.8,v 1.23 2001/03/26 05:37:28 aaron Exp $
+.\"	$OpenBSD: brconfig.8,v 1.27 2001/08/20 05:57:55 mpech Exp $
 .\"
 .\" Copyright (c) 1999, 2000 Jason L. Wright (jason@thought.net)
 .\" All rights reserved.
@@ -55,7 +55,7 @@ utility retrieves kernel state of bridge interfaces and allows
 user control of these bridges.
 Bridge devices create a logical link between two or more Ethernet interfaces
 or encapsulation interfaces (see
-.Xr gif 4 ),
+.Xr gif 4 ) ,
 which will selectively forward frames from each interface on the bridge
 to every other interface on the bridge.
 This can be used to isolate traffic between sets of machines on the same
@@ -123,9 +123,9 @@ Remove all dynamically learned addresses from the cache.
 .It Cm flushall
 Remove all addresses from the cache including static addresses.
 .It Cm blocknonip Ar interface
-Mark an interface so that no packets that are not IPv4, IPv6, ARP, or Reverse
-ARP are accepted from it or are forwarded to it from other bridge member
-interfaces.
+Mark an interface so that no non-IPv4, IPv6, ARP, or Reverse
+ARP packets are accepted from it or forwarded to it from other
+bridge member interfaces.
 .It Cm -blocknonip Ar interface
 Allow non-IPv4, IPv6, ARP, or Reverse ARP packets through the
 .Ar interface .
@@ -338,9 +338,9 @@ The internal interface, ie. fxp1, on each bridge need not have an IP
 address; the bridge can function without it.
 .Pp
 Note:  It is possible to put all the following commands in the
-.Xr hostname.if 8
+.Xr hostname.if 5
 and
-.Xr bridgename.if 8
+.Xr bridgename.if 5
 files, using the ! operator.
 .Sh SPANNING TREE
 The bridge has support for 802.1D Spanning Tree Protocol (STP), which can
@@ -363,7 +363,7 @@ members because they lack a hardware MAC address.
 .Xr bridgename.if 5 ,
 .Xr ifconfig 8 ,
 .Xr ipsecadm 8
-.Sh AUTHOR
+.Sh AUTHORS
 The
 .Xr brconfig 8
 command and the

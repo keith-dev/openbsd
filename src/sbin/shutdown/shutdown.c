@@ -1,4 +1,4 @@
-/*	$OpenBSD: shutdown.c,v 1.20 2001/01/19 17:57:43 deraadt Exp $	*/
+/*	$OpenBSD: shutdown.c,v 1.22 2001/07/09 07:04:47 deraadt Exp $	*/
 /*	$NetBSD: shutdown.c,v 1.9 1995/03/18 15:01:09 cgd Exp $	*/
 
 /*
@@ -44,7 +44,7 @@ static char copyright[] =
 #if 0
 static char sccsid[] = "@(#)shutdown.c	8.2 (Berkeley) 2/16/94";
 #else
-static char rcsid[] = "$OpenBSD: shutdown.c,v 1.20 2001/01/19 17:57:43 deraadt Exp $";
+static char rcsid[] = "$OpenBSD: shutdown.c,v 1.22 2001/07/09 07:04:47 deraadt Exp $";
 #endif
 #endif /* not lint */
 
@@ -424,7 +424,7 @@ die_you_gravy_sucking_pig_dog()
 			t.c_oflag |= (ONLCR | OPOST);
 			tcsetattr(0, TCSANOW, &t);
 
-			execl(_PATH_BSHELL, "sh", _PATH_RC, "shutdown", NULL);
+			execl(_PATH_BSHELL, "sh", _PATH_RC, "shutdown", (char *)NULL);
 			_exit(1);
 		default:
 			waitpid(pid, NULL, 0);
@@ -461,15 +461,16 @@ getoffset(timearg)
 	}
 
 	/* handle hh:mm by getting rid of the colon */
-	for (p = timearg; *p; ++p)
-		if (!isascii(*p) || !isdigit(*p))
+	for (p = timearg; *p; ++p) {
+		if (!isascii(*p) || !isdigit(*p)) {
 			if (*p == ':' && strlen(p) == 3) {
 				p[0] = p[1];
 				p[1] = p[2];
 				p[2] = '\0';
-			}
-			else
+			} else
 				badtime();
+		}
+	}
 
 	unsetenv("TZ");					/* OUR timezone */
 	lt = localtime(&now);				/* current time val */

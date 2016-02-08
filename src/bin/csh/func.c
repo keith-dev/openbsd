@@ -1,4 +1,4 @@
-/*    $OpenBSD: func.c,v 1.9 1998/12/16 17:54:32 deraadt Exp $       */
+/*    $OpenBSD: func.c,v 1.11 2001/07/09 07:02:08 deraadt Exp $       */
 /*    $NetBSD: func.c,v 1.11 1996/02/09 02:28:29 christos Exp $       */
 
 /*-
@@ -38,7 +38,7 @@
 #if 0
 static char sccsid[] = "@(#)func.c	8.1 (Berkeley) 5/31/93";
 #else
-static char rcsid[] = "$OpenBSD: func.c,v 1.9 1998/12/16 17:54:32 deraadt Exp $";
+static char rcsid[] = "$OpenBSD: func.c,v 1.11 2001/07/09 07:02:08 deraadt Exp $";
 #endif
 #endif /* not lint */
 
@@ -253,7 +253,7 @@ dologin(v, t)
     islogin();
     rechist();
     (void) signal(SIGTERM, parterm);
-    (void) execl(_PATH_LOGIN, "login", short2str(v[1]), NULL);
+    (void) execl(_PATH_LOGIN, "login", short2str(v[1]), (char *)NULL);
     untty();
     xexit(1);
 }
@@ -767,11 +767,12 @@ getword(wp)
 	    c = readc(1);
 	    if (c == '\\' && (c = readc(1)) == '\n')
 		c = ' ';
-	    if (c == '\'' || c == '"')
+	    if (c == '\'' || c == '"') {
 		if (d == 0)
 		    d = c;
 		else if (d == c)
 		    d = 0;
+	    }
 	    if (c < 0)
 		goto past;
 	    if (wp) {

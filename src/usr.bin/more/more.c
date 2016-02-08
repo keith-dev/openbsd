@@ -1,4 +1,4 @@
-/*	$OpenBSD: more.c,v 1.11 2000/02/01 03:23:34 deraadt Exp $	*/
+/*	$OpenBSD: more.c,v 1.14 2001/09/05 22:32:41 deraadt Exp $	*/
 /*-
  * Copyright (c) 1980 The Regents of the University of California.
  * All rights reserved.
@@ -974,7 +974,7 @@ register FILE *f;
     char colonch;
     FILE *helpf;
     int done;
-    char comchar, cmdbuf[80], *p;
+    char comchar, cmdbuf[80];
     char option[8];
     char *EDITOR;
     char *editor;
@@ -1438,8 +1438,8 @@ va_dcl
 	    va_start(argp);
 	    execvp (cmd, argp);
 	    write (2, "exec failed\n", 12);
-	    exit (1);
 	    va_end(argp);	/* balance {}'s for some UNIX's */
+	    exit (1);
 	}
 	if (id > 0) {
 	    signal (SIGINT, SIG_IGN);
@@ -1853,6 +1853,8 @@ register FILE *f;
 void
 onsusp ()
 {
+    sigset_t mask;
+
     /* ignore SIGTTOU so we don't get stopped if csh grabs the tty */
     signal(SIGTTOU, SIG_IGN);
     reset_tty ();
@@ -1860,7 +1862,8 @@ onsusp ()
     signal(SIGTTOU, SIG_DFL);
     /* Send the TSTP signal to suspend our process group */
     signal(SIGTSTP, SIG_DFL);
-    sigsetmask(0);
+    sigemptyset(&mask);
+    sigprocmask(SIG_SETMASK, &mask, NULL);
     kill (0, SIGTSTP);
     /* Pause for station break */
 

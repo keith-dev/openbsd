@@ -1,4 +1,4 @@
-/*	$OpenBSD: pstat.c,v 1.25 2001/02/25 05:33:08 csapuntz Exp $	*/
+/*	$OpenBSD: pstat.c,v 1.27 2001/08/11 01:27:47 pvalchev Exp $	*/
 /*	$NetBSD: pstat.c,v 1.27 1996/10/23 22:50:06 cgd Exp $	*/
 
 /*-
@@ -44,7 +44,7 @@ static char copyright[] =
 #if 0
 from: static char sccsid[] = "@(#)pstat.c	8.9 (Berkeley) 2/16/94";
 #else
-static char *rcsid = "$OpenBSD: pstat.c,v 1.25 2001/02/25 05:33:08 csapuntz Exp $";
+static char *rcsid = "$OpenBSD: pstat.c,v 1.27 2001/08/11 01:27:47 pvalchev Exp $";
 #endif
 #endif /* not lint */
 
@@ -354,7 +354,7 @@ vnode_print(avnode, vp)
 	if (flag == 0)
 		*fp++ = '-';
 	*fp = '\0';
-	(void)printf("%8lx %s %5s %4d %4ld",
+	(void)printf("%8lx %s %5s %4d %4u",
 	    (long)avnode, type, flags, vp->v_usecount, vp->v_holdcnt);
 }
 
@@ -488,12 +488,6 @@ nfs_print(vp)
 		*flags++ = 'M';
 	if (flag & NWRITEERR)
 		*flags++ = 'E';
-	if (flag & NQNFSNONCACHE)
-		*flags++ = 'X';
-	if (flag & NQNFSWRITE)
-		*flags++ = 'O';
-	if (flag & NQNFSEVICTED)
-		*flags++ = 'G';
 	if (flag & NACC)
 		*flags++ = 'A';
 	if (flag & NUPD)
@@ -895,7 +889,7 @@ filemode()
 	(void)printf("%d/%d open files\n", nfile, maxfile);
 
 	(void)printf("%*s TYPE       FLG  CNT  MSG  %*s  OFFSET\n",
-	    sizeof (long) * 2, "LOC", sizeof (long) *2, "DATA");
+	    8, "LOC", 8, "DATA");
 	for (; (char *)ffp < buf + len; addr = ffp->f_list.le_next, ffp++) {
 		memmove(&fp, ffp, sizeof fp);
 		if ((unsigned)fp.f_type > DTYPE_SOCKET)
@@ -923,9 +917,9 @@ filemode()
 		(void)printf("  %8.1lx", (long)fp.f_data);
 
 		if (fp.f_offset < 0)
-			(void)printf("  %qx\n", fp.f_offset);
+			(void)printf("  %llx\n", (long long)fp.f_offset);
 		else
-			(void)printf("  %qd\n", fp.f_offset);
+			(void)printf("  %lld\n", (long long)fp.f_offset);
 	}
 	free(buf);
 }

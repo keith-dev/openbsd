@@ -1,10 +1,10 @@
-#	$OpenBSD: Makefile,v 1.9 2001/03/21 22:27:36 miod Exp $
+#	$OpenBSD: Makefile,v 1.12 2001/09/10 23:31:34 drahn Exp $
 
 TARGET_MACHINE_ARCH?=	${MACHINE_ARCH}
 
 .if (${TARGET_MACHINE_ARCH} == "alpha") || \
-    (${TARGET_MACHINE_ARCH} == "mips") || \
     (${TARGET_MACHINE_ARCH} == "powerpc") || \
+    (${TARGET_MACHINE_ARCH} == "sparc64") || \
     (${TARGET_MACHINE_ARCH} == "hppa")
 NOPROG=
 .else
@@ -14,9 +14,11 @@ SRCS=	gprof.c arcs.c dfn.c lookup.c machine.c hertz.c \
 CFLAGS+= -I${.CURDIR} -I.
 .endif
 
+.if defined(PROG)
 beforedepend:
 	ln -sf ${.CURDIR}/${TARGET_MACHINE_ARCH}.h machine.h
 	ln -sf ${.CURDIR}/${TARGET_MACHINE_ARCH}.c machine.c
+.endif # defined (PROG)
 
 beforeinstall:
 	${INSTALL} ${INSTALL_COPY} -o ${BINOWN} -g ${BINGRP} -m 444 \

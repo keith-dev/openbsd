@@ -1,4 +1,4 @@
-/*	$OpenBSD: supcmisc.c,v 1.6 1997/09/16 11:01:21 deraadt Exp $	*/
+/*	$OpenBSD: supcmisc.c,v 1.11 2001/05/07 02:08:02 millert Exp $	*/
 
 /*
  * Copyright (c) 1992 Carnegie Mellon University
@@ -16,7 +16,7 @@
  *
  * Carnegie Mellon requests users of this software to return to
  *
- *  Software Distribution Coordinator  or  Software_Distribution@CS.CMU.EDU
+ *  Software Distribution Coordinator  or  Software.Distribution@CS.CMU.EDU
  *  School of Computer Science
  *  Carnegie Mellon University
  *  Pittsburgh PA 15213-3890
@@ -28,6 +28,15 @@
  * sup misc. routines, include list processing.
  **********************************************************************
  * HISTORY
+ * Revision 1.5  92/08/11  12:07:22  mrt
+ * 	Added release to FILEWHEN name.
+ * 	Brad's changes: delinted and updated variable arguement usage.
+ * 	[92/07/26            mrt]
+ * 
+ * Revision 1.3  89/08/15  15:31:28  bww
+ * 	Updated to use v*printf() in place of _doprnt().
+ * 	From "[89/04/19            mja]" at CMU.
+ * 	[89/08/15            bww]
  * 
  * 27-Dec-87  Glenn Marcy (gm0w) at Carnegie-Mellon University
  *	Fixed bug in ugconvert() which left pw uninitialized.
@@ -41,6 +50,11 @@
 
 #include "supcdefs.h"
 #include "supextern.h"
+#include <limits.h>
+
+#ifndef UID_MAX
+#define UID_MAX	((uid_t)-1)
+#endif
 
 struct liststruct {		/* uid and gid lists */
 	char *Lname;		/* name */
@@ -68,55 +82,79 @@ static LIST *Llookup __P((LIST **, char *));
  *************************************************/
 
 void
-prtime ()
+prtime()
 {
 	char buf[STRINGLENGTH];
 	char relsufix[STRINGLENGTH];
 	time_t twhen;
 
 	if ((thisC->Cflags&CFURELSUF) && thisC->Crelease)
-		(void) snprintf (relsufix,sizeof relsufix,".%s",thisC->Crelease);
+		(void) snprintf(relsufix, sizeof relsufix, ".%s",
+		    thisC->Crelease);
 	else
 		relsufix[0] = '\0';
-	if (chdir (thisC->Cbase) < 0)
-		logerr ("Can't change to base directory %s for collection %s",
-			thisC->Cbase,thisC->Cname);
-	twhen = getwhen(thisC->Cname,relsufix);
-	(void) strncpy (buf,ctime (&twhen), sizeof buf-1);
-	buf[sizeof buf-1] = '\0';
-	loginfo ("Last update occurred at %s for collection %s",
-		buf,thisC->Cname);
+	if (chdir(thisC->Cbase) < 0)
+		logerr("Can't change to base directory %s for collection %s",
+		    thisC->Cbase, thisC->Cname);
+	twhen = getwhen(thisC->Cname, relsufix);
+	(void) strlcpy(buf, ctime(&twhen), sizeof buf);
+	buf[strlen(buf)-1] = '\0';	/* strip newline */
+	loginfo("Last update occurred at %s for collection %s%s",
+	    buf, thisC->Cname, relsufix);
 }
 
-int establishdir (fname)
-char *fname;
+int
+establishdir(fname)
+	char *fname;
 {
-	char dpart[STRINGLENGTH],fpart[STRINGLENGTH];
-	path (fname,dpart,fpart,sizeof fpart);
-	return (estabd (fname,dpart));
+	char dpart[STRINGLENGTH], fpart[STRINGLENGTH];
+
+	path(fname, dpart, fpart, sizeof fpart);
+	return (estabd(fname, dpart));
 }
 
-int estabd (fname,dname)
-char *fname,*dname;
+int
+makedir(fname, mode, statp)
+	char *fname;
+	int mode;
+	struct stat *statp;
 {
-	char dpart[STRINGLENGTH],fpart[STRINGLENGTH];
+	if (lstat(fname, statp) != -1 && !S_ISDIR(statp->st_mode)) {
+		if (unlink(fname) == -1) {
+			notify("SUP: Can't delete %s\n", fname);
+			return (-1);
+		}
+	}
+
+	(void) mkdir(fname, 0755);
+
+	return (stat(fname, statp));
+}
+
+int
+estabd(fname, dname)
+	char *fname, *dname;
+{
+	char dpart[STRINGLENGTH], fpart[STRINGLENGTH];
 	struct stat sbuf;
-	register int x;
+	int x;
 
-	if (stat (dname,&sbuf) >= 0)  return (FALSE); /* exists */
-	path (dname,dpart,fpart,sizeof fpart);
-	if (strcmp (fpart,".") == 0) {		/* dname is / or . */
-		notify ("SUP: Can't create directory %s for %s\n",dname,fname);
+	if (stat(dname, &sbuf) >= 0)
+		return (FALSE); /* exists */
+	path(dname, dpart, fpart, sizeof fpart);
+	if (strcmp(fpart,".") == 0) {		/* dname is / or . */
+		notify("SUP: Can't create directory %s for %s\n", dname, fname);
 		return (TRUE);
 	}
-	x = estabd (fname,dpart);
-	if (x)  return (TRUE);
-	(void) mkdir (dname,0755);
-	if (stat (dname,&sbuf) < 0) {		/* didn't work */
-		notify ("SUP: Can't create directory %s for %s\n",dname,fname);
+	x = estabd(fname, dpart);
+	if (x)
 		return (TRUE);
+	if (makedir(dname, 0755, &sbuf) < 0) {
+		vnotify("SUP: Can't create directory %s for %s\n",
+		    dname, fname);
+		return TRUE;
 	}
-	vnotify ("SUP Created directory %s for %s\n",dname,fname);
+	vnotify("SUP Created directory %s for %s\n", dname, fname);
 	return (FALSE);
 }
 
@@ -124,101 +162,108 @@ char *fname,*dname;
  ***    L I S T   R O U T I N E S    ***
  ***************************************/
 
-static
-int Lhash (name)
-char *name;
+/*
+ * Hash function is:  HASHSIZE * (strlen mod HASHSIZE)
+ *		      +          (char   mod HASHSIZE)
+ * where "char" is last character of name (if name is non-null).
+ */
+static int
+Lhash(name)
+	char *name;
 {
-	/* Hash function is:  HASHSIZE * (strlen mod HASHSIZE)
-	 *		      +          (char   mod HASHSIZE)
-	 * where "char" is last character of name (if name is non-null).
-	 */
+	int len;
+	char c;
 
-	register int len;
-	register char c;
-
-	len = strlen (name);
-	if (len > 0)	c = name[len-1];
-	else		c = 0;
+	len = strlen(name);
+	if (len > 0)
+		c = name[len-1];
+	else
+		c = 0;
 	return (((len&HASHMASK)<<HASHBITS)|(((int)c)&HASHMASK));
 }
 
 static void
-Linsert (table,name,number)
-LIST **table;
-char *name;
-int number;
+Linsert(table, name, number)
+	LIST **table;
+	char *name;
+	int number;
 {
-	register LIST *l;
-	register int lno;
-	lno = Lhash (name);
-	l = (LIST *) malloc (sizeof(LIST));
+	LIST *l;
+	int lno;
+	lno = Lhash(name);
+	l = (LIST *) malloc(sizeof(LIST));
 	l->Lname = name;
 	l->Lnumber = number;
 	l->Lnext = table[lno];
 	table[lno] = l;
 }
 
-static
-LIST *Llookup (table,name)
-LIST **table;
-char *name;
+static LIST *
+Llookup(table, name)
+	LIST **table;
+	char *name;
 {
-	register int lno;
-	register LIST *l;
-	lno = Lhash (name);
-	for (l = table[lno]; l && strcmp(l->Lname,name) != 0; l = l->Lnext);
+	int lno;
+	LIST *l;
+
+	lno = Lhash(name);
+	for (l = table[lno]; l && strcmp(l->Lname,name) != 0; l = l->Lnext)
+		;
 	return (l);
 }
 
-void ugconvert (uname,gname,uid,gid,mode)
-char *uname,*gname;
-int *uid,*gid,*mode;
+void
+ugconvert(uname, gname, uid, gid, mode)
+	char *uname, *gname;
+	uid_t *uid;
+	gid_t *gid;
+	int *mode;
 {
-	register LIST *u,*g;
-	register struct passwd *pw;
-	register struct group *gr;
+	LIST *u, *g;
+	struct passwd *pw;
+	struct group *gr;
 	struct stat sbuf;
-	static int defuid = -1;
-	static int defgid;
+	static uid_t defuid = UID_MAX;
+	static gid_t defgid;
 	static int first = TRUE;
 
 	if (first) {
-		bzero ((char *)uidL, sizeof (uidL));
-		bzero ((char *)gidL, sizeof (gidL));
+		memset(uidL, 0, sizeof(uidL));
+		memset(gidL, 0, sizeof(gidL));
 		first = FALSE;
 	}
 	pw = NULL;
-	if ((u = Llookup (uidL,uname)) != NULL)
-		*uid = u->Lnumber;
-	else if ((pw = getpwnam (uname)) != NULL) {
-		Linsert (uidL,salloc(uname),pw->pw_uid);
+	if ((u = Llookup(uidL, uname)) != NULL)
+		*uid = (uid_t) u->Lnumber;
+	else if ((pw = getpwnam(uname)) != NULL) {
+		Linsert(uidL, strdup(uname), pw->pw_uid);
 		*uid = pw->pw_uid;
 	}
 	if (u || pw) {
-		if ((g = Llookup (gidL,gname)) != NULL) {
-			*gid = g->Lnumber;
+		if ((g = Llookup(gidL, gname)) != NULL) {
+			*gid = (gid_t) g->Lnumber;
 			return;
 		}
-		if ((gr = getgrnam (gname)) != NULL) {
-			Linsert (gidL,salloc(gname),gr->gr_gid);
+		if ((gr = getgrnam(gname)) != NULL) {
+			Linsert(gidL, strdup(gname), gr->gr_gid);
 			*gid = gr->gr_gid;
 			return;
 		}
 		if (pw == NULL)
-			pw = getpwnam (uname);
+			pw = getpwnam(uname);
 		*mode &= ~S_ISGID;
 		*gid = pw->pw_gid;
 		return;
 	}
 	*mode &= ~(S_ISUID|S_ISGID);
-	if (defuid >= 0) {
+	if (defuid != UID_MAX) {
 		*uid = defuid;
 		*gid = defgid;
 		return;
 	}
-	if (stat (".",&sbuf) < 0) {
-		*uid = defuid = getuid ();
-		*gid = defgid = getgid ();
+	if (stat(".", &sbuf) < 0) {
+		*uid = defuid = getuid();
+		*gid = defgid = getgid();
 		return;
 	}
 	*uid = defuid = sbuf.st_uid;
@@ -246,53 +291,52 @@ va_dcl
 	va_list ap;
 
 #ifdef __STDC__
-	va_start(ap,fmt);
+	va_start(ap, fmt);
 #else
 	char *fmt;
 
 	va_start(ap);
-	fmt = va_arg(ap,char *);
+	fmt = va_arg(ap, char *);
 #endif
 	if (fmt == NULL) {
 		if (noteF && noteF != stdout)
-			(void) pclose (noteF);
+			(void) pclose(noteF);
 		noteF = NULL;
 		return;
 	}
 	if ((thisC->Cflags&CFURELSUF) && thisC->Crelease) 
-		(void) snprintf (collrelname,sizeof collrelname,
-			"%s-%s",collname,thisC->Crelease);
-	else {
-		(void) strncpy (collrelname,collname,sizeof collrelname-1);
-		collrelname[sizeof collrelname-1] = '\0';
-	}
+		(void) snprintf(collrelname, sizeof collrelname, "%s-%s",
+		    collname, thisC->Crelease);
+	else
+		(void) strlcpy(collrelname, collname, sizeof collrelname);
 	
 	if (noteF == NULL) {
+		/* XXX - it would be nicer to run sendmail directly (millert) */
 		if ((thisC->Cflags&CFMAIL) && thisC->Cnotify) {
-			(void) snprintf (buf,sizeof buf,
+			(void) snprintf(buf, sizeof buf,
 				"mail -s \"SUP Upgrade of %s\" %s >/dev/null",
-				collrelname,thisC->Cnotify);
-			noteF = popen (buf,"w");
+				collrelname, thisC->Cnotify);
+			noteF = popen(buf, "w");
 			if (noteF == NULL) {
 				logerr ("Can't send mail to %s for %s",
-					thisC->Cnotify,collrelname);
+					thisC->Cnotify, collrelname);
 				noteF = stdout;
 			}
 		} else
 			noteF = stdout;
-		tloc = time ((time_t *)NULL);
-		fprintf (noteF,"SUP Upgrade of %s at %s",
-			collrelname,ctime (&tloc));
-		(void) fflush (noteF);
+		tloc = time(NULL);
+		fprintf(noteF, "SUP Upgrade of %s at %s", collrelname,
+		    ctime(&tloc));
+		(void) fflush(noteF);
 	}
-	vfprintf(noteF,fmt,ap);
+	vfprintf(noteF, fmt, ap);
 	va_end(ap);
-	(void) fflush (noteF);
+	(void) fflush(noteF);
 }
 
 void
-lockout (on)		/* lock out interrupts */
-int on;
+lockout(on)		/* lock out interrupts */
+	int on;
 {
 	static sigset_t oset;
 	sigset_t nset;
@@ -304,22 +348,23 @@ int on;
 		sigaddset(&nset, SIGTERM);
 		sigaddset(&nset, SIGQUIT);
 		(void) sigprocmask(SIG_BLOCK, &nset, &oset);
-	}
-	else {
+	} else {
 		(void) sigprocmask(SIG_SETMASK, &oset, NULL);
 	}
 }
 
-char *fmttime (time)
-time_t time;
+char *
+fmttime(time)
+	time_t time;
 {
-	static char buf[STRINGLENGTH];
-	int len;
+	static char buf[16];
+	char *p;
 
-	(void) strncpy (buf,ctime (&time), sizeof buf-1);
-	buf[sizeof buf-1] = '\0';
-	len = strlen(buf+4)-6;
-	(void) strncpy (buf,buf+4,len);		/* XXX TDR */
-	buf[sizeof buf-1] = '\0';
+	/*
+	 * Copy ctime to buf, stripping day of week, year, and newline.
+	 * E.g.: "Thu Nov 24 18:22:48 1986\n" -> "Nov 24 18:22:48"
+	 */
+	p = ctime(&time) + 4;
+	(void) strlcpy(buf, p, sizeof(buf));
 	return (buf);
 }

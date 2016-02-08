@@ -1,8 +1,8 @@
-#	$OpenBSD: Makefile,v 1.14 2000/12/20 00:57:29 marc Exp $
+#	$OpenBSD: Makefile,v 1.20 2001/09/18 14:31:45 jason Exp $
 
 .if	make(obj)
-SUBDIR= special alpha amiga arc crunch hp300 i386 mac68k mvme68k mvme88k\
-	pmax powerpc sparc sun3
+SUBDIR= special alpha amiga crunch hp300 i386 mac68k macppc mvme68k \
+	mvme88k mvmeppc sparc sparc64 sun3 vax
 .elif	!make(install)
 SUBDIR= special
 .endif
@@ -14,7 +14,7 @@ SUBDIR+= ${MACHINE}
 .endif
 SUBDIR+= notes
 
-all: crunch-tools _SUBDIRUSE
+#all: crunch-tools _SUBDIRUSE
 
 crunch-tools:
 	(cd $(.CURDIR)/crunch; $(MAKE) obj; \

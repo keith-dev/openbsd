@@ -1,4 +1,4 @@
-/*	$OpenBSD: login_skey.c,v 1.1 2000/12/12 02:35:18 millert Exp $	*/
+/*	$OpenBSD: login_skey.c,v 1.3 2001/06/25 22:10:29 millert Exp $	*/
 
 /*-
  * Copyright (c) 1995 Berkeley Software Design, Inc. All rights reserved.
@@ -55,6 +55,8 @@
 #include <sha1.h>
 #include <skey.h>
 
+void timedout __P((int));
+
 int
 main(argc, argv)
 	int argc;
@@ -68,12 +70,12 @@ main(argc, argv)
 	char passbuf[SKEY_MAX_PW_LEN+1];
 	int c, haskey;
 	int mode = 0;
-	char *instance;
 
 	skeyprompt[0] = '\0';
 
 	(void)signal(SIGQUIT, SIG_IGN);
 	(void)signal(SIGINT, SIG_IGN);
+	(void)signal(SIGALRM, timedout);
 	(void)setpriority(PRIO_PROCESS, 0, 0);
 
 	openlog(NULL, LOG_ODELAY, LOG_AUTH);
@@ -150,6 +152,11 @@ main(argc, argv)
 		 * authenticate one at a time and that this call to
 		 * skeychallenge will produce the same results as
 		 * the call to skeychallenge when mode was 1.
+		 *
+		 * Furthermore, RFC2289 requires that an entry be
+		 * locked against a partial guess race which is
+		 * simply not possible if the calling program queries
+		 * the user for the passphrase itself.  Oh well.
 		 */
 		haskey = (skeychallenge(&skey, username, skeyprompt) == 0);
 	} else {
@@ -167,29 +174,36 @@ main(argc, argv)
 			exit(0);
 		}
 
+		/* Time out getting passphrase after 2 minutes to avoid a DoS */
+		if (haskey)
+			alarm(120);
 		readpassphrase(skeyprompt, passbuf, sizeof(passbuf), 0);
-		if (passbuf[0] == '\0') {
+		if (passbuf[0] == '\0')
 			readpassphrase("S/Key Password [echo on]: ",
 			    passbuf, sizeof(passbuf), RPP_ECHO_ON);
-		}
+		alarm(0);
 	}
-
-	if ((instance = strchr(username, '.')))
-		*instance++ = '\0';
 
 	if (haskey && skeyverify(&skey, passbuf) == 0) {
 		if (mode == 0) {
 			if (skey.n <= 1)
-				printf("Warning! You MUST change your S/Key password now!\n");
+				printf("Warning! You MUST change your "
+				    "S/Key password now!\n");
 			else if (skey.n < 5)
 				printf("Warning! Change S/Key password soon\n");
 		}
 		fprintf(back, BI_AUTH "\n");
-		if (instance && strcmp(instance, "root") == 0)
-			fprintf(back, BI_ROOTOKAY "\n");
 		fprintf(back, BI_SECURE "\n");
 		exit(0);
 	}
 	fprintf(back, BI_REJECT "\n");
 	exit(1);
+}
+
+void
+timedout(signo)
+	int signo;
+{
+
+	_exit(1);
 }

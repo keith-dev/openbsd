@@ -1,30 +1,38 @@
-/*
- *	      PPP Link Control Protocol (LCP) Module
+/*-
+ * Copyright (c) 1996 - 2001 Brian Somers <brian@Awfulhak.org>
+ *          based on work by Toshiharu OHNO <tony-o@iij.ad.jp>
+ *                           Internet Initiative Japan, Inc (IIJ)
+ * All rights reserved.
  *
- *	    Written by Toshiharu OHNO (tony-o@iij.ad.jp)
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in the
+ *    documentation and/or other materials provided with the distribution.
  *
- *   Copyright (C) 1993, Internet Initiative Japan, Inc. All rights reserverd.
+ * THIS SOFTWARE IS PROVIDED BY THE AUTHOR AND CONTRIBUTORS ``AS IS'' AND
+ * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+ * ARE DISCLAIMED.  IN NO EVENT SHALL THE AUTHOR OR CONTRIBUTORS BE LIABLE
+ * FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+ * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
+ * OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
+ * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
+ * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
+ * SUCH DAMAGE.
  *
- * Redistribution and use in source and binary forms are permitted
- * provided that the above copyright notice and this paragraph are
- * duplicated in all such forms and that any documentation,
- * advertising materials, and other materials related to such
- * distribution and use acknowledge that the software was developed
- * by the Internet Initiative Japan, Inc.  The name of the
- * IIJ may not be used to endorse or promote products derived
- * from this software without specific prior written permission.
- * THIS SOFTWARE IS PROVIDED ``AS IS'' AND WITHOUT ANY EXPRESS OR
- * IMPLIED WARRANTIES, INCLUDING, WITHOUT LIMITATION, THE IMPLIED
- * WARRANTIES OF MERCHANTIBILITY AND FITNESS FOR A PARTICULAR PURPOSE.
- *
- * $OpenBSD: lcp.c,v 1.24 2000/12/14 13:24:02 brian Exp $
- *
+ * $OpenBSD: lcp.c,v 1.32 2001/09/04 23:35:59 millert Exp $
  */
 
 #include <sys/param.h>
 #include <netinet/in.h>
 #include <netinet/in_systm.h>
 #include <netinet/ip.h>
+#include <sys/socket.h>
 #include <sys/un.h>
 
 #include <signal.h>
@@ -55,6 +63,8 @@
 #include "physical.h"
 #include "prompt.h"
 #include "slcompress.h"
+#include "ncpaddr.h"
+#include "ip.h"
 #include "ipcp.h"
 #include "filter.h"
 #include "mp.h"
@@ -66,6 +76,8 @@
 #ifndef NORADIUS
 #include "radius.h"
 #endif
+#include "ipv6cp.h"
+#include "ncp.h"
 #include "bundle.h"
 
 /* for received LQRs */
@@ -170,7 +182,17 @@ lcp_ReportStatus(struct cmdargs const *arg)
                 (u_long)lcp->want_magic, lcp->want_mrru,
                 lcp->want_shortseq ? "on" : "off", lcp->my_reject);
 
-  prompt_Printf(arg->prompt, "\n Defaults: MRU = %d, ", lcp->cfg.mru);
+  if (lcp->cfg.mru)
+    prompt_Printf(arg->prompt, "\n Defaults: MRU = %d (max %d), ",
+                  lcp->cfg.mru, lcp->cfg.max_mru);
+  else
+    prompt_Printf(arg->prompt, "\n Defaults: MRU = any (max %d), ",
+                  lcp->cfg.max_mru);
+  if (lcp->cfg.mtu)
+    prompt_Printf(arg->prompt, "MTU = %d (max %d), ",
+                  lcp->cfg.mtu, lcp->cfg.max_mtu);
+  else
+    prompt_Printf(arg->prompt, "MTU = any (max %d), ", lcp->cfg.max_mtu);
   prompt_Printf(arg->prompt, "ACCMAP = %08lx\n", (u_long)lcp->cfg.accmap);
   prompt_Printf(arg->prompt, "           LQR period = %us, ",
                 lcp->cfg.lqrperiod);
@@ -233,7 +255,10 @@ lcp_Init(struct lcp *lcp, struct bundle *bundle, struct link *l,
   fsm_Init(&lcp->fsm, "LCP", PROTO_LCP, mincode, LCP_MAXCODE, LogLCP,
            bundle, l, parent, &lcp_Callbacks, lcp_TimerNames);
 
-  lcp->cfg.mru = DEF_MRU;
+  lcp->cfg.mru = 0;
+  lcp->cfg.max_mru = MAX_MRU;
+  lcp->cfg.mtu = 0;
+  lcp->cfg.max_mtu = MAX_MTU;
   lcp->cfg.accmap = 0;
   lcp->cfg.openmode = 1;
   lcp->cfg.lqrperiod = DEF_LQRPERIOD;
@@ -245,7 +270,7 @@ lcp_Init(struct lcp *lcp, struct bundle *bundle, struct link *l,
   lcp->cfg.chap05 = NEG_ACCEPTED;
 #ifdef HAVE_DES
   lcp->cfg.chap80nt = NEG_ACCEPTED;
-  lcp->cfg.chap80lm = NEG_ACCEPTED;
+  lcp->cfg.chap80lm = 0;
   lcp->cfg.chap81 = NEG_ACCEPTED;
 #endif
   lcp->cfg.lqr = NEG_ACCEPTED;
@@ -259,11 +284,11 @@ lcp_Init(struct lcp *lcp, struct bundle *bundle, struct link *l,
 void
 lcp_Setup(struct lcp *lcp, int openmode)
 {
+  struct physical *p = link2physical(lcp->fsm.link);
+
   lcp->fsm.open_mode = openmode;
 
-  lcp->his_mru = lcp->fsm.bundle->cfg.mtu;
-  if (!lcp->his_mru || lcp->his_mru > DEF_MRU)
-    lcp->his_mru = DEF_MRU;
+  lcp->his_mru = DEF_MRU;
   lcp->his_mrru = 0;
   lcp->his_magic = 0;
   lcp->his_lqrperiod = 0;
@@ -273,14 +298,13 @@ lcp_Setup(struct lcp *lcp, int openmode)
   lcp->his_callback.opmask = 0;
   lcp->his_shortseq = 0;
 
-  lcp->want_mru = lcp->cfg.mru;
+  if ((lcp->want_mru = lcp->cfg.mru) == 0)
+    lcp->want_mru = DEF_MRU;
   lcp->want_mrru = lcp->fsm.bundle->ncp.mp.cfg.mrru;
   lcp->want_shortseq = IsEnabled(lcp->fsm.bundle->ncp.mp.cfg.shortseq) ? 1 : 0;
   lcp->want_acfcomp = IsEnabled(lcp->cfg.acfcomp) ? 1 : 0;
 
   if (lcp->fsm.parent) {
-    struct physical *p = link2physical(lcp->fsm.link);
-
     lcp->his_accmap = 0xffffffff;
     lcp->want_accmap = lcp->cfg.accmap;
     lcp->his_protocomp = 0;
@@ -359,6 +383,7 @@ LcpSendConfigReq(struct fsm *fp)
   struct lcp_opt *o;
   struct mp *mp;
   u_int16_t proto;
+  u_short maxmru;
 
   if (!p) {
     log_Printf(LogERROR, "%s: LcpSendConfigReq: Not a physical link !\n",
@@ -380,6 +405,14 @@ LcpSendConfigReq(struct fsm *fp)
     }
   }
 
+  maxmru = p ? physical_DeviceMTU(p) : 0;
+  if (lcp->cfg.max_mru && (!maxmru || maxmru > lcp->cfg.max_mru))
+    maxmru = lcp->cfg.max_mru;
+  if (maxmru && lcp->want_mru > maxmru) {
+    log_Printf(LogWARN, "%s: Reducing configured MRU from %u to %u\n",
+               fp->link->name, lcp->want_mru, maxmru);
+    lcp->want_mru = maxmru;
+  }
   if (!REJECTED(lcp, TY_MRU)) {
     ua_htons(&lcp->want_mru, o->data);
     INC_LCP_OPT(TY_MRU, 4, o);
@@ -585,15 +618,15 @@ LcpDecodeConfig(struct fsm *fp, u_char *cp, int plen, int mode_type,
 {
   /* Deal with incoming PROTO_LCP */
   struct lcp *lcp = fsm2lcp(fp);
-  int type, length, sz, pos, op, callback_req;
+  int type, length, sz, pos, op, callback_req, mru_req;
   u_int32_t magic, accmap;
-  u_short mtu, mru, proto;
+  u_short mru, phmtu, maxmtu, maxmru, wantmtu, wantmru, proto;
   struct lqrreq *req;
   char request[20], desc[22];
   struct mp *mp;
   struct physical *p = link2physical(fp->link);
 
-  sz = op = callback_req = 0;
+  sz = op = callback_req = mru_req = 0;
 
   while (plen >= sizeof(struct fsmconfig)) {
     type = *cp;
@@ -619,7 +652,13 @@ LcpDecodeConfig(struct fsm *fp, u_char *cp, int plen, int mode_type,
             /* Ignore his previous reject so that we REQ next time */
 	    lcp->his_reject &= ~(1 << type);
 
-          if (mru < MIN_MRU) {
+          if (mru > MAX_MRU) {
+            /* Push him down to MAX_MRU */
+            lcp->his_mrru = MAX_MRU;
+	    memcpy(dec->nakend, cp, 2);
+            ua_htons(&lcp->his_mrru, dec->nakend + 2);
+	    dec->nakend += 4;
+          } else if (mru < MIN_MRU) {
             /* Push him up to MIN_MRU */
             lcp->his_mrru = MIN_MRU;
 	    memcpy(dec->nakend, cp, 2);
@@ -657,27 +696,49 @@ LcpDecodeConfig(struct fsm *fp, u_char *cp, int plen, int mode_type,
       break;
 
     case TY_MRU:
+      mru_req = 1;
       ua_ntohs(cp + 2, &mru);
       log_Printf(LogLCP, "%s %d\n", request, mru);
 
       switch (mode_type) {
       case MODE_REQ:
-        mtu = lcp->fsm.bundle->cfg.mtu;
-        if (mru < MIN_MRU || (!lcp->want_mrru && mru < mtu)) {
+        maxmtu = p ? physical_DeviceMTU(p) : 0;
+        if (lcp->cfg.max_mtu && (!maxmtu || maxmtu > lcp->cfg.max_mtu))
+          maxmtu = lcp->cfg.max_mtu;
+        wantmtu = lcp->cfg.mtu;
+        if (maxmtu && wantmtu > maxmtu) {
+          log_Printf(LogWARN, "%s: Reducing configured MTU from %u to %u\n",
+                     fp->link->name, wantmtu, maxmtu);
+          wantmtu = maxmtu;
+        }
+
+        if (maxmtu && mru > maxmtu) {
+          lcp->his_mru = maxmtu;
+          memcpy(dec->nakend, cp, 2);
+          ua_htons(&lcp->his_mru, dec->nakend + 2);
+          dec->nakend += 4;
+        } else if (wantmtu && mru < wantmtu) {
           /* Push him up to MTU or MIN_MRU */
-          lcp->his_mru = mru < mtu ? mtu : MIN_MRU;
+          lcp->his_mru = wantmtu;
           memcpy(dec->nakend, cp, 2);
           ua_htons(&lcp->his_mru, dec->nakend + 2);
           dec->nakend += 4;
         } else {
-          lcp->his_mru = mtu ? mtu : mru;
+          lcp->his_mru = mru;
           memcpy(dec->ackend, cp, 4);
           dec->ackend += 4;
         }
 	break;
       case MODE_NAK:
-        if (mru > MAX_MRU)
-          lcp->want_mru = MAX_MRU;
+        maxmru = p ? physical_DeviceMTU(p) : 0;
+        if (lcp->cfg.max_mru && (!maxmru || maxmru > lcp->cfg.max_mru))
+          maxmru = lcp->cfg.max_mru;
+        wantmru = lcp->cfg.mru > maxmru ? maxmru : lcp->cfg.mru;
+
+        if (wantmru && mru > wantmru)
+          lcp->want_mru = wantmru;
+        else if (mru > maxmru)
+          lcp->want_mru = maxmru;
         else if (mru < MIN_MRU)
           lcp->want_mru = MIN_MRU;
         else
@@ -907,13 +968,16 @@ LcpDecodeConfig(struct fsm *fp, u_char *cp, int plen, int mode_type,
 	if (lcp->want_magic) {
 	  /* Validate magic number */
 	  if (magic == lcp->want_magic) {
+	    sigset_t emptyset;
+
 	    log_Printf(LogLCP, "Magic is same (%08lx) - %d times\n",
                       (u_long)magic, ++lcp->LcpFailedMagic);
 	    lcp->want_magic = GenerateMagic();
 	    memcpy(dec->nakend, cp, 6);
 	    dec->nakend += 6;
             ualarm(TICKUNIT * (4 + 4 * lcp->LcpFailedMagic), 0);
-            sigpause(0);
+	    sigemptyset(&emptyset);
+	    sigsuspend(&emptyset);
 	  } else {
 	    lcp->his_magic = magic;
 	    memcpy(dec->ackend, cp, length);
@@ -1208,6 +1272,22 @@ reqreject:
         log_Printf(LogWARN, "Cannot insist on auth callback without"
                    " PAP or CHAP enabled !\n");
         dec->nakend[-1] = 2;	/* XXX: Silly ! */
+      }
+    }
+    if (mode_type == MODE_REQ && !mru_req) {
+      mru = DEF_MRU;
+      phmtu = p ? physical_DeviceMTU(p) : 0;
+      if (phmtu && mru > phmtu)
+        mru = phmtu;
+      if (mru > lcp->cfg.max_mtu)
+        mru = lcp->cfg.max_mtu;
+      if (mru < DEF_MRU) {
+        /* Don't let the peer use the default MRU */
+        lcp->his_mru = lcp->cfg.mtu && lcp->cfg.mtu < mru ? lcp->cfg.mtu : mru;
+        *dec->nakend++ = TY_MRU;
+        *dec->nakend++ = 4;
+        ua_htons(&lcp->his_mru, dec->nakend);
+        dec->nakend += 2;
       }
     }
     if (dec->rejend != dec->rej) {

@@ -1,4 +1,4 @@
-.\"	$OpenBSD: queue.3,v 1.16 2001/03/01 16:11:14 aaron Exp $
+.\"	$OpenBSD: queue.3,v 1.20 2001/08/02 19:06:58 mpech Exp $
 .\"	$NetBSD: queue.3,v 1.4 1995/07/03 00:25:36 mycroft Exp $
 .\"
 .\" Copyright (c) 1993 The Regents of the University of California.
@@ -63,6 +63,7 @@
 .Nm LIST_INSERT_BEFORE ,
 .Nm LIST_INSERT_HEAD ,
 .Nm LIST_REMOVE ,
+.Nm LIST_REPLACE ,
 .Nm SIMPLEQ_ENTRY ,
 .Nm SIMPLEQ_HEAD ,
 .Nm SIMPLEQ_HEAD_INITIALIZER ,
@@ -103,6 +104,7 @@
 .Nm CIRCLEQ_PREV ,
 .Nm CIRCLEQ_EMPTY ,
 .Nm CIRCLEQ_FOREACH ,
+.Nm CIRCLEQ_FOREACH_REVERSE ,
 .Nm CIRCLEQ_INIT ,
 .Nm CIRCLEQ_INSERT_AFTER ,
 .Nm CIRCLEQ_INSERT_BEFORE ,
@@ -156,6 +158,8 @@
 .Fn LIST_INSERT_HEAD "LIST_HEAD *head" "struct TYPE *elm" "LIST_ENTRY NAME"
 .Ft void
 .Fn LIST_REMOVE "struct TYPE *elm" "LIST_ENTRY NAME"
+.Ft void
+.Fn LIST_REPLACE "struct TYPE *elm" "struct TYPE *elm2" "LIST_ENTRY NAME"
 .Pp
 .Fn SIMPLEQ_ENTRY "TYPE"
 .Fn SIMPLEQ_HEAD "HEADNAME" "TYPE"
@@ -540,6 +544,13 @@ macro removes the element
 from the list.
 .Pp
 The
+.Fn LIST_REPLACE
+macro replaces the list element
+.Fa elm
+with the new element
+.Fa elm2 .
+.Pp
+The
 .Fn LIST_FIRST ,
 and
 .Fn LIST_NEXT
@@ -568,7 +579,7 @@ struct entry {
 	...
 } *n1, *n2, *np;
 
-LIST_INIT(&head);			/* Initialize the list. */
+LIST_INIT(&head);			/* Initialize list. */
 
 n1 = malloc(sizeof(struct entry));	/* Insert at the head. */
 LIST_INSERT_HEAD(&head, n1, entries);
@@ -708,7 +719,7 @@ The elements are doubly linked so that an arbitrary element can be
 removed without traversing the tail queue.
 New elements can be added to the queue after an existing element,
 before an existing element, at the head of the queue, or at the end
-the queue.
+of the queue.
 A
 .Fa TAILQ_HEAD
 structure is declared as follows:
@@ -811,7 +822,7 @@ struct entry {
 	...
 } *n1, *n2, *np;
 
-TAILQ_INIT(&head);			/* Initialize the queue. */
+TAILQ_INIT(&head);			/* Initialize queue. */
 
 n1 = malloc(sizeof(struct entry));	/* Insert at the head. */
 TAILQ_INSERT_HEAD(&head, n1, entries);
@@ -945,7 +956,7 @@ struct entry {
 	...
 } *n1, *n2, *np;
 
-CIRCLEQ_INIT(&head);			/* Initialize the circular queue. */
+CIRCLEQ_INIT(&head);			/* Initialize circular queue. */
 
 n1 = malloc(sizeof(struct entry));	/* Insert at the head. */
 CIRCLEQ_INSERT_HEAD(&head, n1, entries);

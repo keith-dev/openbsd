@@ -1,6 +1,6 @@
 #!/bin/sh -
 #
-#	$OpenBSD: MAKEDEV,v 1.10 2001/03/12 23:23:50 miod Exp $
+#	$OpenBSD: MAKEDEV,v 1.14 2001/06/28 02:58:55 kjc Exp $
 #	$NetBSD: MAKEDEV,v 1.5 1997/01/01 23:46:23 pk Exp $
 #
 # Copyright (c) 1990 The Regents of the University of California.
@@ -56,6 +56,7 @@
 #	ss*	SCSI scanner
 #	uk*	SCSI unknown
 #	ch*	SCSI changer
+#	altq	ALTQ control interface
 #
 # Machine specific devices:
 #	sram	static ram available on some models.
@@ -77,15 +78,15 @@ all)
 	sh $this tty00 tty01 tty02 tty03
 	sh $this ttyw0
 	sh $this sd0 sd1 sd2 sd3 sd4 sd5 sd6 sd7 sd8 sd9
-	sh $this vnd0 vnd1 pty0 cd0 ipl
+	sh $this vnd0 vnd1 pty0 cd0
 	sh $this bpf0 bpf1 bpf2 bpf3 bpf4 bpf5 bpf6 bpf7 bpf8 bpf9
 	#sh $this ccd0 ccd1 ccd2 ccd3
-	sh $this tun0 tun1 lkm local
+	sh $this pf tun0 tun1 lkm local
 	sh $this sram0 nvram0 flash0 vmel0 vmes0
 	#sh $this lp0 lptwo0
 	sh $this random
 	sh $this uk0 uk1
-	sh $this ss0
+	sh $this ss0 altq
 	;;
 
 std)
@@ -287,6 +288,13 @@ lpt*|lpa*)
 	chown root.wheel $name$unit
 	;;
 
+pf)
+	rm -f pf
+	mknod pf c 39 0
+	chown root.wheel pf
+	chmod 600 pf
+	;;
+
 bpf*|tun*)
 	case $i in
 	bpf*) name=bpf;	unit=${i#bpf};	chr=22;;
@@ -340,13 +348,17 @@ lkm)
 	chmod 640 lkm
 	;;
 
-ipl)
-	rm -f ipl ipnat ipstate ipauth
-	mknod ipl c 39 0
-	mknod ipnat c 39 1
-	mknod ipstate c 39 2
-	mknod ipauth c 39 3
-	chown root.wheel ipl ipnat ipstate ipauth
+altq)
+	mkdir -p altq
+	chmod 755 altq
+	unit=0
+	for dev in altq cbq wfq afm fifoq red rio localq hfsc \
+	    cdnr blue priq; do
+		rm -f altq/$dev
+		mknod altq/$dev c 52 $unit
+		chmod 644 altq/$dev
+		unit=$(($unit + 1))
+	done
 	;;
 
 local)

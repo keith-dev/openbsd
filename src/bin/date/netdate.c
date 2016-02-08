@@ -1,4 +1,4 @@
-/*	$OpenBSD: netdate.c,v 1.10 1997/09/01 18:29:22 deraadt Exp $	*/
+/*	$OpenBSD: netdate.c,v 1.13 2001/07/05 22:32:35 espie Exp $	*/
 /*	$NetBSD: netdate.c,v 1.10 1995/09/07 06:21:06 jtc Exp $	*/
 
 /*-
@@ -38,7 +38,7 @@
 #if 0
 static char sccsid[] = "@(#)netdate.c	8.2 (Berkeley) 4/28/95";
 #else
-static char rcsid[] = "$OpenBSD: netdate.c,v 1.10 1997/09/01 18:29:22 deraadt Exp $";
+static char rcsid[] = "$OpenBSD: netdate.c,v 1.13 2001/07/05 22:32:35 espie Exp $";
 #endif
 #endif /* not lint */
 
@@ -84,7 +84,8 @@ netsettime(tval)
 	int fdsn;
 	fd_set *fdsp = NULL;
 	long waittime;
-	int s, length, timed_ack, found, error;
+	int s, timed_ack, found, error;
+	socklen_t length;
 	char hostname[MAXHOSTNAMELEN];
 
 	if ((sp = getservbyname("timed", "udp")) == NULL) {
@@ -117,8 +118,7 @@ netsettime(tval)
 		warn("gethostname");
 		goto bad;
 	}
-	(void)strncpy(msg.tsp_name, hostname, sizeof(msg.tsp_name)-1);
-	msg.tsp_name[sizeof(msg.tsp_name)-1] = '\0';
+	(void)strlcpy(msg.tsp_name, hostname, sizeof(msg.tsp_name));
 	msg.tsp_seq = htons((u_short)0);
 	msg.tsp_time.tv_sec = htonl((u_long)tval);
 	msg.tsp_time.tv_usec = htonl((u_long)0);

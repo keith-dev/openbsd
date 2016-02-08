@@ -1,4 +1,4 @@
-/*	$OpenBSD: ftp.c,v 1.39 2000/10/18 06:53:24 itojun Exp $	*/
+/*	$OpenBSD: ftp.c,v 1.41 2001/06/26 23:44:00 lebel Exp $	*/
 /*	$NetBSD: ftp.c,v 1.27 1997/08/18 10:20:23 lukem Exp $	*/
 
 /*
@@ -67,7 +67,7 @@
 #if 0
 static char sccsid[] = "@(#)ftp.c	8.6 (Berkeley) 10/27/94";
 #else
-static char rcsid[] = "$OpenBSD: ftp.c,v 1.39 2000/10/18 06:53:24 itojun Exp $";
+static char rcsid[] = "$OpenBSD: ftp.c,v 1.41 2001/06/26 23:44:00 lebel Exp $";
 #endif
 #endif /* not lint */
 
@@ -174,10 +174,9 @@ hookup(host, port)
 	}
 
 	if (res0->ai_canonname)
-		strncpy(hostnamebuf, res0->ai_canonname, sizeof(hostnamebuf));
+		strlcpy(hostnamebuf, res0->ai_canonname, sizeof(hostnamebuf));
 	else
-		strncpy(hostnamebuf, host, sizeof(hostnamebuf));
-	hostnamebuf[sizeof(hostnamebuf) - 1] = '\0';
+		strlcpy(hostnamebuf, host, sizeof(hostnamebuf));
 	hostname = hostnamebuf;
 	
 	s = -1;
@@ -453,8 +452,7 @@ getreply(expecteof)
 			if (len > sizeof(reply_string))
 				len = sizeof(reply_string);
 
-			(void)strncpy(reply_string, current_line, len);
-			reply_string[len] = '\0';
+			(void)strlcpy(reply_string, current_line, len + 1);
 		}
 		if (continuation && code != originalcode) {
 			if (originalcode == 0)
@@ -507,22 +505,13 @@ sendrequest(cmd, local, remote, printnames)
 {
 	struct stat st;
 	int c, d;
-	FILE *fin, *dout;
-	int (*closefunc) __P((FILE *));
-	sig_t oldinti, oldintr, oldintp;
+	FILE * volatile fin, * volatile dout;
+	int (* volatile closefunc) __P((FILE *));
+	volatile sig_t oldinti, oldintr, oldintp;
 	volatile off_t hashbytes;
-	char *lmode, buf[BUFSIZ], *bufp;
+	char * volatile lmode;
+	char buf[BUFSIZ], *bufp;
 	int oprogress;
-
-#ifdef __GNUC__				/* XXX: to shut up gcc warnings */
-	(void)&fin;
-	(void)&dout;
-	(void)&closefunc;
-	(void)&oldinti;
-	(void)&oldintr;
-	(void)&oldintp;
-	(void)&lmode;
-#endif
 
 	hashbytes = mark;
 	direction = "sent";
@@ -806,12 +795,12 @@ abortrecv(notused)
 
 void
 recvrequest(cmd, local, remote, lmode, printnames, ignorespecial)
-	const char *cmd, *local, *remote, *lmode;
+	const char *cmd, * volatile local, *remote, *lmode;
 	int printnames, ignorespecial;
 {
-	FILE *fout, *din;
-	int (*closefunc) __P((FILE *));
-	sig_t oldinti, oldintr, oldintp;
+	FILE * volatile fout, * volatile din;
+	int (* volatile closefunc) __P((FILE *));
+	volatile sig_t oldinti, oldintr, oldintp;
 	int c, d;
 	volatile int is_retr, tcrflag, bare_lfs;
 	static size_t bufsize;
@@ -821,16 +810,6 @@ recvrequest(cmd, local, remote, lmode, printnames, ignorespecial)
 	time_t mtime;
 	int oprogress;
 	int opreserve;
-
-#ifdef __GNUC__				/* XXX: to shut up gcc warnings */
-	(void)&local;
-	(void)&fout;
-	(void)&din;
-	(void)&closefunc;
-	(void)&oldinti;
-	(void)&oldintr;
-	(void)&oldintp;
-#endif
 
 	fout = NULL;
 	din = NULL;
@@ -1657,8 +1636,7 @@ pswitch(flag)
 	ip->connect = connected;
 	connected = op->connect;
 	if (hostname) {
-		(void)strncpy(ip->name, hostname, sizeof(ip->name) - 1);
-		ip->name[sizeof(ip->name) - 1] = '\0';
+		(void)strlcpy(ip->name, hostname, sizeof(ip->name));
 	} else
 		ip->name[0] = '\0';
 	hostname = op->name;
@@ -1684,19 +1662,15 @@ pswitch(flag)
 	mcase = op->mcse;
 	ip->ntflg = ntflag;
 	ntflag = op->ntflg;
-	(void)strncpy(ip->nti, ntin, sizeof(ip->nti) - 1);
-	(ip->nti)[sizeof(ip->nti) - 1] = '\0';
+	(void)strlcpy(ip->nti, ntin, sizeof(ip->nti));
 	(void)strcpy(ntin, op->nti);
-	(void)strncpy(ip->nto, ntout, sizeof(ip->nto) - 1);
-	(ip->nto)[sizeof(ip->nto) - 1] = '\0';
+	(void)strlcpy(ip->nto, ntout, sizeof(ip->nto));
 	(void)strcpy(ntout, op->nto);
 	ip->mapflg = mapflag;
 	mapflag = op->mapflg;
-	(void)strncpy(ip->mi, mapin, sizeof(ip->mi) - 1);
-	(ip->mi)[sizeof(ip->mi) - 1] = '\0';
+	(void)strlcpy(ip->mi, mapin, sizeof(ip->mi));
 	(void)strcpy(mapin, op->mi);
-	(void)strncpy(ip->mo, mapout, sizeof(ip->mo) - 1);
-	(ip->mo)[sizeof(ip->mo) - 1] = '\0';
+	(void)strlcpy(ip->mo, mapout, sizeof(ip->mo));
 	(void)strcpy(mapout, op->mo);
 	(void)signal(SIGINT, oldintr);
 	if (abrtflag) {
@@ -1723,16 +1697,11 @@ void
 proxtrans(cmd, local, remote)
 	const char *cmd, *local, *remote;
 {
-	sig_t oldintr;
+	volatile sig_t oldintr;
 	int prox_type, nfnd;
 	volatile int secndflag;
-	char *cmd2;
+	char * volatile cmd2;
 	fd_set mask;
-
-#ifdef __GNUC__				/* XXX: to shut up gcc warnings */
-	(void)&oldintr;
-	(void)&cmd2;
-#endif
 
 	oldintr = NULL;
 	secndflag = 0;

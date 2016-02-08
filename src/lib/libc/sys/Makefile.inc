@@ -1,4 +1,4 @@
-#	$OpenBSD: Makefile.inc,v 1.43 2001/03/14 04:01:59 aaron Exp $
+#	$OpenBSD: Makefile.inc,v 1.48 2001/09/25 20:36:44 niklas Exp $
 #	$NetBSD: Makefile.inc,v 1.35 1995/10/16 23:49:07 jtc Exp $
 #	@(#)Makefile.inc	8.1 (Berkeley) 6/17/93
 
@@ -37,7 +37,8 @@ ASM=	accept.o access.o acct.o adjtime.o bind.o chdir.o chflags.o chmod.o \
 	fchflags.o fchmod.o fchown.o fcntl.o fhopen.o fhstat.o fhstatfs.o \
 	flock.o fpathconf.o fstat.o \
 	fstatfs.o fsync.o futimes.o getdirentries.o getegid.o geteuid.o \
-	getfh.o getfsstat.o getgid.o getgroups.o getitimer.o getpeername.o \
+	getfh.o getfsstat.o getgid.o getgroups.o getitimer.o getpeereid.o \
+	getpeername.o \
 	getpgid.o \
 	getpgrp.o getpid.o getppid.o getpriority.o getrlimit.o getrusage.o \
 	getsid.o \
@@ -65,12 +66,17 @@ GASM=	${ASM:.o=.go}
 PASM=	${ASM:.o=.po}
 SASM=	${ASM:.o=.so}
 
-PSEUDO=	_exit.o _getlogin.o _setlogin.o _ptrace.o
+PSEUDO=	_getlogin.o _setlogin.o _ptrace.o
 GPSEUDO=${PSEUDO:.o=.go}
 PPSEUDO=${PSEUDO:.o=.po}
 SPSEUDO=${PSEUDO:.o=.so}
 
-OBJS+=	${ASM} ${PSEUDO}
+PSEUDO_NOERR=	_exit.o
+GPSEUDO_NOERR=${PSEUDO_NOERR:.o=.go}
+PPSEUDO_NOERR=${PSEUDO_NOERR:.o=.po}
+SPSEUDO_NOERR=${PSEUDO_NOERR:.o=.so}
+
+OBJS+=	${ASM} ${PSEUDO} ${PSEUDO_NOERR}
 
 ${GASM}: ${LIBCSRCDIR}/arch/${MACHINE_ARCH}/SYS.h /usr/include/sys/syscall.h
 	@echo creating ${.TARGET}
@@ -90,7 +96,8 @@ ${PASM}: ${LIBCSRCDIR}/arch/${MACHINE_ARCH}/SYS.h /usr/include/sys/syscall.h
 ${SASM}: ${LIBCSRCDIR}/arch/${MACHINE_ARCH}/SYS.h /usr/include/sys/syscall.h
 	@echo creating ${.TARGET}
 	@printf '#include "SYS.h"\nRSYSCALL(${.PREFIX})\n' | \
-	    ${CPP} -DPIC ${CFLAGS:M-[ID]*} ${AINC} | ${AS} -k -o ${.TARGET}
+	    ${CPP} -DPIC ${CFLAGS:M-[ID]*} ${AINC} | \
+	    ${AS} ${ASPICFLAG} -o ${.TARGET}
 .else
 ${SASM}: ${LIBCSRCDIR}/arch/${MACHINE_ARCH}/SYS.h /usr/include/sys/syscall.h
 	@echo creating ${.TARGET}
@@ -123,7 +130,8 @@ ${PPSEUDO}: ${LIBCSRCDIR}/arch/${MACHINE_ARCH}/SYS.h /usr/include/sys/syscall.h
 ${SPSEUDO}: ${LIBCSRCDIR}/arch/${MACHINE_ARCH}/SYS.h /usr/include/sys/syscall.h
 	@echo creating ${.TARGET}
 	@printf '#include "SYS.h"\nPSEUDO(${.PREFIX},${.PREFIX:S/_//})\n' | \
-	    ${CPP} -DPIC ${CFLAGS:M-[ID]*} ${AINC} | ${AS} -k -o ${.TARGET}
+	    ${CPP} -DPIC ${CFLAGS:M-[ID]*} ${AINC} | \
+	    ${AS} ${ASPICFLAG} -o ${.TARGET}
 .else
 ${SPSEUDO}: ${LIBCSRCDIR}/arch/${MACHINE_ARCH}/SYS.h /usr/include/sys/syscall.h
 	@echo creating ${.TARGET}
@@ -134,6 +142,40 @@ ${SPSEUDO}: ${LIBCSRCDIR}/arch/${MACHINE_ARCH}/SYS.h /usr/include/sys/syscall.h
 ${PSEUDO}: ${LIBCSRCDIR}/arch/${MACHINE_ARCH}/SYS.h /usr/include/sys/syscall.h
 	@echo creating ${.TARGET}
 	@printf '#include "SYS.h"\nPSEUDO(${.PREFIX},${.PREFIX:S/_//})\n' | \
+	    ${CPP} ${CFLAGS:M-[ID]*} ${AINC} | ${AS} -o ${.TARGET}.o
+	@${LD} -X -r ${.TARGET}.o -o ${.TARGET}
+	@rm -f ${.TARGET}.o
+
+${GPSEUDO_NOERR}: ${LIBCSRCDIR}/arch/${MACHINE_ARCH}/SYS.h /usr/include/sys/syscall.h
+	@echo creating ${.TARGET}
+	@printf '#include "SYS.h"\nPSEUDO_NOERROR(${.PREFIX},${.PREFIX:S/_//})\n' | \
+	    ${CPP} ${CFLAGS:M-[ID]*} ${AINC} | ${AS} -o ${.TARGET}.o
+	@${LD} -X -r ${.TARGET}.o -o ${.TARGET}
+	@rm -f ${.TARGET}.o
+
+${PPSEUDO_NOERR}: ${LIBCSRCDIR}/arch/${MACHINE_ARCH}/SYS.h /usr/include/sys/syscall.h
+	@echo creating ${.TARGET}
+	@printf '#include "SYS.h"\nPSEUDO_NOERROR(${.PREFIX},${.PREFIX:S/_//})\n' | \
+	    ${CPP} -DPROF ${CFLAGS:M-[ID]*} ${AINC} | ${AS} -o ${.TARGET}.o
+	@${LD} -X -r ${.TARGET}.o -o ${.TARGET}
+	@rm -f ${.TARGET}.o
+
+.if (${MACHINE_ARCH} != "mips")
+${SPSEUDO_NOERR}: ${LIBCSRCDIR}/arch/${MACHINE_ARCH}/SYS.h /usr/include/sys/syscall.h
+	@echo creating ${.TARGET}
+	@printf '#include "SYS.h"\nPSEUDO_NOERROR(${.PREFIX},${.PREFIX:S/_//})\n' | \
+	    ${CPP} -DPIC ${CFLAGS:M-[ID]*} ${AINC} | \
+	    ${AS} ${ASPICFLAG} -o ${.TARGET}
+.else
+${SPSEUDO_NOERR}: ${LIBCSRCDIR}/arch/${MACHINE_ARCH}/SYS.h /usr/include/sys/syscall.h
+	@echo creating ${.TARGET}
+	@printf '#include "SYS.h"\nPSEUDO_NOERROR(${.PREFIX},${.PREFIX:S/_//})\n' | \
+	    ${CPP} -DPIC ${CFLAGS:M-[ID]*} ${AINC} | ${AS} -o ${.TARGET}
+.endif
+
+${PSEUDO_NOERR}: ${LIBCSRCDIR}/arch/${MACHINE_ARCH}/SYS.h /usr/include/sys/syscall.h
+	@echo creating ${.TARGET}
+	@printf '#include "SYS.h"\nPSEUDO_NOERROR(${.PREFIX},${.PREFIX:S/_//})\n' | \
 	    ${CPP} ${CFLAGS:M-[ID]*} ${AINC} | ${AS} -o ${.TARGET}.o
 	@${LD} -X -r ${.TARGET}.o -o ${.TARGET}
 	@rm -f ${.TARGET}.o
@@ -168,8 +210,8 @@ MAN+=	accept.2 access.2 acct.2 adjtime.2 bind.2 brk.2 chdir.2 chflags.2 \
 	chmod.2 chown.2 chroot.2 clock_gettime.2 close.2 connect.2 dup.2 \
 	execve.2 _exit.2 fcntl.2 fhopen.2 \
 	flock.2 fork.2 fsync.2 getdirentries.2 \
-	getfh.2 getfsstat.2 \
-	getgid.2 getgroups.2 getitimer.2 getlogin.2 getpeername.2 getpgrp.2 \
+	getfh.2 getfsstat.2 getgid.2 getgroups.2 getitimer.2 getlogin.2 \
+	getpeername.2 getpeereid.2 getpgrp.2 \
 	getpid.2 getpriority.2 getrlimit.2 getrusage.2 getsid.2 getsockname.2 \
 	getsockopt.2 gettimeofday.2 getuid.2 intro.2 issetugid.2 ioctl.2 \
 	kill.2 kqueue.2 ktrace.2 link.2 \

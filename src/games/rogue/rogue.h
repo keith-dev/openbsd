@@ -1,4 +1,4 @@
-/*	$OpenBSD: rogue.h,v 1.3 1998/08/22 08:55:43 pjanzen Exp $	*/
+/*	$OpenBSD: rogue.h,v 1.6 2001/08/12 19:52:56 pjanzen Exp $	*/
 /*	$NetBSD: rogue.h,v 1.4 1995/04/24 12:25:04 cgd Exp $	*/
 
 /*
@@ -252,7 +252,7 @@ typedef struct obj object;
 #define INIT_STR	16
 #define INIT_EXPLEVEL	1
 #define INIT_EXP	0
-#define INIT_PACK	{0}
+#define INIT_PACK	{0, (char *)NULL, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, (struct obj *)NULL}
 #define INIT_GOLD	0
 #define INIT_CHAR	'@'
 #define INIT_MOVES	1250
@@ -437,54 +437,7 @@ struct rogue_time {
 	short second;	/* 0 - 59 */
 };
 
-#ifdef CURSES
-struct _win_st {
-	short _cury, _curx;
-	short _maxy, _maxx;
-};
-
-typedef struct _win_st WINDOW;
-
-#ifndef FALSE
-#define FALSE 0
-#endif
-
-extern int LINES, COLS;
-extern WINDOW *curscr;
-extern char *CL;
-
-void	initscr __P((void));
-void	endwin __P((void));
-void	move __P((short, short));
-void	mvaddstr __P((short, short, char *));
-void	addstr __P((char *));
-void	addch __P((int));
-void	mvaddch __P((short, short, int));
-void	refresh __P((void));
-void	wrefresh __P((WINDOW *scr));
-int	mvinch __P((short, short));
-void	clear __P((void));
-void	clrtoeol __P((void));
-void	standout __P((void));
-void	standend __P((void));
-void	crmode __P((void));
-void	noecho __P((void));
-void	nonl __P((void));
-void	clear_buffers __P((void));
-void	put_char_at __P((short, short, int));
-void	put_cursor __P((short, short));
-void	put_st_char __P((int));
-void	get_term_info __P((void));
-boolean	tc_tname __P((FILE *, char *, char *));
-void	tc_gtdata __P((FILE *, char *));
-void	tc_gets __P((char *, char **));
-void	tc_gnum __P((char *, int *));
-void	tstp __P((void));
-void	tc_cmget __P((void));
-
-#else
 #include <curses.h>
-#endif
 
 /*
  * external routine declarations.
@@ -572,7 +525,7 @@ char	get_dungeon_char __P((short, short));
 int	get_exp_level __P((long));
 void	get_food __P((object *, boolean));
 int	get_hit_chance __P((object *));
-int	get_input_line __P((char *, char *, char *, char *, boolean, boolean));
+int	get_input_line __P((char *, char *, char *, int, char *, boolean, boolean));
 char	get_mask_char __P((unsigned short));
 int	get_number __P((char *));
 boolean	get_oth_room __P((short, short *, short *));
@@ -634,11 +587,9 @@ void	make_room __P((short, short, short, short));
 void	make_scroll_titles __P((void));
 boolean	mask_pack __P((object *, unsigned short));
 boolean	mask_room __P((short, short *, short *, unsigned short));
-void	md_cbreak_no_echo_nonl __P((boolean));
 boolean	md_df __P((char *));
 void	md_exit __P((int));
 void	md_gct __P((struct rogue_time *));
-char   *md_gdtcf __P((void));
 int	md_get_file_id __P((char *));
 void	md_gfmt __P((char *, struct rogue_time *));
 int	md_gseed __P((void));
@@ -649,7 +600,6 @@ void	md_lock __P((boolean));
 void	md_shell __P((char *));
 void	md_sleep __P((int));
 void	md_slurp __P((void));
-void	md_tstp __P((void));
 void	message __P((char *, boolean));
 void	mix_colors __P((void));
 void	mix_colors __P((void));

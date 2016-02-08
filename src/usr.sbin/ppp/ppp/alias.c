@@ -1,4 +1,33 @@
 /* -*- mode: c; tab-width: 8; c-basic-indent: 4; -*- */
+
+/*-
+ * Copyright (c) 2001 Charles Mott <cmott@scientech.com>
+ * All rights reserved.
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in the
+ *    documentation and/or other materials provided with the distribution.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE AUTHOR AND CONTRIBUTORS ``AS IS'' AND
+ * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+ * ARE DISCLAIMED.  IN NO EVENT SHALL THE AUTHOR OR CONTRIBUTORS BE LIABLE
+ * FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+ * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
+ * OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
+ * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
+ * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
+ * SUCH DAMAGE.
+ *
+ * $OpenBSD: alias.c,v 1.16 2001/09/13 10:32:54 brian Exp $
+ */
+
 /*
     Alias.c provides supervisory control for the functions of the
     packet aliasing software.  It consists of routines to monitor
@@ -15,9 +44,6 @@
     special code for modifying the ftp PORT command used to establish
     data connections, while alias_irc.c does the same for IRC
     DCC. Alias_util.c contains a few utility routines.
-
-    This software is placed into the public domain with no restrictions
-    on its distribution.
 
     Version 1.0 August, 1996  (cjm)
 
@@ -84,8 +110,6 @@
 	- Added hooks to handle RTSP/RTP.
 
     See HISTORY file for additional revisions.
-
-    $OpenBSD: alias.c,v 1.13 2001/03/25 12:33:04 brian Exp $
 */
 
 #include <sys/types.h>
@@ -110,6 +134,7 @@
 #define CUSEEME_PORT_NUMBER 7648
 #define RTSP_CONTROL_PORT_NUMBER_1 554
 #define RTSP_CONTROL_PORT_NUMBER_2 7070
+#define TFTP_PORT_NUMBER 69
 #define PPTP_CONTROL_PORT_NUMBER 1723
 
 
@@ -813,6 +838,14 @@ UdpAliasOut(struct ip *pip)
 	      || ntohs(ud->uh_sport) == NETBIOS_NS_PORT_NUMBER)
 	    AliasHandleUdpNbtNS(pip, link, &pip->ip_src, &ud->uh_sport,
 				&alias_address, &alias_port);
+/*
+ * We don't know in advance what TID the TFTP server will choose,
+ * so we create a wilcard link (destination port is unspecified)
+ * that will match any TID from a given destination.
+ */
+	else if (ntohs(ud->uh_dport) == TFTP_PORT_NUMBER)
+	    FindRtspOut(pip->ip_src, pip->ip_dst,
+			ud->uh_sport, alias_port, IPPROTO_UDP);
 
 /* If UDP checksum is not zero, adjust since source port is */
 /* being aliased and source address is being altered        */

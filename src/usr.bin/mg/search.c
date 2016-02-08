@@ -1,8 +1,8 @@
-/*	$OpenBSD: search.c,v 1.4 2001/01/29 01:58:09 niklas Exp $	*/
+/*	$OpenBSD: search.c,v 1.7 2001/05/24 03:05:26 mickey Exp $	*/
 
 /*
  *		Search commands.
- * The functions in this file implement the search commands (both plain and 
+ * The functions in this file implement the search commands (both plain and
  * incremental searches are supported) and the query-replace command.
  *
  * The plain old search code is part of the original MicroEMACS "distribution".
@@ -29,14 +29,14 @@ typedef struct {
 } SRCHCOM;
 
 static int	isearch		__P((int));
-static VOID	is_cpush	__P((int));
-static VOID	is_lpush	__P((void));
-static VOID	is_pop		__P((void));
+static void	is_cpush	__P((int));
+static void	is_lpush	__P((void));
+static void	is_pop		__P((void));
 static int	is_peek		__P((void));
-static VOID	is_undo		__P((int *, int *));
+static void	is_undo		__P((int *, int *));
 static int	is_find		__P((int));
-static VOID	is_prompt	__P((int, int, int));
-static VOID	is_dspl		__P((char *, int));
+static void	is_prompt	__P((int, int, int));
+static void	is_dspl		__P((char *, int));
 static int	eq		__P((int, int));
 
 static SRCHCOM	cmds[NSRCH];
@@ -46,8 +46,8 @@ int		srch_lastdir = SRCH_NOPR;	/* Last search flags.	 */
 
 /*
  * Search forward.  Get a search string from the user, and search for it
- * starting at ".".  If found, "." gets moved to just after the matched 
- * characters, and display does all the hard stuff.  If not found, it just 
+ * starting at ".".  If found, "." gets moved to just after the matched
+ * characters, and display does all the hard stuff.  If not found, it just
  * prints a message.
  */
 /* ARGSUSED */
@@ -68,9 +68,9 @@ forwsearch(f, n)
 }
 
 /*
- * Reverse search.  Get a search string from the user, and search, starting 
- * at "." and proceeding toward the front of the buffer.  If found "." is 
- * left pointing at the first character of the pattern [the last character 
+ * Reverse search.  Get a search string from the user, and search, starting
+ * at "." and proceeding toward the front of the buffer.  If found "." is
+ * left pointing at the first character of the pattern [the last character
  * that was matched].
  */
 /* ARGSUSED */
@@ -91,8 +91,8 @@ backsearch(f, n)
 }
 
 /*
- * Search again, using the same search string and direction as the last 
- * search command. The direction has been saved in "srch_lastdir", so you 
+ * Search again, using the same search string and direction as the last
+ * search command. The direction has been saved in "srch_lastdir", so you
  * know which way to go.
  */
 /* ARGSUSED */
@@ -119,7 +119,7 @@ searchagain(f, n)
 }
 
 /*
- * Use incremental searching, initially in the forward direction.  
+ * Use incremental searching, initially in the forward direction.
  * isearch ignores any explicit arguments.
  */
 /* ARGSUSED */
@@ -175,7 +175,7 @@ isearch(dir)
 	for (cip = 0; cip < NSRCH; cip++)
 		cmds[cip].s_code = SRCH_NOPR;
 
-	(VOID)strcpy(opat, pat);
+	(void)strcpy(opat, pat);
 	cip = 0;
 	pptr = -1;
 	clp = curwp->w_dotp;
@@ -190,6 +190,14 @@ isearch(dir)
 
 		switch (c = getkey(FALSE)) {
 		case CCHR('['):
+			/*
+			 * If new characters come in the next 300 msec,
+			 * we can assume that they belong to a longer
+			 * escaped sequence so we should ungetkey the
+			 * ESC to avoid writing out garbage.
+			 */
+			if (ttwait(300) == FALSE)
+				ungetkey(c);
 			srch_lastdir = dir;
 			curwp->w_markp = clp;
 			curwp->w_marko = cbo;
@@ -207,8 +215,8 @@ isearch(dir)
 			curwp->w_doto = cbo;
 			curwp->w_flag |= WFMOVE;
 			srch_lastdir = dir;
-			(VOID)ctrlg(FFRAND, 0);
-			(VOID)strcpy(pat, opat);
+			(void)ctrlg(FFRAND, 0);
+			(void)strcpy(pat, opat);
 			return ABORT;
 		case CCHR(']'):
 		case CCHR('S'):
@@ -222,11 +230,11 @@ isearch(dir)
 				break;
 			is_lpush();
 			pptr = strlen(pat);
-			(VOID)forwchar(FFRAND, 1);
+			(void)forwchar(FFRAND, 1);
 			if (is_find(SRCH_FORW) != FALSE)
 				is_cpush(SRCH_MARK);
 			else {
-				(VOID)backchar(FFRAND, 1);
+				(void)backchar(FFRAND, 1);
 				ttbeep();
 				success = FALSE;
 			}
@@ -243,11 +251,11 @@ isearch(dir)
 				break;
 			is_lpush();
 			pptr = strlen(pat);
-			(VOID)backchar(FFRAND, 1);
+			(void)backchar(FFRAND, 1);
 			if (is_find(SRCH_BACK) != FALSE)
 				is_cpush(SRCH_MARK);
 			else {
-				(VOID)forwchar(FFRAND, 1);
+				(void)forwchar(FFRAND, 1);
 				ttbeep();
 				success = FALSE;
 			}
@@ -306,7 +314,7 @@ isearch(dir)
 	/* NOTREACHED */
 }
 
-static VOID
+static void
 is_cpush(cmd)
 	int cmd;
 {
@@ -315,7 +323,7 @@ is_cpush(cmd)
 	cmds[cip].s_code = cmd;
 }
 
-static VOID
+static void
 is_lpush()
 {
 	int	ctp;
@@ -328,7 +336,7 @@ is_lpush()
 	cmds[ctp].s_dotp = curwp->w_dotp;
 }
 
-static VOID
+static void
 is_pop()
 {
 	if (cmds[cip].s_code != SRCH_NOPR) {
@@ -348,7 +356,7 @@ is_peek()
 }
 
 /* this used to always return TRUE (the return value was checked) */
-static VOID
+static void
 is_undo(pptr, dir)
 	int *pptr, *dir;
 {
@@ -393,7 +401,7 @@ is_find(dir)
 	plen = strlen(pat);
 	if (plen != 0) {
 		if (dir == SRCH_FORW) {
-			(VOID)backchar(FFARG | FFRAND, plen);
+			(void)backchar(FFARG | FFRAND, plen);
 			if (forwsrch() == FALSE) {
 				curwp->w_doto = odoto;
 				curwp->w_dotp = odotp;
@@ -402,7 +410,7 @@ is_find(dir)
 			return TRUE;
 		}
 		if (dir == SRCH_BACK) {
-			(VOID)forwchar(FFARG | FFRAND, plen);
+			(void)forwchar(FFARG | FFRAND, plen);
 			if (backsrch() == FALSE) {
 				curwp->w_doto = odoto;
 				curwp->w_dotp = odotp;
@@ -417,12 +425,12 @@ is_find(dir)
 }
 
 /*
- * If called with "dir" not one of SRCH_FORW or SRCH_BACK, this routine used 
- * to print an error message.  It also used to return TRUE or FALSE, depending 
- * on if it liked the "dir".  However, none of the callers looked at the 
+ * If called with "dir" not one of SRCH_FORW or SRCH_BACK, this routine used
+ * to print an error message.  It also used to return TRUE or FALSE, depending
+ * on if it liked the "dir".  However, none of the callers looked at the
  * status, so I just made the checking vanish.
  */
-static VOID
+static void
 is_prompt(dir, flag, success)
 	int dir, flag, success;
 {
@@ -441,10 +449,10 @@ is_prompt(dir, flag, success)
 }
 
 /*
- * Prompt writing routine for the incremental search.  The "prompt" is just 
+ * Prompt writing routine for the incremental search.  The "prompt" is just
  * a string. The "flag" determines whether pat should be printed.
  */
-static VOID
+static void
 is_dspl(prompt, flag)
 	char *prompt;
 	int flag;
@@ -506,7 +514,7 @@ retry:
 			goto stopsearch;
 		/* ^G or ESC */
 		case CCHR('G'):
-			(VOID)ctrlg(FFRAND, 0);
+			(void)ctrlg(FFRAND, 0);
 		case CCHR('['):
 			goto stopsearch;
 		case '!':
@@ -538,9 +546,9 @@ stopsearch:
 }
 
 /*
- * This routine does the real work of a forward search.  The pattern is sitting 
+ * This routine does the real work of a forward search.  The pattern is sitting
  * in the external variable "pat".  If found, dot is updated, the window system
- * is notified of the change, and TRUE is returned.  If the string isn't found, 
+ * is notified of the change, and TRUE is returned.  If the string isn't found,
  * FALSE is returned.
  */
 int
@@ -587,8 +595,8 @@ fail:		;
 }
 
 /*
- * This routine does the real work of a backward search.  The pattern is 
- * sitting in the external variable "pat".  If found, dot is updated, the 
+ * This routine does the real work of a backward search.  The pattern is
+ * sitting in the external variable "pat".  If found, dot is updated, the
  * window system is notified of the change, and TRUE is returned.  If the
  * string isn't found, FALSE is returned.
  */
@@ -642,7 +650,7 @@ fail:		;
 }
 
 /*
- * Compare two characters.  The "bc" comes from the buffer.  It has its case 
+ * Compare two characters.  The "bc" comes from the buffer.  It has its case
  * folded out. The "pc" is from the pattern.
  */
 static int
@@ -661,10 +669,10 @@ eq(bc, pc)
 }
 
 /*
- * Read a pattern.  Stash it in the external variable "pat".  The "pat" is not 
- * updated if the user types in an empty line.  If the user typed an empty 
- * line, and there is no old pattern, it is an error.  Display the old pattern, 
- * in the style of Jeff Lomicka.  There is some do-it-yourself control 
+ * Read a pattern.  Stash it in the external variable "pat".  The "pat" is not
+ * updated if the user types in an empty line.  If the user typed an empty
+ * line, and there is no old pattern, it is an error.  Display the old pattern,
+ * in the style of Jeff Lomicka.  There is some do-it-yourself control
  * expansion.
  */
 int
@@ -681,7 +689,7 @@ readpattern(prompt)
 
 	/* specified */
 	if (s == TRUE)
-		(VOID) strcpy(pat, tpat);
+		(void) strcpy(pat, tpat);
 	/* CR, but old one */
 	else if (s == FALSE && pat[0] != 0)
 		s = TRUE;

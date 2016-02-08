@@ -1,17 +1,15 @@
-/*	$OpenBSD: keymap.c,v 1.5 2001/01/29 01:58:08 niklas Exp $	*/
+/*	$OpenBSD: keymap.c,v 1.14 2001/05/24 10:47:54 art Exp $	*/
 
 /*
- * Keyboard maps.  This is character set dependent.  The terminal specific 
+ * Keyboard maps.  This is character set dependent.  The terminal specific
  * parts of building the keymap has been moved to a better place.
  */
 
 #include	"def.h"
 #include	"kbd.h"
 
-static int	 name_fent	__P((char *, int));
-
 /*
- * initial keymap declarations, deepest first 
+ * initial keymap declarations, deepest first
  */
 
 #ifndef NO_HELP
@@ -32,44 +30,14 @@ static struct KEYMAPE (2 + IMAPEXT) helpmap = {
 	rescan,
 	{
 		{
-			CCHR('G'), CCHR('H'), cHcG, (KEYMAP *)NULL
+			CCHR('G'), CCHR('H'), cHcG, NULL
 		},
 		{
-			'a', 'c', cHa, (KEYMAP *)NULL
+			'a', 'c', cHa, NULL
 		},
 	}
 };
 #endif /* !NO_HELP */
-
-static struct KEYMAPE (1 + IMAPEXT) extramap1 = {
-	0,
-	1 + IMAPEXT,
-	rescan
-};
-
-static struct KEYMAPE (1 + IMAPEXT) extramap2 = {
-	0,
-	1 + IMAPEXT,
-	rescan
-};
-
-static struct KEYMAPE (1 + IMAPEXT) extramap3 = {
-	0,
-	1 + IMAPEXT,
-	rescan
-};
-
-static struct KEYMAPE (1 + IMAPEXT) extramap4 = {
-	0,
-	1 + IMAPEXT,
-	rescan
-};
-
-static struct KEYMAPE (1 + IMAPEXT) extramap5 = {
-	0,
-	1 + IMAPEXT,
-	rescan
-};
 
 static PF cX4cF[] = {
 	poptofile,		/* ^f */
@@ -88,10 +56,10 @@ static struct KEYMAPE (2 + IMAPEXT) cX4map = {
 	rescan,
 	{
 		{
-			CCHR('F'), CCHR('G'), cX4cF, (KEYMAP *)NULL
+			CCHR('F'), CCHR('G'), cX4cF, NULL
 		},
 		{
-			'b', 'f', cX4b, (KEYMAP *)NULL
+			'b', 'f', cX4b, NULL
 		},
 	}
 };
@@ -133,7 +101,7 @@ static PF cX0[] = {
 	onlywind,		/* 1 */
 	splitwind,		/* 2 */
 	rescan,			/* 3 */
-	prefix,			/* 4 */
+	NULL,			/* 4 */
 };
 
 static PF cXeq[] = {
@@ -185,24 +153,24 @@ static struct KEYMAPE (5 + IMAPEXT) cXmap = {
 	rescan,
 	{
 		{
-			CCHR('B'), CCHR('G'), cXcB, (KEYMAP *)NULL
+			CCHR('B'), CCHR('G'), cXcB, NULL
 		},
 		{
-			CCHR('L'), CCHR('X'), cXcL, (KEYMAP *)NULL
+			CCHR('L'), CCHR('X'), cXcL, NULL
 		},
 #ifndef NO_MACRO
 		{
-			'(', ')', cXlp, (KEYMAP *)NULL
+			'(', ')', cXlp, NULL
 		},
 #endif /* !NO_MACRO */
 		{
 			'0', '4', cX0, (KEYMAP *) & cX4map
 		},
 		{
-			'=', '=', cXeq, (KEYMAP *)NULL
+			'=', '=', cXeq, NULL
 		},
 		{
-			'^', 's', cXcar, (KEYMAP *)NULL
+			'^', 's', cXcar, NULL
 		},
 	}
 };
@@ -286,28 +254,28 @@ static struct KEYMAPE (8 + IMAPEXT) metamap = {
 	rescan,
 	{
 		{
-			CCHR('G'), CCHR('G'), metacG, (KEYMAP *)NULL
+			CCHR('G'), CCHR('G'), metacG, NULL
 		},
 		{
-			CCHR('V'), CCHR('V'), metacV, (KEYMAP *)NULL
+			CCHR('V'), CCHR('V'), metacV, NULL
 		},
 		{
-			' ', ' ', metasp, (KEYMAP *)NULL
+			' ', ' ', metasp, NULL
 		},
 		{
-			'%', '%', metapct, (KEYMAP *)NULL
+			'%', '%', metapct, NULL
 		},
 		{
-			'-', '>', metami, (KEYMAP *)NULL
+			'-', '>', metami, NULL
 		},
 		{
-			'[', 'f', metalb, (KEYMAP *)NULL
+			'[', 'f', metalb, NULL
 		},
 		{
-			'l', 'x', metal, (KEYMAP *) NULL
+			'l', 'x', metal, NULL
 		},
 		{
-			'~', CCHR('?'), metatilde, (KEYMAP *)NULL
+			'~', CCHR('?'), metatilde, NULL
 		},
 	}
 };
@@ -322,7 +290,7 @@ static PF fund_at[] = {
 	forwchar,		/* ^F */
 	ctrlg,			/* ^G */
 #ifndef NO_HELP
-	prefix,			/* ^H */
+	NULL,			/* ^H */
 #else /* !NO_HELP */
 	rescan,			/* ^H */
 #endif /* !NO_HELP */
@@ -344,13 +312,13 @@ static PF fund_CJ[] = {
 	universal_argument,	/* ^U */
 	forwpage,		/* ^V */
 	killregion,		/* ^W */
-	prefix,			/* ^X */
+	NULL,			/* ^X */
 	yank,			/* ^Y */
 	spawncli,		/* ^Z */
 };
 
 static PF fund_esc[] = {
-	prefix,			/* esc */
+	NULL,			/* esc */
 	rescan,			/* ^\ selfinsert is default on fundamental */
 	rescan,			/* ^] */
 	rescan,			/* ^^ */
@@ -376,7 +344,7 @@ static struct KEYMAPE (4 + NFUND_XMAPS + IMAPEXT) fundmap = {
 		},
 #else /* !NO_HELP */
 		{
-			CCHR('@'), CCHR('H'), fund_at, (KEYMAP *)NULL
+			CCHR('@'), CCHR('H'), fund_at, NULL
 		},
 #endif /* !NO_HELP */
 		{
@@ -386,7 +354,7 @@ static struct KEYMAPE (4 + NFUND_XMAPS + IMAPEXT) fundmap = {
 			CCHR('['), CCHR('_'), fund_esc, (KEYMAP *) & metamap
 		},
 		{
-			CCHR('?'), CCHR('?'), fund_del, (KEYMAP *)NULL
+			CCHR('?'), CCHR('?'), fund_del, NULL
 		},
 #ifdef FUND_XMAPS
 		FUND_XMAPS,
@@ -404,7 +372,7 @@ static struct KEYMAPE (1 + IMAPEXT) fillmap = {
 	rescan,
 	{
 		{
-			' ', ' ', fill_sp, (KEYMAP *)NULL
+			' ', ' ', fill_sp, NULL
 		},
 	}
 };
@@ -422,7 +390,7 @@ static struct KEYMAPE (1 + IMAPEXT) indntmap = {
 	rescan,
 	{
 		{
-			CCHR('J'), CCHR('M'), indent_lf, (KEYMAP *)NULL
+			CCHR('J'), CCHR('M'), indent_lf, NULL
 		},
 	}
 };
@@ -437,7 +405,7 @@ static struct KEYMAPE (1 + IMAPEXT) blinkmap = {
 	rescan,
 	{
 		{
-			')', ')', blink_rp, (KEYMAP *)NULL
+			')', ')', blink_rp, NULL
 		},
 	}
 };
@@ -453,7 +421,7 @@ static struct KEYMAPE (1 + IMAPEXT) notabmap = {
 	rescan,
 	{
 		{
-			CCHR('I'), CCHR('I'), notab_tab, (KEYMAP *)NULL
+			CCHR('I'), CCHR('I'), notab_tab, NULL
 		},
 	}
 };
@@ -466,7 +434,7 @@ static struct KEYMAPE (1 + IMAPEXT) overwmap = {
 	{
 		/* unused dummy entry for VMS C */
 		{
-			(KCHAR)0, (KCHAR)0, (PF *)NULL, (KEYMAP *)NULL
+			(KCHAR)0, (KCHAR)0, NULL, NULL
 		},
 	}
 };
@@ -482,7 +450,7 @@ static PF dirednul[] = {
 	forwchar,		/* ^F */
 	ctrlg,			/* ^G */
 #ifndef NO_HELP
-	prefix,			/* ^H */
+	NULL,			/* ^H */
 #endif /* !NO_HELP */
 };
 
@@ -499,12 +467,12 @@ static PF diredcl[] = {
 	universal_argument,	/* ^U */
 	forwpage,		/* ^V */
 	rescan,			/* ^W */
-	prefix,			/* ^X */
+	NULL,			/* ^X */
 };
 
 static PF diredcz[] = {
 	spawncli,		/* ^Z */
-	prefix,			/* esc */
+	NULL,			/* esc */
 	rescan,			/* ^\ */
 	rescan,			/* ^] */
 	rescan,			/* ^^ */
@@ -552,7 +520,7 @@ static struct KEYMAPE (6 + NDIRED_XMAPS + IMAPEXT) diredmap = {
 		},
 #else /* !NO_HELP */
 		{
-			CCHR('@'), CCHR('G'), dirednul, (KEYMAP *)NULL
+			CCHR('@'), CCHR('G'), dirednul, NULL
 		},
 #endif /* !NO_HELP */
 		{
@@ -562,13 +530,13 @@ static struct KEYMAPE (6 + NDIRED_XMAPS + IMAPEXT) diredmap = {
 			CCHR('Z'), ' ', diredcz, (KEYMAP *) & metamap
 		},
 		{
-			'c', 'f', diredc, (KEYMAP *)NULL
+			'c', 'f', diredc, NULL
 		},
 		{
-			'n', 'x', diredn, (KEYMAP *)NULL
+			'n', 'x', diredn, NULL
 		},
 		{
-			CCHR('?'), CCHR('?'), direddl, (KEYMAP *)NULL
+			CCHR('?'), CCHR('?'), direddl, NULL
 		},
 #ifdef	DIRED_XMAPS
 		DIRED_XMAPS,	/* map sections for dired mode keys	 */
@@ -576,6 +544,8 @@ static struct KEYMAPE (6 + NDIRED_XMAPS + IMAPEXT) diredmap = {
 	}
 };
 #endif /* !NO_DIRED */
+
+MAPS	fundamental_mode = { (KEYMAP *)&fundmap, "fundamental", };
 
 /*
  * give names to the maps, for use by help etc. If the map is to be bindable,
@@ -586,436 +556,84 @@ static struct KEYMAPE (6 + NDIRED_XMAPS + IMAPEXT) diredmap = {
  * modes.c also.
  */
 
-MAPS map_table[] = {
-	/* fundamental map MUST be first entry */
-	{(KEYMAP *) & fundmap, "fundamental"},
-	{(KEYMAP *) & fillmap, "fill"},
-	{(KEYMAP *) & indntmap, "indent"},
-	{(KEYMAP *) & blinkmap, "blink"},
+static MAPS map_table[] = {
+	{(KEYMAP *) &fillmap, "fill",},
+	{(KEYMAP *) &indntmap, "indent",},
+	{(KEYMAP *) &blinkmap, "blink",},
 #ifdef NOTAB
-	{(KEYMAP *) & notabmap, "notab"},
+	{(KEYMAP *) &notabmap, "notab",},
 #endif /* NOTAB */
-	{(KEYMAP *) & overwmap, "overwrite"},
-	{(KEYMAP *) & metamap, "esc prefix"},
-	{(KEYMAP *) & cXmap, "c-x prefix"},
-	{(KEYMAP *) & cX4map, "c-x 4 prefix"},
-	{(KEYMAP *) & extramap1, "extra prefix 1"},
-	{(KEYMAP *) & extramap2, "extra prefix 2"},
-	{(KEYMAP *) & extramap3, "extra prefix 3"},
-	{(KEYMAP *) & extramap4, "extra prefix 4"},
-	{(KEYMAP *) & extramap5, "extra prefix 5"},
+	{(KEYMAP *) &overwmap, "overwrite",},
+	{(KEYMAP *) &metamap, "esc prefix",},
+	{(KEYMAP *) &cXmap, "c-x prefix",},
+	{(KEYMAP *) &cX4map, "c-x 4 prefix",},
 #ifndef NO_HELP
-	{(KEYMAP *) & helpmap, "help"},
+	{(KEYMAP *) &helpmap, "help",},
 #endif
 #ifndef NO_DIRED
-	{(KEYMAP *) & diredmap, "dired"},
+	{(KEYMAP *) &diredmap, "dired",},
 #endif
+	{NULL, NULL},
 };
 
-#define NMAPS	(sizeof map_table/sizeof(MAPS))
-int	 nmaps = NMAPS;		/* for use by rebind in extend.c */
+MAPS *maps;
+
+void
+maps_init(void)
+{
+	int i;
+	MAPS *mp;
+
+	maps = &fundamental_mode;
+	for (i = 0; map_table[i].p_name != NULL; i++) {
+		mp = &map_table[i];
+		mp->p_next = maps;
+		maps = mp;
+	}
+}
+
+int
+maps_add(KEYMAP *map, char *name)
+{
+	MAPS *mp;
+
+	if ((mp = malloc(sizeof(*mp))) == NULL)
+		return FALSE;
+
+	mp->p_name = name;
+	mp->p_map = map;
+	mp->p_next = maps;
+	maps = mp;
+
+	return TRUE;
+}
 
 char *
-map_name(map)
-	KEYMAP *map;
+map_name(KEYMAP *map)
 {
-	MAPS	*mp = &map_table[0];
+	MAPS *mp;
 
-	do {
+	for (mp = maps; mp != NULL; mp = mp->p_next)
 		if (mp->p_map == map)
 			return mp->p_name;
-	} while (++mp < &map_table[NMAPS]);
-	return (char *)NULL;
+	return NULL;
 }
 
 MAPS *
-name_mode(name)
-	char *name;
+name_mode(char *name)
 {
-	MAPS	*mp = &map_table[0];
+	MAPS *mp;
 
-	do {
+	for (mp = maps; mp != NULL; mp = mp->p_next)
 		if (strcmp(mp->p_name, name) == 0)
 			return mp;
-	} while (++mp < &map_table[NMAPS]);
-	return (MAPS *)NULL;
+	return NULL;
 }
 
 KEYMAP *
-name_map(name)
-	char *name;
+name_map(char *name)
 {
 	MAPS	*mp;
-	return (mp = name_mode(name)) == NULL ? (KEYMAP *)NULL : mp->p_map;
+	return (mp = name_mode(name)) == NULL ? NULL : mp->p_map;
 }
 
-/*
- * Warning: functnames MUST be in alphabetical order!  (due to binary search
- * in name_function.)  If the function is prefix, it must be listed with the
- * same name in the map_table above.
- */
-FUNCTNAMES functnames[] = {
-#ifndef	NO_HELP
-	{apropos_command, "apropos"},
-#endif /* !NO_HELP */
-	{fillmode, "auto-fill-mode"},
-	{indentmode, "auto-indent-mode"},
-	{backchar, "backward-char"},
-	{delbword, "backward-kill-word"},
-	{gotobop, "backward-paragraph"},
-	{backword, "backward-word"},
-	{gotobob, "beginning-of-buffer"},
-	{gotobol, "beginning-of-line"},
-	{blinkparen, "blink-matching-paren"},
-	{showmatch, "blink-matching-paren-hack"},
-#ifdef BSMAP
-	{bsmap, "bsmap-mode"},
-#endif /* BSMAP */
-	{prefix, "c-x 4 prefix"},
-	{prefix, "c-x prefix"},
-#ifndef NO_MACRO
-	{executemacro, "call-last-kbd-macro"},
-#endif /* !NO_MACRO */
-	{capword, "capitalize-word"},
-#ifndef NO_DIR
-	{changedir, "cd"},
-#endif /* !NO_DIR */
-	{copyregion, "copy-region-as-kill"},
-#ifdef	REGEX
-	{cntmatchlines, "count-matches"},
-	{cntnonmatchlines, "count-non-matches"},
-#endif /* REGEX */
-	{define_key, "define-key"},
-	{backdel, "delete-backward-char"},
-	{deblank, "delete-blank-lines"},
-	{forwdel, "delete-char"},
-	{delwhite, "delete-horizontal-space"},
-#ifdef	REGEX
-	{delmatchlines, "delete-matching-lines"},
-	{delnonmatchlines, "delete-non-matching-lines"},
-#endif /* REGEX */
-	{onlywind, "delete-other-windows"},
-	{delwind, "delete-window"},
-#ifndef NO_HELP
-	{wallchart, "describe-bindings"},
-	{desckey, "describe-key-briefly"},
-#endif /* !NO_HELP */
-	{digit_argument, "digit-argument"},
-#ifndef NO_DIRED
-	{dired, "dired"},
-	{d_undelbak, "dired-backup-unflag"},
-	{d_copy, "dired-copy-file"},
-	{d_expunge, "dired-do-deletions"},
-	{d_findfile, "dired-find-file"},
-	{d_ffotherwindow, "dired-find-file-other-window"},
-	{d_del, "dired-flag-file-deleted"},
-	{d_otherwindow, "dired-other-window"},
-	{d_rename, "dired-rename-file"},
-	{d_undel, "dired-unflag"},
-#endif /* !NO_DIRED */
-	{lowerregion, "downcase-region"},
-	{lowerword, "downcase-word"},
-	{showversion, "emacs-version"},
-#ifndef NO_MACRO
-	{finishmacro, "end-kbd-macro"},
-#endif /* !NO_MACRO */
-	{gotoeob, "end-of-buffer"},
-	{gotoeol, "end-of-line"},
-	{enlargewind, "enlarge-window"},
-	{prefix, "esc prefix"},
-#ifndef NO_STARTUP
-	{evalbuffer, "eval-current-buffer"},
-	{evalexpr, "eval-expression"},
-#endif /* !NO_STARTUP */
-	{swapmark, "exchange-point-and-mark"},
-	{extend, "execute-extended-command"},
-	{prefix, "extra prefix 1"},
-	{prefix, "extra prefix 2"},
-	{prefix, "extra prefix 3"},
-	{prefix, "extra prefix 4"},
-	{prefix, "extra prefix 5"},
-	{fillpara, "fill-paragraph"},
-	{filevisit, "find-file"},
-	{poptofile, "find-file-other-window"},
-	{forwchar, "forward-char"},
-	{gotoeop, "forward-paragraph"},
-	{forwword, "forward-word"},
-	{bindtokey, "global-set-key"},
-	{unbindtokey, "global-unset-key"},
-	{gotoline, "goto-line"},
-#ifndef NO_HELP
-	{prefix, "help"},
-	{help_help, "help-help"},
-#endif /* !NO_HELP */
-	{insert, "insert"},
-	{bufferinsert, "insert-buffer"},
-	{fileinsert, "insert-file"},
-	{fillword, "insert-with-wrap"},
-	{backisearch, "isearch-backward"},
-	{forwisearch, "isearch-forward"},
-	{justone, "just-one-space"},
-	{ctrlg, "keyboard-quit"},
-	{killbuffer, "kill-buffer"},
-	{killline, "kill-line"},
-	{killpara, "kill-paragraph"},
-	{killregion, "kill-region"},
-	{delfword, "kill-word"},
-	{listbuffers, "list-buffers"},
-#ifndef NO_STARTUP
-	{evalfile, "load"},
-#endif /* !NO_STARTUP */
-	{localbind, "local-set-key"},
-	{localunbind, "local-unset-key"},
-#ifndef NO_BACKUP
-	{makebkfile, "make-backup-files"},
-#endif /* !NO_BACKUP */
-#ifdef DO_METAKEY
-	{do_meta, "meta-key-mode"},	/* better name, anyone? */
-#endif /* DO_METAKEY */
-	{negative_argument, "negative-argument"},
-	{newline, "newline"},
-	{indent, "newline-and-indent"},
-	{forwline, "next-line"},
-#ifdef NOTAB
-	{notabmode, "no-tab-mode"},
-#endif /* NOTAB */
-	{notmodified, "not-modified"},
-	{openline, "open-line"},
-	{nextwind, "other-window"},
-	{overwrite, "overwrite-mode"},
-#ifdef PREFIXREGION
-	{prefixregion, "prefix-region"},
-#endif /* PREFIXREGION */
-	{backline, "previous-line"},
-#ifdef GOSMACS
-	{prevwind, "previous-window"},
-#endif /* GOSEMACS */
-	{spawncli, "push-shell"},
-#ifndef NO_DIR
-	{showcwdir, "pwd"},
-#endif /* !NO_DIR */
-	{queryrepl, "query-replace"},
-#ifdef REGEX
-	{re_queryrepl, "query-replace-regexp"},
-#endif /* REGEX */
-	{quote, "quoted-insert"},
-#ifdef REGEX
-	{re_searchagain, "re-search-again"},
-	{re_backsearch, "re-search-backward"},
-	{re_forwsearch, "re-search-forward"},
-#endif /* REGEX */
-	{reposition, "recenter"},
-	{refresh, "redraw-display"},
-	{filesave, "save-buffer"},
-	{quit, "save-buffers-kill-emacs"},
-	{savebuffers, "save-some-buffers"},
-	{backpage, "scroll-down"},
-#ifdef GOSMACS
-	{back1page, "scroll-one-line-down"},
-	{forw1page, "scroll-one-line-up"},
-#endif /* GOSMACS */
-	{pagenext, "scroll-other-window"},
-	{forwpage, "scroll-up"},
-	{searchagain, "search-again"},
-	{backsearch, "search-backward"},
-	{forwsearch, "search-forward"},
-	{selfinsert, "self-insert-command"},
-#ifdef REGEX
-	{setcasefold, "set-case-fold-search"},
-#endif /* REGEX */
-	{set_default_mode, "set-default-mode"},
-	{setfillcol, "set-fill-column"},
-	{setmark, "set-mark-command"},
-#ifdef PREFIXREGION
-	{setprefix, "set-prefix-string"},
-#endif /* PREFIXREGION */
-	{shrinkwind, "shrink-window"},
-#ifdef NOTAB
-	{space_to_tabstop, "space-to-tabstop"},
-#endif /* NOTAB */
-	{splitwind, "split-window-vertically"},
-#ifndef NO_MACRO
-	{definemacro, "start-kbd-macro"},
-#endif /* !NO_MACRO */
-	{spawncli, "suspend-emacs"},
-	{usebuffer, "switch-to-buffer"},
-	{poptobuffer, "switch-to-buffer-other-window"},
-	{twiddle, "transpose-chars"},
-	{universal_argument, "universal-argument"},
-	{upperregion, "upcase-region"},
-	{upperword, "upcase-word"},
-	{showcpos, "what-cursor-position"},
-	{filewrite, "write-file"},
-	{yank, "yank"},
-};
-
-#define NFUNCT	(sizeof(functnames)/sizeof(FUNCTNAMES))
-
-int	 nfunct = NFUNCT;	/* used by help.c */
-
-/*
- * The general-purpose version of ROUND2 blows osk C (2.0) out of the water.
- * (reboot required)  If you need to build a version of mg with less than 32
- * or more than 511 functions, something better must be done.
- * The version that should work, but doesn't is:
- * #define ROUND2(x) (1+((x>>1)|(x>>2)|(x>>3)|(x>>4)|(x>>5)|(x>>6)|(x>>7)|\
- *	(x>>8)|(x>>9)|(x>>10)|(x>>11)|(x>>12)|(x>>13)|(x>>14)|(x>>15)))
- */
-#define ROUND2(x) (x<128?(x<64?32:64):(x<256?128:256))
-
-static int
-name_fent(fname, flag)
-	char *fname;
-	int   flag;
-{
-	int	 try, notit;
-	int	 x = ROUND2(NFUNCT);
-	int	 base = 0;
-
-	do {
-		/* + can be used instead of | here if more efficent.	 */
-		if ((try = base | x) < NFUNCT) {
-			if ((notit = strcmp(fname, functnames[try].n_name)) 
-			    >= 0) {
-				if (!notit)
-					return try;
-				base = try;
-			}
-		}
-	/* try 0 once if needed */
-	} while ((x >>= 1) || (try == 1 && base == 0));
-	return flag ? base : -1;
-}
-
-/*
- * Translate from function name to function pointer, using binary search.
- */
-
-PF
-name_function(fname)
-	char *fname;
-{
-	int	 i;
-	if ((i = name_fent(fname, FALSE)) >= 0)
-		return functnames[i].n_funct;
-	return (PF)NULL;
-}
-
-/*
- * complete function name
- */
-int
-complete_function(fname, c)
-	char *fname;
-	int   c;
-{
-	int	i, j, k, l, oj;
-
-	i = name_fent(fname, TRUE);
-	for (j = 0; (l = fname[j]) && functnames[i].n_name[j] == l; j++) {
-	}
-	if (fname[j] != '\0') {
-		if (++i >= NFUNCT)
-			/* no match */
-			return -2;
-		for (j = 0; (l = fname[j]) && functnames[i].n_name[j] == l; 
-		    j++);
-		if (fname[j] != '\0')
-			/* no match */
-			return -2;
-	}
-	if (c == CCHR('M') && functnames[i].n_name[j] == '\0')
-		return -1;
-	/* find last match */
-	for (k = i + 1; k < NFUNCT; k++) {
-		for (l = 0; functnames[k].n_name[l] == fname[l]; l++);
-		if (l < j)
-			break;
-	}
-	k--;
-	oj = j;
-
-	if (k > i) {
-		/* multiple matches */
-		while ((l = functnames[i].n_name[j]) == 
-		    functnames[k].n_name[j]) {
-			fname[j++] = l;
-			if (l == '-' && c == ' ')
-				break;
-		}
-		if (j == oj)
-			/* ambiguous */
-			return -3;
-	} else {
-		/* single match */
-		while ((l = functnames[i].n_name[j])) {
-			fname[j++] = l;
-			if (l == '-' && c == ' ')
-				break;
-		}
-	}
-	fname[j] = '\0';
-	return j - oj;
-}
-
-/*
- * list possible function name completions.
- */
-LIST *
-complete_function_list(fname, c)
-	char *fname;
-	int   c;
-{
-	int	 i, j, k, l;
-	LIST	*current, *last;
-
-	i = name_fent(fname, TRUE);
-	for (j = 0; (l = fname[j]) && functnames[i].n_name[j] == l; j++);
-	if (fname[j] != '\0') {
-		if (++i >= NFUNCT)
-			/* no match */
-			return NULL;
-		for (j = 0; (l = fname[j]) && functnames[i].n_name[j] == l; 
-		    j++);
-		if (fname[j] != '\0')
-			/* no match */
-			return NULL;
-	}
-	/*
-	 * if(c==CCHR('M') && functnames[i].n_name[j]=='\0') return -1;
-	 */
-	/* find last match */
-	for (k = i + 1; k < NFUNCT; k++) {
-		for (l = 0; functnames[k].n_name[l] == fname[l]; l++);
-		if (l < j)
-			break;
-	}
-	k--;
-	last = NULL;
-	for (; k >= i; k--) {
-		current = (LIST *)malloc(sizeof(LIST));
-		current->l_next = last;
-		current->l_name = functnames[k].n_name;
-		last = current;
-	}
-	return (last);
-}
-
-/*
- * translate from function pointer to function name.
- */
-char *
-function_name(fpoint)
-	PF fpoint;
-{
-	FUNCTNAMES	*fnp = &functnames[0];
-
-	if (fpoint == prefix)
-		/* ambiguous */
-		return (char *)NULL;
-	do {
-		if (fnp->n_funct == fpoint)
-			return fnp->n_name;
-	} while (++fnp < &functnames[NFUNCT]);
-	return (char *)NULL;
-}

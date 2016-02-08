@@ -1,4 +1,4 @@
-/*	$OpenBSD: mv.c,v 1.17 2001/01/08 16:12:57 millert Exp $	*/
+/*	$OpenBSD: mv.c,v 1.19 2001/09/06 13:29:08 mpech Exp $	*/
 /*	$NetBSD: mv.c,v 1.9 1995/03/21 09:06:52 cgd Exp $	*/
 
 /*
@@ -47,7 +47,7 @@ static char copyright[] =
 #if 0
 static char sccsid[] = "@(#)mv.c	8.2 (Berkeley) 4/2/94";
 #else
-static char rcsid[] = "$OpenBSD: mv.c,v 1.17 2001/01/08 16:12:57 millert Exp $";
+static char rcsid[] = "$OpenBSD: mv.c,v 1.19 2001/09/06 13:29:08 mpech Exp $";
 #endif
 #endif /* not lint */
 
@@ -68,6 +68,8 @@ static char rcsid[] = "$OpenBSD: mv.c,v 1.17 2001/01/08 16:12:57 millert Exp $";
 #include <grp.h>
 
 #include "pathnames.h"
+
+extern char *__progname;
 
 int fflg, iflg;
 int stdin_ok;
@@ -366,7 +368,7 @@ copy(from, to)
 	pid_t pid;
 
 	if ((pid = vfork()) == 0) {
-		execl(_PATH_CP, "mv", "-PRp", from, to, NULL);
+		execl(_PATH_CP, "mv", "-PRp", from, to, (char *)NULL);
 		warn("%s", _PATH_CP);
 		_exit(1);
 	}
@@ -384,7 +386,7 @@ copy(from, to)
 		return (1);
 	}
 	if (!(pid = vfork())) {
-		execl(_PATH_RM, "mv", "-rf", from, NULL);
+		execl(_PATH_RM, "mv", "-rf", from, (char *)NULL);
 		warn("%s", _PATH_RM);
 		_exit(1);
 	}
@@ -407,8 +409,8 @@ copy(from, to)
 void
 usage()
 {
-
-	(void)fprintf(stderr, "usage: mv [-fi] source target\n");
-	(void)fprintf(stderr, "       mv [-fi] source ... directory\n");
+	(void)fprintf(stderr, "usage: %s [-fi] source target\n", __progname);
+	(void)fprintf(stderr, "       %s [-fi] source ... directory\n",
+            __progname);
 	exit(1);
 }

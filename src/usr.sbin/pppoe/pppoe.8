@@ -1,4 +1,4 @@
-.\"	$OpenBSD: pppoe.8,v 1.6 2001/01/17 22:40:40 jason Exp $
+.\"	$OpenBSD: pppoe.8,v 1.10 2001/09/12 19:37:12 brian Exp $
 .\"
 .\" Copyright (c) 2000 Network Security Technologies, Inc.
 .\" (http://www.netsec.net)
@@ -57,7 +57,7 @@ Specify the interface that
 .Nm
 is to use, which should be a real Ethernet interface (not a virtual
 device like
-.Xr tun 4 ).
+.Xr tun 4 ) .
 If this option is not specified,
 .Nm
 will use the first Ethernet interface that is up and running.
@@ -97,9 +97,9 @@ if no
 .Ar system
 is specified):
 .Bd -literal -offset indent
-set device !/usr/sbin/pppoe
-set mtu 1492
-set mru 1492
+set device "!/usr/sbin/pppoe"
+set mtu max 1492
+set mru max 1492
 set speed sync
 disable acfcomp protocomp
 deny acfcomp
@@ -159,9 +159,9 @@ default:
    set log Phase Chat LCP IPCP CCP tun command
 
 pppoe:
-   set device !/usr/sbin/pppoe
-   set mtu 1492
-   set mru 1492
+   set device "!/usr/sbin/pppoe -i xl0"
+   set mtu max 1492
+   set mru max 1492
    set speed sync
    disable acfcomp protocomp
    deny acfcomp
@@ -227,7 +227,7 @@ This implementation of
 .Nm pppoe
 first appeared in
 .Ox 2.8 .
-.Sh AUTHOR
+.Sh AUTHORS
 The
 .Nm pppoe
 program was written by

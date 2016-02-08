@@ -1,4 +1,4 @@
-/*	$OpenBSD: display.c,v 1.4 2001/01/29 01:58:07 niklas Exp $	*/
+/*	$OpenBSD: display.c,v 1.6 2001/05/24 03:05:22 mickey Exp $	*/
 
 /*
  * The functions in this file handle redisplay. The
@@ -40,11 +40,11 @@
  * used if "ncol" isn't the same as "NCOL".
  */
 typedef struct {
-	short           v_hash;		/* Hash code, for compares.	 */
-	short           v_flag;		/* Flag word.			 */
-	short           v_color;	/* Color of the line.		 */
-	XSHORT          v_cost;		/* Cost of display.		 */
-	char            v_text[NCOL];	/* The actual characters.	 */
+	short	v_hash;		/* Hash code, for compares.	 */
+	short	v_flag;		/* Flag word.			 */
+	short	v_color;	/* Color of the line.		 */
+	XSHORT	v_cost;		/* Cost of display.		 */
+	char	v_text[NCOL];	/* The actual characters.	 */
 } VIDEO;
 
 #define VFCHG	0x0001			/* Changed.			 */
@@ -60,41 +60,41 @@ typedef struct {
  * this makes the code worse on the VAX.
  */
 typedef struct {
-	XCHAR           s_itrace;	/* "i" index for track back.	 */
-	XCHAR           s_jtrace;	/* "j" index for trace back.	 */
-	XSHORT          s_cost;		/* Display cost.		 */
+	XCHAR	s_itrace;	/* "i" index for track back.	 */
+	XCHAR	s_jtrace;	/* "j" index for trace back.	 */
+	XSHORT	s_cost;		/* Display cost.		 */
 } SCORE;
 
 
-VOID     vtmove         __P((int, int));
-VOID     vtputc         __P((int));
-VOID     vtpute         __P((int));
-int      vtputs         __P((char *));
-VOID     vteeol         __P((void));
-VOID     updext         __P((int, int));
-VOID     modeline       __P((MGWIN *));
-VOID     setscores      __P((int, int));
-VOID     traceback      __P((int, int, int, int));
-VOID     ucopy          __P((VIDEO *, VIDEO *));
-VOID     uline          __P((int, VIDEO *, VIDEO *));
-VOID     hash           __P((VIDEO *));
+void	vtmove __P((int, int));
+void	vtputc __P((int));
+void	vtpute __P((int));
+int	vtputs __P((char *));
+void	vteeol __P((void));
+void	updext __P((int, int));
+void	modeline __P((MGWIN *));
+void	setscores __P((int, int));
+void	traceback __P((int, int, int, int));
+void	ucopy __P((VIDEO *, VIDEO *));
+void	uline __P((int, VIDEO *, VIDEO *));
+void	hash __P((VIDEO *));
 
 
-int             sgarbf = TRUE;		/* TRUE if screen is garbage.	 */
-int             vtrow = 0;		/* Virtual cursor row.		 */
-int             vtcol = 0;		/* Virtual cursor column.	 */
-int             tthue = CNONE;		/* Current color.		 */
-int             ttrow = HUGE;		/* Physical cursor row.		 */
-int             ttcol = HUGE;		/* Physical cursor column.	 */
-int             tttop = HUGE;		/* Top of scroll region.	 */
-int             ttbot = HUGE;		/* Bottom of scroll region.	 */
-int             lbound = 0;		/* leftmost bound of the current line */
+int	sgarbf = TRUE;		/* TRUE if screen is garbage.	 */
+int	vtrow = 0;		/* Virtual cursor row.		 */
+int	vtcol = 0;		/* Virtual cursor column.	 */
+int	tthue = CNONE;		/* Current color.		 */
+int	ttrow = HUGE;		/* Physical cursor row.		 */
+int	ttcol = HUGE;		/* Physical cursor column.	 */
+int	tttop = HUGE;		/* Top of scroll region.	 */
+int	ttbot = HUGE;		/* Bottom of scroll region.	 */
+int	lbound = 0;		/* leftmost bound of the current line */
 					/* being displayed		 */
 
-VIDEO          *vscreen[NROW - 1];	/* Edge vector, virtual.	 */
-VIDEO          *pscreen[NROW - 1];	/* Edge vector, physical.	 */
-VIDEO           video[2 * (NROW - 1)];	/* Actual screen data.		 */
-VIDEO           blanks;			/* Blank line image.		 */
+VIDEO	*vscreen[NROW - 1];	/* Edge vector, virtual.	 */
+VIDEO	*pscreen[NROW - 1];	/* Edge vector, physical.	 */
+VIDEO	video[2 * (NROW - 1)];	/* Actual screen data.		 */
+VIDEO	blanks;			/* Blank line image.		 */
 
 #ifdef	GOSLING
 /*
@@ -118,11 +118,11 @@ SCORE score[NROW * NROW];
  * is marked as garbage, so all the right stuff happens
  * on the first call to redisplay.
  */
-VOID
+void
 vtinit()
 {
-	VIDEO *vp;
-	int    i;
+	VIDEO	*vp;
+	int	i;
 
 	ttopen();
 	ttinit();
@@ -145,7 +145,7 @@ vtinit()
  * the cursor to the last line, erase the line, and
  * close the terminal channel.
  */
-VOID
+void
 vttidy()
 {
 
@@ -165,7 +165,7 @@ vttidy()
  * on the line, which would make "vtputc" a little bit
  * more efficient. No checking for errors.
  */
-VOID
+void
 vtmove(row, col)
 	int row, col;
 {
@@ -186,11 +186,11 @@ vtmove(row, col)
  * makes the tab code loop if you are not careful.
  * Three guesses how we found this.
  */
-VOID
+void
 vtputc(c)
-	int    c;
+	int	c;
 {
-	VIDEO *vp;
+	VIDEO	*vp;
 
 	vp = vscreen[vtrow];
 	if (vtcol >= ncol)
@@ -215,9 +215,9 @@ vtputc(c)
  * yet on left edge, don't print it yet.  Check for overflow on the right
  * margin.
  */
-VOID
+void
 vtpute(c)
-	int    c;
+	int	c;
 {
 	VIDEO *vp;
 
@@ -249,7 +249,7 @@ vtpute(c)
  * the software cursor is located. The display routines will decide if a
  * hardware erase to end of line command should be used to display this.
  */
-VOID
+void
 vteeol()
 {
 	VIDEO *vp;
@@ -268,21 +268,20 @@ vteeol()
  * correct for the current window. Third, make the
  * virtual and physical screens the same.
  */
-VOID
+void
 update()
 {
-	LINE  *lp;
-	MGWIN *wp;
-	VIDEO *vp1;
-	VIDEO *vp2;
-	int    i;
-	int    j;
-	int    c;
-	int    hflag;
-	int    currow;
-	int    curcol;
-	int    offs;
-	int    size;
+	LINE	*lp;
+	MGWIN	*wp;
+	VIDEO	*vp1;
+	VIDEO	*vp2;
+	int	i, j;
+	int	c;
+	int	hflag;
+	int	currow;
+	int	curcol;
+	int	offs;
+	int	size;
 
 	if (typeahead())
 		return;
@@ -500,7 +499,7 @@ update()
  * virtual and physical screens the same when
  * display has done an update.
  */
-VOID
+void
 ucopy(vvp, pvp)
 	VIDEO *vvp;
 	VIDEO *pvp;
@@ -519,12 +518,12 @@ ucopy(vvp, pvp)
  * column greater than the terminal width. The line will be scrolled right or
  * left to let the user see where the cursor is
  */
-VOID
+void
 updext(currow, curcol)
-	int    currow, curcol;
+	int	currow, curcol;
 {
-	LINE  *lp;			/* pointer to current line */
-	int    j;			/* index into line */
+	LINE	*lp;			/* pointer to current line */
+	int	j;			/* index into line */
 
 	/*
 	 * calculate what column the left bound should be
@@ -552,11 +551,11 @@ updext(currow, curcol)
  * line when updating CMODE color lines, because of the way that
  * reverse video works on most terminals.
  */
-VOID
+void
 uline(row, vvp, pvp)
-	int		row;
-	VIDEO          *vvp;
-	VIDEO          *pvp;
+	int	row;
+	VIDEO	*vvp;
+	VIDEO	*pvp;
 {
 #ifdef	MEMMAP
 	putline(row + 1, 1, &vvp->v_text[0]);
@@ -566,7 +565,7 @@ uline(row, vvp, pvp)
 	char  *cp3;
 	char  *cp4;
 	char  *cp5;
-	int    nbflag;
+	int	nbflag;
 
 	if (vvp->v_color != pvp->v_color) {	/* Wrong color, do a	 */
 		ttmove(row, 0);			/* full redraw.		 */
@@ -649,13 +648,13 @@ uline(row, vvp, pvp)
  * that if STANDOUT_GLITCH is defined, first and last magic_cookie_glitch
  * characters may never be seen.
  */
-VOID
+void
 modeline(wp)
 	MGWIN  *wp;
 {
-	int     n;
+	int	n;
 	BUFFER *bp;
-	int     mode;
+	int	mode;
 
 	n = wp->w_toprow + wp->w_ntrows;	/* Location.		 */
 	vscreen[n]->v_color = CMODE;		/* Mode line color.	 */
@@ -703,7 +702,7 @@ int
 vtputs(s)
 	char  *s;
 {
-	int    n = 0;
+	int	n = 0;
 
 	while (*s != '\0') {
 		vtputc(*s++);
@@ -721,12 +720,12 @@ vtputs(s)
  * Tuned for the VAX by Bob McNamara; better than it used to be on
  * just about any machine.
  */
-VOID
+void
 hash(vp)
 	VIDEO *vp;
 {
-	int    i;
-	int    n;
+	int	i;
+	int	n;
 	char  *s;
 
 	if ((vp->v_flag & VFHBAD) != 0) {	/* Hash bad.		 */
@@ -771,19 +770,18 @@ hash(vp)
  * i = 1; do { } while (++i <=size)" will make the code quite a
  * bit better; but it looks ugly.
  */
-VOID
+void
 setscores(offs, size)
 	int offs;
 	int size;
 {
-	SCORE *sp;
-	SCORE *sp1;
-	int    tempcost;
-	int    bestcost;
-	int    j;
-	int    i;
-	VIDEO **vp, **pp;
-	VIDEO **vbase, **pbase;
+	SCORE	*sp;
+	SCORE	*sp1;
+	int	tempcost;
+	int	bestcost;
+	int	j, i;
+	VIDEO	**vp, **pp;
+	VIDEO	**vbase, **pbase;
 
 	vbase = &vscreen[offs - 1];	/* By hand CSE's.	 */
 	pbase = &pscreen[offs - 1];
@@ -861,19 +859,19 @@ setscores(offs, size)
  * which is acceptable because this routine is much less compute
  * intensive then the code that builds the score matrix!
  */
-VOID
+void
 traceback(offs, size, i, j)
-	int    offs;
-	int    size;
-	int    i;
-	int    j;
+	int	offs;
+	int	size;
+	int	i;
+	int	j;
 {
-	int    itrace;
-	int    jtrace;
-	int    k;
-	int    ninsl;
-	int    ndraw;
-	int    ndell;
+	int	itrace;
+	int	jtrace;
+	int	k;
+	int	ninsl;
+	int	ndraw;
+	int	ndell;
 
 	if (i == 0 && j == 0)	/* End of update.	 */
 		return;

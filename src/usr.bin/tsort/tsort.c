@@ -1,4 +1,4 @@
-/* $OpenBSD: tsort.c,v 1.7 2001/04/18 17:57:28 espie Exp $ */
+/* $OpenBSD: tsort.c,v 1.10 2001/07/14 14:18:50 espie Exp $ */
 /* ex:ts=8 sw=4: 
  */
 
@@ -62,6 +62,12 @@
  * In case of a hints file, the set of minimal nodes is maintained as a
  * heap.  The resulting complexity is O(e+v log v) for the worst case.
  * The average should actually be near O(e).
+ *
+ * If the hints file is incomplete, there is some extra complexity incurred
+ * by make_transparent, which does propagate order values to unmarked
+ * nodes. In the worst case, make_transparent is  O(e u),
+ * where u is the number of originally unmarked nodes.
+ * In practice, it is much faster.
  *
  * The simple topological sort algorithm detects cycles.  This program
  * goes further, breaking cycles through the use of simple heuristics.  
@@ -127,8 +133,9 @@ static void usage __P((void));
 static struct node *new_node __P((const char *, const char *));
 
 static unsigned int read_pairs __P((FILE *, struct ohash *, int, 
-    const char *, unsigned int));
+    const char *, unsigned int, int));
 static void split_nodes __P((struct ohash *, struct array *, struct array *));
+static void make_transparent __P((struct ohash *));
 static void insert_arc __P((struct node *, struct node *));
 
 #ifdef DEBUG
@@ -141,7 +148,7 @@ static unsigned int read_hints __P((FILE *, struct ohash *, int,
 static struct node *find_smallest_node __P((struct array *));
 static struct node *find_good_cycle_break __P((struct array *));
 static void print_cycle __P((struct array *));
-static int find_cycle_with __P((struct node *, struct array *));
+static struct node *find_cycle_from __P((struct node *, struct array *));
 static struct node *find_predecessor __P((struct array *, struct node *));
 static unsigned int traverse_node __P((struct node *, unsigned int, struct array *));
 static struct node *find_longest_cycle __P((struct array *, struct array *));
@@ -271,10 +278,10 @@ dump_node(n)
 
 	if (n->refs == 0)
 		return;
-	printf("%s (%u): ", n->k, n->refs);
+	printf("%s (%u/%u): ", n->k, n->order, n->refs);
 	for (l = n->arcs; l != NULL; l = l->next)
 		if (n->refs != 0)
-		printf("%s(%u) ", l->node->k, l->node->refs);
+		printf("%s(%u/%u) ", l->node->k, l->node->order, l->node->refs);
     	putchar('\n');
 }
 
@@ -290,7 +297,7 @@ dump_array(a)
 		
 static void 
 dump_hash(h)
-	struct hash 	*h;
+	struct ohash 	*h;
 {
 	unsigned int 	i;
 	struct node 	*n;
@@ -324,12 +331,13 @@ insert_arc(a, b)
 }
 
 static unsigned int
-read_pairs(f, h, reverse, name, order)
+read_pairs(f, h, reverse, name, order, hint)
 	FILE 		*f;
 	struct ohash 	*h;
 	int 		reverse;
 	const char 	*name;
 	unsigned int	order;
+	int		hint;
 {
 	int 		toggle;
 	struct node 	*a;
@@ -354,7 +362,7 @@ read_pairs(f, h, reverse, name, order)
 				continue;
 			if (toggle) {
 				a = node_lookup(h, str, e);
-				if (a->order == NO_ORDER)
+				if (a->order == NO_ORDER && hint)
 					a->order = order++;
 			} else {
 				struct node *b;
@@ -450,7 +458,7 @@ heapify(h, verbose)
 	unsigned int 	i;
 
 	for (i = h->entries; i != 0;) {
-		if (h->t[--i]->order == 0 && verbose)
+		if (h->t[--i]->order == NO_ORDER && verbose)
 			warnx("node %s absent from hints file", h->t[i]->k);
 		heap_down(h, i);
 	}
@@ -500,6 +508,60 @@ enqueue(h, n)
 		h->t[j] = h->t[i];
 		h->t[i] = swap;
 	}
+}
+
+/* Nodes without order should not hinder direct dependencies.
+ * Iterate until no nodes are left. 
+ */
+static void
+make_transparent(hash)
+	struct ohash	*hash;
+{
+	struct node 	*n;
+	unsigned int 	i;
+	struct link 	*l;
+	int		adjusted;
+	int		bad;
+	unsigned int	min;
+
+	/* first try to solve complete nodes */
+	do {
+		adjusted = 0;
+		bad = 0;
+		for (n = ohash_first(hash, &i); n != NULL; 
+		    n = ohash_next(hash, &i)) {
+			if (n->order == NO_ORDER) {
+				min = NO_ORDER;
+
+				for (l = n->arcs; l != NULL; l = l->next) {
+					/* unsolved node -> delay resolution */
+					if (l->node->order == NO_ORDER) {
+						bad = 1;
+						break;
+					} else if (l->node->order < min)
+						min = l->node->order;
+				}
+				if (min < NO_ORDER && l == NULL) {
+					n->order = min;
+					adjusted = 1;
+				}
+			}
+		}
+
+	} while (adjusted);
+
+	/* then, if incomplete nodes are left, do them */
+	if (bad) do {
+		adjusted = 0;
+		for (n = ohash_first(hash, &i); n != NULL; 
+		    n = ohash_next(hash, &i))
+			if (n->order == NO_ORDER)
+				for (l = n->arcs; l != NULL; l = l->next)
+					if (l->node->order < n->order) {
+						n->order = l->node->order;
+						adjusted = 1;
+					}
+	} while (adjusted);
 }
 
 
@@ -587,10 +649,10 @@ find_smallest_node(h)
  *** Graph algorithms.
  ***/
 
-/* Explore the nodes reachable from i to find a cycle containing it, store
- * it in c.  This may fail.  */
-static int 
-find_cycle_with(i, c)
+/* Explore the nodes reachable from i to find a cycle, store it in c.  
+ * This may fail.  */
+static struct node * 
+find_cycle_from(i, c)
 	struct node 	*i;
 	struct array 	*c;
 {
@@ -614,12 +676,15 @@ find_cycle_with(i, c)
 			struct node *go = n->traverse->node;
 
 			if (go->mark) {
-				if (go == i) {
-					c->entries = 0;
-					for (; n != NULL; n = n->from) 
-						c->t[c->entries++] = n;
-					return 1;
+				c->entries = 0;
+				for (; n != NULL && n != go; n = n->from) {
+					c->t[c->entries++] = n;
+					n->mark = 0;
 				}
+				for (; n != NULL; n = n->from)
+					n->mark = 0;
+				c->t[c->entries++] = go;
+				return go;
 			} else {
 			    go->from = n;
 			    n = go;
@@ -628,7 +693,7 @@ find_cycle_with(i, c)
 			n->mark = 0;
 			n = n->from;
 			if (n == NULL) 
-				return 0;
+				return NULL;
 		}
 	}
 }
@@ -807,7 +872,7 @@ main(argc, argv)
 			    warn_flag, hints_flag, verbose_flag;
 	unsigned int	order;
 
-	order = 1;
+	order = 0;
 
 	reverse_flag = quiet_flag = long_flag = 
 		warn_flag = hints_flag = verbose_flag = 0;
@@ -829,11 +894,11 @@ main(argc, argv)
 				optarg, order);
 			    fclose(f);
 		    }
+			    hints_flag = 1;
+			    break;
 			    /*FALLTHRU*/
 		    case 'f':
-			    if (hints_flag == 1)
-			    	usage();
-			    hints_flag = 1;
+			    hints_flag = 2;
 			    break;
 		    case 'l':
 			    long_flag = 1;
@@ -866,12 +931,14 @@ main(argc, argv)
 		f = fopen(argv[0], "r");
 		if (f == NULL)
 			err(EX_NOINPUT, "Can't open file %s", argv[1]);
-		order = read_pairs(f, &pairs, reverse_flag, argv[1], order);
+		order = read_pairs(f, &pairs, reverse_flag, argv[1], order,
+		    hints_flag == 2);
 		fclose(f);
 		break;
 	}
 	case 0:
-		order = read_pairs(stdin, &pairs, reverse_flag, "stdin", order);
+		order = read_pairs(stdin, &pairs, reverse_flag, "stdin",
+		    order, hints_flag == 2);
 		break;
 	default:
 		usage();
@@ -886,6 +953,8 @@ main(argc, argv)
 	    broken_arcs = 0;
 	    broken_cycles = 0;
 
+	    if (hints_flag)
+	    	make_transparent(&pairs);
 	    split_nodes(&pairs, &aux, &remaining);
 	    ohash_delete(&pairs);
 
@@ -925,14 +994,15 @@ main(argc, argv)
 			    if (long_flag) {
 				    n = find_longest_cycle(&remaining, &aux);
 			    } else {
+				    struct node *b;
+
 				    if (hints_flag) 
 					    n = find_smallest_node(&remaining);
 				    else 
 					    n = find_good_cycle_break(&remaining);
-				    if (!quiet_flag) {
-					    while (!find_cycle_with(n, &aux))
-						    n = find_predecessor(&remaining, n);
-				    }
+				    while ((b = find_cycle_from(n, &aux)) == NULL)
+					    n = find_predecessor(&remaining, n);
+				    n = b;
 			    }
 
 			    if (!quiet_flag) {

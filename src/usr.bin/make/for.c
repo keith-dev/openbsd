@@ -1,5 +1,6 @@
-/*	$OpenBSD: for.c,v 1.23 2000/11/24 14:29:55 espie Exp $	*/
-/*	$NetBSD: for.c,v 1.4 1996/11/06 17:59:05 christos Exp $	*/
+/*	$OpenPackages$ */
+/*	$OpenBSD: for.c,v 1.26 2001/05/29 12:53:40 espie Exp $	*/
+/*	$NetBSD: for.c,v 1.4 1996/11/06 17:59:05 christos Exp $ */
 
 /*
  * Copyright (c) 1999 Marc Espie.
@@ -61,36 +62,27 @@
  * SUCH DAMAGE.
  */
 
-/*-
- * for.c --
- *	Functions to handle loops in a makefile.
- *
- * Interface:
- *	For_Eval 	Evaluate the .for in the passed line
- *	For_Accumulate	Add lines to an accumulating loop
- *	For_Run		Run accumulated loop
- *
- */
-
-#include    <ctype.h>
-#include    <assert.h>
-#include    <stddef.h>
-#include    "make.h"
-#include    "buf.h"
-
-#ifndef lint
-#if 0
-static char sccsid[] = "@(#)for.c	8.1 (Berkeley) 6/6/93";
-#else
-UNUSED
-static char rcsid[] = "$OpenBSD: for.c,v 1.23 2000/11/24 14:29:55 espie Exp $";
-#endif
-#endif /* not lint */
+#include <assert.h>
+#include <ctype.h>
+#include <stddef.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include "config.h"
+#include "defines.h"
+#include "buf.h"
+#include "for.h"
+#include "lst.h"
+#include "error.h"
+#include "var.h"
+#include "lowparse.h"
+#include "str.h"
+#include "memory.h"
 
 /*
  * For statements are of the form:
  *
- * .for <variable> in <varlist>
+ * .for <variable> [variable...] in <varlist>
  * ...
  * .endfor
  *
@@ -103,57 +95,57 @@ static char rcsid[] = "$OpenBSD: for.c,v 1.23 2000/11/24 14:29:55 espie Exp $";
 
 /* State of a for loop.  */
 struct For_ {
-    char		*text;		/* unexpanded text       	*/
-    char		*var;		/* Index name		 	*/
-    LIST  		lst;		/* List of items	 	*/
+    char		*text;		/* Unexpanded text		*/
+    LIST		vars;		/* List of variables		*/
+    LstNode		var;		/* Current var			*/
+    int			nvars;		/* Total number of vars		*/
+    LIST		lst;		/* List of items		*/
     size_t		guess;		/* Estimated expansion size	*/
-    BUFFER		buf;		/* Accumulating text	 	*/
-    unsigned long	lineno;		/* Line number at start of loop */
+    BUFFER		buf;		/* Accumulating text		*/
+    unsigned long	lineno; 	/* Line number at start of loop */
     unsigned long	level;		/* Nesting level		*/
+    bool		freeold;
 };
 
-static void ForExec __P((void *, void *));
-static void build_words_list __P((Lst, const char *));
+/* ForExec(value, handle);
+ *	Expands next variable in loop sequence described by handle to value. */
+static void ForExec(void *, void *);
 
-/* Cut a string into words, stuff that into list.  */
-static void
+/* n = build_words_list(lst, s);
+ *	Cuts string into words, pushes words into list, in reverse order,
+ *	because Parse_FromString works as a stack.
+ *	Returns the number of words.  */
+static unsigned long build_words_list(Lst, const char *);
+
+static unsigned long
 build_words_list(lst, s)
     Lst lst;
     const char *s;
 {
     const char *end, *wrd;
+    unsigned long n;
 
+    n = 0;
     end = s;
 
-    while ((wrd = iterate_words(&end)) != NULL)
-    	Lst_AtFront(lst, escape_dup(wrd, end, "\"'"));
+    while ((wrd = iterate_words(&end)) != NULL) {
+	Lst_AtFront(lst, escape_dupi(wrd, end, "\"'"));
+	n++;
+    }
+    return n;
 }
-
-/*
- *-----------------------------------------------------------------------
- * For_Eval --
- *	Evaluate the for loop in the passed line. The line
- *	looks like this:
- *	    .for <variable> in <varlist>
- *
- * Results:
- *	Loop structure, to accumulate further lines.
- *	NULL if this was not a for loop after all.
- *-----------------------------------------------------------------------
- */
 
 For *
 For_Eval(line)
-    char    	    *line;    /* Line to parse */
+    const char	    *line;    /* Line to parse */
 {
-    char 	*ptr = line;
-    char	*wrd;
-    char 	*sub;
-    char	*endVar;
+    const char	*ptr = line;
+    const char	*wrd;
+    char	*sub;
+    const char	*endVar;
     For 	*arg;
+    unsigned long n;
 
-    for (ptr++; *ptr && isspace(*ptr); ptr++)
-	continue;
     /* If we are not in a for loop quickly determine if the statement is
      * a for.  */
     if (ptr[0] != 'f' || ptr[1] != 'o' || ptr[2] != 'r' ||
@@ -166,39 +158,49 @@ For_Eval(line)
 
     /* We found a for loop, and now we are going to parse it.  */
 
-    /* Grab the variable.  */
-    for (wrd = ptr; *ptr && !isspace(*ptr); ptr++)
-	continue;
-    if (ptr - wrd == 0) {
-	Parse_Error(PARSE_FATAL, "missing variable in for");
+    arg = emalloc(sizeof(*arg));
+    arg->nvars = 0;
+    Lst_Init(&arg->vars);
+
+    for (;;) {
+	/* Grab the variables.  */
+	for (wrd = ptr; *ptr && !isspace(*ptr); ptr++)
+	    continue;
+	if (ptr - wrd == 0) {
+	    Parse_Error(PARSE_FATAL, "Syntax error in for");
+	    return 0;
+	}
+	endVar = ptr++;
+	while (*ptr && isspace(*ptr))
+	    ptr++;
+	/* End of variable list ? */
+	if (endVar - wrd == 2 && wrd[0] == 'i' && wrd[1] == 'n')
+	    break;
+	Lst_AtEnd(&arg->vars, Str_dupi(wrd, endVar));
+	arg->nvars++;
+    }
+    if (arg->nvars == 0) {
+	Parse_Error(PARSE_FATAL, "Missing variable in for");
 	return 0;
     }
-    endVar = ptr++;
-
-    while (*ptr && isspace(*ptr))
-	ptr++;
-
-    /* Grab the `in'.  */
-    if (ptr[0] != 'i' || ptr[1] != 'n' ||
-	!isspace(ptr[2])) {
-	Parse_Error(PARSE_FATAL, "missing `in' in for");
-	printf("%s\n", ptr);
-	return NULL;
-    }
-    ptr += 3;
-
-    /* .for loop is go, collate what we need.  */
-    arg = emalloc(sizeof(*arg));
-    arg->var = interval_dup(wrd, endVar);
 
     /* Make a list with the remaining words.  */
-    sub = Var_Subst(ptr, NULL, FALSE);
-    if (DEBUG(FOR))
-	(void)fprintf(stderr, "For: Iterator %s List %s\n", arg->var, sub);
+    sub = Var_Subst(ptr, NULL, false);
+    if (DEBUG(FOR)) {
+    	LstNode ln;
+	(void)fprintf(stderr, "For: Iterator ");
+	for (ln = Lst_First(&arg->vars); ln != NULL; ln = Lst_Adv(ln))
+		(void)fprintf(stderr, "%s ", (char *)Lst_Datum(ln));
+	(void)fprintf(stderr, "List %s\n", sub);
+    }
 
     Lst_Init(&arg->lst);
-    build_words_list(&arg->lst, sub);
+    n = build_words_list(&arg->lst, sub);
     free(sub);
+    if (arg->nvars != 1 && n % arg->nvars != 0) {
+	Parse_Error(PARSE_FATAL, "Wrong number of items in for loop");
+    	return 0;
+    }
     arg->lineno = Parse_Getlineno();
     arg->level = 1;
     Buf_Init(&arg->buf, 0);
@@ -206,24 +208,11 @@ For_Eval(line)
     return arg;
 }
 
-
-/*-
- *-----------------------------------------------------------------------
- * For_Accumulate --
- *	Accumulate lines in a for loop, until we find the matching endfor.
- *
- * Results:
- *	TRUE: keep accumulating lines.
- *	FALSE: We found the matching .endfor
- *
- * Side Effects:
- *	Accumulate lines in arg.
- *-----------------------------------------------------------------------
- */
-Boolean
+
+bool
 For_Accumulate(arg, line)
-    For		    *arg;
-    const char      *line;    /* Line to parse */
+    For 	    *arg;
+    const char	    *line;    /* Line to parse */
 {
     const char	    *ptr = line;
 
@@ -240,7 +229,7 @@ For_Accumulate(arg, line)
 		(void)fprintf(stderr, "For: end for %lu\n", arg->level);
 	    /* If matching endfor, don't add line to buffer.  */
 	    if (--arg->level == 0)
-		return FALSE;
+		return false;
 	}
 	else if (strncmp(ptr, "for", 3) == 0 &&
 		 isspace(ptr[3])) {
@@ -251,38 +240,42 @@ For_Accumulate(arg, line)
     }
     Buf_AddString(&arg->buf, line);
     Buf_AddChar(&arg->buf, '\n');
-    return TRUE;
+    return true;
 }
 
 
 #define GUESS_EXPANSION 32
-/*-
- *-----------------------------------------------------------------------
- * ForExec --
- *	Expand the for loop for this index and push it in the Makefile
- *-----------------------------------------------------------------------
- */
 static void
-ForExec(namep, argp)
-    void *namep;
+ForExec(valuep, argp)
+    void *valuep;
     void *argp;
 {
-    char *name = (char *)namep;
+    char *value = (char *)valuep;
     For *arg = (For *)argp;
+    BUFFER buf;
+
+    /* Parse_FromString pushes stuff back, so we need to go over vars in
+       reverse.  */
+    if (arg->var == NULL) {
+    	arg->var = Lst_Last(&arg->vars);
+	arg->text = Buf_Retrieve(&arg->buf);
+	arg->freeold = false;
+    }
 
     if (DEBUG(FOR))
-	(void)fprintf(stderr, "--- %s = %s\n", arg->var, name);
-    Parse_FromString(Var_SubstVar(arg->text, arg->var, name, 
-    	arg->guess), arg->lineno);
+	(void)fprintf(stderr, "--- %s = %s\n", (char *)Lst_Datum(arg->var),
+	    value);
+    Buf_Init(&buf, arg->guess);
+    Var_SubstVar(&buf, arg->text, Lst_Datum(arg->var), value);
+    if (arg->freeold)
+    	free(arg->text);
+    arg->text = Buf_Retrieve(&buf);
+    arg->freeold = true;
+    arg->var = Lst_Rev(arg->var);
+    if (arg->var == NULL)
+	Parse_FromString(arg->text, arg->lineno);
 }
 
-
-/*-
- *-----------------------------------------------------------------------
- * For_Run --
- *	Run the for loop, pushing expanded lines for reparse
- *-----------------------------------------------------------------------
- */
 
 void
 For_Run(arg)
@@ -291,9 +284,10 @@ For_Run(arg)
     arg->text = Buf_Retrieve(&arg->buf);
     arg->guess = Buf_Size(&arg->buf) + GUESS_EXPANSION;
 
+    arg->var = NULL;
     Lst_ForEach(&arg->lst, ForExec, arg);
-    free(arg->var);
-    free(arg->text);
+    Buf_Destroy(&arg->buf);
+    Lst_Destroy(&arg->vars, (SimpleProc)free);
     Lst_Destroy(&arg->lst, (SimpleProc)free);
     free(arg);
 }

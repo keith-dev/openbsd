@@ -1,4 +1,4 @@
-#	$OpenBSD: Makefile.inc,v 1.7 1999/11/17 05:22:40 millert Exp $
+#	$OpenBSD: Makefile.inc,v 1.11 2001/09/25 14:27:18 drahn Exp $
 
 # hash functions
 .PATH: ${LIBCSRCDIR}/hash
@@ -11,3 +11,13 @@ MLINKS+=sha1.3 SHA1Transform.3
 MLINKS+=rmd160.3 RMD160Init.3 rmd160.3 RMD160Update.3 rmd160.3 RMD160Final.3
 MLINKS+=rmd160.3 RMD160End.3  rmd160.3 RMD160File.3   rmd160.3 RMD160Data.3
 MLINKS+=rmd160.3 RMD160Transform.3
+
+.if (${MACHINE_ARCH} == "sparc64")
+sha1.o:
+	${CC} ${CFLAGS} ${CPPFLAGS} -O0 -c ${.IMPSRC}
+
+sha1.po:
+	${CC} ${CFLAGS} ${CPPFLAGS} -O0 -c ${.IMPSRC} -o $@
+sha1.so:
+	${CC} ${CFLAGS} ${CPPFLAGS} -O0 ${PICFLAG} -DPIC -c ${.IMPSRC} -o $@
+.endif

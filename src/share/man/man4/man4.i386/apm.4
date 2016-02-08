@@ -1,4 +1,4 @@
-.\"	$OpenBSD: apm.4,v 1.14 2001/02/13 02:23:34 marc Exp $
+.\"	$OpenBSD: apm.4,v 1.19 2001/10/09 00:03:03 drahn Exp $
 .\"
 .\"	Copyright (c) 1998 Marco S. Hyman
 .\"
@@ -10,12 +10,11 @@
 .\"	FOR A PARTICULAR PURPOSE.
 .\"
 .Dd July 17, 1998
-.Dt APM 4
+.Dt APM 4 i386
 .Os
 .Sh NAME
 .Nm apm
-.Nd
-advanced power management device interface
+.Nd advanced power management device interface
 .Sh SYNOPSIS
 .Cd apm0 at bios0 flags 0x0000
 .Sh DESCRIPTION
@@ -231,23 +230,26 @@ As noted above, the operation of the
 driver can be modified using the
 .Dv machdep.apmwarn
 .Xr sysctl 8
-variable.   Another driver modifier is the
+variable.
+Another driver modifier is the
 .Dv machdep.apmhalt
-variable.   When
+variable.
+When
 .Dv machdep.apmhalt
 is set to 1 the
 .Tn APM
 power down code is modified in a way necessary for correct operation on
 some systems, mainly
 .Tn IBM
-laptops.   If your system does not power down when given the command
+laptops.
+If your system does not power down when given the command
 .Li "halt -p"
 try setting
 .Dv machdep.apmhalt
 to 1 using
-.Xr sysctl(8) .
+.Xr sysctl 8 .
 The variable can be set at boot time in
-.Xr sysctl.conf(5) .
+.Xr sysctl.conf 5 .
 .Sh FILES
 .Bl -tag -width /dev/apmctl -compat
 .It Pa /dev/apm
@@ -269,8 +271,8 @@ An attempt to open the file when in use will fail, returning
 .Xr apmd 8 ,
 .Xr halt 8 ,
 .Xr sysctl 8
-.Pp
-http://developer.intel.com/ial/powermgm/apmv12.pdf
+.\" .Pp
+.\" http://developer.intel.com/ial/powermgm/apmv12.pdf
 .Sh HISTORY
 The
 .Nm
@@ -287,3 +289,5 @@ driver source code contains these copyrights:
 .Sh BUGS
 Not all the BIOSes support power down the way we are attempting
 to execute it.
+.Pp
+Not all BIOS vendors even read the specification.

@@ -1,4 +1,5 @@
-/*	$OpenBSD: lstReplace.c,v 1.9 2000/09/14 13:32:10 espie Exp $	*/
+/*	$OpenPackages$ */
+/*	$OpenBSD: lstReplace.c,v 1.12 2001/05/29 12:53:47 espie Exp $	*/
 /*	$NetBSD: lstReplace.c,v 1.5 1996/11/06 17:59:51 christos Exp $	*/
 
 /*
@@ -43,31 +44,20 @@
  */
 
 #include	"lstInt.h"
-#ifndef lint
-#if 0
-static char sccsid[] = "@(#)lstReplace.c	8.1 (Berkeley) 6/6/93";
-#else
-UNUSED
-static char rcsid[] = "$OpenBSD: lstReplace.c,v 1.9 2000/09/14 13:32:10 espie Exp $";
-#endif
-#endif /* not lint */
-
+#include	<stddef.h>
 
 /*-
  *-----------------------------------------------------------------------
  * Lst_Replace --
  *	Replace the datum in the given node with the new datum
- *
- * Side Effects:
- *	The datum field fo the node is altered.
- *
  *-----------------------------------------------------------------------
  */
 void
 Lst_Replace(ln, d)
-    LstNode	ln;
-    void	*d;
+    LstNode		ln;
+    void		*d;
 {
-    if (ln != NULL) 
+    if (ln != NULL)
 	ln->datum = d;
 }
+

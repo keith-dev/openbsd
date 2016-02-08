@@ -1,25 +1,31 @@
-/*
- *			User Process PPP
+/*-
+ * Copyright (c) 1996 - 2001 Brian Somers <brian@Awfulhak.org>
+ *          based on work by Toshiharu OHNO <tony-o@iij.ad.jp>
+ *                           Internet Initiative Japan, Inc (IIJ)
+ * All rights reserved.
  *
- *	    Written by Toshiharu OHNO (tony-o@iij.ad.jp)
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in the
+ *    documentation and/or other materials provided with the distribution.
  *
- *   Copyright (C) 1993, Internet Initiative Japan, Inc. All rights reserverd.
+ * THIS SOFTWARE IS PROVIDED BY THE AUTHOR AND CONTRIBUTORS ``AS IS'' AND
+ * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+ * ARE DISCLAIMED.  IN NO EVENT SHALL THE AUTHOR OR CONTRIBUTORS BE LIABLE
+ * FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+ * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
+ * OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
+ * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
+ * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
+ * SUCH DAMAGE.
  *
- * Redistribution and use in source and binary forms are permitted
- * provided that the above copyright notice and this paragraph are
- * duplicated in all such forms and that any documentation,
- * advertising materials, and other materials related to such
- * distribution and use acknowledge that the software was developed
- * by the Internet Initiative Japan, Inc.  The name of the
- * IIJ may not be used to endorse or promote products derived
- * from this software without specific prior written permission.
- * THIS SOFTWARE IS PROVIDED ``AS IS'' AND WITHOUT ANY EXPRESS OR
- * IMPLIED WARRANTIES, INCLUDING, WITHOUT LIMITATION, THE IMPLIED
- * WARRANTIES OF MERCHANTIBILITY AND FITNESS FOR A PARTICULAR PURPOSE.
- *
- * $OpenBSD: main.c,v 1.26 2001/04/03 08:23:12 brian Exp $
- *
- *	TODO:
+ * $OpenBSD: main.c,v 1.30 2001/08/19 23:22:18 brian Exp $
  */
 
 #include <sys/param.h>
@@ -65,6 +71,8 @@
 #include "iplist.h"
 #include "throughput.h"
 #include "slcompress.h"
+#include "ncpaddr.h"
+#include "ip.h"
 #include "ipcp.h"
 #include "filter.h"
 #include "descriptor.h"
@@ -73,6 +81,8 @@
 #ifndef NORADIUS
 #include "radius.h"
 #endif
+#include "ipv6cp.h"
+#include "ncp.h"
 #include "bundle.h"
 #include "auth.h"
 #include "systems.h"
@@ -289,10 +299,25 @@ main(int argc, char **argv)
 {
   char *name;
   const char *lastlabel;
-  int label, arg;
+  int arg, f, holdfd[3], label;
   struct bundle *bundle;
   struct prompt *prompt;
   struct switches sw;
+
+  probe_Init();
+
+  /*
+   * We open 3 descriptors to ensure that STDIN_FILENO, STDOUT_FILENO and
+   * STDERR_FILENO are always open.  These are closed before DoLoop(),
+   * but *after* we've avoided the possibility of erroneously closing
+   * an important descriptor with close(STD{IN,OUT,ERR}_FILENO).
+   */
+  if ((holdfd[0] = open(_PATH_DEVNULL, O_RDWR)) == -1) {
+    fprintf(stderr, "Cannot open %s !\n", _PATH_DEVNULL);
+    return 2;
+  }
+  for (f = 1; f < sizeof holdfd / sizeof *holdfd; f++)
+    holdfd[f] = dup(holdfd[0]);
 
   name = strrchr(argv[0], '/');
   log_Open(name ? name + 1 : argv[0]);
@@ -394,7 +419,7 @@ main(int argc, char **argv)
     bundle_SetLabel(bundle, lastlabel);
 
   if (sw.mode == PHYS_AUTO &&
-      bundle->ncp.ipcp.cfg.peer_range.ipaddr.s_addr == INADDR_ANY) {
+      ncprange_family(&bundle->ncp.ipcp.cfg.peer_range) == AF_UNSPEC) {
     prompt_Printf(prompt, "You must ``set ifaddr'' with a peer address "
                   "in auto mode.\n");
     AbortProgram(EX_START);
@@ -492,6 +517,10 @@ main(int argc, char **argv)
     prompt_Required(prompt);
   }
 
+  /* We can get rid of these now */
+  for (f = 0; f < sizeof holdfd / sizeof *holdfd; f++)
+    close(holdfd[f]);
+
   log_Printf(LogPHASE, "PPP Started (%s mode).\n", mode2Nam(sw.mode));
   DoLoop(bundle);
   AbortProgram(EX_NORMAL);
@@ -504,9 +533,6 @@ DoLoop(struct bundle *bundle)
 {
   fd_set *rfds, *wfds, *efds;
   int i, nfds, nothing_done;
-  struct probe probe;
-
-  probe_Init(&probe);
 
   if ((rfds = mkfdset()) == NULL) {
     log_Printf(LogERROR, "DoLoop: Cannot create fd_set\n");

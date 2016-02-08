@@ -1,4 +1,4 @@
-/* $OpenBSD: mouse_protocols.c,v 1.1 2001/04/14 04:47:40 aaron Exp $ */
+/* $OpenBSD: mouse_protocols.c,v 1.4 2001/09/20 21:22:16 miod Exp $ */
 
 /*
  * Copyright (c) 2001 Jean-Baptiste Marchand, Julien Montagne and Jerome Verdon
@@ -164,18 +164,6 @@ static symtab_t pnpprod[] = {
     { NULL, -1 },
 };
 	
-static char *
-gettokenname(symtab_t *tab, int val)
-{
-    int i;
-
-    for (i = 0; tab[i].name != NULL; ++i) {
-	if (tab[i].val == val)
-	    return tab[i].name;
-    }
-    return NULL;
-}
-
 static symtab_t *
 gettoken(symtab_t *tab, char *s, int len)
 {
@@ -191,12 +179,13 @@ gettoken(symtab_t *tab, char *s, int len)
 char *
 mouse_name(int type)
 {
-    return ((type == P_UNKNOWN) 
+    return (type == P_UNKNOWN
 	|| (type > sizeof(mouse_names)/sizeof(mouse_names[0]) - 1))
 	? "unknown" : mouse_names[type];
 }
 
-void SetMouseSpeed(int old, int new, unsigned int cflag)
+void
+SetMouseSpeed(int old, int new, unsigned int cflag)
 {
 	struct termios tty;
 	char *c;
@@ -259,8 +248,7 @@ void SetMouseSpeed(int old, int new, unsigned int cflag)
 	}
 
 	if (tcsetattr(mouse.mfd, TCSADRAIN, &tty) < 0) {
-		printf("Unable to get mouse status. Exiting...\n");
-		exit(1);
+		logerr(1, "unable to get mouse status. Exiting...\n");
 	}
 	
 	switch (new)
@@ -290,15 +278,13 @@ void SetMouseSpeed(int old, int new, unsigned int cflag)
 	if (mouse.proto == P_LOGIMAN || mouse.proto == P_LOGI)
 	{
 		if (write(mouse.mfd, c, 2) != 2) {
-			printf("Unable to write to mouse. Exiting...\n");
-			exit(1);
+			logerr(1, "unable to write to mouse. Exiting...\n");
 		}
 	}
 	usleep(100000);
 
 	if (tcsetattr(mouse.mfd, TCSADRAIN, &tty) < 0) {
-		printf("Unable to get mouse status. Exiting...\n");
-		exit(1);
+		logerr(1, "unable to get mouse status. Exiting...\n");
 	}
 }
 
@@ -339,7 +325,6 @@ FlushInput(int fd)
 static int
 pnpgets(int mouse_fd, char *buf)
 {
-    struct timeval timeout;
     struct pollfd pfd[1];
     int i;
     char c;
@@ -769,7 +754,7 @@ mouse_init(void)
 	for (s = "E5E5"; *s; ++s) {
 	    write(mouse.mfd, s, 1);
 
-	    if (poll(pfd, 1, -1) <= 0)
+	    if (poll(pfd, 1, INFTIM) <= 0)
 		break;
 	    read(mouse.mfd, &c, 1);
 	    debug("%c", c);
@@ -906,9 +891,6 @@ mouse_protocol(u_char rBuf, mousestatus_t *act)
     };
     static int           pBufP = 0;
     static unsigned char pBuf[8];
-    static int		 prev_x, prev_y;
-    static int		 on = FALSE;
-    int			 x, y;
 
     debug("received char 0x%x",(int)rBuf);
 

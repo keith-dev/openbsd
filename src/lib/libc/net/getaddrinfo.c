@@ -1,4 +1,4 @@
-/*	$OpenBSD: getaddrinfo.c,v 1.27 2000/08/31 17:41:51 itojun Exp $	*/
+/*	$OpenBSD: getaddrinfo.c,v 1.30 2001/08/20 02:23:05 itojun Exp $	*/
 /*	$KAME: getaddrinfo.c,v 1.31 2000/08/31 17:36:43 itojun Exp $	*/
 
 /*
@@ -1511,6 +1511,7 @@ _yp_getaddrinfo(name, pai)
 
 extern const char *__hostalias __P((const char *));
 extern int h_errno;
+extern int res_opt __P((int, u_char *, int, int));
 
 /*
  * Formulate a normal query, send, and await answer.
@@ -1562,6 +1563,8 @@ res_queryN(name, target)
 
 		n = res_mkquery(QUERY, name, class, type, NULL, 0, NULL,
 		    buf, sizeof(buf));
+		if (n > 0 && (_res.options & RES_USE_EDNS0) != 0)
+			n = res_opt(n, buf, sizeof(buf), anslen);
 		if (n <= 0) {
 #ifdef DEBUG
 			if (_res.options & RES_DEBUG)
@@ -1794,8 +1797,7 @@ res_querydomainN(name, domain, target)
 			return (-1);
 		}
 		if (n > 0 && name[--n] == '.') {
-			strncpy(nbuf, name, n);
-			nbuf[n] = '\0';
+			strlcpy(nbuf, name, n + 1);
 		} else
 			longname = name;
 	} else {
@@ -1805,7 +1807,7 @@ res_querydomainN(name, domain, target)
 			h_errno = NO_RECOVERY;
 			return (-1);
 		}
-		sprintf(nbuf, "%s.%s", name, domain);
+		snprintf(nbuf, sizeof(nbuf), "%s.%s", name, domain);
 	}
 	return (res_queryN(longname, target));
 }

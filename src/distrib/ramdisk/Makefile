@@ -1,4 +1,4 @@
-#	$OpenBSD: Makefile,v 1.15 1999/05/26 16:08:43 espie Exp $
+#	$OpenBSD: Makefile,v 1.18 2001/10/09 23:03:51 deraadt Exp $
 
 REV=		${OSrev}
 
@@ -17,12 +17,13 @@ DISKTYPE=	rdroot
 PID!=		echo $$$$
 REALIMAGE!=	echo /tmp/image.${PID}
 IMAGE?=		ramdisk${REV}.fs
-IMAGESIZE?=	8192 # 4Mb in 512 byte blocks
+IMAGESIZE?=	8192 # 4MB in 512 byte blocks
 NEWFS_WILL_FAIL?=false
 CRUNCHGENOPTS?=
 KERNEL?=	RAMDISK
 UTILS?=		${.CURDIR}/../miniroot
 STRIP?=		strip
+RDSETROOT?=	rdsetroot
 
 LISTS=		${.CURDIR}/list ${ARCHDIR}/list
 MTREE=		${.CURDIR}/mtree.conf
@@ -32,6 +33,7 @@ FLOPPYSIZE?=	2880
 FLOPPYTYPE?=	floppy
 INSTALLBOOT?=	installboot
 BOOT?=		${DESTDIR}/usr/mdec/boot
+BOOTIN?=	${MOUNT_POINT}/boot
 BOOTXX?=	${DESTDIR}/usr/mdec/bootxx
 RAWLABEL?=	-r
 
@@ -59,9 +61,9 @@ ${FLOPPY}:	bsd.gz ${BOOT} ${BOOTXX}
 	disklabel -w ${RAWLABEL} ${VND} ${FLOPPYTYPE}
 	newfs ${NEWFSOPTS_FD} ${VND_RDEV}
 	mount ${VND_DEV} ${MOUNT_POINT}
-	cp ${BOOT} ${MOUNT_POINT}/boot
+	cp ${BOOT} ${MOUNT_POINT}$/
 	cp bsd.gz ${MOUNT_POINT}/bsd
-	${INSTALLBOOT} -v ${MOUNT_POINT}/boot ${BOOTXX} \
+	${INSTALLBOOT} -v ${BOOTIN} ${BOOTXX} \
 		`echo ${VND_RDEV} | sed -e 's/a$$/c/'`
 	@echo ""
 	@df -i ${MOUNT_POINT}
@@ -79,16 +81,16 @@ bsd:
 #	    make depend && make clean && make
 	cp ${.CURDIR}/../../sys/arch/${MACHINE}/compile/${KERNEL}/bsd bsd
 
-bsd.rd:	bsd ${IMAGE} rdsetroot
+bsd.rd:	bsd ${IMAGE} ${RDSETROOT}
 	cp bsd bsd.rd
-	${.OBJDIR}/rdsetroot bsd.rd < ${IMAGE}
+	${.OBJDIR}/${RDSETROOT} bsd.rd < ${IMAGE}
 	${STRIP} bsd.rd
 
 bsd.gz:	bsd.rd
 	${GZIP} ${GZIPFLAGS} < bsd.rd > bsd.gz
 
-rdsetroot: ${.CURDIR}/../common/rdsetroot.c
-	${HOSTCC} ${HOSTCCFLAGS} -o rdsetroot ${.CURDIR}/../common/rdsetroot.c
+${RDSETROOT}: ${.CURDIR}/../common/${RDSETROOT}.c
+	${HOSTCC} ${HOSTCCFLAGS} -o ${RDSETROOT} ${.CURDIR}/../common/${RDSETROOT}.c
 
 ${IMAGE}: ${CBIN}
 	dd if=/dev/zero of=${REALIMAGE} count=${IMAGESIZE}

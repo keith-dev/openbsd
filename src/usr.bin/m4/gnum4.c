@@ -1,4 +1,4 @@
-/* $OpenBSD: gnum4.c,v 1.8 2000/07/24 23:08:25 espie Exp $ */
+/* $OpenBSD: gnum4.c,v 1.15 2001/10/13 20:18:48 espie Exp $ */
 
 /*
  * Copyright (c) 1999 Marc Espie
@@ -173,10 +173,7 @@ doindir(argv, argc)
 	if (p == NULL)
 		errx(1, "undefined macro %s", argv[2]);
 	argv[1] = p->defn;
-	if (p->type == MACRTYPE)
-		expand(argv+1, argc-1);
-	else
-		eval(argv+1, argc-1, p->type);
+	eval(argv+1, argc-1, p->type);
 }
 
 void 
@@ -210,6 +207,7 @@ static void do_regexpindex __P((const char *, regex_t *, regmatch_t *));
 static void do_regexp __P((const char *, regex_t *, const char *, regmatch_t *));
 static void add_sub __P((int, const char *, regex_t *, regmatch_t *));
 static void add_replace __P((const char *, regex_t *, const char *, regmatch_t *));
+#define addconstantstring(s) addchars((s), sizeof(s)-1)
 
 static void 
 addchars(c, n)
@@ -218,7 +216,7 @@ addchars(c, n)
 {
 	if (n == 0)
 		return;
-	if (current + n > bufsize) {
+	while (current + n > bufsize) {
 		if (bufsize == 0)
 			bufsize = 1024;
 		else
@@ -308,6 +306,7 @@ add_replace(string, re, replace, pm)
 		if (*p == '\\') {
 			if (p[1] == '\\') {
 				addchar(p[1]);
+				p++;
 				continue;
 			}
 			if (p[1] == '&') {
@@ -335,23 +334,34 @@ do_subst(string, re, replace, pm)
 	regmatch_t *pm;
 {
 	int error;
-	regoff_t last_match = -1;
+	int flags = 0;
+	const char *last_match = NULL;
 
-	while ((error = regexec(re, string, re->re_nsub+1, pm, 0)) == 0) {
+	while ((error = regexec(re, string, re->re_nsub+1, pm, flags)) == 0) {
+		if (pm[0].rm_eo != 0) {
+			if (string[pm[0].rm_eo-1] == '\n')
+				flags = 0;
+			else
+				flags = REG_NOTBOL;
+		}
 
 		/* NULL length matches are special... We use the `vi-mode' 
 		 * rule: don't allow a NULL-match at the last match
 		 * position. 
 		 */
-		if (pm[0].rm_so == pm[0].rm_eo && pm[0].rm_so == last_match) {
+		if (pm[0].rm_so == pm[0].rm_eo && 
+		    string + pm[0].rm_so == last_match) {
 			if (*string == '\0')
 				return;
 			addchar(*string);
-			string++;
+			if (*string++ == '\n')
+				flags = 0;
+			else
+				flags = REG_NOTBOL;
 			continue;
 		}
-		last_match = pm[0].rm_so;
-		addchars(string, last_match);
+		last_match = string + pm[0].rm_so;
+		addchars(string, pm[0].rm_so);
 		add_replace(string, re, replace, pm);
 		string += pm[0].rm_eo;
 	}
@@ -368,7 +378,6 @@ do_regexp(string, re, replace, pm)
 	regmatch_t *pm;
 {
 	int error;
-	const char *p;
 
 	switch(error = regexec(re, string, re->re_nsub+1, pm, 0)) {
 	case 0: 
@@ -411,12 +420,33 @@ twiddle(p)
 {
 	/* This could use strcspn for speed... */
 	while (*p != '\0') {
-		if (*p == '\\' && (p[1] == '(' || p[1] == ')')) {
-			addchar(p[1]);
+		if (*p == '\\') {
+			switch(p[1]) {
+			case '(':
+			case ')':
+			case '|':
+				addchar(p[1]);
+				break;
+			case 'w':
+				addconstantstring("[_a-zA-Z0-9]");
+				break;
+			case 'W':
+				addconstantstring("[^_a-zA-Z0-9]");
+				break;
+			case '<':
+				addconstantstring("[[:<:]]");
+				break;
+			case '>':
+				addconstantstring("[[:>:]]");
+				break;
+			default:
+				addchars(p, 2);
+				break;
+			}
 			p+=2;
 			continue;
 		}
-		if (*p == '(' || *p == ')')
+		if (*p == '(' || *p == ')' || *p == '|')
 			addchar('\\');
 
 		addchar(*p);
@@ -444,7 +474,7 @@ dopatsubst(argv, argc)
 		return;
 	}
 	error = regcomp(&re, mimic_gnu ? twiddle(argv[3]) : argv[3], 
-	    REG_EXTENDED);
+	    REG_NEWLINE | REG_EXTENDED);
 	if (error != 0)
 		exit_regerror(error, &re);
 	

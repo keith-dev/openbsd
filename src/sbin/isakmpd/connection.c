@@ -1,4 +1,4 @@
-/*	$OpenBSD: connection.c,v 1.17 2001/03/14 21:13:24 tholo Exp $	*/
+/*	$OpenBSD: connection.c,v 1.22 2001/07/06 14:37:11 ho Exp $	*/
 /*	$EOM: connection.c,v 1.28 2000/11/23 12:21:18 niklas Exp $	*/
 
 /*
@@ -58,6 +58,8 @@
 /* How often should we check that connections we require to be up, are up?  */
 #define CHECK_INTERVAL 60
 
+static void connection_passive_teardown (char *);
+
 struct connection
 {
   TAILQ_ENTRY (connection) link;
@@ -88,10 +90,10 @@ TAILQ_HEAD (passive_head, connection_passive) connections_passive;
  * start.
  */
 void
-connection_init ()
+connection_init (void)
 {
   struct conf_list *conns, *attrs;
-  struct conf_list_node *conn, *attr;
+  struct conf_list_node *conn, *attr = NULL;
 
   /*
    * Passive connections normally include: all "active" connections that
@@ -179,7 +181,7 @@ connection_lookup (char *name)
 int
 connection_exist (char *name)
 {
-  return (connection_lookup (name) != NULL);
+  return (connection_lookup (name) != 0);
 }
 
 /* Find the passive connection named NAME.  */
@@ -221,7 +223,7 @@ connection_passive_lookup_by_ids (u_int8_t *id1, u_int8_t *id2)
   for (conn = TAILQ_FIRST (&connections_passive); conn;
        conn = TAILQ_NEXT (conn, link))
     {
-      if (conn->remote_id == NULL)
+      if (!conn->remote_id)
 	continue;
 
       /*
@@ -246,7 +248,7 @@ connection_passive_lookup_by_ids (u_int8_t *id1, u_int8_t *id2)
   for (conn = TAILQ_FIRST (&connections_passive); conn;
        conn = TAILQ_NEXT (conn, link))
     {
-      if (conn->remote_id != NULL)
+      if (!conn->remote_id)
 	continue;
 
       if (compare_ids (id1, conn->local_id, conn->local_sz) == 0
@@ -359,7 +361,7 @@ connection_record_passive (char *name)
       goto fail;
     }
 
-  /* XXX IPSec DOI-specific.  */
+  /* XXX IPsec DOI-specific.  */
   conn->local_id = ipsec_build_id (local_id, &conn->local_sz);
   if (!conn->local_id)
     goto fail;
@@ -371,7 +373,7 @@ connection_record_passive (char *name)
 	goto fail;
     }
   else
-    conn->remote_id = NULL;
+    conn->remote_id = 0;
 
   TAILQ_INSERT_TAIL (&connections_passive, conn, link);
 
@@ -406,7 +408,7 @@ connection_teardown (char *name)
 }
 
 /* Remove the passive connection named NAME.  */
-void
+static void
 connection_passive_teardown (char *name)
 {
   struct connection_passive *conn;

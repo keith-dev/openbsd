@@ -1,4 +1,4 @@
-/*	$OpenBSD: pthread_private.h,v 1.21 2000/12/06 17:18:47 deraadt Exp $	*/
+/*	$OpenBSD: pthread_private.h,v 1.29 2001/09/04 23:28:31 fgsch Exp $	*/
 /*
  * Copyright (c) 1995-1998 John Birrell <jb@cimlogic.com.au>.
  * All rights reserved.
@@ -39,9 +39,19 @@
 #define _PTHREAD_PRIVATE_H
 
 /*
+ * Evaluate the storage class specifier.
+ */
+#ifdef GLOBAL_PTHREAD_PRIVATE
+#define SCLASS
+#else
+#define SCLASS extern
+#endif
+
+/*
  * Include files.
  */
 #include <signal.h>
+#include <stdio.h>
 #include <sys/queue.h>
 #include <sys/types.h>
 #include <sys/time.h>
@@ -72,29 +82,13 @@
 /*
  * Waiting queue manipulation macros (using pqe link):
  */
-#if defined(_PTHREADS_INVARIANTS)
 #define PTHREAD_WAITQ_REMOVE(thrd)	_waitq_remove(thrd)
 #define PTHREAD_WAITQ_INSERT(thrd)	_waitq_insert(thrd)
+
+#if defined(_PTHREADS_INVARIANTS)
 #define PTHREAD_WAITQ_CLEARACTIVE()	_waitq_clearactive()
 #define PTHREAD_WAITQ_SETACTIVE()	_waitq_setactive()
 #else
-#define PTHREAD_WAITQ_REMOVE(thrd)	TAILQ_REMOVE(&_waitingq,thrd,pqe)
-#define PTHREAD_WAITQ_INSERT(thrd) do {					\
-	if ((thrd)->wakeup_time.tv_sec == -1)				\
-		TAILQ_INSERT_TAIL(&_waitingq,thrd,pqe);			\
-	else {								\
-		pthread_t tid = TAILQ_FIRST(&_waitingq);		\
-		while ((tid != NULL) && (tid->wakeup_time.tv_sec != -1) && \
-		    ((tid->wakeup_time.tv_sec < (thrd)->wakeup_time.tv_sec) ||	\
-		    ((tid->wakeup_time.tv_sec == (thrd)->wakeup_time.tv_sec) &&	\
-		    (tid->wakeup_time.tv_nsec <= (thrd)->wakeup_time.tv_nsec)))) \
-			tid = TAILQ_NEXT(tid, pqe);			\
-		if (tid == NULL)					\
-			TAILQ_INSERT_TAIL(&_waitingq,thrd,pqe);		\
-		else							\
-			TAILQ_INSERT_BEFORE(tid,thrd,pqe);		\
-	}								\
-} while (0)
 #define PTHREAD_WAITQ_CLEARACTIVE()
 #define PTHREAD_WAITQ_SETACTIVE()
 #endif
@@ -216,7 +210,6 @@ union pthread_mutex_data {
 	int	m_count;
 };
 
-
 struct pthread_mutex {
 	enum pthread_mutextype		m_type;
 	int				m_protocol;
@@ -263,7 +256,7 @@ struct pthread_mutex {
  */
 #define PTHREAD_MUTEX_STATIC_INITIALIZER   \
 	{ PTHREAD_MUTEX_DEFAULT, PTHREAD_PRIO_NONE, TAILQ_INITIALIZER, \
-	NULL, { NULL }, 0, 0, 0, 0, TAILQ_INITIALIZER, \
+	NULL, { NULL }, MUTEX_FLAGS_PRIVATE, 0, 0, 0, TAILQ_INITIALIZER, \
 	_SPINLOCK_INITIALIZER }
 
 struct pthread_mutex_attr {
@@ -273,12 +266,15 @@ struct pthread_mutex_attr {
 	long			m_flags;
 };
 
+#define PTHREAD_MUTEXATTR_STATIC_INITIALIZER \
+	{ PTHREAD_MUTEX_DEFAULT, PTHREAD_PRIO_NONE, 0, MUTEX_FLAGS_PRIVATE }
+
 /* 
  * Condition variable definitions.
  */
 enum pthread_cond_type {
 	COND_TYPE_FAST,
-#define COND_TYPE_MAX	((int)COND_TYPE_FAST + 1)
+	COND_TYPE_MAX
 };
 
 struct pthread_cond {
@@ -287,6 +283,7 @@ struct pthread_cond {
 	pthread_mutex_t			c_mutex;
 	void				*c_data;
 	long				c_flags;
+	int				c_seqno;
 
 	/*
 	 * Lock for accesses to this structure.
@@ -311,7 +308,19 @@ struct pthread_cond_attr {
  */
 #define PTHREAD_COND_STATIC_INITIALIZER    \
 	{ COND_TYPE_FAST, TAILQ_INITIALIZER, NULL, NULL, \
-	0, _SPINLOCK_INITIALIZER }
+	0, 0, _SPINLOCK_INITIALIZER }
+
+/*
+ * Semaphore definitions.
+ */
+struct sem {
+#define	SEM_MAGIC	((u_int32_t) 0x09fa4012)
+	u_int32_t	magic;
+	pthread_mutex_t	lock;
+	pthread_cond_t	gtzero;
+	u_int32_t	count;
+	u_int32_t	nwaiters;
+};
 
 /*
  * Cleanup definitions.
@@ -333,6 +342,7 @@ struct pthread_attr {
 	void	(*cleanup_attr) ();
 	void	*stackaddr_attr;
 	size_t	stacksize_attr;
+	size_t	guardsize_attr;
 };
 
 /*
@@ -340,6 +350,18 @@ struct pthread_attr {
  */
 #define PTHREAD_CREATE_RUNNING			0
 #define PTHREAD_CREATE_SUSPENDED		1
+
+/*
+ * Additional state for a thread suspended with pthread_suspend_np().
+ */
+enum pthread_susp {
+	SUSP_NO,	/* Not suspended. */
+	SUSP_YES,	/* Suspended. */
+	SUSP_JOIN,	/* Suspended, joining. */
+	SUSP_NOWAIT,	/* Suspended, was in a mutex or condition queue. */
+	SUSP_MUTEX_WAIT,/* Suspended, still in a mutex queue. */
+	SUSP_COND_WAIT	/* Suspended, still in a condition queue. */
+};
 
 /*
  * Miscellaneous definitions.
@@ -351,11 +373,33 @@ struct pthread_attr {
  * almost entirely on this stack.
  */
 #define PTHREAD_STACK_INITIAL			0x100000
+
 /* Address immediately beyond the beginning of the initial thread stack. */
-#define PTHREAD_DEFAULT_PRIORITY		64
-#define PTHREAD_MAX_PRIORITY			126
-#define PTHREAD_MIN_PRIORITY			0
 #define _POSIX_THREAD_ATTR_STACKSIZE
+
+/*
+ * Define the different priority ranges.  All applications have thread
+ * priorities constrained within 0-31.  The threads library raises the
+ * priority when delivering signals in order to ensure that signal
+ * delivery happens (from the POSIX spec) "as soon as possible".
+ * In the future, the threads library will also be able to map specific
+ * threads into real-time (cooperating) processes or kernel threads.
+ * The RT and SIGNAL priorities will be used internally and added to
+ * thread base priorities so that the scheduling queue can handle both
+ * normal and RT priority threads with and without signal handling.
+ *
+ * The approach taken is that, within each class, signal delivery
+ * always has priority over thread execution.
+ */
+#define PTHREAD_DEFAULT_PRIORITY		15
+#define PTHREAD_MIN_PRIORITY			0
+#define PTHREAD_MAX_PRIORITY			31	/* 0x1F */
+#define PTHREAD_SIGNAL_PRIORITY			32	/* 0x20 */
+#define PTHREAD_RT_PRIORITY			64	/* 0x40 */
+#define PTHREAD_FIRST_PRIORITY			PTHREAD_MIN_PRIORITY
+#define PTHREAD_LAST_PRIORITY	\
+	(PTHREAD_MAX_PRIORITY + PTHREAD_SIGNAL_PRIORITY + PTHREAD_RT_PRIORITY)
+#define PTHREAD_BASE_PRIORITY(prio)	((prio) & PTHREAD_MAX_PRIORITY)
 
 /*
  * Clock resolution in nanoseconds.
@@ -366,6 +410,18 @@ struct pthread_attr {
  * Time slice period in microseconds.
  */
 #define TIMESLICE_USEC				100000
+
+/*
+ * Define a thread-safe macro to get the current time of day
+ * which is updated at regular intervals by the scheduling signal
+ * handler.
+ */
+#define	GET_CURRENT_TOD(tv)				\
+	do {						\
+		tv.tv_sec = _sched_tod.tv_sec;		\
+		tv.tv_usec = _sched_tod.tv_usec;	\
+	} while (tv.tv_sec != _sched_tod.tv_sec)
+
 
 struct pthread_key {
 	spinlock_t	lock;
@@ -409,8 +465,8 @@ enum pthread_state {
 	PS_JOIN,
 	PS_SUSPENDED,
 	PS_DEAD,
-	PS_DEADLOCK
-#define PS_STATE_MAX	((int)PS_DEADLOCK + 1)
+	PS_DEADLOCK,
+	PS_STATE_MAX
 };
 
 
@@ -457,10 +513,12 @@ union pthread_wait_data {
 	struct {
 		short	fd;		/* Used when thread waiting on fd */
 		short	branch;		/* Line number, for debugging.    */
-		const char *fname;	/* Source file name for debugging.*/
+		char	*fname;		/* Source file name for debugging.*/
 	} fd;
-	struct pthread_poll_data * poll_data;
+	FILE		*fp;
+	struct pthread_poll_data *poll_data;
 	spinlock_t	*spinlock;
+	struct pthread	*thread;
 };
 
 /* Spare thread stack. */
@@ -471,6 +529,12 @@ struct stack {
 	void			*redzone;	/* Red zone location */
 	void 			*storage;	/* allocated storage */
 };
+
+/*
+ * Define a continuation routine that can be used to perform a
+ * transfer of control:
+ */
+typedef void	(*thread_continuation_t) (void *);
 
 typedef V_TAILQ_ENTRY(pthread) pthread_entry_t;
 
@@ -530,10 +594,25 @@ struct pthread {
 	int	canceltype;
 
 	/*
+	 * Cancelability flags - the lower 2 bits are used by cancel
+	 * definitions in pthread.h
+	 */
+#define PTHREAD_AT_CANCEL_POINT		0x0004
+#define PTHREAD_CANCELLING		0x0008
+#define PTHREAD_CANCEL_NEEDED		0x0010
+	int	cancelflags;
+
+	enum pthread_susp	suspended;
+
+	thread_continuation_t	continuation;
+
+	/*
 	 * Current signal mask and pending signals.
 	 */
 	sigset_t	sigmask;
 	sigset_t	sigpend;
+	int		sigmask_seqno;
+	int		check_pending;
 
 	/* Thread state: */
 	enum pthread_state	state;
@@ -549,12 +628,6 @@ struct pthread {
 	 * time slicing is active.
 	 */
 	long	slice_usec;
-
-	/*
-	 * Incremental priority accumulated by thread while it is ready to
-	 * run but is denied being run.
-	 */
-	int	inc_prio;
 
 	/*
 	 * Time to wake up thread. This is used for sleeping threads and
@@ -678,7 +751,7 @@ struct pthread {
 
 	/* Cleanup handlers Link List */
 	struct pthread_cleanup *cleanup;
-	const char		*fname;	/* Ptr to source file name  */
+	char			*fname;	/* Ptr to source file name  */
 	int			lineno;	/* Source line number.      */
 };
 
@@ -697,94 +770,233 @@ void _thread_machdep_restore_float_state(struct _machdep_state* statep);
  */
 
 /* Kernel thread structure used when there are no running threads: */
-extern struct pthread   _thread_kern_thread;
+SCLASS struct pthread	_thread_kern_thread;
 
 /* Ptr to the thread structure for the running thread: */
-extern struct pthread   * volatile _thread_run;
+SCLASS struct pthread	* volatile _thread_run
+#ifdef GLOBAL_PTHREAD_PRIVATE
+= &_thread_kern_thread;
+#else
+;
+#endif
 
 /* Ptr to the thread structure for the last user thread to run: */
-extern struct pthread   * volatile _last_user_thread;
+SCLASS struct pthread	* volatile _last_user_thread
+#ifdef GLOBAL_PTHREAD_PRIVATE
+= &_thread_kern_thread;
+#else
+;
+#endif
 
 /*
  * Ptr to the thread running in single-threaded mode or NULL if
  * running multi-threaded (default POSIX behaviour).
  */
-extern struct pthread   * volatile _thread_single;
+SCLASS struct pthread	* volatile _thread_single
+#ifdef GLOBAL_PTHREAD_PRIVATE
+= NULL;
+#else
+;
+#endif
 
-extern _thread_list_t		_thread_list;
+SCLASS _thread_list_t		_thread_list
+#ifdef GLOBAL_PTHREAD_PRIVATE
+= TAILQ_HEAD_INITIALIZER(_thread_list);
+#else
+;
+#endif
 
 /*
  * Array of kernel pipe file descriptors that are used to ensure that
  * no signals are missed in calls to _select.
  */
-extern int		_thread_kern_pipe[2];
-extern volatile int	_queue_signals;
-extern volatile int	_thread_kern_in_sched;
+SCLASS int		_thread_kern_pipe[2]
+#ifdef GLOBAL_PTHREAD_PRIVATE
+= {
+	-1,
+	-1
+};
+#else
+;
+#endif
+SCLASS int		volatile _queue_signals
+#ifdef GLOBAL_PTHREAD_PRIVATE
+= 0;
+#else
+;
+#endif
+SCLASS int		volatile _thread_kern_in_sched
+#ifdef GLOBAL_PTHREAD_PRIVATE
+= 0;
+#else
+;
+#endif
 
-/* Last time that an incremental priority update was performed: */
-extern struct timeval   kern_inc_prio_time;
+SCLASS int		_sig_in_handler
+#ifdef GLOBAL_PTHREAD_PRIVATE
+= 0;
+#else
+;
+#endif
+
+/* Time of day at last scheduling timer signal: */
+SCLASS struct timeval volatile	_sched_tod
+#ifdef GLOBAL_PTHREAD_PRIVATE
+= { 0, 0 };
+#else
+;
+#endif
+
+/*
+ * Current scheduling timer ticks; used as resource usage.
+ */
+SCLASS unsigned int volatile	_sched_ticks
+#ifdef GLOBAL_PTHREAD_PRIVATE
+= 0;
+#else
+;
+#endif
 
 /* Dead threads: */
-extern _thread_list_t		_dead_list;
+SCLASS _thread_list_t		_dead_list
+#ifdef GLOBAL_PTHREAD_PRIVATE
+= TAILQ_HEAD_INITIALIZER(_dead_list);
+#else
+;
+#endif
 
 /* Initial thread: */
-extern struct pthread *_thread_initial;
+SCLASS struct pthread *_thread_initial
+#ifdef GLOBAL_PTHREAD_PRIVATE
+= NULL;
+#else
+;
+#endif
 
 /* Default thread attributes: */
-extern struct pthread_attr pthread_attr_default;
+SCLASS struct pthread_attr pthread_attr_default
+#ifdef GLOBAL_PTHREAD_PRIVATE
+= { SCHED_RR, 0, TIMESLICE_USEC, PTHREAD_DEFAULT_PRIORITY,
+	PTHREAD_CREATE_RUNNING, PTHREAD_CREATE_JOINABLE, NULL, NULL, NULL,
+	PTHREAD_STACK_DEFAULT };
+#else
+;
+#endif
 
 /* Default mutex attributes: */
-extern struct pthread_mutex_attr pthread_mutexattr_default;
+SCLASS struct pthread_mutex_attr pthread_mutexattr_default
+#ifdef GLOBAL_PTHREAD_PRIVATE
+= { PTHREAD_MUTEX_DEFAULT, PTHREAD_PRIO_NONE, 0, 0 };
+#else
+;
+#endif
 
 /* Default condition variable attributes: */
-extern struct pthread_cond_attr pthread_condattr_default;
+SCLASS struct pthread_cond_attr pthread_condattr_default
+#ifdef GLOBAL_PTHREAD_PRIVATE
+= { COND_TYPE_FAST, 0 };
+#else
+;
+#endif
 
 /*
  * Standard I/O file descriptors need special flag treatment since
  * setting one to non-blocking does all on *BSD. Sigh. This array
  * is used to store the initial flag settings.
  */
-extern int	_pthread_stdio_flags[3];
+SCLASS int	_pthread_stdio_flags[3];
 
 /* File table information: */
-extern struct fd_table_entry **_thread_fd_table;
+SCLASS struct fd_table_entry **_thread_fd_table
+#ifdef GLOBAL_PTHREAD_PRIVATE
+= NULL;
+#else
+;
+#endif
 
 /* Table for polling file descriptors: */
-extern struct pollfd *_thread_pfd_table;
+SCLASS struct pollfd *_thread_pfd_table
+#ifdef GLOBAL_PTHREAD_PRIVATE
+= NULL;
+#else
+;
+#endif
 
-extern const int dtablecount;
-extern int    _thread_dtablesize;       /* Descriptor table size.           */
+SCLASS const int dtablecount
+#ifdef GLOBAL_PTHREAD_PRIVATE
+= 4096/sizeof(struct fd_table_entry);
+#else
+;
+#endif
+SCLASS int    _thread_dtablesize	/* Descriptor table size.	*/
+#ifdef GLOBAL_PTHREAD_PRIVATE
+= 0;
+#else
+;
+#endif
 
-extern int    _clock_res_nsec;		/* Clock resolution in nsec.	*/
+SCLASS int    _clock_res_nsec		/* Clock resolution in nsec.	*/
+#ifdef GLOBAL_PTHREAD_PRIVATE
+= CLOCK_RES_NSEC;
+#else
+;
+#endif
 
 /* Garbage collector mutex and condition variable. */
-extern	pthread_mutex_t _gc_mutex;
-extern	pthread_cond_t  _gc_cond;
+SCLASS	pthread_mutex_t _gc_mutex
+#ifdef GLOBAL_PTHREAD_PRIVATE
+= NULL
+#endif
+;
+SCLASS	pthread_cond_t  _gc_cond
+#ifdef GLOBAL_PTHREAD_PRIVATE
+= NULL
+#endif
+;
 
 /*
  * Array of signal actions for this process.
  */
-extern struct  sigaction _thread_sigact[NSIG];
+SCLASS struct  sigaction _thread_sigact[NSIG];
+
+/*
+ * Array of counts of dummy handlers for SIG_DFL signals.  This is used to
+ * assure that there is always a dummy signal handler installed while there is a
+ * thread sigwait()ing on the corresponding signal.
+ */
+SCLASS int	_thread_dfl_count[NSIG];
 
 /*
  * Scheduling queues:
  */
-extern pq_queue_t		_readyq;
-extern _thread_list_t		_waitingq;
+SCLASS pq_queue_t		_readyq;
+SCLASS _thread_list_t		_waitingq;
 
 /*
  * Work queue:
  */
-extern _thread_list_t		_workq;
+SCLASS _thread_list_t		_workq;
 
 /* Tracks the number of threads blocked while waiting for a spinlock. */
-extern	volatile int	_spinblock_count;
+SCLASS volatile int	_spinblock_count
+#ifdef GLOBAL_PTHREAD_PRIVATE
+= 0
+#endif
+;
 
 /* Indicates that the signal queue needs to be checked. */
-extern	volatile int	_sigq_check_reqd;
+SCLASS volatile int	_sigq_check_reqd
+#ifdef GLOBAL_PTHREAD_PRIVATE
+= 0
+#endif
+;
 
 /* Thread switch hook. */
-extern	pthread_switch_routine_t _sched_switch_hook;
+SCLASS pthread_switch_routine_t _sched_switch_hook
+#ifdef GLOBAL_PTHREAD_PRIVATE
+= NULL
+#endif
+;
 
 /*
  * Spare stack queue.  Stacks of default size are cached in order to reduce
@@ -795,7 +1007,15 @@ typedef SLIST_HEAD(, stack)	_stack_list_t;
 extern _stack_list_t		_stackq;
 
 /* Used for _PTHREADS_INVARIANTS checking. */
-extern int	_thread_kern_new_state;
+SCLASS int	_thread_kern_new_state
+#ifdef GLOBAL_PTHREAD_PRIVATE 
+= 0;
+#else
+;
+#endif
+
+/* Undefine the storage class specifier: */
+#undef SCLASS
 
 /*
  * Function prototype definitions.
@@ -803,6 +1023,8 @@ extern int	_thread_kern_new_state;
 __BEGIN_DECLS
 int     _find_dead_thread(pthread_t);
 int     _find_thread(pthread_t);
+struct pthread *_get_curthread(void);
+void	_set_curthread(struct pthread *);
 int     _thread_create(pthread_t *,const pthread_attr_t *,void *(*start_routine)(void *),void *,pthread_t);
 void    _dispatch_signals(void);
 void    _thread_signal(pthread_t, int);
@@ -829,10 +1051,10 @@ void    _thread_cleanupspecific(void);
 void    _thread_dump_info(void);
 void    _thread_init(void);
 void    _thread_kern_sched(struct sigcontext *);
-void    _thread_kern_sched_state(enum pthread_state,const char *fname,int lineno);
+void    _thread_kern_sched_state(enum pthread_state,char *fname,int lineno);
 void	_thread_kern_sched_state_unlock(enum pthread_state state,
 	    spinlock_t *lock, char *fname, int lineno);
-void    _thread_kern_set_timeout(struct timespec *);
+void    _thread_kern_set_timeout(const struct timespec *);
 void    _thread_kern_sig_defer(void);
 void    _thread_kern_sig_undefer(void);
 void    _thread_sig_handler(int, int, struct sigcontext *);
@@ -1034,6 +1256,12 @@ pid_t   _thread_sys_wait4(pid_t, int *, int, struct rusage *);
 /* #include <poll.h> */
 #ifdef _SYS_POLL_H_
 int 	_thread_sys_poll(struct pollfd *, unsigned, int);
+#endif
+
+/* #include <sys/event.h> */
+#ifdef _SYS_EVENT_H_
+int     _thread_sys_kevent(int, const struct kevent *, int, struct kevent *,
+	int, const struct timespec *);
 #endif
 
 /* #include <sys/mman.h> */

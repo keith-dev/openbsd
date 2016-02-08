@@ -1,4 +1,4 @@
-/*	$OpenBSD: dnssec.c,v 1.3 2001/01/27 15:39:54 ho Exp $	*/
+/*	$OpenBSD: dnssec.c,v 1.11 2001/08/23 14:17:08 aaron Exp $	*/
 
 /*
  * Copyright (c) 2001 Håkan Olsson.  All rights reserved.
@@ -33,9 +33,13 @@
 #include <stdlib.h>
 
 #include <openssl/rsa.h>
-#include <dns/keyvalues.h>
-#include <lwres/lwres.h>
+
+#ifdef LWRES
 #include <lwres/netdb.h>
+#include <dns/keyvalues.h>
+#else
+#include <netdb.h>
+#endif
 
 #include "sysdep.h"
 
@@ -46,6 +50,11 @@
 #include "log.h"
 #include "message.h"
 #include "transport.h"
+#include "util.h"
+
+#ifndef DNS_UFQDN_SEPARATOR
+#define DNS_UFQDN_SEPARATOR "._ipsec."
+#endif
 
 /* adapted from <dns/rdatastruct.h> / RFC 2535  */
 struct dns_rdata_key {
@@ -56,16 +65,18 @@ struct dns_rdata_key {
   unsigned char *data;
 };
 
-/* XXX IPv4 specific */
 void *
 dns_get_key (int type, struct message *msg, int *keylen)
 {
+  struct exchange *exchange = msg->exchange;
   struct rrsetinfo *rr;
-  struct hostent *hostent;
-  struct sockaddr_in *dst;
-  int ret, i;
   struct dns_rdata_key key_rr;
+  char name[MAXHOSTNAMELEN];
+  in_addr_t ip4;
   u_int8_t algorithm;
+  u_int8_t *id, *umark;
+  size_t id_len;
+  int ret, i;
 
   switch (type)
     {
@@ -89,38 +100,75 @@ dns_get_key (int type, struct message *msg, int *keylen)
       return 0;
     }
 
-  /* Get peer IP address */
-  msg->transport->vtbl->get_dst (msg->transport, (struct sockaddr **)&dst, &i);
-  /* Get peer name and aliases */
-  hostent = lwres_gethostbyaddr ((char *)&dst->sin_addr, 
-				 sizeof (struct in_addr), PF_INET);
+  id = exchange->initiator ? exchange->id_r : exchange->id_i;
+  id_len = exchange->initiator ? exchange->id_r_len : exchange->id_i_len;
+  memset (name, 0, MAXHOSTNAMELEN);
 
-  if (!hostent)
+  if (!id || id_len == 0)
     {
-      LOG_DBG ((LOG_MISC, 30, 
-		"dns_get_key: lwres_gethostbyaddr (%s) failed: %s", 
-		inet_ntoa (((struct sockaddr_in *)dst)->sin_addr),
-		lwres_hstrerror (lwres_h_errno)));
+      log_print ("dns_get_key: ID is missing");
       return 0;
     }
 
-  /* Try host official name */
-  LOG_DBG ((LOG_MISC, 50, "dns_get_key: trying KEY RR for %s", 
-	    hostent->h_name));
-  ret = lwres_getrrsetbyname (hostent->h_name, C_IN, T_KEY, 0, &rr);
-  if (ret)
+  /* Exchanges (and SAs) don't carry the ID in ISAKMP form */
+  id -= ISAKMP_GEN_SZ;
+  id_len += ISAKMP_GEN_SZ - ISAKMP_ID_DATA_OFF;
+
+  switch (GET_ISAKMP_ID_TYPE (id))
     {
-      /* Try host aliases */
-      i = 0;
-      while (hostent->h_aliases[i] && ret)
+    case IPSEC_ID_IPV4_ADDR:
+      /* We want to lookup a KEY RR in the reverse zone.  */
+      if (id_len < sizeof ip4)
+	return 0;
+      memcpy (&ip4, id + ISAKMP_ID_DATA_OFF, sizeof ip4);
+      sprintf (name, "%d.%d.%d.%d.in-addr.arpa.", ip4 >> 24, 
+	       (ip4 >> 16) & 0xFF, (ip4 >> 8) & 0xFF, ip4 & 0xFF);
+      break;
+
+    case IPSEC_ID_IPV6_ADDR:
+      /* XXX Not yet. */
+      return 0;
+      break;
+
+    case IPSEC_ID_FQDN:
+      if ((id_len + 1) >= MAXHOSTNAMELEN)
+	return 0;
+      /* ID is not NULL-terminated. Add trailing dot and terminate.  */
+      memcpy (name, id + ISAKMP_ID_DATA_OFF, id_len);
+      *(name + id_len) = '.';
+      *(name + id_len + 1) = '\0';
+      break;
+
+    case IPSEC_ID_USER_FQDN:
+      /*
+       * Some special handling here. We want to convert the ID
+       * 'user@host.domain' string into 'user._ipsec.host.domain.'.
+       */
+      if ((id_len + sizeof (DNS_UFQDN_SEPARATOR)) >= MAXHOSTNAMELEN)
+	return 0;
+      /* Look for the '@' separator.  */
+      for (umark = id + ISAKMP_ID_DATA_OFF; (umark - id) < id_len; umark++)
+	if (*umark == '@')
+	  break;
+      if (*umark != '@')
 	{
-	  LOG_DBG ((LOG_MISC, 50, "dns_get_key: trying KEY RR for alias %s", 
-		    hostent->h_aliases[i]));
-	  ret = lwres_getrrsetbyname (hostent->h_aliases[i], C_IN, T_KEY, 0,
-				      &rr);
-	  i++;
+	  LOG_DBG((LOG_MISC, 50, "dns_get_key: bad UFQDN ID"));
+	  return 0;
 	}
+      *umark++ = '\0';
+      /* id is now terminated. 'umark', however, is not.  */
+      sprintf (name, "%s%s", id + ISAKMP_ID_DATA_OFF, DNS_UFQDN_SEPARATOR);
+      memcpy (name + strlen (name), umark, id_len - strlen (id) - 1);
+      *(name + id_len + sizeof (DNS_UFQDN_SEPARATOR) - 2) = '.';
+      *(name + id_len + sizeof (DNS_UFQDN_SEPARATOR) - 1) = '\0';
+      break;
+
+    default:
+      return 0;
     }
+
+  LOG_DBG ((LOG_MISC, 50, "dns_get_key: trying KEY RR for %s", name));
+  ret = getrrsetbyname (name, C_IN, T_KEY, 0, &rr);
 
   if (ret)
     {
@@ -138,15 +186,15 @@ dns_get_key (int type, struct message *msg, int *keylen)
   if (!(rr->rri_flags & RRSET_VALIDATED))
     {
       LOG_DBG ((LOG_MISC, 10, "dns_get_key: got unvalidated response"));
-      lwres_freerrset (rr);
+      freerrset (rr);
       return 0;
     }
   
   /* Sanity. */
   if (rr->rri_nrdatas == 0 || rr->rri_rdtype != T_KEY)
     {
-      LOG_DBG ((LOG_MISC, 30, "dns_get_key: no KEY RRs recieved"));
-      lwres_freerrset (rr);
+      LOG_DBG ((LOG_MISC, 30, "dns_get_key: no KEY RRs received"));
+      freerrset (rr);
       return 0;
     } 
 
@@ -164,7 +212,7 @@ dns_get_key (int type, struct message *msg, int *keylen)
 
       if (key_rr.protocol != DNS_KEYPROTO_IPSEC)
 	{
-	  LOG_DBG ((LOG_MISC, 50, "dns_get_key: ignored non-IPSEC key"));
+	  LOG_DBG ((LOG_MISC, 50, "dns_get_key: ignored non-IPsec key"));
 	  continue;
 	}
 
@@ -187,14 +235,14 @@ dns_get_key (int type, struct message *msg, int *keylen)
       if (!key_rr.data)
 	{
 	  log_error ("dns_get_key: malloc (%d) failed", key_rr.datalen);
-	  lwres_freerrset (rr);
+	  freerrset (rr);
 	  return 0;
 	}
       memcpy (key_rr.data, rr->rri_rdatas[i].rdi_data + 4, key_rr.datalen);
       *keylen = key_rr.datalen;
     }
 
-  lwres_freerrset (rr);
+  freerrset (rr);
 
   if (key_rr.datalen)
     return key_rr.data;

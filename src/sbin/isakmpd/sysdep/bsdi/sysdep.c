@@ -1,4 +1,4 @@
-/*	$OpenBSD: sysdep.c,v 1.1 2001/03/23 16:14:35 markus Exp $	*/
+/*	$OpenBSD: sysdep.c,v 1.9 2001/08/23 14:59:10 markus Exp $	*/
 
 /*
  * Copyright (c) 1998, 1999 Niklas Hallqvist.  All rights reserved.
@@ -46,13 +46,9 @@
 #ifdef USE_PF_KEY_V2
 #include "pf_key_v2.h"
 #define KEY_API(x) pf_key_v2_##x
-#else
-#include <net/encap.h>
-#include "pf_encap.h"
-#define KEY_API(x) pf_encap_##x
 #endif
 
-#endif NEED_SYSDEP_APP
+#endif /* NEED_SYSDEP_APP */
 #include "log.h"
 
 extern char *__progname;
@@ -109,8 +105,7 @@ sysdep_connection_check (char *name)
  */
 u_int8_t *
 sysdep_ipsec_get_spi (size_t *sz, u_int8_t proto, struct sockaddr *src,
-		      int srclen, struct sockaddr *dst, int dstlen,
-                      u_int32_t seq)
+		      struct sockaddr *dst, u_int32_t seq)
 {
   if (app_none)
     {
@@ -118,19 +113,39 @@ sysdep_ipsec_get_spi (size_t *sz, u_int8_t proto, struct sockaddr *src,
       /* XXX should be random instead I think.  */
       return strdup ("\x12\x34\x56\x78");
     }
-  return KEY_API (get_spi) (sz, proto, src, srclen, dst, dstlen, seq);
+  return KEY_API (get_spi) (sz, proto, src, dst, seq);
 }
 
 /* Force communication on socket FD to go in the clear.  */
 int
-sysdep_cleartext (int fd)
+sysdep_cleartext (int fd, int af)
 {
   char *buf;
   char *policy[] = { "in bypass", "out bypass", NULL };
   char **p;
+  int ipp;
+  int opt;
+  char *msgstr;
 
   if (app_none)
     return 0;
+
+  switch (af)
+    {
+    case AF_INET:
+      ipp = IPPROTO_IP;
+      opt = IP_IPSEC_POLICY;
+      msgstr = "";
+      break;
+    case AF_INET6:
+      ipp = IPPROTO_IPV6;
+      opt = IPV6_IPSEC_POLICY;
+      msgstr = "V6";
+      break;
+    default:
+      log_print ("sysdep_cleartext: unsupported protocol family %d", af);
+      return -1;
+    }
 
   /*
    * Need to bypass system security policy, so I can send and
@@ -146,12 +161,11 @@ sysdep_cleartext (int fd)
 	  return -1;
 	}
 
-      if (setsockopt(fd, IPPROTO_IP, IP_IPSEC_POLICY, buf,
-		       ipsec_get_policylen(buf)) < 0)
+      if (setsockopt(fd, ipp, opt, buf, ipsec_get_policylen(buf)) < 0)
 	{
 	  log_error ("sysdep_cleartext: "
-		     "setsockopt (%d, IPPROTO_IP, IP_IPSEC_POLICY, ...) failed",
-		     fd);
+		     "setsockopt (%d, IPPROTO_IP%s, IP%s_IPSEC_POLICY, ...) "
+		     "failed", fd, msgstr, msgstr);
 	  return -1;
 	}
       free(buf);
@@ -186,10 +200,11 @@ sysdep_ipsec_group_spis (struct sa *sa, struct proto *proto1,
 }
 
 int
-sysdep_ipsec_set_spi (struct sa *sa, struct proto *proto, int incoming)
+sysdep_ipsec_set_spi (struct sa *sa, struct proto *proto, int incoming,
+		      struct sa *isakmp_sa)
 {
   if (app_none)
     return 0;
-  return KEY_API (set_spi) (sa, proto, incoming);
+  return KEY_API (set_spi) (sa, proto, incoming, isakmp_sa);
 }
 #endif

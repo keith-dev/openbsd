@@ -1,4 +1,4 @@
-.\"     $OpenBSD: securelevel.7,v 1.10 2001/03/11 05:48:26 aaron Exp $
+.\"     $OpenBSD: securelevel.7,v 1.13 2001/06/28 10:09:49 hugh Exp $
 .\"
 .\" Copyright (c) 2000 Hugh Graham
 .\"
@@ -83,10 +83,8 @@ raw disk devices are always read-only whether mounted or not
 .Xr settimeofday 2
 may not set the time backwards
 .It
-.Xr ipf 8
-and
-.Xr ipnat 8
-rules may not be altered
+.Xr pfctl 8
+may no longer alter filter or nat rules
 .It
 the
 .Va ddb.console
@@ -147,8 +145,8 @@ commands that run before the security level changes
 .Sh SEE ALSO
 .Xr chflags 2 ,
 .Xr settimeofday 2 ,
-.Xr options 4 ,
 .Xr mem 4 ,
+.Xr options 4 ,
 .Xr init 8 ,
 .Xr rc 8 ,
 .Xr sysctl 8

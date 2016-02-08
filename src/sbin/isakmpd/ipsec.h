@@ -1,9 +1,10 @@
-/*	$OpenBSD: ipsec.h,v 1.15 2000/12/12 01:44:59 niklas Exp $	*/
+/*	$OpenBSD: ipsec.h,v 1.19 2001/08/22 08:49:00 niklas Exp $	*/
 /*	$EOM: ipsec.h,v 1.42 2000/12/03 07:58:20 angelos Exp $	*/
 
 /*
- * Copyright (c) 1998, 1999 Niklas Hallqvist.  All rights reserved.
+ * Copyright (c) 1998, 1999, 2001 Niklas Hallqvist.  All rights reserved.
  * Copyright (c) 1999 Angelos D. Keromytis.  All rights reserved.
+ * Copyright (c) 2001 Håkan Olsson.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -38,9 +39,14 @@
 #ifndef _IPSEC_H_
 #define _IPSEC_H_
 
+#include <sys/queue.h>
+#include <sys/types.h>
 #include <netinet/in.h>
 
 #include "ipsec_doi.h"
+#ifdef USE_ISAKMP_CFG
+#include "isakmp_cfg.h"
+#endif
 
 struct group;
 struct hash;
@@ -50,9 +56,10 @@ struct proto;
 struct sa;
 
 /*
- * IPSEC-specific data to be linked into the exchange struct.
- * XXX Should probably be two different structs, one for phase 1 and one
- * for phase 2 parameters.
+ * IPsec-specific data to be linked into the exchange struct.
+ * XXX Should probably be several different structs, one for each kind
+ * of exchange, i.e. phase 1, phase 2 and ISAKMP configuration parameters
+ * separated.
  */
 struct ipsec_exch {
   u_int flags;
@@ -60,7 +67,9 @@ struct ipsec_exch {
   struct ike_auth *ike_auth;
   struct group *group;
   u_int16_t prf_type;
-  u_int8_t  pfs;	/* 0 if no KEY_EXCH was proposed, 1 otherwise */
+
+  /* 0 if no KEY_EXCH was proposed, 1 otherwise */
+  u_int8_t pfs;
 
   /*
    * A copy of the initiator SA payload body for later computation of hashes.
@@ -94,6 +103,12 @@ struct ipsec_exch {
   size_t id_ci_sz;
   u_int8_t *id_cr;
   size_t id_cr_sz;
+
+#ifdef USE_ISAKMP_CFG
+  /* ISAKMP configuration mode parameters */
+  u_int16_t cfg_id;
+  LIST_HEAD (, isakmp_cfg_attr) attrs;
+#endif
 };
 
 #define IPSEC_EXCH_FLAG_NO_ID 1
@@ -110,10 +125,10 @@ struct ipsec_sa {
   u_int16_t group_desc;
 
   /* Tunnel parameters.  These are in network byte order.  */
-  in_addr_t src_net;
-  in_addr_t src_mask;
-  in_addr_t dst_net;
-  in_addr_t dst_mask;
+  struct sockaddr *src_net;
+  struct sockaddr *src_mask;
+  struct sockaddr *dst_net;
+  struct sockaddr *dst_mask;
   u_int8_t  tproto;
   u_int16_t sport;
   u_int16_t dport;
@@ -143,16 +158,17 @@ extern int ipsec_esp_authkeylength (struct proto *);
 extern int ipsec_esp_enckeylength (struct proto *);
 extern int ipsec_fill_in_hash (struct message *msg);
 extern int ipsec_gen_g_x (struct message *);
-extern int ipsec_get_id (char *, int *, struct in_addr *, struct in_addr *,
-			 u_int8_t *, u_int16_t *);
+extern int ipsec_get_id (char *, int *, struct sockaddr **, 
+			 struct sockaddr **, u_int8_t *, u_int16_t *);
 extern ssize_t ipsec_id_size (char *, u_int8_t *);
+extern char *ipsec_id_string (u_int8_t *, size_t);
 extern void ipsec_init (void);
 extern int ipsec_initial_contact (struct message *msg);
 extern int ipsec_is_attribute_incompatible (u_int16_t, u_int8_t *, u_int16_t,
 					    void *);
 extern int ipsec_keymat_length (struct proto *);
 extern int ipsec_save_g_x (struct message *);
-extern struct sa *ipsec_sa_lookup (in_addr_t, u_int32_t, u_int8_t);
+extern struct sa *ipsec_sa_lookup (struct sockaddr *, u_int32_t, u_int8_t);
 
 extern char *ipsec_decode_ids(char *, u_int8_t *, size_t, u_int8_t *, size_t,
 			      int);

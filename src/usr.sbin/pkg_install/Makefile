@@ -1,4 +1,4 @@
-#	$OpenBSD: Makefile,v 1.4 1999/10/05 22:34:44 espie Exp $
+#	$OpenBSD: Makefile,v 1.6 2001/05/22 08:18:36 brian Exp $
 
 SUBDIR=lib add create delete info
 

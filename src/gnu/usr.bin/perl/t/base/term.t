@@ -1,10 +1,10 @@
 #!./perl
 
-# $RCSfile: term.t,v $$Revision: 1.4 $$Date: 2000/04/06 17:07:51 $
+# $RCSfile: term.t,v $$Revision: 1.5 $$Date: 2001/05/24 18:36:04 $
 
 BEGIN {
     chdir 't' if -d 't';
-    unshift @INC, '../lib';
+    @INC = '../lib';
 }
 
 use Config;
@@ -51,5 +51,5 @@ else {
     die "/dev/null IS NOT A CHARACTER SPECIAL FILE!!!!\n" unless -c '/dev/null';
 }
 
-open(try, "../Configure") || (die "Can't open ../Configure.");
+open(try, "harness") || (die "Can't open harness.");
 if (<try> ne '') {print "ok 7\n";} else {print "not ok 7\n";}

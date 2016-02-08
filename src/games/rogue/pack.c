@@ -1,4 +1,4 @@
-/*	$OpenBSD: pack.c,v 1.4 2000/04/07 04:34:16 pjanzen Exp $	*/
+/*	$OpenBSD: pack.c,v 1.6 2001/08/12 19:52:56 pjanzen Exp $	*/
 /*	$NetBSD: pack.c,v 1.3 1995/04/22 10:27:54 cgd Exp $	*/
 
 /*
@@ -64,6 +64,7 @@ char *curse_message = "you can't, it appears to be cursed";
 object *
 add_to_pack(obj, pack, condense)
 	object *obj, *pack;
+	int condense;
 {
 	object *op;
 
@@ -469,7 +470,8 @@ call_it()
 	}
 	id_table = get_id_table(obj);
 
-	if (get_input_line("call it:","",buf,id_table[obj->which_kind].title,1,1)) {
+	if (get_input_line("call it:", "", buf, sizeof(buf),
+	    id_table[obj->which_kind].title, 1, 1)) {
 		id_table[obj->which_kind].id_status = CALLED;
 		(void) strcpy(id_table[obj->which_kind].title, buf);
 	}

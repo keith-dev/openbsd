@@ -1,4 +1,4 @@
-/*	$OpenBSD: modload.c,v 1.24 2001/03/22 23:17:50 deraadt Exp $	*/
+/*	$OpenBSD: modload.c,v 1.27 2001/09/17 11:45:20 assar Exp $	*/
 /*	$NetBSD: modload.c,v 1.13 1995/05/28 05:21:58 jtc Exp $	*/
 
 /*
@@ -103,7 +103,7 @@ linkcmd(kernel, entry, outfile, address, object)
 
 	if (pid == 0) {
 		execl(_PATH_LD, "ld", LDSYMTABLE, kernel, "-e", entrybuf, "-o",
-		    outfile, LDTEXTSTART, addrbuf, object, NULL);
+		    outfile, LDTEXTSTART, addrbuf, object, (char *)NULL);
 		exit(128 + errno);
 	}
 
@@ -127,7 +127,7 @@ void
 usage()
 {
 
-	fprintf(stderr, "usage: modload [-dvqu] [-A <kernel>] [-e <entry]\n");
+	fprintf(stderr, "usage: modload [-dvsqu] [-A <kernel>] [-e <entry]\n");
 	fprintf(stderr,
 	    "\t[-p <postinstall>] [-o <output file>] <input file>\n");
 	exit(1);
@@ -255,7 +255,7 @@ main(argc, argv)
 			p = modobj;
 		snprintf(modout, sizeof modout, "%s%s.XXXXXXXX.o",
 		    _PATH_TMP, p);
-		if (modfd = mkstemps(modout, strlen(".o")) == -1)
+		if ((modfd = mkstemps(modout, strlen(".o"))) == -1)
 			err(1, "creating %s", modout);
 		close(modfd);
 		out = modout;
@@ -494,7 +494,7 @@ main(argc, argv)
 
 		cleanup();
 
-		execl(post, post, id, type, offset, 0);
+		execl(post, post, id, type, offset, (char *)NULL);
 		err(16, "can't exec `%s'", post);
 	}
 

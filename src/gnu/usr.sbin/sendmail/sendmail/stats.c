@@ -11,22 +11,20 @@
  *
  */
 
-#ifndef lint
-static char id[] = "@(#)$Sendmail: stats.c,v 8.36.14.5 2001/02/14 04:07:30 gshapiro Exp $";
-#endif /* ! lint */
-
 #include <sendmail.h>
-#include <sendmail/mailstats.h>
 
+SM_RCSID("@(#)$Sendmail: stats.c,v 8.50 2001/09/11 04:05:17 gshapiro Exp $")
+
+#include <sendmail/mailstats.h>
 
 static struct statistics	Stat;
 
-static bool	GotStats = FALSE;	/* set when we have stats to merge */
+static bool	GotStats = false;	/* set when we have stats to merge */
 
 /* See http://physics.nist.gov/cuu/Units/binary.html */
 #define ONE_K		1000		/* one thousand (twenty-four?) */
 #define KBYTES(x)	(((x) + (ONE_K - 1)) / ONE_K)
-/*
+/*
 **  MARKSTATS -- mark statistics
 **
 **	Parameters:
@@ -76,9 +74,9 @@ markstats(e, to, reject)
 	}
 
 
-	GotStats = TRUE;
+	GotStats = true;
 }
-/*
+/*
 **  CLEARSTATS -- clear statistics structure
 **
 **	Parameters:
@@ -96,9 +94,9 @@ clearstats()
 {
 	/* clear the structure to avoid future disappointment */
 	memset(&Stat, '\0', sizeof Stat);
-	GotStats = FALSE;
+	GotStats = false;
 }
-/*
+/*
 **  POSTSTATS -- post statistics in the statistics file
 **
 **	Parameters:
@@ -115,13 +113,15 @@ void
 poststats(sfile)
 	char *sfile;
 {
-	register int fd;
+	int fd;
+	static bool entered = false;
 	long sff = SFF_REGONLY|SFF_OPENASROOT;
 	struct statistics stats;
 	extern off_t lseek();
 
-	if (sfile == NULL || !GotStats)
+	if (sfile == NULL || *sfile == '\0' || !GotStats || entered)
 		return;
+	entered = true;
 
 	(void) time(&Stat.stat_itime);
 	Stat.stat_size = sizeof Stat;
@@ -138,8 +138,9 @@ poststats(sfile)
 	{
 		if (LogLevel > 12)
 			sm_syslog(LOG_INFO, NOQID, "poststats: %s: %s",
-				  sfile, errstring(errno));
+				  sfile, sm_errstring(errno));
 		errno = 0;
+		entered = false;
 		return;
 	}
 	if (read(fd, (char *) &stats, sizeof stats) == sizeof stats &&
@@ -173,4 +174,5 @@ poststats(sfile)
 
 	/* clear the structure to avoid future disappointment */
 	clearstats();
+	entered = false;
 }

@@ -1,4 +1,4 @@
-/*	$OpenBSD: rup.c,v 1.11 1999/08/16 23:48:57 aaron Exp $	*/
+/*	$OpenBSD: rup.c,v 1.14 2001/10/02 18:06:47 deraadt Exp $	*/
 
 /*-
  * Copyright (c) 1993, John Brezak
@@ -34,7 +34,7 @@
  */
 
 #ifndef lint
-static char rcsid[] = "$OpenBSD: rup.c,v 1.11 1999/08/16 23:48:57 aaron Exp $";
+static char rcsid[] = "$OpenBSD: rup.c,v 1.14 2001/10/02 18:06:47 deraadt Exp $";
 #endif /* not lint */
 
 #include <stdio.h>
@@ -139,15 +139,15 @@ remember_rup_data(host, st)
 	char *host;
 	struct statstime *st;
 {
-        if (rup_data_idx >= rup_data_max) {
-                rup_data_max += 16;
-                rup_data = realloc (rup_data, 
+	if (rup_data_idx >= rup_data_max) {
+		rup_data_max += 16;
+		rup_data = realloc(rup_data, 
 		    rup_data_max * sizeof(struct rup_data));
-                if (rup_data == NULL) {
-                        err (1, NULL);
+		if (rup_data == NULL) {
+			err(1, NULL);
 			/* NOTREACHED */
-                }
-        }
+		}
+	}
 	
 	rup_data[rup_data_idx].host = strdup(host);
 	rup_data[rup_data_idx].statstime = *st;
@@ -206,7 +206,8 @@ print_rup_data(host, host_stat)
 
 	host_stat->curtime.tv_sec -= host_stat->boottime.tv_sec;
 
-	ups=host_stat->curtime.tv_sec;
+	if (host_stat->curtime.tv_sec > 0)
+		ups=host_stat->curtime.tv_sec;
 	upd=ups/(3600*24);
 	ups-=upd*3600*24;
 	uph=ups/3600;
@@ -266,6 +267,7 @@ onehost(host)
 	    xdr_statstime, &host_stat, timeout) != RPC_SUCCESS) {
 		fprintf(stderr, "%s: %s", __progname,
 		    clnt_sperror(rstat_clnt, host));
+		clnt_destroy(rstat_clnt);
 		return;
 	}
 

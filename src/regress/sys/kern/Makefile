@@ -1,7 +1,7 @@
-#	$OpenBSD: Makefile,v 1.4 2001/01/29 02:05:54 niklas Exp $
+#	$OpenBSD: Makefile,v 1.6 2001/10/08 22:44:24 art Exp $
 #	$NetBSD: Makefile,v 1.2 1995/04/20 22:42:51 cgd Exp $
 
-SUBDIR+= execve
+SUBDIR+= execve mmap dup2
 
 regress: _SUBDIRUSE
 

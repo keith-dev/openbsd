@@ -1,4 +1,4 @@
-/*	$OpenBSD: rlogin.c,v 1.22 2000/01/27 05:27:42 itojun Exp $	*/
+/*	$OpenBSD: rlogin.c,v 1.25 2001/10/02 01:14:55 art Exp $	*/
 /*	$NetBSD: rlogin.c,v 1.8 1995/10/05 09:07:22 mycroft Exp $	*/
 
 /*
@@ -44,7 +44,7 @@ static char copyright[] =
 #if 0
 static char sccsid[] = "@(#)rlogin.c	8.1 (Berkeley) 6/6/93";
 #else
-static char rcsid[] = "$OpenBSD: rlogin.c,v 1.22 2000/01/27 05:27:42 itojun Exp $";
+static char rcsid[] = "$OpenBSD: rlogin.c,v 1.25 2001/10/02 01:14:55 art Exp $";
 #endif
 #endif /* not lint */
 
@@ -128,7 +128,7 @@ struct	winsize winsize;
 
 void		catch_child __P((int));
 void		copytochild __P((int));
-__dead void	doit __P((int));
+__dead void	doit __P((sigset_t *));
 __dead void	done __P((int));
 void		echo __P((char));
 u_int		getescape __P((char *));
@@ -136,12 +136,12 @@ void		lostpeer __P((int));
 void		mode __P((int));
 void		msg __P((char *));
 void		oob __P((int));
-int		reader __P((int));
+int		reader __P((sigset_t *));
 void		sendwindow __P((void));
 void		setsignal __P((int));
 void		sigwinch __P((int));
 void		stop __P((int));
-__dead void	usage __P((void));
+__dead void	usage __P((void)) __attribute__((__noreturn__));
 void		writer __P((void));
 void		writeroob __P((int));
 
@@ -163,7 +163,7 @@ main(argc, argv)
 	struct passwd *pw;
 	struct servent *sp;
 	struct termios tty;
-	int omask;
+	sigset_t mask, omask;
 	int argoff, ch, dflag, one, uid;
 	char *host, *p, *user, term[64];
 	struct sockaddr_storage ss;
@@ -214,9 +214,8 @@ main(argc, argv)
 			break;
 #ifdef KERBEROS
 		case 'k':
-			(void)strncpy(dst_realm_buf, optarg,
-			    sizeof dst_realm_buf-1);
-			dst_realm_buf[sizeof dst_realm_buf-1] = '\0';
+			(void)strlcpy(dst_realm_buf, optarg, 
+			    sizeof(dst_realm_buf));
 			dest_realm = dst_realm_buf;
 			break;
 #endif
@@ -269,9 +268,8 @@ main(argc, argv)
 		exit(1);
 	}
 
-	(void)strncpy(term, (p = getenv("TERM")) ? p : "network",
-	    sizeof(term) - 1);
-	term[sizeof(term) - 1] = '\0';
+	(void)strlcpy(term, (p = getenv("TERM")) ? p : "network",
+	    sizeof(term));
 
 	/*
 	 * Add "/baud" only if there is room left; ie. do not send "/19"
@@ -289,7 +287,10 @@ main(argc, argv)
 
 	(void)signal(SIGPIPE, lostpeer);
 	/* will use SIGUSR1 for window size hack, so hold it off */
-	omask = sigblock(sigmask(SIGURG) | sigmask(SIGUSR1));
+	sigemptyset(&mask);
+	sigaddset(&mask, SIGURG);
+	sigaddset(&mask, SIGUSR1);
+	sigprocmask(SIG_BLOCK, &mask, &omask);
 	/*
 	 * We set SIGURG and SIGUSR1 below so that an
 	 * incoming signal will be held pending rather than being
@@ -369,7 +370,7 @@ try_connect:
 
 	(void)seteuid(uid);
 	(void)setuid(uid);
-	doit(omask);
+	doit(&omask);
 	/*NOTREACHED*/
 
 	return 0;
@@ -379,7 +380,7 @@ pid_t child;
 
 void
 doit(omask)
-	int omask;
+	sigset_t *omask;
 {
 	struct sigaction sa;
 
@@ -421,7 +422,7 @@ doit(omask)
 	 * signals to the child. We can now unblock SIGURG and SIGUSR1
 	 * that were set above.
 	 */
-	(void)sigsetmask(omask);
+	(void)sigprocmask(SIG_SETMASK, omask, NULL);
 	writer();
 	msg("closed connection.");
 	done(0);
@@ -432,11 +433,16 @@ void
 setsignal(sig)
 	int sig;
 {
-	int omask = sigblock(sigmask(sig));
+	sigset_t mask, omask;
+
+	sigemptyset(&mask);
+	sigaddset(&mask, sig);
+	sigprocmask(SIG_BLOCK, &mask, &omask);
 
 	if (signal(sig, exit) == SIG_IGN)
 		(void)signal(sig, SIG_IGN);
-	(void)sigsetmask(omask);
+
+	sigprocmask(SIG_SETMASK, &omask, NULL);
 }
 
 __dead void
@@ -706,7 +712,7 @@ oob(signo)
 			return;
 		}
 	}
-	if (mark & TIOCPKT_WINDOW) {
+	if (mark & TIOCPKT_WINDOW && ppid > 1) {
 		/* Let server know about window size changes */
 		(void)kill(ppid, SIGUSR1);
 	}
@@ -759,7 +765,7 @@ oob(signo)
 /* reader: read from remote: line -> 1 */
 int
 reader(omask)
-	int omask;
+	sigset_t *omask;
 {
 	pid_t pid;
 	int n, remaining;
@@ -771,7 +777,7 @@ reader(omask)
 	ppid = getppid();
 	(void)fcntl(rem, F_SETOWN, pid);
 	(void)setjmp(rcvtop);
-	(void)sigsetmask(omask);
+	(void)sigprocmask(SIG_SETMASK, omask, NULL);
 	bufp = rcvbuf;
 	for (;;) {
 		while ((remaining = rcvcnt - (bufp - rcvbuf)) > 0) {

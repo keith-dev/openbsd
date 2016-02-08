@@ -1,4 +1,4 @@
-.\"	$OpenBSD: install.1,v 1.13 2000/06/03 23:13:19 ericj Exp $
+.\"	$OpenBSD: install.1,v 1.15 2001/08/03 16:03:02 mpech Exp $
 .\"	$NetBSD: install.1,v 1.4 1994/11/14 04:57:17 jtc Exp $
 .\"
 .\" Copyright (c) 1987, 1990, 1993
@@ -192,8 +192,6 @@ where XXXXXX is decided by
 .Xr mkstemp 3 ,
 are created in the target directory.
 .Sh ENVIRONMENT
-The following environment variables affect the execution of
-.Nm install :
 .Bl -tag -width "STRIP"
 .It Ev STRIP
 For an alternate
@@ -201,6 +199,7 @@ For an alternate
 program to run.
 Default is
 .Pa /usr/bin/strip .
+.El
 .Sh SEE ALSO
 .Xr chflags 1 ,
 .Xr chgrp 1 ,

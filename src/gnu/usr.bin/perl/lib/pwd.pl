@@ -9,11 +9,11 @@
 #
 # Suggested alternative: Cwd
 #
-;# $RCSfile: pwd.pl,v $$Revision: 1.4 $$Date: 2000/04/06 17:06:16 $
+;# $RCSfile: pwd.pl,v $$Revision: 1.5 $$Date: 2001/05/24 18:35:26 $
 ;#
 ;# $Log: pwd.pl,v $
-;# Revision 1.4  2000/04/06 17:06:16  millert
-;# perl-5.6.0 + local changes
+;# Revision 1.5  2001/05/24 18:35:26  millert
+;# merge in perl 5.6.1 with our local changes
 ;#
 ;#
 ;# Usage:

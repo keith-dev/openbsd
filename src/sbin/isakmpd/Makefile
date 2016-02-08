@@ -1,8 +1,8 @@
-#	$OpenBSD: Makefile,v 1.34 2001/03/23 16:14:34 markus Exp $
+#	$OpenBSD: Makefile,v 1.44 2001/08/25 22:22:26 niklas Exp $
 #	$EOM: Makefile,v 1.78 2000/10/15 21:33:42 niklas Exp $
 
 #
-# Copyright (c) 1998, 1999, 2000 Niklas Hallqvist.  All rights reserved.
+# Copyright (c) 1998, 1999, 2000, 2001 Niklas Hallqvist.  All rights reserved.
 # Copyright (c) 2000, 2001 Håkan Olsson.  All rights reserved.
 #
 # Redistribution and use in source and binary forms, with or without
@@ -41,11 +41,9 @@
 # may provide this make variant as "pmake" or maybe "bsdmake".
 #
 
-# openbsd means 2.5 or newer, openbsd-encap is for older kernels with PF_ENCAP
-# linux is the name for Linux with FreeS/WAN integrated, freebsd/netbsd means
-# FreeBSD/NetBSD with KAME IPsec.
+# openbsd means OpenBSD 2.5 or newer. linux is the name for Linux with
+# FreeS/WAN integrated, freebsd/netbsd means FreeBSD/NetBSD with KAME IPsec.
 OS=		openbsd
-#OS=		openbsd-encap
 #OS=		netbsd
 #OS=		freebsd
 #OS=		linux
@@ -53,9 +51,9 @@ OS=		openbsd
 
 # Compile-time configuration of otherwise optional features
 #FEATURES=	tripledes des blowfish cast policy x509 ec aggressive debug gmp
-#FEATURES+=	dnssec
+#FEATURES+=	rawkey isakmp_cfg dnssec
 FEATURES=	tripledes des blowfish cast policy x509 ec aggressive debug
-#FEATURES=
+FEATURES+=	rawkey isakmp_cfg
 
 .PATH:		${.CURDIR}/sysdep/${OS}
 
@@ -67,8 +65,8 @@ SRCS=		app.c attribute.c cert.c connection.c constants.c conf.c \
 		field.c gmp_util.c hash.c if.c ike_auth.c ike_main_mode.c \
 		ike_phase_1.c ike_quick_mode.c init.c ipsec.c ipsec_fld.c \
 		ipsec_num.c isakmpd.c isakmp_doi.c isakmp_fld.c isakmp_num.c \
-		libcrypto.c log.c message.c math_2n.c math_group.c prf.c sa.c \
-		sysdep.c timer.c transport.c udp.c ui.c util.c
+		key.c libcrypto.c log.c message.c math_2n.c math_group.c \
+		prf.c sa.c sysdep.c timer.c transport.c udp.c ui.c util.c
 
 GENERATED=	exchange_num.h ipsec_fld.h ipsec_num.h isakmp_fld.h \
 		isakmp_num.h
@@ -76,7 +74,8 @@ CLEANFILES=	exchange_num.c exchange_num.h ipsec_num.c ipsec_num.h \
 		isakmp_num.c isakmp_num.h ipsec_fld.c ipsec_fld.h \
 		isakmp_fld.c isakmp_fld.h
 MAN=		isakmpd.8 isakmpd.conf.5 isakmpd.policy.5
-CFLAGS+=	-Wall -DNEED_SYSDEP_APP \
+CFLAGS+=	-Wall -Wstrict-prototypes -Wmissing-prototypes \
+		-DNEED_SYSDEP_APP \
 		-I${.CURDIR} -I${.CURDIR}/sysdep/${OS} -I.
 
 # Different debugging & profiling suggestions
@@ -155,14 +154,6 @@ DPADD+=		${LIBGMP}
 CFLAGS+=	-DMP_FLAVOUR=MP_FLAVOUR_OPENSSL
 .endif
 
-.if ${FEATURES:Mdnssec} == "dnssec"
-LIBLWRES=	/usr/local/lib/liblwres.a
-CFLAGS+=	-I/usr/local/include
-LDADD+=		${LIBLWRES}
-DPADD+=		${LIBLWRES}
-SRCS+=		dnssec.c
-.endif
-
 .ifdef HAVE_DLOPEN
 CFLAGS+=	-DHAVE_DLOPEN
 SRCS+=		dyn.c
@@ -175,17 +166,23 @@ DPADD+=		${LIBKEYNOTE} ${LIBM}
 CFLAGS+=	-DUSE_KEYNOTE
 .endif
 
+.ifdef USE_RAWKEY
+USE_LIBCRYPTO=	yes
+CFLAGS+=	-DUSE_RAWKEY
+.endif
+
 .ifdef USE_LIBCRYPTO
 CFLAGS+=	-DUSE_LIBCRYPTO
 LDADD+=		-lcrypto
 DPADD+=		${LIBCRYPTO}
 .endif
 
-SRCS+=		${IPSEC_SRCS} ${X509} ${POLICY} ${EC} ${AGGRESSIVE}
-CFLAGS+=	${IPSEC_CFLAGS}
+SRCS+=		${IPSEC_SRCS} ${X509} ${POLICY} ${EC} ${AGGRESSIVE} ${DNSSEC} \
+		${ISAKMP_CFG}
+CFLAGS+=	${IPSEC_CFLAGS} ${DNSSEC_CFLAGS}
 
-LDADD+=		${DESLIB}
-DPADD+=		${DESLIBDEP}
+LDADD+=		${DESLIB} ${LWRESLIB}
+DPADD+=		${DESLIBDEP} ${LWRESLIB}
 
 exchange_num.c exchange_num.h: genconstants.sh exchange_num.cst
 	/bin/sh ${.CURDIR}/genconstants.sh ${.CURDIR}/exchange_num

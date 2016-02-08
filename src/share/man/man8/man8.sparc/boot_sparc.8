@@ -1,4 +1,4 @@
-.\"	$OpenBSD: boot_sparc.8,v 1.1 2000/11/09 03:57:35 deraadt Exp $
+.\"	$OpenBSD: boot_sparc.8,v 1.4 2001/10/14 21:02:18 miod Exp $
 .\"	$NetBSD: boot_sparc.8,v 1.4 1995/04/25 11:37:25 pk Exp $
 .\"
 .\" Copyright (c) 1992, 1993
@@ -49,18 +49,18 @@ An automatic consistency check of the file systems will be performed
 (as described in
 .Xr fsck 8 ) ,
 and unless this fails, the system will resume multi-user operations.
-.Pp
 .Ss Cold starts
 System boot blocks are installed near the start of the boot disk
 using the procedure described in
 .Xr installboot 8 .
-The boot program attempts to load
-.Pa bsd
-from partition
+The boot program attempts to load the kernel from partition
 .Dq a
 of the boot device,
 which must currently be an
-.Dq sd
+.Dq sd ,
+.Dq xd
+or
+.Dq xy
 disk.
 .Pp
 The
@@ -70,6 +70,12 @@ The
 .Fl a
 flag instructs the system to prompt for the location of the root filesystem
 and the primary swap partition.
+The
+.Fl c
+flag instructs the system to enter the
+.Dq User Kernel Config
+mode upon startup (see
+.Xr boot_config 8 ).
 Other flags are currently ignored.
 .Pp
 The SPARC boot ROM comes in two flavours: an
@@ -102,17 +108,56 @@ incantation in new-mode to force the ROM to always start in new-mode:
 .Pp
 .Em \	ok
 setenv sunmon-compat? false
+.Ss Old-style PROM operation
+By default, the old ROM will poll for boot devices, unless the eeprom settings
+are set to specify a particular boot device.
+The
+.Ox
+bootloader will then look for a kernel named
+.Dq bsd
+by default, unless a different filename has been specified in the boot
+command.
 .Pp
-The ROM will normally load the kernel from
-.Dq sd(0,0,0)bsd .
-To change the
-default so that
+Refer to the
+.Dq PROM User's Manual
+for more information.
+.Ss OpenBoot PROM version 1 operation
+Older OpenBOOT PROM, as well as hybrid (dual-mode) versions operating in
+compatibility mode (with the variable
+.Dq version2?
+set to false) will look for a bootloader and kernel filename as specified
+by the
+.Dq boot-from
+variable.
+To change the default so that
 .Ox
 will be loaded, type the following:
 .Pp
 .Em \	ok
 setenv boot-from sd(0,0,0)bsd
 .Pp
+Replace
+.Dq sd(0,0,0)
+with the appropriate boot device if necessary.
+.Ss OpenBoot PROM version 2 operation
+Version 2 OpenBOOT PROM will look for a bootloader on the device specified
+by the
+.Dq boot-device
+variable.
+The
+.Ox
+bootloader will then look for a kernel named
+.Dq bsd
+by default, unless the
+.Dq boot-file
+environment variable is set, or a different filename has been specified
+in the boot command.
+To reset this variable to its default, empty, value, type the following:
+.Pp
+.Em \	ok
+set-default boot-file
+.Pp
+.Ss Accessing the PROM during runtime
 If the
 .Xr sysctl 8
 variable
@@ -135,6 +180,7 @@ system code
 system bootstrap
 .El
 .Sh SEE ALSO
+.Xr boot_config 8 ,
 .Xr crash 8 ,
 .Xr disklabel 8 ,
 .Xr fsck 8 ,

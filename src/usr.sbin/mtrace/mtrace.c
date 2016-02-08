@@ -21,38 +21,38 @@
  * format the unicast traceroute program written by Van Jacobson (LBL)
  * for the parts where that makes sense.
  * 
- * Copyright (c) 1995 by the University of Southern California
+ * Copyright (c) 1998-2001.
+ * The University of Southern California/Information Sciences Institute.
  * All rights reserved.
  *
- * Permission to use, copy, modify, and distribute this software and its
- * documentation in source and binary forms for non-commercial purposes
- * and without fee is hereby granted, provided that the above copyright
- * notice appear in all copies and that both the copyright notice and
- * this permission notice appear in supporting documentation, and that
- * any documentation, advertising materials, and other materials related
- * to such distribution and use acknowledge that the software was
- * developed by the University of Southern California, Information
- * Sciences Institute.  The name of the University may not be used to
- * endorse or promote products derived from this software without
- * specific prior written permission.
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in the
+ *    documentation and/or other materials provided with the distribution.
+ * 3. Neither the name of the project nor the names of its contributors
+ *    may be used to endorse or promote products derived from this software
+ *    without specific prior written permission.
  *
- * THE UNIVERSITY OF SOUTHERN CALIFORNIA makes no representations about
- * the suitability of this software for any purpose.  THIS SOFTWARE IS
- * PROVIDED "AS IS" AND WITHOUT ANY EXPRESS OR IMPLIED WARRANTIES,
- * INCLUDING, WITHOUT LIMITATION, THE IMPLIED WARRANTIES OF
- * MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE.
- *
- * Other copyrights might apply to parts of this software and are so
- * noted when applicable.
- *
- * In particular, parts of the prototype version of this program may
- * have been derived from mrouted programs sources covered by the
- * license in the accompanying file named "LICENSE".
+ * THIS SOFTWARE IS PROVIDED BY THE PROJECT AND CONTRIBUTORS ``AS IS'' AND
+ * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+ * ARE DISCLAIMED.  IN NO EVENT SHALL THE PROJECT OR CONTRIBUTORS BE LIABLE
+ * FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+ * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
+ * OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
+ * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
+ * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
+ * SUCH DAMAGE.
  */
 
 #ifndef lint
 static char rcsid[] =
-    "@(#) $Id: mtrace.c,v 1.5 2001/03/09 03:24:07 deraadt Exp $";
+    "@(#) $Id: mtrace.c,v 1.8 2001/09/05 22:32:45 deraadt Exp $";
 #endif
 
 #include <netdb.h>
@@ -956,15 +956,15 @@ stat_line(r, s, have_next, rst)
     }
 
     if (debug > 2) {
-	printf("\t\t\t\tv_in: %ld ", ntohl(s->tr_vifin));
-	printf("v_out: %ld ", ntohl(s->tr_vifout));
-	printf("pkts: %ld\n", ntohl(s->tr_pktcnt));
-	printf("\t\t\t\tv_in: %ld ", ntohl(r->tr_vifin));
-	printf("v_out: %ld ", ntohl(r->tr_vifout));
-	printf("pkts: %ld\n", ntohl(r->tr_pktcnt));
-	printf("\t\t\t\tv_in: %ld ",ntohl(s->tr_vifin)-ntohl(r->tr_vifin));
-	printf("v_out: %ld ", ntohl(s->tr_vifout) - ntohl(r->tr_vifout));
-	printf("pkts: %ld ", ntohl(s->tr_pktcnt) - ntohl(r->tr_pktcnt));
+	printf("\t\t\t\tv_in: %u ", ntohl(s->tr_vifin));
+	printf("v_out: %u ", ntohl(s->tr_vifout));
+	printf("pkts: %u\n", ntohl(s->tr_pktcnt));
+	printf("\t\t\t\tv_in: %u ", ntohl(r->tr_vifin));
+	printf("v_out: %u ", ntohl(r->tr_vifout));
+	printf("pkts: %u\n", ntohl(r->tr_pktcnt));
+	printf("\t\t\t\tv_in: %u ", ntohl(s->tr_vifin)-ntohl(r->tr_vifin));
+	printf("v_out: %u ", ntohl(s->tr_vifout) - ntohl(r->tr_vifout));
+	printf("pkts: %u ", ntohl(s->tr_pktcnt) - ntohl(r->tr_pktcnt));
 	printf("time: %d\n", timediff);
 	printf("\t\t\t\tres: %d\n", res);
     }
@@ -1027,7 +1027,7 @@ fixup_stats(base, prev, new)
 		 * doubt from now on.
 		 */
 		p->tr_pktcnt = b->tr_pktcnt = n->tr_pktcnt;
-		*r++;
+		r++;
 	    } else {
 		/*
 		 * This is simply the situation that the original
@@ -1088,15 +1088,15 @@ print_stats(base, prev, new)
 	printf("    ---------------------     --------------------\n");
     }
     if (debug > 2) {
-	printf("\t\t\t\tv_in: %ld ", ntohl(n->tr_vifin));
-	printf("v_out: %ld ", ntohl(n->tr_vifout));
-	printf("pkts: %ld\n", ntohl(n->tr_pktcnt));
-	printf("\t\t\t\tv_in: %ld ", ntohl(b->tr_vifin));
-	printf("v_out: %ld ", ntohl(b->tr_vifout));
-	printf("pkts: %ld\n", ntohl(b->tr_pktcnt));
-	printf("\t\t\t\tv_in: %ld ", ntohl(n->tr_vifin) - ntohl(b->tr_vifin));
-	printf("v_out: %ld ", ntohl(n->tr_vifout) - ntohl(b->tr_vifout));
-	printf("pkts: %ld\n", ntohl(n->tr_pktcnt) - ntohl(b->tr_pktcnt));
+	printf("\t\t\t\tv_in: %u ", ntohl(n->tr_vifin));
+	printf("v_out: %u ", ntohl(n->tr_vifout));
+	printf("pkts: %u\n", ntohl(n->tr_pktcnt));
+	printf("\t\t\t\tv_in: %u ", ntohl(b->tr_vifin));
+	printf("v_out: %u ", ntohl(b->tr_vifout));
+	printf("pkts: %u\n", ntohl(b->tr_pktcnt));
+	printf("\t\t\t\tv_in: %u ", ntohl(n->tr_vifin) - ntohl(b->tr_vifin));
+	printf("v_out: %u ", ntohl(n->tr_vifout) - ntohl(b->tr_vifout));
+	printf("pkts: %u\n", ntohl(n->tr_pktcnt) - ntohl(b->tr_pktcnt));
 	printf("\t\t\t\treset: %d\n", *r);
     }
 
@@ -1708,6 +1708,7 @@ log(severity, syserr, format, va_alist)
 	    if (severity == LOG_WARNING) strcat(fmt, "warning - ");
 	    strncat(fmt, format, 80);
 	    vfprintf(stderr, fmt, ap);
+	    va_end(ap);
 	    if (syserr == 0)
 		fprintf(stderr, "\n");
 	    else if(syserr < sys_nerr)

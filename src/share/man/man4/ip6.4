@@ -1,4 +1,4 @@
-.\"	$OpenBSD: ip6.4,v 1.6 2001/03/01 16:11:17 aaron Exp $
+.\"	$OpenBSD: ip6.4,v 1.11 2001/10/05 14:45:53 mpech Exp $
 .\"	$KAME: ip6.4,v 1.12 2000/06/08 21:19:39 itojun Exp $
 .\"
 .\" Copyright (C) 1999 WIDE Project.
@@ -62,17 +62,14 @@
 .Dd December 17, 1999
 .Dt IP6 4
 .Os
-.\"
 .Sh NAME
 .Nm ip6
 .Nd Internet Protocol version 6 (IPv6)
-.\"
 .Sh SYNOPSIS
 .Fd #include <sys/socket.h>
 .Fd #include <netinet/in.h>
 .Ft int
 .Fn socket AF_INET6 SOCK_RAW proto
-.\"
 .Sh DESCRIPTION
 .Tn IPv6
 is the network layer protocol used by the Internet protocol version 6 family
@@ -184,9 +181,10 @@ may be more than one instance on a single host (such as a conferencing
 program) or for which the sender does not belong to the destination
 group (such as a time querying program).
 .Pp
-A multicast datagram sent with an initial hoplimit greater than 1 may be delivered
-to the sending host on a different interface from that on which it was sent,
-if the host belongs to the destination group on that other interface.
+A multicast datagram sent with an initial hoplimit greater than 1 may be
+delivered to the sending host on a different interface from that on which
+it was sent, if the host belongs to the destination group on that other
+interface.
 The loopback control option has no effect on such delivery.
 .Pp
 A host must become a member of a multicast group before it can receive
@@ -345,7 +343,7 @@ and the first byte of
 .Li cmsg_data[]
 will be the first byte of the socket address structure.
 .Pp
-If the socket address structure contains an IPv6 address (e.g., the
+If the socket address structure contains an IPv6 address (i.e., the
 sin6_family member is
 .Dv AF_INET6
 ), then the node identified by that
@@ -527,9 +525,9 @@ socket option.
 .Pp
 When writing to a raw socket the kernel will automatically fragment
 the packet if its size exceeds the path MTU, inserting the required
-fragmentation headers.  On input the kernel reassembles received
-fragments, so the reader of a raw socket never sees any fragment
-headers.
+fragmentation headers.
+On input the kernel reassembles received fragments, so the reader
+of a raw socket never sees any fragment headers.
 .Pp
 Most IPv4 implementations give special treatment to a raw socket
 created with a third argument to
@@ -568,8 +566,9 @@ int offset = 2;
 setsockopt(fd, IPPROTO_IPV6, IPV6_CHECKSUM, &offset, sizeof(offset));
 .Ed
 .Pp
-By default, this socket option is disabled.  Setting the offset to -1
-also disables the option.  By disabled we mean (1) the kernel will
+By default, this socket option is disabled.
+Setting the offset to -1 also disables the option.
+By disabled we mean (1) the kernel will 
 not calculate and store a checksum for outgoing packets, and (2) the
 kernel will not verify a checksum for received packets.
 .Pp

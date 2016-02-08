@@ -1,4 +1,4 @@
-.\"	$OpenBSD: compat_sunos.8,v 1.8 2000/12/22 16:54:37 avsm Exp $
+.\"	$OpenBSD: compat_sunos.8,v 1.11 2001/10/05 14:45:54 mpech Exp $
 .\"	$NetBSD: compat_sunos.8,v 1.6 1995/06/11 23:05:17 pk Exp $
 .\"
 .\" Copyright (c) 1994 Theo de Raadt
@@ -39,7 +39,8 @@
 .Nd setup procedure for running SunOS binaries under emulation
 .Sh DESCRIPTION
 OpenBSD/sparc and some of the OpenBSD/m68k architectures can run
-SunOS executables.  Most executables will work.
+SunOS executables.
+Most executables will work.
 .Pp
 The SunOS compatibility feature is active
 for kernels compiled with the
@@ -66,7 +67,9 @@ setup to allow dynamically linked executables to work.
 The files you need are on your SunOS machine.
 You need to worry about the legal issues of ensuring that you
 have a right to use the required files on your machine.
-On your OpenBSD machine, do the following:
+On your
+.Ox
+machine, do the following:
 .Pp
 .Bl -enum -inset -offset 123 -compact
 .It
@@ -91,7 +94,9 @@ If you ever expect to use YP, you will want to create a link:
 .Pp
 Alternatively, you can use an NFS mount to accomplish the same
 effect.
-On your OpenBSD machine, do the following:
+On your
+.Ox
+machine, do the following:
 .Pp
 .Bl -enum -inset -offset 123 -compact
 .Pp
@@ -103,10 +108,10 @@ On your OpenBSD machine, do the following:
 .fi
 .El
 .Pp
-This will place the SunOS libraries on your OpenBSD machine
-in a location where the SunOS compatibility code will look for
+This will place the SunOS libraries on your
+.Ox
+machine in a location where the SunOS compatibility code will look for
 first, where they do not conflict with the standard libraries.
-.Pp
 .Sh SEE ALSO
 .Xr compat_svr4 8
 .Sh BUGS

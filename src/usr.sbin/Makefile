@@ -1,20 +1,23 @@
-#	$OpenBSD: Makefile,v 1.76 2001/04/14 09:35:39 deraadt Exp $
+#	$OpenBSD: Makefile,v 1.85 2001/09/25 21:15:40 deraadt Exp $
 
 # not yet done: catman
 
 .include <bsd.own.mk>
 
-SUBDIR=	ac accton adduser amd arp bootpd bootpgw bootpef bootptest \
+SUBDIR=	ac accton adduser altq amd arp bootpd bootpgw bootpef bootptest \
 	chroot config cron dev_mkdb dhcp \
-	edquota gspa httpd inetd iostat ipfs \
-	ipftest ipmon ipsend kgmon kvm_mkdb lpr \
-	mailwrapper map-mbone mrinfo mopd mrouted mtrace mtree named \
-	netgroup_mkdb openssl pkg pkg_install portmap ppp pppd pppoe pstat \
-	pwd_mkdb quot quotaon rarpd rbootd rdconfig rdate repquota rmt \
+	edquota gspa httpd inetd iostat \
+	kgmon kvm_mkdb lpr \
+	mailwrapper mopd mtree named \
+	netgroup_mkdb openssl pkg pkg_install popa3d portmap ppp pppd pppoe \
+	pstat pwd_mkdb quot quotaon rarpd rbootd rdconfig rdate repquota rmt \
 	rpc.bootparamd rpc.lockd rpc.pcnfsd rwhod \
 	sa sesd sliplogin slstats spppcontrol spray \
-	syslogd tcpdump timed traceroute trpt trsp \
+	syslogd tcpdump timed tokenadm tokeninit traceroute trpt trsp \
 	usbdevs user vipw vnconfig wsmoused zdump zic
+
+# LICENSING ISSUES:
+# mrouted mrinfo mtrace map-mbone
 
 # IPv6
 SUBDIR+=faithd ifmcstat ndp rip6query route6d rtadvd rtsold traceroute6

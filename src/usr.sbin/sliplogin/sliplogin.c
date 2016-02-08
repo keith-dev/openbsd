@@ -39,7 +39,7 @@ char copyright[] =
 
 #ifndef lint
 /*static char sccsid[] = "from: @(#)sliplogin.c	5.6 (Berkeley) 3/2/91";*/
-static char rcsid[] = "$Id: sliplogin.c,v 1.12 2001/02/14 03:27:15 deraadt Exp $";
+static char rcsid[] = "$Id: sliplogin.c,v 1.15 2001/09/04 23:35:59 millert Exp $";
 #endif /* not lint */
 
 /*
@@ -119,10 +119,9 @@ findid(name)
 	static char raddr[16];
 	static char mask[16];
 	char user[MAXLOGNAME], *p;
-	int i, j, n;
+	int n;
 
-	(void)strncpy(loginname, name, sizeof loginname-1);
-	loginname[sizeof loginname -1] = '\0';
+	strlcpy(loginname, name, sizeof loginname);
 	if ((fp = fopen(_PATH_ACCESS, "r")) == NULL) {
 		syslog(LOG_ERR, "%s: %m", _PATH_ACCESS);
 		err(1, "%s", _PATH_ACCESS);
@@ -218,12 +217,15 @@ main(argc, argv)
 	struct sgttyb tty, otty;
 #endif
 	char logincmd[2*BUFSIZ+32];
+	sigset_t emptyset;
 	extern uid_t getuid();
 
 	environ = restricted_environ; /* minimal protection for system() */
 
 	if ((name = strrchr(argv[0], '/')) == NULL)
 		name = argv[0];
+	else
+		name++;
 	s = getdtablesize();
 	for (fd = 3 ; fd < s ; fd++)
 		(void) close(fd);
@@ -377,8 +379,9 @@ main(argc, argv)
 
 	/* twiddle thumbs until we get a signal; allow user to kill */
 	seteuid(uid);
+	sigemptyset(&emptyset);
 	while (1)
-		sigpause(0);
+		sigsuspend(&emptyset);
 
 	/* NOTREACHED */
 }

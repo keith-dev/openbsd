@@ -1,4 +1,4 @@
-/*	$OpenBSD: remote.c,v 1.7 1997/09/07 12:23:59 provos Exp $	*/
+/*	$OpenBSD: remote.c,v 1.9 2001/09/09 19:30:49 millert Exp $	*/
 /*	$NetBSD: remote.c,v 1.5 1997/04/20 00:02:45 mellon Exp $	*/
 
 /*
@@ -45,7 +45,7 @@ static char copyright[] =
 #if 0
 static char sccsid[] = "@(#)remote.c	8.1 (Berkeley) 6/6/93";
 #endif
-static char rcsid[] = "$OpenBSD: remote.c,v 1.7 1997/09/07 12:23:59 provos Exp $";
+static char rcsid[] = "$OpenBSD: remote.c,v 1.9 2001/09/09 19:30:49 millert Exp $";
 #endif /* not lint */
 
 #include <stdio.h>
@@ -82,7 +82,7 @@ getremcap(host)
 	int   stat;
 
 	rempath = getenv("REMOTE");
-	if (rempath != NULL)
+	if (rempath != NULL) {
 		if (*rempath != '/')
 			/* we have an entry */
 			cgetset(rempath);
@@ -90,6 +90,7 @@ getremcap(host)
 			db_array[1] = rempath;
 			db_array[2] = _PATH_REMOTE;
 		}
+	}
 
 	if ((stat = cgetent(&bp, db_array, host)) < 0) {
 		if (DV ||
@@ -105,15 +106,17 @@ getremcap(host)
 		}
 		switch(stat) {
 		case -1:
-			fprintf(stderr, "tip: unknown host %s\n", host);
+			fprintf(stderr, "%s: unknown host %s\n", __progname,
+			    host);
 			break;
 		case -2:
 			fprintf(stderr, 
-			    "tip: can't open host description file\n");
+			    "%s: can't open host description file\n",
+			    __progname);
 			break;
 		case -3:
 			fprintf(stderr, 
-			    "tip: possible reference loop in host description file\n");
+			    "%s: possible reference loop in host description file\n", __progname);
 			break;
 		}
 		exit(3);
@@ -213,7 +216,7 @@ getremote(host)
 
 	if (!lookedup) {
 		if (host == NOSTR && (host = getenv("HOST")) == NOSTR) {
-			fprintf(stderr, "tip: no host specified\n");
+			fprintf(stderr, "%s: no host specified\n", __progname);
 			exit(3);
 		}
 		getremcap(host);

@@ -1,4 +1,4 @@
-.\" $OpenBSD: wscons.4,v 1.5 2001/04/16 02:17:52 fgsch Exp $
+.\" $OpenBSD: wscons.4,v 1.8 2001/08/20 05:57:55 mpech Exp $
 .\" $NetBSD: wscons.4,v 1.11 2000/04/13 11:14:42 is Exp $
 .\"
 .\" Copyright (c) 1999 The NetBSD Foundation, Inc.
@@ -40,7 +40,7 @@
 .Nd console access
 .Sh SYNOPSIS
 .Cd option WSEMUL_SUN
-.Cd option WSEMUL_VT100
+.Cd option WSEMUL_NO_VT100
 .Cd option WSEMUL_NO_DUMB
 .Cd option \&"WSEMUL_DEFAULT=\e"xxx\e""
 .Cd option WS_KERNEL_FG=WSCOL_XXX
@@ -55,7 +55,6 @@
 .Cd "wsmouse*   at ... mux N"
 
 .Cd pseudo-device  wsmux    N
-.Pp
 .Sh DESCRIPTION
 The
 .Nm
@@ -87,7 +86,7 @@ codes in terms of
 Instead, a
 .Dq terminal emulation
 is assigned to each virtual screen when the screen is created (see
-.Xr wsconscfg 8 ).
+.Xr wsconscfg 8 ) .
 Different terminal emulations can be active at the same time on one display.
 .Pp
 The following choices are available:
@@ -112,8 +111,8 @@ machine consoles and delivers its keyboard codes for function and
 keypad keys (as far as present on the actually used keyboard).
 This emulation is sufficient for full-screen applications.
 .It vt100
-is available with the kernel compile option
-.Cd option WSEMUL_VT100 .
+is available by default, but can be disabled with
+.Cd option WSEMUL_NO_VT100 .
 It provides the most commonly used functions of
 .Tn DEC VT100
 terminals with some extensions introduced by the

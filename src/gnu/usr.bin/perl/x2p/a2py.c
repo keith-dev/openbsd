@@ -1,13 +1,13 @@
-/* $RCSfile: a2py.c,v $$Revision: 1.4 $$Date: 2000/04/06 17:09:15 $
+/* $RCSfile: a2py.c,v $$Revision: 1.5 $$Date: 2001/05/24 18:36:40 $
  *
- *    Copyright (c) 1991-1997, Larry Wall
+ *    Copyright (c) 1991-2001, Larry Wall
  *
  *    You may distribute under the terms of either the GNU General Public
  *    License or the Artistic License, as specified in the README file.
  *
  * $Log: a2py.c,v $
- * Revision 1.4  2000/04/06 17:09:15  millert
- * perl-5.6.0 + local changes
+ * Revision 1.5  2001/05/24 18:36:40  millert
+ * merge in perl 5.6.1 with our local changes
  *
  */
 

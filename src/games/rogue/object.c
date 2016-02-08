@@ -1,4 +1,4 @@
-/*	$OpenBSD: object.c,v 1.3 1998/08/22 08:55:36 pjanzen Exp $	*/
+/*	$OpenBSD: object.c,v 1.5 2001/08/12 19:52:56 pjanzen Exp $	*/
 /*	$NetBSD: object.c,v 1.3 1995/04/22 10:27:50 cgd Exp $	*/
 
 /*
@@ -41,7 +41,7 @@
 #if 0
 static char sccsid[] = "@(#)object.c	8.1 (Berkeley) 5/31/93";
 #else
-static char rcsid[] = "$OpenBSD: object.c,v 1.3 1998/08/22 08:55:36 pjanzen Exp $";
+static char rcsid[] = "$OpenBSD: object.c,v 1.5 2001/08/12 19:52:56 pjanzen Exp $";
 #endif
 #endif /* not lint */
 
@@ -269,6 +269,7 @@ object_at(pack, row, col)
 
 object *
 get_letter_object(ch)
+	int ch;
 {
 	object *obj;
 
@@ -790,7 +791,7 @@ c_object_for_wizard()
 	}
 	if ((ch != ',') && (ch != ':')) {
 GIL:
-		if (get_input_line("which kind?", "", buf, "", 0, 1)) {
+		if (get_input_line("which kind?", "", buf, sizeof(buf), "", 0, 1)) {
 			wk = get_number(buf);
 			if ((wk >= 0) && (wk <= max)) {
 				obj->which_kind = (unsigned short) wk;

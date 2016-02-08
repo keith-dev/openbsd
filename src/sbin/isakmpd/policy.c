@@ -1,9 +1,10 @@
-/*	$OpenBSD: policy.c,v 1.28 2001/04/09 12:34:38 ho Exp $	*/
+/*	$OpenBSD: policy.c,v 1.46 2001/08/26 01:48:12 niklas Exp $	*/
 /*	$EOM: policy.c,v 1.49 2000/10/24 13:33:39 niklas Exp $ */
 
 /*
  * Copyright (c) 1999, 2000, 2001 Angelos D. Keromytis.  All rights reserved.
  * Copyright (c) 1999, 2000, 2001 Niklas Hallqvist.  All rights reserved.
+ * Copyright (c) 2001 Håkan Olsson.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -53,27 +54,19 @@
 #include <arpa/inet.h>
 #include <errno.h>
 #include <openssl/ssl.h>
+#include <netdb.h>
 
 #include "sysdep.h"
 
-#include "app.h"
 #include "conf.h"
-#include "connection.h"
-#include "cookie.h"
-#include "doi.h"
 #include "dyn.h"
 #include "exchange.h"
-#include "init.h"
 #include "ipsec.h"
 #include "isakmp_doi.h"
-#include "math_group.h"
 #include "sa.h"
-#include "timer.h"
 #include "transport.h"
-#include "udp.h"
 #include "log.h"
 #include "message.h"
-#include "ui.h"
 #include "util.h"
 #include "policy.h"
 #include "x509.h"
@@ -122,12 +115,8 @@ static struct dynload_script libkeynote_script[] = {
 };
 #endif
 
-int keynote_sessid = -1;
 char **keynote_policy_asserts = NULL;
 int keynote_policy_asserts_num = 0;
-char **x509_policy_asserts = NULL;
-int x509_policy_asserts_num = 0;
-int x509_policy_asserts_num_alloc = 0;
 struct exchange *policy_exchange = 0;
 struct sa *policy_sa = 0;
 struct sa *policy_isakmp_sa = 0;
@@ -162,6 +151,23 @@ my_inet_ntop4 (const in_addr_t *src, char *dst, size_t size, int normalize)
   return dst;
 }
 
+static const char *
+my_inet_ntop6 (const unsigned char *src, char *dst, size_t size)
+{
+  static const char fmt[] = "%02x%02x:%02x%02x:%02x%02x:%02x%02x:%02x%02x:%02x%02x:%02x%02x:%02x%02x";
+  char tmp[sizeof "ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff"];
+
+  if (sprintf (tmp, fmt, src[0], src[1], src[2], src[3], src[4], src[5],
+               src[6], src[7], src[8], src[9], src[10], src[11], src[12],
+               src[13], src[14], src[15]) > size)
+    {
+      errno = ENOSPC;
+      return 0;
+    }
+  strcpy (dst, tmp);
+  return dst;
+}
+
 char *
 policy_callback (char *name)
 {
@@ -169,13 +175,14 @@ policy_callback (char *name)
 
   u_int8_t *attr, *value, *id, *idlocal, *idremote;
   size_t id_sz, idlocalsz, idremotesz;
-  struct sockaddr_in *sin;
+  struct sockaddr *sin;
   struct ipsec_exch *ie;
   struct ipsec_sa *is;
   int fmt, i, lifetype = 0;
   in_addr_t net, subnet;
   u_int16_t len, type;
   time_t tt;
+  char *addr;
   static char mytimeofday[15];
 
   /* We use all these as a cache.  */
@@ -187,12 +194,16 @@ policy_callback (char *name)
   static char *comp_encapsulation, ah_key_length[32], esp_key_length[32];
   static char ah_key_rounds[32], esp_key_rounds[32], comp_dict_size[32];
   static char comp_private_alg[32], *remote_filter_type, *local_filter_type;
-  static char remote_filter_addr_upper[64], remote_filter_addr_lower[64];
-  static char local_filter_addr_upper[64], local_filter_addr_lower[64];
+  static char remote_filter_addr_upper[NI_MAXHOST];
+  static char remote_filter_addr_lower[NI_MAXHOST];
+  static char local_filter_addr_upper[NI_MAXHOST];
+  static char local_filter_addr_lower[NI_MAXHOST];
   static char ah_group_desc[32], esp_group_desc[32], comp_group_desc[32];
-  static char remote_ike_address[64], local_ike_address[64];
-  static char *remote_id_type, remote_id_addr_upper[64], *phase_1;
-  static char remote_id_addr_lower[64], *remote_id_proto, remote_id_port[32];
+  static char remote_ike_address[NI_MAXHOST];
+  static char local_ike_address[NI_MAXHOST];
+  static char *remote_id_type, remote_id_addr_upper[NI_MAXHOST], *phase_1;
+  static char remote_id_addr_lower[NI_MAXHOST];
+  static char *remote_id_proto, remote_id_port[32];
   static char remote_filter_port[32], local_filter_port[32];
   static char *remote_filter_proto, *local_filter_proto, *pfs, *initiator;
   static char remote_filter_proto_num[3], local_filter_proto_num[3];
@@ -630,16 +641,25 @@ policy_callback (char *name)
 	    }
 	}
 
-      /* XXX IPv4-specific.  */
-      policy_sa->transport->vtbl->get_src (policy_sa->transport,
-					   (struct sockaddr **)&sin, &fmt);
-      my_inet_ntop4 (&(sin->sin_addr.s_addr), local_ike_address,
-		     sizeof local_ike_address - 1, 0);
+      policy_sa->transport->vtbl->get_src (policy_sa->transport, &sin);
+      if (sockaddr2text (sin, &addr, 1))
+	{
+	  log_error ("policy_callback: sockaddr2text failed");
+	  goto bad;
+	}
+      strncpy (local_ike_address, addr, sizeof local_ike_address);
+      local_ike_address[sizeof local_ike_address - 1] = '\0';
+      free (addr);
 
-      policy_sa->transport->vtbl->get_dst (policy_sa->transport,
-					   (struct sockaddr **)&sin, &fmt);
-      my_inet_ntop4 (&(sin->sin_addr.s_addr), remote_ike_address,
-		     sizeof remote_ike_address - 1, 0);
+      policy_sa->transport->vtbl->get_dst (policy_sa->transport, &sin);
+      if (sockaddr2text (sin, &addr, 1))
+	{
+	  log_error ("policy_callback: sockaddr2text failed");
+	  goto bad;
+	}
+      strncpy (remote_ike_address, addr, sizeof remote_ike_address);
+      remote_ike_address[sizeof remote_ike_address - 1] = '\0';
+      free (addr);
 
       switch (policy_isakmp_sa->exch_type)
 	{
@@ -739,19 +759,88 @@ policy_callback (char *name)
 	  break;
 
 	case IPSEC_ID_IPV6_ADDR:
-	  /* XXX Not yet implemented.  */
 	  remote_id_type = "IPv6 address";
+	  my_inet_ntop6 (id + ISAKMP_ID_DATA_OFF - ISAKMP_GEN_SZ,
+			 remote_id_addr_upper, sizeof remote_id_addr_upper);
+	  strcpy (remote_id_addr_lower, remote_id_addr_upper);
+	  remote_id = strdup (remote_id_addr_upper);
+	  if (!remote_id)
+  	    {
+	      log_error ("policy_callback: strdup (\"%s\") failed",
+			 remote_id_addr_upper);
+	      goto bad;
+	    }
 	  break;
 
 	case IPSEC_ID_IPV6_RANGE:
-	  /* XXX Not yet implemented.  */
 	  remote_id_type = "IPv6 range";
+
+	  my_inet_ntop6 (id + ISAKMP_ID_DATA_OFF - ISAKMP_GEN_SZ,
+			 remote_id_addr_lower,
+			 sizeof remote_id_addr_lower - 1);
+
+	  my_inet_ntop6 (id + ISAKMP_ID_DATA_OFF - ISAKMP_GEN_SZ + 16,
+			 remote_id_addr_upper,
+			 sizeof remote_id_addr_upper - 1);
+
+	  remote_id = calloc (strlen (remote_id_addr_upper) +
+			      strlen (remote_id_addr_lower) + 2,
+			      sizeof (char));
+	  if (!remote_id)
+	    {
+	      log_error ("policy_callback: calloc (%d, %d) failed",
+			 strlen (remote_id_addr_upper)
+			 + strlen (remote_id_addr_lower) + 2,
+			 sizeof (char));
+	      goto bad;
+	    }
+
+	  strcpy (remote_id, remote_id_addr_lower);
+	  remote_id[strlen (remote_id_addr_lower)] = '-';
+	  strcpy (remote_id + strlen (remote_id_addr_lower) + 1,
+		  remote_id_addr_upper);
 	  break;
 
 	case IPSEC_ID_IPV6_ADDR_SUBNET:
-	  /* XXX Not yet implemented.  */
-	  remote_id_type = "IPv6 address";
+	{
+	  struct in6_addr net, mask;
+
+	  remote_id_type = "IPv6 subnet";
+
+	  bcopy (id + ISAKMP_ID_DATA_OFF - ISAKMP_GEN_SZ, &net, sizeof (net));
+	  bcopy (id + ISAKMP_ID_DATA_OFF - ISAKMP_GEN_SZ + 16, &mask,
+		 sizeof (mask));
+
+	  for (i = 0; i < 16; i++)
+	    net.s6_addr[i] &= mask.s6_addr[i];
+
+	  my_inet_ntop6 ((char *) &net, remote_id_addr_lower,
+			 sizeof remote_id_addr_lower - 1);
+
+	  for (i = 0; i < 16; i++)
+	    net.s6_addr[i] |= ~mask.s6_addr[i];
+
+	  my_inet_ntop6 ((char *) &net, remote_id_addr_upper,
+			 sizeof remote_id_addr_upper - 1);
+
+	  remote_id = calloc (strlen (remote_id_addr_upper) +
+			      strlen (remote_id_addr_lower) + 2,
+			      sizeof (char));
+	  if (!remote_id)
+	    {
+	      log_error ("policy_callback: calloc (%d, %d) failed",
+			 strlen (remote_id_addr_upper)
+			 + strlen (remote_id_addr_lower) + 2,
+			 sizeof (char));
+	      goto bad;
+	    }
+
+	  strcpy (remote_id, remote_id_addr_lower);
+	  remote_id[strlen (remote_id_addr_lower)] = '-';
+	  strcpy (remote_id + strlen (remote_id_addr_lower) + 1,
+		  remote_id_addr_upper);
 	  break;
+	}
 
 	case IPSEC_ID_FQDN:
 	  remote_id_type = "FQDN";
@@ -783,11 +872,21 @@ policy_callback (char *name)
 		  id_sz - ISAKMP_ID_DATA_OFF + ISAKMP_GEN_SZ);
 	  break;
 
-	case IPSEC_ID_DER_ASN1_DN: /* XXX -- not sure what's in this.  */
+	case IPSEC_ID_DER_ASN1_DN:
 	  remote_id_type = "ASN1 DN";
+
+	  remote_id = x509_DN_string (id + ISAKMP_ID_DATA_OFF - ISAKMP_GEN_SZ,
+				      id_sz - ISAKMP_ID_DATA_OFF
+				      + ISAKMP_GEN_SZ);
+	  if (!remote_id)
+	    {
+	      LOG_DBG ((LOG_POLICY, 50,
+			"policy_callback: failed to decode name"));
+	      goto bad;
+	    }
 	  break;
 
-	case IPSEC_ID_DER_ASN1_GN: /* XXX -- not sure what's in this.  */
+	case IPSEC_ID_DER_ASN1_GN: /* XXX */
 	  remote_id_type = "ASN1 GN";
 	  break;
 
@@ -803,6 +902,17 @@ policy_callback (char *name)
 			 sizeof (char));
 	      goto bad;
 	    }
+	  /* Does it contain any non-printable characters ? */
+	  for (i = 0; i < id_sz - ISAKMP_ID_DATA_OFF + ISAKMP_GEN_SZ; i++)
+	    if (!isprint (*(id + ISAKMP_ID_DATA_OFF - ISAKMP_GEN_SZ + i)))
+	      break;
+	  if (i >= id_sz - ISAKMP_ID_DATA_OFF + ISAKMP_GEN_SZ)
+	    {
+	      memcpy (remote_id, id + ISAKMP_ID_DATA_OFF - ISAKMP_GEN_SZ,
+		      id_sz - ISAKMP_ID_DATA_OFF + ISAKMP_GEN_SZ);
+	      break;
+	    }
+	  /* Non-printable characters, convert to hex */
           for (i = 0; i < id_sz - ISAKMP_ID_DATA_OFF + ISAKMP_GEN_SZ; i++)
 	    {
 	      remote_id[2 * i]
@@ -936,52 +1046,128 @@ policy_callback (char *name)
 	      break;
 
 	    case IPSEC_ID_IPV6_ADDR:
-	      /* XXX Not yet implemented.  */
 	      remote_filter_type = "IPv6 address";
+	      my_inet_ntop6 (idremote + ISAKMP_ID_DATA_OFF,
+			     remote_filter_addr_upper,
+			     sizeof remote_filter_addr_upper - 1);
+	      strcpy (remote_filter_addr_lower, remote_filter_addr_upper);
+	      remote_filter = strdup (remote_filter_addr_upper);
+	      if (!remote_filter)
+	        {
+		  log_error ("policy_callback: strdup (\"%s\") failed",
+			     remote_filter_addr_upper);
+		  goto bad;
+		}
 	      break;
 
 	    case IPSEC_ID_IPV6_RANGE:
-	      /* XXX Not yet implemented.  */
 	      remote_filter_type = "IPv6 range";
-	      break;
 
-	    case IPSEC_ID_IPV6_ADDR_SUBNET:
-	      /* XXX Not yet implemented.  */
-	      remote_filter_type = "IPv6 address";
-	      break;
+	      my_inet_ntop6 (idremote + ISAKMP_ID_DATA_OFF,
+			     remote_filter_addr_lower,
+			     sizeof remote_filter_addr_lower - 1);
 
-	    case IPSEC_ID_FQDN:
-	      remote_filter_type = "FQDN";
-	      remote_filter = calloc (idremotesz - ISAKMP_ID_DATA_OFF + 1,
+	      my_inet_ntop6 (idremote + ISAKMP_ID_DATA_OFF + 16,
+			     remote_filter_addr_upper,
+			     sizeof remote_filter_addr_upper - 1);
+
+	      remote_filter = calloc (strlen (remote_filter_addr_upper) +
+				      strlen (remote_filter_addr_lower) + 2,
 				      sizeof (char));
 	      if (!remote_filter)
-	        {
+		{
 		  log_error ("policy_callback: calloc (%d, %d) failed",
-			     idremotesz - ISAKMP_ID_DATA_OFF + 1,
+			     strlen (remote_filter_addr_upper) +
+			     strlen (remote_filter_addr_lower) + 2,
 			     sizeof (char));
 		  goto bad;
 		}
+
+	      strcpy (remote_filter, remote_filter_addr_lower);
+	      remote_filter[strlen (remote_filter_addr_lower)] = '-';
+	      strcpy (remote_filter + strlen (remote_filter_addr_lower) + 1,
+		      remote_filter_addr_upper);
+	      break;
+
+	    case IPSEC_ID_IPV6_ADDR_SUBNET:
+	    {
+	      struct in6_addr net, mask;
+
+	      remote_filter_type = "IPv6 subnet";
+
+	      bcopy (idremote + ISAKMP_ID_DATA_OFF, &net, sizeof (net));
+	      bcopy (idremote + ISAKMP_ID_DATA_OFF + 16, &mask, sizeof (mask));
+
+	      for (i = 0; i < 16; i++)
+		net.s6_addr[i] &= mask.s6_addr[i];
+
+	      my_inet_ntop6 ((char *) &net, remote_filter_addr_lower,
+			     sizeof remote_filter_addr_lower - 1);
+
+	      for (i = 0; i < 16; i++)
+		net.s6_addr[i] |= ~mask.s6_addr[i];
+
+	      my_inet_ntop6 ((char *) &net, remote_filter_addr_upper,
+			     sizeof remote_filter_addr_upper - 1);
+
+	      remote_filter = calloc (strlen (remote_filter_addr_upper) +
+				      strlen (remote_filter_addr_lower) + 2,
+				      sizeof (char));
+	      if (!remote_filter)
+		{
+		  log_error ("policy_callback: calloc (%d, %d) failed",
+			     strlen (remote_filter_addr_upper) +
+			     strlen (remote_filter_addr_lower) + 2,
+			     sizeof (char));
+		  goto bad;
+		}
+
+	      strcpy (remote_filter, remote_filter_addr_lower);
+	      remote_filter[strlen (remote_filter_addr_lower)] = '-';
+	      strcpy (remote_filter + strlen (remote_filter_addr_lower) + 1,
+		      remote_filter_addr_upper);
+	      break;
+	    }
+
+	    case IPSEC_ID_FQDN:
+	      remote_filter_type = "FQDN";
+	      remote_filter = malloc (idremotesz - ISAKMP_ID_DATA_OFF + 1);
+	      if (!remote_filter)
+	        {
+		  log_error ("policy_callback: malloc (%d) failed",
+			     idremotesz - ISAKMP_ID_DATA_OFF + 1);
+		  goto bad;
+		}
 	      memcpy (remote_filter, idremote + ISAKMP_ID_DATA_OFF,
-		      idremotesz);
+		      idremotesz - ISAKMP_ID_DATA_OFF);
+	      remote_filter[idremotesz - ISAKMP_ID_DATA_OFF] = '\0';
 	      break;
 
 	    case IPSEC_ID_USER_FQDN:
 	      remote_filter_type = "User FQDN";
-	      remote_filter = calloc (idremotesz - ISAKMP_ID_DATA_OFF + 1,
-				      sizeof (char));
+	      remote_filter = malloc (idremotesz - ISAKMP_ID_DATA_OFF + 1);
 	      if (!remote_filter)
 	        {
-		  log_error ("policy_callback: calloc (%d, %d) failed",
-			     idremotesz - ISAKMP_ID_DATA_OFF + 1,
-			     sizeof (char));
+		  log_error ("policy_callback: malloc (%d) failed",
+			     idremotesz - ISAKMP_ID_DATA_OFF + 1);
 		  goto bad;
 		}
 	      memcpy (remote_filter, idremote + ISAKMP_ID_DATA_OFF,
-		      idremotesz);
+		      idremotesz - ISAKMP_ID_DATA_OFF);
+	      remote_filter[idremotesz - ISAKMP_ID_DATA_OFF] = '\0';
 	      break;
 
-	    case IPSEC_ID_DER_ASN1_DN: /* XXX -- not sure what's in this.  */
+	    case IPSEC_ID_DER_ASN1_DN:
 	      remote_filter_type = "ASN1 DN";
+
+	      remote_filter = x509_DN_string (idremote + ISAKMP_ID_DATA_OFF,
+					      idremotesz - ISAKMP_ID_DATA_OFF);
+	      if (!remote_filter)
+	        {
+		  LOG_DBG ((LOG_POLICY, 50,
+			    "policy_callback: failed to decode name"));
+		  goto bad;
+		}
 	      break;
 
 	    case IPSEC_ID_DER_ASN1_GN: /* XXX -- not sure what's in this.  */
@@ -1000,6 +1186,17 @@ policy_callback (char *name)
 			     sizeof (char));
 		  goto bad;
 	        }
+	      /* Does it contain any non-printable characters ? */
+	      for (i = 0; i < idremotesz - ISAKMP_ID_DATA_OFF; i++)
+		if (!isprint (*(idremote + ISAKMP_ID_DATA_OFF + i)))
+		  break;
+	      if (i >= idremotesz - ISAKMP_ID_DATA_OFF)
+	        {
+		  memcpy (remote_filter, idremote + ISAKMP_ID_DATA_OFF,
+			  idremotesz - ISAKMP_ID_DATA_OFF);
+		  break;
+		}
+	      /* Non-printable characters, convert to hex */
               for (i = 0; i < idremotesz - ISAKMP_ID_DATA_OFF; i++)
 	        {
 		  remote_filter[2 * i]
@@ -1043,15 +1240,30 @@ policy_callback (char *name)
 	}
       else
         {
-	  policy_sa->transport->vtbl->get_dst (policy_sa->transport,
-					       (struct sockaddr **) &sin,
-					       &fmt);
-	  remote_filter_type = "IPv4 address";
-
-	  my_inet_ntop4 (&(sin->sin_addr.s_addr), remote_filter_addr_upper,
-			 sizeof remote_filter_addr_upper - 1, 0);
-	  my_inet_ntop4 (&(sin->sin_addr.s_addr), remote_filter_addr_lower,
-			 sizeof remote_filter_addr_lower - 1, 0);
+	  policy_sa->transport->vtbl->get_dst (policy_sa->transport, &sin);
+	  switch (sin->sa_family)
+	    {
+	    case AF_INET:
+	      remote_filter_type = "IPv4 address";
+	      break;
+	    case AF_INET6:
+	      remote_filter_type = "IPv6 address";
+	      break;
+	    default:
+	      log_print ("policy_callback: unsupported protocol family %d",
+			 sin->sa_family);
+	      goto bad;
+	    }
+	  if (sockaddr2text (sin, &addr, 1))
+	    {
+	      log_error ("policy_callback: sockaddr2text failed");
+	      goto bad;
+	    }
+	  memcpy (remote_filter_addr_upper, addr,
+		  sizeof remote_filter_addr_upper);
+	  memcpy (remote_filter_addr_lower, addr,
+		  sizeof remote_filter_addr_lower);
+	  free (addr);
 	  remote_filter = strdup (remote_filter_addr_upper);
 	  if (!remote_filter)
 	    {
@@ -1137,55 +1349,132 @@ policy_callback (char *name)
 	      break;
 
 	    case IPSEC_ID_IPV6_ADDR:
-	      /* XXX Not yet implemented.  */
 	      local_filter_type = "IPv6 address";
+	      my_inet_ntop6 (idlocal + ISAKMP_ID_DATA_OFF,
+			     local_filter_addr_upper,
+			     sizeof local_filter_addr_upper - 1);
+	      strcpy (local_filter_addr_lower, local_filter_addr_upper);
+	      local_filter = strdup (local_filter_addr_upper);
+	      if (!local_filter)
+	        {
+		  log_error ("policy_callback: strdup (\"%s\") failed",
+			     local_filter_addr_upper);
+		  goto bad;
+		}
 	      break;
 
 	    case IPSEC_ID_IPV6_RANGE:
-	      /* XXX Not yet implemented.  */
 	      local_filter_type = "IPv6 range";
-	      break;
 
-	    case IPSEC_ID_IPV6_ADDR_SUBNET:
-	      /* XXX Not yet implemented.  */
-	      local_filter_type = "IPv6 address";
-	      break;
+	      my_inet_ntop6 (idlocal + ISAKMP_ID_DATA_OFF,
+			     local_filter_addr_lower,
+			     sizeof local_filter_addr_lower - 1);
 
-	    case IPSEC_ID_FQDN:
-	      local_filter_type = "FQDN";
-	      local_filter = calloc (idlocalsz - ISAKMP_ID_DATA_OFF + 1,
-				     sizeof (char));
+	      my_inet_ntop6 (idlocal + ISAKMP_ID_DATA_OFF + 16,
+			     local_filter_addr_upper,
+			     sizeof local_filter_addr_upper - 1);
+
+	      local_filter = calloc (strlen (local_filter_addr_upper) +
+				      strlen (local_filter_addr_lower) + 2,
+				      sizeof (char));
 	      if (!local_filter)
-	        {
+		{
 		  log_error ("policy_callback: calloc (%d, %d) failed",
-			     idlocalsz - ISAKMP_ID_DATA_OFF + 1,
+			     strlen (local_filter_addr_upper) +
+			     strlen (local_filter_addr_lower) + 2,
 			     sizeof (char));
 		  goto bad;
 		}
+
+	      strcpy (local_filter, local_filter_addr_lower);
+	      local_filter[strlen (local_filter_addr_lower)] = '-';
+	      strcpy (local_filter + strlen (local_filter_addr_lower) + 1,
+		      local_filter_addr_upper);
+	      break;
+
+	    case IPSEC_ID_IPV6_ADDR_SUBNET:
+	    {
+	      struct in6_addr net, mask;
+
+	      local_filter_type = "IPv6 subnet";
+
+	      bcopy (idlocal + ISAKMP_ID_DATA_OFF, &net, sizeof (net));
+	      bcopy (idlocal + ISAKMP_ID_DATA_OFF + 16, &mask, sizeof (mask));
+
+	      for (i = 0; i < 16; i++)
+		net.s6_addr[i] &= mask.s6_addr[i];
+
+	      my_inet_ntop6 ((char *) &net, local_filter_addr_lower,
+			     sizeof local_filter_addr_lower - 1);
+
+	      for (i = 0; i < 16; i++)
+		net.s6_addr[i] |= ~mask.s6_addr[i];
+
+	      my_inet_ntop6 ((char *) &net, local_filter_addr_upper,
+			     sizeof local_filter_addr_upper - 1);
+
+	      local_filter = calloc (strlen (local_filter_addr_upper) +
+				      strlen (local_filter_addr_lower) + 2,
+				      sizeof (char));
+	      if (!local_filter)
+		{
+		  log_error ("policy_callback: calloc (%d, %d) failed",
+			     strlen (local_filter_addr_upper) +
+			     strlen (local_filter_addr_lower) + 2,
+			     sizeof (char));
+		  goto bad;
+		}
+
+	      strcpy (local_filter, local_filter_addr_lower);
+	      local_filter[strlen (local_filter_addr_lower)] = '-';
+	      strcpy (local_filter + strlen (local_filter_addr_lower) + 1,
+		      local_filter_addr_upper);
+	      break;
+	    }
+
+	    case IPSEC_ID_FQDN:
+	      local_filter_type = "FQDN";
+	      local_filter = malloc (idlocalsz - ISAKMP_ID_DATA_OFF + 1);
+	      if (!local_filter)
+	        {
+		  log_error ("policy_callback: malloc (%d) failed",
+			     idlocalsz - ISAKMP_ID_DATA_OFF + 1);
+		  goto bad;
+		}
 	      memcpy (local_filter, idlocal + ISAKMP_ID_DATA_OFF,
-		      idlocalsz);
+		      idlocalsz - ISAKMP_ID_DATA_OFF);
+	      local_filter[idlocalsz - ISAKMP_ID_DATA_OFF] = '\0';
 	      break;
 
 	    case IPSEC_ID_USER_FQDN:
 	      local_filter_type = "User FQDN";
-	      local_filter = calloc (idlocalsz - ISAKMP_ID_DATA_OFF + 1,
-				     sizeof (char));
+	      local_filter = malloc (idlocalsz - ISAKMP_ID_DATA_OFF + 1);
 	      if (!local_filter)
 	        {
-		  log_error ("policy_callback: calloc (%d, %d) failed",
-			     idlocalsz - ISAKMP_ID_DATA_OFF + 1,
-			     sizeof (char));
+		  log_error ("policy_callback: malloc (%d) failed",
+			     idlocalsz - ISAKMP_ID_DATA_OFF + 1);
 		  goto bad;
 		}
 	      memcpy (local_filter, idlocal + ISAKMP_ID_DATA_OFF,
-		      idlocalsz);
+		      idlocalsz - ISAKMP_ID_DATA_OFF);
+	      local_filter[idlocalsz - ISAKMP_ID_DATA_OFF] = '\0';
 	      break;
 
-	    case IPSEC_ID_DER_ASN1_DN: /* XXX -- not sure what's in this.  */
+	    case IPSEC_ID_DER_ASN1_DN:
 	      local_filter_type = "ASN1 DN";
+
+	      local_filter = x509_DN_string (idlocal + ISAKMP_ID_DATA_OFF,
+					     idlocalsz - ISAKMP_ID_DATA_OFF);
+	      if (!local_filter)
+	        {
+		  LOG_DBG ((LOG_POLICY, 50,
+			    "policy_callback: failed to decode name"));
+		  goto bad;
+		}
 	      break;
 
-	    case IPSEC_ID_DER_ASN1_GN: /* XXX -- not sure what's in this.  */
+	    case IPSEC_ID_DER_ASN1_GN:
+	      /* XXX -- not sure what's in this.  */
 	      local_filter_type = "ASN1 GN";
 	      break;
 
@@ -1200,7 +1489,18 @@ policy_callback (char *name)
 			     sizeof (char));
 		  goto bad;
 	        }
-              for (i = 0; i < idremotesz - ISAKMP_ID_DATA_OFF; i++)
+	      /* Does it contain any non-printable characters ? */
+	      for (i = 0; i < idlocalsz - ISAKMP_ID_DATA_OFF; i++)
+		if (!isprint (*(idlocal + ISAKMP_ID_DATA_OFF + i)))
+		  break;
+	      if (i >= idlocalsz - ISAKMP_ID_DATA_OFF)
+	        {
+		  memcpy (local_filter, idlocal + ISAKMP_ID_DATA_OFF,
+			  idlocalsz - ISAKMP_ID_DATA_OFF);
+		  break;
+		}
+	      /* Non-printable characters, convert to hex */
+              for (i = 0; i < idlocalsz - ISAKMP_ID_DATA_OFF; i++)
 	        {
 		  local_filter[2 * i]
 		    = hextab[*(idlocal + ISAKMP_ID_DATA_OFF) >> 4];
@@ -1244,15 +1544,31 @@ policy_callback (char *name)
       else
         {
 	  policy_sa->transport->vtbl->get_src (policy_sa->transport,
-					       (struct sockaddr **)&sin,
-					       &fmt);
+					       (struct sockaddr **)&sin);
+	  switch (sin->sa_family)
+	    {
+	    case AF_INET:
+	      local_filter_type = "IPv4 address";
+	      break;
+	    case AF_INET6:
+	      local_filter_type = "IPv6 address";
+	      break;
+	    default:
+	      log_print ("policy_callback: unsupported protocol family %d",
+			 sin->sa_family);
+	      goto bad;
+	    }
 
-	  local_filter_type = "IPv4 address";
-
-	  my_inet_ntop4 (&(sin->sin_addr.s_addr), local_filter_addr_upper,
-			 sizeof local_filter_addr_upper - 1, 0);
-	  my_inet_ntop4 (&(sin->sin_addr.s_addr), local_filter_addr_lower,
-			 sizeof local_filter_addr_lower - 1, 0);
+	  if (sockaddr2text (sin, &addr, 1))
+	    {
+	      log_error ("policy_callback: sockaddr2text failed");
+	      goto bad;
+	    }
+	  memcpy (local_filter_addr_upper, addr,
+		  sizeof local_filter_addr_upper);
+	  memcpy (local_filter_addr_lower, addr,
+		  sizeof local_filter_addr_lower);
+	  free (addr);
 	  local_filter = strdup (local_filter_addr_upper);
 	  if (!local_filter)
 	    {
@@ -1522,15 +1838,6 @@ policy_init (void)
     return;
 #endif
 
-  /* If there exists a session already, release all its resources.  */
-  if (keynote_sessid != -1)
-    LK (kn_close, (keynote_sessid));
-
-  /* Initialize a session.  */
-  keynote_sessid = LK (kn_init, ());
-  if (keynote_sessid == -1)
-    log_fatal ("policy_init: kn_init () failed");
-
   /* Get policy file from configuration.  */
   policy_file = conf_get_str ("General", "Policy-file");
   if (!policy_file)
@@ -1569,16 +1876,8 @@ policy_init (void)
   /* Begone!  */
   free (ptr);
 
-  /* Add each individual policy in the session.  */
-  for (fd = 0; fd < i; fd++)
-    {
-      if (LK (kn_add_assertion, (keynote_sessid, asserts[fd],
-				 strlen (asserts[fd]), ASSERT_FLAG_LOCAL))
-	  == -1)
-        log_print ("policy_init: "
-		   "kn_add_assertion (%d, %p, %d, ASSERT_FLAG_LOCAL) failed",
-                   keynote_sessid, asserts[fd], strlen (asserts[fd]));
-    }
+  if (asserts == (char **) NULL)
+    log_print ("policy_init: all policies flushed");
 
   /* Cleanup */
   if (keynote_policy_asserts)
@@ -1605,12 +1904,13 @@ keynote_cert_init (void)
 void *
 keynote_cert_get (u_int8_t *data, u_int32_t len)
 {
-  char *foo = calloc (len + 1, sizeof (char));
+  char *foo = malloc (len + 1);
 
   if (foo == NULL)
     return NULL;
 
   memcpy (foo, data, len);
+  foo[len] = '\0';
   return foo;
 }
 
@@ -1724,7 +2024,7 @@ int
 keynote_cert_obtain (u_int8_t *id, size_t id_len, void *data, u_int8_t **cert,
 		     u_int32_t *certlen)
 {
-  char *dirname, *file;
+  char *dirname, *file, *addr_str;
   struct stat sb;
   int idtype, fd, len;
 
@@ -1752,21 +2052,24 @@ keynote_cert_obtain (u_int8_t *id, size_t id_len, void *data, u_int8_t **cert,
   switch (idtype)
     {
     case IPSEC_ID_IPV4_ADDR:
-      {
-	struct in_addr in;
+    case IPSEC_ID_IPV6_ADDR:
+      util_ntoa (&addr_str, idtype == IPSEC_ID_IPV4_ADDR ? AF_INET : AF_INET6,
+		 id);
+      if (addr_str == 0)
+	return 0;
 
-	file = calloc (len + 15, sizeof (char));
-	if (file == NULL)
-	  {
-	    log_error ("keynote_cert_obtain: failed to allocate %d bytes",
-		       len + 15);
-	    return 0;
-	  }
+      file = calloc (len + strlen (addr_str), sizeof (char));
+      if (file == NULL)
+	{
+	  log_error ("keynote_cert_obtain: failed to allocate %d bytes",
+		     len + strlen (addr_str));
+	  free (addr_str);
+	  return 0;
+	}
 
-	memcpy (&in, id, sizeof in);
-	sprintf (file, "%s/%s/%s", dirname, inet_ntoa (in), CREDENTIAL_FILE);
-	break;
-      }
+      sprintf (file, "%s/%s/%s", dirname, addr_str, CREDENTIAL_FILE);
+      free (addr_str);
+      break;
 
     case IPSEC_ID_FQDN:
     case IPSEC_ID_USER_FQDN:
@@ -1797,7 +2100,7 @@ keynote_cert_obtain (u_int8_t *id, size_t id_len, void *data, u_int8_t **cert,
       return 0;
     }
 
-  *cert = calloc (sb.st_size, sizeof (char));
+  *cert = calloc (sb.st_size + 1, sizeof (char));
   if (*cert == NULL)
     {
       log_error ("keynote_cert_obtain: failed to allocate %d bytes",
@@ -1843,25 +2146,43 @@ int
 keynote_cert_get_key (void *scert, void *keyp)
 {
   struct keynote_keylist *kl;
-  int sid, num;
+  int sid, kid, num;
   char **foo;
 
   foo = LK (kn_read_asserts, ((char *)scert, strlen ((char *)scert), &num));
   if (foo == NULL || num == 0)
-    return 0;
+    {
+      log_print ("keynote_cert_get_key: failed to decompose credentials");
+      return 0;
+    }
 
-  sid = LK (kn_add_assertion, (keynote_sessid, foo[num - 1],
-			       strlen (scert), 0));
+  kid = LK (kn_init, ());
+  if (kid == -1)
+    {
+      log_print ("keynote_cert_get_key: failed to initialize new policy "
+		 "session");
+      while (num--)
+	free (foo[num]);
+      free (foo);
+      return 0;
+    }
+
+  sid = LK (kn_add_assertion, (kid, foo[num - 1],
+			       strlen (foo[num - 1]), 0));
   while (num--)
     free (foo[num]);
   free (foo);
 
   if (sid == -1)
-    return 0;
+    {
+      log_print ("keynote_cert_get_key: failed to add assertion");
+      LK (kn_close, (kid));
+      return 0;
+    }
 
   *(RSA **)keyp = NULL;
 
-  kl = LK (kn_get_licensees, (keynote_sessid, sid));
+  kl = LK (kn_get_licensees, (kid, sid));
   while (kl)
     {
       if (kl->key_alg == KEYNOTE_ALGORITHM_RSA)
@@ -1873,6 +2194,36 @@ keynote_cert_get_key (void *scert, void *keyp)
       kl = kl->key_next;
     }
 
-  LK (kn_remove_assertion, (keynote_sessid, sid));
+  LK (kn_remove_assertion, (kid, sid));
+  LK (kn_close, (kid));
   return *(RSA **)keyp == NULL ? 0 : 1;
+}
+
+void *
+keynote_cert_dup (void *cert)
+{
+  return strdup((char *)cert);
+}
+
+void
+keynote_serialize (void *cert, u_int8_t **data, u_int32_t *datalen)
+{
+  *datalen = strlen ((char *)cert) + 1;
+  *data = strdup (cert); /* So we allocate an extra character at the end... */
+  if (*data == NULL)
+    log_error ("keynote_serialize: malloc (%d) failed", *datalen);
+}
+
+/* From cert to printable */
+char *
+keynote_printable (void *cert)
+{
+  return strdup ((char *)cert);
+}
+
+/* From printable to cert */
+void *
+keynote_from_printable (char *cert)
+{
+  return strdup (cert);
 }

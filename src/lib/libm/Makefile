@@ -1,5 +1,5 @@
 #  $NetBSD: Makefile,v 1.28 1995/11/20 22:06:19 jtc Exp $
-#  $OpenBSD: Makefile,v 1.23 2000/11/08 20:43:37 deraadt Exp $
+#  $OpenBSD: Makefile,v 1.25 2001/08/28 21:44:20 art Exp $
 #
 #  @(#)Makefile 5.1beta 93/09/24 
 # 
@@ -47,7 +47,7 @@
 
 CFLAGS+= -D__LIBM_PRIVATE -D_USE_WRITE
 
-.if (${MACHINE_ARCH} == "sparc")
+.if (${MACHINE_ARCH} == "sparc") || (${MACHINE_ARCH} == "sparc64")
 CFLAGS+= -O0
 .endif
 
@@ -72,7 +72,7 @@ NOIEEE_ARCH=n_infnan.S n_argred.S n_sqrt.S
 ARCH_SRCS = n_atan2.S n_cabs.S n_cbrt.S n_sincos.S n_tan.S n_support.S 
 .endif
 
-.if (${MACHINE_ARCH} == "mvme88k")
+.if (${MACHINE_ARCH} == "m88k")
 CFLAGS+=-Dfloat=double
 .endif
 

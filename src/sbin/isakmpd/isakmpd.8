@@ -1,8 +1,10 @@
-.\" $OpenBSD: isakmpd.8,v 1.24 2001/04/09 21:21:57 ho Exp $
+.\" $OpenBSD: isakmpd.8,v 1.33 2001/08/31 12:22:19 ho Exp $
 .\" $EOM: isakmpd.8,v 1.23 2000/05/02 00:30:23 niklas Exp $
 .\"
-.\" Copyright (c) 1998, 1999 Niklas Hallqvist.  All rights reserved.
+.\" Copyright (c) 1998, 1999, 2000, 2001 Niklas Hallqvist.
+.\" All rights reserved.
 .\" Copyright (c) 1999 Angelos D. Keromytis.  All rights reserved.
+.\" Copyright (c) 2001 Håkan Olsson.  All rights reserved.
 .\"
 .\" Redistribution and use in source and binary forms, with or without
 .\" modification, are permitted provided that the following conditions
@@ -74,10 +76,14 @@ a FIFO or by signals, upcalls from the kernel via a
 .Dv PF_KEY
 socket, and lastly by scheduled events triggered by timers running out.
 .Pp
-Most uses of isakmpd will be to implement so called "virtual private
+Most uses of 
+.Nm
+will be to implement so called "virtual private
 networks" or VPNs for short.  The
 .Xr vpn 8
-manual page describes how to setup isakmpd for a simple VPN.  For other
+manual page describes how to setup 
+.Nm
+for a simple VPN.  For other
 uses, some more knowledge of IKE as a protocol is required.  One source
 of information are the RFCs mentioned below.
 .Pp
@@ -145,6 +151,10 @@ Policy
 .It A
 All
 .El
+.Pp
+Currently used values for
+.Ar level
+are 0 to 99.
 .It Fl f Ar fifo
 The
 .Fl f
@@ -167,7 +177,7 @@ When the
 .Fl n
 option is given, the kernel will not take part in the negotiations.
 This is a non-destructive mode so to say, in that it won't alter any
-SAs in the IPSEC stack.
+SAs in the IPsec stack.
 .It Fl p Ar listen-port
 The
 .Fl p
@@ -213,18 +223,11 @@ should take part in, or there will be a need to setup one.  In the former
 case, what is needed to be done varies depending on the actual Certificate
 Authority used, and is therefore not covered here, more than
 mentioning that
-.Xr openssl 8
+.Xr openssl 1
 needs to be used to create a certificate signing request that the
 CA understands.  The latter case however is described here:
 .Pp
 .Bl -enum
-.It
-An RSA-enabled
-.Pa libcrypto
-(see
-.Xr crypto 3 )
-needs to be installed.  This is described in
-.Xr ssl 8 .
 .It
 Create your own CA as root.
 .Pp
@@ -243,6 +246,7 @@ value, if you enter '.', the field will be left blank.
 .Bd -literal
 # openssl x509 -req -days 365 -in /etc/ssl/private/ca.csr \\
 	-signkey /etc/ssl/private/ca.key \\
+	-extfile /etc/ssl/x509v3.cnf -extensions x509v3_CA \\
 	-out /etc/ssl/ca.crt
 .Ed
 .Pp
@@ -263,19 +267,35 @@ unique.
 .Pp
 Now take these certificate signing requests to your CA and process
 them like below.  You have to add some extensions to the certificate
-in order to make it usable for isakmpd, which is why you will need
-to run
-.Xr certpatch 8 .
+in order to make it usable for 
+.Nm isakmpd .
+There are two possible ways to add the extensions to the certificate.
+Either you have to to run
+.Xr certpatch 8
+or you have to make use of an OpenSSL configuration file, for example
+.Pa /etc/ssl/x509v3.cnf .
 Replace 10.0.0.1 with the IP-address which
 .Nm
 will be using for identity.
 .Pp
+For using
+.Xr certpach 8 ,
+do the following
 .Bd -literal
 # openssl x509 -req -days 365 -in 10.0.0.1.csr -CA /etc/ssl/ca.crt \\
 	-CAkey /etc/ssl/private/ca.key -CAcreateserial \\
 	-out 10.0.0.1.crt
 # certpatch -i 10.0.0.1 -k /etc/ssl/private/ca.key \\
 	10.0.0.1.crt 10.0.0.1.crt
+.Ed
+.Pp
+Otherwise do
+.Bd -literal
+# setenv CERTIP 10.0.0.1
+# openssl x509 -req -days 365 -in 10.0.0.1.csr -CA /etc/ssl/ca.crt \\
+	-CAkey /etc/ssl/private/ca.key -CAcreateserial \\
+	-extfile /etc/ssl/x509v3.cnf -extensions x509v3_IPAddr \\
+	-out 10.0.0.1.crt
 .Ed
 .Pp
 Put the certificate (the file ending in .crt) in
@@ -285,12 +305,38 @@ on your local system.  Also carry over the CA cert
 and put it in
 .Pa /etc/isakmpd/ca/.
 .El
+.Pp
+It is also possible to store trusted public keys to make them directly
+usable by
+.Nm isakmpd .
+The keys should be saved in PEM format (see 
+.Xr openssl 1 )
+and named and stored after this easy formula:
+.Bl -tag -width for_ufqdn_identities
+.It For IPv4 identities
+/etc/isakmpd/pubkeys/ipv4/A.B.C.D
+.It For IPv6 identities
+/etc/isakmpd/pubkeys/ipv6/abcd:abcd::ab:bc
+.It For FQDN identities
+/etc/isakmpd/pubkeys/fqdn/foo.bar.org
+.It For UFQDN identities
+/etc/isakmpd/pubkeys/ufqdn/user@foo.bar.org
+.El
 .Sh BUGS
 The
 .Fl P
 flag does not do what we document, rather it does nothing.
+.Sh CAVEATS
+When storing a trusted public key for an IPv6 identity, the 
+.Em most efficient
+form of address representation, i.e "::" instead of ":0:0:0:",
+must be used or the matching will fail. 
+.Nm
+uses the output from
+.Xr getnameinfo 3
+for the address-to-name translation.
 .Sh FILES
-.Bl -tag -width /var/run/isakmpd.report
+.Bl -tag -width /etc/isakmpd/private/local.
 .It Pa /etc/isakmpd/ca/
 The directory where CA certificates can be found.
 .It Pa /etc/isakmpd/certs/
@@ -299,14 +345,22 @@ certificate(s) and those of the peers, if a choice to have them kept
 permanently has been made.
 .It Pa /etc/isakmpd/isakmpd.conf
 The configuration file. As this file can contain sensitive information
-it must not be readable by anyone but the user running isakmpd.
+it must not be readable by anyone but the user running
+.Nm isakmpd .
 .It Pa /etc/isakmpd/isakmpd.policy
-The keynote policy configuration file. Same mode requirements as
-for isakmpd.conf.
+The keynote policy configuration file.  The same mode 
+requirements as
+.Nm isakmpd.conf .
 .It Pa /etc/isakmpd/private/local.key
 A local private key for certificate based authentication.  There has
 to be a certificate for this key in the certificate directory mentioned
-above. Same mode requirements as isakmpd.conf.
+above.  The same mode requirements as
+.Nm isakmpd.conf .
+.It Pa /etc/isakmpd/pubkeys/
+Directory in which trusted public keys can be kept. The keys must be
+named after a fashion described above.
+.It Pa /var/run/isakmpd.pid
+The PID of the current daemon.
 .It Pa /var/run/isakmpd.fifo
 The FIFO used to manually control
 .Nm isakmpd .
@@ -316,12 +370,17 @@ The default IKE packet capture file.
 The report file written when
 .Dv SIGUSR1
 is received.
+.It Pa /usr/share/ipsec/isakmpd/
+A directory containing some sample 
+.Nm 
+and keynote policy configuration files.
 .El
 .Sh SEE ALSO
 .Xr ipsec 4 ,
 .Xr isakmpd.conf 5 ,
 .Xr isakmpd.policy 5 ,
-.Xr openssl 8 ,
+.Xr getnameinfo 3 ,
+.Xr openssl 1 ,
 .Xr pcap 3 ,
 .Xr photurisd 8 ,
 .Xr ssl 8 ,

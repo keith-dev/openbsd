@@ -1,4 +1,4 @@
-/*	$OpenBSD: options.c,v 1.12 1998/05/08 04:52:29 millert Exp $	*/
+/*	$OpenBSD: options.c,v 1.14 2001/07/09 22:21:54 pjanzen Exp $	*/
 
 /*
  * options.c - handles option processing for PPP.
@@ -23,7 +23,7 @@
 #if 0
 static char rcsid[] = "Id: options.c,v 1.42 1998/03/26 04:46:06 paulus Exp $";
 #else
-static char rcsid[] = "$OpenBSD: options.c,v 1.12 1998/05/08 04:52:29 millert Exp $";
+static char rcsid[] = "$OpenBSD: options.c,v 1.14 2001/07/09 22:21:54 pjanzen Exp $";
 #endif
 #endif
 
@@ -1686,8 +1686,7 @@ setdevname(cp, quiet)
 	return -1;
     }
 
-    (void) strncpy(devnam, cp, MAXPATHLEN - 1);
-    devnam[MAXPATHLEN - 1] = '\0';
+    (void) strlcpy(devnam, cp, MAXPATHLEN);
     default_device = FALSE;
     devnam_info.priv = privileged_option;
     devnam_info.source = option_source;
@@ -1726,10 +1725,8 @@ setipaddr(arg)
 		return -1;
 	    } else {
 		local = *(u_int32_t *)hp->h_addr;
-		if (our_name[0] == 0) {
-		    strncpy(our_name, arg, MAXNAMELEN - 1);
-		    our_name[MAXNAMELEN - 1] = '\0';
-		}
+		if (our_name[0] == 0)
+		    strlcpy(our_name, arg, MAXNAMELEN);
 	    }
 	} else
 	    local = ina.s_addr;
@@ -1752,10 +1749,8 @@ setipaddr(arg)
 		return -1;
 	    } else {
 		remote = *(u_int32_t *)hp->h_addr;
-		if (remote_name[0] == 0) {
-		    strncpy(remote_name, colon, MAXNAMELEN - 1);
-		    remote_name[MAXNAMELEN - 1] = '\0';
-		}
+		if (remote_name[0] == 0)
+		    strlcpy(remote_name, colon, MAXNAMELEN);
 	    }
 	} else
 	    remote = ina.s_addr;
@@ -1925,8 +1920,7 @@ setname(argv)
 	option_error("using the name option requires root privilege");
 	return 0;
     }
-    strncpy(our_name, argv[0], MAXNAMELEN - 1);
-    our_name[MAXNAMELEN - 1] = '\0';
+    strlcpy(our_name, argv[0], MAXNAMELEN);
     return 1;
 }
 
@@ -1934,8 +1928,7 @@ static int
 setuser(argv)
     char **argv;
 {
-    strncpy(user, argv[0], MAXNAMELEN - 1);
-    user[MAXNAMELEN - 1] = '\0';
+    strlcpy(user, argv[0], MAXNAMELEN);
     return 1;
 }
 
@@ -1943,8 +1936,7 @@ static int
 setremote(argv)
     char **argv;
 {
-    strncpy(remote_name, argv[0], MAXNAMELEN - 1);
-    remote_name[MAXNAMELEN - 1] = '\0';
+    strlcpy(remote_name, argv[0], MAXNAMELEN);
     return 1;
 }
 

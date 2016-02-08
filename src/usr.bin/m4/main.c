@@ -1,4 +1,4 @@
-/*	$OpenBSD: main.c,v 1.39 2001/03/05 15:09:20 espie Exp $	*/
+/*	$OpenBSD: main.c,v 1.51 2001/10/06 10:52:25 espie Exp $	*/
 /*	$NetBSD: main.c,v 1.12 1997/02/08 23:54:49 cgd Exp $	*/
 
 /*-
@@ -47,7 +47,7 @@ static char copyright[] =
 #if 0
 static char sccsid[] = "@(#)main.c	8.1 (Berkeley) 6/6/93";
 #else
-static char rcsid[] = "$OpenBSD: main.c,v 1.39 2001/03/05 15:09:20 espie Exp $";
+static char rcsid[] = "$OpenBSD: main.c,v 1.51 2001/10/06 10:52:25 espie Exp $";
 #endif
 #endif /* not lint */
 
@@ -136,6 +136,8 @@ struct keyblk keywrds[] = {	/* m4 keywords to be installed */
 	{ "m4exit",       EXITTYPE | NOARGS },
 	{ "syscmd",       SYSCTYPE },
 	{ "sysval",       SYSVTYPE | NOARGS },
+	{ "traceon",	  TRACEONTYPE | NOARGS },
+	{ "traceoff",	  TRACEOFFTYPE | NOARGS },
 
 #if defined(unix) || defined(__unix__) 
 	{ "unix",         SELFTYPE | NOARGS },
@@ -177,7 +179,6 @@ main(argc,argv)
 	int c;
 	int n;
 	char *p;
-	FILE *ifp;
 
 	if (signal(SIGINT, SIG_IGN) != SIG_IGN)
 		signal(SIGINT, onintr);
@@ -193,7 +194,7 @@ main(argc,argv)
 	outfile = NULL;
 	resizedivs(MAXOUT);
 
-	while ((c = getopt(argc, argv, "gtD:U:o:I:")) != -1)
+	while ((c = getopt(argc, argv, "gt:d:D:U:o:I:")) != -1)
 		switch(c) {
 
 		case 'D':               /* define something..*/
@@ -213,8 +214,14 @@ main(argc,argv)
 		case 'g':
 			mimic_gnu = 1;
 			break;
+		case 'd':
+			set_trace_flags(optarg);
+			break;
+		case 't':
+			mark_traced(optarg, 1);
+			break;
 		case 'o':
-                        /* XXX accept -o for compatibility  */
+			trace_file(optarg);
                         break;
 		case '?':
 			usage();
@@ -278,11 +285,11 @@ do_look_ahead(t, token)
 {
 	int i;
 
-	assert(t == token[0]);
+	assert((unsigned char)t == (unsigned char)token[0]);
 
 	for (i = 1; *++token; i++) {
 		t = gpbc();
-		if (t == EOF || t != *token) {
+		if (t == EOF || (unsigned char)t != (unsigned char)*token) {
 			putback(t);
 			while (--i)
 				putback(*--token);
@@ -292,7 +299,9 @@ do_look_ahead(t, token)
 	return 1;
 }
 
-#define LOOK_AHEAD(t, token) ((t)==(token)[0] && do_look_ahead(t,token))
+#define LOOK_AHEAD(t, token) (t != EOF && 		\
+    (unsigned char)(t)==(unsigned char)(token)[0] && 	\
+    do_look_ahead(t,token))
 
 /*
  * macro - the work horse..
@@ -329,13 +338,21 @@ macro()
 				pushs1(p->name);	/* macro name  */
 				pushs(ep);	      	/* start next..*/
 
-				if (l != LPAREN)  {   /* add bracks  */
-					putback(RPAREN);
-					putback(LPAREN);
+				if (l != LPAREN && PARLEV == 0)  {   
+				    /* no bracks  */
+					chrsave(EOS);
+
+					if (sp == STACKMAX)
+						errx(1, "internal stack overflow");
+					eval((const char **) mstack+fp+1, 2, 
+					    CALTYP);
+
+					ep = PREVEP;	/* flush strspace */
+					sp = PREVSP;	/* previous sp..  */
+					fp = PREVFP;	/* rewind stack...*/
 				}
 			}
-		}
-		else if (t == EOF) {
+		} else if (t == EOF) {
 			if (sp > -1) {
 				warnx( "unexpected end of input, unclosed parenthesis:");
 				dump_stack(paren, PARLEV);
@@ -379,7 +396,7 @@ macro()
 						if (sp < 0)
 							putc(l, active);
 						else
-							chrsave(l);
+							CHRSAVE(l);
 					}
 				}
 			}
@@ -425,10 +442,8 @@ macro()
 				if (sp == STACKMAX)
 					errx(1, "internal stack overflow");
 
-				if (CALTYP == MACRTYPE)
-					expand((const char **) mstack+fp+1, sp-fp);
-				else
-					eval((const char **) mstack+fp+1, sp-fp, CALTYP);
+				eval((const char **) mstack+fp+1, sp-fp, 
+				    CALTYP);
 
 				ep = PREVEP;	/* flush strspace */
 				sp = PREVSP;	/* previous sp..  */
@@ -461,10 +476,10 @@ macro()
 					}
 					if (t == EOF)
 					    break;
-					chrsave(t);
+					CHRSAVE(t);
 				}
 			} else
-				chrsave(t);		/* stack the char */
+				CHRSAVE(t);		/* stack the char */
 			break;
 		}
 	}
@@ -482,7 +497,7 @@ outputstr(s)
 			putc(*s++, active);
 	else
 		while (*s)
-			chrsave(*s++);
+			CHRSAVE(*s++);
 }
 
 /*
@@ -504,7 +519,8 @@ inspect(c, tp)
 
 	while ((isalnum(c = gpbc()) || c == '_') && tp < etp)
 		h = (h << 5) + h + (*tp++ = c);
-	putback(c);
+	if (c != EOF)
+		PUTBACK(c);
 	*tp = EOS;
 	/* token is too long, it won't match anything, but it can still
 	 * be output. */
@@ -514,7 +530,7 @@ inspect(c, tp)
 			if (sp < 0)
 				putc(c, active);
 			else
-				chrsave(c);
+				CHRSAVE(c);
 		}
 		*name = EOS;
 		return nil;
@@ -545,10 +561,10 @@ initkwds()
 		p = (ndptr) xalloc(sizeof(struct ndblock));
 		p->nxtptr = hashtab[h % HASHSIZE];
 		hashtab[h % HASHSIZE] = p;
-		p->name = keywrds[i].knam;
+		p->name = xstrdup(keywrds[i].knam);
 		p->defn = null;
 		p->hv = h;
-		p->type = (keywrds[i].ktyp & TYPEMASK) | STATIC;
+		p->type = keywrds[i].ktyp & TYPEMASK;
 		if ((keywrds[i].ktyp & NOARGS) == 0)
 			p->type |= NEEDARGS;
 	}
@@ -567,6 +583,17 @@ builtin_type(key)
 	return -1;
 }
 
+char *
+builtin_realname(n)
+	int n;
+{
+	int i;
+
+	for (i = 0; i != MAXKEYS; i++)
+		if (((keywrds[i].ktyp ^ n) & TYPEMASK) == 0)
+			return keywrds[i].knam;
+	return NULL;
+}
 
 static void
 record(t, lev)
@@ -601,7 +628,6 @@ static void
 enlarge_stack()
 {
 	STACKMAX *= 2;
-	fprintf(stderr, "%lu\n", (unsigned long)STACKMAX);
 	mstack = realloc(mstack, sizeof(stae) * STACKMAX);
 	sstack = realloc(sstack, STACKMAX);
 	if (mstack == NULL || sstack == NULL)

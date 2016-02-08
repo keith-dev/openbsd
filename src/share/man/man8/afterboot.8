@@ -1,4 +1,4 @@
-.\"	$OpenBSD: afterboot.8,v 1.61 2001/03/11 05:56:43 aaron Exp $
+.\"	$OpenBSD: afterboot.8,v 1.66 2001/10/14 17:24:19 millert Exp $
 .Dd October 20, 1997
 .Dt AFTERBOOT 8
 \!\" Originally created by Marshall M. Midden -- 1997-10-20, m4@umn.edu
@@ -30,7 +30,6 @@ command, type:
 Administrators will rapidly become more familiar with
 .Ox
 if they get used to using the high quality manual pages.
-.Pp
 .Ss Errata
 By the time that you have installed your system, it is quite likely that
 bugs in the release have been found.
@@ -390,9 +389,9 @@ Note that the
 .Pa /etc/motd
 file is modified by
 .Pa /etc/rc
-whenever the system is booted. To keep any custom message intact, ensure
-that you leave two blank lines at the top, or your message will be
-overwritten.
+whenever the system is booted.
+To keep any custom message intact, ensure that you leave two blank lines
+at the top, or your message will be overwritten.
 .Ss Add new users
 Add users.
 There is an
@@ -426,9 +425,9 @@ for authentication.
 Check for any local changes needed in the files
 .Pa /etc/rc.conf ,
 .Pa /etc/rc.local ,
-.Pa rc.securelevel ,
+.Pa /etc/rc.securelevel ,
 and
-.Pa rc.shutdown.
+.Pa /etc/rc.shutdown .
 Turning on something like the Network Time Protocol in
 .Pa /etc/rc.conf
 requires making sure the package is installed.
@@ -491,9 +490,9 @@ after changes.
 .Ss Sendmail
 .Ox
 ships with a default
-.Pa /etc/mail/sendmail.cf
+.Pa /etc/mail/localhost.cf
 file that will work for simple installations; it was generated from
-.Pa openbsd-proto.mc
+.Pa openbsd-localhost.mc
 in
 .Pa /usr/share/sendmail/cf .
 Please see
@@ -501,23 +500,32 @@ Please see
 and
 .Pa /usr/share/doc/smm/08.sendmailop/op.me
 for information on generating your own sendmail configuration files.
-For the default installation, sendmail is configured to only process
-jobs that have been the queued and to not accept messages over the network.
+For the default installation, sendmail is configured to only accept
+connections from the local host and to not accept connections on
+any external interfaces.
 This makes it possible to send mail locally, but not receive mail from remote
 servers, which is ideal if you have one central incoming mail machine and
 several clients.
-To cause sendmail to accept network connections, modify the
+To cause sendmail to accept external network connections, modify the
 .Dq sendmail_flags
 variable in
 .Pa /etc/rc.conf
-in accordance with the comments therein.
-Note that sendmail now also listens on port 587 by default.  This
-is to implement the RFC2476 message submission protocol.  You may
-disable this via the
+to use the
+.Pa /etc/mail/sendmail.cf
+file in accordance with the comments therein.
+This file was generated from
+.Pa openbsd-proto.mc .
+Note that sendmail now also listens on port 587 by default.
+This is to implement the RFC2476 message submission protocol.
+You may disable this via the
 .Dq no_default_msa
-option in your sendmail .mc file.  See
+option in your sendmail .mc file.
+See
 .Pa /usr/share/sendmail/README
 for more information.
+The
+.Pa /etc/mail/localhost.cf
+file already has this disabled.
 .Ss DHCP server
 If this is a
 DHCP
@@ -583,8 +591,12 @@ filling up disk space from normal running processes and database updates.
 (You probably do not need to understand them.)
 .Pp
 The /altroot filesystem can optionally be used to provide a backup of the
-root filesystem on a daily basis.  To take advantage of this, you must
-have an entry in /etc/fstab with 'xx' for the mount option:
+root filesystem on a daily basis.
+To take advantage of this, you must have an entry in
+.Pa /etc/fstab
+with
+.Dq xx
+for the mount option:
 .Bd -literal -offset indent
 /dev/wd0j /altroot ffs xx 0 0
 .Ed
@@ -594,7 +606,9 @@ and you must add a line to root's crontab:
 ROOTBACKUP=1
 .Ed
 .Pp
-so that the /etc/daily script will make a daily backup of the root filesystem.
+so that the
+.Pa /etc/daily
+script will make a daily backup of the root filesystem.
 .Ss Other files in /etc
 Look at the other files in
 .Pa /etc
@@ -660,7 +674,7 @@ The
 .Ox
 ports collection includes a large set of Third-Party software.
 A lot of it is available as binary packages, that you can download from
-.Pa ftp://ftp.openbsd.org/
+.Pa ftp://ftp.openbsd.org
 or a mirror, and install using
 .Xr pkg_add 1 .
 See
@@ -806,8 +820,8 @@ boot time in the kernel image.
 .Xr ext_srvtab 8 ,
 .Xr ifconfig 8 ,
 .Xr inetd 8 ,
-.Xr mtree 8 ,
 .Xr mount 8 ,
+.Xr mtree 8 ,
 .Xr named 8 ,
 .Xr newaliases 8 ,
 .Xr rbootd 8 ,
