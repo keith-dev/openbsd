@@ -1,4 +1,4 @@
-.\"	$OpenBSD: sysctl.3,v 1.8 1997/10/02 03:01:15 angelos Exp $
+.\"	$OpenBSD: sysctl.3,v 1.11 1998/06/15 17:55:00 mickey Exp $
 .\"
 .\" Copyright (c) 1993
 .\"	The Regents of the University of California.  All rights reserved.
@@ -232,6 +232,7 @@ information.
 .It KERN\_CLOCKRATE	struct clockinfo	no
 .It KERN\_DOMAINNAME	string	yes
 .It KERN\_FILE	struct file	no
+.It KERN\_FSYNC		integer	no
 .It KERN\_HOSTID	integer	yes
 .It KERN\_HOSTNAME	string	yes
 .It KERN\_JOB\_CONTROL	integer	no
@@ -256,6 +257,9 @@ information.
 .It KERN\_RAWPARTITION	integer	no
 .It KERN\_SAVED\_IDS	integer	no
 .It KERN\_SECURELVL	integer	raise only
+.It KERN\_SYSVMSG	integer	no
+.It KERN\_SYSVSEM	integer	no
+.It KERN\_SYSVSHM	integer	no
 .It KERN\_VDISABLE	integer	no
 .It KERN\_VERSION	string	no
 .It KERN\_VNODE	struct vnode	no
@@ -290,6 +294,9 @@ The returned data consists of a single
 followed by an array of
 .Va struct file ,
 whose size depends on the current number of such objects in the system.
+.It Li KERN_FSYNC
+Return 1 if the File Synchronisation Option is available on this system,
+otherwise 0.
 .It Li KERN_HOSTID
 Get or set the host id.
 .It Li KERN_HOSTNAME
@@ -388,6 +395,15 @@ Returns 1 if saved set-group and saved set-user ID is available.
 The system security level.
 This level may be raised by processes with appropriate privilege.
 It may only be lowered by process 1.
+.It Li KERN_SYSVMSG
+Returns 1 if System V style message queue functionality is available on this
+system, otherwise 0.
+.It Li KERN_SYSVSEM
+Returns 1 if System V style semaphore functionality is available on this
+system, otherwise 0.
+.It Li KERN_SYSVSHM
+Returns 1 if System V style share memory functionality is available on this
+system, otherwise 0.
 .It Li KERN_VDISABLE
 Returns the terminal character disabling value.
 .It Li KERN_VERSION
@@ -470,6 +486,7 @@ The currently defined protocols and names are:
 .It icmp	maskrepl	integer	yes
 .It tcp	rfc1323	integer	yes
 .It tcp	baddynamic	array	yes
+.It tcp	ident	structure	no
 .It udp	checksum	integer	yes
 .It udp	baddynamic	array	yes
 .El
@@ -497,6 +514,13 @@ An array of
 is returned specifying the bitmask of TCP ports between 512
 and 1023 inclusive that should not be allocated dynamically
 by the kernel (ie: they must be bound specifically by port number).
+.It Li tcp.ident
+A structure
+.Va struct tcp_ident_mapping
+specifying a local and foreign endpoint of a tcp socket 
+is filled in with the euid and ruid of the process that owns the socket.
+If no such socket exists then the euid and ruid values are both
+set to -1.
 .It Li udp.checksum
 Returns 1 when UDP checksums are being computed and checked.
 Disabling UDP checksums is strongly discouraged.
@@ -695,4 +719,5 @@ definitions for fourth level UDP identifiers
 .Sh HISTORY
 The
 .Nm sysctl
-function first appeared in 4.4BSD.
+function first appeared in
+.Bx 4.4 .

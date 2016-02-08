@@ -677,9 +677,9 @@ done
 if test -z "$ac_aux_dir"; then
   { echo "configure: error: can not find install-sh or install.sh in $srcdir $srcdir/.. $srcdir/../.." 1>&2; exit 1; }
 fi
-ac_config_guess=$ac_aux_dir/config.guess
-ac_config_sub=$ac_aux_dir/config.sub
-ac_configure=$ac_aux_dir/configure # This should be Cygnus configure.
+ac_config_guess="/bin/sh $ac_aux_dir/config.guess"
+ac_config_sub="/bin/sh $ac_aux_dir/config.sub"
+ac_configure="/bin/sh $ac_aux_dir/configure" # This should be Cygnus configure.
 
 
 # Do some error checking and defaulting for the host and target type.
@@ -716,7 +716,7 @@ case "$host_alias" in
 NONE)
   case $nonopt in
   NONE)
-    if host_alias=`sh $ac_config_guess`; then :
+    if host_alias=`$ac_config_guess`; then :
     else { echo "configure: error: can not guess host type; you must specify one" 1>&2; exit 1; }
     fi ;;
   *) host_alias=$nonopt ;;
@@ -3165,6 +3165,14 @@ for machine in $build $host $target; do
 		use_collect2=yes
 		fixincludes=Makefile.in
 		;;
+	hppa*-*-openbsd*)
+		target_cpu_default=1
+		tm_file="pa/pa-openbsd.h"
+		xm_file=pa/xm-openbsd.h
+		xmake_file=x-openbsd
+		use_collect2=yes
+		fixincludes=Makefile.in
+		;;
 	i370-*-mvs*)
 		;;
 	i[34567]86-ibm-aix*)		# IBM PS/2 running AIX
@@ -5075,7 +5083,7 @@ for machine in $build $host $target; do
 		;;
 	vax-*-openbsd*)
 		tm_file=vax/openbsd.h
-		tmake_file=t-libc-ok
+		tmake_file="t-libc-ok vax/t-openbsd"
 		# On OpenBSD, the headers are already okay.
 		fixincludes=Makefile.in
 		xmake_file=x-openbsd

@@ -133,14 +133,14 @@ struct filed {
 	union {
 		char	f_uname[MAXUNAMES][UT_NAMESIZE+1];
 		struct {
-			char	f_hname[MAXHOSTNAMELEN+1];
+			char	f_hname[MAXHOSTNAMELEN];
 			struct sockaddr_in	f_addr;
 		} f_forw;		/* forwarding address */
 		char	f_fname[MAXPATHLEN];
 	} f_un;
 	char	f_prevline[MAXSVLINE];		/* last message logged */
 	char	f_lasttime[16];			/* time of last occurrence */
-	char	f_prevhost[MAXHOSTNAMELEN+1];	/* host from which recd. */
+	char	f_prevhost[MAXHOSTNAMELEN];	/* host from which recd. */
 	int	f_prevpri;			/* pri of f_prevline */
 	int	f_prevlen;			/* length of f_prevline */
 	int	f_prevcount;			/* repetition cnt of prevline */
@@ -177,7 +177,7 @@ struct	filed *Files;
 struct	filed consfile;
 
 int	Debug;			/* debug flag */
-char	LocalHostName[MAXHOSTNAMELEN+1];	/* our hostname */
+char	LocalHostName[MAXHOSTNAMELEN];	/* our hostname */
 char	*LocalDomain;		/* our local domain name */
 int	InetInuse = 0;		/* non-zero if INET sockets are being used */
 int	finet;			/* Internet datagram socket */
@@ -203,7 +203,7 @@ char   *ttymsg __P((struct iovec *, int, char *, int));
 void	usage __P((void));
 void	wallmsg __P((struct filed *, struct iovec *));
 
-#define MAXFUNIX	20
+#define MAXFUNIX	21
 
 int nfunix = 1;
 char *funixn[MAXFUNIX] = { _PATH_LOG };
@@ -356,7 +356,7 @@ main(argc, argv)
 		}
 
 		/*dprintf("readfds = %#x\n", readfds);*/
-		nfds = select(nfds, &readfds, (fd_set *)NULL,
+		nfds = select(nfds+1, &readfds, (fd_set *)NULL,
 		    (fd_set *)NULL, (struct timeval *)NULL);
 		if (nfds == 0)
 			continue;
@@ -393,12 +393,12 @@ main(argc, argv)
 		for (i = 0; i < nfunix; i++) {
 			if (funix[i] != -1 && FD_ISSET(funix[i], &readfds)) {
 				len = sizeof(fromunix);
-				i = recvfrom(funix[i], line, MAXLINE, 0,
+				len = recvfrom(funix[i], line, MAXLINE, 0,
 				    (struct sockaddr *)&fromunix, &len);
-				if (i > 0) {
-					line[i] = '\0';
+				if (len > 0) {
+					line[len] = '\0';
 					printline(LocalHostName, line);
-				} else if (i < 0 && errno != EINTR)
+				} else if (len < 0 && errno != EINTR)
 					logerror("recvfrom unix");
 			}
 		}
@@ -618,7 +618,8 @@ logmsg(pri, msg, from, flags)
 			f->f_prevpri = pri;
 			(void)strncpy(f->f_lasttime, timestamp, 15);
 			(void)strncpy(f->f_prevhost, from,
-					sizeof(f->f_prevhost));
+					sizeof(f->f_prevhost)-1);
+			f->f_prevhost[sizeof(f->f_prevhost)-1] = '\0';
 			if (msglen < MAXSVLINE) {
 				f->f_prevlen = msglen;
 				(void)strcpy(f->f_prevline, msg);
@@ -650,6 +651,8 @@ fprintlog(f, flags, msg)
 		v->iov_len = snprintf(greetings, sizeof(greetings),
 		    "\r\n\7Message from syslogd@%s at %.24s ...\r\n",
 		    f->f_prevhost, ctime(&now));
+		if (v->iov_len >= sizeof(greetings))
+			v->iov_len = sizeof(greetings) - 1;
 		v++;
 		v->iov_base = "";
 		v->iov_len = 0;
@@ -1174,8 +1177,10 @@ cfline(line, f, prog)
 	case '@':
 		if (!InetInuse)
 			break;
-		(void)strcpy(f->f_un.f_forw.f_hname, ++p);
-		hp = gethostbyname(p);
+		(void)strncpy(f->f_un.f_forw.f_hname, ++p,
+		    sizeof(f->f_un.f_forw.f_hname)-1);
+		f->f_un.f_forw.f_hname[sizeof(f->f_un.f_forw.f_hname)-1] = '\0';
+		hp = gethostbyname(f->f_un.f_forw.f_hname);
 		if (hp == NULL) {
 			extern int h_errno;
 

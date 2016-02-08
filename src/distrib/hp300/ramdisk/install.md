@@ -1,6 +1,6 @@
 #!/bin/sh
 #
-#	$OpenBSD: install.md,v 1.10 1998/03/29 19:58:14 millert Exp $
+#	$OpenBSD: install.md,v 1.12 1998/09/11 22:55:45 millert Exp $
 #	$NetBSD: install.md,v 1.1.2.4 1996/08/26 15:45:14 gwr Exp $
 #
 # Copyright (c) 1996 The NetBSD Foundation, Inc.
@@ -120,11 +120,6 @@ md_get_diskdevs() {
 md_get_cddevs() {
 	# return available CD-ROM devices
 	egrep "sd[0-9]*:.*CD-ROM" < /kern/msgbuf | cut -d":" -f1 | sort -u
-}
-
-md_get_ifdevs() {
-	# return available network interfaces
-	egrep "^le[0-9]*:" < /kern/msgbuf | cut -d":" -f1 | sort -u
 }
 
 md_get_partition_range() {
@@ -487,7 +482,7 @@ simple and rational way.
 __welcome_banner_1
 
 	else
-		echo "Welcome to the OpenBSD/alpha ${VERSION_MAJOR}.${VERSION_MINOR} upgrade program."
+		echo "Welcome to the OpenBSD/hp300 ${VERSION_MAJOR}.${VERSION_MINOR} upgrade program."
 		cat << \__welcome_banner_2
 
 This program is designed to help you upgrade your OpenBSD system in a

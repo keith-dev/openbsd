@@ -1,4 +1,4 @@
-/*	$OpenBSD: route.c,v 1.23 1998/02/27 12:07:40 deraadt Exp $	*/
+/*	$OpenBSD: route.c,v 1.25 1998/06/23 22:40:40 millert Exp $	*/
 /*	$NetBSD: route.c,v 1.15 1996/05/07 02:55:06 thorpej Exp $	*/
 
 /*
@@ -38,7 +38,7 @@
 #if 0
 static char sccsid[] = "from: @(#)route.c	8.3 (Berkeley) 3/9/94";
 #else
-static char *rcsid = "$OpenBSD: route.c,v 1.23 1998/02/27 12:07:40 deraadt Exp $";
+static char *rcsid = "$OpenBSD: route.c,v 1.25 1998/06/23 22:40:40 millert Exp $";
 #endif
 #endif /* not lint */
 
@@ -404,6 +404,7 @@ p_sockaddr(sa, mask, flags, width)
 {
 	char workbuf[128], *cplim;
 	register char *cp = workbuf;
+	size_t n;
 
 	switch(sa->sa_family) {
 	case AF_INET:
@@ -444,9 +445,12 @@ p_sockaddr(sa, mask, flags, width)
 
 			cplim = "";
 			for (i = 0; i < sdl->sdl_alen; i++, lla++) {
-				cp += snprintf(cp,
+				n = snprintf(cp,
 				    workbuf + sizeof (workbuf) - cp,
 				    "%s%x", cplim, *lla);
+				if (n >= workbuf + sizeof (workbuf) - cp)
+					n = workbuf + sizeof (workbuf) - cp - 1;
+				cp += n;
 				cplim = ":";
 			}
 			cp = workbuf;
@@ -471,14 +475,24 @@ p_sockaddr(sa, mask, flags, width)
 
 		slim = sa->sa_len + (u_char *) sa;
 		cplim = cp + sizeof(workbuf) - 6;
-		cp += snprintf(cp, cplim - cp, "(%d)", sa->sa_family);
+		n = snprintf(cp, cplim - cp, "(%d)", sa->sa_family);
+		if (n >= cplim - cp)
+			n = cplim - cp - 1;
+		cp += n;
 		while (s < slim && cp < cplim) {
-			cp += snprintf(cp, workbuf + sizeof (workbuf) - cp,
+			n = snprintf(cp, workbuf + sizeof (workbuf) - cp,
 			    " %02x", *s++);
-			if (s < slim)
-				cp += snprintf(cp,
+			if (n >= workbuf + sizeof (workbuf) - cp)
+				n = workbuf + sizeof (workbuf) - cp - 1;
+			cp += n;
+			if (s < slim) {
+				n = snprintf(cp,
 				    workbuf + sizeof (workbuf) - cp,
 				    "%02x", *s++);
+				if (n >= workbuf + sizeof (workbuf) - cp)
+					n = workbuf + sizeof (workbuf) - cp - 1;
+				cp += n;
+			}
 		}
 		cp = workbuf;
 	    }
@@ -552,14 +566,14 @@ routename(in)
 	in_addr_t in;
 {
 	register char *cp;
-	static char line[MAXHOSTNAMELEN + 1];
+	static char line[MAXHOSTNAMELEN];
 	struct hostent *hp;
-	static char domain[MAXHOSTNAMELEN + 1];
+	static char domain[MAXHOSTNAMELEN];
 	static int first = 1;
 
 	if (first) {
 		first = 0;
-		if (gethostname(domain, MAXHOSTNAMELEN) == 0 &&
+		if (gethostname(domain, sizeof domain) == 0 &&
 		    (cp = strchr(domain, '.')))
 			(void) strcpy(domain, cp + 1);
 		else
@@ -597,7 +611,7 @@ netname(in, mask)
 	in_addr_t in, mask;
 {
 	char *cp = 0;
-	static char line[MAXHOSTNAMELEN + 1];
+	static char line[MAXHOSTNAMELEN];
 	struct netent *np = 0;
 	in_addr_t net, subnetshift;
 	int mbits;

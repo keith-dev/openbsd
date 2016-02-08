@@ -1,4 +1,4 @@
-/*	$OpenBSD: util.c,v 1.17 1998/03/30 06:59:36 deraadt Exp $	*/
+/*	$OpenBSD: util.c,v 1.21 1998/09/22 04:42:49 deraadt Exp $	*/
 /*	$NetBSD: util.c,v 1.12 1997/08/18 10:20:27 lukem Exp $	*/
 
 /*
@@ -35,7 +35,7 @@
  */
 
 #ifndef lint
-static char rcsid[] = "$OpenBSD: util.c,v 1.17 1998/03/30 06:59:36 deraadt Exp $";
+static char rcsid[] = "$OpenBSD: util.c,v 1.21 1998/09/22 04:42:49 deraadt Exp $";
 #endif /* not lint */
 
 /*
@@ -62,6 +62,8 @@ static char rcsid[] = "$OpenBSD: util.c,v 1.17 1998/03/30 06:59:36 deraadt Exp $
 
 #include "ftp_var.h"
 #include "pathnames.h"
+
+static void updateprogressmeter __P((int));
 
 /*
  * Connect to peer server and
@@ -268,6 +270,7 @@ tryagain:
 			fprintf(ttyout, "Name (%s:%s): ", host, myname);
 		else
 			fprintf(ttyout, "Name (%s): ", host);
+		*tmp = '\0';
 		(void)fgets(tmp, sizeof(tmp) - 1, stdin);
 		tmp[strlen(tmp) - 1] = '\0';
 		if (*tmp == '\0')
@@ -598,15 +601,16 @@ foregroundproc()
 	    ctty_pgrp == pgrp));
 }
 
-void updateprogressmeter __P((int));
-
-void
+static void
 updateprogressmeter(dummy)
 	int dummy;
 {
+	int save_errno = errno;
 
-	if (foregroundproc())
+	/* update progressmeter if foreground process or in -m mode */
+	if (foregroundproc() || progress == -1)
 		progressmeter(0);
+	errno = save_errno;
 }
 
 /*
@@ -815,12 +819,14 @@ void
 setttywidth(a)
 	int a;
 {
+	int save_errno = errno;
 	struct winsize winsize;
 
 	if (ioctl(fileno(ttyout), TIOCGWINSZ, &winsize) != -1)
-		ttywidth = winsize.ws_col;
+		ttywidth = winsize.ws_col ? winsize.ws_col : 80;
 	else
 		ttywidth = 80;
+	errno = save_errno;
 }
 
 /*

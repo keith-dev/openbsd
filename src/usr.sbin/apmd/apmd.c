@@ -83,10 +83,22 @@ sigexit(int signo)
 void
 usage(void)
 {
-    fprintf(stderr,"usage: %s [-d] [-t timo] [-s] [-a] [-f devfile] [-S sockfile]\n", __progname);
+    fprintf(stderr,
+	    "usage: %s [-dsaqepm] [-t timo] [-a] [-f devfile] [-S sockfile]\n",
+	    __progname);
     exit(1);
 }
 
+
+/*
+ * tell the driver if it should display messages or not.
+ */
+static void
+set_driver_messages(int fd, int mode)
+{
+    if ( ioctl(fd, APM_IOC_PRN_CTL, &mode) == -1 )
+	    syslog( LOG_DEBUG, "can't disable driver messages, error: %m" );
+}
 
 int
 power_status(int fd, int force, struct apm_power_info *pinfo)
@@ -111,7 +123,7 @@ power_status(int fd, int force, struct apm_power_info *pinfo)
 		       "estimated battery life %d%% (%d minutes)",
 		       battstate(bstate.battery_state),
 		       ac_state(bstate.ac_state), bstate.battery_life,
-		       bstate.minutes_left);
+		       bstate.minutes_left );
 	    else
 		syslog(LOG_NOTICE,
 		       "battery status: %s. external power status: %s. "
@@ -246,7 +258,7 @@ int howmany;
 	syslog(LOG_WARNING, "cannot open " _PATH_DEV_SPEAKER ": %m");
 	return;
     }
-    syslog(LOG_DEBUG, "sending %d tones to speaker\n", howmany);
+    syslog(LOG_DEBUG, "sending %d tones to speaker", howmany);
     write (spkrfd, "o4cc", 2 + howmany);
     close(spkrfd);
     return;
@@ -285,12 +297,15 @@ resume(int ctl_fd)
     do_etc_file(_PATH_APM_ETC_RESUME);
 }
 
-void
+int
 main(int argc, char *argv[])
 {
     const char *fname = apmdev;
     int ctl_fd, sock_fd, ch, ready;
     int statonly = 0;
+    int enableonly = 0;
+    int pctonly = 0;
+    int messages = 0;
     fd_set devfds;
     fd_set selcopy;
     struct apm_event_info apmevent;
@@ -299,7 +314,7 @@ main(int argc, char *argv[])
     struct timeval tv = {TIMO, 0}, stv;
     const char *sockname = sockfile;
 
-    while ((ch = getopt(argc, argv, "qadsf:t:S:")) != -1)
+    while ((ch = getopt(argc, argv, "qadsepmf:t:S:")) != -1)
 	switch(ch) {
 	case 'q':
 	    speaker_ok = FALSE;
@@ -324,6 +339,15 @@ main(int argc, char *argv[])
 	case 's':			/* status only */
 	    statonly = 1;
 	    break;
+	case 'e':
+	    enableonly = 1;
+	    break;
+	case 'p':
+	    pctonly = 1;
+	    break;
+	case 'm':
+	    messages = 1;
+	    break;
 	case '?':
 
 	default:
@@ -344,6 +368,17 @@ main(int argc, char *argv[])
     power_status(ctl_fd, 1, 0);
     if (statonly)
 	exit(0);
+    if (enableonly) {
+	set_driver_messages(ctl_fd, APM_PRINT_ON);
+	exit(0);
+    }
+    if (pctonly) {
+	set_driver_messages(ctl_fd, APM_PRINT_PCT);
+	exit(0);
+    }
+    if ( ! messages ) {
+	set_driver_messages(ctl_fd, APM_PRINT_OFF);
+    }
     (void) signal(SIGTERM, sigexit);
     (void) signal(SIGHUP, sigexit);
     (void) signal(SIGINT, sigexit);
@@ -391,7 +426,7 @@ main(int argc, char *argv[])
 		    resumes++;
 		    break;
 		case APM_POWER_CHANGE:
-		    power_status(ctl_fd, 1, 0);
+		    power_status(ctl_fd, 0, 0);
 		    break;
 		default:
 		    break;
@@ -426,7 +461,7 @@ main(int argc, char *argv[])
 	}
     }
     syslog(LOG_ERR, "select failed: %m");
-    exit(1);
+    return 1;
 }
 
 void

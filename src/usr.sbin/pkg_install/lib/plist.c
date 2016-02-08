@@ -1,6 +1,6 @@
-/*	$OpenBSD: plist.c,v 1.3 1997/01/17 07:14:16 millert Exp $	*/
+/*	$OpenBSD: plist.c,v 1.5 1998/10/13 23:09:54 marc Exp $	*/
 #ifndef lint
-static const char *rcsid = "$OpenBSD: plist.c,v 1.3 1997/01/17 07:14:16 millert Exp $";
+static const char *rcsid = "$OpenBSD: plist.c,v 1.5 1998/10/13 23:09:54 marc Exp $";
 #endif
 
 /*
@@ -24,89 +24,116 @@ static const char *rcsid = "$OpenBSD: plist.c,v 1.3 1997/01/17 07:14:16 millert 
  */
 
 #include "lib.h"
+#include <err.h>
+#include <md5.h>
 
-/* Add an item to a packing list */
+/* this struct defines a plist command type */
+typedef struct cmd_t {
+	char		*c_s;		/* string to recognise */
+	pl_ent_t	c_type;		/* type of command */
+	int		c_argc;		/* # of arguments */
+} cmd_t;
+
+/* commands to recognise */
+static cmd_t	cmdv[] = {
+	{	"cwd",		PLIST_CWD,		1	},
+	{	"src",		PLIST_SRC,		1	},
+	{	"cd",		PLIST_CWD,		1	},
+	{	"exec",		PLIST_CMD,		1	},
+	{	"unexec",	PLIST_UNEXEC,		1	},
+	{	"mode",		PLIST_CHMOD,		1	},
+	{	"owner",	PLIST_CHOWN,		1	},
+	{	"group",	PLIST_CHGRP,		1	},
+	{	"comment",	PLIST_COMMENT,		1	},
+	{	"ignore",	PLIST_IGNORE,		0	},
+	{	"ignore_inst",	PLIST_IGNORE_INST,	0	},
+	{	"name",		PLIST_NAME,		1	},
+	{	"display",	PLIST_DISPLAY,		1	},
+	{	"pkgdep",	PLIST_PKGDEP,		1	},
+	{	"pkgcfl",	PLIST_PKGCFL,		1	},
+	{	"mtree",	PLIST_MTREE,		1	},
+	{	"dirrm",	PLIST_DIR_RM,		1	},
+	{	"option",	PLIST_OPTION,		1	},
+	{	NULL,		FAIL,			0	}
+};
+
+/* Add an item to the end of a packing list */
 void
-add_plist(Package *p, plist_t type, char *arg)
+add_plist(package_t *p, pl_ent_t type, char *arg)
 {
-    PackingList tmp;
+	plist_t *tmp;
 
-    tmp = new_plist_entry();
-    tmp->name = copy_string(arg);
-    tmp->type = type;
-
-    if (!p->head)
-	p->head = p->tail = tmp;
-    else {
-	tmp->prev = p->tail;
-	p->tail->next = tmp;
-	p->tail = tmp;
-    }
+	tmp = new_plist_entry();
+	tmp->name = copy_string(arg);
+	tmp->type = type;
+	if (!p->head) {
+		p->head = p->tail = tmp;
+	} else {
+		tmp->prev = p->tail;
+		p->tail->next = tmp;
+		p->tail = tmp;
+	}
 }
 
+/* add an item to the start of a packing list */
 void
-add_plist_top(Package *p, plist_t type, char *arg)
+add_plist_top(package_t *p, pl_ent_t type, char *arg)
 {
-    PackingList tmp;
+	plist_t *tmp;
 
-    tmp = new_plist_entry();
-    tmp->name = copy_string(arg);
-    tmp->type = type;
-
-    if (!p->head)
-	p->head = p->tail = tmp;
-    else {
-	tmp->next = p->head;
-	p->head->prev = tmp;
-	p->head = tmp;
-    }
+	tmp = new_plist_entry();
+	tmp->name = copy_string(arg);
+	tmp->type = type;
+	if (!p->head) {
+		p->head = p->tail = tmp;
+	} else {
+		tmp->next = p->head;
+		p->head->prev = tmp;
+		p->head = tmp;
+	}
 }
 
 /* Return the last (most recent) entry in a packing list */
-PackingList
-last_plist(Package *p)
+plist_t *
+last_plist(package_t *p)
 {
-    return p->tail;
+	return p->tail;
 }
 
 /* Mark all items in a packing list to prevent iteration over them */
 void
-mark_plist(Package *pkg)
+mark_plist(package_t *pkg)
 {
-    PackingList p = pkg->head;
+	plist_t	*pp;
 
-    while (p) {
-	p->marked = TRUE;
-	p = p->next;
-    }
+	for (pp = pkg->head ; pp ; pp = pp->next) {
+		pp->marked = TRUE;
+	}
 }
 
 /* Find a given item in a packing list and, if so, return it (else NULL) */
-PackingList
-find_plist(Package *pkg, plist_t type)
+plist_t *
+find_plist(package_t *pkg, pl_ent_t type)
 {
-    PackingList p = pkg->head;
+	plist_t	*pp;
 
-    while (p) {
-	if (p->type == type)
-	    return p;
-	p = p->next;
-    }
-    return NULL;
+	for (pp = pkg->head ; pp && pp->type != type ; pp = pp->next) {
+	}
+	return pp;
 }
 
 /* Look for a specific boolean option argument in the list */
 char *
-find_plist_option(Package *pkg, char *name)
+find_plist_option(package_t *pkg, char *name)
 {
-    PackingList p = pkg->head;
+	plist_t	*p;
 
-    while (p) {
-	if (p->type == PLIST_OPTION && !strcmp(p->name, name))
-	    return p->name;
-	p = p->next;
-    }
-    return NULL;
+	for (p = pkg->head ; p ; p = p->next) {
+		if (p->type == PLIST_OPTION && strcmp(p->name, name) == 0) {
+			return p->name;
+		}
+	}
+	return (char *) NULL;
 }
 
 /*
@@ -114,12 +141,12 @@ find_plist_option(Package *pkg, char *name)
  * too.)  If 'all' is set, delete all items, not just the first occurance.
  */
 void
-delete_plist(Package *pkg, Boolean all, plist_t type, char *name)
+delete_plist(package_t *pkg, Boolean all, pl_ent_t type, char *name)
 {
-    PackingList p = pkg->head;
+    plist_t *p = pkg->head;
 
     while (p) {
-	PackingList pnext = p->next;
+	plist_t *pnext = p->next;
 
 	if (p->type == type && (!name || !strcmp(name, p->name))) {
 	    free(p->name);
@@ -142,24 +169,26 @@ delete_plist(Package *pkg, Boolean all, plist_t type, char *name)
 }
 
 /* Allocate a new packing list entry */
-PackingList
+plist_t *
 new_plist_entry(void)
 {
-    PackingList ret;
+	plist_t *ret;
 
-    ret = (PackingList)malloc(sizeof(struct _plist));
-    bzero(ret, sizeof(struct _plist));
-    return ret;
+	if ((ret = (plist_t *)malloc(sizeof(plist_t))) == (plist_t *) NULL) {
+		err(1, "can't allocate %d bytes", sizeof(plist_t));
+	}
+	memset(ret, 0, sizeof(plist_t));
+	return ret;
 }
 
 /* Free an entire packing list */
 void
-free_plist(Package *pkg)
+free_plist(package_t *pkg)
 {
-    PackingList p = pkg->head;
+    plist_t *p = pkg->head;
 
     while (p) {
-	PackingList p1 = p->next;
+	plist_t *p1 = p->next;
 
 	free(p->name);
 	free(p);
@@ -175,81 +204,49 @@ free_plist(Package *pkg)
 int
 plist_cmd(char *s, char **arg)
 {
-    char cmd[FILENAME_MAX + 20];	/* 20 == fudge for max cmd len */
-    char *cp, *sp;
+	cmd_t	*cmdp;
+	char	cmd[FILENAME_MAX + 20];	/* 20 == fudge for max cmd len */
+	char	*cp;
+	char	*sp;
 
-    strcpy(cmd, s);
-    str_lowercase(cmd);
-    cp = cmd;
-    sp = s;
-    while (*cp) {
-	if (isspace(*cp)) {
-	    *cp = '\0';
-	    while (isspace(*sp)) /* Never sure if macro, increment later */
-		++sp;
-	    break;
+	(void) strcpy(cmd, s);
+	str_lowercase(cmd);
+	for (cp = cmd, sp = s ; *cp ; cp++, sp++) {
+		if (isspace(*cp)) {
+			for (*cp = '\0'; isspace(*sp) ; sp++) {
+			}
+			break;
+		}
 	}
-	++cp, ++sp;
-    }
-    if (arg)
-	*arg = sp;
-    if (!strcmp(cmd, "cwd"))
-	return PLIST_CWD;
-    else if (!strcmp(cmd, "srcdir"))
-	return PLIST_SRC;
-    else if (!strcmp(cmd, "cd"))
-	return PLIST_CWD;
-    else if (!strcmp(cmd, "exec"))
-	return PLIST_CMD;
-    else if (!strcmp(cmd, "unexec"))
-	return PLIST_UNEXEC;
-    else if (!strcmp(cmd, "mode"))
-	return PLIST_CHMOD;
-    else if (!strcmp(cmd, "owner"))
-	return PLIST_CHOWN;
-    else if (!strcmp(cmd, "group"))
-	return PLIST_CHGRP;
-    else if (!strcmp(cmd, "comment"))
-	return PLIST_COMMENT;
-    else if (!strcmp(cmd, "ignore"))
-	return PLIST_IGNORE;
-    else if (!strcmp(cmd, "ignore_inst"))
-	return PLIST_IGNORE_INST;
-    else if (!strcmp(cmd, "name"))
-	return PLIST_NAME;
-    else if (!strcmp(cmd, "display"))
-	return PLIST_DISPLAY;
-    else if (!strcmp(cmd, "pkgdep"))
-	return PLIST_PKGDEP;
-    else if (!strcmp(cmd, "mtree"))
-	return PLIST_MTREE;
-    else if (!strcmp(cmd, "dirrm"))
-	return PLIST_DIR_RM;
-    else if (!strcmp(cmd, "option"))
-	return PLIST_OPTION;
-    else
-	return FAIL;
+	if (arg) {
+		*arg = sp;
+	}
+	for (cmdp = cmdv ; cmdp->c_s && strcmp(cmdp->c_s, cmd) != 0 ; cmdp++) {
+	}
+	return cmdp->c_type;
 }
 
 /* Read a packing list from a file */
 void
-read_plist(Package *pkg, FILE *fp)
+read_plist(package_t *pkg, FILE *fp)
 {
     char *cp, pline[FILENAME_MAX];
     int cmd;
 
     while (fgets(pline, FILENAME_MAX, fp)) {
-	int len = strlen(pline) - 1;
+	int len = strlen(pline);
 
-	while (isspace(pline[len]))
-	    pline[len--] = '\0';
-	if (len <= 0)
+	while (len && isspace(pline[len - 1]))
+	    pline[--len] = '\0';
+	if (!len)
 	    continue;
 	cp = pline;
 	if (pline[0] == CMD_CHAR) {
 	    cmd = plist_cmd(pline + 1, &cp);
-	    if (cmd == FAIL)
-		barf("Bad command '%s'", pline);
+	    if (cmd == FAIL) {
+		warnx("Unrecognised PLIST command `%s'", pline);
+		continue;
+	    }
 	    if (*cp == '\0')
 		cp = NULL;
 	}
@@ -261,83 +258,28 @@ read_plist(Package *pkg, FILE *fp)
 
 /* Write a packing list to a file, converting commands to ascii equivs */
 void
-write_plist(Package *pkg, FILE *fp)
+write_plist(package_t *pkg, FILE *fp)
 {
-    PackingList plist = pkg->head;
+	plist_t	*p;
+	cmd_t	*cmdp;
 
-    while (plist) {
-	switch(plist->type) {
-	case PLIST_FILE:
-	    fprintf(fp, "%s\n", plist->name);
-	    break;
-
-	case PLIST_CWD:
-	    fprintf(fp, "%ccwd %s\n", CMD_CHAR, plist->name);
-	    break;
-
-	case PLIST_SRC:
-	    fprintf(fp, "%csrcdir %s\n", CMD_CHAR, plist->name);
-	    break;
-
-	case PLIST_CMD:
-	    fprintf(fp, "%cexec %s\n", CMD_CHAR, plist->name);
-	    break;
-
-	case PLIST_UNEXEC:
-	    fprintf(fp, "%cunexec %s\n", CMD_CHAR, plist->name);
-	    break;
-
-	case PLIST_CHMOD:
-	    fprintf(fp, "%cmode %s\n", CMD_CHAR, plist->name ? plist->name : "");
-	    break;
-
-	case PLIST_CHOWN:
-	    fprintf(fp, "%cowner %s\n", CMD_CHAR, plist->name ? plist->name : "");
-	    break;
-
-	case PLIST_CHGRP:
-	    fprintf(fp, "%cgroup %s\n", CMD_CHAR, plist->name ? plist->name : "");
-	    break;
-
-	case PLIST_COMMENT:
-	    fprintf(fp, "%ccomment %s\n", CMD_CHAR, plist->name);
-	    break;
-
-	case PLIST_IGNORE:
-	case PLIST_IGNORE_INST:		/* a one-time non-ignored file */
-	    fprintf(fp, "%cignore\n", CMD_CHAR);
-	    break;
-
-	case PLIST_NAME:
-	    fprintf(fp, "%cname %s\n", CMD_CHAR, plist->name);
-	    break;
-
-	case PLIST_DISPLAY:
-	    fprintf(fp, "%cdisplay %s\n", CMD_CHAR, plist->name);
-	    break;
-
-	case PLIST_PKGDEP:
-	    fprintf(fp, "%cpkgdep %s\n", CMD_CHAR, plist->name);
-	    break;
-
-	case PLIST_MTREE:
-	    fprintf(fp, "%cmtree %s\n", CMD_CHAR, plist->name);
-	    break;
-
-	case PLIST_DIR_RM:
-	    fprintf(fp, "%cdirrm %s\n", CMD_CHAR, plist->name);
-	    break;
-
-	case PLIST_OPTION:
-	    fprintf(fp, "%coption %s\n", CMD_CHAR, plist->name);
-	    break;
-
-	default:
-	    barf("Unknown command type %d (%s)\n", plist->type, plist->name);
-	    break;
+	for (p = pkg->head ; p ; p = p->next) {
+		if (p->type == PLIST_FILE) {
+			/* Fast-track files - these are the most common */
+			(void) fprintf(fp, "%s\n", p->name);
+			continue;
+		}
+		for (cmdp = cmdv ; cmdp->c_type != FAIL && cmdp->c_type != p->type ; cmdp++) {
+		}
+		if (cmdp->c_type == FAIL) {
+			warnx("Unknown PLIST command type %d (%s)", p->type, p->name);
+		} else if (cmdp->c_argc == 0) {
+			(void) fprintf(fp, "%c%s\n", CMD_CHAR, cmdp->c_s);
+		} else {
+			(void) fprintf(fp, "%c%s %s\n", CMD_CHAR, cmdp->c_s,
+					(p->name) ? p->name : "");
+		}
 	}
-	plist = plist->next;
-    }
 }
 
 /*
@@ -347,53 +289,104 @@ write_plist(Package *pkg, FILE *fp)
  * run it too in cases of failure.
  */
 int
-delete_package(Boolean ign_err, Boolean nukedirs, Package *pkg)
+delete_package(Boolean ign_err, Boolean nukedirs, package_t *pkg)
 {
-    PackingList p = pkg->head;
+    plist_t *p;
     char *Where = ".", *last_file = "";
-    Boolean fail = SUCCESS;
+    int fail = SUCCESS;
+    Boolean preserve;
+    char tmp[FILENAME_MAX], *name = NULL;
 
-    if (!p)
-	return FAIL;
-    while (p) {
-	if (p->type == PLIST_CWD) {
+    preserve = find_plist_option(pkg, "preserve") ? TRUE : FALSE;
+    for (p = pkg->head; p; p = p->next) {
+	switch (p->type)  {
+	case PLIST_NAME:
+	    name = p->name;
+	    break;
+
+	case PLIST_IGNORE:
+	    p = p->next;
+	    break;
+
+	case PLIST_CWD:
 	    Where = p->name;
 	    if (Verbose)
 		printf("Change working directory to %s\n", Where);
-	}
-	else if (p->type == PLIST_UNEXEC) {
-	    char cmd[FILENAME_MAX];
+	    break;
 
-	    format_cmd(cmd, p->name, Where, last_file);
+	case PLIST_UNEXEC:
+	    format_cmd(tmp, sizeof(tmp), p->name, Where, last_file);
 	    if (Verbose)
-		printf("Execute `%s'\n", cmd);
-	    if (!Fake && system(cmd)) {
-		whinge("unexec command for `%s' failed.", cmd);
+		printf("Execute `%s'\n", tmp);
+	    if (!Fake && system(tmp)) {
+		warnx("unexec command for `%s' failed", tmp);
 		fail = FAIL;
 	    }
-	}
-	else if (p->type == PLIST_IGNORE)
-	    p = p->next;
-	else if (p->type == PLIST_FILE || p->type == PLIST_DIR_RM) {
-	    char full_name[FILENAME_MAX];
+	    break;
 
-	    sprintf(full_name, "%s/%s", Where, p->name);
-	    if (isdir(full_name) && p->type == PLIST_FILE) {
-		warn("Attempting to delete directory `%s' as a file\n"
-		     "This packing list is incorrect - ignoring delete request.\n", full_name);
+	case PLIST_FILE:
+	    last_file = p->name;
+	    (void) snprintf(tmp, sizeof(tmp), "%s/%s", Where, p->name);
+	    if (isdir(tmp)) {
+		warnx("attempting to delete directory `%s' as a file\n"
+	   "this packing list is incorrect - ignoring delete request", tmp);
+	    }
+	    else {
+		if (p->next && p->next->type == PLIST_COMMENT && !strncmp(p->next->name, "MD5:", 4)) {
+		    char *cp, buf[LegibleChecksumLen];
+
+		    if ((cp = MD5File(tmp, buf)) != NULL) {
+			/* Mismatch? */
+			if (strcmp(cp, p->next->name + 4)) {
+			    if (Verbose)
+				printf("%s fails original MD5 checksum - %s\n",
+				       tmp, Force ? "deleted anyway." : "not deleted.");
+			    if (!Force) {
+				fail = FAIL;
+				continue;
+			    }
+			}
+		    }
+		}
+		if (Verbose)
+		    printf("Delete file %s\n", tmp);
+		if (!Fake) {
+		    if (delete_hierarchy(tmp, ign_err, nukedirs))
+		    fail = FAIL;
+		    if (preserve && name) {
+			char tmp2[FILENAME_MAX];
+			    
+			if (make_preserve_name(tmp2, FILENAME_MAX, name, tmp)) {
+			    if (fexists(tmp2)) {
+				if (rename(tmp2, tmp))
+				   warn("preserve: unable to restore %s as %s",
+					tmp2, tmp);
+			    }
+			}
+		    }
+		}
+	    }
+	    break;
+
+	case PLIST_DIR_RM:
+	    (void) snprintf(tmp, sizeof(tmp), "%s/%s", Where, p->name);
+	    if (!isdir(tmp)) {
+		warnx("attempting to delete file `%s' as a directory\n"
+	"this packing list is incorrect - ignoring delete request", tmp);
 	    }
 	    else {
 		if (Verbose)
-		    printf("Delete %s %s\n", !isdir(full_name) ? "file" : " directory", full_name);
-
-		if (!Fake && delete_hierarchy(full_name, ign_err, p->type == PLIST_DIR_RM ? FALSE : nukedirs)) {
-		    whinge("Unable to completely remove file '%s'", full_name);
+		    printf("Delete directory %s\n", tmp);
+		if (!Fake && delete_hierarchy(tmp, ign_err, FALSE)) {
+		    warnx("unable to completely remove directory '%s'", tmp);
 		    fail = FAIL;
 		}
 	    }
 	    last_file = p->name;
+	    break;
+	default:
+	    break;
 	}
-	p = p->next;
     }
     return fail;
 }
@@ -415,14 +408,19 @@ delete_hierarchy(char *dir, Boolean ign_err, Boolean nukedirs)
     cp1 = cp2 = dir;
     if (!fexists(dir)) {
 	if (!ign_err)
-	    whinge("%s `%s' doesn't really exist.", isdir(dir) ? "Directory" : "File", dir);
-    } else if (nukedirs) {
+	    warnx("%s `%s' doesn't really exist",
+		isdir(dir) ? "directory" : "file", dir);
+	return !ign_err;
+    }
+    else if (nukedirs) {
 	if (vsystem("%s -r%s %s", REMOVE_CMD, (ign_err ? "f" : ""), dir))
 	    return 1;
-    } else if (isdir(dir)) {
+    }
+    else if (isdir(dir)) {
 	if (RMDIR(dir) && !ign_err)
 	    return 1;
-    } else {
+    }
+    else {
 	if (REMOVE(dir, ign_err))
 	    return 1;
     }
@@ -434,11 +432,12 @@ delete_hierarchy(char *dir, Boolean ign_err, Boolean nukedirs)
 	    *cp2 = '\0';
 	if (!isemptydir(dir))
 	    return 0;
-	if (RMDIR(dir) && !ign_err)
+	if (RMDIR(dir) && !ign_err) {
 	    if (!fexists(dir))
-		whinge("Directory `%s' doesn't really exist.", dir);
+		warnx("directory `%s' doesn't really exist", dir);
 	    else
 		return 1;
+	}
 	/* back up the pathname one component */
 	if (cp2) {
 	    cp1 = dir;

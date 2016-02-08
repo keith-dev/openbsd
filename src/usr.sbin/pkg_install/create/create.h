@@ -1,4 +1,4 @@
-/* $OpenBSD: create.h,v 1.1 1996/06/04 07:56:05 niklas Exp $ */
+/* $OpenBSD: create.h,v 1.3 1998/10/13 23:09:50 marc Exp $ */
 
 /*
  * FreeBSD install - a package for the installation and maintainance
@@ -31,16 +31,18 @@ extern char	*Install;
 extern char	*DeInstall;
 extern char	*Contents;
 extern char	*Require;
-extern char	PlayPen[];
+extern char	*SrcDir;
 extern char	*ExcludeFrom;
 extern char	*Mtree;
 extern char	*Pkgdeps;
+extern char	*Pkgcfl;
+extern char	PlayPen[];
+extern size_t	PlayPenSize;
 extern int	Dereference;
 extern int	PlistOnly;
 
-void		check_list(char *, Package *);
-void		usage(const char *, const char *, ...);
+void		check_list(char *, package_t *);
 int		pkg_perform(char **);
-void		copy_plist(char *, Package *);
+void		copy_plist(char *, package_t *);
 
 #endif	/* _INST_CREATE_H_INCLUDE */

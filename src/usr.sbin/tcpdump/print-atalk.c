@@ -23,7 +23,7 @@
 
 #ifndef lint
 static const char rcsid[] =
-    "@(#) $Header: /cvs/src/usr.sbin/tcpdump/print-atalk.c,v 1.7 1997/07/25 20:12:21 mickey Exp $ (LBL)";
+    "@(#) $Header: /cvs/src/usr.sbin/tcpdump/print-atalk.c,v 1.9 1998/07/13 22:13:46 deraadt Exp $ (LBL)";
 #endif
 
 #include <sys/param.h>
@@ -556,11 +556,11 @@ ataddr_string(u_short atnet, u_char athost)
 		while (fgets(line, sizeof(line), fp)) {
 			if (line[0] == '\n' || line[0] == 0 || line[0] == '#')
 				continue;
-			if (sscanf(line, "%d.%d.%d %s", &i1, &i2, &i3,
+			if (sscanf(line, "%d.%d.%d %255s", &i1, &i2, &i3,
 				     nambuf) == 4)
 				/* got a hostname. */
 				i3 |= ((i1 << 8) | i2) << 8;
-			else if (sscanf(line, "%d.%d %s", &i1, &i2,
+			else if (sscanf(line, "%d.%d %255s", &i1, &i2,
 					nambuf) == 3)
 				/* got a net name */
 				i3 = (((i1 << 8) | i2) << 8) | 255;
@@ -587,7 +587,8 @@ ataddr_string(u_short atnet, u_char athost)
 		if (tp2->addr == i) {
 			tp->addr = (atnet << 8) | athost;
 			tp->nxt = newhnamemem();
-			(void)sprintf(nambuf, "%s.%d", tp2->name, athost);
+			(void)snprintf(nambuf, sizeof nambuf, "%s.%d",
+			    tp2->name, athost);
 			tp->name = savestr(nambuf);
 			return (tp->name);
 		}
@@ -595,9 +596,9 @@ ataddr_string(u_short atnet, u_char athost)
 	tp->addr = (atnet << 8) | athost;
 	tp->nxt = newhnamemem();
 	if (athost != 255)
-		(void)sprintf(nambuf, "%d.%d", atnet, athost);
+		(void)snprintf(nambuf, sizeof nambuf, "%d.%d", atnet, athost);
 	else
-		(void)sprintf(nambuf, "%d", atnet);
+		(void)snprintf(nambuf, sizeof nambuf, "%d", atnet);
 	tp->name = savestr(nambuf);
 
 	return (tp->name);
@@ -614,7 +615,7 @@ static struct tok skt2str[] = {
 static const char *
 ddpskt_string(register int skt)
 {
-	static char buf[8];
+	static char buf[10];
 
 	if (nflag) {
 		(void)sprintf(buf, "%d", skt);

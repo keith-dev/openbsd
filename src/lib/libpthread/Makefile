@@ -1,21 +1,20 @@
-#	from: @(#)Makefile	5.2 (Berkeley) 3/5/91
+# Generated automatically from Makefile.in by configure.
+#	@(#)Makefile	5.2 (Berkeley) 3/5/91
+#
+
+.include <bsd.own.mk>
 
 LIB=pthread
-NOPIC= no
-CPPFLAGS+= -DPTHREAD_KERNEL -I. -I${.CURDIR}/include -I${.CURDIR}/arch/${MACHINE_ARCH}
+NOPIC=no
+CFLAGS+=-DPTHREAD_KERNEL -I. -I${.CURDIR}/include -I${.CURDIR}/arch/${MACHINE_ARCH}
 
-.include "${.CURDIR}/arch/${MACHINE_ARCH}/Makefile.inc"
+.include "${.CURDIR}/include/Makefile.inc"
+.include "${.CURDIR}/arch/${MACHINE}/Makefile.inc"
 .include "${.CURDIR}/pthreads/Makefile.inc"
+.include "${.CURDIR}/stdlib/Makefile.inc"
 .include "${.CURDIR}/stdio/Makefile.inc"
+.include "${.CURDIR}/string/Makefile.inc"
+.include "${.CURDIR}/gen/Makefile.inc"
+.include "${.CURDIR}/net/Makefile.inc"
 
-all beforedepend: pthread
-
-CLEANFILES+=pthread 
-
-pthread: 
-	if [ ! -e pthread ]; then \
-		ln -s ${.CURDIR}/include pthread; \
-	fi
-	
 .include <bsd.lib.mk>
-

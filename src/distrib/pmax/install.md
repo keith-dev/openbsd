@@ -1,4 +1,4 @@
-#	$OpenBSD: install.md,v 1.6 1998/03/27 23:28:15 deraadt Exp $
+#	$OpenBSD: install.md,v 1.9 1998/09/11 22:55:44 millert Exp $
 #	$NetBSD: install.md,v 1.3.2.5 1996/08/26 15:45:28 gwr Exp $
 #
 #
@@ -115,11 +115,6 @@ md_get_cddevs() {
 	grep "^rz[0-6] " < /kern/msgbuf | cut -d" " -f1 | sort -u
 }
 
-md_get_ifdevs() {
-	# return available network devices
-	grep "^le[0-9] " < /kern/msgbuf | cut -d" " -f1 | sort -u
-}
-
 md_get_partition_range() {
     # return range of valid partition letters
     echo "[a-p]"
@@ -127,11 +122,13 @@ md_get_partition_range() {
 
 
 md_installboot() {
-	echo -n "Installing boot block..."
 	# $1 is the root disk
+
+	echo -n "Installing boot block... "
 	disklabel -W ${1}
 	disklabel -B ${1}
 	echo "done."
+
 	# we also use this chance to do an ldconfig here
 	echo -n "creating runtime link editor directory cache..."
 	chroot /mnt ldconfig
@@ -188,14 +185,15 @@ md_prep_disklabel()
 	esac
 
 	# display example
+	cat << \__md_prep_disklabel_1
+
+If you are unsure of how to use multiple partitions properly
+(ie. seperating /, /usr, /tmp, /var, /usr/local, and other things)
+just split the space into a root and swap partition for now.
+__md_prep_disklabel_1
+
 	disklabel -W ${_disk}
-# TTT   hack to workaround disklabel problems
-	disklabel ${_disk} > /tmp/tempdisklabel
-	disklabel -r -R ${_disk} /tmp/tempdisklabel 2> /dev/null
 	disklabel -E ${_disk}
-# TTT   hack to workaround disklabel problems
-	disklabel ${_disk} > /tmp/tempdisklabel
-	disklabel -r -R ${_disk} /tmp/tempdisklabel 2> /dev/null
 }
 
 md_copy_kernel() {

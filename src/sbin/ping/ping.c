@@ -1,4 +1,4 @@
-/*	$OpenBSD: ping.c,v 1.30 1998/04/03 11:27:58 deraadt Exp $	*/
+/*	$OpenBSD: ping.c,v 1.35 1998/05/17 01:46:51 angelos Exp $	*/
 /*	$NetBSD: ping.c,v 1.20 1995/08/11 22:37:58 cgd Exp $	*/
 
 /*
@@ -47,7 +47,7 @@ static char copyright[] =
 #if 0
 static char sccsid[] = "@(#)ping.c	8.1 (Berkeley) 6/5/93";
 #else
-static char rcsid[] = "$OpenBSD: ping.c,v 1.30 1998/04/03 11:27:58 deraadt Exp $";
+static char rcsid[] = "$OpenBSD: ping.c,v 1.35 1998/05/17 01:46:51 angelos Exp $";
 #endif
 #endif /* not lint */
 
@@ -91,12 +91,17 @@ static char rcsid[] = "$OpenBSD: ping.c,v 1.30 1998/04/03 11:27:58 deraadt Exp $
 #include <string.h>
 #include <stdlib.h>
 
-#define	DEFDATALEN	(64 - 8)	/* default data length */
+struct tvi {
+	u_int	tv_sec;
+	u_int	tv_usec;
+};
+
+#define	DEFDATALEN	(64 - 8)		/* default data length */
 #define	MAXIPLEN	60
 #define	MAXICMPLEN	76
-#define	MAXPACKET	(65536 - 60 - 8)/* max packet size */
-#define	MAXWAIT_DEFAULT	10		/* max seconds to wait for response */
-#define	NROUTES		9		/* number of record route slots */
+#define	MAXPACKET	(65536 - 60 - 8)	/* max packet size */
+#define	MAXWAIT_DEFAULT	10			/* secs to wait for response */
+#define	NROUTES		9			/* number of record route slots */
 
 #define	A(bit)		rcvd_tbl[(bit)>>3]	/* identify byte in array */
 #define	B(bit)		(1 << ((bit) & 0x07))	/* identify bit in byte */
@@ -155,9 +160,9 @@ int interval = 1;		/* interval between packets */
 /* timing */
 int timing;			/* flag to do timing */
 int maxwait = MAXWAIT_DEFAULT;	/* max seconds to wait for response */
-quad_t tmin = 999999999;	/* minimum round trip time in microsec */
-quad_t tmax = 0;		/* maximum round trip time in microsec */
-quad_t tsum = 0;		/* sum of all times in microsec, for doing average */
+quad_t tmin = 999999999;	/* minimum round trip time in millisec */
+quad_t tmax = 0;		/* maximum round trip time in millisec */
+quad_t tsum = 0;		/* sum of all times in millisec, for doing average */
 
 #ifdef SIGINFO
 int reset_kerninfo;
@@ -208,7 +213,7 @@ main(argc, argv)
 	setuid(getuid());
 
 	preload = 0;
-	datap = &outpack[8 + sizeof(struct timeval)];
+	datap = &outpack[8 + sizeof(struct tvi)];
 	while ((ch = getopt(argc, argv, "DI:LRS:c:dfh:i:l:np:qrs:T:t:vw:")) != -1)
 		switch(ch) {
 		case 'c':
@@ -332,13 +337,13 @@ main(argc, argv)
 	if (options & F_FLOOD && options & F_INTERVAL)
 		errx(1, "-f and -i options are incompatible");
 
-	if (datalen >= sizeof(struct timeval))	/* can we time transfer */
+	if (datalen >= sizeof(struct tvi))	/* can we time transfer */
 		timing = 1;
 	packlen = datalen + MAXIPLEN + MAXICMPLEN;
 	if (!(packet = (u_char *)malloc((u_int)packlen)))
 		err(1, "malloc");
 	if (!(options & F_PINGFILLED))
-		for (i = 8; i < datalen; ++i)
+		for (i = 8 + sizeof(struct tvi); i < datalen; ++i)
 			*datap++ = i;
 
 	ident = getpid() & 0xFFFF;
@@ -523,7 +528,7 @@ catcher()
 		alarm((u_int)interval);
 	else {
 		if (nreceived) {
-			waittime = 2 * tmax / 1000;
+			waittime = 2 * tmax / 1000000;
 			if (!waittime)
 				waittime = 1;
 		} else
@@ -571,9 +576,15 @@ pinger()
 
 	CLR(ntohs(icp->icmp_seq) % mx_dup_ck);
 
-	if (timing)
-		(void)gettimeofday((struct timeval *)&outpack[8],
-		    (struct timezone *)NULL);
+	if (timing) {
+		struct timeval tv;
+		struct tvi tvi;
+
+		(void)gettimeofday(&tv, (struct timezone *)NULL);
+		tvi.tv_sec = htonl(tv.tv_sec);
+		tvi.tv_usec = htonl(tv.tv_usec);
+		memcpy((u_int *)&outpack[8], &tvi, sizeof tvi);
+	}
 
 	cc = datalen + 8;			/* skips ICMP portion */
 
@@ -647,12 +658,17 @@ pr_pack(buf, cc, from)
 			return;			/* 'Twas not our ECHO */
 		++nreceived;
 		if (timing) {
+			struct tvi tvi;
+
 #ifndef icmp_data
 			pkttime = (char *)&icp->icmp_ip;
 #else
 			pkttime = (char *)icp->icmp_data;
 #endif
-			memcpy(&tp, pkttime, sizeof (tp));
+			memcpy(&tvi, pkttime, sizeof tvi);
+			tp.tv_sec = ntohl(tvi.tv_sec);
+			tp.tv_usec = ntohl(tvi.tv_usec);
+			
 			timersub(&tv, &tp, &tv);
 			triptime = (tv.tv_sec * 1000000) + tv.tv_usec;
 			tsum += triptime;
@@ -688,9 +704,9 @@ pr_pack(buf, cc, from)
 			if (dupflag)
 				(void)printf(" (DUP!)");
 			/* check the data */
-			cp = (u_char*)&icp->icmp_data[sizeof (struct timeval)];
-			dp = &outpack[8 + sizeof (struct timeval)];
-			for (i = 8 + sizeof(struct timeval); i < datalen;
+			cp = (u_char*)&icp->icmp_data[sizeof(struct tvi)];
+			dp = &outpack[8 + sizeof(struct tvi)];
+			for (i = 8 + sizeof(struct tvi); i < datalen;
 			    ++i, ++cp, ++dp) {
 				if (*cp != *dp) {
 	(void)printf("\nwrong data byte #%d should be 0x%x but was 0x%x",
@@ -873,16 +889,17 @@ summary(header)
 	(void)printf("%ld packets received, ", nreceived);
 	if (nrepeats)
 		(void)printf("+%ld duplicates, ", nrepeats);
-	if (ntransmitted)
+	if (ntransmitted) {
 		if (nreceived > ntransmitted)
 			(void)printf("-- somebody's printing up packets!");
 		else
 			(void)printf("%d%% packet loss",
 			    (int) (((ntransmitted - nreceived) * 100) /
 			    ntransmitted));
+	}
 	(void)putchar('\n');
 	if (nreceived && timing) {
-		/* Only display average to microseconds */
+		/* Only display average to milliseconds */
 		i = tsum / (nreceived + nrepeats);
 		(void)printf("round-trip min/avg/max = %d.%03d/%d.%03d/%d.%03d ms\n",
 		    (int)(tmin / 1000), (int)(tmin % 1000),
@@ -1210,7 +1227,7 @@ fill(bp, patp)
 
 	if (ii > 0)
 		for (kk = 0;
-		    kk <= MAXPACKET - (8 + sizeof(struct timeval) + ii);
+		    kk <= MAXPACKET - (8 + sizeof(struct tvi) + ii);
 		    kk += ii)
 			for (jj = 0; jj < ii; ++jj)
 				bp[jj + kk] = pat[jj];

@@ -1,4 +1,4 @@
-/*	$OpenBSD: which.c,v 1.3 1998/01/28 17:18:53 millert Exp $	*/
+/*	$OpenBSD: which.c,v 1.5 1998/06/21 22:14:05 millert Exp $	*/
 
 /*
  * Copyright (c) 1997 Todd C. Miller <Todd.Miller@courtesan.com>
@@ -12,10 +12,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by Todd C. Miller.
- * 4. The name of the author may not be used to endorse or promote products
+ * 3. The name of the author may not be used to endorse or promote products
  *    derived from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES,
@@ -31,7 +28,7 @@
  */
 
 #ifndef lint                                                              
-static char rcsid[] = "$OpenBSD: which.c,v 1.3 1998/01/28 17:18:53 millert Exp $";
+static char rcsid[] = "$OpenBSD: which.c,v 1.5 1998/06/21 22:14:05 millert Exp $";
 #endif /* not lint */                                                        
 
 #include <sys/param.h>
@@ -100,23 +97,23 @@ main(argc, argv)
 		mib[0] = CTL_USER;
 		mib[1] = USER_CS_PATH;
 		if (sysctl(mib, 2, NULL, &n, NULL, 0) == -1)
-			err(-1, "unable to get length of user.cs_path");
+			err(1, "unable to get length of user.cs_path");
 		if (n == 0)
-			errx(-1, "user.cs_path was zero length!");
+			errx(1, "user.cs_path was zero length!");
 		if ((path = (char *)malloc(n)) == NULL)
-			errx(-1, "can't allocate memory.");
+			errx(1, "can't allocate memory.");
 		if (sysctl(mib, 2, path, &n, NULL, 0) == -1)
-			err(-1, "unable to get user.cs_path");
+			err(1, "unable to get user.cs_path");
 	} else {
 		if ((path = getenv("PATH")) == NULL)
-			err(-1, "can't get $PATH from environment");
+			err(1, "can't get $PATH from environment");
 	}
 
 	/* To make access(2) do what we want */
 	if (setgid(getegid()))
-		err(-1, "Can't set gid to %u", getegid());
+		err(1, "Can't set gid to %u", getegid());
 	if (setuid(geteuid()))
-		err(-1, "Can't set uid to %u", geteuid());
+		err(1, "Can't set uid to %u", geteuid());
 
 	for (n = optind; n < argc; n++)
 		if (findprog(argv[n], path, progmode, allmatches) == 0)
@@ -149,7 +146,7 @@ findprog(prog, path, progmode, allmatches)
 	}
 
 	if ((path = strdup(path)) == NULL)
-		errx(-1, "Can't allocate memory.");
+		errx(1, "Can't allocate memory.");
 
 	proglen = strlen(prog);
 	while ((p = strsep(&path, ":")) != NULL) {

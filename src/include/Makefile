@@ -1,4 +1,4 @@
-#	$OpenBSD: Makefile,v 1.47 1998/03/03 21:15:22 niklas Exp $
+#	$OpenBSD: Makefile,v 1.56 1998/10/07 02:36:48 deraadt Exp $
 #	$NetBSD: Makefile,v 1.59 1996/05/15 21:36:43 jtc Exp $
 
 #	@(#)Makefile	5.45.1.1 (Berkeley) 5/6/91
@@ -8,15 +8,15 @@
 
 # Missing: mp.h
 
-FILES=	a.out.h ar.h assert.h bitstring.h blf.h bm.h cpio.h ctype.h db.h \
-	des.h dirent.h disktab.h elf_abi.h err.h fnmatch.h fstab.h fts.h \
-	glob.h grp.h ieeefp.h inttypes.h iso646.h kvm.h langinfo.h libgen.h \
-	limits.h locale.h malloc.h math.h md4.h md5.h memory.h mpool.h ndbm.h \
-	netdb.h netgroup.h nlist.h nl_types.h olf_abi.h paths.h poll.h pwd.h \
-	ranlib.h re_comp.h regex.h resolv.h rmd160.h search.h setjmp.h \
-	sgtty.h sha1.h signal.h stab.h stddef.h stdio.h stdlib.h string.h \
-	strings.h struct.h sysexits.h tar.h time.h ttyent.h tzfile.h \
-	unistd.h utime.h utmp.h vis.h
+FILES=	a.out.h ar.h assert.h bitstring.h blf.h bm.h cast.h cpio.h ctype.h \
+	curses.h db.h des.h dirent.h disktab.h elf_abi.h err.h fnmatch.h \
+	fstab.h fts.h glob.h grp.h ieeefp.h inttypes.h iso646.h kvm.h \
+	langinfo.h libgen.h limits.h locale.h malloc.h math.h md4.h md5.h \
+	memory.h mpool.h ndbm.h netdb.h netgroup.h nlist.h nl_types.h \
+	olf_abi.h paths.h poll.h pwd.h ranlib.h re_comp.h regex.h resolv.h \
+	rmd160.h search.h setjmp.h sgtty.h sha1.h signal.h stab.h stddef.h \
+	stdio.h stdlib.h string.h strings.h struct.h sysexits.h tar.h time.h \
+	ttyent.h tzfile.h unistd.h utime.h utmp.h vis.h
 
 .if (${MACHINE_ARCH} != "alpha") && (${MACHINE_ARCH} != "mips")
 FILES+=	dlfcn.h link.h
@@ -31,17 +31,17 @@ MFILES+= link.h dlfcn.h
 
 DIRS=	arpa protocols rpc rpcsvc
 LDIRS=	dev net netinet netccitt netiso netns netipx nfs sys ufs vm ddb \
-	scsi netatalk
+	scsi netatalk isofs xfs
 
 RDIRS=	../lib/libcom_err ../lib/libcompat ../lib/libcurses ../lib/libform \
-	../lib/libmenu ../lib/libocurses ../lib/libpanel ../lib/librpcsvc \
-	../lib/libskey ../lib/libss ../lib/libtermlib ../lib/libedit \
+	../lib/libmenu ../lib/libocurses ../lib/libossaudio ../lib/libpanel \
+	../lib/librpcsvc ../lib/libskey ../lib/libedit \
 	../lib/libpcap ../lib/libutil ../lib/libwrap ../lib/libz \
 	../sys/arch/${MACHINE}
 
-WDIRS=	../gnu/lib/libg++/libg++ ../gnu/lib/libg++/libio \
+WDIRS=	../lib/libssl ../gnu/lib/libg++/libg++ ../gnu/lib/libg++/libio \
 	../gnu/lib/libg++/librx ../gnu/lib/libg++/libstdc++ \
-	../gnu/usr.bin/gcc
+	../gnu/usr.bin/gcc ../gnu/lib/libgmp
 
 NOOBJ=	noobj
 
@@ -105,7 +105,7 @@ copies:
 	rm -rf ${DESTDIR}/usr/include/machine
 	${INSTALL} -d -o ${BINOWN} -g ${BINGRP} -m 755 \
 		${DESTDIR}/usr/include/machine
-	pax -rw -pa -s "|../sys/arch/${MACHINE}/include||" \
+	pax -rw -pa -s "|\.\./sys/arch/${MACHINE}/include||" \
 	    ../sys/arch/${MACHINE}/include/*.h \
 	    ${DESTDIR}/usr/include/machine   
 	rm -rf ${DESTDIR}/usr/include/${MACHINE_ARCH}
@@ -113,7 +113,7 @@ copies:
 	    -d ../sys/arch/${MACHINE_ARCH}/include; then \
 		${INSTALL} -d -o ${BINOWN} -g ${BINGRP} -m 755 \
     	    	    ${DESTDIR}/usr/include/${MACHINE_ARCH}; \
-		pax -rw -pa -s "|../sys/arch/${MACHINE_ARCH}/include||" \
+		pax -rw -pa -s "|\.\./sys/arch/${MACHINE_ARCH}/include||" \
 		    ../sys/arch/${MACHINE_ARCH}/include/*.h \
 		    ${DESTDIR}/usr/include/${MACHINE_ARCH}; \
 	else \

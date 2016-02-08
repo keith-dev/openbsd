@@ -1,4 +1,4 @@
-/*	$OpenBSD: md.h,v 1.2 1996/09/30 22:29:32 deraadt Exp $	*/
+/*	$OpenBSD: md.h,v 1.5 1998/05/16 07:44:26 niklas Exp $	*/
 /*	$NetBSD: md.h,v 1.1 1995/10/19 13:10:20 ragge Exp $	*/
 /*
  * Copyright (c) 1993 Paul Kranenburg
@@ -36,7 +36,14 @@
 #define NEED_SWAP
 #endif
 
-#define	MAX_ALIGNMENT		(sizeof (long))
+/* Remove definitions from the host exec.h */
+#undef __LDPGSZ
+#ifdef relocation_info
+#undef relocation_info
+#endif
+#include <sys/arch/vax/include/exec.h>
+
+#define	MAX_ALIGNMENT		4	/* (sizeof (long)) */
 
 #if defined(__NetBSD__) || defined(__OpenBSD__)
 #define PAGSIZ			__LDPGSZ
@@ -49,13 +56,13 @@
 #define N_SET_FLAG(ex,f)	(oldmagic || N_GETMAGIC(ex)==QMAGIC ? (0) : \
 					N_SETMAGIC(ex,			\
 						   N_GETMAGIC(ex),	\
-						   MID_MACHINE,		\
+						   MID_VAX,		\
 						   N_GETFLAG(ex)|(f)))
 
 #define N_IS_DYNAMIC(ex)	((N_GETFLAG(ex) & EX_DYNAMIC))
 
 #define N_BADMID(ex) \
-	(N_GETMID(ex) != 0 && N_GETMID(ex) != MID_MACHINE)
+	(N_GETMID(ex) != 0 && N_GETMID(ex) != MID_VAX)
 
 #endif
 
@@ -67,11 +74,11 @@
 				  (netzmagic == 0 ?			\
 					N_SETMAGIC(ex,			\
 						   N_GETMAGIC(ex),	\
-						   MID_MACHINE,		\
+						   MID_VAX,		\
 						   N_GETFLAG(ex)|(f)) :	\
 					N_SETMAGIC_NET(ex,		\
 						   N_GETMAGIC_NET(ex),	\
-						   MID_MACHINE,		\
+						   MID_VAX,		\
 						   N_GETFLAG_NET(ex)|(f)) ))
 
 #define N_IS_DYNAMIC(ex)	((N_GETMAGIC_NET(ex) == ZMAGIC) ?	\
@@ -147,31 +154,31 @@ typedef struct jmpslot {
 
 #define get_byte(p)	( ((unsigned char *)(p))[0] )
 
-#define get_short(p)	( ( ((unsigned char *)(p))[0] << 8) | \
-			  ( ((unsigned char *)(p))[1]     )   \
+#define get_short(p)	( ( ((unsigned char *)(p))[0]     ) | \
+			  ( ((unsigned char *)(p))[1] << 8)   \
 			)
 
-#define get_long(p)	( ( ((unsigned char *)(p))[0] << 24) | \
-			  ( ((unsigned char *)(p))[1] << 16) | \
-			  ( ((unsigned char *)(p))[2] << 8 ) | \
-			  ( ((unsigned char *)(p))[3]      )   \
+#define get_long(p)	( ( ((unsigned char *)(p))[0]      ) | \
+			  ( ((unsigned char *)(p))[1] << 8 ) | \
+			  ( ((unsigned char *)(p))[2] << 16) | \
+			  ( ((unsigned char *)(p))[3] << 24)   \
 			)
 
 #define put_byte(p, v)	{ ((unsigned char *)(p))[0] = ((unsigned long)(v)); }
 
 #define put_short(p, v)	{ ((unsigned char *)(p))[0] =			\
-				((((unsigned long)(v)) >> 8) & 0xff); 	\
+				((((unsigned long)(v))     ) & 0xff); 	\
 			  ((unsigned char *)(p))[1] =			\
-				((((unsigned long)(v))     ) & 0xff); }
+				((((unsigned long)(v)) >> 8) & 0xff); }
 
 #define put_long(p, v)	{ ((unsigned char *)(p))[0] =			\
-				((((unsigned long)(v)) >> 24) & 0xff); 	\
+				((((unsigned long)(v))      ) & 0xff); 	\
 			  ((unsigned char *)(p))[1] =			\
-				((((unsigned long)(v)) >> 16) & 0xff); 	\
-			  ((unsigned char *)(p))[2] =			\
 				((((unsigned long)(v)) >>  8) & 0xff); 	\
+			  ((unsigned char *)(p))[2] =			\
+				((((unsigned long)(v)) >> 16) & 0xff); 	\
 			  ((unsigned char *)(p))[3] =			\
-				((((unsigned long)(v))      ) & 0xff); }
+				((((unsigned long)(v)) >> 24) & 0xff); }
 
 #ifdef NEED_SWAP
 

@@ -1,4 +1,4 @@
-/*	$OpenBSD: worm.c,v 1.5 1998/03/12 09:09:30 pjanzen Exp $	*/
+/*	$OpenBSD: worm.c,v 1.7 1998/09/16 00:44:37 pjanzen Exp $	*/
 
 /*
  * Copyright (c) 1980, 1993
@@ -43,7 +43,7 @@ static char copyright[] =
 #if 0
 static char sccsid[] = "@(#)worm.c	8.1 (Berkeley) 5/31/93";
 #else
-static char rcsid[] = "$OpenBSD: worm.c,v 1.5 1998/03/12 09:09:30 pjanzen Exp $";
+static char rcsid[] = "$OpenBSD: worm.c,v 1.7 1998/09/16 00:44:37 pjanzen Exp $";
 #endif
 #endif /* not lint */
 
@@ -54,12 +54,12 @@ static char rcsid[] = "$OpenBSD: worm.c,v 1.5 1998/03/12 09:09:30 pjanzen Exp $"
 
 #include <ctype.h>
 #include <curses.h>
+#include <err.h>
 #include <signal.h>
 #include <stdlib.h>
 #include <termios.h>
 #include <unistd.h>
 
-#define newlink() (struct body *) malloc(sizeof (struct body));
 #define HEAD '@'
 #define BODY 'o'
 #define LENGTH 7
@@ -87,6 +87,7 @@ void	display __P((struct body *, char));
 void	leave __P((int));
 void	life __P((void));
 void	newpos __P((struct body *));
+struct body 	*newlink __P((void));
 void	process __P((char));
 void	prize __P((void));
 int	rnd __P((int));
@@ -163,7 +164,7 @@ life()
 		np = newlink();
 		np->next = bp;
 		bp->prev = np;
-		if (((bp->x <= 2) && (j == 1)) || ((bp->x >= COLS-4)) && (j == -1)) {
+		if (((bp->x <= 2) && (j == 1)) || ((bp->x >= COLS-4) && (j == -1))) {
 			j *= -1;
 			np->x = bp->x;
 			np->y = bp->y + 1;
@@ -179,8 +180,8 @@ life()
 
 void
 display(pos, chr)
-struct body *pos;
-char chr;
+	struct body *pos;
+	char chr;
 {
 	wmove(tv, pos->y, pos->x);
 	waddch(tv, chr);
@@ -188,7 +189,7 @@ char chr;
 
 void
 leave(dummy)
-int dummy;
+	int dummy;
 {
 	endwin();
 	exit(0);
@@ -196,7 +197,7 @@ int dummy;
 
 void
 wake(dummy)
-int dummy;
+	int dummy;
 {
 	signal(SIGALRM, wake);
 	fflush(stdout);
@@ -205,14 +206,14 @@ int dummy;
 
 int
 rnd(range)
-int range;
+	int range;
 {
 	return random() % range;
 }
 
 void
 newpos(bp)
-struct body * bp;
+	struct body * bp;
 {
 	do {
 		bp->y = rnd(LINES-3)+ 2;
@@ -234,7 +235,7 @@ prize()
 
 void
 process(ch)
-char ch;
+	char ch;
 {
 	register int x,y;
 	struct body *nh;
@@ -296,6 +297,18 @@ char ch;
 		alarm(1);
 }
 
+struct body *
+newlink()
+{
+	struct body *tmp;
+
+	if ((tmp = (struct body *) malloc(sizeof (struct body))) == NULL) {
+		endwin();
+		errx(1, "out of memory");
+	}
+	return (tmp);
+}
+
 void
 crash()
 {
@@ -309,7 +322,7 @@ crash()
 
 void
 suspend(dummy)
-int dummy;
+	int dummy;
 {
 	move(LINES-1, 0);
 	refresh();

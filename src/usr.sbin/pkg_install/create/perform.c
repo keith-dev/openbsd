@@ -1,7 +1,7 @@
-/*	$OpenBSD: perform.c,v 1.4 1997/01/17 07:14:13 millert Exp $	*/
+/*	$OpenBSD: perform.c,v 1.6 1998/10/13 23:09:50 marc Exp $	*/
 
 #ifndef lint
-static const char *rcsid = "$OpenBSD: perform.c,v 1.4 1997/01/17 07:14:13 millert Exp $";
+static const char *rcsid = "$OpenBSD: perform.c,v 1.6 1998/10/13 23:09:50 marc Exp $";
 #endif
 
 /*
@@ -27,13 +27,14 @@ static const char *rcsid = "$OpenBSD: perform.c,v 1.4 1997/01/17 07:14:13 miller
 #include "lib.h"
 #include "create.h"
 
-#include <errno.h>
+#include <err.h>
 #include <signal.h>
 #include <sys/syslimits.h>
+#include <sys/wait.h>
 #include <unistd.h>
 
 static void sanity_check(void);
-static void make_dist(char *, char *, char *, Package *);
+static void make_dist(char *, char *, char *, package_t *);
 
 static char *home;
 
@@ -43,7 +44,7 @@ pkg_perform(char **pkgs)
     char *pkg = *pkgs;		/* Only one arg to create */
     char *cp;
     FILE *pkg_in, *fp;
-    Package plist;
+    package_t plist;
     char *suffix;  /* What we tack on to the end of the finished package */
 
     /* Preliminary setup */
@@ -56,8 +57,10 @@ pkg_perform(char **pkgs)
 	pkg_in = stdin;
     else {
 	pkg_in = fopen(Contents, "r");
-	if (!pkg_in)
-	    barf("Unable to open contents file '%s' for input.", Contents);
+	if (!pkg_in) {
+	    cleanup(0);
+	    errx(2, "unable to open contents file '%s' for input", Contents);
+	}
     }
     plist.head = plist.tail = NULL;
 
@@ -84,6 +87,30 @@ pkg_perform(char **pkgs)
 	if (Verbose && !PlistOnly)
 	    printf(".\n");
     }
+
+    /* Put the conflicts directly after the dependencies, if any */
+    if (Pkgcfl) {
+	if (Verbose && !PlistOnly)
+	    printf("Registering conflicts:");
+	while (Pkgcfl) {
+	   cp = strsep(&Pkgcfl, " \t\n");
+	   if (*cp) {
+		add_plist(&plist, PLIST_PKGCFL, cp);
+		if (Verbose && !PlistOnly)
+		    printf(" %s", cp);
+	   }
+	}
+	if (Verbose && !PlistOnly)
+	    printf(".\n");
+    }
+
+    /* If a SrcDir override is set, add it now */
+    if (SrcDir) {
+	if (Verbose && !PlistOnly)
+	    printf("Using SrcDir value of %s\n", SrcDir);
+	add_plist(&plist, PLIST_SRC, SrcDir);
+    }
+
     /* Slurp in the packing list */
     read_plist(&plist, pkg_in);
 
@@ -104,12 +131,13 @@ pkg_perform(char **pkgs)
      * hack.  It's not a real create in progress.
      */
     if (PlistOnly) {
+	check_list(home, &plist);
 	write_plist(&plist, stdout);
 	exit(0);
     }
 
     /* Make a directory to stomp around in */
-    home = make_playpen(PlayPen, 0);
+    home = make_playpen(PlayPen, PlayPenSize, 0);
     signal(SIGINT, cleanup);
     signal(SIGHUP, cleanup);
 
@@ -157,18 +185,17 @@ pkg_perform(char **pkgs)
 	add_plist(&plist, PLIST_MTREE, MTREE_FNAME);
     }
 
-    /* Run through the list again, picking up extra "local" items */
-    /* check_list(".", &plist); */
-    /* copy_plist(".", &plist); */
-    /* mark_plist(&plist); */
-
     /* Finally, write out the packing list */
     fp = fopen(CONTENTS_FNAME, "w");
-    if (!fp)
-	barf("Can't open file %s for writing.", CONTENTS_FNAME);
+    if (!fp) {
+	cleanup(0);
+	errx(2, "can't open file %s for writing", CONTENTS_FNAME);
+    }
     write_plist(&plist, fp);
-    if (fclose(fp))
-	barf("Error while closing %s.", CONTENTS_FNAME);
+    if (fclose(fp)) {
+	cleanup(0);
+	errx(2, "error while closing %s", CONTENTS_FNAME);
+    }
 
     /* And stick it into a tar ball */
     make_dist(home, pkg, suffix, &plist);
@@ -177,19 +204,18 @@ pkg_perform(char **pkgs)
     free(Comment);
     free(Desc);
     free_plist(&plist);
-    cleanup(0);
+    leave_playpen(home);
     return TRUE;	/* Success */
 }
 
 static void
-make_dist(char *home, char *pkg, char *suffix, Package *plist)
+make_dist(char *home, char *pkg, char *suffix, package_t *plist)
 {
     char tball[FILENAME_MAX];
-    PackingList p;
-    int ret, max, len;
-                        /* XXX - The next one should be 
-			   allocated dynamically  */
-    char *args[4096];	/* Much more than enough. */
+    plist_t *p;
+    int ret;
+#define DIST_MAX_ARGS 4096
+    char *args[DIST_MAX_ARGS];	/* Much more than enough. */
     int nargs = 0;
     int pipefds[2];
     FILE *totar;
@@ -238,6 +264,8 @@ make_dist(char *home, char *pkg, char *suffix, Package *plist)
 	args[nargs++] = MTREE_FNAME;
 
     for (p = plist->head; p; p = p->next) {
+	if (nargs > (DIST_MAX_ARGS - 2))
+	    errx(2, "too many args for tar command");
 	if (p->type == PLIST_FILE)
 	    args[nargs++] = p->name;
 	else if (p->type == PLIST_CWD || p->type == PLIST_SRC) {
@@ -248,24 +276,39 @@ make_dist(char *home, char *pkg, char *suffix, Package *plist)
 	     p = p->next;
     }
     args[nargs] = NULL;
-    execv("/bin/tar", args);
-    barf("Failed to execute tar command: %s", strerror(errno));
 
+    /* fork/exec tar to create the package */
+
+    pid = fork();
+    if ( pid < 0 )
+	err(2, "failed to fork");
+    else if ( pid == 0 ) {
+	execv("/bin/tar", args);
+	err(2, "failed to execute tar command");
+    }
     wait(&ret);
     /* assume either signal or bad exit is enough for us */
-    if (ret)
-	barf("tar command failed with code %d", ret);
+    if (ret) {
+	cleanup(0);
+	errx(2, "tar command failed with code %d", ret);
+    }
 }
 
 static void
 sanity_check()
 {
-    if (!Comment)
-	barf("Required package comment string is missing (-c comment).");
-    if (!Desc)
-	barf("Required package description string is missing (-d desc).");
-    if (!Contents)
-	barf("Required package contents list is missing (-f [-]file).");
+    if (!Comment) {
+	cleanup(0);
+	errx(2, "required package comment string is missing (-c comment)");
+    }
+    if (!Desc) {
+	cleanup(0);
+	errx(2, "required package description string is missing (-d desc)");
+    }
+    if (!Contents) {
+	cleanup(0);
+	errx(2, "required package contents list is missing (-f [-]file)");
+    }
 }
 
 
@@ -273,5 +316,20 @@ sanity_check()
 void
 cleanup(int sig)
 {
-    leave_playpen(home);
+    static int	alreadyCleaning;
+    void (*oldint)(int);
+    void (*oldhup)(int);
+    oldint = signal(SIGINT, SIG_IGN);
+    oldhup = signal(SIGHUP, SIG_IGN);
+
+    if (!alreadyCleaning) {
+    	alreadyCleaning = 1;
+	if (sig)
+	    printf("Signal %d received, cleaning up.\n", sig);
+	leave_playpen(home);
+	if (sig)
+	    exit(1);
+    }
+    signal(SIGINT, oldint);
+    signal(SIGHUP, oldhup);
 }

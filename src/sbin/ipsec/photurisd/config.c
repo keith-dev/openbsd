@@ -1,5 +1,5 @@
 /*
- * Copyright 1997 Niels Provos <provos@physnet.uni-hamburg.de>
+ * Copyright 1997,1998 Niels Provos <provos@physnet.uni-hamburg.de>
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -33,7 +33,7 @@
  */
 
 #ifndef lint
-static char rcsid[] = "$Id: config.c,v 1.6 1998/03/04 11:43:15 provos Exp $";
+static char rcsid[] = "$Id: config.c,v 1.11 1998/08/17 22:12:44 provos Exp $";
 #endif
 
 #define _CONFIG_C_
@@ -202,6 +202,7 @@ init_attributes(void)
      int i, def_flag = 0;
      char attrib[257];
      struct cfgx *cfgattrib = NULL;
+     u_int8_t *newbuf;
 
 #ifdef DEBUG
      printf("[Setting up attributes]\n");
@@ -266,7 +267,7 @@ init_attributes(void)
 
 #ifdef IPSEC
 		    if ((tmpatt.type & ~AT_ID) &&
-			(tmpatt.koff = kernel_get_offset(tmpatt.id)) == -1) {
+			kernel_known_transform(tmpatt.id) == -1) {
 			 log_error(0, "Attribute %s not supported by kernel in init_attributes()", name);
 			 continue;
 		    }
@@ -299,11 +300,15 @@ init_attributes(void)
 	       attrib[1] = 0;
 		    
 	       /* Copy attributes in object */
-	       ob->attributes = realloc(ob->attributes, 
-					ob->attribsize + attrib[1] +2);
-	       if (ob->attributes == NULL)
+	       newbuf = realloc(ob->attributes, 
+				ob->attribsize + attrib[1] +2);
+	       if (newbuf == NULL) {
+		    if (ob->attributes != NULL)
+			 free (ob->attributes);
 		    crit_error(1, "realloc() in init_attributes()");
-
+	       }
+	       ob->attributes = newbuf;
+	       
 	       bcopy(attrib, ob->attributes + ob->attribsize, attrib[1] + 2);
 	       ob->attribsize += attrib[1] + 2;
 			
@@ -348,6 +353,7 @@ init_schemes(void)
      struct moduli_cache *tmp;
      mpz_t generator, bits;
      u_int32_t scheme_bits;
+     u_int8_t *newbuf;
 
      char *p, *p2;
      u_int16_t size;
@@ -419,11 +425,14 @@ init_schemes(void)
 	       buffer[2] = buffer[3] = 0;
 	  }
 	       
-	  global_schemes = realloc(global_schemes, global_schemesize
-					+ size + 2);
-	  if (global_schemes == NULL)
+	  newbuf = realloc(global_schemes, global_schemesize + size + 2);
+	  if (newbuf == NULL) {
+	       if (global_schemes != NULL)
+		    free (global_schemes);
 	       crit_error(1, "out of memory in init_schems()");
-	  
+	  }
+	  global_schemes = newbuf;
+
 	  /* DH_G_2_MD5 is a MUST, so we generate it if gen_flag == 0 */
 	  if (*(u_int16_t *)buffer == htons(DH_G_2_MD5))
 	       gen_flag = 1;
@@ -537,7 +546,7 @@ init_times(void)
 	  else if (!strcmp(p, CONFIG_RET_TIMEOUT))
 	       value = &retrans_timeout;
 	  else if (!strcmp(p, CONFIG_EX_TIMEOUT))
-	       value = &exchange_lifetime;
+	       value = &exchange_timeout;
 	  else if (!strcmp(p, CONFIG_EX_LIFETIME))
 	       value = &exchange_lifetime;
 	  else if (!strcmp(p, CONFIG_SPI_LIFETIME))
@@ -783,7 +792,8 @@ init_signals(void)
      struct sigaction sa, osa;
 
      bzero(&sa, sizeof(sa));
-     sa.sa_mask = sigmask(SIGHUP);
+     sigemptyset(&sa.sa_mask);
+     sigaddset(&sa.sa_mask, SIGHUP);
      sa.sa_handler = reconfig;
      sigaction(SIGHUP, &sa, &osa);
 
@@ -926,6 +936,11 @@ pick_attrib(struct stateob *st, u_int8_t **attrib, u_int16_t *attribsize)
 	       }
 	  }
      }
+     if (count == 0) {
+          log_error(0, "no attributes in attribute list for %s in pick_attrib()",
+		    st->address);
+	  return -1;
+     }
 
      if ((*attrib = calloc(count, sizeof(u_int8_t))) == NULL) {
 	  log_error(1, "calloc() in in pick_attrib()"); 
@@ -975,9 +990,36 @@ select_attrib(struct stateob *st, u_int8_t **attributes, u_int16_t *attribsize)
 	  /* Take the ESP section */
 	  char *tp = wantesp, *ta = wantesp;
 	  u_int16_t tpsize = 0, tasize = 0;
+	  u_int8_t flag[20], flagc, hmac = 0;
 	  int res;
 	  attrib_t *attah = NULL;
 	  
+	  /* 
+	   * We travers the ESP section and look for flags,
+	   * perhaps mutually exclusive flags should be handled
+	   * but at the moment we only support the HMAC indicator
+	   */
+
+	  flagc = 0;
+	  while (tpsize < wantespsize && flagc < sizeof(flag)) {
+	       if (isinattrib(offeresp, offerespsize, tp[tpsize])) {
+		    attprop = getattrib(tp[tpsize]);
+		    /* A simple flag has no type */
+		    if (attprop != NULL && attprop->type == 0) {
+			 flag[flagc++] = attprop->id;
+			 switch(attprop->id) {
+			 case AT_HMAC:
+			      hmac = 1;
+			      break;
+			 default:
+			      break;
+			 }
+		    }
+	       }
+	       tpsize += tp[tpsize+1]+2;
+	  }
+
+	  tpsize = 0;
 	  attprop = NULL;
 	  /* We travers the ESP section and look for the first ENC attribute */
 	  while (tpsize < wantespsize) {
@@ -992,12 +1034,12 @@ select_attrib(struct stateob *st, u_int8_t **attributes, u_int16_t *attribsize)
 	       attprop = NULL;
 
 	  /* If we find a fitting AH, we take it */
-	  while (attprop != NULL && tasize < wantespsize) {
+	  while (hmac && attprop != NULL && tasize < wantespsize) {
 	       if (isinattrib(offeresp, offerespsize, ta[tasize])) {
 		    attah = getattrib(ta[tasize]);
 		    if (attah != NULL && (attah->type & AT_AUTH)) {
 #ifdef IPSEC
-			 res = kernel_valid(attprop->koff, attah->koff);
+			 res = kernel_valid(attprop, attah);
 #else
 			 res = 0;
 #endif
@@ -1037,6 +1079,14 @@ select_attrib(struct stateob *st, u_int8_t **attributes, u_int16_t *attribsize)
 		    count += wantesp[tasize+1] + 2;
 		    p += wantesp[tasize+1] + 2;
 	       }
+
+	       /* Insert the flags also */
+	       while (flagc--) {
+		    p[0] = flag[flagc];
+		    p[1] = 0;
+		    p += 2;
+		    count += 2;
+	       }
 	  }
      }
 
@@ -1044,13 +1094,30 @@ select_attrib(struct stateob *st, u_int8_t **attributes, u_int16_t *attribsize)
 	  /* Take the AH section */
 	  u_int8_t *tp = wantah;
 	  u_int16_t tpsize = 0;
+	  u_int8_t flag[20], flagc;
 
+	  flagc = 0;
+	  /* Look for flags */
+	  while (tpsize < wantahsize && flagc < sizeof(flag)) {
+	       if (isinattrib(offerah, offerahsize, tp[tpsize])) {
+		    attprop = getattrib(tp[tpsize]);
+		    if (attprop != NULL && attprop->type == 0)
+			 flag[flagc++] = attprop->id;
+	       }
+	       tpsize += tp[tpsize+1]+2;
+	  }
+
+	  tpsize = 0;
 	  attprop = NULL;
 	  /* We travers the AH section and look for the first AH attribute */
 	  while (tpsize < wantahsize) {
 	       if (isinattrib(offerah, offerahsize, tp[tpsize])) {
 		    attprop = getattrib(tp[tpsize]);
-		    if (attprop != NULL && (attprop->type & AT_AUTH))
+		    if (attprop != NULL && (attprop->type & AT_AUTH)
+#ifdef IPSEC
+			&& (kernel_valid_auth(attprop, flag, flagc) != -1)
+#endif
+			)
 			 break;
 	       }
 	       tpsize += tp[tpsize+1]+2;
@@ -1069,6 +1136,14 @@ select_attrib(struct stateob *st, u_int8_t **attributes, u_int16_t *attribsize)
 	       bcopy(wantah+tpsize, p, wantah[tpsize+1] + 2);
 	       count += wantah[tpsize+1] + 2;
 	       p += wantah[tpsize+1] + 2;
+
+	       /* Insert flags also */
+	       while (flagc--) {
+		    p[0] = flag[flagc];
+		    p[1] = 0;
+		    p += 2;
+		    count += 2;
+	       }
 	  }
      }
 

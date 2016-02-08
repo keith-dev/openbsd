@@ -1,5 +1,5 @@
 #!/bin/sh
-#	$OpenBSD: install.sh,v 1.23 1998/04/11 09:47:27 deraadt Exp $
+#	$OpenBSD: install.sh,v 1.41 1998/10/13 21:23:30 deraadt Exp $
 #	$NetBSD: install.sh,v 1.5.2.8 1996/08/27 18:15:05 gwr Exp $
 #
 # Copyright (c) 1997,1998 Todd Miller, Theo de Raadt
@@ -82,7 +82,6 @@ MODE="install"
 #	md_copy_kernel()	- copy a kernel to the installed disk
 #	md_get_diskdevs()	- return available disk devices
 #	md_get_cddevs()		- return available CD-ROM devices
-#	md_get_ifdevs()		- return available network interfaces
 #	md_get_partition_range() - return range of valid partition letters
 #	md_installboot()	- install boot-blocks on disk
 #	md_labeldisk()		- put label on a disk
@@ -324,7 +323,7 @@ case "$resp" in
 			_nam=`cat /tmp/myname`
 		fi
 		while [ "X${resp}" = X"" ]; do
-			echo -n "Enter system hostname (short form): [$_nam] "
+			echo -n "Enter system hostname (short form, ie. \"foo\"): [$_nam] "
 			getresp "$_nam"
 		done
 		hostname $resp
@@ -336,16 +335,30 @@ case "$resp" in
 			    sed -e 's/^domain //'`
 		fi
 		while [ "X${resp}" = X"" ]; do
-			echo -n "Enter DNS domain name: [$FQDN] "
+			echo -n "Enter DNS domain name (ie. \"bar.com\"): [$FQDN] "
 			getresp "$FQDN"
 		done
 		FQDN=$resp
 
+		echo ""
+		echo "If you have any devices being configured by a DHCP server"
+		echo "it is recommended that you do not enter a default route or"
+		echo "any name servers."
+		echo ""
+
 		configurenetwork
 
-		resp="none"
-		if [ -f /tmp/mygate ]; then
-			resp=`cat /tmp/mygate`
+		resp=`route -n show |
+		    grep '^default' |
+		    sed -e 's/^default          //' -e 's/ .*//'`
+		if [ "X${resp}" = "X" ]; then
+			resp=none
+			if [ -f /tmp/mygate ]; then
+				resp=`cat /etc/mygate`
+				if [ "X${resp}" = "X" ]; then
+					resp="none";
+				fi
+			fi
 		fi
 		echo -n "Enter IP address of default route: [$resp] "
 		getresp "$resp"
@@ -357,16 +370,34 @@ case "$resp" in
 		fi
 
 		resp="none"
-		if [ -f /tmp/resolv.conf ]; then
-			resp=`grep '^nameserver ' /tmp/resolv.conf | \
-			    sed -e 's/^nameserver //'`
+		if [ -f /etc/resolv.conf ]; then
+			resp=""
+			for n in `grep '^nameserver ' /etc/resolv.conf | \
+			    sed -e 's/^nameserver //'`; do
+				if [ "X${resp}" = "X" ]; then
+					resp="$n"
+				else
+					resp="$resp $n"
+				fi
+			done
+		elif [ -f /tmp/resolv.conf ]; then
+			resp=""
+			for n in `grep '^nameserver ' /tmp/resolv.conf | \
+			    sed -e 's/^nameserver //'`; do
+				if [ "X${resp}" = "X" ]; then
+					resp="$n"
+				else
+					resp="$resp $n"
+				fi
+			done
 		fi
 		echo -n	"Enter IP address of primary nameserver: [$resp] "
 		getresp "$resp"
 		if [ "X${resp}" != X"none" ]; then
-			echo "domain $FQDN" > /tmp/resolv.conf
-			echo "nameserver $resp" >> /tmp/resolv.conf
-			echo "search $FQDN" >> /tmp/resolv.conf
+			echo "search $FQDN" > /tmp/resolv.conf
+			for n in `echo ${resp}`; do
+				echo "nameserver $n" >> /tmp/resolv.conf
+			done
 			echo "lookup file bind" >> /tmp/resolv.conf
 
 			echo -n "Would you like to use the nameserver now? [y] "
@@ -499,7 +530,7 @@ while [ "X${resp}" = X"" ]; do
 
 	echo -n "Password (again): "
 	stty -echo
-	getresp "${_password}"
+	getresp ""
 	stty echo
 	echo ""
 	if [ "${_password}" != "${resp}" ]; then
@@ -507,6 +538,8 @@ while [ "X${resp}" = X"" ]; do
 		resp=""
 	fi
 done
+
+md_copy_kernel
 
 install_sets $THESETS
 
@@ -532,6 +565,11 @@ for file in fstab hostname.* hosts myname mygate resolv.conf; do
 	fi
 done
 
+if [ -f /etc/dhclient.conf ]; then
+	echo -n "Modifying dhclient.conf..."
+	cat /etc/dhclient.conf >> /mnt/etc/dhclient.conf
+fi
+
 # If no zoneinfo on the installfs, give them a second chance
 if [ ! -e /usr/share/zoneinfo ]; then
 	get_timezone
@@ -546,8 +584,6 @@ else
 fi
 
 
-md_copy_kernel
-
 md_installboot ${ROOTDISK}
 
 if [ ! -x /mnt/dev/MAKEDEV ]; then
@@ -555,12 +591,12 @@ if [ ! -x /mnt/dev/MAKEDEV ]; then
 	exit
 fi
 
-echo -n "Making all devices..."
+echo -n "Making all device nodes (by running /dev/MAKEDEV all) ..."
 #pid=`twiddle`
 cd /mnt/dev
 sh MAKEDEV all
 #kill $pid
-echo "done."
+echo "... done."
 cd /
 
 _encr=`echo ${_password} | /mnt/usr/bin/encrypt -b 7`

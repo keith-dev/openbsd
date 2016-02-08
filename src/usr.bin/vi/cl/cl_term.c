@@ -21,11 +21,7 @@ static const char sccsid[] = "@(#)cl_term.c	10.22 (Berkeley) 9/15/96";
 #include <bitstring.h>
 #include <errno.h>
 #include <limits.h>
-#ifdef USE_OCURSES
-#include <ocurses.h>
-#else
 #include <curses.h>
-#endif
 #include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -221,6 +217,8 @@ cl_pfmap(sp, stype, from, flen, to, tlen)
 
 	nlen = snprintf(keyname,
 	    sizeof(keyname), "function key %d", atoi(from + 1));
+	if (nlen >= sizeof(keyname))
+		nlen = sizeof(keyname) - 1;
 	return (seq_set(sp, keyname, nlen,
 	    p, strlen(p), to, tlen, stype, SEQ_NOOVERWRITE | SEQ_SCREEN));
 }
@@ -449,7 +447,7 @@ noterm:	if (row == 0)
 	return (0);
 }
 
-#ifdef USE_OCURSES
+#ifdef _USE_OLD_CURSES_
 /*
  * cl_putchar --
  *	Function version of putchar, for tputs.

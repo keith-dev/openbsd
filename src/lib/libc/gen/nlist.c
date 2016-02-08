@@ -32,7 +32,7 @@
  */
 
 #if defined(LIBC_SCCS) && !defined(lint)
-static char rcsid[] = "$OpenBSD: nlist.c,v 1.24 1998/01/20 22:10:48 deraadt Exp $";
+static char rcsid[] = "$OpenBSD: nlist.c,v 1.32 1998/10/04 17:24:17 millert Exp $";
 #endif /* LIBC_SCCS and not lint */
 
 #include <sys/types.h>
@@ -43,6 +43,7 @@ static char rcsid[] = "$OpenBSD: nlist.c,v 1.24 1998/01/20 22:10:48 deraadt Exp 
 
 #include <errno.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
 #include <a.out.h>		/* pulls in nlist.h */
@@ -65,40 +66,47 @@ __aout_fdnlist(fd, list)
 	register struct nlist *list;
 {
 	register struct nlist *p, *s;
-	register void *strtab;
-	register off_t stroff, symoff;
+	register char *strtab;
+	register off_t symoff;
 	register u_long symsize;
 	register int nent, cc;
-	size_t strsize;
+	int strsize, usemalloc = 0;
 	struct nlist nbuf[1024];
 	struct exec exec;
-	struct stat st;
 
 	if (lseek(fd, (off_t)0, SEEK_SET) == -1 ||
 	    read(fd, &exec, sizeof(exec)) != sizeof(exec) ||
-	    N_BADMAG(exec) || fstat(fd, &st) < 0)
+	    N_BADMAG(exec) || exec.a_syms == NULL)
 		return (-1);
 
 	symoff = N_SYMOFF(exec);
 	symsize = exec.a_syms;
-	stroff = symoff + symsize;
 
-	/* Check for files too large to mmap. */
-	if (st.st_size - stroff > SIZE_T_MAX) {
-		errno = EFBIG;
+	/* Read in the size of the string table. */
+	if (lseek(fd, N_STROFF(exec), SEEK_SET) == -1)
 		return (-1);
-	}
+	if (read(fd, (void *)&strsize, sizeof(strsize)) != sizeof(strsize))
+		return (-1);
+
 	/*
-	 * Map string table into our address space.  This gives us
-	 * an easy way to randomly access all the strings, without
-	 * making the memory allocation permanent as with malloc/free
-	 * (i.e., munmap will return it to the system).
+	 * Read in the string table.  We try mmap, but that will fail
+	 * for /dev/ksyms so fall back on malloc.  Since OpenBSD's malloc(3)
+	 * returns memory to the system on free this does not cause bloat.
 	 */
-	strsize = st.st_size - stroff;
+	strsize -= sizeof(strsize);
 	strtab = mmap(NULL, (size_t)strsize, PROT_READ, MAP_COPY|MAP_FILE,
-	    fd, stroff);
-	if (strtab == MAP_FAILED)
-		return (-1);
+	    fd, lseek(fd, 0, SEEK_CUR));
+	if (strtab == MAP_FAILED) {
+		usemalloc = 1;
+		if ((strtab = (char *)malloc(strsize)) == NULL)
+			return (-1);
+		errno = EIO;
+		if (read(fd, strtab, strsize) != strsize) {
+			nent = -1;
+			goto aout_done;
+		}
+	}
+
 	/*
 	 * clean out any left-over information for all valid entries.
 	 * Type and value defined to be 0 if not found; historical
@@ -117,8 +125,10 @@ __aout_fdnlist(fd, list)
 		p->n_value = 0;
 		++nent;
 	}
-	if (lseek(fd, symoff, SEEK_SET) == -1)
-		return (-1);
+	if (lseek(fd, symoff, SEEK_SET) == -1) {
+		nent = -1;
+		goto aout_done;
+	}
 
 	while (symsize > 0) {
 		cc = MIN(symsize, sizeof(nbuf));
@@ -126,12 +136,16 @@ __aout_fdnlist(fd, list)
 			break;
 		symsize -= cc;
 		for (s = nbuf; cc > 0; ++s, cc -= sizeof(*s)) {
-			register int soff = s->n_un.n_strx;
+			char *sname = strtab + s->n_un.n_strx - sizeof(int);
 
-			if (soff == 0 || (s->n_type & N_STAB) != 0)
+			if (s->n_un.n_strx == 0 || (s->n_type & N_STAB) != 0)
 				continue;
-			for (p = list; !ISLAST(p); p++)
-				if (!strcmp(&((char *)strtab)[soff], p->n_un.n_name)) {
+			for (p = list; !ISLAST(p); p++) {
+				char *pname = p->n_un.n_name;
+
+				if (*sname != '_' && *pname == '_')
+					pname++;
+				if (!strcmp(sname, pname)) {
 					p->n_value = s->n_value;
 					p->n_type = s->n_type;
 					p->n_desc = s->n_desc;
@@ -139,9 +153,14 @@ __aout_fdnlist(fd, list)
 					if (--nent <= 0)
 						break;
 				}
+			}
 		}
 	}
-	munmap(strtab, strsize);
+aout_done:
+	if (usemalloc)
+		free(strtab);
+	else
+		munmap(strtab, strsize);
 	return (nent);
 }
 #endif /* _NLIST_DO_AOUT */
@@ -378,11 +397,11 @@ __elf_fdnlist(fd, list)
 	/* Don't process any further if object is stripped. */
 	/* ELFism - dunno if stripped by looking at header */
 	if (symoff == 0)
-		goto done;
+		goto elf_done;
 
 	if (lseek(fd, (off_t) symoff, SEEK_SET) == -1) {
 		nent = -1;
-		goto done;
+		goto elf_done;
 	}
 
 	while (symsize > 0) {
@@ -435,7 +454,7 @@ __elf_fdnlist(fd, list)
 			}
 		}
 	}
-done:
+elf_done:
 	munmap(strtab, symstrsize);
 	return (nent);
 }

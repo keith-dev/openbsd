@@ -259,7 +259,7 @@ FILE *thefile;
     while (!(feof(thefile))) {
 	fgets(line, ASIZE-1, thefile);
 	*value = '\0';	/* protect braindead sscanf() */
-	sscanf(line, "%s %s", param, value);
+	sscanf(line, "%1023s %1023s", param, value);
 	if (strcmp(param, "PidFile")==0 && *value)
 	    strcpy(pidfile, value);
 	if (strcmp(param, "ScoreBoardFile")==0 && *value)

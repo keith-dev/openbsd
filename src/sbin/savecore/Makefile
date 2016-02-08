@@ -1,17 +1,14 @@
-#	$OpenBSD: Makefile,v 1.6 1997/09/21 11:38:11 deraadt Exp $
+#	$OpenBSD: Makefile,v 1.14 1998/09/26 21:39:42 ryker Exp $
 
 PROG=	savecore
 
-# XXX Temporary, until other ports use new libkvm
-.if	(${MACHINE} == "amiga") || \
-	(${MACHINE} == "atari") || \
-	(${MACHINE} == "sparc") || \
-	(${MACHINE} == "sun3")
+# XXX Temporarily until i386, pmax and mac68k are able to use libkvm
+.if	(${MACHINE} == "i386" || ${MACHINE} == "pmax" || ${MACHINE} == "mac68k")
+SRCS=	savecore_old.c
+.else
 SRCS=	savecore.c
 LDADD=	-lkvm
 DPADD=	${LIBKVM}
-.else
-SRCS=	savecore_old.c
 .endif
 SRCS+=	zopen.c
 MAN=	savecore.8

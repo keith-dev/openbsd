@@ -1,4 +1,4 @@
-#	$OpenBSD: rc,v 1.71 1998/04/07 06:11:52 deraadt Exp $
+#	$OpenBSD: rc,v 1.90 1998/10/12 03:02:57 art Exp $
 
 # System startup script run by init on autoboot
 # or after single-user.
@@ -70,6 +70,12 @@ rm -f /fastboot		# XXX (root now writeable)
 echo 'setting tty flags'
 ttyflags -a
 
+# if there's no /etc/host.random, make one through /dev/urandom
+if [ ! -f /etc/host.random ]; then
+	dd if=/dev/urandom of=/etc/host.random bs=1024 count=64 >/dev/null 2>&1
+	chmod 600 /etc/host.random
+fi
+
 # set hostname, turn on network
 echo 'starting network'
 . /etc/netstart
@@ -85,13 +91,11 @@ rm -f /var/spool/uucp/STST/*
 
 echo 'starting system logger'
 rm -f /dev/log
-syslogd ${syslogd_flags}
-
-# $named_flags is imported from /etc/rc.conf;
-# if $named_flags != NO, named is run.
-if [ "X${named_flags}" != X"NO" ]; then
-	echo 'starting named';		named $named_flags
+if [ "X${named_flags}" != X"NO" -a "X${named_chroot}" != "X" ]; then
+	rm -f ${named_chroot}/dev/log
+	syslogd_flags="${syslogd_flags} -a ${named_chroot}/dev/log"
 fi
+syslogd ${syslogd_flags}
 
 # /etc/ifaliases, if it exists, contains the names of additional IP
 # addresses for each interface. It is formatted as a series of lines
@@ -103,10 +107,29 @@ if [ -f /etc/ifaliases ]; then
 	set -- `sed -e 's/#.*$//' /etc/ifaliases | grep -v '^$'`
 	while [ $# -ge 3 ] ; do
 		ifconfig $1 inet alias $2 netmask $3
-		route add -host $2 localhost
+		route -n add -host $2 localhost
 		shift 3
 	done
 )
+fi
+
+# $named_flags, $named_user, and $named_chroot are imported from /etc/rc.conf;
+# if $named_flags != NO, named is run.
+if [ "X${named_flags}" != X"NO" ]; then
+	if [ "X${named_user}" != "X" -a "X${named_user}" != X"root" ]; then
+		named_flags="-u ${named_user} ${named_flags}"
+	fi
+	if [ "X${named_chroot}" != "X" ]; then
+		if [ ! -c "${named_chroot}/dev/null" ]; then
+			( cd /dev ; pax -rw -pe null ${named_chroot}/dev )
+		fi
+		if [ -f /etc/localtime -a -d "${named_chroot}/etc" ]; then
+			cmp -s /etc/localtime "${named_chroot}/etc/localtime" \
+			|| cp -p /etc/localtime "${named_chroot}/etc/localtime"
+		fi
+		named_flags="-t ${named_chroot} ${named_flags}"
+	fi
+	echo 'starting named';		named $named_flags
 fi
 
 if [ X"${ipfilter}" = X"YES" -a X"${ipmon_flags}" != X"NO" ]; then
@@ -197,6 +220,13 @@ if [ -d /var/crash ]; then
 	savecore /var/crash
 fi
 
+if [ "X${afs}" = X"YES" -a -c ${afs_device} -a -d ${afs_mount_point} ]; then
+	echo -n 'mounting afs:'
+	mount -t afs ${afs_device} ${afs_mount_point}
+	/usr/libexec/afsd ${afsd_flags} -d ${afs_device}
+	echo ' done.'
+fi
+
 if [ "X${check_quotas}" = X"YES" ]; then
 	echo -n 'checking quotas:'
 	quotacheck -a
@@ -206,7 +236,7 @@ fi
 
 # build ps databases
 echo 'building databases...'
-kvm_mkdb /bsd
+kvm_mkdb
 dev_mkdb
 
 chmod 666 /dev/tty[pqrs]*
@@ -236,7 +266,7 @@ if [ -f /etc/sysctl.conf ]; then
 )
 fi
 
-test -f /etc/rc.securelevel && . /etc/rc.securelevel
+[ -f /etc/rc.securelevel ] && . /etc/rc.securelevel
 if [ X${securelevel} != X"" ]; then
 	echo -n 'setting kernel security level: '
 	sysctl -w kern.securelevel=${securelevel}
@@ -268,7 +298,7 @@ if [ "$vibackup" != "/var/tmp/vi.recover/vi.*" ]; then
 	for i in $vibackup; do
 		# Unmodified nvi editor backup files either have the
 		# execute bit set or are zero length.  Delete them.
-		if test -x $i -o ! -s $i; then
+		if [ -x $i -o ! -s $i ]; then
 			rm $i
 		fi
 	done
@@ -281,7 +311,7 @@ if [ "$virecovery" != "/var/tmp/vi.recover/recover.*" ]; then
 		# or that have no corresponding backup file.  Else send mail
 		# to the user.
 		recfile=`awk '/^X-vi-recover-path:/{print $2}' < $i`
-		if test -n "$recfile" -a -s "$recfile"; then
+		if [ -n "$recfile" -a -s "$recfile" ]; then
 			sendmail -t < $i
 		else
 			rm $i
@@ -292,10 +322,6 @@ fi
 if [ -f /var/account/acct ]; then
 	echo 'turning on accounting';	accton /var/account/acct
 fi
-
-echo -n standard daemons:
-echo -n ' cron';		cron
-echo '.'
 
 echo -n starting network daemons:
 
@@ -312,6 +338,16 @@ fi
 # If $mrouted_flags == NO, then mrouted isn't run.
 if [ "X${mrouted_flags}" != X"NO" ]; then
 	echo -n ' mrouted';		mrouted $mrouted_flags
+fi
+
+# $dhcpd_flags is imported from /etc/rc.conf
+# If $dhcpd_flags == NO or /etc/dhcpd.conf doesn't exist, then dhcpd isn't run.
+if [ "X${dhcpd_flags}" != X"NO" -a -f /etc/dhcpd.conf ]; then
+	touch /var/db/dhcpd.leases
+	if [ -f /etc/dhcpd.interfaces ]; then
+		dhcpd_ifs=`cat /etc/dhcpd.interfaces | awk -F\# '{ print $1; }'`
+	fi
+	echo -n ' dhcpd';	/usr/sbin/dhcpd ${dhcpd_flags} ${dhcpd_ifs}
 fi
 
 # $rwhod is imported from /etc/rc.conf;
@@ -413,7 +449,19 @@ if [ X${kerberos_slave} = X"YES" ]; then
 	/usr/libexec/kpropd -i &
 fi
 
-. /etc/rc.local
+[ -f /etc/rc.local ] && . /etc/rc.local
+
+echo -n standard daemons:
+
+# $apmd_flags is imported from /etc/rc.conf;
+# don't run daemon if $apmd_flags == NO or /usr/sbin/apmd doesn't exist
+if [ "X${apmd_flags}" != X"NO" -a -x /usr/sbin/apmd ]; then
+        echo -n ' apmd';        /usr/sbin/apmd ${apmd_flags}
+fi
+
+echo -n ' cron';		cron
+
+echo '.'
 
 date
 
@@ -423,3 +471,4 @@ if [ "X${xdm_flags}" != X"NO" ]; then
 fi
 
 exit 0
+

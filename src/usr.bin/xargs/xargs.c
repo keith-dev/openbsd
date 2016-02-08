@@ -1,4 +1,4 @@
-/*	$OpenBSD: xargs.c,v 1.6 1997/11/04 08:47:15 deraadt Exp $	*/
+/*	$OpenBSD: xargs.c,v 1.8 1998/06/23 00:22:58 deraadt Exp $	*/
 /*	$NetBSD: xargs.c,v 1.7 1994/11/14 06:51:41 jtc Exp $	*/
 
 /*-
@@ -47,7 +47,7 @@ static char copyright[] =
 #if 0
 static char sccsid[] = "@(#)xargs.c	8.1 (Berkeley) 6/6/93";
 #endif
-static char rcsid[] = "$OpenBSD: xargs.c,v 1.6 1997/11/04 08:47:15 deraadt Exp $";
+static char rcsid[] = "$OpenBSD: xargs.c,v 1.8 1998/06/23 00:22:58 deraadt Exp $";
 #endif /* not lint */
 
 #include <sys/types.h>
@@ -78,6 +78,7 @@ main(argc, argv)
 	register char *p, *bbp, *ebp, **bxp, **exp, **xp;
 	int cnt, indouble, insingle, nargs, nflag, nline, xflag;
 	char **av, *argp;
+	int arg_max;
 
 	setlocale(LC_ALL, "");
 
@@ -95,7 +96,9 @@ main(argc, argv)
 	 * probably not worthwhile.
 	 */
 	nargs = 5000;
-	nline = ARG_MAX - 4 * 1024;
+	if ((arg_max = sysconf(_SC_ARG_MAX)) == -1)
+		errx(1, "sysconf(_SC_ARG_MAX) failed");
+	nline = arg_max - 4 * 1024;
 	nflag = xflag = 0;
 	while ((ch = getopt(argc, argv, "0n:s:tx")) != -1)
 		switch(ch) {
@@ -315,19 +318,19 @@ run(argv)
 	 * we'll use 124 and 125, the same values used by GNU xargs.
 	 */
 	if (WIFEXITED(status)) {
-		if (WEXITSTATUS (status) == 255) {
-			warnx ("%s exited with status 255", argv[0]);
+		if (WEXITSTATUS(status) == 255) {
+			warnx("%s exited with status 255", argv[0]);
 			exit(124);
-		} else if (WEXITSTATUS (status) != 0) {
+		} else if (WEXITSTATUS(status) != 0) {
 			rval = 123;
 		}
-	} else if (WIFSIGNALED (status)) {
+	} else if (WIFSIGNALED(status)) {
 		if (WTERMSIG(status) != SIGPIPE) {
 			if (WTERMSIG(status) < NSIG)
-				warnx ("%s terminated by SIG%s", argv[0],
+				warnx("%s terminated by SIG%s", argv[0],
 				    sys_signame[WTERMSIG(status)]);
 			else
-				warnx ("%s terminated by signal %d", argv[0],
+				warnx("%s terminated by signal %d", argv[0],
 				    WTERMSIG(status));
 		}
 		exit(125);

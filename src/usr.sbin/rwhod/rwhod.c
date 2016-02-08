@@ -39,7 +39,7 @@ static char copyright[] =
 
 #ifndef lint
 /*static char sccsid[] = "@(#)rwhod.c	8.1 (Berkeley) 6/6/93";*/
-static char rcsid[] = "$OpenBSD: rwhod.c,v 1.9 1997/04/14 07:01:42 deraadt Exp $";
+static char rcsid[] = "$OpenBSD: rwhod.c,v 1.12 1998/08/16 21:22:18 deraadt Exp $";
 #endif /* not lint */
 
 #include <sys/param.h>
@@ -196,8 +196,8 @@ main(argc, argv)
 			continue;
 		wd.wd_hostname[sizeof(wd.wd_hostname)-1] = '\0';
 		if (!verify(wd.wd_hostname)) {
-			syslog(LOG_WARNING, "malformed host name from %x",
-				from.sin_addr);
+			syslog(LOG_WARNING, "malformed host name from %s",
+			    inet_ntoa(from.sin_addr));
 			continue;
 		}
 		(void) snprintf(path, sizeof path, "whod.%s", wd.wd_hostname);
@@ -286,6 +286,7 @@ onalrm(signo)
 	struct stat stb;
 	double avenrun[3];
 	time_t now;
+	struct	utmp *nutmp;
 	int cc;
 
 	now = time(NULL);
@@ -298,16 +299,19 @@ onalrm(signo)
 		if (stb.st_size > utmpsize) {
 			utmpsize = stb.st_size + 10 * sizeof(struct utmp);
 			if (utmp)
-				utmp = (struct utmp *)realloc(utmp, utmpsize);
+				nutmp = (struct utmp *)realloc(utmp, utmpsize);
 			else
-				utmp = (struct utmp *)malloc(utmpsize);
-			if (! utmp) {
+				nutmp = (struct utmp *)malloc(utmpsize);
+			if (!nutmp) {
 				fprintf(stderr, "rwhod: malloc failed\n");
+				if (utmp)
+					free(utmp);
 				utmpsize = 0;
 				goto done;
 			}
+			utmp = nutmp;
 		}
-		(void) lseek(utmpf, (off_t)0, L_SET);
+		(void) lseek(utmpf, (off_t)0, SEEK_SET);
 		cc = read(utmpf, (char *)utmp, stb.st_size);
 		if (cc < 0) {
 			fprintf(stderr, "rwhod: %s: %s\n",

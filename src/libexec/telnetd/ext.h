@@ -1,4 +1,4 @@
-/*	$OpenBSD: ext.h,v 1.5 1998/03/25 18:43:44 art Exp $	*/
+/*	$OpenBSD: ext.h,v 1.8 1998/07/28 20:18:19 marc Exp $	*/
 /*	$NetBSD: ext.h,v 1.6 1996/02/28 20:38:13 thorpej Exp $	*/
 
 /*
@@ -60,9 +60,6 @@ extern int	diagnostic;	/* telnet diagnostic capabilities */
 #ifdef BFTPDAEMON
 extern int	bftpd;		/* behave as bftp daemon */
 #endif /* BFTPDAEMON */
-#if	defined(SecurID)
-extern int	require_SecurID;
-#endif
 #if	defined(AUTHENTICATION)
 extern int	auth_level;
 #endif
@@ -79,7 +76,7 @@ extern char	ptyobuf[BUFSIZ+NETSLOP], *pfrontp, *pbackp;
 extern char	netibuf[BUFSIZ], *netip;
 
 extern char	netobuf[BUFSIZ+NETSLOP], *nfrontp, *nbackp;
-extern char	*neturg;		/* one past last bye of urgent data */
+extern char	*neturg;		/* one past last byte of urgent data */
 
 extern int	pcc, ncc;
 
@@ -151,9 +148,12 @@ extern void
 	tty_binaryin P((int)),
 	tty_binaryout P((int));
 
+extern char*
+	gtgetstr P((char  *, char **));
+
 extern int
 	end_slc P((unsigned char **)),
-	getent P((char *, char *)),
+	gtgetent P((char *, char *)),
 	getnpty P((void)),
 #ifndef convex
 	getpty P((int *)),

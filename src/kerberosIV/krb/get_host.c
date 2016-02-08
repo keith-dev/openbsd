@@ -1,5 +1,5 @@
-/*	$OpenBSD: get_host.c,v 1.6 1998/03/25 21:50:11 art Exp $	*/
-/* $KTH: get_host.c,v 1.31 1997/09/26 17:42:37 joda Exp $ */
+/*	$OpenBSD: get_host.c,v 1.9 1998/07/07 19:06:47 art Exp $	*/
+/*	$KTH: get_host.c,v 1.37 1998/01/17 00:05:47 joda Exp $		*/
 
 /*
  * Copyright (c) 1995, 1996, 1997 Kungliga Tekniska Högskolan
@@ -89,23 +89,18 @@ parse_address(char *address, enum krb_host_proto *proto,
 	p = strchr(address, '/');
 	if(p){
 	    char prot[32];
-	    struct protoent *pp;
+
 	    strncpy(prot, address, MIN(p - address, 32));
 	    prot[ MIN(p - address, 32-1) ] = '\0';
-	    if((pp = getprotobyname(prot)) != NULL ){
-		switch(pp->p_proto){
-		case IPPROTO_UDP:
-		    *proto = PROTO_UDP;
-		    break;
-		case IPPROTO_TCP:
-		    *proto = PROTO_TCP;
-		    break;
-		default:	
-		krb_warning("Unknown protocol `%s', Using default `udp'.\n", 
-			    prot);
-		}
+	    if(strcasecmp(prot, "udp") == 0)
+		*proto = PROTO_UDP;
+	    else if(strcasecmp(prot, "tcp") == 0)
+		*proto = PROTO_TCP;
+	    else if(strcasecmp(prot, "http") == 0) {
+		*proto = PROTO_HTTP;
+		default_port = 80;
 	    } else
-		krb_warning("Bad protocol name `%s', Using default `udp'.\n", 
+		krb_warning("Unknown protocol `%s', Using default `udp'.\n", 
 			    prot);
 	    p++;
 	}else
@@ -150,12 +145,19 @@ add_host(char *realm, char *address, int admin, int validate)
 	return 1;
     if(parse_address(address, &host->proto, &host->host, &host->port) < 0)
 	return 1;
-    if(validate && gethostbyname(host->host) == NULL){
-	free(host->host);
-	host->host = NULL;
-	free(host);
-	host = NULL;
-	return 1;
+    if (validate) {
+        if (krb_dns_debug)
+	    krb_warning("Getting host entry for %s...", host->host);
+	if(gethostbyname(host->host) == NULL) {
+	    if (krb_dns_debug)
+	        krb_warning("Didn't get it.\n");
+	    free(host->host);
+	    host->host = NULL;
+	    free(host);
+	    host = NULL;
+	    return 1;
+	} else if (krb_dns_debug)
+	    krb_warning("Got it.\n");
     }
     host->admin = admin;
     for(p = hosts; p; p = p->next){
@@ -193,7 +195,7 @@ add_host(char *realm, char *address, int admin, int validate)
     p->next = NULL;
     *last = p;
     return 0;
-}
+    }
 
 
 static int
@@ -214,7 +216,17 @@ read_file(const char *filename, const char *r)
     if(f == NULL)
 	return -1;
     while(fgets(line, sizeof(line), f) != NULL) {
-	n = sscanf(line, "%s %s admin %s", realm, address, scratch);
+	char *format = NULL;
+
+	asprintf(&format, "%%%ds %%%ds admin %%%ds", sizeof(realm) - 1,
+		 sizeof(address) - 1, sizeof(scratch) - 1);
+	if (format == NULL) {
+	    fclose(f);
+	    return -1;
+	}
+	n = sscanf(line, format, realm, address, scratch);
+	free(format);
+	format = NULL;
 	if(n == 2 || n == 3){
 	    if(strcmp(realm, r))
 		continue;
@@ -230,7 +242,7 @@ static int
 init_hosts(char *realm)
 {
     int i;
-    char file[128];
+    char file[MAXPATHLEN];
     
     krb_port = ntohs(k_getportbyname (KRB_SERVICE, NULL, htons(KRB_PORT)));
     for(i = 0; krb_get_krbconf(i, file, sizeof(file)) == 0; i++)
@@ -305,6 +317,7 @@ krb_get_host(int nth, char *realm, int admin)
     
 	srv_find_realm(orealm, "udp", KRB_SERVICE);
 	srv_find_realm(orealm, "tcp", KRB_SERVICE);
+	srv_find_realm(orealm, "http", KRB_SERVICE);
 	
 	{
 	    /* XXX this assumes no one has more than 99999 kerberos

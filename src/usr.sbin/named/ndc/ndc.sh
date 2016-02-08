@@ -1,5 +1,5 @@
 #!/bin/sh
-#	$OpenBSD: ndc.sh,v 1.5 1997/03/12 14:51:57 downsj Exp $
+#	$OpenBSD: ndc.sh,v 1.11 1998/07/07 22:05:15 millert Exp $
 
 USAGE='echo \
 	"usage: $0 \
@@ -8,20 +8,58 @@ USAGE='echo \
 	"; exit 1'
 
 PATH=%DESTSBIN%:/bin:/usr/bin:/usr/ucb:$PATH
-PIDFILE=%PIDDIR%/named.pid
 
-if [ -f $PIDFILE ]
-then
-	PID=`cat $PIDFILE`
+NAMED_CMD=named
+RUNNING=0
+if [ -r /etc/rc.conf ]; then
+	CHROOTDIR=`. /etc/rc.conf ; echo "$named_chroot"`
+	if [ "X${CHROOTDIR}" != "X" ]; then
+		NAMED_CMD="${NAMED_CMD} -t ${CHROOTDIR}"
+	else
+		# Need a default
+		CHROOTDIR=/var/named
+	fi
+
+	NAMED_USER=`. /etc/rc.conf ; echo "$named_user"`
+	if [ "X${NAMED_USER}" != "X" ]; then
+		NAMED_CMD="${NAMED_CMD} -u ${NAMED_USER}"
+	fi
+
+	NAMED_FLAGS=`. /etc/rc.conf ; echo "$named_flags"`
+	if [ "X${NAMED_FLAGS}" != "X" ]; then
+		NAMED_CMD="${NAMED_CMD} ${NAMED_FLAGS}"
+	fi
+else
+	CHROOTDIR=%CHROOTDIR%
+fi
+PIDFILE=${CHROOTDIR}/named.pid
+
+#
+# Pid file may live in chroot dir, check there first.
+#
+if [ -f $PIDFILE ]; then
+	PID=`sed 1q $PIDFILE`
+	NAMED_CMD=`tail -1 $PIDFILE`
+	case "`kill -0 $PID 2>&1`" in
+		""|*"not permitted"*)	RUNNING=1;;
+	esac
+fi
+if [ ${RUNNING} -eq 0 -a -f %PIDDIR%/named.pid ]; then
+	PIDFILE=%PIDDIR%/named.pid
+	PID=`sed 1q $PIDFILE`
+	NAMED_CMD=`tail -1 $PIDFILE`
+	case "`kill -0 $PID 2>&1`" in
+		""|*"not permitted"*)	RUNNING=1;;
+	esac
+fi
+
+if [ ${RUNNING} -eq 1 ]; then
 	PS=`%PS% $PID | tail -1 | grep $PID`
-	RUNNING=1
 	[ `echo $PS | wc -w` -ne 0 ] || {
-		PS="named (pid $PID?) not running"
-		RUNNING=0
+		PS="named (pid $PID) can't get name list"
 	}
 else
-	PS="named (no pid file) not running"
-	RUNNING=0
+	PS="named not running"
 fi
 
 for ARG
@@ -50,7 +88,7 @@ do
 			continue
 		}
 		rm -f $PIDFILE
-		named && {
+		$NAMED_CMD && {
 			sleep 5
 			echo Name Server Started
 		}
@@ -71,7 +109,7 @@ do
 			kill $PID && sleep 5
 		}
 		rm -f $PIDFILE
-		named && {
+		$NAMED_CMD && {
 			sleep 5
 			echo Name Server Restarted
 		}

@@ -39,7 +39,7 @@ static char copyright[] =
 
 #ifndef lint
 /* from: static char sccsid[] = "@(#)rshd.c	8.2 (Berkeley) 4/6/94"; */
-static char *rcsid = "$Id: rshd.c,v 1.21 1998/02/03 23:39:32 deraadt Exp $";
+static char *rcsid = "$Id: rshd.c,v 1.28 1998/07/12 08:46:52 deraadt Exp $";
 #endif /* not lint */
 
 /*
@@ -90,11 +90,23 @@ void	 usage __P((void));
 #include <kerberosIV/krb.h>
 #define	VERSION_SIZE	9
 #define SECURE_MESSAGE  "This rsh session is using DES encryption for all transmissions.\r\n"
-#define	OPTIONS		"alnkvxL"
+
+#ifdef CRYPT
+#define OPTIONS		"alnkvxL"
+#else
+#define	OPTIONS		"alnkvL"
+#endif
+
 char	authbuf[sizeof(AUTH_DAT)];
 char	tickbuf[sizeof(KTEXT_ST)];
 int	doencrypt, use_kerberos, vacuous;
-Key_schedule	schedule;
+des_key_schedule schedule;
+#ifdef CRYPT
+int des_read __P((int, char *, int));
+int des_write __P((int, char *, int));
+void desrw_clear_key __P(());
+void desrw_set_key __P((des_cblock *, des_key_schedule *));
+#endif
 #else
 #define	OPTIONS	"alnL"
 #endif
@@ -179,6 +191,7 @@ main(argc, argv)
 		syslog(LOG_WARNING, "setsockopt (SO_LINGER): %m");
 	doit(&from);
 	/* NOTREACHED */
+	return 0;
 }
 
 char	username[20] = "USER=";
@@ -199,9 +212,9 @@ doit(fromp)
 	struct passwd *pwd;
 	u_short port;
 	fd_set ready, readfrom;
-	int cc, nfd, pv[2], pid, s;
+	int cc, nfd, pv[2], pid, s = 0;
 	int one = 1;
-	char *hostname, *errorstr, *errorhost;
+	char *hostname, *errorstr, *errorhost = (char *) NULL;
 	char *cp, sig, buf[BUFSIZ];
 	char cmdbuf[NCARGS+1], locuser[16], remuser[16];
 	char remotehost[2 * MAXHOSTNAMELEN + 1];
@@ -214,8 +227,10 @@ doit(fromp)
 	struct		sockaddr_in	fromaddr;
 	int		rc;
 	long		authopts;
+#ifdef CRYPT
 	int		pv1[2], pv2[2];
 	fd_set		wready, writeto;
+#endif
 
 	fromaddr = *fromp;
 #endif
@@ -233,7 +248,7 @@ doit(fromp)
 #endif
 	fromp->sin_port = ntohs((u_short)fromp->sin_port);
 	if (fromp->sin_family != AF_INET) {
-		syslog(LOG_ERR, "malformed \"from\" address (af %d)\n",
+		syslog(LOG_ERR, "malformed \"from\" address (af %d)",
 		    fromp->sin_family);
 		exit(1);
 	}
@@ -291,21 +306,22 @@ doit(fromp)
 
 	(void) alarm(0);
 	if (port != 0) {
-		int lport = IPPORT_RESERVED - 1;
-		s = rresvport(&lport);
-		if (s < 0) {
-			syslog(LOG_ERR, "can't get stderr port: %m");
-			exit(1);
-		}
+		int lport;
 #ifdef	KERBEROS
 		if (!use_kerberos)
 #endif
 			if (port >= IPPORT_RESERVED ||
 			    port < IPPORT_RESERVED/2) {
-				syslog(LOG_ERR, "2nd port not reserved\n");
+				syslog(LOG_ERR, "2nd port not reserved");
 				exit(1);
 			}
 		fromp->sin_port = htons(port);
+		lport = IPPORT_RESERVED - 1;
+		s = rresvport(&lport);
+		if (s < 0) {
+			syslog(LOG_ERR, "can't get stderr port: %m");
+			exit(1);
+		}
 		if (connect(s, (struct sockaddr *)fromp, sizeof (*fromp)) < 0) {
 			syslog(LOG_INFO, "connect second port %d: %m", port);
 			exit(1);
@@ -371,11 +387,10 @@ doit(fromp)
 			}
 		}
 		hostname = strncpy(hostnamebuf, hostname,
-				   sizeof(hostnamebuf) - 1);
+		    sizeof(hostnamebuf) - 1);
 	} else
 		errorhost = hostname = strncpy(hostnamebuf,
-					       inet_ntoa(fromp->sin_addr),
-					       sizeof(hostnamebuf) - 1);
+		    inet_ntoa(fromp->sin_addr), sizeof(hostnamebuf) - 1);
 
 	hostnamebuf[sizeof(hostnamebuf) - 1] = '\0';
 #ifdef	KERBEROS
@@ -392,7 +407,7 @@ doit(fromp)
 			if (getsockname(0, (struct sockaddr *)&local_addr,
 			    &rc) < 0) {
 				syslog(LOG_ERR, "getsockname: %m");
-				error("rlogind: getsockname: %m");
+				error("rshd: getsockname: %m");
 				exit(1);
 			}
 			authopts = KOPT_DO_MUTUAL;
@@ -400,7 +415,7 @@ doit(fromp)
 				"rcmd", instance, &fromaddr,
 				&local_addr, kdata, "", schedule,
 				version);
-			desrw_set_key(kdata->session, schedule);
+			desrw_set_key(&kdata->session, &schedule);
 		} else
 #endif
 			rc = krb_recvauth(authopts, 0, ticket, "rcmd",
@@ -410,7 +425,7 @@ doit(fromp)
 				version);
 		if (rc != KSUCCESS) {
 			error("Kerberos authentication failure: %s\n",
-				  krb_err_txt[rc]);
+				  krb_get_err_text(rc));
 			exit(1);
 		}
 	} else
@@ -459,9 +474,9 @@ doit(fromp)
 	} else
 #endif
 	if (errorstr ||
-	    pwd->pw_passwd != 0 && *pwd->pw_passwd != '\0' &&
+	    (pwd->pw_passwd != 0 && *pwd->pw_passwd != '\0' &&
 	    iruserok(fromp->sin_addr.s_addr, pwd->pw_uid == 0,
-	    remuser, locuser) < 0) {
+	    remuser, locuser) < 0)) {
 		if (__rcmd_errstr)
 			syslog(LOG_INFO|LOG_AUTH,
 			    "%s@%s as %s: permission denied (%s). cmd='%.80s'",

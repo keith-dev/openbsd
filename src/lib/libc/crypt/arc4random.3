@@ -1,4 +1,4 @@
-.\" $OpenBSD: arc4random.3,v 1.2 1997/04/27 22:40:25 angelos Exp $
+.\" $OpenBSD: arc4random.3,v 1.4 1998/09/07 16:44:34 aaron Exp $
 .\" Copyright 1997 Niels Provos <provos@physnet.uni-hamburg.de>
 .\" All rights reserved.
 .\"
@@ -70,6 +70,7 @@ since
 .Fn arc4random
 automatically initalizes itself.
 .Sh SEE ALSO
+.Xr rand48 3 ,
 .Xr rand 3 ,
 .Xr random 3
 .Sh HISTORY
@@ -78,5 +79,5 @@ has been designed by RSA Data Security, Inc. It was posted anonymously
 to the USENET and was confirmed to be equivalent by several sources who
 had access to the original cipher. Since 
 .Pa RC4
-used to be a trade secret, the cipher is now refered to as 
+used to be a trade secret, the cipher is now referred to as 
 .Pa ARC4 .

@@ -1,4 +1,4 @@
-#	$OpenBSD: install.md,v 1.35 1998/04/15 16:10:34 deraadt Exp $
+#	$OpenBSD: install.md,v 1.41 1998/10/07 18:42:08 millert Exp $
 #
 #
 # Copyright rc) 1996 The NetBSD Foundation, Inc.
@@ -62,17 +62,12 @@ md_machine_arch() {
 
 md_get_diskdevs() {
 	# return available disk devices
-	cat /kern/msgbuf | egrep "^[sw]d[0-9]+ " | cut -d" " -f1 | sort -u
+	cat /kern/msgbuf | egrep "^[sw]d[0-9]+ " | cutword 1 | sort -u
 }
 
 md_get_cddevs() {
 	# return available CDROM devices
-	cat /kern/msgbuf | egrep "^a?cd[0-9]+ " | cut -d" " -f1 | sort -u
-}
-
-md_get_ifdevs() {
-	# return available network devices
-	cat /kern/msgbuf | egrep "^(e[dglp][0-9] |[dil]e[0-9] |f[ep]a[0-9] |fxp[0-9])" | cut -d" " -f1 | sort -u
+	cat /kern/msgbuf | egrep "^a?cd[0-9]+ " | cutword 1 | sort -u
 }
 
 md_get_partition_range() {
@@ -83,11 +78,10 @@ md_get_partition_range() {
 md_installboot() {
 	echo "Installing boot block..."
 	cp /usr/mdec/boot /mnt/boot
-	sync; sync; sync
 	/usr/mdec/installboot -v /mnt/boot /usr/mdec/biosboot ${1}
 
 	echo
-	echo -n "Do you expect to run any accelerated X servers on this machine? [n] "
+	echo -n "Do you expect to run X windows on this machine? [y or n] "
 	getresp "n"
 	case "$resp" in
 		y*|Y*)
@@ -272,4 +266,12 @@ installed system, enter halt at the command prompt. Once the system has
 halted, reset the machine and boot from the disk.
 
 __congratulations_1
+}
+
+hostname() {
+	case $# in
+		0)      cat /kern/hostname ;;
+		1)      echo "$1" > /kern/hostname ;;
+		*)      echo "usage: hostname [name-of-host]"
+	esac
 }

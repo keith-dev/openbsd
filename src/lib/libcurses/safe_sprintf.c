@@ -1,30 +1,41 @@
-/*	$OpenBSD: safe_sprintf.c,v 1.1 1997/12/03 05:21:43 millert Exp $	*/
+/*	$OpenBSD: safe_sprintf.c,v 1.5 1998/09/13 19:16:30 millert Exp $	*/
 
-/******************************************************************************
- * Copyright 1997 by Thomas E. Dickey <dickey@clark.net>                      *
- * All Rights Reserved.                                                       *
- *                                                                            *
- * Permission to use, copy, modify, and distribute this software and its      *
- * documentation for any purpose and without fee is hereby granted, provided  *
- * that the above copyright notice appear in all copies and that both that    *
- * copyright notice and this permission notice appear in supporting           *
- * documentation, and that the name of the above listed copyright holder(s)   *
- * not be used in advertising or publicity pertaining to distribution of the  *
- * software without specific, written prior permission.                       *
- *                                                                            *
- * THE ABOVE LISTED COPYRIGHT HOLDER(S) DISCLAIM ALL WARRANTIES WITH REGARD   *
- * TO THIS SOFTWARE, INCLUDING ALL IMPLIED WARRANTIES OF MERCHANTABILITY AND  *
- * FITNESS, IN NO EVENT SHALL THE ABOVE LISTED COPYRIGHT HOLDER(S) BE LIABLE  *
- * FOR ANY SPECIAL, INDIRECT OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES          *
- * WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN      *
- * ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF OR *
- * IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.                *
- ******************************************************************************/
+/****************************************************************************
+ * Copyright (c) 1998 Free Software Foundation, Inc.                        *
+ *                                                                          *
+ * Permission is hereby granted, free of charge, to any person obtaining a  *
+ * copy of this software and associated documentation files (the            *
+ * "Software"), to deal in the Software without restriction, including      *
+ * without limitation the rights to use, copy, modify, merge, publish,      *
+ * distribute, distribute with modifications, sublicense, and/or sell       *
+ * copies of the Software, and to permit persons to whom the Software is    *
+ * furnished to do so, subject to the following conditions:                 *
+ *                                                                          *
+ * The above copyright notice and this permission notice shall be included  *
+ * in all copies or substantial portions of the Software.                   *
+ *                                                                          *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS  *
+ * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF               *
+ * MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.   *
+ * IN NO EVENT SHALL THE ABOVE COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM,   *
+ * DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR    *
+ * OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR    *
+ * THE USE OR OTHER DEALINGS IN THE SOFTWARE.                               *
+ *                                                                          *
+ * Except as contained in this notice, the name(s) of the above copyright   *
+ * holders shall not be used in advertising or otherwise to promote the     *
+ * sale, use or other dealings in this Software without prior written       *
+ * authorization.                                                           *
+ ****************************************************************************/
+
+/****************************************************************************
+ *  Author: Thomas E. Dickey <dickey@clark.net> 1997                        *
+ ****************************************************************************/
 
 #include <curses.priv.h>
 #include <ctype.h>
 
-MODULE_ID("Id: safe_sprintf.c,v 1.4 1997/11/01 23:01:09 tom Exp $")
+MODULE_ID("$From: safe_sprintf.c,v 1.9 1998/08/15 23:58:49 tom Exp $")
 
 #if USE_SAFE_SPRINTF
 
@@ -57,8 +68,9 @@ _nc_printf_length(const char *fmt, va_list ap)
 
 	while (*fmt != '\0') {
 		if (*fmt == '%') {
+			static char dummy[] = "";
 			PRINTF state = Flags;
-			char *pval   = "";
+			char *pval   = dummy;	/* avoid const-cast */
 			double fval  = 0.0;
 			int done     = FALSE;
 			int ival     = 0;
@@ -140,7 +152,7 @@ _nc_printf_length(const char *fmt, va_list ap)
 							prec = strlen(pval);
 						if (prec > (int)length) {
 							length = length + prec;
-							buffer = realloc(buffer, length);
+							buffer = (char *)_nc_doalloc(buffer, length);
 							if (buffer == 0) {
 								free(format);
 								return -1;
@@ -202,7 +214,8 @@ _nc_printf_string(const char *fmt, va_list ap)
 	int len = _nc_printf_length(fmt, ap);
 
 	if (len > 0) {
-		buf = malloc(len+1);
+		if ((buf = malloc(len+1)) == 0)
+			return(0);
 		vsprintf(buf, fmt, ap);
 	}
 #else
@@ -214,10 +227,10 @@ _nc_printf_string(const char *fmt, va_list ap)
 		if (screen_lines   > rows) rows = screen_lines;
 		if (screen_columns > cols) cols = screen_columns;
 		len = (rows * (cols + 1)) + 1;
-		if (buf == 0)
-			buf = malloc(len);
-		else
-			buf = realloc(buf, len);
+		buf = (char *)_nc_doalloc(buf, len);
+		if (buf == 0) {
+			return(0);
+		}
 	}
 
 	if (buf != 0) {
@@ -226,7 +239,7 @@ _nc_printf_string(const char *fmt, va_list ap)
 # else
 		vsprintf(buf, fmt, ap);		/* ANSI */
 # endif
-#endif
 	}
+#endif
 	return buf;
 }

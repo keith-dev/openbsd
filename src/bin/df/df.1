@@ -1,4 +1,4 @@
-.\"	$OpenBSD: df.1,v 1.6 1997/08/19 06:46:56 denny Exp $
+.\"	$OpenBSD: df.1,v 1.12 1998/09/23 00:13:48 aaron Exp $
 .\"	$NetBSD: df.1,v 1.12 1995/12/05 02:42:45 jtc Exp $
 .\"
 .\" Copyright (c) 1989, 1990, 1993
@@ -42,18 +42,18 @@
 .Nd display free disk space
 .Sh SYNOPSIS
 .Nm df
-.Op Fl hikln
+.Op Fl hiklnP
 .Op Fl t Ar type
 .Op Ar file | Ar file_system ...
 .Sh DESCRIPTION
-.Nm Df
+.Nm df
 displays statistics about the amount of free disk space on the specified
 .Ar file_system
 or on the file system of which
 .Ar file
 is a part.
 Values are displayed in 512-byte per block block counts.
-If neither a file or a
+If neither a file nor a
 .Ar file_system
 operand is specified,
 statistics for all mounted file systems are displayed
@@ -68,7 +68,7 @@ The following options are available:
 .It Fl h
 "Human-readable" output.  Use unit suffixes: Byte, Kilobyte, Megabyte,
 Gigabyte, Terabyte, Petabyte, Exabyte in order to reduce the number of
-digits to three or less.
+digits to four or less.
 .It Fl i
 Include statistics on the number of free inodes.
 .It Fl k
@@ -93,8 +93,9 @@ with the possibly stale statistics that were previously obtained.
 Print out information in a stricter format designed to be parsed
 by portable scripts.
 .It Fl t Ar type
-Is used to indicate the actions should only be taken on
-filesystems of the specified type.
+Indicate the actions should only be taken on
+filesystems of the specified
+.Ar type .
 More than one type may be specified in a comma separated list.
 The list of filesystem types can be prefixed with
 .Dq no
@@ -104,7 +105,7 @@ be taken. If a file system is given on the command line that is not of
 the specified type, a warning is issued and no information is given on
 that file system.
 .El
-.Sh ENVIRONMENT VARIABLES
+.Sh ENVIRONMENT
 .Bl -tag -width BLOCKSIZE
 .It Ev BLOCKSIZE
 If the environment variable
@@ -116,9 +117,9 @@ size block.
 .El
 .Sh SEE ALSO
 .Xr quota 1 ,
-.Xr statfs 2 ,
 .Xr fstatfs 2 ,
 .Xr getfsstat 2 ,
+.Xr statfs 2 ,
 .Xr getmntinfo 3 ,
 .Xr fstab 5 ,
 .Xr mount 8 ,

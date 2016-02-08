@@ -1,3 +1,5 @@
+/*	$OpenBSD: bootparamd.c,v 1.9 1998/07/10 08:06:50 deraadt Exp $	*/
+
 /*
  * This code is not copyright, and is placed in the public domain.
  * Feel free to use and modify. Please send modifications and/or
@@ -5,8 +7,6 @@
  *
  * Various small changes by Theo de Raadt <deraadt@fsa.ca>
  * Parser rewritten (adding YP support) by Roland McGrath <roland@frob.com>
- *
- * $Id: bootparamd.c,v 1.7 1997/06/23 09:31:08 deraadt Exp $
  */
 
 #include <sys/types.h>
@@ -145,7 +145,7 @@ bootparamproc_whoami_1_svc(whoami, rqstp)
 		    255 & whoami->client_address.bp_address_u.ip_addr.lh,
 		    255 & whoami->client_address.bp_address_u.ip_addr.impno);
 	if (dolog)
-		syslog(LOG_NOTICE, "whoami got question for %d.%d.%d.%d\n",
+		syslog(LOG_NOTICE, "whoami got question for %d.%d.%d.%d",
 		    255 & whoami->client_address.bp_address_u.ip_addr.net,
 		    255 & whoami->client_address.bp_address_u.ip_addr.host,
 		    255 & whoami->client_address.bp_address_u.ip_addr.lh,
@@ -181,7 +181,7 @@ bootparamproc_whoami_1_svc(whoami, rqstp)
 			    255 & res.router_address.bp_address_u.ip_addr.lh,
 			    255 & res.router_address.bp_address_u.ip_addr.impno);
 		if (dolog)
-			syslog(LOG_NOTICE, "Returning %s   %s    %d.%d.%d.%d\n",
+			syslog(LOG_NOTICE, "Returning %s   %s    %d.%d.%d.%d",
 			    res.client_name, res.domain_name,
 			    255 & res.router_address.bp_address_u.ip_addr.net,
 			    255 & res.router_address.bp_address_u.ip_addr.host,
@@ -194,7 +194,7 @@ failed:
 	if (debug)
 		warnx("whoami failed");
 	if (dolog)
-		syslog(LOG_NOTICE, "whoami failed\n");
+		syslog(LOG_NOTICE, "whoami failed");
 	return (NULL);
 }
 
@@ -213,7 +213,7 @@ bootparamproc_getfile_1_svc(getfile, rqstp)
 		    getfile->client_name, getfile->file_id);
 
 	if (dolog)
-		syslog(LOG_NOTICE, "getfile got question for \"%s\" and file \"%s\"\n",
+		syslog(LOG_NOTICE, "getfile got question for \"%s\" and file \"%s\"",
 		    getfile->client_name, getfile->file_id);
 
 	he = NULL;
@@ -255,7 +255,7 @@ failed:
 		    255 & res.server_address.bp_address_u.ip_addr.impno);
 	if (dolog)
 		syslog(LOG_NOTICE,
-		    "returning server:%s path:%s address: %d.%d.%d.%d\n",
+		    "returning server:%s path:%s address: %d.%d.%d.%d",
 		    res.server_name, res.server_path,
 		    255 & res.server_address.bp_address_u.ip_addr.net,
 		    255 & res.server_address.bp_address_u.ip_addr.host,

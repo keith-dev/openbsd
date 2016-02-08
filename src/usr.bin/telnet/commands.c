@@ -1,4 +1,4 @@
-/*	$OpenBSD: commands.c,v 1.13 1998/04/07 20:01:06 art Exp $	*/
+/*	$OpenBSD: commands.c,v 1.19 1998/07/16 18:55:59 deraadt Exp $	*/
 /*	$NetBSD: commands.c,v 1.14 1996/03/24 22:03:48 jtk Exp $	*/
 
 /*
@@ -35,6 +35,7 @@
  */
 
 #include "telnet_locl.h"
+#include <err.h>
 
 #if	defined(IPPROTO_IP) && defined(IP_TOS)
 int tos = -1;
@@ -70,7 +71,7 @@ skey_calc(argc, argv)
 
 	if(argc != 3) {
 		printf("%s sequence challenge\n", argv[0]);
-		return;
+		return 0;
 	}
 
 	switch(fork()) {
@@ -78,7 +79,7 @@ skey_calc(argc, argv)
 		execv(PATH_SKEY, argv);
 		exit (1);
 	case -1:
-		perror("fork");
+		err(1, "fork");
 		break;
 	default:
 		(void) wait(&status);
@@ -148,7 +149,7 @@ makeargv()
  * Todo:  1.  Could take random integers (12, 0x12, 012, 0b1).
  */
 
-	static
+	static char
 special(s)
 	register char *s;
 {
@@ -1403,7 +1404,7 @@ extern int shell();
 #endif	/* !defined(TN3270) */
 
     /*VARARGS*/
-    static
+    static int
 bye(argc, argv)
     int  argc;		/* Number of arguments */
     char *argv[];	/* arguments */
@@ -1499,7 +1500,7 @@ getslc(name)
 		genget(name, (char **) SlcList, sizeof(struct slclist));
 }
 
-    static
+    static int
 slccmd(argc, argv)
     int  argc;
     char *argv[];
@@ -1584,6 +1585,7 @@ getenvcmd(name)
 		genget(name, (char **) EnvList, sizeof(struct envlist));
 }
 
+    int
 env_cmd(argc, argv)
     int  argc;
     char *argv[];
@@ -1665,21 +1667,22 @@ env_init()
 	if ((ep = env_find("DISPLAY"))
 	    && ((*ep->value == ':')
 		|| (strncmp((char *)ep->value, "unix:", 5) == 0))) {
-		char hbuf[256+1];
+		char hbuf[MAXHOSTNAMELEN];
 		char *cp2 = strchr((char *)ep->value, ':');
 
-		gethostname(hbuf, 256);
-		hbuf[256] = '\0';
+		gethostname(hbuf, sizeof hbuf);
 
 		/* If this is not the full name, try to get it via DNS */
 		if (strchr(hbuf, '.') == 0) {
 			struct hostent *he = gethostbyname(hbuf);
 			if (he != 0)
-				strncpy(hbuf, he->h_name, 256);
-			hbuf[256] = '\0';
+				strncpy(hbuf, he->h_name, sizeof hbuf-1);
+			hbuf[sizeof hbuf-1] = '\0';
 		}
 
 		asprintf (&cp, "%s%s", hbuf, cp2);
+		if (cp == NULL)
+			err(1, "asprintf");
 
 		free(ep->value);
 		ep->value = (unsigned char *)cp;
@@ -1710,7 +1713,8 @@ env_define(var, value)
 		if (ep->value)
 			free(ep->value);
 	} else {
-		ep = (struct env_lst *)malloc(sizeof(struct env_lst));
+		if ((ep = malloc(sizeof(struct env_lst))) == NULL)
+			err(1, "malloc");
 		ep->next = envlisthead.next;
 		envlisthead.next = ep;
 		ep->prev = &envlisthead;
@@ -1719,8 +1723,10 @@ env_define(var, value)
 	}
 	ep->welldefined = opt_welldefined((char *)var);
 	ep->export = 1;
-	ep->var = (unsigned char *)strdup((char *)var);
-	ep->value = (unsigned char *)strdup((char *)value);
+	if ((ep->var = strdup((char *)var)) == NULL)
+		err(1, "strdup");
+	if ((ep->value = strdup((char *)value)) == NULL)
+		err(1, "strdup");
 	return(ep);
 }
 
@@ -1758,7 +1764,7 @@ env_unexport(var)
 {
 	register struct env_lst *ep;
 
-	if (ep = env_find(var))
+	if ((ep = env_find(var)) != NULL)
 		ep->export = 0;
 }
 
@@ -1911,6 +1917,7 @@ auth_help()
     return 0;
 }
 
+    int
 auth_cmd(argc, argv)
     int  argc;
     char *argv[];
@@ -2092,7 +2099,7 @@ filestuff(fd)
  * Print status about the connection.
  */
     /*ARGSUSED*/
-    static
+    static int
 status(argc, argv)
     int	 argc;
     char *argv[];
@@ -2303,7 +2310,8 @@ tn(argc, argv)
 	    --argc; ++argv;
 	    if (argc == 0)
 		goto usage;
-	    user = strdup(*argv++);
+	    if ((user = strdup(*argv++)) == NULL)
+		err(1, "strdup");
 	    --argc;
 	    continue;
 	}
@@ -2419,8 +2427,6 @@ tn(argc, argv)
 		    herror(hostp);
 		    seteuid(getuid());
 		    setuid(getuid());
-		    fprintf (stderr, "%s: %s\r\n", hostp ? hostp : "",
-			     "unknown error");
 		    return 0;
 		}
 	    }
@@ -2552,8 +2558,11 @@ tn(argc, argv)
 	}
 
 	if (connect(net, sa, sa_size) < 0) {
+	    int retry = 0;
+
 	    if (host && host->h_addr_list[1]) {
 		int oerrno = errno;
+	        retry = 1;
 
 		switch(family) {
 		case AF_INET :
@@ -2564,7 +2573,7 @@ tn(argc, argv)
 #if defined(AF_INET6) && defined(HAVE_STRUCT_SOCKADDR_IN6)
 		case AF_INET6: {
 		    char buf[INET6_ADDRSTRLEN];
-		    
+
 		    fprintf(stderr, "telnet: connect to address %s: ",
 			    inet_ntop(AF_INET6, &sin6.sin6_addr, buf,
 				      sizeof(buf)));
@@ -2578,9 +2587,22 @@ tn(argc, argv)
                    
 		errno = oerrno;
 		perror(NULL);
-		host->h_addr_list++;
-		memmove((caddr_t)&sin.sin_addr,
-			host->h_addr_list[0], host->h_length);
+
+		switch(family) {
+		case AF_INET :
+			printf("Trying %s...\r\n", inet_ntoa(sin.sin_addr));
+			break;
+#if defined(AF_INET6) && defined(HAVE_STRUCT_SOCKADDR_IN6)
+		case AF_INET6: {
+		    printf("Trying %s...\r\n", inet_ntop(AF_INET6,
+					     &sin6.sin6_addr,
+					     buf,
+					     sizeof(buf)));
+		    break;
+		}
+#endif
+		}
+		
 		(void) NetClose(net);
 		continue;
 	    }
@@ -2598,8 +2620,8 @@ tn(argc, argv)
 
 	user = getenv("USER");
 	if (user == NULL ||
-	    (pw = getpwnam(user)) && pw->pw_uid != getuid()) {
-		if (pw = getpwuid(getuid()))
+	    ((pw = getpwnam(user)) && pw->pw_uid != getuid())) {
+		if ((pw = getpwuid(getuid())) != NULL)
 			user = pw->pw_name;
 		else
 			user = NULL;
@@ -2811,7 +2833,7 @@ command(top, tbuf, cnt)
 /*
  * Help command.
  */
-	static
+	static int
 help(argc, argv)
 	int argc;
 	char *argv[];
@@ -2840,9 +2862,6 @@ help(argc, argv)
 	}
 	return 0;
 }
-
-static char *rcname = 0;
-static char rcbuf[128];
 
 #if	defined(IP_OPTIONS) && defined(IPPROTO_IP)
 

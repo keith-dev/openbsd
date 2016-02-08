@@ -1,3 +1,4 @@
+.\"	$OpenBSD: shutdown.2,v 1.5 1998/07/06 18:28:32 deraadt Exp $
 .\"	$NetBSD: shutdown.2,v 1.5 1995/02/27 12:37:11 cgd Exp $
 .\"
 .\" Copyright (c) 1983, 1991, 1993
@@ -65,7 +66,7 @@ If
 is
 .Ar SHUT_RDWR ,
 further sends and receives will be disallowed.
-.Sh DIAGNOSTICS
+.Sh RETURN VALUES
 A 0 is returned if the call succeeds, -1 if it fails.
 .Sh ERRORS
 The call succeeds unless:
@@ -78,10 +79,10 @@ is not
 or
 .Ar SHUT_RDWR .
 .It Bq Er EBADF
-.Fa S
+.Fa s
 is not a valid descriptor.
 .It Bq Er ENOTSOCK
-.Fa S
+.Fa s
 is a file, not a socket.
 .It Bq Er ENOTCONN
 The specified socket is not connected.

@@ -51,6 +51,23 @@ check_noident(homedir)
 	return 0;
 }
 
+static unsigned char itoa64[] =	 /* 0 ... 63 => ascii - 64 */
+	"./0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
+
+static void to64 __P((char *, u_int32_t, int));
+
+static void
+to64(s, v, n)
+	char *s;
+	u_int32_t v;
+	int n;
+{
+	while (--n >= 0) {
+		*s++ = itoa64[v&0x3f];
+		v >>= 6;
+	}
+}
+
 /*
  * Returns 0 on timeout, -1 on error, #bytes read on success.
  */
@@ -128,7 +145,7 @@ parse(fd, laddr, faddr)
 	char	buf[BUFSIZ], *p;
 	struct	in_addr laddr2, faddr2;
 	struct	passwd *pw;
-	int	try, n;
+	int	n;
 	uid_t	uid;
 
 	if (debug_flag && syslog_flag)
@@ -188,18 +205,11 @@ parse(fd, laddr, faddr)
 	 * Next - get the specific TCP connection and return the
 	 * uid - user number.
 	 *
-	 * Try to fetch the information 5 times incase the
-	 * kernel changed beneath us and we missed or took
-	 * a fault.
 	 */
-	for (try = 0; try < 5; try++)
-		if (k_getuid(&faddr2, htons(fport), laddr,
-		    htons(lport), &uid) != -1)
-			break;
-
-	if (try >= 5) {
+	if (k_getuid(&faddr2, htons(fport), laddr,
+	    htons(lport), &uid) == -1) {
 		if (syslog_flag)
-			syslog(LOG_DEBUG, "Returned: %d , %d : NO-USER",	
+			syslog(LOG_DEBUG, "Returning: %d , %d : NO-USER",	
 			    lport, fport);
 		n = snprintf(buf, sizeof(buf), "%d , %d : ERROR : %s\r\n",
 		    lport, fport, unknown_flag ? "UNKNOWN-ERROR" : "NO-USER");
@@ -209,9 +219,6 @@ parse(fd, laddr, faddr)
 		}
 		return 0;
 	}
-	if (try > 0 && syslog_flag)
-		syslog(LOG_NOTICE, "k_getuid retries: %d", try);
-
 	if (debug_flag && syslog_flag)
 		syslog(LOG_DEBUG, "  After k_getuid(), before getpwuid()");
 
@@ -233,7 +240,7 @@ parse(fd, laddr, faddr)
 	}
 
 	if (syslog_flag)
-		syslog(LOG_DEBUG, "Successful lookup: %d , %d : %s\n",
+		syslog(LOG_DEBUG, "Successful lookup: %d , %d : %s",
 		    lport, fport, pw->pw_name);
 
 	if (noident_flag && check_noident(pw->pw_dir)) {
@@ -250,6 +257,29 @@ parse(fd, laddr, faddr)
 		return 0;
 	}
 
+	if (token_flag) {
+		char token[21];
+		char *s = token;
+
+		memset(token, 0, sizeof token);
+		to64(s, arc4random(), 4);
+		to64(s + 4, arc4random(), 4);
+		to64(s + 8, arc4random(), 4);
+		to64(s + 12, arc4random(), 4);
+		to64(s + 16, arc4random(), 4);
+
+		syslog(LOG_NOTICE, "token %s == uid %u (%s)", token, uid,
+		    pw->pw_name);
+		n = snprintf(buf, sizeof(buf),
+		    "%d , %d : USERID : OTHER%s%s :%s\r\n",
+		    lport, fport, charset_name ? " , " : "",
+		    charset_name ? charset_name : "", token);
+		if (timed_write(fd, buf, n, IO_TIMEOUT) != n && syslog_flag) {
+			syslog(LOG_NOTICE, "write to %s: %m", gethost(faddr));
+			return 1;
+		}
+		return 0;
+	}
 	if (number_flag) {
 		n = snprintf(buf, sizeof(buf),
 		    "%d , %d : USERID : OTHER%s%s :%d\r\n",

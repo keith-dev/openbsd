@@ -1,8 +1,9 @@
-#	$OpenBSD: list,v 1.4 1998/04/06 20:27:31 pefo Exp $
+#	$OpenBSD: list,v 1.10 1998/09/25 02:24:30 rahnds Exp $
 
 SRCDIRS distrib/special
 SRCDIRS usr.bin bin sbin usr.sbin gnu/usr.bin
-SRCDIRS usr.bin/vi usr.sbin/pppd
+SRCDIRS usr.sbin/pppd
+#SRCDIRS usr.bin/vi
 
 # copy the crunched binary, link to it, and kill it
 COPY	${OBJDIR}/instbin	instbin
@@ -43,13 +44,13 @@ LINK	instbin			sbin/mount_nfs
 LINK	instbin			sbin/mount_kernfs
 LINK	instbin			sbin/mount_ext2fs
 LINK	instbin			sbin/newfs
+LINK	instbin			sbin/newfs_msdos
 LINK	instbin			sbin/ping
 LINK	instbin			sbin/restore
 LINK	instbin			sbin/route
-LINK	instbin			sbin/slattach
+#LINK	instbin			sbin/slattach
 LINK	instbin			sbin/scsi
 LINK	instbin			sbin/umount
-LINK	instbin			usr/bin/cut
 LINK	instbin			usr/bin/grep usr/bin/fgrep usr/bin/egrep
 LINK	instbin			usr/bin/ftp
 LINK	instbin			usr/bin/gzip usr/bin/gunzip usr/bin/gzcat
@@ -61,12 +62,12 @@ LINK	instbin			usr/bin/tip
 LINK	instbin			usr/sbin/chat
 LINK	instbin			usr/sbin/chown usr/sbin/chgrp
 LINK	instbin			usr/sbin/pppd
-SYMLINK ../../instbin           usr/bin/build usr/bin/vi
+#SYMLINK ../../instbin           usr/bin/build usr/bin/vi
 
 # copy the MAKEDEV script and make some devices
 COPY	${DESTDIR}/dev/MAKEDEV	dev/MAKEDEV
 SPECIAL	cd dev; sh MAKEDEV ramdisk
-SPECIAL	/bin/rm dev/MAKEDEV
+#SPECIAL	/bin/rm dev/MAKEDEV
 
 # we need the contents of /usr/mdec
 COPY	${DESTDIR}/usr/mdec/ofwboot	usr/mdec/ofwboot
@@ -88,16 +89,15 @@ SYMLINK	/tmp/hosts			etc/hosts
 COPYDIR	${DESTDIR}/etc/ppp		etc/ppp
 
 # and the common installation tools
-COPY    ${TOPDIR}/inst-common/termcap.vt        usr/share/misc/termcap
+COPY    ${TOPDIR}/common/termcap.vt        usr/share/misc/termcap
 COPY	${DESTDIR}/usr/share/misc/scsi_modes	usr/share/misc/scsi_modes
 
 # and the installation tools
 COPY	dot.profile			.profile
 COPY	dot.instutils			.instutils
 COPY	install.md			install.md
-COPY	install.sh			install
-#COPY	${CURDIR}/../../miniroot/install.sh		install
+COPY	${CURDIR}/../../miniroot/install.sh		install
 COPY	${CURDIR}/../../miniroot/upgrade.sh		upgrade
-SPECIAL sed "/^VERSION=/s/=.*/=${REV}/" < ${CURDIR}/install.sub > install.sub
-#SPECIAL sed "/^VERSION=/s/=.*/=${REV}/" < ${CURDIR}/../../miniroot/install.sub > install.sub
+#SPECIAL sed "/^VERSION=/s/=.*/=${REV}/" < ${CURDIR}/install.sub > install.sub
+SPECIAL sed "/^VERSION=/s/=.*/=${REV}/" < ${CURDIR}/../../miniroot/install.sub > install.sub
 SPECIAL	chmod 755 install

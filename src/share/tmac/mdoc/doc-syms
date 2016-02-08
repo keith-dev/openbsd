@@ -1,4 +1,4 @@
-.\"	$OpenBSD: doc-syms,v 1.14 1998/03/09 01:10:24 millert Exp $
+.\"	$OpenBSD: doc-syms,v 1.16 1998/08/15 09:59:40 deraadt Exp $
 .\"
 .\" Copyright (c) 1991, 1993
 .\"	The Regents of the University of California.  All rights reserved.
@@ -176,6 +176,7 @@
 .	if "\\$1"2.1"  \&\\*(tNOpenBSD\\*(aa 2.1\\*(aa\\$2
 .	if "\\$1"2.2"  \&\\*(tNOpenBSD\\*(aa 2.2\\*(aa\\$2
 .	if "\\$1"2.3"  \&\\*(tNOpenBSD\\*(aa 2.3\\*(aa\\$2
+.	if "\\$1"2.4"  \&\\*(tNOpenBSD\\*(aa 2.4\\*(aa\\$2
 .\}
 .if \\n(.$==1 \{\
 .	if "\\$1"1.2"  \&\\*(tNOpenBSD\\*(aa 1.2\\*(aa
@@ -183,8 +184,59 @@
 .	if "\\$1"2.1"  \&\\*(tNOpenBSD\\*(aa 2.1\\*(aa
 .	if "\\$1"2.2"  \&\\*(tNOpenBSD\\*(aa 2.2\\*(aa
 .	if "\\$1"2.3"  \&\\*(tNOpenBSD\\*(aa 2.3\\*(aa
+.	if "\\$1"2.4"  \&\\*(tNOpenBSD\\*(aa 2.4\\*(aa
 .	if "\\$1"."    \&\\*(tNOpenBSD\\$1\\*(aa
 .	if "\\$1","    \&\\*(tNOpenBSD\\$1\\*(aa
+.\}
+..
+.\" NS Fx macro -- FreeBSD
+.de Fx
+.nr cF \\n(.f
+.nr cZ \\n(.s
+.ds aa \&\f\\n(cF\s\\n(cZ
+.if \\n(aC==0 \{\
+.       ie \\n(.$==0 \&\\*(tNFreeBSD\\*(aa
+.       el .aV \\$1 \\$2 \\$3 \\$4 \\$5 \\$6 \\$7 \\$8 \\$9
+.\}
+.if \\n(aC>\\n(aP \{\
+.       nr aP \\n(aP+1
+.	ie \\n(C\\n(aP==2 \{\
+.		as b1 \&\\*(tNFreeBSD\ \&\\*(A\\n(aP\\*(aa
+.		ie \\n(aC>\\n(aP \{\
+.			nr aP \\n(aP+1
+.			nR
+.		\}
+.		el .aZ
+.	\}
+.	el \{\
+.	       as b1 \&\\*(tNFreeBSD\\*(aa
+.	       nR
+.	\}
+.\}
+..
+.\" NS Bsx macro -- BSDI BSD/OS
+.de Bsx
+.nr cF \\n(.f
+.nr cZ \\n(.s
+.ds aa \&\f\\n(cF\s\\n(cZ
+.if \\n(aC==0 \{\
+.       ie \\n(.$==0 \&\\*(tNBSDI BSD/OS\\*(aa
+.       el .aV \\$1 \\$2 \\$3 \\$4 \\$5 \\$6 \\$7 \\$8 \\$9
+.\}
+.if \\n(aC>\\n(aP \{\
+.       nr aP \\n(aP+1
+.	ie \\n(C\\n(aP==2 \{\
+.		as b1 \&\\*(tNBSDI BSD/OS\ \&\\*(A\\n(aP\\*(aa
+.		ie \\n(aC>\\n(aP \{\
+.			nr aP \\n(aP+1
+.			nR
+.		\}
+.		el .aZ
+.	\}
+.	el \{\
+.	       as b1 \&\\*(tNBSDI BSDI/OS\\*(aa
+.	       nR
+.	\}
 .\}
 ..
 .\" Ns At macro - AT&T UNIX (this macro does not handle punctuation)

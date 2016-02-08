@@ -32,7 +32,7 @@
  */
 
 #if defined(LIBC_SCCS) && !defined(lint)
-static char rcsid[] = "$OpenBSD: opendir.c,v 1.4 1997/07/09 00:28:23 millert Exp $";
+static char rcsid[] = "$OpenBSD: opendir.c,v 1.6 1998/08/15 08:10:14 deraadt Exp $";
 #endif /* LIBC_SCCS and not lint */
 
 #include <sys/param.h>
@@ -132,14 +132,19 @@ __opendir2(name, flags)
 			 * available to getdirentries
 			 */
 			if (space < DIRBLKSIZ) {
+				char *nbuf;
+
 				space += incr;
 				len += incr;
-				buf = realloc(buf, len);
-				if (buf == NULL) {
+				nbuf = realloc(buf, len);
+				if (nbuf == NULL) {
+					if (buf)
+						free(buf);
 					free(dirp);
 					close(fd);
 					return (NULL);
 				}
+				buf = nbuf;
 				ddptr = buf + (len - space);
 			}
 

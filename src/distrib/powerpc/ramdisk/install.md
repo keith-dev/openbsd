@@ -1,4 +1,4 @@
-#	$OpenBSD: install.md,v 1.3 1998/04/06 20:27:29 pefo Exp $
+#	$OpenBSD: install.md,v 1.7 1998/09/15 05:45:50 rahnds Exp $
 #
 #
 # Copyright rc) 1996 The NetBSD Foundation, Inc.
@@ -41,7 +41,7 @@
 #
 
 # Machine-dependent install sets
-MDSETS="kernel"
+MDSETS="kernel bsdmix bsdofw"
 
 md_set_term() {
 	if [ ! -z "$TERM" ]; then
@@ -62,17 +62,12 @@ md_machine_arch() {
 
 md_get_diskdevs() {
 	# return available disk devices
-	cat /kern/msgbuf | egrep "^[sw]d[0-9] " | cut -d" " -f1 | sort -u
+	cat /kern/msgbuf | egrep "^[sw]d[0-9]|ofdisk[0-9] " | sed -e "s/[ :(].*//" | sort -u
 }
 
 md_get_cddevs() {
 	# return available CDROM devices
-	cat /kern/msgbuf | egrep "^a?cd[0-9] " | cut -d" " -f1 | sort -u
-}
-
-md_get_ifdevs() {
-	# return available network devices
-	cat /kern/msgbuf | egrep "^?de[0-9] " | cut -d" " -f1 | sort -u
+	cat /kern/msgbuf | egrep "^a?cd[0-9] " | sed -e "s/[ :(].*//" | sort -u
 }
 
 md_get_partition_range() {
@@ -131,7 +126,7 @@ md_init_mbr() {
 		echo "This will take a minute or two..."
 		sleep 2
 		echo -n "Creating Master Boot Record (MBR)..."
-		dd if=/usr/mdec/mbr of=/dev/r$1c >/dev/null 2>&1
+		fdisk -i -f /usr/mdec/mbr $1 
 		echo "..done."
 		echo -n "Copying 1MB MSDOS partition to disk..."
 		gunzip < /usr/mdec/msdos1mb.gz | dd of=/dev/r$1c bs=512 seek=1 >/dev/null 2>&1
@@ -328,7 +323,7 @@ __md_prep_disklabel_1
 	disklabel ${_disk} >/tmp/label.$$
 	disklabel -r -R ${_disk} /tmp/label.$$
 	rm -f /tmp/label.$$
-	disklabel -e ${_disk}
+	disklabel -E ${_disk}
 }
 
 md_copy_kernel() {

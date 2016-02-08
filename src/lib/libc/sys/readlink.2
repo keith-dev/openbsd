@@ -1,3 +1,4 @@
+.\"	$OpenBSD: readlink.2,v 1.5 1998/07/06 18:28:17 deraadt Exp $
 .\"	$NetBSD: readlink.2,v 1.7 1995/02/27 12:35:54 cgd Exp $
 .\"
 .\" Copyright (c) 1983, 1991, 1993
@@ -42,16 +43,16 @@
 .Sh SYNOPSIS
 .Fd #include <unistd.h>
 .Ft int
-.Fn readlink "const char *path" "char *buf" "int bufsiz"
+.Fn readlink "const char *path" "char *buf" "size_t bufsiz"
 .Sh DESCRIPTION
-.Fn Readlink
+.Fn readlink
 places the contents of the symbolic link
 .Fa path
 in the buffer
 .Fa buf ,
 which has size
 .Fa bufsiz .
-.Nm Readlink
+.Nm readlink
 does not append a
 .Dv NUL
 character to
@@ -62,7 +63,7 @@ if it succeeds, or a -1 if an error occurs, placing the error
 code in the global variable
 .Va errno .
 .Sh ERRORS
-.Fn Readlink
+.Fn readlink
 will fail if:
 .Bl -tag -width Er
 .It Bq Er ENOTDIR

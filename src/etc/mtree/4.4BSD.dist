@@ -1,4 +1,4 @@
-#	$OpenBSD: 4.4BSD.dist,v 1.50 1998/03/25 07:27:05 beck Exp $
+#	$OpenBSD: 4.4BSD.dist,v 1.61 1998/10/16 05:19:58 deraadt Exp $
 
 /set type=dir uname=root gname=wheel mode=0755
 # .
@@ -28,6 +28,11 @@ fd		mode=0555
 # ./etc
 etc
 
+# ./etc/afs
+afs
+# ./etc/afs
+..
+
 # ./etc/amd
 amd
 # ./etc/amd
@@ -48,17 +53,6 @@ mtree
 # ./etc/mtree
 ..
 
-# ./etc/namedb
-namedb
-
-# ./etc/namedb/tmp
-tmp
-# ./etc/namedb/tmp
-..
-
-# ./etc/namedb
-..
-
 # ./etc/ppp
 ppp
 # ./etc/ppp
@@ -67,6 +61,18 @@ ppp
 # ./etc/sliphome
 sliphome
 # ./etc/sliphome
+..
+
+# ./etc/ssl
+ssl
+
+# ./etc/ssl/private
+private		uname=root mode=0700
+
+# ./etc/ssl
+..
+
+# ./etc
 ..
 
 # ./etc/uucp
@@ -175,9 +181,9 @@ rpcsvc		gname=bin uname=root mode=0755
 # ./usr/include/rpcsvc
 ..
 
-# ./usr/include/ss
-ss		gname=bin uname=root mode=0755
-# ./usr/include/ss
+# ./usr/include/ssl
+ssl		gname=bin uname=root mode=0755
+# ./usr/include/ssl
 ..
 
 # ./usr/include
@@ -994,6 +1000,11 @@ pmax
 # ./usr/share/man/cat4/pmax
 ..
 
+# ./usr/share/man/cat4/powerpc
+powerpc
+# ./usr/share/man/cat4/powerpc
+..
+
 # ./usr/share/man/cat4/sparc
 sparc
 # ./usr/share/man/cat4/sparc
@@ -1201,6 +1212,11 @@ pmax
 # ./usr/share/man/man4/pmax
 ..
 
+# ./usr/share/man/man4/powerpc
+powerpc
+# ./usr/share/man/man4/powerpc
+..
+
 # ./usr/share/man/man4/sparc
 sparc
 # ./usr/share/man/man4/sparc
@@ -1353,6 +1369,57 @@ nls
 # ./usr/share/nls
 ..
 
+# ./usr/share/sendmail
+sendmail
+
+# ./usr/share/sendmail/cf
+cf
+# ./usr/share/sendmail/cf
+..
+
+# ./usr/share/sendmail/domain
+domain
+# ./usr/share/sendmail/domain
+..
+
+# ./usr/share/sendmail/feature
+feature
+# ./usr/share/sendmail/feature
+..
+
+# ./usr/share/sendmail/hack
+hack
+# ./usr/share/sendmail/hack
+..
+
+# ./usr/share/sendmail/m4
+m4
+# ./usr/share/sendmail/m4
+..
+
+# ./usr/share/sendmail/mailer
+mailer
+# ./usr/share/sendmail/mailer
+..
+
+# ./usr/share/sendmail/ostype
+ostype
+# ./usr/share/sendmail/ostype
+..
+
+# ./usr/share/sendmail/sh
+sh
+# ./usr/share/sendmail/sh
+..
+
+# ./usr/share/sendmail/siteconfig
+siteconfig
+# ./usr/share/sendmail/siteconfig
+..
+
+# ./usr/share/sendmail
+..
+
 # ./usr/share/skel
 skel
 # ./usr/share/skel
@@ -1467,7 +1534,7 @@ spool		mode=0700
 ..
 
 # ./var/backups
-backups
+backups		mode=0700
 # ./var/backups
 ..
 
@@ -1498,6 +1565,11 @@ db
 # ./var/db/ns
 ns
 # ./var/db/ns
+..
+
+# ./var/db/pkg
+pkg
+# ./var/db/pkg
 ..
 
 # ./var/db
@@ -1554,6 +1626,22 @@ mail
 # ./var/msgs
 msgs
 # ./var/msgs
+..
+
+# ./var/named
+named		uname=named gname=bin mode=0755
+
+# ./var/named/dev
+dev
+# ./var/named/dev
+..
+
+# ./var/named/etc
+etc
+# ./var/named/etc
+..
+
+# ./var/named
 ..
 
 # ./var/obj				XXX
@@ -1688,6 +1776,11 @@ mod  type=dir uname=root gname=daemon mode=755
 #./www/htdocs/manual/images
 images  type=dir uname=root gname=daemon mode=755
 #./www/htdocs/manual/images
+..
+
+#./www/htdocs/manual/vhosts
+vhosts  type=dir uname=root gname=daemon mode=755
+#./www/htdocs/manual/vhosts
 ..
 
 #./www/htdocs/manual/misc

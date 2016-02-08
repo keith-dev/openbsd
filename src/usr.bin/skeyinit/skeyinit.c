@@ -1,4 +1,4 @@
-/*	$OpenBSD: skeyinit.c,v 1.20 1997/07/27 21:36:05 millert Exp $	*/
+/*	$OpenBSD: skeyinit.c,v 1.22 1998/08/22 19:29:46 dgregor Exp $	*/
 /*	$NetBSD: skeyinit.c,v 1.6 1995/06/05 19:50:48 pk Exp $	*/
 
 /* S/KEY v1.1b (skeyinit.c)
@@ -147,7 +147,11 @@ main(argc, argv)
 	rval = skeylookup(&skey, pp->pw_name);
 	switch (rval) {
 		case -1:
-			err(1, "cannot open database");
+			if (errno == ENOENT)
+				errx(1, "s/key disabled");
+			else
+				err(1, "cannot open database");
+			break;
 		case 0:
 			/* comment out user if asked to */
 			if (zerokey)
@@ -256,7 +260,7 @@ main(argc, argv)
 		}
 	} else {
 		/* Get user's secret password */
-		fputs("Reminder - Only use this method if you are directly connected\n           or have an encrypted channel.  If you are using telnet\n           or rlogin, exit with no password and use keyinit -s.\n", stderr);
+		fputs("Reminder - Only use this method if you are directly connected\n           or have an encrypted channel.  If you are using telnet\n           or rlogin, exit with no password and use skeyinit -s.\n", stderr);
 
 		for (i = 0;; i++) {
 			if (i > 2)

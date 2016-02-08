@@ -1,4 +1,4 @@
-/*	$OpenBSD: main.c,v 1.18 1998/02/08 19:24:08 deraadt Exp $	*/
+/*	$OpenBSD: main.c,v 1.24 1998/08/22 07:44:03 mickey Exp $	*/
 /*	$NetBSD: main.c,v 1.14 1997/06/05 11:13:24 lukem Exp $	*/
 
 /*-
@@ -111,11 +111,12 @@ main(argc, argv)
 	register char *map;
 	register int ch;
 	struct tm then;
+	struct statfs fsbuf;
 	int i, anydirskipped, bflag = 0, Tflag = 0, honorlevel = 1;
 	ino_t maxino;
 	time_t tnow;
 	int dirlist;
-	char *toplevel, *str;
+	char *toplevel, *str, *mount_point = NULL;
 
 	spcl.c_date = 0;
 	(void)time((time_t *)&spcl.c_date);
@@ -150,7 +151,7 @@ main(argc, argv)
 			if (ntrec > maxbsize/1024) {
 				msg("Please choose a blocksize <= %dKB\n",
 				    maxbsize/1024);
-				exit(X_ABORT);
+				exit(X_STARTUP);
 			}
 			bflag = 1;
 			break;
@@ -191,7 +192,7 @@ main(argc, argv)
 			if (spcl.c_ddate < 0) {
 				(void)fprintf(stderr, "bad time \"%s\"\n",
 				    optarg);
-				exit(X_ABORT);
+				exit(X_STARTUP);
 			}
 			Tflag = 1;
 			lastlevel = '?';
@@ -204,7 +205,7 @@ main(argc, argv)
 		case 'W':		/* what to do */
 		case 'w':
 			lastdump(ch);
-			exit(0);	/* do nothing else */
+			exit(X_FINOK);	/* do nothing else */
 
 		case 'a':		/* `auto-size', Write to EOM. */
 			unlimited = 1;
@@ -218,7 +219,7 @@ main(argc, argv)
 
 	if (argc < 1) {
 		(void)fprintf(stderr, "Must specify disk or filesystem\n");
-		exit(X_ABORT);
+		exit(X_STARTUP);
 	}
 
 	/*
@@ -228,29 +229,28 @@ main(argc, argv)
 	toplevel = NULL;
 	for (i = 0; i < argc; i++) {
 		struct stat sb;
-		struct statfs fsbuf;
 
 		if (lstat(argv[i], &sb) == -1) {
 			msg("Cannot lstat %s: %s\n", argv[i], strerror(errno));
-			exit(X_ABORT);
+			exit(X_STARTUP);
 		}
 		if (!S_ISDIR(sb.st_mode) && !S_ISREG(sb.st_mode))
 			break;
 		if (statfs(argv[i], &fsbuf) == -1) {
 			msg("Cannot statfs %s: %s\n", argv[i], strerror(errno));
-			exit(X_ABORT);
+			exit(X_STARTUP);
 		}
 		if (strcmp(argv[i], fsbuf.f_mntonname) == 0) {
 			if (dirlist != 0) {
 				msg("Can't dump a mountpoint and a filelist\n");
-				exit(X_ABORT);
+				exit(X_STARTUP);
 			}
 			break;		/* exit if sole mountpoint */
 		}
 		if (!disk) {
 			if ((toplevel = strdup(fsbuf.f_mntonname)) == NULL) {
 				msg("Cannot malloc diskname\n");
-				exit(X_ABORT);
+				exit(X_STARTUP);
 			}
 			disk = toplevel;
 			if (uflag) {
@@ -265,7 +265,7 @@ main(argc, argv)
 		} else {
 			if (strcmp(disk, fsbuf.f_mntonname) != 0) {
 				msg("%s is not on %s\n", argv[i], disk);
-				exit(X_ABORT);
+				exit(X_STARTUP);
 			}
 		}
 		msg("Dumping file/directory %s\n", argv[i]);
@@ -280,13 +280,13 @@ main(argc, argv)
 				(void)fputs(*argv++, stderr);
 			}
 			(void)putc('\n', stderr);
-			exit(X_ABORT);
+			exit(X_STARTUP);
 		}
 	}
 	if (Tflag && uflag) {
 	        (void)fprintf(stderr,
 		    "You cannot use the T and u flags together.\n");
-		exit(X_ABORT);
+		exit(X_STARTUP);
 	}
 	if (strcmp(tape, "-") == 0) {
 		pipeout++;
@@ -317,10 +317,10 @@ main(argc, argv)
 		*tape++ = '\0';
 #ifdef RDUMP
 		if (rmthost(host) == 0)
-			exit(X_ABORT);
+			exit(X_STARTUP);
 #else
 		(void)fprintf(stderr, "remote dump not enabled\n");
-		exit(X_ABORT);
+		exit(X_STARTUP);
 #endif
 	}
 
@@ -347,28 +347,38 @@ main(argc, argv)
 	 *	the special name missing the leading '/',
 	 *	the file system name with or without the leading '/'.
 	 */
-	dt = fstabsearch(disk);
-	if (dt != NULL) {
-		disk = rawname(dt->fs_spec);
-		(void)strncpy(spcl.c_dev, dt->fs_spec, sizeof(spcl.c_dev) - 1);
-		spcl.c_dev[sizeof(spcl.c_dev) - 1] = '\0';
+	if (!statfs(disk, &fsbuf) && !strcmp(fsbuf.f_mntonname, disk)) {
+		/* mounted disk? */
+		disk = rawname(fsbuf.f_mntfromname);
+		mount_point = fsbuf.f_mntonname;
+		(void)strlcpy(spcl.c_dev, fsbuf.f_mntfromname,
+		    sizeof(spcl.c_dev));
 		if (dirlist != 0) {
 			(void)snprintf(spcl.c_filesys, sizeof(spcl.c_filesys),
-			    "a subset of %s", dt->fs_file);
+			    "a subset of %s", mount_point);
 		} else {
-			(void)strncpy(spcl.c_filesys, dt->fs_file,
-			    sizeof(spcl.c_filesys) - 1);
-			spcl.c_filesys[sizeof(spcl.c_filesys) - 1] = '\0';
+			(void)strlcpy(spcl.c_filesys, mount_point,
+			    sizeof(spcl.c_filesys));
+		}
+	} else if ((dt = fstabsearch(disk)) != NULL) {
+		/* in fstab? */
+		disk = rawname(dt->fs_spec);
+		mount_point = dt->fs_file;
+		(void)strlcpy(spcl.c_dev, dt->fs_spec, sizeof(spcl.c_dev));
+		if (dirlist != 0) {
+			(void)snprintf(spcl.c_filesys, sizeof(spcl.c_filesys),
+			    "a subset of %s", mount_point);
+		} else {
+			(void)strlcpy(spcl.c_filesys, mount_point,
+			    sizeof(spcl.c_filesys));
 		}
 	} else {
-		(void)strncpy(spcl.c_dev, disk, sizeof(spcl.c_dev) - 1);
-		spcl.c_dev[sizeof(spcl.c_dev) - 1] = '\0';
-		(void)strncpy(spcl.c_filesys, "an unlisted file system",
-		    sizeof(spcl.c_filesys) - 1);
-		spcl.c_filesys[sizeof(spcl.c_filesys) - 1] = '\0';
+		/* must be a device */
+		(void)strlcpy(spcl.c_dev, disk, sizeof(spcl.c_dev));
+		(void)strlcpy(spcl.c_filesys, "an unlisted file system",
+		    sizeof(spcl.c_filesys));
 	}
-	(void)strncpy(spcl.c_label, "none", sizeof(spcl.c_label) - 1);
-	spcl.c_label[sizeof(spcl.c_label) - 1] = '\0';
+	(void)strlcpy(spcl.c_label, "none", sizeof(spcl.c_label));
 	(void)gethostname(spcl.c_host, sizeof(spcl.c_host));
 	spcl.c_level = level - '0';
 	spcl.c_type = TS_TAPE;
@@ -380,8 +390,8 @@ main(argc, argv)
  	msg("Date of last level %c dump: %s", lastlevel,
 		spcl.c_ddate == 0 ? "the epoch\n" : ctime(&spcl.c_ddate));
 	msg("Dumping %s ", disk);
-	if (dt != NULL)
-		msgtail("(%s) ", dt->fs_file);
+	if (mount_point != NULL)
+		msgtail("(%s) ", mount_point);
 	if (host)
 		msgtail("to %s on host %s\n", tape, host);
 	else
@@ -389,7 +399,7 @@ main(argc, argv)
 
 	if ((diskfd = open(disk, O_RDONLY)) < 0) {
 		msg("Cannot open %s\n", disk);
-		exit(X_ABORT);
+		exit(X_STARTUP);
 	}
 	sync();
 	sblock = (struct fs *)sblock_buf;
@@ -547,10 +557,13 @@ main(argc, argv)
 static void
 usage()
 {
+	extern char *__progname;
 
-	(void)fprintf(stderr, "usage: dump [-0123456789cnu] [-B records] [-b blocksize] [-d density] [-f file]\n            [-h level] [-s feet] [-T date] filesystem\n");
-	(void)fprintf(stderr, "       dump [-W | -w]\n");
-	exit(1);
+	(void)fprintf(stderr, "usage: %s [-0123456789acnu] [-B records]"
+		      "[-b blocksize] [-d density] [-f file]\n"
+		      "            [-h level] [-s feet] [-T date] filesystem\n"
+		      "       %s [-W | -w]\n", __progname, __progname);
+	exit(X_STARTUP);
 }
 
 /*
@@ -567,9 +580,9 @@ numarg(meaning, vmin, vmax)
 
 	val = strtol(optarg, &p, 10);
 	if (*p)
-		errx(1, "illegal %s -- %s", meaning, optarg);
+		errx(X_STARTUP, "illegal %s -- %s", meaning, optarg);
 	if (val < vmin || (vmax && val > vmax))
-		errx(1, "%s must be between %ld and %ld", meaning, vmin, vmax);
+		errx(X_STARTUP, "%s must be between %ld and %ld", meaning, vmin, vmax);
 	return (val);
 }
 

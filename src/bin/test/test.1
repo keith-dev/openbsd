@@ -1,4 +1,4 @@
-.\"	$OpenBSD: test.1,v 1.5 1997/06/06 11:08:20 deraadt Exp $
+.\"	$OpenBSD: test.1,v 1.8 1998/09/19 14:40:26 aaron Exp $
 .\"	$NetBSD: test.1,v 1.6 1995/03/21 07:04:03 cgd Exp $
 .\"
 .\" Copyright (c) 1991, 1993
@@ -42,7 +42,7 @@
 .Os
 .Sh NAME
 .Nm test
-.Nd Condition evaluation utility.
+.Nd condition evaluation utility
 .Sh SYNOPSIS
 .Nm test
 .Ar expression
@@ -52,17 +52,24 @@
 .Sh DESCRIPTION
 The
 .Nm test
-utility evaluates the expression and, if it evaluates
+utility evaluates the
+.Ar expression
+and, if it evaluates
 to true, returns a zero (true) exit status; otherwise
 it returns 1 (false).
-If there is no expression, test also
+If no
+.Ar expression
+is given,
+.Nm
+also
 returns 1 (false).
 .Pp
 All operators and flags are separate arguments to the
 .Nm test
 utility.
 .Pp
-The following primaries are used to construct expression:
+The following primaries are used to construct
+.Ar expression :
 .Bl -tag -width Ar
 .It Fl b Ar file
 True if
@@ -89,14 +96,14 @@ exists and is a regular file.
 .It Fl g Ar file
 True if
 .Ar file
-exists and its set group ID flag
+exists and its set-group-ID flag
 is set.
 .It Fl h Ar file
 True if
 .Ar file
 exists and is a symbolic link.
 This operator is for COMPATABILITY purposes,
-do not rely on it's existance.  Use
+do not rely on its existence.  Use
 .Fl L
 instead.
 .It Fl k Ar file
@@ -129,7 +136,7 @@ is
 .It Fl u Ar file
 True if
 .Ar file
-exists and its set user ID flag
+exists and its set-user-ID flag
 is set.
 .It Fl w Ar file
 True if
@@ -161,11 +168,11 @@ exists and is a symbolic link.
 .It Fl O Ar file
 True if
 .Ar file
-exists and its owner matches the effective user id of this process.
+exists and its owner matches the effective user ID of this process.
 .It Fl G Ar file
 True if
 .Ar file
-exists and its group matches the effective group id of this process.
+exists and its group matches the effective group ID of this process.
 .It Fl S Ar file
 True if
 .Ar file
@@ -279,7 +286,9 @@ or
 .Ar expression2
 are true.
 .It Cm \&( Ns Ar expression Ns Cm \&)
-True if expression is true.
+True if
+.Ar expression
+is true.
 .El
 .Pp
 The
@@ -293,7 +302,7 @@ The
 grammar is inherently ambiguous.  In order to assure a degree of consistency,
 the cases described in 
 .St -p1003.2
-section D11.2/4.62.4, 
+section D11.2/4.62.4
 are evaluated consistently according to the rules specified in the
 standards document.  All other cases are subject to the ambiguity in the
 command semantics.
@@ -303,9 +312,9 @@ The
 utility exits with one of the following values:
 .Bl -tag -width Ds
 .It 0
-expression evaluated to true.
+Expression evaluated to true.
 .It 1
-expression evaluated to false or expression was
+Expression evaluated to false or expression was
 missing.
 .It >1
 An error occurred.

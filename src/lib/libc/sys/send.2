@@ -1,3 +1,4 @@
+.\"	$OpenBSD: send.2,v 1.9 1998/08/17 17:35:15 deraadt Exp $
 .\"	$NetBSD: send.2,v 1.6 1996/01/15 01:17:18 thorpej Exp $
 .\"
 .\" Copyright (c) 1983, 1991, 1993
@@ -33,7 +34,7 @@
 .\"
 .\"     @(#)send.2	8.2 (Berkeley) 2/21/94
 .\"
-.Dd February 21, 1994
+.Dd July 28, 1998
 .Dt SEND 2
 .Os BSD 4.2
 .Sh NAME
@@ -158,9 +159,42 @@ The
 .Fa flags
 parameter is invalid.
 .El
+.Pp
+In addition,
+.Fn send
+and
+.Fn sendto
+may return following error:
+.Bl -tag -width Er
+.It Bq Er EINVAL
+.Fa len   
+was larger than
+.Dv SSIZE_MAX .
+.El
+.Pp
+Also,
+.Fn sendmsg
+may return following errors:
+.Bl -tag -width Er
+.It Bq Er EINVAL
+The sum of the
+.Fa iov_len
+values in the
+.Fa msg_iov
+array overflowed an
+.Em ssize_t .
+.It Bq Er EMSGSIZE
+The
+.Fa msg_iovlen
+member of
+.Fa msg
+was less than 0 or larger than
+.Dv IOV_MAX .
+.El
 .Sh SEE ALSO
 .Xr fcntl 2 ,
 .Xr recv 2 ,
+.Xr poll 2 ,
 .Xr select 2 ,
 .Xr getsockopt 2 ,
 .Xr socket 2 ,

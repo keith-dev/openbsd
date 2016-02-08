@@ -1,4 +1,4 @@
-/*	$OpenBSD: kvm_mkdb.c,v 1.2 1997/01/15 22:08:15 millert Exp $	*/
+/*	$OpenBSD: kvm_mkdb.c,v 1.6 1998/10/06 18:09:50 millert Exp $	*/
 
 /*-
  * Copyright (c) 1990, 1993
@@ -41,9 +41,9 @@ static char copyright[] =
 
 #ifndef lint
 #if 0
-static char sccsid[] = "from: @(#)kvm_mkdb.c	8.1 (Berkeley) 6/6/93";
+static char sccsid[] = "from: @(#)kvm_mkdb.c	8.3 (Berkeley) 5/4/95";
 #else
-static char *rcsid = "$OpenBSD: kvm_mkdb.c,v 1.2 1997/01/15 22:08:15 millert Exp $";
+static char *rcsid = "$OpenBSD: kvm_mkdb.c,v 1.6 1998/10/06 18:09:50 millert Exp $";
 #endif
 #endif /* not lint */
 
@@ -54,10 +54,16 @@ static char *rcsid = "$OpenBSD: kvm_mkdb.c,v 1.2 1997/01/15 22:08:15 millert Exp
 #include <err.h>
 #include <errno.h>
 #include <fcntl.h>
+#include <libgen.h>
 #include <paths.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
+
+#include <sys/types.h>
+#include <sys/time.h>
+#include <sys/resource.h>
 
 #include "extern.h"
 
@@ -78,11 +84,22 @@ main(argc, argv)
 	char *argv[];
 {
 	DB *db;
-	int ch;
-	char *p, *nlistpath, *nlistname, dbtemp[MAXPATHLEN], dbname[MAXPATHLEN];
+	struct rlimit rl;
+	int fd, ch, verbose = 0;
+	char *nlistpath, *nlistname, dbtemp[MAXPATHLEN], dbname[MAXPATHLEN];
 
-	while ((ch = getopt(argc, argv, "")) != -1)
+	/* Increase our data size to the max if we can. */
+	if (getrlimit(RLIMIT_DATA, &rl) == 0) {
+		rl.rlim_cur = rl.rlim_max;
+		if (setrlimit(RLIMIT_DATA, &rl) < 0)
+			warn("can't set rlimit data size");
+	}
+
+	while ((ch = getopt(argc, argv, "v")) != -1)
 		switch (ch) {
+		case 'v':
+			verbose = 1;
+			break;
 		case '?':
 		default:
 			usage();
@@ -93,26 +110,43 @@ main(argc, argv)
 	if (argc > 1)
 		usage();
 
-	/* If the existing db file matches the currently running kernel, exit */
-	if (testdb())
-		exit(0);
-
-#define	basename(cp)	((p = strrchr((cp), '/')) != NULL ? p + 1 : (cp))
-	nlistpath = argc > 0 ? argv[0] : _PATH_UNIX;
-	nlistname = basename(nlistpath);
+	/* If no kernel specified use _PATH_KSYMS and fall back to _PATH_UNIX */
+	if (argc > 0) {
+		nlistpath = argv[0];
+		if ((fd = open(nlistpath, O_RDONLY, 0)) == -1)
+			err(1, "can't open %s", nlistpath);
+	} else {
+		if ((fd = open((nlistpath = _PATH_KSYMS), O_RDONLY, 0)) == -1 &&
+		    (fd = open((nlistpath = _PATH_UNIX), O_RDONLY, 0)) == -1)
+			err(1, "can't open %s", nlistpath);
+	}
+	nlistname = argc > 0 ? basename(argv[0]) : basename(_PATH_UNIX);
 
 	(void)snprintf(dbtemp, sizeof(dbtemp), "%skvm_%s.tmp",
 	    _PATH_VARDB, nlistname);
 	(void)snprintf(dbname, sizeof(dbname), "%skvm_%s.db",
 	    _PATH_VARDB, nlistname);
+
+	/* If the existing db file matches the currently running kernel, exit */
+	if (testdb(dbname))
+		exit(0);
+	else if (verbose)
+		warnx("rebuilding %s", dbname);
+
 	(void)umask(0);
 	db = dbopen(dbtemp, O_CREAT | O_EXLOCK | O_TRUNC | O_RDWR,
 	    S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH, DB_HASH, &openinfo);
 	if (db == NULL)
-		err(1, "%s", dbtemp);
-	create_knlist(nlistpath, db);
-	if (db->close(db))
-		err(1, "%s", dbtemp);
+		err(1, "can't dbopen %s", dbtemp);
+	if (create_knlist(nlistpath, fd, db) != 0) {
+		(void)unlink(dbtemp);
+		errx(1, "cannot determine executable type of %s", nlistpath);
+	}
+	if (db->close(db)) {
+		warn("can't dbclose %s", dbtemp);
+		(void)unlink(dbtemp);
+		exit(1);
+	}
 	if (rename(dbtemp, dbname))
 		err(1, "rename %s to %s", dbtemp, dbname);
 	exit(0);

@@ -3,9 +3,10 @@
 ; boot file for secondary name server
 ; Note that there should be one primary entry for each SOA record.
 
-sortlist 128.3.0.0
-
-directory	/etc/namedb
+; NOTE: if you are not chroot'ing named, change directory to /var/named
+;       OpenBSD chroot's named by default
+;directory	/var/named
+directory	/
 
 ; type    domain		source host/file		backup file
 

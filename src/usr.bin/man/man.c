@@ -1,4 +1,4 @@
-/*	$OpenBSD: man.c,v 1.7 1998/03/09 23:20:13 millert Exp $	*/
+/*	$OpenBSD: man.c,v 1.11 1998/09/14 05:44:12 deraadt Exp $	*/
 /*	$NetBSD: man.c,v 1.7 1995/09/28 06:05:34 tls Exp $	*/
 
 /*
@@ -44,7 +44,7 @@ static char copyright[] =
 #if 0
 static char sccsid[] = "@(#)man.c	8.17 (Berkeley) 1/31/95";
 #else
-static char rcsid[] = "$OpenBSD: man.c,v 1.7 1998/03/09 23:20:13 millert Exp $";
+static char rcsid[] = "$OpenBSD: man.c,v 1.11 1998/09/14 05:44:12 deraadt Exp $";
 #endif
 #endif /* not lint */
 
@@ -59,6 +59,7 @@ static char rcsid[] = "$OpenBSD: man.c,v 1.7 1998/03/09 23:20:13 millert Exp $";
 #include <glob.h>
 #include <signal.h>
 #include <stdio.h>
+#include <libgen.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
@@ -67,6 +68,9 @@ static char rcsid[] = "$OpenBSD: man.c,v 1.7 1998/03/09 23:20:13 millert Exp $";
 #include "pathnames.h"
 
 int f_all, f_where;
+static TAG *section;	/* could be passed to cleanup() instead */
+
+extern char *__progname;
 
 static void	 build_page __P((char *, char **));
 static void	 cat __P((char *));
@@ -85,13 +89,22 @@ main(argc, argv)
 {
 	extern char *optarg;
 	extern int optind;
-	TAG *defp, *defnewp, *section, *sectnewp, *subp;
+	TAG *defp, *defnewp, *sectnewp, *subp;
 	ENTRY *e_defp, *e_sectp, *e_subp, *ep;
 	glob_t pg;
 	size_t len;
 	int ch, f_cat, f_how, found;
 	char **ap, *cmd, *machine, *p, *p_add, *p_path, *pager, *sflag, *slashp;
 	char *conffile, buf[MAXPATHLEN * 2];
+
+	if (argv[1] == NULL && strcmp(basename(__progname), "help") == 0) {
+		static char *nargv[3];
+		nargv[0] = "man";
+		nargv[1] = "man";
+		nargv[2] = NULL;
+		argv = nargv;
+		argc = 2;
+	}
 
 	machine = sflag = NULL;
 	f_cat = f_how = 0;
@@ -739,7 +752,11 @@ cleanup()
 	    NULL : missp->list.tqh_first;
 	if (ep != NULL)
 		for (; ep != NULL; ep = ep->q.tqe_next) {
-			warnx("no entry for %s in the manual.", ep->s);
+			if (section)
+				warnx("no entry for %s in section %s of the manual.",
+					ep->s, section->s);
+			else
+				warnx("no entry for %s in the manual.", ep->s);
 			rval = 1;
 		}
 
@@ -757,7 +774,9 @@ cleanup()
 static void
 usage()
 {
-	(void)fprintf(stderr,
-    "usage: man [-achw] [-C file] [-M path] [-m path] [section] title ...\n");
+	(void)fprintf(stderr, "usage: %s [-achw] [-C file] [-M path] [-m path] "
+	    "[-s section] [-S subsection] [section] title ...\n", __progname);
+	(void)fprintf(stderr, "usage: %s -k keyword\n", __progname);
+	(void)fprintf(stderr, "usage: %s -f command\n", __progname);
 	exit(1);
 }

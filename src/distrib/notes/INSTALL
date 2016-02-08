@@ -1,4 +1,5 @@
-INSTALLATION NOTES for OpenBSD/MACHINE 2.3
+include(INCLUDE/../m4.common)dnl
+INSTALLATION NOTES for OpenBSD/MACHINE OSREV
 
 
 What is OpenBSD?
@@ -21,7 +22,7 @@ information-gathering problems.  Tools like ipf, ipnat, and nc have
 been added to the tree because security conscious people often need
 them.
 
-OpenBSD 2.3 has significantly enhanced the binary emulation subsystem
+OpenBSD OSREV has significantly enhanced the binary emulation subsystem
 (which includes iBCS2, Linux, OSF/1, SunOS, SVR4, Solaris and Ultrix
 compatibility) and several kernel subsystems have been generalized to
 support this more readily.  The binary emulation strategy is aimed at
@@ -30,56 +31,57 @@ making the emulation as accurate as possible.
 Cryptography components are part of OpenBSD.  OpenBSD is from Canada,
 and export of these pieces (such as kerberosIV) to the world is not
 restricted.  Note that it can not be re-exported from the US once it
-has entered US.  Because of this, take care NOT to get the distrib-
+has entered the US.  Because of this, take care NOT to get the distrib-
 ution from an FTP server in the US if you are outside of Canada and
 the US.
 
-Many new user programs have been added in OpenBSD 2.3, as well,
+Many new user programs have been added in OpenBSD OSREV, as well,
 bringing it closer to our goal of supplying a complete and modern
 UN*X-like environment.  Tools like perl and ksh are standard, as are
 numerous other useful tools.
 
-#include "whatis"
+includeit(whatis)dnl
+
 
 Sources of OpenBSD:
 -------------------
 
-#include "mirrors"
+includeit(mirrors)dnl
 
-OpenBSD 2.3 Release Contents:
+
+OpenBSD OSREV Release Contents:
 -----------------------------
 
-The OpenBSD 2.3 release is organized in the following way.  In the
-.../2.3 directory, there is one sub-directory per architecture, for
-each of the architectures that OpenBSD 2.3 has a binary distribution
-for.  That is described further along in this document).
+The OpenBSD OSREV release is organized in the following way.  In the
+.../OSREV directory, for each of the architectures having an OpenBSD OSREV
+binary distribution, there is a sub-directory.
 
-#include "contents"
+includeit(contents)
 
 OpenBSD System Requirements and Supported Devices:
 --------------------------------------------------
 
-#include "hardware"
+includeit(hardware)
 
 Getting the OpenBSD System onto Useful Media:
 ---------------------------------------------
 
-#include "xfer"
+includeit(xfer)
 
 Preparing your System for OpenBSD Installation:
 -----------------------------------------------
 
-#include "prep"
+includeit(prep)
 
 Installing the OpenBSD System:
 ------------------------------
 
-#include "install"
+includeit(install)
 
 Upgrading a previously-installed OpenBSD System:
 ------------------------------------------------
 
-#include "upgrade"
+includeit(upgrade)
 
 Getting source code for your OpenBSD System:
 --------------------------------------------
@@ -135,10 +137,10 @@ If you are unsure of what man page you are looking for, enter
 where "subject-word" is your topic of interest; a list of possibly 
 related man pages will be displayed.
 
-Adding third party software; ``packages' and ``ports'':
+Adding third party software; ``packages'' and ``ports'':
 -------------------------------------------------------
 
-#include "packages"
+includeit(packages)
 
 Administrivia:
 --------------
@@ -152,7 +154,7 @@ comp.unix.bsd.openbsd.misc for general OpenBSD discussion.
 
 To report bugs, use the 'sendbug' command shipped with OpenBSD,
 and fill in as much information about the problem as you can.  Good
-bug reports include lots of details.  Additionally, bug reports can
+bug reports {:-include-:} lots of details.  Additionally, bug reports can
 be sent by mail to:
 
 	bugs@OpenBSD.ORG

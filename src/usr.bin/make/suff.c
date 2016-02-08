@@ -1,4 +1,4 @@
-/*	$OpenBSD: suff.c,v 1.5 1996/11/30 21:09:04 millert Exp $	*/
+/*	$OpenBSD: suff.c,v 1.10 1998/07/03 18:51:14 millert Exp $	*/
 /*	$NetBSD: suff.c,v 1.13 1996/11/06 17:59:25 christos Exp $	*/
 
 /*
@@ -43,7 +43,7 @@
 #if 0
 static char sccsid[] = "@(#)suff.c	8.4 (Berkeley) 3/21/94";
 #else
-static char rcsid[] = "$OpenBSD: suff.c,v 1.5 1996/11/30 21:09:04 millert Exp $";
+static char rcsid[] = "$OpenBSD: suff.c,v 1.10 1998/07/03 18:51:14 millert Exp $";
 #endif
 #endif /* not lint */
 
@@ -168,7 +168,7 @@ static int SuffGNHasNameP __P((ClientData, ClientData));
 static void SuffUnRef __P((ClientData, ClientData));
 static void SuffFree __P((ClientData));
 static void SuffInsert __P((Lst, Suff *));
-static void SuffRemove __P((Lst, Suff *));
+static Suff *SuffRemove __P((Lst, Suff *));
 static Boolean SuffParseTransform __P((char *, Suff **, Suff **));
 static int SuffRebuildGraph __P((ClientData, ClientData));
 static int SuffAddSrc __P((ClientData, ClientData));
@@ -370,6 +370,13 @@ SuffFree (sp)
     if (s == emptySuff)
 	emptySuff = NULL;
 
+#ifdef notdef
+    /* We don't delete suffixes in order, so we cannot use this */
+    if (s->refCount)
+	Punt("Internal error deleting suffix `%s' with refcount = %d", s->name,
+	    s->refCount); 
+#endif
+
     Lst_Destroy (s->ref, NOFREE);
     Lst_Destroy (s->children, NOFREE);
     Lst_Destroy (s->parents, NOFREE);
@@ -392,14 +399,18 @@ SuffFree (sp)
  *	suffix is possibly freed
  *-----------------------------------------------------------------------
  */
-static void
+static Suff *
 SuffRemove(l, s)
     Lst l;
     Suff *s;
 {
     SuffUnRef((ClientData) l, (ClientData) s);
-    if (s->refCount == 0)
+    if (s->refCount == 0) {
+	SuffUnRef ((ClientData) sufflist, (ClientData) s);
 	SuffFree((ClientData) s);
+	s = NULL;
+    }
+    return (s);
 }
 
 /*-
@@ -679,7 +690,7 @@ Suff_EndTransform(gnp, dummy)
 	(void)SuffParseTransform(gn->name, &s, &t);
 
 	if (DEBUG(SUFF)) {
-	    printf("deleting transformation from %s to %s\n",
+	    printf("deleting transformation from `%s' to `%s'\n",
 		    s->name, t->name);
 	}
 
@@ -691,12 +702,13 @@ Suff_EndTransform(gnp, dummy)
 	 * We'll be called twice when the next target is seen, but .c and .o
 	 * are only linked once...
 	 */
-	SuffRemove(t->children, s);
+	s = SuffRemove(t->children, s);
 
 	/*
 	 * Remove the target from the source's parents list
 	 */
-	SuffRemove(s->parents, t);
+	if (s != NULL)
+	    SuffRemove(s->parents, t);
     } else if ((gn->type & OP_TRANSFORM) && DEBUG(SUFF)) {
 	printf("transformation %s complete\n", gn->name);
     }
@@ -1685,6 +1697,8 @@ SuffFindArchiveDeps(gn, slst)
      */
     eoarch = strchr (gn->name, '(');
     eoname = strchr (eoarch, ')');
+    if (eoarch == NULL || eoname == NULL)
+	return;
 
     *eoname = '\0';	  /* Nuke parentheses during suffix search */
     *eoarch = '\0';	  /* So a suffix can be found */

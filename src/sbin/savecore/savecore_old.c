@@ -1,4 +1,4 @@
-/*	$OpenBSD: savecore_old.c,v 1.7 1998/03/25 23:38:53 deraadt Exp $	*/
+/*	$OpenBSD: savecore_old.c,v 1.12 1998/10/04 16:36:13 millert Exp $	*/
 /*	$NetBSD: savecore_old.c,v 1.1.1.1 1996/03/16 10:25:11 leo Exp $	*/
 
 /*-
@@ -44,7 +44,7 @@ static char copyright[] =
 #if 0
 static char sccsid[] = "@(#)savecore.c	8.3 (Berkeley) 1/2/94";
 #else
-static char rcsid[] = "$OpenBSD: savecore_old.c,v 1.7 1998/03/25 23:38:53 deraadt Exp $";
+static char rcsid[] = "$OpenBSD: savecore_old.c,v 1.12 1998/10/04 16:36:13 millert Exp $";
 #endif
 #endif /* not lint */
 
@@ -52,7 +52,9 @@ static char rcsid[] = "$OpenBSD: savecore_old.c,v 1.7 1998/03/25 23:38:53 deraad
 #include <sys/stat.h>
 #include <sys/mount.h>
 #include <sys/syslog.h>
+#include <sys/types.h>
 #include <sys/time.h>
+#include <sys/resource.h>
 
 #include <dirent.h>
 #include <errno.h>
@@ -139,9 +141,17 @@ main(argc, argv)
 	int argc;
 	char *argv[];
 {
+	struct rlimit rl;
 	int ch;
 
 	openlog("savecore", LOG_PERROR, LOG_DAEMON);
+
+	/* Increase our data size to the max if we can. */
+	if (getrlimit(RLIMIT_DATA, &rl) == 0) {
+		rl.rlim_cur = rl.rlim_max;
+		if (setrlimit(RLIMIT_DATA, &rl) < 0)
+			syslog(LOG_WARNING, "can't set rlimit data size: %m");
+	}
 
 	while ((ch = getopt(argc, argv, "cdfN:vz")) != -1)
 		switch(ch) {
@@ -208,7 +218,7 @@ kmem_setup()
 {
 	FILE *fp;
 	int kmem, i;
-	char *dump_sys;
+	char *dump_sys, *current_sys;
 	
 	/*
 	 * Some names we need for the currently running system, others for
@@ -218,8 +228,14 @@ kmem_setup()
 	 * presumed to be the same (since the disk partitions are probably
 	 * the same!)
 	 */
-	if ((nlist(_PATH_UNIX, current_nl)) == -1)
-		syslog(LOG_ERR, "%s: nlist: %s", _PATH_UNIX, strerror(errno));
+	if ((i = open(_PATH_KSYMS, O_RDONLY)) != -1) {
+		current_sys = _PATH_KSYMS;
+		(void)close(i);
+	} else {
+		current_sys = _PATH_UNIX;
+	}
+	if ((nlist(current_sys, current_nl)) == -1)
+		syslog(LOG_ERR, "%s: nlist: %m", current_sys);
 	for (i = 0; cursyms[i] != -1; i++)
 		if (current_nl[cursyms[i]].n_value == 0) {
 			syslog(LOG_ERR, "%s: %s not in namelist",
@@ -228,6 +244,7 @@ kmem_setup()
 		}
 
 	dump_sys = kernel ? kernel : _PATH_UNIX;
+
 	if ((nlist(dump_sys, dump_nl)) == -1)
 		syslog(LOG_ERR, "%s: nlist: %s", dump_sys, strerror(errno));
 	for (i = 0; dumpsyms[i] != -1; i++)
@@ -238,19 +255,19 @@ kmem_setup()
 		}
 
 	kmem = Open(_PATH_KMEM, O_RDONLY);
-	Lseek(kmem, (off_t)current_nl[X_DUMPDEV].n_value, L_SET);
+	Lseek(kmem, (off_t)current_nl[X_DUMPDEV].n_value, SEEK_SET);
 	(void)Read(kmem, &dumpdev, sizeof(dumpdev));
 	if (dumpdev == NODEV) {
 		syslog(LOG_WARNING, "no core dump (no dumpdev)");
 		exit(1);
 	}
-	Lseek(kmem, (off_t)current_nl[X_DUMPLO].n_value, L_SET);
+	Lseek(kmem, (off_t)current_nl[X_DUMPLO].n_value, SEEK_SET);
 	(void)Read(kmem, &dumplo, sizeof(dumplo));
 	dumplo *= DEV_BSIZE;
 	if (verbose)
 		(void)printf("dumplo = %d (%d * %d)\n",
 		    dumplo, dumplo / DEV_BSIZE, DEV_BSIZE);
-	Lseek(kmem, (off_t)current_nl[X_DUMPMAG].n_value, L_SET);
+	Lseek(kmem, (off_t)current_nl[X_DUMPMAG].n_value, SEEK_SET);
 	(void)Read(kmem, &dumpmag, sizeof(dumpmag));
 	ddname = find_dev(dumpdev, S_IFBLK);
 	dumpfd = Open(ddname, O_RDWR);
@@ -261,7 +278,7 @@ kmem_setup()
 	}
 	if (kernel)
 		return;
-	(void)fseek(fp, (off_t)current_nl[X_VERSION].n_value, L_SET);
+	(void)fseek(fp, (off_t)current_nl[X_VERSION].n_value, SEEK_SET);
 	(void)fgets(vers, sizeof(vers), fp);
 
 	/* Don't fclose(fp), we use dumpfd later. */
@@ -279,17 +296,17 @@ check_kmem()
 		syslog(LOG_ERR, "%s: fdopen: %m", ddname);
 		exit(1);
 	}
-	fseek(fp, (off_t)(dumplo + ok(dump_nl[X_VERSION].n_value)), L_SET);
+	fseek(fp, (off_t)(dumplo + ok(dump_nl[X_VERSION].n_value)), SEEK_SET);
 	fgets(core_vers, sizeof(core_vers), fp);
 	if (strcmp(vers, core_vers) && kernel == 0)
 		syslog(LOG_WARNING,
 		    "warning: %s version mismatch:\n\t%s\nand\t%s\n",
 		    _PATH_UNIX, vers, core_vers);
 	(void)fseek(fp,
-	    (off_t)(dumplo + ok(dump_nl[X_PANICSTR].n_value)), L_SET);
+	    (off_t)(dumplo + ok(dump_nl[X_PANICSTR].n_value)), SEEK_SET);
 	(void)fread(&panicstr, sizeof(panicstr), 1, fp);
 	if (panicstr) {
-		(void)fseek(fp, dumplo + ok(panicstr), L_SET);
+		(void)fseek(fp, dumplo + ok(panicstr), SEEK_SET);
 		cp = panic_mesg;
 		do
 			*cp = getc(fp);
@@ -304,7 +321,8 @@ clear_dump()
 	long newdumplo;
 
 	newdumplo = 0;
-	Lseek(dumpfd, (off_t)(dumplo + ok(dump_nl[X_DUMPMAG].n_value)), L_SET);
+	Lseek(dumpfd, (off_t)(dumplo + ok(dump_nl[X_DUMPMAG].n_value)),
+	    SEEK_SET);
 	Write(dumpfd, &newdumplo, sizeof(newdumplo));
 }
 
@@ -313,11 +331,13 @@ dump_exists()
 {
 	int newdumpmag;
 
-	Lseek(dumpfd, (off_t)(dumplo + ok(dump_nl[X_DUMPMAG].n_value)), L_SET);
+	Lseek(dumpfd, (off_t)(dumplo + ok(dump_nl[X_DUMPMAG].n_value)),
+	    SEEK_SET);
 	(void)Read(dumpfd, &newdumpmag, sizeof(newdumpmag));
 
 	/* Read the dump size. */
-	Lseek(dumpfd, (off_t)(dumplo + ok(dump_nl[X_DUMPSIZE].n_value)), L_SET);
+	Lseek(dumpfd, (off_t)(dumplo + ok(dump_nl[X_DUMPSIZE].n_value)),
+	    SEEK_SET);
 	(void)Read(dumpfd, &dumpsize, sizeof(dumpsize));
 	dumpsize *= getpagesize();
 
@@ -390,7 +410,7 @@ err1:			syslog(LOG_WARNING, "%s: %s", path, strerror(errno));
 	}
 
 	/* Seek to the start of the core. */
-	Lseek(ifd, (off_t)dumplo, L_SET);
+	Lseek(ifd, (off_t)dumplo, SEEK_SET);
 
 	/* Copy the core file. */
 	syslog(LOG_NOTICE, "writing %score to %s",
@@ -527,7 +547,7 @@ get_crashtime()
 {
 	time_t dumptime;			/* Time the dump was taken. */
 
-	Lseek(dumpfd, (off_t)(dumplo + ok(dump_nl[X_TIME].n_value)), L_SET);
+	Lseek(dumpfd, (off_t)(dumplo + ok(dump_nl[X_TIME].n_value)), SEEK_SET);
 	(void)Read(dumpfd, &dumptime, sizeof(dumptime));
 	if (dumptime == 0) {
 		if (verbose)
@@ -662,6 +682,9 @@ Write(fd, bp, size)
 void
 usage()
 {
-	fprintf(stderr, "usage: savecore [-cfvz] [-N system] directory");
+	extern char *__progname;
+
+	fprintf(stderr, "usage: %s [-cfvz] [-N system] directory\n",
+	    __progname);
 	exit(1);
 }

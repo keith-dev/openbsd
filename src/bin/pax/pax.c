@@ -1,4 +1,4 @@
-/*	$OpenBSD: pax.c,v 1.11 1997/09/01 18:29:58 deraadt Exp $	*/
+/*	$OpenBSD: pax.c,v 1.14 1998/09/20 02:22:22 millert Exp $	*/
 /*	$NetBSD: pax.c,v 1.5 1996/03/26 23:54:20 mrg Exp $	*/
 
 /*-
@@ -48,7 +48,7 @@ static char copyright[] =
 #if 0
 static char sccsid[] = "@(#)pax.c	8.2 (Berkeley) 4/18/94";
 #else
-static char rcsid[] = "$OpenBSD: pax.c,v 1.11 1997/09/01 18:29:58 deraadt Exp $";
+static char rcsid[] = "$OpenBSD: pax.c,v 1.14 1998/09/20 02:22:22 millert Exp $";
 #endif
 #endif /* not lint */
 
@@ -61,6 +61,7 @@ static char rcsid[] = "$OpenBSD: pax.c,v 1.11 1997/09/01 18:29:58 deraadt Exp $"
 #include <signal.h>
 #include <unistd.h>
 #include <stdlib.h>
+#include <string.h>
 #include <errno.h>
 #include <fcntl.h>
 #include "pax.h"
@@ -106,6 +107,7 @@ char	*dirptr;		/* destination dir in a copy */
 char	*ltmfrmt;		/* -v locale time format (if any) */
 char	*argv0;			/* root of argv[0] */
 sigset_t s_mask;		/* signal mask for cleanup critical sect */
+FILE	*listf = stderr;	/* file pointer to print file list to */
 
 /*
  *	PAX - Portable Archive Interchange
@@ -385,6 +387,7 @@ gen_init()
 		paxwarn(1, "Unable to set up signal mask");
 		return(-1);
 	}
+	memset(&n_hand, 0, sizeof n_hand);
 	n_hand.sa_mask = s_mask;
 	n_hand.sa_flags = 0;
 	n_hand.sa_handler = sig_cleanup;

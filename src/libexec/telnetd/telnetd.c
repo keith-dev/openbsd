@@ -1,4 +1,4 @@
-/*	$OpenBSD: telnetd.c,v 1.9 1998/03/25 18:43:49 art Exp $	*/
+/*	$OpenBSD: telnetd.c,v 1.15 1998/07/28 20:18:22 marc Exp $	*/
 /*	$NetBSD: telnetd.c,v 1.6 1996/03/20 04:25:57 tls Exp $	*/
 
 /*
@@ -45,11 +45,11 @@ static char copyright[] =
 static char sccsid[] = "@(#)telnetd.c	8.4 (Berkeley) 5/30/95";
 static char rcsid[] = "$NetBSD: telnetd.c,v 1.5 1996/02/28 20:38:23 thorpej Exp $";
 #else
-static char rcsid[] = "$OpenBSD: telnetd.c,v 1.9 1998/03/25 18:43:49 art Exp $";
+static char rcsid[] = "$OpenBSD: telnetd.c,v 1.15 1998/07/28 20:18:22 marc Exp $";
 #endif
 #endif /* not lint */
 
-#include <term.h>
+#include "curses.h"
 #include "telnetd.h"
 #include "pathnames.h"
 
@@ -95,9 +95,6 @@ int	auth_level = 0;
 #if	defined(ENCRYPTION)
 #include <libtelnet/encrypt.h>
 #include <libtelnet/misc-proto.h>
-#endif
-#if	defined(SecurID)
-int	require_SecurID = 0;
 #endif
 
 extern	int utmp_len;
@@ -173,9 +170,6 @@ char valid_opts[] = {
 #endif
 #ifdef CRAY
 	'r', ':',
-#endif
-#ifdef	SecurID
-	's',
 #endif
 	'\0'
 };
@@ -345,12 +339,6 @@ main(argc, argv)
 		    }
 #endif	/* CRAY */
 
-#ifdef	SecurID
-		case 's':
-			/* SecurID required */
-			require_SecurID = 1;
-			break;
-#endif	/* SecurID */
 		case 'S':
 #ifdef	HAS_GETTOS
 			if ((tos = parsetos(optarg, "tcp")) < 0)
@@ -467,7 +455,7 @@ main(argc, argv)
 		int szi = sizeof(int);
 #endif /* SO_SEC_MULTI */
 
-		memset((char *)&dv, 0, sizeof(dv));
+		memset((void *)&dv, 0, sizeof(dv));
 
 		if (getsysv(&sysv, sizeof(struct sysv)) != 0) {
 			perror("getsysv");
@@ -578,9 +566,6 @@ usage()
 	fprintf(stderr, " [-r[lowpty]-[highpty]]");
 #endif
 	fprintf(stderr, "\n\t");
-#ifdef	SecurID
-	fprintf(stderr, " [-s]");
-#endif
 #ifdef	HAS_GETTOS
 	fprintf(stderr, " [-S tos]");
 #endif
@@ -655,7 +640,7 @@ getterminaltype(name)
 	static unsigned char sb[] =
 			{ IAC, SB, TELOPT_TSPEED, TELQUAL_SEND, IAC, SE };
 
-	memmove(nfrontp, sb, sizeof sb);
+	memmove((void *)nfrontp, (void *)sb, sizeof sb);
 	nfrontp += sizeof sb;
 	DIAG(TD_OPTIONS, printsub('>', sb + 2, sizeof sb - 2););
     }
@@ -663,7 +648,7 @@ getterminaltype(name)
 	static unsigned char sb[] =
 			{ IAC, SB, TELOPT_XDISPLOC, TELQUAL_SEND, IAC, SE };
 
-	memmove(nfrontp, sb, sizeof sb);
+	memmove((void *)nfrontp, (void *)sb, sizeof sb);
 	nfrontp += sizeof sb;
 	DIAG(TD_OPTIONS, printsub('>', sb + 2, sizeof sb - 2););
     }
@@ -671,7 +656,7 @@ getterminaltype(name)
 	static unsigned char sb[] =
 			{ IAC, SB, TELOPT_NEW_ENVIRON, TELQUAL_SEND, IAC, SE };
 
-	memmove(nfrontp, sb, sizeof sb);
+	memmove((void *)nfrontp, (void *)sb, sizeof sb);
 	nfrontp += sizeof sb;
 	DIAG(TD_OPTIONS, printsub('>', sb + 2, sizeof sb - 2););
     }
@@ -679,13 +664,13 @@ getterminaltype(name)
 	static unsigned char sb[] =
 			{ IAC, SB, TELOPT_OLD_ENVIRON, TELQUAL_SEND, IAC, SE };
 
-	memmove(nfrontp, sb, sizeof sb);
+	memmove((void *)nfrontp, (void *)sb, sizeof sb);
 	nfrontp += sizeof sb;
 	DIAG(TD_OPTIONS, printsub('>', sb + 2, sizeof sb - 2););
     }
     if (his_state_is_will(TELOPT_TTYPE)) {
 
-	memmove(nfrontp, ttytype_sbbuf, sizeof ttytype_sbbuf);
+	memmove((void *)nfrontp, (void *)ttytype_sbbuf, sizeof ttytype_sbbuf);
 	nfrontp += sizeof ttytype_sbbuf;
 	DIAG(TD_OPTIONS, printsub('>', ttytype_sbbuf + 2,
 					sizeof ttytype_sbbuf - 2););
@@ -765,7 +750,7 @@ _gettermname()
     if (his_state_is_wont(TELOPT_TTYPE))
 	return;
     settimer(baseline);
-    memmove(nfrontp, ttytype_sbbuf, sizeof ttytype_sbbuf);
+    memmove((void *)nfrontp, (void *)ttytype_sbbuf, sizeof ttytype_sbbuf);
     nfrontp += sizeof ttytype_sbbuf;
     DIAG(TD_OPTIONS, printsub('>', ttytype_sbbuf + 2,
 					sizeof ttytype_sbbuf - 2););
@@ -837,7 +822,8 @@ doit(who)
 			fatal(net, "Out of ptys");
 
 		if ((pty = open(lp, 2)) >= 0) {
-			strcpy(line,lp);
+			strncpy(line, lp, sizeof line -1);
+			line[sizeof line -1] = '\0';
 			line[5] = 't';
 			break;
 		}
@@ -1149,15 +1135,16 @@ telnet(f, p, host)
 		hostinfo = 0;
 #endif
 
-	if (getent(defent, gettyname) == 1) {
-		char *getstr();
+	if (gtgetent(defent, gettyname) == 1) {
 		char *cp=defstrs;
 
-		HE = getstr("he", &cp);
-		HN = getstr("hn", &cp);
-		IM = getstr("im", &cp);
-		if (HN && *HN)
-			(void) strcpy(host_name, HN);
+		HE = gtgetstr("he", &cp);
+		HN = gtgetstr("hn", &cp);
+		IM = gtgetstr("im", &cp);
+		if (HN && *HN) {
+			strncpy(host_name, HN, sizeof host_name - 1);
+			host_name[sizeof host_name -1] = '\0';
+		}
 		if (IM == 0)
 			IM = "";
 	} else {

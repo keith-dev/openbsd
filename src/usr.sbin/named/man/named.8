@@ -1,4 +1,4 @@
-.\"	$OpenBSD: named.8,v 1.3 1997/06/10 20:04:32 deraadt Exp $
+.\"	$OpenBSD: named.8,v 1.6 1998/05/31 17:28:35 millert Exp $
 .\" ++Copyright++ 1985
 .\" -
 .\" Copyright (c) 1985
@@ -72,6 +72,15 @@ named \- Internet domain name server
 .B \-q
 ] [
 .B \-r
+] [
+.B \-u
+.I user
+] [
+.B \-g
+.I group
+] [
+.B \-t
+.I chroot_dir
 ]
 .SH DESCRIPTION
 .I Named
@@ -80,7 +89,7 @@ See RFC's 1033, 1034, and 1035 for more information on the Internet
 name-domain system.  Without any arguments,
 .I named
 will read the default boot file
-.IR /etc/named.boot ,
+.IR /var/named/named.boot ,
 read any initial data and listen for queries.
 .PP
 Options are:
@@ -113,6 +122,28 @@ Turns recursion off in the server.  Answers can come only from local
 (primary or secondary) zones.  This can be used on root servers.
 \fINOTE:\fP this option is deprecated in favour
 of the boot file directive ``options no-recursion''.
+.TP
+.B \-u
+Specifies the user the server should run as after it initializes.  The value
+specified may be either a username or a numeric user id.  If the
+.B \-g
+flag is not specified, then the group id used will be the primary group of
+the user specified (initgroups() is called, so all of the user's groups will
+be available to the server).
+.br
+\fINote:\fP normally, \fInamed\fP will rescan the active ethernet
+interfaces when it receives SIGHUP.  Use of the
+.B \-u
+option makes this impossible since the default port that named listens
+on is a reserved port that only the superuser may bind to.
+.TP
+.B \-g
+Specifies the group the server should run as after it initializes.  The value
+specified may be either a groupname or a numeric group id.
+.TP
+.B \-t
+Specifies the directory the server should chroot() into as soon as it is
+finshed processing command line arguments.
 .PP
 Any additional argument is taken as the name of the boot file.
 If multiple boot files are specified, only the last is used.
@@ -404,13 +435,13 @@ is built with the FORCED_RELOAD compile-time option, then SIGHUP will
 also cause the server to check the serial number on all secondary zones.
 Normally the serial numbers are only checked at the SOA-specified intervals.
 .IP SIGINT
-Dumps the current data base and cache to /etc/namedb/tmp/named_dump.db
+Dumps the current data base and cache to /var/named/named_dump.db
 .IP SIGIOT
-Dumps statistics data into /etc/namedb/tmp/named.stats if the server is
+Dumps statistics data into /var/named/named.stats if the server is
 compiled with -DSTATS.  Statistics data is appended to the file.  Some
 systems use SIGABRT rather than SIGIOT for this.
 .IP SIGSYS
-Dumps the profiling data in /etc/namedb/tmp if the server is compiled
+Dumps the profiling data in /var/named if the server is compiled
 with profiling (server forks, chdirs and exits).
 .IP SIGTERM
 Dumps the primary and secondary database files.
@@ -427,13 +458,13 @@ Toggles logging of all incoming queries via syslog(8)
 (requires server to have been built with the QRYLOG option).
 .SH FILES
 .nf
-.ta \w'/etc/namedb/tmp/named_dump.db   'u
-/etc/named.boot	name server configuration boot file
-/etc/named.pid	the process id (on older systems)
-/var/run/named.pid	the process id (on newer systems)
-/etc/namedb/tmp/named_dump.db	dump of the name server database
-/etc/namedb/tmp/named.run	debug output
-/etc/namedb/tmp/named.stats	nameserver statistics data
+.ta \w'/var/named/named_dump.db   'u
+/var/named/named.boot	name server configuration boot file
+/var/run/named.pid	the process id
+/var/named/named.pid	the process id (if named is chroot'd)
+/var/named/named_dump.db	dump of the name server database
+/var/named/named.run	debug output
+/var/named/named.stats	nameserver statistics data
 .fi
 .SH "SEE ALSO"
 kill(1), gethostbyname(3), signal(2), 

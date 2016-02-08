@@ -1,4 +1,4 @@
-#	$OpenBSD: sys.mk,v 1.12 1997/11/05 09:51:06 deraadt Exp $
+#	$OpenBSD: sys.mk,v 1.17 1998/09/15 21:36:24 deraadt Exp $
 #	$NetBSD: sys.mk,v 1.27 1996/04/10 05:47:19 mycroft Exp $
 #	@(#)sys.mk	5.11 (Berkeley) 3/13/91
 
@@ -9,6 +9,10 @@
 .endif
 
 unix=		We run OpenBSD.
+OSMAJOR=	2
+OSMINOR=	4
+OSREV=		$(OSMAJOR).$(OSMINOR)
+OSrev=		$(OSMAJOR)$(OSMINOR)
 
 .SUFFIXES: .out .a .ln .o .c .cc .C .cxx .F .f .r .y .l .s .S .cl .p .h .sh .m4
 
@@ -27,13 +31,13 @@ COMPILE.S?=	${CC} ${AFLAGS} ${CPPFLAGS} -c
 LINK.S?=	${CC} ${AFLAGS} ${CPPFLAGS} ${LDFLAGS}
 
 CC?=		cc
-CFLAGS?=	-O ${DEBUG}
+CFLAGS?=	-O2 ${DEBUG}
 COMPILE.c?=	${CC} ${CFLAGS} ${CPPFLAGS} -c
 LINK.c?=	${CC} ${CFLAGS} ${CPPFLAGS} ${LDFLAGS}
 
 HOSTCC?=	cc
 
-CXX?=		g++
+CXX?=		c++
 CXXFLAGS?=	${CFLAGS}
 COMPILE.cc?=	${CXX} ${CXXFLAGS} ${CPPFLAGS} -c
 LINK.cc?=	${CXX} ${CXXFLAGS} ${CPPFLAGS} ${LDFLAGS}
@@ -42,7 +46,7 @@ CPP?=		cpp
 CPPFLAGS?=	
 
 FC?=		f77
-FFLAGS?=		-O
+FFLAGS?=		-O2
 RFLAGS?=
 COMPILE.f?=	${FC} ${FFLAGS} -c
 LINK.f?=	${FC} ${FFLAGS} ${LDFLAGS}
@@ -75,6 +79,8 @@ YFLAGS?=	-d
 YACC.y?=	${YACC} ${YFLAGS}
 
 INSTALL?=	install
+
+CTAGS?=		/usr/bin/ctags
 
 # C
 .c:

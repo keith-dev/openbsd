@@ -1,4 +1,4 @@
-/*	$OpenBSD: main.c,v 1.38 1998/02/17 23:22:56 millert Exp $	*/
+/*	$OpenBSD: main.c,v 1.42 1998/09/19 20:47:17 millert Exp $	*/
 /*	$NetBSD: main.c,v 1.24 1997/08/18 10:20:26 lukem Exp $	*/
 
 /*
@@ -44,7 +44,7 @@ static char copyright[] =
 #if 0
 static char sccsid[] = "@(#)main.c	8.6 (Berkeley) 10/9/94";
 #else
-static char rcsid[] = "$OpenBSD: main.c,v 1.38 1998/02/17 23:22:56 millert Exp $";
+static char rcsid[] = "$OpenBSD: main.c,v 1.42 1998/09/19 20:47:17 millert Exp $";
 #endif
 #endif /* not lint */
 
@@ -59,6 +59,7 @@ static char rcsid[] = "$OpenBSD: main.c,v 1.38 1998/02/17 23:22:56 millert Exp $
 #include <netdb.h>
 #include <pwd.h>
 #include <stdio.h>
+#include <errno.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
@@ -170,7 +171,7 @@ main(argc, argv)
 	if (isatty(fileno(ttyout)) && !dumb_terminal && foregroundproc())
 		progress = 1;		/* progress bar on if tty is usable */
 
-	while ((ch = getopt(argc, argv, "Aadegino:pPr:tvV")) != -1) {
+	while ((ch = getopt(argc, argv, "Aadegimno:pP:r:tvV")) != -1) {
 		switch (ch) {
 		case 'A':
 			activefallback = 0;
@@ -198,6 +199,10 @@ main(argc, argv)
 
 		case 'i':
 			interactive = 0;
+			break;
+
+		case 'm':
+			progress = -1;
 			break;
 
 		case 'n':
@@ -331,6 +336,7 @@ intr()
 void
 lostpeer()
 {
+	int save_errno = errno;
 
 	alarmtimer(0);
 	if (connected) {
@@ -357,6 +363,7 @@ lostpeer()
 	}
 	proxflag = 0;
 	pswitch(0);
+	errno = save_errno;
 }
 
 /*

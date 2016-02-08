@@ -1,4 +1,4 @@
-/*	$OpenBSD: inetd.c,v 1.46 1998/03/12 00:19:16 deraadt Exp $	*/
+/*	$OpenBSD: inetd.c,v 1.49 1998/07/15 17:51:14 deraadt Exp $	*/
 /*	$NetBSD: inetd.c,v 1.11 1996/02/22 11:14:41 mycroft Exp $	*/
 /*
  * Copyright (c) 1983,1991 The Regents of the University of California.
@@ -41,7 +41,7 @@ char copyright[] =
 
 #ifndef lint
 /*static char sccsid[] = "from: @(#)inetd.c	5.30 (Berkeley) 6/3/91";*/
-static char rcsid[] = "$OpenBSD: inetd.c,v 1.46 1998/03/12 00:19:16 deraadt Exp $";
+static char rcsid[] = "$OpenBSD: inetd.c,v 1.49 1998/07/15 17:51:14 deraadt Exp $";
 #endif /* not lint */
 
 /*
@@ -382,10 +382,13 @@ main(argc, argv, envp)
 #endif
 
 	memset((char *)&sa, 0, sizeof(sa));
-	sa.sa_mask = SIGBLOCK;
+	sigemptyset(&sa.sa_mask);	
+	sigaddset(&sa.sa_mask, SIGALRM);
+	sigaddset(&sa.sa_mask, SIGCHLD);
+	sigaddset(&sa.sa_mask, SIGHUP);
 	sa.sa_handler = retry;
 	sigaction(SIGALRM, &sa, NULL);
-	config(0);
+	config(SIGHUP);
 	sa.sa_handler = config;
 	sigaction(SIGHUP, &sa, NULL);
 	sa.sa_handler = reapchild;
@@ -409,7 +412,7 @@ main(argc, argv, envp)
 	}
 
 	for (;;) {
-	    int n, ctrl;
+	    int n, ctrl = -1;
 	    fd_set readable;
 
 	    if (nsock == 0) {
@@ -493,6 +496,9 @@ main(argc, argv, envp)
 					syslog(LOG_ERR,
 			"%s/%s server failing (looping), service terminated",
 					    sep->se_service, sep->se_proto);
+					if (!sep->se_wait &&
+					    sep->se_socktype == SOCK_STREAM)
+						close(ctrl);
 					FD_CLR(sep->se_fd, &allsock);
 					(void) close(sep->se_fd);
 					sep->se_fd = -1;
@@ -1060,7 +1066,7 @@ setconfig()
 	if (defhost) free(defhost);
 	defhost = newstr("*");
 	if (fconfig != NULL) {
-		fseek(fconfig, 0L, L_SET);
+		fseek(fconfig, 0L, SEEK_SET);
 		return (1);
 	}
 	fconfig = fopen(CONFIG, "r");

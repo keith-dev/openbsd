@@ -1181,7 +1181,6 @@ ctag_file(sp, tfp, name, dirp, dlenp)
 	size_t *dlenp;
 {
 	struct stat sb;
-	size_t len;
 	char *p, buf[MAXPATHLEN];
 
 	/*
@@ -1196,12 +1195,12 @@ ctag_file(sp, tfp, name, dirp, dlenp)
 	if (name[0] != '/' &&
 	    stat(name, &sb) && (p = strrchr(tfp->name, '/')) != NULL) {
 		*p = '\0';
-		len = snprintf(buf, sizeof(buf), "%s/%s", tfp->name, name);
-		*p = '/';
+		(void)snprintf(buf, sizeof(buf), "%s/%s", tfp->name, name);
 		if (stat(buf, &sb) == 0) {
 			*dirp = tfp->name;
 			*dlenp = strlen(*dirp);
 		}
+		*p = '/';
 	}
 }
 

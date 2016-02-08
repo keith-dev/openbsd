@@ -1,5 +1,5 @@
 #!/bin/sh
-#	$OpenBSD: install.sub,v 1.75 1998/04/15 15:21:07 deraadt Exp $
+#	$OpenBSD: install.sub,v 1.108 1998/10/19 19:22:18 deraadt Exp $
 #	$NetBSD: install.sub,v 1.5.2.8 1996/09/02 23:25:02 pk Exp $
 #
 # Copyright (c) 1997,1998 Todd Miller, Theo de Raadt
@@ -69,13 +69,13 @@
 #	OpenBSD installation/upgrade script - common subroutines.
 
 ROOTDISK=""				# filled in below
-VERSION=
+VERSION=24
 VERSION_MAJOR=$(( $VERSION / 10 ))
 VERSION_MINOR=$(( $VERSION % 10 ))
 export VERSION VERSION_MAJOR VERSION_MINOR
 
-ALLSETS="base etc misc comp text man game xbase xfont xserv"	# default install sets
-UPGRSETS="base misc comp text man game xbase xfont xserv"	# default upgrade sets
+ALLSETS="base etc misc comp text man game xbase xshare xfont xserv"	# install
+UPGRSETS="base misc comp text man game xbase xshare xfont xserv"	# upgrade
 SNAPSETS="bin dev etc games man misc sbin text \
 	  usr.bin usr.binutils usr.games usr.include \
 	  usr.lib usr.libexec usr.misc usr.sbin usr.share var"
@@ -166,7 +166,7 @@ rmel() {
 }
 
 cutword () {
-# read a line of data, return Nth element.
+# read lines on stdin, return Nth element of each line, like cut(1)
 	local _a
 	local _n
 	local _oifs
@@ -178,10 +178,12 @@ cutword () {
 	esac
 
 	_n=$1
-	read _a; set -- $_a
+	while read _a; do
+		set -- $_a
+		test "$1" = "" && break
+		eval echo \$$_n
+	done
 	IFS="$_oifs"
-	if [ "$1" = "" ]; then return; fi
-	eval echo \$$_n
 }
 
 cutlast () {
@@ -221,6 +223,24 @@ basename () {
 	IFS="$_oifs"
 	while [ "$#" -gt 10 ]; do shift 10; done
 	eval echo \$$#
+}
+
+isnumeric() {
+	local _a
+	_a=$1
+	while [ ${#_a} != 1 ]; do
+		case $_a in
+			[0-9]*) ;;
+			*)	echo 0; return;;
+		esac
+		_a=${_a#?}
+	done
+	echo 1; return
+}
+
+get_ifdevs() {
+	# return available network devices
+	/sbin/ifconfig -a | egrep -v '^([[:space:]]|(lo|enc|ppp|sl|tun)[[:digit:]])' | cutword -t: 1
 }
 
 dir_has_sets() {
@@ -363,6 +383,8 @@ __getanotherdisk_1
 	getresp ""
 	if [ "X${resp}" = "X" ]; then
 		DISK=done
+	elif [ "X${resp}" = "Xdone" ]; then
+		DISK=done
 	elif isin $resp $_DKDEVS ; then
 		DISK="$resp"
 	else
@@ -431,13 +453,13 @@ addhostent() {
 	# $2 - symbolic name
 
 	# Create an entry in the hosts table.  If no host table
-	# exists, create one.  If the IP address already exists,
+	# exists, create one.  If the symbolic name already exists,
 	# replace it's entry.
 	if [ ! -f /tmp/hosts ]; then
 		echo "127.0.0.1 localhost" > /tmp/hosts
 	fi
 
-	sed "/^$1 /d" < /tmp/hosts > /tmp/hosts.new
+	sed "/ $2 $2.$FQDN\$/d" < /tmp/hosts > /tmp/hosts.new
 	mv /tmp/hosts.new /tmp/hosts
 
 	echo "$1 $2 $2.$FQDN" >> /tmp/hosts
@@ -448,12 +470,16 @@ addifconfig() {
 	# $2 - interface symbolic name
 	# $3 - interface IP address
 	# $4 - interface netmask
-	# $5 - (optional) interface link-layer directives
+	# $5 - (optional) interface media directives
 
 	# Create a hostname.* file for the interface.
-	echo "inet $2 $4 NONE $5" > /tmp/hostname.$1
-
-	addhostent $3 $2
+	if [ "$3" = "dhcp" ]; then
+		echo "dhcp NONE NONE NONE $5" > /tmp/hostname.$1
+		addhostent 127.0.0.1 $2
+	else
+		echo "inet $3 $4 NONE $5" > /tmp/hostname.$1
+		addhostent $3 $2
+	fi
 }
 
 configurenetwork() {
@@ -462,7 +488,7 @@ configurenetwork() {
 	local _ouranswer
 	local _reprompt
 
-	_IFS=`md_get_ifdevs`
+	_IFS=`get_ifdevs`
 	_ifsdone=""
 	_ouranswer=""
 	_reprompt=1
@@ -499,14 +525,16 @@ __configurenetwork_1
 			;;
 		*)
 			_ifs=$resp
+			_ouranswer="done"
 			if isin $_ifs $_IFS ; then
 				if configure_ifs $_ifs ; then
 					_ifsdone="$_ifs $_ifsdone"
+				else
+				_ouranswer=""
 				fi
 			else
 				echo "Invalid response: \"$resp\" is not in list"
 			fi
-			_ouranswer="done"
 			_reprompt=1
 			;;
 		esac
@@ -529,20 +557,25 @@ configure_ifs() {
 	set -- `ifconfig $_interface_name | sed -n '
 		1s/.*<UP,.*$/UP/p
 		1s/.*<.*>*$/DOWN/p
-		2s/inet//
-		2s/--> [0-9.][0-9.]*//
-		2s/netmask//
-		2s/broadcast//
-		2p'`
+		/media:/s/^.*$//
+		/status:/s/^.*$//
+		/inet/s/--> [0-9.][0-9.]*//
+		/inet/s/netmask//
+		/inet/s/broadcast//
+		/inet/s/inet// p'`
 
 	_up=$1
 	_interface_ip=$2
 	_interface_mask=$3
 
+	if [ $_up = "UP" ]; then
+		ifconfig $_interface_name delete down
+	fi
+
 	# Get IP address
 	resp=""		# force one iteration
 	while [ "X${resp}" = X"" ]; do
-		echo -n "IP address? [$_interface_ip] "
+		echo -n "IP address (or 'dhcp') ? [$_interface_ip] "
 		getresp "$_interface_ip"
 		_interface_ip=$resp
 	done
@@ -557,33 +590,102 @@ configure_ifs() {
 	done
 
 	# Get netmask
-	resp=""
-	if [ "X${_interface_mask}" = X"" ]; then
-		_interface_mask=255.255.255.0
+	if [ "$_interface_ip" != "dhcp" ]; then
+		resp=""
+		if [ "X${_interface_mask}" = X"" ]; then
+			_interface_mask=255.255.255.0
+		fi
+		while [ "X${resp}" = X"" ]; do
+			echo -n "Netmask ? [$_interface_mask] "
+			getresp "$_interface_mask"
+			_interface_mask=$resp
+		done
 	fi
-	while [ "X${resp}" = X"" ]; do
-		echo -n "Netmask ? [$_interface_mask] "
-		getresp "$_interface_mask"
-		_interface_mask=$resp
-	done
 
-	echo "Your network interface might require additional link-layer"
-	echo "directives (like \`link0'). If this is the case you can enter"
-	echo "these at the next prompt.  Values used by some drivers are:"
-	echo "    -link0            BNC"
-	echo "    link0 -link1      AUI"
-	echo "    link0 link1       UTP"
-	echo "(But please keep in mind not all drivers use flags like this)."
-	echo -n "Additional link-layer arguments? [$_interface_extra] "
-	getresp "$_interface_extra"
-	if [ "X${resp}" != X"" ]; then
-		_interface_extra=$resp
+	if [ -n "`ifconfig -m ${_interface_name} | sed -n '/media/p'`" ]; then
+		echo "Your use of the network interface may require non-default"
+		echo "media directives.  The default media is:"
+		ifconfig -m ${_interface_name} | sed -n '
+			/supported/D
+			/media:/p'
+		echo "This is a list of supported media:"
+		ifconfig -m ${_interface_name} | sed -n '
+			/media:/D
+			s/^	//
+			/media/p'
+		echo "If the default is not satisfactory, and you wish to use another"
+		echo "media, copy that line from above (ie. \"media 100baseTX\")"
+		echo -n "Media directives? [$_interface_extra] "
+		getresp "$_interface_extra"
+		if [ "X${resp}" != X"" ]; then
+			_interface_extra=$resp
+		fi
 	fi
 
 	# Configure the interface.  If it
 	# succeeds, add it to the permanent
 	# network configuration info.
-	if [ $_up != "UP" ]; then
+	if [ "$_interface_ip" = "dhcp" ]; then
+		ifconfig ${_interface_name} down ${_interface_extra}
+cat > /etc/dhclient.conf << __dhclientedit1
+initial-interval 1;
+send host-name "$_hostname";
+request subnet-mask, broadcast-address, routers,
+       domain-name, domain-name-servers, host-name;
+__dhclientedit1
+		dhclient -1 ${_interface_name}
+
+		set -- `ifconfig $_interface_name | sed -n '
+			1s/.*<UP,.*$/UP/p
+			1s/.*<.*>*$/DOWN/p
+			/media:/s/^.*$//
+			/status:/s/^.*$//
+			/inet/s/--> [0-9.][0-9.]*//
+			/inet/s/netmask//
+			/inet/s/broadcast//
+			/inet/s/inet// p'`
+
+		if [ $1 = "UP" -a $2 = "0.0.0.0" ]; then
+			echo "hostname-associated DHCP attempt for $_interface_name failed..."
+			ifconfig $_interface_name delete down
+
+			cat > /etc/dhclient.conf << __dhclientedit2
+initial-interval 1;
+request subnet-mask, broadcast-address, routers,
+       domain-name, domain-name-servers, host-name;
+__dhclientedit2
+			dhclient -1 ${_interface_name}
+			set -- `ifconfig $_interface_name | sed -n '
+				1s/.*<UP,.*$/UP/p
+				1s/.*<.*>*$/DOWN/p
+				/media:/s/^.*$//
+				/status:/s/^.*$//
+				/inet/s/--> [0-9.][0-9.]*//
+				/inet/s/netmask//
+				/inet/s/broadcast//
+				/inet/s/inet// p'`
+
+			if [ $1 = "UP" -a $2 = "0.0.0.0" ]; then
+				echo "free-roaming DHCP attempt for $_interface_name failed."
+				ifconfig $_interface_name delete down
+				return 1
+			else
+				echo "DHCP attempt for $_interface_name successful."
+				addifconfig \
+					${_interface_name} \
+					${_interface_symname} \
+					${_interface_ip}
+				return 0
+			fi
+		else
+			echo "DHCP configuration of $_interface_name successful."
+			addifconfig \
+				${_interface_name} \
+				${_interface_symname} \
+				${_interface_ip}
+			return 0
+		fi
+	else
 		ifconfig ${_interface_name} down
 		if ifconfig ${_interface_name} inet \
 		    ${_interface_ip} \
@@ -595,14 +697,6 @@ configure_ifs() {
 			    ${_interface_mask} "${_interface_extra}"
 			return 0
 		fi
-	else
-		echo "Interface ${_interface_name} is already active."
-		echo "Just saving configuration on new root filesystem."
-		addifconfig \
-		    ${_interface_name} \
-		    ${_interface_symname} \
-		    ${_interface_ip} \
-		    ${_interface_mask} "${_interface_extra}"
 	fi
 	return 1
 }
@@ -633,7 +727,7 @@ enable_network() {
 			read dt dtaddr
 
 			if [ ! -n "$name" ]; then
-		    echo "/etc/hostname.$1: invalid network configuration file"
+				echo "/etc/hostname.$1: invalid network configuration file"
 				exit
 			fi
 
@@ -672,7 +766,7 @@ enable_network() {
 
 	# Display results...
 	echo	"Network interface configuration:"
-	ifconfig -a
+	ifconfig -am
 
 	echo	""
 
@@ -716,6 +810,68 @@ get_selection() {
 	getresp "$_next"
 }
 
+# Do globbing on the selection and parse +/-, sets _get_files and _setsdone
+# (which must exist in the local namespace) as side effects.
+glob_selection() {
+	local _selection="$1"
+	local _parent_dir="$2"
+	local _sets="$3"
+	local _action
+	local _matched
+	local _tfile
+	local _f
+
+	if [ "X${_selection}" = X"" ]; then
+		return
+	fi
+
+	# Change +/- into add/remove
+	_action=add
+	case "$_selection" in
+		+*)	_selection="${_selection#?}"
+			;;
+		-*)	_selection="${_selection#?}"
+			_action=remove
+			;;
+	esac
+
+	# Major hack to allow the user to select globbing patterns
+	set -o noglob
+	if [ X"$_selection" = X"all" ]; then
+		_selection=*
+	fi
+	_tfile=/tmp/install_case.$$	# safe in single user mode
+	cat >$_tfile << OOF
+	case \$_f in
+		$_selection)	# Add/remove file to extraction list
+			if [ "\$_action" = "add" ]; then
+				_get_files=\`addel \${_f} \${_get_files}\`
+				_setsdone=\`addel \${_f} \${_setsdone}\`
+			elif [ "\$_action" = "remove" ]; then
+				_get_files=\`rmel \${_f} \${_get_files}\`
+				_setsdone=\`rmel \${_f} \${_setsdone}\`
+			else
+				echo "Unknown action: \$_action"
+			fi
+			_matched=\$(( \$_matched + 1 ))
+			;;
+	esac
+OOF
+	set +o noglob
+
+	# Eww.
+	_matched=0
+	for _f in $_sets; do
+		. $_tfile
+	done
+	rm -f $_tfile
+
+	if [ $_matched -eq 0 ]; then
+		echo "File $_parent_dir/$_selection does not exist.  Check to make"
+		echo "sure you entered the information properly or enter 'list' for a file list."
+	fi
+}
+
 install_url() {
 # Get several parameters from the user, and xfer
 # files from the server.
@@ -731,9 +887,6 @@ local _failed_files
 local _osetsdone
 local _url_type
 local _url_base
-local _tfile
-local _matched
-local _action
 
 # Is this an ftp or http install?
 _url_type=$1; shift
@@ -780,16 +933,50 @@ getresp "y"
 case "$resp" in
 n*|N*) ;;
 *)
-	ftp ${_ftp_active} -V -a -o - ftp://ftp.openbsd.org/pub/OpenBSD/${VERSION_MAJOR}.${VERSION_MINOR}/ftplist | grep "^${_url_type}:"
+
+	ftphost=129.128.76.52
+	if [ "X${_resolver_enabled}" = X"TRUE" ]; then
+		ftphost=ftp.openbsd.org
+	fi
+	ftp ${_ftp_active} -V -a -o /tmp/ftplist ftp://${ftphost}/pub/OpenBSD/${VERSION_MAJOR}.${VERSION_MINOR}/ftplist > /dev/null
+	cat /tmp/ftplist | grep "^${_url_type}:" | cat -n | less -XE
 	;;
 esac
 
 # Get server IP address
 resp=""		# force one iteration
 while [ "X${resp}" = X"" ]; do
-	eval echo -n "Server IP address or hostname? [\$_${_url_type}_server_ip]\ "
+	if [ -f /tmp/ftplist ]; then
+		eval echo -n "Server IP address, hostname, or list#? [\$_${_url_type}_server_ip]\ "
+	else
+		eval echo -n "Server IP address, or hostname? [\$_${_url_type}_server_ip]\ "
+	fi
 	eval getresp "\$_${_url_type}_server_ip"
-	eval _${_url_type}_server_ip=$resp
+	if [ "X$resp" = "X?" -a -f /tmp/ftplist ]; then
+		cat /tmp/ftplist | grep "^${_url_type}:" | cat -n | less -XE
+		resp=""
+	elif [ "X${resp}" != X"" -a `isnumeric $resp` = 1 -a $resp -ge 1 \
+	    -a -f /tmp/ftplist ]; then
+		maxlines=`grep "^${_url_type}:" /tmp/ftplist | cat -n |
+		    sed -n -e '$p' | cutword 1`
+		if [ $maxlines -lt $resp ]; then
+			echo "There is no ${resp}th line in the list."
+			resp=""
+			continue
+		fi
+		tline=`grep "^${_url_type}:" /tmp/ftplist | sed -n -e "${resp}p"`
+		url=`echo $tline | sed -e "s/^${_url_type}:\/\///" |
+		    cutword -t' ' 1 | cutword -t' ' 1`
+		host=`echo $url | cutword -t/ 1`
+		path=`echo $url | sed -e "s/^${host}\///"`
+		path="${path}/${VERSION_MAJOR}.${VERSION_MINOR}/${ARCH}"
+		eval _${_url_type}_server_ip=$host
+		eval _${_url_type}_server_dir=$path
+		resp=""		# do it again, just to double check
+		echo "Using	$tline"
+	else
+		eval _${_url_type}_server_ip="$resp"
+	fi
 done
 
 # Get server directory
@@ -951,54 +1138,9 @@ while : ; do
 		eval echo "\$_${_url_type}_server_dir:"
 		echo "${_file_list}"
 		continue
-	elif [ "X${resp}" = X"all" ]; then
-		_get_files="$_sets $_kernel"
-		_setsdone="$_sets $_kernel"
-		break
 	fi
 
-	# Change +/- into add/remove
-	_action=add
-	case "$resp" in
-		+*)	resp="${resp#?}"
-			;;
-		-*)	resp="${resp#?}"
-			_action=remove
-			;;
-	esac
-
-	# Major hack to allow the user to select globbing patterns
-	set -o noglob
-	_tfile=/tmp/install_case.$$	# safe in single user mode
-	cat >$_tfile << OOF
-	case \$_f in
-		$resp)	# Add/remove file to extraction list
-			if [ "\$_action" = "add" ]; then
-				_get_files=\`addel \${_f} \${_get_files}\`
-				_setsdone=\`addel \${_f} \${_setsdone}\`
-			elif [ "\$_action" = "remove" ]; then
-				_get_files=\`rmel \${_f} \${_get_files}\`
-				_setsdone=\`rmel \${_f} \${_setsdone}\`
-			else
-				echo "Unknown action: \$_action"
-			fi
-			_matched=\$(( \$_matched + 1 ))
-			;;
-	esac
-OOF
-	set +o noglob
-
-	# Eww.
-	_matched=0
-	for _f in $_sets $_kernel; do
-		. $_tfile
-	done
-	rm -f $_tfile
-
-	if [ $_matched -eq 0 ]; then
-		eval echo "File \$_${_url_type}_server_dir/$resp does not exist.  Check to make"
-		echo "sure you entered the information properly or enter 'list' for a file list."
-	fi
+	eval glob_selection \"$resp\" \$_${_url_type}_server_dir \"$_sets $_kernel\"
 done
 
 # User may have said "done" without selecting any files
@@ -1022,12 +1164,13 @@ esac
 # Download the files one at a time and keep track of which ones failed
 while test -n "${_get_files}" ; do
 	_failed_files=""
+	echo ""
 	for _f in $_get_files ; do
-		echo ""
+		echo "Getting ${_f} ..."
 		if [ "X${_f}" = "X${_kernel}" ]; then
-			( cd /mnt ; ftp ${_ftp_active} -V ${_url_base}/${_f} )
+			( cd /mnt ; ftp ${_ftp_active} -V -m ${_url_base}/${_f} )
 		else
-			( cd /mnt ; ftp ${_ftp_active} -o - -V ${_url_base}/${_f} | tar zxvpf - )
+			( cd /mnt ; ftp ${_ftp_active} -o - -V -m ${_url_base}/${_f} | tar zxpf - )
 		fi
 		if [ $? -ne 0 ]; then
 			# Mark xfer as having failed,.
@@ -1056,48 +1199,7 @@ while test -n "${_get_files}" ; do
 			continue
 		fi
 
-		# Change +/- into add/remove
-		_action=add
-		case "$resp" in
-			+*)	resp="${resp#?}"
-				;;
-			-*)	resp="${resp#?}"
-				_action=remove
-				;;
-		esac
-
-		# Major hack to allow the user to select globbing patterns
-		set -o noglob
-		_tfile=/tmp/install_case.$$	# safe in single user mode
-		cat >$_tfile << OOF
-		case \$_f in
-			$resp)	# Add/remove file to extraction list
-				if [ "\$_action" = "add" ]; then
-					_get_files=\`addel \${_f} \${_get_files}\`
-					_setsdone=\`addel \${_f} \${_setsdone}\`
-				elif [ "\$_action" = "remove" ]; then
-					_get_files=\`rmel \${_f} \${_get_files}\`
-					_setsdone=\`rmel \${_f} \${_setsdone}\`
-				else
-					echo "Unknown action: \$_action"
-				fi
-				_matched=\$(( \$_matched + 1 ))
-				;;
-		esac
-OOF
-		set +o noglob
-
-		# Eww.
-		_matched=0
-		for _f in $_failed_files; do
-			. $_tfile
-		done
-		rm -f $_tfile
-
-		if [ $_matched -eq 0 ]; then
-			eval echo "File \$_${_url_type}_server_dir/$resp does not exist.  Check to make"
-			echo "sure you entered the information properly or enter 'list' for a file list."
-		fi
+		eval glob_selection \"$resp\" \$_${_url_type}_server_dir \"$_failed_files\"
 	done
 done
 }
@@ -1110,9 +1212,6 @@ local _f
 local _get_files
 local _failed_files
 local _osetsdone
-local _tfile
-local _matched
-local _action
 
 if [ ! -d $1 ]; then
 	echo "No such directory: $1"
@@ -1199,54 +1298,9 @@ while : ; do
 		echo "${1}:"
 		( cd $1 && ls )
 		continue
-	elif [ "X${resp}" = X"all" ]; then
-		_get_files="$_sets $_kernel"
-		_setsdone="$_sets $_kernel"
-		break
 	fi
 
-	# Change +/- into add/remove
-	_action=add
-	case "$resp" in
-		+*)	resp="${resp#?}"
-			;;
-		-*)	resp="${resp#?}"
-			_action=remove
-			;;
-	esac
-
-	# Major hack to allow the user to select globbing patterns
-	set -o noglob
-	_tfile=/tmp/install_case.$$	# safe in single user mode
-	cat >$_tfile << OOF
-	case \$_f in
-		$resp)	# Add/remove file to extraction list
-			if [ "\$_action" = "add" ]; then
-				_get_files=\`addel \${_f} \${_get_files}\`
-				_setsdone=\`addel \${_f} \${_setsdone}\`
-			elif [ "\$_action" = "remove" ]; then
-				_get_files=\`rmel \${_f} \${_get_files}\`
-				_setsdone=\`rmel \${_f} \${_setsdone}\`
-			else
-				echo "Unknown action: \$_action"
-			fi
-			_matched=\$(( \$_matched + 1 ))
-			;;
-	esac
-OOF
-	set +o noglob
-
-	# Eww.
-	_matched=0
-	for _f in $_sets $_kernel; do
-		. $_tfile
-	done
-	rm -f $_tfile
-
-	if [ $_matched = 0 ]; then
-	    echo "File $1/$resp does not exist.  Check to make"
-	    echo "sure you entered the information properly or enter 'list' for a file list."
-	fi
+	glob_selection "$resp" "$1" "$_sets $_kernel"
 done
 
 # User may have said "done" without selecting any files
@@ -1269,13 +1323,13 @@ esac
 # Extract the files one at a time and keep track of which ones failed
 while test -n "${_get_files}" ; do
 	_failed_files=""
+	echo ""
 	for _f in $_get_files ; do
-		echo ""
 		echo "$1/${_f}:"
 		if [ "X${_f}" = "X${_kernel}" ]; then
-			cp $1/$_f /mnt/$_f
+			ftp -V -m -o /mnt/$_f file:$1/$_f
 		else
-			cat $1/$_f | (cd /mnt; tar -zxvpf -)
+			ftp -V -m -o - file:$1/$_f | (cd /mnt; tar -zxpf -)
 		fi
 		if [ $? -ne 0 ]; then
 			# Mark xfer as having failed,.
@@ -1304,48 +1358,7 @@ while test -n "${_get_files}" ; do
 			continue
 		fi
 
-		# Change +/- into add/remove
-		_action=add
-		case "$resp" in
-			+*)	resp="${resp#?}"
-				;;
-			-*)	resp="${resp#?}"
-				_action=remove
-				;;
-		esac
-
-		# Major hack to allow the user to select globbing patterns
-		set -o noglob
-		_tfile=/tmp/install_case.$$	# safe in single user mode
-		cat >$_tfile << OOF
-		case \$_f in
-			$resp)	# Add/remove file to extraction list
-				if [ "\$_action" = "add" ]; then
-					_get_files=\`addel \${_f} \${_get_files}\`
-					_setsdone=\`addel \${_f} \${_setsdone}\`
-				elif [ "\$_action" = "remove" ]; then
-					_get_files=\`rmel \${_f} \${_get_files}\`
-					_setsdone=\`rmel \${_f} \${_setsdone}\`
-				else
-					echo "Unknown action: \$_action"
-				fi
-				_matched=\$(( \$_matched + 1 ))
-				;;
-		esac
-OOF
-		set +o noglob
-
-		# Eww.
-		_matched=0
-		for _f in $_failed_files; do
-			. $_tfile
-		done
-		rm -f $_tfile
-
-		if [ $_matched = 0 ]; then
-		    echo "File $1/$resp does not exist.  Check to make"
-		    echo "sure you entered the information properly or enter 'list' for a file list."
-		fi
+		glob_selection "$resp" "$1" "$_failed_files"
 	done
 done
 }
@@ -1391,7 +1404,7 @@ esac
 _partition_range=`md_get_partition_range`
 resp=""		# force one iteration
 while [ "X${resp}" = X"" ]; do
-	echo -n "Partition? [c] "
+	echo -n "CDROM partition to mount (normally \"c\")? [c] "
 	getresp "c"
 	case "$resp" in
 		$_partition_range)
@@ -1415,7 +1428,7 @@ ffs		Berkeley Fast Filesystem
 __install_cdrom_2
 resp=""		# force one iteration
 while [ "X${resp}" = X"" ]; do
-	echo -n "Which filesystem type? [cd9660] "
+	echo -n "Which filesystem type (Official OpenBSD CDROM are cd9660)? [cd9660] "
 	getresp "cd9660"
 	case "$resp" in
 		cd9660|ffs)
@@ -1696,7 +1709,7 @@ while [ "X${resp}" = X"" ]; do
 	getresp ""
 	case "$resp" in
 		[1-9]*)
-			_nskip=`expr $resp - 1`
+			_nskip=$(( $resp - 1 ))
 			;;
 
 		*)
@@ -1767,11 +1780,11 @@ fi
 	
 cat << \__get_timezone_1
 
-Select a time zone for your location. Timezones are represented on the
-system by a directory structure rooted in "/usr/share/timezone". Most
-timezones can be selected by entering a token like "MET" or "GMT-6".
-Other zones are grouped by continent, with detailed zone information
-separated by a slash ("/"), e.g. "US/Pacific" or "Canada/Mountain".
+Select a time zone for your location. Timezones are represented on the system
+by a directory structure rooted in "/usr/share/timezone". Most timezones can
+be selected by entering a token like "MET" or "GMT-6".  Other zones are
+grouped by continent or country, with detailed zone information separated by
+a slash ("/"), e.g. "US/Pacific" or "Canada/Mountain".
 
 To get a listing of what's available in /usr/share/zoneinfo, enter "?"
 at the prompts below.
@@ -2031,7 +2044,7 @@ fi
 		echo -n "${_mp} "
 		umount ${_mp}
 	done
-	echo "Done."
+	echo "... Done."
 
 	if [ $_check = 1 ]; then
 		echo "Checking filesystem integrity..."

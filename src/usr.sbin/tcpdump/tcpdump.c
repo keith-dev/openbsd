@@ -24,7 +24,7 @@ static const char copyright[] =
     "@(#) Copyright (c) 1988, 1989, 1990, 1991, 1992, 1993, 1994, 1995, 1996\n\
 The Regents of the University of California.  All rights reserved.\n";
 static const char rcsid[] =
-    "@(#) $Header: /cvs/src/usr.sbin/tcpdump/tcpdump.c,v 1.7 1997/01/15 23:44:25 millert Exp $ (LBL)";
+    "@(#) $Header: /cvs/src/usr.sbin/tcpdump/tcpdump.c,v 1.11 1998/09/22 22:03:02 provos Exp $ (LBL)";
 #endif
 
 /*
@@ -98,6 +98,9 @@ static struct printer printers[] = {
 	{ fddi_if_print,	DLT_FDDI },
 	{ null_if_print,	DLT_NULL },
 	{ atm_if_print,		DLT_ATM_RFC1483 },
+	{ null_if_print, 	DLT_LOOP },
+	{ enc_if_print, 	DLT_ENC },
+	{ null_if_print, 	DLT_LOOP },
 	{ NULL,			0 },
 };
 
@@ -230,6 +233,10 @@ main(int argc, char **argv)
 				packettype = PT_RTP;
 			else if (strcasecmp(optarg, "rtcp") == 0)
 				packettype = PT_RTCP;
+			else if (strcasecmp(optarg, "cnfp") == 0)
+				packettype = PT_CNFP;
+			else if (strcasecmp(optarg, "sack") == 0)
+				snaplen = SACK_SNAPLEN;
 			else
 				error("unknown packet type `%s'", optarg);
 			break;

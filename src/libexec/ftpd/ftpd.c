@@ -1,4 +1,4 @@
-/*	$OpenBSD: ftpd.c,v 1.45 1997/12/12 08:55:09 deraadt Exp $	*/
+/*	$OpenBSD: ftpd.c,v 1.49 1998/07/23 08:13:38 deraadt Exp $	*/
 /*	$NetBSD: ftpd.c,v 1.15 1995/06/03 22:46:47 mycroft Exp $	*/
 
 /*
@@ -218,6 +218,7 @@ static int	guniquefd __P((char *, char **));
 static void	 lostconn __P((int));
 static void	 sigquit __P((int));
 static int	 receive_data __P((FILE *, FILE *));
+static void	 replydirname __P((const char *, const char *));
 static void	 send_data __P((FILE *, FILE *, off_t, off_t, int));
 static struct passwd *
 		 sgetpwnam __P((char *));
@@ -419,7 +420,7 @@ main(argc, argv, envp)
 	(void) signal(SIGTERM, sigquit);
 	(void) signal(SIGPIPE, lostconn);
 	(void) signal(SIGCHLD, SIG_IGN);
-	if ((long)signal(SIGURG, myoob) < 0)
+	if (signal(SIGURG, myoob) == SIG_ERR)
 		syslog(LOG_ERR, "signal: %m");
 
 	addrlen = sizeof(ctrl_addr);
@@ -738,6 +739,11 @@ pass(passwd)
 	askpasswd = 0;
 	if (!guest) {		/* "ftp" is only account allowed no password */
 		if (pw == NULL) {
+			useconds_t us;
+
+			/* Sleep between 1 and 3 seconds to emulate a crypt. */
+			us = arc4random() % 3000000;
+			usleep(us);
 			rval = 1;	/* failure below */
 			goto skip;
 		}
@@ -754,8 +760,8 @@ pass(passwd)
 		}
 #endif
 		/* the strcmp does not catch null passwords! */
-		if (pw == NULL || *pw->pw_passwd == '\0' ||
-		    strcmp(crypt(passwd, (pw ? pw->pw_passwd : "xx")), pw->pw_passwd)) {
+		if (strcmp(crypt(passwd, pw->pw_passwd), pw->pw_passwd) ||
+		    *pw->pw_passwd == '\0') {
 			rval = 1;	 /* failure */
 			goto skip;
 		}
@@ -817,7 +823,7 @@ skip:
 
 	dochroot = checkuser(_PATH_FTPCHROOT, pw->pw_name);
 	if (guest || dochroot) {
-		if (multihome) {
+		if (multihome && guest) {
 			struct stat ts;
 
 			/* Compute root directory. */
@@ -970,7 +976,7 @@ retrieve(cmd, name)
 				if (c == '\n')
 					i++;
 			}
-		} else if (lseek(fileno(fin), restart_point, L_SET) < 0) {
+		} else if (lseek(fileno(fin), restart_point, SEEK_SET) < 0) {
 			perror_reply(550, name);
 			goto done;
 		}
@@ -1044,11 +1050,11 @@ store(name, mode, unique)
 			 * because we are changing from reading to
 			 * writing.
 			 */
-			if (fseek(fout, 0L, L_INCR) < 0) {
+			if (fseek(fout, 0L, SEEK_CUR) < 0) {
 				perror_reply(550, name);
 				goto done;
 			}
-		} else if (lseek(fileno(fout), restart_point, L_SET) < 0) {
+		} else if (lseek(fileno(fout), restart_point, SEEK_SET) < 0) {
 			perror_reply(550, name);
 			goto done;
 		}
@@ -1671,6 +1677,22 @@ cwd(path)
 }
 
 void
+replydirname(name, message)
+	const char *name, *message;
+{
+	char npath[MAXPATHLEN];
+	int i;
+
+	for (i = 0; *name != '\0' && i < sizeof(npath) - 1; i++, name++) {
+		npath[i] = *name;
+		if (*name == '"')
+			npath[++i] = '"';
+	}
+	npath[i] = '\0';
+	reply(257, "\"%s\" %s", npath, message);
+}
+
+void
 makedir(name)
 	char *name;
 {
@@ -1679,7 +1701,7 @@ makedir(name)
 	if (mkdir(name, 0777) < 0)
 		perror_reply(550, name);
 	else
-		reply(257, "MKD command successful.");
+		replydirname(name, "directory created.");
 }
 
 void
@@ -1702,7 +1724,7 @@ pwd()
 	if (getwd(path) == (char *)NULL)
 		reply(550, "%s.", path);
 	else
-		reply(257, "\"%s\" is current directory.", path);
+		replydirname(path, "is current directory.");
 }
 
 char *

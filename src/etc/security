@@ -1,6 +1,6 @@
 #!/bin/sh -
 #
-#	$OpenBSD: security,v 1.27 1998/03/22 03:39:11 marc Exp $
+#	$OpenBSD: security,v 1.30 1998/08/17 16:43:47 millert Exp $
 #	from: @(#)security	8.1 (Berkeley) 6/9/93
 #
 
@@ -152,7 +152,11 @@ for i in $list ; do
 		unset PATH
 		/bin/csh -f -s << end-of-csh > /dev/null 2>&1
 			source $i
-			/bin/ls -ldgT \$path > $TMP1
+			if (\$?path) then
+				/bin/ls -ldgT \$path > $TMP1
+			else
+				cat /dev/null > $TMP1
+			endif
 end-of-csh
 		PATH=$SAVE_PATH
 		awk '{
@@ -179,6 +183,7 @@ if [ $umaskset = "no" -o -s $OUTPUT ] ; then
 fi
 
 > $OUTPUT
+> $TMP2
 rhome=/root
 umaskset=no
 list="/etc/profile ${rhome}/.profile"
@@ -193,13 +198,20 @@ for i in $list; do
 		     $2 % 10 < 2 \
 			{ print "Root umask is other writeable" }' >> $OUTPUT
 		SAVE_PATH=$PATH
-		unset PATH
+		SAVE_ENV=$ENV
+		unset PATH ENV
 		/bin/sh << end-of-sh > /dev/null 2>&1
 			. $i
-			list=\`echo \$PATH | /usr/bin/sed -e 's/:/ /g'\`
-			/bin/ls -ldgT \$list > $TMP1
+			if [ X"\$PATH" != "X" ]; then
+				list=\`echo \$PATH | /usr/bin/sed -e 's/:/ /g'\`
+				/bin/ls -ldgT \$list > $TMP1
+			else
+				> $TMP1
+			fi
+			echo \$ENV >> $TMP2
 end-of-sh
 		PATH=$SAVE_PATH
+		ENV=$SAVE_ENV
 		awk '{
 			if ($10 ~ /^\.$/) {
 				print "The root path includes .";
@@ -228,8 +240,9 @@ fi
 # check anyway.
 > $OUTPUT
 rhome=/root
-list="/etc/ksh.kshrc ${rhome}/.kshrc"
-for i in $list; do
+list="/etc/ksh.kshrc `cat $TMP2`"
+(cd $rhome
+ for i in $list; do
 	if [ -s $i ] ; then
 		egrep umask $i |
 		awk '$2 % 100 < 20 \
@@ -241,8 +254,12 @@ for i in $list; do
 			unset PATH
 			/bin/ksh << end-of-sh > /dev/null 2>&1
 				. $i
-				list=\`echo \$PATH | /usr/bin/sed -e 's/:/ /g'\`
-				/bin/ls -ldgT \$list > $TMP1
+				if [ X"\$PATH" != "X" ]; then
+					list=\`echo \$PATH | /usr/bin/sed -e 's/:/ /g'\`
+					/bin/ls -ldgT \$list > $TMP1
+				else
+					> $TMP1
+				fi
 end-of-sh
 			PATH=$SAVE_PATH
 			awk '{
@@ -259,7 +276,8 @@ end-of-sh
 		fi
 
 	fi
-done
+ done
+)
 if [ -s $OUTPUT ] ; then
 	printf "\nChecking root ksh paths, umask values:\n$list\n"
 	cat $OUTPUT
@@ -355,7 +373,7 @@ if [ -s $OUTPUT ] ; then
 fi
 
 # Files that should not be owned by someone else or readable.
-list=".netrc .rhosts .shosts"
+list=".netrc .rhosts .pgp/secring.pgp .shosts .ssh/identity .ssh/random_seed"
 awk -F: '/^[^+-]/ { print $1 " " $6 }' /etc/passwd | \
 while read uid homedir; do
 	for f in $list ; do
@@ -377,8 +395,11 @@ awk '$1 != $5 && $5 != "root" \
 	{ print "user " $1 " " $2 " file is other writeable" }' > $OUTPUT
 
 # Files that should not be owned by someone else or writeable.
-list=".bashrc .cshrc .emacs .exrc .forward .klogin .login .logout \
-      .profile .tcshrc .kshrc .xsession"
+list=".bashrc .bash_profile .bash_login .bash_logout .cshrc \
+      .emacs .exrc .forward .fvwmrc .inputrc .klogin .kshrc .login \
+      .logout .nexrc .profile .screenrc .ssh .ssh/config \
+      .ssh/authorized_keys .ssh/environment .ssh/known_hosts .ssh/rc \
+      .tcshrc .twmrc .xsession .xinitrc .Xdefaults .Xauthority"
 awk -F: '/^[^+-]/ { print $1 " " $6 }' /etc/passwd | \
 while read uid homedir; do
 	for f in $list ; do
@@ -438,8 +459,8 @@ pending="\nChecking setuid/setgid files and devices:\n"
 (find / \( ! -fstype local -o -fstype fdesc -o -fstype kernfs \
 	-o -fstype procfs \) -a -prune -o \
 	-type f -a \( -perm -u+s -o -perm -g+s \) -print0 -o \
-	! -type d -a ! -type f -a ! -type l -a ! -type s -print0 | \
-xargs -0 ls -ldgT | sort +9 > $LIST) 2> $OUTPUT
+	! -type d -a ! -type f -a ! -type l -a ! -type s -a ! -type p \
+	-print0 | xargs -0 ls -ldgT | sort +9 > $LIST) 2> $OUTPUT
 
 # Display any errors that occurred during system file walk.
 if [ -s $OUTPUT ] ; then

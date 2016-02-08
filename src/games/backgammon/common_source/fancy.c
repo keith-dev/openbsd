@@ -1,4 +1,4 @@
-/*	$OpenBSD: fancy.c,v 1.3 1998/03/19 11:13:19 pjanzen Exp $	*/
+/*	$OpenBSD: fancy.c,v 1.6 1998/09/02 06:46:51 pjanzen Exp $	*/
 
 /*
  * Copyright (c) 1980, 1993
@@ -37,7 +37,7 @@
 #if 0
 static char sccsid[] = "@(#)fancy.c	8.1 (Berkeley) 5/31/93";
 #else
-static char rcsid[] = "$OpenBSD: fancy.c,v 1.3 1998/03/19 11:13:19 pjanzen Exp $";
+static char rcsid[] = "$OpenBSD: fancy.c,v 1.6 1998/09/02 06:46:51 pjanzen Exp $";
 #endif
 #endif /* not lint */
 
@@ -63,7 +63,7 @@ int    *linect;		/* array of lengths of lines on screen
 				   (the actual screen is not stored) */
 
 /* two letter codes */
-char    tcap[] = "lecdceclcmhondup";
+char    *tcap[] = {"le", "cd", "ce", "cl", "cm", "ho", "nd", "up", NULL};
 /* corresponding strings */
 char  **tstr[] = {&BC, &CD, &CE, &CL, &CM, &HO, &ND, &UP};
 
@@ -567,12 +567,6 @@ clear()
 }
 
 void
-tos()
-{				/* home cursor */
-	curmove(0, 0);
-}
-
-void
 fancyc(c)
 	int     c;		/* character to output */
 {
@@ -674,7 +668,7 @@ int
 getcaps(s)
 	char   *s;
 {
-	char   *code;		/* two letter code */
+	char   **code;		/* two letter code */
 	char ***cap;		/* pointer to cap string */
 	char   *bufp;		/* pointer to cap buffer */
 	char    tentry[1024];	/* temporary uncoded caps buffer */
@@ -697,8 +691,8 @@ getcaps(s)
 
 	bufp = tbuf;		/* get string entries */
 	cap = tstr;
-	for (code = tcap; *code; code += 2)
-		**cap++ = (char *)tgetstr(code, &bufp);
+	for (code = tcap; *code; code++)
+		**cap++ = (char *)tgetstr(*code, &bufp);
 
 	/* get pertinent lengths */
 	if (HO)
@@ -711,8 +705,8 @@ getcaps(s)
 		lUP = strlen(UP);
 	if (ND)
 		lND = strlen(ND);
+	linect = (int *)calloc(LI + 1, sizeof(int));
 	if (LI < 24 || CO < 72 || !(CL && UP && ND))
 		return(0);
-	linect = (int *)calloc(LI + 1, sizeof(int));
 	return(1);
 }

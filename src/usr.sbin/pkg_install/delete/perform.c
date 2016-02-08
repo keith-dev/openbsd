@@ -1,7 +1,7 @@
-/*	$OpenBSD: perform.c,v 1.3 1997/06/17 08:38:03 deraadt Exp $	*/
+/*	$OpenBSD: perform.c,v 1.5 1998/10/13 23:09:50 marc Exp $	*/
 
 #ifndef lint
-static const char *rcsid = "$OpenBSD: perform.c,v 1.3 1997/06/17 08:38:03 deraadt Exp $";
+static const char *rcsid = "$OpenBSD: perform.c,v 1.5 1998/10/13 23:09:50 marc Exp $";
 #endif
 
 /*
@@ -24,12 +24,13 @@ static const char *rcsid = "$OpenBSD: perform.c,v 1.3 1997/06/17 08:38:03 deraad
  *
  */
 
+#include <err.h>
 #include "lib.h"
 #include "delete.h"
 
 static int pkg_do(char *);
 static void sanity_check(char *);
-static void undepend(PackingList, char *);
+static int undepend(const char *, char *);
 static char LogDir[FILENAME_MAX];
 
 
@@ -43,7 +44,7 @@ pkg_perform(char **pkgs)
     return err_cnt;
 }
 
-static Package Plist;
+static package_t Plist;
 
 /* This is seriously ugly code following.  Written very fast! */
 static int
@@ -51,43 +52,46 @@ pkg_do(char *pkg)
 {
     FILE *cfile;
     char home[FILENAME_MAX];
-    PackingList p;
+    plist_t *p;
     char *tmp;
 
     /* Reset some state */
     if (Plist.head)
 	free_plist(&Plist);
 
-    sprintf(LogDir, "%s/%s", (tmp = getenv(PKG_DBDIR)) ? tmp : DEF_LOG_DIR,
+    (void) snprintf(LogDir, sizeof(LogDir), "%s/%s", (tmp = getenv(PKG_DBDIR)) ? tmp : DEF_LOG_DIR,
     	    pkg);
     if (!fexists(LogDir)) {
-	whinge("No such package '%s' installed.", pkg);
+	warnx("no such package '%s' installed", pkg);
 	return 1;
     }
-    if (!getcwd(home, FILENAME_MAX))
-	barf("Unable to get current working directory!");
+    if (!getcwd(home, FILENAME_MAX)) {
+	cleanup(0);
+	errx(2, "unable to get current working directory!");
+    }
     if (chdir(LogDir) == FAIL) {
-	whinge("Unable to change directory to %s!  Deinstall failed.", LogDir);
+	warnx("unable to change directory to %s! deinstall failed", LogDir);
 	return 1;
     }
     if (!isemptyfile(REQUIRED_BY_FNAME)) {
 	char buf[512];
-	whinge("Package `%s' is required by these other packages", pkg);
-	whinge("and may not be deinstalled%s:", Force ? " (but I'll delete it anyway)" : "" );
+	warnx("package `%s' is required by these other packages\n"
+		"and may not be deinstalled%s:",
+		pkg, Force ? " (but I'll delete it anyway)" : "" );
 	cfile = fopen(REQUIRED_BY_FNAME, "r");
 	if (cfile) {
 	    while (fgets(buf, sizeof(buf), cfile))
 		fprintf(stderr, "%s", buf);
 	    fclose(cfile);
 	} else
-	    whinge("cannot open requirements file `%s'", REQUIRED_BY_FNAME);
+	    warnx("cannot open requirements file `%s'", REQUIRED_BY_FNAME);
 	if (!Force)
 	    return 1;
     }
     sanity_check(LogDir);
     cfile = fopen(CONTENTS_FNAME, "r");
     if (!cfile) {
-	whinge("Unable to open '%s' file.", CONTENTS_FNAME);
+	warnx("unable to open '%s' file", CONTENTS_FNAME);
 	return 1;
     }
     /* If we have a prefix, add it now */
@@ -96,17 +100,18 @@ pkg_do(char *pkg)
     read_plist(&Plist, cfile);
     fclose(cfile);
     p = find_plist(&Plist, PLIST_CWD);
-    if (p)
-	setenv(PKG_PREFIX_VNAME, p->name, 1);
-    else
-	unsetenv(PKG_PREFIX_VNAME);
+    if (!p) {
+	warnx("package '%s' doesn't have a prefix", pkg);
+	return 1;
+    }
+    setenv(PKG_PREFIX_VNAME, p->name, 1);
     if (fexists(REQUIRE_FNAME)) {
 	if (Verbose)
 	    printf("Executing 'require' script.\n");
 	vsystem("chmod +x %s", REQUIRE_FNAME);	/* be sure */
 	if (vsystem("./%s %s DEINSTALL", REQUIRE_FNAME, pkg)) {
-	    whinge("Package %s fails requirements %s", pkg,
-		   Force ? "." : "- not deleted.");
+	    warnx("package %s fails requirements %s", pkg,
+		   Force ? "" : "- not deleted");
 	    if (!Force)
 		return 1;
 	}
@@ -117,32 +122,36 @@ pkg_do(char *pkg)
 	else {
 	    vsystem("chmod +x %s", DEINSTALL_FNAME);	/* make sure */
 	    if (vsystem("./%s %s DEINSTALL", DEINSTALL_FNAME, pkg)) {
-		whinge("De-Install script returned error status.");
+		warnx("deinstall script returned error status");
 		if (!Force)
 		    return 1;
 	    }
 	}
     }
-    if (chdir(home) == FAIL)
-	barf("Toto!  This doesn't look like Kansas anymore!");
+    if (chdir(home) == FAIL) {
+	cleanup(0);
+	errx(2, "Toto! This doesn't look like Kansas anymore!");
+    }
     if (!Fake) {
 	/* Some packages aren't packed right, so we need to just ignore delete_package()'s status.  Ugh! :-( */
 	if (delete_package(FALSE, CleanDirs, &Plist) == FAIL)
-	    warn("Couldn't entirely delete package (perhaps the packing list is\n"
-		 "incorrectly specified?)\n");
+	    warnx(
+	"couldn't entirely delete package (perhaps the packing list is\n"
+	"incorrectly specified?)");
 	if (vsystem("%s -r %s", REMOVE_CMD, LogDir)) {
-	    whinge("Couldn't remove log entry in %s, de-install failed.", LogDir);
-	    return 1;
+	    warnx("couldn't remove log entry in %s, deinstall failed", LogDir);
+	    if (!Force)
+		return 1;
 	}
     }
     for (p = Plist.head; p ; p = p->next) {
 	if (p->type != PLIST_PKGDEP)
 	    continue;
 	if (Verbose)
-	    printf("Attempting to remove dependency on package `%s'\n",
-		   p->name);
+	    printf("Attempting to remove dependency on package `%s'\n", p->name);
 	if (!Fake)
-	    undepend(p, pkg);
+	    findmatchingname((tmp = getenv(PKG_DBDIR)) ? tmp : DEF_LOG_DIR,
+			     p->name, undepend, pkg);
     }
     return 0;
 }
@@ -150,18 +159,26 @@ pkg_do(char *pkg)
 static void
 sanity_check(char *pkg)
 {
-    if (!fexists(CONTENTS_FNAME))
-	barf("Installed package %s has no %s file!", pkg, CONTENTS_FNAME);
+    if (!fexists(CONTENTS_FNAME)) {
+	cleanup(0);
+	errx(2, "installed package %s has no %s file!", pkg, CONTENTS_FNAME);
+    }
 }
 
 void
 cleanup(int sig)
 {
     /* Nothing to do */
+    if(sig)	/* in case this is ever used as a signal handler */
+	exit(1);
 }
 
-static void
-undepend(PackingList p, char *pkgname)
+/* deppkgname is the pkg from which's +REQUIRED_BY file we are
+ * about to remove pkg2delname. This function is called from
+ * findmatchingname(), deppkgname is expanded from a (possible) pattern.
+ */
+int
+undepend(const char *deppkgname, char *pkg2delname)
 {
      char fname[FILENAME_MAX], ftmp[FILENAME_MAX];
      char fbuf[FILENAME_MAX];
@@ -169,49 +186,50 @@ undepend(PackingList p, char *pkgname)
      char *tmp;
      int s;
 
-     sprintf(fname, "%s/%s/%s",
+     (void) snprintf(fname, sizeof(fname), "%s/%s/%s",
 	     (tmp = getenv(PKG_DBDIR)) ? tmp : DEF_LOG_DIR,
-	     p->name, REQUIRED_BY_FNAME);
+	     deppkgname, REQUIRED_BY_FNAME);
      fp = fopen(fname, "r");
      if (fp == NULL) {
-	 whinge("Couldn't open dependency file `%s'", fname);
-	 return;
+	 warnx("couldn't open dependency file `%s'", fname);
+	 return 0;
      }
-     sprintf(ftmp, "%s.XXXXXXXXXX", fname);
+     (void) snprintf(ftmp, sizeof(ftmp), "%s.XXXXXX", fname);
      s = mkstemp(ftmp);
      if (s == -1) {
 	 fclose(fp);
-	 whinge("Couldn't open temp file `%s'", ftmp);
-	 return;
+	 warnx("couldn't open temp file `%s'", ftmp);
+	 return 0;
      }
      fpwr = fdopen(s, "w");
      if (fpwr == NULL) {
 	 close(s);
 	 fclose(fp);
-	 whinge("Couldn't fdopen temp file `%s'", ftmp);
+	 warnx("couldn't fdopen temp file `%s'", ftmp);
 	 remove(ftmp);
-	 return;
+	 return 0;
      }
      while (fgets(fbuf, sizeof(fbuf), fp) != NULL) {
 	 if (fbuf[strlen(fbuf)-1] == '\n')
 	     fbuf[strlen(fbuf)-1] = '\0';
-	 if (strcmp(fbuf, pkgname))		/* no match */
+	 if (strcmp(fbuf, pkg2delname))		/* no match */
 	     fputs(fbuf, fpwr), putc('\n', fpwr);
      }
      (void) fclose(fp);
      if (fchmod(s, 0644) == FAIL) {
-	 whinge("Error changing permission of temp file `%s'", ftmp);
+	 warnx("error changing permission of temp file `%s'", ftmp);
 	 fclose(fpwr);
 	 remove(ftmp);
-	 return;
+	 return 0;
      }
      if (fclose(fpwr) == EOF) {
-	 whinge("Error closing temp file `%s'", ftmp);
+	 warnx("error closing temp file `%s'", ftmp);
 	 remove(ftmp);
-	 return;
+	 return 0;
      }
      if (rename(ftmp, fname) == -1)
-	 warn("Error renaming `%s' to `%s'", ftmp, fname);
+	 warnx("error renaming `%s' to `%s'", ftmp, fname);
      remove(ftmp);			/* just in case */
-     return;
+     
+     return 0;
 }

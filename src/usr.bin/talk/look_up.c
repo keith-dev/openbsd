@@ -1,4 +1,4 @@
-/*	$OpenBSD: look_up.c,v 1.3 1996/06/26 05:40:24 deraadt Exp $	*/
+/*	$OpenBSD: look_up.c,v 1.5 1998/08/18 04:02:18 millert Exp $	*/
 /*	$NetBSD: look_up.c,v 1.3 1994/12/09 02:14:21 jtc Exp $	*/
 
 /*
@@ -38,20 +38,18 @@
 #if 0
 static char sccsid[] = "@(#)look_up.c	8.1 (Berkeley) 6/6/93";
 #endif
-static char rcsid[] = "$OpenBSD: look_up.c,v 1.3 1996/06/26 05:40:24 deraadt Exp $";
+static char rcsid[] = "$OpenBSD: look_up.c,v 1.5 1998/08/18 04:02:18 millert Exp $";
 #endif /* not lint */
 
-#include <sys/types.h>
-#include <sys/socket.h>
-#include <netinet/in.h>
-#include <protocols/talkd.h>
-#include <errno.h>
-#include "talk_ctl.h"
 #include "talk.h"
+#include <errno.h>
+#include <unistd.h>
+#include "talk_ctl.h"
 
 /*
  * See if the local daemon has an invitation for us.
  */
+int
 check_local()
 {
 	CTL_RESPONSE response;
@@ -68,8 +66,8 @@ check_local()
 	if (!look_for_invite(&response))
 		return (0);
 	/*
-	 * There was an invitation waiting for us, 
-	 * so connect with the other (hopefully waiting) party 
+	 * There was an invitation waiting for us,
+	 * so connect with the other (hopefully waiting) party
 	 */
 	current_state = "Waiting to connect with caller";
 	do {
@@ -83,7 +81,7 @@ check_local()
 	if (errno == ECONNREFUSED) {
 		/*
 		 * The caller gave up, but his invitation somehow
-		 * was not cleared. Clear it and initiate an 
+		 * was not cleared. Clear it and initiate an
 		 * invitation. (We know there are no newer invitations,
 		 * the talkd works LIFO.)
 		 */
@@ -99,11 +97,10 @@ check_local()
 /*
  * Look for an invitation on 'machine'
  */
+int
 look_for_invite(rp)
 	CTL_RESPONSE *rp;
 {
-	struct in_addr machine_addr;
-
 	current_state = "Checking for invitation on caller's machine";
 	ctl_transact(his_machine_addr, msg, LOOK_UP, rp);
 	/* the switch is for later options, such as multiple invitations */

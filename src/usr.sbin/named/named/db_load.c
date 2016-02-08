@@ -1,11 +1,11 @@
-/*	$OpenBSD: db_load.c,v 1.3 1997/04/27 23:09:43 deraadt Exp $	*/
+/*	$OpenBSD: db_load.c,v 1.5 1998/05/22 07:09:13 millert Exp $	*/
 
 #if !defined(lint) && !defined(SABER)
 #if 0
 static char sccsid[] = "@(#)db_load.c	4.38 (Berkeley) 3/2/91";
-static char rcsid[] = "$From: db_load.c,v 8.31 1996/12/18 04:09:48 vixie Exp $";
+static char rcsid[] = "$From: db_load.c,v 8.33 1998/05/11 04:19:45 vixie Exp $";
 #else
-static char rcsid[] = "$OpenBSD: db_load.c,v 1.3 1997/04/27 23:09:43 deraadt Exp $";
+static char rcsid[] = "$OpenBSD: db_load.c,v 1.5 1998/05/22 07:09:13 millert Exp $";
 #endif
 #endif /* not lint */
 
@@ -329,6 +329,13 @@ db_load(filename, in_origin, zp, def_domain)
   					n = n * 10 + (*cp++ - '0');
 				}
 				while (isdigit(*cp));
+				if (*cp != '\0') {
+					errs++;
+					syslog(LOG_INFO,
+					       "%s: Line %d: bad TTL: %s.\n",
+					       filename, lineno, buf);
+					break;
+				}
 				if (zp->z_type == Z_CACHE) {
 				    /* this allows the cache entry to age */
 				    /* while sitting on disk (powered off) */
@@ -1369,6 +1376,7 @@ db_load(filename, in_origin, zp, def_domain)
 			continue;
 
 		case ERROR:
+			SETERR("parser error");
 			break;
 		}
  err:
@@ -1994,7 +2002,7 @@ get_netlist(fp, netlistp, allow, print_tag)
 	char *print_tag;
 {
 	struct netinfo *ntp, **end;
-	char buf[BUFSIZ], *maskp;
+	char buf[MAXDNAME], *maskp;
 	struct in_addr ina;
 
 	for (end = netlistp; *end; end = &(**end).next)

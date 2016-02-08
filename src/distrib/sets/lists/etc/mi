@@ -38,6 +38,8 @@
 ./etc/magic
 ./etc/mail.rc
 ./etc/man.conf
+./etc/ssl
+./etc/ssl/private
 ./etc/master.passwd
 ./etc/monthly
 ./etc/motd
@@ -47,9 +49,6 @@
 ./etc/mtree/BSD.x11.dist
 ./etc/mtree/special
 ./etc/myname
-./etc/namedb/localhost.rev
-./etc/namedb/named.boot
-./etc/namedb/root.cache
 ./etc/netstart
 ./etc/networks
 ./etc/newsyslog.conf
@@ -86,6 +85,7 @@
 ./etc/security
 ./etc/sendmail.cf
 ./etc/services
+./etc/dhclient.conf
 ./etc/shells
 ./etc/skeykeys
 ./etc/sliphome/slip.hosts
@@ -109,3 +109,10 @@
 ./var/cron/tabs/root
 ./var/msgs/bounds
 ./etc/sysctl.conf
+./etc/dhcpd.conf
+./etc/dhcpd.interfaces
+./etc/afs
+./etc/afs/CellServDB
+./etc/afs/README
+./etc/afs/ThisCell
+./etc/afs/afsd.conf

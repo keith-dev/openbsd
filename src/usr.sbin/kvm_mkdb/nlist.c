@@ -1,4 +1,4 @@
-/*	$OpenBSD: nlist.c,v 1.7 1997/12/15 10:15:39 deraadt Exp $	*/
+/*	$OpenBSD: nlist.c,v 1.14 1998/09/26 07:16:23 millert Exp $	*/
 
 /*-
  * Copyright (c) 1990, 1993
@@ -37,7 +37,7 @@
 #if 0
 static char sccsid[] = "from: @(#)nlist.c	8.1 (Berkeley) 6/6/93";
 #else
-static char *rcsid = "$OpenBSD: nlist.c,v 1.7 1997/12/15 10:15:39 deraadt Exp $";
+static char *rcsid = "$OpenBSD: nlist.c,v 1.14 1998/09/26 07:16:23 millert Exp $";
 #endif
 #endif /* not lint */
 
@@ -60,9 +60,14 @@ static char *rcsid = "$OpenBSD: nlist.c,v 1.7 1997/12/15 10:15:39 deraadt Exp $"
 #include <sys/mman.h>
 #include <sys/stat.h>
 #include <sys/file.h>
+#include <sys/sysctl.h>
 
-#ifdef DO_ELF
+#ifdef _NLIST_DO_ELF
 #include <elf_abi.h>
+#endif
+
+#ifdef _NLIST_DO_ECOFF
+#include <sys/exec_ecoff.h>
 #endif
 
 typedef struct nlist NLIST;
@@ -71,15 +76,16 @@ typedef struct nlist NLIST;
 
 #define	badfmt(str)	errx(1, "%s: %s: %s", kfile, str, strerror(EFTYPE))
 static char *kfile;
+static char *fmterr;
 
-#if defined(DO_AOUT)
+#if defined(_NLIST_DO_AOUT)
 
 static void badread __P((int, char *));
 static u_long get_kerntext __P((char *kfn, u_int magic));
 
 int
-__aout_knlist(name, db)
-	char *name;
+__aout_knlist(fd, db)
+	int fd;
 	DB *db;
 {
 	register int nsyms;
@@ -87,23 +93,26 @@ __aout_knlist(name, db)
 	FILE *fp;
 	NLIST nbuf;
 	DBT data, key;
-	int fd, nr, strsize;
+	int nr, strsize;
+	size_t len;
 	u_long kerntextoff;
-	char *strtab, buf[1024];
-
-	kfile = name;
-	if ((fd = open(name, O_RDONLY, 0)) < 0)
-		err(1, "%s", name);
+	size_t snamesize;
+	char *strtab, buf[1024], *sname, *p;
 
 	/* Read in exec structure. */
 	nr = read(fd, &ebuf, sizeof(struct exec));
-	if (nr != sizeof(struct exec))
-		return(-1);
+	if (nr != sizeof(struct exec)) {
+		fmterr = "no exec header";
+		return (-1);
+	}
 
 	/* Check magic number and symbol count. */
-	if (N_BADMAG(ebuf))
-		return(-1);
+	if (N_BADMAG(ebuf)) {
+		fmterr = "bad magic number";
+		return (-1);
+	}
 
+	/* Must have a symbol table. */
 	if (!ebuf.a_syms)
 		badfmt("stripped");
 
@@ -111,7 +120,7 @@ __aout_knlist(name, db)
 	if (lseek(fd, N_STROFF(ebuf), SEEK_SET) == -1)
 		badfmt("corrupted string table");
 
-	/* Read in the size of the symbol table. */
+	/* Read in the size of the string table. */
 	nr = read(fd, (char *)&strsize, sizeof(strsize));
 	if (nr != sizeof(strsize))
 		badread(nr, "no symbol table");
@@ -119,62 +128,100 @@ __aout_knlist(name, db)
 	/* Read in the string table. */
 	strsize -= sizeof(strsize);
 	if (!(strtab = malloc(strsize)))
-		err(1, NULL);
+		errx(1, "cannot allocate %d bytes", strsize);
 	if ((nr = read(fd, strtab, strsize)) != strsize)
 		badread(nr, "corrupted symbol table");
 
 	/* Seek to symbol table. */
 	if (!(fp = fdopen(fd, "r")))
-		err(1, "%s", name);
+		err(1, "%s", kfile);
 	if (fseek(fp, N_SYMOFF(ebuf), SEEK_SET) == -1)
-		err(1, "%s", name);
+		err(1, "%s", kfile);
 	
 	data.data = (u_char *)&nbuf;
 	data.size = sizeof(NLIST);
 
-	kerntextoff = get_kerntext(name, N_GETMAGIC(ebuf));
+	kerntextoff = get_kerntext(kfile, N_GETMAGIC(ebuf));
 
 	/* Read each symbol and enter it into the database. */
 	nsyms = ebuf.a_syms / sizeof(struct nlist);
+	sname = NULL;
 	while (nsyms--) {
 		if (fread((char *)&nbuf, sizeof (NLIST), 1, fp) != 1) {
 			if (feof(fp))
 				badfmt("corrupted symbol table");
-			err(1, "%s", name);
+			err(1, "%s", kfile);
 		}
 		if (!nbuf._strx || nbuf.n_type&N_STAB)
 			continue;
 
-		key.data = (u_char *)strtab + nbuf._strx - sizeof(long);
-		key.size = strlen((char *)key.data);
+		/* If the symbol does not start with '_', add one */
+		p = strtab + nbuf._strx - sizeof(int);
+		if (*p != '_') {
+			len = strlen(p) + 1;
+			if (len >= snamesize)
+				sname = realloc(sname, len + 1024);
+			if (sname == NULL)
+				errx(1, "cannot allocate memory");
+			*sname = '_';
+			strcpy(sname+1, p);
+			key.data = (u_char *)sname;
+			key.size = len;
+		} else {
+			key.data = (u_char *)p;
+			key.size = strlen((char *)key.data);
+		}
 		if (db->put(db, &key, &data, 0))
 			err(1, "record enter");
 
 		if (strcmp((char *)key.data, VRS_SYM) == 0) {
-			long cur_off, voff;
-			/*
-			 * Calculate offset relative to a normal (non-kernel)
-			 * a.out.  Kerntextoff is where the kernel is really
-			 * loaded; N_TXTADDR is where a normal file is loaded.
-			 * From there, locate file offset in text or data.
-			 */
-			voff = nbuf.n_value - kerntextoff + N_TXTADDR(ebuf);
-			if ((nbuf.n_type & N_TYPE) == N_TEXT)
-				voff += N_TXTOFF(ebuf) - N_TXTADDR(ebuf);
-			else
-				voff += N_DATOFF(ebuf) - N_DATADDR(ebuf);
-			cur_off = ftell(fp);
-			if (fseek(fp, voff, SEEK_SET) == -1)
-				badfmt("corrupted string table");
+			long cur_off = -1;
 
-			/*
-			 * Read version string up to, and including newline.
-			 * This code assumes that a newline terminates the
-			 * version line.
-			 */
-			if (fgets(buf, sizeof(buf), fp) == NULL)
-				badfmt("corrupted string table");
+			if (ebuf.a_data && ebuf.a_text > __LDPGSZ) {
+				/*
+				 * Calculate offset relative to a normal
+				 * (non-kernel) a.out.  Kerntextoff is where the
+				 * kernel is really loaded; N_TXTADDR is where
+				 * a normal file is loaded.  From there, locate
+				 * file offset in text or data.
+				 */
+				long voff;
 
+				voff = nbuf.n_value-kerntextoff+N_TXTADDR(ebuf);
+				if ((nbuf.n_type & N_TYPE) == N_TEXT)
+					voff += N_TXTOFF(ebuf)-N_TXTADDR(ebuf);
+				else
+					voff += N_DATOFF(ebuf)-N_DATADDR(ebuf);
+				cur_off = ftell(fp);
+				if (fseek(fp, voff, SEEK_SET) == -1)
+					badfmt("corrupted string table");
+
+				/*
+				 * Read version string up to, and including
+				 * newline.  This code assumes that a newline
+				 * terminates the version line.
+				 */
+				if (fgets(buf, sizeof(buf), fp) == NULL)
+					badfmt("corrupted string table");
+			} else {
+				/*
+				 * No data segment and text is __LDPGSZ.
+				 * This must be /dev/ksyms or a look alike.
+				 * Use sysctl() to get version since we
+				 * don't have real text or data.
+				 */
+				int mib[2];
+
+				mib[0] = CTL_KERN;
+				mib[1] = KERN_VERSION;
+				len = sizeof(buf);
+				if (sysctl(mib, 2, buf, &len, NULL, 0) == -1) {
+					err(1, "sysctl can't find kernel "
+					    "version string");
+				}
+				if ((p = strchr(buf, '\n')) != NULL)
+					*(p+1) = '\0';
+			}
 			key.data = (u_char *)VRS_KEY;
 			key.size = sizeof(VRS_KEY) - 1;
 			data.data = (u_char *)buf;
@@ -185,12 +232,12 @@ __aout_knlist(name, db)
 			/* Restore to original values. */
 			data.data = (u_char *)&nbuf;
 			data.size = sizeof(NLIST);
-			if (fseek(fp, cur_off, SEEK_SET) == -1)
+			if (cur_off != -1 && fseek(fp, cur_off, SEEK_SET) == -1)
 				badfmt("corrupted string table");
 		}
 	}
 	(void)fclose(fp);
-	return(0);
+	return (0);
 }
 
 /*
@@ -219,8 +266,6 @@ get_kerntext(name, magic)
 	if (nlist(name, nl) != 0)
 		return (KERNTEXTOFF);
 
-	if (magic == ZMAGIC || magic == QMAGIC)
-		return (nl[0].n_value - sizeof(struct exec));
 	return (nl[0].n_value);
 }
 
@@ -234,41 +279,40 @@ badread(nr, p)
 	badfmt(p);
 }
 
-#endif /* DO_AOUT */
+#endif /* _NLIST_DO_AOUT */
 
-#ifdef DO_ELF
+#ifdef _NLIST_DO_ELF
 int
-__elf_knlist(name, db)
-	char *name;
+__elf_knlist(fd, db)
+	int fd;
 	DB *db;
 {
-	register struct nlist *p;
 	register caddr_t strtab;
 	register off_t symstroff, symoff;
 	register u_long symsize;
 	register u_long kernvma, kernoffs;
-	register int cc, i;
+	register int i;
 	Elf32_Sym sbuf;
-	Elf32_Sym *s;
 	size_t symstrsize;
 	char *shstr, buf[1024];
 	Elf32_Ehdr eh;
 	Elf32_Shdr *sh = NULL;
-	struct stat st;
 	DBT data, key;
 	NLIST nbuf;
 	FILE *fp;
 
-	kfile = name;
-	if ((fp = fopen(name, "r")) < 0)
-		err(1, "%s", name);
+	if ((fp = fdopen(fd, "r")) < 0)
+		err(1, "%s", kfile);
 
 	if (fseek(fp, (off_t)0, SEEK_SET) == -1 ||
 	    fread(&eh, sizeof(eh), 1, fp) != 1 ||
 	    !IS_ELF(eh))
-		return(-1);
+		return (-1);
 
 	sh = (Elf32_Shdr *)malloc(sizeof(Elf32_Shdr) * eh.e_shnum);
+	if (sh == NULL)
+		errx(1, "cannot allocate %d bytes",
+		    sizeof(Elf32_Shdr) * eh.e_shnum);
 
 	if (fseek (fp, eh.e_shoff, SEEK_SET) < 0)
 		badfmt("no exec header");
@@ -277,6 +321,8 @@ __elf_knlist(name, db)
 		badfmt("no exec header");
 
 	shstr = (char *)malloc(sh[eh.e_shstrndx].sh_size);
+	if (shstr == NULL)
+		errx(1, "cannot allocate %d bytes", sh[eh.e_shstrndx].sh_size);
 	if (fseek (fp, sh[eh.e_shstrndx].sh_offset, SEEK_SET) < 0)
 		badfmt("corrupt file");
 	if (fread(shstr, sh[eh.e_shstrndx].sh_size, 1, fp) != 1)
@@ -326,7 +372,7 @@ __elf_knlist(name, db)
 		if (fread((char *)&sbuf, sizeof(sbuf), 1, fp) != 1) {
 			if (feof(fp))
 				badfmt("corrupted symbol table");
-			err(1, "%s", name);
+			err(1, "%s", kfile);
 		}
 		if (!sbuf.st_name)
 			continue;
@@ -396,44 +442,169 @@ __elf_knlist(name, db)
 	}
 	munmap(strtab, symstrsize);
 	(void)fclose(fp);
-	return(0);
+	return (0);
 }
-#endif /* DO_ELF */
+#endif /* _NLIST_DO_ELF */
 
-#ifdef DO_ECOFF
+#ifdef _NLIST_DO_ECOFF
+
+#define check(off, size)	((off < 0) || (off + size > mappedsize))
+#define BAD			do { rv = -1; goto out; } while (0)
+#define BADUNMAP		do { rv = -1; goto unmap; } while (0)
+#define ECOFF_INTXT(p, e)	((p) > (e)->a.text_start && \
+				 (p) < (e)->a.text_start + (e)->a.tsize)
+#define ECOFF_INDAT(p, e)	((p) > (e)->a.data_start && \
+				 (p) < (e)->a.data_start + (e)->a.dsize)
+
 int
-__ecoff_knlist(name, db)
-	char *name;
+__ecoff_knlist(fd, db)
+	int fd;
 	DB *db;
 {
-	return (-1);
+	struct ecoff_exechdr *exechdrp;
+	struct ecoff_symhdr *symhdrp;
+	struct ecoff_extsym *esyms;
+	struct stat st;
+	char *mappedfile, *cp;
+	size_t mappedsize;
+	u_long symhdroff, extstroff, off;
+	u_int symhdrsize;
+	int rv = 0;
+	long i, nesyms;
+	DBT data, key;
+	NLIST nbuf;
+	char *sname = NULL;
+	size_t len, snamesize = 0;
+
+	if (fstat(fd, &st) < 0)
+		err(1, "can't stat %s", kfile);
+	if (st.st_size > SIZE_T_MAX) {
+		fmterr = "file too large";
+		BAD;
+	}
+
+	mappedsize = st.st_size;
+	mappedfile = mmap(NULL, mappedsize, PROT_READ, MAP_COPY|MAP_FILE, fd, 0);
+	if (mappedfile == MAP_FAILED) {
+		fmterr = "unable to mmap";
+		BAD;
+	}
+
+	if (check(0, sizeof *exechdrp))
+		BADUNMAP;
+	exechdrp = (struct ecoff_exechdr *)&mappedfile[0];
+
+	if (ECOFF_BADMAG(exechdrp))
+		BADUNMAP;
+
+	symhdroff = exechdrp->f.f_symptr;
+	symhdrsize = exechdrp->f.f_nsyms;
+	if (symhdrsize == 0)
+		badfmt("stripped");
+
+	if (check(symhdroff, sizeof *symhdrp) ||
+	    sizeof *symhdrp != symhdrsize)
+		BADUNMAP;
+	symhdrp = (struct ecoff_symhdr *)&mappedfile[symhdroff];
+
+	nesyms = symhdrp->esymMax;
+	if (check(symhdrp->cbExtOffset, nesyms * sizeof *esyms))
+		BADUNMAP;
+	esyms = (struct ecoff_extsym *)&mappedfile[symhdrp->cbExtOffset];
+	extstroff = symhdrp->cbSsExtOffset;
+
+	data.data = (u_char *)&nbuf;
+	data.size = sizeof(NLIST);
+
+	for (sname = NULL, i = 0; i < nesyms; i++) {
+		/* Need to prepend a '_' */
+		len = strlen(&mappedfile[extstroff + esyms[i].es_strindex]) + 1;
+		if (len >= snamesize)
+			sname = realloc(sname, len + 1024);
+		if (sname == NULL)
+			errx(1, "cannot allocate memory");
+		*sname = '_';
+		strcpy(sname+1, &mappedfile[extstroff + esyms[i].es_strindex]);
+
+		/* Fill in NLIST */
+		bzero(&nbuf, sizeof(nbuf));
+		nbuf.n_value = esyms[i].es_value;
+		nbuf.n_type = N_EXT;		/* XXX */
+
+		/* Store entry in db */
+		key.data = (u_char *)sname;
+		key.size = strlen(sname);
+		if (db->put(db, &key, &data, 0))
+			err(1, "record enter");
+
+		if (strcmp(sname, VRS_SYM) == 0) {
+			key.data = (u_char *)VRS_KEY;
+			key.size = sizeof(VRS_KEY) - 1;
+
+			/* Version string may be in either text or data segs */
+			if (ECOFF_INTXT(nbuf.n_value, exechdrp))
+				off = nbuf.n_value - exechdrp->a.text_start +
+				    ECOFF_TXTOFF(exechdrp);
+			else if (ECOFF_INDAT(nbuf.n_value, exechdrp))
+				off = nbuf.n_value - exechdrp->a.data_start +
+				    ECOFF_DATOFF(exechdrp);
+			else
+				err(1, "unable to find version string");
+
+			/* Version string should end in newline but... */
+			data.data = &mappedfile[off];
+			if ((cp = strchr(data.data, '\n')) != NULL)
+				data.size = cp - (char *)data.data;
+			else
+				data.size = strlen((char *)data.data);
+
+			if (db->put(db, &key, &data, 0))
+				err(1, "record enter");
+
+			/* Restore to original values */
+			data.data = (u_char *)&nbuf;
+			data.size = sizeof(nbuf);
+		}
+		
+	}
+
+unmap:
+	munmap(mappedfile, mappedsize);
+out:
+	return (rv);
 }
-#endif /* DO_ECOFF */
+#endif /* _NLIST_DO_ECOFF */
 
 static struct knlist_handlers {
-	int	(*fn) __P((char *name, DB *db));
+	int	(*fn) __P((int fd, DB *db));
 } nlist_fn[] = {
-#ifdef DO_AOUT
+#ifdef _NLIST_DO_AOUT
 	{ __aout_knlist },
 #endif
-#ifdef DO_ELF
+#ifdef _NLIST_DO_ELF
 	{ __elf_knlist },
 #endif
-#ifdef DO_ECOFF
+#ifdef _NLIST_DO_ECOFF
 	{ __ecoff_knlist },
 #endif
 };
 
-void
-create_knlist(name, db)
+int
+create_knlist(name, fd, db)
 	char *name;
+	int fd;
 	DB *db;
 {
-	int n, i;
+	int i, error;
 
 	for (i = 0; i < sizeof(nlist_fn)/sizeof(nlist_fn[0]); i++) {
-		n = (nlist_fn[i].fn)(name, db);
-		if (n != -1)
+		fmterr = NULL;
+		kfile = name;
+		if ((error = (nlist_fn[i].fn)(fd, db)) == 0)
 			break;
 	}
+	if (fmterr != NULL)
+		badfmt(fmterr);
+
+	return(error);
 }

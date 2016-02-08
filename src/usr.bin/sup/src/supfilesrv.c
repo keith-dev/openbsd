@@ -1,4 +1,4 @@
-/*	$OpenBSD: supfilesrv.c,v 1.13 1997/11/17 08:54:05 deraadt Exp $	*/
+/*	$OpenBSD: supfilesrv.c,v 1.15 1998/06/03 16:20:38 deraadt Exp $	*/
 
 /*
  * Copyright (c) 1992 Carnegie Mellon University
@@ -351,12 +351,14 @@ char **argv;
 		(void) serviceend ();
 		exit (0);
 	}
+	memset(&ign, 0, sizeof ign);
 	ign.sa_handler = SIG_IGN;
 	sigemptyset(&ign.sa_mask);
 	ign.sa_flags = 0;
 	(void) sigaction (SIGHUP,&ign,NULL);
 	(void) sigaction (SIGINT,&ign,NULL);
 	(void) sigaction (SIGPIPE,&ign,NULL);
+	memset(&chld, 0, sizeof chld);
 	chld.sa_handler = chldsig;
 	sigemptyset(&chld.sa_mask);
 	chld.sa_flags = 0;
@@ -1057,7 +1059,7 @@ void *v;
 	}
 	switch (t->Tmode&S_IFMT) {
 	case S_IFLNK:
-		if ((x = readlink (name,slinkname,STRINGLENGTH)) <= 0) {
+		if ((x = readlink (name,slinkname,STRINGLENGTH-1)) <= 0) {
 			(void) Tinsert (&denyT,name,FALSE);
 			return (SCMOK);
 		}

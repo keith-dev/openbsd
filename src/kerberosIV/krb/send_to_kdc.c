@@ -1,5 +1,5 @@
-/*	$OpenBSD: send_to_kdc.c,v 1.10 1998/02/25 15:51:39 art Exp $	*/
-/* $KTH: send_to_kdc.c,v 1.47 1997/11/07 17:31:38 bg Exp $ */
+/*	$OpenBSD: send_to_kdc.c,v 1.13 1998/08/16 20:48:39 art Exp $	*/
+/*	$KTH: send_to_kdc.c,v 1.54 1998/02/17 23:55:35 bg Exp $		*/
 
 /*
  * This source code is no longer held under any constraint of USA
@@ -135,9 +135,14 @@ send_to_kdc(KTEXT pkt, KTEXT rpkt, char *realm)
             continue;
         no_host = 0;    /* found at least one */
 	while ((p = *(host->h_addr_list)++)) {
-	    hosts = realloc(hosts, sizeof(*hosts) * (n_hosts + 1));
-	    if (hosts == NULL)
+	    struct host *temp;
+
+	    temp = realloc(hosts, sizeof(*hosts) * (n_hosts + 1));
+	    if (temp == NULL) {
+	        free(hosts);
 		return SKDC_CANT;
+	    }
+	    hosts = temp;
 	    memset (&hosts[n_hosts].addr, 0, sizeof(hosts[n_hosts].addr));
 	    hosts[n_hosts].addr.sin_family = host->h_addrtype;
 	    hosts[n_hosts].addr.sin_port = htons(k_host->port);
@@ -189,11 +194,24 @@ static int udp_socket(void)
 
 static int udp_connect(int s, struct sockaddr_in *adr)
 {
+    if(krb_debug) {
+	krb_warning("connecting to %s udp, port %d\n", 
+		    inet_ntoa(adr->sin_addr), 
+		    ntohs(adr->sin_port));
+    }
+
     return connect(s, (struct sockaddr*)adr, sizeof(*adr));
 }
 
 static int udp_send(int s, struct sockaddr_in* adr, KTEXT pkt)
 {
+    if(krb_debug) {
+	krb_warning("sending %d bytes to %s, udp port %d\n", 
+		    pkt->length,
+		    inet_ntoa(adr->sin_addr), 
+		    ntohs(adr->sin_port));
+    }
+
     return send(s, pkt->dat, pkt->length, 0);
 }
 
@@ -204,12 +222,26 @@ static int tcp_socket(void)
 
 static int tcp_connect(int s, struct sockaddr_in *adr)
 {
+    if(krb_debug) {
+	krb_warning("connecting to %s, tcp port %d\n", 
+		    inet_ntoa(adr->sin_addr), 
+		    ntohs(adr->sin_port));
+    }
+
     return connect(s, (struct sockaddr*)adr, sizeof(*adr));
 }
 
 static int tcp_send(int s, struct sockaddr_in* adr, KTEXT pkt)
 {
     unsigned char len[4];
+
+    if(krb_debug) {
+	krb_warning("sending %d bytes to %s, tcp port %d\n", 
+		    pkt->length,
+		    inet_ntoa(adr->sin_addr), 
+		    ntohs(adr->sin_port));
+    }
+
     krb_put_int(pkt->length, len, 4);
     if(send(s, len, sizeof(len), 0) != sizeof(len))
 	return -1;
@@ -219,6 +251,10 @@ static int tcp_send(int s, struct sockaddr_in* adr, KTEXT pkt)
 static int udptcp_recv(void *buf, size_t len, KTEXT rpkt)
 {
     int pktlen=MIN(len, MAX_KTXT_LEN - 1);
+
+    if(krb_debug)
+	krb_warning("recieved %d bytes on udp/tcp socket\n", len);
+
     memcpy(rpkt->dat, buf, pktlen);
     rpkt->length = pktlen;
     return 0;
@@ -250,7 +286,7 @@ static int url_parse(const char *url, char *host, size_t len, short *port)
 
 static int http_connect(int s, struct sockaddr_in *adr)
 {
-    char *proxy = getenv(PROXY_VAR);
+    const char *proxy = krb_get_config_string(PROXY_VAR);
     char host[MAXHOSTNAMELEN];
     short port;
     struct hostent *hp;
@@ -259,8 +295,11 @@ static int http_connect(int s, struct sockaddr_in *adr)
     if (adr == NULL)
       return -1;
 
-    if(proxy == NULL)
+    if(proxy == NULL) {
+	if(krb_debug)
+	    krb_warning("Not using proxy.\n");
 	return tcp_connect(s, adr);
+    }
 
     if(url_parse(proxy, host, sizeof(host), &port) < 0)
 	return -1;
@@ -273,6 +312,11 @@ static int http_connect(int s, struct sockaddr_in *adr)
     sin.sin_family = AF_INET;
     memcpy(&sin.sin_addr, hp->h_addr, sizeof(sin.sin_addr));
     sin.sin_port = htons(port);
+    if(krb_debug) {
+	krb_warning("connecting to proxy on %s (%s) port %d\n", 
+		    host, inet_ntoa(sin.sin_addr), port);
+    }
+
     return connect(s, (struct sockaddr*)&sin, sizeof(sin));
 }
 
@@ -281,27 +325,35 @@ static int http_send(int s, struct sockaddr_in* adr, KTEXT pkt)
     char *str;
     char *msg;
 
-
     if(base64_encode(pkt->dat, pkt->length, &str) < 0)
 	return -1;
 
-    if(getenv(PROXY_VAR)){
-	if (asprintf(&msg, "GET http://%s:%d/%s HTTP/1.0\r\n\r\n",
+    if(krb_get_config_string(PROXY_VAR)){
+	if(krb_debug) {
+	    krb_warning("sending %d bytes to %s, tcp port %d (via proxy)\n", 
+			pkt->length,
+			inet_ntoa(adr->sin_addr), 
+			ntohs(adr->sin_port));
+	}
+
+	asprintf(&msg, "GET http://%s:%d/%s HTTP/1.0\r\n\r\n",
 		     inet_ntoa(adr->sin_addr),
 		     ntohs(adr->sin_port),
-		     str) == -1){
-	    free(str);
-	    str = NULL;
-	    return -1;
+		     str);
+    } else {
+	if(krb_debug) {
+	    krb_warning("sending %d bytes to %s, http port %d\n", 
+			pkt->length,
+			inet_ntoa(adr->sin_addr), 
+			ntohs(adr->sin_port));
 	}
-    }else
-	if (asprintf(&msg, "GET %s HTTP/1.0\r\n\r\n", str) == -1){
-	    free(str);
-	    str = NULL;
-	    return -1;
-	}
+	asprintf(&msg, "GET %s HTTP/1.0\r\n\r\n", str);
+    }
     free(str);
     str = NULL;
+
+    if (msg == NULL)
+	return -1;
 	
     if(send(s, msg, strlen(msg), 0) != strlen(msg)){
 	free(msg);
@@ -331,6 +383,8 @@ static int http_recv(void *buf, size_t len, KTEXT rpkt)
     }
 
     p += 4;
+    if(krb_debug)
+	krb_warning("recieved %d bytes on http socket\n", (tmp + len) - p);
     if (p >= tmp+len) {
 	free(tmp);
 	tmp = NULL;
@@ -365,7 +419,7 @@ send_recv(KTEXT pkt, KTEXT rpkt, int proto, struct sockaddr_in *adr,
 {
     int i;
     int s;
-    unsigned char buf[2048];
+    unsigned char buf[MAX_KTXT_LEN];
     int offset = 0;
     fd_set *fdsp = NULL;
     int fdsn;

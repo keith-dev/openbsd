@@ -1,4 +1,4 @@
-/*	$OpenBSD: user.c,v 1.12 1997/12/23 23:53:02 deraadt Exp $	*/
+/*	$OpenBSD: user.c,v 1.14 1998/09/14 03:54:35 rahnds Exp $	*/
 
 /*
  * Copyright (c) 1997 Tobias Weingartner
@@ -74,26 +74,7 @@ USER_init(disk, tt)
 	int fd;
 	char mbr_buf[DEV_BSIZE];
 
-	/* Fix up given mbr for this disk */
-	tt->part[0].flag = 0;
-	tt->part[1].flag = 0;
-	tt->part[2].flag = 0;
-	tt->part[3].flag = DOSACTIVE;
-	tt->signature = DOSMBR_SIGNATURE;
-
-	/* Use whole disk, save for first head, on first cyl. */
-	tt->part[3].id = DOSPTYP_OPENBSD;
-	tt->part[3].scyl = 0;
-	tt->part[3].shead = 1;
-	tt->part[3].ssect = 1;
-
-	/* Go right to the end */
-	tt->part[3].ecyl = disk->real->cylinders;
-	tt->part[3].ehead = disk->real->heads;
-	tt->part[3].esect = disk->real->sectors;
-
-	/* Fix up start/length fields */
-	PRT_fix_BN(disk, &tt->part[3]);
+	MBR_init(disk, tt);
 
 	/* Write sector 0 */
 	printf("\a\n"
@@ -138,7 +119,7 @@ USER_modify(disk, tt, offset, reloff)
 	DISK_close(fd);
 
 	/* Parse the sucker */
-	MBR_parse(mbr_buf, offset, reloff, &mbr);
+	MBR_parse(disk, mbr_buf, offset, reloff, &mbr);
 
 	printf("Enter 'help' for information\n");
 
@@ -213,7 +194,7 @@ USER_print_disk(disk)
 
 	do {
 		MBR_read(fd, (off_t)offset, mbr_buf);
-		MBR_parse(mbr_buf, offset, firstoff, &mbr);
+		MBR_parse(disk, mbr_buf, offset, firstoff, &mbr);
 
 		printf("Offset: %d\t", (int)offset);
 		MBR_print(&mbr);

@@ -27,7 +27,7 @@
 .\" (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
 .\" THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 .\"
-.\"	$OpenBSD: update.8,v 1.4 1996/07/13 22:45:25 millert Exp $
+.\"	$OpenBSD: update.8,v 1.6 1998/09/01 16:38:22 deraadt Exp $
 .\"
 .Dd June 8, 1996
 .Dt UPDATE 8
@@ -44,7 +44,7 @@ command no longer exists, but has been incorporated into
 the kernel where it will flush dirty buffers that have not
 been touched for thirty seconds or more.
 .Pp
-The same effect can be seen by using the
+The same effect can be obtained by using the
 .Xr sync 8
 command, although the in-kernel
 .Nm update
@@ -57,7 +57,7 @@ process will do this in a staggered manner.
 .Sh BUGS
 It is possible on some systems, that a
 .Xr sync
-occuring simultaneously with a crash may cause
+occurring simultaneously with a crash may cause
 file system damage. See
 .Xr fsck 8 .
 .Sh HISTORY

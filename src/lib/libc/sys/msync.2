@@ -1,3 +1,4 @@
+.\"	$OpenBSD: msync.2,v 1.10 1998/07/10 07:06:18 deraadt Exp $
 .\"	$NetBSD: msync.2,v 1.8 1995/10/12 15:41:09 jtc Exp $
 .\"
 .\" Copyright (c) 1991, 1993
@@ -62,7 +63,7 @@ if
 is non-zero, only modified pages containing
 .Fa addr
 and
-.Fa len
+.Fa len-1
 succeeding locations will be flushed.
 Any required synchronization of memory caches
 will also take place at this time.
@@ -109,7 +110,7 @@ Addresses in the specified region are outside the range allowed
 for the address space of the process, or specify one or more pages
 which are unmapped.
 .It Bq Er EIO
-An I/O error occured while writing.
+An I/O error occurred while writing.
 .Sh BUGS
 Writes are currently done synchronously even if the
 .Dv MS_ASYNC
@@ -123,6 +124,7 @@ flag is specified.
 .Sh HISTORY
 The
 .Fn msync
-function first appeared in 4.4BSD.
+function first appeared in
+.Bx 4.4 .
 It was modified to conform to
 .St -p1003.1b-93

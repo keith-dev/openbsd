@@ -1,4 +1,4 @@
-#	$OpenBSD: install.md,v 1.18 1998/03/27 23:28:17 deraadt Exp $
+#	$OpenBSD: install.md,v 1.22 1998/10/09 11:21:03 deraadt Exp $
 #	$NetBSD: install.md,v 1.3.2.5 1996/08/26 15:45:28 gwr Exp $
 #
 #
@@ -93,27 +93,33 @@ __mfs_failed_1
 	fi
 }
 
+md_get_msgbuf() {
+        # Only want to see one boot's worth of info
+        sed -n -f /dev/stdin $MSGBUF <<- OOF
+                /^Copyright (c)/h
+                /^Copyright (c)/!H
+                \${
+                        g
+                        p
+                }
+	OOF
+}
+
 md_machine_arch() {
 	cat /kern/machine
 }
 
 md_get_diskdevs() {
 	# return available disk devices
-	# dmesg | egrep "(^sd[0-9] |^x[dy][0-9] )" | cut -d" " -f1 | sort -u
-	sed -n -e '1,/^OpenBSD /d' -e '/^sd[0-9] /{s/ .*//;p;}' \
-				-e '/^x[dy][0-9] /{s/ .*//;p;}' <  $MSGBUF
+	md_get_msgbuf | sed -n -e '1,/^OpenBSD /d' \
+				-e '/^sd[0-9] /{s/ .*//;p;}' \
+				-e '/^x[dy][0-9] /{s/ .*//;p;}' 
 }
 
 md_get_cddevs() {
 	# return available CDROM devices
-	# dmesg | grep "^cd[0-9] " | cut -d" " -f1 | sort -u
-	sed -n -e '1,/^OpenBSD /d' -e '/^cd[0-9] /{s/ .*//;p;}' < $MSGBUF
-}
-
-md_get_ifdevs() {
-	# return available network devices
-	# dmesg | egrep "(^le[0-9] |^ie[0-9] )" | cut -d" " -f1 | sort -u
-	sed -n -e '1,/^OpenBSD /d' -e '/^le[0-9] /{s/ .*//;p;}'< $MSGBUF
+	md_get_msgbuf | sed -n -e '1,/^OpenBSD /d' \
+				-e '/^cd[0-9] /{s/ .*//;p;}'
 }
 
 md_get_partition_range() {
@@ -211,7 +217,7 @@ md_copy_kernel() {
 md_welcome_banner() {
 {
 	if [ "$MODE" = "install" ]; then
-		echo "Welcome to the OpenBSD/sparc ${VERSION} installation program."
+		echo "Welcome to the OpenBSD/sparc ${VERSION_MAJOR}.${VERSION_MINOR} installation program."
 		cat << \__welcome_banner_1
 
 This program is designed to help you put OpenBSD on your disk in a simple and

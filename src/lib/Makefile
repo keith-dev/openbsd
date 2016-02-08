@@ -1,24 +1,17 @@
-#	$OpenBSD: Makefile,v 1.23 1997/10/20 00:56:40 deraadt Exp $
+#	$OpenBSD: Makefile,v 1.31 1998/10/07 02:37:35 deraadt Exp $
 #	$NetBSD: Makefile,v 1.20.4.1 1996/06/14 17:22:38 cgd Exp $
 
 SUBDIR=	csu libarch libc libcom_err libcompat libcurses libdes libedit \
-	libform libl libm libmenu libocurses libpanel libpcap libresolv \
-	librpcsvc libskey libss libtelnet libterm libtermlib libutil libwrap \
-	liby libz
+	libform libl libm libmenu libocurses libossaudio libpanel libpcap \
+	libresolv librpcsvc libskey libssl libtelnet libutil libwrap liby libz
 
-# XXX Temporarely until all ports are able to use libkvm (leo)
+# XXX Temporarily until i386, pmax and mac68k are able to use libkvm
 .if	make(obj)
 SUBDIR+=	libkvm libkvm.old
-.elif	(${MACHINE} == "alpha") || \
-	(${MACHINE} == "amiga") || \
-	(${MACHINE} == "atari") || \
-	(${MACHINE} == "powerpc") || \
-	(${MACHINE} == "mvme88k") || \
-	(${MACHINE} == "sparc") || \
-	(${MACHINE} == "sun3")
-SUBDIR+=        libkvm
-.else
+.elif	(${MACHINE} == "i386" || ${MACHINE} == "pmax" || ${MACHINE} == "mac68k")
 SUBDIR+=        libkvm.old
+.else
+SUBDIR+=        libkvm
 .endif
 
 .include <bsd.subdir.mk>

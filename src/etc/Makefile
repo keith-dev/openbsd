@@ -1,4 +1,4 @@
-#	$OpenBSD: Makefile,v 1.85 1998/04/07 23:24:06 ryker Exp $
+#	$OpenBSD: Makefile,v 1.92 1998/09/19 00:48:33 todd Exp $
 
 TZDIR=		/usr/share/zoneinfo
 LOCALTIME=	US/Pacific
@@ -13,13 +13,13 @@ NOOBJ=	oobj
 BINOWN= root
 BINGRP= wheel
 BIN1=	aliases bootptab changelist ccd.conf csh.cshrc csh.login csh.logout \
-	daily dm.conf exports ftpusers ftpchroot gettytab group hosts \
-	hosts.lpd ifaliases inetd.conf ipf.rules ksh.kshrc \
-	locate.rc man.conf monthly motd mrouted.conf myname ipnat.rules \
-	netstart networks newsyslog.conf passwd.conf phones printcap \
-	protocols rbootd.conf rc rc.conf rc.local rc.securelevel remote rpc \
-	security services shells sysctl.conf syslog.conf weekly \
-	etc.${MACHINE}/disktab
+	daily dhcpd.conf dhcpd.interfaces dm.conf exports ftpusers \
+	ftpchroot gettytab group hosts hosts.lpd ifaliases inetd.conf \
+	ipf.rules ksh.kshrc locate.rc man.conf monthly motd mrouted.conf \
+	myname ipnat.rules netstart networks newsyslog.conf passwd.conf \
+	phones printcap protocols rbootd.conf rc rc.conf rc.local \
+	rc.securelevel remote rpc security services shells syslog.conf weekly \
+	etc.${MACHINE}/disktab dhclient.conf
 
 # -rw-rw-r--
 BIN2=	motd
@@ -55,6 +55,10 @@ distribution-etc-root-var: distrib-dirs
 	    chown ${BINOWN} ${DESTDIR}/etc/ttys && \
 	    chgrp ${BINGRP} ${DESTDIR}/etc/ttys && \
 	    chmod 644 ${DESTDIR}/etc/ttys
+	cat sysctl.conf etc.${MACHINE}/sysctl.conf > ${DESTDIR}/etc/sysctl.conf && \
+	    chown ${BINOWN} ${DESTDIR}/etc/sysctl.conf && \
+	    chgrp ${BINGRP} ${DESTDIR}/etc/sysctl.conf && \
+	    chmod 644 ${DESTDIR}/etc/ttys
 	cat fbtab.head etc.${MACHINE}/fbtab fbtab.tail > ${DESTDIR}/etc/fbtab && \
 	    chown ${BINOWN} ${DESTDIR}/etc/fbtab && \
 	    chgrp ${BINGRP} ${DESTDIR}/etc/fbtab && \
@@ -83,7 +87,7 @@ distribution-etc-root-var: distrib-dirs
 		    ${DESTDIR}/etc/kerberosIV; \
 		${INSTALL} -c -o root -g wheel -m 644 krb.conf \
 		    ${DESTDIR}/etc/kerberosIV; \
-		${INSTALL} -c -o root -g wheel -m 444 krb.realms \
+		${INSTALL} -c -o root -g wheel -m 644 krb.realms \
 		    ${DESTDIR}/etc/kerberosIV)
 	(cd amd; \
 		${INSTALL} -c -o root -g wheel -m 644 master.sample \
@@ -127,8 +131,17 @@ distribution-etc-root-var: distrib-dirs
 		    ${DESTDIR}/etc/ppp; \
 		${INSTALL} -c -o root -g wheel -m 644 ppp.secret.sample \
 		    ${DESTDIR}/etc/ppp)
-	cd namedb; ${INSTALL} -c -o ${BINOWN} -g ${BINGRP} -m 644 ${NAMEDB} \
-	    ${DESTDIR}/etc/namedb
+	(cd afs; \
+		${INSTALL} -c -o root -g wheel -m 644 afsd.conf \
+		    ${DESTDIR}/etc/afs; \
+		${INSTALL} -c -o root -g wheel -m 644 ThisCell \
+		    ${DESTDIR}/etc/afs; \
+		${INSTALL} -c -o root -g wheel -m 644 CellServDB \
+		    ${DESTDIR}/etc/afs; \
+		${INSTALL} -c -o root -g wheel -m 644 README \
+		    ${DESTDIR}/etc/afs)
+	cd namedb; ${INSTALL} -c -o named -g ${BINGRP} -m 644 ${NAMEDB} \
+	    ${DESTDIR}/var/named
 	/bin/rm -f ${DESTDIR}/etc/localtime
 	ln -s ${TZDIR}/${LOCALTIME} ${DESTDIR}/etc/localtime
 	/bin/rm -f ${DESTDIR}/etc/rmt
@@ -207,7 +220,7 @@ release:
 .else
 release: distribution snap_pre snap_md
 	cd ${.CURDIR}/../distrib/notes; ${MAKE}; ${MAKE} install
-	cd ${.CURDIR}/../distrib/sets; csh maketars
+	cd ${.CURDIR}/../distrib/sets; csh maketars ${OSrev}
 	-cp ${DESTDIR}/snapshot/bsd* ${RELEASEDIR}
 	-cp ${DESTDIR}/snapshot/*boot* ${RELEASEDIR}
 	-cp ${DESTDIR}/snapshot/*BOOT* ${RELEASEDIR}

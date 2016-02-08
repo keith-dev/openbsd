@@ -1,4 +1,4 @@
-/*	$OpenBSD: mountd.c,v 1.24 1998/03/01 20:06:30 millert Exp $	*/
+/*	$OpenBSD: mountd.c,v 1.26 1998/08/11 16:18:36 deraadt Exp $	*/
 /*	$NetBSD: mountd.c,v 1.31 1996/02/18 11:57:53 fvdl Exp $	*/
 
 /*
@@ -862,7 +862,12 @@ get_exportlist()
 				    grp = grp->gr_next;
 				}
 				if (netgrp) {
-				    if (get_host(hst, grp, tgrp)) {
+				    if (hst == NULL) {
+					syslog(LOG_ERR,
+					    "NULL hostname in netgroup %s, skipping",
+					    cp);
+					grp->gr_type = GT_IGNORE;
+				    } else if (get_host(hst, grp, tgrp)) {
 					syslog(LOG_ERR,
 					    "Unknown host (%s) in netgroup %s",
 					    hst, cp);
@@ -2101,11 +2106,11 @@ check_options(dp)
 	    return (1);
 	}
 	if ((opt_flags & OP_MASK) && (opt_flags & OP_NET) == 0) {
-	    syslog(LOG_ERR, "-mask requires -net");
+	    syslog(LOG_ERR, "-mask requires -network");
 	    return (1);
 	}
 	if ((opt_flags & (OP_NET | OP_ISO)) == (OP_NET | OP_ISO)) {
-	    syslog(LOG_ERR, "-net and -iso mutually exclusive");
+	    syslog(LOG_ERR, "-network and -iso mutually exclusive");
 	    return (1);
 	}
 	if ((opt_flags & OP_ALLDIRS) && dp->dp_left) {

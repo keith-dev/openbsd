@@ -1,4 +1,4 @@
-/*	$OpenBSD: fetch.c,v 1.18 1998/03/26 03:17:08 marc Exp $	*/
+/*	$OpenBSD: fetch.c,v 1.23 1998/09/30 07:49:36 deraadt Exp $	*/
 /*	$NetBSD: fetch.c,v 1.14 1997/08/18 10:20:20 lukem Exp $	*/
 
 /*-
@@ -38,7 +38,7 @@
  */
 
 #ifndef lint
-static char rcsid[] = "$OpenBSD: fetch.c,v 1.18 1998/03/26 03:17:08 marc Exp $";
+static char rcsid[] = "$OpenBSD: fetch.c,v 1.23 1998/09/30 07:49:36 deraadt Exp $";
 #endif /* not lint */
 
 /*
@@ -48,6 +48,7 @@ static char rcsid[] = "$OpenBSD: fetch.c,v 1.18 1998/03/26 03:17:08 marc Exp $";
 #include <sys/types.h>
 #include <sys/param.h>
 #include <sys/socket.h>
+#include <sys/stat.h>
 
 #include <netinet/in.h>
 
@@ -61,6 +62,7 @@ static char rcsid[] = "$OpenBSD: fetch.c,v 1.18 1998/03/26 03:17:08 marc Exp $";
 #include <fcntl.h>
 #include <signal.h>
 #include <stdio.h>
+#include <errno.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
@@ -69,10 +71,12 @@ static char rcsid[] = "$OpenBSD: fetch.c,v 1.18 1998/03/26 03:17:08 marc Exp $";
 
 static int	url_get __P((const char *, const char *, const char *));
 void		aborthttp __P((int));
+void		abortfile __P((int));
 
 
 #define	FTP_URL		"ftp://"	/* ftp URL prefix */
 #define	HTTP_URL	"http://"	/* http URL prefix */
+#define	FILE_URL	"file:"		/* file URL prefix */
 #define FTP_PROXY	"ftp_proxy"	/* env var with ftp proxy location */
 #define HTTP_PROXY	"http_proxy"	/* env var with http proxy location */
 
@@ -93,7 +97,7 @@ url_get(origline, proxyenv, outfile)
 	const char *outfile;
 {
 	struct sockaddr_in sin;
-	int i, out, isftpurl;
+	int i, out, isftpurl, isfileurl;
 	in_port_t port;
 	volatile int s;
 	size_t len;
@@ -102,10 +106,12 @@ url_get(origline, proxyenv, outfile)
 	char *line, *proxy, *host;
 	volatile sig_t oldintr;
 	off_t hashbytes;
+	struct hostent *hp = NULL;
 
 	s = -1;
 	proxy = NULL;
 	isftpurl = 0;
+	isfileurl = 0;
 
 #ifdef __GNUC__				/* XXX: to shut up gcc warnings */
 	(void)&out;
@@ -121,22 +127,29 @@ url_get(origline, proxyenv, outfile)
 	else if (strncasecmp(line, FTP_URL, sizeof(FTP_URL) - 1) == 0) {
 		host = line + sizeof(FTP_URL) - 1;
 		isftpurl = 1;
+	} else if (strncasecmp(line, FILE_URL, sizeof(FILE_URL) - 1) == 0) {
+		host = line + sizeof(FILE_URL) - 1;
+		isfileurl = 1;
 	} else
 		errx(1, "url_get: Invalid URL '%s'", line);
 
-	path = strchr(host, '/');		/* find path */
-	if (EMPTYSTRING(path)) {
-		if (isftpurl)
-			goto noftpautologin;
-		warnx("Invalid URL (no `/' after host): %s", origline);
-		goto cleanup_url_get;
-	}
-	*path++ = '\0';
-	if (EMPTYSTRING(path)) {
-		if (isftpurl)
-			goto noftpautologin;
-		warnx("Invalid URL (no file after host): %s", origline);
-		goto cleanup_url_get;
+	if (isfileurl) {
+		path = host;
+	} else {
+		path = strchr(host, '/');		/* find path */
+		if (EMPTYSTRING(path)) {
+			if (isftpurl)
+				goto noftpautologin;
+			warnx("Invalid URL (no `/' after host): %s", origline);
+			goto cleanup_url_get;
+		}
+		*path++ = '\0';
+		if (EMPTYSTRING(path)) {
+			if (isftpurl)
+				goto noftpautologin;
+			warnx("Invalid URL (no file after host): %s", origline);
+			goto cleanup_url_get;
+		}
 	}
 
 	if (outfile)
@@ -174,6 +187,87 @@ url_get(origline, proxyenv, outfile)
 		path = line;
 	}
 
+	if (isfileurl) {
+		struct stat st;
+
+		s = open(path, O_RDONLY);
+		if (s == -1) {
+			warn("Can't open file %s", path);
+			goto cleanup_url_get;
+		}
+
+		if (fstat(s, &st) == -1)
+			filesize = -1;
+		else
+			filesize = st.st_size;
+
+		/* Open the output file.  */
+		if (strcmp(savefile, "-") != 0) {
+			out = open(savefile, O_CREAT | O_WRONLY | O_TRUNC, 0666);
+			if (out < 0) {
+				warn("Can't open %s", savefile);
+				goto cleanup_url_get;
+			}
+		} else
+			out = fileno(stdout);
+
+		/* Trap signals */
+		oldintr = NULL;
+		if (setjmp(httpabort)) {
+			if (oldintr)
+				(void)signal(SIGINT, oldintr);
+			goto cleanup_url_get;
+		}
+		oldintr = signal(SIGINT, abortfile);
+	
+		bytes = 0;
+		hashbytes = mark;
+		progressmeter(-1);
+	
+		/* Finally, suck down the file. */
+		i = 0;
+		while ((len = read(s, buf, sizeof(buf))) > 0) {
+			bytes += len;
+			for (cp = buf; len > 0; len -= i, cp += i) {
+				if ((i = write(out, cp, len)) == -1) {
+					warn("Writing %s", savefile);
+					goto cleanup_url_get;
+				}
+				else if (i == 0)
+					break;
+			}
+			if (hash && !progress) {
+				while (bytes >= hashbytes) {
+					(void)putc('#', ttyout);
+					hashbytes += mark;
+				}
+				(void)fflush(ttyout);
+			}
+		}
+		if (hash && !progress && bytes > 0) {
+			if (bytes < mark)
+				(void)putc('#', ttyout);
+			(void)putc('\n', ttyout);
+			(void)fflush(ttyout);
+		}
+		if (len != 0) {
+			warn("Reading from file");
+			goto cleanup_url_get;
+		}
+		progressmeter(1);
+		if (verbose)
+			fputs("Successfully retrieved file.\n", ttyout);
+		(void)signal(SIGINT, oldintr);
+	
+		close(s);
+		if (out != fileno(stdout))
+			close(out);
+		if (proxy)
+			free(proxy);
+		free(line);
+		return (0);
+	}
+
 	portnum = strchr(host, ':');			/* find portnum */
 	if (portnum != NULL)
 		*portnum++ = '\0';
@@ -191,8 +285,6 @@ url_get(origline, proxyenv, outfile)
 			goto cleanup_url_get;
 		}
 	} else {
-		struct hostent *hp;
-
 		hp = gethostbyname(host);
 		if (hp == NULL) {
 			warnx("%s: %s", host, hstrerror(h_errno));
@@ -225,8 +317,30 @@ url_get(origline, proxyenv, outfile)
 		goto cleanup_url_get;
 	}
 
-	if (connect(s, (struct sockaddr *)&sin, sizeof(sin)) == -1) {
-		warn("Can't connect to %s", host);
+	while (connect(s, (struct sockaddr *)&sin, sizeof(sin)) < 0) {
+		if (errno == EINTR)
+			continue;
+		if (hp && hp->h_addr_list[1]) {
+			int oerrno = errno;
+			char *ia;
+
+			ia = inet_ntoa(sin.sin_addr);
+			errno = oerrno;
+			warn("connect to address %s", ia);
+			hp->h_addr_list++;
+			memcpy(&sin.sin_addr, hp->h_addr_list[0],
+			    (size_t)hp->h_length);
+			fprintf(ttyout, "Trying %s...\n",
+			    inet_ntoa(sin.sin_addr));
+			(void)close(s);
+			s = socket(AF_INET, SOCK_STREAM, 0);
+			if (s < 0) {
+				warn("socket");
+				goto cleanup_url_get;
+			}
+			continue;
+		}
+		warn("connect");
 		goto cleanup_url_get;
 	}
 
@@ -234,10 +348,13 @@ url_get(origline, proxyenv, outfile)
 	 * Construct and send the request.  We're expecting a return
 	 * status of "200". Proxy requests don't want leading /.
 	 */
-	if (!proxy)
-		fprintf(ttyout, "Requesting %s\n", origline);
-	else
-		fprintf(ttyout, "Requesting %s (via %s)\n", origline, proxyenv);
+	if (verbose) {
+		if (!proxy)
+			fprintf(ttyout, "Requesting %s\n", origline);
+		else
+			fprintf(ttyout, "Requesting %s (via %s)\n",
+			    origline, proxyenv);
+	}
 	snprintf(buf, sizeof(buf), "GET %s%s HTTP/1.0\r\nHost: %s\r\n\r\n",
 	    proxy ? "" : "/", path, host);
 	len = strlen(buf);
@@ -401,6 +518,20 @@ aborthttp(notused)
 }
 
 /*
+ * Abort a http retrieval
+ */
+void
+abortfile(notused)
+	int notused;
+{
+
+	alarmtimer(0);
+	fputs("\nfile fetch aborted.\n", ttyout);
+	(void)fflush(ttyout);
+	longjmp(httpabort, 1);
+}
+
+/*
  * Retrieve multiple files from the command line, transferring
  * files of the form "host:path", "ftp://host/path" using the
  * ftp protocol, and files of the form "http://host/path" using
@@ -461,7 +592,8 @@ auto_fetch(argc, argv, outfile)
 		/*
 		 * Try HTTP URL-style arguments first.
 		 */
-		if (strncasecmp(line, HTTP_URL, sizeof(HTTP_URL) - 1) == 0) {
+		if (strncasecmp(line, HTTP_URL, sizeof(HTTP_URL) - 1) == 0 ||
+		    strncasecmp(line, FILE_URL, sizeof(FILE_URL) - 1) == 0) {
 			if (url_get(line, httpproxy, outfile) == -1)
 				rval = argpos + 1;
 			continue;
@@ -617,7 +749,7 @@ parsed_url:
 			continue;
 		}
 
-		if (!verbose)
+		if (verbose)
 			fprintf(ttyout, "Retrieving %s/%s\n", dir ? dir : "", file);
 
 		if (dirhasglob) {

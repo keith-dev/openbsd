@@ -1,11 +1,11 @@
-/*	$OpenBSD: ns_main.c,v 1.8 1998/03/20 03:06:51 angelos Exp $	*/
+/*	$OpenBSD: ns_main.c,v 1.16 1998/08/16 21:20:07 millert Exp $	*/
 
 #if !defined(lint) && !defined(SABER)
 #if 0
 static char sccsid[] = "@(#)ns_main.c	4.55 (Berkeley) 7/1/91";
-static char rcsid[] = "$From: ns_main.c,v 8.24 1996/11/26 10:11:22 vixie Exp $";
+static char rcsid[] = "$From: ns_main.c,v 8.26 1998/05/11 04:19:45 vixie Exp $";
 #else
-static char rcsid[] = "$OpenBSD: ns_main.c,v 1.8 1998/03/20 03:06:51 angelos Exp $";
+static char rcsid[] = "$OpenBSD: ns_main.c,v 1.16 1998/08/16 21:20:07 millert Exp $";
 #endif
 #endif /* not lint */
 
@@ -109,6 +109,9 @@ char copyright[] =
 #include <stdio.h>
 #include <syslog.h>
 #include <errno.h>
+#include <libgen.h>
+#include <pwd.h>
+#include <grp.h>
 #include <signal.h>
 #include <netdb.h>
 #include <resolv.h>
@@ -130,11 +133,13 @@ static	const int		rbufsize = 8 * 1024,
 static	struct sockaddr_in	nsaddr;
 static	u_int16_t		local_ns_port,		/* our service port */
 				nsid_state;
-static	fd_set			mask;			/* open descriptors */
+static	fd_set			*mask;			/* open descriptors */
+static	size_t			mask_size;
 static	char			**Argv = NULL;
 static	char			*LastArg = NULL;	/* end of argv */
 
 static	struct qstream		*sqadd __P((void));
+static	int			only_digits(const char *);
 static	void			sq_query __P((struct qstream *)),
 				opensocket __P((struct qdatagram *)),
 #ifdef DEBUG
@@ -162,12 +167,13 @@ static void
 usage()
 {
 	fprintf(stderr,
-"Usage: named [-d #] [-q] [-r] [-p port[/localport]] [[-b] bootfile]\n");
+"Usage: named [-d #] [-q] [-r] [-p port[/localport]] [[-b] bootfile]\n"
+"             [-t directory] [-u (username|uid)] [-g (groupname|gid)]\n");
 	exit(1);
 }
 
 /*ARGSUSED*/
-void
+int
 main(argc, argv, envp)
 	int argc;
 	char *argv[], *envp[];
@@ -181,19 +187,28 @@ main(argc, argv, envp)
 	const int on = 1;
 	int rfd, size, len;
 	time_t lasttime, maxctime;
-	u_char buf[BUFSIZ];
+	u_char buf[PACKETSZ];
 #ifdef NeXT
 	int old_sigmask;
 #endif
-	fd_set tmpmask;
+	fd_set *tmpmask;
 	struct timeval t, *tp;
 	struct qstream *candidate = QSTREAM_NULL;
-	char **argp;
+	char **argp, *p;
+	char *chroot_dir = NULL;
+	char *user_name = NULL;
+	char *group_name = NULL;
+	uid_t user_id;
+	gid_t group_id;
+	struct group *gr;
+	struct passwd *pw;
 #ifdef PID_FIX
 	char oldpid[10];
+	char oldargs[BUFSIZ];
 #endif
 #ifdef WANT_PIDFILE
 	FILE	*fp;			/* file descriptor for pid file */
+	char	*nsargs;
 #endif
 #ifdef IP_OPTIONS
 	struct ipoption ip_opts;
@@ -201,6 +216,9 @@ main(argc, argv, envp)
 #ifdef	RLIMIT_NOFILE
 	struct rlimit rl;
 #endif
+
+	user_id = getuid();
+	group_id = getgid();
 
 	local_ns_port = ns_port = htons(NAMESERVER_PORT);
 
@@ -265,7 +283,7 @@ main(argc, argv, envp)
 					ns_port = htons((u_int16_t)
 							atoi(*++argv));
 					{
-					    char *p = strchr(*argv, '/');
+					    p = strchr(*argv, '/');
 					    if (p) {
 						local_ns_port =
 						    htons((u_int16_t)
@@ -286,12 +304,69 @@ main(argc, argv, envp)
 					NoRecurse = 1;
 					break;
 
+				case 't':
+					if (--argc <= 0)
+						usage();
+					chroot_dir = savestr(*++argv);
+					break;
+
+				case 'u':
+					if (--argc <= 0)
+						usage();
+					user_name = *++argv;
+					if ((pw = getpwnam(user_name))) {
+						user_name = savestr(pw->pw_name);
+						user_id = pw->pw_uid;
+						group_id = pw->pw_gid;
+						if ((gr = getgrgid(pw->pw_gid)))
+							group_name =
+							   savestr(gr->gr_name);
+						else {
+							char name[256];
+
+							sprintf(name, "%lu",
+							    (u_long)pw->pw_gid);
+							group_name = savestr(name);
+						}
+					} else if (only_digits(user_name)) {
+						user_name = savestr(user_name);
+						user_id = atoi(user_name);
+					} else {
+						fprintf(stderr,
+						    "user \"%s\" unknown\n",
+						    user_name);
+						exit(1);
+					}
+					break;
+
+				case 'g':
+					if (--argc <= 0)
+						usage();
+					if (group_name != NULL)
+						free(group_name);
+					group_name = *++argv;
+					if ((gr = getgrnam(group_name))) {
+						group_name = savestr(gr->gr_name);
+						group_id = gr->gr_gid;
+					} else if (only_digits(group_name)) {
+						group_name = savestr(group_name);
+						group_id = atoi(group_name);
+					} else {
+						fprintf(stderr,
+						    "group \"%s\" unknown\n",
+						    group_name);
+						exit(1);
+					}
+					break;
+
 				default:
 					usage();
 				}
 		} else
 			bootfile = savestr(*argv);
 	}
+	endgrent();
+	endpwent();
 
 #ifdef DEBUG
 	if (!debug)
@@ -305,6 +380,43 @@ main(argc, argv, envp)
 		fprintf(ddt, "bootfile = %s\n", bootfile);
 	}		
 #endif
+
+	/*
+	 * Chroot if desired.
+	 */
+	if (chroot_dir != NULL) {
+		struct stat sb;
+
+		if (chroot(chroot_dir) < 0) {
+			fprintf(stderr, "chroot %s failed: %s\n", chroot_dir,
+				strerror(errno));
+			exit(1);
+		}
+		if (chdir("/") < 0) {
+			fprintf(stderr, "chdir(\"/\") failed: %s\n",
+				strerror(errno));
+			exit(1);
+		}
+		/*
+		 * Paths to boot file, pid file and named-xfer need to
+		 * be relative if their parent dirs do not exist.  This
+		 * is to allow chroot'ing to the named homedir.
+		 */
+		p = dirname(bootfile);
+		if ((stat(bootfile, &sb) != 0 || !S_ISDIR(sb.st_mode)) &&
+		    (p = strrchr(bootfile, '/')))
+			bootfile = p;
+
+		p = dirname(PidFile);
+		if ((stat(PidFile, &sb) != 0 || !S_ISDIR(sb.st_mode)) &&
+		    (p = strrchr(PidFile, '/')))
+			PidFile = p;
+
+		p = dirname(NamedXfer);
+		if ((stat(NamedXfer, &sb) != 0 || !S_ISDIR(sb.st_mode)) &&
+		    (p = strrchr(NamedXfer, '/')))
+			NamedXfer = p;
+	}
 
 	n = 0;
 #if defined(DEBUG) && defined(LOG_PERROR)
@@ -321,33 +433,52 @@ main(argc, argv, envp)
 #endif
 
 #ifdef	RLIMIT_NOFILE
-	rl.rlim_cur = rl.rlim_max = FD_SETSIZE;
+	rl.rlim_cur = rl.rlim_max = RLIM_INFINITY;
 	if (setrlimit(RLIMIT_NOFILE, &rl) == -1)
-		syslog(LOG_ERR, "setrlimit(RLIMIT_FSIZE,FD_SETSIZE): %m");
+		syslog(LOG_ERR, "setrlimit(RLIMIT_FSIZE,RLIM_INFINITY): %m");
 #endif
 	/* check that udp checksums are on */
 	ns_udp();
 
 #ifdef WANT_PIDFILE
+	/* build up argument string to stash in pid file */
+	nsargs = malloc(LastArg - Argv[0] + 1);
+	if (nsargs == NULL) {
+		syslog(LOG_ERR,
+		       "building argument string, malloc: %m - exiting");
+		exit(1);
+	}
+	for (p=nsargs, argp=Argv; *argp; argp++) {
+		strcpy(p, *argp);
+		p += strlen(p);
+		*p++ = ' ';
+	}
+	*--p = '\0';
+
 	/* tuck my process id away */
 #ifdef PID_FIX
 	fp = fopen(PidFile, "w");
 	if (fp != NULL) {
 		(void) fgets(oldpid, sizeof(oldpid), fp);
+		(void) fgets(oldargs, sizeof(oldargs), fp);
 		(void) rewind(fp);
 		fprintf(fp, "%ld\n", (long)getpid());
+		fprintf(fp, "%s\n", nsargs);
 		(void) my_fclose(fp);
 	}
 #else /*PID_FIX*/
 	fp = fopen(PidFile, "w");
 	if (fp != NULL) {
 		fprintf(fp, "%d\n", getpid());
+		fprintf(fp, "%s\n", nsargs);
 		(void) my_fclose(fp);
 	}
 #endif /*PID_FIX*/
 #endif /*WANT_PIDFILE*/
 
 	syslog(LOG_NOTICE, "starting.  %s", Version);
+	if (chroot_dir != NULL)
+		syslog(LOG_NOTICE, "chrooted to %s", chroot_dir);
 
 	_res.options &= ~(RES_DEFNAMES | RES_DNSRCH | RES_RECURSE);
 
@@ -398,7 +529,8 @@ main(argc, argv, envp)
 #if defined(WANT_PIDFILE) && defined(PID_FIX)
 			/* put old pid back */
 			if (atoi(oldpid) && (fp = fopen(PidFile, "w"))) {
-				fprintf(fp, "%s", oldpid);
+				fputs(oldpid, fp);
+				fputs(oldargs, fp);
 				(void) my_fclose(fp);
 				_exit(1);
 			}
@@ -431,8 +563,23 @@ main(argc, argv, envp)
 	/*
 	 * Get list of local addresses and set up datagram sockets.
 	 */
-	FD_ZERO(&mask);
-	FD_SET(vs, &mask);
+	nfds = getdtablesize();       /* get the number of file descriptors */
+	mask_size = howmany(nfds, NFDBITS) * sizeof(fd_mask);
+	mask = (fd_set *) malloc(mask_size);
+	if (mask == NULL) {
+		syslog(LOG_ERR, "malloc(%d) for fd_set: %m - exiting",
+			mask_size);
+		exit(1);
+	}
+	memset ((void *)mask, 0, mask_size);
+	tmpmask = (fd_set *) malloc(mask_size);
+	if (tmpmask == NULL) {
+		syslog(LOG_ERR, "malloc(%d) for fd_set: %m - exiting",
+			mask_size);
+		exit(1);
+	}
+	memset ((void *)tmpmask, 0, mask_size);
+	FD_SET(vs, mask);
 	getnetconf();
 
 	/*
@@ -561,17 +708,37 @@ main(argc, argv, envp)
 	fp = fopen(PidFile, "w");
 	if (fp != NULL) {
 		fprintf(fp, "%ld\n", (long)getpid());
+		fprintf(fp, "%s\n", nsargs);
 		(void) my_fclose(fp);
 	}
 #endif
+	/*
+	 * Set user if desired.
+	 */
+	if (group_name != NULL) {
+		if (setgid(group_id) < 0) {
+			syslog(LOG_ERR, "setgid(%s): %m", group_name);
+			exit(1);
+		}
+		if (user_name == NULL)
+			syslog(LOG_NOTICE, "group = %s", group_name);
+	}
+	if (user_name != NULL) {
+		if (getuid() == 0 && initgroups(user_name, group_id) < 0) {
+			syslog(LOG_ERR, "initgroups(%s, %d): %m", user_name,
+			       (int)group_id);
+			exit(1);
+		}
+		if (setuid(user_id) < 0) {
+			syslog(LOG_ERR, "setuid(%s): %m", user_name);
+			exit(1);
+		}
+		syslog(LOG_NOTICE, "user = %s, group = %s", user_name,
+		       group_name);
+	}
 
 	syslog(LOG_NOTICE, "Ready to answer queries.\n");
 	prime_cache();
-	nfds = getdtablesize();       /* get the number of file descriptors */
-	if (nfds > FD_SETSIZE) {
-		nfds = FD_SETSIZE;	/* Bulletproofing */
-		syslog(LOG_NOTICE, "Return from getdtablesize() > FD_SETSIZE");
-	}
 #ifdef NeXT
 	old_sigmask = sigblock(sigmask(SIGCHLD));
 #endif
@@ -591,7 +758,7 @@ main(argc, argv, envp)
 #endif /* XSTATS */
 		if (needreload) {
 			needreload = 0;
-			db_reload();
+			db_reload((user_name == NULL));
 		}
 		if (needStatsDump) {
 			needStatsDump = 0;
@@ -636,11 +803,11 @@ main(argc, argv, envp)
 			tp = &t;
 		} else
 			tp = NULL;
-		tmpmask = mask;
+		memcpy ((void *)tmpmask, (void *)mask, mask_size);
 #ifdef NeXT
 		sigsetmask(old_sigmask);	/* Let queued signals run. */
 #endif
-		n = select(nfds, &tmpmask, (fd_set *)NULL, (fd_set *)NULL, tp);
+		n = select(nfds, tmpmask, (fd_set *)NULL, (fd_set *)NULL, tp);
 #ifdef NeXT
 		old_sigmask = sigblock(sigmask(SIGCHLD));
 #endif
@@ -654,7 +821,7 @@ main(argc, argv, envp)
 		for (dqp = datagramq;
 		     dqp != QDATAGRAM_NULL;
 		     dqp = dqp->dq_next) {
-		    if (FD_ISSET(dqp->dq_dfd, &tmpmask))
+		    if (FD_ISSET(dqp->dq_dfd, tmpmask))
 		        for (udpcnt = 0; udpcnt < 42; udpcnt++) {  /*XXX*/
 			    int from_len = sizeof(from_addr);
 
@@ -700,7 +867,7 @@ main(argc, argv, envp)
 		** Note that a "continue" in here takes us back to the select()
 		** which, if our accept() failed, will bring us back here.
 		*/
-		if (FD_ISSET(vs, &tmpmask)) {
+		if (FD_ISSET(vs, tmpmask)) {
 			int from_len = sizeof(from_addr);
 
 			rfd = accept(vs,
@@ -815,8 +982,8 @@ main(argc, argv, envp)
 			sp->s_time = tt.tv_sec;	/* last transaction time */
 			sp->s_from = from_addr;	/* address to respond to */
 			sp->s_bufp = (u_char *)&sp->s_tempsize;
-			FD_SET(rfd, &mask);
-			FD_SET(rfd, &tmpmask);
+			FD_SET(rfd, mask);
+			FD_SET(rfd, tmpmask);
 #ifdef DEBUG
 			if (debug)
 				syslog(LOG_DEBUG,
@@ -829,7 +996,7 @@ main(argc, argv, envp)
 				    (u_long)streamq));
 		for (sp = streamq;  sp != QSTREAM_NULL;  sp = nextsp) {
 			nextsp = sp->s_next;
-			if (!FD_ISSET(sp->s_rfd, &tmpmask))
+			if (!FD_ISSET(sp->s_rfd, tmpmask))
 				continue;
 			dprintf(5, (ddt,
 				  "sp x%lx rfd %d size %d time %d next x%lx\n",
@@ -862,7 +1029,7 @@ main(argc, argv, envp)
 						  malloc(rbufsize))
 						) {
 						    sp->s_buf = buf;
-						    sp->s_size  = sizeof(buf);
+						    sp->s_bufsize=sizeof(buf);
 					    } else {
 						    sp->s_bufsize = rbufsize;
 					    }
@@ -870,14 +1037,16 @@ main(argc, argv, envp)
 					if (sp->s_size > sp->s_bufsize &&
 					    sp->s_bufsize != 0
 					) {
-					    sp->s_buf = (u_char *)
-						realloc((char *)sp->s_buf,
-							(unsigned)sp->s_size);
-					    if (sp->s_buf == NULL) {
+					    u_char *s_buf = (u_char *)
+						realloc((void *)sp->s_buf,
+							(size_t)sp->s_size);
+					    if (s_buf == NULL) {
+						free(sp->s_buf);
 						sp->s_buf = buf;
 						sp->s_bufsize = 0;
 						sp->s_size = sizeof(buf);
 					    } else {
+						sp->s_buf = s_buf;
 						sp->s_bufsize = sp->s_size;
 					    }
 					}
@@ -895,6 +1064,12 @@ main(argc, argv, envp)
 				sp->s_bufp += n;
 				sp->s_size -= n;
 			}
+
+			if (sp->s_size > 0 &&
+			    (n == -1) &&
+			    (errno == PORT_WOULDBLK))
+				continue;
+
 			/*
 			 * we don't have enough memory for the query.
 			 * if we have a query id, then we will send an
@@ -915,8 +1090,10 @@ main(argc, argv, envp)
 				(void) writemsg(sp->s_rfd, sp->s_buf,
 						HFIXEDSZ);
 			    }
+			    sqrm(sp);
 			    continue;
 			}
+
 			/*
 			 * If the message is too short to contain a valid
 			 * header, try to send back an error, and drop the
@@ -937,10 +1114,9 @@ main(argc, argv, envp)
 				(void) writemsg(sp->s_rfd, sp->s_buf,
 						HFIXEDSZ);
 			    }
+			    sqrm(sp);
 			    continue;
 			}
-			if ((n == -1) && (errno == PORT_WOULDBLK))
-				continue;
 			if (n <= 0) {
 				sqrm(sp);
 				continue;
@@ -978,15 +1154,27 @@ getnetconf()
 	struct ifreq ifreq, *ifr;
 	struct qdatagram *dqp;
 	static int first = 1;
-	char buf[32768], *cp, *cplim;
+	char *buf = NULL, *cp, *cplim;
+	int len = 8192;
 	u_int32_t nm;
 	time_t my_generation = time(NULL);
 
-	ifc.ifc_len = sizeof buf;
-	ifc.ifc_buf = buf;
-	if (ioctl(vs, SIOCGIFCONF, (char *)&ifc) < 0) {
-		syslog(LOG_ERR, "get interface configuration: %m - exiting");
-		exit(1);
+	while (1) {
+		ifc.ifc_len = len;
+		ifc.ifc_buf = buf = realloc(buf, len);
+		if (buf == NULL) {
+			syslog(LOG_ERR,
+				"get interface config, malloc: %m - exiting");
+			exit(1);
+		}
+		if (ioctl(vs, SIOCGIFCONF, &ifc) < 0) {
+			syslog(LOG_ERR,
+				"get interface configuration: %m - exiting");
+			exit(1);
+		}
+		if (ifc.ifc_len + sizeof(ifreq) < len)
+			break;
+		len *= 2;
 	}
 	ntp = NULL;
 #if defined(AF_LINK) && \
@@ -1062,6 +1250,7 @@ getnetconf()
 		dqp->dq_addr = ((struct sockaddr_in *)
 				&ifreq.ifr_addr)->sin_addr;
 		dqp->dq_gen = my_generation;
+		/* XXX - this will fail on reload if we run as non-root */
 		opensocket(dqp);
 		dprintf(1, (ddt, "listening [%s]\n",
 			    inet_ntoa(((struct sockaddr_in *)
@@ -1134,6 +1323,7 @@ getnetconf()
 	}
 	if (ntp)
 		free((char *)ntp);
+	free(buf);
 
 	/*
 	 * now go through the datagramq and delete anything that
@@ -1283,7 +1473,7 @@ opensocket(dqp)
 		exit(1);
 #endif
 	}
-	FD_SET(dqp->dq_dfd, &mask);
+	FD_SET(dqp->dq_dfd, mask);
 }
 
 /*
@@ -1487,7 +1677,6 @@ sigprof()
 	dprintf(1, (ddt, "sigprof()\n"));
 	if (fork() == 0)
 	{
-		(void) chdir(_PATH_TMPDIR);
 		exit(1);
 	}
 	errno = save_errno;
@@ -1531,7 +1720,7 @@ sqrm(qp)
 
 	if (qp->s_bufsize != 0)
 		free(qp->s_buf);
-	FD_CLR(qp->s_rfd, &mask);
+	FD_CLR(qp->s_rfd, mask);
 	(void) my_close(qp->s_rfd);
 	if (qp == streamq) {
 		streamq = qp->s_next;
@@ -1596,7 +1785,7 @@ dqflush(gen)
 			syslog(LOG_NOTICE, "interface [%s] missing; deleting",
 			       inet_ntoa(this->dq_addr));
 		}
-		FD_CLR(this->dq_dfd, &mask);
+		FD_CLR(this->dq_dfd, mask);
 		my_close(this->dq_dfd);
 		free(this);
 		if (prev == NULL)
@@ -1633,7 +1822,7 @@ sq_query(sp)
 	register struct qstream *sp;
 {
 	sp->s_refcnt++;
-	FD_CLR(sp->s_rfd, &mask);
+	FD_CLR(sp->s_rfd, mask);
 }
 
 /*
@@ -1647,7 +1836,7 @@ sq_done(sp)
 
 	sp->s_refcnt = 0;
 	sp->s_time = tt.tv_sec;
-	FD_SET(sp->s_rfd, &mask);
+	FD_SET(sp->s_rfd, mask);
 }
 
 void
@@ -1708,6 +1897,18 @@ nsid_next()
 {
 	nsid_state = res_randomid();
 	return (nsid_state);
+}
+
+static int
+only_digits(const char *s) {
+	if (*s == '\0')
+		return (0);
+	while (*s != '\0') {
+		if (!isdigit(*s))
+			return (0);
+		s++;
+	}
+	return (1);
 }
 
 #if defined(BSD43_BSD43_NFS)

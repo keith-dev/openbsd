@@ -1,4 +1,5 @@
-/* $OpenBSD: add.h,v 1.1 1996/06/04 07:56:02 niklas Exp $ */
+/* $OpenBSD: add.h,v 1.3 1998/10/13 23:09:49 marc Exp $ */
+/* from FreeBSD Id: add.h,v 1.8 1997/02/22 16:09:15 peter Exp  */
 
 /*
  * FreeBSD install - a package for the installation and maintainance
@@ -38,7 +39,7 @@ extern char	FirstPen[];
 extern add_mode_t AddMode;
 
 int		make_hierarchy(char *);
-void		extract_plist(char *, Package *);
+void		extract_plist(char *, package_t *);
 void		apply_perms(char *, char *);
 
 #endif	/* _INST_ADD_H_INCLUDE */

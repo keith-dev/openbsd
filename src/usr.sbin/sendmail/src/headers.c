@@ -1,39 +1,17 @@
 /*
- * Copyright (c) 1983, 1995-1997 Eric P. Allman
+ * Copyright (c) 1998 Sendmail, Inc.  All rights reserved.
+ * Copyright (c) 1983, 1995-1997 Eric P. Allman.  All rights reserved.
  * Copyright (c) 1988, 1993
  *	The Regents of the University of California.  All rights reserved.
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in the
- *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the University of
- *	California, Berkeley and its contributors.
- * 4. Neither the name of the University nor the names of its contributors
- *    may be used to endorse or promote products derived from this software
- *    without specific prior written permission.
+ * By using this file, you agree to the terms and conditions set
+ * forth in the LICENSE file which can be found at the top level of
+ * the sendmail distribution.
  *
- * THIS SOFTWARE IS PROVIDED BY THE REGENTS AND CONTRIBUTORS ``AS IS'' AND
- * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
- * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
- * ARE DISCLAIMED.  IN NO EVENT SHALL THE REGENTS OR CONTRIBUTORS BE LIABLE
- * FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
- * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
- * OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
- * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
- * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
- * SUCH DAMAGE.
  */
 
 #ifndef lint
-static char sccsid[] = "@(#)headers.c	8.115 (Berkeley) 10/22/97";
+static char sccsid[] = "@(#)headers.c	8.127 (Berkeley) 6/4/98";
 #endif /* not lint */
 
 # include <errno.h>
@@ -155,7 +133,6 @@ chompheader(line, def, hdrp, e)
 	if (strlen(fname) > 100)
 		return H_EOH;
 
-#if _FFR_HEADER_RSCHECK
 	/* check to see if it represents a ruleset call */
 	if (def)
 	{
@@ -177,7 +154,6 @@ chompheader(line, def, hdrp, e)
 			return 0;
 		}
 	}
-#endif
 
 	/* see if it is a known type */
 	s = stab(fname, ST_HEADER, ST_FIND);
@@ -206,7 +182,7 @@ chompheader(line, def, hdrp, e)
 		(void) sendtolist(fvalue, NULLADDR, &e->e_errorqueue, 0, e);
 
 	/* if this means "end of header" quit now */
-	if (bitset(H_EOH, hi->hi_flags))
+	if (!headeronly && bitset(H_EOH, hi->hi_flags))
 		return hi->hi_flags;
 
 	/*
@@ -278,6 +254,10 @@ chompheader(line, def, hdrp, e)
 	bcopy((char *) mopts, (char *) h->h_mflags, sizeof mopts);
 	*hp = h;
 	h->h_flags = hi->hi_flags;
+
+	/* strip EOH flag if parsing MIME headers */
+	if (headeronly)
+		h->h_flags &= ~H_EOH;
 	if (def)
 		h->h_flags |= H_DEFAULT;
 	if (cond)
@@ -463,7 +443,22 @@ eatheader(e, full)
 	/* full name of from person */
 	p = hvalue("full-name", e->e_header);
 	if (p != NULL)
+	{
+		extern bool rfc822_string __P((char *));
+
+		if (!rfc822_string(p))
+		{
+			extern char *addquotes __P((char *));
+
+			/*
+			**  Quote a full name with special characters
+			**  as a comment so crackaddr() doesn't destroy
+			**  the name portion of the address.
+			*/
+			p = addquotes(p);
+		}
 		define('x', p, e);
+	}
 
 	if (tTd(32, 1))
 		printf("----- collected header -----\n");
@@ -493,7 +488,7 @@ eatheader(e, full)
 			{
 				if (bitset(H_FROM, h->h_flags))
 				{
-					extern char *crackaddr();
+					extern char *crackaddr __P((char *));
 
 					expand(crackaddr(buf), buf, sizeof buf, e);
 				}
@@ -517,7 +512,9 @@ eatheader(e, full)
 		    !bitset(H_DEFAULT, h->h_flags) &&
 		    (!bitset(EF_RESENT, e->e_flags) || bitset(H_RESENT, h->h_flags)))
 		{
+#if 0
 			int saveflags = e->e_flags;
+#endif
 
 			(void) sendtolist(h->h_value, NULLADDR,
 					  &e->e_sendqueue, 0, e);
@@ -1181,17 +1178,58 @@ putheader(mci, hdr, e)
 		printf("--- putheader, mailer = %s ---\n",
 			mci->mci_mailer->m_name);
 
-	mci->mci_flags |= MCIF_INHEADER;
+	/*
+	**  If we're in MIME mode, we're not really in the header of the
+	**  message, just the header of one of the parts of the body of
+	**  the message.  Therefore MCIF_INHEADER should not be turned on.
+	*/
+
+	if (!bitset(MCIF_INMIME, mci->mci_flags))
+		mci->mci_flags |= MCIF_INHEADER;
+
 	for (h = hdr; h != NULL; h = h->h_link)
 	{
 		register char *p = h->h_value;
-		extern bool bitintersect();
+		extern bool bitintersect __P((BITMAP, BITMAP));
 
 		if (tTd(34, 11))
 		{
 			printf("  %s: ", h->h_field);
 			xputs(p);
 		}
+
+#if _FFR_MAX_MIME_HEADER_LENGTH
+		/* heuristic shortening of MIME fields to avoid MUA overflows */
+		if (wordinclass(h->h_field, macid("{checkMIMEFieldHeaders}", NULL)))
+		{
+			extern bool fix_mime_header __P((char *));
+
+			if (fix_mime_header(h->h_value))
+			{
+				sm_syslog(LOG_ALERT, e->e_id,
+				  	"Truncated MIME %s header due to field size (possible attack)",
+				  	h->h_field);
+				if (tTd(34, 11))
+				  	printf("  truncated MIME %s header due to field size (possible attack)\n",
+					  	h->h_field);
+			}
+		}
+
+		if (wordinclass(h->h_field, macid("{checkMIMEHeaders}", NULL)))
+		{
+			extern bool shorten_rfc822_string __P((char *, int));
+
+			if (shorten_rfc822_string(h->h_value, MaxMimeHeaderLength))
+			{
+				sm_syslog(LOG_ALERT, e->e_id,
+				  	"Truncated long MIME %s header (possible attack)",
+				  	h->h_field);
+				if (tTd(34, 11))
+				  	printf("  truncated long MIME %s header (possible attack)\n",
+					  	h->h_field);
+			}
+		}
+#endif
 
 		/* suppress Content-Transfer-Encoding: if we are MIMEing */
 		if (bitset(H_CTE, h->h_flags) &&
@@ -1483,7 +1521,7 @@ commaize(h, p, oldstyle, mci, e)
 		else if (e->e_from.q_mailer != NULL &&
 			 bitnset(M_UDBRECIPIENT, e->e_from.q_mailer->m_flags))
 		{
-			extern char *udbsender();
+			extern char *udbsender __P((char *));
 			char *q;
 
 			q = udbsender(name);
@@ -1562,4 +1600,70 @@ copyheader(header)
 	*tail = NULL;
 	
 	return ret;
+}
+/*
+**  FIX_MIME_HEADER -- possibly truncate/rebalance parameters in a MIME header
+**
+**	Run through all of the parameters of a MIME header and
+**	possibly truncate and rebalance the parameter according
+**	to MaxMimeFieldLength.
+**
+**	Parameters:
+**		string -- the full header
+**
+**	Returns:
+**		TRUE if the header was modified, FALSE otherwise
+**
+**	Side Effects:
+**		string modified in place
+*/
+
+bool
+fix_mime_header(string)
+	char *string;
+{
+	bool modified = FALSE;
+	char *begin = string;
+	char *end;
+	extern char *find_character __P((char *, char));
+	extern bool shorten_rfc822_string __P((char *, int));
+	
+	if (string == NULL || *string == '\0')
+		return FALSE;
+	
+	/* Split on each ';' */
+	while ((end = find_character(begin, ';')) != NULL)
+	{
+		char save = *end;
+		char *bp;
+		
+		*end = '\0';
+		
+		/* Shorten individual parameter */
+		if (shorten_rfc822_string(begin, MaxMimeFieldLength))
+			modified = TRUE;
+		
+		/* Collapse the possibly shortened string with rest */
+		bp = begin + strlen(begin);
+		if (bp != end)
+		{
+			char *ep = end;
+			
+			*end = save;
+			end = bp;
+			
+			/* copy character by character due to overlap */
+			while (*ep != '\0')
+				*bp++ = *ep++;
+			*bp = '\0';
+		}
+		else
+			*end = save;
+		if (*end == '\0')
+			break;
+		
+		/* Move past ';' */
+		begin = end + 1;
+	}
+	return modified;
 }

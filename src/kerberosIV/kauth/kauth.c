@@ -1,5 +1,5 @@
-/*	$OpenBSD: kauth.c,v 1.1 1997/12/18 22:28:03 art Exp $	*/
-/* $KTH: kauth.c,v 1.81 1997/12/09 10:36:33 joda Exp $ */
+/*	$OpenBSD: kauth.c,v 1.3 1998/08/12 23:58:50 art Exp $	*/
+/*	$KTH: kauth.c,v 1.81 1997/12/09 10:36:33 joda Exp $	*/
 
 /*
  * Copyright (c) 1995, 1996, 1997 Kungliga Tekniska Högskolan
@@ -48,6 +48,7 @@
  */
 
 #include "kauth.h"
+#include <simple_exec.h>
 
 krb_principal princ;
 static char srvtab[MAXPATHLEN + 1];
@@ -79,36 +80,26 @@ usage(void)
     exit(1);
 }
 
-static void
+#define EX_NOEXEC	126
+#define EX_NOTFOUND	127
+
+static int
 doexec(int argc, char **argv)
 {
-    int status;
-    pid_t ret;
-
-    switch (fork()) {
-    case -1:
-	err (1, "fork");
-	break;
-    case 0:
-	/* in child */
-	execvp(argv[0], argv);
-	err (1, "Can't exec program ``%s''", argv[0]);
-	break;
-    default:
-	/* in parent */
-	do {
-	    ret = wait(&status);
-	} while ((ret > 0 && !WIFEXITED(status)) || (ret < 0 && errno == EINTR));
+    int ret = simple_execvp(argv[0], argv);
+    if(ret == -2)
+	warn ("fork");
+    if(ret == -3)
+	warn("waitpid");
 	if (ret < 0)
-	    perror("wait");
-	dest_tkt();
-	if (k_hasafs())
-	    k_unlog();	 
-	break;
-    }
+	return EX_NOEXEC;
+    if(ret == EX_NOEXEC || ret == EX_NOTFOUND)
+	warnx("Can't exec program ``%s''", argv[0]);
+	
+    return ret;
 }
 
-void
+static void
 renew(int sig)
 {
     int code;
@@ -178,6 +169,7 @@ main(int argc, char **argv)
     memset(srvtab, 0, sizeof(srvtab));
     *remoteuser = '\0';
     nhost = 0;
+    host = NULL;
   
     /* Look for kerberos name */
     if (argc > 1 &&
@@ -188,8 +180,12 @@ main(int argc, char **argv)
 	strupr(princ.realm);
     }
 
-    while ((c = getopt(argc, argv, "r:t:f:hl:n:c:")) != EOF)
+    while ((c = getopt(argc, argv, "r:t:f:hdl:n:c:")) != EOF)
 	switch (c) {
+	case 'd':
+	    krb_enable_debug();
+	    _kafs_debug = 1;
+	    break;
 	case 'f':
 	    strncpy(srvtab, optarg, sizeof(srvtab));
 	    break;
@@ -238,7 +234,7 @@ main(int argc, char **argv)
 	errx (1, "Could not get default principal");
   
     /* With root tickets assume remote user is root */
-    if (*remoteuser == '\0') 
+    if (*remoteuser == '\0') {
 	if (strcmp(princ.instance, "root") == 0) {
 	    strncpy(remoteuser, princ.instance, sizeof(remoteuser) - 1);
 	    remoteuser[sizeof(remoteuser) - 1] = '\0';
@@ -247,6 +243,7 @@ main(int argc, char **argv)
 	    strncpy(remoteuser, princ.name, sizeof(remoteuser) - 1);
 	    remoteuser[sizeof(remoteuser) - 1] = '\0';
 	}
+    }
 
     more_args = argc - optind;
   
@@ -307,8 +304,12 @@ main(int argc, char **argv)
     if (k_hasafs()) {
 	if (more_args)
 	    k_setpag();
-	if ((code = krb_afslog(cell, NULL)) != 0 && code != KDC_PR_UNKNOWN)
-	    warnx ("%s", krb_get_err_text(code));
+	if ((code = krb_afslog(cell, NULL)) != 0 && code != KDC_PR_UNKNOWN) {
+	    if(code > 0)
+	        warnx ("%s", krb_get_err_text(code));
+	    else
+		warnx ("failed to store AFS token");
+	}
     }
 
     for(ret = 0; nhost-- > 0; host++)
@@ -317,10 +318,14 @@ main(int argc, char **argv)
     if (ret)
 	return ret;
 
-    if (more_args)
-	doexec(more_args, &argv[optind]);
+    if (more_args) {
+	ret = doexec(more_args, &argv[optind]);
+	dest_tkt();
+	if (k_hasafs())
+	    k_unlog();	 
+    }
     else
 	zrefresh();
   
-    return 0;
+    return ret;
 }

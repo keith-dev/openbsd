@@ -1,5 +1,5 @@
 /*
- * Copyright 1997 Niels Provos <provos@physnet.uni-hamburg.de>
+ * Copyright 1997,1998 Niels Provos <provos@physnet.uni-hamburg.de>
  * All rights reserved.
  * 
  * Parts derived from code by Angelos D. Keromytis, kermit@forthnet.gr 
@@ -35,7 +35,7 @@
  */
 
 #ifndef lint
-static char rcsid[] = "$Id: schedule.c,v 1.6 1998/03/04 11:43:49 provos Exp $";
+static char rcsid[] = "$Id: schedule.c,v 1.8 1998/06/30 16:58:36 provos Exp $";
 #endif
 
 #define _SCHEDULE_C_
@@ -60,6 +60,7 @@ static char rcsid[] = "$Id: schedule.c,v 1.6 1998/03/04 11:43:49 provos Exp $";
 #include "modulus.h"
 #include "api.h"
 #ifdef IPSEC
+#include "attributes.h"
 #include "kernel.h"
 #endif
 #ifdef DEBUG
@@ -233,6 +234,10 @@ schedule_process(int sock)
 		    if (st->phase == COOKIE_REQUEST && st->resource == 0) {
 			 log_error(0, "no anwser for cookie request to %s:%d",
 				   st->address, st->port);
+#ifdef IPSEC
+			 if (st->flags & IPSEC_NOTIFY)
+			      kernel_notify_result(st, NULL, 0);
+#endif
 			 break;
 		    } else if(st->phase == COOKIE_REQUEST) {
 			 /* Try again with updated counters */
@@ -280,8 +285,8 @@ schedule_process(int sock)
 		    }
 		    
 #ifdef DEBUG
-		    printf("Resending packet type %d, length %d.\n",
-			   st->phase, st->packetlen);
+		    printf("Resending packet to %s type %d, length %d.\n",
+			   st->address, st->phase, st->packetlen);
 #endif
 		    tmp->tm = tm + retrans_timeout;
 	       }
@@ -374,7 +379,7 @@ schedule_process(int sock)
 	       spi_insert(nspi);
 	       schedule_insert(UPDATE, st->olifetime/2, nspi->SPI, SPI_SIZE);
 #ifdef IPSEC
-	       kernel_insert_spi(nspi);
+	       kernel_insert_spi(st, nspi);
 #endif
 	       break;
 	  default:

@@ -1,4 +1,4 @@
-/*	$OpenBSD: ftp.c,v 1.25 1998/02/10 02:13:10 weingart Exp $	*/
+/*	$OpenBSD: ftp.c,v 1.32 1998/09/19 23:00:50 deraadt Exp $	*/
 /*	$NetBSD: ftp.c,v 1.27 1997/08/18 10:20:23 lukem Exp $	*/
 
 /*
@@ -38,7 +38,7 @@
 #if 0
 static char sccsid[] = "@(#)ftp.c	8.6 (Berkeley) 10/27/94";
 #else
-static char rcsid[] = "$OpenBSD: ftp.c,v 1.25 1998/02/10 02:13:10 weingart Exp $";
+static char rcsid[] = "$OpenBSD: ftp.c,v 1.32 1998/09/19 23:00:50 deraadt Exp $";
 #endif
 #endif /* not lint */
 
@@ -120,6 +120,8 @@ hookup(host, port)
 	hisctladdr.sin_port = port;
 	while (connect(s, (struct sockaddr *)&hisctladdr,
 			sizeof(hisctladdr)) < 0) {
+		if (errno == EINTR)
+			continue;
 		if (hp && hp->h_addr_list[1]) {
 			int oerrno = errno;
 			char *ia;
@@ -130,7 +132,8 @@ hookup(host, port)
 			hp->h_addr_list++;
 			memcpy(&hisctladdr.sin_addr, hp->h_addr_list[0],
 			    (size_t)hp->h_length);
-			fprintf(ttyout, "Trying %s...\n", inet_ntoa(hisctladdr.sin_addr));
+			fprintf(ttyout, "Trying %s...\n",
+			    inet_ntoa(hisctladdr.sin_addr));
 			(void)close(s);
 			s = socket(hisctladdr.sin_family, SOCK_STREAM, 0);
 			if (s < 0) {
@@ -236,7 +239,7 @@ command(va_alist)
 		else if (strncmp("ACCT ", fmt, 5) == 0)
 			fputs("ACCT XXXX", ttyout);
 		else
-			vprintf(fmt, ap);
+			vfprintf(ttyout, fmt, ap);
 		va_end(ap);
 		putc('\n', ttyout);
 		(void)fflush(ttyout);
@@ -386,14 +389,14 @@ getreply(expecteof)
 
 int
 empty(mask, sec)
-	struct fd_set *mask;
+	fd_set *mask;
 	int sec;
 {
 	struct timeval t;
 
 	t.tv_sec = (long) sec;
 	t.tv_usec = 0;
-	return (select(32, mask, (struct fd_set *) 0, (struct fd_set *) 0, &t));
+	return (select(32, mask, (fd_set *) 0, (fd_set *) 0, &t));
 }
 
 jmp_buf	sendabort;
@@ -480,7 +483,8 @@ sendrequest(cmd, local, remote, printnames)
 	oldinti = signal(SIGINFO, psummary);
 	if (strcmp(local, "-") == 0) {
 		fin = stdin;
-		progress = 0;
+		if (progress == 1)
+			progress = 0;
 	} else if (*local == '|') {
 		oldintp = signal(SIGPIPE, SIG_IGN);
 		fin = popen(local + 1, "r");
@@ -492,7 +496,8 @@ sendrequest(cmd, local, remote, printnames)
 			code = -1;
 			return;
 		}
-		progress = 0;
+		if (progress == 1)
+			progress = 0;
 		closefunc = pclose;
 	} else {
 		fin = fopen(local, "r");
@@ -868,7 +873,6 @@ recvrequest(cmd, local, remote, lmode, printnames, ignorespecial)
 		goto abort;
 	if (!ignorespecial && strcmp(local, "-") == 0) {
 		fout = stdout;
-		progress = 0;
 		preserve = 0;
 	} else if (!ignorespecial && *local == '|') {
 		oldintp = signal(SIGPIPE, SIG_IGN);
@@ -877,7 +881,8 @@ recvrequest(cmd, local, remote, lmode, printnames, ignorespecial)
 			warn("%s", local+1);
 			goto abort;
 		}
-		progress = 0;
+		if (progress == 1)
+			progress = 0;
 		preserve = 0;
 		closefunc = pclose;
 	} else {
@@ -902,7 +907,8 @@ recvrequest(cmd, local, remote, lmode, printnames, ignorespecial)
 		bufsize = st.st_blksize;
 	}
 	if ((st.st_mode & S_IFMT) != S_IFREG) {
-		progress = 0;
+		if (progress == 1)
+			progress = 0;
 		preserve = 0;
 	}
 	progressmeter(-1);
@@ -921,7 +927,18 @@ recvrequest(cmd, local, remote, lmode, printnames, ignorespecial)
 		}
 		errno = d = 0;
 		while ((c = read(fileno(din), buf, bufsize)) > 0) {
-			if ((d = write(fileno(fout), buf, (size_t)c)) != c)
+			size_t	wr;
+			size_t	rd = c;
+
+			d = 0;
+			do {
+				wr = write(fileno(fout), buf + d, rd);
+				if (wr == -1 && errno == EPIPE)
+					break;
+				d += wr;
+				rd -= wr;
+			} while (d < c);
+			if (rd != 0)
 				break;
 			bytes += c;
 			if (hash && (!progress || filesize < 0)) {
@@ -1146,8 +1163,10 @@ reinit:
 		p[0] = p0 & 0xff;
 		p[1] = p1 & 0xff;
 
-		if (connect(data, (struct sockaddr *)&data_addr,
+		while (connect(data, (struct sockaddr *)&data_addr,
 			    sizeof(data_addr)) < 0) {
+			if (errno == EINTR)
+				continue;
 			warn("connect");
 			goto bad;
 		}
@@ -1256,9 +1275,11 @@ void
 psummary(notused)
 	int notused;
 {
+	int save_errno = errno;
 
 	if (bytes > 0)
 		ptransfer(1);
+	errno = save_errno;
 }
 
 void
@@ -1385,7 +1406,7 @@ proxtrans(cmd, local, remote)
 	int prox_type, nfnd;
 	volatile int secndflag;
 	char *cmd2;
-	struct fd_set mask;
+	fd_set mask;
 
 #ifdef __GNUC__				/* XXX: to shut up gcc warnings */
 	(void)&oldintr;
@@ -1510,7 +1531,7 @@ reset(argc, argv)
 	int argc;
 	char *argv[];
 {
-	struct fd_set mask;
+	fd_set mask;
 	int nfnd = 1;
 
 	FD_ZERO(&mask);
@@ -1579,7 +1600,7 @@ abort_remote(din)
 {
 	char buf[BUFSIZ];
 	int nfnd;
-	struct fd_set mask;
+	fd_set mask;
 
 	if (cout == NULL) {
 		warnx("Lost control connection for abort.");

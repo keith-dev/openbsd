@@ -1,3 +1,4 @@
+/*	$OpenBSD: input.c,v 1.5 1998/09/21 07:36:06 pjanzen Exp $	*/
 /*	$NetBSD: input.c,v 1.4 1995/04/27 21:22:24 mycroft Exp $	*/
 
 /*-
@@ -49,7 +50,7 @@
 #if 0
 static char sccsid[] = "@(#)input.c	8.1 (Berkeley) 5/31/93";
 #else
-static char rcsid[] = "$NetBSD: input.c,v 1.4 1995/04/27 21:22:24 mycroft Exp $";
+static char rcsid[] = "$OpenBSD: input.c,v 1.5 1998/09/21 07:36:06 pjanzen Exp $";
 #endif
 #endif not lint
 
@@ -60,19 +61,16 @@ static char rcsid[] = "$NetBSD: input.c,v 1.4 1995/04/27 21:22:24 mycroft Exp $"
 #define MAXDEPTH	15
 
 #define RETTOKEN	'\n'
-#ifdef SYSV
-#define CRTOKEN		'\r'
-#endif
 #define REDRAWTOKEN	'\014'	/* CTRL(L) */
 #define HELPTOKEN	'?'
 #define ALPHATOKEN	256
 #define NUMTOKEN	257
 
 typedef struct {
-	int	token;
-	int	to_state;
-	char	*str;
-	char	*(*func)();
+	int		token;
+	int		to_state;
+	const char	*str;
+	const char	*(*func) __P((char));
 } RULE;
 
 typedef struct {
@@ -98,16 +96,8 @@ typedef struct {
 
 #define NUMSTATES	NUMELS(st)
 
-char	*setplane(), *circle(), *left(), *right(), *Left(), *Right(), 
-	*beacon(), *ex_it(), *climb(), *descend(), *setalt(), *setrelalt(), 
-	*benum(), *to_dir(), *rel_dir(), *delayb(), *mark(), *unmark(),
-	*airport(), *turn(), *ignore();
-
 RULE	state0[] = {	{ ALPHATOKEN,	1,	"%c:",		setplane},
 			{ RETTOKEN,	-1,	"",		NULL	},
-#ifdef SYSV
-			{ CRTOKEN,	-1,	"",		NULL	},
-#endif
 			{ HELPTOKEN,	12,	" [a-z]<ret>",	NULL	}},
 	state1[] = {	{ 't',		2,	" turn",	turn	},	
 			{ 'a',		3,	" altitude:",	NULL	},	
@@ -139,9 +129,6 @@ RULE	state0[] = {	{ ALPHATOKEN,	1,	"%c:",		setplane},
 	state4[] = {	{ '@',		9,	" at",		NULL	},	
 			{ 'a',		9,	" at",		NULL	},	
 			{ RETTOKEN,	-1,	"",		NULL	},
-#ifdef SYSV
-			{ CRTOKEN,	-1,	"",		NULL	},
-#endif
 			{ HELPTOKEN,	12,	" @a<ret>",	NULL	}},
 	state5[] = {	{ NUMTOKEN,	7,	"%c",		delayb	},
 			{ HELPTOKEN,	12,	" [0-9]",	NULL	}},
@@ -156,14 +143,8 @@ RULE	state0[] = {	{ ALPHATOKEN,	1,	"%c:",		setplane},
 			{ 'a',		4,	" 270",		rel_dir	},
 			{ 'q',		4,	" 315",		rel_dir	},
 			{ RETTOKEN,	-1,	"",		NULL	},	
-#ifdef SYSV
-			{ CRTOKEN,	-1,	"",		NULL	},	
-#endif
 			{ HELPTOKEN,	12,	" @a<dir><ret>",NULL	}},
 	state7[] = {	{ RETTOKEN,	-1,	"",		NULL	},
-#ifdef SYSV
-			{ CRTOKEN,	-1,	"",		NULL	},
-#endif
 			{ HELPTOKEN,	12,	" <ret>",	NULL	}},
 	state8[] = {	{ NUMTOKEN,	4,	"%c",		benum	},
 			{ HELPTOKEN,	12,	" [0-9]",	NULL	}},
@@ -195,6 +176,7 @@ int	level;
 int	tval;
 int	dest_type, dest_no, dir;
 
+int
 pop()
 {
 	if (level == 0)
@@ -209,6 +191,7 @@ pop()
 	return (0);
 }
 
+void
 rezero()
 {
 	iomove(0);
@@ -221,7 +204,9 @@ rezero()
 	strcpy(T_STR, "");
 }
 
+void
 push(ruleno, ch)
+	int ruleno, ch;
 {
 	int	newstate, newpos;
 
@@ -242,10 +227,11 @@ push(ruleno, ch)
 	strcpy(T_STR, "");
 }
 
+int
 getcommand()
 {
 	int	c, i, done;
-	char	*s, *(*func)();
+	const char	*s, *(*func) __P((char));
 	PLANE	*pp;
 
 	rezero();
@@ -300,12 +286,15 @@ getcommand()
 	return (0);
 }
 
+void
 noise()
 {
-	putchar('\07');
+	if (makenoise)
+		putchar('\07');
 	fflush(stdout);
 }
 
+int
 gettoken()
 {
 	while ((tval = getAChar()) == REDRAWTOKEN)
@@ -321,29 +310,32 @@ gettoken()
 		return (tval);
 }
 
-char	*
+const char	*
 setplane(c)
+	char c;
 {
 	PLANE	*pp;
 
 	pp = findplane(number(c));
 	if (pp == NULL)
 		return ("Unknown Plane");
-	bcopy(pp, &p, sizeof (p));
+	memcpy(&p, pp, sizeof (p));
 	p.delayd = 0;
 	return (NULL);
 }
 
-char	*
+const char	*
 turn(c)
+	char c;
 {
 	if (p.altitude == 0)
 		return ("Planes at airports may not change direction");
 	return (NULL);
 }
 
-char	*
+const char	*
 circle(c)
+	char c;
 {
 	if (p.altitude == 0)
 		return ("Planes cannot circle on the ground");
@@ -351,8 +343,9 @@ circle(c)
 	return (NULL);
 }
 
-char	*
+const char	*
 left(c)
+	char c;
 {
 	dir = D_LEFT;
 	p.new_dir = p.dir - 1;
@@ -361,18 +354,20 @@ left(c)
 	return (NULL);
 }
 
-char	*
+const char	*
 right(c)
+	char c;
 {
 	dir = D_RIGHT;
 	p.new_dir = p.dir + 1;
-	if (p.new_dir > MAXDIR)
+	if (p.new_dir >= MAXDIR)
 		p.new_dir -= MAXDIR;
 	return (NULL);
 }
 
-char	*
+const char	*
 Left(c)
+	char c;
 {
 	p.new_dir = p.dir - 2;
 	if (p.new_dir < 0)
@@ -380,17 +375,19 @@ Left(c)
 	return (NULL);
 }
 
-char	*
+const char	*
 Right(c)
+	char c;
 {
 	p.new_dir = p.dir + 2;
-	if (p.new_dir > MAXDIR)
+	if (p.new_dir >= MAXDIR)
 		p.new_dir -= MAXDIR;
 	return (NULL);
 }
 
-char	*
+const char	*
 delayb(c)
+	char c;
 {
 	int	xdiff, ydiff;
 
@@ -398,28 +395,32 @@ delayb(c)
 
 	if (c >= sp->num_beacons)
 		return ("Unknown beacon");
-	xdiff = sp->beacon[c].x - p.xpos;
+	xdiff = sp->beacon[(int)c].x - p.xpos;
 	xdiff = SGN(xdiff);
-	ydiff = sp->beacon[c].y - p.ypos;
+	ydiff = sp->beacon[(int)c].y - p.ypos;
 	ydiff = SGN(ydiff);
 	if (xdiff != displacement[p.dir].dx || ydiff != displacement[p.dir].dy)
 		return ("Beacon is not in flight path");
+	if (xdiff != 0 && ydiff !=0)
+		if (abs(sp->beacon[(int)c].x - p.xpos) !=
+		    abs(sp->beacon[(int)c].y - p.ypos))
+			return ("Beacon is not in flight path");
 	p.delayd = 1;
 	p.delayd_no = c;
 
 	if (dest_type != T_NODEST) {
 		switch (dest_type) {
 		case T_BEACON:
-			xdiff = sp->beacon[dest_no].x - sp->beacon[c].x;
-			ydiff = sp->beacon[dest_no].y - sp->beacon[c].y;
+			xdiff = sp->beacon[dest_no].x - sp->beacon[(int)c].x;
+			ydiff = sp->beacon[dest_no].y - sp->beacon[(int)c].y;
 			break;
 		case T_EXIT:
-			xdiff = sp->exit[dest_no].x - sp->beacon[c].x;
-			ydiff = sp->exit[dest_no].y - sp->beacon[c].y;
+			xdiff = sp->exit[dest_no].x - sp->beacon[(int)c].x;
+			ydiff = sp->exit[dest_no].y - sp->beacon[(int)c].y;
 			break;
 		case T_AIRPORT:
-			xdiff = sp->airport[dest_no].x - sp->beacon[c].x;
-			ydiff = sp->airport[dest_no].y - sp->beacon[c].y;
+			xdiff = sp->airport[dest_no].x - sp->beacon[(int)c].x;
+			ydiff = sp->airport[dest_no].y - sp->beacon[(int)c].y;
 			break;
 		default:
 			return ("Bad case in delayb!  Get help!");
@@ -434,43 +435,49 @@ delayb(c)
 	return (NULL);
 }
 
-char	*
+const char	*
 beacon(c)
+	char c;
 {
 	dest_type = T_BEACON;
 	return (NULL);
 }
 
-char	*
+const char	*
 ex_it(c)
+	char c;
 {
 	dest_type = T_EXIT;
 	return (NULL);
 }
 
-char	*
+const char	*
 airport(c)
+	char c;
 {
 	dest_type = T_AIRPORT;
 	return (NULL);
 }
 
-char	*
+const char	*
 climb(c)
+	char c;
 {
 	dir = D_UP;
 	return (NULL);
 }
 
-char	*
+const char	*
 descend(c)
+	char c;
 {
 	dir = D_DOWN;
 	return (NULL);
 }
 
-char	*
+const char	*
 setalt(c)
+	char c;
 {
 	if ((p.altitude == c - '0') && (p.new_altitude == p.altitude))
 		return ("Already at that altitude");
@@ -478,8 +485,9 @@ setalt(c)
 	return (NULL);
 }
 
-char	*
+const char	*
 setrelalt(c)
+	char c;
 {
 	if (c == 0)
 		return ("altitude not changed");
@@ -502,8 +510,9 @@ setrelalt(c)
 	return (NULL);
 }
 
-char	*
+const char	*
 benum(c)
+	char c;
 {
 	dest_no = c -= '0';
 
@@ -511,20 +520,20 @@ benum(c)
 	case T_BEACON:
 		if (c >= sp->num_beacons)
 			return ("Unknown beacon");
-		p.new_dir = DIR_FROM_DXDY(sp->beacon[c].x - p.xpos,
-			sp->beacon[c].y - p.ypos);
+		p.new_dir = DIR_FROM_DXDY(sp->beacon[(int)c].x - p.xpos,
+			sp->beacon[(int)c].y - p.ypos);
 		break;
 	case T_EXIT:
 		if (c >= sp->num_exits)
 			return ("Unknown exit");
-		p.new_dir = DIR_FROM_DXDY(sp->exit[c].x - p.xpos,
-			sp->exit[c].y - p.ypos);
+		p.new_dir = DIR_FROM_DXDY(sp->exit[(int)c].x - p.xpos,
+			sp->exit[(int)c].y - p.ypos);
 		break;
 	case T_AIRPORT:
 		if (c >= sp->num_airports)
 			return ("Unknown airport");
-		p.new_dir = DIR_FROM_DXDY(sp->airport[c].x - p.xpos,
-			sp->airport[c].y - p.ypos);
+		p.new_dir = DIR_FROM_DXDY(sp->airport[(int)c].x - p.xpos,
+			sp->airport[(int)c].y - p.ypos);
 		break;
 	default:
 		return ("Unknown case in benum!  Get help!");
@@ -533,15 +542,17 @@ benum(c)
 	return (NULL);
 }
 
-char	*
+const char	*
 to_dir(c)
+	char c;
 {
 	p.new_dir = dir_no(c);
 	return (NULL);
 }
 
-char	*
+const char	*
 rel_dir(c)
+	char c;
 {
 	int	angle;
 
@@ -564,8 +575,9 @@ rel_dir(c)
 	return (NULL);
 }
 
-char	*
+const char	*
 mark(c)
+	char c;
 {
 	if (p.altitude == 0)
 		return ("Cannot mark planes on the ground");
@@ -575,8 +587,9 @@ mark(c)
 	return (NULL);
 }
 
-char	*
+const char	*
 unmark(c)
+	char c;
 {
 	if (p.altitude == 0)
 		return ("Cannot unmark planes on the ground");
@@ -586,8 +599,9 @@ unmark(c)
 	return (NULL);
 }
 
-char	*
+const char	*
 ignore(c)
+	char c;
 {
 	if (p.altitude == 0)
 		return ("Cannot ignore planes on the ground");
@@ -597,6 +611,7 @@ ignore(c)
 	return (NULL);
 }
 
+int
 dir_no(ch)
 	char	ch;
 {
@@ -612,6 +627,7 @@ dir_no(ch)
 	case 'a':	dir = 6;	break;
 	case 'q':	dir = 7;	break;
 	default:
+		dir = -1;
 		fprintf(stderr, "bad character in dir_no\n");
 		break;
 	}

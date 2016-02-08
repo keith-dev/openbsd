@@ -1,7 +1,7 @@
-/*	$OpenBSD: global.c,v 1.2 1996/06/04 08:43:44 niklas Exp $	*/
+/*	$OpenBSD: global.c,v 1.4 1998/10/13 23:09:53 marc Exp $	*/
 
 #ifndef lint
-static const char *rcsid = "$OpenBSD: global.c,v 1.2 1996/06/04 08:43:44 niklas Exp $";
+static const char *rcsid = "$OpenBSD: global.c,v 1.4 1998/10/13 23:09:53 marc Exp $";
 #endif
 
 /*
@@ -30,6 +30,6 @@ static const char *rcsid = "$OpenBSD: global.c,v 1.2 1996/06/04 08:43:44 niklas 
 /* These are global for all utils */
 Boolean	Verbose		= FALSE;
 Boolean	Fake		= FALSE;
-int AutoAnswer		= FALSE;
+Boolean	Force		= FALSE;
 
 

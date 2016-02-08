@@ -1,9 +1,10 @@
-.\"	$OpenBSD: ipf.4,v 1.9 1998/01/26 04:13:33 dgregor Exp $
+.\"	$OpenBSD: ipf.4,v 1.13 1998/09/15 09:55:44 pattonme Exp $
 .TH IPF 4
 .SH NAME
 ipf \- packet filtering kernel interface
 .SH SYNOPSIS
 #include <netinet/ip_fil_compat.h>
+.br
 #include <netinet/ip_fil.h>
 .SH IOCTLS
 .PP
@@ -19,8 +20,8 @@ for use.  The ioctls are called as:
 However, the full complement is as follows:
 .LP
 .nf
-	ioctl(fd, SIOCADAFR, struct frentry *) (same as SUICADDFR)
-	ioctl(fd, SIOCRMAFR, struct frentry *) (same as SUICDELFR)
+	ioctl(fd, SIOCADAFR, struct frentry *) (same as SIOCADDFR)
+	ioctl(fd, SIOCRMAFR, struct frentry *) (same as SIOCDELFR)
 	ioctl(fd, SIOCADIFR, struct frentry *)
 	ioctl(fd, SIOCRMIFR, struct frentry *)
 	ioctl(fd, SIOCINAFR, struct frentry *)
@@ -201,5 +202,14 @@ struct	filterstats {
 #endif
 };
 .fi
+.SH FILES
+/dev/ipauth
+.br
+/dev/ipl
+.br
+/dev/ipstate
 .SH SEE ALSO
-ipfstat(8), ipf(1), ipf(5)
+ipf(1), ipftest(1), ipnat(1), ipl(4), ipnat(4), ipf(5), ipnat(5), ipfstat(8), i
+pmon(8)
+.br
+http://coombs.anu.edu.au/ipfilter/

@@ -1,4 +1,4 @@
-/*	$OpenBSD: vasprintf.c,v 1.3 1998/02/07 20:51:21 tholo Exp $	*/
+/*	$OpenBSD: vasprintf.c,v 1.6 1998/10/16 16:11:56 millert Exp $	*/
 
 /*
  * Copyright (c) 1997 Todd C. Miller <Todd.Miller@courtesan.com>
@@ -12,10 +12,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by Todd C. Miller.
- * 4. The name of the author may not be used to endorse or promote products
+ * 3. The name of the author may not be used to endorse or promote products
  *    derived from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES,
@@ -31,7 +28,7 @@
  */
 
 #if defined(LIBC_SCCS) && !defined(lint)
-static char rcsid[] = "$OpenBSD: vasprintf.c,v 1.3 1998/02/07 20:51:21 tholo Exp $";
+static char rcsid[] = "$OpenBSD: vasprintf.c,v 1.6 1998/10/16 16:11:56 millert Exp $";
 #endif /* LIBC_SCCS and not lint */
 
 #include <stdio.h>
@@ -46,23 +43,30 @@ vasprintf(str, fmt, ap)
 {
 	int ret;
 	FILE f;
+	unsigned char *_base;
 
 	f._file = -1;
 	f._flags = __SWR | __SSTR | __SALC;
 	f._bf._base = f._p = (unsigned char *)malloc(128);
-	if (f._bf._base == NULL) {
-		*str = NULL;
-		errno = ENOMEM;
-		return (-1);
-	}
-	f._bf._size = f._w = 127;		/* Leave room for the NULL */
+	if (f._bf._base == NULL)
+		goto err;
+	f._bf._size = f._w = 127;		/* Leave room for the NUL */
 	ret = vfprintf(&f, fmt, ap);
+	if (ret == -1)
+		goto err;
 	*f._p = '\0';
-	f._bf._base = realloc(f._bf._base, f._bf._size + 1);
-	if (f._bf._base == NULL) {
-		errno = ENOMEM;
-		ret = -1;
-	}
-	*str = (char *)f._bf._base;
+	_base = realloc(f._bf._base, ret + 1);
+	if (_base == NULL)
+		goto err;
+	*str = (char *)_base;
 	return (ret);
+
+err:
+	if (f._bf._base) {
+		free(f._bf._base);
+		f._bf._base = NULL;
+	}
+	*str = NULL;
+	errno = ENOMEM;
+	return (-1);
 }

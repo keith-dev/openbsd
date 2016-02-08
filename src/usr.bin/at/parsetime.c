@@ -1,4 +1,4 @@
-/*	$OpenBSD: parsetime.c,v 1.4 1997/03/01 23:40:10 millert Exp $	*/
+/*	$OpenBSD: parsetime.c,v 1.7 1998/07/10 07:07:04 deraadt Exp $	*/
 /*	$NetBSD: parsetime.c,v 1.3 1995/03/25 18:13:36 glass Exp $	*/
 
 /* 
@@ -46,6 +46,7 @@
 #include <time.h>
 #include <unistd.h>
 #include <ctype.h>
+#include <err.h>
 
 /* Local headers */
 
@@ -108,6 +109,18 @@ struct {
 	{ "oct", OCT, 0 },
 	{ "nov", NOV, 0 },
 	{ "dec", DEC, 0 },
+	{ "january", JAN,0 },
+	{ "february", FEB,0 },
+	{ "march", MAR,0 },
+	{ "april", APR,0 },
+	{ "may", MAY,0 },
+	{ "june", JUN,0 },
+	{ "july", JUL,0 },
+	{ "august", AUG,0 },
+	{ "september", SEP,0 },
+	{ "october", OCT,0 },
+	{ "november", NOV,0 },
+	{ "december", DEC,0 },
 	{ "sunday", SUN, 0 },
 	{ "sun", SUN, 0 },
 	{ "monday", MON, 0 },
@@ -137,7 +150,7 @@ static int sc_tokid;	/* scanner - token id */
 static int sc_tokplur;	/* scanner - is token plural? */
 
 #ifndef lint
-static char rcsid[] = "$OpenBSD: parsetime.c,v 1.4 1997/03/01 23:40:10 millert Exp $";
+static char rcsid[] = "$OpenBSD: parsetime.c,v 1.7 1998/07/10 07:07:04 deraadt Exp $";
 #endif
 
 /* Local functions */
@@ -344,7 +357,7 @@ plus(tm)
 		delay *= 60;
 	case MINUTES:
 		if (expectplur != sc_tokplur)
-			(void)fprintf(stderr, "at: pluralization is wrong\n");
+			warnx("pluralization is wrong");
 		dateadd(delay, tm);
 		return;
 	}
@@ -594,7 +607,13 @@ parsetime(argc, argv)
 
 	switch (token()) {
 	case NOW:	/* now is optional prefix for PLUS tree */
-		expect(PLUS);
+		token();
+		if (sc_tokid == EOF) {
+			runtime = nowtime;
+			break;
+		}
+		else if (sc_tokid != PLUS)
+			plonk(sc_tokid);
 	case PLUS:
 		plus(&runtime);
 		break;

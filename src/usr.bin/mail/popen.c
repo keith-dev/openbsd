@@ -1,4 +1,4 @@
-/*	$OpenBSD: popen.c,v 1.15 1998/02/15 21:20:02 niklas Exp $	*/
+/*	$OpenBSD: popen.c,v 1.23 1998/09/27 21:16:42 millert Exp $	*/
 /*	$NetBSD: popen.c,v 1.6 1997/05/13 06:48:42 mikel Exp $	*/
 
 /*
@@ -38,7 +38,7 @@
 #if 0
 static char sccsid[] = "@(#)popen.c	8.1 (Berkeley) 6/6/93";
 #else
-static char rcsid[] = "$OpenBSD: popen.c,v 1.15 1998/02/15 21:20:02 niklas Exp $";
+static char rcsid[] = "$OpenBSD: popen.c,v 1.23 1998/09/27 21:16:42 millert Exp $";
 #endif
 #endif /* not lint */
 
@@ -221,8 +221,8 @@ file_pid(fp)
  * Run a command without a shell, with optional arguments and splicing
  * of stdin and stdout.  The command name can be a sequence of words.
  * Signals must be handled by the caller.
- * "Mask" contains the signals to ignore in the new process.
- * SIGINT is enabled unless it's in the mask.
+ * "nset" contains the signals to ignore in the new process.
+ * SIGINT is enabled unless it's in "nset".
  */
 /*VARARGS4*/
 int
@@ -381,19 +381,30 @@ int
 wait_child(pid)
 	int pid;
 {
-	struct child *cp = findchild(pid, 0);
+	struct child *cp;
 	sigset_t nset, oset;
+	int rv = 0;
 
 	sigemptyset(&nset);
 	sigaddset(&nset, SIGCHLD);
 	sigprocmask(SIG_BLOCK, &nset, &oset);
-
-	while (!cp->done)
-		sigsuspend(&oset);
-	wait_status = cp->status;
-	delchild(cp);
+	/*
+	 * If we have not already waited on the pid (via sigchild)
+	 * wait on it now.  Otherwise, use the wait status stashed
+	 * by sigchild.
+	 */
+	cp = findchild(pid, 1);
+	if (cp == NULL || !cp->done)
+		rv = waitpid(pid, &wait_status, 0);
+	else
+		wait_status = cp->status;
+	if (cp != NULL)
+		delchild(cp);
 	sigprocmask(SIG_SETMASK, &oset, NULL);
-	return((WIFEXITED(wait_status) && WEXITSTATUS(wait_status)) ? -1 : 0);
+	if (rv == -1 || (WIFEXITED(wait_status) && WEXITSTATUS(wait_status)))
+		return(-1);
+	else
+		return(0);
 }
 
 /*
@@ -403,29 +414,29 @@ void
 free_child(pid)
 	int pid;
 {
-	struct child *cp = findchild(pid, 0);
+	struct child *cp;
 	sigset_t nset, oset;
 
 	sigemptyset(&nset);
 	sigaddset(&nset, SIGCHLD);
 	sigprocmask(SIG_BLOCK, &nset, &oset);
-
-	if (cp->done)
-		delchild(cp);
-	else
-		cp->free = 1;
+	if ((cp = findchild(pid, 0)) != NULL) {
+		if (cp->done)
+			delchild(cp);
+		else
+			cp->free = 1;
+	}
 	sigprocmask(SIG_SETMASK, &oset, NULL);
 }
 
 /*
- * Lock(1)/unlock(0) mail spool using mail.local's -H flag.
+ * Lock(1)/unlock(0) mail spool using lockspool(1).
  * Returns 1 for success, 0 for failure, -1 for bad usage.
  */
 static int
 handle_spool_locks(action)
 	int action;
 {
-	char *cmd;
 	static FILE *lockfp = NULL;
 	static int lock_pid;
 
@@ -440,20 +451,24 @@ handle_spool_locks(action)
 		(void)Pclose(lockfp);
 		lockfp = NULL;
 	} else if (action == 1) {
-		/* Create the lock */
-		if ((cmd = (char *)malloc(sizeof(_PATH_MAIL_LOCAL) + 3)) == NULL)
+		char *cmd = _PATH_LOCKSPOOL;
+
+		/* XXX - lockspool requires root for user arg, we do not */
+		if (uflag && asprintf(&cmd, "%s %s", _PATH_LOCKSPOOL,
+		    myname) == -1)
 			errx(1, "Out of memory");
-		sprintf(cmd, "%s -H", _PATH_MAIL_LOCAL);
-		if ((lockfp = Popen(cmd, "r")) == NULL || getc(lockfp) != '1') {
+
+		/* Create the lock */
+		lockfp = Popen(cmd, "r");
+		if (uflag)
+			free(cmd);
+		if (lockfp == NULL || getc(lockfp) != '1') {
 			lockfp = NULL;
-			(void)free(cmd);
 			return(0);
 		}
-
 		lock_pid = fp_head->pid;	/* new entries added at head */
-		(void)free(cmd);
 	} else {
-		fprintf(stderr, "handle_spool_locks: unknown action %d\n",
+		(void)fprintf(stderr, "handle_spool_locks: unknown action %d\n",
 		    action);
 		return(-1);
 	}

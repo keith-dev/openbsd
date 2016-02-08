@@ -142,7 +142,7 @@ field normally contains comma (``,'') separated subfields as follows:
 .It name
 user's full name
 .It office
-user's office number
+user's office location
 .It wphone
 user's work phone number
 .It hphone
@@ -203,7 +203,7 @@ or
 entries contain text, it will override the information included via YP.
 On some systems, the
 .Ar passwd
-field may also be overriden, hence it is recommended that the standard
+field may also be overridden, hence it is recommended that the standard
 way to enable YP passwd support in
 .Pa /etc/master.passwd
 is:
@@ -238,7 +238,8 @@ User information should (and eventually will) be stored elsewhere.
 Placing YP exclusions in the file after any inclusions will have
 unexpected results.
 .Sh COMPATIBILITY
-The password file format has changed since 4.3BSD.
+The password file format has changed since
+.Bx 4.3 .
 The following awk script can be used to convert your old-style password
 file into a new style password file.
 The additional fields

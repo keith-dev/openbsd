@@ -1,4 +1,4 @@
-/*	$OpenBSD: arp.c,v 1.10 1997/11/28 05:34:41 art Exp $ */
+/*	$OpenBSD: arp.c,v 1.13 1998/09/29 02:22:14 millert Exp $ */
 /*	$NetBSD: arp.c,v 1.12 1995/04/24 13:25:18 cgd Exp $ */
 
 /*
@@ -98,12 +98,14 @@ main(argc, argv)
 	int ch;
 
 	pid = getpid();
+	opterr = 0;
 	while ((ch = getopt(argc, argv, "andsf")) != -1)
 		if (ch == 'n')
 			nflag = 1;
 
 	optind = 1;
 	optreset = 1;
+	opterr = 1;
 	while ((ch = getopt(argc, argv, "andsf")) != -1)
 		switch((char)ch) {
 		case 'a':
@@ -155,7 +157,7 @@ file(name)
 	args[4] = &arg[4][0];
 	retval = 0;
 	while (fgets(line, 100, fp) != NULL) {
-		i = sscanf(line, "%s %s %s %s %s", arg[0], arg[1], arg[2],
+		i = sscanf(line, "%49s %49s %49s %49s %49s", arg[0], arg[1], arg[2],
 		    arg[3], arg[4]);
 		if (i < 2) {
 			warnx("bad line: %s", line);

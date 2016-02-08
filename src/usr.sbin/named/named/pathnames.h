@@ -1,8 +1,8 @@
-/*	$OpenBSD: pathnames.h,v 1.4 1997/06/12 00:39:56 downsj Exp $	*/
+/*	$OpenBSD: pathnames.h,v 1.8 1998/06/02 16:53:16 millert Exp $	*/
 
 /*
  *	@(#)pathnames.h	5.4 (Berkeley) 6/1/90
- *	$From: pathnames.h,v 8.1 1994/12/15 06:24:14 vixie Exp $
+ *	$From: pathnames.h,v 8.2 1998/05/11 04:19:45 vixie Exp $
  */
 
 /*
@@ -64,7 +64,12 @@
 # define _PATH_XFER_PREDEFINED	/* probably from Makefile */
 #endif
 
-#if defined (__sgi) && !defined(_SYSTYPE_SVR4) && !defined(__SYSTYPE_SVR4)
+#ifdef __OpenBSD__
+#ifndef _PATH_XFER
+#define	_PATH_XFER	"/var/named/named-xfer"
+#endif
+#define	_PATH_BOOT	"/var/named/named.boot"
+#elif defined (__sgi) && !defined(_SYSTYPE_SVR4) && !defined(__SYSTYPE_SVR4)
 #define	_PATH_BOOT	"/usr/etc/named.d/named.boot"
 #else
 #define	_PATH_BOOT	"/etc/named.boot"
@@ -76,16 +81,15 @@
 #ifndef _PATH_XFER
 # define _PATH_XFER	"/usr/libexec/named-xfer"
 #endif
-#define	_PATH_DEBUG	"/etc/namedb/tmp/named.run"
-#define	_PATH_DUMPFILE	"/etc/namedb/tmp/named_dump.db"
+#define	_PATH_DEBUG	"named.run"
+#define	_PATH_DUMPFILE	"named_dump.db"
 #ifndef _PATH_PIDFILE
 # define _PATH_PIDFILE	"/var/run/named.pid"
 #endif
-#define	_PATH_STATS	"/etc/namedb/tmp/named.stats"
-#define	_PATH_XFERTRACE	"/etc/namedb/tmp/xfer.trace"
-#define _PATH_XFERDDT	"/etc/namedb/tmp/xfer.ddt"
-#define	_PATH_TMPXFER	"/etc/namedb/tmp/xfer.ddt.XXXXXX"
-#define	_PATH_TMPDIR	"/etc/namedb/tmp"
+#define	_PATH_STATS	"named.stats"
+#define	_PATH_XFERTRACE	"xfer.trace"
+#define _PATH_XFERDDT	"xfer.ddt"
+#define	_PATH_TMPXFER	"xfer.ddt.XXXXXX"
 
 #else /* BSD */
 
@@ -94,16 +98,15 @@
 #ifndef _PATH_XFER
 # define _PATH_XFER	"/etc/named-xfer"
 #endif
-#define	_PATH_DEBUG	"/usr/tmp/named.run"
-#define	_PATH_DUMPFILE	"/usr/tmp/named_dump.db"
+#define	_PATH_DEBUG	"named.run"
+#define	_PATH_DUMPFILE	"named_dump.db"
 #ifndef _PATH_PIDFILE
 # define _PATH_PIDFILE	"/etc/named.pid"
 #endif
-#define	_PATH_STATS	"/usr/tmp/named.stats"
-#define	_PATH_XFERTRACE	"/usr/tmp/xfer.trace"
-#define _PATH_XFERDDT	"/usr/tmp/xfer.ddt"
-#define	_PATH_TMPXFER	"/usr/tmp/xfer.ddt.XXXXXX"
-#define	_PATH_TMPDIR	"/usr/tmp"
+#define	_PATH_STATS	"named.stats"
+#define	_PATH_XFERTRACE	"xfer.trace"
+#define _PATH_XFERDDT	"xfer.ddt"
+#define	_PATH_TMPXFER	"xfer.ddt.XXXXXX"
 #endif /* BSD */
 
 #ifndef _PATH_XFER_PREDEFINED

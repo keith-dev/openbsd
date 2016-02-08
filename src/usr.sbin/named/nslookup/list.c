@@ -1,4 +1,4 @@
-/*	$OpenBSD: list.c,v 1.2 1997/03/12 10:42:47 downsj Exp $	*/
+/*	$OpenBSD: list.c,v 1.5 1998/09/10 18:38:09 deraadt Exp $	*/
 
 /*
  * ++Copyright++ 1985, 1989
@@ -60,7 +60,7 @@
 static char sccsid[] = "@(#)list.c	5.23 (Berkeley) 3/21/91";
 static char rcsid[] = "$From: list.c,v 8.9 1996/11/26 10:11:26 vixie Exp $";
 #else
-static char rcsid[] = "$OpenBSD: list.c,v 1.2 1997/03/12 10:42:47 downsj Exp $";
+static char rcsid[] = "$OpenBSD: list.c,v 1.5 1998/09/10 18:38:09 deraadt Exp $";
 #endif
 #endif /* not lint */
 
@@ -156,13 +156,16 @@ ListHostsByType(string, putToFile)
 	char	*namePtr;
 	char	name[NAME_LEN];
 	char	option[NAME_LEN];
+	char	get[80];
 
 	/*
 	 *  Parse the command line. It maybe of the form "ls -t domain"
 	 *  or "ls -t type domain".
 	 */
 
-	i = sscanf(string, " ls -t %s %s", option, name);
+	snprintf(get, sizeof get, " ls -t %%%ds %%%ds", sizeof option-1,
+	    sizeof name-1);
+	i = sscanf(string, get, option, name);
 	if (putToFile && i == 2 && name[0] == '>') {
 	    i--;
 	}
@@ -193,12 +196,15 @@ ListHosts(string, putToFile)
 	char	*namePtr;
 	char	name[NAME_LEN];
 	char	option[NAME_LEN];
+	char	get[80];
 
 	/*
 	 *  Parse the command line. It maybe of the form "ls domain",
 	 *  "ls -X domain".
 	 */
-	i = sscanf(string, " ls %s %s", option, name);
+	snprintf(get, sizeof get, " ls %%%ds %%%ds", sizeof option-1,
+	    sizeof name-1);
+	i = sscanf(string, get, option, name);
 	if (putToFile && i == 2 && name[0] == '>') {
 	    i--;
 	}
@@ -521,6 +527,8 @@ strip_domain(string, domain)
 }
 
 
+#define NAME_SLOP 80
+
 PrintListInfo(file, msg, eom, qtype, domain)
     FILE	*file;
     u_char	*msg, *eom;
@@ -533,7 +541,7 @@ PrintListInfo(file, msg, eom, qtype, domain)
     u_int32_t		ttl;
     int			n, pref, count;
     struct in_addr	inaddr;
-    char		name[NAME_LEN];
+    char		name[NAME_LEN + NAME_SLOP];
     char		name2[NAME_LEN];
     Boolean		stripped;
 
@@ -562,7 +570,7 @@ PrintListInfo(file, msg, eom, qtype, domain)
 	cp += nameLen + QFIXEDSZ;
     }
     for (count = ntohs(headerPtr->ancount); count > 0; count--) {
-	nameLen = dn_expand(msg, eom, cp, name, sizeof name);
+	nameLen = dn_expand(msg, eom, cp, name, NAME_LEN);
 	if (nameLen < 0)
 	    return (ERROR);
 	cp += nameLen;
@@ -592,7 +600,7 @@ PrintListInfo(file, msg, eom, qtype, domain)
 	    }
 	}
 	if (!stripped && nameLen < sizeof(name)-1) {
-	    strcat(name, ".");
+	    strncat(name, ".", sizeof(name) - strlen(name) - 1);
 	}
 
 	fprintf(file, NAME_FORMAT, name);
@@ -901,8 +909,10 @@ ViewList(string)
 {
     char file[PATH_MAX];
     char command[PATH_MAX];
+    char get[80];
 
-    sscanf(string, " view %s", file);
+    snprintf(get, sizeof get, " view %%%ds", sizeof file-1);
+    sscanf(string, get, file);
     (void)sprintf(command, "grep \"^ \" %s | sort | %s", file, pager);
     system(command);
 }
@@ -936,6 +946,7 @@ Finger(string, putToFile)
 	register int		lastc;
 	char			name[NAME_LEN];
 	char			file[NAME_LEN];
+	char			get[80];
 
 	/*
 	 *  We need a valid current host info to get an inet address.
@@ -945,7 +956,8 @@ Finger(string, putToFile)
 	    return (ERROR);
 	}
 
-	if (sscanf(string, " finger %s", name) == 1) {
+	snprintf(get, sizeof get, " finger %%%ds", sizeof name-1);
+	if (sscanf(string, get, name) == 1) {
 	    if (putToFile && (name[0] == '>')) {
 		name[0] = '\0';
 	    }

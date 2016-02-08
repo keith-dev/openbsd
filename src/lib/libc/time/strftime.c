@@ -1,6 +1,6 @@
 #if defined(LIBC_SCCS) && !defined(lint) && !defined(NOID)
 static char elsieid[] = "@(#)strftime.c	7.57";
-static char *rcsid = "$OpenBSD: strftime.c,v 1.2 1998/02/14 21:03:48 millert Exp $";
+static char *rcsid = "$OpenBSD: strftime.c,v 1.5 1998/08/14 21:39:44 deraadt Exp $";
 #endif /* LIBC_SCCS and not lint */
 
 #include "private.h"
@@ -159,8 +159,11 @@ const struct tm * const	t;
 		(void) fprintf(stderr, "\n");
 	}
 #endif /* !defined NO_RUN_TIME_WARNINGS_ABOUT_YEAR_2000_PROBLEMS_THANK_YOU */
-	if (p == s + maxsize)
+	if (p == s + maxsize) {
+		if (maxsize > 0)
+			s[maxsize - 1] = '\0';
 		return 0;
+	}
 	*p = '\0';
 	return p - s;
 }
@@ -554,6 +557,7 @@ _loc P((void))
 	int			fd;
 	int			oldsun;	/* "...ain't got nothin' to do..." */
 	char *			lbuf;
+	char *			nlbuf;
 	char *			name;
 	char *			p;
 	const char **		ap;
@@ -610,10 +614,15 @@ _loc P((void))
 		goto bad_locale;
 	bufsize = namesize + st.st_size;
 	locale_buf = NULL;
-	lbuf = (lbuf == NULL || lbuf == locale_buf_C) ?
+	nlbuf = (lbuf == NULL || lbuf == locale_buf_C) ?
 		malloc(bufsize) : realloc(lbuf, bufsize);
-	if (lbuf == NULL)
+	if (nlbuf == NULL) {
+		if (lbuf)
+			free(lbuf);
+		lbuf = NULL;
 		goto bad_locale;
+	}
+	lbuf = nlbuf;
 	(void) strcpy(lbuf, name);
 	p = lbuf + namesize;
 	plim = p + st.st_size;

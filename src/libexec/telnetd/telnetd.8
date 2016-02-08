@@ -1,4 +1,4 @@
-.\"	$OpenBSD: telnetd.8,v 1.4 1996/04/23 03:03:50 deraadt Exp $
+.\"	$OpenBSD: telnetd.8,v 1.7 1998/09/06 22:23:18 aaron Exp $
 .\"	$NetBSD: telnetd.8,v 1.8 1996/03/20 04:25:55 tls Exp $
 .\"
 .\" Copyright (c) 1983, 1993
@@ -44,7 +44,7 @@
 protocol server
 .Sh SYNOPSIS
 .Nm /usr/libexec/telnetd
-.Op Fl Uhlkns
+.Op Fl Uhlkn
 .Op Fl D Ar debugmode
 .Op Fl I Ns Ar initid
 .Op Fl S Ar tos
@@ -216,7 +216,7 @@ will operate in character at a time mode.
 It will still support kludge linemode, but will only
 go into kludge linemode if the remote client requests
 it.
-(This is done by by the client sending
+(This is done by the client sending
 .Dv DONT SUPPRESS-GO-AHEAD
 and
 .Dv DONT ECHO . )
@@ -271,25 +271,6 @@ can differentiate
 .Ar highpty
 from
 .Ar lowpty .
-.It Fl s
-This option is only enabled if
-.Nm telnetd
-is compiled with support for
-.Tn SecurID
-cards.
-It causes the
-.Fl s
-option to be passed on to
-.Xr login 1 ,
-and thus is only useful if
-.Xr login 1
-supports the
-.Fl s
-flag to indicate that only
-.Tn SecurID
-validated logins are allowed, and is
-usually useful for controlling remote logins
-from outside of a firewall.
 .It Fl S Ar tos
 .It Fl u Ar len
 This option is used to specify the size of the field
@@ -452,7 +433,8 @@ is willing to receive an 8 bit data stream.
 Requests that the client handle flow control
 characters remotely.
 .It "DO ECHO"
-This is not really supported, but is sent to identify a 4.2BSD
+This is not really supported, but is sent to identify a
+.Bx 4.2
 .Xr telnet 1
 client, which will improperly respond with
 .Dv WILL ECHO.

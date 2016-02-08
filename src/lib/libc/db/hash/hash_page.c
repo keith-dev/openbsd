@@ -35,7 +35,7 @@
  */
 
 #if defined(LIBC_SCCS) && !defined(lint)
-static char rcsid[] = "$OpenBSD: hash_page.c,v 1.3 1996/08/19 08:20:39 tholo Exp $";
+static char rcsid[] = "$OpenBSD: hash_page.c,v 1.6 1998/07/27 15:35:40 millert Exp $";
 #endif /* LIBC_SCCS and not lint */
 
 /*
@@ -54,6 +54,7 @@ static char rcsid[] = "$OpenBSD: hash_page.c,v 1.3 1996/08/19 08:20:39 tholo Exp
  *	open_temp
  */
 
+#include <sys/param.h>
 #include <sys/types.h>
 
 #include <errno.h>
@@ -860,13 +861,19 @@ open_temp(hashp)
 	HTAB *hashp;
 {
 	sigset_t set, oset;
-	static char namestr[] = "_hashXXXXXX";
+	char *envtmp = NULL;
+	char path[MAXPATHLEN];
+	
+	if (issetugid() == 0)
+		envtmp = getenv("TMPDIR");
+	(void)snprintf(path,
+	    sizeof(path), "%s/_hash.XXXXXX", envtmp ? envtmp : "/tmp");
 
 	/* Block signals; make sure file goes away at process exit. */
 	(void)sigfillset(&set);
 	(void)sigprocmask(SIG_BLOCK, &set, &oset);
-	if ((hashp->fp = mkstemp(namestr)) != -1) {
-		(void)unlink(namestr);
+	if ((hashp->fp = mkstemp(path)) != -1) {
+		(void)unlink(path);
 		(void)fcntl(hashp->fp, F_SETFD, 1);
 	}
 	(void)sigprocmask(SIG_SETMASK, &oset, (sigset_t *)NULL);

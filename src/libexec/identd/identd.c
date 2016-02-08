@@ -37,9 +37,6 @@ extern int errno;
 
 extern char *version;
 
-char   *path_unix = NULL;
-char   *path_kmem = NULL;
-
 int     verbose_flag = 0;
 int     debug_flag = 0;
 int     syslog_flag = 0;
@@ -48,6 +45,7 @@ int     other_flag = 0;
 int     unknown_flag = 0;
 int     number_flag = 0;
 int     noident_flag = 0;
+int	token_flag = 0;
 
 int     lport = 0;
 int     fport = 0;
@@ -61,6 +59,16 @@ static int child_pid;
 #ifdef LOG_DAEMON
 static int syslog_facility = LOG_DAEMON;
 #endif
+
+void
+usage()
+{
+	fprintf(stderr,
+	    "identd [-i | -w | -b] [-t seconds] [-u uid] [-g gid] [-p port]\n"
+	    "\t[-a address] [-c charset] [-noelVvmNdh]\n");
+	exit(1);
+}
+
 
 /*
  * Return the name of the connecting host, or the IP number as a string.
@@ -97,7 +105,7 @@ main(argc, argv)
 	int     argc;
 	char   *argv[];
 {
-	int     i, len;
+	int     len;
 	struct sockaddr_in sin;
 	struct in_addr laddr, faddr;
 	struct timeval tv;
@@ -105,18 +113,22 @@ main(argc, argv)
 	struct group *grp;
 	int     background_flag = 0;
 	int     timeout = 0;
-	char   *portno = "113";
+	char   *portno = "auth";
 	char   *bind_address = NULL;
 	int     set_uid = 0;
 	int     set_gid = 0;
-	int     opt_count = 0;	/* Count of option flags */
+	extern char *optarg;
+	extern int optind;
+	int ch;
 
 	/*
 	 * Parse the command line arguments
 	 */
-	for (i = 1; i < argc && argv[i][0] == '-'; i++) {
-		opt_count++;
-		switch (argv[i][1]) {
+	while ((ch = getopt(argc, argv, "hbwit:p:a:u:g:c:r:loenVvdmN")) != -1) {
+		switch (ch) {
+		case 'h':
+			token_flag = 1;
+			break;
 		case 'b':	/* Start as standalone daemon */
 			background_flag = 1;
 			break;
@@ -127,43 +139,44 @@ main(argc, argv)
 			background_flag = 0;
 			break;
 		case 't':
-			timeout = atoi(argv[i] + 2);
+			timeout = atoi(optarg);
 			break;
 		case 'p':
-			portno = argv[i] + 2;
+			portno = optarg;
 			break;
 		case 'a':
-			bind_address = argv[i] + 2;
+			bind_address = optarg;
 			break;
 		case 'u':
-			if (isdigit(argv[i][2])) {
-				set_uid = atoi(argv[i] + 2);
+			if (isdigit(optarg[0])) {
+				set_uid = atoi(optarg);
 				break;
 			}
-			pwd = getpwnam(argv[i] + 2);
+			pwd = getpwnam(optarg);
 			if (!pwd)
-				ERROR1("no such user (%s) for -u option", argv[i] + 2);
+				ERROR1("no such user (%s) for -u option", optarg);
 			else {
 				set_uid = pwd->pw_uid;
-				set_gid = pwd->pw_gid;
+				if (setgid == 0)
+					set_gid = pwd->pw_gid;
 			}
 			break;
 		case 'g':
-			if (isdigit(argv[i][2])) {
-				set_gid = atoi(argv[i] + 2);
+			if (isdigit(optarg[0])) {
+				set_gid = atoi(optarg);
 				break;
 			}
-			grp = getgrnam(argv[i] + 2);
+			grp = getgrnam(optarg);
 			if (!grp)
-				ERROR1("no such group (%s) for -g option", argv[i] + 2);
+				ERROR1("no such group (%s) for -g option", optarg);
 			else
 				set_gid = grp->gr_gid;
 			break;
 		case 'c':
-			charset_name = argv[i] + 2;
+			charset_name = optarg;
 			break;
 		case 'r':
-			indirect_host = argv[i] + 2;
+			indirect_host = optarg;
 			break;
 		case 'l':	/* Use the Syslog daemon for logging */
 			syslog_flag++;
@@ -193,26 +206,10 @@ main(argc, argv)
 		case 'N':	/* Enable users ".noident" files */
 			noident_flag++;
 			break;
+		default:
+			usage();
 		}
 	}
-
-	/*
-	 * Path to kernel namelist file specified on command line
-	 */
-	if (i < argc)
-		path_unix = argv[i++];
-
-	/*
-	 * Path to kernel memory device specified on command line
-	 */
-	if (i < argc)
-		path_kmem = argv[i++];
-
-	/*
-	 * Open the kernel memory device and read the nlist table
-	 */
-	if (k_open() < 0)
-		ERROR("main: k_open");
 
 	/*
 	 * Do the special handling needed for the "-b" flag
@@ -251,9 +248,10 @@ main(argc, argv)
 
 				hp = gethostbyname(bind_address);
 				if (!hp)
-					ERROR1("no such address (%s) for -a switch", bind_address);
-
-				memcpy(&addr.sin_addr, hp->h_addr, sizeof(addr.sin_addr));
+					ERROR1("no such address (%s) for -a switch",
+					    bind_address);
+				memcpy(&addr.sin_addr, hp->h_addr,
+				    sizeof(addr.sin_addr));
 			}
 		}
 

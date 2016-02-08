@@ -1,4 +1,4 @@
-/*	$OpenBSD: chk.c,v 1.3 1997/09/08 08:43:17 deraadt Exp $	*/
+/*	$OpenBSD: chk.c,v 1.5 1998/07/29 03:14:51 millert Exp $	*/
 /*	$NetBSD: chk.c,v 1.2 1995/07/03 21:24:42 cgd Exp $	*/
 
 /*
@@ -33,7 +33,7 @@
  */
 
 #ifndef lint
-static char rcsid[] = "$OpenBSD: chk.c,v 1.3 1997/09/08 08:43:17 deraadt Exp $";
+static char rcsid[] = "$OpenBSD: chk.c,v 1.5 1998/07/29 03:14:51 millert Exp $";
 #endif
 
 #include <stdlib.h>
@@ -443,7 +443,7 @@ chkfaui(hte, def, decl)
 		return;
 
 	/*
-	 * If we find a function definition, we use this for comparision,
+	 * If we find a function definition, we use this for comparison,
 	 * otherwise the first prototype we can find. If there is no
 	 * definition or prototype declaration, the first function call
 	 * is used.
@@ -701,7 +701,7 @@ printflike(hte, call, n, fmt, ap)
 	const	char *fp;
 	int	fc;
 	int	fwidth, prec, left, sign, space, alt, zero;
-	tspec_t	sz, t1, t2;
+	tspec_t	sz, t1, t2 = NOTSPEC;
 	type_t	*tp;
 
 	fp = fmt;
@@ -931,7 +931,7 @@ scanflike(hte, call, n, fmt, ap)
 	const	char *fp;
 	int	fc;
 	int	noasgn, fwidth;
-	tspec_t	sz, t1, t2;
+	tspec_t	sz, t1 = NOTSPEC, t2 = NOTSPEC;
 	type_t	*tp;
 
 	fp = fmt;
@@ -1281,8 +1281,8 @@ chkadecl(hte, def, decl)
  *
  * ignqual	if set, ignore qualifiers of outhermost type; used for
  *		function arguments
- * promote	if set, promote left type before comparision; used for
- *		comparisions of arguments with parameters of old style
+ * promote	if set, promote left type before comparison; used for
+ *		comparisons of arguments with parameters of old style
  *		definitions
  * asgn		left indirected type must have at least the same qualifiers
  *		like right indirected type (for assignments and function

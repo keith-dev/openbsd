@@ -1,4 +1,4 @@
-/*	$OpenBSD: dumprmt.c,v 1.8 1997/07/05 05:35:55 millert Exp $	*/
+/*	$OpenBSD: dumprmt.c,v 1.10 1998/07/14 19:04:05 deraadt Exp $	*/
 /*	$NetBSD: dumprmt.c,v 1.17 1997/06/05 16:10:47 mrg Exp $	*/
 
 /*-
@@ -63,6 +63,7 @@ static char rcsid[] = "$NetBSD: dumprmt.c,v 1.10 1996/03/15 22:39:26 scottr Exp 
 #include <ctype.h>
 #include <err.h>
 #include <netdb.h>
+#include <errno.h>
 #include <pwd.h>
 #include <signal.h>
 #include <stdio.h>
@@ -113,7 +114,7 @@ static void
 rmtconnaborted()
 {
 
-	errx(1, "Lost connection to remote host.");
+	errx(X_ABORT, "Lost connection to remote host.");
 }
 
 void
@@ -132,18 +133,18 @@ rmtgetconn()
 	if (sp == NULL) {
 		sp = getservbyname("shell", "tcp");
 		if (sp == NULL)
-			errx(1, "shell/tcp: unknown service");
+			errx(X_STARTUP, "shell/tcp: unknown service");
 		pwd = getpwuid(getuid());
 		if (pwd == NULL)
-			errx(1, "who are you?");
+			errx(X_STARTUP, "who are you?");
 	}
 	if ((name = strdup(pwd->pw_name)) == NULL)
-		err(1, "malloc");
+		err(X_STARTUP, "malloc");
 	if ((cp = strchr(rmtpeer, '@')) != NULL) {
 		tuser = rmtpeer;
 		*cp = '\0';
 		if (!okname(tuser))
-			exit(1);
+			exit(X_STARTUP);
 		rmtpeer = ++cp;
 	} else
 		tuser = name;
@@ -334,10 +335,9 @@ rmtreply(cmd)
 	if (*code == 'E' || *code == 'F') {
 		rmtgets(emsg, sizeof(emsg));
 		msg("%s: %s", cmd, emsg);
-		if (*code == 'F') {
+		errno = atoi(&code[1]);
+		if (*code == 'F')
 			rmtstate = TS_CLOSED;
-			return (-1);
-		}
 		return (-1);
 	}
 	if (*code != 'A') {

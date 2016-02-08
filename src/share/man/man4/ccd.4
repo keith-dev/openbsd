@@ -1,4 +1,4 @@
-.\"	$OpenBSD: ccd.4,v 1.8 1998/02/06 22:17:20 deraadt Exp $
+.\"	$OpenBSD: ccd.4,v 1.10 1998/09/05 17:41:48 deraadt Exp $
 .\"	$NetBSD: ccd.4,v 1.5 1995/10/09 06:09:09 thorpej Exp $
 .\"
 .\" Copyright (c) 1994 Jason Downs.
@@ -77,12 +77,15 @@ may be configured.
 .Pp
 A
 .Nm ccd
-may be either serially concatenated or interleaved.  If a
+may be either serially concatenated or interleaved.
+To serially concatenate partitions specify an interleave factor of 0.
+.Pp
+If a
 .Nm ccd
 is interleaved correctly, a
 .Dq striping
 effect is achieved, which can increase performance.  Finding the optimum
-interleave factor is a hard problem.  Some things to think about is the
+interleave factor is a hard problem.  Some things to think about are the
 number of disks in the ccd, the typical readahead opportunities, the
 filesystem blocksize and if it's possible to use the optimized ccd I/O
 protocol.  The optimized protocol allows smaller interleave factors for a

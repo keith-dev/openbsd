@@ -1,4 +1,4 @@
-/*	$OpenBSD: sys_term.c,v 1.11 1998/04/01 08:28:19 deraadt Exp $	*/
+/*	$OpenBSD: sys_term.c,v 1.17 1998/07/28 20:18:20 marc Exp $	*/
 /*	$NetBSD: sys_term.c,v 1.9 1996/03/20 04:25:53 tls Exp $	*/
 
 /*
@@ -39,7 +39,7 @@
 static char sccsid[] = "@(#)sys_term.c	8.4+1 (Berkeley) 5/30/95";
 static char rcsid[] = "$NetBSD: sys_term.c,v 1.8 1996/02/28 20:38:21 thorpej Exp $";
 #else
-static char rcsid[] = "$OpenBSD: sys_term.c,v 1.11 1998/04/01 08:28:19 deraadt Exp $";
+static char rcsid[] = "$OpenBSD: sys_term.c,v 1.17 1998/07/28 20:18:20 marc Exp $";
 #endif
 #endif /* not lint */
 
@@ -225,7 +225,7 @@ copy_termbuf(cp, len)
 {
 	if (len > sizeof(termbuf))
 		len = sizeof(termbuf);
-	memmove((char *)&termbuf, cp, len);
+	memmove((void *)&termbuf, cp, len);
 	termbuf2 = termbuf;
 }
 #endif	/* defined(LINEMODE) && defined(TIOCPKT_IOCTL) */
@@ -237,19 +237,19 @@ set_termbuf()
 	 * Only make the necessary changes.
 	 */
 #ifndef	USE_TERMIO
-	if (memcmp((char *)&termbuf.sg, (char *)&termbuf2.sg,
+	if (memcmp((void *)&termbuf.sg, (void *)&termbuf2.sg,
 							sizeof(termbuf.sg)))
 		(void) ioctl(pty, TIOCSETN, (char *)&termbuf.sg);
-	if (memcmp((char *)&termbuf.tc, (char *)&termbuf2.tc,
+	if (memcmp((void *)&termbuf.tc, (void *)&termbuf2.tc,
 							sizeof(termbuf.tc)))
 		(void) ioctl(pty, TIOCSETC, (char *)&termbuf.tc);
-	if (memcmp((char *)&termbuf.ltc, (char *)&termbuf2.ltc,
+	if (memcmp((void *)&termbuf.ltc, (void *)&termbuf2.ltc,
 							sizeof(termbuf.ltc)))
 		(void) ioctl(pty, TIOCSLTC, (char *)&termbuf.ltc);
 	if (termbuf.lflags != termbuf2.lflags)
 		(void) ioctl(pty, TIOCLSET, (char *)&termbuf.lflags);
 #else	/* USE_TERMIO */
-	if (memcmp((char *)&termbuf, (char *)&termbuf2, sizeof(termbuf)))
+	if (memcmp((void *)&termbuf, (void *)&termbuf2, sizeof(termbuf)))
 # ifdef  STREAMSPTY
 		(void) tcsetattr(ttyfd, TCSANOW, &termbuf);
 # else
@@ -1150,7 +1150,7 @@ getptyslave()
 	init_termbuf();
 # ifdef	TIOCGWINSZ
 	if (def_row || def_col) {
-		memset((char *)&ws, 0, sizeof(ws));
+		memset((void *)&ws, 0, sizeof(ws));
 		ws.ws_col = def_col;
 		ws.ws_row = def_row;
 		(void)ioctl(t, TIOCSWINSZ, (char *)&ws);
@@ -1472,10 +1472,10 @@ startslave(host, autologin, autoname)
 	 */
 	if ((i = open(INIT_FIFO, O_WRONLY)) < 0) {
 		char tbuf[128];
-		(void) sprintf(tbuf, "Can't open %s\n", INIT_FIFO);
+		(void) snprintf(tbuf, sizeof tbuf, "Can't open %s\n", INIT_FIFO);
 		fatalperror(net, tbuf);
 	}
-	memset((char *)&request, 0, sizeof(request));
+	memset((void *)&request, 0, sizeof(request));
 	request.magic = INIT_MAGIC;
 	SCPYN(request.gen_id, gen_id);
 	SCPYN(request.tty_id, &line[8]);
@@ -1495,7 +1495,7 @@ startslave(host, autologin, autoname)
 #endif /* BFTPDAEMON */
 	if (write(i, (char *)&request, sizeof(request)) < 0) {
 		char tbuf[128];
-		(void) sprintf(tbuf, "Can't write to %s\n", INIT_FIFO);
+		(void) snprintf(tbuf, sizeof tbuf, "Can't write to %s\n", INIT_FIFO);
 		fatalperror(net, tbuf);
 	}
 	(void) close(i);
@@ -1507,7 +1507,9 @@ startslave(host, autologin, autoname)
 		if (i == 3 || n >= 0 || !gotalarm)
 			break;
 		gotalarm = 0;
-		sprintf(tbuf, "telnetd: waiting for /etc/init to start login process on %s\r\n", line);
+		snprintf(tbuf, sizeof tbuf,
+		    "telnetd: waiting for /etc/init to start login process on %s\r\n",
+		    line);
 		(void) write(net, tbuf, strlen(tbuf));
 	}
 	if (n < 0 && gotalarm)
@@ -1558,7 +1560,6 @@ start_login(host, autologin, name)
 	register char **argv;
 	char **addarg();
 	extern char *getenv();
-	extern char *getstr();
 	extern char *gettyname;
 #define	TABBUFSIZ	512
 	char	defent[TABBUFSIZ];
@@ -1579,7 +1580,7 @@ start_login(host, autologin, name)
 	 * Create utmp entry for child
 	 */
 
-	memset(&utmpx, 0, sizeof(utmpx));
+	memset((void *)&utmpx, 0, sizeof(utmpx));
 	SCPYN(utmpx.ut_user, ".telnet");
 	SCPYN(utmpx.ut_line, line + sizeof("/dev/") - 1);
 	utmpx.ut_pid = pid;
@@ -1659,14 +1660,6 @@ start_login(host, autologin, name)
 		argv = addarg(argv, BFTPPATH);
 	} else
 #endif
-#if	defined (SecurID)
-	/*
-	 * don't worry about the -f that might get sent.
-	 * A -s is supposed to override it anyhow.
-	 */
-	if (require_SecurID)
-		argv = addarg(argv, "-s");
-#endif
 #if	defined (AUTHENTICATION)
 	if (auth_level >= 0 && autologin == AUTH_VALID) {
 # if	!defined(NO_LOGIN_F)
@@ -1722,8 +1715,9 @@ start_login(host, autologin, name)
 			len = strlen(name)+1;
 			write(xpty, name, len);
 			write(xpty, name, len);
-			sprintf(speed, "%s/%d", (cp = getenv("TERM")) ? cp : "",
-				(def_rspeed > 0) ? def_rspeed : 9600);
+			snprintf(speed, sizeof speed,
+			    "%s/%d", (cp = getenv("TERM")) ? cp : "",
+			    (def_rspeed > 0) ? def_rspeed : 9600);
 			len = strlen(speed)+1;
 			write(xpty, speed, len);
 
@@ -1786,10 +1780,10 @@ start_login(host, autologin, name)
 	if (pty > 2)
 		close(pty);
 #endif
-	if (getent(defent, gettyname) == 1) {
+	if (gtgetent(defent, gettyname) == 1) {
 		char *cp = defstrs;
 
-		loginprog = getstr("lo", &cp);
+		loginprog = gtgetstr("lo", &cp);
 	}
 	if (loginprog == NULL)
 		loginprog = _PATH_LOGIN;
@@ -1802,7 +1796,7 @@ start_login(host, autologin, name)
 	sleep(1);
 	execv(loginprog, argv);
 
-	syslog(LOG_ERR, "%s: %m\n", loginprog);
+	syslog(LOG_ERR, "%s: %m", loginprog);
 	fatalperror(net, loginprog);
 	/*NOTREACHED*/
 }
@@ -2185,12 +2179,12 @@ cleantmpdir(jid, tpath, user)
 {
 	switch(fork()) {
 	case -1:
-		syslog(LOG_ERR, "TMPDIR cleanup(%s): fork() failed: %m\n",
+		syslog(LOG_ERR, "TMPDIR cleanup(%s): fork() failed: %m",
 							tpath);
 		break;
 	case 0:
 		execl(CLEANTMPCMD, CLEANTMPCMD, user, tpath, 0);
-		syslog(LOG_ERR, "TMPDIR cleanup(%s): execl(%s) failed: %m\n",
+		syslog(LOG_ERR, "TMPDIR cleanup(%s): execl(%s) failed: %m",
 							tpath, CLEANTMPCMD);
 		exit(1);
 	default:
@@ -2265,7 +2259,8 @@ rmut()
 				if (SCMPN(u->ut_line, line+5) ||
 				    u->ut_name[0]==0)
 					continue;
-				(void) lseek(f, ((off_t)u)-((off_t)utmp), L_SET);
+				(void) lseek(f, ((off_t)u)-((off_t)utmp),
+				    SEEK_SET);
 				SCPYN(u->ut_name, "");
 				SCPYN(u->ut_host, "");
 				(void) time(&u->ut_time);

@@ -1,11 +1,11 @@
-/*	$OpenBSD: ns_resp.c,v 1.3 1997/04/27 23:09:45 deraadt Exp $	*/
+/*	$OpenBSD: ns_resp.c,v 1.5 1998/05/22 07:09:19 millert Exp $	*/
 
 #if !defined(lint) && !defined(SABER)
 #if 0
 static char sccsid[] = "@(#)ns_resp.c	4.65 (Berkeley) 3/3/91";
-static char rcsid[] = "$From: ns_resp.c,v 8.37 1996/12/02 09:17:21 vixie Exp $";
+static char rcsid[] = "$From: ns_resp.c,v 8.41 1998/04/07 04:59:45 vixie Exp $";
 #else
-static char rcsid[] = "$OpenBSD: ns_resp.c,v 1.3 1997/04/27 23:09:45 deraadt Exp $";
+static char rcsid[] = "$OpenBSD: ns_resp.c,v 1.5 1998/05/22 07:09:19 millert Exp $";
 #endif
 #endif /* not lint */
 
@@ -132,17 +132,30 @@ struct flush_set {
 	int		fs_class;
 	u_int		fs_cred;
 	struct db_list *fs_list;
+	struct db_list *fs_last;
 };
 
 static void		rrsetadd __P((struct flush_set *, char *,
 				      struct databuf *)),
 			rrsetupdate __P((struct flush_set *, int flags)),
-			flushrrset __P((struct flush_set *));
+			flushrrset __P((struct flush_set *)),
+			free_flushset __P((struct flush_set *));
 static int		rrsetcmp __P((char *, struct db_list *)),
 			check_root __P((void)),
 			check_ns __P((void)),
 			rrextract __P((u_char *, int, u_char *,
-				       struct databuf **, char *, int));
+				       struct databuf **, char *, int,
+				       char **));
+
+static void		add_related_additional __P((char *));
+static void		free_related_additional __P((void));
+static int		related_additional __P((char *));
+static void		maybe_free __P((char **));
+
+#define MAX_RELATED 100
+
+static int num_related = 0;
+static char *related[MAX_RELATED];
 
 #ifdef LAME_LOGGING
 static char *
@@ -233,14 +246,14 @@ ns_resp(msg, msglen)
 	register struct databuf *ns, *ns2;
 	register u_char *cp;
 	u_char *eom = msg + msglen;
-	struct flush_set *flushset;
+	struct flush_set *flushset = NULL;
 	struct sockaddr_in *nsa;
 	struct databuf *nsp[NSMAX];
-	int i, c, n, qdcount, ancount, aucount, nscount, arcount;
+	int i, c, n, qdcount, ancount, aucount, nscount, arcount, arfirst;
 	int qtype, qclass, dbflags;
 	int restart;	/* flag for processing cname response */
 	int validanswer;
-	int cname, lastwascname;
+	int cname, lastwascname, externalcname;
 	int count, founddata, foundname;
 	int buflen;
 	int newmsglen;
@@ -256,6 +269,7 @@ ns_resp(msg, msglen)
 	struct namebuf *np;
 	struct netinfo *lp;
 	struct fwdinfo *fwd;
+	char *tname = NULL;
 
 	nameserIncr(from_addr.sin_addr, nssRcvdR);
 	nsp[0] = NULL;
@@ -293,6 +307,10 @@ ns_resp(msg, msglen)
 			goto formerr;
 		}
 		cp += n;
+		if (cp + 2 * INT16SZ > eom) {
+			formerrmsg = outofDataQuery;
+			goto formerr;
+		}
 		GETSHORT(qtype, cp);
 		GETSHORT(qclass, cp);
 		if (!ns_nameok(qname, qclass, response_trans,
@@ -573,16 +591,12 @@ ns_resp(msg, msglen)
 			goto formerr;
 		}
 		tp += n;
+		if (tp + 2 * INT16SZ > eom) {
+			formerrmsg = outofDataAuth;
+			goto formerr;
+		}
 		GETSHORT(type, tp);
-		if (tp >= eom) {
-			formerrmsg = outofDataAuth;
-			goto formerr;
-		}
 		GETSHORT(class, tp);
-		if (tp >= eom) {
-			formerrmsg = outofDataAuth;
-			goto formerr;
-		}
 		if (!ns_nameok(name, class, response_trans,
 			       ns_ownercontext(type, response_trans),
 			       name, from_addr.sin_addr)) {
@@ -637,6 +651,7 @@ ns_resp(msg, msglen)
 			u_int16_t type, class, dlen;
 			u_int32_t serial;
 			u_char *tp = cp;
+			u_char *rdatap;
 
 			n = dn_expand(msg, eom, tp, name, sizeof name);
 			if (n < 0) {
@@ -644,14 +659,15 @@ ns_resp(msg, msglen)
 				goto formerr;
 			}
 			tp += n;  		/* name */
+			if (tp + 3 * INT16SZ + INT32SZ > eom) {
+				formerrmsg = outofDataAnswer;
+				goto formerr;
+			}
 			GETSHORT(type, tp);	/* type */
 			GETSHORT(class, tp);	/* class */
 			tp += INT32SZ;		/* ttl */
 			GETSHORT(dlen, tp); 	/* dlen */
-			if (tp >= eom) {
-				formerrmsg = outofDataAnswer;
-				goto formerr;
-			}
+			rdatap = tp;		/* start of rdata */
 			if (!ns_nameok(name, class, response_trans,
 				       ns_ownercontext(type, response_trans),
 				       name, from_addr.sin_addr)) {
@@ -667,10 +683,6 @@ ns_resp(msg, msglen)
 				formerrmsg = msgbuf;
 				goto formerr;
 			}
-			if ((u_int)dlen < (5 * INT32SZ)) {
-				formerrmsg = dlenUnderrunAnswer;
-				goto formerr;
-			}
 
 			if (0 >= (n = dn_skipname(tp, eom))) {
 				formerrmsg = skipnameFailedAnswer;
@@ -682,7 +694,16 @@ ns_resp(msg, msglen)
 				goto formerr;
 			}
 			tp += n;  		/* rname */
+			if (tp + 5 * INT32SZ > eom) {
+				formerrmsg = dlenUnderrunAnswer;
+				goto formerr;
+			}
 			GETLONG(serial, tp);
+			tp += 4 * INT32SZ;	/* Skip rest of SOA. */
+			if ((u_int)(tp - rdatap) != dlen) {
+				formerrmsg = dlenOverrunAnswer;
+				goto formerr;
+			}
 
 			qserial_answer(qp, serial);
 			qremove(qp);
@@ -695,7 +716,8 @@ ns_resp(msg, msglen)
 	/*
 	 * Add the info received in the response to the data base.
 	 */
-	c = ancount + aucount + arcount;
+	arfirst = ancount + aucount;
+	c = arfirst + arcount;
 
 	/* -ve $ing non-existence of record, must handle non-authoritative
 	 * NOERRORs with c == 0.
@@ -759,7 +781,8 @@ ns_resp(msg, msglen)
 	nscount = 0;
 	cname = 0;
 	lastwascname = 0;
-	strncpy(aname, qname, sizeof aname);
+	externalcname = 0;
+	strncpy(aname, qname, sizeof aname-1);
 	aname[sizeof aname-1] = '\0';
 
 	if (count) {
@@ -775,12 +798,20 @@ ns_resp(msg, msglen)
 		struct databuf *dp;
 		int type;
 
+		maybe_free(&tname);
 		if (cp >= eom) {
+			free_related_additional();
+			if (flushset != NULL)
+				free_flushset(flushset);
 			formerrmsg = outofDataFinal;
 			goto formerr;
 		}
-		n = rrextract(msg, msglen, cp, &dp, name, sizeof name);
+		n = rrextract(msg, msglen, cp, &dp, name, sizeof name, &tname);
 		if (n < 0) {
+			free_related_additional();
+			maybe_free(&tname);
+			if (flushset != NULL)
+				free_flushset(flushset);
 			formerrmsg = outofDataFinal;
 			goto formerr;
 		}
@@ -790,21 +821,34 @@ ns_resp(msg, msglen)
 		type = dp->d_type;
 		if (i < ancount) {
 			/* Answer section. */
-			if (strcasecmp(name, aname) != 0) {
-				syslog(LOG_DEBUG, "wrong ans. name (%s != %s)",
-				       name, aname);
+			if (externalcname || (strcasecmp(name, aname) != 0)) {
+				if (!externalcname)
+					syslog(LOG_DEBUG,
+					       "wrong ans. name (%s != %s)",
+					       name, aname);
+				else
+					dprintf(3, (ddt,
+				 "ignoring answer '%s' after external cname\n",
+						    name));
 				db_free(dp);
 				continue;
 			}
 			if (type == T_CNAME &&
 			    qtype != T_CNAME && qtype != T_ANY) {
-				strncpy(aname, (char *)dp->d_data, sizeof aname);
+				strncpy(aname, (char *)dp->d_data, sizeof aname-1);
 				aname[sizeof aname-1] = '\0';
+				if (!samedomain(aname, qp->q_domain))
+					externalcname = 1;
 				cname = 1;
 				lastwascname = 1;
 			} else {
 				validanswer = 1;
 				lastwascname = 0;
+			}
+
+			if (tname != NULL) {
+				add_related_additional(tname);
+				tname = NULL;
 			}
 
 			dp->d_cred = (hp->aa && !strcasecmp(name, qname))
@@ -813,21 +857,84 @@ ns_resp(msg, msglen)
 		} else {
 			/* After answer section. */
 			if (lastwascname) {
+				dprintf(3, (ddt,
+				 "last was cname, ignoring auth. and add.\n"));
 				db_free(dp);
 				break;
 			}
-			if (i < ancount + aucount && type == T_NS) {
+			if (i < arfirst) {
 				/* Authority section. */
-				if (!samedomain(aname, name) ||
-				    (!cname && !samedomain(name, qp->q_domain))
-				    ) {
+				switch (type) {
+				case T_NS:
+				case T_SOA:
+					if (!samedomain(aname, name)){
+						syslog(LOG_DEBUG,
+						    "bad referral (%s !< %s)",
+						       aname[0] ? aname : ".",
+						       name[0] ? name : ".");
+						db_free(dp);
+						continue;
+					} else if (!samedomain(name,
+							       qp->q_domain)) {
+						if (!externalcname)
+						    syslog(LOG_DEBUG,
+  					            "bad referral (%s !< %s)",
+							 name[0] ? name : ".",
+							 qp->q_domain[0] ?
+							 qp->q_domain : ".");
+						db_free(dp);
+						continue;
+					}
+					if (type == T_NS) {
+						nscount++;
+						add_related_additional(tname);
+						tname = NULL;
+					}
+					break;
+				case T_NXT:
+				case T_SIG:
+					break;
+				default:
 					syslog(LOG_DEBUG,
-					       "bad referral (%s !< %s)",
-					       name, qp->q_domain);
+	"invalid RR type '%s' in authority section (name = '%s') from %s",
+					       p_type(type), name,
+					       sin_ntoa(&from_addr));
 					db_free(dp);
 					continue;
 				}
-				nscount++;
+			} else {
+				/* Additional section. */
+				switch (type) {
+				case T_A:
+				case T_AAAA:
+					if (externalcname ||
+					    !samedomain(name, qp->q_domain)) {
+						dprintf(3, (ddt,
+				     "ignoring additional info '%s' type %s\n",
+						       name, p_type(type)));
+						db_free(dp);
+						continue;
+					}
+					if (!related_additional(name)) {
+						syslog(LOG_DEBUG,
+			     "unrelated additional info '%s' type %s from %s",
+						       name, p_type(type),
+						       sin_ntoa(&from_addr));
+						db_free(dp);
+						continue;
+					}
+					break;
+				case T_KEY:
+				case T_SIG:
+					break;
+				default:
+					syslog(LOG_DEBUG,
+	"invalid RR type '%s' in additional section (name = '%s') from %s",
+					       p_type(type), name,
+					       sin_ntoa(&from_addr));
+					db_free(dp);
+					continue;
+				}
 			}
 			dp->d_cred = (qp->q_flags & Q_PRIMING)
 				? DB_C_ANSWER
@@ -835,14 +942,13 @@ ns_resp(msg, msglen)
 		}
 		rrsetadd(flushset, name, dp);
 	}
+	free_related_additional();
+	maybe_free(&tname);
 	if (flushset) {
 		rrsetupdate(flushset, dbflags);
-		for (i = 0; i < count; i++)
-			if (flushset[i].fs_name)
-				free(flushset[i].fs_name);
-		free((char*)flushset);
+		free_flushset(flushset);
 	}
-	if (lastwascname)
+	if (lastwascname && !externalcname)
 		syslog(LOG_DEBUG, "%s (%s)", danglingCname, aname);
 
 	if (cp > eom) {
@@ -1109,7 +1215,11 @@ ns_resp(msg, msglen)
 	qp->q_fwd = fwdtab;
 
 	getname(np, tmpdomain, sizeof tmpdomain);
+	if (qp->q_domain != NULL)
+		free(qp->q_domain);
 	qp->q_domain = strdup(tmpdomain);
+	if (qp->q_domain == NULL)
+		panic(ENOMEM, "ns_resp: strdup failed");
 
 	if ((n = nslookup(nsp, qp, dname, "ns_resp")) <= 0) {
 		if (n < 0) {
@@ -1155,17 +1265,20 @@ ns_resp(msg, msglen)
 			qp->q_cmsglen = qp->q_msglen;
 		} else if (qp->q_msg)
 			(void) free(qp->q_msg);
-		if ((qp->q_msg = (u_char *)malloc(BUFSIZ)) == NULL) {
+		if ((qp->q_msg = (u_char *)malloc(PACKETSZ)) == NULL) {
 			syslog(LOG_NOTICE, "resp: malloc error\n");
 			goto servfail;
 		}
 		n = res_mkquery(QUERY, dname, qclass, qtype,
-				NULL, 0, NULL, qp->q_msg, BUFSIZ);
+				NULL, 0, NULL, qp->q_msg, PACKETSZ);
 		if (n < 0) {
 			syslog(LOG_INFO, "resp: res_mkquery(%s) failed",
 			       dname);
 			goto servfail;
 		}
+		if (qp->q_name != NULL)
+			free(qp->q_name);
+		qp->q_name = savestr(dname);
 		qp->q_msglen = n;
 		hp = (HEADER *) qp->q_msg;
 		hp->rd = 0;
@@ -1264,40 +1377,58 @@ ns_resp(msg, msglen)
 	(void) send_msg((u_char *)hp, (qp->q_cmsglen ? qp->q_cmsglen : qp->q_msglen),
 			qp);
  timeout:
+	if (qp->q_stream != QSTREAM_NULL)
+		sqrm(qp->q_stream);
 	qremove(qp);
 	free_nsp(nsp);
 	return;
 }
 
+#define BOUNDS_CHECK(ptr, count) \
+	do { \
+		if ((ptr) + (count) > eom) { \
+			hp->rcode = FORMERR; \
+			return (-1); \
+		} \
+	} while (0)
+
 static int
-rrextract(msg, msglen, rrp, dpp, dname, namelen)
+rrextract(msg, msglen, rrp, dpp, dname, namelen, tnamep)
 	u_char *msg;
 	int msglen;
 	u_char *rrp;
 	struct databuf **dpp;
 	char *dname;
 	int namelen;
+	char **tnamep;
 {
-	register u_char *cp;
+	register u_char *cp, *eom, *rdatap;
 	register int n;
 	int class, type, dlen, n1;
 	u_int32_t ttl;
 	u_char *cp1;
-	u_char data[BUFSIZ];
+	u_char data[MAXDNAME*2 + INT32SZ*5];
 	register HEADER *hp = (HEADER *)msg;
 	enum context context;
 
+	if (tnamep != NULL)
+		*tnamep = NULL;
+
 	*dpp = NULL;
 	cp = rrp;
-	if ((n = dn_expand(msg, msg + msglen, cp, dname, namelen)) < 0) {
+	eom = msg + msglen;
+	if ((n = dn_expand(msg, eom, cp, dname, namelen)) < 0) {
 		hp->rcode = FORMERR;
 		return (-1);
 	}
 	cp += n;
+	BOUNDS_CHECK(cp, 2*INT16SZ + INT32SZ + INT16SZ);
 	GETSHORT(type, cp);
 	GETSHORT(class, cp);
 	GETLONG(ttl, cp);
 	GETSHORT(dlen, cp);
+	BOUNDS_CHECK(cp, dlen);
+	rdatap = cp;
 	if (!ns_nameok(dname, class, response_trans,
 		       ns_ownercontext(type, response_trans),
 		       dname, from_addr.sin_addr)) {
@@ -1356,8 +1487,7 @@ rrextract(msg, msglen, rrp, dpp, dname, namelen)
 	case T_MR:
 	case T_NS:
 	case T_PTR:
-		n = dn_expand(msg, msg + msglen, cp,
-			      (char *)data, sizeof data);
+		n = dn_expand(msg, eom, cp, (char *)data, sizeof data);
 		if (n < 0) {
 			hp->rcode = FORMERR;
 			return (-1);
@@ -1371,6 +1501,8 @@ rrextract(msg, msglen, rrp, dpp, dname, namelen)
 		cp += n;
 		cp1 = data;
 		n = strlen((char *)data) + 1;
+		if (tnamep != NULL && (type == T_NS || type == T_MB))
+			*tnamep = strdup((char *)cp1);
 		break;
 
 	case T_SOA:
@@ -1381,8 +1513,7 @@ rrextract(msg, msglen, rrp, dpp, dname, namelen)
 		context = mailname_ctx;
 		/* FALLTHROUGH */
 	soa_rp_minfo:
-		n = dn_expand(msg, msg + msglen, cp,
-			      (char *)data, sizeof data);
+		n = dn_expand(msg, eom, cp, (char *)data, sizeof data);
 		if (n < 0) {
 			hp->rcode = FORMERR;
 			return (-1);
@@ -1393,11 +1524,15 @@ rrextract(msg, msglen, rrp, dpp, dname, namelen)
 			return (-1);
 		}
 		cp += n;
+		/*
+		 * The next use of 'cp' is dn_expand(), so we don't have
+		 * to BOUNDS_CHECK() here.
+		 */
 		cp1 = data + (n = strlen((char *)data) + 1);
 		n1 = sizeof(data) - n;
 		if (type == T_SOA)
 			n1 -= 5 * INT32SZ;
-		n = dn_expand(msg, msg + msglen, cp, (char *)cp1, n1);
+		n = dn_expand(msg, eom, cp, (char *)cp1, n1);
 		if (n < 0) {
 			hp->rcode = FORMERR;
 			return (-1);
@@ -1414,7 +1549,9 @@ rrextract(msg, msglen, rrp, dpp, dname, namelen)
 		cp += n;
 		cp1 += strlen((char *)cp1) + 1;
 		if (type == T_SOA) {
-			bcopy(cp, cp1, n = 5 * INT32SZ);
+			n = 5 * INT32SZ;
+			BOUNDS_CHECK(cp, n);
+			bcopy(cp, cp1, n);
 			cp += n;
 			cp1 += n;
 		}
@@ -1424,30 +1561,37 @@ rrextract(msg, msglen, rrp, dpp, dname, namelen)
 
 	case T_NAPTR:
 		/* Grab weight and port. */
+		BOUNDS_CHECK(cp, INT16SZ*2);
 		bcopy(cp, data, INT16SZ*2);
 		cp1 = data + INT16SZ*2;
 		cp += INT16SZ*2;
 
 		/* Flags */
+		BOUNDS_CHECK(cp, 1);
 		n = *cp++;
+		BOUNDS_CHECK(cp, n);
 		*cp1++ = n;
 		bcopy(cp, cp1, n);
 		cp += n; cp1 += n;
 
 		/* Service */
+		BOUNDS_CHECK(cp, 1);
 		n = *cp++;
+		BOUNDS_CHECK(cp, n);
 		*cp1++ = n;
 		bcopy(cp, cp1, n);
 		cp += n; cp1 += n;
 
 		/* Regexp */
+		BOUNDS_CHECK(cp, 1);
 		n = *cp++;
+		BOUNDS_CHECK(cp, n);
 		*cp1++ = n;
 		bcopy(cp, cp1, n);
 		cp += n; cp1 += n;
 
 		/* Replacement */
-		n = dn_expand(msg, msg + msglen, cp, (char *)cp1,
+		n = dn_expand(msg, eom, cp, (char *)cp1,
 			      sizeof data - (cp1 - data));
 		if (n < 0) {
 			hp->rcode = FORMERR;
@@ -1472,19 +1616,21 @@ rrextract(msg, msglen, rrp, dpp, dname, namelen)
 	case T_RT:
 	case T_SRV:
 		/* grab preference */
+		BOUNDS_CHECK(cp, INT16SZ);
 		bcopy(cp, data, INT16SZ);
 		cp1 = data + INT16SZ;
 		cp += INT16SZ;
 
 		if (type == T_SRV) {
 			/* Grab weight and port. */
-			bcopy(cp, data, INT16SZ*2);
+			BOUNDS_CHECK(cp, INT16SZ*2);
+			bcopy(cp, cp1, INT16SZ*2);
 			cp1 += INT16SZ*2;
 			cp += INT16SZ*2;
 		}
 
 		/* get name */
-		n = dn_expand(msg, msg + msglen, cp, (char *)cp1,
+		n = dn_expand(msg, eom, cp, (char *)cp1,
 			      sizeof data - (cp1 - data));
 		if (n < 0) {
 			hp->rcode = FORMERR;
@@ -1497,6 +1643,9 @@ rrextract(msg, msglen, rrp, dpp, dname, namelen)
 		}
 		cp += n;
 
+		if (tnamep != NULL)
+			*tnamep = strdup((char *)cp1);
+
 		/* compute end of data */
 		cp1 += strlen((char *)cp1) + 1;
 		/* compute size of data */
@@ -1506,13 +1655,14 @@ rrextract(msg, msglen, rrp, dpp, dname, namelen)
 
 	case T_PX:
 		/* grab preference */
+		BOUNDS_CHECK(cp, INT16SZ);
 		bcopy(cp, data, INT16SZ);
 		cp1 = data + INT16SZ;
 		cp += INT16SZ;
 
 		/* get MAP822 name */
-		n = dn_expand(msg, msg + msglen, cp, (char *)cp1,
-				sizeof data - INT16SZ);
+		n = dn_expand(msg, eom, cp, (char *)cp1,
+			      sizeof data - INT16SZ);
 		if (n < 0) {
 			hp->rcode = FORMERR;
 			return (-1);
@@ -1523,9 +1673,13 @@ rrextract(msg, msglen, rrp, dpp, dname, namelen)
 			return (-1);
 		}
 		cp += n;
+		/*
+		 * The next use of 'cp' is dn_expand(), so we don't have
+		 * to BOUNDS_CHECK() here.
+		 */
 		cp1 += (n = strlen((char *)cp1) + 1);
 		n1 = sizeof(data) - n;
-		n = dn_expand(msg, msg + msglen, cp, (char *)cp1, n1);
+		n = dn_expand(msg, eom, cp, (char *)cp1, n1);
 		if (n < 0) {
 			hp->rcode = FORMERR;
 			return (-1);
@@ -1548,6 +1702,7 @@ rrextract(msg, msglen, rrp, dpp, dname, namelen)
 		/* This code is similar to that in db_load.c.  */
 
 		/* Skip coveredType, alg, labels */
+		BOUNDS_CHECK(cp, INT16SZ + 1 + 1 + 3*INT32SZ);
 		cp1 = cp + INT16SZ + 1 + 1;
 		GETLONG(origTTL, cp1);
 		GETLONG(exptime, cp1);
@@ -1592,23 +1747,31 @@ rrextract(msg, msglen, rrp, dpp, dname, namelen)
 
 		/* first just copy over the type_covered, algorithm, */
 		/* labels, orig ttl, two timestamps, and the footprint */
+		BOUNDS_CHECK(cp, 18);
 		bcopy(cp, cp1, 18);
 		cp  += 18;
 		cp1 += 18;
 
 		/* then the signer's name */
-		n = dn_expand(msg, msg + msglen, cp,
-			      (char *)cp1, (sizeof data) - 18);
-		if (n < 0)
+		n = dn_expand(msg, eom, cp, (char *)cp1, (sizeof data) - 18);
+		if (n < 0) {
+			hp->rcode = FORMERR;
 			return (-1);
+		}
 		cp += n;
 		cp1 += strlen((char*)cp1)+1;
 
 		/* finally, we copy over the variable-length signature.
 		   Its size is the total data length, minus what we copied. */
+		if (18 + (u_int)n > dlen) {
+			hp->rcode = FORMERR;
+			return (-1);
+		}
 		n = dlen - (18 + n);
-		if (n > (sizeof data) - (cp1 - (u_char *)data))
+		if (n > ((int)(sizeof data) - (int)(cp1 - (u_char *)data))) {
+			hp->rcode = FORMERR;
 			return (-1);  /* out of room! */
+		}
 		bcopy(cp, cp1, n);
 		cp += n;
 		cp1 += n;
@@ -1622,6 +1785,18 @@ rrextract(msg, msglen, rrp, dpp, dname, namelen)
 	default:
 		dprintf(3, (ddt, "unknown type %d\n", type));
 		return ((cp - rrp) + dlen);
+	}
+
+	if (cp > eom) {
+		hp->rcode = FORMERR;
+		return (-1);
+	}
+	if ((u_int)(cp - rdatap) != dlen) {
+		dprintf(3, (ddt,
+		      "encoded rdata length is %u, but actual length was %u",
+			    dlen, (u_int)(cp - rdatap)));
+		hp->rcode = FORMERR;
+		return (-1);
 	}
 	if (n > MAXDATA) {
 		dprintf(1, (ddt,
@@ -1656,12 +1831,12 @@ doupdate(msg, msglen, rrp, zone, savens, flags, cred)
 	int class, type;
 	struct databuf *dp;
 	char dname[MAXDNAME];
-	u_char data[BUFSIZ+MAX_MD5RSA_KEY_BYTES];
 
 	dprintf(3, (ddt, "doupdate(zone %d, savens %#lx, flags %#lx)\n",
 		    zone, (u_long)savens, (u_long)flags));
 
-	if ((n = rrextract(msg, msglen, rrp, &dp, dname, sizeof(dname))) == -1)
+	if ((n = rrextract(msg, msglen, rrp, &dp, dname, sizeof(dname), NULL))
+	    == -1)
 		return (-1);
 	if (!dp)
 		return (-1);
@@ -1682,7 +1857,7 @@ doupdate(msg, msglen, rrp, zone, savens, flags, cred)
 		}
 #endif
 		if (!bogus &&
-		    ((temp = strrchr((char *)data, '.')) != NULL) &&
+		    ((temp = strrchr((char *)dp->d_data, '.')) != NULL) &&
 		     !strcasecmp(temp, ".arpa")
 		     )
 			bogus++;
@@ -1697,7 +1872,7 @@ doupdate(msg, msglen, rrp, zone, savens, flags, cred)
 					    "bogus root NS"))
 				syslog(LOG_NOTICE,
 			 "bogus root NS %s rcvd from %s on query for \"%s\"",
-				       data, sin_ntoa(&from_addr), qname);
+				       dp->d_data, sin_ntoa(&from_addr), qname);
 			db_free(dp);
 			return (cp - rrp);
 		}
@@ -1707,7 +1882,7 @@ doupdate(msg, msglen, rrp, zone, savens, flags, cred)
 					    "bogus nonroot NS"))
 				syslog(LOG_INFO,
 			"bogus nonroot NS %s rcvd from %s on query for \"%s\"",
-				       data, sin_ntoa(&from_addr), qname);
+				       dp->d_data, sin_ntoa(&from_addr), qname);
 			db_free(dp);
 			return (cp - rrp);
 		}
@@ -2029,17 +2204,19 @@ sysquery(dname, class, type, nss, nsc, opcode)
 	qp->q_flags |= Q_SYSTEM;
 
 	getname(np, tmpdomain, sizeof tmpdomain);
+	if (qp->q_domain != NULL)
+		free(qp->q_domain);
 	qp->q_domain = strdup(tmpdomain);
-	if (!qp->q_domain)
+	if (qp->q_domain == NULL)
 		panic(ENOMEM, "ns_resp: strdup failed");
 
-	if ((qp->q_msg = (u_char *)malloc(BUFSIZ)) == NULL) {
+	if ((qp->q_msg = (u_char *)malloc(PACKETSZ)) == NULL) {
 		syslog(LOG_NOTICE, "sysquery: malloc failed");
 		goto err2;
 	}
 	n = res_mkquery(opcode, dname, class,
 			type, NULL, 0, NULL,
-			qp->q_msg, BUFSIZ);
+			qp->q_msg, PACKETSZ);
 	if (n < 0) {
 		syslog(LOG_INFO, "sysquery: res_mkquery(%s) failed", dname);
 		goto err2;
@@ -2738,19 +2915,25 @@ rrsetadd(flushset, name, dp)
 		fs->fs_type = dp->d_type;
 		fs->fs_cred = dp->d_cred;
 		fs->fs_list = NULL;
+		fs->fs_last = NULL;
 	}
 	dbl = (struct db_list *)malloc(sizeof(struct db_list));
 	if (!dbl)
 		panic(-1, "rrsetadd: out of memory");
-	dbl->db_next = fs->fs_list;
+	dbl->db_next = NULL;
 	dbl->db_dp = dp;
-	fs->fs_list = dbl;
+	if (fs->fs_last == NULL)
+		fs->fs_list = dbl;
+	else
+		fs->fs_last->db_next = dbl;
+	fs->fs_last = dbl;
 }
 
 static int
-ttlcheck(name,dbl)
+ttlcheck(name,dbl,update)
 	char *name;
 	struct db_list *dbl;
+	int update;
 {
 	int type = dbl->db_dp->d_type;
 	int class = dbl->db_dp->d_class;
@@ -2774,6 +2957,9 @@ ttlcheck(name,dbl)
 		if (!match(dp, class, type))
 			continue;
 		if (first) {
+			/* we can't update zone data so return early */
+			if (dp->d_zone != 0)
+				return(0);
 			ttl = dp->d_ttl;
 			first = 0;
 		} else if (ttl != dp->d_ttl) {
@@ -2801,6 +2987,19 @@ ttlcheck(name,dbl)
 		}
 		dbp = dbp->db_next;
 	}
+
+	/* update ttl if required */
+	if (update) {
+		for (dp = np->n_data; dp != NULL; dp = dp->d_next) {
+			if (!match(dp, class, type))
+				continue;
+			if (dp->d_ttl > ttl)
+				break;
+			dp->d_ttl = ttl;
+			fixttl(dp);
+		}
+	}
+
 	return(1);
 }
 
@@ -2881,8 +3080,8 @@ rrsetupdate(flushset, flags)
 	while (fs->fs_name) {
 		dprintf(1,(ddt, "rrsetupdate: %s\n",
 			    fs->fs_name[0] ? fs->fs_name : "."));
-		if ((n = rrsetcmp(fs->fs_name,fs->fs_list)) &&
-			    ttlcheck(fs->fs_name,fs->fs_list)) {
+		if ((n = rrsetcmp(fs->fs_name, fs->fs_list)) &&
+		    ttlcheck(fs->fs_name, fs->fs_list, 0)) {
 			if (n > 0)
 				flushrrset(fs);
 
@@ -2899,6 +3098,8 @@ rrsetupdate(flushset, flags)
 				free((char *)odbp);
 			}    
 		} else {
+			if (n == 0)
+				(void)ttlcheck(fs->fs_name, fs->fs_list, 1);
 			dbp = fs->fs_list;
 			while (dbp) {
 				db_free(dbp->db_dp);
@@ -2931,6 +3132,17 @@ flushrrset(fs)
 		dprintf(1, (ddt, "flushrrset: %d\n", n));
 	} while (n == OK);
 	db_free(dp);
+}
+
+static void
+free_flushset(flushset)
+	struct flush_set *flushset;
+{
+	struct flush_set *fs;
+
+	for (fs = flushset; fs->fs_name != NULL; fs++)
+		free(fs->fs_name);
+	free((char *)flushset);
 }
 
 /*
@@ -2983,4 +3195,52 @@ delete_stale(np)
                         goto again;
 		}
 	}
+}
+
+
+static void
+add_related_additional(name)
+	char *name;
+{
+	int i;
+
+	if (num_related >= MAX_RELATED - 1)
+		return;
+	for (i = 0; i < num_related; i++)
+		if (strcasecmp(name, related[i]) == 0) {
+			free(name);
+			return;
+		}
+	related[num_related++] = name;
+}
+
+static void
+free_related_additional() {
+	int i;
+
+	for (i = 0; i < num_related; i++)
+		free(related[i]);
+	num_related = 0;
+}
+
+static int
+related_additional(name)
+	char *name;
+{
+	int i;
+
+	for (i = 0; i < num_related; i++)
+		if (strcasecmp(name, related[i]) == 0)
+			return (1);
+	return (0);
+}
+
+static void
+maybe_free(tname)
+	char **tname;
+{
+	if (tname == NULL || *tname == NULL)
+		return;
+	free(*tname);
+	*tname = NULL;
 }

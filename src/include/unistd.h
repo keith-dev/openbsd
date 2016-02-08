@@ -1,4 +1,4 @@
-/*	$OpenBSD: unistd.h,v 1.19 1998/02/16 09:46:03 deraadt Exp $ */
+/*	$OpenBSD: unistd.h,v 1.22 1998/06/30 23:03:09 deraadt Exp $ */
 /*	$NetBSD: unistd.h,v 1.26.4.1 1996/05/28 02:31:51 mrg Exp $	*/
 
 /*-
@@ -118,11 +118,11 @@ int	 fchdir __P((int));
 int	 fchown __P((int, uid_t, gid_t));
 int	 fsync __P((int));
 int	 ftruncate __P((int, off_t));
-int	 getdomainname __P((char *, int));
+int	 getdomainname __P((char *, size_t));
 int	 getdtablesize __P((void));
 int	 getgrouplist __P((const char *, gid_t, gid_t *, int *));
 long	 gethostid __P((void));
-int	 gethostname __P((char *, int));
+int	 gethostname __P((char *, size_t));
 mode_t	 getmode __P((const void *, mode_t));
 int	 getpagesize __P((void));
 char	*getpass __P((const char *));
@@ -133,6 +133,7 @@ int	 iruserok __P((u_int32_t, int, const char *, const char *));
 int	 lchown __P((const char *, uid_t, gid_t));
 char	*mkdtemp __P((char *));
 int	 mkstemp __P((char *));
+int	 mkstemps __P((char *, int));
 char	*mktemp __P((char *));
 int	 nfssvc __P((int, void *));
 int	 nice __P((int));
@@ -145,7 +146,7 @@ int	 rcmdsh __P((char **, int, const char *,
 		const char *, const char *, char *));
 char	*re_comp __P((const char *));
 int	 re_exec __P((const char *));
-int	 readlink __P((const char *, char *, int));
+int	 readlink __P((const char *, char *, size_t));
 int	 reboot __P((int));
 int	 revoke __P((const char *));
 int	 rfork __P((int opts));
@@ -156,12 +157,12 @@ char	*sbrk __P((int));
 #ifndef _XOPEN_SOURCE
 int	 select __P((int, fd_set *, fd_set *, fd_set *, struct timeval *));
 #endif
-int	 setdomainname __P((const char *, int));
+int	 setdomainname __P((const char *, size_t));
 int	 setegid __P((gid_t));
 int	 seteuid __P((uid_t));
 int	 setgroups __P((int, const gid_t *));
 int	 sethostid __P((long));
-int	 sethostname __P((const char *, int));
+int	 sethostname __P((const char *, size_t));
 int	 setkey __P((const char *));
 int	 setlogin __P((const char *));
 void	*setmode __P((const char *));

@@ -1,4 +1,4 @@
-/*	$OpenBSD: disklabel.c,v 1.50 1998/03/12 19:35:55 millert Exp $	*/
+/*	$OpenBSD: disklabel.c,v 1.56 1998/10/03 22:01:47 millert Exp $	*/
 /*	$NetBSD: disklabel.c,v 1.30 1996/03/14 19:49:24 ghudson Exp $	*/
 
 /*
@@ -44,7 +44,7 @@ static char copyright[] =
 #endif /* not lint */
 
 #ifndef lint
-static char rcsid[] = "$OpenBSD: disklabel.c,v 1.50 1998/03/12 19:35:55 millert Exp $";
+static char rcsid[] = "$OpenBSD: disklabel.c,v 1.56 1998/10/03 22:01:47 millert Exp $";
 #endif /* not lint */
 
 #include <sys/param.h>
@@ -107,6 +107,7 @@ enum {
 	UNSPEC, EDIT, EDITOR, READ, RESTORE, SETWRITEABLE, WRITE, WRITEBOOT
 } op = UNSPEC;
 
+int	pflag;
 int	rflag;
 int	tflag;
 int	nwflag;
@@ -127,7 +128,7 @@ struct disklabel *makebootarea __P((char *, struct disklabel *, int));
 void	display __P((FILE *, struct disklabel *));
 void	display_partition __P((FILE *, struct disklabel *, int, char, int));
 int	width_partition __P((struct disklabel *, int));
-int	editor __P((struct disklabel *, int));
+int	editor __P((struct disklabel *, int, char *));
 int	edit __P((struct disklabel *, int));
 int	editit __P((void));
 char	*skip __P((char *));
@@ -147,7 +148,7 @@ main(argc, argv)
 	struct disklabel *lp;
 	FILE *t;
 
-	while ((ch = getopt(argc, argv, "BENRWb:enrs:tvw")) != -1)
+	while ((ch = getopt(argc, argv, "BENRWb:enprs:tvw")) != -1)
 		switch (ch) {
 #if NUMBOOT > 0
 		case 'B':
@@ -188,6 +189,9 @@ main(argc, argv)
 			if (op != UNSPEC)
 				usage();
 			op = EDIT;
+			break;
+		case 'p':
+			++pflag;
 			break;
 		case 'r':
 			++rflag;
@@ -261,7 +265,7 @@ main(argc, argv)
 			usage();
 		if ((lp = readlabel(f)) == NULL)
 			exit(1);
-		error = editor(lp, f);
+		error = editor(lp, f, specname);
 		break;
 	case READ:
 		if (argc != 1)
@@ -413,7 +417,8 @@ writelabel(f, boot, lp)
 		    (dosdp->dp_typ == DOSPTYP_OPENBSD ||
 		    dosdp->dp_typ == DOSPTYP_FREEBSD ||
 		    dosdp->dp_typ == DOSPTYP_NETBSD)) {
-		        sectoffset = get_le(&dosdp->dp_start) * lp->d_secsize;
+		        sectoffset = (off_t)get_le(&dosdp->dp_start) *
+			    lp->d_secsize;
 		} else {
 			if (dosdp) {
 				int first, ch;
@@ -468,9 +473,9 @@ writelabel(f, boot, lp)
 			}
 		}
 		if (verbose)
-			printf("writing label to block %d (0x%x)\n",
-			    (int)sectoffset/DEV_BSIZE,
-			    (int)sectoffset/DEV_BSIZE);
+			printf("writing label to block %qd (0x%qx)\n",
+			    sectoffset/DEV_BSIZE,
+			    sectoffset/DEV_BSIZE);
 		if (!donothing) {
 			if (lseek(f, sectoffset, SEEK_SET) < 0) {
 				perror("lseek");
@@ -588,7 +593,7 @@ readmbr(f)
 	 * in for example mips processors.
          */
 	dp = (struct dos_partition *)mbr;
-	if (lseek(f, (off_t)DOSBBSECTOR, SEEK_SET) < 0 ||
+	if (lseek(f, (off_t)DOSBBSECTOR * DEV_BSIZE, SEEK_SET) < 0 ||
 	    read(f, mbr, sizeof(mbr)) < sizeof(mbr))
 		err(4, "can't read master boot record");
 
@@ -667,12 +672,14 @@ readlabel(f)
 		    (dosdp->dp_typ == DOSPTYP_OPENBSD ||
 		    dosdp->dp_typ == DOSPTYP_FREEBSD ||
 		    dosdp->dp_typ == DOSPTYP_NETBSD))
-			sectoffset = get_le(&dosdp->dp_start) * DEV_BSIZE;
+			sectoffset = (off_t)get_le(&dosdp->dp_start) *
+			    DEV_BSIZE;
 #endif
 		if (verbose)
-			printf("reading label from block %d (0x%x)\n",
-			    (int)sectoffset/DEV_BSIZE,
-			    (int)sectoffset/DEV_BSIZE);
+			printf("reading label from block %qd, offset %qd\n",
+			    sectoffset/DEV_BSIZE,
+			    sectoffset/DEV_BSIZE +
+			    (LABELSECTOR * DEV_BSIZE) + LABELOFFSET);
 		if (lseek(f, sectoffset, SEEK_SET) < 0 ||
 		    read(f, bootarea, BBSIZE) < BBSIZE)
 			err(4, "%s", specname);
@@ -709,6 +716,10 @@ readlabel(f)
 		}
 		warnx(msg);
 		return(NULL);
+	} else if (pflag) {
+		lp = &lab;
+		if (ioctl(f, DIOCGPDINFO, lp) < 0)
+			err(4, "ioctl DIOCGPDINFO");
 	} else {
 		lp = &lab;
 		if (ioctl(f, DIOCGDINFO, lp) < 0)

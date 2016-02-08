@@ -32,13 +32,14 @@
  */
 
 #if defined(LIBC_SCCS) && !defined(lint)
-static char rcsid[] = "$OpenBSD: signal.c,v 1.2 1996/08/19 08:26:09 tholo Exp $";
+static char rcsid[] = "$OpenBSD: signal.c,v 1.4 1998/06/26 02:12:49 deraadt Exp $";
 #endif /* LIBC_SCCS and not lint */
 
 /*
  * Almost backwards compatible signal.
  */
 #include <signal.h>
+#include <string.h>
 
 sigset_t __sigintr;		/* shared with siginterrupt */
 
@@ -49,6 +50,7 @@ signal(s, a)
 {
 	struct sigaction sa, osa;
 
+	memset(&sa, 0, sizeof sa);
 	sa.sa_handler = a;
 	sigemptyset(&sa.sa_mask);
 	sa.sa_flags = 0;

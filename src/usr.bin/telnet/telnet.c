@@ -1,4 +1,4 @@
-/*	$OpenBSD: telnet.c,v 1.4 1998/03/12 04:57:43 art Exp $	*/
+/*	$OpenBSD: telnet.c,v 1.6 1998/07/27 15:29:29 millert Exp $	*/
 /*	$NetBSD: telnet.c,v 1.7 1996/02/28 21:04:15 thorpej Exp $	*/
 
 /*
@@ -537,6 +537,8 @@ dontoption(option)
  * duplicate, or verbose names (names with spaces).
  */
 
+int is_unique P((char *, char **, char **));
+
 static char *name_unknown = "UNKNOWN";
 static char *unknown[] = { 0, 0 };
 
@@ -779,7 +781,7 @@ suboption()
 	    TerminalSpeeds(&ispeed, &ospeed);
 
 	    snprintf((char *)temp, sizeof(temp), 
-		     "%c%c%c%c%d,%d%c%c", IAC, SB, TELOPT_TSPEED,
+		     "%c%c%c%c%ld,%ld%c%c", IAC, SB, TELOPT_TSPEED,
 		     TELQUAL_IS, ospeed, ispeed, IAC, SE);
 	    len = strlen((char *)temp+4) + 4;	/* temp[3] is 0 ... */
 

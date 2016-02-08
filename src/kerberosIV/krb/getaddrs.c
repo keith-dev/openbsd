@@ -1,8 +1,8 @@
-/*	$OpenBSD: getaddrs.c,v 1.6 1998/03/25 21:50:13 art Exp $	*/
-/* $KTH: getaddrs.c,v 1.20 1997/11/09 06:13:32 assar Exp $ */
+/*	$OpenBSD: getaddrs.c,v 1.9 1998/08/16 20:48:37 art Exp $	*/
+/*	$KTH: getaddrs.c,v 1.24 1998/04/26 15:10:44 joda Exp $		*/
 
 /*
- * Copyright (c) 1995, 1996, 1997 Kungliga Tekniska Högskolan
+ * Copyright (c) 1995, 1996, 1997, 1998 Kungliga Tekniska Högskolan
  * (Royal Institute of Technology, Stockholm, Sweden).
  * All rights reserved.
  * 
@@ -63,81 +63,60 @@ int
 k_get_all_addrs (struct in_addr **l)
 {
      int fd;
-     char *inbuf = NULL;
+     char buf[BUFSIZ];
      struct ifreq ifreq;
      struct ifconf ifconf;
-     int len = 8192;
      int num, j;
      char *p;
+     size_t sz;
      
      if (l == NULL)
 	 return -1;
 
      fd = socket(AF_INET, SOCK_DGRAM, 0);
      if (fd < 0)
-	 return -1;
+         return -1;
 
-     while (1) {
-	 ifconf.ifc_len = len;
-	 ifconf.ifc_buf = inbuf = realloc(inbuf, len);
-	 if (inbuf == NULL)
-	       err(1, "malloc");
-	 if (ioctl(fd, SIOCGIFCONF, &ifconf) < 0) {
-	   close(fd);
-	   free(inbuf);
-	   return -1;
-	 }
-	 if (ifconf.ifc_len + sizeof(ifreq) < len)
-	   break;
-	 len *= 2;
-     }
+     ifconf.ifc_len = sizeof(buf);
+     ifconf.ifc_buf = buf;
+     if(ioctl(fd, SIOCGIFCONF, &ifconf) < 0)
+         return -1;
 
      num = ifconf.ifc_len / sizeof(struct ifreq);
      *l = malloc(num * sizeof(struct in_addr));
      if(*l == NULL) {
 	 close(fd);
-	 free(inbuf);
 	 return -1;
      }
 
      j = 0;
      ifreq.ifr_name[0] = '\0';
-     for (p = ifconf.ifc_buf; p < ifconf.ifc_buf + ifconf.ifc_len;) {
+     for (p = ifconf.ifc_buf; p < ifconf.ifc_buf + ifconf.ifc_len; p += sz) {
           struct ifreq *ifr = (struct ifreq *)p;
-	  size_t sz = sizeof(*ifr);
+	  sz = sizeof(*ifr);
 	  sz = MAX(sz, sizeof(ifr->ifr_name) + ifr->ifr_addr.sa_len);
 
 	  if(strncmp(ifreq.ifr_name, ifr->ifr_name, sizeof(ifr->ifr_name))) {
-	       if(ioctl(fd, SIOCGIFFLAGS, ifr) < 0) {
-		    close(fd);
-		    free(*l);
-		    *l = NULL;
-		    free(inbuf);
-		    return -1;
-	       }
+	       if(ioctl(fd, SIOCGIFFLAGS, ifr) < 0)
+		   continue;
 	       if (ifr->ifr_flags & IFF_UP) {
-		    if(ioctl(fd, SIOCGIFADDR, ifr) < 0) {
-			 close(fd);
-			 free(*l);
-			 *l = NULL;
-			 free(inbuf);
-			 return -1;
-		    }
+		    if(ioctl(fd, SIOCGIFADDR, ifr) < 0)
+			continue;
 		    (*l)[j++] = ((struct sockaddr_in *)&ifr->ifr_addr)->sin_addr;
 	       }
 	       ifreq = *ifr;
 	  }
-	  p = p + sz;
      }
-     if (j != num)
-	if ((*l = realloc (*l, j * sizeof(struct in_addr))) == NULL)
-	{
+     if (j != num) {
+        struct in_addr *temp;
+	if ((temp = realloc (*l, j * sizeof(struct in_addr))) == NULL) {
+	    free(*l);
 	    close(fd);
-	    free(inbuf);
 	    return -1;
 	}
+	*l = temp;
+     }
      
-     free(inbuf);
      close(fd);
      return j;
 }

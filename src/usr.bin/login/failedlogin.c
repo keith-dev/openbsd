@@ -1,4 +1,4 @@
-/*	$OpenBSD: failedlogin.c,v 1.3 1998/03/26 20:28:08 art Exp $	*/
+/*	$OpenBSD: failedlogin.c,v 1.5 1998/07/13 02:11:35 millert Exp $	*/
 
 /*
  * Copyright (c) 1996 Todd C. Miller <Todd.Miller@courtesan.com>
@@ -12,10 +12,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by Todd C. Miller.
- * 4. The name of the author may not be used to endorse or promote products
+ * 3. The name of the author may not be used to endorse or promote products
  *    derived from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES,
@@ -31,7 +28,7 @@
  */
 
 #ifndef lint                                                              
-static char rcsid[] = "$OpenBSD: failedlogin.c,v 1.3 1998/03/26 20:28:08 art Exp $";
+static char rcsid[] = "$OpenBSD: failedlogin.c,v 1.5 1998/07/13 02:11:35 millert Exp $";
 #endif /* not lint */                                                        
 
 /*
@@ -74,14 +71,14 @@ log_failedlogin(uid, host, name, tty)
 
 	/* Add O_CREAT if you want to create failedlogin if it doesn't exist */
 	if ((fd = open(_PATH_FAILEDLOGIN, O_RDWR, S_IREAD|S_IWRITE)) >= 0) {
-		(void)lseek(fd, (off_t)uid * sizeof(failedlogin), L_SET);
+		(void)lseek(fd, (off_t)uid * sizeof(failedlogin), SEEK_SET);
 
 		/* Read in last bad login so can get the count */
 		if (read(fd, (char *)&failedlogin, sizeof(failedlogin)) !=
 			sizeof(failedlogin) || failedlogin.bl_time == 0)
 			memset((void *)&failedlogin, 0, sizeof(failedlogin));
 
-		(void)lseek(fd, (off_t)uid * sizeof(failedlogin), L_SET);
+		(void)lseek(fd, (off_t)uid * sizeof(failedlogin), SEEK_SET);
 		/* Increment count of bad logins */
 		++failedlogin.count;
 		(void)time(&failedlogin.bl_time);
@@ -116,7 +113,7 @@ check_failedlogin(uid)
 	(void)memset((void *)&failedlogin, 0, sizeof(failedlogin));
 
 	if ((fd = open(_PATH_FAILEDLOGIN, O_RDWR, 0)) >= 0) {
-		(void)lseek(fd, (off_t)uid * sizeof(failedlogin), L_SET);
+		(void)lseek(fd, (off_t)uid * sizeof(failedlogin), SEEK_SET);
 		if (read(fd, (char *)&failedlogin, sizeof(failedlogin)) ==
 		    sizeof(failedlogin) && failedlogin.count > 0 ) {
 			/* There was a bad login */
@@ -145,8 +142,10 @@ check_failedlogin(uid)
 
 			/* Reset since this is a good login and write record */
 			failedlogin.count = 0;
-			(void)lseek(fd, (off_t)uid * sizeof(failedlogin), L_SET);
-			(void)write(fd, (char *)&failedlogin, sizeof(failedlogin));
+			(void)lseek(fd, (off_t)uid * sizeof(failedlogin),
+			    SEEK_SET);
+			(void)write(fd, (char *)&failedlogin,
+			    sizeof(failedlogin));
 		}
 		(void)close(fd);
 	}

@@ -1,4 +1,4 @@
-/*	$OpenBSD: savecore.c,v 1.9 1998/03/25 23:38:52 deraadt Exp $	*/
+/*	$OpenBSD: savecore.c,v 1.16 1998/10/04 16:36:13 millert Exp $	*/
 /*	$NetBSD: savecore.c,v 1.26 1996/03/18 21:16:05 leo Exp $	*/
 
 /*-
@@ -44,7 +44,7 @@ static char copyright[] =
 #if 0
 static char sccsid[] = "@(#)savecore.c	8.3 (Berkeley) 1/2/94";
 #else
-static char rcsid[] = "$NetBSD: savecore.c,v 1.26 1996/03/18 21:16:05 leo Exp $";
+static char rcsid[] = "$OpenBSD: savecore.c,v 1.16 1998/10/04 16:36:13 millert Exp $";
 #endif
 #endif /* not lint */
 
@@ -52,7 +52,9 @@ static char rcsid[] = "$NetBSD: savecore.c,v 1.26 1996/03/18 21:16:05 leo Exp $"
 #include <sys/stat.h>
 #include <sys/mount.h>
 #include <sys/syslog.h>
+#include <sys/types.h>
 #include <sys/time.h>
+#include <sys/resource.h>
 
 #include <dirent.h>
 #include <errno.h>
@@ -142,9 +144,17 @@ main(argc, argv)
 	int argc;
 	char *argv[];
 {
+	struct rlimit rl;
 	int ch;
 
 	openlog("savecore", LOG_PERROR, LOG_DAEMON);
+
+	/* Increase our data size to the max if we can. */
+	if (getrlimit(RLIMIT_DATA, &rl) == 0) {
+		rl.rlim_cur = rl.rlim_max;
+		if (setrlimit(RLIMIT_DATA, &rl) < 0)
+			syslog(LOG_WARNING, "can't set rlimit data size: %m");
+	}
 
 	while ((ch = getopt(argc, argv, "cdfN:vz")) != -1)
 		switch(ch) {
@@ -206,13 +216,14 @@ main(argc, argv)
 	exit(0);
 }
 
+char	*dump_sys;
+
 void
 kmem_setup()
 {
 	kvm_t	*kd_kern;
 	char	errbuf[_POSIX2_LINE_MAX];
 	int	i, hdrsz;
-	char	*dump_sys;
 	
 	/*
 	 * Some names we need for the currently running system, others for
@@ -251,8 +262,11 @@ kmem_setup()
 	KREAD(kd_kern, current_nl[X_DUMPMAG].n_value, &dumpmag);
 
 	if (kernel == NULL) {
-		(void)kvm_read(kd_kern, current_nl[X_VERSION].n_value,
-			vers, sizeof(vers));
+		if (kvm_read(kd_kern, current_nl[X_VERSION].n_value,
+		    vers, sizeof(vers)) == -1) {
+			syslog(LOG_ERR, "%s: kvm_read: version misread", dump_sys);
+			exit(1);
+		}
 		vers[sizeof(vers) - 1] = '\0';
 	}
 
@@ -294,8 +308,11 @@ check_kmem()
 	register int	panicloc;
 	char core_vers[1024];
 
-	(void)kvm_read(kd_dump, dump_nl[X_VERSION].n_value, core_vers,
-		sizeof(core_vers));
+	if (kvm_read(kd_dump, dump_nl[X_VERSION].n_value, core_vers,
+	    sizeof(core_vers)) != sizeof(core_vers)) {
+		syslog(LOG_ERR, "%s: kvm_read: version misread", dump_sys);
+		exit(1);
+	}
 	core_vers[sizeof(core_vers) - 1] = '\0';
 
 	if (strcmp(vers, core_vers) && kernel == 0)
@@ -409,7 +426,7 @@ err1:			syslog(LOG_WARNING, "%s: %s", path, strerror(errno));
 	}
 
 	/* Seek to the start of the core. */
-	Lseek(ifd, (off_t)dumplo, L_SET);
+	Lseek(ifd, (off_t)dumplo, SEEK_SET);
 
 	if (kvm_dump_wrtheader(kd_dump, fp, dumpsize) == -1) {
 		syslog(LOG_ERR, "kvm_dump_wrtheader: %s : %s", path,
@@ -665,6 +682,8 @@ Write(fd, bp, size)
 void
 usage()
 {
-	fprintf(stderr, "usage: savecore [-cfvz] [-N system] directory");
+	extern char *__progname;
+	fprintf(stderr, "usage: %s [-cfvz] [-N system] directory\n",
+		__progname);
 	exit(1);
 }

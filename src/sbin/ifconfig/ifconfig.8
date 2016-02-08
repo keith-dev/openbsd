@@ -1,4 +1,4 @@
-.\"	$OpenBSD: ifconfig.8,v 1.9 1998/03/17 08:10:19 deraadt Exp $
+.\"	$OpenBSD: ifconfig.8,v 1.15 1998/09/23 01:20:23 aaron Exp $
 .\"	$NetBSD: ifconfig.8,v 1.11 1996/01/04 21:27:29 pk Exp $
 .\"     $FreeBSD: ifconfig.8,v 1.16 1998/02/01 07:03:29 steve Exp $
 .\"
@@ -35,7 +35,7 @@
 .\"
 .\"     @(#)ifconfig.8	8.4 (Berkeley) 6/1/94
 .\"
-.Dd June 1, 1994
+.Dd Sept 3, 1998
 .Dt IFCONFIG 8
 .Os BSD 4.2
 .Sh NAME
@@ -53,15 +53,21 @@
 .Ar interface
 .Op Ar address_family
 .Nm ifconfig
-.Fl a
+.Fl m
+.Ar interface
+.Op Ar address_family
 .Nm ifconfig
-.Fl A
+.Op Fl a | am
+.Op Ar address_family
+.Nm ifconfig
+.Op Fl A | Am
+.Op Ar address_family
 .Sh DESCRIPTION
-.Nm Ifconfig
+.Nm ifconfig
 is used to assign an address
 to a network interface and/or configure
 network interface parameters.
-.Nm Ifconfig
+.Nm ifconfig
 must be used at boot time to define the network address
 of each interface present on a machine; it may also be used at
 a later time to redefine an interface's address
@@ -106,7 +112,7 @@ count out long strings of digits in network byte order.
 Node addresses are divided into 2 classes: User Node IDs and Server
 Node IDs. 1-127($01-$7F) are for User Node IDs while 128-254($80-$FE)
 are used for Server Node IDs. Node 0($00) is not allowed (unknown)
-while Node 255($FF) is reserved for the Appletalk broadcast Hardware
+while Node 255($FF) is reserved for the AppleTalk broadcast Hardware
 address (broadcast ID).
 .It Ar address_family
 Specifies the
@@ -128,7 +134,7 @@ The
 parameter is a string of the form
 .Dq name unit ,
 for example,
-.Dq en0 
+.Dq en0 .
 .El
 .Pp
 The following parameters may be set with 
@@ -183,6 +189,39 @@ of the destination.
 IP encapsulation of
 .Tn CLNP
 packets is done differently.
+.It Cm media Ar type
+Set the media type of the interface to
+.Ar type .
+Some interfaces support the mutually exclusive use of one of several
+different physical media connectors.  For example, a 10Mb/s Ethernet
+interface might support the use of either
+.Tn AUI
+or twisted pair connectors.  Setting the media type to
+.Dq 10base5
+or
+.Dq AUI
+would change the currently active connector to the AUI port.
+Setting it to
+.Dq 10baseT
+or
+.Dq UTP
+would activate twisted pair.  Refer to the interfaces' driver
+specific man page for a complete list of the available types.
+.It Cm mediaopt Ar opts
+Set the specified media options on the interface.
+.Ar opts
+is a comma delimited list of options to apply to the interface.
+Refer to the interfaces' driver specific man page for a complete
+list of available options.
+.It Fl mediaopt Ar opts
+Disable the specified media options on the interface.
+.It Cm instance Ar minst
+Set the media instance to
+.Ar minst .
+This is useful for devices which have multiple physical layer interfaces
+(PHYs).  Setting the instance on such devices may not be strictly required
+by the network interface driver as the driver may take care of this
+automatically; see the driver's manual page for more information.
 .It Cm metric Ar n
 Set the routing metric of the interface to
 .Ar n ,
@@ -238,11 +277,11 @@ for
 .It Cm range
 Under AppleTalk, set the interface to respond to a
 .Em netrange.
-of the form startnet-endnet. Appletalk uses this scheme instead of
+of the form startnet-endnet. AppleTalk uses this scheme instead of
 netmasks though OpenBSD implements it internally as a set of netmasks.
 .It Cm phase
 The argument following this specifies the version (phase) of the
-Appletalk network attached to the interface. Values of 1 or 2 are permitted.
+AppleTalk network attached to the interface. Values of 1 or 2 are permitted.
 .It Cm trailers
 Request the use of a ``trailer'' link level encapsulation when
 sending (default).
@@ -280,21 +319,33 @@ the hardware will be re-initialized.
 .El
 .Pp
 .Pp
-.Nm Ifconfig
+.Nm ifconfig
 displays the current configuration for a network interface
 when no optional parameters are supplied.
 If a protocol family is specified,
-Ifconfig will report only the details specific to that protocol family.
+ifconfig will report only the details specific to that protocol family.
 .Pp
-The interface name
+Using
 .Fl a
-causes information on all interfaces to be displayed.
-The protocol family may be specified as well.
+causes
+.Nm ifconfig
+to print information on all interfaces.
+The protocol family may be specified as well.  Additionally, if
+.Fl am ,
+is used, interface media information is printed.
 .Pp
-The interface name
+If
 .Fl A
-causes full interface alias information for each interface to be
-displayed.
+is used, it causes full interface alias information for each interface to
+be displayed. If
+.Fl Am
+is used, interface media information is printed for all interfaces
+as well.
+.Pp
+If
+.Fl m
+followed by an interface name is specified, then the media information
+for that interface will be printed.
 .Pp
 Only the super-user may modify the configuration of a network interface.
 .Pp
@@ -305,22 +356,28 @@ Assign the inet(4) address of 192.168.1.10 with a network mask of
 255.255.255.0 to interface fxp0.
 .Pp
 .It Cm ifconfig fxp0 ipx 12625920
-Assign the ipx(3) address of 12625920 sepcified in decimal to interface fxp0.
+Assign the ipx(3) address of 12625920 specified in decimal to interface fxp0.
 .Pp
 .It Cm ifconfig fxp0 atalk 39108.128 range 39107-39109 phase 2
-Assign the Appletalk network 39108 and server node 128 with a network 
+Assign the AppleTalk network 39108 and server node 128 with a network 
 range of 39107-39109 to interface fxp0 on a phase 2 AppleTalk network. 
+.Pp
+.It Cm ifconfig xl0 media 10baseT
+Configure the xl0 interface to use 10baseT.
+.Pp
+.It Cm ifconfig xl0 media 100baseT mediaopt full-duplex
+Configure the xl0 interface to use 100baseT, full duplex.
 .El
 .Sh DIAGNOSTICS
-Messages indicating the specified interface does not exit, the
+Messages indicating the specified interface does not exist, the
 requested address is unknown, or the user is not privileged and
 tried to alter an interface's configuration.
 .Sh SEE ALSO
 .Xr netstat 1 ,
+.Xr ifmedia 4 ,
 .Xr netintro 4 ,
 .Xr rc 8 ,
-.Xr routed 8 ,
-.\" .Xr eon 5
+.Xr routed 8
 .Sh HISTORY
 The
 .Nm

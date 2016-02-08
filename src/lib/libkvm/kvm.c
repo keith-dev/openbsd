@@ -1,4 +1,4 @@
-/*	$OpenBSD: kvm.c,v 1.10 1997/07/25 20:30:17 mickey Exp $ */
+/*	$OpenBSD: kvm.c,v 1.16 1998/08/24 05:32:39 millert Exp $ */
 /*	$NetBSD: kvm.c,v 1.43 1996/05/05 04:31:59 gwr Exp $	*/
 
 /*-
@@ -42,7 +42,7 @@
 #if 0
 static char sccsid[] = "@(#)kvm.c	8.2 (Berkeley) 2/13/94";
 #else
-static char *rcsid = "$OpenBSD: kvm.c,v 1.10 1997/07/25 20:30:17 mickey Exp $";
+static char *rcsid = "$OpenBSD: kvm.c,v 1.16 1998/08/24 05:32:39 millert Exp $";
 #endif
 #endif /* LIBC_SCCS and not lint */
 
@@ -64,6 +64,7 @@ static char *rcsid = "$OpenBSD: kvm.c,v 1.10 1997/07/25 20:30:17 mickey Exp $";
 #include <ctype.h>
 #include <db.h>
 #include <fcntl.h>
+#include <libgen.h>
 #include <limits.h>
 #include <nlist.h>
 #include <paths.h>
@@ -75,7 +76,7 @@ static char *rcsid = "$OpenBSD: kvm.c,v 1.10 1997/07/25 20:30:17 mickey Exp $";
 
 #include "kvm_private.h"
 
-static int	kvm_dbopen __P((kvm_t *));
+static int	kvm_dbopen __P((kvm_t *, const char *));
 static int	_kvm_get_header __P((kvm_t *));
 static kvm_t	*_kvm_open __P((kvm_t *, const char *, const char *,
 		    const char *, int, char *));
@@ -221,7 +222,6 @@ _kvm_open(kd, uf, mf, sf, flag, errout)
 	char *errout;
 {
 	struct stat st;
-	int ufgiven;
 
 	kd->db = 0;
 	kd->pmfd = -1;
@@ -241,10 +241,7 @@ _kvm_open(kd, uf, mf, sf, flag, errout)
 	kd->cpu_data = 0;
 	kd->dump_off = 0;
 
-	ufgiven = (uf != NULL);
-	if (!ufgiven)
-		uf = _PATH_UNIX;
-	else if (strlen(uf) >= MAXPATHLEN) {
+	if (uf && strlen(uf) >= MAXPATHLEN) {
 		_kvm_err(kd, kd->program, "exec file name too long");
 		goto failed;
 	}
@@ -291,9 +288,13 @@ _kvm_open(kd, uf, mf, sf, flag, errout)
 		 * pointer is NULL.  If the database cannot or should
 		 * not be opened, open the namelist argument so we
 		 * revert to slow nlist() calls.
+		 * If no file is specified, try opening _PATH_KSYMS and
+		 * fall back to _PATH_UNIX.
 		 */
-		if ((ufgiven || kvm_dbopen(kd) < 0) && 
-		    (kd->nlfd = open(uf, O_RDONLY, 0)) < 0) {
+		if (kvm_dbopen(kd, uf ? uf : _PATH_UNIX) == -1 &&
+		    ((uf && (kd->nlfd = open(uf, O_RDONLY)) == -1) || (!uf &&
+		    (kd->nlfd = open((uf = _PATH_KSYMS), O_RDONLY)) == -1 &&
+		    (kd->nlfd = open((uf = _PATH_UNIX), O_RDONLY)) == -1))) {
 			_kvm_syserr(kd, kd->program, "%s", uf);
 			goto failed;
 		}
@@ -302,8 +303,12 @@ _kvm_open(kd, uf, mf, sf, flag, errout)
 		 * This is a crash dump.
 		 * Initalize the virtual address translation machinery,
 		 * but first setup the namelist fd.
+		 * If no file is specified, try opening _PATH_KSYMS and
+		 * fall back to _PATH_UNIX.
 		 */
-		if ((kd->nlfd = open(uf, O_RDONLY, 0)) < 0) {
+		if ((uf && (kd->nlfd = open(uf, O_RDONLY)) == -1) || (!uf &&
+		    (kd->nlfd = open((uf = _PATH_KSYMS), O_RDONLY)) == -1 &&
+		    (kd->nlfd = open((uf = _PATH_UNIX), O_RDONLY)) == -1)) {
 			_kvm_syserr(kd, kd->program, "%s", uf);
 			goto failed;
 		}
@@ -475,7 +480,7 @@ off_t	dump_off;
 	if ((CORE_GETMAGIC(cpu_hdr) != KCORE_MAGIC)
 		|| (CORE_GETMID(cpu_hdr) != MID_MACHINE)) {
 		_kvm_err(kd, 0, "invalid magic in cpu_hdr");
-		return (0);
+		return (-1);
 	}
 	hdr_size = ALIGN(sizeof(cpu_hdr));
 
@@ -708,18 +713,41 @@ kvm_close(kd)
  * Only called for live kernels.  Return 0 on success, -1 on failure.
  */
 static int
-kvm_dbopen(kd)
+kvm_dbopen(kd, uf)
 	kvm_t *kd;
+	const char *uf;
 {
 	DBT rec;
 	int dbversionlen;
 	struct nlist nitem;
 	char dbversion[_POSIX2_LINE_MAX];
 	char kversion[_POSIX2_LINE_MAX];
+	char dbname[MAXPATHLEN];
 
-	kd->db = dbopen(_PATH_KVMDB, O_RDONLY, 0, DB_HASH, NULL);
-	if (kd->db == 0)
+	uf = basename((char *)uf);
+
+	(void)snprintf(dbname, sizeof(dbname), "%skvm_%s.db", _PATH_VARDB, uf);
+	kd->db = dbopen(dbname, O_RDONLY, 0, DB_HASH, NULL);
+	if (kd->db == NULL) {
+		switch (errno) {
+		case ENOENT:
+			/* No kvm_bsd.db, fall back to /bsd silently */
+			break;
+		case EFTYPE:
+			_kvm_err(kd, kd->program,
+			    "file %s is incorrectly formatted", dbname);
+			break;
+		case EINVAL:
+			_kvm_err(kd, kd->program,
+			    "invalid argument to dbopen()");
+			break;
+		default:
+			_kvm_err(kd, kd->program, "unknown dbopen() error");
+			break;
+		}
 		return (-1);
+	}
+
 	/*
 	 * read version out of database
 	 */
@@ -875,28 +903,29 @@ kvm_read(kd, kva, buf, len)
 		if (lseek(kd->vmfd, (off_t)kva, SEEK_SET) == -1
 			&& errno != 0) {
 			_kvm_err(kd, 0, "invalid address (%lx)", kva);
-			return (0);
+			return (-1);
 		}
 		cc = read(kd->vmfd, buf, len);
 		if (cc < 0) {
 			_kvm_syserr(kd, 0, "kvm_read");
-			return (0);
+			return (-1);
 		} else if (cc < len)
 			_kvm_err(kd, kd->program, "short read");
 		return (cc);
 	} else {
 		if ((kd->kcore_hdr == NULL) || (kd->cpu_data == NULL)) {
 			_kvm_err(kd, kd->program, "no valid dump header");
-			return (0);
+			return (-1);
 		}
 		cp = buf;
 		while (len > 0) {
 			u_long	pa;
 			off_t	foff;
 		
+			/* In case of error, _kvm_kvatop sets the err string */
 			cc = _kvm_kvatop(kd, kva, &pa);
 			if (cc == 0)
-				return (0);
+				return (-1);
 			if (cc > len)
 				cc = len;
 			foff = _kvm_pa2off(kd, pa);
@@ -945,19 +974,19 @@ kvm_write(kd, kva, buf, len)
 		if (lseek(kd->vmfd, (off_t)kva, SEEK_SET) == -1
 			&& errno != 0) {
 			_kvm_err(kd, 0, "invalid address (%lx)", kva);
-			return (0);
+			return (-1);
 		}
 		cc = write(kd->vmfd, buf, len);
 		if (cc < 0) {
 			_kvm_syserr(kd, 0, "kvm_write");
-			return (0);
+			return (-1);
 		} else if (cc < len)
 			_kvm_err(kd, kd->program, "short write");
 		return (cc);
 	} else {
 		_kvm_err(kd, kd->program,
 		    "kvm_write not implemented for dead kernels");
-		return (0);
+		return (-1);
 	}
 	/* NOTREACHED */
 }
