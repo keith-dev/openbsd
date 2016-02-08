@@ -1,3 +1,4 @@
+/*	$OpenBSD: pwcache.c,v 1.9 2005/08/08 08:05:34 espie Exp $ */
 /*
  * Copyright (c) 1989, 1993
  *	The Regents of the University of California.  All rights reserved.
@@ -27,10 +28,6 @@
  * SUCH DAMAGE.
  */
 
-#if defined(LIBC_SCCS) && !defined(lint)
-static char rcsid[] = "$OpenBSD: pwcache.c,v 1.7 2004/05/18 02:05:52 jfb Exp $";
-#endif /* LIBC_SCCS and not lint */
-
 #include <sys/types.h>
 
 #include <grp.h>
@@ -50,8 +47,8 @@ user_from_uid(uid_t uid, int nouser)
 	} c_uid[NCACHE];
 	static int pwopen;
 	static char nbuf[15];		/* 32 bits == 10 digits */
-	register struct passwd *pw;
-	register struct ncache *cp;
+	struct passwd *pw;
+	struct ncache *cp;
 
 	cp = c_uid + (uid & MASK);
 	if (cp->uid != uid || !*cp->name) {

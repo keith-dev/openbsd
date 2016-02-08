@@ -1,4 +1,4 @@
-/*	$OpenBSD: hist.c,v 1.3 2004/12/07 17:10:56 tedu Exp $	*/
+/*	$OpenBSD: hist.c,v 1.10 2005/08/14 19:49:18 xsa Exp $	*/
 /*
  * Copyright (c) 2004 Jean-Francois Brousseau <jfb@openbsd.org>
  * All rights reserved.
@@ -24,24 +24,23 @@
  * ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include <sys/param.h>
 #include <sys/stat.h>
 
-#include <stdio.h>
 #include <fcntl.h>
+#include <stdio.h>
 #include <stdlib.h>
-#include <unistd.h>
 #include <string.h>
+#include <unistd.h>
 
-#include "log.h"
 #include "cvs.h"
+#include "log.h"
 
-#define CVS_HIST_BUFSIZE    8192
+#define CVS_HIST_BUFSIZE	8192
 
 
 
-static int  cvs_hist_fillbuf  (CVSHIST *);
-static int  cvs_hist_fmt      (const struct cvs_hent *, char *, size_t);
+static int	cvs_hist_fillbuf(CVSHIST *);
+static int	cvs_hist_fmt(const struct cvs_hent *, char *, size_t);
 
 
 /*
@@ -50,7 +49,7 @@ static int  cvs_hist_fmt      (const struct cvs_hent *, char *, size_t);
  * Open a CVS history file.
  * Returns the number of entries in the file on success, or -1 on error.
  */
-CVSHIST*
+CVSHIST *
 cvs_hist_open(const char *path)
 {
 	CVSHIST *histp;
@@ -62,7 +61,7 @@ cvs_hist_open(const char *path)
 	}
 	memset(histp, 0, sizeof(*histp));
 
-	histp->chf_buf = (char *)malloc(CVS_HIST_BUFSIZE);
+	histp->chf_buf = (char *)malloc((size_t)CVS_HIST_BUFSIZE);
 	if (histp->chf_buf == NULL) {
 		cvs_log(LP_ERRNO,
 		    "failed to allocate CVS history parse buffer");
@@ -80,6 +79,7 @@ cvs_hist_open(const char *path)
 	if (histp->chf_fd == -1) {
 		cvs_log(LP_ERRNO,
 		    "failed to open CVS history file `%s'", path);
+		cvs_nolog = 1;
 		free(histp->chf_buf);
 		free(histp);
 		return (NULL);
@@ -115,7 +115,7 @@ cvs_hist_close(CVSHIST *histp)
  * Returns the next entry from the file on success, or NULL on failure or if
  * no entries are left.
  */
-struct cvs_hent*
+struct cvs_hent *
 cvs_hist_getnext(CVSHIST *histp)
 {
 	if (histp->chf_cindex == histp->chf_nbhent) {
@@ -138,6 +138,9 @@ int
 cvs_hist_append(CVSHIST *histp, struct cvs_hent *hentp)
 {
 	char hbuf[128];
+
+	if (cvs_nolog == 1)
+		return (0);
 
 	if (cvs_hist_fmt(hentp, hbuf, sizeof(hbuf)) < 0) {
 		cvs_log(LP_ERR, "failed to append CVS history entry");
@@ -277,11 +280,15 @@ static int
 cvs_hist_fmt(const struct cvs_hent *ent, char *buf, size_t blen)
 {
 	char numbuf[64];
+	int len;
 
 	if (rcsnum_tostr(ent->ch_rev, numbuf, sizeof(numbuf)) == NULL)
 		return (-1);
 
-	return (snprintf(buf, blen, "%c%8x|%s|%s|%s|%s|%s",
+	len = snprintf(buf, blen, "%c%8x|%s|%s|%s|%s|%s",
 	    ent->ch_event, ent->ch_date, ent->ch_user, ent->ch_curdir,
-	    ent->ch_repo, numbuf, ent->ch_arg));
+	    ent->ch_repo, numbuf, ent->ch_arg);
+	if (len >= (int)blen || len == -1)
+		return (-1);
+	return (len);
 }

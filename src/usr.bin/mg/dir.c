@@ -1,4 +1,6 @@
-/*	$OpenBSD: dir.c,v 1.11 2004/07/22 01:25:24 vincent Exp $	*/
+/*	$OpenBSD: dir.c,v 1.14 2005/08/09 00:53:48 kjell Exp $	*/
+
+/* This file is in the public domain. */
 
 /*
  * Name:	MG 2a
@@ -11,10 +13,10 @@
 
 #ifndef NO_DIR
 char		*wdir;
-static char	cwd[NFILEN];
+static char	 cwd[NFILEN];
 
 /*
- * Initialize anything the directory management routines need
+ * Initialize anything the directory management routines need.
  */
 void
 dirinit(void)
@@ -27,7 +29,7 @@ dirinit(void)
 }
 
 /*
- * Change current working directory
+ * Change current working directory.
  */
 /* ARGSUSED */
 int
@@ -35,10 +37,12 @@ changedir(int f, int n)
 {
 	char	bufc[NPAT], *bufp;
 
-	if ((bufp = ereply("Change default directory: ", bufc, NPAT)) == NULL)
-		return ABORT;
-	if (bufc[0] == '\0')
-		(void)strlcpy(bufc, wdir, sizeof bufc);
+	(void)strlcpy(bufc, wdir, sizeof(bufc));
+	if ((bufp = eread("Change default directory: ", bufc, NPAT,
+	    EFDEF | EFNEW | EFCR)) == NULL)
+		return (ABORT);
+	else if (bufp[0] == '\0')
+		return (FALSE);
 	if (chdir(bufc) == -1) {
 		ewprintf("Can't change dir to %s", bufc);
 		return (FALSE);
@@ -51,13 +55,12 @@ changedir(int f, int n)
 }
 
 /*
- * Show current directory
+ * Show current directory.
  */
 /* ARGSUSED */
 int
 showcwdir(int f, int n)
 {
-
 	ewprintf("Current directory: %s", wdir);
 	return (TRUE);
 }

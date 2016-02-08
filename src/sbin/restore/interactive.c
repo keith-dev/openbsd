@@ -1,4 +1,4 @@
-/*	$OpenBSD: interactive.c,v 1.20 2004/07/17 02:14:33 deraadt Exp $	*/
+/*	$OpenBSD: interactive.c,v 1.23 2005/06/16 14:51:21 millert Exp $	*/
 /*	$NetBSD: interactive.c,v 1.10 1997/03/19 08:42:52 lukem Exp $	*/
 
 /*
@@ -34,7 +34,7 @@
 #if 0
 static char sccsid[] = "@(#)interactive.c	8.3 (Berkeley) 9/13/94";
 #else
-static const char rcsid[] = "$OpenBSD: interactive.c,v 1.20 2004/07/17 02:14:33 deraadt Exp $";
+static const char rcsid[] = "$OpenBSD: interactive.c,v 1.23 2005/06/16 14:51:21 millert Exp $";
 #endif
 #endif /* not lint */
 
@@ -513,12 +513,12 @@ printlist(char *name, char *basename)
 	struct direct *dp;
 	struct afile single;
 	RST_DIR *dirp;
-	int entries, len, namelen;
+	size_t namelen;
+	int entries, len;
 	char locname[MAXPATHLEN];
 
 	dp = pathsearch(name);
-	if (dp == NULL || (!dflag && TSTINO(dp->d_ino, dumpmap) == 0) ||
-	    (!vflag && dp->d_ino == WINO))
+	if (dp == NULL || (!dflag && TSTINO(dp->d_ino, dumpmap) == 0))
 		return;
 	if ((dirp = rst_opendir(name)) == NULL) {
 		entries = 1;
@@ -545,16 +545,17 @@ printlist(char *name, char *basename)
 		fprintf(stderr, "%s:\n", name);
 		entries = 0;
 		listp = list;
-		namelen = snprintf(locname, sizeof(locname), "%s/", name);
-		if (namelen >= sizeof(locname))
-			namelen = sizeof(locname) - 1;
+		namelen = strlcpy(locname, name, sizeof(locname));
+		if (namelen >= sizeof(locname) - 1)
+			namelen = sizeof(locname) - 2;
+		locname[namelen++] = '/';
+		locname[namelen] = '\0';
 		while ((dp = rst_readdir(dirp))) {
 			if (dp == NULL)
 				break;
 			if (!dflag && TSTINO(dp->d_ino, dumpmap) == 0)
 				continue;
-			if (!vflag && (dp->d_ino == WINO ||
-			     strcmp(dp->d_name, ".") == 0 ||
+			if (!vflag && (strcmp(dp->d_name, ".") == 0 ||
 			     strcmp(dp->d_name, "..") == 0))
 				continue;
 			locname[namelen] = '\0';
@@ -628,10 +629,6 @@ mkentry(char *name, struct direct *dp, struct afile *fp)
 	case DT_CHR:
 	case DT_BLK:
 		fp->postfix = '#';
-		break;
-
-	case DT_WHT:
-		fp->postfix = '%';
 		break;
 
 	case DT_UNKNOWN:
@@ -726,8 +723,6 @@ glob_readdir(RST_DIR *dirp)
 	static struct dirent adirent;
 
 	while ((dp = rst_readdir(dirp)) != NULL) {
-		if (!vflag && dp->d_ino == WINO)
-			continue;
 		if (dflag || TSTINO(dp->d_ino, dumpmap))
 			break;
 	}
@@ -748,8 +743,7 @@ glob_stat(const char *name, struct stat *stp)
 	struct direct *dp;
 
 	dp = pathsearch(name);
-	if (dp == NULL || (!dflag && TSTINO(dp->d_ino, dumpmap) == 0) ||
-	    (!vflag && dp->d_ino == WINO))
+	if (dp == NULL || (!dflag && TSTINO(dp->d_ino, dumpmap) == 0))
 		return (-1);
 	if (inodetype(dp->d_ino) == NODE)
 		stp->st_mode = S_IFDIR;

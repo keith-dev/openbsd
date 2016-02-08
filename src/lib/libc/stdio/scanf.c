@@ -1,3 +1,4 @@
+/*	$OpenBSD: scanf.c,v 1.9 2005/08/08 08:05:36 espie Exp $ */
 /*-
  * Copyright (c) 1990, 1993
  *	The Regents of the University of California.  All rights reserved.
@@ -30,21 +31,17 @@
  * SUCH DAMAGE.
  */
 
-#if defined(LIBC_SCCS) && !defined(lint)
-static char rcsid[] = "$OpenBSD: scanf.c,v 1.6 2003/06/02 20:18:37 millert Exp $";
-#endif /* LIBC_SCCS and not lint */
-
 #include <stdio.h>
 #include <stdarg.h>
 
 int
-scanf(char const *fmt, ...)
+scanf(const char *fmt, ...)
 {
 	int ret;
 	va_list ap;
 
 	va_start(ap, fmt);
-	ret = __svfscanf(stdin, fmt, ap);
+	ret = vfscanf(stdin, fmt, ap);
 	va_end(ap);
 	return (ret);
 }

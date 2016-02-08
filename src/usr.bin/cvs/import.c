@@ -1,4 +1,4 @@
-/*	$OpenBSD: import.c,v 1.6 2005/03/05 18:43:55 joris Exp $	*/
+/*	$OpenBSD: import.c,v 1.26 2005/08/04 12:20:42 xsa Exp $	*/
 /*
  * Copyright (c) 2004 Joris Vink <joris@openbsd.org>
  * All rights reserved.
@@ -25,64 +25,76 @@
  */
 
 #include <sys/types.h>
-#include <sys/queue.h>
+#include <sys/stat.h>
 
-#include <err.h>
-#include <dirent.h>
 #include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <unistd.h>
 #include <string.h>
-#include <sysexits.h>
+#include <unistd.h>
 
-#include "log.h"
-#include "file.h"
 #include "cvs.h"
+#include "log.h"
 #include "proto.h"
 
 
-#define CVS_IMPORT_DEFBRANCH    "1.1.1"
+#define CVS_IMPORT_DEFBRANCH	"1.1.1"
 
 
+static int	cvs_import_init(struct cvs_cmd *, int, char **, int *);
+static int	cvs_import_pre_exec(struct cvsroot *);
+static int	cvs_import_pre_exec(struct cvsroot *);
+static int	cvs_import_post_exec(struct cvsroot *);
+static int	cvs_import_remote(CVSFILE *, void *);
+static int	cvs_import_local(CVSFILE *, void *);
+static int	cvs_import_cleanup(void);
 
-int cvs_import_file(CVSFILE *, void *);
-char repo[MAXPATHLEN];
+static int dflag = 0;
+static int conflicts = 0;
+static RCSNUM *imp_brnum;
 
-/*
- * cvs_import()
- *
- * Handler for the `cvs import' command.
- */
-int
-cvs_import(int argc, char **argv)
+static char *module, *vendor, *release;
+
+struct cvs_cmd cvs_cmd_import = {
+	CVS_OP_IMPORT, CVS_REQ_IMPORT, "import",
+	{ "im", "imp" },
+	"Import sources into CVS, using vendor branches",
+	"[-d] [-b branch] [-I ign] [-k mode] [-m msg] [-W spec] module "
+	"vendortag releasetag ...",
+	"b:dI:k:m:W:",
+	NULL,
+	CF_RECURSE | CF_IGNORE | CF_NOSYMS,
+	cvs_import_init,
+	cvs_import_pre_exec,
+	cvs_import_remote,
+	cvs_import_local,
+	cvs_import_post_exec,
+	cvs_import_cleanup,
+	CVS_CMD_SENDDIR
+};
+
+static int
+cvs_import_init(struct cvs_cmd *cmd, int argc, char **argv, int *arg)
 {
-	int ch, flags;
-	char *branch;
-	struct cvsroot *root;
-	RCSNUM *bnum;
+	int ch;
 
-	branch = CVS_IMPORT_DEFBRANCH;
-	flags = CF_RECURSE | CF_IGNORE | CF_NOSYMS;
-
-	while ((ch = getopt(argc, argv, "b:dI:k:m:")) != -1) {
+	while ((ch = getopt(argc, argv, cmd->cmd_opts)) != -1) {
 		switch (ch) {
 		case 'b':
-			branch = optarg;
-			if ((bnum = rcsnum_parse(branch)) == NULL) {
+			if ((imp_brnum = rcsnum_parse(optarg)) == NULL) {
 				cvs_log(LP_ERR, "%s is not a numeric branch",
-				    branch);
-				return (EX_USAGE);
+				    optarg);
+				return (CVS_EX_USAGE);
 			}
-			rcsnum_free(bnum);
 			break;
 		case 'd':
+			dflag = 1;
 			break;
 		case 'I':
 			if (cvs_file_ignore(optarg) < 0) {
 				cvs_log(LP_ERR, "failed to add `%s' to list "
 				    "of ignore patterns", optarg);
-				return (EX_USAGE);
+				return (CVS_EX_USAGE);
 			}
 			break;
 		case 'k':
@@ -91,100 +103,277 @@ cvs_import(int argc, char **argv)
 			cvs_msg = strdup(optarg);
 			if (cvs_msg == NULL) {
 				cvs_log(LP_ERRNO, "failed to copy message");
-				return (EX_DATAERR);
+				return (CVS_EX_DATA);
 			}
 			break;
 		default:
-			return (EX_USAGE);
+			return (CVS_EX_USAGE);
 		}
 	}
 
 	argc -= optind;
 	argv += optind;
-	if (argc > 4)
-		return (EX_USAGE);
+	if (argc != 3)
+		return (CVS_EX_USAGE);
 
-	cvs_files = cvs_file_get(".", flags);
-	if (cvs_files == NULL)
-		return (EX_DATAERR);
-
-	root = CVS_DIR_ROOT(cvs_files);
-	if (root == NULL) {
-		cvs_log(LP_ERR,
-		    "No CVSROOT specified!  Please use the `-d' option");
-		cvs_log(LP_ERR,
-		    "or set the CVSROOT environment variable.");
-		return (EX_USAGE);
+	if ((imp_brnum == NULL) &&
+	    ((imp_brnum = rcsnum_parse(CVS_IMPORT_DEFBRANCH)) == NULL)) {
+		cvs_log(LP_ERR, "failed to parse default import branch");
+		return (CVS_EX_DATA);
 	}
+
+	module = argv[0];
+	vendor = argv[1];
+	release = argv[2];
+
+	*arg = optind + 3;
 
 	if ((cvs_msg == NULL) &&
 	    (cvs_msg = cvs_logmsg_get(NULL, NULL, NULL, NULL)) == NULL)
-		return (-1);
+		return (CVS_EX_DATA);
 
-	if (root->cr_method != CVS_METHOD_LOCAL) {
-		if ((cvs_connect(root) < 0) ||
-		    (cvs_sendarg(root, "-b", 0) < 0) ||
-		    (cvs_sendarg(root, branch, 0) < 0) ||
+	return (0);
+}
+
+static int
+cvs_import_pre_exec(struct cvsroot *root)
+{
+	size_t len;
+	char numbuf[64], repodir[MAXPATHLEN];
+
+	if (root->cr_method == CVS_METHOD_LOCAL) {
+		len = cvs_path_cat(root->cr_dir, module, repodir,
+		    sizeof(repodir));
+		if (len >= sizeof(repodir))
+			return (CVS_EX_DATA);
+
+		if (mkdir(repodir, 0700) == -1) {
+			cvs_log(LP_ERRNO, "failed to create %s", repodir);
+			return (CVS_EX_DATA);
+		}
+	} else {
+		rcsnum_tostr(imp_brnum, numbuf, sizeof(numbuf));
+
+		if ((cvs_sendarg(root, "-b", 0) < 0) ||
+		    (cvs_sendarg(root, numbuf, 0) < 0) ||
 		    (cvs_logmsg_send(root, cvs_msg) < 0) ||
-		    (cvs_sendarg(root, argv[0], 0) < 0) ||
-		    (cvs_sendarg(root, argv[1], 0) < 0) ||
-		    (cvs_sendarg(root, argv[2], 0) < 0))
-			return (EX_PROTOCOL);
-	}
-
-	snprintf(repo, sizeof(repo), "%s/%s", root->cr_dir, argv[0]);
-	cvs_file_examine(cvs_files, cvs_import_file, NULL);
-
-	if (root->cr_method != CVS_METHOD_LOCAL) {
-		if (cvs_senddir(root, cvs_files) < 0 ||
-		    cvs_sendreq(root, CVS_REQ_IMPORT, NULL) < 0)
-			return (EX_PROTOCOL);
+		    (cvs_sendarg(root, module, 0) < 0) ||
+		    (cvs_sendarg(root, vendor, 0) < 0) ||
+		    (cvs_sendarg(root, release, 0) < 0))
+			return (CVS_EX_PROTO);
 	}
 
 	return (0);
 }
 
+static int
+cvs_import_post_exec(struct cvsroot *root)
+{
+	char buf[8];
+
+	if (root->cr_method == CVS_METHOD_LOCAL) {
+		if (conflicts > 0)
+			snprintf(buf, sizeof(buf), "%d", conflicts);
+
+		if (verbosity > 0)
+			cvs_printf("\n%s conflicts created by this import\n\n",
+			    conflicts == 0 ? "No" : buf);
+	}
+
+	return (CVS_EX_OK);
+}
+
 /*
- * cvs_import_file()
+ * cvs_import_remote()
  *
  * Perform the import of a single file or directory.
  */
-int
-cvs_import_file(CVSFILE *cfp, void *arg)
+static int
+cvs_import_remote(CVSFILE *cf, void *arg)
 {
-	int ret;
+	size_t len, sz;
 	struct cvsroot *root;
 	char fpath[MAXPATHLEN], repodir[MAXPATHLEN];
+	char repo[MAXPATHLEN], date[32];
 
-	root = CVS_DIR_ROOT(cfp);
+	root = CVS_DIR_ROOT(cf);
 
-	cvs_file_getpath(cfp, fpath, sizeof(fpath));
-	printf("Importing %s\n", fpath);
+	len = cvs_path_cat(root->cr_dir, module, repo, sizeof(repo));
+	if (len >= sizeof(repo))
+		return (CVS_EX_DATA);
 
-	if (cfp->cf_type == DT_DIR) {
-		if (!strcmp(CVS_FILE_NAME(cfp), "."))
+	cvs_file_getpath(cf, fpath, sizeof(fpath));
+
+	if (cf->cf_type == DT_DIR) {
+		if (!strcmp(cf->cf_name, "."))
 			strlcpy(repodir, repo, sizeof(repodir));
-		else
-			snprintf(repodir, sizeof(repodir), "%s/%s", repo, fpath);
-		if (root->cr_method != CVS_METHOD_LOCAL) {
-			ret = cvs_sendreq(root, CVS_REQ_DIRECTORY, fpath);
-			if (ret == 0)
-				ret = cvs_sendln(root, repodir);
-		} else {
-			/* create the directory */
+		else {
+			len = cvs_path_cat(repo, fpath, repodir,
+			    sizeof(repodir));
+			if (len >= sizeof(repodir))
+				return (CVS_EX_DATA);
+		}
+
+		if (cvs_sendreq(root, CVS_REQ_DIRECTORY, fpath) < 0)
+			return (CVS_EX_PROTO);
+		if (cvs_sendln(root, repodir) < 0)
+			return (CVS_EX_PROTO);
+		return (0);
+	}
+
+	if (dflag) {
+		ctime_r(&(cf->cf_mtime), date);
+		sz = strlen(date);
+		if ((sz > 0) && (date[sz - 1] == '\n'))
+			date[--sz] = '\0';
+		if (cvs_sendreq(root, CVS_REQ_CHECKINTIME, date) < 0)
+			return (CVS_EX_PROTO);
+	}
+	if (cvs_sendreq(root, CVS_REQ_MODIFIED, cf->cf_name) < 0)
+		return (CVS_EX_PROTO);
+	if (cvs_sendfile(root, fpath) < 0)
+		return (CVS_EX_PROTO);
+
+	return (0);
+}
+
+static int
+cvs_import_local(CVSFILE *cf, void *arg)
+{
+	size_t len;
+	time_t stamp;
+	char fpath[MAXPATHLEN], rpath[MAXPATHLEN], repo[MAXPATHLEN];
+	const char *comment;
+	struct stat fst;
+	struct timeval ts[2];
+	struct cvsroot *root;
+	RCSFILE *rf;
+	RCSNUM *rev;
+
+	root = CVS_DIR_ROOT(cf);
+
+	len = cvs_path_cat(root->cr_dir, module, repo, sizeof(repo));
+	if (len >= sizeof(repo))
+		return (CVS_EX_DATA);
+
+	cvs_file_getpath(cf, fpath, sizeof(fpath));
+
+	if (cf->cf_type == DT_DIR) {
+		if (!strcmp(cf->cf_name, "."))
+			strlcpy(rpath, repo, sizeof(rpath));
+		else {
+			len = cvs_path_cat(repo, fpath, rpath, sizeof(rpath));
+			if (len >= sizeof(rpath))
+				return (CVS_EX_DATA);
+
+			cvs_printf("Importing %s\n", rpath);
+			if (mkdir(rpath, 0700) == -1) {
+				cvs_log(LP_ERRNO, "failed to create %s",
+				    rpath);
+			}
 		}
 
 		return (0);
 	}
 
-	if (root->cr_method != CVS_METHOD_LOCAL) {
-		if (cvs_sendreq(root, CVS_REQ_MODIFIED, CVS_FILE_NAME(cfp)) < 0)
-			return (-1);
-		if (cvs_sendfile(root, fpath) < 0)
-			return (-1);
-	} else {
-		/* local import */
+	/*
+	 * If -d was given, use the file's last modification time as the
+	 * timestamps for the initial revisions.
+	 */
+	if (dflag) {
+		if (stat(fpath, &fst) == -1) {
+			cvs_log(LP_ERRNO, "failed to stat %s", fpath);
+			return (CVS_EX_DATA);
+		}
+		stamp = (time_t)fst.st_mtime;
+
+		ts[0].tv_sec = stamp;
+		ts[0].tv_usec = 0;
+		ts[1].tv_sec = stamp;
+		ts[1].tv_usec = 0;
+	} else
+		stamp = -1;
+
+	snprintf(rpath, sizeof(rpath), "%s/%s%s",
+	    repo, fpath, RCS_FILE_EXT);
+
+	cvs_printf("N %s\n", fpath);
+
+	rf = rcs_open(rpath, RCS_RDWR|RCS_CREATE);
+	if (rf == NULL) {
+		cvs_log(LP_ERR, "failed to create RCS file: %s",
+		    strerror(rcs_errno));
+		return (CVS_EX_DATA);
 	}
 
+	comment = rcs_comment_lookup(cf->cf_name);
+	if ((comment != NULL) && (rcs_comment_set(rf, comment) < 0)) {
+		cvs_log(LP_WARN, "failed to set RCS comment leader: %s",
+		    rcs_errstr(rcs_errno));
+		/* don't error out, no big deal */
+	}
+
+	rev = rcsnum_brtorev(imp_brnum);
+	if (rcs_rev_add(rf, rev, cvs_msg, stamp) < 0) {
+		cvs_log(LP_ERR, "failed to add revision: %s",
+		    rcs_errstr(rcs_errno));
+		rcs_close(rf);
+		(void)unlink(rpath);
+		return (CVS_EX_DATA);
+	}
+
+	if (rcs_sym_add(rf, release, rev) < 0) {
+		cvs_log(LP_ERR, "failed to set RCS symbol: %s",
+		    strerror(rcs_errno));
+		rcs_close(rf);
+		(void)unlink(rpath);
+		return (CVS_EX_DATA);
+	}
+
+	rcsnum_cpy(imp_brnum, rev, 2);
+	if (rcs_rev_add(rf, rev, cvs_msg, stamp) < 0) {
+		cvs_log(LP_ERR, "failed to add revision: %s",
+		    rcs_errstr(rcs_errno));
+		rcs_close(rf);
+		(void)unlink(rpath);
+		return (CVS_EX_DATA);
+	}
+
+	if (rcs_head_set(rf, rev) < 0) {
+		cvs_log(LP_ERR, "failed to set RCS head: %s",
+		    rcs_errstr(rcs_errno));
+		rcs_close(rf);
+		(void)unlink(rpath);
+		return (CVS_EX_DATA);
+	}
+
+	if (rcs_branch_set(rf, imp_brnum) < 0) {
+		cvs_log(LP_ERR, "failed to set RCS default branch: %s",
+		    strerror(rcs_errno));
+		return (CVS_EX_DATA);
+	}
+
+	if (rcs_sym_add(rf, vendor, imp_brnum) < 0) {
+		cvs_log(LP_ERR, "failed to set RCS symbol: %s",
+		    strerror(rcs_errno));
+		rcs_close(rf);
+		(void)unlink(rpath);
+		return (CVS_EX_DATA);
+	}
+
+	/* add the vendor tag and release tag as symbols */
+	rcs_close(rf);
+
+	if (dflag && (utimes(rpath, ts) == -1))
+		cvs_log(LP_ERRNO, "failed to timestamp RCS file");
+
+	return (CVS_EX_OK);
+}
+
+static int
+cvs_import_cleanup(void)
+{
+	if (imp_brnum != NULL)
+		rcsnum_free(imp_brnum);
 	return (0);
 }

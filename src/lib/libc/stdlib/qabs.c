@@ -1,3 +1,4 @@
+/*	$OpenBSD: qabs.c,v 1.5 2005/08/08 08:05:37 espie Exp $ */
 /*-
  * Copyright (c) 1990 The Regents of the University of California.
  * All rights reserved.
@@ -27,15 +28,10 @@
  * SUCH DAMAGE.
  */
 
-#if defined(LIBC_SCCS) && !defined(lint)
-static char *rcsid = "$OpenBSD: qabs.c,v 1.3 2003/06/02 20:18:38 millert Exp $";
-#endif /* LIBC_SCCS and not lint */
-
 #include <stdlib.h>
 
 quad_t
-qabs(j)
-	quad_t j;
+qabs(quad_t j)
 {
 	return(j < 0 ? -j : j);
 }

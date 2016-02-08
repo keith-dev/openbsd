@@ -1,3 +1,4 @@
+/*	$OpenBSD: gmon.c,v 1.19 2005/08/08 08:05:34 espie Exp $ */
 /*-
  * Copyright (c) 1983, 1992, 1993
  *	The Regents of the University of California.  All rights reserved.
@@ -27,10 +28,6 @@
  * SUCH DAMAGE.
  */
 
-#if !defined(lint) && defined(LIBC_SCCS)
-static char rcsid[] = "$OpenBSD: gmon.c,v 1.16 2003/06/25 21:16:47 deraadt Exp $";
-#endif
-
 #include <sys/param.h>
 #include <sys/time.h>
 #include <sys/gmon.h>
@@ -59,11 +56,9 @@ void	monstartup(u_long lowpc, u_long highpc);
 void	_mcleanup(void);
 
 void
-monstartup(lowpc, highpc)
-	u_long lowpc;
-	u_long highpc;
+monstartup(u_long lowpc, u_long highpc)
 {
-	register int o;
+	int o;
 	char *cp;
 	struct gmonparam *p = &_gmonparam;
 
@@ -221,9 +216,9 @@ _mcleanup(void)
 		perror("mcount: gmon.log");
 		return;
 	}
-	len = snprintf(dbuf, sizeof dbuf, "[mcleanup1] kcount 0x%x ssiz %d\n",
+	snprintf(dbuf, sizeof dbuf, "[mcleanup1] kcount 0x%x ssiz %d\n",
 	    p->kcount, p->kcountsize);
-	write(log, dbuf, len);
+	write(log, dbuf, strlen(dbuf));
 #endif
 	hdr = (struct gmonhdr *)&gmonhdr;
 	bzero(hdr, sizeof(*hdr));
@@ -244,11 +239,11 @@ _mcleanup(void)
 		for (toindex = p->froms[fromindex]; toindex != 0;
 		     toindex = p->tos[toindex].link) {
 #ifdef DEBUG
-			len = snprintf(dbuf, sizeof dbuf,
+			(void) snprintf(dbuf, sizeof dbuf,
 			"[mcleanup2] frompc 0x%x selfpc 0x%x count %d\n" ,
 				frompc, p->tos[toindex].selfpc,
 				p->tos[toindex].count);
-			write(log, dbuf, len);
+			write(log, dbuf, strlen(dbuf));
 #endif
 			rawarc.raw_frompc = frompc;
 			rawarc.raw_selfpc = p->tos[toindex].selfpc;
@@ -265,8 +260,7 @@ _mcleanup(void)
  *	all the data structures are ready.
  */
 void
-moncontrol(mode)
-	int mode;
+moncontrol(int mode)
 {
 	struct gmonparam *p = &_gmonparam;
 
@@ -287,7 +281,7 @@ moncontrol(mode)
  * if something goes wrong, we return 0, an impossible hertz.
  */
 static int
-hertz()
+hertz(void)
 {
 	struct itimerval tim;
 

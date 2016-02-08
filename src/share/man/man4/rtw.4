@@ -1,4 +1,4 @@
-.\"	$OpenBSD: rtw.4,v 1.13 2005/03/18 06:32:04 jmc Exp $
+.\"	$OpenBSD: rtw.4,v 1.19 2005/08/30 15:20:26 grunk Exp $
 .\"
 .\" Copyright (c) 2004 Jonathan Gray <jsg@openbsd.org>
 .\"
@@ -129,7 +129,7 @@ Select IBSS operation.
 Select monitor mode.
 .El
 .It Fl mediaopt Ar opts
-Disable the specified media options on the driver and returns it to the
+Disable the specified media options on the driver and return it to the
 default mode of operation (BSS).
 .It Cm nwid Ar id
 Set the network ID.
@@ -143,6 +143,7 @@ string allows the interface to connect to any available access points.
 By default the
 .Nm
 driver uses an empty string.
+Note that network ID is synonymous with Extended Service Set ID (ESSID).
 .It Cm nwkey Ar key
 Enable WEP encryption using the specified
 .Ar key .
@@ -182,6 +183,7 @@ The following adapters should work:
 .\".It Li "Acer Aspire 1357 LMi" Ta Mini PCI
 .\".It Li "Belkin F5D6001 V3" Ta PCI
 .It Li "Belkin F5D6020 V3" Ta CardBus
+.It Li "Buffalo WLI-CB-B11" Ta CardBus
 .It Li "Corega CG-WLCB11V3" Ta CardBus
 .\".It Li "D-Link DWL-510" Ta PCI
 .\".It Li "D-Link DWL-520 rev D" Ta PCI
@@ -193,7 +195,7 @@ The following adapters should work:
 .It Li "Netgear MA521" Ta CardBus
 .It Li "Ovislink AirLive WL-1120PCM" Ta CardBus
 .It Li "Planet WL-3553" Ta CardBus
-.It Li "TrendNET TEW-266PC" Ta CardBus
+.It Li "TRENDnet TEW-226PC" Ta CardBus
 .\".It Li "TrendNET TEW-288PI" Ta PCI
 .It Li "VCTnet PC-11B1" Ta CardBus
 .El
@@ -224,7 +226,7 @@ Configure rtw0 for WEP, using hex key
 .Pp
 Return rtw0 to its default settings:
 .Bd -literal -offset indent
-# ifconfig rtw0 -bssid -chan media autoselect -mediaopt \e
+# ifconfig rtw0 -bssid -chan media autoselect \e
 	nwid "" -nwkey
 .Ed
 .Pp
@@ -241,6 +243,7 @@ Join an existing BSS network,
 .Xr netintro 4 ,
 .Xr pci 4 ,
 .Xr hostname.if 5 ,
+.Xr hostapd 8 ,
 .Xr ifconfig 8
 .Rs
 .%T Realtek

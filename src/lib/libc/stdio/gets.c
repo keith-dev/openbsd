@@ -1,3 +1,4 @@
+/*	$OpenBSD: gets.c,v 1.9 2005/08/08 08:05:36 espie Exp $ */
 /*-
  * Copyright (c) 1990, 1993
  *	The Regents of the University of California.  All rights reserved.
@@ -30,10 +31,6 @@
  * SUCH DAMAGE.
  */
 
-#if defined(LIBC_SCCS) && !defined(lint)
-static char rcsid[] = "$OpenBSD: gets.c,v 1.7 2004/09/28 18:12:44 otto Exp $";
-#endif /* LIBC_SCCS and not lint */
-
 #include <stdio.h>
 
 __warn_references(gets,
@@ -53,6 +50,6 @@ gets(char *buf)
 				break;
 		else
 			*s++ = c;
-	*s = 0;
+	*s = '\0';
 	return (buf);
 }

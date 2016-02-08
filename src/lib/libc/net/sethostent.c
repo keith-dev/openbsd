@@ -1,3 +1,4 @@
+/*	$OpenBSD: sethostent.c,v 1.9 2005/08/06 20:30:04 espie Exp $ */
 /*
  * Copyright (c) 1985, 1993
  *	The Regents of the University of California.  All rights reserved.
@@ -27,10 +28,6 @@
  * SUCH DAMAGE.
  */
 
-#if defined(LIBC_SCCS) && !defined(lint)
-static char rcsid[] = "$OpenBSD: sethostent.c,v 1.6 2003/06/02 20:18:36 millert Exp $";
-#endif /* LIBC_SCCS and not lint */
-
 #include <sys/param.h>
 #include <netinet/in.h>
 #include <arpa/nameser.h>
@@ -40,19 +37,18 @@ static char rcsid[] = "$OpenBSD: sethostent.c,v 1.6 2003/06/02 20:18:36 millert 
 #include "thread_private.h"
 
 void
-sethostent(stayopen)
-	int stayopen;
+sethostent(int stayopen)
 {
 	struct __res_state *_resp = _THREAD_PRIVATE(_res, _res, &_res);
 
-	if ((_resp->options & RES_INIT) == 0 && res_init() == -1)
+	if (_res_init(0) == -1)
 		return;
 	if (stayopen)
 		_resp->options |= RES_STAYOPEN | RES_USEVC;
 }
 
 void
-endhostent()
+endhostent(void)
 {
 	struct __res_state *_resp = _THREAD_PRIVATE(_res, _res, &_res);
 

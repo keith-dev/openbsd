@@ -1,4 +1,4 @@
-/*	$OpenBSD: rec_get.c,v 1.8 2003/06/02 20:18:34 millert Exp $	*/
+/*	$OpenBSD: rec_get.c,v 1.10 2005/08/05 13:03:00 espie Exp $	*/
 
 /*-
  * Copyright (c) 1990, 1993, 1994
@@ -29,14 +29,6 @@
  * SUCH DAMAGE.
  */
 
-#if defined(LIBC_SCCS) && !defined(lint)
-#if 0
-static char sccsid[] = "@(#)rec_get.c	8.9 (Berkeley) 8/18/94";
-#else
-static const char rcsid[] = "$OpenBSD: rec_get.c,v 1.8 2003/06/02 20:18:34 millert Exp $";
-#endif
-#endif /* LIBC_SCCS and not lint */
-
 #include <sys/types.h>
 
 #include <errno.h>
@@ -62,11 +54,7 @@ static const char rcsid[] = "$OpenBSD: rec_get.c,v 1.8 2003/06/02 20:18:34 mille
  *	RET_ERROR, RET_SUCCESS and RET_SPECIAL if the key not found.
  */
 int
-__rec_get(dbp, key, data, flags)
-	const DB *dbp;
-	const DBT *key;
-	DBT *data;
-	u_int flags;
+__rec_get(const DB *dbp, const DBT *key, DBT *data, u_int flags)
 {
 	BTREE *t;
 	EPG *e;
@@ -121,9 +109,7 @@ __rec_get(dbp, key, data, flags)
  *	RET_ERROR, RET_SUCCESS
  */
 int
-__rec_fpipe(t, top)
-	BTREE *t;
-	recno_t top;
+__rec_fpipe(BTREE *t, recno_t top)
 {
 	DBT data;
 	recno_t nrec;
@@ -179,9 +165,7 @@ __rec_fpipe(t, top)
  *	RET_ERROR, RET_SUCCESS
  */
 int
-__rec_vpipe(t, top)
-	BTREE *t;
-	recno_t top;
+__rec_vpipe(BTREE *t, recno_t top)
 {
 	DBT data;
 	recno_t nrec;
@@ -238,9 +222,7 @@ __rec_vpipe(t, top)
  *	RET_ERROR, RET_SUCCESS
  */
 int
-__rec_fmap(t, top)
-	BTREE *t;
-	recno_t top;
+__rec_fmap(BTREE *t, recno_t top)
 {
 	DBT data;
 	recno_t nrec;
@@ -290,9 +272,7 @@ __rec_fmap(t, top)
  *	RET_ERROR, RET_SUCCESS
  */
 int
-__rec_vmap(t, top)
-	BTREE *t;
-	recno_t top;
+__rec_vmap(BTREE *t, recno_t top)
 {
 	DBT data;
 	u_char *sp, *ep;

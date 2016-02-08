@@ -1,7 +1,25 @@
-#	$OpenBSD: Makefile,v 1.3 2005/03/09 15:42:30 xsa Exp $
+#	$OpenBSD: Makefile,v 1.13 2005/08/08 14:59:41 xsa Exp $
 
-.include <bsd.own.mk>
+PROG=	cvs
+MAN=	cvs.1 cvsignore.5 cvsrc.5 cvswrappers.5 cvsintro.7
 
-SUBDIR= cvs cvsd rcs
+SRCS=	cvs.c add.c admin.c annotate.c buf.c checkout.c cmd.c commit.c date.y \
+	diff.c edit.c entries.c file.c getlog.c history.c hist.c \
+	import.c init.c log.c logmsg.c proto.c rcs.c rcsnum.c release.c \
+	remove.c req.c resp.c root.c server.c status.c strtab.c tag.c \
+	update.c util.c version.c watch.c
 
-.include <bsd.subdir.mk>
+BINDIR= /usr/bin
+BINOWN=	root
+
+CFLAGS= -g -ggdb
+CFLAGS+= -I${.CURDIR} -Wall
+CFLAGS+= -Wstrict-prototypes -Wmissing-prototypes
+CFLAGS+= -Wmissing-declarations
+CFLAGS+= -Wshadow -Wpointer-arith -Wcast-qual
+CFLAGS+= -Wsign-compare
+YFLAGS=
+
+INSTALL_STRIP=
+
+.include <bsd.prog.mk>

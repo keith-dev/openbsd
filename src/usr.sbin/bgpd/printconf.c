@@ -1,4 +1,4 @@
-/*	$OpenBSD: printconf.c,v 1.37 2005/03/14 17:32:04 claudio Exp $	*/
+/*	$OpenBSD: printconf.c,v 1.47 2005/08/09 20:27:25 claudio Exp $	*/
 
 /*
  * Copyright (c) 2003, 2004 Henning Brauer <henning@openbsd.org>
@@ -32,6 +32,7 @@ void		 print_peer(struct peer_config *, struct bgpd_config *,
 		    const char *);
 const char	*print_auth_alg(u_int8_t);
 const char	*print_enc_alg(u_int8_t);
+const char	*print_safi(u_int8_t);
 void		 print_rule(struct peer *, struct filter_rule *);
 const char *	 mrt_type(enum mrt_type);
 void		 print_mrt(u_int32_t, u_int32_t, const char *, const char *);
@@ -77,11 +78,11 @@ print_set(struct filter_set_head *set)
 {
 	struct filter_set	*s;
 
-	if (SIMPLEQ_EMPTY(set))
+	if (TAILQ_EMPTY(set))
 		return;
 
 	printf("set { ");
-	SIMPLEQ_FOREACH(s, set, entry) {
+	TAILQ_FOREACH(s, set, entry) {
 		switch (s->type) {
 		case ACTION_SET_LOCALPREF:
 			printf("localpref %u ", s->action.metric);
@@ -94,6 +95,12 @@ print_set(struct filter_set_head *set)
 			break;
 		case ACTION_SET_RELATIVE_MED:
 			printf("metric %+d ", s->action.relative);
+			break;
+		case ACTION_SET_WEIGHT:
+			printf("weight %u ", s->action.metric);
+			break;
+		case ACTION_SET_RELATIVE_WEIGHT:
+			printf("weight %+d ", s->action.relative);
 			break;
 		case ACTION_SET_NEXTHOP:
 			printf("nexthop %s ", log_addr(&s->action.nexthop));
@@ -119,6 +126,14 @@ print_set(struct filter_set_head *set)
 			break;
 		case ACTION_PFTABLE:
 			printf("pftable %s ", s->action.pftable);
+			break;
+		case ACTION_RTLABEL:
+			printf("rtlabel %s ", s->action.rtlabel);
+			break;
+		case ACTION_RTLABEL_ID:
+		case ACTION_PFTABLE_ID:
+			/* not possible */
+			printf("king bula saiz: config broken");
 			break;
 		}
 	}
@@ -150,6 +165,9 @@ print_mainconf(struct bgpd_config *conf)
 	if (conf->flags & BGPD_FLAG_DECISION_ROUTEAGE)
 		printf("rde route-age evaluate\n");
 
+	if (conf->flags & BGPD_FLAG_DECISION_MED_ALWAYS)
+		printf("rde med compare always\n");
+
 	if (conf->flags & BGPD_FLAG_DECISION_TRANS_AS)
 		printf("transparent-as yes\n");
 
@@ -159,13 +177,42 @@ print_mainconf(struct bgpd_config *conf)
 	TAILQ_FOREACH(la, conf->listen_addrs, entry)
 		printf("listen on %s\n",
 		    log_sockaddr((struct sockaddr *)&la->sa));
+
+	if (conf->flags & BGPD_FLAG_REDIST_CONNECTED) {
+		printf("network inet connected");
+		if (!TAILQ_EMPTY(&conf->connectset))
+			printf(" ");
+		print_set(&conf->connectset);
+		printf("\n");
+	}
+	if (conf->flags & BGPD_FLAG_REDIST_STATIC) {
+		printf("network inet static");
+		if (!TAILQ_EMPTY(&conf->staticset))
+			printf(" ");
+		print_set(&conf->staticset);
+		printf("\n");
+	}
+	if (conf->flags & BGPD_FLAG_REDIST6_CONNECTED) {
+		printf("network inet6 connected");
+		if (!TAILQ_EMPTY(&conf->connectset6))
+			printf(" ");
+		print_set(&conf->connectset6);
+		printf("\n");
+	}
+	if (conf->flags & BGPD_FLAG_REDIST_STATIC) {
+		printf("network inet6 static");
+		if (!TAILQ_EMPTY(&conf->staticset6))
+			printf(" ");
+		print_set(&conf->staticset6);
+		printf("\n");
+	}
 }
 
 void
 print_network(struct network_config *n)
 {
 	printf("network %s/%u", log_addr(&n->prefix), n->prefixlen);
-	if (!SIMPLEQ_EMPTY(&n->attrset))
+	if (!TAILQ_EMPTY(&n->attrset))
 		printf(" ");
 	print_set(&n->attrset);
 	printf("\n");
@@ -253,10 +300,13 @@ print_peer(struct peer_config *p, struct bgpd_config *conf, const char *c)
 	else if (p->auth.method == AUTH_IPSEC_IKE_ESP)
 		printf("%s\tipsec esp ike\n", c);
 
-	if (!SIMPLEQ_EMPTY(&p->attrset))
+	printf("%s\tannounce IPv4 %s\n", c, print_safi(p->capabilities.mp_v4));
+	printf("%s\tannounce IPv6 %s\n", c, print_safi(p->capabilities.mp_v6));
+
+	if (!TAILQ_EMPTY(&p->attrset))
 		printf("%s\t", c);
 	print_set(&p->attrset);
-	if (!SIMPLEQ_EMPTY(&p->attrset))
+	if (!TAILQ_EMPTY(&p->attrset))
 		printf("\n");
 
 	print_mrt(p->id, p->groupid, c, "\t");
@@ -287,6 +337,19 @@ print_enc_alg(u_int8_t alg)
 		return ("aes");
 	default:
 		return ("???");
+	}
+}
+
+const char *
+print_safi(u_int8_t safi)
+{
+	switch (safi) {
+	case SAFI_NONE:
+		return ("none");
+	case SAFI_UNICAST:
+		return ("unicast");
+	default:
+		return ("?");
 	}
 }
 
@@ -488,12 +551,13 @@ print_config(struct bgpd_config *conf, struct network_head *net_l,
 	struct network		*n;
 
 	xmrt_l = mrt_l;
-	print_mainconf(conf);
 	printf("\n");
-	print_mrt(0, 0, "", "");
+	print_mainconf(conf);
 	printf("\n");
 	TAILQ_FOREACH(n, net_l, entry)
 		print_network(&n->net);
+	printf("\n");
+	print_mrt(0, 0, "", "");
 	printf("\n");
 	print_groups(conf, peer_l);
 	printf("\n");

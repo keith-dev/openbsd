@@ -1,3 +1,4 @@
+/*	$OpenBSD: ttyname.c,v 1.12 2005/08/08 08:05:34 espie Exp $ */
 /*
  * Copyright (c) 1988, 1993
  *	The Regents of the University of California.  All rights reserved.
@@ -26,10 +27,6 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  */
-
-#if defined(LIBC_SCCS) && !defined(lint)
-static char rcsid[] = "$OpenBSD: ttyname.c,v 1.10 2004/05/18 02:05:52 jfb Exp $";
-#endif /* LIBC_SCCS and not lint */
 
 #include <sys/types.h>
 #include <sys/stat.h>
@@ -128,8 +125,8 @@ __ttyname_r_basic(int fd, char *buf, size_t len)
 static int
 oldttyname(int fd, struct stat *sb, char *buf, size_t len)
 {
-	register struct dirent *dirp;
-	register DIR *dp;
+	struct dirent *dirp;
+	DIR *dp;
 	struct stat dsb;
 
 	if ((dp = opendir(_PATH_DEV)) == NULL)

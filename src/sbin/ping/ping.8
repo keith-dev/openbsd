@@ -1,4 +1,4 @@
-.\"	$OpenBSD: ping.8,v 1.29 2003/11/25 12:17:44 jmc Exp $
+.\"	$OpenBSD: ping.8,v 1.31 2005/09/01 17:59:13 otto Exp $
 .\"	$NetBSD: ping.8,v 1.10 1995/12/31 04:55:35 ghudson Exp $
 .\"
 .\" Copyright (c) 1985, 1991, 1993
@@ -77,10 +77,10 @@ packet.
 The options are as follows:
 .Bl -tag -width Ds
 .It Fl c Ar count
-Stop after sending
+Stop sending after
 .Ar count
 .Tn ECHO_REQUEST
-packets.
+packets have been sent.
 .It Fl D
 Set the
 .Dv Don't Fragment
@@ -106,7 +106,8 @@ Only the superuser may use this option.
 This can be very hard on a network and should be used with caution.
 .Ef
 .It Fl I Ar ifaddr
-Specify the interface to transmit from on machines with multiple interfaces.
+Specify the interface address to transmit from
+on machines with multiple interfaces.
 For unicast and multicast pings.
 .It Fl i Ar wait
 Wait
@@ -191,8 +192,8 @@ packets other than
 .Tn ECHO_REPLY
 that are received are listed.
 .It Fl w Ar maxwait
-Specifies the maximum number of seconds to wait for a response to
-a packet before transmitting the next one.
+Specifies the maximum number of seconds to wait for responses
+after the last request has been sent.
 The default is 10.
 .El
 .Pp

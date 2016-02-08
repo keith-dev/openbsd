@@ -1,4 +1,4 @@
-/*	$OpenBSD: ami_pci.c,v 1.22 2004/12/26 00:35:42 marco Exp $	*/
+/*	$OpenBSD: ami_pci.c,v 1.30 2005/08/24 19:21:40 marco Exp $	*/
 
 /*
  * Copyright (c) 2001 Michael Shalayeff
@@ -85,14 +85,17 @@ struct	ami_pci_device {
 	{ PCI_VENDOR_DELL,	PCI_PRODUCT_DELL_PERC_4EDI,	0 },	
 	{ PCI_VENDOR_INTEL,	PCI_PRODUCT_INTEL_80960RP_ATU,
 	    AMI_CHECK_SIGN | AMI_BROKEN },
-	{ PCI_VENDOR_SYMBIOS,	PCI_PRODUCT_SYMBIOS_MEGARAID,	0 },
+	{ PCI_VENDOR_SYMBIOS,	PCI_PRODUCT_SYMBIOS_MEGARAID,		0 },
+	{ PCI_VENDOR_SYMBIOS,	PCI_PRODUCT_SYMBIOS_MEGARAID_320,	0 },
+	{ PCI_VENDOR_SYMBIOS,	PCI_PRODUCT_SYMBIOS_MEGARAID_3202E,	0 },
+	{ PCI_VENDOR_SYMBIOS,	PCI_PRODUCT_SYMBIOS_SATA8,		0 },
 	{ 0 }
 };
 
 static const
 struct	ami_pci_subsys {
 	pcireg_t id;
-	char	name[12];
+	char	name[14];
 } ami_pci_subsys[] = {
 	/* only those of a special name are listed here */
 	{ 0x09A0101E,	"Dell 466v1" },
@@ -104,6 +107,7 @@ struct	ami_pci_subsys {
 	{ 0x10cc103c,	"HP T7" },
 	{ 0x10cd103c,	"HP 466" },
 	{ 0x45231000,	"LSI 523" },
+	{ 0x05328086,	"Intel SRCU42X" },
 	{ 0 }
 };
 
@@ -116,6 +120,7 @@ struct ami_pci_vendor {
 	{ 0x1028, "Dell" },
 	{ 0x103c, "HP" },
 	{ 0x1000, "LSI" },
+	{ 0x8086, "Intel" },
 	{ 0 }
 };
 
@@ -202,17 +207,15 @@ ami_pci_attach(parent, self, aux)
 		sc->sc_init = ami_schwartz_init;
 		sc->sc_exec = ami_schwartz_exec;
 		sc->sc_done = ami_schwartz_done;
+		sc->sc_poll = ami_schwartz_poll;
 	} else {
 		sc->sc_init = ami_quartz_init;
 		sc->sc_exec = ami_quartz_exec;
 		sc->sc_done = ami_quartz_done;
+		sc->sc_poll = ami_quartz_poll;
+		sc->sc_flags |= AMI_QUARTZ;
 	}
 	sc->dmat = pa->pa_dmat;
-
-	/* enable bus mastering (should not it be mi?) */
-	csr = pci_conf_read(pa->pa_pc, pa->pa_tag, PCI_COMMAND_STATUS_REG);
-	pci_conf_write(pa->pa_pc, pa->pa_tag, PCI_COMMAND_STATUS_REG,
-	    csr | PCI_COMMAND_MASTER_ENABLE);
 
 	if (pci_intr_map(pa, &ih)) {
 		printf(": can't map interrupt\n");
@@ -275,13 +278,11 @@ ami_pci_attach(parent, self, aux)
 
 	if ((i = ami_pci_find_device(aux)) != -1) {
 		if (ami_pci_devices[i].flags & AMI_BROKEN)
-			sc->sc_quirks = AMI_BROKEN;
-		else
-			sc->sc_quirks = 0x0000;
+			sc->sc_flags |= AMI_BROKEN;
 	}
 	else {
 		/* this device existed at _match() should never happen */
-		panic("ami device dissapeared between match() and attach()\n");
+		panic("ami device dissapeared between match() and attach()");
 	}
 
 	printf(" %s/%s\n%s", model, lhc, sc->sc_dev.dv_xname);

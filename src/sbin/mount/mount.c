@@ -1,4 +1,4 @@
-/*	$OpenBSD: mount.c,v 1.37 2004/11/13 21:45:50 miod Exp $	*/
+/*	$OpenBSD: mount.c,v 1.40 2005/05/26 20:16:21 fgsch Exp $	*/
 /*	$NetBSD: mount.c,v 1.24 1995/11/18 03:34:29 cgd Exp $	*/
 
 /*
@@ -40,7 +40,7 @@ static char copyright[] =
 #if 0
 static char sccsid[] = "@(#)mount.c	8.19 (Berkeley) 4/19/94";
 #else
-static char rcsid[] = "$OpenBSD: mount.c,v 1.37 2004/11/13 21:45:50 miod Exp $";
+static char rcsid[] = "$OpenBSD: mount.c,v 1.40 2005/05/26 20:16:21 fgsch Exp $";
 #endif
 #endif /* not lint */
 
@@ -109,7 +109,6 @@ static struct opt {
 	{ MNT_ROOTFS,		1,	"root file system",	"" },
 	{ MNT_SYNCHRONOUS,	0,	"synchronous",		"sync" },
 	{ MNT_SOFTDEP,		0,	"softdep", 		"softdep" },
-	{ MNT_UNION,		0,	"union",		"" },
 	{ NULL,			0,	"",			"" }
 };
 
@@ -216,7 +215,7 @@ main(int argc, char * const argv[])
 			usage();
 
 		if (realpath(*argv, mntpath) == NULL)
-			err(1, "realpath %s", mntpath);
+			err(1, "realpath %s", *argv);
 		if (hasopt(options, "update")) {
 			if ((mntbuf = getmntpt(mntpath)) == NULL)
 				errx(1,
@@ -348,7 +347,7 @@ mountfs(const char *vfstype, const char *spec, const char *name,
 	char *optbuf, execname[MAXPATHLEN], mntpath[MAXPATHLEN];
 
 	if (realpath(name, mntpath) == NULL) {
-		warn("realpath %s", mntpath);
+		warn("realpath %s", name);
 		return (1);
 	}
 
@@ -375,7 +374,7 @@ mountfs(const char *vfstype, const char *spec, const char *name,
 	} else if (skipmounted) {
 		if (statfs(name, &sf) < 0)
 			err(1, "statfs %s", name);
-		/* XXX can't check f_mntfromname, thanks to mfs, union, etc. */
+		/* XXX can't check f_mntfromname, thanks to mfs, etc. */
 		if (strncmp(name, sf.f_mntonname, MNAMELEN) == 0 &&
 		    strncmp(vfstype, sf.f_fstypename, MFSNAMELEN) == 0) {
 			if (verbose)

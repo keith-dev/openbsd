@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_bridge.c,v 1.141 2004/12/23 09:32:55 camield Exp $	*/
+/*	$OpenBSD: if_bridge.c,v 1.145 2005/07/31 03:30:55 pascoe Exp $	*/
 
 /*
  * Copyright (c) 1999, 2000 Jason L. Wright (jason@thought.net)
@@ -34,7 +34,6 @@
 #include "bpfilter.h"
 #include "gif.h"
 #include "pf.h"
-#include "vlan.h"
 #include "carp.h"
 
 #include <sys/param.h>
@@ -87,9 +86,7 @@
 #include <net/bpf.h>
 #endif
 
-#if NVLAN > 0
 #include <net/if_vlan_var.h>
-#endif
 
 #if NCARP > 0
 #include <netinet/ip_carp.h>
@@ -960,9 +957,9 @@ bridge_output(struct ifnet *ifp, struct mbuf *m, struct sockaddr *sa,
 #endif /* IPSEC */
 
 		/* Catch packets that need TCP/UDP/IP hardware checksumming */
-		if (m->m_pkthdr.csum & M_IPV4_CSUM_OUT ||
-		    m->m_pkthdr.csum & M_TCPV4_CSUM_OUT ||
-		    m->m_pkthdr.csum & M_UDPV4_CSUM_OUT) {
+		if (m->m_pkthdr.csum_flags & M_IPV4_CSUM_OUT ||
+		    m->m_pkthdr.csum_flags & M_TCPV4_CSUM_OUT ||
+		    m->m_pkthdr.csum_flags & M_UDPV4_CSUM_OUT) {
 			m_freem(m);
 			splx(s);
 			return (0);
@@ -2472,8 +2469,7 @@ bridge_fragment(struct bridge_softc *sc, struct ifnet *ifp,
 	goto dropit;
 #else
 	etype = ntohs(eh->ether_type);
-#if NVLAN > 0
-	if (etype == ETHERTYPE_8021Q &&
+	if (etype == ETHERTYPE_VLAN &&
 	    (ifp->if_capabilities & IFCAP_VLAN_MTU) &&
 	    ((m->m_pkthdr.len - sizeof(struct ether_vlan_header)) <=
 	    ifp->if_mtu)) {
@@ -2482,7 +2478,6 @@ bridge_fragment(struct bridge_softc *sc, struct ifnet *ifp,
 		splx(s);
 		return;
 	}
-#endif
 	if (etype != ETHERTYPE_IP) {
 		if (etype > ETHERMTU ||
 		    m->m_pkthdr.len < (LLC_SNAPFRAMELEN +
@@ -2609,7 +2604,7 @@ bridge_send_icmp_err(struct bridge_softc *sc, struct ifnet *ifp,
 		m_freem(n);
 		return;
 	}
-	m = icmp_do_error(n, type, code, 0, ifp);
+	m = icmp_do_error(n, type, code, 0, ifp->if_mtu);
 	if (m == NULL) {
 		m_freem(n2);
 		return;

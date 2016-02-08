@@ -1,4 +1,4 @@
-/* $OpenBSD: policy.c,v 1.80 2005/03/03 15:06:55 hshoexer Exp $	 */
+/* $OpenBSD: policy.c,v 1.86 2005/06/14 10:50:47 hshoexer Exp $	 */
 /* $EOM: policy.c,v 1.49 2000/10/24 13:33:39 niklas Exp $ */
 
 /*
@@ -50,8 +50,6 @@
 #include <errno.h>
 #include <openssl/ssl.h>
 #include <netdb.h>
-
-#include "sysdep.h"
 
 #include "conf.h"
 #include "exchange.h"
@@ -178,8 +176,8 @@ policy_callback(char *name)
 	static int      dirty = 1;
 
 	/* We only need to set dirty at initialization time really.  */
-	if (strcmp(name, KEYNOTE_CALLBACK_CLEANUP) == 0
-	    || strcmp(name, KEYNOTE_CALLBACK_INITIALIZE) == 0) {
+	if (strcmp(name, KEYNOTE_CALLBACK_CLEANUP) == 0 ||
+	    strcmp(name, KEYNOTE_CALLBACK_INITIALIZE) == 0) {
 		esp_present = ah_present = comp_present = pfs = "no";
 		ah_hash_alg = ah_auth_alg = phase_1 = "";
 		esp_auth_alg = esp_enc_alg = comp_alg = ah_encapsulation = "";
@@ -428,7 +426,7 @@ policy_callback(char *name)
 							if (len == 2)
 								snprintf(esp_life_kbytes,
 								    sizeof esp_life_kbytes, "%u",
-								     decode_16(value));
+								    decode_16(value));
 							else
 								snprintf(esp_life_kbytes,
 								    sizeof esp_life_kbytes, "%u",
@@ -514,8 +512,10 @@ policy_callback(char *name)
 							comp_encapsulation = "tunnel";
 							break;
 						}
-#if defined (USE_NAT_TRAVERSAL)
-					else if (decode_16(value) == IPSEC_ENCAP_UDP_ENCAP_TUNNEL)
+					else if (decode_16(value) ==
+					    IPSEC_ENCAP_UDP_ENCAP_TUNNEL ||
+					    decode_16(value) ==
+					    IPSEC_ENCAP_UDP_ENCAP_TUNNEL_DRAFT)
 						switch (proto->proto) {
 						case IPSEC_PROTO_IPSEC_AH:
 							ah_encapsulation = "udp-encap-tunnel";
@@ -530,7 +530,6 @@ policy_callback(char *name)
 							break;
 						}
 					/* XXX IPSEC_ENCAP_UDP_ENCAP_TRANSPORT */
-#endif
 					else
 						switch (proto->proto) {
 						case IPSEC_PROTO_IPSEC_AH:
@@ -713,9 +712,9 @@ policy_callback(char *name)
 			net = decode_32(id + ISAKMP_ID_DATA_OFF -
 			    ISAKMP_GEN_SZ);
 			my_inet_ntop4(&net, remote_id_addr_upper,
-				      sizeof remote_id_addr_upper - 1, 1);
+			    sizeof remote_id_addr_upper - 1, 1);
 			my_inet_ntop4(&net, remote_id_addr_lower,
-				      sizeof remote_id_addr_lower - 1, 1);
+			    sizeof remote_id_addr_lower - 1, 1);
 			remote_id = strdup(remote_id_addr_upper);
 			if (!remote_id) {
 				log_error("policy_callback: "
@@ -922,8 +921,8 @@ policy_callback(char *name)
 			}
 			/* Does it contain any non-printable characters ? */
 			for (i = 0;
-			     i < id_sz - ISAKMP_ID_DATA_OFF + ISAKMP_GEN_SZ;
-			     i++)
+			    i < id_sz - ISAKMP_ID_DATA_OFF + ISAKMP_GEN_SZ;
+			    i++)
 				if (!isprint(*(id + ISAKMP_ID_DATA_OFF -
 				    ISAKMP_GEN_SZ + i)))
 					break;
@@ -937,7 +936,7 @@ policy_callback(char *name)
 			/* Non-printable characters, convert to hex */
 			for (i = 0;
 			    i < id_sz - ISAKMP_ID_DATA_OFF + ISAKMP_GEN_SZ;
-			     i++) {
+			    i++) {
 				remote_id[2 * i] = hextab[*(id +
 				    ISAKMP_ID_DATA_OFF - ISAKMP_GEN_SZ) >> 4];
 				remote_id[2 * i + 1] = hextab[*(id +
@@ -960,11 +959,9 @@ policy_callback(char *name)
 			remote_id_proto = "udp";
 			break;
 
-#ifdef IPPROTO_ETHERIP
 		case IPPROTO_ETHERIP:
 			remote_id_proto = "etherip";
 			break;
-#endif
 
 		default:
 			snprintf(remote_id_proto_num,
@@ -1231,7 +1228,7 @@ policy_callback(char *name)
 				 * characters ?
 				 */
 				for (i = 0;
-				     i < idremotesz - ISAKMP_ID_DATA_OFF; i++)
+				    i < idremotesz - ISAKMP_ID_DATA_OFF; i++)
 					if (!isprint(*(idremote +
 					    ISAKMP_ID_DATA_OFF + i)))
 						break;
@@ -1243,8 +1240,8 @@ policy_callback(char *name)
 				}
 				/* Non-printable characters, convert to hex */
 				for (i = 0;
-				     i < idremotesz - ISAKMP_ID_DATA_OFF;
-				     i++) {
+				    i < idremotesz - ISAKMP_ID_DATA_OFF;
+				    i++) {
 					remote_filter[2 * i]
 					    = hextab[*(idremote +
 						ISAKMP_ID_DATA_OFF) >> 4];
@@ -1270,11 +1267,9 @@ policy_callback(char *name)
 				remote_filter_proto = "udp";
 				break;
 
-#ifdef IPPROTO_ETHERIP
 			case IPPROTO_ETHERIP:
 				remote_filter_proto = "etherip";
 				break;
-#endif
 
 			default:
 				snprintf(remote_filter_proto_num,
@@ -1307,9 +1302,9 @@ policy_callback(char *name)
 				goto bad;
 			}
 			memcpy(remote_filter_addr_upper, addr,
-			       sizeof remote_filter_addr_upper);
+			    sizeof remote_filter_addr_upper);
 			memcpy(remote_filter_addr_lower, addr,
-			       sizeof remote_filter_addr_lower);
+			    sizeof remote_filter_addr_lower);
 			free(addr);
 			remote_filter = strdup(remote_filter_addr_upper);
 			if (!remote_filter) {
@@ -1327,9 +1322,9 @@ policy_callback(char *name)
 
 				net = decode_32(idlocal + ISAKMP_ID_DATA_OFF);
 				my_inet_ntop4(&net, local_filter_addr_upper,
-				     sizeof local_filter_addr_upper - 1, 1);
+				    sizeof local_filter_addr_upper - 1, 1);
 				my_inet_ntop4(&net, local_filter_addr_lower,
-				     sizeof local_filter_addr_upper - 1, 1);
+				    sizeof local_filter_addr_upper - 1, 1);
 				local_filter = strdup(local_filter_addr_upper);
 				if (!local_filter) {
 					log_error("policy_callback: "
@@ -1344,11 +1339,11 @@ policy_callback(char *name)
 
 				net = decode_32(idlocal + ISAKMP_ID_DATA_OFF);
 				my_inet_ntop4(&net, local_filter_addr_lower,
-				     sizeof local_filter_addr_lower - 1, 1);
+				    sizeof local_filter_addr_lower - 1, 1);
 				net = decode_32(idlocal + ISAKMP_ID_DATA_OFF +
 				    4);
 				my_inet_ntop4(&net, local_filter_addr_upper,
-				     sizeof local_filter_addr_upper - 1, 1);
+				    sizeof local_filter_addr_upper - 1, 1);
 				len = strlen(local_filter_addr_upper)
 					+ strlen(local_filter_addr_lower) + 2;
 				local_filter = calloc(len, sizeof(char));
@@ -1373,12 +1368,12 @@ policy_callback(char *name)
 				    ISAKMP_ID_DATA_OFF + 4);
 				net &= subnet;
 				my_inet_ntop4(&net, local_filter_addr_lower,
-				     sizeof local_filter_addr_lower - 1, 1);
+				    sizeof local_filter_addr_lower - 1, 1);
 				net |= ~subnet;
 				my_inet_ntop4(&net, local_filter_addr_upper,
-				     sizeof local_filter_addr_upper - 1, 1);
-				len = strlen(local_filter_addr_upper)
-					+ strlen(local_filter_addr_lower) + 2;
+				    sizeof local_filter_addr_upper - 1, 1);
+				len = strlen(local_filter_addr_upper) +
+				    strlen(local_filter_addr_lower) + 2;
 				local_filter = calloc(len, sizeof(char));
 				if (!local_filter) {
 					log_error("policy_callback: "
@@ -1396,8 +1391,8 @@ policy_callback(char *name)
 			case IPSEC_ID_IPV6_ADDR:
 				local_filter_type = "IPv6 address";
 				my_inet_ntop6(idlocal + ISAKMP_ID_DATA_OFF,
-					      local_filter_addr_upper,
-					sizeof local_filter_addr_upper - 1);
+				    local_filter_addr_upper,
+				    sizeof local_filter_addr_upper - 1);
 				strlcpy(local_filter_addr_lower,
 				    local_filter_addr_upper,
 				    sizeof local_filter_addr_lower);
@@ -1414,8 +1409,8 @@ policy_callback(char *name)
 				local_filter_type = "IPv6 range";
 
 				my_inet_ntop6(idlocal + ISAKMP_ID_DATA_OFF,
-					      local_filter_addr_lower,
-					sizeof local_filter_addr_lower - 1);
+				    local_filter_addr_lower,
+				    sizeof local_filter_addr_lower - 1);
 
 				my_inet_ntop6(idlocal + ISAKMP_ID_DATA_OFF +
 				    16, local_filter_addr_upper,
@@ -1499,8 +1494,7 @@ policy_callback(char *name)
 				memcpy(local_filter,
 				    idlocal + ISAKMP_ID_DATA_OFF,
 				    idlocalsz - ISAKMP_ID_DATA_OFF);
-				local_filter[idlocalsz - ISAKMP_ID_DATA_OFF]
-				    = '\0';
+				local_filter[idlocalsz - ISAKMP_ID_DATA_OFF] = '\0';
 				break;
 
 			case IPSEC_ID_USER_FQDN:
@@ -1517,8 +1511,7 @@ policy_callback(char *name)
 				memcpy(local_filter,
 				    idlocal + ISAKMP_ID_DATA_OFF,
 				    idlocalsz - ISAKMP_ID_DATA_OFF);
-				local_filter[idlocalsz - ISAKMP_ID_DATA_OFF]
-				    = '\0';
+				local_filter[idlocalsz - ISAKMP_ID_DATA_OFF] = '\0';
 				break;
 
 			case IPSEC_ID_DER_ASN1_DN:
@@ -1549,7 +1542,7 @@ policy_callback(char *name)
 					log_error("policy_callback: "
 					    "calloc (%lu, %lu) failed",
 					    2 * ((unsigned long)idlocalsz -
-						ISAKMP_ID_DATA_OFF) + 1,
+					    ISAKMP_ID_DATA_OFF) + 1,
 					    (unsigned long)sizeof(char));
 					goto bad;
 				}
@@ -1558,7 +1551,7 @@ policy_callback(char *name)
 				 * characters ?
 				 */
 				for (i = 0;
-				     i < idlocalsz - ISAKMP_ID_DATA_OFF; i++)
+				    i < idlocalsz - ISAKMP_ID_DATA_OFF; i++)
 					if (!isprint(*(idlocal +
 					    ISAKMP_ID_DATA_OFF + i)))
 						break;
@@ -1570,13 +1563,13 @@ policy_callback(char *name)
 				}
 				/* Non-printable characters, convert to hex */
 				for (i = 0;
-				     i < idlocalsz - ISAKMP_ID_DATA_OFF; i++) {
-					local_filter[2 * i]
-					    = hextab[*(idlocal +
-						ISAKMP_ID_DATA_OFF) >> 4];
-					local_filter[2 * i + 1]
-					    = hextab[*(idlocal +
-						ISAKMP_ID_DATA_OFF) & 0xF];
+				    i < idlocalsz - ISAKMP_ID_DATA_OFF; i++) {
+					local_filter[2 * i] =
+					    hextab[*(idlocal +
+					    ISAKMP_ID_DATA_OFF) >> 4];
+					local_filter[2 * i + 1] =
+					    hextab[*(idlocal +
+					    ISAKMP_ID_DATA_OFF) & 0xF];
 				}
 				break;
 
@@ -1596,11 +1589,9 @@ policy_callback(char *name)
 				local_filter_proto = "udp";
 				break;
 
-#ifdef IPPROTO_ETHERIP
 			case IPPROTO_ETHERIP:
 				local_filter_proto = "etherip";
 				break;
-#endif
 
 			default:
 				snprintf(local_filter_proto_num,

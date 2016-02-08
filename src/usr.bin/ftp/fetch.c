@@ -1,4 +1,4 @@
-/*	$OpenBSD: fetch.c,v 1.51 2004/09/16 04:39:16 deraadt Exp $	*/
+/*	$OpenBSD: fetch.c,v 1.56 2005/08/05 21:01:53 fgsch Exp $	*/
 /*	$NetBSD: fetch.c,v 1.14 1997/08/18 10:20:20 lukem Exp $	*/
 
 /*-
@@ -38,7 +38,7 @@
  */
 
 #if !defined(lint) && !defined(SMALL)
-static char rcsid[] = "$OpenBSD: fetch.c,v 1.51 2004/09/16 04:39:16 deraadt Exp $";
+static char rcsid[] = "$OpenBSD: fetch.c,v 1.56 2005/08/05 21:01:53 fgsch Exp $";
 #endif /* not lint and not SMALL */
 
 /*
@@ -86,9 +86,11 @@ char		*urldecode(const char *);
 #define EMPTYSTRING(x)	((x) == NULL || (*(x) == '\0'))
 
 static const char *at_encoding_warning =
-   "Extra `@' characters in usernames and passwords should be encoded as %%40";
+    "Extra `@' characters in usernames and passwords should be encoded as %%40";
 
 jmp_buf	httpabort;
+
+static int	redirect_loop;
 
 /*
  * Retrieve URL, via the proxy in $proxyvar if necessary.
@@ -98,31 +100,17 @@ jmp_buf	httpabort;
 static int
 url_get(const char *origline, const char *proxyenv, const char *outfile)
 {
+	char pbuf[NI_MAXSERV], hbuf[NI_MAXHOST], *cp, *ep, *portnum, *path;
+	char *hosttail, *cause = "unknown", *line, *host, *port, *buf = NULL;
+	int error, i, isftpurl = 0, isfileurl = 0, isredirect = 0, rval = -1;
 	struct addrinfo hints, *res0, *res;
-	int error;
-	int i, isftpurl, isfileurl, isredirect;
-	volatile int s, out;
-	size_t len;
-	char *cp, *ep, *portnum, *path;
-	char pbuf[NI_MAXSERV], hbuf[NI_MAXHOST];
 	const char * volatile savefile;
-	char *line, *host, *port, *buf;
-	char * volatile proxy;
-	char *hosttail;
+	char * volatile proxy = NULL;
+	volatile int s = -1, out;
 	volatile sig_t oldintr;
+	FILE *fin = NULL;
 	off_t hashbytes;
-	char *cause = "unknown";
-	FILE *fin;
-	int rval;
-
-	s = -1;
-	proxy = NULL;
-	fin = NULL;
-	buf = NULL;
-	isftpurl = 0;
-	isfileurl = 0;
-	isredirect = 0;
-	rval = -1;
+	size_t len;
 
 	line = strdup(origline);
 	if (line == NULL)
@@ -208,7 +196,8 @@ url_get(const char *origline, const char *proxyenv, const char *outfile)
 
 		/* Open the output file.  */
 		if (strcmp(savefile, "-") != 0) {
-			out = open(savefile, O_CREAT | O_WRONLY | O_TRUNC, 0666);
+			out = open(savefile, O_CREAT | O_WRONLY | O_TRUNC,
+			    0666);
 			if (out < 0) {
 				warn("Can't open %s", savefile);
 				goto cleanup_url_get;
@@ -345,54 +334,49 @@ again:
 
 	fin = fdopen(s, "r+");
 
+	if (verbose)
+		fprintf(ttyout, "Requesting %s", origline);
 	/*
 	 * Construct and send the request. Proxy requests don't want leading /.
 	 */
 	if (proxy) {
+		if (verbose)
+			fprintf(ttyout, " (via %s)\n", proxyenv);
 		/*
 		 * Host: directive must use the destination host address for
 		 * the original URI (path).  We do not attach it at this moment.
 		 */
-		if (verbose)
-			fprintf(ttyout, "Requesting %s (via %s)\n",
-			    origline, proxyenv);
-		fprintf(fin, "GET %s HTTP/1.0\r\n%s\r\n\r\n", path, HTTP_USER_AGENT);
+		fprintf(fin, "GET %s HTTP/1.0\r\n%s\r\n\r\n", path,
+		    HTTP_USER_AGENT);
 	} else {
-		if (verbose)
-			fprintf(ttyout, "Requesting %s\n", origline);
+		fprintf(fin, "GET /%s HTTP/1.0\r\nHost: ", path);
 		if (strchr(host, ':')) {
 			char *h, *p;
 
-			/* strip off scoped address portion, since it's local to node */
+			/*
+			 * strip off scoped address portion, since it's
+			 * local to node
+			 */
 			h = strdup(host);
 			if (h == NULL)
 				errx(1, "Can't allocate memory.");
 			if ((p = strchr(h, '%')) != NULL)
 				*p = '\0';
-			/*
-			 * Send port number only if it's specified and does not equal
-			 * 80. Some broken HTTP servers get confused if you explicitly
-			 * send them the port number.
-			 */
-			if (port && strcmp(port, "80") != 0)
-				fprintf(fin,
-				    "GET /%s HTTP/1.0\r\nHost: [%s]:%s\r\n%s\r\n\r\n",
-				    path, h, port, HTTP_USER_AGENT);
-			else
-				fprintf(fin,
-				    "GET /%s HTTP/1.0\r\nHost: [%s]\r\n%s\r\n\r\n",
-				    path, h, HTTP_USER_AGENT);
+			fprintf(fin, "[%s]", h);
 			free(h);
-		} else {
-			if (port && strcmp(port, "80") != 0)
-				fprintf(fin,
-				    "GET /%s HTTP/1.0\r\nHost: %s:%s\r\n%s\r\n\r\n",
-				    path, host, port, HTTP_USER_AGENT);
-			else
-				fprintf(fin,
-				    "GET /%s HTTP/1.0\r\nHost: %s\r\n%s\r\n\r\n",
-				    path, host, HTTP_USER_AGENT);
-		}
+		} else
+			fprintf(fin, "%s", host);
+
+		/*
+		 * Send port number only if it's specified and does not equal
+		 * 80. Some broken HTTP servers get confused if you explicitly
+		 * send them the port number.
+		 */
+		if (port && strcmp(port, "80") != 0)
+			fprintf(fin, ":%s", port);
+		fprintf(fin, "\r\n%s\r\n\r\n", HTTP_USER_AGENT);
+		if (verbose)
+			fprintf(ttyout, "\n");
 	}
 	if (fflush(fin) == EOF) {
 		warn("Writing HTTP request");
@@ -416,6 +400,10 @@ again:
 		cp++;
 	if (strncmp(cp, "301", 3) == 0 || strncmp(cp, "302", 3) == 0) {
 		isredirect++;
+		if (redirect_loop++ > 10) {
+			warnx("Too many redirections requested");
+			goto cleanup_url_get;
+		}
 	} else if (strncmp(cp, "200", 3)) {
 		warnx("Error retrieving file: %s", cp);
 		goto cleanup_url_get;
@@ -606,7 +594,7 @@ auto_fetch(int argc, char *argv[], char *outfile)
 {
 	char *xargv[5];
 	char *cp, *line, *host, *dir, *file, *portnum;
-	char *user, *pass;
+	char *user, *pass, *pathstart;
 	char *ftpproxy, *httpproxy;
 	int rval, xargc;
 	volatile int argpos;
@@ -648,6 +636,7 @@ auto_fetch(int argc, char *argv[], char *outfile)
 		 */
 		if (strncasecmp(line, HTTP_URL, sizeof(HTTP_URL) - 1) == 0 ||
 		    strncasecmp(line, FILE_URL, sizeof(FILE_URL) - 1) == 0) {
+			redirect_loop = 0;
 			if (url_get(line, httpproxy, outfile) == -1)
 				rval = argpos + 1;
 			continue;
@@ -719,6 +708,12 @@ bad_ftp_url:
 			/* split off host[:port] if there is */
 			if (cp) {
 				portnum = strchr(cp, ':');
+				pathstart = strchr(cp, '/');
+				/* : in path is not a port # indicator */
+				if (portnum && pathstart &&
+				    pathstart < portnum)
+					portnum = NULL;
+
 				if (!portnum)
 					;
 				else {
@@ -867,54 +862,53 @@ bad_ftp_url:
 char *
 urldecode(const char *str)
 {
-        char *ret;
-        char c;
-        int i, reallen;
+	char *ret, c;
+	int i, reallen;
 
-        if (str == NULL)
-                return NULL;
-        if ((ret = malloc(strlen(str)+1)) == NULL)
-                err(1, "Can't allocate memory for URL decoding");
-        for (i = 0, reallen = 0; str[i] != '\0'; i++, reallen++, ret++) {
-                c = str[i];
-                if (c == '+') {
-                        *ret = ' ';
-                        continue;
-                }
-                /* Can't use strtol here because next char after %xx may be
-                 * a digit. */
-                if (c == '%' && isxdigit(str[i+1]) && isxdigit(str[i+2])) {
-                        *ret = hextochar(&str[i+1]);
-                        i+=2;
-                        continue;
-                }
-                *ret = c;
-        }
-        *ret = '\0';
+	if (str == NULL)
+		return NULL;
+	if ((ret = malloc(strlen(str)+1)) == NULL)
+		err(1, "Can't allocate memory for URL decoding");
+	for (i = 0, reallen = 0; str[i] != '\0'; i++, reallen++, ret++) {
+		c = str[i];
+		if (c == '+') {
+			*ret = ' ';
+			continue;
+		}
+		/* Can't use strtol here because next char after %xx may be
+		 * a digit. */
+		if (c == '%' && isxdigit(str[i+1]) && isxdigit(str[i+2])) {
+			*ret = hextochar(&str[i+1]);
+			i+=2;
+			continue;
+		}
+		*ret = c;
+	}
+	*ret = '\0';
 
-        return ret-reallen;
+	return ret-reallen;
 }
 
 char
 hextochar(const char *str)
 {
-        char c, ret;
+	char c, ret;
 
-        c = str[0];
-        ret = c;
-        if (isalpha(c))
-                ret -= isupper(c) ? 'A' - 10 : 'a' - 10;
-        else
-                ret -= '0';
-        ret *= 16;
+	c = str[0];
+	ret = c;
+	if (isalpha(c))
+		ret -= isupper(c) ? 'A' - 10 : 'a' - 10;
+	else
+		ret -= '0';
+	ret *= 16;
 
-        c = str[1];
-        ret += c;
-        if (isalpha(c))
-                ret -= isupper(c) ? 'A' - 10 : 'a' - 10;
-        else
-                ret -= '0';
-        return ret;
+	c = str[1];
+	ret += c;
+	if (isalpha(c))
+		ret -= isupper(c) ? 'A' - 10 : 'a' - 10;
+	else
+		ret -= '0';
+	return ret;
 }
 
 int

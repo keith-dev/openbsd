@@ -1,4 +1,4 @@
-.\"	$OpenBSD: stge.4,v 1.6 2004/09/30 19:59:25 mickey Exp $
+.\"	$OpenBSD: stge.4,v 1.10 2005/08/23 16:51:55 jmc Exp $
 .\"	$NetBSD: stge.4,v 1.5 2001/09/11 22:52:54 wiz Exp $
 .\"
 .\" Copyright (c) 2001 The NetBSD Foundation, Inc.
@@ -43,27 +43,28 @@
 .Nd Sundance/Tamarack TC9021 Gigabit Ethernet driver
 .Sh SYNOPSIS
 .Cd "stge* at pci?"
-.Pp
-Configuration of PHYs or Ten-bit interfaces may also be necessary.
-See
-.Xr mii 4 .
+.Cd "eephy* at mii?"
 .Sh DESCRIPTION
 The
 .Nm
 device driver supports the Sundance/Tamarack TC9021 Gigabit Ethernet
 chip.
 .Pp
-The Sundance/Tamarack TC9021 is found on the D-Link DGE-550T, and
-the Antares Microsystems Gigabit Ethernet board.
+The Sundance/Tamarack TC9021 chip is found on adapters such as the
+following:
+.Pp
+.Bl -bullet -compact
+.It
+Allied Telesis CentreCOM LA1000-PCI-T
+.It
+Antares Microsystems TC9021
+.It
+D-Link DGE-550T
+.El
+.Pp
 It uses an external PHY or an external 10-bit interface.
-.\".Pp
-.\"The TC9021 supports IPv4/TCP/UDP checksumming in hardware.  The
-.\".Nm
-.\"driver supports this feature of the chip.  See
-.\".Xr ifconfig 8
-.\"for information on how to enable this feature.
-.\" .Sh DIAGNOSTICS
-.\" XXX too be done.
+.Pp
+The TC9021 supports IPv4 receive IP/TCP/UDP checksum offload.
 .Sh SEE ALSO
 .Xr arp 4 ,
 .Xr eephy 4 ,
@@ -72,7 +73,6 @@ It uses an external PHY or an external 10-bit interface.
 .Xr mii 4 ,
 .Xr netintro 4 ,
 .Xr pci 4 ,
-.Xr vlan 4 ,
 .Xr hostname.if 5 ,
 .Xr ifconfig 8
 .Sh HISTORY
@@ -90,9 +90,9 @@ The
 .Nm
 driver does not support the VLAN tag insertion/removal feature of the
 TC9021 chip.
-This is primarily because the TC9021's VLAN do not have a useful
+This is primarily because the TC9021 does not provide a useful
 programming interface.
 .Pp
 The
 .Nm
-driver does not yet support jumbo Ethernet frames.
+driver does not yet support Jumbo frames.

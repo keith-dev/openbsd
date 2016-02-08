@@ -1,3 +1,4 @@
+/*	$OpenBSD: pmap_prot.c,v 1.6 2005/08/08 08:05:35 espie Exp $ */
 /*
  * Sun RPC is a product of Sun Microsystems, Inc. and is provided for
  * unrestricted use provided that this legend is included on all tape
@@ -27,10 +28,6 @@
  * Mountain View, California  94043
  */
 
-#if defined(LIBC_SCCS) && !defined(lint)
-static char *rcsid = "$OpenBSD: pmap_prot.c,v 1.4 2002/02/13 22:36:52 deraadt Exp $";
-#endif /* LIBC_SCCS and not lint */
-
 /*
  * pmap_prot.c
  * Protocol for the local binder service, or pmap.
@@ -44,9 +41,7 @@ static char *rcsid = "$OpenBSD: pmap_prot.c,v 1.4 2002/02/13 22:36:52 deraadt Ex
 
 
 bool_t
-xdr_pmap(xdrs, regs)
-	XDR *xdrs;
-	struct pmap *regs;
+xdr_pmap(XDR *xdrs, struct pmap *regs)
 {
 
 	if (xdr_u_long(xdrs, &regs->pm_prog) && 

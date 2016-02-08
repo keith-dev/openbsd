@@ -1,4 +1,4 @@
-/*	$OpenBSD: history.c,v 1.8 2005/02/28 20:45:07 joris Exp $	*/
+/*	$OpenBSD: history.c,v 1.23 2005/07/25 12:05:43 xsa Exp $	*/
 /*
  * Copyright (c) 2004 Jean-Francois Brousseau <jfb@openbsd.org>
  * All rights reserved.
@@ -24,77 +24,91 @@
  * ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include <sys/param.h>
 #include <sys/stat.h>
 
 #include <errno.h>
-#include <stdio.h>
 #include <fcntl.h>
+#include <stdio.h>
 #include <stdlib.h>
-#include <unistd.h>
 #include <string.h>
-#include <sysexits.h>
+#include <unistd.h>
 
 #include "cvs.h"
-#include "rcs.h"
 #include "log.h"
 #include "proto.h"
 
-#define CVS_HISTORY_MAXMOD    16
+#define CVS_HISTORY_MAXMOD	16
 
 /* history flags */
-#define CVS_HF_A     0x01
-#define CVS_HF_C     0x02
-#define CVS_HF_E     0x04
-#define CVS_HF_L     0x08
-#define CVS_HF_M     0x10
-#define CVS_HF_O     0x20
-#define CVS_HF_T     0x40
-#define CVS_HF_W     0x80
+#define CVS_HF_A	0x01
+#define CVS_HF_C	0x02
+#define CVS_HF_E	0x04
+#define CVS_HF_L	0x08
+#define CVS_HF_M	0x10
+#define CVS_HF_O	0x20
+#define CVS_HF_T	0x40
+#define CVS_HF_W	0x80
 
-#define CVS_HF_EXCL (CVS_HF_C|CVS_HF_E|CVS_HF_M|CVS_HF_O|CVS_HF_T|CVS_HF_X)
+#define CVS_HF_EXCL	(CVS_HF_C|CVS_HF_E|CVS_HF_M|CVS_HF_O|CVS_HF_T|CVS_HF_X)
 
-static void  cvs_history_print  (struct cvs_hent *);
-
+static int	cvs_history_init(struct cvs_cmd *, int, char **, int *);
+#if 0
+static void	cvs_history_print(struct cvs_hent *);
+#endif
+static int	cvs_history_pre_exec(struct cvsroot *);
 
 extern char *__progname;
 
+struct cvs_cmd cvs_cmd_history = {
+	CVS_OP_HISTORY, CVS_REQ_HISTORY, "history",
+	{ "hi", "his" },
+	"Show repository access history",
+	"[-aceloTw] [-b str] [-D date] [-f file] [-m module] [-n module] "
+	"[-p path] [-r rev] [-t tag] [-u user] [-x ACEFGMORTUW] [-z tz]",
+	"ab:cD:ef:lm:n:op:r:Tt:u:wx:z:",
+	NULL,
+	0,
+	cvs_history_init,
+	cvs_history_pre_exec,
+	NULL,
+	NULL,
+	NULL,
+	NULL,
+	CVS_CMD_SENDDIR
+};
 
-/*
- * cvs_history()
- *
- * Handle the `cvs history' command.
- */
-int
-cvs_history(int argc, char **argv)
+static int flags = 0;
+static char *date, *rev, *user, *tag;
+static char *zone = "+0000";
+static u_int nbmod = 0;
+static u_int rep = 0;
+static char *modules[CVS_HISTORY_MAXMOD];
+
+static int
+cvs_history_init(struct cvs_cmd *cmd, int argc, char **argv, int *arg)
 {
-	int ch, flags;
-	u_int nbmod, rep;
-	char *user, *zone, *tag, *cp;
-	char *modules[CVS_HISTORY_MAXMOD], histpath[MAXPATHLEN];
-	struct cvsroot *root;
-	struct cvs_hent *hent;
-	CVSHIST *hp;
+	int ch;
 
-	tag = NULL;
-	user = NULL;
-	zone = "+0000";
-	nbmod = 0;
-	flags = 0;
-	rep = 0;
+	date = rev = user = tag = NULL;
 
-	while ((ch = getopt(argc, argv, "acelm:oTt:u:wx:z:")) != -1) {
+	while ((ch = getopt(argc, argv, cmd->cmd_opts)) != -1) {
 		switch (ch) {
 		case 'a':
 			flags |= CVS_HF_A;
+			break;
+		case 'b':
 			break;
 		case 'c':
 			rep++;
 			flags |= CVS_HF_C;
 			break;
+		case 'D':
+			break;
 		case 'e':
 			rep++;
 			flags |= CVS_HF_E;
+			break;
+		case 'f':
 			break;
 		case 'l':
 			flags |= CVS_HF_L;
@@ -104,13 +118,18 @@ cvs_history(int argc, char **argv)
 			flags |= CVS_HF_M;
 			if (nbmod == CVS_HISTORY_MAXMOD) {
 				cvs_log(LP_ERR, "too many `-m' options");
-				return (EX_USAGE);
+				return (CVS_EX_USAGE);
 			}
 			modules[nbmod++] = optarg;
+			break;
+		case 'n':
 			break;
 		case 'o':
 			rep++;
 			flags |= CVS_HF_O;
+			break;
+		case 'r':
+			rev = optarg;
 			break;
 		case 'T':
 			rep++;
@@ -127,84 +146,82 @@ cvs_history(int argc, char **argv)
 			break;
 		case 'x':
 			rep++;
-			for (cp = optarg; *cp != '\0'; cp++) {
-			}
 			break;
 		case 'z':
 			zone = optarg;
 			break;
 		default:
-			return (EX_USAGE);
+			return (CVS_EX_USAGE);
 		}
 	}
 
 	if (rep > 1) {
 		cvs_log(LP_ERR,
 		    "Only one report type allowed from: \"-Tcomxe\"");
-		return (EX_USAGE);
+		return (CVS_EX_USAGE);
 	} else if (rep == 0)
 		flags |= CVS_HF_O;    /* use -o as default */
 
-	root = cvsroot_get(".");
-	if (root == NULL) {
-		cvs_log(LP_ERR,
-		    "No CVSROOT specified!  Please use the `-d' option");
-		cvs_log(LP_ERR,
-		    "or set the CVSROOT environment variable.");
-		return (EX_USAGE);
-	}
-	if (root->cr_method == CVS_METHOD_LOCAL) {
-		snprintf(histpath, sizeof(histpath), "%s/%s", root->cr_dir,
-		    CVS_PATH_HISTORY);
-		hp = cvs_hist_open(histpath);
-		if (hp == NULL) {
-			return (EX_UNAVAILABLE);
-		}
+	*arg = optind;
+	return (0);
+}
 
-		while ((hent = cvs_hist_getnext(hp)) != NULL) {
-			cvs_history_print(hent);
-		}
-		cvs_hist_close(hp);
-	} else {
-		if (cvs_connect(root) < 0)
-			return (EX_PROTOCOL);
+static int
+cvs_history_pre_exec(struct cvsroot *root)
+{
+	if (root->cr_method != CVS_METHOD_LOCAL) {
+		if ((flags & CVS_HF_A) && (cvs_sendarg(root, "-a", 0) < 0))
+			return (CVS_EX_PROTO);
 
 		if ((flags & CVS_HF_C) && (cvs_sendarg(root, "-c", 0) < 0))
-			return (EX_PROTOCOL);
+			return (CVS_EX_PROTO);
 
 		if ((flags & CVS_HF_O) && (cvs_sendarg(root, "-o", 0) < 0))
-			return (EX_PROTOCOL);
+			return (CVS_EX_PROTO);
 
-		if (tag != NULL) {
-			if ((cvs_sendarg(root, "-t", 0) < 0) ||
-			    (cvs_sendarg(root, tag, 0) < 0))
-				return (EX_PROTOCOL);
+		if ((date != NULL) && ((cvs_sendarg(root, "-D", 0) < 0) ||
+		    (cvs_sendarg(root, date, 0) < 0)))
+			return (CVS_EX_PROTO);
+
+		if ((rev != NULL) && ((cvs_sendarg(root, "-r", 0) < 0) ||
+		    (cvs_sendarg(root, rev, 0) < 0)))
+			return (CVS_EX_PROTO);
+
+		if ((tag != NULL) && ((cvs_sendarg(root, "-t", 0) < 0) ||
+		    (cvs_sendarg(root, tag, 0) < 0)))
+			return (CVS_EX_PROTO);
+
+		/* if no user is specified, get login name of command issuer */
+		if (!(flags & CVS_HF_A) && (user == NULL)) {
+			if ((user = getlogin()) == NULL) {
+				cvs_log(LP_ERRNO, "cannot get login name");
+				return (CVS_EX_DATA);
+			}
 		}
-		if (user != NULL) {
+
+		if (!(flags & CVS_HF_A)) {
 			if ((cvs_sendarg(root, "-u", 0) < 0) ||
 			    (cvs_sendarg(root, user, 0) < 0))
-				return (EX_PROTOCOL);
+				return (CVS_EX_PROTO);
 		}
 
 		if ((cvs_sendarg(root, "-z", 0) < 0) ||
 		    (cvs_sendarg(root, zone, 0) < 0))
-			return (EX_PROTOCOL);
-
-		if (cvs_sendreq(root, CVS_REQ_HISTORY, NULL) < 0)
-			return (EX_PROTOCOL);
+			return (CVS_EX_PROTO);
 	}
 
 	return (0);
 }
 
 
+#if 0
 static void
 cvs_history_print(struct cvs_hent *hent)
 {
 	struct tm etime;
 
 	if (localtime_r(&(hent->ch_date), &etime) == NULL) {
-		cvs_log(LP_ERROR, "failed to convert timestamp to structure");
+		cvs_log(LP_ERR, "failed to convert timestamp to structure");
 		return;
 	}
 
@@ -213,3 +230,4 @@ cvs_history_print(struct cvs_hent *hent)
 	    etime.tm_mday, etime.tm_hour, etime.tm_min,
 	    0, hent->ch_user, hent->ch_repo);
 }
+#endif

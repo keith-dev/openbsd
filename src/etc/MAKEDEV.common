@@ -1,4 +1,4 @@
-vers(a, {-$OpenBSD: MAKEDEV.common,v 1.16 2005/03/01 13:35:59 otto Exp $-})dnl
+vers(a, {-$OpenBSD: MAKEDEV.common,v 1.20 2005/08/01 22:22:12 deraadt Exp $-})dnl
 divert(1)dnl
 dnl
 dnl Common device definitions.
@@ -125,6 +125,7 @@ target(all, pctr0)dnl
 target(all, pf)dnl
 twrget(all, cry, crypto)dnl
 target(all, apm)dnl
+target(all, acpi)dnl
 twrget(all, tth, ttyh, 0, 1)dnl
 target(all, ttyA, 0, 1)dnl
 target(all, ttyB, 0, 1, 2, 3, 4, 5)dnl
@@ -227,8 +228,6 @@ _mkdev(ss, ss*, {-M ss$U c major_ss_c Mult($U,16) 640 operator
 	M enss$U c major_ss_c Add(Mult($U,16),3) 640 operator
 	RMlist="$RMlist scan$U"
 	MKlist="$MKlist;umask 77;ln -s ss$U scan$U"-})dnl
-__devitem(ses, ses*, SES/SAF-TE SCSI devices)dnl
-_mkdev(ses, ses*, {-M ses$U c major_ses_c $U 640 operator-})dnl
 dnl XXX see ramdisk above
 __devitem(ramd, ramdisk, Ramdisk kernel devices,nothing)dnl
 _mkdev(ramd, ramdisk, {-dnl
@@ -439,9 +438,9 @@ __devitem(cuaz, cua[a-d], On-board zs serial ports,zs)dnl
 __devitem(ttyB, ttyB?, DEC 3000 ZS8530 ("scc") serial ports,scc)dnl
 __devitem(scc, scc*, 82530 serial interface,scc)dnl
 __devtitle(spec, Special purpose devices)dnl
-__devitem(apm, apm, Power management device)dnl
 _mkdev(apm, apm*, {-M apm	c major_apm_c 0 644
 	M apmctl	c major_apm_c 8 644-})dnl
+_mkdev(acpi, acpi*, {-M acpi	c major_acpi_c 0 644-})dnl
 __devitem(pctr, pctr*, PC Performance Tuning Register access device)dnl
 _mkdev(pctr, pctr, {-M pctr c major_pctr_c 0 644-})dnl
 __devitem(systrace, systrace*, System call tracing device)dnl
@@ -457,6 +456,8 @@ _mkdev(au, audio*, {-M sound$U	c major_au_c $U
 	MKlist="$MKlist;[ -e audioctl ] || ln -s audioctl$U audioctl"-})dnl
 __devitem(asc, asc*, ASC Audio device)dnl
 _mkdev(asc, asc*, {-M asc$U major_asc_c 0-})dnl
+__devitem(bio, bio, {-ioctl tunnel pseudo-device-})dnl
+_mkdev(bio, bio, {-M bio c major_bio_c 0 600-})dnl
 __devitem(music, music*, MIDI devices,midi)dnl
 _mkdev(music, music*, {-M music$U     c major_music_c $U
 	M sequencer$U c major_music_c Add($U, 128)

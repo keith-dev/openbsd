@@ -1,3 +1,4 @@
+/*	$OpenBSD: psignal.c,v 1.8 2005/08/08 08:05:34 espie Exp $ */
 /*
  * Copyright (c) 1983, 1993
  *	The Regents of the University of California.  All rights reserved.
@@ -27,10 +28,6 @@
  * SUCH DAMAGE.
  */
 
-#if defined(LIBC_SCCS) && !defined(lint)
-static char rcsid[] = "$OpenBSD: psignal.c,v 1.6 2004/05/18 02:05:52 jfb Exp $";
-#endif /* LIBC_SCCS and not lint */
-
 /*
  * Print the name of the signal indicated
  * along with the supplied message.
@@ -48,8 +45,8 @@ void
 psignal(unsigned int sig, const char *s)
 {
 	static char buf[NL_TEXTMAX];
-	register const char *c;
-	register int n;
+	const char *c;
+	int n;
 	struct iovec iov[4];
 	int niov = 0;
 

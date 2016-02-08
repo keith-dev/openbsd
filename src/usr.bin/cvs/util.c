@@ -1,4 +1,4 @@
-/*	$OpenBSD: util.c,v 1.20 2004/12/22 00:38:26 david Exp $	*/
+/*	$OpenBSD: util.c,v 1.50 2005/08/17 08:35:53 xsa Exp $	*/
 /*
  * Copyright (c) 2004 Jean-Francois Brousseau <jfb@openbsd.org>
  * All rights reserved.
@@ -28,23 +28,16 @@
 #include <sys/stat.h>
 #include <sys/wait.h>
 
-#include <md5.h>
 #include <errno.h>
 #include <fcntl.h>
+#include <md5.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <unistd.h>
 #include <string.h>
+#include <unistd.h>
 
 #include "cvs.h"
 #include "log.h"
-#include "file.h"
-
-static const char *cvs_months[] = {
-	"Jan", "Feb", "Mar", "Apr", "May", "Jun",
-	"Jul", "Aug", "Sep", "Oct", "Nov", "Dec"
-};
-
 
 /* letter -> mode type map */
 static const int cvs_modetypes[26] = {
@@ -94,15 +87,17 @@ pid_t cvs_exec_pid;
 int
 cvs_readrepo(const char *dir, char *dst, size_t len)
 {
-	size_t dlen;
+	size_t dlen, l;
 	FILE *fp;
 	char repo_path[MAXPATHLEN];
 
-	snprintf(repo_path, sizeof(repo_path), "%s/CVS/Repository", dir);
+	l = cvs_path_cat(dir, "CVS/Repository", repo_path, sizeof(repo_path));
+	if (l >= sizeof(repo_path))
+		return (NULL);
+
 	fp = fopen(repo_path, "r");
-	if (fp == NULL) {
+	if (fp == NULL)
 		return (-1);
-	}
 
 	if (fgets(dst, (int)len, fp) == NULL) {
 		if (ferror(fp)) {
@@ -118,80 +113,6 @@ cvs_readrepo(const char *dir, char *dst, size_t len)
 
 	(void)fclose(fp);
 	return (0);
-}
-
-
-/*
- * cvs_datesec()
- *
- * Take a date string and transform it into the number of seconds since the
- * Epoch.  The <type> argument specifies whether the timestamp is in ctime(3)
- * format or RFC 822 format (as CVS uses in its protocol).  If the <adj>
- * parameter is not 0, the returned time will be adjusted according to the
- * machine's local timezone.
- */
-time_t
-cvs_datesec(const char *date, int type, int adj)
-{
-	int i;
-	long off;
-	char sign, mon[8], gmt[8], hr[4], min[4], *ep;
-	struct tm cvs_tm;
-
-	memset(&cvs_tm, 0, sizeof(cvs_tm));
-	cvs_tm.tm_isdst = -1;
-
-	if (type == CVS_DATE_RFC822) {
-		if (sscanf(date, "%d %3s %d %2d:%2d:%2d %5s", &cvs_tm.tm_mday,
-		    mon, &cvs_tm.tm_year, &cvs_tm.tm_hour, &cvs_tm.tm_min,
-		    &cvs_tm.tm_sec, gmt) < 7)
-			return (-1);
-		cvs_tm.tm_year -= 1900;
-
-		if (*gmt == '-') {
-			sscanf(gmt, "%c%2s%2s", &sign, hr, min);
-			cvs_tm.tm_gmtoff = strtol(hr, &ep, 10);
-			if ((cvs_tm.tm_gmtoff == LONG_MIN) ||
-			    (cvs_tm.tm_gmtoff == LONG_MAX) ||
-			    (*ep != '\0')) {
-				cvs_log(LP_ERR,
-				    "parse error in GMT hours specification `%s'", hr);
-				cvs_tm.tm_gmtoff = 0;
-			} else {
-				/* get seconds */
-				cvs_tm.tm_gmtoff *= 3600;
-
-				/* add the minutes */
-				off = strtol(min, &ep, 10);
-				if ((cvs_tm.tm_gmtoff == LONG_MIN) ||
-				    (cvs_tm.tm_gmtoff == LONG_MAX) ||
-				    (*ep != '\0')) {
-					cvs_log(LP_ERR,
-					    "parse error in GMT minutes "
-					    "specification `%s'", min);
-				} else
-					cvs_tm.tm_gmtoff += off * 60;
-			}
-		}
-		if (sign == '-')
-			cvs_tm.tm_gmtoff = -cvs_tm.tm_gmtoff;
-	} else if (type == CVS_DATE_CTIME) {
-		/* gmt is used for the weekday */
-		sscanf(date, "%3s %3s %d %2d:%2d:%2d %d", gmt, mon,
-		    &cvs_tm.tm_mday, &cvs_tm.tm_hour, &cvs_tm.tm_min,
-		    &cvs_tm.tm_sec, &cvs_tm.tm_year);
-		cvs_tm.tm_year -= 1900;
-		cvs_tm.tm_gmtoff = 0;
-	}
-
-	for (i = 0; i < (int)(sizeof(cvs_months)/sizeof(cvs_months[0])); i++) {
-		if (strcmp(cvs_months[i], mon) == 0) {
-			cvs_tm.tm_mon = i;
-			break;
-		}
-	}
-
-	return mktime(&cvs_tm);
 }
 
 
@@ -213,7 +134,9 @@ cvs_strtomode(const char *str, mode_t *mode)
 	char buf[32], ms[4], *sp, *ep;
 
 	m = 0;
-	strlcpy(buf, str, sizeof(buf));
+	if (strlcpy(buf, str, sizeof(buf)) >= sizeof(buf)) {
+		return (-1);
+	}
 	sp = buf;
 	ep = sp;
 
@@ -259,6 +182,10 @@ cvs_strtomode(const char *str, mode_t *mode)
 /*
  * cvs_modetostr()
  *
+ * Generate a CVS-format string to represent the permissions mask on a file
+ * from the mode <mode> and store the result in <buf>, which can accept up to
+ * <len> bytes (including the terminating NUL byte).  The result is guaranteed
+ * to be NUL-terminated.
  * Returns 0 on success, or -1 on failure.
  */
 int
@@ -296,7 +223,6 @@ cvs_modetostr(mode_t mode, char *buf, size_t len)
 	return (0);
 }
 
-
 /*
  * cvs_cksum()
  *
@@ -319,7 +245,6 @@ cvs_cksum(const char *file, char *dst, size_t len)
 
 	return (0);
 }
-
 
 /*
  * cvs_splitpath()
@@ -373,7 +298,7 @@ cvs_getargv(const char *line, char **argv, int argvlen)
 	char linebuf[256], qbuf[128], *lp, *cp, *arg;
 
 	strlcpy(linebuf, line, sizeof(linebuf));
-	memset(argv, 0, sizeof(argv));
+	memset(argv, 0, argvlen * sizeof(char *));
 	argc = 0;
 
 	/* build the argument vector */
@@ -425,7 +350,7 @@ cvs_getargv(const char *line, char **argv, int argvlen)
 		argc++;
 	}
 
-	if (err) {
+	if (err != 0) {
 		/* ditch the argument vector */
 		for (i = 0; i < (u_int)argc; i++)
 			free(argv[i]);
@@ -442,23 +367,25 @@ cvs_getargv(const char *line, char **argv, int argvlen)
  * Allocate an argument vector large enough to accommodate for all the
  * arguments found in <line> and return it.
  */
-
-char**
+char **
 cvs_makeargv(const char *line, int *argc)
 {
 	int i, ret;
 	char *argv[1024], **copy;
+	size_t size;
 
 	ret = cvs_getargv(line, argv, 1024);
 	if (ret == -1)
 		return (NULL);
 
-	copy = (char **)malloc((ret + 1) * sizeof(char *));
+	size = (ret + 1) * sizeof(char *);
+	copy = (char **)malloc(size);
 	if (copy == NULL) {
 		cvs_log(LP_ERRNO, "failed to allocate argument vector");
+		cvs_freeargv(argv, ret);
 		return (NULL);
 	}
-	memset(copy, 0, sizeof(copy));
+	memset(copy, 0, size);
 
 	for (i = 0; i < ret; i++)
 		copy[i] = argv[i];
@@ -493,62 +420,55 @@ cvs_freeargv(char **argv, int argc)
  * Returns 0 on success, or -1 on failure.
  */
 int
-cvs_mkadmin(CVSFILE *cdir, mode_t mode)
+cvs_mkadmin(const char *dpath, const char *rootpath, const char *repopath)
 {
-	char dpath[MAXPATHLEN], path[MAXPATHLEN];
+	size_t l;
+	char path[MAXPATHLEN];
 	FILE *fp;
 	CVSENTRIES *ef;
 	struct stat st;
-	struct cvsroot *root;
 
-	cvs_file_getpath(cdir, dpath, sizeof(dpath));
+	l = cvs_path_cat(dpath, CVS_PATH_CVSDIR, path, sizeof(path));
+	if (l >= sizeof(path))
+		return (-1);
 
-	snprintf(path, sizeof(path), "%s/" CVS_PATH_CVSDIR, dpath);
-	if ((mkdir(path, mode) == -1) && (errno != EEXIST)) {
+	if ((mkdir(path, 0755) == -1) && (errno != EEXIST)) {
 		cvs_log(LP_ERRNO, "failed to create directory %s", path);
 		return (-1);
 	}
 
 	/* just create an empty Entries file */
 	ef = cvs_ent_open(dpath, O_WRONLY);
-	(void)cvs_ent_close(ef);
+	if (ef != NULL)
+		cvs_ent_close(ef);
 
-	root = cdir->cf_ddat->cd_root;
-	snprintf(path, sizeof(path), "%s/" CVS_PATH_ROOTSPEC, dpath);
-	if ((root != NULL) && (stat(path, &st) != 0) && (errno == ENOENT)) {
+	l = cvs_path_cat(dpath, CVS_PATH_ROOTSPEC, path, sizeof(path));
+	if (l >= sizeof(path))
+		return (-1);
+
+	if ((stat(path, &st) == -1) && (errno == ENOENT)) {
 		fp = fopen(path, "w");
 		if (fp == NULL) {
 			cvs_log(LP_ERRNO, "failed to open %s", path);
 			return (-1);
 		}
-		if (root->cr_user != NULL) {
-			fprintf(fp, "%s", root->cr_user);
-			if (root->cr_pass != NULL)
-				fprintf(fp, ":%s", root->cr_pass);
-			if (root->cr_host != NULL)
-				putc('@', fp);
-		}
-
-		if (root->cr_host != NULL) {
-			fprintf(fp, "%s", root->cr_host);
-			if (root->cr_dir != NULL)
-				putc(':', fp);
-		}
-		if (root->cr_dir)
-			fprintf(fp, "%s", root->cr_dir);
-		putc('\n', fp);
+		if (rootpath != NULL)
+			fprintf(fp, "%s\n", rootpath);
 		(void)fclose(fp);
 	}
 
-	snprintf(path, sizeof(path), "%s/" CVS_PATH_REPOSITORY, dpath);
-	if ((stat(path, &st) != 0) && (errno == ENOENT) &&
-	    (cdir->cf_ddat->cd_repo != NULL)) {
+	l = cvs_path_cat(dpath, CVS_PATH_REPOSITORY, path, sizeof(path));
+	if (l >= sizeof(path))
+		return (-1);
+
+	if ((stat(path, &st) == -1) && (errno == ENOENT)) {
 		fp = fopen(path, "w");
 		if (fp == NULL) {
 			cvs_log(LP_ERRNO, "failed to open %s", path);
 			return (-1);
 		}
-		fprintf(fp, "%s\n", cdir->cf_ddat->cd_repo);
+		if (repopath != NULL)
+			fprintf(fp, "%s\n", repopath);
 		(void)fclose(fp);
 	}
 
@@ -578,4 +498,294 @@ cvs_exec(int argc, char **argv, int fds[3])
 		cvs_log(LP_ERRNO, "failed to waitpid");
 
 	return (ret);
+}
+
+/*
+ * cvs_chdir()
+ *
+ * Change to directory.
+ * chdir() wrapper with an error message.
+ * Returns 0 on success, or -1 on failure.
+ */
+int
+cvs_chdir(const char *path)
+{
+	if (chdir(path) == -1) {
+		cvs_log(LP_ERRNO, "cannot change to dir `%s'", path);
+		return (-1);
+	}
+
+	return (0);
+}
+
+/*
+ * cvs_rename()
+ * Change the name of a file.
+ * rename() wrapper with an error message.
+ * Returns 0 on success, or -1 on failure.
+ */
+int
+cvs_rename(const char *from, const char *to)
+{
+	cvs_log(LP_TRACE, "cvs_rename(%s,%s)", from, to);
+
+	if (cvs_noexec == 1)
+		return (0);
+
+	if (rename(from, to) == -1) {
+		cvs_log(LP_ERRNO, "cannot rename file `%s' to `%s'", from, to);
+		return (-1);
+	}
+
+	return (0);
+}
+
+/*
+ * cvs_unlink()
+ *
+ * Removes the link named by <path>.
+ * unlink() wrapper with an error message.
+ * Returns 0 on success, or -1 on failure.
+ */
+int
+cvs_unlink(const char *path)
+{
+	cvs_log(LP_TRACE, "cvs_unlink(%s)", path);
+
+	if (cvs_noexec == 1)
+		return (0);
+
+	if ((unlink(path) == -1) && (errno != ENOENT)) {
+		cvs_log(LP_ERRNO, "cannot remove `%s'", path);
+		return (-1);
+	}
+
+	return (0);
+}
+
+/*
+ * cvs_rmdir()
+ *
+ * Remove a directory tree from disk.
+ * Returns 0 on success, or -1 on failure.
+ */
+int
+cvs_rmdir(const char *path)
+{
+	int ret = -1;
+	size_t len;
+	DIR *dirp;
+	struct dirent *ent;
+	char fpath[MAXPATHLEN];
+
+	cvs_log(LP_TRACE, "cvs_rmdir(%s)", path);
+
+	if (cvs_noexec == 1)
+		return (0);
+
+	if ((dirp = opendir(path)) == NULL) {
+		cvs_log(LP_ERRNO, "failed to open '%s'", path);
+		return (-1);
+	}
+
+	while ((ent = readdir(dirp)) != NULL) {
+		if (!strcmp(ent->d_name, ".") ||
+		    !strcmp(ent->d_name, ".."))
+			continue;
+
+		len = cvs_path_cat(path, ent->d_name, fpath, sizeof(fpath));
+		if (len >= sizeof(fpath))
+			goto done;
+
+		if (ent->d_type == DT_DIR) {
+			if (cvs_rmdir(fpath) == -1)
+				goto done;
+		} else if ((cvs_unlink(fpath) == -1) && (errno != ENOENT))
+			goto done;
+	}
+
+
+	if ((rmdir(path) == -1) && (errno != ENOENT)) {
+		cvs_log(LP_ERRNO, "failed to remove '%s'", path);
+		goto done;
+	}
+
+	ret = 0;
+done:
+	closedir(dirp);
+	return (ret);
+}
+
+/*
+ * Create a directory, and the parent directories if needed.
+ * based upon mkpath() from mkdir.c
+ */
+int
+cvs_create_dir(const char *path, int create_adm, char *root, char *repo)
+{
+	size_t l;
+	int len, ret;
+	char *d, *s;
+	struct stat sb;
+	char rpath[MAXPATHLEN], entry[MAXPATHLEN];
+	CVSENTRIES *entf;
+	struct cvs_ent *ent;
+
+	if (create_adm == 1 && (root == NULL || repo == NULL)) {
+		cvs_log(LP_ERR, "missing stuff in cvs_create_dir");
+		return (-1);
+	}
+
+	if ((s = strdup(path)) == NULL)
+		return (-1);
+
+	if (strlcpy(rpath, repo, sizeof(rpath)) >= sizeof(rpath) ||
+	    strlcat(rpath, "/", sizeof(rpath)) >= sizeof(rpath)) {
+		errno = ENAMETOOLONG;
+		cvs_log(LP_ERRNO, "%s", rpath);
+		free(s);
+		return (-1);
+	}
+
+	ret = -1;
+	entf = NULL;
+	d = strtok(s, "/");
+	while (d != NULL) {
+		if (stat(d, &sb)) {
+			/* try to create the directory */
+			if ((errno != ENOENT) || (mkdir(d, 0755) &&
+			    errno != EEXIST)) {
+				cvs_log(LP_ERRNO, "failed to create `%s'", d);
+				goto done;
+			}
+		} else if (!S_ISDIR(sb.st_mode)) {
+			cvs_log(LP_ERR, "`%s' not a directory", d);
+			goto done;
+		}
+
+		/*
+		 * Create administrative files if requested.
+		 */
+		if (create_adm == 1) {
+			l = strlcat(rpath, d, sizeof(rpath));
+			if (l >= sizeof(rpath))
+				goto done;
+
+			l = strlcat(rpath, "/", sizeof(rpath));
+			if (l >= sizeof(rpath))
+				goto done;
+
+			if (cvs_mkadmin(d, root, rpath) < 0) {
+				cvs_log(LP_ERR, "failed to create adm files");
+				goto done;
+			}
+		}
+
+		/*
+		 * Add it to the parent directory entry file.
+		 * (if any).
+		 */
+		entf = cvs_ent_open(".", O_RDWR);
+		if (entf != NULL && strcmp(d, ".")) {
+			len = snprintf(entry, sizeof(entry), "D/%s////", d);
+			if (len == -1 || len >= (int)sizeof(entry)) {
+				errno = ENAMETOOLONG;
+				cvs_log(LP_ERRNO, "%s", entry);
+				goto done;
+			}
+
+			if ((ent = cvs_ent_parse(entry)) == NULL) {
+				cvs_log(LP_ERR, "failed to parse entry");
+				goto done;
+			}
+
+			cvs_ent_remove(entf, d);
+
+			if (cvs_ent_add(entf, ent) < 0) {
+				cvs_log(LP_ERR, "failed to add entry");
+				goto done;
+			}
+		}
+
+		if (entf != NULL) {
+			cvs_ent_close(entf);
+			entf = NULL;
+		}
+
+		/*
+		 * All went ok, switch to the newly created directory.
+		 */
+		if (cvs_chdir(d) == -1)
+			goto done;
+
+		d = strtok(NULL, "/");
+	}
+
+	ret = 0;
+done:
+	if (entf != NULL)
+		cvs_ent_close(entf);
+	free(s);
+	return (ret);
+}
+
+/*
+ * cvs_path_cat()
+ *
+ * Concatenate the two paths <base> and <end> and store the generated path
+ * into the buffer <dst>, which can accept up to <dlen> bytes, including the
+ * NUL byte.  The result is guaranteed to be NUL-terminated.
+ * Returns the number of bytes necessary to store the full resulting path,
+ * not including the NUL byte (a value equal to or larger than <dlen>
+ * indicates truncation).
+ */
+size_t
+cvs_path_cat(const char *base, const char *end, char *dst, size_t dlen)
+{
+	size_t len;
+
+	len = strlcpy(dst, base, dlen);
+	if (len >= dlen - 1) {
+		errno = ENAMETOOLONG;
+		cvs_log(LP_ERRNO, "%s", dst);
+	} else {
+		dst[len] = '/';
+		dst[len + 1] = '\0';
+		len = strlcat(dst, end, dlen);
+		if (len >= dlen) {
+			errno = ENAMETOOLONG;
+			cvs_log(LP_ERRNO, "%s", dst);
+		}
+	}
+
+	return (len);
+}
+
+/*
+ * cvs_rcs_getpath()
+ *
+ * Get the RCS path of the file <file> and store it in <buf>, which is
+ * of size <len>. For portability, it is recommended that <buf> always be
+ * at least MAXPATHLEN bytes long.
+ * Returns a pointer to the start of the path on success, or NULL on failure.
+ */
+char *
+cvs_rcs_getpath(CVSFILE *file, char *buf, size_t len)
+{
+	int l;
+	char *repo;
+	struct cvsroot *root;
+
+	root = CVS_DIR_ROOT(file);
+	repo = CVS_DIR_REPO(file);
+
+	l = snprintf(buf, len, "%s/%s/%s%s",
+	    root->cr_dir, repo, file->cf_name, RCS_FILE_EXT);
+	if (l == -1 || l >= (int)len) {
+		errno = ENAMETOOLONG;
+		cvs_log(LP_ERRNO, "%s", buf);
+		return (NULL);
+	}
+
+	return (buf);
 }

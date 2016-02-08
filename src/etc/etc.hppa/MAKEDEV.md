@@ -1,5 +1,5 @@
 vers(__file__,
-	{-$OpenBSD: MAKEDEV.md,v 1.22 2004/09/15 01:02:31 mickey Exp $-},
+	{-$OpenBSD: MAKEDEV.md,v 1.25 2005/08/01 22:22:13 deraadt Exp $-},
 etc.MACHINE)dnl
 dnl
 dnl Copyright (c) 2001-2004 Todd T. Fries <todd@OpenBSD.org>
@@ -48,7 +48,16 @@ _DEV(wsmux, 30)
 _TITLE(point)
 _DEV(wsmouse, 29)
 _TITLE(prn)
-_DEV(lpt, 30)
+_DEV(lpt, 26)
+_TITLE(usb)
+_DEV(uall)
+_DEV(usb, 40)
+_DEV(uhid, 41)
+_DEV(ugen, 42)
+_DEV(ulpt, 43)
+_DEV(urio, 44)
+_DEV(ttyU, 45)
+_DEV(uscan, 46)
 _TITLE(spec)
 _DEV(au, 35)
 _DEV(bpf, 17)
@@ -59,7 +68,6 @@ _DEV(pci, 31)
 _DEV(pdc, 22)
 _DEV(pf, 21)
 _DEV(rnd, 20)
-_DEV(ses, 37)
 _DEV(ss, 14)
 _DEV(systrace, 34)
 _DEV(tun, 18)
@@ -79,7 +87,6 @@ _std(1, 2, 25, 3, 6)
 dnl
 dnl *** hppa specific devices
 dnl
-target(all, ses, 0)dnl
 target(all, ch, 0)dnl
 target(all, ss, 0, 1)dnl
 target(all, xfs, 0)dnl

@@ -1,4 +1,6 @@
-/*	$OpenBSD: re_search.c,v 1.13 2004/07/22 01:25:25 vincent Exp $	*/
+/*	$OpenBSD: re_search.c,v 1.18 2005/08/09 00:53:48 kjell Exp $	*/
+
+/* This file is in the public domain. */
 
 /*
  *	regular expression search commands for Mg
@@ -63,7 +65,7 @@ re_forwsearch(int f, int n)
 
 /*
  * Reverse search.
- * Get a search string from the	 user, and search, starting at "."
+ * Get a search string from the user, and search, starting at "."
  * and proceeding toward the front of the buffer. If found "." is left
  * pointing at the first character of the pattern [the last character that
  * was matched].
@@ -128,7 +130,7 @@ static regmatch_t	re_match[RE_NMATCH];
 int
 re_queryrepl(int f, int n)
 {
-	int	rcnt = 0;	/* replacements made so far	*/
+	int	rcnt = 0;		/* replacements made so far	*/
 	int	plen, s;		/* length of found string	*/
 	char	news[NPAT], *rep;	/* replacement string		*/
 
@@ -138,8 +140,8 @@ re_queryrepl(int f, int n)
 
 	if ((s = re_readpattern("RE Query replace")) != TRUE)
 		return (s);
-	if ((rep =
-	    ereply("Query replace %s with: ", news, NPAT, re_pat)) == NULL)
+	if ((rep = eread("Query replace %s with: ", news, NPAT,
+	    EFNUL | EFNEW | EFCR, re_pat)) == NULL)
 		return (ABORT);
 	ewprintf("Query replacing %s with %s:", re_pat, news);
 
@@ -200,7 +202,7 @@ stopsearch:
 		else
 			ewprintf("(%d replacements done)", rcnt);
 	}
-	return TRUE;
+	return (TRUE);
 }
 
 /*
@@ -292,8 +294,6 @@ re_doreplace(RSIZE plen, char *st, int f)
 	return (s);
 }
 
-
-
 /*
  * This routine does the real work of a forward search.  The pattern is
  * sitting in the external variable "pat".  If found, dot is updated, the
@@ -339,7 +339,6 @@ re_forwsrch(void)
 	}
 	return (FALSE);
 }
-
 
 /*
  * This routine does the real work of a backward search.  The pattern is sitting
@@ -399,7 +398,6 @@ re_backsrch(void)
 	return (FALSE);
 }
 
-
 /*
  * Read a pattern.
  * Stash it in the external variable "re_pat". The "pat" is
@@ -416,13 +414,15 @@ re_readpattern(char *prompt)
 	char		tpat[NPAT], *rep;
 
 	if (re_pat[0] == '\0')
-		rep = ereply("%s: ", tpat, NPAT, prompt);
+		rep = eread("%s: ", tpat, NPAT, EFNEW | EFCR, prompt);
 	else
-		rep = ereply("%s: (default %s) ", tpat, NPAT, prompt, re_pat);
-
-	if (rep != NULL && *rep != '\0') {
+		rep = eread("%s: (default %s) ", tpat, NPAT,
+		    EFNUL | EFNEW | EFCR, prompt, re_pat);
+	if (rep == NULL)
+		return (ABORT);
+	if (rep[0] != '\0') {
 		/* New pattern given */
-		(void)strlcpy(re_pat, tpat, sizeof re_pat);
+		(void)strlcpy(re_pat, tpat, sizeof(re_pat));
 		if (casefoldsearch)
 			flags = REG_EXTENDED | REG_ICASE;
 		else
@@ -470,9 +470,8 @@ setcasefold(int f, int n)
 	return (TRUE);
 }
 
-
 /*
- * Delete all lines after dot that contain a string matching regex
+ * Delete all lines after dot that contain a string matching regex.
  */
 int
 delmatchlines(int f, int n)
@@ -488,7 +487,7 @@ delmatchlines(int f, int n)
 }
 
 /*
- * Delete all lines after dot that don't contain a string matching regex
+ * Delete all lines after dot that don't contain a string matching regex.
  */
 int
 delnonmatchlines(int f, int n)
@@ -504,7 +503,7 @@ delnonmatchlines(int f, int n)
 }
 
 /*
- * This function does the work of deleting matching lines
+ * This function does the work of deleting matching lines.
  */
 static int
 killmatches(int cond)
@@ -547,7 +546,7 @@ killmatches(int cond)
 }
 
 /*
- * Count lines matching regex
+ * Count lines matching regex.
  */
 int
 cntmatchlines(int f, int n)
@@ -557,11 +556,12 @@ cntmatchlines(int f, int n)
 	if ((s = re_readpattern("Count lines (matching regexp)")) != TRUE)
 		return (s);
 	s = countmatches(TRUE);
+
 	return (s);
 }
 
 /*
- * Count lines that fail to match regex
+ * Count lines that fail to match regex.
  */
 int
 cntnonmatchlines(int f, int n)
@@ -570,7 +570,6 @@ cntnonmatchlines(int f, int n)
 
 	if ((s = re_readpattern("Count lines (not matching regexp)")) != TRUE)
 		return (s);
-
 	s = countmatches(FALSE);
 
 	return (s);

@@ -1,4 +1,4 @@
-/*	$OpenBSD: print-ike.c,v 1.26 2004/10/07 09:50:48 hshoexer Exp $	*/
+/*	$OpenBSD: print-ike.c,v 1.28 2005/08/28 18:37:55 cloder Exp $	*/
 
 /*
  * Copyright (c) 1990, 1991, 1992, 1993, 1994, 1995, 1996, 1997, 1998, 1999
@@ -29,7 +29,7 @@
 
 #ifndef lint
 static const char rcsid[] =
-    "@(#) $Header: /cvs/src/usr.sbin/tcpdump/print-ike.c,v 1.26 2004/10/07 09:50:48 hshoexer Exp $ (XXX)";
+    "@(#) $Header: /cvs/src/usr.sbin/tcpdump/print-ike.c,v 1.28 2005/08/28 18:37:55 cloder Exp $ (XXX)";
 #endif
 
 #include <sys/param.h>
@@ -838,8 +838,15 @@ ike_pl_print (u_int8_t type, u_int8_t *buf, u_int8_t doi)
 	static const char *pltypes[] = IKE_PAYLOAD_TYPES_INITIALIZER;
 	static const char *plprivtypes[] = 
 	    IKE_PRIVATE_PAYLOAD_TYPES_INITIALIZER;
-	u_int8_t next_type = buf[0];
-	u_int16_t this_len = buf[2]<<8 | buf[3];
+	u_int8_t next_type;
+	u_int16_t this_len;
+
+	if (&buf[4] > snapend) {
+		goto pltrunc;
+	}
+
+	next_type = buf[0];
+	this_len = buf[2]<<8 | buf[3];
 
 	if (type < PAYLOAD_PRIVATE_MIN || type >= PAYLOAD_PRIVATE_MAX)
 		printf("\n\t%spayload: %s len: %hu", ike_tab_offset(),
@@ -858,7 +865,7 @@ ike_pl_print (u_int8_t type, u_int8_t *buf, u_int8_t doi)
 	    this_len == 0)
 		goto pltrunc;
 	    
-	if ((u_int8_t *)&(buf[0]) > snapend - this_len)
+	if (buf + this_len > snapend)
 		goto pltrunc;
 
 	ike_tab_level++;
@@ -910,8 +917,15 @@ ike_pl_print (u_int8_t type, u_int8_t *buf, u_int8_t doi)
 		ike_pl_attribute_print(buf, this_len);
 		break;
 
+	case PAYLOAD_SAK:
+	case PAYLOAD_SAT:
+	case PAYLOAD_KD:
+	case PAYLOAD_SEQ:
+	case PAYLOAD_POP:
 	case PAYLOAD_NAT_D:
 	case PAYLOAD_NAT_OA:
+	case PAYLOAD_NAT_D_DRAFT:
+	case PAYLOAD_NAT_OA_DRAFT:
 		break;
 
 	default:

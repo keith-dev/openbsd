@@ -1,4 +1,4 @@
-.\" $OpenBSD: bge.4,v 1.19 2005/01/14 03:14:46 pvalchev Exp $
+.\" $OpenBSD: bge.4,v 1.26 2005/08/24 01:13:56 brad Exp $
 .\" Copyright (c) 2001 Wind River Systems
 .\" Copyright (c) 1997, 1998, 1999, 2000, 2001
 .\"	Bill Paul <wpaul@windriver.com>. All rights reserved.
@@ -35,7 +35,7 @@
 .Os
 .Sh NAME
 .Nm bge
-.Nd Broadcom BCM570x/5750/5751 PCI Gigabit Ethernet adapter driver
+.Nd Broadcom Gigabit Ethernet adapter driver
 .Sh SYNOPSIS
 .Cd "bge* at pci?"
 .Cd "brgphy* at mii?"
@@ -43,38 +43,54 @@
 The
 .Nm
 driver provides support for various NICs based on the Broadcom BCM570x,
-5750, and 5751 families of Gigabit Ethernet controller chips, including the
-following:
+5714, 572x, 575x, 578x, and 5901 families of Gigabit Ethernet controller
+chips, including the following:
 .Pp
 .Bl -bullet -compact
 .It
-3Com 3c996-T
+3Com 3c996-T (10/100/1000baseT)
 .It
-3Com 3c996-SX
+3Com 3c996-SX (1000baseSX)
 .It
-3Com 3c996B-T
+3Com 3c996B-T (10/100/1000baseT)
 .It
-Dell PowerEdge 1750 integrated BCM5704C NIC
+Dell PowerEdge 1750 integrated BCM5704C NIC (10/100/1000baseT)
 .It
-Dell PowerEdge 2550 integrated BCM5700 NIC
+Dell PowerEdge 2550 integrated BCM5700 NIC (10/100/1000baseT)
 .It
-Dell PowerEdge 2650 integrated BCM5703 NIC
+Dell PowerEdge 2650 integrated BCM5703 NIC (10/100/1000baseT)
 .It
-HP ProLiant NC7760 embedded Gigabit NIC
+HP ProLiant NC320T PCI-E Gigabit NIC (10/100/1000baseT)
 .It
-HP ProLiant NC7770 PCI-X Gigabit NIC
+HP ProLiant NC370F PCI-X Gigabit NIC (1000baseSX)
 .It
-HP ProLiant NC7781 embedded PCI-X Gigabit NIC
+HP ProLiant NC370T PCI-X Gigabit NIC (10/100/1000baseT)
 .It
-IBM xSeries 235 integrated BCM5703X NIC
+HP ProLiant NC1020 PCI Gigabit NIC (10/100/1000baseT)
 .It
-IBM xSeries 305 integrated BCM5703X NIC
+HP ProLiant NC6770 PCI-X Gigabit NIC (1000baseSX)
 .It
-Netgear GA302T
+HP ProLiant NC7760 embedded PCI Gigabit NIC (10/100/1000baseT)
 .It
-SysKonnect SK-9D21
+HP ProLiant NC7770 PCI-X Gigabit NIC (10/100/1000baseT)
 .It
-SysKonnect SK-9D41
+HP ProLiant NC7771 PCI-X Gigabit NIC (10/100/1000baseT)
+.It
+HP ProLiant NC7780 embedded PCI-X Gigabit NIC (10/100/1000baseT)
+.It
+HP ProLiant NC7781 embedded PCI-X Gigabit NIC (10/100/1000baseT)
+.It
+HP ProLiant NC7782 embedded PCI-X Gigabit NIC (10/100/1000baseT)
+.It
+IBM xSeries 235 integrated BCM5703X NIC (10/100/1000baseT)
+.It
+IBM xSeries 305 integrated BCM5703X NIC (10/100/1000baseT)
+.It
+Netgear GA302T (10/100/1000baseT)
+.It
+SysKonnect SK-9D21 (10/100/1000baseT)
+.It
+SysKonnect SK-9D41 (1000baseSX)
 .El
 .Pp
 All of these NICs are capable of 10, 100 and 1000Mbps speeds over CAT5
@@ -98,12 +114,12 @@ which support autonegotiation of 10, 100 and 1000Mbps modes in
 full or half duplex.
 .Pp
 The BCM570x (excluding the BCM5705 and derivatives)
-also supports jumbo frames, which can be configured
+also supports Jumbo frames, which can be configured
 via the interface MTU setting.
 Selecting an MTU larger than 1500 bytes with the
 .Xr ifconfig 8
-utility configures the adapter to receive and transmit jumbo frames.
-Using jumbo frames can greatly improve performance for certain tasks,
+utility configures the adapter to receive and transmit Jumbo frames.
+Using Jumbo frames can greatly improve performance for certain tasks,
 such as file transfers and data streaming.
 .Pp
 The
@@ -207,13 +223,11 @@ the network connection (cable).
 .El
 .Sh SEE ALSO
 .Xr arp 4 ,
-.Xr bce 4 ,
 .Xr brgphy 4 ,
 .Xr ifmedia 4 ,
 .Xr intro 4 ,
 .Xr netintro 4 ,
 .Xr pci 4 ,
-.Xr vlan 4 ,
 .Xr hostname.if 5 ,
 .Xr ifconfig 8
 .Sh HISTORY

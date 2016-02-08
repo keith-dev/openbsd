@@ -1,4 +1,4 @@
-/*	$OpenBSD: packet.c,v 1.5 2005/02/16 15:23:33 norby Exp $ */
+/*	$OpenBSD: packet.c,v 1.11 2005/08/11 16:28:07 henning Exp $ */
 
 /*
  * Copyright (c) 2004, 2005 Esben Norby <norby@openbsd.org>
@@ -27,6 +27,7 @@
 
 #include <errno.h>
 #include <event.h>
+#include <md5.h>
 #include <stdlib.h>
 #include <strings.h>
 
@@ -40,30 +41,26 @@ int		 ospf_hdr_sanity_check(const struct ip *,
 		    struct ospf_hdr *, u_int16_t, const struct iface *);
 struct iface	*find_iface(struct ospfd_conf *, struct in_addr);
 
-void
-gen_ospf_hdr(void *buf, struct iface *iface, u_int8_t type)
+int
+gen_ospf_hdr(struct buf *buf, struct iface *iface, u_int8_t type)
 {
-	struct ospf_hdr	*ospf_hdr = buf;
+	struct ospf_hdr	ospf_hdr;
 
-	ospf_hdr->version = OSPF_VERSION;
-	ospf_hdr->type = type;
-	ospf_hdr->len = 0;			/* updated later */
-	ospf_hdr->rtr_id = iface->rtr_id.s_addr;
-	ospf_hdr->area_id = iface->area->id.s_addr;
-	ospf_hdr->chksum = 0;			/* updated later */
-	ospf_hdr->auth_type = htons(iface->auth_type);
+	bzero(&ospf_hdr, sizeof(ospf_hdr));
+	ospf_hdr.version = OSPF_VERSION;
+	ospf_hdr.type = type;
+	ospf_hdr.rtr_id = iface->rtr_id.s_addr;
+	if (iface->type != IF_TYPE_VIRTUALLINK)
+		ospf_hdr.area_id = iface->area->id.s_addr;
+	ospf_hdr.auth_type = htons(iface->auth_type);
+
+	return (buf_add(buf, &ospf_hdr, sizeof(ospf_hdr)));
 }
 
 /* send and receive packets */
 int
 send_packet(struct iface *iface, char *pkt, int len, struct sockaddr_in *dst)
 {
-	if (iface->passive) {
-		log_warnx("send_packet: cannot send packet on passive "
-		    "interface %s", iface->name);
-		return (-1);
-	}
-
 	/* set outgoing interface for multicast traffic */
 	if (IN_MULTICAST(ntohl(dst->sin_addr.s_addr)))
 		if (if_set_mcast(iface) == -1) {
@@ -108,9 +105,8 @@ recv_packet(int fd, short event, void *bula)
 		fatal("recv_packet");
 
 	if ((r = recvfrom(fd, buf, READ_BUF_SIZE, 0, NULL, NULL)) == -1) {
-		if (errno != EAGAIN) {
+		if (errno != EAGAIN && errno != EINTR)
 			log_debug("recv_packet: error receiving packet");
-		}
 		goto done;
 	}
 
@@ -161,15 +157,20 @@ recv_packet(int fd, short event, void *bula)
 	if ((l = ospf_hdr_sanity_check(&ip_hdr, ospf_hdr, len, iface)) == -1)
 		goto done;
 
+	nbr = nbr_find_id(iface, ospf_hdr->rtr_id);
+	if (ospf_hdr->type != PACKET_TYPE_HELLO && nbr == NULL) {
+		log_debug("recv_packet: unknown neighbor ID");
+		goto done;
+	}
+
+	if (auth_validate(buf, len, iface, nbr)) {
+		log_warnx("recv_packet: authentication error, "
+		    "interface %s", iface->name);
+		goto done;
+	}
+
 	buf += sizeof(*ospf_hdr);
 	len = l - sizeof(*ospf_hdr);
-
-	if (ospf_hdr->type != PACKET_TYPE_HELLO)
-		/* find neighbor */
-		if ((nbr = nbr_find_id(iface, ospf_hdr->rtr_id)) == NULL) {
-			log_debug("recv_packet: unknown neighbor ID");
-			goto done;
-		}
 
 	/* switch OSPF packet type */
 	switch (ospf_hdr->type) {
@@ -208,7 +209,7 @@ int
 ip_hdr_sanity_check(const struct ip *ip_hdr, u_int16_t len)
 {
 	if (ntohs(ip_hdr->ip_len) != len) {
-		log_debug("recv_packet: invalid IP packet length %s",
+		log_debug("recv_packet: invalid IP packet length %u",
 		    ntohs(ip_hdr->ip_len));
 		return (-1);
 	}
@@ -239,12 +240,19 @@ ospf_hdr_sanity_check(const struct ip *ip_hdr, struct ospf_hdr *ospf_hdr,
 		return (-1);
 	}
 
-	if (ospf_hdr->area_id != iface->area->id.s_addr) {
-		/* TODO backbone area is allowed for virtual links */
-		addr.s_addr = ospf_hdr->area_id;
-		log_debug("recv_packet: invalid area ID %s, interface %s",
-		    inet_ntoa(addr), iface->name);
-		return (-1);
+	if (iface->type != IF_TYPE_VIRTUALLINK) {
+		if (ospf_hdr->area_id != iface->area->id.s_addr) {
+			addr.s_addr = ospf_hdr->area_id;
+			log_debug("recv_packet: invalid area ID %s, "
+			    "interface %s", inet_ntoa(addr), iface->name);
+			return (-1);
+		}
+	 } else {
+		if (ospf_hdr->area_id != 0) {
+			log_debug("recv_packet: invalid area ID %s, "
+			    "interface %s",iface->name);
+			return (-1);
+		}
 	}
 
 	if (iface->type == IF_TYPE_BROADCAST || iface->type == IF_TYPE_NBMA) {
@@ -257,12 +265,6 @@ ospf_hdr_sanity_check(const struct ip *ip_hdr, struct ospf_hdr *ospf_hdr,
 			    if_state_name(iface->state), iface->name);
 			return (-1);
 		}
-	}
-
-	if (auth_validate(ospf_hdr, iface)) {
-		log_warnx("recv_packet: authentication error, interface %s",
-		    iface->name);
-		return (-1);
 	}
 
 	return (ntohs(ospf_hdr->len));
@@ -285,10 +287,20 @@ find_iface(struct ospfd_conf *xconf, struct in_addr src)
 
 			if (iface->fd > 0 && (iface->addr.s_addr &
 			    iface->mask.s_addr) == (src.s_addr &
-			    iface->mask.s_addr) && !iface->passive)
+			    iface->mask.s_addr) && !iface->passive &&
+			    iface->type != IF_TYPE_VIRTUALLINK) {
 				return (iface);
+			}
 		}
 	}
+
+	LIST_FOREACH(area, &xconf->area_list, entry)
+		LIST_FOREACH(iface, &area->iface_list, entry)
+			if ((iface->type == IF_TYPE_VIRTUALLINK) &&
+			    (src.s_addr == iface->dst.s_addr)) {
+				return (iface);
+			}
+
 
 	return (NULL);
 }

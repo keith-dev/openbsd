@@ -1,4 +1,4 @@
-.\"     $OpenBSD: intro.4,v 1.46 2005/03/18 02:54:25 jsg Exp $
+.\"     $OpenBSD: intro.4,v 1.49 2005/05/22 04:16:42 brad Exp $
 .\"
 .\" Copyright (c) 2001-2002 The OpenBSD Project
 .\" All Rights Reserved.
@@ -75,6 +75,8 @@ Not all supported devices are listed.
 .Bl -tag -width zs/zstty/zskbd(4) -compact -offset indent
 .It Xr agten 4
 Fujitsu AG-10e frame buffer.
+.It Xr ahc 4
+Adaptec 2xxx and 3xxx series PCI/VLB/EISA SCSI adapter boards.
 .It Xr apio 4
 Aurora SBus pio1 parallel ports.
 .It Xr asio 4
@@ -117,6 +119,8 @@ UPA Creator/Creator 3D/Elite 3D color frame buffer.
 Clones of the DEC Tulip Ethernet controller.
 .It Xr eap 4
 Ensoniq AudioPCI based audio.
+.It Xr epic 4
+SMC 83C170 (EPIC/100) Ethernet driver.
 .It Xr eso 4
 ESS Technology Solo-1 PCI AudioDrive based audio.
 .It Xr esp 4
@@ -160,6 +164,8 @@ Supported as carrier for
 or
 .Nm qe
 Ethernet controllers.
+.It Xr re 4
+Realtek 8169/8169S/8110S Gigabit Ethernet.
 .It Xr rfx 4
 Vitec/Connectware/AP&D
 .Tn RasterFlex

@@ -1,11 +1,8 @@
+/*	$OpenBSD: localeconv.c,v 1.5 2005/08/08 08:05:35 espie Exp $ */
 /*
  * Written by J.T. Conklin <jtc@netbsd.org>.
  * Public domain.
  */
-
-#if defined(LIBC_SCCS) && !defined(lint)
-static char *rcsid = "$OpenBSD: localeconv.c,v 1.3 1997/07/23 21:14:40 kstailey Exp $";
-#endif /* LIBC_SCCS and not lint */
 
 #include <sys/localedef.h>
 #include <locale.h>
@@ -26,7 +23,7 @@ int __nlocale_changed = 1;
  * Return the current locale conversion.
  */
 struct lconv *
-localeconv()
+localeconv(void)
 {
     static struct lconv ret;
 

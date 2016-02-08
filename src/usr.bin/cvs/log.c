@@ -1,4 +1,4 @@
-/*	$OpenBSD: log.c,v 1.11 2005/02/22 16:22:10 jfb Exp $	*/
+/*	$OpenBSD: log.c,v 1.25 2005/08/05 16:21:41 xsa Exp $	*/
 /*
  * Copyright (c) 2004 Jean-Francois Brousseau <jfb@openbsd.org>
  * All rights reserved.
@@ -28,20 +28,19 @@
 
 #include <errno.h>
 #include <stdio.h>
-#include <string.h>
 #include <stdlib.h>
-#include <unistd.h>
-#include <stdarg.h>
+#include <string.h>
 #include <syslog.h>
+#include <unistd.h>
 
-#include "log.h"
 #include "cvs.h"
+#include "log.h"
 
 extern char *__progname;
 
 
 #ifdef unused
-static char *cvs_log_levels[] = {
+static char *cvs_log_levels[LP_MAX + 1] = {
 	"debug",
 	"info",
 	"notice",
@@ -50,10 +49,11 @@ static char *cvs_log_levels[] = {
 	"alert",
 	"error",
 	"abort",
+	"trace",
 };
 #endif
 
-static int cvs_slpriomap[] = {
+static int cvs_slpriomap[LP_MAX + 1] = {
 	LOG_DEBUG,
 	LOG_INFO,
 	LOG_NOTICE,
@@ -62,18 +62,20 @@ static int cvs_slpriomap[] = {
 	LOG_ALERT,
 	LOG_ERR,
 	LOG_ERR,
+	LOG_DEBUG,
 };
 
+static int send_m = 1;
 static u_int cvs_log_dest = LD_STD;
 static u_int cvs_log_flags = 0;
 
 static struct syslog_data cvs_sl = SYSLOG_DATA_INIT;
 
 /* filter manipulation macros */
-#define CVS_LOG_FLTRRST()    (cvs_log_filters = 0)
-#define CVS_LOG_FLTRSET(l)   (cvs_log_filters |= (1 << l))
-#define CVS_LOG_FLTRGET(l)   (cvs_log_filters & (1 << l))
-#define CVS_LOG_FLTRCLR(l)   (cvs_log_filters &= ~(1 << l))
+#define CVS_LOG_FLTRRST()	(cvs_log_filters = 0)
+#define CVS_LOG_FLTRSET(l)	(cvs_log_filters |= (1 << l))
+#define CVS_LOG_FLTRGET(l)	(cvs_log_filters & (1 << l))
+#define CVS_LOG_FLTRCLR(l)	(cvs_log_filters &= ~(1 << l))
 
 static u_int cvs_log_filters;
 
@@ -201,8 +203,9 @@ int
 cvs_vlog(u_int level, const char *fmt, va_list vap)
 {
 	int ecp;
-	char prefix[64], buf[1024], ebuf[32];
+	char prefix[64], buf[1024], ebuf[255];
 	FILE *out;
+	struct cvs_cmd *cmdp;
 
 	if (level > LP_MAX)
 		return (-1);
@@ -216,7 +219,9 @@ cvs_vlog(u_int level, const char *fmt, va_list vap)
 	else
 		ecp = 0;
 
-#ifdef CVS
+	/* always use the command name in error messages, not aliases */
+	cmdp = cvs_findcmd(cvs_command);
+
 	/* The cvs program appends the command name to the program name */
 	if (level == LP_TRACE) {
 		strlcpy(prefix, " -> ", sizeof(prefix));
@@ -225,12 +230,11 @@ cvs_vlog(u_int level, const char *fmt, va_list vap)
 	} else if (cvs_command != NULL) {
 		if (level == LP_ABORT)
 			snprintf(prefix, sizeof(prefix), "%s [%s aborted]",
-			    __progname, cvs_command);
+			    __progname, cmdp->cmd_name);
 		else
 			snprintf(prefix, sizeof(prefix), "%s %s", __progname,
-			    cvs_command);
+			    cmdp->cmd_name);
 	} else /* just use the standard strlcpy */
-#endif
 		strlcpy(prefix, __progname, sizeof(prefix));
 
 	if ((cvs_log_flags & LF_PID) && (level != LP_TRACE)) {
@@ -245,12 +249,11 @@ cvs_vlog(u_int level, const char *fmt, va_list vap)
 	}
 
 	if (cvs_log_dest & LD_STD) {
-		if (level <= LP_NOTICE)
+		if (level < LP_NOTICE)
 			out = stdout;
 		else
 			out = stderr;
 
-#ifdef CVS
 		if (cvs_cmdop == CVS_OP_SERVER) {
 			if (out == stdout)
 				putc('M', out);
@@ -260,7 +263,6 @@ cvs_vlog(u_int level, const char *fmt, va_list vap)
 			}
 			putc(' ', out);
 		}
-#endif
 
 		fputs(prefix, out);
 		if (level != LP_TRACE)
@@ -283,18 +285,62 @@ cvs_vlog(u_int level, const char *fmt, va_list vap)
 /*
  * cvs_printf()
  *
- * Wrapper function around printf() that prepends a 'M' or 'E' command when
+ * Wrapper function around printf() that prepends a 'M' command when
  * the program is acting as server.
  */
 int
 cvs_printf(const char *fmt, ...)
 {
 	int ret;
+	char *nstr, *dp, *sp;
 	va_list vap;
 
 	va_start(vap, fmt);
-	ret = vprintf(fmt, vap);
-	va_end(vap);
 
+	if (cvs_cmdop == CVS_OP_SERVER) {
+		ret = vasprintf(&nstr, fmt, vap);
+		if (ret != -1) {
+			for (dp = nstr; *dp != '\0';) {
+				sp = strchr(dp, '\n');
+				if (sp == NULL)
+					for (sp = dp; *sp != '\0'; sp++)
+						;
+
+				if (send_m) {
+					send_m = 0;
+					putc('M', stdout);
+					putc(' ', stdout);
+				}
+
+				fwrite(dp, sizeof(char), (size_t)(sp - dp),
+				    stdout);
+
+				if (*sp != '\n')
+					break;
+
+				putc('\n', stdout);
+				send_m = 1;
+				dp = sp + 1;
+			}
+			free(nstr);
+		}
+	} else
+		ret = vprintf(fmt, vap);
+
+	va_end(vap);
 	return (ret);
+}
+void
+cvs_putchar(int c)
+{
+	if (cvs_cmdop == CVS_OP_SERVER && send_m) {
+		send_m = 0;
+		putc('M', stdout);
+		putc(' ', stdout);
+	}
+
+	putc(c, stdout);
+
+	if (cvs_cmdop == CVS_OP_SERVER && c == '\n')
+		send_m = 1;
 }

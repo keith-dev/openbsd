@@ -1,4 +1,4 @@
-/* $OpenBSD: math_2n.c,v 1.17 2005/02/27 13:12:12 hshoexer Exp $	 */
+/* $OpenBSD: math_2n.c,v 1.23 2005/05/03 13:50:44 moritz Exp $	 */
 /* $EOM: math_2n.c,v 1.15 1999/04/20 09:23:30 niklas Exp $	 */
 
 /*
@@ -43,14 +43,11 @@
 #include <string.h>
 #include <stdio.h>
 
-#include "sysdep.h"
-
 #include "math_2n.h"
 #include "util.h"
 
 static u_int8_t hex2int(char);
 
-static char     int2hex[] = "0123456789abcdef";
 CHUNK_TYPE      b2n_mask[CHUNK_BITS] = {
 	0x01, 0x02, 0x04, 0x08, 0x10, 0x20, 0x40, 0x80,
 #if CHUNK_BITS > 8
@@ -219,7 +216,7 @@ b2n_set_str(b2n_ptr n, char *str)
 		tmp = 0;
 		for (j = (i == 0 ?
 		    ((len - 1) % CHUNK_BYTES) + 1 : CHUNK_BYTES);
-		     j > 0; j--) {
+		    j > 0; j--) {
 			tmp <<= 8;
 			tmp |= (hex2int(str[w]) << 4) | hex2int(str[w + 1]);
 			w += 2;
@@ -229,72 +226,6 @@ b2n_set_str(b2n_ptr n, char *str)
 
 	n->dirty = 1;
 	return 0;
-}
-
-/* Output function, mainly for debugging purposes.  */
-void
-b2n_print(b2n_ptr n)
-{
-	int             i, j, w, flag = 0;
-	int             left;
-	char            buffer[2 * CHUNK_BYTES];
-	CHUNK_TYPE      tmp;
-
-	left = ((((7 + b2n_sigbit(n)) >> 3) - 1) % CHUNK_BYTES) + 1;
-	printf("0x");
-	for (i = 0; i < n->chunks; i++) {
-		tmp = n->limp[n->chunks - 1 - i];
-		memset(buffer, '0', sizeof(buffer));
-		for (w = 0, j = (i == 0 ? left : CHUNK_BYTES); j > 0; j--) {
-			buffer[w++] = int2hex[(tmp >> 4) & 0xf];
-			buffer[w++] = int2hex[tmp & 0xf];
-			tmp >>= 8;
-		}
-
-		for (j = (i == 0 ? left - 1 : CHUNK_BYTES - 1); j >= 0; j--)
-			if (flag || (i == n->chunks - 1 && j == 0) ||
-			 buffer[2 * j] != '0' || buffer[2 * j + 1] != '0') {
-				putchar(buffer[2 * j]);
-				putchar(buffer[2 * j + 1]);
-				flag = 1;
-			}
-	}
-	printf("\n");
-}
-
-int
-b2n_snprint(char *buf, size_t sz, b2n_ptr n)
-{
-	int             i, j, w, flag = 0;
-	size_t          k;
-	int             left;
-	char            buffer[2 * CHUNK_BYTES];
-	CHUNK_TYPE      tmp;
-
-	left = ((((7 + b2n_sigbit(n)) >> 3) - 1) % CHUNK_BYTES) + 1;
-
-	k = strlcpy(buf, "0x", sz);
-	for (i = 0; i < n->chunks && k < sz - 1; i++) {
-		tmp = n->limp[n->chunks - 1 - i];
-		memset(buffer, '0', sizeof(buffer));
-		for (w = 0, j = (i == 0 ? left : CHUNK_BYTES); j > 0; j--) {
-			buffer[w++] = int2hex[(tmp >> 4) & 0xf];
-			buffer[w++] = int2hex[tmp & 0xf];
-			tmp >>= 8;
-		}
-
-		for (j = (i == 0 ? left - 1 : CHUNK_BYTES - 1); j >= 0
-		    && k < sz - 3; j--)
-			if (flag || (i == n->chunks - 1 && j == 0) ||
-			    buffer[2 * j] != '0' || buffer[2 * j + 1] != '0') {
-				buf[k++] = buffer[2 * j];
-				buf[k++] = buffer[2 * j + 1];
-				flag = 1;
-			}
-	}
-
-	buf[k++] = 0;
-	return k;
 }
 
 /* Arithmetic functions.  */
@@ -398,8 +329,7 @@ b2n_cmp_null(b2n_ptr a)
 	do {
 		if (a->limp[i])
 			return 1;
-	}
-	while (++i < a->chunks);
+	} while (++i < a->chunks);
 
 	return 0;
 }
@@ -656,8 +586,8 @@ b2n_div(b2n_ptr q, b2n_ptr r, b2n_ptr n, b2n_ptr m)
 	/* The first iteration is done over the relevant bits */
 	bits = (CHUNK_MASK + sn) & CHUNK_MASK;
 	for (i = len; i >= 0 && b2n_sigbit(nenn) >= sm; i--)
-		for (j = (i == len ? bits : CHUNK_MASK); j >= 0
-		    && b2n_sigbit(nenn) >= sm; j--) {
+		for (j = (i == len ? bits : CHUNK_MASK); j >= 0 &&
+		    b2n_sigbit(nenn) >= sm; j--) {
 			if (nenn->limp[i] & b2n_mask[j]) {
 				if (b2n_sub(nenn, nenn, shift))
 					goto fail;
@@ -942,8 +872,7 @@ b2n_sqrt(b2n_ptr zo, b2n_ptr b, b2n_ptr ip)
 			if (b2n_add(w, w, p))	/* w**2 + p */
 				goto fail;
 		}
-	}
-	while (!b2n_cmp_null(w));
+	} while (!b2n_cmp_null(w));
 
 	B2N_SWAP(zo, z);
 

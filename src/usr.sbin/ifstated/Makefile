@@ -1,4 +1,4 @@
-#	$OpenBSD: Makefile,v 1.4 2004/12/14 10:24:15 mpf Exp $
+#	$OpenBSD: Makefile,v 1.6 2005/08/06 08:27:16 sturm Exp $
 
 PROG=	ifstated
 SRCS=	ifstated.c parse.y
@@ -7,7 +7,7 @@ CFLAGS+= -Wstrict-prototypes -Wmissing-prototypes
 CLFAGS+= -Wmissing-declarations -Wredundant-decls
 CFLAGS+= -Wshadow -Wpointer-arith -Wcast-qual
 YFLAGS=
-MAN= ifstated.8
-LDADD+=-lutil -levent
+MAN= ifstated.8 ifstated.conf.5
+LDADD+=-levent
 
 .include <bsd.prog.mk>

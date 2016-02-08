@@ -1,3 +1,4 @@
+/*	$OpenBSD: wbuf.c,v 1.9 2005/08/08 08:05:36 espie Exp $ */
 /*-
  * Copyright (c) 1990, 1993
  *	The Regents of the University of California.  All rights reserved.
@@ -30,10 +31,6 @@
  * SUCH DAMAGE.
  */
 
-#if defined(LIBC_SCCS) && !defined(lint)
-static char rcsid[] = "$OpenBSD: wbuf.c,v 1.7 2004/09/28 18:12:44 otto Exp $";
-#endif /* LIBC_SCCS and not lint */
-
 #include <stdio.h>
 #include <errno.h>
 #include "local.h"
@@ -48,6 +45,7 @@ __swbuf(int c, FILE *fp)
 {
 	int n;
 
+	_SET_ORIENTATION(fp, -1);
 	/*
 	 * In case we cannot write, or longjmp takes us out early,
 	 * make sure _w is 0 (if fully- or un-buffered) or -_bf._size

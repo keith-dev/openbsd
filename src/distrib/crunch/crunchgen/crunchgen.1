@@ -1,4 +1,4 @@
-.\"	$OpenBSD: crunchgen.1,v 1.15 2004/08/24 09:11:39 jmc Exp $
+.\"	$OpenBSD: crunchgen.1,v 1.18 2005/08/04 05:08:15 jmc Exp $
 .\"
 .\"
 .\" Copyright (c) 1994 University of Maryland
@@ -60,7 +60,9 @@ For each component program,
 .Nm
 can optionally attempt to determine the object (.o) files that make up
 the program from its source directory Makefile.
-This information is cached between runs.
+This information is cached in a file named
+.Pa <conf-name>.cache
+between runs.
 .Nm
 uses the companion program
 .Xr crunchide 1
@@ -142,6 +144,9 @@ These dirs are searched using the BSD
 convention.
 Multiple srcdirs lines can be specified.
 The directories are searched in the order they are given.
+.It libdirs Ar dirname
+A list of source trees in which the source directories for supplementary
+libraries can be found.
 .It progs Ar progname ...
 A list of programs that make up the crunched binary.
 Multiple progs lines can be specified.

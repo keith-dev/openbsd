@@ -1,4 +1,4 @@
-/* $OpenBSD: user.c,v 1.61 2004/09/30 15:07:41 otto Exp $ */
+/* $OpenBSD: user.c,v 1.65 2005/08/27 23:12:36 deraadt Exp $ */
 /* $NetBSD: user.c,v 1.69 2003/04/14 17:40:07 agc Exp $ */
 
 /*
@@ -120,7 +120,7 @@ enum {
 #endif
 
 #ifndef DEF_SHELL
-#define DEF_SHELL	_PATH_CSHELL
+#define DEF_SHELL	_PATH_KSHELL
 #endif
 
 #ifndef DEF_COMMENT
@@ -540,7 +540,9 @@ append_group(char *user, int ngroups, const char **groups)
 			continue;
 		}
 		for (i = 0 ; i < ngroups ; i++) {
-			if (strncmp(groups[i], buf, colon - buf) == 0) {
+			j = (int)(colon - buf);
+			if (strncmp(groups[i], buf, j) == 0 &&
+			    groups[i][j] == '\0') {
 				while (isspace(buf[cc - 1]))
 					cc--;
 				buf[(j = cc)] = '\0';
@@ -1114,6 +1116,11 @@ adduser(char *login_name, user_t *up)
 	}
 	if (yp) {
 		cc = snprintf(buf, sizeof(buf), "+:*::::::::\n");
+		if (cc == -1 || cc >= sizeof(buf)) {
+			(void) close(ptmpfd);
+			pw_abort();
+			errx(EXIT_FAILURE, "can't add `%s', line too long", buf);
+		}
 		if (write(ptmpfd, buf, (size_t) cc) != cc) {
 			(void) close(ptmpfd);
 			pw_abort();

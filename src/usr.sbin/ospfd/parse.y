@@ -1,4 +1,4 @@
-/*	$OpenBSD: parse.y,v 1.8 2005/03/12 11:03:05 norby Exp $ */
+/*	$OpenBSD: parse.y,v 1.16 2005/06/28 22:35:34 claudio Exp $ */
 
 /*
  * Copyright (c) 2004, 2005 Esben Norby <norby@openbsd.org>
@@ -65,7 +65,7 @@ int	 check_file_secrecy(int fd, const char *fname);
 
 static struct {
 	u_int32_t	dead_interval;
-	u_int16_t	transfer_delay;
+	u_int16_t	transmit_delay;
 	u_int16_t	hello_interval;
 	u_int16_t	rxmt_interval;
 	u_int16_t	metric;
@@ -97,9 +97,9 @@ typedef struct {
 
 %}
 
-%token	AREA INTERFACE ROUTERID FIBUPDATE
-%token	SPFDELAY SPFHOLDTIME
-%token	AUTHKEY AUTHTYPE
+%token	AREA INTERFACE ROUTERID FIBUPDATE REDISTRIBUTE
+%token	RFC1583COMPAT SPFDELAY SPFHOLDTIME
+%token	AUTHKEY AUTHTYPE AUTHMD AUTHMDKEYID
 %token	METRIC PASSIVE
 %token	HELLOINTERVAL TRANSMITDELAY
 %token	RETRANSMITINTERVAL ROUTERDEADTIME ROUTERPRIORITY
@@ -194,11 +194,11 @@ conf_main	: METRIC number {
 		| TRANSMITDELAY number {
 			if ($2 < MIN_TRANSMIT_DELAY ||
 			    $2 > MAX_TRANSMIT_DELAY) {
-				yyerror("transfer-delay out of range (%d-%d)",
+				yyerror("transmit-delay out of range (%d-%d)",
 				    MIN_TRANSMIT_DELAY, MAX_TRANSMIT_DELAY);
 				YYERROR;
 			}
-			defaults.transfer_delay = $2;
+			defaults.transmit_delay = $2;
 		}
 		| HELLOINTERVAL number {
 			if ($2 < MIN_HELLO_INTERVAL ||
@@ -231,6 +231,28 @@ conf_main	: METRIC number {
 			else
 				conf->flags &= ~OSPFD_FLAG_NO_FIB_UPDATE;
 		}
+		| REDISTRIBUTE STRING {
+			if (!strcmp($2, "static"))
+				conf->redistribute_flags |=
+				    REDISTRIBUTE_STATIC;
+			else if (!strcmp($2, "connected"))
+				conf->redistribute_flags |=
+				    REDISTRIBUTE_CONNECTED;
+			else if (!strcmp($2, "default"))
+				conf->redistribute_flags |=
+				    REDISTRIBUTE_DEFAULT;
+			else if (!strcmp($2, "none"))
+				conf->redistribute_flags = 0;
+			else {
+				yyerror("unknown redistribute type");
+				free($2);
+				YYERROR;
+			}
+			free($2);
+		}
+		| RFC1583COMPAT yesno {
+			conf->rfc1583compat = $2;
+		}
 		| SPFDELAY number {
 			if ($2 < MIN_SPF_DELAY || $2 > MAX_SPF_DELAY) {
 				yyerror("spf-delay out of range "
@@ -251,6 +273,37 @@ conf_main	: METRIC number {
 		}
 		;
 
+authmd		: AUTHMD number STRING {
+			if (iface != NULL) {
+				if ($2 < MIN_MD_ID || $2 > MAX_MD_ID) {
+					yyerror("auth-keyid out of range "
+					    "(%d-%d)", MIN_MD_ID, MAX_MD_ID);
+					free($3);
+					YYERROR;
+				}
+				if (strlen($3) > MD5_DIGEST_LENGTH) {
+					yyerror("auth-md length out of range "
+					    "(max length %d)",
+					    MD5_DIGEST_LENGTH);
+					free($3);
+					YYERROR;
+				}
+				md_list_add(iface, $2, $3);
+			}
+			free($3);
+		}
+
+authmdkeyid	: AUTHMDKEYID number {
+			if (iface != NULL) {
+				if ($2 < MIN_MD_ID || $2 > MAX_MD_ID) {
+					yyerror("auth-keyid out of range "
+					    "(%d-%d)", MIN_MD_ID, MAX_MD_ID);
+					YYERROR;
+				}
+				iface->auth_keyid = $2;
+			}
+		}
+
 authtype	: AUTHTYPE STRING {
 			enum auth_type	type;
 
@@ -259,7 +312,7 @@ authtype	: AUTHTYPE STRING {
 			else if (!strcmp($2, "simple"))
 				type = AUTH_SIMPLE;
 			else if (!strcmp($2, "crypt"))
-				type = AUTH_SIMPLE;
+				type = AUTH_CRYPT;
 			else {
 				yyerror("unknown auth-type");
 				free($2);
@@ -272,8 +325,13 @@ authtype	: AUTHTYPE STRING {
 
 authkey		: AUTHKEY STRING {
 			if (iface != NULL) {
+				if (strlen($2) > MAX_SIMPLE_AUTH_LEN) {
+					yyerror("auth-key size out of range "
+					    "(max %d)", MAX_SIMPLE_AUTH_LEN);
+					free($2);
+					YYERROR;
+				}
 				iface->auth_key = $2;
-				/* XXX truncate and warn! */
 			}
 		}
 		;
@@ -294,9 +352,7 @@ area		: AREA string {
 			}
 			free($2);
 			area = conf_get_area(id);
-		} optnl '{' optnl {
-
-		} areaopts_l '}' {
+		} '{' optnl areaopts_l '}' {
 			area = NULL;
 		}
 		;
@@ -333,11 +389,11 @@ areaoptsl	: interface nl
 		| TRANSMITDELAY number nl {
 			if ($2 < MIN_TRANSMIT_DELAY ||
 			    $2 > MAX_TRANSMIT_DELAY) {
-				yyerror("transfer-delay out of range (%d-%d)",
+				yyerror("transmit-delay out of range (%d-%d)",
 				    MIN_TRANSMIT_DELAY, MAX_TRANSMIT_DELAY);
 				YYERROR;
 			}
-			area->transfer_delay = $2;
+			area->transmit_delay = $2;
 		}
 		| HELLOINTERVAL number nl {
 			if ($2 < MIN_HELLO_INTERVAL ||
@@ -359,7 +415,7 @@ areaoptsl	: interface nl
 		}
 		;
 
-interface	: INTERFACE STRING {
+interface	: INTERFACE STRING	{
 			struct kif *kif;
 
 			if ((kif = kif_findname($2)) == NULL) {
@@ -375,21 +431,25 @@ interface	: INTERFACE STRING {
 			LIST_INSERT_HEAD(&area->iface_list,
 			    iface, entry);
 			iface->rtr_id = conf->rtr_id;
-			iface->passive = false;
-		} optnl '{' optnl {
-
-		} interfaceopts_l '}' {
+			iface->passive = 0;
+		} interface_block {
 			iface = NULL;
 		}
+		;
+
+interface_block	: '{' optnl interfaceopts_l '}'
+		|
 		;
 
 interfaceopts_l	: interfaceopts_l interfaceoptsl
 		| interfaceoptsl
 		;
 
-interfaceoptsl	: authkey nl
+interfaceoptsl	: authmd nl
+		| authkey nl
+		| authmdkeyid nl
 		| authtype nl
-		| PASSIVE nl		{ iface->passive = true; }
+		| PASSIVE nl		{ iface->passive = 1; }
 		| METRIC number nl {
 			if ($2 < MIN_METRIC || $2 > MAX_METRIC) {
 				yyerror("metric out of range (%d-%d)",
@@ -417,11 +477,11 @@ interfaceoptsl	: authkey nl
 		| TRANSMITDELAY number nl {
 			if ($2 < MIN_TRANSMIT_DELAY ||
 			    $2 > MAX_TRANSMIT_DELAY) {
-				yyerror("transfer-delay out of range (%d-%d)",
+				yyerror("transmit-delay out of range (%d-%d)",
 				    MIN_TRANSMIT_DELAY, MAX_TRANSMIT_DELAY);
 				YYERROR;
 			}
-			iface->transfer_delay = $2;
+			iface->transmit_delay = $2;
 		}
 		| HELLOINTERVAL number nl {
 			if ($2 < MIN_HELLO_INTERVAL ||
@@ -478,13 +538,17 @@ lookup(char *s)
 	static const struct keywords keywords[] = {
 		{"area",		AREA},
 		{"auth-key",		AUTHKEY},
+		{"auth-md",		AUTHMD},
+		{"auth-md-keyid",	AUTHMDKEYID},
 		{"auth-type",		AUTHTYPE},
 		{"fib-update",		FIBUPDATE},
 		{"hello-interval",	HELLOINTERVAL},
 		{"interface",		INTERFACE},
 		{"metric",		METRIC},
 		{"passive",		PASSIVE},
+		{"redistribute",	REDISTRIBUTE},
 		{"retransmit-interval",	RETRANSMITINTERVAL},
+		{"rfc1583compat",	RFC1583COMPAT},
 		{"router-dead-time",	ROUTERDEADTIME},
 		{"router-id",		ROUTERID},
 		{"router-priority",	ROUTERPRIORITY},
@@ -706,7 +770,7 @@ parse_config(char *filename, int opts)
 	}
 
 	defaults.dead_interval = DEFAULT_RTR_DEAD_TIME;
-	defaults.transfer_delay = DEFAULT_TRANSMIT_DELAY;
+	defaults.transmit_delay = DEFAULT_TRANSMIT_DELAY;
 	defaults.hello_interval = DEFAULT_HELLO_INTERVAL;
 	defaults.rxmt_interval = DEFAULT_RXMT_INTERVAL;
 	defaults.metric = DEFAULT_METRIC;
@@ -727,11 +791,12 @@ parse_config(char *filename, int opts)
 	conf->opts = opts;
 	LIST_INIT(&conf->area_list);
 
-	if (check_file_secrecy(fileno(fin), filename)) {
-		fclose(fin);
-		free(conf);
-		return (NULL);
-	}
+	if (!(conf->opts & OSPFD_OPT_NOACTION))
+		if (check_file_secrecy(fileno(fin), filename)) {
+			fclose(fin);
+			free(conf);
+			return (NULL);
+		}
 
 	yyparse();
 
@@ -861,7 +926,7 @@ conf_get_area(struct in_addr id)
 	LIST_INSERT_HEAD(&conf->area_list, a, entry);
 
 	a->dead_interval = defaults.dead_interval;
-	a->transfer_delay = defaults.transfer_delay;
+	a->transmit_delay = defaults.transmit_delay;
 	a->hello_interval = defaults.hello_interval;
 	a->rxmt_interval = defaults.rxmt_interval;
 	a->metric = defaults.metric;
@@ -888,7 +953,7 @@ conf_get_if(struct kif *kif)
 
 	i = if_new(kif);
 	i->dead_interval = area->dead_interval;
-	i->transfer_delay = area->transfer_delay;
+	i->transmit_delay = area->transmit_delay;
 	i->hello_interval = area->hello_interval;
 	i->rxmt_interval = area->rxmt_interval;
 	i->metric = area->metric;

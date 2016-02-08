@@ -1,3 +1,4 @@
+/*	$OpenBSD: ctype_.c,v 1.9 2005/08/08 08:05:33 espie Exp $ */
 /*
  * Copyright (c) 1989 The Regents of the University of California.
  * All rights reserved.
@@ -32,13 +33,10 @@
  * SUCH DAMAGE.
  */
 
-#if defined(LIBC_SCCS) && !defined(lint)
-static char rcsid[] = "$OpenBSD: ctype_.c,v 1.6 2003/06/02 20:18:34 millert Exp $";
-#endif /* LIBC_SCCS and not lint */
-
 #include <ctype.h>
+#include "ctype_private.h"
 
-const char _C_ctype_[1 + 256] = {
+const char _C_ctype_[1 + CTYPE_NUM_CHARS] = {
 	0,
 	_C,	_C,	_C,	_C,	_C,	_C,	_C,	_C,
 	_C,	_C|_S,	_C|_S,	_C|_S,	_C|_S,	_C|_S,	_C,	_C,
@@ -55,20 +53,14 @@ const char _C_ctype_[1 + 256] = {
 	_P,	_L|_X,	_L|_X,	_L|_X,	_L|_X,	_L|_X,	_L|_X,	_L,
 	_L,	_L,	_L,	_L,	_L,	_L,	_L,	_L,
 	_L,	_L,	_L,	_L,	_L,	_L,	_L,	_L,
-/*
- * define USE7BIT to force 7-bit ANSI behavior, otherwise the routine
- * will determine printability based on the IS0 8859 8-bit standard
- */
-#ifdef USE7BIT
-	_L,	_L,	_L,	_P,	_P,	_P,	_P,	_C
-#else
+/* determine printability based on the IS0 8859 8-bit standard */
 	_L,	_L,	_L,	_P,	_P,	_P,	_P,	_C,
 
 	_C,	_C,	_C,	_C,	_C,	_C,	_C,	_C, /* 80 */
-	_C,	_C|_S,	_C|_S,	_C|_S,	_C|_S,	_C|_S,	_C,	_C, /* 88 */
+	_C,	_C,	_C,	_C,	_C,	_C,	_C,	_C, /* 88 */
 	_C,	_C,	_C,	_C,	_C,	_C,	_C,	_C, /* 90 */
 	_C,	_C,	_C,	_C,	_C,	_C,	_C,	_C, /* 98 */
-   _S|(char)_B,	_P,	_P,	_P,	_P,	_P,	_P,	_P, /* A0 */
+	_P,	_P,	_P,	_P,	_P,	_P,	_P,	_P, /* A0 */
 	_P,	_P,	_P,	_P,	_P,	_P,	_P,	_P, /* A8 */
 	_P,	_P,	_P,	_P,	_P,	_P,	_P,	_P, /* B0 */
 	_P,	_P,	_P,	_P,	_P,	_P,	_P,	_P, /* B8 */
@@ -80,7 +72,6 @@ const char _C_ctype_[1 + 256] = {
 	_P,	_P,	_P,	_P,	_P,	_P,	_P,	_P, /* E8 */
 	_P,	_P,	_P,	_P,	_P,	_P,	_P,	_P, /* F0 */
 	_P,	_P,	_P,	_P,	_P,	_P,	_P,	_P  /* F8 */
-#endif /*USE7BIT*/
 };
 
 const char *_ctype_ = _C_ctype_;

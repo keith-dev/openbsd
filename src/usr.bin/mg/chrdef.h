@@ -1,4 +1,6 @@
-/*	$OpenBSD: chrdef.h,v 1.5 2002/02/21 04:15:30 deraadt Exp $	*/
+/*	$OpenBSD: chrdef.h,v 1.7 2005/06/14 18:14:40 kjell Exp $	*/
+
+/* This file is in the public domain. */
 
 /*
  * sys/default/chardef.h: character set specific #defines for Mg 2a
@@ -6,7 +8,7 @@
  */
 
 /*
- * Casting should be at least as efficent as anding with 0xff,
+ * Casting should be at least as efficient as anding with 0xff,
  * and won't have the size problems.  Override in sysdef.h if no
  * unsigned char type.
  */

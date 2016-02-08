@@ -143,12 +143,12 @@ sub main'shl	{ &out2("sall",@_); }
 sub main'shr	{ &out2("shrl",@_); }
 sub main'xor	{ &out2("xorl",@_); }
 sub main'xorb	{ &out2("xorb",@_); }
-sub main'add	{ &out2("addl",@_); }
+sub main'add	{ &out2($_[0]=~/%[a-d][lh]/?"addb":"addl",@_); }
 sub main'adc	{ &out2("adcl",@_); }
 sub main'sub	{ &out2("subl",@_); }
 sub main'rotl	{ &out2("roll",@_); }
 sub main'rotr	{ &out2("rorl",@_); }
-sub main'exch	{ &out2("xchg",@_); }
+sub main'exch	{ &out2($_[0]=~/%[a-d][lh]/?"xchgb":"xchgl",@_); }
 sub main'cmp	{ &out2("cmpl",@_); }
 sub main'lea	{ &out2("leal",@_); }
 sub main'mul	{ &out1("mull",@_); }
@@ -170,7 +170,7 @@ sub main'jc	{ &out1("jc",@_); }
 sub main'jnc	{ &out1("jnc",@_); }
 sub main'jno	{ &out1("jno",@_); }
 sub main'dec	{ &out1("decl",@_); }
-sub main'inc	{ &out1("incl",@_); }
+sub main'inc	{ &out1($_[0]=~/%[a-d][hl]/?"incb":"incl",@_); }
 sub main'push	{ &out1("pushl",@_); $stack+=4; }
 sub main'pop	{ &out1("popl",@_); $stack-=4; }
 sub main'pushf	{ &out0("pushf"); $stack+=4; }
@@ -179,6 +179,9 @@ sub main'not	{ &out1("notl",@_); }
 sub main'call	{ &out1("call",($_[0]=~/^\.L/?'':$under).$_[0]); }
 sub main'ret	{ &out0("ret"); }
 sub main'nop	{ &out0("nop"); }
+sub main'test   { &out2("testl",@_); }
+sub main'movz	{ &out2("movzbl",@_); }
+sub main'neg    { &out1("negl",@_); }
 
 # The bswapl instruction is new for the 486. Emulate if i386.
 sub main'bswap
@@ -461,6 +464,12 @@ sub main'comment
 		}
 	}
 
+sub main'public_label
+        {
+        $label{$_[0]}="${under}${_[0]}" if (!defined($label{$_[0]}));
+        push(@out,".globl\t$label{$_[0]}\n");
+        }
+
 sub main'label
 	{
 	if (!defined($label{$_[0]}))
@@ -497,7 +506,7 @@ sub main'file_end
 
 sub main'data_word
 	{
-	push(@out,"\t.long $_[0]\n");
+	push(@out,"\t.long\t".join(',',@_)."\n");
 	}
 
 # debug output functions: puts, putx, printf

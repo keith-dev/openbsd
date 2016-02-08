@@ -1,4 +1,4 @@
-/*	$OpenBSD: main.c,v 1.59 2005/02/24 09:44:36 moritz Exp $	*/
+/*	$OpenBSD: main.c,v 1.65 2005/07/22 08:38:46 jmc Exp $	*/
 
 #ifndef SMALL
 static const char copyright[] =
@@ -36,7 +36,7 @@ static const char license[] =
 #endif /* SMALL */
 
 #ifndef SMALL
-static const char main_rcsid[] = "$OpenBSD: main.c,v 1.59 2005/02/24 09:44:36 moritz Exp $";
+static const char main_rcsid[] = "$OpenBSD: main.c,v 1.65 2005/07/22 08:38:46 jmc Exp $";
 #endif
 
 #include <sys/param.h>
@@ -70,7 +70,7 @@ const struct compressor {
 	void *(*open)(int, const char *, char *, int, u_int32_t, int);
 	int (*read)(void *, char *, int);
 	int (*write)(void *, const char *, int);
-	int (*close)(void *, struct z_info *);
+	int (*close)(void *, struct z_info *, const char *, struct stat *);
 } c_table[] = {
 #define M_DEFLATE (&c_table[0])
   { "deflate", ".gz", "\037\213", gz_open, gz_read, gz_write, gz_close },
@@ -95,7 +95,6 @@ const struct compressor null_method =
 #endif /* SMALL */
 
 int permission(const char *);
-void setfile(const char *, struct stat *);
 __dead void usage(int);
 int docompress(const char *, char *, const struct compressor *,
     int, struct stat *);
@@ -186,9 +185,8 @@ main(int argc, char *argv[])
 		    (p = strtok_r(NULL, " ", &last)), i++)
 			if (i < sizeof(nargv)/sizeof(nargv[1]) - argc - 1)
 				nargv[i] = p;
-			else {
+			else
 				errx(1, "GZIP is too long");
-			}
 		argc += i - 1;
 		while ((nargv[i++] = *argv++))
 			;
@@ -419,12 +417,11 @@ main(int argc, char *argv[])
 			fprintf(stderr, "%s:\t", infile);
 
 		error = (decomp ? dodecompress : docompress)
-			(infile, outfile, method, bits, entry->fts_statp);
+		    (infile, outfile, method, bits, entry->fts_statp);
 
 		switch (error) {
 		case SUCCESS:
 			if (!cat && !testmode) {
-				setfile(outfile, entry->fts_statp);
 				if (!pipin && unlink(infile) && verbose >= 0)
 					warn("input: %s", infile);
 			}
@@ -471,7 +468,7 @@ docompress(const char *in, char *out, const struct compressor *method,
 
 	if ((ifd = open(in, O_RDONLY)) < 0) {
 		if (verbose >= 0)
-			warn("%s", out);
+			warn("%s", in);
 		return (FAILURE);
 	}
 
@@ -517,7 +514,7 @@ docompress(const char *in, char *out, const struct compressor *method,
 		error = FAILURE;
 	}
 
-	if ((method->close)(cookie, &info)) {
+	if ((method->close)(cookie, &info, out, sb)) {
 		if (!error && verbose >= 0)
 			warn("%s", out);
 		error = FAILURE;
@@ -616,7 +613,7 @@ dodecompress(const char *in, char *out, const struct compressor *method,
 	else if ((ofd = open(out, O_WRONLY|O_CREAT|O_TRUNC, S_IWUSR)) < 0) {
 		if (verbose >= 0)
 			warn("%s", in);
-		(method->close)(cookie, NULL);
+		(method->close)(cookie, NULL, NULL, NULL);
 		return (FAILURE);
 	}
 
@@ -636,12 +633,11 @@ dodecompress(const char *in, char *out, const struct compressor *method,
 		error = errno == EINVAL ? WARNING : FAILURE;
 	}
 
-	if ((method->close)(cookie, &info)) {
+	if ((method->close)(cookie, &info, NULL, NULL)) {
 		if (!error && verbose >= 0)
 			warnx("%s", in);
 		error = FAILURE;
 	}
-
 	if (!nosave) {
 		if (info.mtime != 0) {
 			sb->st_mtimespec.tv_sec =
@@ -654,6 +650,8 @@ dodecompress(const char *in, char *out, const struct compressor *method,
 		if (cat && strcmp(out, "/dev/stdout") != 0)
 			cat = 0;		/* have a real output name */
 	}
+	if (error == SUCCESS)
+		setfile(out, ofd, sb);
 
 	if (ofd != -1 && close(ofd)) {
 		if (!error && verbose >= 0)
@@ -676,16 +674,12 @@ dodecompress(const char *in, char *out, const struct compressor *method,
 }
 
 void
-setfile(const char *name, struct stat *fs)
+setfile(const char *name, int fd, struct stat *fs)
 {
 	struct timeval tv[2];
 
-	if (!pipin || !nosave) {
-		TIMESPEC_TO_TIMEVAL(&tv[0], &fs->st_atimespec);
-		TIMESPEC_TO_TIMEVAL(&tv[1], &fs->st_mtimespec);
-		if (utimes(name, tv))
-			warn("utimes: %s", name);
-	}
+	if (name == NULL || cat || testmode)
+		return;
 
 	/*
 	 * If input was a pipe we don't have any info to restore but we
@@ -693,7 +687,7 @@ setfile(const char *name, struct stat *fs)
 	 */
 	if (pipin) {
 		mode_t mask = umask(022);
-		chmod(name, DEFFILEMODE & ~mask);
+		fchmod(fd, DEFFILEMODE & ~mask);
 		umask(mask);
 		return;
 	}
@@ -705,16 +699,23 @@ setfile(const char *name, struct stat *fs)
 	 * chown.  If chown fails, lose setuid/setgid bits.
 	 */
 	fs->st_mode &= S_ISUID|S_ISGID|S_IRWXU|S_IRWXG|S_IRWXO;
-	if (chown(name, fs->st_uid, fs->st_gid)) {
+	if (fchown(fd, fs->st_uid, fs->st_gid)) {
 		if (errno != EPERM)
-			warn("chown: %s", name);
+			warn("fchown: %s", name);
 		fs->st_mode &= ~(S_ISUID|S_ISGID);
 	}
-	if (chmod(name, fs->st_mode))
-		warn("chown: %s", name);
+	if (fchmod(fd, fs->st_mode))
+		warn("fchmod: %s", name);
 
-	if (fs->st_flags && chflags(name, fs->st_flags))
-		warn("chflags: %s", name);
+	if (fs->st_flags && fchflags(fd, fs->st_flags))
+		warn("fchflags: %s", name);
+
+	if (!nosave) {
+		TIMESPEC_TO_TIMEVAL(&tv[0], &fs->st_atimespec);
+		TIMESPEC_TO_TIMEVAL(&tv[1], &fs->st_mtimespec);
+		if (futimes(fd, tv))
+			warn("futimes: %s", name);
+	}
 }
 
 int
@@ -811,7 +812,7 @@ list_stats(const char *name, const struct compressor *method,
 			if (timestr[4] == ' ')
 				timestr[4] = '0';
 			printf("%-7.7s %08x %s ", method->name, info->crc,
-				timestr);
+			    timestr);
 		}
 		printf("%10lld    %10lld  %4.1f%%  %s\n",
 		    (long long)(info->total_in + info->hlen),
@@ -856,7 +857,8 @@ __dead void
 usage(int status)
 {
 	fprintf(stderr,
-	    "usage: %s [-cdfghOqrtvV] [-b bits] [-S suffix] [-[1-9]] [file ...]\n",
+	    "usage: %s [-123456789cdfghLlNnOqrtVv] [-b bits] [-o filename]\n"
+	    "\t[-S suffix] [file ...]\n",
 	    __progname);
 	exit(status);
 }

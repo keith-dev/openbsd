@@ -1,4 +1,4 @@
-.\" $OpenBSD: gsckbd.4,v 1.11 2004/09/30 19:59:26 mickey Exp $
+.\" $OpenBSD: gsckbd.4,v 1.15 2005/05/20 08:58:43 jmc Exp $
 .\"
 .\" Copyright (c) 2003, Miodrag Vallat.
 .\" All rights reserved.
@@ -48,7 +48,7 @@
 .\" OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
 .\" SUCH DAMAGE.
 .\"
-.Dd March 16, 2004
+.Dd May 6, 2005
 .Dt GSCKBD 4 hppa
 .Os
 .Sh NAME
@@ -89,6 +89,10 @@ The built-in mappings are at this time:
 (
 .Dq br
 ) Brazilian.
+.It KB_CF
+(
+.Dq cf
+) Canadian French.
 .It KB_DE
 (
 .Dq de
@@ -231,8 +235,10 @@ and sending an ESC character before the key symbol if the ALT
 key is pressed simultaneously, use
 .Ic wsconsctl -w keyboard.encoding=de.nodead.metaesc .
 To set it at kernel build time, add
-.Em option PCKBD_LAYOUT="(KB_DE|KB_NODEAD|KB_METAESC)"
-to the kernel configuration file.
+the following to the kernel configuration file:
+.Bd -literal -offset indent
+option PCKBD_LAYOUT="(KB_DE|KB_NODEAD|KB_METAESC)"
+.Ed
 .Sh SEE ALSO
 .Xr gsc 4 ,
 .Xr gsckbc 4 ,

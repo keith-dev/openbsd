@@ -1,3 +1,4 @@
+/*	$OpenBSD: auth_none.c,v 1.9 2005/08/08 08:05:35 espie Exp $ */
 /*
  * Sun RPC is a product of Sun Microsystems, Inc. and is provided for
  * unrestricted use provided that this legend is included on all tape
@@ -26,10 +27,6 @@
  * 2550 Garcia Avenue
  * Mountain View, California  94043
  */
-
-#if defined(LIBC_SCCS) && !defined(lint)
-static char *rcsid = "$OpenBSD: auth_none.c,v 1.7 2001/09/15 13:51:00 deraadt Exp $";
-#endif /* LIBC_SCCS and not lint */
 
 /*
  * auth_none.c
@@ -70,7 +67,7 @@ static struct authnone_private {
 } *authnone_private;
 
 AUTH *
-authnone_create()
+authnone_create(void)
 {
 	struct authnone_private *ap = authnone_private;
 	XDR xdr_stream;
@@ -98,9 +95,7 @@ authnone_create()
 
 /*ARGSUSED*/
 static bool_t
-authnone_marshal(client, xdrs)
-	AUTH *client;
-	XDR *xdrs;
+authnone_marshal(AUTH *client, XDR *xdrs)
 {
 	struct authnone_private *ap = authnone_private;
 

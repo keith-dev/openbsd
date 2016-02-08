@@ -1,3 +1,4 @@
+/*	$OpenBSD: alarm.c,v 1.7 2005/08/08 08:05:33 espie Exp $ */
 /*
  * Copyright (c) 1983, 1993
  *	The Regents of the University of California.  All rights reserved.
@@ -27,10 +28,6 @@
  * SUCH DAMAGE.
  */
 
-#if defined(LIBC_SCCS) && !defined(lint)
-static char rcsid[] = "$OpenBSD: alarm.c,v 1.5 2003/06/11 21:03:10 deraadt Exp $";
-#endif /* LIBC_SCCS and not lint */
-
 /*
  * Backwards compatible alarm.
  */
@@ -41,7 +38,7 @@ unsigned int
 alarm(unsigned int secs)
 {
 	struct itimerval it, oitv;
-	register struct itimerval *itp = &it;
+	struct itimerval *itp = &it;
 
 	timerclear(&itp->it_interval);
 	itp->it_value.tv_sec = secs;

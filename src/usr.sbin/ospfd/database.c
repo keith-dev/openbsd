@@ -1,4 +1,4 @@
-/*	$OpenBSD: database.c,v 1.5 2005/02/10 14:05:48 claudio Exp $ */
+/*	$OpenBSD: database.c,v 1.12 2005/05/27 05:51:22 norby Exp $ */
 
 /*
  * Copyright (c) 2005 Claudio Jeker <claudio@openbsd.org>
@@ -20,6 +20,8 @@
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
+#include <netinet/in_systm.h>
+#include <netinet/ip.h>
 #include <arpa/inet.h>
 #include <stdlib.h>
 #include <string.h>
@@ -39,32 +41,21 @@ int
 send_db_description(struct nbr *nbr)
 {
 	struct sockaddr_in	 dst;
-	struct db_dscrp_hdr	*dd_hdr;
-	struct lsa_hdr		*lsa_hdr;
+	struct db_dscrp_hdr	 dd_hdr;
 	struct lsa_entry	*le, *nle;
-	char			*buf;
-	char			*ptr;
+	struct buf		*buf;
 	int			 ret = 0;
 
-	log_debug("send_db_description: neighbor ID %s, seq_num %x",
-	    inet_ntoa(nbr->id), nbr->dd_seq_num);
-
-	if (nbr->iface->passive)
-		return (0);
-
-	if ((ptr = buf = calloc(1, READ_BUF_SIZE)) == NULL)
+	if ((buf = buf_open(nbr->iface->mtu - sizeof(struct ip))) == NULL)
 		fatal("send_db_description");
 
 	/* OSPF header */
-	gen_ospf_hdr(ptr, nbr->iface, PACKET_TYPE_DD);
-	ptr += sizeof(struct ospf_hdr);
+	if (gen_ospf_hdr(buf, nbr->iface, PACKET_TYPE_DD))
+		goto fail;
 
-	/* database description header */
-	dd_hdr = (struct db_dscrp_hdr *)ptr;
-	dd_hdr->opts = oeconf->options;
-	dd_hdr->dd_seq_num = htonl(nbr->dd_seq_num);
-
-	ptr += sizeof(*dd_hdr);
+	/* reserve space for database description header */
+	if (buf_reserve(buf, sizeof(dd_hdr)) == NULL)
+		goto fail;
 
 	switch (nbr->state) {
 	case NBR_STA_DOWN:
@@ -78,15 +69,9 @@ send_db_description(struct nbr *nbr)
 		ret = -1;
 		goto done;
 	case NBR_STA_XSTRT:
-		log_debug("send_db_description: state %s, neighbor ID %s",
-		    nbr_state_name(nbr->state), inet_ntoa(nbr->id));
-
 		nbr->options |= OSPF_DBD_MS | OSPF_DBD_M | OSPF_DBD_I;
 		break;
 	case NBR_STA_XCHNG:
-		log_debug("send_db_description: state %s, neighbor ID %s",
-		    nbr_state_name(nbr->state), inet_ntoa(nbr->id));
-
 		if (nbr->master) {
 			/* master */
 			nbr->options |= OSPF_DBD_MS;
@@ -102,21 +87,17 @@ send_db_description(struct nbr *nbr)
 
 		nbr->options &= ~OSPF_DBD_I;
 
-		/* build LSA list */
-		lsa_hdr = (struct lsa_hdr *)ptr;
-
-		for (le = TAILQ_FIRST(&nbr->db_sum_list); (le != NULL) &&
-		    ((ptr - buf) < nbr->iface->mtu - PACKET_HDR); le = nle) {
+		/* build LSA list, keep space for a possible md5 sum */
+		for (le = TAILQ_FIRST(&nbr->db_sum_list); le != NULL &&
+		    buf->wpos + sizeof(struct lsa_hdr) < buf->max -
+		    MD5_DIGEST_LENGTH; le = nle) {
 			nbr->dd_end = nle = TAILQ_NEXT(le, entry);
-			memcpy(ptr, le->le_lsa, sizeof(struct lsa_hdr));
-			ptr += sizeof(*lsa_hdr);
+			if (buf_add(buf, le->le_lsa, sizeof(struct lsa_hdr)))
+				goto fail;
 		}
 		break;
 	case NBR_STA_LOAD:
 	case NBR_STA_FULL:
-		log_debug("send_db_description: state %s, neighbor ID %s",
-		    nbr_state_name(nbr->state), inet_ntoa(nbr->id));
-
 		if (nbr->master) {
 			/* master */
 			nbr->options |= OSPF_DBD_MS;
@@ -129,11 +110,7 @@ send_db_description(struct nbr *nbr)
 
 		break;
 	default:
-		log_debug("send_db_description: unknown neighbor state, "
-		    "neighbor ID %s", inet_ntoa(nbr->id));
-		ret = -1;
-		goto done;
-		break;
+		fatalx("send_db_description: unknown neighbor state");
 	}
 
 	/* set destination */
@@ -143,36 +120,44 @@ send_db_description(struct nbr *nbr)
 	switch (nbr->iface->type) {
 	case IF_TYPE_POINTOPOINT:
 		inet_aton(AllSPFRouters, &dst.sin_addr);
-		dd_hdr->iface_mtu = htons(nbr->iface->mtu);
+		dd_hdr.iface_mtu = htons(nbr->iface->mtu);
 		break;
 	case IF_TYPE_BROADCAST:
 		dst.sin_addr = nbr->addr;
-		dd_hdr->iface_mtu = htons(nbr->iface->mtu);
+		dd_hdr.iface_mtu = htons(nbr->iface->mtu);
 		break;
 	case IF_TYPE_NBMA:
 	case IF_TYPE_POINTOMULTIPOINT:
+		/* XXX not supported */
+		break;
 	case IF_TYPE_VIRTUALLINK:
-		dst.sin_addr = nbr->addr;
-		dd_hdr->iface_mtu = 0;
+		dst.sin_addr = nbr->iface->dst;
+		dd_hdr.iface_mtu = 0;
 		break;
 	default:
 		fatalx("send_db_description: unknown interface type");
 	}
 
-	dd_hdr->bits = nbr->options;
+	dd_hdr.opts = oeconf->options;
+	dd_hdr.bits = nbr->options;
+	dd_hdr.dd_seq_num = htonl(nbr->dd_seq_num);
+
+	memcpy(buf_seek(buf, sizeof(struct ospf_hdr), sizeof(dd_hdr)),
+	    &dd_hdr, sizeof(dd_hdr));
 
 	/* update authentication and calculate checksum */
-	auth_gen(buf, ptr - buf, nbr->iface);
+	if (auth_gen(buf, nbr->iface))
+		goto fail;
 
 	/* transmit packet */
-	if ((ret = send_packet(nbr->iface, buf, (ptr - buf), &dst)) == -1)
-		log_warnx("send_db_description: error sending packet on "
-		    "interface %s", nbr->iface->name);
-
+	ret = send_packet(nbr->iface, buf->buf, buf->wpos, &dst);
 done:
-	free(buf);
-
+	buf_free(buf);
 	return (ret);
+fail:
+	log_warn("send_db_description");
+	buf_free(buf);
+	return (-1);
 }
 
 void
@@ -180,9 +165,6 @@ recv_db_description(struct nbr *nbr, char *buf, u_int16_t len)
 {
 	struct db_dscrp_hdr	 dd_hdr;
 	int			 dupe = 0;
-
-	log_debug("recv_db_description: neighbor ID %s, seq_num %x",
-	    inet_ntoa(nbr->id), nbr->dd_seq_num);
 
 	if (len < sizeof(dd_hdr)) {
 		log_warnx("recv_dd_description: "
@@ -193,9 +175,8 @@ recv_db_description(struct nbr *nbr, char *buf, u_int16_t len)
 	buf += sizeof(dd_hdr);
 	len -= sizeof(dd_hdr);
 
-
 	/* db description packet sanity checks */
-	if (ntohs(dd_hdr.iface_mtu) != nbr->iface->mtu) {
+	if (ntohs(dd_hdr.iface_mtu) > nbr->iface->mtu) {
 		log_warnx("recv_dd_description: invalid MTU, neighbor ID %s",
 		    inet_ntoa(nbr->id));
 		return;
@@ -208,7 +189,6 @@ recv_db_description(struct nbr *nbr, char *buf, u_int16_t len)
 			dupe = 1;
 	}
 
-	log_debug("recv_db_description: seq_num %x", ntohl(dd_hdr.dd_seq_num));
 	switch (nbr->state) {
 	case NBR_STA_DOWN:
 	case NBR_STA_ATTEMPT:
@@ -219,9 +199,6 @@ recv_db_description(struct nbr *nbr, char *buf, u_int16_t len)
 		    inet_ntoa(nbr->id));
 		return;
 	case NBR_STA_INIT:
-		log_debug("recv_db_description: state %s, neighbor ID %s",
-		    nbr_state_name(nbr->state), inet_ntoa(nbr->id));
-
 		/* evaluate dr and bdr before issuing a 2-Way event */
 		if_fsm(nbr->iface, IF_EVT_NBR_CHNG);
 		nbr_fsm(nbr, NBR_EVT_2_WAY_RCVD);
@@ -229,9 +206,6 @@ recv_db_description(struct nbr *nbr, char *buf, u_int16_t len)
 			return;
 		/* FALLTHROUGH */
 	case NBR_STA_XSTRT:
-		log_debug("recv_db_description: state %s, neighbor ID %s",
-		    nbr_state_name(nbr->state), inet_ntoa(nbr->id));
-
 		if (dupe)
 			return;
 		/*
@@ -243,9 +217,7 @@ recv_db_description(struct nbr *nbr, char *buf, u_int16_t len)
 			if ((ntohl(nbr->id.s_addr)) >
 			    ntohl(nbr->iface->rtr_id.s_addr)) {
 				/* slave */
-				log_debug("recv_db_description: slave, "
-				    "neighbor ID %s", inet_ntoa(nbr->id));
-				nbr->master = false;
+				nbr->master = 0;
 				nbr->dd_seq_num = ntohl(dd_hdr.dd_seq_num);
 
 				/* event negotiation done */
@@ -282,9 +254,6 @@ recv_db_description(struct nbr *nbr, char *buf, u_int16_t len)
 	case NBR_STA_XCHNG:
 	case NBR_STA_LOAD:
 	case NBR_STA_FULL:
-		log_debug("recv_db_description: state %s, neighbor ID %s",
-		    nbr_state_name(nbr->state), inet_ntoa(nbr->id));
-
 		if (dd_hdr.bits & OSPF_DBD_I ||
 		    !(dd_hdr.bits & OSPF_DBD_MS) == !nbr->master) {
 			log_warnx("recv_db_description: seq num mismatch, "
@@ -401,8 +370,6 @@ db_tx_timer(int fd, short event, void *arg)
 	struct nbr *nbr = arg;
 	struct timeval tv;
 
-	log_debug("db_tx_timer: neighbor ID %s", inet_ntoa(nbr->id));
-
 	switch (nbr->state) {
 	case NBR_STA_DOWN:
 	case NBR_STA_ATTEMPT:
@@ -426,8 +393,6 @@ db_tx_timer(int fd, short event, void *arg)
 	if (nbr->master) {
 		timerclear(&tv);
 		tv.tv_sec = nbr->iface->rxmt_interval;
-		log_debug("db_tx_timer: reschedule neighbor ID %s",
-		    inet_ntoa(nbr->id));
 		evtimer_add(&nbr->db_tx_timer, &tv);
 	}
 }
@@ -440,8 +405,6 @@ start_db_tx_timer(struct nbr *nbr)
 	if (nbr == nbr->iface->self)
 		return (0);
 
-	log_debug("start_db_tx_timer: neighbor ID %s", inet_ntoa(nbr->id));
-
 	timerclear(&tv);
 
 	return (evtimer_add(&nbr->db_tx_timer, &tv));
@@ -452,8 +415,6 @@ stop_db_tx_timer(struct nbr *nbr)
 {
 	if (nbr == nbr->iface->self)
 		return (0);
-
-	log_debug("stop_db_tx_timer: neighbor ID %s", inet_ntoa(nbr->id));
 
 	return (evtimer_del(&nbr->db_tx_timer));
 }

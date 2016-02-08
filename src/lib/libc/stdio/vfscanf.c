@@ -1,3 +1,4 @@
+/*	$OpenBSD: vfscanf.c,v 1.15 2005/08/08 08:05:36 espie Exp $ */
 /*-
  * Copyright (c) 1990, 1993
  *	The Regents of the University of California.  All rights reserved.
@@ -29,10 +30,6 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  */
-
-#if defined(LIBC_SCCS) && !defined(lint)
-static char rcsid[] = "$OpenBSD: vfscanf.c,v 1.10 2004/09/28 18:12:44 otto Exp $";
-#endif /* LIBC_SCCS and not lint */
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -85,11 +82,15 @@ static char rcsid[] = "$OpenBSD: vfscanf.c,v 1.10 2004/09/28 18:12:44 otto Exp $
 
 static u_char *__sccl(char *, u_char *);
 
+#if !defined(VFSCANF)
+#define VFSCANF	vfscanf
+#endif
+
 /*
  * vfscanf
  */
 int
-__svfscanf(FILE *fp, char const *fmt0, _BSD_VA_LIST_ ap)
+VFSCANF(FILE *fp, const char *fmt0, _BSD_VA_LIST_ ap)
 {
 	u_char *fmt = (u_char *)fmt0;
 	int c;		/* character from format, or conversion */
@@ -108,6 +109,8 @@ __svfscanf(FILE *fp, char const *fmt0, _BSD_VA_LIST_ ap)
 	/* `basefix' is used to avoid `if' tests in the integer scanner */
 	static short basefix[17] =
 		{ 10, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16 };
+
+	_SET_ORIENTATION(fp, -1);
 
 	nassigned = 0;
 	nread = 0;
@@ -372,7 +375,7 @@ literal:
 				n = p - p0;
 				if (n == 0)
 					goto match_failure;
-				*p = 0;
+				*p = '\0';
 				nassigned++;
 			}
 			nread += n;
@@ -402,7 +405,7 @@ literal:
 					if (fp->_r <= 0 && __srefill(fp))
 						break;
 				}
-				*p = 0;
+				*p = '\0';
 				nread += p - p0;
 				nassigned++;
 			}
@@ -529,7 +532,7 @@ literal:
 			if ((flags & SUPPRESS) == 0) {
 				u_quad_t res;
 
-				*p = 0;
+				*p = '\0';
 				res = (*ccfn)(buf, (char **)NULL, base);
 				if (flags & POINTER)
 					*va_arg(ap, void **) =
@@ -627,7 +630,7 @@ literal:
 			if ((flags & SUPPRESS) == 0) {
 				double res;
 
-				*p = 0;
+				*p = '\0';
 				res = strtod(buf, (char **) NULL);
 				if (flags & LONGDBL)
 					*va_arg(ap, long double *) = res;

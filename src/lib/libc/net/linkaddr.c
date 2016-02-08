@@ -1,3 +1,4 @@
+/*	$OpenBSD: linkaddr.c,v 1.5 2005/08/06 20:30:03 espie Exp $ */
 /*-
  * Copyright (c) 1990, 1993
  *	The Regents of the University of California.  All rights reserved.
@@ -27,10 +28,6 @@
  * SUCH DAMAGE.
  */
 
-#if defined(LIBC_SCCS) && !defined(lint)
-static char rcsid[] = "$OpenBSD: linkaddr.c,v 1.3 2003/06/02 20:18:35 millert Exp $";
-#endif /* LIBC_SCCS and not lint */
-
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <net/if_dl.h>
@@ -48,13 +45,11 @@ static char rcsid[] = "$OpenBSD: linkaddr.c,v 1.3 2003/06/02 20:18:35 millert Ex
 #define LETTER	(4*3)
 
 void
-link_addr(addr, sdl)
-	register const char *addr;
-	register struct sockaddr_dl *sdl;
+link_addr(const char *addr, struct sockaddr_dl *sdl)
 {
-	register char *cp = sdl->sdl_data;
+	char *cp = sdl->sdl_data;
 	char *cplim = sdl->sdl_len + (char *)sdl;
-	register int byte = 0, state = NAMING, new;
+	int byte = 0, state = NAMING, new;
 
 	bzero((char *)&sdl->sdl_family, sdl->sdl_len - 1);
 	sdl->sdl_family = AF_LINK;
@@ -119,13 +114,12 @@ link_addr(addr, sdl)
 static char hexlist[] = "0123456789abcdef";
 
 char *
-link_ntoa(sdl)
-	register const struct sockaddr_dl *sdl;
+link_ntoa(const struct sockaddr_dl *sdl)
 {
 	static char obuf[64];
-	register char *out = obuf; 
-	register int i;
-	register u_char *in = (u_char *)LLADDR(sdl);
+	char *out = obuf; 
+	int i;
+	u_char *in = (u_char *)LLADDR(sdl);
 	u_char *inlim = in + sdl->sdl_alen;
 	int firsttime = 1;
 

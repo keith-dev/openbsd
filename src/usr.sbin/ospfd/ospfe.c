@@ -1,4 +1,4 @@
-/*	$OpenBSD: ospfe.c,v 1.13 2005/03/15 22:03:56 claudio Exp $ */
+/*	$OpenBSD: ospfe.c,v 1.31 2005/06/13 08:27:29 claudio Exp $ */
 
 /*
  * Copyright (c) 2005 Claudio Jeker <claudio@openbsd.org>
@@ -38,11 +38,14 @@
 #include "ospf.h"
 #include "ospfd.h"
 #include "ospfe.h"
+#include "rde.h"
 #include "control.h"
 #include "log.h"
 
-void	 ospfe_sig_handler(int, short, void *);
-void	 ospfe_shutdown(void);
+void		 ospfe_sig_handler(int, short, void *);
+void		 ospfe_shutdown(void);
+void		 orig_rtr_lsa_all(struct area *);
+struct iface	*find_vlink(struct abr_rtr *);
 
 volatile sig_atomic_t	 ospfe_quit = 0;
 struct ospfd_conf	*oeconf = NULL;
@@ -88,6 +91,22 @@ ospfe(struct ospfd_conf *xconf, int pipe_parent2ospfe[2], int pipe_ospfe2rde[2],
 	if (control_init() == -1)
 		fatalx("control socket setup failed");
 
+	/* create the raw ip socket */
+	if ((xconf->ospf_socket = socket(AF_INET, SOCK_RAW,
+	    IPPROTO_OSPF)) == -1)
+		fatal("error creating raw socket");
+
+	/* set some defaults */
+	if (if_set_mcast_ttl(xconf->ospf_socket,
+	    IP_DEFAULT_MULTICAST_TTL) == -1)
+		fatal("if_set_mcast_ttl");
+
+	if (if_set_mcast_loop(xconf->ospf_socket) == -1)
+		fatal("if_set_mcast_loop");
+
+	if (if_set_tos(xconf->ospf_socket, IPTOS_PREC_INTERNETCONTROL) == -1)
+		fatal("if_set_tos");
+
 	oeconf = xconf;
 
 	if ((pw = getpwnam(OSPFD_USER)) == NULL)
@@ -102,12 +121,9 @@ ospfe(struct ospfd_conf *xconf, int pipe_parent2ospfe[2], int pipe_ospfe2rde[2],
 	ospfd_process = PROC_OSPF_ENGINE;
 
 	if (setgroups(1, &pw->pw_gid) ||
-	    setegid(pw->pw_gid) || setgid(pw->pw_gid) ||
-	    seteuid(pw->pw_uid) || setuid(pw->pw_uid)) {
+	    setresgid(pw->pw_gid, pw->pw_gid, pw->pw_gid) ||
+	    setresuid(pw->pw_uid, pw->pw_uid, pw->pw_uid))
 		fatal("can't drop privileges");
-	}
-
-	endpwent();
 
 	event_init();
 	nbr_init(NBR_HASHSIZE);
@@ -154,9 +170,12 @@ ospfe(struct ospfd_conf *xconf, int pipe_parent2ospfe[2], int pipe_ospfe2rde[2],
 	/* start interfaces */
 	LIST_FOREACH(area, &oeconf->area_list, entry) {
 		LIST_FOREACH(iface, &area->iface_list, entry) {
-			if (if_fsm(iface, IF_EVT_UP)) {
-				log_debug("error starting interface %s",
-				    iface->name);
+			if (!iface->passive) {
+				if_init(xconf, iface);
+				if (if_fsm(iface, IF_EVT_UP)) {
+					log_debug("error starting interface %s",
+					    iface->name);
+				}
 			}
 		}
 	}
@@ -177,9 +196,11 @@ ospfe_shutdown(void)
 	/* stop all interfaces and remove all areas */
 	LIST_FOREACH(area, &oeconf->area_list, entry) {
 		LIST_FOREACH(iface, &area->iface_list, entry) {
-			if (if_fsm(iface, IF_EVT_DOWN)) {
-				log_debug("error stopping interface %s",
-				    iface->name);
+			if (!iface->passive) {
+				if (if_fsm(iface, IF_EVT_DOWN)) {
+					log_debug("error stopping interface %s",
+					    iface->name);
+				}
 			}
 		}
 		area_del(area);
@@ -252,7 +273,8 @@ ospfe_dispatch_main(int fd, short event, void *bula)
 
 			LIST_FOREACH(area, &oeconf->area_list, entry) {
 				LIST_FOREACH(iface, &area->iface_list, entry) {
-					if (kif->ifindex == iface->ifindex) {
+					if (kif->ifindex == iface->ifindex &&
+					    iface->type != IF_TYPE_VIRTUALLINK) {
 						iface->flags = kif->flags;
 						iface->linkstate =
 						    kif->link_state;
@@ -297,6 +319,7 @@ ospfe_dispatch_rde(int fd, short event, void *bula)
 	struct iface		*iface;
 	struct lsa_entry	*le;
 	struct imsg		 imsg;
+	struct abr_rtr		 ar;
 	int			 n, noack = 0;
 	u_int16_t		 l, age;
 
@@ -329,10 +352,6 @@ ospfe_dispatch_rde(int fd, short event, void *bula)
 				fatalx("ospfe_dispatch_rde: "
 				    "neighbor not found");
 
-			log_debug("ospfe_dispatch_rde: IMSG_DD, "
-			    "neighbor id %s, len %d", inet_ntoa(nbr->id),
-			    imsg.hdr.len - IMSG_HEADER_SIZE);
-
 			/* put these on my ls_req_list for retrieval */
 			lhp = lsa_hdr_new();
 			memcpy(lhp, imsg.data, sizeof(*lhp));
@@ -358,10 +377,6 @@ ospfe_dispatch_rde(int fd, short event, void *bula)
 				fatalx("ospfe_dispatch_rde: "
 				    "neighbor not found");
 
-			log_debug("ospfe_dispatch_rde: IMSG_DB_SNAPSHOT, "
-			    "neighbor id %s, len %d", inet_ntoa(nbr->id),
-			    imsg.hdr.len - IMSG_HEADER_SIZE);
-
 			/* add LSA header to the neighbor db_sum_list */
 			lhp = lsa_hdr_new();
 			memcpy(lhp, imsg.data, sizeof(*lhp));
@@ -373,10 +388,6 @@ ospfe_dispatch_rde(int fd, short event, void *bula)
 				fatalx("ospfe_dispatch_rde: "
 				    "neighbor not found");
 
-			log_debug("ospfe_dispatch_rde: IMSG_DB_END, "
-			    "neighbor id %s, len %d", inet_ntoa(nbr->id),
-			    imsg.hdr.len - IMSG_HEADER_SIZE);
-
 			/* snapshot done, start tx of dd packets */
 			nbr_fsm(nbr, NBR_EVT_SNAP_DONE);
 			break;
@@ -385,10 +396,6 @@ ospfe_dispatch_rde(int fd, short event, void *bula)
 			if (nbr == NULL)
 				fatalx("ospfe_dispatch_rde: "
 				    "neighbor not found");
-
-			log_debug("ospfe_dispatch_rde: IMSG_LS_FLOOD, "
-			    "neighbor id %s, len %d", inet_ntoa(nbr->id),
-			    imsg.hdr.len - IMSG_HEADER_SIZE);
 
 			l = imsg.hdr.len - IMSG_HEADER_SIZE;
 			if (l < sizeof(lsa_hdr))
@@ -429,11 +436,16 @@ ospfe_dispatch_rde(int fd, short event, void *bula)
 			le = ls_req_list_get(nbr, &lsa_hdr);
 			if (!(nbr->state & NBR_STA_FULL) && le != NULL) {
 				ls_req_list_free(nbr, le);
-				/* XXX no need to ack requested lsa */
+				/*
+				 * XXX no need to ack requested lsa
+				 * the problem is that the RFC is very
+				 * unclear about this.
+				 */
 				noack = 1;
 			}
 
-			if (!noack && nbr->iface->self != nbr) {
+			if (!noack && nbr->iface != NULL &&
+			    nbr->iface->self != nbr) {
 				if (!(nbr->iface->state & IF_STA_BACKUP) ||
 				    nbr->iface->dr == nbr) {
 					/* delayed ack */
@@ -463,10 +475,6 @@ ospfe_dispatch_rde(int fd, short event, void *bula)
 				fatalx("ospfe_dispatch_rde: "
 				    "neighbor not found");
 
-			log_debug("ospfe_dispatch_rde: IMSG_LS_UPD, "
-			    "neighbor id %s, len %d", inet_ntoa(nbr->id),
-			    imsg.hdr.len - IMSG_HEADER_SIZE);
-
 			if (nbr->iface->self == nbr)
 				break;
 
@@ -474,7 +482,7 @@ ospfe_dispatch_rde(int fd, short event, void *bula)
 			if (ntohs(age) >= MAX_AGE) {
 				/* add to retransmit list */
 				ref = lsa_cache_add(imsg.data, l);
-				ls_retrans_list_add(nbr, imsg.data); /* XXX */
+				ls_retrans_list_add(nbr, imsg.data);
 				lsa_cache_put(ref, nbr);
 			}
 
@@ -494,10 +502,6 @@ ospfe_dispatch_rde(int fd, short event, void *bula)
 				fatalx("ospfe_dispatch_rde: "
 				    "neighbor not found");
 
-			log_debug("ospfe_dispatch_rde: IMSG_LS_ACK, "
-			    "neighbor id %s, len %d", inet_ntoa(nbr->id),
-			    imsg.hdr.len - IMSG_HEADER_SIZE);
-
 			if (nbr->iface->self == nbr)
 				break;
 
@@ -514,19 +518,41 @@ ospfe_dispatch_rde(int fd, short event, void *bula)
 				fatalx("ospfe_dispatch_rde: "
 				    "neighbor not found");
 
-			log_debug("ospfe_dispatch_rde: IMSG_LS_BADREQ, "
-			    "neighbor id %s, len %d", inet_ntoa(nbr->id),
-			    imsg.hdr.len - IMSG_HEADER_SIZE);
-
 			if (nbr->iface->self == nbr)
 				fatalx("ospfe_dispatch_rde: "
 				    "dummy neighbor got BADREQ");
 
 			nbr_fsm(nbr, NBR_EVT_BAD_LS_REQ);
 			break;
+		case IMSG_ABR_UP:
+			memcpy(&ar, imsg.data, sizeof(ar));
+
+			if ((iface = find_vlink(&ar)) != NULL &&
+			    iface->state == IF_STA_DOWN)
+				if (if_fsm(iface, IF_EVT_UP)) {
+					log_debug("error starting interface %s",
+					    iface->name);
+				}
+			break;
+		case IMSG_ABR_DOWN:
+			memcpy(&ar, imsg.data, sizeof(ar));
+
+			if ((iface = find_vlink(&ar)) != NULL &&
+			    iface->state == IF_STA_POINTTOPOINT)
+				if (if_fsm(iface, IF_EVT_DOWN)) {
+					log_debug("error stopping interface %s",
+					    iface->name);
+				}
+			break;
 		case IMSG_CTL_AREA:
 		case IMSG_CTL_END:
 		case IMSG_CTL_SHOW_DATABASE:
+		case IMSG_CTL_SHOW_DB_EXT:
+		case IMSG_CTL_SHOW_DB_NET:
+		case IMSG_CTL_SHOW_DB_RTR:
+		case IMSG_CTL_SHOW_DB_SELF:
+		case IMSG_CTL_SHOW_DB_SUM:
+		case IMSG_CTL_SHOW_DB_ASBR:
 		case IMSG_CTL_SHOW_RIB:
 		case IMSG_CTL_SHOW_SUM:
 		case IMSG_CTL_SHOW_SUM_AREA:
@@ -542,6 +568,41 @@ ospfe_dispatch_rde(int fd, short event, void *bula)
 	imsg_event_add(ibuf);
 }
 
+struct iface *
+find_vlink(struct abr_rtr *ar)
+{
+	struct area	*area;
+	struct iface	*iface = NULL;
+
+	LIST_FOREACH(area, &oeconf->area_list, entry)
+		LIST_FOREACH(iface, &area->iface_list, entry)
+			if (iface->abr_id.s_addr == ar->abr_id.s_addr &&
+			    iface->type == IF_TYPE_VIRTUALLINK &&
+			    iface->area->id.s_addr == ar->area.s_addr) {
+				iface->dst.s_addr = ar->dst_ip.s_addr;
+				iface->addr.s_addr = ar->addr.s_addr;
+				iface->metric = ar->metric;
+
+				return (iface);
+			}
+
+	return (iface);
+}
+
+void
+orig_rtr_lsa_all(struct area *area)
+{
+	struct area	*a;
+
+	/*
+	 * update all router LSA in all areas except area itself,
+	 * as this update is already running.
+	 */
+	LIST_FOREACH(a, &oeconf->area_list, entry)
+		if (a != area)
+			orig_rtr_lsa(a);
+}
+
 void
 orig_rtr_lsa(struct area *area)
 {
@@ -553,6 +614,7 @@ orig_rtr_lsa(struct area *area)
 	struct nbr		*nbr, *self = NULL;
 	u_int16_t		 num_links = 0;
 	u_int16_t		 chksum;
+	u_int8_t		 border, virtual = 0;
 
 	log_debug("orig_rtr_lsa: area %s", inet_ntoa(area->id));
 
@@ -569,13 +631,8 @@ orig_rtr_lsa(struct area *area)
 
 	/* links */
 	LIST_FOREACH(iface, &area->iface_list, entry) {
-		log_debug("orig_rtr_lsa: interface %s", iface->name);
-
 		if (self == NULL && iface->self != NULL)
 			self = iface->self;
-
-		if (iface->state & IF_STA_DOWN)
-			continue;
 
 		bzero(&rtr_link, sizeof(rtr_link));
 
@@ -655,8 +712,24 @@ orig_rtr_lsa(struct area *area)
 			rtr_link.type = LINK_TYPE_STUB_NET;
 			break;
 		case IF_TYPE_VIRTUALLINK:
-			log_debug("orig_rtr_lsa: not supported, interface %s",
-			     iface->name);
+			LIST_FOREACH(nbr, &iface->nbr_list, entry) {
+				if (nbr != iface->self &&
+				    nbr->state & NBR_STA_FULL)
+					break;
+			}
+			if (nbr) {
+				rtr_link.id = nbr->id.s_addr;
+				rtr_link.data = iface->addr.s_addr;
+				rtr_link.type = LINK_TYPE_VIRTUAL;
+				rtr_link.metric = htons(iface->metric);
+				num_links++;
+				virtual = 1;
+				if (buf_add(buf, &rtr_link, sizeof(rtr_link)))
+					fatalx("orig_rtr_lsa: buf_add failed");
+
+				log_debug("orig_rtr_lsa: virtual link, interface %s",
+				     iface->name);
+			}
 			continue;
 		case IF_TYPE_POINTOMULTIPOINT:
 			log_debug("orig_rtr_lsa: stub net, "
@@ -699,7 +772,28 @@ orig_rtr_lsa(struct area *area)
 	}
 
 	/* LSA router header */
-	lsa_rtr.flags = oeconf->flags;	/* XXX */
+	lsa_rtr.flags = 0;
+	/*
+	 * Set the E bit as soon as an as-ext lsa may be redistributed, only
+	 * setting it in case we redistribute something is not worth the fuss.
+	 */
+	if (oeconf->redistribute_flags && (oeconf->options & OSPF_OPTION_E))
+		lsa_rtr.flags |= OSPF_RTR_E;
+
+	border = area_border_router(oeconf);
+
+	if (border != oeconf->border) {
+		oeconf->border = border;
+		orig_rtr_lsa_all(area);
+	}
+
+	if (oeconf->border)
+		lsa_rtr.flags |= OSPF_RTR_B;
+	if (virtual)
+		lsa_rtr.flags |= OSPF_RTR_V;
+
+	/* TODO set V flag if a active virtual link ends here and the
+	 * area is the tranist area for this link. */
 	lsa_rtr.dummy = 0;
 	lsa_rtr.nlinks = htons(num_links);
 	memcpy(buf_seek(buf, sizeof(lsa_hdr), sizeof(lsa_rtr)),
@@ -707,7 +801,7 @@ orig_rtr_lsa(struct area *area)
 
 	/* LSA header */
 	lsa_hdr.age = htons(DEFAULT_AGE);
-	lsa_hdr.opts = oeconf->options;	/* XXX */
+	lsa_hdr.opts = oeconf->options;		/* XXX */
 	lsa_hdr.type = LSA_TYPE_ROUTER;
 	lsa_hdr.ls_id = oeconf->rtr_id.s_addr;
 	lsa_hdr.adv_rtr = oeconf->rtr_id.s_addr;
@@ -738,8 +832,6 @@ orig_net_lsa(struct iface *iface)
 	struct buf		*buf;
 	int			 num_rtr = 0;
 	u_int16_t		 chksum;
-
-	log_debug("orig_net_lsa: iface %s", iface->name);
 
 	/* XXX READ_BUF_SIZE */
 	if ((buf = buf_dynamic(sizeof(lsa_hdr), READ_BUF_SIZE)) == NULL)
@@ -773,7 +865,7 @@ orig_net_lsa(struct iface *iface)
 	else
 		lsa_hdr.age = htons(MAX_AGE);
 
-	lsa_hdr.opts = oeconf->options;	/* XXX */
+	lsa_hdr.opts = oeconf->options;		/* XXX */
 	lsa_hdr.type = LSA_TYPE_NETWORK;
 	lsa_hdr.ls_id = iface->addr.s_addr;
 	lsa_hdr.adv_rtr = oeconf->rtr_id.s_addr;

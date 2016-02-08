@@ -1,3 +1,4 @@
+/*	$OpenBSD: lseek.c,v 1.13 2005/08/08 08:05:37 espie Exp $ */
 /*
  * Copyright (c) 1992, 1993
  *	The Regents of the University of California.  All rights reserved.
@@ -27,15 +28,12 @@
  * SUCH DAMAGE.
  */
 
-#if defined(SYSLIBC_SCCS) && !defined(lint)
-static char rcsid[] = "$OpenBSD: lseek.c,v 1.11 2004/06/07 21:11:23 marc Exp $";
-#endif /* SYSLIBC_SCCS and not lint */
-
 #include <sys/types.h>
-#include <sys/time.h>
 #include <sys/syscall.h>
 #include <unistd.h>
 #include "thread_private.h"
+
+off_t __syscall(quad_t, ...);
 
 /*
  * This function provides 64-bit offset padding that
@@ -44,7 +42,6 @@ static char rcsid[] = "$OpenBSD: lseek.c,v 1.11 2004/06/07 21:11:23 marc Exp $";
 off_t
 lseek(int fd, off_t offset, int whence)
 {
-	extern off_t __syscall();
 	off_t retval;
 
 	if (_FD_LOCK(fd, FD_RDWR, NULL) != 0) {

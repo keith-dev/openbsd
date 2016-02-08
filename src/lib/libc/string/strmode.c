@@ -1,3 +1,4 @@
+/*	$OpenBSD: strmode.c,v 1.7 2005/08/08 08:05:37 espie Exp $ */
 /*-
  * Copyright (c) 1990 The Regents of the University of California.
  * All rights reserved.
@@ -26,10 +27,6 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  */
-
-#if defined(LIBC_SCCS) && !defined(lint)
-static char *rcsid = "$OpenBSD: strmode.c,v 1.5 2003/06/11 21:08:16 deraadt Exp $";
-#endif /* LIBC_SCCS and not lint */
 
 #include <sys/types.h>
 #include <sys/stat.h>
@@ -63,11 +60,6 @@ strmode(int mode, char *p)
 #ifdef S_IFIFO
 	case S_IFIFO:			/* fifo */
 		*p++ = 'p';
-		break;
-#endif
-#ifdef S_IFWHT
-	case S_IFWHT:			/* whiteout */
-		*p++ = 'w';
 		break;
 #endif
 	default:			/* unknown */

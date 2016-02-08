@@ -1,4 +1,4 @@
-/*	$OpenBSD: supcmeat.c,v 1.19 2003/09/04 03:24:07 beck Exp $	*/
+/*	$OpenBSD: supcmeat.c,v 1.21 2005/04/27 18:13:16 mickey Exp $	*/
 
 /*
  * Copyright (c) 1992 Carnegie Mellon University
@@ -561,6 +561,8 @@ needone(t, dummy)
 	struct stat sbuf;
 
 	newt = Tinsert (&lastT,t->Tname,TRUE);
+	if (!newt)
+		return (SCMERR);
 	newt->Tflags |= FUPDATE;
 	fetch = TRUE;
 	if ((thisC->Cflags&CFALL) == 0) {
@@ -602,6 +604,8 @@ needone(t, dummy)
 	}
 	/* If we get this far, we're either doing an update or a full fetch. */
 	newt = Tinsert(&needT, t->Tname, TRUE);
+	if (!newt)
+		return (SCMERR);
 	if (!fetch && S_ISREG(t->Tmode))
 		newt->Tflags |= FUPDATE;
 	return (SCMOK);
@@ -919,7 +923,10 @@ recvdir(t, new, statp)		/* receive directory from network */
 	tbuf[1].tv_usec = 0;
 	if (!noutime)
 		(void) utimes(t->Tname, tbuf);
-	vnotify("SUP %s directory %s\n", new ? "Created" : "Updated", t->Tname);
+	if (new)
+		vnotify("SUP Created directory %s\n", t->Tname);
+	else
+		v2notify("SUP Updated directory %s\n", t->Tname);
 	return (FALSE);
 }
 

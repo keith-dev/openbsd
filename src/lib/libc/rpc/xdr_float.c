@@ -1,3 +1,4 @@
+/*	$OpenBSD: xdr_float.c,v 1.15 2005/08/08 08:05:36 espie Exp $ */
 /*
  * Sun RPC is a product of Sun Microsystems, Inc. and is provided for
  * unrestricted use provided that this legend is included on all tape
@@ -27,12 +28,8 @@
  * Mountain View, California  94043
  */
 
-#if defined(LIBC_SCCS) && !defined(lint)
-static char *rcsid = "$OpenBSD: xdr_float.c,v 1.12 2004/02/01 07:11:24 drahn Exp $";
-#endif /* LIBC_SCCS and not lint */
-
 /*
- * xdr_float.c, Generic XDR routines impelmentation.
+ * xdr_float.c, Generic XDR routines implementation.
  *
  * Copyright (C) 1984, Sun Microsystems, Inc.
  *
@@ -92,9 +89,7 @@ static struct sgl_limits {
 #endif /* __vax__ */
 
 bool_t
-xdr_float(xdrs, fp)
-	XDR *xdrs;
-	float *fp;
+xdr_float(XDR *xdrs, float *fp)
 {
 #ifdef IEEEFP
 	bool_t rv;
@@ -199,9 +194,7 @@ static struct dbl_limits {
 
 
 bool_t
-xdr_double(xdrs, dp)
-	XDR *xdrs;
-	double *dp;
+xdr_double(XDR *xdrs, double *dp)
 {
 #ifdef IEEEFP
 	int32_t *i32p;

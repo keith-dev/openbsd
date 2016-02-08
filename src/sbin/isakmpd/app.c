@@ -1,4 +1,4 @@
-/* $OpenBSD: app.c,v 1.9 2004/04/15 18:39:25 deraadt Exp $	 */
+/* $OpenBSD: app.c,v 1.12 2005/05/04 10:05:01 hshoexer Exp $	 */
 /* $EOM: app.c,v 1.6 1999/05/01 20:21:06 niklas Exp $	 */
 
 /*
@@ -39,6 +39,8 @@
 
 #include "app.h"
 #include "log.h"
+#include "monitor.h"
+#include "pf_key_v2.h"
 
 int app_socket;
 
@@ -51,7 +53,7 @@ app_init(void)
 {
 	if (app_none)
 		return;
-	app_socket = sysdep_app_open();
+	app_socket = monitor_pf_key_v2_open();
 	if (app_socket == -1)
 		log_fatal("app_init: cannot open connection to application");
 }
@@ -59,5 +61,5 @@ app_init(void)
 void
 app_handler(void)
 {
-	sysdep_app_handler(app_socket);
+	pf_key_v2_handler(app_socket);
 }

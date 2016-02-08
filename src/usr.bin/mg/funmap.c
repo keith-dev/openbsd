@@ -1,4 +1,4 @@
-/*	$OpenBSD: funmap.c,v 1.10 2005/03/09 16:20:48 jfb Exp $	*/
+/*	$OpenBSD: funmap.c,v 1.14 2005/05/30 13:13:50 jason Exp $	*/
 /*
  * Copyright (c) 2001 Artur Grabowski <art@openbsd.org>.  All rights reserved.
  *
@@ -43,7 +43,7 @@ static struct funmap functnames[] = {
 #ifndef	NO_HELP
 	{apropos_command, "apropos",},
 #endif /* !NO_HELP */
-	{ auto_execute, "auto-execute", },
+	{auto_execute, "auto-execute", },
 	{fillmode, "auto-fill-mode",},
 	{indentmode, "auto-indent-mode",},
 	{backchar, "backward-char",},
@@ -118,6 +118,7 @@ static struct funmap functnames[] = {
 	{fillpara, "fill-paragraph",},
 	{filevisit, "find-file",},
 	{filevisitro, "find-file-read-only",},
+	{filevisitalt, "find-alternate-file",},
 	{poptofile, "find-file-other-window",},
 	{forwchar, "forward-char",},
 	{gotoeop, "forward-paragraph",},
@@ -175,6 +176,7 @@ static struct funmap functnames[] = {
 	{showcwdir, "pwd",},
 #endif /* !NO_DIR */
 	{queryrepl, "query-replace",},
+	{replstr, "replace-string",},
 #ifdef REGEX
 	{re_queryrepl, "query-replace-regexp",},
 #endif /* REGEX */
@@ -220,15 +222,15 @@ static struct funmap functnames[] = {
 	{poptobuffer, "switch-to-buffer-other-window",},
 	{togglereadonly, "toggle-read-only" },
 	{twiddle, "transpose-chars",},
-	{ undo, "undo", },
-	{ undo_dump, "undo-list", },
+	{undo, "undo", },
+	{undo_dump, "undo-list", },
 	{universal_argument, "universal-argument",},
 	{upperregion, "upcase-region",},
 	{upperword, "upcase-word",},
 	{showcpos, "what-cursor-position",},
 	{filewrite, "write-file",},
 	{yank, "yank",},
-	{NULL, NULL,},
+	{NULL, NULL,}
 };
 
 void
@@ -248,14 +250,14 @@ funmap_add(PF fun, const char *fname)
 	struct funmap *fn;
 
 	if ((fn = malloc(sizeof(*fn))) == NULL)
-		return FALSE;
+		return (FALSE);
 
 	fn->fn_funct = fun;
 	fn->fn_name = fname;
 	fn->fn_next = funs;
 
 	funs = fn;
-	return TRUE;
+	return (TRUE);
 }
 
 /*
@@ -268,9 +270,9 @@ name_function(const char *fname)
 
 	for (fn = funs; fn != NULL; fn = fn->fn_next) {
 		if (strcmp(fn->fn_name, fname) == 0)
-			return fn->fn_funct;
+			return (fn->fn_funct);
 	}
-	return NULL;
+	return (NULL);
 }
 
 const char *
@@ -280,20 +282,20 @@ function_name(PF fun)
 
 	for (fn = funs; fn != NULL; fn = fn->fn_next) {
 		if (fn->fn_funct == fun)
-			return fn->fn_name;
+			return (fn->fn_name);
 	}
-	return NULL;
+	return (NULL);
 }
 
 /*
- * list possible function name completions.
+ * List possible function name completions.
  */
 LIST *
-complete_function_list(const char *fname, int c)
+complete_function_list(const char *fname)
 {
-	struct funmap *fn;
-	LIST *head, *el;
-	int len;
+	struct funmap	*fn;
+	LIST		*head, *el;
+	int		 len;
 
 	len = strlen(fname);
 	head = NULL;
@@ -301,16 +303,12 @@ complete_function_list(const char *fname, int c)
 		if (memcmp(fname, fn->fn_name, len) == 0) {
 			if ((el = malloc(sizeof(*el))) == NULL) {
 				free_file_list(head);
-				return NULL;
+				return (NULL);
 			}
 			el->l_name = fn->fn_name;
 			el->l_next = head;
 			head = el;
 		}
 	}
-
-	return head;
+	return (head);
 }
-
-
-

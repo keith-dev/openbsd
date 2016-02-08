@@ -1,4 +1,4 @@
-/*	$OpenBSD: local.h,v 1.7 2005/03/08 15:43:31 moritz Exp $	*/
+/*	$OpenBSD: local.h,v 1.11 2005/06/17 20:40:32 espie Exp $	*/
 
 /*-
  * Copyright (c) 1990, 1993
@@ -37,11 +37,15 @@
  * in particular, macros and private variables.
  */
 
+#include <wchar.h> 
+#include "wcio.h"
+#include "fileext.h"
+
 int	__sflush(FILE *);
 FILE	*__sfp(void);
 int	__srefill(FILE *);
 int	__sread(void *, char *, int);
-int	__swrite(void *, char const *, int);
+int	__swrite(void *, const char *, int);
 fpos_t	__sseek(void *, fpos_t, int);
 int	__sclose(void *);
 void	__sinit(void);
@@ -52,7 +56,7 @@ int	_fwalk(int (*)(FILE *));
 int	__swsetup(FILE *);
 int	__sflags(const char *, int *);
 
-extern void __atexit_register_cleanup(void (*)());
+extern void __atexit_register_cleanup(void (*)(void));
 extern int __sdidinit;
 
 /*
@@ -66,11 +70,11 @@ extern int __sdidinit;
  * Test whether the given stdio file has an active ungetc buffer;
  * release such a buffer, without restoring ordinary unread data.
  */
-#define	HASUB(fp) ((fp)->_ub._base != NULL)
+#define	HASUB(fp) (_UB(fp)._base != NULL)
 #define	FREEUB(fp) { \
-	if ((fp)->_ub._base != (fp)->_ubuf) \
-		free((char *)(fp)->_ub._base); \
-	(fp)->_ub._base = NULL; \
+	if (_UB(fp)._base != (fp)->_ubuf) \
+		free(_UB(fp)._base); \
+	_UB(fp)._base = NULL; \
 }
 
 /*

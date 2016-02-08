@@ -1,4 +1,4 @@
-/*	$OpenBSD: kqueue.c,v 1.12 2004/04/28 06:53:12 brad Exp $	*/
+/*	$OpenBSD: kqueue.c,v 1.18 2005/07/02 07:15:13 grunk Exp $	*/
 
 /*
  * Copyright 2000-2002 Niels Provos <provos@citi.umich.edu>
@@ -44,29 +44,18 @@
 #include <string.h>
 #include <unistd.h>
 #include <errno.h>
-#include <err.h>
 #ifdef HAVE_INTTYPES_H
 #include <inttypes.h>
 #endif
 
-#ifdef USE_LOG
-#include "log.h"
-#else
-#define LOG_DBG(x)
-#define log_error	warn
-#endif
-
-#if defined(HAVE_INTTYPES_H) && !defined(__OpenBSD__)
+#if defined(HAVE_INTTYPES_H) && !defined(__OpenBSD__) && !defined(__FreeBSD__)
 #define INTPTR(x)	(intptr_t)x
 #else
 #define INTPTR(x)	x
 #endif
 
 #include "event.h"
-
-extern struct event_list timequeue;
-extern struct event_list eventqueue;
-extern struct event_list addqueue;
+#include "log.h"
 
 #define EVLIST_X_KQINKERNEL	0x1000
 
@@ -78,13 +67,13 @@ struct kqop {
 	struct kevent *events;
 	int nevents;
 	int kq;
-} kqueueop;
+};
 
 void *kq_init	(void);
 int kq_add	(void *, struct event *);
 int kq_del	(void *, struct event *);
-int kq_recalc	(void *, int);
-int kq_dispatch	(void *, struct timeval *);
+int kq_recalc	(struct event_base *, void *, int);
+int kq_dispatch	(struct event_base *, void *, struct timeval *);
 int kq_insert	(struct kqop *, struct kevent *);
 
 const struct eventop kqops = {
@@ -100,38 +89,65 @@ void *
 kq_init(void)
 {
 	int kq;
+	struct kqop *kqueueop;
 
 	/* Disable kqueue when this environment variable is set */
 	if (!issetugid() && getenv("EVENT_NOKQUEUE"))
 		return (NULL);
 
-	memset(&kqueueop, 0, sizeof(kqueueop));
+	if (!(kqueueop = calloc(1, sizeof(struct kqop))))
+		return (NULL);
 
 	/* Initalize the kernel queue */
 	
 	if ((kq = kqueue()) == -1) {
-		log_error("kqueue");
+		event_warn("kqueue");
+		free (kqueueop);
 		return (NULL);
 	}
 
-	kqueueop.kq = kq;
+	kqueueop->kq = kq;
 
 	/* Initalize fields */
-	kqueueop.changes = malloc(NEVENT * sizeof(struct kevent));
-	if (kqueueop.changes == NULL)
-		return (NULL);
-	kqueueop.events = malloc(NEVENT * sizeof(struct kevent));
-	if (kqueueop.events == NULL) {
-		free (kqueueop.changes);
+	kqueueop->changes = malloc(NEVENT * sizeof(struct kevent));
+	if (kqueueop->changes == NULL) {
+		free (kqueueop);
 		return (NULL);
 	}
-	kqueueop.nevents = NEVENT;
+	kqueueop->events = malloc(NEVENT * sizeof(struct kevent));
+	if (kqueueop->events == NULL) {
+		free (kqueueop->changes);
+		free (kqueueop);
+		return (NULL);
+	}
+	kqueueop->nevents = NEVENT;
 
-	return (&kqueueop);
+	/* Check for Mac OS X kqueue bug. */
+	kqueueop->changes[0].ident = -1;
+	kqueueop->changes[0].filter = EVFILT_READ;
+	kqueueop->changes[0].flags = EV_ADD;
+	/*
+	 * If kqueue works, then kevent will succeed, and it will
+	 * stick an error in events[0].  If kqueue is broken, then
+	 * kevent will fail.
+	 */
+	if (kevent(kq,
+		kqueueop->changes, 1, kqueueop->events, NEVENT, NULL) != 1 ||
+	    kqueueop->events[0].ident != -1 ||
+	    kqueueop->events[0].flags != EV_ERROR) {
+		event_warn("%s: detected broken kqueue; not using.", __func__);
+		free(kqueueop->changes);
+		free(kqueueop->events);
+		free(kqueueop);
+		close(kq);
+		return (NULL);
+	}
+
+	return (kqueueop);
 }
 
 int
-kq_recalc(void *arg, int max)
+kq_recalc(struct event_base *base, void *arg, int max)
 {
 	return (0);
 }
@@ -150,7 +166,7 @@ kq_insert(struct kqop *kqop, struct kevent *kev)
 		newchange = realloc(kqop->changes,
 				    nevents * sizeof(struct kevent));
 		if (newchange == NULL) {
-			log_error("%s: malloc", __func__);
+			event_warn("%s: malloc", __func__);
 			return (-1);
 		}
 		kqop->changes = newchange;
@@ -163,7 +179,7 @@ kq_insert(struct kqop *kqop, struct kevent *kev)
 		 * the next realloc will pick it up.
 		 */
 		if (newresult == NULL) {
-			log_error("%s: malloc", __func__);
+			event_warn("%s: malloc", __func__);
 			return (-1);
 		}
 		kqop->events = newresult;
@@ -173,8 +189,8 @@ kq_insert(struct kqop *kqop, struct kevent *kev)
 
 	memcpy(&kqop->changes[kqop->nchanges++], kev, sizeof(struct kevent));
 
-	LOG_DBG((LOG_MISC, 70, "%s: fd %d %s%s",
-		 __func__, kev->ident, 
+	event_debug(("%s: fd %d %s%s",
+		 __func__, kev->ident,
 		 kev->filter == EVFILT_READ ? "EVFILT_READ" : "EVFILT_WRITE",
 		 kev->flags == EV_DELETE ? " (del)" : ""));
 
@@ -188,7 +204,7 @@ kq_sighandler(int sig)
 }
 
 int
-kq_dispatch(void *arg, struct timeval *tv)
+kq_dispatch(struct event_base *base, void *arg, struct timeval *tv)
 {
 	struct kqop *kqop = arg;
 	struct kevent *changes = kqop->changes;
@@ -204,32 +220,36 @@ kq_dispatch(void *arg, struct timeval *tv)
 	kqop->nchanges = 0;
 	if (res == -1) {
 		if (errno != EINTR) {
-			log_error("kevent");
+                        event_warn("kevent");
 			return (-1);
 		}
 
 		return (0);
 	}
 
-	LOG_DBG((LOG_MISC, 80, "%s: kevent reports %d", __func__, res));
+	event_debug(("%s: kevent reports %d", __func__, res));
 
 	for (i = 0; i < res; i++) {
 		int which = 0;
 
 		if (events[i].flags & EV_ERROR) {
-			/* 
+			/*
 			 * Error messages that can happen, when a delete fails.
 			 *   EBADF happens when the file discriptor has been
 			 *   closed,
 			 *   ENOENT when the file discriptor was closed and
 			 *   then reopened.
+			 *   EINVAL for some reasons not understood; EINVAL
+			 *   should not be returned ever; but FreeBSD does :-\
 			 * An error is also indicated when a callback deletes
 			 * an event we are still processing.  In that case
 			 * the data field is set to ENOENT.
 			 */
 			if (events[i].data == EBADF ||
+			    events[i].data == EINVAL ||
 			    events[i].data == ENOENT)
 				continue;
+			errno = events[i].data;
 			return (-1);
 		}
 

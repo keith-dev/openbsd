@@ -1,3 +1,4 @@
+/*	$OpenBSD: svc_auth.c,v 1.7 2005/08/08 08:05:35 espie Exp $ */
 /*
  * Sun RPC is a product of Sun Microsystems, Inc. and is provided for
  * unrestricted use provided that this legend is included on all tape
@@ -27,10 +28,6 @@
  * Mountain View, California  94043
  */
 
-#if defined(LIBC_SCCS) && !defined(lint)
-static char *rcsid = "$OpenBSD: svc_auth.c,v 1.5 2001/09/15 13:51:01 deraadt Exp $";
-#endif /* LIBC_SCCS and not lint */
-
 /*
  * svc_auth_nodes.c, Server-side rpc authenticator interface,
  * *WITHOUT* DES authentication.
@@ -55,9 +52,12 @@ static char *rcsid = "$OpenBSD: svc_auth.c,v 1.5 2001/09/15 13:51:01 deraadt Exp
  *
  */
 
-enum auth_stat _svcauth_null();		/* no authentication */
-enum auth_stat _svcauth_unix();		/* unix style (uid, gids) */
-enum auth_stat _svcauth_short();	/* short hand unix style */
+/* no authentication */
+enum auth_stat _svcauth_null(void);
+/* unix style (uid, gids) */
+enum auth_stat _svcauth_unix(struct svc_req *rqst, struct rpc_msg *msg);
+/* short hand unix style */
+enum auth_stat _svcauth_short(struct svc_req *rqst, struct rpc_msg *msg);
 
 static struct {
 	enum auth_stat (*authenticator)();
@@ -88,9 +88,7 @@ static struct {
  * invalid.
  */
 enum auth_stat
-_authenticate(rqst, msg)
-	struct svc_req *rqst;
-	struct rpc_msg *msg;
+_authenticate(struct svc_req *rqst, struct rpc_msg *msg)
 {
 	int cred_flavor;
 
@@ -106,7 +104,7 @@ _authenticate(rqst, msg)
 }
 
 enum auth_stat
-_svcauth_null(/*rqst, msg*/)
+_svcauth_null(void)
 	/*struct svc_req *rqst;
 	struct rpc_msg *msg;*/
 {

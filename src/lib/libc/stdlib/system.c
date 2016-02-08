@@ -1,3 +1,4 @@
+/*	$OpenBSD: system.c,v 1.8 2005/08/08 08:05:37 espie Exp $ */
 /*
  * Copyright (c) 1988 The Regents of the University of California.
  * All rights reserved.
@@ -27,10 +28,6 @@
  * SUCH DAMAGE.
  */
 
-#if defined(LIBC_SCCS) && !defined(lint)
-static char *rcsid = "$OpenBSD: system.c,v 1.6 2003/06/02 20:18:38 millert Exp $";
-#endif /* LIBC_SCCS and not lint */
-
 #include <sys/types.h>
 #include <sys/wait.h>
 #include <signal.h>
@@ -41,8 +38,7 @@ static char *rcsid = "$OpenBSD: system.c,v 1.6 2003/06/02 20:18:38 millert Exp $
 extern char **environ;
 
 int
-system(command)
-	const char *command;
+system(const char *command)
 {
 	pid_t pid;
 	sig_t intsave, quitsave;

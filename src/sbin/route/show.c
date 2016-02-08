@@ -1,4 +1,4 @@
-/*	$OpenBSD: show.c,v 1.40 2005/02/18 04:00:21 jaredy Exp $	*/
+/*	$OpenBSD: show.c,v 1.43 2005/05/27 04:55:27 mcbride Exp $	*/
 /*	$NetBSD: show.c,v 1.1 1996/11/15 18:01:41 gwr Exp $	*/
 
 /*
@@ -30,14 +30,6 @@
  * SUCH DAMAGE.
  */
 
-#ifndef lint
-#if 0
-static char sccsid[] = "from: @(#)route.c	8.3 (Berkeley) 3/9/94";
-#else
-static const char rcsid[] = "$OpenBSD: show.c,v 1.40 2005/02/18 04:00:21 jaredy Exp $";
-#endif
-#endif /* not lint */
-
 #include <sys/param.h>
 #include <sys/protosw.h>
 #include <sys/socket.h>
@@ -63,6 +55,12 @@ static const char rcsid[] = "$OpenBSD: show.c,v 1.40 2005/02/18 04:00:21 jaredy 
 #include <unistd.h>
 
 #include "show.h"
+
+char	*any_ntoa(const struct sockaddr *);
+char	*ipx_print(struct sockaddr *);
+char	*link_print(struct sockaddr *);
+
+extern int nflag;
 
 #define PLEN  (LONG_BIT / 4 + 2) /* XXX this is also defined in netstat.h */
 
@@ -95,6 +93,7 @@ static const struct bits bits[] = {
 	{ RTF_PROTO2,	'2' },
 	{ RTF_PROTO3,	'3' },
 	{ RTF_CLONED,	'c' },
+	{ RTF_JUMBO,	'J' },
 	{ 0 }
 };
 
@@ -104,9 +103,7 @@ void	 pr_family(int);
 void	 p_sockaddr(struct sockaddr *, struct sockaddr *, int, int);
 void	 p_flags(int, char *);
 char	*routename4(in_addr_t);
-#ifdef INET6
 char	*routename6(struct sockaddr_in6 *);
-#endif
 char	*any_ntoa(const struct sockaddr *);
 
 /*
@@ -151,22 +148,13 @@ p_rttables(int af, int Aflag)
 	}
 }
 
-/* column widths; each followed by one space */
-#ifndef INET6
-#define	WID_DST(af)	18	/* width of destination column */
-#define	WID_GW(af)	18	/* width of gateway column */
-#else
-/* width of destination/gateway column */
-#if 1
-/* strlen("fe80::aaaa:bbbb:cccc:dddd@gif0") == 30, strlen("/128") == 4 */
+/* 
+ * column widths; each followed by one space
+ * width of destination/gateway column
+ * strlen("fe80::aaaa:bbbb:cccc:dddd@gif0") == 30, strlen("/128") == 4
+ */
 #define	WID_DST(af)	((af) == AF_INET6 ? (nflag ? 34 : 18) : 18)
 #define	WID_GW(af)	((af) == AF_INET6 ? (nflag ? 30 : 18) : 18)
-#else
-/* strlen("fe80::aaaa:bbbb:cccc:dddd") == 25, strlen("/128") == 4 */
-#define	WID_DST(af)	((af) == AF_INET6 ? (nflag ? 29 : 18) : 18)
-#define	WID_GW(af)	((af) == AF_INET6 ? (nflag ? 25 : 18) : 18)
-#endif
-#endif /* INET6 */
 
 /*
  * Print header for routing table columns.
@@ -250,19 +238,11 @@ pr_family(int af)
 	case AF_INET:
 		afname = "Internet";
 		break;
-#ifdef INET6
 	case AF_INET6:
 		afname = "Internet6";
 		break;
-#endif /* INET6 */
-	case AF_NS:
-		afname = "XNS";
-		break;
 	case AF_IPX:
 		afname = "IPX";
-		break;
-	case AF_CCITT:
-		afname = "X.25";
 		break;
 	case PF_KEY:
 		afname = "Encap";
@@ -286,11 +266,9 @@ p_sockaddr(struct sockaddr *sa, struct sockaddr *mask, int flags, int width)
 	char *cp;
 
 	switch (sa->sa_family) {
-#ifdef INET6
 	case AF_INET6:
 	    {
 		struct sockaddr_in6 *sa6 = (struct sockaddr_in6 *)sa;
-#ifdef __KAME__
 		struct in6_addr *in6 = &sa6->sin6_addr;
 
 		/*
@@ -304,14 +282,12 @@ p_sockaddr(struct sockaddr *sa, struct sockaddr *mask, int flags, int width)
 			    &in6->s6_addr[2]);
 			*(u_short *)&in6->s6_addr[2] = 0;
 		}
-#endif
 		if (flags & RTF_HOST)
 			cp = routename((struct sockaddr *)sa6);
 		else
 			cp = netname((struct sockaddr *)sa6, mask);
 		break;
 	    }
-#endif
 	default:
 		if ((flags & RTF_HOST) || mask == NULL)
 			cp = routename(sa);
@@ -371,7 +347,6 @@ routename(struct sockaddr *sa)
 		return
 		    (routename4(((struct sockaddr_in *)sa)->sin_addr.s_addr));
 
-#ifdef INET6
 	case AF_INET6:
 	    {
 		struct sockaddr_in6 sin6;
@@ -380,7 +355,6 @@ routename(struct sockaddr *sa)
 		memcpy(&sin6, sa, sa->sa_len);
 		sin6.sin6_len = sizeof(struct sockaddr_in6);
 		sin6.sin6_family = AF_INET6;
-#ifdef __KAME__
 		if (sa->sa_len == sizeof(struct sockaddr_in6) &&
 		    (IN6_IS_ADDR_LINKLOCAL(&sin6.sin6_addr) ||
 		     IN6_IS_ADDR_MC_LINKLOCAL(&sin6.sin6_addr)) &&
@@ -390,10 +364,8 @@ routename(struct sockaddr *sa)
 			sin6.sin6_addr.s6_addr[2] = 0;
 			sin6.sin6_addr.s6_addr[3] = 0;
 		}
-#endif
 		return (routename6(&sin6));
 	    }
-#endif
 
 	case AF_IPX:
 		return (ipx_print(sa));
@@ -443,7 +415,6 @@ routename4(in_addr_t in)
 	return (line);
 }
 
-#ifdef INET6
 char *
 routename6(struct sockaddr_in6 *sin6)
 {
@@ -461,7 +432,6 @@ routename6(struct sockaddr_in6 *sin6)
 
 	return (line);
 }
-#endif
 
 /*
  * Return the name of the network whose address is given.
@@ -502,7 +472,6 @@ netname4(in_addr_t in, struct sockaddr_in *maskp)
 	return (line);
 }
 
-#ifdef INET6
 char *
 netname6(struct sockaddr_in6 *sa6, struct sockaddr_in6 *mask)
 {
@@ -595,7 +564,6 @@ netname6(struct sockaddr_in6 *sa6, struct sockaddr_in6 *mask)
 	snprintf(line, sizeof(line), "%s/%d", hbuf, masklen);
 	return (line);
 }
-#endif
 
 /*
  * Return the name of the network whose address is given.
@@ -609,11 +577,10 @@ netname(struct sockaddr *sa, struct sockaddr *mask)
 	case AF_INET:
 		return netname4(((struct sockaddr_in *)sa)->sin_addr.s_addr,
 		    (struct sockaddr_in *)mask);
-#ifdef INET6
+
 	case AF_INET6:
 		return netname6((struct sockaddr_in6 *)sa,
 		    (struct sockaddr_in6 *)mask);
-#endif
 
 	case AF_IPX:
 		return (ipx_print(sa));

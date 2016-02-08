@@ -1,4 +1,4 @@
-# $OpenBSD: list.local,v 1.9 2005/03/16 19:42:20 deraadt Exp $
+# $OpenBSD: list.local,v 1.11 2005/04/06 21:01:04 deraadt Exp $
 
 # add local links; use bin/sh since instbin has already been unlinked
 LINK	instbin					sbin/wicontrol
@@ -8,10 +8,11 @@ LINK	instbin					sbin/ping6
 LINK	instbin					sbin/rtsol
 LINK	instbin					sbin/apm sbin/zzz
 LINK	instbin					sbin/apmd
+LINK	instbin					sbin/mount_udf
 
 # firmwares that might need loading
 #COPY	${DESTDIR}/etc/firmware/tigon1		etc/firmware/tigon1
-COPY	${DESTDIR}/etc/firmware/tigon2		etc/firmware/tigon2
+#COPY	${DESTDIR}/etc/firmware/tigon2		etc/firmware/tigon2
 COPY	${DESTDIR}/etc/firmware/kue		etc/firmware/kue
 COPY	${DESTDIR}/etc/firmware/3c990		etc/firmware/3c990
 

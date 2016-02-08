@@ -1,3 +1,4 @@
+/*	$OpenBSD: exec.c,v 1.18 2005/08/08 08:05:34 espie Exp $ */
 /*-
  * Copyright (c) 1991, 1993
  *	The Regents of the University of California.  All rights reserved.
@@ -26,10 +27,6 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  */
-
-#if defined(LIBC_SCCS) && !defined(lint)
-static char rcsid[] = "$OpenBSD: exec.c,v 1.16 2003/06/11 21:03:10 deraadt Exp $";
-#endif /* LIBC_SCCS and not lint */
 
 #include <sys/param.h>
 #include <sys/types.h>
@@ -134,8 +131,8 @@ int
 execvp(const char *name, char * const *argv)
 {
 	char **memp;
-	register int cnt, lp, ln, len;
-	register char *p;
+	int cnt, lp, ln, len;
+	char *p;
 	int eacces = 0;
 	char *bp, *cur, *path, buf[MAXPATHLEN];
 

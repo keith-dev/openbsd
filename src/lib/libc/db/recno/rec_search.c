@@ -1,4 +1,4 @@
-/*	$OpenBSD: rec_search.c,v 1.9 2005/01/03 22:46:43 millert Exp $	*/
+/*	$OpenBSD: rec_search.c,v 1.11 2005/08/05 13:03:00 espie Exp $	*/
 
 /*-
  * Copyright (c) 1990, 1993
@@ -29,14 +29,6 @@
  * SUCH DAMAGE.
  */
 
-#if defined(LIBC_SCCS) && !defined(lint)
-#if 0
-static char sccsid[] = "@(#)rec_search.c	8.4 (Berkeley) 7/14/94";
-#else
-static const char rcsid[] = "$OpenBSD: rec_search.c,v 1.9 2005/01/03 22:46:43 millert Exp $";
-#endif
-#endif /* LIBC_SCCS and not lint */
-
 #include <sys/types.h>
 
 #include <errno.h>
@@ -63,10 +55,7 @@ static const char rcsid[] = "$OpenBSD: rec_search.c,v 1.9 2005/01/03 22:46:43 mi
  *	the bt_cur field of the tree.  A pointer to the field is returned.
  */
 EPG *
-__rec_search(t, recno, op)
-	BTREE *t;
-	recno_t recno;
-	enum SRCHOP op;
+__rec_search(BTREE *t, recno_t recno, enum SRCHOP op)
 {
 	indx_t idx;
 	PAGE *h;

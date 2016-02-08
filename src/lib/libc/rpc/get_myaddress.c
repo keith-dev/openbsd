@@ -1,3 +1,4 @@
+/*	$OpenBSD: get_myaddress.c,v 1.12 2005/08/08 08:05:35 espie Exp $ */
 /*
  * Sun RPC is a product of Sun Microsystems, Inc. and is provided for
  * unrestricted use provided that this legend is included on all tape
@@ -27,10 +28,6 @@
  * Mountain View, California  94043
  */
 
-#if defined(LIBC_SCCS) && !defined(lint)
-static char *rcsid = "$OpenBSD: get_myaddress.c,v 1.10 2000/02/25 05:06:27 itojun Exp $";
-#endif /* LIBC_SCCS and not lint */
-
 /*
  * get_myaddress.c
  *
@@ -56,8 +53,7 @@ static char *rcsid = "$OpenBSD: get_myaddress.c,v 1.10 2000/02/25 05:06:27 itoju
  * interface only if there are no other possible interfaces.
  */
 int
-get_myaddress(addr)
-	struct sockaddr_in *addr;
+get_myaddress(struct sockaddr_in *addr)
 {
 	struct ifaddrs *ifap, *ifa;
 	int loopback = 0, gotit = 0;

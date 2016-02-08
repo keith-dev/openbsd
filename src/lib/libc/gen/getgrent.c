@@ -1,3 +1,4 @@
+/*	$OpenBSD: getgrent.c,v 1.23 2005/08/08 08:05:34 espie Exp $ */
 /*
  * Copyright (c) 1989, 1993
  *	The Regents of the University of California.  All rights reserved.
@@ -27,10 +28,6 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  */
-
-#if defined(LIBC_SCCS) && !defined(lint)
-static char rcsid[] = "$OpenBSD: getgrent.c,v 1.21 2004/06/07 21:11:23 marc Exp $";
-#endif /* LIBC_SCCS and not lint */
 
 #include <sys/types.h>
 #include <sys/param.h>
@@ -250,7 +247,7 @@ static int
 grscan(int search, gid_t gid, const char *name, struct group *p_gr,
     struct group_storage *gs)
 {
-	register char *cp, **m;
+	char *cp, **m;
 	char *bp, *endp;
 	u_long ul;
 #ifdef YP
@@ -403,7 +400,7 @@ grscan(int search, gid_t gid, const char *name, struct group *p_gr,
 				break;
 			default:
 				if (_yp_check(NULL)) {
-					register char *tptr;
+					char *tptr;
 
 					tptr = strsep(&bp, ":\n");
 					if (search && name && strcmp(tptr, name))

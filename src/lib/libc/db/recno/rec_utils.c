@@ -1,3 +1,4 @@
+/*	$OpenBSD: rec_utils.c,v 1.7 2005/08/05 13:03:00 espie Exp $ */
 /*-
  * Copyright (c) 1990, 1993, 1994
  *	The Regents of the University of California.  All rights reserved.
@@ -27,10 +28,6 @@
  * SUCH DAMAGE.
  */
 
-#if defined(LIBC_SCCS) && !defined(lint)
-static const char rcsid[] = "$OpenBSD: rec_utils.c,v 1.5 2003/06/02 20:18:34 millert Exp $";
-#endif /* LIBC_SCCS and not lint */
-
 #include <sys/param.h>
 
 #include <stdio.h>
@@ -55,11 +52,7 @@ static const char rcsid[] = "$OpenBSD: rec_utils.c,v 1.5 2003/06/02 20:18:34 mil
  *	RET_SUCCESS, RET_ERROR.
  */
 int
-__rec_ret(t, e, nrec, key, data)
-	BTREE *t;
-	EPG *e;
-	recno_t nrec;
-	DBT *key, *data;
+__rec_ret(BTREE *t, EPG *e, recno_t nrec, DBT *key, DBT *data)
 {
 	RLEAF *rl;
 	void *p;

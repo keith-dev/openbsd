@@ -1,4 +1,6 @@
-/*	$OpenBSD: spawn.c,v 1.8 2003/05/20 03:08:55 cloder Exp $	*/
+/*	$OpenBSD: spawn.c,v 1.10 2005/06/14 18:14:40 kjell Exp $	*/
+
+/* This file is in the public domain. */
 
 /*
  * Spawn.  Actually just suspends Mg.
@@ -31,7 +33,7 @@ spawncli(int f, int n)
 		epresf = FALSE;
 	}
 	if (ttcooked() == FALSE)
-		return(FALSE);
+		return (FALSE);
 
 	/* Exit application mode and tidy. */
 	tttidy();
@@ -43,5 +45,5 @@ spawncli(int f, int n)
 
 	/* Force repaint. */
 	sgarbf = TRUE;
-	return ttraw();
+	return (ttraw());
 }

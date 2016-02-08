@@ -1,4 +1,4 @@
-/*	$OpenBSD: rde_decide.c,v 1.40 2004/11/11 10:35:15 claudio Exp $ */
+/*	$OpenBSD: rde_decide.c,v 1.42 2005/08/09 20:27:25 claudio Exp $ */
 
 /*
  * Copyright (c) 2003, 2004 Claudio Jeker <claudio@openbsd.org>
@@ -137,7 +137,8 @@ prefix_cmp(struct prefix *p1, struct prefix *p2)
 		return (asp2->origin - asp1->origin);
 
 	/* 5. MED decision, only comparable between the same neighboring AS */
-	if (aspath_neighbor(asp1->aspath) == aspath_neighbor(asp2->aspath))
+	if (rde_decisionflags() & BGPD_FLAG_DECISION_MED_ALWAYS ||
+	    aspath_neighbor(asp1->aspath) == aspath_neighbor(asp2->aspath))
 		/* lowest value wins */
 		if ((asp2->med - asp1->med) != 0)
 			return (asp2->med - asp1->med);
@@ -154,21 +155,31 @@ prefix_cmp(struct prefix *p1, struct prefix *p2)
 			return -1;
 	}
 
-	/* 7. nexthop costs. NOT YET -> IGNORE */
+	/*
+	 * 7. local tie-breaker, this weight is here to tip equal long AS
+	 * pathes in one or the other direction. It happens more and more
+	 * that AS pathes are equally long and so traffic engineering needs
+	 * a metric that weights a prefix at a very late stage in the
+	 * decision process.
+	 */
+	if ((asp1->weight - asp2->weight) != 0)
+		return (asp1->weight - asp2->weight);
+
+	/* 8. nexthop costs. NOT YET -> IGNORE */
 
 	/*
-	 * 8. older route (more stable) wins but only if route-age
+	 * 9. older route (more stable) wins but only if route-age
 	 * evaluation is enabled.
 	 */
 	if (rde_decisionflags() & BGPD_FLAG_DECISION_ROUTEAGE)
 		if ((p2->lastchange - p1->lastchange) != 0)
 			return (p2->lastchange - p1->lastchange);
 
-	/* 9. lowest BGP Id wins */
+	/* 10. lowest BGP Id wins */
 	if ((p2->peer->remote_bgpid - p1->peer->remote_bgpid) != 0)
 		return (p2->peer->remote_bgpid - p1->peer->remote_bgpid);
 
-	/* 10. lowest peer address wins (IPv4 is better than IPv6) */
+	/* 11. lowest peer address wins (IPv4 is better than IPv6) */
 	if (memcmp(&p1->peer->remote_addr, &p2->peer->remote_addr,
 	    sizeof(p1->peer->remote_addr)) != 0)
 		return (-memcmp(&p1->peer->remote_addr, &p2->peer->remote_addr,

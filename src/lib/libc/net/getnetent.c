@@ -1,3 +1,4 @@
+/*	$OpenBSD: getnetent.c,v 1.11 2005/08/06 20:30:03 espie Exp $ */
 /*
  * Copyright (c) 1983, 1993
  *	The Regents of the University of California.  All rights reserved.
@@ -27,10 +28,6 @@
  * SUCH DAMAGE.
  */
 
-#if defined(LIBC_SCCS) && !defined(lint)
-static char rcsid[] = "$OpenBSD: getnetent.c,v 1.9 2003/06/02 20:18:35 millert Exp $";
-#endif /* LIBC_SCCS and not lint */
-
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
@@ -48,8 +45,7 @@ static char *net_aliases[MAXALIASES];
 int _net_stayopen;
 
 void
-setnetent(f)
-	int f;
+setnetent(int f)
 {
 	if (netf == NULL)
 		netf = fopen(_PATH_NETWORKS, "r" );
@@ -59,7 +55,7 @@ setnetent(f)
 }
 
 void
-endnetent()
+endnetent(void)
 {
 	if (netf) {
 		fclose(netf);
@@ -69,7 +65,7 @@ endnetent()
 }
 
 struct netent *
-getnetent()
+getnetent(void)
 {
 	char *p, *cp, **q;
 	size_t len;

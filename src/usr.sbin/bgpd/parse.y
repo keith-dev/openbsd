@@ -1,4 +1,4 @@
-/*	$OpenBSD: parse.y,v 1.153 2005/03/16 10:50:26 henning Exp $ */
+/*	$OpenBSD: parse.y,v 1.171 2005/08/09 20:27:25 claudio Exp $ */
 
 /*
  * Copyright (c) 2002, 2003, 2004 Henning Brauer <henning@openbsd.org>
@@ -95,6 +95,8 @@ int		 neighbor_consistent(struct peer *);
 int		 merge_filterset(struct filter_set_head *, struct filter_set *);
 void		 copy_filterset(struct filter_set_head *,
 		    struct filter_set_head *);
+void		 move_filterset(struct filter_set_head *,
+		    struct filter_set_head *);
 
 TAILQ_HEAD(symhead, sym)	 symhead = TAILQ_HEAD_INITIALIZER(symhead);
 struct sym {
@@ -140,7 +142,7 @@ typedef struct {
 %}
 
 %token	AS ROUTERID HOLDTIME YMIN LISTEN ON FIBUPDATE
-%token	RDE EVALUATE IGNORE
+%token	RDE EVALUATE IGNORE COMPARE
 %token	GROUP NEIGHBOR NETWORK
 %token	REMOTEAS DESCR LOCALADDR MULTIHOP PASSIVE MAXPREFIX ANNOUNCE
 %token	ENFORCE NEIGHBORAS CAPABILITIES REFLECTOR DEPEND
@@ -150,13 +152,16 @@ typedef struct {
 %token	ALLOW DENY MATCH
 %token	QUICK
 %token	FROM TO ANY
+%token	CONNECTED STATIC
 %token	PREFIX PREFIXLEN SOURCEAS TRANSITAS COMMUNITY
 %token	SET LOCALPREF MED METRIC NEXTHOP REJECT BLACKHOLE NOMODIFY
-%token	PREPEND_SELF PREPEND_PEER PFTABLE
+%token	PREPEND_SELF PREPEND_PEER PFTABLE WEIGHT RTLABEL
 %token	ERROR
 %token	IPSEC ESP AH SPI IKE
+%token	IPV4 IPV6
 %token	<v.string>		STRING
 %type	<v.number>		number asnumber optnumber yesno inout espah
+%type	<v.number>		family
 %type	<v.string>		string
 %type	<v.addr>		address
 %type	<v.prefix>		prefix addrspec
@@ -313,7 +318,7 @@ conf_main	: AS asnumber		{
 			else
 				conf->flags &= ~BGPD_FLAG_DECISION_TRANS_AS;
 		}
-		| LOG string		{
+		| LOG STRING		{
 			if (!strcmp($2, "updates"))
 				conf->log |= BGPD_LOG_UPDATES;
 			else {
@@ -325,19 +330,49 @@ conf_main	: AS asnumber		{
 		| NETWORK prefix filter_set	{
 			struct network	*n;
 
-			if ($2.prefix.af != AF_INET) {
-				yyerror("king bula sez: AF_INET only for now");
-				YYERROR;
-			}
 			if ((n = calloc(1, sizeof(struct network))) == NULL)
 				fatal("new_network");
 			memcpy(&n->net.prefix, &$2.prefix,
 			    sizeof(n->net.prefix));
 			n->net.prefixlen = $2.len;
-			memcpy(&n->net.attrset, &$3,
-			    sizeof(n->net.attrset));
+			move_filterset($3, &n->net.attrset);
+			free($3);
 
 			TAILQ_INSERT_TAIL(netconf, n, entry);
+		}
+		| NETWORK STRING STATIC filter_set	{
+			if (!strcmp($2, "inet")) {
+				conf->flags |= BGPD_FLAG_REDIST_STATIC;
+				move_filterset($4, &conf->staticset);
+			} else if (!strcmp($2, "inet6")) {
+				conf->flags |= BGPD_FLAG_REDIST6_STATIC;
+				move_filterset($4, &conf->staticset6);
+			}
+			free($2);
+			free($4);
+		}
+		| NETWORK STRING CONNECTED filter_set	{
+			if (!strcmp($2, "inet")) {
+				conf->flags |= BGPD_FLAG_REDIST_CONNECTED;
+				move_filterset($4, &conf->connectset);
+			} else if (!strcmp($2, "inet6")) {
+				conf->flags |= BGPD_FLAG_REDIST6_CONNECTED;
+				move_filterset($4, &conf->connectset6);
+			}
+			free($2);
+			free($4);
+		}
+		| NETWORK STATIC filter_set	{
+			/* keep for compatibility till after next release */
+			conf->flags |= BGPD_FLAG_REDIST_STATIC;
+			move_filterset($3, &conf->staticset);
+			free($3);
+		}
+		| NETWORK CONNECTED filter_set	{
+			/* keep for compatibility till after next release */
+			conf->flags |= BGPD_FLAG_REDIST_CONNECTED;
+			move_filterset($3, &conf->connectset);
+			free($3);
 		}
 		| DUMP STRING STRING optnumber		{
 			int action;
@@ -379,6 +414,19 @@ conf_main	: AS asnumber		{
 				YYERROR;
 			}
 			free($2);
+		}
+		| RDE MED COMPARE STRING	{
+			if (!strcmp($4, "always"))
+				conf->flags |= BGPD_FLAG_DECISION_MED_ALWAYS;
+			else if (!strcmp($4, "strict"))
+				conf->flags &= ~BGPD_FLAG_DECISION_MED_ALWAYS;
+			else {
+				yyerror("rde med compare: "
+				    "unknown setting \"%s\"", $4);
+				free($4);
+				YYERROR;
+			}
+			free($4);
 		}
 		;
 
@@ -576,6 +624,32 @@ peeropts	: REMOTEAS asnumber	{
 			}
 			curpeer->conf.min_holdtime = $3;
 		}
+		| ANNOUNCE family STRING {
+			u_int8_t	safi;
+
+			if (!strcmp($3, "none"))
+				safi = SAFI_NONE;
+			else if (!strcmp($3, "unicast"))
+				safi = SAFI_UNICAST;
+			else {
+				yyerror("unknown/unsupported SAFI \"%s\"",
+				    $3);
+				free($3);
+				YYERROR;
+			}
+			free($3);
+
+			switch ($2) {
+			case AFI_IPv4:
+				curpeer->conf.capabilities.mp_v4 = safi;
+				break;
+			case AFI_IPv6:
+				curpeer->conf.capabilities.mp_v6 = safi;
+				break;
+			default:
+				fatal("king bula sees borked AFI");
+			}
+		}
 		| ANNOUNCE STRING {
 			if (!strcmp($2, "self"))
 				curpeer->conf.announce_type = ANNOUNCE_SELF;
@@ -743,8 +817,8 @@ peeropts	: REMOTEAS asnumber	{
 		| SET optnl "{" optnl filter_set_l optnl "}"	{
 			struct filter_set	*s;
 
-			while ((s = SIMPLEQ_FIRST($5)) != NULL) {
-				SIMPLEQ_REMOVE_HEAD($5, entry);
+			while ((s = TAILQ_FIRST($5)) != NULL) {
+				TAILQ_REMOVE($5, s, entry);
 				if (merge_filterset(&curpeer->conf.attrset, s)
 				    == -1)
 				YYERROR;
@@ -790,6 +864,10 @@ peeropts	: REMOTEAS asnumber	{
 			}
 			free($3);
 		}
+		;
+
+family		: IPV4	{ $$ = AFI_IPv4; }
+		| IPV6	{ $$ = AFI_IPv6; }
 		;
 
 espah		: ESP		{ $$ = 1; }
@@ -1108,8 +1186,8 @@ filter_set	: /* empty */					{ $$ = NULL; }
 			if (($$ = calloc(1, sizeof(struct filter_set_head))) ==
 			    NULL)
 				fatal(NULL);
-			SIMPLEQ_INIT($$);
-			SIMPLEQ_INSERT_TAIL($$, $2, entry);
+			TAILQ_INIT($$);
+			TAILQ_INSERT_TAIL($$, $2, entry);
 		}
 		| SET optnl "{" optnl filter_set_l optnl "}"	{ $$ = $5; }
 		;
@@ -1123,8 +1201,8 @@ filter_set_l	: filter_set_l comma filter_set_opt	{
 			if (($$ = calloc(1, sizeof(struct filter_set_head))) ==
 			    NULL)
 				fatal(NULL);
-			SIMPLEQ_INIT($$);
-			SIMPLEQ_INSERT_TAIL($$, $1, entry);
+			TAILQ_INIT($$);
+			TAILQ_INSERT_TAIL($$, $1, entry);
 		}
 		;
 
@@ -1136,7 +1214,7 @@ filter_set_opt	: LOCALPREF number		{
 		}
 		| LOCALPREF '+' number		{
 			if ($3 > INT_MAX) {
-				yyerror("metric to small: max %u", INT_MAX);
+				yyerror("localpref to big: max %u", INT_MAX);
 				YYERROR;
 			}
 			if (($$ = calloc(1, sizeof(struct filter_set))) == NULL)
@@ -1146,7 +1224,7 @@ filter_set_opt	: LOCALPREF number		{
 		}
 		| LOCALPREF '-' number		{
 			if ($3 > INT_MAX) {
-				yyerror("metric to small: min -%u", INT_MAX);
+				yyerror("localpref to small: min -%u", INT_MAX);
 				YYERROR;
 			}
 			if (($$ = calloc(1, sizeof(struct filter_set))) == NULL)
@@ -1162,7 +1240,7 @@ filter_set_opt	: LOCALPREF number		{
 		}
 		| MED '+' number			{
 			if ($3 > INT_MAX) {
-				yyerror("metric to small: max %u", INT_MAX);
+				yyerror("metric to big: max %u", INT_MAX);
 				YYERROR;
 			}
 			if (($$ = calloc(1, sizeof(struct filter_set))) == NULL)
@@ -1188,7 +1266,7 @@ filter_set_opt	: LOCALPREF number		{
 		}
 		| METRIC '+' number			{
 			if ($3 > INT_MAX) {
-				yyerror("metric to small: max %u", INT_MAX);
+				yyerror("metric to big: max %u", INT_MAX);
 				YYERROR;
 			}
 			if (($$ = calloc(1, sizeof(struct filter_set))) == NULL)
@@ -1204,6 +1282,32 @@ filter_set_opt	: LOCALPREF number		{
 			if (($$ = calloc(1, sizeof(struct filter_set))) == NULL)
 				fatal(NULL);
 			$$->type = ACTION_SET_RELATIVE_MED;
+			$$->action.relative = -$3;
+		}
+		| WEIGHT number				{
+			if (($$ = calloc(1, sizeof(struct filter_set))) == NULL)
+				fatal(NULL);
+			$$->type = ACTION_SET_WEIGHT;
+			$$->action.metric = $2;
+		}
+		| WEIGHT '+' number			{
+			if ($3 > INT_MAX) {
+				yyerror("weight to big: max %u", INT_MAX);
+				YYERROR;
+			}
+			if (($$ = calloc(1, sizeof(struct filter_set))) == NULL)
+				fatal(NULL);
+			$$->type = ACTION_SET_RELATIVE_WEIGHT;
+			$$->action.metric = $3;
+		}
+		| WEIGHT '-' number			{
+			if ($3 > INT_MAX) {
+				yyerror("weight to small: min -%u", INT_MAX);
+				YYERROR;
+			}
+			if (($$ = calloc(1, sizeof(struct filter_set))) == NULL)
+				fatal(NULL);
+			$$->type = ACTION_SET_RELATIVE_WEIGHT;
 			$$->action.relative = -$3;
 		}
 		| NEXTHOP address		{
@@ -1248,7 +1352,7 @@ filter_set_opt	: LOCALPREF number		{
 			}
 			$$->action.prepend = $2;
 		}
-		| PFTABLE string		{
+		| PFTABLE STRING		{
 			if (($$ = calloc(1, sizeof(struct filter_set))) == NULL)
 				fatal(NULL);
 			$$->type = ACTION_PFTABLE;
@@ -1272,6 +1376,19 @@ filter_set_opt	: LOCALPREF number		{
 			}
 			free($2);
 		}
+		| RTLABEL STRING		{
+			if (($$ = calloc(1, sizeof(struct filter_set))) == NULL)
+				fatal(NULL);
+			$$->type = ACTION_RTLABEL;
+			if (strlcpy($$->action.rtlabel, $2,
+			    sizeof($$->action.rtlabel)) >=
+			    sizeof($$->action.rtlabel)) {
+				yyerror("rtlabel name too long");
+				free($2);
+				YYERROR;
+			}
+			free($2);
+		}
 		| COMMUNITY STRING		{
 			if (($$ = calloc(1, sizeof(struct filter_set))) == NULL)
 				fatal(NULL);
@@ -1282,11 +1399,6 @@ filter_set_opt	: LOCALPREF number		{
 				YYERROR;
 			}
 			free($2);
-			if ($$->action.community.as <= 0 ||
-			    $$->action.community.as > 0xffff) {
-				yyerror("Invalid community");
-				YYERROR;
-			}
 			/* Don't allow setting of unknown well-known types */
 			if ($$->action.community.as == COMMUNITY_WELLKNOWN) {
 				switch ($$->action.community.type) {
@@ -1356,6 +1468,8 @@ lookup(char *s)
 	/* this has to be sorted always */
 	static const struct keywords keywords[] = {
 		{ "AS",			AS},
+		{ "IPv4",		IPV4},
+		{ "IPv6",		IPV6},
 		{ "ah",			AH},
 		{ "allow",		ALLOW},
 		{ "announce",		ANNOUNCE},
@@ -1363,6 +1477,8 @@ lookup(char *s)
 		{ "blackhole",		BLACKHOLE},
 		{ "capabilities",	CAPABILITIES},
 		{ "community",		COMMUNITY},
+		{ "compare",		COMPARE},
+		{ "connected",		CONNECTED},
 		{ "deny",		DENY},
 		{ "depend",		DEPEND},
 		{ "descr",		DESCR},
@@ -1411,13 +1527,16 @@ lookup(char *s)
 		{ "route-collector",	ROUTECOLL},
 		{ "route-reflector",	REFLECTOR},
 		{ "router-id",		ROUTERID},
+		{ "rtlabel",		RTLABEL},
 		{ "set",		SET},
 		{ "source-as",		SOURCEAS},
 		{ "spi",		SPI},
+		{ "static",		STATIC},
 		{ "tcp",		TCP},
 		{ "to",			TO},
 		{ "transit-as",		TRANSITAS},
-		{ "transparent-as",	TRANSPARENT}
+		{ "transparent-as",	TRANSPARENT},
+		{ "weight",		WEIGHT}
 	};
 	const struct keywords	*p;
 
@@ -1630,6 +1749,8 @@ parse_config(char *filename, struct bgpd_config *xconf,
 	struct sym		*sym, *next;
 	struct peer		*p, *pnext;
 	struct listen_addr	*la;
+	struct network		*n;
+	struct filter_rule	*r;
 
 	if ((fin = fopen(filename, "r")) == NULL) {
 		warn("%s", filename);
@@ -1649,8 +1770,6 @@ parse_config(char *filename, struct bgpd_config *xconf,
 	if ((listen_addrs = calloc(1, sizeof(struct listen_addrs))) == NULL)
 		fatal(NULL);
 	LIST_INIT(mrtconf);
-	netconf = nc;
-	TAILQ_INIT(netconf);
 	TAILQ_INIT(listen_addrs);
 
 	peer_l = NULL;
@@ -1660,9 +1779,13 @@ parse_config(char *filename, struct bgpd_config *xconf,
 	lineno = 1;
 	errors = 0;
 	id = 1;
+	conf->opts = xconf->opts;
+
+	/* filter and network list are always empty in the parent */
 	filter_l = xfilter_l;
 	TAILQ_INIT(filter_l);
-	conf->opts = xconf->opts;
+	netconf = nc;
+	TAILQ_INIT(netconf);
 
 	yyparse();
 
@@ -1683,12 +1806,27 @@ parse_config(char *filename, struct bgpd_config *xconf,
 	}
 
 	if (errors) {
-		/* XXX more leaks in this case? */
+		/* XXX more leaks in this case */
 		while ((la = TAILQ_FIRST(listen_addrs)) != NULL) {
 			TAILQ_REMOVE(listen_addrs, la, entry);
 			free(la);
 		}
 		free(listen_addrs);
+
+		for (p = peer_l; p != NULL; p = pnext) {
+			pnext = p->next;
+			free(p);
+		}
+
+		while ((n = TAILQ_FIRST(netconf)) != NULL) {
+			TAILQ_REMOVE(netconf, n, entry);
+			free(n);
+		}
+
+		while ((r = TAILQ_FIRST(filter_l)) != NULL) {
+			TAILQ_REMOVE(filter_l, r, entry);
+			free(r);
+		}
 	} else {
 		errors += merge_config(xconf, conf, peer_l, listen_addrs);
 		errors += mrt_mergeconfig(xmconf, mrtconf);
@@ -1877,7 +2015,7 @@ alloc_peer(void)
 	p->conf.capabilities.mp_v4 = SAFI_UNICAST;
 	p->conf.capabilities.mp_v6 = SAFI_NONE;
 	p->conf.capabilities.refresh = 1;
-	SIMPLEQ_INIT(&p->conf.attrset);
+	TAILQ_INIT(&p->conf.attrset);
 
 	return (p);
 }
@@ -1898,7 +2036,7 @@ new_peer(void)
 		    sizeof(p->conf.descr)) >= sizeof(p->conf.descr))
 			fatalx("new_peer descr strlcpy");
 		p->conf.groupid = curgroup->conf.id;
-		SIMPLEQ_INIT(&p->conf.attrset);
+		TAILQ_INIT(&p->conf.attrset);
 		copy_filterset(&curgroup->conf.attrset, &p->conf.attrset);
 	}
 	p->next = NULL;
@@ -1994,6 +2132,7 @@ expand_rule(struct filter_rule *rule, struct filter_peers_l *peer,
 	struct filter_peers_l	*p, *pnext;
 	struct filter_prefix_l	*prefix, *prefix_next;
 	struct filter_as_l	*a, *anext;
+	struct filter_set	*s;
 
 	p = peer;
 	do {
@@ -2010,7 +2149,7 @@ expand_rule(struct filter_rule *rule, struct filter_peers_l *peer,
 				memcpy(r, rule, sizeof(struct filter_rule));
 				memcpy(&r->match, match,
 				    sizeof(struct filter_match));
-				SIMPLEQ_INIT(&r->set);
+				TAILQ_INIT(&r->set);
 				copy_filterset(set, &r->set);
 
 				if (p != NULL)
@@ -2053,6 +2192,15 @@ expand_rule(struct filter_rule *rule, struct filter_peers_l *peer,
 		anext = a->next;
 		free(a);
 	}
+
+	if (set != NULL) {
+		while ((s = TAILQ_FIRST(set)) != NULL) {
+			TAILQ_REMOVE(set, s, entry);
+			free(s);
+		}
+		free(set);
+	}
+
 	return (0);
 }
 
@@ -2117,6 +2265,27 @@ neighbor_consistent(struct peer *p)
 		return (-1);
 	}
 
+	if (!conf->as) {
+		yyerror("AS needs to be given before neighbor definitions");
+		return (-1);
+	}
+
+	/* set default values if they where undefined */
+	p->conf.ebgp = (p->conf.remote_as != conf->as);
+	if (p->conf.announce_type == ANNOUNCE_UNDEF)
+		p->conf.announce_type = p->conf.ebgp == 0 ?
+		    ANNOUNCE_ALL : ANNOUNCE_SELF;
+	if (p->conf.enforce_as == ENFORCE_AS_UNDEF)
+		p->conf.enforce_as = p->conf.ebgp == 0 ?
+		    ENFORCE_AS_OFF : ENFORCE_AS_ON;
+
+	/* EBGP neighbors are not allowed in route reflector clusters */
+	if (p->conf.reflector_client && p->conf.ebgp) {
+		yyerror("EBGP neighbors are not allowed in route "
+		    "reflector clusters");
+		return (-1);
+	}
+
 	return (0);
 }
 
@@ -2125,32 +2294,19 @@ merge_filterset(struct filter_set_head *sh, struct filter_set *s)
 {
 	struct filter_set	*t;
 
-	SIMPLEQ_FOREACH(t, sh, entry) {
-		if (s->type != t->type)
-			continue;
-
-		switch (s->type) {
-		case ACTION_SET_COMMUNITY:
-			if (s->action.community.as == t->action.community.as &&
-			    s->action.community.type ==
-			    t->action.community.type) {
+	TAILQ_FOREACH(t, sh, entry) {
+		if (filterset_cmp(s, t) == 0) {
+			if (s->type == ACTION_SET_COMMUNITY)
 				yyerror("community is already set");
-				return (-1);
-			}
-			break;
-		case ACTION_SET_NEXTHOP:
-			if (s->action.nexthop.af != t->action.nexthop.af)
-				break;
-			/* FALLTHROUGH */
-		default:
-			yyerror("redefining set parameters is not fluffy");
+			else
+				yyerror("redefining set parameter %s",
+				    filterset_names[s->type]);
 			return (-1);
 		}
 	}
-	SIMPLEQ_INSERT_TAIL(sh, s, entry);
+	TAILQ_INSERT_TAIL(sh, s, entry);
 	return (0);
 }
-
 
 void
 copy_filterset(struct filter_set_head *source, struct filter_set_head *dest)
@@ -2160,10 +2316,27 @@ copy_filterset(struct filter_set_head *source, struct filter_set_head *dest)
 	if (source == NULL)
 		return;
 
-	SIMPLEQ_FOREACH(s, source, entry) {
+	TAILQ_FOREACH(s, source, entry) {
 		if ((t = calloc(1, sizeof(struct filter_set))) == NULL)
 			fatal(NULL);
 		memcpy(t, s, sizeof(struct filter_set));
-		SIMPLEQ_INSERT_TAIL(dest, t, entry);
+		TAILQ_INSERT_TAIL(dest, t, entry);
 	}
 }
+
+void
+move_filterset(struct filter_set_head *source, struct filter_set_head *dest)
+{
+	struct filter_set	*s;
+
+	TAILQ_INIT(dest);
+
+	if (source == NULL || TAILQ_EMPTY(source))
+		return;
+
+	while ((s = TAILQ_FIRST(source)) != NULL) {
+		TAILQ_REMOVE(source, s, entry);
+		TAILQ_INSERT_TAIL(dest, s, entry);
+	}
+}
+

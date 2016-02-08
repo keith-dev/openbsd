@@ -1,4 +1,4 @@
-.\"	$OpenBSD: sh.1,v 1.65 2005/02/18 09:01:49 jmc Exp $
+.\"	$OpenBSD: sh.1,v 1.68 2005/08/21 17:40:42 millert Exp $
 .\"
 .\"	Public Domain
 .\"
@@ -774,6 +774,7 @@ not
 .Sq A ,
 .Sq B ,
 .Sq ,
+.Sq D ,
 and
 .Sq E .
 This behavior is POSIX compliant, but incompatible with some other shell
@@ -3374,7 +3375,7 @@ except zero padding is used instead of space padding.
 .Pp
 .It Xo
 .Ic ulimit
-.Op Fl acdfHlmnpSstv
+.Op Fl acdfHlmnpSst
 .Op Ar value
 .Xc
 Display or set process limits.
@@ -3438,10 +3439,10 @@ kilobytes on the size of the stack area.
 Impose a time limit of
 .Ar n
 CPU seconds spent in user mode to be used by each process.
-.It Fl v Ar n
-Impose a limit of
-.Ar n
-kilobytes on the amount of virtual memory used.
+.\".It Fl v Ar n
+.\"Impose a limit of
+.\".Ar n
+.\"kilobytes on the amount of virtual memory used.
 .El
 .Pp
 As far as
@@ -3725,7 +3726,8 @@ Shell database.
 .Xr stty 1 ,
 .Xr vi 1 ,
 .Xr shells 5 ,
-.Xr environ 7
+.Xr environ 7 ,
+.Xr script 7
 .Rs
 .%A Morris Bolsky
 .%A David Korn

@@ -1,5 +1,5 @@
 # ex:ts=8 sw=4:
-# $OpenBSD: Ustar.pm,v 1.15 2004/12/26 15:18:51 espie Exp $
+# $OpenBSD: Ustar.pm,v 1.35 2005/08/10 14:02:22 espie Exp $
 #
 # Copyright (c) 2002-2004 Marc Espie <espie@openbsd.org>
 #
@@ -31,7 +31,12 @@ use constant {
 	DIR => '5',
 	FIFO => '6',
 	CONTFILE => '7',
-	USTAR_HEADER => 'a100a8a8a8a12a12a8aa100a6a2a32a32a8a8a155',
+	USTAR_HEADER => 'a100a8a8a8a12a12a8aa100a6a2a32a32a8a8a155a12',
+	MAXFILENAME => 100,
+	MAXLINKNAME => 100,
+	MAXPREFIX => 155,
+	MAXUSERNAME => 32,
+	MAXGROUPNAME => 32
 };
 
 use File::Path ();
@@ -40,6 +45,8 @@ use OpenBSD::IdCache;
 
 my $uidcache = new OpenBSD::UidCache;
 my $gidcache = new OpenBSD::GidCache;
+my $unamecache = new OpenBSD::UnameCache;
+my $gnamecache = new OpenBSD::GnameCache;
 
 # This is a multiple of st_blksize everywhere....
 my $buffsize = 2 * 1024 * 1024;
@@ -50,7 +57,7 @@ sub new
 
     $destdir = '' unless defined $destdir;
 
-    return bless { fh => $fh, swallow => 0, destdir => $destdir} , $class;
+    return bless { fh => $fh, swallow => 0, key => {}, destdir => $destdir} , $class;
 }
 
 
@@ -84,7 +91,7 @@ sub next
     # decode header
     my ($name, $mode, $uid, $gid, $size, $mtime, $chksum, $type,
     $linkname, $magic, $version, $uname, $gname, $major, $minor,
-    $prefix) = unpack(USTAR_HEADER, $header);
+    $prefix, $pad) = unpack(USTAR_HEADER, $header);
     if ($magic ne "ustar\0" || $version ne '00') {
 	die "Not an ustar archive header";
     }
@@ -100,6 +107,8 @@ sub next
     $uname =~ s/\0*$//;
     $gname =~ s/\0*$//;
     $linkname =~ s/\0*$//;
+    $major = oct($major);
+    $minor = oct($minor);
     $uid = oct($uid);
     $gid = oct($gid);
     $uid = $uidcache->lookup($uname, $uid);
@@ -121,14 +130,11 @@ sub next
 	gname => $gname,
 	gid => $gid,
 	size => $size,
+	major => $major,
+	minor => $minor,
 	archive => $self,
 	destdir => $self->{destdir}
 	};
-    # adjust swallow
-    $self->{swallow} = $size;
-    if ($size % 512) {
-	$self->{swallow} += 512 - $size % 512;
-    }
     if ($type eq DIR) {
     	bless $result, 'OpenBSD::Ustar::Dir';
     } elsif ($type eq HARDLINK) {
@@ -137,49 +143,186 @@ sub next
     	bless $result, 'OpenBSD::Ustar::SoftLink';
     } elsif ($type eq FILE || $type eq FILE1) {
     	bless $result, 'OpenBSD::Ustar::File';
+    } elsif ($type eq FIFO) {
+    	bless $result, 'OpenBSD::Ustar::Fifo';
+    } elsif ($type eq CHARDEVICE) {
+    	bless $result, 'OpenBSD::Ustar::CharDevice';
+    } elsif ($type eq BLOCKDEVICE) {
+    	bless $result, 'OpenBSD::Ustar::BlockDevice';
     } else {
     	die "Unsupported type";
     }
+    if (!$result->isFile()) {
+    	if ($size != 0) {
+		die "Bad archive: non null size for non file entry\n";
+	}
+    }
+    # adjust swallow
+    $self->{swallow} = $size;
+    if ($size % 512) {
+	$self->{swallow} += 512 - $size % 512;
+    }
+    $self->{cachename} = $name;
     return $result;
+}
+
+sub split_name
+{
+	my $name = shift;
+	my $prefix = '';
+
+	my $l = length $name;
+	if ($l > MAXFILENAME && $l <= MAXFILENAME+MAXPREFIX+1) {
+		while (length($name) > MAXFILENAME && 
+		    $name =~ m/^(.*?\/)(.*)$/) {
+			$prefix .= $1;
+			$name = $2;
+		}
+		$prefix =~ s|/$||;
+	}
+	return ($prefix, $name);
 }
 
 sub mkheader
 {
 	my ($entry, $type) = @_;
-	my ($name, $prefix);
-	if (length($name) < 100) {
-		$prefix = '';
-	} elsif (length($name) > 255) {
-		die "Can't fit such a name $name\n";
-	} elsif ($name =~ m|^(.*)/(.{,100})$|) {
-		$prefix = $1;
-		$name = $2;
+	my ($prefix, $name) = split_name($entry->{name});
+	my $linkname = $entry->{linkname};
+	my $size = $entry->{size};
+	if (!$entry->isFile()) {
+		$size = 0;
+	}
+	my ($major, $minor);
+	if ($entry->isDevice()) {
+		$major = $entry->{major};
+		$minor = $entry->{minor};
 	} else {
-		die "Can't fit such a name $name\n";
+		$major = 0;
+		$minor = 0;
+	}
+	if (defined $entry->{cwd}) {
+		my $cwd = $entry->{cwd};
+		$cwd.='/' unless $cwd =~ m/\/$/;
+		$linkname =~ s/^\Q$cwd\E//;
+	}
+	if (!defined $linkname) {
+		$linkname = '';
+	}
+	if (length $prefix > MAXPREFIX) {
+		die "Prefix too long $prefix\n";
+	}
+	if (length $name > MAXFILENAME) {
+		die "Name too long $name\n";
+	}
+	if (length $linkname > MAXLINKNAME) {
+		die "Linkname too long $linkname\n";
+	}
+	if (length $entry->{uname} > MAXUSERNAME) {
+		die "Username too long ", $entry->{uname}, "\n";
+	}
+	if (length $entry->{gname} > MAXGROUPNAME) {
+		die "Groupname too long ", $entry->{gname}, "\n";
 	}
 	my $header;
 	my $cksum = ' 'x8;
 	for (1 .. 2) {
 		$header = pack(USTAR_HEADER, 
 		    $name,
-		    sprintf("%o", $entry->{mode}),
-		    sprintf("%o", $entry->{uid}),
-		    sprintf("%o", $entry->{gid}),
-		    sprintf("%o", $entry->{size}),
-		    sprintf("%o", $entry->{mtime}),
+		    sprintf("%07o", $entry->{mode}),
+		    sprintf("%07o", $entry->{uid}),
+		    sprintf("%07o", $entry->{gid}),
+		    sprintf("%011o", $size),
+		    sprintf("%011o", $entry->{mtime}),
 		    $cksum,
 		    $type,
-		    $entry->{linkname},
+		    $linkname,
 		    'ustar', '00',
 		    $entry->{uname},
 		    $entry->{gname},
-		    '0', '0',
-		    $prefix);
-		$cksum = unpack("%C*", $header);
+		    sprintf("%07o", $major),
+		    sprintf("%07o", $minor),
+		    $prefix, "\0");
+		$cksum = sprintf("%07o", unpack("%C*", $header));
 	}
 	return $header;
 }
 
+sub prepare
+{
+	my ($self, $filename) = @_;
+
+	my $destdir = $self->{destdir};
+	my $realname = "$destdir/$filename";
+
+	my ($dev, $ino, $mode, $uid, $gid, $rdev, $size, $mtime) = 
+	    (lstat $realname)[0,1,2,4,5,6, 7,9];
+
+	my $entry = {
+		key => "$dev/$ino", 
+		name => $filename,
+		realname => $realname,
+		mode => $mode,
+		uid => $uid,
+		gid => $gid,
+		size => $size,
+		mtime => $mtime,
+		uname => $unamecache->lookup($uid),
+		gname => $gnamecache->lookup($gid),
+		major => $rdev/256,
+		minor => $rdev%256,
+		archive => $self,
+		destdir => $self->{destdir}
+	};
+	my $k = $entry->{key};
+	if (defined $self->{key}->{$k}) {
+		$entry->{linkname} = $self->{key}->{$k};
+		bless $entry, "OpenBSD::Ustar::HardLink";
+	} elsif (-l $realname) {
+		$entry->{linkname} = readlink($realname);
+		bless $entry, "OpenBSD::Ustar::SoftLink";
+	} elsif (-p _) {
+		bless $entry, "OpenBSD::Ustar::Fifo";
+	} elsif (-c _) {
+		bless $entry, "OpenBSD::Ustar::CharDevice";
+	} elsif (-b _) {
+		bless $entry, "OpenBSD::Ustar::BlockDevice";
+	} elsif (-d _) {
+		bless $entry, "OpenBSD::Ustar::Dir";
+	} else {
+		bless $entry, "OpenBSD::Ustar::File";
+	}
+	return $entry;
+}
+
+sub pad
+{
+	my $fh = $_[0]->{fh};
+	print $fh "\0"x1024;
+}
+
+sub close
+{
+	my $self = shift;
+	if (defined $self->{padout}) {
+	    $self->pad();
+	}
+	close($self->{fh});
+}
+
+sub destdir
+{
+	my $self = shift;
+	if (@_ > 0) {
+		$self->{destdir} = shift;
+	} else {
+		return $self->{destdir};
+	}
+}
+
+sub fh
+{
+	return $_[0]->{fh};
+}
 
 package OpenBSD::Ustar::Object;
 sub set_modes
@@ -197,8 +340,63 @@ sub make_basedir
 	File::Path::mkpath($dir) unless -d $dir;
 }
 
+sub write
+{
+	my $self = shift;
+	my $arc = $self->{archive};
+	my $out = $arc->{fh};
+
+	$arc->{padout} = 1;
+	my $header = OpenBSD::Ustar::mkheader($self, $self->type());
+	print $out $header;
+	$self->write_contents($arc);
+	my $k = $self->{key};
+	if (!defined $arc->{key}->{$k}) {
+		$arc->{key}->{$k} = $self->{name};
+	}
+}
+
+sub alias
+{
+	my ($self, $arc, $alias) = @_;
+
+	my $k = $self->{archive}.":".$self->{archive}->{cachename};
+	if (!defined $arc->{key}->{$k}) {
+		$arc->{key}->{$k} = $alias;
+	}
+}
+
+sub write_contents
+{
+	# only files have anything to write
+}
+
+sub resolve_links
+{
+	# only hard links must cheat
+}
+
+sub copy_contents
+{
+	# only files need copying
+}
+
+sub copy
+{
+	my ($self, $wrarc) = @_;
+	my $out = $wrarc->{fh};
+	$self->resolve_links($wrarc);
+	$wrarc->{padout} = 1;
+	my $header = OpenBSD::Ustar::mkheader($self, $self->type());
+	print $out $header;
+
+	$self->copy_contents($wrarc);
+}
+
 sub isDir() { 0 }
 sub isFile() { 0 }
+sub isDevice() { 0 }
+sub isFifo() { 0 }
 sub isLink() { 0 }
 sub isSymLink() { 0 }
 sub isHardLink() { 0 }
@@ -215,6 +413,8 @@ sub create
 
 sub isDir() { 1 }
 
+sub type() { OpenBSD::Ustar::DIR }
+
 package OpenBSD::Ustar::HardLink;
 our @ISA=qw(OpenBSD::Ustar::Object);
 
@@ -230,8 +430,23 @@ sub create
 	    die "Can't link $self->{destdir}$linkname to $self->{destdir}$self->{name}: $!";
 }
 
+sub resolve_links
+{
+	my ($self, $arc) = @_;
+
+	my $k = $self->{archive}.":".$self->{linkname};
+	if (defined $arc->{key}->{$k}) {
+		$self->{linkname} = $arc->{key}->{$k};
+	} else {
+		print join("\n", keys(%{$arc->{key}})), "\n";
+		die "Can't copy link over: original for $k NOT available\n";
+	}
+}
+
 sub isLink() { 1 }
 sub isHardLink() { 1 }
+
+sub type() { OpenBSD::Ustar::HARDLINK }
 
 package OpenBSD::Ustar::SoftLink;
 our @ISA=qw(OpenBSD::Ustar::Object);
@@ -246,6 +461,48 @@ sub create
 
 sub isLink() { 1 }
 sub isSymLink() { 1 }
+
+sub type() { OpenBSD::Ustar::SOFTLINK }
+
+package OpenBSD::Ustar::Fifo;
+our @ISA=qw(OpenBSD::Ustar::Object);
+
+sub create
+{
+	my $self = shift;
+	$self->make_basedir($self->{name});
+	require POSIX;
+	POSIX::mkfifo($self->{destdir}.$self->{name}, $self->{mode}) or
+	    die "Can't create fifo $self->{name}: $!";
+	$self->SUPER::set_modes();
+}
+
+sub isFifo() { 1 }
+sub type() { OpenBSD::Ustar::FIFO }
+
+package OpenBSD::UStar::Device;
+our @ISA=qw(OpenBSD::Ustar::Object);
+
+sub create
+{
+	my $self = shift;
+	$self->make_basedir($self->{name});
+	system('/sbin/mknod', 'mknod', '-m', $self->{mode}, $self->{destdir}.$self->{name}, $self->devicetype(), $self->{major}, $self->{minor});
+}
+
+sub isDevice() { 1 }
+
+package OpenBSD::Ustar::BlockDevice;
+our @ISA=qw(OpenBSD::Ustar::Device);
+
+sub type() { OpenBSD::Ustar::BLOCKDEVICE }
+sub devicetype() { 'b' }
+
+package OpenBSD::Ustar::CharDevice;
+our @ISA=qw(OpenBSD::Ustar::Device);
+
+sub type() { OpenBSD::Ustar::BLOCKDEVICE }
+sub devicetype() { 'c' }
 
 package OpenBSD::CompactWriter;
 
@@ -342,6 +599,61 @@ sub create
 	$self->SUPER::set_modes();
 }
 
+sub write_contents
+{
+	my ($self, $arc) = @_;
+	my $filename = $self->{realname};
+	my $size = $self->{size};
+	my $out = $arc->{fh};
+	open my $fh, "<", $filename or die "Can't read file $filename: $!";
+
+	my $buffer;
+	my $toread = $size;
+	while ($toread > 0) {
+		my $maxread = $buffsize;
+		$maxread = $toread if $maxread > $toread;
+		if (!defined read($fh, $buffer, $maxread)) {
+			die "Error reading from file: $!";
+		}
+		unless (print $out $buffer) {
+			die "Error writing to archive: $!";
+		}
+			
+		$toread -= $maxread;
+	}
+	if ($size % 512) {
+		print $out "\0" x (512 - $size % 512);
+	}
+}
+
+sub copy_contents
+{
+	my ($self, $arc) = @_;
+	my $out = $arc->{fh};
+	my $buffer;
+	my $size = $self->{size};
+	my $toread = $size;
+	while ($toread > 0) {
+		my $maxread = $buffsize;
+		$maxread = $toread if $maxread > $toread;
+		if (!defined read($self->{archive}->{fh}, $buffer, $maxread)) {
+			die "Error reading from archive: $!";
+		}
+		$self->{archive}->{swallow} -= $maxread;
+		unless (print $out $buffer) {
+			die "Error writing to archive $!";
+		}
+			
+		$toread -= $maxread;
+	}
+	if ($size % 512) {
+		print $out "\0" x (512 - $size % 512);
+	}
+	$self->alias($arc, $self->{name});
+}
+
 sub isFile() { 1 }
+
+sub type() { OpenBSD::Ustar::FILE1 }
 
 1;

@@ -1,3 +1,4 @@
+/*	$OpenBSD: inet_network.c,v 1.10 2005/08/06 20:30:03 espie Exp $ */
 /*
  * Copyright (c) 1983, 1993
  *	The Regents of the University of California.  All rights reserved.
@@ -27,10 +28,6 @@
  * SUCH DAMAGE.
  */
 
-#if defined(LIBC_SCCS) && !defined(lint)
-static char rcsid[] = "$OpenBSD: inet_network.c,v 1.8 2003/06/02 20:18:35 millert Exp $";
-#endif /* LIBC_SCCS and not lint */
-
 #include <sys/types.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
@@ -42,13 +39,12 @@ static char rcsid[] = "$OpenBSD: inet_network.c,v 1.8 2003/06/02 20:18:35 miller
  * network numbers.
  */
 in_addr_t
-inet_network(cp)
-	register const char *cp;
+inet_network(const char *cp)
 {
-	register in_addr_t val, base, n;
-	register char c;
+	in_addr_t val, base, n;
+	char c;
 	in_addr_t parts[4], *pp = parts;
-	register int i;
+	int i;
 
 again:
 	val = 0; base = 10;

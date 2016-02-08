@@ -1,3 +1,4 @@
+/*	$OpenBSD: catgets.c,v 1.7 2005/08/05 13:03:00 espie Exp $ */
 /*-
  * Copyright (c) 1996 The NetBSD Foundation, Inc.
  * All rights reserved.
@@ -34,10 +35,6 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
-#if defined(LIBC_SCCS) && !defined(lint)
-static char rcsid[] = "$OpenBSD: catgets.c,v 1.5 1996/09/15 09:31:22 tholo Exp $";
-#endif /* LIBC_SCCS and not lint */
-
 #define _NLS_PRIVATE
 
 #include <errno.h>
@@ -46,11 +43,7 @@ static char rcsid[] = "$OpenBSD: catgets.c,v 1.5 1996/09/15 09:31:22 tholo Exp $
 #include <nl_types.h>
 
 char *
-_catgets(catd, set_id, msg_id, s)
-	nl_catd catd;
-	int set_id;
-	int msg_id;
-	const char *s;
+_catgets(nl_catd catd, int set_id, int msg_id, const char *s)
 {
 	struct _nls_cat_hdr *cat_hdr;
 	struct _nls_set_hdr *set_hdr;

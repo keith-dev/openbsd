@@ -1,3 +1,4 @@
+/*	$OpenBSD: swab.c,v 1.7 2005/08/08 08:05:37 espie Exp $ */
 /*
  * Copyright (c) 1988 Regents of the University of California.
  * All rights reserved.
@@ -30,18 +31,14 @@
  * SUCH DAMAGE.
  */
 
-#if defined(LIBC_SCCS) && !defined(lint)
-static char *rcsid = "$OpenBSD: swab.c,v 1.5 2003/06/11 21:08:16 deraadt Exp $";
-#endif /* LIBC_SCCS and not lint */
-
 #include <unistd.h>
 
 void
 swab(const void *from, void *to, size_t len)
 {
-	register unsigned long temp;
-	register int n;
-	register char *fp, *tp;
+	unsigned long temp;
+	int n;
+	char *fp, *tp;
 
 	n = (len >> 1) + 1;
 	fp = (char *)from;

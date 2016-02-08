@@ -1,3 +1,5 @@
+/* $OpenBSD: ap_cpystrn.c,v 1.7 2005/06/20 12:23:22 robert Exp $ */
+
 /* ====================================================================
  * The Apache Software License, Version 1.1
  *
@@ -71,24 +73,23 @@
  * ap_cpystrn() follows the same call structure as strncpy().
  */
 
-API_EXPORT(char *) ap_cpystrn(char *dst, const char *src, size_t dst_size)
+API_EXPORT(char *)
+ap_cpystrn(char *dst, const char *src, size_t dst_size)
 {
 
-    char *d, *end;
+	char *d, *end;
 
-    if (!dst_size)
-        return (dst);
+	if (!dst_size)
+		return (dst);
 
-    d = dst;
-    end = dst + dst_size - 1;
+	d = dst;
+	end = dst + dst_size - 1;
 
-    for (; d < end; ++d, ++src) {
-	if (!(*d = *src)) {
-	    return (d);
-	}
-    }
+	for (; d < end; ++d, ++src)
+		if (!(*d = *src))
+			return (d);
 
-    *d = '\0';	/* always null terminate */
+	*d = '\0';      /* always null terminate */
 
-    return (d);
+	return (d);
 }

@@ -142,7 +142,7 @@ namespace std
   using ::vsprintf;
 }
 
-#if defined(_GLIBCPP_USE_C99)
+#if defined(_GLIBCPP_USE_C99) || defined(_GLIBCPP_USE_C99_SNPRINTF)
 
 #undef snprintf
 #undef vfscanf
@@ -156,7 +156,7 @@ namespace __gnu_cxx
   extern "C" int
     (snprintf)(char * restrict, size_t, const char * restrict, ...);
   extern "C" int
-    (vfscanf)(FILE * restrict, const char * restrict, __gnuc_va_list);
+   (vfscanf)(FILE * restrict, const char * restrict, __gnuc_va_list);
   extern "C" int (vscanf)(const char * restrict, __gnuc_va_list);
   extern "C" int
     (vsnprintf)(char * restrict, size_t, const char * restrict, __gnuc_va_list);

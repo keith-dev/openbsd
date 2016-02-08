@@ -1,4 +1,4 @@
-/*	$OpenBSD: area.c,v 1.2 2005/01/28 17:53:33 norby Exp $ */
+/*	$OpenBSD: area.c,v 1.4 2005/05/26 18:59:14 norby Exp $ */
 
 /*
  * Copyright (c) 2004, 2005 Esben Norby <norby@openbsd.org>
@@ -53,8 +53,6 @@ area_del(struct area *area)
 	struct vertex		*v, *nv;
 	struct rde_nbr		*n;
 
-	log_debug("area_del: area ID %s", inet_ntoa(area->id));
-
 	/* clean lists */
 	while ((iface = LIST_FIRST(&area->iface_list)) != NULL) {
 		LIST_REMOVE(iface, entry);
@@ -78,7 +76,7 @@ area_del(struct area *area)
 struct area *
 area_find(struct ospfd_conf *conf, struct in_addr area_id)
 {
-	struct area *area = NULL;
+	struct area	*area;
 
 	LIST_FOREACH(area, &conf->area_list, entry) {
 		if (area->id.s_addr == area_id.s_addr) {
@@ -86,6 +84,30 @@ area_find(struct ospfd_conf *conf, struct in_addr area_id)
 		}
 	}
 
-	log_debug("area_find: area ID %s not found", inet_ntoa(area_id));
 	return (NULL);
 }
+
+void
+area_track(struct area *area, int state)
+{
+	if (state & NBR_STA_FULL)
+		area->active++;
+	else if (area->active == 0)
+		fatalx("king bula sez: area already inactive");
+	else
+		area->active--;
+}
+
+int
+area_border_router(struct ospfd_conf *conf)
+{
+	struct area	*area;
+	int		 active = 0;
+
+	LIST_FOREACH(area, &conf->area_list, entry)
+		if (area->active > 0)
+			active++;
+
+	return (active > 1);
+}
+

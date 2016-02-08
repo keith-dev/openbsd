@@ -1,4 +1,4 @@
-/*	$OpenBSD: lsupdate.c,v 1.6 2005/03/17 21:17:12 claudio Exp $ */
+/*	$OpenBSD: lsupdate.c,v 1.11 2005/05/26 20:10:24 norby Exp $ */
 
 /*
  * Copyright (c) 2005 Claudio Jeker <claudio@openbsd.org>
@@ -44,9 +44,6 @@ lsa_flood(struct iface *iface, struct nbr *originator, struct lsa_hdr *lsa_hdr,
 	struct lsa_entry	*le = NULL;
 	int			 queued = 0, dont_ack = 0;
 	int			 r;
-
-	if (iface->passive)
-		return (0);
 
 	LIST_FOREACH(nbr, &iface->nbr_list, entry) {
 		if (nbr == iface->self)
@@ -138,7 +135,6 @@ lsa_flood(struct iface *iface, struct nbr *originator, struct lsa_hdr *lsa_hdr,
 		fatalx("lsa_flood: unknown interface type");
 	}
 
-
 	return (dont_ack == 2);
 }
 
@@ -146,20 +142,14 @@ int
 send_ls_update(struct iface *iface, struct in_addr addr, void *data, int len)
 {
 	struct sockaddr_in	 dst;
-	char			*buf;
-	char			*ptr;
+	struct buf		*buf;
+	size_t			 pos;
 	u_int32_t		 nlsa;
 	u_int16_t		 age;
-	int			 ret = 0;
+	int			 ret;
 
-	log_debug("send_ls_update: interface %s addr %s",
-	    iface->name, inet_ntoa(addr));
-
-	if (iface->passive)
-		return (0);
-
-	/* XXX use buffer API instead for better decoupling */
-	if ((ptr = buf = calloc(1, READ_BUF_SIZE)) == NULL)
+	/* XXX READ_BUF_SIZE */
+	if ((buf = buf_dynamic(PKG_DEF_SIZE, READ_BUF_SIZE)) == NULL)
 		fatal("send_ls_update");
 
 	/* set destination */
@@ -168,34 +158,37 @@ send_ls_update(struct iface *iface, struct in_addr addr, void *data, int len)
 	dst.sin_addr.s_addr = addr.s_addr;
 
 	/* OSPF header */
-	gen_ospf_hdr(ptr, iface, PACKET_TYPE_LS_UPDATE);
-	ptr += sizeof(struct ospf_hdr);
+	if (gen_ospf_hdr(buf, iface, PACKET_TYPE_LS_UPDATE))
+		goto fail;
 
 	nlsa = htonl(1);
-	memcpy(ptr, &nlsa, sizeof(nlsa));
-	ptr += sizeof(nlsa);
+	if (buf_add(buf, &nlsa, sizeof(nlsa)))
+		goto fail;
 
-	memcpy(ptr, data, len);		/* XXX */
+	pos = buf->wpos;
+	if (buf_add(buf, data, len))
+		goto fail;
 
 	/* age LSA befor sending it out */
-	memcpy(&age, ptr, sizeof(age));
+	memcpy(&age, data, sizeof(age));
 	age = ntohs(age);
-	if ((age += iface->transfer_delay) >= MAX_AGE)
+	if ((age += iface->transmit_delay) >= MAX_AGE)
 		age = MAX_AGE;
 	age = ntohs(age);
-	memcpy(ptr, &age, sizeof(age));
-
-	ptr += len;
+	memcpy(buf_seek(buf, pos, sizeof(age)), &age, sizeof(age));
 
 	/* update authentication and calculate checksum */
-	auth_gen(buf, ptr - buf, iface);
+	if (auth_gen(buf, iface))
+		goto fail;
 
-	if ((ret = send_packet(iface, buf, (ptr - buf), &dst)) == -1)
-		log_warnx("send_ls_update: error sending packet on "
-		    "interface %s", iface->name);
+	ret = send_packet(iface, buf->buf, buf->wpos, &dst);
 
-	free(buf);
+	buf_free(buf);
 	return (ret);
+fail:
+	log_warn("send_hello");
+	buf_free(buf);
+	return (-1);
 }
 
 void
@@ -203,8 +196,6 @@ recv_ls_update(struct nbr *nbr, char *buf, u_int16_t len)
 {
 	struct lsa_hdr		 lsa;
 	u_int32_t		 nlsa;
-
-	log_debug("recv_ls_update: neighbor ID %s", inet_ntoa(nbr->id));
 
 	if (len < sizeof(nlsa)) {
 		log_warnx("recv_ls_update: bad packet size, neighbor ID %s",
@@ -338,7 +329,7 @@ ls_retrans_list_clr(struct nbr *nbr)
 		ls_retrans_list_free(nbr, le);
 }
 
-bool
+int
 ls_retrans_list_empty(struct nbr *nbr)
 {
 	return (TAILQ_EMPTY(&nbr->ls_retrans_list));
@@ -351,7 +342,7 @@ ls_retrans_timer(int fd, short event, void *bula)
 	struct in_addr		 addr;
 	struct nbr		*nbr = bula;
 	struct lsa_entry	*le;
-	
+
 	if (nbr->iface->self == nbr) {
 		if (!(nbr->iface->state & IF_STA_DROTHER)) {
 			/*
@@ -373,7 +364,7 @@ ls_retrans_timer(int fd, short event, void *bula)
 	} else
 		memcpy(&addr, &nbr->addr, sizeof(addr));
 
-		
+
 	if ((le = TAILQ_FIRST(&nbr->ls_retrans_list)) != NULL) {
 		send_ls_update(nbr->iface, addr, le->le_ref->data,
 		    le->le_ref->len);

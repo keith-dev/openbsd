@@ -1,4 +1,4 @@
-/*	$OpenBSD: pf_norm.c,v 1.97 2004/09/21 16:59:12 aaron Exp $ */
+/*	$OpenBSD: pf_norm.c,v 1.102 2005/08/06 12:11:09 pascoe Exp $ */
 
 /*
  * Copyright 2001 Niels Provos <provos@citi.umich.edu>
@@ -412,7 +412,7 @@ pf_reassemble(struct mbuf **m0, struct pf_fragment **frag,
 			break;
 		}
 
-		/* This fragment is completely overlapped, loose it */
+		/* This fragment is completely overlapped, lose it */
 		next = LIST_NEXT(frea, fr_next);
 		m_freem(frea->fr_m);
 		LIST_REMOVE(frea, fr_next);
@@ -831,8 +831,7 @@ pf_normalize_ip(struct mbuf **m0, int dir, struct pfi_kif *kif, u_short *reason,
 	r = TAILQ_FIRST(pf_main_ruleset.rules[PF_RULESET_SCRUB].active.ptr);
 	while (r != NULL) {
 		r->evaluations++;
-		if (r->kif != NULL &&
-		    (r->kif != kif && r->kif != kif->pfik_parent) == !r->ifnot)
+		if (pfi_kif_match(r->kif, kif) == r->ifnot)
 			r = r->skip[PF_SKIP_IFP].ptr;
 		else if (r->direction && r->direction != dir)
 			r = r->skip[PF_SKIP_DIR].ptr;
@@ -850,10 +849,12 @@ pf_normalize_ip(struct mbuf **m0, int dir, struct pfi_kif *kif, u_short *reason,
 			break;
 	}
 
-	if (r == NULL)
+	if (r == NULL || r->action == PF_NOSCRUB)
 		return (PF_PASS);
-	else
-		r->packets++;
+	else {
+		r->packets[dir == PF_OUT]++;
+		r->bytes[dir == PF_OUT] += pd->tot_len;
+	}
 
 	/* Check for illegal packets */
 	if (hlen < (int)sizeof(struct ip))
@@ -1002,13 +1003,13 @@ pf_normalize_ip(struct mbuf **m0, int dir, struct pfi_kif *kif, u_short *reason,
  no_mem:
 	REASON_SET(reason, PFRES_MEMORY);
 	if (r != NULL && r->log)
-		PFLOG_PACKET(kif, h, m, AF_INET, dir, *reason, r, NULL, NULL);
+		PFLOG_PACKET(kif, h, m, AF_INET, dir, *reason, r, NULL, NULL, pd);
 	return (PF_DROP);
 
  drop:
 	REASON_SET(reason, PFRES_NORM);
 	if (r != NULL && r->log)
-		PFLOG_PACKET(kif, h, m, AF_INET, dir, *reason, r, NULL, NULL);
+		PFLOG_PACKET(kif, h, m, AF_INET, dir, *reason, r, NULL, NULL, pd);
 	return (PF_DROP);
 
  bad:
@@ -1020,7 +1021,7 @@ pf_normalize_ip(struct mbuf **m0, int dir, struct pfi_kif *kif, u_short *reason,
 
 	REASON_SET(reason, PFRES_FRAG);
 	if (r != NULL && r->log)
-		PFLOG_PACKET(kif, h, m, AF_INET, dir, *reason, r, NULL, NULL);
+		PFLOG_PACKET(kif, h, m, AF_INET, dir, *reason, r, NULL, NULL, pd);
 
 	return (PF_DROP);
 }
@@ -1048,8 +1049,7 @@ pf_normalize_ip6(struct mbuf **m0, int dir, struct pfi_kif *kif,
 	r = TAILQ_FIRST(pf_main_ruleset.rules[PF_RULESET_SCRUB].active.ptr);
 	while (r != NULL) {
 		r->evaluations++;
-		if (r->kif != NULL &&
-		    (r->kif != kif && r->kif != kif->pfik_parent) == !r->ifnot)
+		if (pfi_kif_match(r->kif, kif) == r->ifnot)
 			r = r->skip[PF_SKIP_IFP].ptr;
 		else if (r->direction && r->direction != dir)
 			r = r->skip[PF_SKIP_DIR].ptr;
@@ -1069,10 +1069,12 @@ pf_normalize_ip6(struct mbuf **m0, int dir, struct pfi_kif *kif,
 			break;
 	}
 
-	if (r == NULL)
+	if (r == NULL || r->action == PF_NOSCRUB)
 		return (PF_PASS);
-	else
-		r->packets++;
+	else {
+		r->packets[dir == PF_OUT]++;
+		r->bytes[dir == PF_OUT] += pd->tot_len;
+	}
 
 	/* Check for illegal packets */
 	if (sizeof(struct ip6_hdr) + IPV6_MAXPACKET < m->m_pkthdr.len)
@@ -1184,19 +1186,19 @@ pf_normalize_ip6(struct mbuf **m0, int dir, struct pfi_kif *kif,
  shortpkt:
 	REASON_SET(reason, PFRES_SHORT);
 	if (r != NULL && r->log)
-		PFLOG_PACKET(kif, h, m, AF_INET6, dir, *reason, r, NULL, NULL);
+		PFLOG_PACKET(kif, h, m, AF_INET6, dir, *reason, r, NULL, NULL, pd);
 	return (PF_DROP);
 
  drop:
 	REASON_SET(reason, PFRES_NORM);
 	if (r != NULL && r->log)
-		PFLOG_PACKET(kif, h, m, AF_INET6, dir, *reason, r, NULL, NULL);
+		PFLOG_PACKET(kif, h, m, AF_INET6, dir, *reason, r, NULL, NULL, pd);
 	return (PF_DROP);
 
  badfrag:
 	REASON_SET(reason, PFRES_FRAG);
 	if (r != NULL && r->log)
-		PFLOG_PACKET(kif, h, m, AF_INET6, dir, *reason, r, NULL, NULL);
+		PFLOG_PACKET(kif, h, m, AF_INET6, dir, *reason, r, NULL, NULL, pd);
 	return (PF_DROP);
 }
 #endif /* INET6 */
@@ -1215,8 +1217,7 @@ pf_normalize_tcp(int dir, struct pfi_kif *kif, struct mbuf *m, int ipoff,
 	r = TAILQ_FIRST(pf_main_ruleset.rules[PF_RULESET_SCRUB].active.ptr);
 	while (r != NULL) {
 		r->evaluations++;
-		if (r->kif != NULL &&
-		    (r->kif != kif && r->kif != kif->pfik_parent) == !r->ifnot)
+		if (pfi_kif_match(r->kif, kif) == r->ifnot)
 			r = r->skip[PF_SKIP_IFP].ptr;
 		else if (r->direction && r->direction != dir)
 			r = r->skip[PF_SKIP_DIR].ptr;
@@ -1246,8 +1247,10 @@ pf_normalize_tcp(int dir, struct pfi_kif *kif, struct mbuf *m, int ipoff,
 
 	if (rm == NULL || rm->action == PF_NOSCRUB)
 		return (PF_PASS);
-	else
-		r->packets++;
+	else {
+		r->packets[dir == PF_OUT]++;
+		r->bytes[dir == PF_OUT] += pd->tot_len;
+	}
 
 	if (rm->rule_flag & PFRULE_REASSEMBLE_TCP)
 		pd->flags |= PFDESC_TCP_NORM;
@@ -1309,7 +1312,7 @@ pf_normalize_tcp(int dir, struct pfi_kif *kif, struct mbuf *m, int ipoff,
  tcp_drop:
 	REASON_SET(&reason, PFRES_NORM);
 	if (rm != NULL && r->log)
-		PFLOG_PACKET(kif, h, m, AF_INET, dir, reason, r, NULL, NULL);
+		PFLOG_PACKET(kif, h, m, AF_INET, dir, reason, r, NULL, NULL, pd);
 	return (PF_DROP);
 }
 
@@ -1743,7 +1746,7 @@ pf_normalize_tcp_stateful(struct mbuf *m, int off, struct pf_pdesc *pd,
 	 * timestamps.  And require all data packets to contain a timestamp
 	 * if the first does.  PAWS implicitly requires that all data packets be
 	 * timestamped.  But I think there are middle-man devices that hijack
-	 * TCP streams immedietly after the 3whs and don't timestamp their
+	 * TCP streams immediately after the 3whs and don't timestamp their
 	 * packets (seen in a WWW accelerator or cache).
 	 */
 	if (pd->p_len > 0 && src->scrub && (src->scrub->pfss_flags &

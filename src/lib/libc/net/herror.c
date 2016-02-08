@@ -1,4 +1,4 @@
-/*	$OpenBSD: herror.c,v 1.6 2005/03/02 12:26:24 millert Exp $	*/
+/*	$OpenBSD: herror.c,v 1.8 2005/08/06 20:30:03 espie Exp $	*/
 
 /*
  * ++Copyright++ 1987, 1993
@@ -51,15 +51,6 @@
  * --Copyright--
  */
 
-#if defined(LIBC_SCCS) && !defined(lint)
-#if 0
-static char sccsid[] = "@(#)herror.c	8.1 (Berkeley) 6/4/93";
-static char rcsid[] = "$From: herror.c,v 8.3 1996/08/05 08:31:35 vixie Exp $";
-#else
-static char rcsid[] = "$OpenBSD: herror.c,v 1.6 2005/03/02 12:26:24 millert Exp $";
-#endif
-#endif /* LIBC_SCCS and not lint */
-
 #include <sys/types.h>
 #include <sys/param.h>
 #include <sys/uio.h>
@@ -83,11 +74,10 @@ extern int	h_errno;
  *	print the error indicated by the h_errno value.
  */
 void
-herror(s)
-	const char *s;
+herror(const char *s)
 {
 	struct iovec iov[4];
-	register struct iovec *v = iov;
+	struct iovec *v = iov;
 
 	if (s && *s) {
 		v->iov_base = (char *)s;
@@ -106,8 +96,7 @@ herror(s)
 }
 
 const char *
-hstrerror(err)
-	int err;
+hstrerror(int err)
 {
 	if (err < 0)
 		return ("Resolver internal error");

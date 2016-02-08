@@ -1,4 +1,4 @@
-/*	$OpenBSD: top.c,v 1.35 2004/10/07 06:26:12 otto Exp $	*/
+/*	$OpenBSD: top.c,v 1.40 2005/06/17 09:40:48 markus Exp $	*/
 
 /*
  *  Top users/processes display for Unix
@@ -42,6 +42,7 @@ const char	copyright[] = "Copyright (c) 1984 through 1996, William LeFebvre";
 #include <stdlib.h>
 #include <limits.h>
 #include <unistd.h>
+#include <sys/stat.h>
 
 /* includes specific to top */
 #include "display.h"		/* interface to display package */
@@ -79,7 +80,7 @@ int order_index;
 /* pointers to display routines */
 void		(*d_loadave)(int, double *) = i_loadave;
 void		(*d_procstates)(int, int *) = i_procstates;
-void		(*d_cpustates)(int *) = i_cpustates;
+void		(*d_cpustates)(int64_t *) = i_cpustates;
 void		(*d_memory)(int *) = i_memory;
 void		(*d_message)(void) = i_message;
 void		(*d_header)(char *) = i_header;
@@ -96,6 +97,7 @@ char *order_name = NULL;
 int topn = Default_TOPN;
 int no_command = Yes;
 int old_system = No;
+int show_args = No;
 
 #if Default_TOPN == Infinity
 char topn_specified = No;
@@ -124,6 +126,7 @@ char topn_specified = No;
 #define CMD_system	15
 #define CMD_order	16
 #define CMD_pid		17
+#define CMD_command	18
 
 static void
 usage(void)
@@ -131,7 +134,7 @@ usage(void)
 	extern char *__progname;
 
 	fprintf(stderr,
-	    "usage: %s [-biInqSu] [-d count] [-o field] [-p pid] [-s time] [-U username] [number]\n",
+	    "usage: %s [-bIinqSu] [-d count] [-o field] [-p pid] [-s time] [-U username] [number]\n",
 	    __progname);
 }
 
@@ -511,7 +514,7 @@ rundisplay(void)
 	int change, i;
 	struct pollfd pfd[1];
 	uid_t uid;
-	static char command_chars[] = "\f qh?en#sdkriIuSop";
+	static char command_chars[] = "\f qh?en#sdkriIuSopC";
 
 	/*
 	 * assume valid command unless told
@@ -593,7 +596,7 @@ rundisplay(void)
 		 * command strchr
 		 */
 		while (1) {
-			len = read(0, &ch, 1);
+			len = read(STDIN_FILENO, &ch, 1);
 			if (len == -1 && errno == EINTR)
 				continue;
 			if (len == 0)
@@ -650,7 +653,7 @@ rundisplay(void)
 			standout("Hit any key to continue: ");
 			fflush(stdout);
 			while (1) {
-				len = read(0, &ch, 1);
+				len = read(STDIN_FILENO, &ch, 1);
 				if (len == -1 && errno == EINTR)
 					continue;
 				if (len == 0)
@@ -673,7 +676,7 @@ rundisplay(void)
 				standout("Hit any key to continue: ");
 				fflush(stdout);
 				while (1) {
-					len = read(0, &ch, 1);
+					len = read(STDIN_FILENO, &ch, 1);
 					if (len == -1 && errno == EINTR)
 						continue;
 					if (len == 0)
@@ -817,7 +820,7 @@ rundisplay(void)
 			break;
 
 		case CMD_pid:
-			new_message(MT_standout, "Process id to show: ");
+			new_message(MT_standout, "Process ID to show: ");
 			if (readline(tempbuf2, sizeof(tempbuf2), No) > 0) {
 				if (tempbuf2[0] == '+' &&
 				    tempbuf2[1] == '\0') {
@@ -845,6 +848,10 @@ rundisplay(void)
 					exit(1);
 			} else
 				clear_message();
+			break;
+
+		case CMD_command:
+			show_args = (show_args == No) ? Yes : No;
 			break;
 
 		default:

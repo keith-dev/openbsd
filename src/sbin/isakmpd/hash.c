@@ -1,4 +1,4 @@
-/* $OpenBSD: hash.c,v 1.18 2005/02/27 13:12:12 hshoexer Exp $	 */
+/* $OpenBSD: hash.c,v 1.20 2005/04/08 22:32:10 cloder Exp $	 */
 /* $EOM: hash.c,v 1.10 1999/04/17 23:20:34 niklas Exp $	 */
 
 /*
@@ -32,15 +32,8 @@
 
 #include <sys/param.h>
 #include <string.h>
-#if defined (__APPLE__)
-#include <openssl/md5.h>
-#include <openssl/sha.h>
-#else
 #include <md5.h>
 #include <sha1.h>
-#endif				/* __APPLE__ */
-
-#include "sysdep.h"
 
 #include "hash.h"
 #include "log.h"

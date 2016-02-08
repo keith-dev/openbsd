@@ -1,4 +1,4 @@
-/*	$OpenBSD: pfctl_parser.c,v 1.211 2004/12/07 10:33:41 dhartmei Exp $ */
+/*	$OpenBSD: pfctl_parser.c,v 1.219 2005/06/30 20:52:20 sturm Exp $ */
 
 /*
  * Copyright (c) 2001 Daniel Hartmeier
@@ -479,9 +479,11 @@ const char	*pf_scounters[FCNT_MAX+1] = FCNT_NAMES;
 void
 print_status(struct pf_status *s, int opts)
 {
-	char	statline[80], *running;
-	time_t	runtime;
-	int	i;
+	char			statline[80], *running;
+	time_t			runtime;
+	int			i;
+	char			buf[PF_MD5_DIGEST_LENGTH * 2 + 1];
+	static const char 	hex[] = "0123456789abcdef";
 
 	runtime = time(NULL) - s->since;
 	running = s->running ? "Enabled" : "Disabled";
@@ -515,7 +517,18 @@ print_status(struct pf_status *s, int opts)
 		printf("%15s\n\n", "Debug: Loud");
 		break;
 	}
-	printf("Hostid: 0x%08x\n\n", ntohl(s->hostid));
+
+	if (opts & PF_OPT_VERBOSE) {
+		printf("Hostid:   0x%08x\n", ntohl(s->hostid));
+
+		for (i = 0; i < PF_MD5_DIGEST_LENGTH; i++) {
+			buf[i + i] = hex[s->pf_chksum[i] >> 4];
+			buf[i + i + 1] = hex[s->pf_chksum[i] & 0x0f];
+		}
+		buf[i + i] = '\0';
+		printf("Checksum: 0x%s\n\n", buf);
+	}
+
 	if (s->ifname[0] != 0) {
 		printf("Interface Stats for %-16s %5s %16s\n",
 		    s->ifname, "IPv4", "IPv6");
@@ -623,7 +636,8 @@ print_src_node(struct pf_src_node *sn, int opts)
 			printf(", expires in %.2u:%.2u:%.2u",
 			    sn->expire, min, sec);
 		}
-		printf(", %u pkts, %u bytes", sn->packets, sn->bytes);
+		printf(", %u pkts, %u bytes", sn->packets[0] + sn->packets[1],
+		    sn->bytes[0] + sn->bytes[1]);
 		switch (sn->ruletype) {
 		case PF_NAT:
 			if (sn->rule.nr != -1)
@@ -714,10 +728,19 @@ print_rule(struct pf_rule *r, const char *anchor_call, int verbose)
 		printf(" in");
 	else if (r->direction == PF_OUT)
 		printf(" out");
-	if (r->log == 1)
+	if (r->log) {
 		printf(" log");
-	else if (r->log == 2)
-		printf(" log-all");
+		if (r->log & ~PF_LOG) {
+			int count = 0;
+
+			printf(" (");
+			if (r->log & PF_LOG_ALL)
+				printf("%sall", count++ ? ", " : "");
+			if (r->log & PF_LOG_SOCKET_LOOKUP)
+				printf("%suser", count++ ? ", " : "");
+			printf(")");
+		}
+	}
 	if (r->quick)
 		printf(" quick");
 	if (r->ifname[0]) {
@@ -820,7 +843,7 @@ print_rule(struct pf_rule *r, const char *anchor_call, int verbose)
 		opts = 1;
 	if (r->rule_flag & PFRULE_SRCTRACK)
 		opts = 1;
-	if (r->rule_flag & (PFRULE_IFBOUND | PFRULE_GRBOUND))
+	if (r->rule_flag & PFRULE_IFBOUND)
 		opts = 1;
 	for (i = 0; !opts && i < PFTM_MAX; ++i)
 		if (r->timeout[i])
@@ -886,12 +909,6 @@ print_rule(struct pf_rule *r, const char *anchor_call, int verbose)
 			if (!opts)
 				printf(", ");
 			printf("if-bound");
-			opts = 0;
-		}
-		if (r->rule_flag & PFRULE_GRBOUND) {
-			if (!opts)
-				printf(", ");
-			printf("group-bound");
 			opts = 0;
 		}
 		for (i = 0; i < PFTM_MAX; ++i)

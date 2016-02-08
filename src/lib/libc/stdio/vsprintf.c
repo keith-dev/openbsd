@@ -1,3 +1,4 @@
+/*	$OpenBSD: vsprintf.c,v 1.11 2005/08/08 08:05:36 espie Exp $ */
 /*-
  * Copyright (c) 1990, 1993
  *	The Regents of the University of California.  All rights reserved.
@@ -30,12 +31,9 @@
  * SUCH DAMAGE.
  */
 
-#if defined(LIBC_SCCS) && !defined(lint)
-static char rcsid[] = "$OpenBSD: vsprintf.c,v 1.9 2004/09/28 18:12:44 otto Exp $";
-#endif /* LIBC_SCCS and not lint */
-
 #include <stdio.h>
 #include <limits.h>
+#include "local.h"
 
 #if defined(APIWARN)
 __warn_references(vsprintf,
@@ -47,7 +45,9 @@ vsprintf(char *str, const char *fmt, _BSD_VA_LIST_ ap)
 {
 	int ret;
 	FILE f;
+	struct __sfileext fext;
 
+	_FILEEXT_SETUP(&f, &fext);
 	f._file = -1;
 	f._flags = __SWR | __SSTR;
 	f._bf._base = f._p = (unsigned char *)str;

@@ -1,4 +1,4 @@
-/*	$OpenBSD: parse.y,v 1.482 2005/03/07 13:20:03 henning Exp $	*/
+/*	$OpenBSD: parse.y,v 1.492 2005/06/14 18:15:49 henning Exp $	*/
 
 /*
  * Copyright (c) 2001 Markus Friedl.  All rights reserved.
@@ -255,8 +255,8 @@ struct node_hfsc_opts	hfsc_opts;
 int	yyerror(const char *, ...);
 int	disallow_table(struct node_host *, const char *);
 int	disallow_alias(struct node_host *, const char *);
-int	rule_consistent(struct pf_rule *);
-int	filter_consistent(struct pf_rule *);
+int	rule_consistent(struct pf_rule *, int);
+int	filter_consistent(struct pf_rule *, int);
 int	nat_consistent(struct pf_rule *);
 int	rdr_consistent(struct pf_rule *);
 int	process_tabledef(char *, struct table_opts *);
@@ -395,7 +395,7 @@ typedef struct {
 
 %}
 
-%token	PASS BLOCK SCRUB RETURN IN OS OUT LOG LOGALL QUICK ON FROM TO FLAGS
+%token	PASS BLOCK SCRUB RETURN IN OS OUT LOG QUICK ON FROM TO FLAGS
 %token	RETURNRST RETURNICMP RETURNICMP6 PROTO INET INET6 ALL ANY ICMPTYPE
 %token	ICMP6TYPE CODE KEEP MODULATE STATE PORT RDR NAT BINAT ARROW NODF
 %token	MINTTL ERROR ALLOWOPTS FASTROUTE FILENAME ROUTETO DUPTO REPLYTO NO LABEL
@@ -410,15 +410,15 @@ typedef struct {
 %token	LOAD
 %token	STICKYADDRESS MAXSRCSTATES MAXSRCNODES SOURCETRACK GLOBAL RULE
 %token	MAXSRCCONN MAXSRCCONNRATE OVERLOAD FLUSH
-%token	TAGGED TAG IFBOUND GRBOUND FLOATING STATEPOLICY ROUTE
+%token	TAGGED TAG IFBOUND FLOATING STATEPOLICY ROUTE
 %token	<v.string>		STRING
 %token	<v.i>			PORTBINARY
 %type	<v.interface>		interface if_list if_item_not if_item
 %type	<v.number>		number icmptype icmp6type uid gid
-%type	<v.number>		tos not yesno natpass
-%type	<v.i>			no dir log af fragcache sourcetrack flush
-%type	<v.i>			unaryop statelock
-%type	<v.b>			action nataction scrubaction
+%type	<v.number>		tos not yesno
+%type	<v.i>			no dir log logopts logopt af fragcache
+%type	<v.i>			sourcetrack flush unaryop statelock
+%type	<v.b>			action nataction natpass scrubaction
 %type	<v.b>			flags flag blockspec
 %type	<v.range>		port rport
 %type	<v.hashkey>		hashkey
@@ -559,10 +559,6 @@ option		: SET OPTIMIZATION STRING		{
 					break;
 				case PFRULE_IFBOUND:
 					printf("set state-policy if-bound\n");
-					break;
-				case PFRULE_GRBOUND:
-					printf("set state-policy "
-					    "group-bound\n");
 					break;
 				}
 			default_statelock = $3;
@@ -1543,11 +1539,15 @@ pfrule		: action dir logquick interface route af proto fromto
 					YYERROR;
 				}
 			r.match_tag_not = $9.match_tag_not;
-			r.flags = $9.flags.b1;
-			r.flagset = $9.flags.b2;
 			if (rule_label(&r, $9.label))
 				YYERROR;
 			free($9.label);
+			r.flags = $9.flags.b1;
+			r.flagset = $9.flags.b2;
+			if (($9.flags.b1 & $9.flags.b2) != $9.flags.b1) {
+				yyerror("flags always false");
+				YYERROR;
+			}
 			if ($9.flags.b1 || $9.flags.b2 || $8.src_os) {
 				for (proto = $7; proto != NULL &&
 				    proto->proto != IPPROTO_TCP;
@@ -2028,9 +2028,16 @@ logquick	: /* empty */			{ $$.log = 0; $$.quick = 0; }
 		| QUICK log			{ $$.log = $2; $$.quick = 1; }
 		;
 
-log		: LOG				{ $$ = 1; }
-		| LOGALL			{ $$ = 2; }
+log		: LOG				{ $$ = PF_LOG; }
+		| LOG '(' logopts ')'		{ $$ = PF_LOG | $3; }
 		;
+
+logopts		: logopt			{ $$ = $1; }
+		| logopts comma logopt		{ $$ = $1 | $3; }
+
+logopt		: ALL				{ $$ = PF_LOG_ALL; }
+		| USER				{ $$ = PF_LOG_SOCKET_LOOKUP; }
+		| GROUP				{ $$ = PF_LOG_SOCKET_LOOKUP; }
 
 interface	: /* empty */			{ $$ = NULL; }
 		| ON if_item_not		{ $$ = $2; }
@@ -2428,31 +2435,13 @@ port_item	: port				{
 
 port		: STRING			{
 			char	*p = strchr($1, ':');
-			struct servent	*s = NULL;
-			u_long		 ulval;
 
 			if (p == NULL) {
-				if (atoul($1, &ulval) == 0) {
-					if (ulval > 65535) {
-						free($1);
-						yyerror("illegal port value %lu",
-						    ulval);
-						YYERROR;
-					}
-					$$.a = htons(ulval);
-				} else {
-					s = getservbyname($1, "tcp");
-					if (s == NULL)
-						s = getservbyname($1, "udp");
-					if (s == NULL) {
-						yyerror("unknown port %s", $1);
-						free($1);
-						YYERROR;
-					}
-					$$.a = s->s_port;
+				if (($$.a = getservice($1)) == -1) {
+					free($1);
+					YYERROR;
 				}
-				$$.b = 0;
-				$$.t = 0;
+				$$.b = $$.t = 0;
 			} else {
 				int port[2];
 
@@ -2832,9 +2821,6 @@ sourcetrack	: SOURCETRACK		{ $$ = PF_SRCTRACK; }
 statelock	: IFBOUND {
 			$$ = PFRULE_IFBOUND;
 		}
-		| GRBOUND {
-			$$ = PFRULE_GRBOUND;
-		}
 		| FLOATING {
 			$$ = 0;
 		}
@@ -3199,25 +3185,34 @@ redirection	: /* empty */			{ $$ = NULL; }
 		}
 		;
 
-natpass		: /* empty */	{ $$ = 0; }
-		| PASS		{ $$ = 1; }
+natpass		: /* empty */	{ $$.b1 = $$.b2 = 0; }
+		| PASS		{ $$.b1 = 1; $$.b2 = 0; }
+		| PASS log	{ $$.b1 = 1; $$.b2 = $2; }
 		;
 
 nataction	: no NAT natpass {
-			$$.b2 = $$.w = 0;
+			if ($1 && $3.b1) {
+				yyerror("\"pass\" not valid with \"no\"");
+				YYERROR;
+			}
 			if ($1)
 				$$.b1 = PF_NONAT;
 			else
 				$$.b1 = PF_NAT;
-			$$.b2 = $3;
+			$$.b2 = $3.b1;
+			$$.w = $3.b2;
 		}
 		| no RDR natpass {
-			$$.b2 = $$.w = 0;
+			if ($1 && $3.b1) {
+				yyerror("\"pass\" not valid with \"no\"");
+				YYERROR;
+			}
 			if ($1)
 				$$.b1 = PF_NORDR;
 			else
 				$$.b1 = PF_RDR;
-			$$.b2 = $3;
+			$$.b2 = $3.b1;
+			$$.w = $3.b2;
 		}
 		;
 
@@ -3232,6 +3227,7 @@ natrule		: nataction interface af proto fromto tag tagged redirpool pool_opts
 
 			r.action = $1.b1;
 			r.natpass = $1.b2;
+			r.log = $1.w;
 			r.af = $3;
 
 			if (!r.af) {
@@ -3387,11 +3383,16 @@ binatrule	: no BINAT natpass interface af proto FROM host TO ipspec tag tagged
 
 			memset(&binat, 0, sizeof(binat));
 
+			if ($1 && $3.b1) {
+				yyerror("\"pass\" not valid with \"no\"");
+				YYERROR;
+			}
 			if ($1)
 				binat.action = PF_NOBINAT;
 			else
 				binat.action = PF_BINAT;
-			binat.natpass = $3;
+			binat.natpass = $3.b1;
+			binat.log = $3.b2;
 			binat.af = $5;
 			if (!binat.af && $8 != NULL && $8->af)
 				binat.af = $8->af;
@@ -3712,7 +3713,7 @@ disallow_alias(struct node_host *h, const char *fmt)
 }
 
 int
-rule_consistent(struct pf_rule *r)
+rule_consistent(struct pf_rule *r, int anchor_call)
 {
 	int	problems = 0;
 
@@ -3721,7 +3722,7 @@ rule_consistent(struct pf_rule *r)
 	case PF_DROP:
 	case PF_SCRUB:
 	case PF_NOSCRUB:
-		problems = filter_consistent(r);
+		problems = filter_consistent(r, anchor_call);
 		break;
 	case PF_NAT:
 	case PF_NONAT:
@@ -3740,7 +3741,7 @@ rule_consistent(struct pf_rule *r)
 }
 
 int
-filter_consistent(struct pf_rule *r)
+filter_consistent(struct pf_rule *r, int anchor_call)
 {
 	int	problems = 0;
 
@@ -3790,11 +3791,6 @@ filter_consistent(struct pf_rule *r)
 	}
 	if (r->action == PF_DROP && r->keep_state) {
 		yyerror("keep state on block rules doesn't make sense");
-		problems++;
-	}
-	if ((r->tagname[0] || r->match_tagname[0]) && !r->keep_state &&
-	    r->action == PF_PASS) {
-		yyerror("tags cannot be used without keep state");
 		problems++;
 	}
 	return (-problems);
@@ -4480,7 +4476,7 @@ expand_rule(struct pf_rule *r,
 			TAILQ_INSERT_TAIL(&r->rpool.list, pa, entries);
 		}
 
-		if (rule_consistent(r) < 0 || error)
+		if (rule_consistent(r, anchor_call[0]) < 0 || error)
 			yyerror("skipping rule due to errors");
 		else {
 			r->nr = pf->rule_nr++;
@@ -4598,7 +4594,6 @@ lookup(char *s)
 		{ "from",		FROM},
 		{ "global",		GLOBAL},
 		{ "group",		GROUP},
-		{ "group-bound",	GRBOUND},
 		{ "hfsc",		HFSC},
 		{ "hostid",		HOSTID},
 		{ "icmp-type",		ICMPTYPE},
@@ -4613,7 +4608,6 @@ lookup(char *s)
 		{ "linkshare",		LINKSHARE},
 		{ "load",		LOAD},
 		{ "log",		LOG},
-		{ "log-all",		LOGALL},
 		{ "loginterface",	LOGINTERFACE},
 		{ "max",		MAXIMUM},
 		{ "max-mss",		MAXMSS},

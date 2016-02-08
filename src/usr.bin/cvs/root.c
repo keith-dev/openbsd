@@ -1,4 +1,4 @@
-/*	$OpenBSD: root.c,v 1.15 2005/02/17 16:09:03 jfb Exp $	*/
+/*	$OpenBSD: root.c,v 1.24 2005/08/10 16:01:27 joris Exp $	*/
 /*
  * Copyright (c) 2004 Jean-Francois Brousseau <jfb@openbsd.org>
  * All rights reserved.
@@ -26,13 +26,13 @@
 
 #include <sys/types.h>
 
-#include <stdlib.h>
-#include <stdio.h>
-#include <unistd.h>
 #include <err.h>
 #include <errno.h>
-#include <string.h>
 #include <paths.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <unistd.h>
 
 #include "cvs.h"
 #include "log.h"
@@ -54,7 +54,7 @@ const char *cvs_methods[] = {
 	"fork",
 };
 
-#define CVS_NBMETHODS  (sizeof(cvs_methods)/sizeof(cvs_methods[0]))
+#define CVS_NBMETHODS	(sizeof(cvs_methods)/sizeof(cvs_methods[0]))
 
 /*
  * CVSROOT cache
@@ -65,11 +65,7 @@ const char *cvs_methods[] = {
  * increases the reference count).  Otherwise, it does the parsing and adds
  * the result to the cache for future hits.
  */
-
-static struct cvsroot **cvs_rcache = NULL;
-static u_int cvs_rcsz = 0;
-
-
+static TAILQ_HEAD(, cvsroot) cvs_rcache = TAILQ_HEAD_INITIALIZER(cvs_rcache);
 
 /*
  * cvsroot_parse()
@@ -81,18 +77,23 @@ static u_int cvs_rcsz = 0;
  * Returns a pointer to the allocated information on success, or NULL
  * on failure.
  */
-struct cvsroot*
+struct cvsroot *
 cvsroot_parse(const char *str)
 {
 	u_int i;
 	char *cp, *sp, *pp;
-	void *tmp;
 	struct cvsroot *root;
 
-	for (i = 0; i < cvs_rcsz; i++) {
-		if (strcmp(str, cvs_rcache[i]->cr_str) == 0) {
-			cvs_rcache[i]->cr_ref++;
-			return (cvs_rcache[i]);
+	/*
+	 * Look if we have it in cache, if we found it add it to the cache
+	 * at the first position again.
+	 */
+	TAILQ_FOREACH(root, &cvs_rcache, root_cache) {
+		if (strcmp(str, root->cr_str) == 0) {
+			TAILQ_REMOVE(&cvs_rcache, root, root_cache);
+			TAILQ_INSERT_HEAD(&cvs_rcache, root, root_cache);
+			root->cr_ref++;
+			return (root);
 		}
 	}
 
@@ -161,6 +162,7 @@ cvsroot_parse(const char *str)
 		if (root->cr_method == CVS_METHOD_NONE)
 			root->cr_method = CVS_METHOD_LOCAL;
 		/* stop here, it's just a path */
+		TAILQ_INSERT_HEAD(&cvs_rcache, root, root_cache);
 		return (root);
 	}
 
@@ -214,13 +216,7 @@ cvsroot_parse(const char *str)
 	}
 
 	/* add to the cache */
-	tmp = realloc(cvs_rcache, (cvs_rcsz + 1) * sizeof(struct cvsroot *));
-	if (tmp != NULL) {
-		cvs_rcache = (struct cvsroot **)tmp;
-		cvs_rcache[cvs_rcsz++] = root;
-		root->cr_ref++;
-	}
-
+	TAILQ_INSERT_HEAD(&cvs_rcache, root, root_cache);
 	return (root);
 }
 
@@ -236,6 +232,7 @@ cvsroot_free(struct cvsroot *root)
 {
 	root->cr_ref--;
 	if (root->cr_ref == 0) {
+		TAILQ_REMOVE(&cvs_rcache, root, root_cache);
 		if (root->cr_str != NULL)
 			free(root->cr_str);
 		if (root->cr_buf != NULL)
@@ -257,9 +254,10 @@ cvsroot_free(struct cvsroot *root)
  * 2) the CVS/Root file found in checked-out trees
  * 3) the CVSROOT environment variable
  */
-struct cvsroot*
+struct cvsroot *
 cvsroot_get(const char *dir)
 {
+	int l;
 	size_t len;
 	char rootpath[MAXPATHLEN], *rootstr, line[128];
 	FILE *fp;
@@ -267,7 +265,13 @@ cvsroot_get(const char *dir)
 	if (cvs_rootstr != NULL)
 		return cvsroot_parse(cvs_rootstr);
 
-	snprintf(rootpath, sizeof(rootpath), "%s/" CVS_PATH_ROOTSPEC, dir);
+	l = snprintf(rootpath, sizeof(rootpath), "%s/" CVS_PATH_ROOTSPEC, dir);
+	if (l == -1 || l >= (int)sizeof(rootpath)) {
+		errno = ENAMETOOLONG;
+		cvs_log(LP_ERRNO, "%s", rootpath);
+		return (NULL);
+	}
+
 	fp = fopen(rootpath, "r");
 	if (fp == NULL) {
 		if (errno == ENOENT) {
@@ -277,13 +281,15 @@ cvsroot_get(const char *dir)
 			else
 				return (NULL);
 		} else {
-			cvs_log(LP_ERRNO, "failed to open CVS/Root");
+			cvs_log(LP_ERRNO, "failed to open %s",
+			    CVS_PATH_ROOTSPEC);
 			return (NULL);
 		}
 	}
 
-	if (fgets(line, sizeof(line), fp) == NULL) {
-		cvs_log(LP_ERR, "failed to read CVSROOT line from CVS/Root");
+	if (fgets(line, (int)sizeof(line), fp) == NULL) {
+		cvs_log(LP_ERR, "failed to read line from %s",
+		    CVS_PATH_ROOTSPEC);
 		(void)fclose(fp);
 		return (NULL);
 	}
@@ -291,7 +297,7 @@ cvsroot_get(const char *dir)
 
 	len = strlen(line);
 	if (len == 0)
-		cvs_log(LP_WARN, "empty CVS/Root file");
+		cvs_log(LP_WARN, "empty %s file", CVS_PATH_ROOTSPEC);
 	else if (line[len - 1] == '\n')
 		line[--len] = '\0';
 

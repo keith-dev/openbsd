@@ -15,7 +15,7 @@
  * PERFORMANCE OF THIS SOFTWARE.
  */
 
-/* $ISC: main.c,v 1.119.2.3.2.16 2004/09/01 07:16:35 marka Exp $ */
+/* $ISC: main.c,v 1.119.2.3.2.17 2004/10/25 00:42:54 marka Exp $ */
 
 #include <config.h>
 
@@ -566,7 +566,7 @@ setup(void) {
 	 * Initialize system's random device as fallback entropy source
 	 * if running chroot'ed.
 	 */
-	if (ns_g_chrootdir != NULL) {
+	if (1) { /* Always chroot due to privsep */
 		result = isc_entropy_create(ns_g_mctx, &ns_g_fallbackentropy);
 		if (result != ISC_R_SUCCESS)
 			ns_main_earlyfatal("isc_entropy_create() failed: %s",
@@ -621,6 +621,15 @@ setup(void) {
 	isc_socket_privsep(1);
 
 	/* process is now unprivileged and inside a chroot */
+
+	/*
+	 * We call isc_app_start() here as some versions of FreeBSD's fork()
+	 * destroys all the signal handling it sets up.
+	 */
+	result = isc_app_start();
+	if (result != ISC_R_SUCCESS)
+		ns_main_earlyfatal("isc_app_start() failed: %s",
+				   isc_result_totext(result));
 
 	isc_log_write(ns_g_lctx, NS_LOGCATEGORY_GENERAL, NS_LOGMODULE_MAIN,
 		      ISC_LOG_NOTICE, "starting BIND %s%s", ns_g_version,
@@ -813,11 +822,6 @@ main(int argc, char *argv[]) {
 	isc_error_setunexpected(library_unexpected_error);
 
 	ns_os_init(program_name);
-
-	result = isc_app_start();
-	if (result != ISC_R_SUCCESS)
-		ns_main_earlyfatal("isc_app_start() failed: %s",
-				   isc_result_totext(result));
 
 	dns_result_register();
 	dst_result_register();

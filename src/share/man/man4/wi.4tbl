@@ -1,4 +1,4 @@
-.\"	$OpenBSD: wi.4tbl,v 1.70 2005/03/12 10:32:40 jmc Exp $
+.\"	$OpenBSD: wi.4tbl,v 1.76 2005/08/08 16:48:05 uwe Exp $
 .\"
 .\" Copyright (c) 1997, 1998, 1999
 .\"	Bill Paul <wpaul@ctr.columbia.edu>. All rights reserved.
@@ -183,7 +183,7 @@ Select IBSS operation.
 Select IBSS master operation.
 .El
 .It Fl mediaopt Ar opts
-Disable the specified media options on the driver and returns it to the
+Disable the specified media options on the driver and return it to the
 default mode of operation (BSS).
 .It Cm nwid Ar id
 Set the network ID.
@@ -197,6 +197,7 @@ string allows the interface to connect to any available access points.
 By default the
 .Nm
 driver uses an empty string.
+Note that network ID is synonymous with Extended Service Set ID (ESSID).
 .It Cm nwkey Ar key
 Enable WEP encryption using the specified
 .Ar key .
@@ -292,9 +293,11 @@ Apacer Wireless Steno MB112:Prism-3:USB
 Apple Airport:Hermes:macobio
 ARtem Onair:Hermes:PCMCIA
 ASUS SpaceLink WL-100:Prism-2.5:PCMCIA
+ASUS SpaceLink WL-110:Prism-2.5:CF
 ASUS WL-140:Prism-3:USB
 Belkin F5D6020 (version 1 only):Prism-2:PCMCIA
 Belkin F5D6001 (version 1 only):Prism-2:PCI
+Belkin F5D6060 (version 1 only):Prism-2.5:CF
 Buffalo AirStation:Prism-2:PCMCIA
 Buffalo AirStation:Prism-2:CF
 Cabletron RoamAbout:Hermes:PCMCIA
@@ -362,6 +365,7 @@ Proxim RangeLAN-DS:Prism-2:PCMCIA
 Samsung MagicLAN SWL-2000N:Prism-2:PCMCIA
 Samsung MagicLAN SWL-2210P:Prism-2:PCI
 Senao NL-2511MP:Prism-2.5:PCI
+Senao NL-2511CF:Prism-3:CF
 Siemens SpeedStream SS1021:Prism-2:PCMCIA
 Siemens SpeedStream SS1022:Prism-3:USB
 Sitecom WL-022:Prism-3:USB
@@ -446,7 +450,7 @@ Configure wi0 for WEP, using hex key
 .Pp
 Return wi0 to its default settings:
 .Bd -literal -offset indent
-# ifconfig wi0 -bssid -chan media autoselect -mediaopt \e
+# ifconfig wi0 -bssid -chan media autoselect \e
 	nwid "" -nwkey -powersave -txpower
 .Ed
 .Pp

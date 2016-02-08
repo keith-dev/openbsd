@@ -1,4 +1,4 @@
-.\" $OpenBSD: lge.4,v 1.10 2004/09/30 19:59:24 mickey Exp $
+.\" $OpenBSD: lge.4,v 1.15 2005/08/23 18:15:59 jmc Exp $
 .\" Copyright (c) 2001 Wind River Systems
 .\" Copyright (c) 1997, 1998, 1999, 2000, 2001
 .\"	Bill Paul <william.paul@windriver.com>. All rights reserved.
@@ -49,9 +49,11 @@ following:
 .Pp
 .Bl -bullet -compact
 .It
-SMC TigerCard 1000 (SMC9462SX)
+Allied Telesis CentreCOM LA1000-PCI-SX
 .It
 D-Link DGE-500SX
+.It
+SMC TigerCard 1000 (SMC9462SX)
 .El
 .Pp
 These NICs are capable of 1000Mbps speeds over fiber optic cable.
@@ -128,12 +130,11 @@ the network connection (cable).
 .Xr intro 4 ,
 .Xr netintro 4 ,
 .Xr pci 4 ,
-.Xr vlan 4 ,
 .Xr hostname.if 5 ,
 .Xr ifconfig 8
 .Rs
 .%T Level 1 LXT1001 Programming Manual
-.%O http://www.FreeBSD.org/~wpaul/Level1/LXT1001SRM.pdf
+.%O http://people.freebsd.org/~wpaul/Level1/LXT1001SRM.pdf
 .Re
 .Sh HISTORY
 The

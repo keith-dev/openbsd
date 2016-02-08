@@ -1,4 +1,4 @@
-/*	$OpenBSD: rde_attr.c,v 1.44 2004/11/10 15:18:11 claudio Exp $ */
+/*	$OpenBSD: rde_attr.c,v 1.49 2005/06/13 15:16:50 claudio Exp $ */
 
 /*
  * Copyright (c) 2004 Claudio Jeker <claudio@openbsd.org>
@@ -40,8 +40,10 @@ attr_write(void *p, u_int16_t p_len, u_int8_t flags, u_int8_t type,
 	if (data_len > 255) {
 		tot_len += 2 + data_len;
 		flags |= ATTR_EXTLEN;
-	} else
+	} else {
 		tot_len += 1 + data_len;
+		flags &= ~ATTR_EXTLEN;
+	}
 
 	if (tot_len > p_len)
 		return (-1);
@@ -59,6 +61,15 @@ attr_write(void *p, u_int16_t p_len, u_int8_t flags, u_int8_t type,
 		memcpy(b, data, data_len);
 
 	return (tot_len);
+}
+
+int
+attr_optlen(struct attr *a)
+{
+	if (a->len > 255)
+		return (4 + a->len);
+	else
+		return (3 + a->len);
 }
 
 int
@@ -534,7 +545,7 @@ aspath_snprint(char *buf, size_t size, void *data, u_int16_t len)
 			UPDATE();
 		}
 	}
-	/* ensure that we have a valid C-string */
+	/* ensure that we have a valid C-string especially for emtpy as path */
 	if (size > 0)
 		*buf = '\0';
 
@@ -545,15 +556,22 @@ aspath_snprint(char *buf, size_t size, void *data, u_int16_t len)
 int
 aspath_asprint(char **ret, void *data, u_int16_t len)
 {
-	size_t	slen, plen;
+	size_t	slen;
+	int	plen;
 
 	slen = aspath_strlen(data, len) + 1;
 	*ret = malloc(slen);
 	if (*ret == NULL)
 		return (-1);
-	plen = aspath_snprint(*ret, slen, data, len);
 
-	return (plen);
+	plen = aspath_snprint(*ret, slen, data, len);
+	if (plen == -1) {
+		free(*ret);
+		*ret = NULL;
+		return (-1);
+	}
+
+	return (0);
 }
 
 size_t
@@ -685,11 +703,12 @@ community_set(struct attr *attr, int as, int type)
 	if (i >= ncommunities) {
 		if (attr->len > 0xffff - 4) /* overflow */
 			return (0);
-		attr->len += 4;
-		if ((p = realloc(attr->data, attr->len)) == NULL)
+		i = attr->len + 4;
+		if ((p = realloc(attr->data, i)) == NULL)
 			return (0);
 
 		attr->data = p;
+		attr->len = i;
 		p = attr->data + attr->len - 4;
 	}
 	p[0] = as >> 8;

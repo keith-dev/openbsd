@@ -1,4 +1,4 @@
-/*	$OpenBSD: hello.c,v 1.4 2005/02/09 15:51:30 claudio Exp $ */
+/*	$OpenBSD: hello.c,v 1.9 2005/08/30 21:07:58 claudio Exp $ */
 
 /*
  * Copyright (c) 2005 Claudio Jeker <claudio@openbsd.org>
@@ -39,17 +39,13 @@ int
 send_hello(struct iface *iface)
 {
 	struct sockaddr_in	 dst;
-	struct hello_hdr	*hello;
+	struct hello_hdr	 hello;
 	struct nbr		*nbr;
-	char			*buf;
-	char			*ptr;
-	int			 ret = 0;
+	struct buf		*buf;
+	int			 ret;
 
-	if (iface->passive)
-		return (0);
-
-	/* XXX use buffer API instead for better decoupling */
-	if ((ptr = buf = calloc(1, READ_BUF_SIZE)) == NULL)
+	/* XXX READ_BUF_SIZE */
+	if ((buf = buf_dynamic(PKG_DEF_SIZE, READ_BUF_SIZE)) == NULL)
 		fatal("send_hello");
 
 	dst.sin_family = AF_INET;
@@ -62,59 +58,58 @@ send_hello(struct iface *iface)
 		break;
 	case IF_TYPE_NBMA:
 	case IF_TYPE_POINTOMULTIPOINT:
+		/* XXX not supported */
+		break;
 	case IF_TYPE_VIRTUALLINK:
-		/* XXX these networks need to be preconfigured */
-		/* dst.sin_addr.s_addr = nbr->addr.s_addr; */
-		inet_aton(AllSPFRouters, &dst.sin_addr);
+		dst.sin_addr = iface->dst;
 		break;
 	default:
 		fatalx("send_hello: unknown interface type");
 	}
 
 	/* OSPF header */
-	gen_ospf_hdr(ptr, iface, PACKET_TYPE_HELLO);
-	ptr += sizeof(struct ospf_hdr);
+	if (gen_ospf_hdr(buf, iface, PACKET_TYPE_HELLO))
+		goto fail;
 
 	/* hello header */
-	hello = (struct hello_hdr *)ptr;
-	hello->mask = iface->mask.s_addr;
-	hello->hello_interval = htons(iface->hello_interval);
-	hello->opts = oeconf->options;
-	hello->rtr_priority = iface->priority;
-	hello->rtr_dead_interval = htonl(iface->dead_interval);
+	hello.mask = iface->mask.s_addr;
+	hello.hello_interval = htons(iface->hello_interval);
+	hello.opts = oeconf->options;
+	hello.rtr_priority = iface->priority;
+	hello.rtr_dead_interval = htonl(iface->dead_interval);
 
 	if (iface->dr) {
-		hello->d_rtr = iface->dr->addr.s_addr;
+		hello.d_rtr = iface->dr->addr.s_addr;
 		iface->self->dr.s_addr = iface->dr->addr.s_addr;
-	}
+	} else
+		hello.d_rtr = 0;
 	if (iface->bdr) {
-		hello->bd_rtr = iface->bdr->addr.s_addr;
+		hello.bd_rtr = iface->bdr->addr.s_addr;
 		iface->self->bdr.s_addr = iface->bdr->addr.s_addr;
-	}
-	ptr += sizeof(*hello);
+	} else
+		hello.bd_rtr = 0;
+
+	if (buf_add(buf, &hello, sizeof(hello)))
+		goto fail;
 
 	/* active neighbor(s) */
 	LIST_FOREACH(nbr, &iface->nbr_list, entry) {
-		if (ptr - buf > iface->mtu - PACKET_HDR) {
-			log_warnx("send_hello: too many neighbors on "
-			    "interface %s", iface->name);
-			break;
-		}
-		if ((nbr->state >= NBR_STA_INIT) && (nbr != iface->self)) {
-			memcpy(ptr, &nbr->id, sizeof(nbr->id));
-			ptr += sizeof(nbr->id);
-		}
+		if ((nbr->state >= NBR_STA_INIT) && (nbr != iface->self))
+			if (buf_add(buf, &nbr->id, sizeof(nbr->id)))
+				goto fail;
 	}
 
 	/* update authentication and calculate checksum */
-	auth_gen(buf, ptr - buf, iface);
+	if (auth_gen(buf, iface))
+		goto fail;
 
-	if ((ret = send_packet(iface, buf, (ptr - buf), &dst)) == -1)
-		log_warnx("send_hello: error sending packet on "
-		    "interface %s", iface->name);
-
-	free(buf);
+	ret = send_packet(iface, buf->buf, buf->wpos, &dst);
+	buf_free(buf);
 	return (ret);
+fail:
+	log_warn("send_hello");
+	buf_free(buf);
+	return (-1);
 }
 
 void
@@ -122,9 +117,9 @@ recv_hello(struct iface *iface, struct in_addr src, u_int32_t rtr_id, char *buf,
     u_int16_t len)
 {
 	struct hello_hdr	 hello;
-	struct nbr		*nbr = NULL;
+	struct nbr		*nbr = NULL, *dr;
 	u_int32_t		 nbr_id;
-	int			 twoway = 0, nbr_change = 0;
+	int			 nbr_change = 0;
 
 	if (len < sizeof(hello) && (len & 0x03)) {
 		log_warnx("recv_hello: bad packet size, interface %s",
@@ -191,8 +186,15 @@ recv_hello(struct iface *iface, struct in_addr src, u_int32_t rtr_id, char *buf,
 		fatalx("recv_hello: unknown interface type");
 	}
 
-	if (!nbr)
+	if (!nbr) {
 		nbr = nbr_new(rtr_id, iface, 0);
+		/* set neighbor parameters */
+		nbr->dr.s_addr = hello.d_rtr;
+		nbr->bdr.s_addr = hello.bd_rtr;
+		nbr->priority = hello.rtr_priority;
+		nbr_change = 1;
+	}
+
 	/* actually the neighbor address shouldn't be stored on virtual links */
 	nbr->addr.s_addr = src.s_addr;
 	nbr->options = hello.opts;
@@ -203,8 +205,8 @@ recv_hello(struct iface *iface, struct in_addr src, u_int32_t rtr_id, char *buf,
 		memcpy(&nbr_id, buf, sizeof(nbr_id));
 		if (nbr_id == iface->rtr_id.s_addr) {
 			/* seen myself */
-			if (nbr->state < NBR_STA_XSTRT)
-				twoway = 1;
+			if (nbr->state & NBR_STA_PRELIM)
+				nbr_fsm(nbr, NBR_EVT_2_WAY_RCVD);
 			break;
 		}
 		buf += sizeof(nbr_id);
@@ -225,10 +227,26 @@ recv_hello(struct iface *iface, struct in_addr src, u_int32_t rtr_id, char *buf,
 		nbr_change = 1;
 	}
 
-	if (iface->state == IF_STA_WAITING &&
-	    ((nbr->dr.s_addr == nbr->addr.s_addr &&
-	    nbr->bdr.s_addr == 0) || nbr->bdr.s_addr == nbr->addr.s_addr))
+	if (iface->state & IF_STA_WAITING &&
+	    hello.d_rtr == nbr->addr.s_addr && hello.bd_rtr == 0) {
+		log_debug("hello: DR seen with NO BDR");
 		if_fsm(iface, IF_EVT_BACKUP_SEEN);
+	}
+
+	if (iface->state & IF_STA_WAITING && hello.bd_rtr == nbr->addr.s_addr) {
+		/*
+		 * In case we see the BDR make sure that the DR is around
+		 * with a bidirectional (2_WAY or better) connection
+		 */
+		log_debug("hello: BDR seen");
+		LIST_FOREACH(dr, &iface->nbr_list, entry)
+			if (hello.d_rtr == dr->addr.s_addr &&
+			    dr->state & NBR_STA_BIDIR) {
+				log_debug("hello: BDR seen & DR %s is BIDIR",
+				    inet_ntoa(dr->addr));
+				if_fsm(iface, IF_EVT_BACKUP_SEEN);
+			}
+	}
 
 	if ((nbr->addr.s_addr == nbr->dr.s_addr &&
 	    nbr->addr.s_addr != hello.d_rtr) ||
@@ -245,15 +263,6 @@ recv_hello(struct iface *iface, struct in_addr src, u_int32_t rtr_id, char *buf,
 
 	nbr->dr.s_addr = hello.d_rtr;
 	nbr->bdr.s_addr = hello.bd_rtr;
-
-	if (twoway) {
-		/*
-		 * event 2 way received needs to be delayed after the
-		 * interface neighbor change check else the DR and BDR
-		 * may not be set correctly.
-		 */
-		nbr_fsm(nbr, NBR_EVT_2_WAY_RCVD);
-	}
 
 	if (nbr_change)
 		if_fsm(iface, IF_EVT_NBR_CHNG);

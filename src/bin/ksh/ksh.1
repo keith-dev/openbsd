@@ -1,4 +1,4 @@
-.\"	$OpenBSD: ksh.1,v 1.97 2005/03/04 11:50:06 jmc Exp $
+.\"	$OpenBSD: ksh.1,v 1.102 2005/08/21 17:40:42 millert Exp $
 .\"
 .\"	Public Domain
 .\"
@@ -946,6 +946,7 @@ not
 .Sq A ,
 .Sq B ,
 .Sq ,
+.Sq D ,
 and
 .Sq E .
 This behavior is POSIX compliant, but incompatible with some other shell
@@ -1432,11 +1433,6 @@ This parameter is not imported from the environment when the shell is
 started.
 .It Ev KSH_VERSION
 The version of the shell and the date the version was created (read-only).
-See also the version commands in
-.Sx Emacs editing mode
-and
-.Sx Vi editing mode
-sections, below.
 .It Ev LINENO
 The line number of the function or shell script that is currently being
 executed.
@@ -4187,7 +4183,7 @@ except zero padding is used instead of space padding.
 .Pp
 .It Xo
 .Ic ulimit
-.Op Fl acdfHlmnpSstv
+.Op Fl acdfHlmnpSst
 .Op Ar value
 .Xc
 Display or set process limits.
@@ -4251,10 +4247,10 @@ kilobytes on the size of the stack area.
 Impose a time limit of
 .Ar n
 CPU seconds spent in user mode to be used by each process.
-.It Fl v Ar n
-Impose a limit of
-.Ar n
-kilobytes on the amount of virtual memory used.
+.\".It Fl v Ar n
+.\"Impose a limit of
+..\"Ar n
+.\"kilobytes on the amount of virtual memory used.
 .El
 .Pp
 As far as
@@ -4882,11 +4878,8 @@ lines (earlier).
 Uppercase the next
 .Ar n
 words.
-.It version: ^V
-Display the version of
-.Nm .
-The current edit buffer is restored as soon as any
-key is pressed (the key is then processed, unless it is a space).
+.It quote: ^V
+Synonym for ^^.
 .It yank: ^Y
 Inserts the most recently killed text string at the current cursor position.
 .It yank-pop: ^[y
@@ -5108,10 +5101,6 @@ enumeration command).
 .It = and ^E
 Command/file name enumeration.
 List all the commands or files that match the current big-word.
-.It ^V
-Display the version of
-.Nm pdksh ;
-it is displayed until another key is pressed (this key is ignored).
 .It @ Ns Ar c
 Macro expansion.
 Execute the commands found in the alias
@@ -5469,7 +5458,8 @@ Shell database.
 .Xr stty 1 ,
 .Xr vi 1 ,
 .Xr shells 5 ,
-.Xr environ 7
+.Xr environ 7 ,
+.Xr script 7
 .Rs
 .%A Morris Bolsky
 .%A David Korn

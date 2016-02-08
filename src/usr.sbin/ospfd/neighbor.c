@@ -1,4 +1,4 @@
-/*	$OpenBSD: neighbor.c,v 1.12 2005/03/17 21:17:12 claudio Exp $ */
+/*	$OpenBSD: neighbor.c,v 1.23 2005/06/13 08:32:29 claudio Exp $ */
 
 /*
  * Copyright (c) 2005 Claudio Jeker <claudio@openbsd.org>
@@ -50,7 +50,7 @@ struct nbr_table {
 #define NBR_HASH(x)		\
 	&nbrtable.hashtbl[(x) & nbrtable.hashmask]
 
-u_int32_t	peercnt;
+u_int32_t	peercnt = NBR_CNTSTART;
 
 struct {
 	int		state;
@@ -63,7 +63,6 @@ struct {
     {NBR_STA_BIDIR,	NBR_EVT_2_WAY_RCVD,	NBR_ACT_NOTHING,	0},
     {NBR_STA_INIT,	NBR_EVT_1_WAY_RCVD,	NBR_ACT_NOTHING,	0},
     {NBR_STA_DOWN,	NBR_EVT_HELLO_RCVD,	NBR_ACT_STRT_ITIMER,	NBR_STA_INIT},
-    {NBR_STA_DOWN,	NBR_EVT_STRT,		NBR_ACT_STRT,		NBR_STA_ATTEMPT},
     {NBR_STA_ATTEMPT,	NBR_EVT_HELLO_RCVD,	NBR_ACT_RST_ITIMER,	NBR_STA_INIT},
     {NBR_STA_INIT,	NBR_EVT_2_WAY_RCVD,	NBR_ACT_EVAL,		0},
     {NBR_STA_XSTRT,	NBR_EVT_NEG_DONE,	NBR_ACT_SNAP,		NBR_STA_SNAP},
@@ -86,7 +85,6 @@ struct {
 const char * const nbr_event_names[] = {
 	"NOTHING",
 	"HELLO_RECEIVED",
-	"START",
 	"2_WAY_RECEIVED",
 	"NEGOTIATION_DONE",
 	"SNAPSHOT_DONE",
@@ -104,7 +102,6 @@ const char * const nbr_event_names[] = {
 
 const char * const nbr_action_names[] = {
 	"NOTHING",
-	"START",
 	"RESET_INACTIVITY_TIMER",
 	"START_INACTIVITY_TIMER",
 	"EVAL",
@@ -145,9 +142,6 @@ nbr_fsm(struct nbr *nbr, enum nbr_event event)
 	}
 
 	switch (nbr_fsm_tbl[i].action) {
-	case NBR_ACT_STRT:
-		ret = nbr_act_start(nbr);
-		break;
 	case NBR_ACT_RST_ITIMER:
 		ret = nbr_act_reset_itimer(nbr);
 		break;
@@ -197,31 +191,37 @@ nbr_fsm(struct nbr *nbr, enum nbr_event event)
 	if (new_state != 0)
 		nbr->state = new_state;
 
-	/* state change inform RDE */
-	if (old_state != nbr->state)
+	if (old_state != nbr->state) {
+		nbr->stats.sta_chng++;
+		/* state change inform RDE */
 		ospfe_imsg_compose_rde(IMSG_NEIGHBOR_CHANGE,
 		    nbr->peerid, 0, &new_state, sizeof(new_state));
 
-	/* bidirectional communication lost */
-	if (old_state & ~NBR_STA_PRELIM && nbr->state & NBR_STA_PRELIM)
-		if_fsm(nbr->iface, IF_EVT_NBR_CHNG);
+		if (old_state & NBR_STA_FULL || nbr->state & NBR_STA_FULL) {
+			/*
+			 * neighbor changed from/to FULL
+			 * originate new rtr and net LSA
+			 */
+			area_track(nbr->iface->area, nbr->state);
+			orig_rtr_lsa(nbr->iface->area);
+			if (nbr->iface->state & IF_STA_DR)
+				orig_net_lsa(nbr->iface);
+		}
 
-	/* neighbor changed from/to FULL originate new rtr and net LSA */
-	if (old_state != nbr->state && (old_state & NBR_STA_FULL ||
-	    nbr->state & NBR_STA_FULL)) {
-		orig_rtr_lsa(nbr->iface->area);
-		if (nbr->iface->state & IF_STA_DR)
-			orig_net_lsa(nbr->iface);
-	}
+		/* bidirectional communication lost */
+		if (old_state & ~NBR_STA_PRELIM && nbr->state & NBR_STA_PRELIM)
+			if_fsm(nbr->iface, IF_EVT_NBR_CHNG);
 
-	if (old_state != nbr->state) {
-		nbr->stats.sta_chng++;
 		log_debug("nbr_fsm: event %s resulted in action %s and "
 		    "changing state for neighbor ID %s from %s to %s",
 		    nbr_event_name(event),
 		    nbr_action_name(nbr_fsm_tbl[i].action),
 		    inet_ntoa(nbr->id), nbr_state_name(old_state),
 		    nbr_state_name(nbr->state));
+
+		if (nbr->iface->type == IF_TYPE_VIRTUALLINK) {
+			orig_rtr_lsa(nbr->iface->area);
+		}
 	}
 
 	return (ret);
@@ -230,6 +230,8 @@ nbr_fsm(struct nbr *nbr, enum nbr_event event)
 void
 nbr_init(u_int32_t hashsize)
 {
+	struct nbr_head	*head;
+	struct nbr	*nbr;
 	u_int32_t        hs, i;
 
 	for (hs = 1; hs < hashsize; hs <<= 1)
@@ -242,20 +244,34 @@ nbr_init(u_int32_t hashsize)
 		LIST_INIT(&nbrtable.hashtbl[i]);
 
 	nbrtable.hashmask = hs - 1;
+
+	/* allocate a dummy neighbor used for self originated AS ext routes */
+	if ((nbr = calloc(1, sizeof(*nbr))) == NULL)
+		fatal("nbr_init");
+
+	nbr->id.s_addr = ospfe_router_id();
+	nbr->state = NBR_STA_DOWN;
+	nbr->peerid = NBR_IDSELF;
+	head = NBR_HASH(nbr->peerid);
+	LIST_INSERT_HEAD(head, nbr, hash);
+
+	TAILQ_INIT(&nbr->ls_retrans_list);
+	TAILQ_INIT(&nbr->db_sum_list);
+	TAILQ_INIT(&nbr->ls_req_list);
 }
 
 struct nbr *
 nbr_new(u_int32_t nbr_id, struct iface *iface, int self)
 {
 	struct nbr_head	*head;
-	struct nbr	*nbr = NULL;
+	struct nbr	*nbr;
 	struct rde_nbr	 rn;
 
 	if ((nbr = calloc(1, sizeof(*nbr))) == NULL)
 		fatal("nbr_new");
 
 	nbr->state = NBR_STA_DOWN;
-	nbr->master = true;
+	nbr->master = 1;
 	nbr->dd_seq_num = arc4random();	/* RFC: some unique value */
 	nbr->id.s_addr = nbr_id;
 
@@ -289,9 +305,6 @@ nbr_new(u_int32_t nbr_id, struct iface *iface, int self)
 	evtimer_set(&nbr->ls_retrans_timer, ls_retrans_timer, nbr);
 	evtimer_set(&nbr->adj_timer, nbr_adj_timer, nbr);
 
-	log_debug("nbr_new: neighbor ID %s, peerid %lu",
-	    inet_ntoa(nbr->id), nbr->peerid);
-
 	bzero(&rn, sizeof(rn));
 	rn.id.s_addr = nbr->id.s_addr;
 	rn.area_id.s_addr = nbr->iface->area->id.s_addr;
@@ -306,9 +319,6 @@ nbr_new(u_int32_t nbr_id, struct iface *iface, int self)
 int
 nbr_del(struct nbr *nbr)
 {
-	log_debug("nbr_del: neighbor ID %s, peerid %lu", inet_ntoa(nbr->id),
-	    nbr->peerid);
-
 	if (nbr == nbr->iface->self)
 		return (0);
 
@@ -363,8 +373,6 @@ nbr_itimer(int fd, short event, void *arg)
 {
 	struct nbr *nbr = arg;
 
-	log_debug("nbr_itimer: %s", inet_ntoa(nbr->id));
-
 	if (nbr->state == NBR_STA_DOWN) {
 		nbr_del(nbr);
 	} else
@@ -375,8 +383,6 @@ int
 nbr_start_itimer(struct nbr *nbr)
 {
 	struct timeval	tv;
-
-	log_debug("nbr_start_itimer: %s", inet_ntoa(nbr->id));
 
 	timerclear(&tv);
 	tv.tv_sec = nbr->iface->dead_interval;
@@ -417,8 +423,6 @@ nbr_start_adj_timer(struct nbr *nbr)
 {
 	struct timeval	tv;
 
-	log_debug("nbr_start_adj_timer: %s", inet_ntoa(nbr->id));
-
 	timerclear(&tv);
 	tv.tv_sec = DEFAULT_ADJ_TMOUT;
 
@@ -426,14 +430,6 @@ nbr_start_adj_timer(struct nbr *nbr)
 }
 
 /* actions */
-int
-nbr_act_start(struct nbr *nbr)
-{
-	log_debug("nbr_act_start: neighbor ID %s", inet_ntoa(nbr->id));
-
-	return (-1);
-}
-
 int
 nbr_act_reset_itimer(struct nbr *nbr)
 {
@@ -468,12 +464,13 @@ nbr_adj_ok(struct nbr *nbr)
 	case IF_TYPE_POINTOPOINT:
 	case IF_TYPE_VIRTUALLINK:
 	case IF_TYPE_POINTOMULTIPOINT:
+		/* always ok */
 		break;
 	case IF_TYPE_BROADCAST:
 	case IF_TYPE_NBMA:
 		/*
 		 * if neighbor is dr, bdr or router self is dr or bdr
-		 * start forming adjacancy
+		 * start forming adjacency
 		 */
 		if (iface->dr == nbr || iface->bdr == nbr ||
 		    iface->state & IF_STA_DRORBDR)
@@ -488,15 +485,13 @@ nbr_adj_ok(struct nbr *nbr)
 int
 nbr_act_eval(struct nbr *nbr)
 {
-	log_debug("nbr_act_eval: neighbor ID %s", inet_ntoa(nbr->id));
-
 	if (!nbr_adj_ok(nbr)) {
 		nbr->state = NBR_STA_2_WAY;
 		return (0);
 	}
 
 	nbr->state = NBR_STA_XSTRT;
-	nbr->master = true;
+	nbr->master = 1;
 	nbr->dd_seq_num++;	/* as per RFC */
 	nbr->dd_pending = 0;
 	/* initial db negotiation */
@@ -508,8 +503,6 @@ nbr_act_eval(struct nbr *nbr)
 int
 nbr_act_snapshot(struct nbr *nbr)
 {
-	log_debug("nbr_act_snapshot: neighbor ID %s", inet_ntoa(nbr->id));
-
 	stop_db_tx_timer(nbr);
 	nbr_start_adj_timer(nbr);
 
@@ -521,8 +514,6 @@ nbr_act_snapshot(struct nbr *nbr)
 int
 nbr_act_exchange_done(struct nbr *nbr)
 {
-	log_debug("nbr_act_exchange_done: neighbor ID %s", inet_ntoa(nbr->id));
-
 	if (nbr->master)
 		stop_db_tx_timer(nbr);
 
@@ -543,8 +534,6 @@ nbr_act_exchange_done(struct nbr *nbr)
 int
 nbr_act_adj_ok(struct nbr *nbr)
 {
-	log_debug("nbr_act_adj_ok: neighbor ID %s", inet_ntoa(nbr->id));
-
 	if (nbr_adj_ok(nbr)) {
 		if (nbr->state == NBR_STA_2_WAY)
 			return (nbr_act_eval(nbr));
@@ -559,8 +548,6 @@ nbr_act_adj_ok(struct nbr *nbr)
 int
 nbr_act_restart_dd(struct nbr *nbr)
 {
-	log_debug("nbr_act_restart_dd: neighbor ID %s", inet_ntoa(nbr->id));
-
 	nbr_act_clear_lists(nbr);
 
 	if (!nbr_adj_ok(nbr)) {
@@ -569,7 +556,7 @@ nbr_act_restart_dd(struct nbr *nbr)
 	}
 
 	nbr->state = NBR_STA_XSTRT;
-	nbr->master = true;
+	nbr->master = 1;
 	nbr->dd_seq_num += arc4random() & 0xffff;
 	nbr->dd_pending = 0;
 
@@ -584,8 +571,6 @@ nbr_act_delete(struct nbr *nbr)
 {
 	struct timeval	tv;
 
-	log_debug("nbr_act_delete: neighbor ID %s", inet_ntoa(nbr->id));
-
 	/* stop timers */
 	if (nbr_stop_itimer(nbr)) {
 		log_warnx("nbr_act_delete: error removing inactivity timer, "
@@ -596,6 +581,8 @@ nbr_act_delete(struct nbr *nbr)
 	/* clear dr and bdr */
 	nbr->dr.s_addr = 0;
 	nbr->bdr.s_addr = 0;
+
+	nbr->crypt_seq_num = 0;
 
 	/* schedule kill timer */
 	timerclear(&tv);
@@ -612,8 +599,6 @@ nbr_act_delete(struct nbr *nbr)
 int
 nbr_act_clear_lists(struct nbr *nbr)
 {
-	log_debug("nbr_act_clear_lists: neighbor ID %s", inet_ntoa(nbr->id));
-
 	if (stop_db_tx_timer(nbr)) {
 		log_warnx("nbr_act_delete: error removing db_tx_timer, "
 		    "neighbor ID %s", inet_ntoa(nbr->id));

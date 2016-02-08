@@ -1,4 +1,4 @@
-.\"	$OpenBSD: su.1,v 1.21 2005/01/22 16:29:40 jmc Exp $
+.\"	$OpenBSD: su.1,v 1.23 2005/04/18 21:23:24 jmc Exp $
 .\"
 .\" Copyright (c) 1988, 1990 The Regents of the University of California.
 .\" All rights reserved.
@@ -231,25 +231,38 @@ Same as
 .Ev LOGNAME .
 .El
 .Sh EXAMPLES
-.Bl -tag -width 5n -compact
-.It Li "$ su bin -c makewhatis"
-Runs the command
-.Li makewhatis
+Run the command
+.Dq makewhatis
 as user
-.Li bin .
+.Dq bin .
 You will be asked for bin's password unless your real UID is 0.
 .Pp
-.It Li "$ su bin -c 'makewhatis /usr/local/man'"
+.Dl $ su bin -c makewhatis
+.Pp
 Same as above, but the target command consists of more than a
-single word.
+single word:
 .Pp
-.It Li "$ su -l foo"
+.Dl $ su bin -c 'makewhatis /usr/local/man'
+.Pp
+Same as above, but the target command is run with the resource
+limits of the login class
+.Dq staff .
+Note that the first
+.Fl c
+option applies to
+.Nm
+while the second is an argument to the shell.
+.Pp
+.Dl $ su -c staff bin -c 'makewhatis /usr/local/man'
+.Pp
 Pretend a login for user
-.Li foo .
+.Dq foo :
 .Pp
-.It Li "$ su -a skey -l foo"
-Same as above, but use S/Key for authentication.
-.El
+.Dl $ su -l foo
+.Pp
+Same as above, but use S/Key for authentication:
+.Pp
+.Dl $ su -a skey -l foo
 .Sh SEE ALSO
 .Xr csh 1 ,
 .Xr kinit 1 ,

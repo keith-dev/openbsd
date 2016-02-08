@@ -1,4 +1,4 @@
-/*	$OpenBSD: rde.h,v 1.63 2005/03/11 12:54:20 claudio Exp $ */
+/*	$OpenBSD: rde.h,v 1.70 2005/08/10 08:34:06 claudio Exp $ */
 
 /*
  * Copyright (c) 2003, 2004 Claudio Jeker <claudio@openbsd.org> and
@@ -59,6 +59,8 @@ struct rde_peer {
 	struct uplist_prefix		 withdraws;
 	struct uplist_attr		 updates6;
 	struct uplist_prefix		 withdraws6;
+	struct capabilities		 capa_announced;
+	struct capabilities		 capa_received;
 	u_int32_t			 prefix_cnt;
 	u_int32_t			 remote_bgpid;
 	u_int32_t			 up_pcnt;
@@ -158,10 +160,12 @@ struct rde_aspath {
 	struct rde_peer			*peer;
 	struct aspath			*aspath;
 	struct nexthop			*nexthop;	/* may be NULL */
-	char				 pftable[PFTABLE_LEN];
 	u_int32_t			 med;		/* multi exit disc */
 	u_int32_t			 lpref;		/* local pref */
-	u_int16_t			 flags;	/* internally used */
+	u_int32_t			 weight;	/* low prio lpref */
+	u_int16_t			 rtlabelid;	/* route label id */
+	u_int16_t			 pftableid;	/* pf table id */
+	u_int16_t			 flags;		/* internally used */
 	u_int16_t			 prefix_cnt; /* # of prefixes */
 	u_int16_t			 active_cnt; /* # of active prefixes */
 	u_int8_t			 origin;
@@ -236,7 +240,7 @@ struct prefix {
 /* rde.c */
 void		 rde_send_kroute(struct prefix *, struct prefix *);
 void		 rde_send_nexthop(struct bgpd_addr *, int);
-void		 rde_send_pftable(const char *, struct bgpd_addr *,
+void		 rde_send_pftable(u_int16_t, struct bgpd_addr *,
 		     u_int8_t, int);
 void		 rde_send_pftable_commit(void);
 
@@ -248,6 +252,7 @@ int		 rde_decisionflags(void);
 /* rde_attr.c */
 int		 attr_write(void *, u_int16_t, u_int8_t, u_int8_t, void *,
 		     u_int16_t);
+int		 attr_optlen(struct attr *);
 void		 attr_optcopy(struct rde_aspath *, struct rde_aspath *);
 int		 attr_optadd(struct rde_aspath *, u_int8_t, u_int8_t,
 		     void *, u_int16_t);
@@ -321,13 +326,15 @@ int		 nexthop_compare(struct nexthop *, struct nexthop *);
 void		 prefix_evaluate(struct prefix *, struct pt_entry *);
 void		 up_init(struct rde_peer *);
 void		 up_down(struct rde_peer *);
+void		 up_dump_upcall(struct pt_entry *, void *);
 void		 up_generate_updates(struct rde_peer *,
 		     struct prefix *, struct prefix *);
 void		 up_generate_default(struct rde_peer *, sa_family_t);
 int		 up_dump_prefix(u_char *, int, struct uplist_prefix *,
 		     struct rde_peer *);
 int		 up_dump_attrnlri(u_char *, int, struct rde_peer *);
-void		 up_dump_upcall(struct pt_entry *, void *);
+char		*up_dump_mp_unreach(u_char *, u_int16_t *, struct rde_peer *);
+char		*up_dump_mp_reach(u_char *, u_int16_t *, struct rde_peer *);
 
 /* rde_prefix.c */
 void		 pt_init(void);
@@ -343,8 +350,7 @@ void		 pt_dump(void (*)(struct pt_entry *, void *), void *,
 
 /* rde_filter.c */
 enum filter_actions rde_filter(struct rde_peer *, struct rde_aspath *,
-    struct bgpd_addr *, u_int8_t, enum directions);
-void		 rde_free_set(struct filter_set_head *);
+    struct bgpd_addr *, u_int8_t, struct rde_peer *, enum directions);
 void		 rde_apply_set(struct rde_aspath *, struct filter_set_head *,
 		     sa_family_t, struct rde_peer *, enum directions);
 int		 rde_filter_community(struct rde_aspath *, int, int);

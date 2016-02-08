@@ -1,4 +1,4 @@
-/*	$OpenBSD: locore.s,v 1.82 2005/02/10 04:06:01 weingart Exp $	*/
+/*	$OpenBSD: locore.s,v 1.91 2005/07/18 14:55:49 mickey Exp $	*/
 /*	$NetBSD: locore.s,v 1.145 1996/05/03 19:41:19 christos Exp $	*/
 
 /*-
@@ -736,8 +736,29 @@ NENTRY(proc_trampoline)
  * Signal trampoline; copied to top of user stack.
  */
 NENTRY(sigcode)
-	call	*SIGF_HANDLER(%esp)
-	leal	SIGF_SC(%esp),%eax	# scp (the call may have clobbered the
+	movl	SIGF_FPSTATE(%esp),%esi	# FPU state area if need saving
+	testl	%esi,%esi
+	jz	1f
+	fnsave	(%esi)
+1:	call	*SIGF_HANDLER(%esp)
+	testl	%esi,%esi
+	jz	2f
+	frstor	(%esi)
+	jmp	2f
+
+	.globl  _C_LABEL(sigcode_xmm)
+_C_LABEL(sigcode_xmm):
+	movl	SIGF_FPSTATE(%esp),%esi	# FPU state area if need saving
+	testl	%esi,%esi
+	jz	1f
+	fxsave	(%esi)
+	fninit
+1:	call	*SIGF_HANDLER(%esp)
+	testl	%esi,%esi
+	jz	2f
+	fxrstor	(%esi)
+
+2:	leal	SIGF_SC(%esp),%eax	# scp (the call may have clobbered the
 					# copy at SIGF_SCP(%esp))
 	pushl	%eax
 	pushl	%eax			# junk to fake return address
@@ -1298,6 +1319,8 @@ ENTRY(copyinstr)
 
 1:	decl	%edx
 	jz	2f
+	cmpl    $VM_MAXUSER_ADDRESS,%esi
+	jae     _C_LABEL(copystr_fault)
 	lodsb
 	stosb
 	testb	%al,%al
@@ -1596,40 +1619,34 @@ ENTRY(idle)
 
 	movl	$IPL_NONE,CPL		# spl0()
 	call	_C_LABEL(Xspllower)	# process pending interrupts
+	jmp	_C_LABEL(idle_start)
 
 ENTRY(idle_loop)
-	cmpl	$0,_C_LABEL(whichqs)
-	jnz	_C_LABEL(idle_exit)
 #if NAPM > 0
 	call	_C_LABEL(apm_cpu_idle)
-	cmpl	$0,_C_LABEL(apm_dobusy)
-	je	1f
-	call	_C_LABEL(apm_cpu_busy)
-1:
-#endif
-#if NPCTR > 0 && NAPM == 0
+#else
+#if NPCTR > 0
 	addl	$1,_C_LABEL(pctr_idlcnt)
 	adcl	$0,_C_LABEL(pctr_idlcnt)+4
-#else
+#endif
+	sti
 	hlt
 #endif
-	jmp	_C_LABEL(idle_loop)
+ENTRY(idle_start)
+	cli
+	cmpl	$0,_C_LABEL(whichqs)
+	jz	_C_LABEL(idle_loop)
 
 ENTRY(idle_exit)
 	movl	$IPL_HIGH,CPL		# splhigh
+	sti
 #if defined(MULTIPROCESSOR) || defined(LOCKDEBUG)	
 	call	_C_LABEL(sched_lock_idle)
 #endif
-#if 0
-	GET_CPUINFO(%ebx)
-	leal	CPU_INFO_NAME(%ebx),%ebx
-	pushl	%ebx
-	pushl	$1f
-	call	_C_LABEL(printf)
-	addl	$8,%esp
+#if NAPM > 0
+	call	_C_LABEL(apm_cpu_busy)
 #endif
 	jmp	switch_search
-1:	.asciz	"%s: unidle\n"
 		
 #ifdef DIAGNOSTIC
 NENTRY(switch_error)

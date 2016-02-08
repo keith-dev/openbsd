@@ -1,5 +1,5 @@
 # ex:ts=8 sw=4:
-# $OpenBSD: Delete.pm,v 1.21 2005/02/09 11:07:13 espie Exp $
+# $OpenBSD: Delete.pm,v 1.27 2005/08/22 11:34:52 espie Exp $
 #
 # Copyright (c) 2003-2004 Marc Espie <espie@openbsd.org>
 #
@@ -22,10 +22,11 @@ use OpenBSD::Error;
 use OpenBSD::Vstat;
 use OpenBSD::PackageInfo;
 use OpenBSD::RequiredBy;
+use File::Basename;
 
 sub keep_old_files
 {
-	my ($plist, $dir) = @_;
+	my ($state, $plist, $dir) = @_;
 	my $p = new OpenBSD::PackingList;
 	for my $i (qw(cvstags name no-default-conflict pkgcfl conflict) ) {
 		if (defined $plist->{$i}) {
@@ -40,6 +41,24 @@ sub keep_old_files
 		next unless $i->IsFile();
 		if (defined $i->{stillaround}) {
 			delete $i->{stillaround};
+			if ($state->{replacing}) {
+				require File::Temp;
+
+				my $n = $i->fullname();
+
+				my ($fh, $j) = File::Temp::mkstemp("$n.XXXXXXXX");
+				close $fh;
+				if (rename($n, $j)) {
+					print "Renaming $n to $j\n";
+					if ($i->{name} !~ m|^/| && $i->cwd() ne '.') {
+						my $c = $i->cwd();
+						$j =~ s|^\Q$c\E/||;
+					}
+					$i->{name} = $j;
+				} else {
+					print "Bad rename $n to $j: $!\n";
+				}
+			}
 			push(@{$p->{items}}, $i);
 		}
 	}
@@ -90,11 +109,31 @@ sub validate_plist($$)
 		my $s = OpenBSD::Vstat::remove($fname, $item->{size});
 		next unless defined $s;
 		if ($s->{ro}) {
-			Warn "Error: ", $s->{dev}, " is read-only ($fname)\n";
+			if ($state->{very_verbose} or ++($s->{problems}) < 4) {
+				Warn "Error: ", $s->{dev}, 
+				    " is read-only ($fname)\n";
+			} elsif ($s->{problems} == 4) {
+				Warn "Error: ... more files can't be removed from ",
+					$s->{dev}, "\n";
+			}
 			$problems++;
 		}
 	}
+	my $dir = installed_info($plist->pkgname());
+	for my $i (info_names()) {
+		my $fname = $dir.$i;
+		if (-e $fname) {
+			my $size = (stat _)[7];
+			my $s = OpenBSD::Vstat::remove($fname, $size);
+			next unless defined $s;
+			if ($s->{ro}) {
+				Warn "Error: ", $s->{dev}, " is read-only ($fname)\n";
+				$problems++;
+			}
+		}
+	}
 	Fatal "fatal issues" if $problems;
+	$totsize = 1 if $totsize == 0;
 	$plist->{totsize} = $totsize;
 }
 
@@ -105,8 +144,8 @@ sub remove_packing_info
 	for my $fname (info_names()) {
 		unlink($dir.$fname);
 	}
-	OpenBSD::RequiredBy->erase($dir);
-	OpenBSD::Requiring->erase($dir);
+	OpenBSD::RequiredBy->forget($dir);
+	OpenBSD::Requiring->forget($dir);
 	rmdir($dir) or Fatal "Can't finish removing directory $dir: $!";
 }
 
@@ -187,7 +226,7 @@ sub delete_plist
 		
 	return if $state->{not};
 	if ($state->{baddelete}) {
-	    my $borked = keep_old_files($plist, $dir);
+	    my $borked = keep_old_files($state, $plist, $dir);
 	    $state->print("Files kept as $borked package\n");
 	    delete $state->{baddelete};
 	}
@@ -441,7 +480,10 @@ sub delete
 	}
 	return if $state->{not};
 	return unless -e $realname;
-	if ($state->{extra}) {
+	if ($state->{replacing}) {
+		$state->print("Remember to update $realname\n");
+		$self->mark_dir($state, dirname($name));
+	} elsif ($state->{extra}) {
 		unlink($realname) or 
 		    print "problem deleting extra file $realname\n";
 	} else {
@@ -457,6 +499,7 @@ sub delete
 	my ($self, $state) = @_;
 	return unless $state->{extra};
 	my $realname = $state->{destdir}.$self->fullname();
+	return if $state->{replacing};
 	if ($state->{extra}) {
 		$self->SUPER::delete($state);
 	} else {

@@ -1,4 +1,4 @@
-/*	$OpenBSD: parser.c,v 1.6 2005/03/15 22:09:43 claudio Exp $ */
+/*	$OpenBSD: parser.c,v 1.9 2005/06/16 18:48:43 henning Exp $ */
 
 /*
  * Copyright (c) 2004 Esben Norby <norby@openbsd.org>
@@ -82,11 +82,15 @@ static const struct token t_show_iface[] = {
 };
 
 static const struct token t_show_db[] = {
-	{NOTOKEN,	"",		NONE,		NULL},
-	{KEYWORD,	"area",		SHOW_DBBYAREA,	t_show_area},
-/*	{KEYWORD,	"router",	NONE,		NULL},
-	{KEYWORD,	"network",	NONE,		NULL}, */
-	{ENDTOKEN,	"",		NONE,		NULL}
+	{NOTOKEN,	"",			NONE,		NULL},
+	{KEYWORD,	"area",			SHOW_DBBYAREA,	t_show_area},
+	{KEYWORD,	"asbr",			SHOW_DBASBR,	NULL},
+	{KEYWORD,	"external",		SHOW_DBEXT,	NULL},
+	{KEYWORD,	"network",		SHOW_DBNET,	NULL},
+	{KEYWORD,	"router",		SHOW_DBRTR,	NULL},
+	{KEYWORD,	"self-originated",	SHOW_DBSELF,	NULL},
+	{KEYWORD,	"summary",		SHOW_DBSUM,	NULL},
+	{ENDTOKEN,	"",			NONE,		NULL}
 };
 
 static const struct token t_show_area[] = {
@@ -108,6 +112,7 @@ static const struct token t_show_rib[] = {
 
 static const struct token t_show_fib[] = {
 	{NOTOKEN,	"",		NONE,			NULL},
+	{KEYWORD,	"interface",	SHOW_FIB_IFACE,		t_show_iface},
 	{FLAG,		"connected",	F_CONNECTED,		t_show_fib},
 	{FLAG,		"static",	F_STATIC,		t_show_fib},
 	{FLAG,		"ospf",		F_OSPFD_INSERTED,	t_show_fib},
@@ -288,7 +293,7 @@ parse_prefix(const char *word, struct in_addr *addr, u_int8_t *prefixlen)
 		if ((bits = inet_net_pton(AF_INET, word,
 		    &ina, sizeof(ina))) == -1)
 			return (0);
-		addr->s_addr = ina.s_addr & htonl(0xffffffff << (32 - bits));
+		addr->s_addr = ina.s_addr & htonl(prefixlen2mask(bits));
 		*prefixlen = bits;
 		return (1);
 	} else {
@@ -297,4 +302,14 @@ parse_prefix(const char *word, struct in_addr *addr, u_int8_t *prefixlen)
 	}
 
 	return (0);
+}
+
+/* XXX local copy from kroute.c, should go to shared file */
+in_addr_t
+prefixlen2mask(u_int8_t prefixlen)
+{
+	if (prefixlen == 0)
+		return (0);
+
+	return (0xffffffff << (32 - prefixlen));
 }

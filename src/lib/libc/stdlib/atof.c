@@ -1,3 +1,4 @@
+/*	$OpenBSD: atof.c,v 1.5 2005/08/08 08:05:36 espie Exp $ */
 /*
  * Copyright (c) 1988 The Regents of the University of California.
  * All rights reserved.
@@ -27,15 +28,10 @@
  * SUCH DAMAGE.
  */
 
-#if defined(LIBC_SCCS) && !defined(lint)
-static char *rcsid = "$OpenBSD: atof.c,v 1.3 2003/06/02 20:18:37 millert Exp $";
-#endif /* LIBC_SCCS and not lint */
-
 #include <stdlib.h>
 
 double
-atof(ascii)
-	const char *ascii;
+atof(const char *ascii)
 {
 	return(strtod(ascii, (char **)NULL));
 }

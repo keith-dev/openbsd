@@ -1,4 +1,4 @@
-/* $OpenBSD: machine.c,v 1.47 2004/12/06 15:57:04 markus Exp $	 */
+/* $OpenBSD: machine.c,v 1.49 2005/06/17 09:40:48 markus Exp $	 */
 
 /*-
  * Copyright (c) 1994 Thorsten Lockert <tholo@sigmasoft.com>
@@ -81,7 +81,7 @@ static char header[] =
 #define UNAME_START 6
 
 #define Proc_format \
-	"%5d %-8.8s %3d %4d %5s %5s %-8s %-6.6s %6s %5.2f%% %.11s"
+	"%5d %-8.8s %3d %4d %5s %5s %-8s %-6.6s %6s %5.2f%% %.51s"
 
 /* process state names for the "STATE" column of the display */
 /*
@@ -96,9 +96,9 @@ char	*state_abbrev[] = {
 static int      stathz;
 
 /* these are for calculating cpu state percentages */
-static long     cp_time[CPUSTATES];
-static long     cp_old[CPUSTATES];
-static long     cp_diff[CPUSTATES];
+static int64_t     **cp_time;
+static int64_t     **cp_old;
+static int64_t     **cp_diff;
 
 /* these are for detailing the process states */
 int process_states[8];
@@ -109,7 +109,7 @@ char *procstatenames[] = {
 };
 
 /* these are for detailing the cpu states */
-int cpu_states[CPUSTATES];
+int64_t *cpu_states;
 char *cpustatenames[] = {
 	"user", "nice", "system", "interrupt", "idle", NULL
 };
@@ -162,12 +162,28 @@ int
 machine_init(struct statics *statics)
 {
 	size_t size = sizeof(ncpu);
-	int mib[2], pagesize;
+	int mib[2], pagesize, cpu;
 
 	mib[0] = CTL_HW;
 	mib[1] = HW_NCPU;
 	if (sysctl(mib, 2, &ncpu, &size, NULL, 0) == -1)
 		return (-1);
+	cpu_states = malloc(ncpu * CPUSTATES * sizeof(int64_t));
+	if (cpu_states == NULL)
+		err(1, NULL);
+	cp_time = malloc(ncpu * sizeof(int64_t *));
+	cp_old  = malloc(ncpu * sizeof(int64_t *));
+	cp_diff = malloc(ncpu * sizeof(int64_t *));
+	if (cp_time == NULL || cp_old == NULL || cp_diff == NULL)
+		err(1, NULL);
+	for (cpu = 0; cpu < ncpu; cpu++) {
+		cp_time[cpu] = malloc(CPUSTATES * sizeof(int64_t));
+		cp_old[cpu] = malloc(CPUSTATES * sizeof(int64_t));
+		cp_diff[cpu] = malloc(CPUSTATES * sizeof(int64_t));
+		if (cp_time[cpu] == NULL || cp_old[cpu] == NULL ||
+		    cp_diff[cpu] == NULL)
+			err(1, NULL);
+	}
 
 	stathz = getstathz();
 	if (stathz == -1)
@@ -216,16 +232,37 @@ get_system_info(struct system_info *si)
 {
 	static int sysload_mib[] = {CTL_VM, VM_LOADAVG};
 	static int vmtotal_mib[] = {CTL_VM, VM_METER};
-	static int cp_time_mib[] = {CTL_KERN, KERN_CPTIME};
 	struct loadavg sysload;
 	struct vmtotal vmtotal;
 	double *infoloadp;
 	size_t size;
 	int i;
+	int64_t *tmpstate;
 
-	size = sizeof(cp_time);
-	if (sysctl(cp_time_mib, 2, &cp_time, &size, NULL, 0) < 0)
-		warn("sysctl kern.cp_time failed");
+	if (ncpu > 1) {
+		size = CPUSTATES * sizeof(int64_t);
+		for (i = 0; i < ncpu; i++) {
+			int cp_time_mib[] = {CTL_KERN, KERN_CPTIME2, i};
+			tmpstate = cpu_states + (CPUSTATES * i);
+			if (sysctl(cp_time_mib, 3, cp_time[i], &size, NULL, 0) < 0)
+				warn("sysctl kern.cp_time2 failed");
+			/* convert cp_time2 counts to percentages */
+			(void) percentages(CPUSTATES, tmpstate, cp_time[i],
+			    cp_old[i], cp_diff[i]);
+		}
+	} else {
+		int cp_time_mib[] = {CTL_KERN, KERN_CPTIME};
+		long cp_time_tmp[CPUSTATES];
+
+		size = sizeof(cp_time_tmp);
+		if (sysctl(cp_time_mib, 2, cp_time_tmp, &size, NULL, 0) < 0)
+			warn("sysctl kern.cp_time failed");
+		for (i = 0; i < CPUSTATES; i++)
+			cp_time[0][i] = cp_time_tmp[i];
+		/* convert cp_time counts to percentages */
+		(void) percentages(CPUSTATES, cpu_states, cp_time[0],
+		    cp_old[0], cp_diff[0]);
+	}
 
 	size = sizeof(sysload);
 	if (sysctl(sysload_mib, 2, &sysload, &size, NULL, 0) < 0)
@@ -234,8 +271,6 @@ get_system_info(struct system_info *si)
 	for (i = 0; i < 3; i++)
 		*infoloadp++ = ((double) sysload.ldavg[i]) / sysload.fscale;
 
-	/* convert cp_time counts to percentages */
-	(void) percentages(CPUSTATES, cpu_states, cp_time, cp_old, cp_diff);
 
 	/* get total -- systemwide main memory usage structure */
 	size = sizeof(vmtotal);
@@ -380,12 +415,48 @@ state_abbr(struct kinfo_proc2 *pp)
 	static char buf[10];
 
 	if (ncpu > 1 && pp->p_cpuid != KI_NOCPU)
-		snprintf(buf, sizeof buf, "%s/%d",
+		snprintf(buf, sizeof buf, "%s/%llu",
 		    state_abbrev[(unsigned char)pp->p_stat], pp->p_cpuid);
 	else
 		snprintf(buf, sizeof buf, "%s",
 		    state_abbrev[(unsigned char)pp->p_stat]);
 	return buf;
+}
+
+char *
+format_comm(struct kinfo_proc2 *kp)
+{
+#define ARG_SIZE 60
+	static char **s, buf[ARG_SIZE];
+	size_t siz = 100;
+	char **p;
+	int mib[4];
+	extern int show_args;
+
+	if (!show_args)
+		return (kp->p_comm);
+
+	for (;; siz *= 2) {
+		if ((s = realloc(s, siz)) == NULL)
+			err(1, NULL);
+		mib[0] = CTL_KERN;
+		mib[1] = KERN_PROC_ARGS;
+		mib[2] = kp->p_pid;
+		mib[3] = KERN_PROC_ARGV;
+		if (sysctl(mib, 4, s, &siz, NULL, 0) == 0)
+			break;
+		if (errno != ENOMEM)
+			return (kp->p_comm);
+	}
+	buf[0] = '\0';
+	for (p = s; *p != NULL; p++) {
+		if (p != s)
+			strlcat(buf, " ", sizeof(buf));
+		strlcat(buf, *p, sizeof(buf));
+	}
+	if (buf[0] == '\0')
+		return (kp->p_comm);
+	return (buf);
 }
 
 char *
@@ -436,7 +507,7 @@ format_next_process(caddr_t handle, char *(*get_userid)(uid_t))
 	    (pp->p_stat == SSLEEP && pp->p_slptime > maxslp) ?
 	    "idle" : state_abbr(pp),
 	    p_wait, format_time(cputime), 100.0 * pct,
-	    printable(pp->p_comm));
+	    printable(format_comm(pp)));
 
 	/* return the result */
 	return (fmt);

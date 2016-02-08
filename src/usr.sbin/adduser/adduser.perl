@@ -1,6 +1,6 @@
 #!/usr/bin/perl
 #
-#	$OpenBSD: adduser.perl,v 1.48 2005/02/24 16:45:02 millert Exp $
+#	$OpenBSD: adduser.perl,v 1.50 2005/08/31 17:28:15 kettenis Exp $
 #
 # Copyright (c) 1995-1996 Wolfram Schneider <wosch@FreeBSD.org>. Berlin.
 # All rights reserved.
@@ -91,7 +91,7 @@ sub variables {
     $etc_login_conf = "/etc/login.conf";
     @pwd_mkdb = ("pwd_mkdb", "-p");	# program for building passwd database
     $encryptionmethod = "auto";
-    $rcsid = '$OpenBSD: adduser.perl,v 1.48 2005/02/24 16:45:02 millert Exp $';
+    $rcsid = '$OpenBSD: adduser.perl,v 1.50 2005/08/31 17:28:15 kettenis Exp $';
 
     # List of directories where shells located
     @path = ('/bin', '/usr/bin', '/usr/local/bin');
@@ -100,7 +100,7 @@ sub variables {
 
     @encryption_methods = ('auto', 'blowfish', 'md5', 'des', 'old');
 
-    $defaultshell = 'sh';	# defaultshell if not empty
+    $defaultshell = 'ksh';	# defaultshell if not empty
     $group_uniq = 'USER';
     $defaultgroup = $group_uniq;# login groupname, $group_uniq means username
     $defaultclass = 'default';  # default user login class
@@ -148,22 +148,11 @@ sub variables {
 }
 
 sub login_conf_read {
-     local($cont);
-
-     print "Reading $etc_login_conf\n" if $verbose;
-     open(S, $etc_login_conf) || die "$etc_login_conf: $!\n";
-
-     $cont = 0;
-     while(<S>) {
+     foreach (`getcap -f $etc_login_conf -a -s localcipher`) {
 	chomp;
-	s/^\s*//;
-        next if m/^(#|$)/;
-	if (!$cont && /^([^:]+):/) {
-	    push(@login_classes, split(/\|/, $1));
-	}
-	$cont = /\\$/;
-    }
-    close(S);
+	s/:.*//;
+	push(@login_classes, $_);
+     }
 }
 
 # read shell database, see also: shells(5)

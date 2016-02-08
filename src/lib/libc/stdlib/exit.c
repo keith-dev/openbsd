@@ -1,3 +1,4 @@
+/*	$OpenBSD: exit.c,v 1.11 2005/08/08 08:05:36 espie Exp $ */
 /*-
  * Copyright (c) 1990 The Regents of the University of California.
  * All rights reserved.
@@ -27,10 +28,6 @@
  * SUCH DAMAGE.
  */
 
-#if defined(LIBC_SCCS) && !defined(lint)
-static char *rcsid = "$OpenBSD: exit.c,v 1.9 2003/06/02 20:18:37 millert Exp $";
-#endif /* LIBC_SCCS and not lint */
-
 #include <sys/types.h>
 #include <sys/mman.h>
 #include <stdlib.h>
@@ -51,11 +48,10 @@ int     __isthreaded    = 0;
  * Exit, flushing stdio buffers if necessary.
  */
 void
-exit(status)
-	int status;
+exit(int status)
 {
-	register struct atexit *p, *q;
-	register int n, pgsize = getpagesize();
+	struct atexit *p, *q;
+	int n, pgsize = getpagesize();
 
 	if (!__atexit_invalid) {
 		p = __atexit;

@@ -1,4 +1,4 @@
-/*	$OpenBSD: ping.c,v 1.70 2005/01/19 13:40:47 mpf Exp $	*/
+/*	$OpenBSD: ping.c,v 1.72 2005/09/01 17:59:13 otto Exp $	*/
 /*	$NetBSD: ping.c,v 1.20 1995/08/11 22:37:58 cgd Exp $	*/
 
 /*
@@ -43,7 +43,7 @@ static const char copyright[] =
 #if 0
 static char sccsid[] = "@(#)ping.c	8.1 (Berkeley) 6/5/93";
 #else
-static const char rcsid[] = "$OpenBSD: ping.c,v 1.70 2005/01/19 13:40:47 mpf Exp $";
+static const char rcsid[] = "$OpenBSD: ping.c,v 1.72 2005/09/01 17:59:13 otto Exp $";
 #endif
 #endif /* not lint */
 
@@ -107,18 +107,19 @@ struct tvi {
 
 /* various options */
 int options;
-#define	F_FLOOD		0x001
-#define	F_INTERVAL	0x002
-#define	F_NUMERIC	0x004
-#define	F_PINGFILLED	0x008
-#define	F_QUIET		0x010
-#define	F_RROUTE	0x020
-#define	F_SO_DEBUG	0x040
-#define	F_SO_DONTROUTE	0x080
-#define	F_VERBOSE	0x100
-#define	F_SADDR		0x200
-#define	F_HDRINCL	0x400
-#define	F_TTL		0x800
+#define	F_FLOOD		0x0001
+#define	F_INTERVAL	0x0002
+#define	F_NUMERIC	0x0004
+#define	F_PINGFILLED	0x0008
+#define	F_QUIET		0x0010
+#define	F_RROUTE	0x0020
+#define	F_SO_DEBUG	0x0040
+#define	F_SO_DONTROUTE	0x0080
+#define	F_VERBOSE	0x0100
+#define	F_SADDR		0x0200
+#define	F_HDRINCL	0x0400
+#define	F_TTL		0x0800
+#define	F_SO_JUMBO	0x1000
 
 /* multicast options */
 int moptions;
@@ -157,9 +158,9 @@ struct itimerval interstr;	/* interval structure for use with setitimer */
 /* timing */
 int timing;			/* flag to do timing */
 unsigned int maxwait = MAXWAIT_DEFAULT;	/* max seconds to wait for response */
-quad_t tmin = 999999999;	/* minimum round trip time in millisec */
-quad_t tmax = 0;		/* maximum round trip time in millisec */
-quad_t tsum = 0;		/* sum of all times in millisec, for doing average */
+quad_t tmin = 999999999;	/* minimum round trip time in usec */
+quad_t tmax = 0;		/* maximum round trip time in usec */
+quad_t tsum = 0;		/* sum of all times in usec, for doing average */
 quad_t tsumsq = 0;		/* sum of all times squared, for std. dev. */
 
 int bufspace = IP_MAXPACKET;
@@ -210,7 +211,8 @@ main(int argc, char *argv[])
 
 	preload = 0;
 	datap = &outpack[8 + sizeof(struct tvi)];
-	while ((ch = getopt(argc, argv, "DI:LRS:c:dfi:l:np:qrs:T:t:vw:")) != -1)
+	while ((ch = getopt(argc, argv,
+	    "DI:LRS:c:dfi:jl:np:qrs:T:t:vw:")) != -1)
 		switch(ch) {
 		case 'c':
 			npackets = strtonum(optarg, 1, INT_MAX, &errstr);
@@ -257,6 +259,9 @@ main(int argc, char *argv[])
 				interval = 0.01;
 
 			options |= F_INTERVAL;
+			break;
+		case 'j':
+			options |= F_SO_JUMBO;
 			break;
 		case 'L':
 			moptions |= MULTICAST_NOLOOP;
@@ -379,6 +384,9 @@ main(int argc, char *argv[])
 		    sizeof(hold));
 	if (options & F_SO_DONTROUTE)
 		(void)setsockopt(s, SOL_SOCKET, SO_DONTROUTE, (char *)&hold,
+		    sizeof(hold));
+	if (options & F_SO_JUMBO)
+		(void)setsockopt(s, SOL_SOCKET, SO_JUMBO, (char *)&hold,
 		    sizeof(hold));
 
 	if (options & F_TTL) {
@@ -1336,7 +1344,7 @@ void
 usage(void)
 {
 	(void)fprintf(stderr,
-	    "usage: ping [-DdfLnqRrv] [-c count] [-I ifaddr] [-i wait]\n"
+	    "usage: ping [-DdfjLnqRrv] [-c count] [-I ifaddr] [-i wait]\n"
 	    "\t[-l preload] [-p pattern] [-s packetsize] [-T tos] [-t ttl]\n"
 	    "\t[-w maxwait] host\n");
 	exit(1);

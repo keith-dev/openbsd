@@ -1,4 +1,4 @@
-/*	$OpenBSD: entries.c,v 1.25 2005/02/22 16:09:28 jfb Exp $	*/
+/*	$OpenBSD: entries.c,v 1.47 2005/08/22 08:53:12 joris Exp $	*/
 /*
  * Copyright (c) 2004 Jean-Francois Brousseau <jfb@openbsd.org>
  * All rights reserved.
@@ -24,21 +24,21 @@
  * ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include <sys/param.h>
 #include <sys/stat.h>
 
-#include <stdio.h>
+#include <errno.h>
 #include <fcntl.h>
+#include <stdio.h>
 #include <stdlib.h>
-#include <unistd.h>
 #include <string.h>
+#include <unistd.h>
 
-#include "log.h"
 #include "cvs.h"
+#include "log.h"
 
 
-#define CVS_ENTRIES_NFIELDS  6
-#define CVS_ENTRIES_DELIM   '/'
+#define CVS_ENTRIES_NFIELDS	6
+#define CVS_ENTRIES_DELIM	'/'
 
 
 /*
@@ -48,21 +48,38 @@
  * Returns a pointer to the CVSENTRIES file structure on success, or NULL
  * on failure.
  */
-CVSENTRIES*
+CVSENTRIES *
 cvs_ent_open(const char *dir, int flags)
 {
 	size_t len;
-	int exists;
-	char entpath[MAXPATHLEN], ebuf[128], mode[4];
+	int exists, nodir;
+	char cdpath[MAXPATHLEN], ebuf[CVS_ENT_MAXLINELEN], entpath[MAXPATHLEN];
+	char mode[4];
 	FILE *fp;
 	struct stat st;
 	struct cvs_ent *ent;
 	CVSENTRIES *ep;
 
 	exists = 0;
+	nodir = 1;
 	memset(mode, 0, sizeof(mode));
 
-	snprintf(entpath, sizeof(entpath), "%s/" CVS_PATH_ENTRIES, dir);
+	/*
+	 * Check if the CVS/ dir does exist. If it does,
+	 * maybe the Entries file was deleted by accident,
+	 * display error message. Else we might be doing a fresh
+	 * update or checkout of a module.
+	 */
+	len = cvs_path_cat(dir, CVS_PATH_CVSDIR, cdpath, sizeof(cdpath));
+	if (len >= sizeof(cdpath))
+		return (NULL);
+
+	if ((stat(cdpath, &st) == 0) && S_ISDIR(st.st_mode))
+		nodir = 0;	/* the CVS/ directory does exist */
+
+	len = cvs_path_cat(dir, CVS_PATH_ENTRIES, entpath, sizeof(entpath));
+	if (len >= sizeof(entpath))
+		return (NULL);
 
 	switch (flags & O_ACCMODE) {
 	case O_WRONLY:
@@ -84,8 +101,9 @@ cvs_ent_open(const char *dir, int flags)
 
 	fp = fopen(entpath, mode);
 	if (fp == NULL) {
-		cvs_log(LP_ERRNO, "cannot open %s for %s", entpath,
-		    mode[1] == '+' ? "writing" : "reading");
+		if (nodir == 0)
+			cvs_log(LP_ERRNO, "cannot open %s for %s", entpath,
+			    mode[1] == '+' ? "writing" : "reading");
 		return (NULL);
 	}
 
@@ -108,11 +126,11 @@ cvs_ent_open(const char *dir, int flags)
 	ep->cef_cur = NULL;
 	TAILQ_INIT(&(ep->cef_ent));
 
-	while (fgets(ebuf, sizeof(ebuf), fp) != NULL) {
+	while (fgets(ebuf, (int)sizeof(ebuf), fp) != NULL) {
 		len = strlen(ebuf);
 		if ((len > 0) && (ebuf[len - 1] == '\n'))
 			ebuf[--len] = '\0';
-		if (strcmp(ebuf, "D") == 0)
+		if ((ebuf[0] == 'D') && (ebuf[1] == '\0'))
 			break;
 		ent = cvs_ent_parse(ebuf);
 		if (ent == NULL)
@@ -133,7 +151,7 @@ cvs_ent_open(const char *dir, int flags)
 
 	(void)fclose(fp);
 
-	if (exists)
+	if (exists == 1)
 		ep->cef_flags |= CVS_ENTF_SYNC;
 
 	return (ep);
@@ -151,14 +169,12 @@ cvs_ent_close(CVSENTRIES *ep)
 {
 	struct cvs_ent *ent;
 
-	if ((ep->cef_flags & CVS_ENTF_WR) &&
+	if ((cvs_noexec == 0) && (ep->cef_flags & CVS_ENTF_WR) &&
 	    !(ep->cef_flags & CVS_ENTF_SYNC)) {
 		/* implicit sync with disk */
 		(void)cvs_ent_write(ep);
 	}
 
-	if (ep->cef_file != NULL)
-		(void)fclose(ep->cef_file);
 	if (ep->cef_path != NULL)
 		free(ep->cef_path);
 
@@ -243,6 +259,8 @@ cvs_ent_remove(CVSENTRIES *ef, const char *name)
 {
 	struct cvs_ent *ent;
 
+	cvs_log(LP_TRACE, "cvs_ent_remove(%s)", name);
+
 	ent = cvs_ent_get(ef, name);
 	if (ent == NULL)
 		return (-1);
@@ -270,14 +288,14 @@ cvs_ent_remove(CVSENTRIES *ef, const char *name)
  * <file>.
  * Returns a pointer to the cvs entry structure on success, or NULL on failure.
  */
-struct cvs_ent*
+struct cvs_ent *
 cvs_ent_get(CVSENTRIES *ef, const char *file)
 {
-	struct cvs_ent *ep;
+	struct cvs_ent *ent;
 
-	TAILQ_FOREACH(ep, &(ef->cef_ent), ce_list)
-		if (strcmp(ep->ce_name, file) == 0)
-			return (ep);
+	TAILQ_FOREACH(ent, &(ef->cef_ent), ce_list)
+		if (strcmp(ent->ce_name, file) == 0)
+			return (ent);
 
 	return (NULL);
 }
@@ -291,7 +309,7 @@ cvs_ent_get(CVSENTRIES *ef, const char *file)
  * will return the entry following the last one returned.
  * Returns a pointer to the cvs entry structure on success, or NULL on failure.
  */
-struct cvs_ent*
+struct cvs_ent *
 cvs_ent_next(CVSENTRIES *ef)
 {
 	if (ef->cef_cur == NULL)
@@ -313,7 +331,7 @@ cvs_ent_parse(const char *entry)
 {
 	int i;
 	char *fields[CVS_ENTRIES_NFIELDS], *buf, *sp, *dp;
-	struct cvs_ent *entp;
+	struct cvs_ent *ent;
 
 	buf = strdup(entry);
 	if (buf == NULL) {
@@ -336,54 +354,54 @@ cvs_ent_parse(const char *entry)
 		return (NULL);
 	}
 
-	entp = (struct cvs_ent *)malloc(sizeof(*entp));
-	if (entp == NULL) {
+	ent = (struct cvs_ent *)malloc(sizeof(*ent));
+	if (ent == NULL) {
 		cvs_log(LP_ERRNO, "failed to allocate CVS entry");
 		return (NULL);
 	}
-	memset(entp, 0, sizeof(*entp));
-	entp->ce_buf = buf;
-
-	entp->ce_rev = rcsnum_alloc();
-	if (entp->ce_rev == NULL) {
-		cvs_ent_free(entp);
-		return (NULL);
-	}
+	memset(ent, 0, sizeof(*ent));
+	ent->ce_buf = buf;
 
 	if (*fields[0] == '\0')
-		entp->ce_type = CVS_ENT_FILE;
+		ent->ce_type = CVS_ENT_FILE;
 	else if (*fields[0] == 'D')
-		entp->ce_type = CVS_ENT_DIR;
+		ent->ce_type = CVS_ENT_DIR;
 	else
-		entp->ce_type = CVS_ENT_NONE;
+		ent->ce_type = CVS_ENT_NONE;
 
-	entp->ce_status = CVS_ENT_REG;
-	entp->ce_name = fields[1];
+	ent->ce_status = CVS_ENT_REG;
+	ent->ce_name = fields[1];
 
-	if (entp->ce_type == CVS_ENT_FILE) {
+	if (ent->ce_type == CVS_ENT_FILE) {
 		if (*fields[2] == '-') {
-			entp->ce_status = CVS_ENT_REMOVED;
+			ent->ce_status = CVS_ENT_REMOVED;
 			sp = fields[2] + 1;
 		} else {
 			sp = fields[2];
-			if (strcmp(fields[2], "0") == 0)
-				entp->ce_status = CVS_ENT_ADDED;
+			if ((fields[2][0] == '0') && (fields[2][1] == '\0'))
+				ent->ce_status = CVS_ENT_ADDED;
 		}
-		rcsnum_aton(sp, NULL, entp->ce_rev);
 
-		if (strcmp(fields[3], CVS_DATE_DUMMY) == 0)
-			entp->ce_mtime = CVS_DATE_DMSEC;
-		else
-			entp->ce_mtime = cvs_datesec(fields[3],
-			    CVS_DATE_CTIME, 0);
+		if ((ent->ce_rev = rcsnum_parse(sp)) == NULL) {
+			cvs_ent_free(ent);
+			return (NULL);
+		}
 
-		entp->ce_opts = fields[4];
-		entp->ce_tag = fields[5];
+		if (cvs_cmdop == CVS_OP_SERVER) {
+			if (!strcmp(fields[3], "up to date"))
+				ent->ce_status = CVS_ENT_UPTODATE;
+		} else {
+			if (strcmp(fields[3], CVS_DATE_DUMMY) == 0)
+				ent->ce_mtime = CVS_DATE_DMSEC;
+			else
+				ent->ce_mtime = cvs_date_parse(fields[3]);
+		}
 	}
 
-	return (entp);
+	ent->ce_opts = fields[4];
+	ent->ce_tag = fields[5];
+	return (ent);
 }
-
 
 /*
  * cvs_ent_free()
@@ -400,38 +418,6 @@ cvs_ent_free(struct cvs_ent *ent)
 	free(ent);
 }
 
-
-/*
- * cvs_ent_getent()
- *
- * Get a single entry from the CVS/Entries file of the basename portion of
- * path <path> and return that entry.  That entry must later be freed using
- * cvs_ent_free().
- */
-struct cvs_ent*
-cvs_ent_getent(const char *path)
-{
-	char base[MAXPATHLEN], *file;
-	CVSENTRIES *entf;
-	struct cvs_ent *ep;
-
-	cvs_splitpath(path, base, sizeof(base), &file);
-
-	entf = cvs_ent_open(base, O_RDONLY);
-	if (entf == NULL)
-		return (NULL);
-
-	ep = cvs_ent_get(entf, file);
-	if (ep != NULL) {
-		/* take it out of the queue so it doesn't get freed */
-		TAILQ_REMOVE(&(entf->cef_ent), ep, ce_list);
-	}
-
-	cvs_ent_close(entf);
-	return (ep);
-}
-
-
 /*
  * cvs_ent_write()
  *
@@ -444,33 +430,32 @@ cvs_ent_write(CVSENTRIES *ef)
 	size_t len;
 	char revbuf[64], timebuf[32];
 	struct cvs_ent *ent;
+	FILE *fp;
 
 	if (ef->cef_flags & CVS_ENTF_SYNC)
 		return (0);
 
-	if (ef->cef_file == NULL) {
-		ef->cef_file = fopen(ef->cef_path, "w");
-		if (ef->cef_file == NULL) {
-			cvs_log(LP_ERRNO, "failed to open Entries `%s'",
-			    ef->cef_path);
-			return (-1);
-		}
+	if ((fp = fopen(ef->cef_path, "w")) == NULL) {
+		cvs_log(LP_ERRNO, "failed to open Entries `%s'", ef->cef_path);
+		return (-1);
 	}
 
-
-	/* reposition ourself at beginning of file */
-	rewind(ef->cef_file);
 	TAILQ_FOREACH(ent, &(ef->cef_ent), ce_list) {
 		if (ent->ce_type == CVS_ENT_DIR) {
-			putc('D', ef->cef_file);
+			putc('D', fp);
 			timebuf[0] = '\0';
 			revbuf[0] = '\0';
 		} else {
 			rcsnum_tostr(ent->ce_rev, revbuf, sizeof(revbuf));
-			if (ent->ce_mtime == CVS_DATE_DMSEC)
+			if ((ent->ce_mtime == CVS_DATE_DMSEC &&
+			    (ent->ce_status != CVS_ENT_ADDED)) ||
+			    ent->ce_status == CVS_ENT_REMOVED)
 				strlcpy(timebuf, CVS_DATE_DUMMY,
 				    sizeof(timebuf));
-			else {
+			else if (ent->ce_status == CVS_ENT_ADDED) {
+				strlcpy(timebuf, "Initial ", sizeof(timebuf));
+				strlcat(timebuf, ent->ce_name, sizeof(timebuf));
+			} else {
 				ctime_r(&(ent->ce_mtime), timebuf);
 				len = strlen(timebuf);
 				if ((len > 0) && (timebuf[len - 1] == '\n'))
@@ -478,16 +463,23 @@ cvs_ent_write(CVSENTRIES *ef)
 			}
 		}
 
-		fprintf(ef->cef_file, "/%s/%s/%s/%s/%s\n", ent->ce_name,
-		    revbuf, timebuf, "", "");
+		if (cvs_cmdop == CVS_OP_SERVER) {
+			if (ent->ce_status == CVS_ENT_UPTODATE)
+				strlcpy(timebuf, "up to date", sizeof(timebuf));
+			else
+				timebuf[0] = '\0';
+		}
+
+		fprintf(fp, "/%s/%s%s/%s/%s/%s\n", ent->ce_name,
+		    (ent->ce_status == CVS_ENT_REMOVED) ? "-" : "", revbuf,
+		    timebuf, "", "");
 	}
 
 	/* terminating line */
-	fprintf(ef->cef_file, "D\n");
+	putc('D', fp);
+	putc('\n', fp);
 
 	ef->cef_flags |= CVS_ENTF_SYNC;
-	fclose(ef->cef_file);
-	ef->cef_file = NULL;
-
+	fclose(fp);
 	return (0);
 }

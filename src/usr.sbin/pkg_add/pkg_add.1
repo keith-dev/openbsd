@@ -1,4 +1,4 @@
-.\"	$OpenBSD: pkg_add.1,v 1.33 2005/01/03 13:01:27 jmc Exp $
+.\"	$OpenBSD: pkg_add.1,v 1.46 2005/08/17 19:22:31 espie Exp $
 .\"
 .\" FreeBSD install - a package for the installation and maintenance
 .\" of non-core utilities.
@@ -26,7 +26,7 @@
 .Sh SYNOPSIS
 .Nm pkg_add
 .Bk -words
-.Op Fl acInqrvx
+.Op Fl acInqruvx
 .Op Fl A Ar arch
 .Op Fl B Ar pkg-destdir
 .Op Fl F Ar keywords
@@ -60,10 +60,11 @@ packages and may not be installed using
 Each package name may be specified as a filename (which normally consists of the
 package name itself plus the
 .Dq .tgz
-suffix) or an URL referring to FTP, HTTP, or SCP locations.
-For example, the following is valid:
+suffix) or a URL referring to FTP, HTTP, or SCP locations.
+The following examples are valid:
 .Pp
 .Li pkg_add -v ftp://ftp.openbsd.org/pub/OpenBSD/2.7/packages/i386/m4-1.4.tgz
+.Li pkg_add -v scp://login@host/usr/ports/packages/sparc/all/tcl-8.4.7.tgz
 .Pp
 If the given package names are not found in the current working directory,
 .Nm
@@ -157,8 +158,16 @@ will install everything and the kitchen sink: randomly reorder the list
 of packages to install, and proceed after weeding out conflicts.
 .It Ar libdepends
 library specifications may not be fulfilled.
+.It Ar noclosure
+do not compute the closure of dependencies to figure out which packages to
+update when using
+.Fl u .
 .It Ar nonroot
 install even if not running as root.
+.It Ar pkgpath
+with
+.Fl u ,
+do not check the pkgpath matches if only one candidate is found.
 .It Ar scripts
 external scripts may fail.
 .It Ar update
@@ -211,12 +220,41 @@ marker.
 Replace package quickly; do not bother checking MD5s before removing files.
 .It Fl r
 Allow replacing existing packages.
-This is an experimental option for now:
-the code will try to take every precaution to make sure the update can
+The code will try to take every precaution to make sure the update can
 proceed before removing the old package and adding the new one, and it
 should also handle shared libraries correctly.
-But this functionality has seen very little testing yet, and since it is
-rather powerful, it can break a system in a thorough way.
+Among other things,
+.Nm
+will refuse to update packages as soon as it needs to run scripts that
+might fail
+.Po
+use
+.Fl F Ar update
+to force the update
+.Pc ;
+.Nm
+will also refuse to update packages when the dependencies don't quite
+match
+.Po
+use
+.Fl F Ar updatedepends
+to force the update
+.Pc .
+.It Fl u
+Display the name of packages to use for an update of the given
+.Ar pkgname(s) .
+With this option, if no
+.Ar pkgname
+is given,
+.Nm
+will display update names for all installed packages.
+This relies on
+.Ev PKG_PATH
+to figure out the new package names.
+After
+.Ox 3.8
+rolls out and enough tests are conducted, this will become a true update
+switch and will proceed with the update proper.
 .It Fl v
 Turn on verbose output.
 Several
@@ -276,10 +314,9 @@ For packages tagged with architecture constraints,
 verifies that the current machine architecture agrees with the constraints.
 .It
 All package dependencies (from
-.Cm @pkgdep ,
-.Cm @libdepend ,
+.Cm @depend
 and
-.Cm @newdepend
+.Cm @wantlib
 directives; see
 .Xr pkg_create 1 )
 are read from the packing list.
@@ -449,6 +486,8 @@ to a suitable area, as
 does not check for noexec status except by failing to run installation
 scripts.
 .Sh BUGS
-The
-.Fl r
-option has not seen wide-testing yet and is almost certainly full of bugs.
+.Xr scp 1
+processes do not die like they should when their pipe is closed,
+so using
+.Nm
+over SCP consumes an insane amount of resources.

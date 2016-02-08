@@ -1,4 +1,4 @@
-/*	$OpenBSD: pkill.c,v 1.9 2005/03/02 21:45:53 otto Exp $	*/
+/*	$OpenBSD: pkill.c,v 1.14 2005/07/16 11:48:46 jmc Exp $	*/
 /*	$NetBSD: pkill.c,v 1.5 2002/10/27 11:49:34 kleink Exp $	*/
 
 /*-
@@ -38,7 +38,7 @@
  */
 
 #ifndef lint
-static const char rcsid[] = "$OpenBSD: pkill.c,v 1.9 2005/03/02 21:45:53 otto Exp $";
+static const char rcsid[] = "$OpenBSD: pkill.c,v 1.14 2005/07/16 11:48:46 jmc Exp $";
 #endif /* !lint */
 
 #include <sys/types.h>
@@ -268,7 +268,9 @@ main(int argc, char **argv)
 					ret = snprintf(buf + j, sizeof(buf) - j,
 					    pargv[1] != NULL ? "%s " : "%s",
 					    pargv[0]);
-					if (ret > 0)
+					if (ret >= sizeof(buf) - j)
+						j += sizeof(buf) - j - 1;
+					else if (ret > 0)
 						j += ret;
 					pargv++;
 				}
@@ -403,7 +405,7 @@ main(int argc, char **argv)
 		else if (rv != STATUS_ERROR)
 			rv = STATUS_MATCH;
 	}
-	if (pgrep)
+	if (pgrep && j)
 		putchar('\n');
 
 	exit(rv);
@@ -419,8 +421,8 @@ usage(void)
 	else
 		ustr = "[-signal] [-fnvx]";
 
-	fprintf(stderr, "usage: %s %s [-G gid] [-P ppid] [-U uid] [-g pgrp] "
-	    "[-s sid] [-t tty] [-u euid] pattern ...\n", __progname, ustr);
+	fprintf(stderr, "usage: %s %s [-G gid] [-g pgrp] [-P ppid] [-s sid] "
+	    "[-t tty]\n\t[-U uid] [-u euid] [pattern ...]\n", __progname, ustr);
 
 	exit(STATUS_ERROR);
 }

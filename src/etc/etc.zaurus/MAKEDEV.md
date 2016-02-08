@@ -1,5 +1,5 @@
 vers(__file__,
-	{-$OpenBSD: MAKEDEV.md,v 1.4 2005/03/04 15:57:00 todd Exp $-},
+	{-$OpenBSD: MAKEDEV.md,v 1.7 2005/08/01 22:22:14 deraadt Exp $-},
 etc.MACHINE)dnl
 dnl
 dnl Copyright (c) 2001-2004 Todd T. Fries <todd@OpenBSD.org>
@@ -25,9 +25,10 @@ dnl OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
 dnl ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 dnl
 dnl
+__devitem(apm, apm, Power management device)dnl
 _TITLE(make)
 _DEV(all)
-_DEV(ramd)
+_DEV(ramdisk)
 _DEV(std)
 _DEV(local)
 _TITLE(dis)
@@ -87,6 +88,11 @@ _DEV(xfs, 51)
 dnl
 divert(__mddivert)dnl
 dnl
+ramdisk)
+	_recurse std bpf0 wd0 wd1 sd0 tty00 rd0 wsmouse
+	_recurse st0 ttyC0 random wskbd0 apm
+	;;
+
 _std(1, 2, 8, 3, 6)
 	M xf86		c 2 4 600
 	M reload	c 2 20 640 kmem
@@ -94,7 +100,6 @@ _std(1, 2, 8, 3, 6)
 dnl
 dnl *** zaurus specific targets
 dnl
-target(all, ses, 0)dnl
 target(all, ch, 0)dnl
 target(all, ss, 0, 1)dnl
 target(all, xfs, 0)dnl
@@ -110,11 +115,3 @@ target(all, sd, 0, 1, 2, 3, 4)dnl
 target(all, vnd, 0, 1, 2, 3)dnl
 target(all, ccd, 0, 1, 2, 3)dnl
 target(all, ttyC, 0, 1)dnl
-target(ramd, sd, 0, 1, 2, 3, 4)dnl
-target(ramd, wd, 0, 1, 2, 3, 4)dnl
-target(ramd, st, 0, 1)dnl
-target(ramd, cd, 0, 1)dnl)dnl
-target(ramd, rd, 0)dnl
-target(ramd, tty0, 0, 1)dnl
-target(ramd, pty, 0)dnl
-target(ramd, ttyC, 0, 1)dnl

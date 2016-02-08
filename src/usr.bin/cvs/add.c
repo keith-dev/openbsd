@@ -1,4 +1,4 @@
-/*	$OpenBSD: add.c,v 1.14 2005/01/24 18:30:25 jfb Exp $	*/
+/*	$OpenBSD: add.c,v 1.27 2005/07/30 00:01:50 joris Exp $	*/
 /*
  * Copyright (c) 2004 Jean-Francois Brousseau <jfb@openbsd.org>
  * All rights reserved.
@@ -30,7 +30,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sysexits.h>
 #include <unistd.h>
 
 #include "cvs.h"
@@ -41,26 +40,39 @@
 extern char *__progname;
 
 
-int  cvs_add_file (CVSFILE *, void *);
+static int	cvs_add_remote(CVSFILE *, void *);
+static int	cvs_add_local(CVSFILE *, void *);
+static int	cvs_add_init(struct cvs_cmd *, int, char **, int *);
+static int	cvs_add_pre_exec(struct cvsroot *);
 
+struct cvs_cmd cvs_cmd_add = {
+	CVS_OP_ADD, CVS_REQ_ADD, "add",
+	{ "ad", "new" },
+	"Add a new file/directory to the repository",
+	"[-k mode] [-m msg] file ...",
+	"k:m:",
+	NULL,
+	0,
+	cvs_add_init,
+	cvs_add_pre_exec,
+	cvs_add_remote,
+	cvs_add_local,
+	NULL,
+	NULL,
+	CVS_CMD_ALLOWSPEC | CVS_CMD_SENDDIR | CVS_CMD_SENDARGS2
+};
 
-/*
- * cvs_add()
- *
- * Handler for the `cvs add' command.
- * Returns 0 on success, or one of the known system exit codes on failure.
- */
-int
-cvs_add(int argc, char **argv)
+static int kflag = RCS_KWEXP_DEFAULT;
+static char *koptstr;
+
+static int
+cvs_add_init(struct cvs_cmd *cmd, int argc, char **argv, int *arg)
 {
-	int i, ch, kflag;
-	char buf[16], *koptstr;
-	struct cvsroot *root;
+	int ch;
 
-	kflag = RCS_KWEXP_DEFAULT;
 	cvs_msg = NULL;
 
-	while ((ch = getopt(argc, argv, "k:m:")) != -1) {
+	while ((ch = getopt(argc, argv, cmd->cmd_opts)) != -1) {
 		switch (ch) {
 		case 'k':
 			koptstr = optarg;
@@ -69,68 +81,42 @@ cvs_add(int argc, char **argv)
 				cvs_log(LP_ERR,
 				    "invalid RCS keyword expansion mode");
 				rcs_kflag_usage();
-				return (EX_USAGE);
+				return (CVS_EX_USAGE);
 			}
 			break;
 		case 'm':
 			if ((cvs_msg = strdup(optarg)) == NULL) {
 				cvs_log(LP_ERRNO, "failed to copy message");
-				return (EX_DATAERR);
+				return (CVS_EX_DATA);
 			}
 			break;
 		default:
-			return (EX_USAGE);
+			return (CVS_EX_USAGE);
 		}
 	}
 
-	argc -= optind;
-	argv += optind;
-	if (argc == 0)
-		return (EX_USAGE);
+	*arg = optind;
+	return (0);
+}
 
-	cvs_files = cvs_file_getspec(argv, argc, 0);
-	if (cvs_files == NULL)
-		return (EX_DATAERR);
+static int
+cvs_add_pre_exec(struct cvsroot *root)
+{
+	char buf[16];
 
-	root = CVS_DIR_ROOT(cvs_files);
-	if (root == NULL) {
-		cvs_log(LP_ERR,
-		    "No CVSROOT specified!  Please use the `-d' option");
-		cvs_log(LP_ERR,
-		    "or set the CVSROOT environment variable.");
-		return (EX_USAGE);
-	}
-	if (root->cr_method != CVS_METHOD_LOCAL) {
-		if (cvs_connect(root) < 0)
-			return (EX_PROTOCOL);
-		if (kflag != RCS_KWEXP_DEFAULT) {
-			strlcpy(buf, "-k", sizeof(buf));
-			strlcat(buf, koptstr, sizeof(buf));
-			if (cvs_sendarg(root, buf, 0) < 0)
-				return (EX_PROTOCOL);
-		}
-	}
-
-	cvs_file_examine(cvs_files, cvs_add_file, NULL);
-
-	if (root->cr_method != CVS_METHOD_LOCAL) {
-		if (cvs_senddir(root, cvs_files) < 0)
-			return (EX_PROTOCOL);
-
-		for (i = 0; i < argc; i++)
-			if (cvs_sendarg(root, argv[i], 0) < 0)
-				return (EX_PROTOCOL);
-
-		if (cvs_sendreq(root, CVS_REQ_ADD, NULL) < 0)
-			return (EX_PROTOCOL);
+	if ((root->cr_method != CVS_METHOD_LOCAL) &&
+	    (kflag != RCS_KWEXP_DEFAULT)) {
+		strlcpy(buf, "-k", sizeof(buf));
+		strlcat(buf, koptstr, sizeof(buf));
+		if (cvs_sendarg(root, buf, 0) < 0)
+			return (CVS_EX_PROTO);
 	}
 
 	return (0);
 }
 
-
-int
-cvs_add_file(CVSFILE *cf, void *arg)
+static int
+cvs_add_remote(CVSFILE *cf, void *arg)
 {
 	int ret;
 	struct cvsroot *root;
@@ -139,22 +125,28 @@ cvs_add_file(CVSFILE *cf, void *arg)
 	root = CVS_DIR_ROOT(cf);
 
 	if (cf->cf_type == DT_DIR) {
-		if (root->cr_method != CVS_METHOD_LOCAL)
-			ret = cvs_senddir(root, cf);
-
+		ret = cvs_senddir(root, cf);
+		if (ret == -1)
+			ret = CVS_EX_PROTO;
 		return (ret);
 	}
 
-	if (root->cr_method != CVS_METHOD_LOCAL) {
-		if (cf->cf_cvstat == CVS_FST_UNKNOWN)
-			ret = cvs_sendreq(root, CVS_REQ_ISMODIFIED,
-			    CVS_FILE_NAME(cf));
-	} else {
-		cvs_log(LP_INFO, "scheduling file `%s' for addition",
-		    CVS_FILE_NAME(cf));
-		cvs_log(LP_INFO, "use `%s commit' to add this file permanently",
-		    __progname);
-	}
+	if (cf->cf_cvstat == CVS_FST_UNKNOWN)
+		ret = cvs_sendreq(root, CVS_REQ_ISMODIFIED,
+		    cf->cf_name);
+
+	if (ret == -1)
+		ret = CVS_EX_PROTO;
 
 	return (ret);
+}
+
+static
+int cvs_add_local(CVSFILE *cf, void *arg)
+{
+	cvs_log(LP_NOTICE, "scheduling file `%s' for addition", cf->cf_name);
+	cvs_log(LP_NOTICE, "use `%s commit' to add this file permanently",
+	    __progname);
+
+	return (0);
 }

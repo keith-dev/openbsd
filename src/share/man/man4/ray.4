@@ -1,4 +1,4 @@
-.\"	$OpenBSD: ray.4,v 1.15 2005/03/06 21:49:00 jmc Exp $
+.\"	$OpenBSD: ray.4,v 1.18 2005/06/09 09:03:38 jmc Exp $
 .\"	$NetBSD: ray.4,v 1.5 2000/02/28 13:54:55 enami Exp $
 .\"
 .\" Copyright (c) 2000 Christian E. Hopps
@@ -136,7 +136,7 @@ driver supports the following media options:
 Select IBSS operation.
 .El
 .It Fl mediaopt Ar opts
-Disable the specified media options on the driver and returns it to the
+Disable the specified media options on the driver and return it to the
 default mode of operation (BSS).
 .It Cm nwid Ar id
 Set the network ID.
@@ -150,6 +150,7 @@ string allows the interface to connect to any available access points.
 By default the
 .Nm
 driver uses an empty string.
+Note that network ID is synonymous with Extended Service Set ID (ESSID).
 .El
 .Sh HARDWARE
 Cards supported by the
@@ -172,7 +173,7 @@ dhcp NONE NONE NONE chan 11
 .Pp
 Return ray0 to its default settings:
 .Bd -literal -offset indent
-# ifconfig ray0 -bssid -chan media autoselect -mediaopt nwid ""
+# ifconfig ray0 -bssid -chan media autoselect nwid ""
 .Ed
 .Pp
 Join an existing BSS network,

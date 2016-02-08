@@ -1,4 +1,4 @@
-/*	$OpenBSD: bt_seq.c,v 1.9 2005/01/03 22:30:28 millert Exp $	*/
+/*	$OpenBSD: bt_seq.c,v 1.11 2005/08/05 13:03:00 espie Exp $	*/
 
 /*-
  * Copyright (c) 1990, 1993, 1994
@@ -31,14 +31,6 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  */
-
-#if defined(LIBC_SCCS) && !defined(lint)
-#if 0
-static char sccsid[] = "@(#)bt_seq.c	8.7 (Berkeley) 7/20/94";
-#else
-static const char rcsid[] = "$OpenBSD: bt_seq.c,v 1.9 2005/01/03 22:30:28 millert Exp $";
-#endif
-#endif /* LIBC_SCCS and not lint */
 
 #include <sys/types.h>
 
@@ -76,10 +68,7 @@ static int __bt_seqset(BTREE *, EPG *, DBT *, int);
  *	RET_ERROR, RET_SUCCESS or RET_SPECIAL if there's no next key.
  */
 int
-__bt_seq(dbp, key, data, flags)
-	const DB *dbp;
-	DBT *key, *data;
-	u_int flags;
+__bt_seq(const DB *dbp, DBT *key, DBT *data, u_int flags)
 {
 	BTREE *t;
 	EPG e;
@@ -151,11 +140,7 @@ __bt_seq(dbp, key, data, flags)
  *	RET_ERROR, RET_SUCCESS or RET_SPECIAL if there's no next key.
  */
 static int
-__bt_seqset(t, ep, key, flags)
-	BTREE *t;
-	EPG *ep;
-	DBT *key;
-	int flags;
+__bt_seqset(BTREE *t, EPG *ep, DBT *key, int flags)
 {
 	PAGE *h;
 	pgno_t pg;
@@ -239,10 +224,7 @@ __bt_seqset(t, ep, key, flags)
  *	RET_ERROR, RET_SUCCESS or RET_SPECIAL if there's no next key.
  */
 static int
-__bt_seqadv(t, ep, flags)
-	BTREE *t;
-	EPG *ep;
-	int flags;
+__bt_seqadv(BTREE *t, EPG *ep, int flags)
 {
 	CURSOR *c;
 	PAGE *h;
@@ -341,11 +323,7 @@ usecurrent:		F_CLR(c, CURS_AFTER | CURS_BEFORE);
  *	or RET_SPECIAL if no such key exists.
  */
 static int
-__bt_first(t, key, erval, exactp)
-	BTREE *t;
-	const DBT *key;
-	EPG *erval;
-	int *exactp;
+__bt_first(BTREE *t, const DBT *key, EPG *erval, int *exactp)
 {
 	PAGE *h;
 	EPG *ep, save;
@@ -442,10 +420,7 @@ __bt_first(t, key, erval, exactp)
  *    idx:	page index
  */
 void
-__bt_setcur(t, pgno, idx)
-	BTREE *t;
-	pgno_t pgno;
-	u_int idx;
+__bt_setcur(BTREE *t, pgno_t pgno, u_int idx)
 {
 	/* Lose any already deleted key. */
 	if (t->bt_cursor.key.data != NULL) {

@@ -1,4 +1,4 @@
-/*	$OpenBSD: rde_rib.c,v 1.64 2005/03/11 12:54:20 claudio Exp $ */
+/*	$OpenBSD: rde_rib.c,v 1.69 2005/07/29 12:38:40 claudio Exp $ */
 
 /*
  * Copyright (c) 2003, 2004 Claudio Jeker <claudio@openbsd.org>
@@ -81,7 +81,7 @@ path_update(struct rde_peer *peer, struct rde_aspath *nasp,
 	struct rde_aspath	*asp;
 	struct prefix		*p;
 
-	rde_send_pftable(nasp->pftable, prefix, prefixlen, 0);
+	rde_send_pftable(nasp->pftableid, prefix, prefixlen, 0);
 	rde_send_pftable_commit();
 
 	if ((p = prefix_get(peer, prefix, prefixlen)) != NULL) {
@@ -128,10 +128,20 @@ path_compare(struct rde_aspath *a, struct rde_aspath *b)
 		return (1);
 	if (a->lpref < b->lpref)
 		return (-1);
+	if (a->weight > b->weight)
+		return (1);
+	if (a->weight < b->weight)
+		return (-1);
+	if (a->rtlabelid > b->rtlabelid)
+		return (1);
+	if (a->rtlabelid < b->rtlabelid)
+		return (-1);
+	if (a->pftableid > b->pftableid)
+		return (1);
+	if (a->pftableid < b->pftableid)
+		return (-1);
 
-	r = strcmp(a->pftable, b->pftable);
-	if (r == 0)
-		r = aspath_compare(a->aspath, b->aspath);
+	r = aspath_compare(a->aspath, b->aspath);
 	if (r == 0)
 		r = nexthop_compare(a->nexthop, b->nexthop);
 	if (r > 0)
@@ -188,7 +198,7 @@ path_remove(struct rde_aspath *asp)
 	while ((p = LIST_FIRST(&asp->prefix_h)) != NULL) {
 		/* Commit is done in peer_down() */
 		pt_getaddr(p->prefix, &addr);
-		rde_send_pftable(p->aspath->pftable,
+		rde_send_pftable(p->aspath->pftableid,
 		    &addr, p->prefix->prefixlen, 1);
 
 		prefix_destroy(p);
@@ -266,7 +276,10 @@ path_copy(struct rde_aspath *asp)
 	nasp->nexthop = asp->nexthop;
 	nasp->med = asp->med;
 	nasp->lpref = asp->lpref;
+	nasp->weight = asp->weight;
 	nasp->origin = asp->origin;
+	nasp->rtlabelid = asp->rtlabelid;
+	rtlabel_ref(nasp->rtlabelid);
 
 	nasp->flags = asp->flags & ~F_ATTR_LINKED;
 
@@ -290,6 +303,8 @@ path_get(void)
 	asp->origin = ORIGIN_INCOMPLETE;
 	asp->lpref = DEFAULT_LPREF;
 	/* med = 0 */
+	/* weight = 0 */
+	/* rtlabel = 0 */
 
 	return (asp);
 }
@@ -301,6 +316,7 @@ path_put(struct rde_aspath *asp)
 	if (asp->flags & F_ATTR_LINKED)
 		fatalx("path_put: linked object");
 
+	rtlabel_unref(asp->rtlabelid);
 	aspath_put(asp->aspath);
 	attr_optfree(asp);
 	free(asp);
@@ -478,7 +494,7 @@ prefix_remove(struct rde_peer *peer, struct bgpd_addr *prefix, int prefixlen)
 
 	asp = p->aspath;
 
-	rde_send_pftable(asp->pftable, prefix, prefixlen, 1);
+	rde_send_pftable(asp->pftableid, prefix, prefixlen, 1);
 	rde_send_pftable_commit();
 
 	prefix_unlink(p);
@@ -585,10 +601,10 @@ prefix_network_clean(struct rde_peer *peer, time_t reloadtime)
 
 				if (pt_empty(pte))
 					pt_remove(pte);
-				if (path_empty(asp))
-					path_destroy(asp);
 			}
 		}
+		if (path_empty(asp))
+			path_destroy(asp);
 	}
 }
 
@@ -660,7 +676,9 @@ prefix_free(struct prefix *pref)
 	free(pref);
 }
 
-/* nexthop functions */
+/*
+ * nexthop functions
+ */
 struct nexthop_head	*nexthop_hash(struct bgpd_addr *);
 struct nexthop		*nexthop_lookup(struct bgpd_addr *);
 
@@ -732,9 +750,21 @@ nexthop_update(struct kroute_nexthop *msg)
 		memcpy(&nh->true_nexthop, &msg->gateway,
 		    sizeof(nh->true_nexthop));
 
-	nh->nexthop_netlen = msg->kr.kr4.prefixlen;
-	nh->nexthop_net.af = AF_INET;
-	nh->nexthop_net.v4.s_addr = msg->kr.kr4.prefix.s_addr;
+	switch (msg->nexthop.af) {
+	case AF_INET:
+		nh->nexthop_netlen = msg->kr.kr4.prefixlen;
+		nh->nexthop_net.af = AF_INET;
+		nh->nexthop_net.v4.s_addr = msg->kr.kr4.prefix.s_addr;
+		break;
+	case AF_INET6:
+		nh->nexthop_netlen = msg->kr.kr6.prefixlen;
+		nh->nexthop_net.af = AF_INET6;
+		memcpy(&nh->nexthop_net.v6, &msg->kr.kr6.prefix,
+		    sizeof(struct in6_addr));
+		break;
+	default:
+		fatalx("nexthop_update: unknown af");
+	}
 
 	if (rde_noevaluate())
 		/*

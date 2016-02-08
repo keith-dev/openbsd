@@ -1,3 +1,5 @@
+/* $OpenBSD: ap_signal.c,v 1.9 2005/06/20 12:23:22 robert Exp $ */
+
 /* ====================================================================
  * The Apache Software License, Version 1.1
  *
@@ -63,14 +65,15 @@
  * from W. Richard Stevens' "Advanced Programming in the UNIX Environment"
  * (the version that does not automatically restart system calls).
  */
-Sigfunc *signal(int signo, Sigfunc * func)
+Sigfunc *
+signal(int signo, Sigfunc * func)
 {
-    struct sigaction act, oact;
+	struct sigaction act, oact;
 
-    act.sa_handler = func;
-    sigemptyset(&act.sa_mask);
-    act.sa_flags = 0;
-    if (sigaction(signo, &act, &oact) < 0)
-	return SIG_ERR;
-    return oact.sa_handler;
+	act.sa_handler = func;
+	sigemptyset(&act.sa_mask);
+	act.sa_flags = 0;
+	if (sigaction(signo, &act, &oact) < 0)
+		return SIG_ERR;
+	return oact.sa_handler;
 }

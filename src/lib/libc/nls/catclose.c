@@ -1,3 +1,4 @@
+/*	$OpenBSD: catclose.c,v 1.6 2005/08/05 13:03:00 espie Exp $ */
 /*-
  * Copyright (c) 1996 The NetBSD Foundation, Inc.
  * All rights reserved.
@@ -34,10 +35,6 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
-#if defined(LIBC_SCCS) && !defined(lint)
-static char rcsid[] = "$OpenBSD: catclose.c,v 1.4 1997/07/09 01:08:57 millert Exp $";
-#endif /* LIBC_SCCS and not lint */
-
 #define _NLS_PRIVATE
 
 #include <sys/types.h>
@@ -47,8 +44,7 @@ static char rcsid[] = "$OpenBSD: catclose.c,v 1.4 1997/07/09 01:08:57 millert Ex
 #include <stdlib.h>
 
 int
-_catclose(catd)
-	nl_catd catd;
+_catclose(nl_catd catd)
 {
 	if (catd == (nl_catd) -1) {
 		errno = EBADF;

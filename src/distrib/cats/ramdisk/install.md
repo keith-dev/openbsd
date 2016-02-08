@@ -1,4 +1,4 @@
-#	$OpenBSD: install.md,v 1.7 2005/02/27 09:01:34 david Exp $
+#	$OpenBSD: install.md,v 1.10 2005/04/02 14:34:46 krw Exp $
 #
 #
 # Copyright (c) 1996 The NetBSD Foundation, Inc.
@@ -43,9 +43,6 @@ MDFSTYPE=msdos
 MDXAPERTURE=2
 ARCH=ARCH
 
-md_set_term() {
-}
-
 md_installboot() {
 }
 
@@ -53,7 +50,7 @@ md_prep_disk() {
 	local _disk=$1 _resp
 	typeset -l _resp
 
-	cat << __EOT
+	cat <<__EOT
 
 $_disk must be partitioned using an BSD or an MBR partition table.
 
@@ -62,7 +59,7 @@ It is more a question of firmware compatibility disk portability.
 (Once we can figure out what filesystems ABLE can boot)
 __EOT
 
-	while : ; do
+	while :; do
 		ask "Use BSD or MBR partition table?" BSD
 		_resp=$resp
 		case $_resp in
@@ -82,7 +79,7 @@ md_prep_MBR() {
 	local _disk=$1
 
 	if [[ -n $(disklabel -c $_disk 2>/dev/null | grep ' BSD ') ]]; then
-		cat << __EOT
+		cat <<__EOT
 
 WARNING: putting an MBR partition table on $_disk will DESTROY the existing BSD
          partitions and BSD partition table.
@@ -95,7 +92,7 @@ __EOT
 	ask_yn "Use *all* of $_disk for OpenBSD?"
 	if [[ $resp == y ]]; then
 		echo -n "Creating Master Boot Record (MBR)..."
-		fdisk -e $_disk  >/dev/null 2>&1 << __EOT
+		fdisk -e $_disk  >/dev/null 2>&1 <<__EOT
 reinit
 update
 write
@@ -104,7 +101,7 @@ __EOT
 		echo "done."
 
 		echo -n "Formatting 1MB MSDOS boot partition..."
-		gunzip < /usr/mdec/msdos1mb.gz | \
+		gunzip </usr/mdec/msdos1mb.gz | \
 		    dd of=/dev/r${_disk}c bs=512 seek=1 >/dev/null 2>&1
 		echo "done."
 
@@ -113,7 +110,7 @@ __EOT
 
 	# Manual MBR setup. The user is basically on their own. Give a few
 	# hints and let the user rip.
-	cat << __EOT
+	cat <<__EOT
 
 **** NOTE ****
 
@@ -129,7 +126,7 @@ __EOT
 
 	fdisk -e $_disk
 
-	cat << __EOT
+	cat <<__EOT
 Here is the MBR configuration you chose:
 
 $(fdisk $_disk)
@@ -144,7 +141,7 @@ __EOT
 md_prep_BSD() {
 	local _disk=$1
 
-	cat << __EOT
+	cat <<__EOT
 
 No special setup should be required to label using BSD disklabel.
 however if the disk has previously been partitioned in another
@@ -166,7 +163,7 @@ md_prep_disklabel() {
 
 	case $disklabeltype in
 	BSD)	;;
-	MBR)	cat << __EOT
+	MBR)	cat <<__EOT
 
 You *MUST* setup the OpenBSD disklabel to include the MSDOS-formatted boot
 partition as the 'i' partition. If the 'i' partition is missing or not the
@@ -185,7 +182,7 @@ __EOT
 }
 
 md_congrats() {
-	cat << __EOT
+	cat <<__EOT
 
 Once the machine has rebooted use OpenFirmware to boot into OpenBSD, as
 described in the INSTALL.$ARCH document. The command to boot OpenBSD will be

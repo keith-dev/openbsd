@@ -1,4 +1,4 @@
-/* $OpenBSD: sa.h,v 1.43 2005/03/04 16:20:07 hshoexer Exp $	 */
+/* $OpenBSD: sa.h,v 1.46 2005/04/08 16:52:41 deraadt Exp $	 */
 /* $EOM: sa.h,v 1.58 2000/10/10 12:39:01 provos Exp $	 */
 
 /*
@@ -201,18 +201,14 @@ struct sa {
 	struct event   *soft_death;
 	struct event   *death;
 
-#if defined (USE_NAT_TRAVERSAL)
 	struct event   *nat_t_keepalive;
-#endif
 
-#if defined (USE_DPD)
 	/* IKE DPD (RFC3706) message sequence number.  */
 	u_int32_t	dpd_seq;	/* sent */
 	u_int32_t	dpd_rseq;	/* recieved */
 	u_int32_t	dpd_failcount;	/* # of subsequent failures */
 	u_int32_t	dpd_rdupcount;	/* # of subsequent duplicates */
 	struct event   *dpd_event;	/* time of next event */
-#endif
 };
 
 /* This SA is alive.  */
@@ -289,7 +285,7 @@ struct sa_kinfo {
 
 	u_int64_t	exp_timeout;
 	u_int64_t	soft_timeout;
-	
+
 	u_int64_t	first_use;
 	u_int64_t	established;
 	u_int64_t	soft_first_use;

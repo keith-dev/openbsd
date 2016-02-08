@@ -1,3 +1,4 @@
+/*	$OpenBSD: getcwd.c,v 1.14 2005/08/08 08:05:34 espie Exp $ */
 /*
  * Copyright (c) 1989, 1991, 1993
  *	The Regents of the University of California.  All rights reserved.
@@ -27,10 +28,6 @@
  * SUCH DAMAGE.
  */
 
-#if defined(LIBC_SCCS) && !defined(lint)
-static char rcsid[] = "$OpenBSD: getcwd.c,v 1.11 2005/01/06 03:26:02 millert Exp $";
-#endif /* LIBC_SCCS and not lint */
-
 #include <sys/param.h>
 #include <sys/stat.h>
 
@@ -48,12 +45,12 @@ static char rcsid[] = "$OpenBSD: getcwd.c,v 1.11 2005/01/06 03:26:02 millert Exp
 char *
 getcwd(char *pt, size_t size)
 {
-	register struct dirent *dp;
-	register DIR *dir = NULL;
-	register dev_t dev;
-	register ino_t ino;
-	register int first;
-	register char *bpt, *bup;
+	struct dirent *dp;
+	DIR *dir = NULL;
+	dev_t dev;
+	ino_t ino;
+	int first;
+	char *bpt, *bup;
 	struct stat s;
 	dev_t root_dev;
 	ino_t root_ino;
@@ -221,10 +218,15 @@ notfound:
 		errno = save_errno ? save_errno : ENOENT;
 	/* FALLTHROUGH */
 err:
+	save_errno = errno;
+
 	if (ptsize)
 		free(pt);
 	free(up);
 	if (dir)
 		(void)closedir(dir);
+
+	errno = save_errno;
+
 	return (NULL);
 }

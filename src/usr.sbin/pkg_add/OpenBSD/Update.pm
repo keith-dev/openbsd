@@ -1,5 +1,5 @@
 # ex:ts=8 sw=4:
-# $OpenBSD: Update.pm,v 1.51 2005/02/07 15:35:23 espie Exp $
+# $OpenBSD: Update.pm,v 1.55 2005/08/16 21:34:10 espie Exp $
 #
 # Copyright (c) 2004 Marc Espie <espie@openbsd.org>
 #
@@ -25,8 +25,11 @@ sub can_update
 {
 	my ($self, $install, $state) = @_;
 
-	if (!$self->updatable($install)) {
+	my $issue = $self->update_issue($install);
+	
+	if (defined $issue) {
 		$state->{okay} = 0;
+	    	push(@{$state->{journal}}, $issue);
 	}
 }
 
@@ -34,7 +37,7 @@ sub validate_depend
 {
 }
 
-sub updatable($$) { 1 }
+sub update_issue($$) { undef }
 
 sub extract
 {
@@ -109,29 +112,44 @@ sub extract
 }
 
 package OpenBSD::PackingElement::ScriptFile;
-sub updatable($$) { 0 }
+sub update_issue($$) 
+{ 
+	return $_[0]->{name}." script";
+}
 
 package OpenBSD::PackingElement::FINSTALL;
-sub updatable($$) { !$_[1] }
+sub update_issue($$) 
+{ 
+	return undef if !$_[1];
+	return $_[0]->SUPER::update_issue($_[1]);
+}
 
 package OpenBSD::PackingElement::FDEINSTALL;
-sub updatable($$) { $_[1] }
+sub update_issue($$) 
+{ 
+	return undef if $_[1];
+	return $_[0]->SUPER::update_issue($_[1]);
+}
 
 package OpenBSD::PackingElement::Exec;
-sub updatable($$) { !$_[1] }
+sub update_issue($$) 
+{ 
+	return undef if !$_[1];
+	return '@exec '.$_[0]->{expanded};
+}
 
 package OpenBSD::PackingElement::Unexec;
-sub updatable($$) 
+sub update_issue($$) 
 { 
-	return 1 if $_[1];
+	return undef if $_[1];
 	my $self = $_[0];
 
 	# those are deemed innocuous
 	if ($self->{expanded} =~ m|^/sbin/ldconfig\s+\-R\b| or
 	    $self->{expanded} =~ m|^install-info\s+\-\-delete\b|) {
-		return 1;
+		return undef;
 	} else {
-		return 0;
+		return '@unexec '.$self->{expanded};
 	}
 }
 
@@ -256,9 +274,13 @@ sub can_do
 	if (!defined $plist) {
 		Fatal "Couldn't find packing-list for $toreplace\n";
 	}
+	$state->{journal} = [];
 	$plist->visit('can_update', 0, $state);
 	if ($state->{okay} == 0) {
-		Warn "Old package ", $plist->pkgname(), " contains unsafe operations\n";
+		Warn "Old package ", $plist->pkgname(), " contains potentially unsafe operations\n";
+		for my $i (@{$state->{journal}}) {
+			Warn "\t$i\n";
+		}
 		if ($state->{forced}->{update}) {
 			Warn "(forcing update)\n";
 			$state->{okay} = 1;
@@ -299,10 +321,14 @@ sub is_safe
 {
 	my ($plist, $state) = @_;
 	$state->{okay} = 1;
+	$state->{journal} = [];
 	$plist->visit('can_update', 1, $state);
 	if ($state->{okay} == 0) {
 		Warn "New package ", $plist->pkgname(), 
-		    " contains unsafe operations\n";
+		    " contains potentially unsafe operations\n";
+		for my $i (@{$state->{journal}}) {
+			Warn "\t$i\n";
+		}
 		if ($state->{forced}->{update}) {
 			Warn "(forcing update)\n";
 			$state->{okay} = 1;
@@ -428,12 +454,17 @@ sub save_old_libraries
 				$stub_list->to_cache();
 				$old_plist->to_cache();
 			} else {
+				require OpenBSD::md5;
+
 				mkdir($dest);
 				my $oldname = $old_plist->pkgname();
-				open my $comment, '>', $dest.COMMENT;
-				print $comment "Stub libraries for $oldname";
-				close $comment;
-				link($dest.COMMENT, $dest.DESC);
+				open my $descr, '>', $dest.DESC;
+				print $descr "Stub libraries for $oldname\n";
+				print $descr "Stub libraries for $oldname\n";
+				close $descr;
+				my $f = OpenBSD::PackingElement::FDESC->add($stub_list, DESC);
+				$f->{ignore} = 1;
+				$f->{md5} = OpenBSD::md5::fromfile($dest.DESC);
 				$stub_list->to_installation();
 				$old_plist->to_installation();
 			}
@@ -472,10 +503,9 @@ sub is_needed
 	$oplist->visit('build_context', $old_context);
 	my $n = join(',', sort keys %$new_context);
 	my $o = join(',', sort keys %$old_context);
-	print "Comparing full signature \"$o\" vs. \"$n\"\n" 
+	print "Comparing full signature for ", $plist->pkgname(), " \"$o\" vs. \"$n\": ", $n eq $o ? "equal\n" : "different\n" 
 	    if $state->{very_verbose};
-	return join(',', sort keys %$new_context) ne 
-	    join(',', sort keys %$old_context);
+	return $n ne $o;
 }
 
 sub figure_out_libs

@@ -1,4 +1,4 @@
-/*	$OpenBSD: repo.c,v 1.1 2005/02/16 15:41:15 jfb Exp $	*/
+/*	$OpenBSD: repo.c,v 1.8 2005/08/11 11:45:06 xsa Exp $	*/
 /*
  * Copyright (c) 2005 Jean-Francois Brousseau <jfb@openbsd.org>
  * All rights reserved.
@@ -30,21 +30,20 @@
 #include <sys/stat.h>
 
 #include <errno.h>
-#include <stdio.h>
-#include <fcntl.h>
-#include <stdlib.h>
-#include <unistd.h>
 #include <dirent.h>
-#include <string.h>
+#include <fcntl.h>
 #include <libgen.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <unistd.h>
 
 #include "log.h"
 #include "repo.h"
-#include "cvsd.h"
 
 
 
-static CVSRPENT*  cvs_repo_loadrec (CVSREPO *, const char *);
+static CVSRPENT	*cvs_repo_loadrec(CVSREPO *, const char *);
 
 
 /*
@@ -54,7 +53,7 @@ static CVSRPENT*  cvs_repo_loadrec (CVSREPO *, const char *);
  * is specified in <base>.
  */
 
-CVSREPO*
+CVSREPO *
 cvs_repo_load(const char *base, int flags)
 {
 	struct stat st;
@@ -198,7 +197,7 @@ cvs_repo_lockent(CVSRPENT *ent, int type, pid_t owner)
 		 * Another process has already locked the entry with a write
 		 * lock, so regardless of the type of lock we are requesting,
 		 * we'll have to wait in the pending requests queue.
-		 */ 
+		 */
 		if (ent->cr_wlock->lk_owner == owner) {
 			cvs_log(LP_WARN, "double-lock attempt");
 			free(lk);
@@ -283,7 +282,7 @@ cvs_repo_unlockent(CVSRPENT *ent, pid_t owner)
  * cvs_repo_alias()
  *
  * Add a new module entry with name <alias> in the repository <repo>, which
- * points to the path <path> within the repository. 
+ * points to the path <path> within the repository.
  * Returns 0 on success, or -1 on failure.
  */
 int
@@ -366,7 +365,8 @@ cvs_repo_find(CVSREPO *repo, const char *path)
 	CVSRPENT *sf, *cf;
 
 	if ((len = strlcpy(pbuf, path, sizeof(pbuf))) >= sizeof(pbuf)) {
-		cvs_log(LP_ERR, "path %s too long", path);
+		errno = ENAMETOOLONG;
+		cvs_log(LP_ERRNO, "%s", path);
 		return (NULL);
 	}
 
@@ -378,8 +378,8 @@ cvs_repo_find(CVSREPO *repo, const char *path)
 	pp = pbuf;
 	do {
 		if (cf->cr_type != CVS_RPENT_DIR) {
-			cvs_log(LP_ERR,
-			    "part of the path %s is not a directory", path);
+			errno = ENOTDIR;
+			cvs_log(LP_ERRNO, "%s", path);
 			return (NULL);
 		}
 		sp = strchr(pp, '/');
@@ -425,7 +425,7 @@ cvs_repo_find(CVSREPO *repo, const char *path)
  * at least MAXPATHLEN bytes long.
  * Returns a pointer to the start of the path on success, or NULL on failure.
  */
-char*
+char *
 cvs_repo_getpath(CVSRPENT *file, char *buf, size_t len)
 {
 	u_int i;
@@ -472,7 +472,7 @@ cvs_repo_getpath(CVSRPENT *file, char *buf, size_t len)
 static CVSRPENT*
 cvs_repo_loadrec(CVSREPO *repo, const char *path)
 {
-	int ret, fd;
+	int ret, fd, l;
 	long base;
 	u_char *dp, *ep;
 	mode_t fmode;
@@ -544,7 +544,7 @@ cvs_repo_loadrec(CVSREPO *repo, const char *path)
 		}
 
 		do {
-			ret = getdirentries(fd, fbuf, sizeof(fbuf), &base);
+			ret = getdirentries(fd, fbuf, (int)sizeof(fbuf), &base);
 			if (ret == -1) {
 				cvs_log(LP_ERRNO,
 				    "failed to get directory entries");
@@ -568,8 +568,16 @@ cvs_repo_loadrec(CVSREPO *repo, const char *path)
 				    (ent->d_name[1] == '.')))
 					continue;
 
-				snprintf(pbuf, sizeof(pbuf), "%s/%s", path,
+				l = snprintf(pbuf, sizeof(pbuf), "%s/%s", path,
 				    ent->d_name);
+				if (l == -1 || l >= (int)sizeof(pbuf)) {
+					errno = ENAMETOOLONG;
+					cvs_log(LP_ERRNO, "%s", pbuf);
+
+					cvs_repo_entree(cfp);
+					(void)close(fd);
+					return (NULL);
+				}
 
 				if ((ent->d_type != DT_DIR) &&
 				    (ent->d_type != DT_REG)) {

@@ -1,4 +1,4 @@
-#	$OpenBSD: install.md,v 1.2 2004/08/12 23:46:08 krw Exp $
+#	$OpenBSD: install.md,v 1.6 2005/04/02 14:34:46 krw Exp $
 #
 #
 # Copyright (c) 1996 The NetBSD Foundation, Inc.
@@ -45,52 +45,6 @@ MDXAPERTURE=2
 MDSERIAL="com com tty0"
 ARCH=ARCH
 
-md_set_term() {
-	local _tables
-
-	ask_yn "Do you wish to select a keyboard encoding table?"
-	[[ $resp == n ]] && return
-
-	while : ; do
-		ask "Select your keyboard type: (P)C-AT/XT, (U)SB or 'done'" P
-		case $resp in
-		P*|p*)  _tables="be br de dk es fr it jp lt no pt ru sf sg sv ua uk us"
-			;;
-		U*|u*)	_tables="br de dk es fr it jp no sf sg sv uk us"
-			;;
-		done)	;;
-		*)	echo "'$resp' is not a valid keyboard type."
-			resp=
-			continue
-			;;
-		esac
-		break;
-	done
-
-	[ -z "$_tables" ] && return
-
-	while : ; do
-		cat << __EOT
-The available keyboard encoding tables are:
-
-	${_tables}
-
-__EOT
-		ask "Table name? (or 'done')" us
-		case $resp in
-		done)	;;
-		*)	if kbd $resp ; then
-				echo $resp > /tmp/kbdtype
-			else
-				echo "'${resp}' is not a valid table name."
-				continue
-			fi
-			;;
-		esac
-		break;
-	done
-}
-
 md_installboot() {
 	echo Installing boot block...
 	cp /usr/mdec/boot /mnt/boot
@@ -118,7 +72,7 @@ md_prep_fdisk() {
 	ask_yn "Do you want to use *all* of $_disk for OpenBSD?"
 	if [[ $resp == y ]]; then
 		echo -n "Putting all of $_disk into an active OpenBSD MBR partition (type 'A6')..."
-		fdisk -e ${_disk} << __EOT > /dev/null
+		fdisk -e ${_disk} <<__EOT >/dev/null
 reinit
 update
 write
@@ -129,7 +83,7 @@ __EOT
 	fi
 
 	# Manually configure the MBR.
-	cat << __EOT
+	cat <<__EOT
 
 You will now create a single MBR partition to contain your OpenBSD data. This
 partition must have an id of 'A6'; must *NOT* overlap other partitions; and
@@ -141,7 +95,7 @@ $(fdisk ${_disk})
 __EOT
 	fdisk -e ${_disk}
 
-	cat << __EOT
+	cat <<__EOT
 Here is the partition information you chose:
 
 $(fdisk ${_disk})
@@ -153,7 +107,7 @@ md_prep_disklabel() {
 
 	md_prep_fdisk $_disk
 
-	cat << __EOT
+	cat <<__EOT
 
 You will now create an OpenBSD disklabel inside the OpenBSD MBR
 partition. The disklabel defines how OpenBSD splits up the MBR partition

@@ -1,4 +1,4 @@
-/*	$OpenBSD: ospfd.h,v 1.16 2005/03/15 22:03:56 claudio Exp $ */
+/*	$OpenBSD: ospfd.h,v 1.35 2005/06/26 19:22:12 claudio Exp $ */
 
 /*
  * Copyright (c) 2004 Esben Norby <norby@openbsd.org>
@@ -24,10 +24,10 @@
 #include <sys/socket.h>
 #include <sys/time.h>
 #include <sys/tree.h>
+#include <md5.h>
 #include <net/if.h>
 #include <netinet/in.h>
 #include <event.h>
-#include <stdbool.h>
 
 #define CONF_FILE		"/etc/ospfd.conf"
 #define	OSPFD_SOCKET		"/var/run/ospfd.sock"
@@ -36,8 +36,13 @@
 #define NBR_HASHSIZE		128
 #define LSA_HASHSIZE		512
 
+#define NBR_IDSELF		1
+#define NBR_CNTSTART		(NBR_IDSELF + 1)
+
 #define	READ_BUF_SIZE		65535
+#define	PKG_DEF_SIZE		512	/* compromise */
 #define	RT_BUF_SIZE		16384
+#define	MAX_RTSOCK_BUF		128 * 1024
 
 #define	OSPFD_FLAG_NO_FIB_UPDATE	0x0001
 
@@ -46,7 +51,12 @@
 #define	F_CONNECTED		0x0004
 #define	F_DOWN			0x0010
 #define	F_STATIC		0x0020
-#define	F_LONGER		0x0040
+#define	F_DYNAMIC		0x0040
+#define	F_LONGER		0x0080
+
+#define REDISTRIBUTE_STATIC	0x01
+#define REDISTRIBUTE_CONNECTED	0x02
+#define REDISTRIBUTE_DEFAULT	0x04
 
 /* buffer */
 struct buf {
@@ -60,9 +70,9 @@ struct buf {
 };
 
 struct msgbuf {
+	TAILQ_HEAD(, buf)	 bufs;
 	u_int32_t		 queued;
 	int			 fd;
-	TAILQ_HEAD(, buf)	 bufs;
 };
 
 #define	IMSG_HEADER_SIZE	sizeof(struct imsg_hdr)
@@ -71,7 +81,7 @@ struct msgbuf {
 struct buf_read {
 	u_char			 buf[READ_BUF_SIZE];
 	u_char			*rptr;
-	ssize_t			 wpos;
+	size_t			 wpos;
 };
 
 struct imsgbuf {
@@ -90,6 +100,12 @@ enum imsg_type {
 	IMSG_CTL_RELOAD,
 	IMSG_CTL_SHOW_INTERFACE,
 	IMSG_CTL_SHOW_DATABASE,
+	IMSG_CTL_SHOW_DB_EXT,
+	IMSG_CTL_SHOW_DB_NET,
+	IMSG_CTL_SHOW_DB_RTR,
+	IMSG_CTL_SHOW_DB_SELF,
+	IMSG_CTL_SHOW_DB_SUM,
+	IMSG_CTL_SHOW_DB_ASBR,
 	IMSG_CTL_SHOW_NBR,
 	IMSG_CTL_SHOW_RIB,
 	IMSG_CTL_SHOW_SUM,
@@ -107,6 +123,8 @@ enum imsg_type {
 	IMSG_NEIGHBOR_UP,
 	IMSG_NEIGHBOR_DOWN,
 	IMSG_NEIGHBOR_CHANGE,
+	IMSG_NETWORK_ADD,
+	IMSG_NETWORK_DEL,
 	IMSG_DD,
 	IMSG_DD_END,
 	IMSG_DB_SNAPSHOT,
@@ -116,7 +134,9 @@ enum imsg_type {
 	IMSG_LS_ACK,
 	IMSG_LS_FLOOD,
 	IMSG_LS_BADREQ,
-	IMSG_LS_MAXAGE
+	IMSG_LS_MAXAGE,
+	IMSG_ABR_UP,
+	IMSG_ABR_DOWN
 };
 
 struct imsg_hdr {
@@ -152,14 +172,14 @@ struct area {
 	u_int32_t		 stub_default_cost;
 	u_int32_t		 num_spf_calc;
 	u_int32_t		 dead_interval;
-	u_int16_t		 transfer_delay;
+	int			 active;
+	u_int16_t		 transmit_delay;
 	u_int16_t		 hello_interval;
 	u_int16_t		 rxmt_interval;
 	u_int16_t		 metric;
 	u_int8_t		 priority;
-
-	bool			 transit;
-	bool			 stub;
+	u_int8_t		 transit;
+	u_int8_t		 stub;
 };
 
 /* interface states */
@@ -259,6 +279,12 @@ static const char * const path_type_names[] = {
 	"Type 2 ext"
 };
 
+struct auth_md {
+	TAILQ_ENTRY(auth_md)	 entry;
+	char			 key[MD5_DIGEST_LENGTH];
+	u_int8_t		 keyid;
+};
+
 /* lsa list used in RDE and OE */
 TAILQ_HEAD(lsa_head, lsa_entry);
 
@@ -269,6 +295,7 @@ struct iface {
 	struct event		 lsack_tx_timer;
 
 	LIST_HEAD(, nbr)	 nbr_list;
+	TAILQ_HEAD(, auth_md)	 auth_md_list;
 	struct lsa_head		 ls_ack_list;
 
 	char			 name[IF_NAMESIZE];
@@ -276,6 +303,7 @@ struct iface {
 	struct in_addr		 dst;
 	struct in_addr		 mask;
 	struct in_addr		 rtr_id;
+	struct in_addr		 abr_id;
 	char			*auth_key;
 	struct nbr		*dr;	/* designated router */
 	struct nbr		*bdr;	/* backup designated router */
@@ -285,21 +313,22 @@ struct iface {
 	u_int32_t		 baudrate;
 	u_int32_t		 dead_interval;
 	u_int32_t		 ls_ack_cnt;
+	u_int32_t		 crypt_seq_num;
 	unsigned int		 ifindex;
 	int			 fd;
 	int			 state;
 	int			 mtu;
 	u_int16_t		 flags;
-	u_int16_t		 transfer_delay;
+	u_int16_t		 transmit_delay;
 	u_int16_t		 hello_interval;
 	u_int16_t		 rxmt_interval;
 	u_int16_t		 metric;
 	enum iface_type		 type;
 	enum auth_type		 auth_type;
+	u_int8_t		 auth_keyid;
 	u_int8_t		 linkstate;
 	u_int8_t		 priority;
-
-	bool			 passive;
+	u_int8_t		 passive;
 };
 
 /* ospf_conf */
@@ -313,21 +342,23 @@ struct ospfd_conf {
 	struct event		ev;
 	struct event		spf_timer;
 	struct in_addr		rtr_id;
+	struct lsa_tree		lsa_tree;
+	LIST_HEAD(, area)	area_list;
+	LIST_HEAD(, vertex)	cand_list;
+
 	u_int32_t		opts;
 #define OSPFD_OPT_VERBOSE	0x00000001
 #define OSPFD_OPT_VERBOSE2	0x00000002
 #define OSPFD_OPT_NOACTION	0x00000004
-	int			maxdepth;
-	LIST_HEAD(, area)	area_list;
-	LIST_HEAD(, vertex)	cand_list;
-	struct lsa_tree		lsa_tree;
 	u_int32_t		spf_delay;
 	u_int32_t		spf_hold_time;
 	int			spf_state;
 	int			ospf_socket;
 	int			flags;
+	int			redistribute_flags;
 	int			options; /* OSPF options */
 	u_int8_t		rfc1583compat;
+	u_int8_t		border;
 };
 
 /* kroute */
@@ -369,7 +400,7 @@ struct ctl_iface {
 	int			 mtu;
 	int			 nbr_cnt;
 	int			 adj_cnt;
-	u_int16_t		 transfer_delay;
+	u_int16_t		 transmit_delay;
 	u_int16_t		 hello_interval;
 	u_int16_t		 flags;
 	u_int16_t		 metric;
@@ -377,7 +408,7 @@ struct ctl_iface {
 	enum iface_type		 type;
 	u_int8_t		 linkstate;
 	u_int8_t		 priority;
-	bool			 passive;
+	u_int8_t		 passive;
 };
 
 struct ctl_nbr {
@@ -404,8 +435,10 @@ struct ctl_rt {
 	struct in_addr		 area;
 	struct in_addr		 adv_rtr;
 	u_int32_t		 cost;
+	u_int32_t		 cost2;
 	enum path_type		 p_type;
 	enum dst_type		 d_type;
+	u_int8_t		 flags;
 	u_int8_t		 prefixlen;
 };
 
@@ -426,12 +459,12 @@ struct ctl_sum_area {
 	u_int32_t		 num_lsa;
 };
 
-void		 show_config(struct ospfd_conf *xconf);
-
 /* area.c */
 struct area	*area_new(void);
 int		 area_del(struct area *);
 struct area	*area_find(struct ospfd_conf *, struct in_addr);
+void		 area_track(struct area *, int);
+int		 area_border_router(struct ospfd_conf *);
 
 /* buffer.c */
 struct buf	*buf_open(size_t);
@@ -484,7 +517,19 @@ void		 kr_dispatch_msg(int, short, void *);
 int		 kr_nexthop_add(struct in_addr);
 void		 kr_nexthop_delete(struct in_addr);
 void		 kr_show_route(struct imsg *);
-void		 kr_ifinfo(char *);
+void		 kr_ifinfo(char *, pid_t);
 struct kif	*kif_findname(char *);
+void		 kif_update(struct kif *);
+int		 kif_validate(int);
+
+u_int8_t	mask2prefixlen(in_addr_t);
+in_addr_t	prefixlen2mask(u_int8_t);
+
+/* ospfd.c */
+void	main_imsg_compose_ospfe(int, pid_t, void *, u_int16_t);
+void	main_imsg_compose_rde(int, pid_t, void *, u_int16_t);
+
+/* printconf.c */
+void	print_config(struct ospfd_conf *);
 
 #endif	/* _OSPFD_H_ */

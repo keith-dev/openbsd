@@ -1,4 +1,4 @@
-/*	$OpenBSD: rde.c,v 1.153 2004/11/23 13:07:01 claudio Exp $ */
+/*	$OpenBSD: rde.c,v 1.169 2005/08/10 08:34:06 claudio Exp $ */
 
 /*
  * Copyright (c) 2003, 2004 Henning Brauer <henning@openbsd.org>
@@ -61,12 +61,12 @@ void		 rde_update_log(const char *,
 		     const struct bgpd_addr *, u_int8_t);
 int		 rde_reflector(struct rde_peer *, struct rde_aspath *);
 void		 rde_dump_rib_as(struct prefix *, pid_t);
-void		 rde_dump_rib_prefix(struct prefix *, pid_t);
 void		 rde_dump_upcall(struct pt_entry *, void *);
 void		 rde_dump_as(struct filter_as *, pid_t);
 void		 rde_dump_prefix_upcall(struct pt_entry *, void *);
 void		 rde_dump_prefix(struct ctl_show_rib_prefix *, pid_t);
 void		 rde_update_queue_runner(void);
+void		 rde_update6_queue_runner(void);
 
 void		 peer_init(u_int32_t);
 void		 peer_shutdown(void);
@@ -148,12 +148,9 @@ rde_main(struct bgpd_config *config, struct peer *peer_l,
 	bgpd_process = PROC_RDE;
 
 	if (setgroups(1, &pw->pw_gid) ||
-	    setegid(pw->pw_gid) || setgid(pw->pw_gid) ||
-	    seteuid(pw->pw_uid) || setuid(pw->pw_uid)) {
+	    setresgid(pw->pw_gid, pw->pw_gid, pw->pw_gid) ||
+	    setresuid(pw->pw_uid, pw->pw_uid, pw->pw_uid))
 		fatal("can't drop privileges");
-	}
-
-	endpwent();
 
 	signal(SIGTERM, rde_sighdlr);
 	signal(SIGINT, rde_sighdlr);
@@ -252,6 +249,7 @@ rde_main(struct bgpd_config *config, struct peer *peer_l,
 		}
 
 		rde_update_queue_runner();
+		rde_update6_queue_runner();
 	}
 
 	rde_shutdown();
@@ -286,7 +284,7 @@ rde_dispatch_imsg_session(struct imsgbuf *ibuf)
 	if ((n = imsg_read(ibuf)) == -1)
 		fatal("rde_dispatch_imsg_session: imsg_read error");
 	if (n == 0)	/* connection closed */
-		fatal("rde_dispatch_imsg_session: pipe closed");
+		fatalx("rde_dispatch_imsg_session: pipe closed");
 
 	for (;;) {
 		if ((n = imsg_get(ibuf, &imsg)) == -1)
@@ -335,7 +333,7 @@ rde_dispatch_imsg_session(struct imsgbuf *ibuf)
 				break;
 			}
 			memcpy(&netconf_s, imsg.data, sizeof(netconf_s));
-			SIMPLEQ_INIT(&netconf_s.attrset);
+			TAILQ_INIT(&netconf_s.attrset);
 			session_set = &netconf_s.attrset;
 			break;
 		case IMSG_NETWORK_DONE:
@@ -353,7 +351,7 @@ rde_dispatch_imsg_session(struct imsgbuf *ibuf)
 				break;
 			}
 			memcpy(&netconf_s, imsg.data, sizeof(netconf_s));
-			SIMPLEQ_INIT(&netconf_s.attrset);
+			TAILQ_INIT(&netconf_s.attrset);
 			network_delete(&netconf_s, 0);
 			break;
 		case IMSG_NETWORK_FLUSH:
@@ -377,7 +375,7 @@ rde_dispatch_imsg_session(struct imsgbuf *ibuf)
 			if ((s = malloc(sizeof(struct filter_set))) == NULL)
 				fatal(NULL);
 			memcpy(s, imsg.data, sizeof(struct filter_set));
-			SIMPLEQ_INSERT_TAIL(session_set, s, entry);
+			TAILQ_INSERT_TAIL(session_set, s, entry);
 			break;
 		case IMSG_CTL_SHOW_NETWORK:
 			if (imsg.hdr.len != IMSG_HEADER_SIZE) {
@@ -457,7 +455,7 @@ rde_dispatch_imsg_parent(struct imsgbuf *ibuf)
 	if ((n = imsg_read(ibuf)) == -1)
 		fatal("rde_dispatch_imsg_parent: imsg_read error");
 	if (n == 0)	/* connection closed */
-		fatal("rde_dispatch_imsg_parent: pipe closed");
+		fatalx("rde_dispatch_imsg_parent: pipe closed");
 
 	for (;;) {
 		if ((n = imsg_get(ibuf, &imsg)) == -1)
@@ -479,12 +477,22 @@ rde_dispatch_imsg_parent(struct imsgbuf *ibuf)
 			break;
 		case IMSG_NETWORK_ADD:
 			memcpy(&netconf_p, imsg.data, sizeof(netconf_p));
-			SIMPLEQ_INIT(&netconf_p.attrset);
+			TAILQ_INIT(&netconf_p.attrset);
 			parent_set = &netconf_p.attrset;
 			break;
 		case IMSG_NETWORK_DONE:
 			parent_set = NULL;
 			network_add(&netconf_p, 1);
+			break;
+		case IMSG_NETWORK_REMOVE:
+			if (imsg.hdr.len - IMSG_HEADER_SIZE !=
+			    sizeof(struct network_config)) {
+				log_warnx("rde_dispatch: wrong imsg len");
+				break;
+			}
+			memcpy(&netconf_p, imsg.data, sizeof(netconf_p));
+			TAILQ_INIT(&netconf_p.attrset);
+			network_delete(&netconf_p, 1);
 			break;
 		case IMSG_RECONF_FILTER:
 			if (imsg.hdr.len - IMSG_HEADER_SIZE !=
@@ -493,7 +501,7 @@ rde_dispatch_imsg_parent(struct imsgbuf *ibuf)
 			if ((r = malloc(sizeof(struct filter_rule))) == NULL)
 				fatal(NULL);
 			memcpy(r, imsg.data, sizeof(struct filter_rule));
-			SIMPLEQ_INIT(&r->set);
+			TAILQ_INIT(&r->set);
 			parent_set = &r->set;
 			TAILQ_INSERT_TAIL(newrules, r, entry);
 			break;
@@ -516,6 +524,7 @@ rde_dispatch_imsg_parent(struct imsgbuf *ibuf)
 			prefix_network_clean(&peerself, reloadtime);
 			while ((r = TAILQ_FIRST(rules_l)) != NULL) {
 				TAILQ_REMOVE(rules_l, r, entry);
+				filterset_free(&r->set);
 				free(r);
 			}
 			free(rules_l);
@@ -527,14 +536,14 @@ rde_dispatch_imsg_parent(struct imsgbuf *ibuf)
 			break;
 		case IMSG_FILTER_SET:
 			if (parent_set == NULL) {
-				log_warnx("rde_dispatch: "
+				log_warnx("rde_dispatch_imsg_parent: "
 				    "IMSG_FILTER_SET unexpected");
 				break;
 			}
 			if ((s = malloc(sizeof(struct filter_set))) == NULL)
 				fatal(NULL);
 			memcpy(s, imsg.data, sizeof(struct filter_set));
-			SIMPLEQ_INSERT_TAIL(parent_set, s, entry);
+			TAILQ_INSERT_TAIL(parent_set, s, entry);
 			break;
 		case IMSG_MRT_OPEN:
 		case IMSG_MRT_REOPEN:
@@ -687,8 +696,17 @@ rde_update_dispatch(struct imsg *imsg)
 		p += pos;
 		len -= pos;
 
+		if (peer->capa_received.mp_v4 == SAFI_NONE &&
+		    peer->capa_received.mp_v6 != SAFI_NONE) {
+			log_peer_warnx(&peer->conf, "bad AFI, IPv4 disabled");
+			rde_update_err(peer, ERR_UPDATE, ERR_UPD_OPTATTR,
+			    NULL, 0);
+			path_put(asp);
+			return (-1);
+		}
+
 		/* input filter */
-		if (rde_filter(peer, NULL, &prefix, prefixlen,
+		if (rde_filter(peer, NULL, &prefix, prefixlen, peer,
 		    DIR_IN) == ACTION_DENY)
 			continue;
 
@@ -711,6 +729,14 @@ rde_update_dispatch(struct imsg *imsg)
 		mplen--;
 		switch (afi) {
 		case AFI_IPv6:
+			if (peer->capa_received.mp_v6 == SAFI_NONE) {
+				log_peer_warnx(&peer->conf, "bad AFI, "
+				    "IPv6 disabled");
+				rde_update_err(peer, ERR_UPDATE,
+				    ERR_UPD_OPTATTR, NULL, 0);
+				path_put(asp);
+				return (-1);
+			}
 			while (mplen > 0) {
 				if ((pos = rde_update_get_prefix6(mpp, mplen,
 				    &prefix, &prefixlen)) == -1) {
@@ -737,7 +763,7 @@ rde_update_dispatch(struct imsg *imsg)
 
 				/* input filter */
 				if (rde_filter(peer, NULL, &prefix, prefixlen,
-				    DIR_IN) == ACTION_DENY)
+				    peer, DIR_IN) == ACTION_DENY)
 					continue;
 
 				rde_update_log("withdraw", peer, NULL,
@@ -746,7 +772,8 @@ rde_update_dispatch(struct imsg *imsg)
 			}
 			break;
 		default:
-			fatalx("unsupported multipath AF");
+			/* silently ignore unsupported multiprotocol AF */
+			break;
 		}
 	}
 
@@ -783,13 +810,22 @@ rde_update_dispatch(struct imsg *imsg)
 		p += pos;
 		nlri_len -= pos;
 
+		if (peer->capa_received.mp_v4 == SAFI_NONE &&
+		    peer->capa_received.mp_v6 != SAFI_NONE) {
+			log_peer_warnx(&peer->conf, "bad AFI, IPv4 disabled");
+			rde_update_err(peer, ERR_UPDATE, ERR_UPD_OPTATTR,
+			    NULL, 0);
+			path_put(asp);
+			return (-1);
+		}
+
 		/*
 		 * We need to copy attrs before calling the filter because
 		 * the filter may change the attributes.
 		 */
 		fasp = path_copy(asp);
 		/* input filter */
-		if (rde_filter(peer, fasp, &prefix, prefixlen,
+		if (rde_filter(peer, fasp, &prefix, prefixlen, peer,
 		    DIR_IN) == ACTION_DENY) {
 			path_put(fasp);
 			continue;
@@ -835,12 +871,20 @@ rde_update_dispatch(struct imsg *imsg)
 		mpp += pos;
 		mplen -= pos;
 
-		/* apply default overrides */
-		rde_apply_set(asp, &peer->conf.attrset, AF_INET6, peer,
-		    DIR_DEFAULT_IN);
-
 		switch (afi) {
 		case AFI_IPv6:
+			if (peer->capa_received.mp_v6 == SAFI_NONE) {
+				log_peer_warnx(&peer->conf, "bad AFI, "
+				    "IPv6 disabled");
+				rde_update_err(peer, ERR_UPDATE,
+				    ERR_UPD_OPTATTR, NULL, 0);
+				path_put(asp);
+				return (-1);
+			}
+			/* apply default overrides */
+			rde_apply_set(asp, &peer->conf.attrset, AF_INET6, peer,
+			    DIR_DEFAULT_IN);
+
 			while (mplen > 0) {
 				if ((pos = rde_update_get_prefix6(mpp, mplen,
 				    &prefix, &prefixlen)) == -1) {
@@ -865,8 +909,8 @@ rde_update_dispatch(struct imsg *imsg)
 
 				fasp = path_copy(asp);
 				/* input filter */
-				if (rde_filter(peer, fasp, &prefix,
-				    prefixlen, DIR_IN) == ACTION_DENY) {
+				if (rde_filter(peer, fasp, &prefix, prefixlen,
+				    peer, DIR_IN) == ACTION_DENY) {
 					path_put(fasp);
 					continue;
 				}
@@ -888,8 +932,10 @@ rde_update_dispatch(struct imsg *imsg)
 				    &prefix, prefixlen);
 				path_update(peer, fasp, &prefix, prefixlen);
 			}
+			break;
 		default:
-			fatalx("unsupported AF");
+			/* silently ignore unsupported multiprotocol AF */
+			break;
 		}
 	}
 
@@ -1422,7 +1468,7 @@ rde_update_log(const char *message,
 
 	if (asprintf(&p, "%s/%u", log_addr(prefix), prefixlen) == -1)
 		p = NULL;
-	log_info("neighbor %s (AS%u) %s %s/%u %s",
+	log_info("neighbor %s (AS%u) %s %s %s",
 	    log_addr(&peer->conf.remote_addr), peer->conf.remote_as, message,
 	    p ? p : "out of memory", nexthop ? nexthop : "");
 
@@ -1526,29 +1572,6 @@ rde_dump_rib_as(struct prefix *p, pid_t pid)
 }
 
 void
-rde_dump_rib_prefix(struct prefix *p, pid_t pid)
-{
-	struct ctl_show_rib_prefix	 prefix;
-
-	prefix.lastchange = p->lastchange;
-	pt_getaddr(p->prefix, &prefix.prefix);
-	prefix.prefixlen = p->prefix->prefixlen;
-	prefix.flags = 0;
-	if (p->prefix->active == p)
-		prefix.flags |= F_RIB_ACTIVE;
-	if (p->peer->conf.ebgp == 0)
-		prefix.flags |= F_RIB_INTERNAL;
-	if (p->aspath->flags & F_PREFIX_ANNOUNCED)
-		prefix.flags |= F_RIB_ANNOUNCE;
-	if (p->aspath->nexthop == NULL ||
-	    p->aspath->nexthop->state == NEXTHOP_REACH)
-		prefix.flags |= F_RIB_ELIGIBLE;
-	if (imsg_compose(ibuf_se, IMSG_CTL_SHOW_RIB_PREFIX, 0, pid, -1,
-	    &prefix, sizeof(prefix)) == -1)
-		log_warnx("rde_dump_as: imsg_compose error");
-}
-
-void
 rde_dump_upcall(struct pt_entry *pt, void *ptr)
 {
 	struct prefix		*p;
@@ -1568,18 +1591,15 @@ rde_dump_as(struct filter_as *a, pid_t pid)
 	struct prefix			*p;
 	u_int32_t			 i;
 
-	i = pathtable.path_hashmask;
-	do {
+	for (i = 0; i <= pathtable.path_hashmask; i++) {
 		LIST_FOREACH(asp, &pathtable.path_hashtbl[i], path_l) {
 			if (!aspath_match(asp->aspath, a->type, a->as))
 				continue;
 			/* match found */
-			rde_dump_rib_as(LIST_FIRST(&asp->prefix_h), pid);
-			for (p = LIST_NEXT(LIST_FIRST(&asp->prefix_h), path_l);
-			    p != NULL; p = LIST_NEXT(p, path_l))
-				rde_dump_rib_prefix(p, pid);
+			LIST_FOREACH(p, &asp->prefix_h, path_l)
+				rde_dump_rib_as(p, pid);
 		}
-	} while (i-- != 0);
+	}
 }
 
 void
@@ -1626,15 +1646,15 @@ rde_dump_prefix(struct ctl_show_rib_prefix *pref, pid_t pid)
 
 /*
  * kroute specific functions
- * XXX notyet IPv6 ready
  */
 void
 rde_send_kroute(struct prefix *new, struct prefix *old)
 {
-	struct kroute		kr;
-	struct bgpd_addr	addr;
-	struct prefix	*p;
-	enum imsg_type	 type;
+	struct kroute_label	 kl;
+	struct kroute6_label	 kl6;
+	struct bgpd_addr	 addr;
+	struct prefix		*p;
+	enum imsg_type		 type;
 
 	/*
 	 * If old is != NULL we know it was active and should be removed.
@@ -1647,8 +1667,6 @@ rde_send_kroute(struct prefix *new, struct prefix *old)
 	    new->aspath->flags & F_PREFIX_ANNOUNCED))
 		return;
 
-	bzero(&kr, sizeof(kr));
-
 	if (new == NULL || new->aspath->nexthop == NULL ||
 	    new->aspath->nexthop->state != NEXTHOP_REACH ||
 	    new->aspath->flags & F_PREFIX_ANNOUNCED) {
@@ -1657,35 +1675,65 @@ rde_send_kroute(struct prefix *new, struct prefix *old)
 	} else {
 		type = IMSG_KROUTE_CHANGE;
 		p = new;
-		kr.nexthop.s_addr = p->aspath->nexthop->true_nexthop.v4.s_addr;
 	}
 
 	pt_getaddr(p->prefix, &addr);
-	kr.prefix.s_addr = addr.v4.s_addr;
-	kr.prefixlen = p->prefix->prefixlen;
-	if (p->aspath->flags & F_NEXTHOP_REJECT)
-		kr.flags |= F_REJECT;
-	if (p->aspath->flags & F_NEXTHOP_BLACKHOLE)
-		kr.flags |= F_BLACKHOLE;
-
-	if (imsg_compose(ibuf_main, type, 0, 0, -1, &kr, sizeof(kr)) == -1)
-		fatal("imsg_compose error");
+	switch (addr.af) {
+	case AF_INET:
+		bzero(&kl, sizeof(kl));
+		kl.kr.prefix.s_addr = addr.v4.s_addr;
+		kl.kr.prefixlen = p->prefix->prefixlen;
+		if (p->aspath->flags & F_NEXTHOP_REJECT)
+			kl.kr.flags |= F_REJECT;
+		if (p->aspath->flags & F_NEXTHOP_BLACKHOLE)
+			kl.kr.flags |= F_BLACKHOLE;
+		if (type == IMSG_KROUTE_CHANGE)
+			kl.kr.nexthop.s_addr =
+			    p->aspath->nexthop->true_nexthop.v4.s_addr;
+		strlcpy(kl.label, rtlabel_id2name(p->aspath->rtlabelid),
+		    sizeof(kl.label));
+		if (imsg_compose(ibuf_main, type, 0, 0, -1, &kl,
+		    sizeof(kl)) == -1)
+			fatal("imsg_compose error");
+		break;
+	case AF_INET6:
+		bzero(&kl6, sizeof(kl6));
+		memcpy(&kl6.kr.prefix, &addr.v6, sizeof(struct in6_addr));
+		kl6.kr.prefixlen = p->prefix->prefixlen;
+		if (p->aspath->flags & F_NEXTHOP_REJECT)
+			kl6.kr.flags |= F_REJECT;
+		if (p->aspath->flags & F_NEXTHOP_BLACKHOLE)
+			kl6.kr.flags |= F_BLACKHOLE;
+		if (type == IMSG_KROUTE_CHANGE) {
+			type = IMSG_KROUTE6_CHANGE;
+			memcpy(&kl6.kr.nexthop,
+			    &p->aspath->nexthop->true_nexthop.v6,
+			    sizeof(struct in6_addr));
+		} else
+			type = IMSG_KROUTE6_DELETE;
+		strlcpy(kl6.label, rtlabel_id2name(p->aspath->rtlabelid),
+		    sizeof(kl6.label));
+		if (imsg_compose(ibuf_main, type, 0, 0, -1, &kl6,
+		    sizeof(kl6)) == -1)
+			fatal("imsg_compose error");
+		break;
+	}
 }
 
 /*
  * pf table specific functions
  */
 void
-rde_send_pftable(const char *table, struct bgpd_addr *addr,
+rde_send_pftable(u_int16_t id, struct bgpd_addr *addr,
     u_int8_t len, int del)
 {
 	struct pftable_msg pfm;
 
-	if (*table == '\0')
+	if (id == 0)
 		return;
 
 	bzero(&pfm, sizeof(pfm));
-	strlcpy(pfm.pftable, table, sizeof(pfm.pftable));
+	strlcpy(pfm.pftable, pftable_id2name(id), sizeof(pfm.pftable));
 	memcpy(&pfm.addr, addr, sizeof(pfm.addr));
 	pfm.len = len;
 
@@ -1794,6 +1842,61 @@ rde_update_queue_runner(void)
 	} while (sent != 0);
 }
 
+void
+rde_update6_queue_runner(void)
+{
+	struct rde_peer		*peer;
+	char			*b;
+	int			 sent;
+	u_int16_t		 len;
+
+	/* first withdraws ... */
+	do {
+		sent = 0;
+		LIST_FOREACH(peer, &peerlist, peer_l) {
+			if (peer->state != PEER_UP)
+				continue;
+			len = sizeof(queue_buf) - MSGSIZE_HEADER;
+			b = up_dump_mp_unreach(queue_buf, &len, peer);
+
+			if (b == NULL)
+				/*
+				 * No packet to send. The 4 bytes are the
+				 * needed withdraw and path attribute length.
+				 */
+				continue;
+			/* finally send message to SE */
+			if (imsg_compose(ibuf_se, IMSG_UPDATE, peer->conf.id,
+			    0, -1, b, len) == -1)
+				fatal("imsg_compose error");
+			sent++;
+		}
+	} while (sent != 0);
+
+	/* ... then updates */
+	do {
+		sent = 0;
+		LIST_FOREACH(peer, &peerlist, peer_l) {
+			if (peer->state != PEER_UP)
+				continue;
+			len = sizeof(queue_buf) - MSGSIZE_HEADER;
+			b = up_dump_mp_reach(queue_buf, &len, peer);
+
+			if (b == NULL)
+				/*
+				 * No packet to send. The 4 bytes are the
+				 * needed withdraw and path attribute length.
+				 */
+				continue;
+			/* finally send message to SE */
+			if (imsg_compose(ibuf_se, IMSG_UPDATE, peer->conf.id,
+			    0, -1, b, len) == -1)
+				fatal("imsg_compose error");
+			sent++;
+		}
+	} while (sent != 0);
+}
+
 /*
  * generic helper function
  */
@@ -1886,7 +1989,7 @@ peer_add(u_int32_t id, struct peer_config *p_conf)
 
 	LIST_INIT(&peer->path_h);
 	memcpy(&peer->conf, p_conf, sizeof(struct peer_config));
-	SIMPLEQ_INIT(&peer->conf.attrset);
+	TAILQ_INIT(&peer->conf.attrset);
 	peer->remote_bgpid = 0;
 	peer->state = PEER_NONE;
 	up_init(peer);
@@ -1905,7 +2008,7 @@ peer_remove(struct rde_peer *peer)
 	LIST_REMOVE(peer, hash_l);
 	LIST_REMOVE(peer, peer_l);
 
-	rde_free_set(&peer->conf.attrset);
+	filterset_free(&peer->conf.attrset);
 	free(peer);
 }
 
@@ -1948,15 +2051,13 @@ peer_localaddrs(struct rde_peer *peer, struct bgpd_addr *laddr)
 			if (ifa->ifa_addr->sa_family ==
 			    match->ifa_addr->sa_family)
 				ifa = match;
-			else {
-				if (IN6_IS_ADDR_LINKLOCAL(
-				    &((struct sockaddr_in6 *)ifa->
-				    ifa_addr)->sin6_addr) ||
-				    IN6_IS_ADDR_SITELOCAL(
-				    &((struct sockaddr_in6 *)ifa->
-				    ifa_addr)->sin6_addr))
-					continue;
-			}
+			else if (IN6_IS_ADDR_LINKLOCAL(
+			    &((struct sockaddr_in6 *)ifa->
+			    ifa_addr)->sin6_addr) ||
+			    IN6_IS_ADDR_SITELOCAL(
+			    &((struct sockaddr_in6 *)ifa->
+			    ifa_addr)->sin6_addr))
+				continue;
 			peer->local_v6_addr.af = AF_INET6;
 			memcpy(&peer->local_v6_addr.v6,
 			    &((struct sockaddr_in6 *)ifa->ifa_addr)->
@@ -1987,6 +2088,10 @@ peer_up(u_int32_t id, struct session_up *sup)
 	peer->remote_bgpid = ntohl(sup->remote_bgpid);
 	memcpy(&peer->remote_addr, &sup->remote_addr,
 	    sizeof(peer->remote_addr));
+	memcpy(&peer->capa_announced, &sup->capa_announced,
+	    sizeof(peer->capa_announced));
+	memcpy(&peer->capa_received, &sup->capa_received,
+	    sizeof(peer->capa_received));
 
 	peer_localaddrs(peer, &sup->local_addr);
 
@@ -2046,15 +2151,20 @@ peer_dump(u_int32_t id, u_int16_t afi, u_int8_t safi)
 		if (safi == SAFI_ALL || safi == SAFI_UNICAST ||
 		    safi == SAFI_BOTH) {
 			if (peer->conf.announce_type ==
-			    ANNOUNCE_DEFAULT_ROUTE) {
+			    ANNOUNCE_DEFAULT_ROUTE)
 				up_generate_default(peer, AF_INET);
-				return;
-			}
-			pt_dump(up_dump_upcall, peer, AF_INET);
-			return;
+			else
+				pt_dump(up_dump_upcall, peer, AF_INET);
 		}
-
-	log_peer_warnx(&peer->conf, "unsupported AFI, SAFI combination");
+	if (afi == AFI_ALL || afi == AFI_IPv6)
+		if (safi == SAFI_ALL || safi == SAFI_UNICAST ||
+		    safi == SAFI_BOTH) {
+			if (peer->conf.announce_type ==
+			    ANNOUNCE_DEFAULT_ROUTE)
+				up_generate_default(peer, AF_INET6);
+			else
+				pt_dump(up_dump_upcall, peer, AF_INET6);
+		}
 }
 
 /*
@@ -2107,7 +2217,7 @@ network_add(struct network_config *nc, int flagstatic)
 		    DIR_DEFAULT_IN);
 		path_update(&peerdynamic, asp, &nc->prefix, nc->prefixlen);
 	}
-	rde_free_set(&nc->attrset);
+	filterset_free(&nc->attrset);
 }
 
 void

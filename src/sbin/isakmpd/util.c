@@ -1,4 +1,4 @@
-/* $OpenBSD: util.c,v 1.52 2005/03/10 21:39:21 hshoexer Exp $	 */
+/* $OpenBSD: util.c,v 1.58 2005/07/25 14:56:42 hshoexer Exp $	 */
 /* $EOM: util.c,v 1.23 2000/11/23 12:22:08 niklas Exp $	 */
 
 /*
@@ -45,8 +45,6 @@
 #include <net/route.h>
 #include <net/if.h>
 
-#include "sysdep.h"
-
 #include "log.h"
 #include "message.h"
 #include "monitor.h"
@@ -60,11 +58,13 @@
  */
 int	allow_name_lookups = 0;
 
+#if defined(INSECURE_RAND)
 /*
  * This is set to true in case of regression-test mode, when it will
  * cause predictable random numbers be generated.
  */
 int	regrand = 0;
+#endif
 
 /*
  * If in regression-test mode, this is the seed used.
@@ -145,6 +145,23 @@ ones_test(const u_int8_t *p, size_t sz)
 }
 
 /*
+ * Generate 32 bits of random data.  If compiled with INSECURE_RAND
+ * and -r option is specified, then return deterministic data.
+ */
+u_int32_t
+rand_32(void)
+{
+#if !defined(INSECURE_RAND)
+	return arc4random();
+#else
+	if (regrand)
+		return random();
+	else
+		return arc4random();
+#endif
+}
+
+/*
  * Generate a random data, len bytes long.
  */
 u_int8_t *
@@ -155,7 +172,7 @@ getrandom(u_int8_t *buf, size_t len)
 
 	for (i = 0; i < len; i++) {
 		if (i % sizeof tmp == 0)
-			tmp = sysdep_random();
+			tmp = rand_32();
 
 		buf[i] = tmp & 0xff;
 		tmp >>= 8;
@@ -238,7 +255,6 @@ text2sockaddr(char *address, char *port, struct sockaddr **sa, sa_family_t af,
 	struct sockaddr_storage tmp_sas;
 	struct ifaddrs *ifap, *ifa = NULL, *llifa = NULL;
 	char *np = address;
-#ifdef USE_DEFAULT_ROUTE
 	char ifname[IFNAMSIZ];
 	u_char buf[BUFSIZ];
 	struct rt_msghdr *rtm;
@@ -247,7 +263,6 @@ text2sockaddr(char *address, char *port, struct sockaddr **sa, sa_family_t af,
 	struct sockaddr_in6 *sin6;
 	int fd = 0, seq, len, b;
 	pid_t pid;
-#endif /* USE_DEFAULT_ROUTE */
 
 	bzero(&hints, sizeof hints);
 	if (!allow_name_lookups)
@@ -257,7 +272,6 @@ text2sockaddr(char *address, char *port, struct sockaddr **sa, sa_family_t af,
 	hints.ai_protocol = IPPROTO_UDP;
 
 	if (getaddrinfo(address, port, &hints, &ai)) {
-#ifdef USE_DEFAULT_ROUTE
 		/*
 		 * If the 'default' keyword is used, do a route lookup for
 		 * the default route, and use the interface associated with
@@ -265,7 +279,7 @@ text2sockaddr(char *address, char *port, struct sockaddr **sa, sa_family_t af,
 		 */
 		if (!strcmp(address, "default")) {
 			fd = socket(PF_ROUTE, SOCK_RAW, af);
-			
+
 			bzero(buf, sizeof(buf));
 
 			rtm = (struct rt_msghdr *)buf;
@@ -273,7 +287,7 @@ text2sockaddr(char *address, char *port, struct sockaddr **sa, sa_family_t af,
 			rtm->rtm_type = RTM_GET;
 			rtm->rtm_flags = RTF_UP;
 			rtm->rtm_addrs = RTA_DST;
-			rtm->rtm_seq = seq = arc4random(); 
+			rtm->rtm_seq = seq = arc4random();
 
 			/* default destination */
 			sa2 = (struct sockaddr *)(rtm + 1);
@@ -327,10 +341,9 @@ text2sockaddr(char *address, char *port, struct sockaddr **sa, sa_family_t af,
 				np = if_indextoname(rtm->rtm_index, ifname);
 				if (np == NULL)
 					return (-1);
-			}	
+			}
 		}
-#endif /* USE_DEFAULT_ROUTE */
-	
+
 		if (getifaddrs(&ifap) != 0)
 			return (-1);
 
@@ -339,18 +352,18 @@ text2sockaddr(char *address, char *port, struct sockaddr **sa, sa_family_t af,
 		case AF_INET:
 			for (ifa = ifap; ifa; ifa = ifa->ifa_next)
 				if (!strcmp(ifa->ifa_name, np) &&
-				    ifa->ifa_addr != NULL && 
+				    ifa->ifa_addr != NULL &&
 				    ifa->ifa_addr->sa_family == AF_INET)
 					break;
 			break;
 		case AF_INET6:
 			for (ifa = ifap; ifa; ifa = ifa->ifa_next) {
 				if (!strcmp(ifa->ifa_name, np) &&
-				    ifa->ifa_addr != NULL && 
+				    ifa->ifa_addr != NULL &&
 				    ifa->ifa_addr->sa_family == AF_INET6) {
 					if (IN6_IS_ADDR_LINKLOCAL(
 					    &((struct sockaddr_in6 *)
-					    ifa->ifa_addr)->sin6_addr) && 
+					    ifa->ifa_addr)->sin6_addr) &&
 					    llifa == NULL)
 						llifa = ifa;
 					else
@@ -362,30 +375,29 @@ text2sockaddr(char *address, char *port, struct sockaddr **sa, sa_family_t af,
 			}
 			break;
 		}
-  
+
 		if (ifa) {
 			if (netmask)
 				memcpy(&tmp_sas, ifa->ifa_netmask,
-				    sysdep_sa_len(ifa->ifa_netmask));
-				    
+				    SA_LEN(ifa->ifa_netmask));
 			else
 				memcpy(&tmp_sas, ifa->ifa_addr,
-				    sysdep_sa_len(ifa->ifa_addr));
+				    SA_LEN(ifa->ifa_addr));
 			freeifaddrs(ifap);
 		} else {
 			freeifaddrs(ifap);
 			return -1;
 		}
 	} else {
-		memcpy(&tmp_sas, ai->ai_addr, sysdep_sa_len(ai->ai_addr));
+		memcpy(&tmp_sas, ai->ai_addr, SA_LEN(ai->ai_addr));
 		freeaddrinfo(ai);
 	}
 
-	*sa = malloc(sysdep_sa_len((struct sockaddr *)&tmp_sas));
+	*sa = malloc(SA_LEN((struct sockaddr *)&tmp_sas));
 	if (!*sa)
 		return -1;
 
-	memcpy(*sa, &tmp_sas, sysdep_sa_len((struct sockaddr *)&tmp_sas));
+	memcpy(*sa, &tmp_sas, SA_LEN((struct sockaddr *)&tmp_sas));
 	return 0;
 }
 
@@ -400,7 +412,7 @@ sockaddr2text(struct sockaddr *sa, char **address, int zflag)
 	int	addrlen, i, j;
 	long	val;
 
-	if (getnameinfo(sa, sysdep_sa_len(sa), buf, sizeof buf, 0, 0,
+	if (getnameinfo(sa, SA_LEN(sa), buf, sizeof buf, 0, 0,
 			allow_name_lookups ? 0 : NI_NUMERICHOST))
 		return -1;
 
@@ -545,7 +557,7 @@ util_ntoa(char **buf, int af, u_int8_t *addr)
 
 	bzero(&from, fromlen);
 	sfrom->sa_family = af;
-#ifndef USE_OLD_SOCKADDR
+
 	switch (af) {
 	case AF_INET:
 		sfrom->sa_len = sizeof(struct sockaddr_in);
@@ -554,7 +566,7 @@ util_ntoa(char **buf, int af, u_int8_t *addr)
 		sfrom->sa_len = sizeof(struct sockaddr_in6);
 		break;
 	}
-#endif
+
 	memcpy(sockaddr_addrdata(sfrom), addr, sockaddr_addrlen(sfrom));
 
 	if (sockaddr2text(sfrom, buf, 0)) {
@@ -596,6 +608,21 @@ check_file_secrecy_fd(int fd, char *name, size_t *file_size)
 
 	return 0;
 }
+
+/* Calculate timeout.  Returns -1 on error. */
+long
+get_timeout(struct timeval *timeout)
+{
+	struct timeval	now, result;
+
+	if (gettimeofday(&now, NULL) < 0)
+		return -1;
+
+	timersub(timeout, &now, &result);
+
+	return result.tv_sec;
+}
+
 
 /* Special for compiling with Boehms GC. See Makefile and sysdep.h  */
 #if defined (USE_BOEHM_GC)

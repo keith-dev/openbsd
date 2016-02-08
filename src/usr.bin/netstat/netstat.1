@@ -1,4 +1,4 @@
-.\"	$OpenBSD: netstat.1,v 1.40 2004/07/13 23:33:29 jmc Exp $
+.\"	$OpenBSD: netstat.1,v 1.46 2005/07/25 20:32:12 jmc Exp $
 .\"	$NetBSD: netstat.1,v 1.11 1995/10/03 21:42:43 thorpej Exp $
 .\"
 .\" Copyright (c) 1983, 1990, 1992, 1993
@@ -43,7 +43,7 @@
 .Op Fl M Ar core
 .Op Fl N Ar system
 .Nm netstat
-.Op Fl bdgilmnqrSstu
+.Op Fl bdgilmnqrstu
 .Op Fl f Ar address_family
 .Op Fl M Ar core
 .Op Fl N Ar system
@@ -54,6 +54,10 @@
 .Op Fl N Ar system
 .Op Fl w Ar wait
 .Nm netstat
+.Op Fl M Ar core
+.Op Fl N Ar system
+.Fl P Ar pcbaddr
+.Nm netstat
 .Op Fl s
 .Op Fl M Ar core
 .Op Fl N Ar system
@@ -62,6 +66,8 @@
 .Op Fl a
 .Op Fl f Ar address_family
 .Op Fl i | I Ar interface
+.Nm netstat
+.Op Fl W Ar interface
 .Sh DESCRIPTION
 The
 .Nm
@@ -80,16 +86,21 @@ interval specified,
 .Nm
 will continuously display the information regarding packet
 traffic on the configured network interfaces.
-The fourth form displays statistics about the named protocol.
-The fifth form displays per interface statistics for
+The fourth form displays statistics about the protocol control block (PCB).
+The fifth form displays statistics about the named protocol.
+The sixth form displays per interface statistics for
 the specified address family.
+The final form displays per interface statistics for
+the specified wireless (802.11) device.
 .Pp
 The options are as follows:
 .Bl -tag -width Ds
 .It Fl A
 With the default display,
 show the address of any protocol control blocks associated with sockets; used
-for debugging.
+for debugging, e.g. with the
+.Fl P
+flag.
 .It Fl a
 With the default display,
 show the state of all sockets; normally sockets used by
@@ -126,7 +137,6 @@ The following address families are recognized:
 .It "inet6" Ta Dv "AF_INET6" Ta "IP Version 6"
 .It "ipx" Ta Dv "AF_IPX" Ta "Novell IPX"
 .It "atalk" Ta Dv "AF_APPLETALK" Ta "AppleTalk"
-.It "ns" Ta Dv "AF_NS" Ta "Xerox NS Protocols"
 .It "encap" Ta Dv "PF_KEY" Ta "IPsec"
 .It "local" Ta Dv "AF_LOCAL" Ta "Local to Host (i.e., pipes)"
 .It "unix" Ta Dv "AF_UNIX" Ta "Local to Host (i.e., pipes)"
@@ -200,6 +210,14 @@ Show network addresses as numbers (normally
 interprets addresses and attempts to display them
 symbolically).
 This option may be used with any of the display formats.
+.It Fl P Ar pcbaddr
+Display the contents of the protocol control block (PCB) located at
+the kernel virtual address
+.Ar pcbaddr .
+PCB addresses can be obtained using the
+.Fl A
+flag.
+This option can currently only be used to display TCP control blocks.
 .It Fl p Ar protocol
 Restrict the output to
 .Ar protocol ,
@@ -222,10 +240,6 @@ Show the routing tables.
 If the
 .Fl s
 option is also specified, show routing statistics instead.
-.It Fl S
-Make the
-.Fl r
-command display the source selector part of the routes.
 .It Fl s
 Show per-protocol statistics.
 If this option is repeated, counters with a value of zero are suppressed.
@@ -240,6 +254,9 @@ address family.
 .It Fl v
 Be verbose.
 Avoids truncation of long addresses.
+.It Fl W Ar interface
+(IEEE 802.11 devices only)
+Show per-interface IEEE 802.11 wireless statistics.
 .It Fl w Ar wait
 Show network interface statistics at intervals of
 .Ar wait

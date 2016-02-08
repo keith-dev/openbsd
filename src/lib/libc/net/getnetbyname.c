@@ -1,3 +1,4 @@
+/*	$OpenBSD: getnetbyname.c,v 1.8 2005/08/06 20:30:03 espie Exp $ */
 /*
  * Copyright (c) 1983, 1993
  *	The Regents of the University of California.  All rights reserved.
@@ -27,21 +28,16 @@
  * SUCH DAMAGE.
  */
 
-#if defined(LIBC_SCCS) && !defined(lint)
-static char rcsid[] = "$OpenBSD: getnetbyname.c,v 1.6 2003/06/02 20:18:35 millert Exp $";
-#endif /* LIBC_SCCS and not lint */
-
 #include <netdb.h>
 #include <string.h>
 
 extern int _net_stayopen;
 
 struct netent *
-_getnetbyname(name)
-	register const char *name;
+_getnetbyname(const char *name)
 {
-	register struct netent *p;
-	register char **cp;
+	struct netent *p;
+	char **cp;
 
 	setnetent(_net_stayopen);
 	while ((p = getnetent())) {

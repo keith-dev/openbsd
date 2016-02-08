@@ -1,4 +1,4 @@
-/*	$OpenBSD: vasprintf.c,v 1.9 2004/09/28 18:12:44 otto Exp $	*/
+/*	$OpenBSD: vasprintf.c,v 1.11 2005/08/08 08:05:36 espie Exp $	*/
 
 /*
  * Copyright (c) 1997 Todd C. Miller <Todd.Miller@courtesan.com>
@@ -16,21 +16,20 @@
  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
 
-#if defined(LIBC_SCCS) && !defined(lint)
-static char rcsid[] = "$OpenBSD: vasprintf.c,v 1.9 2004/09/28 18:12:44 otto Exp $";
-#endif /* LIBC_SCCS and not lint */
-
 #include <stdio.h>
 #include <stdlib.h>
 #include <errno.h>
+#include "local.h"
 
 int
 vasprintf(char **str, const char *fmt, _BSD_VA_LIST_ ap)
 {
 	int ret;
 	FILE f;
+	struct __sfileext fext;
 	unsigned char *_base;
 
+	_FILEEXT_SETUP(&f, &fext);
 	f._file = -1;
 	f._flags = __SWR | __SSTR | __SALC;
 	f._bf._base = f._p = (unsigned char *)malloc(128);

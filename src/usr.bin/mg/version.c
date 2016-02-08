@@ -1,7 +1,9 @@
-/*	$OpenBSD: version.c,v 1.7 2003/06/01 23:58:04 art Exp $	*/
+/*	$OpenBSD: version.c,v 1.9 2005/06/14 18:14:40 kjell Exp $	*/
+
+/* This file is in the public domain. */
 
 /*
- * This file contains the string that get written
+ * This file contains the string that gets written
  * out by the emacs-version command.
  */
 
@@ -18,5 +20,5 @@ int
 showversion(int f, int n)
 {
 	ewprintf("%s", version);
-	return TRUE;
+	return (TRUE);
 }

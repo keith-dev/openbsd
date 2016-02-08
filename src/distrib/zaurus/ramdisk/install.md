@@ -1,4 +1,4 @@
-#	$OpenBSD: install.md,v 1.2 2005/01/16 19:24:55 deraadt Exp $
+#	$OpenBSD: install.md,v 1.7 2005/04/28 16:26:15 deraadt Exp $
 #
 #
 # Copyright (c) 1996 The NetBSD Foundation, Inc.
@@ -43,9 +43,6 @@ MDFSTYPE=msdos
 MDXAPERTURE=2
 ARCH=ARCH
 
-md_set_term() {
-}
-
 md_installboot() {
 }
 
@@ -69,7 +66,7 @@ md_prep_fdisk() {
 	ask_yn "Do you want to use *all* of $_disk for OpenBSD?"
 	if [[ $resp == y ]]; then
 		echo -n "Putting all of $_disk into an active OpenBSD MBR partition (type 'A6')..."
-		fdisk -e ${_disk} << __EOT > /dev/null
+		fdisk -e ${_disk} <<__EOT >/dev/null
 reinit
 update
 write
@@ -80,7 +77,7 @@ __EOT
 	fi
 
 	# Manually configure the MBR.
-	cat << __EOT
+	cat <<__EOT
 
 You will now create a single MBR partition to contain your OpenBSD data. This
 partition must have an id of 'A6'; must *NOT* overlap other partitions; and
@@ -92,7 +89,7 @@ $(fdisk ${_disk})
 __EOT
 	fdisk -e ${_disk}
 
-	cat << __EOT
+	cat <<__EOT
 Here is the partition information you chose:
 
 $(fdisk ${_disk})
@@ -104,7 +101,7 @@ md_prep_disklabel() {
 
 	md_prep_fdisk $_disk
 
-	cat << __EOT
+	cat <<__EOT
 
 You will now create an OpenBSD disklabel inside the OpenBSD MBR
 partition. The disklabel defines how OpenBSD splits up the MBR partition
@@ -126,4 +123,13 @@ __EOT
 }
 
 md_congrats() {
+	val=`ztsscale`
+	case $? in
+	0)
+		grep -v '^machdep\.ztsscale.*$' /mnt/etc/sysctl.conf \
+		     >/tmp/sysctl.conf
+		echo $val "	# see ztsscale(8)" >> /tmp/sysctl.conf
+		cp /tmp/sysctl.conf /mnt/etc/sysctl.conf
+		;;
+	esac
 }

@@ -1,4 +1,4 @@
-/*	$OpenBSD: buf.c,v 1.8 2004/12/08 22:22:38 jfb Exp $	*/
+/*	$OpenBSD: buf.c,v 1.18 2005/08/14 19:49:18 xsa Exp $	*/
 /*
  * Copyright (c) 2003 Jean-Francois Brousseau <jfb@openbsd.org>
  * All rights reserved.
@@ -27,40 +27,40 @@
 #include <sys/param.h>
 #include <sys/stat.h>
 
-#include <stdio.h>
 #include <ctype.h>
+#include <errno.h>
 #include <fcntl.h>
 #include <stdarg.h>
-#include <unistd.h>
-#include <string.h>
+#include <stdio.h>
 #include <stdlib.h>
-#include <errno.h>
+#include <string.h>
+#include <unistd.h>
 
 #include "buf.h"
 #include "log.h"
 
 
-#define BUF_INCR   128
+#define BUF_INCR	128
 
 
 struct cvs_buf {
-	u_int    cb_flags;
+	u_int	cb_flags;
 
 	/* buffer handle and size */
-	u_char  *cb_buf;
-	size_t   cb_size;
+	u_char	*cb_buf;
+	size_t	 cb_size;
 
 	/* start and length of valid data in buffer */
-	u_char  *cb_cur;
-	size_t   cb_len;
+	u_char	*cb_cur;
+	size_t	 cb_len;
 };
 
 
+#define SIZE_LEFT(b)	(b->cb_size - (size_t)(b->cb_cur - b->cb_buf) \
+			    - b->cb_len)
 
-#define SIZE_LEFT(b)  ((size_t)(b->cb_buf - b->cb_cur) + b->cb_size)
 
-
-static ssize_t   cvs_buf_grow (BUF *, size_t);
+static ssize_t	cvs_buf_grow(BUF *, size_t);
 
 
 
@@ -71,7 +71,7 @@ static ssize_t   cvs_buf_grow (BUF *, size_t);
  * uses dynamically-allocated memory and must be freed with cvs_buf_free(),
  * once the buffer is no longer needed.
  */
-BUF*
+BUF *
 cvs_buf_alloc(size_t len, u_int flags)
 {
 	BUF *b;
@@ -106,7 +106,7 @@ cvs_buf_alloc(size_t len, u_int flags)
  * buffer.
  * Returns the loaded buffer on success, or NULL on failure.
  */
-BUF*
+BUF *
 cvs_buf_load(const char *path, u_int flags)
 {
 	int fd;
@@ -135,7 +135,7 @@ cvs_buf_load(const char *path, u_int flags)
 	}
 
 	for (bp = buf->cb_cur; ; bp += (size_t)ret) {
-		len = MIN(SIZE_LEFT(buf), 4096);
+		len = SIZE_LEFT(buf);
 		ret = read(fd, bp, len);
 		if (ret == -1) {
 			cvs_log(LP_ERRNO, "read failed from buffer source");
@@ -174,7 +174,7 @@ cvs_buf_free(BUF *b)
  * of the buffer.  Instead, they are returned and should be freed later using
  * free().
  */
-void*
+void *
 cvs_buf_release(BUF *b)
 {
 	u_char *tmp;
@@ -193,6 +193,7 @@ cvs_buf_release(BUF *b)
 void
 cvs_buf_empty(BUF *b)
 {
+	memset(b->cb_buf, 0, b->cb_size);
 	b->cb_cur = b->cb_buf;
 	b->cb_len = 0;
 }
@@ -214,7 +215,7 @@ cvs_buf_copy(BUF *b, size_t off, void *dst, size_t len)
 		return (-1);
 
 	rc = MIN(len, (b->cb_len - off));
-	memcpy(dst, b->cb_buf, rc);
+	memcpy(dst, b->cb_buf + off, rc);
 
 	return (ssize_t)rc;
 }
@@ -223,11 +224,11 @@ cvs_buf_copy(BUF *b, size_t off, void *dst, size_t len)
 /*
  * cvs_buf_set()
  *
- * Set the contents of the buffer <b> to the first <len> bytes of data found
- * at <src>.  If the buffer was not created with BUF_AUTOEXT, as many bytes
- * as possible will be copied in the buffer.
+ * Set the contents of the buffer <b> at offset <off> to the first <len>
+ * bytes of data found at <src>.  If the buffer was not created with
+ * BUF_AUTOEXT, as many bytes as possible will be copied in the buffer.
  */
-int
+ssize_t
 cvs_buf_set(BUF *b, const void *src, size_t len, size_t off)
 {
 	size_t rlen;
@@ -248,7 +249,7 @@ cvs_buf_set(BUF *b, const void *src, size_t len, size_t off)
 		b->cb_len = rlen;
 	}
 
-	return (int)rlen;
+	return (rlen);
 }
 
 
@@ -267,7 +268,7 @@ cvs_buf_putc(BUF *b, int c)
 	if (bp == (b->cb_buf + b->cb_size)) {
 		/* extend */
 		if (!(b->cb_flags & BUF_AUTOEXT) ||
-		    (cvs_buf_grow(b, BUF_INCR) < 0))
+		    (cvs_buf_grow(b, (size_t)BUF_INCR) < 0))
 			return (-1);
 
 		/* the buffer might have been moved */
@@ -337,19 +338,19 @@ cvs_buf_fappend(BUF *b, const char *fmt, ...)
 		return (-1);
 	}
 
-	ret = cvs_buf_append(b, str, ret);
+	ret = cvs_buf_append(b, str, (size_t)ret);
 	free(str);
 	return (ret);
 }
 
 
 /*
- * cvs_buf_size()
+ * cvs_buf_len()
  *
  * Returns the size of the buffer that is being used.
  */
 size_t
-cvs_buf_size(BUF *b)
+cvs_buf_len(BUF *b)
 {
 	return (b->cb_len);
 }
@@ -360,7 +361,7 @@ cvs_buf_size(BUF *b)
  *
  * Peek at the contents of the buffer <b> at offset <off>.
  */
-const void*
+const void *
 cvs_buf_peek(BUF *b, size_t off)
 {
 	if (off >= b->cb_len)
@@ -386,7 +387,7 @@ cvs_buf_write_fd(BUF *b, int fd)
 	bp = b->cb_cur;
 
 	do {
-		ret = write(fd, bp, MIN(len, 8192));
+		ret = write(fd, bp, len);
 		if (ret == -1) {
 			if (errno == EINTR || errno == EAGAIN)
 				continue;
@@ -414,15 +415,13 @@ cvs_buf_write(BUF *b, const char *path, mode_t mode)
 
 	fd = open(path, O_WRONLY|O_CREAT|O_TRUNC, mode);
 	if (fd == -1) {
-		cvs_log(LP_ERRNO, "failed to open file `%s': %s", 
-		    path, strerror(errno));
+		cvs_log(LP_ERRNO, "failed to open file `%s'", path);
 		return (-1);
 	}
 
 	ret = cvs_buf_write_fd(b, fd);
 	if (ret == -1) {
-		cvs_log(LP_ERRNO, "failed to write to file `%s': %s", 
-		    path, strerror(errno));
+		cvs_log(LP_ERRNO, "failed to write to file `%s'",  path);
 		(void)unlink(path);
 	}
 	(void)close(fd);
@@ -433,7 +432,7 @@ cvs_buf_write(BUF *b, const char *path, mode_t mode)
 /*
  * cvs_buf_write_stmp()
  *
- * Write the contents of the buffer <b> to a temporary file whose path is 
+ * Write the contents of the buffer <b> to a temporary file whose path is
  * specified using <template> (see mkstemp.3). NB. This function will modify
  * <template>, as per mkstemp
  */
@@ -445,15 +444,14 @@ cvs_buf_write_stmp(BUF *b, char *template, mode_t mode)
 
 	fd = mkstemp(template);
 	if (fd == -1) {
-		cvs_log(LP_ERRNO, "failed to mkstemp file `%s': %s", 
-		    template, strerror(errno));
+		cvs_log(LP_ERRNO, "failed to mkstemp file `%s'", template);
 		return (-1);
 	}
 
 	ret = cvs_buf_write_fd(b, fd);
 	if (ret == -1) {
-		cvs_log(LP_ERRNO, "failed to write to temp file `%s': %s", 
-		    template, strerror(errno));
+		cvs_log(LP_ERRNO, "failed to write to temp file `%s'",
+		    template);
 		(void)unlink(template);
 	}
 	(void)close(fd);

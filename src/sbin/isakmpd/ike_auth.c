@@ -1,4 +1,4 @@
-/* $OpenBSD: ike_auth.c,v 1.97 2005/02/22 16:57:48 hshoexer Exp $	 */
+/* $OpenBSD: ike_auth.c,v 1.104 2005/07/14 12:50:08 moritz Exp $	 */
 /* $EOM: ike_auth.c,v 1.59 2000/11/21 00:21:31 angelos Exp $	 */
 
 /*
@@ -43,12 +43,8 @@
 #include <string.h>
 #include <unistd.h>
 #include <regex.h>
-#if defined (USE_KEYNOTE)
 #include <keynote.h>
-#endif
 #include <policy.h>
-
-#include "sysdep.h"
 
 #include "cert.h"
 #include "conf.h"
@@ -57,7 +53,6 @@
 #include "dnssec.h"
 #endif
 #include "exchange.h"
-#include "gmp_util.h"
 #include "hash.h"
 #include "ike_auth.h"
 #include "ipsec.h"
@@ -70,9 +65,7 @@
 #include "transport.h"
 #include "util.h"
 #include "key.h"
-#if defined (USE_X509)
 #include "x509.h"
-#endif
 
 #ifdef notyet
 static u_int8_t *enc_gen_skeyid(struct exchange *, size_t *);
@@ -82,15 +75,11 @@ static u_int8_t *pre_shared_gen_skeyid(struct exchange *, size_t *);
 static int      pre_shared_decode_hash(struct message *);
 static int      pre_shared_encode_hash(struct message *);
 
-#if defined (USE_X509) || defined (USE_KEYNOTE)
 static u_int8_t *sig_gen_skeyid(struct exchange *, size_t *);
 static int      rsa_sig_decode_hash(struct message *);
 static int      rsa_sig_encode_hash(struct message *);
-#endif
 
-#if defined (USE_RAWKEY)
 static int      get_raw_key_from_file(int, u_int8_t *, size_t, RSA **);
-#endif
 
 static int      ike_auth_hash(struct exchange *, u_int8_t *);
 
@@ -107,13 +96,11 @@ static struct ike_auth ike_auth[] = {
 		pre_shared_encode_hash
 	},
 #endif
-#if defined (USE_X509) || defined (USE_KEYNOTE)
 	{
 		IKE_AUTH_RSA_SIG, sig_gen_skeyid,
 		rsa_sig_decode_hash,
 		rsa_sig_encode_hash
 	},
-#endif
 #ifdef notdef
 	{
 		IKE_AUTH_RSA_ENC, enc_gen_skeyid,
@@ -147,15 +134,11 @@ static void *
 ike_auth_get_key(int type, char *id, char *local_id, size_t *keylen)
 {
 	char	*key, *buf;
-#if defined (USE_X509) || defined (USE_KEYNOTE)
 	int	 fd;
 	char	*keyfile;
-#if defined (USE_X509)
 	FILE	*keyfp;
 	RSA	*rsakey;
 	size_t	fsize;
-#endif
-#endif
 
 	switch (type) {
 	case IKE_AUTH_PRE_SHARED:
@@ -198,8 +181,6 @@ ike_auth_get_key(int type, char *id, char *local_id, size_t *keylen)
 		break;
 
 	case IKE_AUTH_RSA_SIG:
-#if defined (USE_X509) || defined (USE_KEYNOTE)
-#if defined (USE_KEYNOTE)
 		if (local_id && (keyfile = conf_get_str("KeyNote",
 		    "Credential-directory")) != 0) {
 			struct stat     sb;
@@ -280,8 +261,6 @@ ike_auth_get_key(int type, char *id, char *local_id, size_t *keylen)
 			return dc.dec_key;
 		}
 ignorekeynote:
-#endif				/* USE_KEYNOTE */
-#ifdef USE_X509
 		/* Otherwise, try X.509 */
 		keyfile = conf_get_str("X509-certificates", "Private-key");
 
@@ -315,8 +294,6 @@ ignorekeynote:
 			return 0;
 		}
 		return rsakey;
-#endif /* USE_X509 */
-#endif /* USE_X509 || USE_KEYNOTE */
 
 	default:
 		log_print("ike_auth_get_key: unknown key type %d", type);
@@ -423,7 +400,6 @@ pre_shared_gen_skeyid(struct exchange *exchange, size_t *sz)
 	return skeyid;
 }
 
-#if defined (USE_X509) || defined (USE_KEYNOTE)
 /* Both DSS & RSA signature authentication use this algorithm.  */
 static u_int8_t *
 sig_gen_skeyid(struct exchange *exchange, size_t *sz)
@@ -471,7 +447,6 @@ sig_gen_skeyid(struct exchange *exchange, size_t *sz)
 	prf_free(prf);
 	return skeyid;
 }
-#endif				/* USE_X509 || USE_KEYNOTE */
 
 #ifdef notdef
 /*
@@ -548,7 +523,6 @@ pre_shared_decode_hash(struct message *msg)
 	return 0;
 }
 
-#if defined (USE_X509) || defined (USE_KEYNOTE)
 /* Decrypt the HASH in SIG, we already need a parsed ID payload.  */
 static int
 rsa_sig_decode_hash(struct message *msg)
@@ -594,7 +568,6 @@ rsa_sig_decode_hash(struct message *msg)
 		    p ? GET_ISAKMP_CERT_ENCODING(p->p) : -1);
 		return -1;
 	}
-#if defined (USE_POLICY) || defined (USE_KEYNOTE)
 	/*
 	 * We need the policy session initialized now, so we can add
 	 * credentials etc.
@@ -605,7 +578,6 @@ rsa_sig_decode_hash(struct message *msg)
 		    "session");
 		return -1;
 	}
-#endif				/* USE_POLICY || USE_KEYNOTE */
 
 	/* Obtain a certificate from our certificate storage.  */
 	if (handler->cert_obtain(id, id_len, 0, &rawcert, &rawcertlen)) {
@@ -626,10 +598,8 @@ rsa_sig_decode_hash(struct message *msg)
 					    "of type %d", handler->id));
 					exchange->recv_cert = cert;
 					exchange->recv_certtype = handler->id;
-#if defined (USE_POLICY)
 					x509_generate_kn(exchange->policy_id,
 					    cert);
-#endif				/* USE_POLICY */
 				}
 			}
 		} else if (handler->id == ISAKMP_CERTENC_KEYNOTE)
@@ -641,8 +611,7 @@ rsa_sig_decode_hash(struct message *msg)
 	 * XXX I believe this is the wrong spot for this.  CERTs can appear
 	 * anytime.
          */
-	for (p = payload_first(msg, ISAKMP_PAYLOAD_CERT); p;
-	    p = TAILQ_NEXT(p, link)) {
+	TAILQ_FOREACH(p, &msg->payload[ISAKMP_PAYLOAD_CERT], link) {
 		p->flags |= PL_MARK;
 
 		/*
@@ -712,7 +681,6 @@ rsa_sig_decode_hash(struct message *msg)
 		exchange->recv_cert = cert;
 		exchange->recv_certtype = GET_ISAKMP_CERT_ENCODING(p->p);
 
-#if defined (USE_POLICY) || defined (USE_KEYNOTE)
 		if (exchange->recv_certtype == ISAKMP_CERTENC_KEYNOTE) {
 			struct keynote_deckey dc;
 			char           *pp;
@@ -742,8 +710,6 @@ rsa_sig_decode_hash(struct message *msg)
 			    pp);
 			free(pp);
 		}
-#endif
-
 		found++;
 	}
 
@@ -767,13 +733,11 @@ rsa_sig_decode_hash(struct message *msg)
 	}
 #endif				/* USE_DNSSEC */
 
-#if defined (USE_RAWKEY)
 	/* If we still have not found a key, try to read it from a file. */
 	if (!found)
 		if (get_raw_key_from_file(IKE_AUTH_RSA_SIG, id, id_len, &key)
 		    != -1)
 			found++;
-#endif
 
 	if (!found) {
 		log_print("rsa_sig_decode_hash: no public key found");
@@ -824,7 +788,6 @@ rsa_sig_decode_hash(struct message *msg)
 	p->flags |= PL_MARK;
 	return 0;
 }
-#endif				/* USE_X509 || USE_KEYNOTE */
 
 static int
 pre_shared_encode_hash(struct message *msg)
@@ -850,7 +813,6 @@ pre_shared_encode_hash(struct message *msg)
 	return 0;
 }
 
-#if defined (USE_X509) || defined (USE_KEYNOTE)
 /* Encrypt the HASH into a SIG type.  */
 static int
 rsa_sig_encode_hash(struct message *msg)
@@ -1022,6 +984,7 @@ skipcert:
 	/* Enable RSA blinding.  */
 	if (RSA_blinding_on(sent_key, NULL) != 1) {
 		log_error("rsa_sig_encode_hash: RSA_blinding_on () failed.");
+		RSA_free(sent_key);
 		return -1;
 	}
 	/* XXX hashsize is not necessarily prf->blocksize.  */
@@ -1029,10 +992,12 @@ skipcert:
 	if (!buf) {
 		log_error("rsa_sig_encode_hash: malloc (%lu) failed",
 		    (unsigned long)hashsize);
+		RSA_free(sent_key);
 		return -1;
 	}
 	if (ike_auth_hash(exchange, buf) == -1) {
 		free(buf);
+		RSA_free(sent_key);
 		return -1;
 	}
 	snprintf(header, sizeof header, "rsa_sig_encode_hash: HASH_%c",
@@ -1043,6 +1008,8 @@ skipcert:
 	if (!data) {
 		log_error("rsa_sig_encode_hash: malloc (%d) failed",
 		    RSA_size(sent_key));
+		free(buf);
+		RSA_free(sent_key);
 		return -1;
 	}
 	sigsize = RSA_private_encrypt(hashsize, buf, data, sent_key,
@@ -1059,6 +1026,7 @@ skipcert:
 	datalen = (u_int32_t) sigsize;
 
 	free(buf);
+	RSA_free(sent_key);
 
 	buf = realloc(data, ISAKMP_SIG_SZ + datalen);
 	if (!buf) {
@@ -1080,7 +1048,6 @@ skipcert:
 	}
 	return 0;
 }
-#endif				/* USE_X509 || USE_KEYNOTE */
 
 int
 ike_auth_hash(struct exchange *exchange, u_int8_t *buf)
@@ -1117,7 +1084,6 @@ ike_auth_hash(struct exchange *exchange, u_int8_t *buf)
 	return 0;
 }
 
-#if defined (USE_RAWKEY)
 static int
 get_raw_key_from_file(int type, u_int8_t *id, size_t id_len, RSA **rsa)
 {
@@ -1167,4 +1133,3 @@ get_raw_key_from_file(int type, u_int8_t *id, size_t id_len, RSA **rsa)
 
 	return (*rsa ? 0 : -1);
 }
-#endif				/* USE_RAWKEY */

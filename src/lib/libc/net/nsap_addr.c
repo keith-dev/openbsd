@@ -1,4 +1,4 @@
-/*	$OpenBSD: nsap_addr.c,v 1.4 1997/07/09 01:08:45 millert Exp $	*/
+/*	$OpenBSD: nsap_addr.c,v 1.6 2005/08/06 20:30:03 espie Exp $	*/
 
 /*
  * Copyright (c) 1996 by Internet Software Consortium.
@@ -17,14 +17,6 @@
  * SOFTWARE.
  */
 
-#if defined(LIBC_SCCS) && !defined(lint)
-#if 0
-static char rcsid[] = "$From: nsap_addr.c,v 8.3 1996/08/05 08:31:35 vixie Exp $";
-#else
-static char rcsid[] = "$OpenBSD: nsap_addr.c,v 1.4 1997/07/09 01:08:45 millert Exp $";
-#endif
-#endif /* LIBC_SCCS and not lint */
-
 #include <sys/types.h>
 #include <sys/param.h>
 #include <sys/socket.h>
@@ -34,19 +26,15 @@ static char rcsid[] = "$OpenBSD: nsap_addr.c,v 1.4 1997/07/09 01:08:45 millert E
 #include <resolv.h>
 
 static char
-xtob(c)
-	register int c;
+xtob(int c)
 {
 	return (c - (((c >= '0') && (c <= '9')) ? '0' : '7'));
 }
 
 u_int
-inet_nsap_addr(ascii, binary, maxlen)
-	const char *ascii;
-	u_char *binary;
-	int maxlen;
+inet_nsap_addr(const char *ascii, u_char *binary, int maxlen)
 {
-	register u_char c, nib;
+	u_char c, nib;
 	u_int len = 0;
 
 	while ((c = *ascii++) != '\0' && len < maxlen) {
@@ -76,12 +64,9 @@ inet_nsap_addr(ascii, binary, maxlen)
 }
 
 char *
-inet_nsap_ntoa(binlen, binary, ascii)
-	int binlen;
-	register const u_char *binary;
-	register char *ascii;
+inet_nsap_ntoa(int binlen, const u_char *binary, char *ascii)
 {
-	register int nib;
+	int nib;
 	int i;
 	static char tmpbuf[255*3];
 	char *start;

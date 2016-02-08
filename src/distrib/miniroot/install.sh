@@ -1,5 +1,5 @@
 #!/bin/ksh
-#	$OpenBSD: install.sh,v 1.149 2004/11/06 18:05:48 deraadt Exp $
+#	$OpenBSD: install.sh,v 1.152 2005/04/21 21:41:33 krw Exp $
 #	$NetBSD: install.sh,v 1.5.2.8 1996/08/27 18:15:05 gwr Exp $
 #
 # Copyright (c) 1997-2004 Todd Miller, Theo de Raadt, Ken Westerback
@@ -85,7 +85,7 @@ if [ ! -f /etc/fstab ]; then
 	DISK=
 	_DKDEVS=$DKDEVS
 
-	while : ; do
+	while :; do
 		_DKDEVS=`rmel "$DISK" $_DKDEVS`
 
 		# Always do ROOTDISK first, and repeat until
@@ -105,6 +105,7 @@ if [ ! -f /etc/fstab ]; then
 		fi
 
 		DISK=$resp
+		makedev $DISK || continue
 
 		# Deal with disklabels, including editing the root disklabel
 		# and labeling additional disks. This is machine-dependent since
@@ -162,7 +163,7 @@ if [ ! -f /etc/fstab ]; then
 
 		# Now prompt the user for the mount points.
 		_i=0
-		while : ; do
+		while :; do
 			_pp=${_partitions[$_i]}
 			_ps=$(( ${_psizes[$_i]} / 2 ))
 			_mp=${_mount_points[$_i]}
@@ -215,7 +216,7 @@ if [ ! -f /etc/fstab ]; then
 		done
 	done
 
-	cat << __EOT
+	cat <<__EOT
 
 OpenBSD filesystems:
 $(<$FILESYSTEMS)
@@ -327,7 +328,7 @@ ask_until "\nSystem hostname? (short form, e.g. 'foo')" "$(hostname -s)"
 ( cd /tmp; rm -f host* my* resolv.* dhclient.* )
 
 # Always create new hosts file.
-cat > /tmp/hosts << __EOT
+cat >/tmp/hosts <<__EOT
 ::1 localhost
 127.0.0.1 localhost
 ::1 $(hostname -s)
@@ -357,7 +358,7 @@ install_sets
 # mount.
 while read _dev _mp _fstype _opt _rest; do
 	mount -u -o $_opt $_dev $_mp ||	exit
-done < /etc/fstab
+done </etc/fstab
 
 # Handle questions...
 questions
@@ -370,7 +371,7 @@ echo -n "Saving configuration files..."
 
 # Move configuration files from /tmp to /mnt/etc.
 ( cd /tmp
-hostname > myname
+hostname >myname
 
 # Add FQDN to /tmp/hosts entries, changing lines of the form '1.2.3.4 hostname'
 # to '1.2.3.4 hostname.$FQDN hostname'. Leave untouched any lines containing
@@ -382,7 +383,7 @@ while read _addr _hn _aliases; do
 	else
 		echo "$_addr $_hn.$_dn $_hn"
 	fi
-done < hosts > hosts.new
+done <hosts >hosts.new
 mv hosts.new hosts
 
 # Prepend interesting comments from installed hosts and dhclient.conf files
@@ -400,7 +401,7 @@ done )
 _encr=`/mnt/usr/bin/encrypt -b 8 -- "$_password"`
 echo "1,s@^root::@root:${_encr}:@
 w
-q" | /mnt/bin/ed /mnt/etc/master.passwd 2> /dev/null
+q" | /mnt/bin/ed /mnt/etc/master.passwd 2>/dev/null
 /mnt/usr/sbin/pwd_mkdb -p -d /mnt/etc /etc/master.passwd
 
 echo -n "done.\nGenerating initial host.random file..."

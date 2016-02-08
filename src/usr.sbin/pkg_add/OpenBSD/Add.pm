@@ -1,5 +1,5 @@
 # ex:ts=8 sw=4:
-# $OpenBSD: Add.pm,v 1.31 2005/02/07 00:52:35 espie Exp $
+# $OpenBSD: Add.pm,v 1.39 2005/08/22 11:25:59 espie Exp $
 #
 # Copyright (c) 2003-2004 Marc Espie <espie@openbsd.org>
 #
@@ -20,6 +20,7 @@ use warnings;
 package OpenBSD::Add;
 use OpenBSD::Error;
 use OpenBSD::PackageInfo;
+use OpenBSD::ArcCheck;
 use File::Copy;
 
 sub manpages_index
@@ -87,14 +88,26 @@ sub validate_plist($$)
 		my $s = OpenBSD::Vstat::add($fname, $item->{size}, \$pkgname);
 		next unless defined $s;
 		if ($s->{ro}) {
-			Warn "Error: ", $s->{dev}, " is read-only ($fname)\n";
+			if ($state->{very_verbose} or ++($s->{problems}) < 4) {
+				Warn "Error: ", $s->{dev}, 
+				    " is read-only ($fname)\n";
+			} elsif ($s->{problems} == 4) {
+				Warn "Error: ... more files can't be written to ",
+					$s->{dev}, "\n";
+			}
 			$problems++;
 		}
 		if ($state->{forced}->{kitchensink} && $state->{not}) {
 			next;
 		}
 		if ($s->avail() < 0) {
-			Warn "Error: ", $s->{dev}, " is not large enough ($fname)\n";
+			if ($state->{very_verbose} or ++($s->{problems}) < 4) {
+				Warn "Error: ", $s->{dev}, 
+				    " is not large enough ($fname)\n";
+			} elsif ($s->{problems} == 4) {
+				Warn "Error: ... more files do not fit on ",
+					$s->{dev}, "\n";
+			}
 			$problems++;
 		}
 	}
@@ -125,14 +138,17 @@ sub validate_plist($$)
 		OpenBSD::CollisionReport::collision_report($colliding, $state);
 	}
 	Fatal "fatal issues in installing $pkgname" if $problems;
+	$totsize = 1 if $totsize == 0;
 	return $totsize;
 }
 
 sub borked_installation
 {
-	my ($plist, $dir, @msg) = @_;
+	my ($plist, $dir, $not, @msg) = @_;
 
+	Fatal @msg if $not;
 	use OpenBSD::PackingElement;
+
 
 	my $borked = borked_package($plist->pkgname());
 	# fix packing list for pkg_delete
@@ -140,7 +156,7 @@ sub borked_installation
 
 	# last file may have not copied correctly
 	my $last = $plist->{items}->[@{$plist->{items}}-1];
-	if ($last->IsFile()) {
+	if ($last->IsFile() && defined($last->{md5})) {
 	    require OpenBSD::md5;
 
 	    my $old = $last->{md5};
@@ -341,7 +357,11 @@ sub prepare_to_extract
 	my $destdir = $state->{destdir};
 
 	my $file=$state->{archive}->next();
-	if ($file->{name} ne $self->{name}) {
+	if (!defined $file) {
+		Fatal "Error: truncated archive\n";
+	}
+	$file->{cwd} = $self->cwd();
+	if (!$file->check_name($self->{name})) {
 		Fatal "Error: archive does not match ", $file->{name}, "!=",
 		$self->{name}, "\n";
 	}
@@ -349,7 +369,7 @@ sub prepare_to_extract
 		unless (defined $self->{symlink} && $file->isSymLink()) {
 			Fatal "Error: bogus symlink ", $self->{name}, "\n";
 		}
-		if ($self->{symlink} ne $file->{linkname}) {
+		if (!$file->check_linkname($self->{symlink})) {
 			Fatal "Error: archive sl does not match ", $file->{linkname}, "!=",
 			$self->{symlink}, "\n";
 		}
@@ -357,18 +377,13 @@ sub prepare_to_extract
 		unless (defined $self->{link} && $file->isHardLink()) {
 			Fatal "Error: bogus hardlink ", $self->{name}, "\n";
 		}
-		my $linkname = $file->{linkname};
-		if (defined $self->{cwd}) {
-			$linkname = $self->cwd().'/'.$linkname;
-		}
-		if ($self->{link} ne $linkname) {
-			Fatal "Error: archive hl does not match ", $linkname, "!=",
+		if (!$file->check_linkname($self->{link})) {
+			Fatal "Error: archive hl does not match ", $file->{linkname}, "!=",
 			$self->{link}, "!!!\n";
 		}
 	}
 
 	$file->{name} = $fullname;
-	$file->{cwd} = $self->cwd();
 	$file->{destdir} = $destdir;
 	# faked installation are VERY weird
 	if (defined $self->{symlink} && $state->{do_faked}) {
@@ -523,34 +538,5 @@ sub install
 	return if $state->{do_faked};
 	$self->mark_ldconfig_directory($state->{destdir});
 }
-
-package OpenBSD::PackingElement::Arch;
-
-sub check
-{
-	my ($self, $forced_arch) = @_;
-
-	my ($machine_arch, $arch);
-	for my $ok (@{$self->{arches}}) {
-		return 1 if $ok eq '*';
-		if (defined $forced_arch) {
-			if ($ok eq $forced_arch) {
-				return 1;
-			} else {
-				next;
-			}
-		}
-		if (!defined $machine_arch) {
-			chomp($machine_arch = `/usr/bin/arch -s`);
-		}
-		return 1 if $ok eq $machine_arch;
-		if (!defined $arch) {
-			chomp($arch = `/usr/bin/uname -m`);
-		}
-		return 1 if $ok eq $arch;
-	}
-	return undef;
-}
-
 
 1;

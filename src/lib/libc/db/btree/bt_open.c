@@ -1,4 +1,4 @@
-/*	$OpenBSD: bt_open.c,v 1.11 2003/06/02 20:18:33 millert Exp $	*/
+/*	$OpenBSD: bt_open.c,v 1.13 2005/08/05 13:02:59 espie Exp $	*/
 
 /*-
  * Copyright (c) 1990, 1993, 1994
@@ -31,14 +31,6 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  */
-
-#if defined(LIBC_SCCS) && !defined(lint)
-#if 0
-static char sccsid[] = "@(#)bt_open.c	8.11 (Berkeley) 11/2/95";
-#else
-static const char rcsid[] = "$OpenBSD: bt_open.c,v 1.11 2003/06/02 20:18:33 millert Exp $";
-#endif
-#endif /* LIBC_SCCS and not lint */
 
 /*
  * Implementation of btree access method for 4.4BSD.
@@ -89,10 +81,8 @@ static int tmp(void);
  *
  */
 DB *
-__bt_open(fname, flags, mode, openinfo, dflags)
-	const char *fname;
-	int flags, mode, dflags;
-	const BTREEINFO *openinfo;
+__bt_open(const char *fname, int flags, int mode, const BTREEINFO *openinfo,
+    int dflags)
 {
 	struct stat sb;
 	BTMETA m;
@@ -352,8 +342,7 @@ err:	if (t) {
  *	RET_ERROR, RET_SUCCESS
  */
 static int
-nroot(t)
-	BTREE *t;
+nroot(BTREE *t)
 {
 	PAGE *meta, *root;
 	pgno_t npg;
@@ -393,7 +382,7 @@ nroot(t)
 }
 
 static int
-tmp()
+tmp(void)
 {
 	sigset_t set, oset;
 	int fd;
@@ -414,7 +403,7 @@ tmp()
 }
 
 static int
-byteorder()
+byteorder(void)
 {
 	u_int32_t x;
 	u_char *p;
@@ -432,8 +421,7 @@ byteorder()
 }
 
 int
-__bt_fd(dbp)
-	const DB *dbp;
+__bt_fd(const DB *dbp)
 {
 	BTREE *t;
 

@@ -1,4 +1,4 @@
-/*	$OpenBSD: privsep_pcap.c,v 1.7 2005/03/06 18:44:50 reyk Exp $ */
+/*	$OpenBSD: privsep_pcap.c,v 1.9 2005/05/22 19:53:33 moritz Exp $ */
 
 /*
  * Copyright (c) 2004 Can Erkin Acar
@@ -48,7 +48,7 @@
 
 /*
  * privileged part of priv_pcap_setfilter, compile the filter
- * expression, and return it to the child. Note that we fake an hpcap
+ * expression, and return it to the parent. Note that we fake an hpcap
  * and use it to capture the error messages, and pass the error back
  * to client.
  */
@@ -105,8 +105,8 @@ setfilter(int bpfd, int sock, char *filter)
 }
 
 /*
- * filter is compiled and set in the parent, get the compiled output,
- * and set it locally, for filtering dumps etc.
+ * filter is compiled and set in the privileged process.
+ * get the compiled output and set it locally for filtering dumps etc.
  */
 struct bpf_program *
 priv_pcap_setfilter(pcap_t *hpcap, int oflag, u_int32_t netmask)
@@ -486,7 +486,7 @@ priv_pcap_dump_open(pcap_t *p, char *fname)
 	FILE *f;
 
 	if (priv_fd < 0)
-		errx(1, "%s: called from privileged portion\n", __func__);
+		errx(1, "%s: called from privileged portion", __func__);
 
 	if (fname[0] == '-' && fname[1] == '\0') {
 		f = stdout;

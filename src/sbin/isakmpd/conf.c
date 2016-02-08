@@ -1,4 +1,4 @@
-/* $OpenBSD: conf.c,v 1.76 2005/03/15 20:33:07 moritz Exp $	 */
+/* $OpenBSD: conf.c,v 1.84 2005/08/02 09:08:40 hshoexer Exp $	 */
 /* $EOM: conf.c,v 1.48 2000/12/04 02:04:29 angelos Exp $	 */
 
 /*
@@ -44,8 +44,6 @@
 #include <string.h>
 #include <unistd.h>
 #include <errno.h>
-
-#include "sysdep.h"
 
 #include "app.h"
 #include "conf.h"
@@ -137,8 +135,8 @@ conf_remove_now(char *section, char *tag)
 	for (cb = LIST_FIRST(&conf_bindings[conf_hash(section)]); cb;
 	    cb = next) {
 		next = LIST_NEXT(cb, link);
-		if (strcasecmp(cb->section, section) == 0
-		    && strcasecmp(cb->tag, tag) == 0) {
+		if (strcasecmp(cb->section, section) == 0 &&
+		    strcasecmp(cb->tag, tag) == 0) {
 			LIST_REMOVE(cb, link);
 			LOG_DBG((LOG_MISC, 95, "[%s]:%s->%s removed", section,
 			    tag, cb->value));
@@ -199,15 +197,33 @@ conf_set_now(char *section, char *tag, char *value, int override,
 		    (unsigned long)sizeof *node);
 		return 1;
 	}
-	node->section = strdup(section);
-	node->tag = strdup(tag);
-	node->value = strdup(value);
+	node->section = node->tag = node->value = NULL;
+	if ((node->section = strdup(section)) == NULL)
+		goto fail;
+	if ((node->tag = strdup(tag)) == NULL)
+		goto fail;
+	if ((node->value = strdup(value)) == NULL)
+		goto fail;
 	node->is_default = is_default;
 
 	LIST_INSERT_HEAD(&conf_bindings[conf_hash(section)], node, link);
 	LOG_DBG((LOG_MISC, 95, "conf_set_now: [%s]:%s->%s", node->section,
 	    node->tag, node->value));
 	return 0;
+fail:
+	if (node->value) {
+		free(node->value);
+		node->value = NULL;
+	}
+	if (node->tag) {
+		free(node->tag);
+		node->tag = NULL;
+	}
+	if (node->section) {
+		free(node->section);
+		node->section = NULL;
+	}
+	return 1;
 }
 
 /*
@@ -318,7 +334,7 @@ conf_parse(int trans, char *buf, size_t sz)
  *
  * DH group defaults to MODP_1024.
  *
- * XXX We may want to support USE_BLOWFISH, USE_TRIPLEDES, etc...
+ * XXX We may want to support USE_TRIPLEDES, etc...
  * XXX No EC2N DH support here yet.
  */
 
@@ -475,7 +491,6 @@ conf_load_defaults(int tr)
 	conf_set(tr, "General", "Pubkey-directory", CONF_DFLT_PUBKEY_DIR, 0,
 	    1);
 
-#ifdef USE_X509
 	conf_set(tr, "X509-certificates", "CA-directory",
 	    CONF_DFLT_X509_CA_DIR, 0, 1);
 	conf_set(tr, "X509-certificates", "Cert-directory",
@@ -484,12 +499,9 @@ conf_load_defaults(int tr)
 	    CONF_DFLT_X509_PRIVATE_KEY, 0, 1);
 	conf_set(tr, "X509-certificates", "CRL-directory",
 	    CONF_DFLT_X509_CRL_DIR, 0, 1);
-#endif
 
-#ifdef USE_KEYNOTE
 	conf_set(tr, "KeyNote", "Credential-directory",
 	    CONF_DFLT_KEYNOTE_CRED_DIR, 0, 1);
-#endif
 
 	/* Lifetimes. XXX p1/p2 vs main/quick mode may be unclear.  */
 	dflt = conf_get_trans_str(tr, "General", "Default-phase-1-lifetime");
@@ -568,10 +580,16 @@ conf_reinit(void)
 	size_t	 sz;
 	char	*new_conf_addr = 0;
 
-	if ((fd = monitor_open(conf_path, O_RDONLY, 0)) != -1) {
-		if (check_file_secrecy_fd(fd, conf_path, &sz))
-			goto fail;
+	fd = monitor_open(conf_path, O_RDONLY, 0);
+	if (fd == -1 || check_file_secrecy_fd(fd, conf_path, &sz) == -1) {
+		if (fd == -1 && errno != ENOENT)
+			log_error("conf_reinit: open(\"%s\", O_RDONLY, 0) "
+			    "failed", conf_path);
+		if (fd != -1)
+			close(fd);
 
+		trans = conf_begin();
+	} else {
 		new_conf_addr = malloc(sz);
 		if (!new_conf_addr) {
 			log_error("conf_reinit: malloc (%lu) failed",
@@ -590,12 +608,6 @@ conf_reinit(void)
 
 		/* XXX Should we not care about errors and rollback?  */
 		conf_parse(trans, new_conf_addr, sz);
-	} else {
-		if (errno != ENOENT)
-			log_error("conf_reinit: open(\"%s\", O_RDONLY, 0) "
-			    "failed", conf_path);
-
-		trans = conf_begin();
 	}
 
 	/* Load default configuration values.  */
@@ -693,8 +705,8 @@ conf_get_str(char *section, char *tag)
 			return cb->value;
 		}
 	LOG_DBG((LOG_MISC, 95,
-	     "conf_get_str: configuration value not found [%s]:%s", section,
-	     tag));
+	    "conf_get_str: configuration value not found [%s]:%s", section,
+	    tag));
 	return 0;
 }
 

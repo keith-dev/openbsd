@@ -1,4 +1,6 @@
-/*	$OpenBSD: cinfo.c,v 1.10 2002/07/01 14:33:44 vincent Exp $	*/
+/*	$OpenBSD: cinfo.c,v 1.12 2005/06/14 18:14:40 kjell Exp $	*/
+
+/* This file is in the public domain. */
 
 /*
  *		Character class tables.
@@ -93,10 +95,10 @@ char *
 keyname(char *cp, size_t len, int k)
 {
 	const char  *np;
-	size_t copied;
+	size_t	     copied;
 
 	if (k < 0)
-		k = CHARMASK(k);/* sign extended char */
+		k = CHARMASK(k);	/* sign extended char */
 	switch (k) {
 	case CCHR('@'):
 		np = "C-SPC";
@@ -131,7 +133,7 @@ keyname(char *cp, size_t len, int k)
 			*cp++ = ((k >> 3) & 7) + '0';
 			*cp++ = (k & 7) + '0';
 			*cp = '\0';
-			return cp;
+			return (cp);
 		} else if (k < ' ') {
 			*cp++ = 'C';
 			*cp++ = '-';
@@ -141,10 +143,10 @@ keyname(char *cp, size_t len, int k)
 		}
 		*cp++ = k;
 		*cp = '\0';
-		return cp;
+		return (cp);
 	}
 	copied = strlcpy(cp, np, len);
 	if (copied >= len)
 		copied = len - 1;
-	return cp + copied;
+	return (cp + copied);
 }

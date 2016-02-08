@@ -1,4 +1,4 @@
-/*	$OpenBSD: sysctl.c,v 1.117 2005/01/28 15:39:14 millert Exp $	*/
+/*	$OpenBSD: sysctl.c,v 1.128 2005/08/05 03:07:40 dlg Exp $	*/
 /*	$NetBSD: sysctl.c,v 1.9 1995/09/30 07:12:50 thorpej Exp $	*/
 
 /*
@@ -40,7 +40,7 @@ static const char copyright[] =
 #if 0
 static const char sccsid[] = "@(#)sysctl.c	8.5 (Berkeley) 5/9/95";
 #else
-static const char rcsid[] = "$OpenBSD: sysctl.c,v 1.117 2005/01/28 15:39:14 millert Exp $";
+static const char rcsid[] = "$OpenBSD: sysctl.c,v 1.128 2005/08/05 03:07:40 dlg Exp $";
 #endif
 #endif /* not lint */
 
@@ -60,6 +60,7 @@ static const char rcsid[] = "$OpenBSD: sysctl.c,v 1.117 2005/01/28 15:39:14 mill
 #include <sys/sensors.h>
 #include <machine/cpu.h>
 #include <net/route.h>
+#include <net/if.h>
 
 #include <netinet/in.h>
 #include <netinet/in_systm.h>
@@ -182,6 +183,7 @@ int	Aflag, aflag, nflag, qflag;
 #define	LONGARRAY	0x00000800
 #define	KMEMSTATS	0x00001000
 #define	SENSORS		0x00002000
+#define	ZTSSCALE	0x00004000
 
 /* prototypes */
 void debuginit(void);
@@ -210,6 +212,7 @@ int sysctl_shminfo(char *, char **, int *, int, int *);
 int sysctl_watchdog(char *, char **, int *, int, int *);
 int sysctl_tc(char *, char **, int *, int, int *);
 int sysctl_sensors(char *, char **, int *, int, int *);
+void print_sensor(struct sensor *);
 int sysctl_emul(char *, char *, int);
 #ifdef CPU_CHIPSET
 int sysctl_chipset(char *, char **, int *, int, int *);
@@ -279,7 +282,7 @@ listall(char *prefix, struct list *lp)
 	if (lp->list == NULL)
 		return;
 	if ((len = strlcpy(name, prefix, sizeof(name))) >= sizeof(name))
-		warn("%s: name too long", prefix);
+		errx(1, "%s: name too long", prefix);
 	cp = name + len++;
 	*cp++ = '.';
 	for (lvl2 = 0; lvl2 < lp->size; lvl2++) {
@@ -308,6 +311,14 @@ parse(char *string, int flags)
 	struct list *lp;
 	int mib[CTL_MAXNAME];
 	char *cp, *bufp, buf[BUFSIZ];
+#ifdef CPU_ZTSSCALE
+	struct ztsscale {
+		int ts_minx;
+		int ts_maxx;
+		int ts_miny;
+		int ts_maxy;
+	} tsbuf;
+#endif
 
 	(void)strlcpy(buf, string, sizeof(buf));
 	bufp = buf;
@@ -464,6 +475,10 @@ parse(char *string, int flags)
 			if (len < 0)
 				return;
 			break;
+		case HW_PHYSMEM:
+		case HW_USERMEM:
+			special |= UNSIGNED;
+			break;
 		}
 		break;
 
@@ -606,6 +621,46 @@ parse(char *string, int flags)
 			len = sysctl_chipset(string, &bufp, mib, flags, &type);
 			if (len < 0)
 				return;
+			break;
+		}
+#endif
+#ifdef CPU_ZTSSCALE
+		if (mib[1] == CPU_ZTSSCALE) {
+			special |= ZTSSCALE;
+			if (newsize > 0) {
+				const char *errstr = 0;
+
+				/* Unspecified values default to 0. */
+				bzero(&tsbuf, sizeof tsbuf);
+				newval = (void *)strtok(newval, ",");
+				if (newval != NULL) {
+					tsbuf.ts_minx = (int)strtonum(newval,
+					    0, 32768, &errstr);
+					newval = (void *)strtok(NULL, ",");
+				}
+				if (!errstr && newval != NULL) {
+					tsbuf.ts_maxx = (int)strtonum(newval,
+					    0, 32768, &errstr);
+					newval = (void *)strtok(NULL, ",");
+				}
+				if (!errstr && newval != NULL) {
+					tsbuf.ts_miny = (int)strtonum(newval,
+					    0, 32768, &errstr);
+					newval = (void *)strtok(NULL, ",");
+				}
+				if (!errstr && newval != NULL) {
+					tsbuf.ts_maxy = (int)strtonum(newval,
+					    0, 32768, &errstr);
+					newval = (void *)strtok(NULL, ",");
+				}
+				if (errstr)
+					errx(1, "calibration value is %s",
+					    errstr);
+				if (newval != NULL)
+					errx(1, "too many calibration values");
+				newval = &tsbuf;
+				newsize = sizeof(tsbuf);
+			}
 			break;
 		}
 #endif
@@ -900,29 +955,37 @@ parse(char *string, int flags)
 		if (size > 0 && (s->flags & SENSOR_FINVALID) == 0) {
 			if (!nflag)
 				printf("%s%s", string, equ);
-			printf("%s, %s, ", s->device, s->desc);
-			switch (s->type) {
-			case SENSOR_TEMP:
-				printf("temp, %.2f degC / %.2f degF",
-				    (s->value - 273150000) / 1000000.0,
-				    (s->value - 273150000) / 1000000.0 * 9 / 5 +
-				    32);
-				break;
-			case SENSOR_FANRPM:
-				printf("fanrpm, %lld RPM", s->value);
-				break;
-			case SENSOR_VOLTS_DC:
-				printf("volts_dc, %.2f V",
-				    s->value / 1000000.0);
-				break;
-			default:
-				printf("unknown");
-			}
+			print_sensor(s);
 			printf("\n");
 		}
 		return;
 	}
+#ifdef CPU_ZTSSCALE
+	if (special & ZTSSCALE) {
+		struct ztsscale *tsp;
 
+		if (newsize == 0) {
+			if (!nflag)
+				(void)printf("%s%s", string, equ);
+			tsp = (struct ztsscale *)buf;
+			(void)printf("%d,%d,%d,%d\n", tsp->ts_minx,
+			    tsp->ts_maxx, tsp->ts_miny, tsp->ts_maxy);
+		} else {
+			if (!qflag) {
+				if (!nflag) {
+					tsp = (struct ztsscale *)buf;
+					(void)printf("%s: %d,%d,%d,%d -> ",
+					    string, tsp->ts_minx, tsp->ts_maxx,
+					    tsp->ts_miny, tsp->ts_maxy);
+				}
+				tsp = (struct ztsscale *)newval;
+				(void)printf("%d,%d,%d,%d\n", tsp->ts_minx,
+				    tsp->ts_maxx, tsp->ts_miny, tsp->ts_maxy);
+			}
+		}
+		return;
+	}
+#endif
 	switch (type) {
 	case CTLTYPE_INT:
 		if (newsize == 0) {
@@ -1244,7 +1307,7 @@ sysctl_bios(char *string, char **bufpp, int mib[], int flags, int *typep)
 			/* scan all the bios devices */
 			for (indx = 0; indx < 256; indx++) {
 				snprintf(name, sizeof(name), "%s.%u",
-					 string, indx);
+				    string, indx);
 				parse(name, 1);
 			}
 			return (-1);
@@ -1299,6 +1362,7 @@ struct ctlname mobileipname[] = MOBILEIPCTL_NAMES;
 struct ctlname ipcompname[] = IPCOMPCTL_NAMES;
 struct ctlname carpname[] = CARPCTL_NAMES;
 struct ctlname bpfname[] = CTL_NET_BPF_NAMES;
+struct ctlname ifqname[] = CTL_IFQ_NAMES;
 struct list inetlist = { inetname, IPPROTO_MAXID };
 struct list inetvars[] = {
 	{ ipname, IPCTL_MAXID },	/* ip */
@@ -1416,6 +1480,7 @@ struct list inetvars[] = {
 	{ carpname, CARPCTL_MAXID },
 };
 struct list bpflist = { bpfname, NET_BPF_MAXID };
+struct list ifqlist = { ifqname, IFQCTL_MAXID };
 
 struct list kernmalloclist = { kernmallocname, KERN_MALLOC_MAXID };
 struct list forkstatlist = { forkstatname, KERN_FORKSTAT_MAXID };
@@ -1481,6 +1546,12 @@ sysctl_nchstats(char *string, char **bufpp, int mib[], int flags, int *typep)
 		break;
 	case KERN_NCHSTATS_2PASSES:
 		(void)printf("%ld\n", nch.ncs_2passes);
+		break;
+	case KERN_NCHSTATS_REVHITS:
+		(void)printf("%ld\n", nch.ncs_revhits);
+		break;
+	case KERN_NCHSTATS_REVMISS:
+		(void)printf("%ld\n", nch.ncs_revmiss);
 		break;
 	}
 	return (-1);
@@ -1765,6 +1836,20 @@ sysctl_inet(char *string, char **bufpp, int mib[], int flags, int *typep)
 		return (-1);
 	mib[3] = indx;
 	*typep = lp->list[indx].ctl_type;
+	if (*typep == CTLTYPE_NODE) {
+		int tindx;
+
+		if (*bufpp == 0) {
+			listall(string, &ifqlist);
+			return(-1);
+		}
+		lp = &ifqlist;
+		if ((tindx = findname(string, "fifth", bufpp, lp)) == -1)
+			return (-1);
+		mib[4] = tindx;
+		*typep = lp->list[tindx].ctl_type;
+		return(5);
+	}
 	return (4);
 }
 
@@ -2012,12 +2097,12 @@ sysctl_sensors(char *string, char **bufpp, int mib[], int flags, int *typep)
 	int indx;
 
 	if (*bufpp == NULL) {
-		char name[BUFSIZ];
+		char buf[BUFSIZ];
 
 		/* scan all sensors */
 		for (indx = 0; indx < 256; indx++) {
-			snprintf(name, sizeof(name), "%s.%u", string, indx);
-			parse(name, 0);
+			snprintf(buf, sizeof(buf), "%s.%u", string, indx);
+			parse(buf, 0);
 		}
 		return (-1);
 	}
@@ -2028,6 +2113,55 @@ sysctl_sensors(char *string, char **bufpp, int mib[], int flags, int *typep)
 	mib[2] = atoi(name);
 	*typep = CTLTYPE_STRUCT;
 	return (3);
+}
+
+void
+print_sensor(struct sensor *s)
+{
+	printf("%s, %s, ", s->device, s->desc);
+	switch (s->status) {
+	case SENSOR_S_OK:
+		printf("OK, ");
+		break;
+	case SENSOR_S_WARN:
+		printf("WARNING, ");
+		break;
+	case SENSOR_S_CRIT:
+		printf("CRITICAL, ");
+		break;
+	case SENSOR_S_UNKNOWN:
+		printf("UNKNOWN, ");
+		break;
+	}
+
+	if (s->flags & SENSOR_FUNKNOWN)
+		printf("unknown");
+	else {
+		switch (s->type) {
+		case SENSOR_TEMP:
+			printf("temp, %.2f degC / %.2f degF",
+			    (s->value - 273150000) / 1000000.0,
+			    (s->value - 273150000) / 1000000.0 * 9 / 5 + 32);
+			break;
+		case SENSOR_FANRPM:
+			printf("fanrpm, %lld RPM", s->value);
+			break;
+		case SENSOR_VOLTS_DC:
+			printf("volts_dc, %.2f V", s->value / 1000000.0);
+			break;
+		case SENSOR_INDICATOR:
+			printf("indicator, %s", s->value ? "On" : "Off");
+			break;
+		case SENSOR_INTEGER:
+			printf("raw, %lld", s->value);
+			break;
+		case SENSOR_PERCENT:
+			printf("percent, %.2f%%", (float)s->value / 1000.0);
+			break;
+		default:
+			printf("unknown");
+		}
+	}
 }
 
 struct emulname {

@@ -1,7 +1,7 @@
-/*	$OpenBSD: session.c,v 1.213 2005/03/11 17:46:11 henning Exp $ */
+/*	$OpenBSD: session.c,v 1.232 2005/07/24 11:56:37 henning Exp $ */
 
 /*
- * Copyright (c) 2003, 2004 Henning Brauer <henning@openbsd.org>
+ * Copyright (c) 2003, 2004, 2005 Henning Brauer <henning@openbsd.org>
  *
  * Permission to use, copy, modify, and distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -211,11 +211,9 @@ session_main(struct bgpd_config *config, struct peer *cpeers,
 		fatalx("pfkey setup failed");
 
 	if (setgroups(1, &pw->pw_gid) ||
-	    setegid(pw->pw_gid) || setgid(pw->pw_gid) ||
-	    seteuid(pw->pw_uid) || setuid(pw->pw_uid))
+	    setresgid(pw->pw_gid, pw->pw_gid, pw->pw_gid) ||
+	    setresuid(pw->pw_uid, pw->pw_uid, pw->pw_uid))
 		fatal("can't drop privileges");
-
-	endpwent();
 
 	listener_cnt = 0;
 	setup_listeners(&listener_cnt);
@@ -580,6 +578,9 @@ bgp_fsm(struct peer *peer, enum session_events event)
 				return;
 			}
 
+			peer->stats.last_sent_errcode = 0;
+			peer->stats.last_sent_suberr = 0;
+
 			if (!peer->depend_ok)
 				peer->ConnectRetryTimer = 0;
 			else if (peer->conf.passive || peer->conf.template) {
@@ -587,9 +588,9 @@ bgp_fsm(struct peer *peer, enum session_events event)
 				peer->ConnectRetryTimer = 0;
 			} else {
 				change_state(peer, STATE_CONNECT, event);
-				session_connect(peer);
 				peer->ConnectRetryTimer =
 				    time(NULL) + INTERVAL_CONNECTRETRY;
+				session_connect(peer);
 			}
 			break;
 		default:
@@ -620,7 +621,7 @@ bgp_fsm(struct peer *peer, enum session_events event)
 			peer->ConnectRetryTimer =
 			    time(NULL) + INTERVAL_CONNECTRETRY;
 			session_connect(peer);
-		break;
+			break;
 		default:
 			change_state(peer, STATE_IDLE, event);
 			break;
@@ -1365,6 +1366,10 @@ session_notification(struct peer *peer, u_int8_t errcode, u_int8_t subcode,
 	struct mrt		*mrt;
 	ssize_t			 len;
 	int			 errs = 0;
+	u_int8_t		 null8 = 0;
+
+	if (peer->stats.last_sent_errcode)	/* some notifctn already sent */
+		return;
 
 	len = MSGSIZE_NOTIFICATION_MIN + datalen;
 
@@ -1380,7 +1385,10 @@ session_notification(struct peer *peer, u_int8_t errcode, u_int8_t subcode,
 	errs += buf_add(buf, &msg.len, sizeof(msg.len));
 	errs += buf_add(buf, &msg.type, sizeof(msg.type));
 	errs += buf_add(buf, &errcode, sizeof(errcode));
-	errs += buf_add(buf, &subcode, sizeof(subcode));
+	if (errcode == ERR_CEASE)
+		errs += buf_add(buf, &null8, sizeof(null8));
+	else
+		errs += buf_add(buf, &subcode, sizeof(subcode));
 
 	if (datalen > 0)
 		errs += buf_add(buf, data, datalen);
@@ -1406,7 +1414,10 @@ session_notification(struct peer *peer, u_int8_t errcode, u_int8_t subcode,
 		bgp_fsm(peer, EVNT_CON_FATAL);
 		return;
 	}
+
 	peer->stats.msg_sent_notification++;
+	peer->stats.last_sent_errcode = errcode;
+	peer->stats.last_sent_suberr = subcode;
 }
 
 int
@@ -1427,7 +1438,11 @@ session_dispatch_msg(struct pollfd *pfd, struct peer *p)
 				    &error, &len) == -1 || error) {
 					if (error)
 						errno = error;
-					log_peer_warn(&p->conf, "socket error");
+					if (errno != p->lasterr) {
+						log_peer_warn(&p->conf,
+						    "socket error");
+						p->lasterr = errno;
+					}
 					bgp_fsm(p, EVNT_CON_OPENFAIL);
 					return (1);
 				}
@@ -1471,78 +1486,78 @@ session_dispatch_msg(struct pollfd *pfd, struct peer *p)
 	if (pfd->revents & POLLIN) {
 		if ((n = read(p->fd, p->rbuf->buf + p->rbuf->wpos,
 		    sizeof(p->rbuf->buf) - p->rbuf->wpos)) == -1) {
-				if (errno != EINTR && errno != EAGAIN) {
-					log_peer_warn(&p->conf, "read error");
-					bgp_fsm(p, EVNT_CON_FATAL);
-				}
-				return (1);
+			if (errno != EINTR && errno != EAGAIN) {
+				log_peer_warn(&p->conf, "read error");
+				bgp_fsm(p, EVNT_CON_FATAL);
 			}
-			if (n == 0) {	/* connection closed */
-				bgp_fsm(p, EVNT_CON_CLOSED);
-				return (1);
-			}
+			return (1);
+		}
+		if (n == 0) {	/* connection closed */
+			bgp_fsm(p, EVNT_CON_CLOSED);
+			return (1);
+		}
 
-			rpos = 0;
-			av = p->rbuf->wpos + n;
-			p->stats.last_read = time(NULL);
+		rpos = 0;
+		av = p->rbuf->wpos + n;
+		p->stats.last_read = time(NULL);
 
-			/*
-			 * session might drop to IDLE -> buffers deallocated
-			 * we MUST check rbuf != NULL before use
-			 */
-			for (;;) {
-				if (rpos + MSGSIZE_HEADER > av)
-					break;
-				if (p->rbuf == NULL)
-					break;
-				if (parse_header(p, p->rbuf->buf + rpos,
-				    &msglen, &msgtype) == -1)
-					return (0);
-				if (rpos + msglen > av)
-					break;
-				p->rbuf->rptr = p->rbuf->buf + rpos;
-
-				switch (msgtype) {
-				case OPEN:
-					bgp_fsm(p, EVNT_RCVD_OPEN);
-					p->stats.msg_rcvd_open++;
-					break;
-				case UPDATE:
-					bgp_fsm(p, EVNT_RCVD_UPDATE);
-					p->stats.msg_rcvd_update++;
-					break;
-				case NOTIFICATION:
-					bgp_fsm(p, EVNT_RCVD_NOTIFICATION);
-					p->stats.msg_rcvd_notification++;
-					break;
-				case KEEPALIVE:
-					bgp_fsm(p, EVNT_RCVD_KEEPALIVE);
-					p->stats.msg_rcvd_keepalive++;
-					break;
-				case RREFRESH:
-					parse_refresh(p);
-					p->stats.msg_rcvd_rrefresh++;
-					break;
-				default:	/* cannot happen */
-					session_notification(p, ERR_HEADER,
-					    ERR_HDR_TYPE, &msgtype, 1);
-					log_warnx("received message with "
-					    "unknown type %u", msgtype);
-				}
-				rpos += msglen;
-				if (++processed > MSG_PROCESS_LIMIT)
-					break;
-			}
+		/*
+		 * session might drop to IDLE -> buffers deallocated
+		 * we MUST check rbuf != NULL before use
+		 */
+		for (;;) {
+			if (rpos + MSGSIZE_HEADER > av)
+				break;
 			if (p->rbuf == NULL)
-				return (1);
+				break;
+			if (parse_header(p, p->rbuf->buf + rpos, &msglen,
+			    &msgtype) == -1)
+				return (0);
+			if (rpos + msglen > av)
+				break;
+			p->rbuf->rptr = p->rbuf->buf + rpos;
 
-			if (rpos < av) {
-				left = av - rpos;
-				memcpy(&p->rbuf->buf, p->rbuf->buf + rpos,
-				    left);
-				p->rbuf->wpos = left;
-			} else
-				p->rbuf->wpos = 0;
+			switch (msgtype) {
+			case OPEN:
+				bgp_fsm(p, EVNT_RCVD_OPEN);
+				p->stats.msg_rcvd_open++;
+				break;
+			case UPDATE:
+				bgp_fsm(p, EVNT_RCVD_UPDATE);
+				p->stats.msg_rcvd_update++;
+				break;
+			case NOTIFICATION:
+				bgp_fsm(p, EVNT_RCVD_NOTIFICATION);
+				p->stats.msg_rcvd_notification++;
+				break;
+			case KEEPALIVE:
+				bgp_fsm(p, EVNT_RCVD_KEEPALIVE);
+				p->stats.msg_rcvd_keepalive++;
+				break;
+			case RREFRESH:
+				parse_refresh(p);
+				p->stats.msg_rcvd_rrefresh++;
+				break;
+			default:	/* cannot happen */
+				session_notification(p, ERR_HEADER,
+				    ERR_HDR_TYPE, &msgtype, 1);
+				log_warnx("received message with "
+				    "unknown type %u", msgtype);
+				bgp_fsm(p, EVNT_CON_FATAL);
+			}
+			rpos += msglen;
+			if (++processed > MSG_PROCESS_LIMIT)
+				break;
+		}
+		if (p->rbuf == NULL)
+			return (1);
+
+		if (rpos < av) {
+			left = av - rpos;
+			memcpy(&p->rbuf->buf, p->rbuf->buf + rpos, left);
+			p->rbuf->wpos = left;
+		} else
+			p->rbuf->wpos = 0;
 
 		return (1);
 	}
@@ -1579,6 +1594,7 @@ parse_header(struct peer *peer, u_char *data, u_int16_t *len, u_int8_t *type)
 		    "received message: illegal length: %u byte", *len);
 		session_notification(peer, ERR_HEADER, ERR_HDR_LEN,
 		    &olen, sizeof(olen));
+		bgp_fsm(peer, EVNT_CON_FATAL);
 		return (-1);
 	}
 
@@ -1589,6 +1605,7 @@ parse_header(struct peer *peer, u_char *data, u_int16_t *len, u_int8_t *type)
 			    "received OPEN: illegal len: %u byte", *len);
 			session_notification(peer, ERR_HEADER, ERR_HDR_LEN,
 			    &olen, sizeof(olen));
+			bgp_fsm(peer, EVNT_CON_FATAL);
 			return (-1);
 		}
 		break;
@@ -1599,6 +1616,7 @@ parse_header(struct peer *peer, u_char *data, u_int16_t *len, u_int8_t *type)
 			    *len);
 			session_notification(peer, ERR_HEADER, ERR_HDR_LEN,
 			    &olen, sizeof(olen));
+			bgp_fsm(peer, EVNT_CON_FATAL);
 			return (-1);
 		}
 		break;
@@ -1608,6 +1626,7 @@ parse_header(struct peer *peer, u_char *data, u_int16_t *len, u_int8_t *type)
 			    "received UPDATE: illegal len: %u byte", *len);
 			session_notification(peer, ERR_HEADER, ERR_HDR_LEN,
 			    &olen, sizeof(olen));
+			bgp_fsm(peer, EVNT_CON_FATAL);
 			return (-1);
 		}
 		break;
@@ -1617,6 +1636,7 @@ parse_header(struct peer *peer, u_char *data, u_int16_t *len, u_int8_t *type)
 			    "received KEEPALIVE: illegal len: %u byte", *len);
 			session_notification(peer, ERR_HEADER, ERR_HDR_LEN,
 			    &olen, sizeof(olen));
+			bgp_fsm(peer, EVNT_CON_FATAL);
 			return (-1);
 		}
 		break;
@@ -1626,6 +1646,7 @@ parse_header(struct peer *peer, u_char *data, u_int16_t *len, u_int8_t *type)
 			    "received RREFRESH: illegal len: %u byte", *len);
 			session_notification(peer, ERR_HEADER, ERR_HDR_LEN,
 			    &olen, sizeof(olen));
+			bgp_fsm(peer, EVNT_CON_FATAL);
 			return (-1);
 		}
 		break;
@@ -1634,6 +1655,7 @@ parse_header(struct peer *peer, u_char *data, u_int16_t *len, u_int8_t *type)
 		    "received msg with unknown type %u", *type);
 		session_notification(peer, ERR_HEADER, ERR_HDR_TYPE,
 		    type, 1);
+		bgp_fsm(peer, EVNT_CON_FATAL);
 		return (-1);
 	}
 	LIST_FOREACH(mrt, &mrthead, entry) {
@@ -2101,25 +2123,31 @@ session_dispatch_imsg(struct imsgbuf *ibuf, int idx, u_int *listener_cnt)
 				reconf = RECONF_KEEP;
 
 			memcpy(&p->conf, pconf, sizeof(struct peer_config));
-			SIMPLEQ_INIT(&p->conf.attrset);
+			TAILQ_INIT(&p->conf.attrset);
 			session_set = &p->conf.attrset;
 			p->conf.reconf_action = reconf;
 			break;
 		case IMSG_RECONF_LISTENER:
 			if (idx != PFD_PIPE_MAIN)
 				fatalx("reconf request not from parent");
+			if (nconf == NULL)
+				fatalx("IMSG_RECONF_LISTENER but no config");
 			nla = imsg.data;
-			TAILQ_FOREACH(la, conf->listen_addrs, entry) {
+			TAILQ_FOREACH(la, conf->listen_addrs, entry)
 				if (!la_cmp(la, nla))
 					break;
-			}
-
-			if ((nla->fd = imsg_get_fd(ibuf)) == -1)
-				log_warnx("expected to receive fd for %s "
-				    "but didn't receive any",
-				    log_sockaddr((struct sockaddr *)&la->sa));
 
 			if (la == NULL) {
+				if (nla->reconf != RECONF_REINIT)
+					fatalx("king bula sez: "
+					    "expected REINIT");
+
+				if ((nla->fd = imsg_get_fd(ibuf)) == -1)
+					log_warnx("expected to receive fd for "
+					    "%s but didn't receive any",
+					    log_sockaddr((struct sockaddr *)
+					    &nla->sa));
+
 				la = calloc(1, sizeof(struct listen_addr));
 				if (la == NULL)
 					fatal(NULL);
@@ -2130,9 +2158,11 @@ session_dispatch_imsg(struct imsgbuf *ibuf, int idx, u_int *listener_cnt)
 				TAILQ_INSERT_TAIL(nconf->listen_addrs, la,
 				    entry);
 			} else {
+				if (nla->reconf != RECONF_KEEP)
+					fatalx("king bula sez: expected KEEP");
 				la->reconf = RECONF_KEEP;
-				close(nla->fd);
 			}
+
 			break;
 		case IMSG_RECONF_DONE:
 			if (idx != PFD_PIPE_MAIN)
@@ -2155,12 +2185,6 @@ session_dispatch_imsg(struct imsgbuf *ibuf, int idx, u_int *listener_cnt)
 				if (p->conf.reconf_action == RECONF_NONE &&
 				    !p->conf.cloned)
 					p->conf.reconf_action = RECONF_DELETE;
-
-			/* if there are no new listeners, keep default ones */
-			if (TAILQ_EMPTY(nconf->listen_addrs))
-				TAILQ_FOREACH(la, conf->listen_addrs, entry)
-					if (la->flags & DEFAULT_LISTENER)
-						la->reconf = RECONF_KEEP;
 
 			/* delete old listeners */
 			for (la = TAILQ_FIRST(conf->listen_addrs); la != NULL;
@@ -2203,7 +2227,7 @@ session_dispatch_imsg(struct imsgbuf *ibuf, int idx, u_int *listener_cnt)
 			if ((s = malloc(sizeof(struct filter_set))) == NULL)
 				fatal(NULL);
 			memcpy(s, imsg.data, sizeof(struct filter_set));
-			SIMPLEQ_INSERT_TAIL(session_set, s, entry);
+			TAILQ_INSERT_TAIL(session_set, s, entry);
 			break;
 		case IMSG_IFINFO:
 			if (idx != PFD_PIPE_MAIN)
@@ -2272,6 +2296,7 @@ session_dispatch_imsg(struct imsgbuf *ibuf, int idx, u_int *listener_cnt)
 			}
 			break;
 		case IMSG_CTL_KROUTE:
+		case IMSG_CTL_KROUTE6:
 		case IMSG_CTL_KROUTE_ADDR:
 		case IMSG_CTL_SHOW_NEXTHOP:
 		case IMSG_CTL_SHOW_INTERFACE:
@@ -2323,6 +2348,21 @@ session_dispatch_imsg(struct imsgbuf *ibuf, int idx, u_int *listener_cnt)
 
 			session_notification(p, errcode, subcode,
 			    data, imsg.hdr.len - IMSG_HEADER_SIZE - 2);
+			switch (errcode) {
+			case ERR_CEASE:
+				switch (subcode) {
+				case ERR_CEASE_MAX_PREFIX:
+					bgp_fsm(p, EVNT_STOP);
+					break;
+				default:
+					bgp_fsm(p, EVNT_CON_FATAL);
+					break;
+				}
+				break;
+			default:
+				bgp_fsm(p, EVNT_CON_FATAL);
+				break;
+			}
 			break;
 		default:
 			break;
@@ -2480,7 +2520,7 @@ session_match_mask(struct peer *p, struct sockaddr *ip)
 	struct in6_addr	 mask;
 
 	if (p->conf.remote_addr.af == AF_INET) {
-		v4mask = htonl(0xffffffff << (32 - p->conf.remote_masklen));
+		v4mask = htonl(prefixlen2mask(p->conf.remote_masklen));
 		if (p->conf.remote_addr.v4.s_addr ==
 		    ((((struct sockaddr_in *)ip)->sin_addr.s_addr) & v4mask))
 			return (1);
@@ -2541,7 +2581,7 @@ session_up(struct peer *p)
 	    &p->conf, sizeof(p->conf)) == -1)
 		fatalx("imsg_compose error");
 
-	SIMPLEQ_FOREACH(s, &p->conf.attrset, entry) {
+	TAILQ_FOREACH(s, &p->conf.attrset, entry) {
 		if (imsg_compose(ibuf_rde, IMSG_FILTER_SET, p->conf.id, 0, -1,
 		    s, sizeof(struct filter_set)) == -1)
 			fatalx("imsg_compose error");

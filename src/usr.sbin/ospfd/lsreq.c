@@ -1,4 +1,4 @@
-/*	$OpenBSD: lsreq.c,v 1.4 2005/02/10 14:05:48 claudio Exp $ */
+/*	$OpenBSD: lsreq.c,v 1.10 2005/05/26 20:05:29 norby Exp $ */
 
 /*
  * Copyright (c) 2004, 2005 Esben Norby <norby@openbsd.org>
@@ -34,19 +34,12 @@ int
 send_ls_req(struct nbr *nbr)
 {
 	struct sockaddr_in	 dst;
-	struct ls_req_hdr	*ls_req_hdr;
+	struct ls_req_hdr	 ls_req_hdr;
 	struct lsa_entry	*le, *nle;
-	char			*buf = NULL;
-	char			*ptr;
-	int			 ret = 0;
+	struct buf		*buf;
+	int			 ret;
 
-	log_debug("send_ls_req: neighbor ID %s", inet_ntoa(nbr->id));
-
-	if (nbr->iface->passive)
-		return (0);
-
-	/* XXX use buffer API instead for better decoupling */
-	if ((ptr = buf = calloc(1, READ_BUF_SIZE)) == NULL)
+	if ((buf = buf_open(nbr->iface->mtu - sizeof(struct ip))) == NULL)
 		fatal("send_ls_req");
 
 	/* set destination */
@@ -68,35 +61,38 @@ send_ls_req(struct nbr *nbr)
 	}
 
 	/* OSPF header */
-	gen_ospf_hdr(ptr, nbr->iface, PACKET_TYPE_LS_REQUEST);
-	ptr += sizeof(struct ospf_hdr);
+	if (gen_ospf_hdr(buf, nbr->iface, PACKET_TYPE_LS_REQUEST))
+		goto fail;
 
-	/* LSA header(s) */
+	/* LSA header(s), keep space for a possible md5 sum */
 	for (le = TAILQ_FIRST(&nbr->ls_req_list); le != NULL &&
-	    (ptr - buf) < nbr->iface->mtu - PACKET_HDR; le = nle) {
+	    buf->wpos + sizeof(struct ls_req_hdr) < buf->max -
+	    MD5_DIGEST_LENGTH; le = nle) {
 		nbr->ls_req = nle = TAILQ_NEXT(le, entry);
-		ls_req_hdr = (struct ls_req_hdr *)ptr;
-		ls_req_hdr->type = htonl(le->le_lsa->type);
-		ls_req_hdr->ls_id = le->le_lsa->ls_id;
-		ls_req_hdr->adv_rtr = le->le_lsa->adv_rtr;
-		ptr += sizeof(*ls_req_hdr);
+		ls_req_hdr.type = htonl(le->le_lsa->type);
+		ls_req_hdr.ls_id = le->le_lsa->ls_id;
+		ls_req_hdr.adv_rtr = le->le_lsa->adv_rtr;
+		if (buf_add(buf, &ls_req_hdr, sizeof(ls_req_hdr)))
+			goto fail;
 	}
 
 	/* update authentication and calculate checksum */
-	auth_gen(buf, ptr - buf, nbr->iface);
+	if (auth_gen(buf, nbr->iface))
+		goto fail;
 
-	if ((ret = send_packet(nbr->iface, buf, (ptr - buf), &dst)) == -1)
-		log_warnx("send_ls_req: error sending packet on "
-		    "interface %s", nbr->iface->name);
-	free(buf);
+	ret = send_packet(nbr->iface, buf->buf, buf->wpos, &dst);
+
+	buf_free(buf);
 	return (ret);
+fail:
+	log_warn("send_ls_req");
+	buf_free(buf);
+	return (-1);
 }
 
 void
 recv_ls_req(struct nbr *nbr, char *buf, u_int16_t len)
 {
-	log_debug("recv_ls_req: neighbor ID %s", inet_ntoa(nbr->id));
-
 	switch (nbr->state) {
 	case NBR_STA_DOWN:
 	case NBR_STA_ATTEMPT:
@@ -188,7 +184,7 @@ ls_req_list_clr(struct nbr *nbr)
 	nbr->ls_req = NULL;
 }
 
-bool
+int
 ls_req_list_empty(struct nbr *nbr)
 {
 	return (TAILQ_EMPTY(&nbr->ls_req_list));
@@ -198,10 +194,8 @@ ls_req_list_empty(struct nbr *nbr)
 void
 ls_req_tx_timer(int fd, short event, void *arg)
 {
-	struct nbr *nbr = arg;
-	struct timeval tv;
-
-	log_debug("ls_req_tx_timer: neighbor ID %s", inet_ntoa(nbr->id));
+	struct nbr	*nbr = arg;
+	struct timeval	 tv;
 
 	switch (nbr->state) {
 	case NBR_STA_DOWN:
@@ -227,8 +221,6 @@ ls_req_tx_timer(int fd, short event, void *arg)
 	if (nbr->state == NBR_STA_LOAD) {
 		timerclear(&tv);
 		tv.tv_sec = nbr->iface->rxmt_interval;
-		log_debug("ls_req_tx_timer: reschedule neighbor ID %s",
-		    inet_ntoa(nbr->id));
 		evtimer_add(&nbr->lsreq_tx_timer, &tv);
 	}
 }
@@ -241,7 +233,6 @@ start_ls_req_tx_timer(struct nbr *nbr)
 	if (nbr == nbr->iface->self)
 		return (0);
 
-	log_debug("start_ls_req_tx_timer: neighbor ID %s", inet_ntoa(nbr->id));
 	timerclear(&tv);
 
 	return (evtimer_add(&nbr->lsreq_tx_timer, &tv));
@@ -252,8 +243,6 @@ stop_ls_req_tx_timer(struct nbr *nbr)
 {
 	if (nbr == nbr->iface->self)
 		return (0);
-
-	log_debug("stop_ls_req_tx_timer: neighbor ID %s", inet_ntoa(nbr->id));
 
 	return (evtimer_del(&nbr->lsreq_tx_timer));
 }

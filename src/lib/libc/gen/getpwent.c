@@ -1,3 +1,4 @@
+/*	$OpenBSD: getpwent.c,v 1.34 2005/08/08 08:05:34 espie Exp $ */
 /*
  * Copyright (c) 1988, 1993
  *	The Regents of the University of California.  All rights reserved.
@@ -27,10 +28,6 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  */
-
-#if defined(LIBC_SCCS) && !defined(lint)
-static char rcsid[] = "$OpenBSD: getpwent.c,v 1.32 2004/05/18 02:05:52 jfb Exp $";
-#endif /* LIBC_SCCS and not lint */
 
 #include <sys/param.h>
 #include <fcntl.h>
@@ -150,8 +147,8 @@ __ypexclude_free(void)
 static void
 __ypproto_set(void)
 {
-	register char *ptr;
-	register struct passwd *pw = &_pw_passwd;
+	char *ptr;
+	struct passwd *pw = &_pw_passwd;
 
 	/* make this the new prototype */
 	ptr = (char *)__yppbuf;
@@ -976,7 +973,7 @@ __initdb(void)
 static int
 __hashpw(DBT *key)
 {
-	register char *p, *t;
+	char *p, *t;
 	static u_int max;
 	static char *line;
 	DBT data;

@@ -1,3 +1,4 @@
+/*	$OpenBSD: readdir.c,v 1.10 2005/08/08 08:05:34 espie Exp $ */
 /*
  * Copyright (c) 1983, 1993
  *	The Regents of the University of California.  All rights reserved.
@@ -27,10 +28,6 @@
  * SUCH DAMAGE.
  */
 
-#if defined(LIBC_SCCS) && !defined(lint)
-static char rcsid[] = "$OpenBSD: readdir.c,v 1.7 2004/05/18 02:05:52 jfb Exp $";
-#endif /* LIBC_SCCS and not lint */
-
 #include <sys/param.h>
 #include <dirent.h>
 #include <string.h>
@@ -43,7 +40,7 @@ static char rcsid[] = "$OpenBSD: readdir.c,v 1.7 2004/05/18 02:05:52 jfb Exp $";
 struct dirent *
 readdir(DIR *dirp)
 {
-	register struct dirent *dp;
+	struct dirent *dp;
 
 	for (;;) {
 		if (dirp->dd_loc >= dirp->dd_size) {
@@ -65,8 +62,6 @@ readdir(DIR *dirp)
 			return (NULL);
 		dirp->dd_loc += dp->d_reclen;
 		if (dp->d_ino == 0)
-			continue;
-		if (dp->d_type == DT_WHT && (dirp->dd_flags & DTF_HIDEW))
 			continue;
 		return (dp);
 	}

@@ -151,7 +151,6 @@ static int ssl_sock_init(void)
 #ifdef WATT32
 	extern int _watt_do_exit;
 	_watt_do_exit = 0;
-	dbug_init();
 	if (sock_init())
 		return (0);
 #elif defined(OPENSSL_SYS_WINDOWS)
@@ -482,7 +481,7 @@ static struct hostent *GetHostByName(char *name)
 		/* else add to cache */
 		if(strlen(name) < sizeof ghbn_cache[0].name)
 			{
-			strcpy(ghbn_cache[lowi].name,name);
+			strlcpy(ghbn_cache[lowi].name,name, sizeof(ghbn_cache[0].name));
 			memcpy((char *)&(ghbn_cache[lowi].ent),ret,sizeof(struct hostent));
 			ghbn_cache[lowi].order=ghbn_miss+ghbn_hits;
 			}

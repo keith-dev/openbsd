@@ -1,4 +1,4 @@
-/*	$OpenBSD: pmap.c,v 1.80 2004/12/25 23:02:24 miod Exp $	*/
+/*	$OpenBSD: pmap.c,v 1.82 2005/07/12 21:12:03 hshoexer Exp $	*/
 /*	$NetBSD: pmap.c,v 1.91 2000/06/02 17:46:37 thorpej Exp $	*/
 
 /*
@@ -650,7 +650,7 @@ pmap_map_ptes(pmap)
 	if (!pmap_valid_entry(opde) || (opde & PG_FRAME) != pmap->pm_pdirpa) {
 		*APDP_PDE = (pd_entry_t) (pmap->pm_pdirpa | PG_RW | PG_V);
 		if (pmap_valid_entry(opde))
-			pmap_apte_flush(pmap);
+			pmap_apte_flush(curpcb->pcb_pmap);
 	}
 	return(APTE_BASE);
 }
@@ -1630,7 +1630,7 @@ pmap_free_pvpage()
 		/* unmap the page */
 		dead_entries = NULL;
 		uvm_unmap_remove(map, (vaddr_t)pvp, ((vaddr_t)pvp) + PAGE_SIZE,
-		    &dead_entries);
+		    &dead_entries, NULL);
 		vm_map_unlock(map);
 
 		if (dead_entries != NULL)

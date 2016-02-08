@@ -1,4 +1,4 @@
-/*	$OpenBSD: getopt_long.c,v 1.17 2004/06/03 18:46:52 millert Exp $	*/
+/*	$OpenBSD: getopt_long.c,v 1.19 2005/08/08 08:05:36 espie Exp $	*/
 /*	$NetBSD: getopt_long.c,v 1.15 2002/01/31 22:43:40 tv Exp $	*/
 
 /*
@@ -55,10 +55,6 @@
  * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
  * POSSIBILITY OF SUCH DAMAGE.
  */
-
-#if defined(LIBC_SCCS) && !defined(lint)
-static char *rcsid = "$OpenBSD: getopt_long.c,v 1.17 2004/06/03 18:46:52 millert Exp $";
-#endif /* LIBC_SCCS and not lint */
 
 #include <err.h>
 #include <errno.h>
@@ -515,12 +511,8 @@ getopt(int nargc, char * const *nargv, const char *options)
  *	Parse argc/argv argument vector.
  */
 int
-getopt_long(nargc, nargv, options, long_options, idx)
-	int nargc;
-	char * const *nargv;
-	const char *options;
-	const struct option *long_options;
-	int *idx;
+getopt_long(int nargc, char * const *nargv, const char *options,
+    const struct option *long_options, int *idx)
 {
 
 	return (getopt_internal(nargc, nargv, options, long_options, idx,
@@ -532,12 +524,8 @@ getopt_long(nargc, nargv, options, long_options, idx)
  *	Parse argc/argv argument vector.
  */
 int
-getopt_long_only(nargc, nargv, options, long_options, idx)
-	int nargc;
-	char * const *nargv;
-	const char *options;
-	const struct option *long_options;
-	int *idx;
+getopt_long_only(int nargc, char * const *nargv, const char *options,
+    const struct option *long_options, int *idx)
 {
 
 	return (getopt_internal(nargc, nargv, options, long_options, idx,

@@ -1,4 +1,4 @@
-/*	$OpenBSD: ftpd.c,v 1.163 2005/03/15 12:22:58 niallo Exp $	*/
+/*	$OpenBSD: ftpd.c,v 1.168 2005/08/22 17:49:37 mickey Exp $	*/
 /*	$NetBSD: ftpd.c,v 1.15 1995/06/03 22:46:47 mycroft Exp $	*/
 
 /*
@@ -70,7 +70,7 @@ static const char copyright[] =
 static const char sccsid[] = "@(#)ftpd.c	8.4 (Berkeley) 4/16/94";
 #else
 static const char rcsid[] =
-    "$OpenBSD: ftpd.c,v 1.163 2005/03/15 12:22:58 niallo Exp $";
+    "$OpenBSD: ftpd.c,v 1.168 2005/08/22 17:49:37 mickey Exp $";
 #endif
 #endif /* not lint */
 
@@ -1189,9 +1189,12 @@ retrieve(char *cmd, char *name)
 			n = restart_point;
 			i = 0;
 			while (i++ < n) {
-				if ((c=getc(fin)) == EOF) {
-					perror_reply(550, name);
-					goto done;
+				if ((c = getc(fin)) == EOF) {
+					if (ferror(fin)) {
+						perror_reply(550, name);
+						goto done;
+					} else
+						break;
 				}
 				if (c == '\n')
 					i++;
@@ -1259,9 +1262,12 @@ store(char *name, char *mode, int unique)
 			n = restart_point;
 			i = 0;
 			while (i++ < n) {
-				if ((c=getc(fout)) == EOF) {
-					perror_reply(550, name);
-					goto done;
+				if ((c = getc(fout)) == EOF) {
+					if (ferror(fout)) {
+						perror_reply(550, name);
+						goto done;
+					} else
+						break;
 				}
 				if (c == '\n')
 					i++;
@@ -1306,7 +1312,7 @@ getdatasock(char *mode)
 	if (data >= 0)
 		return (fdopen(data, mode));
 	sigprocmask (SIG_BLOCK, &allsigs, NULL);
-	s = socket(ctrl_addr.su_family, SOCK_STREAM, 0);
+	s = monitor_socket(ctrl_addr.su_family);
 	if (s < 0)
 		goto bad;
 	if (setsockopt(s, SOL_SOCKET, SO_REUSEADDR,
@@ -2799,15 +2805,16 @@ logxfer(char *name, off_t size, time_t start)
 		strvis(vremotehost, remotehost, VIS_SAFE|VIS_NOSLASH);
 		strvis(vpw, guest? guestpw : pw->pw_name, VIS_SAFE|VIS_NOSLASH);
 
-		if ((len = snprintf(buf, sizeof(buf),
+		len = snprintf(buf, sizeof(buf),
 		    "%.24s %d %s %qd %s %c %s %c %c %s ftp %d %s %s\n",
 		    ctime(&now), now - start + (now == start),
 		    vremotehost, (long long)size, vpath,
 		    ((type == TYPE_A) ? 'a' : 'b'), "*" /* none yet */,
 		    'o', ((guest) ? 'a' : 'r'),
 		    vpw, 0 /* none yet */,
-		    ((guest) ? "*" : pw->pw_name), dhostname)) >= sizeof(buf)
-		    || len < 0) {
+		    ((guest) ? "*" : pw->pw_name), dhostname);
+
+		if (len >= sizeof(buf) || len == -1) {
 			if ((len = strlen(buf)) == 0)
 				return;		/* should not happen */
 			buf[len - 1] = '\n';

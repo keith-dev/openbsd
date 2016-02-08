@@ -1,3 +1,4 @@
+/*	$OpenBSD: elf_hash.c,v 1.8 2005/08/08 08:05:33 espie Exp $ */
 /*
  * Copyright (c) 1995, 1996 Erik Theisen
  * All rights reserved.
@@ -25,10 +26,6 @@
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#if defined(LIBC_SCCS) && !defined(lint)
-static char rcsid[] = "$OpenBSD: elf_hash.c,v 1.6 2004/05/18 02:05:52 jfb Exp $";
-#endif /* LIBC_SCCS and not lint */
-
 #include <sys/types.h>
 #include <sys/param.h>
 #include <sys/mman.h>
@@ -51,7 +48,7 @@ static char rcsid[] = "$OpenBSD: elf_hash.c,v 1.6 2004/05/18 02:05:52 jfb Exp $"
 unsigned int
 elf_hash(const unsigned char *name)
 {
-	register unsigned int h = 0, g;
+	unsigned int h = 0, g;
 
 	while (*name) {
 		h = (h << 4) + *name++;

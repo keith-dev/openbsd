@@ -1,4 +1,4 @@
-/*	$OpenBSD: resp.c,v 1.21 2005/01/27 18:34:26 jfb Exp $	*/
+/*	$OpenBSD: resp.c,v 1.57 2005/08/19 08:28:54 xsa Exp $	*/
 /*
  * Copyright (c) 2004 Jean-Francois Brousseau <jfb@openbsd.org>
  * All rights reserved.
@@ -29,32 +29,30 @@
 #include <sys/stat.h>
 #include <sys/time.h>
 
-#include <fcntl.h>
-#include <stdio.h>
-#include <errno.h>
 #include <dirent.h>
-#include <stdlib.h>
-#include <unistd.h>
-#include <string.h>
+#include <errno.h>
+#include <fcntl.h>
 #include <libgen.h>
-#include <sysexits.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <unistd.h>
 
 #include "buf.h"
 #include "cvs.h"
 #include "log.h"
-#include "file.h"
 #include "proto.h"
 
 
-#define CVS_MTSTK_MAXDEPTH   16
+#define CVS_MTSTK_MAXDEPTH	16
 
 
 #define STRIP_SLASH(p)						\
 	do {							\
-		size_t len;					\
-		len = strlen(p);				\
-		while ((len > 0) && (p[len - 1] == '/'))	\
-			p[--len] = '\0';			\
+		size_t _slen;					\
+		_slen = strlen(p);				\
+		while ((_slen > 0) && (p[_slen - 1] == '/'))	\
+			p[--_slen] = '\0';			\
 	} while (0)
 
 
@@ -74,7 +72,7 @@ static int  cvs_resp_modxpand  (struct cvsroot *, int, char *);
 static int  cvs_resp_rcsdiff   (struct cvsroot *, int, char *);
 static int  cvs_resp_template  (struct cvsroot *, int, char *);
 static int  cvs_resp_copyfile  (struct cvsroot *, int, char *);
-
+static int  cvs_resp_createdir (char *);
 
 struct cvs_resphdlr {
 	int (*hdlr)(struct cvsroot *, int, char *);
@@ -114,7 +112,15 @@ struct cvs_resphdlr {
 	{ cvs_resp_m        },
 };
 
-
+/*
+ * Instead of opening and closing the Entry file all the time,
+ * which caused a huge CPU load and slowed down everything,
+ * we keep the Entry file for the directory we are working in
+ * open until we encounter a new directory.
+ */
+static char cvs_resp_lastdir[MAXPATHLEN] = "";
+static CVSENTRIES *cvs_resp_lastent = NULL;
+static int resp_check_dir(struct cvsroot *, const char *);
 
 /*
  * The MT command uses scoping to tag the data.  Whenever we encouter a '+',
@@ -263,7 +269,7 @@ cvs_resp_m(struct cvsroot *root, int type, char *line)
 		} else {
 			if (strcmp(line, "newline") == 0)
 				putc('\n', stdout);
-			else if (strncmp(line, "fname ", 6) == 0)
+			else if (strncmp(line, "fname ", (size_t)6) == 0)
 				printf("%s", line + 6);
 			else {
 				/* assume text */
@@ -294,6 +300,11 @@ cvs_resp_m(struct cvsroot *root, int type, char *line)
 static int
 cvs_resp_ok(struct cvsroot *root, int type, char *line)
 {
+	/*
+	 * If we still have an Entry file open, close it now.
+	 */
+	if (cvs_resp_lastent != NULL)
+		cvs_ent_close(cvs_resp_lastent);
 
 	return (1);
 }
@@ -303,10 +314,20 @@ cvs_resp_ok(struct cvsroot *root, int type, char *line)
  * cvs_resp_error()
  *
  * Handler for the `error' response.  This handler's job is to
+ * show the error message given by the server.
  */
 static int
 cvs_resp_error(struct cvsroot *root, int type, char *line)
 {
+	if (line == NULL)
+		return (1);
+
+	/* XXX - GNU cvs sends an empty error message
+	 * at the end of the diff command, even for successfull
+	 * diff.
+	 */
+	if ((strlen(line) == 1) && (*line == ' '))
+		return (1);
 
 	fprintf(stderr, "%s\n", line);
 	return (1);
@@ -322,30 +343,44 @@ cvs_resp_error(struct cvsroot *root, int type, char *line)
 static int
 cvs_resp_statdir(struct cvsroot *root, int type, char *line)
 {
-	int fd;
+	int fd, len;
 	char rpath[MAXPATHLEN], statpath[MAXPATHLEN];
 
 	/* remote directory line */
 	if (cvs_getln(root, rpath, sizeof(rpath)) < 0)
 		return (-1);
 
-	snprintf(statpath, sizeof(statpath), "%s/%s", line,
-	    CVS_PATH_STATICENTRIES);
+	STRIP_SLASH(line);
 
-	if ((type == CVS_RESP_CLRSTATDIR) &&
-	    (unlink(statpath) == -1) && (errno != ENOENT)) {
-		cvs_log(LP_ERRNO, "failed to unlink %s file",
-		    CVS_PATH_STATICENTRIES);
+	/*
+	 * Create the directory if it does not exist.
+	 */
+	if (cvs_resp_createdir(line) < 0)
 		return (-1);
-	} else if (type == CVS_RESP_SETSTATDIR) {
-		fd = open(statpath, O_CREAT|O_TRUNC|O_WRONLY, 0400);
-		if (fd == -1) {
-			cvs_log(LP_ERRNO,
-			    "failed to set static directory on %s", line);
-			return (-1);
-		}
-		(void)close(fd);
 
+	len = snprintf(statpath, sizeof(statpath), "%s/%s", line,
+	    CVS_PATH_STATICENTRIES);
+	if (len == -1 || len >= (int)sizeof(statpath)) {
+		cvs_log(LP_ERR,
+		    "path overflow for Entries.static specification");
+		return (-1);
+	}
+
+	if (cvs_noexec == 0) {
+		if ((type == CVS_RESP_CLRSTATDIR) &&
+		    (cvs_unlink(statpath) == -1)) {
+			return (-1);
+		} else if (type == CVS_RESP_SETSTATDIR) {
+			fd = open(statpath, O_CREAT|O_TRUNC|O_WRONLY, 0644);
+			if (fd == -1) {
+				cvs_log(LP_ERRNO,
+				    "failed to set static directory on %s",
+				    line);
+				return (-1);
+			}
+			(void)close(fd);
+
+		}
 	}
 
 	return (0);
@@ -355,16 +390,12 @@ cvs_resp_statdir(struct cvsroot *root, int type, char *line)
  * cvs_resp_sticky()
  *
  * Handler for the `Clear-sticky' and `Set-sticky' responses.  If the
- * specified directory doesn't exist, we create it and attach it to the
- * global file structure.
+ * specified directory doesn't exist, we create it.
  */
 static int
 cvs_resp_sticky(struct cvsroot *root, int type, char *line)
 {
-	char buf[MAXPATHLEN], subdir[MAXPATHLEN], *file;
-	struct cvs_ent *ent;
-	CVSFILE *cf, *sdir;
-	CVSENTRIES *entf;
+	char buf[MAXPATHLEN];
 
 	/* get the remote path */
 	if (cvs_getln(root, buf, sizeof(buf)) < 0)
@@ -372,49 +403,98 @@ cvs_resp_sticky(struct cvsroot *root, int type, char *line)
 
 	STRIP_SLASH(line);
 
+	if (cvs_resp_createdir(line) < 0)
+		return (-1);
+
+	return (0);
+}
+
+/*
+ * Shared code for cvs_resp[static, sticky]
+ *
+ * Looks if the directory requested exists, if it doesn't it will
+ * create it plus all administrative files as well.
+ */
+static int
+cvs_resp_createdir(char *line)
+{
+	int l;
+	CVSFILE *base, *cf;
+	CVSENTRIES *entf;
+	struct stat st;
+	struct cvs_ent *ent;
+	char *file, subdir[MAXPATHLEN], buf[CVS_ENT_MAXLINELEN];
+
+	entf = NULL;
+	cf = NULL;
+
+	/*
+	 * we do not want to handle the '.' case,
+	 * so return early.
+	 */
+	if (!strcmp(line, "."))
+		return (0);
+
 	cvs_splitpath(line, subdir, sizeof(subdir), &file);
-	sdir = cvs_file_find(cvs_files, subdir);
-	if (sdir == NULL) {
-		cvs_log(LP_ERR, "failed to find %s", subdir);
+	base = cvs_file_loadinfo(subdir, CF_NOFILES, NULL, NULL, 1);
+	if (base == NULL)
+		return (-1);
+
+	/*
+	 * If <line> doesn't exist, we create it.
+	 */
+	if (stat(line, &st) == -1) {
+		if (errno != ENOENT) {
+			cvs_log(LP_ERRNO, "failed to stat '%s'", line);
+			return (-1);
+		}
+
+		cf = cvs_file_create(base, line, DT_DIR, 0755);
+	} else {
+		cf = cvs_file_loadinfo(line, CF_NOFILES, NULL, NULL, 1);
+	}
+
+	if (cf == NULL) {
+		cvs_file_free(base);
 		return (-1);
 	}
 
-	cf = cvs_file_find(sdir, file);
-	if (cf == NULL) {
-		/* attempt to create it */
-		cf = cvs_file_create(sdir, line, DT_DIR, 0755);
-		if (cf == NULL)
-			return (-1);
-		cf->cf_ddat->cd_repo = strdup(line);
-		if (cf->cf_ddat->cd_repo == NULL) {
-			cvs_log(LP_ERRNO, "failed to duplicate `%s'", line);
-			cvs_file_free(cf);
-			return (-1);
-		}
-		cf->cf_ddat->cd_root = root;
-		root->cr_ref++;
+	/*
+	 * If the Entries file for the parent is already
+	 * open, operate on that, instead of reopening it
+	 * and invalidating the opened list.
+	 */
+	if (!strcmp(subdir, cvs_resp_lastdir))
+		entf = cvs_resp_lastent;
+	else
+		entf = cvs_ent_open(subdir, O_WRONLY);
 
-		cvs_file_attach(sdir, cf);
+	/*
+	 * see if the entry is still present. If not, we add it again.
+	 */
+	if (entf != NULL) {
+		if ((ent = cvs_ent_get(entf, cf->cf_name)) == NULL) {
+			l = snprintf(buf, sizeof(buf), "D/%s////", cf->cf_name);
+			if (l == -1 || l >= (int)sizeof(buf)) {
+				cvs_file_free(cf);
+				cvs_file_free(base);
+				return (-1);
+			}
 
-		/* add a directory entry to the parent */
-		if ((entf = cvs_ent_open(subdir, O_WRONLY)) != NULL) {
-			snprintf(buf, sizeof(buf), "D/%s////",
-			    CVS_FILE_NAME(cf));
 			ent = cvs_ent_parse(buf);
 			if (ent == NULL)
 				cvs_log(LP_ERR,
 				    "failed to create directory entry");
 			else
 				cvs_ent_add(entf, ent);
-			cvs_ent_close(entf);
 		}
+
+		if (strcmp(subdir, cvs_resp_lastdir))
+			cvs_ent_close(entf);
 	}
 
-	if (type == CVS_RESP_CLRSTICKY)
-		cf->cf_ddat->cd_flags &= ~CVS_DIRF_STICKY;
-	else if (type == CVS_RESP_SETSTICKY)
-		cf->cf_ddat->cd_flags |= CVS_DIRF_STICKY;
-
+	cvs_file_free(cf);
+	cvs_file_free(base);
 	return (0);
 }
 
@@ -428,27 +508,26 @@ cvs_resp_sticky(struct cvsroot *root, int type, char *line)
 static int
 cvs_resp_newentry(struct cvsroot *root, int type, char *line)
 {
-	char entbuf[128];
+	char entbuf[CVS_ENT_MAXLINELEN];
 	struct cvs_ent *ent;
-	CVSENTRIES *entfile;
 
 	/* get the remote path */
-	cvs_getln(root, entbuf, sizeof(entbuf));
+	if (cvs_getln(root, entbuf, sizeof(entbuf)) < 0)
+		return (-1);
 
 	/* get the new Entries line */
 	if (cvs_getln(root, entbuf, sizeof(entbuf)) < 0)
 		return (-1);
 
-	entfile = cvs_ent_open(line, O_WRONLY);
-	if (entfile == NULL)
+	if (resp_check_dir(root, line) < 0)
 		return (-1);
+
 	if (type == CVS_RESP_NEWENTRY) {
-		cvs_ent_addln(entfile, entbuf);
+		cvs_ent_addln(cvs_resp_lastent, entbuf);
 	} else if (type == CVS_RESP_CHECKEDIN) {
 		ent = cvs_ent_parse(entbuf);
 		if (ent == NULL) {
 			cvs_log(LP_ERR, "failed to parse entry");
-			cvs_ent_close(entfile);
 			return (-1);
 		}
 
@@ -456,13 +535,10 @@ cvs_resp_newentry(struct cvsroot *root, int type, char *line)
 		ent->ce_mtime = time(&(ent->ce_mtime));
 
 		/* replace the current entry with the one we just received */
-		if (cvs_ent_remove(entfile, ent->ce_name) < 0)
-			cvs_log(LP_WARN, "failed to remove `%s' entry",
-			    ent->ce_name);
+		(void)cvs_ent_remove(cvs_resp_lastent, ent->ce_name);
 
-		cvs_ent_add(entfile, ent);
+		cvs_ent_add(cvs_resp_lastent, ent);
 	}
-	cvs_ent_close(entfile);
 
 	return (0);
 }
@@ -507,6 +583,7 @@ cvs_resp_cksum(struct cvsroot *root, int type, char *line)
 static int
 cvs_resp_copyfile(struct cvsroot *root, int type, char *line)
 {
+	int len;
 	char path[MAXPATHLEN], newpath[MAXPATHLEN], newname[MAXNAMLEN], *file;
 
 	/* read the remote path of the file to copy and its new name */
@@ -519,11 +596,20 @@ cvs_resp_copyfile(struct cvsroot *root, int type, char *line)
 		return (-1);
 	}
 
-	snprintf(path, sizeof(path), "%s%s", line, file);
-	snprintf(newpath, sizeof(newpath), "%s%s", line, newname);
+	len = snprintf(path, sizeof(path), "%s%s", line, file);
+	if (len == -1 || len >= (int)sizeof(path)) {
+		cvs_log(LP_ERR, "source path overflow in Copy-file response");
+		return (-1);
+	}
+	len = snprintf(newpath, sizeof(newpath), "%s%s", line, newname);
+	if (len == -1 || len >= (int)sizeof(path)) {
+		cvs_log(LP_ERR,
+		    "destination path overflow in Copy-file response");
+		return (-1);
+	}
 
 	if (rename(path, newpath) == -1) {
-		cvs_log(LP_ERRNO, "failed to rename %s to %s", line, newname);
+		cvs_log(LP_ERRNO, "failed to rename %s to %s", path, newpath);
 		return (-1);
 	}
 
@@ -541,7 +627,7 @@ cvs_resp_copyfile(struct cvsroot *root, int type, char *line)
 static int
 cvs_resp_modtime(struct cvsroot *root, int type, char *line)
 {
-	cvs_modtime = cvs_datesec(line, CVS_DATE_RFC822, 1);
+	cvs_modtime = cvs_date_parse(line);
 	return (0);
 }
 
@@ -559,11 +645,9 @@ cvs_resp_updated(struct cvsroot *root, int type, char *line)
 	mode_t fmode;
 	char path[MAXPATHLEN], cksum_buf[CVS_CKSUM_LEN];
 	BUF *fbuf;
-	CVSENTRIES *entfile;
-	struct cvs_ent *ep;
+	struct cvs_ent *ent;
 	struct timeval tv[2];
 
-	ret = 0;
 	STRIP_SLASH(line);
 
 	/* read the remote path of the file */
@@ -574,36 +658,42 @@ cvs_resp_updated(struct cvsroot *root, int type, char *line)
 	if (cvs_getln(root, path, sizeof(path)) < 0)
 		return (-1);
 
-	if ((ep = cvs_ent_parse(path)) == NULL)
+	if ((ent = cvs_ent_parse(path)) == NULL)
 		return (-1);
-	snprintf(path, sizeof(path), "%s/%s", line, ep->ce_name);
-
-	entfile = cvs_ent_open(line, O_WRONLY);
-	if (entfile == NULL) {
-		cvs_ent_free(ep);
+	ret = snprintf(path, sizeof(path), "%s/%s", line, ent->ce_name);
+	if (ret == -1 || ret >= (int)sizeof(path)) {
+		cvs_log(LP_ERR, "Entries path overflow in response");
 		return (-1);
 	}
+	ret = 0;
+
+	/*
+	 * Please be sure the directory does exist.
+	 */
+	if (cvs_resp_createdir(line) < 0)
+		return (-1);
+
+	if (resp_check_dir(root, line) < 0)
+		return (-1);
 
 	if (cvs_modtime != CVS_DATE_DMSEC) {
-		ep->ce_mtime = cvs_modtime;
-		cvs_modtime = CVS_DATE_DMSEC;	/* invalidate */
+		ent->ce_mtime = cvs_modtime;
 	} else
-		ep->ce_mtime = time(&(ep->ce_mtime));
+		ent->ce_mtime = time(&(ent->ce_mtime));
 
 	if ((type == CVS_RESP_UPDEXIST) || (type == CVS_RESP_UPDATED) ||
 	    (type == CVS_RESP_MERGED) || (type == CVS_RESP_CREATED)) {
-		if (cvs_ent_remove(entfile, ep->ce_name) < 0)
-			cvs_log(LP_WARN, "failed to remove entry for `%s'",
-			    ep->ce_name);
+		if ((cvs_ent_remove(cvs_resp_lastent, ent->ce_name) < 0) &&
+		    (type != CVS_RESP_CREATED)) {
+			cvs_log(LP_WARN, "failed to remove entry for '%s`",
+			    ent->ce_name);
+		}
 	}
 
-	if (cvs_ent_add(entfile, ep) < 0) {
-		cvs_ent_free(ep);
-		cvs_ent_close(entfile);
+	if (cvs_ent_add(cvs_resp_lastent, ent) < 0) {
+		cvs_ent_free(ent);
 		return (-1);
 	}
-
-	cvs_ent_close(entfile);
 
 	if ((fbuf = cvs_recvfile(root, &fmode)) == NULL)
 		return (-1);
@@ -621,6 +711,9 @@ cvs_resp_updated(struct cvsroot *root, int type, char *line)
 		if (utimes(path, tv) == -1)
 			cvs_log(LP_ERRNO, "failed to set file timestamps");
 	}
+
+	/* invalidate last received timestamp */
+	cvs_modtime = CVS_DATE_DMSEC;
 
 	/* now see if there is a checksum */
 	if (cvs_fcksum != NULL) {
@@ -651,22 +744,27 @@ cvs_resp_updated(struct cvsroot *root, int type, char *line)
 static int
 cvs_resp_removed(struct cvsroot *root, int type, char *line)
 {
-	char base[MAXPATHLEN], *file;
-	CVSENTRIES *ef;
+	int l;
+	char buf[MAXPATHLEN], base[MAXPATHLEN], fpath[MAXPATHLEN], *file;
 
-	cvs_splitpath(line, base, sizeof(base), &file);
-	ef = cvs_ent_open(base, O_RDWR);
-	if (ef == NULL) {
-		cvs_log(LP_ERR, "error handling `Removed' response");
-		if (type == CVS_RESP_RMENTRY)
-			return (-1);
-	} else {
-		(void)cvs_ent_remove(ef, file);
-		cvs_ent_close(ef);
+	if (cvs_getln(root, buf, sizeof(buf)) < 0)
+		return (-1);
+
+	cvs_splitpath(buf, base, sizeof(base), &file);
+	l = snprintf(fpath, sizeof(fpath), "%s/%s", line, file);
+	if (l == -1 || l >= (int)sizeof(fpath)) {
+		errno = ENAMETOOLONG;
+		cvs_log(LP_ERRNO, "%s", fpath);
+		return (-1);
 	}
 
-	if ((type == CVS_RESP_REMOVED) && (unlink(line) == -1)) {
-		cvs_log(LP_ERRNO, "failed to unlink `%s'", line);
+	if (resp_check_dir(root, line) < 0)
+		return (-1);
+
+	(void)cvs_ent_remove(cvs_resp_lastent, file);
+	if ((type == CVS_RESP_REMOVED) && ((unlink(fpath) == -1) &&
+	    errno != ENOENT)) {
+		cvs_log(LP_ERRNO, "failed to unlink `%s'", file);
 		return (-1);
 	}
 
@@ -709,7 +807,9 @@ cvs_resp_modxpand(struct cvsroot *root, int type, char *line)
 static int
 cvs_resp_rcsdiff(struct cvsroot *root, int type, char *line)
 {
-	char file[MAXPATHLEN], buf[MAXPATHLEN], cksum_buf[CVS_CKSUM_LEN];
+	int len;
+	char file[MAXPATHLEN];
+	char buf[CVS_ENT_MAXLINELEN], cksum_buf[CVS_CKSUM_LEN];
 	char *fname, *orig, *patch;
 	mode_t fmode;
 	BUF *res, *fcont, *patchbuf;
@@ -717,14 +817,22 @@ cvs_resp_rcsdiff(struct cvsroot *root, int type, char *line)
 	struct cvs_ent *ent;
 
 	/* get remote path and build local path of file to be patched */
-	cvs_getln(root, buf, sizeof(buf));
+	if (cvs_getln(root, buf, sizeof(buf)) < 0)
+		return (-1);
+
 	fname = strrchr(buf, '/');
 	if (fname == NULL)
 		fname = buf;
-	snprintf(file, sizeof(file), "%s%s", line, fname);
+	len = snprintf(file, sizeof(file), "%s%s", line, fname);
+	if (len == -1 || len >= (int)sizeof(file)) {
+		cvs_log(LP_ERR, "path overflow in Rcs-diff response");
+		return (-1);
+	}
 
 	/* get updated entry fields */
-	cvs_getln(root, buf, sizeof(buf));
+	if (cvs_getln(root, buf, sizeof(buf)) < 0)
+		return (-1);
+
 	ent = cvs_ent_parse(buf);
 	if (ent == NULL)
 		return (-1);
@@ -784,6 +892,67 @@ cvs_resp_template(struct cvsroot *root, int type, char *line)
 	tmpl = cvs_recvfile(root, &mode);
 	if (tmpl == NULL)
 		return (-1);
+
+	return (0);
+}
+
+/*
+ * Check if <dir> is the same as the last
+ * received directory, if it's not, switch Entry files.
+ */
+static int
+resp_check_dir(struct cvsroot *root, const char *dir)
+{
+	int l;
+	size_t len;
+	char cvspath[MAXPATHLEN], repo[MAXPATHLEN];
+	struct stat st;
+
+	/*
+	 * Make sure the CVS directory exists.
+	 */
+	l = snprintf(cvspath, sizeof(cvspath), "%s/%s", dir, CVS_PATH_CVSDIR);
+	if (l == -1 || l >= (int)sizeof(cvspath))
+		return (-1);
+
+	if (stat(cvspath, &st) == -1) {
+		if (errno != ENOENT)
+			return (-1);
+		if  (cvs_repo_base != NULL) {
+			l = snprintf(repo, sizeof(repo), "%s/%s", cvs_repo_base,
+			    dir);
+			if (l == -1 || l >= (int)sizeof(repo))
+				return (-1);
+		} else {
+			strlcpy(repo, dir, sizeof(repo));
+		}
+
+		if (cvs_mkadmin(dir, root->cr_str, repo) < 0)
+			return (-1);
+	}
+
+	if (strcmp(dir, cvs_resp_lastdir)) {
+		if (cvs_resp_lastent != NULL)
+			cvs_ent_close(cvs_resp_lastent);
+		cvs_resp_lastent = cvs_ent_open(dir, O_WRONLY);
+		if (cvs_resp_lastent == NULL)
+			return (-1);
+
+		len = strlcpy(cvs_resp_lastdir, dir, sizeof(cvs_resp_lastdir));
+		if (len >= sizeof(cvs_resp_lastdir)) {
+			errno = ENAMETOOLONG;
+			cvs_log(LP_ERRNO, "%s", cvs_resp_lastdir);
+			return (-1);
+		}
+	} else {
+		/* make sure the old one is still open */
+		if (cvs_resp_lastent == NULL) {
+			cvs_resp_lastent = cvs_ent_open(cvs_resp_lastdir,
+			    O_WRONLY);
+			if (cvs_resp_lastent == NULL)
+				return (-1);
+		}
+	}
 
 	return (0);
 }

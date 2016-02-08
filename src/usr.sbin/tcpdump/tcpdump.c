@@ -1,4 +1,4 @@
-/*	$OpenBSD: tcpdump.c,v 1.42 2005/03/07 16:13:38 reyk Exp $	*/
+/*	$OpenBSD: tcpdump.c,v 1.46 2005/05/28 09:01:52 reyk Exp $	*/
 
 /*
  * Copyright (c) 1988, 1989, 1990, 1991, 1992, 1993, 1994, 1995, 1996, 1997
@@ -26,7 +26,7 @@ static const char copyright[] =
     "@(#) Copyright (c) 1988, 1989, 1990, 1991, 1992, 1993, 1994, 1995, 1996, 1997\n\
 The Regents of the University of California.  All rights reserved.\n";
 static const char rcsid[] =
-    "@(#) $Header: /cvs/src/usr.sbin/tcpdump/tcpdump.c,v 1.42 2005/03/07 16:13:38 reyk Exp $ (LBL)";
+    "@(#) $Header: /cvs/src/usr.sbin/tcpdump/tcpdump.c,v 1.46 2005/05/28 09:01:52 reyk Exp $ (LBL)";
 #endif
 
 /*
@@ -40,6 +40,7 @@ static const char rcsid[] =
 #include <sys/types.h>
 #include <sys/time.h>
 #include <sys/ioctl.h>
+#include <sys/wait.h>
 
 #include <netinet/in.h>
 
@@ -51,6 +52,7 @@ static const char rcsid[] =
 #include <unistd.h>
 #include <ctype.h>
 #include <err.h>
+#include <errno.h>
 
 #include "interface.h"
 #include "addrtoname.h"
@@ -89,12 +91,15 @@ char *program_name;
 
 int32_t thiszone;		/* seconds offset from gmt to local time */
 
+extern volatile pid_t child_pid;
+
 /* Externs */
 extern void bpf_dump(struct bpf_program *, int);
 extern int esp_init(char *);
 
 /* Forwards */
 RETSIGTYPE cleanup(int);
+RETSIGTYPE gotchld(int);
 extern __dead void usage(void);
 
 /* Length of saved portion of packet. */
@@ -446,8 +451,11 @@ main(int argc, char **argv)
 
 	if (snaplen == 0) {
 		switch (dlt) {
+		case DLT_IEEE802_11:
+			snaplen = IEEE802_11_SNAPLEN;
+			break;
 		case DLT_IEEE802_11_RADIO:
-			snaplen = RADIOTAP_SNAPLEN;			
+			snaplen = IEEE802_11_RADIO_SNAPLEN;
 			break;
 		default:
 			snaplen = DEFAULT_SNAPLEN;
@@ -508,6 +516,7 @@ main(int argc, char **argv)
 
 	setsignal(SIGTERM, cleanup);
 	setsignal(SIGINT, cleanup);
+	setsignal(SIGCHLD, gotchld);
 	/* Cooperate with nohup(1) XXX is this still necessary/working? */
 	if ((oldhandler = setsignal(SIGHUP, cleanup)) != SIG_DFL)
 		(void)setsignal(SIGHUP, oldhandler);
@@ -559,28 +568,48 @@ RETSIGTYPE
 cleanup(int signo)
 {
 	struct pcap_stat stat;
+	sigset_t allsigs;
 	char buf[1024];
 
+	sigfillset(&allsigs);
+	sigprocmask(SIG_BLOCK, &allsigs, NULL);
+
 	/* Can't print the summary if reading from a savefile */
+	(void)write(STDERR_FILENO, "\n", 1);
 	if (pd != NULL && pcap_file(pd) == NULL) {
-#if 0
-		(void)fflush(stdout);	/* XXX unsafe */
-#endif
-		(void)write(STDERR_FILENO, "\n", 1);
 		if (pcap_stats(pd, &stat) < 0) {
 			(void)snprintf(buf, sizeof buf,
 			    "pcap_stats: %s\n", pcap_geterr(pd));
-			write(STDOUT_FILENO, buf, strlen(buf));
+			write(STDERR_FILENO, buf, strlen(buf));
 		} else {
 			(void)snprintf(buf, sizeof buf,
 			    "%d packets received by filter\n", stat.ps_recv);
-			write(STDOUT_FILENO, buf, strlen(buf));
+			write(STDERR_FILENO, buf, strlen(buf));
 			(void)snprintf(buf, sizeof buf,
 			    "%d packets dropped by kernel\n", stat.ps_drop);
-			write(STDOUT_FILENO, buf, strlen(buf));
+			write(STDERR_FILENO, buf, strlen(buf));
 		}
 	}
 	_exit(0);
+}
+
+RETSIGTYPE
+gotchld(int signo)
+{
+	pid_t pid;
+	int status;
+	int save_err = errno;
+
+	do {
+		pid = waitpid(child_pid, &status, WNOHANG);
+		if (pid > 0 && (WIFEXITED(status) || WIFSIGNALED(status)))
+			cleanup(0);
+	} while (pid == -1 && errno == EINTR);
+
+	if (pid == -1)
+		_exit(1);
+
+	errno = save_err;
 }
 
 /* dump the buffer in `emacs-hexl' style */

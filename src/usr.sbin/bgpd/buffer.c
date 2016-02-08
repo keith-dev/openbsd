@@ -1,4 +1,4 @@
-/*	$OpenBSD: buffer.c,v 1.28 2005/03/17 21:51:26 claudio Exp $ */
+/*	$OpenBSD: buffer.c,v 1.32 2005/08/11 16:24:11 henning Exp $ */
 
 /*
  * Copyright (c) 2003, 2004 Henning Brauer <henning@openbsd.org>
@@ -19,11 +19,10 @@
 #include <sys/types.h>
 #include <sys/uio.h>
 
-#include <stdio.h>
-#include <stdlib.h>
-#include <err.h>
 #include <errno.h>
 #include <limits.h>
+#include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
 
@@ -87,7 +86,8 @@ buf_write(int sock, struct buf *buf)
 
 	if ((n = write(sock, buf->buf + buf->rpos,
 	    buf->size - buf->rpos)) == -1) {
-		if (errno == EAGAIN || errno == ENOBUFS)	/* try later */
+		if (errno == EAGAIN || errno == ENOBUFS ||
+		    errno == EINTR)	/* try later */
 			return (0);
 		else
 			return (-1);
@@ -132,12 +132,6 @@ msgbuf_clear(struct msgbuf *msgbuf)
 int
 msgbuf_write(struct msgbuf *msgbuf)
 {
-	/*
-	 * possible race here
-	 * when we cannot write out data completely from a buffer,
-	 * we MUST return and NOT try to write out stuff from later buffers -
-	 * the socket might have become writeable again
-	 */
 	struct iovec	 iov[IOV_MAX];
 	struct buf	*buf, *next;
 	int		 i = 0;
@@ -172,7 +166,8 @@ msgbuf_write(struct msgbuf *msgbuf)
 	}
 
 	if ((n = sendmsg(msgbuf->fd, &msg, 0)) == -1) {
-		if (errno == EAGAIN || errno == ENOBUFS)	/* try later */
+		if (errno == EAGAIN || errno == ENOBUFS ||
+		    errno == EINTR)	/* try later */
 			return (0);
 		else
 			return (-1);
@@ -191,7 +186,7 @@ msgbuf_write(struct msgbuf *msgbuf)
 		close(buf->fd);
 		buf->fd = -1;
 	}
-	
+
 	for (buf = TAILQ_FIRST(&msgbuf->bufs); buf != NULL && n > 0;
 	    buf = next) {
 		next = TAILQ_NEXT(buf, entry);
@@ -210,12 +205,6 @@ msgbuf_write(struct msgbuf *msgbuf)
 int
 msgbuf_writebound(struct msgbuf *msgbuf)
 {
-	/*
-	 * possible race here
-	 * when we cannot write out data completely from a buffer,
-	 * we MUST return and NOT try to write out stuff from later buffers -
-	 * the socket might have become writeable again
-	 */
 	struct buf	*buf;
 	int		 n;
 

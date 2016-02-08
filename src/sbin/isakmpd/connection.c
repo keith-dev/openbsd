@@ -1,4 +1,4 @@
-/* $OpenBSD: connection.c,v 1.29 2004/06/14 09:55:41 ho Exp $	 */
+/* $OpenBSD: connection.c,v 1.32 2005/05/04 10:05:01 hshoexer Exp $	 */
 /* $EOM: connection.c,v 1.28 2000/11/23 12:21:18 niklas Exp $	 */
 
 /*
@@ -42,6 +42,7 @@
 #include "connection.h"
 #include "doi.h"
 #include "ipsec.h"
+#include "pf_key_v2.h"
 
 /* XXX isakmp.h only required for compare_ids().  */
 #include "isakmp.h"
@@ -110,7 +111,7 @@ connection_init(void)
 			 * XXX This code (i.e. the attribute lookup) seems
 			 * like a likely candidate for factoring out into a
 			 * function of its own.
-		         */
+			 */
 			attrs = conf_get_list(conn->field, "Flags");
 			if (attrs)
 				for (attr = TAILQ_FIRST(&attrs->fields); attr;
@@ -154,7 +155,7 @@ connection_checker(void *vconn)
 	    connection_checker, conn, &now);
 	if (!conn->ev)
 		log_print("connection_checker: could not add timer event");
-	sysdep_connection_check(conn->name);
+	pf_key_v2_connection_check(conn->name);
 }
 
 /* Find the connection named NAME.  */
@@ -220,7 +221,7 @@ connection_passive_lookup_by_ids(u_int8_t *id1, u_int8_t *id2)
 		/*
 		 * If both IDs match what we have saved, return the name.
 		 * Don't bother in which order they are.
-	         */
+		 */
 		if ((compare_ids(id1, conn->local_id, conn->local_sz) == 0 &&
 		    compare_ids(id2, conn->remote_id, conn->remote_sz) == 0) ||
 		    (compare_ids(id1, conn->remote_id, conn->remote_sz) == 0 &&
@@ -400,10 +401,8 @@ connection_report(void)
 {
 	struct connection *conn;
 	struct timeval  now;
-#ifdef USE_DEBUG
 	struct connection_passive *pconn;
 	struct doi     *doi = doi_lookup(ISAKMP_DOI_ISAKMP);
-#endif
 
 	gettimeofday(&now, 0);
 	for (conn = TAILQ_FIRST(&connections); conn;
@@ -412,7 +411,6 @@ connection_report(void)
 		    "connection_report: connection %s next check %ld seconds",
 		    (conn->name ? conn->name : "<unnamed>"),
 		    conn->ev->expiration.tv_sec - now.tv_sec));
-#ifdef USE_DEBUG
 	for (pconn = TAILQ_FIRST(&connections_passive); pconn;
 	    pconn = TAILQ_NEXT(pconn, link))
 		LOG_DBG((LOG_REPORT, 0,
@@ -420,7 +418,6 @@ connection_report(void)
 		    doi->decode_ids("local_id: %s, remote_id: %s",
 		    pconn->local_id, pconn->local_sz,
 		    pconn->remote_id, pconn->remote_sz, 1)));
-#endif
 }
 
 /* Reinitialize all connections (SIGHUP handling).  */

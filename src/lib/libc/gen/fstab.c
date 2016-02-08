@@ -1,3 +1,4 @@
+/*	$OpenBSD: fstab.c,v 1.15 2005/08/08 08:05:34 espie Exp $ */
 /*
  * Copyright (c) 1980, 1988, 1993
  *	The Regents of the University of California.  All rights reserved.
@@ -27,10 +28,6 @@
  * SUCH DAMAGE.
  */
 
-#if defined(LIBC_SCCS) && !defined(lint)
-static char rcsid[] = "$OpenBSD: fstab.c,v 1.13 2004/05/18 02:05:52 jfb Exp $";
-#endif /* LIBC_SCCS and not lint */
-
 #include <sys/types.h>
 #include <sys/uio.h>
 #include <sys/stat.h>
@@ -52,7 +49,7 @@ static int fstabscan(void);
 static int
 fstabscan(void)
 {
-	register char *cp;
+	char *cp;
 #define	MAXLINELENGTH	1024
 	static char line[MAXLINELENGTH];
 	char subline[MAXLINELENGTH];

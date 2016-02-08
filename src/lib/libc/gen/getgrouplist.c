@@ -1,3 +1,4 @@
+/*	$OpenBSD: getgrouplist.c,v 1.12 2005/08/08 08:05:34 espie Exp $ */
 /*
  * Copyright (c) 1991, 1993
  *	The Regents of the University of California.  All rights reserved.
@@ -27,10 +28,6 @@
  * SUCH DAMAGE.
  */
 
-#if defined(LIBC_SCCS) && !defined(lint)
-static char rcsid[] = "$OpenBSD: getgrouplist.c,v 1.10 2004/05/18 02:05:52 jfb Exp $";
-#endif /* LIBC_SCCS and not lint */
-
 /*
  * get credential
  */
@@ -42,8 +39,8 @@ static char rcsid[] = "$OpenBSD: getgrouplist.c,v 1.10 2004/05/18 02:05:52 jfb E
 int
 getgrouplist(const char *uname, gid_t agroup, gid_t *groups, int *grpcnt)
 {
-	register struct group *grp;
-	register int i, ngroups;
+	struct group *grp;
+	int i, ngroups;
 	int ret, maxgroups;
 	int bail;
 

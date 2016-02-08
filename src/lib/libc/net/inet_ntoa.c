@@ -1,3 +1,4 @@
+/*	$OpenBSD: inet_ntoa.c,v 1.6 2005/08/06 20:30:03 espie Exp $ */
 /*
  * Copyright (c) 1983, 1993
  *	The Regents of the University of California.  All rights reserved.
@@ -27,10 +28,6 @@
  * SUCH DAMAGE.
  */
 
-#if defined(LIBC_SCCS) && !defined(lint)
-static char rcsid[] = "$OpenBSD: inet_ntoa.c,v 1.4 2003/06/02 20:18:35 millert Exp $";
-#endif /* LIBC_SCCS and not lint */
-
 /*
  * Convert network-format internet address
  * to base 256 d.d.d.d representation.
@@ -41,11 +38,10 @@ static char rcsid[] = "$OpenBSD: inet_ntoa.c,v 1.4 2003/06/02 20:18:35 millert E
 #include <stdio.h>
 
 char *
-inet_ntoa(in)
-	struct in_addr in;
+inet_ntoa(struct in_addr in)
 {
 	static char b[18];
-	register char *p;
+	char *p;
 
 	p = (char *)&in;
 #define	UC(b)	(((int)b)&0xff)

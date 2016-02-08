@@ -1,4 +1,4 @@
-.\"	$OpenBSD: sk.4,v 1.31 2005/02/26 23:04:56 brad Exp $
+.\"	$OpenBSD: sk.4,v 1.38 2005/09/01 13:19:13 brad Exp $
 .\"
 .\" Copyright (c) 1997, 1998, 1999
 .\"	Bill Paul <wpaul@ctr.columbia.edu>. All rights reserved.
@@ -38,10 +38,11 @@
 .Sh NAME
 .Nm sk ,
 .Nm skc
-.Nd SysKonnect XMAC II and Marvell GMAC based Gigabit Ethernet
+.Nd SysKonnect XMAC II and Marvell Yukon based Gigabit Ethernet
 .Sh SYNOPSIS
 .Cd "skc* at pci?"
 .Cd "sk* at skc?"
+.Cd "brgphy* at mii?"
 .Cd "eephy* at mii?"
 .Cd "xmphy* at mii?"
 .Sh DESCRIPTION
@@ -51,6 +52,18 @@ driver provides support for SysKonnect based Gigabit Ethernet adapters
 and Marvell based Gigabit Ethernet adapters, including the following:
 .Pp
 .Bl -bullet -offset indent -compact
+.It
+3Com 3c940 single port, copper adapter
+.It
+3Com 3c2000-T single port, copper adapter
+.It
+Belkin F5D5005, copper adapter
+.It
+D-Link DGE-530T, copper adapter
+.It
+Linksys EG1032v2, copper adapter
+.It
+Linksys EG1064v2, copper adapter
 .It
 SK-9821 SK-NET GE-T single port, copper adapter
 .It
@@ -70,21 +83,11 @@ SK-9821 V2.0 single port, copper adapter
 .It
 SK-9843 V2.0 single port, copper adapter
 .It
-3com 3c940 single port, copper adapter
-.It
-Belkin F5D5005, copper adapter
-.It
-Linksys EG1032v2, copper adapter
-.It
-Linksys EG1064v2, copper adapter
-.It
-D-Link DGE-530T, copper adapter
-.It
 SMC 9452TX, copper adapter
 .El
 .Pp
 The SysKonnect based adapters consist of two main components: the
-XaQti Corp.
+XaQti Corp.\&
 XMAC II Gigabit MAC (sk) and the SysKonnect GEnesis controller ASIC (skc).
 The XMAC provides the Gigabit MAC and PHY support
 while the GEnesis provides an interface to the PCI bus, DMA support,
@@ -94,7 +97,6 @@ allowing dual-port NIC configurations.
 .Pp
 The Marvell based adapters are a single integrated circuit, but are
 still presented as a separate MAC (sk) and controller ASIC (skc).
-At this time, there are no dual-port Marvell based NICs.
 .Pp
 The
 .Nm
@@ -105,15 +107,15 @@ to separate networks.
 .Pp
 The XaQti XMAC II supports full and half duplex operation with
 autonegotiation.
-The XMAC also supports unlimited frame sizes.
-Support for jumbo frames is provided via the interface MTU setting.
+The XMAC also supports up to a 9000 byte frame size.
+Support for Jumbo frames is provided via the interface MTU setting.
 Selecting an MTU larger than 1500 bytes with the
 .Xr ifconfig 8
-utility configures the adapter to receive and transmit jumbo frames.
-Using jumbo frames can greatly improve performance for certain tasks,
+utility configures the adapter to transmit Jumbo frames.
+Using Jumbo frames can greatly improve performance for certain tasks,
 such as file transfers and data streaming.
 .Pp
-Hardware receive TCP/IP checksum offload for IPv4 is supported.
+Hardware receive IP checksum offload for IPv4 is supported.
 .Pp
 The following media types and options (as given to
 .Xr ifconfig 8 )
@@ -159,6 +161,7 @@ the network connection (cable).
 .El
 .Sh SEE ALSO
 .Xr arp 4 ,
+.Xr brgphy 4 ,
 .Xr eephy 4 ,
 .Xr ifmedia 4 ,
 .Xr intro 4 ,

@@ -1,4 +1,4 @@
-.\"	$OpenBSD: pf.conf.5,v 1.326 2005/03/01 18:10:44 jmc Exp $
+.\"	$OpenBSD: pf.conf.5,v 1.337 2005/08/06 19:52:36 jmc Exp $
 .\"
 .\" Copyright (c) 2002, Daniel Hartmeier
 .\" All rights reserved.
@@ -217,7 +217,7 @@ When the resolver is called to add a hostname to a table,
 .Em all
 resulting IPv4 and IPv6 addresses are placed into the table.
 IP addresses can also be entered in a table by specifying a valid interface
-name or the
+name, a valid interface group or the
 .Em self
 keyword, in which case all addresses assigned to the interface(s) will be
 added to the table.
@@ -442,8 +442,6 @@ option sets the default behaviour for states:
 .Bl -tag -width group-bound -compact
 .It Ar if-bound
 States are bound to interface.
-.It Ar group-bound
-States are bound to interface group (i.e. ppp)
 .It Ar floating
 States can match packets on any interfaces (the default).
 .El
@@ -1086,7 +1084,7 @@ or to the firewall itself.
 Note that redirecting external incoming connections to the loopback
 address, as in
 .Bd -literal -offset indent
-rdr on ne3 inet proto tcp to port 8025 -> 127.0.0.1 port 25
+rdr on ne3 inet proto tcp to port spamd -> 127.0.0.1 port smtp
 .Ed
 .Pp
 will effectively allow an external host to connect to daemons
@@ -1221,7 +1219,7 @@ logging daemon, which dumps the logged packets to the file
 in
 .Xr pcap 3
 binary format.
-.It Ar log-all
+.It Ar log (all)
 Used with
 .Ar keep state ,
 .Ar modulate state
@@ -1240,9 +1238,7 @@ is considered the last matching rule, and evaluation of subsequent rules
 is skipped.
 .It Ar on <interface>
 This rule applies only to packets coming in on, or going out through, this
-particular interface.
-It is also possible to simply give the interface driver name, like ppp or fxp,
-to make the rule match packets flowing through a group of interfaces.
+particular interface or interface group.
 .It Ar <af>
 This rule applies only to packets of this address family.
 Supported values are
@@ -1560,14 +1556,6 @@ is not the last matching rule.
 Further matching rules can replace the tag with a
 new one but will not remove a previously applied tag.
 A packet is only ever assigned one tag at a time.
-.Ar pass
-rules that use the
-.Ar tag
-keyword must also use
-.Ar keep state ,
-.Ar modulate state
-or
-.Ar synproxy state .
 Packet tagging can be done during
 .Ar nat ,
 .Ar rdr ,
@@ -1754,34 +1742,18 @@ All further packets of these connections are passed if they match a state.
 .Pp
 By default, packets coming in and out of any interface can match a state,
 but it is also possible to change that behaviour by assigning states to a
-single interface or a group of interfaces.
+single interface.
 .Pp
 The default policy is specified by the
 .Ar state-policy
 global option, but this can be adjusted on a per-rule basis by adding one
 of the
-.Ar if-bound ,
-.Ar group-bound
+.Ar if-bound
 or
 .Ar floating
 keywords to the
 .Ar keep state
 option.
-For example, if a rule is defined as:
-.Bd -literal -offset indent
-pass out on ppp from any to 10.12/16 keep state (group-bound)
-.Ed
-.Pp
-A state created on ppp0 would match packets an all PPP interfaces,
-but not packets flowing through fxp0 or any other interface.
-.Pp
-Keeping rules
-.Ar floating
-is the more flexible option when the firewall is in a dynamic routing
-environment.
-However, this has some security implications since a state created by one
-trusted network could allow potentially hostile packets coming in from other
-interfaces.
 .Pp
 Specifying
 .Ar flags S/SA
@@ -1878,6 +1850,15 @@ Using a
 modifier on
 .Ar modulate state
 rules between fast networks is suggested to prevent ACK storms.
+.Pp
+Note that alternative methods are available
+to prevent loss of the state table
+and allow for firewall failover.
+See
+.Xr carp 4
+and
+.Xr pfsync 4
+for further information.
 .Sh SYN PROXY
 By default,
 .Xr pf 4
@@ -1962,7 +1943,7 @@ keyword is specified, the number of states per source IP is tracked.
 The maximum number of states created by this rule is limited by the rule's
 .Ar max-src-nodes
 and
-.Ar max-src-state
+.Ar max-src-states
 options.
 Only state entries created by this particular rule count toward the rule's
 limits.
@@ -2580,6 +2561,12 @@ pass in on $ext_if proto tcp from any to 157.161.48.183 port >= 49152 \e
 block in on $ext_if proto tcp from any os {"Windows 95", "Windows 98"} \e
       to any port smtp
 
+# IPv6
+# pass in/out all IPv6 traffic: note that we have to enable this in two
+# different ways, on both our physical interface and our tunnel
+pass quick on gif0 inet6 keep state
+pass quick on $ext_if proto ipv6 keep state
+
 # Packet Tagging
 
 # three interfaces: $int_if, $ext_if, and $wifi_if (wireless). NAT is
@@ -2611,7 +2598,7 @@ in BNF:
 .Bd -literal
 line           = ( option | pf-rule | nat-rule | binat-rule | rdr-rule |
                  antispoof-rule | altq-rule | queue-rule | anchor-rule |
-                 trans-anchors | load-anchors | table-rule )
+                 trans-anchors | load-anchor | table-rule )
 
 option         = "set" ( [ "timeout" ( timeout | "{" timeout-list "}" ) ] |
                  [ "optimization" [ "default" | "normal" |
@@ -2620,16 +2607,19 @@ option         = "set" ( [ "timeout" ( timeout | "{" timeout-list "}" ) ] |
                  [ "limit" ( limit-item | "{" limit-list "}" ) ] |
                  [ "loginterface" ( interface-name | "none" ) ] |
                  [ "block-policy" ( "drop" | "return" ) ] |
-                 [ "state-policy" ( "if-bound" | "group-bound" |
-                 "floating" ) ]
+                 [ "state-policy" ( "if-bound" | "floating" ) ]
                  [ "require-order" ( "yes" | "no" ) ]
                  [ "fingerprints" filename ] |
+                 [ "skip on" ( interface-name | "{" interface-list "}" ) ] |
                  [ "debug" ( "none" | "urgent" | "misc" | "loud" ) ] )
 
 pf-rule        = action [ ( "in" | "out" ) ]
-                 [ "log" | "log-all" ] [ "quick" ]
+                 [ "log" [ "(" logopts ")"] ] [ "quick" ]
                  [ "on" ifspec ] [ route ] [ af ] [ protospec ]
                  hosts [ filteropt-list ]
+
+logopts        = logopt [ "," logopts ]
+logopt         = "all" | "user"
 
 filteropt-list = filteropt-list filteropt | filteropt
 filteropt      = user | group | flags | icmp-type | icmp6-type | tos |
@@ -2638,22 +2628,25 @@ filteropt      = user | group | flags | icmp-type | icmp6-type | tos |
                  "fragment" | "no-df" | "min-ttl" number |
                  "max-mss" number | "random-id" | "reassemble tcp" |
                  fragmentation | "allow-opts" |
-                 "label" string | "tag" string | [ ! ] "tagged" string
+                 "label" string | "tag" string | [ ! ] "tagged" string |
                  "queue" ( string | "(" string [ [ "," ] string ] ")" ) |
                  "probability" number"%"
 
-nat-rule       = [ "no" ] "nat" [ "pass" ] [ "on" ifspec ] [ af ]
+nat-rule       = [ "no" ] "nat" [ "pass" [ "log" [ "(" logopts ")" ] ] ]
+                 [ "on" ifspec ] [ af ]
                  [ protospec ] hosts [ "tag" string ] [ "tagged" string ]
                  [ "->" ( redirhost | "{" redirhost-list "}" )
                  [ portspec ] [ pooltype ] [ "static-port" ] ]
 
-binat-rule     = [ "no" ] "binat" [ "pass" ] [ "on" interface-name ]
-                 [ af ] [ "proto" ( proto-name | proto-number ) ]
+binat-rule     = [ "no" ] "binat" [ "pass" [ "log" [ "(" logopts ")" ] ] ]
+                 [ "on" interface-name ] [ af ]
+                 [ "proto" ( proto-name | proto-number ) ]
                  "from" address [ "/" mask-bits ] "to" ipspec
                  [ "tag" string ] [ "tagged" string ]
                  [ "->" address [ "/" mask-bits ] ]
 
-rdr-rule       = [ "no" ] "rdr" [ "pass" ] [ "on" ifspec ] [ af ]
+rdr-rule       = [ "no" ] "rdr" [ "pass" [ "log" [ "(" logopts ")" ] ] ]
+                 [ "on" ifspec ] [ af ]
                  [ protospec ] hosts [ "tag" string ] [ "tagged" string ]
                  [ "->" ( redirhost | "{" redirhost-list "}" )
                  [ portspec ] [ pooltype ] ]
@@ -2677,7 +2670,7 @@ queue-rule     = "queue" string [ "on" interface-name ] queueopts-list
                  subqueue
 
 anchor-rule    = "anchor" string [ ( "in" | "out" ) ] [ "on" ifspec ]
-                 [ af ] [ "proto" ] [ protospec ] [ hosts ]
+                 [ af ] [ protospec ] [ hosts ]
 
 trans-anchors  = ( "nat-anchor" | "rdr-anchor" | "binat-anchor" ) string
                  [ "on" ifspec ] [ af ] [ "proto" ] [ protospec ] [ hosts ]
@@ -2760,7 +2753,7 @@ state-opt      = ( "max" number | "no-sync" | timeout |
                  "max-src-conn" number |
                  "max-src-conn-rate" number "/" number |
                  "overload" "<" string ">" [ "flush" ] |
-                 "if-bound" | "group-bound" | "floating" )
+                 "if-bound" | "floating" )
 
 fragmentation  = [ "fragment reassemble" | "fragment crop" |
                  "fragment drop-ovl" ]
@@ -2812,6 +2805,7 @@ Service name database.
 Example rulesets.
 .El
 .Sh SEE ALSO
+.Xr carp 4 ,
 .Xr icmp 4 ,
 .Xr icmp6 4 ,
 .Xr ip 4 ,

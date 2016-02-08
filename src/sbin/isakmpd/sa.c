@@ -1,4 +1,4 @@
-/* $OpenBSD: sa.c,v 1.90 2005/02/27 13:12:12 hshoexer Exp $	 */
+/* $OpenBSD: sa.c,v 1.101 2005/08/09 12:50:08 hshoexer Exp $	 */
 /* $EOM: sa.c,v 1.112 2000/12/12 00:22:52 niklas Exp $	 */
 
 /*
@@ -35,10 +35,8 @@
 #include <stdlib.h>
 #include <string.h>
 
-#if defined (USE_KEYNOTE) || defined (USE_POLICY)
 #include <regex.h>
 #include <keynote.h>
-#endif				/* USE_KEYNOTE || USE_POLICY */
 
 #include "sysdep.h"
 
@@ -200,8 +198,8 @@ sa_check_peer(struct sa *sa, void *v_addr)
 		return 0;
 
 	sa->transport->vtbl->get_dst(sa->transport, &dst);
-	return sysdep_sa_len(dst) == addr->len &&
-	    memcmp(dst, addr->addr, sysdep_sa_len(dst)) == 0;
+	return SA_LEN(dst) == addr->len &&
+	    memcmp(dst, addr->addr, SA_LEN(dst)) == 0;
 }
 
 struct dst_isakmpspi_arg {
@@ -225,8 +223,8 @@ isakmp_sa_check(struct sa *sa, void *v_arg)
 	/* verify address is either src or dst for this sa */
 	sa->transport->vtbl->get_dst(sa->transport, &dst);
 	sa->transport->vtbl->get_src(sa->transport, &src);
-	if (memcmp(src, arg->dst, sysdep_sa_len(src)) &&
-	    memcmp(dst, arg->dst, sysdep_sa_len(dst)))
+	if (memcmp(src, arg->dst, SA_LEN(src)) &&
+	    memcmp(dst, arg->dst, SA_LEN(dst)))
 		return 0;
 
 	/* match icookie+rcookie against spi */
@@ -331,7 +329,7 @@ sa_lookup(u_int8_t *cookies, u_int8_t *message_id)
 	 * time, and then masking, should do.  Doing it this way means we can
 	 * validate cookies very fast thus delimiting the effects of "Denial of
 	 * service"-attacks using packet flooding.
-         */
+	 */
 	for (i = 0; i < ISAKMP_HDR_COOKIES_LEN; i += 2) {
 		cp = cookies + i;
 		/* Doing it this way avoids alignment problems.  */
@@ -345,11 +343,10 @@ sa_lookup(u_int8_t *cookies, u_int8_t *message_id)
 		}
 	bucket &= bucket_mask;
 	for (sa = LIST_FIRST(&sa_tab[bucket]);
-	    sa && (memcmp(cookies, sa->cookies, ISAKMP_HDR_COOKIES_LEN) != 0
-	    || (message_id && memcmp(message_id, sa->message_id,
-		ISAKMP_HDR_MESSAGE_ID_LEN) != 0)
-	    || (!message_id && !zero_test(sa->message_id,
-		ISAKMP_HDR_MESSAGE_ID_LEN)));
+	    sa && (memcmp(cookies, sa->cookies, ISAKMP_HDR_COOKIES_LEN) != 0 ||
+	    (message_id && memcmp(message_id, sa->message_id,
+	    ISAKMP_HDR_MESSAGE_ID_LEN) != 0) ||
+	    (!message_id && !zero_test(sa->message_id, ISAKMP_HDR_MESSAGE_ID_LEN)));
 	    sa = LIST_NEXT(sa, link))
 		;
 
@@ -365,7 +362,7 @@ sa_create(struct exchange *exchange, struct transport *t)
 	/*
 	 * We want the SA zeroed for sa_free to be able to find out what fields
 	 * have been filled-in.
-         */
+	 */
 	sa = calloc(1, sizeof *sa);
 	if (!sa) {
 		log_error("sa_create: calloc (1, %lu) failed",
@@ -491,7 +488,7 @@ report_spi(FILE *fd, const u_int8_t *buf, size_t sz, int spi)
 static void
 report_proto(FILE *fd, struct proto *proto)
 {
-	struct ipsec_proto *iproto = proto->data;
+	struct ipsec_proto *iproto;
 	int	keylen, hashlen;
 
 	switch (proto->proto) {
@@ -535,6 +532,13 @@ report_proto(FILE *fd, struct proto *proto)
 		}
 
 		fprintf(fd, "Authentication algorithm: ");
+
+		if (!proto->data) {
+			fprintf(fd, "none\n");
+			break;
+		}
+		iproto = proto->data;
+
 		switch (iproto->auth) {
 		case IPSEC_AUTH_HMAC_MD5:
 			fprintf(fd, "HMAC-MD5\n");
@@ -613,6 +617,75 @@ report_proto(FILE *fd, struct proto *proto)
 	}
 }
 
+/*
+ * Display SA lifetimes.
+ */
+static void
+report_lifetimes(FILE *fd, struct sa *sa)
+{
+	long timeout;
+
+	if (sa->seconds)
+		fprintf(fd, "Lifetime: %llu seconds\n", sa->seconds);
+
+	if (sa->soft_death) {
+		timeout = get_timeout(&sa->soft_death->expiration);
+		if (timeout < 0)
+			fprintf(fd, "<no soft timeout>\n");
+		else
+			fprintf(fd, "Soft timeout in %ld seconds\n", timeout);
+	}
+
+	if (sa->death) {
+		timeout = get_timeout(&sa->death->expiration);
+		if (timeout < 0)
+			fprintf(fd, "No hard timeout>\n");
+		else
+			fprintf(fd, "Hard timeout in %ld seconds\n", timeout);
+	}
+
+	if (sa->kilobytes)
+		fprintf(fd, "Lifetime: %llu kilobytes\n", sa->kilobytes);
+}
+
+/*
+ * Print phase 1 specific information.
+ */
+static void
+report_phase1(FILE *fd, struct sa *sa)
+{
+	/* Cookies. */
+	fprintf(fd, "icookie %08x%08x rcookie %08x%08x\n",
+	    decode_32(sa->cookies), decode_32(sa->cookies + 4),
+	    decode_32(sa->cookies + 8), decode_32(sa->cookies + 12));
+}
+
+/*
+ * Print phase 2 specific information.
+ */
+static void
+report_phase2(FILE *fd, struct sa *sa)
+{
+	struct proto	*proto;
+	int		 i;
+
+	/* Transform information. */
+	for (proto = TAILQ_FIRST(&sa->protos); proto;
+	    proto = TAILQ_NEXT(proto, link)) {
+
+		/* SPI values. */
+		for (i = 0; i < 2; i++)
+			if (proto->spi[i])
+				report_spi(fd, proto->spi[i],
+				    proto->spi_sz[i], i);
+			else
+				fprintf(fd, "SPI %d not defined.\n", i);
+
+		/* Proto values. */
+		report_proto(fd, proto);
+	}
+}
+
 /* Report all the SAs to the report channel.  */
 void
 sa_report(void)
@@ -625,42 +698,36 @@ sa_report(void)
 			sa_dump(LOG_REPORT, 0, "sa_report", sa);
 }
 
-
 /*
  * Print an SA's connection details to file SA_FILE.
  */
 static void
 sa_dump_all(FILE *fd, struct sa *sa)
 {
-	struct proto   *proto;
-	int             i;
-
 	/* SA name and phase. */
 	fprintf(fd, "SA name: %s", sa->name ? sa->name : "<unnamed>");
-	fprintf(fd, " (Phase %d)\n", sa->phase);
+	fprintf(fd, " (Phase %d%s)\n", sa->phase, sa->phase == 1 ?
+	    (sa->initiator ? "/Initiator" : "/Responder") : "");
 
 	/* Source and destination IPs. */
-	fprintf(fd, sa->transport == NULL ? "<no transport>" :
+	fprintf(fd, "%s", sa->transport == NULL ? "<no transport>" :
 	    sa->transport->vtbl->decode_ids(sa->transport));
 	fprintf(fd, "\n");
 
-	/* Transform information. */
-	for (proto = TAILQ_FIRST(&sa->protos); proto;
-	    proto = TAILQ_NEXT(proto, link)) {
-		/* SPI values. */
-		for (i = 0; i < 2; i++)
-			if (proto->spi[i])
-				report_spi(fd, proto->spi[i], proto->spi_sz[i],
-				    i);
-			else
-				fprintf(fd, "SPI %d not defined.", i);
+	/* Lifetimes */
+	report_lifetimes(fd, sa);
 
-		/* Proto values. */
-		report_proto(fd, proto);
-
-		/* SA separator. */
-		fprintf(fd, "\n");
+	if (sa->phase == 1)
+		report_phase1(fd, sa);
+	else if (sa->phase == 2)
+		report_phase2(fd, sa);
+	else {
+		/* Should not happen, but... */
+		fprintf(fd, "<unknown phase>\n");
 	}
+
+	/* SA separator. */
+	fprintf(fd, "\n");
 }
 
 /* Report info of all SAs to file 'fd'.  */
@@ -672,10 +739,7 @@ sa_report_all(FILE *fd)
 
 	for (i = 0; i <= bucket_mask; i++)
 		for (sa = LIST_FIRST(&sa_tab[i]); sa; sa = LIST_NEXT(sa, link))
-			if (sa->phase == 1)
-				fprintf(fd, "SA name: none (phase 1)\n\n");
-			else
-				sa_dump_all(fd, sa);
+			sa_dump_all(fd, sa);
 }
 
 /* Free the protocol structure pointed to by PROTO.  */
@@ -724,12 +788,10 @@ sa_free(struct sa *sa)
 		sa->soft_death = 0;
 		sa->refcnt--;
 	}
-#if defined (USE_DPD)
 	if (sa->dpd_event) {
 		timer_remove_event(sa->dpd_event);
 		sa->dpd_event = 0;
 	}
-#endif
 	sa_remove(sa);
 }
 
@@ -792,22 +854,16 @@ sa_release(struct sa *sa)
 		    sa->recv_key);
 	if (sa->keynote_key)
 		free(sa->keynote_key);	/* This is just a string */
-#if defined (USE_POLICY) || defined (USE_KEYNOTE)
 	if (sa->policy_id != -1)
 		kn_close(sa->policy_id);
-#endif
 	if (sa->name)
 		free(sa->name);
 	if (sa->keystate)
 		free(sa->keystate);
-#if defined (USE_NAT_TRAVERSAL)
 	if (sa->nat_t_keepalive)
 		timer_remove_event(sa->nat_t_keepalive);
-#endif
-#if defined (USE_DPD)
 	if (sa->dpd_event)
 		timer_remove_event(sa->dpd_event);
-#endif
 	if (sa->transport)
 		transport_release(sa->transport);
 	free(sa);
@@ -829,7 +885,7 @@ sa_isakmp_upgrade(struct message *msg)
 	/*
 	 * We don't install a transport in the initiator case as we don't know
 	 * what local address will be chosen.  Do it now instead.
-         */
+	 */
 	sa->transport = msg->transport;
 	transport_reference(sa->transport);
 	sa_enter(sa);
@@ -840,6 +896,7 @@ sa_isakmp_upgrade(struct message *msg)
 struct attr_validation_state {
 	u_int8_t       *attrp[ATTRS_SIZE];
 	u_int8_t        checked[ATTRS_SIZE];
+	u_int16_t	len[ATTRS_SIZE];
 	int             phase;	/* IKE (1) or IPSEC (2) attrs? */
 	int             mode;	/* 0 = 'load', 1 = check */
 };
@@ -849,6 +906,8 @@ static int
 sa_validate_xf_attrs(u_int16_t type, u_int8_t *value, u_int16_t len,
     void *arg)
 {
+	int val0, val1;
+
 	struct attr_validation_state *avs =
 	    (struct attr_validation_state *)arg;
 
@@ -869,6 +928,7 @@ sa_validate_xf_attrs(u_int16_t type, u_int8_t *value, u_int16_t len,
 
 	if (avs->mode == 0) {	/* Load attrs.  */
 		avs->attrp[type] = value;
+		avs->len[type] = len;
 		return 0;
 	}
 	/* Checking for a missing attribute is an immediate failure.  */
@@ -877,7 +937,28 @@ sa_validate_xf_attrs(u_int16_t type, u_int8_t *value, u_int16_t len,
 
 	/* Match the loaded attribute against this one, mark it as checked.  */
 	avs->checked[type]++;
-	return memcmp(avs->attrp[type], value, len);
+	switch (len) {
+	case 2:
+		val0 = (int)decode_16(value);
+		break;
+	case 4:
+		val0 = (int)decode_32(value);
+		break;
+	default:
+		return 1;
+	}
+	switch (avs->len[type]) {
+	case 2:
+		val1 = (int)decode_16(avs->attrp[type]);
+		break;
+	case 4:
+		val1 = (int)decode_32(avs->attrp[type]);
+		break;
+	default:
+		return 1;
+	}
+	/* Return 0 when the values are equal. */
+	return (val0 != val1);
 }
 
 /*
@@ -912,7 +993,7 @@ sa_validate_proto_xf(struct proto *match, struct payload *xf, int phase)
 	avs->phase = phase;
 
 	/* Load the "proposal candidate" attribute set.  */
-	(void) attribute_map(xf->p + ISAKMP_TRANSFORM_SA_ATTRS_OFF,
+	(void)attribute_map(xf->p + ISAKMP_TRANSFORM_SA_ATTRS_OFF,
 	    GET_ISAKMP_GEN_LENGTH(xf->p) - ISAKMP_TRANSFORM_SA_ATTRS_OFF,
 	    sa_validate_xf_attrs, avs);
 	xf_id = GET_ISAKMP_TRANSFORM_ID(xf->p);
@@ -976,9 +1057,9 @@ sa_add_transform(struct sa *sa, struct payload *xf, int initiator,
 		 * selected proposal to make this lookup easier. Most vendors
 		 * follow this. One noted exception is the CiscoPIX (and
 		 * perhaps other Cisco products).
-	         *
+		 *
 		 * We start by matching on the proposal number, as before.
-	         */
+		 */
 		for (proto = TAILQ_FIRST(&sa->protos);
 		    proto && proto->no != GET_ISAKMP_PROP_NO(prop->p);
 		    proto = TAILQ_NEXT(proto, link))
@@ -986,13 +1067,12 @@ sa_add_transform(struct sa *sa, struct payload *xf, int initiator,
 		/*
 		 * If we did not find a match, search through all proposals
 		 * and xforms.
-	         */
+		 */
 		if (!proto || sa_validate_proto_xf(proto, xf, sa->phase) != 0)
 			for (proto = TAILQ_FIRST(&sa->protos);
-			     proto && sa_validate_proto_xf(proto, xf,
-				 sa->phase) != 0;
-			     proto = TAILQ_NEXT(proto, link))
-			    ;
+			    proto && sa_validate_proto_xf(proto, xf, sa->phase) != 0;
+			    proto = TAILQ_NEXT(proto, link))
+				;
 	}
 	if (!proto)
 		return -1;
@@ -1100,7 +1180,7 @@ sa_soft_expire(void *v_sa)
 		/*
 		 * Start to watch the use of this SA, so a renegotiation can
 		 * happen as soon as it is shown to be alive.
-	         */
+		 */
 		sa->flags |= SA_FLAG_FADING;
 }
 
@@ -1189,12 +1269,10 @@ sa_mark_replaced(struct sa *sa)
 {
 	LOG_DBG((LOG_SA, 60, "sa_mark_replaced: SA %p (%s) marked as replaced",
 	    sa, sa->name ? sa->name : "unnamed"));
-#if defined (USE_DPD)
 	if (sa->dpd_event) {
 		timer_remove_event(sa->dpd_event);
 		sa->dpd_event = 0;
 	}
-#endif
 	sa->flags |= SA_FLAG_REPLACED;
 }
 
@@ -1219,14 +1297,14 @@ sa_setup_expirations(struct sa *sa)
 	 * It is not good to do the decrease on the hard timeout, because then
 	 * we may drop our SA before our peer.
 	 * XXX Better scheme to come?
-         */
+	 */
 	if (!sa->soft_death) {
 		gettimeofday(&expiration, 0);
 		/*
 		 * XXX This should probably be configuration controlled
 		 * somehow.
 		 */
-		seconds = sa->seconds * (850 + sysdep_random() % 100) / 1000;
+		seconds = sa->seconds * (850 + rand_32() % 100) / 1000;
 		LOG_DBG((LOG_TIMER, 95,
 		    "sa_setup_expirations: SA %p soft timeout in %llu seconds",
 		    sa, seconds));

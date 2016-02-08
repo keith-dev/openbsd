@@ -1,4 +1,4 @@
-/*	$OpenBSD: rde_filter.c,v 1.26 2005/03/14 17:32:04 claudio Exp $ */
+/*	$OpenBSD: rde_filter.c,v 1.34 2005/08/10 08:34:06 claudio Exp $ */
 
 /*
  * Copyright (c) 2004 Claudio Jeker <claudio@openbsd.org>
@@ -31,7 +31,8 @@ int	rde_filter_match(struct filter_rule *, struct rde_aspath *,
 
 enum filter_actions
 rde_filter(struct rde_peer *peer, struct rde_aspath *asp,
-    struct bgpd_addr *prefix, u_int8_t prefixlen, enum directions dir)
+    struct bgpd_addr *prefix, u_int8_t prefixlen, struct rde_peer *from,
+    enum directions dir)
 {
 	struct filter_rule	*f;
 	enum filter_actions	 action = ACTION_ALLOW; /* default allow */
@@ -48,7 +49,7 @@ rde_filter(struct rde_peer *peer, struct rde_aspath *asp,
 		if (rde_filter_match(f, asp, prefix, prefixlen)) {
 			if (asp != NULL)
 				rde_apply_set(asp, &f->set, prefix->af,
-				    asp->peer, dir);
+				    from, dir);
 			if (f->action != ACTION_NONE)
 				action = f->action;
 			if (f->quick)
@@ -59,19 +60,8 @@ rde_filter(struct rde_peer *peer, struct rde_aspath *asp,
 }
 
 void
-rde_free_set(struct filter_set_head *sh)
-{
-	struct filter_set	*set;
-
-	while ((set = SIMPLEQ_FIRST(sh)) != NULL) {
-		SIMPLEQ_REMOVE_HEAD(sh, entry);
-		free(set);
-	}
-}
-
-void
 rde_apply_set(struct rde_aspath *asp, struct filter_set_head *sh,
-    sa_family_t af, struct rde_peer *peer, enum directions dir)
+    sa_family_t af, struct rde_peer *from, enum directions dir)
 {
 	struct filter_set	*set;
 	struct aspath		*new;
@@ -82,7 +72,7 @@ rde_apply_set(struct rde_aspath *asp, struct filter_set_head *sh,
 	if (asp == NULL)
 		return;
 
-	SIMPLEQ_FOREACH(set, sh, entry) {
+	TAILQ_FOREACH(set, sh, entry) {
 		/*
 		 * default outgoing overrides are only allowed to
 		 * set prepend-self and set nexthop no-modify
@@ -131,6 +121,24 @@ rde_apply_set(struct rde_aspath *asp, struct filter_set_head *sh,
 					asp->med += set->action.relative;
 			}
 			break;
+		case ACTION_SET_WEIGHT:
+			asp->weight = set->action.metric;
+			break;
+		case ACTION_SET_RELATIVE_WEIGHT:
+			if (set->action.relative > 0) {
+				if (set->action.relative + asp->weight <
+				    asp->weight)
+					asp->weight = UINT_MAX;
+				else
+					asp->weight += set->action.relative;
+			} else {
+				if ((u_int32_t)-set->action.relative >
+				    asp->weight)
+					asp->weight = 0;
+				else
+					asp->weight += set->action.relative;
+			}
+			break;
 		case ACTION_SET_PREPEND_SELF:
 			/* don't apply if this is a incoming default override */
 			if (dir == DIR_DEFAULT_IN)
@@ -142,7 +150,9 @@ rde_apply_set(struct rde_aspath *asp, struct filter_set_head *sh,
 			asp->aspath = new;
 			break;
 		case ACTION_SET_PREPEND_PEER:
-			as = peer->conf.remote_as;
+			if (from == NULL)
+				break;
+			as = from->conf.remote_as;
 			prepend = set->action.prepend;
 			new = aspath_prepend(asp->aspath, as, prepend);
 			aspath_put(asp->aspath);
@@ -170,8 +180,24 @@ rde_apply_set(struct rde_aspath *asp, struct filter_set_head *sh,
 			    set->action.community.type);
 			break;
 		case ACTION_PFTABLE:
-			strlcpy(asp->pftable, set->action.pftable,
-			    sizeof(asp->pftable));
+			/* convert pftable name to an id */
+			set->action.id = pftable_name2id(set->action.pftable);
+			set->type = ACTION_PFTABLE_ID;
+			/* FALLTHROUGH */
+		case ACTION_PFTABLE_ID:
+			pftable_unref(asp->pftableid);
+			asp->pftableid = set->action.id;
+			pftable_ref(asp->pftableid);
+			break;
+		case ACTION_RTLABEL:
+			/* convert the route label to an id for faster access */
+			set->action.id = rtlabel_name2id(set->action.rtlabel);
+			set->type = ACTION_RTLABEL_ID;
+			/* FALLTHROUGH */
+		case ACTION_RTLABEL_ID:
+			rtlabel_unref(asp->rtlabelid);
+			asp->rtlabelid = set->action.id;
+			rtlabel_ref(asp->rtlabelid);
 			break;
 		}
 	}
@@ -271,3 +297,55 @@ rde_filter_community(struct rde_aspath *asp, int as, int type)
 
 	return (community_match(a->data, a->len, as, type));
 }
+
+/* free a filterset and take care of possible name2id references */
+void
+filterset_free(struct filter_set_head *sh)
+{
+	struct filter_set	*s;
+
+	while ((s = TAILQ_FIRST(sh)) != NULL) {
+		TAILQ_REMOVE(sh, s, entry);
+		if (s->type == ACTION_RTLABEL_ID)
+			rtlabel_unref(s->action.id);
+		else if (s->type == ACTION_PFTABLE_ID)
+			pftable_unref(s->action.id);
+		free(s);
+	}
+}
+
+/*
+ * this function is a bit more complicated than a memcmp() because there are
+ * types that need to be considered equal e.g. ACTION_SET_MED and
+ * ACTION_SET_RELATIVE_MED. Also ACTION_SET_COMMUNITY and ACTION_SET_NEXTHOP
+ * need some special care.
+ */
+int
+filterset_cmp(struct filter_set *a, struct filter_set *b)
+{
+	if (strcmp(filterset_names[a->type], filterset_names[b->type]))
+		return (a->type - b->type);
+
+	if (a->type == ACTION_SET_COMMUNITY) {	/* a->type == b->type */
+		/* compare community */
+		if (a->action.community.as - b->action.community.as != 0)
+			return (a->action.community.as -
+			    b->action.community.as);
+		return (a->action.community.type - b->action.community.type);
+	}
+
+	if (a->type == ACTION_SET_NEXTHOP && b->type == ACTION_SET_NEXTHOP) {
+		/*
+		 * This is the only intresting case, all others are considered
+		 * equal. It does not make sense to e.g. set a nexthop and
+		 * reject it at the same time. Allow one IPv4 and one IPv6
+		 * per filter set or only one of the other nexthop modifiers.
+		 */
+		return (a->action.nexthop.af - b->action.nexthop.af);
+	}
+
+	/* equal */
+	return (0);
+}
+
+

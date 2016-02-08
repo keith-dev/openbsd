@@ -1,4 +1,4 @@
-/* $OpenBSD: netcat.c,v 1.77 2005/02/08 15:26:23 otto Exp $ */
+/* $OpenBSD: netcat.c,v 1.82 2005/07/24 09:33:56 marius Exp $ */
 /*
  * Copyright (c) 2001 Eric Jackson <ericj@monkey.org>
  *
@@ -50,6 +50,7 @@
 #include <string.h>
 #include <unistd.h>
 #include <fcntl.h>
+#include "atomicio.h"
 
 #ifndef SUN_LEN
 #define SUN_LEN(su) \
@@ -62,6 +63,7 @@
 /* Command Line Options */
 int	dflag;					/* detached, no stdin */
 int	iflag;					/* Interval Flag */
+int	jflag;					/* use jumbo frames if we can */
 int	kflag;					/* More than one connect */
 int	lflag;					/* Bind to local port */
 int	nflag;					/* Don't do name look up */
@@ -80,7 +82,6 @@ int timeout = -1;
 int family = AF_UNSPEC;
 char *portlist[PORT_MAX+1];
 
-ssize_t	atomicio(ssize_t (*)(int, void *, size_t), int, void *, size_t);
 void	atelnet(int, unsigned char *, unsigned int);
 void	build_ports(char *);
 void	help(void);
@@ -92,6 +93,7 @@ int	socks_connect(const char *, const char *, struct addrinfo, const char *, con
 int	udptest(int);
 int	unix_connect(char *);
 int	unix_listen(char *);
+int     set_common_sockopts(int);
 void	usage(int);
 
 int
@@ -115,7 +117,8 @@ main(int argc, char *argv[])
 	endp = NULL;
 	sv = NULL;
 
-	while ((ch = getopt(argc, argv, "46Ddhi:klnp:rSs:tUuvw:X:x:z")) != -1) {
+	while ((ch = getopt(argc, argv,
+	    "46Ddhi:jklnp:rSs:tUuvw:X:x:z")) != -1) {
 		switch (ch) {
 		case '4':
 			family = AF_INET;
@@ -146,6 +149,9 @@ main(int argc, char *argv[])
 			iflag = (int)strtoul(optarg, &endp, 10);
 			if (iflag < 0 || *endp != '\0')
 				errx(1, "interval cannot be negative");
+			break;
+		case 'j':
+			jflag = 1;
 			break;
 		case 'k':
 			kflag = 1;
@@ -286,12 +292,13 @@ main(int argc, char *argv[])
 			 * functions to talk to the caller.
 			 */
 			if (uflag) {
-				int rv;
-				char buf[1024];
+				int rv, plen;
+				char buf[8192];
 				struct sockaddr_storage z;
 
 				len = sizeof(z);
-				rv = recvfrom(s, buf, sizeof(buf), MSG_PEEK,
+				plen = jflag ? 8192 : 1024;
+				rv = recvfrom(s, buf, plen, MSG_PEEK,
 				    (struct sockaddr *)&z, &len);
 				if (rv < 0)
 					err(1, "recvfrom");
@@ -302,6 +309,7 @@ main(int argc, char *argv[])
 
 				connfd = s;
 			} else {
+				len = sizeof(cliaddr);
 				connfd = accept(s, (struct sockaddr *)&cliaddr,
 				    &len);
 			}
@@ -455,7 +463,7 @@ int
 remote_connect(const char *host, const char *port, struct addrinfo hints)
 {
 	struct addrinfo *res, *res0;
-	int s, error, x = 1;
+	int s, error;
 
 	if ((error = getaddrinfo(host, port, &hints, &res)))
 		errx(1, "getaddrinfo: %s", gai_strerror(error));
@@ -490,16 +498,8 @@ remote_connect(const char *host, const char *port, struct addrinfo hints)
 				errx(1, "bind failed: %s", strerror(errno));
 			freeaddrinfo(ares);
 		}
-		if (Sflag) {
-			if (setsockopt(s, IPPROTO_TCP, TCP_MD5SIG,
-			    &x, sizeof(x)) == -1)
-				err(1, NULL);
-		}
-		if (Dflag) {
-			if (setsockopt(s, SOL_SOCKET, SO_DEBUG,
-			    &x, sizeof(x)) == -1)
-				err(1, NULL);
-		}
+
+		set_common_sockopts(s);
 
 		if (connect(s, res0->ai_addr, res0->ai_addrlen) == 0)
 			break;
@@ -544,23 +544,14 @@ local_listen(char *host, char *port, struct addrinfo hints)
 	res0 = res;
 	do {
 		if ((s = socket(res0->ai_family, res0->ai_socktype,
-		    res0->ai_protocol)) == 0)
+		    res0->ai_protocol)) < 0)
 			continue;
 
 		ret = setsockopt(s, SOL_SOCKET, SO_REUSEPORT, &x, sizeof(x));
 		if (ret == -1)
 			err(1, NULL);
-		if (Sflag) {
-			ret = setsockopt(s, IPPROTO_TCP, TCP_MD5SIG,
-			    &x, sizeof(x));
-			if (ret == -1)
-				err(1, NULL);
-		}
-		if (Dflag) {
-			if (setsockopt(s, SOL_SOCKET, SO_DEBUG,
-			    &x, sizeof(x)) == -1)
-				err(1, NULL);
-		}
+
+		set_common_sockopts(s);
 
 		if (bind(s, (struct sockaddr *)res0->ai_addr,
 		    res0->ai_addrlen) == 0)
@@ -588,9 +579,12 @@ void
 readwrite(int nfd)
 {
 	struct pollfd pfd[2];
-	unsigned char buf[BUFSIZ];
-	int wfd = fileno(stdin), n;
+	unsigned char buf[8192];
+	int n, wfd = fileno(stdin);
 	int lfd = fileno(stdout);
+	int plen;
+
+	plen = jflag ? 8192 : 1024;
 
 	/* Setup Network FD */
 	pfd[0].fd = nfd;
@@ -613,7 +607,7 @@ readwrite(int nfd)
 			return;
 
 		if (pfd[0].revents & POLLIN) {
-			if ((n = read(nfd, buf, sizeof(buf))) < 0)
+			if ((n = read(nfd, buf, plen)) < 0)
 				return;
 			else if (n == 0) {
 				shutdown(nfd, SHUT_RD);
@@ -622,22 +616,20 @@ readwrite(int nfd)
 			} else {
 				if (tflag)
 					atelnet(nfd, buf, n);
-				if (atomicio((ssize_t (*)(int, void *, size_t))write,
-				    lfd, buf, n) != n)
+				if (atomicio(vwrite, lfd, buf, n) != n)
 					return;
 			}
 		}
 
 		if (!dflag && pfd[1].revents & POLLIN) {
-			if ((n = read(wfd, buf, sizeof(buf))) < 0)
+			if ((n = read(wfd, buf, plen)) < 0)
 				return;
 			else if (n == 0) {
 				shutdown(nfd, SHUT_WR);
 				pfd[1].fd = -1;
 				pfd[1].events = 0;
 			} else {
-				if (atomicio((ssize_t (*)(int, void *, size_t))write,
-				    nfd, buf, n) != n)
+				if (atomicio(vwrite, nfd, buf, n) != n)
 					return;
 			}
 		}
@@ -668,9 +660,8 @@ atelnet(int nfd, unsigned char *buf, unsigned int size)
 			p++;
 			obuf[2] = *p;
 			obuf[3] = '\0';
-			if (atomicio((ssize_t (*)(int, void *, size_t))write,
-			    nfd, obuf, 3) != 3)
-				warnx("Write Error!");
+			if (atomicio(vwrite, nfd, obuf, 3) != 3)
+				warn("Write Error!");
 			obuf[0] = '\0';
 		}
 	}
@@ -759,6 +750,28 @@ udptest(int s)
 			ret = -1;
 	}
 	return (ret);
+}
+
+int
+set_common_sockopts(int s)
+{
+	int x = 1;
+
+	if (Sflag) {
+		if (setsockopt(s, IPPROTO_TCP, TCP_MD5SIG,
+			&x, sizeof(x)) == -1)
+			err(1, NULL);
+	}
+	if (Dflag) {
+		if (setsockopt(s, SOL_SOCKET, SO_DEBUG,
+			&x, sizeof(x)) == -1)
+			err(1, NULL);
+	}
+	if (jflag) {
+		if (setsockopt(s, SOL_SOCKET, SO_JUMBO,
+			&x, sizeof(x)) == -1)
+			err(1, NULL);
+	}
 }
 
 void

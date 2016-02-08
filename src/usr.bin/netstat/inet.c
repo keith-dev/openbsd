@@ -1,4 +1,4 @@
-/*	$OpenBSD: inet.c,v 1.92 2005/02/10 14:25:08 itojun Exp $	*/
+/*	$OpenBSD: inet.c,v 1.98 2005/08/11 15:52:14 markus Exp $	*/
 /*	$NetBSD: inet.c,v 1.14 1995/10/03 21:42:37 thorpej Exp $	*/
 
 /*
@@ -34,7 +34,7 @@
 #if 0
 static char sccsid[] = "from: @(#)inet.c	8.4 (Berkeley) 4/20/94";
 #else
-static const char *rcsid = "$OpenBSD: inet.c,v 1.92 2005/02/10 14:25:08 itojun Exp $";
+static const char *rcsid = "$OpenBSD: inet.c,v 1.98 2005/08/11 15:52:14 markus Exp $";
 #endif
 #endif /* not lint */
 
@@ -138,13 +138,13 @@ protopr0(u_long off, char *name, int af)
 		return;
 	istcp = strcmp(name, "tcp") == 0;
 	israw = strncmp(name, "ip", 2) == 0;
-	kread(off, (char *)&table, sizeof table);
+	kread(off, &table, sizeof table);
 	prev = head =
 	    (struct inpcb *)&((struct inpcbtable *)off)->inpt_queue.cqh_first;
 	next = table.inpt_queue.cqh_first;
 
 	while (next != head) {
-		kread((u_long)next, (char *)&inpcb, sizeof inpcb);
+		kread((u_long)next, &inpcb, sizeof inpcb);
 		if (inpcb.inp_queue.cqe_prev != prev) {
 			printf("???\n");
 			break;
@@ -168,10 +168,9 @@ protopr0(u_long off, char *name, int af)
 		if (!aflag &&
 		    inet_lnaof(inpcb.inp_laddr) == INADDR_ANY)
 			continue;
-		kread((u_long)inpcb.inp_socket, (char *)&sockb, sizeof (sockb));
+		kread((u_long)inpcb.inp_socket, &sockb, sizeof (sockb));
 		if (istcp) {
-			kread((u_long)inpcb.inp_ppcb,
-			    (char *)&tcpcb, sizeof (tcpcb));
+			kread((u_long)inpcb.inp_ppcb, &tcpcb, sizeof (tcpcb));
 		}
 		if (first) {
 			printf("Active Internet connections");
@@ -250,7 +249,7 @@ tcp_stats(u_long off, char *name)
 	if (off == 0)
 		return;
 	printf("%s:\n", name);
-	kread(off, (char *)&tcpstat, sizeof (tcpstat));
+	kread(off, &tcpstat, sizeof (tcpstat));
 
 #define	p(f, m) if (tcpstat.f || sflag <= 1) \
 	printf(m, tcpstat.f, plural(tcpstat.f))
@@ -348,6 +347,15 @@ tcp_stats(u_long off, char *name)
 		"already in the cache\n");
 	p(tcps_sc_dropped, "\t%qd SYN%s dropped (no route or no space)\n");
 
+	p(tcps_sack_recovery_episode, "\t%qd SACK recovery episode%s\n");
+	p(tcps_sack_rexmits,
+		"\t\t%qd segment rexmit%s in SACK recovery episodes\n");
+	p(tcps_sack_rexmit_bytes,
+		"\t\t%qd byte rexmit%s in SACK recovery episodes\n");
+	p(tcps_sack_rcv_opts,
+		"\t%qd SACK option%s received\n");
+	p(tcps_sack_snd_opts, "\t%qd SACK option%s sent\n");
+
 #undef p
 #undef p1
 #undef p2
@@ -366,7 +374,7 @@ udp_stats(u_long off, char *name)
 
 	if (off == 0)
 		return;
-	kread(off, (char *)&udpstat, sizeof (udpstat));
+	kread(off, &udpstat, sizeof (udpstat));
 	printf("%s:\n", name);
 #define	p(f, m) if (udpstat.f || sflag <= 1) \
 	printf(m, udpstat.f, plural(udpstat.f))
@@ -406,7 +414,7 @@ ip_stats(u_long off, char *name)
 
 	if (off == 0)
 		return;
-	kread(off, (char *)&ipstat, sizeof (ipstat));
+	kread(off, &ipstat, sizeof (ipstat));
 	printf("%s:\n", name);
 
 #define	p(f, m) if (ipstat.f || sflag <= 1) \
@@ -445,6 +453,7 @@ ip_stats(u_long off, char *name)
 	p(ips_badaddr, "\t%lu datagram%s with bad address in header\n");
 	p(ips_inhwcsum, "\t%lu input datagram%s checksum-processed by hardware\n");
 	p(ips_outhwcsum, "\t%lu output datagram%s checksum-processed by hardware\n");
+	p(ips_notmember, "\t%lu multicast packet%s which we don't join\n");
 #undef p
 #undef p1
 }
@@ -504,7 +513,7 @@ icmp_stats(u_long off, char *name)
 
 	if (off == 0)
 		return;
-	kread(off, (char *)&icmpstat, sizeof (icmpstat));
+	kread(off, &icmpstat, sizeof (icmpstat));
 	printf("%s:\n", name);
 
 #define	p(f, m) if (icmpstat.f || sflag <= 1) \
@@ -555,7 +564,7 @@ igmp_stats(u_long off, char *name)
 
 	if (off == 0)
 		return;
-	kread(off, (char *)&igmpstat, sizeof (igmpstat));
+	kread(off, &igmpstat, sizeof (igmpstat));
 	printf("%s:\n", name);
 
 #define	p(f, m) if (igmpstat.f || sflag <= 1) \
@@ -586,7 +595,7 @@ pim_stats(u_long off, char *name)
 
 	if (off == 0)
 		return;
-	if (kread(off, (char *)&pimstat, sizeof (pimstat)) != 0) {
+	if (kread(off, &pimstat, sizeof (pimstat)) != 0) {
 		/* XXX: PIM is probably not enabled in the kernel */
 		return;
 	}
@@ -637,7 +646,7 @@ getrpcportnam(in_port_t port, int proto)
 
 	if (first == 0) {
 		first = 1;
-		memset((char *)&server_addr, 0, sizeof server_addr);
+		memset(&server_addr, 0, sizeof server_addr);
 		server_addr.sin_family = AF_INET;
 		if ((hp = gethostbyname("localhost")) != NULL)
 			memmove((caddr_t)&server_addr.sin_addr, hp->h_addr,
@@ -779,7 +788,7 @@ ah_stats(u_long off, char *name)
 
 	if (off == 0)
 		return;
-	kread(off, (char *)&ahstat, sizeof (ahstat));
+	kread(off, &ahstat, sizeof (ahstat));
 	printf("%s:\n", name);
 
 #define p(f, m) if (ahstat.f || sflag <= 1) \
@@ -820,7 +829,7 @@ etherip_stats(u_long off, char *name)
 
 	if (off == 0)
 		return;
-	kread(off, (char *)&etheripstat, sizeof (etheripstat));
+	kread(off, &etheripstat, sizeof (etheripstat));
 	printf("%s:\n", name);
 
 #define p(f, m) if (etheripstat.f || sflag <= 1) \
@@ -848,7 +857,7 @@ esp_stats(u_long off, char *name)
 
 	if (off == 0)
 		return;
-	kread(off, (char *)&espstat, sizeof (espstat));
+	kread(off, &espstat, sizeof (espstat));
 	printf("%s:\n", name);
 
 #define p(f, m) if (espstat.f || sflag <= 1) \
@@ -890,7 +899,7 @@ ipip_stats(u_long off, char *name)
 
 	if (off == 0)
 		return;
-	kread(off, (char *)&ipipstat, sizeof (ipipstat));
+	kread(off, &ipipstat, sizeof (ipipstat));
 	printf("%s:\n", name);
 
 #define p(f, m) if (ipipstat.f || sflag <= 1) \
@@ -919,7 +928,7 @@ carp_stats(u_long off, char *name)
 
 	if (off == 0)
 		return;
-	kread(off, (char *)&carpstat, sizeof(carpstat));
+	kread(off, &carpstat, sizeof(carpstat));
 	printf("%s:\n", name);
 
 #define p(f, m) if (carpstat.f || sflag <= 1) \
@@ -945,7 +954,7 @@ carp_stats(u_long off, char *name)
 #undef p2
 }
 
-/* 
+/*
  * Dump pfsync statistics structure.
  */
 void
@@ -955,7 +964,7 @@ pfsync_stats(u_long off, char *name)
 
 	if (off == 0)
 		return;
-	kread(off, (char *)&pfsyncstat, sizeof(pfsyncstat));
+	kread(off, &pfsyncstat, sizeof(pfsyncstat));
 	printf("%s:\n", name);
 
 #define p(f, m) if (pfsyncstat.f || sflag <= 1) \
@@ -993,7 +1002,7 @@ ipcomp_stats(u_long off, char *name)
 
 	if (off == 0)
 		return;
-	kread(off, (char *)&ipcompstat, sizeof (ipcompstat));
+	kread(off, &ipcompstat, sizeof (ipcompstat));
 	printf("%s:\n", name);
 
 #define p(f, m) if (ipcompstat.f || sflag <= 1) \
@@ -1017,4 +1026,83 @@ ipcomp_stats(u_long off, char *name)
 	p(ipcomps_obytes, "\t%qu output byte%s\n");
 
 #undef p
+}
+
+/*
+ * Dump the contents of a TCPCB
+ */
+void
+tcp_dump(u_long off)
+{
+	struct tcpcb tcpcb;
+
+	if (off == 0)
+		return;
+	kread(off, (char *)&tcpcb, sizeof (tcpcb));
+
+#define	p(fmt, v, sep) printf(#v " " fmt sep, tcpcb.v);
+	printf("pcb %p, ", off);
+	p("%p", t_inpcb, "\n");
+	p("%d", t_state, "");
+        if (tcpcb.t_state >= 0 && tcpcb.t_state < TCP_NSTATES)
+		printf(" (%s)", tcpstates[tcpcb.t_state]);
+	printf("\n");
+	p("%d", t_rxtshift, ", ");
+	p("%d", t_rxtcur, ", ");
+	p("%d", t_dupacks, "\n");
+	p("%u", t_maxseg, ", ");
+	p("%u", t_maxopd, ", ");
+	p("%u", t_peermss, "\n");
+	p("0x%x", t_flags, ", ");
+	p("%u", t_force, "\n");
+	p("%u", iss, "\n");
+	p("%u", snd_una, ", ");
+	p("%u", snd_nxt, ", ");
+	p("%u", snd_up, "\n");
+	p("%u", snd_wl1, ", ");
+	p("%u", snd_wl2, ", ");
+	p("%lu", snd_wnd, "\n");
+	p("%d", sack_enable, ", ");
+	p("%d", snd_numholes, ", ");
+	p("%u", snd_fack, ", ");
+	p("%lu",snd_awnd, "\n");
+	p("%u", retran_data, ", ");
+	p("%u", snd_last, "\n");
+	p("%u", irs, "\n");
+	p("%u", rcv_nxt, ", ");
+	p("%u", rcv_up, ", ");
+	p("%lu", rcv_wnd, "\n");
+	p("%u", rcv_lastsack, "\n");
+	p("%d", rcv_numsacks, "\n");
+	p("%u", rcv_adv, ", ");
+	p("%u", snd_max, "\n");
+	p("%lu", snd_cwnd, ", ");
+	p("%lu", snd_ssthresh, ", ");
+	p("%lu", max_sndwnd, "\n");
+	p("%u", t_rcvtime, ", ");
+	p("%u", t_rtttime, ", ");
+	p("%u", t_rtseq, "\n");
+	p("%u", t_srtt, ", ");
+	p("%u", t_rttvar, ", ");
+	p("%u", t_rttmin, "\n");
+	p("%u", t_oobflags, ", ");
+	p("%u", t_iobc, "\n");
+	p("%u", t_softerror, "\n");
+	p("%u", snd_scale, ", ");
+	p("%u", rcv_scale, ", ");
+	p("%u", request_r_scale, ", ");
+	p("%u", requested_s_scale, "\n");
+	p("%u", ts_recent, ", ");
+	p("%u", ts_recent_age, "\n");
+	p("%u", last_ack_sent, "\n");
+	HTONS(tcpcb.t_pmtud_ip_len);
+	HTONS(tcpcb.t_pmtud_nextmtu);
+	p("%u", t_pmtud_mss_acked, ", ");
+	p("%u", t_pmtud_mtu_sent, "\n");
+	p("%u", t_pmtud_nextmtu, ", ");
+	p("%u", t_pmtud_ip_len, ", ");
+	p("%u", t_pmtud_ip_hl, "\n");
+	p("%u", t_pmtud_th_seq, "\n");
+	p("%u", pf, "\n");
+#undef	p
 }

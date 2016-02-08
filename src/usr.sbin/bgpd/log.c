@@ -1,4 +1,4 @@
-/*	$OpenBSD: log.c,v 1.42 2004/11/18 14:30:10 henning Exp $ */
+/*	$OpenBSD: log.c,v 1.46 2005/06/05 23:54:05 henning Exp $ */
 
 /*
  * Copyright (c) 2003, 2004 Henning Brauer <henning@openbsd.org>
@@ -15,11 +15,6 @@
  * ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
-
-#include <sys/types.h>
-#include <sys/socket.h>
-#include <netinet/in.h>
-#include <arpa/inet.h>
 
 #include <err.h>
 #include <errno.h>
@@ -276,19 +271,19 @@ log_notification(const struct peer *peer, u_int8_t errcode, u_int8_t subcode,
 	p = log_fmt_peer(&peer->conf);
 	switch (errcode) {
 	case ERR_HEADER:
-		if (subcode > sizeof(suberr_header_names)/sizeof(char *))
+		if (subcode >= sizeof(suberr_header_names)/sizeof(char *))
 			uk = 1;
 		else
 			suberrname = suberr_header_names[subcode];
 		break;
 	case ERR_OPEN:
-		if (subcode > sizeof(suberr_open_names)/sizeof(char *))
+		if (subcode >= sizeof(suberr_open_names)/sizeof(char *))
 			uk = 1;
 		else
 			suberrname = suberr_open_names[subcode];
 		break;
 	case ERR_UPDATE:
-		if (subcode > sizeof(suberr_update_names)/sizeof(char *))
+		if (subcode >= sizeof(suberr_update_names)/sizeof(char *))
 			uk = 1;
 		else
 			suberrname = suberr_update_names[subcode];
@@ -346,6 +341,29 @@ log_addr(const struct bgpd_addr *addr)
 		return ("?");
 	else
 		return (buf);
+}
+
+const char *
+log_in6addr(const struct in6_addr *addr)
+{
+	struct sockaddr_in6	sa_in6;
+	u_int16_t		tmp16;
+
+	bzero(&sa_in6, sizeof(sa_in6));
+	sa_in6.sin6_len = sizeof(sa_in6);
+	sa_in6.sin6_family = AF_INET6;
+	memcpy(&sa_in6.sin6_addr, addr, sizeof(sa_in6.sin6_addr));
+
+	/* XXX thanks, KAME, for this ugliness... adopted from route/show.c */
+	if (IN6_IS_ADDR_LINKLOCAL(&sa_in6.sin6_addr) ||
+	    IN6_IS_ADDR_MC_LINKLOCAL(&sa_in6.sin6_addr)) {
+		memcpy(&tmp16, &sa_in6.sin6_addr.s6_addr[2], sizeof(tmp16));
+		sa_in6.sin6_scope_id = ntohs(tmp16);
+		sa_in6.sin6_addr.s6_addr[2] = 0;
+		sa_in6.sin6_addr.s6_addr[3] = 0;
+	}
+
+	return (log_sockaddr((struct sockaddr *)&sa_in6));
 }
 
 const char *

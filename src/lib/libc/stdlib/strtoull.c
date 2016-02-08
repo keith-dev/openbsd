@@ -1,3 +1,4 @@
+/*	$OpenBSD: strtoull.c,v 1.5 2005/08/08 08:05:37 espie Exp $ */
 /*-
  * Copyright (c) 1992 The Regents of the University of California.
  * All rights reserved.
@@ -27,10 +28,6 @@
  * SUCH DAMAGE.
  */
 
-#if defined(LIBC_SCCS) && !defined(lint)
-static const char rcsid[] = "$OpenBSD: strtoull.c,v 1.3 2005/03/02 12:24:26 millert Exp $";
-#endif /* LIBC_SCCS and not lint */
-
 #include <sys/types.h>
 
 #include <ctype.h>
@@ -45,10 +42,7 @@ static const char rcsid[] = "$OpenBSD: strtoull.c,v 1.3 2005/03/02 12:24:26 mill
  * alphabets and digits are each contiguous.
  */
 unsigned long long
-strtoull(nptr, endptr, base)
-	const char *nptr;
-	char **endptr;
-	int base;
+strtoull(const char *nptr, char **endptr, int base)
 {
 	const char *s;
 	unsigned long long acc, cutoff;
@@ -113,10 +107,7 @@ strtoull(nptr, endptr, base)
 __weak_alias(strtouq, strtoull);
 #else
 u_quad_t
-strtouq(nptr, endptr, base)
-	const char *nptr;
-	char **endptr;
-	int base;
+strtouq(const char *nptr, char **endptr, int base)
 {
 
 	return ((u_quad_t)strtoull(nptr, endptr, base));

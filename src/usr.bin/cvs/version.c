@@ -1,4 +1,4 @@
-/*	$OpenBSD: version.c,v 1.7 2004/12/07 17:10:56 tedu Exp $	*/
+/*	$OpenBSD: version.c,v 1.18 2005/07/25 12:13:08 xsa Exp $	*/
 /*
  * Copyright (c) 2004 Jean-Francois Brousseau <jfb@openbsd.org>
  * All rights reserved.
@@ -26,41 +26,47 @@
 
 #include <sys/types.h>
 
-#include <stdlib.h>
-#include <stdio.h>
-#include <unistd.h>
 #include <errno.h>
+#include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
-#include <sysexits.h>
+#include <unistd.h>
 
 #include "cvs.h"
+#include "log.h"
 #include "proto.h"
 
+static int	cvs_version_pre_exec(struct cvsroot *);
+
+struct cvs_cmd cvs_cmd_version = {
+	CVS_OP_VERSION, CVS_REQ_VERSION, "version",
+	{ "ve", "ver" },
+	"Show current CVS version(s)",
+	"",
+	"",
+	NULL,
+	0,
+	NULL,
+	cvs_version_pre_exec,
+	NULL,
+	NULL,
+	NULL,
+	NULL,
+	0
+};
 
 
-int
-cvs_version(int argc, char **argv)
+static int
+cvs_version_pre_exec(struct cvsroot *root)
 {
-	struct cvsroot *root;
-
-	if (argc > 1)
-		return (EX_USAGE);
-
-	root = cvsroot_get(".");
 	if ((root != NULL) && (root->cr_method != CVS_METHOD_LOCAL))
 		printf("Client: ");
-	printf("%s\n", CVS_VERSION);
+	cvs_printf("%s\n", CVS_VERSION);
 
 	if ((root != NULL) && (root->cr_method != CVS_METHOD_LOCAL)) {
-		if (cvs_connect(root) < 0)
-			return (1);
-
-		printf("Server: %s\n", root->cr_version == NULL ?
+		cvs_printf("Server: %s\n", root->cr_version == NULL ?
 		    "(unknown)" : root->cr_version);
-		cvs_disconnect(root);
 	}
-
-	cvsroot_free(root);
 
 	return (0);
 }

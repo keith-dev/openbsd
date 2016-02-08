@@ -1,4 +1,4 @@
-/*	$OpenBSD: conflex.c,v 1.7 2004/09/15 19:02:38 deraadt Exp $	*/
+/*	$OpenBSD: conflex.c,v 1.10 2005/08/02 18:26:49 moritz Exp $	*/
 
 /* Lexical scanner for dhcpd config file... */
 
@@ -51,7 +51,6 @@ char *token_line;
 char *prev_line;
 char *cur_line;
 char *tlname;
-int eol_token;
 
 static char line1[81];
 static char line2[81];
@@ -101,7 +100,7 @@ get_char(FILE *cfile)
 			lpos = 1;
 			cur_line[0] = 0;
 		} else if (c != EOF) {
-			if (lpos <= 81) {
+			if (lpos < sizeof(line1)) {
 				cur_line[lpos - 1] = c;
 				cur_line[lpos] = 0;
 			}
@@ -125,7 +124,7 @@ get_token(FILE *cfile)
 
 		c = get_char(cfile);
 
-		if (!(c == '\n' && eol_token) && isascii(c) && isspace(c))
+		if (isascii(c) && isspace(c))
 			continue;
 		if (c == '#') {
 			skip_to_eol(cfile);
@@ -339,6 +338,7 @@ intern(char *atom, int dfv)
 			return (BOOTING);
 		if (!strcasecmp(atom + 1, "oot-unknown-clients"))
 			return (BOOT_UNKNOWN_CLIENTS);
+		break;
 	case 'c':
 		if (!strcasecmp(atom + 1, "lass"))
 			return (CLASS);

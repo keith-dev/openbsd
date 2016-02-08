@@ -1,14 +1,17 @@
-# $OpenBSD: Makefile,v 1.23 2005/03/07 21:46:59 espie Exp $
+# $OpenBSD: Makefile,v 1.29 2005/08/17 09:45:45 espie Exp $
 
 .include <bsd.own.mk>
 
-MAN=pkg_add.1 pkg_info.1 pkg_create.1 pkg_delete.1 pkg.1 pkg_mklocatedb.1
+MAN=pkg_add.1 pkg_info.1 pkg_create.1 pkg_delete.1 pkg_merge.1 \
+	pkg.1 pkg_mklocatedb.1
 POD2MAN=/usr/bin/pod2man
 
 PACKAGES= \
     OpenBSD/Add.pm \
+    OpenBSD/ArcCheck.pm \
     OpenBSD/CollisionReport.pm \
     OpenBSD/Delete.pm \
+    OpenBSD/Dependencies.pm \
     OpenBSD/Error.pm \
     OpenBSD/Getopt.pm \
     OpenBSD/IdCache.pm \
@@ -37,18 +40,22 @@ SCRIPTS= \
     pkg_info \
     pkg_create \
     pkg_delete \
+    pkg_merge \
     pkg_mklocatedb \
     pkg
 
 LIBBASE=/usr/libdata/perl5
 
 PODS= \
+    OpenBSD::Getopt \
     OpenBSD::IdCache \
     OpenBSD::Mtree \
+    OpenBSD::PackageName \
     OpenBSD::PackingElement \
     OpenBSD::PackingList \
     OpenBSD::PkgCfl \
     OpenBSD::PkgSpec \
+    OpenBSD::RequiredBy \
     OpenBSD::Ustar \
     OpenBSD::Vstat
 

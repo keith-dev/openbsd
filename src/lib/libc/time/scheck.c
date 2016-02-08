@@ -1,12 +1,8 @@
+/*	$OpenBSD: scheck.c,v 1.8 2005/08/08 08:05:38 espie Exp $ */
 /*
 ** This file is in the public domain, so clarified as of
 ** Feb 14, 2003 by Arthur David Olson (arthur_david_olson@nih.gov).
 */
-
-#if defined(LIBC_SCCS) && !defined(lint) && !defined(NOID)
-static char elsieid[] = "@(#)scheck.c	8.15";
-static char rcsid[] = "$OpenBSD: scheck.c,v 1.6 2003/02/14 18:24:53 millert Exp $";
-#endif /* LIBC_SCCS and not lint */
 
 /*LINTLIBRARY*/
 
@@ -15,7 +11,7 @@ static char rcsid[] = "$OpenBSD: scheck.c,v 1.6 2003/02/14 18:24:53 millert Exp 
 char *
 scheck(string, format)
 const char * const	string;
-const char * const	format;
+char * const		format;
 {
 	register char *		fbuf;
 	register const char *	fp;

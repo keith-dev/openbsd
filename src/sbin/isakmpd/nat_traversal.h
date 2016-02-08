@@ -1,4 +1,4 @@
-/*	$OpenBSD: nat_traversal.h,v 1.2 2004/06/21 23:27:10 ho Exp $	*/
+/*	$OpenBSD: nat_traversal.h,v 1.4 2005/07/25 15:03:47 hshoexer Exp $	*/
 
 /*
  * Copyright (c) 2004 Håkan Olsson.  All rights reserved.
@@ -26,6 +26,24 @@
 
 #ifndef _NAT_TRAVERSAL_H_
 #define _NAT_TRAVERSAL_H_
+
+#define VID_DRAFT_V2	0
+#define VID_DRAFT_V2_N	1
+#define VID_DRAFT_V3	2
+#define VID_RFC3947	3
+
+struct nat_t_cap {
+	int		 id;
+	u_int32_t	 flags;
+	const char	*text;
+	char		*hash;
+	size_t		 hashsize;
+};
+
+/*
+ * Set if -T is given on the command line to disable NAT-T support.
+ */
+extern int	disable_nat_t;
 
 void	nat_t_init(void);
 int	nat_t_add_vendor_payloads(struct message *);

@@ -1,4 +1,4 @@
-/*	$OpenBSD: pwritev.c,v 1.6 2003/06/11 21:03:10 deraadt Exp $	*/
+/*	$OpenBSD: pwritev.c,v 1.8 2005/08/08 08:05:37 espie Exp $	*/
 
 /*
  * Copyright (c) 1992, 1993
@@ -29,14 +29,12 @@
  * SUCH DAMAGE.
  */
 
-#if defined(SYSLIBC_SCCS) && !defined(lint)
-static char rcsid[] = "$OpenBSD: pwritev.c,v 1.6 2003/06/11 21:03:10 deraadt Exp $";
-#endif /* SYSLIBC_SCCS and not lint */
-
 #include <sys/types.h>
 #include <sys/syscall.h>
 #include <sys/uio.h>
 #include <unistd.h>
+
+register_t __syscall(quad_t, ...);
 
 /*
  * This function provides 64-bit offset padding that
@@ -45,15 +43,6 @@ static char rcsid[] = "$OpenBSD: pwritev.c,v 1.6 2003/06/11 21:03:10 deraadt Exp
 ssize_t
 pwritev(int fd, const struct iovec *iovp, int iovcnt, off_t offset)
 {
-	extern off_t __syscall();
-	quad_t q;
-	int rv;
 
-	q = __syscall((quad_t)SYS_pwritev, fd, iovp, iovcnt, 0, offset);
-	if (/* LINTED constant */ sizeof (quad_t) == sizeof (register_t) ||
-	    /* LINTED constant */ BYTE_ORDER == LITTLE_ENDIAN)
-		rv = (int)q;
-	else
-		rv = (int)((u_quad_t)q >> 32);
-	return rv;
+	return (__syscall((quad_t)SYS_pwritev, fd, iovp, iovcnt, 0, offset));
 }

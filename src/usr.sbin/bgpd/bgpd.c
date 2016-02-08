@@ -1,4 +1,4 @@
-/*	$OpenBSD: bgpd.c,v 1.113 2005/02/09 10:56:28 henning Exp $ */
+/*	$OpenBSD: bgpd.c,v 1.123 2005/07/01 13:38:14 claudio Exp $ */
 
 /*
  * Copyright (c) 2003, 2004 Henning Brauer <henning@openbsd.org>
@@ -41,12 +41,17 @@ __dead void	usage(void);
 int		main(int, char *[]);
 int		check_child(pid_t, const char *);
 int		send_filterset(struct imsgbuf *, struct filter_set_head *,
-		    int, int);
+		    int);
 int		reconfigure(char *, struct bgpd_config *, struct mrt_head *,
 		    struct peer **, struct filter_head *);
 int		dispatch_imsg(struct imsgbuf *, int);
 
 int			 rfd = -1;
+int			 cflags = 0;
+struct filter_set_head	*connectset;
+struct filter_set_head	*connectset6;
+struct filter_set_head	*staticset;
+struct filter_set_head	*staticset6;
 volatile sig_atomic_t	 mrtdump = 0;
 volatile sig_atomic_t	 quit = 0;
 volatile sig_atomic_t	 reconfig = 0;
@@ -153,8 +158,10 @@ main(int argc, char *argv[])
 		}
 	}
 
-	if (parse_config(conffile, &conf, &mrt_l, &peer_l, &net_l, rules_l))
+	if (parse_config(conffile, &conf, &mrt_l, &peer_l, &net_l, rules_l)) {
+		free(rules_l);
 		exit(1);
+	}
 
 	if (conf.opts & BGPD_OPT_NOACTION) {
 		if (conf.opts & BGPD_OPT_VERBOSE)
@@ -163,13 +170,17 @@ main(int argc, char *argv[])
 			fprintf(stderr, "configuration OK\n");
 		exit(0);
 	}
+	cflags = conf.flags;
+	connectset = &conf.connectset;
+	staticset = &conf.staticset;
+	connectset6 = &conf.connectset6;
+	staticset6 = &conf.staticset6;
 
 	if (geteuid())
 		errx(1, "need root privileges");
 
 	if (getpwnam(BGPD_USER) == NULL)
 		errx(1, "unknown user %s", BGPD_USER);
-	endpwent();
 
 	log_init(debug);
 
@@ -233,11 +244,9 @@ main(int argc, char *argv[])
 		TAILQ_REMOVE(rules_l, r, entry);
 		free(r);
 	}
-
-	while ((la = TAILQ_FIRST(conf.listen_addrs)) != NULL) {
-		TAILQ_REMOVE(conf.listen_addrs, la, entry);
+	TAILQ_FOREACH(la, conf.listen_addrs, entry) {
 		close(la->fd);
-		free(la);
+		la->fd = -1;
 	}
 
 	mrt_reconfigure(&mrt_l);
@@ -334,6 +343,11 @@ main(int argc, char *argv[])
 		LIST_REMOVE(m, entry);
 		free(m);
 	}
+	while ((la = TAILQ_FIRST(conf.listen_addrs)) != NULL) {
+		TAILQ_REMOVE(conf.listen_addrs, la, entry);
+		close(la->fd);
+		free(la);
+	}
 
 	free(rules_l);
 	control_cleanup();
@@ -377,21 +391,14 @@ check_child(pid_t pid, const char *pname)
 }
 
 int
-send_filterset(struct imsgbuf *i, struct filter_set_head *set, int id, int f)
+send_filterset(struct imsgbuf *i, struct filter_set_head *set, int id)
 {
 	struct filter_set	*s;
 
-	for (s = SIMPLEQ_FIRST(set); s != NULL; ) {
+	TAILQ_FOREACH(s, set, entry)
 		if (imsg_compose(i, IMSG_FILTER_SET, id, 0, -1, s,
 		    sizeof(struct filter_set)) == -1)
 			return (-1);
-		if (f) {
-			SIMPLEQ_REMOVE_HEAD(set, entry);
-			free(s);
-			s = SIMPLEQ_FIRST(set);
-		} else
-			s = SIMPLEQ_NEXT(s, entry);
-	}
 	return (0);
 }
 
@@ -411,6 +418,12 @@ reconfigure(char *conffile, struct bgpd_config *conf, struct mrt_head *mrt_l,
 		return (-1);
 	}
 
+	cflags = conf->flags;
+	connectset = &conf->connectset;
+	staticset = &conf->staticset;
+	connectset6 = &conf->connectset6;
+	staticset6 = &conf->staticset6;
+
 	prepare_listeners(conf);
 
 	if (imsg_compose(ibuf_se, IMSG_RECONF_CONF, 0, 0, -1,
@@ -424,39 +437,42 @@ reconfigure(char *conffile, struct bgpd_config *conf, struct mrt_head *mrt_l,
 		    &p->conf, sizeof(struct peer_config)) == -1)
 			return (-1);
 		if (send_filterset(ibuf_se, &p->conf.attrset,
-		    p->conf.id, 0) == -1)
+		    p->conf.id) == -1)
 			return (-1);
 	}
 	while ((n = TAILQ_FIRST(&net_l)) != NULL) {
 		if (imsg_compose(ibuf_rde, IMSG_NETWORK_ADD, 0, 0, -1,
 		    &n->net, sizeof(struct network_config)) == -1)
 			return (-1);
-		if (send_filterset(ibuf_rde, &n->net.attrset, 0, 1) == -1)
+		if (send_filterset(ibuf_rde, &n->net.attrset, 0) == -1)
 			return (-1);
 		if (imsg_compose(ibuf_rde, IMSG_NETWORK_DONE, 0, 0, -1,
 		    NULL, 0) == -1)
 			return (-1);
 		TAILQ_REMOVE(&net_l, n, entry);
+		filterset_free(&n->net.attrset);
 		free(n);
 	}
+	/* redistribute list needs to be reloaded too */
+	if (kr_redist_reload() == -1)
+		return (-1);
+
 	while ((r = TAILQ_FIRST(rules_l)) != NULL) {
 		if (imsg_compose(ibuf_rde, IMSG_RECONF_FILTER, 0, 0, -1,
 		    r, sizeof(struct filter_rule)) == -1)
 			return (-1);
-		if (send_filterset(ibuf_rde, &r->set, 0, 1) == -1)
+		if (send_filterset(ibuf_rde, &r->set, 0) == -1)
 			return (-1);
 		TAILQ_REMOVE(rules_l, r, entry);
+		filterset_free(&r->set);
 		free(r);
 	}
-	while ((la = TAILQ_FIRST(conf->listen_addrs)) != NULL) {
+	TAILQ_FOREACH(la, conf->listen_addrs, entry) {
 		if (imsg_compose(ibuf_se, IMSG_RECONF_LISTENER, 0, 0, la->fd,
 		    la, sizeof(struct listen_addr)) == -1)
 			return (-1);
-		TAILQ_REMOVE(conf->listen_addrs, la, entry);
-		free(la);
+		la->fd = -1;
 	}
-	free(conf->listen_addrs);
-	conf->listen_addrs = NULL;
 
 	if (imsg_compose(ibuf_se, IMSG_RECONF_DONE, 0, 0, -1, NULL, 0) == -1 ||
 	    imsg_compose(ibuf_rde, IMSG_RECONF_DONE, 0, 0, -1, NULL, 0) == -1)
@@ -472,6 +488,7 @@ dispatch_imsg(struct imsgbuf *ibuf, int idx)
 {
 	struct imsg		 imsg;
 	int			 n;
+	int			 rv;
 
 	if ((n = imsg_read(ibuf)) == -1)
 		return (-1);
@@ -481,6 +498,7 @@ dispatch_imsg(struct imsgbuf *ibuf, int idx)
 		return (-1);
 	}
 
+	rv = 0;
 	for (;;) {
 		if ((n = imsg_get(ibuf, &imsg)) == -1)
 			return (-1);
@@ -493,13 +511,25 @@ dispatch_imsg(struct imsgbuf *ibuf, int idx)
 			if (idx != PFD_PIPE_ROUTE)
 				log_warnx("route request not from RDE");
 			else if (kr_change(imsg.data))
-				return (-1);
+				rv = -1;
 			break;
 		case IMSG_KROUTE_DELETE:
 			if (idx != PFD_PIPE_ROUTE)
 				log_warnx("route request not from RDE");
 			else if (kr_delete(imsg.data))
-				return (-1);
+				rv = -1;
+			break;
+		case IMSG_KROUTE6_CHANGE:
+			if (idx != PFD_PIPE_ROUTE)
+				log_warnx("route request not from RDE");
+			else if (kr6_change(imsg.data))
+				rv = -1;
+			break;
+		case IMSG_KROUTE6_DELETE:
+			if (idx != PFD_PIPE_ROUTE)
+				log_warnx("route request not from RDE");
+			else if (kr6_delete(imsg.data))
+				rv = -1;
 			break;
 		case IMSG_NEXTHOP_ADD:
 			if (idx != PFD_PIPE_ROUTE)
@@ -509,7 +539,7 @@ dispatch_imsg(struct imsgbuf *ibuf, int idx)
 				    sizeof(struct bgpd_addr))
 					log_warnx("wrong imsg len");
 				else if (kr_nexthop_add(imsg.data) == -1)
-					return (-1);
+					rv = -1;
 			break;
 		case IMSG_NEXTHOP_REMOVE:
 			if (idx != PFD_PIPE_ROUTE)
@@ -529,7 +559,7 @@ dispatch_imsg(struct imsgbuf *ibuf, int idx)
 				    sizeof(struct pftable_msg))
 					log_warnx("wrong imsg len");
 				else if (pftable_addr_add(imsg.data) != 0)
-					return (-1);
+					rv = -1;
 			break;
 		case IMSG_PFTABLE_REMOVE:
 			if (idx != PFD_PIPE_ROUTE)
@@ -539,7 +569,7 @@ dispatch_imsg(struct imsgbuf *ibuf, int idx)
 				    sizeof(struct pftable_msg))
 					log_warnx("wrong imsg len");
 				else if (pftable_addr_remove(imsg.data) != 0)
-					return (-1);
+					rv = -1;
 			break;
 		case IMSG_PFTABLE_COMMIT:
 			if (idx != PFD_PIPE_ROUTE)
@@ -548,7 +578,7 @@ dispatch_imsg(struct imsgbuf *ibuf, int idx)
 				if (imsg.hdr.len != IMSG_HEADER_SIZE)
 					log_warnx("wrong imsg len");
 				else if (pftable_commit() != 0)
-					return (-1);
+					rv = -1;
 			break;
 		case IMSG_CTL_RELOAD:
 			if (idx != PFD_PIPE_SESSION)
@@ -589,6 +619,8 @@ dispatch_imsg(struct imsgbuf *ibuf, int idx)
 			break;
 		}
 		imsg_free(&imsg);
+		if (rv != 0)
+			return (rv);
 	}
 	return (0);
 }
@@ -622,3 +654,57 @@ send_imsg_session(int type, pid_t pid, void *data, u_int16_t datalen)
 {
 	imsg_compose(ibuf_se, type, 0, pid, -1, data, datalen);
 }
+
+int
+bgpd_redistribute(int type, struct kroute *kr, struct kroute6 *kr6)
+{
+	struct network_config	 net;
+	struct filter_set_head	*h;
+
+	if ((cflags & BGPD_FLAG_REDIST_CONNECTED) && kr &&
+	    (kr->flags & F_CONNECTED))
+		h = connectset;
+	else if ((cflags & BGPD_FLAG_REDIST_STATIC) && kr &&
+	    (kr->flags & F_STATIC))
+		h = staticset;
+	else if ((cflags & BGPD_FLAG_REDIST6_CONNECTED) && kr6 &&
+	    (kr6->flags & F_CONNECTED))
+		h = connectset6;
+	else if ((cflags & BGPD_FLAG_REDIST6_STATIC) && kr6 &&
+	    (kr6->flags & F_STATIC))
+		h = staticset6;
+	else
+		return (0);
+
+	bzero(&net, sizeof(net));
+	if (kr && kr6)
+		fatalx("bgpd_redistribute: unable to redistribute v4 and v6"
+		    "together");
+	if (kr != NULL) {
+		net.prefix.af = AF_INET;
+		net.prefix.v4.s_addr = kr->prefix.s_addr;
+		net.prefixlen = kr->prefixlen;
+	}
+	if (kr6 != NULL) {
+		net.prefix.af = AF_INET6;
+		memcpy(&net.prefix.v6, &kr6->prefix, sizeof(struct in6_addr));
+		net.prefixlen = kr6->prefixlen;
+	}
+
+
+	if (imsg_compose(ibuf_rde, type, 0, 0, -1, &net,
+	    sizeof(struct network_config)) == -1)
+		return (-1);
+
+	/* networks that get deleted don't need to send the filter set */
+	if (type == IMSG_NETWORK_REMOVE)
+		return (1);
+
+	if (send_filterset(ibuf_rde, h, 0) == -1)
+		return (-1);
+	if (imsg_compose(ibuf_rde, IMSG_NETWORK_DONE, 0, 0, -1, NULL, 0) == -1)
+		return (-1);
+
+	return (1);
+}
+

@@ -1,4 +1,4 @@
-/*	$OpenBSD: bt_utils.c,v 1.7 2005/01/03 22:46:43 millert Exp $	*/
+/*	$OpenBSD: bt_utils.c,v 1.9 2005/08/05 13:03:00 espie Exp $	*/
 
 /*-
  * Copyright (c) 1990, 1993, 1994
@@ -32,14 +32,6 @@
  * SUCH DAMAGE.
  */
 
-#if defined(LIBC_SCCS) && !defined(lint)
-#if 0
-static char sccsid[] = "@(#)bt_utils.c	8.8 (Berkeley) 7/20/94";
-#else
-static const char rcsid[] = "$OpenBSD: bt_utils.c,v 1.7 2005/01/03 22:46:43 millert Exp $";
-#endif
-#endif /* LIBC_SCCS and not lint */
-
 #include <sys/param.h>
 
 #include <stdio.h>
@@ -66,11 +58,7 @@ static const char rcsid[] = "$OpenBSD: bt_utils.c,v 1.7 2005/01/03 22:46:43 mill
  *	RET_SUCCESS, RET_ERROR.
  */
 int
-__bt_ret(t, e, key, rkey, data, rdata, copy)
-	BTREE *t;
-	EPG *e;
-	DBT *key, *rkey, *data, *rdata;
-	int copy;
+__bt_ret(BTREE *t, EPG *e, DBT *key, DBT *rkey, DBT *data, DBT *rdata, int copy)
 {
 	BLEAF *bl;
 	void *p;
@@ -152,10 +140,7 @@ dataonly:
  *	> 0 if k1 is > record
  */
 int
-__bt_cmp(t, k1, e)
-	BTREE *t;
-	const DBT *k1;
-	EPG *e;
+__bt_cmp(BTREE *t, const DBT *k1, EPG *e)
 {
 	BINTERNAL *bi;
 	BLEAF *bl;
@@ -215,8 +200,7 @@ __bt_cmp(t, k1, e)
  *	> 0 if a is > b
  */
 int
-__bt_defcmp(a, b)
-	const DBT *a, *b;
+__bt_defcmp(const DBT *a, const DBT *b)
 {
 	size_t len;
 	u_char *p1, *p2;

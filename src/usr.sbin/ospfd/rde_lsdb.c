@@ -1,4 +1,4 @@
-/*	$OpenBSD: rde_lsdb.c,v 1.10 2005/02/27 08:21:15 norby Exp $ */
+/*	$OpenBSD: rde_lsdb.c,v 1.19 2005/08/08 12:22:48 claudio Exp $ */
 
 /*
  * Copyright (c) 2004, 2005 Claudio Jeker <claudio@openbsd.org>
@@ -30,9 +30,9 @@
 struct vertex	*vertex_get(struct lsa *, struct rde_nbr *);
 
 int		 lsa_router_check(struct lsa *, u_int16_t);
-void		 lsa_age(struct vertex *);
 void		 lsa_timeout(int, short, void *);
 void		 lsa_refresh(struct vertex *);
+int		 lsa_equal(struct lsa *, struct lsa *);
 
 struct lsa_tree	*global_lsa_tree;
 
@@ -111,7 +111,7 @@ lsa_newer(struct lsa_hdr *a, struct lsa_hdr *b)
 		return (1);
 
 	/*
-	 * The sequnece number is defined as signed 32-bit integer,
+	 * The sequence number is defined as signed 32-bit integer,
 	 * no idea how IETF came up with such a stupid idea.
 	 */
 	a32 = (int32_t)ntohl(a->seq_num);
@@ -338,11 +338,16 @@ lsa_add(struct rde_nbr *nbr, struct lsa *lsa)
 
 	new = vertex_get(lsa, nbr);
 	old = RB_INSERT(lsa_tree, tree, new);
+
 	if (old != NULL) {
+		if (!lsa_equal(new->lsa, old->lsa))
+			start_spf_timer();
 		RB_REMOVE(lsa_tree, tree, old);
 		vertex_free(old);
 		RB_INSERT(lsa_tree, tree, new);
-	}
+	} else
+		start_spf_timer();
+
 
 	/* timeout handling either MAX_AGE or LS_REFRESH_TIME */
 	timerclear(&tv);
@@ -430,9 +435,11 @@ lsa_find_net(struct area *area, u_int32_t ls_id)
 	struct lsa_tree	*tree = &area->lsa_tree;
 	struct vertex	*v;
 
+	/* XXX speed me up */
 	RB_FOREACH(v, lsa_tree, tree) {
-		if ((v->lsa->hdr.type == LSA_TYPE_NETWORK) &&
-		    (v->lsa->hdr.ls_id == (ls_id))) {
+		if (v->lsa->hdr.type == LSA_TYPE_NETWORK &&
+		    v->lsa->hdr.ls_id == ls_id) {
+			lsa_age(v);
 			return (v);
 		}
 	}
@@ -479,14 +486,48 @@ lsa_snap(struct area *area, u_int32_t peerid)
 }
 
 void
-lsa_dump(struct lsa_tree *tree, pid_t pid)
+lsa_dump(struct lsa_tree *tree, int imsg_type, pid_t pid)
 {
 	struct vertex	*v;
 
 	RB_FOREACH(v, lsa_tree, tree) {
 		lsa_age(v);
-		rde_imsg_compose_ospfe(IMSG_CTL_SHOW_DATABASE, 0, pid,
-		    &v->lsa->hdr, ntohs(v->lsa->hdr.len));
+		switch (imsg_type) {
+		case IMSG_CTL_SHOW_DATABASE:
+			rde_imsg_compose_ospfe(IMSG_CTL_SHOW_DATABASE, 0, pid,
+			    &v->lsa->hdr, ntohs(v->lsa->hdr.len));
+			continue;
+		case IMSG_CTL_SHOW_DB_SELF:
+			if (v->lsa->hdr.adv_rtr == rde_router_id())
+				break;
+			continue;
+		case IMSG_CTL_SHOW_DB_EXT:
+			if (v->type == LSA_TYPE_EXTERNAL)
+				break;
+			continue;
+		case IMSG_CTL_SHOW_DB_NET:
+			if (v->type == LSA_TYPE_NETWORK)
+				break;
+			continue;
+		case IMSG_CTL_SHOW_DB_RTR:
+			if (v->type == LSA_TYPE_ROUTER)
+				break;
+			continue;
+		case IMSG_CTL_SHOW_DB_SUM:
+			if (v->type == LSA_TYPE_SUM_NETWORK)
+				break;
+			continue;
+		case IMSG_CTL_SHOW_DB_ASBR:
+			if (v->type == LSA_TYPE_SUM_ROUTER)
+				break;
+			continue;
+		default:
+			log_debug("%d", imsg_type);
+			log_warnx("lsa_dump: unknown imsg type");
+			return;
+		}
+		rde_imsg_compose_ospfe(imsg_type, 0, pid, &v->lsa->hdr,
+		    ntohs(v->lsa->hdr.len));
 	}
 }
 
@@ -496,8 +537,6 @@ lsa_timeout(int fd, short event, void *bula)
 	struct vertex	*v = bula;
 
 	lsa_age(v);
-
-	log_debug("lsa_timeout: REFLOOD age %d", ntohs(v->lsa->hdr.age));
 
 	if (v->nbr->self && ntohs(v->lsa->hdr.age) < MAX_AGE)
 		lsa_refresh(v);
@@ -545,13 +584,19 @@ lsa_merge(struct rde_nbr *nbr, struct lsa *lsa, struct vertex *v)
 		return;
 	}
 
-	/* TODO check for changes */
-
-	/* set the seq_num to the current on. lsa_refresh() will do the ++ */
+	/* set the seq_num to the current one. lsa_refresh() will do the ++ */
 	lsa->hdr.seq_num = v->lsa->hdr.seq_num;
+
+	/* compare LSA most header fields are equal so don't check them */
+	if (lsa_equal(lsa, v->lsa)) {
+		free(lsa);
+		return;
+	}
+
 	/* overwrite the lsa all other fields are unaffected */
 	free(v->lsa);
 	v->lsa = lsa;
+	start_spf_timer();
 
 	/* set correct timeout for reflooding the LSA */
 	now = time(NULL);
@@ -560,3 +605,49 @@ lsa_merge(struct rde_nbr *nbr, struct lsa *lsa, struct vertex *v)
 		tv.tv_sec = MIN_LS_ARRIVAL;
 	evtimer_add(&v->ev, &tv);
 }
+
+void
+lsa_remove_invalid_sums(struct area *area)
+{
+	struct lsa_tree	*tree = &area->lsa_tree;
+	struct vertex	*v, *nv;
+
+	/* XXX speed me up */
+	for (v = RB_MIN(lsa_tree, tree); v != NULL; v = nv) {
+		nv = RB_NEXT(lsa_tree, tree, v);
+		if ((v->lsa->hdr.type == LSA_TYPE_SUM_NETWORK ||
+		    v->lsa->hdr.type == LSA_TYPE_SUM_ROUTER) &&
+		    v->nbr->self && v->cost == LS_INFINITY) {
+			/*
+			 * age the lsa and call lsa_timeout() which will
+			 * actually remove it from the database.
+			 */
+			v->lsa->hdr.age = htons(MAX_AGE);
+			lsa_timeout(0, 0, v);
+		}
+	}
+}
+
+int
+lsa_equal(struct lsa *a, struct lsa *b)
+{
+	/*
+	 * compare LSA that already have same type, adv_rtr and ls_id
+	 * so not all header need to be compared
+	 */
+	if (a == NULL || b == NULL)
+		return (0);
+	if (a->hdr.len != b->hdr.len)
+	       return (0);
+	if (a->hdr.opts != b->hdr.opts)
+		return (0);
+	/* LSA with age MAX_AGE are never equal */
+	if (a->hdr.age == htons(MAX_AGE) || b->hdr.age == htons(MAX_AGE))
+		return (0);
+	if (memcmp(&a->data, &b->data, ntohs(a->hdr.len) -
+	    sizeof(struct lsa_hdr)))
+		return (0);
+
+	return (1);
+}
+

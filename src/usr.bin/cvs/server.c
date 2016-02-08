@@ -1,4 +1,4 @@
-/*	$OpenBSD: server.c,v 1.6 2004/12/07 17:10:56 tedu Exp $	*/
+/*	$OpenBSD: server.c,v 1.23 2005/08/14 19:49:18 xsa Exp $	*/
 /*
  * Copyright (c) 2004 Jean-Francois Brousseau <jfb@openbsd.org>
  * All rights reserved.
@@ -25,18 +25,16 @@
  */
 
 #include <sys/types.h>
+#include <sys/stat.h>
 
-#include <stdlib.h>
-#include <stdio.h>
-#include <unistd.h>
 #include <errno.h>
+#include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
-#include <paths.h>
-#include <sysexits.h>
+#include <unistd.h>
 
 #include "cvs.h"
 #include "log.h"
-#include "sock.h"
 #include "proto.h"
 
 
@@ -44,7 +42,21 @@
 char   **cvs_args;
 u_int   cvs_nbarg = 0;
 u_int   cvs_utf8ok = 0;
-u_int   cvs_case   = 0;
+u_int   cvs_case = 0;
+
+struct cvs_cmd cvs_cmd_server = {
+	CVS_OP_SERVER, 0, "server",
+	{ },
+	"Server mode",
+	"",
+	"",
+	NULL,
+	0,
+	NULL, NULL, NULL, NULL, NULL, NULL,
+	0
+};
+
+char cvs_server_tmpdir[MAXPATHLEN];
 
 /*
  * cvs_server()
@@ -60,29 +72,42 @@ u_int   cvs_case   = 0;
 int
 cvs_server(int argc, char **argv)
 {
+	int l, ret;
 	size_t len;
-	char reqbuf[128];
+	char reqbuf[512];
 
 	if (argc != 1) {
-		return (EX_USAGE);
+		return (CVS_EX_USAGE);
 	}
 
 	/* make sure standard in and standard out are line-buffered */
-	(void)setvbuf(stdin, NULL, _IOLBF, 0);
-	(void)setvbuf(stdout, NULL, _IOLBF, 0);
+	(void)setvbuf(stdin, NULL, _IOLBF, (size_t)0);
+	(void)setvbuf(stdout, NULL, _IOLBF, (size_t)0);
 
-	if (cvs_sock_connect(CVSD_SOCK_PATH) < 0) {
-		cvs_log(LP_ERR, "failed to connect to CVS server socket");
-		return (-1);
+	/* create the temporary directory */
+	l = snprintf(cvs_server_tmpdir, sizeof(cvs_server_tmpdir),
+	    "%s/cvs-serv%d", cvs_tmpdir, getpid());
+	if (l == -1 || l >= (int)sizeof(cvs_server_tmpdir)) {
+		errno = ENAMETOOLONG;
+		cvs_log(LP_ERRNO, "%s", cvs_server_tmpdir);
+		return (CVS_EX_DATA);
 	}
 
+	if (mkdir(cvs_server_tmpdir, 0700) == -1) {
+		cvs_log(LP_ERRNO, "failed to create temporary directory '%s'",
+		    cvs_server_tmpdir);
+		return (CVS_EX_FILE);
+	}
+
+	if (cvs_chdir(cvs_server_tmpdir) == -1)
+		return (CVS_EX_FILE);
 
 	for (;;) {
-		if (fgets(reqbuf, sizeof(reqbuf), stdin) == NULL) {
+		if (fgets(reqbuf, (int)sizeof(reqbuf), stdin) == NULL) {
 			if (feof(stdin))
 				break;
 			else if (ferror(stdin))
-				return (EX_DATAERR);
+				return (CVS_EX_DATA);
 		}
 
 		len = strlen(reqbuf);
@@ -90,7 +115,7 @@ cvs_server(int argc, char **argv)
 			continue;
 		else if (reqbuf[len - 1] != '\n') {
 			cvs_log(LP_ERR, "truncated request");
-			return (EX_DATAERR);
+			return (CVS_EX_PROTO);
 		}
 		reqbuf[--len] = '\0';
 
@@ -99,7 +124,8 @@ cvs_server(int argc, char **argv)
 
 	}
 
-	cvs_sock_disconnect();
+	/* cleanup the temporary tree */
+	ret = cvs_rmdir(cvs_server_tmpdir);
 
-	return (0);
+	return (ret);
 }

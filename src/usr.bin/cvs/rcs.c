@@ -1,4 +1,4 @@
-/*	$OpenBSD: rcs.c,v 1.36 2005/03/13 22:50:34 jfb Exp $	*/
+/*	$OpenBSD: rcs.c,v 1.59 2005/08/14 19:49:18 xsa Exp $	*/
 /*
  * Copyright (c) 2004 Jean-Francois Brousseau <jfb@openbsd.org>
  * All rights reserved.
@@ -25,94 +25,173 @@
  */
 
 #include <sys/param.h>
-#include <sys/queue.h>
 #include <sys/stat.h>
 
-#include <errno.h>
-#include <stdio.h>
 #include <ctype.h>
-#include <stdlib.h>
+#include <errno.h>
+#include <pwd.h>
 #include <stdarg.h>
+#include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 
-#include "rcs.h"
 #include "log.h"
+#include "rcs.h"
+#include "strtab.h"
 
-#define RCS_BUFSIZE     16384
-#define RCS_BUFEXTSIZE   8192
+#define RCS_BUFSIZE	16384
+#define RCS_BUFEXTSIZE	8192
 
 
 /* RCS token types */
-#define RCS_TOK_ERR     -1
-#define RCS_TOK_EOF      0
-#define RCS_TOK_NUM      1
-#define RCS_TOK_ID       2
-#define RCS_TOK_STRING   3
-#define RCS_TOK_SCOLON   4
-#define RCS_TOK_COLON    5
+#define RCS_TOK_ERR	-1
+#define RCS_TOK_EOF	0
+#define RCS_TOK_NUM	1
+#define RCS_TOK_ID	2
+#define RCS_TOK_STRING	3
+#define RCS_TOK_SCOLON	4
+#define RCS_TOK_COLON	5
 
 
-#define RCS_TOK_HEAD     8
-#define RCS_TOK_BRANCH   9
-#define RCS_TOK_ACCESS   10
-#define RCS_TOK_SYMBOLS  11
-#define RCS_TOK_LOCKS    12
-#define RCS_TOK_COMMENT  13
-#define RCS_TOK_EXPAND   14
-#define RCS_TOK_DATE     15
-#define RCS_TOK_AUTHOR   16
-#define RCS_TOK_STATE    17
-#define RCS_TOK_NEXT     18
-#define RCS_TOK_BRANCHES 19
-#define RCS_TOK_DESC     20
-#define RCS_TOK_LOG      21
-#define RCS_TOK_TEXT     22
-#define RCS_TOK_STRICT   23
+#define RCS_TOK_HEAD		8
+#define RCS_TOK_BRANCH		9
+#define RCS_TOK_ACCESS		10
+#define RCS_TOK_SYMBOLS		11
+#define RCS_TOK_LOCKS		12
+#define RCS_TOK_COMMENT		13
+#define RCS_TOK_EXPAND		14
+#define RCS_TOK_DATE		15
+#define RCS_TOK_AUTHOR		16
+#define RCS_TOK_STATE		17
+#define RCS_TOK_NEXT		18
+#define RCS_TOK_BRANCHES	19
+#define RCS_TOK_DESC		20
+#define RCS_TOK_LOG		21
+#define RCS_TOK_TEXT		22
+#define RCS_TOK_STRICT		23
 
-#define RCS_ISKEY(t)    (((t) >= RCS_TOK_HEAD) && ((t) <= RCS_TOK_BRANCHES))
+#define RCS_ISKEY(t)	(((t) >= RCS_TOK_HEAD) && ((t) <= RCS_TOK_BRANCHES))
 
 
-#define RCS_NOSCOL   0x01   /* no terminating semi-colon */
-#define RCS_VOPT     0x02   /* value is optional */
+#define RCS_NOSCOL	0x01	/* no terminating semi-colon */
+#define RCS_VOPT	0x02	/* value is optional */
 
 
 /* opaque parse data */
 struct rcs_pdata {
-	u_int  rp_lines;
+	u_int	rp_lines;
 
-	char  *rp_buf;
-	size_t rp_blen;
-	char  *rp_bufend;
+	char	*rp_buf;
+	size_t	 rp_blen;
+	char	*rp_bufend;
+	size_t	 rp_tlen;
 
 	/* pushback token buffer */
-	char   rp_ptok[128];
-	int    rp_pttype;       /* token type, RCS_TOK_ERR if no token */
+	char	rp_ptok[128];
+	int	rp_pttype;	/* token type, RCS_TOK_ERR if no token */
 
-	FILE  *rp_file;
+	FILE	*rp_file;
 };
 
 
 struct rcs_line {
-	char *rl_line;
-	int   rl_lineno;
-	TAILQ_ENTRY(rcs_line) rl_list;
+	char			*rl_line;
+	int			 rl_lineno;
+	TAILQ_ENTRY(rcs_line)	 rl_list;
 };
 TAILQ_HEAD(rcs_tqh, rcs_line);
 
 struct rcs_foo {
-	int       rl_nblines;
-	char     *rl_data;
-	struct rcs_tqh rl_lines;
+	int		 rl_nblines;
+	char		*rl_data;
+	struct rcs_tqh	 rl_lines;
 };
 
-#define RCS_TOKSTR(rfp)   ((struct rcs_pdata *)rfp->rf_pdata)->rp_buf
-#define RCS_TOKLEN(rfp)   ((struct rcs_pdata *)rfp->rf_pdata)->rp_blen
+#define RCS_TOKSTR(rfp)	((struct rcs_pdata *)rfp->rf_pdata)->rp_buf
+#define RCS_TOKLEN(rfp)	((struct rcs_pdata *)rfp->rf_pdata)->rp_tlen
 
+
+
+/* invalid characters in RCS symbol names */
+static const char rcs_sym_invch[] = RCS_SYM_INVALCHAR;
+
+
+/* comment leaders, depending on the file's suffix */
+static const struct rcs_comment {
+	const char	*rc_suffix;
+	const char	*rc_cstr;
+} rcs_comments[] = {
+	{ "1",    ".\\\" " },
+	{ "2",    ".\\\" " },
+	{ "3",    ".\\\" " },
+	{ "4",    ".\\\" " },
+	{ "5",    ".\\\" " },
+	{ "6",    ".\\\" " },
+	{ "7",    ".\\\" " },
+	{ "8",    ".\\\" " },
+	{ "9",    ".\\\" " },
+	{ "a",    "-- "    },	/* Ada		 */
+	{ "ada",  "-- "    },
+	{ "adb",  "-- "    },
+	{ "asm",  ";; "    },	/* assembler (MS-DOS) */
+	{ "ads",  "-- "    },	/* Ada */
+	{ "bat",  ":: "    },	/* batch (MS-DOS) */
+	{ "body", "-- "    },	/* Ada */
+	{ "c",    " * "    },	/* C */
+	{ "c++",  "// "    },	/* C++ */
+	{ "cc",   "// "    },
+	{ "cpp",  "// "    },
+	{ "cxx",  "// "    },
+	{ "m",    "// "    },	/* Objective-C */
+	{ "cl",   ";;; "   },	/* Common Lisp	 */
+	{ "cmd",  ":: "    },	/* command (OS/2) */
+	{ "cmf",  "c "     },	/* CM Fortran	 */
+	{ "csh",  "# "     },	/* shell	 */
+	{ "e",    "# "     },	/* efl		 */
+	{ "epsf", "% "     },	/* encapsulated postscript */
+	{ "epsi", "% "     },	/* encapsulated postscript */
+	{ "el",   "; "     },	/* Emacs Lisp	 */
+	{ "f",    "c "     },	/* Fortran	 */
+	{ "for",  "c "     },
+	{ "h",    " * "    },	/* C-header	 */
+	{ "hh",   "// "    },	/* C++ header	 */
+	{ "hpp",  "// "    },
+	{ "hxx",  "// "    },
+	{ "in",   "# "     },	/* for Makefile.in */
+	{ "l",    " * "    },	/* lex */
+	{ "mac",  ";; "    },	/* macro (DEC-10, MS-DOS, PDP-11, VMS, etc) */
+	{ "mak",  "# "     },	/* makefile, e.g. Visual C++ */
+	{ "me",   ".\\\" " },	/* me-macros	t/nroff	 */
+	{ "ml",   "; "     },	/* mocklisp	 */
+	{ "mm",   ".\\\" " },	/* mm-macros	t/nroff	 */
+	{ "ms",   ".\\\" " },	/* ms-macros	t/nroff	 */
+	{ "man",  ".\\\" " },	/* man-macros	t/nroff	 */
+	{ "p",    " * "    },	/* pascal	 */
+	{ "pas",  " * "    },
+	{ "pl",   "# "     },	/* Perl	(conflict with Prolog) */
+	{ "pm",   "# "     },	/* Perl	module */
+	{ "ps",   "% "     },	/* postscript */
+	{ "psw",  "% "     },	/* postscript wrap */
+	{ "pswm", "% "     },	/* postscript wrap */
+	{ "r",    "# "     },	/* ratfor	 */
+	{ "rc",   " * "    },	/* Microsoft Windows resource file */
+	{ "red",  "% "     },	/* psl/rlisp	 */
+	{ "sh",   "# "     },	/* shell	 */
+	{ "sl",   "% "     },	/* psl		 */
+	{ "spec", "-- "    },	/* Ada		 */
+	{ "tex",  "% "     },	/* tex		 */
+	{ "y",    " * "    },	/* yacc		 */
+	{ "ye",   " * "    },	/* yacc-efl	 */
+	{ "yr",   " * "    },	/* yacc-ratfor	 */
+};
+
+#define NB_COMTYPES	(sizeof(rcs_comments)/sizeof(rcs_comments[0]))
 
 #ifdef notyet
 static struct rcs_kfl {
-	char  rk_char;
-	int   rk_val;
+	char	rk_char;
+	int	rk_val;
 } rcs_kflags[] = {
 	{ 'k',   RCS_KWEXP_NAME },
 	{ 'v',   RCS_KWEXP_VAL  },
@@ -123,13 +202,13 @@ static struct rcs_kfl {
 #endif
 
 static struct rcs_key {
-	char  rk_str[16];
-	int   rk_id;
-	int   rk_val;
-	int   rk_flags;
+	char	rk_str[16];
+	int	rk_id;
+	int	rk_val;
+	int	rk_flags;
 } rcs_keys[] = {
 	{ "access",   RCS_TOK_ACCESS,   RCS_TOK_ID,     RCS_VOPT     },
-	{ "author",   RCS_TOK_AUTHOR,   RCS_TOK_STRING, 0            },
+	{ "author",   RCS_TOK_AUTHOR,   RCS_TOK_ID,     0            },
 	{ "branch",   RCS_TOK_BRANCH,   RCS_TOK_NUM,    RCS_VOPT     },
 	{ "branches", RCS_TOK_BRANCHES, RCS_TOK_NUM,    RCS_VOPT     },
 	{ "comment",  RCS_TOK_COMMENT,  RCS_TOK_STRING, RCS_VOPT     },
@@ -140,20 +219,20 @@ static struct rcs_key {
 	{ "locks",    RCS_TOK_LOCKS,    RCS_TOK_ID,     0            },
 	{ "log",      RCS_TOK_LOG,      RCS_TOK_STRING, RCS_NOSCOL   },
 	{ "next",     RCS_TOK_NEXT,     RCS_TOK_NUM,    RCS_VOPT     },
-	{ "state",    RCS_TOK_STATE,    RCS_TOK_STRING, RCS_VOPT     },
+	{ "state",    RCS_TOK_STATE,    RCS_TOK_ID,     RCS_VOPT     },
 	{ "strict",   RCS_TOK_STRICT,   0,              0,           },
 	{ "symbols",  RCS_TOK_SYMBOLS,  0,              0            },
 	{ "text",     RCS_TOK_TEXT,     RCS_TOK_STRING, RCS_NOSCOL   },
 };
 
-#define RCS_NKEYS   (sizeof(rcs_keys)/sizeof(rcs_keys[0]))
+#define RCS_NKEYS	(sizeof(rcs_keys)/sizeof(rcs_keys[0]))
 
 #ifdef notyet
 /*
  * Keyword expansion table
  */
 static struct rcs_kw {
-	char  kw_str[16];
+	char	kw_str[16];
 } rcs_expkw[] = {
 	{ "Author"    },
 	{ "Date"      },
@@ -173,6 +252,8 @@ static const char *rcs_errstrs[] = {
 	"No such entry",
 	"Duplicate entry found",
 	"Bad RCS number",
+	"Invalid RCS symbol",
+	"Parse error",
 };
 
 #define RCS_NERR   (sizeof(rcs_errstrs)/sizeof(rcs_errstrs[0]))
@@ -181,26 +262,27 @@ static const char *rcs_errstrs[] = {
 int rcs_errno = RCS_ERR_NOERR;
 
 
-static int   rcs_write           (RCSFILE *);
-static int   rcs_parse           (RCSFILE *);
-static int   rcs_parse_admin     (RCSFILE *);
-static int   rcs_parse_delta     (RCSFILE *);
-static int   rcs_parse_deltatext (RCSFILE *);
+static int	rcs_write(RCSFILE *);
+static int	rcs_parse(RCSFILE *);
+static int	rcs_parse_admin(RCSFILE *);
+static int	rcs_parse_delta(RCSFILE *);
+static int	rcs_parse_deltatext(RCSFILE *);
 
-static int   rcs_parse_access    (RCSFILE *);
-static int   rcs_parse_symbols   (RCSFILE *);
-static int   rcs_parse_locks     (RCSFILE *);
-static int   rcs_parse_branches  (RCSFILE *, struct rcs_delta *);
-static void  rcs_freedelta       (struct rcs_delta *);
-static void  rcs_freepdata       (struct rcs_pdata *);
-static int   rcs_gettok          (RCSFILE *);
-static int   rcs_pushtok         (RCSFILE *, const char *, int);
-static int   rcs_growbuf         (RCSFILE *);
-static int   rcs_patch_lines     (struct rcs_foo *, struct rcs_foo *);
+static int	rcs_parse_access(RCSFILE *);
+static int	rcs_parse_symbols(RCSFILE *);
+static int	rcs_parse_locks(RCSFILE *);
+static int	rcs_parse_branches(RCSFILE *, struct rcs_delta *);
+static void	rcs_freedelta(struct rcs_delta *);
+static void	rcs_freepdata(struct rcs_pdata *);
+static int	rcs_gettok(RCSFILE *);
+static int	rcs_pushtok(RCSFILE *, const char *, int);
+static int	rcs_growbuf(RCSFILE *);
+static int	rcs_patch_lines(struct rcs_foo *, struct rcs_foo *);
+static int	rcs_strprint(const u_char *, size_t, FILE *);
 
-static struct rcs_delta*  rcs_findrev    (RCSFILE *, RCSNUM *);
-static struct rcs_foo*    rcs_splitlines (const char *);
-static void               rcs_freefoo    (struct rcs_foo *);
+static struct rcs_delta	*rcs_findrev(RCSFILE *, const RCSNUM *);
+static struct rcs_foo	*rcs_splitlines(const char *);
+static void		 rcs_freefoo(struct rcs_foo *);
 
 
 /*
@@ -233,6 +315,7 @@ rcs_open(const char *path, int flags, ...)
 			fmode = va_arg(vap, mode_t);
 			va_end(vap);
 		} else {
+			rcs_errno = RCS_ERR_ERRNO;
 			cvs_log(LP_ERR, "RCS file `%s' does not exist", path);
 			return (NULL);
 		}
@@ -243,11 +326,13 @@ rcs_open(const char *path, int flags, ...)
 
 	if ((rfp = (RCSFILE *)malloc(sizeof(*rfp))) == NULL) {
 		cvs_log(LP_ERRNO, "failed to allocate RCS file structure");
+		rcs_errno = RCS_ERR_ERRNO;
 		return (NULL);
 	}
 	memset(rfp, 0, sizeof(*rfp));
 
 	if ((rfp->rf_path = strdup(path)) == NULL) {
+		rcs_errno = RCS_ERR_ERRNO;
 		cvs_log(LP_ERRNO, "failed to duplicate RCS file path");
 		free(rfp);
 		return (NULL);
@@ -301,7 +386,7 @@ rcs_close(RCSFILE *rfp)
 		rsp = TAILQ_FIRST(&(rfp->rf_symbols));
 		TAILQ_REMOVE(&(rfp->rf_symbols), rsp, rs_list);
 		rcsnum_free(rsp->rs_num);
-		free(rsp->rs_name);
+		cvs_strfree(rsp->rs_name);
 		free(rsp);
 	}
 
@@ -320,11 +405,11 @@ rcs_close(RCSFILE *rfp)
 	if (rfp->rf_path != NULL)
 		free(rfp->rf_path);
 	if (rfp->rf_comment != NULL)
-		free(rfp->rf_comment);
+		cvs_strfree(rfp->rf_comment);
 	if (rfp->rf_expand != NULL)
-		free(rfp->rf_expand);
+		cvs_strfree(rfp->rf_expand);
 	if (rfp->rf_desc != NULL)
-		free(rfp->rf_desc);
+		cvs_strfree(rfp->rf_desc);
 	free(rfp);
 }
 
@@ -339,16 +424,17 @@ static int
 rcs_write(RCSFILE *rfp)
 {
 	FILE *fp;
-	char buf[1024], numbuf[64], *cp;
-	size_t rlen, len;
+	char buf[1024], numbuf[64];
 	struct rcs_access *ap;
 	struct rcs_sym *symp;
+	struct rcs_branch *brp;
 	struct rcs_delta *rdp;
 
 	if (rfp->rf_flags & RCS_SYNCED)
 		return (0);
 
 	if ((fp = fopen(rfp->rf_path, "w")) == NULL) {
+		rcs_errno = RCS_ERR_ERRNO;
 		cvs_log(LP_ERRNO, "failed to open RCS output file `%s'",
 		    rfp->rf_path);
 		return (-1);
@@ -388,45 +474,57 @@ rcs_write(RCSFILE *rfp)
 		fprintf(fp, " strict;");
 	fputc('\n', fp);
 
-	if (rfp->rf_comment != NULL)
-		fprintf(fp, "comment\t@%s@;\n", rfp->rf_comment);
+	if (rfp->rf_comment != NULL) {
+		fputs("comment\t@", fp);
+		rcs_strprint((const u_char *)rfp->rf_comment,
+		    strlen(rfp->rf_comment), fp);
+		fputs("@;\n", fp);
+	}
 
-	if (rfp->rf_expand != NULL)
-		fprintf(fp, "expand @ %s @;\n", rfp->rf_expand);
+	if (rfp->rf_expand != NULL) {
+		fputs("expand @", fp);
+		rcs_strprint((const u_char *)rfp->rf_expand,
+		    strlen(rfp->rf_expand), fp);
+		fputs("@;\n", fp);
+	}
 
-	fprintf(fp, "\n\n");
+	fputs("\n\n", fp);
 
 	TAILQ_FOREACH(rdp, &(rfp->rf_delta), rd_list) {
 		fprintf(fp, "%s\n", rcsnum_tostr(rdp->rd_num, numbuf,
 		    sizeof(numbuf)));
 		fprintf(fp, "date\t%d.%02d.%02d.%02d.%02d.%02d;",
-		    rdp->rd_date.tm_year, rdp->rd_date.tm_mon + 1,
+		    rdp->rd_date.tm_year + 1900, rdp->rd_date.tm_mon + 1,
 		    rdp->rd_date.tm_mday, rdp->rd_date.tm_hour,
 		    rdp->rd_date.tm_min, rdp->rd_date.tm_sec);
 		fprintf(fp, "\tauthor %s;\tstate %s;\n",
 		    rdp->rd_author, rdp->rd_state);
-		fprintf(fp, "branches;\n");
+		fputs("branches", fp);
+		TAILQ_FOREACH(brp, &(rdp->rd_branches), rb_list) {
+			fprintf(fp, " %s", rcsnum_tostr(brp->rb_num, numbuf,
+			    sizeof(numbuf)));
+		}
+		fputs(";\n", fp);
 		fprintf(fp, "next\t%s;\n\n", rcsnum_tostr(rdp->rd_next,
 		    numbuf, sizeof(numbuf)));
 	}
 
-	fprintf(fp, "\ndesc\n@%s@\n\n",
-	    (rfp->rf_desc == NULL) ? "" : rfp->rf_desc);
+	fputs("\ndesc\n@", fp);
+	if (rfp->rf_desc != NULL)
+		rcs_strprint((const u_char *)rfp->rf_desc,
+		    strlen(rfp->rf_desc), fp);
+	fputs("@\n\n", fp);
 
 	/* deltatexts */
 	TAILQ_FOREACH(rdp, &(rfp->rf_delta), rd_list) {
 		fprintf(fp, "\n%s\n", rcsnum_tostr(rdp->rd_num, numbuf,
 		    sizeof(numbuf)));
-		fprintf(fp, "log\n@%s@\ntext\n@", rdp->rd_log);
-
-		cp = rdp->rd_text;
-		do {
-			len = sizeof(buf);
-			rlen = rcs_stresc(1, cp, buf, &len);
-			fprintf(fp, "%s", buf);
-			cp += rlen;
-		} while (len != 0);
-		fprintf(fp, "@\n\n");
+		fputs("log\n@", fp);
+		rcs_strprint((const u_char *)rdp->rd_log,
+		    strlen(rdp->rd_log), fp);
+		fputs("@\ntext\n@", fp);
+		rcs_strprint(rdp->rd_text, rdp->rd_tlen, fp);
+		fputs("@\n\n", fp);
 	}
 	fclose(fp);
 
@@ -434,6 +532,42 @@ rcs_write(RCSFILE *rfp)
 
 	return (0);
 }
+
+/*
+ * rcs_head_get()
+ *
+ * Retrieve the revision number of the head revision for the RCS file <file>.
+ */
+const RCSNUM*
+rcs_head_get(RCSFILE *file)
+{
+	return (file->rf_head);
+}
+
+/*
+ * rcs_head_set()
+ *
+ * Set the revision number of the head revision for the RCS file <file> to
+ * <rev>, which must reference a valid revision within the file.
+ */
+int
+rcs_head_set(RCSFILE *file, const RCSNUM *rev)
+{
+	struct rcs_delta *rd;
+
+	if ((rd = rcs_findrev(file, rev)) == NULL)
+		return (-1);
+
+	if ((file->rf_head == NULL) &&
+	    ((file->rf_head = rcsnum_alloc()) == NULL))
+		return (-1);
+
+	if (rcsnum_cpy(rev, file->rf_head, 0) < 0)
+		return (-1);
+
+	return (0);
+}
+
 
 /*
  * rcs_branch_get()
@@ -491,11 +625,12 @@ rcs_access_add(RCSFILE *file, const char *login)
 
 	ap = (struct rcs_access *)malloc(sizeof(*ap));
 	if (ap == NULL) {
+		rcs_errno = RCS_ERR_ERRNO;
 		cvs_log(LP_ERRNO, "failed to allocate RCS access entry");
 		return (-1);
 	}
 
-	ap->ra_name = strdup(login);
+	ap->ra_name = cvs_strdup(login);
 	if (ap->ra_name == NULL) {
 		cvs_log(LP_ERRNO, "failed to duplicate user name");
 		free(ap);
@@ -531,7 +666,7 @@ rcs_access_remove(RCSFILE *file, const char *login)
 	}
 
 	TAILQ_REMOVE(&(file->rf_access), ap, ra_list);
-	free(ap->ra_name);
+	cvs_strfree(ap->ra_name);
 	free(ap);
 
 	/* not synced anymore */
@@ -551,6 +686,11 @@ rcs_sym_add(RCSFILE *rfp, const char *sym, RCSNUM *snum)
 {
 	struct rcs_sym *symp;
 
+	if (!rcs_sym_check(sym)) {
+		rcs_errno = RCS_ERR_BADSYM;
+		return (NULL);
+	}
+
 	/* first look for duplication */
 	TAILQ_FOREACH(symp, &(rfp->rf_symbols), rs_list) {
 		if (strcmp(symp->rs_name, sym) == 0) {
@@ -559,22 +699,21 @@ rcs_sym_add(RCSFILE *rfp, const char *sym, RCSNUM *snum)
 		}
 	}
 
-	symp = (struct rcs_sym *)malloc(sizeof(*symp));
-	if (symp == NULL) {
+	if ((symp = (struct rcs_sym *)malloc(sizeof(*symp))) == NULL) {
+		rcs_errno = RCS_ERR_ERRNO;
 		cvs_log(LP_ERRNO, "failed to allocate RCS symbol");
 		return (-1);
 	}
 
-	symp->rs_name = strdup(sym);
-	if (symp->rs_name == NULL) {
+	if ((symp->rs_name = cvs_strdup(sym)) == NULL) {
+		rcs_errno = RCS_ERR_ERRNO;
 		cvs_log(LP_ERRNO, "failed to duplicate symbol");
 		free(symp);
 		return (-1);
 	}
 
-	symp->rs_num = rcsnum_alloc();
-	if (symp->rs_num == NULL) {
-		free(symp->rs_name);
+	if ((symp->rs_num = rcsnum_alloc()) == NULL) {
+		cvs_strfree(symp->rs_name);
 		free(symp);
 		return (-1);
 	}
@@ -600,6 +739,11 @@ rcs_sym_remove(RCSFILE *file, const char *sym)
 {
 	struct rcs_sym *symp;
 
+	if (!rcs_sym_check(sym)) {
+		rcs_errno = RCS_ERR_BADSYM;
+		return (NULL);
+	}
+
 	TAILQ_FOREACH(symp, &(file->rf_symbols), rs_list)
 		if (strcmp(symp->rs_name, sym) == 0)
 			break;
@@ -610,7 +754,7 @@ rcs_sym_remove(RCSFILE *file, const char *sym)
 	}
 
 	TAILQ_REMOVE(&(file->rf_symbols), symp, rs_list);
-	free(symp->rs_name);
+	cvs_strfree(symp->rs_name);
 	rcsnum_free(symp->rs_num);
 	free(symp);
 
@@ -633,6 +777,11 @@ rcs_sym_getrev(RCSFILE *file, const char *sym)
 	RCSNUM *num;
 	struct rcs_sym *symp;
 
+	if (!rcs_sym_check(sym)) {
+		rcs_errno = RCS_ERR_BADSYM;
+		return (NULL);
+	}
+
 	num = NULL;
 	TAILQ_FOREACH(symp, &(file->rf_symbols), rs_list)
 		if (strcmp(symp->rs_name, sym) == 0)
@@ -647,6 +796,32 @@ rcs_sym_getrev(RCSFILE *file, const char *sym)
 	}
 
 	return (num);
+}
+
+/*
+ * rcs_sym_check()
+ *
+ * Check the RCS symbol name <sym> for any unsupported characters.
+ * Returns 1 if the tag is correct, 0 if it isn't valid.
+ */
+int
+rcs_sym_check(const char *sym)
+{
+	int ret;
+	const char *cp;
+
+	ret = 1;
+	cp = sym;
+	if (!isalpha(*cp++))
+		return (0);
+
+	for (; *cp != '\0'; cp++)
+		if (!isgraph(*cp) || (strchr(rcs_sym_invch, *cp) != NULL)) {
+			ret = 0;
+			break;
+		}
+
+	return (ret);
 }
 
 /*
@@ -686,11 +861,83 @@ rcs_lock_setmode(RCSFILE *file, int mode)
 }
 
 /*
+ * rcs_lock_add()
+ *
+ * Add an RCS lock for the user <user> on revision <rev>.
+ * Returns 0 on success, or -1 on failure.
+ */
+int
+rcs_lock_add(RCSFILE *file, const char *user, RCSNUM *rev)
+{
+	struct rcs_lock *lkp;
+
+	/* first look for duplication */
+	TAILQ_FOREACH(lkp, &(file->rf_locks), rl_list) {
+		if (strcmp(lkp->rl_name, user) == 0) {
+			rcs_errno = RCS_ERR_DUPENT;
+			return (-1);
+		}
+	}
+
+	if ((lkp = (struct rcs_lock *)malloc(sizeof(*lkp))) == NULL) {
+		rcs_errno = RCS_ERR_ERRNO;
+		cvs_log(LP_ERRNO, "failed to allocate RCS lock");
+		return (-1);
+	}
+
+	lkp->rl_name = cvs_strdup(user);
+	if (lkp->rl_name == NULL) {
+		cvs_log(LP_ERRNO, "failed to duplicate user name");
+		free(lkp);
+		return (-1);
+	}
+
+	TAILQ_INSERT_TAIL(&(file->rf_locks), lkp, rl_list);
+
+	/* not synced anymore */
+	file->rf_flags &= ~RCS_SYNCED;
+	return (0);
+
+
+}
+
+
+/*
+ * rcs_lock_remove()
+ *
+ * Remove the RCS lock on revision <rev>.
+ * Returns 0 on success, or -1 on failure.
+ */
+int
+rcs_lock_remove(RCSFILE *file, const RCSNUM *rev)
+{
+	struct rcs_lock *lkp;
+
+	TAILQ_FOREACH(lkp, &(file->rf_locks), rl_list)
+		if (rcsnum_cmp(lkp->rl_num, rev, 0) == 0)
+			break;
+
+	if (lkp == NULL) {
+		rcs_errno = RCS_ERR_NOENT;
+		return (-1);
+	}
+
+	TAILQ_REMOVE(&(file->rf_locks), lkp, rl_list);
+	rcsnum_free(lkp->rl_num);
+	cvs_strfree(lkp->rl_name);
+	free(lkp);
+
+	/* not synced anymore */
+	file->rf_flags &= ~RCS_SYNCED;
+	return (0);
+}
+
+/*
  * rcs_desc_get()
  *
  * Retrieve the description for the RCS file <file>.
  */
-const char*
+const char *
 rcs_desc_get(RCSFILE *file)
 {
 	return (file->rf_desc);
@@ -707,11 +954,11 @@ rcs_desc_set(RCSFILE *file, const char *desc)
 {
 	char *tmp;
 
-	if ((tmp = strdup(desc)) == NULL)
+	if ((tmp = cvs_strdup(desc)) == NULL)
 		return (-1);
 
 	if (file->rf_desc != NULL)
-		free(file->rf_desc);
+		cvs_strfree(file->rf_desc);
 	file->rf_desc = tmp;
 	file->rf_flags &= ~RCS_SYNCED;
 
@@ -719,11 +966,35 @@ rcs_desc_set(RCSFILE *file, const char *desc)
 }
 
 /*
+ * rcs_comment_lookup()
+ *
+ * Lookup the assumed comment leader based on a file's suffix.
+ * Returns a pointer to the string on success, or NULL on failure.
+ */
+const char *
+rcs_comment_lookup(const char *filename)
+{
+	int i;
+	const char *sp;
+
+	if ((sp = strrchr(filename, '.')) == NULL) {
+		rcs_errno = RCS_ERR_NOENT;
+		return (NULL);
+	}
+	sp++;
+
+	for (i = 0; i < (int)NB_COMTYPES; i++)
+		if (strcmp(rcs_comments[i].rc_suffix, sp) == 0)
+			return (rcs_comments[i].rc_cstr);
+	return (NULL);
+}
+
+/*
  * rcs_comment_get()
  *
  * Retrieve the comment leader for the RCS file <file>.
  */
-const char*
+const char *
 rcs_comment_get(RCSFILE *file)
 {
 	return (file->rf_comment);
@@ -740,16 +1011,35 @@ rcs_comment_set(RCSFILE *file, const char *comment)
 {
 	char *tmp;
 
-	if ((tmp = strdup(comment)) == NULL)
+	if ((tmp = cvs_strdup(comment)) == NULL)
 		return (-1);
 
 	if (file->rf_comment != NULL)
-		free(file->rf_comment);
+		cvs_strfree(file->rf_comment);
 	file->rf_comment = tmp;
 	file->rf_flags &= ~RCS_SYNCED;
 
 	return (0);
 }
+
+/*
+ * rcs_tag_resolve()
+ *
+ * Retrieve the revision number corresponding to the tag <tag> for the RCS
+ * file <file>.
+ */
+RCSNUM*
+rcs_tag_resolve(RCSFILE *file, const char *tag)
+{
+	RCSNUM *num;
+
+	if ((num = rcsnum_parse(tag)) == NULL) {
+		num = rcs_sym_getrev(file, tag);
+	}
+
+	return (num);
+}
+
 
 /*
  * rcs_patch()
@@ -929,7 +1219,7 @@ rcs_getrev(RCSFILE *rfp, RCSNUM *rev)
 		return (NULL);
 	}
 
-	len = strlen(rdp->rd_text);
+	len = rdp->rd_tlen;
 	if ((rbuf = cvs_buf_alloc(len, BUF_AUTOEXT)) == NULL)
 		return (NULL);
 
@@ -959,7 +1249,7 @@ rcs_getrev(RCSFILE *rfp, RCSNUM *rev)
 				return (NULL);
 			}
 			bp = cvs_buf_release(rbuf);
-			rbuf = rcs_patch((char *)bp, rdp->rd_text);
+			rbuf = rcs_patch((char *)bp, (char *)rdp->rd_text);
 			if (rbuf == NULL)
 				break;
 		} while (rcsnum_cmp(crev, rev, 0) != 0);
@@ -971,25 +1261,105 @@ rcs_getrev(RCSFILE *rfp, RCSNUM *rev)
 }
 
 /*
- * rcs_gethead()
+ * rcs_rev_add()
  *
- * Get the head revision for the RCS file <rf>.
+ * Add a revision to the RCS file <rf>.  The new revision's number can be
+ * specified in <rev> (which can also be RCS_HEAD_REV, in which case the
+ * new revision will have a number equal to the previous head revision plus
+ * one).  The <msg> argument specifies the log message for that revision, and
+ * <date> specifies the revision's date (a value of -1 is
+ * equivalent to using the current time).
+ * Returns 0 on success, or -1 on failure.
  */
-BUF*
-rcs_gethead(RCSFILE *rf)
+int
+rcs_rev_add(RCSFILE *rf, RCSNUM *rev, const char *msg, time_t date)
 {
-	return rcs_getrev(rf, rf->rf_head);
+	time_t now;
+	struct passwd *pw;
+	struct rcs_delta *rdp;
+
+	if (rev == RCS_HEAD_REV) {
+	} else if ((rdp = rcs_findrev(rf, rev)) != NULL) {
+		rcs_errno = RCS_ERR_DUPENT;
+		return (-1);
+	}
+
+	if ((pw = getpwuid(getuid())) == NULL) {
+		rcs_errno = RCS_ERR_ERRNO;
+		return (-1);
+	}
+
+	if ((rdp = (struct rcs_delta *)malloc(sizeof(*rdp))) == NULL) {
+		rcs_errno = RCS_ERR_ERRNO;
+		return (-1);
+	}
+	memset(rdp, 0, sizeof(*rdp));
+
+	TAILQ_INIT(&(rdp->rd_branches));
+	TAILQ_INIT(&(rdp->rd_snodes));
+
+	if ((rdp->rd_num = rcsnum_alloc()) == NULL) {
+		rcs_freedelta(rdp);
+		return (-1);
+	}
+	rcsnum_cpy(rev, rdp->rd_num, 0);
+
+	if ((rdp->rd_author = cvs_strdup(pw->pw_name)) == NULL) {
+		rcs_freedelta(rdp);
+		return (-1);
+	}
+
+	if ((rdp->rd_state = cvs_strdup(RCS_STATE_EXP)) == NULL) {
+		rcs_freedelta(rdp);
+		return (-1);
+	}
+
+	if ((rdp->rd_log = cvs_strdup(msg)) == NULL) {
+		rcs_errno = RCS_ERR_ERRNO;
+		rcs_freedelta(rdp);
+		return (-1);
+	}
+
+	if (date != (time_t)(-1))
+		now = date;
+	else
+		time(&now);
+	gmtime_r(&now, &(rdp->rd_date));
+
+	TAILQ_INSERT_HEAD(&(rf->rf_delta), rdp, rd_list);
+	rf->rf_ndelta++;
+
+	return (0);
 }
 
 /*
- * rcs_getrevbydate()
+ * rcs_rev_remove()
  *
- * Get an RCS revision by a specific date.
+ * Remove the revision whose number is <rev> from the RCS file <rf>.
  */
-RCSNUM*
-rcs_getrevbydate(RCSFILE *rfp, struct tm *date)
+int
+rcs_rev_remove(RCSFILE *rf, RCSNUM *rev)
 {
-	return (NULL);
+	int ret;
+	struct rcs_delta *rdp;
+
+	ret = 0;
+	if (rev == RCS_HEAD_REV)
+		rev = rf->rf_head;
+
+	/* do we actually have that revision? */
+	if ((rdp = rcs_findrev(rf, rev)) == NULL) {
+		rcs_errno = RCS_ERR_NOENT;
+		ret = -1;
+	} else {
+		/* XXX assumes it's not a sub node */
+		TAILQ_REMOVE(&(rf->rf_delta), rdp, rd_list);
+		rf->rf_ndelta--;
+		rf->rf_flags &= ~RCS_SYNCED;
+	}
+
+	return (ret);
+
 }
 
 /*
@@ -1000,7 +1370,7 @@ rcs_getrevbydate(RCSFILE *rfp, struct tm *date)
  * Returns a pointer to the delta on success, or NULL on failure.
  */
 static struct rcs_delta*
-rcs_findrev(RCSFILE *rfp, RCSNUM *rev)
+rcs_findrev(RCSFILE *rfp, const RCSNUM *rev)
 {
 	u_int cmplen;
 	struct rcs_delta *rdp;
@@ -1057,14 +1427,14 @@ rcs_kwexp_set(RCSFILE *file, int mode)
 			buf[i++] = 'l';
 	}
 
-	if ((tmp = strdup(buf)) == NULL) {
+	if ((tmp = cvs_strdup(buf)) == NULL) {
 		cvs_log(LP_ERRNO, "%s: failed to copy expansion mode",
 		    file->rf_path);
 		return (-1);
 	}
 
 	if (file->rf_expand != NULL)
-		free(file->rf_expand);
+		cvs_strfree(file->rf_expand);
 	file->rf_expand = tmp;
 
 	return (0);
@@ -1124,12 +1494,18 @@ rcs_kflag_get(const char *flags)
  *
  * Get the error string matching the RCS error code <code>.
  */
-const char*
+const char *
 rcs_errstr(int code)
 {
-	if ((code < 0) || (code > (int)RCS_NERR))
-		return (NULL);
-	return (rcs_errstrs[code]);
+	const char *esp;
+
+	if ((code < 0) || ((code >= (int)RCS_NERR) && (code != RCS_ERR_ERRNO)))
+		esp = NULL;
+	else if (code == RCS_ERR_ERRNO)
+		esp = strerror(errno);
+	else
+		esp = rcs_errstrs[code];
+	return (esp);
 }
 
 void
@@ -1161,6 +1537,7 @@ rcs_parse(RCSFILE *rfp)
 		return (0);
 
 	if ((pdp = (struct rcs_pdata *)malloc(sizeof(*pdp))) == NULL) {
+		rcs_errno = RCS_ERR_ERRNO;
 		cvs_log(LP_ERRNO, "failed to allocate RCS parser data");
 		return (-1);
 	}
@@ -1171,13 +1548,15 @@ rcs_parse(RCSFILE *rfp)
 
 	pdp->rp_file = fopen(rfp->rf_path, "r");
 	if (pdp->rp_file == NULL) {
+		rcs_errno = RCS_ERR_ERRNO;
 		cvs_log(LP_ERRNO, "failed to open RCS file `%s'", rfp->rf_path);
 		rcs_freepdata(pdp);
 		return (-1);
 	}
 
-	pdp->rp_buf = (char *)malloc(RCS_BUFSIZE);
+	pdp->rp_buf = (char *)malloc((size_t)RCS_BUFSIZE);
 	if (pdp->rp_buf == NULL) {
+		rcs_errno = RCS_ERR_ERRNO;
 		cvs_log(LP_ERRNO, "failed to allocate RCS parser buffer");
 		rcs_freepdata(pdp);
 		return (-1);
@@ -1206,6 +1585,7 @@ rcs_parse(RCSFILE *rfp)
 
 	ret = rcs_gettok(rfp);
 	if (ret != RCS_TOK_DESC) {
+		rcs_errno = RCS_ERR_PARSE;
 		cvs_log(LP_ERR, "token `%s' found where RCS desc expected",
 		    RCS_TOKSTR(rfp));
 		rcs_freepdata(pdp);
@@ -1214,13 +1594,14 @@ rcs_parse(RCSFILE *rfp)
 
 	ret = rcs_gettok(rfp);
 	if (ret != RCS_TOK_STRING) {
+		rcs_errno = RCS_ERR_PARSE;
 		cvs_log(LP_ERR, "token `%s' found where RCS desc expected",
 		    RCS_TOKSTR(rfp));
 		rcs_freepdata(pdp);
 		return (-1);
 	}
 
-	rfp->rf_desc = strdup(RCS_TOKSTR(rfp));
+	rfp->rf_desc = cvs_strdup(RCS_TOKSTR(rfp));
 	if (rfp->rf_desc == NULL) {
 		cvs_log(LP_ERRNO, "failed to duplicate rcs token");
 		rcs_freepdata(pdp);
@@ -1236,9 +1617,6 @@ rcs_parse(RCSFILE *rfp)
 			return (-1);
 		}
 	}
-
-	cvs_log(LP_DEBUG, "RCS file `%s' parsed OK (%u lines)", rfp->rf_path,
-	    pdp->rp_lines);
 
 	rcs_freepdata(pdp);
 
@@ -1267,6 +1645,7 @@ rcs_parse_admin(RCSFILE *rfp)
 	for (;;) {
 		tok = rcs_gettok(rfp);
 		if (tok == RCS_TOK_ERR) {
+			rcs_errno = RCS_ERR_PARSE;
 			cvs_log(LP_ERR, "parse error in RCS admin section");
 			return (-1);
 		} else if ((tok == RCS_TOK_NUM) || (tok == RCS_TOK_DESC)) {
@@ -1285,6 +1664,7 @@ rcs_parse_admin(RCSFILE *rfp)
 				rk = &(rcs_keys[i]);
 
 		if (hmask & (1 << tok)) {
+			rcs_errno = RCS_ERR_PARSE;
 			cvs_log(LP_ERR, "duplicate RCS key");
 			return (-1);
 		}
@@ -1299,6 +1679,7 @@ rcs_parse_admin(RCSFILE *rfp)
 			if (ntok == RCS_TOK_SCOLON)
 				break;
 			if (ntok != rk->rk_val) {
+				rcs_errno = RCS_ERR_PARSE;
 				cvs_log(LP_ERR,
 				    "invalid value type for RCS key `%s'",
 				    rk->rk_str);
@@ -1322,14 +1703,14 @@ rcs_parse_admin(RCSFILE *rfp)
 				    rfp->rf_branch) < 0)
 					return (-1);
 			} else if (tok == RCS_TOK_COMMENT) {
-				rfp->rf_comment = strdup(RCS_TOKSTR(rfp));
+				rfp->rf_comment = cvs_strdup(RCS_TOKSTR(rfp));
 				if (rfp->rf_comment == NULL) {
 					cvs_log(LP_ERRNO,
 					    "failed to duplicate rcs token");
 					return (-1);
 				}
 			} else if (tok == RCS_TOK_EXPAND) {
-				rfp->rf_expand = strdup(RCS_TOKSTR(rfp));
+				rfp->rf_expand = cvs_strdup(RCS_TOKSTR(rfp));
 				if (rfp->rf_expand == NULL) {
 					cvs_log(LP_ERRNO,
 					    "failed to duplicate rcs token");
@@ -1340,6 +1721,7 @@ rcs_parse_admin(RCSFILE *rfp)
 			/* now get the expected semi-colon */
 			ntok = rcs_gettok(rfp);
 			if (ntok != RCS_TOK_SCOLON) {
+				rcs_errno = RCS_ERR_PARSE;
 				cvs_log(LP_ERR,
 				    "missing semi-colon after RCS `%s' key",
 				    rk->rk_str);
@@ -1359,6 +1741,7 @@ rcs_parse_admin(RCSFILE *rfp)
 				return (-1);
 			break;
 		default:
+			rcs_errno = RCS_ERR_PARSE;
 			cvs_log(LP_ERR,
 			    "unexpected token `%s' in RCS admin section",
 			    RCS_TOKSTR(rfp));
@@ -1389,6 +1772,7 @@ rcs_parse_delta(RCSFILE *rfp)
 
 	rdp = (struct rcs_delta *)malloc(sizeof(*rdp));
 	if (rdp == NULL) {
+		rcs_errno = RCS_ERR_ERRNO;
 		cvs_log(LP_ERRNO, "failed to allocate RCS delta structure");
 		return (-1);
 	}
@@ -1406,9 +1790,11 @@ rcs_parse_delta(RCSFILE *rfp)
 	}
 
 	TAILQ_INIT(&(rdp->rd_branches));
+	TAILQ_INIT(&(rdp->rd_snodes));
 
 	tok = rcs_gettok(rfp);
 	if (tok != RCS_TOK_NUM) {
+		rcs_errno = RCS_ERR_PARSE;
 		cvs_log(LP_ERR, "unexpected token `%s' at start of delta",
 		    RCS_TOKSTR(rfp));
 		rcs_freedelta(rdp);
@@ -1423,6 +1809,7 @@ rcs_parse_delta(RCSFILE *rfp)
 	for (;;) {
 		tok = rcs_gettok(rfp);
 		if (tok == RCS_TOK_ERR) {
+			rcs_errno = RCS_ERR_PARSE;
 			cvs_log(LP_ERR, "parse error in RCS delta section");
 			rcs_freedelta(rdp);
 			return (-1);
@@ -1438,6 +1825,7 @@ rcs_parse_delta(RCSFILE *rfp)
 				rk = &(rcs_keys[i]);
 
 		if (hmask & (1 << tok)) {
+			rcs_errno = RCS_ERR_PARSE;
 			cvs_log(LP_ERR, "duplicate RCS key");
 			rcs_freedelta(rdp);
 			return (-1);
@@ -1454,6 +1842,7 @@ rcs_parse_delta(RCSFILE *rfp)
 				if (rk->rk_flags & RCS_VOPT)
 					break;
 				else {
+					rcs_errno = RCS_ERR_PARSE;
 					cvs_log(LP_ERR, "missing mandatory "
 					    "value to RCS key `%s'",
 					    rk->rk_str);
@@ -1463,6 +1852,7 @@ rcs_parse_delta(RCSFILE *rfp)
 			}
 
 			if (ntok != rk->rk_val) {
+				rcs_errno = RCS_ERR_PARSE;
 				cvs_log(LP_ERR,
 				    "invalid value type for RCS key `%s'",
 				    rk->rk_str);
@@ -1471,8 +1861,8 @@ rcs_parse_delta(RCSFILE *rfp)
 			}
 
 			if (tokstr != NULL)
-				free(tokstr);
-			tokstr = strdup(RCS_TOKSTR(rfp));
+				cvs_strfree(tokstr);
+			tokstr = cvs_strdup(RCS_TOKSTR(rfp));
 			if (tokstr == NULL) {
 				cvs_log(LP_ERRNO,
 				    "failed to duplicate rcs token");
@@ -1483,25 +1873,32 @@ rcs_parse_delta(RCSFILE *rfp)
 			/* now get the expected semi-colon */
 			ntok = rcs_gettok(rfp);
 			if (ntok != RCS_TOK_SCOLON) {
+				rcs_errno = RCS_ERR_PARSE;
 				cvs_log(LP_ERR,
 				    "missing semi-colon after RCS `%s' key",
 				    rk->rk_str);
+				cvs_strfree(tokstr);
 				rcs_freedelta(rdp);
 				return (-1);
 			}
 
 			if (tok == RCS_TOK_DATE) {
 				if ((datenum = rcsnum_parse(tokstr)) == NULL) {
+					cvs_strfree(tokstr);
 					rcs_freedelta(rdp);
 					return (-1);
 				}
 				if (datenum->rn_len != 6) {
+					rcs_errno = RCS_ERR_PARSE;
 					cvs_log(LP_ERR,
 					    "RCS date specification has %s "
 					    "fields",
 					    (datenum->rn_len > 6) ? "too many" :
 					    "missing");
+					cvs_strfree(tokstr);
 					rcs_freedelta(rdp);
+					rcsnum_free(datenum);
+					return (-1);
 				}
 				rdp->rd_date.tm_year = datenum->rn_id[0];
 				if (rdp->rd_date.tm_year >= 1900)
@@ -1523,9 +1920,13 @@ rcs_parse_delta(RCSFILE *rfp)
 			}
 			break;
 		case RCS_TOK_BRANCHES:
-			rcs_parse_branches(rfp, rdp);
+			if (rcs_parse_branches(rfp, rdp) < 0) {
+				rcs_freedelta(rdp);
+				return (-1);
+			}
 			break;
 		default:
+			rcs_errno = RCS_ERR_PARSE;
 			cvs_log(LP_ERR,
 			    "unexpected token `%s' in RCS delta",
 			    RCS_TOKSTR(rfp));
@@ -1535,7 +1936,7 @@ rcs_parse_delta(RCSFILE *rfp)
 	}
 
 	if (tokstr != NULL)
-		free(tokstr);
+		cvs_strfree(tokstr);
 
 	TAILQ_INSERT_TAIL(&(rfp->rf_delta), rdp, rd_list);
 	rfp->rf_ndelta++;
@@ -1563,6 +1964,7 @@ rcs_parse_deltatext(RCSFILE *rfp)
 		return (0);
 
 	if (tok != RCS_TOK_NUM) {
+		rcs_errno = RCS_ERR_PARSE;
 		cvs_log(LP_ERR,
 		    "unexpected token `%s' at start of RCS delta text",
 		    RCS_TOKSTR(rfp));
@@ -1588,6 +1990,7 @@ rcs_parse_deltatext(RCSFILE *rfp)
 
 	tok = rcs_gettok(rfp);
 	if (tok != RCS_TOK_LOG) {
+		rcs_errno = RCS_ERR_PARSE;
 		cvs_log(LP_ERR, "unexpected token `%s' where RCS log expected",
 		    RCS_TOKSTR(rfp));
 		return (-1);
@@ -1595,11 +1998,12 @@ rcs_parse_deltatext(RCSFILE *rfp)
 
 	tok = rcs_gettok(rfp);
 	if (tok != RCS_TOK_STRING) {
+		rcs_errno = RCS_ERR_PARSE;
 		cvs_log(LP_ERR, "unexpected token `%s' where RCS log expected",
 		    RCS_TOKSTR(rfp));
 		return (-1);
 	}
-	rdp->rd_log = strdup(RCS_TOKSTR(rfp));
+	rdp->rd_log = cvs_strdup(RCS_TOKSTR(rfp));
 	if (rdp->rd_log == NULL) {
 		cvs_log(LP_ERRNO, "failed to copy RCS deltatext log");
 		return (-1);
@@ -1607,6 +2011,7 @@ rcs_parse_deltatext(RCSFILE *rfp)
 
 	tok = rcs_gettok(rfp);
 	if (tok != RCS_TOK_TEXT) {
+		rcs_errno = RCS_ERR_PARSE;
 		cvs_log(LP_ERR, "unexpected token `%s' where RCS text expected",
 		    RCS_TOKSTR(rfp));
 		return (-1);
@@ -1614,16 +2019,19 @@ rcs_parse_deltatext(RCSFILE *rfp)
 
 	tok = rcs_gettok(rfp);
 	if (tok != RCS_TOK_STRING) {
+		rcs_errno = RCS_ERR_PARSE;
 		cvs_log(LP_ERR, "unexpected token `%s' where RCS text expected",
 		    RCS_TOKSTR(rfp));
 		return (-1);
 	}
 
-	rdp->rd_text = strdup(RCS_TOKSTR(rfp));
+	rdp->rd_text = (u_char *)malloc(RCS_TOKLEN(rfp));
 	if (rdp->rd_text == NULL) {
 		cvs_log(LP_ERRNO, "failed to copy RCS delta text");
 		return (-1);
 	}
+	memcpy(rdp->rd_text, RCS_TOKSTR(rfp), RCS_TOKLEN(rfp));
+	rdp->rd_tlen = RCS_TOKLEN(rfp);
 
 	return (1);
 }
@@ -1641,6 +2049,7 @@ rcs_parse_access(RCSFILE *rfp)
 
 	while ((type = rcs_gettok(rfp)) != RCS_TOK_SCOLON) {
 		if (type != RCS_TOK_ID) {
+			rcs_errno = RCS_ERR_PARSE;
 			cvs_log(LP_ERR, "unexpected token `%s' in access list",
 			    RCS_TOKSTR(rfp));
 			return (-1);
@@ -1670,7 +2079,8 @@ rcs_parse_symbols(RCSFILE *rfp)
 		if (type == RCS_TOK_SCOLON)
 			break;
 
-		if (type != RCS_TOK_STRING) {
+		if (type != RCS_TOK_ID) {
+			rcs_errno = RCS_ERR_PARSE;
 			cvs_log(LP_ERR, "unexpected token `%s' in symbol list",
 			    RCS_TOKSTR(rfp));
 			return (-1);
@@ -1678,10 +2088,11 @@ rcs_parse_symbols(RCSFILE *rfp)
 
 		symp = (struct rcs_sym *)malloc(sizeof(*symp));
 		if (symp == NULL) {
+			rcs_errno = RCS_ERR_ERRNO;
 			cvs_log(LP_ERRNO, "failed to allocate RCS symbol");
 			return (-1);
 		}
-		symp->rs_name = strdup(RCS_TOKSTR(rfp));
+		symp->rs_name = cvs_strdup(RCS_TOKSTR(rfp));
 		if (symp->rs_name == NULL) {
 			cvs_log(LP_ERRNO, "failed to duplicate rcs token");
 			free(symp);
@@ -1691,26 +2102,29 @@ rcs_parse_symbols(RCSFILE *rfp)
 		symp->rs_num = rcsnum_alloc();
 		if (symp->rs_num == NULL) {
 			cvs_log(LP_ERRNO, "failed to allocate rcsnum info");
+			cvs_strfree(symp->rs_name);
 			free(symp);
 			return (-1);
 		}
 
 		type = rcs_gettok(rfp);
 		if (type != RCS_TOK_COLON) {
+			rcs_errno = RCS_ERR_PARSE;
 			cvs_log(LP_ERR, "unexpected token `%s' in symbol list",
 			    RCS_TOKSTR(rfp));
 			rcsnum_free(symp->rs_num);
-			free(symp->rs_name);
+			cvs_strfree(symp->rs_name);
 			free(symp);
 			return (-1);
 		}
 
 		type = rcs_gettok(rfp);
 		if (type != RCS_TOK_NUM) {
+			rcs_errno = RCS_ERR_PARSE;
 			cvs_log(LP_ERR, "unexpected token `%s' in symbol list",
 			    RCS_TOKSTR(rfp));
 			rcsnum_free(symp->rs_num);
-			free(symp->rs_name);
+			cvs_strfree(symp->rs_name);
 			free(symp);
 			return (-1);
 		}
@@ -1719,12 +2133,12 @@ rcs_parse_symbols(RCSFILE *rfp)
 			cvs_log(LP_ERR, "failed to parse RCS NUM `%s'",
 			    RCS_TOKSTR(rfp));
 			rcsnum_free(symp->rs_num);
-			free(symp->rs_name);
+			cvs_strfree(symp->rs_name);
 			free(symp);
 			return (-1);
 		}
 
-		TAILQ_INSERT_HEAD(&(rfp->rf_symbols), symp, rs_list);
+		TAILQ_INSERT_TAIL(&(rfp->rf_symbols), symp, rs_list);
 	}
 
 	return (0);
@@ -1748,6 +2162,7 @@ rcs_parse_locks(RCSFILE *rfp)
 			break;
 
 		if (type != RCS_TOK_ID) {
+			rcs_errno = RCS_ERR_PARSE;
 			cvs_log(LP_ERR, "unexpected token `%s' in lock list",
 			    RCS_TOKSTR(rfp));
 			return (-1);
@@ -1766,16 +2181,20 @@ rcs_parse_locks(RCSFILE *rfp)
 
 		type = rcs_gettok(rfp);
 		if (type != RCS_TOK_COLON) {
+			rcs_errno = RCS_ERR_PARSE;
 			cvs_log(LP_ERR, "unexpected token `%s' in symbol list",
 			    RCS_TOKSTR(rfp));
+			rcsnum_free(lkp->rl_num);
 			free(lkp);
 			return (-1);
 		}
 
 		type = rcs_gettok(rfp);
 		if (type != RCS_TOK_NUM) {
+			rcs_errno = RCS_ERR_PARSE;
 			cvs_log(LP_ERR, "unexpected token `%s' in symbol list",
 			    RCS_TOKSTR(rfp));
+			rcsnum_free(lkp->rl_num);
 			free(lkp);
 			return (-1);
 		}
@@ -1783,6 +2202,7 @@ rcs_parse_locks(RCSFILE *rfp)
 		if (rcsnum_aton(RCS_TOKSTR(rfp), NULL, lkp->rl_num) < 0) {
 			cvs_log(LP_ERR, "failed to parse RCS NUM `%s'",
 			    RCS_TOKSTR(rfp));
+			rcsnum_free(lkp->rl_num);
 			free(lkp);
 			return (-1);
 		}
@@ -1799,6 +2219,7 @@ rcs_parse_locks(RCSFILE *rfp)
 
 		type = rcs_gettok(rfp);
 		if (type != RCS_TOK_SCOLON) {
+			rcs_errno = RCS_ERR_PARSE;
 			cvs_log(LP_ERR,
 			    "missing semi-colon after `strict' keyword");
 			return (-1);
@@ -1826,6 +2247,7 @@ rcs_parse_branches(RCSFILE *rfp, struct rcs_delta *rdp)
 			break;
 
 		if (type != RCS_TOK_NUM) {
+			rcs_errno = RCS_ERR_PARSE;
 			cvs_log(LP_ERR,
 			    "unexpected token `%s' in list of branches",
 			    RCS_TOKSTR(rfp));
@@ -1834,16 +2256,15 @@ rcs_parse_branches(RCSFILE *rfp, struct rcs_delta *rdp)
 
 		brp = (struct rcs_branch *)malloc(sizeof(*brp));
 		if (brp == NULL) {
+			rcs_errno = RCS_ERR_ERRNO;
 			cvs_log(LP_ERRNO, "failed to allocate RCS branch");
 			return (-1);
 		}
-		brp->rb_num = rcsnum_alloc();
+		brp->rb_num = rcsnum_parse(RCS_TOKSTR(rfp));
 		if (brp->rb_num == NULL) {
 			free(brp);
 			return (-1);
 		}
-
-		rcsnum_aton(RCS_TOKSTR(rfp), NULL, brp->rb_num);
 
 		TAILQ_INSERT_TAIL(&(rdp->rd_branches), brp, rb_list);
 	}
@@ -1868,11 +2289,11 @@ rcs_freedelta(struct rcs_delta *rdp)
 		rcsnum_free(rdp->rd_next);
 
 	if (rdp->rd_author != NULL)
-		free(rdp->rd_author);
+		cvs_strfree(rdp->rd_author);
 	if (rdp->rd_state != NULL)
-		free(rdp->rd_state);
+		cvs_strfree(rdp->rd_state);
 	if (rdp->rd_log != NULL)
-		free(rdp->rd_log);
+		cvs_strfree(rdp->rd_log);
 	if (rdp->rd_text != NULL)
 		free(rdp->rd_text);
 
@@ -1921,6 +2342,7 @@ rcs_gettok(RCSFILE *rfp)
 
 	type = RCS_TOK_ERR;
 	bp = pdp->rp_buf;
+	pdp->rp_tlen = 0;
 	*bp = '\0';
 
 	if (pdp->rp_pttype != RCS_TOK_ERR) {
@@ -1954,6 +2376,7 @@ rcs_gettok(RCSFILE *rfp)
 				break;
 			}
 			*(bp++) = ch;
+			pdp->rp_tlen++;
 			if (bp == pdp->rp_bufend - 1) {
 				len = bp - pdp->rp_buf;
 				if (rcs_growbuf(rfp) < 0) {
@@ -1989,6 +2412,7 @@ rcs_gettok(RCSFILE *rfp)
 				pdp->rp_lines++;
 
 			*(bp++) = ch;
+			pdp->rp_tlen++;
 			if (bp == pdp->rp_bufend - 1) {
 				len = bp - pdp->rp_buf;
 				if (rcs_growbuf(rfp) < 0) {
@@ -2020,6 +2444,7 @@ rcs_gettok(RCSFILE *rfp)
 			}
 			last = ch;
 			*(bp++) = ch;
+			pdp->rp_tlen++;
 		}
 		*bp = '\0';
 	}
@@ -2045,53 +2470,6 @@ rcs_pushtok(RCSFILE *rfp, const char *tok, int type)
 	return (0);
 }
 
-/*
- * rcs_stresc()
- *
- * Performs either escaping or unescaping of the string stored in <str>.
- * The operation is to escape special RCS characters if the <esc> argument
- * is 1, or unescape otherwise.  The result is stored in the <buf> destination
- * buffer, and <blen> must originally point to the size of <buf>.
- * Returns the number of bytes which have been read from the source <str> and
- * operated on.  The <blen> parameter will contain the number of bytes
- * actually copied in <buf>.
- */
-size_t
-rcs_stresc(int esc, const char *str, char *buf, size_t *blen)
-{
-	size_t rlen;
-	const char *sp;
-	char *bp, *bep;
-
-	rlen = 0;
-	bp = buf;
-	bep = buf + *blen - 1;
-
-	for (sp = str; (*sp != '\0') && (bp <= (bep - 1)); sp++) {
-		if (*sp == '@') {
-			if (esc) {
-				if (bp > (bep - 2))
-					break;
-				*(bp++) = '@';
-			} else {
-				sp++;
-				if (*sp != '@') {
-					cvs_log(LP_WARN,
-					    "unknown escape character `%c' in "
-					    "RCS file", *sp);
-					if (*sp == '\0')
-						break;
-				}
-			}
-		}
-
-		*(bp++) = *sp;
-	}
-
-	*bp = '\0';
-	*blen = (bp - buf);
-	return (sp - str);
-}
 
 /*
  * rcs_splitlines()
@@ -2125,8 +2503,10 @@ rcs_splitlines(const char *fcont)
 	 * in rcs_patch().
 	 */
 	lp = (struct rcs_line *)malloc(sizeof(*lp));
-	if (lp == NULL)
+	if (lp == NULL) {
+		rcs_freefoo(foo);
 		return (NULL);
+	}
 
 	lp->rl_line = NULL;
 	lp->rl_lineno = 0;
@@ -2136,6 +2516,7 @@ rcs_splitlines(const char *fcont)
 	for (dcp = foo->rl_data; *dcp != '\0';) {
 		lp = (struct rcs_line *)malloc(sizeof(*lp));
 		if (lp == NULL) {
+			rcs_freefoo(foo);
 			cvs_log(LP_ERR, "failed to allocate line entry");
 			return (NULL);
 		}
@@ -2183,6 +2564,7 @@ rcs_growbuf(RCSFILE *rf)
 
 	tmp = realloc(pdp->rp_buf, pdp->rp_blen + RCS_BUFEXTSIZE);
 	if (tmp == NULL) {
+		rcs_errno = RCS_ERR_ERRNO;
 		cvs_log(LP_ERRNO, "failed to grow RCS parse buffer");
 		return (-1);
 	}
@@ -2190,6 +2572,38 @@ rcs_growbuf(RCSFILE *rf)
 	pdp->rp_buf = (char *)tmp;
 	pdp->rp_blen += RCS_BUFEXTSIZE;
 	pdp->rp_bufend = pdp->rp_buf + pdp->rp_blen - 1;
+
+	return (0);
+}
+
+/*
+ * rcs_strprint()
+ *
+ * Output an RCS string <str> of size <slen> to the stream <stream>.  Any
+ * '@' characters are escaped.  Otherwise, the string can contain arbitrary
+ * binary data.
+ */
+static int
+rcs_strprint(const u_char *str, size_t slen, FILE *stream)
+{
+	const u_char *ap, *ep, *sp;
+	size_t ret;
+
+	if (slen == 0)
+		return (0);
+
+	ep = str + slen - 1;
+
+	for (sp = str; sp <= ep;)  {
+		ap = memchr(sp, '@', ep - sp);
+		if (ap == NULL)
+			ap = ep;
+		ret = fwrite(sp, sizeof(u_char), ap - sp + 1, stream);
+
+		if (*ap == '@')
+			putc('@', stream);
+		sp = ap + 1;
+	}
 
 	return (0);
 }

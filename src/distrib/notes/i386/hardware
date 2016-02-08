@@ -1,4 +1,4 @@
-dnl	$OpenBSD: hardware,v 1.196 2005/03/20 00:15:46 joris Exp $
+dnl	$OpenBSD: hardware,v 1.218 2005/08/30 15:20:26 grunk Exp $
 OpenBSD/MACHINE OSREV works across a broad range of standard PCs and
 clones, with a wide variety of processors and I/O bus architectures.  It
 can be expected to install and run with minimal difficulties on most
@@ -75,23 +75,22 @@ Supported hardware {:-include-:}:
 		    (RAID mode is not supported)
 		Intel PIIX, PIIX3, and PIIX4
 		Intel 82801 (ICH/ICH0/ICH2/ICH3/ICH4/ICH4-M/ICH5/ICH5R/
-		    ICH6/ICH6R)
+		    ICH6/ICH6M/ICH6R/ICH7)
 		Intel 6300ESB
 		ITE IT8212F (RAID mode is not supported)
 		National Semiconductor PC87415
 		National Semiconductor SCx200 (found on SC1100 SoC)
-		NVIDIA nForce/nForce2/nForce2-400/nForce3/nForce3-250
-		    (SATA controllers are not supported)
+		NVIDIA nForce/nForce2/nForce2-400/nForce3/nForce3-250/nForce4
 		Promise PDC20246, PDC20262, PDC20265, PDC20267, PDC20268,
 		    PDC20268R, PDC20269, PDC20271, PDC20275, PDC20276,
 		    PDC20277, PDC20376 (RAID mode is not supported)
 		ServerWorks OSB4, CSB5, CSB6 (including support for the third
 		    channel)
-		Silicon Image SiI3112, SiI3512, SiI3114
-		Silicon Integrated System 5513 (5597/5598), 540, 550, 620,
-		    630, 630S, 633, 635, 640, 645, 645DX, 648, 650, 651,
-		    652, 655, 658, 730, 733, 735, 740, 745, 746, 748, 750,
-		    751, 752, 755, 962, 963
+		Silicon Image SiI3112 (including ATI IXP SATA), SiI3512, SiI3114
+		Silicon Integrated System 180, 181, 182, 5513 (5597/5598), 540,
+		    550, 620, 630, 630S, 633, 635, 640, 645, 645DX, 648, 650,
+		    651, 652, 661, 655, 658, 730, 733, 735, 740, 745, 746, 748,
+		    750, 751, 752, 755, 760, 962, 963
 		VIA Technologies VT82C586/A/B, VT82C596A/B, VT82C686A/B,
 		    VT8231, VT8366, VT8233, VT8235, VT8237
 	SCSI Host Adapters
@@ -163,7 +162,7 @@ Supported hardware {:-include-:}:
 		WD-7000 SCSI host adapters [A] [B] [C]
 	RAID and Cache Controllers
 		3ware Escalade 3W-5x00, 3W-6x00 [A] [C]
-		Adaptec FSA-based RAID controllers, including: [A] [B] [C]
+		Adaptec FSA-based RAID controllers, including: [*]
 		    Adaptec AAC-2622, AAC-364, AAC-3642
 		    Dell PERC 2/Si, PERC 2/QC, PERC 3/Si, PERC 3/Di,
 		      PERC 3/QC
@@ -174,7 +173,7 @@ Supported hardware {:-include-:}:
 		    Dell PERC 4Si and 4Di
 		    HP NetRAID 438, 466 and T[567]
 		    LSI/Symbios 523 SATA
-		Compaq Smart ARRAY PCI/EISA adapters, including: [A] [C]
+		Compaq Smart ARRAY 2*, 3* and 4* adapters, including: [A] [C]
 		    Compaq Integrated Array
 		    Compaq IAES
 		    Compaq IDA, IDA-2
@@ -183,6 +182,7 @@ Supported hardware {:-include-:}:
 		      4250ES, 431
 		    Compaq SMART, SMART-2/E, SMART-2/P, SMART-2DH,
 		      SMART-2SL
+		Compaq/HP Smart ARRAY 5* and 6* adapters
 		DPT SmartCache and SmartRaid III/IV PCI/EISA adapters [A] [C]
 		Intel (and formerly ICP-Vortex) GDT series [A] [C]
 		I2O (intelligent I/O) RAID controllers, including: [A] [C]
@@ -329,27 +329,32 @@ Supported hardware {:-include-:}:
 		    Melco Inc. LUA-TX
 		    Siemens SpeedStream USB
 		    SmartBridges smartNIC 2
-		    SMC 2202USB
-		    SMC EZ Connect USB
+		    SMC 2202USB/ETH
+		    SMC 2206USB/ETH
 		    SOHOware NUB100
 		ASIX Electronics AX88172 USB Ethernet adapters,
 		  including: [A] [B]
 		    ATEN UC210T
+		    BAFO BF-320
 		    Billionton Systems USB2AR
 		    Buffalo(MELCO) LUA-U2-KTX
 		    Corega FEther USB2-TX
 		    D-Link DUB-E100
+		    Good Way GWUSB2E
 		    Hawking UF200
 		    Intellinet USB 2.0 to Ethernet (rev A)
 		    JVC MP-PRX1
 		    LinkSys USB200M
 		    Netgear FA120
 		    Sitecom LN-029
+		    SMC 2209USB/ETH
 		    SnapPort USB 2.0 LAN Adapter
 		    ST Lab USB 2.0 Fast Ethernet
 		    Surecom EP-1427X-2
 		    System TALKS SGC-X2UL
 		    TRENDnet TU2-ET100
+		    Z-TEK ZK-R01-2
+
 		AMD LANCE and PCnet-based ISA Ethernet adapters, including: [B] [C]
 		    Novell NE1500T
 		    Novell NE2100
@@ -460,16 +465,23 @@ Supported hardware {:-include-:}:
 		    SMC EZ Card 10/100 PCI 1211-TX
 		RealTek RTL8150L based USB adapters, including: [A] [B] [C]
 		    Abocom RTL8151
+		    BAFO BF-310
+		    Billionton USBKR-100
+		    Compex UE202-B
 		    GreenHouse GH-USB100B
 		    GreenHouse GH-USB100B with HomePNA
+		    Hawking Technology HUF11
 		    Linksys USB100M
 		    Longshine LCS-8138TX
 		    Melco Inc. LUA-KTX
 		    Micronet SP128AR
-		    OQO model 01 Ethernet
+		    NetComm NP1010
+		    OQO model 01 (10/100) Ethernet
+		    Repotec RP-USB100-A
 		    SMC 2208USB/ETH
 		    TrendNet TU-ET100C
 		    Zt USB10/100
+		    Z-TEK ZK-R02
 		SiS 900 and SiS 7016-based PCI adapters, including: [B] [C]
 		    Mototech ME313
 		    NetSurf NS-KFE30D
@@ -703,6 +715,7 @@ Supported hardware {:-include-:}:
 		    ZyXEL ZyAIR B-200
 		Ralink RT2500 based CardBus IEEE 802.11b/g adapters [A] [B]
 		    A-Link WL54PC
+		    Alfa AWPC036
 		    Amigo AWI-914W
 		    AMIT WL531C
 		    ASUS WL-107G
@@ -711,33 +724,49 @@ Supported hardware {:-include-:}:
 		    Canyon CN-WF513
 		    CC&C WL-2102
 		    CNet CWC-854
-		    Compex WL54G
 		    Conceptronic C54RC
+		    Corega CG-WLCB54GL
 		    Digitus DN-7001G-RA
+		    Dynalink WLG25CARDBUS
 		    E-Tech WGPC02
+		    E-Tech WGPC03
 		    Edimax EW-7108PCg
 		    Eminent EM3036
 		    Encore ENPWI-G-RLAM
+		    Eusso UGL2454-01R
 		    Fibreline WL-400X
 		    Gigabyte GN-WMKG
 		    Hawking HWC54GR
+		    Hercules HWGPCMCIA-54
 		    JAHT WN-4054P
+		    KCORP LifeStyle KLS-611
+		    LevelOne WPC-0301 v2
+		    Micronet SP908GK V3
+		    Minitar MN54GCB-R
 		    MSI CB54G2
+		    MSI MS-6835
 		    Pro-Nets CB80211G
 		    Repotec RP-WB7108
 		    SATech SN-54C
 		    Sitecom WL-112
 		    SparkLAN WL-685R
 		    Surecom EP-9428-g
-		    Surecom EP-9428-g
 		    Sweex LC500050
 		    TekComm NE-9428-g
+		    Tonze PW-6200C
 		    Unex MR054g-R02
 		    Zinwell ZWX-G160
 		    Zonet ZEW1500
+		Ralink RT2500 based Mini PCI IEEE 802.11b/g adapters [A] [B]
+		    Amigo AWI-922W
+		    Billionton MIWLGRL
+		    Gigabyte GN-WIKG
+		    MSI MP54G2
+		    MSI MS-6833
+		    Tonze PC-620C
+		    Zinwell ZWX-G360
 		Ralink RT2500 based PCI IEEE 802.11b/g adapters [A] [B]
 		    A-Link WL54H
-		    Amigo AWI-922W mini-PCI
 		    Amigo AWI-926W
 		    AMIT WL531P
 		    AOpen AOI-831
@@ -745,27 +774,30 @@ Supported hardware {:-include-:}:
 		    ASUS WIFI-G-AAY
 		    Atlantis Land A02-PCI-W54
 		    Belkin F5D7000 v3
-		    Billionton MIWLGRL mini-PCI
 		    Canyon CN-WF511
 		    CNet CWP-854
 		    Compex WLP54G
 		    Conceptronic C54Ri
+		    Corega CG-WLPCI54GL
 		    Digitus DN-7006G-RA
+		    Dynalink WLG25PCI
 		    E-Tech WGPI02
 		    Edimax EW-7128g
 		    Eminent EM3037
 		    Encore ENLWI-G-RLAM
+		    Eusso UGL2454-VPR
 		    Fiberline WL-400P
-		    Gigabyte GN-WIKG mini-PCI
+		    Foxconn WLL-3350
 		    Gigabyte GN-WPKG
 		    Hawking HWP54GR
+		    Hercules HWGPCI-54
 		    iNexQ CR054g-009 (R03)
 		    JAHT WN-4054PCI
 		    LevelOne WNC-0301 v2
 		    Linksys WMP54G v4
 		    Micronet SP906GK
 		    Minitar MN54GPC-R
-		    MSI MP54G2 mini-PCI
+		    MSI MS-6834
 		    MSI PC54G2
 		    OvisLink EVO-W54PCI
 		    PheeNet HWL-PCIG/RA
@@ -774,34 +806,46 @@ Supported hardware {:-include-:}:
 		    SATech SN-54P
 		    Sitecom WL-115
 		    Surecom EP-9321-g
-		    Surecom EP-9321-g1
 		    Sweex LC700030
 		    TekComm NE-9321-g
+		    Tonze PC-6200C
 		    Unex CR054g-R02
-		    Zinwell ZWX-G360 mini-PCI
 		    Zinwell ZWX-G361
 		    Zonet ZEW1600
 		Ralink RT2500 based USB 2.0 IEEE 802.11b/g adapters [A] [B]
 		    AMIT WL532U
 		    ASUS WL-167g
+		    Belkin F5D7050
+		    Buffalo WLI-U2-KG54
 		    Buffalo WLI-U2-KG54-AI
+		    Buffalo WLI-U2-KG54-YB
 		    CNet CWD-854
 		    Compex WLU54G
 		    Conceptronic C54RU
 		    D-Link DWL-G122 (b1)
+		    Dynalink WLG25USB
 		    E-Tech WGUS02
+		    Eminent 3035
 		    Gigabyte GN-WBKG
+		    Hercules HWGUSB2-54
+		    KCORP LifeStyle KLS-685
 		    Linksys WUSB54G v4
 		    Linksys WUSB54GP v4
 		    MSI MS-6861
 		    MSI MS-6865
 		    MSI MS-6869
-		    Repotec RP-WU0402
+		    SerComm UB801R
+		    SparkLAN WL-685R
+		    Sphairon UB801R
 		    Surecom EP-9001-g
+		    Tonze UW-6200C
+		    Zaapa ZNWUSB-54
 		    Zinwell ZWX-G261
+		    Zonet ZEW2500P
 		Raytheon Raylink PCMCIA IEEE 802.11 FH adapters [A] [B] [C]
 		Realtek RTL8180L based CardBus IEEE 802.11b adapters [A] [B]
 		    Belkin F5D6020 V3
+		    Buffalo WLI-CB-B11
 		    Corega CG-WLCB11V3
 		    D-Link DWL-610
 		    Level-One WPC-0101
@@ -809,7 +853,7 @@ Supported hardware {:-include-:}:
 		    Netgear MA521
 		    Ovislink AirLive WL-1120PCM
 		    Planet WL-3553
-		    TrendNET TEW-266PC
+		    TRENDnet TEW-226PC
 		    VCTnet PC-11B1
 	Gigabit Ethernet Adapters
 		Alteon Tigon I/II PCI Gigabit Ethernet boards, including: [A]
@@ -870,9 +914,15 @@ Supported hardware {:-include-:}:
 		Realtek 8169/8169S/8110S based PCI adapters, including:
 		    Buffalo LGY-PCI-GT (8169S)
 		    Corega CG-LAPCIGT (8169S)
+		    D-Link DGE-528T (8169S)
 		    Gigabyte 7N400 Pro2 Integrated Gigabit Ethernet (8110S)
+		    LevelOne GNC-0105T (8169S)
+		    Linksys EG1032v3 (8169S)
+		    Netgear GA511 PC Card (8169)
 		    PLANEX COMMUNICATIONS Inc. GN-1200TC (8169S)
-		    Xterasys XN-152 10/100/1000 NIC (8169) 
+		    Surecom EP-320G-TX1 (8169S)
+		    US Robotics USR997902 (8169S)
+		    Xterasys XN-152 10/100/1000 NIC (8169)
 		Sundance/Tamarack TC9021 based PCI adapters, including: [G]
 		    D-Link DGE-550T (10/100/1000baseTX)
 		    Antares Microsystems Gigabit Ethernet board
@@ -1025,6 +1075,7 @@ Supported hardware {:-include-:}:
 		Serial mice (uses serial port driver)
 	Sound Devices [G]
 		AMD 768 and 8111 AC'97
+		ATI IXP series integrated AC'97
 		C-Media CMI8[37]38
 		Cirrus Logic CrystalClear CS4280, CS4281
 		Ensoniq AudioPCI
@@ -1086,12 +1137,13 @@ Supported hardware {:-include-:}:
 		    VideoLogic Captivator PCI
 		    Zoltrix TV and Genie TV/FM
 		Hardware monitoring sensors, including: [G]
+		    ITE IT8705F, IT8712F
 		    National Semiconductor LM75, LM77, LM78, LM78-J, LM79
 		    National Semiconductor PC87366 LPC Super I/O VLM and TMS
-		    Winbond W83697HF, W83627HF, W83627THF, W83781D, W83782D
-		    VIA VT82C686A, VT8231
-		    ITE IT8705F, IT8712F
 		    SiS SiS950
+		    VIA VT1211
+		    VIA VT82C686A, VT8231
+		    Winbond W83697HF, W83627HF, W83627THF, W83781D, W83782D
 		General Purpose Input/Output (GPIO) devices, including:
 		    National Semiconductor PC87366 LPC Super I/O GPIO
 		    National Semiconductor Geode SC1100 PCI-ISA bridge GPIO
@@ -1110,9 +1162,9 @@ kernels, but are NOT included on the various distribution floppies
 Drivers for hardware marked with [A] are not included in floppy A.
 Drivers for hardware marked with [B] are not included in floppy B.
 Drivers for hardware marked with [C] are not included in floppy C.
-Support for devices marked with [*] is not included in the GENERIC kernel,
-and will require you to compile a custom kernel to enable it.
-
+Support for devices marked with [*] is not included in the distribution media
+or in the GENERIC kernel, and will require you to compile a custom kernel to
+enable it.
 
 Hardware that we do NOT currently support, but get many questions
 about:

@@ -1,4 +1,4 @@
-/* $OpenBSD: isakmpd.c,v 1.73 2005/02/27 13:12:12 hshoexer Exp $	 */
+/* $OpenBSD: isakmpd.c,v 1.89 2005/06/25 23:20:43 hshoexer Exp $	 */
 /* $EOM: isakmpd.c,v 1.54 2000/10/05 09:28:22 niklas Exp $	 */
 
 /*
@@ -44,15 +44,15 @@
 #include <unistd.h>
 #include <fcntl.h>
 
-#include "sysdep.h"
-
 #include "app.h"
 #include "conf.h"
 #include "connection.h"
 #include "init.h"
 #include "libcrypto.h"
 #include "log.h"
+#include "message.h"
 #include "monitor.h"
+#include "nat_traversal.h"
 #include "sa.h"
 #include "timer.h"
 #include "transport.h"
@@ -62,9 +62,7 @@
 #include "util.h"
 #include "cert.h"
 
-#ifdef USE_POLICY
 #include "policy.h"
-#endif
 
 static void     usage(void);
 
@@ -92,37 +90,30 @@ volatile sig_atomic_t sigusr1ed = 0;
 static char    *report_file = "/var/run/isakmpd.report";
 
 /*
- * If we receive a USR2 signal, this flag gets set to show we need to
- * rehash our SA soft expiration timers to a uniform distribution.
- * XXX Perhaps this is a really bad idea?
- */
-volatile sig_atomic_t sigusr2ed = 0;
-
-/*
  * If we receive a TERM signal, perform a "clean shutdown" of the daemon.
  * This includes to send DELETE notifications for all our active SAs.
  * Also on recv of an INT signal (Ctrl-C out of an '-d' session, typically).
  */
 volatile sig_atomic_t sigtermed = 0;
 void            daemon_shutdown_now(int);
+void		set_slave_signals(void);
 
 /* The default path of the PID file.  */
 static char    *pid_file = "/var/run/isakmpd.pid";
 
-#ifdef USE_DEBUG
 /* The path of the IKE packet capture log file.  */
 static char    *pcap_file = 0;
-#endif
 
 static void
 usage(void)
 {
+	extern char *__progname;
+
 	fprintf(stderr,
-	    "usage: %s [-4] [-6] [-a] [-c config-file] [-d] [-D class=level]\n"
-	    "          [-f fifo] [-i pid-file] [-K] [-n] [-N udpencap-port]\n"
-	    "          [-p listen-port] [-L] [-l packetlog-file] [-r seed]\n"
-	    "          [-R report-file] [-v]\n",
-	    sysdep_progname());
+	    "usage: %s [-46adKLnTv] [-c config-file] [-D class=level] [-f fifo]\n"
+	    "          [-i pid-file] [-l packetlog-file] [-N udpencap-port]\n"
+	    "          [-p listen-port] [-R report-file]\n",
+	    __progname);
 	exit(1);
 }
 
@@ -130,13 +121,13 @@ static void
 parse_args(int argc, char *argv[])
 {
 	int             ch;
+#if defined(INSECURE_RAND)
 	char           *ep;
-#ifdef USE_DEBUG
+#endif
 	int             cls, level;
 	int             do_packetlog = 0;
-#endif
 
-	while ((ch = getopt(argc, argv, "46ac:dD:f:i:KnN:p:Ll:r:R:v")) != -1) {
+	while ((ch = getopt(argc, argv, "46ac:dD:f:i:KnN:p:Ll:r:R:Tv")) != -1) {
 		switch (ch) {
 		case '4':
 			bind_family |= BIND_FAMILY_INET4;
@@ -158,12 +149,11 @@ parse_args(int argc, char *argv[])
 			debug++;
 			break;
 
-#ifdef USE_DEBUG
 		case 'D':
 			if (sscanf(optarg, "%d=%d", &cls, &level) != 2) {
 				if (sscanf(optarg, "A=%d", &level) == 1) {
 					for (cls = 0; cls < LOG_ENDCLASS;
-					     cls++)
+					    cls++)
 						log_debug_cmd(cls, level);
 				} else
 					log_print("parse_args: -D argument "
@@ -171,7 +161,6 @@ parse_args(int argc, char *argv[])
 			} else
 				log_debug_cmd(cls, level);
 			break;
-#endif				/* USE_DEBUG */
 
 		case 'f':
 			ui_fifo = optarg;
@@ -181,11 +170,9 @@ parse_args(int argc, char *argv[])
 			pid_file = optarg;
 			break;
 
-#ifdef USE_POLICY
 		case 'K':
 			ignore_policy++;
 			break;
-#endif
 
 		case 'n':
 			app_none++;
@@ -199,27 +186,32 @@ parse_args(int argc, char *argv[])
 			udp_default_port = optarg;
 			break;
 
-#ifdef USE_DEBUG
 		case 'l':
 			pcap_file = optarg;
-			/* Fallthrough intended.  */
+			/* FALLTHROUGH */
 
 		case 'L':
 			do_packetlog++;
 			break;
-#endif				/* USE_DEBUG */
 
 		case 'r':
+#if defined(INSECURE_RAND)
 			seed = strtoul(optarg, &ep, 0);
 			srandom(seed);
 			if (*ep != '\0')
 				log_fatal("parse_args: invalid numeric arg "
 				    "to -r (%s)", optarg);
 			regrand = 1;
+#else
+			usage();
 			break;
-
+#endif
 		case 'R':
 			report_file = optarg;
+			break;
+
+		case 'T':
+			disable_nat_t = 1;
 			break;
 
 		case 'v':
@@ -234,12 +226,11 @@ parse_args(int argc, char *argv[])
 	argc -= optind;
 	argv += optind;
 
-#ifdef USE_DEBUG
 	if (do_packetlog && !pcap_file)
 		pcap_file = PCAP_FILE_DEFAULT;
-#endif
 }
 
+/* ARGSUSED */
 static void
 sighup(int sig)
 {
@@ -275,24 +266,6 @@ sigusr1(int sig)
 	sigusr1ed = 1;
 }
 
-/* Rehash soft expiration timers on SIGUSR2.  */
-static void
-rehash_timers(void)
-{
-#if 0
-	/* XXX - not yet */
-	log_print("SIGUSR2 received, rehashing soft expiration timers.");
-
-	timer_rehash_timers();
-#endif
-}
-
-static void
-sigusr2(int sig)
-{
-	sigusr2ed = 1;
-}
-
 static int
 phase2_sa_check(struct sa *sa, void *arg)
 {
@@ -305,6 +278,29 @@ phase1_sa_check(struct sa *sa, void *arg)
 	return sa->phase == 1;
 }
 
+void
+set_slave_signals(void)
+{
+	int n;
+
+	for (n = 1; n < _NSIG; n++)
+		signal(n, SIG_DFL);
+
+	/*
+	 * Do a clean daemon shutdown on TERM/INT. These signals must be
+	 * initialized before monitor_init(). INT is only used with '-d'.
+         */
+	signal(SIGTERM, daemon_shutdown_now);
+	if (debug == 1)		/* i.e '-dd' will skip this.  */
+		signal(SIGINT, daemon_shutdown_now);
+
+	/* Reinitialize on HUP reception.  */
+	signal(SIGHUP, sighup);
+
+	/* Report state on USR1 reception.  */
+	signal(SIGUSR1, sigusr1);
+}
+
 static void
 daemon_shutdown(void)
 {
@@ -315,7 +311,7 @@ daemon_shutdown(void)
 		log_print("isakmpd: shutting down...");
 
 		/*
-		 * Delete all active SAs.  First IPsec SAs, then ISAKMPD. 
+		 * Delete all active SAs.  First IPsec SAs, then ISAKMPD.
 		 * Each DELETE is another (outgoing) message.
 		 */
 		while ((sa = sa_find(phase2_sa_check, NULL)))
@@ -323,17 +319,17 @@ daemon_shutdown(void)
 
 		while ((sa = sa_find(phase1_sa_check, NULL)))
 			sa_delete(sa, 1);
+
+		/* We only want to do this once. */
 		sigtermed++;
 	}
 	if (transport_prio_sendqs_empty()) {
 		/*
 		 * When the prioritized transport sendq:s are empty, i.e all
 		 * the DELETE notifications have been sent, we can shutdown.
-	         */
+		 */
 
-#ifdef USE_DEBUG
 		log_packet_stop();
-#endif
 		/* Remove FIFO and pid files.  */
 		unlink(ui_fifo);
 		unlink(pid_file);
@@ -343,6 +339,7 @@ daemon_shutdown(void)
 }
 
 /* Called on SIGTERM, SIGINT or by ui_shutdown_daemon().  */
+/* ARGSUSED */
 void
 daemon_shutdown_now(int sig)
 {
@@ -355,7 +352,7 @@ write_pid_file(void)
 {
 	FILE	*fp;
 
-	/* Ignore errors. This will fail with USE_PRIVSEP.  */
+	/* Ignore errors. This fails with privsep.  */
 	unlink(pid_file);
 
 	fp = monitor_fopen(pid_file, "w");
@@ -377,13 +374,7 @@ main(int argc, char *argv[])
 	size_t          mask_size;
 	struct timeval  tv, *timeout;
 
-#if defined (HAVE_CLOSEFROM) && (!defined (OpenBSD) || (OpenBSD >= 200405))
 	closefrom(STDERR_FILENO + 1);
-#else
-	m = getdtablesize();
-	for (n = STDERR_FILENO + 1; n < m; n++)
-		(void) close(n);
-#endif
 
 	/*
 	 * Make sure init() won't alloc fd 0, 1 or 2, as daemon() will close
@@ -392,9 +383,6 @@ main(int argc, char *argv[])
 	for (n = 0; n <= 2; n++)
 		if (fcntl(n, F_GETFL, 0) == -1 && errno == EBADF)
 			(void) open("/dev/null", n ? O_WRONLY : O_RDONLY, 0);
-
-	for (n = 1; n < _NSIG; n++)
-		signal(n, SIG_DFL);
 
 	/* Log cmd line parsing and initialization errors to stderr.  */
 	log_to(stderr);
@@ -405,14 +393,7 @@ main(int argc, char *argv[])
 	setprotoent(1);
 	setservent(1);
 
-	/*
-	 * Do a clean daemon shutdown on TERM/INT. These signals must be
-	 * initialized before monitor_init(). INT is only used with '-d'.
-         */
-	signal(SIGTERM, daemon_shutdown_now);
-	if (debug == 1)		/* i.e '-dd' will skip this.  */
-		signal(SIGINT, daemon_shutdown_now);
-
+	set_slave_signals();
 	/* Daemonize before forking unpriv'ed child */
 	if (!debug)
 		if (daemon(0, 0))
@@ -421,33 +402,20 @@ main(int argc, char *argv[])
 	/* Set timezone before priv'separation */
 	tzset();
 
-#if defined (USE_PRIVSEP)
 	if (monitor_init(debug)) {
 		/* The parent, with privileges enters infinite monitor loop. */
 		monitor_loop(debug);
 		exit(0);	/* Never reached.  */
 	}
 	/* Child process only from this point on, no privileges left.  */
-#endif
 
 	init();
 
 	write_pid_file();
 
-	/* Reinitialize on HUP reception.  */
-	signal(SIGHUP, sighup);
-
-	/* Report state on USR1 reception.  */
-	signal(SIGUSR1, sigusr1);
-
-	/* Rehash soft expiration timers on USR2 reception.  */
-	signal(SIGUSR2, sigusr2);
-
-#if defined (USE_DEBUG)
 	/* If we wanted IKE packet capture to file, initialize it now.  */
 	if (pcap_file != 0)
 		log_packet_init(pcap_file);
-#endif
 
 	/* Allocate the file descriptor sets just big enough.  */
 	n = getdtablesize();
@@ -461,9 +429,7 @@ main(int argc, char *argv[])
 		log_fatal("main: malloc (%lu) failed",
 		    (unsigned long)mask_size);
 
-#if defined (USE_PRIVSEP)
 	monitor_init_done();
-#endif
 
 	while (1) {
 		/* If someone has sent SIGHUP to us, reconfigure.  */
@@ -478,17 +444,11 @@ main(int argc, char *argv[])
 			log_print("SIGUSR1 received");
 			report();
 		}
-		/* and if someone sent SIGUSR2, do a timer rehash.  */
-		if (sigusr2ed) {
-			sigusr2ed = 0;
-			log_print("SIGUSR2 received");
-			rehash_timers();
-		}
 		/*
 		 * and if someone set 'sigtermed' (SIGTERM, SIGINT or via the
 		 * UI), this indicates we should start a controlled shutdown
 		 * of the daemon.
-	         *
+		 *
 		 * Note: Since _one_ message is sent per iteration of this
 		 * enclosing while-loop, and we want to send a number of
 		 * DELETE notifications, we must loop atleast this number of
@@ -496,7 +456,7 @@ main(int argc, char *argv[])
 		 * the DELETEs, all other calls just increments the
 		 * 'sigtermed' variable until it reaches a "safe" value, and
 		 * the daemon exits.
-	         */
+		 */
 		if (sigtermed)
 			daemon_shutdown();
 
@@ -511,7 +471,7 @@ main(int argc, char *argv[])
 		 * XXX Some day we might want to deal with an abstract
 		 * application class instead, with many instantiations
 		 * possible.
-	         */
+		 */
 		if (!app_none && app_socket >= 0) {
 			FD_SET(app_socket, rfds);
 			if (app_socket + 1 > n)
@@ -537,7 +497,7 @@ main(int argc, char *argv[])
 				 * condition time to resolve without letting
 				 * this process eat up all available CPU
 				 * we sleep for a short while.
-			         */
+				 */
 				sleep(1);
 			}
 		} else if (n) {

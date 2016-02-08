@@ -1,3 +1,4 @@
+/*	$OpenBSD: fgets.c,v 1.10 2005/08/08 08:05:36 espie Exp $ */
 /*-
  * Copyright (c) 1990, 1993
  *	The Regents of the University of California.  All rights reserved.
@@ -30,10 +31,6 @@
  * SUCH DAMAGE.
  */
 
-#if defined(LIBC_SCCS) && !defined(lint)
-static char rcsid[] = "$OpenBSD: fgets.c,v 1.7 2004/09/28 18:12:44 otto Exp $";
-#endif /* LIBC_SCCS and not lint */
-
 #include <stdio.h>
 #include <string.h>
 #include "local.h"
@@ -54,6 +51,7 @@ fgets(char *buf, int n, FILE *fp)
 	if (n <= 0)		/* sanity check */
 		return (NULL);
 
+	_SET_ORIENTATION(fp, -1);
 	s = buf;
 	n--;			/* leave space for NUL */
 	while (n != 0) {
@@ -85,7 +83,7 @@ fgets(char *buf, int n, FILE *fp)
 			fp->_r -= len;
 			fp->_p = t;
 			(void)memcpy((void *)s, (void *)p, len);
-			s[len] = 0;
+			s[len] = '\0';
 			return (buf);
 		}
 		fp->_r -= len;
@@ -94,6 +92,6 @@ fgets(char *buf, int n, FILE *fp)
 		s += len;
 		n -= len;
 	}
-	*s = 0;
+	*s = '\0';
 	return (buf);
 }

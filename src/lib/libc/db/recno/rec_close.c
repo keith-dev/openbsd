@@ -1,4 +1,4 @@
-/*	$OpenBSD: rec_close.c,v 1.9 2003/06/02 20:18:34 millert Exp $	*/
+/*	$OpenBSD: rec_close.c,v 1.11 2005/08/05 13:03:00 espie Exp $	*/
 
 /*-
  * Copyright (c) 1990, 1993, 1994
@@ -29,14 +29,6 @@
  * SUCH DAMAGE.
  */
 
-#if defined(LIBC_SCCS) && !defined(lint)
-#if 0
-static char sccsid[] = "@(#)rec_close.c	8.6 (Berkeley) 8/18/94";
-#else
-static const char rcsid[] = "$OpenBSD: rec_close.c,v 1.9 2003/06/02 20:18:34 millert Exp $";
-#endif
-#endif /* LIBC_SCCS and not lint */
-
 #include <sys/types.h>
 #include <sys/uio.h>
 #include <sys/mman.h>
@@ -59,8 +51,7 @@ static const char rcsid[] = "$OpenBSD: rec_close.c,v 1.9 2003/06/02 20:18:34 mil
  *	RET_ERROR, RET_SUCCESS
  */
 int
-__rec_close(dbp)
-	DB *dbp;
+__rec_close(DB *dbp)
 {
 	BTREE *t;
 	int status;
@@ -107,9 +98,7 @@ __rec_close(dbp)
  *	RET_SUCCESS, RET_ERROR.
  */
 int
-__rec_sync(dbp, flags)
-	const DB *dbp;
-	u_int flags;
+__rec_sync(const DB *dbp, u_int flags)
 {
 	struct iovec iov[2];
 	BTREE *t;

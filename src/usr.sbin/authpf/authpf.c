@@ -1,4 +1,4 @@
-/*	$OpenBSD: authpf.c,v 1.89 2005/02/10 04:24:15 joel Exp $	*/
+/*	$OpenBSD: authpf.c,v 1.91 2005/05/23 22:50:23 henning Exp $	*/
 
 /*
  * Copyright (C) 1998 - 2002 Bob Beck (beck@openbsd.org).
@@ -133,7 +133,6 @@ main(int argc, char *argv[])
 
 	uid = getuid();
 	pw = getpwuid(uid);
-	endpwent();
 	if (pw == NULL) {
 		syslog(LOG_ERR, "cannot find user for uid %u", uid);
 		goto die;
@@ -258,8 +257,11 @@ main(int argc, char *argv[])
 	} while (1);
 
 	/* revoke privs */
-	seteuid(getuid());
-	setuid(getuid());
+	uid = getuid();
+	if (setresuid(uid, uid, uid) == -1) {
+		syslog(LOG_INFO, "setresuid: %s", strerror(errno));
+		do_death(0);
+	}
 
 	openlog("authpf", LOG_PID | LOG_NDELAY, LOG_DAEMON);
 

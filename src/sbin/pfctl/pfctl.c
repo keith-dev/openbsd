@@ -1,4 +1,4 @@
-/*	$OpenBSD: pfctl.c,v 1.234 2005/03/07 13:52:50 henning Exp $ */
+/*	$OpenBSD: pfctl.c,v 1.243 2005/07/11 14:16:09 dhartmei Exp $ */
 
 /*
  * Copyright (c) 2001 Daniel Hartmeier
@@ -65,6 +65,7 @@ int	 pfctl_clear_nat(int, int, char *);
 int	 pfctl_clear_altq(int, int);
 int	 pfctl_clear_src_nodes(int, int);
 int	 pfctl_clear_states(int, const char *, int);
+void	 pfctl_addrprefix(char *, struct pf_addr *);
 int	 pfctl_kill_states(int, const char *, int);
 void	 pfctl_init_options(struct pfctl *);
 int	 pfctl_load_options(struct pfctl *);
@@ -113,10 +114,12 @@ static const struct {
 	const char	*name;
 	int		index;
 } pf_limits[] = {
-	{ "states",	PF_LIMIT_STATES },
-	{ "src-nodes",	PF_LIMIT_SRC_NODES },
-	{ "frags",	PF_LIMIT_FRAGS },
-	{ NULL,		0 }
+	{ "states",		PF_LIMIT_STATES },
+	{ "src-nodes",		PF_LIMIT_SRC_NODES },
+	{ "frags",		PF_LIMIT_FRAGS },
+	{ "tables",		PF_LIMIT_TABLES },
+	{ "table-entries",	PF_LIMIT_TABLE_ENTRIES },
+	{ NULL,			0 }
 };
 
 struct pf_hint {
@@ -205,10 +208,10 @@ usage(void)
 	fprintf(stderr, "usage: %s [-AdeghmNnOoqRrvz] ", __progname);
 	fprintf(stderr, "[-a anchor] [-D macro=value] [-F modifier]\n");
 	fprintf(stderr, "             ");
-	fprintf(stderr, "[-f file] [-i interface] [-k host] ");
-	fprintf(stderr, "[-p device] [-s modifier]\n");
+	fprintf(stderr, "[-f file] [-i interface] [-k host | network] ");
+	fprintf(stderr, "[-p device]\n");
 	fprintf(stderr, "             ");
-	fprintf(stderr, "[-t table -T command [address ...]] ");
+	fprintf(stderr, "[-s modifier] [-t table -T command [address ...]] ");
 	fprintf(stderr, "[-x level]\n");
 	exit(1);
 }
@@ -268,7 +271,7 @@ pfctl_clear_interface_flags(int dev, int opts)
 
 	if ((opts & PF_OPT_NOACTION) == 0) {
 		bzero(&pi, sizeof(pi));
-		pi.pfiio_flags = PFI_IFLAG_SETABLE_MASK;
+		pi.pfiio_flags = PFI_IFLAG_SKIP;
 
 		if (ioctl(dev, DIOCCLRIFFLAG, &pi))
 			err(1, "DIOCCLRIFFLAG");
@@ -358,6 +361,56 @@ pfctl_clear_states(int dev, const char *iface, int opts)
 	return (0);
 }
 
+void
+pfctl_addrprefix(char *addr, struct pf_addr *mask)
+{
+	char *p;
+	const char *errstr;
+	int prefix, ret_ga, q, r;
+	struct addrinfo hints, *res;
+
+	if ((p = strchr(addr, '/')) == NULL)
+		return;
+
+	*p++ = '\0';
+	prefix = strtonum(p, 0, 128, &errstr);
+	if (errstr)
+		errx(1, "prefix is %s: %s", errstr, p);
+
+	bzero(&hints, sizeof(hints));
+	/* prefix only with numeric addresses */
+	hints.ai_flags |= AI_NUMERICHOST;
+
+	if ((ret_ga = getaddrinfo(addr, NULL, &hints, &res))) {
+		errx(1, "getaddrinfo: %s", gai_strerror(ret_ga));
+		/* NOTREACHED */
+	}
+
+	if (res->ai_family == AF_INET && prefix > 32)
+		errx(1, "prefix too long for AF_INET");
+	else if (res->ai_family == AF_INET6 && prefix > 128)
+		errx(1, "prefix too long for AF_INET6");
+
+	q = prefix >> 3;
+	r = prefix & 7;
+	switch (res->ai_family) {
+	case AF_INET:
+		bzero(&mask->v4, sizeof(mask->v4));
+		mask->v4.s_addr = htonl((u_int32_t)
+		    (0xffffffffffULL << (32 - prefix)));
+		break;
+	case AF_INET6:
+		bzero(&mask->v6, sizeof(mask->v6));
+		if (q > 0)
+			memset((void *)&mask->v6, 0xff, q);
+		if (r > 0)
+			*((u_char *)&mask->v6 + q) =
+			    (0xff00 >> r) & 0xff;
+		break;
+	}
+	freeaddrinfo(res);
+}
+
 int
 pfctl_kill_states(int dev, const char *iface, int opts)
 {
@@ -377,6 +430,8 @@ pfctl_kill_states(int dev, const char *iface, int opts)
 	if (iface != NULL && strlcpy(psk.psk_ifname, iface,
 	    sizeof(psk.psk_ifname)) >= sizeof(psk.psk_ifname))
 		errx(1, "invalid interface: %s", iface);
+
+	pfctl_addrprefix(state_kill[0], &psk.psk_src.addr.v.a.mask);
 
 	if ((ret_ga = getaddrinfo(state_kill[0], NULL, NULL, &res[0]))) {
 		errx(1, "getaddrinfo: %s", gai_strerror(ret_ga));
@@ -408,6 +463,8 @@ pfctl_kill_states(int dev, const char *iface, int opts)
 			memset(&psk.psk_dst.addr.v.a.mask, 0xff,
 			    sizeof(psk.psk_dst.addr.v.a.mask));
 			memset(&last_dst, 0xff, sizeof(last_dst));
+			pfctl_addrprefix(state_kill[1],
+			    &psk.psk_dst.addr.v.a.mask);
 			if ((ret_ga = getaddrinfo(state_kill[1], NULL, NULL,
 			    &res[1]))) {
 				errx(1, "getaddrinfo: %s",
@@ -533,12 +590,18 @@ pfctl_print_rule_counters(struct pf_rule *rule, int opts)
 		printf("  [ queue: qname=%s qid=%u pqname=%s pqid=%u ]\n",
 		    rule->qname, rule->qid, rule->pqname, rule->pqid);
 	}
-	if (opts & PF_OPT_VERBOSE)
+	if (opts & PF_OPT_VERBOSE) {
 		printf("  [ Evaluations: %-8llu  Packets: %-8llu  "
 			    "Bytes: %-10llu  States: %-6u]\n",
 			    (unsigned long long)rule->evaluations,
-			    (unsigned long long)rule->packets,
-			    (unsigned long long)rule->bytes, rule->states);
+			    (unsigned long long)(rule->packets[0] +
+			    rule->packets[1]),
+			    (unsigned long long)(rule->bytes[0] +
+			    rule->bytes[1]), rule->states);
+		if (!(opts & PF_OPT_DEBUG))
+			printf("  [ Inserted: uid %u pid %u ]\n",
+			    (unsigned)rule->cuid, (unsigned)rule->cpid);
+	}
 }
 
 void
@@ -594,10 +657,16 @@ pfctl_show_rules(int dev, int opts, int format, char *anchorname)
 		case 1:
 			if (pr.rule.label[0]) {
 				printf("%s ", pr.rule.label);
-				printf("%llu %llu %llu\n",
+				printf("%llu %llu %llu %llu %llu %llu %llu\n",
 				    (unsigned long long)pr.rule.evaluations,
-				    (unsigned long long)pr.rule.packets,
-				    (unsigned long long)pr.rule.bytes);
+				    (unsigned long long)(pr.rule.packets[0] +
+				    pr.rule.packets[1]),
+				    (unsigned long long)(pr.rule.bytes[0] +
+				    pr.rule.bytes[1]),
+				    (unsigned long long)pr.rule.packets[0],
+				    (unsigned long long)pr.rule.bytes[0],
+				    (unsigned long long)pr.rule.packets[1],
+				    (unsigned long long)pr.rule.bytes[1]);
 			}
 			break;
 		default:
@@ -629,10 +698,16 @@ pfctl_show_rules(int dev, int opts, int format, char *anchorname)
 		case 1:
 			if (pr.rule.label[0]) {
 				printf("%s ", pr.rule.label);
-				printf("%llu %llu %llu\n",
+				printf("%llu %llu %llu %llu %llu %llu %llu\n",
 				    (unsigned long long)pr.rule.evaluations,
-				    (unsigned long long)pr.rule.packets,
-				    (unsigned long long)pr.rule.bytes);
+				    (unsigned long long)(pr.rule.packets[0] +
+				    pr.rule.packets[1]),
+				    (unsigned long long)(pr.rule.bytes[0] +
+				    pr.rule.bytes[1]),
+				    (unsigned long long)pr.rule.packets[0],
+				    (unsigned long long)pr.rule.bytes[0],
+				    (unsigned long long)pr.rule.packets[1],
+				    (unsigned long long)pr.rule.bytes[1]);
 			}
 			break;
 		default:
@@ -705,16 +780,17 @@ pfctl_show_src_nodes(int dev, int opts)
 		}
 		if (ioctl(dev, DIOCGETSRCNODES, &psn) < 0) {
 			warn("DIOCGETSRCNODES");
+			free(inbuf);
 			return (-1);
 		}
 		if (psn.psn_len + sizeof(struct pfioc_src_nodes) < len)
 			break;
 		if (len == 0 && psn.psn_len == 0)
-			return (0);
+			goto done;
 		if (len == 0 && psn.psn_len != 0)
 			len = psn.psn_len;
 		if (psn.psn_len == 0)
-			return (0);	/* no src_nodes */
+			goto done;	/* no src_nodes */
 		len *= 2;
 	}
 	p = psn.psn_src_nodes;
@@ -724,6 +800,8 @@ pfctl_show_src_nodes(int dev, int opts)
 		print_src_node(p, opts);
 		p++;
 	}
+done:
+	free(inbuf);
 	return (0);
 }
 
@@ -747,16 +825,17 @@ pfctl_show_states(int dev, const char *iface, int opts)
 		}
 		if (ioctl(dev, DIOCGETSTATES, &ps) < 0) {
 			warn("DIOCGETSTATES");
+			free(inbuf);
 			return (-1);
 		}
 		if (ps.ps_len + sizeof(struct pfioc_states) < len)
 			break;
 		if (len == 0 && ps.ps_len == 0)
-			return (0);
+			goto done;
 		if (len == 0 && ps.ps_len != 0)
 			len = ps.ps_len;
 		if (ps.ps_len == 0)
-			return (0);	/* no states */
+			goto done;	/* no states */
 		len *= 2;
 	}
 	p = ps.ps_states;
@@ -769,6 +848,8 @@ pfctl_show_states(int dev, const char *iface, int opts)
 		}
 		print_state(p, opts);
 	}
+done:
+	free(inbuf);
 	return (0);
 }
 
@@ -825,11 +906,11 @@ pfctl_show_limits(int dev, int opts)
 		pl.index = pf_limits[i].index;
 		if (ioctl(dev, DIOCGETLIMIT, &pl))
 			err(1, "DIOCGETLIMIT");
-		printf("%-10s ", pf_limits[i].name);
+		printf("%-13s ", pf_limits[i].name);
 		if (pl.limit == UINT_MAX)
 			printf("unlimited\n");
 		else
-			printf("hard limit %6u\n", pl.limit);
+			printf("hard limit %8u\n", pl.limit);
 	}
 	return (0);
 }
@@ -1148,9 +1229,11 @@ pfctl_init_options(struct pfctl *pf)
 	pf->timeout[PFTM_SRC_NODE] = PFTM_SRC_NODE_VAL;
 	pf->timeout[PFTM_TS_DIFF] = PFTM_TS_DIFF_VAL;
 
-	pf->limit[PF_LIMIT_STATES]	= PFSTATE_HIWAT;
-	pf->limit[PF_LIMIT_FRAGS]	= PFFRAG_FRENT_HIWAT;
-	pf->limit[PF_LIMIT_SRC_NODES]	= PFSNODE_HIWAT;
+	pf->limit[PF_LIMIT_STATES] = PFSTATE_HIWAT;
+	pf->limit[PF_LIMIT_FRAGS] = PFFRAG_FRENT_HIWAT;
+	pf->limit[PF_LIMIT_SRC_NODES] = PFSNODE_HIWAT;
+	pf->limit[PF_LIMIT_TABLES] = PFR_KTABLE_HIWAT;
+	pf->limit[PF_LIMIT_TABLE_ENTRIES] = PFR_KENTRY_HIWAT;
 
 	pf->debug = PF_DEBUG_URGENT;
 }
@@ -1343,7 +1426,7 @@ pfctl_load_logif(struct pfctl *pf, char *ifname)
 	memset(&pi, 0, sizeof(pi));
 	if (ifname && strlcpy(pi.ifname, ifname,
 	    sizeof(pi.ifname)) >= sizeof(pi.ifname)) {
-		warnx("pfctl_set_logif: strlcpy");
+		warnx("pfctl_load_logif: strlcpy");
 		return (1);
 	}
 	if (ioctl(pf->dev, DIOCSETSTATUSIF, &pi)) {

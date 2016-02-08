@@ -1,4 +1,4 @@
-/* $OpenBSD: message.c,v 1.98 2005/03/05 12:35:03 ho Exp $	 */
+/* $OpenBSD: message.c,v 1.114 2005/07/20 16:50:43 moritz Exp $	 */
 /* $EOM: message.c,v 1.156 2000/10/10 12:36:39 provos Exp $	 */
 
 /*
@@ -38,16 +38,12 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "sysdep.h"
-
 #include "attribute.h"
 #include "cert.h"
 #include "constants.h"
 #include "crypto.h"
 #include "doi.h"
-#ifdef USE_DPD
 #include "dpd.h"
-#endif
 #include "exchange.h"
 #include "field.h"
 #include "hash.h"
@@ -56,21 +52,13 @@
 #include "isakmp.h"
 #include "log.h"
 #include "message.h"
-#if defined (USE_NAT_TRAVERSAL)
 #include "nat_traversal.h"
-#endif
 #include "prf.h"
 #include "sa.h"
 #include "timer.h"
 #include "transport.h"
 #include "util.h"
 #include "virtual.h"
-
-#ifdef __GNUC__
-#define INLINE __inline
-#else
-#define INLINE
-#endif
 
 /* A local set datatype, coincidentally fd_set suits our purpose fine.  */
 typedef fd_set  set;
@@ -84,6 +72,9 @@ static int	message_index_payload(struct message *, struct payload *,
 		    u_int8_t ,u_int8_t *);
 static int	message_parse_transform(struct message *, struct payload *,
 		    u_int8_t, u_int8_t *);
+static struct field *message_get_field(u_int8_t);
+static int	message_validate_payload(struct message *, struct payload *,
+		    u_int8_t);
 static u_int16_t message_payload_sz(u_int8_t);
 static int      message_validate_attribute(struct message *, struct payload *);
 static int      message_validate_cert(struct message *, struct payload *);
@@ -103,46 +94,6 @@ static int      message_validate_transform(struct message *, struct payload *);
 static int      message_validate_vendor(struct message *, struct payload *);
 
 static void     message_packet_log(struct message *);
-
-static int (*message_validate_payload[])(struct message *, struct payload *) =
-{
-	message_validate_sa, message_validate_proposal,
-	message_validate_transform, message_validate_key_exch,
-	message_validate_id, message_validate_cert, message_validate_cert_req,
-	message_validate_hash, message_validate_sig, message_validate_nonce,
-	message_validate_notify, message_validate_delete,
-	message_validate_vendor, message_validate_attribute,
-	message_validate_nat_d, message_validate_nat_oa
-};
-
-static struct field *fields[] = {
-	isakmp_sa_fld, isakmp_prop_fld, isakmp_transform_fld, isakmp_ke_fld,
-	isakmp_id_fld, isakmp_cert_fld, isakmp_certreq_fld, isakmp_hash_fld,
-	isakmp_sig_fld, isakmp_nonce_fld, isakmp_notify_fld, isakmp_delete_fld,
-	isakmp_vendor_fld, isakmp_attribute_fld, isakmp_nat_d_fld,
-	isakmp_nat_oa_fld
-};
-
-/*
- * These maps are used for indexing the payloads in msg->payloads[i].
- * payload_revmap should be updated if the payloads in isakmp_num.cst change.
- * payload_map is populated during startup by message_init().
- */
-static u_int8_t payload_revmap[] = {
-	ISAKMP_PAYLOAD_NONE, ISAKMP_PAYLOAD_SA, ISAKMP_PAYLOAD_PROPOSAL,
-	ISAKMP_PAYLOAD_TRANSFORM, ISAKMP_PAYLOAD_KEY_EXCH, ISAKMP_PAYLOAD_ID,
-	ISAKMP_PAYLOAD_CERT, ISAKMP_PAYLOAD_CERT_REQ, ISAKMP_PAYLOAD_HASH,
-	ISAKMP_PAYLOAD_SIG, ISAKMP_PAYLOAD_NONCE, ISAKMP_PAYLOAD_NOTIFY,
-	ISAKMP_PAYLOAD_DELETE, ISAKMP_PAYLOAD_VENDOR, ISAKMP_PAYLOAD_ATTRIBUTE,
-#ifdef notyet
-	ISAKMP_PAYLOAD_SAK, ISAKMP_PAYLOAD_SAT, ISAKMP_PAYLOAD_KD,
-	ISAKMP_PAYLOAD_SEQ, ISAKMP_PAYLOAD_POP
-#endif
-	ISAKMP_PAYLOAD_NAT_D, ISAKMP_PAYLOAD_NAT_OA
-};
-
-static u_int8_t payload_map[256];
-u_int8_t payload_index_max;
 
 /*
  * Fields used for checking monotonic increasing of proposal and transform
@@ -166,7 +117,7 @@ message_alloc(struct transport *t, u_int8_t *buf, size_t sz)
 	/*
 	 * We use calloc(3) because it zeroes the structure which we rely on in
 	 * message_free when determining what sub-allocations to free.
-         */
+	 */
 	msg = (struct message *)calloc(1, sizeof *msg);
 	if (!msg)
 		return 0;
@@ -188,13 +139,13 @@ message_alloc(struct transport *t, u_int8_t *buf, size_t sz)
 	    ISAKMP_HDR_NEXT_PAYLOAD_OFF;
 	msg->transport = t;
 	transport_reference(t);
-	msg->payload = (struct payload_head *)calloc(payload_index_max,
+	msg->payload = (struct payload_head *)calloc(ISAKMP_PAYLOAD_MAX,
 	    sizeof *msg->payload);
 	if (!msg->payload) {
 		message_free(msg);
 		return 0;
 	}
-	for (i = 0; i < payload_index_max; i++)
+	for (i = 0; i < ISAKMP_PAYLOAD_MAX; i++)
 		TAILQ_INIT(&msg->payload[i]);
 	TAILQ_INIT(&msg->post_send);
 	LOG_DBG((LOG_MESSAGE, 90, "message_alloc: allocated %p", msg));
@@ -223,7 +174,7 @@ void
 message_free(struct message *msg)
 {
 	u_int32_t       i;
-	struct payload *payload, *next;
+	struct payload *payload;
 
 	LOG_DBG((LOG_MESSAGE, 20, "message_free: freeing %p", msg));
 	if (!msg)
@@ -239,10 +190,9 @@ message_free(struct message *msg)
 	if (msg->retrans)
 		timer_remove_event(msg->retrans);
 	if (msg->payload) {
-		for (i = 0; i < payload_index_max; i++)
-			for (payload = payload_first(msg, i); payload;
-			     payload = next) {
-				next = TAILQ_NEXT(payload, link);
+		for (i = 0; i < ISAKMP_PAYLOAD_MAX; i++)
+			while ((payload = TAILQ_FIRST(&msg->payload[i]))) {
+				TAILQ_REMOVE(&msg->payload[i], payload, link);
 				free(payload);
 			}
 		free(msg->payload);
@@ -321,7 +271,7 @@ message_parse_payloads(struct message *msg, struct payload *p, u_int8_t next,
 		}
 		/*
 		 * Decode and validate the payload length field.
-	         */
+		 */
 		len = GET_ISAKMP_GEN_LENGTH(buf);
 
 		if (message_payload_sz(payload) == 0) {
@@ -349,8 +299,8 @@ message_parse_payloads(struct message *msg, struct payload *p, u_int8_t next,
 		}
 		/* Ignore most private payloads.  */
 		if (next >= ISAKMP_PAYLOAD_PRIVATE_MIN &&
-		    next != ISAKMP_PAYLOAD_NAT_D &&
-		    next != ISAKMP_PAYLOAD_NAT_OA) {
+		    next != ISAKMP_PAYLOAD_NAT_D_DRAFT &&
+		    next != ISAKMP_PAYLOAD_NAT_OA_DRAFT) {
 			LOG_DBG((LOG_MESSAGE, 30, "message_parse_payloads: "
 			    "private next payload type %s in payload of "
 			    "type %d ignored",
@@ -360,7 +310,7 @@ message_parse_payloads(struct message *msg, struct payload *p, u_int8_t next,
 		/*
 		 * Check if the current payload is one of the accepted ones at
 		 * this stage.
-	         */
+		 */
 		if (!ISSET(payload, accepted_payloads)) {
 			log_print("message_parse_payloads: payload type %s "
 			    "unexpected", constant_name(isakmp_payload_cst,
@@ -377,8 +327,7 @@ next_payload:
 		/* Advance to next payload.  */
 		buf += len;
 		sz += len;
-	}
-	while (next != ISAKMP_PAYLOAD_NONE);
+	} while (next != ISAKMP_PAYLOAD_NONE);
 	return sz;
 }
 
@@ -398,9 +347,9 @@ message_parse_proposal(struct message *msg, struct payload *p,
 	message_index_payload(msg, p, payload, buf);
 
 	ZERO(&payload_set);
-	SET(payload_revmap[ISAKMP_PAYLOAD_TRANSFORM], &payload_set);
+	SET(ISAKMP_PAYLOAD_TRANSFORM, &payload_set);
 	if (message_parse_payloads(msg,
-	    payload_last(msg, ISAKMP_PAYLOAD_PROPOSAL),
+	    TAILQ_LAST(&msg->payload[ISAKMP_PAYLOAD_PROPOSAL], payload_head),
 	    ISAKMP_PAYLOAD_TRANSFORM, buf + ISAKMP_PROP_SPI_OFF +
 	    GET_ISAKMP_PROP_SPI_SZ(buf), &payload_set, message_parse_transform)
 	    == -1)
@@ -418,13 +367,111 @@ message_parse_transform(struct message *msg, struct payload *p,
 
 	LOG_DBG((LOG_MESSAGE, 50, "Transform %d's attributes",
 	    GET_ISAKMP_TRANSFORM_NO(buf)));
-#ifdef USE_DEBUG
 	attribute_map(buf + ISAKMP_TRANSFORM_SA_ATTRS_OFF,
 	    GET_ISAKMP_GEN_LENGTH(buf) - ISAKMP_TRANSFORM_SA_ATTRS_OFF,
 	    msg->exchange->doi->debug_attribute, msg);
-#endif
 
 	return 0;
+}
+
+static struct field *
+message_get_field(u_int8_t payload)
+{
+	switch (payload) {
+	case ISAKMP_PAYLOAD_SA:
+		return isakmp_sa_fld;
+	case ISAKMP_PAYLOAD_PROPOSAL:
+		return isakmp_prop_fld;
+	case ISAKMP_PAYLOAD_TRANSFORM:
+		return isakmp_transform_fld;
+	case ISAKMP_PAYLOAD_KEY_EXCH:
+		return isakmp_ke_fld;
+	case ISAKMP_PAYLOAD_ID:
+		return isakmp_id_fld;
+	case ISAKMP_PAYLOAD_CERT:
+		return isakmp_cert_fld;
+	case ISAKMP_PAYLOAD_CERT_REQ:
+		return isakmp_certreq_fld;
+	case ISAKMP_PAYLOAD_HASH:
+		return isakmp_hash_fld;
+	case ISAKMP_PAYLOAD_SIG:
+		return isakmp_sig_fld;
+	case ISAKMP_PAYLOAD_NONCE:
+		return isakmp_nonce_fld;
+	case ISAKMP_PAYLOAD_NOTIFY:
+		return isakmp_notify_fld;
+	case ISAKMP_PAYLOAD_DELETE:
+		return isakmp_delete_fld;
+	case ISAKMP_PAYLOAD_VENDOR:
+		return isakmp_vendor_fld;
+	case ISAKMP_PAYLOAD_ATTRIBUTE:
+		return isakmp_attribute_fld;
+	case ISAKMP_PAYLOAD_NAT_D:
+	case ISAKMP_PAYLOAD_NAT_D_DRAFT:
+		return isakmp_nat_d_fld;
+	case ISAKMP_PAYLOAD_NAT_OA:
+	case ISAKMP_PAYLOAD_NAT_OA_DRAFT:
+		return isakmp_nat_oa_fld;
+	/* Not yet supported and any other unknown payloads. */
+	case ISAKMP_PAYLOAD_SAK:
+	case ISAKMP_PAYLOAD_SAT:
+	case ISAKMP_PAYLOAD_KD:
+	case ISAKMP_PAYLOAD_SEQ:
+	case ISAKMP_PAYLOAD_POP:
+	default:
+		break;
+	}
+	return NULL;
+}
+
+static int
+message_validate_payload(struct message *m, struct payload *p, u_int8_t payload)
+{
+	switch (payload) {
+	case ISAKMP_PAYLOAD_SA:
+		return message_validate_sa(m, p);
+	case ISAKMP_PAYLOAD_PROPOSAL:
+		return message_validate_proposal(m, p);
+	case ISAKMP_PAYLOAD_TRANSFORM:
+		return message_validate_transform(m, p);
+	case ISAKMP_PAYLOAD_KEY_EXCH:
+		return message_validate_key_exch(m, p);
+	case ISAKMP_PAYLOAD_ID:
+		return message_validate_id(m, p);
+	case ISAKMP_PAYLOAD_CERT:
+		return message_validate_cert(m, p);
+	case ISAKMP_PAYLOAD_CERT_REQ:
+		return message_validate_cert_req(m, p);
+	case ISAKMP_PAYLOAD_HASH:
+		return message_validate_hash(m, p);
+	case ISAKMP_PAYLOAD_SIG:
+		return message_validate_sig(m, p);
+	case ISAKMP_PAYLOAD_NONCE:
+		return message_validate_nonce(m, p);
+	case ISAKMP_PAYLOAD_NOTIFY:
+		return message_validate_notify(m, p);
+	case ISAKMP_PAYLOAD_DELETE:
+		return message_validate_delete(m, p);
+	case ISAKMP_PAYLOAD_VENDOR:
+		return message_validate_vendor(m, p);
+	case ISAKMP_PAYLOAD_ATTRIBUTE:
+		return message_validate_attribute(m, p);
+	case ISAKMP_PAYLOAD_NAT_D:
+	case ISAKMP_PAYLOAD_NAT_D_DRAFT:
+		return message_validate_nat_d(m, p);
+	case ISAKMP_PAYLOAD_NAT_OA:
+	case ISAKMP_PAYLOAD_NAT_OA_DRAFT:
+		return message_validate_nat_oa(m, p);
+	/* Not yet supported and any other unknown payloads. */
+	case ISAKMP_PAYLOAD_SAK:
+	case ISAKMP_PAYLOAD_SAT:
+	case ISAKMP_PAYLOAD_KD:
+	case ISAKMP_PAYLOAD_SEQ:
+	case ISAKMP_PAYLOAD_POP:
+	default:
+		break;
+	}
+	return -1;
 }
 
 /* Check payloads for their required minimum size. */
@@ -460,12 +507,12 @@ message_payload_sz(u_int8_t payload)
 		return ISAKMP_VENDOR_SZ;
 	case ISAKMP_PAYLOAD_ATTRIBUTE:
 		return ISAKMP_ATTRIBUTE_SZ;
-#if defined (USE_NAT_TRAVERSAL)
 	case ISAKMP_PAYLOAD_NAT_D:
+	case ISAKMP_PAYLOAD_NAT_D_DRAFT:
 		return ISAKMP_NAT_D_SZ;
 	case ISAKMP_PAYLOAD_NAT_OA:
+	case ISAKMP_PAYLOAD_NAT_OA_DRAFT:
 		return ISAKMP_NAT_OA_SZ;
-#endif
 	/* Not yet supported and any other unknown payloads. */
 	case ISAKMP_PAYLOAD_SAK:
 	case ISAKMP_PAYLOAD_SAT:
@@ -481,7 +528,6 @@ message_payload_sz(u_int8_t payload)
 static int
 message_validate_attribute(struct message *msg, struct payload *p)
 {
-#ifdef USE_ISAKMP_CFG
 	/* If we don't have an exchange yet, create one.  */
 	if (!msg->exchange) {
 		if (zero_test((u_int8_t *) msg->iov[0].iov_base +
@@ -498,7 +544,6 @@ message_validate_attribute(struct message *msg, struct payload *p)
 			return -1;
 		}
 	}
-#endif
 	return 0;
 }
 
@@ -530,7 +575,7 @@ message_validate_cert_req(struct message *msg, struct payload *p)
 	/*
 	 * Check the certificate types we support and if an acceptable
 	 * authority is included in the payload check if it can be decoded
-         */
+	 */
 	cert = cert_get(GET_ISAKMP_CERTREQ_TYPE(p->p));
 	if (!cert || (len && !cert->certreq_validate(p->p +
 	    ISAKMP_CERTREQ_AUTHORITY_OFF, len))) {
@@ -544,11 +589,6 @@ message_validate_cert_req(struct message *msg, struct payload *p)
 /*
  * Validate the delete payload P in message MSG.  As a side-effect, create
  * an exchange if we do not have one already.
- *
- * Note:  DELETEs are only accepted as part of an INFORMATIONAL exchange.
- * exchange_validate() makes sure a HASH payload is present.  Due to the order
- * of message validation functions in message_validate_payload[] we can be
- * sure that the HASH payload has been successfully validated at this point.
  */
 static int
 message_validate_delete(struct message *msg, struct payload *p)
@@ -680,7 +720,7 @@ message_validate_hash(struct message *msg, struct payload *p)
 	/* If no SKEYID_a, we can not do anything (should not happen).  */
 	if (!isa->skeyid_a)
 		goto invalid;
-		
+
 	/* Allocate the prf and start calculating our HASH(1). */
 	LOG_DBG_BUF((LOG_MISC, 90, "message_validate_hash: SKEYID_a",
 	    isa->skeyid_a, isa->skeyid_len));
@@ -737,10 +777,10 @@ message_validate_id(struct message *msg, struct payload *p)
 		message_drop(msg, ISAKMP_NOTIFY_PAYLOAD_MALFORMED, 0, 1, 1);
 		return -1;
 	}
-	if (exchange->doi
-	    && exchange->doi->validate_id_information(GET_ISAKMP_ID_TYPE(p->p),
-	    p->p + ISAKMP_ID_DOI_DATA_OFF, p->p + ISAKMP_ID_DATA_OFF, len -
-	    ISAKMP_ID_DATA_OFF, exchange)) {
+	if (exchange->doi &&
+	    exchange->doi->validate_id_information(GET_ISAKMP_ID_TYPE(p->p),
+	    p->p + ISAKMP_ID_DOI_DATA_OFF, p->p + ISAKMP_ID_DATA_OFF,
+	    len - ISAKMP_ID_DATA_OFF, exchange)) {
 		message_drop(msg, ISAKMP_NOTIFY_INVALID_ID_INFORMATION, 0, 1,
 		    1);
 		return -1;
@@ -870,7 +910,7 @@ message_validate_notify(struct message *msg, struct payload *p)
 	}
 
 	/* Validate the SPI. XXX Just ISAKMP for now.  */
-	if (proto == ISAKMP_PROTO_ISAKMP && 
+	if (proto == ISAKMP_PROTO_ISAKMP &&
 	    GET_ISAKMP_NOTIFY_SPI_SZ(p->p) == ISAKMP_HDR_COOKIES_LEN &&
 	    msg->isakmp_sa &&
 	    memcmp(p->p + ISAKMP_NOTIFY_SPI_OFF, msg->isakmp_sa->cookies,
@@ -880,15 +920,15 @@ message_validate_notify(struct message *msg, struct payload *p)
 		return -1;
 	}
 
-	if (type < ISAKMP_NOTIFY_INVALID_PAYLOAD_TYPE
-	    || (type >= ISAKMP_NOTIFY_RESERVED_MIN
-		&& type < ISAKMP_NOTIFY_PRIVATE_MIN)
-	    || (type >= ISAKMP_NOTIFY_STATUS_RESERVED1_MIN
-		&& type <= ISAKMP_NOTIFY_STATUS_RESERVED1_MAX)
-	    || (type >= ISAKMP_NOTIFY_STATUS_DOI_MIN
-		&& type <= ISAKMP_NOTIFY_STATUS_DOI_MAX
-		&& doi->validate_notification(type))
-	    || type >= ISAKMP_NOTIFY_STATUS_RESERVED2_MIN) {
+	if (type < ISAKMP_NOTIFY_INVALID_PAYLOAD_TYPE ||
+	    (type >= ISAKMP_NOTIFY_RESERVED_MIN &&
+	    type < ISAKMP_NOTIFY_PRIVATE_MIN) ||
+	    (type >= ISAKMP_NOTIFY_STATUS_RESERVED1_MIN &&
+	    type <= ISAKMP_NOTIFY_STATUS_RESERVED1_MAX) ||
+	    (type >= ISAKMP_NOTIFY_STATUS_DOI_MIN &&
+	    type <= ISAKMP_NOTIFY_STATUS_DOI_MAX &&
+	    doi->validate_notification(type)) ||
+	    type >= ISAKMP_NOTIFY_STATUS_RESERVED2_MIN) {
 		log_print("message_validate_notify: "
 		    "message type not supported");
 		message_free(msg);
@@ -912,8 +952,8 @@ message_validate_proposal(struct message *msg, struct payload *p)
 		message_drop(msg, ISAKMP_NOTIFY_PAYLOAD_MALFORMED, 0, 1, 1);
 		return -1;
 	}
-	if (proto != ISAKMP_PROTO_ISAKMP
-	    && msg->exchange->doi->validate_proto(proto)) {
+	if (proto != ISAKMP_PROTO_ISAKMP &&
+	    msg->exchange->doi->validate_proto(proto)) {
 		message_drop(msg, ISAKMP_NOTIFY_INVALID_PROTOCOL_ID, 0, 1, 1);
 		return -1;
 	}
@@ -962,7 +1002,7 @@ message_validate_sa(struct message *msg, struct payload *p)
 	 * already set, then we are creating a new phase 1 SA.  Otherwise,
 	 * lookup the SA using the cookies and the message ID.  If we cannot
 	 * find it, and the phase 1 SA is ready, setup a phase 2 SA.
-         */
+	 */
 	if (!exchange) {
 		if (zero_test(pkt + ISAKMP_HDR_RCOOKIE_OFF,
 		    ISAKMP_HDR_RCOOKIE_LEN))
@@ -985,7 +1025,7 @@ message_validate_sa(struct message *msg, struct payload *p)
 	/*
 	 * Create a struct sa for each SA payload handed to us unless we are
 	 * the initiator where we only will count them.
-         */
+	 */
 	if (exchange->initiator) {
 		/* XXX Count SA payloads.  */
 	} else if (sa_create(exchange, msg->transport)) {
@@ -1001,7 +1041,7 @@ message_validate_sa(struct message *msg, struct payload *p)
 	/*
 	 * Let the DOI validate the situation, at the same time it tells us
 	 * what the length of the situation field is.
-         */
+	 */
 	if (exchange->doi->validate_situation(p->p + ISAKMP_SA_SIT_OFF, &len,
 	    GET_ISAKMP_GEN_LENGTH(p->p) - ISAKMP_SA_SIT_OFF)) {
 		log_print("message_validate_sa: situation not supported");
@@ -1018,7 +1058,7 @@ message_validate_sa(struct message *msg, struct payload *p)
 
 	/* Go through the PROPOSAL payloads.  */
 	ZERO(&payload_set);
-	SET(payload_revmap[ISAKMP_PAYLOAD_PROPOSAL], &payload_set);
+	SET(ISAKMP_PAYLOAD_PROPOSAL, &payload_set);
 	if (message_parse_payloads(msg, p, ISAKMP_PAYLOAD_PROPOSAL,
 	    p->p + ISAKMP_SA_SIT_OFF + len, &payload_set,
 	    message_parse_proposal) == -1)
@@ -1069,7 +1109,7 @@ message_validate_transform(struct message *msg, struct payload *p)
 	/*
 	 * Check that we get monotonically increasing transform numbers per
 	 * proposal.
-         */
+	 */
 	if (prop != last_prop)
 		last_prop = prop;
 	else if (GET_ISAKMP_TRANSFORM_NO(p->p) <= last_xf_no) {
@@ -1104,12 +1144,8 @@ message_validate_vendor(struct message *msg, struct payload *p)
 		message_drop(msg, ISAKMP_NOTIFY_INVALID_PAYLOAD_TYPE, 0, 1, 1);
 		return -1;
 	}
-#if defined (USE_DPD)
 	dpd_check_vendor_payload(msg, p);
-#endif
-#if defined (USE_NAT_TRAVERSAL)
 	nat_t_check_vendor_payload(msg, p);
-#endif
 	if (!(p->flags & PL_MARK))
 		LOG_DBG((LOG_MESSAGE, 40, "message_validate_vendor: "
 		    "vendor ID seen"));
@@ -1135,8 +1171,7 @@ message_index_payload(struct message *msg, struct payload *p, u_int8_t payload,
 	payload_node->p = buf;
 	payload_node->context = p;
 	payload_node->flags = 0;
-	TAILQ_INSERT_TAIL(&msg->payload[payload_map[payload]], payload_node,
-	    link);
+	TAILQ_INSERT_TAIL(&msg->payload[payload], payload_node, link);
 	return 0;
 }
 
@@ -1153,10 +1188,10 @@ message_sort_payloads(struct message *msg, u_int8_t next)
 	int	i, sz;
 
 	ZERO(&payload_set);
-	for (i = ISAKMP_PAYLOAD_SA; i < payload_index_max; i++)
+	for (i = ISAKMP_PAYLOAD_SA; i < ISAKMP_PAYLOAD_MAX; i++)
 		if (i != ISAKMP_PAYLOAD_PROPOSAL && i !=
 		    ISAKMP_PAYLOAD_TRANSFORM)
-			SET(payload_revmap[i], &payload_set);
+			SET(i, &payload_set);
 	sz = message_parse_payloads(msg, 0, next,
 	    (u_int8_t *)msg->iov[0].iov_base + ISAKMP_HDR_SZ, &payload_set,
 	    message_index_payload);
@@ -1173,16 +1208,16 @@ message_validate_payloads(struct message *msg)
 {
 	int             i;
 	struct payload *p;
+	struct field   *f;
 
-	for (i = ISAKMP_PAYLOAD_SA; i < payload_index_max; i++)
-		for (p = payload_first(msg, i); p; p = TAILQ_NEXT(p, link)) {
+	for (i = ISAKMP_PAYLOAD_SA; i < ISAKMP_PAYLOAD_MAX; i++)
+		TAILQ_FOREACH(p, &msg->payload[i], link) {
 			LOG_DBG((LOG_MESSAGE, 60, "message_validate_payloads: "
 			    "payload %s at %p of message %p",
 			    constant_name(isakmp_payload_cst, i), p->p, msg));
-			field_dump_payload(fields[i - ISAKMP_PAYLOAD_SA],
-			    p->p);
-			if (message_validate_payload[i - ISAKMP_PAYLOAD_SA]
-			    (msg, p))
+			if ((f = message_get_field(i)) != NULL)
+				field_dump_payload(f, p->p);
+			if (message_validate_payload(msg, p, i))
 				return -1;
 		}
 	return 0;
@@ -1204,9 +1239,7 @@ message_recv(struct message *msg)
 	struct keystate *ks = 0;
 	struct proto    tmp_proto;
 	struct sa       tmp_sa;
-#if defined (USE_NAT_TRAVERSAL)
 	struct transport *t;
-#endif
 
 	/* Messages shorter than an ISAKMP header are bad.  */
 	if (sz < ISAKMP_HDR_SZ || sz != GET_ISAKMP_HDR_LENGTH(buf)) {
@@ -1214,19 +1247,17 @@ message_recv(struct message *msg)
 		message_drop(msg, 0, 0, 1, 1);
 		return -1;
 	}
-#ifdef USE_DEBUG
 	/* Possibly dump a raw hex image of the message to the log channel.  */
 	message_dump_raw("message_recv", msg, LOG_MESSAGE);
-#endif
 
 	/*
 	 * If the responder cookie is zero, this is a request to setup an
 	 * ISAKMP SA.  Otherwise the cookies should refer to an existing
 	 * ISAKMP SA.
-         *
+	 *
 	 * XXX This is getting ugly, please reread later to see if it can be
 	 * made nicer.
-         */
+	 */
 	setup_isakmp_sa = zero_test(buf + ISAKMP_HDR_RCOOKIE_OFF,
 	    ISAKMP_HDR_RCOOKIE_LEN);
 	if (setup_isakmp_sa) {
@@ -1234,13 +1265,13 @@ message_recv(struct message *msg)
 		 * This might be a retransmission of a former ISAKMP SA setup
 		 * message.  If so, just drop it.
 		 * XXX Must we really look in both the SA and exchange pools?
-	         */
-		if (exchange_lookup_from_icookie(buf + ISAKMP_HDR_ICOOKIE_OFF)
-		    || sa_lookup_from_icookie(buf + ISAKMP_HDR_ICOOKIE_OFF)) {
+		 */
+		if (exchange_lookup_from_icookie(buf + ISAKMP_HDR_ICOOKIE_OFF) ||
+		    sa_lookup_from_icookie(buf + ISAKMP_HDR_ICOOKIE_OFF)) {
 			/*
 			 * XXX Later we should differentiate between
 			 * retransmissions and potential replay attacks.
-		         */
+			 */
 			LOG_DBG((LOG_MESSAGE, 90,
 			    "message_recv: dropping setup for existing SA"));
 			message_free(msg);
@@ -1255,12 +1286,12 @@ message_recv(struct message *msg)
 		 * If we cannot find an ISAKMP SA out of the cookies, this is
 		 * either a responder's first reply, and we need to upgrade
 		 * our exchange, or it's just plain invalid cookies.
-	         */
+		 */
 		if (!msg->isakmp_sa) {
 			msg->exchange = exchange_lookup_from_icookie(buf +
 			    ISAKMP_HDR_ICOOKIE_OFF);
-			if (msg->exchange && msg->exchange->phase == 1
-			    && zero_test(msg->exchange->cookies +
+			if (msg->exchange && msg->exchange->phase == 1 &&
+			    zero_test(msg->exchange->cookies +
 			    ISAKMP_HDR_RCOOKIE_OFF, ISAKMP_HDR_RCOOKIE_LEN))
 				exchange_upgrade_p1(msg);
 			else {
@@ -1320,12 +1351,12 @@ message_recv(struct message *msg)
 	 * until after all payloads have been seen for the validation as the
 	 * SA payload might not yet have been parsed, thus the DOI might be
 	 * unknown.
-         */
+	 */
 	exch_type = GET_ISAKMP_HDR_EXCH_TYPE(buf);
-	if (exch_type == ISAKMP_EXCH_NONE
-	    || (exch_type >= ISAKMP_EXCH_FUTURE_MIN &&
-		exch_type <= ISAKMP_EXCH_FUTURE_MAX)
-	    || (setup_isakmp_sa && exch_type >= ISAKMP_EXCH_DOI_MIN)) {
+	if (exch_type == ISAKMP_EXCH_NONE ||
+	    (exch_type >= ISAKMP_EXCH_FUTURE_MIN &&
+	    exch_type <= ISAKMP_EXCH_FUTURE_MAX) ||
+	    (setup_isakmp_sa && exch_type >= ISAKMP_EXCH_DOI_MIN)) {
 		log_print("message_recv: invalid exchange type %s",
 		    constant_name(isakmp_exch_cst, exch_type));
 		message_drop(msg, ISAKMP_NOTIFY_INVALID_EXCHANGE_TYPE, 0, 1,
@@ -1335,7 +1366,7 @@ message_recv(struct message *msg)
 	/*
 	 * Check for unrecognized flags, or the encryption flag when we don't
 	 * have an ISAKMP SA to decrypt with.
-         */
+	 */
 	flags = GET_ISAKMP_HDR_FLAGS(buf);
 	if (flags & ~(ISAKMP_FLAGS_ENC | ISAKMP_FLAGS_COMMIT |
 	    ISAKMP_FLAGS_AUTH_ONLY)) {
@@ -1349,7 +1380,7 @@ message_recv(struct message *msg)
 	 * zero.
 	 */
 	msgid_is_zero = zero_test(buf + ISAKMP_HDR_MESSAGE_ID_OFF,
-				  ISAKMP_HDR_MESSAGE_ID_LEN);
+	    ISAKMP_HDR_MESSAGE_ID_LEN);
 	if (setup_isakmp_sa && !msgid_is_zero) {
 		log_print("message_recv: invalid message id");
 		message_drop(msg, ISAKMP_NOTIFY_INVALID_MESSAGE_ID, 0, 1, 1);
@@ -1359,7 +1390,7 @@ message_recv(struct message *msg)
 		/*
 		 * XXX Very likely redundant, look at the  else clause of the
 		 * if (setup_isakmp_sa) statement above.
-	         */
+		 */
 		msg->exchange = exchange_lookup(buf, 0);
 		if (!msg->exchange) {
 			log_print("message_recv: phase 1 message after "
@@ -1403,9 +1434,9 @@ message_recv(struct message *msg)
 	/*
 	 * Check the overall payload structure at the same time as indexing
 	 * them by type.
-         */
-	if (GET_ISAKMP_HDR_NEXT_PAYLOAD(buf) != ISAKMP_PAYLOAD_NONE
-	    && message_sort_payloads(msg, GET_ISAKMP_HDR_NEXT_PAYLOAD(buf))) {
+	 */
+	if (GET_ISAKMP_HDR_NEXT_PAYLOAD(buf) != ISAKMP_PAYLOAD_NONE &&
+	    message_sort_payloads(msg, GET_ISAKMP_HDR_NEXT_PAYLOAD(buf))) {
 		if (ks)
 			free(ks);
 		return -1;
@@ -1415,7 +1446,7 @@ message_recv(struct message *msg)
 	 * message needs either to be retained for later duplicate checks or
 	 * freed entirely.
 	 * XXX Should SAs and even transports be cleaned up then too?
-         */
+	 */
 	if (message_validate_payloads(msg)) {
 		if (ks)
 			free(ks);
@@ -1432,7 +1463,6 @@ message_recv(struct message *msg)
 			free(ks);
 		return -1;
 	}
-#if defined (USE_NAT_TRAVERSAL)
 	/*
 	 * NAT-T may have switched ports for us. We need to replace the
 	 * old ISAKMP SA transport here with one that contains the proper
@@ -1444,16 +1474,13 @@ message_recv(struct message *msg)
 		transport_reference(msg->transport);
 		transport_release(t);
 	}
-#endif
+
 	/*
 	 * Now we can validate DOI-specific exchange types.  If we have no SA
 	 * DOI-specific exchange types are definitely wrong.
-         */
-	if (exch_type >= ISAKMP_EXCH_DOI_MIN
-#if 0 /* always true; silence GCC3 warning */
-	    && exch_type <= ISAKMP_EXCH_DOI_MAX
-#endif
-	    && msg->exchange->doi->validate_exchange(exch_type)) {
+	 */
+	if (exch_type >= ISAKMP_EXCH_DOI_MIN &&
+	    msg->exchange->doi->validate_exchange(exch_type)) {
 		log_print("message_recv: invalid DOI exchange type %d",
 		    exch_type);
 		message_drop(msg, ISAKMP_NOTIFY_INVALID_EXCHANGE_TYPE, 0, 1,
@@ -1473,8 +1500,8 @@ message_recv(struct message *msg)
 	/* Handle the flags.  */
 	if (flags & ISAKMP_FLAGS_ENC)
 		msg->exchange->flags |= EXCHANGE_FLAG_ENCRYPT;
-	if ((msg->exchange->flags & EXCHANGE_FLAG_COMMITTED) == 0
-	    && (flags & ISAKMP_FLAGS_COMMIT))
+	if ((msg->exchange->flags & EXCHANGE_FLAG_COMMITTED) == 0 &&
+	    (flags & ISAKMP_FLAGS_COMMIT))
 		msg->exchange->flags |= EXCHANGE_FLAG_HE_COMMITTED;
 
 	/*
@@ -1524,9 +1551,9 @@ message_send(struct message *msg)
 	/*
 	 * If the ISAKMP SA has set up encryption, encrypt the message.
 	 * However, in a retransmit, it is already encrypted.
-         */
-	if ((msg->flags & MSG_ENCRYPTED) == 0
-	    && exchange->flags & EXCHANGE_FLAG_ENCRYPT) {
+	 */
+	if ((msg->flags & MSG_ENCRYPTED) == 0 &&
+	    exchange->flags & EXCHANGE_FLAG_ENCRYPT) {
 		if (!exchange->keystate) {
 			exchange->keystate = exchange->doi->get_keystate(msg);
 			if (!exchange->keystate)
@@ -1545,9 +1572,7 @@ message_send(struct message *msg)
 		    GET_ISAKMP_HDR_FLAGS(msg->iov[0].iov_base)
 		    | ISAKMP_FLAGS_COMMIT);
 
-#ifdef USE_DEBUG
 	message_dump_raw("message_send", msg, LOG_MESSAGE);
-#endif
 	msg->flags |= MSG_IN_TRANSIT;
 	exchange->in_transit = msg;
 
@@ -1555,7 +1580,7 @@ message_send(struct message *msg)
 	 * If we get a retransmission of a message before our response
 	 * has left the queue, don't queue it again, as it will result
 	 * in a circular list.
-         */
+	 */
 	q = msg->transport->vtbl->get_queue(msg);
 	for (m = TAILQ_FIRST(q); m; m = TAILQ_NEXT(m, link))
 		if (m == msg) {
@@ -1635,10 +1660,9 @@ message_add_payload(struct message *msg, u_int8_t payload, u_int8_t *buf,
 	 * For the sake of exchange_validate we index the payloads even in
 	 * outgoing messages, however context and flags are uninteresting in
 	 * this situation.
-         */
+	 */
 	payload_node->p = buf;
-	TAILQ_INSERT_TAIL(&msg->payload[payload_map[payload]], payload_node,
-	    link);
+	TAILQ_INSERT_TAIL(&msg->payload[payload], payload_node, link);
 	return 0;
 }
 
@@ -1657,13 +1681,11 @@ struct info_args {
 			u_int16_t       nspis;
 			u_int8_t       *spis;
 		} d;
-#if defined (USE_DPD)
 		struct {
 			u_int16_t	msg_type;
 			u_int8_t	*spi;
 			u_int32_t	seq;
 		} dpd;
-#endif
 	} u;
 };
 
@@ -1710,12 +1732,12 @@ message_send_delete(struct sa *sa)
 	struct sockaddr *dst;
 
 	sa->transport->vtbl->get_dst(sa->transport, &dst);
-	isakmp_sa = sa_isakmp_lookup_by_peer(dst, sysdep_sa_len(dst));
+	isakmp_sa = sa_isakmp_lookup_by_peer(dst, SA_LEN(dst));
 	if (!isakmp_sa) {
 		/*
 		 * XXX We ought to setup an ISAKMP SA with our peer here and
 		 * send the DELETE over that one.
-	         */
+		 */
 		return;
 	}
 	args.discr = 'D';
@@ -1736,7 +1758,6 @@ message_send_delete(struct sa *sa)
 	}
 }
 
-#if defined (USE_DPD)
 void
 message_send_dpd_notify(struct sa* isakmp_sa, u_int16_t notify, u_int32_t seq)
 {
@@ -1752,7 +1773,6 @@ message_send_dpd_notify(struct sa* isakmp_sa, u_int16_t notify, u_int32_t seq)
 
 	exchange_establish_p2(isakmp_sa, ISAKMP_EXCH_INFO, 0, &args, 0, 0);
 }
-#endif
 
 /* Build the informational message into MSG.  */
 int
@@ -1769,11 +1789,9 @@ message_send_info(struct message *msg)
 			return -1;
 
 	switch (args->discr) {
-#if defined (USE_DPD)
 	case 'P':
 		sz = sizeof args->u.dpd.seq;
 		/* FALLTHROUGH */
-#endif
 	case 'N':
 		sz += ISAKMP_NOTIFY_SPI_OFF + args->spi_sz;
 		break;
@@ -1782,7 +1800,7 @@ message_send_info(struct message *msg)
 		sz = ISAKMP_DELETE_SPI_OFF + args->u.d.nspis * args->spi_sz;
 		break;
 	}
-	
+
 	buf = calloc(1, sz);
 	if (!buf) {
 		log_error("message_send_info: calloc (1, %lu) failed",
@@ -1791,12 +1809,10 @@ message_send_info(struct message *msg)
 		return -1;
 	}
 	switch (args->discr) {
-#if defined (USE_DPD)
 	case 'P':
 		memcpy(buf + ISAKMP_NOTIFY_SPI_OFF + args->spi_sz,
 		    &args->u.dpd.seq, sizeof args->u.dpd.seq);
 		/* FALLTHROUGH */
-#endif
 	case 'N':
 		/* Build the NOTIFY payload.  */
 		payload = ISAKMP_PAYLOAD_NOTIFY;
@@ -1915,7 +1931,6 @@ message_dump_raw(char *header, struct message *msg, int class)
 static void
 message_packet_log(struct message *msg)
 {
-#if defined (USE_DEBUG)
 	struct sockaddr *src, *dst;
 	struct transport *t = msg->transport;
 
@@ -1923,10 +1938,8 @@ message_packet_log(struct message *msg)
 	if (msg->xmits > 0)
 		return;
 
-#if defined (USE_NAT_TRAVERSAL)
 	if (msg->exchange && msg->exchange->flags & EXCHANGE_FLAG_NAT_T_ENABLE)
 		t = ((struct virtual_transport *)msg->transport)->encap;
-#endif
 
 	/* Figure out direction. */
 	if (msg->exchange &&
@@ -1939,7 +1952,6 @@ message_packet_log(struct message *msg)
 	}
 
 	log_packet_iov(src, dst, msg->iov, msg->iovlen);
-#endif				/* USE_DEBUG */
 }
 
 /*
@@ -1963,7 +1975,7 @@ message_encrypt(struct message *msg)
 	 * For encryption we need to put all payloads together in a single
 	 * buffer.  This buffer should be padded to the current crypto
 	 * transform's blocksize.
-         */
+	 */
 	for (i = 1; i < msg->iovlen; i++)
 		sz += msg->iov[i].iov_len;
 	sz = ((sz + exchange->crypto->blocksize - 1) /
@@ -2022,8 +2034,8 @@ message_check_duplicate(struct message *msg)
 		    exchange->last_received->orig,
 		    exchange->last_received->orig_sz));
 		/* Is it a duplicate, lose the new one.  */
-		if (sz == exchange->last_received->orig_sz
-		    && memcmp(pkt, exchange->last_received->orig, sz) == 0) {
+		if (sz == exchange->last_received->orig_sz &&
+		    memcmp(pkt, exchange->last_received->orig, sz) == 0) {
 			LOG_DBG((LOG_MESSAGE, 80,
 			    "message_check_duplicate: dropping dup"));
 
@@ -2031,7 +2043,7 @@ message_check_duplicate(struct message *msg)
 			 * Retransmit if the previos sent message was the last
 			 * of an exchange, otherwise just wait for the
 			 * ordinary retransmission.
-		         */
+			 */
 			if (exchange->last_sent && (exchange->last_sent->flags
 			    & MSG_LAST))
 				message_send(exchange->last_sent);
@@ -2042,7 +2054,7 @@ message_check_duplicate(struct message *msg)
 	/*
 	 * As this new message is an indication that state is moving forward
 	 * at the peer, remove the retransmit timer on our last message.
-         */
+	 */
 	if (exchange->last_sent) {
 		if (exchange->last_sent == exchange->in_transit) {
 			struct message *m = exchange->in_transit;
@@ -2057,7 +2069,7 @@ message_check_duplicate(struct message *msg)
 }
 
 /* Helper to message_negotiate_sa.  */
-static INLINE struct payload *
+static __inline struct payload *
 step_transform(struct payload *tp, struct payload **propp,
     struct payload **sap)
 {
@@ -2087,7 +2099,7 @@ message_negotiate_sa(struct message *msg, int (*validate)(struct exchange *,
 	/*
 	 * This algorithm is a weird bottom-up thing... mostly due to the
 	 * payload links pointing upwards.
-         *
+	 *
 	 * The algorithm goes something like this:
 	 * Foreach transform
 	 *   If transform is compatible
@@ -2103,7 +2115,7 @@ message_negotiate_sa(struct message *msg, int (*validate)(struct exchange *,
 	 *   If the next transform belongs to a new SA
 	 *     If no transforms have been chosen
 	 *       Issue a NO_PROPOSAL_CHOSEN notification
-         */
+	 */
 
 	sa = TAILQ_FIRST(&exchange->sa_list);
 	for (tp = payload_first(msg, ISAKMP_PAYLOAD_TRANSFORM); tp;
@@ -2140,10 +2152,10 @@ retry_transform:
 		/*
 		 * Figure out if we will be looking at a new protocol proposal
 		 * inside the current protection suite.
-	         */
-		if (next_tp && propp != next_propp && sap == next_sap
-		    && (GET_ISAKMP_PROP_NO(propp->p)
-		    == GET_ISAKMP_PROP_NO(next_propp->p))) {
+		 */
+		if (next_tp && propp != next_propp && sap == next_sap &&
+		    (GET_ISAKMP_PROP_NO(propp->p) ==
+		    GET_ISAKMP_PROP_NO(next_propp->p))) {
 			if (!suite_ok_so_far) {
 				LOG_DBG((LOG_NEGOTIATION, 30,
 				    "message_negotiate_sa: proto %d proposal "
@@ -2163,10 +2175,10 @@ retry_transform:
 				 * protection suite.
 				 */
 				while ((next_tp = step_transform(tp,
-					&next_propp, &next_sap))
-				    && (GET_ISAKMP_PROP_NO(next_propp->p)
-					== GET_ISAKMP_PROP_NO(propp->p))
-				    && next_sap == sap)
+				    &next_propp, &next_sap)) &&
+				    (GET_ISAKMP_PROP_NO(next_propp->p) ==
+				    GET_ISAKMP_PROP_NO(propp->p)) &&
+				    next_sap == sap)
 					tp = next_tp;
 			}
 			suite_ok_so_far = 0;
@@ -2175,14 +2187,14 @@ retry_transform:
 		 * Figure out if we will be looking at a new protection
 		 * suite.
 		 */
-		if (!next_tp
-		    || (propp != next_propp && (GET_ISAKMP_PROP_NO(propp->p)
-			!= GET_ISAKMP_PROP_NO(next_propp->p)))
-		    || sap != next_sap) {
+		if (!next_tp ||
+		    (propp != next_propp && (GET_ISAKMP_PROP_NO(propp->p) !=
+		    GET_ISAKMP_PROP_NO(next_propp->p))) ||
+		    sap != next_sap) {
 			/*
 			 * Check if the suite we just considered was OK, if so
 			 * we check it against the accepted ones.
-		         */
+			 */
 			if (suite_ok_so_far) {
 				if (!validate || validate(exchange, sa,
 				    msg->isakmp_sa)) {
@@ -2196,8 +2208,8 @@ retry_transform:
 					 * SA.
 					 */
 					while ((next_tp = step_transform(tp,
-						&next_propp, &next_sap))
-					    && next_sap == sap)
+					    &next_propp, &next_sap)) &&
+					    next_sap == sap)
 						tp = next_tp;
 				} else {
 					/* Backtrack.  */
@@ -2230,7 +2242,7 @@ retry_transform:
 				 * seeing we just turn down one of the offers,
 				 * can we?  I suggest renaming message_drop to
 				 * something else.
-			         */
+				 */
 				log_print("message_negotiate_sa: no "
 				    "compatible proposal found");
 				message_drop(msg,
@@ -2245,7 +2257,7 @@ cleanup:
 	/*
 	 * Remove potentially succeeded choices from the SA.
 	 * XXX Do we leak struct protos and related data here?
-         */
+	 */
 	while (TAILQ_FIRST(&sa->protos))
 		TAILQ_REMOVE(&sa->protos, TAILQ_FIRST(&sa->protos), link);
 	return -1;
@@ -2272,7 +2284,7 @@ message_add_sa_payload(struct message *msg)
 
 	/*
 	 * Generate SA payloads.
-         */
+	 */
 	for (sa = TAILQ_FIRST(&exchange->sa_list); sa;
 	    sa = TAILQ_NEXT(sa, next)) {
 		/* Setup a SA payload.  */
@@ -2373,7 +2385,7 @@ message_add_sa_payload(struct message *msg)
 		 * Add the payloads.  As this is a SA, we need to recompute the
 		 * lengths of the payloads containing others.  We also need to
 		 * reset these payload's "next payload type" field.
-	         */
+		 */
 		if (message_add_payload(msg, ISAKMP_PAYLOAD_SA, sa_buf,
 		    sa_len, 1))
 			goto cleanup;
@@ -2491,37 +2503,8 @@ message_post_send(struct message *msg)
 	}
 }
 
-/* Initialize and populate payload_map[].  */
-void
-message_init(void)
-{
-	u_int8_t	i;
-
-	bzero(&payload_map, sizeof payload_map);
-
-	payload_index_max = sizeof payload_revmap / sizeof payload_revmap[0];
-	for (i = 0; i < payload_index_max; i++) {
-		payload_map[payload_revmap[i]] = i;
-		LOG_DBG((LOG_MESSAGE, 95, "message_init: payload_map[%d] = %d",
-		    payload_revmap[i], i));
-	}
-}
-
 struct payload *
 payload_first(struct message *msg, u_int8_t payload)
 {
-	if (payload_map[payload])
-		return TAILQ_FIRST(&msg->payload[payload_map[payload]]);
-	else
-		return 0;
-}
-
-struct payload *
-payload_last(struct message *msg, u_int8_t payload)
-{
-	if (payload_map[payload])
-		return TAILQ_LAST(&msg->payload[payload_map[payload]],
-		    payload_head);
-	else
-		return 0;
+	return TAILQ_FIRST(&msg->payload[payload]);
 }

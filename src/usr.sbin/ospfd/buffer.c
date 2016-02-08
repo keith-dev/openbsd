@@ -1,4 +1,4 @@
-/*	$OpenBSD: buffer.c,v 1.3 2005/02/09 14:39:56 claudio Exp $ */
+/*	$OpenBSD: buffer.c,v 1.7 2005/08/11 16:28:07 henning Exp $ */
 
 /*
  * Copyright (c) 2003, 2004 Henning Brauer <henning@openbsd.org>
@@ -17,13 +17,12 @@
  */
 
 #include <sys/types.h>
-#include <sys/socket.h>
 #include <sys/uio.h>
-#include <stdio.h>
-#include <stdlib.h>
-#include <err.h>
+
 #include <errno.h>
 #include <limits.h>
+#include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
 
@@ -73,8 +72,10 @@ buf_realloc(struct buf *buf, size_t len)
 	u_char	*b;
 
 	/* on static buffers max is eq size and so the following fails */
-	if (buf->wpos + len > buf->max)
+	if (buf->wpos + len > buf->max) {
+		errno = ENOMEM;
 		return (-1);
+	}
 
 	b = realloc(buf->buf, buf->wpos + len);
 	if (b == NULL)
@@ -135,7 +136,8 @@ buf_write(int sock, struct buf *buf)
 
 	if ((n = write(sock, buf->buf + buf->rpos,
 	    buf->size - buf->rpos)) == -1) {
-		if (errno == EAGAIN || errno == ENOBUFS)	/* try later */
+		if (errno == EAGAIN || errno == ENOBUFS ||
+		    errno == EINTR)	/* try later */
 			return (0);
 		else
 			return (-1);
@@ -180,12 +182,6 @@ msgbuf_clear(struct msgbuf *msgbuf)
 int
 msgbuf_write(struct msgbuf *msgbuf)
 {
-	/*
-	 * possible race here
-	 * when we cannot write out data completely from a buffer,
-	 * we MUST return and NOT try to write out stuff from later buffers -
-	 * the socket might have become writeable again
-	 */
 	struct iovec	 iov[IOV_MAX];
 	struct buf	*buf, *next;
 	int		 i = 0;
@@ -220,7 +216,8 @@ msgbuf_write(struct msgbuf *msgbuf)
 	}
 
 	if ((n = sendmsg(msgbuf->fd, &msg, 0)) == -1) {
-		if (errno == EAGAIN || errno == ENOBUFS)	/* try later */
+		if (errno == EAGAIN || errno == ENOBUFS ||
+		    errno == EINTR)	/* try later */
 			return (0);
 		else
 			return (-1);
@@ -249,12 +246,6 @@ msgbuf_write(struct msgbuf *msgbuf)
 int
 msgbuf_writebound(struct msgbuf *msgbuf)
 {
-	/*
-	 * possible race here
-	 * when we cannot write out data completely from a buffer,
-	 * we MUST return and NOT try to write out stuff from later buffers -
-	 * the socket might have become writeable again
-	 */
 	struct buf	*buf;
 	int		 n;
 

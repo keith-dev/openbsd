@@ -1,4 +1,4 @@
-/*	$OpenBSD: ospf.h,v 1.8 2005/02/27 08:21:15 norby Exp $ */
+/*	$OpenBSD: ospf.h,v 1.12 2005/05/10 20:20:47 claudio Exp $ */
 
 /*
  * Copyright (c) 2004, 2005 Esben Norby <norby@openbsd.org>
@@ -22,7 +22,6 @@
 #define _OSPF_H_
 
 #include <netinet/in.h>
-#include <stdbool.h>
 
 /* misc */
 #define OSPF_VERSION		2
@@ -36,7 +35,7 @@
 #define MIN_METRIC		1
 #define MAX_METRIC		65535	/* sum & as-ext lsa use 24bit metrics */
 
-#define DEFAULT_PRIORITY	0 /* XXX force to 0 for now */
+#define DEFAULT_PRIORITY	1
 #define MIN_PRIORITY		0
 #define MAX_PRIORITY		255
 
@@ -67,6 +66,11 @@
 #define DEFAULT_SPF_HOLDTIME	5
 #define MIN_SPF_HOLDTIME	1
 #define MAX_SPF_HOLDTIME	5
+
+#define MIN_MD_ID		0
+#define MAX_MD_ID		255
+
+#define MAX_SIMPLE_AUTH_LEN	8
 
 /* OSPF compatibility flags */
 #define OSPF_OPTION_E		0x02
@@ -104,6 +108,13 @@
 #define MAX_SEQ_NUM		0x7fffffff
 
 /* OSPF header */
+struct crypt {
+	u_int16_t		dummy;
+	u_int8_t		keyid;
+	u_int8_t		len;
+	u_int32_t		seq_num;
+};
+
 struct ospf_hdr {
 	u_int8_t		version;
 	u_int8_t		type;
@@ -113,8 +124,8 @@ struct ospf_hdr {
 	u_int16_t		chksum;
 	u_int16_t		auth_type;
 	union {
-		char		simple[8];
-		u_int64_t	crypt;
+		char		simple[MAX_SIMPLE_AUTH_LEN];
+		struct crypt	crypt;
 	} auth_key;
 };
 

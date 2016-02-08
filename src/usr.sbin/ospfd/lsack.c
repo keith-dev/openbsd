@@ -1,4 +1,4 @@
-/*	$OpenBSD: lsack.c,v 1.6 2005/03/17 21:17:12 claudio Exp $ */
+/*	$OpenBSD: lsack.c,v 1.13 2005/05/27 02:24:42 norby Exp $ */
 
 /*
  * Copyright (c) 2004, 2005 Esben Norby <norby@openbsd.org>
@@ -38,18 +38,11 @@ int
 send_ls_ack(struct iface *iface, struct in_addr addr, void *data, int len)
 {
 	struct sockaddr_in	 dst;
-	char			*buf;
-	char			*ptr;
-	int			 ret = 0;
+	struct buf		*buf;
+	int			 ret;
 
-	log_debug("send_ls_ack: interface %s addr %s",
-	    iface->name, inet_ntoa(addr));
-
-	if (iface->passive)
-		return (0);
-
-	/* XXX use buffer API instead for better decoupling */
-	if ((ptr = buf = calloc(1, READ_BUF_SIZE)) == NULL)
+	/* XXX READ_BUF_SIZE */
+	if ((buf = buf_dynamic(PKG_DEF_SIZE, READ_BUF_SIZE)) == NULL)
 		fatal("send_ls_ack");
 
 	dst.sin_family = AF_INET;
@@ -57,30 +50,31 @@ send_ls_ack(struct iface *iface, struct in_addr addr, void *data, int len)
 	dst.sin_addr.s_addr = addr.s_addr;
 
 	/* OSPF header */
-	gen_ospf_hdr(ptr, iface, PACKET_TYPE_LS_ACK);
-	ptr += sizeof(struct ospf_hdr);
+	if (gen_ospf_hdr(buf, iface, PACKET_TYPE_LS_ACK))
+		goto fail;
 
 	/* LS ack(s) */
-	memcpy(ptr, data, len);		/* XXX size check ??? */
-	ptr += len;
+	if (buf_add(buf, data, len))
+		goto fail;
 
 	/* update authentication and calculate checksum */
-	auth_gen(buf, ptr - buf, iface);
+	if (auth_gen(buf, iface))
+		goto fail;
 
-	if ((ret = send_packet(iface, buf, (ptr - buf), &dst)) == -1)
-		log_warnx("send_ls_ack: error sending packet on "
-		    "interface %s", iface->name);
+	ret = send_packet(iface, buf->buf, buf->wpos, &dst);
 
-	free(buf);
+	buf_free(buf);
 	return (ret);
+fail:
+	log_warn("send_ls_ack");
+	buf_free(buf);
+	return (-1);
 }
 
 void
 recv_ls_ack(struct nbr *nbr, char *buf, u_int16_t len)
 {
 	struct lsa_hdr	 lsa_hdr;
-
-	log_debug("recv_ls_ack: neighbor ID %s", inet_ntoa(nbr->id));
 
 	switch (nbr->state) {
 	case NBR_STA_DOWN:
@@ -96,9 +90,6 @@ recv_ls_ack(struct nbr *nbr, char *buf, u_int16_t len)
 	case NBR_STA_XCHNG:
 	case NBR_STA_LOAD:
 	case NBR_STA_FULL:
-		log_debug("recv_ls_ack: state %s, neighbor ID %s",
-		    nbr_state_name(nbr->state), inet_ntoa(nbr->id));
-
 		while (len >= sizeof(lsa_hdr)) {
 			memcpy(&lsa_hdr, buf, sizeof(lsa_hdr));
 
@@ -210,7 +201,7 @@ ls_ack_list_clr(struct iface *iface)
 	iface->ls_ack_cnt = 0;
 }
 
-bool
+int
 ls_ack_list_empty(struct iface *iface)
 {
 	return (TAILQ_EMPTY(&iface->ls_ack_list));
@@ -235,17 +226,14 @@ ls_ack_tx_timer(int fd, short event, void *arg)
 	while (!ls_ack_list_empty(iface)) {
 		ptr = buf;
 		cnt = 0;
-		for (le = TAILQ_FIRST(&iface->ls_ack_list); (le != NULL) &&
-		    ((ptr - buf) < iface->mtu - PACKET_HDR); le = nle) {
+		for (le = TAILQ_FIRST(&iface->ls_ack_list); le != NULL &&
+		    (ptr - buf < iface->mtu - PACKET_HDR); le = nle) {
 			nle = TAILQ_NEXT(le, entry);
 			memcpy(ptr, le->le_lsa, sizeof(struct lsa_hdr));
 			ptr += sizeof(*lsa_hdr);
 			ls_ack_list_free(iface, le);
 			cnt++;
 		}
-
-		log_debug("ls_ack_tx_timer: sending %d ack(s), interface %s",
-		    cnt, iface->name);
 
 		/* send LS ack(s) but first set correct destination */
 		switch (iface->type) {
@@ -268,11 +256,11 @@ ls_ack_tx_timer(int fd, short event, void *arg)
 					continue;
 				if (!(nbr->state & NBR_STA_FLOOD))
 					continue;
-				send_ls_ack(iface, nbr->addr, ptr, ptr - buf);
+				send_ls_ack(iface, nbr->addr, buf, ptr - buf);
 			}
 			break;
 		default:
-			fatalx("lsa_flood: unknown interface type");
+			fatalx("lsa_ack_tx_timer: unknown interface type");
 		}
 	}
 
@@ -284,9 +272,9 @@ start_ls_ack_tx_timer(struct iface *iface)
 {
 	struct timeval tv;
 
-	log_debug("start_ls_ack_tx_timer: interface %s", iface->name);
 	timerclear(&tv);
 	tv.tv_sec = iface->rxmt_interval / 2;
+
 	return (evtimer_add(&iface->lsack_tx_timer, &tv));
 }
 
@@ -295,7 +283,6 @@ start_ls_ack_tx_timer_now(struct iface *iface)
 {
 	struct timeval tv;
 
-	log_debug("start_ls_ack_tx_timer_now: interface %s", iface->name);
 	timerclear(&tv);
 
 	return (evtimer_add(&iface->lsack_tx_timer, &tv));
@@ -304,7 +291,5 @@ start_ls_ack_tx_timer_now(struct iface *iface)
 int
 stop_ls_ack_tx_timer(struct iface *iface)
 {
-	log_debug("stop_ls_ack_tx_timer: interface %s", iface->name);
-
 	return (evtimer_del(&iface->lsack_tx_timer));
 }

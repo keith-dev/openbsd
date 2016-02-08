@@ -1,5 +1,5 @@
 vers(__file__,
-	{-$OpenBSD: MAKEDEV.md,v 1.25 2005/03/01 18:22:32 miod Exp $-},
+	{-$OpenBSD: MAKEDEV.md,v 1.29 2005/08/01 22:22:13 deraadt Exp $-},
 etc.MACHINE)dnl
 dnl
 dnl Copyright (c) 2001-2004 Todd T. Fries <todd@OpenBSD.org>
@@ -46,6 +46,7 @@ _mkdev(s64_czs, cua[a-z], {-u=${i#cua*}
 	M cua$u c major_s64_czs_c Add($n, 128) 660 dialer uucp-})dnl
 __devitem(presto, presto*, Prestoserve NVRAM memory)dnl
 disk_q(presto)dnl
+__devitem(apm, apm, Power management device, tctrl)dnl
 dnl
 dnl *** MAKEDEV itself
 dnl
@@ -71,6 +72,7 @@ _DEV(st, 18, 11)
 _TITLE(term)
 _DEV(s64_czs, 12)
 _DEV(s64_tzs, 12)
+_DEV(com, 36)
 _DEV(mag, 100)
 _DEV(spif, 102)
 _TITLE(pty)
@@ -89,6 +91,7 @@ _DEV(wsmux, 81)
 _TITLE(point)
 _DEV(wsmouse, 80)
 _TITLE(spec)
+_DEV(apm, 30)
 _DEV(au, 69)
 _DEV(bpf, 105)
 _DEV(fdesc, 24)
@@ -96,7 +99,6 @@ _DEV(lkm, 112)
 _DEV(oppr)
 _DEV(pf, 59)
 _DEV(rnd, 119)
-_DEV(ses, 124)
 _DEV(ss, 121)
 _DEV(systrace, 50)
 _DEV(tun, 111)
@@ -119,7 +121,6 @@ dnl *** some sparc-specific targets
 dnl
 twrget(all, s64_tzs, tty, a, b, c, d)dnl
 twrget(all, s64_czs, cua, a, b, c, d)dnl
-target(all, ses, 0)dnl
 target(all, ch, 0)dnl
 target(all, ss, 0, 1)dnl
 target(all, xfs, 0)dnl

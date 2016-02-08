@@ -1,5 +1,5 @@
 # ex:ts=8 sw=4:
-# $OpenBSD: PackageLocator.pm,v 1.11 2004/08/06 08:06:01 espie Exp $
+# $OpenBSD: PackageLocator.pm,v 1.20 2005/08/22 11:30:30 espie Exp $
 #
 # Copyright (c) 2003-2004 Marc Espie <espie@openbsd.org>
 #
@@ -61,13 +61,9 @@ sub close
 	$object->_close();
 }
 
-
-# open method that tracks opened files per-host.
-sub open
+sub make_room
 {
-	my ($self, $object) = @_;
-
-	return undef unless $self->may_exist($object->{name});
+	my $self = shift;
 
 	# kill old files if too many
 	my $already = $self->opened();
@@ -81,6 +77,18 @@ sub open
 			$self->close($o);
 		}
 	}
+	return $already;
+}
+
+# open method that tracks opened files per-host.
+sub open
+{
+	my ($self, $object) = @_;
+
+	return undef unless $self->may_exist($object->{name});
+
+	# kill old files if too many
+	my $already = $self->make_room();
 
 	my $p = $self->pipename($object->{name});
 	
@@ -121,7 +129,7 @@ sub list
 	my ($self) = @_;
 	my $host = $self->{host};
 	my $path = $self->{path};
-	return _list("ssh $host ls -l $path");
+	return $self->_list("ssh $host ls -l $path");
 }
 
 package OpenBSD::PackageLocation::Local;
@@ -232,10 +240,11 @@ our @ISA=qw(OpenBSD::PackageLocation::HTTPorFTP OpenBSD::PackageLocation);
 sub list
 {
 	my ($self) = @_;
+	$self->make_room();
 	my $fullname = $self->{location};
 	my @l =();
 	local $_;
-	open(my $fh, '-|', "echo ls|ftp -o - $fullname 2>/dev/null") or return undef;
+	open(my $fh, '-|', "ftp -o - $fullname 2>/dev/null") or return undef;
 	# XXX assumes a pkg HREF won't cross a line. Is this the case ?
 	while(<$fh>) {
 		chomp;
@@ -254,8 +263,9 @@ our @ISA=qw(OpenBSD::PackageLocation::HTTPorFTP OpenBSD::PackageLocation OpenBSD
 sub list
 {
 	my ($self) = @_;
+	$self->make_room();
 	my $fullname = $self->{location};
-	return _list("echo ls|ftp -o - $fullname 2>/dev/null");
+	return $self->_list("echo nlist|ftp -o - $fullname 2>/dev/null");
 }
 
 
@@ -288,10 +298,11 @@ sub find
 {
 	my $class = shift;
 	local $_ = shift;
+	my $arch = shift;
 
 	if ($_ eq '-') {
 		my $location = OpenBSD::PackageLocation::Local::Pipe->_new('./');
-		my $package = $class->openAbsolute($location, '');
+		my $package = $class->openAbsolute($location, '', $arch);
 		return $package;
 	}
 	$_.=".tgz" unless m/\.tgz$/;
@@ -304,13 +315,13 @@ sub find
 
 		my ($pkgname, $path) = fileparse($_);
 		my $location = OpenBSD::PackageLocation->new($path);
-		$package = $class->openAbsolute($location, $pkgname);
+		$package = $class->openAbsolute($location, $pkgname, $arch);
 		if (defined $package) {
 			push(@pkgpath, $location);
 		}
 	} else {
 		for my $p (@pkgpath) {
-			$package = $class->openAbsolute($p, $_);
+			$package = $class->openAbsolute($p, $_, $arch);
 			last if defined $package;
 		}
 	}
@@ -323,6 +334,15 @@ sub available
 	my @l = ();
 	foreach my $loc (@pkgpath) {
 		push(@l, $loc->simplelist());
+	}
+	return @l;
+}
+
+sub distant_available
+{
+	my @l = ();
+	foreach my $loc (@pkgpath) {
+		push(@l, $loc->list());
 	}
 	return @l;
 }
@@ -362,9 +382,10 @@ sub _open
 
 sub openAbsolute
 {
-	my ($class, $location, $name) = @_;
+	my ($class, $location, $name, $arch) = @_;
 	my $self = { location => $location, name => $name};
 	bless $self, $class;
+
 
 	if (!$self->_open()) {
 		return undef;
@@ -373,10 +394,16 @@ sub openAbsolute
 	$self->{dir} = $dir;
 
 	# check that Open worked
+OKAY:
 	while (my $e = $self->next()) {
 		if ($e->isFile() && is_info_name($e->{name})) {
 			$e->{name}=$dir.$e->{name};
-			eval { $e->create(); }
+			eval { $e->create(); };
+			if ($@) {
+				unlink($e->{name});
+				$@ =~ s/\s+at.*//;
+				print STDERR $@;
+			}
 		} else {
 			$self->unput();
 			last;
@@ -386,7 +413,30 @@ sub openAbsolute
 #		$self->close();
 		return $self;
 	} else {
+		# maybe it's a fat package.
+		while (my $e = $self->next()) {
+			unless ($e->{name} =~ m/\/\+CONTENTS$/) {
+				last;
+			}
+			my $prefix = $`;
+			$e->{name}=$dir.CONTENTS;
+			eval { $e->create(); };
+			require OpenBSD::PackingList;
+			my $pkgname = $name;
+			$pkgname =~ s/\.tgz$//;
+			my $plist = OpenBSD::PackingList->fromfile($dir.CONTENTS, \&OpenBSD::PackingList::FatOnly);
+			next if $pkgname ne '-' and $plist->pkgname() ne $pkgname;
+			if ($plist->has('arch')) {
+				if ($plist->{arch}->check($arch)) {
+					$self->{filter} = $prefix;
+					goto OKAY;
+				}
+			}
+		}
 		$self->close();
+
+		require File::Path;
+		File::Path::rmtree($dir);
 		return undef;
 	}
 }
@@ -417,7 +467,20 @@ sub next
 		}
 	}
 	if (!$self->{_unput}) {
-		$self->{_current} = $self->{_archive}->next();
+		my $e = $self->{_archive}->next();
+		if (defined $self->{filter}) {
+			if ($e->{name} =~ m/^(.*?)\/(.*)$/) {
+				my ($beg, $name) = ($1, $2);
+				if (index($beg, $self->{filter}) == -1) {
+					return $self->next();
+				}
+				$e->{name} = $name;
+				if ($e->isHardLink()) {
+					$e->{linkname} =~ s/^(.*?)\///;
+				}
+			}
+		}
+		$self->{_current} = $e;
 	}
 	$self->{_unput} = 0;
 	return $self->{_current};

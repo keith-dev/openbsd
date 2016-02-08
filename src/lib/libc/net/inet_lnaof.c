@@ -1,3 +1,4 @@
+/*	$OpenBSD: inet_lnaof.c,v 1.6 2005/08/06 20:30:03 espie Exp $ */
 /*
  * Copyright (c) 1983, 1993
  *	The Regents of the University of California.  All rights reserved.
@@ -27,10 +28,6 @@
  * SUCH DAMAGE.
  */
 
-#if defined(LIBC_SCCS) && !defined(lint)
-static char rcsid[] = "$OpenBSD: inet_lnaof.c,v 1.4 2003/06/02 20:18:35 millert Exp $";
-#endif /* LIBC_SCCS and not lint */
-
 #include <sys/param.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
@@ -41,10 +38,9 @@ static char rcsid[] = "$OpenBSD: inet_lnaof.c,v 1.4 2003/06/02 20:18:35 millert 
  * number formats.
  */
 in_addr_t
-inet_lnaof(in)
-	struct in_addr in;
+inet_lnaof(struct in_addr in)
 {
-	register in_addr_t i = ntohl(in.s_addr);
+	in_addr_t i = ntohl(in.s_addr);
 
 	if (IN_CLASSA(i))
 		return ((i)&IN_CLASSA_HOST);

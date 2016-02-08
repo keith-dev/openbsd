@@ -1,4 +1,4 @@
-#	$OpenBSD: Makefile,v 1.4 2003/11/01 00:50:44 mickey Exp $
+#	$OpenBSD: Makefile,v 1.6 2005/07/13 14:53:54 otto Exp $
 
 SUBDIR+= rint floor toint trivial1
 

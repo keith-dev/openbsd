@@ -1,4 +1,6 @@
-/*	$OpenBSD: search.c,v 1.11 2004/07/22 01:25:25 vincent Exp $	*/
+/*	$OpenBSD: search.c,v 1.22 2005/08/09 00:53:48 kjell Exp $	*/
+
+/* This file is in the public domain. */
 
 /*
  *		Search commands.
@@ -10,6 +12,7 @@
  */
 
 #include "def.h"
+#include <ctype.h>
 
 #ifndef NO_MACRO
 #include "macro.h"
@@ -37,7 +40,7 @@ static void	is_undo(int *, int *);
 static int	is_find(int);
 static void	is_prompt(int, int, int);
 static void	is_dspl(char *, int);
-static int	eq(int, int);
+static int	eq(int, int, int);
 
 static SRCHCOM	cmds[NSRCH];
 static int	cip;
@@ -57,13 +60,13 @@ forwsearch(int f, int n)
 	int	s;
 
 	if ((s = readpattern("Search")) != TRUE)
-		return s;
+		return (s);
 	if (forwsrch() == FALSE) {
 		ewprintf("Search failed: \"%s\"", pat);
-		return FALSE;
+		return (FALSE);
 	}
 	srch_lastdir = SRCH_FORW;
-	return TRUE;
+	return (TRUE);
 }
 
 /*
@@ -82,10 +85,10 @@ backsearch(int f, int n)
 		return (s);
 	if (backsrch() == FALSE) {
 		ewprintf("Search failed: \"%s\"", pat);
-		return FALSE;
+		return (FALSE);
 	}
 	srch_lastdir = SRCH_BACK;
-	return TRUE;
+	return (TRUE);
 }
 
 /*
@@ -100,19 +103,19 @@ searchagain(int f, int n)
 	if (srch_lastdir == SRCH_FORW) {
 		if (forwsrch() == FALSE) {
 			ewprintf("Search failed: \"%s\"", pat);
-			return FALSE;
+			return (FALSE);
 		}
-		return TRUE;
+		return (TRUE);
 	}
 	if (srch_lastdir == SRCH_BACK) {
 		if (backsrch() == FALSE) {
 			ewprintf("Search failed: \"%s\"", pat);
-			return FALSE;
+			return (FALSE);
 		}
-		return TRUE;
+		return (TRUE);
 	}
 	ewprintf("No last search");
-	return FALSE;
+	return (FALSE);
 }
 
 /*
@@ -123,7 +126,7 @@ searchagain(int f, int n)
 int
 forwisearch(int f, int n)
 {
-	return isearch(SRCH_FORW);
+	return (isearch(SRCH_FORW));
 }
 
 /*
@@ -134,7 +137,7 @@ forwisearch(int f, int n)
 int
 backisearch(int f, int n)
 {
-	return isearch(SRCH_BACK);
+	return (isearch(SRCH_BACK));
 }
 
 /*
@@ -157,19 +160,21 @@ isearch(int dir)
 	int	 cbo;
 	int	 success;
 	int	 pptr;
-
+	int	 firstc;
+	int	 xcase;
+	int	 i;
 	char	 opat[NPAT];
 
 #ifndef NO_MACRO
 	if (macrodef) {
 		ewprintf("Can't isearch in macro");
-		return FALSE;
+		return (FALSE);
 	}
 #endif /* !NO_MACRO */
 	for (cip = 0; cip < NSRCH; cip++)
 		cmds[cip].s_code = SRCH_NOPR;
 
-	(void)strlcpy(opat, pat, sizeof opat);
+	(void)strlcpy(opat, pat, sizeof(opat));
 	cip = 0;
 	pptr = -1;
 	clp = curwp->w_dotp;
@@ -210,8 +215,8 @@ isearch(int dir)
 			curwp->w_flag |= WFMOVE;
 			srch_lastdir = dir;
 			(void)ctrlg(FFRAND, 0);
-			(void)strlcpy(pat, opat, sizeof pat);
-			return ABORT;
+			(void)strlcpy(pat, opat, sizeof(pat));
+			return (ABORT);
 		case CCHR(']'):
 		case CCHR('S'):
 			if (dir == SRCH_BACK) {
@@ -220,8 +225,18 @@ isearch(int dir)
 				is_cpush(SRCH_FORW);
 				success = TRUE;
 			}
-			if (success == FALSE && dir == SRCH_FORW)
+			if (success == FALSE && dir == SRCH_FORW) {
+				/* wrap the search to beginning */
+				clp = lforw(curbp->b_linep);
+				curwp->w_dotp = clp;
+				curwp->w_doto = 0;
+				if (is_find(dir) != FALSE) {
+					is_cpush(SRCH_MARK);
+					success = TRUE;
+				}
 				break;
+			}
+
 			is_lpush();
 			pptr = strlen(pat);
 			(void)forwchar(FFRAND, 1);
@@ -241,8 +256,18 @@ isearch(int dir)
 				is_cpush(SRCH_BACK);
 				success = TRUE;
 			}
-			if (success == FALSE && dir == SRCH_BACK)
+			if (success == FALSE && dir == SRCH_BACK) {
+				/* wrap the search to end */
+				clp = lback(curbp->b_linep);
+				curwp->w_dotp = clp;
+				curwp->w_doto =
+				    llength(curwp->w_dotp);
+				if (is_find(dir) != FALSE) {
+					is_cpush(SRCH_MARK);
+					success = TRUE;
+				}
 				break;
+			}
 			is_lpush();
 			pptr = strlen(pat);
 			(void)backchar(FFRAND, 1);
@@ -252,6 +277,42 @@ isearch(int dir)
 				(void)forwchar(FFRAND, 1);
 				ttbeep();
 				success = FALSE;
+			}
+			is_prompt(dir, pptr < 0, success);
+			break;
+		case CCHR('W'):
+			/* add the rest of the current word to the pattern */
+			clp = curwp->w_dotp;
+			cbo = curwp->w_doto;
+			firstc = 1;
+			if (dir == SRCH_BACK) {
+				/* when isearching backwards, cbo is the start of the pattern */
+				cbo += pptr;
+			}
+
+			/* if the search is case insensitive, add to pattern using lowercase */
+			xcase = 0;
+			for (i = 0; pat[i]; i++)
+				if (ISUPPER(CHARMASK(pat[i])))
+					xcase = 1;
+
+			while (cbo < llength(clp)) {
+				c = lgetc(clp, cbo++);
+				if ((!firstc && !isalnum(c)) || pptr == NPAT)
+					break;
+
+				firstc = 0;
+				if (!xcase && ISUPPER(c))
+					c = TOLOWER(c);
+
+				pat[pptr++] = c;
+				pat[pptr] = '\0';
+				/* cursor only moves when isearching forwards */
+				if (dir == SRCH_FORW) {
+					curwp->w_doto = cbo;
+					curwp->w_flag |= WFMOVE;
+					update();
+				}
 			}
 			is_prompt(dir, pptr < 0, success);
 			break;
@@ -276,7 +337,7 @@ isearch(int dir)
 				curwp->w_marko = cbo;
 				ewprintf("Mark set");
 				curwp->w_flag |= WFMOVE;
-				return TRUE;
+				return (TRUE);
 			}	/* and continue */
 		case CCHR('I'):
 		case CCHR('J'):
@@ -288,7 +349,7 @@ isearch(int dir)
 			pat[pptr++] = c;
 			if (pptr == NPAT) {
 				ewprintf("Pattern too long");
-				return FALSE;
+				return (FALSE);
 			}
 			pat[pptr] = '\0';
 			is_lpush();
@@ -345,7 +406,7 @@ is_pop(void)
 static int
 is_peek(void)
 {
-	return cmds[cip].s_code;
+	return (cmds[cip].s_code);
 }
 
 /* this used to always return TRUE (the return value was checked) */
@@ -396,23 +457,23 @@ is_find(int dir)
 			if (forwsrch() == FALSE) {
 				curwp->w_doto = odoto;
 				curwp->w_dotp = odotp;
-				return FALSE;
+				return (FALSE);
 			}
-			return TRUE;
+			return (TRUE);
 		}
 		if (dir == SRCH_BACK) {
 			(void)forwchar(FFARG | FFRAND, plen);
 			if (backsrch() == FALSE) {
 				curwp->w_doto = odoto;
 				curwp->w_dotp = odotp;
-				return FALSE;
+				return (FALSE);
 			}
-			return TRUE;
+			return (TRUE);
 		}
 		ewprintf("bad call to is_find");
-		return FALSE;
+		return (FALSE);
 	}
-	return FALSE;
+	return (FALSE);
 }
 
 /*
@@ -467,14 +528,15 @@ queryrepl(int f, int n)
 #ifndef NO_MACRO
 	if (macrodef) {
 		ewprintf("Can't query replace in macro");
-		return FALSE;
+		return (FALSE);
 	}
 #endif /* !NO_MACRO */
 
 	if ((s = readpattern("Query replace")) != TRUE)
 		return (s);
-	if ((rep = ereply("Query replace %s with: ", news, NPAT, pat)) == NULL)
-		return ABORT;
+	if ((rep = eread("Query replace %s with: ", news, NPAT,
+	    EFNUL | EFNEW | EFCR, pat)) == NULL)
+		return (ABORT);
 	else if (rep[0] == '\0')
 		news[0] = '\0';
 	ewprintf("Query replacing %s with %s:", pat, news);
@@ -529,7 +591,46 @@ stopsearch:
 		ewprintf("(1 replacement done)");
 	else
 		ewprintf("(%d replacements done)", rcnt);
-	return TRUE;
+	return (TRUE);
+}
+
+/*
+ * Replace string globally without individual prompting.
+ */
+/* ARGSUSED */
+int
+replstr(int f, int n)
+{
+	char	news[NPAT];
+	int	s, plen, rcnt = 0;
+	char	*r;
+
+	if ((s = readpattern("Replace string")) != TRUE)
+		return s;
+
+	r = eread("Replace string %s with: ", news, NPAT,
+	    EFNUL | EFNEW | EFCR,  pat);
+	if (r == NULL)
+		 return (ABORT);
+
+	plen = strlen(pat);
+	while (forwsrch() == TRUE) {
+		update();
+		if (lreplace((RSIZE)plen, news, f) == FALSE)
+			return (FALSE);
+
+		rcnt++;
+	}
+
+	curwp->w_flag |= WFHARD;
+	update();
+
+	if (rcnt == 1)
+		ewprintf("(1 replacement done)");
+	else
+		ewprintf("(%d replacements done)", rcnt);
+
+	return (TRUE);
 }
 
 /*
@@ -542,11 +643,14 @@ int
 forwsrch(void)
 {
 	LINE	*clp, *tlp;
-	int	 cbo, tbo, c;
+	int	 cbo, tbo, c, i, xcase = 0;
 	char	*pp;
 
 	clp = curwp->w_dotp;
 	cbo = curwp->w_doto;
+	for (i = 0; pat[i]; i++)
+		if (ISUPPER(CHARMASK(pat[i])))
+			xcase = 1;
 	for (;;) {
 		if (cbo == llength(clp)) {
 			if ((clp = lforw(clp)) == curbp->b_linep)
@@ -555,7 +659,7 @@ forwsrch(void)
 			c = CCHR('J');
 		} else
 			c = lgetc(clp, cbo++);
-		if (eq(c, pat[0]) != FALSE) {
+		if (eq(c, pat[0], xcase) != FALSE) {
 			tlp = clp;
 			tbo = cbo;
 			pp = &pat[1];
@@ -568,17 +672,17 @@ forwsrch(void)
 					c = CCHR('J');
 				} else
 					c = lgetc(tlp, tbo++);
-				if (eq(c, *pp++) == FALSE)
+				if (eq(c, *pp++, xcase) == FALSE)
 					goto fail;
 			}
 			curwp->w_dotp = tlp;
 			curwp->w_doto = tbo;
 			curwp->w_flag |= WFMOVE;
-			return TRUE;
+			return (TRUE);
 		}
 fail:		;
 	}
-	return FALSE;
+	return (FALSE);
 }
 
 /*
@@ -591,24 +695,27 @@ int
 backsrch(void)
 {
 	LINE	*clp, *tlp;
-	int	 cbo, tbo, c;
+	int	 cbo, tbo, c, i, xcase = 0;
 	char	*epp, *pp;
 
 	for (epp = &pat[0]; epp[1] != 0; ++epp);
 	clp = curwp->w_dotp;
 	cbo = curwp->w_doto;
+	for (i = 0; pat[i]; i++)
+		if (ISUPPER(CHARMASK(pat[i])))
+			xcase = 1;
 	for (;;) {
 		if (cbo == 0) {
 			clp = lback(clp);
 			if (clp == curbp->b_linep)
-				return FALSE;
+				return (FALSE);
 			cbo = llength(clp) + 1;
 		}
 		if (--cbo == llength(clp))
 			c = CCHR('J');
 		else
 			c = lgetc(clp, cbo);
-		if (eq(c, *epp) != FALSE) {
+		if (eq(c, *epp, xcase) != FALSE) {
 			tlp = clp;
 			tbo = cbo;
 			pp = epp;
@@ -623,13 +730,13 @@ backsrch(void)
 					c = CCHR('J');
 				else
 					c = lgetc(tlp, tbo);
-				if (eq(c, *--pp) == FALSE)
+				if (eq(c, *--pp, xcase) == FALSE)
 					goto fail;
 			}
 			curwp->w_dotp = tlp;
 			curwp->w_doto = tbo;
 			curwp->w_flag |= WFMOVE;
-			return TRUE;
+			return (TRUE);
 		}
 fail:		;
 	}
@@ -641,17 +748,19 @@ fail:		;
  * folded out. The "pc" is from the pattern.
  */
 static int
-eq(int bc, int pc)
+eq(int bc, int pc, int xcase)
 {
 	bc = CHARMASK(bc);
 	pc = CHARMASK(pc);
 	if (bc == pc)
-		return TRUE;
+		return (TRUE);
+	if (xcase)
+		return (FALSE);
 	if (ISUPPER(bc))
-		return TOLOWER(bc) == pc;
+		return (TOLOWER(bc) == pc);
 	if (ISUPPER(pc))
-		return bc == TOLOWER(pc);
-	return FALSE;
+		return (bc == TOLOWER(pc));
+	return (FALSE);
 }
 
 /*
@@ -665,21 +774,23 @@ int
 readpattern(char *prompt)
 {
 	char	tpat[NPAT], *rep;
-	int retval;
+	int	retval;
 
-	if (tpat[0] == '\0')
-		rep = ereply("%s: ", tpat, NPAT, prompt);
+	if (pat[0] == '\0')
+		rep = eread("%s: ", tpat, NPAT, EFNEW | EFCR, prompt);
 	else
-		rep = ereply("%s: (default %s) ", tpat, NPAT, prompt, pat);
+		rep = eread("%s: (default %s) ", tpat, NPAT,
+		    EFNUL | EFNEW | EFCR, prompt, pat);
 
 	/* specified */
-	if (rep != NULL && *rep != '\0') {
-		(void) strlcpy(pat, tpat, sizeof pat);
+	if (rep == NULL) {
+		retval = ABORT;
+	} else if (rep[0] != '\0') {
+		(void)strlcpy(pat, tpat, sizeof(pat));
 		retval = TRUE;
-	} else if (*rep == '\0' && pat[0] != '\0') {
+	} else if (pat[0] != '\0') {
 		retval = TRUE;
 	} else
 		retval = FALSE;
-	return retval;
+	return (retval);
 }
-

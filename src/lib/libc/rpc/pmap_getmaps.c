@@ -1,3 +1,4 @@
+/*	$OpenBSD: pmap_getmaps.c,v 1.10 2005/08/08 08:05:35 espie Exp $ */
 /*
  * Sun RPC is a product of Sun Microsystems, Inc. and is provided for
  * unrestricted use provided that this legend is included on all tape
@@ -27,10 +28,6 @@
  * Mountain View, California  94043
  */
 
-#if defined(LIBC_SCCS) && !defined(lint)
-static char *rcsid = "$OpenBSD: pmap_getmaps.c,v 1.8 2005/01/08 19:17:39 krw Exp $";
-#endif /* LIBC_SCCS and not lint */
-
 /*
  * pmap_getmap.c
  * Client interface to pmap rpc service.
@@ -57,8 +54,7 @@ static char *rcsid = "$OpenBSD: pmap_getmaps.c,v 1.8 2005/01/08 19:17:39 krw Exp
  * Calls the pmap service remotely to do get the maps.
  */
 struct pmaplist *
-pmap_getmaps(address)
-	 struct sockaddr_in *address;
+pmap_getmaps(struct sockaddr_in *address)
 {
 	struct pmaplist *head = NULL;
 	int sock = -1;

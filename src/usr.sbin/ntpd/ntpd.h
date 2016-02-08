@@ -1,4 +1,4 @@
-/*	$OpenBSD: ntpd.h,v 1.53 2005/02/03 10:53:33 dtucker Exp $ */
+/*	$OpenBSD: ntpd.h,v 1.60 2005/08/10 13:48:36 dtucker Exp $ */
 
 /*
  * Copyright (c) 2003, 2004 Henning Brauer <henning@openbsd.org>
@@ -33,7 +33,7 @@
 #define	NTPD_USER	"_ntp"
 #define	CONFFILE	"/etc/ntpd.conf"
 
-#define	READ_BUF_SIZE		65535
+#define	READ_BUF_SIZE		4096
 
 #define	NTPD_OPT_VERBOSE	0x0001
 #define	NTPD_OPT_VERBOSE2	0x0002
@@ -55,10 +55,14 @@
 #define	QUERYTIME_MAX		15	/* single query might take n secs max */
 #define	OFFSET_ARRAY_SIZE	8
 #define	SETTIME_MIN_OFFSET	180	/* min offset for settime at start */
+#define	SETTIME_TIMEOUT		15	/* max seconds to wait with -s */
 #define	LOG_NEGLIGEE		128	/* negligible drift to not log (ms) */
 
 enum client_state {
 	STATE_NONE,
+	STATE_DNS_INPROGRESS,
+	STATE_DNS_TEMPFAIL,
+	STATE_DNS_DONE,
 	STATE_QUERY_SENT,
 	STATE_REPLY_RECEIVED
 };
@@ -85,6 +89,8 @@ struct ntp_status {
 	double		rootdispersion;
 	double		reftime;
 	u_int32_t	refid;
+	u_int32_t	refid4;
+	u_int8_t	synced;
 	u_int8_t	leap;
 	int8_t		precision;
 	u_int8_t	poll;
@@ -127,7 +133,7 @@ struct ntpd_conf {
 };
 
 struct buf {
-	TAILQ_ENTRY(buf)	 entries;
+	TAILQ_ENTRY(buf)	 entry;
 	u_char			*buf;
 	size_t			 size;
 	size_t			 wpos;
@@ -135,13 +141,13 @@ struct buf {
 };
 
 struct msgbuf {
-	TAILQ_HEAD(bufs, buf)	 bufs;
+	TAILQ_HEAD(, buf)	 bufs;
 	u_int32_t		 queued;
 	int			 fd;
 };
 
 struct buf_read {
-	ssize_t			 wpos;
+	size_t			 wpos;
 	u_char			 buf[READ_BUF_SIZE];
 	u_char			*rptr;
 };

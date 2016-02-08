@@ -1,4 +1,4 @@
-/* $OpenBSD: ike_phase_1.c,v 1.58 2005/01/29 17:07:55 hshoexer Exp $	 */
+/* $OpenBSD: ike_phase_1.c,v 1.65 2005/07/05 11:59:51 hshoexer Exp $	 */
 /* $EOM: ike_phase_1.c,v 1.31 2000/12/11 23:47:56 niklas Exp $	 */
 
 /*
@@ -37,17 +37,13 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "sysdep.h"
-
 #include "attribute.h"
 #include "conf.h"
 #include "constants.h"
 #include "crypto.h"
 #include "dh.h"
 #include "doi.h"
-#ifdef USE_DPD
 #include "dpd.h"
-#endif
 #include "exchange.h"
 #include "hash.h"
 #include "ike_auth.h"
@@ -58,9 +54,7 @@
 #include "log.h"
 #include "math_group.h"
 #include "message.h"
-#if defined (USE_NAT_TRAVERSAL)
 #include "nat_traversal.h"
-#endif
 #include "prf.h"
 #include "sa.h"
 #include "transport.h"
@@ -357,24 +351,20 @@ ike_phase_1_initiator_send_SA(struct message *msg)
 	memcpy(ie->sa_i_b + sa_len - ISAKMP_GEN_SZ,
 	    payload_first(msg, ISAKMP_PAYLOAD_PROPOSAL)->p, proposal_len);
 	transforms_len = 0;
-	for (i = 0, p = payload_first(msg, ISAKMP_PAYLOAD_TRANSFORM);
+	for (i = 0, p = TAILQ_FIRST(&msg->payload[ISAKMP_PAYLOAD_TRANSFORM]);
 	    i < conf->cnt; i++, p = TAILQ_NEXT(p, link)) {
 		memcpy(ie->sa_i_b + sa_len + proposal_len + transforms_len -
 		    ISAKMP_GEN_SZ, p->p, transform_len[i]);
 		transforms_len += transform_len[i];
 	}
 
-#if defined (USE_NAT_TRAVERSAL)
 	/* Advertise NAT-T capability.  */
 	if (nat_t_add_vendor_payloads(msg))
 		goto bail_out;
-#endif
 
-#if defined (USE_DPD)
 	/* Advertise DPD capability.  */
 	if (dpd_add_vendor_payload(msg))
 		goto bail_out;
-#endif
 
 	conf_free_list(conf);
 	free(transform);
@@ -528,17 +518,13 @@ ike_phase_1_responder_send_SA(struct message *msg)
 	if (message_add_sa_payload(msg))
 		return -1;
 
-#if defined (USE_NAT_TRAVERSAL)
 	/* Advertise NAT-T capability.  */
 	if (nat_t_add_vendor_payloads(msg))
 		return -1;
-#endif
 
-#if defined (USE_DPD)
 	/* Advertise DPD capability.  */
 	if (dpd_add_vendor_payload(msg))
 		return -1;
-#endif
 	return 0;
 }
 
@@ -561,14 +547,12 @@ ike_phase_1_send_KE_NONCE(struct message *msg, size_t nonce_sz)
 		/* XXX Log? */
 		return -1;
 	}
-#if defined (USE_NAT_TRAVERSAL)
 	/* If this exchange uses NAT-Traversal, add NAT-D payloads now.  */
 	if (msg->exchange->flags & EXCHANGE_FLAG_NAT_T_CAP_PEER)
 		if (nat_t_exchange_add_nat_d(msg)) {
 			/* XXX Log? */
 			return -1;
 		}
-#endif
 	return 0;
 }
 
@@ -591,12 +575,10 @@ ike_phase_1_recv_KE_NONCE(struct message *msg)
 		/* XXX How to log and notify peer?  */
 		return -1;
 	}
-#if defined (USE_NAT_TRAVERSAL)
 	/* MainMode: Check for NAT-D payloads and contents.  */
 	if (msg->exchange->type == ISAKMP_EXCH_ID_PROT &&
 	    msg->exchange->flags & EXCHANGE_FLAG_NAT_T_CAP_PEER)
 		(void)nat_t_exchange_check_nat_d(msg);
-#endif
 	return 0;
 }
 
@@ -734,7 +716,7 @@ ike_phase_1_post_exchange_KE_NONCE(struct message *msg)
 		prf->Final(key, prf->prfctx);
 
 		for (len = prf->blocksize, p = key; len < exchange->key_length;
-		     len += prf->blocksize, p += prf->blocksize) {
+		    len += prf->blocksize, p += prf->blocksize) {
 			prf->Init(prf->prfctx);
 			prf->Update(prf->prfctx, p, prf->blocksize);
 			prf->Final(p + prf->blocksize, prf->prfctx);
@@ -843,9 +825,20 @@ ike_phase_1_send_ID(struct message *msg)
 		switch (id_type) {
 		case IPSEC_ID_IPV4_ADDR:
 		case IPSEC_ID_IPV6_ADDR:
-			/* Already in network byteorder.  */
+			data = conf_get_str(my_id, "Address");
+			if (!data) {
+				log_print("ike_phase_1_send_ID: section %s "
+				    "has no \"Address\" tag", my_id);
+				return -1;
+			}
+			if (text2sockaddr(data, NULL, &src, af, 0)) {
+				log_error("ike_phase_1_send_ID: "
+				    "text2sockaddr() failed");
+				return -1;
+			}
 			memcpy(buf + ISAKMP_ID_DATA_OFF,
 			    sockaddr_addrdata(src), sockaddr_addrlen(src));
+			free(src);
 			break;
 
 		case IPSEC_ID_IPV4_ADDR_SUBNET:
@@ -1199,7 +1192,7 @@ ike_phase_1_validate_prop(struct exchange *exchange, struct sa *sa,
 					 * we have, they do not provide?
 					 */
 					for (node = LIST_FIRST(&vs.attrs);
-					     node; node = next_node) {
+					    node; node = next_node) {
 						next_node =
 						    LIST_NEXT(node, link);
 						if (node->type ==
@@ -1347,7 +1340,7 @@ attribute_unacceptable(u_int16_t type, u_int8_t *value, u_int16_t len,
 
 				/*
 				 * If this is the type we are looking at,
-				 * to save a pointer this section in vs->life.
+				 * save a pointer to this section in vs->life.
 				 */
 				if (constant_value(ike_duration_cst, str) ==
 				    decode_16(value)) {

@@ -1,4 +1,4 @@
-/* $OpenBSD: monitor.h,v 1.12 2004/11/08 12:34:00 hshoexer Exp $	 */
+/* $OpenBSD: monitor.h,v 1.17 2005/05/28 18:52:12 hshoexer Exp $	 */
 
 /*
  * Copyright (c) 2003 Håkan Olsson.  All rights reserved.
@@ -27,12 +27,8 @@
 #ifndef _MONITOR_H_
 #define _MONITOR_H_
 
-#if defined (USE_PRIVSEP)
 #include <sys/types.h>
 #include <sys/stat.h>
-
-#include <dirent.h>
-#include <stdio.h>
 
 #define ISAKMPD_PRIVSEP_USER "_isakmpd"
 
@@ -42,23 +38,12 @@ enum monitor_reqtypes {
 	MONITOR_UI_INIT,
 	MONITOR_PFKEY_OPEN,
 	MONITOR_GET_FD,
-	MONITOR_GET_SOCKET,
 	MONITOR_SETSOCKOPT,
 	MONITOR_BIND,
+	MONITOR_REQ_READDIR,
 	MONITOR_MKFIFO,
 	MONITOR_INIT_DONE,
 	MONITOR_SHUTDOWN
-};
-
-enum priv_state {
-	STATE_INIT,		/* just started */
-	STATE_RUNNING,		/* running */
-	STATE_QUIT		/* shutting down */
-};
-
-struct monitor_dirents {
-	int             current;
-	struct dirent **dirents;
 };
 
 pid_t           monitor_init(int);
@@ -72,29 +57,12 @@ int             monitor_open(const char *, int, mode_t);
 int             monitor_stat(const char *, struct stat *);
 int             monitor_setsockopt(int, int, int, const void *, socklen_t);
 int             monitor_bind(int, const struct sockaddr *, socklen_t);
-struct monitor_dirents *monitor_opendir(const char *);
-struct dirent  *monitor_readdir(struct monitor_dirents *);
-void            monitor_closedir(struct monitor_dirents *);
+int		monitor_req_readdir(const char *);
+int		monitor_readdir(char *, size_t);
 void            monitor_init_done(void);
 
 void		monitor_ui_init(void);
 int		monitor_pf_key_v2_open(void);
 void		monitor_exit(int);
 
-#else				/* !USE_PRIVSEP */
-
-#define monitor_fopen	fopen
-#define monitor_open	open
-#define monitor_stat	stat
-#define monitor_setsockopt setsockopt
-#define monitor_bind	bind
-#define monitor_opendir	opendir
-#define monitor_readdir	readdir
-#define monitor_closedir closedir
-
-#define monitor_ui_init	ui_init
-#define monitor_pf_key_v2_open pf_key_v2_open
-#define monitor_exit	exit
-
-#endif				/* USE_PRIVSEP */
 #endif				/* _MONITOR_H_ */

@@ -1,3 +1,4 @@
+/*	$OpenBSD: svc_auth_unix.c,v 1.9 2005/08/08 08:05:35 espie Exp $ */
 /*
  * Sun RPC is a product of Sun Microsystems, Inc. and is provided for
  * unrestricted use provided that this legend is included on all tape
@@ -27,10 +28,6 @@
  * Mountain View, California  94043
  */
 
-#if defined(LIBC_SCCS) && !defined(lint)
-static char *rcsid = "$OpenBSD: svc_auth_unix.c,v 1.7 2001/09/15 13:51:01 deraadt Exp $";
-#endif /* LIBC_SCCS and not lint */
-
 /*
  * svc_auth_unix.c
  * Handles UNIX flavor authentication parameters on the service side of rpc.
@@ -50,9 +47,7 @@ static char *rcsid = "$OpenBSD: svc_auth_unix.c,v 1.7 2001/09/15 13:51:01 deraad
  * Unix longhand authenticator
  */
 enum auth_stat
-_svcauth_unix(rqst, msg)
-	struct svc_req *rqst;
-	struct rpc_msg *msg;
+_svcauth_unix(struct svc_req *rqst, struct rpc_msg *msg)
 {
 	enum auth_stat stat;
 	XDR xdrs;
@@ -127,9 +122,7 @@ done:
  */
 /*ARGSUSED*/
 enum auth_stat 
-_svcauth_short(rqst, msg)
-	struct svc_req *rqst;
-	struct rpc_msg *msg;
+_svcauth_short(struct svc_req *rqst, struct rpc_msg *msg)
 {
 	return (AUTH_REJECTEDCRED);
 }

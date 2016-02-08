@@ -1,3 +1,4 @@
+/*	$OpenBSD: getttyent.c,v 1.9 2005/08/08 08:05:34 espie Exp $ */
 /*
  * Copyright (c) 1989, 1993
  *	The Regents of the University of California.  All rights reserved.
@@ -27,10 +28,6 @@
  * SUCH DAMAGE.
  */
 
-#if defined(LIBC_SCCS) && !defined(lint)
-static char rcsid[] = "$OpenBSD: getttyent.c,v 1.7 2004/05/18 02:05:52 jfb Exp $";
-#endif /* LIBC_SCCS and not lint */
-
 #include <ttyent.h>
 #include <stdio.h>
 #include <ctype.h>
@@ -45,7 +42,7 @@ static char *value(char *);
 struct ttyent *
 getttynam(const char *tty)
 {
-	register struct ttyent *t;
+	struct ttyent *t;
 
 	setttyent();
 	while ((t = getttyent()))
@@ -59,8 +56,8 @@ struct ttyent *
 getttyent(void)
 {
 	static struct ttyent tty;
-	register int c;
-	register char *p;
+	int c;
+	char *p;
 #define	MAXLINELENGTH	200
 	static char line[MAXLINELENGTH];
 
@@ -139,8 +136,8 @@ getttyent(void)
 static char *
 skip(char *p)
 {
-	register char *t;
-	register int c, q;
+	char *t;
+	int c, q;
 
 	for (q = 0, t = p; (c = *p) != '\0'; p++) {
 		if (c == '"') {

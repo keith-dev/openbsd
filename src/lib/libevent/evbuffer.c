@@ -1,4 +1,4 @@
-/*	$OpenBSD: evbuffer.c,v 1.1 2004/04/28 06:53:12 brad Exp $	*/
+/*	$OpenBSD: evbuffer.c,v 1.6 2005/07/02 07:15:13 grunk Exp $	*/
 
 /*
  * Copyright (c) 2002-2004 Niels Provos <provos@citi.umich.edu>
@@ -37,7 +37,6 @@
 #include <sys/time.h>
 #endif
 
-#include <err.h>
 #include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -47,6 +46,11 @@
 #endif
 
 #include "event.h"
+
+/* prototypes */
+
+void bufferevent_setwatermark(struct bufferevent *, short, size_t, size_t);
+void bufferevent_read_pressure_cb(struct evbuffer *, size_t, size_t, void *);
 
 static int
 bufferevent_add(struct event *ev, int timeout)
@@ -62,7 +66,7 @@ bufferevent_add(struct event *ev, int timeout)
 	return (event_add(ev, ptv));
 }
 
-/* 
+/*
  * This callback is executed when the size of the input buffer changes.
  * We use it to apply back pressure on the reading side.
  */
@@ -71,7 +75,7 @@ void
 bufferevent_read_pressure_cb(struct evbuffer *buf, size_t old, size_t now,
     void *arg) {
 	struct bufferevent *bufev = arg;
-	/* 
+	/*
 	 * If we are below the watermak then reschedule reading if it's
 	 * still enabled.
 	 */
@@ -152,7 +156,9 @@ bufferevent_writecb(int fd, short event, void *arg)
 	if (EVBUFFER_LENGTH(bufev->output)) {
 	    res = evbuffer_write(bufev->output, fd);
 	    if (res == -1) {
-		    if (errno == EAGAIN || errno == EINTR)
+		    if (errno == EAGAIN ||
+			errno == EINTR ||
+			errno == EINPROGRESS)
 			    goto reschedule;
 		    /* error case */
 		    what |= EVBUFFER_ERROR;
@@ -226,6 +232,19 @@ bufferevent_new(int fd, evbuffercb readcb, evbuffercb writecb,
 
 	return (bufev);
 }
+
+int
+bufferevent_priority_set(struct bufferevent *bufev, int priority)
+{
+	if (event_priority_set(&bufev->ev_read, priority) == -1)
+		return (-1);
+	if (event_priority_set(&bufev->ev_write, priority) == -1)
+		return (-1);
+
+	return (0);
+}
+
+/* Closing the file descriptor is the responsibility of the caller */
 
 void
 bufferevent_free(struct bufferevent *bufev)

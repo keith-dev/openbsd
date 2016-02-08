@@ -1,10 +1,11 @@
-# $OpenBSD: Makefile,v 1.37 2005/02/07 20:34:54 beck Exp $
+# $OpenBSD: Makefile,v 1.43 2005/05/10 14:03:22 markus Exp $
 
 LIB=	crypto
 
 SSLEAYDIST=	src
 SSL_SRC=	${.CURDIR}/../${SSLEAYDIST}
 LCRYPTO_SRC=	${SSL_SRC}/crypto
+FIPS_SRC=	${SSL_SRC}/fips
 
 .if ${MACHINE_ARCH} == "i386" || ${MACHINE_ARCH} == "arm" || \
     ${MACHINE_ARCH} == "vax" || ${MACHINE_ARCH} == "amd64" || \
@@ -14,8 +15,13 @@ CFLAGS+= -DL_ENDIAN
 CFLAGS+= -DB_ENDIAN
 .endif 
 
+.include <bsd.own.mk>		# for 'NOPIC' definition
+.if !defined(NOPIC)
+CFLAGS+= -DDSO_DLFCN -DHAVE_DLFCN_H
+.endif
+
 CFLAGS+= -DOPENSSL_NO_IDEA -DTERMIOS -DANSI_SOURCE -DNO_ERR -DOPENSSL_NO_ASM
-CFLAGS+= -DOPENSSL_NO_RC5 -DOPENSSL_NO_KRB5 -DSO_DLFCN -DHAVE_DLFCN_H 
+CFLAGS+= -DOPENSSL_NO_RC5 -DOPENSSL_NO_KRB5
 CFLAGS+= -DOPENSSL_NO_MDC2
 CFLAGS+= -DNO_WINDOWS_BRAINDEATH
 CFLAGS+= -DOPENSSL_NO_HW_CSWIFT -DOPENSSL_NO_HW_NCIPHER -DOPENSSL_NO_HW_ATALLA
@@ -33,7 +39,7 @@ SRCS+=	sha_dgst.c sha1dgst.c sha_one.c sha1_one.c
 SRCS+=	hmac.c							
 SRCS+=	rmd_dgst.c rmd_one.c				
 SRCS+=	acss_skey.c acss_enc.c
-SRCS+= aes_cbc.c aes_cfb.c aes_ctr.c aes_ecb.c aes_ofb.c aes_misc.c aes_core.c
+SRCS+= aes_cbc.c aes_cfb.c aes_ctr.c aes_ecb.c aes_ofb.c aes_misc.c
 SRCS+=	cbc_cksm.c cbc_enc.c cfb64enc.c cfb_enc.c \
 	ecb3_enc.c ecb_enc.c enc_read.c enc_writ.c \
 	ofb64enc.c ofb_enc.c pcbc_enc.c \
@@ -78,7 +84,7 @@ SRCS+= bio_b64.c e_bf.c m_sha.c p_open.c
 SRCS+= bio_enc.c e_cast.c e_xcbc_d.c m_dss.c m_sha1.c p_seal.c
 SRCS+= bio_md.c e_des.c encode.c m_dss1.c names.c p_sign.c
 SRCS+= bio_ok.c e_des3.c evp_enc.c m_md2.c p_verify.c
-SRCS+= c_all.c evp_err.c evp_acnf.c m_md4.c p5_crpt.c
+SRCS+= c_all.c evp_err.c evp_acnf.c m_md4.c p5_crpt.c e_old.c
 SRCS+= c_allc.c evp_key.c m_md5.c p5_crpt2.c
 SRCS+= c_alld.c e_null.c evp_lib.c p_dec.c
 SRCS+= digest.c e_rc2.c evp_pbe.c m_null.c p_enc.c
@@ -105,7 +111,7 @@ SRCS+= x509_cmp.c x509_ext.c x509_req.c x509_v3.c x509rset.c
 SRCS+=	v3_akey.c v3_alt.c v3_bcons.c v3_bitst.c v3_conf.c v3_cpols.c
 SRCS+=	v3_crld.c v3_enum.c v3_extku.c v3_genn.c v3_ia5.c v3_int.c
 SRCS+=	v3_lib.c v3_pku.c v3_prn.c v3_skey.c v3_sxnet.c v3_utl.c
-SRCS+=	v3err.c v3_info.c v3_purp.c v3_ocsp.c v3_akeya.c
+SRCS+=	v3err.c v3_info.c v3_purp.c v3_ocsp.c v3_akeya.c v3_pci.c v3_pcia.c
 SRCS+=	conf_err.c conf_lib.c conf_def.c conf_api.c conf_mod.c conf_mall.c
 SRCS+=	conf_sap.c
 SRCS+=	txt_db.c							
@@ -121,13 +127,22 @@ SRCS+= eng_dyn.c eng_table.c tb_cipher.c eng_err.c tb_rsa.c
 SRCS+= hw_cryptodev.c eng_cnf.c
 SRCS+= tb_dh.c eng_fat.c tb_digest.c eng_init.c
 SRCS+= tb_dsa.c eng_lib.c tb_rand.c eng_list.c
-SRCs+= tb_rsa.c
 SRCS+= dso_dl.c dso_dlfcn.c dso_err.c dso_lib.c dso_null.c
 SRCS+= dso_openssl.c dso_win32.c dso_vms.c
 SRCS+= ocsp_asn.c ocsp_err.c ocsp_ht.c ocsp_prn.c ocsp_vfy.c
 SRCS+= ocsp_cl.c ocsp_ext.c ocsp_lib.c ocsp_srv.c
 SRCS+= ec_cvt.c ec_lib.c ecp_mont.c ecp_recp.c
 SRCS+= ec_err.c ec_mult.c ecp_nist.c ecp_smpl.c
+
+# Only used when -DOPENSSL_FIPS is set
+#SRCS+= fips.c fips_err_wrapper.c
+#SRCS+= fips_aes_core.c fips_aes_selftest.c
+#SRCS+= fips_des_enc.c fips_des_selftest.c fips_set_key.c
+#SRCS+= fips_dh_check.c fips_dh_gen.c fips_dh_key.c
+#SRCS+= fips_dsa_ossl.c fips_dsa_gen.c fips_dsa_selftest.c
+#SRCS+= fips_rand.c
+#SRCS+= fips_rsa_eay.c fips_rsa_gen.c fips_rsa_selftest.c
+#SRCS+= fips_sha1dgst.c fips_sha1_selftest.c
 
 .PATH:	${LCRYPTO_SRC}/md2 ${LCRYPTO_SRC}/md5 ${LCRYPTO_SRC}/sha \
 	${LCRYPTO_SRC}/mdc2 ${LCRYPTO_SRC}/hmac ${LCRYPTO_SRC}/ripemd \
@@ -142,9 +157,12 @@ SRCS+= ec_err.c ec_mult.c ecp_nist.c ecp_smpl.c
 	${LCRYPTO_SRC}/pkcs7 ${LCRYPTO_SRC}/x509v3 ${LCRYPTO_SRC}/pkcs12 \
 	${LCRYPTO_SRC}/comp ${LCRYPTO_SRC}/txt_db ${LCRYPTO_SRC}/md4 \
 	${LCRYPTO_SRC}/engine ${LCRYPTO_SRC}/dso ${LCRYPTO_SRC}/ui \
-	${LCRYPTO_SRC}/ocsp ${LCRYPTO_SRC}/ec ${LCRYPTO_SRC}/aes ${LCRYPTO_SRC} \
+	${LCRYPTO_SRC}/ocsp ${LCRYPTO_SRC}/ec ${LCRYPTO_SRC}/aes \
+	${LCRYPTO_SRC} \
 	${LCRYPTO_SRC}/acss ${.CURDIR}/arch/${MACHINE_ARCH} \
-	${LCRYPTO_SRC}/bn/asm
+	${LCRYPTO_SRC}/bn/asm \
+	${FIPS_SRC}/ ${FIPS_SRC}/aes ${FIPS_SRC}/des ${FIPS_SRC}/dh \
+	${FIPS_SRC}/dsa ${FIPS_SRC}/rand ${FIPS_SRC}/rsa ${FIPS_SRC}/sha1
 
 HDRS=\
 	crypto/acss/acss.h \
@@ -203,7 +221,9 @@ HDRS=\
 	crypto/x509/x509.h \
 	crypto/x509/x509_vfy.h \
 	crypto/x509v3/x509v3.h \
-	e_os2.h
+	e_os2.h \
+	fips/fips.h \
+	fips/rand/fips_rand.h 
 
 HDRS_GEN=\
 	${.CURDIR}/arch/${MACHINE_ARCH}/opensslconf.h \
@@ -255,12 +275,14 @@ des_enc.po:
 .endif  
 
 .if (${MACHINE_ARCH} == "i386")
+CFLAGS+= -DAES_ASM
 CFLAGS+= -DMD5_ASM
 CFLAGS+= -DSHA1_ASM
 CFLAGS+= -DRMD160_ASM
 CFLAGS+= -DOPENBSD_CAST_ASM
 CFLAGS+= -DOPENBSD_DES_ASM
 SSLASM=\
+	aes aes-586 \
 	bf bf-586 \
 	bn bn-586 \
 	bn co-586 \
@@ -280,15 +302,18 @@ ${f}.S: ${LCRYPTO_SRC}/${dir}/asm/${f}.pl ${LCRYPTO_SRC}/perlasm/x86unix.pl
 SRCS+= bf_cbc.c	
 .else
 .if (${MACHINE_ARCH} == "vax")
+SRCS+= aes_core.c
 SRCS+= bf_enc.c
 SRCS+= bn_asm_vax.S
 SRCS+= rc4_enc.c	
 .else
 .if (${MACHINE_ARCH} == "amd64")
+SRCS+= aes_core.c
 SRCS+= bf_enc.c
 SRCS+= x86_64-gcc.c
 SRCS+= rc4_enc.c	
 .else
+SRCS+= aes_core.c
 SRCS+= bf_enc.c	
 SRCS+= bn_asm.c
 SRCS+= rc4_enc.c	

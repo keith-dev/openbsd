@@ -1,11 +1,7 @@
-#	$OpenBSD: Makefile,v 1.22 2005/01/14 22:39:17 miod Exp $
+#	$OpenBSD: Makefile,v 1.24 2005/04/04 04:25:42 mickey Exp $
 
-.if ${MACHINE} == "alpha" || ${MACHINE} == "amd64" || \
-    ${MACHINE} == "cats" || ${MACHINE} == "hp300" || \
-    ${MACHINE} == "hppa" || ${MACHINE} == "i386" || \
-    ${MACHINE} == "luna88k" || ${MACHINE} == "macppc" || \
-    ${MACHINE} == "sgi" || ${MACHINE} == "sparc" || \
-    ${MACHINE} == "sparc64" || ${MACHINE} == "zaurus"
+.if ${MACHINE} != "mac68k" && ${MACHINE} != "mvme68k" && \
+    ${MACHINE} != "mvme88k" && ${MACHINE} != "vax"
 
 PROG=	wsconsctl
 SRCS=	display.c keyboard.c keysym.c map_parse.y map_scan.l \

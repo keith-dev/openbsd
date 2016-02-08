@@ -1,4 +1,4 @@
-/*	$OpenBSD: ospfd.c,v 1.9 2005/03/15 22:03:56 claudio Exp $ */
+/*	$OpenBSD: ospfd.c,v 1.23 2005/08/15 18:58:47 norby Exp $ */
 
 /*
  * Copyright (c) 2005 Claudio Jeker <claudio@openbsd.org>
@@ -52,8 +52,6 @@ int		check_child(pid_t, const char *);
 
 void	main_dispatch_ospfe(int, short, void *);
 void	main_dispatch_rde(int, short, void *);
-void	main_imsg_compose_ospfe(int, pid_t, void *, u_int16_t);
-void	main_imsg_compose_rde(int, pid_t, void *, u_int16_t);
 
 int	check_file_secrecy(int, const char *);
 
@@ -67,8 +65,8 @@ struct ospfd_conf	*conf = NULL;
 struct imsgbuf		*ibuf_ospfe;
 struct imsgbuf		*ibuf_rde;
 
-pid_t			 ospfe_pid;
-pid_t			 rde_pid;
+pid_t			 ospfe_pid = 0;
+pid_t			 rde_pid = 0;
 
 void
 main_sig_handler(int sig, short event, void *arg)
@@ -77,20 +75,24 @@ main_sig_handler(int sig, short event, void *arg)
 	 * signal handler rules don't apply, libevent decouples for us
 	 */
 
+	int	die = 0;
+
 	switch (sig) {
 	case SIGTERM:
 	case SIGINT:
-		ospfd_shutdown();
-		/* NOTREACHED */
+		die = 1;
+		/* FALLTHROUGH */
 	case SIGCHLD:
-		if (check_child(ospfe_pid, "ospfe engine")) {
+		if (check_child(ospfe_pid, "ospf engine")) {
 			ospfe_pid = 0;
-			ospfd_shutdown();
+			die = 1;
 		}
 		if (check_child(rde_pid, "route decision engine")) {
 			rde_pid = 0;
-			ospfd_shutdown();
+			die = 1;
 		}
+		if (die)
+			ospfd_shutdown();
 		break;
 	case SIGHUP:
 		/* reconfigure */
@@ -107,7 +109,7 @@ usage(void)
 {
 	extern char *__progname;
 
-	fprintf(stderr, "usage: %s [-d] [-f file]\n", __progname);
+	fprintf(stderr, "usage: %s [-dnv] [-f file]\n", __progname);
 	exit(1);
 }
 
@@ -116,7 +118,7 @@ main(int argc, char *argv[])
 {
 	struct event		 ev_sigint, ev_sigterm, ev_sigchld, ev_sighup;
 	char			*conffile;
-	int			 ch;
+	int			 ch, opts = 0;
 	int			 debug = 0;
 
 	conffile = CONF_FILE;
@@ -125,7 +127,7 @@ main(int argc, char *argv[])
 	/* start logging */
 	log_init(1);
 
-	while ((ch = getopt(argc, argv, "dhf:")) != -1) {
+	while ((ch = getopt(argc, argv, "df:nv")) != -1) {
 		switch (ch) {
 		case 'd':
 			debug = 1;
@@ -133,6 +135,15 @@ main(int argc, char *argv[])
 		case 'f':
 			conffile = optarg;
 			break;
+		case 'n':
+			opts |= OSPFD_OPT_NOACTION;
+			break;
+		case 'v':
+			if (opts & OSPFD_OPT_VERBOSE)
+				opts |= OSPFD_OPT_VERBOSE2;
+			opts |= OSPFD_OPT_VERBOSE;
+			break;
+
 		default:
 			usage();
 			/* NOTREACHED */
@@ -145,8 +156,16 @@ main(int argc, char *argv[])
 	kif_init();
 
 	/* parse config file */
-	if ((conf = parse_config(conffile, OSPFD_OPT_VERBOSE)) == NULL )
+	if ((conf = parse_config(conffile, opts)) == NULL )
 		exit(1);
+
+	if (conf->opts & OSPFD_OPT_NOACTION) {
+		if (conf->opts & OSPFD_OPT_VERBOSE)
+			print_config(conf);
+		else
+			fprintf(stderr, "configuration OK\n");
+		exit(0);
+	}
 
 	/* check for root privileges  */
 	if (geteuid())
@@ -155,8 +174,6 @@ main(int argc, char *argv[])
 	/* check for ospfd user */
 	if (getpwnam(OSPFD_USER) == NULL)
 		errx(1, "unknown user %s", OSPFD_USER);
-
-	endpwent();
 
 	if (!debug)
 		daemon(1, 0);
@@ -177,13 +194,6 @@ main(int argc, char *argv[])
 	session_socket_blockmode(pipe_ospfe2rde[0], BM_NONBLOCK);
 	session_socket_blockmode(pipe_ospfe2rde[1], BM_NONBLOCK);
 
-	event_init();
-
-	if (if_init(conf))
-		log_info("error initializing interfaces");
-	else
-		log_debug("interfaces initialized");
-
 	/* start children */
 	rde_pid = rde(conf, pipe_parent2rde, pipe_ospfe2rde, pipe_parent2ospfe);
 	ospfe_pid = ospfe(conf, pipe_parent2ospfe, pipe_ospfe2rde,
@@ -192,11 +202,13 @@ main(int argc, char *argv[])
 	/* show who we are */
 	setproctitle("parent");
 
+	event_init();
+
 	/* setup signal handler */
 	signal_set(&ev_sigint, SIGINT, main_sig_handler, NULL);
 	signal_set(&ev_sigterm, SIGTERM, main_sig_handler, NULL);
 	signal_set(&ev_sigchld, SIGINT, main_sig_handler, NULL);
-	signal_set(&ev_sighup, SIGTERM, main_sig_handler, NULL);
+	signal_set(&ev_sighup, SIGHUP, main_sig_handler, NULL);
 	signal_add(&ev_sigint, NULL);
 	signal_add(&ev_sigterm, NULL);
 	signal_add(&ev_sigchld, NULL);
@@ -226,9 +238,7 @@ main(int argc, char *argv[])
 	event_add(&ibuf_rde->ev, NULL);
 
 	if (kr_init(!(conf->flags & OSPFD_FLAG_NO_FIB_UPDATE)) == -1)
-		ospfd_shutdown();
-
-	show_config(conf);
+		fatalx("kr_init failed");
 
 	event_dispatch();
 
@@ -320,8 +330,7 @@ main_dispatch_ospfe(int fd, short event, void *bula)
 
 		switch (imsg.hdr.type) {
 		case IMSG_CTL_RELOAD:
-			log_debug("main_dispatch_ospfe: IMSG_CTL_RELOAD");
-			/* reconfig */
+			/* XXX reconfig */
 			break;
 		case IMSG_CTL_FIB_COUPLE:
 			kr_fib_couple();
@@ -334,10 +343,12 @@ main_dispatch_ospfe(int fd, short event, void *bula)
 			kr_show_route(&imsg);
 			break;
 		case IMSG_CTL_IFINFO:
-			if (imsg.hdr.len != IMSG_HEADER_SIZE + IFNAMSIZ)
-				log_warnx("IFINFO request with wrong len");
+			if (imsg.hdr.len == IMSG_HEADER_SIZE)
+				kr_ifinfo(NULL, imsg.hdr.pid);
+			else if (imsg.hdr.len == IMSG_HEADER_SIZE + IFNAMSIZ)
+				kr_ifinfo(imsg.data, imsg.hdr.pid);
 			else
-				kr_ifinfo(imsg.data);
+				log_warnx("IFINFO request with wrong len");
 			break;
 		default:
 			log_debug("main_dispatch_ospfe: error handling imsg %d",
@@ -414,24 +425,23 @@ main_imsg_compose_rde(int type, pid_t pid, void *data, u_int16_t datalen)
 	imsg_compose(ibuf_rde, type, 0, pid, -1, data, datalen);
 }
 
-
 int
 check_file_secrecy(int fd, const char *fname)
 {
 	struct stat	st;
 
 	if (fstat(fd, &st)) {
-		log_warn("cannot stat %s", fname);
+		warn("cannot stat %s", fname);
 		return (-1);
 	}
 
 	if (st.st_uid != 0 && st.st_uid != getuid()) {
-		log_warnx("%s: owner not root or current user", fname);
+		warnx("%s: owner not root or current user", fname);
 		return (-1);
 	}
 
 	if (st.st_mode & (S_IRWXG | S_IRWXO)) {
-		log_warnx("%s: group/world readable/writeable", fname);
+		warnx("%s: group/world readable/writeable", fname);
 		return (-1);
 	}
 

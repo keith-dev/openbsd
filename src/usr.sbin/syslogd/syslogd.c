@@ -1,4 +1,4 @@
-/*	$OpenBSD: syslogd.c,v 1.89 2005/03/12 08:05:58 markus Exp $	*/
+/*	$OpenBSD: syslogd.c,v 1.92 2005/06/10 01:41:43 millert Exp $	*/
 
 /*
  * Copyright (c) 1983, 1988, 1993, 1994
@@ -39,7 +39,7 @@ static const char copyright[] =
 #if 0
 static const char sccsid[] = "@(#)syslogd.c	8.3 (Berkeley) 4/4/94";
 #else
-static const char rcsid[] = "$OpenBSD: syslogd.c,v 1.89 2005/03/12 08:05:58 markus Exp $";
+static const char rcsid[] = "$OpenBSD: syslogd.c,v 1.92 2005/06/10 01:41:43 millert Exp $";
 #endif
 #endif /* not lint */
 
@@ -287,7 +287,7 @@ main(int argc, char *argv[])
 	socklen_t len;
 	char *p, *line;
 	char resolve[MAXHOSTNAMELEN];
-	int lockpipe[2], nullfd = -1;
+	int lockpipe[2], nullfd;
 	FILE *fp;
 
 	while ((ch = getopt(argc, argv, "dnuf:m:p:a:s:")) != -1)
@@ -329,6 +329,15 @@ main(int argc, char *argv[])
 
 	if (Debug)
 		setlinebuf(stdout);
+
+	if ((nullfd = open(_PATH_DEVNULL, O_RDWR)) == -1) {
+		logerror("Couldn't open /dev/null");
+		die(0);
+	}
+	while (nullfd < 2) {
+		dup2(nullfd, nullfd + 1);
+		nullfd++;
+	}
 
 	consfile.f_type = F_CONSOLE;
 	(void)strlcpy(consfile.f_un.f_fname, ctty,
@@ -435,7 +444,6 @@ main(int argc, char *argv[])
 			exit(1);
 		case 0:
 			setsid();
-			nullfd = open(_PATH_DEVNULL, O_RDWR);
 			close(lockpipe[0]);
 			break;
 		default:
@@ -791,7 +799,7 @@ fprintlog(struct filed *f, int flags, char *msg)
 {
 	struct iovec iov[6];
 	struct iovec *v;
-	int l;
+	int l, retryonce;
 	char line[MAXLINE + 1], repbuf[80], greetings[500];
 
 	v = iov;
@@ -887,6 +895,7 @@ fprintlog(struct filed *f, int flags, char *msg)
 			v->iov_base = "\n";
 			v->iov_len = 1;
 		}
+		retryonce = 0;
 	again:
 		if (writev(f->f_file, iov, 6) < 0) {
 			int e = errno;
@@ -901,8 +910,9 @@ fprintlog(struct filed *f, int flags, char *msg)
 				 */
 				break;
 			} else if ((e == EIO || e == EBADF) &&
-			    f->f_type != F_FILE) {
+			    f->f_type != F_FILE && !retryonce) {
 				f->f_file = priv_open_tty(f->f_un.f_fname);
+				retryonce = 1;
 				if (f->f_file < 0) {
 					f->f_type = F_UNUSED;
 					logerror(f->f_un.f_fname);
@@ -1144,6 +1154,9 @@ init(void)
 			(void)close(f->f_file);
 			break;
 		case F_FORW:
+			break;
+		case F_MEMBUF:
+			ringbuf_free(f->f_un.f_mb.f_rb);
 			break;
 		}
 		next = f->f_next;

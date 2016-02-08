@@ -1,4 +1,4 @@
-/*	$OpenBSD: logmsg.c,v 1.12 2005/02/26 21:51:33 david Exp $	*/
+/*	$OpenBSD: logmsg.c,v 1.21 2005/08/14 19:49:18 xsa Exp $	*/
 /*
  * Copyright (c) 2004 Jean-Francois Brousseau <jfb@openbsd.org>
  * All rights reserved.
@@ -30,18 +30,17 @@
 #include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <unistd.h>
 #include <string.h>
+#include <unistd.h>
 
+#include "buf.h"
 #include "cvs.h"
 #include "log.h"
-#include "buf.h"
 #include "proto.h"
 
 
-#define CVS_LOGMSG_BIGMSG     32000
-#define CVS_LOGMSG_FTMPL      "/tmp/cvsXXXXXXXXXX"
-#define CVS_LOGMSG_PREFIX     "CVS:"
+#define CVS_LOGMSG_BIGMSG	32000
+#define CVS_LOGMSG_PREFIX	"CVS:"
 #define CVS_LOGMSG_LINE \
 "----------------------------------------------------------------------"
 
@@ -60,7 +59,7 @@ static const char *cvs_logmsg_ops[3] = {
  * The returned value must later be free()d.
  * Returns a pointer to the allocated buffer on success, or NULL on failure.
  */
-char*
+char *
 cvs_logmsg_open(const char *path)
 {
 	int lcont;
@@ -85,7 +84,7 @@ cvs_logmsg_open(const char *path)
 			fprintf(stderr,
 			    "The specified message file seems big.  "
 			    "Proceed anyways? (y/n) ");
-			if (fgets(lbuf, sizeof(lbuf), stdin) == NULL) {
+			if (fgets(lbuf, (int)sizeof(lbuf), stdin) == NULL) {
 				cvs_log(LP_ERRNO,
 				    "failed to read from standard input");
 				return (NULL);
@@ -111,7 +110,7 @@ cvs_logmsg_open(const char *path)
 		return (NULL);
 	}
 
-	bp = cvs_buf_alloc(128, BUF_AUTOEXT);
+	bp = cvs_buf_alloc((size_t)128, BUF_AUTOEXT);
 	if (bp == NULL) {
 		(void)fclose(fp);
 		return (NULL);
@@ -123,7 +122,7 @@ cvs_logmsg_open(const char *path)
 	 */
 	lcont = 0;
 
-	while (fgets(lbuf, sizeof(lbuf), fp) != NULL) {
+	while (fgets(lbuf, (int)sizeof(lbuf), fp) != NULL) {
 		len = strlen(lbuf);
 		if (len == 0)
 			continue;
@@ -164,7 +163,7 @@ cvs_logmsg_open(const char *path)
  * Returns the message in a dynamically allocated string on success, NULL on
  * failure.
  */
-char*
+char *
 cvs_logmsg_get(const char *dir, struct cvs_flist *added,
     struct cvs_flist *modified, struct cvs_flist *removed)
 {
@@ -184,7 +183,8 @@ cvs_logmsg_get(const char *dir, struct cvs_flist *added,
 	fds[0] = -1;
 	fds[1] = -1;
 	fds[2] = -1;
-	strlcpy(path, CVS_LOGMSG_FTMPL, sizeof(path));
+	strlcpy(path, cvs_tmpdir, sizeof(path));
+	strlcat(path, "/cvsXXXXXXXXXX", sizeof(path));
 	argc = 0;
 	argv[argc++] = cvs_editor;
 	argv[argc++] = path;
@@ -216,10 +216,13 @@ cvs_logmsg_get(const char *dir, struct cvs_flist *added,
 		if (files[i] == NULL)
 			continue;
 
+		if (SIMPLEQ_EMPTY(files[i]))
+			continue;
+
 		fprintf(fp, "%s %s Files:", CVS_LOGMSG_PREFIX,
 		    cvs_logmsg_ops[i]);
 		nl = 1;
-		TAILQ_FOREACH(cvsfp, files[i], cf_list) {
+		SIMPLEQ_FOREACH(cvsfp, files[i], cf_list) {
 			/* take the space into account */
 			cvs_file_getpath(cvsfp, fpath, sizeof(fpath));
 			len = strlen(fpath) + 1;
@@ -266,11 +269,11 @@ cvs_logmsg_get(const char *dir, struct cvs_flist *added,
 
 		/* nothing was entered */
 		fprintf(stderr,
-		    "Log message unchanged or not specified\na)bort, "
+		    "\nLog message unchanged or not specified\na)bort, "
 		    "c)ontinue, e)dit, !)reuse this message unchanged "
 		    "for remaining dirs\nAction: (continue) ");
 
-		if (fgets(buf, sizeof(buf), stdin) == NULL) {
+		if (fgets(buf, (int)sizeof(buf), stdin) == NULL) {
 			cvs_log(LP_ERRNO, "failed to read from standard input");
 			break;
 		}
@@ -280,7 +283,7 @@ cvs_logmsg_get(const char *dir, struct cvs_flist *added,
 			fprintf(stderr, "invalid input\n");
 			continue;
 		} else if (buf[0] == 'a') {
-			cvs_log(LP_ERR, "aborted by user");
+			cvs_log(LP_ABORT, "aborted by user");
 			break;
 		} else if ((buf[0] == '\n') || (buf[0] == 'c')) {
 			/* empty message */

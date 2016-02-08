@@ -1,4 +1,4 @@
-.\"	$OpenBSD: options.4,v 1.155 2004/12/24 17:26:48 miod Exp $
+.\"	$OpenBSD: options.4,v 1.167 2005/06/17 20:49:26 drahn Exp $
 .\"	$NetBSD: options.4,v 1.21 1997/06/25 03:13:00 thorpej Exp $
 .\"
 .\" Copyright (c) 1998 Theo de Raadt
@@ -87,7 +87,7 @@ and
 system calls which were replaced in
 .Ox 3.6
 when their arguments were changed to match
-.St -p1003.1-2003 ,
+.St -p1003.1-2004 ,
 as well as binaries that use old versions of the
 .Xr fhstat 2 ,
 .Xr fstat 2 ,
@@ -165,7 +165,7 @@ On those architectures that support it, this enables binary
 compatibility with
 .Em HP-UX
 applications built for the same architecture.
-This option is available on some m68k architectures.
+This option is available on some m68k and hppa architectures.
 See
 .Xr compat_hpux 8 .
 .It Cd option COMPAT_IBCS2
@@ -332,6 +332,11 @@ Be verbose on what RAIDframe does.
 See
 .Xr raid 4
 for details.
+.It Cd option VFSDEBUG
+Turns on debugging for the Virtual File System interface.
+See
+.Xr vfs 9
+for details.
 .El
 .Ss File Systems
 .Bl -ohang
@@ -397,6 +402,11 @@ It also supports Joliet extensions.
 See
 .Xr mount_cd9660 8
 for details.
+.It Cd option UDF
+Includes code for the UDF file systems typically found on DVD discs.
+See
+.Xr mount_udf 8
+for details.
 .It Cd option MSDOSFS
 Includes support for the
 .Tn MS-DOS
@@ -446,13 +456,6 @@ may be found.
 See
 .Xr mount_kernfs 8
 for details.
-.It Cd option NULLFS
-Includes code for a loopback file system.
-This permits portions of the file hierarchy to be re-mounted in other places.
-The code really exists to provide an example of a stackable file system layer.
-See
-.Xr mount_null 8
-for details.
 .It Cd option PORTAL
 Includes the (experimental) portal filesystem.
 This permits interesting tricks like opening TCP sockets by opening files in
@@ -473,24 +476,6 @@ visible as files, and signals may be sent to processes by writing to
 files in the procfs namespace.
 See
 .Xr mount_procfs 8
-for details.
-.It Cd option UMAPFS
-Includes a loopback file system in which user and group IDs may be
-remapped -- this can be useful when mounting alien file systems with
-different uids and gids than the local system (eg, remote NFS).
-See
-.Xr mount_umap 8
-for details.
-.It Cd option UNION
-Includes code for the union file system, which permits directories to
-be mounted on top of each other in such a way that both file systems
-remain visible -- this permits tricks like allowing writing (and the
-deleting of files) on a read-only file system like a CD-ROM by
-mounting a local writable file system on top of the read-only file
-system.
-This filesystem is still experimental and is known to be somewhat unstable.
-See
-.Xr mount_union 8
 for details.
 .It Cd option XFS
 Includes the kernel support for the AFS-compatible Arla filesystem.
@@ -569,13 +554,6 @@ With this option, only the superuser can set them, and they can't be cleared
 if the securelevel is greater than 0.
 See also
 .Xr chflags 1 .
-.It Cd option UFS_EXTATTR
-This option enables Extended Attribute support for UFS filesystems.
-.It Cd option UFS_EXTATTR_AUTOSTART
-This option causes Extended Attributes to be started and enabled when each
-UFS filesystem is mounted.
-The attribute storage is expected to be (relative to mount point)
-.Pa /.attribute/{system|user}/<attrname>
 .It Cd option UFS_DIRHASH
 This option enables using an in memory hash table to speed lookups
 in large directories.
@@ -665,7 +643,7 @@ routine, the
 .Xr ccd 4
 driver,
 the
-.Xr ncr 4
+.Xr siop 4
 driver, and much of the networking code.
 Note that this option is silently turned on by the
 .Em DEBUG
@@ -704,7 +682,7 @@ through ioctls on the
 .Pa /dev/pci
 device.
 It's used by the
-.Xr XFree86 1
+.Xr Xorg 1
 server on some architectures.
 See
 .Xr pci 4
@@ -714,7 +692,7 @@ Enables
 .Xr ioctl 2
 access to the AGP GART on the supported chipsets.
 It's used by the
-.Xr XFree86 1
+.Xr Xorg 1
 server on some architectures.
 See
 .Xr vga 4
@@ -759,15 +737,6 @@ for debugging IPv6 neighbor discovery protocol handling.
 See
 .Xr sysctl 3
 for details.
-.It Cd option NS
-Include support for the Xerox XNS protocol stack.
-See
-.Xr ns 4
-for details.
-.It Cd option CCITT,LLC,HDLC
-Include support for the X.25 protocol stack.
-The state of this code is currently unknown.
-It probably contains bugs.
 .It Cd option IPX, IPXIP
 Include support for Internetwork Packet Exchange protocol commonly in
 use by
@@ -959,7 +928,7 @@ must also be set to a non-zero value for this option to have any
 effect.
 Each bit enables a full lun scan for the corresponding target on the
 buses specified by
-.Em SCSIFORCELUN_BUSES.
+.Em SCSIFORCELUN_BUSES .
 .El
 .Ss System V IPC Options
 .Bl -ohang
@@ -1123,7 +1092,6 @@ is zero, the hardware realtime clock device is not in Daylight Saving Time.
 .Xr inet 4 ,
 .Xr ipsec 4 ,
 .Xr lkm 4 ,
-.Xr ns 4 ,
 .Xr pci 4 ,
 .Xr xf86 4 ,
 .Xr X 7 ,
@@ -1138,11 +1106,9 @@ is zero, the hardware realtime clock device is not in Daylight Saving Time.
 .Xr mount_mfs 8 ,
 .Xr mount_msdos 8 ,
 .Xr mount_nfs 8 ,
-.Xr mount_null 8 ,
 .Xr mount_portal 8 ,
 .Xr mount_procfs 8 ,
-.Xr mount_umap 8 ,
-.Xr mount_union 8 ,
+.Xr mount_udf 8 ,
 .Xr mrouted 8 ,
 .Xr quotaon 8 ,
 .Xr rpc.rquotad 8 ,

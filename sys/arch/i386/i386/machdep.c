@@ -1,4 +1,4 @@
-/*	$OpenBSD: machdep.c,v 1.316 2005/02/24 21:14:11 grange Exp $	*/
+/*	$OpenBSD: machdep.c,v 1.324 2005/08/20 00:27:08 jsg Exp $	*/
 /*	$NetBSD: machdep.c,v 1.214 1996/11/10 03:16:17 thorpej Exp $	*/
 
 /*-
@@ -181,8 +181,7 @@ extern struct proc *npxproc;
 #define FREE_PGS(pgs) uvm_pglistfree(&(pgs))
 
 /* the following is used externally (sysctl_hw) */
-char machine[] = "i386";		/* cpu "architecture" */
-char machine_arch[] = "i386";		/* machine == machine_arch */
+char machine[] = MACHINE;
 
 /*
  * Declare these as initialized data so we can patch them.
@@ -319,17 +318,17 @@ int allowaperture = 0;
 #endif
 #endif
 
-void	winchip_cpu_setup(const char *, int, int);
-void	amd_family5_setup(const char *, int, int);
-void	amd_family6_setup(const char *, int, int);
-void	cyrix3_cpu_setup(const char *, int, int);
-void	cyrix6x86_cpu_setup(const char *, int, int);
-void	natsem6x86_cpu_setup(const char *, int, int);
-void	intel586_cpu_setup(const char *, int, int);
-void	intel686_common_cpu_setup(const char *, int, int);
-void	intel686_cpu_setup(const char *, int, int);
-void	intel686_p4_cpu_setup(const char *, int, int);
-void	tm86_cpu_setup(const char *, int, int);
+void	winchip_cpu_setup(struct cpu_info *);
+void	amd_family5_setup(struct cpu_info *);
+void	amd_family6_setup(struct cpu_info *);
+void	cyrix3_cpu_setup(struct cpu_info *);
+void	cyrix6x86_cpu_setup(struct cpu_info *);
+void	natsem6x86_cpu_setup(struct cpu_info *);
+void	intel586_cpu_setup(struct cpu_info *);
+void	intel686_common_cpu_setup(struct cpu_info *);
+void	intel686_cpu_setup(struct cpu_info *);
+void	intel686_p4_cpu_setup(struct cpu_info *);
+void	tm86_cpu_setup(struct cpu_info *);
 char *	intel686_cpu_name(int);
 char *	cyrix3_cpu_name(int, int);
 char *	tm86_cpu_name(int);
@@ -1119,7 +1118,7 @@ const struct cpu_cpuid_feature i386_cpuid_features[] = {
 };
 
 const struct cpu_cpuid_feature i386_cpuid_ecxfeatures[] = {
-	{ CPUIDECX_PNI,		"PNI" },
+	{ CPUIDECX_SSE3,	"SSE3" },
 	{ CPUIDECX_MWAIT,	"MWAIT" },
 	{ CPUIDECX_EST,		"EST" },
 	{ CPUIDECX_TM2,		"TM2" },
@@ -1127,29 +1126,28 @@ const struct cpu_cpuid_feature i386_cpuid_ecxfeatures[] = {
 };
 
 void
-winchip_cpu_setup(cpu_device, model, step)
-	const char *cpu_device;
-	int model, step;
+winchip_cpu_setup(struct cpu_info *ci)
 {
 #if defined(I586_CPU)
 
-	switch ((curcpu()->ci_signature >> 4) & 15) { /* model */
+	switch ((ci->ci_signature >> 4) & 15) { /* model */
 	case 4: /* WinChip C6 */
-		curcpu()->ci_feature_flags &= ~CPUID_TSC;
+		ci->ci_feature_flags &= ~CPUID_TSC;
 		/* Disable RDTSC instruction from user-level. */
 		lcr4(rcr4() | CR4_TSD);
-		printf("%s: TSC disabled\n", cpu_device);
+		printf("%s: TSC disabled\n", ci->ci_dev.dv_xname);
 		break;
 	}
 #endif
 }
 
 void
-cyrix3_cpu_setup(cpu_device, model, step)
-	const char *cpu_device;
-	int model, step;
+cyrix3_cpu_setup(struct cpu_info *ci)
 {
 #if defined(I686_CPU)
+	int model = (ci->ci_signature >> 4) & 15;
+	int step = ci->ci_signature & 15;
+
 	u_int64_t msreg;
 	u_int32_t regs[4];
 	unsigned int val;
@@ -1199,13 +1197,14 @@ cyrix3_cpu_setup(cpu_device, model, step)
 		} else
 			val = 0;
 
+		if (val & (C3_CPUID_HAS_RNG | C3_CPUID_HAS_ACE))
+			printf("%s:", ci->ci_dev.dv_xname);
+
 		/* Enable RNG if present and disabled */
-		if (val & 0x44/*???*/)
-			printf("%s:", cpu_device);
-		if (val & 0x4) {
+		if (val & C3_CPUID_HAS_RNG) {
 			extern int viac3_rnd_present;
 
-			if (!(val & 0x8)) {
+			if (!(val & C3_CPUID_DO_RNG)) {
 				msreg = rdmsr(0x110B);
 				msreg |= 0x40;
 				wrmsr(0x110B, msreg);
@@ -1215,9 +1214,9 @@ cyrix3_cpu_setup(cpu_device, model, step)
 		}
 
 		/* Enable AES engine if present and disabled */
-		if (val & 0x40) {
+		if (val & C3_CPUID_HAS_ACE) {
 #ifdef CRYPTO
-			if (!(val & 0x80)) {
+			if (!(val & C3_CPUID_DO_ACE)) {
 				msreg = rdmsr(0x1107);
 				msreg |= (0x01 << 28);
 				wrmsr(0x1107, msreg);
@@ -1226,11 +1225,24 @@ cyrix3_cpu_setup(cpu_device, model, step)
 #endif /* CRYPTO */
 			printf(" AES");
 		}
-#if 0
-		/* Enable SHA engine if present and disabled */
-		if (val & 0x40/**/) {
+
+		/* Enable ACE2 engine if present and disabled */
+		if (val & C3_CPUID_HAS_ACE2) {
 #ifdef CRYPTO
-			if (!(val & 0x80/**/)) {
+			if (!(val & C3_CPUID_DO_ACE2)) {
+				msreg = rdmsr(0x1107);
+				msreg |= (0x01 << 28);
+				wrmsr(0x1107, msreg);
+			}
+			i386_has_xcrypt |= C3_HAS_AESCTR;
+#endif /* CRYPTO */
+			printf(" AES-CTR");
+		}
+
+		/* Enable SHA engine if present and disabled */
+		if (val & C3_CPUID_HAS_PHE) {
+#ifdef CRYPTO
+			if (!(val & C3_CPUID_DO_PHE)) {
 				msreg = rdmsr(0x1107);
 				msreg |= (0x01 << 28/**/);
 				wrmsr(0x1107, msreg);
@@ -1239,12 +1251,11 @@ cyrix3_cpu_setup(cpu_device, model, step)
 #endif /* CRYPTO */
 			printf(" SHA1 SHA256");
 		}
-#endif
-#if 0
+
 		/* Enable MM engine if present and disabled */
-		if (val & 0x40/*???*/) {
+		if (val & C3_CPUID_HAS_PMM) {
 #ifdef CRYPTO
-			if (!(val & 0x80/**/)) {
+			if (!(val & C3_CPUID_DO_PMM)) {
 				msreg = rdmsr(0x1107);
 				msreg |= (0x01 << 28/**/);
 				wrmsr(0x1107, msreg);
@@ -1253,7 +1264,7 @@ cyrix3_cpu_setup(cpu_device, model, step)
 #endif /* CRYPTO */
 			printf(" RSA");
 		}
-#endif
+
 		printf("\n");
 		break;
 	}
@@ -1261,14 +1272,12 @@ cyrix3_cpu_setup(cpu_device, model, step)
 }
 
 void
-cyrix6x86_cpu_setup(cpu_device, model, step)
-	const char *cpu_device;
-	int model, step;
+cyrix6x86_cpu_setup(struct cpu_info *ci)
 {
 #if defined(I486_CPU) || defined(I586_CPU) || defined(I686_CPU)
 	extern int clock_broken_latch;
 
-	switch ((curcpu()->ci_signature >> 4) & 15) { /* model */
+	switch ((ci->ci_signature >> 4) & 15) { /* model */
 	case -1: /* M1 w/o cpuid */
 	case 2:	/* M1 */
 		/* set up various cyrix registers */
@@ -1284,13 +1293,14 @@ cyrix6x86_cpu_setup(cpu_device, model, step)
 		/* disable access to ccr4/ccr5 */
 		cyrix_write_reg(0xC3, cyrix_read_reg(0xC3) & ~0x10);
 
-		printf("%s: xchg bug workaround performed\n", cpu_device);
+		printf("%s: xchg bug workaround performed\n",
+		    ci->ci_dev.dv_xname);
 		break;	/* fallthrough? */
 	case 4:	/* GXm */
 		/* Unset the TSC bit until calibrate_delay() gets fixed. */
 		clock_broken_latch = 1;
 		curcpu()->ci_feature_flags &= ~CPUID_TSC;
-		printf("%s: TSC disabled\n", cpu_device);
+		printf("%s: TSC disabled\n", ci->ci_dev.dv_xname);
 		break;
 	}
 #endif
@@ -1310,18 +1320,17 @@ natsem6x86_cpureset(void)
 #endif
 
 void
-natsem6x86_cpu_setup(cpu_device, model, step)
-	const char *cpu_device;
-	int model, step;
+natsem6x86_cpu_setup(struct cpu_info *ci)
 {
 #if defined(I586_CPU) || defined(I686_CPU)
 	extern int clock_broken_latch;
+	int model = (ci->ci_signature >> 4) & 15;
 
 	clock_broken_latch = 1;
 	switch (model) {
 	case 4:
 		cpu_feature &= ~CPUID_TSC;
-		printf("%s: TSC disabled\n", cpu_device);
+		printf("%s: TSC disabled\n", ci->ci_dev.dv_xname);
 		break;
 	}
 	cpuresetfn = natsem6x86_cpureset;
@@ -1330,23 +1339,22 @@ natsem6x86_cpu_setup(cpu_device, model, step)
 
 
 void
-intel586_cpu_setup(cpu_device, model, step)
-	const char *cpu_device;
-	int model, step;
+intel586_cpu_setup(struct cpu_info *ci)
 {
 #if defined(I586_CPU)
 	if (!cpu_f00f_bug) {
 		fix_f00f();
-		printf("%s: F00F bug workaround installed\n", cpu_device);
+		printf("%s: F00F bug workaround installed\n",
+		    ci->ci_dev.dv_xname);
 	}
 #endif
 }
 
 void
-amd_family5_setup(cpu_device, model, step)
-	const char *cpu_device;
-	int model, step;
+amd_family5_setup(struct cpu_info *ci)
 {
+	int model = (ci->ci_signature >> 4) & 15;
+
 	switch (model) {
 	case 0:		/* AMD-K5 Model 0 */
 		/*
@@ -1371,40 +1379,62 @@ amd_family5_setup(cpu_device, model, step)
 	}
 }
 
+struct amd_pn_flag {
+	int mask;
+	const char *name;
+};
+
 void
-amd_family6_setup(cpu_device, model, step)
-	const char *cpu_device;
-	int model, step;
+amd_family6_setup(struct cpu_info *ci)
 {
 #if !defined(SMALL_KERNEL) && defined(I686_CPU)
 	extern void (*pagezero)(void *, size_t);
 	extern void sse2_pagezero(void *, size_t);
 	extern void i686_pagezero(void *, size_t);
+	static struct amd_pn_flag amd_pn_flags[] = {
+	    {0, "TS"},
+	    {1, "FID"},
+	    {2, "VID"},
+	    {4, "TTP"},
+	    {8, "TM"},
+	    {16, "STC"}
+	};
+	u_int regs[4];
+	int i;
 
 	if (cpu_feature & CPUID_SSE2)
 		pagezero = sse2_pagezero;
 	else
 		pagezero = i686_pagezero;
-	k7_powernow_init(curcpu()->ci_signature);
+	cpuid(0x80000000, regs);
+	if (regs[0] > 0x80000007) {
+		cpuid(0x80000007, regs);
+		printf("%s: AMD Powernow:", ci->ci_dev.dv_xname);
+		for (i = 0; i < 6; i++) {
+			if (regs[3] & amd_pn_flags[i].mask)
+				printf(" %s", amd_pn_flags[i].name);
+		}
+		printf("\n");
+		if (regs[3] & 6)
+			k7_powernow_init(curcpu()->ci_signature);
+	}
 #endif
 }
 
 void
-intel686_common_cpu_setup(const char *cpu_device, int model, int step)
+intel686_common_cpu_setup(struct cpu_info *ci)
 {
-	/*
-	 * Make sure SYSENTER is disabled.
-	 */
-	if (cpu_feature & CPUID_SEP)
-		wrmsr(MSR_SYSENTER_CS, 0);
 
 #if !defined(SMALL_KERNEL) && defined(I686_CPU)
+	int model = (ci->ci_signature >> 4) & 15;
+	int step = ci->ci_signature & 15;
+
 	if (cpu_ecxfeature & CPUIDECX_EST) {
 		if (rdmsr(MSR_MISC_ENABLE) & (1 << 16))
-			est_init(cpu_device);
+			est_init(ci->ci_dev.dv_xname);
 		else
 			printf("%s: Enhanced SpeedStep disabled by BIOS\n",
-			    cpu_device);
+			    ci->ci_dev.dv_xname);
 	} else if ((cpu_feature & (CPUID_ACPI | CPUID_TM)) ==
 	    (CPUID_ACPI | CPUID_TM))
 		p4tcc_init(model, step);
@@ -1420,17 +1450,21 @@ intel686_common_cpu_setup(const char *cpu_device, int model, int step)
 		pagezero = i686_pagezero;
 	}
 #endif
+	/*
+	 * Make sure SYSENTER is disabled.
+	 */
+	if (cpu_feature & CPUID_SEP)
+		wrmsr(MSR_SYSENTER_CS, 0);
 }
 
 void
-intel686_cpu_setup(const char *cpu_device, int model, int step)
+intel686_cpu_setup(struct cpu_info *ci)
 {
-	struct cpu_info *ci = curcpu();
-	/* XXX SMP int model = (ci->ci_signature >> 4) & 15; */
-	/* XXX SMP int step = ci->ci_signature & 15; */
+	int model = (ci->ci_signature >> 4) & 15;
+	int step = ci->ci_signature & 15;
 	u_quad_t msr119;
 
-	intel686_common_cpu_setup(cpu_device, model, step);
+	intel686_common_cpu_setup(ci);
 
 	/*
 	 * Original PPro returns SYSCALL in CPUID but is non-functional.
@@ -1447,7 +1481,8 @@ intel686_cpu_setup(const char *cpu_device, int model, int step)
 		msr119 |= 0x0000000000200000LL;
 		wrmsr(MSR_BBL_CR_CTL, msr119);
 
-		printf("%s: disabling processor serial number\n", cpu_device);
+		printf("%s: disabling processor serial number\n",
+			 ci->ci_dev.dv_xname);
 		ci->ci_feature_flags &= ~CPUID_SER;
 		ci->ci_level = 2;
 	}
@@ -1459,20 +1494,18 @@ intel686_cpu_setup(const char *cpu_device, int model, int step)
 }
 
 void
-intel686_p4_cpu_setup(const char *cpu_device, int model, int step)
+intel686_p4_cpu_setup(struct cpu_info *ci)
 {
-	intel686_common_cpu_setup(cpu_device, model, step);
+	intel686_common_cpu_setup(ci);
 
 #if !defined(SMALL_KERNEL) && defined(I686_CPU)
-	p4_model = model;
+	p4_model = (ci->ci_signature >> 4) & 15;
 	update_cpuspeed = p4_update_cpuspeed;
 #endif
 }
 
 void
-tm86_cpu_setup(cpu_device, model, step)
-	const char *cpu_device;
-	int model, step;
+tm86_cpu_setup(struct cpu_info *ci)
 {
 #if !defined(SMALL_KERNEL) && defined(I586_CPU)
 	longrun_init();
@@ -1670,7 +1703,7 @@ identifycpu(struct cpu_info *ci)
 		}
 	}
 
-	/* Find the amount of on-chip L2 cache.  Add support for AMD K6-3...*/
+	/* Find the amount of on-chip L2 cache. */
 	cachesize = -1;
 	if (vendor == CPUVENDOR_INTEL && cpuid_level >= 2 && family < 0xf) {
 		int intel_cachetable[] = { 0, 128, 256, 512, 1024, 2048 };
@@ -1678,6 +1711,13 @@ identifycpu(struct cpu_info *ci)
 		if ((cpu_cache_edx & 0xFF) >= 0x40 &&
 		    (cpu_cache_edx & 0xFF) <= 0x45)
 			cachesize = intel_cachetable[(cpu_cache_edx & 0xFF) - 0x40];
+	} else if (vendor == CPUVENDOR_AMD && class == CPUCLASS_686) {
+		u_int regs[4];
+		cpuid(0x80000000, regs);
+		if (regs[0] >= 0x80000006) {
+			cpuid(0x80000006, regs);
+			cachesize = (regs[2] >> 16);
+		}
 	}
 
 	/* Remove leading and duplicated spaces from cpu_brandstr */
@@ -1773,7 +1813,7 @@ identifycpu(struct cpu_info *ci)
 #ifndef MULTIPROCESSOR
 	/* configure the CPU if needed */
 	if (ci->cpu_setup != NULL)
-		(ci->cpu_setup)(cpu_device, model, step);
+		(ci->cpu_setup)(ci);
 #endif
 
 #ifndef SMALL_KERNEL
@@ -2013,11 +2053,15 @@ sendsig(catcher, sig, mask, code, type, val)
 	int type;
 	union sigval val;
 {
+#ifdef I686_CPU
+	extern char sigcode, sigcode_xmm;
+#endif
 	struct proc *p = curproc;
 	struct pmap *pmap = vm_map_pmap(&p->p_vmspace->vm_map);
 	struct trapframe *tf = p->p_md.md_regs;
 	struct sigframe *fp, frame;
 	struct sigacts *psp = p->p_sigacts;
+	register_t sp;
 	int oonstack = psp->ps_sigstk.ss_flags & SS_ONSTACK;
 
 	/*
@@ -2030,13 +2074,19 @@ sendsig(catcher, sig, mask, code, type, val)
 	 */
 	if ((psp->ps_flags & SAS_ALTSTACK) && !oonstack &&
 	    (psp->ps_sigonstack & sigmask(sig))) {
-		fp = (struct sigframe *)(psp->ps_sigstk.ss_sp +
-		    psp->ps_sigstk.ss_size - sizeof(struct sigframe));
+		sp = (long)psp->ps_sigstk.ss_sp + psp->ps_sigstk.ss_size;
 		psp->ps_sigstk.ss_flags |= SS_ONSTACK;
-	} else {
-		fp = (struct sigframe *)tf->tf_esp - 1;
+	} else
+		sp = tf->tf_esp;
+
+	frame.sf_fpstate = NULL;
+	if (p->p_md.md_flags & MDP_USEDFPU) {
+		sp -= sizeof(union savefpu);
+		sp &= ~0xf;	/* foe XMM regs */
+		frame.sf_fpstate = (void *)sp;
 	}
 
+	fp = (struct sigframe *)sp - 1;
 	frame.sf_scp = &fp->sf_sc;
 	frame.sf_sip = NULL;
 	frame.sf_handler = catcher;
@@ -2105,6 +2155,10 @@ sendsig(catcher, sig, mask, code, type, val)
 	tf->tf_eip = p->p_sigcode;
 	tf->tf_cs = pmap->pm_hiexec > I386_MAX_EXE_ADDR ?
 	    GSEL(GUCODE1_SEL, SEL_UPL) : GSEL(GUCODE_SEL, SEL_UPL);
+#ifdef I686_CPU
+	if (i386_use_fxsave)
+		tf->tf_eip += &sigcode_xmm - &sigcode;
+#endif
 	tf->tf_eflags &= ~(PSL_T|PSL_VM|PSL_AC);
 	tf->tf_esp = (int)fp;
 	tf->tf_ss = GSEL(GUDATA_SEL, SEL_UPL);

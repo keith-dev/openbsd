@@ -3,8 +3,8 @@
 # THIS FILE AUTOMATICALLY GENERATED.  DO NOT EDIT.
 # generated from:
 #
-#	OpenBSD: etc.sparc/MAKEDEV.md,v 1.25 2005/03/01 18:22:32 miod Exp 
-#	OpenBSD: MAKEDEV.common,v 1.16 2005/03/01 13:35:59 otto Exp 
+#	OpenBSD: etc.sparc/MAKEDEV.md,v 1.29 2005/08/01 22:22:13 deraadt Exp 
+#	OpenBSD: MAKEDEV.common,v 1.20 2005/08/01 22:22:12 deraadt Exp 
 #	OpenBSD: MAKEDEV.mi,v 1.73 2005/02/07 06:14:18 david Exp 
 #	OpenBSD: MAKEDEV.sub,v 1.14 2005/02/07 06:14:18 david Exp 
 #
@@ -46,6 +46,7 @@
 # Terminal ports:
 #	cua[a-z]*	Zilog 8530 serial ports
 #	tty[a-z]*	Zilog 8530 serial ports
+#	tty[0-7][0-9a-f]	NS16x50 serial ports
 #	magma*	Magma multiport cards
 #	spif*	"spif" multiport cards
 # Pseudo terminals:
@@ -64,6 +65,7 @@
 # Pointing devices:
 #	wsmouse*	wscons mice
 # Special purpose devices:
+#	apm	Power management device
 #	audio*	Audio devices
 #	bpf*	Berkeley Packet Filter
 #	fd	fd/* nodes for fdescfs
@@ -71,7 +73,6 @@
 #	openprom	PROM settings
 #	pf*	Packet Filter
 #	*random	In-kernel random data source
-#	ses*	SES/SAF-TE SCSI devices
 #	ss*	SCSI scanners
 #	systrace*	System call tracing device
 #	tun*	Network tunnel driver
@@ -254,10 +255,6 @@ ss*)
 	MKlist="$MKlist;umask 77;ln -s ss$U scan$U"
 	;;
 
-ses*)
-	M ses$U c 124 $U 640 operator
-	;;
-
 *random)
 	n=0
 	for pre in " " s u p a
@@ -298,6 +295,11 @@ audio*)
 	MKlist="$MKlist;[ -e mixer ] || ln -s mixer$U mixer"
 	MKlist="$MKlist;[ -e sound ] || ln -s sound$U sound"
 	MKlist="$MKlist;[ -e audioctl ] || ln -s audioctl$U audioctl"
+	;;
+
+apm*)
+	M apm	c 30 0 644
+	M apmctl	c 30 8 644
 	;;
 
 wsmouse*)
@@ -405,6 +407,13 @@ magma*)
 	M bpp${nam}1 c 101 $(($offset+1)) 600
 	;;
 
+tty[0-7][0-9a-f])
+	U=${i#tty*}
+	o=$(h2d $U)
+	M tty$U c 36 $o 660 dialer uucp
+	M cua$U c 36 $(($o+128)) 660 dialer uucp
+	;;
+
 tty[a-z])
 	u=${i#tty*}
 	case $u in
@@ -497,10 +506,10 @@ all)
 	R sd1 sd2 sd3 sd4 cd0 cd1 rd0 xy0 xy1 xy2 xy3 tun0 tun1 tun2
 	R tun3 bpf0 bpf1 bpf2 bpf3 bpf4 bpf5 bpf6 bpf7 bpf8 bpf9 pty0
 	R fd1 fd1B fd1C fd1D fd1E fd1F fd1G fd1H fd0 fd0B fd0C fd0D
-	R fd0E fd0F fd0G fd0H xfs0 ss0 ss1 ch0 ses0 cuaa cuab cuac
-	R cuad ttya ttyb ttyc ttyd ptm local wscons audio0 uk0 random
-	R lkm pf systrace xd0 xd1 xd2 xd3 raid0 raid1 raid2 raid3 std
-	R st0 st1 fd
+	R fd0E fd0F fd0G fd0H xfs0 ss0 ss1 ch0 cuaa cuab cuac cuad
+	R ttya ttyb ttyc ttyd ptm local wscons audio0 uk0 random lkm
+	R tty00 tty01 tty02 tty03 apm pf systrace xd0 xd1 xd2 xd3
+	R raid0 raid1 raid2 raid3 std st0 st1 fd
 	;;
 
 presto*|xd*|xy*|sd*|raid*|ccd*)

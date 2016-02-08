@@ -1,3 +1,4 @@
+/*	$OpenBSD: sprintf.c,v 1.12 2005/08/08 08:05:36 espie Exp $ */
 /*-
  * Copyright (c) 1990, 1993
  *	The Regents of the University of California.  All rights reserved.
@@ -30,10 +31,6 @@
  * SUCH DAMAGE.
  */
 
-#if defined(LIBC_SCCS) && !defined(lint)
-static char rcsid[] = "$OpenBSD: sprintf.c,v 1.9 2003/07/24 01:15:42 deraadt Exp $";
-#endif /* LIBC_SCCS and not lint */
-
 #include <stdio.h>
 #include <stdarg.h>
 #include <limits.h>
@@ -45,12 +42,14 @@ __warn_references(sprintf,
 #endif
 
 int
-sprintf(char *str, char const *fmt, ...)
+sprintf(char *str, const char *fmt, ...)
 {
 	int ret;
 	va_list ap;
 	FILE f;
+	struct __sfileext fext;
 
+	_FILEEXT_SETUP(&f, &fext);
 	f._file = -1;
 	f._flags = __SWR | __SSTR;
 	f._bf._base = f._p = (unsigned char *)str;

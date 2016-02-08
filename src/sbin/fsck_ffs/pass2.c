@@ -1,4 +1,4 @@
-/*	$OpenBSD: pass2.c,v 1.19 2003/10/11 01:43:45 tedu Exp $	*/
+/*	$OpenBSD: pass2.c,v 1.22 2005/06/16 14:51:37 millert Exp $	*/
 /*	$NetBSD: pass2.c,v 1.17 1996/09/27 22:45:15 christos Exp $	*/
 
 /*
@@ -34,7 +34,7 @@
 #if 0
 static char sccsid[] = "@(#)pass2.c	8.6 (Berkeley) 10/27/94";
 #else
-static const char rcsid[] = "$OpenBSD: pass2.c,v 1.19 2003/10/11 01:43:45 tedu Exp $";
+static const char rcsid[] = "$OpenBSD: pass2.c,v 1.22 2005/06/16 14:51:37 millert Exp $";
 #endif
 #endif /* not lint */
 
@@ -63,15 +63,17 @@ static int info_pos;
 static int
 pass2_info1(char *buf, int buflen)
 {
-	return snprintf(buf, buflen, "phase 2, directory %d/%d",
-		info_pos, info_max);
+	return (snprintf(buf, buflen, "phase 2, directory %d/%d",
+	    info_pos, info_max) > 0);
 }
 
 static int
 pass2_info2(char *buf, int buflen)
 {
-	return snprintf(buf, buflen, "phase 2, parent directory %d/%d",
-		info_pos, info_max);
+	if (snprintf(buf, buflen, "phase 2, parent directory %d/%d",
+	    info_pos, info_max) > 0)
+		return (strlen(buf));
+	return (0);
 }
 
 void
@@ -136,10 +138,6 @@ pass2(void)
 		errexit("BAD STATE %d FOR ROOT INODE\n", statemap[ROOTINO]);
 	}
 	statemap[ROOTINO] = DFOUND;
-	if (newinofmt) {
-		statemap[WINO] = FSTATE;
-		typemap[WINO] = DT_WHT;
-	}
 	/*
 	 * Sort the directory list into disk block order.
 	 */
@@ -420,14 +418,6 @@ chk2:
 	if (dirp->d_ino > maxino) {
 		fileerror(idesc->id_number, dirp->d_ino, "I OUT OF RANGE");
 		n = reply("REMOVE");
-	} else if (newinofmt &&
-		   ((dirp->d_ino == WINO && dirp->d_type != DT_WHT) ||
-		    (dirp->d_ino != WINO && dirp->d_type == DT_WHT))) {
-		fileerror(idesc->id_number, dirp->d_ino, "BAD WHITEOUT ENTRY");
-		dirp->d_ino = WINO;
-		dirp->d_type = DT_WHT;
-		if (reply("FIX") == 1)
-			ret |= ALTERED;
 	} else {
 again:
 		switch (statemap[dirp->d_ino]) {

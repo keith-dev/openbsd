@@ -1,3 +1,4 @@
+/*	$OpenBSD: random.c,v 1.14 2005/08/08 08:05:37 espie Exp $ */
 /*
  * Copyright (c) 1983 Regents of the University of California.
  * All rights reserved.
@@ -26,10 +27,6 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  */
-
-#if defined(LIBC_SCCS) && !defined(lint)
-static char *rcsid = "$OpenBSD: random.c,v 1.12 2003/06/02 20:18:38 millert Exp $";
-#endif /* LIBC_SCCS and not lint */
 
 #include <sys/param.h>
 #include <sys/sysctl.h>
@@ -190,8 +187,7 @@ static int rand_sep = SEP_3;
  * for default usage relies on values produced by this routine.
  */
 void
-srandom(x)
-	unsigned int x;
+srandom(unsigned int x)
 {
 	int i;
 	int32_t test;
@@ -232,7 +228,7 @@ srandom(x)
  * a fixed seed.
  */
 void
-srandomdev()
+srandomdev(void)
 {
 	int fd, i, mib[2], n;
 	size_t len;
@@ -299,10 +295,7 @@ srandomdev()
  * Returns a pointer to the old state.
  */
 char *
-initstate(seed, arg_state, n)
-	u_int seed;			/* seed for R.N.G. */
-	char *arg_state;		/* pointer to state array */
-	size_t n;			/* # bytes of state info */
+initstate(u_int seed, char *arg_state, size_t n)
 {
 	char *ostate = (char *)(&state[-1]);
 
@@ -359,8 +352,7 @@ initstate(seed, arg_state, n)
  * Returns a pointer to the old state information.
  */
 char *
-setstate(arg_state)
-	const char *arg_state;
+setstate(const char *arg_state)
 {
 	int32_t *new_state = (int32_t *)arg_state;
 	int32_t type = new_state[0] % MAX_TYPES;
@@ -411,7 +403,7 @@ setstate(arg_state)
  * Returns a 31-bit random number.
  */
 long
-random()
+random(void)
 {
 	int32_t i;
 

@@ -1,4 +1,4 @@
-/*	$OpenBSD: diff3prog.c,v 1.5 2004/01/07 18:16:42 canacar Exp $	*/
+/*	$OpenBSD: diff3prog.c,v 1.7 2005/08/01 08:17:57 otto Exp $	*/
 
 /*
  * Copyright (C) Caldera International Inc.  2001-2002.
@@ -71,11 +71,12 @@ static const char copyright[] =
 #endif /* not lint */
 
 #ifndef lint
-static const char rcsid[] = "$OpenBSD: diff3prog.c,v 1.5 2004/01/07 18:16:42 canacar Exp $";
+static const char rcsid[] = "$OpenBSD: diff3prog.c,v 1.7 2005/08/01 08:17:57 otto Exp $";
 #endif /* not lint */
 
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include <ctype.h>
 #include <err.h>
 
@@ -104,9 +105,10 @@ struct diff {
 	struct range new;
 };
 
-#define NC 200
-struct diff d13[NC];
-struct diff d23[NC];
+size_t szchanges;
+
+struct diff *d13;
+struct diff *d23;
 /*
  * "de" is used to gather editing scripts.  These are later spewed out in
  * reverse order.  Its first element must be all zero, the "new" component
@@ -114,10 +116,9 @@ struct diff d23[NC];
  * look (!?).  Array overlap indicates which sections in "de" correspond to
  * lines that are different in all three files.
  */
-struct diff de[NC];
-char overlap[NC];
+struct diff *de;
+char *overlap;
 int  overlapcnt;
-char line[256];
 FILE *fp[3];
 int cline[3];		/* # of the last-read line in each file (0-2) */
 /*
@@ -132,10 +133,10 @@ char f1mark[40], f3mark[40];	/* markers for -E and -X */
 
 int duplicate(struct range *, struct range *);
 int edit(struct diff *, int, int);
-int getchange(FILE *);
-int getline(FILE *);
+char *getchange(FILE *);
+char *getline(FILE *, size_t *);
 int number(char **);
-int readin(char *, struct diff *);
+int readin(char *, struct diff **);
 int skip(int, int, char *);
 void change(int, struct range *, int);
 void keep(int, struct range *);
@@ -145,6 +146,7 @@ void repos(int);
 void separate(const char *);
 __dead void edscript(int);
 __dead void trouble(void);
+void increase(void);
 __dead void usage(void);
 
 int
@@ -187,8 +189,9 @@ main(int argc, char **argv)
 		    argc >= 7 ? argv[6] : argv[4]);
 	}
 
-	m = readin(argv[0], d13);
-	n = readin(argv[1], d23);
+	increase();
+	m = readin(argv[0], &d13);
+	n = readin(argv[1], &d23);
 	for (i = 0; i <= 2; i++) {
 		if ((fp[i] = fopen(argv[i + 2], "r")) == NULL) {
 			printf("diff3: can't open %s\n", argv[i + 2]);
@@ -206,17 +209,15 @@ main(int argc, char **argv)
  * The vector could be optimized out of existence)
  */
 int
-readin(char *name, struct diff *dd)
+readin(char *name, struct diff **dd)
 {
-	int i;
-	int a,b,c,d;
-	char kind;
-	char *p;
+	int a, b, c, d, i;
+	char kind, *p;
+
 	fp[0] = fopen(name, "r");
-	for (i=0; getchange(fp[0]); i++) {
-		if (i >= NC)
-			err(EXIT_FAILURE, "too many changes");
-		p = line;
+	for (i=0; (p = getchange(fp[0])); i++) {
+		if (i >= szchanges - 1)
+			increase();
 		a = b = number(&p);
 		if (*p == ',') {
 			p++;
@@ -234,13 +235,13 @@ readin(char *name, struct diff *dd)
 			c++;
 		b++;
 		d++;
-		dd[i].old.from = a;
-		dd[i].old.to = b;
-		dd[i].new.from = c;
-		dd[i].new.to = d;
+		(*dd)[i].old.from = a;
+		(*dd)[i].old.to = b;
+		(*dd)[i].new.from = c;
+		(*dd)[i].new.to = d;
 	}
-	dd[i].old.from = dd[i-1].old.to;
-	dd[i].new.from = dd[i-1].new.to;
+	(*dd)[i].old.from = (*dd)[i-1].old.to;
+	(*dd)[i].new.from = (*dd)[i-1].new.to;
 	(void)fclose(fp[0]);
 	return (i);
 }
@@ -255,32 +256,44 @@ number(char **lc)
 	return (nn);
 }
 
-int
+char *
 getchange(FILE *b)
 {
-	while (getline(b)) {
+	char *line;
+
+	while ((line = getline(b, NULL))) {
 		if (isdigit((unsigned char)line[0]))
-			return (1);
+			return (line);
 	}
-	return (0);
+	return (NULL);
 }
 
-int
-getline(FILE *b)
+char *
+getline(FILE *b, size_t *n)
 {
-	int i, c;
+	char *cp;
+	size_t len;
+	static char *buf;
+	static size_t bufsize;
 
-	for (i = 0; i < sizeof(line) - 1; i++) {
-		c = getc(b);
-		if (c == EOF)
-			break;
-		line[i] = c;
-		if (c == '\n') {
-			line[++i] = 0;
-			return (i);
-		}
+	if ((cp = fgetln(b, &len)) == NULL)
+		return (NULL);
+
+	if (cp[len - 1] != '\n')
+		len++;
+	if (len + 1 > bufsize) {
+		do {
+			bufsize += 1024;
+		} while (len + 1 > bufsize);
+		if ((buf = realloc(buf, bufsize)) == NULL)
+			err(EXIT_FAILURE, NULL);
 	}
-	return (0);
+	memcpy(buf, cp, len - 1);
+	buf[len - 1] = '\n';
+	buf[len] = '\0';
+	if (n != NULL)
+		*n = len;
+	return (buf);
 }
 
 void
@@ -447,16 +460,17 @@ keep(int i, struct range *rnew)
 int
 skip(int i, int from, char *pr)
 {
-	int j, n;
+	size_t j, n;
+	char *line;
 
 	for (n = 0; cline[i] < from - 1; n += j) {
-		if ((j = getline(fp[i])) == 0)
+		if ((line = getline(fp[i], &j)) == NULL)
 			trouble();
 		if (pr != NULL)
 			printf("%s%s", pr, line);
 		cline[i]++;
 	}
-	return (n);
+	return ((int) n);
 }
 
 /*
@@ -554,6 +568,41 @@ edscript(int n)
 	}
 	exit(overlapcnt);
 }
+
+void
+increase(void)
+{
+	struct diff *p;
+	char *q;
+	size_t newsz, incr;
+
+	/* are the memset(3) calls needed? */
+	newsz = szchanges == 0 ? 64 : 2 * szchanges;
+	incr = newsz - szchanges;
+
+	p = realloc(d13, newsz * sizeof(struct diff));
+	if (p == NULL)
+		err(1, NULL);
+	memset(p + szchanges, 0, incr * sizeof(struct diff));
+	d13 = p;
+	p = realloc(d23, newsz * sizeof(struct diff));
+	if (p == NULL)
+		err(1, NULL);
+	memset(p + szchanges, 0, incr * sizeof(struct diff));
+	d23 = p;
+	p = realloc(de, newsz * sizeof(struct diff));
+	if (p == NULL)
+		err(1, NULL);
+	memset(p + szchanges, 0, incr * sizeof(struct diff));
+	de = p;
+	q = realloc(overlap, newsz * sizeof(char));
+	if (q == NULL)
+		err(1, NULL);
+	memset(q + szchanges, 0, incr * sizeof(char));
+	overlap = q;
+	szchanges = newsz;
+}
+
 
 __dead void
 usage(void)

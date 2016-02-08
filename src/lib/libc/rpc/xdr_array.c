@@ -1,3 +1,4 @@
+/*	$OpenBSD: xdr_array.c,v 1.9 2005/08/08 08:05:36 espie Exp $ */
 /*
  * Sun RPC is a product of Sun Microsystems, Inc. and is provided for
  * unrestricted use provided that this legend is included on all tape
@@ -27,12 +28,8 @@
  * Mountain View, California  94043
  */
 
-#if defined(LIBC_SCCS) && !defined(lint)
-static char *rcsid = "$OpenBSD: xdr_array.c,v 1.6 2002/08/01 01:05:24 deraadt Exp $";
-#endif /* LIBC_SCCS and not lint */
-
 /*
- * xdr_array.c, Generic XDR routines impelmentation.
+ * xdr_array.c, Generic XDR routines implementation.
  *
  * Copyright (C) 1984, Sun Microsystems, Inc.
  *
@@ -57,13 +54,12 @@ static char *rcsid = "$OpenBSD: xdr_array.c,v 1.6 2002/08/01 01:05:24 deraadt Ex
  * xdr procedure to call to handle each element of the array.
  */
 bool_t
-xdr_array(xdrs, addrp, sizep, maxsize, elsize, elproc)
-	XDR *xdrs;
-	caddr_t *addrp;		/* array pointer */
-	u_int *sizep;		/* number of elements */
-	u_int maxsize;		/* max numberof elements */
-	u_int elsize;		/* size in bytes of each element */
-	xdrproc_t elproc;	/* xdr routine to handle each element */
+xdr_array(XDR *xdrs,
+    caddr_t *addrp,	/* array pointer */
+    u_int *sizep,	/* number of elements */
+    u_int maxsize,	/* max numberof elements */
+    u_int elsize,	/* size in bytes of each element */
+    xdrproc_t elproc)	/* xdr routine to handle each element */
 {
 	caddr_t target = *addrp;
 	u_int nodesize, c, i;
@@ -130,12 +126,8 @@ xdr_array(xdrs, addrp, sizep, maxsize, elsize, elproc)
  * > xdr_elem: routine to XDR each element
  */
 bool_t
-xdr_vector(xdrs, basep, nelem, elemsize, xdr_elem)
-	XDR *xdrs;
-	char *basep;
-	u_int nelem;
-	u_int elemsize;
-	xdrproc_t xdr_elem;	
+xdr_vector(XDR *xdrs, char *basep, u_int nelem, u_int elemsize,
+    xdrproc_t xdr_elem)
 {
 	char *elptr;
 	u_int i;

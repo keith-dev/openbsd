@@ -1,4 +1,4 @@
-/*	$OpenBSD: ntp.c,v 1.54 2005/03/08 16:33:43 henning Exp $ */
+/*	$OpenBSD: ntp.c,v 1.67 2005/08/10 13:48:36 dtucker Exp $ */
 
 /*
  * Copyright (c) 2003, 2004 Henning Brauer <henning@openbsd.org>
@@ -118,11 +118,10 @@ ntp_main(int pipe_prnt[2], struct ntpd_conf *nconf)
 	setup_listeners(se, conf, &listener_cnt);
 
 	if (setgroups(1, &pw->pw_gid) ||
-	    setegid(pw->pw_gid) || setgid(pw->pw_gid) ||
-	    seteuid(pw->pw_uid) || setuid(pw->pw_uid))
+	    setresgid(pw->pw_gid, pw->pw_gid, pw->pw_gid) ||
+	    setresuid(pw->pw_uid, pw->pw_uid, pw->pw_uid))
 		fatal("can't drop privileges");
 
-	endpwent();
 	endservent();
 
 	signal(SIGTERM, ntp_sighdlr);
@@ -139,7 +138,7 @@ ntp_main(int pipe_prnt[2], struct ntpd_conf *nconf)
 		client_peer_init(p);
 
 	bzero(&conf->status, sizeof(conf->status));
-	conf->status.leap = LI_ALARM;
+	conf->status.synced = 0;
 	clock_getres(CLOCK_REALTIME, &tp);
 	b = 1000000000 / tp.tv_nsec;	/* convert to Hz */
 	for (a = 0; b > 1; a--, b >>= 1)
@@ -195,13 +194,14 @@ ntp_main(int pipe_prnt[2], struct ntpd_conf *nconf)
 		idx_peers = i;
 		sent_cnt = trial_cnt = 0;
 		TAILQ_FOREACH(p, &conf->ntp_peers, entry) {
-			if (p->next > 0 && p->next < nextaction)
-				nextaction = p->next;
 			if (p->next > 0 && p->next <= time(NULL)) {
-				trial_cnt++;
+				if (p->state > STATE_DNS_INPROGRESS)
+					trial_cnt++;
 				if (client_query(p) == 0)
 					sent_cnt++;
 			}
+			if (p->next > 0 && p->next < nextaction)
+				nextaction = p->next;
 
 			if (p->deadline > 0 && p->deadline < nextaction)
 				nextaction = p->deadline;
@@ -227,7 +227,8 @@ ntp_main(int pipe_prnt[2], struct ntpd_conf *nconf)
 			}
 		}
 
-		if (trial_cnt > 0 && sent_cnt == 0 && conf->settime)
+		if (conf->settime &&
+		    ((trial_cnt > 0 && sent_cnt == 0) || peer_cnt == 0))
 			priv_settime(0);	/* no good peers, don't wait */
 
 		if (ibuf_main->w.queued > 0)
@@ -305,6 +306,16 @@ ntp_dispatch_imsg(void)
 			break;
 
 		switch (imsg.hdr.type) {
+		case IMSG_ADJTIME:
+			memcpy(&n, imsg.data, sizeof(n));
+			if (n == 1 && !conf->status.synced) {
+				log_info("clock is now synced");
+				conf->status.synced = 1;
+			} else if (n == 0 && conf->status.synced) {
+				log_info("clock is now unsynced");
+				conf->status.synced = 0;
+			}
+			break;
 		case IMSG_HOST_DNS:
 			TAILQ_FOREACH(peer, &conf->ntp_peers, entry)
 				if (peer->id == imsg.hdr.peerid)
@@ -317,7 +328,13 @@ ntp_dispatch_imsg(void)
 				log_warnx("IMSG_HOST_DNS but addr != NULL!");
 				break;
 			}
+
 			dlen = imsg.hdr.len - IMSG_HEADER_SIZE;
+			if (dlen == 0) {	/* no data -> temp error */
+				peer->state = STATE_DNS_TEMPFAIL;
+				break;
+			}
+
 			p = (u_char *)imsg.data;
 			while (dlen >= sizeof(struct sockaddr_storage)) {
 				if ((h = calloc(1, sizeof(struct ntp_addr))) ==
@@ -332,15 +349,17 @@ ntp_dispatch_imsg(void)
 					npeer->addr = h;
 					npeer->addr_head.a = h;
 					client_peer_init(npeer);
+					npeer->state = STATE_DNS_DONE;
 					peer_add(npeer);
 				} else {
 					h->next = peer->addr;
 					peer->addr = h;
 					peer->addr_head.a = peer->addr;
+					peer->state = STATE_DNS_DONE;
 				}
 			}
 			if (dlen != 0)
-				fatal("IMSG_HOST_DNS: dlen != 0");
+				fatalx("IMSG_HOST_DNS: dlen != 0");
 			if (peer->addr_head.pool)
 				peer_remove(peer);
 			else
@@ -386,7 +405,7 @@ priv_adjtime(void)
 	}
 
 	if ((peers = calloc(offset_cnt, sizeof(struct ntp_peer *))) == NULL)
-		fatal("calloc ntp_adjtime");
+		fatal("calloc priv_adjtime");
 
 	TAILQ_FOREACH(p, &conf->ntp_peers, entry) {
 		if (p->trustlevel < TRUSTLEVEL_BADPEER)
@@ -414,18 +433,22 @@ priv_adjtime(void)
 			conf->status.stratum =
 			    peers[offset_cnt / 2]->update.status.stratum;
 		}
+		conf->status.leap = peers[offset_cnt / 2]->update.status.leap;
 
 		imsg_compose(ibuf_main, IMSG_ADJTIME, 0, 0,
 		    &offset_median, sizeof(offset_median));
 
 		conf->status.reftime = gettime();
-		conf->status.leap = LI_NOWARNING;
 		conf->status.stratum++;	/* one more than selected peer */
 		update_scale(offset_median);
 
+		conf->status.refid4 =
+		    peers[offset_cnt / 2]->update.status.refid4;
 		if (peers[offset_cnt / 2]->addr->ss.ss_family == AF_INET)
 			conf->status.refid = ((struct sockaddr_in *)
 			    &peers[offset_cnt / 2]->addr->ss)->sin_addr.s_addr;
+		else
+			conf->status.refid = conf->status.refid4;
 	}
 
 	free(peers);
@@ -454,8 +477,17 @@ offset_compare(const void *aa, const void *bb)
 void
 priv_settime(double offset)
 {
+	struct ntp_peer *p;
+
 	imsg_compose(ibuf_main, IMSG_SETTIME, 0, 0, &offset, sizeof(offset));
 	conf->settime = 0;
+
+	TAILQ_FOREACH(p, &conf->ntp_peers, entry) {
+		if (p->next)
+			p->next -= offset;
+		if (p->deadline)
+			p->deadline -= offset;
+	}
 }
 
 void

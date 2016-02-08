@@ -1,3 +1,4 @@
+/*	$OpenBSD: auth_unix.c,v 1.19 2005/08/08 08:05:35 espie Exp $ */
 /*
  * Sun RPC is a product of Sun Microsystems, Inc. and is provided for
  * unrestricted use provided that this legend is included on all tape
@@ -26,10 +27,6 @@
  * 2550 Garcia Avenue
  * Mountain View, California  94043
  */
-
-#if defined(LIBC_SCCS) && !defined(lint)
-static char *rcsid = "$OpenBSD: auth_unix.c,v 1.17 2005/01/08 19:17:39 krw Exp $";
-#endif /* LIBC_SCCS and not lint */
 
 /*
  * auth_unix.c, Implements UNIX style authentication parameters. 
@@ -83,7 +80,7 @@ struct audata {
 };
 #define	AUTH_PRIVATE(auth)	((struct audata *)auth->ah_private)
 
-static void marshal_new_auth();
+static void marshal_new_auth(AUTH *auth);
 
 
 /*
@@ -91,12 +88,7 @@ static void marshal_new_auth();
  * Returns an auth handle with the given stuff in it.
  */
 AUTH *
-authunix_create(machname, uid, gid, len, aup_gids)
-	char *machname;
-	int uid;
-	int gid;
-	int len;
-	int *aup_gids;
+authunix_create(char *machname, int uid, int gid, int len, int *aup_gids)
 {
 	struct authunix_parms aup;
 	char mymem[MAX_AUTH_BYTES];
@@ -173,7 +165,7 @@ authunix_create(machname, uid, gid, len, aup_gids)
  * syscalls.
  */
 AUTH *
-authunix_create_default()
+authunix_create_default(void)
 {
 	int len, i;
 	char machname[MAX_MACHINE_NAME + 1];
@@ -199,16 +191,13 @@ authunix_create_default()
  */
 /* ARGSUSED */
 static void
-authunix_nextverf(auth)
-	AUTH *auth;
+authunix_nextverf(AUTH *auth)
 {
 	/* no action necessary */
 }
 
 static bool_t
-authunix_marshal(auth, xdrs)
-	AUTH *auth;
-	XDR *xdrs;
+authunix_marshal(AUTH *auth, XDR *xdrs)
 {
 	struct audata *au = AUTH_PRIVATE(auth);
 
@@ -216,9 +205,7 @@ authunix_marshal(auth, xdrs)
 }
 
 static bool_t
-authunix_validate(auth, verf)
-	AUTH *auth;
-	struct opaque_auth *verf;
+authunix_validate(AUTH *auth, struct opaque_auth *verf)
 {
 	struct audata *au;
 	XDR xdrs;
@@ -246,8 +233,7 @@ authunix_validate(auth, verf)
 }
 
 static bool_t
-authunix_refresh(auth)
-	AUTH *auth;
+authunix_refresh(AUTH *auth)
 {
 	struct audata *au = AUTH_PRIVATE(auth);
 	struct authunix_parms aup;
@@ -289,8 +275,7 @@ done:
 }
 
 static void
-authunix_destroy(auth)
-	AUTH *auth;
+authunix_destroy(AUTH *auth)
 {
 	struct audata *au = AUTH_PRIVATE(auth);
 
@@ -312,8 +297,7 @@ authunix_destroy(auth)
  * sets private data, au_marshed and au_mpos
  */
 static void
-marshal_new_auth(auth)
-	AUTH *auth;
+marshal_new_auth(AUTH *auth)
 {
 	XDR		xdr_stream;
 	XDR	*xdrs = &xdr_stream;

@@ -1,4 +1,4 @@
-.\"	$OpenBSD: cvs.1,v 1.60 2005/03/06 21:28:26 jmc Exp $
+.\"	$OpenBSD: cvs.1,v 1.89 2005/08/24 09:19:38 xsa Exp $
 .\"
 .\" Copyright (c) 2004 Jean-Francois Brousseau <jfb@openbsd.org>
 .\" Copyright (c) 2004, 2005 Xavier Santolaria <xsa@openbsd.org>
@@ -29,18 +29,21 @@
 .Os
 .Sh NAME
 .Nm cvs
-.Nd OpenCVS Concurrent Versioning System client
+.Nd OpenCVS Concurrent Versioning System
 .Sh SYNOPSIS
 .Nm
-.Op Fl flQqtv
+.Bk -words
+.Op Fl flnQqrtvw
 .Op Fl d Ar root
 .Op Fl e Ar editor
 .Xo
 .Oo Fl s
 .Ar var Ns = Ns Ar val Oc
 .Xc
+.Op Fl T Ar tmpdir
 .Op Fl z Ar level
 .Ar command Op Ar ...
+.Ek
 .Sh DESCRIPTION
 The
 .Nm
@@ -69,7 +72,7 @@ See
 for further information.
 .Pp
 The following options are supported:
-.Bl -tag -width "-e editorXX"
+.Bl -tag -width Ds
 .It Fl d Ar root
 Use
 .Ar root
@@ -84,20 +87,40 @@ This option overrides the environment variables CVSEDITOR, VISUAL, and EDITOR.
 Do not read the user's configuration file on startup.
 .It Fl l
 Suppress logging of history information.
+.It Fl n
+Dry-run mode.
+Show which files will be used by the command issued
+without really running it.
 .It Fl Q
 Be extra quiet.
 Only error messages will be displayed.
 .It Fl q
 Be quiet about reporting.
+.It Fl r
+Extract files in read-only mode.
 .It Fl s Ar var Ns = Ns Ar val
 Set the value of the internal variable
 .Ar var
 to the string
 .Ar val .
+.It Fl T Ar tmpdir
+Set the value of the directory where temporary files are to be created.
+The default is set to
+.Pa /tmp .
 .It Fl t
 Trace program execution.
 .It Fl v
 Display version information and exit.
+.It Fl w
+Extract new files in read-write mode.
+Overrides the setting of the
+.Ev CVSREAD
+environment variable.
+This is the default unless
+.Ev CVSREAD
+is set or the
+.Fl r
+option is specified.
 .It Fl z Ar level
 Specify the compression level to
 .Xr gzip 1
@@ -125,7 +148,7 @@ Embedded strings of the form $keyword$ and $keyword:...$ in a file
 are replaced with strings of the form $keyword: value$ whenever you
 obtain a new revision of the file.
 The possible keywords are as follows:
-.Bl -tag -width "RevisionXXX"
+.Bl -tag -width Ds
 .It $\&Author$
 The name of the user who checked in the revision.
 .It $\&Date$
@@ -221,13 +244,12 @@ command to freeze the values before releasing software.
 .Sh COMMANDS
 The following commands are supported by
 .Nm :
-.Bl -tag -width "xxxxxxxxxxxx"
+.Bl -tag -width Ds
 .It Xo Ic add
 .Op Fl k Ar mode
 .Op Fl m Ar msg
 .Ar file ...
 .Xc
-.Pp
 Before a file is known to
 .Nm ,
 it must be added to the repository using this command.
@@ -287,7 +309,7 @@ Set the default branch to
 .Ar branch .
 .It Fl I
 Command is interactive.
-.It Fl k
+.It Fl k Ar mode
 Specify the keyword substitution mode.
 .It Fl m Ar rev : Ns Ar msg
 Change the log message of a revision.
@@ -321,7 +343,7 @@ file.
 .It Fl o Ar rev
 Delete one or more revisions.
 The specifications of the values or revisions are as follows:
-.Bl -tag -width "XXXXXXXXXXXX"
+.Bl -tag -width Ds
 .It rev
 Specific revision.
 .It rev1:rev2
@@ -390,7 +412,6 @@ Aliases:
 .Fl r Ar rev Oc
 .Op Ar file ...
 .Xc
-.Pp
 For each line of any files specified, show information about its
 last revision.
 The information given is the last revision when a modification occurred,
@@ -426,7 +447,8 @@ Show annotations as of revision
 .El
 .Pp
 Aliases:
-.Ic ann .
+.Ic ann ,
+.Ic blame .
 .It Xo Ic checkout
 .Op Fl AcflNnPpRs
 .Op Fl d Ar dir
@@ -454,6 +476,8 @@ Display the list of available modules.
 .It Fl D Ar date
 Check out as of the latest revision no later than
 .Ar date
+(implies
+.Fl P )
 (is sticky).
 .It Fl d Ar dir
 Check out in directory
@@ -551,7 +575,7 @@ Aliases:
 .Ic ci ,
 .Ic com .
 .It Xo Ic diff
-.Op Fl cilNpRu
+.Op Fl cilNnpRu
 .Oo Oo Fl D
 .Ar date1 \*(Ba
 .Fl r Ar rev1 Oc
@@ -600,6 +624,10 @@ Limit the scope of the search to the local directory
 only and disable recursive behaviour.
 .It Fl N
 Include added or removed files.
+.It Fl n
+Produces a diff in the same format as that used by
+.Xr rcsdiff 1 ,
+with a count of changed lines on each insert or delete command.
 .It Fl p
 With unified and context diffs, show with each change the first
 40 characters of the last line before the context beginning with
@@ -654,7 +682,7 @@ command takes the following options:
 .It Fl a Ar action
 Specify the temporary notification wanted:
 .Pp
-.Bl -tag -width "commitXX" -compact
+.Bl -tag -width Ds -compact
 .It Cm commit
 Another user has committed changes to the file.
 .It Cm edit
@@ -880,7 +908,7 @@ Check that records match the current working directory.
 Extract by a specific record type specified by a single letter.
 They can be used in combination.
 The available types are as follows:
-.Bl -tag -width "XXX"
+.Bl -tag -width Ds
 .It A
 A file has been added with the
 .Ic add
@@ -972,9 +1000,13 @@ Aliases:
 .Ic hi ,
 .Ic his .
 .It Xo Ic import
+.Op Fl d
 .Op Fl b Ar branch
+.Op Fl I Ar ign
+.Op Fl k Ar mode
 .Op Fl m Ar msg
-.Ar repository
+.Op Fl W Ar spec
+.Ar module
 .Ar vendortag
 .Ar releasetag
 .Xc
@@ -982,7 +1014,7 @@ Aliases:
 Import sources into CVS using vendor branches.
 .Pp
 At least three arguments are required:
-.Ar repository
+.Ar module
 specifies the location of the sources to be imported;
 .Ar vendortag
 is a tag for the entire branch;
@@ -996,8 +1028,22 @@ command takes the following options:
 .Bl -tag -width Ds -offset 3n
 .It Fl b Ar branch
 Specify the first-level branch number.
+.It Fl d
+Use the file's last modification time as the timestamp for the
+initial revisions.
+.It Fl I Ar ign
+Ignore files specified by
+.Ar ign .
+This option can be used several times on the command line.
+To see all files, use the
+.Fl I Ar !\&
+specification.
+.It Fl k Ar mode
+Specify the keyword substitution mode (is sticky).
 .It Fl m Ar msg
 Specify the log message to send.
+.It Fl W Ar spec
+Wrappers specification line.
 .El
 .Pp
 Aliases:
@@ -1036,7 +1082,7 @@ List revisions of the default branch only.
 .It Fl d Ar dates
 Specify revisions with dates matching the specification.
 The specification might be as follows:
-.Bl -tag -width "XXXXXXXXXXXXXX"
+.Bl -tag -width Ds
 .It D1>D2 or D2>D1
 Select all revisions between
 .Ar \&D1
@@ -1073,7 +1119,7 @@ Do not list tags.
 Print name of RCS file only.
 .It Fl r Ar revs
 Specify revision(s) to list:
-.Bl -tag -width "XXXXXXXXXXXXXXX"
+.Bl -tag -width Ds
 .It REV1,REV2,...,
 A list of revisions is specified by separating names or numbers
 of revisions by the
@@ -1241,7 +1287,7 @@ command.
 For each file not being synchronized with the base repository,
 a single letter prefix is given to specify the state of the file.
 The possible prefixes are as follows:
-.Bl -tag -width "XXX"
+.Bl -tag -width Ds
 .It \&?
 The file is unknown to
 .Nm
@@ -1286,6 +1332,21 @@ is scheduled to be removed from the repository.
 Files are not actually removed from the repository until the
 .Ic commit
 command has been run subsequently.
+.Pp
+There is no way to remove a directory with the
+.Ic remove
+command.
+.Nm
+will only remove a directory if it is empty and if the
+.Ic checkout
+or
+.Ic update
+commands are run with the
+.Fl P
+option.
+(Note that the
+.Ic export
+command always removes empty directories.)
 .Pp
 The
 .Ic remove
@@ -1388,7 +1449,7 @@ Display symbolic tags for
 .Ar file .
 .Pp
 The state may be one of the following:
-.Bl -tag -width "Locally modified"
+.Bl -tag -width Ds
 .It Cm Locally Added
 The file has been added with the
 .Ic add
@@ -1577,7 +1638,7 @@ option must be used for that.
 For each file updated, a single letter prefix is given to
 specify the state of the file.
 The possible prefixes are as follows:
-.Bl -tag -width "XXX"
+.Bl -tag -width Ds
 .It \&?
 The file is unknown to
 .Nm .
@@ -1675,7 +1736,7 @@ command takes the following options:
 Specify the permanent notification wanted for
 .Ar add | remove :
 .Pp
-.Bl -tag -width "commitXX" -compact
+.Bl -tag -width Ds -compact
 .It Cm commit
 Another user has committed changes to the file.
 .It Cm edit
@@ -1712,7 +1773,7 @@ The
 command lists the users who asked for notifications as well as the
 notifications details.
 The possible notifications are as follows:
-.Bl -tag -width "tcommitXX"
+.Bl -tag -width Ds
 .It Cm commit
 Permanent watch of a commit of a new version of a file.
 .It Cm edit
@@ -1748,13 +1809,28 @@ This is the default.
 .El
 .El
 .Sh ENVIRONMENT
-.Bl -tag -width CVS_CLIENT_LOG
+.Bl -tag -width Ds
 .It Ev CVS_CLIENT_LOG
 This variable enables logging of all communications between the client and
 server when running in non-local mode.
 If set, this environment variable must contain a base path from which two
 paths will be generated by appending ".in" to the value for the server's
 input and ".out" for the server's output.
+.Pp
+The path can contain the following substitutes:
+.Pp
+.Bl -tag -width Ds -offset indent -compact
+.It %c
+the command being run
+.It %d
+the date
+.It %p
+the process ID
+.It %u
+the username of the person running it
+.El
+.Pp
+The substitutes are only supported by OpenCVS.
 .It Ev CVS_RSH
 Name of the program to use when connecting to the server through a remote
 shell.
@@ -1772,6 +1848,10 @@ Checked before
 .Ev EDITOR
 and
 .Ev VISUAL .
+.It Ev CVSREAD
+If set,
+.Nm
+extracts files in read-only mode.
 .It Ev CVSROOT
 When set, this variable should contain the string pointing to the root
 directory of the CVS repository.
@@ -1783,6 +1863,17 @@ Name of the editor to use when editing commit messages.
 This is traditionally a line-oriented editor,
 such as
 .Xr ex 1 .
+.It Ev HOME
+Directory where the
+.Pa .cvsignore
+and
+.Pa .cvsrc
+files are searched for.
+.It Ev TMPDIR
+When set, this variable specifies the directory where temporary files
+are to be created.
+The default is set to
+.Pa /tmp .
 .It Ev VISUAL
 Name of the editor to use when editing commit messages.
 This is traditionally a screen-oriented editor,
@@ -1791,6 +1882,17 @@ such as
 .El
 .Sh FILES
 .Bl -tag -width Ds
+.It Pa $HOME/.cvsignore
+File containing a list of files (or
+.Xr sh 1
+file name patterns) that should be ignored by
+.Nm
+during the
+.Ic import ,
+.Ic release ,
+and
+.Ic update
+commands.
 .It Pa $HOME/.cvsrc
 File containing a list of implicit options to pass to certain commands.
 This file is read on startup unless the
@@ -1798,18 +1900,202 @@ This file is read on startup unless the
 option is specified.
 .It Pa $CVSROOT/CVSROOT
 Directory containing repository administrative files.
+.It Pa $CVSROOT/CVSROOT/history
+File containing reports of
+.Ic checkout ,
+.Ic commit ,
+.Ic export ,
+.Ic release ,
+.Ic rtag ,
+and
+.Ic update
+commands that have been issued.
+By default, the
+.Ic init
+command creates the
+.Pa history
+file.
+To disable history logging, the
+.Pa history
+file should be removed manually.
+The
+.Ic history
+command shows these reports according to several criteria.
 .It Pa $CVSROOT/CVSROOT/loginfo
 File containing associations between modules and handlers for
 post-commit logging.
+.El
+.Pp
+Each directory that is managed by
+.Nm
+contains a
+.Pa CVS
+directory.
+This directory is used by various
+.Nm
+commands to record the status of files in the current working directory.
+These files should not be modified manually by the user but by the
+.Nm
+commands instead.
+Files that are always stored in every
+.Pa CVS
+directory are as follows:
+.Bl -tag -width Ds
+.It Pa CVS/Entries
+File containing a list of files managed by
+.Nm .
+.Pa Entries
+has one line per file or directory describing the state of it with
+regard to the source repository.
+These lines have the following format:
+.Pp
+.Dl /name/revision/timestamp/options/tag
+.Bl -tag -width Ds
+.It name
+Name of the file in the directory.
+.It revision
+Revision of the file in the working directory.
+The revision is equal to
+.Sq 0
+if the file has been added with the
+.Ic add
+command or preceded by the
+.Sq -
+character if the file has been removed with the
+.Ic remove
+command.
+.It timestamp
+Contains the timestamp of the file at the time
+.Nm
+created it.
+If the timestamp is different from the actual modification time of the file,
+it means that the file has been modified.
+.It options
+Contains the keyword substitution mode used for this file.
+.It tag
+Contains
+.Sq T
+followed by a tagname or
+.Sq D
+followed by a date.
+.El
+.Pp
+Entries corresponding to directories have the following format:
+.Pp
+.Dl D/name////
+.Pp
+The lines in the
+.Pa Entries
+file can be in any order.
+.It Pa CVS/Repository
+File containing the path to the corresponding directory in the
+source repository.
+.It Pa CVS/Root
+File containing the value of the
+.Ev CVSROOT
+variable at the time of checkout.
+This file is used by all
+.Nm
+commands instead of
+.Ev CVSROOT
+once
+.Nm
+has checked for its existence.
+.El
+.Pp
+Depending on the circumstances, other files may exist in the
+.Pa CVS
+directory:
+.Bl -tag -width Ds
+.It Pa CVS/Base
+If pseudo-lock mode is enabled in client-server mode,
+the
+.Pa Base
+directory contains a copy of the file on which the
+.Ic edit
+command has been issued.
+This allows the
+.Ic unedit
+command to operate even if the CVS server is unreachable.
+.It Pa CVS/Baserev
+File listing the revisions for each file contained in the
+.Pa Base
+directory under the following format:
+.Pp
+.Dl name/revision/
+.It Pa CVS/Checkin.prog
+File containing the path to the command specified with the
+.Fl i
+option in the
+.Pa CVSROOT/modules
+file.
+.It Pa CVS/Entries.Static
+Tells
+.Nm
+to not add files to the directory unless the
+.Ic update
+command is issued with the
+.Fl d
+option.
+.It Pa CVS/Notify
+File containing the notifications that could not be sent to the
+CVS server but will be sent at the next successful connection.
+.It Pa CVS/Tag
+File containing the symbolic revision that was used at checkout.
+.It Pa CVS/Update.prog
+File containing the path to the command specified with the
+.Fl u
+option in the
+.Pa CVSROOT/modules
+file.
+.It Pa CVS/<name>,t
+File containing the description of the file
+.Pa file
+that has been added with the
+.Ic add
+command.
+This description is used by
+.Nm
+when archiving this file with the
+.Ic commit
+command.
+.El
+.Sh DIAGNOSTICS
+The
+.Nm
+utility exits 0 on success, or with one of the following return codes.
+The numerical values corresponding to the symbolic ones are given in
+parentheses for easy reference.
+.Bl -tag -width Ds
+.It Dv CVS_EX_USAGE Pq 1
+The
+.Nm
+command was used incorrectly.
+Either with the wrong number of arguments, a bad flag, a bad syntax in
+a parameter, etc...
+.It Dv CVS_EX_DATA Pq 2
+The input data was incorrect in some way.
+.It Dv CVS_EX_PROTO Pq 3
+The remote system returned something that was not possible during
+a protocol exchange.
+.It Dv CVS_EX_FILE Pq 4
+An error occurred while doing an operation on a file.
+.It Dv CVS_EX_BADTAG Pq 5
+An error occurred while doing a tagging/untagging operation.
+.It Dv CVS_EX_BADROOT Pq 6
+The
+.Ev CVSROOT
+was not given or does not match the expected format.
 .El
 .Sh SEE ALSO
 .Xr diff 1 ,
 .Xr gzip 1 ,
 .Xr patch 1 ,
 .Xr rcs 1 ,
+.Xr cvsignore 5 ,
 .Xr cvsrc 5 ,
-.Xr cvsintro 7 ,
-.Xr cvsd 8
+.Xr cvswrappers 5 ,
+.Xr cvsintro 7
 .Sh HISTORY
 The OpenCVS project is a BSD-licensed rewrite of the original
 Concurrent Versioning System written by Jean-Francois Brousseau.

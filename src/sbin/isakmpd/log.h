@@ -1,4 +1,4 @@
-/* $OpenBSD: log.h,v 1.21 2004/05/23 18:17:56 hshoexer Exp $	 */
+/* $OpenBSD: log.h,v 1.24 2005/05/26 05:35:55 moritz Exp $	 */
 /* $EOM: log.h,v 1.19 2000/03/30 14:27:23 ho Exp $	 */
 
 /*
@@ -61,8 +61,6 @@ enum log_classes {
 #define LOG_PRINT  -1
 #define LOG_REPORT -2
 
-#ifdef USE_DEBUG
-
 #define LOG_DBG(x)	log_debug x
 #define LOG_DBG_BUF(x)	log_debug_buf x
 
@@ -79,17 +77,14 @@ extern void     log_packet_iov(struct sockaddr *, struct sockaddr *,
 extern void     log_packet_restart(char *);
 extern void     log_packet_stop(void);
 
-#else				/* !USE_DEBUG */
-
-#define LOG_DBG(x)
-#define LOG_DBG_BUF(x)
-
-#endif				/* USE_DEBUG */
-
 extern FILE    *log_current(void);
 extern void	log_error(const char *,...)
 		    __attribute__((__format__(__printf__, 1, 2)));
+extern void	log_errorx(const char *,...)
+		    __attribute__((__format__(__printf__, 1, 2)));
 extern void     log_fatal(const char *,...)
+		    __attribute__((__format__(__printf__, 1, 2)));
+extern void     log_fatalx(const char *,...)
 		    __attribute__((__format__(__printf__, 1, 2)));
 extern void     log_print(const char *,...)
 		    __attribute__((__format__(__printf__, 1, 2)));

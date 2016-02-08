@@ -1,3 +1,4 @@
+/*	$OpenBSD: stdio.c,v 1.9 2005/08/08 08:05:36 espie Exp $ */
 /*-
  * Copyright (c) 1990, 1993
  *	The Regents of the University of California.  All rights reserved.
@@ -30,10 +31,6 @@
  * SUCH DAMAGE.
  */
 
-#if defined(LIBC_SCCS) && !defined(lint)
-static char rcsid[] = "$OpenBSD: stdio.c,v 1.6 2004/09/28 18:12:44 otto Exp $";
-#endif /* LIBC_SCCS and not lint */
-
 #include <fcntl.h>
 #include <unistd.h>
 #include <stdio.h>
@@ -59,7 +56,7 @@ __sread(void *cookie, char *buf, int n)
 }
 
 int
-__swrite(void *cookie, char const *buf, int n)
+__swrite(void *cookie, const char *buf, int n)
 {
 	FILE *fp = cookie;
 
@@ -86,9 +83,7 @@ __sseek(void *cookie, fpos_t offset, int whence)
 }
 
 int
-__sclose(cookie)
-	void *cookie;
+__sclose(void *cookie)
 {
-
 	return (close(((FILE *)cookie)->_file));
 }

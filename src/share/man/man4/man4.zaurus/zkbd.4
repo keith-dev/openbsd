@@ -1,4 +1,4 @@
-.\" $OpenBSD: zkbd.4,v 1.6 2005/01/16 01:35:55 jmc Exp $
+.\" $OpenBSD: zkbd.4,v 1.12 2005/06/04 17:56:24 dlg Exp $
 .\"
 .\" Copyright (c) 2004 Theo de Raadt <deraadt@openbsd.org>
 .\"
@@ -21,7 +21,8 @@
 .Nm zkbd
 .Nd Zaurus keyboard support
 .Sh SYNOPSIS
-.Cd "zkbd*  at pxaip?"
+.Cd "zkbd0  at pxaip?"
+.Cd "wskbd* at zkdb?"
 .Sh DESCRIPTION
 The
 .Nm
@@ -33,7 +34,7 @@ driver.
 .Sh LAYOUT
 The Zaurus keyboard uses some strange chording behaviours to make
 certain key combinations show up.
-The left-hand Japanese key beside Ctrl is mapped as the ALT key.
+The left-hand Japanese key beside Ctrl (kana/hira) is mapped as the ALT key.
 The non-obvious key mappings are explained here:
 .Pp
 .Bl -tag -width "xxxxxxxxxxxxx" -compact -offset indent
@@ -63,13 +64,34 @@ Up and Down
 Right
 .It Li Rear Cancel
 Left
+.It Li \&Fn Up
+Page Up
+.It Li \&Fn Down
+Page Down
+.It Li \&Fn Left
+Home
+.It Li \&Fn Right
+End
 .El
 .Pp
-Alt + F1 will select the second virtual console.
+On/Off is special: pressing the key for 2 seconds will suspend
+the system.
+Pressing the key while the Zaurus is suspended will cause it to resume.
+Pressing the key longer than 6 seconds will do a nice halt if
+the machdep.kbdreset
+.Xr sysctl 8
+variable is 1.
+.Pp
+All keyboard input (including the On/Off key) is ignored if the display is
+shut.
+.Pp
+For information on the use and configuration of the keyboard refer to
+.Xr wskbd 4 .
 .Sh SEE ALSO
 .Xr intro 4 ,
 .Xr pxaip 4 ,
-.Xr wskbd 4
+.Xr wskbd 4 ,
+.Xr sysctl 8
 .Sh HISTORY
 The
 .Nm

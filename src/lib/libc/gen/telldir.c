@@ -1,3 +1,4 @@
+/*	$OpenBSD: telldir.c,v 1.7 2005/08/08 08:05:34 espie Exp $ */
 /*
  * Copyright (c) 1983, 1993
  *	The Regents of the University of California.  All rights reserved.
@@ -26,10 +27,6 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  */
-
-#if defined(LIBC_SCCS) && !defined(lint)
-static char rcsid[] = "$OpenBSD: telldir.c,v 1.5 2004/05/18 02:05:52 jfb Exp $";
-#endif /* LIBC_SCCS and not lint */
 
 #include <sys/param.h>
 #include <dirent.h>
@@ -70,8 +67,8 @@ void __seekdir(DIR *, long);
 long
 telldir(const DIR *dirp)
 {
-	register int index;
-	register struct ddloc *lp;
+	int index;
+	struct ddloc *lp;
 
 	if ((lp = (struct ddloc *)malloc(sizeof(struct ddloc))) == NULL)
 		return (-1);
@@ -91,8 +88,8 @@ telldir(const DIR *dirp)
 void
 __seekdir(DIR *dirp, long loc)
 {
-	register struct ddloc *lp;
-	register struct ddloc **prevlp;
+	struct ddloc *lp;
+	struct ddloc **prevlp;
 	struct dirent *dp;
 
 	prevlp = &dd_hash[LOCHASH(loc)];

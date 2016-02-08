@@ -1,4 +1,4 @@
-.\" $OpenBSD: bgpd.conf.5,v 1.46 2005/03/15 23:41:52 henning Exp $
+.\" $OpenBSD: bgpd.conf.5,v 1.60 2005/08/10 09:00:16 jmc Exp $
 .\"
 .\" Copyright (c) 2004 Claudio Jeker <claudio@openbsd.org>
 .\" Copyright (c) 2003, 2004 Henning Brauer <henning@openbsd.org>
@@ -68,7 +68,7 @@ or
 .Ic group ) .
 Macros are not expanded inside quotes.
 .Pp
-For example,
+For example:
 .Bd -literal -offset indent
 peer1="1.2.3.4"
 neighbor $peer1 {
@@ -86,20 +86,22 @@ Set the local
 .Em autonomous system
 number to
 .Ar as-number .
-The AS numbers are assigned by local RIRs, such as
+The AS numbers are assigned by local RIRs, such as:
 .Pp
 .Bl -tag -width xxxxxxxx -compact
+.It AfriNIC
+for Africa
 .It APNIC
-for the Asia Pacific region,
+for Asia Pacific
 .It ARIN
-for North America, parts of the Caribbean and Africa,
+for North America and parts of the Caribbean
 .It LACNIC
-for Latin America and Caribbean, and
+for Latin America and the Caribbean
 .It RIPE NCC
-for Europe, the Middle East and parts of Asia and Africa.
+for Europe, the Middle East, and parts of Asia
 .El
 .Pp
-For example,
+For example:
 .Bd -literal -offset indent
 AS 65001
 .Ed
@@ -204,7 +206,23 @@ Log received and sent updates.
 .Ar address Ns Li / Ns Ar prefix
 .Op Ic set ...\&
 .Xc
+.It Xo
+.Ic network
+.Pq Ic inet Ns \&| Ns Ic inet6
+.Ic static Op Ic set ...\&
+.Xc
+.It Xo
+.Ic network
+.Pq Ic inet Ns \&| Ns Ic inet6
+.Ic connected Op Ic set ...\&
+.Xc
 Announce the specified network as belonging to our AS.
+If set to
+.Ic connected ,
+routes to directly attached networks will be announced.
+If set to
+.Ic static ,
+all static routes will be announced.
 .Bd -literal -offset indent
 network 192.168.7.0/24
 .Ed
@@ -224,13 +242,31 @@ section.
 .Pp
 .It Xo
 .Ic rde
+.Ic med
+.Ic compare
+.Pq Ic always Ns \&| Ns Ic strict
+.Xc
+If set to
+.Ic always ,
+the
+.Em MED
+attributes will always be compared.
+The default is
+.Ic strict ,
+where the
+.Em MED
+is only compared between peers belonging to the same AS.
+.Pp
+.It Xo
+.Ic rde
 .Ic route-age
 .Pq Ic ignore Ns \&| Ns Ic evaluate
 .Xc
 If set to
 .Ic evaluate ,
 the best path selection will not only be based on the path attributes but
-also on the age of the route.
+also on the age of the route, giving preference to the older, typically
+more stable, route.
 In this case the decision process is no longer deterministic.
 The default is
 .Ic ignore .
@@ -272,7 +308,7 @@ establishes TCP connections to other BGP speakers called
 .Em neighbors .
 Each neighbor is specified by a
 .Ic neighbor
-section, which allows properties to be set specifially for that neighbor:
+section, which allows properties to be set specifically for that neighbor:
 .Bd -literal -offset indent
 neighbor 10.0.0.2 {
 	remote-as 65002
@@ -357,6 +393,20 @@ which limits the sent
 messages to announcements of the local AS.
 The default for IBGP peers is
 .Ic all .
+.Pp
+.It Xo
+.Ic announce
+.Pq Ic IPv4 Ns \&| Ns Ic IPv6
+.Pq Ic none Ns \&| Ns Ic unicast
+.Xc
+For the given address family, control which subsequent address families
+(at the moment, only
+.Em none ,
+which disables the announcement of that address family, and
+.Em unicast
+are supported) are announced during the capabilities negotiation.
+Only routes for that address family and subsequent address family will be
+announced and processed.
 .Pp
 .It Ic depend on Ar interface
 The neighbor session will be kept in state
@@ -842,6 +892,7 @@ otherwise it will be set to
 .Ar number .
 .Pp
 .It Ic med Ar number
+.It Ic metric Ar number
 Set the
 .Em MULTI_EXIT_DISC
 AS path attribute.
@@ -877,7 +928,7 @@ set nexthop reject
 .It Ic pftable Ar table
 Add the prefix in the update to the specified
 .Xr pf 4
-radix table, regardless of whether or not the path was selected for routing.
+table, regardless of whether or not the path was selected for routing.
 This option may be useful in building realtime blacklists.
 .Pp
 .It Ic prepend-neighbor Ar number
@@ -891,6 +942,28 @@ Prepend the local AS
 .Ar number
 times to the
 .Em AS path .
+.Pp
+.It Ic rtlabel Ar label
+Add the prefix with the specified
+.Ar label
+to the kernel routing table.
+.Pp
+.It Ic weight Ar number
+The
+.Em weight
+is used to tip prefixes with equally long AS paths in one or
+the other direction.
+A prefix is weighed at a very late stage in the decision process.
+If
+.Ar number
+starts with a plus or minus sign, the
+.Em weight
+will be adjusted by adding or subtracting
+.Ar number ;
+otherwise it will be set to
+.Ar number .
+.Em Weight
+is a local non-transitive attribute and a bgpd-specific extension.
 .El
 .Sh FILES
 .Bl -tag -width "/etc/bgpd.conf" -compact
