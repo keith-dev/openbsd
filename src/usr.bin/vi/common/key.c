@@ -1,4 +1,4 @@
-/*	$OpenBSD: key.c,v 1.6 2002/02/16 21:27:57 millert Exp $	*/
+/*	$OpenBSD: key.c,v 1.9 2006/01/08 21:08:27 miod Exp $	*/
 
 /*-
  * Copyright (c) 1991, 1993, 1994
@@ -105,7 +105,7 @@ int
 v_key_init(sp)
 	SCR *sp;
 {
-	CHAR_T ch;
+	u_int ch;
 	GS *gp;
 	KEYLIST *kp;
 	int cnt;
@@ -434,10 +434,10 @@ v_event_append(sp, argp)
 
 /* Remove events from the queue. */
 #define	QREM(len) {							\
-	if ((gp->i_cnt -= len) == 0)					\
+	if ((gp->i_cnt -= (len)) == 0)					\
 		gp->i_next = 0;						\
 	else								\
-		gp->i_next += len;					\
+		gp->i_next += (len);					\
 }
 
 /*
@@ -632,7 +632,7 @@ newmap:	evp = &gp->i_event[gp->i_next];
 	 */
 	if (istimeout || F_ISSET(&evp->e_ch, CH_NOMAP) ||
 	    !LF_ISSET(EC_MAPCOMMAND | EC_MAPINPUT) ||
-	    evp->e_c < MAX_BIT_SEQ && !bit_test(gp->seqb, evp->e_c))
+	    (evp->e_c < MAX_BIT_SEQ && !bit_test(gp->seqb, evp->e_c)))
 		goto nomap;
 
 	/* Search the map. */
@@ -753,9 +753,9 @@ v_sync(sp, flags)
 	GS *gp;
 
 	gp = sp->gp;
-	for (sp = gp->dq.cqh_first; sp != (void *)&gp->dq; sp = sp->q.cqe_next)
+	CIRCLEQ_FOREACH(sp, &gp->dq, q)
 		rcv_sync(sp, flags);
-	for (sp = gp->hq.cqh_first; sp != (void *)&gp->hq; sp = sp->q.cqe_next)
+	CIRCLEQ_FOREACH(sp, &gp->hq, q)
 		rcv_sync(sp, flags);
 }
 

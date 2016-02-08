@@ -1,4 +1,4 @@
-/*	$OpenBSD: control.c,v 1.11 2005/05/12 19:10:12 norby Exp $ */
+/*	$OpenBSD: control.c,v 1.13 2006/02/10 18:30:47 claudio Exp $ */
 
 /*
  * Copyright (c) 2003, 2004 Henning Brauer <henning@openbsd.org>
@@ -224,6 +224,7 @@ control_dispatch_imsg(int fd, short event, void *bula)
 		case IMSG_CTL_FIB_COUPLE:
 		case IMSG_CTL_FIB_DECOUPLE:
 		case IMSG_CTL_RELOAD:
+			c->ibuf.pid = imsg.hdr.pid;
 			ospfe_imsg_compose_parent(imsg.hdr.type, 0, NULL, 0);
 			break;
 		case IMSG_CTL_KROUTE:
@@ -240,7 +241,7 @@ control_dispatch_imsg(int fd, short event, void *bula)
 				memcpy(&ifidx, imsg.data, sizeof(ifidx));
 				ospfe_iface_ctl(c, ifidx);
 				imsg_compose(&c->ibuf, IMSG_CTL_END, 0,
-				    0, -1, NULL, 0);
+				    0, NULL, 0);
 			}
 			break;
 		case IMSG_CTL_SHOW_DATABASE:
@@ -250,18 +251,14 @@ control_dispatch_imsg(int fd, short event, void *bula)
 		case IMSG_CTL_SHOW_DB_SELF:
 		case IMSG_CTL_SHOW_DB_SUM:
 		case IMSG_CTL_SHOW_DB_ASBR:
+		case IMSG_CTL_SHOW_RIB:
+		case IMSG_CTL_SHOW_SUM:
 			c->ibuf.pid = imsg.hdr.pid;
 			ospfe_imsg_compose_rde(imsg.hdr.type, 0, imsg.hdr.pid,
 			    imsg.data, imsg.hdr.len - IMSG_HEADER_SIZE);
 			break;
 		case IMSG_CTL_SHOW_NBR:
 			ospfe_nbr_ctl(c);
-			break;
-		case IMSG_CTL_SHOW_RIB:
-		case IMSG_CTL_SHOW_SUM:
-			c->ibuf.pid = imsg.hdr.pid;
-			ospfe_imsg_compose_rde(imsg.hdr.type, 0, imsg.hdr.pid,
-			    imsg.data, imsg.hdr.len - IMSG_HEADER_SIZE);
 			break;
 		default:
 			log_debug("control_dispatch_imsg: "
@@ -284,7 +281,7 @@ control_imsg_relay(struct imsg *imsg)
 		return (0);
 	}
 
-	return (imsg_compose(&c->ibuf, imsg->hdr.type, 0, imsg->hdr.pid, -1,
+	return (imsg_compose(&c->ibuf, imsg->hdr.type, 0, imsg->hdr.pid,
 	    imsg->data, imsg->hdr.len - IMSG_HEADER_SIZE));
 }
 

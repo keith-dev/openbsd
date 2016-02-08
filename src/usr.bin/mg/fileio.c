@@ -1,4 +1,4 @@
-/*	$OpenBSD: fileio.c,v 1.50 2005/06/14 18:14:40 kjell Exp $	*/
+/*	$OpenBSD: fileio.c,v 1.68 2005/12/20 06:17:36 kjell Exp $	*/
 
 /* This file is in the public domain. */
 
@@ -7,14 +7,18 @@
  */
 #include "def.h"
 
+
 #include <sys/types.h>
+#include <sys/time.h>
+#include <sys/resource.h>
+#include <sys/wait.h>
+#include "kbd.h"
 #include <limits.h>
 #include <sys/stat.h>
 #include <sys/dir.h>
 #include <string.h>
 #include <fcntl.h>
 #include <unistd.h>
-#include <ctype.h>
 
 static FILE	*ffp;
 
@@ -22,7 +26,7 @@ static FILE	*ffp;
  * Open a file for reading.
  */
 int
-ffropen(const char *fn, BUFFER *bp)
+ffropen(const char *fn, struct buffer *bp)
 {
 	struct stat	statbuf;
 
@@ -31,12 +35,18 @@ ffropen(const char *fn, BUFFER *bp)
 			return (FIOFNF);
 		return (FIOERR);
 	}
+
+	/* If 'fn' is a directory open it with dired. */
+	if (fisdir(fn) == TRUE)
+		return (FIODIR);
+
 	if (bp && fstat(fileno(ffp), &statbuf) == 0) {
 		/* set highorder bit to make sure this isn't all zero */
 		bp->b_fi.fi_mode = statbuf.st_mode | 0x8000;
 		bp->b_fi.fi_uid = statbuf.st_uid;
 		bp->b_fi.fi_gid = statbuf.st_gid;
 	}
+
 	return (FIOSUC);
 }
 
@@ -44,15 +54,15 @@ ffropen(const char *fn, BUFFER *bp)
  * Open a file for writing.
  */
 int
-ffwopen(const char *fn, BUFFER *bp)
+ffwopen(const char *fn, struct buffer *bp)
 {
 	int	fd;
-	mode_t	mode = DEFFILEMODE;
+	mode_t	fmode = DEFFILEMODE;
 
 	if (bp && bp->b_fi.fi_mode)
-		mode = bp->b_fi.fi_mode & 07777;
+		fmode = bp->b_fi.fi_mode & 07777;
 
-	fd = open(fn, O_RDWR | O_CREAT | O_TRUNC, mode);
+	fd = open(fn, O_RDWR | O_CREAT | O_TRUNC, fmode);
 	if (fd == -1) {
 		ffp = NULL;
 		ewprintf("Cannot open file for writing : %s", strerror(errno));
@@ -85,7 +95,7 @@ ffwopen(const char *fn, BUFFER *bp)
  */
 /* ARGSUSED */
 int
-ffclose(BUFFER *bp)
+ffclose(struct buffer *bp)
 {
 	(void) fclose(ffp);
 	return (FIOSUC);
@@ -96,9 +106,9 @@ ffclose(BUFFER *bp)
  * buffer. Return the status.
  */
 int
-ffputbuf(BUFFER *bp)
+ffputbuf(struct buffer *bp)
 {
-	LINE   *lp, *lpend;
+	struct line   *lp, *lpend;
 
 	lpend = bp->b_linep;
 	for (lp = lforw(lpend); lp != lpend; lp = lforw(lp)) {
@@ -146,7 +156,6 @@ ffgetline(char *buf, int nbuf, int *nbytes)
 	return (c == EOF ? FIOEOF : FIOSUC);
 }
 
-#ifndef NO_BACKUP
 /*
  * Make a backup copy of "fname".  On Unix the backup has the same
  * name as the original file, with a "~" on the end; this seems to
@@ -220,12 +229,10 @@ fbackupfile(const char *fn)
 
 	return (nread == -1 ? FALSE : TRUE);
 }
-#endif
 
 /*
- * The string "fn" is a file name.
- * Perform any required appending of directory name or case adjustments.
- * If NO_DIR is not defined, the same file should be referred to even if the
+ * The string "fn" is a file name.  Perform any required appending of directory
+ * name or case adjustments.  The same file should be referred to even if the
  * working directory changes.
  */
 #ifdef SYMBLINK
@@ -236,17 +243,15 @@ fbackupfile(const char *fn)
 #endif
 #endif
 #include <pwd.h>
-#ifndef NO_DIR
 extern char	*wdir;
-#endif
 
 char *
 adjustname(const char *fn)
 {
 	static char	 fnb[MAXPATHLEN];
 	const char	*cp;
-	char		 user[LOGIN_NAME_MAX + 1], path[MAXPATHLEN];
-	int		 len;
+	char		 user[LOGIN_NAME_MAX], path[MAXPATHLEN];
+	size_t		 ulen, plen;
 
 	path[0] = '\0';
 	/* first handle tilde expansion */
@@ -256,34 +261,40 @@ adjustname(const char *fn)
 		cp = strchr(fn, '/');
 		if (cp == NULL)
 			cp = fn + strlen(fn); /* point to the NUL byte */
-
-		if ((cp - &fn[1]) > LOGIN_NAME_MAX) {
-			ewprintf("login name too long");
+		ulen = cp - &fn[1];
+		if (ulen >= sizeof(user)) {
+			ewprintf("Login name too long");
 			return (NULL);
 		}
-		if (cp == &fn[1]) /* ~/ */
-			strlcpy(user, getlogin(), sizeof(user));
-		else
-			strlcpy(user, &fn[1], cp - &fn[1] + 1);
+		if (ulen == 0) /* ~/ or ~ */
+			(void)strlcpy(user, getlogin(), sizeof(user));
+		else { /* ~user/ or ~user */
+			memcpy(user, &fn[1], ulen);
+			user[ulen] = '\0';
+		}
 		pw = getpwnam(user);
 		if (pw == NULL) {
-			ewprintf("unknown user %s", user);
+			ewprintf("Unknown user %s", user);
 			return (NULL);
 		}
-		strlcpy(path, pw->pw_dir, sizeof(path) - 1);
-		len = strlen(path);
-		if (path[len] != '/') {
-			path[len] = '/';
-			path[len + 1] = '\0';
+		plen = strlcpy(path, pw->pw_dir, sizeof(path));
+		if (plen == 0 || path[plen - 1] != '/') {
+			if (strlcat(path, "/", sizeof(path)) >= sizeof(path)) {
+				ewprintf("Path too long");
+				return (NULL);
+			}
 		}
 		fn = cp;
 		if (*fn == '/')
 			fn++;
 	}
-	strlcat(path, fn, sizeof(path));
+	if (strlcat(path, fn, sizeof(path)) >= sizeof(path)) {
+		ewprintf("Path too long");
+		return (NULL);
+	}
 
 	if (realpath(path, fnb) == NULL)
-		strlcpy(fnb, path, sizeof(fnb));
+		(void)strlcpy(fnb, path, sizeof(fnb));
 
 	return (fnb);
 }
@@ -300,17 +311,18 @@ startupfile(char *suffix)
 {
 	static char	 file[NFILEN];
 	char		*home;
+	int		 ret;
 
 	if ((home = getenv("HOME")) == NULL || *home == '\0')
 		goto nohome;
 
 	if (suffix == NULL) {
-		if (snprintf(file, sizeof(file), "%s/.mg", home)
-		    >= sizeof(file))
+		ret = snprintf(file, sizeof(file), "%s/.mg", home);
+		if (ret < 0 || ret >= sizeof(file))
 			return (NULL);
 	} else {
-		if (snprintf(file, sizeof(file), "%s/.mg-%s", home, suffix)
-		    >= sizeof(file))
+		ret = snprintf(file, sizeof(file), "%s/.mg-%s", home, suffix);
+		if (ret < 0 || ret >= sizeof(file))
 			return (NULL);
 	}
 
@@ -319,32 +331,29 @@ startupfile(char *suffix)
 nohome:
 #ifdef STARTUPFILE
 	if (suffix == NULL) {
-		if (snprintf(file, sizeof(file), "%s", STARTUPFILE)
-		    >= sizeof(file))
+		ret = snprintf(file, sizeof(file), "%s", STARTUPFILE);
+		if (ret < 0 || ret >= sizeof(file))
 			return (NULL);
 	} else {
-		if (snprintf(file, sizeof(file), "%s%s", STARTUPFILE, suffix)
-		    >= sizeof(file))
+		ret = snprintf(file, sizeof(file), "%s%s", STARTUPFILE,
+		    suffix);
+		if (ret < 0 || ret >= sizeof(file))
 			return (NULL);
 	}
 
 	if (access(file, R_OK) == 0)
 		return (file);
-#endif
+#endif /* STARTUPFILE */
 	return (NULL);
 }
-#endif
-
-#ifndef NO_DIRED
-#include <sys/wait.h>
-#include "kbd.h"
+#endif /* !NO_STARTUP */
 
 int
 copy(char *frname, char *toname)
 {
 	int	ifd, ofd, n;
 	char	buf[BUFSIZ];
-	mode_t	mode = DEFFILEMODE;	/* XXX?? */
+	mode_t	fmode = DEFFILEMODE;	/* XXX?? */
 	struct	stat orig;
 
 	if ((ifd = open(frname, O_RDONLY)) == -1)
@@ -355,7 +364,7 @@ copy(char *frname, char *toname)
 		return (FALSE);
 	}
 
-	if ((ofd = open(toname, O_WRONLY|O_CREAT|O_TRUNC, mode)) == -1) {
+	if ((ofd = open(toname, O_WRONLY|O_CREAT|O_TRUNC, fmode)) == -1) {
 		close(ifd);
 		return (FALSE);
 	}
@@ -388,106 +397,17 @@ copy(char *frname, char *toname)
 }
 
 /*
- * dirname needs to have enough place to store an additional '/'.
- */
-BUFFER *
-dired_(char *dirname)
-{
-	BUFFER	*bp;
-	FILE	*dirpipe;
-	char	 line[256];
-	int	 len;
-
-	if ((dirname = adjustname(dirname)) == NULL) {
-		ewprintf("Bad directory name");
-		return (NULL);
-	}
-	/* this should not be done, instead adjustname() should get a flag */
-	len = strlen(dirname);
-	if (dirname[len - 1] != '/') {
-		dirname[len++] = '/';
-		dirname[len] = '\0';
-	}
-	if ((bp = findbuffer(dirname)) == NULL) {
-		ewprintf("Could not create buffer");
-		return (NULL);
-	}
-	if (bclear(bp) != TRUE)
-		return (NULL);
-	bp->b_flag |= BFREADONLY;
-	if (snprintf(line, sizeof(line), "ls -al %s", dirname)
-	    >= sizeof(line)) {
-		ewprintf("Path too long");
-		return (NULL);
-	}
-	if ((dirpipe = popen(line, "r")) == NULL) {
-		ewprintf("Problem opening pipe to ls");
-		return (NULL);
-	}
-	line[0] = line[1] = ' ';
-	while (fgets(&line[2], sizeof(line) - 2, dirpipe) != NULL) {
-		line[strlen(line) - 1] = '\0';	/* remove ^J	 */
-		(void) addline(bp, line);
-	}
-	if (pclose(dirpipe) == -1) {
-		ewprintf("Problem closing pipe to ls : %s",
-		    strerror(errno));
-		return (NULL);
-	}
-	bp->b_dotp = lforw(bp->b_linep);	/* go to first line */
-	(void) strlcpy(bp->b_fname, dirname, sizeof(bp->b_fname));
-	if ((bp->b_modes[1] = name_mode("dired")) == NULL) {
-		bp->b_modes[0] = name_mode("fundamental");
-		ewprintf("Could not find mode dired");
-		return (NULL);
-	}
-	bp->b_nmodes = 1;
-	return (bp);
-}
-
-#define NAME_FIELD	8
-
-int
-d_makename(LINE *lp, char *fn, int len)
-{
-	int	 i;
-	char	*p, *ep;
-
-	strlcpy(fn, curbp->b_fname, len);
-	p = lp->l_text;
-	ep = lp->l_text + llength(lp);
-	for (i = 0; i < NAME_FIELD; i++) {
-		while (p < ep && isspace(*p))
-			p++;
-		while (p < ep && !isspace(*p))
-			p++;
-		while (p < ep && isspace(*p))
-			p++;
-		if (p == ep)
-			return (ABORT);
-	}
-	strlcat(fn, p, len);
-	return ((lgetc(lp, 2) == 'd') ? TRUE : FALSE);
-}
-#endif				/* NO_DIRED */
-
-struct filelist {
-	LIST	fl_l;
-	char	fl_name[NFILEN + 2];
-};
-
-/*
  * return list of file names that match the name in buf.
  */
-LIST *
+struct list *
 make_file_list(char *buf)
 {
 	char		*dir, *file, *cp;
-	int		 len, preflen;
+	int		 len, preflen, ret;
 	DIR		*dirp;
 	struct dirent	*dent;
-	LIST		*last;
-	struct filelist *current;
+	struct list	*last, *current;
+	char		 fl_name[NFILEN + 2];
 	char		 prefixx[NFILEN + 1];
 
 	/*
@@ -529,12 +449,13 @@ make_file_list(char *buf)
 			return (NULL);
 	}
 	/* Now we get the prefix of the name the user typed. */
-	strlcpy(prefixx, buf, sizeof(prefixx));
+	if (strlcpy(prefixx, buf, sizeof(prefixx)) >= sizeof(prefixx))
+		return (NULL);
 	cp = strrchr(prefixx, '/');
 	if (cp == NULL)
-		prefixx[0] = 0;
+		prefixx[0] = '\0';
 	else
-		cp[1] = 0;
+		cp[1] = '\0';
 
 	preflen = strlen(prefixx);
 	/* cp is the tail of buf that really needs to be compared. */
@@ -578,31 +499,49 @@ make_file_list(char *buf)
 			char		statname[NFILEN + 2];
 
 			statbuf.st_mode = 0;
-			if (snprintf(statname, sizeof(statname), "%s/%s",
-			    dir, dent->d_name) > sizeof(statname) - 1) {
+			ret = snprintf(statname, sizeof(statname), "%s/%s",
+			    dir, dent->d_name);
+			if (ret < 0 || ret > sizeof(statname) - 1)
 				continue;
-			}
 			if (stat(statname, &statbuf) < 0)
 				continue;
 			if (statbuf.st_mode & S_IFDIR)
 				isdir = 1;
 		}
 
-		current = malloc(sizeof(struct filelist));
-		if (current == NULL)
-			break;
-
-		if (snprintf(current->fl_name, sizeof(current->fl_name),
-		    "%s%s%s", prefixx, dent->d_name, isdir ? "/" : "")
-		    >= sizeof(current->fl_name)) {
+		if ((current = malloc(sizeof(struct list))) == NULL) {
+			free_file_list(last);
+			return (NULL);
+		}
+		ret = snprintf(fl_name, sizeof(fl_name),
+		    "%s%s%s", prefixx, dent->d_name, isdir ? "/" : "");
+		if (ret < 0 || ret >= sizeof(fl_name)) {
 			free(current);
 			continue;
 		}
-		current->fl_l.l_next = last;
-		current->fl_l.l_name = current->fl_name;
-		last = (LIST *) current;
+		current->l_next = last;
+		current->l_name = strdup(fl_name);
+		last = current;
 	}
 	closedir(dirp);
 
 	return (last);
+}
+
+/*
+ * Test if a supplied filename refers to a directory
+ * Returns ABORT on error, TRUE if directory. FALSE otherwise
+ */
+int
+fisdir(const char *fname)
+{
+	struct stat	statbuf;
+
+	if (stat(fname, &statbuf) != 0)
+		return (ABORT);
+
+	if (S_ISDIR(statbuf.st_mode))
+		return (TRUE);
+
+	return (FALSE);
 }

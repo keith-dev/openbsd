@@ -1,4 +1,4 @@
-/*	$OpenBSD: virtual.c,v 1.22 2005/08/25 09:57:58 markus Exp $	*/
+/*	$OpenBSD: virtual.c,v 1.25 2005/11/13 18:24:24 hshoexer Exp $	*/
 
 /*
  * Copyright (c) 2004 Håkan Olsson.  All rights reserved.
@@ -58,16 +58,16 @@ static struct transport	*virtual_clone(struct transport *, struct sockaddr *);
 static struct transport	*virtual_create(char *);
 static char		*virtual_decode_ids (struct transport *);
 static void		 virtual_get_dst(struct transport *,
-    struct sockaddr **);
+			     struct sockaddr **);
 static struct msg_head	*virtual_get_queue(struct message *);
 static void		 virtual_get_src(struct transport *,
-    struct sockaddr **);
+			     struct sockaddr **);
 static void		 virtual_handle_message(struct transport *);
 static void		 virtual_reinit(void);
 static void		 virtual_remove(struct transport *);
 static void		 virtual_report(struct transport *);
 static int		 virtual_send_message(struct message *,
-    struct transport *);
+			     struct transport *);
 
 static struct transport_vtbl virtual_transport_vtbl = {
 	{ 0 }, "udp",
@@ -496,8 +496,7 @@ virtual_clone(struct transport *vt, struct sockaddr *raddr)
 
 	memcpy(v2, v, sizeof *v);
 	/* Remove the copy's links into virtual_listen_list.  */
-	v2->link.le_next = 0;
-	v2->link.le_prev = 0;
+	memset(&v2->link, 0, sizeof v2->link);
 
 	if (v->encap_is_active)
 		v2->main = 0; /* No need to clone this.  */
@@ -571,13 +570,17 @@ virtual_create(char *name)
 static void
 virtual_remove(struct transport *t)
 {
-	struct virtual_transport *v = (struct virtual_transport *)t;
+	struct virtual_transport *p, *v = (struct virtual_transport *)t;
 
 	if (v->encap)
 		v->encap->vtbl->remove(v->encap);
 	if (v->main)
 		v->main->vtbl->remove(v->main);
-	if (v->link.le_prev)
+
+	for (p = LIST_FIRST(&virtual_listen_list); p && p != v; p =
+	    LIST_NEXT(p, link))
+		;
+	if (p == v)
 		LIST_REMOVE(v, link);
 
 	LOG_DBG((LOG_TRANSPORT, 90, "virtual_remove: removed %p", v));

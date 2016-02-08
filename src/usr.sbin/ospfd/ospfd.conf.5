@@ -1,4 +1,4 @@
-.\"	$OpenBSD: ospfd.conf.5,v 1.10 2005/05/24 20:38:20 claudio Exp $
+.\"	$OpenBSD: ospfd.conf.5,v 1.14 2005/10/28 18:27:17 jmc Exp $
 .\"
 .\" Copyright (c) 2005 Esben Norby <norby@openbsd.org>
 .\" Copyright (c) 2004 Claudio Jeker <claudio@openbsd.org>
@@ -94,16 +94,16 @@ The default is
 .Sm on
 .Xc
 If set to
-.Ar connected ,
+.Ic connected ,
 routes to directly attached networks will be announced over OSPF.
 If set to
-.Ar static ,
+.Ic static ,
 static routes will be announced over OSPF.
 If set to
-.Ar default ,
+.Ic default ,
 a default route pointing to this router will be announced over OSPF.
 The default setting is
-.Ar none .
+.Ic none .
 In this case no additional routes will be announced over OSPF.
 .It Xo
 .Ic rfc1583compat
@@ -156,22 +156,43 @@ interface em0 {
 Interface specific parameters are listed below.
 .Bl -tag -width Ds
 .It Ic auth-key Ar key
-Set the authentication key.
-If the auth-type is set to simple, up to 8 characters can be specified.
-.It Ic auth-md Ar key-id Ar key
-Set the crypt authentication key.
-If the auth-type is set to crypt, up to 16 characters can be specified.
+Set the authentication key for
+.Ic simple
+authentication.
+Up to 8 characters can be specified.
+.It Ic auth-md Ar key-id key
+Set the authentication
+.Ar key-id
+and
+.Ar key
+for
+.Ic crypt
+authentication.
+The valid range for
+.Ar key-id
+is 0\-255.
+Up to 16 characters can be specified for
+.Ar key .
 Multiple keys may be specified.
 .It Ic auth-md-keyid Ar key-id
-Configure which key-id to use when using crypt authentication.
-The default key-id is 0.
+Configure the
+.Ar key-id
+to use for
+.Ic crypt
+authentication.
+The valid range for
+.Ar key-id
+is 0\-255.
+The default key-id is 1.
+While key-id 0 is valid, it is unavailable on Cisco devices.
 .It Xo
 .Ic auth-type
 .Po Ic none Ns \&| Ns
 .Ic simple Ns \&| Ns Ic crypt Pc
 .Xc
 Set the authentication type.
-The default is none.
+The default is
+.Ic none .
 Simple authentication uses a plaintext password, up to 8 characters.
 Crypt authentication uses an MD5 hash.
 .It Ic hello-interval Ar seconds
@@ -182,6 +203,7 @@ Set the interface metric a.k.a. cost.
 The default value is 10; valid range is 1\-65535.
 .It Ic passive
 Prevent transmission and reception of OSPF packets on this interface.
+The specified interface will be announced as a stub network.
 .It Ic retransmit-interval Ar seconds
 Set retransmit interval.
 The default value is 5 seconds; valid range is 5\-3600 seconds.

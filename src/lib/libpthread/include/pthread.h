@@ -1,4 +1,4 @@
-/*	$OpenBSD: pthread.h,v 1.23 2004/02/24 00:49:43 brad Exp $	*/
+/*	$OpenBSD: pthread.h,v 1.25 2005/10/31 20:48:30 brad Exp $	*/
 
 /*
  * Copyright (c) 1993, 1994 by Chris Provenzano, proven@mit.edu
@@ -182,8 +182,6 @@ struct pthread_once {
  *
  *	PTHREAD_MUTEX_NORMAL
  *	PTHREAD_MUTEX_RECURSIVE
- *      MUTEX_TYPE_FAST (deprecated)
- *	MUTEX_TYPE_COUNTING_FAST (deprecated)
  *
  * will deviate from POSIX specified semantics.
  */
@@ -191,17 +189,16 @@ enum pthread_mutextype {
 	PTHREAD_MUTEX_ERRORCHECK	= 1,	/* Default POSIX mutex */
 	PTHREAD_MUTEX_RECURSIVE		= 2,	/* Recursive mutex */
 	PTHREAD_MUTEX_NORMAL		= 3,	/* No error checking */
-	MUTEX_TYPE_MAX
+	PTHREAD_MUTEX_TYPE_MAX
 };
 
 #define PTHREAD_MUTEX_DEFAULT		PTHREAD_MUTEX_ERRORCHECK
-#define MUTEX_TYPE_FAST			PTHREAD_MUTEX_NORMAL
-#define MUTEX_TYPE_COUNTING_FAST	PTHREAD_MUTEX_RECURSIVE
 
 /*
  * Thread function prototype definitions:
  */
 __BEGIN_DECLS
+int		pthread_atfork(void (*)(void), void (*)(void), void (*)(void));
 int		pthread_attr_destroy(pthread_attr_t *);
 int		pthread_attr_getstack(const pthread_attr_t *,
 			void **, size_t *);

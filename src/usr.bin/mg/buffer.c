@@ -1,4 +1,4 @@
-/*	$OpenBSD: buffer.c,v 1.44 2005/08/09 00:53:48 kjell Exp $	*/
+/*	$OpenBSD: buffer.c,v 1.54 2005/12/20 06:17:35 kjell Exp $	*/
 
 /* This file is in the public domain. */
 
@@ -10,22 +10,22 @@
 #include "kbd.h"		/* needed for modes */
 #include <stdarg.h>
 
-static BUFFER  *makelist(void);
+static struct buffer  *makelist(void);
 
+/* ARGSUSED */
 int
 togglereadonly(int f, int n)
 {
-	if (!(curbp->b_flag & BFREADONLY)) {
+	if (!(curbp->b_flag & BFREADONLY))
 		curbp->b_flag |= BFREADONLY;
-		ewprintf("Now readonly");
-	} else {
+	else {
 		curbp->b_flag &=~ BFREADONLY;
 		if (curbp->b_flag & BFCHG)
 			ewprintf("Warning: Buffer was modified");
 	}
 	curwp->w_flag |= WFMODE;
 
-	return (1);
+	return (TRUE);
 }
 
 /*
@@ -38,7 +38,7 @@ togglereadonly(int f, int n)
 int
 usebuffer(int f, int n)
 {
-	BUFFER *bp;
+	struct buffer *bp;
 	char    bufn[NBUFN], *bufp;
 
 	/* Get buffer to use from user */
@@ -68,8 +68,8 @@ usebuffer(int f, int n)
 int
 poptobuffer(int f, int n)
 {
-	BUFFER *bp;
-	MGWIN  *wp;
+	struct buffer *bp;
+	struct mgwin  *wp;
 	char    bufn[NBUFN], *bufp;
 
 	/* Get buffer to use from user */
@@ -106,7 +106,7 @@ poptobuffer(int f, int n)
 int
 killbuffer_cmd(int f, int n)
 {
-	BUFFER *bp;
+	struct buffer *bp;
 	char    bufn[NBUFN], *bufp;
 
 	if ((bufp = eread("Kill buffer: (default %s) ", bufn, NBUFN,
@@ -120,12 +120,13 @@ killbuffer_cmd(int f, int n)
 }
 
 int
-killbuffer(BUFFER *bp)
+killbuffer(struct buffer *bp)
 {
-	BUFFER *bp1;
-	BUFFER *bp2;
-	MGWIN  *wp;
+	struct buffer *bp1;
+	struct buffer *bp2;
+	struct mgwin  *wp;
 	int s;
+	struct undo_rec *rec, *next;
 
 	/*
 	 * Find some other buffer to display. Try the alternate buffer,
@@ -138,7 +139,7 @@ killbuffer(BUFFER *bp)
 		if (bp1 == NULL) {
 			/* only one buffer. see if it's *scratch* */
 			if (bp == bfind("*scratch*", FALSE))
-				return (FALSE);
+				return (TRUE);
 			/* create *scratch* for alternate buffer */
 			if ((bp1 = bfind("*scratch*", TRUE)) == NULL)
 				return (FALSE);
@@ -176,7 +177,14 @@ killbuffer(BUFFER *bp)
 			bp1->b_altb = (bp->b_altb == bp1) ? NULL : bp->b_altb;
 		bp1 = bp1->b_bufp;
 	}
-	free((char *)bp->b_bname);		/* Release name block	 */
+	rec = LIST_FIRST(&bp->b_undo);
+	while (rec != NULL) {
+		next = LIST_NEXT(rec, next);
+		free_undo_record(rec);
+		rec = next;
+	}
+
+	free(bp->b_bname);			/* Release name block	 */
 	free(bp);				/* Release buffer block */
 	return (TRUE);
 }
@@ -216,10 +224,10 @@ static struct KEYMAPE (2 + IMAPEXT) listbufmap = {
 	rescan,
 	{
 		{
-			'1', '1', listbuf_one, NULL
+			CCHR('M'), CCHR('M'), listbuf_pf, NULL
 		},
 		{
-			CCHR('M'), CCHR('M'), listbuf_pf, NULL
+			'1', '1', listbuf_one, NULL
 		}
 	}
 };
@@ -235,9 +243,9 @@ static struct KEYMAPE (2 + IMAPEXT) listbufmap = {
 int
 listbuffers(int f, int n)
 {
-	static int	 initialized = 0;
-	BUFFER		*bp;
-	MGWIN		*wp;
+	static int		 initialized = 0;
+	struct buffer		*bp;
+	struct mgwin		*wp;
 
 	if (!initialized) {
 		maps_add((KEYMAP *)&listbufmap, "listbufmap");
@@ -262,13 +270,12 @@ listbuffers(int f, int n)
  * Return NULL if there is an error (if
  * there is no memory).
  */
-static BUFFER *
+static struct buffer *
 makelist(void)
 {
-	int	w = ncol / 2;
-	BUFFER *bp, *blp;
-	LINE   *lp;
-
+	int		w = ncol / 2;
+	struct buffer	*bp, *blp;
+	struct line	*lp;
 
 	if ((blp = bfind("*Buffer List*", TRUE)) == NULL)
 		return (NULL);
@@ -331,10 +338,10 @@ listbuf_goto_buffer_one(int f, int n)
 static int
 listbuf_goto_buffer_helper(int f, int n, int only)
 {
-	BUFFER  *bp;
-	MGWIN   *wp;
-	char	*line = NULL;
-	int	 i, ret = FALSE;
+	struct buffer	*bp;
+	struct mgwin	*wp;
+	char		*line = NULL;
+	int		 i, ret = FALSE;
 
 	if (curwp->w_dotp->l_text[listbuf_ncol/2 - 1] == '$') {
 		ewprintf("buffer name truncated");
@@ -378,15 +385,15 @@ cleanup:
 }
 
 /*
- * The argument "text" points to a format string.  Append this line to the
+ * The argument "fmt" points to a format string.  Append this line to the
  * buffer. Handcraft the EOL on the end.  Return TRUE if it worked and
  * FALSE if you ran out of room.
  */
 int
-addlinef(BUFFER *bp, char *fmt, ...)
+addlinef(struct buffer *bp, char *fmt, ...)
 {
-	va_list  ap;
-	LINE	*lp;
+	va_list		 ap;
+	struct line	*lp;
 
 	if ((lp = lalloc(0)) == NULL)
 		return (FALSE);
@@ -409,23 +416,27 @@ addlinef(BUFFER *bp, char *fmt, ...)
 
 /*
  * Look through the list of buffers, giving the user a chance to save them.
- * Return TRUE if there are any changed buffers afterwards.  Buffers that
- * don't have an associated file don't count.  Return FALSE if there are
- * no changed buffers.
+ * Return TRUE if there are any changed buffers afterwards.  Buffers that don't
+ * have an associated file don't count.  Return FALSE if there are no changed
+ * buffers.  Return ABORT if an error occurs or if the user presses c-g.
  */
 int
 anycb(int f)
 {
-	BUFFER *bp;
-	int	s = FALSE, save = FALSE;
-	char	prompt[NFILEN + 11];
+	struct buffer	*bp;
+	int		 s = FALSE, save = FALSE, ret;
+	char		 pbuf[NFILEN + 11];
 
 	for (bp = bheadp; bp != NULL; bp = bp->b_bufp) {
 		if (bp->b_fname != NULL && *(bp->b_fname) != '\0' &&
 		    (bp->b_flag & BFCHG) != 0) {
-			snprintf(prompt, sizeof(prompt), "Save file %s",
+			ret = snprintf(pbuf, sizeof(pbuf), "Save file %s",
 			    bp->b_fname);
-			if ((f == TRUE || (save = eyorn(prompt)) == TRUE) &&
+			if (ret < 0 || ret >= sizeof(pbuf)) {
+				ewprintf("Error: filename too long!");
+				return (ABORT);
+			}
+			if ((f == TRUE || (save = eyorn(pbuf)) == TRUE) &&
 			    buffsave(bp) == TRUE) {
 				bp->b_flag &= ~BFCHG;
 				upmodes(bp);
@@ -448,12 +459,12 @@ anycb(int f)
  * all buffers. Return pointer to the BUFFER
  * block for the buffer.
  */
-BUFFER *
+struct buffer *
 bfind(const char *bname, int cflag)
 {
-	BUFFER	*bp;
-	LINE	*lp;
-	int	 i;
+	struct buffer	*bp;
+	struct line	*lp;
+	int		 i;
 
 	bp = bheadp;
 	while (bp != NULL) {
@@ -464,9 +475,9 @@ bfind(const char *bname, int cflag)
 	if (cflag != TRUE)
 		return (NULL);
 
-	bp = calloc(1, sizeof(BUFFER));
+	bp = calloc(1, sizeof(struct buffer));
 	if (bp == NULL) {
-		ewprintf("Can't get %d bytes", sizeof(BUFFER));
+		ewprintf("Can't get %d bytes", sizeof(struct buffer));
 		return (NULL);
 	}
 	if ((bp->b_bname = strdup(bname)) == NULL) {
@@ -475,7 +486,7 @@ bfind(const char *bname, int cflag)
 		return (NULL);
 	}
 	if ((lp = lalloc(0)) == NULL) {
-		free((char *) bp->b_bname);
+		free(bp->b_bname);
 		free(bp);
 		return (NULL);
 	}
@@ -488,6 +499,9 @@ bfind(const char *bname, int cflag)
 	bp->b_nwnd = 0;
 	bp->b_linep = lp;
 	bp->b_nmodes = defb_nmodes;
+	LIST_INIT(&bp->b_undo);
+	bp->b_undoptr = NULL;
+	memset(&bp->b_undopos, 0, sizeof(bp->b_undopos));
 	i = 0;
 	do {
 		bp->b_modes[i] = defb_modes[i];
@@ -512,10 +526,10 @@ bfind(const char *bname, int cflag)
  * looks good.
  */
 int
-bclear(BUFFER *bp)
+bclear(struct buffer *bp)
 {
-	LINE  *lp;
-	int    s;
+	struct line	*lp;
+	int		 s;
 
 	if ((bp->b_flag & BFCHG) != 0 &&	/* Changed. */
 	    (s = eyesno("Buffer modified; kill anyway")) != TRUE)
@@ -535,10 +549,10 @@ bclear(BUFFER *bp)
  * action on redisplay.
  */
 int
-showbuffer(BUFFER *bp, MGWIN *wp, int flags)
+showbuffer(struct buffer *bp, struct mgwin *wp, int flags)
 {
-	BUFFER *obp;
-	MGWIN  *owp;
+	struct buffer	*obp;
+	struct mgwin	*owp;
 
 	if (wp->w_bufp == bp) {	/* Easy case! */
 		wp->w_flag |= flags;
@@ -581,10 +595,10 @@ showbuffer(BUFFER *bp, MGWIN *wp, int flags)
  * Pop the buffer we got passed onto the screen.
  * Returns a status.
  */
-MGWIN *
-popbuf(BUFFER *bp)
+struct mgwin *
+popbuf(struct buffer *bp)
 {
-	MGWIN  *wp;
+	struct mgwin	*wp;
 
 	if (bp->b_nwnd == 0) {	/* Not on screen yet.	 */
 		if ((wp = wpopup()) == NULL)
@@ -607,8 +621,8 @@ popbuf(BUFFER *bp)
 int
 bufferinsert(int f, int n)
 {
-	BUFFER *bp;
-	LINE   *clp;
+	struct buffer *bp;
+	struct line   *clp;
 	int	clo, nline;
 	char	bufn[NBUFN], *bufp;
 
@@ -664,7 +678,7 @@ bufferinsert(int f, int n)
 int
 notmodified(int f, int n)
 {
-	MGWIN *wp;
+	struct mgwin *wp;
 
 	curbp->b_flag &= ~BFCHG;
 	wp = wheadp;		/* Update mode lines.	 */
@@ -683,9 +697,9 @@ notmodified(int f, int n)
  * help functions.
  */
 int
-popbuftop(BUFFER *bp)
+popbuftop(struct buffer *bp)
 {
-	MGWIN *wp;
+	struct mgwin *wp;
 
 	bp->b_dotp = lforw(bp->b_linep);
 	bp->b_doto = 0;

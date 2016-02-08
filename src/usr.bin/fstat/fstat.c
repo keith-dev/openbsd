@@ -1,4 +1,4 @@
-/*	$OpenBSD: fstat.c,v 1.52 2005/07/04 01:54:09 djm Exp $	*/
+/*	$OpenBSD: fstat.c,v 1.55 2005/12/28 20:48:18 pedro Exp $	*/
 
 /*-
  * Copyright (c) 1988, 1993
@@ -37,7 +37,7 @@ static char copyright[] =
 
 #ifndef lint
 /*static char sccsid[] = "from: @(#)fstat.c	8.1 (Berkeley) 6/6/93";*/
-static char *rcsid = "$OpenBSD: fstat.c,v 1.52 2005/07/04 01:54:09 djm Exp $";
+static char *rcsid = "$OpenBSD: fstat.c,v 1.55 2005/12/28 20:48:18 pedro Exp $";
 #endif /* not lint */
 
 #include <sys/param.h>
@@ -260,10 +260,10 @@ main(int argc, char *argv[])
 		errx(1, "%s", kvm_geterr(kd));
 	if (nflg)
 		printf("%s",
-"USER     CMD          PID   FD  DEV    INUM       MODE R/W    DV|SZ");
+"USER     CMD          PID   FD  DEV      INUM       MODE R/W    DV|SZ");
 	else
 		printf("%s",
-"USER     CMD          PID   FD MOUNT      INUM MODE       R/W    DV|SZ");
+"USER     CMD          PID   FD MOUNT        INUM MODE       R/W    DV|SZ");
 	if (oflg)
 		printf("%s", ":OFFSET  ");
 	if (checkfile && fsflg == 0)
@@ -462,7 +462,7 @@ vtrans(struct vnode *vp, int i, int flag, off_t offset)
 	}
 	PREFIX(i);
 	if (badtype) {
-		(void)printf(" -         -  %10s    -\n", badtype);
+		(void)printf(" -           -  %10s    -\n", badtype);
 		return;
 	}
 	if (nflg)
@@ -474,7 +474,7 @@ vtrans(struct vnode *vp, int i, int flag, off_t offset)
 		(void)snprintf(mode, sizeof mode, "%o", fst.mode);
 	else
 		strmode(fst.mode, mode);
-	(void)printf(" %6ld %11s", fst.fileid, mode);
+	(void)printf(" %8ld %11s", fst.fileid, mode);
 	rw[0] = '\0';
 	if (flag & FREAD)
 		strlcat(rw, "r", sizeof rw);
@@ -509,17 +509,27 @@ int
 ufs_filestat(struct vnode *vp, struct filestat *fsp)
 {
 	struct inode inode;
+	struct ufs1_dinode di1;
 
 	if (!KVM_READ(VTOI(vp), &inode, sizeof (inode))) {
 		dprintf("can't read inode at %p for pid %ld",
 		    VTOI(vp), (long)Pid);
 		return 0;
 	}
+
+	if (!KVM_READ(inode.i_din1, &di1, sizeof(struct ufs1_dinode))) {
+		dprintf("can't read dinode at %p for pid %ld",
+		    inode.i_din1, (long)Pid);
+		return (0);
+	}
+
+	inode.i_din1 = &di1;
+
 	fsp->fsid = inode.i_dev & 0xffff;
 	fsp->fileid = (long)inode.i_number;
-	fsp->mode = inode.i_ffs_mode;
-	fsp->size = inode.i_ffs_size;
-	fsp->rdev = inode.i_ffs_rdev;
+	fsp->mode = inode.i_ffs1_mode;
+	fsp->size = inode.i_ffs1_size;
+	fsp->rdev = inode.i_ffs1_rdev;
 
 	return 1;
 }
@@ -528,12 +538,22 @@ int
 ext2fs_filestat(struct vnode *vp, struct filestat *fsp)
 {
 	struct inode inode;
+	struct ext2fs_dinode e2di;
 
 	if (!KVM_READ(VTOI(vp), &inode, sizeof (inode))) {
 		dprintf("can't read inode at %p for pid %ld",
 		    VTOI(vp), (long)Pid);
 		return 0;
 	}
+
+	if (!KVM_READ(inode.i_e2din, &e2di, sizeof(struct ext2fs_dinode))) {
+		dprintf("can't read dinode at %p for pid %ld",
+		    inode.i_e2din, (long)Pid);
+		return (0);
+	}
+
+	inode.i_e2din = &e2di;
+
 	fsp->fsid = inode.i_dev & 0xffff;
 	fsp->fileid = (long)inode.i_number;
 	fsp->mode = inode.i_e2fs_mode;

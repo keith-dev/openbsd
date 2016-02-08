@@ -42,7 +42,15 @@
  */
 
 #include "includes.h"
-RCSID("$OpenBSD: sshd.c,v 1.312 2005/07/25 11:59:40 markus Exp $");
+RCSID("$OpenBSD: sshd.c,v 1.323 2006/02/20 17:19:54 stevesk Exp $");
+
+#include <sys/ioctl.h>
+#include <sys/types.h>
+#include <sys/wait.h>
+#include <sys/stat.h>
+
+#include <paths.h>
+#include <signal.h>
 
 #include <openssl/dh.h>
 #include <openssl/bn.h>
@@ -624,16 +632,8 @@ privsep_postauth(Authctxt *authctxt)
 {
 	if (authctxt->pw->pw_uid == 0 || options.use_login) {
 		/* File descriptor passing is broken or root login */
-		monitor_apply_keystate(pmonitor);
 		use_privsep = 0;
-		return;
-	}
-
-	/* Authentication complete */
-	alarm(0);
-	if (startup_pipe != -1) {
-		close(startup_pipe);
-		startup_pipe = -1;
+		goto skip;
 	}
 
 	/* New socket pair */
@@ -660,6 +660,7 @@ privsep_postauth(Authctxt *authctxt)
 	/* Drop privileges */
 	do_setusercontext(authctxt->pw);
 
+ skip:
 	/* It is safe now to apply the key state */
 	monitor_apply_keystate(pmonitor);
 
@@ -885,6 +886,9 @@ main(int ac, char **av)
 	/* Save argv. */
 	saved_argv = av;
 	rexec_argc = ac;
+
+	/* Ensure that fds 0, 1 and 2 are open or directed to /dev/null */
+	sanitise_stdfd();
 
 	/* Initialize configuration options to their default values. */
 	initialize_server_options(&options);
@@ -1568,7 +1572,12 @@ main(int ac, char **av)
 		debug("get_remote_port failed");
 		cleanup_exit(255);
 	}
-	remote_ip = get_remote_ipaddr();
+
+	/*
+	 * We use get_canonical_hostname with usedns = 0 instead of
+	 * get_remote_ipaddr here so IP options will be checked.
+	 */
+	remote_ip = get_canonical_hostname(0);
 
 #ifdef LIBWRAP
 	/* Check whether logins are denied from this host. */
@@ -1591,10 +1600,10 @@ main(int ac, char **av)
 	verbose("Connection from %.500s port %d", remote_ip, remote_port);
 
 	/*
-	 * We don\'t want to listen forever unless the other side
+	 * We don't want to listen forever unless the other side
 	 * successfully authenticates itself.  So we set up an alarm which is
 	 * cleared after successful authentication.  A limit of zero
-	 * indicates no limit. Note that we don\'t set the alarm in debugging
+	 * indicates no limit. Note that we don't set the alarm in debugging
 	 * mode; it is just annoying to have the server exit just when you
 	 * are about to discover the bug.
 	 */
@@ -1639,6 +1648,17 @@ main(int ac, char **av)
 	}
 
  authenticated:
+	/*
+	 * Cancel the alarm we set to limit the time taken for
+	 * authentication.
+	 */
+	alarm(0);
+	signal(SIGALRM, SIG_DFL);
+	if (startup_pipe != -1) {
+		close(startup_pipe);
+		startup_pipe = -1;
+	}
+
 	/*
 	 * In privilege separation, we fork another child and prepare
 	 * file descriptor passing.

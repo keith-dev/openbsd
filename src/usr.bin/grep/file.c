@@ -1,4 +1,4 @@
-/*	$OpenBSD: file.c,v 1.7 2005/02/07 08:47:18 otto Exp $	*/
+/*	$OpenBSD: file.c,v 1.9 2006/02/09 09:54:46 otto Exp $	*/
 
 /*-
  * Copyright (c) 1999 James Howard and Dag-Erling Coïdan Smørgrav
@@ -173,24 +173,6 @@ grep_bin_file(file_t *f)
 	}
 }
 
-long
-grep_tell(file_t *f)
-{
-	switch (f->type) {
-	case FILE_STDIO:
-		return ftell(f->f);
-	case FILE_MMAP:
-		return mmtell(f->mmf);
-#ifndef NOZ
-	case FILE_GZIP:
-		return gztell(f->gzf);
-#endif
-	default:
-		/* can't happen */
-		errx(2, "invalid file type");
-	}
-}
-
 char *
 grep_fgetln(file_t *f, size_t *l)
 {
@@ -228,4 +210,5 @@ grep_close(file_t *f)
 		/* can't happen */
 		errx(2, "invalid file type");
 	}
+	free(f);
 }

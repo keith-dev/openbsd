@@ -1,4 +1,4 @@
-/*	$OpenBSD: bgpd.c,v 1.123 2005/07/01 13:38:14 claudio Exp $ */
+/*	$OpenBSD: bgpd.c,v 1.132 2006/01/24 14:26:52 claudio Exp $ */
 
 /*
  * Copyright (c) 2003, 2004 Henning Brauer <henning@openbsd.org>
@@ -86,7 +86,7 @@ usage(void)
 	extern char *__progname;
 
 	fprintf(stderr, "usage: %s [-dnv] ", __progname);
-	fprintf(stderr, "[-D macro=value] [-f file]\n");
+	fprintf(stderr, "[-D macro=value] [-f file] [-r path]\n");
 	exit(1);
 }
 
@@ -112,7 +112,7 @@ main(int argc, char *argv[])
 	pid_t			 io_pid = 0, rde_pid = 0, pid;
 	char			*conffile;
 	int			 debug = 0;
-	int			 ch, nfds, timeout;
+	int			 ch, timeout, nfds;
 	int			 pipe_m2s[2];
 	int			 pipe_m2r[2];
 	int			 pipe_s2r[2];
@@ -131,7 +131,7 @@ main(int argc, char *argv[])
 	TAILQ_INIT(rules_l);
 	peer_l = NULL;
 
-	while ((ch = getopt(argc, argv, "dD:f:nv")) != -1) {
+	while ((ch = getopt(argc, argv, "dD:f:nr:v")) != -1) {
 		switch (ch) {
 		case 'd':
 			debug = 1;
@@ -151,6 +151,9 @@ main(int argc, char *argv[])
 			if (conf.opts & BGPD_OPT_VERBOSE)
 				conf.opts |= BGPD_OPT_VERBOSE2;
 			conf.opts |= BGPD_OPT_VERBOSE;
+			break;
+		case 'r':
+			conf.rcsock = optarg;
 			break;
 		default:
 			usage();
@@ -237,6 +240,7 @@ main(int argc, char *argv[])
 
 	while ((net = TAILQ_FIRST(&net_l)) != NULL) {
 		TAILQ_REMOVE(&net_l, net, entry);
+		filterset_free(&net->net.attrset);
 		free(net);
 	}
 
@@ -252,6 +256,7 @@ main(int argc, char *argv[])
 	mrt_reconfigure(&mrt_l);
 
 	while (quit == 0) {
+		bzero(pfd, sizeof(pfd));
 		pfd[PFD_PIPE_SESSION].fd = ibuf_se->fd;
 		pfd[PFD_PIPE_SESSION].events = POLLIN;
 		if (ibuf_se->w.queued)
@@ -273,32 +278,29 @@ main(int argc, char *argv[])
 				quit = 1;
 			}
 
-		if (nfds > 0 && (pfd[PFD_PIPE_SESSION].revents & POLLOUT))
+		if (nfds > 0 && pfd[PFD_PIPE_SESSION].revents & POLLOUT)
 			if (msgbuf_write(&ibuf_se->w) < 0) {
 				log_warn("pipe write error (to SE)");
 				quit = 1;
 			}
 
-		if (nfds > 0 && (pfd[PFD_PIPE_ROUTE].revents & POLLOUT))
+		if (nfds > 0 && pfd[PFD_PIPE_ROUTE].revents & POLLOUT)
 			if (msgbuf_write(&ibuf_rde->w) < 0) {
 				log_warn("pipe write error (to RDE)");
 				quit = 1;
 			}
 
 		if (nfds > 0 && pfd[PFD_PIPE_SESSION].revents & POLLIN) {
-			nfds--;
 			if (dispatch_imsg(ibuf_se, PFD_PIPE_SESSION) == -1)
 				quit = 1;
 		}
 
 		if (nfds > 0 && pfd[PFD_PIPE_ROUTE].revents & POLLIN) {
-			nfds--;
 			if (dispatch_imsg(ibuf_rde, PFD_PIPE_ROUTE) == -1)
 				quit = 1;
 		}
 
 		if (nfds > 0 && pfd[PFD_SOCK_ROUTE].revents & POLLIN) {
-			nfds--;
 			if (kr_dispatch_msg() == -1)
 				quit = 1;
 		}
@@ -321,7 +323,7 @@ main(int argc, char *argv[])
 			}
 		}
 
-		if (mrtdump == 1) {
+		if (mrtdump) {
 			mrtdump = 0;
 			mrt_handler(&mrt_l);
 		}
@@ -350,7 +352,8 @@ main(int argc, char *argv[])
 	}
 
 	free(rules_l);
-	control_cleanup();
+	control_cleanup(SOCKET_NAME);
+	control_cleanup(conf.rcsock);
 	kr_shutdown();
 	pftable_clear_all();
 	free(conf.listen_addrs);
@@ -426,20 +429,28 @@ reconfigure(char *conffile, struct bgpd_config *conf, struct mrt_head *mrt_l,
 
 	prepare_listeners(conf);
 
+	/* start reconfiguration */
 	if (imsg_compose(ibuf_se, IMSG_RECONF_CONF, 0, 0, -1,
 	    conf, sizeof(struct bgpd_config)) == -1)
 		return (-1);
 	if (imsg_compose(ibuf_rde, IMSG_RECONF_CONF, 0, 0, -1,
 	    conf, sizeof(struct bgpd_config)) == -1)
 		return (-1);
-	for (p = *peer_l; p != NULL; p = p->next) {
+
+	/* send peer list and listeners to the SE */
+	for (p = *peer_l; p != NULL; p = p->next)
 		if (imsg_compose(ibuf_se, IMSG_RECONF_PEER, p->conf.id, 0, -1,
 		    &p->conf, sizeof(struct peer_config)) == -1)
 			return (-1);
-		if (send_filterset(ibuf_se, &p->conf.attrset,
-		    p->conf.id) == -1)
+
+	TAILQ_FOREACH(la, conf->listen_addrs, entry) {
+		if (imsg_compose(ibuf_se, IMSG_RECONF_LISTENER, 0, 0, la->fd,
+		    la, sizeof(struct listen_addr)) == -1)
 			return (-1);
+		la->fd = -1;
 	}
+
+	/* networks for the RDE */
 	while ((n = TAILQ_FIRST(&net_l)) != NULL) {
 		if (imsg_compose(ibuf_rde, IMSG_NETWORK_ADD, 0, 0, -1,
 		    &n->net, sizeof(struct network_config)) == -1)
@@ -453,10 +464,12 @@ reconfigure(char *conffile, struct bgpd_config *conf, struct mrt_head *mrt_l,
 		filterset_free(&n->net.attrset);
 		free(n);
 	}
+
 	/* redistribute list needs to be reloaded too */
 	if (kr_redist_reload() == -1)
 		return (-1);
 
+	/* filters for the RDE */
 	while ((r = TAILQ_FIRST(rules_l)) != NULL) {
 		if (imsg_compose(ibuf_rde, IMSG_RECONF_FILTER, 0, 0, -1,
 		    r, sizeof(struct filter_rule)) == -1)
@@ -467,13 +480,8 @@ reconfigure(char *conffile, struct bgpd_config *conf, struct mrt_head *mrt_l,
 		filterset_free(&r->set);
 		free(r);
 	}
-	TAILQ_FOREACH(la, conf->listen_addrs, entry) {
-		if (imsg_compose(ibuf_se, IMSG_RECONF_LISTENER, 0, 0, la->fd,
-		    la, sizeof(struct listen_addr)) == -1)
-			return (-1);
-		la->fd = -1;
-	}
 
+	/* singal both childs to replace their config */
 	if (imsg_compose(ibuf_se, IMSG_RECONF_DONE, 0, 0, -1, NULL, 0) == -1 ||
 	    imsg_compose(ibuf_rde, IMSG_RECONF_DONE, 0, 0, -1, NULL, 0) == -1)
 		return (-1);

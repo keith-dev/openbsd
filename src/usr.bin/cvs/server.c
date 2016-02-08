@@ -1,4 +1,4 @@
-/*	$OpenBSD: server.c,v 1.23 2005/08/14 19:49:18 xsa Exp $	*/
+/*	$OpenBSD: server.c,v 1.27 2006/01/02 08:11:56 xsa Exp $	*/
 /*
  * Copyright (c) 2004 Jean-Francois Brousseau <jfb@openbsd.org>
  * All rights reserved.
@@ -24,14 +24,7 @@
  * ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include <sys/types.h>
-#include <sys/stat.h>
-
-#include <errno.h>
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-#include <unistd.h>
+#include "includes.h"
 
 #include "cvs.h"
 #include "log.h"
@@ -76,9 +69,8 @@ cvs_server(int argc, char **argv)
 	size_t len;
 	char reqbuf[512];
 
-	if (argc != 1) {
+	if (argc != 1)
 		return (CVS_EX_USAGE);
-	}
 
 	/* make sure standard in and standard out are line-buffered */
 	(void)setvbuf(stdin, NULL, _IOLBF, (size_t)0);
@@ -89,33 +81,32 @@ cvs_server(int argc, char **argv)
 	    "%s/cvs-serv%d", cvs_tmpdir, getpid());
 	if (l == -1 || l >= (int)sizeof(cvs_server_tmpdir)) {
 		errno = ENAMETOOLONG;
-		cvs_log(LP_ERRNO, "%s", cvs_server_tmpdir);
-		return (CVS_EX_DATA);
-	}
-
-	if (mkdir(cvs_server_tmpdir, 0700) == -1) {
-		cvs_log(LP_ERRNO, "failed to create temporary directory '%s'",
+		fatal("cvs_server: tmpdir path too long: `%s'",
 		    cvs_server_tmpdir);
-		return (CVS_EX_FILE);
 	}
 
-	if (cvs_chdir(cvs_server_tmpdir) == -1)
-		return (CVS_EX_FILE);
+	if (mkdir(cvs_server_tmpdir, 0700) == -1)
+		fatal("cvs_server: mkdir: `%s': %s",
+		    cvs_server_tmpdir, strerror(errno));
+
+	cvs_chdir(cvs_server_tmpdir, 1);
 
 	for (;;) {
 		if (fgets(reqbuf, (int)sizeof(reqbuf), stdin) == NULL) {
 			if (feof(stdin))
 				break;
-			else if (ferror(stdin))
-				return (CVS_EX_DATA);
+			else if (ferror(stdin)) {
+				(void)cvs_rmdir(cvs_server_tmpdir);
+				fatal("cvs_server: fgets failed");
+			}
 		}
 
 		len = strlen(reqbuf);
 		if (len == 0)
 			continue;
 		else if (reqbuf[len - 1] != '\n') {
-			cvs_log(LP_ERR, "truncated request");
-			return (CVS_EX_PROTO);
+			(void)cvs_rmdir(cvs_server_tmpdir);
+			fatal("cvs_server: truncated request");
 		}
 		reqbuf[--len] = '\0';
 

@@ -1,4 +1,4 @@
-.\"	$OpenBSD: usb.4,v 1.49 2005/08/28 04:22:30 jsg Exp $
+.\"	$OpenBSD: usb.4,v 1.53 2005/12/20 21:47:57 jmc Exp $
 .\"	$NetBSD: usb.4,v 1.15 1999/07/29 14:20:32 augustss Exp $
 .\"
 .\" Copyright (c) 1999 The NetBSD Foundation, Inc.
@@ -130,7 +130,7 @@ Atmel AT76C50x IEEE 802.11b wireless network interfaces.
 .It Xr aue 4
 ADMtek AN986 / ADM8511 Pegasus family USB Ethernet interfaces.
 .It Xr axe 4
-ASIX Electronics AX88172/AX88178 USB Ethernet interfaces.
+ASIX Electronics AX88172/AX88178/AX88772 USB Ethernet interfaces.
 .It Xr cdce 4
 USB Host-to-Host (aka USB-to-USB) bridges based on the USB
 Communication Device Class (CDC) and Ethernet subclass.
@@ -191,6 +191,8 @@ D-Link DSB-R100 USB radio.
 .El
 .Ss Human Interface Devices
 .Bl -tag -width 12n -offset ind -compact
+.It Xr tpms 4
+Apple touchpad mouse.
 .It Xr uhid 4
 Generic driver for Human Interface Devices.
 .It Xr uhidev 4
@@ -533,6 +535,7 @@ Human Interface Devices
 .Xr pci 4 ,
 .Xr pcmcia 4 ,
 .Xr scsi 4 ,
+.Xr tpms 4 ,
 .Xr uaudio 4 ,
 .Xr ubsa 4 ,
 .Xr ubt 4 ,
@@ -544,7 +547,6 @@ Human Interface Devices
 .Xr ugen 4 ,
 .Xr uhid 4 ,
 .Xr uhidev 4 ,
-.Xr uhub 4 ,
 .Xr uipaq 4 ,
 .Xr ukbd 4 ,
 .Xr ulpt 4 ,

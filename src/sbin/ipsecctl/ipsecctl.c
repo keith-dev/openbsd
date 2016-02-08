@@ -1,4 +1,4 @@
-/*	$OpenBSD: ipsecctl.c,v 1.26 2005/08/22 17:26:46 hshoexer Exp $	*/
+/*	$OpenBSD: ipsecctl.c,v 1.42 2006/02/01 12:38:47 hshoexer Exp $	*/
 /*
  * Copyright (c) 2004, 2005 Hans-Joerg Hoexer <hshoexer@openbsd.org>
  *
@@ -30,9 +30,10 @@
 #include <err.h>
 #include <errno.h>
 #include <fcntl.h>
+#include <netdb.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <strings.h>
+#include <string.h>
 #include <unistd.h>
 
 #include "ipsecctl.h"
@@ -42,7 +43,7 @@ int		 ipsecctl_rules(char *, int);
 FILE		*ipsecctl_fopen(const char *, const char *);
 int		 ipsecctl_commit(int, struct ipsecctl *);
 int		 ipsecctl_add_rule(struct ipsecctl *, struct ipsec_rule *);
-void		 ipsecctl_print_addr(struct ipsec_addr *);
+void		 ipsecctl_print_addr(struct ipsec_addr_wrap *);
 void		 ipsecctl_print_key(struct ipsec_key *);
 void		 ipsecctl_print_flow(struct ipsec_rule *, int);
 void		 ipsecctl_print_sa(struct ipsec_rule *, int);
@@ -54,6 +55,7 @@ void		 ipsecctl_show_flows(int);
 void		 ipsecctl_show_sas(int);
 void		 usage(void);
 const char	*ipsecctl_lookup_option(char *, const char **);
+static int	 unmask(struct ipsec_addr *, sa_family_t);
 
 const char	*infile;	/* Used by parse.y */
 const char	*showopt;
@@ -67,7 +69,8 @@ static const char *showopt_list[] = {
 static const char *direction[] = {"?", "in", "out"};
 static const char *flowtype[] = {"?", "use", "acquire", "require", "deny",
     "bypass", "dontacq"};
-static const char *proto[] = {"?", "esp", "ah", "ipcomp", "tcpmd5"};
+static const char *proto[] = {"?", "esp", "ah", "ipcomp", "tcpmd5", "ipip"};
+static const char *tmode[] = {"?", "transport", "tunnel"};
 static const char *auth[] = {"?", "psk", "rsa"};
 
 int
@@ -105,6 +108,11 @@ ipsecctl_rules(char *filename, int opts)
 			if (ipsecctl_commit(action, &ipsec))
 				err(1, NULL);
 	}
+
+	if (fin != stdin) {
+		fclose(fin);
+		fin = NULL;
+	}
 	return (error);
 }
 
@@ -136,17 +144,21 @@ ipsecctl_commit(int action, struct ipsecctl *ipsec)
 	struct ipsec_rule *rp;
 
 	if (pfkey_init() == -1)
-		errx(1, "failed to open PF_KEY socket");
+		errx(1, "ipsecctl_commit: failed to open PF_KEY socket");
 
 	while ((rp = TAILQ_FIRST(&ipsec->rule_queue))) {
 		TAILQ_REMOVE(&ipsec->rule_queue, rp, entries);
 
 		if (rp->type & RULE_IKE) {
 			if (ike_ipsec_establish(action, rp) == -1)
-				warnx("failed to add rule %d", rp->nr);
+				warnx("failed to %s rule %d",
+				    action == ACTION_DELETE ? "delete" : "add",
+				    rp->nr);
 		} else {
 			if (pfkey_ipsec_establish(action, rp) == -1)
-				warnx("failed to add rule %d", rp->nr);
+				warnx("failed to %s rule %d",
+				    action == ACTION_DELETE ? "delete" : "add",
+				    rp->nr);
 		}
 
 		/* src and dst are always used. */
@@ -165,6 +177,11 @@ ipsecctl_commit(int action, struct ipsecctl *ipsec)
 			if (rp->auth->dstid)
 				free(rp->auth->dstid);
 			free(rp->auth);
+		}
+		if (rp->ikeauth) {
+			if (rp->ikeauth->string)
+				free(rp->ikeauth->string);
+			free(rp->ikeauth);
 		}
 		if (rp->xfs)
 			free(rp->xfs);
@@ -195,27 +212,23 @@ ipsecctl_add_rule(struct ipsecctl *ipsec, struct ipsec_rule *r)
 }
 
 void
-ipsecctl_print_addr(struct ipsec_addr *ipa)
+ipsecctl_print_addr(struct ipsec_addr_wrap *ipa)
 {
-	u_int32_t	mask;
-	char		buf[48];
+	int		bits;
+	char		buf[NI_MAXHOST];
 
 	if (ipa == NULL) {
 		printf("?");
 		return;
 	}
-	if (inet_ntop(ipa->af, &ipa->v4, buf, sizeof(buf)) == NULL)
+	if (inet_ntop(ipa->af, &ipa->address, buf, sizeof(buf)) == NULL)
 		printf("?");
 	else
 		printf("%s", buf);
 
-	if (ipa->v4mask.mask32 != 0xffffffff) {
-		mask = ntohl(ipa->v4mask.mask32);
-		if (mask == 0)
-			printf("/0");
-		else
-			printf("/%d", 32 - ffs((int) mask) + 1);
-	}
+	bits = unmask(&ipa->mask, ipa->af);
+	if (bits != (ipa->af == AF_INET ? 32 : 128))
+		printf("/%d", bits);
 }
 
 void
@@ -236,8 +249,10 @@ ipsecctl_print_flow(struct ipsec_rule *r, int opts)
 	ipsecctl_print_addr(r->src);
 	printf(" to ");
 	ipsecctl_print_addr(r->dst);
-	printf(" peer ");
-	ipsecctl_print_addr(r->peer);
+	if (r->peer) {
+		printf(" peer ");
+		ipsecctl_print_addr(r->peer);
+	}
 
 	if (opts & IPSECCTL_OPT_VERBOSE) {
 		if (r->auth) {
@@ -253,10 +268,14 @@ ipsecctl_print_flow(struct ipsec_rule *r, int opts)
 	printf("\n");
 }
 
+/* ARGSUSED1 */
 void
 ipsecctl_print_sa(struct ipsec_rule *r, int opts)
 {
 	printf("%s ", proto[r->proto]);
+	/* tunnel/transport is only meaningful esp/ah/ipcomp */
+	if (r->proto != IPSEC_TCPMD5 && r->proto != IPSEC_IPIP)
+		printf("%s ", tmode[r->tmode]);
 	printf("from ");
 	ipsecctl_print_addr(r->src);
 	printf(" to ");
@@ -268,6 +287,8 @@ ipsecctl_print_sa(struct ipsec_rule *r, int opts)
 			printf(" auth %s", r->xfs->authxf->name);
 		if (r->xfs && r->xfs->encxf)
 			printf(" enc %s", r->xfs->encxf->name);
+		if (r->xfs && r->xfs->compxf)
+			printf(" comp %s", r->xfs->compxf->name);
 	}
 	if (r->authkey) {
 		if (r->proto == IPSEC_TCPMD5)
@@ -309,9 +330,10 @@ ipsecctl_flush(int opts)
 		return (0);
 
 	if (pfkey_init() == -1)
-		errx(1, "failed to open PF_KEY socket");
+		errx(1, "ipsecctl_flush: failed to open PF_KEY socket");
 
-	pfkey_ipsec_flush();
+	if (pfkey_ipsec_flush() == -1)
+		errx(1, "ipsecctl_flush: failed to flush");
 
 	return (0);
 }
@@ -331,13 +353,13 @@ ipsecctl_get_rules(struct ipsecctl *ipsec)
 	mib[3] = NET_KEY_SPD_DUMP;
 
 	if (sysctl(mib, 4, NULL, &need, NULL, 0) == -1)
-		err(1, "sysctl");
+		err(1, "ipsecctl_get_rules: sysctl");
 	if (need == 0)
 		return;
 	if ((buf = malloc(need)) == NULL)
-		err(1, "malloc");
+		err(1, "ipsecctl_get_rules: malloc");
 	if (sysctl(mib, 4, buf, &need, NULL, 0) == -1)
-		err(1, "sysctl");
+		err(1, "ipsecctl_get_rules: sysctl");
 	lim = buf + need;
 
 	for (next = buf; next < lim; next += msg->sadb_msg_len *
@@ -348,15 +370,18 @@ ipsecctl_get_rules(struct ipsecctl *ipsec)
 
 		rule = calloc(1, sizeof(struct ipsec_rule));
 		if (rule == NULL)
-			err(1, "malloc");
+			err(1, "ipsecctl_get_rules: malloc");
 		rule->nr = ipsec->rule_nr++;
 		rule->type |= RULE_FLOW;
 
 		if (pfkey_parse(msg, rule))
-			errx(1, "failed to parse pfkey message");
+			errx(1, "ipsecctl_get_rules: "
+			    "failed to parse PF_KEY message");
 
 		ipsecctl_add_rule(ipsec, rule);
 	}
+
+	free(buf);
 }
 
 void
@@ -388,7 +413,7 @@ ipsecctl_show_flows(int opts)
 			printf("No flows\n");
 		return;
 	}
-		
+
 	while ((rp = TAILQ_FIRST(&ipsec.rule_queue))) {
 		TAILQ_REMOVE(&ipsec.rule_queue, rp, entries);
 
@@ -398,8 +423,10 @@ ipsecctl_show_flows(int opts)
 		free(rp->src);
 		free(rp->dst->name);
 		free(rp->dst);
-		free(rp->peer->name);
-		free(rp->peer);
+		if (rp->peer) {
+			free(rp->peer->name);
+			free(rp->peer);
+		}
 		if (rp->auth) {
 			if (rp->auth->srcid)
 				free(rp->auth->srcid);
@@ -409,8 +436,6 @@ ipsecctl_show_flows(int opts)
 		}
 		free(rp);
 	}
-
-	return;
 }
 
 void
@@ -432,16 +457,16 @@ ipsecctl_show_sas(int opts)
 
 	/* When the SADB is empty we get ENOENT, no need to err(). */
 	if (sysctl(mib, 5, NULL, &need, NULL, 0) == -1 && errno != ENOENT)
-		err(1, "sysctl");
+		err(1, "ipsecctl_show_sas: sysctl");
 	if (need == 0) {
 		if (opts & IPSECCTL_OPT_SHOWALL)
 			printf("No entries\n");
 		return;
 	}
 	if ((buf = malloc(need)) == NULL)
-		err(1, "malloc");
+		err(1, "ipsecctl_show_sas: malloc");
 	if (sysctl(mib, 5, buf, &need, NULL, 0) == -1)
-		err(1, "sysctl");
+		err(1, "ipsecctl_show_sas: sysctl");
 	lim = buf + need;
 	for (next = buf; next < lim;
 	    next += msg->sadb_msg_len * PFKEYV2_CHUNK) {
@@ -450,6 +475,8 @@ ipsecctl_show_sas(int opts)
 			break;
 		pfkey_print_sa(msg, opts);
 	}
+
+	free(buf);
 }
 
 __dead void
@@ -551,4 +578,23 @@ main(int argc, char *argv[])
 	}
 
 	exit(error);
+}
+
+/* ARGSUSED1 */
+static int
+unmask(struct ipsec_addr *ipa, sa_family_t af)
+{
+	int		i = 31, j = 0, b = 0;
+	u_int32_t	tmp;
+
+	while (j < 4 && ipa->addr32[j] == 0xffffffff) {
+		b += 32;
+		j++;
+	}
+	if (j < 4) {
+		tmp = ntohl(ipa->addr32[j]);
+		for (i = 31; tmp & (1 << i); --i)
+			b++;
+	}
+	return (b);
 }

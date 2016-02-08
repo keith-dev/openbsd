@@ -1,4 +1,4 @@
-.\"	$OpenBSD: isa.4,v 1.30 2005/08/05 05:12:56 jsg Exp $
+.\"	$OpenBSD: isa.4,v 1.35 2006/02/01 19:33:24 martin Exp $
 .\"	$NetBSD: isa.4,v 1.19 2000/03/18 16:54:37 augustss Exp $
 .\"
 .\" Copyright (c) 2000 Theo de Raadt.  All rights reserved.
@@ -41,6 +41,10 @@
 .Cd "# amd64 and i386"
 .Cd "isa0 at mainbus0"
 .Cd "isa0 at pcib?"
+.Pp
+.Cd "# i386"
+.Cd "isa0 at ichpcib?"
+.Cd "isa0 at gscpcib?"
 .Pp
 .Cd "# alpha"
 .Cd "isa* at pceb?"
@@ -191,7 +195,7 @@ Novel NE2000 and compatible
 .Tn Ethernet
 interfaces.
 .It Xr sm 4
-SMC91C9x-based
+SMC91C9x and SMC91C1xx-based
 .Tn Ethernet
 interfaces.
 .It Xr we 4
@@ -244,6 +248,8 @@ National Semiconductor LM78, LM79 and compatible hardware monitors.
 .It Xr pcic 4
 .Tn ISA
 PCMCIA controllers.
+.It Xr viasio 4
+VIA VT1211 LPC Super I/O.
 .El
 .Pp
 Note that some
@@ -301,8 +307,9 @@ These are listed in
 .Xr sm 4 ,
 .Xr uha 4 ,
 .Xr usb 4 ,
+.Xr viasio 4 ,
 .Xr wdc 4 ,
-.\" no manpage .Xr wds 4 ,
+.Xr wds 4 ,
 .Xr we 4 ,
 .Xr wss 4 ,
 .Xr wt 4

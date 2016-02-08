@@ -1,4 +1,4 @@
-/*	$OpenBSD: tcp_input.c,v 1.190 2005/08/11 11:39:36 markus Exp $	*/
+/*	$OpenBSD: tcp_input.c,v 1.195 2006/02/26 17:50:45 markus Exp $	*/
 /*	$NetBSD: tcp_input.c,v 1.23 1996/02/13 23:43:44 christos Exp $	*/
 
 /*
@@ -604,19 +604,25 @@ findpcb:
 		break;
 	}
 	if (inp == 0) {
+		int	inpl_flags = 0;
+#if NPF > 0
+		struct pf_mtag *t;
+
+		if ((t = pf_find_mtag(m)) != NULL &&
+		    t->flags & PF_TAG_TRANSLATE_LOCALHOST)
+			inpl_flags = INPLOOKUP_WILDCARD;
+#endif
 		++tcpstat.tcps_pcbhashmiss;
 		switch (af) {
 #ifdef INET6
 		case AF_INET6:
 			inp = in6_pcblookup_listen(&tcbtable,
-			    &ip6->ip6_dst, th->th_dport, m_tag_find(m,
-			    PACKET_TAG_PF_TRANSLATE_LOCALHOST, NULL) != NULL);
+			    &ip6->ip6_dst, th->th_dport, inpl_flags);
 			break;
 #endif /* INET6 */
 		case AF_INET:
 			inp = in_pcblookup_listen(&tcbtable,
-			    ip->ip_dst, th->th_dport, m_tag_find(m,
-			    PACKET_TAG_PF_TRANSLATE_LOCALHOST, NULL) != NULL);
+			    ip->ip_dst, th->th_dport, inpl_flags);
 			break;
 		}
 		/*
@@ -1417,7 +1423,8 @@ trimthenstep6:
 	 *	Close the tcb.
 	 */
 	if (tiflags & TH_RST) {
-		if (th->th_seq != tp->last_ack_sent)
+		if (th->th_seq != tp->last_ack_sent &&
+		    th->th_seq != tp->rcv_nxt)
 			goto drop;
 
 		switch (tp->t_state) {
@@ -1582,7 +1589,7 @@ trimthenstep6:
 				 * duplicate ack (ie, window info didn't
 				 * change), the ack is the biggest we've
 				 * seen and we've seen exactly our rexmt
-				 * threshhold of them, assume a packet
+				 * threshold of them, assume a packet
 				 * has been dropped and retransmit it.
 				 * Kludge snd_nxt & the congestion
 				 * window so we send only this one
@@ -1931,9 +1938,10 @@ step6:
 	 * Update window information.
 	 * Don't look at window if no ACK: TAC's send garbage on first SYN.
 	 */
-	if ((tiflags & TH_ACK) && (SEQ_LT(tp->snd_wl1, th->th_seq) ||
-	    (tp->snd_wl1 == th->th_seq && SEQ_LT(tp->snd_wl2, th->th_ack)) ||
-	    (tp->snd_wl2 == th->th_ack && tiwin > tp->snd_wnd))) {
+	if ((tiflags & TH_ACK) &&
+	    (SEQ_LT(tp->snd_wl1, th->th_seq) || (tp->snd_wl1 == th->th_seq &&
+	    (SEQ_LT(tp->snd_wl2, th->th_ack) ||
+	    (tp->snd_wl2 == th->th_ack && tiwin > tp->snd_wnd))))) {
 		/* keep track of pure window updates */
 		if (tlen == 0 &&
 		    tp->snd_wl2 == th->th_ack && tiwin > tp->snd_wnd)
@@ -3970,7 +3978,7 @@ syn_cache_add(src, dst, th, iphlen, so, m, optp, optlen, oi)
 #endif
 		tb.pf = tp->pf;
 #ifdef TCP_SACK
-		tb.sack_enable = tcp_do_sack;
+		tb.sack_enable = tp->sack_enable;
 #endif
 		tb.t_flags = tcp_do_rfc1323 ? (TF_REQ_SCALE|TF_REQ_TSTMP) : 0;
 #ifdef TCP_SIGNATURE

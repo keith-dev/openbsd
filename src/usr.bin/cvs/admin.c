@@ -1,4 +1,4 @@
-/*	$OpenBSD: admin.c,v 1.23 2005/07/27 16:42:19 xsa Exp $	*/
+/*	$OpenBSD: admin.c,v 1.29 2006/02/01 08:33:18 xsa Exp $	*/
 /*
  * Copyright (c) 2004 Jean-Francois Brousseau <jfb@openbsd.org>
  * Copyright (c) 2005 Joris Vink <joris@openbsd.org>
@@ -25,15 +25,7 @@
  * ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include <sys/types.h>
-#include <sys/stat.h>
-
-#include <errno.h>
-#include <fcntl.h>
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-#include <unistd.h>
+#include "includes.h"
 
 #include "cvs.h"
 #include "log.h"
@@ -216,82 +208,81 @@ cvs_admin_pre_exec(struct cvsroot *root)
 	if (root->cr_method == CVS_METHOD_LOCAL)
 		return (0);
 
-	if ((alist != NULL) && ((cvs_sendarg(root, "-a", 0) < 0) ||
-	    (cvs_sendarg(root, alist, 0) < 0)))
-		return (CVS_EX_PROTO);
+	if (alist != NULL) {
+		cvs_sendarg(root, "-a", 0);
+		cvs_sendarg(root, alist, 0);
+	}
 
-	if ((userfile != NULL) && ((cvs_sendarg(root, "-A", 0) < 0) ||
-	    (cvs_sendarg(root, userfile, 0) < 0)))
-		return (CVS_EX_PROTO);
+	if (userfile != NULL) {
+		cvs_sendarg(root, "-A", 0);
+		cvs_sendarg(root, userfile, 0);
+	}
 
 	if (runflags & FLAG_BRANCH) {
-		if (cvs_sendarg(root, "-b", 0) < 0)
-			return (CVS_EX_PROTO);
-		if ((branch_arg != NULL) &&
-		    (cvs_sendarg(root, branch_arg, 0) < 0))
-			return (CVS_EX_PROTO);
+		cvs_sendarg(root, "-b", 0);
+		if (branch_arg != NULL)
+			cvs_sendarg(root, branch_arg, 0);
 	}
 
-	if ((comment != NULL) && ((cvs_sendarg(root, "-c", 0) < 0) ||
-	    (cvs_sendarg(root, comment, 0) < 0)))
-		return (CVS_EX_PROTO);
+	if (comment != NULL) {
+		cvs_sendarg(root, "-c", 0);
+		cvs_sendarg(root, comment, 0);
+	}
 
 	if (runflags & FLAG_DELUSER)  {
-		if (cvs_sendarg(root, "-e", 0) < 0)
-			return (CVS_EX_PROTO);
-		if ((elist != NULL) &&
-		    (cvs_sendarg(root, elist, 0) < 0))
-			return (CVS_EX_PROTO);
+		cvs_sendarg(root, "-e", 0);
+		if (elist != NULL)
+			cvs_sendarg(root, elist, 0);
 	}
 
-	if (runflags & FLAG_INTERACTIVE) {
-		if (cvs_sendarg(root, "-I", 0) < 0)
-			return (CVS_EX_PROTO);
-	}
+	if (runflags & FLAG_INTERACTIVE)
+		cvs_sendarg(root, "-I", 0);
 
-	if ((subst != NULL) && ((cvs_sendarg(root, "-k", 0) < 0) ||
-	    (cvs_sendarg(root, subst, 0) < 0)))
-		return (CVS_EX_PROTO);
+	if (subst != NULL) {
+		cvs_sendarg(root, "-k", 0);
+		cvs_sendarg(root, subst, 0);
+	}
 
 	if (lockrev & LOCK_SET) {
-		if (cvs_sendarg(root, "-l", 0) < 0)
-			return (CVS_EX_PROTO);
-		if ((lockrev_arg != NULL) &&
-		    (cvs_sendarg(root, lockrev_arg, 0) < 0))
-			return (CVS_EX_PROTO);
+		cvs_sendarg(root, "-l", 0);
+		if (lockrev_arg != NULL)
+			cvs_sendarg(root, lockrev_arg, 0);
 	}
 
-	if ((lkmode == RCS_LOCK_STRICT) && (cvs_sendarg(root, "-L", 0) < 0))
-		return (CVS_EX_PROTO);
-	else if ((lkmode == RCS_LOCK_LOOSE) && (cvs_sendarg(root, "-U", 0) < 0))
-		return (CVS_EX_PROTO);
+	if (lkmode == RCS_LOCK_STRICT)
+		cvs_sendarg(root, "-L", 0);
+	else if (lkmode == RCS_LOCK_LOOSE)
+		cvs_sendarg(root, "-U", 0);
 
-	if ((replace_msg != NULL) && ((cvs_sendarg(root, "-m", 0) < 0)
-	    || (cvs_sendarg(root, replace_msg, 0) < 0)))
-		return (CVS_EX_PROTO);
+	if (replace_msg != NULL) {
+		cvs_sendarg(root, "-m", 0);
+		cvs_sendarg(root, replace_msg, 0);
+	}
 
-	if ((ntag != NULL) && ((cvs_sendarg(root, "-n", 0) < 0) ||
-	    (cvs_sendarg(root, ntag, 0) < 0)))
-		return (CVS_EX_PROTO);
+	if (ntag != NULL) {
+		cvs_sendarg(root, "-n", 0);
+		cvs_sendarg(root, ntag, 0);
+	}
 
-	if ((Ntag != NULL) && ((cvs_sendarg(root, "-N", 0) < 0) ||
-	    (cvs_sendarg(root, Ntag, 0) < 0)))
-		return (CVS_EX_PROTO);
+	if (Ntag != NULL) {
+		cvs_sendarg(root, "-N", 0);
+		cvs_sendarg(root, Ntag, 0);
+	}
 
-	if ((range != NULL) && ((cvs_sendarg(root, "-o", 0) < 0) ||
-	    (cvs_sendarg(root, range, 0) < 0)))
-		return (CVS_EX_PROTO);
+	if (range != NULL) {
+		cvs_sendarg(root, "-o", 0);
+		cvs_sendarg(root, range, 0);
+	}
 
-	if ((state != NULL) && ((cvs_sendarg(root, "-s", 0) < 0) ||
-	    (cvs_sendarg(root, state, 0) < 0)))
-		return (CVS_EX_PROTO);
+	if (state != NULL) {
+		cvs_sendarg(root, "-s", 0);
+		cvs_sendarg(root, state, 0);
+	}
 
 	if (lockrev & LOCK_REMOVE) {
-		if (cvs_sendarg(root, "-u", 0) < 0)
-			return (CVS_EX_PROTO);
-		if ((unlockrev_arg != NULL) &&
-		    (cvs_sendarg(root, unlockrev_arg, 0) < 0))
-			return (CVS_EX_PROTO);
+		cvs_sendarg(root, "-u", 0);
+		if (unlockrev_arg != NULL)
+			cvs_sendarg(root, unlockrev_arg, 0);
 	}
 
 	return (0);
@@ -305,47 +296,38 @@ cvs_admin_pre_exec(struct cvsroot *root)
 static int
 cvs_admin_remote(CVSFILE *cf, void *arg)
 {
-	int ret;
 	char *repo, fpath[MAXPATHLEN];
 	struct cvsroot *root;
 
-	ret = 0;
 	root = CVS_DIR_ROOT(cf);
 	repo = CVS_DIR_REPO(cf);
 
 	if (cf->cf_type == DT_DIR) {
 		if (cf->cf_cvstat == CVS_FST_UNKNOWN)
-			ret = cvs_sendreq(root, CVS_REQ_QUESTIONABLE,
-			    cf->cf_name);
+			cvs_sendreq(root, CVS_REQ_QUESTIONABLE, cf->cf_name);
 		else
-			ret = cvs_senddir(root, cf);
-		if (ret == -1)
-			ret = CVS_EX_PROTO;
-
-		return (ret);
+			cvs_senddir(root, cf);
+		return (0);
 	}
 
 	cvs_file_getpath(cf, fpath, sizeof(fpath));
-
-	if (cvs_sendentry(root, cf) < 0)
-		return (CVS_EX_PROTO);
+	cvs_sendentry(root, cf);
 
 	switch (cf->cf_cvstat) {
 	case CVS_FST_UNKNOWN:
-		ret = cvs_sendreq(root, CVS_REQ_QUESTIONABLE, cf->cf_name);
+		cvs_sendreq(root, CVS_REQ_QUESTIONABLE, cf->cf_name);
 		break;
 	case CVS_FST_UPTODATE:
-		ret = cvs_sendreq(root, CVS_REQ_UNCHANGED, cf->cf_name);
+		cvs_sendreq(root, CVS_REQ_UNCHANGED, cf->cf_name);
 		break;
 	case CVS_FST_MODIFIED:
-		ret = cvs_sendreq(root, CVS_REQ_MODIFIED, cf->cf_name);
-		if (ret == 0)
-			ret = cvs_sendfile(root, fpath);
+		cvs_sendreq(root, CVS_REQ_MODIFIED, cf->cf_name);
+		cvs_sendfile(root, fpath);
 	default:
 		break;
 	}
 
-	return (ret);
+	return (0);
 }
 
 /*
@@ -366,20 +348,23 @@ cvs_admin_local(CVSFILE *cf, void *arg)
 		return (0);
 	}
 
-	if (cf->cf_cvstat == CVS_FST_UNKNOWN) {
-		if (verbosity > 1)
-			cvs_log(LP_WARN, "nothing known about %s", cf->cf_name);
+	if (cf->cf_cvstat == CVS_FST_UNKNOWN)
+		return (0);
+	else if (cf->cf_cvstat == CVS_FST_ADDED) {
+		cvs_log(LP_WARN, "cannot admin newly added file `%s'",
+		    cf->cf_name);
 		return (0);
 	}
 
 	cvs_file_getpath(cf, fpath, sizeof(fpath));
+	cvs_rcs_getpath(cf, rcspath, sizeof(rcspath));
 
-	if (cvs_rcs_getpath(cf, rcspath, sizeof(rcspath)) == NULL)
-		return (CVS_EX_DATA);
+	if ((rf = rcs_open(rcspath, RCS_RDWR)) == NULL)
+		fatal("cvs_admin_local: rcs_open `%s': %s", rcspath,
+		    rcs_errstr(rcs_errno));
 
-	rf = rcs_open(rcspath, RCS_RDWR);
-	if (rf == NULL)
-		return (CVS_EX_DATA);
+	if (!(runflags & FLAG_QUIET))
+		cvs_printf("RCS file: %s\n", rcspath);
 
 	if (!RCS_KWEXP_INVAL(kflag))
 		ret = rcs_kwexp_set(rf, kflag);
@@ -387,6 +372,9 @@ cvs_admin_local(CVSFILE *cf, void *arg)
 		ret = rcs_lock_setmode(rf, lkmode);
 
 	rcs_close(rf);
+
+	if (!(runflags & FLAG_QUIET))
+		cvs_printf("done\n");
 
 	return (0);
 }

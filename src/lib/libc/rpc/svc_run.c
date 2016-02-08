@@ -1,4 +1,4 @@
-/*	$OpenBSD: svc_run.c,v 1.16 2005/08/08 08:05:35 espie Exp $ */
+/*	$OpenBSD: svc_run.c,v 1.18 2005/12/21 01:40:22 millert Exp $ */
 /*
  * Sun RPC is a product of Sun Microsystems, Inc. and is provided for
  * unrestricted use provided that this legend is included on all tape
@@ -33,7 +33,7 @@
  * Wait for input, call server program.
  */
 #include <rpc/rpc.h>
-#include <sys/errno.h>
+#include <errno.h>
 #include <unistd.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -42,17 +42,18 @@
 void
 svc_run(void)
 {
-	struct pollfd *pfd = NULL;
+	struct pollfd *pfd = NULL, *newp;
 	int nready, saved_max_pollfd = 0;
 
 	for (;;) {
 		if (svc_max_pollfd > saved_max_pollfd) {
-			free(pfd);
-			pfd = malloc(sizeof(*pfd) * svc_max_pollfd);
-			if (pfd == NULL) {
+			newp = realloc(pfd, sizeof(*pfd) * svc_max_pollfd);
+			if (newp == NULL) {
+				free(pfd);
 				perror("svc_run");	/* XXX */
 				return;			/* XXX */
 			}
+			pfd = newp;
 			saved_max_pollfd = svc_max_pollfd;
 		}
 		memcpy(pfd, svc_pollfd, sizeof(*pfd) * svc_max_pollfd);

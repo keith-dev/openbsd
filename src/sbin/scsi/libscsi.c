@@ -1,4 +1,4 @@
-/*	$OpenBSD: libscsi.c,v 1.3 2005/04/09 02:10:01 cloder Exp $	*/
+/*	$OpenBSD: libscsi.c,v 1.5 2005/12/21 01:40:23 millert Exp $	*/
 
 /* Copyright (c) 1994 HD Associates
  * (contact: dufault@hda.com)
@@ -38,7 +38,7 @@
 #include <ctype.h>
 #include <string.h>
 #include <sys/scsiio.h>
-#include <sys/errno.h>
+#include <errno.h>
 #include <stdarg.h>
 #include <fcntl.h>
 
@@ -1127,9 +1127,6 @@ int
 scsireq_enter(int fid, scsireq_t *scsireq)
 {
 	int ret;
-
-	if (scsireq == 0)
-		return EFAULT;
 
 	ret = ioctl(fid, SCIOCCOMMAND, (void *)scsireq);
 

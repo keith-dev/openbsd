@@ -1,4 +1,4 @@
-.\"	$OpenBSD: tcpdump.8,v 1.56 2005/07/08 12:47:28 jmc Exp $
+.\"	$OpenBSD: tcpdump.8,v 1.59 2005/10/20 03:33:20 deraadt Exp $
 .\"
 .\" Copyright (c) 1987, 1988, 1989, 1990, 1991, 1992, 1994, 1995, 1996
 .\"	The Regents of the University of California.  All rights reserved.
@@ -262,6 +262,13 @@ bytes will be printed.
 .It Fl y Ar datalinktype
 Set the data link type to use while capturing to
 .Ar datalinktype .
+Commonly used types include
+.Cm EN10MB ,
+.Cm IEEE802_11 ,
+and
+.Cm IEEE802_11_RADIO .
+The choices applicable to a particular device can be listed using
+.Fl L .
 .El
 .Pp
 .Ar expression
@@ -347,6 +354,7 @@ Possible protocols are:
 .Cm pim ,
 .Cm rarp ,
 .Cm sca ,
+.Cm stp ,
 .Cm tcp ,
 and
 .Cm udp .
@@ -599,13 +607,28 @@ True if the packet is an IP multicast packet.
 True if the packet is of ether type
 .Ar proto .
 .Ar proto
-can be a number or name from
-.Xr protocols 5 ,
-such as
+can be a number or one of the names
 .Cm ip ,
+.Cm ip6 ,
 .Cm arp ,
+.Cm rarp ,
+.Cm atalk ,
+.Cm atalkarp ,
+.Cm decnet ,
+.Cm decdts ,
+.Cm decdns ,
+.Cm lanbridge ,
+.Cm lat ,
+.Cm mopdl ,
+.Cm moprc ,
+.Cm pup ,
+.Cm sca ,
+.Cm sprite ,
+.Cm stp ,
+.Cm vexp ,
+.Cm vprod ,
 or
-.Cm rarp .
+.Cm xns .
 These identifiers are also keywords and must be escaped
 using a backslash character
 .Pq Sq \e .
@@ -1739,6 +1762,7 @@ interrupt.
 .%D November 1998
 .Re
 .Sh AUTHORS
+.An -nosplit
 .An Van Jacobson Aq van@ee.lbl.gov ,
 .An Craig Leres Aq leres@ee.lbl.gov ,
 and

@@ -1,4 +1,4 @@
-.\"	$OpenBSD: bc.1,v 1.18 2004/10/19 07:36:51 otto Exp $
+.\"	$OpenBSD: bc.1,v 1.20 2005/10/29 08:27:25 jmc Exp $
 .\"
 .\" Copyright (C) Caldera International Inc.  2001-2002.
 .\" All rights reserved.
@@ -331,7 +331,6 @@ the exponential function and
 .Pp
 prints approximate values of the exponential function of
 the first ten integers.
-.Pp
 .Bd -literal -offset indent
 $ bc -l -e 'scale = 500; 2 * a(2^10000)' -e quit
 .Ed
@@ -365,6 +364,7 @@ A complete rewrite of the
 command first appeared in
 .Ox 3.5 .
 .Sh AUTHORS
+.An -nosplit
 The original version of the
 .Nm
 command was written by

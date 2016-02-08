@@ -1,4 +1,4 @@
-/* $OpenBSD: cddb.c,v 1.8 2003/06/09 11:33:14 espie Exp $ */
+/* $OpenBSD: cddb.c,v 1.11 2006/01/23 17:29:22 millert Exp $ */
 /*
  * Copyright (c) 2002 Marc Espie.
  *
@@ -24,7 +24,7 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include <sys/types.h>
+#include <sys/param.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <sys/cdio.h>
@@ -106,11 +106,10 @@ safe_copy(char **p, const char *title)
 	if (*p == NULL)
 		*p = strdup(copy_buffer);
 	else {
-		size_t len = strlen(*p) + strlen(copy_buffer) + 1;
-		char *n = malloc(len);
-		if (n == NULL)
+		char *n;
+
+		if (asprintf(&n, "%s%s", *p, copy_buffer) == -1)
 			return;
-		snprintf(n, len, "%s%s", *p, copy_buffer);
 		free(*p);
 		*p = n;
 	}
@@ -327,7 +326,7 @@ cddb(const char *host_port, int n, struct cd_toc_entry *e, char *arg)
 		}
 	} else if (strcmp(line, "200") != 0 || !further_query(cout, type))
 		goto end;
-	result = malloc(sizeof(char *) * n+1);
+	result = malloc(sizeof(char *) * (n + 1));
 	if (!result)
 		goto end;
 	for (i = 0; i <= n; i++)

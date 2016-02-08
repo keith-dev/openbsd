@@ -1,4 +1,4 @@
-/*	$OpenBSD: echo.c,v 1.36 2005/08/09 00:53:48 kjell Exp $	*/
+/*	$OpenBSD: echo.c,v 1.43 2005/12/20 06:17:36 kjell Exp $	*/
 
 /* This file is in the public domain. */
 
@@ -18,16 +18,17 @@
 #include "funmap.h"
 
 #include <stdarg.h>
+#include <term.h>
 
 static char	*veread(const char *, char *, size_t, int, va_list);
-static int	 complt(int, int, char *, size_t, int);
-static int	 complt_list(int, int, char *, int);
+static int	 complt(int, int, char *, size_t, int, int *);
+static int	 complt_list(int, char *, int);
 static void	 eformat(const char *, va_list);
 static void	 eputi(int, int);
 static void	 eputl(long, int);
 static void	 eputs(const char *);
 static void	 eputc(char);
-static LIST	*copy_list(LIST *);
+static struct list	*copy_list(struct list *);
 
 int		epresf = FALSE;		/* stuff in echo line flag */
 
@@ -94,11 +95,11 @@ eyesno(const char *sp)
 		if (rep[0] != '\0') {
 #ifndef NO_MACRO
 			if (macrodef) {
-				LINE	*lp = maclcur;
+				struct line	*lp = maclcur;
 
 				maclcur = lp->l_bp;
 				maclcur->l_fp = lp->l_fp;
-				free((char *)lp);
+				free(lp);
 			}
 #endif /* !NO_MACRO */
 			if ((rep[0] == 'y' || rep[0] == 'Y') &&
@@ -141,8 +142,19 @@ eread(const char *fmt, char *buf, size_t nbuf, int flag, ...)
 static char *
 veread(const char *fp, char *buf, size_t nbuf, int flag, va_list ap)
 {
-	int	 cpos, dynbuf = (buf == NULL);
-	int	 c, i;
+	int	 dynbuf = (buf == NULL);
+	int	 cpos, epos;		/* cursor, end position in buf */
+	int	 c, i, y;
+	int	 cplflag = FALSE;	/* display completion list */
+	int	 cwin = FALSE;		/* completion list created */
+	int	 mr = 0;		/* match left arrow */
+	int	 ml = 0;		/* match right arrow */
+	int	 esc = 0;		/* position in esc pattern */
+	struct buffer	*bp;			/* completion list buffer */
+	struct mgwin	*wp;			/* window for compl list */
+	int	 match;			/* esc match found */
+	int	 cc, rr;		/* saved ttcol, ttrow */
+	char	*ret;			/* return value */
 
 #ifndef NO_MACRO
 	if (inmacro) {
@@ -157,7 +169,10 @@ veread(const char *fp, char *buf, size_t nbuf, int flag, va_list ap)
 		return (buf);
 	}
 #endif /* !NO_MACRO */
-	cpos = 0;
+	epos = cpos = 0;
+	ml = mr = esc = 0;
+	cplflag = FALSE;
+
 	if ((flag & EFNEW) != 0 || ttrow != nrow - 1) {
 		ttcolor(CTEXT);
 		ttmove(nrow - 1, 0);
@@ -169,45 +184,163 @@ veread(const char *fp, char *buf, size_t nbuf, int flag, va_list ap)
 		if (buf == NULL)
 			return (NULL);
 		eputs(buf);
-		cpos += strlen(buf);
+		epos = cpos += strlen(buf);
 	}
 	tteeol();
 	ttflush();
 	for (;;) {
 		c = getkey(FALSE);
 		if ((flag & EFAUTO) != 0 && (c == ' ' || c == CCHR('I'))) {
-			cpos += complt(flag, c, buf, nbuf, cpos);
+			if (cplflag == TRUE) {
+				complt_list(flag, buf, cpos);
+				cwin = TRUE;
+			} else if (complt(flag, c, buf, nbuf, epos, &i) == TRUE) {
+				cplflag = TRUE;
+				epos += i;
+				cpos = epos;
+			}
 			continue;
 		}
-		if ((flag & EFAUTO) != 0 && c == '?') {
-			complt_list(flag, c, buf, cpos);
-			continue;
+		cplflag = FALSE;
+
+		if (esc > 0) { /* ESC sequence started */
+			match = 0;
+			if (ml == esc && key_left[ml] && c == key_left[ml]) {
+				match++;
+				if (key_left[++ml] == '\0') {
+					c = CCHR('B');
+					esc = 0;
+				}
+			}
+			if (mr == esc && key_right[mr] && c == key_right[mr]) {
+				match++;
+				if (key_right[++mr] == '\0') {
+					c = CCHR('F');
+					esc = 0;
+				}
+			}
+			if (match == 0) {
+				esc = 0;
+				continue;
+				/* hack. how do we know esc pattern is done? */
+			}
+			if (esc > 0) {
+				esc++;
+				continue;
+			}
 		}
 		switch (c) {
+		case CCHR('A'): /* start of line */
+			while (cpos > 0) {
+				if (ISCTRL(buf[--cpos]) != FALSE) {
+					ttputc('\b');
+					--ttcol;
+				}
+				ttputc('\b');
+				--ttcol;
+			}
+			ttflush();
+			break;
+		case CCHR('D'):
+			if (cpos != epos) {
+				tteeol();
+				y = buf[cpos];
+				epos--;
+				rr = ttrow;
+				cc = ttcol;
+				for (i = cpos; i < epos; i++) {
+					buf[i] = buf[i + 1];
+					eputc(buf[i]);
+				}
+				ttmove(rr, cc);
+				ttflush();
+			}
+			break;
+		case CCHR('E'): /* end of line */
+			while (cpos < epos) {
+				eputc(buf[cpos++]);
+			}
+			ttflush();
+			break;
+		case CCHR('B'): /* back */
+			if (cpos > 0) {
+				if (ISCTRL(buf[--cpos]) != FALSE) {
+					ttputc('\b');
+					--ttcol;
+				}
+				ttputc('\b');
+				--ttcol;
+				ttflush();
+			}
+			break;
+		case CCHR('F'): /* forw */
+			if (cpos < epos) {
+				eputc(buf[cpos++]);
+				ttflush();
+			}
+			break;
+		case CCHR('Y'): /* yank from kill buffer */
+			i = 0;
+			while ((y = kremove(i++)) >= 0 && y != '\n') {
+				int t;
+				if (dynbuf && epos + 1 >= nbuf) {
+					void *newp;
+					size_t newsize = epos + epos + 16;
+					if ((newp = realloc(buf, newsize))
+					    == NULL)
+						goto fail;
+					buf = newp;
+					nbuf = newsize;
+				}
+				for (t = epos; t > cpos; t--)
+					buf[t] = buf[t - 1];
+				buf[cpos++] = (char)y;
+				epos++;
+				eputc((char)y);
+				cc = ttcol;
+				rr = ttrow;
+				for (t = cpos; t < epos; t++)
+					eputc(buf[t]);
+				ttmove(rr, cc);
+			}
+			ttflush();
+			break;
+		case CCHR('K'): /* copy here-EOL to kill buffer */
+			kdelete();
+			for (i = cpos; i < epos; i++)
+				kinsert(buf[i], KFORW);
+			tteeol();
+			epos = cpos;
+			ttflush();
+			break;
+		case CCHR('['):
+			ml = mr = esc = 1;
+			break;
 		case CCHR('J'):
 			c = CCHR('M');
 			/* FALLTHROUGH */
 		case CCHR('M'):			/* return, done */
 			/* if there's nothing in the minibuffer, abort */
-			if (cpos == 0 && !(flag & EFNUL)) {
+			if (epos == 0 && !(flag & EFNUL)) {
 				(void)ctrlg(FFRAND, 0);
 				ttflush();
 				return (NULL);
 			}
 			if ((flag & EFFUNC) != 0) {
-				if ((i = complt(flag, c, buf, nbuf, cpos)) == 0)
+				if (complt(flag, c, buf, nbuf, epos, &i)
+				    == FALSE)
 					continue;
 				if (i > 0)
-					cpos += i;
+					epos += i;
 			}
-			buf[cpos] = '\0';
+			buf[epos] = '\0';
 			if ((flag & EFCR) != 0) {
 				ttputc(CCHR('M'));
 				ttflush();
 			}
 #ifndef NO_MACRO
 			if (macrodef) {
-				LINE	*lp;
+				struct line	*lp;
 
 				if ((lp = lalloc(cpos)) == NULL) {
 					static char falseval[] = "";
@@ -223,25 +356,38 @@ veread(const char *fp, char *buf, size_t nbuf, int flag, va_list ap)
 				bcopy(buf, lp->l_text, cpos);
 			}
 #endif /* !NO_MACRO */
+			ret = buf;
 			goto done;
 		case CCHR('G'):			/* bell, abort */
 			eputc(CCHR('G'));
 			(void)ctrlg(FFRAND, 0);
 			ttflush();
-			return (NULL);
+			ret = NULL;
+			goto done;
 		case CCHR('H'):			/* rubout, erase */
 		case CCHR('?'):
 			if (cpos != 0) {
+				y = buf[--cpos];
+				epos--;
 				ttputc('\b');
-				ttputc(' ');
-				ttputc('\b');
-				--ttcol;
-				if (ISCTRL(buf[--cpos]) != FALSE) {
+				ttcol--;
+				if (ISCTRL(y) != FALSE) {
 					ttputc('\b');
+					ttcol--;
+				}
+				rr = ttrow;
+				cc = ttcol;
+				for (i = cpos; i < epos; i++) {
+					buf[i] = buf[i + 1];
+					eputc(buf[i]);
+				}
+				ttputc(' ');
+				if (ISCTRL(y) != FALSE) {
 					ttputc(' ');
 					ttputc('\b');
-					--ttcol;
 				}
+				ttputc('\b');
+				ttmove(rr, cc);
 				ttflush();
 			}
 			break;
@@ -258,6 +404,7 @@ veread(const char *fp, char *buf, size_t nbuf, int flag, va_list ap)
 					ttputc('\b');
 					--ttcol;
 				}
+				epos--;
 			}
 			ttflush();
 			break;
@@ -293,38 +440,55 @@ veread(const char *fp, char *buf, size_t nbuf, int flag, va_list ap)
 			c = getkey(FALSE);
 			/* FALLTHROUGH */
 		default:
-			/* all the rest */
-			if (dynbuf && cpos + 1 >= nbuf) {
+			if (dynbuf && epos + 1 >= nbuf) {
 				void *newp;
-				size_t newsize = cpos + cpos + 16;
-
-				if ((newp = realloc(buf, newsize)) == NULL) {
-					ewprintf("Out of memory");
-					free(buf);
-					return (NULL);
-				}
+				size_t newsize = epos + epos + 16;
+				if ((newp = realloc(buf, newsize)) == NULL)
+					goto fail;
 				buf = newp;
 				nbuf = newsize;
 			}
-			if (cpos < nbuf - 1) {
-				buf[cpos++] = (char)c;
-				eputc((char)c);
-				ttflush();
-			}
+			for (i = epos; i > cpos; i--)
+				buf[i] = buf[i - 1];
+			buf[cpos++] = (char)c;
+			epos++;
+			eputc((char)c);
+			cc = ttcol;
+			rr = ttrow;
+			for (i = cpos; i < epos; i++)
+				eputc(buf[i]);
+			ttmove(rr, cc);
+			ttflush();
 		}
 	}
 done:
-	return (buf);
+	if (cwin == TRUE) {
+		/* blow away cpltion window */
+		bp = bfind("*Completions*", TRUE);
+		if ((wp = popbuf(bp)) != NULL) {
+			curwp = wp;
+			delwind(FFRAND, 1);
+		}
+	}
+	return (ret);
+fail:
+	ewprintf("Out of memory");
+	free(buf);
+	return (NULL);
 }
 
 /*
  * Do completion on a list of objects.
+ * c is SPACE, TAB, or CR
+ * return TRUE if matched (or partially matched)
+ * FALSE is result is ambiguous,
+ * ABORT on error.
  */
 static int
-complt(int flags, int c, char *buf, size_t nbuf, int cpos)
+complt(int flags, int c, char *buf, size_t nbuf, int cpos, int *nx)
 {
-	LIST	*lh, *lh2;
-	LIST	*wholelist = NULL;
+	struct list	*lh, *lh2;
+	struct list	*wholelist = NULL;
 	int	 i, nxtra, nhits, bxtra, msglen, nshown;
 	int	 wflag = FALSE;
 	char	*msg;
@@ -357,7 +521,7 @@ complt(int flags, int c, char *buf, size_t nbuf, int cpos)
 			lh2 = lh;
 		++nhits;
 		if (lh->l_name[cpos] == '\0')
-			nxtra = -1;
+			nxtra = -1; /* exact match */
 		else {
 			bxtra = getxtra(lh, lh2, cpos, wflag);
 			if (bxtra < nxtra)
@@ -368,23 +532,25 @@ complt(int flags, int c, char *buf, size_t nbuf, int cpos)
 	if (nhits == 0)
 		msg = " [No match]";
 	else if (nhits > 1 && nxtra == 0)
-		msg = " [Ambiguous]";
+		msg = " [Ambiguous. Ctrl-G to cancel]";
 	else {
 		/*
 		 * Being lazy - ought to check length, but all things
 		 * autocompleted have known types/lengths.
 		 */
 		if (nxtra < 0 && nhits > 1 && c == ' ')
-			nxtra = 1;
+			nxtra = 1; /* ??? */
 		for (i = 0; i < nxtra && cpos < nbuf; ++i) {
 			buf[cpos] = lh2->l_name[cpos];
 			eputc(buf[cpos++]);
 		}
+		/* XXX should grow nbuf */
 		ttflush();
 		free_file_list(wholelist);
-		if (nxtra < 0 && c != CCHR('M'))
-			return (0);
-		return (nxtra);
+		*nx = nxtra;
+		if (nxtra < 0 && c != CCHR('M')) /* exact */
+			*nx = 0;
+		return (TRUE);
 	}
 
 	/*
@@ -408,18 +574,19 @@ complt(int flags, int c, char *buf, size_t nbuf, int cpos)
 	ttcol -= (i = nshown);	/* update ttcol on BS's		 */
 	while (i--)
 		ttputc('\b');	/* update ttcol again!		 */
-	return (0);
+	*nx = nxtra;
+	return ((nhits > 0) ? TRUE : FALSE);
 }
 
 /*
  * Do completion on a list of objects, listing instead of completing.
  */
 static int
-complt_list(int flags, int c, char *buf, int cpos)
+complt_list(int flags, char *buf, int cpos)
 {
-	LIST	*lh, *lh2, *lh3;
-	LIST	*wholelist = NULL;
-	BUFFER	*bp;
+	struct list	*lh, *lh2, *lh3;
+	struct list	*wholelist = NULL;
+	struct buffer	*bp;
 	int	 i, maxwidth, width;
 	int	 preflen = 0;
 	int	 oldrow = ttrow;
@@ -427,14 +594,14 @@ complt_list(int flags, int c, char *buf, int cpos)
 	int	 oldhue = tthue;
 	char	 *linebuf;
 	size_t	 linesize, len;
-	const char *cp;
+	char *cp;
 
 	lh = NULL;
 
 	ttflush();
 
-	/* The results are put into a help buffer. */
-	bp = bfind("*help*", TRUE);
+	/* The results are put into a completion buffer. */
+	bp = bfind("*Completions*", TRUE);
 	if (bclear(bp) == FALSE)
 		return (FALSE);
 
@@ -533,7 +700,8 @@ complt_list(int flags, int c, char *buf, int cpos)
 				linebuf[0] = '\0';
 				width = 0;
 			}
-			len = strlcat(linebuf, lh2->l_name + preflen, linesize);
+			len = strlcat(linebuf, lh2->l_name + preflen,
+			    linesize);
 			width += maxwidth;
 			if (len < width && width < linesize) {
 				/* pad so the objects nicely line up */
@@ -570,7 +738,7 @@ complt_list(int flags, int c, char *buf, int cpos)
  * this is normal.
  */
 int
-getxtra(LIST *lp1, LIST *lp2, int cpos, int wflag)
+getxtra(struct list *lp1, struct list *lp2, int cpos, int wflag)
 {
 	int	i;
 
@@ -634,7 +802,7 @@ eformat(const char *fp, va_list ap)
 			c = *fp++;
 			switch (c) {
 			case 'c':
-				keyname(kname, sizeof(kname), va_arg(ap, int));
+				getkeyname(kname, sizeof(kname), va_arg(ap, int));
 				eputs(kname);
 				break;
 
@@ -642,7 +810,7 @@ eformat(const char *fp, va_list ap)
 				for (cp = kname, c = 0; c < key.k_count; c++) {
 					if (c)
 						*cp++ = ' ';
-					cp = keyname(cp, sizeof(kname) -
+					cp = getkeyname(cp, sizeof(kname) -
 					    (cp - kname) - 1, key.k_chars[c]);
 				}
 				eputs(kname);
@@ -750,34 +918,37 @@ eputc(char c)
 }
 
 void
-free_file_list(LIST *lp)
+free_file_list(struct list *lp)
 {
-	LIST	*next;
+	struct list	*next;
 
 	while (lp) {
 		next = lp->l_next;
+		free(lp->l_name);
 		free(lp);
 		lp = next;
 	}
 }
 
-static LIST *
-copy_list(LIST *lp)
+static struct list *
+copy_list(struct list *lp)
 {
-	LIST	*current, *last, *nxt;
+	struct list	*current, *last, *nxt;
 
 	last = NULL;
 	while (lp) {
-		current = (LIST *)malloc(sizeof(LIST));
+		current = (struct list *)malloc(sizeof(struct list));
 		if (current == NULL) {
+			/* Free what we have allocated so far */
 			for (current = last; current; current = nxt) {
 				nxt = current->l_next;
+				free(current->l_name);
 				free(current);
 			}
 			return (NULL);
 		}
 		current->l_next = last;
-		current->l_name = lp->l_name;
+		current->l_name = strdup(lp->l_name);
 		last = current;
 		lp = lp->l_next;
 	}

@@ -1,4 +1,4 @@
-.\"     $OpenBSD: epic.4,v 1.3 2005/07/27 23:27:35 brad Exp $
+.\"     $OpenBSD: epic.4,v 1.6 2006/02/13 05:29:42 brad Exp $
 .\"
 .\" Copyright (c) 1998 Jason L. Wright (jason@thought.net)
 .\" All rights reserved.
@@ -32,6 +32,8 @@
 .Nd SMC 83C170 (EPIC/100) Ethernet driver
 .Sh SYNOPSIS
 .Cd "epic* at pci?"
+.Cd "acphy* at mii?"
+.Cd "lxtphy* at mii?"
 .Cd "qsphy* at mii?"
 .Sh DESCRIPTION
 The
@@ -44,13 +46,6 @@ This driver provides support for the
 .Tn SMC
 .Tn EtherPower II 10/100
 Ethernet cards.
-.Pp
-When a
-.Nm
-interface is brought up, by default, it will attempt to auto-negotiate the
-link speed and duplex.
-The speeds, in order of attempt, are: 100Mb/s Full Duplex, 100Mb/s Half Duplex,
-10 Mb/s Full Duplex, and 10 Mb/s Half Duplex.
 .Pp
 The
 .Nm
@@ -79,10 +74,12 @@ Use 10baseT, half duplex
 Put the interface into loopback mode
 .El
 .Sh SEE ALSO
+.Xr acphy 4 ,
 .Xr arp 4 ,
 .Xr ifmedia 4 ,
 .Xr inet 4 ,
 .Xr intro 4 ,
+.Xr lxtphy 4 ,
 .Xr netintro 4 ,
 .Xr pci 4 ,
 .Xr qsphy 4 ,
@@ -97,6 +94,7 @@ device driver first appeared in
 support was added in
 .Ox 3.8 .
 .Sh AUTHORS
+.An -nosplit
 The
 .Nm
 driver was written by

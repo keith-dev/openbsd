@@ -1,4 +1,4 @@
-/*	$OpenBSD: rcs.h,v 1.31 2005/08/02 11:48:56 joris Exp $	*/
+/*	$OpenBSD: rcs.h,v 1.46 2006/02/09 08:08:56 niallo Exp $	*/
 /*
  * Copyright (c) 2004 Jean-Francois Brousseau <jfb@openbsd.org>
  * All rights reserved.
@@ -27,11 +27,6 @@
 #ifndef RCS_H
 #define RCS_H
 
-#include <sys/types.h>
-#include <sys/queue.h>
-
-#include <time.h>
-
 #include "buf.h"
 
 #define RCS_DIFF_MAXARG		32
@@ -59,6 +54,25 @@
 #define RCS_LOCK_STRICT		1
 
 
+/*
+ * Keyword expansion table
+ */
+#define RCS_KW_AUTHOR		0x1000
+#define RCS_KW_DATE		0x2000
+#define RCS_KW_LOG		0x4000
+#define RCS_KW_NAME		0x8000
+#define RCS_KW_RCSFILE		0x0100
+#define RCS_KW_REVISION		0x0200
+#define RCS_KW_SOURCE		0x0400
+#define RCS_KW_STATE		0x0800
+#define RCS_KW_FULLPATH		0x0010
+
+#define RCS_KW_ID \
+	(RCS_KW_RCSFILE | RCS_KW_REVISION | RCS_KW_DATE \
+	| RCS_KW_AUTHOR | RCS_KW_STATE)
+
+#define RCS_KW_HEADER	(RCS_KW_ID | RCS_KW_FULLPATH)
+
 /* RCS keyword expansion modes (kflags) */
 #define RCS_KWEXP_NONE	0x00
 #define RCS_KWEXP_NAME	0x01	/* include keyword name */
@@ -75,6 +89,12 @@
 	((k & RCS_KWEXP_OLD) && (RCS_KWEXP_OLD & ~RCS_KWEXP_OLD)))
 
 
+struct rcs_kw {
+	char	kw_str[16];
+	int	kw_type;
+};
+
+#define RCS_NKWORDS	(sizeof(rcs_expkw)/sizeof(rcs_expkw[0]))
 
 #define RCSNUM_MAXNUM	USHRT_MAX
 #define RCSNUM_MAXLEN	64
@@ -83,15 +103,21 @@
 
 
 /* file flags */
-#define RCS_READ	0x01
-#define RCS_WRITE	0x02
-#define RCS_RDWR	(RCS_READ|RCS_WRITE)
-#define RCS_CREATE	0x04		/* create the file */
+#define RCS_READ	  (1<<0)
+#define RCS_WRITE	  (1<<1)
+#define RCS_RDWR	  (RCS_READ|RCS_WRITE)
+#define RCS_CREATE	  (1<<2)  /* create the file */
+#define RCS_PARSE_FULLY   (1<<3)  /* fully parse it on open */
 
 /* internal flags */
-#define RCS_PARSED	0x010000	/* file has been parsed */
-#define RCS_SYNCED	0x020000	/* in-mem copy is sync with disk copy */
-#define RCS_SLOCK	0x040000	/* strict lock */
+#define RCS_PARSED	  (1<<4)  /* file has been parsed */
+#define RCS_SYNCED	  (1<<5)  /* in-mem copy is sync with disk copy */
+#define RCS_SLOCK	  (1<<6)  /* strict lock */
+
+/* parser flags */
+#define PARSED_DELTAS     (1<<7)  /* all deltas are parsed */
+#define PARSED_DESC       (1<<8)  /* the description is parsed */
+#define PARSED_DELTATEXTS (1<<9)  /* all delta texts are parsed */
 
 /* delta flags */
 #define RCS_RD_DEAD	0x01	/* dead */
@@ -104,6 +130,12 @@
 #define RCS_ERR_BADSYM	4
 #define RCS_ERR_PARSE	5
 #define RCS_ERR_ERRNO	255
+
+/* used for cvs_checkout_rev */
+#define CHECKOUT_REV_CREATED	1
+#define CHECKOUT_REV_MERGED	2
+#define CHECKOUT_REV_REMOVED	3
+#define CHECKOUT_REV_UPDATED	4
 
 typedef struct rcs_num {
 	u_int		 rn_len;
@@ -149,6 +181,7 @@ struct rcs_delta {
 	char		*rd_author;
 	char		*rd_state;
 	char		*rd_log;
+	char		*rd_locker;
 	u_char		*rd_text;
 	size_t		 rd_tlen;
 
@@ -160,7 +193,6 @@ struct rcs_delta {
 
 typedef struct rcs_file {
 	char	*rf_path;
-	u_int	 rf_ref;
 	mode_t	 rf_mode;
 	u_int	 rf_flags;
 
@@ -183,48 +215,55 @@ typedef struct rcs_file {
 extern int rcs_errno;
 
 
-RCSFILE		*rcs_open(const char *, int, ...);
-void		 rcs_close(RCSFILE *);
-const RCSNUM	*rcs_head_get(RCSFILE *);
-int		 rcs_head_set(RCSFILE *, const RCSNUM *);
-const RCSNUM	*rcs_branch_get(RCSFILE *);
-int		 rcs_branch_set(RCSFILE *, const RCSNUM *);
-int		 rcs_access_add(RCSFILE *, const char *);
-int		 rcs_access_remove(RCSFILE *, const char *);
-int		 rcs_access_check(RCSFILE *, const char *);
-int		 rcs_sym_add(RCSFILE *, const char *, RCSNUM *);
-int		 rcs_sym_remove(RCSFILE *, const char *);
-RCSNUM		*rcs_sym_getrev(RCSFILE *, const char *);
-int		 rcs_sym_check(const char *);
-int		 rcs_lock_getmode(RCSFILE *);
-int		 rcs_lock_setmode(RCSFILE *, int);
-int		 rcs_lock_add(RCSFILE *, const char *, RCSNUM *);
-int		 rcs_lock_remove(RCSFILE *, const RCSNUM *);
-BUF		*rcs_getrev(RCSFILE *, RCSNUM *);
-const char	*rcs_desc_get(RCSFILE *);
-int		 rcs_desc_set(RCSFILE *, const char *);
-const char	*rcs_comment_lookup(const char *);
-const char	*rcs_comment_get(RCSFILE *);
-int		 rcs_comment_set(RCSFILE *, const char *);
-int		 rcs_kwexp_set(RCSFILE *, int);
-int		 rcs_kwexp_get(RCSFILE *);
-int		 rcs_rev_add(RCSFILE *, RCSNUM *, const char *, time_t);
-int		rcs_rev_remove(RCSFILE *, RCSNUM *);
-RCSNUM		*rcs_tag_resolve(RCSFILE *, const char *);
-const char	*rcs_errstr(int);
+RCSFILE			*rcs_open(const char *, int, ...);
+void			 rcs_close(RCSFILE *);
+const RCSNUM		*rcs_head_get(RCSFILE *);
+int			 rcs_head_set(RCSFILE *, RCSNUM *);
+const RCSNUM		*rcs_branch_get(RCSFILE *);
+int			 rcs_branch_set(RCSFILE *, const RCSNUM *);
+int			 rcs_access_add(RCSFILE *, const char *);
+int			 rcs_access_remove(RCSFILE *, const char *);
+int			 rcs_access_check(RCSFILE *, const char *);
+struct rcs_delta	*rcs_findrev(RCSFILE *, RCSNUM *);
+int			 rcs_sym_add(RCSFILE *, const char *, RCSNUM *);
+int			 rcs_sym_remove(RCSFILE *, const char *);
+RCSNUM			*rcs_sym_getrev(RCSFILE *, const char *);
+int			 rcs_sym_check(const char *);
+int			 rcs_lock_getmode(RCSFILE *);
+int			 rcs_lock_setmode(RCSFILE *, int);
+int			 rcs_lock_add(RCSFILE *, const char *, RCSNUM *);
+int			 rcs_lock_remove(RCSFILE *, const char *, RCSNUM *);
+BUF			*rcs_getrev(RCSFILE *, RCSNUM *);
+int			 rcs_deltatext_set(RCSFILE *, RCSNUM *, const char *);
+const char		*rcs_desc_get(RCSFILE *);
+int			 rcs_desc_set(RCSFILE *, const char *);
+const char		*rcs_comment_lookup(const char *);
+const char		*rcs_comment_get(RCSFILE *);
+int			 rcs_comment_set(RCSFILE *, const char *);
+int			 rcs_kwexp_set(RCSFILE *, int);
+int			 rcs_kwexp_get(RCSFILE *);
+int			 rcs_rev_add(RCSFILE *, RCSNUM *, const char *, time_t,
+			     const char *);
+time_t			 rcs_rev_getdate(RCSFILE *, RCSNUM *);
+int			 rcs_rev_setlog(RCSFILE *, RCSNUM *, const char *);
+int			 rcs_rev_remove(RCSFILE *, RCSNUM *);
+int			 rcs_state_set(RCSFILE *, RCSNUM *, const char *);
+const char		*rcs_state_get(RCSFILE *, RCSNUM *);
+int			 rcs_state_check(const char *);
+RCSNUM			*rcs_tag_resolve(RCSFILE *, const char *);
+const char		*rcs_errstr(int);
 
 
 int	rcs_kflag_get(const char *);
 void	rcs_kflag_usage(void);
 int	rcs_kw_expand(RCSFILE *, u_char *, size_t, size_t *);
 
-BUF	*rcs_patch(const char *, const char *);
-
 RCSNUM	*rcsnum_alloc(void);
 RCSNUM	*rcsnum_parse(const char *);
 RCSNUM	*rcsnum_brtorev(const RCSNUM *);
 RCSNUM	*rcsnum_revtobr(const RCSNUM *);
 RCSNUM	*rcsnum_inc(RCSNUM *);
+RCSNUM	*rcsnum_dec(RCSNUM *);
 void	 rcsnum_free(RCSNUM *);
 int	 rcsnum_aton(const char *, char **, RCSNUM *);
 char	*rcsnum_tostr(const RCSNUM *, char *, size_t);

@@ -1,5 +1,5 @@
 .\"	$RuOBSD: radio.4,v 1.4 2001/10/26 05:38:43 form Exp $
-.\"	$OpenBSD: radio.4,v 1.20 2004/08/01 23:17:55 mickey Exp $
+.\"	$OpenBSD: radio.4,v 1.25 2006/02/06 15:36:57 jmc Exp $
 .\"
 .\" Copyright (c) 2001 Vladimir Popov
 .\" All rights reserved.
@@ -24,7 +24,7 @@
 .\" (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
 .\" THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 .\"
-.Dd October 20, 2001
+.Dd December 5, 2005
 .Dt RADIO 4
 .Os
 .Sh NAME
@@ -86,6 +86,11 @@ struct radio_info {
 	u_int32_t	info;
 #define RADIO_INFO_STEREO		(1<<0)
 #define RADIO_INFO_SIGNAL		(1<<1)
+	u_int32_t	tuner_mode;
+#define RADIO_TUNER_MODE_RADIO		(1<<0)
+#define RADIO_TUNER_MODE_TV		(1<<1)
+	u_int32_t	chan;
+	u_int32_t	chnlset;
 };
 .Ed
 .Pp
@@ -114,6 +119,18 @@ an automatic search for cards that support this feature.
 The
 .Va freq
 field is the frequency in kHz the card is tuned to.
+.Pp
+The
+.Va tuner_mode
+field is the current tuning mode of the tuner.
+Valid modes are:
+.Pp
+.Bl -tag -width indent -compact
+.It Dv RADIO_TUNER_MODE_RADIO
+The tuner operates in FM radio mode.
+.It Dv RADIO_TUNER_MODE_TV
+The tuner operates in TV mode.
+.El
 .Pp
 The
 .Va caps
@@ -153,7 +170,48 @@ Informs whether the device receives a stereo or mono signal.
 .It Dv RADIO_INFO_SIGNAL
 Informs whether the device receives a valid signal or noise.
 .El
+.Pp
+The
+.Va chan
+holds the TV channel the card is tuned to.
+.Pp
+The
+.Va chnlset
+specifies the TV channel set currently being used.
+The tuner uses the current channel set to derive the tuning frequency
+from the channel number.
+Western Europe is the default channel set.
+The following is a list of valid channel sets:
+.Bl -tag -width indent -compact
+.Pp
+.It 1
+U.S.A. Broadcast
+.It 2
+U.S.A. Cable IRC
+.It 3
+U.S.A. Cable HRC
+.It 4
+Western Europe
+.It 5
+Japan Broadcast
+.It 6
+Japan Cable
+.It 7
+Former U.S.S.R. and C.I.S. Countries
+.It 8
+Australia
+.It 9
+France
 .El
+.El
+.Pp
+Either
+.Va freq
+or
+.Va chan
+can be used to tune to FM radio stations or TV channels,
+respectively.
+Some devices may not support both functionalities.
 .Sh CHIPSETS
 LM700x is a frequency synthesizer IC.
 The LM700x is programmed through a 24-bit write-only shift register.
@@ -219,6 +277,7 @@ The
 device driver appeared in
 .Ox 3.0 .
 .Sh AUTHORS
+.An -nosplit
 The
 .Nm
 driver was written by

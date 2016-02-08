@@ -1,4 +1,4 @@
-/*	$OpenBSD: pstat.c,v 1.52 2005/05/26 01:45:02 pedro Exp $	*/
+/*	$OpenBSD: pstat.c,v 1.56 2005/12/28 20:48:18 pedro Exp $	*/
 /*	$NetBSD: pstat.c,v 1.27 1996/10/23 22:50:06 cgd Exp $	*/
 
 /*-
@@ -40,7 +40,7 @@ static char copyright[] =
 #if 0
 from: static char sccsid[] = "@(#)pstat.c	8.9 (Berkeley) 2/16/94";
 #else
-static char *rcsid = "$OpenBSD: pstat.c,v 1.52 2005/05/26 01:45:02 pedro Exp $";
+static char *rcsid = "$OpenBSD: pstat.c,v 1.56 2005/12/28 20:48:18 pedro Exp $";
 #endif
 #endif /* not lint */
 
@@ -356,11 +356,16 @@ ufs_print(struct vnode *vp)
 {
 	int flag;
 	struct inode inode, *ip = &inode;
+	struct ufs1_dinode di1;
 	char flagbuf[16], *flags = flagbuf;
 	char *name;
 	mode_t type;
 
 	KGETRET(VTOI(vp), &inode, sizeof(struct inode), "vnode's inode");
+	KGETRET(inode.i_din1, &di1, sizeof(struct ufs1_dinode),
+	    "vnode's dinode");
+
+	inode.i_din1 = &di1;
 	flag = ip->i_flag;
 #if 0
 	if (flag & IN_LOCKED)
@@ -389,16 +394,16 @@ ufs_print(struct vnode *vp)
 	*flags = '\0';
 
 	(void)printf(" %6d %5s", ip->i_number, flagbuf);
-	type = ip->i_ffs_mode & S_IFMT;
-	if (S_ISCHR(ip->i_ffs_mode) || S_ISBLK(ip->i_ffs_mode))
+	type = ip->i_ffs1_mode & S_IFMT;
+	if (S_ISCHR(ip->i_ffs1_mode) || S_ISBLK(ip->i_ffs1_mode))
 		if (usenumflag ||
-		    ((name = devname(ip->i_ffs_rdev, type)) == NULL))
+		    ((name = devname(ip->i_ffs1_rdev, type)) == NULL))
 			(void)printf("   %2d,%-2d",
-			    major(ip->i_ffs_rdev), minor(ip->i_ffs_rdev));
+			    major(ip->i_ffs1_rdev), minor(ip->i_ffs1_rdev));
 		else
 			(void)printf(" %7s", name);
 	else
-		(void)printf(" %7qd", ip->i_ffs_size);
+		(void)printf(" %7qd", ip->i_ffs1_size);
 	return (0);
 }
 
@@ -413,10 +418,16 @@ ext2fs_print(struct vnode *vp)
 {
 	int flag;
 	struct inode inode, *ip = &inode;
+	struct ext2fs_dinode di;
 	char flagbuf[16], *flags = flagbuf;
 
 	KGETRET(VTOI(vp), &inode, sizeof(struct inode), "vnode's inode");
+	KGETRET(inode.i_e2din, &di, sizeof(struct ext2fs_dinode),
+	    "vnode's dinode");
+
+	inode.i_e2din = &di;
 	flag = ip->i_flag;
+
 #if 0
 	if (flag & IN_LOCKED)
 		*flags++ = 'L';
@@ -705,10 +716,11 @@ kinfo_vnodes(int *avnodes)
 	evbuf = vbuf + (numvnodes + 20) *
 	    (sizeof(struct vnode *) + sizeof(struct vnode));
 	KGET(V_MOUNTLIST, mountlist);
-	for (num = 0, mp = mountlist.cqh_first; ; mp = mount.mnt_list.cqe_next) {
+	for (num = 0, mp = CIRCLEQ_FIRST(&mountlist); ;
+	    mp = CIRCLEQ_NEXT(&mount, mnt_list)) {
 		KGET2(mp, &mount, sizeof(mount), "mount entry");
-		for (vp = mount.mnt_vnodelist.lh_first;
-		    vp != NULL; vp = vnode.v_mntvnodes.le_next) {
+		for (vp = LIST_FIRST(&mount.mnt_vnodelist);
+		    vp != NULL; vp = LIST_NEXT(&vnode, v_mntvnodes)) {
 			KGET2(vp, &vnode, sizeof(vnode), "vnode");
 			if ((bp + sizeof(struct vnode *) +
 			    sizeof(struct vnode)) > evbuf)
@@ -720,7 +732,7 @@ kinfo_vnodes(int *avnodes)
 			bp += sizeof(struct vnode);
 			num++;
 		}
-		if (mp == mountlist.cqh_last)
+		if (mp == CIRCLEQ_LAST(&mountlist))
 			break;
 	}
 	*avnodes = num;
@@ -780,7 +792,8 @@ ttymode(void)
 		free(itp);
 	} else {
 		KGET(TTY_TTYLIST, tty_head);
-		for (tp = tty_head.tqh_first; tp; tp = tty.tty_link.tqe_next) {
+		for (tp = TAILQ_FIRST(&tty_head); tp;
+		    tp = TAILQ_NEXT(&tty, tty_link)) {
 			KGET2(tp, &tty, sizeof tty, "tty struct");
 			tty2itty(&tty, &itty);
 			ttyprt(&itty);
@@ -892,7 +905,7 @@ filemode(void)
 	 * structure, and then an array of file structs (whose addresses are
 	 * derivable from the previous entry).
 	 */
-	addr = ((struct filelist *)buf)->lh_first;
+	addr = LIST_FIRST((struct filelist *)buf);
 	ffp = (struct file *)(buf + sizeof(struct filelist));
 	nfile = (len - sizeof(struct filelist)) / sizeof(struct file);
 
@@ -900,7 +913,7 @@ filemode(void)
 
 	(void)printf("%*s TYPE       FLG  CNT  MSG  %*s  OFFSET\n",
 	    8, "LOC", 8, "DATA");
-	for (; (char *)ffp < buf + len; addr = ffp->f_list.le_next, ffp++) {
+	for (; (char *)ffp < buf + len; addr = LIST_NEXT(ffp, f_list), ffp++) {
 		memmove(&fp, ffp, sizeof fp);
 		if ((unsigned)fp.f_type > DTYPE_SOCKET)
 			continue;

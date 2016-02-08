@@ -1,4 +1,4 @@
-#	$OpenBSD: Makefile,v 1.74 2005/05/26 01:29:02 pedro Exp $
+#	$OpenBSD: Makefile,v 1.77 2006/01/09 21:26:46 jsg Exp $
 
 # Not ported: XNSrouted enpload scsiformat startslip
 # Missing: icheck
@@ -13,9 +13,7 @@ SUBDIR= atactl badsect bioctl brconfig ccdconfig disklabel dmesg dhclient \
 # support for various file systems
 SUBDIR+= mount_ados
 SUBDIR+= mount_cd9660
-SUBDIR+= mount_fdesc
 SUBDIR+= mount_ffs	newfs fsck_ffs fsdb dumpfs dump restore clri tunefs fsirand
-SUBDIR+= mount_kernfs
 # mount_mfs -> newfs
 SUBDIR+= mount_msdos	newfs_msdos fsck_msdos
 SUBDIR+= mount_nfs
@@ -30,6 +28,6 @@ SUBDIR+= mount_xfs
 SUBDIR+= ping6 rtsol
 
 # Man pages (and manpages to do)
-SUBDIR+= fdisk pdisk ancontrol wicontrol wsconsctl
+SUBDIR+= fdisk pdisk wicontrol wsconsctl
 
 .include <bsd.subdir.mk>

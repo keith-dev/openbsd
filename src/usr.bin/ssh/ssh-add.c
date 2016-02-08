@@ -35,7 +35,10 @@
  */
 
 #include "includes.h"
-RCSID("$OpenBSD: ssh-add.c,v 1.72 2005/07/17 07:17:55 djm Exp $");
+RCSID("$OpenBSD: ssh-add.c,v 1.75 2006/02/20 17:19:54 stevesk Exp $");
+
+#include <sys/types.h>
+#include <sys/stat.h>
 
 #include <openssl/evp.h>
 
@@ -312,12 +315,16 @@ main(int argc, char **argv)
 	char *sc_reader_id = NULL;
 	int i, ch, deleting = 0, ret = 0;
 
+	/* Ensure that fds 0, 1 and 2 are open or directed to /dev/null */
+	sanitise_stdfd();
+
 	SSLeay_add_all_algorithms();
 
 	/* At first, get a connection to the authentication agent. */
 	ac = ssh_get_authentication_connection();
 	if (ac == NULL) {
-		fprintf(stderr, "Could not open a connection to your authentication agent.\n");
+		fprintf(stderr,
+		    "Could not open a connection to your authentication agent.\n");
 		exit(2);
 	}
 	while ((ch = getopt(argc, argv, "lLcdDxXe:s:t:")) != -1) {

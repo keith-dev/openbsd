@@ -1,4 +1,4 @@
-/*	$OpenBSD: ossaudio.c,v 1.7 2005/01/19 18:35:04 jason Exp $	*/
+/*	$OpenBSD: ossaudio.c,v 1.9 2006/02/13 12:01:11 espie Exp $	*/
 /*	$NetBSD: ossaudio.c,v 1.14 2001/05/10 01:53:48 augustss Exp $	*/
 
 /*-

@@ -1,4 +1,4 @@
-/*	$OpenBSD: includes.h,v 1.19 2005/05/19 02:42:26 djm Exp $	*/
+/*	$OpenBSD: includes.h,v 1.37 2006/02/22 00:04:44 stevesk Exp $	*/
 
 /*
  * Author: Tatu Ylonen <ylo@cs.hut.fi>
@@ -21,31 +21,17 @@ static /**/const char *const rcsid[] = { (const char *)rcsid, "\100(#)" msg }
 
 #include <sys/types.h>
 #include <sys/socket.h>
-#include <sys/select.h>
 #include <sys/param.h>
-#include <sys/ioctl.h>
-#include <sys/endian.h>
-#include <sys/stat.h>
-#include <sys/wait.h>
 #include <sys/time.h>
-#include <sys/un.h>
-#include <sys/resource.h>
 
 #include <netinet/in.h>
-#include <netinet/in_systm.h>
-#include <netinet/tcp.h>
-#include <netinet/ip.h>
 #include <arpa/inet.h>
 #include <netdb.h>
 
 #include <stddef.h>
-#include <netgroup.h>
 #include <stdio.h>
-#include <ctype.h>
 #include <errno.h>
 #include <fcntl.h>
-#include <signal.h>
-#include <termios.h>
 #include <stdlib.h>
 #include <string.h>
 #include <stdarg.h>
@@ -53,8 +39,6 @@ static /**/const char *const rcsid[] = { (const char *)rcsid, "\100(#)" msg }
 #include <grp.h>
 #include <unistd.h>
 #include <time.h>
-#include <paths.h>
-#include <dirent.h>
 
 #include "version.h"
 

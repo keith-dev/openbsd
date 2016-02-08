@@ -1,4 +1,4 @@
-/*	$OpenBSD: remove.c,v 1.35 2005/08/22 11:17:26 xsa Exp $	*/
+/*	$OpenBSD: remove.c,v 1.42 2006/01/27 12:45:21 xsa Exp $	*/
 /*
  * Copyright (c) 2004 Jean-Francois Brousseau <jfb@openbsd.org>
  * Copyright (c) 2004, 2005 Xavier Santolaria <xsa@openbsd.org>
@@ -25,15 +25,7 @@
  * ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include <sys/types.h>
-#include <sys/stat.h>
-
-#include <errno.h>
-#include <fcntl.h>
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-#include <unistd.h>
+#include "includes.h"
 
 #include "cvs.h"
 #include "log.h"
@@ -109,36 +101,25 @@ cvs_remove_remote(CVSFILE *cf, void *arg)
 
 	if (cf->cf_type == DT_DIR) {
 		if (cf->cf_cvstat == CVS_FST_UNKNOWN)
-			ret = cvs_sendreq(root, CVS_REQ_QUESTIONABLE,
-			    cf->cf_name);
+			cvs_sendreq(root, CVS_REQ_QUESTIONABLE, cf->cf_name);
 		else
-			ret = cvs_senddir(root, cf);
-
-		if (ret == -1)
-			ret = CVS_EX_PROTO;
-		return (ret);
+			cvs_senddir(root, cf);
+		return (0);
 	}
 
 	cvs_file_getpath(cf, fpath, sizeof(fpath));
 
 	if (cvs_remove_file(fpath) < 0)
-		return (CVS_EX_FILE);
+		fatal("cvs_remove_remote: cvs_remove_file `%s' failed", fpath);
 
-	if (cvs_sendentry(root, cf) < 0)
-		return (CVS_EX_PROTO);
+	cvs_sendentry(root, cf);
 
 	if (cf->cf_cvstat != CVS_FST_LOST && force_remove != 1) {
-		if (cf->cf_cvstat != CVS_FST_ADDED) {
-			if (cvs_sendreq(root, CVS_REQ_MODIFIED,
-			    cf->cf_name) < 0) {
-				return (CVS_EX_PROTO);
-			}
-		}
+		if (cf->cf_cvstat != CVS_FST_ADDED)
+			cvs_sendreq(root, CVS_REQ_MODIFIED, cf->cf_name);
 
-		if (cf->cf_flags & CVS_FILE_ONDISK) {
-			if (cvs_sendfile(root, fpath) < 0)
-				return (CVS_EX_PROTO);
-		}
+		if (cf->cf_flags & CVS_FILE_ONDISK)
+			cvs_sendfile(root, fpath);
 	}
 
 	return (0);
@@ -147,9 +128,10 @@ cvs_remove_remote(CVSFILE *cf, void *arg)
 static int
 cvs_remove_local(CVSFILE *cf, void *arg)
 {
-	int existing, l, removed;
+	int existing, removed;
 	char buf[MAXPATHLEN], fpath[MAXPATHLEN];
 	CVSENTRIES *entf;
+	struct cvs_ent *ent;
 
 	existing = removed = 0;
 	entf = (CVSENTRIES *)cf->cf_entry;
@@ -164,7 +146,8 @@ cvs_remove_local(CVSFILE *cf, void *arg)
 		cvs_file_getpath(cf, fpath, sizeof(fpath));
 
 		if (cvs_remove_file(fpath) < 0)
-			return (CVS_EX_FILE);
+			fatal("cvs_remove_local: cvs_remove_file `%s' failed",
+			     fpath);
 	}
 
 	if (nuked == 0) {
@@ -178,19 +161,18 @@ cvs_remove_local(CVSFILE *cf, void *arg)
 			    cf->cf_name);
 		return (0);
 	} else if (cf->cf_cvstat == CVS_FST_ADDED) {
-		if (cvs_ent_remove(entf, cf->cf_name) == -1)
-			return (CVS_EX_FILE);
+		if (cvs_ent_remove(entf, cf->cf_name, 0) == -1)
+			fatal("cvs_remove_local: cvs_ent_remove failed");
 
-		l = snprintf(buf, sizeof(buf), "%s/%s%s",
-		    CVS_PATH_CVSDIR, cf->cf_name, CVS_DESCR_FILE_EXT);
-		if (l == -1 || l >= (int)sizeof(buf)) {
-			errno = ENAMETOOLONG;
-			cvs_log(LP_ERRNO, "%s", buf);
-			return (CVS_EX_DATA);
-		}
+		if (strlcpy(buf, CVS_PATH_CVSDIR, sizeof(buf)) >= sizeof(buf) ||
+		    strlcat(buf, "/", sizeof(buf)) >= sizeof(buf) ||
+		    strlcat(buf, cf->cf_name, sizeof(buf)) >= sizeof(buf) ||
+		    strlcat(buf, CVS_DESCR_FILE_EXT,
+		    sizeof(buf)) >= sizeof(buf))
+			fatal("cvs_remove_local: path truncation");
 
 		if (cvs_unlink(buf) == -1)
-			return (CVS_EX_FILE);
+			fatal("cvs_remove_local: cvs_unlink `%s' failed", buf);
 
 		if (verbosity > 1)
 			cvs_log(LP_NOTICE, "removed `%s'", cf->cf_name);
@@ -202,8 +184,12 @@ cvs_remove_local(CVSFILE *cf, void *arg)
 			    cf->cf_name);
 		return (0);
 	} else {
+		if ((ent = cvs_ent_get(entf, cf->cf_name)) == NULL)
+			fatal("cvs_remove_local: cvs_ent_get failed");
 
-		/* XXX prefix file version with the `-' char in CVS/Entries */
+		/* Prefix revision with `-' */
+		ent->ce_status = CVS_ENT_REMOVED;
+		entf->cef_flags &= ~CVS_ENTF_SYNC;
 
 		if (verbosity > 1)
 			cvs_log(LP_NOTICE, "scheduling file `%s' for removal",
@@ -243,7 +229,7 @@ cvs_remove_file(const char *fpath)
 
 	/* if -f option is used, physically remove the file */
 	if (force_remove == 1) {
-		if(cvs_unlink(fpath) == -1)
+		if (cvs_unlink(fpath) == -1)
 			return (-1);
 		nuked++;
 	} else {

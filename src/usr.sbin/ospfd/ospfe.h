@@ -1,4 +1,4 @@
-/*	$OpenBSD: ospfe.h,v 1.15 2005/05/26 20:42:10 norby Exp $ */
+/*	$OpenBSD: ospfe.h,v 1.24 2006/02/19 21:48:56 norby Exp $ */
 
 /*
  * Copyright (c) 2004, 2005 Esben Norby <norby@openbsd.org>
@@ -87,6 +87,8 @@ struct lsa_entry {
 		struct lsa_hdr	*lu_lsa;
 		struct lsa_ref	*lu_ref;
 	}			 le_data;
+	unsigned short		 le_when;
+	unsigned short		 le_oneshot;
 };
 #define	le_lsa	le_data.lu_lsa
 #define	le_ref	le_data.lu_ref
@@ -131,10 +133,11 @@ struct nbr {
 	u_int32_t		 dd_pending;
 	u_int32_t		 peerid;	/* unique ID in DB */
 	u_int32_t		 ls_req_cnt;
+	u_int32_t		 ls_ret_cnt;
 	u_int32_t		 crypt_seq_num;
 
+	time_t			 uptime;
 	int			 state;
-	u_int8_t		 link_state;
 	u_int8_t		 priority;
 	u_int8_t		 options;
 	u_int8_t		 last_rx_options;
@@ -149,7 +152,6 @@ int		 auth_gen(struct buf *, struct iface *);
 void		 md_list_init(struct iface *);
 void		 md_list_add(struct iface *, u_int8_t, char *);
 void		 md_list_clr(struct iface *);
-int		 md_list_empty(struct iface *);
 struct auth_md	*md_list_find(struct iface *, u_int8_t);
 
 /* database.c */
@@ -184,9 +186,8 @@ void		 orig_net_lsa(struct iface *);
 int		 if_fsm(struct iface *, enum iface_event);
 
 struct iface	*if_new(struct kif *);
-int		 if_del(struct iface *);
+void		 if_del(struct iface *);
 void		 if_init(struct ospfd_conf *, struct iface *);
-int		 if_shutdown(struct ospfd_conf *);
 
 int		 if_act_start(struct iface *);
 int		 if_act_elect(struct iface *);
@@ -205,6 +206,7 @@ int	 if_leave_group(struct iface *, struct in_addr *);
 int	 if_set_mcast(struct iface *);
 int	 if_set_mcast_ttl(int, u_int8_t);
 int	 if_set_tos(int, int);
+void	 if_set_recvbuf(int);
 int	 if_set_mcast_loop(int);
 
 /* lsack.c */
@@ -236,10 +238,10 @@ int	 stop_ls_req_tx_timer(struct nbr *);
 /* lsupdate.c */
 int		 lsa_flood(struct iface *, struct nbr *, struct lsa_hdr *,
 		     void *, u_int16_t);
-int		 send_ls_update(struct iface *, struct in_addr, void *, int);
 void		 recv_ls_update(struct nbr *, char *, u_int16_t);
 
-void		 ls_retrans_list_add(struct nbr *, struct lsa_hdr *);
+void		 ls_retrans_list_add(struct nbr *, struct lsa_hdr *,
+		     unsigned short, unsigned short);
 int		 ls_retrans_list_del(struct nbr *, struct lsa_hdr *);
 struct lsa_entry	*ls_retrans_list_get(struct nbr *, struct lsa_hdr *);
 void		 ls_retrans_list_free(struct nbr *, struct lsa_entry *);
@@ -255,7 +257,7 @@ void		 lsa_cache_put(struct lsa_ref *, struct nbr *);
 /* neighbor.c */
 void		 nbr_init(u_int32_t);
 struct nbr	*nbr_new(u_int32_t, struct iface *, int);
-int		 nbr_del(struct nbr *);
+void		 nbr_del(struct nbr *);
 
 struct nbr	*nbr_find_id(struct iface *, u_int32_t);
 struct nbr	*nbr_find_peerid(u_int32_t);
@@ -293,5 +295,7 @@ struct lsa_hdr	*lsa_hdr_new(void);
 int	 gen_ospf_hdr(struct buf *, struct iface *, u_int8_t);
 int	 send_packet(struct iface *, char *, int, struct sockaddr_in *);
 void	 recv_packet(int, short, void *);
+
+char	*pkt_ptr;	/* packet buffer */
 
 #endif	/* _OSPFE_H_ */

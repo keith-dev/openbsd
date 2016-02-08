@@ -1,4 +1,4 @@
-/*	$OpenBSD: auth.c,v 1.5 2005/04/05 13:01:21 claudio Exp $ */
+/*	$OpenBSD: auth.c,v 1.8 2006/02/02 15:11:54 norby Exp $ */
 
 /*
  * Copyright (c) 2004, 2005 Esben Norby <norby@openbsd.org>
@@ -59,7 +59,7 @@ auth_validate(void *buf, u_int16_t len, struct iface *iface, struct nbr *nbr)
 		     sizeof(ospf_hdr->auth_key.simple));
 
 		if (in_cksum(ospf_hdr, ntohs(ospf_hdr->len))) {
-			log_debug("recv_packet: invalid checksum, interface %s",
+			log_debug("auth_validate: invalid checksum, interface %s",
 			    iface->name);
 			return (-1);
 		}
@@ -147,7 +147,7 @@ auth_gen(struct buf *buf, struct iface *iface)
 
 	/* update length */
 	if (buf->wpos > USHRT_MAX)
-		fatalx("auth_gen: resulting ospf packet to big");
+		fatalx("auth_gen: resulting ospf packet too big");
 	ospf_hdr->len = htons((u_int16_t)buf->wpos);
 	/* clear auth_key field */
 	bzero(ospf_hdr->auth_key.simple,
@@ -228,8 +228,6 @@ md_list_add(struct iface *iface, u_int8_t keyid, char *key)
 		}
 	}
 	TAILQ_INSERT_TAIL(&iface->auth_md_list, md, entry);
-
-	return;
 }
 
 void
@@ -241,12 +239,6 @@ md_list_clr(struct iface *iface)
 		TAILQ_REMOVE(&iface->auth_md_list, m, entry);
 		free(m);
 	}
-}
-
-int
-md_list_empty(struct iface *iface)
-{
-	return (TAILQ_EMPTY(&iface->auth_md_list));
 }
 
 struct auth_md *

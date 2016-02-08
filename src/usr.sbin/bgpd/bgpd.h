@@ -1,4 +1,4 @@
-/*	$OpenBSD: bgpd.h,v 1.176 2005/08/09 20:27:25 claudio Exp $ */
+/*	$OpenBSD: bgpd.h,v 1.192 2006/02/10 14:34:40 claudio Exp $ */
 
 /*
  * Copyright (c) 2003, 2004 Henning Brauer <henning@openbsd.org>
@@ -142,6 +142,7 @@ struct bgpd_config {
 	struct filter_set_head			 staticset;
 	struct filter_set_head			 staticset6;
 	struct listen_addrs			*listen_addrs;
+	char					*rcsock;
 	int					 opts;
 	int					 flags;
 	int					 log;
@@ -212,7 +213,6 @@ struct peer_config {
 	struct bgpd_addr	 local_addr;
 	struct peer_auth	 auth;
 	struct capabilities	 capabilities;
-	struct filter_set_head	 attrset;
 	char			 group[PEER_DESCR_LEN];
 	char			 descr[PEER_DESCR_LEN];
 	char			 if_depend[IFNAMSIZ];
@@ -231,8 +231,11 @@ struct peer_config {
 	u_int8_t		 ebgp;		/* 1 = ebgp, 0 = ibgp */
 	u_int8_t		 distance;	/* 1 = direct, >1 = multihop */
 	u_int8_t		 passive;
+	u_int8_t		 down;
 	u_int8_t		 announce_capa;
 	u_int8_t		 reflector_client;
+	u_int8_t		 softreconfig_in;
+	u_int8_t		 softreconfig_out;
 };
 
 struct network_config {
@@ -296,7 +299,6 @@ enum imsg_type {
 	IMSG_NETWORK_FLUSH,
 	IMSG_NETWORK_DONE,
 	IMSG_FILTER_SET,
-	IMSG_CTL_SHOW_NEIGHBOR,
 	IMSG_CTL_END,
 	IMSG_CTL_RELOAD,
 	IMSG_CTL_FIB_COUPLE,
@@ -307,12 +309,17 @@ enum imsg_type {
 	IMSG_CTL_KROUTE,
 	IMSG_CTL_KROUTE6,
 	IMSG_CTL_KROUTE_ADDR,
+	IMSG_CTL_RESULT,
+	IMSG_CTL_SHOW_NEIGHBOR,
 	IMSG_CTL_SHOW_NEXTHOP,
 	IMSG_CTL_SHOW_INTERFACE,
 	IMSG_CTL_SHOW_RIB,
 	IMSG_CTL_SHOW_RIB_AS,
 	IMSG_CTL_SHOW_RIB_PREFIX,
 	IMSG_CTL_SHOW_NETWORK,
+	IMSG_CTL_SHOW_NETWORK6,
+	IMSG_CTL_SHOW_RIB_MEM,
+	IMSG_CTL_SHOW_TERSE,
 	IMSG_REFRESH,
 	IMSG_IFINFO
 };
@@ -327,6 +334,12 @@ struct imsg_hdr {
 struct imsg {
 	struct imsg_hdr	 hdr;
 	void		*data;
+};
+
+enum ctl_results {
+	CTL_RES_OK,
+	CTL_RES_NOSUCHPEER,
+	CTL_RES_DENIED
 };
 
 /* needed for session.h parse prototype */
@@ -453,8 +466,9 @@ struct ctl_show_rib {
 	time_t			lastchange;
 	u_int32_t		local_pref;
 	u_int32_t		med;
-	u_int16_t		prefix_cnt;
-	u_int16_t		active_cnt;
+	u_int32_t		prefix_cnt;
+	u_int32_t		active_cnt;
+	u_int32_t		adjrib_cnt;
 	u_int16_t		aspath_len;
 	u_int16_t		flags;
 	u_int8_t		prefixlen;
@@ -490,9 +504,7 @@ enum filter_actions {
 
 enum directions {
 	DIR_IN = 1,
-	DIR_OUT,
-	DIR_DEFAULT_IN,		/* only needed to apply default set */
-	DIR_DEFAULT_OUT
+	DIR_OUT
 };
 
 enum from_spec {
@@ -522,6 +534,7 @@ struct filter_peers {
 /* special community type */
 #define	COMMUNITY_ERROR			-1
 #define	COMMUNITY_ANY			-2
+#define	COMMUNITY_NEIGHBOR_AS		-3
 #define	COMMUNITY_WELLKNOWN		0xffff
 #define	COMMUNITY_NO_EXPORT		0xff01
 #define	COMMUNITY_NO_ADVERTISE		0xff02
@@ -578,6 +591,7 @@ enum action_types {
 	ACTION_SET_NEXTHOP_BLACKHOLE,
 	ACTION_SET_NEXTHOP_NOMODIFY,
 	ACTION_SET_COMMUNITY,
+	ACTION_DEL_COMMUNITY,
 	ACTION_PFTABLE,
 	ACTION_PFTABLE_ID,
 	ACTION_RTLABEL,
@@ -598,6 +612,7 @@ static const char * const filterset_names[] = {
 	"nexthop",
 	"nexthop",
 	"community",
+	"community delete",
 	"pftable",
 	"pftable",
 	"rtlabel",
@@ -624,6 +639,21 @@ struct rrefresh {
 	u_int8_t	safi;
 };
 
+struct rde_memstats {
+	int64_t		path_cnt;
+	int64_t		prefix_cnt;
+	int64_t		pt4_cnt;
+	int64_t		pt6_cnt;
+	int64_t		nexthop_cnt;
+	int64_t		aspath_cnt;
+	int64_t		aspath_size;
+	int64_t		aspath_refs;
+	int64_t		attr_cnt;
+	int64_t		attr_refs;
+	int64_t		attr_data;
+	int64_t		attr_dcnt;
+};
+
 /* Address Family Numbers as per rfc1700 */
 #define	AFI_IPv4	1
 #define	AFI_IPv6	2
@@ -644,7 +674,7 @@ int		 bgpd_redistribute(int, struct kroute *, struct kroute6 *);
 
 /* buffer.c */
 struct buf	*buf_open(size_t);
-int		 buf_add(struct buf *, void *, size_t);
+int		 buf_add(struct buf *, const void *, size_t);
 void		*buf_reserve(struct buf *, size_t);
 int		 buf_close(struct msgbuf *, struct buf *);
 int		 buf_write(int, struct buf *);
@@ -666,9 +696,6 @@ void		 log_info(const char *, ...);
 void		 log_debug(const char *, ...);
 void		 fatal(const char *);
 void		 fatalx(const char *);
-void		 fatal_ensure(const char *, int, const char *);
-const char	*log_addr(const struct bgpd_addr *);
-const char	*log_in6addr(const struct in6_addr *);
 
 /* parse.y */
 int	 cmdline_symset(char *);
@@ -682,10 +709,10 @@ void	 imsg_init(struct imsgbuf *, int);
 int	 imsg_read(struct imsgbuf *);
 int	 imsg_get(struct imsgbuf *, struct imsg *);
 int	 imsg_compose(struct imsgbuf *, enum imsg_type, u_int32_t, pid_t, int,
-	    void *, u_int16_t);
+	    const void *, u_int16_t);
 struct buf	*imsg_create(struct imsgbuf *, enum imsg_type, u_int32_t, pid_t,
 		    u_int16_t);
-int	 imsg_add(struct buf *, void *, u_int16_t);
+int	 imsg_add(struct buf *, const void *, u_int16_t);
 int	 imsg_close(struct imsgbuf *, struct buf *);
 void	 imsg_free(struct imsg *);
 int	 imsg_get_fd(struct imsgbuf *);
@@ -711,8 +738,7 @@ void		 inet6applymask(struct in6_addr *, const struct in6_addr *,
 		    int);
 
 /* control.c */
-int	control_init(void);
-void	control_cleanup(void);
+void	control_cleanup(const char *);
 int	control_imsg_relay(struct imsg *);
 
 /* pftable.c */
@@ -724,11 +750,11 @@ int	pftable_addr_remove(struct pftable_msg *);
 int	pftable_commit(void);
 
 /* name2id.c */
-u_int16_t	 rtlabel_name2id(char *);
+u_int16_t	 rtlabel_name2id(const char *);
 const char	*rtlabel_id2name(u_int16_t);
 void		 rtlabel_unref(u_int16_t);
 void		 rtlabel_ref(u_int16_t);
-u_int16_t	 pftable_name2id(char *);
+u_int16_t	 pftable_name2id(const char *);
 const char	*pftable_id2name(u_int16_t);
 void		 pftable_unref(u_int16_t);
 void		 pftable_ref(u_int16_t);
@@ -738,5 +764,12 @@ void		 pftable_ref(u_int16_t);
 void		 filterset_free(struct filter_set_head *);
 int		 filterset_cmp(struct filter_set *, struct filter_set *);
 
+/* util.c */
+const char	*log_addr(const struct bgpd_addr *);
+const char	*log_in6addr(const struct in6_addr *);
+const char *	 log_sockaddr(struct sockaddr *);
+int		 aspath_snprint(char *, size_t, void *, u_int16_t);
+int		 aspath_asprint(char **, void *, u_int16_t);
+size_t		 aspath_strlen(void *, u_int16_t);
 
 #endif /* __BGPD_H__ */

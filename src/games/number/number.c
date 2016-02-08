@@ -1,4 +1,4 @@
-/*	$OpenBSD: number.c,v 1.11 2004/07/10 07:26:23 deraadt Exp $	*/
+/*	$OpenBSD: number.c,v 1.13 2005/11/05 22:55:37 jmc Exp $	*/
 
 /*
  * Copyright (c) 1988, 1993, 1994
@@ -39,7 +39,7 @@ static char copyright[] =
 #if 0
 static char sccsid[] = "@(#)number.c	8.3 (Berkeley) 5/4/95";
 #else
-static char rcsid[] = "$OpenBSD: number.c,v 1.11 2004/07/10 07:26:23 deraadt Exp $";
+static char rcsid[] = "$OpenBSD: number.c,v 1.13 2005/11/05 22:55:37 jmc Exp $";
 #endif
 #endif /* not lint */
 
@@ -170,8 +170,8 @@ badnum:			errx(1, "illegal number: %s", line);
 	*p = '\0';
 
 	if ((len = strlen(line)) > MAXNUM ||
-	    ((fraction != NULL) && (flen = strlen(fraction))) > MAXNUM)
-		errx(1, "number too large (max %d digits).", MAXNUM);
+	    ((fraction != NULL) && (flen = strlen(fraction)) > MAXNUM))
+		errx(1, "number too long (max %d digits).", MAXNUM);
 
 	if (*line == '-') {
 		(void)printf("minus%s", lflag ? " " : "\n");
@@ -327,13 +327,14 @@ pfract(int len)
 
 	switch(len) {
 	case 1:
-		(void)printf("tenths.\n");
+		(void)printf("tenths%s", lflag ? "" : ".\n");
 		break;
 	case 2:
-		(void)printf("hundredths.\n");
+		(void)printf("hundredths%s", lflag ? "" : ".\n");
 		break;
 	default:
-		(void)printf("%s%sths.\n", pref[len % 3], name3[len / 3]);
+		(void)printf("%s%sths%s", pref[len % 3], name3[len / 3],
+		    lflag ? "" : ".\n");
 		break;
 	}
 }

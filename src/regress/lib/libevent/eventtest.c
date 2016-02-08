@@ -1,4 +1,4 @@
-/*	$OpenBSD: eventtest.c,v 1.6 2005/04/22 01:28:04 brad Exp $	*/
+/*	$OpenBSD: eventtest.c,v 1.9 2006/01/23 20:19:34 brad Exp $	*/
 /*	$NetBSD: eventtest.c,v 1.3 2004/08/07 21:09:47 provos Exp $	*/
 
 /*
@@ -40,7 +40,6 @@
 #include <string.h>
 #include <unistd.h>
 #include <errno.h>
-#include <err.h>
 
 #include <event.h>
 
@@ -235,10 +234,10 @@ setup_test(char *name)
 	}
 
         if (fcntl(pair[0], F_SETFL, O_NONBLOCK) == -1)
-                warn("fcntl(O_NONBLOCK)");
+		fprintf(stderr, "fcntl(O_NONBLOCK)");
 
         if (fcntl(pair[1], F_SETFL, O_NONBLOCK) == -1)
-                warn("fcntl(O_NONBLOCK)");
+		fprintf(stderr, "fcntl(O_NONBLOCK)");
 
 	test_ok = 0;
 	called = 0;
@@ -262,7 +261,7 @@ cleanup_test(void)
 }
 
 void
-test1(void)
+test_simpleread(void)
 {
 	struct event ev;
 
@@ -281,7 +280,7 @@ test1(void)
 }
 
 void
-test2(void)
+test_simplewrite(void)
 {
 	struct event ev;
 
@@ -297,7 +296,7 @@ test2(void)
 }
 
 void
-test3(void)
+test_multiple(void)
 {
 	struct event ev, ev2;
 	int i;
@@ -326,7 +325,7 @@ test3(void)
 }
 
 void
-test4(void)
+test_persistent(void)
 {
 	struct event ev, ev2;
 	int i;
@@ -355,7 +354,7 @@ test4(void)
 }
 
 void
-test5(void)
+test_combined(void)
 {
 	struct both r1, r2, w1, w2;
 
@@ -390,7 +389,7 @@ test5(void)
 }
 
 void
-test6(void)
+test_simpletimeout(void)
 {
 	struct timeval tv;
 	struct event ev;
@@ -409,7 +408,7 @@ test6(void)
 }
 
 void
-test7(void)
+test_simplesignal(void)
 {
 	struct event ev;
 	struct itimerval itv;
@@ -431,7 +430,7 @@ test7(void)
 }
 
 void
-test8(void)
+test_loopexit(void)
 {
 	struct timeval tv, tv_start, tv_end;
 	struct event ev;
@@ -461,6 +460,21 @@ test8(void)
 }
 
 void
+test_evbuffer(void) {
+	setup_test("Evbuffer: ");
+
+	struct evbuffer *evb = evbuffer_new();
+
+	evbuffer_add_printf(evb, "%s/%d", "hello", 1);
+
+	if (EVBUFFER_LENGTH(evb) == 7 &&
+	    strcmp(EVBUFFER_DATA(evb), "hello/1") == 0)
+	    test_ok = 1;
+	
+	cleanup_test();
+}
+
+void
 readcb(struct bufferevent *bev, void *arg)
 {
 	if (EVBUFFER_LENGTH(bev->input) == 8333) {
@@ -483,7 +497,7 @@ errorcb(struct bufferevent *bev, short what, void *arg)
 }
 
 void
-test9(void)
+test_bufferevent(void)
 {
 	struct bufferevent *bev1, *bev2;
 	char buffer[8333];
@@ -589,6 +603,81 @@ test_priorities(int npriorities)
 	cleanup_test();
 }
 
+static void
+test_multiple_cb(int fd, short event, void *arg)
+{
+	if (event & EV_READ)
+		test_ok |= 1;
+	else if (event & EV_WRITE)
+		test_ok |= 2;
+}
+
+void
+test_multiple_events_for_same_fd(void)
+{
+   struct event e1, e2;
+
+   setup_test("Multiple events for same fd: ");
+
+   event_set(&e1, pair[0], EV_READ, test_multiple_cb, NULL);
+   event_add(&e1, NULL);
+   event_set(&e2, pair[0], EV_WRITE, test_multiple_cb, NULL);
+   event_add(&e2, NULL);
+   event_loop(EVLOOP_ONCE);
+   event_del(&e2);
+   write(pair[1], TEST1, strlen(TEST1)+1);
+   event_loop(EVLOOP_ONCE);
+   event_del(&e1);
+   
+   if (test_ok != 3)
+	   test_ok = 0;
+
+   cleanup_test();
+}
+
+void
+read_once_cb(int fd, short event, void *arg)
+{
+	char buf[256];
+	int len;
+
+	len = read(fd, buf, sizeof(buf));
+
+	if (called) {
+		test_ok = 0;
+	} else if (len) {
+		/* Assumes global pair[0] can be used for writing */
+		write(pair[0], TEST1, strlen(TEST1)+1);
+		test_ok = 1;
+	}
+
+	called++;
+}
+
+void
+test_want_only_once(void)
+{
+	struct event ev;
+	struct timeval tv;
+
+	/* Very simple read test */
+	setup_test("Want read only once: ");
+	
+	write(pair[0], TEST1, strlen(TEST1)+1);
+
+	/* Setup the loop termination */
+	timerclear(&tv);
+	tv.tv_sec = 1;
+	event_loopexit(&tv);
+	
+	event_set(&ev, pair[1], EV_READ, read_once_cb, &ev);
+	if (event_add(&ev, NULL) == -1)
+		exit(1);
+	event_dispatch();
+
+	cleanup_test();
+}
+
 int
 main (int argc, char **argv)
 {
@@ -597,27 +686,33 @@ main (int argc, char **argv)
 	/* Initalize the event library */
 	event_base = event_init();
 
-	test1();
+	test_simpleread();
 
-	test2();
+	test_simplewrite();
 
-	test3();
+	test_multiple();
 
-	test4();
+	test_persistent();
 
-	test5();
+	test_combined();
 
-	test6();
+	test_simpletimeout();
 
-	test7();
+	test_simplesignal();
 
-	test8();
+	test_loopexit();
 
-	test9();
+	test_evbuffer();
+
+	test_bufferevent();
 
 	test_priorities(1);
 	test_priorities(2);
 	test_priorities(3);
+
+	test_multiple_events_for_same_fd();
+
+	test_want_only_once();
 
 	return (0);
 }

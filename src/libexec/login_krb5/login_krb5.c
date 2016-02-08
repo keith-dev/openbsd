@@ -1,4 +1,4 @@
-/*	$OpenBSD: login_krb5.c,v 1.21 2005/04/13 18:46:03 biorn Exp $	*/
+/*	$OpenBSD: login_krb5.c,v 1.23 2005/11/13 00:27:56 deraadt Exp $	*/
 
 /*-
  * Copyright (c) 2001, 2002 Hans Insulander <hin@openbsd.org>.
@@ -172,10 +172,12 @@ krb5_login(char *username, char *invokinguser, char *password, int login,
 
 	if (strcmp(username, "root") == 0 && invokinguser[0] != '\0') {
 		char *tmp;
-		int len = strlen(invokinguser)+6;
 
-		tmp = malloc(len);
-		snprintf(tmp, len, "%s/root", invokinguser);
+		ret = asprintf(&tmp, "%s/root", invokinguser);
+		if (ret == -1) {
+			krb5_syslog(context, LOG_ERR, ret, "asprintf");
+			exit(1);
+		}
 		ret = krb5_parse_name(context, tmp, &princ);
 		free(tmp);
 	} else

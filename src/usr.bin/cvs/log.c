@@ -1,4 +1,4 @@
-/*	$OpenBSD: log.c,v 1.25 2005/08/05 16:21:41 xsa Exp $	*/
+/*	$OpenBSD: log.c,v 1.30 2006/01/02 17:06:10 xsa Exp $	*/
 /*
  * Copyright (c) 2004 Jean-Francois Brousseau <jfb@openbsd.org>
  * All rights reserved.
@@ -24,14 +24,7 @@
  * ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include <sys/types.h>
-
-#include <errno.h>
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-#include <syslog.h>
-#include <unistd.h>
+#include "includes.h"
 
 #include "cvs.h"
 #include "log.h"
@@ -65,7 +58,9 @@ static int cvs_slpriomap[LP_MAX + 1] = {
 	LOG_DEBUG,
 };
 
+#if !defined(RCSPROG)
 static int send_m = 1;
+#endif
 static u_int cvs_log_dest = LD_STD;
 static u_int cvs_log_flags = 0;
 
@@ -84,9 +79,8 @@ static u_int cvs_log_filters;
  * cvs_log_init()
  *
  * Initialize the logging facility of the server.
- * Returns 0 on success, or -1 on failure.
  */
-int
+void
 cvs_log_init(u_int dest, u_int flags)
 {
 	int slopt;
@@ -112,8 +106,6 @@ cvs_log_init(u_int dest, u_int flags)
 
 		openlog_r(__progname, slopt, LOG_DAEMON, &cvs_sl);
 	}
-
-	return (0);
 }
 
 
@@ -205,7 +197,10 @@ cvs_vlog(u_int level, const char *fmt, va_list vap)
 	int ecp;
 	char prefix[64], buf[1024], ebuf[255];
 	FILE *out;
+#if !defined(RCSPROG)
+	char *cmdname;
 	struct cvs_cmd *cmdp;
+#endif
 
 	if (level > LP_MAX)
 		return (-1);
@@ -220,7 +215,13 @@ cvs_vlog(u_int level, const char *fmt, va_list vap)
 		ecp = 0;
 
 	/* always use the command name in error messages, not aliases */
-	cmdp = cvs_findcmd(cvs_command);
+#if !defined(RCSPROG)
+	if (cvs_command == NULL)
+		cmdname = " ";
+	else {
+		cmdp = cvs_findcmd(cvs_command);
+		cmdname = cmdp->cmd_name;
+	}
 
 	/* The cvs program appends the command name to the program name */
 	if (level == LP_TRACE) {
@@ -230,11 +231,12 @@ cvs_vlog(u_int level, const char *fmt, va_list vap)
 	} else if (cvs_command != NULL) {
 		if (level == LP_ABORT)
 			snprintf(prefix, sizeof(prefix), "%s [%s aborted]",
-			    __progname, cmdp->cmd_name);
+			    __progname, cmdname);
 		else
 			snprintf(prefix, sizeof(prefix), "%s %s", __progname,
-			    cmdp->cmd_name);
+			    cmdname);
 	} else /* just use the standard strlcpy */
+#endif
 		strlcpy(prefix, __progname, sizeof(prefix));
 
 	if ((cvs_log_flags & LF_PID) && (level != LP_TRACE)) {
@@ -254,6 +256,7 @@ cvs_vlog(u_int level, const char *fmt, va_list vap)
 		else
 			out = stderr;
 
+#if !defined(RCSPROG)
 		if (cvs_cmdop == CVS_OP_SERVER) {
 			if (out == stdout)
 				putc('M', out);
@@ -263,6 +266,7 @@ cvs_vlog(u_int level, const char *fmt, va_list vap)
 			}
 			putc(' ', out);
 		}
+#endif
 
 		fputs(prefix, out);
 		if (level != LP_TRACE)
@@ -292,11 +296,14 @@ int
 cvs_printf(const char *fmt, ...)
 {
 	int ret;
+#if !defined(RCSPROG)
 	char *nstr, *dp, *sp;
+#endif
 	va_list vap;
 
 	va_start(vap, fmt);
 
+#if !defined(RCSPROG)
 	if (cvs_cmdop == CVS_OP_SERVER) {
 		ret = vasprintf(&nstr, fmt, vap);
 		if (ret != -1) {
@@ -322,9 +329,10 @@ cvs_printf(const char *fmt, ...)
 				send_m = 1;
 				dp = sp + 1;
 			}
-			free(nstr);
+			xfree(nstr);
 		}
 	} else
+#endif
 		ret = vprintf(fmt, vap);
 
 	va_end(vap);
@@ -333,14 +341,18 @@ cvs_printf(const char *fmt, ...)
 void
 cvs_putchar(int c)
 {
+#if !defined(RCSPROG)
 	if (cvs_cmdop == CVS_OP_SERVER && send_m) {
 		send_m = 0;
 		putc('M', stdout);
 		putc(' ', stdout);
 	}
+#endif
 
 	putc(c, stdout);
 
+#if !defined(RCSPROG)
 	if (cvs_cmdop == CVS_OP_SERVER && c == '\n')
 		send_m = 1;
+#endif
 }

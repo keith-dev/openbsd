@@ -1,4 +1,4 @@
-/*	$OpenBSD: cvs.h,v 1.80 2005/08/16 16:34:19 xsa Exp $	*/
+/*	$OpenBSD: cvs.h,v 1.101 2006/02/10 10:15:48 xsa Exp $	*/
 /*
  * Copyright (c) 2004 Jean-Francois Brousseau <jfb@openbsd.org>
  * All rights reserved.
@@ -27,18 +27,11 @@
 #ifndef CVS_H
 #define CVS_H
 
-#include <sys/param.h>
-
-#include <dirent.h>
-#include <stdio.h>
-
 #include "rcs.h"
 #include "file.h"
+#include "xmalloc.h"
 
-#define CVS_VERSION_MAJOR	0
-#define CVS_VERSION_MINOR	3
-#define CVS_VERSION		"OpenCVS 0.3"
-
+#define CVS_VERSION	"OpenCVS 0.3"
 
 #define CVS_HIST_CACHE	128
 #define CVS_HIST_NBFLD	6
@@ -53,8 +46,7 @@
 #define CVS_EX_DATA	2
 #define CVS_EX_PROTO	3
 #define CVS_EX_FILE	4
-#define CVS_EX_BADTAG	5
-#define CVS_EX_BADROOT	6
+#define CVS_EX_BADROOT	5
 
 /* operations */
 #define CVS_OP_UNKNOWN		0
@@ -125,7 +117,7 @@
 #define CVS_PATH_HISTORY	CVS_PATH_ROOT "/history"
 #define CVS_PATH_LOGINFO	CVS_PATH_ROOT "/loginfo"
 #define CVS_PATH_MODULES	CVS_PATH_ROOT "/modules"
-#define CVS_PATH_NOTIFY		CVS_PATH_ROOT "/notify"
+#define CVS_PATH_NOTIFY_R	CVS_PATH_ROOT "/notify"
 #define CVS_PATH_RCSINFO	CVS_PATH_ROOT "/rcsinfo"
 #define CVS_PATH_TAGINFO	CVS_PATH_ROOT "/taginfo"
 #define CVS_PATH_VERIFYMSG	CVS_PATH_ROOT "/verifymsg"
@@ -134,11 +126,21 @@
 /* client-side paths */
 #define CVS_PATH_RC		".cvsrc"
 #define CVS_PATH_CVSDIR		"CVS"
+#define CVS_PATH_BASEDIR	CVS_PATH_CVSDIR "/Base"
+#define CVS_PATH_BASEREV	CVS_PATH_CVSDIR "/Baserev"
+#define CVS_PATH_BASEREVTMP	CVS_PATH_CVSDIR "/Baserev.tmp"
+#define CVS_PATH_CHECKINPROG	CVS_PATH_CVSDIR "/Checkin.prog"
 #define CVS_PATH_ENTRIES	CVS_PATH_CVSDIR "/Entries"
 #define CVS_PATH_STATICENTRIES	CVS_PATH_CVSDIR "/Entries.Static"
 #define CVS_PATH_LOGENTRIES	CVS_PATH_CVSDIR "/Entries.Log"
+#define CVS_PATH_BACKUPENTRIES	CVS_PATH_CVSDIR "/Entries.Backup"
+#define CVS_PATH_NOTIFY		CVS_PATH_CVSDIR "/Notify"
+#define CVS_PATH_NOTIFYTMP	CVS_PATH_CVSDIR "/Notify.tmp"
 #define CVS_PATH_ROOTSPEC	CVS_PATH_CVSDIR "/Root"
 #define CVS_PATH_REPOSITORY	CVS_PATH_CVSDIR "/Repository"
+#define CVS_PATH_TAG		CVS_PATH_CVSDIR "/Tag"
+#define CVS_PATH_TEMPLATE	CVS_PATH_CVSDIR "/Template"
+#define CVS_PATH_UPDATEPROG	CVS_PATH_CVSDIR "/Update.prog"
 
 
 /* flags for cmd_flags */
@@ -150,26 +152,26 @@
 
 
 struct cvs_cmd {
-	int   cmd_op;
-	int   cmd_req;
-	char  cmd_name[CVS_CMD_MAXNAMELEN];
-	char  cmd_alias[CVS_CMD_MAXALIAS][CVS_CMD_MAXNAMELEN];
-	char  cmd_descr[CVS_CMD_MAXDESCRLEN];
-	char *cmd_synopsis;
-	char *cmd_opts;
-	char *cmd_defargs;
-	int   file_flags;
+	int	 cmd_op;
+	int	 cmd_req;
+	char	 cmd_name[CVS_CMD_MAXNAMELEN];
+	char	 cmd_alias[CVS_CMD_MAXALIAS][CVS_CMD_MAXNAMELEN];
+	char	 cmd_descr[CVS_CMD_MAXDESCRLEN];
+	char	*cmd_synopsis;
+	char	*cmd_opts;
+	char	*cmd_defargs;
+	int	 file_flags;
 
 	/* operations vector */
-	int (*cmd_init)        (struct cvs_cmd *, int, char **, int *);
-	int (*cmd_pre_exec)    (struct cvsroot *);
-	int (*cmd_exec_remote) (CVSFILE *, void *);
-	int (*cmd_exec_local)  (CVSFILE *, void *);
-	int (*cmd_post_exec)   (struct cvsroot *);
-	int (*cmd_cleanup)     (void);
+	int	 (*cmd_init)(struct cvs_cmd *, int, char **, int *);
+	int	 (*cmd_pre_exec)(struct cvsroot *);
+	int	 (*cmd_exec_remote)(CVSFILE *, void *);
+	int	 (*cmd_exec_local)(CVSFILE *, void *);
+	int	 (*cmd_post_exec)(struct cvsroot *);
+	int	 (*cmd_cleanup)(void);
 
 	/* flags for cvs_file_get() */
-	int   cmd_flags;
+	int	 cmd_flags;
 };
 
 struct cvs_file;
@@ -249,7 +251,13 @@ struct cvsroot {
 #define CVS_ENTF_SYNC	0x01	/* contents of disk and memory match */
 #define CVS_ENTF_WR	0x02	/* file is opened for writing too */
 
-
+#define STRIP_SLASH(p)					\
+	do {						\
+		size_t _slen;				\
+		_slen = strlen(p);			\
+		while ((_slen > 0) && (p[_slen - 1] == '/'))	\
+			p[--_slen] = '\0';		\
+	} while (0)
 struct cvs_ent {
 	char			*ce_buf;
 	u_int16_t		 ce_type;
@@ -259,14 +267,22 @@ struct cvs_ent {
 	time_t			 ce_mtime;
 	char			*ce_opts;
 	char			*ce_tag;
+
+	/*
+	 * This variable is set to 1 if we have already processed this entry
+	 * in the cvs_file_getdir() function. This is to avoid files being
+	 * passed twice to the callbacks.
+	 */
+	int			processed;
 	TAILQ_ENTRY(cvs_ent)	 ce_list;
 };
 
 typedef struct cvs_entries {
 	char	*cef_path;
+	char	*cef_bpath;
 	u_int	 cef_flags;
 
-	TAILQ_HEAD(, cvs_ent)	 cef_ent;
+	TAILQ_HEAD(cvsentrieshead, cvs_ent)	 cef_ent;
 	struct cvs_ent		*cef_cur;
 } CVSENTRIES;
 
@@ -363,17 +379,17 @@ const char	*cvs_var_get(const char *);
 
 /* root.c */
 struct cvsroot	*cvsroot_parse(const char *);
-void		 cvsroot_free(struct cvsroot *);
+void		 cvsroot_remove(struct cvsroot *);
 struct cvsroot	*cvsroot_get(const char *);
 
 
-/* Entries API */
+/* entries.c */
 CVSENTRIES	*cvs_ent_open(const char *, int);
 struct cvs_ent	*cvs_ent_get(CVSENTRIES *, const char *);
 struct cvs_ent	*cvs_ent_next(CVSENTRIES *);
 int		 cvs_ent_add(CVSENTRIES *, struct cvs_ent *);
 int		 cvs_ent_addln(CVSENTRIES *, const char *);
-int		 cvs_ent_remove(CVSENTRIES *, const char *);
+int		 cvs_ent_remove(CVSENTRIES *, const char *, int);
 int		 cvs_ent_write(CVSENTRIES *);
 struct cvs_ent	*cvs_ent_parse(const char *);
 void		 cvs_ent_close(CVSENTRIES *);
@@ -390,21 +406,37 @@ int		 cvs_hist_append(CVSHIST *, struct cvs_hent *);
 char	*cvs_logmsg_open(const char *);
 char	*cvs_logmsg_get(const char *, struct cvs_flist *,
 	    struct cvs_flist *, struct cvs_flist *);
-int	 cvs_logmsg_send(struct cvsroot *, const char *);
+void	cvs_logmsg_send(struct cvsroot *, const char *);
 
 /* date.y */
 time_t	cvs_date_parse(const char *);
 
 /* util.c */
+
+struct cvs_line {
+	char			*l_line;
+	int			 l_lineno;
+	TAILQ_ENTRY(cvs_line)	 l_list;
+};
+
+TAILQ_HEAD(cvs_tqh, cvs_line);
+
+struct cvs_lines {
+	int		l_nblines;
+	char		*l_data;
+	struct cvs_tqh	l_lines;
+};
+
 int	  cvs_readrepo(const char *, char *, size_t);
-int	  cvs_modetostr(mode_t, char *, size_t);
-int	  cvs_strtomode(const char *, mode_t *);
-int	  cvs_splitpath(const char *, char *, size_t, char **);
-int	  cvs_mkadmin(const char *, const char *, const char *);
+void	  cvs_modetostr(mode_t, char *, size_t);
+void	  cvs_strtomode(const char *, mode_t *);
+void	  cvs_splitpath(const char *, char *, size_t, char **);
+int	  cvs_mkadmin(const char *, const char *, const char *, char *,
+		char *, int);
 int	  cvs_cksum(const char *, char *, size_t);
 int	  cvs_exec(int, char **, int []);
 int	  cvs_getargv(const char *, char **, int);
-int	  cvs_chdir(const char *);
+int	  cvs_chdir(const char *, int);
 int	  cvs_rename(const char *, const char *);
 int	  cvs_unlink(const char *);
 int	  cvs_rmdir(const char *);
@@ -412,7 +444,18 @@ int	  cvs_create_dir(const char *, int, char *, char *);
 char	 *cvs_rcs_getpath(CVSFILE *, char *, size_t);
 char	**cvs_makeargv(const char *, int *);
 void	  cvs_freeargv(char **, int);
+void	  cvs_write_tagfile(char *, char *, int);
+void	  cvs_parse_tagfile(char **, char **, int *);
 size_t	  cvs_path_cat(const char *, const char *, char *, size_t);
+time_t	  cvs_hack_time(time_t, int);
 
+BUF			*cvs_patchfile(const char *, const char *,
+			    int (*p)(struct cvs_lines *, struct cvs_lines *));
+struct cvs_lines	*cvs_splitlines(const char *);
+void			cvs_freelines(struct cvs_lines *);
 
-#endif	/* CVS_H */
+/* XXX */
+int			rcs_patch_lines(struct cvs_lines *, struct cvs_lines *);
+int	cvs_checkout_rev(RCSFILE *, RCSNUM *, CVSFILE *, char *, int, int, ...);
+
+#endif

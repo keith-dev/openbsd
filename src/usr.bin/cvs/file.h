@@ -1,4 +1,4 @@
-/*	$OpenBSD: file.h,v 1.28 2005/08/17 16:23:19 joris Exp $	*/
+/*	$OpenBSD: file.h,v 1.33 2006/01/02 09:42:20 xsa Exp $	*/
 /*
  * Copyright (c) 2004 Jean-Francois Brousseau <jfb@openbsd.org>
  * All rights reserved.
@@ -27,19 +27,10 @@
 #ifndef FILE_H
 #define FILE_H
 
-#include <sys/param.h>
-
-#include <dirent.h>
-#include <search.h>
-
 #include "rcs.h"
 
 struct cvs_file;
 struct cvs_entries;
-
-
-#define CVS_FILE_MAXDEPTH	32
-
 
 #define CF_STAT		0x01	/* obsolete */
 #define CF_IGNORE	0x02	/* apply regular ignore rules */
@@ -47,9 +38,9 @@ struct cvs_entries;
 #define CF_SORT		0x08	/* all files are sorted alphabetically */
 #define CF_KNOWN	0x10	/* only recurse in directories known to CVS */
 #define CF_CREATE	0x20	/* create if file does not exist */
-#define CF_MKADMIN	0x40	/* create admin files if they're missing */
-#define CF_NOSYMS	0x80	/* ignore symbolic links */
-#define CF_NOFILES	0x100	/* don't load any files inside a directory */
+#define CF_NOSYMS	0x40	/* ignore symbolic links */
+#define CF_NOFILES	0x80	/* don't load any files inside a directory */
+#define CF_REPO		0x100	/* we are loading a repository with ,v files */
 
 /*
  * The cvs_file structure is used to represent any file or directory within
@@ -70,7 +61,6 @@ struct cvs_entries;
 #define CVS_FST_PATCHED		6
 #define CVS_FST_LOST		7	/* Needs Checkout */
 
-
 SIMPLEQ_HEAD(cvs_flist, cvs_file);
 
 typedef struct cvs_file {
@@ -81,8 +71,8 @@ typedef struct cvs_file {
 	 * cf_dir contains the parent directory the file or dir is in.
 	 * if cf_dir is NULL the file is in the parent directory.
 	 */
-	const char	*cf_name;
-	const char	*cf_dir;
+	char		*cf_name;
+	char		*cf_dir;
 
 	/* pointer to the parent directory's entry file */
 	void		*cf_entry;
@@ -122,7 +112,6 @@ typedef struct cvs_file {
 #define cf_repo		cf_td.cf_dir.cd_repo
 #define cf_root		cf_td.cf_dir.cd_root
 
-
 #define CVS_DIRF_STATIC		0x01
 #define CVS_DIRF_STICKY		0x02
 #define CVS_DIRF_BASE		0x04
@@ -149,7 +138,6 @@ CVSFILE	*cvs_file_loadinfo(char *, int, int (*)(CVSFILE *, void *), void *,
 CVSFILE	*cvs_file_create(CVSFILE *, const char *, u_int, mode_t);
 CVSFILE	*cvs_file_copy(CVSFILE *);
 int	 cvs_file_attach(CVSFILE *, CVSFILE *);
-int	 cvs_file_examine(CVSFILE *, int (*)(CVSFILE *, void *), void *);
 
 int	 cvs_file_init(void);
 int	 cvs_file_ignore(const char *);

@@ -1,7 +1,7 @@
-/*	$OpenBSD: apme.c,v 1.4 2005/06/17 19:13:35 reyk Exp $	*/
+/*	$OpenBSD: apme.c,v 1.11 2006/01/31 10:55:02 reyk Exp $	*/
 
 /*
- * Copyright (c) 2004, 2005 Reyk Floeter <reyk@vantronix.net>
+ * Copyright (c) 2004, 2005 Reyk Floeter <reyk@openbsd.org>
  *
  * Permission to use, copy, modify, and distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -43,13 +43,99 @@
 #include <unistd.h>
 
 #include "hostapd.h"
+#include "iapp.h"
 
-void	 hostapd_apme_frame(struct hostapd_config *, u_int8_t *, u_int);
+void	 hostapd_apme_frame(struct hostapd_apme *, u_int8_t *, u_int);
+
+int
+hostapd_apme_add(struct hostapd_config *cfg, const char *name)
+{
+	struct hostapd_apme *apme;
+
+	if (hostapd_apme_lookup(cfg, name) != NULL)
+		return (EEXIST);
+	if ((apme = (struct hostapd_apme *)
+	    calloc(1, sizeof(struct hostapd_apme))) == NULL)
+		return (ENOMEM);
+
+	strlcpy(apme->a_iface, name, sizeof(apme->a_iface));
+	apme->a_cfg = cfg;
+
+	TAILQ_INSERT_TAIL(&cfg->c_apmes, apme, a_entries);
+
+	hostapd_log(HOSTAPD_LOG_DEBUG,
+	    "%s: Host AP interface added\n", apme->a_iface);
+
+	return (0);
+}
+
+int
+hostapd_apme_deauth(struct hostapd_apme *apme)
+{
+	struct hostapd_config *cfg = (struct hostapd_config *)apme->a_cfg;
+	struct hostapd_iapp *iapp = &cfg->c_iapp;
+	u_int8_t buf[sizeof(struct ieee80211_frame) + sizeof(u_int16_t)];
+	struct ieee80211_frame *wh;
+
+	bzero(&buf, sizeof(buf));
+	wh = (struct ieee80211_frame *)&buf[0];
+	wh->i_fc[0] = IEEE80211_FC0_VERSION_0 | IEEE80211_FC0_TYPE_MGT |
+	    IEEE80211_FC0_SUBTYPE_DEAUTH;
+	wh->i_fc[1] = IEEE80211_FC1_DIR_NODS;
+	memset(&wh->i_addr1, 0xff, IEEE80211_ADDR_LEN);
+	bcopy(apme->a_bssid, wh->i_addr2, IEEE80211_ADDR_LEN);
+	bcopy(apme->a_bssid, wh->i_addr3, IEEE80211_ADDR_LEN);
+	*(u_int16_t *)(wh + 1) = htole16(IEEE80211_REASON_AUTH_EXPIRE);
+
+	if (write(apme->a_raw, buf, sizeof(buf)) == -1) {
+		hostapd_log(HOSTAPD_LOG_VERBOSE,
+		    "%s/%s: failed to deauthenticate all stations: %s\n",
+		    iapp->i_iface, apme->a_iface,
+		    strerror(errno));
+		return (EIO);
+	}
+
+	hostapd_log(HOSTAPD_LOG_VERBOSE,
+	    "%s/%s: deauthenticated all stations\n",
+	    apme->a_iface, iapp->i_iface);
+
+	return (0);
+}
+
+struct hostapd_apme *
+hostapd_apme_lookup(struct hostapd_config *cfg, const char *name)
+{
+	struct hostapd_apme *apme;
+
+	TAILQ_FOREACH(apme, &cfg->c_apmes, a_entries) {
+		if (strcmp(name, apme->a_iface) == 0)
+			return (apme);
+	}
+
+	return (NULL);
+}
+
+void
+hostapd_apme_term(struct hostapd_apme *apme)
+{
+	struct hostapd_config *cfg = (struct hostapd_config *)apme->a_cfg;
+
+	/* Kick a specified Host AP interface */
+	event_del(&apme->a_ev);
+	close(apme->a_raw);
+
+	TAILQ_REMOVE(&cfg->c_apmes, apme, a_entries);
+
+	hostapd_log(HOSTAPD_LOG_DEBUG,
+	    "%s: Host AP interface removed\n", apme->a_iface);
+
+	free(apme);
+}
 
 void
 hostapd_apme_input(int fd, short sig, void *arg)
 {
-	struct hostapd_config *cfg = (struct hostapd_config *)arg;
+	struct hostapd_apme *apme = (struct hostapd_apme *)arg;
 	u_int8_t buf[IAPP_MAXSIZE], *bp, *ep;
 	struct bpf_hdr *bph;
 	ssize_t len;
@@ -69,23 +155,24 @@ hostapd_apme_input(int fd, short sig, void *arg)
 	 */
 
 	bp = (u_int8_t *)&buf;
-	bph = (struct bpf_hdr *)bp;
 	ep = bp + len;
 
 	while (bp < ep) {
-		register int caplen, hdrlen;
+		register u_int caplen, hdrlen;
+
+		bph = (struct bpf_hdr *)bp;
 		caplen = bph->bh_caplen;
 		hdrlen = bph->bh_hdrlen;
 
 		/* Process frame */
-		hostapd_apme_frame(cfg, bp + hdrlen, caplen);
+		hostapd_apme_frame(apme, bp + hdrlen, caplen);
 
 		bp += BPF_WORDALIGN(caplen + hdrlen);
 	}
 }
 
 int
-hostapd_apme_output(struct hostapd_config *cfg,
+hostapd_apme_output(struct hostapd_apme *apme,
     struct hostapd_ieee80211_frame *frame)
 {
 	struct iovec iov[2];
@@ -130,16 +217,17 @@ hostapd_apme_output(struct hostapd_config *cfg,
 		iov[1].iov_len = frame->i_data_len;
 	}
 
-	if (writev(cfg->c_apme_raw, iov, iovcnt) == -1)
+	if (writev(apme->a_raw, iov, iovcnt) == -1)
 		return (errno);
 
 	return (0);
 }
 
 int
-hostapd_apme_offset(struct hostapd_config *cfg,
+hostapd_apme_offset(struct hostapd_apme *apme,
     u_int8_t *buf, const u_int len)
 {
+	struct hostapd_config *cfg = (struct hostapd_config *)apme->a_cfg;
 	struct ieee80211_radiotap_header *rh;
 	u_int rh_len;
 
@@ -163,13 +251,15 @@ hostapd_apme_offset(struct hostapd_config *cfg,
 }
 
 void
-hostapd_apme_frame(struct hostapd_config *cfg, u_int8_t *buf, u_int len)
+hostapd_apme_frame(struct hostapd_apme *apme, u_int8_t *buf, u_int len)
 {
+	struct hostapd_config *cfg = (struct hostapd_config *)apme->a_cfg;
+	struct hostapd_apme *other_apme;
 	struct hostapd_node node;
 	struct ieee80211_frame *wh;
 	int offset;
 
-	if ((offset = hostapd_apme_offset(cfg, buf, len)) < 0)
+	if ((offset = hostapd_apme_offset(apme, buf, len)) < 0)
 		return;
 	wh = (struct ieee80211_frame *)(buf + offset);
 
@@ -178,7 +268,7 @@ hostapd_apme_frame(struct hostapd_config *cfg, u_int8_t *buf, u_int len)
 		return;
 
 	/* Handle received frames */
-	if ((hostapd_handle_input(cfg, buf, len) ==
+	if ((hostapd_handle_input(apme, buf, len) ==
 	    (HOSTAPD_FRAME_F_RET_SKIP >> HOSTAPD_FRAME_F_RET_S)) ||
 	    cfg->c_flags & HOSTAPD_CFG_F_IAPP_PASSIVE)
 		return;
@@ -197,8 +287,8 @@ hostapd_apme_frame(struct hostapd_config *cfg, u_int8_t *buf, u_int len)
 	/*
 	 * ...sent by the Host AP (addr2) to our BSSID (addr3)
 	 */
-	if (bcmp(wh->i_addr2, cfg->c_apme_bssid, IEEE80211_ADDR_LEN) != 0 ||
-	    bcmp(wh->i_addr3, cfg->c_apme_bssid, IEEE80211_ADDR_LEN) != 0)
+	if (bcmp(wh->i_addr2, apme->a_bssid, IEEE80211_ADDR_LEN) != 0 ||
+	    bcmp(wh->i_addr3, apme->a_bssid, IEEE80211_ADDR_LEN) != 0)
 		return;
 
 	cfg->c_stats.cn_rx_apme++;
@@ -207,66 +297,77 @@ hostapd_apme_frame(struct hostapd_config *cfg, u_int8_t *buf, u_int len)
 	 * Double-check if the station got associated to our Host AP
 	 */
 	bcopy(wh->i_addr1, node.ni_macaddr, IEEE80211_ADDR_LEN);
-	if (hostapd_priv_apme_getnode(cfg, &node) != 0) {
+	if (hostapd_priv_apme_getnode(apme, &node) != 0) {
 		hostapd_log(HOSTAPD_LOG_DEBUG,
 		    "%s: invalid association from %s on the Host AP\n",
-		    cfg->c_apme_iface, etheraddr_string(wh->i_addr1));
+		    apme->a_iface, etheraddr_string(wh->i_addr1));
 		return;
 	}
 	cfg->c_stats.cn_tx_apme++;
 
-	hostapd_iapp_add_notify(cfg, &node);
+	/*
+	 * Delete node on other attached Host APs
+	 */
+	TAILQ_FOREACH(other_apme, &cfg->c_apmes, a_entries) {
+		if (apme == other_apme)
+			continue;
+		if (hostapd_apme_delnode(other_apme, &node) == 0)
+			cfg->c_stats.cn_tx_apme++;
+	}
+
+	hostapd_iapp_add_notify(apme, &node);
 
 }
 
 void
-hostapd_apme_init(struct hostapd_config *cfg)
+hostapd_apme_init(struct hostapd_apme *apme)
 {
+	struct hostapd_config *cfg = (struct hostapd_config *)apme->a_cfg;
 	u_int i, dlt;
 	struct ifreq ifr;
 
-	cfg->c_apme_raw = hostapd_bpf_open(O_RDWR);
+	apme->a_raw = hostapd_bpf_open(O_RDWR);
 
-	cfg->c_apme_rawlen = IAPP_MAXSIZE;
-	if (ioctl(cfg->c_apme_raw, BIOCSBLEN, &cfg->c_apme_rawlen) == -1)
+	apme->a_rawlen = IAPP_MAXSIZE;
+	if (ioctl(apme->a_raw, BIOCSBLEN, &apme->a_rawlen) == -1)
 		hostapd_fatal("failed to set BPF buffer len \"%s\": %s\n",
-		    cfg->c_apme_iface, strerror(errno));
+		    apme->a_iface, strerror(errno));
 
 	i = 1;
-	if (ioctl(cfg->c_apme_raw, BIOCIMMEDIATE, &i) == -1)
+	if (ioctl(apme->a_raw, BIOCIMMEDIATE, &i) == -1)
 		hostapd_fatal("failed to set BPF immediate mode on \"%s\": "
-		    "%s\n", cfg->c_apme_iface, strerror(errno));
+		    "%s\n", apme->a_iface, strerror(errno));
 
 	bzero(&ifr, sizeof(struct ifreq));
-	strlcpy(ifr.ifr_name, cfg->c_apme_iface, sizeof(ifr.ifr_name));
+	strlcpy(ifr.ifr_name, apme->a_iface, sizeof(ifr.ifr_name));
 
 	/* This may fail, ignore it */
-	ioctl(cfg->c_apme_raw, BIOCPROMISC, NULL);
+	ioctl(apme->a_raw, BIOCPROMISC, NULL);
 
 	/* Associate the wireless network interface to the BPF descriptor */
-	if (ioctl(cfg->c_apme_raw, BIOCSETIF, &ifr) == -1)
+	if (ioctl(apme->a_raw, BIOCSETIF, &ifr) == -1)
 		hostapd_fatal("failed to set BPF interface \"%s\": %s\n",
-		    cfg->c_apme_iface, strerror(errno));
+		    apme->a_iface, strerror(errno));
 
 	dlt = cfg->c_apme_dlt;
-	if (ioctl(cfg->c_apme_raw, BIOCSDLT, &dlt) == -1)
+	if (ioctl(apme->a_raw, BIOCSDLT, &dlt) == -1)
 		hostapd_fatal("failed to set BPF link type on \"%s\": %s\n",
-		    cfg->c_apme_iface, strerror(errno));
+		    apme->a_iface, strerror(errno));
 
 	/* Lock the BPF descriptor, no further configuration */
-	if (ioctl(cfg->c_apme_raw, BIOCLOCK, NULL) == -1)
+	if (ioctl(apme->a_raw, BIOCLOCK, NULL) == -1)
 		hostapd_fatal("failed to lock BPF interface on \"%s\": %s\n",
-		    cfg->c_apme_iface, strerror(errno));
+		    apme->a_iface, strerror(errno));
 }
 
 int
-hostapd_apme_addnode(struct hostapd_config *cfg, struct hostapd_node *node)
+hostapd_apme_addnode(struct hostapd_apme *apme, struct hostapd_node *node)
 {
-	return (hostapd_priv_apme_setnode(cfg, node, 1));
+	return (hostapd_priv_apme_setnode(apme, node, 1));
 }
 
 int
-hostapd_apme_delnode(struct hostapd_config *cfg, struct hostapd_node *node)
+hostapd_apme_delnode(struct hostapd_apme *apme, struct hostapd_node *node)
 {
-	return (hostapd_priv_apme_setnode(cfg, node, 0));
+	return (hostapd_priv_apme_setnode(apme, node, 0));
 }

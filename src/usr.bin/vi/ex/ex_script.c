@@ -1,4 +1,4 @@
-/*	$OpenBSD: ex_script.c,v 1.11 2003/09/02 22:44:06 dhartmei Exp $	*/
+/*	$OpenBSD: ex_script.c,v 1.13 2006/01/08 21:05:40 miod Exp $	*/
 
 /*-
  * Copyright (c) 1992, 1993, 1994
@@ -379,13 +379,13 @@ sscr_input(sp)
 	GS *gp;
 	struct timeval tv;
 	fd_set *rdfd;
-	int maxfd, nfd;
+	int maxfd;
 
 	gp = sp->gp;
 
 	/* Allocate space for rdfd. */
 	maxfd = STDIN_FILENO;
-	for (sp = gp->dq.cqh_first; sp != (void *)&gp->dq; sp = sp->q.cqe_next)
+	CIRCLEQ_FOREACH(sp, &gp->dq, q)
 		if (F_ISSET(sp, SC_SCRIPT) && sp->script->sh_master > maxfd)
 			maxfd = sp->script->sh_master;
 	rdfd = (fd_set *)malloc(howmany(maxfd + 1, NFDBITS) * sizeof(fd_mask));
@@ -399,7 +399,7 @@ loop:	memset(rdfd, 0, howmany(maxfd + 1, NFDBITS) * sizeof(fd_mask));
 	tv.tv_usec = 0;
 
 	/* Set up the input mask. */
-	for (sp = gp->dq.cqh_first; sp != (void *)&gp->dq; sp = sp->q.cqe_next)
+	CIRCLEQ_FOREACH(sp, &gp->dq, q)
 		if (F_ISSET(sp, SC_SCRIPT))
 			FD_SET(sp->script->sh_master, rdfd);
 
@@ -417,7 +417,7 @@ loop:	memset(rdfd, 0, howmany(maxfd + 1, NFDBITS) * sizeof(fd_mask));
 	}
 
 	/* Read the input. */
-	for (sp = gp->dq.cqh_first; sp != (void *)&gp->dq; sp = sp->q.cqe_next)
+	CIRCLEQ_FOREACH(sp, &gp->dq, q)
 		if (F_ISSET(sp, SC_SCRIPT) &&
 		    FD_ISSET(sp->script->sh_master, rdfd) && sscr_insert(sp)) {
 			free(rdfd);
@@ -434,7 +434,6 @@ static int
 sscr_insert(sp)
 	SCR *sp;
 {
-	struct timeval tv;
 	CHAR_T *endp, *p, *t;
 	SCRIPT *sc;
 	struct pollfd pfd[1];
@@ -626,7 +625,7 @@ sscr_check(sp)
 	GS *gp;
 
 	gp = sp->gp;
-	for (sp = gp->dq.cqh_first; sp != (void *)&gp->dq; sp = sp->q.cqe_next)
+	CIRCLEQ_FOREACH(sp, &gp->dq, q)
 		if (F_ISSET(sp, SC_SCRIPT)) {
 			F_SET(gp, G_SCRWIN);
 			return;

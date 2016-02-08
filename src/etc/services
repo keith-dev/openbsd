@@ -1,4 +1,4 @@
-#	$OpenBSD: services,v 1.59 2005/07/23 09:45:11 mbalmer Exp $
+#	$OpenBSD: services,v 1.63 2005/11/20 19:15:11 reyk Exp $
 #
 # Network services, Internet style
 #
@@ -203,6 +203,10 @@ krbupdate	760/tcp		kreg		# BSD Kerberos registration
 #
 socks		1080/tcp			# Socks
 kpop		1109/tcp			# Pop with Kerberos
+ms-sql-s	1433/tcp	Microsoft-SQL-Server
+ms-sql-s	1433/udp	Microsoft-SQL-Server
+ms-sql-m	1434/tcp	Microsoft-SQL-Monitor
+ms-sql-m	1434/udp	Microsoft-SQL-Monitor
 ingreslock	1524/tcp
 ingreslock	1524/udp
 prospero-np	1525/tcp			# Prospero non-privileged
@@ -221,6 +225,10 @@ kip		2112/tcp			# IP over kerberos
 kauth		2120/tcp			# Remote kauth
 iprop		2121/tcp			# Kerberos incremental propagation
 netplan		2983/tcp			# netplan daemon
+eppc		3031/tcp			# Remote AppleEvents/PPC Toolbox
+eppc		3031/udp			# Remote AppleEvents/PPC Toolbox
+iapp		3517/tcp	802-11-iapp	# IEEE 802.11f IAPP
+iapp		3517/udp	802-11-iapp	# IEEE 802.11f IAPP
 daap		3689/tcp			# Digital Audio Access Protocol
 daap		3689/udp			# Digital Audio Access Protocol
 krb524		4444/tcp			# Kerberos 5->4

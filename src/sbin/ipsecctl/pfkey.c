@@ -1,4 +1,4 @@
-/*	$OpenBSD: pfkey.c,v 1.23 2005/08/22 17:26:46 hshoexer Exp $	*/
+/*	$OpenBSD: pfkey.c,v 1.32 2005/12/06 14:27:57 markus Exp $	*/
 /*
  * Copyright (c) 2003, 2004 Henning Brauer <henning@openbsd.org>
  * Copyright (c) 2003, 2004 Markus Friedl <markus@openbsd.org>
@@ -42,12 +42,12 @@ static int	fd;
 static u_int32_t sadb_msg_seq = 1;
 
 static int	pfkey_flow(int, u_int8_t, u_int8_t, u_int8_t,
-		    struct ipsec_addr *, struct ipsec_addr *,
-		    struct ipsec_addr *, struct ipsec_auth *, u_int8_t);
+		    struct ipsec_addr_wrap *, struct ipsec_addr_wrap *,
+		    struct ipsec_addr_wrap *, struct ipsec_auth *, u_int8_t);
 static int	pfkey_sa(int, u_int8_t, u_int8_t, u_int32_t,
-		    struct ipsec_addr *, struct ipsec_addr *,
+		    struct ipsec_addr_wrap *, struct ipsec_addr_wrap *,
 		    struct ipsec_transforms *, struct ipsec_key *,
-		    struct ipsec_key *);
+		    struct ipsec_key *, u_int8_t);
 static int	pfkey_reply(int);
 int		pfkey_parse(struct sadb_msg *, struct ipsec_rule *);
 int		pfkey_ipsec_flush(void);
@@ -56,16 +56,16 @@ int		pfkey_init(void);
 
 static int
 pfkey_flow(int sd, u_int8_t satype, u_int8_t action, u_int8_t direction,
-    struct ipsec_addr *src, struct ipsec_addr *dst, struct ipsec_addr *peer,
-    struct ipsec_auth *auth, u_int8_t flowtype)
+    struct ipsec_addr_wrap *src, struct ipsec_addr_wrap *dst,
+    struct ipsec_addr_wrap *peer, struct ipsec_auth *auth, u_int8_t flowtype)
 {
 	struct sadb_msg		 smsg;
 	struct sadb_address	 sa_src, sa_dst, sa_peer, sa_smask, sa_dmask;
 	struct sadb_protocol	 sa_flowtype, sa_protocol;
 	struct sadb_ident	*sa_srcid, *sa_dstid;
 	struct sockaddr_storage	 ssrc, sdst, speer, smask, dmask;
-	struct iovec	 	 iov[IOV_CNT];
-	ssize_t		 	 n;
+	struct iovec		 iov[IOV_CNT];
+	ssize_t			 n;
 	int			 iov_cnt, len, ret = 0;
 
 	sa_srcid = sa_dstid = NULL;
@@ -74,10 +74,10 @@ pfkey_flow(int sd, u_int8_t satype, u_int8_t action, u_int8_t direction,
 	bzero(&smask, sizeof(smask));
 	switch (src->af) {
 	case AF_INET:
-		((struct sockaddr_in *)&ssrc)->sin_addr = src->v4;
+		((struct sockaddr_in *)&ssrc)->sin_addr = src->address.v4;
 		ssrc.ss_len = sizeof(struct sockaddr_in);
 		ssrc.ss_family = AF_INET;
-		((struct sockaddr_in *)&smask)->sin_addr = src->v4mask.mask;
+		((struct sockaddr_in *)&smask)->sin_addr = src->mask.v4;
 		break;
 	case AF_INET6:
 	default:
@@ -91,10 +91,10 @@ pfkey_flow(int sd, u_int8_t satype, u_int8_t action, u_int8_t direction,
 	bzero(&dmask, sizeof(dmask));
 	switch (dst->af) {
 	case AF_INET:
-		((struct sockaddr_in *)&sdst)->sin_addr = dst->v4;
+		((struct sockaddr_in *)&sdst)->sin_addr = dst->address.v4;
 		sdst.ss_len = sizeof(struct sockaddr_in);
 		sdst.ss_family = AF_INET;
-		((struct sockaddr_in *)&dmask)->sin_addr = dst->v4mask.mask;
+		((struct sockaddr_in *)&dmask)->sin_addr = dst->mask.v4;
 		break;
 	case AF_INET6:
 	default:
@@ -108,7 +108,8 @@ pfkey_flow(int sd, u_int8_t satype, u_int8_t action, u_int8_t direction,
 	if (peer) {
 		switch (peer->af) {
 		case AF_INET:
-			((struct sockaddr_in *)&speer)->sin_addr = peer->v4;
+			((struct sockaddr_in *)&speer)->sin_addr =
+			    peer->address.v4;
 			speer.ss_len = sizeof(struct sockaddr_in);
 			speer.ss_family = AF_INET;
 			break;
@@ -178,7 +179,7 @@ pfkey_flow(int sd, u_int8_t satype, u_int8_t action, u_int8_t direction,
 
 		sa_srcid = calloc(len, sizeof(u_int8_t));
 		if (sa_srcid == NULL)
-			err(1, "calloc");
+			err(1, "pfkey_flow: calloc");
 
 		sa_srcid->sadb_ident_type = auth->idtype;
 		sa_srcid->sadb_ident_len = len / 8;
@@ -192,7 +193,7 @@ pfkey_flow(int sd, u_int8_t satype, u_int8_t action, u_int8_t direction,
 
 		sa_dstid = calloc(len, sizeof(u_int8_t));
 		if (sa_dstid == NULL)
-			err(1, "calloc");
+			err(1, "pfkey_flow: calloc");
 
 		sa_dstid->sadb_ident_type = auth->idtype;
 		sa_dstid->sadb_ident_len = len / 8;
@@ -303,23 +304,24 @@ out:
 }
 
 static int
-pfkey_sa(int sd, u_int8_t satype, u_int8_t action, u_int32_t spi, struct
-    ipsec_addr *src, struct ipsec_addr *dst, struct ipsec_transforms *xfs,
-    struct ipsec_key *authkey, struct ipsec_key *enckey)
+pfkey_sa(int sd, u_int8_t satype, u_int8_t action, u_int32_t spi,
+    struct ipsec_addr_wrap *src, struct ipsec_addr_wrap *dst,
+    struct ipsec_transforms *xfs, struct ipsec_key *authkey,
+    struct ipsec_key *enckey, u_int8_t tmode)
 {
 	struct sadb_msg		smsg;
 	struct sadb_sa		sa;
 	struct sadb_address	sa_src, sa_dst;
 	struct sadb_key		sa_authkey, sa_enckey;
 	struct sockaddr_storage	ssrc, sdst;
-	struct iovec	 	iov[IOV_CNT];
-	ssize_t		 	n;
-	int		 	iov_cnt, len, ret = 0;
+	struct iovec		iov[IOV_CNT];
+	ssize_t			n;
+	int			iov_cnt, len, ret = 0;
 
 	bzero(&ssrc, sizeof(ssrc));
 	switch (src->af) {
 	case AF_INET:
-		((struct sockaddr_in *)&ssrc)->sin_addr = src->v4;
+		((struct sockaddr_in *)&ssrc)->sin_addr = src->address.v4;
 		ssrc.ss_len = sizeof(struct sockaddr_in);
 		ssrc.ss_family = AF_INET;
 		break;
@@ -332,7 +334,7 @@ pfkey_sa(int sd, u_int8_t satype, u_int8_t action, u_int32_t spi, struct
 	bzero(&sdst, sizeof(sdst));
 	switch (dst->af) {
 	case AF_INET:
-		((struct sockaddr_in *)&sdst)->sin_addr = dst->v4;
+		((struct sockaddr_in *)&sdst)->sin_addr = dst->address.v4;
 		sdst.ss_len = sizeof(struct sockaddr_in);
 		sdst.ss_family = AF_INET;
 		break;
@@ -356,6 +358,9 @@ pfkey_sa(int sd, u_int8_t satype, u_int8_t action, u_int32_t spi, struct
 	sa.sadb_sa_spi = htonl(spi);
 	sa.sadb_sa_state = SADB_SASTATE_MATURE;
 
+	if (satype != SADB_X_SATYPE_IPIP && tmode == IPSEC_TUNNEL)
+		sa.sadb_sa_flags |= SADB_X_SAFLAGS_TUNNEL;
+
 	if (xfs && xfs->authxf) {
 		switch (xfs->authxf->id) {
 		case AUTHXF_NONE:
@@ -377,12 +382,6 @@ pfkey_sa(int sd, u_int8_t satype, u_int8_t action, u_int32_t spi, struct
 			break;
 		case AUTHXF_HMAC_SHA2_512:
 			sa.sadb_sa_auth = SADB_X_AALG_SHA2_512;
-			break;
-		case AUTHXF_MD5:
-			sa.sadb_sa_auth = SADB_X_AALG_MD5;
-			break;
-		case AUTHXF_SHA1:
-			sa.sadb_sa_auth = SADB_X_AALG_SHA1;
 			break;
 		default:
 			warnx("unsupported authentication algorithm %d",
@@ -422,6 +421,19 @@ pfkey_sa(int sd, u_int8_t satype, u_int8_t action, u_int32_t spi, struct
 			    xfs->encxf->id);
 		}
 	}
+	if (xfs && xfs->compxf) {
+		switch (xfs->compxf->id) {
+		case COMPXF_DEFLATE:
+			sa.sadb_sa_encrypt = SADB_X_CALG_DEFLATE;
+			break;
+		case COMPXF_LZS:
+			sa.sadb_sa_encrypt = SADB_X_CALG_LZS;
+			break;
+		default:
+			warnx("unsupported compression algorithm %d",
+			    xfs->compxf->id);
+		}
+	}
 
 	bzero(&sa_src, sizeof(sa_src));
 	sa_src.sadb_address_len = (sizeof(sa_src) + ROUNDUP(ssrc.ss_len)) / 8;
@@ -431,7 +443,8 @@ pfkey_sa(int sd, u_int8_t satype, u_int8_t action, u_int32_t spi, struct
 	sa_dst.sadb_address_len = (sizeof(sa_dst) + ROUNDUP(sdst.ss_len)) / 8;
 	sa_dst.sadb_address_exttype = SADB_EXT_ADDRESS_DST;
 
-	if (action == SADB_ADD && !authkey && !enckey) { /* XXX ENCNULL */
+	if (action == SADB_ADD && !authkey && !enckey && satype !=
+	    SADB_X_SATYPE_IPCOMP && satype != SADB_X_SATYPE_IPIP) { /* XXX ENCNULL */
 		warnx("no key specified");
 		return -1;
 	}
@@ -532,7 +545,7 @@ pfkey_reply(int sd)
 	}
 	len = hdr.sadb_msg_len * PFKEYV2_CHUNK;
 	if ((data = malloc(len)) == NULL)
-		err(1, NULL);
+		err(1, "pfkey_reply: malloc");
 	if (read(sd, data, len) != len) {
 		warn("PF_KEY short read");
 		bzero(data, len);
@@ -553,6 +566,7 @@ pfkey_parse(struct sadb_msg *msg, struct ipsec_rule *rule)
 	struct sadb_protocol	*sproto;
 	struct sadb_ident	*sident;
 	struct sockaddr		*sa;
+	struct sockaddr_in	*sa_in;
 	int			 len;
 
 	switch (msg->sadb_msg_satype) {
@@ -563,6 +577,11 @@ pfkey_parse(struct sadb_msg *msg, struct ipsec_rule *rule)
 		rule->proto = IPSEC_AH;
 		break;
 	case SADB_X_SATYPE_IPCOMP:
+		rule->proto = IPSEC_IPCOMP;
+		break;
+	case SADB_X_SATYPE_IPIP:
+		rule->proto = IPSEC_IPIP;
+		break;
 	default:
 		return (1);
 	}
@@ -578,16 +597,16 @@ pfkey_parse(struct sadb_msg *msg, struct ipsec_rule *rule)
 			saddr = (struct sadb_address *)ext;
 			sa = (struct sockaddr *)(saddr + 1);
 
-			rule->local = calloc(1, sizeof(struct ipsec_addr));
+			rule->local = calloc(1, sizeof(struct ipsec_addr_wrap));
 			if (rule->local == NULL)
-				err(1, "malloc");
+				err(1, "pfkey_parse: malloc");
 
 			switch (sa->sa_family) {
 			case AF_INET:
 				bcopy(&((struct sockaddr_in *)sa)->sin_addr,
-				    &rule->local->v4, sizeof(struct in_addr));
-				memset(&rule->local->v4mask, 0xff,
-				    sizeof(u_int32_t));
+				    &rule->local->address.v4,
+				    sizeof(struct in_addr));
+				rule->local->mask.addr32[0] = 0xffffffff;
 				rule->local->af = AF_INET;
 				break;
 			default:
@@ -601,16 +620,16 @@ pfkey_parse(struct sadb_msg *msg, struct ipsec_rule *rule)
 			saddr = (struct sadb_address *)ext;
 			sa = (struct sockaddr *)(saddr + 1);
 
-			rule->peer = calloc(1, sizeof(struct ipsec_addr));
+			rule->peer = calloc(1, sizeof(struct ipsec_addr_wrap));
 			if (rule->peer == NULL)
-				err(1, "malloc");
+				err(1, "pfkey_parse: malloc");
 
 			switch (sa->sa_family) {
 			case AF_INET:
 				bcopy(&((struct sockaddr_in *)sa)->sin_addr,
-				    &rule->peer->v4, sizeof(struct in_addr));
-				memset(&rule->peer->v4mask, 0xff,
-				    sizeof(u_int32_t));
+				    &rule->peer->address.v4,
+				    sizeof(struct in_addr));
+				rule->peer->mask.addr32[0] = 0xffffffff;
 				rule->peer->af = AF_INET;
 				break;
 			default:
@@ -627,12 +646,12 @@ pfkey_parse(struct sadb_msg *msg, struct ipsec_rule *rule)
 				rule->auth = calloc(1, sizeof(struct
 				    ipsec_auth));
 				if (rule->auth == NULL)
-					err(1, "calloc");
+					err(1, "pfkey_parse: calloc");
 			}
 
 			rule->auth->srcid = calloc(1, len);
 			if (rule->auth->srcid == NULL)
-				err(1, "calloc");
+				err(1, "pfkey_parse: calloc");
 
 			strlcpy(rule->auth->srcid, (char *)(sident + 1), len);
 			break;
@@ -646,12 +665,12 @@ pfkey_parse(struct sadb_msg *msg, struct ipsec_rule *rule)
 				rule->auth = calloc(1, sizeof(struct
 				    ipsec_auth));
 				if (rule->auth == NULL)
-					err(1, "calloc");
+					err(1, "pfkey_parse: calloc");
 			}
 
 			rule->auth->dstid = calloc(1, len);
 			if (rule->auth->dstid == NULL)
-				err(1, "calloc");
+				err(1, "pfkey_parse: calloc");
 
 			strlcpy(rule->auth->dstid, (char *)(sident + 1), len);
 			break;
@@ -704,15 +723,16 @@ pfkey_parse(struct sadb_msg *msg, struct ipsec_rule *rule)
 
 			if (rule->src == NULL) {
 				rule->src = calloc(1,
-				    sizeof(struct ipsec_addr));
+				    sizeof(struct ipsec_addr_wrap));
 				if (rule->src == NULL)
-					err(1, "calloc");
+					err(1, "pfkey_parse: calloc");
 			}
 
 			switch (sa->sa_family) {
 			case AF_INET:
 				bcopy(&((struct sockaddr_in *)sa)->sin_addr,
-				    &rule->src->v4, sizeof(struct in_addr));
+				    &rule->src->address.v4,
+				    sizeof(struct in_addr));
 				rule->src->af = AF_INET;
 				break;
 			default:
@@ -726,15 +746,16 @@ pfkey_parse(struct sadb_msg *msg, struct ipsec_rule *rule)
 
 			if (rule->dst == NULL) {
 				rule->dst = calloc(1,
-				    sizeof(struct ipsec_addr));
+				    sizeof(struct ipsec_addr_wrap));
 				if (rule->dst == NULL)
-					err(1, "calloc");
+					err(1, "pfkey_parse: calloc");
 			}
 
 			switch (sa->sa_family) {
 			case AF_INET:
 				bcopy(&((struct sockaddr_in *)sa)->sin_addr,
-				    &rule->dst->v4, sizeof(struct in_addr));
+				    &rule->dst->address.v4,
+				    sizeof(struct in_addr));
 				rule->dst->af = AF_INET;
 				break;
 
@@ -750,15 +771,15 @@ pfkey_parse(struct sadb_msg *msg, struct ipsec_rule *rule)
 
 			if (rule->src == NULL) {
 				rule->src = calloc(1,
-				    sizeof(struct ipsec_addr));
+				    sizeof(struct ipsec_addr_wrap));
 				if (rule->src == NULL)
-					err(1, "calloc");
+					err(1, "pfkey_parse: calloc");
 			}
 
 			switch (sa->sa_family) {
 			case AF_INET:
-				bcopy(&((struct sockaddr_in *)sa)->sin_addr,
-				    &rule->src->v4mask.mask,
+				sa_in = (struct sockaddr_in *)sa;
+				bcopy(&sa_in->sin_addr, &rule->src->mask.v4,
 				    sizeof(struct in_addr));
 				rule->src->af = AF_INET;
 				break;
@@ -774,15 +795,15 @@ pfkey_parse(struct sadb_msg *msg, struct ipsec_rule *rule)
 
 			if (rule->dst == NULL) {
 				rule->dst = calloc(1,
-				    sizeof(struct ipsec_addr));
+				    sizeof(struct ipsec_addr_wrap));
 				if (rule->dst == NULL)
-					err(1, "calloc");
+					err(1, "pfkey_parse: calloc");
 			}
 
 			switch (sa->sa_family) {
 			case AF_INET:
-				bcopy(&((struct sockaddr_in *)sa)->sin_addr,
-				    &rule->dst->v4mask.mask,
+				sa_in = (struct sockaddr_in *)sa;
+				bcopy(&sa_in->sin_addr, &rule->dst->mask.v4,
 				    sizeof(struct in_addr));
 				rule->dst->af = AF_INET;
 				break;
@@ -791,7 +812,7 @@ pfkey_parse(struct sadb_msg *msg, struct ipsec_rule *rule)
 				return (1);
 			}
 			break;
-		
+
 		default:
 			return (1);
 		}
@@ -814,7 +835,12 @@ pfkey_ipsec_establish(int action, struct ipsec_rule *r)
 		case IPSEC_AH:
 			satype = SADB_SATYPE_AH;
 			break;
-		case IPSEC_COMP:
+		case IPSEC_IPCOMP:
+			satype = SADB_X_SATYPE_IPCOMP;
+			break;
+		case IPSEC_IPIP:
+			satype = SADB_X_SATYPE_IPIP;
+			break;
 		default:
 			return -1;
 		}
@@ -851,8 +877,14 @@ pfkey_ipsec_establish(int action, struct ipsec_rule *r)
 		case IPSEC_ESP:
 			satype = SADB_SATYPE_ESP;
 			break;
+		case IPSEC_IPCOMP:
+			satype = SADB_X_SATYPE_IPCOMP;
+			break;
 		case IPSEC_TCPMD5:
 			satype = SADB_X_SATYPE_TCPSIGNATURE;
+			break;
+		case IPSEC_IPIP:
+			satype = SADB_X_SATYPE_IPIP;
 			break;
 		default:
 			return -1;
@@ -860,11 +892,12 @@ pfkey_ipsec_establish(int action, struct ipsec_rule *r)
 		switch (action) {
 		case ACTION_ADD:
 			ret = pfkey_sa(fd, satype, SADB_ADD, r->spi,
-			    r->src, r->dst, r->xfs, r->authkey, r->enckey);
+			    r->src, r->dst, r->xfs, r->authkey, r->enckey,
+			    r->tmode);
 			break;
 		case ACTION_DELETE:
 			ret = pfkey_sa(fd, satype, SADB_DELETE, r->spi,
-			    r->src, r->dst, r->xfs, NULL, NULL);
+			    r->src, r->dst, r->xfs, NULL, NULL, r->tmode);
 			break;
 		default:
 			return -1;
@@ -921,7 +954,7 @@ int
 pfkey_init(void)
 {
 	if ((fd = socket(PF_KEY, SOCK_RAW, PF_KEY_V2)) == -1)
-		err(1, "failed to open PF_KEY socket");
+		err(1, "pfkey_init: failed to open PF_KEY socket");
 
 	return 0;
 }

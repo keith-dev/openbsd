@@ -1,4 +1,4 @@
-/*	$OpenBSD: tty.c,v 1.22 2005/06/14 18:14:40 kjell Exp $	*/
+/*	$OpenBSD: tty.c,v 1.26 2006/02/25 14:40:16 otto Exp $	*/
 
 /* This file is in the public domain. */
 
@@ -32,6 +32,7 @@
 #include <sys/types.h>
 #include <sys/time.h>
 #include <sys/ioctl.h>
+
 #include <term.h>
 #include <signal.h>
 
@@ -43,6 +44,7 @@ static char	*scroll_fwd;	/* How to scroll forward. */
 
 static void	 winchhandler(int);
 
+/* ARGSUSED */
 static void
 winchhandler(int sig)
 {
@@ -67,6 +69,7 @@ ttinit(void)
 	}
 
 	signal(SIGWINCH, winchhandler);
+	signal(SIGCONT, winchhandler);
 	siginterrupt(SIGWINCH, 1);
 
 	scroll_fwd = scroll_forward;
@@ -438,7 +441,7 @@ fakec(int c)
 static int
 charcost(char *s)
 {
-	int	cci = 0;
+	cci = 0;
 
 	tputs(s, nrow, fakec);
 	return (cci);

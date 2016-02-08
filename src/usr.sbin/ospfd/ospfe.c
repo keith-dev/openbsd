@@ -1,4 +1,4 @@
-/*	$OpenBSD: ospfe.c,v 1.31 2005/06/13 08:27:29 claudio Exp $ */
+/*	$OpenBSD: ospfe.c,v 1.40 2006/02/21 13:02:59 claudio Exp $ */
 
 /*
  * Copyright (c) 2005 Claudio Jeker <claudio@openbsd.org>
@@ -23,6 +23,7 @@
 #include <sys/queue.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
+#include <net/if_types.h>
 #include <stdlib.h>
 #include <signal.h>
 #include <string.h>
@@ -107,6 +108,8 @@ ospfe(struct ospfd_conf *xconf, int pipe_parent2ospfe[2], int pipe_ospfe2rde[2],
 	if (if_set_tos(xconf->ospf_socket, IPTOS_PREC_INTERNETCONTROL) == -1)
 		fatal("if_set_tos");
 
+	if_set_recvbuf(xconf->ospf_socket);
+
 	oeconf = xconf;
 
 	if ((pw = getpwnam(OSPFD_USER)) == NULL)
@@ -167,15 +170,16 @@ ospfe(struct ospfd_conf *xconf, int pipe_parent2ospfe[2], int pipe_ospfe2rde[2],
 	TAILQ_INIT(&ctl_conns);
 	control_listen();
 
+	if ((pkt_ptr = calloc(1, READ_BUF_SIZE)) == NULL)
+		fatal("ospfe");
+
 	/* start interfaces */
 	LIST_FOREACH(area, &oeconf->area_list, entry) {
 		LIST_FOREACH(iface, &area->iface_list, entry) {
-			if (!iface->passive) {
-				if_init(xconf, iface);
-				if (if_fsm(iface, IF_EVT_UP)) {
-					log_debug("error starting interface %s",
-					    iface->name);
-				}
+			if_init(xconf, iface);
+			if (if_fsm(iface, IF_EVT_UP)) {
+				log_debug("error starting interface %s",
+				    iface->name);
 			}
 		}
 	}
@@ -194,17 +198,18 @@ ospfe_shutdown(void)
 	struct iface	*iface;
 
 	/* stop all interfaces and remove all areas */
-	LIST_FOREACH(area, &oeconf->area_list, entry) {
+	while ((area = LIST_FIRST(&oeconf->area_list)) != NULL) {
 		LIST_FOREACH(iface, &area->iface_list, entry) {
-			if (!iface->passive) {
-				if (if_fsm(iface, IF_EVT_DOWN)) {
-					log_debug("error stopping interface %s",
-					    iface->name);
-				}
+			if (if_fsm(iface, IF_EVT_DOWN)) {
+				log_debug("error stopping interface %s",
+				    iface->name);
 			}
 		}
+		LIST_REMOVE(area, entry);
 		area_del(area);
 	}
+
+	close(oeconf->ospf_socket);
 
 	/* clean up */
 	msgbuf_write(&ibuf_rde->w);
@@ -213,6 +218,8 @@ ospfe_shutdown(void)
 	msgbuf_write(&ibuf_main->w);
 	msgbuf_clear(&ibuf_main->w);
 	free(ibuf_main);
+	free(oeconf);
+	free(pkt_ptr);
 
 	log_info("ospf engine exiting");
 	_exit(0);
@@ -222,14 +229,14 @@ ospfe_shutdown(void)
 int
 ospfe_imsg_compose_parent(int type, pid_t pid, void *data, u_int16_t datalen)
 {
-	return (imsg_compose(ibuf_main, type, 0, pid, -1, data, datalen));
+	return (imsg_compose(ibuf_main, type, 0, pid, data, datalen));
 }
 
 int
 ospfe_imsg_compose_rde(int type, u_int32_t peerid, pid_t pid,
     void *data, u_int16_t datalen)
 {
-	return (imsg_compose(ibuf_rde, type, peerid, pid, -1, data, datalen));
+	return (imsg_compose(ibuf_rde, type, peerid, pid, data, datalen));
 }
 
 void
@@ -240,7 +247,7 @@ ospfe_dispatch_main(int fd, short event, void *bula)
 	struct area	*area = NULL;
 	struct iface	*iface = NULL;
 	struct kif	*kif;
-	int		 n;
+	int		 n, link_ok;
 
 	switch (event) {
 	case EV_READ:
@@ -270,6 +277,11 @@ ospfe_dispatch_main(int fd, short event, void *bula)
 			    sizeof(struct kif))
 				fatalx("IFINFO imsg with wrong len");
 			kif = imsg.data;
+			link_ok = (kif->flags & IFF_UP) &&
+			    (kif->link_state == LINK_STATE_UP ||
+			    (kif->link_state == LINK_STATE_UNKNOWN &&
+			    kif->media_type != IFT_CARP));
+
 
 			LIST_FOREACH(area, &oeconf->area_list, entry) {
 				LIST_FOREACH(iface, &area->iface_list, entry) {
@@ -278,9 +290,8 @@ ospfe_dispatch_main(int fd, short event, void *bula)
 						iface->flags = kif->flags;
 						iface->linkstate =
 						    kif->link_state;
-						if ((kif->flags & IFF_UP) &&
-						    (kif->link_state !=
-						     LINK_STATE_DOWN)) {
+
+						if (link_ok) {
 							if_fsm(iface,
 							    IF_EVT_UP);
 						} else {
@@ -479,22 +490,21 @@ ospfe_dispatch_rde(int fd, short event, void *bula)
 				break;
 
 			memcpy(&age, imsg.data, sizeof(age));
-			if (ntohs(age) >= MAX_AGE) {
+			ref = lsa_cache_add(imsg.data, l);
+			if (ntohs(age) >= MAX_AGE)
 				/* add to retransmit list */
-				ref = lsa_cache_add(imsg.data, l);
-				ls_retrans_list_add(nbr, imsg.data);
-				lsa_cache_put(ref, nbr);
-			}
+				ls_retrans_list_add(nbr, imsg.data, 0, 0);
+			else
+				ls_retrans_list_add(nbr, imsg.data, 0, 1);
 
-			/* send direct don't add to retransmit list */
-			send_ls_update(nbr->iface, nbr->addr, imsg.data, l);
+			lsa_cache_put(ref, nbr);
 			break;
 		case IMSG_LS_ACK:
 			/*
 			 * IMSG_LS_ACK is used in two cases:
 			 * 1. LSA was a duplicate
-			 * 2. LSA's age is MaxAge and there is no current
-			 *    instance in the DB plus no neighbor is state
+			 * 2. LS age is MaxAge and there is no current
+			 *    instance in the DB plus no neighbor in state
 			 *    Exchange or Loading
 			 */
 			nbr = nbr_find_peerid(imsg.hdr.peerid);
@@ -703,6 +713,13 @@ orig_rtr_lsa(struct area *area)
 					break;
 				}
 			}
+
+			if ((iface->flags & IFF_UP) == 0 ||
+			    iface->linkstate == LINK_STATE_DOWN ||
+			    (iface->linkstate != LINK_STATE_UP &&
+			    iface->media_type == IFT_CARP))
+				continue;
+
 			log_debug("orig_rtr_lsa: stub net, "
 			    "interface %s", iface->name);
 
@@ -727,8 +744,8 @@ orig_rtr_lsa(struct area *area)
 				if (buf_add(buf, &rtr_link, sizeof(rtr_link)))
 					fatalx("orig_rtr_lsa: buf_add failed");
 
-				log_debug("orig_rtr_lsa: virtual link, interface %s",
-				     iface->name);
+				log_debug("orig_rtr_lsa: virtual link, "
+				    "interface %s", iface->name);
 			}
 			continue;
 		case IF_TYPE_POINTOMULTIPOINT:
@@ -815,8 +832,8 @@ orig_rtr_lsa(struct area *area)
 	    &chksum, sizeof(chksum));
 
 	if (self)
-		imsg_compose(ibuf_rde, IMSG_LS_UPD,
-		    self->peerid, 0, -1, buf->buf, buf->wpos);
+		imsg_compose(ibuf_rde, IMSG_LS_UPD, self->peerid, 0,
+		    buf->buf, buf->wpos);
 	else
 		log_warnx("orig_rtr_lsa: empty area %s",
 		    inet_ntoa(area->id));
@@ -878,7 +895,7 @@ orig_net_lsa(struct iface *iface)
 	memcpy(buf_seek(buf, LS_CKSUM_OFFSET, sizeof(chksum)),
 	    &chksum, sizeof(chksum));
 
-	imsg_compose(ibuf_rde, IMSG_LS_UPD, iface->self->peerid, 0, -1,
+	imsg_compose(ibuf_rde, IMSG_LS_UPD, iface->self->peerid, 0,
 	    buf->buf, buf->wpos);
 
 	buf_free(buf);
@@ -902,7 +919,7 @@ ospfe_iface_ctl(struct ctl_conn *c, unsigned int idx)
 			if (idx == 0 || idx == iface->ifindex) {
 				ictl = if_to_ctl(iface);
 				imsg_compose(&c->ibuf, IMSG_CTL_SHOW_INTERFACE,
-				    0, 0, -1, ictl, sizeof(struct ctl_iface));
+				    0, 0, ictl, sizeof(struct ctl_iface));
 			}
 }
 
@@ -920,10 +937,10 @@ ospfe_nbr_ctl(struct ctl_conn *c)
 				if (iface->self != nbr) {
 					nctl = nbr_to_ctl(nbr);
 					imsg_compose(&c->ibuf,
-					    IMSG_CTL_SHOW_NBR, 0, 0, -1, nctl,
+					    IMSG_CTL_SHOW_NBR, 0, 0, nctl,
 					    sizeof(struct ctl_nbr));
 				}
 			}
 
-	imsg_compose(&c->ibuf, IMSG_CTL_END, 0, 0, -1, NULL, 0);
+	imsg_compose(&c->ibuf, IMSG_CTL_END, 0, 0, NULL, 0);
 }

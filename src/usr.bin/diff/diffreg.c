@@ -1,4 +1,4 @@
-/*	$OpenBSD: diffreg.c,v 1.62 2005/01/13 08:27:45 otto Exp $	*/
+/*	$OpenBSD: diffreg.c,v 1.64 2006/02/22 07:26:08 otto Exp $	*/
 
 /*
  * Copyright (C) Caldera International Inc.  2001-2002.
@@ -65,7 +65,7 @@
  */
 
 #ifndef lint
-static const char rcsid[] = "$OpenBSD: diffreg.c,v 1.62 2005/01/13 08:27:45 otto Exp $";
+static const char rcsid[] = "$OpenBSD: diffreg.c,v 1.64 2006/02/22 07:26:08 otto Exp $";
 #endif /* not lint */
 
 #include <sys/param.h>
@@ -511,8 +511,10 @@ opentemp(const char *file)
 
 	if ((tempdir = getenv("TMPDIR")) == NULL)
 		tempdir = _PATH_TMP;
-	if (snprintf(tempfile, sizeof(tempfile), "%s/diff.XXXXXXXX",
-	    tempdir) >= sizeof(tempfile)) {
+	
+	if (strlcpy(tempfile, tempdir, sizeof(tempfile)) >= sizeof(tempfile) ||
+	    strlcat(tempfile, "/diff.XXXXXXXX", sizeof(tempfile)) >=
+	    sizeof(tempfile)) {
 		close(ifd);
 		errno = ENAMETOOLONG;
 		return (NULL);
@@ -977,6 +979,8 @@ preadline(int fd, size_t len, off_t off)
 	line = emalloc(len + 1);
 	if ((nr = pread(fd, line, len, off)) < 0)
 		err(1, "preadline");
+	if (nr > 0 && line[nr-1] == '\n')
+		nr--;
 	line[nr] = '\0';
 	return (line);
 }

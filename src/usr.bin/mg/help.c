@@ -1,4 +1,4 @@
-/*	$OpenBSD: help.c,v 1.25 2005/08/09 00:53:48 kjell Exp $	*/
+/*	$OpenBSD: help.c,v 1.31 2005/12/14 07:11:44 kjell Exp $	*/
 
 /* This file is in the public domain. */
 
@@ -16,7 +16,7 @@
 #include "macro.h"
 #endif /* !NO_MACRO */
 
-static int	showall(BUFFER *, KEYMAP *, char *);
+static int	showall(struct buffer *, KEYMAP *, char *);
 static int	findbind(KEYMAP *, PF, char *, size_t);
 
 /*
@@ -31,24 +31,24 @@ desckey(int f, int n)
 	PF	 funct;
 	int	 c, m, i, num;
 	char	*pep;
-	char	 prompt[80];
+	char	 dprompt[80];
 
 #ifndef NO_MACRO
 	if (inmacro)
 		return (TRUE);	/* ignore inside keyboard macro */
 #endif /* !NO_MACRO */
-	num = strlcpy(prompt, "Describe key briefly: ", sizeof(prompt));
-	if (num >= sizeof(prompt))
-		num = sizeof(prompt) - 1;
-	pep = prompt + num;
+	num = strlcpy(dprompt, "Describe key briefly: ", sizeof(dprompt));
+	if (num >= sizeof(dprompt))
+		num = sizeof(dprompt) - 1;
+	pep = dprompt + num;
 	key.k_count = 0;
 	m = curbp->b_nmodes;
 	curmap = curbp->b_modes[m]->p_map;
 	for (;;) {
 		for (;;) {
-			ewprintf("%s", prompt);
+			ewprintf("%s", dprompt);
 			pep[-1] = ' ';
-			pep = keyname(pep, sizeof(prompt) - (pep - prompt),
+			pep = getkeyname(pep, sizeof(dprompt) - (pep - dprompt),
 			    key.k_chars[key.k_count++] = c = getkey(FALSE));
 			if ((funct = doscan(curmap, c, &curmap)) != NULL)
 				break;
@@ -104,7 +104,7 @@ int
 wallchart(int f, int n)
 {
 	int		 m;
-	BUFFER		*bp;
+	struct buffer		*bp;
 
 	bp = bfind("*help*", TRUE);
 	if (bclear(bp) != TRUE)
@@ -125,10 +125,10 @@ wallchart(int f, int n)
 }
 
 static int
-showall(BUFFER *bp, KEYMAP *map, char *prefix)
+showall(struct buffer *bp, KEYMAP *map, char *prefix)
 {
 	KEYMAP	*newmap;
-	char	 buf[80], key[16];
+	char	 buf[80], keybuf[16];
 	PF	 fun;
 	int	 c;
 
@@ -140,13 +140,13 @@ showall(BUFFER *bp, KEYMAP *map, char *prefix)
 		fun = doscan(map, c, &newmap);
 		if (fun == rescan || fun == selfinsert)
 			continue;
-		keyname(buf, sizeof(buf), c);
-		(void)snprintf(key, sizeof(key), "%s%s ", prefix, buf);
+		getkeyname(buf, sizeof(buf), c);
+		(void)snprintf(keybuf, sizeof(keybuf), "%s%s ", prefix, buf);
 		if (fun == NULL) {
-			if (showall(bp, newmap, key) == FALSE)
+			if (showall(bp, newmap, keybuf) == FALSE)
 				return (FALSE);
 		} else {
-			if (addlinef(bp, "%-16s%s", key,
+			if (addlinef(bp, "%-16s%s", keybuf,
 				    function_name(fun)) == FALSE)
 				return (FALSE);
 		}
@@ -177,12 +177,11 @@ help_help(int f, int n)
 int
 apropos_command(int f, int n)
 {
-	BUFFER		*bp;
-	LIST		*fnames, *el;
-	char		 string[32], *bufp;
+	struct buffer		*bp;
+	struct list		*fnames, *el;
+	char		 string[32];
 
-	if ((bufp = eread("apropos: ", string, sizeof(string),
-	   EFNUL | EFNEW)) == NULL)
+	if (eread("apropos: ", string, sizeof(string), EFNUL | EFNEW) == NULL)
 		return (ABORT);
 	/* FALSE means we got a 0 character string, which is fine */
 	bp = bfind("*help*", TRUE);
@@ -214,20 +213,20 @@ findbind(KEYMAP *map, PF fun, char *buf, size_t len)
 {
 	KEYMAP	*newmap;
 	PF	 nfun;
-	char	 buf2[16], key[16];
+	char	 buf2[16], keybuf[16];
 	int	 c;
 
 	/* XXX - 256 ? */
 	for (c = 0; c < 256; c++) {
 		nfun = doscan(map, c, &newmap);
 		if (nfun == fun) {
-			keyname(buf, len, c);
+			getkeyname(buf, len, c);
 			return (TRUE);
 		}
 		if (nfun == NULL) {
 			if (findbind(newmap, fun, buf2, sizeof(buf2)) == TRUE) {
-				keyname(key, sizeof(key), c);
-				(void)snprintf(buf, len, "%s %s", key, buf2);
+				getkeyname(keybuf, sizeof(keybuf), c);
+				(void)snprintf(buf, len, "%s %s", keybuf, buf2);
 				return (TRUE);
 			}
 		}

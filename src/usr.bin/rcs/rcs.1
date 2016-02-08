@@ -1,4 +1,4 @@
-.\"	$OpenBSD: rcs.1,v 1.1 2005/04/15 15:46:21 deraadt Exp $
+.\"	$OpenBSD: rcs.1,v 1.20 2005/12/14 10:34:48 xsa Exp $
 .\"
 .\" Copyright (c) 2005 Jean-Francois Brousseau <jfb@openbsd.org>
 .\" All rights reserved.
@@ -31,11 +31,23 @@
 .Nd RCS file management program
 .Sh SYNOPSIS
 .Nm
-.Op Fl hiLMUV
-.Op Fl a Ar users
-.Op Fl b Op Ar rev
-.Op Fl e Op Ar users
-.Ar file Op Ar ...
+.Op Fl ehIiLMqTUV
+.Op Fl A Ns Ar oldfile
+.Op Fl a Ns Ar users
+.Op Fl b Ns Op Ar rev
+.Op Fl c Ns Ar string
+.Op Fl e Ns Op Ar users
+.Op Fl k Ns Ar mode
+.Oo Fl m Ns Ar rev Ns :
+.Ar msg Oc
+.Op Fl o Ns Ar rev
+.Oo Fl s Ns Ar state Ns
+.Op : Ns Ar rev Oc
+.Oo Fl t Ns Ar file Ns \*(Ba
+.Ar str Oc
+.Op Fl x Ns Ar suffixes
+.Op Fl z Ns Ar tz
+.Ar file ...
 .Sh DESCRIPTION
 The
 .Nm
@@ -44,11 +56,21 @@ files.
 .Pp
 The following options are supported:
 .Bl -tag -width "-e usersXX"
-.It Fl a Ar users
+.It Fl A Ns Ar oldfile
+Append the access list of
+.Ar oldfile
+to the access list of the RCS files.
+.It Fl a Ns Ar users
 Add the usernames specified in the comma-separated list
 .Ar users
 to the access list of the RCS files.
-.It Fl e Op Ar users
+.It Fl b Ns Op Ar rev
+Set the default branch to
+.Ar rev .
+.It Fl c Ns Ar string
+Set comment leader to
+.Ar string .
+.It Fl e Ns Op Ar users
 Remove the usernames specified in the comma-separated list
 .Ar users
 from the access list of the RCS files.
@@ -57,9 +79,16 @@ If
 is not specified, all users are removed from the access list.
 .It Fl h
 Display the program's usage and exit.
+.It Fl I
+Interactive mode.
 .It Fl i
-Create the RCS files specified as arguments.
+Create and initialize a new RCS file.
+If the RCS file has no path prefix, try to first create it in the
+.Pa ./RCS
+subdirectory or, if that fails, in the current directory.
 Files created this way contain no revision.
+.It Fl k Ns Ar mode
+Specify the keyword substitution mode.
 .It Fl L
 Enable strict locking on the RCS files.
 See
@@ -74,6 +103,70 @@ to
 .Nm
 .Fl u .
 This option is currently ignored.
+.It Fl m Ns Ar rev : Ns Ar msg
+Replace revision
+.Ar rev Ns 's
+log message with
+.Ar msg .
+.It Fl o Ns Ar rev
+Delete one or more revisions.
+The specifications of the values or revisions are as follows:
+.Bl -tag -width Ds
+.It rev
+Specific revision.
+.It rev1:rev2
+Delete all revisions of a branch between
+.Ar rev1
+and
+.Ar rev2 .
+.It rev1::rev2
+Delete all revisions of a branch between
+.Ar rev1
+and
+.Ar rev2
+without deleting revisions
+.Ar rev1
+and
+.Ar rev2 .
+.It :rev
+Delete all revisions of the branch until revision
+.Ar rev .
+.It rev:
+Delete all revisions of the branch from revision
+.Ar rev
+until the last revision of the branch.
+.El
+.It Fl q
+Be quiet about reporting.
+.Sm off
+.It Fl s Ar state Op : Ar rev
+.Sm on
+Sets the state of revision
+.Ar rev
+to the identifier
+.Ar state .
+The specified value may not contain a space character.
+If
+.Ar rev
+is not specified, the latest revision of the default branch
+is assumed.
+.It Fl T
+Preserve the modification time of RCS files.
+.Sm off
+.It Fl t Ar file \*(Ba Ar str
+.Sm on
+Change the descriptive text.
+The descriptive text is taken from the
+.Ar file
+specified as argument or from the string
+.Ar str
+given as argument if it is preceded by the
+.Sq -
+character.
+If no argument is used, the descriptive text is taken from standard input
+terminated by end-of-file or by a line containing the
+.Sq \&.
+character by itself.
 .It Fl U
 Disable strict locking on the RCS files.
 See
@@ -81,6 +174,14 @@ See
 for more details on locking.
 .It Fl V
 Print the program's version string and exit.
+.It Fl x Ns Ar suffixes
+Specifies the suffixes for RCS files.
+Suffixes should be separated by the
+.Sq /
+character.
+.It Fl z Ns Ar tz
+No effect.
+For compatibility.
 .El
 .Sh ENVIRONMENT
 .Bl -tag -width RCSINIT
@@ -91,6 +192,8 @@ are prepended to the argument list.
 .Sh SEE ALSO
 .Xr ci 1 ,
 .Xr co 1 ,
+.Xr ident 1 ,
 .Xr rcsclean 1 ,
 .Xr rcsdiff 1 ,
-.Xr rcsfile 5
+.Xr rcsmerge 1 ,
+.Xr rlog 1

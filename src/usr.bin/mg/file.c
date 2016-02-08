@@ -1,4 +1,4 @@
-/*	$OpenBSD: file.c,v 1.38 2005/08/09 00:53:48 kjell Exp $	*/
+/*	$OpenBSD: file.c,v 1.50 2005/12/20 06:17:36 kjell Exp $	*/
 
 /* This file is in the public domain. */
 
@@ -6,8 +6,9 @@
  *	File commands.
  */
 
-#include <libgen.h>
 #include "def.h"
+
+#include <libgen.h>
 
 /*
  * Insert a file into the current buffer.  Real easy - just call the
@@ -40,11 +41,13 @@ fileinsert(int f, int n)
 int
 filevisit(int f, int n)
 {
-	BUFFER	*bp;
+	struct buffer	*bp;
 	char	 fname[NFILEN], *bufp, *adjf, *slash;
+	int	 status;
 
 	if (curbp->b_fname && curbp->b_fname[0] != '\0') {
-		strlcpy(fname, curbp->b_fname, sizeof(fname));
+		if (strlcpy(fname, curbp->b_fname, sizeof(fname)) >= sizeof(fname))
+			return (FALSE);
 		if ((slash = strrchr(fname, '/')) != NULL) {
 			*(slash + 1) = '\0';
 		}
@@ -66,9 +69,7 @@ filevisit(int f, int n)
 	curbp = bp;
 	if (showbuffer(bp, curwp, WFHARD) != TRUE)
 		return (FALSE);
-	if (bp->b_fname[0] == 0) {
-		int status;
-
+	if (bp->b_fname[0] == '\0') {
 		if ((status = readin(adjf)) != TRUE)
 			killbuffer(bp);
 		return (status);
@@ -82,15 +83,17 @@ filevisit(int f, int n)
  * buffer is killed before the switch. If the kill fails, or is aborted,
  * revert to the original file.
  */
+/* ARGSUSED */
 int
 filevisitalt(int f, int n)
 {
-	BUFFER	*bp;
+	struct buffer	*bp;
 	char	 fname[NFILEN], *bufp, *adjf, *slash;
 	int	 status;
 
 	if (curbp->b_fname && curbp->b_fname[0] != '\0') {
-		strlcpy(fname, curbp->b_fname, sizeof(fname));
+		if (strlcpy(fname, curbp->b_fname, sizeof(fname)) >= sizeof(fname))
+			return (FALSE);
 		if ((slash = strrchr(fname, '/')) != NULL) {
 			*(slash + 1) = '\0';
 		}
@@ -144,9 +147,10 @@ filevisitro(int f, int n)
 int
 poptofile(int f, int n)
 {
-	BUFFER	*bp;
-	MGWIN	*wp;
+	struct buffer	*bp;
+	struct mgwin	*wp;
 	char	 fname[NFILEN], *adjf, *bufp;
+	int	 status;
 
 	if ((bufp = eread("Find file in other window: ", fname, NFILEN,
 	    EFNEW | EFCR | EFFILE)) == NULL)
@@ -162,9 +166,7 @@ poptofile(int f, int n)
 		return (FALSE);
 	curbp = bp;
 	curwp = wp;
-	if (bp->b_fname[0] == 0) {
-		int status;
-
+	if (bp->b_fname[0] == '\0') {
 		if ((status = readin(adjf)) != TRUE)
 			killbuffer(bp);
 		return (status);
@@ -176,12 +178,17 @@ poptofile(int f, int n)
  * Given a file name, either find the buffer it uses, or create a new
  * empty buffer to put it in.
  */
-BUFFER *
-findbuffer(char *fname)
+struct buffer *
+findbuffer(char *fn)
 {
-	BUFFER		*bp;
-	char		 bname[NBUFN];
+	struct buffer		*bp;
+	char		 bname[NBUFN], fname[NBUFN];
 	unsigned int	 count, remain, i;
+
+	if (strlcpy(fname, fn, sizeof(fname)) >= sizeof(fname)) {
+		ewprintf("filename too long");
+		return (NULL);
+	}
 
 	for (bp = bheadp; bp != NULL; bp = bp->b_bufp) {
 		if (strcmp(bp->b_fname, fname) == 0)
@@ -189,7 +196,7 @@ findbuffer(char *fname)
 	}
 	i = strlcpy(bname, basename(fname), sizeof(bname));
 	if (i >= sizeof(bname))
-		return NULL;  
+		return (NULL);
 	remain = sizeof(bname) - i;
 	for (count = 2; bfind(bname, FALSE) != NULL; count++)
 		snprintf(&bname[i], remain, "<%d>", count);
@@ -206,8 +213,8 @@ findbuffer(char *fname)
 int
 readin(char *fname)
 {
-	MGWIN	*wp;
-	int	 status, i;
+	struct mgwin	*wp;
+	int	 status, i, ro = FALSE;
 	PF	*ael;
 
 	/* might be old */
@@ -238,8 +245,15 @@ readin(char *fname)
 		}
 	}
 
-	/* We need to set the READONLY flag after we insert the file. */
+	/*
+	 * We need to set the READONLY flag after we insert the file,
+	 * unless the file is a directory.
+	 */
 	if (access(fname, W_OK) && errno != ENOENT)
+		ro = TRUE;
+	if (fisdir(fname) == TRUE)
+		ro = TRUE;
+	if (ro == TRUE)
 		curbp->b_flag |= BFREADONLY;
 	else
 		curbp->b_flag &=~ BFREADONLY;
@@ -258,28 +272,30 @@ readin(char *fname)
  */
 
 /*
- * Insert a file in the current buffer, after dot.  Set mark at the end of
- * the text inserted; point at the beginning.  Return a standard status.
- * Print a summary (lines read, error message) out as well.  Unless the
- * NO_BACKUP conditional is set, this routine also does the read end of
- * backup processing.  The BFBAK flag, if set in a buffer, says that a
- * backup should be taken.  It is set when a file is read in, but not on
- * a new file.  (You don't need to make a backup copy of nothing.)
+ * Insert a file in the current buffer, after dot. If file is a directory,
+ * and 'replacebuf' is TRUE, invoke dired mode, else die with an error.
+ * If file is a regular file, set mark at the end of the text inserted;
+ * point at the beginning.  Return a standard status. Print a summary
+ * (lines read, error message) out as well. This routine also does the
+ * read end of backup processing.  The BFBAK flag, if set in a buffer,
+ * says that a backup should be taken.  It is set when a file is read in,
+ * but not on a new file. You don't need to make a backup copy of nothing.
  */
+
 static char	*line = NULL;
 static int	linesize = 0;
 
 int
-insertfile(char *fname, char *newname, int needinfo)
+insertfile(char *fname, char *newname, int replacebuf)
 {
-	BUFFER	*bp;
-	LINE	*lp1, *lp2;
-	LINE	*olp;			/* line we started at */
-	MGWIN	*wp;
+	struct buffer	*bp;
+	struct line	*lp1, *lp2;
+	struct line	*olp;			/* line we started at */
+	struct mgwin	*wp;
 	int	 nbytes, s, nline, siz, x = -1, x2;
 	int	 opos;			/* offset we started at */
 
-	if (needinfo)
+	if (replacebuf == TRUE)
 		x = undo_enable(FALSE);
 
 	lp1 = NULL;
@@ -296,7 +312,7 @@ insertfile(char *fname, char *newname, int needinfo)
 		(void)strlcpy(bp->b_fname, newname, sizeof bp->b_fname);
 
 	/* hard file open */
-	if ((s = ffropen(fname, needinfo ? bp : NULL)) == FIOERR)
+	if ((s = ffropen(fname, (replacebuf == TRUE) ? bp : NULL)) == FIOERR)
 		goto out;
 	if (s == FIOFNF) {
 		/* file not found */
@@ -305,6 +321,19 @@ insertfile(char *fname, char *newname, int needinfo)
 		else
 			ewprintf("(File not found)");
 		goto out;
+	} else if (s == FIODIR) {
+		/* file was a directory */
+		if (replacebuf == FALSE) {
+			ewprintf("Cannot insert: file is a directory, %s",
+			    fname);
+			goto cleanup;
+		}
+		killbuffer(bp);
+		if ((bp = dired_(fname)) == NULL)
+			return (FALSE);
+		undo_enable(x);
+		curbp = bp;
+		return (showbuffer(bp, curwp, WFHARD | WFMODE));
 	}
 	opos = curwp->w_doto;
 
@@ -328,7 +357,7 @@ doneread:
 		switch (s) {
 		case FIOSUC:
 			++nline;
-			/* and continue */
+			/* FALLTHRU */
 		case FIOEOF:
 			/* the last line of the file */
 			if ((lp1 = lalloc(nbytes)) == NULL) {
@@ -395,14 +424,10 @@ endoffile:
 	curwp->w_doto = opos;
 	if (olp == curbp->b_linep)
 		curwp->w_dotp = lforw(olp);
-#ifndef NO_BACKUP
 	if (newname != NULL)
 		bp->b_flag |= BFCHG | BFBAK;	/* Need a backup.	 */
 	else
 		bp->b_flag |= BFCHG;
-#else /* !NO_BACKUP */
-	bp->b_flag |= BFCHG;
-#endif /* !NO_BACKUP */
 	/*
 	 * If the insert was at the end of buffer, set lp1 to the end of
 	 * buffer line, and lp2 to the beginning of the newly inserted text.
@@ -431,10 +456,10 @@ out:		lp2 = NULL;
 			}
 		}
 	}
-	if (x != -1)
-		undo_enable(x);
+cleanup:
+	undo_enable(x);
 
-	/* return false if error */
+	/* return FALSE if error */
 	return (s != FIOERR);
 }
 
@@ -470,14 +495,9 @@ filewrite(int f, int n)
 			p++;
 		else
 			p = curbp->b_fname;
-		if (curbp->b_bname)
-			free((char *)curbp->b_bname);
+		free(curbp->b_bname);
 		curbp->b_bname = strdup(p);
-#ifndef NO_BACKUP
 		curbp->b_flag &= ~(BFBAK | BFCHG);
-#else /* !NO_BACKUP */
-		curbp->b_flag &= ~BFCHG;
-#endif /* !NO_BACKUP */
 		upmodes(curbp);
 	}
 	return (s);
@@ -486,12 +506,10 @@ filewrite(int f, int n)
 /*
  * Save the contents of the current buffer back into its associated file.
  */
-#ifndef NO_BACKUP
 #ifndef	MAKEBACKUP
 #define	MAKEBACKUP TRUE
 #endif /* !MAKEBACKUP */
 static int	makebackup = MAKEBACKUP;
-#endif /* !NO_BACKUP */
 
 /* ARGSUSED */
 int
@@ -509,7 +527,7 @@ filesave(int f, int n)
  * the value of makebackup.
  */
 int
-buffsave(BUFFER *bp)
+buffsave(struct buffer *bp)
 {
 	int	 s;
 
@@ -525,7 +543,6 @@ buffsave(BUFFER *bp)
 		return (FALSE);
 	}
 
-#ifndef NO_BACKUP
 	if (makebackup && (bp->b_flag & BFBAK)) {
 		s = fbackupfile(bp->b_fname);
 		/* hard error */
@@ -536,19 +553,13 @@ buffsave(BUFFER *bp)
 		    (s = eyesno("Backup error, save anyway")) != TRUE)
 			return (s);
 	}
-#endif /* !NO_BACKUP */
 	if ((s = writeout(bp, bp->b_fname)) == TRUE) {
-#ifndef NO_BACKUP
 		bp->b_flag &= ~(BFCHG | BFBAK);
-#else /* !NO_BACKUP */
-		bp->b_flag &= ~BFCHG;
-#endif /* !NO_BACKUP */
 		upmodes(bp);
 	}
 	return (s);
 }
 
-#ifndef NO_BACKUP
 /*
  * Since we don't have variables (we probably should) this is a command
  * processor for changing the value of the make backup flag.  If no argument
@@ -567,7 +578,6 @@ makebkfile(int f, int n)
 	ewprintf("Backup files %sabled", makebackup ? "en" : "dis");
 	return (TRUE);
 }
-#endif /* !NO_BACKUP */
 
 /*
  * NB: bp is passed to both ffwopen and ffclose because some
@@ -584,7 +594,7 @@ makebkfile(int f, int n)
  * "fileio.c" package. Most of the grief is checking of some sort.
  */
 int
-writeout(BUFFER *bp, char *fn)
+writeout(struct buffer *bp, char *fn)
 {
 	int	 s;
 
@@ -608,9 +618,9 @@ writeout(BUFFER *bp, char *fn)
  * mode line updated.
  */
 void
-upmodes(BUFFER *bp)
+upmodes(struct buffer *bp)
 {
-	MGWIN	*wp;
+	struct mgwin	*wp;
 
 	for (wp = wheadp; wp != NULL; wp = wp->w_wndp)
 		if (bp == NULL || curwp->w_bufp == bp)

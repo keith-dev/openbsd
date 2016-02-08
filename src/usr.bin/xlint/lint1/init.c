@@ -1,4 +1,4 @@
-/*	$OpenBSD: init.c,v 1.4 2002/02/16 21:27:59 millert Exp $	*/
+/*	$OpenBSD: init.c,v 1.7 2005/11/29 20:15:04 cloder Exp $	*/
 /*	$NetBSD: init.c,v 1.4 1995/10/02 17:21:37 jpo Exp $	*/
 
 /*
@@ -33,7 +33,7 @@
  */
 
 #ifndef lint
-static char rcsid[] = "$OpenBSD: init.c,v 1.4 2002/02/16 21:27:59 millert Exp $";
+static char rcsid[] = "$OpenBSD: init.c,v 1.7 2005/11/29 20:15:04 cloder Exp $";
 #endif
 
 #include <stdlib.h>
@@ -67,7 +67,7 @@ static	int	strginit(tnode_t *);
  * which is to be initialized on it.
  */
 void
-prepinit()
+prepinit(void)
 {
 	istk_t	*istk;
 
@@ -94,7 +94,7 @@ prepinit()
 }
 
 static void
-popi2()
+popi2(void)
 {
 	istk_t	*istk;
 	sym_t	*m;
@@ -125,8 +125,7 @@ popi2()
 }
 
 static void
-popinit(brace)
-	int	brace;
+popinit(int brace)
 {
 	if (brace) {
 		/*
@@ -151,7 +150,7 @@ popinit(brace)
 }
 
 static void
-pushinit()
+pushinit(void)
 {
 	istk_t	*istk;
 	int	cnt;
@@ -236,7 +235,7 @@ pushinit()
 }
 
 static void
-testinit()
+testinit(void)
 {
 	istk_t	*istk;
 
@@ -267,8 +266,7 @@ testinit()
 }
 
 static void
-nextinit(brace)
-	int	brace;
+nextinit(int brace)
 {
 	if (!brace) {
 		if (initstk->i_type == NULL &&
@@ -304,7 +302,7 @@ nextinit(brace)
 }
 
 void
-initlbr()
+initlbr(void)
 {
 	if (initerr)
 		return;
@@ -326,7 +324,7 @@ initlbr()
 }
 
 void
-initrbr()
+initrbr(void)
 {
 	if (initerr)
 		return;
@@ -335,8 +333,7 @@ initrbr()
 }
 
 void
-mkinit(tn)
-	tnode_t	*tn;
+mkinit(tnode_t *tn)
 {
 	ptrdiff_t offs;
 	sym_t	*sym;
@@ -351,7 +348,7 @@ mkinit(tn)
 	sc = initsym->s_scl;
 
 	/*
-	 * Do not test for automatic aggregat initialisation. If the
+	 * Do not test for automatic aggregate initialisation. If the
 	 * initalizer starts with a brace we have the warning already.
 	 * If not, an error will be printed that the initializer must
 	 * be enclosed by braces.
@@ -413,7 +410,7 @@ mkinit(tn)
 	tmem = tsave();
 	expr(tn, 1, 0);
 	trestor(tmem);
-	
+
 	if (isityp(lt) && ln->tn_type->t_isfield && !isityp(rt)) {
 		/*
 		 * Bit-fields can be initialized in trad. C only by integer
@@ -447,8 +444,7 @@ mkinit(tn)
 
 
 static int
-strginit(tn)
-	tnode_t	*tn;
+strginit(tnode_t *tn)
 {
 	tspec_t	t;
 	istk_t	*istk;

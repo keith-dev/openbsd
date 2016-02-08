@@ -1,4 +1,4 @@
-.\" $OpenBSD: bgpd.8,v 1.13 2004/07/13 23:01:02 jmc Exp $
+.\" $OpenBSD: bgpd.8,v 1.16 2006/01/24 17:55:09 jmc Exp $
 .\"
 .\" Copyright (c) 2003, 2004 Henning Brauer <henning@openbsd.org>
 .\"
@@ -28,6 +28,7 @@
 .Fl D Ar macro Ns = Ns Ar value Oc
 .Xc
 .Op Fl f Ar file
+.Op Fl r Ar path
 .Ek
 .Sh DESCRIPTION
 .Nm
@@ -94,6 +95,13 @@ instead of the default
 .It Fl n
 Configtest mode.
 Only check the configuration file for validity.
+.It Fl r Ar path
+Open a second, restricted, control socket that
+.Xr bgpctl 8
+can use.
+Only
+.Em show
+requests are allowed on this socket.
 .It Fl v
 Produce more verbose output.
 .El
@@ -121,11 +129,6 @@ configuration file
 .%R RFC 2385
 .%T "Protection of BGP Sessions via the TCP MD5 Signature Option"
 .%D August 1998
-.Re
-.Rs
-.%R RFC 2439
-.%T "BGP Route Flap Damping"
-.%D November 1998
 .Re
 .Rs
 .%R RFC 2858

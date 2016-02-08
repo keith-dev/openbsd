@@ -1,4 +1,4 @@
-/*	$OpenBSD: mpool.c,v 1.14 2005/08/05 13:03:00 espie Exp $	*/
+/*	$OpenBSD: mpool.c,v 1.18 2006/01/25 14:40:03 millert Exp $	*/
 
 /*-
  * Copyright (c) 1990, 1993, 1994
@@ -159,6 +159,7 @@ mpool_delete(MPOOL *mp, void *page)
 	CIRCLEQ_REMOVE(&mp->lqh, bp, q);
 
 	free(bp);
+	mp->curcache--;
 	return (RET_SUCCESS);
 }	
 	
@@ -209,14 +210,13 @@ mpool_get(MPOOL *mp, pgno_t pgno,
 		return (NULL);
 
 	/* Read in the contents. */
-#ifdef STATISTICS
-	++mp->pageread;
-#endif
 	off = mp->pagesize * pgno;
 	if ((nr = pread(mp->fd, bp->page, mp->pagesize, off)) != mp->pagesize) {
 		switch (nr) {
 		case -1:
 			/* errno is set for us by pread(). */
+			free(bp);
+			mp->curcache--;
 			return (NULL);
 		case 0:
 			/*
@@ -224,12 +224,18 @@ mpool_get(MPOOL *mp, pgno_t pgno,
 			 * new page.
 			 */
 			memset(bp->page, 0, mp->pagesize);
+			break;
 		default:
 			/* A partial read is definitely bad. */
+			free(bp);
+			mp->curcache--;
 			errno = EINVAL;
 			return (NULL);
 		}
 	}
+#ifdef STATISTICS
+	++mp->pageread;
+#endif
 
 	/* Set the page number, pin the page. */
 	bp->pgno = pgno;
@@ -289,8 +295,9 @@ mpool_close(MPOOL *mp)
 	BKT *bp;
 
 	/* Free up any space allocated to the lru pages. */
-	while ((bp = mp->lqh.cqh_first) != (void *)&mp->lqh) {
-		CIRCLEQ_REMOVE(&mp->lqh, mp->lqh.cqh_first, q);
+	while (!CIRCLEQ_EMPTY(&mp->lqh)) {
+		bp = CIRCLEQ_FIRST(&mp->lqh);
+		CIRCLEQ_REMOVE(&mp->lqh, bp, q);
 		free(bp);
 	}
 
@@ -309,8 +316,7 @@ mpool_sync(MPOOL *mp)
 	BKT *bp;
 
 	/* Walk the lru chain, flushing any dirty pages to disk. */
-	for (bp = mp->lqh.cqh_first;
-	    bp != (void *)&mp->lqh; bp = bp->q.cqe_next)
+	CIRCLEQ_FOREACH(bp, &mp->lqh, q)
 		if (bp->flags & MPOOL_DIRTY &&
 		    mpool_write(mp, bp) == RET_ERROR)
 			return (RET_ERROR);
@@ -339,8 +345,7 @@ mpool_bkt(MPOOL *mp)
 	 * off any lists.  If we don't find anything we grow the cache anyway.
 	 * The cache never shrinks.
 	 */
-	for (bp = mp->lqh.cqh_first;
-	    bp != (void *)&mp->lqh; bp = bp->q.cqe_next)
+	CIRCLEQ_FOREACH(bp, &mp->lqh, q)
 		if (!(bp->flags & MPOOL_PINNED)) {
 			/* Flush if dirty. */
 			if (bp->flags & MPOOL_DIRTY &&
@@ -421,7 +426,7 @@ mpool_look(MPOOL *mp, pgno_t pgno)
 	BKT *bp;
 
 	head = &mp->hqh[HASHKEY(pgno)];
-	for (bp = head->cqh_first; bp != (void *)head; bp = bp->hq.cqe_next)
+	CIRCLEQ_FOREACH(bp, head, hq)
 		if ((bp->pgno == pgno) &&
 			((bp->flags & MPOOL_INUSE) == MPOOL_INUSE)) {
 #ifdef STATISTICS
@@ -465,8 +470,7 @@ mpool_stat(MPOOL *mp)
 
 	sep = "";
 	cnt = 0;
-	for (bp = mp->lqh.cqh_first;
-	    bp != (void *)&mp->lqh; bp = bp->q.cqe_next) {
+	CIRCLEQ_FOREACH(bp, &mp->lqh, q) {
 		(void)fprintf(stderr, "%s%d", sep, bp->pgno);
 		if (bp->flags & MPOOL_DIRTY)
 			(void)fprintf(stderr, "d");

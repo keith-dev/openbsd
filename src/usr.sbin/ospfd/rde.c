@@ -1,4 +1,4 @@
-/*	$OpenBSD: rde.c,v 1.28 2005/08/08 12:22:48 claudio Exp $ */
+/*	$OpenBSD: rde.c,v 1.40 2006/02/21 13:02:59 claudio Exp $ */
 
 /*
  * Copyright (c) 2004, 2005 Claudio Jeker <claudio@openbsd.org>
@@ -46,6 +46,7 @@ void		 rde_dispatch_parent(int, short, void *);
 void		 rde_send_summary(pid_t);
 void		 rde_send_summary_area(struct area *, pid_t);
 void		 rde_nbr_init(u_int32_t);
+void		 rde_nbr_free(void);
 struct rde_nbr	*rde_nbr_find(u_int32_t);
 struct rde_nbr	*rde_nbr_new(u_int32_t, struct rde_nbr *);
 void		 rde_nbr_del(struct rde_nbr *);
@@ -55,8 +56,6 @@ int		 rde_req_list_exists(struct rde_nbr *, struct lsa_hdr *);
 void		 rde_req_list_del(struct rde_nbr *, struct lsa_hdr *);
 void		 rde_req_list_free(struct rde_nbr *);
 
-int		 rde_redistribute(struct kroute *);
-void		 rde_update_redistribute(int);
 struct lsa	*rde_asext_get(struct kroute *);
 struct lsa	*rde_asext_put(struct kroute *);
 
@@ -156,7 +155,7 @@ rde(struct ospfd_conf *xconf, int pipe_parent2rde[2], int pipe_ospfe2rde[2],
 	    ibuf_main->handler, ibuf_main);
 	event_add(&ibuf_main->ev, NULL);
 
-	evtimer_set(&rdeconf->spf_timer, spf_timer, rdeconf);
+	evtimer_set(&rdeconf->ev, spf_timer, rdeconf);
 	cand_list_init();
 	rt_init();
 
@@ -171,16 +170,23 @@ rde(struct ospfd_conf *xconf, int pipe_parent2rde[2], int pipe_ospfe2rde[2],
 void
 rde_shutdown(void)
 {
+	struct area	*a;
+
 	stop_spf_timer(rdeconf);
 	cand_list_clr();
 	rt_clear();
 
-	msgbuf_write(&ibuf_ospfe->w);
+	while ((a = LIST_FIRST(&rdeconf->area_list)) != NULL) {
+		LIST_REMOVE(a, entry);
+		area_del(a);
+	}
+	rde_nbr_free();
+
 	msgbuf_clear(&ibuf_ospfe->w);
 	free(ibuf_ospfe);
-	msgbuf_write(&ibuf_main->w);
 	msgbuf_clear(&ibuf_main->w);
 	free(ibuf_main);
+	free(rdeconf);
 
 	log_info("route decision engine exiting");
 	_exit(0);
@@ -190,14 +196,14 @@ rde_shutdown(void)
 int
 rde_imsg_compose_parent(int type, pid_t pid, void *data, u_int16_t datalen)
 {
-	return (imsg_compose(ibuf_main, type, 0, pid, -1, data, datalen));
+	return (imsg_compose(ibuf_main, type, 0, pid, data, datalen));
 }
 
 int
 rde_imsg_compose_ospfe(int type, u_int32_t peerid, pid_t pid, void *data,
     u_int16_t datalen)
 {
-	return (imsg_compose(ibuf_ospfe, type, peerid, pid, -1, data, datalen));
+	return (imsg_compose(ibuf_ospfe, type, peerid, pid, data, datalen));
 }
 
 void
@@ -209,6 +215,7 @@ rde_dispatch_imsg(int fd, short event, void *bula)
 	struct ls_req_hdr	 req_hdr;
 	struct lsa_hdr		 lsa_hdr, *db_hdr;
 	struct rde_nbr		 rn, *nbr;
+	struct timespec		 tp;
 	struct lsa		*lsa;
 	struct area		*area;
 	struct vertex		*v;
@@ -233,7 +240,8 @@ rde_dispatch_imsg(int fd, short event, void *bula)
 		fatalx("unknown event");
 	}
 
-	now = time(NULL);
+	clock_gettime(CLOCK_MONOTONIC, &tp);
+	now = tp.tv_sec;
 
 	for (;;) {
 		if ((n = imsg_get(ibuf, &imsg)) == -1)
@@ -265,8 +273,12 @@ rde_dispatch_imsg(int fd, short event, void *bula)
 				fatalx("rde_dispatch_imsg: "
 				    "neighbor does not exist");
 
-			nbr->state = state;
 
+			if (state != nbr->state && (nbr->state & NBR_STA_FULL ||
+			    state & NBR_STA_FULL))
+				area_track(nbr->area, state);
+
+			nbr->state = state;
 			if (nbr->state & NBR_STA_FULL)
 				rde_req_list_free(nbr);
 			break;
@@ -279,7 +291,7 @@ rde_dispatch_imsg(int fd, short event, void *bula)
 			lsa_snap(nbr->area, imsg.hdr.peerid);
 
 			imsg_compose(ibuf_ospfe, IMSG_DB_END, imsg.hdr.peerid,
-			    0, -1, NULL, 0);
+			    0, NULL, 0);
 			break;
 		case IMSG_DD:
 			nbr = rde_nbr_find(imsg.hdr.peerid);
@@ -302,13 +314,13 @@ rde_dispatch_imsg(int fd, short event, void *bula)
 
 				if (lsa_newer(&lsa_hdr, db_hdr) > 0) {
 					/*
-					 * only request LSA's that are
+					 * only request LSAs that are
 					 * newer or missing
 					 */
 					rde_req_list_add(nbr, &lsa_hdr);
 					imsg_compose(ibuf_ospfe, IMSG_DD,
-					    imsg.hdr.peerid, 0, -1,
-					    &lsa_hdr, sizeof(lsa_hdr));
+					    imsg.hdr.peerid, 0, &lsa_hdr,
+					    sizeof(lsa_hdr));
 				}
 			}
 			if (l != 0)
@@ -317,7 +329,7 @@ rde_dispatch_imsg(int fd, short event, void *bula)
 				    "packet", imsg.hdr.peerid);
 
 			imsg_compose(ibuf_ospfe, IMSG_DD_END, imsg.hdr.peerid,
-			    0, -1, NULL, 0);
+			    0, NULL, 0);
 			break;
 		case IMSG_LS_REQ:
 			nbr = rde_nbr_find(imsg.hdr.peerid);
@@ -335,12 +347,12 @@ rde_dispatch_imsg(int fd, short event, void *bula)
 				    ntohl(req_hdr.type), req_hdr.ls_id,
 				    req_hdr.adv_rtr)) == NULL) {
 					imsg_compose(ibuf_ospfe, IMSG_LS_BADREQ,
-					    imsg.hdr.peerid, 0, -1, NULL, 0);
+					    imsg.hdr.peerid, 0, NULL, 0);
 					continue;
 				}
 				imsg_compose(ibuf_ospfe, IMSG_LS_UPD,
-				    imsg.hdr.peerid, 0, -1,
-				    v->lsa, ntohs(v->lsa->hdr.len));
+				    imsg.hdr.peerid, 0, v->lsa,
+				    ntohs(v->lsa->hdr.len));
 			}
 			if (l != 0)
 				log_warnx("rde_dispatch_imsg: peerid %lu, "
@@ -359,8 +371,10 @@ rde_dispatch_imsg(int fd, short event, void *bula)
 			memcpy(lsa, imsg.data, imsg.hdr.len - IMSG_HEADER_SIZE);
 
 			if (!lsa_check(nbr, lsa,
-			    imsg.hdr.len - IMSG_HEADER_SIZE))
+			    imsg.hdr.len - IMSG_HEADER_SIZE)) {
+				free(lsa);
 				break;
+			}
 
 			v = lsa_find(nbr->area, lsa->hdr.type, lsa->hdr.ls_id,
 				    lsa->hdr.adv_rtr);
@@ -371,6 +385,7 @@ rde_dispatch_imsg(int fd, short event, void *bula)
 
 			if (nbr->self) {
 				lsa_merge(nbr, lsa, v);
+				/* lsa_merge frees the right lsa */
 				break;
 			}
 
@@ -378,43 +393,64 @@ rde_dispatch_imsg(int fd, short event, void *bula)
 			if (r > 0) {
 				/* new LSA newer than DB */
 				if (v && v->flooded &&
-				    v->changed + MIN_LS_ARRIVAL >= now)
+				    v->changed + MIN_LS_ARRIVAL >= now) {
+					free(lsa);
 					break;
+				}
 				if (!(self = lsa_self(nbr, lsa, v)))
 					lsa_add(nbr, lsa);
 
 				rde_req_list_del(nbr, &lsa->hdr);
 				/* flood and perhaps ack LSA */
 				imsg_compose(ibuf_ospfe, IMSG_LS_FLOOD,
-				    imsg.hdr.peerid, 0, -1,
-				    lsa, ntohs(lsa->hdr.len));
+				    imsg.hdr.peerid, 0, lsa,
+				    ntohs(lsa->hdr.len));
 
 				/* reflood self originated LSA */
 				if (self && v)
 					imsg_compose(ibuf_ospfe, IMSG_LS_FLOOD,
-					    v->nbr->peerid, 0, -1,
-					    v->lsa, ntohs(v->lsa->hdr.len));
-			} else if (rde_req_list_exists(nbr, &lsa->hdr)) {
-				imsg_compose(ibuf_ospfe, IMSG_LS_BADREQ,
-				    imsg.hdr.peerid, 0, -1, NULL, 0);
+					    v->nbr->peerid, 0, v->lsa,
+					    ntohs(v->lsa->hdr.len));
+				/* lsa not added so free it */
+				if (self)
+					free(lsa);
 			} else if (r < 0) {
+				/* lsa no longer needed */
+				free(lsa);
+
+				/*
+				 * point 6 of "The Flooding Procedure"
+				 * We are violating the RFC here because
+				 * it does not make sense to reset a session
+				 * because an equal LSA is already in the table.
+				 * Only if the LSA sent is older than the one
+				 * in the table we should reset the session.
+				 */
+				if (rde_req_list_exists(nbr, &lsa->hdr)) {
+					imsg_compose(ibuf_ospfe, IMSG_LS_BADREQ,
+					    imsg.hdr.peerid, 0, NULL, 0);
+					break;
+				}
+
 				/* new LSA older than DB */
 				if (ntohl(db_hdr->seq_num) == MAX_SEQ_NUM &&
 				    ntohs(db_hdr->age) == MAX_AGE)
 					/* seq-num wrap */
 					break;
+
 				if (v->changed + MIN_LS_ARRIVAL >= now)
 					break;
 
 				/* directly send current LSA, no ack */
 				imsg_compose(ibuf_ospfe, IMSG_LS_UPD,
-				    imsg.hdr.peerid, 0, -1,
-				    v->lsa, ntohs(v->lsa->hdr.len));
+				    imsg.hdr.peerid, 0, v->lsa,
+				    ntohs(v->lsa->hdr.len));
 			} else {
 				/* LSA equal send direct ack */
 				imsg_compose(ibuf_ospfe, IMSG_LS_ACK,
-				    imsg.hdr.peerid, 0, -1, &lsa->hdr,
+				    imsg.hdr.peerid, 0, &lsa->hdr,
 				    sizeof(lsa->hdr));
+				free(lsa);
 			}
 			break;
 		case IMSG_LS_MAXAGE:
@@ -466,7 +502,7 @@ rde_dispatch_imsg(int fd, short event, void *bula)
 			if (imsg.hdr.len == IMSG_HEADER_SIZE) {
 				LIST_FOREACH(area, &rdeconf->area_list, entry) {
 					imsg_compose(ibuf_ospfe, IMSG_CTL_AREA,
-					    0, imsg.hdr.pid, -1, area,
+					    0, imsg.hdr.pid, area,
 					    sizeof(*area));
 					lsa_dump(&area->lsa_tree, imsg.hdr.type,
 					    imsg.hdr.pid);
@@ -477,7 +513,7 @@ rde_dispatch_imsg(int fd, short event, void *bula)
 				memcpy(&aid, imsg.data, sizeof(aid));
 				if ((area = area_find(rdeconf, aid)) != NULL) {
 					imsg_compose(ibuf_ospfe, IMSG_CTL_AREA,
-					    0, imsg.hdr.pid, -1, area,
+					    0, imsg.hdr.pid, area,
 					    sizeof(*area));
 					lsa_dump(&area->lsa_tree, imsg.hdr.type,
 					    imsg.hdr.pid);
@@ -488,13 +524,12 @@ rde_dispatch_imsg(int fd, short event, void *bula)
 				}
 			}
 			imsg_compose(ibuf_ospfe, IMSG_CTL_END, 0, imsg.hdr.pid,
-			    -1, NULL, 0);
+			    NULL, 0);
 			break;
 		case IMSG_CTL_SHOW_RIB:
 			LIST_FOREACH(area, &rdeconf->area_list, entry) {
 				imsg_compose(ibuf_ospfe, IMSG_CTL_AREA,
-				    0, imsg.hdr.pid, -1, area,
-				    sizeof(*area));
+				    0, imsg.hdr.pid, area, sizeof(*area));
 
 				rt_dump(area->id, imsg.hdr.pid, RIB_RTR);
 				rt_dump(area->id, imsg.hdr.pid, RIB_NET);
@@ -503,14 +538,14 @@ rde_dispatch_imsg(int fd, short event, void *bula)
 			rt_dump(aid, imsg.hdr.pid, RIB_EXT);
 
 			imsg_compose(ibuf_ospfe, IMSG_CTL_END, 0, imsg.hdr.pid,
-			    -1, NULL, 0);
+			    NULL, 0);
 			break;
 		case IMSG_CTL_SHOW_SUM:
 			rde_send_summary(imsg.hdr.pid);
 			LIST_FOREACH(area, &rdeconf->area_list, entry)
 				rde_send_summary_area(area, imsg.hdr.pid);
 			imsg_compose(ibuf_ospfe, IMSG_CTL_END, 0, imsg.hdr.pid,
-			    -1, NULL, 0);
+			    NULL, 0);
 			break;
 		default:
 			log_debug("rde_dispatch_msg: unexpected imsg %d",
@@ -530,7 +565,6 @@ rde_dispatch_parent(int fd, short event, void *bula)
 	struct lsa		*lsa;
 	struct vertex		*v;
 	struct kroute		 kr;
-	struct kif		 kif;
 	int			 n;
 
 	switch (event) {
@@ -563,8 +597,6 @@ rde_dispatch_parent(int fd, short event, void *bula)
 			}
 			memcpy(&kr, imsg.data, sizeof(kr));
 
-			log_debug("rde: new announced net %s/%d",
-			    inet_ntoa(kr.prefix), kr.prefixlen);
 			if ((lsa = rde_asext_get(&kr)) != NULL) {
 				v = lsa_find(NULL, lsa->hdr.type,
 				    lsa->hdr.ls_id, lsa->hdr.adv_rtr);
@@ -579,26 +611,12 @@ rde_dispatch_parent(int fd, short event, void *bula)
 			}
 			memcpy(&kr, imsg.data, sizeof(kr));
 
-			log_debug("rde: removing announced net %s/%d",
-				    inet_ntoa(kr.prefix), kr.prefixlen);
 			if ((lsa = rde_asext_put(&kr)) != NULL) {
 				v = lsa_find(NULL, lsa->hdr.type,
 				    lsa->hdr.ls_id, lsa->hdr.adv_rtr);
 
 				lsa_merge(nbrself, lsa, v);
 			}
-			break;
-		case IMSG_IFINFO:
-			if (imsg.hdr.len != IMSG_HEADER_SIZE + sizeof(kif)) {
-				log_warnx("rde_dispatch: wrong imsg len");
-				break;
-			}
-			memcpy(&kif, imsg.data, sizeof(kif));
-
-			log_debug("IMSG_IFINFO: ifindex %i reachable %d",
-			    kif.ifindex, kif.nh_reachable);
-			kif_update(&kif);
-			rde_update_redistribute(kif.ifindex);
 			break;
 		default:
 			log_debug("rde_dispatch_parent: unexpected imsg %d",
@@ -626,7 +644,7 @@ rde_send_change_kroute(struct rt_node *r)
 	kr.nexthop.s_addr = r->nexthop.s_addr;
 	kr.prefixlen = r->prefixlen;
 
-	imsg_compose(ibuf_main, IMSG_KROUTE_CHANGE, 0, 0, -1, &kr, sizeof(kr));
+	imsg_compose(ibuf_main, IMSG_KROUTE_CHANGE, 0, 0, &kr, sizeof(kr));
 }
 
 void
@@ -639,7 +657,7 @@ rde_send_delete_kroute(struct rt_node *r)
 	kr.nexthop.s_addr = r->nexthop.s_addr;
 	kr.prefixlen = r->prefixlen;
 
-	imsg_compose(ibuf_main, IMSG_KROUTE_DELETE, 0, 0, -1, &kr, sizeof(kr));
+	imsg_compose(ibuf_main, IMSG_KROUTE_DELETE, 0, 0, &kr, sizeof(kr));
 }
 
 void
@@ -732,6 +750,13 @@ rde_nbr_init(u_int32_t hashsize)
 	nbrself->self = 1;
 	head = RDE_NBR_HASH(NBR_IDSELF);
 	LIST_INSERT_HEAD(head, nbrself, hash);
+}
+
+void
+rde_nbr_free(void)
+{
+	free(nbrself);
+	free(rdenbrtable.hashtbl);
 }
 
 struct rde_nbr *
@@ -882,127 +907,48 @@ rde_req_list_free(struct rde_nbr *nbr)
 /*
  * as-external LSA handling
  */
-LIST_HEAD(, rde_asext) rde_asext_list;
-
-int
-rde_redistribute(struct kroute *kr)
+struct lsa *
+rde_asext_get(struct kroute *kr)
 {
 	struct area	*area;
 	struct iface	*iface;
-	int		 rv = 0;
-
-	if (!(kr->flags & F_KERNEL))
-		return (0);
-
-	if ((rdeconf->options & OSPF_OPTION_E) == 0)
-		return (0);
-
-	if ((rdeconf->redistribute_flags & REDISTRIBUTE_DEFAULT) &&
-	    (kr->prefix.s_addr == INADDR_ANY && kr->prefixlen == 0))
-		return (1);
-
-	/* only allow 0.0.0.0/0 if REDISTRIBUTE_DEFAULT */
-	if (kr->prefix.s_addr == INADDR_ANY && kr->prefixlen == 0)
-		return (0);
-
-	if ((rdeconf->redistribute_flags & REDISTRIBUTE_STATIC) &&
-	    (kr->flags & F_STATIC))
-		rv = 1;
-	if ((rdeconf->redistribute_flags & REDISTRIBUTE_CONNECTED) &&
-	    (kr->flags & F_CONNECTED))
-		rv = 1;
-
-	/* interface is not up and running so don't announce */
-	if (kif_validate(kr->ifindex) == 0)
-		return (0);
 
 	LIST_FOREACH(area, &rdeconf->area_list, entry)
 		LIST_FOREACH(iface, &area->iface_list, entry) {
 			if ((iface->addr.s_addr & iface->mask.s_addr) ==
 			    kr->prefix.s_addr && iface->mask.s_addr ==
-			    prefixlen2mask(kr->prefixlen))
-				rv = 0;	/* already announced as net LSA */
+			    prefixlen2mask(kr->prefixlen)) {
+				/* already announced as (stub) net LSA */
+				log_debug("rde_asext_get: %s/%d is net LSA",
+				    inet_ntoa(kr->prefix), kr->prefixlen);
+				return (NULL);
+			}
 		}
 
-	return (rv);
-}
-
-void
-rde_update_redistribute(int ifindex)
-{
-	struct rde_asext	*ae;
-	struct lsa		*lsa;
-	struct vertex		*v;
-	int			 wasused;
-
-	LIST_FOREACH(ae, &rde_asext_list, entry)
-		if (ae->kr.ifindex == ifindex) {
-			wasused = ae->used;
-			ae->used = rde_redistribute(&ae->kr);
-			if (ae->used)
-				lsa = orig_asext_lsa(&ae->kr, DEFAULT_AGE);
-			else if (wasused)
-				lsa = orig_asext_lsa(&ae->kr, MAX_AGE);
-			else
-				continue;
-
-			v = lsa_find(NULL, lsa->hdr.type,
-			    lsa->hdr.ls_id, lsa->hdr.adv_rtr);
-
-			lsa_merge(nbrself, lsa, v);
-		}
-}
-
-struct lsa *
-rde_asext_get(struct kroute *kr)
-{
-	struct rde_asext	*ae;
-	int			 wasused;
-
-	LIST_FOREACH(ae, &rde_asext_list, entry)
-		if (kr->prefix.s_addr == ae->kr.prefix.s_addr &&
-		    kr->prefixlen == ae->kr.prefixlen)
-			break;
-
-	if (ae == NULL) {
-		if ((ae = calloc(1, sizeof(*ae))) == NULL)
-			fatal("rde_asext_get");
-		LIST_INSERT_HEAD(&rde_asext_list, ae, entry);
-	}
-
-	memcpy(&ae->kr, kr, sizeof(ae->kr));
-
-	wasused = ae->used;
-	ae->used = rde_redistribute(kr);
-
-	if (ae->used)
-		/* update of seqnum is done by lsa_merge */
-		return (orig_asext_lsa(kr, DEFAULT_AGE));
-	else if (wasused)
-		/* lsa_merge will take care of removing the lsa from the db */
-		return (orig_asext_lsa(kr, MAX_AGE));
-	else
-		/* not in lsdb, superseded by a net lsa */
-		return (NULL);
+	/* update of seqnum is done by lsa_merge */
+	return (orig_asext_lsa(kr, DEFAULT_AGE));
 }
 
 struct lsa *
 rde_asext_put(struct kroute *kr)
 {
-	struct rde_asext	*ae;
-	int			 used;
+	struct area	*area;
+	struct iface	*iface;
 
-	LIST_FOREACH(ae, &rde_asext_list, entry)
-		if (kr->prefix.s_addr == ae->kr.prefix.s_addr &&
-		    kr->prefixlen == ae->kr.prefixlen) {
-			LIST_REMOVE(ae, entry);
-			used = ae->used;
-			free(ae);
-			if (used)
-				return (orig_asext_lsa(kr, MAX_AGE));
-			break;
+	LIST_FOREACH(area, &rdeconf->area_list, entry)
+		LIST_FOREACH(iface, &area->iface_list, entry) {
+			if ((iface->addr.s_addr & iface->mask.s_addr) ==
+			    kr->prefix.s_addr && iface->mask.s_addr ==
+			    prefixlen2mask(kr->prefixlen)) {
+				/* already announced as (stub) net LSA */
+				log_debug("rde_asext_put: %s/%d is net LSA",
+				    inet_ntoa(kr->prefix), kr->prefixlen);
+				return (NULL);
+			}
 		}
-	return (NULL);
+
+	/* remove by reflooding with MAX_AGE */
+	return (orig_asext_lsa(kr, MAX_AGE));
 }
 
 /*
@@ -1024,8 +970,8 @@ rde_summary_update(struct rt_node *rte, struct area *area)
 	/* no need for summary LSA in the originating area */
 	if (rte->area.s_addr == area->id.s_addr)
 		return;
-	/* TODO nexthop check, nexthop part of aera -> no summary */
-	if (rte->cost == LS_INFINITY)
+	/* TODO nexthop check, nexthop part of area -> no summary */
+	if (rte->cost >= LS_INFINITY)
 		return;
 	/* TODO AS border router specific checks */
 	/* TODO inter-area network route stuff */

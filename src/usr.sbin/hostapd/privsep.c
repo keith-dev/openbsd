@@ -1,7 +1,7 @@
-/*	$OpenBSD: privsep.c,v 1.13 2005/08/17 13:18:33 reyk Exp $	*/
+/*	$OpenBSD: privsep.c,v 1.18 2005/12/18 17:54:12 reyk Exp $	*/
 
 /*
- * Copyright (c) 2004, 2005 Reyk Floeter <reyk@vantronix.net>
+ * Copyright (c) 2004, 2005 Reyk Floeter <reyk@openbsd.org>
  * Copyright (c) 1995, 1999 Theo de Raadt
  *
  * Permission to use, copy, modify, and distribute this software for any
@@ -50,6 +50,7 @@
 #include <unistd.h>
 
 #include "hostapd.h"
+#include "iapp.h"
 
 enum hostapd_cmd_types {
 	PRIV_APME_BSSID,	/* Get the Host AP's BSSID */
@@ -60,6 +61,7 @@ enum hostapd_cmd_types {
 };
 
 void	 hostapd_priv(int, short, void *);
+struct hostapd_apme *hostapd_priv_getapme(int, struct hostapd_config *);
 void	 hostapd_sig_relay(int);
 void	 hostapd_sig_chld(int);
 int	 hostapd_may_read(int, void *, size_t);
@@ -76,6 +78,7 @@ static volatile pid_t child_pid = -1;
 void
 hostapd_priv_init(struct hostapd_config *cfg)
 {
+	struct hostapd_iapp *iapp = &cfg->c_iapp;
 	int i, socks[2];
 	struct passwd *pw;
 	struct servent *se;
@@ -84,9 +87,9 @@ hostapd_priv_init(struct hostapd_config *cfg)
 		signal(i, SIG_DFL);
 
 	if ((se = getservbyname("iapp", "udp")) == NULL) {
-		cfg->c_iapp_udp_port = IAPP_PORT;
+		iapp->i_udp_port = IAPP_PORT;
 	} else
-		cfg->c_iapp_udp_port = se->s_port;
+		iapp->i_udp_port = se->s_port;
 
 	if ((pw = getpwnam(HOSTAPD_USER)) == NULL)
 		hostapd_fatal("failed to get user \"%s\"\n", HOSTAPD_USER);
@@ -145,7 +148,7 @@ hostapd_priv_init(struct hostapd_config *cfg)
 	close(socks[1]);
 
 	if (cfg->c_flags & HOSTAPD_CFG_F_APME) {
-		if ((cfg->c_apme = socket(AF_INET, SOCK_DGRAM, 0)) == -1)
+		if ((cfg->c_apme_ctl = socket(AF_INET, SOCK_DGRAM, 0)) == -1)
 			hostapd_fatal("unable to open ioctl socket\n");
 	}
 
@@ -163,10 +166,28 @@ hostapd_priv_init(struct hostapd_config *cfg)
 	_exit(EXIT_SUCCESS);
 }
 
+struct hostapd_apme *
+hostapd_priv_getapme(int fd, struct hostapd_config *cfg)
+{
+	struct hostapd_apme *apme;
+	char name[IFNAMSIZ];
+	int n;
+
+	hostapd_must_read(fd, name, IFNAMSIZ);
+	if ((cfg->c_flags & HOSTAPD_CFG_F_APME) == 0 ||
+	    (apme = hostapd_apme_lookup(cfg, name)) == NULL) {
+		n = ENXIO;
+		hostapd_must_write(fd, &n, sizeof(int));
+		return (NULL);
+	}
+	return (apme);
+}
+
 void
 hostapd_priv(int fd, short sig, void *arg)
 {
 	struct hostapd_config *cfg = (struct hostapd_config *)arg;
+	struct hostapd_apme *apme;
 	struct hostapd_node node;
 	struct ieee80211_bssid bssid;
 	struct ieee80211_nodereq nr;
@@ -190,15 +211,14 @@ hostapd_priv(int fd, short sig, void *arg)
 		hostapd_log(HOSTAPD_LOG_DEBUG,
 		    "[priv]: msg PRIV_APME_BSSID received\n");
 
-		strlcpy(bssid.i_name, cfg->c_apme_iface, sizeof(bssid.i_name));
+		if ((apme = hostapd_priv_getapme(fd, cfg)) == NULL)
+			break;
+		strlcpy(bssid.i_name, apme->a_iface, sizeof(bssid.i_name));
 
 		/* Try to get the APME's BSSID */
-		if (cfg->c_flags & HOSTAPD_CFG_F_APME) {
-			if ((ret = ioctl(cfg->c_apme,
-			    SIOCG80211BSSID, &bssid)) != 0)
-				ret = errno;
-		} else
-			ret = ENXIO;
+		if ((ret = ioctl(cfg->c_apme_ctl,
+		    SIOCG80211BSSID, &bssid)) != 0)
+			ret = errno;
 
 		hostapd_must_write(fd, &ret, sizeof(int));
 		if (ret == 0)
@@ -213,15 +233,14 @@ hostapd_priv(int fd, short sig, void *arg)
 		hostapd_must_read(fd, &node, sizeof(struct hostapd_node));
 		bcopy(node.ni_macaddr, nr.nr_macaddr, IEEE80211_ADDR_LEN);
 
-		strlcpy(nr.nr_ifname, cfg->c_apme_iface, sizeof(ifr.ifr_name));
+		if ((apme = hostapd_priv_getapme(fd, cfg)) == NULL)
+			break;
+		strlcpy(nr.nr_ifname, apme->a_iface, sizeof(ifr.ifr_name));
 
 		/* Try to get a station from the APME */
-		if (cfg->c_flags & HOSTAPD_CFG_F_APME) {
-			if ((ret = ioctl(cfg->c_apme,
-			    SIOCG80211NODE, &nr)) != 0)
-				ret = errno;
-		} else
-			ret = ENXIO;
+		if ((ret = ioctl(cfg->c_apme_ctl,
+		    SIOCG80211NODE, &nr)) != 0)
+			ret = errno;
 
 		hostapd_must_write(fd, &ret, sizeof(int));
 		if (ret == 0) {
@@ -243,17 +262,17 @@ hostapd_priv(int fd, short sig, void *arg)
 		hostapd_must_read(fd, &node, sizeof(struct hostapd_node));
 		bcopy(node.ni_macaddr, nr.nr_macaddr, IEEE80211_ADDR_LEN);
 
-		strlcpy(nr.nr_ifname, cfg->c_apme_iface, sizeof(ifr.ifr_name));
+		if ((apme = hostapd_priv_getapme(fd, cfg)) == NULL)
+			break;
+		strlcpy(nr.nr_ifname, apme->a_iface, sizeof(ifr.ifr_name));
 
 		request = cmd == PRIV_APME_ADDNODE ?
 		    SIOCS80211NODE : SIOCS80211DELNODE;
 
 		/* Try to add/delete a station from the APME */
-		if (cfg->c_flags & HOSTAPD_CFG_F_APME) {
-			if ((ret = ioctl(cfg->c_apme, request, &nr)) != 0)
-				ret = errno;
-		} else
-			ret = ENXIO;
+		if ((ret = ioctl(cfg->c_apme_ctl, request, &nr)) != 0)
+			ret = errno;
+
 		hostapd_must_write(fd, &ret, sizeof(int));
 		break;
 
@@ -272,14 +291,17 @@ hostapd_priv(int fd, short sig, void *arg)
 		hostapd_fatal("[priv]: unknown command %d\n", cmd);
 	}
 	event_add(&cfg->c_priv_ev, NULL);
+
+	return;
 }
 
 /*
  * Unprivileged callers
  */
 int
-hostapd_priv_apme_getnode(struct hostapd_config *cfg, struct hostapd_node *node)
+hostapd_priv_apme_getnode(struct hostapd_apme *apme, struct hostapd_node *node)
 {
+	struct hostapd_config *cfg = (struct hostapd_config *)apme->a_cfg;
 	int ret, cmd;
 
 	if (priv_fd < 0)
@@ -291,6 +313,7 @@ hostapd_priv_apme_getnode(struct hostapd_config *cfg, struct hostapd_node *node)
 	cmd = PRIV_APME_GETNODE;
 	hostapd_must_write(priv_fd, &cmd, sizeof(int));
 	hostapd_must_write(priv_fd, node, sizeof(struct hostapd_node));
+	hostapd_must_write(priv_fd, &apme->a_iface, IFNAMSIZ);
 	hostapd_must_read(priv_fd, &ret, sizeof(int));
 	if (ret != 0)
 		return (ret);
@@ -300,9 +323,11 @@ hostapd_priv_apme_getnode(struct hostapd_config *cfg, struct hostapd_node *node)
 }
 
 int
-hostapd_priv_apme_setnode(struct hostapd_config *cfg, struct hostapd_node *node,
+hostapd_priv_apme_setnode(struct hostapd_apme *apme, struct hostapd_node *node,
     int add)
 {
+	struct hostapd_config *cfg = (struct hostapd_config *)apme->a_cfg;
+	struct hostapd_iapp *iapp = &cfg->c_iapp;
 	int ret, cmd;
 
 	if (priv_fd < 0)
@@ -317,14 +342,22 @@ hostapd_priv_apme_setnode(struct hostapd_config *cfg, struct hostapd_node *node,
 		cmd = PRIV_APME_DELNODE;
 	hostapd_must_write(priv_fd, &cmd, sizeof(int));
 	hostapd_must_write(priv_fd, node, sizeof(struct hostapd_node));
+	hostapd_must_write(priv_fd, &apme->a_iface, IFNAMSIZ);
+
 	hostapd_must_read(priv_fd, &ret, sizeof(int));
+	if (ret == 0)
+		hostapd_log(HOSTAPD_LOG_VERBOSE, "%s/%s: %s node %s\n",
+		    apme->a_iface, iapp->i_iface,
+		    add ? "added" : "removed",
+		    etheraddr_string(node->ni_macaddr));
 
 	return (ret);
 }
 
 void
-hostapd_priv_apme_bssid(struct hostapd_config *cfg)
+hostapd_priv_apme_bssid(struct hostapd_apme *apme)
 {
+	struct hostapd_config *cfg = (struct hostapd_config *)apme->a_cfg;
 	int ret, cmd;
 
 	if (priv_fd < 0)
@@ -335,13 +368,13 @@ hostapd_priv_apme_bssid(struct hostapd_config *cfg)
 
 	cmd = PRIV_APME_BSSID;
 	hostapd_must_write(priv_fd, &cmd, sizeof(int));
-
+	hostapd_must_write(priv_fd, &apme->a_iface, IFNAMSIZ);
 	hostapd_must_read(priv_fd, &ret, sizeof(int));
 	if (ret != 0)
 		hostapd_fatal("failed to get Host AP's BSSID on"
-		    " \"%s\": %s\n", cfg->c_apme_iface, strerror(errno));
+		    " \"%s\": %s\n", apme->a_iface, strerror(errno));
 
-	hostapd_must_read(priv_fd, &cfg->c_apme_bssid, IEEE80211_ADDR_LEN);
+	hostapd_must_read(priv_fd, &apme->a_bssid, IEEE80211_ADDR_LEN);
 	cfg->c_stats.cn_tx_apme++;
 }
 
@@ -410,6 +443,7 @@ hostapd_may_read(int fd, void *buf, size_t n)
 		case -1:
 			if (errno == EINTR || errno == EAGAIN)
 				continue;
+			/* FALLTHROUGH */
 		case 0:
 			return (1);
 		default:
@@ -435,8 +469,10 @@ hostapd_must_read(int fd, void *buf, size_t n)
 		case -1:
 			if (errno == EINTR || errno == EAGAIN)
 				continue;
+			/* FALLTHROUGH */
 		case 0:
 			_exit(0);
+			break;
 		default:
 			pos += res;
 		}
@@ -459,8 +495,10 @@ hostapd_must_write(int fd, void *buf, size_t n)
 		case -1:
 			if (errno == EINTR || errno == EAGAIN)
 				continue;
+			/* FALLTHROUGH */
 		case 0:
 			_exit(0);
+			break;
 		default:
 			pos += res;
 		}

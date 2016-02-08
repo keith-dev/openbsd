@@ -1,4 +1,4 @@
-/*	$OpenBSD: hello.c,v 1.9 2005/08/30 21:07:58 claudio Exp $ */
+/*	$OpenBSD: hello.c,v 1.12 2006/02/02 20:46:34 claudio Exp $ */
 
 /*
  * Copyright (c) 2005 Claudio Jeker <claudio@openbsd.org>
@@ -203,7 +203,7 @@ recv_hello(struct iface *iface, struct in_addr src, u_int32_t rtr_id, char *buf,
 
 	while (len >= sizeof(nbr_id)) {
 		memcpy(&nbr_id, buf, sizeof(nbr_id));
-		if (nbr_id == iface->rtr_id.s_addr) {
+		if (nbr_id == ospfe_router_id()) {
 			/* seen myself */
 			if (nbr->state & NBR_STA_PRELIM)
 				nbr_fsm(nbr, NBR_EVT_2_WAY_RCVD);
@@ -228,24 +228,18 @@ recv_hello(struct iface *iface, struct in_addr src, u_int32_t rtr_id, char *buf,
 	}
 
 	if (iface->state & IF_STA_WAITING &&
-	    hello.d_rtr == nbr->addr.s_addr && hello.bd_rtr == 0) {
-		log_debug("hello: DR seen with NO BDR");
+	    hello.d_rtr == nbr->addr.s_addr && hello.bd_rtr == 0)
 		if_fsm(iface, IF_EVT_BACKUP_SEEN);
-	}
 
 	if (iface->state & IF_STA_WAITING && hello.bd_rtr == nbr->addr.s_addr) {
 		/*
 		 * In case we see the BDR make sure that the DR is around
 		 * with a bidirectional (2_WAY or better) connection
 		 */
-		log_debug("hello: BDR seen");
 		LIST_FOREACH(dr, &iface->nbr_list, entry)
 			if (hello.d_rtr == dr->addr.s_addr &&
-			    dr->state & NBR_STA_BIDIR) {
-				log_debug("hello: BDR seen & DR %s is BIDIR",
-				    inet_ntoa(dr->addr));
+			    dr->state & NBR_STA_BIDIR)
 				if_fsm(iface, IF_EVT_BACKUP_SEEN);
-			}
 	}
 
 	if ((nbr->addr.s_addr == nbr->dr.s_addr &&
@@ -268,5 +262,4 @@ recv_hello(struct iface *iface, struct in_addr src, u_int32_t rtr_id, char *buf,
 		if_fsm(iface, IF_EVT_NBR_CHNG);
 
 	/* TODO NBMA needs some special handling */
-	return;
 }

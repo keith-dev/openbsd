@@ -1,10 +1,6 @@
-dnl	$OpenBSD: install,v 1.27 2004/03/17 09:25:09 jmc Exp $
+dnl	$OpenBSD: install,v 1.29 2005/11/26 12:26:18 miod Exp $
 OpenBSDInstallPrelude
 dnl No extra line, this has to stick to the geometry notes paragraph.
-The file `HP-IB.geometry' has geometry information for several HP-IB
-disks, but may be incomplete.  Geometry may be calculated from an HP-UX
-`/etc/disktab' entry, but note that HP-UX geometry is based on
-1024-byte sectors, while OpenBSD's is based on 512-byte sectors.
 
 The ramdisk kernel may be loaded from the network, from CD-ROM, or other
 SCSI devices (such as Zip(tm) disk).  Note that loading from HP-IB or SCSI
@@ -105,12 +101,12 @@ OpenBSDBootMsgs
 
 	You will next be asked for your terminal type.  There are only
 	a few specific terminal types supported.  If you are using a
-	graphics display, just hit return to select the default (hp300h).
+	graphics display, just hit return to select the default (vt220).
 	If you are using an ASCII terminal, it should either be an HP
 	or vt100 compatible terminal; nothing else is supported.  (If
 	your terminal type is xterm, just use vt100.)
 	
-OpenBSDInstallPart3({:- or "hd0" for HPIB/CS80 drives-:})
+OpenBSDInstallPart3({:- or "hd0" for HP-IB/CS80 drives-:})
 
 OpenBSDInstallPart4
 

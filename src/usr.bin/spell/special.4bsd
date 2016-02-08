@@ -30,7 +30,6 @@ altqstat
 always
 amd
 amq
-ancontrol
 and
 anno
 ansitape
@@ -421,7 +420,6 @@ geteuid
 getfsent
 getfsfile
 getfsspec
-getfstype
 getgid
 getgrent
 getgrgid

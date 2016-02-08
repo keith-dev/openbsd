@@ -1,5 +1,5 @@
 # ex:ts=8 sw=4:
-# $OpenBSD: Delete.pm,v 1.27 2005/08/22 11:34:52 espie Exp $
+# $OpenBSD: Delete.pm,v 1.32 2005/10/27 07:02:02 bernd Exp $
 #
 # Copyright (c) 2003-2004 Marc Espie <espie@openbsd.org>
 #
@@ -49,7 +49,7 @@ sub keep_old_files
 				my ($fh, $j) = File::Temp::mkstemp("$n.XXXXXXXX");
 				close $fh;
 				if (rename($n, $j)) {
-					print "Renaming $n to $j\n";
+					print "Renaming old file $n to $j\n";
 					if ($i->{name} !~ m|^/| && $i->cwd() ne '.') {
 						my $c = $i->cwd();
 						$j =~ s|^\Q$c\E/||;
@@ -100,25 +100,9 @@ sub validate_plist($$)
 	my ($plist, $state) = @_;
 
 	my $destdir = $state->{destdir};
-	my $problems = 0;
-	my $totsize = 0;
-	for my $item (@{$plist->{items}}) {
-		next unless $item->IsFile();
-		my $fname = $destdir.$item->fullname();
-		$totsize += $item->{size} if defined $item->{size};
-		my $s = OpenBSD::Vstat::remove($fname, $item->{size});
-		next unless defined $s;
-		if ($s->{ro}) {
-			if ($state->{very_verbose} or ++($s->{problems}) < 4) {
-				Warn "Error: ", $s->{dev}, 
-				    " is read-only ($fname)\n";
-			} elsif ($s->{problems} == 4) {
-				Warn "Error: ... more files can't be removed from ",
-					$s->{dev}, "\n";
-			}
-			$problems++;
-		}
-	}
+	$state->{problems} = 0;
+	$state->{totsize} = 0;
+	$plist->visit('prepare_for_deletion', $state);
 	my $dir = installed_info($plist->pkgname());
 	for my $i (info_names()) {
 		my $fname = $dir.$i;
@@ -128,13 +112,13 @@ sub validate_plist($$)
 			next unless defined $s;
 			if ($s->{ro}) {
 				Warn "Error: ", $s->{dev}, " is read-only ($fname)\n";
-				$problems++;
+				$state->{problems}++;
 			}
 		}
 	}
-	Fatal "fatal issues" if $problems;
-	$totsize = 1 if $totsize == 0;
-	$plist->{totsize} = $totsize;
+	Fatal "fatal issues" if $state->{problems};
+	$state->{totsize} = 1 if $state->{totsize} == 0;
+	$plist->{totsize} = $state->{totsize};
 }
 
 sub remove_packing_info
@@ -237,6 +221,10 @@ sub delete_plist
 
 package OpenBSD::PackingElement;
 
+sub prepare_for_deletion
+{
+}
+
 sub delete
 {
 }
@@ -244,15 +232,62 @@ sub delete
 package OpenBSD::PackingElement::FileObject;
 use File::Basename;
 
-sub mark_dir
+sub mark_directory
 {
 	my ($self, $state, $dir) = @_;
 
 	$state->{dirs_okay}->{$dir} = 1;
 	my $d2 = dirname($dir);
 	if ($d2 ne $dir) {
-		$self->mark_dir($state, $d2);
+		$self->mark_directory($state, $d2);
 	}
+}
+
+sub mark_dir
+{
+	my ($self, $state) = @_;
+
+	$self->mark_directory($state, dirname($self->fullname()));
+}
+
+sub realname
+{
+	my ($self, $state) = @_;
+
+	my $name = $self->fullname();
+	if (defined $self->{tempname}) {
+		$name = $self->{tempname};
+	}
+	return $state->{destdir}.$name;
+}
+
+sub do_not_delete
+{
+	my ($self, $state) = @_;
+
+	my $realname = $self->realname($state);
+	$state->{baddelete} = 1;
+	$self->{stillaround} = 1;
+
+	delete $self->{symlink};
+	delete $self->{link};
+	delete $self->{md5};
+
+	if (-l $realname) {
+		$self->{symlink} = readlink $realname;
+	} elsif (-f _) {
+		$self->{md5} = OpenBSD::md5::fromfile($realname);
+	} elsif (-d _) {
+		# what should we do ?
+	}
+}
+
+
+package OpenBSD::PackingElement::DirlikeObject;
+sub mark_dir
+{
+	my ($self, $state) = @_;
+	$self->mark_directory($state, $self->fullname());
 }
 
 package OpenBSD::PackingElement::NewUser;
@@ -323,44 +358,78 @@ sub delete
 
 package OpenBSD::PackingElement::FileBase;
 use OpenBSD::md5;
+use OpenBSD::Error;
+use OpenBSD::Vstat;
+
+sub prepare_for_deletion
+{
+	my ($self, $state) = @_;
+
+	my $fname = $state->{destdir}.$self->fullname();
+	$state->{totsize} += $self->{size} if defined $self->{size};
+	my $s = OpenBSD::Vstat::remove($fname, $self->{size});
+	return unless defined $s;
+	if ($s->{ro}) {
+		if ($state->{very_verbose} or ++($s->{problems}) < 4) {
+			Warn "Error: ", $s->{dev}, 
+			    " is read-only ($fname)\n";
+		} elsif ($s->{problems} == 4) {
+			Warn "Error: ... more files can't be removed from ",
+				$s->{dev}, "\n";
+		}
+		$state->{problems}++;
+	}
+}
+
 sub delete
 {
 	my ($self, $state) = @_;
-	my $name = $self->fullname();
-	if (defined $self->{tempname}) {
-		$name = $self->{tempname};
-	}
-	my $realname = $state->{destdir}.$name;
-	if (-l $realname) {
-		if ($state->{very_verbose}) {
-			print "deleting symlink: $realname\n";
-		}
-	} else {
-		if (! -f $realname) {
-			print "File $realname does not exist\n";
+	my $realname = $self->realname($state);
+
+	if (defined $self->{symlink}) {
+		if (-l $realname) {
+			my $contents = readlink $realname;
+			if ($contents ne $self->{symlink}) {
+				print "Symlink does not match: $realname ($contents vs. ", $self->{symlink},")\n";
+				$self->do_not_delete($state);
+				return;
+			}
+		} else  {
+			print "Bogus symlink: $realname\n";
+			$self->do_not_delete($state);
 			return;
 		}
-		unless (defined($self->{link}) or $self->{nochecksum} or $state->{quick}) {
-			if (!defined $self->{md5}) {
-				print "Problem: $name does not have an md5 checksum\n";
-				print "NOT deleting: $realname\n";
-				$state->print("Couldn't delete $realname (no md5)\n");
+	} else {
+		if (-l $realname) {
+				print "Unexpected symlink: $realname\n";
+				$self->do_not_delete($state);
+		} else {
+			if (! -f $realname) {
+				print "File $realname does not exist\n";
 				return;
 			}
-			my $md5 = OpenBSD::md5::fromfile($realname);
-			if ($md5 ne $self->{md5}) {
-				print "Problem: md5 doesn't match for $name\n";
-				print "NOT deleting: $realname\n";
-				$state->print("Couldn't delete $realname (bad md5)\n");
-				$self->{stillaround} = 1;
-				$self->{md5} = $md5;
-				$state->{baddelete} = 1;
-				return;
+			unless (defined($self->{link}) or $self->{nochecksum} or $state->{quick}) {
+				if (!defined $self->{md5}) {
+					print "Problem: ", $self->fullname(),
+					    " does not have an md5 checksum\n";
+					print "NOT deleting: $realname\n";
+					$state->print("Couldn't delete $realname (no md5)\n");
+					return;
+				}
+				my $md5 = OpenBSD::md5::fromfile($realname);
+				if ($md5 ne $self->{md5}) {
+					print "Problem: md5 doesn't match for ",
+						$self->fullname(), "\n";
+					print "NOT deleting: $realname\n";
+					$state->print("Couldn't delete $realname (bad md5)\n");
+					$self->do_not_delete($state);
+					return;
+				}
 			}
 		}
-		if ($state->{very_verbose}) {
-			print "deleting: $realname\n";
-		}
+	}
+	if ($state->{very_verbose}) {
+		print "deleting: $realname\n";
 	}
 	return if $state->{not};
 	if (!unlink $realname) {
@@ -377,14 +446,13 @@ use File::Basename;
 sub delete
 {
 	my ($self, $state) = @_;
-	my $name = $self->fullname();
-	my $realname = $state->{destdir}.$name;
+	my $realname = $self->realname($state);
 
 	my $orig = $self->{copyfrom};
 	if (!defined $orig) {
 		Fatal "\@sample element does not reference a valid file\n";
 	}
-	my $origname = $state->{destdir}.$orig->fullname();
+	my $origname = $orig->realname($state);
 	if (! -e $realname) {
 		$state->print("File $realname does not exist\n");
 		return;
@@ -401,7 +469,7 @@ sub delete
 
 	if ($state->{quick}) {
 		unless ($state->{extra}) {
-			$self->mark_dir($state, dirname($name));
+			$self->mark_dir($state);
 			$state->print("You should also remove $realname\n");
 			return;
 		}
@@ -411,7 +479,7 @@ sub delete
 			print "File $realname identical to sample\n" if $state->{not} or $state->{verbose};
 		} else {
 			unless ($state->{extra}) {
-				$self->mark_dir($state, dirname($name));
+				$self->mark_dir($state);
 				$state->print("You should also remove $realname (which was modified)\n");
 				return;
 			}
@@ -473,8 +541,7 @@ use File::Basename;
 sub delete
 {
 	my ($self, $state) = @_;
-	my $name = $self->fullname();
-	my $realname = $state->{destdir}.$name;
+	my $realname = $self->realname($state);
 	if ($state->{beverbose} && $state->{extra}) {
 		print "deleting extra file: $realname\n";
 	}
@@ -482,13 +549,13 @@ sub delete
 	return unless -e $realname;
 	if ($state->{replacing}) {
 		$state->print("Remember to update $realname\n");
-		$self->mark_dir($state, dirname($name));
+		$self->mark_dir($state);
 	} elsif ($state->{extra}) {
 		unlink($realname) or 
 		    print "problem deleting extra file $realname\n";
 	} else {
 		$state->print("You should also remove $realname\n");
-		$self->mark_dir($state, dirname($name));
+		$self->mark_dir($state);
 	}
 }
 
@@ -498,13 +565,13 @@ sub delete
 {
 	my ($self, $state) = @_;
 	return unless $state->{extra};
-	my $realname = $state->{destdir}.$self->fullname();
+	my $realname = $self->realname($state);
 	return if $state->{replacing};
 	if ($state->{extra}) {
 		$self->SUPER::delete($state);
 	} else {
 		$state->print("You should also remove the directory $realname\n");
-		$self->mark_dir($state, $self->fullname());
+		$self->mark_dir($state);
 	}
 }
 

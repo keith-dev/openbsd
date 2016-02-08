@@ -1,6 +1,6 @@
-.\" $OpenBSD: hostapd.conf.5,v 1.8 2005/07/04 22:49:02 jmc Exp $
+.\" $OpenBSD: hostapd.conf.5,v 1.29 2005/12/29 04:33:58 reyk Exp $
 .\"
-.\" Copyright (c) 2004, 2005 Reyk Floeter <reyk@vantronix.net>
+.\" Copyright (c) 2004, 2005 Reyk Floeter <reyk@openbsd.org>
 .\"
 .\" Permission to use, copy, modify, and distribute this software for any
 .\" purpose with or without fee is hereby granted, provided that the above
@@ -47,6 +47,13 @@ when receiving specified IEEE 802.11 frames.
 Comments can be put anywhere in the file using a hash mark
 .Pq Sq # ,
 and extend to the end of the current line.
+.Pp
+Additional configuration files can be included with the
+.Ic include
+keyword, for example:
+.Bd -literal -offset indent
+include "/etc/hostapd.conf.local"
+.Ed
 .Sh MACROS
 Much like
 .Xr cpp 1
@@ -65,6 +72,7 @@ Macros are not expanded inside quotes.
 For example:
 .Bd -literal -offset indent
 wlan="ath0"
+set iapp handle subtype { ! add notify, radiotap }
 set iapp interface $wlan
 .Ed
 .Sh TABLES
@@ -81,8 +89,8 @@ Tables are used for
 .Xr hostapd 8
 .Em event rules
 to match specified IEEE 802.11 link layer addresses and address ranges,
-and the capability to assign link layer to IP addresses is a
-requirement for advanced IAPP functionality.
+and the capability to assign link layer to IP addresses and an option netmask
+is a requirement for advanced IAPP functionality.
 .Pp
 Table options may be presented after the table name declaration.
 The following options are supported:
@@ -94,7 +102,7 @@ definition.
 .Pp
 For example:
 .Bd -literal -offset indent
-cisco="00:40:06:ff:ff:ff / ff:ff:ff:00:00:00"
+cisco="00:40:06:ff:ff:ff & ff:ff:ff:00:00:00"
 
 table <black> { $cisco, 00:0d:60:ff:f1:2a }
 table <myess> const {
@@ -102,15 +110,25 @@ table <myess> const {
 	00:00:24:c3:40:19 -> 10.195.64.25,
 	00:00:24:c3:40:1a -> 10.195.64.26
 }
+table <myclient> const {
+	00:05:4e:45:d4:b9 -> 172.23.5.1/30
+}
 .Ed
 .Sh GLOBAL CONFIGURATION
 The following configuration settings are understood:
 .Bl -tag -width Ds
-.It Ic set hostap interface Ar interface
+.It Xo
+.Ic set hostap interface
+.Ar interface \*(Ba\ \&
+.Pf { Ar interface0 , interface1 , ... No }
+.Xc
 Specify the wireless interface running in Host AP mode.
 This option could be omitted to use
 .Xr hostapd 8
 to log received IAPP messages.
+Multiple hostap interfaces may be specified
+as a comma-separated list,
+surrounded by curly braces.
 .It Ic set hostap mode Ar mode
 Specify the Host AP capture mode.
 The supported modes are:
@@ -128,48 +146,94 @@ Specify the mandatory Inter-Access-Point (IAPP) interface.
 It is important that the IAPP interface is on a trusted
 network because there is no authentication and an attacker could force
 disassociation of selected stations on all listening access points.
+.It Xo
+.Ic set iapp handle subtype
+.Ar subtype \*(Ba\ \&
+.Pf { Ar subtype0 , subtype1 , ... No }
+.Xc
+Specify the IAPP subtypes to use:
+.Pp
+.Bl -tag -width broadcast -offset indent -compact
+.It Xo
+.Op Ic not
+.Ic add notify
+.Xc
+Send and receive
+.Em ADD.notify
+messages.
+This option is enabled by default.
+.It Xo
+.Op Ic not
+.Ic radiotap
+.Xc
+Receive
+.Em radiotap
+messages.
+This option is enabled by default.
+.El
+.Pp
 .It Ic set iapp mode Ar mode
 Specify the IAPP mode.
 The supported modes are:
 .Pp
 .Bl -tag -width broadcast -offset indent -compact
-.It Ic multicast
-Use multicast frames.
-.It Ic broadcast
+.It Xo
+.Ic multicast
+.Op Ic address Ar ipv4addr
+.Op Ic port Ar number
+.Op Ic ttl Ar number
+.Xc
+Use
+.Xr multicast 4
+frames.
+A multicast time-to-live (TTL) of 2 or higher is required to allow
+multicast forwarding, for example for use with
+.Xr mrouted 8 .
+.It Xo
+.Ic broadcast
+.Op Ic port Ar number
+.Xc
 Use broadcast frames.
 .El
 .Pp
-The default is multicast.
-The multicast group used is 224.0.1.178.
+The default is multicast using the multicast address 224.0.1.178 with a TTL
+limited to 1 hop.
 .El
 .Sh EVENT RULES
 Event rules provide a powerful way to trigger a certain action when
 receiving specified IEEE 802.11 frames on the
 .Em hostap interface .
 The rules are handled in sequential order, from first to last.
-.Pp
-In difference to packet filter rules like in
-.Xr pf.conf 5 ,
-the
-.Xr hostapd 8
-event rules are handled without a state;
-each rule is processed indepedently from the others and from
+Rules are handled without a state:
+each rule is processed independently from the others and from
 any previous actions.
+This behaviour is somewhat different to that of packet filter rules
+specified in
+.Xr pf.conf 5 .
 .Pp
 All
 .Xr hostapd 8
 event rules are single line statements beginning with
 the mandatory
 .Ic hostap handle
-keywords and optional rule options, frame matching,
-a specified action, and a limit:
+keywords and optional rule options, interface, frame matching,
+a specified action, a limit, and a minimal rate:
 .Bd -filled -offset indent
 .Ic hostap handle
 .Op Ar option
+.Op Ar interface
 .Op Ar frame
 .Op Ar action
 .Op Ar limit
+.Op Ar rate
 .Ed
+.Pp
+Some rule statements support the optional keyword
+.Ic not ,
+also represented by the
+.Ic !\&
+operator,
+for inverse matching.
 .Pp
 The optional parts are defined below.
 .Ss Rule Option
@@ -190,6 +254,21 @@ The keyword
 .Ic skip
 additionally skips any further IAPP processing of the frame,
 which is normally done after handling the event rules.
+.Ss Rule Interface
+The rule
+.Ar interface
+specifies the hostap interface the rule is matched on.
+The available interface list is specified by the global
+.Ic set hostap interface
+configuration setting.
+.Bd -filled -offset indent
+.Ic on
+.Op Ic not
+.Ar interface
+.Ed
+.Pp
+If not given,
+the event rule is matched on all available hostap interfaces.
 .Ss Rule Frame
 The
 .Ar frame
@@ -253,7 +332,7 @@ The direction may be specified in the following ways:
 Match all directions.
 .It Ic dir Ar framedir
 Match frames with the given direction
-.Ar framedir.
+.Ar framedir .
 See the
 .Sx Frame Directions
 section below for available direction specifications.
@@ -387,6 +466,10 @@ is
 Write informational messages to the local system log (see
 .Xr syslogd 8 )
 or standard error.
+If the
+.Sx Rule Rate
+has been specified,
+log will print the actual rate.
 .It Ic node add | delete Ar lladdr
 Add or remove the specified node from the internal kernel
 node table.
@@ -408,6 +491,23 @@ to protect
 .Xr hostapd 8
 against excessive flooding with IEEE 802.11 frames.
 For example, beacon frames will be normally received every 100 ms.
+.Ss Rule Rate
+It is possible to tell
+.Xr hostapd 8
+to trigger the action only after a specific
+.Ic rate
+of matched frames.
+.Bd -filled -offset indent
+.Ic rate
+.Ar number
+.Ar /
+.Ar number
+.Ic sec
+.Ed
+.Pp
+This will help to detect excessive flooding of IEEE 802.11 frames.
+For example, de-auth flooding is a DoS (Denial of Service) attack
+against IEEE 802.11 wireless networks.
 .Ss Management Frame Subtypes
 The
 .Ar subtype
@@ -422,8 +522,7 @@ in the frame body, but currently only the
 and
 .Ic disassoc
 reason codes are supported:
-.Pp
-.Bl -tag -width Ds -compact
+.Bl -ohang -offset 3n
 .It Ic subtype beacon
 A beacon frame.
 Wireless access points and devices running in
@@ -465,8 +564,7 @@ defines a descriptive reason for the actual
 or
 .Em disassociation
 of a station:
-.Pp
-.Bl -tag -width Ds -compact
+.Bl -ohang -offset 3n
 .It Ic reason assoc expire
 Disassociated due to inactivity.
 .It Ic reason assoc leave
@@ -501,8 +599,7 @@ Unspecified reason.
 The direction a frame is being transmitted
 .Pq Ar framedir
 can be specified in the following ways:
-.Pp
-.Bl -tag -width Ds -compact
+.Bl -ohang -offset 3n
 .It Ic dir no ds
 No distribution system direction is used for management frames.
 .It Ic dir to ds
@@ -513,67 +610,42 @@ A frame from the distribution system, the access point, to a station.
 A frame direction used by wireless distribution systems (WDS) for
 wireless access point to access point communication.
 .El
-.Sh GRAMMAR
-Syntax for
-.Nm
-in BNF:
+.Sh EVENT RULE EXAMPLES
 .Bd -literal
-grammar		= [ varset ] | [ tabledef ] | option | [ event ]
+# Log probe requests locally
+hostap handle type management subtype probe request \e
+    with log
 
-varset		= varname "=" varvalue
+# Detect flooding of management frames except beacons.
+# This will detect some possible Denial of Service attacks
+# against the IEEE 802.11 protocol.
+hostap handle skip type management subtype ! beacon \e
+    with log \e
+    rate 100 / 10 sec
 
-tabledef	= "table" table tableopts
+# Log rogue accesspoints via IAPP, limited to every second,
+# and skip further IAPP processing.
+hostap handle skip type management subtype beacon bssid !<myess> \e
+    with iapp type radiotap limit 1 sec
 
-table		= "<" tablename ">"
+# Send deauthentication frames to stations associated to rogue APs
+hostap handle type data bssid !<myess> with frame type management \e
+    subtype deauth reason auth expire \e
+    from &bssid to &from bssid &bssid
 
-tableopts	= "const" | "{" [ "\n" ] "}" |
-		  "{" [ "\\n" ] tableaddrlist [ "\\n" ] "}"
+# Send authentication requests from random station addresses to
+# rogue accesspoints. This is a common way to test the quality of
+# various hostap implementations.
+hostap handle skip type management subtype beacon bssid <pentest> \e
+    with frame type management subtype auth \e
+    from random to &bssid bssid &bssid
 
-tableaddrlist	= lladdr [ "->" ipv4-dotted-quad | "&" lladdr-mask |
-		  "/" number ] [ "," ] [ tableaddrlist ]
+# Re-inject a received IEEE 802.11 frame on the interface ath0
+hostap handle on ath0 type management subtype auth with resend
 
-option		= "set" ( "hostap" "interface" name |
-		  "iapp" "interface" name [ "passive" ] |
-		  [ "iapp" "mode" ( "multicast" | "broadcast" ] )
-
-event		= "hostap" "handle" [ eventopt ] [ frmmatch ] [ action ]
-		  [ limit ]
-
-eventopt	= "skip" | "quick"
-
-action		= "with" ( "log" [ "verbose" ] | "frame" frmaction |
-		  "iapp" "type" "radiotap" |
-		  "node" ( "add" | "delete" ) frmactionaddr )
-
-frmmatch	= [ frmmatchtype ] [ "dir" ( "any" | [ "!" ] frmdir ) ]
-		  [ ( "from" | "to" | "bssid" ) frmmatchaddr ]
-
-frmmatchtype	= "type" ( "any" | [ "!" ] ( "data" | "management"
-		  [ frmmatchmgmt ] ) )
-
-frmmatchmgmt	= "subtype" ( "any" | [ "!" ] frmsubtype )
-
-frmmatchaddr	= "any" | [ "!" ] table | [ "!" ] lladdr
-
-frmaction	= frmactiontype [ "dir" frmdir ]
-		  ( "from" , "to" , "bssid" ) frmactionaddr
-
-frmactiontype	= "type" ( "data" | "management" "subtype" frmsubtype )
-
-frmactionaddr	= lladdr | refaddr | "random"
-
-limit		= "limit" number ( "sec" | "usec" )
-
-frmsubtype	= ( "probe-request" | "probe-resp" |
-		  "beacon" ) [ frmelems ] | "atim" | "auth" | "deauth" |
-		  "assoc-request" | "assoc-resp" | "reassoc-request" |
-		  "reassoc-response"
-
-frmelems	= "nwid" [ "!" ] name [ frmelems ]
-
-frmdir		= ( "no" | "to" | "from" | "ds" "to" ) "ds"
-
-refaddr		= "&" ( "from" | "to" | "bssid" )
+# Remove a blacklisted node from the kernel node tree
+hostap handle type management subtype auth from <blacklist> \e
+    with node delete &from
 .Ed
 .Sh FILES
 .Bl -tag -width "/etc/hostapd.conf" -compact

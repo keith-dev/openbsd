@@ -1,4 +1,4 @@
-.\"	$OpenBSD: ami.4,v 1.24 2005/08/24 19:31:27 marco Exp $
+.\"	$OpenBSD: ami.4,v 1.32 2006/02/24 09:57:55 jmc Exp $
 .\"
 .\" Michael Shalayeff, 2001. Public Domain.
 .\"
@@ -17,12 +17,56 @@ The
 driver provides support for the MegaRAID family of RAID controllers,
 including:
 .Pp
-.Bl -tag -width Ds -offset indent -compact
-.It Dell PERC2/DC, PERC3/DC, PERC3/DCL, PERC3/QC, PERC3/SC,
-.It Dell PERC4/DC, PERC4/SC, PERC4/Di, PERC4e/Di, PERC4/Si, and CERC
-.It Hewlett-Packard 438, 466, and T[567]
-.It LSI/AMI MegaRAID, MEGARAID 320, MEGARAID 320-2E
-.It LSI/Symbios 523 SATA
+.Bl -dash -offset indent -compact
+.It
+ACER MegaRAID ROMB-2E
+.It
+Dell CERC-PATA,
+PERC 2/DC,
+PERC 3/DC,
+PERC 3/DCL,
+PERC 3/Di,
+PERC 3/QC,
+PERC 3/SC,
+PERC 4/DC,
+PERC 4/Di,
+PERC 4/SC,
+PERC 4e/DC,
+PERC 4e/Di,
+PERC 4e/SC,
+PERC 4e/Si
+.It
+FSC MegaRAID PCI Express ROMB
+.It
+Hewlett-Packard 438,
+466,
+T[567]
+.It
+Intel RAID Controller SROMBU42E,
+SRCU42X,
+SRCU42E,
+SRCU41L,
+SRCS16,
+SRCS28X,
+SRCZCRX
+.It
+LSI/AMI/Symbios MegaRAID,
+MegaRAID 320-0,
+MegaRAID 320-1,
+MegaRAID 320-2,
+MegaRAID 320-1E,
+MegaRAID 320-2E,
+MegaRAID 320-0X,
+MegaRAID 320-2X,
+MegaRAID 320-4X,
+MegaRAID i4,
+523 SATA,
+MegaRAID 150-4,
+MegaRAID 150-6,
+MegaRAID 300-4x,
+MegaRAID 300-8x
+.It
+NEC MegaRAID PCI Express ROMB
 .El
 .Pp
 These controllers support RAID 0, RAID 1, RAID 5, JBOD,
@@ -66,6 +110,7 @@ The
 driver first appeared in
 .Ox 2.9 .
 .Sh AUTHORS
+.An -nosplit
 The
 .Nm
 driver was written by

@@ -1,4 +1,4 @@
-#	$OpenBSD: Makefile.inc,v 1.37 2005/02/01 15:12:28 millert Exp $
+#	$OpenBSD: Makefile.inc,v 1.39 2005/10/03 10:57:16 jmc Exp $
 
 # gen sources
 .PATH: ${LIBCSRCDIR}/arch/${MACHINE_ARCH}/gen ${LIBCSRCDIR}/gen
@@ -96,7 +96,7 @@ MLINKS+=getcap.3 cgetcap.3 getcap.3 cgetclose.3 getcap.3 cgetent.3 \
 MLINKS+=getcwd.3 getwd.3
 MLINKS+=getdomainname.3 setdomainname.3
 MLINKS+=getfsent.3 endfsent.3 getfsent.3 getfsfile.3 getfsent.3 getfsspec.3 \
-	getfsent.3 getfstype.3 getfsent.3 setfsent.3
+	getfsent.3 setfsent.3
 MLINKS+=getgrent.3 endgrent.3 getgrent.3 setgroupent.3 getgrent.3 getgrgid.3 \
 	getgrent.3 getgrnam.3 getgrent.3 setgrent.3 getgrent.3 setgrfile.3 \
 	getgrent.3 getgrgid_r.3 getgrent.3 getgrnam_r.3
@@ -130,4 +130,5 @@ MLINKS+=syslog.3 closelog.3 syslog.3 openlog.3 syslog.3 setlogmask.3 \
 MLINKS+=tolower.3 _tolower.3
 MLINKS+=toupper.3 _toupper.3
 MLINKS+=ttyname.3 ttyname_r.3 ttyname.3 isatty.3 ttyname.3 ttyslot.3
-MLINKS+=vis.3 strvis.3 vis.3 strnvis.3 vis.3 strvisx.3 unvis.3 strunvis.3
+MLINKS+=unvis.3 strunvis.3 unvis.3 strnunvis.3
+MLINKS+=vis.3 strvis.3 vis.3 strnvis.3 vis.3 strvisx.3

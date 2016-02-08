@@ -1,4 +1,4 @@
-/*	$OpenBSD: window.c,v 1.17 2005/06/14 18:14:40 kjell Exp $	*/
+/*	$OpenBSD: window.c,v 1.21 2006/02/25 14:40:16 otto Exp $	*/
 
 /* This file is in the public domain. */
 
@@ -8,12 +8,12 @@
 
 #include "def.h"
 
-MGWIN *
-new_window(BUFFER *bp)
+struct mgwin *
+new_window(struct buffer *bp)
 {
-	MGWIN *wp;
+	struct mgwin *wp;
 
-	wp = calloc(1, sizeof(MGWIN));
+	wp = calloc(1, sizeof(struct mgwin));
 	if (wp == NULL)
 		return (NULL);
 
@@ -27,25 +27,7 @@ new_window(BUFFER *bp)
 	wp->w_wrapline = NULL;
 	if (bp)
 		bp->b_nwnd++;
-	LIST_INIT(&wp->w_undo);
-	wp->w_undoptr = NULL;
-	wp->w_undopos = 0;
-
 	return (wp);
-}
-
-void
-free_window(MGWIN *wp)
-{
-	struct undo_rec *rec, *next;
-
-	rec = LIST_FIRST(&wp->w_undo);
-	while (rec != NULL) {
-		next = LIST_NEXT(rec, next);
-		free_undo_record(rec);
-		rec = next;
-	}
-	free(wp);
 }
 
 /*
@@ -77,22 +59,30 @@ reposition(int f, int n)
  * changed size, arrange that everything is redone, then call "update" to
  * fix the display.  We do this so the new size can be displayed.  In the
  * normal case the call to "update" in "main.c" refreshes the screen, and
- * all of the windows need not be recomputed.  Note that when you get to the
- * "display unusable" message, the screen will be messed up. If you make the
- * window bigger again, and send another command, everything will get fixed!
+ * all of the windows need not be recomputed. This call includes a
+ * 'force' parameter to ensure that the redraw is done, even after a
+ * a suspend/continue (where the window size parameters will already
+ * be updated). Note that when you get to the "display unusable"
+ * message, the screen will be messed up. If you make the window bigger
+ * again, and send another command, everything will get fixed!
  */
+int
+redraw(int f, int n)
+{
+	return (do_redraw(f, n, FALSE));
+}
+
 /* ARGSUSED */
 int
-refresh(int f, int n)
+do_redraw(int f, int n, int force)
 {
-	MGWIN	*wp;
-	int	 oldnrow;
-	int	 oldncol;
+	struct mgwin	*wp;
+	int		 oldnrow, oldncol;
 
 	oldnrow = nrow;
 	oldncol = ncol;
 	ttresize();
-	if (nrow != oldnrow || ncol != oldncol) {
+	if (nrow != oldnrow || ncol != oldncol || force) {
 
 		/* find last */
 		wp = wheadp;
@@ -121,7 +111,7 @@ refresh(int f, int n)
 int
 nextwind(int f, int n)
 {
-	MGWIN	*wp;
+	struct mgwin	*wp;
 
 	if ((wp = curwp->w_wndp) == NULL)
 		wp = wheadp;
@@ -140,7 +130,7 @@ nextwind(int f, int n)
 int
 prevwind(int f, int n)
 {
-	MGWIN	*wp1, *wp2;
+	struct mgwin	*wp1, *wp2;
 
 	wp1 = wheadp;
 	wp2 = curwp;
@@ -164,9 +154,9 @@ prevwind(int f, int n)
 int
 onlywind(int f, int n)
 {
-	MGWIN	*wp;
-	LINE	*lp;
-	int	 i;
+	struct mgwin	*wp;
+	struct line	*lp;
+	int		 i;
 
 	while (wheadp != curwp) {
 		wp = wheadp;
@@ -177,7 +167,7 @@ onlywind(int f, int n)
 			wp->w_bufp->b_markp = wp->w_markp;
 			wp->w_bufp->b_marko = wp->w_marko;
 		}
-		free_window(wp);
+		free(wp);
 	}
 	while (curwp->w_wndp != NULL) {
 		wp = curwp->w_wndp;
@@ -188,7 +178,7 @@ onlywind(int f, int n)
 			wp->w_bufp->b_markp = wp->w_markp;
 			wp->w_bufp->b_marko = wp->w_marko;
 		}
-		free_window(wp);
+		free(wp);
 	}
 	lp = curwp->w_linep;
 	i = curwp->w_toprow;
@@ -214,9 +204,9 @@ onlywind(int f, int n)
 int
 splitwind(int f, int n)
 {
-	MGWIN	*wp, *wp1, *wp2;
-	LINE	*lp;
-	int	 ntru, ntrd, ntrl;
+	struct mgwin	*wp, *wp1, *wp2;
+	struct line	*lp;
+	int		 ntru, ntrd, ntrl;
 
 	if (curwp->w_ntrows < 3) {
 		ewprintf("Cannot split a %d line window", curwp->w_ntrows);
@@ -297,9 +287,9 @@ splitwind(int f, int n)
 int
 enlargewind(int f, int n)
 {
-	MGWIN	*adjwp;
-	LINE	*lp;
-	int	 i;
+	struct mgwin	*adjwp;
+	struct line	*lp;
+	int		 i;
 
 	if (n < 0)
 		return (shrinkwind(f, -n));
@@ -346,9 +336,9 @@ enlargewind(int f, int n)
 int
 shrinkwind(int f, int n)
 {
-	MGWIN	*adjwp;
-	LINE	*lp;
-	int	 i;
+	struct mgwin	*adjwp;
+	struct line	*lp;
+	int		 i;
 
 	if (n < 0)
 		return (enlargewind(f, -n));
@@ -400,7 +390,7 @@ shrinkwind(int f, int n)
 int
 delwind(int f, int n)
 {
-	MGWIN	*wp, *nwp;
+	struct mgwin	*wp, *nwp;
 
 	wp = curwp;		/* Cheap...		 */
 
@@ -425,7 +415,7 @@ delwind(int f, int n)
 			nwp->w_wndp = wp->w_wndp;
 			break;
 		}
-	free_window(wp);
+	free(wp);
 	return (TRUE);
 }
 
@@ -434,10 +424,10 @@ delwind(int f, int n)
  * Pick the uppermost window that isn't the current window. An LRU algorithm
  * might be better. Return a pointer, or NULL on error.
  */
-MGWIN *
+struct mgwin *
 wpopup(void)
 {
-	MGWIN	*wp;
+	struct mgwin	*wp;
 
 	if (wheadp->w_wndp == NULL &&
 	    splitwind(FFRAND, 0) == FALSE)

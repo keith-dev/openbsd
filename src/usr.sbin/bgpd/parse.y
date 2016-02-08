@@ -1,4 +1,4 @@
-/*	$OpenBSD: parse.y,v 1.171 2005/08/09 20:27:25 claudio Exp $ */
+/*	$OpenBSD: parse.y,v 1.181 2006/02/10 14:34:40 claudio Exp $ */
 
 /*
  * Copyright (c) 2002, 2003, 2004 Henning Brauer <henning@openbsd.org>
@@ -45,6 +45,10 @@ static struct peer		*peer_l, *peer_l_old;
 static struct peer		*curpeer;
 static struct peer		*curgroup;
 static struct filter_head	*filter_l;
+static struct filter_head	*peerfilter_l;
+static struct filter_head	*groupfilter_l;
+static struct filter_rule	*curpeer_filter[2];
+static struct filter_rule	*curgroup_filter[2];
 static struct listen_addrs	*listen_addrs;
 static FILE			*fin = NULL;
 static int			 lineno = 1;
@@ -97,6 +101,7 @@ void		 copy_filterset(struct filter_set_head *,
 		    struct filter_set_head *);
 void		 move_filterset(struct filter_set_head *,
 		    struct filter_set_head *);
+struct filter_rule	*get_rule(enum action_types);
 
 TAILQ_HEAD(symhead, sym)	 symhead = TAILQ_HEAD_INITIALIZER(symhead);
 struct sym {
@@ -145,7 +150,7 @@ typedef struct {
 %token	RDE EVALUATE IGNORE COMPARE
 %token	GROUP NEIGHBOR NETWORK
 %token	REMOTEAS DESCR LOCALADDR MULTIHOP PASSIVE MAXPREFIX ANNOUNCE
-%token	ENFORCE NEIGHBORAS CAPABILITIES REFLECTOR DEPEND
+%token	ENFORCE NEIGHBORAS CAPABILITIES REFLECTOR DEPEND DOWN SOFTRECONFIG
 %token	DUMP IN OUT
 %token	LOG ROUTECOLL TRANSPARENT
 %token	TCP MD5SIG PASSWORD KEY
@@ -153,7 +158,7 @@ typedef struct {
 %token	QUICK
 %token	FROM TO ANY
 %token	CONNECTED STATIC
-%token	PREFIX PREFIXLEN SOURCEAS TRANSITAS COMMUNITY
+%token	PREFIX PREFIXLEN SOURCEAS TRANSITAS COMMUNITY DELETE
 %token	SET LOCALPREF MED METRIC NEXTHOP REJECT BLACKHOLE NOMODIFY
 %token	PREPEND_SELF PREPEND_PEER PFTABLE WEIGHT RTLABEL
 %token	ERROR
@@ -165,7 +170,7 @@ typedef struct {
 %type	<v.string>		string
 %type	<v.addr>		address
 %type	<v.prefix>		prefix addrspec
-%type	<v.u8>			action quick direction
+%type	<v.u8>			action quick direction delete
 %type	<v.filter_peers>	filter_peer filter_peer_l filter_peer_h
 %type	<v.filter_match>	filter_match filter_elm filter_match_h
 %type	<v.filter_as>		filter_as filter_as_l filter_as_h
@@ -176,7 +181,7 @@ typedef struct {
 %type	<v.filter_prefix>	filter_prefix filter_prefix_l
 %type	<v.filter_prefix>	filter_prefix_h filter_prefix_m
 %type	<v.u8>			unaryop binaryop filter_as_type
-%type	<v.encspec>		encspec;
+%type	<v.encspec>		encspec
 %%
 
 grammar		: /* empty */
@@ -529,6 +534,15 @@ neighbor	: {	curpeer = new_peer(); }
 			}
 		}
 		    peeropts_h {
+			if (curpeer_filter[0] != NULL)
+				TAILQ_INSERT_TAIL(peerfilter_l,
+				    curpeer_filter[0], entry);
+			if (curpeer_filter[1] != NULL)
+				TAILQ_INSERT_TAIL(peerfilter_l,
+				    curpeer_filter[1], entry);
+			curpeer_filter[0] = NULL;
+			curpeer_filter[1] = NULL;
+
 			if (neighbor_consistent(curpeer) == -1)
 				YYERROR;
 			curpeer->next = peer_l;
@@ -554,6 +568,15 @@ group		: GROUP string optnl '{' optnl {
 			}
 		}
 		    groupopts_l '}' {
+			if (curgroup_filter[0] != NULL)
+				TAILQ_INSERT_TAIL(groupfilter_l,
+				    curgroup_filter[0], entry);
+			if (curgroup_filter[1] != NULL)
+				TAILQ_INSERT_TAIL(groupfilter_l,
+				    curgroup_filter[1], entry);
+			curgroup_filter[0] = NULL;
+			curgroup_filter[1] = NULL;
+
 			free(curgroup);
 			curgroup = NULL;
 		}
@@ -607,6 +630,9 @@ peeropts	: REMOTEAS asnumber	{
 		}
 		| PASSIVE		{
 			curpeer->conf.passive = 1;
+		}
+		| DOWN		{
+			curpeer->conf.down = 1;
 		}
 		| HOLDTIME number	{
 			if ($2 < MIN_HOLDTIME) {
@@ -811,17 +837,21 @@ peeropts	: REMOTEAS asnumber	{
 			curpeer->conf.announce_capa = $3;
 		}
 		| SET filter_set_opt	{
-			if (merge_filterset(&curpeer->conf.attrset, $2) == -1)
+			struct filter_rule	*r;
+
+			r = get_rule($2->type);
+			if (merge_filterset(&r->set, $2) == -1)
 				YYERROR;
 		}
 		| SET optnl "{" optnl filter_set_l optnl "}"	{
+			struct filter_rule	*r;
 			struct filter_set	*s;
 
 			while ((s = TAILQ_FIRST($5)) != NULL) {
 				TAILQ_REMOVE($5, s, entry);
-				if (merge_filterset(&curpeer->conf.attrset, s)
-				    == -1)
-				YYERROR;
+				r = get_rule(s->type);
+				if (merge_filterset(&r->set, s) == -1)
+					YYERROR;
 			}
 			free($5);
 		}
@@ -863,6 +893,12 @@ peeropts	: REMOTEAS asnumber	{
 				YYERROR;
 			}
 			free($3);
+		}
+		| SOFTRECONFIG inout yesno {
+			if ($2)
+				curpeer->conf.softreconfig_in = $3;
+			else
+				curpeer->conf.softreconfig_out = $3;
 		}
 		;
 
@@ -1206,6 +1242,10 @@ filter_set_l	: filter_set_l comma filter_set_opt	{
 		}
 		;
 
+delete		: /* empty */	{ $$ = 0; }
+		| DELETE	{ $$ = 1; }
+		;
+
 filter_set_opt	: LOCALPREF number		{
 			if (($$ = calloc(1, sizeof(struct filter_set))) == NULL)
 				fatal(NULL);
@@ -1246,7 +1286,7 @@ filter_set_opt	: LOCALPREF number		{
 			if (($$ = calloc(1, sizeof(struct filter_set))) == NULL)
 				fatal(NULL);
 			$$->type = ACTION_SET_RELATIVE_MED;
-			$$->action.metric = $3;
+			$$->action.relative = $3;
 		}
 		| MED '-' number			{
 			if ($3 > INT_MAX) {
@@ -1298,7 +1338,7 @@ filter_set_opt	: LOCALPREF number		{
 			if (($$ = calloc(1, sizeof(struct filter_set))) == NULL)
 				fatal(NULL);
 			$$->type = ACTION_SET_RELATIVE_WEIGHT;
-			$$->action.metric = $3;
+			$$->action.relative = $3;
 		}
 		| WEIGHT '-' number			{
 			if ($3 > INT_MAX) {
@@ -1389,27 +1429,41 @@ filter_set_opt	: LOCALPREF number		{
 			}
 			free($2);
 		}
-		| COMMUNITY STRING		{
+		| COMMUNITY delete STRING	{
 			if (($$ = calloc(1, sizeof(struct filter_set))) == NULL)
 				fatal(NULL);
-			$$->type = ACTION_SET_COMMUNITY;
-			if (parsecommunity($2, &$$->action.community.as,
+			if ($2)
+				$$->type = ACTION_DEL_COMMUNITY;
+			else
+				$$->type = ACTION_SET_COMMUNITY;
+
+			if (parsecommunity($3, &$$->action.community.as,
 			    &$$->action.community.type) == -1) {
-				free($2);
+				free($3);
+				free($$);
 				YYERROR;
 			}
-			free($2);
+			free($3);
+			/* Don't allow setting of any match */
+			if (!$2 && ($$->action.community.as == COMMUNITY_ANY ||
+			    $$->action.community.type == COMMUNITY_ANY)) {
+				yyerror("'*' is not allowed in set community");
+				free($$);
+				YYERROR;
+			}
 			/* Don't allow setting of unknown well-known types */
 			if ($$->action.community.as == COMMUNITY_WELLKNOWN) {
 				switch ($$->action.community.type) {
 				case COMMUNITY_NO_EXPORT:
 				case COMMUNITY_NO_ADVERTISE:
 				case COMMUNITY_NO_EXPSUBCONFED:
+				case COMMUNITY_NO_PEER:
 					/* valid */
 					break;
 				default:
 					/* unknown */
 					yyerror("Invalid well-known community");
+					free($$);
 					YYERROR;
 					break;
 				}
@@ -1479,9 +1533,11 @@ lookup(char *s)
 		{ "community",		COMMUNITY},
 		{ "compare",		COMPARE},
 		{ "connected",		CONNECTED},
+		{ "delete",		DELETE},
 		{ "deny",		DENY},
 		{ "depend",		DEPEND},
 		{ "descr",		DESCR},
+		{ "down",		DOWN},
 		{ "dump",		DUMP},
 		{ "enforce",		ENFORCE},
 		{ "esp",		ESP},
@@ -1529,6 +1585,7 @@ lookup(char *s)
 		{ "router-id",		ROUTERID},
 		{ "rtlabel",		RTLABEL},
 		{ "set",		SET},
+		{ "softreconfig",	SOFTRECONFIG},
 		{ "source-as",		SOURCEAS},
 		{ "spi",		SPI},
 		{ "static",		STATIC},
@@ -1769,8 +1826,17 @@ parse_config(char *filename, struct bgpd_config *xconf,
 		fatal(NULL);
 	if ((listen_addrs = calloc(1, sizeof(struct listen_addrs))) == NULL)
 		fatal(NULL);
+	if ((filter_l = calloc(1, sizeof(struct filter_head))) == NULL)
+		fatal(NULL);
+	if ((peerfilter_l = calloc(1, sizeof(struct filter_head))) == NULL)
+		fatal(NULL);
+	if ((groupfilter_l = calloc(1, sizeof(struct filter_head))) == NULL)
+		fatal(NULL);
 	LIST_INIT(mrtconf);
 	TAILQ_INIT(listen_addrs);
+	TAILQ_INIT(filter_l);
+	TAILQ_INIT(peerfilter_l);
+	TAILQ_INIT(groupfilter_l);
 
 	peer_l = NULL;
 	peer_l_old = *xpeers;
@@ -1781,11 +1847,11 @@ parse_config(char *filename, struct bgpd_config *xconf,
 	id = 1;
 	conf->opts = xconf->opts;
 
-	/* filter and network list are always empty in the parent */
-	filter_l = xfilter_l;
-	TAILQ_INIT(filter_l);
+	/* network list is always empty in the parent */
 	netconf = nc;
 	TAILQ_INIT(netconf);
+	/* init the empty filter list for later */
+	TAILQ_INIT(xfilter_l);
 
 	yyparse();
 
@@ -1827,6 +1893,16 @@ parse_config(char *filename, struct bgpd_config *xconf,
 			TAILQ_REMOVE(filter_l, r, entry);
 			free(r);
 		}
+
+		while ((r = TAILQ_FIRST(peerfilter_l)) != NULL) {
+			TAILQ_REMOVE(peerfilter_l, r, entry);
+			free(r);
+		}
+
+		while ((r = TAILQ_FIRST(groupfilter_l)) != NULL) {
+			TAILQ_REMOVE(groupfilter_l, r, entry);
+			free(r);
+		}
 	} else {
 		errors += merge_config(xconf, conf, peer_l, listen_addrs);
 		errors += mrt_mergeconfig(xmconf, mrtconf);
@@ -1836,10 +1912,31 @@ parse_config(char *filename, struct bgpd_config *xconf,
 			pnext = p->next;
 			free(p);
 		}
+
+		/*
+		 * Move filter list and static group and peer filtersets
+		 * together. Static group sets come first then peer sets
+		 * last normal filter rules.
+		 */
+		while ((r = TAILQ_FIRST(groupfilter_l)) != NULL) {
+			TAILQ_REMOVE(groupfilter_l, r, entry);
+			TAILQ_INSERT_TAIL(xfilter_l, r, entry);
+		}
+		while ((r = TAILQ_FIRST(peerfilter_l)) != NULL) {
+			TAILQ_REMOVE(peerfilter_l, r, entry);
+			TAILQ_INSERT_TAIL(xfilter_l, r, entry);
+		}
+		while ((r = TAILQ_FIRST(filter_l)) != NULL) {
+			TAILQ_REMOVE(filter_l, r, entry);
+			TAILQ_INSERT_TAIL(xfilter_l, r, entry);
+		}
 	}
 
 	free(conf);
 	free(mrtconf);
+	free(filter_l);
+	free(peerfilter_l);
+	free(groupfilter_l);
 
 	return (errors ? -1 : 0);
 }
@@ -1941,6 +2038,8 @@ getcommunity(char *s)
 
 	if (strcmp(s, "*") == 0)
 		return (COMMUNITY_ANY);
+	if (strcmp(s, "neighbor-as") == 0)
+		return (COMMUNITY_NEIGHBOR_AS);
 	if (atoul(s, &ulval) == -1) {
 		yyerror("\"%s\" is not a number", s);
 		return (COMMUNITY_ERROR);
@@ -2015,7 +2114,8 @@ alloc_peer(void)
 	p->conf.capabilities.mp_v4 = SAFI_UNICAST;
 	p->conf.capabilities.mp_v6 = SAFI_NONE;
 	p->conf.capabilities.refresh = 1;
-	TAILQ_INIT(&p->conf.attrset);
+	p->conf.softreconfig_in = 1;
+	p->conf.softreconfig_out = 1;
 
 	return (p);
 }
@@ -2036,8 +2136,6 @@ new_peer(void)
 		    sizeof(p->conf.descr)) >= sizeof(p->conf.descr))
 			fatalx("new_peer descr strlcpy");
 		p->conf.groupid = curgroup->conf.id;
-		TAILQ_INIT(&p->conf.attrset);
-		copy_filterset(&curgroup->conf.attrset, &p->conf.attrset);
 	}
 	p->next = NULL;
 
@@ -2295,6 +2393,10 @@ merge_filterset(struct filter_set_head *sh, struct filter_set *s)
 	struct filter_set	*t;
 
 	TAILQ_FOREACH(t, sh, entry) {
+		/*
+		 * need to cycle across the full list because even
+		 * if types are not equal filterset_cmp() may return 0.
+		 */
 		if (filterset_cmp(s, t) == 0) {
 			if (s->type == ACTION_SET_COMMUNITY)
 				yyerror("community is already set");
@@ -2304,6 +2406,37 @@ merge_filterset(struct filter_set_head *sh, struct filter_set *s)
 			return (-1);
 		}
 	}
+
+	TAILQ_FOREACH(t, sh, entry) {
+		if (s->type < t->type) {
+			TAILQ_INSERT_BEFORE(t, s, entry);
+			return (0);
+		}
+		if (s->type == t->type)
+			switch (s->type) {
+			case ACTION_SET_COMMUNITY:
+				if (s->action.community.as <
+				    t->action.community.as ||
+				    (s->action.community.as ==
+				    t->action.community.as &&
+				    s->action.community.type <
+				    t->action.community.type)) {
+					TAILQ_INSERT_BEFORE(t, s, entry);
+					return (0);
+				}
+				break;
+			case ACTION_SET_NEXTHOP:
+				if (s->action.nexthop.af <
+				    t->action.nexthop.af) {
+					TAILQ_INSERT_BEFORE(t, s, entry);
+					return (0);
+				}
+				break;
+			default:
+				break;
+			}
+	}
+
 	TAILQ_INSERT_TAIL(sh, s, entry);
 	return (0);
 }
@@ -2331,7 +2464,7 @@ move_filterset(struct filter_set_head *source, struct filter_set_head *dest)
 
 	TAILQ_INIT(dest);
 
-	if (source == NULL || TAILQ_EMPTY(source))
+	if (source == NULL)
 		return;
 
 	while ((s = TAILQ_FIRST(source)) != NULL) {
@@ -2340,3 +2473,38 @@ move_filterset(struct filter_set_head *source, struct filter_set_head *dest)
 	}
 }
 
+struct filter_rule *
+get_rule(enum action_types type)
+{
+	struct filter_rule	*r;
+	int			 out;
+
+	switch (type) {
+	case ACTION_SET_PREPEND_SELF:
+	case ACTION_SET_NEXTHOP_NOMODIFY:
+		out = 1;
+		break;
+	default:
+		out = 0;
+		break;
+	}
+	r = (curpeer == curgroup) ? curgroup_filter[out] : curpeer_filter[out];
+	if (r == NULL) {
+		if ((r = calloc(1, sizeof(struct filter_rule))) == NULL)
+			fatal(NULL);
+		r->quick = 0;
+		r->dir = out ? DIR_OUT : DIR_IN;
+		r->action = ACTION_NONE;
+		TAILQ_INIT(&r->set);
+		if (curpeer == curgroup) {
+			/* group */
+			r->peer.groupid = curgroup->conf.id;
+			curgroup_filter[out] = r;
+		} else {
+			/* peer */
+			r->peer.peerid = curpeer->conf.id;
+			curpeer_filter[out] = r;
+		}
+	}
+	return (r);
+}

@@ -25,7 +25,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- * $OpenBSD: ipcp.c,v 1.41 2005/07/17 19:13:24 brad Exp $
+ * $OpenBSD: ipcp.c,v 1.44 2005/09/21 16:58:34 brad Exp $
  */
 
 #include <sys/param.h>
@@ -872,13 +872,14 @@ IpcpLayerDown(struct fsm *fp)
     log_Printf(LogIPCP, "%s: LayerDown: %s\n", fp->link->name, addr);
 
 #ifndef NORADIUS
+    radius_Flush(&fp->bundle->radius);
     radius_Account(&fp->bundle->radius, &fp->bundle->radacct,
-                   fp->bundle->links, RAD_STOP, &ipcp->peer_ip, &ipcp->ifmask,
-                   &ipcp->throughput);
+                   fp->bundle->links, RAD_STOP, &ipcp->throughput);
 
-  if (fp->bundle->radius.cfg.file && fp->bundle->radius.filterid)
-    system_Select(fp->bundle, fp->bundle->radius.filterid, LINKDOWNFILE,
-                  NULL, NULL);
+    if (fp->bundle->radius.cfg.file && fp->bundle->radius.filterid)
+      system_Select(fp->bundle, fp->bundle->radius.filterid, LINKDOWNFILE,
+                    NULL, NULL);
+    radius_StopTimer(&fp->bundle->radius);
 #endif
 
     /*
@@ -940,12 +941,14 @@ IpcpLayerUp(struct fsm *fp)
     return 0;
 
 #ifndef NORADIUS
+  radius_Account_Set_Ip(&fp->bundle->radacct, &ipcp->peer_ip, &ipcp->ifmask);
   radius_Account(&fp->bundle->radius, &fp->bundle->radacct, fp->bundle->links,
-                 RAD_START, &ipcp->peer_ip, &ipcp->ifmask, &ipcp->throughput);
+                 RAD_START, &ipcp->throughput);
 
   if (fp->bundle->radius.cfg.file && fp->bundle->radius.filterid)
     system_Select(fp->bundle, fp->bundle->radius.filterid, LINKUPFILE,
                   NULL, NULL);
+  radius_StartTimer(fp->bundle);
 #endif
 
   /*

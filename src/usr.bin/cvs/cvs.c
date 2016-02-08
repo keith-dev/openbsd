@@ -1,4 +1,4 @@
-/*	$OpenBSD: cvs.c,v 1.84 2005/08/10 14:49:20 xsa Exp $	*/
+/*	$OpenBSD: cvs.c,v 1.94 2006/01/29 11:17:09 xsa Exp $	*/
 /*
  * Copyright (c) 2004 Jean-Francois Brousseau <jfb@openbsd.org>
  * All rights reserved.
@@ -24,24 +24,11 @@
  * ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include <sys/stat.h>
-#include <sys/types.h>
-#include <sys/wait.h>
-
-#include <ctype.h>
-#include <err.h>
-#include <errno.h>
-#include <pwd.h>
-#include <signal.h>
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-#include <unistd.h>
+#include "includes.h"
 
 #include "cvs.h"
 #include "log.h"
 #include "file.h"
-#include "strtab.h"
 
 
 extern char *__progname;
@@ -103,10 +90,11 @@ main(int argc, char **argv)
 	struct passwd *pw;
 	struct stat st;
 
+	tzset();
+
 	TAILQ_INIT(&cvs_variables);
 
-	if (cvs_log_init(LD_STD, 0) < 0)
-		err(1, "failed to initialize logging");
+	cvs_log_init(LD_STD, 0);
 
 	/* by default, be very verbose */
 	(void)cvs_log_filter(LP_FILTER_UNSET, LP_INFO);
@@ -114,8 +102,6 @@ main(int argc, char **argv)
 #ifdef DEBUG
 	(void)cvs_log_filter(LP_FILTER_UNSET, LP_DEBUG);
 #endif
-
-	cvs_strtab_init();
 
 	/* check environment so command-line options override it */
 	if ((envstr = getenv("CVS_RSH")) != NULL)
@@ -130,14 +116,10 @@ main(int argc, char **argv)
 		cvs_readonly = 1;
 
 	if ((cvs_homedir = getenv("HOME")) == NULL) {
-		pw = getpwuid(getuid());
-		if (pw == NULL) {
-			cvs_log(LP_NOTICE,
-				"failed to get user's password entry");
-			exit(CVS_EX_DATA);
-		}
+		if ((pw = getpwuid(getuid())) == NULL)
+			fatal("getpwuid failed");
 		cvs_homedir = pw->pw_dir;
-        }
+	}
 
 	if ((envstr = getenv("TMPDIR")) != NULL)
 		cvs_tmpdir = envstr;
@@ -158,40 +140,30 @@ main(int argc, char **argv)
 	 * the environment variable TMPDIR, or via
 	 * the global option -T <dir>
 	 */
-	if (stat(cvs_tmpdir, &st) == -1) {
-		cvs_log(LP_ERR, "failed to stat `%s'", cvs_tmpdir);
-		exit(CVS_EX_FILE);
-	} else if (!S_ISDIR(st.st_mode)) {
-		cvs_log(LP_ERR, "`%s' is not valid temporary directory",
-		    cvs_tmpdir);
-		exit(CVS_EX_FILE);
-	}
+	if (stat(cvs_tmpdir, &st) == -1)
+		fatal("stat failed on `%s': %s", cvs_tmpdir, strerror(errno));
+	else if (!S_ISDIR(st.st_mode))
+		fatal("`%s' is not valid temporary directory", cvs_tmpdir);
 
 	if (cvs_readrc == 1) {
 		cvs_read_rcfile();
 
 		if (cvs_defargs != NULL) {
-			targv = cvs_makeargv(cvs_defargs, &i);
-			if (targv == NULL) {
-				cvs_log(LP_ERR,
-				    "failed to load default arguments to %s",
+			if ((targv = cvs_makeargv(cvs_defargs, &i)) == NULL)
+				fatal("failed to load default arguments to %s",
 				    __progname);
-				exit(CVS_EX_DATA);
-			}
 
 			cvs_getopt(i, targv);
 			cvs_freeargv(targv, i);
-			free(targv);
+			xfree(targv);
 		}
 	}
 
 	/* setup signal handlers */
 	signal(SIGPIPE, SIG_IGN);
 
-	if (cvs_file_init() < 0) {
-		cvs_log(LP_ERR, "failed to initialize file support");
-		exit(CVS_EX_FILE);
-	}
+	if (cvs_file_init() < 0)
+		fatal("failed to initialize file support");
 
 	ret = -1;
 
@@ -215,11 +187,9 @@ main(int argc, char **argv)
 		/* transform into a new argument vector */
 		ret = cvs_getargv(cmdp->cmd_defargs, cmd_argv + 1,
 		    CVS_CMD_MAXARG - 1);
-		if (ret < 0) {
-			cvs_log(LP_ERRNO, "failed to generate argument vector "
-			    "from default arguments");
-			exit(CVS_EX_DATA);
-		}
+		if (ret < 0)
+			fatal("main: cvs_getargv failed");
+
 		cmd_argc += ret;
 	}
 	for (ret = 1; ret < argc; ret++)
@@ -228,8 +198,8 @@ main(int argc, char **argv)
 	ret = cvs_startcmd(cmdp, cmd_argc, cmd_argv);
 	switch (ret) {
 	case CVS_EX_USAGE:
-		fprintf(stderr, "Usage: %s %s %s\n", __progname, cvs_command,
-		    cmdp->cmd_synopsis);
+		fprintf(stderr, "Usage: %s %s %s\n", __progname,
+		    cmdp->cmd_name, cmdp->cmd_synopsis);
 		break;
 	case CVS_EX_DATA:
 		cvs_log(LP_ABORT, "internal data error");
@@ -257,9 +227,7 @@ main(int argc, char **argv)
 	if (cvs_files != NULL)
 		cvs_file_free(cvs_files);
 	if (cvs_msg != NULL)
-		free(cvs_msg);
-
-	cvs_strtab_cleanup();
+		xfree(cvs_msg);
 
 	return (ret);
 }
@@ -340,9 +308,9 @@ cvs_getopt(int argc, char **argv)
 		case 'z':
 			cvs_compress = (int)strtol(optarg, &ep, 10);
 			if (*ep != '\0')
-				errx(1, "error parsing compression level");
+				fatal("error parsing compression level");
 			if (cvs_compress < 0 || cvs_compress > 9)
-				errx(1, "gzip compression level must be "
+				fatal("gzip compression level must be "
 				    "between 0 and 9");
 			break;
 		default:
@@ -370,13 +338,14 @@ static void
 cvs_read_rcfile(void)
 {
 	char rcpath[MAXPATHLEN], linebuf[128], *lp, *p;
-	int l, linenum = 0;
+	int linenum = 0;
 	size_t len;
 	struct cvs_cmd *cmdp;
 	FILE *fp;
 
-	l = snprintf(rcpath, sizeof(rcpath), "%s/%s", cvs_homedir, CVS_PATH_RC);
-	if (l == -1 || l >= (int)sizeof(rcpath)) {
+	if (strlcpy(rcpath, cvs_homedir, sizeof(rcpath)) >= sizeof(rcpath) ||
+	    strlcat(rcpath, "/", sizeof(rcpath)) >= sizeof(rcpath) ||
+	    strlcat(rcpath, CVS_PATH_RC, sizeof(rcpath)) >= sizeof(rcpath)) {
 		errno = ENAMETOOLONG;
 		cvs_log(LP_ERRNO, "%s", rcpath);
 		return;
@@ -422,10 +391,7 @@ cvs_read_rcfile(void)
 			 * argument processing.
 			 */
 			*lp = ' ';
-			cvs_defargs = strdup(p);
-			if (cvs_defargs == NULL)
-				cvs_log(LP_ERRNO,
-				    "failed to copy global arguments");
+			cvs_defargs = xstrdup(p);
 		} else {
 			lp++;
 			cmdp = cvs_findcmd(p);
@@ -436,11 +402,7 @@ cvs_read_rcfile(void)
 				continue;
 			}
 
-			cmdp->cmd_defargs = strdup(lp);
-			if (cmdp->cmd_defargs == NULL)
-				cvs_log(LP_ERRNO,
-				    "failed to copy default arguments for %s",
-				    cmdp->cmd_name);
+			cmdp->cmd_defargs = xstrdup(lp);
 		}
 	}
 	if (ferror(fp)) {
@@ -483,33 +445,16 @@ cvs_var_set(const char *var, const char *val)
 		if (strcmp(vp->cv_name, var) == 0)
 			break;
 
-	valcp = strdup(val);
-	if (valcp == NULL) {
-		cvs_log(LP_ERRNO, "failed to allocate variable");
-		return (-1);
-	}
-
+	valcp = xstrdup(val);
 	if (vp == NULL) {
-		vp = (struct cvs_var *)malloc(sizeof(*vp));
-		if (vp == NULL) {
-			cvs_log(LP_ERRNO, "failed to allocate variable");
-			free(valcp);
-			return (-1);
-		}
+		vp = (struct cvs_var *)xmalloc(sizeof(*vp));
 		memset(vp, 0, sizeof(*vp));
 
-		vp->cv_name = strdup(var);
-		if (vp->cv_name == NULL) {
-			cvs_log(LP_ERRNO, "failed to allocate variable");
-			free(valcp);
-			free(vp);
-			return (-1);
-		}
-
+		vp->cv_name = xstrdup(var);
 		TAILQ_INSERT_TAIL(&cvs_variables, vp, cv_link);
 
 	} else	/* free the previous value */
-		free(vp->cv_val);
+		xfree(vp->cv_val);
 
 	vp->cv_val = valcp;
 
@@ -531,9 +476,9 @@ cvs_var_unset(const char *var)
 	TAILQ_FOREACH(vp, &cvs_variables, cv_link)
 		if (strcmp(vp->cv_name, var) == 0) {
 			TAILQ_REMOVE(&cvs_variables, vp, cv_link);
-			free(vp->cv_name);
-			free(vp->cv_val);
-			free(vp);
+			xfree(vp->cv_name);
+			xfree(vp->cv_val);
+			xfree(vp);
 			return (0);
 		}
 

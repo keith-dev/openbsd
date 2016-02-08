@@ -23,7 +23,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- *	$OpenBSD: radius.c,v 1.26 2005/07/17 19:13:25 brad Exp $
+ *	$OpenBSD: radius.c,v 1.36 2005/09/21 16:58:34 brad Exp $
  *
  */
 
@@ -93,6 +93,10 @@
 #include "ncp.h"
 #include "bundle.h"
 #include "proto.h"
+
+#if !defined(UINT32_MAX)
+#define	UINT32_MAX	0xffffffffU
+#endif
 
 #ifndef NODES
 struct mschap_response {
@@ -219,6 +223,25 @@ demangle(struct radius *r, const void *mangled, size_t mlen,
 }
 #endif
 
+/* XXX: This should go into librarius. */
+#ifndef NOINET6
+static uint8_t *
+rad_cvt_ipv6prefix(const void *data, size_t len)
+{
+	const size_t ipv6len = sizeof(struct in6_addr) + 2;
+	uint8_t *s;
+
+	if (len > ipv6len)
+		return NULL;
+	s = malloc(ipv6len);
+	if (s != NULL) {
+		memset(s, 0, ipv6len);
+		memcpy(s, data, len);
+	}
+	return s;
+}
+#endif
+
 /*
  * rad_continue_send_request() has given us `got' (non-zero).  Deal with it.
  */
@@ -235,13 +258,18 @@ radius_Process(struct radius *r, int got)
   const char *stype;
   u_int32_t ipaddr, vendor;
   struct in_addr ip;
+#ifndef NOINET6
+  uint8_t ipv6addr[INET6_ADDRSTRLEN];
+  struct in6_addr ip6;
+#endif
 
   r->cx.fd = -1;		/* Stop select()ing */
   stype = r->cx.auth ? "auth" : "acct";
 
   switch (got) {
     case RAD_ACCESS_ACCEPT:
-      log_Printf(LogPHASE, "Radius(%s): ACCEPT received\n", stype);
+      log_Printf(log_IsKept(LogRADIUS) ? LogRADIUS : LogPHASE,
+		 "Radius(%s): ACCEPT received\n", stype);
       if (!r->cx.auth) {
         rad_close(r->cx.rad);
         return;
@@ -249,7 +277,8 @@ radius_Process(struct radius *r, int got)
       break;
 
     case RAD_ACCESS_REJECT:
-      log_Printf(LogPHASE, "Radius(%s): REJECT received\n", stype);
+      log_Printf(log_IsKept(LogRADIUS) ? LogRADIUS : LogPHASE,
+		 "Radius(%s): REJECT received\n", stype);
       if (!r->cx.auth) {
         rad_close(r->cx.rad);
         return;
@@ -258,14 +287,22 @@ radius_Process(struct radius *r, int got)
 
     case RAD_ACCESS_CHALLENGE:
       /* we can't deal with this (for now) ! */
-      log_Printf(LogPHASE, "Radius: CHALLENGE received (can't handle yet)\n");
+      log_Printf(log_IsKept(LogRADIUS) ? LogRADIUS : LogPHASE,
+		 "Radius: CHALLENGE received (can't handle yet)\n");
       if (r->cx.auth)
         auth_Failure(r->cx.auth);
       rad_close(r->cx.rad);
       return;
 
     case RAD_ACCOUNTING_RESPONSE:
-      log_Printf(LogPHASE, "Radius(%s): Accounting response received\n", stype);
+      /*
+       * It's probably not ideal to log this at PHASE level as we'll see
+       * too much stuff going to the log when ``set rad_alive'' is used.
+       * So we differ from older behaviour (ppp version 3.1 and before)
+       * and just log accounting responses to LogRADIUS.
+       */
+      log_Printf(LogRADIUS, "Radius(%s): Accounting response received\n",
+		 stype);
       if (r->cx.auth)
         auth_Failure(r->cx.auth);		/* unexpected !!! */
 
@@ -274,7 +311,8 @@ radius_Process(struct radius *r, int got)
       return;
 
     case -1:
-      log_Printf(LogPHASE, "radius(%s): %s\n", stype, rad_strerror(r->cx.rad));
+      log_Printf(log_IsKept(LogRADIUS) ? LogRADIUS : LogPHASE,
+		 "radius(%s): %s\n", stype, rad_strerror(r->cx.rad));
       if (r->cx.auth)
         auth_Failure(r->cx.auth);
       rad_close(r->cx.rad);
@@ -297,7 +335,8 @@ radius_Process(struct radius *r, int got)
     switch (res) {
       case RAD_FRAMED_IP_ADDRESS:
         r->ip = rad_cvt_addr(data);
-        log_Printf(LogPHASE, " IP %s\n", inet_ntoa(r->ip));
+	log_Printf(log_IsKept(LogRADIUS) ? LogRADIUS : LogPHASE,
+		   " IP %s\n", inet_ntoa(r->ip));
         break;
 
       case RAD_FILTER_ID:
@@ -308,22 +347,26 @@ radius_Process(struct radius *r, int got)
           rad_close(r->cx.rad);
           return;
         }
-        log_Printf(LogPHASE, " Filter \"%s\"\n", r->filterid);
+	log_Printf(log_IsKept(LogRADIUS) ? LogRADIUS : LogPHASE,
+		   " Filter \"%s\"\n", r->filterid);
         break;
 
       case RAD_SESSION_TIMEOUT:
         r->sessiontime = rad_cvt_int(data);
-        log_Printf(LogPHASE, " Session-Timeout %lu\n", r->sessiontime);
+	log_Printf(log_IsKept(LogRADIUS) ? LogRADIUS : LogPHASE,
+		   " Session-Timeout %lu\n", r->sessiontime);
         break;
 
       case RAD_FRAMED_IP_NETMASK:
         r->mask = rad_cvt_addr(data);
-        log_Printf(LogPHASE, " Netmask %s\n", inet_ntoa(r->mask));
+	log_Printf(log_IsKept(LogRADIUS) ? LogRADIUS : LogPHASE,
+		   " Netmask %s\n", inet_ntoa(r->mask));
         break;
 
       case RAD_FRAMED_MTU:
         r->mtu = rad_cvt_int(data);
-        log_Printf(LogPHASE, " MTU %lu\n", r->mtu);
+	log_Printf(log_IsKept(LogRADIUS) ? LogRADIUS : LogPHASE,
+		   " MTU %lu\n", r->mtu);
         break;
 
       case RAD_FRAMED_ROUTING:
@@ -335,7 +378,8 @@ radius_Process(struct radius *r, int got)
 
       case RAD_FRAMED_COMPRESSION:
         r->vj = rad_cvt_int(data) == 1 ? 1 : 0;
-        log_Printf(LogPHASE, " VJ %sabled\n", r->vj ? "en" : "dis");
+	log_Printf(log_IsKept(LogRADIUS) ? LogRADIUS : LogPHASE,
+		   " VJ %sabled\n", r->vj ? "en" : "dis");
         break;
 
       case RAD_FRAMED_ROUTE:
@@ -353,9 +397,11 @@ radius_Process(struct radius *r, int got)
           return;
         }
 
-        log_Printf(LogPHASE, " Route: %s\n", nuke);
+	log_Printf(log_IsKept(LogRADIUS) ? LogRADIUS : LogPHASE,
+		   " Route: %s\n", nuke);
         bundle = r->cx.auth->physical->dl->bundle;
         ip.s_addr = INADDR_ANY;
+        ncpaddr_setip4(&gw, ip);
         ncprange_setip4host(&dest, ip);
         argc = command_Interpret(nuke, strlen(nuke), argv);
         if (argc < 0)
@@ -402,8 +448,70 @@ radius_Process(struct radius *r, int got)
           rad_close(r->cx.rad);
           return;
         }
-        log_Printf(LogPHASE, " Reply-Message \"%s\"\n", r->repstr);
+	log_Printf(log_IsKept(LogRADIUS) ? LogRADIUS : LogPHASE,
+		   " Reply-Message \"%s\"\n", r->repstr);
         break;
+
+#ifndef NOINET6
+      case RAD_FRAMED_IPV6_PREFIX:
+	free(r->ipv6prefix);
+        r->ipv6prefix = rad_cvt_ipv6prefix(data, len);
+	inet_ntop(AF_INET6, &r->ipv6prefix[2], ipv6addr, sizeof(ipv6addr));
+	log_Printf(log_IsKept(LogRADIUS) ? LogRADIUS : LogPHASE,
+		   " IPv6 %s/%d\n", ipv6addr, r->ipv6prefix[1]);
+        break;
+
+      case RAD_FRAMED_IPV6_ROUTE:
+        /*
+         * We expect a string of the format ``dest[/bits] gw [metrics]''
+         * Any specified metrics are ignored.  MYADDR6 and HISADDR6 are
+         * understood for ``dest'' and ``gw'' and ``::'' is the same
+         * as ``HISADDR6''.
+         */
+
+        if ((nuke = rad_cvt_string(data, len)) == NULL) {
+          log_Printf(LogERROR, "rad_cvt_string: %s\n", rad_strerror(r->cx.rad));
+          auth_Failure(r->cx.auth);
+          rad_close(r->cx.rad);
+          return;
+        }
+
+	log_Printf(log_IsKept(LogRADIUS) ? LogRADIUS : LogPHASE,
+		   " IPv6 Route: %s\n", nuke);
+        bundle = r->cx.auth->physical->dl->bundle;
+	ncpaddr_setip6(&gw, &in6addr_any);
+	ncprange_set(&dest, &gw, 0);
+        argc = command_Interpret(nuke, strlen(nuke), argv);
+        if (argc < 0)
+          log_Printf(LogWARN, "radius: %s: Syntax error\n",
+                     argc == 1 ? argv[0] : "\"\"");
+        else if (argc < 2)
+          log_Printf(LogWARN, "radius: %s: Invalid route\n",
+                     argc == 1 ? argv[0] : "\"\"");
+        else if ((strcasecmp(argv[0], "default") != 0 &&
+                  !ncprange_aton(&dest, &bundle->ncp, argv[0])) ||
+                 !ncpaddr_aton(&gw, &bundle->ncp, argv[1]))
+          log_Printf(LogWARN, "radius: %s %s: Invalid route\n",
+                     argv[0], argv[1]);
+        else {
+          addrs = 0;
+
+          if (!strncasecmp(argv[0], "HISADDR6", 8))
+            addrs = ROUTE_DSTHISADDR6;
+          else if (!strncasecmp(argv[0], "MYADDR6", 7))
+            addrs = ROUTE_DSTMYADDR6;
+
+          if (ncpaddr_getip6(&gw, &ip6) && IN6_IS_ADDR_UNSPECIFIED(&ip6)) {
+            addrs |= ROUTE_GWHISADDR6;
+            ncpaddr_copy(&gw, &bundle->ncp.ipv6cp.hisaddr);
+          } else if (strcasecmp(argv[1], "HISADDR6") == 0)
+            addrs |= ROUTE_GWHISADDR6;
+
+          route_Add(&r->ipv6routes, addrs, &dest, &gw);
+        }
+        free(nuke);
+        break;
+#endif
 
       case RAD_VENDOR_SPECIFIC:
         if ((res = rad_get_vendor_attr(&vendor, &data, &len)) <= 0) {
@@ -428,7 +536,7 @@ radius_Process(struct radius *r, int got)
                      * Only point at the String field if we don't think the
                      * peer has misformatted the response.
                      */
-                    ((const char *)data)++;
+                    data = (const char *)data + 1;
                     len--;
                   } else
                     log_Printf(LogWARN, "Warning: The MS-CHAP-Error "
@@ -441,7 +549,8 @@ radius_Process(struct radius *r, int got)
                     rad_close(r->cx.rad);
                     return;
                   }
-                  log_Printf(LogPHASE, " MS-CHAP-Error \"%s\"\n", r->errstr);
+		  log_Printf(log_IsKept(LogRADIUS) ? LogRADIUS : LogPHASE,
+			     " MS-CHAP-Error \"%s\"\n", r->errstr);
                 }
                 break;
 
@@ -455,7 +564,7 @@ radius_Process(struct radius *r, int got)
                      * Only point at the String field if we don't think the
                      * peer has misformatted the response.
                      */
-                    ((const char *)data)++;
+                    data = (const char *)data + 1;
                     len--;
                   } else
                     log_Printf(LogWARN, "Warning: The MS-CHAP2-Success "
@@ -468,32 +577,36 @@ radius_Process(struct radius *r, int got)
                     rad_close(r->cx.rad);
                     return;
                   }
-                  log_Printf(LogPHASE, " MS-CHAP2-Success \"%s\"\n",
-                             r->msrepstr);
+		  log_Printf(log_IsKept(LogRADIUS) ? LogRADIUS : LogPHASE,
+			     " MS-CHAP2-Success \"%s\"\n", r->msrepstr);
                 }
                 break;
 
               case RAD_MICROSOFT_MS_MPPE_ENCRYPTION_POLICY:
                 r->mppe.policy = rad_cvt_int(data);
-                log_Printf(LogPHASE, " MS-MPPE-Encryption-Policy %s\n",
+		log_Printf(log_IsKept(LogRADIUS) ? LogRADIUS : LogPHASE,
+			   " MS-MPPE-Encryption-Policy %s\n",
                            radius_policyname(r->mppe.policy));
                 break;
 
               case RAD_MICROSOFT_MS_MPPE_ENCRYPTION_TYPES:
                 r->mppe.types = rad_cvt_int(data);
-                log_Printf(LogPHASE, " MS-MPPE-Encryption-Types %s\n",
+		log_Printf(log_IsKept(LogRADIUS) ? LogRADIUS : LogPHASE,
+			   " MS-MPPE-Encryption-Types %s\n",
                            radius_typesname(r->mppe.types));
                 break;
 
               case RAD_MICROSOFT_MS_MPPE_RECV_KEY:
                 free(r->mppe.recvkey);
 		demangle(r, data, len, &r->mppe.recvkey, &r->mppe.recvkeylen);
-                log_Printf(LogPHASE, " MS-MPPE-Recv-Key ********\n");
+		log_Printf(log_IsKept(LogRADIUS) ? LogRADIUS : LogPHASE,
+			   " MS-MPPE-Recv-Key ********\n");
                 break;
 
               case RAD_MICROSOFT_MS_MPPE_SEND_KEY:
 		demangle(r, data, len, &r->mppe.sendkey, &r->mppe.sendkeylen);
-                log_Printf(LogPHASE, " MS-MPPE-Send-Key ********\n");
+		log_Printf(log_IsKept(LogRADIUS) ? LogRADIUS : LogPHASE,
+			   " MS-MPPE-Send-Key ********\n");
                 break;
 #endif
 
@@ -541,7 +654,8 @@ radius_Continue(struct radius *r, int sel)
 
   timer_Stop(&r->cx.timer);
   if ((got = rad_continue_send_request(r->cx.rad, sel, &r->cx.fd, &tv)) == 0) {
-    log_Printf(LogPHASE, "Radius: Request re-sent\n");
+    log_Printf(log_IsKept(LogRADIUS) ? LogRADIUS : LogPHASE,
+	       "Radius: Request re-sent\n");
     r->cx.timer.load = tv.tv_usec / TICKUNIT + tv.tv_sec * SECTICKS;
     timer_Start(&r->cx.timer);
     return;
@@ -566,6 +680,25 @@ static void
 radius_Read(struct fdescriptor *d, struct bundle *bundle, const fd_set *fdset)
 {
   radius_Continue(descriptor2radius(d), 1);
+}
+
+/*
+ * Flush any pending transactions
+ */
+void
+radius_Flush(struct radius *r)
+{
+  struct timeval tv;
+  fd_set s;
+
+  while (r->cx.fd != -1) {
+    FD_ZERO(&s);
+    FD_SET(r->cx.fd, &s);
+    tv.tv_sec = 0;
+    tv.tv_usec = TICKUNIT;
+    select(r->cx.fd + 1, &s, NULL, NULL, &tv);
+    radius_Continue(r, 1);
+  }
 }
 
 /*
@@ -632,6 +765,10 @@ radius_Init(struct radius *r)
   r->mtu = DEF_MTU;
   r->msrepstr = NULL;
   r->repstr = NULL;
+#ifndef NOINET6
+  r->ipv6prefix = NULL;
+  r->ipv6routes = NULL;
+#endif
   r->errstr = NULL;
   r->mppe.policy = 0;
   r->mppe.types = 0;
@@ -653,12 +790,19 @@ radius_Destroy(struct radius *r)
   log_Printf(LogDEBUG, "Radius: radius_Destroy\n");
   timer_Stop(&r->cx.timer);
   route_DeleteAll(&r->routes);
+#ifndef NOINET6
+  route_DeleteAll(&r->ipv6routes);
+#endif
   free(r->filterid);
   r->filterid = NULL;
   free(r->msrepstr);
   r->msrepstr = NULL;
   free(r->repstr);
   r->repstr = NULL;
+#ifndef NOINET6
+  free(r->ipv6prefix);
+  r->ipv6prefix = NULL;
+#endif
   free(r->errstr);
   r->errstr = NULL;
   free(r->mppe.recvkey);
@@ -729,10 +873,9 @@ radius_Authenticate(struct radius *r, struct authinfo *authp, const char *name,
   struct timeval tv;
   int got;
   char hostname[MAXHOSTNAMELEN];
-#if 0
+  char *mac_addr, *what;
   struct hostent *hp;
   struct in_addr hostaddr;
-#endif
 #ifndef NODES
   struct mschap_response msresp;
   struct mschap2_response msresp2;
@@ -785,6 +928,7 @@ radius_Authenticate(struct radius *r, struct authinfo *authp, const char *name,
       rad_close(r->cx.rad);
       return 0;
     }
+    what = "PAP";
     break;
 
   case PROTO_CHAP:
@@ -797,6 +941,7 @@ radius_Authenticate(struct radius *r, struct authinfo *authp, const char *name,
         rad_close(r->cx.rad);
         return 0;
       }
+      what = "CHAP";
       break;
 
 #ifndef NODES
@@ -816,6 +961,7 @@ radius_Authenticate(struct radius *r, struct authinfo *authp, const char *name,
       rad_put_vendor_attr(r->cx.rad, RAD_VENDOR_MICROSOFT,
                           RAD_MICROSOFT_MS_CHAP_RESPONSE, &msresp,
                           sizeof msresp);
+      what = "MSCHAP";
       break;
 
     case 0x81:
@@ -837,6 +983,7 @@ radius_Authenticate(struct radius *r, struct authinfo *authp, const char *name,
       rad_put_vendor_attr(r->cx.rad, RAD_VENDOR_MICROSOFT,
                           RAD_MICROSOFT_MS_CHAP2_RESPONSE, &msresp2,
                           sizeof msresp2);
+      what = "MSCHAPv2";
       break;
 #endif
     default:
@@ -850,8 +997,8 @@ radius_Authenticate(struct radius *r, struct authinfo *authp, const char *name,
   if (gethostname(hostname, sizeof hostname) != 0)
     log_Printf(LogERROR, "rad_put: gethostname(): %s\n", strerror(errno));
   else {
-#if 0
-    if ((hp = gethostbyname(hostname)) != NULL) {
+    if (Enabled(authp->physical->dl->bundle, OPT_NAS_IP_ADDRESS) &&
+        (hp = gethostbyname(hostname)) != NULL) {
       hostaddr.s_addr = *(u_long *)hp->h_addr;
       if (rad_put_addr(r->cx.rad, RAD_NAS_IP_ADDRESS, hostaddr) != 0) {
         log_Printf(LogERROR, "rad_put: rad_put_string: %s\n",
@@ -860,8 +1007,8 @@ radius_Authenticate(struct radius *r, struct authinfo *authp, const char *name,
         return 0;
       }
     }
-#endif
-    if (rad_put_string(r->cx.rad, RAD_NAS_IDENTIFIER, hostname) != 0) {
+    if (Enabled(authp->physical->dl->bundle, OPT_NAS_IDENTIFIER) &&
+        rad_put_string(r->cx.rad, RAD_NAS_IDENTIFIER, hostname) != 0) {
       log_Printf(LogERROR, "rad_put: rad_put_string: %s\n",
                  rad_strerror(r->cx.rad));
       rad_close(r->cx.rad);
@@ -869,13 +1016,23 @@ radius_Authenticate(struct radius *r, struct authinfo *authp, const char *name,
     }
   }
 
+  if ((mac_addr = getenv("HISMACADDR")) != NULL &&
+      rad_put_string(r->cx.rad, RAD_CALLING_STATION_ID, mac_addr) != 0) {
+    log_Printf(LogERROR, "rad_put: %s\n", rad_strerror(r->cx.rad));
+    rad_close(r->cx.rad);
+    return 0;
+  }
+
   radius_put_physical_details(r->cx.rad, authp->physical);
+
+  log_Printf(LogRADIUS, "Radius(auth): %s data sent for %s\n", what, name);
 
   r->cx.auth = authp;
   if ((got = rad_init_send_request(r->cx.rad, &r->cx.fd, &tv)))
     radius_Process(r, got);
   else {
-    log_Printf(LogPHASE, "Radius: Request sent\n");
+    log_Printf(log_IsKept(LogRADIUS) ? LogRADIUS : LogPHASE,
+	       "Radius: Request sent\n");
     log_Printf(LogDEBUG, "Using radius_Timeout [%p]\n", radius_Timeout);
     r->cx.timer.load = tv.tv_usec / TICKUNIT + tv.tv_sec * SECTICKS;
     r->cx.timer.func = radius_Timeout;
@@ -887,21 +1044,39 @@ radius_Authenticate(struct radius *r, struct authinfo *authp, const char *name,
   return 1;
 }
 
+/* Fetch IP, netmask from IPCP */
+void
+radius_Account_Set_Ip(struct radacct *ac, struct in_addr *peer_ip,
+		      struct in_addr *netmask)
+{
+  ac->proto = PROTO_IPCP;
+  memcpy(&ac->peer.ip.addr, peer_ip, sizeof(ac->peer.ip.addr));
+  memcpy(&ac->peer.ip.mask, netmask, sizeof(ac->peer.ip.mask));
+}
+
+#ifndef NOINET6
+/* Fetch interface-id from IPV6CP */
+void
+radius_Account_Set_Ipv6(struct radacct *ac, u_char *ifid)
+{
+  ac->proto = PROTO_IPV6CP;
+  memcpy(&ac->peer.ipv6.ifid, ifid, sizeof(ac->peer.ipv6.ifid));
+}
+#endif
+
 /*
  * Send an accounting request to the RADIUS server
  */
 void
 radius_Account(struct radius *r, struct radacct *ac, struct datalink *dl,
-               int acct_type, struct in_addr *peer_ip, struct in_addr *netmask,
-               struct pppThroughput *stats)
+               int acct_type, struct pppThroughput *stats)
 {
   struct timeval tv;
   int got;
   char hostname[MAXHOSTNAMELEN];
-#if 0
+  char *mac_addr;
   struct hostent *hp;
   struct in_addr hostaddr;
-#endif
 
   if (!*r->cfg.file)
     return;
@@ -950,17 +1125,55 @@ radius_Account(struct radius *r, struct radacct *ac, struct datalink *dl,
     snprintf(ac->multi_session_id, sizeof ac->multi_session_id, "%s",
              dl->bundle->ncp.mp.active ?
              dl->bundle->ncp.mp.server.socket.sun_path : "");
-
-    /* Fetch IP, netmask from IPCP */
-    memcpy(&ac->ip, peer_ip, sizeof(ac->ip));
-    memcpy(&ac->mask, netmask, sizeof(ac->mask));
   };
 
   if (rad_put_string(r->cx.rad, RAD_USER_NAME, ac->user_name) != 0 ||
       rad_put_int(r->cx.rad, RAD_SERVICE_TYPE, RAD_FRAMED) != 0 ||
-      rad_put_int(r->cx.rad, RAD_FRAMED_PROTOCOL, RAD_PPP) != 0 ||
-      rad_put_addr(r->cx.rad, RAD_FRAMED_IP_ADDRESS, ac->ip) != 0 ||
-      rad_put_addr(r->cx.rad, RAD_FRAMED_IP_NETMASK, ac->mask) != 0) {
+      rad_put_int(r->cx.rad, RAD_FRAMED_PROTOCOL, RAD_PPP) != 0) {
+    log_Printf(LogERROR, "rad_put: %s\n", rad_strerror(r->cx.rad));
+    rad_close(r->cx.rad);
+    return;
+  }
+  switch (ac->proto) {
+  case PROTO_IPCP:
+    if (rad_put_addr(r->cx.rad, RAD_FRAMED_IP_ADDRESS,
+		     ac->peer.ip.addr) != 0 ||
+	rad_put_addr(r->cx.rad, RAD_FRAMED_IP_NETMASK,
+		     ac->peer.ip.mask) != 0) {
+      log_Printf(LogERROR, "rad_put: %s\n", rad_strerror(r->cx.rad));
+      rad_close(r->cx.rad);
+      return;
+    }
+    break;
+#ifndef NOINET6
+  case PROTO_IPV6CP:
+    if (rad_put_attr(r->cx.rad, RAD_FRAMED_INTERFACE_ID, ac->peer.ipv6.ifid,
+		     sizeof(ac->peer.ipv6.ifid)) != 0) {
+      log_Printf(LogERROR, "rad_put_attr: %s\n", rad_strerror(r->cx.rad));
+      rad_close(r->cx.rad);
+      return;
+    }
+    if (r->ipv6prefix) {
+      /*
+       * Since PPP doesn't delegate an IPv6 prefix to a peer,
+       * Framed-IPv6-Prefix may be not used, actually.
+       */
+      if (rad_put_attr(r->cx.rad, RAD_FRAMED_IPV6_PREFIX, r->ipv6prefix,
+		       sizeof(struct in6_addr) + 2) != 0) {
+	log_Printf(LogERROR, "rad_put_attr: %s\n", rad_strerror(r->cx.rad));
+	rad_close(r->cx.rad);
+	return;
+      }
+    }
+    break;
+#endif
+  default:
+    /* We don't log any protocol specific information */
+    break;
+   }
+
+  if ((mac_addr = getenv("HISMACADDR")) != NULL &&
+      rad_put_string(r->cx.rad, RAD_CALLING_STATION_ID, mac_addr) != 0) {
     log_Printf(LogERROR, "rad_put: %s\n", rad_strerror(r->cx.rad));
     rad_close(r->cx.rad);
     return;
@@ -969,8 +1182,8 @@ radius_Account(struct radius *r, struct radacct *ac, struct datalink *dl,
   if (gethostname(hostname, sizeof hostname) != 0)
     log_Printf(LogERROR, "rad_put: gethostname(): %s\n", strerror(errno));
   else {
-#if 0
-    if ((hp = gethostbyname(hostname)) != NULL) {
+    if (Enabled(dl->bundle, OPT_NAS_IP_ADDRESS) &&
+        (hp = gethostbyname(hostname)) != NULL) {
       hostaddr.s_addr = *(u_long *)hp->h_addr;
       if (rad_put_addr(r->cx.rad, RAD_NAS_IP_ADDRESS, hostaddr) != 0) {
         log_Printf(LogERROR, "rad_put: rad_put_string: %s\n",
@@ -979,8 +1192,8 @@ radius_Account(struct radius *r, struct radacct *ac, struct datalink *dl,
         return;
       }
     }
-#endif
-    if (rad_put_string(r->cx.rad, RAD_NAS_IDENTIFIER, hostname) != 0) {
+    if (Enabled(dl->bundle, OPT_NAS_IDENTIFIER) &&
+        rad_put_string(r->cx.rad, RAD_NAS_IDENTIFIER, hostname) != 0) {
       log_Printf(LogERROR, "rad_put: rad_put_string: %s\n",
                  rad_strerror(r->cx.rad));
       rad_close(r->cx.rad);
@@ -1001,11 +1214,13 @@ radius_Account(struct radius *r, struct radacct *ac, struct datalink *dl,
     return;
   }
 
-  if (acct_type == RAD_STOP)
-  /* Show some statistics */
-    if (rad_put_int(r->cx.rad, RAD_ACCT_INPUT_OCTETS, stats->OctetsIn) != 0 ||
+  if (acct_type == RAD_STOP || acct_type == RAD_ALIVE)
+    /* Show some statistics */
+    if (rad_put_int(r->cx.rad, RAD_ACCT_INPUT_OCTETS, stats->OctetsIn % UINT32_MAX) != 0 ||
+        rad_put_int(r->cx.rad, RAD_ACCT_INPUT_GIGAWORDS, stats->OctetsIn / UINT32_MAX) != 0 ||
         rad_put_int(r->cx.rad, RAD_ACCT_INPUT_PACKETS, stats->PacketsIn) != 0 ||
-        rad_put_int(r->cx.rad, RAD_ACCT_OUTPUT_OCTETS, stats->OctetsOut) != 0 ||
+        rad_put_int(r->cx.rad, RAD_ACCT_OUTPUT_OCTETS, stats->OctetsOut % UINT32_MAX) != 0 ||
+        rad_put_int(r->cx.rad, RAD_ACCT_OUTPUT_GIGAWORDS, stats->OctetsOut / UINT32_MAX) != 0 ||
         rad_put_int(r->cx.rad, RAD_ACCT_OUTPUT_PACKETS, stats->PacketsOut)
         != 0 ||
         rad_put_int(r->cx.rad, RAD_ACCT_SESSION_TIME, throughput_uptime(stats))
@@ -1014,6 +1229,31 @@ radius_Account(struct radius *r, struct radacct *ac, struct datalink *dl,
       rad_close(r->cx.rad);
       return;
     }
+
+  if (log_IsKept(LogPHASE) || log_IsKept(LogRADIUS)) {
+    char *what;
+    int level;
+
+    switch (acct_type) {
+    case RAD_START:
+      what = "START";
+      level = log_IsKept(LogPHASE) ? LogPHASE : LogRADIUS;
+      break;
+    case RAD_STOP:
+      what = "STOP";
+      level = log_IsKept(LogPHASE) ? LogPHASE : LogRADIUS;
+      break;
+    case RAD_ALIVE:
+      what = "ALIVE";
+      level = LogRADIUS;
+      break;
+    default:
+      what = "<unknown>";
+      level = log_IsKept(LogPHASE) ? LogPHASE : LogRADIUS;
+      break;
+    }
+    log_Printf(level, "Radius(acct): %s data sent\n", what);
+  }
 
   r->cx.auth = NULL;			/* Not valid for accounting requests */
   if ((got = rad_init_send_request(r->cx.rad, &r->cx.fd, &tv)))
@@ -1055,6 +1295,42 @@ radius_Show(struct radius *r, struct prompt *p)
     prompt_Printf(p, "     Error Message: %s\n", r->errstr ? r->errstr : "");
     if (r->routes)
       route_ShowSticky(p, r->routes, "            Routes", 16);
+#ifndef NOINET6
+    if (r->ipv6routes)
+      route_ShowSticky(p, r->ipv6routes, "            IPv6 Routes", 16);
+#endif
   } else
     prompt_Printf(p, " (not authenticated)\n");
+}
+
+static void
+radius_alive(void *v)
+{
+  struct bundle *bundle = (struct bundle *)v;
+
+  timer_Stop(&bundle->radius.alive.timer);
+  bundle->radius.alive.timer.load = bundle->radius.alive.interval * SECTICKS;
+  if (bundle->radius.alive.timer.load) {
+    radius_Account(&bundle->radius, &bundle->radacct,
+                   bundle->links, RAD_ALIVE, &bundle->ncp.ipcp.throughput);
+    timer_Start(&bundle->radius.alive.timer);
+  }
+}
+
+void
+radius_StartTimer(struct bundle *bundle)
+{
+  if (bundle->radius.cfg.file && bundle->radius.alive.interval) {
+    bundle->radius.alive.timer.func = radius_alive;
+    bundle->radius.alive.timer.name = "radius alive";
+    bundle->radius.alive.timer.load = bundle->radius.alive.interval * SECTICKS;
+    bundle->radius.alive.timer.arg = bundle;
+    radius_alive(bundle);
+  }
+}
+
+void
+radius_StopTimer(struct radius *r)
+{
+  timer_Stop(&r->alive.timer);
 }

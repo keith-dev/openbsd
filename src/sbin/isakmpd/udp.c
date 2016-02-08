@@ -1,4 +1,4 @@
-/* $OpenBSD: udp.c,v 1.91 2005/08/25 09:57:58 markus Exp $	 */
+/* $OpenBSD: udp.c,v 1.93 2006/02/02 14:33:53 hshoexer Exp $	 */
 /* $EOM: udp.c,v 1.57 2001/01/26 10:09:57 niklas Exp $	 */
 
 /*
@@ -357,6 +357,7 @@ void
 udp_remove(struct transport *t)
 {
 	struct udp_transport *u = (struct udp_transport *)t;
+	struct transport *p;
 
 	if (u->src)
 		free(u->src);
@@ -364,7 +365,11 @@ udp_remove(struct transport *t)
 		free(u->dst);
 	if ((t->flags & TRANSPORT_LISTEN) && u->s >= 0)
 		close(u->s);
-	if (t->link.le_prev)
+
+	for (p = LIST_FIRST(&transport_list); p && p != t; p =
+	    LIST_NEXT(p, link))
+		;
+	if (p == t)
 		LIST_REMOVE(t, link);
 
 	LOG_DBG((LOG_TRANSPORT, 90, "udp_remove: removed transport %p", t));
@@ -380,7 +385,7 @@ udp_report(struct transport *t)
 	in_port_t	 sport, dport;
 
 	if (sockaddr2text(u->src, &src, 0))
-		goto ret;
+		return;
 	sport = sockaddr_port(u->src);
 
 	if (!u->dst || sockaddr2text(u->dst, &dst, 0))
@@ -390,7 +395,6 @@ udp_report(struct transport *t)
 	LOG_DBG((LOG_REPORT, 0, "udp_report: fd %d src %s:%u dst %s:%u", u->s,
 	    src, ntohs(sport), dst ? dst : "<none>", ntohs(dport)));
 
-ret:
 	if (dst)
 		free(dst);
 	if (src)

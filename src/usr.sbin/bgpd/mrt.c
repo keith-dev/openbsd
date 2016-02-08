@@ -1,4 +1,4 @@
-/*	$OpenBSD: mrt.c,v 1.47 2004/12/23 16:09:26 henning Exp $ */
+/*	$OpenBSD: mrt.c,v 1.50 2006/02/08 14:49:58 claudio Exp $ */
 
 /*
  * Copyright (c) 2003, 2004 Claudio Jeker <claudio@openbsd.org>
@@ -219,8 +219,8 @@ mrt_dump_state(struct mrt *mrt, u_int16_t old_state, u_int16_t new_state,
 static u_int16_t
 mrt_attr_length(struct rde_aspath *a, int oldform)
 {
-	struct attr	*oa;
 	u_int16_t	 alen, plen;
+	u_int8_t	 l;
 
 	alen = 4 /* origin */ + 7 /* lpref */;
 	if (oldform)
@@ -230,8 +230,12 @@ mrt_attr_length(struct rde_aspath *a, int oldform)
 	if (a->med != 0)
 		alen += 7;
 
-	TAILQ_FOREACH(oa, &a->others, entry)
-		alen += 2 + oa->len + (oa->len > 255 ? 2 : 1);
+	for (l = 0; l < a->others_len; l++)
+		if (a->others[l] != NULL)
+			alen += 2 + a->others[l]->len +
+			    (a->others[l]->len > 255 ? 2 : 1);
+		else
+			break;
 
 	return alen;
 }
@@ -245,6 +249,7 @@ mrt_attr_dump(void *p, u_int16_t len, struct rde_aspath *a,
 	u_int32_t	 tmp32;
 	int		 r;
 	u_int16_t	 aslen, wlen = 0;
+	u_int8_t	 l;
 
 	/* origin */
 	if ((r = attr_write(buf + wlen, len, ATTR_WELL_KNOWN, ATTR_ORIGIN,
@@ -284,7 +289,9 @@ mrt_attr_dump(void *p, u_int16_t len, struct rde_aspath *a,
 	wlen += r; len -= r;
 
 	/* dump all other path attributes without modification */
-	TAILQ_FOREACH(oa, &a->others, entry) {
+	for (l = 0; l < a->others_len; l++) {
+		if ((oa = a->others[l]) == NULL)
+			break;
 		if ((r = attr_write(buf + wlen, len, oa->flags, oa->type,
 		    oa->data, oa->len)) == -1)
 			return (-1);
@@ -506,11 +513,17 @@ mrt_dump_upcall(struct pt_entry *pt, void *ptr)
 	 * dumps the table so we do the same. If only the active route should
 	 * be dumped p should be set to p = pt->active.
 	 */
-	LIST_FOREACH(p, &pt->prefix_h, prefix_l)
+	LIST_FOREACH(p, &pt->prefix_h, prefix_l) {
+		/* for now dump only stuff from the local-RIB */
+		if (!(p->flags & F_LOCAL))
+			continue;
 		if (mrtbuf->type == MRT_TABLE_DUMP)
-			mrt_dump_entry(mrtbuf, p, sequencenum++, p->peer);
+			mrt_dump_entry(mrtbuf, p, sequencenum++,
+			    p->aspath->peer);
 		else
-			mrt_dump_entry_mp(mrtbuf, p, sequencenum++, p->peer);
+			mrt_dump_entry_mp(mrtbuf, p, sequencenum++,
+			    p->aspath->peer);
+	}
 }
 
 static int

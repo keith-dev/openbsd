@@ -1,4 +1,4 @@
-.\"	$OpenBSD: fstat.1,v 1.31 2004/07/13 23:36:56 jmc Exp $
+.\"	$OpenBSD: fstat.1,v 1.35 2005/12/15 16:35:47 jmc Exp $
 .\"
 .\" Copyright (c) 1987, 1991, 1993
 .\"	The Regents of the University of California.  All rights reserved.
@@ -122,9 +122,7 @@ tr	\- kernel trace file
 .Pp
 If the file number is followed by an asterisk
 .Pq Ql * ,
-the file is not an inode, but rather a socket,
-.Tn FIFO ,
-or there is an error.
+the file is not an inode, but rather a socket, or there is an error.
 In this case the remainder of the line doesn't
 correspond to the remaining headers -- the format of the line
 is described later under
@@ -203,8 +201,6 @@ permit further analysis without duplicating
 For example, the addresses mentioned above are the addresses which the
 .Ic netstat -A
 command would print for TCP, UDP, and Unix domain.
-Note that since pipes are implemented using sockets, a pipe appears as a
-connected Unix domain stream socket.
 A unidirectional Unix domain socket indicates the direction of flow with
 an arrow
 .Pf ( Dq <-
@@ -250,13 +246,16 @@ is printed with some information as to queue length.
 Since these things are normally serviced quickly, it is likely that
 nothing of real importance can be discerned.
 .Sh SYSTRACE
-Each systrace device is printed with only the kernel address of the
+Each
+.Xr systrace 4
+device is printed with only the kernel address of the
 device private data.
 .Sh SEE ALSO
 .Xr netstat 1 ,
 .Xr nfsstat 1 ,
 .Xr ps 1 ,
 .Xr systat 1 ,
+.Xr top 1 ,
 .Xr iostat 8 ,
 .Xr pstat 8 ,
 .Xr tcpdrop 8 ,

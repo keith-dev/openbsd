@@ -1,4 +1,4 @@
-#	$OpenBSD: install.sub,v 1.390 2005/08/29 17:47:55 krw Exp $
+#	$OpenBSD: install.sub,v 1.401 2006/02/28 20:33:55 matthieu Exp $
 #	$NetBSD: install.sub,v 1.5.2.8 1996/09/02 23:25:02 pk Exp $
 #
 # Copyright (c) 1997-2005 Todd Miller, Theo de Raadt, Ken Westerback
@@ -76,24 +76,24 @@
 #	MDDKDEVS    - '/^[sw]d[0-9][0-9]* /s/ .*//p' assumed if not provided
 #	MDCDDEVS    - '/^cd[0-9][0-9]* /s/ .*//p'    assumed if not provided
 #	MDMTDEVS    - '/^[cmsw]t[0-9][0-9]* /s/ .*//p'
+#	MDSERIAL    - offer to configure a serial console
 #	MDXAPERTURE - set machdep.allowaperture=value in sysctl.conf
 . install.md
 
 set_term() {
 	local _tables
 
-	[[ -n $TERM ]] && return
-	ask "Terminal type?" ${MDTERM:-vt220}
-	TERM=$resp
-	export TERM
+	TERM=${TERM:-${MDTERM:-vt220}}
+	ask "Terminal type?" $TERM
+	export TERM=$resp
 
 	[[ -x /sbin/kbd ]] || return
 	_tables=$(bsort $(kbd -l | egrep -v "^(user|tables|encoding)"))
 	while :; do
-		ask "kbd(8) mapping? ('?' for list)" "none"
+		ask "kbd(8) mapping? ('L' for list)" "none"
 		case $resp in
+		[Ll?])	echo "Major tables: $_tables" ;;
 		none)	return ;;
-		"?")	echo "Major tables: $_tables" ;;
 		*)	kbd $resp && { echo $resp >/tmp/kbdtype ; return ; } ;;
 		esac
 	done
@@ -168,6 +168,18 @@ __EOT
 	echo "Cool! Let's get to it."
 }
 
+# Echo the file $1 to standard output, skipping any lines that begin with a
+# '#'. i.e. strip comment lines from the file.
+stripcom () {
+	local _l
+
+	[[ -f $1 ]] || return
+
+	while read _l; do
+		[[ -n ${_l%%#*} ]] && echo $_l
+	done <$1
+}
+		
 scan_dmesg() {
 	bsort $(sed -ne "$1" /var/run/dmesg.boot)
 }
@@ -179,6 +191,15 @@ get_ifdevs() {
 }
 
 # Get the first (lowest unit #) serial device if any, if MDSERIAL is set.
+#
+# MDSERIAL is of the form
+#
+# "<dmesg device prefix> <boot loader device prefix> <tty device prefix>"
+#
+# So "pccom com tty0" means the dmesg is searched for devices pccom0, pccom1,
+# ... pccom9. If pccom2 is found, then com2 and tty02 are used in serial
+# console configuration via boot.conf commands and /etc/ttys.
+#
 # NOTE: Only single digit serial devices (<dev>0 -> <dev>9) are looked for.
 get_serialdev() {
 	local _d _bd _td
@@ -483,7 +504,7 @@ select_sets() {
 
 Select sets by entering a set name, a file name pattern or 'all'. De-select
 sets by prepending a '-' to the set name, file name pattern or 'all'. Selected
-sets are labelled '[x]'.
+sets are labelled '[X]'.
 __EOT
 	while :; do
 		_action=
@@ -707,7 +728,7 @@ v6_config() {
 	v6_defroute $_ifs
 	[[ $resp == none ]] && return
 	route -n add -inet6 -host default "$resp" || return
-	echo "!route -qn add -host -inet6 default $resp" >>$_hn
+	echo "$resp" >>/tmp/mygate
 }
 
 v4_defroute() {
@@ -760,7 +781,7 @@ v6_defroute() {
 
 # Much of this is gratuitously stolen from /etc/netstart.
 enable_network() {
-	local _netfile
+	local _netfile _gw
 
 	# Copy any required or optional files found
 	for _netfile in hosts dhclient.conf resolv.conf resolv.conf.tail protocols services; do
@@ -806,13 +827,13 @@ enable_network() {
 			"dhcp")	[ "$name" = "NONE" ] && name=
 				[ "$mask" = "NONE" ] && mask=
 				[ "$bcaddr" = "NONE" ] && bcaddr=
-				ifconfig $if $name $mask $bcaddr $ext1 $ext2 down
-				cmd="dhclient $if"
+				dhcpif="$dhcpif $if"
+				cmd="ifconfig $if $name $mask $bcaddr $ext1 $ext2 down"
+				cmd="$cmd; dhclient $if"
 				;;
 			"rtsol")
-				ifconfig $if $name $mask $bcaddr $ext1 $ext2 up
-				rtsif="$rtsif $if"
-				cmd=
+				rtsolif="$rtsolif $if"
+				cmd="ifconfig $if $name $mask $bcaddr $ext1 $ext2 up"
 				;;
 			"up")
 				# The only one of these guaranteed to be set is $if
@@ -863,14 +884,21 @@ enable_network() {
 		done </mnt/etc/hostname.$if
 	done
 
-	[[ -n $rtsif ]] && /mnt/sbin/rtsol -F $rtsif
+	[[ -n $rtsolif ]] && /mnt/sbin/rtsol -F $rtsolif
 
-	# /mnt/etc/mygate, if it exists, contains the name of my gateway host
-	# that name must be in /etc/hosts.
-	if [ -f /mnt/etc/mygate ]; then
-		route delete default >/dev/null 2>&1
-		route -qn add -host default $(</mnt/etc/mygate)
-	fi
+	# /mnt/etc/mygate, if it exists, contains the address(es) of my
+	# default gateway(s). Use for ipv4 if no interfaces configured via
+	# dhcp. Use for ipv6 if no interfaces configured via rtsol.
+	[[ -z $dhcpif ]] && stripcom /mnt/etc/mygate | while read _gw; do
+		[[ $_gw == @(*:*) ]] && continue
+		route -qn delete default >/dev/null 2>&1
+		route -qn add -host default $_gw && break
+	done
+	[[ -z $rtsolif ]] && stripcom /mnt/etc/mygate | while read _gw; do
+		[[ $_gw == !(*:*) ]] && continue
+		route -qn delete -inet6 default >/dev/null 2>&1
+		route -qn add -host -inet6 default $_gw && break
+	done
 
 	# Use loopback, not the wire.
 	route -qn add -host `hostname` 127.0.0.1 >/dev/null
@@ -940,6 +968,9 @@ __EOT
 			echo "'$_f' did not install correctly."
 		else
 			DEFAULTSETS=$(rmel $_f $DEFAULTSETS)
+			# XXX Hack for 3.9. Remove old static X modules.
+			[[ $_f == xserv39.tgz ]] || continue
+			( cd /mnt/usr/X11R6/lib/modules ; rm -f *.[ao] */*.[ao] )
 		fi
 	done
 }
@@ -1619,7 +1650,7 @@ __EOT
 ROOTDISK=
 ROOTDEV=
 
-VERSION=38
+VERSION=39
 
 VNAME="$(( $VERSION / 10 )).$(( $VERSION % 10 ))"
 SETDIR="$VNAME/$ARCH"

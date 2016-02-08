@@ -15,11 +15,17 @@
  */
 
 #include "includes.h"
+RCSID("$OpenBSD: sftp.c,v 1.75 2006/02/20 17:19:54 stevesk Exp $");
 
-RCSID("$OpenBSD: sftp.c,v 1.66 2005/08/08 13:22:48 jaredy Exp $");
+#include <sys/ioctl.h>
+#include <sys/types.h>
+#include <sys/wait.h>
+#include <sys/stat.h>
 
 #include <glob.h>
 #include <histedit.h>
+#include <paths.h>
+#include <signal.h>
 
 #include "buffer.h"
 #include "xmalloc.h"
@@ -692,6 +698,8 @@ do_ls_dir(struct sftp_conn *conn, char *path, char *strip_path, int lflag)
 	}
 
 	if (lflag & SORT_FLAGS) {
+		for (n = 0; d[n] != NULL; n++)
+			;	/* count entries */
 		sort_flag = lflag & (SORT_FLAGS|LS_REVERSE_SORT);
 		qsort(d, n, sizeof(*d), sdirent_comp);
 	}
@@ -1428,10 +1436,15 @@ main(int argc, char **argv)
 	extern int optind;
 	extern char *optarg;
 
+	/* Ensure that fds 0, 1 and 2 are open or directed to /dev/null */
+	sanitise_stdfd();
+
+	memset(&args, '\0', sizeof(args));
 	args.list = NULL;
-	addargs(&args, "ssh");		/* overwritten with ssh_program */
+	addargs(&args, ssh_program);
 	addargs(&args, "-oForwardX11 no");
 	addargs(&args, "-oForwardAgent no");
+	addargs(&args, "-oPermitLocalCommand no");
 	addargs(&args, "-oClearAllForwardings yes");
 
 	ll = SYSLOG_LEVEL_INFO;
@@ -1463,6 +1476,7 @@ main(int argc, char **argv)
 			break;
 		case 'S':
 			ssh_program = optarg;
+			replacearg(&args, 0, "%s", ssh_program);
 			break;
 		case 'b':
 			if (batchmode)
@@ -1539,7 +1553,6 @@ main(int argc, char **argv)
 		addargs(&args, "%s", host);
 		addargs(&args, "%s", (sftp_server != NULL ?
 		    sftp_server : "sftp"));
-		args.list[0] = ssh_program;
 
 		if (!batchmode)
 			fprintf(stderr, "Connecting to %s...\n", host);
@@ -1552,6 +1565,7 @@ main(int argc, char **argv)
 			fprintf(stderr, "Attaching to %s...\n", sftp_direct);
 		connect_to_server(sftp_direct, args.list, &in, &out);
 	}
+	freeargs(&args);
 
 	err = interactive_loop(in, out, file1, file2);
 

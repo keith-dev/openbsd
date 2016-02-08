@@ -1,4 +1,4 @@
-/*	$OpenBSD: database.c,v 1.12 2005/05/27 05:51:22 norby Exp $ */
+/*	$OpenBSD: database.c,v 1.17 2005/11/12 18:18:24 deraadt Exp $ */
 
 /*
  * Copyright (c) 2005 Claudio Jeker <claudio@openbsd.org>
@@ -177,8 +177,9 @@ recv_db_description(struct nbr *nbr, char *buf, u_int16_t len)
 
 	/* db description packet sanity checks */
 	if (ntohs(dd_hdr.iface_mtu) > nbr->iface->mtu) {
-		log_warnx("recv_dd_description: invalid MTU, neighbor ID %s",
-		    inet_ntoa(nbr->id));
+		log_warnx("recv_dd_description: invalid MTU %d sent by "
+		    "neighbor ID %s, expected %d", ntohs(dd_hdr.iface_mtu),
+		    inet_ntoa(nbr->id), nbr->iface->mtu);
 		return;
 	}
 
@@ -199,9 +200,9 @@ recv_db_description(struct nbr *nbr, char *buf, u_int16_t len)
 		    inet_ntoa(nbr->id));
 		return;
 	case NBR_STA_INIT:
-		/* evaluate dr and bdr before issuing a 2-Way event */
-		if_fsm(nbr->iface, IF_EVT_NBR_CHNG);
+		/* evaluate dr and bdr after issuing a 2-Way event */
 		nbr_fsm(nbr, NBR_EVT_2_WAY_RCVD);
+		if_fsm(nbr->iface, IF_EVT_NBR_CHNG);
 		if (nbr->state != NBR_STA_XSTRT)
 			return;
 		/* FALLTHROUGH */
@@ -210,12 +211,11 @@ recv_db_description(struct nbr *nbr, char *buf, u_int16_t len)
 			return;
 		/*
 		 * check bits: either I,M,MS or only M
-		 * I,M,MS is checked here the M only case is a fall-through
 		 */
 		if (dd_hdr.bits == (OSPF_DBD_I | OSPF_DBD_M | OSPF_DBD_MS)) {
 			/* if nbr Router ID is larger than own -> slave */
 			if ((ntohl(nbr->id.s_addr)) >
-			    ntohl(nbr->iface->rtr_id.s_addr)) {
+			    ntohl(ospfe_router_id())) {
 				/* slave */
 				nbr->master = 0;
 				nbr->dd_seq_num = ntohl(dd_hdr.dd_seq_num);
@@ -224,7 +224,7 @@ recv_db_description(struct nbr *nbr, char *buf, u_int16_t len)
 				nbr_fsm(nbr, NBR_EVT_NEG_DONE);
 			}
 		} else if (!(dd_hdr.bits & (OSPF_DBD_I | OSPF_DBD_MS))) {
-			/* master */
+			/* M only case: we are master */
 			if (ntohl(dd_hdr.dd_seq_num) != nbr->dd_seq_num) {
 				log_warnx("recv_db_description: invalid "
 				    "seq num, mine %x his %x",
@@ -307,7 +307,7 @@ recv_db_description(struct nbr *nbr, char *buf, u_int16_t len)
 			nbr->dd_seq_num = ntohl(dd_hdr.dd_seq_num);
 		}
 
-		/* forward to RDE and let it decide which LSA's to request */
+		/* forward to RDE and let it decide which LSAs to request */
 		if (len > 0) {
 			nbr->dd_pending++;
 			ospfe_imsg_compose_rde(IMSG_DD, nbr->peerid, 0,
@@ -329,7 +329,6 @@ recv_db_description(struct nbr *nbr, char *buf, u_int16_t len)
 
 	nbr->last_rx_options = dd_hdr.opts;
 	nbr->last_rx_bits = dd_hdr.bits;
-	return;
 }
 
 void

@@ -1,4 +1,4 @@
-/*	$OpenBSD: decl.c,v 1.11 2005/08/14 11:02:33 miod Exp $	*/
+/*	$OpenBSD: decl.c,v 1.19 2005/12/18 19:21:02 cloder Exp $	*/
 /*	$NetBSD: decl.c,v 1.11 1995/10/02 17:34:16 jpo Exp $	*/
 
 /*
@@ -33,7 +33,7 @@
  */
 
 #ifndef lint
-static char rcsid[] = "$OpenBSD: decl.c,v 1.11 2005/08/14 11:02:33 miod Exp $";
+static char rcsid[] = "$OpenBSD: decl.c,v 1.19 2005/12/18 19:21:02 cloder Exp $";
 #endif
 
 #include <sys/param.h>
@@ -84,7 +84,7 @@ static	void	glchksz(sym_t *);
  * initializes all global vars used in declarations
  */
 void
-initdecl()
+initdecl(void)
 {
 	int	i;
 	static	struct {
@@ -174,7 +174,7 @@ initdecl()
 		for (i = 0; i < NTSPEC; i++)
 			ttab[i].tt_psz = ttab[i].tt_sz;
 	}
-	
+
 	/* shared type structures */
 	typetab = xcalloc(NTSPEC, sizeof (type_t));
 	for (i = 0; i < NTSPEC; i++)
@@ -209,15 +209,13 @@ initdecl()
  * if it is to be modified (adding qualifiers or anything else).
  */
 type_t *
-gettyp(t)
-	tspec_t	t;
+gettyp(tspec_t t)
 {
 	return (&typetab[t]);
 }
 
 type_t *
-duptyp(tp)
-	const	type_t *tp;
+duptyp(const type_t *tp)
 {
 	type_t	*ntp;
 
@@ -231,8 +229,7 @@ duptyp(tp)
  * allocated memory should be freed after the expr).
  */
 type_t *
-tduptyp(tp)
-	const	type_t *tp;
+tduptyp(const type_t *tp)
 {
 	type_t	*ntp;
 
@@ -246,8 +243,7 @@ tduptyp(tp)
  * struct, union or enum type.
  */
 int
-incompl(tp)
-	type_t	*tp;
+incompl(type_t *tp)
 {
 	tspec_t	t;
 
@@ -268,9 +264,7 @@ incompl(tp)
  * types.
  */
 void
-setcompl(tp, ic)
-	type_t	*tp;
-	int	ic;
+setcompl(type_t *tp, int ic)
 {
 	tspec_t	t;
 
@@ -291,8 +285,7 @@ setcompl(tp, ic)
  * storage classes.
  */
 void
-addscl(sc)
-	scl_t	sc;
+addscl(scl_t sc)
 {
 	if (sc == INLINE) {
 		if (dcs->d_inline)
@@ -328,8 +321,7 @@ addscl(sc)
  * struct/union/enum tag.
  */
 void
-addtype(tp)
-	type_t	*tp;
+addtype(type_t *tp)
 {
 	tspec_t	t;
 
@@ -412,7 +404,7 @@ addtype(tp)
 	} else {
 		/*
 		 * remember specifiers "void", "char", "int", "float" or
-		 * "double" int dcs->d_atyp 
+		 * "double" int dcs->d_atyp
 		 */
 		if (dcs->d_atyp != NOTSPEC)
 			/* more than one, print error in deftyp() */
@@ -426,9 +418,7 @@ addtype(tp)
  * and other specifiers (except struct, union, enum, typedef name)
  */
 static type_t *
-tdeferr(td, t)
-	type_t	*td;
-	tspec_t	t;
+tdeferr(type_t *td, tspec_t t)
 {
 	tspec_t	t2;
 
@@ -498,9 +488,7 @@ tdeferr(td, t)
  * if the tag is unnamed.
  */
 static void
-settdsym(tp, sym)
-	type_t	*tp;
-	sym_t	*sym;
+settdsym(type_t *tp, sym_t *sym)
 {
 	tspec_t	t;
 
@@ -518,12 +506,11 @@ settdsym(tp, sym)
  * (and not the declarator) in the top element of the declaration stack.
  * Also detect multiple qualifiers of the same kind.
 
- * The rememberd qualifier is used by deftyp() to construct the type
+ * The remembered qualifier is used by deftyp() to construct the type
  * for all declarators.
  */
 void
-addqual(q)
-	tqual_t	q;
+addqual(tqual_t q)
 {
 	if (q == CONST) {
 		if (dcs->d_const) {
@@ -531,15 +518,20 @@ addqual(q)
 			warning(10, "const");
 		}
 		dcs->d_const = 1;
-	} else {
-		if (q != VOLATILE)
-			lerror("addqual() 1");
+	} else if (q == VOLATILE) {
 		if (dcs->d_volatile) {
 			/* duplicate "%s" */
 			warning(10, "volatile");
 		}
 		dcs->d_volatile = 1;
-	}
+	} else if (q == RESTRICT) {
+		if (dcs->d_restrict) {
+			/* duplicate "%s" */
+			warning(10, "restrict");
+		}
+		dcs->d_restrict = 1;
+	} else
+		lerror("addqual() 1");
 }
 
 /*
@@ -547,8 +539,7 @@ addqual(q)
  * argument declaration lists ...)
  */
 void
-pushdecl(sc)
-	scl_t	sc;
+pushdecl(scl_t sc)
 {
 	dinfo_t	*di;
 
@@ -567,7 +558,7 @@ pushdecl(sc)
  * Go back to previous declaration level
  */
 void
-popdecl()
+popdecl(void)
 {
 	dinfo_t	*di;
 
@@ -652,7 +643,7 @@ popdecl()
  * global declarations/definitions.
  */
 void
-setasm()
+setasm(void)
 {
 	dinfo_t	*di;
 
@@ -665,7 +656,7 @@ setasm()
  * will be used by the next declaration
  */
 void
-clrtyp()
+clrtyp(void)
 {
 	dcs->d_atyp = dcs->d_smod = dcs->d_lmod = NOTSPEC;
 	dcs->d_scl = NOSCL;
@@ -684,7 +675,7 @@ clrtyp()
  * context.
  */
 void
-deftyp()
+deftyp(void)
 {
 	tspec_t	t, s, l;
 	type_t	*tp;
@@ -800,8 +791,7 @@ deftyp()
  * Merge type specifiers (char, ..., long long, signed, unsigned).
  */
 static tspec_t
-mrgtspec(t, s)
-	tspec_t	t, s;
+mrgtspec(tspec_t t, tspec_t s)
 {
 	if (s == SIGNED || s == UNSIGN) {
 		if (t == CHAR) {
@@ -828,9 +818,7 @@ mrgtspec(t, s)
  * if name is not NULL.
  */
 int
-length(tp, name)
-	type_t	*tp;
-	const	char *name;
+length(type_t *tp, const char *name)
 {
 	int	elem, elsz;
 
@@ -868,11 +856,10 @@ length(tp, name)
 }
 
 /*
- * Get the alignment of the given Type in bits.
+ * Get the alignment of the given type in bits.
  */
 int
-getbound(tp)
-	type_t	*tp;
+getbound(type_t *tp)
 {
 	int	a;
 	tspec_t	t;
@@ -903,8 +890,7 @@ getbound(tp)
  * struct/union/enum elements and parameters.
  */
 sym_t *
-lnklst(l1, l2)
-	sym_t	*l1, *l2;
+lnklst(sym_t *l1, sym_t *l2)
 {
 	sym_t	*l;
 
@@ -926,8 +912,7 @@ lnklst(l1, l2)
  * - void types other than type of function or pointer
  */
 void
-chktyp(sym)
-	sym_t	*sym;
+chktyp(sym_t *sym)
 {
 	tspec_t	to, t;
 	type_t	**tpp, *tp;
@@ -1004,10 +989,11 @@ chktyp(sym)
 			}
 		}
 		if (t == VOID && to != PTR) {
-			if (tp->t_const || tp->t_volatile) {
+			if (tp->t_const || tp->t_volatile || tp->t_restrict) {
 				/* inappropriate qualifiers with "void" */
 				warning(69);
 				tp->t_const = tp->t_volatile = 0;
+				tp->t_restrict = 0;
 			}
 		}
 		tpp = &tp->t_subt;
@@ -1019,8 +1005,7 @@ chktyp(sym)
  * Process the declarator of a struct/union element.
  */
 sym_t *
-decl1str(dsym)
-	sym_t	*dsym;
+decl1str(sym_t *dsym)
 {
 	type_t	*tp;
 	tspec_t	t;
@@ -1049,8 +1034,8 @@ decl1str(dsym)
 		/*
 		 * bit field
 		 *
-		 * only unsigned und signed int are protable bit-field types
-		 *(at least in ANSI C, in traditional C only unsigned int)
+		 * only unsigned and signed int are portable bit-field types
+		 * (at least in ANSI C, in traditional C only unsigned int)
 		 */
 		if (t == CHAR || t == UCHAR || t == SCHAR ||
 		    t == SHORT || t == USHORT || t == ENUM) {
@@ -1061,6 +1046,12 @@ decl1str(dsym)
 				/* nonportable bit-field type */
 				warning(34);
 			}
+			if (isutyp(t))
+				tp->t_tspec = UINT;
+			else
+				tp->t_tspec = INT;
+
+			tp->t_isenum = 0;
 		} else if (t == INT && dcs->d_smod == NOTSPEC) {
 			if (pflag) {
 				/* nonportable bit-field type */
@@ -1138,8 +1129,7 @@ decl1str(dsym)
  * al contains the required alignment, len the length of a bit-field.
  */
 static void
-align(al, len)
-	int	al, len;
+align(int al, int len)
 {
 	int	no;
 
@@ -1150,7 +1140,7 @@ align(al, len)
 	 */
 	if (al > dcs->d_stralign)
 		dcs->d_stralign = al;
-	
+
 	no = (dcs->d_offset + (al - 1)) & ~(al - 1);
 	if (len == 0 || dcs->d_offset + len > no)
 		dcs->d_offset = no;
@@ -1160,9 +1150,7 @@ align(al, len)
  * Remember the width of the field in its type structure.
  */
 sym_t *
-bitfield(dsym, len)
-	sym_t	*dsym;
-	int	len;
+bitfield(sym_t *dsym, int len)
 {
 	if (dsym == NULL) {
 		dsym = getblk(sizeof (sym_t));
@@ -1174,6 +1162,8 @@ bitfield(dsym, len)
 	}
 	dsym->s_type = duptyp(dsym->s_type);
 	dsym->s_type->t_isfield = 1;
+	dsym->s_type->t_proto = 0;
+	dsym->s_type->t_isenum = 0;
 	dsym->s_type->t_flen = len;
 	dsym->s_field = 1;
 	return (dsym);
@@ -1186,8 +1176,7 @@ bitfield(dsym, len)
  * will be at the top of the list.
  */
 pqinf_t *
-mergepq(p1, p2)
-	pqinf_t	*p1, *p2;
+mergepq(pqinf_t *p1, pqinf_t *p2)
 {
 	pqinf_t	*p;
 
@@ -1220,14 +1209,12 @@ mergepq(p1, p2)
  * Followint 3 functions extend the type of a declarator with
  * pointer, function and array types.
  *
- * The current type is the Type built by deftyp() (dcs->d_type) and
+ * The current type is the type built by deftyp() (dcs->d_type) and
  * pointer, function and array types already added for this
  * declarator. The new type extension is inserted between both.
  */
 sym_t *
-addptr(decl, pi)
-	sym_t	*decl;
-	pqinf_t	*pi;
+addptr(sym_t *decl, pqinf_t *pi)
 {
 	type_t	**tpp, *tp;
 	pqinf_t	*npi;
@@ -1254,9 +1241,7 @@ addptr(decl, pi)
  * n is the specified dimension
  */
 sym_t *
-addarray(decl, dim, n)
-	sym_t	*decl;
-	int	dim, n;
+addarray(sym_t *decl, int dim, int n)
 {
 	type_t	**tpp, *tp;
 
@@ -1285,8 +1270,7 @@ addarray(decl, dim, n)
 }
 
 sym_t *
-addfunc(decl, args)
-	sym_t	*decl, *args;
+addfunc(sym_t *decl, sym_t *args)
 {
 	type_t	**tpp, *tp;
 
@@ -1334,8 +1318,7 @@ addfunc(decl, args)
  */
 /* ARGSUSED */
 static sym_t *
-nsfunc(decl, args)
-	sym_t	*decl, *args;
+nsfunc(sym_t *decl, sym_t *args)
 {
 	sym_t	*arg, *sym;
 	scl_t	sc;
@@ -1373,8 +1356,7 @@ nsfunc(decl, args)
  * Called for old style function declarations.
  */
 static void
-osfunc(decl, args)
-	sym_t	*decl, *args;
+osfunc(sym_t *decl, sym_t *args)
 {
 	/*
 	 * Remember list of params only if this is really seams to be
@@ -1384,7 +1366,7 @@ osfunc(decl, args)
 	    decl->s_type == dcs->d_nxt->d_type) {
 		/*
 		 * We assume that this becomes a function definition. If
-		 * we are wrong, its corrected in chkfdef(). 
+		 * we are wrong, its corrected in chkfdef().
 		 */
 		if (args != NULL) {
 			decl->s_osdef = 1;
@@ -1403,9 +1385,7 @@ osfunc(decl, args)
  * error message.
  */
 void
-chkfdef(sym, msg)
-	sym_t	*sym;
-	int	msg;
+chkfdef(sym_t *sym, int msg)
 {
 	if (sym->s_osdef) {
 		if (msg) {
@@ -1425,8 +1405,7 @@ chkfdef(sym, msg)
  * s_def and s_reg are valid after dname().
  */
 sym_t *
-dname(sym)
-	sym_t	*sym;
+dname(sym_t *sym)
 {
 	scl_t	sc = NOSCL;
 
@@ -1524,8 +1503,7 @@ dname(sym)
  * definition.
  */
 sym_t *
-iname(sym)
-	sym_t	*sym;
+iname(sym_t *sym)
 {
 	if (sym->s_scl != NOSCL) {
 		if (blklev == sym->s_blklev) {
@@ -1553,10 +1531,7 @@ iname(sym)
  * semi is 1 if the following token is T_SEMI
  */
 type_t *
-mktag(tag, kind, decl, semi)
-	sym_t	*tag;
-	tspec_t	kind;
-	int	decl, semi;
+mktag(sym_t *tag, tspec_t kind, int decl, int semi)
 {
 	scl_t	scl = NOSCL;
 	type_t	*tp;
@@ -1611,7 +1586,7 @@ mktag(tag, kind, decl, semi)
 			tp->t_enum = getblk(sizeof (enum_t));
 			tp->t_enum->etag = tag;
 		}
-		/* ist unvollstaendiger Typ */
+		/* is incomplete type */
 		setcompl(tp, 1);
 	}
 
@@ -1624,10 +1599,7 @@ mktag(tag, kind, decl, semi)
  * semi is 1 if T_SEMI follows
  */
 static sym_t *
-newtag(tag, scl, decl, semi)
-	sym_t	*tag;
-	scl_t	scl;
-	int	decl, semi;
+newtag(sym_t *tag, scl_t scl, int decl, int semi)
 {
 	if (tag->s_blklev < blklev) {
 		if (semi) {
@@ -1679,8 +1651,7 @@ newtag(tag, scl, decl, semi)
 }
 
 const char *
-scltoa(sc)
-	scl_t	sc;
+scltoa(scl_t sc)
 {
 	const	char *s;
 
@@ -1703,9 +1674,7 @@ scltoa(sc)
  * tp points to the type of the, tag, fmem to the list of members/enums.
  */
 type_t *
-compltag(tp, fmem)
-	type_t	*tp;
-	sym_t	*fmem;
+compltag(type_t *tp, sym_t *fmem)
 {
 	tspec_t	t;
 	str_t	*sp;
@@ -1747,12 +1716,10 @@ compltag(tp, fmem)
  *
  * sym points to the enumerator
  * val is the value of the enumerator
- * impl is 1 if the the value of the enumerator was not explicit specified.
+ * impl is 1 if the value of the enumerator was not explicitly specified.
  */
 sym_t *
-ename(sym, val, impl)
-	sym_t	*sym;
-	int	val, impl;
+ename(sym_t *sym, int val, int impl)
 {
 	if (sym->s_scl) {
 		if (sym->s_blklev == blklev) {
@@ -1794,9 +1761,7 @@ ename(sym, val, impl)
  * Process a single external declarator.
  */
 void
-decl1ext(dsym, initflg)
-	sym_t	*dsym;
-	int	initflg;
+decl1ext(sym_t *dsym, int initflg)
 {
 	int	warn, rval, redec;
 	sym_t	*rdsym;
@@ -1825,6 +1790,12 @@ decl1ext(dsym, initflg)
 		}
 	}
 
+	if (dsym->s_type->t_tspec == FUNC) {
+		if (noretflg)
+			dsym->s_noreturn = 1;
+	}
+	noretflg = 0;
+
 	/* Write the declaration into the output file */
 	if (plibflg && llibflg &&
 	    dsym->s_type->t_tspec == FUNC && dsym->s_type->t_proto) {
@@ -1839,7 +1810,6 @@ decl1ext(dsym, initflg)
 	}
 
 	if ((rdsym = dcs->d_rdcsym) != NULL) {
-
 		/*
 		 * If the old symbol stems from a old style function definition
 		 * we have remembered the params in rdsmy->s_args and compare
@@ -1852,7 +1822,6 @@ decl1ext(dsym, initflg)
 		}
 
 		if (!redec && !isredec(dsym, (warn = 0, &warn))) {
-		
 			if (warn) {
 				/* redeclaration of %s */
 				(*(sflag ? error : warning))(27, dsym->s_name);
@@ -1898,7 +1867,7 @@ decl1ext(dsym, initflg)
 			compltyp(dsym, rdsym);
 
 		}
-		
+
 		rmsym(rdsym);
 	}
 
@@ -1915,8 +1884,7 @@ decl1ext(dsym, initflg)
  * the same symbol.
  */
 void
-cpuinfo(sym, rdsym)
-	sym_t	*sym, *rdsym;
+cpuinfo(sym_t *sym, sym_t *rdsym)
 {
 	sym->s_spos = rdsym->s_spos;
 	sym->s_upos = rdsym->s_upos;
@@ -1930,9 +1898,7 @@ cpuinfo(sym, rdsym)
  * a warning.
  */
 int
-isredec(dsym, warn)
-	sym_t	*dsym;
-	int	*warn;
+isredec(sym_t *dsym, int *warn)
 {
 	sym_t	*rsym;
 
@@ -2011,14 +1977,11 @@ isredec(dsym, warn)
  *		compatible with a prototype
  */
 int
-eqtype(tp1, tp2, ignqual, promot, warn)
-	type_t	*tp1, *tp2;
-	int	ignqual, promot, *warn;
+eqtype(type_t *tp1, type_t *tp2, int ignqual, int promot, int *warn)
 {
 	tspec_t	t;
 
 	while (tp1 != NULL && tp2 != NULL) {
-
 		t = tp1->t_tspec;
 		if (promot) {
 			if (t == FLOAT) {
@@ -2042,6 +2005,9 @@ eqtype(tp1, tp2, ignqual, promot, warn)
 			return (0);
 
 		if (tp1->t_volatile != tp2->t_volatile && !ignqual && !tflag)
+			return (0);
+
+		if (tp1->t_restrict != tp2->t_restrict && !ignqual && !tflag)
 			return (0);
 
 		if (t == STRUCT || t == UNION)
@@ -2079,9 +2045,7 @@ eqtype(tp1, tp2, ignqual, promot, warn)
  * Compares the parameter types of two prototypes.
  */
 static int
-eqargs(tp1, tp2, warn)
-	type_t	*tp1, *tp2;
-	int	*warn;
+eqargs(type_t *tp1, type_t *tp2, int *warn)
 {
 	sym_t	*a1, *a2;
 
@@ -2092,7 +2056,6 @@ eqargs(tp1, tp2, warn)
 	a2 = tp2->t_args;
 
 	while (a1 != NULL && a2 != NULL) {
-
 		if (eqtype(a1->s_type, a2->s_type, 1, 0, warn) == 0)
 			return (0);
 
@@ -2115,9 +2078,7 @@ eqargs(tp1, tp2, warn)
  *	   is applied on it
  */
 static int
-mnoarg(tp, warn)
-	type_t	*tp;
-	int	*warn;
+mnoarg(type_t *tp, int *warn)
 {
 	sym_t	*arg;
 	tspec_t	t;
@@ -2142,8 +2103,7 @@ mnoarg(tp, warn)
  * a previous old style function definition.
  */
 static int
-chkosdef(rdsym, dsym)
-	sym_t	*rdsym, *dsym;
+chkosdef(sym_t *rdsym, sym_t *dsym)
 {
 	sym_t	*args, *pargs, *arg, *parg;
 	int	narg, nparg, n;
@@ -2194,7 +2154,7 @@ chkosdef(rdsym, dsym)
 }
 
 /*
- * Complets a type by copying the dimension and prototype information
+ * Completes a type by copying the dimension and prototype information
  * from a second compatible type.
  *
  * Following lines are legal:
@@ -2204,8 +2164,7 @@ chkosdef(rdsym, dsym)
  * be duplicated.
  */
 void
-compltyp(dsym, ssym)
-	sym_t	*dsym, *ssym;
+compltyp(sym_t *dsym, sym_t *ssym)
 {
 	type_t	**dstp, *src;
 	type_t	*dst;
@@ -2220,7 +2179,7 @@ compltyp(dsym, ssym)
 			if (dst->t_dim == 0 && src->t_dim != 0) {
 				*dstp = dst = duptyp(dst);
 				dst->t_dim = src->t_dim;
-				/* now a complete Typ */
+				/* now a complete type */
 				setcompl(dst, 0);
 			}
 		} else if (dst->t_tspec == FUNC) {
@@ -2239,9 +2198,7 @@ compltyp(dsym, ssym)
  * Completes the declaration of a single argument.
  */
 sym_t *
-decl1arg(sym, initflg)
-	sym_t	*sym;
-	int	initflg;
+decl1arg(sym_t *sym, int initflg)
 {
 	tspec_t	t;
 
@@ -2301,11 +2258,11 @@ decl1arg(sym, initflg)
  * Does some checks for lint directives which apply to functions.
  * Processes arguments in old style function definitions which default
  * to int.
- * Checks compatiblility of old style function definition with previous
+ * Checks compatibility of old style function definition with previous
  * prototype.
  */
 void
-cluparg()
+cluparg(void)
 {
 	sym_t	*args, *arg, *pargs, *parg;
 	int	narg, nparg, n, msg;
@@ -2372,7 +2329,7 @@ cluparg()
 	}
 
 	/*
-	 * print a warning for each argument off an old style function
+	 * print a warning for each argument of an old style function
 	 * definition which defaults to int
 	 */
 	for (arg = args; arg != NULL; arg = arg->s_nxt) {
@@ -2385,7 +2342,7 @@ cluparg()
 	}
 
 	/*
-	 * If this is an old style function definition and a prototyp
+	 * If this is an old style function definition and a prototype
 	 * exists, compare the types of arguments.
 	 */
 	if (funcsym->s_osdef && funcsym->s_type->t_proto) {
@@ -2419,7 +2376,7 @@ cluparg()
 		/* from now the prototype is valid */
 		funcsym->s_osdef = 0;
 		funcsym->s_args = NULL;
-		
+
 	}
 
 }
@@ -2430,8 +2387,7 @@ cluparg()
  * Returns 1 if the position of the previous declaration should be reported.
  */
 static int
-chkptdecl(arg, parg)
-	sym_t	*arg, *parg;
+chkptdecl(sym_t *arg, sym_t *parg)
 {
 	type_t	*tp, *ptp;
 	int	warn, msg;
@@ -2464,9 +2420,7 @@ chkptdecl(arg, parg)
  * Completes a single local declaration/definition.
  */
 void
-decl1loc(dsym, initflg)
-	sym_t	*dsym;
-	int	initflg;
+decl1loc(sym_t *dsym, int initflg)
 {
 	/* Correct a mistake done in dname(). */
 	if (dsym->s_type->t_tspec == FUNC) {
@@ -2523,9 +2477,7 @@ decl1loc(dsym, initflg)
 	}
 
 	if (dcs->d_rdcsym != NULL) {
-
 		if (dcs->d_rdcsym->s_blklev == 0) {
-
 			switch (dsym->s_scl) {
 			case AUTO:
 				/* automatic hides external declaration: %s */
@@ -2550,9 +2502,7 @@ decl1loc(dsym, initflg)
 			default:
 				lerror("decl1loc() 1");
 			}
-
 		} else if (dcs->d_rdcsym->s_blklev == blklev) {
-
 			/* no hflag, because its illegal! */
 			if (dcs->d_rdcsym->s_arg) {
 				/*
@@ -2568,21 +2518,16 @@ decl1loc(dsym, initflg)
 			}
 
 		} else if (dcs->d_rdcsym->s_blklev < blklev) {
-
 			if (hflag)
 				/* declaration hides earlier one: %s */
 				warning(95, dsym->s_name);
-			
 		}
 
 		if (dcs->d_rdcsym->s_blklev == blklev) {
-
 			/* redeclaration of %s */
 			error(27, dsym->s_name);
 			rmsym(dcs->d_rdcsym);
-
 		}
-
 	}
 
 	if (initflg && !(initerr = chkinit(dsym))) {
@@ -2606,8 +2551,7 @@ decl1loc(dsym, initflg)
  * Processes (re)declarations of external Symbols inside blocks.
  */
 static void
-ledecl(dsym)
-	sym_t	*dsym;
+ledecl(sym_t *dsym)
 {
 	int	eqt, warn;
 	sym_t	*esym;
@@ -2657,13 +2601,12 @@ ledecl(dsym)
 }
 
 /*
- * Print an error or a warning if the symbol cant be initialized due
- * to type/storage class. Returnvalue is 1 if an error has been
+ * Print an error or a warning if the symbol can't be initialized due
+ * to type/storage class. Return value is 1 if an error has been
  * detected.
  */
 static int
-chkinit(sym)
-	sym_t	*sym;
+chkinit(sym_t *sym)
 {
 	int	err;
 
@@ -2694,7 +2637,7 @@ chkinit(sym)
  * Create a symbole for an abstract declaration.
  */
 sym_t *
-aname()
+aname(void)
 {
 	sym_t	*sym;
 
@@ -2722,7 +2665,7 @@ aname()
  * Removes anything which has nothing to do on global level.
  */
 void
-globclup()
+globclup(void)
 {
 	while (dcs->d_nxt != NULL)
 		popdecl();
@@ -2732,7 +2675,7 @@ globclup()
 	mblklev = 0;
 
 	/*
-	 * remove all informations about pending lint directives without
+	 * remove all information about pending lint directives without
 	 * warnings.
 	 */
 	glclup(1);
@@ -2742,8 +2685,7 @@ globclup()
  * Process an abstract type declaration
  */
 sym_t *
-decl1abs(sym)
-	sym_t	*sym;
+decl1abs(sym_t *sym)
 {
 	chkfdef(sym, 1);
 	chktyp(sym);
@@ -2754,8 +2696,7 @@ decl1abs(sym)
  * Checks size after declarations of variables and their initialisation.
  */
 void
-chksz(dsym)
-	sym_t	*dsym;
+chksz(sym_t *dsym)
 {
 	/*
 	 * check size only for symbols which are defined and no function and
@@ -2783,8 +2724,7 @@ chksz(dsym)
  * Mark an object as set if it is not already
  */
 void
-setsflg(sym)
-	sym_t	*sym;
+setsflg(sym_t *sym)
 {
 	if (!sym->s_set) {
 		sym->s_set = 1;
@@ -2796,9 +2736,7 @@ setsflg(sym)
  * Mark an object as used if it is not already
  */
 void
-setuflg(sym, fcall, szof)
-	sym_t	*sym;
-	int	fcall, szof;
+setuflg(sym_t *sym, int fcall, int szof)
 {
 	if (!sym->s_used) {
 		sym->s_used = 1;
@@ -2820,8 +2758,7 @@ setuflg(sym, fcall, szof)
  * with s_dlnxt) if these are not used or only set.
  */
 void
-chkusage(di)
-	dinfo_t	*di;
+chkusage(dinfo_t *di)
 {
 	sym_t	*sym;
 	int	mknowarn;
@@ -2841,9 +2778,7 @@ chkusage(di)
  * only set.
  */
 void
-chkusg1(novar, sym)
-	int	novar;
-	sym_t	*sym;
+chkusg1(int novar, sym_t *sym)
 {
 	pos_t	cpos;
 
@@ -2868,9 +2803,7 @@ chkusg1(novar, sym)
 }
 
 static void
-chkausg(novar, arg)
-	int	novar;
-	sym_t	*arg;
+chkausg(int novar, sym_t *arg)
 {
 	if (!arg->s_set)
 		lerror("chkausg() 1");
@@ -2886,9 +2819,7 @@ chkausg(novar, arg)
 }
 
 static void
-chkvusg(novar, sym)
-	int	novar;
-	sym_t	*sym;
+chkvusg(int novar, sym_t *sym)
 {
 	scl_t	sc;
 	sym_t	*xsym;
@@ -2955,8 +2886,7 @@ chkvusg(novar, sym)
 }
 
 static void
-chklusg(lab)
-	sym_t	*lab;
+chklusg(sym_t *lab)
 {
 	if (blklev != 1 || lab->s_blklev != 1)
 		lerror("chklusg() 1");
@@ -2973,8 +2903,7 @@ chklusg(lab)
 }
 
 static void
-chktusg(sym)
-	sym_t	*sym;
+chktusg(sym_t *sym)
 {
 	if (!incompl(sym->s_type))
 		return;
@@ -3011,7 +2940,7 @@ chktusg(sym)
  * - static symbols which are never used
  */
 void
-chkglsyms()
+chkglsyms(void)
 {
 	sym_t	*sym;
 	pos_t	cpos;
@@ -3038,12 +2967,11 @@ chkglsyms()
 }
 
 static void
-chkglvar(sym)
-	sym_t	*sym;
+chkglvar(sym_t *sym)
 {
 	if (sym->s_scl == TYPEDEF || sym->s_scl == ENUMCON)
 		return;
-	
+
 	if (sym->s_scl != EXTERN && sym->s_scl != STATIC)
 		lerror("chkglvar() 1");
 
@@ -3085,13 +3013,12 @@ chkglvar(sym)
 }
 
 static void
-glchksz(sym)
-	sym_t	*sym;
+glchksz(sym_t *sym)
 {
 	if (sym->s_def == TDEF) {
 		if (sym->s_type->t_tspec == FUNC)
 			/*
-			 * this can happen if an syntax error occurred
+			 * this can happen if a syntax error occurred
 			 * after a function declaration
 			 */
 			return;
@@ -3112,9 +3039,7 @@ glchksz(sym)
  * Prints information about location of previous definition/declaration.
  */
 void
-prevdecl(msg, psym)
-	int	msg;
-	sym_t	*psym;
+prevdecl(int msg, sym_t *psym)
 {
 	pos_t	cpos;
 

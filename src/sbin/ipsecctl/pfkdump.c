@@ -1,4 +1,4 @@
-/*	$OpenBSD: pfkdump.c,v 1.5 2005/07/09 21:54:12 hshoexer Exp $	*/
+/*	$OpenBSD: pfkdump.c,v 1.10 2005/12/21 01:40:23 millert Exp $	*/
 
 /*
  * Copyright (c) 2003 Markus Friedl.  All rights reserved.
@@ -25,7 +25,6 @@
  */
 #include <sys/param.h>
 #include <sys/socket.h>
-#include <sys/errno.h>
 #include <sys/time.h>
 #include <sys/sysctl.h>
 #include <net/pfkeyv2.h>
@@ -36,6 +35,7 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <err.h>
+#include <errno.h>
 
 #include "ipsecctl.h"
 #include "pfkey.h"
@@ -65,7 +65,7 @@ struct idname {
 
 struct idname ext_types[] = {
 	{ SADB_EXT_RESERVED,		"reserved",		NULL },
-	{ SADB_EXT_SA,			"sa",			print_sa},
+	{ SADB_EXT_SA,			"sa",			print_sa },
 	{ SADB_EXT_LIFETIME_CURRENT,	"lifetime_cur",		print_life },
 	{ SADB_EXT_LIFETIME_HARD,	"lifetime_hard",	print_life },
 	{ SADB_EXT_LIFETIME_SOFT,	"lifetime_soft",	print_life },
@@ -76,7 +76,7 @@ struct idname ext_types[] = {
 	{ SADB_EXT_IDENTITY_SRC,	"identity_src",		print_ident },
 	{ SADB_EXT_IDENTITY_DST,	"identity_dst",		print_ident },
 	{ SADB_X_EXT_REMOTE_AUTH,	"remote_auth",		print_auth },
-	{ SADB_X_EXT_LOCAL_CREDENTIALS, "local_cred",		print_cred },
+	{ SADB_X_EXT_LOCAL_CREDENTIALS,	"local_cred",		print_cred },
 	{ SADB_X_EXT_REMOTE_CREDENTIALS,"remote_cred",		print_cred },
 	{ SADB_X_EXT_UDPENCAP,		"udpencap",		print_udpenc },
 	{ SADB_X_EXT_LIFETIME_LASTUSE,	"lifetime_lastuse",	print_life },
@@ -211,6 +211,14 @@ print_sa(struct sadb_ext *ext, struct sadb_msg *msg)
 {
 	struct sadb_sa *sa = (struct sadb_sa *)ext;
 
+	/* tunnel/transport is only meaningful for esp/ah/ipcomp */
+	if (msg->sadb_msg_satype != SADB_X_SATYPE_TCPSIGNATURE) {
+		if (sa->sadb_sa_flags & SADB_X_SAFLAGS_TUNNEL)
+			printf("tunnel ");
+		else
+			printf("transport ");
+	}
+
 	if (extensions[SADB_EXT_ADDRESS_SRC]) {
 		printf("from ");
 		print_addr(extensions[SADB_EXT_ADDRESS_SRC], msg);
@@ -219,24 +227,22 @@ print_sa(struct sadb_ext *ext, struct sadb_msg *msg)
 		printf(" to ");
 		print_addr(extensions[SADB_EXT_ADDRESS_DST], msg);
 	}
+	printf(" spi 0x%08x", ntohl(sa->sadb_sa_spi));
 	if (msg->sadb_msg_satype == SADB_X_SATYPE_IPCOMP)
-		printf("cpi 0x%8.8x %s",
-		    ntohl(sa->sadb_sa_spi),
-		    lookup_name(comp_types, sa->sadb_sa_encrypt));
+		printf(" comp %s", lookup_name(comp_types,
+		    sa->sadb_sa_encrypt));
 	else {
-		printf(" spi 0x%8.8x", ntohl(sa->sadb_sa_spi));
 		if (sa->sadb_sa_encrypt)
-			printf(" %s",
-			    lookup_name(enc_types, sa->sadb_sa_encrypt));
+			printf(" enc %s", lookup_name(enc_types,
+			    sa->sadb_sa_encrypt));
 		if (sa->sadb_sa_auth)
-			printf(" %s",
-			    lookup_name(auth_types, sa->sadb_sa_auth));
+			printf(" auth %s", lookup_name(auth_types,
+			    sa->sadb_sa_auth));
 	}
-	if (sa->sadb_sa_flags & SADB_X_SAFLAGS_TUNNEL)
-		printf(" tunnel");
 	printf("\n");
 }
 
+/* ARGSUSED1 */
 static void
 print_addr(struct sadb_ext *ext, struct sadb_msg *msg)
 {
@@ -268,6 +274,7 @@ print_addr(struct sadb_ext *ext, struct sadb_msg *msg)
 	}
 }
 
+/* ARGSUSED1 */
 static void
 print_key(struct sadb_ext *ext, struct sadb_msg *msg)
 {
@@ -284,6 +291,7 @@ print_key(struct sadb_ext *ext, struct sadb_msg *msg)
 	printf("\n");
 }
 
+/* ARGSUSED1 */
 static void
 print_life(struct sadb_ext *ext, struct sadb_msg *msg)
 {
@@ -296,6 +304,7 @@ print_life(struct sadb_ext *ext, struct sadb_msg *msg)
 	    life->sadb_lifetime_usetime);
 }
 
+/* ARGSUSED1 */
 static void
 print_ident(struct sadb_ext *ext, struct sadb_msg *msg)
 {
@@ -306,6 +315,7 @@ print_ident(struct sadb_ext *ext, struct sadb_msg *msg)
 	    ident->sadb_ident_id, (char *)(ident + 1));
 }
 
+/* ARGSUSED1 */
 static void
 print_auth(struct sadb_ext *ext, struct sadb_msg *msg)
 {
@@ -315,6 +325,7 @@ print_auth(struct sadb_ext *ext, struct sadb_msg *msg)
 	    lookup_name(xauth_types, x_cred->sadb_x_cred_type));
 }
 
+/* ARGSUSED1 */
 static void
 print_cred(struct sadb_ext *ext, struct sadb_msg *msg)
 {
@@ -323,6 +334,7 @@ print_cred(struct sadb_ext *ext, struct sadb_msg *msg)
 	    lookup_name(cred_types, x_cred->sadb_x_cred_type));
 }
 
+/* ARGSUSED1 */
 static void
 print_udpenc(struct sadb_ext *ext, struct sadb_msg *msg)
 {

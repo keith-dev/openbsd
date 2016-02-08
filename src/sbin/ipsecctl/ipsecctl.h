@@ -1,4 +1,4 @@
-/*	$OpenBSD: ipsecctl.h,v 1.17 2005/08/22 17:26:46 hshoexer Exp $	*/
+/*	$OpenBSD: ipsecctl.h,v 1.27 2006/01/17 00:05:39 deraadt Exp $	*/
 /*
  * Copyright (c) 2004, 2005 Hans-Joerg Hoexer <hshoexer@openbsd.org>
  *
@@ -40,10 +40,11 @@ enum {
 	DIRECTION_UNKNOWN, IPSEC_IN, IPSEC_OUT, IPSEC_INOUT
 };
 enum {
-	PROTO_UNKNOWN, IPSEC_ESP, IPSEC_AH, IPSEC_COMP, IPSEC_TCPMD5
+	PROTO_UNKNOWN, IPSEC_ESP, IPSEC_AH, IPSEC_IPCOMP, IPSEC_TCPMD5,
+	IPSEC_IPIP
 };
 enum {
-	AUTH_UNKNOWN, AUTH_PSK, AUTH_RSA
+	MODE_UNKNOWN, IPSEC_TRANSPORT, IPSEC_TUNNEL
 };
 enum {
 	ID_UNKNOWN, ID_PREFIX, ID_FQDN, ID_UFQDN
@@ -55,25 +56,43 @@ enum {
 enum {
 	AUTHXF_UNKNOWN, AUTHXF_NONE, AUTHXF_HMAC_MD5, AUTHXF_HMAC_RIPEMD160,
 	AUTHXF_HMAC_SHA1, AUTHXF_HMAC_SHA2_256, AUTHXF_HMAC_SHA2_384,
-	AUTHXF_HMAC_SHA2_512, AUTHXF_MD5, AUTHXF_SHA1
+	AUTHXF_HMAC_SHA2_512
 };
 enum {
-	ENCXF_UNKNOWN,ENCXF_NONE, ENCXF_3DES_CBC, ENCXF_DES_CBC, ENCXF_AES,
+	ENCXF_UNKNOWN, ENCXF_NONE, ENCXF_3DES_CBC, ENCXF_DES_CBC, ENCXF_AES,
 	ENCXF_AESCTR, ENCXF_BLOWFISH, ENCXF_CAST128, ENCXF_NULL, ENCXF_SKIPJACK
+};
+enum {
+	COMPXF_UNKNOWN, COMPXF_DEFLATE, COMPXF_LZS
 };
 enum {
 	IKE_ACTIVE, IKE_PASSIVE
 };
+enum {
+	IKE_AUTH_RSA, IKE_AUTH_PSK
+};
 
 struct ipsec_addr {
-	struct in_addr   v4;
 	union {
-		struct in_addr  mask;
-		u_int32_t	mask32;
-	}		 v4mask;
-	int		 netaddress;
-	sa_family_t	 af;
-	char		*name;
+		struct in_addr		v4;
+		struct in6_addr		v6;
+		u_int8_t		addr8[16];
+		u_int16_t		addr16[8];
+		u_int32_t		addr32[4];
+	} ipa;
+#define v4	ipa.v4
+#define v6	ipa.v6
+#define addr8	ipa.addr8
+#define addr16	ipa.addr16
+#define addr32	ipa.addr32
+};
+
+struct ipsec_addr_wrap {
+	struct ipsec_addr	 address;
+	struct ipsec_addr	 mask;
+	int			 netaddress;
+	sa_family_t		 af;
+	char			*name;
 };
 
 struct ipsec_auth {
@@ -88,6 +107,11 @@ struct ipsec_key {
 	u_int8_t	*data;
 };
 
+struct ike_auth {
+	u_int8_t	 type;
+	char		*string;
+};
+
 struct ipsec_xf {
 	char		*name;
 	u_int16_t	 id;
@@ -98,6 +122,7 @@ struct ipsec_xf {
 struct ipsec_transforms {
 	const struct ipsec_xf *authxf;
 	const struct ipsec_xf *encxf;
+	const struct ipsec_xf *compxf;
 };
 
 extern const struct ipsec_xf authxfs[];
@@ -107,10 +132,11 @@ extern const struct ipsec_xf encxfs[];
 struct ipsec_rule {
 	u_int8_t	 type;
 
-	struct ipsec_addr *src;
-	struct ipsec_addr *dst;
-	struct ipsec_addr *peer;
+	struct ipsec_addr_wrap *src;
+	struct ipsec_addr_wrap *dst;
+	struct ipsec_addr_wrap *peer;
 	struct ipsec_auth *auth;
+	struct ike_auth *ikeauth;
 	struct ipsec_transforms *xfs;
 	struct ipsec_transforms *mmxfs;
 	struct ipsec_transforms *qmxfs;
@@ -118,6 +144,7 @@ struct ipsec_rule {
 	struct ipsec_key  *enckey;
 
 	u_int8_t	 proto;
+	u_int8_t	 tmode;
 	u_int8_t	 direction;
 	u_int8_t	 flowtype;
 	u_int8_t	 ikemode;
@@ -135,10 +162,17 @@ struct ipsecctl {
 	struct ipsec_rule_queue rule_queue;
 };
 
+struct addr_node {
+	struct ipsec_addr_wrap	 addr;
+	sa_family_t		 af;
+	struct addr_node	*next;
+	struct addr_node	*tail;
+};
+
 int	parse_rules(FILE *, struct ipsecctl *);
 int	ipsecctl_add_rule(struct ipsecctl * ipsec, struct ipsec_rule *);
 void	ipsecctl_get_rules(struct ipsecctl *);
 int	ike_print_config(struct ipsec_rule *, int);
 int	ike_ipsec_establish(int, struct ipsec_rule *);
 
-#endif				/* _IPSECCTL_H_ */
+#endif /* _IPSECCTL_H_ */

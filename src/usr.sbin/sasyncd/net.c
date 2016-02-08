@@ -1,4 +1,4 @@
-/*	$OpenBSD: net.c,v 1.8 2005/05/27 20:47:11 ho Exp $	*/
+/*	$OpenBSD: net.c,v 1.11 2006/01/26 09:53:46 moritz Exp $	*/
 
 /*
  * Copyright (c) 2005 Håkan Olsson.  All rights reserved.
@@ -36,6 +36,7 @@
 #include <arpa/inet.h>
 #include <ifaddrs.h>
 #include <netdb.h>
+#include <signal.h>
 
 #include <openssl/aes.h>
 #include <openssl/sha.h>
@@ -588,7 +589,7 @@ net_send_messages(fd_set *fds)
 		}
 		m = qm->msg;
 
-		log_msg(5, "net_send_messages: msg %p len %d ref %d "
+		log_msg(5, "net_send_messages: msg %p len %u ref %d "
 		    "to peer %s", m, m->len, m->refcnt, p->name);
 
 		/* write message */
@@ -669,7 +670,7 @@ static u_int8_t *
 net_read(struct syncpeer *p, u_int32_t *msgtype, u_int32_t *msglen)
 {
 	u_int8_t	*msg, *blob, *rhash, *iv, hash[SHA_DIGEST_LENGTH];
-	u_int32_t	 v, blob_len;
+	u_int32_t	 v, blob_len, pos = 0;
 	int		 padlen = 0, offset = 0, r;
 	SHA_CTX		 ctx;
 
@@ -694,16 +695,21 @@ net_read(struct syncpeer *p, u_int32_t *msgtype, u_int32_t *msglen)
 		log_err("net_read: malloc()");
 		return NULL;
 	}
-	r = read(p->socket, blob, blob_len);
-	if (r < 1) {
-		net_disconnect_peer(p);
-		free(blob);
-		return NULL;
-	} else if (r < (ssize_t)blob_len) {
-		/* XXX wait and read more? */
-		fprintf(stderr, "net_read: wanted %d, got %d\n", blob_len, r);
-		free(blob);
-		return NULL;
+
+	while (blob_len > pos) {
+		switch (r = read(p->socket, blob + pos, blob_len - pos)) {
+		case -1:
+			if (errno == EINTR || errno == EAGAIN)
+				continue;
+                        /* FALLTHROUGH */
+		case 0:
+			net_disconnect_peer(p);
+			free(blob);
+			return NULL;
+                        /* NOTREACHED */
+		default:
+			pos += r;
+		}
 	}
 
 	offset = 0;

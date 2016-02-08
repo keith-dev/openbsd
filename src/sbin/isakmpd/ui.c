@@ -1,4 +1,4 @@
-/* $OpenBSD: ui.c,v 1.45 2005/04/08 22:32:10 cloder Exp $	 */
+/* $OpenBSD: ui.c,v 1.47 2005/11/14 23:25:11 deraadt Exp $	 */
 /* $EOM: ui.c,v 1.43 2000/10/05 09:25:12 niklas Exp $	 */
 
 /*
@@ -31,7 +31,10 @@
  */
 
 #include <sys/types.h>
+#include <sys/socket.h>
 #include <sys/stat.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
 #include <fcntl.h>
 #include <stdlib.h>
 #include <string.h>
@@ -115,21 +118,58 @@ ui_connect(char *cmd)
 	connection_setup(name);
 }
 
-/* Tear down a phase 2 connection.  */
+/* Tear down a connection, can be phase 1 or 2.  */
 static void
 ui_teardown(char *cmd)
 {
-	char            name[81];
-	struct sa      *sa;
+	struct sockaddr_in	 addr;
+	struct sockaddr_in6	 addr6;
+	struct sa		*sa;
+	int			 phase;
+	char            	 name[81];
 
-	if (sscanf(cmd, "t %80s", name) != 1) {
+	/* If no phase is given, we default to phase 2. */
+	phase = 2;
+	if (sscanf(cmd, "t main %80s", name) == 1)
+		phase = 1;
+	else if (sscanf(cmd, "t quick %80s", name) == 1)
+		phase = 2;
+	else if (sscanf(cmd, "t %80s", name) != 1) {
 		log_print("ui_teardown: command \"%s\" malformed", cmd);
 		return;
 	}
-	LOG_DBG((LOG_UI, 10, "ui_teardown: teardown connection \"%s\"", name));
-	connection_teardown(name);
-	while ((sa = sa_lookup_by_name(name, 2)) != 0)
-		sa_delete(sa, 1);
+	LOG_DBG((LOG_UI, 10, "ui_teardown: teardown connection \"%s\", "
+	    "phase %d", name, phase));
+
+	bzero(&addr, sizeof(addr));
+	bzero(&addr6, sizeof(addr6));
+
+	if (inet_pton(AF_INET, name, &addr.sin_addr) == 1) {
+		addr.sin_len = sizeof(addr);
+		addr.sin_family = AF_INET;
+
+		while ((sa = sa_lookup_by_peer((struct sockaddr *)&addr,
+		    SA_LEN((struct sockaddr *)&addr), phase)) != 0) {
+			if (sa->name)
+				connection_teardown(sa->name);
+			sa_delete(sa, 1);
+		}
+	} else if (inet_pton(AF_INET6, name, &addr6.sin6_addr) == 1) {
+		addr6.sin6_len = sizeof(addr6);
+		addr6.sin6_family = AF_INET6;
+
+		while ((sa = sa_lookup_by_peer((struct sockaddr *)&addr6,
+		    SA_LEN((struct sockaddr *)&addr6), phase)) != 0) {
+			if (sa->name)
+				connection_teardown(sa->name);
+			sa_delete(sa, 1);
+		}
+	} else {
+		if (phase == 2)
+			connection_teardown(name);
+		while ((sa = sa_lookup_by_name(name, phase)) != 0)
+			sa_delete(sa, 1);
+	}
 }
 
 /* Tear down all phase 2 connections.  */
@@ -181,7 +221,7 @@ ui_config(char *cmd)
 {
 	char	 subcmd[81], section[81], tag[81], value[81], tmp[81];
 	char	*v, *nv;
-	int	 trans = 0, items, nvlen;
+	int	 trans = 0, items;
 	FILE	*fd;
 
 	if (sscanf(cmd, "C %80s", subcmd) != 1)
@@ -222,18 +262,14 @@ ui_config(char *cmd)
 			conf_set(trans, section, tag, value, 1, 0);
 		else {
 			/* Add the new value to the end of the 'v' list.  */
-			nvlen = strlen(v) + strlen(value) + 2;
-			nv = (char *)malloc(nvlen);
-			if (!nv) {
-				log_error("ui_config: malloc(%d) failed",
-				    nvlen);
+			if (asprintf(&nv,
+			    v[strlen(v) - 1] == ',' ? "%s%s" : "%s,%s", v,
+			    value) == -1) {
+				log_error("ui_config: malloc() failed");
 				if (trans)
 					conf_end(trans, 0);
 				return;
 			}
-			snprintf(nv, nvlen,
-			    v[strlen(v) - 1] == ',' ? "%s%s" : "%s,%s", v,
-			    value);
 			conf_set(trans, section, tag, nv, 1, 0);
 			free(nv);
 		}

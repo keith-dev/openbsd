@@ -1,4 +1,4 @@
-.\"	$OpenBSD: afterboot.8,v 1.110 2005/07/14 21:12:17 jmc Exp $
+.\"	$OpenBSD: afterboot.8,v 1.112 2005/11/28 19:43:00 jmc Exp $
 .\"
 .\" Copyright (c) 1997 Marshall M. Midden
 .\" All rights reserved.
@@ -673,14 +673,17 @@ for the mount option:
 .Pp
 .Dl /dev/wd0j /altroot ffs xx 0 0
 .Pp
-and you must add a line to root's
+and the environment variable
+.Ev ROOTBACKUP
+must be set.
+For example, the following can be added to root's
 .Xr crontab 5 :
 .Pp
 .Dl ROOTBACKUP=1
 .Pp
-so that the
+The
 .Pa /etc/daily
-script will make a daily backup of the root filesystem.
+script will then make a daily backup of the root filesystem.
 .Ss Tighten up security
 You might wish to tighten up security more by editing
 .Pa /etc/fbtab
@@ -796,6 +799,7 @@ To compile a kernel inside a writable source tree, do the following:
 # vi SOMEFILE  (to make any changes)
 # config SOMEFILE
 # cd ../compile/SOMEFILE
+# make depend
 # make
 .Ed
 .Pp
@@ -805,9 +809,6 @@ is the architecture (e.g. i386), and
 .Ar SOMEFILE
 should be a name indicative of a particular configuration
 (often that of the hostname).
-You can also do a
-.Ic make depend
-so that you will have dependencies there the next time you do a compile.
 .Pp
 If you are building your kernel again, before you do a
 .Ic make
@@ -818,14 +819,14 @@ or a
 .Ic make clean
 after making changes to your kernel options.
 .Pp
-After either of these two methods, you can place the new kernel (called
+The new kernel (called
 .Pa bsd )
-in
+can be placed in
 .Pa /
 (i.e.\&
 .Pa /bsd )
 and the system will boot it next time.
-Most people save their backup kernels as
+Many people save their backup kernels as
 .Pa /bsd.1 ,
 .Pa /bsd.2 ,
 etc.

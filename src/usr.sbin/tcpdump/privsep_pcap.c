@@ -1,4 +1,4 @@
-/*	$OpenBSD: privsep_pcap.c,v 1.9 2005/05/22 19:53:33 moritz Exp $ */
+/*	$OpenBSD: privsep_pcap.c,v 1.14 2005/11/13 19:37:50 otto Exp $ */
 
 /*
  * Copyright (c) 2004 Can Erkin Acar
@@ -78,19 +78,24 @@ setfilter(int bpfd, int sock, char *filter)
 	if (pcap_compile(&hpcap, &fcode, filter, oflag, netmask))
 		goto err;
 
-	/* write the filter */
-	must_write(sock, &fcode.bf_len, sizeof(fcode.bf_len));
-	if (fcode.bf_len > 0)
+	/* if bpf descriptor is open, set the filter XXX check oflag? */
+	if (bpfd >= 0 && ioctl(bpfd, BIOCSETF, &fcode)) {
+		snprintf(hpcap.errbuf, PCAP_ERRBUF_SIZE,
+		    "ioctl: BIOCSETF: %s", strerror(errno));
+		pcap_freecode(&fcode);
+		goto err;
+	}
+	if (fcode.bf_len > 0) {
+		/* write the filter */
+		must_write(sock, &fcode.bf_len, sizeof(fcode.bf_len));
 		must_write(sock, fcode.bf_insns,
 		    fcode.bf_len * sizeof(struct bpf_insn));
-	else {
-		write_string(sock, "Invalid filter size");
-		return (1);
+	} else {
+		snprintf(hpcap.errbuf, PCAP_ERRBUF_SIZE, "Invalid filter size");
+		pcap_freecode(&fcode);
+		goto err;
 	}
 
-	/* if bpf descriptor is open, set the filter XXX check oflag? */
-	if (bpfd >= 0 && ioctl(bpfd, BIOCSETF, &fcode))
-		return 1;
 
 	pcap_freecode(&fcode);
 	return (0);
@@ -160,11 +165,7 @@ priv_pcap_setfilter(pcap_t *hpcap, int oflag, u_int32_t netmask)
 	return (fcode);
 
  err:
-	if (fcode) {
-		if (fcode->bf_insns)
-			free(fcode->bf_insns);
-		free(fcode);
-	}
+	free(fcode);
 	return (NULL);
 }
 
@@ -174,12 +175,12 @@ int
 pcap_live(const char *device, int snaplen, int promisc, u_int dlt)
 {
 	char		bpf[sizeof "/dev/bpf0000000000"];
-	int		fd = -1, n = 0;
+	int		fd, n = 0;
 	struct ifreq	ifr;
 	unsigned	v;
 
 	if (device == NULL || snaplen <= 0)
-		goto error;
+		return (-1);
 
 	do {
 		snprintf(bpf, sizeof(bpf), "/dev/bpf%d", n++);
@@ -187,7 +188,7 @@ pcap_live(const char *device, int snaplen, int promisc, u_int dlt)
 	} while (fd < 0 && errno == EBUSY);
 
 	if (fd < 0)
-		goto error;
+		return (-1);
 
 	v = 32768;	/* XXX this should be a user-accessible hook */
 	ioctl(fd, BIOCSBLEN, &v);
@@ -196,12 +197,12 @@ pcap_live(const char *device, int snaplen, int promisc, u_int dlt)
 	if (ioctl(fd, BIOCSETIF, &ifr) < 0)
 		goto error;
 
+	if (dlt != (u_int) -1 && ioctl(fd, BIOCSDLT, &dlt))
+		goto error;
+
 	if (promisc)
 		/* this is allowed to fail */
 		ioctl(fd, BIOCPROMISC, NULL);
-
-	if (dlt != (u_int) -1 && ioctl(fd, BIOCSDLT, &dlt))
-		goto error;
 
 	/* lock the descriptor */
 	if (ioctl(fd, BIOCLOCK, NULL) < 0)
@@ -209,8 +210,7 @@ pcap_live(const char *device, int snaplen, int promisc, u_int dlt)
 	return (fd);
 
  error:
-	if (fd >= 0)
-		close(fd);
+	close(fd);
 	return (-1);
 }
 
@@ -382,10 +382,10 @@ priv_pcap_offline(const char *fname, char *errbuf)
 
 		fp = fdopen(p->fd, "r");
 		if (fp == NULL) {
-			close(p->fd);
-			p->fd = -1;
 			snprintf(errbuf, PCAP_ERRBUF_SIZE, "%s: %s", fname,
 			    pcap_strerror(errno));
+			close(p->fd);
+			p->fd = -1;
 			goto bad;
 		}
 	}
@@ -503,9 +503,9 @@ priv_pcap_dump_open(pcap_t *p, char *fname)
 		}
 		f = fdopen(fd, "w");
 		if (f == NULL) {
-			close(fd);
 			snprintf(p->errbuf, PCAP_ERRBUF_SIZE, "%s: %s",
 			    fname, pcap_strerror(errno));
+			close(fd);
 			return (NULL);
 		}
 	}

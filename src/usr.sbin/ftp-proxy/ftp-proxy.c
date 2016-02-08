@@ -1,4 +1,4 @@
-/*	$OpenBSD: ftp-proxy.c,v 1.5 2005/06/07 14:12:07 camield Exp $ */
+/*	$OpenBSD: ftp-proxy.c,v 1.7 2005/11/18 08:49:32 camield Exp $ */
 
 /*
  * Copyright (c) 2004, 2005 Camiel Dobbelaar, <cd@sentia.nl>
@@ -174,11 +174,12 @@ client_parse_anon(struct session *s)
 {
 	if (strcasecmp("USER ftp\r\n", linebuf) != 0 &&
 	    strcasecmp("USER anonymous\r\n", linebuf) != 0) {
-	    	linelen = snprintf(linebuf, sizeof linebuf,
+		snprintf(linebuf, sizeof linebuf,
 		    "500 Only anonymous FTP allowed\r\n");
 		logmsg(LOG_DEBUG, "#%d proxy: %s", s->id, linebuf);
 
 		/* Talk back to the client ourself. */
+		linelen = strlen(linebuf);
 		bufferevent_write(s->client_bufev, linebuf, linelen);
 
 		/* Clear buffer so it's not sent to the server. */
@@ -292,11 +293,9 @@ end_session(struct session *s)
 		bufferevent_free(s->server_bufev);
 
 	if (s->client_fd != -1)
-		while (close(s->client_fd) != 0 && errno == EINTR)
-			;
+		close(s->client_fd);
 	if (s->server_fd != -1)
-		while (close(s->server_fd) != 0 && errno == EINTR)
-			;
+		close(s->server_fd);
 
 	/* Remove rulesets by commiting empty ones. */
 	err = 0;

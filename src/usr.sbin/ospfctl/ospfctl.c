@@ -1,4 +1,4 @@
-/*	$OpenBSD: ospfctl.c,v 1.17 2005/05/27 00:51:52 norby Exp $ */
+/*	$OpenBSD: ospfctl.c,v 1.25 2006/02/24 21:06:46 norby Exp $ */
 
 /*
  * Copyright (c) 2005 Claudio Jeker <claudio@openbsd.org>
@@ -36,12 +36,10 @@
 #include "ospfd.h"
 #include "ospfe.h"
 #include "parser.h"
-#include "log.h"
 
 __dead void	 usage(void);
 int		 show_summary_msg(struct imsg *);
 int		 show_interface_msg(struct imsg *);
-void		 print_baudrate(u_long);
 const char	*print_if_type(enum iface_type type);
 const char	*print_if_state(int);
 const char	*print_nbr_state(int);
@@ -114,7 +112,7 @@ main(int argc, char *argv[])
 		err(1, "connect: %s", OSPFD_SOCKET);
 
 	if ((ibuf = malloc(sizeof(struct imsgbuf))) == NULL)
-		fatal(NULL);
+		err(1, NULL);
 	imsg_init(ibuf, ctl_sock, NULL);
 	done = 0;
 
@@ -125,7 +123,7 @@ main(int argc, char *argv[])
 		/* not reached */
 	case SHOW:
 	case SHOW_SUM:
-		imsg_compose(ibuf, IMSG_CTL_SHOW_SUM, 0, 0, -1, NULL, 0);
+		imsg_compose(ibuf, IMSG_CTL_SHOW_SUM, 0, 0, NULL, 0);
 		break;
 	case SHOW_IFACE:
 		if (*res->ifname) {
@@ -133,65 +131,65 @@ main(int argc, char *argv[])
 			if (ifidx == 0)
 				errx(1, "no such interface %s", res->ifname);
 		}
-		imsg_compose(ibuf, IMSG_CTL_SHOW_INTERFACE, 0, 0, -1,
+		imsg_compose(ibuf, IMSG_CTL_SHOW_INTERFACE, 0, 0,
 		    &ifidx, sizeof(ifidx));
 		break;
 	case SHOW_NBR:
-		printf("%-15s %-3s %-17s %-9s %-15s %s\n", "ID", "Pri",
-		    "State", "DeadTime", "Address", "Interface");
+		printf("%-15s %-3s %-12s %-8s %-15s %-9s %s\n", "ID", "Pri",
+		    "State", "DeadTime", "Address", "Iface","Uptime");
 	case SHOW_NBR_DTAIL:
-		imsg_compose(ibuf, IMSG_CTL_SHOW_NBR, 0, 0, -1, NULL, 0);
+		imsg_compose(ibuf, IMSG_CTL_SHOW_NBR, 0, 0, NULL, 0);
 		break;
 	case SHOW_DB:
-		imsg_compose(ibuf, IMSG_CTL_SHOW_DATABASE, 0, 0, -1, NULL, 0);
+		imsg_compose(ibuf, IMSG_CTL_SHOW_DATABASE, 0, 0, NULL, 0);
 		break;
 	case SHOW_DBBYAREA:
-		imsg_compose(ibuf, IMSG_CTL_SHOW_DATABASE, 0, 0, -1,
+		imsg_compose(ibuf, IMSG_CTL_SHOW_DATABASE, 0, 0,
 		    &res->addr, sizeof(res->addr));
 		break;
 	case SHOW_DBEXT:
-		imsg_compose(ibuf, IMSG_CTL_SHOW_DB_EXT, 0, 0, -1, NULL, 0);
+		imsg_compose(ibuf, IMSG_CTL_SHOW_DB_EXT, 0, 0, NULL, 0);
 		break;
 	case SHOW_DBNET:
-		imsg_compose(ibuf, IMSG_CTL_SHOW_DB_NET, 0, 0, -1, NULL, 0);
+		imsg_compose(ibuf, IMSG_CTL_SHOW_DB_NET, 0, 0, NULL, 0);
 		break;
 	case SHOW_DBRTR:
-		imsg_compose(ibuf, IMSG_CTL_SHOW_DB_RTR, 0, 0, -1, NULL, 0);
+		imsg_compose(ibuf, IMSG_CTL_SHOW_DB_RTR, 0, 0, NULL, 0);
 		break;
 	case SHOW_DBSELF:
-		imsg_compose(ibuf, IMSG_CTL_SHOW_DB_SELF, 0, 0, -1, NULL, 0);
+		imsg_compose(ibuf, IMSG_CTL_SHOW_DB_SELF, 0, 0, NULL, 0);
 		break;
 	case SHOW_DBSUM:
-		imsg_compose(ibuf, IMSG_CTL_SHOW_DB_SUM, 0, 0, -1, NULL, 0);
+		imsg_compose(ibuf, IMSG_CTL_SHOW_DB_SUM, 0, 0, NULL, 0);
 		break;
 	case SHOW_DBASBR:
-		imsg_compose(ibuf, IMSG_CTL_SHOW_DB_ASBR, 0, 0, -1, NULL, 0);
+		imsg_compose(ibuf, IMSG_CTL_SHOW_DB_ASBR, 0, 0, NULL, 0);
 		break;
 	case SHOW_RIB:
-		printf("%-20s %-17s %-12s %-9s %-7s\n", "Destination",
-		    "Nexthop", "Path Type", "Type", "Cost");
+		printf("%-20s %-17s %-12s %-9s %-7s %-8s\n", "Destination",
+		    "Nexthop", "Path Type", "Type", "Cost", "Uptime");
 	case SHOW_RIB_DTAIL:
-		imsg_compose(ibuf, IMSG_CTL_SHOW_RIB, 0, 0, -1, NULL, 0);
+		imsg_compose(ibuf, IMSG_CTL_SHOW_RIB, 0, 0, NULL, 0);
 		break;
 	case SHOW_FIB:
 		if (!res->addr.s_addr)
-			imsg_compose(ibuf, IMSG_CTL_KROUTE, 0, 0, -1,
+			imsg_compose(ibuf, IMSG_CTL_KROUTE, 0, 0,
 			    &res->flags, sizeof(res->flags));
 		else
-			imsg_compose(ibuf, IMSG_CTL_KROUTE_ADDR, 0, 0, -1,
+			imsg_compose(ibuf, IMSG_CTL_KROUTE_ADDR, 0, 0,
 			    &res->addr, sizeof(res->addr));
 		show_fib_head();
 		break;
 	case SHOW_FIB_IFACE:
 		if (*res->ifname)
-			imsg_compose(ibuf, IMSG_CTL_IFINFO, 0, 0, -1,
+			imsg_compose(ibuf, IMSG_CTL_IFINFO, 0, 0,
 			    res->ifname, sizeof(res->ifname));
 		else
-			imsg_compose(ibuf, IMSG_CTL_IFINFO, 0, 0, -1, NULL, 0);
+			imsg_compose(ibuf, IMSG_CTL_IFINFO, 0, 0, NULL, 0);
 		show_interface_head();
 		break;
 	case RELOAD:
-		imsg_compose(ibuf, IMSG_CTL_RELOAD, 0, 0, -1, NULL, 0);
+		imsg_compose(ibuf, IMSG_CTL_RELOAD, 0, 0, NULL, 0);
 		printf("reload request sent.\n");
 		done = 1;
 		break;
@@ -337,13 +335,31 @@ show_interface_msg(struct imsg *imsg)
 		    "hello %d, dead %d, wait %d, retransmit %d\n",
 		     iface->hello_interval, iface->dead_interval,
 		     iface->dead_interval, iface->rxmt_interval);
-		if (iface->hello_timer < 0)
+		if (iface->passive)
+			printf("    Passive interface (No Hellos)\n");
+		else if (iface->hello_timer < 0)
 			printf("    Hello timer not running\n");
 		else
 			printf("    Hello timer due in %s\n",
 			    fmt_timeframe_core(iface->hello_timer));
 		printf("  Neighbor count is %d, adjacent neighbor count is "
 		    "%d\n", iface->nbr_cnt, iface->adj_cnt);
+		if (iface->auth_type > 0) {
+			switch (iface->auth_type) {
+			case AUTH_SIMPLE:
+				printf("  Simple password authentication "
+				    "enabled\n");
+				break;
+			case AUTH_CRYPT:
+				printf("  Message digest authentication "
+				    "enabled\n");
+				printf("    Primary key id is %d\n",
+				    iface->auth_keyid);
+				break;
+			default:
+				break;
+			}
+		}
 		break;
 	case IMSG_CTL_END:
 		printf("\n");
@@ -381,19 +397,19 @@ print_if_state(int state)
 	case IF_STA_DOWN:
 		return ("DOWN");
 	case IF_STA_LOOPBACK:
-		return ("LOOPBACK");
+		return ("LOOP");
 	case IF_STA_WAITING:
-		return ("WAITING");
+		return ("WAIT");
 	case IF_STA_POINTTOPOINT:
 		return ("P2P");
 	case IF_STA_DROTHER:
-		return ("DROTHER");
+		return ("OTHER");
 	case IF_STA_BACKUP:
-		return ("BACKUP");
+		return ("BCKUP");
 	case IF_STA_DR:
 		return ("DR");
 	default:
-		return ("UNKNOWN");
+		return ("UNKNW");
 	}
 }
 
@@ -404,23 +420,23 @@ print_nbr_state(int state)
 	case NBR_STA_DOWN:
 		return ("DOWN");
 	case NBR_STA_ATTEMPT:
-		return ("ATTEMPT");
+		return ("ATTMP");
 	case NBR_STA_INIT:
 		return ("INIT");
 	case NBR_STA_2_WAY:
 		return ("2-WAY");
 	case NBR_STA_XSTRT:
-		return ("EXSTART");
+		return ("EXSTA");
 	case NBR_STA_SNAP:
-		return ("SNAPSHOT");
+		return ("SNAP");
 	case NBR_STA_XCHNG:
-		return ("EXCHANGE");
+		return ("EXCHG");
 	case NBR_STA_LOAD:
-		return ("LOADING");
+		return ("LOAD");
 	case NBR_STA_FULL:
 		return ("FULL");
 	default:
-		return ("UNKNOWN");
+		return ("UNKNW");
 	}
 }
 
@@ -826,9 +842,10 @@ show_nbr_msg(struct imsg *imsg)
 		if (asprintf(&state, "%s/%s", print_nbr_state(nbr->nbr_state),
 		    print_if_state(nbr->iface_state)) == -1)
 			err(1, NULL);
-		printf("%-15s %-3d %-17s %-9s ", inet_ntoa(nbr->id),
+		printf("%-15s %-3d %-12s %-9s", inet_ntoa(nbr->id),
 		    nbr->priority, state, fmt_timeframe_core(nbr->dead_timer));
-		printf("%-15s %s\n", inet_ntoa(nbr->addr), nbr->name);
+		printf("%-15s %-9s %s\n", inet_ntoa(nbr->addr), nbr->name,
+		    nbr->uptime == 0 ? "-" : fmt_timeframe_core(nbr->uptime));
 		free(state);
 		break;
 	case IMSG_CTL_END:
@@ -915,9 +932,10 @@ show_rib_msg(struct imsg *imsg)
 			errx(1, "Invalid route type");
 		}
 
-		printf("%-20s %-17s %-12s %-9s %-7d\n", dstnet,
+		printf("%-20s %-17s %-12s %-9s %-7d %s\n", dstnet,
 		    inet_ntoa(rt->nexthop), path_type_names[rt->p_type],
-		    dst_type_names[rt->d_type], rt->cost);
+		    dst_type_names[rt->d_type], rt->cost,
+		    rt->uptime == 0 ? "-" : fmt_timeframe_core(rt->uptime));
 		free(dstnet);
 		break;
 	case IMSG_CTL_END:

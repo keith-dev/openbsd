@@ -1,4 +1,4 @@
-/*	$OpenBSD: root.c,v 1.24 2005/08/10 16:01:27 joris Exp $	*/
+/*	$OpenBSD: root.c,v 1.30 2006/01/25 13:31:45 xsa Exp $	*/
 /*
  * Copyright (c) 2004 Jean-Francois Brousseau <jfb@openbsd.org>
  * All rights reserved.
@@ -24,15 +24,7 @@
  * ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include <sys/types.h>
-
-#include <err.h>
-#include <errno.h>
-#include <paths.h>
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-#include <unistd.h>
+#include "includes.h"
 
 #include "cvs.h"
 #include "log.h"
@@ -66,6 +58,7 @@ const char *cvs_methods[] = {
  * the result to the cache for future hits.
  */
 static TAILQ_HEAD(, cvsroot) cvs_rcache = TAILQ_HEAD_INITIALIZER(cvs_rcache);
+static void cvsroot_free(struct cvsroot *);
 
 /*
  * cvsroot_parse()
@@ -97,11 +90,7 @@ cvsroot_parse(const char *str)
 		}
 	}
 
-	root = (struct cvsroot *)malloc(sizeof(*root));
-	if (root == NULL) {
-		cvs_log(LP_ERRNO, "failed to allocate CVS root data");
-		return (NULL);
-	}
+	root = (struct cvsroot *)xmalloc(sizeof(*root));
 	memset(root, 0, sizeof(*root));
 	root->cr_ref = 1;
 	root->cr_method = CVS_METHOD_NONE;
@@ -111,29 +100,16 @@ cvsroot_parse(const char *str)
 	CVS_SETVR(root, CVS_REQ_VALIDREQ);
 	CVS_SETVR(root, CVS_REQ_VALIDRESP);
 
-	root->cr_str = strdup(str);
-	if (root->cr_str == NULL) {
-		free(root);
-		return (NULL);
-	}
-	root->cr_buf = strdup(str);
-	if (root->cr_buf == NULL) {
-		cvs_log(LP_ERRNO, "failed to copy CVS root");
-		cvsroot_free(root);
-		return (NULL);
-	}
+	root->cr_str = xstrdup(str);
+	root->cr_buf = xstrdup(str);
 
 	sp = root->cr_buf;
 	cp = root->cr_buf;
 	if (*sp == ':') {
 		sp++;
-		cp = strchr(sp, ':');
-		if (cp == NULL) {
-			cvs_log(LP_ERR, "failed to parse CVSROOT: "
-			    "unterminated method");
-			cvsroot_free(root);
-			return (NULL);
-		}
+		if ((cp = strchr(sp, ':')) == NULL)
+			fatal("failed to parse CVSROOT: unterminated method");
+
 		*(cp++) = '\0';
 
 		for (i = 0; i < CVS_NBMETHODS; i++) {
@@ -142,20 +118,13 @@ cvsroot_parse(const char *str)
 				break;
 			}
 		}
-		if (i == CVS_NBMETHODS) {
-			cvs_log(LP_ERR, "unknown method `%s'", sp);
-			cvsroot_free(root);
-			return (NULL);
-		}
+		if (i == CVS_NBMETHODS)
+			fatal("cvsroot_parse: unknown method `%s'", sp);
 	}
 
 	/* find the start of the actual path */
-	sp = strchr(cp, '/');
-	if (sp == NULL) {
-		cvs_log(LP_ERR, "no path specification in CVSROOT");
-		cvsroot_free(root);
-		return (NULL);
-	}
+	if ((sp = strchr(cp, '/')) == NULL)
+		fatal("no path specification in CVSROOT");
 
 	root->cr_dir = sp;
 	if (sp == cp) {
@@ -166,11 +135,9 @@ cvsroot_parse(const char *str)
 		return (root);
 	}
 
-	if (*(sp - 1) != ':') {
-		cvs_log(LP_ERR, "missing host/path delimiter in CVS root");
-		cvsroot_free(root);
-		return (NULL);
-	}
+	if (*(sp - 1) != ':')
+		fatal("missing host/path delimiter in CVSROOT");
+
 	*(sp - 1) = '\0';
 
 	/*
@@ -196,12 +163,8 @@ cvsroot_parse(const char *str)
 	if (pp != NULL) {
 		*(pp++) = '\0';
 		root->cr_port = (u_int)strtol(pp, &cp, 10);
-		if (*cp != '\0' || root->cr_port > 65535) {
-			cvs_log(LP_ERR,
-			    "invalid port specification in CVSROOT");
-			cvsroot_free(root);
-			return (NULL);
-		}
+		if ((*cp != '\0') || (root->cr_port > 65535))
+			fatal("invalid port specification in CVSROOT");
 
 	}
 
@@ -220,6 +183,20 @@ cvsroot_parse(const char *str)
 	return (root);
 }
 
+/*
+ * cvsroot_remove()
+ *
+ * Remove a CVSROOT structure from the cache, and free it.
+ */
+void
+cvsroot_remove(struct cvsroot *root)
+{
+	root->cr_ref--;
+	if (root->cr_ref == 0) {
+		TAILQ_REMOVE(&cvs_rcache, root, root_cache);
+		cvsroot_free(root);
+	}
+}
 
 /*
  * cvsroot_free()
@@ -227,22 +204,17 @@ cvsroot_parse(const char *str)
  * Free a CVSROOT structure previously allocated and returned by
  * cvsroot_parse().
  */
-void
+static void
 cvsroot_free(struct cvsroot *root)
 {
-	root->cr_ref--;
-	if (root->cr_ref == 0) {
-		TAILQ_REMOVE(&cvs_rcache, root, root_cache);
-		if (root->cr_str != NULL)
-			free(root->cr_str);
-		if (root->cr_buf != NULL)
-			free(root->cr_buf);
-		if (root->cr_version != NULL)
-			free(root->cr_version);
-		free(root);
-	}
+	if (root->cr_str != NULL)
+		xfree(root->cr_str);
+	if (root->cr_buf != NULL)
+		xfree(root->cr_buf);
+	if (root->cr_version != NULL)
+		xfree(root->cr_version);
+	xfree(root);
 }
-
 
 /*
  * cvsroot_get()
@@ -257,7 +229,6 @@ cvsroot_free(struct cvsroot *root)
 struct cvsroot *
 cvsroot_get(const char *dir)
 {
-	int l;
 	size_t len;
 	char rootpath[MAXPATHLEN], *rootstr, line[128];
 	FILE *fp;
@@ -265,34 +236,30 @@ cvsroot_get(const char *dir)
 	if (cvs_rootstr != NULL)
 		return cvsroot_parse(cvs_rootstr);
 
-	l = snprintf(rootpath, sizeof(rootpath), "%s/" CVS_PATH_ROOTSPEC, dir);
-	if (l == -1 || l >= (int)sizeof(rootpath)) {
+	if (strlcpy(rootpath, dir, sizeof(rootpath)) >= sizeof(rootpath) ||
+	    strlcat(rootpath, "/", sizeof(rootpath)) >= sizeof(rootpath) ||
+	    strlcat(rootpath, CVS_PATH_ROOTSPEC,
+	    sizeof(rootpath)) >= sizeof(rootpath)) {
 		errno = ENAMETOOLONG;
-		cvs_log(LP_ERRNO, "%s", rootpath);
-		return (NULL);
+		fatal("cvsroot_get: %s: %s", rootpath, strerror(errno));
 	}
 
-	fp = fopen(rootpath, "r");
-	if (fp == NULL) {
+	if ((fp = fopen(rootpath, "r")) == NULL) {
 		if (errno == ENOENT) {
 			/* try env as a last resort */
 			if ((rootstr = getenv("CVSROOT")) != NULL)
 				return cvsroot_parse(rootstr);
 			else
-				return (NULL);
+				fatal("cvsroot_get: empty CVSROOT variable");
 		} else {
-			cvs_log(LP_ERRNO, "failed to open %s",
-			    CVS_PATH_ROOTSPEC);
-			return (NULL);
+			fatal("cvsroot_get: fopen: `%s': %s",
+			    CVS_PATH_ROOTSPEC, strerror(errno));
 		}
 	}
 
-	if (fgets(line, (int)sizeof(line), fp) == NULL) {
-		cvs_log(LP_ERR, "failed to read line from %s",
-		    CVS_PATH_ROOTSPEC);
-		(void)fclose(fp);
-		return (NULL);
-	}
+	if (fgets(line, (int)sizeof(line), fp) == NULL)
+		fatal("cvsroot_get: fgets: `%s'", CVS_PATH_ROOTSPEC);
+
 	(void)fclose(fp);
 
 	len = strlen(line);

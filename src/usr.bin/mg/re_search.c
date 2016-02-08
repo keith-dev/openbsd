@@ -1,4 +1,4 @@
-/*	$OpenBSD: re_search.c,v 1.18 2005/08/09 00:53:48 kjell Exp $	*/
+/*	$OpenBSD: re_search.c,v 1.22 2005/12/13 06:01:27 kjell Exp $	*/
 
 /* This file is in the public domain. */
 
@@ -34,7 +34,7 @@ char	re_pat[NPAT];			/* regex pattern		    */
 int	re_srch_lastdir = SRCH_NOPR;	/* last search flags		    */
 int	casefoldsearch = TRUE;		/* does search ignore case?	    */
 
-static int	 re_doreplace(RSIZE, char *, int);
+static int	 re_doreplace(RSIZE, char *);
 static int	 re_forwsrch(void);
 static int	 re_backsrch(void);
 static int	 re_readpattern(char *);
@@ -132,16 +132,12 @@ re_queryrepl(int f, int n)
 {
 	int	rcnt = 0;		/* replacements made so far	*/
 	int	plen, s;		/* length of found string	*/
-	char	news[NPAT], *rep;	/* replacement string		*/
-
-	/* Casefold check */
-	if (!casefoldsearch)
-		f = TRUE;
+	char	news[NPAT];		/* replacement string		*/
 
 	if ((s = re_readpattern("RE Query replace")) != TRUE)
 		return (s);
-	if ((rep = eread("Query replace %s with: ", news, NPAT,
-	    EFNUL | EFNEW | EFCR, re_pat)) == NULL)
+	if (eread("Query replace %s with: ", news, NPAT,
+	    EFNUL | EFNEW | EFCR, re_pat) == NULL)
 		return (ABORT);
 	ewprintf("Query replacing %s with %s:", re_pat, news);
 
@@ -156,27 +152,28 @@ retry:
 		switch (getkey(FALSE)) {
 		case ' ':
 			plen = re_match[0].rm_eo - re_match[0].rm_so;
-			if (re_doreplace((RSIZE)plen, news, f) == FALSE)
+			if (re_doreplace((RSIZE)plen, news) == FALSE)
 				return (FALSE);
 			rcnt++;
 			break;
 
 		case '.':
 			plen = re_match[0].rm_eo - re_match[0].rm_so;
-			if (re_doreplace((RSIZE)plen, news, f) == FALSE)
+			if (re_doreplace((RSIZE)plen, news) == FALSE)
 				return (FALSE);
 			rcnt++;
 			goto stopsearch;
 
 		case CCHR('G'):				/* ^G */
 			(void)ctrlg(FFRAND, 0);
+			goto stopsearch;
 		case CCHR('['):				/* ESC */
 		case '`':
 			goto stopsearch;
 		case '!':
 			do {
 				plen = re_match[0].rm_eo - re_match[0].rm_so;
-				if (re_doreplace((RSIZE)plen, news, f) == FALSE)
+				if (re_doreplace((RSIZE)plen, news) == FALSE)
 					return (FALSE);
 				rcnt++;
 			} while (re_forwsrch() == TRUE);
@@ -210,13 +207,12 @@ stopsearch:
  * re_query replace.  Its reason for existence is to deal with \1, \2. etc.
  *  plen: length to remove
  *  st:   replacement string
- *  f:    case hack disable
  */
 static int
-re_doreplace(RSIZE plen, char *st, int f)
+re_doreplace(RSIZE plen, char *st)
 {
 	int	 j, k, s, more, num, state;
-	LINE	*clp;
+	struct line	*clp;
 	char	 repstr[REPLEN];
 
 	clp = curwp->w_dotp;
@@ -290,7 +286,7 @@ re_doreplace(RSIZE plen, char *st, int f)
 	}			/* while (more)   */
 
 	repstr[j] = '\0';
-	s = lreplace(plen, repstr, f);
+	s = lreplace(plen, repstr);
 	return (s);
 }
 
@@ -304,7 +300,7 @@ static int
 re_forwsrch(void)
 {
 	int	 tbo, error;
-	LINE	*clp;
+	struct line	*clp;
 
 	clp = curwp->w_dotp;
 	tbo = curwp->w_doto;
@@ -349,7 +345,7 @@ re_forwsrch(void)
 static int
 re_backsrch(void)
 {
-	LINE		*clp;
+	struct line		*clp;
 	int		 tbo;
 	regmatch_t	 lastmatch;
 
@@ -451,6 +447,7 @@ re_readpattern(char *prompt)
  * Cause case to not matter in searches.  This is the default.	If called
  * with argument cause case to matter.
  */
+/* ARGSUSED*/
 int
 setcasefold(int f, int n)
 {
@@ -473,6 +470,7 @@ setcasefold(int f, int n)
 /*
  * Delete all lines after dot that contain a string matching regex.
  */
+/* ARGSUSED */
 int
 delmatchlines(int f, int n)
 {
@@ -489,6 +487,7 @@ delmatchlines(int f, int n)
 /*
  * Delete all lines after dot that don't contain a string matching regex.
  */
+/* ARGSUSED */
 int
 delnonmatchlines(int f, int n)
 {
@@ -510,7 +509,7 @@ killmatches(int cond)
 {
 	int	 s, error;
 	int	 count = 0;
-	LINE	*clp;
+	struct line	*clp;
 
 	clp = curwp->w_dotp;
 	if (curwp->w_doto == llength(clp))
@@ -548,6 +547,7 @@ killmatches(int cond)
 /*
  * Count lines matching regex.
  */
+/* ARGSUSED */
 int
 cntmatchlines(int f, int n)
 {
@@ -563,6 +563,7 @@ cntmatchlines(int f, int n)
 /*
  * Count lines that fail to match regex.
  */
+/* ARGSUSED */
 int
 cntnonmatchlines(int f, int n)
 {
@@ -583,7 +584,7 @@ countmatches(int cond)
 {
 	int	 error;
 	int	 count = 0;
-	LINE	*clp;
+	struct line	*clp;
 
 	clp = curwp->w_dotp;
 	if (curwp->w_doto == llength(clp))

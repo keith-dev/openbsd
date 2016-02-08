@@ -1,4 +1,4 @@
-/*	$OpenBSD: neighbor.c,v 1.23 2005/06/13 08:32:29 claudio Exp $ */
+/*	$OpenBSD: neighbor.c,v 1.30 2006/02/19 21:48:56 norby Exp $ */
 
 /*
  * Copyright (c) 2005 Claudio Jeker <claudio@openbsd.org>
@@ -117,6 +117,7 @@ const char * const nbr_action_names[] = {
 int
 nbr_fsm(struct nbr *nbr, enum nbr_event event)
 {
+	struct timeval	now;
 	int		old_state;
 	int		new_state = 0;
 	int		i, ret = 0;
@@ -206,6 +207,9 @@ nbr_fsm(struct nbr *nbr, enum nbr_event event)
 			orig_rtr_lsa(nbr->iface->area);
 			if (nbr->iface->state & IF_STA_DR)
 				orig_net_lsa(nbr->iface);
+
+			gettimeofday(&now, NULL);
+			nbr->uptime = now.tv_sec;
 		}
 
 		/* bidirectional communication lost */
@@ -316,12 +320,9 @@ nbr_new(u_int32_t nbr_id, struct iface *iface, int self)
 	return (nbr);
 }
 
-int
+void
 nbr_del(struct nbr *nbr)
 {
-	if (nbr == nbr->iface->self)
-		return (0);
-
 	ospfe_imsg_compose_rde(IMSG_NEIGHBOR_DOWN, nbr->peerid, 0, NULL, 0);
 
 	/* clear lists */
@@ -333,8 +334,6 @@ nbr_del(struct nbr *nbr)
 	LIST_REMOVE(nbr, hash);
 
 	free(nbr);
-
-	return (0);
 }
 
 struct nbr *
@@ -412,8 +411,12 @@ nbr_adj_timer(int fd, short event, void *arg)
 {
 	struct nbr *nbr = arg;
 
+	if (nbr->state == NBR_STA_2_WAY)
+		return ;
+
 	if (nbr->state & NBR_STA_ACTIVE && nbr->state != NBR_STA_FULL) {
-		log_debug("nbr_adj_timer: failed to form adjacency");
+		log_warnx("nbr_adj_timer: failed to form adjacency with %s",
+		    inet_ntoa(nbr->id));
 		nbr_fsm(nbr, NBR_EVT_ADJTMOUT);
 	}
 }
@@ -497,6 +500,8 @@ nbr_act_eval(struct nbr *nbr)
 	/* initial db negotiation */
 	start_db_tx_timer(nbr);
 
+	nbr_start_adj_timer(nbr);
+
 	return (0);
 }
 
@@ -504,7 +509,6 @@ int
 nbr_act_snapshot(struct nbr *nbr)
 {
 	stop_db_tx_timer(nbr);
-	nbr_start_adj_timer(nbr);
 
 	ospfe_imsg_compose_rde(IMSG_DB_SNAPSHOT, nbr->peerid, 0, NULL, 0);
 
@@ -563,6 +567,8 @@ nbr_act_restart_dd(struct nbr *nbr)
 	/* initial db negotiation */
 	start_db_tx_timer(nbr);
 
+	nbr_start_adj_timer(nbr);
+
 	return (0);
 }
 
@@ -570,6 +576,9 @@ int
 nbr_act_delete(struct nbr *nbr)
 {
 	struct timeval	tv;
+
+	if (nbr == nbr->iface->self)
+		return (0);
 
 	/* stop timers */
 	if (nbr_stop_itimer(nbr)) {
@@ -600,13 +609,13 @@ int
 nbr_act_clear_lists(struct nbr *nbr)
 {
 	if (stop_db_tx_timer(nbr)) {
-		log_warnx("nbr_act_delete: error removing db_tx_timer, "
+		log_warnx("nbr_act_clear_lists: error removing db_tx_timer, "
 		    "neighbor ID %s", inet_ntoa(nbr->id));
 		return (-1);
 	}
 
 	if (stop_ls_req_tx_timer(nbr)) {
-		log_warnx("nbr_act_delete: error removing lsreq_tx_timer, "
+		log_warnx("nbr_act_clear_lists: error removing lsreq_tx_timer, "
 		    "neighbor ID %s", inet_ntoa(nbr->id));
 		return (-1);
 	}
@@ -647,11 +656,7 @@ nbr_to_ctl(struct nbr *nbr)
 		nctl.db_sum_lst_cnt++;
 
 	nctl.ls_req_lst_cnt = nbr->ls_req_cnt;
-
-	/* XXX */
-	nctl.ls_retrans_lst_cnt = 0;
-	TAILQ_FOREACH(le, &nbr->ls_retrans_list, entry)
-		nctl.ls_retrans_lst_cnt++;
+	nctl.ls_retrans_lst_cnt = nbr->ls_ret_cnt;
 
 	nctl.nbr_state = nbr->state;
 
@@ -677,9 +682,17 @@ nbr_to_ctl(struct nbr *nbr)
 	gettimeofday(&now, NULL);
 	if (evtimer_pending(&nbr->inactivity_timer, &tv)) {
 		timersub(&tv, &now, &res);
-		nctl.dead_timer = res.tv_sec;
+		if (nbr->state & NBR_STA_DOWN)
+			nctl.dead_timer = DEFAULT_NBR_TMOUT - res.tv_sec;
+		else
+			nctl.dead_timer = res.tv_sec;
 	} else
 		nctl.dead_timer = 0;
+
+	if (nbr->state == NBR_STA_FULL) {
+		nctl.uptime = now.tv_sec - nbr->uptime;
+	} else
+		nctl.uptime = 0;
 
 	return (&nctl);
 }

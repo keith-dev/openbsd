@@ -1,4 +1,4 @@
-/*	$OpenBSD: kroute.c,v 1.140 2005/07/01 22:00:04 claudio Exp $ */
+/*	$OpenBSD: kroute.c,v 1.144 2006/02/23 15:25:18 claudio Exp $ */
 
 /*
  * Copyright (c) 2003, 2004 Henning Brauer <henning@openbsd.org>
@@ -680,6 +680,10 @@ kr_redistribute6(int type, struct kroute6 *kr6)
 	if (!(kr6->flags & F_KERNEL))
 		return (0);
 
+	/* Dynamic routes are not redistributable. */
+	if (kr6->flags & F_DYNAMIC)
+		return (0);
+
 	/*
 	 * We consider unspecified, loopback, multicast, link- and site-local,
 	 * IPv4 mapped and IPv4 compatible addresses as not redistributable.
@@ -1249,6 +1253,9 @@ kroute_validate(struct kroute *kr)
 {
 	struct kif_node		*kif;
 
+	if (kr->flags & (F_REJECT | F_BLACKHOLE))
+		return (0);
+
 	if ((kif = kif_find(kr->ifindex)) == NULL) {
 		if (kr->ifindex)
 			log_warnx("interface with index %d not found, "
@@ -1265,6 +1272,9 @@ int
 kroute6_validate(struct kroute6 *kr)
 {
 	struct kif_node		*kif;
+
+	if (kr->flags & (F_REJECT | F_BLACKHOLE))
+		return (0);
 
 	if ((kif = kif_find(kr->ifindex)) == NULL) {
 		if (kr->ifindex)
@@ -1728,6 +1738,8 @@ send_rtmsg(int fd, int action, struct kroute *kroute)
 		r.hdr.rtm_flags |= RTF_BLACKHOLE;
 	if (kroute->flags & F_REJECT)
 		r.hdr.rtm_flags |= RTF_REJECT;
+	if (action == RTM_CHANGE)	/* reset these flags on change */
+		r.hdr.rtm_fmask = RTF_REJECT|RTF_BLACKHOLE;
 	r.hdr.rtm_seq = kr_state.rtseq++;	/* overflow doesn't matter */
 	r.hdr.rtm_addrs = RTA_DST|RTA_GATEWAY|RTA_NETMASK|RTA_LABEL;
 	r.prefix.sin_len = sizeof(r.prefix);
@@ -2065,11 +2077,12 @@ fetchifs(int ifindex)
 			if (sa->sa_family == AF_LINK) {
 				sdl = (struct sockaddr_dl *)sa;
 				if (sdl->sdl_nlen >= sizeof(kif->k.ifname))
-					strlcpy(kif->k.ifname, sdl->sdl_data,
-					    sizeof(kif->k.ifname));
+					memcpy(kif->k.ifname, sdl->sdl_data,
+					    sizeof(kif->k.ifname) - 1);
 				else if (sdl->sdl_nlen > 0)
-					strlcpy(kif->k.ifname, sdl->sdl_data,
-					    sdl->sdl_nlen + 1);
+					memcpy(kif->k.ifname, sdl->sdl_data,
+					    sdl->sdl_nlen);
+				/* string already terminated via calloc() */
 			}
 
 		kif_insert(kif);

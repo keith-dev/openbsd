@@ -1,4 +1,4 @@
-/*	$OpenBSD: buf.c,v 1.18 2005/08/14 19:49:18 xsa Exp $	*/
+/*	$OpenBSD: buf.c,v 1.33 2006/02/26 09:45:02 xsa Exp $	*/
 /*
  * Copyright (c) 2003 Jean-Francois Brousseau <jfb@openbsd.org>
  * All rights reserved.
@@ -24,24 +24,13 @@
  * ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include <sys/param.h>
-#include <sys/stat.h>
-
-#include <ctype.h>
-#include <errno.h>
-#include <fcntl.h>
-#include <stdarg.h>
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-#include <unistd.h>
+#include "includes.h"
 
 #include "buf.h"
 #include "log.h"
-
+#include "xmalloc.h"
 
 #define BUF_INCR	128
-
 
 struct cvs_buf {
 	u_int	cb_flags;
@@ -55,14 +44,10 @@ struct cvs_buf {
 	size_t	 cb_len;
 };
 
-
 #define SIZE_LEFT(b)	(b->cb_size - (size_t)(b->cb_cur - b->cb_buf) \
 			    - b->cb_len)
 
-
 static ssize_t	cvs_buf_grow(BUF *, size_t);
-
-
 
 /*
  * cvs_buf_alloc()
@@ -76,19 +61,13 @@ cvs_buf_alloc(size_t len, u_int flags)
 {
 	BUF *b;
 
-	b = (BUF *)malloc(sizeof(*b));
-	if (b == NULL) {
-		cvs_log(LP_ERRNO, "failed to allocate buffer");
-		return (NULL);
-	}
-
-	b->cb_buf = malloc(len);
-	if (b->cb_buf == NULL) {
-		cvs_log(LP_ERRNO, "failed to allocate buffer");
-		free(b);
-		return (NULL);
-	}
-	memset(b->cb_buf, 0, len);
+	b = (BUF *)xmalloc(sizeof(*b));
+	/* Postpone creation of zero-sized buffers */
+	if (len > 0) {
+		b->cb_buf = xmalloc(len);
+		memset(b->cb_buf, 0, len);
+	} else
+		b->cb_buf = NULL;
 
 	b->cb_flags = flags;
 	b->cb_size = len;
@@ -98,13 +77,12 @@ cvs_buf_alloc(size_t len, u_int flags)
 	return (b);
 }
 
-
 /*
  * cvs_buf_load()
  *
  * Open the file specified by <path> and load all of its contents into a
  * buffer.
- * Returns the loaded buffer on success, or NULL on failure.
+ * Returns the loaded buffer on success.
  */
 BUF *
 cvs_buf_load(const char *path, u_int flags)
@@ -116,32 +94,19 @@ cvs_buf_load(const char *path, u_int flags)
 	struct stat st;
 	BUF *buf;
 
-	fd = open(path, O_RDONLY, 0600);
-	if (fd == -1) {
-		cvs_log(LP_ERRNO, "failed to open buffer source");
-		return (NULL);
-	}
+	if ((fd = open(path, O_RDONLY, 0600)) == -1)
+		fatal("%s: %s", path, strerror(errno));
 
-	if (fstat(fd, &st) == -1) {
-		cvs_log(LP_ERRNO, "failed to stat buffer source");
-		(void)close(fd);
-		return (NULL);
-	}
+	if (fstat(fd, &st) == -1)
+		fatal("cvs_buf_load: fstat: %s", strerror(errno));
 
 	buf = cvs_buf_alloc((size_t)st.st_size, flags);
-	if (buf == NULL) {
-		(void)close(fd);
-		return (NULL);
-	}
-
 	for (bp = buf->cb_cur; ; bp += (size_t)ret) {
 		len = SIZE_LEFT(buf);
 		ret = read(fd, bp, len);
 		if (ret == -1) {
-			cvs_log(LP_ERRNO, "read failed from buffer source");
-			(void)close(fd);
 			cvs_buf_free(buf);
-			return (NULL);
+			fatal("cvs_buf_load: read: %s", strerror(errno));
 		} else if (ret == 0)
 			break;
 
@@ -153,7 +118,6 @@ cvs_buf_load(const char *path, u_int flags)
 	return (buf);
 }
 
-
 /*
  * cvs_buf_free()
  *
@@ -162,10 +126,10 @@ cvs_buf_load(const char *path, u_int flags)
 void
 cvs_buf_free(BUF *b)
 {
-	free(b->cb_buf);
-	free(b);
+	if (b->cb_buf != NULL)
+		xfree(b->cb_buf);
+	xfree(b);
 }
-
 
 /*
  * cvs_buf_release()
@@ -180,10 +144,9 @@ cvs_buf_release(BUF *b)
 	u_char *tmp;
 
 	tmp = b->cb_buf;
-	free(b);
+	xfree(b);
 	return (tmp);
 }
-
 
 /*
  * cvs_buf_empty()
@@ -198,7 +161,6 @@ cvs_buf_empty(BUF *b)
 	b->cb_len = 0;
 }
 
-
 /*
  * cvs_buf_copy()
  *
@@ -212,14 +174,13 @@ cvs_buf_copy(BUF *b, size_t off, void *dst, size_t len)
 	size_t rc;
 
 	if (off > b->cb_len)
-		return (-1);
+		fatal("cvs_buf_copy failed");
 
 	rc = MIN(len, (b->cb_len - off));
 	memcpy(dst, b->cb_buf + off, rc);
 
 	return (ssize_t)rc;
 }
-
 
 /*
  * cvs_buf_set()
@@ -231,12 +192,12 @@ cvs_buf_copy(BUF *b, size_t off, void *dst, size_t len)
 ssize_t
 cvs_buf_set(BUF *b, const void *src, size_t len, size_t off)
 {
-	size_t rlen;
+	size_t rlen = 0;
 
 	if (b->cb_size < (len + off)) {
-		if ((b->cb_flags & BUF_AUTOEXT) && (cvs_buf_grow(b,
-		    len + off - b->cb_size) < 0))
-			return (-1);
+		if ((b->cb_flags & BUF_AUTOEXT) &&
+		    (cvs_buf_grow(b, len + off - b->cb_size) < 0))
+			fatal("cvs_buf_set failed");
 		else
 			rlen = b->cb_size - off;
 	} else
@@ -252,12 +213,11 @@ cvs_buf_set(BUF *b, const void *src, size_t len, size_t off)
 	return (rlen);
 }
 
-
 /*
  * cvs_buf_putc()
  *
  * Append a single character <c> to the end of the buffer <b>.
- * Returns 0 on success, or -1 on failure.
+ * Returns 0 on success.
  */
 int
 cvs_buf_putc(BUF *b, int c)
@@ -269,7 +229,7 @@ cvs_buf_putc(BUF *b, int c)
 		/* extend */
 		if (!(b->cb_flags & BUF_AUTOEXT) ||
 		    (cvs_buf_grow(b, (size_t)BUF_INCR) < 0))
-			return (-1);
+			fatal("cvs_buf_putc failed");
 
 		/* the buffer might have been moved */
 		bp = b->cb_cur + b->cb_len;
@@ -280,6 +240,17 @@ cvs_buf_putc(BUF *b, int c)
 	return (0);
 }
 
+/*
+ * cvs_buf_getc()
+ *
+ * Return u_char at buffer position <pos>.
+ *
+ */
+u_char
+cvs_buf_getc(BUF *b, u_int pos)
+{
+	return (b->cb_cur[pos]);
+}
 
 /*
  * cvs_buf_append()
@@ -288,8 +259,7 @@ cvs_buf_putc(BUF *b, int c)
  * buffer is too small to accept all data, it will attempt to append as much
  * data as possible, or if the BUF_AUTOEXT flag is set for the buffer, it
  * will get resized to an appropriate size to accept all data.
- * Returns the number of bytes successfully appended to the buffer, or -1
- * on failure.
+ * Returns the number of bytes successfully appended to the buffer.
  */
 ssize_t
 cvs_buf_append(BUF *b, const void *data, size_t len)
@@ -305,7 +275,7 @@ cvs_buf_append(BUF *b, const void *data, size_t len)
 	if (left < len) {
 		if (b->cb_flags & BUF_AUTOEXT) {
 			if (cvs_buf_grow(b, len - left) < 0)
-				return (-1);
+				fatal("cvs_buf_append failed");
 			bp = b->cb_cur + b->cb_len;
 		} else
 			rlen = bep - bp;
@@ -316,7 +286,6 @@ cvs_buf_append(BUF *b, const void *data, size_t len)
 
 	return (rlen);
 }
-
 
 /*
  * cvs_buf_fappend()
@@ -333,16 +302,13 @@ cvs_buf_fappend(BUF *b, const char *fmt, ...)
 	ret = vasprintf(&str, fmt, vap);
 	va_end(vap);
 
-	if (ret == -1) {
-		cvs_log(LP_ERRNO, "failed to format data");
-		return (-1);
-	}
+	if (ret == -1)
+		fatal("cvs_buf_fappend: failed to format data");
 
 	ret = cvs_buf_append(b, str, (size_t)ret);
-	free(str);
+	xfree(str);
 	return (ret);
 }
-
 
 /*
  * cvs_buf_len()
@@ -354,7 +320,6 @@ cvs_buf_len(BUF *b)
 {
 	return (b->cb_len);
 }
-
 
 /*
  * cvs_buf_peek()
@@ -369,7 +334,6 @@ cvs_buf_peek(BUF *b, size_t off)
 
 	return (b->cb_buf + off);
 }
-
 
 /*
  * cvs_buf_write_fd()
@@ -407,26 +371,28 @@ cvs_buf_write_fd(BUF *b, int fd)
  * Write the contents of the buffer <b> to the file whose path is given in
  * <path>.  If the file does not exist, it is created with mode <mode>.
  */
-
 int
 cvs_buf_write(BUF *b, const char *path, mode_t mode)
 {
-	int ret, fd;
-
-	fd = open(path, O_WRONLY|O_CREAT|O_TRUNC, mode);
-	if (fd == -1) {
-		cvs_log(LP_ERRNO, "failed to open file `%s'", path);
-		return (-1);
+	int fd;
+ open:
+	if ((fd = open(path, O_WRONLY|O_CREAT|O_TRUNC, mode)) == -1) {
+		if ((errno == EACCES) && (unlink(path) != -1))
+			goto open;
+		else
+			fatal("open: `%s': %s", path, strerror(errno));
 	}
 
-	ret = cvs_buf_write_fd(b, fd);
-	if (ret == -1) {
-		cvs_log(LP_ERRNO, "failed to write to file `%s'",  path);
+	if (cvs_buf_write_fd(b, fd) == -1) {
 		(void)unlink(path);
+		fatal("cvs_buf_write: cvs_buf_write_fd: `%s'", path);
 	}
 	(void)close(fd);
 
-	return (ret);
+	if (chmod(path, mode) < 0)
+		fatal("cvs_buf_write: chmod failed: %s", strerror(errno));
+
+	return (0);
 }
 
 /*
@@ -436,27 +402,21 @@ cvs_buf_write(BUF *b, const char *path, mode_t mode)
  * specified using <template> (see mkstemp.3). NB. This function will modify
  * <template>, as per mkstemp
  */
-
 int
 cvs_buf_write_stmp(BUF *b, char *template, mode_t mode)
 {
-	int ret, fd;
+	int fd;
 
-	fd = mkstemp(template);
-	if (fd == -1) {
-		cvs_log(LP_ERRNO, "failed to mkstemp file `%s'", template);
-		return (-1);
-	}
+	if ((fd = mkstemp(template)) == -1)
+		fatal("mkstemp: `%s': %s", template, strerror(errno));
 
-	ret = cvs_buf_write_fd(b, fd);
-	if (ret == -1) {
-		cvs_log(LP_ERRNO, "failed to write to temp file `%s'",
-		    template);
+	if (cvs_buf_write_fd(b, fd) == -1) {
 		(void)unlink(template);
+		fatal("cvs_buf_write_stmp: cvs_buf_write_fd: `%s'", template);
 	}
 	(void)close(fd);
 
-	return (ret);
+	return (0);
 }
 
 /*
@@ -473,11 +433,11 @@ cvs_buf_grow(BUF *b, size_t len)
 	size_t diff;
 
 	diff = b->cb_cur - b->cb_buf;
-	tmp = realloc(b->cb_buf, b->cb_size + len);
-	if (tmp == NULL) {
-		cvs_log(LP_ERRNO, "failed to grow buffer");
-		return (-1);
-	}
+	/* Buffer not allocated yet */
+	if (b->cb_size == 0)
+		tmp = xmalloc(len);
+	else
+		tmp = xrealloc(b->cb_buf, b->cb_size + len);
 	b->cb_buf = (u_char *)tmp;
 	b->cb_size += len;
 

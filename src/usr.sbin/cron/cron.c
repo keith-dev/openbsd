@@ -1,4 +1,4 @@
-/*	$OpenBSD: cron.c,v 1.36 2004/06/17 22:11:55 millert Exp $	*/
+/*	$OpenBSD: cron.c,v 1.38 2005/11/15 07:02:37 miod Exp $	*/
 
 /* Copyright 1988,1990,1993,1994 by Paul Vixie
  * All rights reserved
@@ -22,7 +22,7 @@
  */
 
 #if !defined(lint) && !defined(LINT)
-static const char rcsid[] = "$OpenBSD: cron.c,v 1.36 2004/06/17 22:11:55 millert Exp $";
+static const char rcsid[] = "$OpenBSD: cron.c,v 1.38 2005/11/15 07:02:37 miod Exp $";
 #endif
 
 #define	MAIN_PROGRAM
@@ -310,7 +310,7 @@ find_jobs(int vtime, cron_db *db, int doWild, int doNonWild) {
 	user *u;
 	entry *e;
 
-	/* make 0-based values out of these so we can use them as indicies
+	/* make 0-based values out of these so we can use them as indices
 	 */
 	minute = tm->tm_min -FIRST_MINUTE;
 	hour = tm->tm_hour -FIRST_HOUR;
@@ -416,8 +416,10 @@ cron_sleep(int target) {
 			if (fd >= 0 && fcntl(fd, F_SETFL, O_NONBLOCK) == 0) {
 				(void) read(fd, &poke, 1);
 				close(fd);
-				if (poke & RELOAD_CRON)
+				if (poke & RELOAD_CRON) {
+					database.mtime = (time_t)0;
 					load_database(&database);
+				}
 				if (poke & RELOAD_AT) {
 					/*
 					 * We run any pending at jobs right
@@ -425,6 +427,7 @@ cron_sleep(int target) {
 					 * jobs immediately.
 					 */
 					gettimeofday(&t2, NULL);
+					at_database.mtime = (time_t)0;
 					if (scan_atjobs(&at_database, &t2))
 						atrun(&at_database,
 						    batch_maxload, t2.tv_sec);

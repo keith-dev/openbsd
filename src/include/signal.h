@@ -1,4 +1,4 @@
-/*	$OpenBSD: signal.h,v 1.8 2004/05/03 17:25:00 millert Exp $	*/
+/*	$OpenBSD: signal.h,v 1.10 2005/12/21 19:09:01 millert Exp $	*/
 /*	$NetBSD: signal.h,v 1.8 1996/02/29 00:04:57 jtc Exp $	*/
 
 /*-
@@ -35,20 +35,21 @@
 #ifndef _USER_SIGNAL_H
 #define _USER_SIGNAL_H
 
+#include <sys/cdefs.h>
 #include <sys/signal.h>
 
-#if !defined(_ANSI_SOURCE)
+#if __BSD_VISIBLE || __POSIX_VISIBLE || __XPG_VISIBLE
 #include <sys/types.h>
 #endif
 
-#if !defined(_ANSI_SOURCE) && !defined(_POSIX_SOURCE)
+#if __BSD_VISIBLE
 extern __const char *__const sys_signame[_NSIG];
 extern __const char *__const sys_siglist[_NSIG];
 #endif
 
 __BEGIN_DECLS
 int	raise(int);
-#ifndef	_ANSI_SOURCE
+#if __BSD_VISIBLE || __POSIX_VISIBLE || __XPG_VISIBLE
 void	(*bsd_signal(int, void (*)(int)))(int);
 int	kill(pid_t, int);
 int	sigaction(int, const struct sigaction *, struct sigaction *);
@@ -63,10 +64,10 @@ int	sigsuspend(const sigset_t *);
 
 #if defined(__GNUC__)
 extern __inline int sigaddset(sigset_t *set, int signo) {
-	extern int errno;
+	int *__errno(void);
 
 	if (signo <= 0 || signo >= _NSIG) {
-		errno = 22;			/* EINVAL */
+		*__errno() = 22;		/* EINVAL */
 		return -1;
 	}
 	*set |= (1 << ((signo)-1));		/* sigmask(signo) */
@@ -74,10 +75,10 @@ extern __inline int sigaddset(sigset_t *set, int signo) {
 }
 
 extern __inline int sigdelset(sigset_t *set, int signo) {
-	extern int errno;
+	int *__errno(void);
 
 	if (signo <= 0 || signo >= _NSIG) {
-		errno = 22;			/* EINVAL */
+		*__errno() = 22;		/* EINVAL */
 		return -1;
 	}
 	*set &= ~(1 << ((signo)-1));		/* sigmask(signo) */
@@ -85,10 +86,10 @@ extern __inline int sigdelset(sigset_t *set, int signo) {
 }
 
 extern __inline int sigismember(const sigset_t *set, int signo) {
-	extern int errno;
+	int *__errno(void);
 
 	if (signo <= 0 || signo >= _NSIG) {
-		errno = 22;			/* EINVAL */
+		*__errno() = 22;		/* EINVAL */
 		return -1;
 	}
 	return ((*set & (1 << ((signo)-1))) != 0);
@@ -99,20 +100,24 @@ extern __inline int sigismember(const sigset_t *set, int signo) {
 #define	sigemptyset(set)	(*(set) = 0, 0)
 #define	sigfillset(set)		(*(set) = ~(sigset_t)0, 0)
 
-#ifndef _POSIX_SOURCE
+#if __BSD_VISIBLE || __XPG_VISIBLE >= 420
 int	killpg(pid_t, int);
-int	sigblock(int);
 int	siginterrupt(int, int);
 int	sigpause(int);
 int	sigreturn(struct sigcontext *);
-int	sigsetmask(int);
 int	sigstack(const struct sigstack *, struct sigstack *);
 int	sigaltstack(const struct sigaltstack *, struct sigaltstack *);
-int	sigvec(int, struct sigvec *, struct sigvec *);
+#if __BSD_VISIBLE
 void	psignal(unsigned int, const char *);
+int	sigblock(int);
+int	sigsetmask(int);
+int	sigvec(int, struct sigvec *, struct sigvec *);
+#endif
+#if __BSD_VISIBLE ||  __POSIX_VISIBLE >= 199309 || __XPG_VISIBLE >= 500
 int	sigwait(const sigset_t *, int *);
-#endif	/* !_POSIX_SOURCE */
-#endif	/* !_ANSI_SOURCE */
+#endif
+#endif /* __BSD_VISIBLE || __XPG_VISIBLE >= 420 */
+#endif /* __BSD_VISIBLE || __POSIX_VISIBLE || __XPG_VISIBLE */
 __END_DECLS
 
 #endif	/* !_USER_SIGNAL_H */

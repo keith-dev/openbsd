@@ -1,4 +1,4 @@
-/*	$OpenBSD: rtld_machine.c,v 1.5 2004/10/01 22:10:37 pefo Exp $ */
+/*	$OpenBSD: rtld_machine.c,v 1.8 2005/09/22 01:33:08 drahn Exp $ */
 
 /*
  * Copyright (c) 1998-2004 Opsycon AB, Sweden.
@@ -74,14 +74,13 @@ _dl_md_reloc(elf_object_t *object, int rel, int relsz)
 	this = NULL;
 	got_start = 0;
 	got_end = 0;
-	ooff = _dl_find_symbol("__got_start", object, &this, NULL,
-	    SYM_SEARCH_SELF|SYM_NOWARNNOTFOUND|SYM_PLT, 0, object);
+	ooff = _dl_find_symbol("__got_start", &this,
+	    SYM_SEARCH_OBJ|SYM_NOWARNNOTFOUND|SYM_PLT, NULL, object, NULL);
 	if (this != NULL)
 		got_start = ooff + this->st_value;
-
 	this = NULL;
-	ooff = _dl_find_symbol("__got_end", object, &this, NULL,
-	    SYM_SEARCH_SELF|SYM_NOWARNNOTFOUND|SYM_PLT, 0, object);
+	ooff = _dl_find_symbol("__got_end", &this,
+	    SYM_SEARCH_OBJ|SYM_NOWARNNOTFOUND|SYM_PLT, NULL, object, NULL);
 	if (this != NULL)
 		got_end = ooff + this->st_value;
 
@@ -97,22 +96,22 @@ _dl_md_reloc(elf_object_t *object, int rel, int relsz)
 		ooff = 0;
 		sym = object->dyn.symtab;
 		sym += ELF64_R_SYM(relocs->r_info);
-		this = sym;
 		symn = object->dyn.strtab + sym->st_name;
 		type = ELF64_R_TYPE(relocs->r_info);
 
+		this = NULL;
 		if (ELF64_R_SYM(relocs->r_info) &&
 		    !(ELF64_ST_BIND(sym->st_info) == STB_LOCAL &&
 		    ELF64_ST_TYPE (sym->st_info) == STT_NOTYPE)) {
-			ooff = _dl_find_symbol(symn, _dl_objects, &this, NULL,
-			SYM_SEARCH_ALL | SYM_NOWARNNOTFOUND | SYM_PLT,
-			sym->st_size, object);
-			if (!this && ELF64_ST_BIND(sym->st_info) == STB_GLOBAL) {
-				_dl_printf("%s: can't resolve reference '%s'\n",
-				    _dl_progname, symn);
-				fails++;
-			}
+			ooff = _dl_find_symbol(symn, &this,
+			SYM_SEARCH_ALL | SYM_WARNNOTFOUND | SYM_PLT,
+			sym, object, NULL);
 
+			if (this == NULL) {
+				if (ELF_ST_BIND(sym->st_info) != STB_WEAK)
+					fails++;
+				continue;
+			}
 		}
 
 		switch (ELF64_R_TYPE(relocs->r_info)) {
@@ -213,14 +212,14 @@ _dl_md_reloc_got(elf_object_t *object, int lazy)
 	this = NULL;
 	object->plt_size = 0;
 	object->got_size = 0;
-	ooff = _dl_find_symbol("__got_start", object, &this, NULL,
-	    SYM_SEARCH_SELF|SYM_NOWARNNOTFOUND|SYM_PLT, 0, object);
+	ooff = _dl_find_symbol("__got_start", &this,
+	    SYM_SEARCH_OBJ|SYM_NOWARNNOTFOUND|SYM_PLT, NULL, object, NULL);
 	if (this != NULL)
 		object->got_start = ooff + this->st_value;
 
 	this = NULL;
-	ooff = _dl_find_symbol("__got_end", object, &this, NULL,
-	    SYM_SEARCH_SELF|SYM_NOWARNNOTFOUND|SYM_PLT, 0, object);
+	ooff = _dl_find_symbol("__got_end", &this,
+	    SYM_SEARCH_OBJ|SYM_NOWARNNOTFOUND|SYM_PLT, NULL, object, NULL);
 	if (this != NULL)
 		object->got_size = ooff + this->st_value  - object->got_start;
 
@@ -234,9 +233,9 @@ _dl_md_reloc_got(elf_object_t *object, int lazy)
 			if (symp->st_value == 0 || !lazy) {
 				this = 0;
 				ooff = _dl_find_symbol(strt + symp->st_name,
-				    _dl_objects, &this, NULL,
+				    &this,
 				    SYM_SEARCH_ALL|SYM_NOWARNNOTFOUND|SYM_PLT,
-				    symp->st_size, object);
+				    symp, object, NULL);
 				if (this)
 					*gotp = this->st_value + ooff;
 			} else
@@ -244,10 +243,9 @@ _dl_md_reloc_got(elf_object_t *object, int lazy)
 		} else if (symp->st_shndx == SHN_COMMON ||
 			symp->st_shndx == SHN_UNDEF) {
 			this = 0;
-			ooff = _dl_find_symbol(strt + symp->st_name,
-			    _dl_objects, &this, NULL,
+			ooff = _dl_find_symbol(strt + symp->st_name, &this,
 			    SYM_SEARCH_ALL|SYM_NOWARNNOTFOUND|SYM_PLT,
-			    symp->st_size, object);
+			    symp, object, NULL);
 			if (this)
 				*gotp = this->st_value + ooff;
 		} else if (ELF64_ST_TYPE(symp->st_info) == STT_FUNC &&
@@ -255,10 +253,9 @@ _dl_md_reloc_got(elf_object_t *object, int lazy)
 			*gotp += loff;
 		} else {	/* Resolve all others immediatly */
 			this = 0;
-			ooff = _dl_find_symbol(strt + symp->st_name,
-			    _dl_objects, &this, NULL,
+			ooff = _dl_find_symbol(strt + symp->st_name, &this,
 			    SYM_SEARCH_ALL|SYM_NOWARNNOTFOUND|SYM_PLT,
-			    symp->st_size, object);
+			    symp, object, NULL);
 			if (this)
 				*gotp = this->st_value + ooff;
 			else

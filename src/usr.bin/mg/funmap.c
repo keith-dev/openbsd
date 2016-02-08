@@ -1,4 +1,4 @@
-/*	$OpenBSD: funmap.c,v 1.14 2005/05/30 13:13:50 jason Exp $	*/
+/*	$OpenBSD: funmap.c,v 1.23 2005/12/20 06:17:36 kjell Exp $	*/
 /*
  * Copyright (c) 2001 Artur Grabowski <art@openbsd.org>.  All rights reserved.
  *
@@ -63,15 +63,13 @@ static struct funmap functnames[] = {
 	{executemacro, "call-last-kbd-macro",},
 #endif /* !NO_MACRO */
 	{capword, "capitalize-word",},
-#ifndef NO_DIR
 	{changedir, "cd",},
-#endif /* !NO_DIR */
 	{copyregion, "copy-region-as-kill",},
 #ifdef	REGEX
 	{cntmatchlines, "count-matches",},
 	{cntnonmatchlines, "count-non-matches",},
 #endif /* REGEX */
-	{define_key, "define-key",},
+	{redefine_key, "define-key",},
 	{backdel, "delete-backward-char",},
 	{deblank, "delete-blank-lines",},
 	{forwdel, "delete-char",},
@@ -87,18 +85,6 @@ static struct funmap functnames[] = {
 	{desckey, "describe-key-briefly",},
 #endif /* !NO_HELP */
 	{digit_argument, "digit-argument",},
-#ifndef NO_DIRED
-	{dired, "dired",},
-	{d_undelbak, "dired-backup-unflag",},
-	{d_copy, "dired-copy-file",},
-	{d_expunge, "dired-do-deletions",},
-	{d_findfile, "dired-find-file",},
-	{d_ffotherwindow, "dired-find-file-other-window",},
-	{d_del, "dired-flag-file-deleted",},
-	{d_otherwindow, "dired-other-window",},
-	{d_rename, "dired-rename-file",},
-	{d_undel, "dired-unflag",},
-#endif /* !NO_DIRED */
 	{lowerregion, "downcase-region",},
 	{lowerword, "downcase-word",},
 	{showversion, "emacs-version",},
@@ -127,7 +113,6 @@ static struct funmap functnames[] = {
 	{unbindtokey, "global-unset-key",},
 	{gotoline, "goto-line",},
 #ifndef NO_HELP
-	{NULL, "help",},
 	{help_help, "help-help",},
 #endif /* !NO_HELP */
 	{insert, "insert",},
@@ -149,12 +134,8 @@ static struct funmap functnames[] = {
 #endif /* !NO_STARTUP */
 	{localbind, "local-set-key",},
 	{localunbind, "local-unset-key",},
-#ifndef NO_BACKUP
 	{makebkfile, "make-backup-files",},
-#endif /* !NO_BACKUP */
-#ifdef DO_METAKEY
 	{do_meta, "meta-key-mode",},	/* better name, anyone? */
-#endif /* DO_METAKEY */
 	{negative_argument, "negative-argument",},
 	{newline, "newline",},
 	{indent, "newline-and-indent",},
@@ -165,19 +146,17 @@ static struct funmap functnames[] = {
 	{notmodified, "not-modified",},
 	{openline, "open-line",},
 	{nextwind, "other-window",},
-	{overwrite, "overwrite-mode",},
+	{overwrite_mode, "overwrite-mode",},
 #ifdef PREFIXREGION
 	{prefixregion, "prefix-region",},
 #endif /* PREFIXREGION */
 	{backline, "previous-line",},
 	{prevwind, "previous-window",},
 	{spawncli, "push-shell",},
-#ifndef NO_DIR
 	{showcwdir, "pwd",},
-#endif /* !NO_DIR */
 	{queryrepl, "query-replace",},
-	{replstr, "replace-string",},
 #ifdef REGEX
+	{replstr, "replace-string",},
 	{re_queryrepl, "query-replace-regexp",},
 #endif /* REGEX */
 	{quote, "quoted-insert",},
@@ -187,7 +166,7 @@ static struct funmap functnames[] = {
 	{re_forwsearch, "re-search-forward",},
 #endif /* REGEX */
 	{reposition, "recenter",},
-	{refresh, "redraw-display",},
+	{redraw, "redraw-display",},
 	{filesave, "save-buffer",},
 	{quit, "save-buffers-kill-emacs",},
 	{savebuffers, "save-some-buffers",},
@@ -290,11 +269,11 @@ function_name(PF fun)
 /*
  * List possible function name completions.
  */
-LIST *
+struct list *
 complete_function_list(const char *fname)
 {
 	struct funmap	*fn;
-	LIST		*head, *el;
+	struct list	*head, *el;
 	int		 len;
 
 	len = strlen(fname);
@@ -305,7 +284,7 @@ complete_function_list(const char *fname)
 				free_file_list(head);
 				return (NULL);
 			}
-			el->l_name = fn->fn_name;
+			el->l_name = strdup(fn->fn_name);
 			el->l_next = head;
 			head = el;
 		}

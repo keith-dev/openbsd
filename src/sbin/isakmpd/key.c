@@ -1,4 +1,4 @@
-/* $OpenBSD: key.c,v 1.22 2005/04/08 22:32:10 cloder Exp $	 */
+/* $OpenBSD: key.c,v 1.24 2005/11/15 22:10:49 cloder Exp $	 */
 /*
  * The author of this code is Angelos D. Keromytis (angelos@cis.upenn.edu)
  *
@@ -93,26 +93,14 @@ key_serialize(int type, int private, void *key, u_int8_t **data,
 
 /* Convert from serialized to printable */
 char *
-key_printable(int type, int private, u_int8_t *data, int datalen)
+key_printable(int type, int private, u_int8_t *data, size_t datalen)
 {
-	char	*s;
-	int	 i;
-
 	switch (type) {
 	case ISAKMP_KEY_PASSPHRASE:
 		return strdup((char *)data);
 
 	case ISAKMP_KEY_RSA:
-		s = malloc(datalen * 2 + 1);
-		if (!s) {
-			log_error("key_printable: malloc (%d) failed",
-			    datalen * 2 + 1);
-			return 0;
-		}
-		for (i = 0; i < datalen; i++)
-			snprintf(s + (2 * i), 2 * (datalen - i) + 1, "%02x",
-			    data[i]);
-		return s;
+		return raw2hex(data, datalen);
 
 	default:
 		log_error("key_printable: unknown/unsupported key type %d",
@@ -123,7 +111,7 @@ key_printable(int type, int private, u_int8_t *data, int datalen)
 
 /* Convert from serialized to internal.  */
 void *
-key_internalize(int type, int private, u_int8_t *data, int datalen)
+key_internalize(int type, int private, u_int8_t *data, size_t datalen)
 {
 	switch (type) {
 	case ISAKMP_KEY_PASSPHRASE:

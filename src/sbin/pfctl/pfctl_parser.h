@@ -1,4 +1,4 @@
-/*	$OpenBSD: pfctl_parser.h,v 1.80 2005/02/07 18:18:14 david Exp $ */
+/*	$OpenBSD: pfctl_parser.h,v 1.83 2005/11/17 20:52:39 dhartmei Exp $ */
 
 /*
  * Copyright (c) 2001 Daniel Hartmeier
@@ -117,10 +117,6 @@ struct node_host {
 	struct node_host	*next;
 	struct node_host	*tail;
 };
-/* special flags used by ifa_exists */
-#define PF_IFA_FLAG_GROUP	0x10000
-#define PF_IFA_FLAG_DYNAMIC	0x20000
-#define PF_IFA_FLAG_CLONABLE	0x40000
 
 struct node_os {
 	char			*os;
@@ -187,7 +183,7 @@ struct pf_opt_rule {
 };
 
 
-int	pfctl_rules(int, char *, int, char *, struct pfr_buffer *);
+int	pfctl_rules(int, char *, FILE *, int, char *, struct pfr_buffer *);
 int	pfctl_optimize_rules(struct pfctl *);
 
 int	pfctl_add_rule(struct pfctl *, struct pf_rule *, const char *);
@@ -267,7 +263,7 @@ void			 set_ipmask(struct node_host *, u_int8_t);
 int			 check_netmask(struct node_host *, sa_family_t);
 int			 unmask(struct pf_addr *, sa_family_t);
 void			 ifa_load(void);
-struct node_host	*ifa_exists(const char *, int);
+struct node_host	*ifa_exists(const char *);
 struct node_host	*ifa_lookup(const char *, int);
 struct node_host	*host(const char *);
 

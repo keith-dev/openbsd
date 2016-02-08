@@ -1,4 +1,4 @@
-/*	$OpenBSD: kern_exec.c,v 1.95 2005/08/14 11:02:33 miod Exp $	*/
+/*	$OpenBSD: kern_exec.c,v 1.99 2006/01/19 17:54:47 mickey Exp $	*/
 /*	$NetBSD: kern_exec.c,v 1.75 1996/02/09 18:59:28 christos Exp $	*/
 
 /*-
@@ -109,9 +109,7 @@ int stackgap_random = STACKGAP_RANDOM;
  *			error code, locked vnode, exec header unmodified
  */
 int
-check_exec(p, epp)
-	struct proc *p;
-	struct exec_package *epp;
+check_exec(struct proc *p, struct exec_package *epp)
 {
 	int error, i;
 	struct vnode *vp;
@@ -234,10 +232,7 @@ bad1:
  */
 /* ARGSUSED */
 int
-sys_execve(p, v, retval)
-	register struct proc *p;
-	void *v;
-	register_t *retval;
+sys_execve(struct proc *p, void *v, register_t *retval)
 {
 	struct sys_execve_args /* {
 		syscallarg(const char *) path;
@@ -638,6 +633,10 @@ sys_execve(p, v, retval)
 	    p->p_emul != pack.ep_emul)
 		(*p->p_emul->e_proc_exit)(p);
 
+	p->p_descfd = 255;
+	if ((pack.ep_flags & EXEC_HASFD) && pack.ep_fd < 255)
+		p->p_descfd = pack.ep_fd;
+
 	/*
 	 * Call exec hook. Emulation code may NOT store reference to anything
 	 * from &pack.
@@ -676,7 +675,7 @@ bad:
 		(void) fdrelease(p, pack.ep_fd);
 	}
 	if (pack.ep_interp != NULL)
-		FREE(pack.ep_interp, M_TEMP);
+		pool_put(&namei_pool, pack.ep_interp);
 	if (pack.ep_emul_arg != NULL)
 		FREE(pack.ep_emul_arg, M_TEMP);
 	/* close and put the exec'd file */
@@ -705,7 +704,7 @@ exec_abort:
 	uvm_deallocate(&vm->vm_map, VM_MIN_ADDRESS,
 		VM_MAXUSER_ADDRESS - VM_MIN_ADDRESS);
 	if (pack.ep_interp != NULL)
-		FREE(pack.ep_interp, M_TEMP);
+		pool_put(&namei_pool, pack.ep_interp);
 	if (pack.ep_emul_arg != NULL)
 		FREE(pack.ep_emul_arg, M_TEMP);
 	pool_put(&namei_pool, nid.ni_cnd.cn_pnbuf);
@@ -714,7 +713,7 @@ exec_abort:
 
 free_pack_abort:
 	free(pack.ep_hdr, M_EXEC);
-	exit1(p, W_EXITCODE(0, SIGABRT));
+	exit1(p, W_EXITCODE(0, SIGABRT), EXIT_NORMAL);
 
 	/* NOTREACHED */
 	p->p_flag &= ~P_INEXEC;
@@ -726,11 +725,8 @@ free_pack_abort:
 
 
 void *
-copyargs(pack, arginfo, stack, argp)
-	struct exec_package *pack;
-	struct ps_strings *arginfo;
-	void *stack;
-	void *argp;
+copyargs(struct exec_package *pack, struct ps_strings *arginfo, void *stack,
+    void *argp)
 {
 	char **cpp = stack;
 	char *dp, *sp;

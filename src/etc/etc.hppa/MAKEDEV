@@ -3,9 +3,9 @@
 # THIS FILE AUTOMATICALLY GENERATED.  DO NOT EDIT.
 # generated from:
 #
-#	OpenBSD: etc.hppa/MAKEDEV.md,v 1.25 2005/08/01 22:22:13 deraadt Exp 
-#	OpenBSD: MAKEDEV.common,v 1.20 2005/08/01 22:22:12 deraadt Exp 
-#	OpenBSD: MAKEDEV.mi,v 1.73 2005/02/07 06:14:18 david Exp 
+#	OpenBSD: etc.hppa/MAKEDEV.md,v 1.26 2006/01/11 21:57:53 martin Exp 
+#	OpenBSD: MAKEDEV.common,v 1.23 2005/12/27 19:02:42 miod Exp 
+#	OpenBSD: MAKEDEV.mi,v 1.77 2005/10/06 06:43:19 otto Exp 
 #	OpenBSD: MAKEDEV.sub,v 1.14 2005/02/07 06:14:18 david Exp 
 #
 #
@@ -47,7 +47,7 @@
 #	pty*	Set of 62 master pseudo terminals
 #	tty*	Set of 62 slave pseudo terminals
 # Console ports:
-#	ttyC0	Minimal wscons devices
+#	wscons	Minimal wscons devices
 #	ttyC-F*	wscons display devices
 #	wskbd*	wscons keyboards
 #	wsmux	wscons keyboard/mouse mux devices
@@ -68,7 +68,8 @@
 #	audio*	Audio devices
 #	bpf*	Berkeley Packet Filter
 #	crypto	Hardware crypto access driver
-#	fd	fd/* nodes for fdescfs
+#	fd	fd/* nodes
+#	hotplug	devices hot plugging
 #	lkm	Loadable kernel modules interface
 #	pci	PCI bus device
 #	pdc	PDC device
@@ -147,15 +148,13 @@ dodisk()
 {
 	[ "$DEBUG" ] && set -x
 	n=$(($((${5}*${7:-16}))+${6})) count=0
-	RMlist="$RMlist $1$2? r$1$2?"
 	[ 0$7 -ne 8 ] && l="i j k l m n o p"
 	for d in a b c d e f g h $l
 	do
-		M $1$2$d	b $3 $(($n+$count)) 640
-		M r$1$2$d	c $4 $(($n+$count)) 640
+		M $1$2$d	b $3 $(($n+$count)) 640 operator
+		M r$1$2$d	c $4 $(($n+$count)) 640 operator
 		let count=count+1
 	done
-	MKlist="$MKlist;chown root:operator $1$2? r$1$2?"
 }
 
 dodisk2()
@@ -169,35 +168,31 @@ dodisk2()
 }
 
 # M name b/c major minor [mode] [group]
-RMlist="rm -f"
-MKlist=":"
+RMlist[0]="rm -f"
 
 mkl() {
-	[ "${mklist[$1]}" ] && {
-		mklist[$1]="${mklist[$1]};mknod -m $1 $2 $3 $4 $5"
-	} || {
-		mklist[$1]="mknod -m $1 $2 $3 $4 $5"
-		modes="$modes $1"
-	}
+	mklist[${#mklist[*]}]=";mknod -m $1 $2 $3 $4 $5"
 }
 
 M() {
-	RMlist="$RMlist $1"
+	RMlist[${#RMlist[*]}]=$1
 	mkl ${5-666} $1 $2 $3 $4
-	mklist="$mklist $1"
 	G=${6:-wheel}
 	[ "$7" ] && {
-		MKlist="$MKlist;chown $7:$G $1"
+		MKlist[${#MKlist[*]}]=";chown $7:$G $1"
 	} || {
 		case $G in
-		wheel)g=0;;kmem)g=2;;operator)g=5;;tty)g=4;;dialer)g=117;;_lkm)g=61;;
+		wheel)
+			[ ${#whlist[*]} = 0 ] && whlist[0]=";chgrp wheel"
+			whlist[${#whlist[*]}]="$1"
+		;;
+		operator)
+			[ ${#oplist[*]} = 0 ] && oplist[0]=";chgrp operator"
+			oplist[${#oplist[*]}]="$1"
+		;;
+		*)
+			MKlist[${#MKlist[*]}]=";chgrp $G $1";
 		esac
-		[ "${grplist[$g]}" ] && {
-			grplist[$g]="${grplist[$g]} $1"
-		} || {
-			groups="$groups $g"
-			grplist[$g]="chgrp $G $1"
-		}
 	}
 	return 0
 }
@@ -251,8 +246,8 @@ ss*)
 	M ss$U c 14 $(($U*16)) 640 operator
 	M nss$U c 14 $(($(($U*16))+1)) 640 operator
 	M enss$U c 14 $(($(($U*16))+3)) 640 operator
-	RMlist="$RMlist scan$U"
-	MKlist="$MKlist;umask 77;ln -s ss$U scan$U"
+	RMlist[${#RMlist[*]}]="scan$U"
+	MKlist[${#MKlist[*]}]=";umask 77;ln -s ss$U scan$U"
 	;;
 
 *random)
@@ -276,10 +271,14 @@ lkm)
 	M lkm c 19 0 640 _lkm
 	;;
 
+hotplug)
+	M hotplug c 47 $U 400
+	;;
+
 fd)
-	RMlist="mkdir -p fd;$RMlist" n=0
+	RMlist[${#RMlist[*]}]=";mkdir -p fd;rm -f" n=0
 	while [ $n -lt 64 ];do M fd/$n c 16 $n;n=$(($n+1));done
-	MKlist="$MKlist;chmod 555 fd"
+	MKlist[${#MKlist[*]}]=";chmod 555 fd"
 	;;
 
 crypto)
@@ -295,10 +294,10 @@ audio*)
 	M mixer$U	c 35 $(($U+16))
 	M audio$U	c 35 $(($U+128))
 	M audioctl$U	c 35 $(($U+192))
-	MKlist="$MKlist;[ -e audio ] || ln -s audio$U audio"
-	MKlist="$MKlist;[ -e mixer ] || ln -s mixer$U mixer"
-	MKlist="$MKlist;[ -e sound ] || ln -s sound$U sound"
-	MKlist="$MKlist;[ -e audioctl ] || ln -s audioctl$U audioctl"
+	MKlist[${#MKlist[*]}]=";[ -e audio ] || ln -s audio$U audio"
+	MKlist[${#MKlist[*]}]=";[ -e mixer ] || ln -s mixer$U mixer"
+	MKlist[${#MKlist[*]}]=";[ -e sound ] || ln -s sound$U sound"
+	MKlist[${#MKlist[*]}]=";[ -e audioctl ] || ln -s audioctl$U audioctl"
 	;;
 
 uscanner*)
@@ -481,9 +480,9 @@ all)
 	R cd0 cd1 rd0 tun0 tun1 tun2 tun3 bpf0 bpf1 bpf2 bpf3 bpf4
 	R bpf5 bpf6 bpf7 bpf8 bpf9 pty0 fd1 fd1B fd1C fd1D fd1E fd1F
 	R fd1G fd1H fd0 fd0B fd0C fd0D fd0E fd0F fd0G fd0H xfs0 ss0
-	R ss1 ch0 ptm local wscons pci uall audio0 uk0 random lpa0
-	R lpa1 lpa2 lpt0 lpt1 lpt2 lkm tty00 tty01 tty02 tty03 crypto
-	R pf systrace wd0 wd1 wd2 wd3 std st0 st1 fd
+	R ss1 ch0 hotplug ptm local wscons pci uall audio0 uk0 random
+	R lpa0 lpa1 lpa2 lpt0 lpt1 lpt2 lkm tty00 tty01 tty02 tty03
+	R crypto pf systrace wd0 wd1 wd2 wd3 std st0 st1 fd
 	;;
 
 wd*|sd*|ccd*)
@@ -501,16 +500,14 @@ esac
 done
 }
 R "$@"
-list="$RMlist"
-for mode in $modes; do
-	list="$list;${mklist[$mode]}"
-done
-for group in $groups; do
-	list="$list;${grplist[$group]}"
-done
-list="$list;$MKlist"
-if [ "$eo" = "echo" ]; then
-	$eo "$list"
+{
+echo -n ${RMlist[*]}
+echo -n ${mklist[*]}
+echo -n ${MKlist[*]}
+echo -n ${whlist[*]}
+echo ${oplist[*]}
+} | if [ "$eo" = "echo" ]; then
+        cat
 else
-	echo "$list" | sh
+	sh
 fi

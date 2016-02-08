@@ -1,4 +1,4 @@
-/*	$OpenBSD: main.c,v 1.41 2005/08/09 00:53:48 kjell Exp $	*/
+/*	$OpenBSD: main.c,v 1.49 2006/02/25 14:40:16 otto Exp $	*/
 
 /* This file is in the public domain. */
 
@@ -20,10 +20,10 @@ int		 thisflag;			/* flags, this command	*/
 int		 lastflag;			/* flags, last command	*/
 int		 curgoal;			/* goal column		*/
 int		 startrow;			/* row to start		*/
-BUFFER		*curbp;				/* current buffer	*/
-BUFFER		*bheadp;			/* BUFFER list head	*/
-MGWIN		*curwp;				/* current window	*/
-MGWIN		*wheadp;			/* MGWIN listhead	*/
+struct buffer		*curbp;				/* current buffer	*/
+struct buffer		*bheadp;			/* BUFFER list head	*/
+struct mgwin		*curwp;				/* current window	*/
+struct mgwin		*wheadp;			/* MGWIN listhead	*/
 char		 pat[NPAT];			/* pattern		*/
 
 static void	 edinit(PF);
@@ -33,7 +33,7 @@ main(int argc, char **argv)
 {
 	char	*cp, *init_fcn_name = NULL;
 	PF	 init_fcn = NULL;
-	int	 o, i, nfiles, status;
+	int	 o, i, nfiles;
 	int	 nobackups = 0;
 
 	while ((o = getopt(argc, argv, "nf:")) != -1)
@@ -63,7 +63,10 @@ main(int argc, char **argv)
 	{
 		extern void grep_init(void);
 		extern void theo_init(void);
+		extern void mail_init(void);
+		extern void dired_init(void);
 
+		dired_init();
 		grep_init();
 		theo_init();
 		mail_init();
@@ -74,9 +77,7 @@ main(int argc, char **argv)
 		errx(1, "Unknown function `%s'", init_fcn_name);
 
 	vtinit();		/* Virtual terminal.		*/
-#ifndef NO_DIR
 	dirinit();		/* Get current directory.	*/
-#endif	/* !NO_DIR */
 	edinit(init_fcn);	/* Buffers, windows.		*/
 	ttykeymapinit();	/* Symbols, bindings.		*/
 
@@ -98,7 +99,7 @@ main(int argc, char **argv)
 
 	for (nfiles = 0, i = 0; i < argc; i++) {
 		if (argv[i][0] == '+' && strlen(argv[i]) >= 2) {
-			int lval;
+			long long lval;
 			const char *errstr;
 
 			lval = strtonum(&argv[i][1], INT_MIN, INT_MAX, &errstr);
@@ -117,7 +118,7 @@ notnum:
 					errx(1, "Can't find current buffer!");
 				}
 				(void)showbuffer(curbp, curwp, 0);
-				if ((status = readin(cp)) != TRUE)
+				if (readin(cp) != TRUE)
 					killbuffer(curbp);
 				else {
 					if (init_fcn_name)
@@ -139,7 +140,7 @@ notnum:
 			eerase();
 #endif	/* !NO_DPROMPT */
 		if (winch_flag) {
-			refresh(0, 0);
+			do_redraw(0, 0, TRUE);
 			winch_flag = 0;
 		}
 		update();
@@ -151,7 +152,7 @@ notnum:
 			break;
 		case ABORT:
 			ewprintf("Quit");
-			/* and fall through */
+			/* FALLTHRU */
 		case FALSE:
 		default:
 			ttbeep();
@@ -168,8 +169,8 @@ notnum:
 static void
 edinit(PF init_fcn)
 {
-	BUFFER	*bp;
-	MGWIN	*wp;
+	struct buffer	*bp;
+	struct mgwin	*wp;
 
 	bheadp = NULL;
 	bp = bfind("*scratch*", TRUE);		/* Text buffer.		 */

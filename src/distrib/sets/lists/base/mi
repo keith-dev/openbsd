@@ -103,6 +103,7 @@
 ./sbin/ipsecadm
 ./sbin/ipsecctl
 ./sbin/isakmpd
+./sbin/ldconfig
 ./sbin/lmccontrol
 ./sbin/mkfifo
 ./sbin/mknod
@@ -112,9 +113,7 @@
 ./sbin/mount_ados
 ./sbin/mount_cd9660
 ./sbin/mount_ext2fs
-./sbin/mount_fdesc
 ./sbin/mount_ffs
-./sbin/mount_kernfs
 ./sbin/mount_mfs
 ./sbin/mount_msdos
 ./sbin/mount_nfs
@@ -241,10 +240,10 @@
 ./usr/bin/fsplit
 ./usr/bin/fstat
 ./usr/bin/ftp
-./usr/bin/gdbtui
 ./usr/bin/gencat
 ./usr/bin/getcap
 ./usr/bin/getconf
+./usr/bin/getent
 ./usr/bin/getopt
 ./usr/bin/grep
 ./usr/bin/grodvi
@@ -259,6 +258,7 @@
 ./usr/bin/gzcat
 ./usr/bin/gzexe
 ./usr/bin/gzip
+./usr/bin/gzsig
 ./usr/bin/h2ph
 ./usr/bin/h2xs
 ./usr/bin/head
@@ -293,6 +293,7 @@
 ./usr/bin/lam
 ./usr/bin/last
 ./usr/bin/lastcomm
+./usr/bin/ldd
 ./usr/bin/leave
 ./usr/bin/less
 ./usr/bin/lesskey
@@ -408,6 +409,7 @@
 ./usr/bin/s2p
 ./usr/bin/scp
 ./usr/bin/script
+./usr/bin/sdiff
 ./usr/bin/sectok
 ./usr/bin/sed
 ./usr/bin/sendbug
@@ -838,6 +840,7 @@
 ./usr/libdata/perl5/OpenBSD/Error.pm
 ./usr/libdata/perl5/OpenBSD/Getopt.pm
 ./usr/libdata/perl5/OpenBSD/IdCache.pm
+./usr/libdata/perl5/OpenBSD/Interactive.pm
 ./usr/libdata/perl5/OpenBSD/Makewhatis
 ./usr/libdata/perl5/OpenBSD/Makewhatis.pm
 ./usr/libdata/perl5/OpenBSD/Makewhatis/Check.pm
@@ -1680,7 +1683,6 @@
 ./usr/libexec/cvs/contrib/sccs2rcs
 ./usr/libexec/diff3prog
 ./usr/libexec/fingerd
-./usr/libexec/ftp-proxy
 ./usr/libexec/ftpd
 ./usr/libexec/getNAME
 ./usr/libexec/getty
@@ -1721,6 +1723,7 @@
 ./usr/libexec/spellprog
 ./usr/libexec/ssh-keysign
 ./usr/libexec/tcpd
+./usr/libexec/tftp-proxy
 ./usr/libexec/tftpd
 ./usr/libexec/uucpd
 ./usr/libexec/vfontedpr
@@ -1789,6 +1792,7 @@
 ./usr/sbin/edquota
 ./usr/sbin/faithd
 ./usr/sbin/fs
+./usr/sbin/ftp-proxy
 ./usr/sbin/group
 ./usr/sbin/groupadd
 ./usr/sbin/groupdel
@@ -1941,6 +1945,7 @@
 ./usr/share/calendar/calendar.christian
 ./usr/share/calendar/calendar.computer
 ./usr/share/calendar/calendar.croatian
+./usr/share/calendar/calendar.discord
 ./usr/share/calendar/calendar.fictional
 ./usr/share/calendar/calendar.french
 ./usr/share/calendar/calendar.german
@@ -2244,8 +2249,6 @@
 ./usr/share/lkm/syscall
 ./usr/share/lkm/syscall/module
 ./usr/share/lkm/syscall/test
-./usr/share/lkm/vfs
-./usr/share/lkm/vfs/module
 ./usr/share/locale
 ./usr/share/locale/bg_BG.CP1251
 ./usr/share/locale/bg_BG.CP1251/LC_CTYPE
@@ -2408,6 +2411,7 @@
 ./usr/share/misc/countrycodes
 ./usr/share/misc/eqnchar
 ./usr/share/misc/inter.phone
+./usr/share/misc/iso3166.tab
 ./usr/share/misc/license.template
 ./usr/share/misc/mail.help
 ./usr/share/misc/mail.tildehelp
@@ -2830,6 +2834,7 @@
 ./usr/share/zoneinfo/America/Cayman
 ./usr/share/zoneinfo/America/Chicago
 ./usr/share/zoneinfo/America/Chihuahua
+./usr/share/zoneinfo/America/Coral_Harbour
 ./usr/share/zoneinfo/America/Cordoba
 ./usr/share/zoneinfo/America/Costa_Rica
 ./usr/share/zoneinfo/America/Cuiaba
@@ -2862,7 +2867,9 @@
 ./usr/share/zoneinfo/America/Indiana/Indianapolis
 ./usr/share/zoneinfo/America/Indiana/Knox
 ./usr/share/zoneinfo/America/Indiana/Marengo
+./usr/share/zoneinfo/America/Indiana/Petersburg
 ./usr/share/zoneinfo/America/Indiana/Vevay
+./usr/share/zoneinfo/America/Indiana/Vincennes
 ./usr/share/zoneinfo/America/Indianapolis
 ./usr/share/zoneinfo/America/Inuvik
 ./usr/share/zoneinfo/America/Iqaluit
@@ -2887,6 +2894,7 @@
 ./usr/share/zoneinfo/America/Merida
 ./usr/share/zoneinfo/America/Mexico_City
 ./usr/share/zoneinfo/America/Miquelon
+./usr/share/zoneinfo/America/Moncton
 ./usr/share/zoneinfo/America/Monterrey
 ./usr/share/zoneinfo/America/Montevideo
 ./usr/share/zoneinfo/America/Montreal
@@ -3055,6 +3063,7 @@
 ./usr/share/zoneinfo/Australia/Brisbane
 ./usr/share/zoneinfo/Australia/Broken_Hill
 ./usr/share/zoneinfo/Australia/Canberra
+./usr/share/zoneinfo/Australia/Currie
 ./usr/share/zoneinfo/Australia/Darwin
 ./usr/share/zoneinfo/Australia/Hobart
 ./usr/share/zoneinfo/Australia/LHI
@@ -3278,20 +3287,6 @@
 ./usr/share/zoneinfo/ROC
 ./usr/share/zoneinfo/ROK
 ./usr/share/zoneinfo/Singapore
-./usr/share/zoneinfo/SystemV
-./usr/share/zoneinfo/SystemV/AST4
-./usr/share/zoneinfo/SystemV/AST4ADT
-./usr/share/zoneinfo/SystemV/CST6
-./usr/share/zoneinfo/SystemV/CST6CDT
-./usr/share/zoneinfo/SystemV/EST5
-./usr/share/zoneinfo/SystemV/EST5EDT
-./usr/share/zoneinfo/SystemV/HST10
-./usr/share/zoneinfo/SystemV/MST7
-./usr/share/zoneinfo/SystemV/MST7MDT
-./usr/share/zoneinfo/SystemV/PST8
-./usr/share/zoneinfo/SystemV/PST8PDT
-./usr/share/zoneinfo/SystemV/YST9
-./usr/share/zoneinfo/SystemV/YST9YDT
 ./usr/share/zoneinfo/Turkey
 ./usr/share/zoneinfo/UCT
 ./usr/share/zoneinfo/US
@@ -3405,6 +3400,7 @@
 ./usr/share/zoneinfo/posix/America/Cayman
 ./usr/share/zoneinfo/posix/America/Chicago
 ./usr/share/zoneinfo/posix/America/Chihuahua
+./usr/share/zoneinfo/posix/America/Coral_Harbour
 ./usr/share/zoneinfo/posix/America/Cordoba
 ./usr/share/zoneinfo/posix/America/Costa_Rica
 ./usr/share/zoneinfo/posix/America/Cuiaba
@@ -3437,7 +3433,9 @@
 ./usr/share/zoneinfo/posix/America/Indiana/Indianapolis
 ./usr/share/zoneinfo/posix/America/Indiana/Knox
 ./usr/share/zoneinfo/posix/America/Indiana/Marengo
+./usr/share/zoneinfo/posix/America/Indiana/Petersburg
 ./usr/share/zoneinfo/posix/America/Indiana/Vevay
+./usr/share/zoneinfo/posix/America/Indiana/Vincennes
 ./usr/share/zoneinfo/posix/America/Indianapolis
 ./usr/share/zoneinfo/posix/America/Inuvik
 ./usr/share/zoneinfo/posix/America/Iqaluit
@@ -3462,6 +3460,7 @@
 ./usr/share/zoneinfo/posix/America/Merida
 ./usr/share/zoneinfo/posix/America/Mexico_City
 ./usr/share/zoneinfo/posix/America/Miquelon
+./usr/share/zoneinfo/posix/America/Moncton
 ./usr/share/zoneinfo/posix/America/Monterrey
 ./usr/share/zoneinfo/posix/America/Montevideo
 ./usr/share/zoneinfo/posix/America/Montreal
@@ -3630,6 +3629,7 @@
 ./usr/share/zoneinfo/posix/Australia/Brisbane
 ./usr/share/zoneinfo/posix/Australia/Broken_Hill
 ./usr/share/zoneinfo/posix/Australia/Canberra
+./usr/share/zoneinfo/posix/Australia/Currie
 ./usr/share/zoneinfo/posix/Australia/Darwin
 ./usr/share/zoneinfo/posix/Australia/Hobart
 ./usr/share/zoneinfo/posix/Australia/LHI
@@ -3853,20 +3853,6 @@
 ./usr/share/zoneinfo/posix/ROC
 ./usr/share/zoneinfo/posix/ROK
 ./usr/share/zoneinfo/posix/Singapore
-./usr/share/zoneinfo/posix/SystemV
-./usr/share/zoneinfo/posix/SystemV/AST4
-./usr/share/zoneinfo/posix/SystemV/AST4ADT
-./usr/share/zoneinfo/posix/SystemV/CST6
-./usr/share/zoneinfo/posix/SystemV/CST6CDT
-./usr/share/zoneinfo/posix/SystemV/EST5
-./usr/share/zoneinfo/posix/SystemV/EST5EDT
-./usr/share/zoneinfo/posix/SystemV/HST10
-./usr/share/zoneinfo/posix/SystemV/MST7
-./usr/share/zoneinfo/posix/SystemV/MST7MDT
-./usr/share/zoneinfo/posix/SystemV/PST8
-./usr/share/zoneinfo/posix/SystemV/PST8PDT
-./usr/share/zoneinfo/posix/SystemV/YST9
-./usr/share/zoneinfo/posix/SystemV/YST9YDT
 ./usr/share/zoneinfo/posix/Turkey
 ./usr/share/zoneinfo/posix/UCT
 ./usr/share/zoneinfo/posix/US
@@ -3981,6 +3967,7 @@
 ./usr/share/zoneinfo/right/America/Cayman
 ./usr/share/zoneinfo/right/America/Chicago
 ./usr/share/zoneinfo/right/America/Chihuahua
+./usr/share/zoneinfo/right/America/Coral_Harbour
 ./usr/share/zoneinfo/right/America/Cordoba
 ./usr/share/zoneinfo/right/America/Costa_Rica
 ./usr/share/zoneinfo/right/America/Cuiaba
@@ -4013,7 +4000,9 @@
 ./usr/share/zoneinfo/right/America/Indiana/Indianapolis
 ./usr/share/zoneinfo/right/America/Indiana/Knox
 ./usr/share/zoneinfo/right/America/Indiana/Marengo
+./usr/share/zoneinfo/right/America/Indiana/Petersburg
 ./usr/share/zoneinfo/right/America/Indiana/Vevay
+./usr/share/zoneinfo/right/America/Indiana/Vincennes
 ./usr/share/zoneinfo/right/America/Indianapolis
 ./usr/share/zoneinfo/right/America/Inuvik
 ./usr/share/zoneinfo/right/America/Iqaluit
@@ -4038,6 +4027,7 @@
 ./usr/share/zoneinfo/right/America/Merida
 ./usr/share/zoneinfo/right/America/Mexico_City
 ./usr/share/zoneinfo/right/America/Miquelon
+./usr/share/zoneinfo/right/America/Moncton
 ./usr/share/zoneinfo/right/America/Monterrey
 ./usr/share/zoneinfo/right/America/Montevideo
 ./usr/share/zoneinfo/right/America/Montreal
@@ -4206,6 +4196,7 @@
 ./usr/share/zoneinfo/right/Australia/Brisbane
 ./usr/share/zoneinfo/right/Australia/Broken_Hill
 ./usr/share/zoneinfo/right/Australia/Canberra
+./usr/share/zoneinfo/right/Australia/Currie
 ./usr/share/zoneinfo/right/Australia/Darwin
 ./usr/share/zoneinfo/right/Australia/Hobart
 ./usr/share/zoneinfo/right/Australia/LHI
@@ -4429,20 +4420,6 @@
 ./usr/share/zoneinfo/right/ROC
 ./usr/share/zoneinfo/right/ROK
 ./usr/share/zoneinfo/right/Singapore
-./usr/share/zoneinfo/right/SystemV
-./usr/share/zoneinfo/right/SystemV/AST4
-./usr/share/zoneinfo/right/SystemV/AST4ADT
-./usr/share/zoneinfo/right/SystemV/CST6
-./usr/share/zoneinfo/right/SystemV/CST6CDT
-./usr/share/zoneinfo/right/SystemV/EST5
-./usr/share/zoneinfo/right/SystemV/EST5EDT
-./usr/share/zoneinfo/right/SystemV/HST10
-./usr/share/zoneinfo/right/SystemV/MST7
-./usr/share/zoneinfo/right/SystemV/MST7MDT
-./usr/share/zoneinfo/right/SystemV/PST8
-./usr/share/zoneinfo/right/SystemV/PST8PDT
-./usr/share/zoneinfo/right/SystemV/YST9
-./usr/share/zoneinfo/right/SystemV/YST9YDT
 ./usr/share/zoneinfo/right/Turkey
 ./usr/share/zoneinfo/right/UCT
 ./usr/share/zoneinfo/right/US
@@ -4464,6 +4441,7 @@
 ./usr/share/zoneinfo/right/W-SU
 ./usr/share/zoneinfo/right/WET
 ./usr/share/zoneinfo/right/Zulu
+./usr/share/zoneinfo/zone.tab
 ./usr/src
 ./var
 ./var/account

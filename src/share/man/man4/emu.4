@@ -1,4 +1,4 @@
-.\"	$OpenBSD: emu.4,v 1.9 2004/09/30 19:59:24 mickey Exp $
+.\"	$OpenBSD: emu.4,v 1.12 2005/12/29 17:30:28 jmc Exp $
 .\"	$NetBSD: emuxki.4,v 1.1 2001/10/18 18:40:16 jdolecek Exp $
 .\"
 .\" Copyright (c) 2001 The NetBSD Foundation, Inc.
@@ -58,7 +58,7 @@ E-mu Systems, Inc. EMU10K1 music synthesis engine
 64-voice hardware polyphony with E-mu's patented 8-point interpolation
 technology
 .It
-Up 1024-voice polyphony with multi-timbre capability
+Up to 1024-voice polyphony with multi-timbre capability
 .It
 Support for real-time digital effects like reverb, chorus, flanger, pitch
 shifter, or distortion across any audio source
@@ -66,9 +66,6 @@ shifter, or distortion across any audio source
 User-selectable settings are optimized for headphones, two or four speakers
 .It
 Processes sample rates from 5kHz to 48kHz
-.It
-Hardware full duplex support enables simultaneous record and playback
-at 8 standard sample rates
 .It
 Creative Multi Speaker Surround (CMSS) places any mono or stereo sound
 source in a 360 degree audio space
@@ -90,6 +87,7 @@ The
 device driver appeared in
 .Ox 3.1 .
 .Sh AUTHORS
+.An -nosplit
 The
 .Nm
 driver was written by

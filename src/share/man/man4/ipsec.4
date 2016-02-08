@@ -1,4 +1,4 @@
-.\" $OpenBSD: ipsec.4,v 1.65 2005/08/19 15:45:47 jmc Exp $
+.\" $OpenBSD: ipsec.4,v 1.69 2005/12/12 11:56:47 jmc Exp $
 .\"
 .\" Copyright 1997 Niels Provos <provos@physnet.uni-hamburg.de>
 .\" All rights reserved.
@@ -245,7 +245,7 @@ between NAT and the IPsec flow matching, especially on the packet output path.
 Inside the TCP/IP stack, packets go through the following stages:
 .Bd -literal -offset indent
 UL/R -\*(Gt [X] -\*(Gt PF/NAT(enc0) -\*(Gt IPsec -\*(Gt PF/NAT(IF) -\*(Gt IF
-UL/R \*(Lt-------- PF/NAT(enc0) \*(Lt- IPsec -\*(Gt PF/NAT(IF) \*(Lt- IF
+UL/R \*(Lt-------- PF/NAT(enc0) \*(Lt- IPsec \*(Lt- PF/NAT(IF) \*(Lt- IF
 .Ed
 .Pp
 With IF being the real interface and UL/R the Upper Layer or Routing code.
@@ -352,10 +352,9 @@ In any case a properly configured key management daemon is required which
 listens to messages from the kernel.
 .Pp
 A list of all security associations in the kernel tables can be
-obtained via the kernfs file
-.Aq Pa ipsec ,
-typically in
-.Aq Pa /kern/ipsec .
+obtained using the
+.Xr ipsecctl 8
+command.
 .Sh DIAGNOSTICS
 A socket operation may fail with one of the following errors returned:
 .Bl -tag -width [EINVAL]

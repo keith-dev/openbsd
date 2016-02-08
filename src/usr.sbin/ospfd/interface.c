@@ -1,4 +1,4 @@
-/*	$OpenBSD: interface.c,v 1.31 2005/08/30 21:07:58 claudio Exp $ */
+/*	$OpenBSD: interface.c,v 1.41 2006/01/05 15:53:36 claudio Exp $ */
 
 /*
  * Copyright (c) 2005 Claudio Jeker <claudio@openbsd.org>
@@ -24,6 +24,7 @@
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include <net/if.h>
+#include <net/if_types.h>
 #include <ctype.h>
 #include <err.h>
 #include <stdio.h>
@@ -107,7 +108,7 @@ if_fsm(struct iface *iface, enum iface_event event)
 
 	if (iface_fsm[i].state == -1) {
 		/* XXX event outside of the defined fsm, ignore it. */
-		log_debug("fsm_if: interface %s, "
+		log_debug("if_fsm: interface %s, "
 		    "event %s not expected in state %s", iface->name,
 		    if_event_name(event), if_state_name(old_state));
 		return (0);
@@ -129,7 +130,7 @@ if_fsm(struct iface *iface, enum iface_event event)
 	}
 
 	if (ret) {
-		log_debug("fsm_if: error changing state for interface %s, "
+		log_debug("if_fsm: error changing state for interface %s, "
 		    "event %s, state %s", iface->name, if_event_name(event),
 		    if_state_name(old_state));
 		return (-1);
@@ -141,7 +142,7 @@ if_fsm(struct iface *iface, enum iface_event event)
 	if (iface->state != old_state)
 		orig_rtr_lsa(iface->area);
 
-	log_debug("fsm_if: event %s resulted in action %s and changing "
+	log_debug("if_fsm: event %s resulted in action %s and changing "
 	    "state for interface %s from %s to %s",
 	    if_event_name(event), if_action_name(iface_fsm[i].action),
 	    iface->name, if_state_name(old_state), if_state_name(iface->state));
@@ -161,7 +162,6 @@ if_new(struct kif *kif)
 		err(1, "if_new: calloc");
 
 	iface->state = IF_STA_DOWN;
-	iface->passive = 1;
 
 	LIST_INIT(&iface->nbr_list);
 	TAILQ_INIT(&iface->ls_ack_list);
@@ -189,17 +189,22 @@ if_new(struct kif *kif)
 		err(1, "if_new: socket");
 
 	/* get type */
-	if ((kif->flags & IFF_POINTOPOINT))
+	if (kif->flags & IFF_POINTOPOINT)
 		iface->type = IF_TYPE_POINTOPOINT;
-	if ((kif->flags & IFF_BROADCAST) &&
-	    (kif->flags & IFF_MULTICAST))
+	if (kif->flags & IFF_BROADCAST &&
+	    kif->flags & IFF_MULTICAST)
 		iface->type = IF_TYPE_BROADCAST;
+	if (kif->flags & IFF_LOOPBACK) {
+		iface->type = IF_TYPE_POINTOPOINT;
+		iface->state = IF_STA_LOOPBACK;
+	}
 
 	/* get mtu, index and flags */
 	iface->mtu = kif->mtu;
 	iface->ifindex = kif->ifindex;
 	iface->flags = kif->flags;
 	iface->linkstate = kif->link_state;
+	iface->media_type = kif->media_type;
 
 	/* get address */
 	if (ioctl(s, SIOCGIFADDR, (caddr_t)ifr) < 0)
@@ -214,7 +219,7 @@ if_new(struct kif *kif)
 	iface->mask = sain->sin_addr;
 
 	/* get p2p dst address */
-	if (iface->type == IF_TYPE_POINTOPOINT) {
+	if (kif->flags & IFF_POINTOPOINT) {
 		if (ioctl(s, SIOCGIFDSTADDR, (caddr_t)ifr) < 0)
 			err(1, "if_new: cannot get dst addr");
 		sain = (struct sockaddr_in *) &ifr->ifr_addr;
@@ -227,7 +232,7 @@ if_new(struct kif *kif)
 	return (iface);
 }
 
-int
+void
 if_del(struct iface *iface)
 {
 	struct nbr	*nbr = NULL;
@@ -235,17 +240,13 @@ if_del(struct iface *iface)
 	log_debug("if_del: interface %s", iface->name);
 
 	/* clear lists etc */
-	iface->self = NULL; /* trick neighbor.c code to remove self too */
-	while ((nbr = LIST_FIRST(&iface->nbr_list)) != NULL) {
-		LIST_REMOVE(nbr, entry);
+	while ((nbr = LIST_FIRST(&iface->nbr_list)) != NULL)
 		nbr_del(nbr);
-	}
 
 	ls_ack_list_clr(iface);
 	md_list_clr(iface);
 	free(iface->auth_key);
-
-	return (-1);
+	free(iface);
 }
 
 void
@@ -260,16 +261,6 @@ if_init(struct ospfd_conf *xconf, struct iface *iface)
 	evtimer_set(&iface->wait_timer, if_wait_timer, iface);
 
 	iface->fd = xconf->ospf_socket;
-}
-
-int
-if_shutdown(struct ospfd_conf *xconf)
-{
-	int	ret = 0;
-
-	ret = close(xconf->ospf_socket);
-
-	return (ret);
 }
 
 /* timers */
@@ -333,9 +324,24 @@ if_act_start(struct iface *iface)
 	struct in_addr		 addr;
 
 	if (!((iface->flags & IFF_UP) &&
-	    (iface->linkstate != LINK_STATE_DOWN))) {
+	    (iface->linkstate == LINK_STATE_UP ||
+	    (iface->linkstate == LINK_STATE_UNKNOWN &&
+	    iface->media_type != IFT_CARP)))) {
 		log_debug("if_act_start: interface %s link down",
 		    iface->name);
+		return (0);
+	}
+
+	if (iface->media_type == IFT_CARP && iface->passive == 0) {
+		/* force passive mode on carp interfaces */
+		log_warnx("if_act_start: forcing interface %s to passive",
+		    iface->name);
+		iface->passive = 1;
+	}
+
+	if (iface->passive) {
+		/* for an update of stub network entries */
+		orig_rtr_lsa(iface->area);
 		return (0);
 	}
 
@@ -407,6 +413,7 @@ if_elect(struct nbr *a, struct nbr *b)
 int
 if_act_elect(struct iface *iface)
 {
+	struct in_addr	 addr;
 	struct nbr	*nbr, *bdr = NULL, *dr = NULL;
 	int		 round = 0;
 	int		 changed = 0;
@@ -422,7 +429,7 @@ start:
 			continue;
 		if (bdr != NULL) {
 			/*
-			 * routers announcing themselfs as BDR have higher
+			 * routers announcing themselves as BDR have higher
 			 * precedence over those routers announcing a
 			 * different BDR.
 			 */
@@ -465,7 +472,7 @@ start:
 	    (iface->self == bdr && iface->self != iface->bdr) ||
 	    (iface->self != bdr && iface->self == iface->bdr))) {
 		/*
-		 * Reset announced DR/DBR to calculated one, so
+		 * Reset announced DR/BDR to calculated one, so
 		 * that we may get elected in the second round.
 		 * This is needed to drop from a DR to a BDR.
 		 */
@@ -508,10 +515,30 @@ start:
 	iface->bdr = bdr;
 
 	if (changed) {
+		inet_aton(AllDRouters, &addr);
+		if (old_state & IF_STA_DRORBDR &&
+		    (iface->state & IF_STA_DRORBDR) == 0) {
+			if (if_leave_group(iface, &addr)) {
+				log_warnx("if_act_elect: "
+				    "error leaving group %s, interface %s",
+				    inet_ntoa(addr), iface->name);
+				return (-1);
+			}
+		} else if ((old_state & IF_STA_DRORBDR) == 0 &&
+		    iface->state & IF_STA_DRORBDR) {
+			if (if_join_group(iface, &addr)) {
+				log_warnx("if_act_elect: "
+				    "error joining group %s, interface %s",
+				    inet_ntoa(addr), iface->name);
+				return (-1);
+			}
+		}
+
 		LIST_FOREACH(nbr, &iface->nbr_list, entry) {
 			if (nbr->state & NBR_STA_BIDIR)
 				nbr_fsm(nbr, NBR_EVT_ADJ_OK);
 		}
+
 		orig_rtr_lsa(iface->area);
 		if (iface->state & IF_STA_DR || old_state & IF_STA_DR)
 			orig_net_lsa(iface);
@@ -530,6 +557,12 @@ if_act_reset(struct iface *iface)
 {
 	struct nbr		*nbr = NULL;
 	struct in_addr		 addr;
+
+	if (iface->passive) {
+		/* for an update of stub network entries */
+		orig_rtr_lsa(iface->area);
+		return (0);
+	}
 
 	switch (iface->type) {
 	case IF_TYPE_POINTOPOINT:
@@ -594,7 +627,7 @@ if_to_ctl(struct iface *iface)
 	memcpy(ictl.name, iface->name, sizeof(ictl.name));
 	memcpy(&ictl.addr, &iface->addr, sizeof(ictl.addr));
 	memcpy(&ictl.mask, &iface->mask, sizeof(ictl.mask));
-	memcpy(&ictl.rtr_id, &iface->rtr_id, sizeof(ictl.rtr_id));
+	ictl.rtr_id.s_addr = ospfe_router_id();
 	memcpy(&ictl.area, &iface->area->id, sizeof(ictl.area));
 	if (iface->dr) {
 		memcpy(&ictl.dr_id, &iface->dr->id, sizeof(ictl.dr_id));
@@ -627,6 +660,8 @@ if_to_ctl(struct iface *iface)
 	ictl.linkstate = iface->linkstate;
 	ictl.priority = iface->priority;
 	ictl.passive = iface->passive;
+	ictl.auth_type = iface->auth_type;
+	ictl.auth_keyid = iface->auth_keyid;
 
 	gettimeofday(&now, NULL);
 	if (evtimer_pending(&iface->hello_timer, &tv)) {
@@ -718,6 +753,17 @@ if_set_tos(int fd, int tos)
 	}
 
 	return (0);
+}
+
+void
+if_set_recvbuf(int fd)
+{
+	int	bsize;
+
+	bsize = 65535;
+	while (setsockopt(fd, SOL_SOCKET, SO_RCVBUF, &bsize,
+	    sizeof(bsize)) == -1)
+		bsize /= 2; 
 }
 
 int

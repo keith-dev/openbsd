@@ -1,4 +1,4 @@
-dnl	$OpenBSD: hardware,v 1.24 2005/07/23 03:17:48 jsg Exp $
+dnl	$OpenBSD: hardware,v 1.30 2006/02/16 06:16:05 brad Exp $
 OpenBSD/MACHINE runs on the Chalice/Simtec StrongARM 110 Evaluation Board.
 
 Supported devices {:-include-:}:
@@ -20,12 +20,12 @@ Supported devices {:-include-:}:
 		    PDC20268R, PDC20269, PDC20271, PDC20275, PDC20276, PDC20277
 		    (RAID mode is not supported)
 		ServerWorks OSB4, CSB5, CSB6
-		Silicon Integrated System 180, 181, 182, 5513 (5597/5598), 540,
+		Silicon Integrated System 180, 181, 5513 (5597/5598), 540,
 		    550, 620, 630, 630S, 633, 635, 640, 645, 645DX, 648, 650,
 		    651, 652, 661, 655, 658, 730, 733, 735, 740, 745, 746, 748,
 		    750, 751, 752, 755, 760, 962, 963
 		VIA Technologies VT82C586A/B, VT82C596A/B, VT82C686A/B,
-		    VT8231, VT8366, VT8233, VT8235
+		    VT8231, VT8366, VT8233, VT8235, VT8237, VT8251, VT6410
 		(Other PCI IDE-compliant controllers should work, but
 		 those not listed above may not be capable of DMA modes)
 	SCSI Host Adapters
@@ -82,7 +82,7 @@ Supported devices {:-include-:}:
 		    Dell OptiPlex GX1 on-board 3c918
 		    Dell Latitude laptop docking station embedded
 			3c905
-		    NVidia nForce2 integrated 3Com 9201 (nForce2-ST, nForce2-GT)
+		    NVIDIA nForce2 integrated 3Com 9201 (nForce2-ST, nForce2-GT)
 		ADMtek AN986-based USB adapters, including
 		    Abocom UFE1000
 		    Abocom DSB650TX
@@ -96,7 +96,7 @@ Supported devices {:-include-:}:
 		    Elsa Microlink USB2Ethernet
 		    I/O Data USB ETTX
 		    Kingston KNU101TX
-		    LinkSys USB100TX, USB100H1 and USB10TA
+		    Linksys USB100TX, USB100H1 and USB10TA
 		    Melco Inc. LUA-TX
 		    Siemens SpeedStream USB
 		    SmartBridges smartNIC 2
@@ -114,7 +114,7 @@ Supported devices {:-include-:}:
 		    Hawking UF200
 		    Intellinet USB 2.0 to Ethernet (rev A)
 		    JVC MP-PRX1
-		    LinkSys USB200M
+		    Linksys USB200M
 		    Netgear FA120
 		    Sitecom LN-029
 		    SMC 2209USB/ETH
@@ -130,7 +130,7 @@ Supported devices {:-include-:}:
 		Digital DC21x4x-based PCI Ethernet adapters, including:
 		    Older SMC PCI EtherPower 10, 10/100 (models
 		      8432, 9332, and 9334)
-		    Older LinkSys 10, 10/100 (newer models are
+		    Older Linksys 10, 10/100 (newer models are
 		      supported by other drivers)
 		    Znyx ZX3xx
 		    Cogent EM100FX and EM440TX
@@ -160,7 +160,7 @@ Supported devices {:-include-:}:
 		    Jaton USB XpressNet
 		    Kawasaki USB101
 		    Kingston Ethernet
-		    LinkSys USB10T
+		    Linksys USB10T
 		    Mobility Ethernet
 		    Netgear EA101
 		    Peracom USB
@@ -205,6 +205,7 @@ Supported devices {:-include-:}:
 		    Sitecom WL-022
 		    Syntax USB-400
 		    US Robotics 1120
+		    ViewSonic Airsync
 		    Z-Com XI-725/726
 		    Z-Com XI-735
 		    ZyXEL ZyAIR B-200

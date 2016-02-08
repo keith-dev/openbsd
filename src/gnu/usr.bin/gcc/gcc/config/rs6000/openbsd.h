@@ -35,6 +35,26 @@ Boston, MA 02111-1307, USA.  */
     }						\
   while (0)
 
+/* Override the default from rs6000.h to avoid conflicts with macros
+   defined in OpenBSD header files.  */
+
+#undef RS6000_CPU_CPP_ENDIAN_BUILTINS
+#define RS6000_CPU_CPP_ENDIAN_BUILTINS()	\
+  do						\
+    {						\
+      if (BYTES_BIG_ENDIAN)			\
+	{					\
+	  builtin_define ("__BIG_ENDIAN__");	\
+	  builtin_assert ("machine=bigendian");	\
+	}					\
+      else					\
+	{					\
+	  builtin_define ("__LITTLE_ENDIAN__");	\
+	  builtin_assert ("machine=littleendian"); \
+	}					\
+    }						\
+  while (0)
+
 #undef	CPP_OS_DEFAULT_SPEC
 #define CPP_OS_DEFAULT_SPEC "%(cpp_os_openbsd)"
 
@@ -94,7 +114,13 @@ Boston, MA 02111-1307, USA.  */
 /* Some code gets optimized incorrectly by move_movables() in loop.c */
 #define	BROKEN_MOVE_MOVABLES_P
 
-/* some stuff that must agree with ansi.h */
+/* This must agree with <machine/_types.h> */
+#undef SIZE_TYPE
+#define SIZE_TYPE "long unsigned int"
+
+#undef PTRDIFF_TYPE
+#define PTRDIFF_TYPE "long int"
+
 #undef WCHAR_TYPE
 #define WCHAR_TYPE	"int"
 

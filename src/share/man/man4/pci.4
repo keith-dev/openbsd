@@ -1,4 +1,4 @@
-.\"	$OpenBSD: pci.4,v 1.125 2005/08/13 23:17:49 claudio Exp $
+.\"	$OpenBSD: pci.4,v 1.139 2006/02/19 17:29:27 jmc Exp $
 .\"	$NetBSD: pci.4,v 1.29 2000/04/01 00:32:23 tsarna Exp $
 .\"
 .\" Copyright (c) 2000 Theo de Raadt.  All rights reserved.
@@ -245,6 +245,9 @@ PRO/Wireless 2100 IEEE 802.11b wireless network adapters.
 .It Xr iwi 4
 .Tn Intel
 PRO/Wireless 2200BG/2225BG/2915ABG IEEE 802.11a/b/g wireless network adapters.
+.It Xr ixgb 4
+.Tn Intel
+PRO/10GbE Ethernet interfaces.
 .It Xr le 4
 PCNet-PCI Ethernet interfaces.
 .It Xr lge 4
@@ -259,12 +262,14 @@ Myson Technologies
 3-in-1 Fast Ethernet interfaces.
 .It Xr ne 4
 NE2000-compatible Ethernet interfaces.
+.It Xr nfe 4
+NVIDIA nForce MCP Ethernet.
 .It Xr nge 4
 National Semiconductor DP83820 and DP83821 based Gigabit Ethernet.
 .It Xr pcn 4
 AMD PCnet-PCI Ethernet interfaces.
 .It Xr ral 4
-Ralink Technology RT2500 IEEE 802.11a/b/g wireless network adapters.
+Ralink Technology IEEE 802.11a/b/g wireless network adapters.
 .It Xr re 4
 RealTek 8169/8169S/8110S Ethernet interfaces.
 .It Xr rl 4
@@ -379,8 +384,12 @@ Gemtek PCI FM radio device driver.
 .El
 .Ss Miscellaneous devices
 .Bl -tag -width 10n -offset ind -compact
+.It Xr alipm 4
+Acer Labs M7101 Power Management controller.
+.It Xr amdiic 4
+AMD-8111 SMBus controller.
 .It Xr amdpm 4
-AMD768 Power Management controller.
+AMD-76x Power Management controller.
 .It Xr bktr 4
 Brooktree Bt848
 .Tn PCI
@@ -392,12 +401,20 @@ Yenta compatible
 bridges.
 .It Xr ehci 4
 USB EHCI host controller.
+.It Xr ichiic 4
+Intel ICH SMBus controller.
+.It Xr ichwdt 4
+Intel 6300ESB ICH watchdog timer.
+.It Xr nviic 4
+NVIDIA nForce2/3/4 SMBus controller.
 .It Xr ohci 4
 USB OHCI host controller.
 .It Xr pcic 4
 .Tn PCI
 .Tn PCMCIA
 controllers, including the Cirrus Logic GD6729.
+.It Xr piixpm 4
+Intel PIIX and compatible Power Management controller.
 .It Xr ppb 4
 Generic
 .Tn PCI Ns \- Ns Tn PCI
@@ -414,6 +431,8 @@ and
 communications ports.
 .It Xr uhci 4
 USB UHCI host controller.
+.It Xr viapm 4
+VIA VT8233/8235/8237 Bus Control and Power Management controller.
 .It Xr wdt 4
 ICS PCI-WDT500/501 watchdog timer devices.
 .El
@@ -485,6 +504,9 @@ driver.
 .Xr adw 4 ,
 .Xr ahc 4 ,
 .Xr ahd 4 ,
+.Xr alipm 4 ,
+.Xr amdiic 4 ,
+.Xr amdpm 4 ,
 .Xr ami 4 ,
 .Xr an 4 ,
 .Xr apecs 4 ,
@@ -529,6 +551,8 @@ driver.
 .Xr gdt 4 ,
 .Xr gtp 4 ,
 .Xr hifn 4 ,
+.Xr ichiic 4 ,
+.Xr ichwdt 4 ,
 .Xr iha 4 ,
 .Xr intro 4 ,
 .Xr iop 4 ,
@@ -549,9 +573,11 @@ driver.
 .Xr mpt 4 ,
 .Xr ne 4 ,
 .Xr neo 4 ,
+.Xr nfe 4 ,
 .Xr nge 4 ,
 .Xr noct 4 ,
 .Xr nofn 4 ,
+.Xr nviic 4 ,
 .Xr ohci 4 ,
 .Xr options 4 ,
 .Xr pchb 4 ,
@@ -559,6 +585,7 @@ driver.
 .Xr pcic 4 ,
 .Xr pcmcia 4 ,
 .Xr pcscp 4 ,
+.Xr piixpm 4 ,
 .Xr ppb 4 ,
 .Xr psycho 4 ,
 .Xr puc 4 ,
@@ -587,6 +614,7 @@ driver.
 .Xr usb 4 ,
 .Xr vga 4 ,
 .Xr vge 4 ,
+.Xr viapm 4 ,
 .Xr vr 4 ,
 .Xr wb 4 ,
 .Xr wdt 4 ,
@@ -597,7 +625,7 @@ driver.
 The machine-independent
 .Tn PCI
 subsystem appeared in
-.Ox 2.0 .
+.Ox 1.2 .
 Support for device listing and matching was re-implemented by
 Kenneth Merry, and first appeared in
 .Fx 3.0 .

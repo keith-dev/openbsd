@@ -1,4 +1,4 @@
-/*	$OpenBSD: rde_update.c,v 1.39 2005/08/10 08:34:06 claudio Exp $ */
+/*	$OpenBSD: rde_update.c,v 1.49 2006/01/13 13:04:33 claudio Exp $ */
 
 /*
  * Copyright (c) 2004 Claudio Jeker <claudio@openbsd.org>
@@ -17,6 +17,7 @@
  */
 #include <sys/types.h>
 #include <sys/queue.h>
+#include <sys/hash.h>
 
 #include <stdlib.h>
 #include <string.h>
@@ -33,22 +34,22 @@ int		up_set_prefix(u_char *, int, struct bgpd_addr *, u_int8_t);
 
 /* update stuff. */
 struct update_prefix {
-	struct bgpd_addr		 prefix;
-	int				 prefixlen;
-	struct uplist_prefix		*prefix_h;
 	TAILQ_ENTRY(update_prefix)	 prefix_l;
 	RB_ENTRY(update_prefix)		 entry;
+	struct uplist_prefix		*prefix_h;
+	struct bgpd_addr		 prefix;
+	int				 prefixlen;
 };
 
 struct update_attr {
-	u_int32_t			 attr_hash;
-	u_char				*attr;
-	u_int16_t			 attr_len;
-	u_int16_t			 mpattr_len;
-	u_char				*mpattr;
-	struct uplist_prefix		 prefix_h;
 	TAILQ_ENTRY(update_attr)	 attr_l;
 	RB_ENTRY(update_attr)		 entry;
+	struct uplist_prefix		 prefix_h;
+	u_char				*attr;
+	u_char				*mpattr;
+	u_int32_t			 attr_hash;
+	u_int16_t			 attr_len;
+	u_int16_t			 mpattr_len;
 };
 
 void	up_clear(struct uplist_attr *, struct uplist_prefix *);
@@ -253,290 +254,206 @@ up_add(struct rde_peer *peer, struct update_prefix *p, struct update_attr *a)
 	return (0);
 }
 
+int
+up_test_update(struct rde_peer *peer, struct prefix *p)
+{
+	struct bgpd_addr	 addr;
+	struct attr		*attr;
+
+	if (peer->state != PEER_UP)
+		return (-1);
+
+	if (p == NULL)
+		/* no prefix available */
+		return (0);
+
+	if (peer == p->aspath->peer)
+		/* Do not send routes back to sender */
+		return (0);
+
+	pt_getaddr(p->prefix, &addr);
+	switch (addr.af) {
+	case AF_INET:
+		if (peer->capa_announced.mp_v4 == SAFI_NONE &&
+		    peer->capa_received.mp_v6 != SAFI_NONE)
+			return (-1);
+		break;
+	case AF_INET6:
+		if (peer->capa_announced.mp_v6 == SAFI_NONE)
+			return (-1);
+		break;
+	}
+
+	if (peer->conf.ebgp && !aspath_loopfree(p->aspath->aspath,
+	    peer->conf.remote_as)) {
+		/*
+		 * Do not send routes back to sender which would
+		 * cause an aspath loop.
+		 */
+		return (0);
+	}
+
+	if (p->aspath->peer->conf.ebgp == 0 && peer->conf.ebgp == 0) {
+		/*
+		 * route reflector redistribution rules:
+		 * 1. if announce is set                -> announce
+		 * 2. old non-client, new non-client    -> no
+		 * 3. old client, new non-client        -> yes
+		 * 4. old non-client, new client        -> yes
+		 * 5. old client, new client            -> yes
+		 */
+		if (p->aspath->peer->conf.reflector_client == 0 &&
+		    peer->conf.reflector_client == 0 &&
+		    (p->aspath->flags & F_PREFIX_ANNOUNCED) == 0)
+			/* Do not redistribute updates to ibgp peers */
+			return (0);
+	}
+
+	/* announce type handling */
+	switch (peer->conf.announce_type) {
+	case ANNOUNCE_UNDEF:
+	case ANNOUNCE_NONE:
+	case ANNOUNCE_DEFAULT_ROUTE:
+		/*
+		 * no need to withdraw old prefix as this will be
+		 * filtered out as well.
+		 */
+		return (-1);
+	case ANNOUNCE_ALL:
+		break;
+	case ANNOUNCE_SELF:
+		/*
+		 * pass only prefix that have a aspath count
+		 * of zero this is equal to the ^$ regex.
+		 */
+		if (p->aspath->aspath->ascnt != 0)
+			return (0);
+		break;
+	}
+
+	/* well known communities */
+	if (rde_filter_community(p->aspath,
+	    COMMUNITY_WELLKNOWN, COMMUNITY_NO_ADVERTISE))
+		return (0);
+	if (peer->conf.ebgp && rde_filter_community(p->aspath,
+	    COMMUNITY_WELLKNOWN, COMMUNITY_NO_EXPORT))
+		return (0);
+	if (peer->conf.ebgp && rde_filter_community(p->aspath,
+	    COMMUNITY_WELLKNOWN, COMMUNITY_NO_EXPSUBCONFED))
+		return (0);
+
+	/*
+	 * Don't send messages back to originator
+	 * this is not specified in the RFC but seems logical.
+	 */
+	if ((attr = attr_optget(p->aspath, ATTR_ORIGINATOR_ID)) != NULL) {
+		if (memcmp(attr->data, &peer->remote_bgpid,
+		    sizeof(peer->remote_bgpid)) == 0) {
+			/* would cause loop don't send */
+			return (-1);
+		}
+	}
+
+	return (1);
+}
+
+int
+up_generate(struct rde_peer *peer, struct rde_aspath *asp,
+    struct bgpd_addr *addr, u_int8_t prefixlen)
+{
+	struct update_attr		*ua = NULL;
+	struct update_prefix		*up;
+
+	if (asp) {
+		ua = calloc(1, sizeof(struct update_attr));
+		if (ua == NULL)
+			fatal("up_generate_updates");
+
+		if (up_generate_attr(peer, ua, asp, addr->af) == -1) {
+			log_warnx("generation of bgp path attributes failed");
+			free(ua);
+			return (-1);
+		}
+		/*
+		 * use aspath_hash as attr_hash, this may be unoptimal
+		 * but currently I don't care.
+		 */
+		ua->attr_hash = hash32_buf(ua->attr, ua->attr_len, HASHINIT);
+		if (ua->mpattr)
+			ua->attr_hash = hash32_buf(ua->mpattr, ua->mpattr_len,
+			    ua->attr_hash);
+	}
+
+	up = calloc(1, sizeof(struct update_prefix));
+	if (up == NULL)
+		fatal("up_generate_updates");
+	up->prefix = *addr;
+	up->prefixlen = prefixlen;
+
+	if (up_add(peer, up, ua) == -1)
+		return (-1);
+
+	return (0);
+}
+
 void
-up_generate_updates(struct rde_peer *peer,
+up_generate_updates(struct filter_head *rules, struct rde_peer *peer,
     struct prefix *new, struct prefix *old)
 {
-	struct update_attr		*a;
-	struct update_prefix		*p;
-	struct attr			*attr;
-	struct rde_aspath		*fasp;
+	struct rde_aspath		*asp;
 	struct bgpd_addr		 addr;
 
 	if (peer->state != PEER_UP)
 		return;
 
-	if (new == NULL || (new->aspath->nexthop != NULL &&
-	    new->aspath->nexthop->state != NEXTHOP_REACH)) {
-		if (old == NULL)
-			/* new prefix got filtered and no old prefix avail */
-			return;
-
-		if (peer == old->peer)
-			/* Do not send routes back to sender */
+	if (new == NULL) {
+		if (up_test_update(peer, old) != 1)
 			return;
 
 		pt_getaddr(old->prefix, &addr);
-		switch (addr.af) {
-		case AF_INET:
-			if (peer->capa_announced.mp_v4 == SAFI_NONE &&
-			    peer->capa_received.mp_v6 != SAFI_NONE)
-				return;
-			break;
-		case AF_INET6:
-			if (peer->capa_announced.mp_v6 == SAFI_NONE)
-				return;
-			break;
-		}
-
-		if (peer->conf.ebgp &&
-		    !aspath_loopfree(old->aspath->aspath,
-		    peer->conf.remote_as))
-			/*
-			 * Do not send routes back to sender which would
-			 * cause a aspath loop.
-			 */
+		if (rde_filter(NULL, rules, peer, old->aspath, &addr,
+		    old->prefix->prefixlen, old->aspath->peer, DIR_OUT) ==
+		    ACTION_DENY)
 			return;
-
-		if (old->peer->conf.ebgp == 0 && peer->conf.ebgp == 0) {
-			/*
-			 * route reflector redistribution rules:
-			 * 1. if announce is set		-> announce
-			 * 2. old non-client, new non-client	-> no
-			 * 3. old client, new non-client	-> yes
-			 * 4. old non-client, new client	-> yes
-			 * 5. old client, new client		-> yes
-			 */
-			if (old->peer->conf.reflector_client == 0 &&
-			    peer->conf.reflector_client == 0 &&
-			    (old->aspath->flags & F_PREFIX_ANNOUNCED) == 0)
-				/* Do not redistribute updates to ibgp peers */
-				return;
-		}
-
-		/* announce type handling */
-		switch (peer->conf.announce_type) {
-		case ANNOUNCE_UNDEF:
-		case ANNOUNCE_NONE:
-		case ANNOUNCE_DEFAULT_ROUTE:
-			return;
-		case ANNOUNCE_ALL:
-			break;
-		case ANNOUNCE_SELF:
-			/*
-			 * pass only prefix that have a aspath count
-			 * of zero this is equal to the ^$ regex.
-			 */
-			if (old->aspath->aspath->ascnt != 0)
-				return;
-			break;
-		}
-
-		/* well known communities */
-		if (rde_filter_community(old->aspath,
-		    COMMUNITY_WELLKNOWN, COMMUNITY_NO_ADVERTISE))
-			return;
-		if (peer->conf.ebgp && rde_filter_community(old->aspath,
-		    COMMUNITY_WELLKNOWN, COMMUNITY_NO_EXPORT))
-			return;
-		if (peer->conf.ebgp && rde_filter_community(old->aspath,
-		    COMMUNITY_WELLKNOWN, COMMUNITY_NO_EXPSUBCONFED))
-			return;
-
-		/*
-		 * Don't send messages back to originator
-		 * this is not specified in the RFC but seems logical.
-		 */
-		if ((attr = attr_optget(old->aspath,
-		    ATTR_ORIGINATOR_ID)) != NULL) {
-			if (memcmp(attr->data, &peer->remote_bgpid,
-			    sizeof(peer->remote_bgpid)) == 0)
-				/* would cause loop don't send */
-				return;
-		}
-
-		/* copy attributes for output filter */
-		fasp = path_copy(old->aspath);
-
-		/* default override not needed here as this is a withdraw */
-
-		if (rde_filter(peer, fasp, &addr, old->prefix->prefixlen,
-		    old->peer, DIR_OUT) == ACTION_DENY) {
-			path_put(fasp);
-			return;
-		}
-		path_put(fasp);
 
 		/* withdraw prefix */
-		p = calloc(1, sizeof(struct update_prefix));
-		if (p == NULL)
-			fatal("up_generate_updates");
-
-		p->prefix = addr;
-		p->prefixlen = old->prefix->prefixlen;
-		if (up_add(peer, p, NULL) == -1)
-			log_warnx("queuing withdraw failed.");
+		up_generate(peer, NULL, &addr, old->prefix->prefixlen);
 	} else {
-		if (peer == new->peer) {
-			/* Do not send routes back to sender */
-			up_generate_updates(peer, NULL, old);
+		switch (up_test_update(peer, new)) {
+		case 1:
+			break;
+		case 0:
+			up_generate_updates(rules, peer, NULL, old);
+			return;
+		case -1:
 			return;
 		}
 
 		pt_getaddr(new->prefix, &addr);
-		switch (addr.af) {
-		case AF_INET:
-			if (peer->capa_announced.mp_v4 == SAFI_NONE &&
-			    peer->capa_received.mp_v6 != SAFI_NONE)
-				return;
-			break;
-		case AF_INET6:
-			if (peer->capa_announced.mp_v6 == SAFI_NONE)
-				return;
-			break;
-		}
-
-		if (peer->conf.ebgp &&
-		    !aspath_loopfree(new->aspath->aspath,
-		    peer->conf.remote_as)) {
-			/*
-			 * Do not send routes back to sender which would
-			 * cause a aspath loop.
-			 */
-			up_generate_updates(peer, NULL, old);
+		if (rde_filter(&asp, rules, peer, new->aspath, &addr,
+		    new->prefix->prefixlen, new->aspath->peer, DIR_OUT) ==
+		    ACTION_DENY) {
+			path_put(asp);
+			up_generate_updates(rules, peer, NULL, old);
 			return;
-		}
-
-		if (new->peer->conf.ebgp == 0 && peer->conf.ebgp == 0) {
-			/*
-			 * route reflector redistribution rules:
-			 * 1. if announce is set		-> announce
-			 * 2. old non-client, new non-client	-> no
-			 * 3. old client, new non-client	-> yes
-			 * 4. old non-client, new client	-> yes
-			 * 5. old client, new client		-> yes
-			 */
-			if (new->peer->conf.reflector_client == 0 &&
-			    peer->conf.reflector_client == 0 &&
-			    (new->aspath->flags & F_PREFIX_ANNOUNCED) == 0) {
-				/* Do not redistribute updates to ibgp peers */
-				up_generate_updates(peer, NULL, old);
-				return;
-			}
-		}
-
-		/* announce type handling */
-		switch (peer->conf.announce_type) {
-		case ANNOUNCE_UNDEF:
-		case ANNOUNCE_NONE:
-		case ANNOUNCE_DEFAULT_ROUTE:
-			/*
-			 * no need to withdraw old prefix as this will be
-			 * filtered out to.
-			 */
-			return;
-		case ANNOUNCE_ALL:
-			break;
-		case ANNOUNCE_SELF:
-			/*
-			 * pass only prefix that have a aspath count
-			 * of zero this is equal to the ^$ regex.
-			 */
-			if (new->aspath->aspath->ascnt != 0) {
-				up_generate_updates(peer, NULL, old);
-				return;
-			}
-			break;
-		}
-
-		/* well known communities */
-		if (rde_filter_community(new->aspath,
-		    COMMUNITY_WELLKNOWN, COMMUNITY_NO_ADVERTISE)) {
-			up_generate_updates(peer, NULL, old);
-			return;
-		}
-		if (peer->conf.ebgp && rde_filter_community(new->aspath,
-		    COMMUNITY_WELLKNOWN, COMMUNITY_NO_EXPORT)) {
-			up_generate_updates(peer, NULL, old);
-			return;
-		}
-		if (peer->conf.ebgp && rde_filter_community(new->aspath,
-		    COMMUNITY_WELLKNOWN, COMMUNITY_NO_EXPSUBCONFED)) {
-			up_generate_updates(peer, NULL, old);
-			return;
-		}
-
-		/* copy attributes for output filter */
-		fasp = path_copy(new->aspath);
-
-		/*
-		 * apply default outgoing overrides,
-		 * actually only prepend-self and nexthop no-modify
-		 */
-		rde_apply_set(fasp, &peer->conf.attrset, new->prefix->af,
-		    new->aspath->peer, DIR_DEFAULT_OUT);
-
-		if (rde_filter(peer, fasp, &addr, new->prefix->prefixlen,
-		    new->peer, DIR_OUT) == ACTION_DENY) {
-			path_put(fasp);
-			up_generate_updates(peer, NULL, old);
-			return;
-		}
-
-		/*
-		 * Don't send messages back to originator
-		 * this is not specified in the RFC but seems logical.
-		 */
-		if ((attr = attr_optget(new->aspath,
-		    ATTR_ORIGINATOR_ID)) != NULL) {
-			if (memcmp(attr->data, &peer->remote_bgpid,
-			    sizeof(peer->remote_bgpid)) == 0) {
-				/* would cause loop don't send */
-				path_put(fasp);
-				return;
-			}
 		}
 
 		/* generate update */
-		p = calloc(1, sizeof(struct update_prefix));
-		if (p == NULL)
-			fatal("up_generate_updates");
-
-		a = calloc(1, sizeof(struct update_attr));
-		if (a == NULL)
-			fatal("up_generate_updates");
-
-		if (up_generate_attr(peer, a, fasp, addr.af) == -1) {
-			log_warnx("generation of bgp path attributes failed");
-			free(a);
-			free(p);
-			return;
-		}
-
-		/*
-		 * use aspath_hash as attr_hash, this may be unoptimal
-		 * but currently I don't care.
-		 */
-		a->attr_hash = aspath_hash(fasp->aspath->data,
-		    fasp->aspath->len);
-		p->prefix = addr;
-		p->prefixlen = new->prefix->prefixlen;
-
-		/* no longer needed */
-		path_put(fasp);
-
-		if (up_add(peer, p, a) == -1)
-			log_warnx("queuing update failed.");
+		if (asp != NULL) {
+			up_generate(peer, asp, &addr, new->prefix->prefixlen);
+			path_put(asp);
+		} else
+			up_generate(peer, new->aspath, &addr,
+			    new->prefix->prefixlen);
 	}
 }
 
 /* send a default route to the specified peer */
 void
-up_generate_default(struct rde_peer *peer, sa_family_t af)
+up_generate_default(struct filter_head *rules, struct rde_peer *peer,
+    sa_family_t af)
 {
-	struct update_attr	*a;
-	struct update_prefix	*p;
-	struct rde_aspath	*asp;
+	struct rde_aspath	*asp, *fasp;
 	struct bgpd_addr	 addr;
 
 	if (peer->capa_received.mp_v4 == SAFI_NONE &&
@@ -557,59 +474,28 @@ up_generate_default(struct rde_peer *peer, sa_family_t af)
 	 * XXX apply default overrides. Not yet possible, mainly a parse.y
 	 * problem.
 	 */
+	/* rde_apply_set(asp, set, af, NULL ???, DIR_IN); */
 
 	/* filter as usual */
 	bzero(&addr, sizeof(addr));
 	addr.af = af;
-	/*
-	 * XXX we should pass peerself here. This will be fixed with the
-	 * apply default overrides.
-	 */
-	if (rde_filter(peer, asp, &addr, 0, NULL, DIR_OUT) == ACTION_DENY) {
+
+	if (rde_filter(&fasp, rules, peer, asp, &addr, 0, NULL, DIR_OUT) ==
+	    ACTION_DENY) {
+		path_put(fasp);
 		path_put(asp);
 		return;
 	}
 
 	/* generate update */
-	p = calloc(1, sizeof(struct update_prefix));
-	if (p == NULL)
-		fatal("up_generate_default");
-
-	a = calloc(1, sizeof(struct update_attr));
-	if (a == NULL)
-		fatal("up_generate_default");
-
-	if (up_generate_attr(peer, a, asp, af) == -1) {
-		log_warnx("generation of bgp path attributes failed");
-		free(a);
-		free(p);
-		return;
-	}
-
-	/*
-	 * use aspath_hash as attr_hash, this may be unoptimal
-	 * but currently I don't care.
-	 */
-	a->attr_hash = aspath_hash(asp->aspath->data, asp->aspath->len);
-	p->prefix = addr;
-	p->prefixlen = 0; /* default route */
+	if (fasp != NULL)
+		up_generate(peer, fasp, &addr, 0);
+	else
+		up_generate(peer, asp, &addr, 0);
 
 	/* no longer needed */
+	path_put(fasp);
 	path_put(asp);
-
-	if (up_add(peer, p, a) == -1)
-		log_warnx("queuing update failed.");
-
-}
-
-void
-up_dump_upcall(struct pt_entry *pt, void *ptr)
-{
-	struct rde_peer	*peer = ptr;
-
-	if (pt->active == NULL)
-		return;
-	up_generate_updates(peer, pt->active, NULL);
 }
 
 u_char	up_attr_buf[4096];
@@ -738,6 +624,7 @@ up_generate_attr(struct rde_peer *peer, struct update_attr *upa,
 	in_addr_t	 nexthop;
 	int		 r, ismp = 0;
 	u_int16_t	 len = sizeof(up_attr_buf), wlen = 0;
+	u_int8_t	 l;
 
 	/* origin */
 	if ((r = attr_write(up_attr_buf + wlen, len, ATTR_WELL_KNOWN,
@@ -801,7 +688,9 @@ up_generate_attr(struct rde_peer *peer, struct update_attr *upa,
 	 *  3. transitive known attrs: announce unmodified
 	 *  4. transitive unknown attrs: set partial bit and re-announce
 	 */
-	TAILQ_FOREACH(oa, &a->others, entry) {
+	for (l = 0; l < a->others_len; l++) {
+		if ((oa = a->others[l]) == NULL)
+			break;
 		switch (oa->type) {
 		case ATTR_ATOMIC_AGGREGATE:
 			if ((r = attr_write(up_attr_buf + wlen, len,
@@ -1043,7 +932,7 @@ up_dump_mp_reach(u_char *buf, u_int16_t *len, struct rde_peer *peer)
 	datalen += upa->mpattr_len;
 	wpos -= upa->mpattr_len;
 	memcpy(buf + wpos, upa->mpattr, upa->mpattr_len);
-	
+
 	if (datalen > 255) {
 		wpos -= 2;
 		tmp = htons(datalen);

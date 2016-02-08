@@ -1,4 +1,4 @@
-/*	$OpenBSD: rde_lsdb.c,v 1.19 2005/08/08 12:22:48 claudio Exp $ */
+/*	$OpenBSD: rde_lsdb.c,v 1.27 2006/02/23 16:16:27 norby Exp $ */
 
 /*
  * Copyright (c) 2004, 2005 Claudio Jeker <claudio@openbsd.org>
@@ -68,12 +68,14 @@ struct vertex *
 vertex_get(struct lsa *lsa, struct rde_nbr *nbr)
 {
 	struct vertex	*v;
+	struct timespec	 tp;
 
 	if ((v = calloc(1, sizeof(struct vertex))) == NULL)
 		fatal(NULL);
 	v->nbr = nbr;
 	v->lsa = lsa;
-	v->changed = v->stamp = time(NULL);
+	clock_gettime(CLOCK_MONOTONIC, &tp);
+	v->changed = v->stamp = tp.tv_sec;
 	v->cost = LS_INFINITY;
 	v->ls_id = ntohl(lsa->hdr.ls_id);
 	v->adv_rtr = ntohl(lsa->hdr.adv_rtr);
@@ -133,6 +135,8 @@ lsa_newer(struct lsa_hdr *a, struct lsa_hdr *b)
 	a16 = ntohs(a->age);
 	b16 = ntohs(b->age);
 
+	if (a16 >= MAX_AGE && b16 >= MAX_AGE)
+		return (0);
 	if (b16 >= MAX_AGE)
 		return (-1);
 	if (a16 >= MAX_AGE)
@@ -340,14 +344,19 @@ lsa_add(struct rde_nbr *nbr, struct lsa *lsa)
 	old = RB_INSERT(lsa_tree, tree, new);
 
 	if (old != NULL) {
-		if (!lsa_equal(new->lsa, old->lsa))
+		if (!lsa_equal(new->lsa, old->lsa)) {
+			if (lsa->hdr.type != LSA_TYPE_EXTERNAL)
+				nbr->area->dirty = 1;
 			start_spf_timer();
+		}
 		RB_REMOVE(lsa_tree, tree, old);
 		vertex_free(old);
 		RB_INSERT(lsa_tree, tree, new);
-	} else
+	} else {
+		if (lsa->hdr.type != LSA_TYPE_EXTERNAL)
+			nbr->area->dirty = 1;
 		start_spf_timer();
-
+	}
 
 	/* timeout handling either MAX_AGE or LS_REFRESH_TIME */
 	timerclear(&tv);
@@ -385,12 +394,18 @@ lsa_del(struct rde_nbr *nbr, struct lsa_hdr *lsa)
 void
 lsa_age(struct vertex *v)
 {
+	struct timespec	tp;
 	time_t		now;
 	int		d;
 	u_int16_t	age;
 
-	now = time(NULL);
+	clock_gettime(CLOCK_MONOTONIC, &tp);
+	now = tp.tv_sec;
+
 	d = now - v->stamp;
+	/* set stamp so that at least new calls work */
+	v->stamp = now;
+
 	if (d < 0) {
 		log_warnx("lsa_age: time went backwards");
 		return;
@@ -403,7 +418,6 @@ lsa_age(struct vertex *v)
 		age += d;
 
 	v->lsa->hdr.age = htons(age);
-	v->stamp = now;
 }
 
 struct vertex *
@@ -549,6 +563,7 @@ void
 lsa_refresh(struct vertex *v)
 {
 	struct timeval	 tv;
+	struct timespec	 tp;
 	u_int32_t	 seqnum;
 	u_int16_t	 len;
 
@@ -565,7 +580,9 @@ lsa_refresh(struct vertex *v)
 	v->lsa->hdr.ls_chksum = 0;
 	v->lsa->hdr.ls_chksum = htons(iso_cksum(v->lsa, len, LS_CKSUM_OFFSET));
 
-	v->changed = v->stamp = time(NULL);
+	clock_gettime(CLOCK_MONOTONIC, &tp);
+	v->changed = v->stamp = tp.tv_sec;
+
 	timerclear(&tv);
 	tv.tv_sec = LS_REFRESH_TIME;
 	evtimer_add(&v->ev, &tv);
@@ -575,7 +592,9 @@ void
 lsa_merge(struct rde_nbr *nbr, struct lsa *lsa, struct vertex *v)
 {
 	struct timeval	tv;
+	struct timespec	tp;
 	time_t		now;
+	u_int16_t	len;
 
 	if (v == NULL) {
 		lsa_add(nbr, lsa);
@@ -586,6 +605,10 @@ lsa_merge(struct rde_nbr *nbr, struct lsa *lsa, struct vertex *v)
 
 	/* set the seq_num to the current one. lsa_refresh() will do the ++ */
 	lsa->hdr.seq_num = v->lsa->hdr.seq_num;
+	/* recalculate checksum */
+	len = ntohs(lsa->hdr.len);
+	lsa->hdr.ls_chksum = 0;
+	lsa->hdr.ls_chksum = htons(iso_cksum(lsa, len, LS_CKSUM_OFFSET));
 
 	/* compare LSA most header fields are equal so don't check them */
 	if (lsa_equal(lsa, v->lsa)) {
@@ -597,12 +620,15 @@ lsa_merge(struct rde_nbr *nbr, struct lsa *lsa, struct vertex *v)
 	free(v->lsa);
 	v->lsa = lsa;
 	start_spf_timer();
+	if (lsa->hdr.type != LSA_TYPE_EXTERNAL)
+		nbr->area->dirty = 1;
 
 	/* set correct timeout for reflooding the LSA */
-	now = time(NULL);
+	clock_gettime(CLOCK_MONOTONIC, &tp);
+	now = tp.tv_sec;
 	timerclear(&tv);
-	if (v->changed + MIN_LS_ARRIVAL >= now)
-		tv.tv_sec = MIN_LS_ARRIVAL;
+	if (v->changed + MIN_LS_INTERVAL >= now)
+		tv.tv_sec = MIN_LS_INTERVAL;
 	evtimer_add(&v->ev, &tv);
 }
 

@@ -1,4 +1,4 @@
-/*	$OpenBSD: sh.h,v 1.27 2005/03/28 21:33:04 deraadt Exp $	*/
+/*	$OpenBSD: sh.h,v 1.29 2005/12/11 18:53:51 deraadt Exp $	*/
 
 /*
  * Public Domain Bourne/Korn shell
@@ -68,7 +68,7 @@ typedef INT32 Tflag;
 
 #define	LINE	2048		/* input line size */
 #define	PATH	1024		/* pathname size (todo: PATH_MAX/pathconf()) */
-#define ARRAYMAX 1023		/* max array index */
+#define ARRAYMAX 2047		/* max array index */
 
 EXTERN	const char *kshname;	/* $0 */
 EXTERN	pid_t	kshpid;		/* $$, shell pid */
@@ -221,7 +221,6 @@ EXTERN	char shell_flags [FNFLAGS];
 EXTERN	char	null [] I__("");	/* null value for variable */
 EXTERN	char	space [] I__(" ");
 EXTERN	char	newline [] I__("\n");
-EXTERN	char	slash [] I__("/");
 
 enum temp_type {
 	TT_HEREDOC_EXP,	/* expanded heredoc */

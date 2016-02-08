@@ -1,4 +1,4 @@
-/*	$OpenBSD: rde.h,v 1.20 2005/08/08 12:22:48 claudio Exp $ */
+/*	$OpenBSD: rde.h,v 1.26 2006/02/24 21:06:47 norby Exp $ */
 
 /*
  * Copyright (c) 2004, 2005 Esben Norby <norby@openbsd.org>
@@ -62,12 +62,6 @@ struct rde_nbr {
 	int				 self;
 };
 
-struct rde_asext {
-	LIST_ENTRY(rde_asext)	 entry;
-	struct kroute		 kr;
-	int			 used;
-};
-
 struct rt_node {
 	RB_ENTRY(rt_node)	 entry;
 	struct in_addr		 prefix;
@@ -76,6 +70,7 @@ struct rt_node {
 	struct in_addr		 adv_rtr;
 	u_int32_t		 cost;
 	u_int32_t		 cost2;
+	time_t			 uptime;
 	enum path_type		 p_type;
 	enum dst_type		 d_type;
 	u_int8_t		 flags;
@@ -125,6 +120,8 @@ void		 lsa_remove_invalid_sums(struct area *);
 
 /* rde_spf.c */
 void		 spf_calc(struct area *);
+void		 rt_calc(struct vertex *, struct area *, struct ospfd_conf *);
+void		 asext_calc(struct vertex *);
 void		 spf_tree_clr(struct area *);
 
 void		 cand_list_init(void);
@@ -132,7 +129,6 @@ void		 cand_list_add(struct vertex *);
 struct vertex	*cand_list_pop(void);
 int		 cand_list_present(struct vertex *);
 void		 cand_list_clr(void);
-int		 cand_list_empty(void);
 
 void		 spf_timer(int, short, void *);
 int		 start_spf_timer(void);

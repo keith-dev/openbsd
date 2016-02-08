@@ -1,4 +1,4 @@
-/*	$OpenBSD: ami_pci.c,v 1.30 2005/08/24 19:21:40 marco Exp $	*/
+/*	$OpenBSD: ami_pci.c,v 1.35 2005/12/13 12:13:59 dlg Exp $	*/
 
 /*
  * Copyright (c) 2001 Michael Shalayeff
@@ -75,7 +75,6 @@ struct	ami_pci_device {
 	int	vendor;
 	int	product;
 	int	flags;
-#define	AMI_CHECK_SIGN	0x001
 } ami_pci_devices[] = {
 	{ PCI_VENDOR_AMI,	PCI_PRODUCT_AMI_MEGARAID,	0 },
 	{ PCI_VENDOR_AMI,	PCI_PRODUCT_AMI_MEGARAID428,	AMI_BROKEN },
@@ -94,21 +93,24 @@ struct	ami_pci_device {
 
 static const
 struct	ami_pci_subsys {
-	pcireg_t id;
-	char	name[14];
+	pcireg_t	id;
+	const char	*name;
+	int		flags;
 } ami_pci_subsys[] = {
-	/* only those of a special name are listed here */
-	{ 0x09A0101E,	"Dell 466v1" },
-	{ 0x11111111,	"Dell 466v2" },
-	{ 0x11121111,	"Dell 438" },
-	{ 0x11111028,	"Dell 466v3" },
-	{ 0x10c6103c,	"HP 438" },
-	{ 0x10c7103c,	"HP T5/T6" },
-	{ 0x10cc103c,	"HP T7" },
-	{ 0x10cd103c,	"HP 466" },
-	{ 0x45231000,	"LSI 523" },
-	{ 0x05328086,	"Intel SRCU42X" },
-	{ 0 }
+	/* only those of a special name or quirk are listed here */
+	{ 0x0511101e,	"AMI MegaRAID i4", AMI_BROKEN },
+	{ 0x04931028,	"Dell PERC3/DC", 0 },
+	{ 0x09A0101E,	"Dell 466v1", 0 },
+	{ 0x11111111,	"Dell 466v2", 0 },
+	{ 0x11121111,	"Dell 438", 0 },
+	{ 0x11111028,	"Dell 466v3", 0 },
+	{ 0x10c6103c,	"HP 438", 0 },
+	{ 0x10c7103c,	"HP T5/T6", 0 },
+	{ 0x10cc103c,	"HP T7", 0 },
+	{ 0x10cd103c,	"HP 466", 0 },
+	{ 0x45231000,	"LSI 523", 0 },
+	{ 0x05328086,	"Intel SRCU42X", 0 },
+	{ 0, NULL, 0 }
 };
 
 static const
@@ -124,9 +126,8 @@ struct ami_pci_vendor {
 	{ 0 }
 };
 
-int ami_pci_find_device(aux)
-	void *aux;
-{
+int
+ami_pci_find_device(void *aux) {
 	int i;
 	struct pci_attach_args *pa = aux;
 
@@ -144,10 +145,7 @@ int ami_pci_find_device(aux)
 }
 
 int
-ami_pci_match(parent, match, aux)
-	struct device *parent;
-	void *match;
-	void *aux;
+ami_pci_match(struct device *parent, void *match, void *aux)
 {
 	struct pci_attach_args *pa = aux;
 	int i;
@@ -177,9 +175,7 @@ ami_pci_match(parent, match, aux)
 }
 
 void
-ami_pci_attach(parent, self, aux)
-	struct device *parent, *self;
-	void *aux;
+ami_pci_attach(struct device *parent, struct device *self, void *aux)
 {
 	struct ami_softc *sc = (struct ami_softc *)self;
 	struct pci_attach_args *pa = aux;
@@ -198,7 +194,7 @@ ami_pci_attach(parent, self, aux)
 	csr = pci_mapreg_type(pa->pa_pc, pa->pa_tag, AMI_BAR);
 	csr |= PCI_MAPREG_MEM_TYPE_32BIT;
 	if (pci_mapreg_map(pa, AMI_BAR, csr, 0,
-	    &sc->iot, &sc->ioh, NULL, &size, AMI_PCI_MEMSIZE)) {
+	    &sc->sc_iot, &sc->sc_ioh, NULL, &size, AMI_PCI_MEMSIZE)) {
 		printf(": can't map controller pci space\n");
 		return;
 	}
@@ -215,11 +211,11 @@ ami_pci_attach(parent, self, aux)
 		sc->sc_poll = ami_quartz_poll;
 		sc->sc_flags |= AMI_QUARTZ;
 	}
-	sc->dmat = pa->pa_dmat;
+	sc->sc_dmat = pa->pa_dmat;
 
 	if (pci_intr_map(pa, &ih)) {
 		printf(": can't map interrupt\n");
-		bus_space_unmap(sc->iot, sc->ioh, size);
+		bus_space_unmap(sc->sc_iot, sc->sc_ioh, size);
 		return;
 	}
 	intrstr = pci_intr_string(pa->pa_pc, ih);
@@ -230,19 +226,22 @@ ami_pci_attach(parent, self, aux)
 		if (intrstr)
 			printf(" at %s", intrstr);
 		printf("\n");
-		bus_space_unmap(sc->iot, sc->ioh, size);
+		bus_space_unmap(sc->sc_iot, sc->sc_ioh, size);
+		return;
 	}
 
 	printf(": %s", intrstr);
 
 	csr = pci_conf_read(pa->pa_pc, pa->pa_tag, PCI_SUBSYS_ID_REG);
-	for (ssp = ami_pci_subsys; ssp->id; ssp++)
+	for (ssp = ami_pci_subsys; ssp->id; ssp++) {
 		if (ssp->id == csr) {
 			model = ssp->name;
+			sc->sc_flags |= ssp->flags;
 			break;
 		}
+	}
 
-	if (!model && PCI_VENDOR(pa->pa_id) == PCI_VENDOR_AMI)
+	if (!model && PCI_VENDOR(pa->pa_id) == PCI_VENDOR_AMI) {
 		switch (PCI_PRODUCT(pa->pa_id)) {
 		case PCI_PRODUCT_AMI_MEGARAID428:
 			model = "AMI 428";
@@ -251,10 +250,12 @@ ami_pci_attach(parent, self, aux)
 			model = "AMI 434";
 			break;
 		}
+	}
 
-	/* XXX 438 is netraid 3si for hp cards, but we get to know
-	   they are hp too late in md code */
-
+	/*
+	 * XXX 438 is netraid 3si for hp cards, but we get to know
+	 * they are hp too late in md code
+	 */
 	if (!model) {
 		const struct ami_pci_vendor *vp;
 		static char modelbuf[32];
@@ -262,10 +263,10 @@ ami_pci_attach(parent, self, aux)
 		for (vp = ami_pci_vendors;
 		     vp->id && vp->id != (csr & 0xffff); vp++);
 		if (vp->id)
-			snprintf(modelbuf, sizeof modelbuf, "%s %x", vp->name,
+			snprintf(modelbuf, sizeof(modelbuf), "%s %x", vp->name,
 			    (csr >> 16) & 0xffff);
 		else
-			snprintf(modelbuf, sizeof modelbuf, "unknown 0x%08x",
+			snprintf(modelbuf, sizeof(modelbuf), "unknown 0x%08x",
 			    csr);
 		model = modelbuf;
 	}
@@ -279,17 +280,16 @@ ami_pci_attach(parent, self, aux)
 	if ((i = ami_pci_find_device(aux)) != -1) {
 		if (ami_pci_devices[i].flags & AMI_BROKEN)
 			sc->sc_flags |= AMI_BROKEN;
-	}
-	else {
+	} else {
 		/* this device existed at _match() should never happen */
 		panic("ami device dissapeared between match() and attach()");
 	}
 
-	printf(" %s/%s\n%s", model, lhc, sc->sc_dev.dv_xname);
+	printf(" %s %s\n%s", model, lhc, sc->sc_dev.dv_xname);
 
 	if (ami_attach(sc)) {
 		pci_intr_disestablish(pa->pa_pc, sc->sc_ih);
 		sc->sc_ih = NULL;
-		bus_space_unmap(sc->iot, sc->ioh, size);
+		bus_space_unmap(sc->sc_iot, sc->sc_ioh, size);
 	}
 }

@@ -1,4 +1,4 @@
-/* $OpenBSD: message.c,v 1.114 2005/07/20 16:50:43 moritz Exp $	 */
+/* $OpenBSD: message.c,v 1.116 2005/10/25 10:38:01 hshoexer Exp $	 */
 /* $EOM: message.c,v 1.156 2000/10/10 12:36:39 provos Exp $	 */
 
 /*
@@ -1731,6 +1731,9 @@ message_send_delete(struct sa *sa)
 	struct sa      *isakmp_sa;
 	struct sockaddr *dst;
 
+	if (!sa->transport)
+		return;
+
 	sa->transport->vtbl->get_dst(sa->transport, &dst);
 	isakmp_sa = sa_isakmp_lookup_by_peer(dst, SA_LEN(dst));
 	if (!isakmp_sa) {
@@ -1745,13 +1748,24 @@ message_send_delete(struct sa *sa)
 	args.u.d.nspis = 1;
 	for (proto = TAILQ_FIRST(&sa->protos); proto;
 	    proto = TAILQ_NEXT(proto, link)) {
-		if (proto->proto == ISAKMP_PROTO_ISAKMP) {
+		switch (proto->proto) {
+		case ISAKMP_PROTO_ISAKMP:
 			args.spi_sz = ISAKMP_HDR_COOKIES_LEN;
 			args.u.d.spis = sa->cookies;
-		} else {
+			break;
+
+		case IPSEC_PROTO_IPSEC_AH:
+		case IPSEC_PROTO_IPSEC_ESP:
+		case IPSEC_PROTO_IPCOMP:
 			args.spi_sz = proto->spi_sz[1];
 			args.u.d.spis = proto->spi[1];
+			break;
+		default:
+			log_print("message_send_delete: cannot delete unknown "
+			    "protocol %d", proto->proto);
+			continue;
 		}
+
 		args.proto = proto->proto;
 		exchange_establish_p2(isakmp_sa, ISAKMP_EXCH_INFO, 0, &args,
 		    0, 0);

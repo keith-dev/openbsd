@@ -1,4 +1,4 @@
-/*	$OpenBSD: init.c,v 1.19 2005/07/25 12:05:43 xsa Exp $	*/
+/*	$OpenBSD: init.c,v 1.22 2006/02/10 10:15:48 xsa Exp $	*/
 /*
  * Copyright (c) 2004 Jean-Francois Brousseau <jfb@openbsd.org>
  * All rights reserved.
@@ -24,15 +24,7 @@
  * ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include <sys/param.h>
-#include <sys/stat.h>
-
-#include <errno.h>
-#include <fcntl.h>
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-#include <unistd.h>
+#include "includes.h"
 
 #include "cvs.h"
 #include "log.h"
@@ -58,14 +50,14 @@ struct cvsroot_file {
 	{ CVS_PATH_HISTORY,     CFT_FILE, (S_IRUSR|S_IWUSR|S_IRGRP|S_IROTH) },
 	{ CVS_PATH_LOGINFO,     CFT_FILE, (S_IRUSR|S_IWUSR|S_IRGRP|S_IROTH) },
 	{ CVS_PATH_MODULES,     CFT_FILE, (S_IRUSR|S_IWUSR|S_IRGRP|S_IROTH) },
-	{ CVS_PATH_NOTIFY,      CFT_FILE, (S_IRUSR|S_IWUSR|S_IRGRP|S_IROTH) },
+	{ CVS_PATH_NOTIFY_R,    CFT_FILE, (S_IRUSR|S_IWUSR|S_IRGRP|S_IROTH) },
 	{ CVS_PATH_RCSINFO,     CFT_FILE, (S_IRUSR|S_IWUSR|S_IRGRP|S_IROTH) },
 	{ CVS_PATH_TAGINFO,     CFT_FILE, (S_IRUSR|S_IWUSR|S_IRGRP|S_IROTH) },
 	{ CVS_PATH_VERIFYMSG,   CFT_FILE, (S_IRUSR|S_IWUSR|S_IRGRP|S_IROTH) },
 };
 
 static int	cvs_init_pre_exec(struct cvsroot *);
-static int	cvs_init_create_files(struct cvsroot *);
+static void	cvs_init_create_files(struct cvsroot *);
 
 struct cvs_cmd cvs_cmd_init = {
 	CVS_OP_INIT, CVS_REQ_INIT, "init",
@@ -93,10 +85,8 @@ struct cvs_cmd cvs_cmd_init = {
 static int
 cvs_init_pre_exec(struct cvsroot *root)
 {
-	if (root->cr_method == CVS_METHOD_LOCAL) {
-		if (cvs_init_create_files(root) < 0)
-			return (CVS_EX_FILE);
-	}
+	if (root->cr_method == CVS_METHOD_LOCAL)
+		cvs_init_create_files(root);
 
 	return (0);
 }
@@ -109,7 +99,7 @@ cvs_init_pre_exec(struct cvsroot *root)
  * Returns 0 on success, -1 on failure.
  *
  */
-static int
+static void
 cvs_init_create_files(struct cvsroot *root)
 {
 	size_t len;
@@ -123,9 +113,8 @@ cvs_init_create_files(struct cvsroot *root)
 	if (mkdir(root->cr_dir, 0777) == -1) {
 		if (!(errno == EEXIST || (errno == EACCES &&
 		    (stat(root->cr_dir, &st) == 0) && S_ISDIR(st.st_mode)))) {
-			cvs_log(LP_ERRNO, "cannot make directory %s",
-			    root->cr_dir);
-			return (CVS_EX_FILE);
+			fatal("cvs_init_create_files: mkdir: %s: %s",
+			    root->cr_dir, strerror(errno));
 		}
 	}
 
@@ -134,38 +123,32 @@ cvs_init_create_files(struct cvsroot *root)
 		len = cvs_path_cat(root->cr_dir, cvsroot_files[i].cf_path,
 		    path, sizeof(path));
 		if (len >= sizeof(path))
-			return (-1);
+			fatal("cvs_init_create_files: path truncation");
 
 		if (cvsroot_files[i].cf_type == CFT_DIR) {
 			if (mkdir(path, cvsroot_files[i].cf_mode) == -1) {
 				if (!(errno == EEXIST || (errno == EACCES &&
 				    (stat(path, &st) == 0) &&
 				    S_ISDIR(st.st_mode)))) {
-					cvs_log(LP_ERRNO,
-					    "cannot make directory %s", path);
-					return (CVS_EX_FILE);
+					fatal("cvs_init_create_files: mkdir: "
+					    "%s: %s", path, strerror(errno));
 				}
 			}
 		} else if (cvsroot_files[i].cf_type == CFT_FILE) {
 			fd = open(path, O_WRONLY|O_CREAT|O_EXCL,
 			    cvsroot_files[i].cf_mode);
-			if (fd == -1) {
-				cvs_log(LP_ERRNO, "failed to create `%s'",
-				    path);
-				return (CVS_EX_FILE);
-			}
+			if (fd == -1)
+				fatal("cvs_init_create_file: open failed: %s",
+				    strerror(errno));
 
 			(void)close(fd);
 
 			strlcat(path, RCS_FILE_EXT, sizeof(path));
 			rfp = rcs_open(path, RCS_WRITE|RCS_CREATE, 0640);
-			if (rfp == NULL) {
-				return (CVS_EX_DATA);
-			}
+			if (rfp == NULL)
+				return;
 
 			rcs_close(rfp);
 		}
 	}
-
-	return (0);
 }

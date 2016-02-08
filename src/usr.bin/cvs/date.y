@@ -1,5 +1,5 @@
 %{
-/*	$OpenBSD: date.y,v 1.8 2005/05/20 17:15:49 jfb Exp $	*/
+/*	$OpenBSD: date.y,v 1.11 2006/01/02 08:11:56 xsa Exp $	*/
 
 /*
 **  Originally written by Steven M. Bellovin <smb@research.att.com> while
@@ -14,15 +14,7 @@
 /* SUPPRESS 287 on yaccpar_sccsid *//* Unused static variable */
 /* SUPPRESS 288 on yyerrlab *//* Label unused */
 
-#include <sys/types.h>
-#include <sys/timeb.h>
-
-#include <ctype.h>
-#include <stdio.h>
-#include <stdarg.h>
-#include <stdlib.h>
-#include <string.h>
-#include <time.h>
+#include "includes.h"
 
 #include "log.h"
 #include "cvs.h"
@@ -79,7 +71,7 @@ static time_t	yyRelMonth;
 static time_t	yyRelSeconds;
 
 
-static int   yyerror   (const char *, ...);
+static int   yyerror   (const char *);
 static int   yylex     (void);
 static int   yyparse   (void);
 static int   lookup    (char *);
@@ -488,20 +480,27 @@ static TABLE const MilitaryTable[] = {
 };
 
 
-/* ARGSUSED */
 static int
-yyerror(const char *fmt, ...)
+yyerror(const char *s)
 {
-	va_list vap;
+	char *str;
+	int n;
 
-	va_start(vap, fmt);
+	if (isspace(yyInput[0]) || !isprint(yyInput[0]))
+		n = asprintf(&str, "%s: unexpected char 0x%02x in date string",
+		    s, yyInput[0]);
+	else
+		n = asprintf(&str, "%s: unexpected %s in date string",
+		    s, yyInput);
+	if (n == -1)
+		return (0);
+
 #if defined(TEST)
-	vprintf(fmt, vap);
+	printf("%s", str);
 #else
-	cvs_vlog(LP_ERR, fmt, vap);
+	cvs_log(LP_ERR, "%s", str);
 #endif
-	va_end(vap);
-
+	free(str);
 	return (0);
 }
 
@@ -530,7 +529,7 @@ ToSeconds(time_t Hours, time_t Minutes, time_t	Seconds, MERIDIAN Meridian)
 			Hours = 0;
 		return ((Hours + 12) * 60L + Minutes) * 60L + Seconds;
 	default:
-		abort ();
+		abort();
 	}
 	/* NOTREACHED */
 }
@@ -795,15 +794,14 @@ difftm(struct tm *a, struct tm *b)
 	int ay = a->tm_year + (YEAR_TMORIGIN - 1);
 	int by = b->tm_year + (YEAR_TMORIGIN - 1);
 	int days = (
-			  /* difference in day of year */
-			  a->tm_yday - b->tm_yday
-			  /* + intervening leap days */
-			  +  ((ay >> 2) - (by >> 2))
-			  -  (ay/100 - by/100)
-			  +  ((ay/100 >> 2) - (by/100 >> 2))
-			  /* + difference in years * 365 */
-			  +  (long)(ay-by) * 365
-			  );
+	    /* difference in day of year */
+	    a->tm_yday - b->tm_yday
+	    /* + intervening leap days */
+	    +  ((ay >> 2) - (by >> 2))
+	    -  (ay/100 - by/100)
+	    +  ((ay/100 >> 2) - (by/100 >> 2))
+	    /* + difference in years * 365 */
+	    +  (long)(ay-by) * 365);
 	return (60 * (60 * (24 * days + (a->tm_hour - b->tm_hour))
 	    + (a->tm_min - b->tm_min)) + (a->tm_sec - b->tm_sec));
 }
@@ -845,7 +843,7 @@ cvs_date_parse(const char *p)
 		if (gmt_ptr != NULL)
 			ftz.timezone = difftm(&gmt, tm) / 60;
 
-		if(tm->tm_isdst)
+		if (tm->tm_isdst)
 			ftz.timezone += 60;
 	}
 	else {
@@ -882,7 +880,8 @@ cvs_date_parse(const char *p)
 	} else {
 		Start = nowtime;
 		if (!yyHaveRel)
-			Start -= ((tm->tm_hour * 60L + tm->tm_min) * 60L) + tm->tm_sec;
+			Start -= ((tm->tm_hour * 60L + tm->tm_min) * 60L) +
+			    tm->tm_sec;
 	}
 
 	Start += yyRelSeconds;

@@ -1,4 +1,4 @@
-dnl	$OpenBSD: hardware,v 1.218 2005/08/30 15:20:26 grunk Exp $
+dnl	$OpenBSD: hardware,v 1.231 2006/02/13 06:19:25 brad Exp $
 OpenBSD/MACHINE OSREV works across a broad range of standard PCs and
 clones, with a wide variety of processors and I/O bus architectures.  It
 can be expected to install and run with minimal difficulties on most
@@ -69,6 +69,7 @@ Supported hardware {:-include-:}:
 		Acer Labs M5229
 		Adaptec AAR-1210SA
 		Advanced Micro Devices AMD-756, AMD-766, AMD-768, AMD-8111
+		ATI IXP 200, IXP 300, IXP 400
 		CMD Tech PCI0640, PCI0643, PCI0646, PCI0648, PCI0649, PCI0680
 		Contaq Microsystems/Cypress CY82C693
 		HighPoint HPT366, HPT370, HPT372, HPT302, HPT371, HPT374
@@ -86,13 +87,13 @@ Supported hardware {:-include-:}:
 		    PDC20277, PDC20376 (RAID mode is not supported)
 		ServerWorks OSB4, CSB5, CSB6 (including support for the third
 		    channel)
-		Silicon Image SiI3112 (including ATI IXP SATA), SiI3512, SiI3114
-		Silicon Integrated System 180, 181, 182, 5513 (5597/5598), 540,
+		Silicon Image SiI3112, SiI3512, SiI3114
+		Silicon Integrated System 180, 181, 5513 (5597/5598), 540,
 		    550, 620, 630, 630S, 633, 635, 640, 645, 645DX, 648, 650,
 		    651, 652, 661, 655, 658, 730, 733, 735, 740, 745, 746, 748,
 		    750, 751, 752, 755, 760, 962, 963
 		VIA Technologies VT82C586/A/B, VT82C596A/B, VT82C686A/B,
-		    VT8231, VT8366, VT8233, VT8235, VT8237
+		    VT8231, VT8366, VT8233, VT8235, VT8237, VT8251, VT6410
 	SCSI Host Adapters
 		Adaptec AHA-1540, AHA-154xA, AHA-154xB, AHA-1542C,
 		    AHA-1542CF, AHA-1542CP, AHA-1640 [B] [C]
@@ -295,7 +296,7 @@ Supported hardware {:-include-:}:
 		    Dell OptiPlex GX1 on-board 3c918
 		    Dell Latitude laptop docking station embedded
 			3c905
-		    NVidia nForce2 integrated 3Com 9201 (nForce2-ST, nForce2-GT)
+		    NVIDIA nForce2 integrated 3Com 9201 (nForce2-ST, nForce2-GT)
 		3Com 3c990 3XP Typhoon/Sidewinder PCI adapters, including: [A]
 		  [B] [C]
 		    3C990-TX-95
@@ -325,7 +326,7 @@ Supported hardware {:-include-:}:
 		    Elsa Microlink USB2Ethernet
 		    I/O Data USB ETTX
 		    Kingston KNU101TX
-		    LinkSys USB100TX, USB100H1 and USB10TA
+		    Linksys USB100TX, USB100H1 and USB10TA
 		    Melco Inc. LUA-TX
 		    Siemens SpeedStream USB
 		    SmartBridges smartNIC 2
@@ -344,7 +345,7 @@ Supported hardware {:-include-:}:
 		    Hawking UF200
 		    Intellinet USB 2.0 to Ethernet (rev A)
 		    JVC MP-PRX1
-		    LinkSys USB200M
+		    Linksys USB200M
 		    Netgear FA120
 		    Sitecom LN-029
 		    SMC 2209USB/ETH
@@ -379,7 +380,7 @@ Supported hardware {:-include-:}:
 		Digital DC21x4x-based PCI Ethernet adapters, including:
 		    Older SMC PCI EtherPower 10, 10/100 (models
 		      8432, 9332, and 9334)
-		    Older LinkSys 10, 10/100 (newer models are
+		    Older Linksys 10, 10/100 (newer models are
 		      supported by other drivers)
 		    Znyx ZX3xx
 		    Cogent EM100FX and EM440TX
@@ -420,7 +421,7 @@ Supported hardware {:-include-:}:
 		    Jaton USB XpressNet
 		    Kawasaki USB101
 		    Kingston Ethernet
-		    LinkSys USB10T
+		    Linksys USB10T
 		    Mobility Ethernet
 		    Netgear EA101
 		    Peracom USB
@@ -432,7 +433,7 @@ Supported hardware {:-include-:}:
 		    SMC 2102/2104USB
 		Lite-On PNIC/PNIC-II-based adapters, including:
 		    Kingston KNE110TX
-		    LinkSys LNE100TX
+		    Linksys LNE100TX
 		    Matrox Networks FastNIC 10/100
 		    Netgear FA310TX
 		Macronix 98713/713A/715/715A/725/727/732-based adapters,
@@ -479,7 +480,7 @@ Supported hardware {:-include-:}:
 		    OQO model 01 (10/100) Ethernet
 		    Repotec RP-USB100-A
 		    SMC 2208USB/ETH
-		    TrendNet TU-ET100C
+		    TRENDnet TU-ET100C
 		    Zt USB10/100
 		    Z-TEK ZK-R02
 		SiS 900 and SiS 7016-based PCI adapters, including: [B] [C]
@@ -508,14 +509,15 @@ Supported hardware {:-include-:}:
 		    Hawking PN102TX
 		    D-Link DFE530TX
 		Winbond W89C840F Ethernet adapters, including: [A] [B] [C]
-		    Trendware TE100-PCIE
+		    TRENDnet TE100-PCIE
 		    Compex RL100-ATX 10/100baseTX
 	Wireless Ethernet Adapters
 		ADMtek ADM8211 based IEEE 802.11b CardBus adapters [A] [B] [C]
 		    3Com OfficeConnect 3CRSHPW796
 		    Blitz NetWave Point
 		    D-Link DWL-650 Rev. L1
-		    TrendNet TEW-221PC CardBus
+		    SMC 2635W v1
+		    TRENDnet TEW-221PC CardBus
 		ADMtek ADM8211 based IEEE 802.11b PCI adapters [A] [B] [C]
 		    Belkin F5D6001 v2
 		    D-Link DWL-520 Rev. C1
@@ -613,11 +615,16 @@ Supported hardware {:-include-:}:
 		  IEEE 802.11a/b/g adapters [G]
 		Intersil PRISM-2-3 based IEEE 802.11b Compact Flash adapters
 		(will be detected as PCMCIA adapters) [A] [B]
+		    AmbiCom WL1100C-CF
+		    ASUS WL-110
+		    Belkin F5D6060 (version 1)
 		    Buffalo AirStation
 		    D-Link DCF-660W
 		    ELSA XI800
 		    Linksys WCF12
 		    Netgear MA701
+		    Pretec Compact WLAN OC-WLBXX-A
+		    Senao NL-2511CF
 		Intersil PRISM 2-3, Lucent Hermes and Symbol Spectrum 24
 		  based PCMCIA IEEE 802.11b adapters [A] [B]
 		    3Com AirConnect 3CRWE737A
@@ -674,7 +681,7 @@ Supported hardware {:-include-:}:
 		    Global Sun Technology GL24110P (untested)
 		    Global Sun Technology GL24110P02
 		    Intersil Mini-PCI
-		    LinkSys WDT11 (a rebadged GL24110P02)
+		    Linksys WDT11 (a rebadged GL24110P02)
 		    NDC/Sohoware NCP130
 		    Netgear MA301
 		    Netgear MA311
@@ -710,6 +717,7 @@ Supported hardware {:-include-:}:
 		    Sitecom WL-022
 		    Syntax USB-400
 		    US Robotics 1120
+		    ViewSonic Airsync
 		    Z-Com XI-725/726
 		    Z-Com XI-735
 		    ZyXEL ZyAIR B-200
@@ -888,15 +896,14 @@ Supported hardware {:-include-:}:
 		    Addtron AEG320T
 		    Asante FriendlyNet GigaNIX 1000TA and 1000TPC
 		    D-Link DGE-500T
-		    LinkSys EG1032 and EG1064
+		    Linksys EG1032 and EG1064
 		    Netgear GA622T
 		    SMC EZ Card 1000
 		    Surecom Technology EP-320G-TX
 		Level1 LXT1001 based adapters (untested), including: [*]
 		    SMC TigerCard 1000
 		    D-Link DGE-500SX
-		Broadcom BCM570x (Tigon3) based PCI adapters, including: [A]
-		  [B] [C]
+		Broadcom BCM570x (Tigon3) based PCI adapters, including: [A] [C]
 		    3Com 3c996-T
 		    3Com 3c996-SX
 		    3Com 3c996B-T
@@ -1087,7 +1094,7 @@ Supported hardware {:-include-:}:
 		Gravis Ultrasound and Ultrasound Max
 		Intel i810/i820 and 440MX AC'97
 		NeoMagic 256AV/ZX
-		nVidia nForce and nForce AC'97
+		NVIDIA nForce and nForce AC'97
 		SiS 7012 AC'97
 		SoundBlaster ISA cards and 100% compatibles
 		SoundBlaster PCI128
@@ -1280,43 +1287,43 @@ PCI BIOS, or autoconfigured.
 Hardware not listed in the above table doesn't need any specific
 configuration.
 
-
-Special care for PCI BIOS:
-
-	As with all BIOS implementations and subsystems this one has bugs
-	too.
-	Sometimes specifications are unclear about interfaces and/or data
-	validation.
-	These all cause our driver for PCI BIOS to misbehave in more or
-	less fatal ways, such as panics on pcibios0 configuration or PCI
-	device attachments, or unconfigured PCI devices due to IRQ and/or
-	I/O address misconfiguration.
-
-	Fast workaround
-
-	Boot by giving the -c flag to the initial boot request.
-	Following the loading of the kernel, the user is presented with a
-
-	UKC>
-
-	Then type the following commands:
-
-	UKC> change bios0
-	165 bios0 at mainbus0 bus -1 flags 0x0
-	change [n] y
-	bus [-1] ? <enter>
-	flags [0] ? 3
-	165 bios0 changed
-	165 bios0 at mainbus0 bus -1 flags 0x3
-	UKC> quit
-
-	This will disable the pcibios0 attachment.
-	Sometimes, especially when hangs occur on particular PCI device
-	attachments, moving PCI cards into a different slot helps.
-
-	Fixing for good
-
-	Try to gather dmesg output from the failing configuration, for
-	example by using a serial console (see boot(8)), and send it to
-	<mickey@OpenBSD.org> along with descriptions of your hardware setup.
-	Alternatively, dig in the code and fix problems.
+dnl
+dnl Special care for PCI BIOS:
+dnl
+dnl	As with all BIOS implementations and subsystems this one has bugs
+dnl	too.
+dnl	Sometimes specifications are unclear about interfaces and/or data
+dnl	validation.
+dnl	These all cause our driver for PCI BIOS to misbehave in more or
+dnl	less fatal ways, such as panics on pcibios0 configuration or PCI
+dnl	device attachments, or unconfigured PCI devices due to IRQ and/or
+dnl	I/O address misconfiguration.
+dnl
+dnl	Fast workaround
+dnl
+dnl	Boot by giving the -c flag to the initial boot request.
+dnl	Following the loading of the kernel, the user is presented with a
+dnl
+dnl	UKC>
+dnl
+dnl	Then type the following commands:
+dnl
+dnl	UKC> change bios0
+dnl	165 bios0 at mainbus0 bus -1 flags 0x0
+dnl	change [n] y
+dnl	bus [-1] ? <enter>
+dnl	flags [0] ? 3
+dnl	165 bios0 changed
+dnl	165 bios0 at mainbus0 bus -1 flags 0x3
+dnl	UKC> quit
+dnl
+dnl	This will disable the pcibios0 attachment.
+dnl	Sometimes, especially when hangs occur on particular PCI device
+dnl	attachments, moving PCI cards into a different slot helps.
+dnl
+dnl	Fixing for good
+dnl
+dnl	Try to gather dmesg output from the failing configuration, for
+dnl	example by using a serial console (see boot(8)), and send it to
+dnl	<mickey@OpenBSD.org> along with descriptions of your hardware setup.
+dnl	Alternatively, dig in the code and fix problems.

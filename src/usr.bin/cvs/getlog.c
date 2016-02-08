@@ -1,6 +1,7 @@
-/*	$OpenBSD: getlog.c,v 1.46 2005/08/08 14:48:27 xsa Exp $	*/
+/*	$OpenBSD: getlog.c,v 1.55 2006/02/06 16:21:43 xsa Exp $	*/
 /*
  * Copyright (c) 2004 Jean-Francois Brousseau <jfb@openbsd.org>
+ * Copyright (c) 2005, 2006 Xavier Santolaria <xsa@openbsd.org>
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -24,25 +25,22 @@
  * ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include <errno.h>
-#include <paths.h>
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-#include <unistd.h>
+#include "includes.h"
 
 #include "cvs.h"
 #include "log.h"
 #include "proto.h"
 
 
-#define CVS_GLOG_RFONLY		0x01
-#define CVS_GLOG_HDONLY		0x02
-
-
 #define CVS_GETLOG_REVSEP	"----------------------------"
 #define CVS_GETLOG_REVEND \
  "============================================================================="
+
+#define GLOG_BRANCH		(1<<0)
+#define GLOG_HEADER		(1<<1)
+#define GLOG_HEADER_DESCR	(1<<2)
+#define GLOG_NAME		(1<<3)
+#define GLOG_NOTAGS		(1<<4)
 
 static int	cvs_getlog_init(struct cvs_cmd *, int, char **, int *);
 static int	cvs_getlog_remote(CVSFILE *, void *);
@@ -84,10 +82,7 @@ struct cvs_cmd cvs_cmd_rlog = {
 	CVS_CMD_SENDDIR | CVS_CMD_ALLOWSPEC | CVS_CMD_SENDARGS2
 };
 
-static int log_rfonly = 0;
-static int log_honly = 0;
-static int log_lhonly = 0;
-static int log_notags = 0;
+static int runflags = 0;
 
 static int
 cvs_getlog_init(struct cvs_cmd *cmd, int argc, char **argv, int *arg)
@@ -97,27 +92,28 @@ cvs_getlog_init(struct cvs_cmd *cmd, int argc, char **argv, int *arg)
 	while ((ch = getopt(argc, argv, cmd->cmd_opts)) != -1) {
 		switch (ch) {
 		case 'b':
+			runflags |= GLOG_BRANCH;
 			break;
 		case 'd':
 			break;
 		case 'h':
-			log_honly = 1;
+			runflags |= GLOG_HEADER;
 			break;
 		case 'l':
 			cmd->file_flags &= ~CF_RECURSE;
 			break;
 		case 'N':
-			log_notags = 1;
+			runflags |= GLOG_NOTAGS;
 			break;
 		case 'R':
-			log_rfonly = 1;
+			runflags |= GLOG_NAME;
 			break;
 		case 'r':
 			break;
 		case 's':
 			break;
 		case 't':
-			log_lhonly = 1;
+			runflags |= GLOG_HEADER_DESCR;
 			break;
 		case 'w':
 			break;
@@ -134,16 +130,21 @@ static int
 cvs_getlog_pre_exec(struct cvsroot *root)
 {
 	if (root->cr_method != CVS_METHOD_LOCAL) {
-		if (log_honly && (cvs_sendarg(root, "-h", 0) < 0))
-			return (CVS_EX_PROTO);
-		if (log_notags && (cvs_sendarg(root, "-N", 0) < 0))
-			return (CVS_EX_PROTO);
-		if (log_rfonly && (cvs_sendarg(root, "-R", 0) < 0))
-			return (CVS_EX_PROTO);
-		if (log_lhonly && (cvs_sendarg(root, "-t", 0) < 0))
-			return (CVS_EX_PROTO);
-	}
+		if (runflags & GLOG_BRANCH)
+			cvs_sendarg(root, "-b", 0);
 
+		if (runflags & GLOG_HEADER)
+			cvs_sendarg(root, "-h", 0);
+
+		if (runflags & GLOG_NOTAGS)
+			cvs_sendarg(root, "-N", 0);
+
+		if (runflags & GLOG_NAME)
+			cvs_sendarg(root, "-R", 0);
+
+		if (runflags & GLOG_HEADER_DESCR)
+			cvs_sendarg(root, "-t", 0);
+	}
 	return (0);
 }
 
@@ -154,45 +155,39 @@ cvs_getlog_pre_exec(struct cvsroot *root)
 static int
 cvs_getlog_remote(CVSFILE *cf, void *arg)
 {
-	int ret;
 	char fpath[MAXPATHLEN];
 	struct cvsroot *root;
 
-	ret = 0;
 	root = CVS_DIR_ROOT(cf);
 
 	if (cf->cf_type == DT_DIR) {
 		if (cf->cf_cvstat == CVS_FST_UNKNOWN)
-			ret = cvs_sendreq(root, CVS_REQ_QUESTIONABLE,
-			    cf->cf_name);
+			cvs_sendreq(root, CVS_REQ_QUESTIONABLE, cf->cf_name);
 		else
-			ret = cvs_senddir(root, cf);
-		return (ret);
+			cvs_senddir(root, cf);
+		return (0);
 	}
 
 	cvs_file_getpath(cf, fpath, sizeof(fpath));
 
-	if (cvs_sendentry(root, cf) < 0)
-		return (CVS_EX_PROTO);
+	cvs_sendentry(root, cf);
 
 	switch (cf->cf_cvstat) {
 	case CVS_FST_UNKNOWN:
-		ret = cvs_sendreq(root, CVS_REQ_QUESTIONABLE, cf->cf_name);
+		cvs_sendreq(root, CVS_REQ_QUESTIONABLE, cf->cf_name);
 		break;
 	case CVS_FST_UPTODATE:
-		ret = cvs_sendreq(root, CVS_REQ_UNCHANGED, cf->cf_name);
+		cvs_sendreq(root, CVS_REQ_UNCHANGED, cf->cf_name);
 		break;
 	case CVS_FST_ADDED:
 	case CVS_FST_MODIFIED:
-		ret = cvs_sendreq(root, CVS_REQ_ISMODIFIED, cf->cf_name);
+		cvs_sendreq(root, CVS_REQ_ISMODIFIED, cf->cf_name);
 		break;
 	default:
 		break;
 	}
 
-	if (ret == -1)
-		ret = CVS_EX_PROTO;
-	return (ret);
+	return (0);
 }
 
 
@@ -228,17 +223,16 @@ cvs_getlog_local(CVSFILE *cf, void *arg)
 		return (0);
 	}
 
-	if (cvs_rcs_getpath(cf, rcspath, sizeof(rcspath)) == NULL)
-		return (CVS_EX_DATA);
+	cvs_rcs_getpath(cf, rcspath, sizeof(rcspath));
 
-	if (log_rfonly) {
+	if (runflags & GLOG_NAME) {
 		cvs_printf("%s\n", rcspath);
 		return (0);
 	}
 
-	rf = rcs_open(rcspath, RCS_READ);
-	if (rf == NULL)
-		return (CVS_EX_DATA);
+	if ((rf = rcs_open(rcspath, RCS_READ|RCS_PARSE_FULLY)) == NULL)
+		fatal("cvs_getlog_local: rcs_open `%s': %s", rcspath,
+		    rcs_errstr(rcs_errno));
 
 	cvs_printf("\nRCS file: %s", rcspath);
 	cvs_printf("\nWorking file: %s", cf->cf_name);
@@ -258,7 +252,7 @@ cvs_getlog_local(CVSFILE *cf, void *arg)
 	TAILQ_FOREACH(acp, &(rf->rf_access), ra_list)
 		cvs_printf("\t%s\n", acp->ra_name);
 
-	if (log_notags == 0) {
+	if (!(runflags & GLOG_NOTAGS)) {
 		cvs_printf("symbolic names:\n");
 		TAILQ_FOREACH(sym, &(rf->rf_symbols), rs_list)
 			cvs_printf("\t%s: %s\n", sym->rs_name,
@@ -268,17 +262,17 @@ cvs_getlog_local(CVSFILE *cf, void *arg)
 	cvs_printf("keyword substitution: %s\n",
 	    rf->rf_expand == NULL ? "kv" : rf->rf_expand);
 
-	cvs_printf("total revisions: %u;", rf->rf_ndelta);
+	cvs_printf("total revisions: %u", rf->rf_ndelta);
 
-	if ((log_honly == 0) && (log_lhonly == 0))
-		cvs_printf("\tselected revisions: %u", nrev);
+	if (!(runflags & GLOG_HEADER) && !(runflags & GLOG_HEADER_DESCR))
+		cvs_printf(";\tselected revisions: %u", nrev);
 
 	cvs_printf("\n");
 
-	if ((log_honly == 0) || (log_lhonly == 1))
+	if (!(runflags & GLOG_HEADER) || (runflags & GLOG_HEADER_DESCR))
 		cvs_printf("description:\n%s", rf->rf_desc);
 
-	if ((log_honly == 0) && (log_lhonly == 0)) {
+	if (!(runflags & GLOG_HEADER) && !(runflags & GLOG_HEADER_DESCR)) {
 		TAILQ_FOREACH(rdp, &(rf->rf_delta), rd_list) {
 			rcsnum_tostr(rdp->rd_num, numbuf, sizeof(numbuf));
 			cvs_printf(CVS_GETLOG_REVSEP "\nrevision %s\n", numbuf);

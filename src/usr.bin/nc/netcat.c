@@ -1,4 +1,4 @@
-/* $OpenBSD: netcat.c,v 1.82 2005/07/24 09:33:56 marius Exp $ */
+/* $OpenBSD: netcat.c,v 1.87 2006/02/01 21:33:14 otto Exp $ */
 /*
  * Copyright (c) 2001 Eric Jackson <ericj@monkey.org>
  *
@@ -37,7 +37,9 @@
 #include <sys/un.h>
 
 #include <netinet/in.h>
+#include <netinet/in_systm.h>
 #include <netinet/tcp.h>
+#include <netinet/ip.h>
 #include <arpa/telnet.h>
 
 #include <err.h>
@@ -50,6 +52,7 @@
 #include <string.h>
 #include <unistd.h>
 #include <fcntl.h>
+#include <limits.h>
 #include "atomicio.h"
 
 #ifndef SUN_LEN
@@ -67,6 +70,7 @@ int	jflag;					/* use jumbo frames if we can */
 int	kflag;					/* More than one connect */
 int	lflag;					/* Bind to local port */
 int	nflag;					/* Don't do name look up */
+char   *Pflag;					/* Proxy username */
 char   *pflag;					/* Localport flag */
 int	rflag;					/* Random ports flag */
 char   *sflag;					/* Source Address */
@@ -77,6 +81,7 @@ int	xflag;					/* Socks proxy */
 int	zflag;					/* Port Scan Flag */
 int	Dflag;					/* sodebug */
 int	Sflag;					/* TCP MD5 signature option */
+int	Tflag = -1;				/* IP Type of Service */
 
 int timeout = -1;
 int family = AF_UNSPEC;
@@ -88,12 +93,13 @@ void	help(void);
 int	local_listen(char *, char *, struct addrinfo);
 void	readwrite(int);
 int	remote_connect(const char *, const char *, struct addrinfo);
-int	socks_connect(const char *, const char *, struct addrinfo, const char *, const char *,
-	struct addrinfo, int);
+int	socks_connect(const char *, const char *, struct addrinfo,
+	    const char *, const char *, struct addrinfo, int, const char *);
 int	udptest(int);
 int	unix_connect(char *);
 int	unix_listen(char *);
-int     set_common_sockopts(int);
+void	set_common_sockopts(int);
+int	parse_iptos(char *);
 void	usage(int);
 
 int
@@ -118,7 +124,7 @@ main(int argc, char *argv[])
 	sv = NULL;
 
 	while ((ch = getopt(argc, argv,
-	    "46Ddhi:jklnp:rSs:tUuvw:X:x:z")) != -1) {
+	    "46Ddhi:jklnP:p:rSs:tT:Uuvw:X:x:z")) != -1) {
 		switch (ch) {
 		case '4':
 			family = AF_INET;
@@ -162,6 +168,9 @@ main(int argc, char *argv[])
 		case 'n':
 			nflag = 1;
 			break;
+		case 'P':
+			Pflag = optarg;
+			break;
 		case 'p':
 			pflag = optarg;
 			break;
@@ -201,6 +210,9 @@ main(int argc, char *argv[])
 			break;
 		case 'S':
 			Sflag = 1;
+			break;
+		case 'T':
+			Tflag = parse_iptos(optarg);
 			break;
 		default:
 			usage(1);
@@ -346,7 +358,8 @@ main(int argc, char *argv[])
 
 			if (xflag)
 				s = socks_connect(host, portlist[i], hints,
-				    proxyhost, proxyport, proxyhints, socksv);
+				    proxyhost, proxyport, proxyhints, socksv,
+				    Pflag);
 			else
 				s = remote_connect(host, portlist[i], hints);
 
@@ -477,13 +490,6 @@ remote_connect(const char *host, const char *port, struct addrinfo hints)
 		/* Bind to a local port or source address if specified. */
 		if (sflag || pflag) {
 			struct addrinfo ahints, *ares;
-
-			if (!(sflag && pflag)) {
-				if (!sflag)
-					sflag = NULL;
-				else
-					pflag = NULL;
-			}
 
 			memset(&ahints, 0, sizeof(struct addrinfo));
 			ahints.ai_family = res0->ai_family;
@@ -752,7 +758,7 @@ udptest(int s)
 	return (ret);
 }
 
-int
+void
 set_common_sockopts(int s)
 {
 	int x = 1;
@@ -772,6 +778,28 @@ set_common_sockopts(int s)
 			&x, sizeof(x)) == -1)
 			err(1, NULL);
 	}
+	if (Tflag != -1) {
+		if (setsockopt(s, IPPROTO_IP, IP_TOS,
+		    &Tflag, sizeof(Tflag)) == -1)
+			err(1, "set IP ToS");
+	}
+}
+
+int
+parse_iptos(char *s)
+{
+	int tos = -1;
+
+	if (strcmp(s, "lowdelay") == 0)
+		return (IPTOS_LOWDELAY);
+	if (strcmp(s, "throughput") == 0)
+		return (IPTOS_THROUGHPUT);
+	if (strcmp(s, "reliability") == 0)
+		return (IPTOS_RELIABILITY);
+
+	if (sscanf(s, "0x%x", &tos) != 1 || tos < 0 || tos > 0xff)
+		errx(1, "invalid IP Type of Service");
+	return (tos);
 }
 
 void
@@ -788,10 +816,12 @@ help(void)
 	\t-k		Keep inbound sockets open for multiple connects\n\
 	\t-l		Listen mode, for inbound connects\n\
 	\t-n		Suppress name/port resolutions\n\
+	\t-P proxyuser\tUsername for proxy authentication\n\
 	\t-p port\t	Specify local port for remote connects\n\
 	\t-r		Randomize remote ports\n\
 	\t-S		Enable the TCP MD5 signature option\n\
 	\t-s addr\t	Local source address\n\
+	\t-T ToS\t	Set IP Type of Service\n\
 	\t-t		Answer TELNET negotiation\n\
 	\t-U		Use UNIX domain socket\n\
 	\t-u		UDP mode\n\
@@ -808,7 +838,7 @@ void
 usage(int ret)
 {
 	fprintf(stderr, "usage: nc [-46DdhklnrStUuvz] [-i interval] [-p source_port]\n");
-	fprintf(stderr, "\t  [-s source_ip_address] [-w timeout] [-X proxy_version]\n");
+	fprintf(stderr, "\t  [-s source_ip_address] [-T ToS] [-w timeout] [-X proxy_version]\n");
 	fprintf(stderr, "\t  [-x proxy_address[:port]] [hostname] [port[s]]\n");
 	if (ret)
 		exit(1);

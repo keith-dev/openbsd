@@ -1,4 +1,4 @@
-dnl	$OpenBSD: hardware,v 1.61 2005/08/23 02:25:53 jsg Exp $
+dnl	$OpenBSD: hardware,v 1.69 2006/02/13 06:19:25 brad Exp $
 OpenBSD/MACHINE OSREV should work on all Athlon 64-based and
 compatible designs.
 
@@ -26,6 +26,7 @@ dnl		YENTA-compatible PCI-CardBus bridges
 		Acer Labs M5229
 		Adaptec AAR-1210SA
 		Advanced Micro Devices AMD-756, AMD-766, AMD-768, AMD-8111
+		ATI IXP 200, IXP 300, IXP 400
 		CMD Tech PCI0640, PCI0643, PCI0646, PCI0648, PCI0649, PCI0680
 		Contaq Microsystems/Cypress CY82C693
 		HighPoint HPT366, HPT370, HPT372, HPT302, HPT371, HPT374
@@ -43,8 +44,8 @@ dnl		YENTA-compatible PCI-CardBus bridges
 		    PDC20277, PDC20376 (RAID mode is not supported)
 		ServerWorks OSB4, CSB5, CSB6 (including support for the third
 		    channel)
-		Silicon Image SiI3112 (including ATI IXP SATA), SiI3512, SiI3114
-		Silicon Integrated System 180, 181, 182, 5513 (5597/5598), 540,
+		Silicon Image SiI3112, SiI3512, SiI3114
+		Silicon Integrated System 180, 181, 5513 (5597/5598), 540,
 		    550, 620, 630, 630S, 633, 635, 640, 645, 645DX, 648, 650,
 		    651, 652, 661, 655, 658, 730, 733, 735, 740, 745, 746, 748,
 		    750, 751, 752, 755, 760, 962, 963
@@ -53,7 +54,7 @@ dnl		YENTA-compatible PCI-CardBus bridges
 		    652, 655, 658, 730, 733, 735, 740, 745, 746, 748, 750,
 		    751, 752, 755, 962, 963
 		VIA Technologies VT82C586/A/B, VT82C596A/B, VT82C686A/B,
-		    VT8231, VT8366, VT8233, VT8235, VT8237
+		    VT8231, VT8366, VT8233, VT8235, VT8237, VT8251, VT6410
 	SCSI Host Adapters
 		Adaptec AIC-7770, AIC-7850, AIC-7860, AIC-7870, AIC-7880,
 		AIC-7890, AIC-7891, AIC-7892, AIC-7895, AIC-7896, AIC-7897
@@ -209,7 +210,7 @@ dnl		YENTA-compatible PCI-CardBus bridges
 		    3Com 3c555/3c556/3c556B MiniPCI adapters
 		    Dell Latitude laptop docking station embedded
 			3c905
-		    NVidia nForce2 integrated 3Com 9201 (nForce2-ST, nForce2-GT)
+		    NVIDIA nForce2 integrated 3Com 9201 (nForce2-ST, nForce2-GT)
 		3Com 3c990 3XP Typhoon/Sidewinder PCI adapters, including:
 		    3C990-TX-95
 		    3C990-TX-97
@@ -238,7 +239,7 @@ dnl		YENTA-compatible PCI-CardBus bridges
 		    Elsa Microlink USB2Ethernet
 		    I/O Data USB ETTX
 		    Kingston KNU101TX
-		    LinkSys USB100TX, USB100H1 and USB10TA
+		    Linksys USB100TX, USB100H1 and USB10TA
 		    Melco Inc. LUA-TX
 		    Siemens SpeedStream USB
 		    SmartBridges smartNIC 2
@@ -256,7 +257,7 @@ dnl		YENTA-compatible PCI-CardBus bridges
 		    Hawking UF200
 		    Intellinet USB 2.0 to Ethernet (rev A)
 		    JVC MP-PRX1
-		    LinkSys USB200M
+		    Linksys USB200M
 		    Netgear FA120
 		    Sitecom LN-029
 		    SMC 2209USB/ETH
@@ -283,7 +284,7 @@ dnl		YENTA-compatible PCI-CardBus bridges
 		Digital DC21x4x-based PCI Ethernet adapters, including:
 		    Older SMC PCI EtherPower 10, 10/100 (models
 		      8432, 9332, and 9334)
-		    Older LinkSys 10, 10/100 (newer models are
+		    Older Linksys 10, 10/100 (newer models are
 		      supported by other drivers)
 		    Znyx ZX3xx
 		    Cogent EM100FX and EM440TX
@@ -321,7 +322,7 @@ dnl		YENTA-compatible PCI-CardBus bridges
 		    Jaton USB XpressNet
 		    Kawasaki USB101
 		    Kingston Ethernet
-		    LinkSys USB10T
+		    Linksys USB10T
 		    Mobility Ethernet
 		    Netgear EA101
 		    Peracom USB
@@ -333,7 +334,7 @@ dnl		YENTA-compatible PCI-CardBus bridges
 		    SMC 2102/2104USB
 		Lite-On PNIC/PNIC-II-based adapters, including:
 		    Kingston KNE110TX
-		    LinkSys LNE100TX
+		    Linksys LNE100TX
 		    Matrox Networks FastNIC 10/100
 		    Netgear FA310TX
 		Macronix 98713/713A/715/715A/725/727/732-based adapters,
@@ -379,7 +380,7 @@ dnl		YENTA-compatible PCI-CardBus bridges
 		    NetComm NP1010
 		    Repotec RP-USB100-A
 		    SMC 2208USB/ETH
-		    TrendNet TU-ET100C
+		    TRENDnet TU-ET100C
 		    Zt USB10/100
 		    Z-TEK ZK-R02
 		SiS 900 and SiS 7016-based PCI adapters, including:
@@ -404,7 +405,7 @@ dnl		YENTA-compatible PCI-CardBus bridges
 		    Hawking PN102TX
 		    D-Link DFE530TX
 		Winbond W89C840F Ethernet adapters, including:
-		    Trendware TE100-PCIE
+		    TRENDnet TE100-PCIE
 		    Compex RL100-ATX 10/100baseTX
 	Wireless Ethernet Adapters
 		Atmel AT76C50x based USB IEEE 802.11b adapters
@@ -461,7 +462,7 @@ dnl		YENTA-compatible PCI-CardBus bridges
 		    Global Sun Technology GL24110P (untested)
 		    Global Sun Technology GL24110P02
 		    Intersil Mini-PCI
-		    LinkSys WDT11 (a rebadged GL24110P02)
+		    Linksys WDT11 (a rebadged GL24110P02)
 		    NDC/Sohoware NCP130
 		    Netgear MA301
 		    Netgear MA311
@@ -497,6 +498,7 @@ dnl		YENTA-compatible PCI-CardBus bridges
 		    Sitecom WL-022
 		    Syntax USB-400
 		    US Robotics 1120
+		    ViewSonic Airsync
 		    Z-Com XI-725/726
 		    Z-Com XI-735
 		    ZyXEL ZyAIR B-200
@@ -562,7 +564,7 @@ dnl		YENTA-compatible PCI-CardBus bridges
 		    Addtron AEG320T
 		    Asante FriendlyNet GigaNIX 1000TA and 1000TPC
 		    D-Link DGE-500T
-		    LinkSys EG1032 and EG1064
+		    Linksys EG1032 and EG1064
 		    Netgear GA622T
 		    SMC EZ Card 1000
 		    Surecom Technology EP-320G-TX
@@ -746,7 +748,7 @@ dnl		    See above
 		Forte Media FM801 audio
 		Intel i810/i820 and 440MX AC'97
 		NeoMagic 256AV/ZX
-		nVidia nForce and nForce AC'97
+		NVIDIA nForce and nForce AC'97
 		SiS 7012 AC'97
 		SoundBlaster PCI128
 		SoundBlaster Live! and PCI512 (EMU10k1)

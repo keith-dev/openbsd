@@ -1,4 +1,4 @@
-/*	$OpenBSD: update.c,v 1.44 2005/08/08 11:37:41 xsa Exp $	*/
+/*	$OpenBSD: update.c,v 1.54 2006/01/27 15:26:38 xsa Exp $	*/
 /*
  * Copyright (c) 2004 Jean-Francois Brousseau <jfb@openbsd.org>
  * All rights reserved.
@@ -24,25 +24,17 @@
  * ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include <sys/stat.h>
-
-#include <errno.h>
-#include <fcntl.h>
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-#include <unistd.h>
+#include "includes.h"
 
 #include "cvs.h"
 #include "log.h"
 #include "proto.h"
-
+#include "diff.h"
 
 static int	cvs_update_init(struct cvs_cmd *, int, char **, int *);
 static int	cvs_update_pre_exec(struct cvsroot *);
 static int	cvs_update_remote(CVSFILE *, void *);
 static int	cvs_update_local(CVSFILE *, void *);
-
 
 struct cvs_cmd cvs_cmd_update = {
 	CVS_OP_UPDATE, CVS_REQ_UPDATE, "update",
@@ -134,21 +126,24 @@ static int
 cvs_update_pre_exec(struct cvsroot *root)
 {
 	if (root->cr_method != CVS_METHOD_LOCAL) {
-		if ((cvs_cmd_update.cmd_flags & CVS_CMD_PRUNEDIRS) &&
-		    (cvs_sendarg(root, "-P", 0) < 0))
-			return (CVS_EX_PROTO);
-		if (Aflag && cvs_sendarg(root, "-A", 0) < 0)
-			return (CVS_EX_PROTO);
-		if (dflag && cvs_sendarg(root, "-d", 0) < 0)
-			return (CVS_EX_PROTO);
+		if (cvs_cmd_update.cmd_flags & CVS_CMD_PRUNEDIRS)
+			cvs_sendarg(root, "-P", 0);
 
-		if ((rev != NULL) && ((cvs_sendarg(root, "-r", 0) < 0) ||
-		    (cvs_sendarg(root, rev, 0) < 0)))
-			return (CVS_EX_PROTO);
+		if (Aflag == 1)
+			cvs_sendarg(root, "-A", 0);
 
-		if ((date != NULL) && ((cvs_sendarg(root, "-D", 0) < 0) ||
-		    (cvs_sendarg(root, date, 0) < 0)))
-			return (CVS_EX_PROTO);
+		if (dflag == 1)
+			cvs_sendarg(root, "-d", 0);
+
+		if (rev != NULL) {
+			cvs_sendarg(root, "-r", 0);
+			cvs_sendarg(root, rev, 0);
+		}
+
+		if (date != NULL) {
+			cvs_sendarg(root, "-D", 0);
+			cvs_sendarg(root, date, 0);
+		}
 	}
 
 	return (0);
@@ -163,55 +158,43 @@ cvs_update_pre_exec(struct cvsroot *root)
 static int
 cvs_update_remote(CVSFILE *cf, void *arg)
 {
-	int ret;
 	char fpath[MAXPATHLEN];
 	struct cvsroot *root;
 
-	ret = 0;
 	root = CVS_DIR_ROOT(cf);
 
 	if (cf->cf_type == DT_DIR) {
 		if (cf->cf_cvstat == CVS_FST_UNKNOWN)
-			ret = cvs_sendreq(root, CVS_REQ_QUESTIONABLE,
-			    cf->cf_name);
+			cvs_sendreq(root, CVS_REQ_QUESTIONABLE, cf->cf_name);
 		else
-			ret = cvs_senddir(root, cf);
-
-		if (ret == -1)
-			ret = CVS_EX_PROTO;
-
-		return (ret);
+			cvs_senddir(root, cf);
+		return (0);
 	}
 
 	cvs_file_getpath(cf, fpath, sizeof(fpath));
 
-	if (cvs_sendentry(root, cf) < 0)
-		return (CVS_EX_PROTO);
+	cvs_sendentry(root, cf);
 
 	if (!(cf->cf_flags & CVS_FILE_ONDISK))
 		return (0);
 
 	switch (cf->cf_cvstat) {
 	case CVS_FST_UNKNOWN:
-		ret = cvs_sendreq(root, CVS_REQ_QUESTIONABLE, cf->cf_name);
+		cvs_sendreq(root, CVS_REQ_QUESTIONABLE, cf->cf_name);
 		break;
 	case CVS_FST_UPTODATE:
-		ret = cvs_sendreq(root, CVS_REQ_UNCHANGED, cf->cf_name);
+		cvs_sendreq(root, CVS_REQ_UNCHANGED, cf->cf_name);
 		break;
 	case CVS_FST_ADDED:
 	case CVS_FST_MODIFIED:
-		ret = cvs_sendreq(root, CVS_REQ_MODIFIED, cf->cf_name);
-		if (ret == 0)
-			ret = cvs_sendfile(root, fpath);
+		cvs_sendreq(root, CVS_REQ_MODIFIED, cf->cf_name);
+		cvs_sendfile(root, fpath);
 		break;
 	default:
 		break;
 	}
 
-	if (ret == -1)
-		ret = CVS_EX_PROTO;
-
-	return (ret);
+	return (0);
 }
 
 /*
@@ -220,35 +203,135 @@ cvs_update_remote(CVSFILE *cf, void *arg)
 static int
 cvs_update_local(CVSFILE *cf, void *arg)
 {
-	int ret;
+	int ret, islocal, revdiff;
 	char fpath[MAXPATHLEN], rcspath[MAXPATHLEN];
+	char *repo;
 	RCSFILE *rf;
+	RCSNUM *frev;
+	BUF *fbuf;
+	struct cvsroot *root;
 
-	ret = 0;
+	revdiff = ret = 0;
 	rf = NULL;
+	frev = NULL;
+	islocal = (cvs_cmdop != CVS_OP_SERVER);
 
+	root = CVS_DIR_ROOT(cf);
+	repo = CVS_DIR_REPO(cf);
 	cvs_file_getpath(cf, fpath, sizeof(fpath));
 
 	if (cf->cf_cvstat == CVS_FST_UNKNOWN) {
-		cvs_printf("? %s\n", fpath);
+		if (verbosity > 1)
+			cvs_printf("? %s\n", fpath);
 		return (CVS_EX_OK);
 	}
 
 	if (cf->cf_type == DT_DIR) {
-		cvs_log(LP_NOTICE, "Updating %s", fpath);
+		if (verbosity > 1)
+			cvs_log(LP_NOTICE, "Updating %s", fpath);
 		return (CVS_EX_OK);
 	}
 
-	if (cvs_rcs_getpath(cf, rcspath, sizeof(rcspath)) == NULL)
-		return (CVS_EX_DATA);
+	cvs_rcs_getpath(cf, rcspath, sizeof(rcspath));
 
-	rf = rcs_open(rcspath, RCS_RDWR);
-	if (rf == NULL) {
-		printf("failed here?\n");
-		return (CVS_EX_DATA);
+	/*
+	 * Only open the RCS file for files that have not been added.
+	 */
+	if (cf->cf_cvstat != CVS_FST_ADDED) {
+		rf = rcs_open(rcspath, RCS_READ);
+
+		/*
+		 * If there is no RCS file available in the repository
+		 * directory that matches this file, it's gone.
+		 * XXX: so what about the Attic?
+		 */
+		if (rf == NULL) {
+			cvs_log(LP_WARN, "%s is no longer in the repository",
+			    fpath);
+			if (cvs_checkout_rev(NULL, NULL, cf, fpath,
+			    islocal, CHECKOUT_REV_REMOVED) < 0)
+				fatal("cvs_update_local: cvs_checkout_rev failed");
+			return (CVS_EX_OK);
+		}
+	} else {
+		/* There's no need to update a newly added file */
+		cvs_printf("A %s\n", fpath);
+		return (CVS_EX_OK);
 	}
 
+	/* set keyword expansion */
+	/* XXX look at cf->cf_opts as well for this */
+	if (rcs_kwexp_set(rf, kflag) < 0)
+		fatal("cvs_update_local: rcs_kwexp_set failed");
+
+	/* fill in the correct revision */
+	if (rev != NULL) {
+		if ((frev = rcsnum_parse(rev)) == NULL)
+			fatal("cvs_update_local: rcsnum_parse failed");
+	} else
+		frev = rf->rf_head;
+
+	/*
+	 * Compare the headrevision with the revision we currently have.
+	 */
+	if (cf->cf_lrev != NULL)
+		revdiff = rcsnum_cmp(cf->cf_lrev, frev, 0);
+
+	switch (cf->cf_cvstat) {
+	case CVS_FST_MODIFIED:
+		/*
+		 * If the file has been modified but there is a newer version
+		 * available, we try to merge it into the existing changes.
+		 */
+		if (revdiff == 1) {
+			fbuf = cvs_diff3(rf, fpath, cf->cf_lrev, frev);
+			if (fbuf == NULL) {
+				cvs_log(LP_ERR, "merge failed");
+				break;
+			}
+
+			/*
+			 * Please note fbuf will be free'd in cvs_checkout_rev
+			 */
+			if (cvs_checkout_rev(rf, frev, cf, fpath, islocal,
+			    CHECKOUT_REV_MERGED, fbuf) != -1) {
+				cvs_printf("%c %s\n",
+				    (diff3_conflicts > 0) ? 'C' : 'M',
+				    fpath);
+				if (diff3_conflicts > 0)
+					cf->cf_cvstat = CVS_FST_CONFLICT;
+			}
+		} else {
+			cvs_printf("M %s\n", fpath);
+		}
+		break;
+	case CVS_FST_REMOVED:
+		cvs_printf("R %s\n", fpath);
+		break;
+	case CVS_FST_CONFLICT:
+		cvs_printf("C %s\n", fpath);
+		break;
+	case CVS_FST_LOST:
+		if (cvs_checkout_rev(rf, frev, cf, fpath, islocal,
+		    CHECKOUT_REV_UPDATED) != -1) {
+			cf->cf_cvstat = CVS_FST_UPTODATE;
+			cvs_printf("U %s\n", fpath);
+		}
+		break;
+	case CVS_FST_UPTODATE:
+		if (revdiff == 1) {
+			if (cvs_checkout_rev(rf, frev, cf, fpath, islocal,
+			    CHECKOUT_REV_UPDATED) != -1)
+				cvs_printf("P %s\n", fpath);
+		}
+		break;
+	default:
+		break;
+	}
+
+	if ((frev != NULL) && (frev != rf->rf_head))
+		rcsnum_free(frev);
 	rcs_close(rf);
 
-	return (ret);
+	return (CVS_EX_OK);
 }

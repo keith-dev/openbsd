@@ -1,4 +1,4 @@
-/*	$OpenBSD: rcsnum.c,v 1.15 2005/08/02 11:48:56 joris Exp $	*/
+/*	$OpenBSD: rcsnum.c,v 1.24 2006/01/28 14:09:34 niallo Exp $	*/
 /*
  * Copyright (c) 2004 Jean-Francois Brousseau <jfb@openbsd.org>
  * All rights reserved.
@@ -24,19 +24,15 @@
  * ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include <sys/param.h>
-
-#include <ctype.h>
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
+#include "includes.h"
 
 #include "cvs.h"
 #include "log.h"
 #include "rcs.h"
 
 
-static int	rcsnum_setsize(RCSNUM *, u_int);
+static int	 rcsnum_setsize(RCSNUM *, u_int);
+static char	*rcsnum_itoa(u_int16_t, char *, size_t);
 
 
 /*
@@ -50,11 +46,7 @@ rcsnum_alloc(void)
 {
 	RCSNUM *rnp;
 
-	rnp = (RCSNUM *)malloc(sizeof(*rnp));
-	if (rnp == NULL) {
-		rcs_errno = RCS_ERR_ERRNO;
-		return (NULL);
-	}
+	rnp = (RCSNUM *)xmalloc(sizeof(*rnp));
 	rnp->rn_len = 0;
 	rnp->rn_id = NULL;
 
@@ -72,9 +64,7 @@ rcsnum_parse(const char *str)
 	char *ep;
 	RCSNUM *num;
 
-	if ((num = rcsnum_alloc()) == NULL)
-		return (NULL);
-
+	num = rcsnum_alloc();
 	if ((rcsnum_aton(str, &ep, num) < 0) || (*ep != '\0')) {
 		rcsnum_free(num);
 		num = NULL;
@@ -94,8 +84,8 @@ void
 rcsnum_free(RCSNUM *rn)
 {
 	if (rn->rn_id != NULL)
-		free(rn->rn_id);
-	free(rn);
+		xfree(rn->rn_id);
+	xfree(rn);
 }
 
 /*
@@ -117,13 +107,30 @@ rcsnum_tostr(const RCSNUM *nump, char *buf, size_t blen)
 		return (buf);
 	}
 
-	snprintf(buf, blen, "%u", nump->rn_id[0]);
+	strlcpy(buf, rcsnum_itoa(nump->rn_id[0], buf, blen), blen);
 	for (i = 1; i < nump->rn_len; i++) {
-		snprintf(tmp, sizeof(tmp), ".%u", nump->rn_id[i]);
-		strlcat(buf, tmp, blen);
+		strlcat(buf, ".", blen);
+		strlcat(buf, rcsnum_itoa(nump->rn_id[i], tmp, sizeof(tmp)),
+		    blen);
 	}
 
 	return (buf);
+}
+
+static char *
+rcsnum_itoa(u_int16_t num, char *buf, size_t len)
+{
+	u_int16_t i;
+	char *p;
+
+	p = buf + len - 1;
+	i = num;
+	bzero(buf, len);
+	while (i) {
+		*--p = '0' + (i % 10);
+		i  /= 10;
+	}
+	return (p);
 }
 
 /*
@@ -145,12 +152,7 @@ rcsnum_cpy(const RCSNUM *nsrc, RCSNUM *ndst, u_int depth)
 		len = depth;
 	sz = len * sizeof(u_int16_t);
 
-	tmp = realloc(ndst->rn_id, sz);
-	if (tmp == NULL) {
-		rcs_errno = RCS_ERR_ERRNO;
-		return (-1);
-	}
-
+	tmp = xrealloc(ndst->rn_id, sz);
 	ndst->rn_id = (u_int16_t *)tmp;
 	ndst->rn_len = len;
 	memcpy(ndst->rn_id, nsrc->rn_id, sz);
@@ -210,13 +212,8 @@ rcsnum_aton(const char *str, char **ep, RCSNUM *nump)
 	void *tmp;
 	char *s;
 
-	if (nump->rn_id == NULL) {
-		nump->rn_id = (u_int16_t *)malloc(sizeof(u_int16_t));
-		if (nump->rn_id == NULL) {
-			rcs_errno = RCS_ERR_ERRNO;
-			return (-1);
-		}
-	}
+	if (nump->rn_id == NULL)
+		nump->rn_id = (u_int16_t *)xmalloc(sizeof(u_int16_t));
 
 	nump->rn_len = 0;
 	nump->rn_id[0] = 0;
@@ -232,20 +229,16 @@ rcsnum_aton(const char *str, char **ep, RCSNUM *nump)
 			}
 
 			nump->rn_len++;
-			tmp = realloc(nump->rn_id,
+			tmp = xrealloc(nump->rn_id,
 			    (nump->rn_len + 1) * sizeof(u_int16_t));
-			if (tmp == NULL)
-				goto rcsnum_aton_failed;
 			nump->rn_id = (u_int16_t *)tmp;
 			nump->rn_id[nump->rn_len] = 0;
 			continue;
 		}
 
 		val = (nump->rn_id[nump->rn_len] * 10) + (*sp - 0x30);
-		if (val > RCSNUM_MAXNUM) {
-			cvs_log(LP_ERR, "RCSNUM overflow");
-			goto rcsnum_aton_failed;
-		}
+		if (val > RCSNUM_MAXNUM)
+			fatal("RCSNUM overflow!");
 
 		nump->rn_id[nump->rn_len] = val;
 	}
@@ -274,8 +267,12 @@ rcsnum_aton(const char *str, char **ep, RCSNUM *nump)
 	 * completely insane and not understandable reason in that output.
 	 *
 	 */
+#if !defined(RCSPROG)
 	if ((nump->rn_len > 2) && (nump->rn_id[nump->rn_len - 1] == 0)
 	    && (cvs_cmdop != CVS_OP_LOG)) {
+#else
+	if ((nump->rn_len > 2) && (nump->rn_id[nump->rn_len - 1] == 0)) {
+#endif
 		/*
 		 * Look for ".0.x" at the end of the branch number.
 		 */
@@ -302,7 +299,7 @@ rcsnum_aton(const char *str, char **ep, RCSNUM *nump)
 
 rcsnum_aton_failed:
 	nump->rn_len = 0;
-	free(nump->rn_id);
+	xfree(nump->rn_id);
 	nump->rn_id = NULL;
 	return (-1);
 }
@@ -323,6 +320,21 @@ rcsnum_inc(RCSNUM *num)
 }
 
 /*
+ * rcsnum_dec()
+ *
+ * Decreases the revision number specified in <num>
+ * Returns pointer to the <num> on success, or NULL on failure.
+ */
+RCSNUM *
+rcsnum_dec(RCSNUM *num)
+{
+	if (num->rn_id[num->rn_len - 1] <= 0)
+		return (NULL);
+	num->rn_id[num->rn_len - 1]--;
+	return (num);
+}
+
+/*
  * rcsnum_revtobr()
  *
  * Retrieve the branch number associated with the revision number <num>.
@@ -337,9 +349,7 @@ rcsnum_revtobr(const RCSNUM *num)
 	if (num->rn_len < 2)
 		return (NULL);
 
-	if ((brnum = rcsnum_alloc()) == NULL)
-		return (NULL);
-
+	brnum = rcsnum_alloc();
 	rcsnum_cpy(num, brnum, 0);
 
 	if (!RCSNUM_ISBRANCH(brnum))
@@ -363,9 +373,7 @@ rcsnum_brtorev(const RCSNUM *brnum)
 		return (NULL);
 	}
 
-	if ((num = rcsnum_alloc()) == NULL)
-		return (NULL);
-
+	num = rcsnum_alloc();
 	if (rcsnum_setsize(num, brnum->rn_len + 1) < 0) {
 		rcsnum_free(num);
 		return (NULL);
@@ -382,12 +390,7 @@ rcsnum_setsize(RCSNUM *num, u_int len)
 {
 	void *tmp;
 
-	tmp = realloc(num->rn_id, len * sizeof(u_int16_t));
-	if (tmp == NULL) {
-		rcs_errno = RCS_ERR_ERRNO;
-		return (-1);
-	}
-
+	tmp = xrealloc(num->rn_id, len * sizeof(u_int16_t));
 	num->rn_id = (u_int16_t *)tmp;
 	num->rn_len = len;
 	return (0);

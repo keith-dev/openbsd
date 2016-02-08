@@ -1,4 +1,4 @@
-/* $OpenBSD: commands.c,v 1.17 2005/06/17 09:40:48 markus Exp $	 */
+/* $OpenBSD: commands.c,v 1.19 2005/12/04 23:10:06 tedu Exp $	 */
 
 /*
  *  Top users/processes display for Unix
@@ -92,7 +92,7 @@ show_help(void)
 		    "k       - kill processes; send a signal to a list of processes\n"
 		    "n or #  - change number of processes to display\n", stdout);
 		fputs(
-		    "o       - specify sort order (size, res, cpu, time)\n"
+		    "o       - specify sort order (size, res, cpu, time, pri)\n"
 		    "p       - display one process (+ selects all processes)\n",
 		    stdout);
 		fputs(
@@ -100,6 +100,7 @@ show_help(void)
 		    "s       - change number of seconds to delay between updates\n"
 		    "S       - toggle the display of system processes\n"
 		    "u       - display processes for only one user (+ selects all users)\n"
+		    "T       - toggle the display of threads\n"
 		    "C       - toggle the display of the command line arguments\n"
 		    "\n\n", stdout);
 	}

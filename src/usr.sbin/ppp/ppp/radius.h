@@ -23,7 +23,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- *	$OpenBSD: radius.h,v 1.11 2002/06/17 01:14:08 brian Exp $
+ *	$OpenBSD: radius.h,v 1.16 2005/09/21 16:58:34 brad Exp $
  */
 
 #define	MPPE_POLICY_ALLOWED	1
@@ -51,6 +51,10 @@ struct radius {
   char *msrepstr;		/* MS-CHAP2-Response */
   char *repstr;			/* Reply-Message */
   char *errstr;			/* Error-Message */
+#ifndef NOINET6
+  uint8_t *ipv6prefix;		/* FRAMED IPv6 Prefix */
+  struct sticky_route *ipv6routes;  /* FRAMED IPv6 Routes */
+#endif
   struct {
     int policy;			/* MPPE_POLICY_* */
     int types;			/* MPPE_TYPE_*BIT bitmask */
@@ -62,6 +66,10 @@ struct radius {
   struct {
     char file[PATH_MAX];	/* Radius config file */
   } cfg;
+  struct {
+    struct pppTimer timer;	/* for this long */
+    int interval;
+  } alive;
 };
 
 struct radacct {
@@ -70,8 +78,18 @@ struct radacct {
   char session_id[256];		/* Unique session ID */
   char multi_session_id[51];	/* Unique MP session ID */
   int  authentic;		/* How the session has been authenticated */
-  struct in_addr ip;
-  struct in_addr mask;
+  u_short proto;		/* Protocol number */
+  union {
+    struct {
+      struct in_addr addr;
+      struct in_addr mask;
+    } ip;
+#ifndef NOINET6
+    struct {
+      u_char ifid[8];
+    } ipv6;
+#endif
+  } peer;
 };
 
 #define descriptor2radius(d) \
@@ -79,22 +97,31 @@ struct radacct {
 
 struct bundle;
 
+extern void radius_Flush(struct radius *);
 extern void radius_Init(struct radius *);
 extern void radius_Destroy(struct radius *);
 
 extern void radius_Show(struct radius *, struct prompt *);
+extern void radius_StartTimer(struct bundle *);
+extern void radius_StopTimer(struct radius *);
 extern int radius_Authenticate(struct radius *, struct authinfo *,
                                const char *, const char *, int,
                                const char *, int);
+extern void radius_Account_Set_Ip(struct radacct *, struct in_addr *,
+				  struct in_addr *);
+#ifndef NOINET6
+extern void radius_Account_Set_Ipv6(struct radacct *, u_char *);
+#endif
 extern void radius_Account(struct radius *, struct radacct *,
-                           struct datalink *, int, struct in_addr *,
-                           struct in_addr *, struct pppThroughput *);
+                           struct datalink *, int, struct pppThroughput *);
 
 /* An (int) parameter to radius_Account, from radlib.h */
 #if !defined(RAD_START)
 #define RAD_START	1
 #define RAD_STOP	2
 #endif
+
+#define RAD_ALIVE	3
 
 /* Get address from NAS pool */
 #define RADIUS_INADDR_POOL	htonl(0xfffffffe)	/* 255.255.255.254 */

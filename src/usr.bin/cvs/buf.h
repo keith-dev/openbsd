@@ -1,4 +1,4 @@
-/*	$OpenBSD: buf.h,v 1.6 2005/07/26 20:58:44 moritz Exp $	*/
+/*	$OpenBSD: buf.h,v 1.9 2006/02/01 16:28:20 xsa Exp $	*/
 /*
  * Copyright (c) 2003 Jean-Francois Brousseau <jfb@openbsd.org>
  * All rights reserved.
@@ -38,9 +38,6 @@
 #ifndef BUF_H
 #define BUF_H
 
-#include <sys/types.h>
-
-
 /* flags */
 #define BUF_AUTOEXT	1	/* autoextend on append */
 
@@ -52,11 +49,13 @@ BUF		*cvs_buf_alloc(size_t, u_int);
 BUF		*cvs_buf_load(const char *, u_int);
 void		 cvs_buf_free(BUF *);
 void		*cvs_buf_release(BUF *);
+u_char		 cvs_buf_getc(BUF *, u_int);
 void		 cvs_buf_empty(BUF *);
 ssize_t		 cvs_buf_copy(BUF *, size_t, void *, size_t);
 ssize_t		 cvs_buf_set(BUF *, const void *, size_t, size_t);
 ssize_t		 cvs_buf_append(BUF *, const void *, size_t);
-int		 cvs_buf_fappend(BUF *, const char *, ...);
+int		 cvs_buf_fappend(BUF *, const char *, ...)
+		     __attribute__((format(printf, 2, 3)));
 int		 cvs_buf_putc(BUF *, int);
 size_t		 cvs_buf_len(BUF *);
 const void	*cvs_buf_peek(BUF *, size_t);

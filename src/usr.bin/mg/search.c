@@ -1,4 +1,4 @@
-/*	$OpenBSD: search.c,v 1.22 2005/08/09 00:53:48 kjell Exp $	*/
+/*	$OpenBSD: search.c,v 1.28 2006/02/03 13:57:03 otto Exp $	*/
 
 /* This file is in the public domain. */
 
@@ -25,11 +25,11 @@
 #define SRCH_ACCM	(-4)
 #define SRCH_MARK	(-5)
 
-typedef struct {
+struct srchcom {
 	int	 s_code;
-	LINE	*s_dotp;
+	struct line	*s_dotp;
 	int	 s_doto;
-} SRCHCOM;
+};
 
 static int	isearch(int);
 static void	is_cpush(int);
@@ -42,7 +42,7 @@ static void	is_prompt(int, int, int);
 static void	is_dspl(char *, int);
 static int	eq(int, int, int);
 
-static SRCHCOM	cmds[NSRCH];
+static struct srchcom	cmds[NSRCH];
 static int	cip;
 
 int		srch_lastdir = SRCH_NOPR;	/* Last search flags.	 */
@@ -154,7 +154,7 @@ backisearch(int f, int n)
 static int
 isearch(int dir)
 {
-	LINE	*clp;
+	struct line	*clp;
 
 	int	 c;
 	int	 cbo;
@@ -285,6 +285,8 @@ isearch(int dir)
 			clp = curwp->w_dotp;
 			cbo = curwp->w_doto;
 			firstc = 1;
+			if (pptr == -1)
+				pptr = 0;
 			if (dir == SRCH_BACK) {
 				/* when isearching backwards, cbo is the start of the pattern */
 				cbo += pptr;
@@ -338,7 +340,8 @@ isearch(int dir)
 				ewprintf("Mark set");
 				curwp->w_flag |= WFMOVE;
 				return (TRUE);
-			}	/* and continue */
+			}
+			/* FALLTHRU */
 		case CCHR('I'):
 		case CCHR('J'):
 	addchar:
@@ -419,6 +422,7 @@ is_undo(int *pptr, int *dir)
 	case SRCH_BEGIN:
 	case SRCH_NOPR:
 		*pptr = -1;
+		break;
 	case SRCH_MARK:
 		break;
 	case SRCH_FORW:
@@ -446,7 +450,7 @@ static int
 is_find(int dir)
 {
 	int	 plen, odoto;
-	LINE	*odotp;
+	struct line	*odotp;
 
 	odoto = curwp->w_doto;
 	odotp = curwp->w_dotp;
@@ -551,46 +555,48 @@ queryrepl(int f, int n)
 retry:
 		update();
 		switch (getkey(FALSE)) {
+		case 'y':
 		case ' ':
-			if (lreplace((RSIZE)plen, news, f) == FALSE)
+			if (lreplace((RSIZE)plen, news) == FALSE)
 				return (FALSE);
 			rcnt++;
 			break;
 		case '.':
-			if (lreplace((RSIZE)plen, news, f) == FALSE)
+			if (lreplace((RSIZE)plen, news) == FALSE)
 				return (FALSE);
 			rcnt++;
 			goto stopsearch;
-		/* ^G or ESC */
+		/* ^G, CR or ESC */
 		case CCHR('G'):
 			(void)ctrlg(FFRAND, 0);
+			goto stopsearch;
 		case CCHR('['):
+		case CCHR('M'):
 			goto stopsearch;
 		case '!':
 			do {
-				if (lreplace((RSIZE)plen, news, f) == FALSE)
+				if (lreplace((RSIZE)plen, news) == FALSE)
 					return (FALSE);
 				rcnt++;
 			} while (forwsrch() == TRUE);
 			goto stopsearch;
+		case 'n':
 		case CCHR('H'):
 		/* To not replace */
 		case CCHR('?'):
 			break;
 		default:
-			ewprintf("<SP> replace, [.] rep-end, <DEL> don't, [!] repl rest <ESC> quit");
+			ewprintf("y/n or <SP>/<DEL>: replace/don't, [.] repl-end, [!] repl-rest, <CR>/<ESC> quit");
 			goto retry;
 		}
 	}
 stopsearch:
 	curwp->w_flag |= WFHARD;
 	update();
-	if (rcnt == 0)
-		ewprintf("(No replacements done)");
-	else if (rcnt == 1)
-		ewprintf("(1 replacement done)");
+	if (rcnt == 1)
+		ewprintf("Replaced 1 occurrence");
 	else
-		ewprintf("(%d replacements done)", rcnt);
+		ewprintf("Replaced %d occurrences", rcnt);
 	return (TRUE);
 }
 
@@ -616,7 +622,7 @@ replstr(int f, int n)
 	plen = strlen(pat);
 	while (forwsrch() == TRUE) {
 		update();
-		if (lreplace((RSIZE)plen, news, f) == FALSE)
+		if (lreplace((RSIZE)plen, news) == FALSE)
 			return (FALSE);
 
 		rcnt++;
@@ -626,9 +632,9 @@ replstr(int f, int n)
 	update();
 
 	if (rcnt == 1)
-		ewprintf("(1 replacement done)");
+		ewprintf("Replaced 1 occurrence");
 	else
-		ewprintf("(%d replacements done)", rcnt);
+		ewprintf("Replaced %d occurrences", rcnt);
 
 	return (TRUE);
 }
@@ -642,7 +648,7 @@ replstr(int f, int n)
 int
 forwsrch(void)
 {
-	LINE	*clp, *tlp;
+	struct line	*clp, *tlp;
 	int	 cbo, tbo, c, i, xcase = 0;
 	char	*pp;
 
@@ -694,7 +700,7 @@ fail:		;
 int
 backsrch(void)
 {
-	LINE	*clp, *tlp;
+	struct line	*clp, *tlp;
 	int	 cbo, tbo, c, i, xcase = 0;
 	char	*epp, *pp;
 

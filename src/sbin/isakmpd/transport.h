@@ -1,4 +1,4 @@
-/* $OpenBSD: transport.h,v 1.15 2004/06/20 15:24:05 ho Exp $	 */
+/* $OpenBSD: transport.h,v 1.17 2005/12/28 10:57:35 hshoexer Exp $	 */
 /* $EOM: transport.h,v 1.16 2000/07/17 18:57:59 provos Exp $	 */
 
 /*
@@ -46,6 +46,8 @@
 #include "message.h"
 
 struct transport;
+
+LIST_HEAD(transport_list, transport) transport_list;
 
 /* This describes a tranport "method" like UDP or similar.  */
 struct transport_vtbl {
@@ -146,7 +148,6 @@ extern struct transport *transport_create(char *, char *);
 extern int      transport_fd_set(fd_set *);
 extern void     transport_handle_messages(fd_set *);
 extern void     transport_init(void);
-extern void     transport_map(void (*) (struct transport *));
 extern void     transport_method_add(struct transport_vtbl *);
 extern int      transport_pending_wfd_set(fd_set *);
 extern int      transport_prio_sendqs_empty(void);

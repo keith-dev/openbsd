@@ -1,4 +1,4 @@
-/*	$OpenBSD: parse.y,v 1.16 2005/06/28 22:35:34 claudio Exp $ */
+/*	$OpenBSD: parse.y,v 1.24 2006/01/20 00:01:20 millert Exp $ */
 
 /*
  * Copyright (c) 2004, 2005 Esben Norby <norby@openbsd.org>
@@ -23,18 +23,17 @@
 
 %{
 #include <sys/types.h>
-#include <sys/time.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
-#include <net/if.h>
 #include <ctype.h>
 #include <err.h>
 #include <errno.h>
+#include <ifaddrs.h>
+#include <limits.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <string.h>
-#include <syslog.h>
 
 #include "ospf.h"
 #include "ospfd.h"
@@ -62,6 +61,7 @@ int	 findeol(void);
 int	 yylex(void);
 void	 clear_config(struct ospfd_conf *xconf);
 int	 check_file_secrecy(int fd, const char *fname);
+u_int32_t	get_rtr_id(void);
 
 static struct {
 	u_int32_t	dead_interval;
@@ -218,12 +218,13 @@ conf_main	: METRIC number {
 			}
 			defaults.rxmt_interval = $2;
 		}
-		| ROUTERID string {
+		| ROUTERID STRING {
 			if (!inet_aton($2, &conf->rtr_id)) {
 				yyerror("error parsing router-id");
 				free($2);
 				YYERROR;
 			}
+			free($2);
 		}
 		| FIBUPDATE yesno {
 			if ($2 == 0)
@@ -276,13 +277,13 @@ conf_main	: METRIC number {
 authmd		: AUTHMD number STRING {
 			if (iface != NULL) {
 				if ($2 < MIN_MD_ID || $2 > MAX_MD_ID) {
-					yyerror("auth-keyid out of range "
+					yyerror("auth-md key-id out of range "
 					    "(%d-%d)", MIN_MD_ID, MAX_MD_ID);
 					free($3);
 					YYERROR;
 				}
 				if (strlen($3) > MD5_DIGEST_LENGTH) {
-					yyerror("auth-md length out of range "
+					yyerror("auth-md key length out of range "
 					    "(max length %d)",
 					    MD5_DIGEST_LENGTH);
 					free($3);
@@ -296,7 +297,7 @@ authmd		: AUTHMD number STRING {
 authmdkeyid	: AUTHMDKEYID number {
 			if (iface != NULL) {
 				if ($2 < MIN_MD_ID || $2 > MAX_MD_ID) {
-					yyerror("auth-keyid out of range "
+					yyerror("auth-md-keyid out of range "
 					    "(%d-%d)", MIN_MD_ID, MAX_MD_ID);
 					YYERROR;
 				}
@@ -326,13 +327,14 @@ authtype	: AUTHTYPE STRING {
 authkey		: AUTHKEY STRING {
 			if (iface != NULL) {
 				if (strlen($2) > MAX_SIMPLE_AUTH_LEN) {
-					yyerror("auth-key size out of range "
-					    "(max %d)", MAX_SIMPLE_AUTH_LEN);
+					yyerror("auth-key length out of range "
+					    "(max length %d)", MAX_SIMPLE_AUTH_LEN);
 					free($2);
 					YYERROR;
 				}
 				iface->auth_key = $2;
-			}
+			} else
+				free($2);
 		}
 		;
 
@@ -343,10 +345,10 @@ optnl		: '\n' optnl
 nl		: '\n' optnl		/* one newline or more */
 		;
 
-area		: AREA string {
+area		: AREA STRING {
 			struct in_addr	id;
 			if (inet_aton($2, &id) == 0) {
-				yyerror("error parsing area-id");
+				yyerror("error parsing area");
 				free($2);
 				YYERROR;
 			}
@@ -430,14 +432,13 @@ interface	: INTERFACE STRING	{
 			iface->area = area;
 			LIST_INSERT_HEAD(&area->iface_list,
 			    iface, entry);
-			iface->rtr_id = conf->rtr_id;
-			iface->passive = 0;
 		} interface_block {
 			iface = NULL;
 		}
 		;
 
 interface_block	: '{' optnl interfaceopts_l '}'
+		| '{' optnl '}'
 		|
 		;
 
@@ -821,6 +822,9 @@ parse_config(char *filename, int opts)
 		return (NULL);
 	}
 
+	if (conf->rtr_id.s_addr == 0)
+		conf->rtr_id.s_addr = get_rtr_id();
+	
 	return (conf);
 }
 
@@ -958,6 +962,7 @@ conf_get_if(struct kif *kif)
 	i->rxmt_interval = area->rxmt_interval;
 	i->metric = area->metric;
 	i->priority = area->priority;
+	i->auth_keyid = 1;
 
 	return (i);
 }
@@ -965,6 +970,40 @@ conf_get_if(struct kif *kif)
 void
 clear_config(struct ospfd_conf *xconf)
 {
-	/* XXX clear conf */
-		/* ... */
+	struct area	*a;
+
+	while ((a = LIST_FIRST(&xconf->area_list)) != NULL) {
+		LIST_REMOVE(a, entry);
+		area_del(a);
+	}
+
+	free(xconf);
+}
+
+u_int32_t
+get_rtr_id(void)
+{
+	struct ifaddrs		*ifap, *ifa;
+	u_int32_t		 ip = 0, cur, localnet;
+
+	localnet = htonl(INADDR_LOOPBACK & IN_CLASSA_NET);
+
+	if (getifaddrs(&ifap) == -1)
+		fatal("getifaddrs");
+
+	for (ifa = ifap; ifa; ifa = ifa->ifa_next) {
+		if (ifa->ifa_addr->sa_family != AF_INET)
+			continue;
+		cur = ((struct sockaddr_in *)ifa->ifa_addr)->sin_addr.s_addr;
+		if ((cur & localnet) == localnet)	/* skip 127/8 */
+			continue;
+		if (cur > ip || ip == 0)
+			ip = cur;
+	}
+	freeifaddrs(ifap);
+	
+	if (ip == 0)
+		fatal("router-id is 0.0.0.0");
+
+	return (ip);
 }

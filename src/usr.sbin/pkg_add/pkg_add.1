@@ -1,4 +1,4 @@
-.\"	$OpenBSD: pkg_add.1,v 1.46 2005/08/17 19:22:31 espie Exp $
+.\"	$OpenBSD: pkg_add.1,v 1.56 2006/01/06 13:00:07 jmc Exp $
 .\"
 .\" FreeBSD install - a package for the installation and maintenance
 .\" of non-core utilities.
@@ -26,7 +26,7 @@
 .Sh SYNOPSIS
 .Nm pkg_add
 .Bk -words
-.Op Fl acInqruvx
+.Op Fl acIinqruvx
 .Op Fl A Ar arch
 .Op Fl B Ar pkg-destdir
 .Op Fl F Ar keywords
@@ -71,11 +71,19 @@ If the given package names are not found in the current working directory,
 will search for them in each directory named by the
 .Ev PKG_PATH
 environment variable.
+Since a few URL schemes contain colons,
+.Nm
+relies on each directory ending in a / to split the path correctly.
 Specifying
 .Ql -
 as a package name causes
 .Nm
 to read from the standard input.
+.Pp
+If the environment variable
+.Ev PKG_CACHE
+is set, every package retrieved from a distant location will also be
+copied here.
 .Pp
 Some packages may depend on other packages.
 When resolving dependencies
@@ -144,13 +152,17 @@ should be waived.
 These include:
 .Pp
 .Bl -tag -width "updatedependsXX" -compact
+.It Ar allversions
+do not trim older p* variants of packages for updates.
+.It Ar alwaysupdate
+proceed with an update even if
+.Nm
+can't find new packages for all installed packages.
 .It Ar arch
 architecture recorded in package may not match.
 .It Ar boguslibs
 not all shared libraries are marked with @lib.
 Inefficiently rescan package lists for non marked libraries.
-.It Ar conflicts
-package may conflict with other packages.
 .It Ar installed
 in update mode, reinstall an existing package with the same signature.
 .It Ar kitchensink
@@ -177,6 +189,10 @@ force update even if forward dependencies no longer match.
 .El
 .It Fl I
 If scripts exist for a given package, do not execute them.
+.It Fl i
+Switch on interactive mode.
+.Nm
+may ask questions to the user if faced with difficult decisions.
 .It Fl L Ar localbase
 Install a package under
 .Ar localbase .
@@ -219,42 +235,40 @@ marker.
 .It Fl q
 Replace package quickly; do not bother checking MD5s before removing files.
 .It Fl r
-Allow replacing existing packages.
-The code will try to take every precaution to make sure the update can
+Replace existing packages.
+.Nm
+will try to take every precaution to make sure the replacement can
 proceed before removing the old package and adding the new one, and it
 should also handle shared libraries correctly.
 Among other things,
 .Nm
-will refuse to update packages as soon as it needs to run scripts that
+will refuse to replace packages as soon as it needs to run scripts that
 might fail
 .Po
 use
 .Fl F Ar update
-to force the update
+to force the replacement
 .Pc ;
 .Nm
-will also refuse to update packages when the dependencies don't quite
+will also refuse to replace packages when the dependencies don't quite
 match
 .Po
 use
 .Fl F Ar updatedepends
-to force the update
+to force the replacement
 .Pc .
 .It Fl u
-Display the name of packages to use for an update of the given
-.Ar pkgname(s) .
-With this option, if no
+Update the given
+.Ar pkgname(s) ,
+and anything it depends upon.
+If no
 .Ar pkgname
 is given,
 .Nm
-will display update names for all installed packages.
+will update all installed packages.
 This relies on
 .Ev PKG_PATH
 to figure out the new package names.
-After
-.Ox 3.8
-rolls out and enough tests are conducted, this will become a true update
-switch and will proceed with the update proper.
 .It Fl v
 Turn on verbose output.
 Several
@@ -405,8 +419,90 @@ Note that it is safe to interrupt
 .Nm pkg_add
 through
 .Dv SIGINT ,
-as it will safely record an interrupted install as
+.Dv SIGHUP ,
+and other signals, as it will safely record an interrupted install as
 .Pa partial-<pkgname>[.n] .
+.Pp
+When replacing packages, the procedure is slightly different.
+.Bl -enum
+.It
+A check is made to determine if a similar package is already installed.
+If its signature is identical to that of the new package, no replacement
+is performed (unless -F installed is specified).
+.It
+A check is made to determine what old package the new package should replace,
+using conflicts.
+.It
+A check is made to determine whether the old package will be deleted without
+issue, and whether the new package will install correctly.
+This includes refusing to run any code (unless -F update), and verifying
+that the new package still matches dependencies (unless -F updatedepends).
+.It
+Shared libraries deserve special treatment: each shared library from the old
+package that does no longer exist in the new package, but that is required
+from a wantlib of another package is kept along in a stub package named
+.Pa \&.libs-<pkgname> .
+.It
+The new package is extracted to the filesystem, using temporary filenames
+of the form
+.Pa pkg.XXXXXXX
+since the old package is still there.
+The packing-list is amended to record these names as @temp annotations,
+in cases the installation fails.
+.It
+The old package is deleted as usual, except that some packages may still depend
+on it.
+.It
+The new package is installed as usual, except that the files are already present
+and only need to be renamed.
+.It
+Dependencies from the old package are adjusted to point to the new package.
+.El
+.Pp
+To update packages in -u mode,
+.Nm
+performs the following steps.
+.Bl -enum
+.It
+Packages to update are checked for dependencies, and their dependencies are
+marked for update as well, unless -F noclosure.
+.It
+Each package name is reduced to its stem, and every package name with matching
+stem available through
+.Ev PKG_PATH
+is considered as an update candidate.
+.It
+Some minimal version matching occurs: out of all p* variations of a given
+package, only the most recent package is kept (unless -F allversions
+is given).
+Note that
+.Nm pkg_add
+does not try to compare versions in a smarter way, thus
+.Ev PKG_PATH
+should point to a snapshot of packages for a given version of
+.Ox ,
+similar to the organization on the FTP sites.
+.It
+Candidates are then matched according to their source paths (the subdirectory of
+the ports dir, plus flavors and multi-packages modifiers), in order to weed
+out similar packages with distinct options.
+.It
+The signature of the candidate is compared to the signature of the already
+installed package: identical signatures mean no update needed.
+.It
+If several candidates are left,
+.Nm
+will ask the user in interactive mode, and not perform the update in
+non-interactive mode.
+.It
+Once a suitable update candidate has been found for every package,
+.Nm
+proceeds to print out the list of new packages, and then performs the update.
+.It
+If some updates can't be solved,
+.Nm
+stops before the update, unless -F alwaysupdate.
+.El
 .Sh ENVIRONMENT
 .Bl -tag -width PKG_DESTDIR
 .It Ev FTPMODE
@@ -433,17 +529,21 @@ value passed to any
 or
 .Cm REQUIRE
 script invoked from the package.
+.It Ev PKG_CACHE
+If set, any package retrieved from a distant location will be copied to
+that directory as well.
 .It Ev PKG_PATH
 If a given package name cannot be found,
 the directories named by
 .Ev PKG_PATH
 are searched.
 It should contain a series of entries separated by colons.
-Each entry consists of a directory name.
+Each entry consists of a directory name, ending in a slash.
+URL schemes such as FTP, HTTP, or SCP are also appropriate.
 The current directory may be indicated
 implicitly by an empty directory name, or explicitly by a single
 period
-.Pq Ql \&. .
+.Pq Ql \&./ .
 .It Ev PKG_TMPDIR
 Temporary area where package information files will be extracted, instead of
 .Pa /var/tmp .
@@ -453,7 +553,8 @@ Temporary area where package information files will be extracted, instead of
 .Xr pkg_create 1 ,
 .Xr pkg_delete 1 ,
 .Xr pkg_info 1 ,
-.Xr bsd.port.mk 5
+.Xr bsd.port.mk 5 ,
+.Xr package 5
 .Sh AUTHORS
 .Bl -tag -width indent -compact
 .It "Jordan Hubbard"

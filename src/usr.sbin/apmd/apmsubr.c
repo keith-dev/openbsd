@@ -1,4 +1,4 @@
-/*	$OpenBSD: apmsubr.c,v 1.3 2001/07/07 01:10:42 mickey Exp $	*/
+/*	$OpenBSD: apmsubr.c,v 1.7 2006/01/28 17:08:14 sturm Exp $	*/
 
 /*
  *  Copyright (c) 1995,1996 John T. Kohl
@@ -48,7 +48,7 @@ battstate(int state)
 	case APM_BATTERY_ABSENT:
 		return "absent";
 	case APM_BATT_UNKNOWN:
-		return "unknown (absent?)";
+		return "unknown";
 	default:
 		return "invalid battery state";
 	}
@@ -68,5 +68,24 @@ ac_state(int state)
 		return "not known";
 	default:
 		return "invalid AC status";
+	}
+}
+
+const char *
+perf_state(int state)
+{
+	switch (state) {
+	case PERF_NONE:
+		return "uninitialized";
+	case PERF_LOW:
+		return "low";
+	case PERF_HIGH:
+		return "high";
+	case PERF_AUTO:
+		return "auto";
+	case PERF_COOL:
+		return "cool running";
+	default:
+		return "invalid performance status";
 	}
 }

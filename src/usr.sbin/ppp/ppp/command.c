@@ -25,7 +25,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- * $OpenBSD: command.c,v 1.88 2005/07/26 01:32:25 brad Exp $
+ * $OpenBSD: command.c,v 1.91 2005/09/21 16:28:47 brad Exp $
  */
 
 #include <sys/param.h>
@@ -142,6 +142,7 @@
 #define	VAR_IFQUEUE	35
 #define	VAR_MPPE	36
 #define	VAR_IPV6CPRETRY	37
+#define	VAR_RAD_ALIVE	38
 
 /* ``accept|deny|disable|enable'' masks */
 #define NEG_HISMASK (1)
@@ -493,6 +494,22 @@ substipv6(char *tgt, const char *oldstr, const struct ncpaddr *ip)
 {
     return subst(tgt, oldstr, ncpaddr_ntoa(ip));
 }
+
+#ifndef NORADIUS
+static char *
+substipv6prefix(char *tgt, const char *oldstr, const uint8_t *ipv6prefix)
+{
+  uint8_t ipv6addr[INET6_ADDRSTRLEN];
+  uint8_t prefix[INET6_ADDRSTRLEN + sizeof("/128") - 1];
+
+  if (ipv6prefix) {
+    inet_ntop(AF_INET6, &ipv6prefix[2], ipv6addr, sizeof(ipv6addr));
+    snprintf(prefix, sizeof(prefix), "%s/%d", ipv6addr, ipv6prefix[1]);
+  } else
+    prefix[0] = '\0';
+  return subst(tgt, oldstr, prefix);
+}
+#endif
 #endif
 
 void
@@ -560,6 +577,10 @@ command_Expand(char **nargv, int argc, char const *const *oargv,
     nargv[arg] = substip(nargv[arg], "MYADDR", bundle->ncp.ipcp.my_ip);
 #ifndef NOINET6
     nargv[arg] = substipv6(nargv[arg], "MYADDR6", &bundle->ncp.ipv6cp.myaddr);
+#ifndef NORADIUS
+    nargv[arg] = substipv6prefix(nargv[arg], "IPV6PREFIX",
+				 bundle->radius.ipv6prefix);
+#endif
 #endif
     nargv[arg] = substull(nargv[arg], "OCTETSIN", oin);
     nargv[arg] = substull(nargv[arg], "OCTETSOUT", oout);
@@ -2008,6 +2029,29 @@ SetVariable(struct cmdargs const *arg)
     }
     break;
 
+#ifndef NORADIUS
+  case VAR_RAD_ALIVE:
+    if (arg->argc > arg->argn + 2) {
+      log_Printf(LogWARN, "Too many RADIUS alive interval values\n");
+      res = 1;
+    } else if (arg->argc == arg->argn) {
+      log_Printf(LogWARN, "Too few RADIUS alive interval values\n");
+      res = 1;
+    } else {
+      arg->bundle->radius.alive.interval = atoi(argp);
+      if (arg->bundle->radius.alive.interval && !arg->bundle->radius.cfg.file) {
+        log_Printf(LogWARN, "rad_alive requires radius to be configured\n");
+	res = 1;
+      } else if (arg->bundle->ncp.ipcp.fsm.state == ST_OPENED) {
+	if (arg->bundle->radius.alive.interval)
+	  radius_StartTimer(arg->bundle);
+	else
+	  radius_StopTimer(&arg->bundle->radius);
+      }
+    }
+    break;
+#endif
+
   case VAR_LQRPERIOD:
     long_val = atol(argp);
     if (long_val < MIN_LQRPERIOD) {
@@ -2323,7 +2367,7 @@ static struct cmdtab const SetCommands[] = {
    "set lcpretry value [attempts]", (const void *)VAR_LCPRETRY},
   {"log", NULL, log_SetLevel, LOCAL_AUTH, "log level",
   "set log [local] [+|-]all|async|cbcp|ccp|chat|command|connect|debug|dns|hdlc|"
-  "id0|ipcp|lcp|lqm|phase|physical|sync|tcp/ip|timer|tun..."},
+  "id0|ipcp|lcp|lqm|phase|physical|radius|sync|tcp/ip|timer|tun..."},
   {"login", NULL, SetVariable, LOCAL_AUTH | LOCAL_CX,
   "login script", "set login chat-script", (const void *) VAR_LOGIN},
   {"logout", NULL, SetVariable, LOCAL_AUTH | LOCAL_CX,
@@ -2353,6 +2397,9 @@ static struct cmdtab const SetCommands[] = {
 #ifndef NORADIUS
   {"radius", NULL, SetVariable, LOCAL_AUTH,
   "RADIUS Config", "set radius cfgfile", (const void *)VAR_RADIUS},
+  {"rad_alive", NULL, SetVariable, LOCAL_AUTH,
+  "Raduis alive interval", "set rad_alive value",
+  (const void *)VAR_RAD_ALIVE},  
 #endif
   {"reconnect", NULL, datalink_SetReconnect, LOCAL_AUTH | LOCAL_CX,
   "Reconnect timeout", "set reconnect value ntries"},
@@ -2545,7 +2592,7 @@ NatEnable(struct cmdargs const *arg)
       return 0;
     } else if (strcasecmp(arg->argv[arg->argn], "no") == 0) {
       arg->bundle->NatEnabled = 0;
-      arg->bundle->cfg.opt &= ~OPT_IFACEALIAS;
+      opt_disable(arg->bundle, OPT_IFACEALIAS);
       /* Don't iface_Clear() - there may be manually configured addresses */
       return 0;
     }
@@ -2690,24 +2737,32 @@ ident_cmd(const char *cmd, unsigned *keep, unsigned *add)
 static int
 OptSet(struct cmdargs const *arg)
 {
-  int bit = (int)(long)arg->cmd->args;
-  unsigned keep;			/* Keep these bits */
-  unsigned add;				/* Add these bits */
+  int opt = (int)(long)arg->cmd->args;
+  unsigned keep;			/* Keep this opt */
+  unsigned add;				/* Add this opt */
 
   if (ident_cmd(arg->argv[arg->argn - 2], &keep, &add) == NULL)
     return 1;
 
 #ifndef NOINET6
-  if (add == NEG_ENABLED && bit == OPT_IPV6CP && !probe.ipv6_available) {
+  if (add == NEG_ENABLED && opt == OPT_IPV6CP && !probe.ipv6_available) {
     log_Printf(LogWARN, "IPv6 is not available on this machine\n");
     return 1;
   }
 #endif
+  if (!add && ((opt == OPT_NAS_IP_ADDRESS &&
+                !Enabled(arg->bundle, OPT_NAS_IDENTIFIER)) ||
+               (opt == OPT_NAS_IDENTIFIER &&
+                !Enabled(arg->bundle, OPT_NAS_IP_ADDRESS)))) {
+    log_Printf(LogWARN,
+               "Cannot disable both NAS-IP-Address and NAS-Identifier\n");
+    return 1;
+  }
 
   if (add)
-    arg->bundle->cfg.opt |= bit;
+    opt_enable(arg->bundle, opt);
   else
-    arg->bundle->cfg.opt &= ~bit;
+    opt_disable(arg->bundle, opt);
 
   return 0;
 }
@@ -2715,12 +2770,12 @@ OptSet(struct cmdargs const *arg)
 static int
 IfaceAliasOptSet(struct cmdargs const *arg)
 {
-  unsigned save = arg->bundle->cfg.opt;
+  unsigned long long save = arg->bundle->cfg.optmask;
   int result = OptSet(arg);
 
   if (result == 0)
     if (Enabled(arg->bundle, OPT_IFACEALIAS) && !arg->bundle->NatEnabled) {
-      arg->bundle->cfg.opt = save;
+      arg->bundle->cfg.optmask = save;
       log_Printf(LogWARN, "Cannot enable iface-alias without NAT\n");
       result = 2;
     }
@@ -2882,6 +2937,10 @@ static struct cmdtab const NegotiateCommands[] = {
   "disable|enable", (const void *)OPT_KEEPSESSION},
   {"loopback", NULL, OptSet, LOCAL_AUTH, "Loop packets for local iface",
   "disable|enable", (const void *)OPT_LOOPBACK},
+  {"nas-ip-address", NULL, OptSet, LOCAL_AUTH, "Send NAS-IP-Address to RADIUS",
+  "disable|enable", (const void *)OPT_NAS_IP_ADDRESS},
+  {"nas-identifier", NULL, OptSet, LOCAL_AUTH, "Send NAS-Identifier to RADIUS",
+  "disable|enable", (const void *)OPT_NAS_IDENTIFIER},
   {"passwdauth", NULL, OptSet, LOCAL_AUTH, "Use passwd file",
   "disable|enable", (const void *)OPT_PASSWDAUTH},
   {"proxy", NULL, OptSet, LOCAL_AUTH, "Create a proxy ARP entry",
@@ -2898,9 +2957,9 @@ static struct cmdtab const NegotiateCommands[] = {
   "disable|enable", (const void *)OPT_UTMP},
 
 #ifndef NOINET6
-#define OPT_MAX 15	/* accept/deny allowed below and not above */
+#define NEG_OPT_MAX 17	/* accept/deny allowed below and not above */
 #else
-#define OPT_MAX 13
+#define NEG_OPT_MAX 15
 #endif
 
   {"acfcomp", NULL, NegotiateSet, LOCAL_AUTH | LOCAL_CX,
@@ -2972,7 +3031,7 @@ NegotiateCommand(struct cmdargs const *arg)
     for (n = arg->argn; n < arg->argc; n++) {
       argv[1] = arg->argv[n];
       FindExec(arg->bundle, NegotiateCommands + (keep == NEG_HISMASK ?
-               0 : OPT_MAX), 2, 1, argv, arg->prompt, arg->cx);
+               0 : NEG_OPT_MAX), 2, 1, argv, arg->prompt, arg->cx);
     }
   } else if (arg->prompt)
     prompt_Printf(arg->prompt, "Use `%s ?' to get a list.\n",

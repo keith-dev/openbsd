@@ -1,4 +1,4 @@
-dnl	$OpenBSD: hardware,v 1.103 2005/08/23 02:25:54 jsg Exp $
+dnl	$OpenBSD: hardware,v 1.110 2006/02/16 20:39:51 martin Exp $
 OpenBSD/MACHINE OSREV runs on the following classes of machines:
 	Sun Blade 100/150
 	Sun Fire V100
@@ -73,8 +73,10 @@ Supported devices {:-include-:}:
 		SBus NCR53c9x adapters (esp)
 		SBus 10/100Mbit SunSwift Ethernet+SCSI cards, aka HME + FAS366
 		  cards (esp)
-		SBus QLogic adapters (isp)
+		SBus and PCI QLogic adapters (isp)
 		PCI NCR53c8xx adapters (siop)
+		AMD Am53c974 PCscsi-PCI host adapters including the Tekram
+		  DC-390 (pcscp)
 
 	PCI IDE Controllers: (pciide)
 		Acer Labs M5229
@@ -162,7 +164,7 @@ dnl		PCI Alteon Tigon I/II PCI Gigabit Ethernet boards (ti)
 		    Elsa Microlink USB2Ethernet
 		    I/O Data USB ETTX
 		    Kingston KNU101TX
-		    LinkSys USB100TX, USB100H1 and USB10TA
+		    Linksys USB100TX, USB100H1 and USB10TA
 		    Melco Inc. LUA-TX
 		    Siemens SpeedStream USB
 		    SmartBridges smartNIC 2
@@ -180,7 +182,7 @@ dnl		PCI Alteon Tigon I/II PCI Gigabit Ethernet boards (ti)
 		    Hawking UF200
 		    Intellinet USB 2.0 to Ethernet (rev A)
 		    JVC MP-PRX1
-		    LinkSys USB200M
+		    Linksys USB200M
 		    Netgear FA120
 		    Sitecom LN-029
 		    SMC 2209USB/ETH
@@ -211,7 +213,7 @@ dnl		PCI Alteon Tigon I/II PCI Gigabit Ethernet boards (ti)
 		    Jaton USB XpressNet
 		    Kawasaki USB101
 		    Kingston Ethernet
-		    LinkSys USB10T
+		    Linksys USB10T
 		    Mobility Ethernet
 		    Netgear EA101
 		    Peracom USB
@@ -236,7 +238,7 @@ dnl		PCI Alteon Tigon I/II PCI Gigabit Ethernet boards (ti)
 		    NetComm NP1010
 		    Repotec RP-USB100-A
 		    SMC 2208USB/ETH
-		    TrendNet TU-ET100C
+		    TRENDnet TU-ET100C
 		    Zt USB10/100
 		    Z-TEK ZK-R02
 
@@ -287,11 +289,16 @@ dnl		PCI Alteon Tigon I/II PCI Gigabit Ethernet boards (ti)
 		    Z-Com M4Y-750
 		Intersil PRISM-2-3 based IEEE 802.11b Compact Flash adapters
 		  (will be detected as PCMCIA adapters)
+		    AmbiCom WL1100C-CF
+		    ASUS WL-110
+		    Belkin F5D6060 (version 1)
 		    Buffalo AirStation
 		    D-Link DCF-660W
 		    ELSA XI800
 		    Linksys WCF12
 		    Netgear MA701
+		    Pretec Compact WLAN OC-WLBXX-A
+		    Senao NL-2511CF
 		Intersil PRISM 2-3, Lucent Hermes and Symbol Spectrum 24
 		  based PCMCIA IEEE 802.11b adapters
 		    3Com AirConnect 3CRWE737A
@@ -348,7 +355,7 @@ dnl		PCI Alteon Tigon I/II PCI Gigabit Ethernet boards (ti)
 		    Global Sun Technology GL24110P (untested)
 		    Global Sun Technology GL24110P02
 		    Intersil Mini-PCI
-		    LinkSys WDT11 (a rebadged GL24110P02)
+		    Linksys WDT11 (a rebadged GL24110P02)
 		    NDC/Sohoware NCP130
 		    Netgear MA301
 		    Netgear MA311
@@ -384,6 +391,7 @@ dnl		PCI Alteon Tigon I/II PCI Gigabit Ethernet boards (ti)
 		    Sitecom WL-022
 		    Syntax USB-400
 		    US Robotics 1120
+		    ViewSonic Airsync
 		    Z-Com XI-725/726
 		    Z-Com XI-735
 		    ZyXEL ZyAIR B-200

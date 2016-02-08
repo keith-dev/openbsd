@@ -1,20 +1,15 @@
 #!/bin/sh -
 #
-#	$OpenBSD: netstart,v 1.105 2005/05/22 08:56:08 todd Exp $
+#	$OpenBSD: netstart,v 1.113 2005/12/28 04:55:35 david Exp $
 
 # Strip comments (and leading/trailing whitespace if IFS is set)
 # from a file and spew to stdout
 stripcom() {
-	local _file="$1"
-	local _line
-
-	{
-		while read _line ; do
-			_line=${_line%%#*}		# strip comments
-			test -z "$_line" && continue
-			echo $_line
-		done
-	} < $_file
+	local _l
+	[[ -f $1 ]] || return
+	while read _l; do
+		[[ -n ${_l%%#*} ]] && echo $_l
+	done<$1
 }
 
 # Returns true if $1 contains only alphanumerics
@@ -81,14 +76,13 @@ ifstart() {
 			[ "$name" = "NONE" ] && name=
 			[ "$mask" = "NONE" ] && mask=
 			[ "$bcaddr" = "NONE" ] && bcaddr=
-			ifconfig $if $name $mask $bcaddr $ext1 $ext2 down
-			cmd="dhclient $if"
-			setgateway=N
+			cmd="ifconfig $if $name $mask $bcaddr $ext1 $ext2 down"
+			cmd="$cmd;dhclient $if"
+			dhcpif="$dhcpif $if"
 			;;
 		"rtsol")
-			ifconfig $if $name $mask $bcaddr $ext1 $ext2 up
 			rtsolif="$rtsolif $if"
-			cmd=
+			cmd="ifconfig $if $name $mask $bcaddr $ext1 $ext2 up"
 			;;
 		"up")
 			# The only one of these guaranteed to be set is $if.
@@ -152,9 +146,9 @@ ifmstart() {
 			# Strip off /etc/hostname. prefix
 			if=${hn#/etc/hostname.}
 			test "$if" = "*" && continue
-	
+
 			# Skip unwanted ifs
-			s=""	
+			s=""
 			for xf in $2; do
 				test "$xf" = "${if%%[0-9]*}" && s="1" && break
 			done
@@ -178,7 +172,7 @@ bridgestart() {
 	brconfig $1 > /dev/null 2>&1
 	if [ "$?" != "0" ]; then
 		# Try to create interface if it does not exist
-		ifconfig $if create > /dev/null 2>&1
+		ifconfig $1 create > /dev/null 2>&1
 		if [ "$?" != "0" ]; then
 			return
 		fi
@@ -291,7 +285,7 @@ fi
 # Configure all the non-loopback interfaces which we know about, but
 # do not start interfaces which must be delayed.
 # Refer to hostname.if(5) and bridgename.if(5)
-ifmstart "" "carp gif gre pfsync pppoe"
+ifmstart "" "trunk vlan carp gif gre pfsync pppoe"
 
 if [ "$ip6kernel" = "YES" -a "x$rtsolif" != "x" ]; then
 	fw=`sysctl -n net.inet6.ip6.forwarding`
@@ -308,17 +302,25 @@ if [ "$ip6kernel" = "YES" ]; then
 	sleep `sysctl -n net.inet6.ip6.dad_count`
 fi
 
-# The pfsync interface needs to come up before carp.
+# The trunk interfaces need to come up first in this list.
+# The vlan interfaces need to come up after trunk.
+# The pfsync interfaces need to come up before carp.
 # Configure all the carp interfaces which we know about.
 # They must come up after pfsync but before default route.
-ifmstart "pfsync carp"
+ifmstart "trunk vlan pfsync carp"
 
 # /etc/mygate, if it exists, contains the name of my gateway host
 # that name must be in /etc/hosts.
-if [ "X${setgateway}" != X"N" -a -f /etc/mygate ]; then
-	route -qn delete default > /dev/null 2>&1
-	route -qn add -host default `stripcom /etc/mygate`
-fi
+[[ -z $dhcpif ]] && stripcom /etc/mygate | while read gw; do
+		[[ $gw == @(*:*) ]] && continue
+		route -qn delete default > /dev/null 2>&1
+		route -qn add -host default $gw && break
+done
+[[ -z $rtsolif ]] && stripcom /etc/mygate | while read gw; do
+		[[ $gw == !(*:*) ]] && continue
+		route -qn delete -inet6 default > /dev/null 2>&1
+		route -qn add -host -inet6 default $gw && break
+done
 
 # Multicast routing.
 #
@@ -328,6 +330,7 @@ fi
 # NO			YES			none installed	daemon will run
 # YES/interface		NO			-interface	YES=def. iface
 #	   Any other combination		-reject		config error
+route -qn delete 224.0.0.0/4 > /dev/null 2>&1
 case "$multicast_host:$multicast_router" in
 NO:NO)
 	route -qn add -net 224.0.0.0/4 -interface 127.0.0.1 -reject > /dev/null
@@ -335,7 +338,7 @@ NO:NO)
 NO:YES)
 	;;
 *:NO)
-	set `if [ $multicast_host = YES ]; then
+	maddr=`if [ "$multicast_host" = "YES" ]; then
 		ed -s '!route -qn show -inet' <<EOF
 /^default/p
 EOF
@@ -343,8 +346,14 @@ EOF
 		ed -s "!ifconfig $multicast_host" <<EOF
 /^	inet /p
 EOF
-	fi`
-	route -qn add -net 224.0.0.0/4 -interface $2 > /dev/null
+	fi 2> /dev/null`
+	if [ "X${maddr}" != "X" ]; then
+		set $maddr
+		route -qn add -net 224.0.0.0/4 -interface $2 > /dev/null
+	else
+		route -qn add -net 224.0.0.0/4 -interface \
+			127.0.0.1 -reject > /dev/null
+	fi
 	;;
 *:*)
 	echo 'config error, multicasting disabled until rc.conf is fixed'

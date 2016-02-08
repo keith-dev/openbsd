@@ -1,4 +1,4 @@
-/*	$OpenBSD: vs_msg.c,v 1.7 2002/02/16 21:27:58 millert Exp $	*/
+/*	$OpenBSD: vs_msg.c,v 1.9 2006/01/08 21:05:40 miod Exp $	*/
 
 /*-
  * Copyright (c) 1993, 1994
@@ -250,12 +250,13 @@ vs_msg(sp, mtype, line, len)
 	 * XXX
 	 * Shouldn't we save this, too?
 	 */
-	if (F_ISSET(sp, SC_TINPUT_INFO) || F_ISSET(gp, G_BELLSCHED))
+	if (F_ISSET(sp, SC_TINPUT_INFO) || F_ISSET(gp, G_BELLSCHED)) {
 		if (F_ISSET(sp, SC_SCR_VI)) {
 			F_CLR(gp, G_BELLSCHED);
 			(void)gp->scr_bell(sp);
 		} else
 			F_SET(gp, G_BELLSCHED);
+	}
 
 	/*
 	 * If vi is using the error line for text input, there's no screen
@@ -281,13 +282,14 @@ vs_msg(sp, mtype, line, len)
 	 * the screen, so previous opinions are ignored.
 	 */
 	if (F_ISSET(sp, SC_EX | SC_SCR_EXWROTE)) {
-		if (!F_ISSET(sp, SC_SCR_EX))
+		if (!F_ISSET(sp, SC_SCR_EX)) {
 			if (F_ISSET(sp, SC_SCR_EXWROTE)) {
 				if (sp->gp->scr_screen(sp, SC_EX))
 					return;
 			} else
 				if (ex_init(sp))
 					return;
+		}
 
 		if (mtype == M_ERR)
 			(void)gp->scr_attr(sp, SA_INVERSE, 1);
@@ -349,13 +351,14 @@ vs_msg(sp, mtype, line, len)
 	padding += 2;
 
 	maxcols = sp->cols - 1;
-	if (vip->lcontinue != 0)
+	if (vip->lcontinue != 0) {
 		if (len + vip->lcontinue + padding > maxcols)
 			vs_output(sp, vip->mtype, ".\n", 2);
 		else  {
 			vs_output(sp, vip->mtype, ";", 1);
 			vs_output(sp, M_NONE, " ", 1);
 		}
+	}
 	vip->mtype = mtype;
 	for (s = line;; s = t) {
 		for (; len > 0 && isblank(*s); --len, ++s);
@@ -600,7 +603,7 @@ vs_ex_resolve(sp, continuep)
 	 * If we're not the bottom of the split screen stack, the screen
 	 * image itself is wrong, so redraw everything.
 	 */
-	if (sp->q.cqe_next != (void *)&sp->gp->dq)
+	if (CIRCLEQ_NEXT(sp, q) != CIRCLEQ_END(&sp->gp->dq))
 		F_SET(sp, SC_SCR_REDRAW);
 
 	/* If ex changed the underlying file, the map itself is wrong. */
@@ -698,10 +701,10 @@ vs_resolve(sp, csp, forcewait)
 	 * messages.)  Once this is done, don't trust the cursor.  That
 	 * extra refresh screwed the pooch.
 	 */
-	if (gp->msgq.lh_first != NULL) {
+	if (LIST_FIRST(&gp->msgq) != NULL) {
 		if (!F_ISSET(sp, SC_SCR_VI) && vs_refresh(sp, 1))
 			return (1);
-		while ((mp = gp->msgq.lh_first) != NULL) {
+		while ((mp = LIST_FIRST(&gp->msgq)) != NULL) {
 			gp->scr_msg(sp, mp->mtype, mp->buf, mp->len);
 			LIST_REMOVE(mp, q);
 			free(mp->buf);
@@ -781,7 +784,7 @@ vs_scroll(sp, continuep, wtype)
 		(void)gp->scr_deleteln(sp);
 
 		/* If there are screens below us, push them back into place. */
-		if (sp->q.cqe_next != (void *)&sp->gp->dq) {
+		if (CIRCLEQ_NEXT(sp, q) != CIRCLEQ_END(&sp->gp->dq)) {
 			(void)gp->scr_move(sp, LASTLINE(sp), 0);
 			(void)gp->scr_insertln(sp);
 		}
@@ -914,10 +917,10 @@ vs_msgsave(sp, mt, p, len)
 	mp_n->mtype = mt;
 
 	gp = sp->gp;
-	if ((mp_c = gp->msgq.lh_first) == NULL) {
+	if ((mp_c = LIST_FIRST(&gp->msgq)) == NULL) {
 		LIST_INSERT_HEAD(&gp->msgq, mp_n, q);
 	} else {
-		for (; mp_c->q.le_next != NULL; mp_c = mp_c->q.le_next);
+		for (; LIST_NEXT(mp_c, q) != NULL; mp_c = LIST_NEXT(mp_c, q));
 		LIST_INSERT_AFTER(mp_c, mp_n, q);
 	}
 	return;

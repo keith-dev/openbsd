@@ -1,4 +1,4 @@
-/*	$OpenBSD: if.c,v 1.137 2005/07/04 09:52:33 henning Exp $	*/
+/*	$OpenBSD: if.c,v 1.143 2006/02/09 00:05:55 reyk Exp $	*/
 /*	$NetBSD: if.c,v 1.35 1996/05/07 05:26:04 thorpej Exp $	*/
 
 /*
@@ -405,6 +405,11 @@ if_attachhead(struct ifnet *ifp)
 	if (ifp->if_linkstatehooks == NULL)
 		panic("if_attachhead: malloc");
 	TAILQ_INIT(ifp->if_linkstatehooks);
+	ifp->if_detachhooks = malloc(sizeof(*ifp->if_detachhooks),
+	    M_TEMP, M_NOWAIT);
+	if (ifp->if_detachhooks == NULL)
+		panic("if_attachhead: malloc");
+	TAILQ_INIT(ifp->if_detachhooks);
 	TAILQ_INSERT_HEAD(&ifnet, ifp, if_list);
 	if_attachsetup(ifp);
 }
@@ -431,6 +436,11 @@ if_attach(struct ifnet *ifp)
 	if (ifp->if_linkstatehooks == NULL)
 		panic("if_attach: malloc");
 	TAILQ_INIT(ifp->if_linkstatehooks);
+	ifp->if_detachhooks = malloc(sizeof(*ifp->if_detachhooks),
+	    M_TEMP, M_NOWAIT);
+	if (ifp->if_detachhooks == NULL)
+		panic("if_attach: malloc");
+	TAILQ_INIT(ifp->if_detachhooks);
 
 #if NCARP > 0
 	if (ifp->if_type != IFT_CARP)
@@ -500,6 +510,9 @@ if_detach(struct ifnet *ifp)
 	ifp->if_init = if_detached_init;
 	ifp->if_watchdog = if_detached_watchdog;
 
+	/* Call detach hooks, ie. to remove vlan interfaces */
+	dohooks(ifp->if_detachhooks, HOOK_REMOVE | HOOK_FREE);
+
 #if NTRUNK > 0
 	if (ifp->if_type == IFT_IEEE8023ADLAG)
 		trunk_port_ifdetach(ifp);
@@ -518,9 +531,7 @@ if_detach(struct ifnet *ifp)
 #endif
 
 #if NBPFILTER > 0
-	/* If there is a bpf device attached, detach from it.  */
-	if (ifp->if_bpf)
-		bpfdetach(ifp);
+	bpfdetach(ifp);
 #endif
 #ifdef ALTQ
 	if (ALTQ_IS_ENABLED(&ifp->if_snd))
@@ -628,6 +639,7 @@ do { \
 
 	free(ifp->if_addrhooks, M_TEMP);
 	free(ifp->if_linkstatehooks, M_TEMP);
+	free(ifp->if_detachhooks, M_TEMP);
 
 	for (dp = domains; dp; dp = dp->dom_next) {
 		if (dp->dom_ifdetach && ifp->if_afdata[dp->dom_family])
@@ -824,6 +836,7 @@ if_clone_list(struct if_clonereq *ifcr)
 
 	for (ifc = LIST_FIRST(&if_cloners); ifc != NULL && count != 0;
 	     ifc = LIST_NEXT(ifc, ifc_list), count--, dst += IFNAMSIZ) {
+		bzero(outbuf, sizeof outbuf);
 		strlcpy(outbuf, ifc->ifc_name, IFNAMSIZ);
 		error = copyout(outbuf, dst, IFNAMSIZ);
 		if (error)
@@ -1709,6 +1722,7 @@ if_getgroup(caddr_t data, struct ifnet *ifp)
 	TAILQ_FOREACH(ifgl, &ifp->if_groups, ifgl_next) {
 		if (len < sizeof(ifgrq))
 			return (EINVAL);
+		bzero(&ifgrq, sizeof ifgrq);
 		strlcpy(ifgrq.ifgrq_group, ifgl->ifgl_group->ifg_group,
 		    sizeof(ifgrq.ifgrq_group));
 		if ((error = copyout((caddr_t)&ifgrq, (caddr_t)ifgp,
@@ -1750,6 +1764,7 @@ if_getgroupmembers(caddr_t data)
 	TAILQ_FOREACH(ifgm, &ifg->ifg_members, ifgm_next) {
 		if (len < sizeof(ifgrq))
 			return (EINVAL);
+		bzero(&ifgrq, sizeof ifgrq);
 		strlcpy(ifgrq.ifgrq_member, ifgm->ifgm_ifp->if_xname,
 		    sizeof(ifgrq.ifgrq_member));
 		if ((error = copyout((caddr_t)&ifgrq, (caddr_t)ifgp,

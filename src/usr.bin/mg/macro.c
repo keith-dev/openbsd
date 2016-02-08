@@ -1,4 +1,4 @@
-/*	$OpenBSD: macro.c,v 1.9 2005/06/14 18:14:40 kjell Exp $	*/
+/*	$OpenBSD: macro.c,v 1.11 2005/12/20 06:17:36 kjell Exp $	*/
 
 /* This file is in the public domain. */
 
@@ -15,8 +15,8 @@ int inmacro = FALSE;
 int macrodef = FALSE;
 int macrocount = 0;
 
-LINE *maclhead = NULL;
-LINE *maclcur;
+struct line *maclhead = NULL;
+struct line *maclcur;
 
 union macrodef macro[MAXMACRO];
 
@@ -24,7 +24,7 @@ union macrodef macro[MAXMACRO];
 int
 definemacro(int f, int n)
 {
-	LINE	*lp1, *lp2;
+	struct line	*lp1, *lp2;
 
 	macrocount = 0;
 
@@ -37,9 +37,9 @@ definemacro(int f, int n)
 	if (maclhead != NULL) {
 		for (lp1 = maclhead->l_fp; lp1 != maclhead; lp1 = lp2) {
 			lp2 = lp1->l_fp;
-			free((char *)lp1);
+			free(lp1);
 		}
-		free((char *)lp1);
+		free(lp1);
 	}
 
 	if ((maclhead = lp1 = lalloc(0)) == NULL)

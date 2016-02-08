@@ -1,4 +1,4 @@
-/*	$OpenBSD: rtld_machine.c,v 1.31 2004/05/25 21:42:47 mickey Exp $ */
+/*	$OpenBSD: rtld_machine.c,v 1.35 2006/02/22 19:50:21 miod Exp $ */
 
 /*
  * Copyright (c) 1999 Dale Rahn
@@ -34,8 +34,6 @@
 #include <sys/cdefs.h>
 #include <sys/mman.h>
 #include <sys/exec.h>
-
-#include <machine/elf_machdep.h>
 
 #include <nlist.h>
 #include <link.h>
@@ -96,9 +94,9 @@ _dl_md_reloc(elf_object_t *object, int rel, int relasz)
 		switch (ELF64_R_TYPE(relas->r_info)) {
 		case R_TYPE(REFQUAD):
 			ooff =  _dl_find_symbol_bysym(object,
-			    ELF64_R_SYM(relas->r_info), _dl_objects, &this,
-			    NULL, SYM_SEARCH_ALL|SYM_WARNNOTFOUND|SYM_NOTPLT,
-			    sym->st_size);
+			    ELF64_R_SYM(relas->r_info), &this,
+			    SYM_SEARCH_ALL|SYM_WARNNOTFOUND|SYM_NOTPLT,
+			    sym, NULL);
 			if (this == NULL)
 				goto resolve_failed;
 			*r_addr += ooff + this->st_value + relas->r_addend;
@@ -121,18 +119,18 @@ _dl_printf("unaligned RELATIVE: %p type: %d %s 0x%lx -> 0x%lx\n", r_addr,
 				*r_addr += loff;
 			break;
 		case R_TYPE(JMP_SLOT):
-			ooff = _dl_find_symbol(symn, _dl_objects, &this,
-			    NULL, SYM_SEARCH_ALL|SYM_WARNNOTFOUND|SYM_PLT,
-			    sym->st_size, object);
+			ooff = _dl_find_symbol(symn, &this,
+			    SYM_SEARCH_ALL|SYM_WARNNOTFOUND|SYM_PLT,
+			    sym, object, NULL);
 			if (this == NULL)
 				goto resolve_failed;
 			*r_addr = ooff + this->st_value + relas->r_addend;
 			break;
 		case R_TYPE(GLOB_DAT):
 			ooff =  _dl_find_symbol_bysym(object,
-			    ELF64_R_SYM(relas->r_info), _dl_objects, &this,
-			    NULL, SYM_SEARCH_ALL|SYM_WARNNOTFOUND|SYM_NOTPLT,
-			    sym->st_size);
+			    ELF64_R_SYM(relas->r_info), &this,
+			    SYM_SEARCH_ALL|SYM_WARNNOTFOUND|SYM_NOTPLT,
+			    sym, NULL);
 			if (this == NULL)
 				goto resolve_failed;
 			*r_addr = ooff + this->st_value + relas->r_addend;
@@ -148,9 +146,8 @@ _dl_printf("unaligned RELATIVE: %p type: %d %s 0x%lx -> 0x%lx\n", r_addr,
 		}
 		continue;
 resolve_failed:
-		_dl_printf("%s: %s :can't resolve reference '%s'\n",
-		    _dl_progname, object->load_name, symn);
-		fails++;
+		if (ELF_ST_BIND(sym->st_info) != STB_WEAK)
+			fails++;
 	}
 	__asm __volatile("imb" : : : "memory");
 
@@ -185,8 +182,9 @@ _dl_bind(elf_object_t *object, int reloff)
 
 	addr = (Elf_Addr *)(object->load_offs + rela->r_offset);
 	this = NULL;
-	ooff = _dl_find_symbol(symn, _dl_objects, &this, NULL,
-	    SYM_SEARCH_ALL|SYM_WARNNOTFOUND|SYM_PLT, sym->st_size, object);
+	ooff = _dl_find_symbol(symn, &this,
+	    SYM_SEARCH_ALL|SYM_WARNNOTFOUND|SYM_PLT, sym,
+	    object, NULL);
 	if (this == NULL) {
 		_dl_printf("lazy binding failed!\n");
 		*((int *)0) = 0;	/* XXX */
@@ -229,28 +227,28 @@ _dl_md_reloc_got(elf_object_t *object, int lazy)
 	object->got_addr = NULL;
 	object->got_size = 0;
 	this = NULL;
-	ooff = _dl_find_symbol("__got_start", object, &this, NULL,
-	    SYM_SEARCH_SELF|SYM_NOWARNNOTFOUND|SYM_PLT, 0, object);
+	ooff = _dl_find_symbol("__got_start", &this,
+	    SYM_SEARCH_OBJ|SYM_NOWARNNOTFOUND|SYM_PLT, NULL, object, NULL);
 	if (this != NULL)
 		object->got_addr = ooff + this->st_value;
 
 	this = NULL;
-	ooff = _dl_find_symbol("__got_end", object, &this, NULL,
-	    SYM_SEARCH_SELF|SYM_NOWARNNOTFOUND|SYM_PLT, 0, object);
+	ooff = _dl_find_symbol("__got_end", &this,
+	    SYM_SEARCH_OBJ|SYM_NOWARNNOTFOUND|SYM_PLT, NULL, object, NULL);
 	if (this != NULL)
 		object->got_size = ooff + this->st_value  - object->got_addr;
 
 	plt_addr = NULL;
 	object->plt_size = 0;
 	this = NULL;
-	ooff = _dl_find_symbol("__plt_start", object, &this, NULL,
-	    SYM_SEARCH_SELF|SYM_NOWARNNOTFOUND|SYM_PLT, 0, object);
+	ooff = _dl_find_symbol("__plt_start", &this,
+	    SYM_SEARCH_OBJ|SYM_NOWARNNOTFOUND|SYM_PLT, NULL, object, NULL);
 	if (this != NULL)
 		plt_addr = ooff + this->st_value;
 
 	this = NULL;
-	ooff = _dl_find_symbol("__plt_end", object, &this, NULL,
-	    SYM_SEARCH_SELF|SYM_NOWARNNOTFOUND|SYM_PLT, 0, object);
+	ooff = _dl_find_symbol("__plt_end", &this,
+	    SYM_SEARCH_OBJ|SYM_NOWARNNOTFOUND|SYM_PLT, NULL, object, NULL);
 	if (this != NULL)
 		object->plt_size = ooff + this->st_value  - plt_addr;
 

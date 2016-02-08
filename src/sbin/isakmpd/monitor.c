@@ -1,4 +1,4 @@
-/* $OpenBSD: monitor.c,v 1.60 2005/06/13 13:32:59 millert Exp $	 */
+/* $OpenBSD: monitor.c,v 1.63 2006/01/02 10:42:51 hshoexer Exp $	 */
 
 /*
  * Copyright (c) 2003 Håkan Olsson.  All rights reserved.
@@ -58,8 +58,7 @@ struct monitor_state {
 	char            root[MAXPATHLEN];
 } m_state;
 
-volatile sig_atomic_t sigchlded = 0;
-extern volatile sig_atomic_t sigtermed;
+extern char *pid_file;
 
 extern void	set_slave_signals(void);
 
@@ -78,7 +77,6 @@ static int      m_priv_check_sockopt(int, int);
 static int      m_priv_check_bind(const struct sockaddr *, socklen_t);
 
 static void	set_monitor_signals(void);
-static void	monitor_got_sigchld(int);
 static void	sig_pass_to_chld(int);
 
 /*
@@ -149,8 +147,21 @@ monitor_init(int debug)
 void
 monitor_exit(int code)
 {
-	if (m_state.pid != 0)
-		kill(m_state.pid, SIGKILL);
+	int status;
+	pid_t pid;
+
+	if (m_state.pid != 0) {
+		/* When called from the monitor, kill slave and wait for it  */
+		kill(m_state.pid, SIGTERM);
+
+		do {
+			pid = waitpid(m_state.pid, &status, 0);
+		} while (pid == -1 && errno == EINTR);
+
+		/* Remove FIFO and pid files.  */
+		unlink(ui_fifo);
+		unlink(pid_file);
+	}
 
 	close(m_state.s);
 	exit(code);
@@ -173,8 +184,6 @@ monitor_ui_init(void)
 	if (ui_socket < 0)
 		log_fatal("monitor_ui_init: parent could not create FIFO "
 		    "\"%s\"", ui_fifo);
-
-	return;
 }
 
 int
@@ -313,8 +322,10 @@ monitor_setsockopt(int s, int level, int optname, const void *optval,
 
 	cmd = MONITOR_SETSOCKOPT;
 	must_write(&cmd, sizeof cmd);
-	if (mm_send_fd(m_state.s, s))
-		goto errout;
+	if (mm_send_fd(m_state.s, s)) {
+		log_print("monitor_setsockopt: read/write error");
+		return -1;
+	}
 
 	must_write(&level, sizeof level);
 	must_write(&optname, sizeof optname);
@@ -326,10 +337,6 @@ monitor_setsockopt(int s, int level, int optname, const void *optval,
 	if (err != 0)
 		errno = err;
 	return ret;
-
-errout:
-	log_print("monitor_setsockopt: read/write error");
-	return -1;
 }
 
 int
@@ -339,8 +346,10 @@ monitor_bind(int s, const struct sockaddr *name, socklen_t namelen)
 
 	cmd = MONITOR_BIND;
 	must_write(&cmd, sizeof cmd);
-	if (mm_send_fd(m_state.s, s))
-		goto errout;
+	if (mm_send_fd(m_state.s, s)) {
+		log_print("monitor_bind: read/write error");
+		return -1;
+	}
 
 	must_write(&namelen, sizeof namelen);
 	must_write(name, namelen);
@@ -350,10 +359,6 @@ monitor_bind(int s, const struct sockaddr *name, socklen_t namelen)
 	if (err != 0)
 		errno = err;
 	return ret;
-
-errout:
-	log_print("monitor_bind: read/write error");
-	return -1;
 }
 
 int
@@ -414,20 +419,10 @@ set_monitor_signals(void)
 	for (n = 0; n < _NSIG; n++)
 		signal(n, SIG_DFL);
 
-	/* If the child dies, we should shutdown also.  */
-	signal(SIGCHLD, monitor_got_sigchld);
-
 	/* Forward some signals to the child. */
 	signal(SIGTERM, sig_pass_to_chld);
 	signal(SIGHUP, sig_pass_to_chld);
 	signal(SIGUSR1, sig_pass_to_chld);
-}
-
-/* ARGSUSED */
-static void
-monitor_got_sigchld(int sig)
-{
-	sigchlded = 1;
 }
 
 static void
@@ -444,33 +439,12 @@ sig_pass_to_chld(int sig)
 void
 monitor_loop(int debug)
 {
-	pid_t	 pid;
-	int	 msgcode, status;
+	int	 msgcode;
 
 	if (!debug)
 		log_to(0);
 
 	for (;;) {
-		/*
-		 * Currently, there is no need for us to hang around if the
-		 * child is in the process of shutting down.
-		 */
-		if (sigtermed) {
-			kill(m_state.pid, SIGTERM);
-			break;
-		}
-
-		if (sigchlded) {
-			do {
-				pid = waitpid(m_state.pid, &status, WNOHANG);
-			} while (pid == -1 && errno == EINTR);
-
-			if (pid == m_state.pid && (WIFEXITED(status) ||
-			    WIFSIGNALED(status))) {
-				break;
-			}
-		}
-
 		must_read(&msgcode, sizeof msgcode);
 
 		switch (msgcode) {
@@ -542,17 +516,14 @@ m_priv_ui_init(void)
 	must_write(&err, sizeof err);
 
 	if (ui_socket >= 0 && mm_send_fd(m_state.s, ui_socket)) {
+		log_error("m_priv_ui_init: read/write operation failed");
 		close(ui_socket);
-		goto errout;
+		return;
 	}
 
 	/* In case of stdin, we do not close the socket. */
 	if (ui_socket > 0)
 		close(ui_socket);
-	return;
-
-errout:
-	log_error("m_priv_ui_init: read/write operation failed");
 }
 
 /* Privileged: called by monitor_loop.  */
@@ -568,15 +539,11 @@ m_priv_pfkey_open(void)
 	must_write(&err, sizeof err);
 
 	if (fd > 0 && mm_send_fd(m_state.s, fd)) {
+		log_error("m_priv_pfkey_open: read/write operation failed");
 		close(fd);
-		goto errout;
+		return;
 	}
 	close(fd);
-
-	return;
-
-errout:
-	log_error("m_priv_pfkey_open: read/write operation failed");
 }
 
 /* Privileged: called by monitor_loop.  */
@@ -613,14 +580,11 @@ m_priv_getfd(void)
 	must_write(&err, sizeof err);
 
 	if (v > 0 && mm_send_fd(m_state.s, v)) {
+		log_error("m_priv_getfd: read/write operation failed");
 		close(v);
-		goto errout;
+		return;
 	}
 	close(v);
-	return;
-
-errout:
-	log_error("m_priv_getfd: read/write operation failed");
 }
 
 /* Privileged: called by monitor_loop.  */
@@ -666,8 +630,6 @@ m_priv_setsockopt(void)
 
 errout:
 	log_print("m_priv_setsockopt: read/write error");
-	if (optval)
-		free(optval);
 	if (sock >= 0)
 		close(sock);
 }
@@ -713,8 +675,6 @@ m_priv_bind(void)
 
 errout:
 	log_print("m_priv_bind: read/write error");
-	if (name)
-		free(name);
 	if (sock >= 0)
 		close(sock);
 }
@@ -741,7 +701,7 @@ must_read(void *buf, size_t n)
                         if (errno == EINTR || errno == EAGAIN)
                                 continue;
                 case 0:
-			_exit(0);
+			monitor_exit(0);
                 default:
                         pos += res;
                 }
@@ -766,7 +726,7 @@ must_write(const void *buf, size_t n)
                         if (errno == EINTR || errno == EAGAIN)
                                 continue;
                 case 0:
-			_exit(0);
+			monitor_exit(0);
                 default:
                         pos += res;
                 }
@@ -951,6 +911,4 @@ m_priv_req_readdir()
 
 	len = 0;
 	must_write(&len, sizeof len);
-
-	return;
 }

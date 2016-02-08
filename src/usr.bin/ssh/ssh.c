@@ -40,7 +40,17 @@
  */
 
 #include "includes.h"
-RCSID("$OpenBSD: ssh.c,v 1.249 2005/07/30 01:26:16 djm Exp $");
+RCSID("$OpenBSD: ssh.c,v 1.265 2006/02/22 00:04:45 stevesk Exp $");
+
+#include <sys/resource.h>
+#include <sys/ioctl.h>
+#include <sys/types.h>
+#include <sys/un.h>
+#include <sys/stat.h>
+
+#include <ctype.h>
+#include <paths.h>
+#include <signal.h>
 
 #include <openssl/evp.h>
 #include <openssl/err.h>
@@ -158,13 +168,13 @@ usage(void)
 {
 	fprintf(stderr,
 "usage: ssh [-1246AaCfgkMNnqsTtVvXxY] [-b bind_address] [-c cipher_spec]\n"
-"           [-D port] [-e escape_char] [-F configfile]\n"
+"           [-D [bind_address:]port] [-e escape_char] [-F configfile]\n"
 "           [-i identity_file] [-L [bind_address:]port:host:hostport]\n"
 "           [-l login_name] [-m mac_spec] [-O ctl_cmd] [-o option] [-p port]\n"
 "           [-R [bind_address:]port:host:hostport] [-S ctl_path]\n"
-"           [user@]hostname [command]\n"
+"           [-w tunnel:tunnel] [user@]hostname [command]\n"
 	);
-	exit(1);
+	exit(255);
 }
 
 static int ssh_session(void);
@@ -187,6 +197,9 @@ main(int ac, char **av)
 	extern char *optarg;
 	struct servent *sp;
 	Forward fwd;
+
+	/* Ensure that fds 0, 1 and 2 are open or directed to /dev/null */
+	sanitise_stdfd();
 
 	/*
 	 * Save the original real uid.  It will be needed later (uid-swapping
@@ -215,7 +228,7 @@ main(int ac, char **av)
 	pw = getpwuid(original_real_uid);
 	if (!pw) {
 		logit("You don't exist, go away!");
-		exit(1);
+		exit(255);
 	}
 	/* Take a copy of the returned structure. */
 	pw = pwcopy(pw);
@@ -236,7 +249,7 @@ main(int ac, char **av)
 
 again:
 	while ((opt = getopt(ac, av,
-	    "1246ab:c:e:fgi:kl:m:no:p:qstvxACD:F:I:L:MNO:PR:S:TVXY")) != -1) {
+	    "1246ab:c:e:fgi:kl:m:no:p:qstvxACD:F:I:L:MNO:PR:S:TVw:XY")) != -1) {
 		switch (opt) {
 		case '1':
 			options.protocol = SSH_PROTO_1;
@@ -332,6 +345,15 @@ again:
 			if (opt == 'V')
 				exit(0);
 			break;
+		case 'w':
+			if (options.tun_open == -1)
+				options.tun_open = SSH_TUNMODE_DEFAULT;
+			options.tun_local = a2tun(optarg, &options.tun_remote);
+			if (options.tun_local == SSH_TUNID_ERR) {
+				fprintf(stderr, "Bad tun device '%s'\n", optarg);
+				exit(255);
+			}
+			break;
 		case 'q':
 			options.log_level = SYSLOG_LEVEL_QUIET;
 			break;
@@ -347,7 +369,7 @@ again:
 			else {
 				fprintf(stderr, "Bad escape character '%s'.\n",
 				    optarg);
-				exit(1);
+				exit(255);
 			}
 			break;
 		case 'c':
@@ -362,7 +384,7 @@ again:
 					fprintf(stderr,
 					    "Unknown cipher type '%s'\n",
 					    optarg);
-					exit(1);
+					exit(255);
 				}
 				if (options.cipher == SSH_CIPHER_3DES)
 					options.ciphers = "3des-cbc";
@@ -378,7 +400,7 @@ again:
 			else {
 				fprintf(stderr, "Unknown mac type '%s'\n",
 				    optarg);
-				exit(1);
+				exit(255);
 			}
 			break;
 		case 'M':
@@ -391,7 +413,7 @@ again:
 			options.port = a2port(optarg);
 			if (options.port == 0) {
 				fprintf(stderr, "Bad port '%s'\n", optarg);
-				exit(1);
+				exit(255);
 			}
 			break;
 		case 'l':
@@ -405,7 +427,7 @@ again:
 				fprintf(stderr,
 				    "Bad local forwarding specification '%s'\n",
 				    optarg);
-				exit(1);
+				exit(255);
 			}
 			break;
 
@@ -416,7 +438,7 @@ again:
 				fprintf(stderr,
 				    "Bad remote forwarding specification "
 				    "'%s'\n", optarg);
-				exit(1);
+				exit(255);
 			}
 			break;
 
@@ -427,7 +449,7 @@ again:
 			if ((fwd.listen_host = hpdelim(&cp)) == NULL) {
 				fprintf(stderr, "Bad dynamic forwarding "
 				    "specification '%.100s'\n", optarg);
-				exit(1);
+				exit(255);
 			}
 			if (cp != NULL) {
 				fwd.listen_port = a2port(cp);
@@ -440,7 +462,7 @@ again:
 			if (fwd.listen_port == 0) {
 				fprintf(stderr, "Bad dynamic port '%s'\n",
 				    optarg);
-				exit(1);
+				exit(255);
 			}
 			add_local_forward(&options, &fwd);
 			xfree(p);
@@ -461,7 +483,7 @@ again:
 			line = xstrdup(optarg);
 			if (process_config_line(&options, host ? host : "",
 			    line, "command-line", 0, &dummy) != 0)
-				exit(1);
+				exit(255);
 			xfree(line);
 			break;
 		case 's':
@@ -614,11 +636,15 @@ again:
 		options.control_path = NULL;
 
 	if (options.control_path != NULL) {
+		char me[NI_MAXHOST];
+
+		if (gethostname(me, sizeof(me)) == -1)
+			fatal("gethostname: %s", strerror(errno));
 		snprintf(buf, sizeof(buf), "%d", options.port);
 		cp = tilde_expand_filename(options.control_path,
 		    original_real_uid);
 		options.control_path = percent_expand(cp, "p", buf, "h", host,
-		    "r", options.user, (char *)NULL);
+		    "r", options.user, "l", me, (char *)NULL);
 		xfree(cp);
 	}
 	if (mux_command != 0 && options.control_path == NULL)
@@ -631,7 +657,7 @@ again:
 	    options.address_family, options.connection_attempts,
 	    original_effective_uid == 0 && options.use_privileged_port,
 	    options.proxy_command) != 0)
-		exit(1);
+		exit(255);
 
 	/*
 	 * If we successfully made the connection, load the host private key
@@ -684,7 +710,7 @@ again:
 
 	/*
 	 * Now that we are back to our own permissions, create ~/.ssh
-	 * directory if it doesn\'t already exist.
+	 * directory if it doesn't already exist.
 	 */
 	snprintf(buf, sizeof buf, "%.100s%s%.100s", pw->pw_dir, strcmp(pw->pw_dir, "/") ? "/" : "", _PATH_SSH_USER_DIR);
 	if (stat(buf, &st) < 0)
@@ -780,8 +806,7 @@ ssh_init_forwarding(void)
 		debug("Remote connections from %.200s:%d forwarded to "
 		    "local address %.200s:%d",
 		    (options.remote_forwards[i].listen_host == NULL) ?
-		    (options.gateway_ports ? "*" : "LOCALHOST") :
-		    options.remote_forwards[i].listen_host,
+		    "LOCALHOST" : options.remote_forwards[i].listen_host,
 		    options.remote_forwards[i].listen_port,
 		    options.remote_forwards[i].connect_host,
 		    options.remote_forwards[i].connect_port);
@@ -797,7 +822,7 @@ static void
 check_agent_present(void)
 {
 	if (options.forward_agent) {
-		/* Clear agent forwarding if we don\'t have an agent. */
+		/* Clear agent forwarding if we don't have an agent. */
 		if (!ssh_agent_present())
 			options.forward_agent = 0;
 	}
@@ -998,7 +1023,7 @@ ssh_control_listener(void)
 		fatal("ControlPath too long");
 
 	if ((control_fd = socket(PF_UNIX, SOCK_STREAM, 0)) < 0)
-		fatal("%s socket(): %s\n", __func__, strerror(errno));
+		fatal("%s socket(): %s", __func__, strerror(errno));
 
 	old_umask = umask(0177);
 	if (bind(control_fd, (struct sockaddr*)&addr, addr.sun_len) == -1) {
@@ -1007,12 +1032,12 @@ ssh_control_listener(void)
 			fatal("ControlSocket %s already exists",
 			    options.control_path);
 		else
-			fatal("%s bind(): %s\n", __func__, strerror(errno));
+			fatal("%s bind(): %s", __func__, strerror(errno));
 	}
 	umask(old_umask);
 
 	if (listen(control_fd, 64) == -1)
-		fatal("%s listen(): %s\n", __func__, strerror(errno));
+		fatal("%s listen(): %s", __func__, strerror(errno));
 
 	set_nonblock(control_fd);
 }
@@ -1043,6 +1068,28 @@ ssh_session2_setup(int id, void *arg)
 		debug("Requesting authentication agent forwarding.");
 		channel_request_start(id, "auth-agent-req@openssh.com", 0);
 		packet_send();
+	}
+
+	if (options.tun_open != SSH_TUNMODE_NO) {
+		Channel *c;
+		int fd;
+
+		debug("Requesting tun.");
+		if ((fd = tun_open(options.tun_local,
+		    options.tun_open)) >= 0) {
+			c = channel_new("tun", SSH_CHANNEL_OPENING, fd, fd, -1,
+			    CHAN_TCP_WINDOW_DEFAULT, CHAN_TCP_PACKET_DEFAULT,
+			    0, "tun", 1);
+			c->datagram = 1;
+			packet_start(SSH2_MSG_CHANNEL_OPEN);
+			packet_put_cstring("tun@openssh.com");
+			packet_put_int(c->self);
+			packet_put_int(c->local_window_max);
+			packet_put_int(c->local_maxpacket);
+			packet_put_int(options.tun_open);
+			packet_put_int(options.tun_remote);
+			packet_send();
+		}
 	}
 
 	client_session2_setup(id, tty_flag, subsystem_flag, getenv("TERM"),
@@ -1108,6 +1155,11 @@ ssh_session2(void)
 
 	if (!no_shell_flag || (datafellows & SSH_BUG_DUMMYCHAN))
 		id = ssh_session2_open();
+
+	/* Execute a local command */
+	if (options.local_command != NULL &&
+	    options.permit_local_command)
+		ssh_local_cmd(options.local_command);
 
 	/* If requested, let ssh continue in the background. */
 	if (fork_after_authentication_flag)

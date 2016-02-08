@@ -1,4 +1,4 @@
-/*	$OpenBSD: printconf.c,v 1.47 2005/08/09 20:27:25 claudio Exp $	*/
+/*	$OpenBSD: printconf.c,v 1.53 2006/02/10 14:34:40 claudio Exp $	*/
 
 /*
  * Copyright (c) 2003, 2004 Henning Brauer <henning@openbsd.org>
@@ -119,6 +119,10 @@ print_set(struct filter_set_head *set)
 			break;
 		case ACTION_SET_PREPEND_PEER:
 			printf("prepend-neighbor %u ", s->action.prepend);
+			break;
+		case ACTION_DEL_COMMUNITY:
+			printf("community delete %u:%u ",
+			    s->action.community.as, s->action.community.type);
 			break;
 		case ACTION_SET_COMMUNITY:
 			printf("community %u:%u ", s->action.community.as,
@@ -303,11 +307,16 @@ print_peer(struct peer_config *p, struct bgpd_config *conf, const char *c)
 	printf("%s\tannounce IPv4 %s\n", c, print_safi(p->capabilities.mp_v4));
 	printf("%s\tannounce IPv6 %s\n", c, print_safi(p->capabilities.mp_v6));
 
-	if (!TAILQ_EMPTY(&p->attrset))
-		printf("%s\t", c);
-	print_set(&p->attrset);
-	if (!TAILQ_EMPTY(&p->attrset))
-		printf("\n");
+	if (p->softreconfig_in == 1)
+		printf("%s\tsoftreconfig in yes\n", c);
+	else
+		printf("%s\tsoftreconfig in no\n", c);
+
+	if (p->softreconfig_out == 1)
+		printf("%s\tsoftreconfig out yes\n", c);
+	else
+		printf("%s\tsoftreconfig out no\n", c);
+
 
 	print_mrt(p->id, p->groupid, c, "\t");
 
@@ -380,7 +389,7 @@ print_rule(struct peer *peer_l, struct filter_rule *r)
 		    p = p->next)
 			;	/* nothing */
 		if (p == NULL)
-			printf("?");
+			printf("? ");
 		else
 			printf("%s ", log_addr(&p->conf.remote_addr));
 	} else if (r->peer.groupid) {
@@ -390,7 +399,7 @@ print_rule(struct peer *peer_l, struct filter_rule *r)
 		if (p == NULL)
 			printf("group ? ");
 		else
-			printf("group %s ", p->conf.group);
+			printf("group \"%s\" ", p->conf.group);
 	} else
 		printf("any ");
 
@@ -423,13 +432,18 @@ print_rule(struct peer *peer_l, struct filter_rule *r)
 	}
 
 	if (r->match.community.as != 0) {
+		printf("community ");
 		if (r->match.community.as == COMMUNITY_ANY)
 			printf("*:");
+		else if (r->match.community.as == COMMUNITY_NEIGHBOR_AS)
+			printf("neighbor-as:");
 		else
 			printf("%d:", r->match.community.as);
 
 		if (r->match.community.type == COMMUNITY_ANY)
 			printf("* ");
+		else if (r->match.community.type == COMMUNITY_NEIGHBOR_AS)
+			printf("neighbor-as ");
 		else
 			printf("%d ", r->match.community.type);
 	}

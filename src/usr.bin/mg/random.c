@@ -1,4 +1,4 @@
-/*	$OpenBSD: random.c,v 1.12 2005/06/14 18:14:40 kjell Exp $	*/
+/*	$OpenBSD: random.c,v 1.17 2005/11/22 05:02:44 kjell Exp $	*/
 
 /* This file is in the public domain. */
 
@@ -24,7 +24,7 @@
 int
 showcpos(int f, int n)
 {
-	LINE	*clp;
+	struct line	*clp;
 	long	 nchar, cchar;
 	int	 nline, row;
 	int	 cline, cbyte;		/* Current line/char/byte */
@@ -114,7 +114,7 @@ getcolpos(void)
 int
 twiddle(int f, int n)
 {
-	LINE	*dotp;
+	struct line	*dotp;
 	int	 doto, cr;
 
 	dotp = curwp->w_dotp;
@@ -164,33 +164,18 @@ openline(int f, int n)
 }
 
 /*
- * Insert a newline.  [following "feature" not present in current version of
- * Gnu, and now disabled here too] If you are at the end of the line and the
- * next line is a blank line, just move into the blank line.  This makes
- * "C-O" and "C-X C-O" work nicely, and reduces the amount of screen update
- * that has to be done.  This would not be as critical if screen update were a
- * lot more efficient.
+ * Insert a newline.
  */
 /* ARGSUSED */
 int
 newline(int f, int n)
 {
-	LINE	*lp;
 	int	 s;
 
 	if (n < 0)
 		return (FALSE);
 
 	while (n--) {
-		lp = curwp->w_dotp;
-#ifdef undef
-		if (llength(lp) == curwp->w_doto &&
-		    lforw(lp) != curbp->b_linep &&
-		    llength(lforw(lp)) == 0) {
-			if ((s = forwchar(FFRAND, 1)) != TRUE)
-				return (s);
-		} else
-#endif /* undef */
 		if ((s = lnewline()) != TRUE)
 			return (s);
 	}
@@ -209,7 +194,7 @@ newline(int f, int n)
 int
 deblank(int f, int n)
 {
-	LINE	*lp1, *lp2;
+	struct line	*lp1, *lp2;
 	RSIZE	 nld;
 
 	lp1 = curwp->w_dotp;
@@ -350,121 +335,6 @@ backdel(int f, int n)
 		s = ldelete((RSIZE)n, (f & FFARG) ? KFORW : KNONE);
 
 	return (s);
-}
-
-/*
- * Kill line.  If called without an argument, it kills from dot to the end
- * of the line, unless it is at the end of the line, when it kills the
- * newline.  If called with an argument of 0, it kills from the start of the
- * line to dot.  If called with a positive argument, it kills from dot
- * forward over that number of newlines.  If called with a negative argument
- * it kills any text before dot on the current line, then it kills back
- * abs(arg) lines.
- */
-/* ARGSUSED */
-int
-killline(int f, int n)
-{
-	LINE	*nextp;
-	RSIZE	 chunk;
-	int	 i, c;
-
-	/* clear kill buffer if last wasn't a kill */
-	if ((lastflag & CFKILL) == 0)
-		kdelete();
-	thisflag |= CFKILL;
-	if (!(f & FFARG)) {
-		for (i = curwp->w_doto; i < llength(curwp->w_dotp); ++i)
-			if ((c = lgetc(curwp->w_dotp, i)) != ' ' && c != '\t')
-				break;
-		if (i == llength(curwp->w_dotp))
-			chunk = llength(curwp->w_dotp) - curwp->w_doto + 1;
-		else {
-			chunk = llength(curwp->w_dotp) - curwp->w_doto;
-			if (chunk == 0)
-				chunk = 1;
-		}
-	} else if (n > 0) {
-		chunk = llength(curwp->w_dotp) - curwp->w_doto + 1;
-		nextp = lforw(curwp->w_dotp);
-		i = n;
-		while (--i) {
-			if (nextp == curbp->b_linep)
-				break;
-			chunk += llength(nextp) + 1;
-			nextp = lforw(nextp);
-		}
-	} else {
-		/* n <= 0 */
-		chunk = curwp->w_doto;
-		curwp->w_doto = 0;
-		i = n;
-		while (i++) {
-			if (lback(curwp->w_dotp) == curbp->b_linep)
-				break;
-			curwp->w_dotp = lback(curwp->w_dotp);
-			curwp->w_flag |= WFMOVE;
-			chunk += llength(curwp->w_dotp) + 1;
-		}
-	}
-	/*
-	 * KFORW here is a bug.  Should be KBACK/KFORW, but we need to
-	 * rewrite the ldelete code (later)?
-	 */
-	return (ldelete(chunk, KFORW));
-}
-
-/*
- * Yank text back from the kill buffer.  This is really easy.  All of the work
- * is done by the standard insert routines.  All you do is run the loop, and
- * check for errors.  The blank lines are inserted with a call to "newline"
- * instead of a call to "lnewline" so that the magic stuff that happens when
- * you type a carriage return also happens when a carriage return is yanked
- * back from the kill buffer.  An attempt has been made to fix the cosmetic
- * bug associated with a yank when dot is on the top line of the window
- * (nothing moves, because all of the new text landed off screen).
- */
-/* ARGSUSED */
-int
-yank(int f, int n)
-{
-	LINE	*lp;
-	int	 c, i, nline;
-
-	if (n < 0)
-		return (FALSE);
-
-	/* newline counting */
-	nline = 0;
-
-	while (n--) {
-		/* mark around last yank */
-		isetmark();
-		i = 0;
-		while ((c = kremove(i)) >= 0) {
-			if (c == '\n') {
-				if (newline(FFRAND, 1) == FALSE)
-					return (FALSE);
-				++nline;
-			} else {
-				if (linsert(1, c) == FALSE)
-					return (FALSE);
-			}
-			++i;
-		}
-	}
-	/* cosmetic adjustment */
-	lp = curwp->w_linep;
-
-	/* if offscreen insert */
-	if (curwp->w_dotp == lp) {
-		while (nline-- && lback(lp) != curbp->b_linep)
-			lp = lback(lp);
-		/* adjust framing */
-		curwp->w_linep = lp;
-		curwp->w_flag |= WFHARD;
-	}
-	return (TRUE);
 }
 
 #ifdef	NOTAB

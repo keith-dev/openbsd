@@ -1,6 +1,6 @@
-.\"	$OpenBSD: piixpm.4,v 1.2 2004/09/30 19:59:25 mickey Exp $
+.\"	$OpenBSD: piixpm.4,v 1.9 2006/01/18 03:06:33 brad Exp $
 .\"
-.\" Copyright (c) 2004 Alexander Yurchenko <grange@openbsd.org>
+.\" Copyright (c) 2004, 2005 Alexander Yurchenko <grange@openbsd.org>
 .\"
 .\" Permission to use, copy, modify, and distribute this software for any
 .\" purpose with or without fee is hereby granted, provided that the above
@@ -19,30 +19,52 @@
 .Os
 .Sh NAME
 .Nm piixpm
-.Nd Intel PIIX Power Management
+.Nd Intel PIIX and compatible Power Management controller
 .Sh SYNOPSIS
 .Cd "piixpm* at pci?"
+.Cd "iic* at piixpm?"
 .Sh DESCRIPTION
 The
 .Nm
-driver provides support for the Intel PIIX Power Management controller.
-Only power management timer is supported for now.
+driver provides support for the Intel PIIX and compatible Power Management
+controller.
+Only the SMBus host interface is supported and can be used with the
+.Xr iic 4
+framework.
+.Pp
+Supported chipsets:
+.Pp
+.Bl -bullet -compact -offset indent
+.It
+ATI SB200, IXP300, IXP400
+.It
+Intel 82371AB (PIIX4), 82440MX
+.It
+ServerWorks OSB4, CSB5, CSB6
+.It
+SMSC Victory66
+.El
 .Sh SEE ALSO
+.Xr iic 4 ,
 .Xr intro 4 ,
 .Xr pci 4
 .Sh HISTORY
 The
 .Nm
 driver first appeared in
-.Ox 3.7 .
+.Ox 3.7
+to provide support for the power management (ACPI) timer.
+In
+.Ox 3.9 ,
+power management support was dropped in favor of
+.Xr acpitimer 4
+and SMBus functionality was added.
 .Sh AUTHORS
-The
+.An -nosplit
+The current
 .Nm
 driver was written by
-.An Poul-Henning Kamp Aq phk@FreeBSD.ORG
-for
-.Fx
-and ported to
-.Ox
-by
-.An Thorsten Lockert Aq tholo@openbsd.org .
+.An Alexander Yurchenko Aq grange@openbsd.org .
+.Sh BUGS
+The driver doesn't support I2C commands with a data buffer size of more
+than 2 bytes.

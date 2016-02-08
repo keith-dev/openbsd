@@ -1,4 +1,4 @@
-.\"	$OpenBSD: pkg_delete.1,v 1.17 2005/01/03 01:02:45 espie Exp $
+.\"	$OpenBSD: pkg_delete.1,v 1.20 2005/09/07 14:01:59 jmc Exp $
 .\"
 .\" FreeBSD install - a package for the installation and maintenance
 .\" of non-core utilities.
@@ -25,10 +25,10 @@
 .Nd a utility for deleting previously installed software package distributions
 .Sh SYNOPSIS
 .Nm pkg_delete
-.Op Fl cInqvx
+.Op Fl cIinqvx
 .Op Fl B Ar pkg-destdir
 .Op Fl F Ar keywords
-.Ar pkgname Op Ar ...
+.Ar pkg-name Op Ar ...
 .Sh DESCRIPTION
 The
 .Nm
@@ -83,6 +83,10 @@ proceed even if some package names don't resolve to installed package names.
 .El
 .It Fl I
 If scripts exist for a given package, do not execute them.
+.It Fl i
+Switch on interactive mode.
+.Nm
+may ask questions to the user if faced with difficult decisions.
 .It Fl n
 Don't actually deinstall a package, just report the steps that
 would be taken if it were.

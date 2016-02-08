@@ -1,4 +1,4 @@
-/*	$OpenBSD: rde_attr.c,v 1.49 2005/06/13 15:16:50 claudio Exp $ */
+/*	$OpenBSD: rde_attr.c,v 1.63 2006/02/09 21:05:09 claudio Exp $ */
 
 /*
  * Copyright (c) 2004 Claudio Jeker <claudio@openbsd.org>
@@ -17,6 +17,7 @@
  */
 
 #include <sys/types.h>
+#include <sys/hash.h>
 #include <sys/queue.h>
 
 #include <netinet/in.h>
@@ -28,7 +29,7 @@
 #include "bgpd.h"
 #include "rde.h"
 
-/* attribute specific functions */
+void	attr_free(struct rde_aspath *, struct attr *);
 
 int
 attr_write(void *p, u_int16_t p_len, u_int8_t flags, u_int8_t type,
@@ -63,95 +64,300 @@ attr_write(void *p, u_int16_t p_len, u_int8_t flags, u_int8_t type,
 	return (tot_len);
 }
 
-int
-attr_optlen(struct attr *a)
+/* optional attribute specific functions */
+int		 attr_diff(struct attr *, struct attr *);
+struct attr	*attr_alloc(u_int8_t, u_int8_t, const void *, u_int16_t);
+struct attr	*attr_lookup(u_int8_t, u_int8_t, const void *, u_int16_t);
+void		 attr_put(struct attr *);
+
+struct attr_table {
+	struct attr_list	*hashtbl;
+	u_int32_t		 hashmask;
+} attrtable;
+
+#define ATTR_HASH(x)				\
+	&attrtable.hashtbl[(x) & attrtable.hashmask]
+
+void
+attr_init(u_int32_t hashsize)
 {
-	if (a->len > 255)
-		return (4 + a->len);
-	else
-		return (3 + a->len);
+	u_int32_t	hs, i;
+
+	for (hs = 1; hs < hashsize; hs <<= 1)
+		;
+	attrtable.hashtbl = calloc(hs, sizeof(struct attr_list));
+	if (attrtable.hashtbl == NULL)
+		fatal("attr_init");
+
+	for (i = 0; i < hs; i++)
+		LIST_INIT(&attrtable.hashtbl[i]);
+
+	attrtable.hashmask = hs - 1;
+}
+
+void
+attr_shutdown(void)
+{
+	u_int32_t	i;
+
+	for (i = 0; i <= attrtable.hashmask; i++)
+		if (!LIST_EMPTY(&attrtable.hashtbl[i]))
+			log_warnx("attr_shutdown: free non-free table");
+
+	free(attrtable.hashtbl);
 }
 
 int
 attr_optadd(struct rde_aspath *asp, u_int8_t flags, u_int8_t type,
     void *data, u_int16_t len)
 {
-	struct attr	*a, *p;
+	u_int8_t	 l;
+	struct attr	*a, *t;
 
 	/* known optional attributes were validated previously */
-	a = calloc(1, sizeof(struct attr));
-	if (a == NULL)
-		fatal("attr_optadd");
+	if ((a = attr_lookup(flags, type, data, len)) == NULL)
+		a = attr_alloc(flags, type, data, len);
 
-	a->flags = flags;
-	a->type = type;
-	a->len = len;
-	if (len != 0) {
-		a->data = malloc(len);
-		if (a->data == NULL)
-			fatal("attr_optadd");
-
-		memcpy(a->data, data, len);
-	} else
-		a->data = NULL;
-
-	/* keep a sorted list */
-	TAILQ_FOREACH_REVERSE(p, &asp->others, attr_list, entry) {
-		if (type == p->type) {
-			/* attribute only once allowed */
-			free(a->data);
-			free(a);
+	/* attribute allowed only once */
+	for (l = 0; l < asp->others_len; l++) {
+		if (asp->others[l] == NULL)
+			break;
+		if (type == asp->others[l]->type)
 			return (-1);
-		}
-		if (type > p->type) {
-			TAILQ_INSERT_AFTER(&asp->others, p, a, entry);
+	}
+
+	/* add attribute to the table but first bump refcnt */
+	a->refcnt++;
+	rdemem.attr_refs++;
+
+	for (l = 0; l < asp->others_len; l++) {
+		if (asp->others[l] == NULL) {
+			asp->others[l] = a;
 			return (0);
 		}
+		/* list is sorted */
+		if (a->type < asp->others[l]->type) {
+			t = asp->others[l];
+			asp->others[l] = a;
+			a = t;
+		}
 	}
-	TAILQ_INSERT_HEAD(&asp->others, a, entry);
+
+	/* no empty slot found, need to realloc */
+	asp->others_len++;
+	if ((asp->others = realloc(asp->others,
+	    asp->others_len * sizeof(struct attr *))) == NULL)
+		fatal("attr_optadd");
+
+	/* l stores the size of others before resize */
+	asp->others[l] = a;
 	return (0);
 }
 
 struct attr *
 attr_optget(const struct rde_aspath *asp, u_int8_t type)
 {
-	struct attr	*a;
+	u_int8_t	 l;
 
-	TAILQ_FOREACH(a, &asp->others, entry) {
-		if (type == a->type)
-			return (a);
-		if (type < a->type)
-			/* list is sorted */
+	for (l = 0; l < asp->others_len; l++) {
+		if (asp->others[l] == NULL)
+			break;
+		if (type == asp->others[l]->type)
+			return (asp->others[l]);
+		if (type < asp->others[l]->type)
 			break;
 	}
 	return (NULL);
 }
 
 void
-attr_optcopy(struct rde_aspath *t, struct rde_aspath *s)
+attr_copy(struct rde_aspath *t, struct rde_aspath *s)
 {
-	struct attr	*os;
+	u_int8_t	l;
 
-	TAILQ_FOREACH(os, &s->others, entry)
-		attr_optadd(t, os->flags, os->type, os->data, os->len);
+	if (t->others != NULL)
+		attr_freeall(t);
+
+	t->others_len = s->others_len;
+	if (t->others_len == 0) {
+		t->others = NULL;
+		return;
+	}
+
+	if ((t->others = calloc(s->others_len, sizeof(struct attr *))) == 0)
+		fatal("attr_copy");
+
+	for (l = 0; l < t->others_len; l++) {
+		if (s->others[l] == NULL)
+			break;
+		s->others[l]->refcnt++;
+		rdemem.attr_refs++;
+		t->others[l] = s->others[l];
+	}
+}
+
+int
+attr_diff(struct attr *oa, struct attr *ob)
+{
+	int	r;
+
+	if (ob == NULL)
+		return (1);
+	if (oa == NULL)
+		return (-1);
+	if (oa->flags > ob->flags)
+		return (1);
+	if (oa->flags < ob->flags)
+		return (-1);
+	if (oa->type > ob->type)
+		return (1);
+	if (oa->type < ob->type)
+		return (-1);
+	if (oa->len > ob->len)
+		return (1);
+	if (oa->len < ob->len)
+		return (-1);
+	r = memcmp(oa->data, ob->data, oa->len);
+	if (r > 0)
+		return (1);
+	if (r < 0)
+		return (-1);
+
+	fatalx("attr_diff: equal attributes encountered");
+	return (0);
+}
+
+int
+attr_compare(struct rde_aspath *a, struct rde_aspath *b)
+{
+	u_int8_t	l, min;
+
+	min = a->others_len < b->others_len ? a->others_len : b->others_len;
+	for (l = 0; l < min; l++)
+		if (a->others[l] != b->others[l])
+			return (attr_diff(a->others[l], b->others[l]));
+
+	if (a->others_len < b->others_len) {
+		for (; l < b->others_len; l++)
+			if (b->others[l] != NULL)
+				return (-1);
+	} else if (a->others_len > b->others_len) {
+		for (; l < a->others_len; l++)
+			if (a->others[l] != NULL)
+				return (1);
+	}
+
+	return (0);
 }
 
 void
-attr_optfree(struct rde_aspath *asp)
+attr_free(struct rde_aspath *asp, struct attr *attr)
+{
+	u_int8_t	l;
+
+	for (l = 0; l < asp->others_len; l++)
+		if (asp->others[l] == attr) {
+			attr_put(asp->others[l]);
+			for (++l; l < asp->others_len; l++)
+				asp->others[l - 1] = asp->others[l];
+			asp->others[asp->others_len - 1] = NULL;
+			return;
+		}
+
+	/* no realloc() because the slot may be reused soon */
+}
+
+void
+attr_freeall(struct rde_aspath *asp)
+{
+	u_int8_t	l;
+
+	for (l = 0; l < asp->others_len; l++)
+		attr_put(asp->others[l]);
+
+	free(asp->others);
+	asp->others = NULL;
+	asp->others_len = 0;
+}
+
+struct attr *
+attr_alloc(u_int8_t flags, u_int8_t type, const void *data, u_int16_t len)
 {
 	struct attr	*a;
 
-	while ((a = TAILQ_FIRST(&asp->others)) != NULL) {
-		TAILQ_REMOVE(&asp->others, a, entry);
-		free(a->data);
-		free(a);
+	a = calloc(1, sizeof(struct attr));
+	if (a == NULL)
+		fatal("attr_optadd");
+	rdemem.attr_cnt++;
+
+	a->flags = flags;
+	a->hash = hash32_buf(&flags, sizeof(flags), HASHINIT);
+	a->type = type;
+	a->hash = hash32_buf(&type, sizeof(type), a->hash);
+	a->len = len;
+	if (len != 0) {
+		if ((a->data = malloc(len)) == NULL)
+			fatal("attr_optadd");
+
+		rdemem.attr_dcnt++;
+		rdemem.attr_data += len;
+		memcpy(a->data, data, len);
+	} else
+		a->data = NULL;
+
+	a->hash = hash32_buf(&len, sizeof(len), a->hash);
+	a->hash = hash32_buf(a->data, a->len, a->hash);
+	LIST_INSERT_HEAD(ATTR_HASH(a->hash), a, entry);
+
+	return (a);
+}
+
+struct attr *
+attr_lookup(u_int8_t flags, u_int8_t type, const void *data, u_int16_t len)
+{
+	struct attr_list	*head;
+	struct attr		*a;
+	u_int32_t		 hash;
+
+	hash = hash32_buf(&flags, sizeof(flags), HASHINIT);
+	hash = hash32_buf(&type, sizeof(type), hash);
+	hash = hash32_buf(&len, sizeof(len), hash);
+	hash = hash32_buf(data, len, hash);
+	head = ATTR_HASH(hash);
+
+	LIST_FOREACH(a, head, entry) {
+		if (hash == a->hash && type == a->type &&
+		    flags == a->flags && len == a->len &&
+		    memcmp(data, a->data, len) == 0)
+			return (a);
 	}
+	return (NULL);
+}
+
+void
+attr_put(struct attr *a)
+{
+	if (a == NULL)
+		return;
+
+	rdemem.attr_refs--;
+	if (--a->refcnt > 0)
+		/* somebody still holds a reference */
+		return;
+
+	/* unlink */
+	LIST_REMOVE(a, entry);
+
+	if (a->len != 0)
+		rdemem.attr_dcnt--;
+	rdemem.attr_data -= a->len;
+	rdemem.attr_cnt--;
+	free(a->data);
+	free(a);
 }
 
 /* aspath specific functions */
 
-u_int32_t	 aspath_hash(const void *, u_int16_t);
-u_int16_t	 aspath_extract(const void *, int);
 struct aspath	*aspath_lookup(const void *, u_int16_t);
 
 struct aspath_table {
@@ -218,7 +424,7 @@ aspath_shutdown(void)
 
 	for (i = 0; i <= astable.hashmask; i++)
 		if (!LIST_EMPTY(&astable.hashtbl[i]))
-			log_warnx("path_free: free non-free table");
+			log_warnx("aspath_shutdown: free non-free table");
 
 	free(astable.hashtbl);
 }
@@ -236,16 +442,21 @@ aspath_get(void *data, u_int16_t len)
 		if (aspath == NULL)
 			fatal("aspath_get");
 
+		rdemem.aspath_cnt++;
+		rdemem.aspath_size += ASPATH_HEADER_SIZE + len;
+
 		aspath->refcnt = 0;
 		aspath->len = len;
 		aspath->ascnt = aspath_count(data, len);
 		memcpy(aspath->data, data, len);
 
 		/* link */
-		head = ASPATH_HASH(aspath_hash(aspath->data, aspath->len));
+		head = ASPATH_HASH(hash32_buf(aspath->data, aspath->len,
+		    HASHINIT));
 		LIST_INSERT_HEAD(head, aspath, entry);
 	}
 	aspath->refcnt++;
+	rdemem.aspath_refs++;
 
 	return (aspath);
 }
@@ -256,13 +467,17 @@ aspath_put(struct aspath *aspath)
 	if (aspath == NULL)
 		return;
 
-	if (--aspath->refcnt > 0)
+	rdemem.aspath_refs--;
+	if (--aspath->refcnt > 0) {
 		/* somebody still holds a reference */
 		return;
+	}
 
 	/* unlink */
 	LIST_REMOVE(aspath, entry);
 
+	rdemem.aspath_cnt--;
+	rdemem.aspath_size -= ASPATH_HEADER_SIZE + aspath->len;
 	free(aspath);
 }
 
@@ -359,52 +574,6 @@ aspath_compare(struct aspath *a1, struct aspath *a2)
 	return (0);
 }
 
-#define AS_HASH_INITIAL 8271
-
-u_int32_t
-aspath_hash(const void *data, u_int16_t len)
-{
-	const u_int8_t	*seg;
-	u_int32_t	 hash;
-	u_int16_t	 seg_size;
-	u_int8_t	 i, seg_len, seg_type;
-
-	hash = AS_HASH_INITIAL;
-	seg = data;
-	for (; len > 0; len -= seg_size, seg += seg_size) {
-		seg_type = seg[0];
-		seg_len = seg[1];
-		seg_size = 2 + 2 * seg_len;
-
-		for (i = 0; i < seg_len; i++) {
-			hash += (hash << 5);
-			hash ^= aspath_extract(seg, i);
-		}
-
-		if (seg_size > len)
-			fatalx("aspath_hash: bula bula");
-	}
-	return (hash);
-}
-
-/*
- * Extract the asnum out of the as segment at the specified position.
- * Direct access is not possible because of non-aligned reads.
- * ATTENTION: no bounds check are done.
- */
-u_int16_t
-aspath_extract(const void *seg, int pos)
-{
-	const u_char	*ptr = seg;
-	u_int16_t	 as = 0;
-
-	ptr += 2 + 2 * pos;
-	as = *ptr++;
-	as <<= 8;
-	as |= *ptr;
-	return (as);
-}
-
 struct aspath *
 aspath_lookup(const void *data, u_int16_t len)
 {
@@ -412,7 +581,7 @@ aspath_lookup(const void *data, u_int16_t len)
 	struct aspath		*aspath;
 	u_int32_t		 hash;
 
-	hash = aspath_hash(data, len);
+	hash = hash32_buf(data, len, HASHINIT);
 	head = ASPATH_HASH(hash);
 
 	LIST_FOREACH(aspath, head, entry) {
@@ -450,6 +619,7 @@ aspath_prepend(struct aspath *asp, u_int16_t as, int quantum)
 	if (quantum == 0) {
 		/* no change needed but increase refcnt as we return a copy */
 		asp->refcnt++;
+		rdemem.aspath_refs++;
 		return (asp);
 	} else if (type == AS_SET || size + quantum > 255) {
 		/* need to attach a new AS_SEQUENCE */
@@ -491,133 +661,6 @@ aspath_prepend(struct aspath *asp, u_int16_t as, int quantum)
 	free(p);
 
 	return (asp);
-}
-
-int
-aspath_snprint(char *buf, size_t size, void *data, u_int16_t len)
-{
-#define UPDATE()				\
-	do {					\
-		if (r == -1)			\
-			return (-1);		\
-		total_size += r;		\
-		if ((unsigned int)r < size) {	\
-			size -= r;		\
-			buf += r;		\
-		} else {			\
-			buf += size;		\
-			size = 0;		\
-		}				\
-	} while (0)
-	u_int8_t	*seg;
-	int		 r, total_size;
-	u_int16_t	 seg_size;
-	u_int8_t	 i, seg_type, seg_len;
-
-	total_size = 0;
-	seg = data;
-	for (; len > 0; len -= seg_size, seg += seg_size) {
-		seg_type = seg[0];
-		seg_len = seg[1];
-		seg_size = 2 + 2 * seg_len;
-
-		if (seg_type == AS_SET) {
-			if (total_size != 0)
-				r = snprintf(buf, size, " { ");
-			else
-				r = snprintf(buf, size, "{ ");
-			UPDATE();
-		} else if (total_size != 0) {
-			r = snprintf(buf, size, " ");
-			UPDATE();
-		}
-
-		for (i = 0; i < seg_len; i++) {
-			r = snprintf(buf, size, "%hu", aspath_extract(seg, i));
-			UPDATE();
-			if (i + 1 < seg_len) {
-				r = snprintf(buf, size, " ");
-				UPDATE();
-			}
-		}
-		if (seg_type == AS_SET) {
-			r = snprintf(buf, size, " }");
-			UPDATE();
-		}
-	}
-	/* ensure that we have a valid C-string especially for emtpy as path */
-	if (size > 0)
-		*buf = '\0';
-
-	return (total_size);
-#undef UPDATE
-}
-
-int
-aspath_asprint(char **ret, void *data, u_int16_t len)
-{
-	size_t	slen;
-	int	plen;
-
-	slen = aspath_strlen(data, len) + 1;
-	*ret = malloc(slen);
-	if (*ret == NULL)
-		return (-1);
-
-	plen = aspath_snprint(*ret, slen, data, len);
-	if (plen == -1) {
-		free(*ret);
-		*ret = NULL;
-		return (-1);
-	}
-
-	return (0);
-}
-
-size_t
-aspath_strlen(void *data, u_int16_t len)
-{
-	u_int8_t	*seg;
-	int		 total_size;
-	u_int16_t	 as, seg_size;
-	u_int8_t	 i, seg_type, seg_len;
-
-	total_size = 0;
-	seg = data;
-	for (; len > 0; len -= seg_size, seg += seg_size) {
-		seg_type = seg[0];
-		seg_len = seg[1];
-		seg_size = 2 + 2 * seg_len;
-
-		if (seg_type == AS_SET)
-			if (total_size != 0)
-				total_size += 3;
-			else
-				total_size += 2;
-		else if (total_size != 0)
-			total_size += 1;
-
-		for (i = 0; i < seg_len; i++) {
-			as = aspath_extract(seg, i);
-			if (as >= 10000)
-				total_size += 5;
-			else if (as >= 1000)
-				total_size += 4;
-			else if (as >= 100)
-				total_size += 3;
-			else if (as >= 10)
-				total_size += 2;
-			else
-				total_size += 1;
-
-			if (i + 1 < seg_len)
-				total_size += 1;
-		}
-
-		if (seg_type == AS_SET)
-			total_size += 2;
-	}
-	return (total_size);
 }
 
 /* we need to be able to search more than one as */
@@ -680,42 +723,118 @@ community_match(void *data, u_int16_t len, int as, int type)
 		etype <<= 8;
 		etype |= *p++;
 		if ((as == COMMUNITY_ANY || (u_int16_t)as == eas) &&
-		    (type == COMMUNITY_ANY || type == etype))
+		    (type == COMMUNITY_ANY || (u_int16_t)type == etype))
 			return (1);
 	}
 	return (0);
 }
 
 int
-community_set(struct attr *attr, int as, int type)
+community_set(struct rde_aspath *asp, int as, int type)
 {
-	u_int8_t *p = attr->data;
-	unsigned int i, ncommunities = attr->len;
+	struct attr	*attr;
+	u_int8_t	*p = NULL;
+	unsigned int	 i, ncommunities = 0;
+	u_int8_t	 f = ATTR_OPTIONAL|ATTR_TRANSITIVE;
+	u_int8_t	 t = ATTR_COMMUNITIES;
 
-	ncommunities >>= 2; /* divide by four */
+	attr = attr_optget(asp, ATTR_COMMUNITIES);
+	if (attr != NULL) {
+		p = attr->data;
+		ncommunities = attr->len >> 2; /* divide by four */
+	}
 
+	/* first check if the community is not already set */
 	for (i = 0; i < ncommunities; i++) {
-		if (as >> 8 == p[0] && (as & 0xff) == p[1])
-			break;
+		if (as >> 8 == p[0] && (as & 0xff) == p[1] &&
+		    type >> 8 == p[2] && (type & 0xff) == p[3])
+			/* already present, nothing todo */
+			return (1);
 		p += 4;
 	}
 
-	if (i >= ncommunities) {
-		if (attr->len > 0xffff - 4) /* overflow */
-			return (0);
-		i = attr->len + 4;
-		if ((p = realloc(attr->data, i)) == NULL)
-			return (0);
+	if (ncommunities++ >= 0x3fff)
+		/* overflow */
+		return (0);
 
-		attr->data = p;
-		attr->len = i;
-		p = attr->data + attr->len - 4;
-	}
+	if ((p = malloc(ncommunities << 2)) == NULL)
+		fatal("community_set");
+
 	p[0] = as >> 8;
 	p[1] = as & 0xff;
 	p[2] = type >> 8;
 	p[3] = type & 0xff;
 
+	if (attr != NULL) {
+		memcpy(p + 4, attr->data, attr->len);
+		f = attr->flags;
+		t = attr->type;
+		attr_free(asp, attr);
+	}
+
+	attr_optadd(asp, f, t, p, ncommunities << 2);
+
 	return (1);
+}
+
+void
+community_delete(struct rde_aspath *asp, int as, int type)
+{
+	struct attr	*attr;
+	u_int8_t	*p, *n;
+	u_int16_t	 l, len = 0;
+	u_int16_t	 eas, etype;
+	u_int8_t	 f, t;
+
+	attr = attr_optget(asp, ATTR_COMMUNITIES);
+	if (attr == NULL)
+		/* no attr nothing to do */
+		return;
+	
+	p = attr->data;
+	for (l = 0; l < attr->len; l += 4) {
+		eas = *p++;
+		eas <<= 8;
+		eas |= *p++;
+		etype = *p++;
+		etype <<= 8;
+		etype |= *p++;
+
+		if (as != COMMUNITY_ANY && (u_int16_t)as != eas &&
+		    type != COMMUNITY_ANY && (u_int16_t)type != etype)
+			len += 4;
+	}
+
+	if (len == 0) {
+		attr_free(asp, attr);
+		return;
+	}
+
+	if ((n = malloc(len)) == NULL)
+		fatal("community_delete");
+
+	p = attr->data;
+	for (l = 0; l < len && p < attr->data + attr->len; ) {
+		eas = *p++;
+		eas <<= 8;
+		eas |= *p++;
+		etype = *p++;
+		etype <<= 8;
+		etype |= *p++;
+
+		if (as != COMMUNITY_ANY && (u_int16_t)as != eas &&
+		    type != COMMUNITY_ANY && (u_int16_t)type != etype) {
+			n[l++] = eas >> 8;
+			n[l++] = eas & 0xff;
+			n[l++] = etype >> 8;
+			n[l++] = etype & 0xff;
+		}
+	}
+
+	f = attr->flags;
+	t = attr->type;
+
+	attr_free(asp, attr);
+	attr_optadd(asp, f, t, n, len);
 }
 

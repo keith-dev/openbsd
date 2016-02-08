@@ -1,4 +1,4 @@
-/* $OpenBSD: exchange.c,v 1.123 2005/07/05 11:57:03 hshoexer Exp $	 */
+/* $OpenBSD: exchange.c,v 1.125 2005/11/16 18:35:32 cloder Exp $	 */
 /* $EOM: exchange.c,v 1.143 2000/12/04 00:02:25 angelos Exp $	 */
 
 /*
@@ -60,6 +60,7 @@
 #include "sa.h"
 #include "util.h"
 #include "key.h"
+#include "dpd.h"
 
 /* Initial number of bits from the cookies used as hash.  */
 #define INITIAL_BUCKET_BITS 6
@@ -1014,8 +1015,10 @@ exchange_setup_p1(struct message *msg, u_int32_t doi)
 
 		/* Figure out the DOI.  */
 		str = conf_get_str(policy, "DOI");
-		if (!str || strcasecmp(str, "IPSEC") == 0)
+		if (!str || strcasecmp(str, "IPSEC") == 0) {
 			want_doi = IPSEC_DOI_IPSEC;
+			str = "IPSEC";
+		}
 		else if (strcasecmp(str, "ISAKMP") == 0)
 			want_doi = ISAKMP_DOI_ISAKMP;
 		else {
@@ -1477,6 +1480,14 @@ exchange_finalize(struct message *msg)
 		TAILQ_REMOVE(&exchange->sa_list, sa, next);
 		sa_release(sa);
 	}
+	/*
+	 * Start sending DPD messages after all SAs have been released.
+	 * Otherwise we have a race between exchange_free_aux() and
+	 * dpd_check_event() where both will call sa_free().
+	 */
+	if (exchange->phase == 1 && msg->isakmp_sa &&
+	    (exchange->flags & EXCHANGE_FLAG_DPD_CAP_PEER))
+		dpd_start(msg->isakmp_sa);
 
 	/* If we have nothing to retransmit we can safely remove ourselves.  */
 	if (!exchange->last_sent)

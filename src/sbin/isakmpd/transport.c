@@ -1,4 +1,4 @@
-/* $OpenBSD: transport.c,v 1.33 2005/04/08 23:15:26 hshoexer Exp $	 */
+/* $OpenBSD: transport.c,v 1.35 2005/12/28 10:57:35 hshoexer Exp $	 */
 /* $EOM: transport.c,v 1.43 2000/10/10 12:36:39 provos Exp $	 */
 
 /*
@@ -47,7 +47,6 @@
 /* If no retransmit limit is given, use this as a default.  */
 #define RETRANSMIT_DEFAULT 10
 
-LIST_HEAD(transport_list, transport) transport_list;
 LIST_HEAD(transport_method_list, transport_vtbl) transport_method_list;
 
 /* Call the reinit function of the various transports.  */
@@ -168,16 +167,6 @@ void
 transport_method_add(struct transport_vtbl *t)
 {
 	LIST_INSERT_HEAD(&transport_method_list, t, link);
-}
-
-/* Apply a function FUNC on all registered (non-toplevel) transports.  */
-void
-transport_map(void (*func) (struct transport *))
-{
-	struct transport *t;
-
-	for (t = LIST_FIRST(&transport_list); t; t = LIST_NEXT(t, link))
-		(*func) (t);
 }
 
 /*

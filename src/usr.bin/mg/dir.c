@@ -1,4 +1,4 @@
-/*	$OpenBSD: dir.c,v 1.14 2005/08/09 00:53:48 kjell Exp $	*/
+/*	$OpenBSD: dir.c,v 1.16 2005/12/20 05:04:28 kjell Exp $	*/
 
 /* This file is in the public domain. */
 
@@ -11,7 +11,6 @@
 
 #include "def.h"
 
-#ifndef NO_DIR
 char		*wdir;
 static char	 cwd[NFILEN];
 
@@ -24,7 +23,7 @@ dirinit(void)
 	if ((wdir = getcwd(cwd, sizeof(cwd))) == NULL) {
 		ewprintf("Can't get current directory!");
 		chdir("/");
-		strlcpy(cwd, "/", sizeof(cwd));
+		(void)strlcpy(cwd, "/", sizeof(cwd));
 	}
 }
 
@@ -64,4 +63,3 @@ showcwdir(int f, int n)
 	ewprintf("Current directory: %s", wdir);
 	return (TRUE);
 }
-#endif

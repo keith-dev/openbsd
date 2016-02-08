@@ -1,4 +1,4 @@
-/*	$OpenBSD: kbd.c,v 1.17 2005/06/14 18:14:40 kjell Exp $	*/
+/*	$OpenBSD: kbd.c,v 1.21 2005/12/13 07:20:13 kjell Exp $	*/
 
 /* This file is in the public domain. */
 
@@ -14,7 +14,6 @@
 #include "macro.h"
 #endif /* !NO_MACRO */
 
-#ifdef DO_METAKEY
 #ifndef METABIT
 #define METABIT 0x80
 #endif /* !METABIT */
@@ -28,7 +27,7 @@ static int	 use_metakey = TRUE;
 static int	 pushed = FALSE;
 static int	 pushedc;
 
-MAP_ELEMENT	*ele;
+struct map_element	*ele;
 
 struct key key;
 
@@ -45,7 +44,6 @@ do_meta(int f, int n)
 	ewprintf("Meta keys %sabled", use_metakey ? "en" : "dis");
 	return (TRUE);
 }
-#endif /* DO_METAKEY */
 
 #ifdef BSMAP
 static int	 bs_map = BSMAP;
@@ -67,11 +65,9 @@ bsmap(int f, int n)
 void
 ungetkey(int c)
 {
-#ifdef DO_METAKEY
 	if (use_metakey && pushed && c == CCHR('['))
 		pushedc |= METABIT;
 	else
-#endif /* DO_METAKEY */
 		pushedc = c;
 	pushed = TRUE;
 }
@@ -106,16 +102,14 @@ getkey(int flag)
 		else if (c == CCHR('?'))
 			c = CCHR('H');
 #endif /* BSMAP */
-#ifdef DO_METAKEY
 	if (use_metakey && (c & METABIT)) {
 		pushedc = c & ~METABIT;
 		pushed = TRUE;
 		c = CCHR('[');
 	}
-#endif /* DO_METAKEY */
 #ifndef NO_DPROMPT
 	if (flag && promptp < &prompt[PROMPTL - 5]) {
-		promptp = keyname(promptp,
+		promptp = getkeyname(promptp,
 		    sizeof(prompt) - (promptp - prompt) - 1, c);
 		*promptp++ = '-';
 		*promptp = '\0';
@@ -132,8 +126,8 @@ getkey(int flag)
 PF
 doscan(KEYMAP *map, int c, KEYMAP **newmap)
 {
-	MAP_ELEMENT	*elec = &map->map_element[0];
-	MAP_ELEMENT	*last = &map->map_element[map->map_num];
+	struct map_element	*elec = &map->map_element[0];
+	struct map_element	*last = &map->map_element[map->map_num];
 	PF		 ret;
 
 	while (elec < last && c > elec->k_num)
@@ -179,12 +173,12 @@ rescan(int f, int n)
 	KEYMAP	*curmap;
 	int	 i;
 	PF	 fp = NULL;
-	int	 mode = curbp->b_nmodes;
+	int	 md = curbp->b_nmodes;
 
 	for (;;) {
 		if (ISUPPER(key.k_chars[key.k_count - 1])) {
 			c = TOLOWER(key.k_chars[key.k_count - 1]);
-			curmap = curbp->b_modes[mode]->p_map;
+			curmap = curbp->b_modes[md]->p_map;
 			for (i = 0; i < key.k_count - 1; i++) {
 				if ((fp = doscan(curmap, (key.k_chars[i]), &curmap))
 				    != NULL)
@@ -207,9 +201,9 @@ rescan(int f, int n)
 			}
 		}
 		/* try previous mode */
-		if (--mode < 0)
+		if (--md < 0)
 			return (ABORT);
-		curmap = curbp->b_modes[mode]->p_map;
+		curmap = curbp->b_modes[md]->p_map;
 		for (i = 0; i < key.k_count; i++) {
 			if ((fp = doscan(curmap, (key.k_chars[i]), &curmap)) != NULL)
 				break;
@@ -346,7 +340,7 @@ int
 selfinsert(int f, int n)
 {
 #ifndef NO_MACRO
-	LINE	*lp;
+	struct line	*lp;
 #endif /* !NO_MACRO */
 	int	 c;
 	int	 count;

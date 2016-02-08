@@ -1,4 +1,4 @@
-/*	$OpenBSD: msdosfs_vnops.c,v 1.53 2005/03/14 22:31:52 tom Exp $	*/
+/*	$OpenBSD: msdosfs_vnops.c,v 1.56 2005/12/01 22:13:33 pedro Exp $	*/
 /*	$NetBSD: msdosfs_vnops.c,v 1.63 1997/10/17 11:24:19 ws Exp $	*/
 
 /*-
@@ -1151,6 +1151,9 @@ abortit:
 				VOP_UNLOCK(fdvp, 0, p);
 			goto bad;
 		}
+
+		cache_purge(fvp);
+
 		if (!doingdirectory) {
 			error = pcbmap(dp, de_cluster(pmp, to_diroffset), 0,
 				       &ip->de_dirclust, 0);
@@ -1187,7 +1190,7 @@ abortit:
 			goto bad;
 		}
 		dotdotp = (struct direntry *)bp->b_data;
-		putushort(dotdotp[0].deStartCluster, dp->de_StartCluster);
+		putushort(dotdotp[0].deStartCluster, cn);
 		pcl = dp->de_StartCluster;
 		if (FAT32(pmp) && pcl == pmp->pm_rootdirblk)
 			pcl = 0;
@@ -1743,8 +1746,7 @@ msdosfs_lock(v)
 	} */ *ap = v;
 	struct vnode *vp = ap->a_vp;
 
-	return (lockmgr(&VTODE(vp)->de_lock, ap->a_flags, &vp->v_interlock,
-	    ap->a_p));
+	return (lockmgr(&VTODE(vp)->de_lock, ap->a_flags, &vp->v_interlock));
 }
 
 int
@@ -1757,7 +1759,7 @@ msdosfs_unlock(v)
 	struct vnode *vp = ap->a_vp;
 
 	return (lockmgr(&VTODE(vp)->de_lock, ap->a_flags | LK_RELEASE,
-	    &vp->v_interlock, ap->a_p));
+	    &vp->v_interlock));
 }
 
 int

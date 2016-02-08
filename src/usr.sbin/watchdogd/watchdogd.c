@@ -1,7 +1,7 @@
-/*	$OpenBSD: watchdogd.c,v 1.4 2005/08/09 15:09:06 mickey Exp $ */
+/*	$OpenBSD: watchdogd.c,v 1.6 2006/01/17 11:38:50 mbalmer Exp $ */
 
 /*
- * Copyright (c) 2005 Marc Balmer <marc@msys.ch>
+ * Copyright (c) 2005 Marc Balmer <mbalmer@openbsd.org>
  *
  * Permission to use, copy, modify, and distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -134,13 +134,14 @@ main(int argc, char *argv[])
 	}
 
 	(void)mlockall(MCL_CURRENT | MCL_FUTURE);
+	setpriority(PRIO_PROCESS, getpid(), -5);
 
 	signal(SIGTERM, sighdlr);
 
 	retval = 0;
 	while (!quit) {
 		if (sysctl(mib, 3, NULL, 0, &period, sizeof(period)) == -1)
-			quit = 1;
+			quit = retval = 1;
 		sleep(interval);
 	}
 

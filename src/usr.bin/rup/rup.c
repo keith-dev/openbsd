@@ -1,4 +1,4 @@
-/*	$OpenBSD: rup.c,v 1.20 2003/12/12 05:25:06 deraadt Exp $	*/
+/*	$OpenBSD: rup.c,v 1.22 2005/11/17 19:55:05 moritz Exp $	*/
 
 /*-
  * Copyright (c) 1993, John Brezak
@@ -29,7 +29,7 @@
  */
 
 #ifndef lint
-static char rcsid[] = "$OpenBSD: rup.c,v 1.20 2003/12/12 05:25:06 deraadt Exp $";
+static char rcsid[] = "$OpenBSD: rup.c,v 1.22 2005/11/17 19:55:05 moritz Exp $";
 #endif /* not lint */
 
 #include <stdio.h>
@@ -64,7 +64,7 @@ static int
 search_host(struct in_addr addr)
 {
 	struct host_list *hp;
-	
+
 	if (!hosts)
 		return(0);
 
@@ -143,7 +143,7 @@ remember_rup_data(char *host, struct statstime *st)
 		rup_data = newrup;
 		rup_data_max = newsize;
 	}
-	
+
 	if ((rup_data[rup_data_idx].host = strdup(host)) == NULL)
 		err(1, NULL);
 	rup_data[rup_data_idx].statstime = *st;
@@ -196,12 +196,12 @@ print_rup_data(char *host, statstime *host_stat)
 	host_stat->curtime.tv_sec -= host_stat->boottime.tv_sec;
 
 	if (host_stat->curtime.tv_sec > 0)
-		ups=host_stat->curtime.tv_sec;
-	upd=ups/(3600*24);
-	ups-=upd*3600*24;
-	uph=ups/3600;
-	ups-=uph*3600;
-	upm=ups/60;
+		ups = host_stat->curtime.tv_sec;
+	upd = ups / (3600 * 24);
+	ups -= upd * 3600 * 24;
+	uph = ups / 3600;
+	ups -= uph * 3600;
+	upm = ups / 60;
 
 	if (upd != 0)
 		snprintf(days_buf, sizeof days_buf, "%3u day%s, ", upd,
@@ -227,9 +227,9 @@ print_rup_data(char *host, statstime *host_stat)
 
 	printf(" up %9.9s%9.9s load average: %.2f %.2f %.2f\n",
 	    days_buf, hours_buf,
-	    (double)host_stat->avenrun[0]/FSCALE,
-	    (double)host_stat->avenrun[1]/FSCALE,
-	    (double)host_stat->avenrun[2]/FSCALE);
+	    (double)host_stat->avenrun[0] / FSCALE,
+	    (double)host_stat->avenrun[1] / FSCALE,
+	    (double)host_stat->avenrun[2] / FSCALE);
 
 	return(0);
 }
@@ -242,7 +242,7 @@ onehost(char *host)
 	statstime host_stat;
 	static struct timeval timeout = {25, 0};
 	extern char *__progname;
-	
+
 	rstat_clnt = clnt_create(host, RSTATPROG, RSTATVERS_TIME, "udp");
 	if (rstat_clnt == NULL) {
 		fprintf(stderr, "%s: %s", __progname,
@@ -259,7 +259,11 @@ onehost(char *host)
 		return;
 	}
 
-	print_rup_data(host, &host_stat);
+	if (sort_type != SORT_NONE)
+		remember_rup_data(host, &host_stat);
+	else
+		print_rup_data(host, &host_stat);
+
 	clnt_destroy(rstat_clnt);
 }
 
@@ -269,10 +273,9 @@ allhosts(void)
 	statstime host_stat;
 	enum clnt_stat clnt_stat;
 	extern char *__progname;
-	size_t i;
 
 	if (sort_type != SORT_NONE) {
-		printf("collecting responses...");
+		printf("collecting responses...\n");
 		fflush(stdout);
 	}
 
@@ -282,23 +285,13 @@ allhosts(void)
 		fprintf(stderr, "%s: %s\n", __progname, clnt_sperrno(clnt_stat));
 		exit(1);
 	}
-
-	if (sort_type != SORT_NONE) {
-		putchar('\n');
-		qsort(rup_data, rup_data_idx, sizeof(struct rup_data),
-		    compare);
-
-		for (i = 0; i < rup_data_idx; i++) {
-			print_rup_data(rup_data[i].host,
-			    &rup_data[i].statstime);
-		}
-	}
 }
 
 int
 main(int argc, char *argv[])
 {
 	int ch;
+	size_t i;
 	extern int optind;
 
 	sort_type = SORT_NONE;
@@ -320,7 +313,7 @@ main(int argc, char *argv[])
 			usage();
 			/*NOTREACHED*/
 		}
-	
+
 	setlinebuf(stdout);
 
 	if (argc == optind)
@@ -328,6 +321,16 @@ main(int argc, char *argv[])
 	else {
 		for (; optind < argc; optind++)
 			onehost(argv[optind]);
+	}
+
+	if (sort_type != SORT_NONE) {
+		qsort(rup_data, rup_data_idx, sizeof(struct rup_data),
+		    compare);
+
+		for (i = 0; i < rup_data_idx; i++) {
+			print_rup_data(rup_data[i].host,
+			    &rup_data[i].statstime);
+		}
 	}
 
 	exit(0);

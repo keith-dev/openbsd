@@ -1,4 +1,4 @@
-/*	$OpenBSD: apm.c,v 1.11 2005/03/30 20:00:55 deraadt Exp $	*/
+/*	$OpenBSD: apm.c,v 1.18 2006/02/26 17:59:07 jmc Exp $	*/
 
 /*
  *  Copyright (c) 1996 John T. Kohl
@@ -58,7 +58,7 @@ int send_command(int fd, struct apm_command *cmd, struct apm_reply *reply);
 void
 usage(void)
 {
-	fprintf(stderr,"usage: %s [-v] [-z | -S] [-slbam] [-f socket]\n",
+	fprintf(stderr,"usage: %s [-AabCHLlmPSvz] [-f sockname]\n",
 	    __progname);
 	exit(1);
 }
@@ -66,7 +66,7 @@ usage(void)
 void
 zzusage(void)
 {
-	fprintf(stderr,"usage: %s [-z | -S] [-f socket]\n",
+	fprintf(stderr,"usage: %s [-Sz] [-f sockname]\n",
 	    __progname);
 	exit(1);
 }
@@ -86,7 +86,7 @@ send_command(int fd, struct apm_command *cmd, struct apm_reply *reply)
 		warn("invalid send to APM daemon");
 		return (1);
 	}
-	return 0;
+	return (0);
 }
 
 int
@@ -130,25 +130,25 @@ open_socket(const char *sockname)
 		errno = errr;
 		err(1, "cannot open connection to APM daemon");
 	}
-	return sock;
+	return (sock);
 }
 
 int
 main(int argc, char *argv[])
 {
 	const char *sockname = _PATH_APM_SOCKET;
-	int dostatus = FALSE;
 	int doac = FALSE;
 	int dopct = FALSE;
 	int dobstate = FALSE;
 	int domin = FALSE;
+	int doperf = FALSE;
 	int verbose = FALSE;
 	int ch, fd, rval;
 	enum apm_action action = NONE;
 	struct apm_command command;
 	struct apm_reply reply;
 
-	while ((ch = getopt(argc, argv, "lmbvasSzf:")) != -1) {
+	while ((ch = getopt(argc, argv, "ACHLlmbvaPSzf:")) != -1) {
 		switch (ch) {
 		case 'v':
 			verbose = TRUE;
@@ -166,11 +166,25 @@ main(int argc, char *argv[])
 				usage();
 			action = STANDBY;
 			break;
-		case 's':
-			if (action != NONE && action != GETSTATUS)
+		case 'A':
+			if (action != NONE)
 				usage();
-			dostatus = TRUE;
-			action = GETSTATUS;
+			action = SETPERF_AUTO;
+			break;
+		case 'C':
+			if (action != NONE)
+				usage();
+			action = SETPERF_COOL;
+			break;
+		case 'H':
+			if (action != NONE)
+				usage();
+			action = SETPERF_HIGH;
+			break;
+		case 'L':
+			if (action != NONE)
+				usage();
+			action = SETPERF_LOW;
 			break;
 		case 'b':
 			if (action != NONE && action != GETSTATUS)
@@ -196,6 +210,12 @@ main(int argc, char *argv[])
 			doac = TRUE;
 			action = GETSTATUS;
 			break;
+		case 'P':
+			if (action != NONE && action != GETSTATUS)
+				usage();
+			doperf = TRUE;
+			action = GETSTATUS;
+			break;
 		default:
 			usage();
 		}
@@ -209,8 +229,8 @@ main(int argc, char *argv[])
 	switch (action) {
 	case NONE:
 		action = GETSTATUS;
-		verbose = doac = dopct = dobstate = dostatus = domin = TRUE;
-		/* fallthrough */
+		verbose = doac = dopct = dobstate = domin = doperf = TRUE;
+		/* FALLTHROUGH */
 	case GETSTATUS:
 		if (fd == -1) {
 			/* open the device directly and get status */
@@ -219,9 +239,13 @@ main(int argc, char *argv[])
 			    &reply.batterystate) == 0)
 				goto printval;
 		}
-		/* fallthrough */
+		/* FALLTHROUGH */
 	case SUSPEND:
 	case STANDBY:
+	case SETPERF_LOW:
+	case SETPERF_HIGH:
+	case SETPERF_AUTO:
+	case SETPERF_COOL:
 		command.action = action;
 		break;
 	default:
@@ -252,17 +276,28 @@ main(int argc, char *argv[])
 			if (doac)
 				printf("%d\n",
 				    reply.batterystate.ac_state);
-			if (dostatus)
-				printf("1\n");
+			if (doperf)
+				printf("%d\n", reply.perfstate);
 			break;
 		}
-		if (dobstate)
-			printf("Battery state: %s\n",
+
+		if (dobstate) {
+			printf("Battery state: %s",
 			    battstate(reply.batterystate.battery_state));
-		if (dopct)
-			printf("Battery remaining: %d percent\n",
+			if (!dopct && !domin)
+				printf("\n");
+		}
+
+		if (dopct && !dobstate)
+			printf("Battery remaining: %d percent",
 			    reply.batterystate.battery_life);
-		if (domin) {
+		else if (dopct)
+			printf(", %d%% remaining",
+			    reply.batterystate.battery_life);
+		if (dopct && !domin)
+			printf("\n");
+
+		if (domin && !dobstate && !dopct) {
 #ifdef __powerpc__
 			if (reply.batterystate.battery_state ==
 			    APM_BATT_CHARGING)
@@ -284,12 +319,35 @@ main(int argc, char *argv[])
 					printf("%d minutes\n",
 					    reply.batterystate.minutes_left);
 			}
+		} else if (domin) {
+#ifdef __powerpc__
+			if (reply.batterystate.battery_state ==
+			    APM_BATT_CHARGING)
+				printf(", %d minutes recharge time estimate\n",
+				    reply.batterystate.minutes_left);
+			else if (reply.batterystate.minutes_left == 0 &&
+			    reply.batterystate.battery_life > 10)
+				printf(", unknown life estimate\n");
+			else
+#endif
+			{
+				if (reply.batterystate.minutes_left ==
+				    (u_int)-1)
+					printf(", unknown");
+				else
+					printf(", %d minutes",
+					    reply.batterystate.minutes_left);
+				printf(" life estimate\n");
+			}
 		}
+
 		if (doac)
 			printf("A/C adapter state: %s\n",
 			    ac_state(reply.batterystate.ac_state));
-		if (dostatus)
-			printf("Power management enabled\n");
+
+		if (doperf)
+			printf("Performance state: %s (%d MHz)\n",
+			    perf_state(reply.perfstate), reply.cpuspeed);
 		break;
 	default:
 		break;

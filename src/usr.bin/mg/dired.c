@@ -1,4 +1,4 @@
-/*	$OpenBSD: dired.c,v 1.21 2005/08/09 00:53:48 kjell Exp $	*/
+/*	$OpenBSD: dired.c,v 1.35 2005/12/20 05:04:28 kjell Exp $	*/
 
 /* This file is in the public domain. */
 
@@ -7,22 +7,76 @@
  */
 
 #include "def.h"
+#include "funmap.h"
 #include "kbd.h"
+
 #include <sys/types.h>
 #include <sys/stat.h>
+#include <sys/time.h>
+#include <sys/resource.h>
 #include <sys/wait.h>
 
+#include <ctype.h>
 #include <signal.h>
 #include <fcntl.h>
 #include <errno.h>
 #include <libgen.h>
 
-#ifndef NO_DIRED
+void		 dired_init(void);
+static int	 dired(int, int);
+static int	 d_otherwindow(int, int);
+static int	 d_undel(int, int);
+static int	 d_undelbak(int, int);
+static int	 d_findfile(int, int);
+static int	 d_ffotherwindow(int, int);
+static int	 d_expunge(int, int);
+static int	 d_copy(int, int);
+static int	 d_del(int, int);
+static int	 d_rename(int, int);
+static int	 d_shell_command(int, int);
+static int	 d_create_directory(int, int);
+static int	 d_makename(struct line *, char *, size_t);
 
-int d_findfile(int, int);
+extern struct keymap_s helpmap, cXmap, metamap;
 
-static PF dired_cmds_1[] = {
-	forwline,		/* space */
+static PF dirednul[] = {
+	setmark,		/* ^@ */
+	gotobol,		/* ^A */
+	backchar,		/* ^B */
+	rescan,			/* ^C */
+	d_del,			/* ^D */
+	gotoeol,		/* ^E */
+	forwchar,		/* ^F */
+	ctrlg,			/* ^G */
+#ifndef NO_HELP
+	NULL,			/* ^H */
+#endif /* !NO_HELP */
+};
+
+static PF diredcl[] = {
+	reposition,		/* ^L */
+	d_findfile,		/* ^M */
+	forwline,		/* ^N */
+	rescan,			/* ^O */
+	backline,		/* ^P */
+	rescan,			/* ^Q */
+	backisearch,		/* ^R */
+	forwisearch,		/* ^S */
+	rescan,			/* ^T */
+	universal_argument,	/* ^U */
+	forwpage,		/* ^V */
+	rescan,			/* ^W */
+	NULL			/* ^X */
+};
+
+static PF diredcz[] = {
+	spawncli,		/* ^Z */
+	NULL,			/* esc */
+	rescan,			/* ^\ */
+	rescan,			/* ^] */
+	rescan,			/* ^^ */
+	rescan,			/* ^_ */
+	forwline,		/* SP */
 	d_shell_command,	/* ! */
 	rescan,			/* " */
 	rescan,			/* # */
@@ -36,116 +90,112 @@ static PF dired_cmds_1[] = {
 	d_create_directory	/* + */
 };
 
-static PF dired_cmds_2[] = {
-	rescan,			/* a */
-	rescan,			/* b */
-	rescan,			/* c */
-	rescan, 		/* d */
-	d_findfile, 		/* e */
-	d_findfile, 		/* f */
-	rescan, 		/* g */
-	rescan, 		/* h */
-	rescan, 		/* i */
-	rescan, 		/* j */
-	rescan, 		/* k */
-	rescan, 		/* l */
-	rescan, 		/* m */
-	forwline, 		/* n */
-	d_ffotherwindow, 	/* o */
-	rescan, 		/* p */
-	rescan, 		/* q */
-	rescan, 		/* r */
-	rescan, 		/* s */
-	rescan, 		/* t */
-	rescan, 		/* u */
-	d_findfile, 		/* v */
-	rescan, 		/* w */
-	d_expunge, 		/* x */
-	rescan, 		/* y */
-	rescan			/* z */
+static PF diredc[] = {
+	d_copy,			/* c */
+	d_del,			/* d */
+	d_findfile,		/* e */
+	d_findfile		/* f */
 };
 
-static PF dired_cmds_3[] = {
-	rescan,			/* A */
-	rescan,			/* B */
-	d_copy,			/* C */
-	d_del,			/* D */
-	rescan,			/* E */
-	rescan, 		/* F */
-	rescan, 		/* G */
-	rescan, 		/* H */
-	rescan, 		/* I */
-	rescan, 		/* J */
-	rescan, 		/* K */
-	rescan, 		/* L */
-	rescan, 		/* M */
-	rescan, 		/* N */
-	rescan, 		/* O */
-	rescan, 		/* P */
-	rescan, 		/* Q */
-	d_rename, 		/* R */
-	rescan, 		/* S */
-	rescan, 		/* T */
-	rescan, 		/* U */
-	d_findfile, 		/* V */
-	rescan, 		/* W */
-	d_expunge, 		/* X */
-	rescan, 		/* Y */
-	rescan			/* Z */
+static PF diredn[] = {
+	forwline,		/* n */
+	d_ffotherwindow,	/* o */
+	backline,		/* p */
+	rescan,			/* q */
+	d_rename,		/* r */
+	rescan,			/* s */
+	rescan,			/* t */
+	d_undel,		/* u */
+	rescan,			/* v */
+	rescan,			/* w */
+	d_expunge		/* x */
 };
 
-static PF dired_pf[] = {
-	d_findfile,		/* ^M */
-	rescan,			/* ^N */
-	d_findfile		/* ^O */
+static PF direddl[] = {
+	d_undelbak		/* del */
 };
 
-static struct KEYMAPE (4 + IMAPEXT) diredmap = {
-	4,
-	4 + IMAPEXT,
+#ifndef	DIRED_XMAPS
+#define	NDIRED_XMAPS	0	/* number of extra map sections */
+#endif /* DIRED_XMAPS */
+
+static struct KEYMAPE (6 + NDIRED_XMAPS + IMAPEXT) diredmap = {
+	6 + NDIRED_XMAPS,
+	6 + NDIRED_XMAPS + IMAPEXT,
 	rescan,
 	{
-		{ CCHR('M'), CCHR('O'), dired_pf, NULL },
-		{ ' ', '+', dired_cmds_1, NULL },
-		{ 'A', 'Z', dired_cmds_3, NULL },
-		{ 'a', 'z', dired_cmds_2, NULL }
+#ifndef NO_HELP
+		{
+			CCHR('@'), CCHR('H'), dirednul, (KEYMAP *) & helpmap
+		},
+#else /* !NO_HELP */
+		{
+			CCHR('@'), CCHR('G'), dirednul, NULL
+		},
+#endif /* !NO_HELP */
+		{
+			CCHR('L'), CCHR('X'), diredcl, (KEYMAP *) & cXmap
+		},
+		{
+			CCHR('Z'), '+', diredcz, (KEYMAP *) & metamap
+		},
+		{
+			'c', 'f', diredc, NULL
+		},
+		{
+			'n', 'x', diredn, NULL
+		},
+		{
+			CCHR('?'), CCHR('?'), direddl, NULL
+		},
+#ifdef	DIRED_XMAPS
+		DIRED_XMAPS,	/* map sections for dired mode keys	 */
+#endif /* DIRED_XMAPS */
 	}
 };
 
+void
+dired_init(void)
+{
+	funmap_add(dired, "dired");
+	funmap_add(d_undelbak, "dired-backup-unflag");
+	funmap_add(d_copy, "dired-copy-file");
+	funmap_add(d_expunge, "dired-do-deletions");
+	funmap_add(d_findfile, "dired-find-file");
+	funmap_add(d_ffotherwindow, "dired-find-file-other-window");
+	funmap_add(d_del, "dired-flag-file-deleted");
+	funmap_add(d_otherwindow, "dired-other-window");
+	funmap_add(d_rename, "dired-rename-file");
+	funmap_add(d_undel, "dired-unflag");
+	maps_add((KEYMAP *)&diredmap, "dired");
+	dobindkey(fundamental_map, "dired", "^Xd");
+}
 
 /* ARGSUSED */
 int
 dired(int f, int n)
 {
-	static int   inited = 0;
-	char	     dirname[NFILEN], *bufp, *slash;
-	BUFFER	    *bp;
-
-	if (inited == 0) {
-		maps_add((KEYMAP *)&diredmap, "dired");
-		inited = 1;
-	}
+	char		 dname[NFILEN], *bufp, *slash;
+	struct buffer	*bp;
 
 	if (curbp->b_fname && curbp->b_fname[0] != '\0') {
-		(void)strlcpy(dirname, curbp->b_fname, sizeof(dirname));
-		if ((slash = strrchr(dirname, '/')) != NULL) {
+		(void)strlcpy(dname, curbp->b_fname, sizeof(dname));
+		if ((slash = strrchr(dname, '/')) != NULL) {
 			*(slash + 1) = '\0';
 		}
 	} else {
-		if (getcwd(dirname, sizeof(dirname)) == NULL)
-			dirname[0] = '\0';
+		if (getcwd(dname, sizeof(dname)) == NULL)
+			dname[0] = '\0';
 	}
 
-	if ((bufp = eread("Dired: ", dirname, NFILEN,
+	if ((bufp = eread("Dired: ", dname, NFILEN,
 	    EFDEF | EFNEW | EFCR)) == NULL)
 		return (ABORT);
 	if (bufp[0] == '\0')
 		return (FALSE);
 	if ((bp = dired_(bufp)) == NULL)
 		return (FALSE);
-	bp->b_modes[0] = name_mode("fundamental");
-	bp->b_modes[1] = name_mode("dired");
-	bp->b_nmodes = 1;
+
 	curbp = bp;
 	return (showbuffer(bp, curwp, WFHARD | WFMODE));
 }
@@ -154,12 +204,21 @@ dired(int f, int n)
 int
 d_otherwindow(int f, int n)
 {
-	char	 dirname[NFILEN], *bufp;
-	BUFFER	*bp;
-	MGWIN	*wp;
+	char		 dname[NFILEN], *bufp, *slash;
+	struct buffer	*bp;
+	struct mgwin	*wp;
 
-	dirname[0] = '\0';
-	if ((bufp = eread("Dired other window: ", dirname, NFILEN,
+	if (curbp->b_fname && curbp->b_fname[0] != '\0') {
+		(void)strlcpy(dname, curbp->b_fname, sizeof(dname));
+		if ((slash = strrchr(dname, '/')) != NULL) {
+			*(slash + 1) = '\0';
+		}
+	} else {
+		if (getcwd(dname, sizeof(dname)) == NULL)
+			dname[0] = '\0';
+	}
+
+	if ((bufp = eread("Dired other window: ", dname, NFILEN,
 	    EFDEF | EFNEW | EFCR)) == NULL)
 		return (ABORT);
 	else if (bufp[0] == '\0')
@@ -228,9 +287,9 @@ d_undelbak(int f, int n)
 int
 d_findfile(int f, int n)
 {
-	BUFFER	*bp;
-	int	 s;
-	char	 fname[NFILEN];
+	struct buffer	*bp;
+	int		 s;
+	char		 fname[NFILEN];
 
 	if ((s = d_makename(curwp->w_dotp, fname, sizeof(fname))) == ABORT)
 		return (FALSE);
@@ -252,10 +311,10 @@ d_findfile(int f, int n)
 int
 d_ffotherwindow(int f, int n)
 {
-	char	fname[NFILEN];
-	int	s;
-	BUFFER *bp;
-	MGWIN  *wp;
+	char		 fname[NFILEN];
+	int		 s;
+	struct buffer	*bp;
+	struct mgwin	*wp;
 
 	if ((s = d_makename(curwp->w_dotp, fname, sizeof(fname))) == ABORT)
 		return (FALSE);
@@ -274,8 +333,8 @@ d_ffotherwindow(int f, int n)
 int
 d_expunge(int f, int n)
 {
-	LINE	*lp, *nlp;
-	char	 fname[NFILEN];
+	struct line	*lp, *nlp;
+	char		 fname[NFILEN];
 
 	for (lp = lforw(curbp->b_linep); lp != curbp->b_linep; lp = nlp) {
 		nlp = lforw(lp);
@@ -311,9 +370,9 @@ int
 d_copy(int f, int n)
 {
 	char	frname[NFILEN], toname[NFILEN], *bufp;
-	int	stat;
+	int	ret;
 	size_t	off;
-	BUFFER *bp;
+	struct buffer *bp;
 
 	if (d_makename(curwp->w_dotp, frname, sizeof(frname)) != FALSE) {
 		ewprintf("Not a file");
@@ -329,9 +388,9 @@ d_copy(int f, int n)
 		return (ABORT);
 	else if (bufp[0] == '\0')
 		return (FALSE);
-	stat = (copy(frname, toname) >= 0) ? TRUE : FALSE;
-	if (stat != TRUE)
-		return (stat);
+	ret = (copy(frname, toname) >= 0) ? TRUE : FALSE;
+	if (ret != TRUE)
+		return (ret);
 	bp = dired_(curbp->b_fname);
 	return (showbuffer(bp, curwp, WFHARD | WFMODE));
 }
@@ -340,10 +399,10 @@ d_copy(int f, int n)
 int
 d_rename(int f, int n)
 {
-	char	frname[NFILEN], toname[NFILEN], *bufp;
-	int	stat;
-	size_t	off;
-	BUFFER *bp;
+	char		 frname[NFILEN], toname[NFILEN], *bufp;
+	int		 ret;
+	size_t		 off;
+	struct buffer	*bp;
 
 	if (d_makename(curwp->w_dotp, frname, sizeof(frname)) != FALSE) {
 		ewprintf("Not a file");
@@ -359,27 +418,28 @@ d_rename(int f, int n)
 		return (ABORT);
 	else if (bufp[0] == '\0')
 		return (FALSE);
-	stat = (rename(frname, toname) >= 0) ? TRUE : FALSE;
-	if (stat != TRUE)
-		return (stat);
+	ret = (rename(frname, toname) >= 0) ? TRUE : FALSE;
+	if (ret != TRUE)
+		return (ret);
 	bp = dired_(curbp->b_fname);
 	return (showbuffer(bp, curwp, WFHARD | WFMODE));
 }
-#endif
 
+/* ARGSUSED */
 void
 reaper(int signo __attribute__((unused)))
 {
-	pid_t	ret;
-	int	status;
+	int	save_errno = errno, status;
 
-	while ((ret = waitpid(-1, &status, WNOHANG)) >= 0)
+	while (waitpid(-1, &status, WNOHANG) >= 0)
 		;
+	errno = save_errno;
 }
 
 /*
  * Pipe the currently selected file through a shell command.
  */
+/* ARGSUSED */
 int
 d_shell_command(int f, int n)
 {
@@ -387,8 +447,8 @@ d_shell_command(int f, int n)
 	int	 infd, fds[2];
 	pid_t	 pid;
 	struct	 sigaction olda, newa;
-	BUFFER	*bp;
-	MGWIN	*wp;
+	struct buffer	*bp;
+	struct mgwin	*wp;
 	FILE	*fin;
 
 	bp = bfind("*Shell Command Output*", TRUE);
@@ -435,6 +495,7 @@ d_shell_command(int f, int n)
 		dup2(fds[1], STDERR_FILENO);
 		execl("/bin/sh", "sh", "-c", bufp, (char *)NULL);
 		exit(1);
+		break;
 	default:
 		close(infd);
 		close(fds[1]);
@@ -467,12 +528,13 @@ d_shell_command(int f, int n)
 	return (TRUE);
 }
 
+/* ARGSUSED */
 int
 d_create_directory(int f, int n)
 {
 	char	 tocreate[MAXPATHLEN], *bufp;
 	size_t  off;
-	BUFFER	*bp;
+	struct buffer	*bp;
 
 	off = strlcpy(tocreate, curbp->b_fname, sizeof(tocreate));
 	if (off >= sizeof(tocreate) - 1)
@@ -489,4 +551,91 @@ d_create_directory(int f, int n)
 	}
 	bp = dired_(curbp->b_fname);
 	return (showbuffer(bp, curwp, WFHARD | WFMODE));
+}
+
+#define NAME_FIELD	8
+
+static int
+d_makename(struct line *lp, char *fn, size_t len)
+{
+	int	 i;
+	char	*p, *ep;
+
+	if (strlcpy(fn, curbp->b_fname, len) >= len)
+		return (FALSE);
+	if ((p = lp->l_text) == NULL)
+		return (ABORT);
+	ep = lp->l_text + llength(lp);
+	p++; /* skip action letter, if any */
+	for (i = 0; i < NAME_FIELD; i++) {
+		while (p < ep && isspace(*p))
+			p++;
+		while (p < ep && !isspace(*p))
+			p++;
+		while (p < ep && isspace(*p))
+			p++;
+		if (p == ep)
+			return (ABORT);
+	}
+	if (strlcat(fn, p, len) >= len)
+		return (FALSE);
+	return ((lgetc(lp, 2) == 'd') ? TRUE : FALSE);
+}
+
+/*
+ * XXX dname needs to have enough place to store an additional '/'.
+ */
+struct buffer *
+dired_(char *dname)
+{
+	struct buffer	*bp;
+	FILE	*dirpipe;
+	char	 line[256];
+	int	 len, ret;
+
+	if ((dname = adjustname(dname)) == NULL) {
+		ewprintf("Bad directory name");
+		return (NULL);
+	}
+	/* this should not be done, instead adjustname() should get a flag */
+	len = strlen(dname);
+	if (dname[len - 1] != '/') {
+		dname[len++] = '/';
+		dname[len] = '\0';
+	}
+	if ((bp = findbuffer(dname)) == NULL) {
+		ewprintf("Could not create buffer");
+		return (NULL);
+	}
+	if (bclear(bp) != TRUE)
+		return (NULL);
+	bp->b_flag |= BFREADONLY;
+	ret = snprintf(line, sizeof(line), "ls -al %s", dname);
+	if (ret < 0 || ret  >= sizeof(line)) {
+		ewprintf("Path too long");
+		return (NULL);
+	}
+	if ((dirpipe = popen(line, "r")) == NULL) {
+		ewprintf("Problem opening pipe to ls");
+		return (NULL);
+	}
+	line[0] = line[1] = ' ';
+	while (fgets(&line[2], sizeof(line) - 2, dirpipe) != NULL) {
+		line[strlen(line) - 1] = '\0';	/* remove ^J	 */
+		(void) addline(bp, line);
+	}
+	if (pclose(dirpipe) == -1) {
+		ewprintf("Problem closing pipe to ls : %s",
+		    strerror(errno));
+		return (NULL);
+	}
+	bp->b_dotp = lforw(bp->b_linep);	/* go to first line */
+	(void) strlcpy(bp->b_fname, dname, sizeof(bp->b_fname));
+	if ((bp->b_modes[1] = name_mode("dired")) == NULL) {
+		bp->b_modes[0] = name_mode("fundamental");
+		ewprintf("Could not find mode dired");
+		return (NULL);
+	}
+	bp->b_nmodes = 1;
+	return (bp);
 }

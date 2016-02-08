@@ -1,4 +1,4 @@
-/*	$OpenBSD: ospfd.c,v 1.23 2005/08/15 18:58:47 norby Exp $ */
+/*	$OpenBSD: ospfd.c,v 1.27 2006/02/10 18:30:47 claudio Exp $ */
 
 /*
  * Copyright (c) 2005 Claudio Jeker <claudio@openbsd.org>
@@ -34,6 +34,7 @@
 #include <pwd.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include <signal.h>
 #include <unistd.h>
 #include <util.h>
@@ -54,6 +55,7 @@ void	main_dispatch_ospfe(int, short, void *);
 void	main_dispatch_rde(int, short, void *);
 
 int	check_file_secrecy(int, const char *);
+void	ospf_redistribute_default(int);
 
 int	pipe_parent2ospfe[2];
 int	pipe_parent2rde[2];
@@ -240,6 +242,9 @@ main(int argc, char *argv[])
 	if (kr_init(!(conf->flags & OSPFD_FLAG_NO_FIB_UPDATE)) == -1)
 		fatalx("kr_init failed");
 
+	/* redistribute default */
+	ospf_redistribute_default(IMSG_NETWORK_ADD);
+
 	event_dispatch();
 
 	ospfd_shutdown();
@@ -250,7 +255,8 @@ main(int argc, char *argv[])
 void
 ospfd_shutdown(void)
 {
-	pid_t	pid;
+	struct area	*a;
+	pid_t		 pid;
 
 	if (ospfe_pid)
 		kill(ospfe_pid, SIGTERM);
@@ -258,9 +264,13 @@ ospfd_shutdown(void)
 	if (rde_pid)
 		kill(rde_pid, SIGTERM);
 
+	while ((a = LIST_FIRST(&conf->area_list)) != NULL) {
+		LIST_REMOVE(a, entry);
+		area_del(a);
+	}
+
 	control_cleanup();
 	kr_shutdown();
-	if_shutdown(conf);
 
 	do {
 		if ((pid = wait(NULL)) == -1 &&
@@ -272,6 +282,7 @@ ospfd_shutdown(void)
 	free(ibuf_ospfe);
 	msgbuf_clear(&ibuf_rde->w);
 	free(ibuf_rde);
+	free(conf);
 
 	log_info("terminating");
 	exit(0);
@@ -414,15 +425,13 @@ main_dispatch_rde(int fd, short event, void *bula)
 void
 main_imsg_compose_ospfe(int type, pid_t pid, void *data, u_int16_t datalen)
 {
-
-	imsg_compose(ibuf_ospfe, type, 0, pid, -1, data, datalen);
+	imsg_compose(ibuf_ospfe, type, 0, pid, data, datalen);
 }
 
 void
 main_imsg_compose_rde(int type, pid_t pid, void *data, u_int16_t datalen)
 {
-
-	imsg_compose(ibuf_rde, type, 0, pid, -1, data, datalen);
+	imsg_compose(ibuf_rde, type, 0, pid, data, datalen);
 }
 
 int
@@ -460,3 +469,35 @@ imsg_event_add(struct imsgbuf *ibuf)
 	event_set(&ibuf->ev, ibuf->fd, ibuf->events, ibuf->handler, ibuf);
 	event_add(&ibuf->ev, NULL);
 }
+
+int
+ospf_redistribute(struct kroute *kr)
+{
+	/* stub area router? */
+	if ((conf->options & OSPF_OPTION_E) == 0)
+		return (0);
+
+	/* only allow 0.0.0.0/0 via REDISTRIBUTE_DEFAULT */
+	if (kr->prefix.s_addr == INADDR_ANY && kr->prefixlen == 0)
+		return (0);
+
+	if ((conf->redistribute_flags & REDISTRIBUTE_STATIC) &&
+	    (kr->flags & F_STATIC))
+		return (1);
+	if ((conf->redistribute_flags & REDISTRIBUTE_CONNECTED) &&
+	    (kr->flags & F_CONNECTED))
+		return (1);
+
+	return (0);
+}
+
+void
+ospf_redistribute_default(int type)
+{
+	struct kroute	kr;
+
+	bzero(&kr, sizeof(kr));
+	if (conf->redistribute_flags & REDISTRIBUTE_DEFAULT)
+		main_imsg_compose_rde(type, 0, &kr, sizeof(struct kroute));
+}
+

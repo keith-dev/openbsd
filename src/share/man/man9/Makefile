@@ -1,10 +1,10 @@
-#	$OpenBSD: Makefile,v 1.99 2005/08/01 05:31:49 djm Exp $
+#	$OpenBSD: Makefile,v 1.111 2006/01/18 14:51:42 mickey Exp $
 #	$NetBSD: Makefile,v 1.4 1996/01/09 03:23:01 thorpej Exp $
 
 #	Makefile for section 9 (kernel function and variable) manual pages.
 
 MAN=	altq.9 audio.9 autoconf.9 boot.9 buffercache.9 bus_dma.9 bus_space.9 \
-	copy.9 crypto.9 ctxsw.9 disk.9 disklabel.9 \
+	copy.9 crypto.9 ctxsw.9 delay.9 disk.9 disklabel.9 \
 	dohooks.9 dopowerhooks.9 \
 	domountroothooks.9 doshutdownhooks.9 dostartuphooks.9 \
 	evcount.9 file.9 \
@@ -17,16 +17,16 @@ MAN=	altq.9 audio.9 autoconf.9 boot.9 buffercache.9 bus_dma.9 bus_space.9 \
 	kern.9 knote.9 kthread.9 ktrace.9 loadfirmware.9 lock.9 log.9 \
 	malloc.9 mbuf.9 mbuf_tags.9 md5.9 microtime.9 \
 	mountroothook_establish.9 mutex.9 namei.9 \
-	panic.9 pfind.9 physio.9 pmap.9 \
+	panic.9 pci_conf_read.9 pci_intr_map.9 pfind.9 physio.9 pmap.9 \
 	pool.9 powerhook_establish.9 ppsratecheck.9 printf.9 psignal.9 \
 	radio.9 random.9 rasops.9 ratecheck.9 resettodr.9 rssadapt.9 \
 	shutdownhook_establish.9 sleep.9 spl.9 startuphook_establish.9 \
-	style.9 syscall.9 systrace.9 \
+	style.9 syscall.9 systrace.9 sysctl_int.9 \
 	tc_init.9 time.9 timeout.9 tvtohz.9 uiomove.9 uvm.9 vfs.9 vfs_cache.9 \
 	vaccess.9 vclean.9 vcount.9 vdevgone.9 vfinddev.9 vflush.9 \
 	vflushbuf.9 vget.9 vgone.9 vhold.9 vinvalbuf.9 vnode.9 vnsubr.9 \
-	VOP_LOOKUP.9 vput.9 vrecycle.9 vref.9 vrele.9 vwaitforio.9 vwakeup.9 \
-	wdog_register.9
+	VOP_GETATTR.9 VOP_LOOKUP.9 vput.9 vrecycle.9 vref.9 vrele.9 \
+	vwaitforio.9 vwakeup.9 wdog_register.9
 
 MLINKS+=autoconf.9 config_init.9 autoconf.9 config_search.9 \
 	autoconf.9 config_rootsearch.9 autoconf.9 config_found_sm.9 \
@@ -116,7 +116,7 @@ MLINKS+=evcount.9 evcount_attach.9 evcount.9 evcount_detach.9
 MLINKS+=extent.9 extent_create.9 extent.9 extent_destroy.9 \
 	extent.9 extent_alloc.9 extent.9 extent_alloc_subregion.9 \
 	extent.9 extent_alloc_region.9 extent.9 extent_free.9 \
-	extent.9 extent_free.9 extent.9 extent_print.9
+	extent.9 extent_print.9
 MLINKS+=file.9 falloc.9 file.9 fdrelease.9 file.9 FREF.9 file.9 FRELE.9 \
 	file.9 fd_getfile.9 file.9 getvnode.9 file.9 getsock.9
 MLINKS+=getdevvp.9 bdevvp.9 getdevvp.9 cdevvp.9
@@ -183,7 +183,7 @@ MLINKS+=mbuf.9 m_copym2.9 mbuf.9 m_copym.9 mbuf.9 m_free.9 mbuf.9 MFREE.9 \
 	mbuf.9 m_get.9 mbuf.9 MGET.9 mbuf.9 m_getclr.9 mbuf.9 m_gethdr.9 \
 	mbuf.9 MGETHDR.9 mbuf.9 m_prepend.9 mbuf.9 M_PREPEND.9 \
 	mbuf.9 m_pulldown.9 mbuf.9 m_pullup.9 mbuf.9 m_pullup2.9 \
-	mbuf.9 m_retry.9 mbuf.9 m_retryhdr.9 mbuf.9 m_split.9 \
+	mbuf.9 m_split.9 \
 	mbuf.9 m_inject.9 mbuf.9 m_getptr.9 mbuf.9 m_adj.9 mbuf.9 m_copyback.9 \
 	mbuf.9 m_freem.9 mbuf.9 m_reclaim.9 mbuf.9 m_copydata.9 \
 	mbuf.9 m_cat.9 mbuf.9 m_devget.9 mbuf.9 m_zero.9 mbuf.9 m_apply.9 \
@@ -213,6 +213,11 @@ MLINKS+=rssadapt.9 ieee80211_rssadapt_choose.9 \
 	rssadapt.9 ieee80211_rssadapt_lower_rate.9 \
 	rssadapt.9 ieee80211_rssadapt_raise_rate.9 \
 	rssadapt.9 ieee80211_rssadapt_updatestats.9
+MLINKS+=pci_conf_read.9 pci_conf_write.9 pci_conf_read.9 pci_make_tag.9 \
+	pci_conf_read.9 pci_decompose_tag.9
+MLINKS+=pci_intr_map.9 pci_intr_string.9 pci_intr_map.9 pci_intr_line.9 \
+	pci_intr_map.9 pci_intr_establish.9 \
+	pci_intr_map.9 pci_intr_disestablish.9
 MLINKS+=pfind.9 pgfind.9
 MLINKS+=pmap.9 pmap_init.9 pmap.9 pmap_enter.9 pmap.9 pmap_remove.9 \
 	pmap.9 pmap_unwire.9 pmap.9 pmap_protect.9 pmap.9 pmap_page_protect.9 \
@@ -223,9 +228,10 @@ MLINKS+=pmap.9 pmap_init.9 pmap.9 pmap_enter.9 pmap.9 pmap_remove.9 \
 	pmap.9 pmap_steal_memory.9 pmap.9 pmap_growkernel.9 \
 	pmap.9 pmap_update.9 pmap.9 pmap_collect.9 pmap.9 pmap_virtual_space.9 \
 	pmap.9 pmap_copy.9 pmap.9 pmap_kenter_pa.9 pmap.9 pmap_kremove.9
-MLINKS+=pool.9 pool_init.9 pool.9 pool_destroy.9 pool.9 pool_get.9 \
-	pool.9 pool_put.9 pool.9 pool_prime.9 pool.9 pool_sethiwat.9 \
-	pool.9 pool_setlowat.9 pool.9 pool_cache_init.9 \
+MLINKS+=pool.9 pool_init.9 pool.9 pool_destroy.9 pool.9 pool_set_drain_hook.9 \
+	pool.9 pool_get.9 pool.9 pool_put.9 pool.9 pool_prime.9 \
+	pool.9 pool_sethiwat.9 pool.9 pool_setlowat.9 \
+	pool.9 pool_sethardlimit.9 pool.9 pool_cache_init.9 \
 	pool.9 pool_cache_destroy.9 pool.9 pool_cache_get.9 \
 	pool.9 pool_cache_put.9 pool.9 pool_cache_destruct_object.9 \
 	pool.9 pool_cache_invalidate.9
@@ -238,13 +244,18 @@ MLINKS+=shutdownhook_establish.9 shutdownhook_disestablish.9
 MLINKS+=mountroothook_establish.9 mountroothook_disestablish.9
 MLINKS+=sleep.9 tsleep.9 sleep.9 wakeup.9
 MLINKS+=spl.9 spl0.9 spl.9 splassert.9 spl.9 splbio.9 spl.9 splclock.9 \
-	spl.9 splhigh.9 spl.9 splimp.9 spl.9 spllowersoftclock.9 \
+	spl.9 splhigh.9 spl.9 spllowersoftclock.9 \
 	spl.9 splnet.9 spl.9 splsched.9 spl.9 splserial.9 spl.9 splsoftclock.9 \
-	spl.9 splsoftnet.9 spl.9 splsoftserial.9 spl.9 splsofttty.9 \
+	spl.9 splsoftnet.9 spl.9 splsofttty.9 \
 	spl.9 splstatclock.9 spl.9 spltty.9 spl.9 splvm.9 spl.9 splx.9
 MLINKS+=startuphook_establish.9 startuphook_disestablish.9
 MLINKS+=systrace.9 systrace_redirect.9 \
 	systrace.9 systrace_fork.9 systrace.9 systrace_exit.9
+MLINKS+=sysctl_int.9 sysctl_int_arr.9 sysctl_int.9 sysctl_quad.9 \
+	sysctl_int.9 sysctl_string.9 sysctl_int.9 sysctl_tstring.9 \
+	sysctl_int.9 sysctl_rdint.9 sysctl_int.9 sysctl_rdquad.9 \
+	sysctl_int.9 sysctl_rdstring.9 sysctl_int.9 sysctl_rdstruct.9 \
+	sysctl_int.9 sysctl_struct.9 sysctl_int.9 ctlname.9
 MLINKS+=time.9 boottime.9 time.9 mono_time.9 time.9 runtime.9
 MLINKS+=timeout.9 timeout_add.9 timeout.9 timeout_set.9 \
 	timeout.9 timeout_pending.9 timeout.9 timeout_del.9 \
@@ -268,7 +279,7 @@ MLINKS+=uvm.9 uvm_init.9 uvm.9 uvm_init_limits.9 uvm.9 uvm_setpagesize.9 \
 	uvm.9 uvm_pglistfree.9 uvm.9 uvm_page_physload.9 \
 	uvm.9 uvm_pageout.9 uvm.9 uvm_scheduler.9 uvm.9 uvm_swapin.9 \
 	uvm.9 uao_create.9 uvm.9 uao_detach.9 uvm.9 uao_reference.9 \
-	uvm.9 uvm_chgkprot.9 uvm.9 uvm_kernacc.9 uvm.9 uvm_useracc.9 \
+	uvm.9 uvm_chgkprot.9 uvm.9 uvm_kernacc.9 \
 	uvm.9 uvm_vslock.9 uvm.9 uvm_vsunlock.9 uvm.9 uvm_meter.9 \
 	uvm.9 uvm_sysctl.9 uvm.9 uvm_fork.9 uvm.9 uvm_grow.9 \
 	uvm.9 uvm_coredump.9
@@ -287,16 +298,16 @@ MLINKS+=vfs_cache.9 cache_enter.9 vfs_cache.9 cache_lookup.9 \
 	vfs_cache.9 cache_purge.9 vfs_cache.9 cache_purgevfs.9 \
 	vfs_cache.9 cache_revlookup.9
 
-MLINKS+=vnsubr.9 vn_close.9 vnsubr.9 vn_default_error.9 vnsubr.9 vn_isunder.9 \
-	vnsubr.9 vn_lock.9 vnsubr.9 vn_open.9 vnsubr.9 vn_rdwr.9 \
-	vnsubr.9 vn_stat.9 vnsubr.9 vn_writechk.9 vnsubr.9 vn_marktext.9
+MLINKS+=vnsubr.9 vn_access.9 vnsubr.9 vn_close.9 vnsubr.9 vn_default_error.9 \
+	vnsubr.9 vn_isunder.9 vnsubr.9 vn_lock.9 vnsubr.9 vn_open.9 \
+	vnsubr.9 vn_rdwr.9 vnsubr.9 vn_stat.9 vnsubr.9 vn_writechk.9 \
+	vnsubr.9 vn_marktext.9
 
 # VOP functions
 MLINKS+=VOP_LOOKUP.9 VOP_ABORTOP.9 VOP_LOOKUP.9 VOP_ACCESS.9 \
 	VOP_LOOKUP.9 VOP_ADVLOCK.9 VOP_LOOKUP.9 VOP_BMAP.9 \
 	VOP_LOOKUP.9 VOP_BWRITE.9 VOP_LOOKUP.9 VOP_CLOSE.9 \
 	VOP_LOOKUP.9 VOP_CREATE.9 VOP_LOOKUP.9 VOP_FSYNC.9 \
-	VOP_LOOKUP.9 VOP_GETATTR.9 \
 	VOP_LOOKUP.9 VOP_INACTIVE.9 VOP_LOOKUP.9 VOP_IOCTL.9 \
 	VOP_LOOKUP.9 VOP_ISLOCKED.9 VOP_LOOKUP.9 VOP_KQFILTER.9 \
 	VOP_LOOKUP.9 VOP_LINK.9 \
@@ -308,8 +319,9 @@ MLINKS+=VOP_LOOKUP.9 VOP_ABORTOP.9 VOP_LOOKUP.9 VOP_ACCESS.9 \
 	VOP_LOOKUP.9 VOP_REALLOCBLKS.9 VOP_LOOKUP.9 VOP_RECLAIM.9 \
 	VOP_LOOKUP.9 VOP_REMOVE.9 VOP_LOOKUP.9 VOP_RENAME.9 \
 	VOP_LOOKUP.9 VOP_REVOKE.9 VOP_LOOKUP.9 VOP_RMDIR.9 \
-	VOP_LOOKUP.9 VOP_SETATTR.9 \
 	VOP_LOOKUP.9 VOP_STRATEGY.9 VOP_LOOKUP.9 VOP_SYMLINK.9 \
 	VOP_LOOKUP.9 VOP_UNLOCK.9 VOP_LOOKUP.9 VOP_WRITE.9
+
+MLINKS+= VOP_GETATTR.9 VOP_SETATTR.9
 
 .include <bsd.prog.mk>

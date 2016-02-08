@@ -1,4 +1,4 @@
-/*	$OpenBSD: diff.c,v 1.55 2005/08/14 19:49:18 xsa Exp $	*/
+/*	$OpenBSD: diff.c,v 1.80 2006/02/26 18:35:08 niallo Exp $	*/
 /*
  * Copyright (C) Caldera International Inc.  2001-2002.
  * All rights reserved.
@@ -126,53 +126,13 @@
  *	6n words for files of length n.
  */
 
-#include <sys/stat.h>
-
-#include <ctype.h>
-#include <dirent.h>
-#include <err.h>
-#include <errno.h>
-#include <fcntl.h>
-#include <paths.h>
-#include <regex.h>
-#include <stddef.h>
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-#include <unistd.h>
+#include "includes.h"
 
 #include "buf.h"
 #include "cvs.h"
+#include "diff.h"
 #include "log.h"
 #include "proto.h"
-
-
-#define CVS_DIFF_DEFCTX	3	/* default context length */
-
-
-/*
- * Output format options
- */
-#define	D_NORMAL	0	/* Normal output */
-#define	D_CONTEXT	1	/* Diff with context */
-#define	D_UNIFIED	2	/* Unified context diff */
-#define	D_IFDEF		3	/* Diff with merged #ifdef's */
-#define	D_BRIEF		4	/* Say if the files differ */
-#define	D_RCSDIFF	5       /* Reverse editor output: RCS format */
-
-/*
- * Status values for print_status() and diffreg() return values
- */
-#define	D_SAME		0	/* Files are the same */
-#define	D_DIFFER	1	/* Files are different */
-#define	D_BINARY	2	/* Binary files are different */
-#define	D_COMMON	3	/* Subdirectory common to both dirs */
-#define	D_ONLY		4	/* Only exists in one directory */
-#define	D_MISMATCH1	5	/* path1 was a dir, path2 a file */
-#define	D_MISMATCH2	6	/* path1 was a file, path2 a dir */
-#define	D_ERROR		7	/* An error occurred */
-#define	D_SKIPPED1	8	/* path1 was a special file */
-#define	D_SKIPPED2	9	/* path2 was a special file */
 
 struct cand {
 	int	x;
@@ -186,7 +146,7 @@ struct line {
 } *file[2];
 
 /*
- * The following struct is used to record change information when
+ * The following struct is used to record change in formation when
  * doing a "context" or "unified" diff.  (see routine "change" to
  * understand the highly mnemonic field names)
  */
@@ -204,13 +164,13 @@ struct diff_arg {
 	char	*date2;
 };
 
-
+#if !defined(RCSPROG)
 static int	cvs_diff_init(struct cvs_cmd *, int, char **, int *);
 static int	cvs_diff_remote(CVSFILE *, void *);
 static int	cvs_diff_local(CVSFILE *, void *);
 static int	cvs_diff_pre_exec(struct cvsroot *);
 static int	cvs_diff_cleanup(void);
-int		cvs_diffreg(const char *, const char *);
+#endif
 
 static void	 output(const char *, FILE *, const char *, FILE *);
 static void	 check(FILE *, FILE *);
@@ -240,12 +200,16 @@ static char	*match_function(const long *, int, FILE *);
 static char	*preadline(int, size_t, off_t);
 
 
-static int aflag, bflag, dflag, iflag, Nflag, pflag, tflag, Tflag, wflag;
-static int context;
-static int format = D_NORMAL;
+#if !defined(RCSPROG)
+static int Nflag;
+#endif
+static int aflag, bflag, dflag, iflag, pflag, tflag, Tflag, wflag;
+static int context = 3;
+int diff_format = D_NORMAL;
+char *diff_file = NULL;
+char diffargs[128];
 static struct stat stb1, stb2;
-static char *ifdefname, *ignore_pats, diffargs[128];
-static const char *diff_file;
+static char *ifdefname, *ignore_pats;
 regex_t ignore_re;
 
 static int  *J;			/* will be overlaid on class */
@@ -272,7 +236,7 @@ static struct context_vec *context_vec_ptr;
 static char lastbuf[FUNCTION_CONTEXT_SIZE];
 static int  lastline;
 static int  lastmatchline;
-
+BUF  *diffbuf = NULL;
 
 /*
  * chrtran points to one of 2 translation tables: cup2low if folding upper to
@@ -332,7 +296,7 @@ u_char cup2low[256] = {
 	0xfd, 0xfe, 0xff
 };
 
-
+#if !defined(RCSPROG)
 struct cvs_cmd cvs_cmd_diff = {
 	CVS_OP_DIFF, CVS_REQ_DIFF, "diff",
 	{ "di", "dif" },
@@ -369,7 +333,9 @@ struct cvs_cmd cvs_cmd_rdiff = {
 	cvs_diff_cleanup,
 	CVS_CMD_SENDARGS2 | CVS_CMD_ALLOWSPEC | CVS_CMD_SENDDIR
 };
+#endif
 
+#if !defined(RCSPROG)
 static struct diff_arg *dap = NULL;
 static int recurse;
 
@@ -378,9 +344,7 @@ cvs_diff_init(struct cvs_cmd *cmd, int argc, char **argv, int *arg)
 {
 	int ch;
 
-	dap = (struct diff_arg *)malloc(sizeof(*dap));
-	if (dap == NULL)
-		return (CVS_EX_DATA);
+	dap = (struct diff_arg *)xmalloc(sizeof(*dap));
 	dap->date1 = dap->date2 = dap->rev1 = dap->rev2 = NULL;
 	strlcpy(diffargs, argv[0], sizeof(diffargs));
 
@@ -388,7 +352,7 @@ cvs_diff_init(struct cvs_cmd *cmd, int argc, char **argv, int *arg)
 		switch (ch) {
 		case 'c':
 			strlcat(diffargs, " -c", sizeof(diffargs));
-			format = D_CONTEXT;
+			diff_format = D_CONTEXT;
 			break;
 		case 'D':
 			if (dap->date1 == NULL && dap->rev1 == NULL) {
@@ -416,7 +380,7 @@ cvs_diff_init(struct cvs_cmd *cmd, int argc, char **argv, int *arg)
 			break;
 		case 'n':
 			strlcat(diffargs, " -n", sizeof(diffargs));
-			format = D_RCSDIFF;
+			diff_format = D_RCSDIFF;
 			break;
 		case 'p':
 			strlcat(diffargs, " -p", sizeof(diffargs));
@@ -440,7 +404,7 @@ cvs_diff_init(struct cvs_cmd *cmd, int argc, char **argv, int *arg)
 			break;
 		case 'u':
 			strlcat(diffargs, " -u", sizeof(diffargs));
-			format = D_UNIFIED;
+			diff_format = D_UNIFIED;
 			break;
 		default:
 			return (CVS_EX_USAGE);
@@ -455,7 +419,7 @@ int
 cvs_diff_cleanup(void)
 {
 	if (dap != NULL) {
-		free(dap);
+		xfree(dap);
 		dap = NULL;
 	}
 	return (0);
@@ -470,36 +434,29 @@ cvs_diff_pre_exec(struct cvsroot *root)
 {
 	if (root->cr_method != CVS_METHOD_LOCAL) {
 		/* send the flags */
-		if (Nflag && (cvs_sendarg(root, "-N", 0) < 0))
-			return (CVS_EX_PROTO);
-		if (pflag && (cvs_sendarg(root, "-p", 0) < 0))
-			return (CVS_EX_PROTO);
+		if (Nflag == 1)
+			cvs_sendarg(root, "-N", 0);
+		if (pflag == 1)
+			cvs_sendarg(root, "-p", 0);
 
-		if (format == D_CONTEXT) {
-			if (cvs_sendarg(root, "-c", 0) < 0)
-				return (CVS_EX_PROTO);
-		} else if (format == D_UNIFIED) {
-			if (cvs_sendarg(root, "-u", 0) < 0)
-				return (CVS_EX_PROTO);
-		}
+		if (diff_format == D_CONTEXT)
+			cvs_sendarg(root, "-c", 0);
+		else if (diff_format == D_UNIFIED)
+			cvs_sendarg(root, "-u", 0);
 
 		if (dap->rev1 != NULL) {
-			if ((cvs_sendarg(root, "-r", 0) < 0) ||
-			    (cvs_sendarg(root, dap->rev1, 0) < 0))
-				return (CVS_EX_PROTO);
+			cvs_sendarg(root, "-r", 0);
+			cvs_sendarg(root, dap->rev1, 0);
 		} else if (dap->date1 != NULL) {
-			if ((cvs_sendarg(root, "-D", 0) < 0) ||
-			    (cvs_sendarg(root, dap->date1, 0) < 0))
-				return (CVS_EX_PROTO);
+			cvs_sendarg(root, "-D", 0);
+			cvs_sendarg(root, dap->date1, 0);
 		}
 		if (dap->rev2 != NULL) {
-			if ((cvs_sendarg(root, "-r", 0) < 0) ||
-			    (cvs_sendarg(root, dap->rev2, 0) < 0))
-				return (CVS_EX_PROTO);
+			cvs_sendarg(root, "-r", 0);
+			cvs_sendarg(root, dap->rev2, 0);
 		} else if (dap->date2 != NULL) {
-			if ((cvs_sendarg(root, "-D", 0) < 0) ||
-			    (cvs_sendarg(root, dap->date2, 0) < 0))
-				return  (CVS_EX_PROTO);
+			cvs_sendarg(root, "-D", 0);
+			cvs_sendarg(root, dap->date2, 0);
 		}
 	}
 
@@ -561,8 +518,7 @@ cvs_diff_remote(struct cvs_file *cfp, void *arg)
 		return (0);
 	}
 
-	if (cvs_sendentry(root, cfp) < 0)
-		return (CVS_EX_PROTO);
+	cvs_sendentry(root, cfp);
 
 	if (cfp->cf_cvstat == CVS_FST_UPTODATE) {
 		cvs_sendreq(root, CVS_REQ_UNCHANGED, cfp->cf_name);
@@ -570,9 +526,8 @@ cvs_diff_remote(struct cvs_file *cfp, void *arg)
 	}
 
 	/* at this point, the file is modified */
-	if ((cvs_sendreq(root, CVS_REQ_MODIFIED, cfp->cf_name) < 0) ||
-	    (cvs_sendfile(root, diff_file) < 0))
-		return (CVS_EX_PROTO);
+	cvs_sendreq(root, CVS_REQ_MODIFIED, cfp->cf_name);
+	cvs_sendfile(root, diff_file);
 
 	return (0);
 }
@@ -580,7 +535,6 @@ cvs_diff_remote(struct cvs_file *cfp, void *arg)
 static int
 cvs_diff_local(CVSFILE *cf, void *arg)
 {
-	int len;
 	char *repo, buf[64];
 	char fpath[MAXPATHLEN], rcspath[MAXPATHLEN];
 	char path_tmp1[MAXPATHLEN], path_tmp2[MAXPATHLEN];
@@ -588,6 +542,10 @@ cvs_diff_local(CVSFILE *cf, void *arg)
 	RCSNUM *r1, *r2;
 	RCSFILE *rf;
 	struct cvsroot *root;
+	struct timeval tv[2], tv2[2];
+
+	memset(&tv, 0, sizeof(tv));
+	memset(&tv2, 0, sizeof(tv2));
 
 	rf = NULL;
 	root = CVS_DIR_ROOT(cf);
@@ -612,18 +570,11 @@ cvs_diff_local(CVSFILE *cf, void *arg)
 		return (0);
 
 	/* at this point, the file is modified */
-	len = snprintf(rcspath, sizeof(rcspath), "%s/%s/%s%s",
-	    root->cr_dir, repo, diff_file, RCS_FILE_EXT);
-	if (len == -1 || len >= (int)sizeof(rcspath)) {
-		errno = ENAMETOOLONG;
-		cvs_log(LP_ERRNO, "%s", rcspath);
-		return (CVS_EX_DATA);
-	}
+	cvs_rcs_getpath(cf, rcspath, sizeof(rcspath));
 
-	rf = rcs_open(rcspath, RCS_READ);
-	if (rf == NULL) {
-		return (CVS_EX_DATA);
-	}
+	if ((rf = rcs_open(rcspath, RCS_READ)) == NULL)
+		fatal("cvs_diff_local: rcs_open `%s': %s", rcspath,
+		    rcs_errstr(rcs_errno));
 
 	cvs_printf("Index: %s\n%s\nRCS file: %s\n", diff_file,
 	    RCS_DIFF_DIV, rcspath);
@@ -631,9 +582,8 @@ cvs_diff_local(CVSFILE *cf, void *arg)
 	if (dap->rev1 == NULL)
 		r1 = cf->cf_lrev;
 	else {
-		if ((r1 = rcsnum_parse(dap->rev1)) == NULL) {
-			return (CVS_EX_DATA);
-		}
+		if ((r1 = rcsnum_parse(dap->rev1)) == NULL)
+			fatal("cvs_diff_local: rcsnum_parse failed");
 	}
 
 	cvs_printf("retrieving revision %s\n",
@@ -641,12 +591,15 @@ cvs_diff_local(CVSFILE *cf, void *arg)
 	b1 = rcs_getrev(rf, r1);
 
 	if (b1 == NULL) {
-		cvs_log(LP_ERR, "failed to retrieve revision %s\n",
+		cvs_log(LP_ERR, "failed to retrieve revision %s",
 		    rcsnum_tostr(r1, buf, sizeof(buf)));
 		if (r1 != cf->cf_lrev)
 			rcsnum_free(r1);
+		rcs_close(rf);
 		return (CVS_EX_DATA);
 	}
+	tv[0].tv_sec = (long)rcs_rev_getdate(rf, r1);
+	tv[1].tv_sec = tv[0].tv_sec;
 
 	if (r1 != cf->cf_lrev)
 		rcsnum_free(r1);
@@ -654,18 +607,30 @@ cvs_diff_local(CVSFILE *cf, void *arg)
 	if (dap->rev2 != NULL) {
 		cvs_printf("retrieving revision %s\n", dap->rev2);
 		if ((r2 = rcsnum_parse(dap->rev2)) == NULL) {
+			rcs_close(rf);
 			return (CVS_EX_DATA);
 		}
 		b2 = rcs_getrev(rf, r2);
+		tv2[0].tv_sec = (long)rcs_rev_getdate(rf, r2);
+		tv2[1].tv_sec = tv2[0].tv_sec;
 		rcsnum_free(r2);
 	} else {
+		struct stat st;
+		if (stat(diff_file, &st) < 0) {
+			cvs_log(LP_ERR, "failed to retrieve revision %s",
+			    dap->rev2);
+			cvs_buf_free(b1);
+			return (CVS_EX_DATA);
+		}
 		b2 = cvs_buf_load(diff_file, BUF_AUTOEXT);
+		tv2[0].tv_sec = st.st_mtime;
+		tv2[1].tv_sec = st.st_mtime;
 	}
 
 	rcs_close(rf);
 
 	if (b2 == NULL) {
-		cvs_log(LP_ERR, "failed to retrieve revision %s\n",
+		cvs_log(LP_ERR, "failed to retrieve revision %s",
 		    dap->rev2);
 		cvs_buf_free(b1);
 		return (CVS_EX_DATA);
@@ -676,32 +641,31 @@ cvs_diff_local(CVSFILE *cf, void *arg)
 	if (dap->rev2 != NULL)
 		cvs_printf(" -r%s", dap->rev2);
 	cvs_printf(" %s\n", diff_file);
-	strlcpy(path_tmp1, "/tmp/diff1.XXXXXXXXXX", sizeof(path_tmp1));
-	if (cvs_buf_write_stmp(b1, path_tmp1, 0600) == -1) {
-		cvs_buf_free(b1);
-		cvs_buf_free(b2);
-		return (CVS_EX_DATA);
-	}
+	strlcpy(path_tmp1, cvs_tmpdir, sizeof(path_tmp1));
+	strlcat(path_tmp1, "/diff1.XXXXXXXXXX", sizeof(path_tmp1));
+	cvs_buf_write_stmp(b1, path_tmp1, 0600);
 	cvs_buf_free(b1);
+	if (utimes(path_tmp1, (const struct timeval *)&tv) < 0)
+		cvs_log(LP_ERRNO, "error setting utimes");
 
-	strlcpy(path_tmp2, "/tmp/diff2.XXXXXXXXXX", sizeof(path_tmp2));
-	if (cvs_buf_write_stmp(b2, path_tmp2, 0600) == -1) {
-		cvs_buf_free(b2);
-		(void)unlink(path_tmp1);
-		return (CVS_EX_DATA);
-	}
+	strlcpy(path_tmp2, cvs_tmpdir, sizeof(path_tmp2));
+	strlcat(path_tmp2, "/diff2.XXXXXXXXXX", sizeof(path_tmp2));
+	cvs_buf_write_stmp(b2, path_tmp2, 0600);
 	cvs_buf_free(b2);
+	if (utimes(path_tmp2, (const struct timeval *)&tv2) < 0)
+		cvs_log(LP_ERRNO, "error setting utimes");
 
-	cvs_diffreg(path_tmp1, path_tmp2);
+	cvs_diffreg(path_tmp1, path_tmp2, NULL);
 	(void)unlink(path_tmp1);
 	(void)unlink(path_tmp2);
 
 	return (0);
 }
+#endif
 
 
 int
-cvs_diffreg(const char *file1, const char *file2)
+cvs_diffreg(const char *file1, const char *file2, BUF *out)
 {
 	FILE *f1, *f2;
 	int i, rval;
@@ -714,6 +678,8 @@ cvs_diffreg(const char *file1, const char *file2)
 	lastmatchline = 0;
 	context_vec_ptr = context_vec_start - 1;
 	chrtran = (iflag ? cup2low : clow2low);
+	if (out != NULL)
+		diffbuf = out;
 
 	f1 = fopen(file1, "r");
 	if (f1 == NULL) {
@@ -727,6 +693,14 @@ cvs_diffreg(const char *file1, const char *file2)
 		goto closem;
 	}
 
+	if (stat(file1, &stb1) < 0) {
+		cvs_log(LP_ERRNO, "%s", file1);
+		goto closem;
+	}
+	if (stat(file2, &stb2) < 0) {
+		cvs_log(LP_ERRNO, "%s", file2);
+		goto closem;
+	}
 	switch (files_differ(f1, f2)) {
 	case 0:
 		goto closem;
@@ -751,71 +725,41 @@ cvs_diffreg(const char *file1, const char *file2)
 
 	member = (int *)file[1];
 	equiv(sfile[0], slen[0], sfile[1], slen[1], member);
-	if ((tmp = realloc(member, (slen[1] + 2) * sizeof(int))) == NULL) {
-		free(member);
-		member = NULL;
-		cvs_log(LP_ERRNO, "failed to resize member");
-		goto closem;
-	}
+	tmp = xrealloc(member, (slen[1] + 2) * sizeof(int));
 	member = (int *)tmp;
 
 	class = (int *)file[0];
 	unsort(sfile[0], slen[0], class);
-	if ((tmp = realloc(class, (slen[0] + 2) * sizeof(int))) == NULL) {
-		free(class);
-		class = NULL;
-		cvs_log(LP_ERRNO, "failed to resize class");
-		goto closem;
-	}
+	tmp = xrealloc(class, (slen[0] + 2) * sizeof(int));
 	class = (int *)tmp;
 
-	if ((klist = malloc((slen[0] + 2) * sizeof(int))) == NULL) {
-		cvs_log(LP_ERRNO, "failed to allocate klist");
-		goto closem;
-	}
+	klist = xmalloc((slen[0] + 2) * sizeof(int));
 	clen = 0;
 	clistlen = 100;
-	if ((clist = malloc(clistlen * sizeof(cand))) == NULL) {
-		cvs_log(LP_ERRNO, "failed to allocate clist");
-		goto closem;
-	}
+	clist = xmalloc(clistlen * sizeof(cand));
 
 	if ((i = stone(class, slen[0], member, klist)) < 0)
 		goto closem;
 
-	free(member);
-	free(class);
+	xfree(member);
+	xfree(class);
 
-	if ((tmp = realloc(J, (diff_len[0] + 2) * sizeof(int))) == NULL) {
-		free(J);
-		J = NULL;
-		cvs_log(LP_ERRNO, "failed to resize J");
-		goto closem;
-	}
+	tmp = xrealloc(J, (diff_len[0] + 2) * sizeof(int));
 	J = (int *)tmp;
 	unravel(klist[i]);
-	free(clist);
-	free(klist);
+	xfree(clist);
+	xfree(klist);
 
-	if ((tmp = realloc(ixold, (diff_len[0] + 2) * sizeof(long))) == NULL) {
-		free(ixold);
-		ixold = NULL;
-		cvs_log(LP_ERRNO, "failed to resize ixold");
-		goto closem;
-	}
+	tmp = xrealloc(ixold, (diff_len[0] + 2) * sizeof(long));
 	ixold = (long *)tmp;
-	if ((tmp = realloc(ixnew, (diff_len[1] + 2) * sizeof(long))) == NULL) {
-		free(ixnew);
-		ixnew = NULL;
-		cvs_log(LP_ERRNO, "failed to resize ixnew");
-		goto closem;
-	}
+
+	tmp = xrealloc(ixnew, (diff_len[1] + 2) * sizeof(long));
 	ixnew = (long *)tmp;
 	check(f1, f2);
 	output(file1, f1, file2, f2);
 
 closem:
-	if (anychange) {
+	if (anychange == 1) {
 		if (rval == D_SAME)
 			rval = D_DIFFER;
 	}
@@ -845,7 +789,7 @@ files_differ(FILE *f1, FILE *f2)
 		j = fread(buf2, (size_t)1, sizeof(buf2), f2);
 		if (i != j)
 			return (1);
-		if (i == 0 && j == 0) {
+		if ((i == 0) && (j == 0)) {
 			if (ferror(f1) || ferror(f2))
 				return (1);
 			return (0);
@@ -869,20 +813,11 @@ prepare(int i, FILE *fd, off_t filesize)
 	if (sz < 100)
 		sz = 100;
 
-	p = (struct line *)malloc((sz + 3) * sizeof(struct line));
-	if (p == NULL) {
-		cvs_log(LP_ERRNO, "failed to prepare line array");
-		return (-1);
-	}
+	p = (struct line *)xmalloc((sz + 3) * sizeof(struct line));
 	for (j = 0; (h = readhash(fd));) {
 		if (j == (int)sz) {
 			sz = sz * 3 / 2;
-			tmp = realloc(p, (sz + 3) * sizeof(struct line));
-			if (tmp == NULL) {
-				cvs_log(LP_ERRNO, "failed to grow line array");
-				free(p);
-				return (-1);
-			}
+			tmp = xrealloc(p, (sz + 3) * sizeof(struct line));
 			p = (struct line *)tmp;
 		}
 		p[++j].value = h;
@@ -1022,11 +957,7 @@ newcand(int x, int y, int pred)
 
 	if (clen == clistlen) {
 		newclistlen = clistlen * 11 / 10;
-		tmp = realloc(clist, newclistlen * sizeof(cand));
-		if (tmp == NULL) {
-			cvs_log(LP_ERRNO, "failed to resize clist");
-			return (-1);
-		}
+		tmp = xrealloc(clist, newclistlen * sizeof(cand));
 		clist = tmp;
 		clistlen = newclistlen;
 	}
@@ -1101,7 +1032,7 @@ check(FILE *f1, FILE *f2)
 			ixnew[j] = ctnew += skipline(f2);
 			j++;
 		}
-		if (bflag || wflag || iflag) {
+		if ((bflag == 1)|| (wflag == 1) || (iflag == 1)) {
 			for (;;) {
 				c = getc(f1);
 				d = getc(f2);
@@ -1109,14 +1040,14 @@ check(FILE *f1, FILE *f2)
 				 * GNU diff ignores a missing newline
 				 * in one file if bflag || wflag.
 				 */
-				if ((bflag || wflag) &&
+				if (((bflag == 1) || (wflag == 1)) &&
 				    ((c == EOF && d == '\n') ||
 				    (c == '\n' && d == EOF))) {
 					break;
 				}
 				ctold++;
 				ctnew++;
-				if (bflag && isspace(c) && isspace(d)) {
+				if ((bflag == 1) && isspace(c) && isspace(d)) {
 					do {
 						if (c == '\n')
 							break;
@@ -1127,7 +1058,7 @@ check(FILE *f1, FILE *f2)
 							break;
 						ctnew++;
 					} while (isspace(d = getc(f2)));
-				} else if (wflag) {
+				} else if (wflag == 1) {
 					while (isspace(c) && c != '\n') {
 						c = getc(f1);
 						ctold++;
@@ -1140,13 +1071,13 @@ check(FILE *f1, FILE *f2)
 				if (chrtran[c] != chrtran[d]) {
 					jackpot++;
 					J[i] = 0;
-					if (c != '\n' && c != EOF)
+					if ((c != '\n') && (c != EOF))
 						ctold += skipline(f1);
-					if (d != '\n' && c != EOF)
+					if ((d != '\n') && (c != EOF))
 						ctnew += skipline(f2);
 					break;
 				}
-				if (c == '\n' || c == EOF)
+				if ((c == '\n') || (c == EOF))
 					break;
 			}
 		} else {
@@ -1156,13 +1087,13 @@ check(FILE *f1, FILE *f2)
 				if ((c = getc(f1)) != (d = getc(f2))) {
 					/* jackpot++; */
 					J[i] = 0;
-					if (c != '\n' && c != EOF)
+					if ((c != '\n') && (c != EOF))
 						ctold += skipline(f1);
-					if (d != '\n' && c != EOF)
+					if ((d != '\n') && (c != EOF))
 						ctnew += skipline(f2);
 					break;
 				}
-				if (c == '\n' || c == EOF)
+				if ((c == '\n') || (c == EOF))
 					break;
 			}
 		}
@@ -1173,7 +1104,7 @@ check(FILE *f1, FILE *f2)
 	for (; j <= diff_len[1]; j++)
 		ixnew[j] = ctnew += skipline(f2);
 	/*
-	 * if (jackpot)
+	 * if (jackpot != 0)
 	 *	cvs_printf("jackpot\n");
 	 */
 }
@@ -1216,15 +1147,12 @@ unsort(struct line *f, int l, int *b)
 {
 	int *a, i;
 
-	if ((a = (int *)malloc((l + 1) * sizeof(int))) == NULL) {
-		cvs_log(LP_ERRNO, "failed to allocate sort array");
-		return;
-	}
+	a = (int *)xmalloc((l + 1) * sizeof(int));
 	for (i = 1; i <= l; i++)
 		a[f[i].serial] = f[i].value;
 	for (i = 1; i <= l; i++)
 		b[i] = a[i];
-	free(a);
+	xfree(a);
 }
 
 static int
@@ -1260,19 +1188,19 @@ output(const char *file1, FILE *f1, const char *file2, FILE *f2)
 	}
 	if (m == 0)
 		change(file1, f1, file2, f2, 1, 0, 1, diff_len[1]);
-	if (format == D_IFDEF) {
+	if (diff_format == D_IFDEF) {
 		for (;;) {
 #define	c i0
 			if ((c = getc(f1)) == EOF)
 				return;
-			cvs_putchar(c);
+			diff_output("%c", c);
 		}
 #undef c
 	}
 	if (anychange != 0) {
-		if (format == D_CONTEXT)
+		if (diff_format == D_CONTEXT)
 			dump_context_vec(f1, f2);
-		else if (format == D_UNIFIED)
+		else if (diff_format == D_UNIFIED)
 			dump_unified_vec(f1, f2);
 	}
 }
@@ -1280,20 +1208,20 @@ output(const char *file1, FILE *f1, const char *file2, FILE *f2)
 static __inline void
 range(int a, int b, char *separator)
 {
-	cvs_printf("%d", a > b ? b : a);
+	diff_output("%d", a > b ? b : a);
 	if (a < b)
-		cvs_printf("%s%d", separator, b);
+		diff_output("%s%d", separator, b);
 }
 
 static __inline void
 uni_range(int a, int b)
 {
 	if (a < b)
-		cvs_printf("%d,%d", a, b - a + 1);
+		diff_output("%d,%d", a, b - a + 1);
 	else if (a == b)
-		cvs_printf("%d", b);
+		diff_output("%d", b);
 	else
-		cvs_printf("%d,0", b);
+		diff_output("%d,0", b);
 }
 
 static char *
@@ -1302,11 +1230,7 @@ preadline(int fd, size_t rlen, off_t off)
 	char *line;
 	ssize_t nr;
 
-	line = malloc(rlen + 1);
-	if (line == NULL) {
-		cvs_log(LP_ERRNO, "failed to allocate line");
-		return (NULL);
-	}
+	line = xmalloc(rlen + 1);
 	if ((nr = pread(fd, line, rlen, off)) < 0) {
 		cvs_log(LP_ERRNO, "preadline failed");
 		return (NULL);
@@ -1321,7 +1245,7 @@ ignoreline(char *line)
 	int ret;
 
 	ret = regexec(&ignore_re, line, (size_t)0, NULL, 0);
-	free(line);
+	xfree(line);
 	return (ret == 0);	/* if it matched, it should be ignored. */
 }
 
@@ -1339,7 +1263,7 @@ change(const char *file1, FILE *f1, const char *file2, FILE *f2,
 	static size_t max_context = 64;
 	int i;
 
-	if (format != D_IFDEF && a > b && c > d)
+	if (diff_format != D_IFDEF && a > b && c > d)
 		return;
 	if (ignore_pats != NULL) {
 		char *line;
@@ -1356,7 +1280,7 @@ change(const char *file1, FILE *f1, const char *file2, FILE *f2,
 					goto proceed;
 			}
 		}
-		if (a > b || c <= d) {	/* Changes and inserts. */
+		if ((a > b) || (c <= d)) {	/* Changes and inserts. */
 			for (i = c; i <= d; i++) {
 				line = preadline(fileno(f2),
 				    ixnew[i] - ixnew[i - 1], ixnew[i - 1]);
@@ -1367,7 +1291,7 @@ change(const char *file1, FILE *f1, const char *file2, FILE *f2,
 		return;
 	}
 proceed:
-	if (format == D_CONTEXT || format == D_UNIFIED) {
+	if (diff_format == D_CONTEXT || diff_format == D_UNIFIED) {
 		/*
 		 * Allocate change records as needed.
 		 */
@@ -1375,14 +1299,8 @@ proceed:
 			struct context_vec *tmp;
 			ptrdiff_t offset = context_vec_ptr - context_vec_start;
 			max_context <<= 1;
-			if ((tmp = realloc(context_vec_start,
-			    max_context * sizeof(struct context_vec))) == NULL) {
-				free(context_vec_start);
-				context_vec_start = NULL;
-				cvs_log(LP_ERRNO,
-				    "failed to resize context_vec_start");
-				return;
-			}
+			tmp = xrealloc(context_vec_start, max_context *
+			    sizeof(struct context_vec));
 			context_vec_start = tmp;
 			context_vec_end = context_vec_start + max_context;
 			context_vec_ptr = context_vec_start + offset;
@@ -1391,11 +1309,11 @@ proceed:
 			/*
 			 * Print the context/unidiff header first time through.
 			 */
-			cvs_printf("%s %s	%s",
-			    format == D_CONTEXT ? "***" : "---", diff_file,
+			diff_output("%s %s	%s",
+			    diff_format == D_CONTEXT ? "***" : "---", diff_file,
 			    ctime(&stb1.st_mtime));
-			cvs_printf("%s %s	%s",
-			    format == D_CONTEXT ? "---" : "+++", diff_file,
+			diff_output("%s %s	%s",
+			    diff_format == D_CONTEXT ? "---" : "+++", diff_file,
 			    ctime(&stb2.st_mtime));
 			anychange = 1;
 		} else if (a > context_vec_ptr->b + (2 * context) + 1 &&
@@ -1404,7 +1322,7 @@ proceed:
 			 * If this change is more than 'context' lines from the
 			 * previous change, dump the record and reset it.
 			 */
-			if (format == D_CONTEXT)
+			if (diff_format == D_CONTEXT)
 				dump_context_vec(f1, f2);
 			else
 				dump_unified_vec(f1, f2);
@@ -1418,35 +1336,35 @@ proceed:
 	}
 	if (anychange == 0)
 		anychange = 1;
-	switch (format) {
+	switch (diff_format) {
 	case D_BRIEF:
 		return;
 	case D_NORMAL:
 		range(a, b, ",");
-		cvs_putchar(a > b ? 'a' : c > d ? 'd' : 'c');
-		if (format == D_NORMAL)
+		diff_output("%c", a > b ? 'a' : c > d ? 'd' : 'c');
+		if (diff_format == D_NORMAL)
 			range(c, d, ",");
-		cvs_putchar('\n');
+		diff_output("\n");
 		break;
 	case D_RCSDIFF:
 		if (a > b)
-			cvs_printf("a%d %d\n", b, d - c + 1);
+			diff_output("a%d %d\n", b, d - c + 1);
 		else {
-			cvs_printf("d%d %d\n", a, b - a + 1);
+			diff_output("d%d %d\n", a, b - a + 1);
 
 			if (!(c > d))	/* add changed lines */
-				cvs_printf("a%d %d\n", b, d - c + 1);
+				diff_output("a%d %d\n", b, d - c + 1);
 		}
 		break;
 	}
-	if (format == D_NORMAL || format == D_IFDEF) {
+	if (diff_format == D_NORMAL || diff_format == D_IFDEF) {
 		fetch(ixold, a, b, f1, '<', 1);
-		if (a <= b && c <= d && format == D_NORMAL)
-			puts("---");
+		if (a <= b && c <= d && diff_format == D_NORMAL)
+			diff_output("---\n");
 	}
-	i = fetch(ixnew, c, d, f2, format == D_NORMAL ? '>' : '\0', 0);
+	i = fetch(ixnew, c, d, f2, diff_format == D_NORMAL ? '>' : '\0', 0);
 	if (inifdef) {
-		cvs_printf("#endif /* %s */\n", ifdefname);
+		diff_output("#endif /* %s */\n", ifdefname);
 		inifdef = 0;
 	}
 }
@@ -1460,53 +1378,56 @@ fetch(long *f, int a, int b, FILE *lb, int ch, int oldfile)
 	 * When doing #ifdef's, copy down to current line
 	 * if this is the first file, so that stuff makes it to output.
 	 */
-	if (format == D_IFDEF && oldfile) {
+	if (diff_format == D_IFDEF && oldfile) {
 		long curpos = ftell(lb);
 		/* print through if append (a>b), else to (nb: 0 vs 1 orig) */
 		nc = f[a > b ? b : a - 1] - curpos;
 		for (i = 0; i < nc; i++)
-			cvs_putchar(getc(lb));
+			diff_output("%c", getc(lb));
 	}
 	if (a > b)
 		return (0);
-	if (format == D_IFDEF) {
+	if (diff_format == D_IFDEF) {
 		if (inifdef) {
-			cvs_printf("#else /* %s%s */\n",
+			diff_output("#else /* %s%s */\n",
 			    oldfile == 1 ? "!" : "", ifdefname);
 		} else {
 			if (oldfile)
-				cvs_printf("#ifndef %s\n", ifdefname);
+				diff_output("#ifndef %s\n", ifdefname);
 			else
-				cvs_printf("#ifdef %s\n", ifdefname);
+				diff_output("#ifdef %s\n", ifdefname);
 		}
 		inifdef = 1 + oldfile;
 	}
 	for (i = a; i <= b; i++) {
 		fseek(lb, f[i - 1], SEEK_SET);
 		nc = f[i] - f[i - 1];
-		if (format != D_IFDEF && ch != '\0') {
-			cvs_putchar(ch);
-			if (Tflag && (format == D_NORMAL || format == D_CONTEXT
-			    || format == D_UNIFIED))
-				cvs_putchar('\t');
-			else if (format != D_UNIFIED)
-				cvs_putchar(' ');
+		if (diff_format != D_IFDEF && ch != '\0') {
+			diff_output("%c", ch);
+			if ((Tflag == 1 ) && (diff_format == D_NORMAL ||
+			    diff_format == D_CONTEXT ||
+			    diff_format == D_UNIFIED))
+				diff_output("\t");
+			else if (diff_format != D_UNIFIED)
+				diff_output(" ");
 		}
 		col = 0;
 		for (j = 0, lastc = '\0'; j < nc; j++, lastc = c) {
 			if ((c = getc(lb)) == EOF) {
-				if (format == D_RCSDIFF)
-					warnx("No newline at end of file");
+				if (diff_format == D_RCSDIFF)
+					cvs_log(LP_WARN,
+					    "No newline at end of file");
 				else
-					puts("\n\\ No newline at end of file");
+					diff_output("\n\\ No newline at end of "
+					    "file");
 				return (0);
 			}
-			if (c == '\t' && tflag) {
+			if ((c == '\t') && (tflag == 1)) {
 				do {
-					cvs_putchar(' ');
+					diff_output(" ");
 				} while (++col & 7);
 			} else {
-				cvs_putchar(c);
+				diff_output("%c", c);
 				col++;
 			}
 		}
@@ -1525,8 +1446,8 @@ readhash(FILE *f)
 
 	sum = 1;
 	space = 0;
-	if (!bflag && !wflag) {
-		if (iflag)
+	if ((bflag != 1) && (wflag != 1)) {
+		if (iflag == 1)
 			for (i = 0; (t = getc(f)) != '\n'; i++) {
 				if (t == EOF) {
 					if (i == 0)
@@ -1552,7 +1473,7 @@ readhash(FILE *f)
 				space++;
 				continue;
 			default:
-				if (space && !wflag) {
+				if ((space != 0) && (wflag != 1)) {
 					i++;
 					space = 0;
 				}
@@ -1582,7 +1503,7 @@ asciifile(FILE *f)
 	char buf[BUFSIZ];
 	int i, cnt;
 
-	if (aflag || f == NULL)
+	if ((aflag == 1) || (f == NULL))
 		return (1);
 
 	rewind(f);
@@ -1614,7 +1535,8 @@ match_function(const long *f, int pos, FILE *fp)
 			if (p != NULL)
 				*p = '\0';
 			if (isalpha(buf[0]) || buf[0] == '_' || buf[0] == '$') {
-				strlcpy(lastbuf, (const char *)buf, sizeof lastbuf);
+				strlcpy(lastbuf, (const char *)buf,
+				    sizeof lastbuf);
 				lastmatchline = pos;
 				return lastbuf;
 			}
@@ -1643,17 +1565,17 @@ dump_context_vec(FILE *f1, FILE *f2)
 	lowc = MAX(1, cvp->c - context);
 	upd = MIN(diff_len[1], context_vec_ptr->d + context);
 
-	cvs_printf("***************");
-	if (pflag) {
+	diff_output("***************");
+	if (pflag == 1) {
 		f = match_function(ixold, lowa - 1, f1);
 		if (f != NULL) {
-			cvs_putchar(' ');
-			cvs_printf("%s", f);
+			diff_output(" ");
+			diff_output("%s", f);
 		}
 	}
-	cvs_printf("\n*** ");
+	diff_output("\n*** ");
 	range(lowa, upb, ",");
-	cvs_printf(" ****\n");
+	diff_output(" ****\n");
 
 	/*
 	 * Output changes to the "old" file.  The first loop suppresses
@@ -1667,7 +1589,7 @@ dump_context_vec(FILE *f1, FILE *f2)
 			do_output++;
 			break;
 		}
-	if (do_output) {
+	if (do_output != 0) {
 		while (cvp <= context_vec_ptr) {
 			a = cvp->a;
 			b = cvp->b;
@@ -1692,9 +1614,9 @@ dump_context_vec(FILE *f1, FILE *f2)
 		fetch(ixold, b + 1, upb, f1, ' ', 0);
 	}
 	/* output changes to the "new" file */
-	cvs_printf("--- ");
+	diff_output("--- ");
 	range(lowc, upd, ",");
-	cvs_printf(" ----\n");
+	diff_output(" ----\n");
 
 	do_output = 0;
 	for (cvp = context_vec_start; cvp <= context_vec_ptr; cvp++)
@@ -1703,7 +1625,7 @@ dump_context_vec(FILE *f1, FILE *f2)
 			do_output++;
 			break;
 		}
-	if (do_output) {
+	if (do_output != 0) {
 		while (cvp <= context_vec_ptr) {
 			a = cvp->a;
 			b = cvp->b;
@@ -1748,19 +1670,19 @@ dump_unified_vec(FILE *f1, FILE *f2)
 	lowc = MAX(1, cvp->c - context);
 	upd = MIN(diff_len[1], context_vec_ptr->d + context);
 
-	cvs_printf("@@ -");
+	diff_output("@@ -");
 	uni_range(lowa, upb);
-	cvs_printf(" +");
+	diff_output(" +");
 	uni_range(lowc, upd);
-	cvs_printf(" @@");
-	if (pflag) {
+	diff_output(" @@");
+	if (pflag == 1) {
 		f = match_function(ixold, lowa - 1, f1);
 		if (f != NULL) {
-			cvs_putchar(' ');
-			cvs_printf("%s", f);
+			diff_output(" ");
+			diff_output("%s", f);
 		}
 	}
-	cvs_putchar('\n');
+	diff_output("\n");
 
 	/*
 	 * Output changes in "unified" diff format--the old and new lines
@@ -1803,4 +1725,20 @@ dump_unified_vec(FILE *f1, FILE *f2)
 	fetch(ixnew, d + 1, upd, f2, ' ', 0);
 
 	context_vec_ptr = context_vec_start - 1;
+}
+
+void
+diff_output(const char *fmt, ...)
+{
+	va_list vap;
+	char *str;
+
+	va_start(vap, fmt);
+	vasprintf(&str, fmt, vap);
+	if (diffbuf != NULL)
+		cvs_buf_append(diffbuf, str, strlen(str));
+	else
+		cvs_printf("%s", str);
+	xfree(str);
+	va_end(vap);
 }

@@ -1,4 +1,4 @@
-/*	$OpenBSD: cut.c,v 1.7 2002/02/16 21:27:56 millert Exp $	*/
+/*	$OpenBSD: cut.c,v 1.10 2006/01/08 21:09:13 miod Exp $	*/
 
 /*-
  * Copyright (c) 1992, 1993, 1994
@@ -73,7 +73,7 @@ cut(sp, namep, fm, tm, flags)
 	int flags;
 {
 	CB *cbp;
-	CHAR_T name;
+	CHAR_T name = '1';	/* default numeric buffer */
 	recno_t lno;
 	int append, copy_one, copy_def;
 
@@ -102,8 +102,8 @@ cut(sp, namep, fm, tm, flags)
 	append = copy_one = copy_def = 0;
 	if (namep != NULL) {
 		name = *namep;
-		if (LF_ISSET(CUT_NUMREQ) || LF_ISSET(CUT_NUMOPT) &&
-		    (LF_ISSET(CUT_LINEMODE) || fm->lno != tm->lno)) {
+		if (LF_ISSET(CUT_NUMREQ) || (LF_ISSET(CUT_NUMOPT) &&
+		    (LF_ISSET(CUT_LINEMODE) || fm->lno != tm->lno))) {
 			copy_one = 1;
 			cb_rotate(sp);
 		}
@@ -113,9 +113,9 @@ cut(sp, namep, fm, tm, flags)
 			name = tolower(name);
 		}
 namecb:		CBNAME(sp, cbp, name);
-	} else if (LF_ISSET(CUT_NUMREQ) || LF_ISSET(CUT_NUMOPT) &&
-	    (LF_ISSET(CUT_LINEMODE) || fm->lno != tm->lno)) {
-		name = '1';
+	} else if (LF_ISSET(CUT_NUMREQ) || (LF_ISSET(CUT_NUMOPT) &&
+	    (LF_ISSET(CUT_LINEMODE) || fm->lno != tm->lno))) {
+		/* Copy into numeric buffer 1. */
 		cb_rotate(sp);
 		goto namecb;
 	} else
@@ -168,7 +168,6 @@ copyloop:
 	sp->gp->dcbp = cbp;	/* Repoint the default buffer on each pass. */
 
 	if (copy_one) {		/* Copy into numeric buffer 1. */
-		name = '1';
 		CBNAME(sp, cbp, name);
 		copy_one = 0;
 		goto copyloop;
@@ -198,7 +197,7 @@ cb_rotate(sp)
 	CB *cbp, *del_cbp;
 
 	del_cbp = NULL;
-	for (cbp = sp->gp->cutq.lh_first; cbp != NULL; cbp = cbp->q.le_next)
+	LIST_FOREACH(cbp, &sp->gp->cutq, q)
 		switch(cbp->name) {
 		case '1':
 			cbp->name = '2';
@@ -291,8 +290,8 @@ cut_close(gp)
 	CB *cbp;
 
 	/* Free cut buffer list. */
-	while ((cbp = gp->cutq.lh_first) != NULL) {
-		if (cbp->textq.cqh_first != (void *)&cbp->textq)
+	while ((cbp = LIST_FIRST(&gp->cutq)) != NULL) {
+		if (CIRCLEQ_FIRST(&cbp->textq) != CIRCLEQ_END(&cbp->textq))
 			text_lfree(&cbp->textq);
 		LIST_REMOVE(cbp, q);
 		free(cbp);
@@ -300,7 +299,7 @@ cut_close(gp)
 
 	/* Free default cut storage. */
 	cbp = &gp->dcb_store;
-	if (cbp->textq.cqh_first != (void *)&cbp->textq)
+	if (CIRCLEQ_FIRST(&cbp->textq) != CIRCLEQ_END(&cbp->textq))
 		text_lfree(&cbp->textq);
 }
 
@@ -347,7 +346,7 @@ text_lfree(headp)
 {
 	TEXT *tp;
 
-	while ((tp = headp->cqh_first) != (void *)headp) {
+	while ((tp = CIRCLEQ_FIRST(headp)) != CIRCLEQ_END(headp)) {
 		CIRCLEQ_REMOVE(headp, tp, q);
 		text_free(tp);
 	}

@@ -1,7 +1,7 @@
-/*	$OpenBSD: hostapd.h,v 1.5 2005/07/30 17:18:24 reyk Exp $	*/
+/*	$OpenBSD: hostapd.h,v 1.16 2005/12/18 17:54:12 reyk Exp $	*/
 
 /*
- * Copyright (c) 2004, 2005 Reyk Floeter <reyk@vantronix.net>
+ * Copyright (c) 2004, 2005 Reyk Floeter <reyk@openbsd.org>
  *
  * Permission to use, copy, modify, and distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -22,6 +22,7 @@
 #include <sys/param.h>
 #include <sys/types.h>
 #include <sys/socket.h>
+#include <sys/tree.h>
 
 #include <net/if.h>
 #include <netinet/in.h>
@@ -33,8 +34,6 @@
 
 #include <net80211/ieee80211.h>
 #include <net80211/ieee80211_ioctl.h>
-
-#define IEEE80211_IAPP_VERSION	0
 
 /*
  * hostapd (IAPP) <-> Host AP (APME)
@@ -49,36 +48,6 @@ struct hostapd_node {
 	u_int16_t	ni_rxseq;
 	u_int16_t	ni_rssi;
 };
-
-/*
- * IAPP <-> IAPP
- */
-
-struct ieee80211_iapp_frame {
-	u_int8_t	i_version;
-	u_int8_t	i_command;
-	u_int16_t	i_identifier;
-	u_int16_t	i_length;
-} __packed;
-
-enum ieee80211_iapp_frame_type {
-	IEEE80211_IAPP_FRAME_ADD_NOTIFY			= 0,
-	IEEE80211_IAPP_FRAME_MOVE_NOTIFY		= 1,
-	IEEE80211_IAPP_FRAME_MOVE_RESPONSE		= 2,
-	IEEE80211_IAPP_FRAME_SEND_SECURITY_BLOCK	= 3,
-	IEEE80211_IAPP_FRAME_ACK_SECURITY_BLOCK		= 4,
-	IEEE80211_IAPP_FRAME_CACHE_NOTIFY		= 5,
-	IEEE80211_IAPP_FRAME_CACHE_RESPONSE		= 6,
-	IEEE80211_IAPP_FRAME_HOSTAPD_RADIOTAP		= 12,
-	IEEE80211_IAPP_FRAME_HOSTAPD_PCAP		= 13
-};
-
-struct ieee80211_iapp_add_notify {
-	u_int8_t	a_length;
-	u_int8_t	a_reserved;
-	u_int8_t	a_macaddr[IEEE80211_ADDR_LEN];
-	u_int16_t	a_seqnum;
-} __packed;
 
 /*
  * IAPP -> switches (LLC)
@@ -123,30 +92,41 @@ struct hostapd_counter {
 	((_e)->e_lladdr[5] == ((_b)[5] & (_e)->e_addr.a_mask[5]))		\
 )
 
+struct hostapd_inaddr {
+	sa_family_t		in_af;
+	union {
+		struct in_addr	v4;
+		struct in6_addr	v6;
+	} in_v;
+	int			in_netmask;
+};
+
+#define in_v4			in_v.v4
+#define in_v6			in_v.v6
+
 struct hostapd_entry {
 	u_int8_t			e_lladdr[IEEE80211_ADDR_LEN];
 	u_int8_t			e_flags;
 
 #define HOSTAPD_ENTRY_F_LLADDR		0x00
 #define HOSTAPD_ENTRY_F_MASK		0x01
-#define HOSTAPD_ENTRY_F_IPV4		0x02
+#define HOSTAPD_ENTRY_F_INADDR		0x02
 
 	union {
 		u_int8_t		a_mask[IEEE80211_ADDR_LEN];
-		struct in_addr		a_ipv4;
+		struct hostapd_inaddr	a_inaddr;
 	}				e_addr;
 
+	RB_ENTRY(hostapd_entry)		e_nodes;
 	TAILQ_ENTRY(hostapd_entry)	e_entries;
 };
 
 #define e_mask				e_addr.a_mask
-#define e_ipv4				e_addr.a_ipv4
+#define e_inaddr			e_addr.a_inaddr
 
 #define HOSTAPD_TABLE_NAMELEN		32
-#define HOSTAPD_TABLE_HASHSIZE		256
-#define HOSTAPD_TABLE_HASH(_a)		(((((					\
-	(0 ^ (_a)[0]) ^ (_a)[1]) ^ (_a)[2]) ^ (_a)[3]) ^ (_a)[4]) ^ (_a)[5]	\
-)
+
+RB_HEAD(hostapd_tree, hostapd_entry);
 
 struct hostapd_table {
 	char				t_name[HOSTAPD_TABLE_NAMELEN];
@@ -154,7 +134,7 @@ struct hostapd_table {
 
 #define HOSTAPD_TABLE_F_CONST		0x01
 
-	TAILQ_HEAD(, hostapd_entry)	t_head[HOSTAPD_TABLE_HASHSIZE];
+	struct hostapd_tree		t_tree;
 	TAILQ_HEAD(, hostapd_entry)	t_mask_head;
 	TAILQ_ENTRY(hostapd_table)	t_entries;
 };
@@ -228,6 +208,9 @@ struct hostapd_frame {
 #define HOSTAPD_FRAME_F_BSSID_N		0x00002000
 #define HOSTAPD_FRAME_F_BSSID_TABLE	0x00004000
 #define HOSTAPD_FRAME_F_BSSID_M		0x00007000
+#define HOSTAPD_FRAME_F_APME		0x00008000
+#define HOSTAPD_FRAME_F_APME_N		0x00010000
+#define HOSTAPD_FRAME_F_APME_M		0x00018000
 #define HOSTAPD_FRAME_F_M		0x0fffffff
 #define HOSTAPD_FRAME_F_RET_OK		0x00000000
 #define HOSTAPD_FRAME_F_RET_QUICK	0x10000000
@@ -242,8 +225,11 @@ struct hostapd_frame {
 	(HOSTAPD_FRAME_F_FROM_N | HOSTAPD_FRAME_F_TO_N |		\
 	HOSTAPD_FRAME_F_BSSID_N)
 
+	struct hostapd_apme		*f_apme;
 	struct hostapd_table		*f_from, *f_to, *f_bssid;
-	struct timeval			f_limit, f_then;
+	struct timeval			f_limit, f_then, f_last;
+	long				f_rate, f_rate_intval;
+	long				f_rate_cnt, f_rate_delay;
 
 	enum hostapd_action		f_action;
 	u_int32_t			f_action_flags;
@@ -255,25 +241,42 @@ struct hostapd_frame {
 	TAILQ_ENTRY(hostapd_frame)	f_entries;
 };
 
+struct hostapd_apme {
+	int				a_raw;
+	u_int				a_rawlen;
+	struct event			a_ev;
+	char				a_iface[IFNAMSIZ];
+	u_int8_t			a_bssid[IEEE80211_ADDR_LEN];
+	void				*a_cfg;
+	struct sockaddr_in		a_addr;
+
+	TAILQ_ENTRY(hostapd_apme)	a_entries;
+};
+
+struct hostapd_iapp {
+	u_int16_t			i_cnt;
+	int				i_raw;
+	char				i_iface[IFNAMSIZ];
+	int				i_udp;
+	struct event			i_udp_ev;
+	u_int16_t			i_udp_port;
+	struct sockaddr_in		i_addr;
+	struct sockaddr_in		i_broadcast;
+	struct sockaddr_in		i_multicast;
+	u_int8_t			i_ttl;
+	u_int8_t			i_flags;
+
+#define HOSTAPD_IAPP_F_ADD_NOTIFY	0x01
+#define HOSTAPD_IAPP_F_RADIOTAP		0x02
+#define HOSTAPD_IAPP_F_DEFAULT							\
+	(HOSTAPD_IAPP_F_ADD_NOTIFY | HOSTAPD_IAPP_F_RADIOTAP)
+};
+
 struct hostapd_config {
-	int				c_apme;
-	int				c_apme_raw;
-	u_int				c_apme_rawlen;
-	struct event			c_apme_ev;
-	char				c_apme_iface[IFNAMSIZ];
-	int				c_apme_n;
-	u_int8_t			c_apme_bssid[IEEE80211_ADDR_LEN];
+	int				c_apme_ctl;
 	u_int				c_apme_dlt;
 
-	u_int16_t			c_iapp;
-	int				c_iapp_raw;
-	char				c_iapp_iface[IFNAMSIZ];
-	int				c_iapp_udp;
-	struct event			c_iapp_udp_ev;
-	u_int16_t			c_iapp_udp_port;
-	struct sockaddr_in		c_iapp_addr;
-	struct sockaddr_in		c_iapp_broadcast;
-	struct sockaddr_in		c_iapp_multicast;
+	struct hostapd_iapp		c_iapp;
 
 	u_int8_t			c_flags;
 
@@ -295,13 +298,10 @@ struct hostapd_config {
 
 	struct hostapd_counter		c_stats;
 
+	TAILQ_HEAD(, hostapd_apme)	c_apmes;
 	TAILQ_HEAD(, hostapd_table)	c_tables;
 	TAILQ_HEAD(, hostapd_frame)	c_frames;
 };
-
-#define IAPP_PORT	3517	/* XXX this should be added to /etc/services */
-#define IAPP_MCASTADDR	"224.0.1.178"
-#define IAPP_MAXSIZE	512
 
 #define	HOSTAPD_USER	"_hostapd"
 #define HOSTAPD_CONFIG	"/etc/hostapd.conf"
@@ -341,41 +341,49 @@ struct hostapd_entry *hostapd_entry_lookup(struct hostapd_table *,
 	    u_int8_t *);
 void	 hostapd_entry_update(struct hostapd_table *,
 	    struct hostapd_entry *);
+int	 hostapd_entry_cmp(struct hostapd_entry *, struct hostapd_entry *);
+
+RB_PROTOTYPE(hostapd_tree, hostapd_entry, e_nodes, hostapd_entry_cmp);
 
 int	 hostapd_parse_file(struct hostapd_config *);
 int	 hostapd_parse_symset(char *);
 
 void	 hostapd_priv_init(struct hostapd_config *);
 int	 hostapd_priv_llc_xid(struct hostapd_config *, struct hostapd_node *);
-void	 hostapd_priv_apme_bssid(struct hostapd_config *);
-int	 hostapd_priv_apme_getnode(struct hostapd_config *,
+void	 hostapd_priv_apme_bssid(struct hostapd_apme *);
+int	 hostapd_priv_apme_getnode(struct hostapd_apme *,
 	    struct hostapd_node *);
-int	 hostapd_priv_apme_setnode(struct hostapd_config *,
+int	 hostapd_priv_apme_setnode(struct hostapd_apme *,
 	    struct hostapd_node *node, int);
 
-void	 hostapd_apme_init(struct hostapd_config *);
+void	 hostapd_apme_init(struct hostapd_apme *);
+int	 hostapd_apme_deauth(struct hostapd_apme *);
+int	 hostapd_apme_add(struct hostapd_config *, const char *);
+void	 hostapd_apme_term(struct hostapd_apme *);
+struct hostapd_apme *hostapd_apme_lookup(struct hostapd_config *,
+	    const char *);
 void	 hostapd_apme_input(int, short, void *);
-int	 hostapd_apme_output(struct hostapd_config *,
+int	 hostapd_apme_output(struct hostapd_apme *,
 	    struct hostapd_ieee80211_frame *);
-int	 hostapd_apme_addnode(struct hostapd_config *,
+int	 hostapd_apme_addnode(struct hostapd_apme *,
 	    struct hostapd_node *node);
-int	 hostapd_apme_delnode(struct hostapd_config *,
+int	 hostapd_apme_delnode(struct hostapd_apme *,
 	    struct hostapd_node *node);
-int	 hostapd_apme_offset(struct hostapd_config *, u_int8_t *,
+int	 hostapd_apme_offset(struct hostapd_apme *, u_int8_t *,
 	    const u_int);
 
 void	 hostapd_iapp_init(struct hostapd_config *);
 void	 hostapd_iapp_term(struct hostapd_config *);
-int	 hostapd_iapp_add_notify(struct hostapd_config *,
+int	 hostapd_iapp_add_notify(struct hostapd_apme *,
 	    struct hostapd_node *);
-int	 hostapd_iapp_radiotap(struct hostapd_config *,
+int	 hostapd_iapp_radiotap(struct hostapd_apme *,
 	    u_int8_t *, const u_int);
 void	 hostapd_iapp_input(int, short, void *);
 
 void	 hostapd_llc_init(struct hostapd_config *);
 int	 hostapd_llc_send_xid(struct hostapd_config *, struct hostapd_node *);
 
-int	 hostapd_handle_input(struct hostapd_config *, u_int8_t *, u_int);
+int	 hostapd_handle_input(struct hostapd_apme *, u_int8_t *, u_int);
 
 void	 hostapd_print_ieee80211(u_int, u_int, u_int8_t *, u_int);
 

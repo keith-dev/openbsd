@@ -1,4 +1,4 @@
-/*	$OpenBSD: pfkey.c,v 1.11 2005/05/28 01:07:52 ho Exp $	*/
+/*	$OpenBSD: pfkey.c,v 1.13 2006/02/15 05:09:29 david Exp $	*/
 
 /*
  * Copyright (c) 2005 Håkan Olsson.  All rights reserved.
@@ -77,7 +77,7 @@ pfkey_write(u_int8_t *buf, ssize_t len)
 		return 0;
 
 	if (write(cfgstate.pfkey_socket, buf, len) != len) {
-		log_err("pfkey: msg %s write() failed",
+		log_err("pfkey: msg %s write() failed on socket %d",
 		    pfkey_print_type(msg), cfgstate.pfkey_socket);
 		return -1;
 	}
@@ -297,7 +297,7 @@ pfkey_handle_message(struct sadb_msg *m)
 		/* FALLTHROUGH */
 
 	default:
-		/* Pass the the rest along to our peers. */
+		/* Pass the rest along to our peers. */
 		memmove(m, msg, msg->sadb_msg_len * CHUNK); /* for realloc */
 		return net_queue(NULL, MSG_PFKEYDATA, (u_int8_t *)m,
 		    m->sadb_msg_len * CHUNK);
@@ -418,7 +418,7 @@ pfkey_queue_message(u_int8_t *data, u_int32_t datalen)
 
 	sadb->sadb_msg_pid = getpid();
 	sadb->sadb_msg_seq = seq++;
-	log_msg(3, "pfkey_queue_message: pfkey %s len %d seq %d",
+	log_msg(3, "pfkey_queue_message: pfkey %s len %u seq %u",
 	    pfkey_print_type(sadb), sadb->sadb_msg_len * CHUNK,
 	    sadb->sadb_msg_seq);
 

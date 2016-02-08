@@ -1,4 +1,4 @@
-#	$OpenBSD: Makefile,v 1.227 2005/08/15 00:40:17 millert Exp $
+#	$OpenBSD: Makefile,v 1.232 2006/01/04 20:38:59 miod Exp $
 
 TZDIR=		/usr/share/zoneinfo
 LOCALTIME=	Canada/Mountain
@@ -21,19 +21,14 @@ BIN1=	changelist ccd.conf csh.cshrc csh.login csh.logout daily dhcpd.conf \
 	etc.${MACHINE}/disktab dhclient.conf mailer.conf ntpd.conf \
 	moduli pf.os sensorsd.conf ifstated.conf
 
-.if ${MACHINE} == "alpha" || ${MACHINE} == "amd64" || \
-    ${MACHINE} == "cats" || ${MACHINE} == "hp300" || \
-    ${MACHINE} == "hppa" || ${MACHINE} == "hppa64" || \
-    ${MACHINE} == "luna88k" || ${MACHINE} == "macppc" || \
-    ${MACHINE} == "sparc" || ${MACHINE} == "sparc64" || \
-    ${MACHINE} == "zaurus" || ${MACHINE} == "i386"
+.if ${MACHINE} != "mvme68k" && ${MACHINE} != "mvme88k" && \
+    ${MACHINE} != "vax"
 BIN1+=	wsconsctl.conf
 .endif
 
 # -rw-rw-r--
 BIN2=	motd
 
-NAMEDB=	localhost.rev localhost.v6.rev localhost.zone root.cache
 PCS=	pcs750.bin
 WCS1=	wcs fppwcs poc poc1 poc2 fppoc
 WCS2=	fpevent fppwcs fppwcs_dual hdcwcs load_diags start_fpp wcs wcs_dual
@@ -75,7 +70,7 @@ distribution-etc-root-var: distrib-dirs
 	awk -f ${.CURDIR}/mklogin.conf `test -f etc.${MACHINE}/login.conf.overrides && echo etc.${MACHINE}/login.conf.overrides` < ${.CURDIR}/login.conf.in > \
 	    ${DESTDIR}/etc/login.conf && \
 	    chown ${BINOWN}:${BINGRP} ${DESTDIR}/etc/login.conf && \
-	    chmod 644 ${DESTDIR}/etc/login.conf 
+	    chmod 644 ${DESTDIR}/etc/login.conf
 	${INSTALL} -c -o ${BINOWN} -g ${BINGRP} -m 664 ${BIN2} ${DESTDIR}/etc
 	${INSTALL} -c -o root -g wheel -m 600 hosts.equiv ${DESTDIR}/etc
 	${INSTALL} -c -o root -g wheel -m 600 crontab ${DESTDIR}/var/cron/tabs/root
@@ -85,6 +80,7 @@ distribution-etc-root-var: distrib-dirs
 	${INSTALL} -c -o root -g wheel -m 600 ospfd.conf ${DESTDIR}/etc
 	${INSTALL} -c -o root -g wheel -m 600 pf.conf ${DESTDIR}/etc
 	${INSTALL} -c -o root -g wheel -m 600 hostapd.conf ${DESTDIR}/etc
+	${INSTALL} -c -o root -g wheel -m 600 ipsec.conf ${DESTDIR}/etc
 	${INSTALL} -c -o ${BINOWN} -g ${BINGRP} -m 555 \
 	    etc.${MACHINE}/MAKEDEV ${DESTDIR}/dev
 	cd root; \
@@ -97,8 +93,10 @@ distribution-etc-root-var: distrib-dirs
 		${INSTALL} -c -o root -g wheel -m 644 dot.profile \
 		    ${DESTDIR}/root/.profile; \
 		rm -f ${DESTDIR}/.cshrc ${DESTDIR}/.profile; \
-		ln ${DESTDIR}/root/.cshrc ${DESTDIR}/.cshrc; \
-		ln ${DESTDIR}/root/.profile ${DESTDIR}/.profile
+		${INSTALL} -c -o root -g wheel -m 644 dot.cshrc \
+		    ${DESTDIR}/.cshrc; \
+		${INSTALL} -c -o root -g wheel -m 644 dot.profile \
+		    ${DESTDIR}/.profile;
 	cd skel; \
 		${INSTALL} -c -o root -g wheel -m 644 dot.cshrc \
 		    ${DESTDIR}/etc/skel/.cshrc; \
@@ -380,7 +378,7 @@ distrib:
 DHSIZE=1024 1536 2048 3072 4096
 update-moduli:
 	( \
-		echo '#    $$OpenBSD: Makefile,v 1.227 2005/08/15 00:40:17 millert Exp $$'; \
+		echo '#    $$OpenBSD: Makefile,v 1.232 2006/01/04 20:38:59 miod Exp $$'; \
 		echo '# Time Type Tests Tries Size Generator Modulus'; \
 		( for i in ${DHSIZE}; do \
 			ssh-keygen -b $$i -G /dev/stdout; \

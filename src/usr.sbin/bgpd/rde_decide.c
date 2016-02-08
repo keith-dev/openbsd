@@ -1,4 +1,4 @@
-/*	$OpenBSD: rde_decide.c,v 1.42 2005/08/09 20:27:25 claudio Exp $ */
+/*	$OpenBSD: rde_decide.c,v 1.47 2006/01/24 12:52:11 claudio Exp $ */
 
 /*
  * Copyright (c) 2003, 2004 Claudio Jeker <claudio@openbsd.org>
@@ -115,6 +115,12 @@ prefix_cmp(struct prefix *p1, struct prefix *p2)
 	if (p2 == NULL)
 		return (1);
 
+	/* only prefix in the Local-RIB are eligible */
+	if (!(p1->flags & F_LOCAL))
+		return (-1);
+	if (!(p2->flags & F_LOCAL))
+		return (1);
+
 	asp1 = p1->aspath;
 	asp2 = p2->aspath;
 
@@ -176,14 +182,18 @@ prefix_cmp(struct prefix *p1, struct prefix *p2)
 			return (p2->lastchange - p1->lastchange);
 
 	/* 10. lowest BGP Id wins */
-	if ((p2->peer->remote_bgpid - p1->peer->remote_bgpid) != 0)
-		return (p2->peer->remote_bgpid - p1->peer->remote_bgpid);
+	if ((p2->aspath->peer->remote_bgpid -
+	    p1->aspath->peer->remote_bgpid) != 0)
+		return (p2->aspath->peer->remote_bgpid -
+		    p1->aspath->peer->remote_bgpid);
 
 	/* 11. lowest peer address wins (IPv4 is better than IPv6) */
-	if (memcmp(&p1->peer->remote_addr, &p2->peer->remote_addr,
-	    sizeof(p1->peer->remote_addr)) != 0)
-		return (-memcmp(&p1->peer->remote_addr, &p2->peer->remote_addr,
-		    sizeof(p1->peer->remote_addr)));
+	if (memcmp(&p1->aspath->peer->remote_addr,
+	    &p2->aspath->peer->remote_addr,
+	    sizeof(p1->aspath->peer->remote_addr)) != 0)
+		return (-memcmp(&p1->aspath->peer->remote_addr,
+		    &p2->aspath->peer->remote_addr,
+		    sizeof(p1->aspath->peer->remote_addr)));
 
 	fatalx("Uh, oh a politician in the decision process");
 	/* NOTREACHED */
@@ -204,8 +214,10 @@ prefix_evaluate(struct prefix *p, struct pt_entry *pte)
 		/* decision process is turned off */
 		if (p != NULL)
 			LIST_INSERT_HEAD(&pte->prefix_h, p, prefix_l);
-		if (pte->active != NULL)
+		if (pte->active != NULL) {
+			pte->active->aspath->active_cnt--;
 			pte->active = NULL;
+		}
 		return;
 	}
 
@@ -224,7 +236,14 @@ prefix_evaluate(struct prefix *p, struct pt_entry *pte)
 				}
 		}
 	}
+
 	xp = LIST_FIRST(&pte->prefix_h);
+	if (xp == NULL || !(xp->flags & F_LOCAL) ||
+	    (xp->aspath->nexthop != NULL && xp->aspath->nexthop->state !=
+	    NEXTHOP_REACH))
+		/* xp is ineligible */
+		xp = NULL;
+
 	if (pte->active != xp) {
 		/* need to generate an update */
 		if (pte->active != NULL)
@@ -232,20 +251,14 @@ prefix_evaluate(struct prefix *p, struct pt_entry *pte)
 
 		/*
 		 * Send update with remove for pte->active and add for xp
-		 * but remember that xp may be ineligible or NULL.
-		 * Do not send an update if the only available path
-		 * has an unreachable nexthop. This decision has to be made
-		 * by the called functions.
+		 * but remember that xp may be NULL aka ineligible.
+		 * Additional decision may be made by the called functions.
 		 */
 		rde_generate_updates(xp, pte->active);
 		rde_send_kroute(xp, pte->active);
 
-		if (xp == NULL || (xp->aspath->nexthop != NULL &&
-		    xp->aspath->nexthop->state != NEXTHOP_REACH))
-			pte->active = NULL;
-		else {
-			pte->active = xp;
-			pte->active->aspath->active_cnt++;
-		}
+		pte->active = xp;
+		if (xp != NULL)
+			xp->aspath->active_cnt++;
 	}
 }

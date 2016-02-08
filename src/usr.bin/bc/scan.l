@@ -1,5 +1,5 @@
 %{
-/*      $OpenBSD: scan.l,v 1.18 2005/04/13 06:36:03 otto Exp $	*/
+/*      $OpenBSD: scan.l,v 1.20 2006/01/24 19:38:44 otto Exp $	*/
 
 /*
  * Copyright (c) 2003, Otto Moerbeek <otto@drijf.net>
@@ -18,7 +18,7 @@
  */
 
 #ifndef lint
-static const char rcsid[] = "$OpenBSD: scan.l,v 1.18 2005/04/13 06:36:03 otto Exp $";
+static const char rcsid[] = "$OpenBSD: scan.l,v 1.20 2006/01/24 19:38:44 otto Exp $";
 #endif /* not lint */
 
 #include <err.h>
@@ -225,6 +225,7 @@ add_str(const char *str)
 	strlcat(strbuf, str, strbuf_sz);
 }
 
+/* ARGSUSED */
 void
 abort_line(int sig)
 {
@@ -264,6 +265,8 @@ yywrap(void)
 		free(cmdexpr);
 		state++;
 	}
+	if (yyin != NULL && yyin != stdin)
+		fclose(yyin);
 	if (fileindex < sargc) {
 		filename = sargv[fileindex++];
 		yyin = fopen(filename, "r");

@@ -1,4 +1,4 @@
-dnl	$OpenBSD: hardware,v 1.67 2005/08/23 02:25:53 jsg Exp $
+dnl	$OpenBSD: hardware,v 1.71 2006/01/08 00:32:56 jolan Exp $
 OpenBSD/MACHINE OSREV is expected to run on the following hardware.
 If you have hardware that is listed here and are unable to run
 OpenBSD, or if you are able to run OpenBSD on hardware not listed
@@ -223,7 +223,7 @@ Supported Peripherals:
 		Digital DC21x4x-based PCI adapters (de), including:
 			Older SMC PCI EtherPower 10, 10/100 (models 8432,
 			  9332, and 9334)
-			Older LinkSys 10, 10/100 (newer models are supported
+			Older Linksys 10, 10/100 (newer models are supported
 			  by other drivers)
 			Znyx ZX3xx
 			Cogent EM100FX and EM440TX
@@ -333,6 +333,14 @@ Supported Peripherals:
 		Ensoniq AudioPCI (eap)
 		SoundBlaster PCI128 (eap)
 
+	Radio Receiver Devices [*]
+		Brooktree 848/849/878/879-based TV tuner
+
+	Miscellaneous Devices [*]
+		Brooktree 8[47][89] based frame grabber and TV tuner cards,
+		including: [G]
+			Leadtek Winfast TV 2000
+
 Untested Peripherals:
 
 The following peripherals are compiled into the system, but are not known to
@@ -374,7 +382,7 @@ work. It's our best guess that they do, but any feedback is appreciated.
 			Elsa Microlink USB2Ethernet
 			I/O Data USB ETTX
 			Kingston KNU101TX
-			LinkSys USB100TX, USB100H1 and USB10TA
+			Linksys USB100TX, USB100H1 and USB10TA
 			Melco Inc. LUA-TX
 			Siemens SpeedStream USB
 			SmartBridges smartNIC 2
@@ -392,7 +400,7 @@ work. It's our best guess that they do, but any feedback is appreciated.
 			Hawking UF200
 			Intellinet USB 2.0 to Ethernet (rev A)
 			JVC MP-PRX1
-			LinkSys USB200M
+			Linksys USB200M
 			Netgear FA120
 			Sitecom LN-029
 			SMC 2209USB/ETH
@@ -438,7 +446,7 @@ work. It's our best guess that they do, but any feedback is appreciated.
 			Jaton USB XpressNet
 			Kawasaki USB101
 			Kingston Ethernet
-			LinkSys USB10T
+			Linksys USB10T
 			Mobility Ethernet
 			Netgear EA101
 			Peracom USB
@@ -450,7 +458,7 @@ work. It's our best guess that they do, but any feedback is appreciated.
 			SMC 2102/2104USB
 		Lite-On PNIC/PNIC-II-based adapters (dc), including: [*]
 			Kingston KNE110TX
-			LinkSys LNE100TX
+			Linksys LNE100TX
 			Matrox Networks FastNIC 10/100
 			Netgear FA310TX
 		Macronix 98713/98715/98725-based adapters (dc), including: [*]
@@ -480,7 +488,7 @@ work. It's our best guess that they do, but any feedback is appreciated.
 			NetComm NP1010
 			Repotec RP-USB100-A
 			SMC 2208USB/ETH
-			TrendNet TU-ET100C
+			TRENDnet TU-ET100C
 			Zt USB10/100
 			Z-TEK ZK-R02
 		SiS 900 and SiS 7016-based PCI adapters (sis), including: [*]
@@ -498,7 +506,7 @@ work. It's our best guess that they do, but any feedback is appreciated.
 			Racore 8165 and 8148
 			TI ThunderLAN adapters
 		Winbond W89C840F-based adapters (wb), including: [*]
-			Trendware TE100-PCIE
+			TRENDnet TE100-PCIE
 			Compex RL100-ATX 10/100
 		Please be aware that many NE2000 adapters fail or perform
 		very poorly. We do not recommend using them, but your
@@ -589,6 +597,45 @@ work. It's our best guess that they do, but any feedback is appreciated.
 		    Zaapa ZNWUSB-54
 		    Zinwell ZWX-G261
 		    Zonet ZEW2500P
+		Atheros AR521x based CardBus IEEE 802.11a/b/g adapters [-]
+		    3Com 3CRPAG175
+		    Aztech WL830PC
+		    D-Link DWL-A650
+		    D-Link DWL-AB650
+		    D-Link DWL-AG650
+		    D-Link DWL-G650B
+		    Elecom LD-WL54AG
+		    Elecom LD-WL54
+		    Fujitsu E5454
+		    Fujitsu FMV-JW481
+		    Fujitsu E5454
+		    I/O Data WN-AB
+		    I/O Data WN-AG
+		    I/O Data WN-A54
+		    Linksys WPC51AB
+		    Linksys WPC55AG
+		    NEC PA-WL/54AG
+		    Netgear WAB501
+		    Netgear WAG511
+		    Netgear WG511T
+		    Orinoco 8480
+		    Orinoco 8470WD
+		    Proxim Skyline 4030
+		    Samsung SWL-5200N
+		    SMC SMC2735W
+		    Sony PCWA-C700
+		    Sony PCWA-C300S
+		    Sony PCWA-C500
+		Atheros AR521x based PCI IEEE 802.11a/b/g adapters [-]
+		    D-Link DWL-A520
+		    D-Link DWL-AG520
+		    D-Link DWL-G520
+		    HP NC4000
+		    Linksys WMP55AG
+		    Netgear WAG311
+		    Netgear WG311
+		    Proxim Skyline 4032
+		    Senao NL-5354MP
 	ATM Adapters [*]
 		Efficient Networks EN-155 and Adaptec ANA-590x ATM interfaces
 		  (en)

@@ -1,4 +1,4 @@
-/*	$OpenBSD: ospfd.h,v 1.35 2005/06/26 19:22:12 claudio Exp $ */
+/*	$OpenBSD: ospfd.h,v 1.46 2006/02/24 21:06:47 norby Exp $ */
 
 /*
  * Copyright (c) 2004 Esben Norby <norby@openbsd.org>
@@ -53,6 +53,7 @@
 #define	F_STATIC		0x0020
 #define	F_DYNAMIC		0x0040
 #define	F_LONGER		0x0080
+#define	F_REDISTRIBUTED		0x0100
 
 #define REDISTRIBUTE_STATIC	0x01
 #define REDISTRIBUTE_CONNECTED	0x02
@@ -66,7 +67,6 @@ struct buf {
 	size_t			 max;
 	size_t			 wpos;
 	size_t			 rpos;
-	int			 fd;
 };
 
 struct msgbuf {
@@ -151,11 +151,6 @@ struct imsg {
 	void		*data;
 };
 
-struct imsg_fd {
-	TAILQ_ENTRY(imsg_fd)	entry;
-	int			fd;
-};
-
 /* area */
 struct vertex;
 struct rde_nbr;
@@ -180,6 +175,7 @@ struct area {
 	u_int8_t		 priority;
 	u_int8_t		 transit;
 	u_int8_t		 stub;
+	u_int8_t		 dirty;
 };
 
 /* interface states */
@@ -302,7 +298,6 @@ struct iface {
 	struct in_addr		 addr;
 	struct in_addr		 dst;
 	struct in_addr		 mask;
-	struct in_addr		 rtr_id;
 	struct in_addr		 abr_id;
 	char			*auth_key;
 	struct nbr		*dr;	/* designated router */
@@ -325,6 +320,7 @@ struct iface {
 	u_int16_t		 metric;
 	enum iface_type		 type;
 	enum auth_type		 auth_type;
+	u_int8_t		 media_type;
 	u_int8_t		 auth_keyid;
 	u_int8_t		 linkstate;
 	u_int8_t		 priority;
@@ -340,7 +336,6 @@ enum {
 
 struct ospfd_conf {
 	struct event		ev;
-	struct event		spf_timer;
 	struct in_addr		rtr_id;
 	struct lsa_tree		lsa_tree;
 	LIST_HEAD(, area)	area_list;
@@ -409,6 +404,8 @@ struct ctl_iface {
 	u_int8_t		 linkstate;
 	u_int8_t		 priority;
 	u_int8_t		 passive;
+	enum auth_type		 auth_type;
+	u_int8_t		 auth_keyid;
 };
 
 struct ctl_nbr {
@@ -419,6 +416,7 @@ struct ctl_nbr {
 	struct in_addr		 bdr;
 	struct in_addr		 area;
 	time_t			 dead_timer;
+	time_t			 uptime;
 	u_int32_t		 db_sum_lst_cnt;
 	u_int32_t		 ls_req_lst_cnt;
 	u_int32_t		 ls_retrans_lst_cnt;
@@ -434,6 +432,7 @@ struct ctl_rt {
 	struct in_addr		 nexthop;
 	struct in_addr		 area;
 	struct in_addr		 adv_rtr;
+	time_t			 uptime;
 	u_int32_t		 cost;
 	u_int32_t		 cost2;
 	enum path_type		 p_type;
@@ -473,13 +472,10 @@ int		 buf_add(struct buf *, void *, size_t);
 void		*buf_reserve(struct buf *, size_t);
 void		*buf_seek(struct buf *, size_t, size_t);
 int		 buf_close(struct msgbuf *, struct buf *);
-int		 buf_write(int, struct buf *);
 void		 buf_free(struct buf *);
 void		 msgbuf_init(struct msgbuf *);
 void		 msgbuf_clear(struct msgbuf *);
 int		 msgbuf_write(struct msgbuf *);
-int		 msgbuf_writebound(struct msgbuf *);
-int		 msgbuf_unbounded(struct msgbuf *msgbuf);
 
 /* parse.y */
 struct ospfd_conf	*parse_config(char *, int);
@@ -487,16 +483,15 @@ int			 cmdline_symset(char *);
 
 /* imsg.c */
 void	 imsg_init(struct imsgbuf *, int, void (*)(int, short, void *));
-int	 imsg_read(struct imsgbuf *);
-int	 imsg_get(struct imsgbuf *, struct imsg *);
-int	 imsg_compose(struct imsgbuf *, enum imsg_type, u_int32_t, pid_t, int,
+ssize_t	 imsg_read(struct imsgbuf *);
+ssize_t	 imsg_get(struct imsgbuf *, struct imsg *);
+int	 imsg_compose(struct imsgbuf *, enum imsg_type, u_int32_t, pid_t,
 	    void *, u_int16_t);
 struct buf	*imsg_create(struct imsgbuf *, enum imsg_type, u_int32_t, pid_t,
 		    u_int16_t);
 int	 imsg_add(struct buf *, void *, u_int16_t);
 int	 imsg_close(struct imsgbuf *, struct buf *);
 void	 imsg_free(struct imsg *);
-int	 imsg_get_fd(struct imsgbuf *);
 void	 imsg_event_add(struct imsgbuf *); /* needs to be provided externally */
 
 /* in_cksum.c */
@@ -514,13 +509,9 @@ void		 kr_shutdown(void);
 void		 kr_fib_couple(void);
 void		 kr_fib_decouple(void);
 void		 kr_dispatch_msg(int, short, void *);
-int		 kr_nexthop_add(struct in_addr);
-void		 kr_nexthop_delete(struct in_addr);
 void		 kr_show_route(struct imsg *);
 void		 kr_ifinfo(char *, pid_t);
 struct kif	*kif_findname(char *);
-void		 kif_update(struct kif *);
-int		 kif_validate(int);
 
 u_int8_t	mask2prefixlen(in_addr_t);
 in_addr_t	prefixlen2mask(u_int8_t);
@@ -528,6 +519,7 @@ in_addr_t	prefixlen2mask(u_int8_t);
 /* ospfd.c */
 void	main_imsg_compose_ospfe(int, pid_t, void *, u_int16_t);
 void	main_imsg_compose_rde(int, pid_t, void *, u_int16_t);
+int	ospf_redistribute(struct kroute *kr);
 
 /* printconf.c */
 void	print_config(struct ospfd_conf *);

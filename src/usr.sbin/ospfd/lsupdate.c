@@ -1,4 +1,4 @@
-/*	$OpenBSD: lsupdate.c,v 1.11 2005/05/26 20:10:24 norby Exp $ */
+/*	$OpenBSD: lsupdate.c,v 1.27 2006/02/23 16:06:29 claudio Exp $ */
 
 /*
  * Copyright (c) 2005 Claudio Jeker <claudio@openbsd.org>
@@ -18,12 +18,13 @@
  */
 
 #include <sys/types.h>
+#include <sys/hash.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
 
 #include <stdlib.h>
-#include <strings.h>
+#include <string.h>
 
 #include "ospf.h"
 #include "ospfd.h"
@@ -34,12 +35,18 @@
 extern struct ospfd_conf	*oeconf;
 extern struct imsgbuf		*ibuf_rde;
 
+struct buf *prepare_ls_update(struct iface *);
+int	add_ls_update(struct buf *, struct iface *, void *, int, u_int16_t);
+int	send_ls_update(struct buf *, struct iface *, struct in_addr, u_int32_t);
+
+void	ls_retrans_list_insert(struct nbr *, struct lsa_entry *);
+void	ls_retrans_list_remove(struct nbr *, struct lsa_entry *);
+
 /* link state update packet handling */
 int
 lsa_flood(struct iface *iface, struct nbr *originator, struct lsa_hdr *lsa_hdr,
     void *data, u_int16_t len)
 {
-	struct in_addr		 addr;
 	struct nbr		*nbr;
 	struct lsa_entry	*le = NULL;
 	int			 queued = 0, dont_ack = 0;
@@ -51,11 +58,11 @@ lsa_flood(struct iface *iface, struct nbr *originator, struct lsa_hdr *lsa_hdr,
 		if (!(nbr->state & NBR_STA_FLOOD))
 			continue;
 
-		if (iface->state & IF_STA_DROTHER)
-			if ((le = ls_retrans_list_get(iface->self, lsa_hdr)))
-			    ls_retrans_list_free(nbr, le);
+		if (iface->state & IF_STA_DROTHER && !queued)
+			while ((le = ls_retrans_list_get(iface->self, lsa_hdr)))
+			    ls_retrans_list_free(iface->self, le);
 
-		if ((le = ls_retrans_list_get(nbr, lsa_hdr)))
+		while ((le = ls_retrans_list_get(nbr, lsa_hdr)))
 			ls_retrans_list_free(nbr, le);
 
 		if (!(nbr->state & NBR_STA_FULL) &&
@@ -80,12 +87,16 @@ lsa_flood(struct iface *iface, struct nbr *originator, struct lsa_hdr *lsa_hdr,
 			continue;
 		}
 
-		queued = 1;
+		/* non DR or BDR router keep all lsa in one retrans list */
 		if (iface->state & IF_STA_DROTHER) {
 			if (!queued)
-				ls_retrans_list_add(iface->self, data);
-		} else
-			ls_retrans_list_add(nbr, data);
+				ls_retrans_list_add(iface->self, data,
+				    iface->rxmt_interval, 0);
+			queued = 1;
+		} else {
+			ls_retrans_list_add(nbr, data, iface->rxmt_interval, 0);
+			queued = 1;
+		}
 	}
 
 	if (!queued)
@@ -99,18 +110,15 @@ lsa_flood(struct iface *iface, struct nbr *originator, struct lsa_hdr *lsa_hdr,
 		dont_ack++;
 	}
 
-	/* flood LSA but first set correct destination */
+	/*
+	 * initial flood needs to be queued separately, timeout is zero
+	 * and oneshot has to be set because the retransimssion queues
+	 * are already loaded.
+	 */
 	switch (iface->type) {
 	case IF_TYPE_POINTOPOINT:
-		inet_aton(AllSPFRouters, &addr);
-		send_ls_update(iface, addr, data, len);
-		break;
 	case IF_TYPE_BROADCAST:
-		if (iface->state & IF_STA_DRORBDR)
-			inet_aton(AllSPFRouters, &addr);
-		else
-			inet_aton(AllDRouters, &addr);
-		send_ls_update(iface, addr, data, len);
+		ls_retrans_list_add(iface->self, data, 0, 1);
 		break;
 	case IF_TYPE_NBMA:
 	case IF_TYPE_POINTOMULTIPOINT:
@@ -128,7 +136,7 @@ lsa_flood(struct iface *iface, struct nbr *originator, struct lsa_hdr *lsa_hdr,
 				    lsa_hdr->adv_rtr != le->le_lsa->adv_rtr)
 					continue;
 			}
-			send_ls_update(iface, nbr->addr, data, len);
+			ls_retrans_list_add(nbr, data, 0, 1);
 		}
 		break;
 	default:
@@ -138,55 +146,83 @@ lsa_flood(struct iface *iface, struct nbr *originator, struct lsa_hdr *lsa_hdr,
 	return (dont_ack == 2);
 }
 
+struct buf *
+prepare_ls_update(struct iface *iface)
+{
+	struct buf		*buf;
+
+	if ((buf = buf_open(iface->mtu - sizeof(struct ip))) == NULL)
+		fatal("send_ls_update");
+
+	/* OSPF header */
+	if (gen_ospf_hdr(buf, iface, PACKET_TYPE_LS_UPDATE))
+		goto fail;
+
+	/* reserve space for number of lsa field */
+	if (buf_reserve(buf, sizeof(u_int32_t)) == NULL)
+		goto fail;
+
+	return (buf);
+fail:
+	log_warn("prepare_ls_update");
+	buf_free(buf);
+	return (NULL);
+}
+
 int
-send_ls_update(struct iface *iface, struct in_addr addr, void *data, int len)
+add_ls_update(struct buf *buf, struct iface *iface, void *data, int len,
+    u_int16_t older)
+{
+	size_t		pos;
+	u_int16_t	age;
+
+	if (buf->wpos + len >= buf->max - MD5_DIGEST_LENGTH)
+		return (0);
+
+	pos = buf->wpos;
+	if (buf_add(buf, data, len)) {
+		log_warn("add_ls_update");
+		return (0);
+	}
+
+	/* age LSA before sending it out */
+	memcpy(&age, data, sizeof(age));
+	age = ntohs(age);
+	if ((age += older + iface->transmit_delay) >= MAX_AGE)
+		age = MAX_AGE;
+	age = htons(age);
+	memcpy(buf_seek(buf, pos, sizeof(age)), &age, sizeof(age));
+
+	return (1);
+}
+
+
+
+int
+send_ls_update(struct buf *buf, struct iface *iface, struct in_addr addr,
+    u_int32_t nlsa)
 {
 	struct sockaddr_in	 dst;
-	struct buf		*buf;
-	size_t			 pos;
-	u_int32_t		 nlsa;
-	u_int16_t		 age;
 	int			 ret;
 
-	/* XXX READ_BUF_SIZE */
-	if ((buf = buf_dynamic(PKG_DEF_SIZE, READ_BUF_SIZE)) == NULL)
-		fatal("send_ls_update");
+	nlsa = htonl(nlsa);
+	memcpy(buf_seek(buf, sizeof(struct ospf_hdr), sizeof(nlsa)),
+	    &nlsa, sizeof(nlsa));
+	/* update authentication and calculate checksum */
+	if (auth_gen(buf, iface))
+		goto fail;
 
 	/* set destination */
 	dst.sin_family = AF_INET;
 	dst.sin_len = sizeof(struct sockaddr_in);
 	dst.sin_addr.s_addr = addr.s_addr;
 
-	/* OSPF header */
-	if (gen_ospf_hdr(buf, iface, PACKET_TYPE_LS_UPDATE))
-		goto fail;
-
-	nlsa = htonl(1);
-	if (buf_add(buf, &nlsa, sizeof(nlsa)))
-		goto fail;
-
-	pos = buf->wpos;
-	if (buf_add(buf, data, len))
-		goto fail;
-
-	/* age LSA befor sending it out */
-	memcpy(&age, data, sizeof(age));
-	age = ntohs(age);
-	if ((age += iface->transmit_delay) >= MAX_AGE)
-		age = MAX_AGE;
-	age = ntohs(age);
-	memcpy(buf_seek(buf, pos, sizeof(age)), &age, sizeof(age));
-
-	/* update authentication and calculate checksum */
-	if (auth_gen(buf, iface))
-		goto fail;
-
 	ret = send_packet(iface, buf->buf, buf->wpos, &dst);
 
 	buf_free(buf);
 	return (ret);
 fail:
-	log_warn("send_hello");
+	log_warn("send_ls_update");
 	buf_free(buf);
 	return (-1);
 }
@@ -233,7 +269,7 @@ recv_ls_update(struct nbr *nbr, char *buf, u_int16_t len)
 				    "neighbor ID %s", inet_ntoa(nbr->id));
 				return;
 			}
-			imsg_compose(ibuf_rde, IMSG_LS_UPD, nbr->peerid, 0, -1,
+			imsg_compose(ibuf_rde, IMSG_LS_UPD, nbr->peerid, 0,
 			    buf, ntohs(lsa.len));
 			buf += ntohs(lsa.len);
 			len -= ntohs(lsa.len);
@@ -247,13 +283,12 @@ recv_ls_update(struct nbr *nbr, char *buf, u_int16_t len)
 	default:
 		fatalx("recv_ls_update: unknown neighbor state");
 	}
-
-	return;
 }
 
 /* link state retransmit list */
 void
-ls_retrans_list_add(struct nbr *nbr, struct lsa_hdr *lsa)
+ls_retrans_list_add(struct nbr *nbr, struct lsa_hdr *lsa,
+    unsigned short timeout, unsigned short oneshot)
 {
 	struct timeval		 tv;
 	struct lsa_entry	*le;
@@ -266,11 +301,14 @@ ls_retrans_list_add(struct nbr *nbr, struct lsa_hdr *lsa)
 		fatal("ls_retrans_list_add");
 
 	le->le_ref = ref;
-	TAILQ_INSERT_TAIL(&nbr->ls_retrans_list, le, entry);
+	le->le_when = timeout;
+	le->le_oneshot = oneshot;
+
+	ls_retrans_list_insert(nbr, le);
 
 	if (!evtimer_pending(&nbr->ls_retrans_timer, NULL)) {
 		timerclear(&tv);
-		tv.tv_sec = nbr->iface->rxmt_interval;
+		tv.tv_sec = TAILQ_FIRST(&nbr->ls_retrans_list)->le_when;
 
 		if (evtimer_add(&nbr->ls_retrans_timer, &tv) == -1)
 			log_warn("ls_retrans_list_add: evtimer_add failed");
@@ -282,8 +320,7 @@ ls_retrans_list_del(struct nbr *nbr, struct lsa_hdr *lsa_hdr)
 {
 	struct lsa_entry	*le;
 
-	le = ls_retrans_list_get(nbr, lsa_hdr);
-	if (le == NULL)
+	if ((le = ls_retrans_list_get(nbr, lsa_hdr)) == NULL)
 		return (-1);
 	if (lsa_hdr->seq_num == le->le_ref->hdr.seq_num &&
 	    lsa_hdr->ls_chksum == le->le_ref->hdr.ls_chksum) {
@@ -291,7 +328,7 @@ ls_retrans_list_del(struct nbr *nbr, struct lsa_hdr *lsa_hdr)
 		return (0);
 	}
 
-	log_warnx("ls_retrans_list_del: invalid LS ack received, neigbor %s",
+	log_warnx("ls_retrans_list_del: invalid LS ack received, neighbor %s",
 	     inet_ntoa(nbr->id));
 
 	return (-1);
@@ -312,9 +349,58 @@ ls_retrans_list_get(struct nbr *nbr, struct lsa_hdr *lsa_hdr)
 }
 
 void
+ls_retrans_list_insert(struct nbr *nbr, struct lsa_entry *new)
+{
+	struct lsa_entry	*le;
+	unsigned short		 when = new->le_when;
+
+	TAILQ_FOREACH(le, &nbr->ls_retrans_list, entry) {
+		if (when < le->le_when) {
+			new->le_when = when;
+			TAILQ_INSERT_BEFORE(le, new, entry);
+			nbr->ls_ret_cnt++;
+			return;
+		}
+		when -= le->le_when;
+	}
+	new->le_when = when;
+	TAILQ_INSERT_TAIL(&nbr->ls_retrans_list, new, entry);
+	nbr->ls_ret_cnt++;
+}
+
+void
+ls_retrans_list_remove(struct nbr *nbr, struct lsa_entry *le)
+{
+	struct timeval		 tv;
+	struct lsa_entry	*next = TAILQ_NEXT(le, entry);
+	int			 reset = 0;
+
+	/* adjust timeout of next entry */
+	if (next)
+		next->le_when += le->le_when;
+
+	if (TAILQ_FIRST(&nbr->ls_retrans_list) == le &&
+	    evtimer_pending(&nbr->ls_retrans_timer, NULL))
+		reset = 1;
+
+	TAILQ_REMOVE(&nbr->ls_retrans_list, le, entry);
+	nbr->ls_ret_cnt--;
+
+	if (reset && TAILQ_FIRST(&nbr->ls_retrans_list)) {
+		evtimer_del(&nbr->ls_retrans_timer);
+
+		timerclear(&tv);
+		tv.tv_sec = TAILQ_FIRST(&nbr->ls_retrans_list)->le_when;
+
+		if (evtimer_add(&nbr->ls_retrans_timer, &tv) == -1)
+			log_warn("ls_retrans_timer: evtimer_add failed");
+	}
+}
+
+void
 ls_retrans_list_free(struct nbr *nbr, struct lsa_entry *le)
 {
-	TAILQ_REMOVE(&nbr->ls_retrans_list, le, entry);
+	ls_retrans_list_remove(nbr, le);
 
 	lsa_cache_put(le->le_ref, nbr);
 	free(le);
@@ -327,6 +413,8 @@ ls_retrans_list_clr(struct nbr *nbr)
 
 	while ((le = TAILQ_FIRST(&nbr->ls_retrans_list)) != NULL)
 		ls_retrans_list_free(nbr, le);
+
+	nbr->ls_ret_cnt = 0;
 }
 
 int
@@ -339,41 +427,81 @@ void
 ls_retrans_timer(int fd, short event, void *bula)
 {
 	struct timeval		 tv;
+	struct timespec		 tp;
 	struct in_addr		 addr;
 	struct nbr		*nbr = bula;
 	struct lsa_entry	*le;
+	struct buf		*buf;
+	time_t			 now;
+	int			 d;
+	u_int32_t		 nlsa = 0;
 
+	if ((le = TAILQ_FIRST(&nbr->ls_retrans_list)) != NULL)
+		le->le_when = 0;	/* timer fired */
+	else
+		return;			/* queue empty, nothing to do */
+
+	clock_gettime(CLOCK_MONOTONIC, &tp);
+	now = tp.tv_sec;
+	
 	if (nbr->iface->self == nbr) {
-		if (!(nbr->iface->state & IF_STA_DROTHER)) {
+		/*
+		 * oneshot needs to be set for lsa queued for flooding,
+		 * if oneshot is not set then the lsa needs to be converted
+		 * because the router switched lately to DR or BDR
+		 */
+		if (le->le_oneshot && nbr->iface->state & IF_STA_DRORBDR)
+			inet_aton(AllSPFRouters, &addr);
+		else if (nbr->iface->state & IF_STA_DRORBDR) {
 			/*
-			 * Iick, we are suddenly DR or BDDR so convert this
-			 * retrans list into a real flood. I'm not 100% sure if
-			 * using iface->self as originator is correct but we
-			 * will flood the whole net with this and that's the
-			 * idea.
+			 * old retransmission needs to be converted into
+			 * flood by rerunning the lsa_flood.
 			 */
-			while ((le = TAILQ_FIRST(&nbr->ls_retrans_list)) !=
-			    NULL) {
-				lsa_flood(nbr->iface, nbr, &le->le_ref->hdr,
-				    le->le_ref->data, le->le_ref->len);
-				ls_retrans_list_free(nbr, le);
-			}
+			lsa_flood(nbr->iface, nbr, &le->le_ref->hdr,
+			    le->le_ref->data, le->le_ref->len);
+			ls_retrans_list_free(nbr, le);
+			/* ls_retrans_list_free retriggers the timer */
 			return;
-		}
-		inet_aton(AllDRouters, &addr);
+		} else
+			inet_aton(AllDRouters, &addr);
 	} else
 		memcpy(&addr, &nbr->addr, sizeof(addr));
 
+	if ((buf = prepare_ls_update(nbr->iface)) == NULL) {
+		le->le_when = 1;
+		goto done;
+	}
 
+	while ((le = TAILQ_FIRST(&nbr->ls_retrans_list)) != NULL &&
+	    le->le_when == 0) {
+		d = now - le->le_ref->stamp;
+		if (d < 0)
+			d = 0;
+		else if (d > MAX_AGE)
+			d = MAX_AGE;
+
+		if (add_ls_update(buf, nbr->iface, le->le_ref->data,
+		    le->le_ref->len, d) == 0)
+			break;
+		nlsa++;
+		if (le->le_oneshot)
+			ls_retrans_list_free(nbr, le);
+		else {
+			TAILQ_REMOVE(&nbr->ls_retrans_list, le, entry);
+			nbr->ls_ret_cnt--;
+			le->le_when = nbr->iface->rxmt_interval;
+			ls_retrans_list_insert(nbr, le);
+		}
+	}
+	send_ls_update(buf, nbr->iface, addr, nlsa);
+
+done:
 	if ((le = TAILQ_FIRST(&nbr->ls_retrans_list)) != NULL) {
-		send_ls_update(nbr->iface, addr, le->le_ref->data,
-		    le->le_ref->len);
-
 		timerclear(&tv);
-		tv.tv_sec = nbr->iface->rxmt_interval;
+		tv.tv_sec = le->le_when;
 
 		if (evtimer_add(&nbr->ls_retrans_timer, &tv) == -1)
-			log_warn("ls_retrans_list_add: evtimer_add failed");
+			log_warn("ls_retrans_timer: evtimer_add failed");
 	}
 }
 
@@ -385,7 +513,6 @@ struct lsa_cache {
 } lsacache;
 
 struct lsa_ref		*lsa_cache_look(struct lsa_hdr *);
-struct lsa_cache_head	*lsa_cache_hash(struct lsa_hdr *);
 
 void
 lsa_cache_init(u_int32_t hashsize)
@@ -409,6 +536,7 @@ lsa_cache_add(void *data, u_int16_t len)
 {
 	struct lsa_cache_head	*head;
 	struct lsa_ref		*ref, *old;
+	struct timespec		 tp;
 
 	if ((ref = calloc(1, sizeof(*ref))) == NULL)
 		fatal("lsa_cache_add");
@@ -423,11 +551,14 @@ lsa_cache_add(void *data, u_int16_t len)
 	if ((ref->data = malloc(len)) == NULL)
 		fatal("lsa_cache_add");
 	memcpy(ref->data, data, len);
-	ref->stamp = time(NULL);
+
+	clock_gettime(CLOCK_MONOTONIC, &tp);
+	ref->stamp = tp.tv_sec;
 	ref->len = len;
 	ref->refcnt = 1;
 
-	head = lsa_cache_hash(&ref->hdr);
+	head = &lsacache.hashtbl[hash32_buf(&ref->hdr, sizeof(ref->hdr),
+	    HASHINIT) & lsacache.hashmask];
 	LIST_INSERT_HEAD(head, ref, entry);
 	return (ref);
 }
@@ -465,31 +596,15 @@ lsa_cache_look(struct lsa_hdr *lsa_hdr)
 	struct lsa_cache_head	*head;
 	struct lsa_ref		*ref;
 
-	head = lsa_cache_hash(lsa_hdr);
+	head = &lsacache.hashtbl[hash32_buf(lsa_hdr, sizeof(*lsa_hdr),
+	    HASHINIT) & lsacache.hashmask];
+
 	LIST_FOREACH(ref, head, entry) {
-		if (ref->hdr.type == lsa_hdr->type &&
-		    ref->hdr.ls_id == lsa_hdr->ls_id &&
-		    ref->hdr.adv_rtr == lsa_hdr->adv_rtr &&
-		    ref->hdr.seq_num == lsa_hdr->seq_num &&
-		    ref->hdr.ls_chksum == lsa_hdr->ls_chksum) {
+		if (memcmp(&ref->hdr, lsa_hdr, sizeof(*lsa_hdr)) == 0)
 			/* found match */
 			return (ref);
-		}
 	}
+
 	return (NULL);
 }
 
-struct lsa_cache_head *
-lsa_cache_hash(struct lsa_hdr *lsa_hdr)
-{
-	u_int32_t	hash = 8271;
-
-	hash ^= lsa_hdr->type;
-	hash ^= lsa_hdr->ls_id;
-	hash ^= lsa_hdr->adv_rtr;
-	hash ^= lsa_hdr->seq_num;
-	hash ^= lsa_hdr->ls_chksum;
-	hash &= lsacache.hashmask;
-
-	return (&lsacache.hashtbl[hash]);
-}

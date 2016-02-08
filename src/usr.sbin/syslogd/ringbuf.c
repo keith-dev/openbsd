@@ -1,4 +1,4 @@
-/* $OpenBSD: ringbuf.c,v 1.4 2005/06/06 23:22:04 djm Exp $ */
+/* $OpenBSD: ringbuf.c,v 1.7 2005/09/21 23:25:32 djm Exp $ */
 
 /*
  * Copyright (c) 2004 Damien Miller
@@ -22,12 +22,9 @@
 
 #include <sys/types.h>
 #include <sys/param.h>
-#include <sys/uio.h>
-#include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <unistd.h>
 
 #include "syslogd.h"
 
@@ -87,10 +84,13 @@ ringbuf_append_line(struct ringbuf *rb, char *line)
 		return (-1);
 
 	llen = strlen(line);
+	if (llen == 0)
+		return (-1);
+
 	if (line[llen - 1] != '\n')
 		llen++; /* one extra for appended '\n' */
 
-	if (rb == NULL || llen == 0 || llen >= rb->len)
+	if (llen >= rb->len)
 		return (-1);
 
 	/*
@@ -136,14 +136,14 @@ ringbuf_append_line(struct ringbuf *rb, char *line)
 ssize_t
 ringbuf_to_string(char *buf, size_t len, struct ringbuf *rb)
 {
-	ssize_t copy_len, n;
+	size_t copy_len, n;
 
-	if (buf == NULL || rb == NULL)
+	if (buf == NULL || rb == NULL || len == 0)
 		return (-1);
 
 	copy_len = MIN(len - 1, ringbuf_used(rb));
 
-	if (copy_len <= 0)
+	if (copy_len == 0)
 		return (copy_len);
 
 	if (rb->start < rb->end)
@@ -152,7 +152,7 @@ ringbuf_to_string(char *buf, size_t len, struct ringbuf *rb)
 		/* If the buffer is wrapped, copy each hunk separately */
 		n = rb->len - rb->start;
 		memcpy(buf, rb->buf + rb->start, MIN(n, copy_len));
-		if (copy_len - n > 0)
+		if (copy_len > n)
 			memcpy(buf + n, rb->buf, MIN(rb->end, copy_len - n));
 	}
 	buf[copy_len] = '\0';

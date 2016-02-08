@@ -1,4 +1,4 @@
-/*	$OpenBSD: lex.c,v 1.36 2005/03/30 17:16:37 deraadt Exp $	*/
+/*	$OpenBSD: lex.c,v 1.38 2005/12/11 20:31:21 otto Exp $	*/
 
 /*
  * lexical analysis and source input
@@ -289,10 +289,16 @@ yylex(int cf)
 			case '\\':
 				c = getsc();
 				switch (c) {
-				case '"': case '\\':
+				case '\\':
 				case '$': case '`':
 					*wp++ = QCHAR, *wp++ = c;
 					break;
+				case '"':
+					if ((cf & HEREDOC) == 0) {
+						*wp++ = QCHAR, *wp++ = c;
+						break;
+					}
+					/* FALLTROUGH */
 				default:
 					Xcheck(ws, wp);
 					if (c) { /* trailing \ is lost */
@@ -774,12 +780,12 @@ Done:
 		int h = hash(ident);
 
 		/* { */
-		if ((cf & KEYWORD) && (p = tsearch(&keywords, ident, h)) &&
+		if ((cf & KEYWORD) && (p = ktsearch(&keywords, ident, h)) &&
 		    (!(cf & ESACONLY) || p->val.i == ESAC || p->val.i == '}')) {
 			afree(yylval.cp, ATEMP);
 			return p->val.i;
 		}
-		if ((cf & ALIAS) && (p = tsearch(&aliases, ident, h)) &&
+		if ((cf & ALIAS) && (p = ktsearch(&aliases, ident, h)) &&
 		    (p->flag & ISSET)) {
 			Source *s;
 

@@ -1,4 +1,4 @@
-/*	$OpenBSD: ftp.c,v 1.57 2004/09/16 04:39:16 deraadt Exp $	*/
+/*	$OpenBSD: ftp.c,v 1.61 2006/02/16 07:41:01 pvalchev Exp $	*/
 /*	$NetBSD: ftp.c,v 1.27 1997/08/18 10:20:23 lukem Exp $	*/
 
 /*
@@ -60,7 +60,7 @@
  */
 
 #if !defined(lint) && !defined(SMALL)
-static char rcsid[] = "$OpenBSD: ftp.c,v 1.57 2004/09/16 04:39:16 deraadt Exp $";
+static char rcsid[] = "$OpenBSD: ftp.c,v 1.61 2006/02/16 07:41:01 pvalchev Exp $";
 #endif /* not lint and not SMALL */
 
 #include <sys/types.h>
@@ -103,14 +103,11 @@ union sockunion {
 
 union sockunion myctladdr, hisctladdr, data_addr;
 
-union sockunion hisctladdr;
-union sockunion data_addr;
 int	data = -1;
 int	abrtflag = 0;
 jmp_buf	ptabort;
 int	ptabflg;
 int	ptflag = 0;
-union sockunion myctladdr;
 off_t	restart_point = 0;
 
 
@@ -200,7 +197,9 @@ hookup(char *host, char *port)
 				warn("connect to address %s", hbuf);
 			}
 			cause = "connect";
+			error = errno;
 			close(s);
+			errno = error;
 			s = -1;
 			continue;
 		}
@@ -571,19 +570,19 @@ sendrequest(const char *cmd, const char *local, const char *remote,
 
 	if (restart_point &&
 	    (strcmp(cmd, "STOR") == 0 || strcmp(cmd, "APPE") == 0)) {
-		int rc;
+		int rc = -1;
 
-		rc = -1;
 		switch (curtype) {
 		case TYPE_A:
-			rc = fseek(fin, (long) restart_point, SEEK_SET);
+			rc = fseeko(fin, restart_point, SEEK_SET);
 			break;
 		case TYPE_I:
 		case TYPE_L:
-			rc = lseek(fileno(fin), restart_point, SEEK_SET);
+			if (lseek(fileno(fin), restart_point, SEEK_SET) != -1)
+				rc = 0;
 			break;
 		}
-		if (rc < 0) {
+		if (rc == -1) {
 			warn("local: %s", local);
 			restart_point = 0;
 			progress = oprogress;
@@ -591,7 +590,7 @@ sendrequest(const char *cmd, const char *local, const char *remote,
 				(*closefunc)(fin);
 			return;
 		}
-		if (command("REST %ld", (long) restart_point)
+		if (command("REST %lld", (long long) restart_point)
 			!= CONTINUE) {
 			restart_point = 0;
 			progress = oprogress;
@@ -877,7 +876,7 @@ recvrequest(const char *cmd, const char * volatile local, const char *remote,
 	if (setjmp(recvabort))
 		goto abort;
 	if (is_retr && restart_point &&
-	    command("REST %ld", (long) restart_point) != CONTINUE)
+	    command("REST %lld", (long long) restart_point) != CONTINUE)
 		return;
 	if (remote) {
 		if (command("%s %s", cmd, remote) != PRELIM) {

@@ -23,7 +23,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- *	$OpenBSD: radlib.h,v 1.4 2002/06/15 01:33:23 brian Exp $
+ *	$OpenBSD: radlib.h,v 1.7 2005/09/21 17:22:28 brad Exp $
  */
 
 #ifndef _RADLIB_H_
@@ -31,6 +31,9 @@
 
 #include <sys/types.h>
 #include <netinet/in.h>
+
+/* Limits */
+#define RAD_MAX_ATTR_LEN		253
 
 /* Message types */
 #define RAD_ACCESS_REQUEST		1
@@ -98,6 +101,8 @@
 #define RAD_FRAMED_APPLETALK_NETWORK	38	/* Integer */
 #define RAD_FRAMED_APPLETALK_ZONE	39	/* Integer */
      /* reserved for accounting		40-59 */
+#define RAD_ACCT_INPUT_GIGAWORDS	52
+#define RAD_ACCT_OUTPUT_GIGAWORDS	53
 #define RAD_CHAP_CHALLENGE		60	/* String */
 #define RAD_NAS_PORT_TYPE		61	/* Integer */
 	#define RAD_ASYNC			0
@@ -123,11 +128,21 @@
 #define RAD_PORT_LIMIT			62	/* Integer */
 #define RAD_LOGIN_LAT_PORT		63	/* Integer */
 #define RAD_CONNECT_INFO		77	/* String */
+#define RAD_EAP_MESSAGE			79	/* Octets */
+#define RAD_MESSAGE_AUTHENTIC		80	/* Octets */
+#define RAD_ACCT_INTERIM_INTERVAL	85	/* Integer */
+#define RAD_NAS_IPV6_ADDRESS		95	/* IPv6 address */
+#define RAD_FRAMED_INTERFACE_ID		96	/* 8 octets */
+#define RAD_FRAMED_IPV6_PREFIX		97	/* Octets */
+#define RAD_LOGIN_IPV6_HOST		98	/* IPv6 address */
+#define RAD_FRAMED_IPV6_ROUTE		99	/* String */
+#define RAD_FRAMED_IPV6_POOL		100	/* String */
 
 /* Accounting attribute types and values */
 #define RAD_ACCT_STATUS_TYPE		40	/* Integer */
 	#define RAD_START			1
 	#define RAD_STOP			2
+	#define RAD_UPDATE			3
 	#define RAD_ACCOUNTING_ON		7
 	#define RAD_ACCOUNTING_OFF		8
 #define RAD_ACCT_DELAY_TIME		41	/* Integer */

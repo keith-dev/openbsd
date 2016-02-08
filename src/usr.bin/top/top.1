@@ -1,4 +1,4 @@
-.\"	$OpenBSD: top.1,v 1.29 2005/06/17 09:40:48 markus Exp $
+.\"	$OpenBSD: top.1,v 1.33 2005/12/05 12:20:27 jmc Exp $
 .\"
 .\" Copyright (c) 1997, Jason Downs.  All rights reserved.
 .\"
@@ -31,7 +31,7 @@
 .Nd display and update information about the top CPU processes
 .Sh SYNOPSIS
 .Nm top
-.Op Fl bIinqSu
+.Op Fl bIinqSTu
 .Op Fl d Ar count
 .Op Fl o Ar field
 .Op Fl p Ar pid
@@ -152,6 +152,10 @@ Set the delay between screen updates to
 seconds.
 The value may be fractional, to permit delays of less than 1 second.
 The default delay between updates is 5 seconds.
+.It Fl T
+Show process threads in the display.
+Normally, only the main process is shown.
+This option makes all threads visible.
 .It Fl U Ar username
 Show only those processes owned by
 .Ar username .
@@ -391,12 +395,17 @@ used to map user ID to name
 kernel image
 .El
 .Sh SEE ALSO
+.Xr fstat 1 ,
 .Xr kill 1 ,
+.Xr netstat 1 ,
 .Xr ps 1 ,
 .Xr stty 1 ,
 .Xr systat 1 ,
 .Xr mem 4 ,
-.Xr renice 8
+.Xr iostat 8 ,
+.Xr pstat 8 ,
+.Xr renice 8 ,
+.Xr vmstat 8
 .Sh AUTHORS
 William LeFebvre, EECS Department, Northwestern University
 .Sh BUGS

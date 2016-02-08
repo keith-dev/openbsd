@@ -1,4 +1,4 @@
-/*	$OpenBSD: string.h,v 1.15 2005/03/30 03:04:16 deraadt Exp $	*/
+/*	$OpenBSD: string.h,v 1.17 2006/01/06 18:53:04 millert Exp $	*/
 /*	$NetBSD: string.h,v 1.6 1994/10/26 00:56:30 cgd Exp $	*/
 
 /*-
@@ -34,11 +34,13 @@
 
 #ifndef _STRING_H_
 #define	_STRING_H_
-#include <machine/ansi.h>
 
-#ifdef	_BSD_SIZE_T_
-typedef	_BSD_SIZE_T_	size_t;
-#undef	_BSD_SIZE_T_
+#include <sys/cdefs.h>
+#include <machine/_types.h>
+
+#ifndef	_SIZE_T_DEFINED_
+#define	_SIZE_T_DEFINED_
+typedef	__size_t	size_t;
 #endif
 
 #ifndef	NULL
@@ -48,8 +50,6 @@ typedef	_BSD_SIZE_T_	size_t;
 #define	NULL	0L
 #endif
 #endif
-
-#include <sys/cdefs.h>
 
 __BEGIN_DECLS
 void	*memchr(const void *, int, size_t);
@@ -69,8 +69,6 @@ int	 strcoll(const char *, const char *);
 char	*strcpy(char *, const char *);
 size_t	 strcspn(const char *, const char *);
 char	*strerror(int);
-int	 strerror_r(int, char *, size_t)
-		__attribute__ ((__bounded__(__string__,2,3)));
 size_t	 strlen(const char *);
 char	*strncat(char *, const char *, size_t)
 		__attribute__ ((__bounded__(__string__,1,3)));
@@ -86,8 +84,12 @@ char	*strtok_r(char *, const char *, char **);
 size_t	 strxfrm(char *, const char *, size_t)
 		__attribute__ ((__bounded__(__string__,1,3)));
 
-/* Nonstandard routines */
-#if !defined(_ANSI_SOURCE) && !defined(_POSIX_SOURCE)
+#if __BSD_VISIBLE || __XPG_VISIBLE
+void	*memccpy(void *, const void *, int, size_t)
+		__attribute__ ((__bounded__(__buffer__,1,4)));
+#endif
+
+#if __BSD_VISIBLE || __XPG_VISIBLE >= 420
 int	 bcmp(const void *, const void *, size_t);
 void	 bcopy(const void *, void *, size_t)
 		__attribute__ ((__bounded__(__buffer__,1,3)))
@@ -96,18 +98,24 @@ void	 bzero(void *, size_t)
 		__attribute__ ((__bounded__(__buffer__,1,2)));
 int	 ffs(int);
 char	*index(const char *, int);
-void	*memccpy(void *, const void *, int, size_t)
-		__attribute__ ((__bounded__(__buffer__,1,4)));
 char	*rindex(const char *, int);
 int	 strcasecmp(const char *, const char *);
+int	 strncasecmp(const char *, const char *, size_t);
 char	*strdup(const char *);
+#endif
+
+#if __BSD_VISIBLE || __XPG_VISIBLE >= 600
+int	 strerror_r(int, char *, size_t)
+	    __attribute__ ((__bounded__(__string__,2,3)));
+#endif
+
+#if __BSD_VISIBLE
 char	*strcasestr(const char *, const char *);
 size_t	 strlcat(char *, const char *, size_t)
 		__attribute__ ((__bounded__(__string__,1,3)));
 size_t	 strlcpy(char *, const char *, size_t)
 		__attribute__ ((__bounded__(__string__,1,3)));
 void	 strmode(int, char *);
-int	 strncasecmp(const char *, const char *, size_t);
 char	*strsep(char **, const char *);
 char	*strsignal(int);
 #endif 

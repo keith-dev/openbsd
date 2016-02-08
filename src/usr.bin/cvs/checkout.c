@@ -1,4 +1,4 @@
-/*	$OpenBSD: checkout.c,v 1.39 2005/07/25 12:05:43 xsa Exp $	*/
+/*	$OpenBSD: checkout.c,v 1.50 2006/01/31 13:55:20 xsa Exp $	*/
 /*
  * Copyright (c) 2004 Jean-Francois Brousseau <jfb@openbsd.org>
  * All rights reserved.
@@ -24,14 +24,7 @@
  * ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include <sys/types.h>
-#include <sys/stat.h>
-
-#include <errno.h>
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-#include <unistd.h>
+#include "includes.h"
 
 #include "cvs.h"
 #include "log.h"
@@ -43,6 +36,7 @@
 
 static int	cvs_checkout_init(struct cvs_cmd *, int, char **, int *);
 static int	cvs_checkout_pre_exec(struct cvsroot *);
+static int	cvs_checkout_local(CVSFILE *cf, void *);
 
 struct cvs_cmd cvs_cmd_checkout = {
 	CVS_OP_CHECKOUT, CVS_REQ_CO, "checkout",
@@ -79,6 +73,9 @@ struct cvs_cmd cvs_cmd_export = {
 	CVS_CMD_ALLOWSPEC | CVS_CMD_SENDDIR
 };
 
+static char *currepo = NULL;
+static DIR *dirp = NULL;
+static int cwdfd = -1;
 static char *date, *tag, *koptstr, *tgtdir, *rcsid;
 static int statmod = 0;
 static int shorten = 0;
@@ -88,6 +85,8 @@ static int kflag = RCS_KWEXP_DEFAULT;
 /* modules */
 static char **co_mods;
 static int    co_nmod;
+
+/* XXX checkout has issues in remote mode, -N gets seen as module */
 
 static int
 cvs_checkout_init(struct cvs_cmd *cmd, int argc, char **argv, int *arg)
@@ -157,31 +156,20 @@ cvs_checkout_init(struct cvs_cmd *cmd, int argc, char **argv, int *arg)
 	co_mods = argv;
 	co_nmod = argc;
 
-	if ((statmod == 0) && (argc == 0)) {
-		cvs_log(LP_ABORT,
-		    "must specify at least one module or directory");
-		return (-1);
-	}
+	if ((statmod == 0) && (argc == 0))
+		fatal("must specify at least one module or directory");
 
-	if (statmod && (argc > 0)) {
-		cvs_log(LP_ABORT,  "-c and -s must not get any arguments");
-		return (-1);
-	}
+	if (statmod && (argc > 0))
+		fatal("-c and -s must not get any arguments");
 
 	/* `export' command exceptions */
 	if (cvs_cmdop == CVS_OP_EXPORT) {
-		if (!tag && !date) {
-			cvs_log(LP_ABORT, "must specify a tag or date");
-			return (-1);
-		}
+		if (!tag && !date)
+			fatal("must specify a tag or date");
 
 		/* we don't want numerical revisions here */
-		if (tag && (rcs = rcsnum_parse(tag)) != NULL) {
-			cvs_log(LP_ABORT, "tag `%s' must be a symbolic tag",
-			    tag);
-			rcsnum_free(rcs);
-			return (-1);
-		}
+		if (tag && (rcs = rcsnum_parse(tag)) != NULL)
+			fatal("tag `%s' must be a symbolic tag", tag);
 	}
 
 	*arg = optind;
@@ -191,79 +179,160 @@ cvs_checkout_init(struct cvs_cmd *cmd, int argc, char **argv, int *arg)
 static int
 cvs_checkout_pre_exec(struct cvsroot *root)
 {
-	int i;
-	char *sp;
+	int i, ret;
+	char *sp, repo[MAXPATHLEN];
+
+	if ((dirp = opendir(".")) == NULL)
+		fatal("cvs_checkout_pre_exec: opendir failed");
+
+	cwdfd = dirfd(dirp);
 
 	for (i = 0; i < co_nmod; i++) {
 		if ((sp = strchr(co_mods[i], '/')) != NULL)
 			*sp = '\0';
 
-		if ((mkdir(co_mods[i], 0755) == -1) && (errno != EEXIST)) {
-			cvs_log(LP_ERRNO, "can't create base directory '%s'",
-			    co_mods[i]);
-			return (CVS_EX_DATA);
-		}
+		if ((mkdir(co_mods[i], 0755) == -1) && (errno != EEXIST))
+			fatal("cvs_checkout_pre_exec: mkdir `%s': %s",
+			    co_mods[i], strerror(errno));
 
-		if (cvs_mkadmin(co_mods[i], root->cr_str, co_mods[i]) < 0) {
-			cvs_log(LP_ERR, "can't create base directory '%s'",
-			    co_mods[i]);
-			return (CVS_EX_DATA);
-		}
+		cvs_mkadmin(co_mods[i], root->cr_str, co_mods[i], NULL,
+		    NULL, 0);
 
 		if (sp != NULL)
 			*sp = '/';
 	}
 
-	if (root->cr_method != CVS_METHOD_LOCAL) {
+	if (root->cr_method == CVS_METHOD_LOCAL) {
+		if ((dirp = opendir(".")) == NULL)
+			fatal("cvs_checkout_pre_exec: opendir failed");
+
+		cwdfd = dirfd(dirp);
+
+		for (i = 0; i < co_nmod; i++) {
+			if (strlcpy(repo, root->cr_dir, sizeof(repo)) >=
+			    sizeof(repo) ||
+			    strlcat(repo, "/", sizeof(repo)) >= sizeof(repo) ||
+			    strlcat(repo, co_mods[i], sizeof(repo)) >=
+			    sizeof(repo))
+				fatal("cvs_checkout_pre_exec: path truncation");
+
+			currepo = co_mods[i];
+			ret = cvs_file_get(repo, CF_RECURSE | CF_REPO |
+			    CF_IGNORE, cvs_checkout_local, NULL, NULL);
+			if (ret != CVS_EX_OK) {
+				closedir(dirp);
+				return (ret);
+			}
+		}
+
+		closedir(dirp);
+	} else {
 		/*
 		 * These arguments are for the expand-modules
 		 * command that we send to the server before requesting
 		 * a checkout.
 		 */
 		for (i = 0; i < co_nmod; i++)
-			if (cvs_sendarg(root, co_mods[i], 0) < 0)
-				return (CVS_EX_PROTO);
-		if (cvs_sendreq(root, CVS_REQ_DIRECTORY, ".") < 0)
-			return (CVS_EX_PROTO);
-		if (cvs_sendln(root, root->cr_dir) < 0)
-			return (CVS_EX_PROTO);
+			cvs_sendarg(root, co_mods[i], 0);
 
-		if (cvs_sendreq(root, CVS_REQ_XPANDMOD, NULL) < 0)
-			cvs_log(LP_ERR, "failed to expand module");
+		cvs_sendreq(root, CVS_REQ_DIRECTORY, ".");
+		cvs_sendln(root, root->cr_dir);
+		cvs_sendreq(root, CVS_REQ_XPANDMOD, NULL);
 
-		if ((usehead == 1) && (cvs_sendarg(root, "-f", 0) < 0))
-			return (CVS_EX_PROTO);
+		if (usehead == 1)
+			cvs_sendarg(root, "-f", 0);
 
-		if ((tgtdir != NULL) &&
-		    ((cvs_sendarg(root, "-d", 0) < 0) ||
-		    (cvs_sendarg(root, tgtdir, 0) < 0)))
-			return (CVS_EX_PROTO);
+		if (tgtdir != NULL) {
+			cvs_sendarg(root, "-d", 0);
+			cvs_sendarg(root, tgtdir, 0);
+		}
 
-		if ((shorten == 0) && cvs_sendarg(root, "-N", 0) < 0)
-			return (CVS_EX_PROTO);
+		if (shorten == 0)
+			cvs_sendarg(root, "-N", 0);
 
-		if ((cvs_cmd_checkout.cmd_flags & CVS_CMD_PRUNEDIRS) &&
-		    (cvs_sendarg(root, "-P", 0) < 0))
-			return (CVS_EX_PROTO);
+		if (cvs_cmd_checkout.cmd_flags & CVS_CMD_PRUNEDIRS);
+			cvs_sendarg(root, "-P", 0);
 
 		for (i = 0; i < co_nmod; i++)
-			if (cvs_sendarg(root, co_mods[i], 0) < 0)
-				return (CVS_EX_PROTO);
+			cvs_sendarg(root, co_mods[i], 0);
 
-		if ((statmod == CVS_LISTMOD) &&
-		    (cvs_sendarg(root, "-c", 0) < 0))
-			return (CVS_EX_PROTO);
-		else if ((statmod == CVS_STATMOD) &&
-		    (cvs_sendarg(root, "-s", 0) < 0))
-			return (CVS_EX_PROTO);
+		if (statmod == CVS_LISTMOD)
+			cvs_sendarg(root, "-c", 0);
+		else if (statmod == CVS_STATMOD)
+			cvs_sendarg(root, "-s", 0);
 
-		if ((tag != NULL) && ((cvs_sendarg(root, "-r", 0) < 0) ||
-		    (cvs_sendarg(root, tag, 0) < 0)))
-			return (CVS_EX_PROTO);
+		if (tag != NULL) {
+			cvs_sendarg(root, "-r", 0);
+			cvs_sendarg(root, tag, 0);
+		}
 
-		if ((date != NULL) && ((cvs_sendarg(root, "-D", 0) < 0) ||
-		    (cvs_sendarg(root, date, 0) < 0)))
-			return (CVS_EX_PROTO);
+		if (date != NULL) {
+			cvs_sendarg(root, "-D", 0);
+			cvs_sendarg(root, date, 0);
+		}
 	}
+
+	return (0);
+}
+
+static int
+cvs_checkout_local(CVSFILE *cf, void *arg)
+{
+	char rcspath[MAXPATHLEN], fpath[MAXPATHLEN];
+	RCSFILE *rf;
+	struct cvsroot *root;
+	static int inattic = 0;
+
+	/* we don't want these */
+	if ((cf->cf_type == DT_DIR) && !strcmp(cf->cf_name, "Attic")) {
+		inattic = 1;
+		return (CVS_EX_OK);
+	}
+
+	root = CVS_DIR_ROOT(cf);
+
+	cvs_file_getpath(cf, fpath, sizeof(fpath));
+	cvs_rcs_getpath(cf, rcspath, sizeof(rcspath));
+
+	if (cf->cf_type == DT_DIR) {
+		inattic = 0;
+		if (verbosity > 1)
+			cvs_log(LP_INFO, "Updating %s", fpath);
+
+		if (cvs_cmdop != CVS_OP_SERVER) {
+			/*
+			 * We pass an empty repository name to
+			 * cvs_create_dir(), because it will correctly
+			 * create the repository directory for us.
+			 */
+			if (cvs_create_dir(fpath, 1, root->cr_dir, NULL) < 0)
+				fatal("cvs_checkout_local: cvs_create_dir failed");
+			if (fchdir(cwdfd) < 0)
+				fatal("cvs_checkout_local: fchdir failed");
+		} else {
+			/*
+			 * TODO: send responses to client so it'll
+			 * create it's directories.
+			 */
+		}
+
+		return (CVS_EX_OK);
+	}
+
+	if (inattic == 1)
+		return (CVS_EX_OK);
+
+	if ((rf = rcs_open(rcspath, RCS_READ)) == NULL)
+		fatal("cvs_checkout_local: rcs_open `%s': %s", rcspath,
+		    rcs_errstr(rcs_errno));
+
+	if (cvs_checkout_rev(rf, rf->rf_head, cf, fpath,
+	    (cvs_cmdop != CVS_OP_SERVER) ? 1 : 0,
+	    CHECKOUT_REV_CREATED) < 0)
+		fatal("cvs_checkout_local: cvs_checkout_rev failed");
+
+	rcs_close(rf);
+
+	cvs_printf("U %s\n", fpath);
 	return (0);
 }

@@ -1,4 +1,4 @@
-#	$OpenBSD: bsd.lib.mk,v 1.43 2004/09/20 18:52:38 espie Exp $
+#	$OpenBSD: bsd.lib.mk,v 1.55 2006/02/03 19:24:52 bernd Exp $
 #	$NetBSD: bsd.lib.mk,v 1.67 1996/01/17 20:39:26 mycroft Exp $
 #	@(#)bsd.lib.mk	5.26 (Berkeley) 5/2/91
 
@@ -10,8 +10,13 @@
 
 .if exists(${.CURDIR}/shlib_version)
 .include "${.CURDIR}/shlib_version"
+.if defined(LIB) && defined(LIB${LIB}_VERSION)
+SHLIB_MAJOR=${LIB${LIB}_VERSION:R}
+SHLIB_MINOR=${LIB${LIB}_VERSION:E}
+.else
 SHLIB_MAJOR=${major}
 SHLIB_MINOR=${minor}
+.endif
 .endif
 
 .MAIN: all
@@ -23,9 +28,9 @@ SHLIB_MINOR=${minor}
 .SUFFIXES: .out .o .go .po .so .S .s .c .cc .C .cxx .f .y .l .ln .m4 .m
 
 .c.o:
-	@echo "${COMPILE.c} ${.IMPSRC} -o ${.TARGET}"
+	@echo "${COMPILE.c} ${DEBUG1} ${.IMPSRC} -o ${.TARGET}"
 	@${COMPILE.c} ${.IMPSRC}  -o ${.TARGET}.o
-	@${LD} -x -r ${.TARGET}.o -o ${.TARGET}
+	@${LD} -X -r ${.TARGET}.o -o ${.TARGET}
 	@rm -f ${.TARGET}.o
 
 .c.go:
@@ -43,7 +48,7 @@ SHLIB_MINOR=${minor}
 .c.so:
 	@echo "${COMPILE.c} ${PICFLAG} -DPIC ${.IMPSRC} -o ${.TARGET}"
 	@${COMPILE.c} ${PICFLAG} -DPIC ${.IMPSRC} -o ${.TARGET}.o
-	@${LD} -x -r ${.TARGET}.o -o ${.TARGET}
+	@${LD} -X -r ${.TARGET}.o -o ${.TARGET}
 	@rm -f ${.TARGET}.o
 
 .c.ln:
@@ -52,7 +57,7 @@ SHLIB_MINOR=${minor}
 .cc.o .C.o .cxx.o:
 	@echo "${COMPILE.cc} ${.IMPSRC} -o ${.TARGET}"
 	@${COMPILE.cc} ${.IMPSRC} -o ${.TARGET}.o
-	@${LD} -x -r ${.TARGET}.o -o ${.TARGET}
+	@${LD} -X -r ${.TARGET}.o -o ${.TARGET}
 	@rm -f ${.TARGET}.o
 
 .cc.go .C.go .cxx.go:
@@ -70,7 +75,32 @@ SHLIB_MINOR=${minor}
 .cc.so .C.so .cxx.so:
 	@echo "${COMPILE.cc} ${PICFLAG} -DPIC ${.IMPSRC} -o ${.TARGET}"
 	@${COMPILE.cc} ${PICFLAG} -DPIC ${.IMPSRC} -o ${.TARGET}.o
-	@${LD} -x -r ${.TARGET}.o -o ${.TARGET}
+	@${LD} -X -r ${.TARGET}.o -o ${.TARGET}
+	@rm -f ${.TARGET}.o
+
+# Fortran 77
+.f.o:
+	@echo "${COMPILE.f} ${.IMPSRC} -o ${.TARGET}"
+	@${COMPILE.f} ${.IMPSRC} -o ${.TARGET}.o
+	@${LD} -X -r ${.TARGET}.o -o ${.TARGET}
+	@rm -f ${.TARGET}.o
+
+.f.go:
+	@echo "${COMPILE.f} -g ${.IMPSRC} -o ${.TARGET}"
+	@${COMPILE.f} -g ${.IMPSRC} -o ${.TARGET}.o
+	@${LD} -X -r ${.TARGET}.o -o ${.TARGET}
+	@rm -f ${.TARGET}.o
+
+.f.po:
+	@echo "${COMPILE.f} -p ${.IMPSRC} -o ${.TARGET}"
+	@${COMPILE.f} -p ${.IMPSRC} -o ${.TARGET}.o
+	@${LD} -X -r ${.TARGET}.o -o ${.TARGET}
+	@rm -f ${.TARGET}.o
+
+.f.so:
+	@echo "${COMPILE.f} ${PICFLAG} -DPIC ${.IMPSRC} -o ${.TARGET}"
+	@${COMPILE.f} ${PICFLAG} -DPIC ${.IMPSRC} -o ${.TARGET}.o
+	@${LD} -X -r ${.TARGET}.o -o ${.TARGET}
 	@rm -f ${.TARGET}.o
 
 .S.o .s.o:
@@ -83,7 +113,7 @@ SHLIB_MINOR=${minor}
 	@${CPP} ${CPPFLAGS} ${CFLAGS:M-[ID]*} ${AINC} ${.IMPSRC} | \
 	    ${AS} -o ${.TARGET}.o
 .endif
-	@${LD} -x -r ${.TARGET}.o -o ${.TARGET}
+	@${LD} -X -r ${.TARGET}.o -o ${.TARGET}
 	@rm -f ${.TARGET}.o
 
 .S.go .s.go:
@@ -107,7 +137,7 @@ SHLIB_MINOR=${minor}
 	    ${AS} ${ASPICFLAG} -o ${.TARGET}"
 	@${CPP} -DPIC ${CPPFLAGS} ${CFLAGS:M-[ID]*} ${AINC} ${.IMPSRC} | \
 	    ${AS} ${ASPICFLAG} -o ${.TARGET}.o
-	@${LD} -x -r ${.TARGET}.o -o ${.TARGET}
+	@${LD} -X -r ${.TARGET}.o -o ${.TARGET}
 	@rm -f ${.TARGET}.o
 
 .if ${WARNINGS:L} == "yes"
@@ -116,6 +146,10 @@ CXXFLAGS+=	${CXXDIAGFLAGS}
 .endif
 CFLAGS+=	${COPTS}
 CXXFLAGS+=	${CXXOPTS}
+
+.if (${MACHINE} != "zaurus") && (${MACHINE} != "hp300")
+DEBUG?=	-g
+.endif
 
 _LIBS=lib${LIB}.a
 .if (${DEBUGLIBS:L} == "yes")
@@ -134,7 +168,7 @@ _LIBS+=lib${LIB}.so.${SHLIB_MAJOR}.${SHLIB_MINOR}
 .endif
 .endif
 
-.if !defined(NOLINT)
+.if defined(WANTLINT) && ${WANTLINT:L} != "no"
 _LIBS+=llib-l${LIB}.ln
 .endif
 
@@ -177,7 +211,6 @@ lib${LIB}.so.${SHLIB_MAJOR}.${SHLIB_MINOR}: ${SOBJS} ${DPADD}
 	    `${LORDER} ${SOBJS}|tsort -q` ${LDADD}
 
 LOBJS+=	${LSRCS:.c=.ln} ${SRCS:M*.c:.c=.ln}
-# the following looks XXX to me... -- cgd
 LLIBS?=	-lc
 llib-l${LIB}.ln: ${LOBJS}
 	@echo building llib-l${LIB}.ln
@@ -216,7 +249,7 @@ beforeinstall:
 realinstall:
 #	ranlib lib${LIB}.a
 	${INSTALL} ${INSTALL_COPY} -o ${LIBOWN} -g ${LIBGRP} -m 600 lib${LIB}.a \
-	    ${DESTDIR}${LIBDIR}
+	    ${DESTDIR}${LIBDIR}/lib${LIB}.a
 .if (${INSTALL_COPY} != "-p")
 	${RANLIB} -t ${DESTDIR}${LIBDIR}/lib${LIB}.a
 .endif
@@ -252,7 +285,7 @@ realinstall:
 	${INSTALL} ${INSTALL_COPY} -o ${LIBOWN} -g ${LIBGRP} -m ${LIBMODE} \
 	    lib${LIB}.so.${SHLIB_MAJOR}.${SHLIB_MINOR} ${DESTDIR}${LIBDIR}
 .endif
-.if !defined(NOLINT)
+.if defined(WANTLINT) && ${WANTLINT:L} != "no"
 	${INSTALL} ${INSTALL_COPY} -o ${LIBOWN} -g ${LIBGRP} -m ${LIBMODE} \
 	    llib-l${LIB}.ln ${DESTDIR}${LINTLIBDIR}
 .endif

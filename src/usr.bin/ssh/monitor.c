@@ -25,13 +25,19 @@
  */
 
 #include "includes.h"
-RCSID("$OpenBSD: monitor.c,v 1.63 2005/03/10 22:01:05 deraadt Exp $");
+RCSID("$OpenBSD: monitor.c,v 1.68 2006/02/20 17:02:44 stevesk Exp $");
 
-#include <openssl/dh.h>
+#include <sys/types.h>
+#include <sys/wait.h>
+
+#include <paths.h>
+#include <signal.h>
 
 #ifdef SKEY
 #include <skey.h>
 #endif
+
+#include <openssl/dh.h>
 
 #include "ssh.h"
 #include "auth.h"
@@ -165,7 +171,7 @@ struct mon_table mon_dispatch_proto20[] = {
     {MONITOR_REQ_AUTHPASSWORD, MON_AUTH, mm_answer_authpassword},
 #ifdef BSD_AUTH
     {MONITOR_REQ_BSDAUTHQUERY, MON_ISAUTH, mm_answer_bsdauthquery},
-    {MONITOR_REQ_BSDAUTHRESPOND, MON_AUTH,mm_answer_bsdauthrespond},
+    {MONITOR_REQ_BSDAUTHRESPOND, MON_AUTH, mm_answer_bsdauthrespond},
 #endif
 #ifdef SKEY
     {MONITOR_REQ_SKEYQUERY, MON_ISAUTH, mm_answer_skeyquery},
@@ -202,7 +208,7 @@ struct mon_table mon_dispatch_proto15[] = {
     {MONITOR_REQ_RSARESPONSE, MON_ONCE|MON_AUTHDECIDE, mm_answer_rsa_response},
 #ifdef BSD_AUTH
     {MONITOR_REQ_BSDAUTHQUERY, MON_ISAUTH, mm_answer_bsdauthquery},
-    {MONITOR_REQ_BSDAUTHRESPOND, MON_AUTH,mm_answer_bsdauthrespond},
+    {MONITOR_REQ_BSDAUTHRESPOND, MON_AUTH, mm_answer_bsdauthrespond},
 #endif
 #ifdef SKEY
     {MONITOR_REQ_SKEYQUERY, MON_ISAUTH, mm_answer_skeyquery},
@@ -1578,7 +1584,7 @@ mm_answer_gss_setup_ctx(int sock, Buffer *m)
 	buffer_clear(m);
 	buffer_put_int(m, major);
 
-	mm_request_send(sock,MONITOR_ANS_GSSSETUP, m);
+	mm_request_send(sock, MONITOR_ANS_GSSSETUP, m);
 
 	/* Now we have a context, enable the step */
 	monitor_permit(mon_dispatch, MONITOR_REQ_GSSSTEP, 1);
@@ -1591,7 +1597,7 @@ mm_answer_gss_accept_ctx(int sock, Buffer *m)
 {
 	gss_buffer_desc in;
 	gss_buffer_desc out = GSS_C_EMPTY_BUFFER;
-	OM_uint32 major,minor;
+	OM_uint32 major, minor;
 	OM_uint32 flags = 0; /* GSI needs this */
 	u_int len;
 
@@ -1608,7 +1614,7 @@ mm_answer_gss_accept_ctx(int sock, Buffer *m)
 
 	gss_release_buffer(&minor, &out);
 
-	if (major==GSS_S_COMPLETE) {
+	if (major == GSS_S_COMPLETE) {
 		monitor_permit(mon_dispatch, MONITOR_REQ_GSSSTEP, 0);
 		monitor_permit(mon_dispatch, MONITOR_REQ_GSSUSEROK, 1);
 		monitor_permit(mon_dispatch, MONITOR_REQ_GSSCHECKMIC, 1);
@@ -1657,7 +1663,7 @@ mm_answer_gss_userok(int sock, Buffer *m)
 	debug3("%s: sending result %d", __func__, authenticated);
 	mm_request_send(sock, MONITOR_ANS_GSSUSEROK, m);
 
-	auth_method="gssapi-with-mic";
+	auth_method = "gssapi-with-mic";
 
 	/* Monitor loop will terminate if authenticated */
 	return (authenticated);

@@ -1,5 +1,5 @@
 # ex:ts=8 sw=4:
-# $OpenBSD: Update.pm,v 1.55 2005/08/16 21:34:10 espie Exp $
+# $OpenBSD: Update.pm,v 1.61 2006/02/21 19:20:17 espie Exp $
 #
 # Copyright (c) 2004 Marc Espie <espie@openbsd.org>
 #
@@ -19,6 +19,7 @@ use strict;
 use warnings;
 
 use OpenBSD::Delete;
+use OpenBSD::Interactive;
 
 package OpenBSD::PackingElement;
 sub can_update
@@ -51,10 +52,6 @@ sub unmark_lib
 {
 }
 
-sub build_context
-{
-}
-
 package OpenBSD::PackingElement::FileBase;
 use File::Temp qw/tempfile/;
 
@@ -65,6 +62,7 @@ sub extract
 	my $file = $self->prepare_to_extract($state);
 
 	if (defined $self->{link} || defined $self->{symlink}) {
+		$self->{zap} = 1;
 		return;
 	}
 	
@@ -74,6 +72,7 @@ sub extract
 	}
 	if ($state->{not}) {
 		print "extracting tempfile under $d\n" if $state->{very_verbose};
+		$state->{archive}->skip();
 	} else {
 		if (!-e _) {
 			File::Path::mkpath($d);
@@ -153,8 +152,37 @@ sub update_issue($$)
 	}
 }
 
-package OpenBSD::PackingElement::LibDepend;
+package OpenBSD::PackingElement::Depend;
 use OpenBSD::Error;
+
+sub check_replacement_spec
+{
+	my ($self, $state, $wanting, $toreplace, $replacement) = @_;
+
+	# nothing to validate if old dependency doesn't concern us.
+	return unless OpenBSD::PkgSpec::match($self->{pattern}, $toreplace);
+	# nothing to do if new dependency just matches
+	return if OpenBSD::PkgSpec::match($self->{pattern}, $replacement);
+
+	if ($state->{forced}->{updatedepends}) {
+	    Warn "Forward dependency of $wanting on $toreplace doesn't match $replacement, forcing it\n";
+	    $state->{forcedupdates} = {} unless defined $state->{forcedupdates};
+	    $state->{forcedupdates}->{$wanting} = 1;
+	} elsif ($state->{interactive}) {
+
+	    if (OpenBSD::Interactive::confirm("Forward dependency of $wanting on $toreplace doesn't match $replacement, proceed with update anyways", 1, 0, 'updatedepends')) {
+		$state->{forcedupdates} = {} unless defined $state->{forcedupdates};
+		$state->{forcedupdates}->{$wanting} = 1;
+	    } else {
+		$state->{okay} = 0;
+	    }
+	} else {
+	    $state->{okay} = 0;
+	    Warn "Can't update forward dependency of $wanting on $toreplace: $replacement doesn't match (use -F updatedepends to force it)\n";
+	}
+}
+
+package OpenBSD::PackingElement::LibDepend;
 sub validate_depend
 {
 	my ($self, $state, $wanting, $toreplace, $replacement) = @_;
@@ -162,17 +190,7 @@ sub validate_depend
 	if (defined $self->{name}) {
 		return unless $self->{name} eq $wanting;
 	}
-	return unless OpenBSD::PkgSpec::match($self->{pattern}, $toreplace);
-	if (!OpenBSD::PkgSpec::match($self->{pattern}, $replacement)) {
-		if ($state->{forced}->{updatedepends}) {
-		    Warn "Forward dependency of $wanting on $toreplace doesn't match $replacement, forcing it\n";
-		    $state->{forcedupdates} = {} unless defined $state->{forcedupdates};
-		    $state->{forcedupdates}->{$wanting} = 1;
-		} else {
-		    $state->{okay} = 0;
-		    Warn "Can't update forward dependency of $wanting on $toreplace: $replacement doesn't match\n";
-		}
-	}
+	$self->check_replacement_spec($state, $wanting, $toreplace, $replacement);
 }
 
 package OpenBSD::PackingElement::Lib;
@@ -201,27 +219,7 @@ sub unmark_lib
 	delete $libs->{"$libname"};
 }
 
-package OpenBSD::PackingElement::Wantlib;
-sub build_context
-{
-	my ($self, $hash) = @_;
-	$hash->{$self->{name}} = 1;
-}
-
-package OpenBSD::PackingElement::Depend;
-sub build_context
-{
-	my ($self, $hash) = @_;
-	$hash->{$self->{def}} = 1;
-}
-
-package OpenBSD::PackingElement::PkgDep;
-sub build_context
-{
-}
-
 package OpenBSD::PackingElement::NewDepend;
-use OpenBSD::Error;
 sub validate_depend
 {
 	my ($self, $state, $wanting, $toreplace, $replacement) = @_;
@@ -229,33 +227,15 @@ sub validate_depend
 	if (defined $self->{name}) {
 		return unless $self->{name} eq $wanting;
 	}
-	return unless OpenBSD::PkgSpec::match($self->{pattern}, $toreplace);
-	if (!OpenBSD::PkgSpec::match($self->{pattern}, $replacement)) {
-		if ($state->{forced}->{updatedepends}) {
-		    Warn "Forward dependency of $wanting on $toreplace doesn't match $replacement, forcing it\n";
-		} else {
-		    $state->{okay} = 0;
-		    Warn "Can't update forward dependency of $wanting on $toreplace: $replacement doesn't match\n";
-		}
-	}
+	$self->check_replacement_spec($state, $wanting, $toreplace, $replacement);
 }
 
 package OpenBSD::PackingElement::Dependency;
-use OpenBSD::Error;
-
 sub validate_depend
 {
 	my ($self, $state, $wanting, $toreplace, $replacement) = @_;
 
-	return unless OpenBSD::PkgSpec::match($self->{pattern}, $toreplace);
-	if (!OpenBSD::PkgSpec::match($self->{pattern}, $replacement)) {
-		if ($state->{forced}->{updatedepends}) {
-		    Warn "Forward dependency of $wanting on $toreplace doesn't match $replacement, forcing it\n";
-		} else {
-		    $state->{okay} = 0;
-		    Warn "Can't update forward dependency of $wanting on $toreplace: $replacement doesn't match\n";
-		}
-	}
+	$self->check_replacement_spec($state, $wanting, $toreplace, $replacement);
 }
 
 package OpenBSD::Update;
@@ -263,6 +243,7 @@ use OpenBSD::RequiredBy;
 use OpenBSD::PackingList;
 use OpenBSD::PackageInfo;
 use OpenBSD::Error;
+use OpenBSD::Interactive;
 
 sub can_do
 {
@@ -284,6 +265,11 @@ sub can_do
 		if ($state->{forced}->{update}) {
 			Warn "(forcing update)\n";
 			$state->{okay} = 1;
+		} elsif ($state->{interactive}) {
+
+			if (OpenBSD::Interactive::confirm("proceed with update anyways", 1, 0, 'update')) {
+			    $state->{okay} = 1;
+			}
 		}
 	}
 	my @wantlist = OpenBSD::RequiredBy->new($toreplace)->list();
@@ -297,8 +283,12 @@ sub can_do
 		for my $wanting (@wantlist) {
 			my $p2 = OpenBSD::PackingList->from_installation(
 			    $wanting, \&OpenBSD::PackingList::DependOnly);
-			$p2->visit('validate_depend', $state, $wanting, 
-			    $toreplace, $replacement);
+			if (!defined $p2) {
+				Warn "Error: $wanting missing from installation\n"
+			} else {
+				$p2->visit('validate_depend', $state, $wanting, 
+				    $toreplace, $replacement);
+			}
 		}
 	}
 
@@ -332,6 +322,10 @@ sub is_safe
 		if ($state->{forced}->{update}) {
 			Warn "(forcing update)\n";
 			$state->{okay} = 1;
+		} elsif ($state->{interactive}) {
+			if (OpenBSD::Interactive::confirm("proceed with update anyways", 1, 0, 'update')) {
+			    $state->{okay} = 1;
+			}
 		}
 	}
 	return $state->{okay};
@@ -401,9 +395,11 @@ sub convert_to_requiring
 
 sub walk_depends_closure
 {
-	my ($start, $name, $state) = @_;
+	my ($start, $plist, $state) = @_;
 	my @todo = ($start);
 	my $done = {};
+	my $depend = 0;
+	my $name = $plist->pkgname();
 
 	print "Packages that depend on those shared libraries:\n" 
 	    if $state->{beverbose};
@@ -423,8 +419,15 @@ sub walk_depends_closure
 				convert_to_requiring($pkg2);
 			}
 			$l->add($name);
+			$depend = 1;
 		}
 	}
+#	if (!$depend && $state->{interactive}) {
+#		if ($state->{forced}->{zapoldlibs} ||
+#		    OpenBSD::Interactive::confirm("Nothing depends on $name.  Delete it", 1, 0)) {
+#		    	OpenBSD::Delete::delete_plist($plist, $state);
+#		}
+#	}
 }
 
 
@@ -460,7 +463,6 @@ sub save_old_libraries
 				my $oldname = $old_plist->pkgname();
 				open my $descr, '>', $dest.DESC;
 				print $descr "Stub libraries for $oldname\n";
-				print $descr "Stub libraries for $oldname\n";
 				close $descr;
 				my $f = OpenBSD::PackingElement::FDESC->add($stub_list, DESC);
 				$f->{ignore} = 1;
@@ -473,7 +475,7 @@ sub save_old_libraries
 			require OpenBSD::PkgCfl;
 			OpenBSD::PkgCfl::register($stub_list, $state);
 
-			walk_depends_closure($old_plist->pkgname(), $stub_name, $state);
+			walk_depends_closure($old_plist->pkgname(), $stub_list, $state);
 		} else {
 			print "No libraries to keep\n" if $state->{beverbose};
 		}
@@ -491,21 +493,6 @@ sub adjust_dependency
 	}
 	$l->delete($from);
 	$l->add($into);
-}
-
-sub is_needed
-{
-	my ($plist, $state) = @_;
-	my $new_context = {};
-	$plist->visit('build_context', $new_context);
-	my $oplist = OpenBSD::PackingList->from_installation($plist->pkgname());
-	my $old_context = {};
-	$oplist->visit('build_context', $old_context);
-	my $n = join(',', sort keys %$new_context);
-	my $o = join(',', sort keys %$old_context);
-	print "Comparing full signature for ", $plist->pkgname(), " \"$o\" vs. \"$n\": ", $n eq $o ? "equal\n" : "different\n" 
-	    if $state->{very_verbose};
-	return $n ne $o;
 }
 
 sub figure_out_libs

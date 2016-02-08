@@ -1,4 +1,4 @@
-/*	$OpenBSD: externs1.h,v 1.3 2002/02/16 21:27:59 millert Exp $	*/
+/*	$OpenBSD: externs1.h,v 1.10 2005/12/18 19:21:02 cloder Exp $	*/
 /*	$NetBSD: externs1.h,v 1.7 1995/10/02 17:31:39 jpo Exp $	*/
 
 /*
@@ -40,6 +40,7 @@ extern	int	bflag;
 extern	int	cflag;
 extern	int	dflag;
 extern	int	eflag;
+extern	int	fflag;
 extern	int	Fflag;
 extern	int	gflag;
 extern	int	hflag;
@@ -195,6 +196,7 @@ extern	tnode_t	*convert(op_t, int, type_t *, tnode_t *);
 extern	void	cvtcon(op_t, int, type_t *, val_t *, val_t *);
 extern	const	char *tyname(type_t *);
 extern	tnode_t	*bldszof(type_t *);
+extern	tnode_t	*bldszoftrm(tnode_t *);
 extern	tnode_t	*cast(tnode_t *, type_t *);
 extern	tnode_t	*funcarg(tnode_t *, tnode_t *);
 extern	tnode_t	*funccall(tnode_t *, tnode_t *);
@@ -203,6 +205,7 @@ extern	void	expr(tnode_t *, int, int);
 extern	void	chkmisc(tnode_t *, int, int, int, int, int, int);
 extern	int	conaddr(tnode_t *, sym_t **, ptrdiff_t *);
 extern	strg_t	*catstrg(strg_t *, strg_t *);
+extern	void	displexpr(tnode_t *, int);
 
 /*
  * func.c
@@ -222,6 +225,7 @@ extern	pos_t	scflpos;
 extern	int	ccflg;
 extern	int	llibflg;
 extern	int	nowarn;
+extern	int	noretflg;
 extern	int	plibflg;
 extern	int	quadflg;
 
@@ -248,6 +252,7 @@ extern	void	dobreak(void);
 extern	void	doreturn(tnode_t *);
 extern	void	glclup(int);
 extern	void	argsused(int);
+extern	void	noreturn(int);
 extern	void	constcond(int);
 extern	void	fallthru(int);
 extern	void	notreach(int);

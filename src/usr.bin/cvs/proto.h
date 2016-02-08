@@ -1,4 +1,4 @@
-/*	$OpenBSD: proto.h,v 1.7 2005/07/25 11:07:00 xsa Exp $	*/
+/*	$OpenBSD: proto.h,v 1.12 2006/01/04 14:58:12 xsa Exp $	*/
 /*
  * Copyright (c) 2004 Jean-Francois Brousseau <jfb@openbsd.org>
  * All rights reserved.
@@ -26,8 +26,6 @@
 
 #ifndef PROTO_H
 #define PROTO_H
-
-#include <sys/param.h>
 
 #include "buf.h"
 #include "file.h"
@@ -108,8 +106,13 @@
 #define CVS_REQ_RLOG		67
 #define CVS_REQ_RDIFF		68
 #define CVS_REQ_VERSION		69
+#define CVS_REQ_WATCH_ON	70
+#define CVS_REQ_WATCH_OFF	71
+#define CVS_REQ_WATCH_ADD	72
+#define CVS_REQ_WATCH_REMOVE	73
 
-#define CVS_REQ_MAX		69
+
+#define CVS_REQ_MAX		73
 
 
 /* responses */
@@ -162,8 +165,8 @@ struct cvs_resp {
 
 
 BUF	*cvs_recvfile(struct cvsroot *, mode_t *);
-int	 cvs_sendfile(struct cvsroot *, const char *);
-int	 cvs_connect(struct cvsroot *);
+void	 cvs_sendfile(struct cvsroot *, const char *);
+void	 cvs_connect(struct cvsroot *);
 void	 cvs_disconnect(struct cvsroot *);
 
 int		 cvs_req_handle(char *);
@@ -176,16 +179,16 @@ struct cvs_resp* cvs_resp_getbyid(int);
 struct cvs_resp* cvs_resp_getbyname(const char *);
 char*            cvs_resp_getvalid(void);
 
-int	cvs_sendreq(struct cvsroot *, u_int, const char *);
-int	cvs_getresp(struct cvsroot *);
-int	cvs_sendresp(u_int, const char *);
-int	cvs_getln(struct cvsroot *, char *, size_t);
-int	cvs_senddir(struct cvsroot *, CVSFILE *);
-int	cvs_sendarg(struct cvsroot *, const char *, int);
-int	cvs_sendln(struct cvsroot *, const char *);
-int	cvs_sendentry(struct cvsroot *, const CVSFILE *);
-int	cvs_sendraw(struct cvsroot *, const void *, size_t);
-ssize_t	cvs_recvraw(struct cvsroot *, void *, size_t);
+void	cvs_sendreq(struct cvsroot *, u_int, const char *);
+void	cvs_getresp(struct cvsroot *);
+void	cvs_sendresp(u_int, const char *);
+void	cvs_getln(struct cvsroot *, char *, size_t);
+void	cvs_senddir(struct cvsroot *, CVSFILE *);
+void	cvs_sendarg(struct cvsroot *, const char *, int);
+void	cvs_sendln(struct cvsroot *, const char *);
+void	cvs_sendentry(struct cvsroot *, const CVSFILE *);
+void	cvs_sendraw(struct cvsroot *, const void *, size_t);
+size_t	cvs_recvraw(struct cvsroot *, void *, size_t);
 
 
 #endif	/* PROTO_H */

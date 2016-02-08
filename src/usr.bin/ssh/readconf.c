@@ -12,7 +12,12 @@
  */
 
 #include "includes.h"
-RCSID("$OpenBSD: readconf.c,v 1.143 2005/07/30 02:03:47 djm Exp $");
+RCSID("$OpenBSD: readconf.c,v 1.148 2006/02/22 00:04:44 stevesk Exp $");
+
+#include <sys/types.h>
+#include <sys/stat.h>
+
+#include <ctype.h>
 
 #include "ssh.h"
 #include "xmalloc.h"
@@ -70,6 +75,10 @@ RCSID("$OpenBSD: readconf.c,v 1.143 2005/07/30 02:03:47 djm Exp $");
      Cipher none
      PasswordAuthentication no
 
+   Host vpn.fake.com
+     Tunnel yes
+     TunnelDevice 3
+
    # Defaults for various options
    Host *
      ForwardAgent no
@@ -107,6 +116,7 @@ typedef enum {
 	oAddressFamily, oGssAuthentication, oGssDelegateCreds,
 	oServerAliveInterval, oServerAliveCountMax, oIdentitiesOnly,
 	oSendEnv, oControlPath, oControlMaster, oHashKnownHosts,
+	oTunnel, oTunnelDevice, oLocalCommand, oPermitLocalCommand,
 	oDeprecated, oUnsupported
 } OpCodes;
 
@@ -198,6 +208,10 @@ static struct {
 	{ "controlpath", oControlPath },
 	{ "controlmaster", oControlMaster },
 	{ "hashknownhosts", oHashKnownHosts },
+	{ "tunnel", oTunnel },
+	{ "tunneldevice", oTunnelDevice },
+	{ "localcommand", oLocalCommand },
+	{ "permitlocalcommand", oPermitLocalCommand },
 	{ NULL, oBadOption }
 };
 
@@ -262,6 +276,7 @@ clear_forwardings(Options *options)
 		xfree(options->remote_forwards[i].connect_host);
 	}
 	options->num_remote_forwards = 0;
+	options->tun_open = SSH_TUNMODE_NO;
 }
 
 /*
@@ -294,7 +309,8 @@ process_config_line(Options *options, const char *host,
 		    int *activep)
 {
 	char *s, **charptr, *endofnumber, *keyword, *arg, *arg2, fwdarg[256];
-	int opcode, *intptr, value;
+	int opcode, *intptr, value, value2, scale;
+	long long orig, val64;
 	size_t len;
 	Forward fwd;
 
@@ -467,22 +483,36 @@ parse_yesnoask:
 			fatal("%.200s line %d: Missing argument.", filename, linenum);
 		if (arg[0] < '0' || arg[0] > '9')
 			fatal("%.200s line %d: Bad number.", filename, linenum);
-		value = strtol(arg, &endofnumber, 10);
+		orig = val64 = strtoll(arg, &endofnumber, 10);
 		if (arg == endofnumber)
 			fatal("%.200s line %d: Bad number.", filename, linenum);
 		switch (toupper(*endofnumber)) {
+		case '\0':
+			scale = 1;
+			break;
 		case 'K':
-			value *= 1<<10;
+			scale = 1<<10;
 			break;
 		case 'M':
-			value *= 1<<20;
+			scale = 1<<20;
 			break;
 		case 'G':
-			value *= 1<<30;
+			scale = 1<<30;
 			break;
+		default:
+			fatal("%.200s line %d: Invalid RekeyLimit suffix",
+			    filename, linenum);
 		}
+		val64 *= scale;
+		/* detect integer wrap and too-large limits */
+		if ((val64 / scale) != orig || val64 > INT_MAX)
+			fatal("%.200s line %d: RekeyLimit too large",
+			    filename, linenum);
+		if (val64 < 16)
+			fatal("%.200s line %d: RekeyLimit too small",
+			    filename, linenum);
 		if (*activep && *intptr == -1)
-			*intptr = value;
+			*intptr = (int)val64;
 		break;
 
 	case oIdentityFile:
@@ -551,9 +581,10 @@ parse_string:
 		goto parse_string;
 
 	case oProxyCommand:
+		charptr = &options->proxy_command;
+parse_command:
 		if (s == NULL)
 			fatal("%.200s line %d: Missing argument.", filename, linenum);
-		charptr = &options->proxy_command;
 		len = strspn(s, WHITESPACE "=");
 		if (*activep && *charptr == NULL)
 			*charptr = xstrdup(s + len);
@@ -820,6 +851,49 @@ parse_int:
 		intptr = &options->hash_known_hosts;
 		goto parse_flag;
 
+	case oTunnel:
+		intptr = &options->tun_open;
+		arg = strdelim(&s);
+		if (!arg || *arg == '\0')
+			fatal("%s line %d: Missing yes/point-to-point/"
+			    "ethernet/no argument.", filename, linenum);
+		value = 0;	/* silence compiler */
+		if (strcasecmp(arg, "ethernet") == 0)
+			value = SSH_TUNMODE_ETHERNET;
+		else if (strcasecmp(arg, "point-to-point") == 0)
+			value = SSH_TUNMODE_POINTOPOINT;
+		else if (strcasecmp(arg, "yes") == 0)
+			value = SSH_TUNMODE_DEFAULT;
+		else if (strcasecmp(arg, "no") == 0)
+			value = SSH_TUNMODE_NO;
+		else
+			fatal("%s line %d: Bad yes/point-to-point/ethernet/"
+			    "no argument: %s", filename, linenum, arg);
+		if (*activep)
+			*intptr = value;
+		break;
+
+	case oTunnelDevice:
+		arg = strdelim(&s);
+		if (!arg || *arg == '\0')
+			fatal("%.200s line %d: Missing argument.", filename, linenum);
+		value = a2tun(arg, &value2);
+		if (value == SSH_TUNID_ERR)
+			fatal("%.200s line %d: Bad tun device.", filename, linenum);
+		if (*activep) {
+			options->tun_local = value;
+			options->tun_remote = value2;
+		}
+		break;
+
+	case oLocalCommand:
+		charptr = &options->local_command;
+		goto parse_command;
+
+	case oPermitLocalCommand:
+		intptr = &options->permit_local_command;
+		goto parse_flag;
+
 	case oDeprecated:
 		debug("%s line %d: Deprecated option \"%s\"",
 		    filename, linenum, keyword);
@@ -964,6 +1038,11 @@ initialize_options(Options * options)
 	options->control_path = NULL;
 	options->control_master = -1;
 	options->hash_known_hosts = -1;
+	options->tun_open = -1;
+	options->tun_local = -1;
+	options->tun_remote = -1;
+	options->local_command = NULL;
+	options->permit_local_command = -1;
 }
 
 /*
@@ -1088,6 +1167,15 @@ fill_default_options(Options * options)
 		options->control_master = 0;
 	if (options->hash_known_hosts == -1)
 		options->hash_known_hosts = 0;
+	if (options->tun_open == -1)
+		options->tun_open = SSH_TUNMODE_NO;
+	if (options->tun_local == -1)
+		options->tun_local = SSH_TUNID_ANY;
+	if (options->tun_remote == -1)
+		options->tun_remote = SSH_TUNID_ANY;
+	if (options->permit_local_command == -1)
+		options->permit_local_command = 0;
+	/* options->local_command should not be set by default */
 	/* options->proxy_command should not be set by default */
 	/* options->user will be set in the main program if appropriate */
 	/* options->hostname will be set in the main program if appropriate */

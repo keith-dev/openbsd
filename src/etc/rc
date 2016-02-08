@@ -1,4 +1,4 @@
-#	$OpenBSD: rc,v 1.271 2005/07/25 19:18:44 mcbride Exp $
+#	$OpenBSD: rc,v 1.277 2006/01/12 21:54:15 deraadt Exp $
 
 # System startup script run by init on autoboot
 # or after single-user.
@@ -240,8 +240,6 @@ fi
 
 sysctl_conf
 
-mixerctl_conf
-
 # set hostname, turn on network
 echo 'starting network'
 if [ -f /etc/resolv.conf.save ]; then
@@ -328,7 +326,7 @@ if [ X"${isakmpd_flags}" != X"NO" ]; then
 	echo 'starting isakmpd';	isakmpd ${isakmpd_flags}
 fi
 
-echo -n 'starting rpc daemons:'
+echo -n 'starting initial daemons:'
 
 # $portmap is imported from /etc/rc.conf;
 # if $portmap == YES, the portmapper is started.
@@ -336,14 +334,17 @@ if [ X"${portmap}" = X"YES" ]; then
 	echo -n ' portmap';		portmap
 fi
 
-if [ -d /var/yp/binding -a X`domainname` != X ]; then
+if [ X`domainname` != X ]; then
 	if [ -d /var/yp/`domainname` ]; then
-		# yp server capabilities needed...
+		# YP server capabilities needed...
 		echo -n ' ypserv';		ypserv ${ypserv_flags}
 		#echo -n ' ypxfrd';		ypxfrd
 	fi
 
-	echo -n ' ypbind';		ypbind
+	if [ -d /var/yp/binding ]; then
+		# YP client capabilities needed...
+		echo -n ' ypbind';		ypbind
+	fi
 
 	if [ X"${yppasswdd_flags}" != X"NO" -a -d /var/yp/`domainname` ]; then
 		# if we are the master server, run rpc.yppasswdd
@@ -610,7 +611,7 @@ fi
 
 
 if [ X"${lpd_flags}" != X"NO" ]; then
-	echo -n ' printer';		lpd ${lpd_flags}
+	echo -n ' lpd';			lpd ${lpd_flags}
 fi
 
 # $sendmail_flags is imported from /etc/rc.conf;
@@ -630,6 +631,10 @@ fi
 
 if [ X"${ftpd_flags}" != X"NO" ]; then
 	echo -n ' ftpd';		/usr/libexec/ftpd ${ftpd_flags}
+fi
+
+if [ X"${ftpproxy_flags}" != X"NO" ]; then
+	echo -n ' ftp-proxy';		/usr/sbin/ftp-proxy ${ftpproxy_flags}
 fi
 
 if [ X"${identd_flags}" != X"NO" ]; then
@@ -688,6 +693,8 @@ echo '.'
 
 wsconsctl_conf
 
+mixerctl_conf
+
 # KerberosV master KDC
 if [ X"${krb5_master_kdc}" = X"YES" ]; then
 	echo 'KerberosV master KDC'
@@ -723,6 +730,10 @@ fi
 
 if [ X"${hotplugd_flags}" != X"NO" -a -x /usr/sbin/hotplugd ]; then
 	echo -n ' hotplugd';	/usr/sbin/hotplugd ${hotplugd_flags}
+fi
+
+if [ X"${watchdogd_flags}" != X"NO" -a -x /usr/sbin/watchdogd ]; then
+	echo -n ' watchdogd';	/usr/sbin/watchdogd ${watchdogd_flags}
 fi
 
 echo -n ' cron';		cron

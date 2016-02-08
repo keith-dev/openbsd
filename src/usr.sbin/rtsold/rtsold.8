@@ -1,4 +1,4 @@
-.\"	$OpenBSD: rtsold.8,v 1.18 2004/01/05 20:32:50 itojun Exp $
+.\"	$OpenBSD: rtsold.8,v 1.23 2005/10/27 17:00:15 jmc Exp $
 .\"	$KAME: rtsold.8,v 1.17 2001/07/09 22:30:37 itojun Exp $
 .\"
 .\" Copyright (C) 1995, 1996, 1997, and 1998 WIDE Project.
@@ -38,16 +38,17 @@
 .\"
 .Sh SYNOPSIS
 .Nm rtsold
-.Op Fl dDfFm1
+.Op Fl 1DdFfm
 .Ar interface ...
 .Nm rtsold
-.Op Fl dDfFm1
+.Op Fl 1DdFfm
 .Fl a
+.Pp
 .Nm rtsol
-.Op Fl dDF
+.Op Fl DdF
 .Ar interface ...
 .Nm rtsol
-.Op Fl dD
+.Op Fl DdF
 .Fl a
 .\"
 .Sh DESCRIPTION
@@ -64,6 +65,16 @@ and to get non link-local addresses.
 should be used on IPv6 hosts
 .Pq non-router nodes
 only.
+The
+.Va net.inet6.ip6.forwarding
+.Xr sysctl 8
+should be set to zero and the
+.Va net.inet6.ip6.accept_rtadv
+.Xr sysctl 8
+should be set to a non-zero value
+(see also the
+.Fl F
+option below).
 .Pp
 If you invoke the program as
 .Nm rtsol ,
@@ -73,18 +84,20 @@ without becoming a daemon.
 In other words,
 .Nm rtsol
 behaves as
-.Do
-.Nm
-.Fl f1
-.Ar interfaces
-.Dc .
+.Dq rtsold -f1 interface ... .
 .Pp
-Specifically,
+An interface may be configured at boot
+to be brought up using
+.Nm rtsol
+via a
+.Xr hostname.if 5
+file.
+See that man page for more information.
+.Pp
 .Nm
 sends at most 3 Router Solicitations on an interface
 after one of the following events:
-.Pp
-.Bl -bullet -compact
+.Bl -bullet
 .It
 Just after invocation of
 .Nm
@@ -113,13 +126,13 @@ This feature is provided
 for such stations so that they can find new routers as soon as possible
 when they attach to another link.
 .El
-.Lp
+.Pp
 Once
 .Nm
 has sent a Router Solicitation, and has received a valid Router Advertisement,
 it refrains from sending additional solicitations on that interface, until
 the next time one of the above events occurs.
-.Lp
+.Pp
 When sending a Router Solicitation on an interface,
 .Nm
 includes a Source Link-layer address option if the interface
@@ -134,6 +147,12 @@ will dump the current internal state into
 .Pp
 The options are as follows:
 .Bl -tag -width Ds
+.It Fl 1
+Perform only one probe.
+Transmit Router Solicitation packets until at least one valid Router
+Advertisement packet has arrived on each
+.Ar interface ,
+then exit.
 .It Fl a
 Autoprobe outgoing interface.
 .Nm
@@ -144,30 +163,30 @@ finds multiple interfaces,
 .Nm
 will exit with error.
 .\"
+.It Fl D
+Enable more debugging (than that offered by the
+.Fl d
+option) including the printing of internal timer information.
 .It Fl d
 Enable debugging.
-.It Fl D
-Enable more debugging including the printing of internal timer information.
+.It Fl F
+Automatically set the
+.Xr sysctl 8
+variables relating to
+.Nm
+(see above).
+Without this option,
+.Nm
+will obey the current
+.Xr sysctl 8
+settings.
 .It Fl f
-.Fl f
-prevents
+This option prevents
 .Nm
 from becoming a daemon (foreground mode).
 Warning messages are generated to standard error
 instead of
 .Xr syslog 3 .
-.It Fl F
-Configure
-.Xr sysctl 8
-variable related to
-.Nm
-by itself.
-Without
-.Fl F ,
-.Nm
-will not alter and obey the current
-.Xr sysctl 8
-settings.
 .It Fl m
 Enable mobility support.
 If this option is specified,
@@ -180,25 +199,19 @@ Moreover, if the option is specified,
 periodically sends Router Solicitation on an interface that does not support
 .Dv SIOCGIFMEDIA
 ioctl.
-.It Fl 1
-Perform only one probe.
-Transmit Router Solicitation packets until at least one valid Router
-Advertisement packet has arrived on each
-.Ar interface ,
-then exit.
 .El
-.Sh RETURN VALUES
-The
-.Nm
-program exits 0 on success, and >0 on failures.
+.Pp
+.Ex -std rtsold
 .\"
 .Sh FILES
-.Bl -tag -width /var/run/rtsold.dump -compact
+.Bl -tag -width "/var/run/rtsold.dumpXX" -compact
 .It Pa /var/run/rtsold.dump
-dumps internal state on.
+Internal state dump file.
 .El
 .\"
 .Sh SEE ALSO
+.Xr hostname.if 5 ,
+.Xr netstart 8 ,
 .Xr rtadvd 8 ,
 .Xr sysctl 8
 .\"

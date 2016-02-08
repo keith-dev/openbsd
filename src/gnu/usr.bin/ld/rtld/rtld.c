@@ -1,4 +1,4 @@
-/*	$OpenBSD: rtld.c,v 1.39 2004/11/08 20:47:07 miod Exp $	*/
+/*	$OpenBSD: rtld.c,v 1.41 2005/12/21 01:40:22 millert Exp $	*/
 /*	$NetBSD: rtld.c,v 1.43 1996/01/14 00:35:17 pk Exp $	*/
 /*
  * Copyright (c) 1993 Paul Kranenburg
@@ -37,12 +37,12 @@
 #include <sys/file.h>
 #include <sys/time.h>
 #include <sys/resource.h>
-#include <sys/errno.h>
 #include <sys/mman.h>
 #ifndef MAP_COPY
 #define MAP_COPY	MAP_PRIVATE
 #endif
 #include <err.h>
+#include <errno.h>
 #include <dlfcn.h>
 #include <fcntl.h>
 #include <a.out.h>
@@ -1663,7 +1663,7 @@ char	*fmt;
 	va_start(ap);
 #endif
 
-	vsprintf(buf, fmt, ap);
+	vsnprintf(buf, sizeof buf, fmt, ap);
 	(void)write(1, buf, strlen(buf));
 	va_end(ap);
 }

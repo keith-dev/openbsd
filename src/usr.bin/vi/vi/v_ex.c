@@ -1,4 +1,4 @@
-/*	$OpenBSD: v_ex.c,v 1.5 2002/02/16 21:27:58 millert Exp $	*/
+/*	$OpenBSD: v_ex.c,v 1.7 2006/02/17 19:12:41 otto Exp $	*/
 
 /*-
  * Copyright (c) 1992, 1993, 1994
@@ -200,8 +200,12 @@ v_switch(sp, vp)
 	 * Try the alternate file name, then the previous file
 	 * name.  Use the real name, not the user's current name.
 	 */
-	if ((name = sp->alt_name) == NULL) {
+	if (sp->alt_name == NULL) {
 		msgq(sp, M_ERR, "180|No previous file to edit");
+		return (1);
+	}
+	if ((name = strdup(sp->alt_name)) == NULL) {
+		msgq(sp, M_SYSERR, NULL);
 		return (1);
 	}
 
@@ -308,7 +312,7 @@ v_filter(sp, vp)
 	 * Entering <escape> on an empty line was historically an error,
 	 * this implementation doesn't bother.
 	 */
-	tp = sp->tiq.cqh_first;
+	tp = CIRCLEQ_FIRST(&sp->tiq);
 	if (tp->term != TERM_OK) {
 		vp->m_final.lno = sp->lno;
 		vp->m_final.cno = sp->cno;
@@ -407,7 +411,7 @@ v_ex(sp, vp)
 			if (v_tcmd(sp, vp, ':',
 			    TXT_BS | TXT_CEDIT | TXT_FILEC | TXT_PROMPT))
 				return (1);
-			tp = sp->tiq.cqh_first;
+			tp = CIRCLEQ_FIRST(&sp->tiq);
 
 			/*
 			 * If the user entered a single <esc>, they want to

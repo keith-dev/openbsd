@@ -34,8 +34,15 @@
  */
 
 #include "includes.h"
+RCSID("$OpenBSD: ssh-agent.c,v 1.129 2006/02/20 17:02:44 stevesk Exp $");
+
 #include <sys/queue.h>
-RCSID("$OpenBSD: ssh-agent.c,v 1.122 2004/10/29 22:53:56 djm Exp $");
+#include <sys/resource.h>
+#include <sys/types.h>
+#include <sys/un.h>
+
+#include <paths.h>
+#include <signal.h>
 
 #include <openssl/evp.h>
 #include <openssl/md5.h>
@@ -351,7 +358,7 @@ process_remove_identity(SocketEntry *e, int version)
 		if (id != NULL) {
 			/*
 			 * We have this key.  Free the old key.  Since we
-			 * don\'t want to leave empty slots in the middle of
+			 * don't want to leave empty slots in the middle of
 			 * the array, we actually free the key there and move
 			 * all the entries between the empty slot and the end
 			 * of the array.
@@ -1000,6 +1007,9 @@ main(int ac, char **av)
 	extern char *optarg;
 	pid_t pid;
 	char pidstrbuf[1 + 3 * sizeof pid];
+
+	/* Ensure that fds 0, 1 and 2 are open or directed to /dev/null */
+	sanitise_stdfd();
 
 	/* drop */
 	setegid(getgid());

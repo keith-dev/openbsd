@@ -1,4 +1,4 @@
-/*	$OpenBSD: modes.c,v 1.12 2005/08/09 00:53:48 kjell Exp $	*/
+/*	$OpenBSD: modes.c,v 1.16 2005/12/13 07:20:13 kjell Exp $	*/
 
 /* This file is in the public domain. */
 
@@ -14,14 +14,14 @@
 static int	changemode(int, int, char *);
 
 int	 defb_nmodes = 0;
-MAPS	*defb_modes[PBMODES] = { &fundamental_mode };
+struct maps_s	*defb_modes[PBMODES] = { &fundamental_mode };
 int	 defb_flag = 0;
 
 static int
 changemode(int f, int n, char *mode)
 {
 	int	 i;
-	MAPS	*m;
+	struct maps_s	*m;
 
 	if ((m = name_mode(mode)) == NULL) {
 		ewprintf("Can't find mode %s", mode);
@@ -98,7 +98,7 @@ notabmode(int f, int n)
 #endif	/* NOTAB */
 
 int
-overwrite(int f, int n)
+overwrite_mode(int f, int n)
 {
 	if (changemode(f, n, "overwrite") == FALSE)
 		return (FALSE);
@@ -116,16 +116,16 @@ int
 set_default_mode(int f, int n)
 {
 	int	 i;
-	MAPS	*m;
-	char	 mode[32], *bufp;
+	struct maps_s	*m;
+	char	 modebuf[32], *bufp;
 
-	if ((bufp = eread("Set Default Mode: ", mode, sizeof(mode),
+	if ((bufp = eread("Set Default Mode: ", modebuf, sizeof(modebuf),
 	    EFNEW)) == NULL)
 		return (ABORT);
 	else if (bufp[0] == '\0')
 		return (FALSE);
-	if ((m = name_mode(mode)) == NULL) {
-		ewprintf("can't find mode %s", mode);
+	if ((m = name_mode(modebuf)) == NULL) {
+		ewprintf("can't find mode %s", modebuf);
 		return (FALSE);
 	}
 	if (!(f & FFARG)) {
@@ -156,18 +156,19 @@ set_default_mode(int f, int n)
 			defb_modes[i] = defb_modes[i + 1];
 		defb_nmodes--;
 	}
-	if (strcmp(mode, "overwrite") == 0) {
+	if (strcmp(modebuf, "overwrite") == 0) {
 		if (n <= 0)
 			defb_flag &= ~BFOVERWRITE;
 		else
 			defb_flag |= BFOVERWRITE;
 	}
 #ifdef NOTAB
-	if (strcmp(mode, "notab") == 0)
+	if (strcmp(modebuf, "notab") == 0) {
 		if (n <= 0)
 			defb_flag &= ~BFNOTAB;
 		else
 			defb_flag |= BFNOTAB;
+	}
 #endif	/* NOTAB */
 	return (TRUE);
 }

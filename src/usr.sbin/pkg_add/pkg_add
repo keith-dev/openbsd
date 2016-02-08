@@ -1,7 +1,7 @@
 #! /usr/bin/perl
 
 # ex:ts=8 sw=4:
-# $OpenBSD: pkg_add,v 1.196 2005/08/29 00:42:58 espie Exp $
+# $OpenBSD: pkg_add,v 1.216 2006/02/10 11:42:51 espie Exp $
 #
 # Copyright (c) 2003-2004 Marc Espie <espie@openbsd.org>
 #
@@ -31,14 +31,38 @@ use OpenBSD::Vstat;
 use OpenBSD::Getopt;
 use OpenBSD::Error;
 use OpenBSD::ProgressMeter;
+use OpenBSD::Interactive;
 use OpenBSD::Add;
 use OpenBSD::SharedLibs;
-use File::Path;
 
 my $errors = 0;
+my $bad = 0;
 
 our %forced = ();
 our $not;
+
+sub uses_old_libs
+{
+	my $plist = shift;
+	require OpenBSD::RequiredBy;
+
+	my $d = OpenBSD::Requiring->new($plist->pkgname());
+	return  grep {/^\.libs\-/} $d->list();
+}
+
+sub has_new_sig
+{
+	my ($plist, $state) = @_;
+	if (!defined $plist->{new_sig}) {
+		my $n = OpenBSD::PackingList->from_installation($plist->pkgname())->signature();
+		my $o = $plist->signature();
+		print "Comparing full signature for ", $plist->pkgname(), " \"$o\" vs. \"$n\": ", $n eq $o ? "equal\n" : "different\n" 
+		    if $state->{very_verbose};
+		$plist->{new_sig} = $n ne $o;
+	}
+	return $plist->{new_sig};
+}
+
 
 sub can_install($$$)
 {
@@ -50,14 +74,11 @@ sub can_install($$$)
 
 	my %conflicts = map {($_,1)} @conflicts;
 
-	if (defined $conflicts{$pkgname}) {
-		if (!$state->{replace}) {
-			if (!$state->{forced}->{installed}) {
-				print "Can't install $pkgname because it's already installed\n";
-				$state->{installed}->{$handle->{pkgname}} = 1;
-				$errors++;
-			}
-			return undef;
+	if ((keys %conflicts) == 1 && (keys %conflicts)[0] eq $pkgname) {
+		if (!$state->{forced}->{installed} &&
+		    !has_new_sig($plist, $state) && !uses_old_libs($plist)) {
+			print "Already installed: $pkgname\n";
+			return 1;
 		}
 	}
 
@@ -72,6 +93,14 @@ sub can_install($$$)
 	}
 
 	if (!$state->{replace}) {
+		if (@conflicts == 1 && is_installed($plist->pkgname()) &&
+		    !has_new_sig($plist, $state) && 
+		    !uses_old_libs($plist)) {
+			print "Not reinstalling $pkgname\n" if $state->{verbose};
+			OpenBSD::SharedLibs::add_package_libs($plist->pkgname());
+			$state->{installed}->{$pkgname} = 1;
+			return undef;
+		}
 		print "Can't install $pkgname because of conflicts (",join(',', @conflicts, @libs), ")\n";
 		$errors++;
 		return undef;
@@ -86,14 +115,15 @@ sub can_install($$$)
 	require OpenBSD::Update;
 
 	if (is_installed($plist->pkgname()) && !$state->{forced}->{installed}) {
-		if (!OpenBSD::Update::is_needed($plist, $state)) {
+		if (!has_new_sig($plist, $state) && !uses_old_libs($plist)) {
+			    print "Not reinstalling $pkgname\n" if $state->{verbose};
 			    OpenBSD::SharedLibs::add_package_libs($plist->pkgname());
 			    $state->{installed}->{$pkgname} = 1;
 			    return undef;
 			}
 	}
 	if (!OpenBSD::Update::is_safe($plist, $state)) {
-		print "Can't safely update to $pkgname\n";
+		print "Can't safely update to $pkgname (use -F update to force it)\n";
 		$errors++;
 		return undef;
 	}
@@ -145,9 +175,7 @@ sub pre_add($$)
 	if ($handle->{finished}) {
 		return undef;
 	}
-	my $dir = $handle->info();
-    	my $plist = $handle->{plist} = 
-	    OpenBSD::PackingList->fromfile($dir.CONTENTS);
+    	my $plist = $handle->{plist} = $handle->plist();
 	unless (defined $plist) {
 		print "Can't find CONTENTS from $pkg\n";
 		$errors++;
@@ -176,8 +204,8 @@ sub pre_add($$)
 	if (can_install($plist, $state, $handle)) {
 		return $handle;
 	} else {
-		$handle->close();
-		rmtree($handle->info());
+		$handle->close_with_client_error();
+		$handle->wipe_info();
 		delete $handle->{plist};
 		$handle->{finished} = 1;
 		if ($state->{forced}->{kitchensink}) {
@@ -191,7 +219,6 @@ sub pre_add($$)
 sub do_script
 {
 	my ($plist, $name, $state, $args) = @_;
-	$state->{dir} = $plist->{dir};
 	return unless $plist->has($name);
 	$plist->get($name)->run($state, $args);
 }
@@ -214,13 +241,12 @@ sub failed_install
 {
 	my ($handle, $not, $interrupted) = @_;
 	my $plist = $handle->{plist};
-	my $dir = $handle->info();
 	my $pkgname = $plist->pkgname();
 	my $msg = "Installation of $pkgname failed";
 	if ($interrupted) {
 		$msg ="Caught SIG$interrupted. $msg";
 	}
-	OpenBSD::Add::borked_installation($plist, $dir, $not, $msg);
+	OpenBSD::Add::borked_installation($plist, $handle->info(), $not, $msg);
 }
 
 sub really_add($$)
@@ -232,6 +258,7 @@ sub really_add($$)
 	my $pkgname = $plist->pkgname();
 	$state->{archive} = $handle;
 	$plist->{dir} = $dir;
+	$state->{dir} = $plist->{dir};
 	$state->set_pkgname($pkgname);
 
 	# XXX in `combined' updates, some dependencies may remove extra 
@@ -344,6 +371,7 @@ sub really_add($$)
 		# Here there should be code to handle old libs
 
 		OpenBSD::ProgressMeter::set_header("$pkgname (installing)");
+		$state->{dir} = $plist->{dir};
 		$state->set_pkgname($pkgname);
 	}
 
@@ -357,6 +385,7 @@ sub really_add($$)
 		};
 
 		if ($interrupted || $errors) {
+			# here we should remove links from the temp package
 			failed_install($handle, $state->{not}, $interrupted);
 		}
 	} else {
@@ -389,7 +418,7 @@ sub really_add($$)
 		}
 	}
 
-	$handle->close();
+	$handle->finish_and_close();
 	OpenBSD::ProgressMeter::next();
 
 	if (!($interrupted || $errors)) {
@@ -490,22 +519,33 @@ sub install_package
 	}
 
 	if (defined $state->{installed}->{$handle->{pkgname}}) {
-		$handle->close();
+		$handle->close_now();
 		return ();
 	}
 
 	my $plist = $handle->{plist};
+	if ($plist->{need_modules}) {
+	    if (!defined $handle->{solved_dependencies}) {
+		    my @deps = OpenBSD::Dependencies::solve($state, $handle, @todo);
+		    if (@deps > 0) {
+			    build_deptree($state, $pkg, @deps);
+			    return (@deps, $pkg);
+		    }
+	    } else {
+		    $plist = $handle->{plist} = $handle->plist();
+	    }
+	}
 
 	if (is_installed($plist->pkgname()) && !$state->{forced}->{installed}) {
 		if ($state->{replace}) {
-			if (!OpenBSD::Update::is_needed($plist, $state)) {
+			if (!has_new_sig($plist, $state) && !uses_old_libs($plist)) {
 				OpenBSD::SharedLibs::add_package_libs($plist->pkgname());
 				$state->{installed}->{$handle->{pkgname}} = 1;
-				$handle->close();
+				$handle->close_now();
 				return ();
 			}
 		} else {
-			$handle->close();
+			$handle->close_now();
 			return ();
 		}
 	}
@@ -528,7 +568,8 @@ sub install_package
 	for my $dep (keys %{$handle->{solved_dependencies}}) {
 		next if is_installed($dep);
 		print "Can't install $pkg: can't resolve $dep\n";
-		$handle->close();
+		$handle->close_now();
+		$bad++;
 		return ();
 	}
 
@@ -558,14 +599,55 @@ sub install_package
 		}
 	}
 	if (!$okay) {
-		$handle->close();
-		return () unless $forced{libdepends};
+		$handle->close_now();
+		if (!$forced{libdepends}) {
+			$bad++;
+			return ();
+		}
 	}
 	really_add($handle, $state);
-	rmtree($handle->info());
+	$handle->wipe_info();
 	delete $handle->{plist};
 	$state->{installed}->{$handle->{pkgname}} = 1;
 	return ();
+}
+
+
+sub choose1
+{
+	my ($pkgname, $interactive, @l) = @_;
+	if (@l == 0) {
+	    print "Can't resolve $pkgname\n";
+	    $bad = 1;
+	} elsif (@l == 1) {
+		return $l[0];
+	} elsif (@l != 0) {
+		print "Ambiguous: $pkgname could be ", join(' ', @l),"\n";
+		if ($interactive) {
+		    my $result = OpenBSD::Interactive::ask_list('Choose one package', 1, ("<None>", @l));
+		    if ($result eq '<None>') {
+			$bad = 1;
+		    } else {
+			return $result;
+		    }
+		} else {
+		    $bad = 1;
+		}
+	}
+	return undef;
+}
+
+sub available_stems
+{
+	my $state = shift;
+	my @avail = OpenBSD::PackageLocator::available();
+	if (@avail == 0) {
+		Warn "No packages available in the PKG_PATH\n";
+	}
+	unless ($state->{forced}->{allversions}) {
+	    @avail = OpenBSD::PackageName::keep_most_recent(@avail);
+	}
+	return OpenBSD::PackageName::compile_stemlist(@avail);
 }
 
 sub find_updates
@@ -573,30 +655,18 @@ sub find_updates
 	my ($old, $new, $state) = @_;
 	my @list = ();
 
-	for my $pkgname (@$old) {
-		if (OpenBSD::PackageName::is_stem($pkgname)) {
-			my @l = OpenBSD::PackageName::findstem($pkgname,
-			    installed_packages());
-			if (@l == 0) {
-			    Fatal("Can't resolve $pkgname to an installed package name");
-			} elsif (@l == 1) {
-				push(@list, $l[0]);
-			} else {
-				Fatal("Ambiguous: $pkgname could be", join(',', @l));
-			}
-		} else {
-			push(@list, $pkgname);
-		}
-	}
+	OpenBSD::PackageInfo::solve_installed_names($old, \@list, "(updating them all)", $state);
 	unless (defined $state->{full_update} or defined $state->{forced}->{noclosure}) {
 		require OpenBSD::RequiredBy;
 
 		@list = OpenBSD::Requiring->compute_closure(@list);
 	}
 	my @cantupdate = ();
-	my $hash = OpenBSD::PackageName::compile_stemlist(OpenBSD::PackageLocator::distant_available());
+	my $hash = available_stems($state);
 
+	OpenBSD::ProgressMeter::set_header("Looking for updates");
 	for my $pkgname (@list) {
+		next if $pkgname =~ m/^\.libs-/;
 		my $stem = OpenBSD::PackageName::splitstem($pkgname);
 		my @l = $hash->findstem($stem);
 		if (@l == 0) {
@@ -605,34 +675,56 @@ sub find_updates
 		}
 		my @l2 = ();
 		if (@l == 1 && $state->{forced}->{pkgpath}) {
+			OpenBSD::ProgressMeter::clear();
 			print "Directly updating $pkgname -> ", $l[0], "\n";
 			push(@$new, $l[0]);
 			next;
 		}
-		my $plist = OpenBSD::PackingList->from_installation($pkgname, \&OpenBSD::PackingList::ExtraInfoOnly);
+		my $plist = OpenBSD::PackingList->from_installation($pkgname, \&OpenBSD::PackingList::UpdateInfoOnly);
 		if (!defined $plist) {
 			Fatal("Can't locate $pkgname");
 		}
+		my $found;
 		for my $candidate (@l) {
 		    my $handle = OpenBSD::PackageLocator->find($candidate, $state->{arch});
 		    if (!$handle) {
 			    next;
 		    }
-		    $handle->close();
-		    my $dir = $handle->info();
-		    my $p2 = OpenBSD::PackingList->fromfile($dir.CONTENTS,
-			\&OpenBSD::PackingList::ExtraInfoOnly);
+		    $handle->close_now();
+		    my $p2 = $handle->plist(\&OpenBSD::PackingList::UpdateInfoOnly);
+		    if (!$p2) {
+		    	next;
+		    }
 		    if ($p2->has('arch')) {
 			unless ($p2->{arch}->check($state->{arch})) {
 			    next;
 			}
 		    }
+		    if ($plist->signature() eq $p2->signature()) {
+		    	$found = $candidate;
+		    }
 		    if ($p2->{extrainfo}->{subdir} eq $plist->{extrainfo}->{subdir}) {
 			push(@l2, $candidate);
+		    } elsif ($p2->has('pkgpath')) {
+		    	for my $p (@{$p2->{pkgpath}}) {
+				if ($p->{name} eq $plist->{extrainfo}->{subdir}) {
+					push(@l2, $candidate);
+					last;
+				}
+		    	}
 		    }
 		}
 
-		print "Updating $pkgname -> ", join(' ', @l2), "\n";
+		if (defined $found && @l2 == 1 && $found eq  $l2[0]) {
+			if (!uses_old_libs($plist)) {
+				my $msg = "No need to update $pkgname";
+				OpenBSD::ProgressMeter::message($msg);
+				print "$msg\n" if $state->{beverbose};
+				next;
+			}
+		}
+		OpenBSD::ProgressMeter::clear();
+		print "Candidates for updating $pkgname -> ", join(' ', @l2), "\n";
 		# if all packages have the same version, but distinct p,
 		# grab the most recent.
 		if (@l2 > 1) {
@@ -640,12 +732,45 @@ sub find_updates
 		}
 			
 		if (@l2 == 1) {
-			push(@$new, $l2[0]);
-		} else {
+			if (defined $found && $found eq  $l2[0] && !uses_old_libs($plist)) {
+				my $msg = "No need to update $pkgname";
+				OpenBSD::ProgressMeter::message($msg);
+				print "$msg\n" if $state->{beverbose};
+			} else {
+				push(@$new, $l2[0]);
+			}
+		} elsif (@l2 == 0) {
 			push(@cantupdate, $pkgname);
+		} else {
+			my $result = choose1($pkgname, $state->{interactive}, sort @l2);
+			push(@$new, $result) if defined $result;
 		}
 	}
+	OpenBSD::ProgressMeter::next();
 	return @cantupdate;
+}
+
+sub find_truenames
+{
+	my ($old, $new, $state) = @_;
+
+	my $h;
+
+	for my $pkgname (@$old) {
+		if (OpenBSD::PackageName::is_stem($pkgname)) {
+		    if (!defined $h) {
+		    	$h = available_stems($state);
+		    }
+		    my @l = $h->findstem($pkgname);
+		    if (@l > 1) {
+			@l = OpenBSD::PackageName::keep_most_recent(@l);
+		    }
+		    my $result = choose1($pkgname, $state->{interactive}, sort @l);
+		    push(@$new, $result) if defined $result;
+		} else {
+		    push(@$new, $pkgname);
+		}
+	}
 }
 
 sub reorder
@@ -661,13 +786,13 @@ sub reorder
 	}
 }
 
-set_usage('pkg_add [-acInqrvvx] [-A arch] [-B pkg-destdir] [-F keywords]',
-'[-L localbase] [-P type] [-Q quick-destdir] pkgname [...]');
+set_usage('pkg_add [-acIinqruvx] [-A arch] [-B pkg-destdir] [-F keywords]',
+'[-L localbase] [-P type] [-Q quick-destdir] pkg-name [...]');
 
-our ($opt_a, $opt_v, $opt_n, $opt_I, $opt_L, $opt_B, $opt_A, $opt_P, $opt_Q, $opt_x, $opt_r, $opt_q, $opt_c, $opt_u);
+our ($opt_a, $opt_v, $opt_n, $opt_I, $opt_L, $opt_B, $opt_A, $opt_P, $opt_Q, $opt_x, $opt_r, $opt_q, $opt_c, $opt_i, $opt_u);
 $opt_v = 0;
 try { 
-	getopts('aqchuvnrxIL:f:F:B:A:P:Q:',
+	getopts('aqchivnruxIL:f:F:B:A:P:Q:',
 	{'v' => sub {++$opt_v;},
 	 'h' => sub { Usage(); },
 	 'F' => sub { 
@@ -692,7 +817,6 @@ $state->{cache} = {};
 $state->{installed} = {};
 $state->{deptree} = {};
 $state->{do_faked} = 0;
-$state->{replace} = $opt_r;
 $state->{localbase} = $opt_L;
 $state->{arch} = $opt_A;
 $state->{forced} = \%forced;
@@ -731,7 +855,7 @@ if (defined $state->{destdir}) {
 }
 
 
-$state->{not} = $opt_n || $opt_u;
+$state->{not} = $opt_n;
 # XXX RequiredBy
 $not = $opt_n;
 $state->{quick} = $opt_q;
@@ -739,7 +863,9 @@ $state->{extra} = $opt_c;
 $state->{dont_run_scripts} = $opt_I;
 $state->{very_verbose} = $opt_v >= 2;
 $state->{verbose} = $opt_v;
+$state->{interactive} = $opt_i;
 $state->{beverbose} = $opt_n || ($opt_v >= 2);
+$state->{replace} = $opt_r || $opt_u;
 
 if (@ARGV == 0 && !$opt_u) {
 	Usage "Missing pkgname";
@@ -757,27 +883,43 @@ if ($< && !$forced{nonroot}) {
 }
 
 lock_db($state->{not});
+
+my @todo = ();
+
 if ($opt_u) {
 	if (@ARGV == 0) {
 		@ARGV = sort(installed_packages());
 		$state->{full_update} = 1;
 	}
-	my @todo = ();
 	my @cantupdate = find_updates(\@ARGV, \@todo, $state);
-	print "Update using pkg_add -r ", join(' ', @todo), "\n";
 	if (@cantupdate > 0) {
-		print "Cannot find updates for ",join(' ', @cantupdate), "\n";
+			print "Cannot find updates for ", join(' ', @cantupdate), "\n";
+		unless ($state->{forced}->{alwaysupdate} ||
+			OpenBSD::Interactive::confirm("Proceed", $state->{interactive}, 0)) {
+				exit(1);
+	    	}
 	}
-	exit(0);
+	if ($bad) {
+		print "There are some ambiguities. Please run in interactive ".
+		    "mode again.\n";
+	}
+	if (@todo > 0 && !$bad) {
+		print "Running the equivalent of pkg_add -r ",
+		    join(' ', @todo), "\n";
+	}
+} else {
+	find_truenames(\@ARGV, \@todo, $state);
+	if (defined $state->{forced}->{kitchensink}) {
+		reorder(\@todo);
+		if (!$opt_r) {
+			@todo = grep {s/\.tgz$//; !is_installed($_);} @todo;
+		}
+		print "Adding in order:\n", (map { "\t$_\n" } @todo), "\n";
+	}
 }
 
-my @todo = (@ARGV);
-if (defined $state->{forced}->{kitchensink}) {
-	reorder(\@todo);
-	if (!$opt_r) {
-		@todo = grep {s/\.tgz$//; !is_installed($_);} @todo;
-	}
-	print "Adding in order:\n", (map { "\t$_\n" } @todo), "\n";
+if ($bad) {
+	exit(1);
 }
 
 eval {
@@ -819,3 +961,7 @@ rethrow $dielater;
 	}
 	exit(1);
 };
+
+if ($bad) {
+	exit(1);
+}

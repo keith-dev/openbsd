@@ -1,4 +1,4 @@
-/*	$OpenBSD: session.c,v 1.232 2005/07/24 11:56:37 henning Exp $ */
+/*	$OpenBSD: session.c,v 1.244 2006/02/08 12:36:29 henning Exp $ */
 
 /*
  * Copyright (c) 2003, 2004, 2005 Henning Brauer <henning@openbsd.org>
@@ -46,7 +46,8 @@
 #define PFD_PIPE_MAIN		0
 #define PFD_PIPE_ROUTE		1
 #define	PFD_SOCK_CTL		2
-#define PFD_LISTENERS_START	3
+#define	PFD_SOCK_RCTL		3
+#define PFD_LISTENERS_START	4
 
 void	session_sighdlr(int);
 int	setup_listeners(u_int *);
@@ -91,7 +92,7 @@ struct bgpd_sysdep	 sysdep;
 struct peer		*npeers;
 volatile sig_atomic_t	 session_quit = 0;
 int			 pending_reconf = 0;
-int			 csock = -1;
+int			 csock = -1, rcsock = -1;
 u_int			 peer_cnt;
 struct imsgbuf		*ibuf_rde;
 struct imsgbuf		*ibuf_main;
@@ -193,7 +194,10 @@ session_main(struct bgpd_config *config, struct peer *cpeers,
 	}
 
 	/* control socket is outside chroot */
-	if ((csock = control_init()) == -1)
+	if ((csock = control_init(0, SOCKET_NAME)) == -1)
+		fatalx("control socket setup failed");
+	if (conf->rcsock != NULL &&
+	    (rcsock = control_init(1, conf->rcsock)) == -1)
 		fatalx("control socket setup failed");
 
 	if ((pw = getpwnam(BGPD_USER)) == NULL)
@@ -233,7 +237,8 @@ session_main(struct bgpd_config *config, struct peer *cpeers,
 	imsg_init(ibuf_rde, pipe_s2r[0]);
 	imsg_init(ibuf_main, pipe_m2s[1]);
 	TAILQ_INIT(&ctl_conns);
-	csock = control_listen();
+	control_listen(csock);
+	control_listen(rcsock);
 	LIST_INIT(&mrthead);
 	peer_cnt = 0;
 	ctl_cnt = 0;
@@ -248,6 +253,7 @@ session_main(struct bgpd_config *config, struct peer *cpeers,
 	/* network list is not used in the SE */
 	while ((net = TAILQ_FIRST(net_l)) != NULL) {
 		TAILQ_REMOVE(net_l, net, entry);
+		filterset_free(&net->net.attrset);
 		free(net);
 	}
 
@@ -350,6 +356,8 @@ session_main(struct bgpd_config *config, struct peer *cpeers,
 			pfd[PFD_PIPE_ROUTE].events |= POLLOUT;
 		pfd[PFD_SOCK_CTL].fd = csock;
 		pfd[PFD_SOCK_CTL].events = POLLIN;
+		pfd[PFD_SOCK_RCTL].fd = rcsock;
+		pfd[PFD_SOCK_RCTL].events = POLLIN;
 
 		nextaction = time(NULL) + 240;	/* loop every 240s at least */
 		i = PFD_LISTENERS_START;
@@ -379,6 +387,7 @@ session_main(struct bgpd_config *config, struct peer *cpeers,
 					p->IdleHoldTime =
 					    INTERVAL_IDLE_HOLD_INITIAL;
 					p->IdleHoldResetTimer = 0;
+					p->errcnt = 0;
 				} else
 					p->IdleHoldResetTimer =
 					    time(NULL) + p->IdleHoldTime;
@@ -461,7 +470,12 @@ session_main(struct bgpd_config *config, struct peer *cpeers,
 
 		if (nfds > 0 && pfd[PFD_SOCK_CTL].revents & POLLIN) {
 			nfds--;
-			ctl_cnt += control_accept(csock);
+			ctl_cnt += control_accept(csock, 0);
+		}
+
+		if (nfds > 0 && pfd[PFD_SOCK_RCTL].revents & POLLIN) {
+			nfds--;
+			ctl_cnt += control_accept(rcsock, 1);
 		}
 
 		for (j = PFD_LISTENERS_START; nfds > 0 && j < idx_listeners;
@@ -514,7 +528,8 @@ session_main(struct bgpd_config *config, struct peer *cpeers,
 	msgbuf_clear(&ibuf_main->w);
 	free(ibuf_main);
 
-	control_shutdown();
+	control_shutdown(csock);
+	control_shutdown(rcsock);
 	log_info("session engine exiting");
 	_exit(0);
 }
@@ -531,10 +546,6 @@ init_peer(struct peer *p)
 {
 	p->fd = p->wbuf.fd = -1;
 
-	memcpy(&p->capa.ann, &p->conf.capabilities, sizeof(p->capa.ann));
-	if (!p->conf.announce_capa)
-		session_capa_ann_none(p);
-
 	if (p->conf.if_depend[0])
 		imsg_compose(ibuf_main, IMSG_IFINFO, 0, 0, -1,
 		    p->conf.if_depend, sizeof(p->conf.if_depend));
@@ -544,7 +555,10 @@ init_peer(struct peer *p)
 	peer_cnt++;
 
 	change_state(p, STATE_IDLE, EVNT_NONE);
-	p->IdleHoldTimer = time(NULL);	/* start ASAP */
+	if (p->conf.down)
+		p->IdleHoldTimer = 0;		/* no autostart */
+	else
+		p->IdleHoldTimer = time(NULL);	/* start ASAP */
 }
 
 void
@@ -583,7 +597,8 @@ bgp_fsm(struct peer *peer, enum session_events event)
 
 			if (!peer->depend_ok)
 				peer->ConnectRetryTimer = 0;
-			else if (peer->conf.passive || peer->conf.template) {
+			else if (peer->passive || peer->conf.passive ||
+			    peer->conf.template) {
 				change_state(peer, STATE_ACTIVE, event);
 				peer->ConnectRetryTimer = 0;
 			} else {
@@ -592,6 +607,7 @@ bgp_fsm(struct peer *peer, enum session_events event)
 				    time(NULL) + INTERVAL_CONNECTRETRY;
 				session_connect(peer);
 			}
+			peer->passive = 0;
 			break;
 		default:
 			/* ignore */
@@ -857,6 +873,13 @@ change_state(struct peer *peer, enum session_state state,
 			    peer->IdleHoldTime < MAX_IDLE_HOLD/2)
 				peer->IdleHoldTime *= 2;
 		}
+		if (peer->state == STATE_NONE || peer->state == STATE_ESTABLISHED) {
+			/* initialize capability negotiation structures */
+			memcpy(&peer->capa.ann, &peer->conf.capabilities,
+			    sizeof(peer->capa.ann));
+			if (!peer->conf.announce_capa)
+				session_capa_ann_none(peer);
+		}
 		break;
 	case STATE_CONNECT:
 		break;
@@ -867,9 +890,7 @@ change_state(struct peer *peer, enum session_state state,
 	case STATE_OPENCONFIRM:
 		break;
 	case STATE_ESTABLISHED:
-		if (peer->IdleHoldTime > INTERVAL_IDLE_HOLD_INITIAL)
-			peer->IdleHoldResetTimer =
-			    time(NULL) + peer->IdleHoldTime;
+		peer->IdleHoldResetTimer = time(NULL) + peer->IdleHoldTime;
 		session_up(peer);
 		break;
 	default:		/* something seriously fucked */
@@ -909,6 +930,13 @@ session_accept(int listenfd)
 	}
 
 	p = getpeerbyip((struct sockaddr *)&cliaddr);
+
+	if (p != NULL && p->state == STATE_IDLE && p->errcnt < 2 &&
+	    p->ConnectRetryTimer > 0) {
+		/* fast reconnect after clear */
+		p->passive = 1;
+		bgp_fsm(p, EVNT_START);
+	}
 
 	if (p != NULL &&
 	    (p->state == STATE_CONNECT || p->state == STATE_ACTIVE)) {
@@ -1759,7 +1787,7 @@ parse_open(struct peer *peer)
 	memcpy(&optparamlen, p, sizeof(optparamlen));
 	p += sizeof(optparamlen);
 
-	if (optparamlen > msglen - MSGSIZE_OPEN_MIN) {
+	if (optparamlen != msglen - MSGSIZE_OPEN_MIN) {
 			log_peer_warnx(&peer->conf,
 			    "corrupt OPEN message received: length mismatch");
 			session_notification(peer, ERR_OPEN, 0, NULL, 0);
@@ -1913,6 +1941,7 @@ parse_notification(struct peer *peer)
 	datalen -= sizeof(subcode);
 
 	log_notification(peer, errcode, subcode, p, datalen);
+	peer->errcnt++;
 
 	if (errcode == ERR_OPEN && subcode == ERR_OPEN_CAPA) {
 		if (datalen == 0) {	/* zebra likes to send those.. humbug */
@@ -1937,8 +1966,9 @@ parse_notification(struct peer *peer)
 			datalen -= sizeof(capa_len);
 			if (datalen < capa_len) {
 				log_peer_warnx(&peer->conf,
-				    "parse_notification: capa_len %u exceeds"
-				    "remaining msg length", capa_len);
+				    "parse_notification: capa_len %u exceeds "
+				    "remaining msg length %u", capa_len,
+				    datalen);
 				return (-1);
 			}
 			p += capa_len;
@@ -2059,8 +2089,6 @@ parse_capabilities(struct peer *peer, u_char *d, u_int16_t dlen)
 	return (0);
 }
 
-struct filter_set_head	*session_set;
-
 void
 session_dispatch_imsg(struct imsgbuf *ibuf, int idx, u_int *listener_cnt)
 {
@@ -2071,7 +2099,6 @@ session_dispatch_imsg(struct imsgbuf *ibuf, int idx, u_int *listener_cnt)
 	struct peer		*p, *next;
 	struct listen_addr	*la, *nla;
 	struct kif		*kif;
-	struct filter_set	*s;
 	u_char			*data;
 	enum reconf_action	 reconf;
 	int			 n, depend_ok;
@@ -2123,8 +2150,6 @@ session_dispatch_imsg(struct imsgbuf *ibuf, int idx, u_int *listener_cnt)
 				reconf = RECONF_KEEP;
 
 			memcpy(&p->conf, pconf, sizeof(struct peer_config));
-			TAILQ_INIT(&p->conf.attrset);
-			session_set = &p->conf.attrset;
 			p->conf.reconf_action = reconf;
 			break;
 		case IMSG_RECONF_LISTENER:
@@ -2213,21 +2238,8 @@ session_dispatch_imsg(struct imsgbuf *ibuf, int idx, u_int *listener_cnt)
 			free(nconf->listen_addrs);
 			free(nconf);
 			nconf = NULL;
-			session_set = NULL;
 			pending_reconf = 0;
 			log_info("SE reconfigured");
-			break;
-		case IMSG_FILTER_SET:
-			if (idx != PFD_PIPE_MAIN)
-				fatalx("reconf request not from parent");
-			if (session_set == NULL) {
-				log_warnx("IMSG_FILTER_SET unexpected");
-				break;
-			}
-			if ((s = malloc(sizeof(struct filter_set))) == NULL)
-				fatal(NULL);
-			memcpy(s, imsg.data, sizeof(struct filter_set));
-			TAILQ_INSERT_TAIL(session_set, s, entry);
 			break;
 		case IMSG_IFINFO:
 			if (idx != PFD_PIPE_MAIN)
@@ -2306,7 +2318,9 @@ session_dispatch_imsg(struct imsgbuf *ibuf, int idx, u_int *listener_cnt)
 			break;
 		case IMSG_CTL_SHOW_RIB:
 		case IMSG_CTL_SHOW_RIB_PREFIX:
+		case IMSG_CTL_SHOW_RIB_MEM:
 		case IMSG_CTL_SHOW_NETWORK:
+		case IMSG_CTL_SHOW_NETWORK6:
 		case IMSG_CTL_SHOW_NEIGHBOR:
 			if (idx != PFD_PIPE_ROUTE)
 				fatalx("ctl rib request not from RDE");
@@ -2575,17 +2589,10 @@ void
 session_up(struct peer *p)
 {
 	struct session_up	 sup;
-	struct filter_set	*s;
 
 	if (imsg_compose(ibuf_rde, IMSG_SESSION_ADD, p->conf.id, 0, -1,
 	    &p->conf, sizeof(p->conf)) == -1)
 		fatalx("imsg_compose error");
-
-	TAILQ_FOREACH(s, &p->conf.attrset, entry) {
-		if (imsg_compose(ibuf_rde, IMSG_FILTER_SET, p->conf.id, 0, -1,
-		    s, sizeof(struct filter_set)) == -1)
-			fatalx("imsg_compose error");
-	}
 
 	switch (p->sa_local.ss_family) {
 	case AF_INET:

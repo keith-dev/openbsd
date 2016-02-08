@@ -1,4 +1,4 @@
-/*	$OpenBSD: theo.c,v 1.87 2005/05/27 01:41:27 jason Exp $	*/
+/*	$OpenBSD: theo.c,v 1.97 2005/11/18 20:56:53 deraadt Exp $	*/
 /*
  * Copyright (c) 2002 Artur Grabowski <art@openbsd.org>
  * All rights reserved.
@@ -45,8 +45,6 @@ static struct KEYMAPE (1 + IMAPEXT) theomap = {
 	}
 };
 
-static BUFFER *tbuf;
-
 void
 theo_init(void)
 {
@@ -54,11 +52,12 @@ theo_init(void)
 	maps_add((KEYMAP *)&theomap, "theo");
 }
 
+/* ARGSUSED */
 static int
 theo(int f, int n)
 {
-	BUFFER	*bp;
-	MGWIN	*wp;
+	struct buffer	*bp;
+	struct mgwin	*wp;
 
 	bp = bfind("theo", TRUE);
 	if (bclear(bp) != TRUE)
@@ -71,7 +70,7 @@ theo(int f, int n)
 	if ((wp = popbuf(bp)) == NULL)
 		return (FALSE);
 
-	tbuf = curbp = bp;
+	curbp = bp;
 	curwp = wp;
 	return (TRUE);
 }
@@ -92,28 +91,20 @@ static const char *talk[] = {
 	"Lazy bums slacking on your asses.",
 	"35 commits an hour? That's pathetic!",
 	"Fine software takes time to prepare.  Give a little slack.",
-	"emacs on the vax",
 	"Just a minute ago we were hugging and now you, guys, do not love me anymore",
-	"I'll let you know when I need to floss my teeth",
-	"If you can't figure out yourself, you're lacking some mental faculties",
 	"I am just stating a fact",
-	"blah blah",
 	"i'd love to hack, but i can't",
 	"Wait, yes, I am on drugs",
-	"during release it is a constant.  almost noone helps.",
-	"i let you guys do whatever you wanted",
 	"you bring new meaning to the terms slackass. I will have to invent a new term.",
 	"if they cut you out, muddy their back yards",
 	"Make them want to start over, and play nice the next time.",
 	"It is clear that this has not been thought through.",
 	"avoid using abort().  it is not nice.",
-	"if you do not test that, you are banned from editing theo.c",
 	"That's the most ridiculous thing I've heard in the last two or three minutes!",
 	"I'm not just doing this for crowd response. I need to be right.",
 	"i admit you are better than i am...",
 	"I'd put a fan on my bomb.. And blinking lights...",
 	"I love to fight",
-	"I am not concerned with commit count",
 	"No sane people allowed here.  Go home.",
 	"you have to stop peeing on your breakfast",
 	"feature requests come from idiots",
@@ -122,28 +113,16 @@ static const char *talk[] = {
 	"shame on you for following my rules.",
 	"altq's parser sucks dead whale farts through the finest chemistry pipette's",
 	"screw this operating system shit, i just want to drive!",
-	"That is the most stupid thing I have heard all week.",
 	"Search for fuck.  Anytime you see that word, you have a paragraph to write.",
-	"what I'm doing [...] is hell. it's kind of fun.",
 	"Yes, but the ports people are into S&M.",
 	"Buttons are for idiots.",
 	"We are not hackers. We are turd polishing craftsmen.",
-	"if ya break cvs, we hunt ya and break yer legs",
 	"who cares.  style(9) can bite my ass",
-	"The argument is totally Linux.",
 	"It'd be one fucking happy planet if it wasn't for what's under this fucking sticker.",
-	"noone is gonna add that thing to theo.c?  wow, i'm stunned.  no henning?",
 	"I would explain, but I am too drunk.",
-	"Take a picture of my butt, it's what everyone wants.",
 	"you slackers don't deserve pictures yet",
-	"You guys are about four days behind on theo.c",
-	"I'm just talking.",
 	"Vegetarian my ass",
 	"Wait a minute, that's a McNally's!",
-	"Your connection is breaking up.",
-	"germans are not allowed to get involved there",
-	"gprs sucks camel dick dryer than the gobi desert",
-	"I AM NEVER SATISFIED",
 	"don't they recognize their moral responsibility to entertain me?",
 	"#ifdef is for emacs developers.",
 	"Many well known people become net-kooks in their later life, because they lose touch with reality.",
@@ -151,16 +130,7 @@ static const char *talk[] = {
 	"tweep tweep tweep",
 	"Quite frankly, SSE's alignment requirement is the most utterly retarded idea since eating your own shit.",
 	"Holy verbose prom startup Batman.",
-	"Do you think you are exempt from COMPILING BEFORE YOU COMMIT",
-	"I want to be REALLY COOL just like all the other developers!",
-	"I don't know what you are talking about.  Please tell me what you are talking about.",
-	"I avoid helping people who refuse to learn how to help themselves.",
 	"Any day now, when we sell out.",
-	"And there you have it.. the distinction between those people who are OpenBSD develepers and those who will never be able to be...",
-	"I don't mean this applies to everyone, but is there a high quantity of attention deficit disorder in our user community?  Or retards?",
-	"Have you been living in a cave, or are you just being a jerk?",
-	"If you want it, go do the stinking work yourself.",
-	"A burp means less gas later",
 	"optimism in man kind does not belong here",
 	"First user who tries to push this button, he pounds into the ground with a rant of death.",
 	"we did farts.  now we do sperm.  we are cutting edge.",
@@ -168,19 +138,20 @@ static const char *talk[] = {
 	"Stop wasting your time reading people's licenses.",
 	"doing it with environment variables is OH SO SYSTEM FIVE LIKE OH MY GOD PASS ME THE SPOON",
 	"Linux is fucking POO, not just bad, bad REALLY REALLY BAD",
-	"openbsd development is slow because lots of developers have shrunken balls",
 	"penguins are not much more than chickens that swim.",
 	"i am a packet sniffing fool, let me wipe my face with my own poo",
-	"they are manual pages, not tea time chit-chats",
 	"Whiners.  They scale really well.",
 	"in your world, you would have a checklist of 50 fucking workarounds just to make a coffee.",
 	"for once, I have nothing to say.",
 	"You have no idea how fucked we are",
-	"You can call it fart if you want to."
+	"You can call it fart if you want to.",
+	"wavelan is a battle field",
+	"You are in a maze of gpio pins, all alike, all undocumented, and a few are wired to bombs."
 };
 
 static const int ntalk = sizeof(talk)/sizeof(talk[0]);
 
+/* ARGSUSED */
 static int
 theo_analyze(int f, int n)
 {

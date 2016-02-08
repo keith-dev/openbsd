@@ -1,4 +1,4 @@
-/*	$OpenBSD: extend.c,v 1.35 2005/08/09 00:53:48 kjell Exp $	*/
+/*	$OpenBSD: extend.c,v 1.44 2005/12/20 06:17:36 kjell Exp $	*/
 
 /* This file is in the public domain. */
 
@@ -9,6 +9,8 @@
 #include "def.h"
 #include "kbd.h"
 #include "funmap.h"
+
+#include <ctype.h>
 
 #ifndef NO_MACRO
 #include "macro.h"
@@ -23,13 +25,17 @@
 #endif /* !NO_STARTUP */
 #endif /* FKEYS */
 
+#include <ctype.h>
+
 static int	 remap(KEYMAP *, int, PF, KEYMAP *);
 static KEYMAP	*reallocmap(KEYMAP *);
 static void	 fixmap(KEYMAP *, KEYMAP *, KEYMAP *);
 static int	 dobind(KEYMAP *, const char *, int);
 static char	*skipwhite(char *);
 static char	*parsetoken(char *);
+#ifdef	BINDKEY
 static int	 bindkey(KEYMAP **, const char *, KCHAR *, int);
+#endif /* BINDKEY */
 
 /*
  * Insert a string, mainly for use from macros (created by selfinsert).
@@ -94,7 +100,7 @@ remap(KEYMAP *curmap,		/* pointer to the map being changed */
 	int		 i, n1, n2, nold;
 	KEYMAP		*mp, *newmap;
 	PF		*pfp;
-	MAP_ELEMENT	*mep;
+	struct map_element	*mep;
 
 	if (ele >= &curmap->map_element[curmap->map_num] || c < ele->k_base) {
 		if (ele > &curmap->map_element[0] && (funct != NULL ||
@@ -165,7 +171,7 @@ remap(KEYMAP *curmap,		/* pointer to the map being changed */
 				ele->k_prefmap = pref_map;
 			else {
 				if ((mp = (KEYMAP *)malloc(sizeof(KEYMAP) +
-				    (MAPINIT - 1) * sizeof(MAP_ELEMENT))) == NULL) {
+				    (MAPINIT - 1) * sizeof(struct map_element))) == NULL) {
 					ewprintf("Out of memory");
 					ele->k_funcp[c - ele->k_base] =
 					    curmap->map_default;
@@ -194,7 +200,7 @@ remap(KEYMAP *curmap,		/* pointer to the map being changed */
 				else {
 					if ((mp = malloc(sizeof(KEYMAP) +
 					    (MAPINIT - 1) *
-					    sizeof(MAP_ELEMENT))) == NULL) {
+					    sizeof(struct map_element))) == NULL) {
 						ewprintf("Out of memory");
 						ele->k_funcp[c - ele->k_base] =
 						    curmap->map_default;
@@ -241,7 +247,7 @@ remap(KEYMAP *curmap,		/* pointer to the map being changed */
 			curmap->map_num++;
 			if (pref_map == NULL) {
 				if ((mp = malloc(sizeof(KEYMAP) + (MAPINIT - 1)
-				    * sizeof(MAP_ELEMENT))) == NULL) {
+				    * sizeof(struct map_element))) == NULL) {
 					ewprintf("Out of memory");
 					ele->k_funcp[c - ele->k_base] =
 					    curmap->map_default;
@@ -264,13 +270,13 @@ remap(KEYMAP *curmap,		/* pointer to the map being changed */
 static KEYMAP *
 reallocmap(KEYMAP *curmap)
 {
-	MAPS	*mps;
+	struct maps_s	*mps;
 	KEYMAP	*mp;
 	int	 i;
 
 	if ((mp = (KEYMAP *)malloc((unsigned)(sizeof(KEYMAP) +
 	    (curmap->map_max + (MAPGROW - 1)) *
-	    sizeof(MAP_ELEMENT)))) == NULL) {
+	    sizeof(struct map_element)))) == NULL) {
 		ewprintf("Out of memory");
 		return (NULL);
 	}
@@ -320,7 +326,7 @@ dobind(KEYMAP *curmap, const char *p, int unbind)
 {
 	KEYMAP	*pref_map = NULL;
 	PF	 funct;
-	char	 prompt[80], *bufp, *pep;
+	char	 bprompt[80], *bufp, *pep;
 	int	 c, s, n;
 
 #ifndef NO_MACRO
@@ -347,15 +353,15 @@ dobind(KEYMAP *curmap, const char *p, int unbind)
 	} else {
 #endif /* !NO_STARTUP */
 #endif /* !NO_MACRO */
-		n = strlcpy(prompt, p, sizeof(prompt));
-		if (n >= sizeof(prompt))
-			n = sizeof(prompt) - 1;
-		pep = prompt + n;
+		n = strlcpy(bprompt, p, sizeof(bprompt));
+		if (n >= sizeof(bprompt))
+			n = sizeof(bprompt) - 1;
+		pep = bprompt + n;
 		for (;;) {
-			ewprintf("%s", prompt);
+			ewprintf("%s", bprompt);
 			pep[-1] = ' ';
-			pep = keyname(pep, sizeof(prompt) - (pep - prompt),
-			    c = getkey(FALSE));
+			pep = getkeyname(pep, sizeof(bprompt) -
+			    (pep - bprompt), c = getkey(FALSE));
 			if (doscan(curmap, c, &curmap) != NULL)
 				break;
 			*pep++ = '-';
@@ -367,13 +373,13 @@ dobind(KEYMAP *curmap, const char *p, int unbind)
 	if (unbind)
 		funct = rescan;
 	else {
-		if ((bufp = eread("%s to command: ", prompt, sizeof(prompt),
-		    EFFUNC | EFNEW, prompt)) == NULL)
+		if ((bufp = eread("%s to command: ", bprompt, sizeof(bprompt),
+		    EFFUNC | EFNEW, bprompt)) == NULL)
 			return (ABORT);
 		else if (bufp[0] == '\0')
 			return (FALSE);
-		if (((funct = name_function(prompt)) == NULL) ?
-		    (pref_map = name_map(prompt)) == NULL : funct == NULL) {
+		if (((funct = name_function(bprompt)) == NULL) ?
+		    (pref_map = name_map(bprompt)) == NULL : funct == NULL) {
 			ewprintf("[No match]");
 			return (FALSE);
 		}
@@ -429,10 +435,13 @@ dobindkey(KEYMAP *map, const char *func, const char *str)
 
 	for (i = 0; *str && i < MAXKEY; i++) {
 		/* XXX - convert numbers w/ strol()? */
-		if (*str != '\\')
-			key.k_chars[i] = *str;
-		else {
+		if (*str == '^' && *(str + 1) !=  '\0') {
+			key.k_chars[i] = CCHR(toupper(*++str));
+		} else if (*str == '\\' && *(str + 1) != '\0') {
 			switch (*++str) {
+			case '^':
+				key.k_chars[i] = '^';
+				break;
 			case 't':
 			case 'T':
 				key.k_chars[i] = '\t';
@@ -449,8 +458,12 @@ dobindkey(KEYMAP *map, const char *func, const char *str)
 			case 'E':
 				key.k_chars[i] = CCHR('[');
 				break;
+			case '\\':
+				key.k_chars[i] = '\\';
+				break;
 			}
-		}
+		} else
+			key.k_chars[i] = *str;
 		str++;
 	}
 	key.k_count = i;
@@ -485,13 +498,13 @@ localbind(int f, int n)
  */
 /* ARGSUSED */
 int
-define_key(int f, int n)
+redefine_key(int f, int n)
 {
 	static char	 buf[48];
 	char		 tmp[32], *bufp;
 	KEYMAP		*mp;
 
-	strlcpy(buf, "Define key map: ", sizeof(buf));
+	(void)strlcpy(buf, "Define key map: ", sizeof(buf));
 	if ((bufp = eread(buf, tmp, sizeof(tmp), EFNEW)) == NULL)
 		return (ABORT);
 	else if (bufp[0] == '\0')
@@ -501,17 +514,20 @@ define_key(int f, int n)
 		ewprintf("Unknown map %s", tmp);
 		return (FALSE);
 	}
-	strlcat(buf, "key: ", sizeof(buf));
+	if (strlcat(buf, "key: ", sizeof(buf)) >= sizeof(buf))
+		return (FALSE);
 
 	return (dobind(mp, buf, FALSE));
 }
 
+/* ARGSUSED */
 int
 unbindtokey(int f, int n)
 {
 	return (dobind(fundamental_map, "Global unset key: ", TRUE));
 }
 
+/* ARGSUSED */
 int
 localunbind(int f, int n)
 {
@@ -542,11 +558,11 @@ extend(int f, int n)
 	if ((funct = name_function(bufp)) != NULL) {
 #ifndef NO_MACRO
 		if (macrodef) {
-			LINE	*lp = maclcur;
+			struct line	*lp = maclcur;
 			macro[macrocount - 1].m_funct = funct;
 			maclcur = lp->l_bp;
 			maclcur->l_fp = lp->l_fp;
-			free((char *)lp);
+			free(lp);
 		}
 #endif /* !NO_MACRO */
 		return ((*funct)(f, n));
@@ -596,8 +612,8 @@ evalexpr(int f, int n)
 int
 evalbuffer(int f, int n)
 {
-	LINE		*lp;
-	BUFFER		*bp = curbp;
+	struct line		*lp;
+	struct buffer		*bp = curbp;
 	int		 s;
 	static char	 excbuf[128];
 
@@ -675,7 +691,7 @@ int
 excline(char *line)
 {
 	PF	 fp;
-	LINE	*lp, *np;
+	struct line	*lp, *np;
 	int	 status, c, f, n;
 	char	*funcp, *tmp;
 	char	*argp = NULL;
@@ -732,7 +748,7 @@ excline(char *line)
 	} else if (fp == localbind || fp == localunbind) {
 		bind = BINDARG;
 		curmap = curbp->b_modes[curbp->b_nmodes]->p_map;
-	} else if (fp == define_key)
+	} else if (fp == redefine_key)
 		bind = BINDNEXT;
 	else
 		bind = BINDNO;
@@ -865,10 +881,10 @@ excline(char *line)
 			if ((curmap = name_map(lp->l_text)) == NULL) {
 				ewprintf("No such mode: %s", lp->l_text);
 				status = FALSE;
-				free((char *)lp);
+				free(lp);
 				goto cleanup;
 			}
-			free((char *)lp);
+			free(lp);
 			bind = BINDARG;
 			break;
 		default:
@@ -909,10 +925,10 @@ cleanup:
 	lp = maclcur->l_fp;
 	while (lp != maclcur) {
 		np = lp->l_fp;
-		free((char *)lp);
+		free(lp);
 		lp = np;
 	}
-	free((char *)lp);
+	free(lp);
 	return (status);
 }
 

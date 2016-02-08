@@ -1,4 +1,4 @@
-/*	$OpenBSD: keymap.c,v 1.30 2005/06/14 18:14:40 kjell Exp $	*/
+/*	$OpenBSD: keymap.c,v 1.37 2005/11/18 20:56:53 deraadt Exp $	*/
 
 /* This file is in the public domain. */
 
@@ -26,7 +26,7 @@ static PF cHa[] = {
 	desckey			/* c */
 };
 
-static struct KEYMAPE (2 + IMAPEXT) helpmap = {
+struct KEYMAPE (2 + IMAPEXT) helpmap = {
 	2,
 	2 + IMAPEXT,
 	rescan,
@@ -81,8 +81,8 @@ static PF cXcL[] = {
 	rescan,			/* ^N */
 	deblank,		/* ^O */
 	rescan,			/* ^P */
-	rescan,			/* ^Q */
-	rescan,			/* ^R */
+	togglereadonly,		/* ^Q */
+	filevisitro,		/* ^R */
 	filesave,		/* ^S */
 	rescan,			/* ^T */
 	upperregion,		/* ^U */
@@ -113,15 +113,11 @@ static PF cXeq[] = {
 static PF cXcar[] = {
 	enlargewind,		/* ^ */
 	rescan,			/* _ */
-	rescan,			/* ` */
+	next_error,		/* ` */
 	rescan,			/* a */
 	usebuffer,		/* b */
 	rescan,			/* c */
-#ifndef NO_DIRED
-	dired,			/* d */
-#else /* !NO_DIRED */
 	rescan,			/* d */
-#endif /* !NO_DIRED */
 #ifndef NO_MACRO
 	executemacro,		/* e */
 #else /* !NO_MACRO */
@@ -146,7 +142,7 @@ static PF cXcar[] = {
 };
 
 #ifndef NO_MACRO
-static struct KEYMAPE (6 + IMAPEXT) cXmap = {
+struct KEYMAPE (6 + IMAPEXT) cXmap = {
 	6,
 	6 + IMAPEXT,
 #else /* !NO_MACRO */
@@ -252,7 +248,7 @@ static PF metatilde[] = {
 	delbword		/* DEL */
 };
 
-static struct KEYMAPE (8 + IMAPEXT) metamap = {
+struct KEYMAPE (8 + IMAPEXT) metamap = {
 	8,
 	8 + IMAPEXT,
 	rescan,
@@ -443,113 +439,11 @@ static struct KEYMAPE (1 + IMAPEXT) overwmap = {
 	}
 };
 
-#ifndef NO_DIRED
-static PF dirednul[] = {
-	setmark,		/* ^@ */
-	gotobol,		/* ^A */
-	backchar,		/* ^B */
-	rescan,			/* ^C */
-	d_del,			/* ^D */
-	gotoeol,		/* ^E */
-	forwchar,		/* ^F */
-	ctrlg,			/* ^G */
-#ifndef NO_HELP
-	NULL,			/* ^H */
-#endif /* !NO_HELP */
-};
 
-static PF diredcl[] = {
-	reposition,		/* ^L */
-	forwline,		/* ^M */
-	forwline,		/* ^N */
-	rescan,			/* ^O */
-	backline,		/* ^P */
-	rescan,			/* ^Q */
-	backisearch,		/* ^R */
-	forwisearch,		/* ^S */
-	rescan,			/* ^T */
-	universal_argument,	/* ^U */
-	forwpage,		/* ^V */
-	rescan,			/* ^W */
-	NULL			/* ^X */
-};
-
-static PF diredcz[] = {
-	spawncli,		/* ^Z */
-	NULL,			/* esc */
-	rescan,			/* ^\ */
-	rescan,			/* ^] */
-	rescan,			/* ^^ */
-	rescan,			/* ^_ */
-	forwline		/* SP */
-};
-
-static PF diredc[] = {
-	d_copy,			/* c */
-	d_del,			/* d */
-	d_findfile,		/* e */
-	d_findfile		/* f */
-};
-
-static PF diredn[] = {
-	forwline,		/* n */
-	d_ffotherwindow,	/* o */
-	backline,		/* p */
-	rescan,			/* q */
-	d_rename,		/* r */
-	rescan,			/* s */
-	rescan,			/* t */
-	d_undel,		/* u */
-	rescan,			/* v */
-	rescan,			/* w */
-	d_expunge		/* x */
-};
-
-static PF direddl[] = {
-	d_undelbak		/* del */
-};
-
-#ifndef	DIRED_XMAPS
-#define	NDIRED_XMAPS	0	/* number of extra map sections */
-#endif /* DIRED_XMAPS */
-
-static struct KEYMAPE (6 + NDIRED_XMAPS + IMAPEXT) diredmap = {
-	6 + NDIRED_XMAPS,
-	6 + NDIRED_XMAPS + IMAPEXT,
-	rescan,
-	{
-#ifndef NO_HELP
-		{
-			CCHR('@'), CCHR('H'), dirednul, (KEYMAP *) & helpmap
-		},
-#else /* !NO_HELP */
-		{
-			CCHR('@'), CCHR('G'), dirednul, NULL
-		},
-#endif /* !NO_HELP */
-		{
-			CCHR('L'), CCHR('X'), diredcl, (KEYMAP *) & cXmap
-		},
-		{
-			CCHR('Z'), ' ', diredcz, (KEYMAP *) & metamap
-		},
-		{
-			'c', 'f', diredc, NULL
-		},
-		{
-			'n', 'x', diredn, NULL
-		},
-		{
-			CCHR('?'), CCHR('?'), direddl, NULL
-		},
-#ifdef	DIRED_XMAPS
-		DIRED_XMAPS,	/* map sections for dired mode keys	 */
-#endif /* DIRED_XMAPS */
-	}
-};
-#endif /* !NO_DIRED */
-
-MAPS	fundamental_mode = { (KEYMAP *)&fundmap, "fundamental" };
+/*
+ * The basic (root) keyboard map
+ */
+struct maps_s	fundamental_mode = { (KEYMAP *)&fundmap, "fundamental" };
 
 /*
  * give names to the maps, for use by help etc. If the map is to be bindable,
@@ -560,7 +454,7 @@ MAPS	fundamental_mode = { (KEYMAP *)&fundmap, "fundamental" };
  * modes.c also.
  */
 
-static MAPS map_table[] = {
+static struct maps_s map_table[] = {
 	{(KEYMAP *) &fillmap, "fill",},
 	{(KEYMAP *) &indntmap, "indent",},
 	{(KEYMAP *) &blinkmap, "blink",},
@@ -574,19 +468,16 @@ static MAPS map_table[] = {
 #ifndef NO_HELP
 	{(KEYMAP *) &helpmap, "help",},
 #endif
-#ifndef NO_DIRED
-	{(KEYMAP *) &diredmap, "dired",},
-#endif
 	{NULL, NULL}
 };
 
-MAPS *maps;
+struct maps_s *maps;
 
 void
 maps_init(void)
 {
 	int	 i;
-	MAPS	*mp;
+	struct maps_s	*mp;
 
 	maps = &fundamental_mode;
 	for (i = 0; map_table[i].p_name != NULL; i++) {
@@ -596,10 +487,13 @@ maps_init(void)
 	}
 }
 
+/*
+ * Insert a new (named) keymap at the head of the keymap list.
+ */
 int
 maps_add(KEYMAP *map, const char *name)
 {
-	MAPS	*mp;
+	struct maps_s	*mp;
 
 	if ((mp = malloc(sizeof(*mp))) == NULL)
 		return (FALSE);
@@ -615,7 +509,7 @@ maps_add(KEYMAP *map, const char *name)
 const char *
 map_name(KEYMAP *map)
 {
-	MAPS	*mp;
+	struct maps_s	*mp;
 
 	for (mp = maps; mp != NULL; mp = mp->p_next)
 		if (mp->p_map == map)
@@ -623,10 +517,10 @@ map_name(KEYMAP *map)
 	return (NULL);
 }
 
-MAPS *
+struct maps_s *
 name_mode(const char *name)
 {
-	MAPS	*mp;
+	struct maps_s	*mp;
 
 	for (mp = maps; mp != NULL; mp = mp->p_next)
 		if (strcmp(mp->p_name, name) == 0)
@@ -637,6 +531,7 @@ name_mode(const char *name)
 KEYMAP *
 name_map(const char *name)
 {
-	MAPS	*mp;
+	struct maps_s	*mp;
+
 	return ((mp = name_mode(name)) == NULL ? NULL : mp->p_map);
 }

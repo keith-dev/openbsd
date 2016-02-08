@@ -1,4 +1,4 @@
-/* $OpenBSD: mail.c,v 1.6 2005/08/09 00:53:48 kjell Exp $ */
+/* $OpenBSD: mail.c,v 1.9 2005/11/18 20:56:53 deraadt Exp $ */
 /*
  * This file is in the public domain.
  *
@@ -10,6 +10,7 @@
 #include "kbd.h"
 #include "funmap.h"
 
+void		 mail_init(void);
 static int	 fake_self_insert(int, int);
 static int	 mail(int, int);
 
@@ -78,6 +79,7 @@ mail_init(void)
 	maps_add((KEYMAP *)&mailmap, "mail-mode");
 }
 
+/* ARGSUSED */
 static int
 mail(int f, int n)
 {
@@ -125,7 +127,7 @@ fake_self_insert(int f, int n)
 			 */
 			const char *trail;
 			int save_doto = curwp->w_doto;
-			LINE *save_dotp = curwp->w_dotp;
+			struct line *save_dotp = curwp->w_dotp;
 			int tlen = len - col;
 
 			trail = curwp->w_dotp->l_text + col;

@@ -25,7 +25,7 @@ changecom(,)dnl
 .\" OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
 .\" SUCH DAMAGE.
 .\"
-.\" $OpenBSD: ppp.8.m4,v 1.30 2005/07/26 06:01:02 jmc Exp $
+.\" $OpenBSD: ppp.8.m4,v 1.37 2005/09/22 14:03:39 jmc Exp $
 .\"
 .Dd September 20, 1995
 .Dt PPP 8
@@ -850,7 +850,7 @@ file:
 ppp ON awfulhak> load MyISP
 .Ed
 .Pp
-Note, no action is taken by
+Note: no action is taken by
 .Nm
 after a section is loaded, whether it's the result of passing a label on
 the command line or using the
@@ -2341,6 +2341,14 @@ Generate LQR reports.
 Phase transition log output.
 .It Li Physical
 Dump physical level packet in hex.
+.It Li Radius
+Dump RADIUS information.
+RADIUS information resulting from the link coming up or down is logged at
+.Dq Phase
+level unless
+.Dq Radius
+logging is enabled.
+This log level is most useful for monitoring RADIUS alive information.
 .It Li Sync
 Dump sync level packet in hex.
 .It Li TCP/IP
@@ -2938,7 +2946,7 @@ will send
 .Em LCP ECHO
 requests to the peer at the frequency defined by
 .Dq echoperiod .
-Note,
+Note:
 .Em LQR
 requests will supersede
 .Em LCP ECHO
@@ -3094,6 +3102,49 @@ the other end.
 It is convenient to have this option enabled when
 the interface is also the default route as it avoids the necessity
 of a loopback route.
+.It NAS-IP-Address
+Default: Enabled.
+This option controls whether
+.Nm
+sends the
+.Dq NAS-IP-Address
+attribute to the RADIUS server when RADIUS is in use
+.Pq see Dq set radius .
+.Pp
+Note: at least one of
+.Dq NAS-IP-Address
+and
+.Dq NAS-Identifier
+must be enabled.
+.Pp
+Versions of
+.Nm
+prior to version 3.4.1 did not send the
+.Dq NAS-IP-Address
+attribute as it was reported to break the Radiator RADIUS server.
+As the latest RFC (2865) no longer hints that only one of
+.Dq NAS-IP-Address
+and
+.Dq NAS-Identifier
+should be sent (as RFC 2138 did),
+.Nm
+now sends both and leaves it up to the administrator that chooses to use
+bad RADIUS implementations to
+.Dq disable NAS-IP-Address .
+.It NAS-Identifier
+Default: Enabled.
+This option controls whether
+.Nm
+sends the
+.Dq NAS-Identifier
+attribute to the RADIUS server when RADIUS is in use
+.Pq see Dq set radius .
+.Pp
+Note: at least one of
+.Dq NAS-IP-Address
+and
+.Dq NAS-Identifier
+must be enabled.
 .It passwdauth
 Default: Disabled.
 Enabling this option will tell the PAP authentication
@@ -4350,7 +4401,7 @@ If
 .Nm
 is the caller, only a single number should be specified.
 .Pp
-Note, this option is very unsafe when used with a
+Note: this option is very unsafe when used with a
 .Sq \&*
 as a malicious caller can tell
 .Nm
@@ -5291,7 +5342,7 @@ word replacements done by the shell commands (see the
 .Ic bg
 command above) are done here too.
 .Pp
-Note, if USER is required in the process title, the
+Note: if USER is required in the process title, the
 .Ic set proctitle
 command must appear in
 .Pa ppp.linkup ,
@@ -5397,6 +5448,58 @@ or
 .Dv HISADDR
 keywords.
 .Pp
+.It RAD_FRAMED_IPV6_PREFIX
+If this attribute is supplied, the value is substituted for IPV6PREFIX
+in a command.
+You may pass it to an upper layer protocol,
+such as DHCPv6,
+for delegating an IPv6 prefix to a peer.
+.It RAD_FRAMED_IPV6_ROUTE
+The received string is expected to be in the format
+.Ar dest Ns Op / Ns Ar bits
+.Ar gw
+.Op Ar metrics .
+Any specified metrics are ignored.
+.Dv MYADDR6
+and
+.Dv HISADDR6
+are understood as valid values for
+.Ar dest
+and
+.Ar gw ;
+.Dq default
+can be used for
+.Ar dest
+to specify the default route; and
+.Dq ::
+is understood to be the same as
+.Dq default
+for
+.Ar dest
+and
+.Dv HISADDR6
+for
+.Ar gw .
+.Pp
+For example, a returned value of
+.Dq 3ffe:505:abcd::/48 ::
+would result in a routing table entry to the 3ffe:505:abcd::/48 network via
+.Dv HISADDR6
+and a returned value of
+.Dq :: ::
+or
+.Dq default HISADDR6
+would result in a default route to
+.Dv HISADDR6 .
+.Pp
+All RADIUS IPv6 routes are applied after any sticky routes are
+applied, making RADIUS IPv6 routes override configured routes.
+This also applies for RADIUS IPv6 routes that don't {include} the
+.Dv MYADDR6
+or
+.Dv HISADDR6
+keywords.
+.Pp
 .It RAD_SESSION_TIMEOUT
 If supplied, the client connection is closed after the given number of
 seconds.
@@ -5433,7 +5536,7 @@ If either or both are set, 40-bit and/or 128-bit (respectively) encryption
 options are set, overriding any given first argument to the
 .Ic set mppe
 command.
-Note, it is not currently possible for the RADIUS server to specify 56-bit
+Note: it is not currently possible for the RADIUS server to specify 56-bit
 encryption.
 .It RAD_MICROSOFT_MS_MPPE_RECV_KEY
 If this
@@ -5455,6 +5558,16 @@ to function.
 .Pp
 Values received from the RADIUS server may be viewed using
 .Ic show bundle .
+.It Ic set rad_alive Ar timeout
+When RADIUS is configured, setting
+.Dq rad_alive
+to a non-zero
+.Ar timeout
+value will tell
+.Nm
+to sent RADIUS accounting information to the RADIUS server every
+.Ar timeout
+seconds.
 .It Ic set reconnect Ar timeout ntries
 Should the line drop unexpectedly (due to loss of CD or LQR
 failure), a connection will be re-established after the given
@@ -5515,7 +5628,7 @@ times.
 .Ar max
 defaults to 10.
 .Pp
-Note, the
+Note: the
 .Ar secs
 delay will be effective, even after
 .Ar attempts
@@ -5870,7 +5983,7 @@ A file to check when
 closes a network level connection.
 .It Pa /var/log/ppp.log
 Logging and debugging information file.
-Note, this name is specified in
+Note: this name is specified in
 .Pa /etc/syslog.conf .
 See
 .Xr syslog.conf 5

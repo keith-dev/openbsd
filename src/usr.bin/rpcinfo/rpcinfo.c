@@ -1,9 +1,9 @@
-/*	$OpenBSD: rpcinfo.c,v 1.9 2003/06/10 22:20:50 deraadt Exp $	*/
+/*	$OpenBSD: rpcinfo.c,v 1.11 2006/01/20 00:01:20 millert Exp $	*/
 
 #ifndef lint
 /*static char sccsid[] = "from: @(#)rpcinfo.c 1.22 87/08/12 SMI";*/
 /*static char sccsid[] = "from: @(#)rpcinfo.c	2.2 88/08/11 4.0 RPCSRC";*/
-static char rcsid[] = "$OpenBSD: rpcinfo.c,v 1.9 2003/06/10 22:20:50 deraadt Exp $";
+static char rcsid[] = "$OpenBSD: rpcinfo.c,v 1.11 2006/01/20 00:01:20 millert Exp $";
 #endif
 
 /*
@@ -56,6 +56,7 @@ static char rcsid[] = "$OpenBSD: rpcinfo.c,v 1.9 2003/06/10 22:20:50 deraadt Exp
 #include <unistd.h>
 #include <ctype.h>
 #include <errno.h>
+#include <limits.h>
 #include <arpa/inet.h>
 
 #define MAXHOSTLEN 256
@@ -622,10 +623,17 @@ setreg(int argc, char **argv)
 	if (port_num >= 65536)
 		usage("port number out of range");
 		
-	if ((pmap_set(prog_num, version_num, PF_INET,
+	if ((pmap_set(prog_num, version_num, IPPROTO_TCP,
 	    (u_short)port_num)) == 0) {
 		fprintf(stderr, "rpcinfo: Could not set registration "
-		    "for prog %s version %s port %s\n",
+		    "for prog %s version %s port %s protocol IPPROTO_TCP\n",
+		    argv[0], argv[1], argv[2]);
+		exit(1);
+	}
+	if ((pmap_set(prog_num, version_num, IPPROTO_UDP,
+	    (u_short)port_num)) == 0) {
+		fprintf(stderr, "rpcinfo: Could not set registration "
+		    "for prog %s version %s port %s protocol IPPROTO_UDP\n",
 		    argv[0], argv[1], argv[2]);
 		exit(1);
 	}

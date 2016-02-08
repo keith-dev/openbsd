@@ -1,4 +1,4 @@
-.\"	$OpenBSD: ifconfig.8,v 1.110 2005/06/14 03:54:31 henning Exp $
+.\"	$OpenBSD: ifconfig.8,v 1.118 2006/02/21 17:07:14 jmc Exp $
 .\"	$NetBSD: ifconfig.8,v 1.11 1996/01/04 21:27:29 pk Exp $
 .\"     $FreeBSD: ifconfig.8,v 1.16 1998/02/01 07:03:29 steve Exp $
 .\"
@@ -108,6 +108,8 @@
 .Ar vlan-interface
 .Cm vlan
 .Ar vlan-tag
+.Cm vlanprio
+.Ar vlan-priority
 .Cm vlandev
 .Ar parent-interface
 .Sh DESCRIPTION
@@ -162,8 +164,8 @@ Print the names of all network pseudo-devices that
 can be created dynamically at runtime using
 .Cm ifconfig create .
 .It Fl M
-For the chosen 802.11 interfaces, show the results of an access point
-scan.
+For the chosen IEEE 802.11-based wireless network interface, show the
+results of an access point scan.
 In Host AP mode, this will dump the list of known nodes.
 .It Fl m Ar interface
 Print media information for a given
@@ -230,6 +232,9 @@ supported are
 .Dq atalk ,
 and
 .Dq ipx .
+.It Ar dest_address
+Specify the address of the correspondent on the other end
+of a point-to-point link.
 .It Ar interface
 The
 .Ar interface
@@ -286,7 +291,10 @@ Establish an additional network address for this interface.
 This is sometimes useful when changing network numbers, and
 one wishes to accept packets addressed to the old interface.
 .It Fl alias
-Remove the specified network address alias.
+A synonym for
+.Cm delete .
+Use of this option is discouraged in favour of
+.Cm delete .
 .It Cm anycast
 (inet6 only)
 Set the IPv6 anycast address bit.
@@ -357,19 +365,20 @@ extra console error logging.
 .It Fl debug
 Disable driver-dependent debugging code.
 .It Cm delete
-Remove the network address specified.
-This would be used if you incorrectly specified an alias, or it
-was no longer needed.
+Remove the specified network address,
+including any netmask or destination address configured with this address.
 .It Cm deletetunnel
-Removes the source and destination tunnel addresses,
-configured onto a tunnel interface.
+.Pf ( Xr gif 4
+and
+.Xr gre 4
+devices only)
+Remove the source and destination tunnel addresses.
 .It Cm description Ar value
 Specify a description of the interface.
 This can be used to label interfaces in situations where they may
 otherwise be difficult to distinguish.
-.It Ar dest_address
-Specify the address of the correspondent on the other end
-of a point-to-point link.
+.It Cm -description
+Clear the interface description.
 .It Cm destroy
 Destroy the specified network pseudo-device.
 .It Cm down
@@ -777,6 +786,14 @@ pseudo-device, disassociate the physical interface
 from it.
 This breaks the link between the vlan interface and its parent,
 clears its vlan tag, flags, and link address, and shuts the interface down.
+.It Cm vlanprio Ar vlan-priority
+If the interface is a
+.Xr vlan 4
+pseudo-interface, set the vlan priority value
+to
+.Ar vlan-priority .
+This value is a 3-bit number which is used to create an 802.1Q
+vlan header for packets sent from the vlan interface.
 .It Cm vltime Ar n
 (inet6 only)
 Set valid lifetime for the address.

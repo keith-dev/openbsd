@@ -1,9 +1,12 @@
-# $OpenBSD: Makefile,v 1.29 2005/08/17 09:45:45 espie Exp $
+# $OpenBSD: Makefile,v 1.33 2005/09/18 02:56:12 deraadt Exp $
 
 .include <bsd.own.mk>
 
-MAN=pkg_add.1 pkg_info.1 pkg_create.1 pkg_delete.1 pkg_merge.1 \
+MAN1=pkg_add.1 pkg_info.1 pkg_create.1 pkg_delete.1 pkg_merge.1 \
 	pkg.1 pkg_mklocatedb.1
+MAN5=package.5
+MAN=${MAN1} ${MAN5}
+
 POD2MAN=/usr/bin/pod2man
 
 PACKAGES= \
@@ -15,6 +18,7 @@ PACKAGES= \
     OpenBSD/Error.pm \
     OpenBSD/Getopt.pm \
     OpenBSD/IdCache.pm \
+    OpenBSD/Interactive.pm \
     OpenBSD/Mtree.pm \
     OpenBSD/PackageInfo.pm \
     OpenBSD/PackageLocator.pm \
@@ -34,6 +38,7 @@ PACKAGES= \
     OpenBSD/Vstat.pm \
     OpenBSD/md5.pm \
 
+PACKAGEDIRS=OpenBSD
 
 SCRIPTS= \
     pkg_add \
@@ -78,9 +83,11 @@ $p.3p: pod/$p.pod
 	${POD2MAN} --section=3p --official --name=$p ${.ALLSRC} $@
 .endfor
 .ifndef NOMAN
-MANALL+=${MAN:S/.1$/.cat1/}
+MANALL+=${MAN1:S/.1$/.cat1/}
+MANALL+=${MAN5:S/.5$/.cat5/}
 .  ifdef MANPS
-PSALL+= ${MAN:S/.1$/.ps1/}
+PSALL+= ${MAN1:S/.1$/.ps1/}
+PSALL+= ${MAN5:S/.5$/.ps5/}
 .  endif
 .endif
 
@@ -98,9 +105,11 @@ stamp-mansrc.build:
 	@touch $@
 
 install: 
-.for i in ${PACKAGES}
+.for i in ${PACKAGEDIRS}
 	${INSTALL} -d -o ${LIBOWN} -g ${LIBGRP} -m ${DIRMODE} \
-		${DESTDIR}${LIBBASE}/${i:H}
+		${DESTDIR}${LIBBASE}/$i
+.endfor
+.for i in ${PACKAGES}
 	${INSTALL} ${INSTALL_COPY} -o ${LIBOWN} -g ${LIBGRP} -m ${LIBMODE} \
 		${.CURDIR}/$i ${DESTDIR}${LIBBASE}/$i
 .endfor

@@ -1,4 +1,4 @@
-/*	$OpenBSD: commit.c,v 1.46 2005/07/27 16:42:19 xsa Exp $	*/
+/*	$OpenBSD: commit.c,v 1.51 2006/01/02 08:11:56 xsa Exp $	*/
 /*
  * Copyright (c) 2004 Jean-Francois Brousseau <jfb@openbsd.org>
  * All rights reserved.
@@ -24,16 +24,7 @@
  * ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include <sys/types.h>
-#include <sys/queue.h>
-#include <sys/stat.h>
-
-#include <errno.h>
-#include <fcntl.h>
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-#include <unistd.h>
+#include "includes.h"
 
 #include "buf.h"
 #include "cvs.h"
@@ -88,11 +79,7 @@ cvs_commit_init(struct cvs_cmd *cmd, int argc, char **argv, int *arg)
 			cmd->file_flags &= ~CF_RECURSE;
 			break;
 		case 'm':
-			cvs_msg = strdup(optarg);
-			if (cvs_msg == NULL) {
-				cvs_log(LP_ERRNO, "failed to copy message");
-				return (CVS_EX_USAGE);
-			}
+			cvs_msg = xstrdup(optarg);
 			break;
 		case 'R':
 			cmd->file_flags |= CF_RECURSE;
@@ -110,8 +97,8 @@ cvs_commit_init(struct cvs_cmd *cmd, int argc, char **argv, int *arg)
 		return (CVS_EX_USAGE);
 	}
 
-	if ((mfile != NULL) && (cvs_msg = cvs_logmsg_open(mfile)) == NULL)
-		return (CVS_EX_DATA);
+	if (mfile != NULL)
+		cvs_msg = cvs_logmsg_open(mfile);
 
 	*arg = optind;
 
@@ -191,13 +178,11 @@ cvs_commit_pre_exec(struct cvsroot *root)
 		return (CVS_EX_DATA);
 
 	if (root->cr_method != CVS_METHOD_LOCAL) {
-		if (cvs_logmsg_send(root, cvs_msg) < 0)
-			return (CVS_EX_PROTO);
+		cvs_logmsg_send(root, cvs_msg);
 
 		if (rev != NULL) {
-			if ((cvs_sendarg(root, "-r", 0) < 0) ||
-			    (cvs_sendarg(root, rev, 0) < 0))
-				return (CVS_EX_PROTO);
+			cvs_sendarg(root, "-r", 0);
+			cvs_sendarg(root, rev, 0);
 		}
 	}
 
@@ -247,10 +232,8 @@ cvs_commit_remote(CVSFILE *cf, void *arg)
 	root = CVS_DIR_ROOT(cf);
 
 	if (cf->cf_type == DT_DIR) {
-		if (cf->cf_cvstat != CVS_FST_UNKNOWN) {
-			if (cvs_senddir(root, cf) < 0)
-				return (CVS_EX_PROTO);
-		}
+		if (cf->cf_cvstat != CVS_FST_UNKNOWN)
+			cvs_senddir(root, cf);
 		return (0);
 	}
 
@@ -262,9 +245,7 @@ cvs_commit_remote(CVSFILE *cf, void *arg)
 	if ((cf->cf_cvstat == CVS_FST_ADDED) ||
 	    (cf->cf_cvstat == CVS_FST_MODIFIED) ||
 	    (cf->cf_cvstat == CVS_FST_REMOVED)) {
-		if (cvs_sendentry(root, cf) < 0) {
-			return (CVS_EX_PROTO);
-		}
+		cvs_sendentry(root, cf);
 
 		/* if it's removed, don't bother sending a
 		 * Modified request together with the file its
@@ -273,12 +254,8 @@ cvs_commit_remote(CVSFILE *cf, void *arg)
 		if (cf->cf_cvstat == CVS_FST_REMOVED)
 			return (0);
 
-		if (cvs_sendreq(root, CVS_REQ_MODIFIED, cf->cf_name) < 0)
-			return (CVS_EX_PROTO);
-
-		if (cvs_sendfile(root, fpath) < 0) {
-			return (CVS_EX_PROTO);
-		}
+		cvs_sendreq(root, CVS_REQ_MODIFIED, cf->cf_name);
+		cvs_sendfile(root, fpath);
 	}
 
 	return (0);
@@ -296,9 +273,7 @@ cvs_commit_local(CVSFILE *cf, void *arg)
 	}
 
 	cvs_file_getpath(cf, fpath, sizeof(fpath));
-
-	if (cvs_rcs_getpath(cf, rcspath, sizeof(rcspath)) == NULL)
-		return (CVS_EX_DATA);
+	cvs_rcs_getpath(cf, rcspath, sizeof(rcspath));
 
 	return (0);
 }

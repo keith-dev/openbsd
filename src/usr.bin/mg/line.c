@@ -1,4 +1,4 @@
-/*	$OpenBSD: line.c,v 1.23 2005/06/14 18:14:40 kjell Exp $	*/
+/*	$OpenBSD: line.c,v 1.37 2005/12/20 06:17:36 kjell Exp $	*/
 
 /* This file is in the public domain. */
 
@@ -20,38 +20,17 @@
 
 #include "def.h"
 
-/*
- * The number of bytes member from the start of the structure type should be
- * computed at compile time.
- */
-
-#ifndef OFFSET
-#define OFFSET(type,member) ((char *)&(((type *)0)->member)-(char *)((type *)0))
-#endif
-
-#ifndef NBLOCK
-#define NBLOCK	16		/* Line block chunk size.	 */
-#endif
-
-#ifndef KBLOCK
-#define KBLOCK	256		/* Kill buffer block size.	 */
-#endif
-
-static char	*kbufp = NULL;	/* Kill buffer data.		 */
-static RSIZE	 kused = 0;	/* # of bytes used in KB.	 */
-static RSIZE	 ksize = 0;	/* # of bytes allocated in KB.	 */
-static RSIZE	 kstart = 0;	/* # of first used byte in KB.	 */
-
-static int	 kgrow(int);
+#include <stdlib.h>
+#include <string.h>
 
 /*
  * Allocate a new line of size `used'.  lrealloc() can be called if the line
  * ever needs to grow beyond that.
  */
-LINE *
+struct line *
 lalloc(int used)
 {
-	LINE *lp;
+	struct line *lp;
 
 	if ((lp = malloc(sizeof(*lp))) == NULL)
 		return (NULL);
@@ -66,7 +45,7 @@ lalloc(int used)
 }
 
 int
-lrealloc(LINE *lp, int newsize)
+lrealloc(struct line *lp, int newsize)
 {
 	char *tmp;
 
@@ -86,10 +65,10 @@ lrealloc(LINE *lp, int newsize)
  * magic conditions described in the above comments don't hold here.
  */
 void
-lfree(LINE *lp)
+lfree(struct line *lp)
 {
-	BUFFER	*bp;
-	MGWIN	*wp;
+	struct buffer	*bp;
+	struct mgwin	*wp;
 
 	for (wp = wheadp; wp != NULL; wp = wp->w_wndp) {
 		if (wp->w_linep == lp)
@@ -132,7 +111,7 @@ lfree(LINE *lp)
 void
 lchange(int flag)
 {
-	MGWIN	*wp;
+	struct mgwin	*wp;
 
 	/* update mode lines if this is the first change. */
 	if ((curbp->b_flag & BFCHG) == 0) {
@@ -160,8 +139,8 @@ lchange(int flag)
 int
 linsert_str(const char *s, int n)
 {
-	LINE	*lp1;
-	MGWIN	*wp;
+	struct line	*lp1;
+	struct mgwin	*wp;
 	RSIZE	 i;
 	int	 doto;
 
@@ -180,7 +159,7 @@ linsert_str(const char *s, int n)
 
 	/* special case for the end */
 	if (lp1 == curbp->b_linep) {
-		LINE *lp2, *lp3;
+		struct line *lp2, *lp3;
 
 		/* now should only happen in empty buffer */
 		if (curwp->w_doto != 0)
@@ -250,8 +229,8 @@ linsert_str(const char *s, int n)
 int
 linsert(int n, int c)
 {
-	LINE	*lp1;
-	MGWIN	*wp;
+	struct line	*lp1;
+	struct mgwin	*wp;
 	RSIZE	 i;
 	int	 doto;
 
@@ -270,7 +249,7 @@ linsert(int n, int c)
 
 	/* special case for the end */
 	if (lp1 == curbp->b_linep) {
-		LINE *lp2, *lp3;
+		struct line *lp2, *lp3;
 
 		/* now should only happen in empty buffer */
 		if (curwp->w_doto != 0) {
@@ -331,19 +310,15 @@ linsert(int n, int c)
 }
 
 int
-lnewline_at(LINE *lp1, int doto)
+lnewline_at(struct line *lp1, int doto)
 {
-	LINE	*lp2;
+	struct line	*lp2;
 	int	 nlen;
-	MGWIN	*wp;
+	struct mgwin	*wp;
 
 	lchange(WFHARD);
 
-	undo_add_boundary();
-	undo_add_insert(lp1, llength(lp1), 1);
-	undo_add_boundary();
-
-	/* avoid unnecessary copying */
+	/* If start of line, allocate a new line instead of copying */
 	if (doto == 0) {
 		/* new first part */
 		if ((lp2 = lalloc(0)) == NULL)
@@ -355,6 +330,9 @@ lnewline_at(LINE *lp1, int doto)
 		for (wp = wheadp; wp != NULL; wp = wp->w_wndp)
 			if (wp->w_linep == lp1)
 				wp->w_linep = lp2;
+		undo_add_boundary();
+		undo_add_insert(lp2, 0, 1);
+		undo_add_boundary();
 		return (TRUE);
 	}
 
@@ -382,6 +360,9 @@ lnewline_at(LINE *lp1, int doto)
 			wp->w_marko -= doto;
 		}
 	}
+	undo_add_boundary();
+	undo_add_insert(lp1, llength(lp1), 1);
+	undo_add_boundary();
 	return (TRUE);
 }
 
@@ -400,34 +381,35 @@ lnewline(void)
 }
 
 /*
- * This function deletes "n" bytes, starting at dot. It understands how to
- * deal with end of lines, etc.  It returns TRUE if all of the characters
- * were deleted, and FALSE if they were not (because dot ran into the end
- * of the buffer.  The "kflag" indicates either no insertion, or direction
- * of insertion into the kill buffer.
+ * This function deletes "n" bytes, starting at dot. (actually, n+1, as the
+ * newline is included) It understands how to deal with end of lines, etc.
+ * It returns TRUE if all of the characters were deleted, and FALSE if
+ * they were not (because dot ran into the end of the buffer).
+ * The "kflag" indicates either no insertion, or direction  of insertion
+ * into the kill buffer.
  */
 int
 ldelete(RSIZE n, int kflag)
 {
-	LINE	*dotp;
-	RSIZE	 chunk;
-	MGWIN	*wp;
-	int	 doto;
-	char	*cp1, *cp2;
+	struct line	*dotp;
+	RSIZE		 chunk;
+	struct mgwin	*wp;
+	int		 doto;
+	char		*cp1, *cp2;
+	size_t		 len;
+	char		*sv;
+	int		 end;
 
 	if (curbp->b_flag & BFREADONLY) {
 		ewprintf("Buffer is read only");
 		return (FALSE);
 	}
+	len = n;
+	if ((sv = calloc(1, len + 1)) == NULL)
+		return (FALSE);
+	end = 0;
 
 	undo_add_delete(curwp->w_dotp, curwp->w_doto, n);
-
-	/*
-	 * HACK - doesn't matter, and fixes back-over-nl bug for empty
-	 *	kill buffers.
-	 */
-	if (kused == kstart)
-		kflag = KFORW;
 
 	while (n != 0) {
 		dotp = curwp->w_dotp;
@@ -446,29 +428,18 @@ ldelete(RSIZE n, int kflag)
 				/* End of buffer */
 				return (FALSE);
 			lchange(WFHARD);
-			if (ldelnewline() == FALSE ||
-			    (kflag != KNONE && kinsert('\n', kflag) == FALSE))
+			if (ldelnewline() == FALSE)
 				return (FALSE);
+			end = strlcat(sv, "\n", len + 1);
 			--n;
 			continue;
 		}
 		lchange(WFEDIT);
 		/* Scrunch text */
 		cp1 = &dotp->l_text[doto];
-		if (kflag == KFORW) {
-			while (ksize - kused < chunk)
-				if (kgrow(FALSE) == FALSE)
-					return (FALSE);
-			bcopy(cp1, &(kbufp[kused]), (int)chunk);
-			kused += chunk;
-		} else if (kflag == KBACK) {
-			while (kstart < chunk)
-				if (kgrow(TRUE) == FALSE)
-					return (FALSE);
-			bcopy(cp1, &(kbufp[kstart - chunk]), (int)chunk);
-			kstart -= chunk;
-		} else if (kflag != KNONE)
-			panic("broken ldelete call");
+		memcpy(&sv[end], cp1, chunk);
+		end += chunk;
+		sv[end] = '\0';
 		for (cp2 = cp1 + chunk; cp2 < &dotp->l_text[dotp->l_used];
 		    cp2++)
 			*cp1++ = *cp2;
@@ -489,6 +460,9 @@ ldelete(RSIZE n, int kflag)
 		}
 		n -= chunk;
 	}
+	if (kchunk(sv, (RSIZE)len, kflag) != TRUE)
+		return (FALSE);
+	free(sv);
 	return (TRUE);
 }
 
@@ -504,8 +478,8 @@ ldelete(RSIZE n, int kflag)
 int
 ldelnewline(void)
 {
-	LINE	*lp1, *lp2, *lp3;
-	MGWIN	*wp;
+	struct line	*lp1, *lp2, *lp3;
+	struct mgwin	*wp;
 
 	if (curbp->b_flag & BFREADONLY) {
 		ewprintf("Buffer is read only");
@@ -534,7 +508,7 @@ ldelnewline(void)
 		lp1->l_used += lp2->l_used;
 		lp1->l_fp = lp2->l_fp;
 		lp2->l_fp->l_bp = lp1;
-		free((char *)lp2);
+		free(lp2);
 		return (TRUE);
 	}
 	if ((lp3 = lalloc(lp1->l_used + lp2->l_used)) == NULL)
@@ -561,8 +535,8 @@ ldelnewline(void)
 			wp->w_marko += lp1->l_used;
 		}
 	}
-	free((char *)lp1);
-	free((char *)lp2);
+	free(lp1);
+	free(lp2);
 	return (TRUE);
 }
 
@@ -573,160 +547,25 @@ ldelnewline(void)
  * was there).
  */
 int
-lreplace(RSIZE plen, char *st, int f)
+lreplace(RSIZE plen, char *st)
 {
 	RSIZE	rlen;	/* replacement length		 */
-	int	rtype;	/* capitalization		 */
-	int	c;	/* used for random characters	 */
-	int	doto;	/* offset into line		 */
 
 	if (curbp->b_flag & BFREADONLY) {
 		ewprintf("Buffer is read only");
 		return (FALSE);
 	}
+	undo_add_boundary();
+	undo_no_boundary(TRUE);
 
-	undo_add_change(curwp->w_dotp, curwp->w_doto, plen);
-
-	/*
-	 * Find the capitalization of the word that was found.  f says use
-	 * exact case of replacement string (same thing that happens with
-	 * lowercase found), so bypass check.
-	 */
-	/* NOSTRICT */
 	(void)backchar(FFARG | FFRAND, (int)plen);
-	rtype = _MG_L;
-	c = lgetc(curwp->w_dotp, curwp->w_doto);
-	if (ISUPPER(c) != FALSE && f == FALSE) {
-		rtype = _MG_U | _MG_L;
-		if (curwp->w_doto + 1 < llength(curwp->w_dotp)) {
-			c = lgetc(curwp->w_dotp, curwp->w_doto + 1);
-			if (ISUPPER(c) != FALSE) {
-				rtype = _MG_U;
-			}
-		}
-	}
+	(void)ldelete(plen, KNONE);
 
-	/*
-	 * make the string lengths match (either pad the line
-	 * so that it will fit, or scrunch out the excess).
-	 * be careful with dot's offset.
-	 */
 	rlen = strlen(st);
-	doto = curwp->w_doto;
-	if (plen > rlen)
-		(void)ldelete((RSIZE) (plen - rlen), KNONE);
-	else if (plen < rlen) {
-		if (linsert((int)(rlen - plen), ' ') == FALSE)
-			return (FALSE);
-	}
-	curwp->w_doto = doto;
-
-	/*
-	 * do the replacement:	If was capital, then place first
-	 * char as if upper, and subsequent chars as if lower.
-	 * If inserting upper, check replacement for case.
-	 */
-	while ((c = CHARMASK(*st++)) != '\0') {
-		if ((rtype & _MG_U) != 0 && ISLOWER(c) != 0)
-			c = TOUPPER(c);
-		if (rtype == (_MG_U | _MG_L))
-			rtype = _MG_L;
-		if (c == CCHR('J')) {
-			if (curwp->w_doto == llength(curwp->w_dotp))
-				(void)forwchar(FFRAND, 1);
-			else {
-				if (ldelete((RSIZE) 1, KNONE) != FALSE)
-					(void)lnewline();
-			}
-		} else if (curwp->w_dotp == curbp->b_linep) {
-			(void)linsert(1, c);
-		} else if (curwp->w_doto == llength(curwp->w_dotp)) {
-			if (ldelete((RSIZE) 1, KNONE) != FALSE)
-				(void)linsert(1, c);
-		} else
-			lputc(curwp->w_dotp, curwp->w_doto++, c);
-	}
+	region_put_data(st, rlen);
 	lchange(WFHARD);
+
+	undo_no_boundary(FALSE);
+	undo_add_boundary();
 	return (TRUE);
-}
-
-/*
- * Delete all of the text saved in the kill buffer.  Called by commands when
- * a new kill context is created. The kill buffer array is released, just in
- * case the buffer has grown to an immense size.  No errors.
- */
-void
-kdelete(void)
-{
-	if (kbufp != NULL) {
-		free((char *)kbufp);
-		kbufp = NULL;
-		kstart = kused = ksize = 0;
-	}
-}
-
-/*
- * Insert a character to the kill buffer, enlarging the buffer if there
- * isn't any room. Always grow the buffer in chunks, on the assumption
- * that if you put something in the kill buffer you are going to put more
- * stuff there too later. Return TRUE if all is well, and FALSE on errors.
- * Print a message on errors.  Dir says whether to put it at back or front.
- */
-int
-kinsert(int c, int dir)
-{
-	if (kused == ksize && dir == KFORW && kgrow(FALSE) == FALSE)
-		return (FALSE);
-	if (kstart == 0 && dir == KBACK && kgrow(TRUE) == FALSE)
-		return (FALSE);
-	if (dir == KFORW)
-		kbufp[kused++] = c;
-	else if (dir == KBACK)
-		kbufp[--kstart] = c;
-	else
-		panic("broken kinsert call");	/* Oh shit! */
-	return (TRUE);
-}
-
-/*
- * kgrow - just get more kill buffer for the callee. back is true if
- * we are trying to get space at the beginning of the kill buffer.
- */
-static int
-kgrow(int back)
-{
-	int	 nstart;
-	char	*nbufp;
-
-	if ((unsigned)(ksize + KBLOCK) <= (unsigned)ksize) {
-		/* probably 16 bit unsigned */
-		ewprintf("Kill buffer size at maximum");
-		return (FALSE);
-	}
-	if ((nbufp = malloc((unsigned)(ksize + KBLOCK))) == NULL) {
-		ewprintf("Can't get %ld bytes", (long)(ksize + KBLOCK));
-		return (FALSE);
-	}
-	nstart = (back == TRUE) ? (kstart + KBLOCK) : (KBLOCK / 4);
-	bcopy(&(kbufp[kstart]), &(nbufp[nstart]), (int)(kused - kstart));
-	if (kbufp != NULL)
-		free((char *)kbufp);
-	kbufp = nbufp;
-	ksize += KBLOCK;
-	kused = kused - kstart + nstart;
-	kstart = nstart;
-	return (TRUE);
-}
-
-/*
- * This function gets characters from the kill buffer. If the character
- * index "n" is off the end, it returns "-1". This lets the caller just
- * scan along until it gets a "-1" back.
- */
-int
-kremove(int n)
-{
-	if (n < 0 || n + kstart >= kused)
-		return (-1);
-	return (CHARMASK(kbufp[n + kstart]));
 }

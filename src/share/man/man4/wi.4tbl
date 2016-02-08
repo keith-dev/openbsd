@@ -1,4 +1,4 @@
-.\"	$OpenBSD: wi.4tbl,v 1.76 2005/08/08 16:48:05 uwe Exp $
+.\"	$OpenBSD: wi.4tbl,v 1.82 2006/02/19 17:32:17 jmc Exp $
 .\"
 .\" Copyright (c) 1997, 1998, 1999
 .\"	Bill Paul <wpaul@ctr.columbia.edu>. All rights reserved.
@@ -134,12 +134,6 @@ or on boot with
 .Xr hostname.if 5
 using the following parameters:
 .Bl -tag -width Ds
-.It Cm bssid Ar bssid
-Set the desired BSSID.
-.It Fl bssid
-Unset the desired BSSID.
-The interface will automatically select a BSSID in this mode, which is
-the default.
 .It Cm chan Ar n
 Set the channel (radio frequency) to be used by the driver based on
 the given channel ID
@@ -288,6 +282,7 @@ Addtron AWA-100:Prism-2:PCI
 Addtron AWP-100:Prism-2:PCMCIA
 Agere ORiNOCO:Hermes:PCMCIA
 AirVast WM168b:Prism-3:USB
+AmbiCom WL1100C-CF:Prism-3:CF
 Ambit WLAN:Prism-3:USB
 Apacer Wireless Steno MB112:Prism-3:USB
 Apple Airport:Hermes:macobio
@@ -332,7 +327,7 @@ Intersil Mini PCI:Prism-2.5:PCI
 Intersil ISL3872:Prism-3:PCI
 Intersil Prism 2X:Prism-3:USB
 JVC MP-XP7250:Prism-3:USB
-Linksys WCF12:Prism-2:CF
+Linksys WCF12:Prism-3:CF
 Linksys Instant Wireless WPC11:Prism-2:PCMCIA
 Linksys Instant Wireless WPC11 2.5:Prism-2.5:PCMCIA
 Linksys Instant Wireless WPC11 3.0:Prism-3:PCMCIA
@@ -360,12 +355,13 @@ NTT-ME 11Mbps Wireless LAN:Prism-2:PCMCIA
 Pheenet WL-503IA:Prism-3:USB
 Planex GW-NS11H:Prism-3:PCMCIA
 Planex GW-US11H:Prism-3:USB
+Pretec Compact WLAN OC-WLBXX-A:Prism-2.5:CF
 Proxim Harmony:Prism-2:PCMCIA
 Proxim RangeLAN-DS:Prism-2:PCMCIA
 Samsung MagicLAN SWL-2000N:Prism-2:PCMCIA
 Samsung MagicLAN SWL-2210P:Prism-2:PCI
-Senao NL-2511MP:Prism-2.5:PCI
 Senao NL-2511CF:Prism-3:CF
+Senao NL-2511MP:Prism-2.5:PCI
 Siemens SpeedStream SS1021:Prism-2:PCMCIA
 Siemens SpeedStream SS1022:Prism-3:USB
 Sitecom WL-022:Prism-3:USB
@@ -377,6 +373,7 @@ TDK LAK-CD011WL:Prism-2:PCMCIA
 US Robotics 1120:Prism-3:USB
 US Robotics 2410:Prism-2:PCMCIA
 US Robotics 2445:Prism-2:PCMCIA
+ViewSonic Airsync:Prism-2.5:USB
 Z-Com XI-725/726:Prism-2.5:USB
 Z-Com XI-735:Prism-3:USB
 ZyXEL ZyAIR B-200:Prism-3:USB
@@ -404,7 +401,7 @@ The following such adapters are supported or expected to work:
 .It Eumitcom WL11000P
 .It Global Sun Technology GL24110P (untested)
 .It Global Sun Technology GL24110P02
-.It LinkSys WDT11 (a rebadged GL24110P02)
+.It Linksys WDT11 (a rebadged GL24110P02)
 .It Longshine 8031
 .It Netgear MA301
 .It Siemens/Efficient Networks SpeedStream 1023
@@ -450,8 +447,8 @@ Configure wi0 for WEP, using hex key
 .Pp
 Return wi0 to its default settings:
 .Bd -literal -offset indent
-# ifconfig wi0 -bssid -chan media autoselect \e
-	nwid "" -nwkey -powersave -txpower
+# ifconfig wi0 -chan media autoselect nwid "" \e
+	-nwkey -powersave -txpower
 .Ed
 .Pp
 Join an existing BSS network,
@@ -522,19 +519,19 @@ The host-based access point mode on the Intersil PRISM cards has
 bugs when used with firmware versions prior to 0.8.3 and is completely
 unusable with firmware versions prior to 0.8.0 and 1.4.0-1.4.2.
 .Pp
-Software WEP is currently only supported in HostAP and BSS modes.
+Software WEP is currently only supported in Host AP and BSS modes.
 Furthermore, software WEP is currently incapable of decrypting
 fragmented frames.
 Lucent-based cards using firmware 8.10 and above fragment encrypted
 frames sent at 11Mbps.
 To work around this, Lucent clients with this firmware revision
-connecting to a HostAP server should use a 2Mbps connection or
+connecting to a Host AP server should use a 2Mbps connection or
 upgrade their firmware to version 8.72.
 .Pp
-HostAP mode doesn't support WDS or power saving.
+Host AP mode doesn't support WDS or power saving.
 Clients attempting to use power saving mode may experience
 significant packet loss
 (disabling power saving on the client will fix this).
 .Pp
 Support for USB devices is buggy.
-HostAP mode and AP scanning are not currently supported with USB devices.
+Host AP mode and AP scanning are not currently supported with USB devices.

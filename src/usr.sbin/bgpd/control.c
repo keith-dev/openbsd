@@ -1,4 +1,4 @@
-/*	$OpenBSD: control.c,v 1.43 2005/03/11 15:48:58 deraadt Exp $ */
+/*	$OpenBSD: control.c,v 1.49 2006/01/24 15:28:03 henning Exp $ */
 
 /*
  * Copyright (c) 2003, 2004 Henning Brauer <henning@openbsd.org>
@@ -30,20 +30,17 @@
 
 #define	CONTROL_BACKLOG	5
 
-struct {
-	int	fd;
-} control_state;
-
 struct ctl_conn	*control_connbyfd(int);
 struct ctl_conn	*control_connbypid(pid_t);
 int		 control_close(int);
+void		 control_result(struct ctl_conn *, u_int);
 
 int
-control_init(void)
+control_init(int restricted, char *path)
 {
 	struct sockaddr_un	 sun;
 	int			 fd;
-	mode_t			 old_umask;
+	mode_t			 old_umask, mode;
 
 	if ((fd = socket(AF_UNIX, SOCK_STREAM, 0)) == -1) {
 		log_warn("control_init: socket");
@@ -52,18 +49,25 @@ control_init(void)
 
 	bzero(&sun, sizeof(sun));
 	sun.sun_family = AF_UNIX;
-	strlcpy(sun.sun_path, SOCKET_NAME, sizeof(sun.sun_path));
+	strlcpy(sun.sun_path, path, sizeof(sun.sun_path));
 
-	if (unlink(SOCKET_NAME) == -1)
+	if (unlink(path) == -1)
 		if (errno != ENOENT) {
-			log_warn("unlink %s", SOCKET_NAME);
+			log_warn("unlink %s", path);
 			close(fd);
 			return (-1);
 		}
 
-	old_umask = umask(S_IXUSR|S_IXGRP|S_IWOTH|S_IROTH|S_IXOTH);
+	if (restricted) {
+		old_umask = umask(S_IXUSR|S_IXGRP|S_IXOTH);
+		mode = S_IRUSR|S_IWUSR|S_IRGRP|S_IWGRP|S_IROTH|S_IWOTH;
+	} else {
+		old_umask = umask(S_IXUSR|S_IXGRP|S_IWOTH|S_IROTH|S_IXOTH);
+		mode = S_IRUSR|S_IWUSR|S_IRGRP|S_IWGRP;
+	}
+
 	if (bind(fd, (struct sockaddr *)&sun, sizeof(sun)) == -1) {
-		log_warn("control_init: bind: %s", SOCKET_NAME);
+		log_warn("control_init: bind: %s", path);
 		close(fd);
 		umask(old_umask);
 		return (-1);
@@ -71,44 +75,44 @@ control_init(void)
 
 	umask(old_umask);
 
-	if (chmod(SOCKET_NAME, S_IRUSR|S_IWUSR|S_IRGRP|S_IWGRP) == -1) {
-		log_warn("control_init chmod");
+	if (chmod(path, mode) == -1) {
+		log_warn("control_init: chmod: %s", path);
 		close(fd);
-		(void)unlink(SOCKET_NAME);
+		unlink(path);
 		return (-1);
 	}
 
 	session_socket_blockmode(fd, BM_NONBLOCK);
-	control_state.fd = fd;
 
 	return (fd);
 }
 
 int
-control_listen(void)
+control_listen(int fd)
 {
-	if (listen(control_state.fd, CONTROL_BACKLOG) == -1) {
+	if (fd != -1 && listen(fd, CONTROL_BACKLOG) == -1) {
 		log_warn("control_listen: listen");
 		return (-1);
 	}
 
-	return (control_state.fd);
+	return (0);
 }
 
 void
-control_shutdown(void)
+control_shutdown(int fd)
 {
-	close(control_state.fd);
+	close(fd);
 }
 
 void
-control_cleanup(void)
+control_cleanup(const char *path)
 {
-	unlink(SOCKET_NAME);
+	if (path)
+		unlink(path);
 }
 
 int
-control_accept(int listenfd)
+control_accept(int listenfd, int restricted)
 {
 	int			 connfd;
 	socklen_t		 len;
@@ -131,6 +135,7 @@ control_accept(int listenfd)
 	}
 
 	imsg_init(&ctl_conn->ibuf, connfd);
+	ctl_conn->restricted = restricted;
 
 	TAILQ_INSERT_TAIL(&ctl_conns, ctl_conn, entry);
 
@@ -217,7 +222,30 @@ control_dispatch_msg(struct pollfd *pfd, u_int *ctl_cnt)
 		if (n == 0)
 			break;
 
+		if (c->restricted) {
+			switch (imsg.hdr.type) {
+			case IMSG_CTL_SHOW_NEIGHBOR:
+			case IMSG_CTL_SHOW_NEXTHOP:
+			case IMSG_CTL_SHOW_INTERFACE:
+			case IMSG_CTL_SHOW_RIB:
+			case IMSG_CTL_SHOW_RIB_AS:
+			case IMSG_CTL_SHOW_RIB_PREFIX:
+			case IMSG_CTL_SHOW_RIB_MEM:
+			case IMSG_CTL_SHOW_NETWORK:
+			case IMSG_CTL_SHOW_TERSE:
+				break;
+			default:
+				/* clear imsg type to prevent processing */
+				imsg.hdr.type = IMSG_NONE;
+				control_result(c, CTL_RES_DENIED);
+				break;
+			}
+		}
+
 		switch (imsg.hdr.type) {
+		case IMSG_NONE:
+			/* message was filtered out, nothing to do */
+			break;
 		case IMSG_CTL_SHOW_NEIGHBOR:
 			c->ibuf.pid = imsg.hdr.pid;
 			if (imsg.hdr.len == IMSG_HEADER_SIZE +
@@ -237,6 +265,12 @@ control_dispatch_msg(struct pollfd *pfd, u_int *ctl_cnt)
 					    p, sizeof(struct peer));
 			imsg_compose_rde(IMSG_CTL_END, imsg.hdr.pid, NULL, 0);
 			break;
+		case IMSG_CTL_SHOW_TERSE:
+			for (p = peers; p != NULL; p = p->next)
+				imsg_compose(&c->ibuf, IMSG_CTL_SHOW_NEIGHBOR,
+				    0, 0, -1, p, sizeof(struct peer));
+			imsg_compose(&c->ibuf, IMSG_CTL_END, 0, 0, -1, NULL, 0);
+			break;
 		case IMSG_CTL_RELOAD:
 		case IMSG_CTL_FIB_COUPLE:
 		case IMSG_CTL_FIB_DECOUPLE:
@@ -253,8 +287,7 @@ control_dispatch_msg(struct pollfd *pfd, u_int *ctl_cnt)
 				if (p == NULL)
 					p = getpeerbydesc(neighbor->descr);
 				if (p == NULL) {
-					log_warnx("IMSG_CTL_NEIGHBOR_ "
-					    "with unknown neighbor");
+					control_result(c, CTL_RES_NOSUCHPEER);
 					break;
 				}
 				switch (imsg.hdr.type) {
@@ -266,11 +299,13 @@ control_dispatch_msg(struct pollfd *pfd, u_int *ctl_cnt)
 					break;
 				case IMSG_CTL_NEIGHBOR_CLEAR:
 					bgp_fsm(p, EVNT_STOP);
-					bgp_fsm(p, EVNT_START);
+					p->IdleHoldTimer = time(NULL) +
+					    SESSION_CLEAR_DELAY;
 					break;
 				default:
 					fatal("king bula wants more humppa");
 				}
+				control_result(c, CTL_RES_OK);
 			} else
 				log_warnx("got IMSG_CTL_NEIGHBOR_ with "
 				    "wrong length");
@@ -286,6 +321,7 @@ control_dispatch_msg(struct pollfd *pfd, u_int *ctl_cnt)
 		case IMSG_CTL_SHOW_RIB:
 		case IMSG_CTL_SHOW_RIB_AS:
 		case IMSG_CTL_SHOW_RIB_PREFIX:
+		case IMSG_CTL_SHOW_RIB_MEM:
 		case IMSG_CTL_SHOW_NETWORK:
 			c->ibuf.pid = imsg.hdr.pid;
 			imsg_compose_rde(imsg.hdr.type, imsg.hdr.pid,
@@ -318,4 +354,11 @@ control_imsg_relay(struct imsg *imsg)
 
 	return (imsg_compose(&c->ibuf, imsg->hdr.type, 0, imsg->hdr.pid, -1,
 	    imsg->data, imsg->hdr.len - IMSG_HEADER_SIZE));
+}
+
+void
+control_result(struct ctl_conn *c, u_int code)
+{
+	imsg_compose(&c->ibuf, IMSG_CTL_RESULT, 0, c->ibuf.pid, -1,
+	    &code, sizeof(code));
 }

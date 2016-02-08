@@ -1,4 +1,4 @@
-/*	$OpenBSD: apmd.c,v 1.34 2005/06/14 15:18:53 deraadt Exp $	*/
+/*	$OpenBSD: apmd.c,v 1.41 2006/01/19 19:17:10 sturm Exp $	*/
 
 /*
  *  Copyright (c) 1995, 1996 John T. Kohl
@@ -37,6 +37,8 @@
 #include <sys/wait.h>
 #include <sys/event.h>
 #include <sys/time.h>
+#include <sys/dkstat.h>
+#include <sys/sysctl.h>
 #include <stdio.h>
 #include <syslog.h>
 #include <fcntl.h>
@@ -58,14 +60,24 @@ const char sockfile[] = _PATH_APM_SOCKET;
 
 int debug = 0;
 
+int doperf = PERF_NONE;
+#define PERFINC 50
+#define PERFDEC 20
+#define PERFMIN 0
+#define PERFMAX 100
+#define PERFINCTHRES 10
+#define PERFDECTHRES 30
+
 extern char *__progname;
 
 void usage(void);
 int power_status(int fd, int force, struct apm_power_info *pinfo);
 int bind_socket(const char *sn);
 enum apm_state handle_client(int sock_fd, int ctl_fd);
+void perf_status(struct apm_power_info *pinfo);
 void suspend(int ctl_fd);
 void stand_by(int ctl_fd);
+void setperf(int new_perf);
 void sigexit(int signo);
 void do_etc_file(const char *file);
 void sockunlink(void);
@@ -82,7 +94,7 @@ void
 usage(void)
 {
 	fprintf(stderr,
-	    "usage: %s [-adempqs] [-f devfile] [-S sockfile] [-t timo]\n",
+	    "usage: %s [-AaCdeHLmps] [-f devname] [-S sockname] [-t seconds]\n",
 	    __progname);
 	exit(1);
 }
@@ -119,6 +131,18 @@ power_status(int fd, int force, struct apm_power_info *pinfo)
 	struct apm_power_info bstate;
 	static struct apm_power_info last;
 	int acon = 0;
+
+	if (fd == -1) {
+		if (pinfo) {
+			bstate.battery_state = 255;
+			bstate.ac_state = 255;
+			bstate.battery_life = 0;
+			bstate.minutes_left = -1;
+			*pinfo = bstate;
+		}
+
+		return 0;
+	}
 
 	if (ioctl(fd, APM_IOC_GETPOWER, &bstate) == 0) {
 	/* various conditions under which we report status:  something changed
@@ -165,6 +189,71 @@ power_status(int fd, int force, struct apm_power_info *pinfo)
 		syslog(LOG_ERR, "cannot fetch power status: %m");
 
 	return acon;
+}
+
+void
+perf_status(struct apm_power_info *pinfo)
+{
+	static long cp_time_old[CPUSTATES];
+	static int avg_idle;
+	long change, cp_time[CPUSTATES];
+	int cp_time_mib[] = {CTL_KERN, KERN_CPTIME};
+	int hw_perf_mib[] = {CTL_HW, HW_SETPERF};
+	int i, idle, perf;
+	int forcehi = 0;
+	int sum = 0;
+	size_t cp_time_sz = sizeof(cp_time);
+	size_t perf_sz = sizeof(perf);
+
+	if (sysctl(cp_time_mib, 2, &cp_time, &cp_time_sz, NULL, 0) < 0)
+		syslog(LOG_INFO, "cannot read kern.cp_time");
+
+	for (i = 0; i < CPUSTATES; i++) {
+		if ((change = cp_time[i] - cp_time_old[i]) < 0) {
+			/* counter wrapped */
+			change = ((unsigned long)cp_time[i] -
+			    (unsigned long)cp_time_old[i]);
+		}
+		sum += change;
+		if (i == CP_IDLE)
+			idle = change;
+	}
+	if (sum == 0)
+		sum = 1;
+
+	/* smooth data */
+	avg_idle = (avg_idle + (100 * idle) / sum) / 2;
+
+	switch (doperf) {
+	case PERF_AUTO:
+		/*
+		 * force setperf towards the max if we are connected to AC
+		 * power and have a battery life greater than 15%
+		 */
+		if (pinfo->ac_state == APM_AC_ON && pinfo->battery_life > 15)
+			forcehi = 1;		
+		break;
+	case PERF_COOL:
+		forcehi = 0;
+		break;
+	}
+	
+	if (sysctl(hw_perf_mib, 2, &perf, &perf_sz, NULL, 0) < 0)
+		syslog(LOG_INFO, "cannot read hw.setperf");
+
+	if (forcehi || (avg_idle < PERFINCTHRES && perf < PERFMAX)) {
+		perf += PERFINC;
+		if (perf > PERFMAX)
+			perf = PERFMAX;
+		setperf(perf);
+	} else if (avg_idle > PERFDECTHRES && perf > PERFMIN) {
+		perf -= PERFDEC;
+		if (perf < PERFMIN)
+			perf = PERFMIN;
+		setperf(perf);
+	}
+
+	memcpy(cp_time_old, cp_time, sizeof(cp_time_old));
 }
 
 char socketname[MAXPATHLEN];
@@ -217,6 +306,9 @@ handle_client(int sock_fd, int ctl_fd)
 	socklen_t fromlen;
 	struct apm_command cmd;
 	struct apm_reply reply;
+	int cpuspeed_mib[] = {CTL_HW, HW_CPUSPEED};
+	int cpuspeed;
+	size_t cpuspeed_sz = sizeof(cpuspeed);
 
 	fromlen = sizeof(from);
 	cli_fd = accept(sock_fd, (struct sockaddr *)&from, &fromlen);
@@ -245,11 +337,38 @@ handle_client(int sock_fd, int ctl_fd)
 	case STANDBY:
 		reply.newstate = STANDING_BY;
 		break;
+	case SETPERF_LOW:
+		doperf = PERF_LOW;
+		reply.newstate = NORMAL;
+		syslog(LOG_NOTICE, "setting hw.setperf to %d", PERFMIN);
+		setperf(PERFMIN);
+		break;
+	case SETPERF_HIGH:
+		doperf = PERF_HIGH;
+		reply.newstate = NORMAL;
+		syslog(LOG_NOTICE, "setting hw.setperf to %d", PERFMAX);
+		setperf(PERFMAX);
+		break;
+	case SETPERF_AUTO:
+		doperf = PERF_AUTO;
+		reply.newstate = NORMAL;
+		syslog(LOG_NOTICE, "setting hw.setperf automatically");
+		break;
+	case SETPERF_COOL:
+		doperf = PERF_COOL;
+		reply.newstate = NORMAL;
+		syslog(LOG_NOTICE, "setting hw.setperf for cool running");
+		break;
 	default:
 		reply.newstate = NORMAL;
 		break;
 	}
 
+	if (sysctl(cpuspeed_mib, 2, &cpuspeed, &cpuspeed_sz, NULL, 0) < 0)
+		syslog(LOG_INFO, "cannot read hw.cpuspeed");
+
+	reply.cpuspeed = cpuspeed;
+	reply.perfstate = doperf;
 	reply.vno = APMD_VNO;
 	if (send(cli_fd, &reply, sizeof(reply), 0) != sizeof(reply))
 		syslog(LOG_INFO, "client reply botch");
@@ -280,7 +399,7 @@ stand_by(int ctl_fd)
 	ioctl(ctl_fd, APM_IOC_STANDBY, 0);
 }
 
-#define TIMO (1*60)			/* 10 minutes */
+#define TIMO (10*60)			/* 10 minutes */
 
 int
 main(int argc, char *argv[])
@@ -294,11 +413,13 @@ main(int argc, char *argv[])
 	int messages = 0;
 	int noacsleep = 0;
 	struct timespec ts = {TIMO, 0}, sts = {0, 0};
+	struct apm_power_info pinfo;
+	time_t apmtimeout = 0;
 	const char *sockname = sockfile;
-	int kq;
+	int kq, nchanges;
 	struct kevent ev[2];
 
-	while ((ch = getopt(argc, argv, "adsepmf:t:S:")) != -1)
+	while ((ch = getopt(argc, argv, "aACdHLsepmf:t:S:")) != -1)
 		switch(ch) {
 		case 'a':
 			noacsleep = 1;
@@ -326,6 +447,28 @@ main(int argc, char *argv[])
 		case 'p':
 			pctonly = 1;
 			break;
+		case 'A':
+			if (doperf != PERF_NONE)
+				usage();
+			doperf = PERF_AUTO;
+			break;
+		case 'C':
+			if (doperf != PERF_NONE)
+				usage();
+			doperf = PERF_COOL;
+			break;
+		case 'L':
+			if (doperf != PERF_NONE)
+				usage();
+			doperf = PERF_LOW;
+			setperf(PERFMIN);
+			break;
+		case 'H':
+			if (doperf != PERF_NONE)
+				usage();
+			doperf = PERF_HIGH;
+			setperf(PERFMAX);
+			break;
 		case 'm':
 			messages = 1;
 			break;
@@ -349,10 +492,10 @@ main(int argc, char *argv[])
 	(void) signal(SIGHUP, sigexit);
 	(void) signal(SIGINT, sigexit);
 
-	if ((ctl_fd = open(fname, O_RDWR)) == -1)
-		error("cannot open device file `%s'", fname);
-
-	if (fcntl(ctl_fd, F_SETFD, 1) == -1)
+	if ((ctl_fd = open(fname, O_RDWR)) == -1) {
+		if (errno != ENXIO)
+			error("cannot open device file `%s'", fname);
+	} else if (fcntl(ctl_fd, F_SETFD, 1) == -1)
 		error("cannot set close-on-exec for `%s'", fname);
 
 	sock_fd = bind_socket(sockname);
@@ -360,7 +503,7 @@ main(int argc, char *argv[])
 	if (fcntl(sock_fd, F_SETFD, 1) == -1)
 		error("cannot set close-on-exec for the socket", NULL);
 
-	power_status(ctl_fd, 1, 0);
+	power_status(ctl_fd, 1, &pinfo);
 
 	if (statonly)
 		exit(0);
@@ -382,11 +525,16 @@ main(int argc, char *argv[])
 	if (kq <= 0)
 		error("kqueue", NULL);
 
-	EV_SET(&ev[0], ctl_fd, EVFILT_READ, EV_ADD | EV_ENABLE | EV_CLEAR,
+	EV_SET(&ev[0], sock_fd, EVFILT_READ, EV_ADD | EV_ENABLE | EV_CLEAR,
 	    0, 0, NULL);
-	EV_SET(&ev[1], sock_fd, EVFILT_READ, EV_ADD | EV_ENABLE | EV_CLEAR,
-	    0, 0, NULL);
-	if (kevent(kq, ev, 2, NULL, 0, &sts) < 0)
+	if (ctl_fd == -1)
+		nchanges = 1;
+	else {
+		EV_SET(&ev[1], ctl_fd, EVFILT_READ, EV_ADD | EV_ENABLE |
+		    EV_CLEAR, 0, 0, NULL);
+		nchanges = 2;
+	}
+	if (kevent(kq, ev, nchanges, NULL, 0, &sts) < 0)
 		error("kevent", NULL);
 
 	for (;;) {
@@ -394,14 +542,24 @@ main(int argc, char *argv[])
 
 		sts = ts;
 
+		if (doperf == PERF_AUTO || doperf == PERF_COOL) {
+			sts.tv_sec = 1;
+			perf_status(&pinfo);
+		}
+
+		apmtimeout += sts.tv_sec;
 		if ((rv = kevent(kq, NULL, 0, ev, 1, &sts)) < 0)
 			break;
 
-		/* wakeup for timeout: take status */
-		powerbak = power_status(ctl_fd, 0, 0);
-		if (powerstatus != powerbak) {
-			powerstatus = powerbak;
-			powerchange = 1;
+		if (apmtimeout >= ts.tv_sec) {
+			apmtimeout = 0;
+
+			/* wakeup for timeout: take status */
+			powerbak = power_status(ctl_fd, 0, &pinfo);
+			if (powerstatus != powerbak) {
+				powerstatus = powerbak;
+				powerchange = 1;
+			}
 		}
 
 		if (!rv)
@@ -432,7 +590,7 @@ main(int argc, char *argv[])
 			case APM_NORMAL_RESUME:
 			case APM_CRIT_RESUME:
 			case APM_SYS_STANDBY_RESUME:
-				powerbak = power_status(ctl_fd, 0, 0);
+				powerbak = power_status(ctl_fd, 0, &pinfo);
 				if (powerstatus != powerbak) {
 					powerstatus = powerbak;
 					powerchange = 1;
@@ -440,7 +598,7 @@ main(int argc, char *argv[])
 				resumes++;
 				break;
 			case APM_POWER_CHANGE:
-				powerbak = power_status(ctl_fd, 0, 0);
+				powerbak = power_status(ctl_fd, 0, &pinfo);
 				if (powerstatus != powerbak) {
 					powerstatus = powerbak;
 					powerchange = 1;
@@ -451,7 +609,7 @@ main(int argc, char *argv[])
 			}
 
 			if ((standbys || suspends) && noacsleep &&
-			    power_status(ctl_fd, 0, 0))
+			    power_status(ctl_fd, 0, &pinfo))
 				syslog(LOG_DEBUG, "no! sleep! till brooklyn!");
 			else if (suspends)
 				suspend(ctl_fd);
@@ -486,6 +644,17 @@ main(int argc, char *argv[])
 	error("kevent loop", NULL);
 
 	return 1;
+}
+
+void
+setperf(int new_perf)
+{
+	int hw_perf_mib[] = {CTL_HW, HW_SETPERF};
+	int perf;
+	size_t perf_sz = sizeof(perf);
+
+	if (sysctl(hw_perf_mib, 2, &perf, &perf_sz, &new_perf, perf_sz) < 0)
+		syslog(LOG_INFO, "cannot set hw.setperf");
 }
 
 void

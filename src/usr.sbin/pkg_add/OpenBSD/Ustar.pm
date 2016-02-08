@@ -1,5 +1,5 @@
 # ex:ts=8 sw=4:
-# $OpenBSD: Ustar.pm,v 1.35 2005/08/10 14:02:22 espie Exp $
+# $OpenBSD: Ustar.pm,v 1.40 2005/10/26 09:47:48 espie Exp $
 #
 # Copyright (c) 2002-2004 Marc Espie <espie@openbsd.org>
 #
@@ -64,16 +64,31 @@ sub new
 sub skip
 {
     my $self = shift;
-    return if $self->{swallow} == 0;
-
     my $temp;
-    while ($self->{swallow} > $buffsize) {
-    	read($self->{fh}, $temp, $buffsize);
-	$self->{swallow} -= $buffsize;
+
+    while ($self->{swallow} > 0) {
+    	my $toread = $self->{swallow};
+	if ($toread >$buffsize) {
+		$toread = $buffsize;
+	}
+    	my $actual = read($self->{fh}, $temp, $toread);
+	if (!defined $actual) {
+		die "Error while skipping archive: $!\n";
+	}
+	$self->{swallow} -= $actual;
     }
-    read($self->{fh},  $temp, $self->{swallow});
-    $self->{swallow} = 0;
 }
+
+my $types = {
+    DIR , 'OpenBSD::Ustar::Dir',
+    HARDLINK , 'OpenBSD::Ustar::HardLink',
+    SOFTLINK , 'OpenBSD::Ustar::SoftLink',
+    FILE , 'OpenBSD::Ustar::File',
+    FILE1 , 'OpenBSD::Ustar::File',
+    FIFO , 'OpenBSD::Ustar::Fifo',
+    CHARDEVICE , 'OpenBSD::Ustar::CharDevice',
+    BLOCKDEVICE , 'OpenBSD::Ustar::BlockDevice',
+};
 
 sub next
 {
@@ -134,28 +149,11 @@ sub next
 	minor => $minor,
 	archive => $self,
 	destdir => $self->{destdir}
-	};
-    if ($type eq DIR) {
-    	bless $result, 'OpenBSD::Ustar::Dir';
-    } elsif ($type eq HARDLINK) {
-	bless $result, 'OpenBSD::Ustar::HardLink';
-    } elsif ($type eq SOFTLINK) {
-    	bless $result, 'OpenBSD::Ustar::SoftLink';
-    } elsif ($type eq FILE || $type eq FILE1) {
-    	bless $result, 'OpenBSD::Ustar::File';
-    } elsif ($type eq FIFO) {
-    	bless $result, 'OpenBSD::Ustar::Fifo';
-    } elsif ($type eq CHARDEVICE) {
-    	bless $result, 'OpenBSD::Ustar::CharDevice';
-    } elsif ($type eq BLOCKDEVICE) {
-    	bless $result, 'OpenBSD::Ustar::BlockDevice';
+    };
+    if (defined $types->{$type}) {
+    	$types->{$type}->new($result);
     } else {
-    	die "Unsupported type";
-    }
-    if (!$result->isFile()) {
-    	if ($size != 0) {
-		die "Bad archive: non null size for non file entry\n";
-	}
+    	die "Unsupported type $type";
     }
     # adjust swallow
     $self->{swallow} = $size;
@@ -200,6 +198,18 @@ sub mkheader
 		$major = 0;
 		$minor = 0;
 	}
+	my ($uname, $gname);
+	if (defined $entry->{uname}) {
+		$uname = $entry->{uname};
+	} else {
+		$uname = $entry->{uid};
+	}
+	if (defined $entry->{gname}) {
+		$gname = $entry->{gname};
+	} else {
+		$gname = $entry->{gid};
+	}
+
 	if (defined $entry->{cwd}) {
 		my $cwd = $entry->{cwd};
 		$cwd.='/' unless $cwd =~ m/\/$/;
@@ -217,11 +227,11 @@ sub mkheader
 	if (length $linkname > MAXLINKNAME) {
 		die "Linkname too long $linkname\n";
 	}
-	if (length $entry->{uname} > MAXUSERNAME) {
-		die "Username too long ", $entry->{uname}, "\n";
+	if (length $uname > MAXUSERNAME) {
+		die "Username too long $uname\n";
 	}
-	if (length $entry->{gname} > MAXGROUPNAME) {
-		die "Groupname too long ", $entry->{gname}, "\n";
+	if (length $gname > MAXGROUPNAME) {
+		die "Groupname too long $gname\n";
 	}
 	my $header;
 	my $cksum = ' 'x8;
@@ -237,8 +247,8 @@ sub mkheader
 		    $type,
 		    $linkname,
 		    'ustar', '00',
-		    $entry->{uname},
-		    $entry->{gname},
+		    $uname,
+		    $gname,
 		    sprintf("%07o", $major),
 		    sprintf("%07o", $minor),
 		    $prefix, "\0");
@@ -325,6 +335,16 @@ sub fh
 }
 
 package OpenBSD::Ustar::Object;
+sub new
+{
+	my ($class, $object) = @_;
+
+	if ($object->{size} != 0) {
+		die "Bad archive: non null size for arbitrary entry\n";
+	}
+	bless $object, $class;
+}
+
 sub set_modes
 {
 	my $self = shift;
@@ -571,6 +591,12 @@ sub close
 
 package OpenBSD::Ustar::File;
 our @ISA=qw(OpenBSD::Ustar::Object);
+sub new
+{
+	my ($class, $object) = @_;
+
+	bless $object, $class;
+}
 
 sub create
 {
@@ -597,6 +623,19 @@ sub create
 	}
 	$out->close() or die "Error closing $self->{destdir}$self->{name}: $!";
 	$self->SUPER::set_modes();
+}
+
+sub contents
+{
+	my $self = shift;
+	my $toread = $self->{size};
+	my $buffer;
+
+	if (!defined read($self->{archive}->{fh}, $buffer, $toread)) {
+		die "Error reading from archive: $!";
+	}
+	$self->{archive}->{swallow} -= $toread;
+	return $buffer;
 }
 
 sub write_contents

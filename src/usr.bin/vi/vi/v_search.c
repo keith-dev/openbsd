@@ -1,4 +1,4 @@
-/*	$OpenBSD: v_search.c,v 1.7 2002/02/16 21:27:58 millert Exp $	*/
+/*	$OpenBSD: v_search.c,v 1.9 2006/01/08 21:05:40 miod Exp $	*/
 
 /*-
  * Copyright (c) 1992, 1993, 1994
@@ -95,7 +95,7 @@ v_exaddr(sp, vp, dir)
 	    (O_ISSET(sp, O_SEARCHINCR) ? TXT_SEARCHINCR : 0)))
 		return (1);
 
-	tp = sp->tiq.cqh_first;
+	tp = CIRCLEQ_FIRST(&sp->tiq);
 
 	/* If the user backspaced over the prompt, do nothing. */
 	if (tp->term == TERM_BS)
@@ -468,8 +468,8 @@ v_correct(sp, vp, isdelta)
 	 * because of the wrapscan option.
 	 */
 	if (vp->m_start.lno > vp->m_stop.lno ||
-	    vp->m_start.lno == vp->m_stop.lno &&
-	    vp->m_start.cno > vp->m_stop.cno) {
+	    (vp->m_start.lno == vp->m_stop.lno &&
+	    vp->m_start.cno > vp->m_stop.cno)) {
 		m = vp->m_start;
 		vp->m_start = vp->m_stop;
 		vp->m_stop = m;

@@ -1,7 +1,7 @@
-/*	$OpenBSD: iapp.c,v 1.7 2005/08/17 13:18:33 reyk Exp $	*/
+/*	$OpenBSD: iapp.c,v 1.14 2005/12/18 17:54:12 reyk Exp $	*/
 
 /*
- * Copyright (c) 2004, 2005 Reyk Floeter <reyk@vantronix.net>
+ * Copyright (c) 2004, 2005 Reyk Floeter <reyk@openbsd.org>
  *
  * Permission to use, copy, modify, and distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -40,41 +40,59 @@
 #include <unistd.h>
 
 #include "hostapd.h"
+#include "iapp.h"
 
 void
 hostapd_iapp_init(struct hostapd_config *cfg)
 {
+	struct hostapd_apme *apme;
+	struct hostapd_iapp *iapp = &cfg->c_iapp;
+
 	if ((cfg->c_flags & HOSTAPD_CFG_F_APME) == 0)
 		return;
 
-	/* Get Host AP's BSSID */
-	hostapd_priv_apme_bssid(cfg);
+	TAILQ_FOREACH(apme, &cfg->c_apmes, a_entries) {
+		/* Get Host AP's BSSID */
+		hostapd_priv_apme_bssid(apme);
+		hostapd_log(HOSTAPD_LOG,
+		    "%s/%s: attached Host AP interface with BSSID %s\n",
+		    apme->a_iface, iapp->i_iface,
+		    etheraddr_string(apme->a_bssid));
 
-	hostapd_log(HOSTAPD_LOG_VERBOSE,
-	    "%s: attaching to Host AP %s with BSSID \"%s\"\n",
-	    cfg->c_iapp_iface, cfg->c_apme_iface,
-	    etheraddr_string(cfg->c_apme_bssid));
+		/* Deauthenticate all stations on startup */
+		hostapd_apme_deauth(apme);
+	}
 }
 
 void
 hostapd_iapp_term(struct hostapd_config *cfg)
 {
+	struct hostapd_apme *apme;
+	struct hostapd_iapp *iapp = &cfg->c_iapp;
+
 	if ((cfg->c_flags & HOSTAPD_CFG_F_APME) == 0)
 		return;
 
-	/* XXX not yet used but inspired by the APME TERMINATE action */
-	hostapd_log(HOSTAPD_LOG_VERBOSE, "%s: detaching from Host AP %s\n",
-	    cfg->c_iapp_iface, cfg->c_apme_iface);
+	TAILQ_FOREACH(apme, &cfg->c_apmes, a_entries) {
+		hostapd_log(HOSTAPD_LOG_VERBOSE,
+		    "%s/%s: detaching from Host AP\n",
+		    apme->a_iface, iapp->i_iface);
+	}
 }
 
 int
-hostapd_iapp_add_notify(struct hostapd_config *cfg, struct hostapd_node *node)
+hostapd_iapp_add_notify(struct hostapd_apme *apme, struct hostapd_node *node)
 {
+	struct hostapd_config *cfg = (struct hostapd_config *)apme->a_cfg;
+	struct hostapd_iapp *iapp = &cfg->c_iapp;
 	struct sockaddr_in *addr;
 	struct {
 		struct ieee80211_iapp_frame hdr;
 		struct ieee80211_iapp_add_notify add;
 	} __packed frame;
+
+	if ((iapp->i_flags & HOSTAPD_IAPP_F_ADD_NOTIFY) == 0)
+		return (0);
 
 	/*
 	 * Send an ADD.notify message to other accesspoints to notify
@@ -84,7 +102,7 @@ hostapd_iapp_add_notify(struct hostapd_config *cfg, struct hostapd_node *node)
 
 	frame.hdr.i_version = IEEE80211_IAPP_VERSION;
 	frame.hdr.i_command = IEEE80211_IAPP_FRAME_ADD_NOTIFY;
-	frame.hdr.i_identifier = htons(cfg->c_iapp++);
+	frame.hdr.i_identifier = htons(iapp->i_cnt++);
 	frame.hdr.i_length = sizeof(struct ieee80211_iapp_add_notify);
 
 	frame.add.a_length = IEEE80211_ADDR_LEN;
@@ -92,29 +110,32 @@ hostapd_iapp_add_notify(struct hostapd_config *cfg, struct hostapd_node *node)
 	bcopy(node->ni_macaddr, frame.add.a_macaddr, IEEE80211_ADDR_LEN);
 
 	if (cfg->c_flags & HOSTAPD_CFG_F_BRDCAST)
-		addr = &cfg->c_iapp_broadcast;
+		addr = &iapp->i_broadcast;
 	else
-		addr = &cfg->c_iapp_multicast;
+		addr = &iapp->i_multicast;
 
-	if (sendto(cfg->c_iapp_udp, &frame, sizeof(frame),
+	if (sendto(iapp->i_udp, &frame, sizeof(frame),
 	    0, (struct sockaddr *)addr, sizeof(struct sockaddr_in)) == -1) {
 		hostapd_log(HOSTAPD_LOG,
 		    "%s: failed to send ADD notification: %s\n",
-		    cfg->c_iapp_iface, strerror(errno));
+		    iapp->i_iface, strerror(errno));
 		return (errno);
 	}
 
-	hostapd_log(HOSTAPD_LOG, "%s: sent ADD notification for %s\n",
-	    cfg->c_iapp_iface, etheraddr_string(frame.add.a_macaddr));
+	hostapd_log(HOSTAPD_LOG, "%s/%s: sent ADD notification for %s\n",
+	    apme->a_iface, iapp->i_iface,
+	    etheraddr_string(frame.add.a_macaddr));
 
 	/* Send a LLC XID frame, see llc.c for details */
 	return (hostapd_priv_llc_xid(cfg, node));
 }
 
 int
-hostapd_iapp_radiotap(struct hostapd_config *cfg, u_int8_t *buf,
+hostapd_iapp_radiotap(struct hostapd_apme *apme, u_int8_t *buf,
     const u_int len)
 {
+	struct hostapd_config *cfg = (struct hostapd_config *)apme->a_cfg;
+	struct hostapd_iapp *iapp = &cfg->c_iapp;
 	struct sockaddr_in *addr;
 	struct ieee80211_iapp_frame hdr;
 	struct msghdr msg;
@@ -134,13 +155,13 @@ hostapd_iapp_radiotap(struct hostapd_config *cfg, u_int8_t *buf,
 		hdr.i_command = IEEE80211_IAPP_FRAME_HOSTAPD_PCAP;
 	else
 		return (EINVAL);
-	hdr.i_identifier = htons(cfg->c_iapp++);
+	hdr.i_identifier = htons(iapp->i_cnt++);
 	hdr.i_length = len;
 
 	if (cfg->c_flags & HOSTAPD_CFG_F_BRDCAST)
-		addr = &cfg->c_iapp_broadcast;
+		addr = &iapp->i_broadcast;
 	else
-		addr = &cfg->c_iapp_multicast;
+		addr = &iapp->i_multicast;
 
 	iov[0].iov_base = &hdr;
 	iov[0].iov_len = sizeof(hdr);
@@ -154,10 +175,10 @@ hostapd_iapp_radiotap(struct hostapd_config *cfg, u_int8_t *buf,
 	msg.msg_controllen = 0;
 	msg.msg_flags = 0;
 
-	if (sendmsg(cfg->c_iapp_udp, &msg, 0) == -1) {
+	if (sendmsg(iapp->i_udp, &msg, 0) == -1) {
 		hostapd_log(HOSTAPD_LOG,
 		    "%s: failed to send HOSTAPD %s: %s\n",
-		    cfg->c_iapp_iface, cfg->c_apme_dlt ==
+		    iapp->i_iface, cfg->c_apme_dlt ==
 		    DLT_IEEE802_11_RADIO ? "radiotap" : "pcap",
 		    strerror(errno));
 		return (errno);
@@ -170,6 +191,8 @@ void
 hostapd_iapp_input(int fd, short sig, void *arg)
 {
 	struct hostapd_config *cfg = (struct hostapd_config *)arg;
+	struct hostapd_iapp *iapp = &cfg->c_iapp;
+	struct hostapd_apme *apme;
 	struct sockaddr_in addr;
 	socklen_t addr_len;
 	ssize_t len;
@@ -198,7 +221,7 @@ hostapd_iapp_input(int fd, short sig, void *arg)
 	    (struct sockaddr*)&addr, &addr_len)) < 1)
 		return;
 
-	if (bcmp(&cfg->c_iapp_addr.sin_addr, &addr.sin_addr,
+	if (bcmp(&iapp->i_addr.sin_addr, &addr.sin_addr,
 	    sizeof(addr.sin_addr)) == 0)
 		return;
 
@@ -236,14 +259,17 @@ hostapd_iapp_input(int fd, short sig, void *arg)
 		 * ADD.notify message will be ignored.
 		 */
 		if (cfg->c_flags & HOSTAPD_CFG_F_APME) {
-			if ((ret = hostapd_apme_delnode(cfg, &node)) == 0)
-				cfg->c_stats.cn_tx_apme++;
+			TAILQ_FOREACH(apme, &cfg->c_apmes, a_entries) {
+				if ((ret = hostapd_apme_delnode(apme,
+				    &node)) == 0)
+					cfg->c_stats.cn_tx_apme++;
+			}
 		} else
 			ret = 0;
 
 		hostapd_log(HOSTAPD_LOG, "%s: %s ADD notification "
 		    "for %s at %s\n",
-		    cfg->c_apme_iface, ret == 0 ?
+		    iapp->i_iface, ret == 0 ?
 		    "received" : "ignored",
 		    etheraddr_string(node.ni_macaddr),
 		    inet_ntoa(addr.sin_addr));
@@ -251,6 +277,9 @@ hostapd_iapp_input(int fd, short sig, void *arg)
 
 	case IEEE80211_IAPP_FRAME_HOSTAPD_PCAP:
 	case IEEE80211_IAPP_FRAME_HOSTAPD_RADIOTAP:
+		if ((iapp->i_flags & HOSTAPD_IAPP_F_RADIOTAP) == 0)
+			return;
+
 		/* Short frame */
 		if (len <= (ssize_t)sizeof(struct ieee80211_iapp_frame) ||
 		    frame->hdr.i_length < sizeof(struct ieee80211_frame))
@@ -277,7 +306,7 @@ hostapd_iapp_input(int fd, short sig, void *arg)
 
 		hostapd_log(HOSTAPD_LOG_VERBOSE,
 		    "%s: received unsupported IAPP message %d\n",
-		    cfg->c_iapp_iface, frame->hdr.i_command);
+		    iapp->i_iface, frame->hdr.i_command);
 		return;
 
 	default:

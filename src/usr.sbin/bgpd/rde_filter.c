@@ -1,4 +1,4 @@
-/*	$OpenBSD: rde_filter.c,v 1.34 2005/08/10 08:34:06 claudio Exp $ */
+/*	$OpenBSD: rde_filter.c,v 1.46 2006/02/09 21:05:09 claudio Exp $ */
 
 /*
  * Copyright (c) 2004 Claudio Jeker <claudio@openbsd.org>
@@ -18,26 +18,29 @@
 #include <sys/types.h>
 #include <sys/queue.h>
 
+#include <limits.h>
 #include <stdlib.h>
 #include <string.h>
 
 #include "bgpd.h"
 #include "rde.h"
 
-extern struct filter_head	*rules_l;	/* XXX ugly */
-
 int	rde_filter_match(struct filter_rule *, struct rde_aspath *,
-	    struct bgpd_addr *, u_int8_t);
+	    struct bgpd_addr *, u_int8_t, struct rde_peer *);
+int	filterset_equal(struct filter_set_head *, struct filter_set_head *);
 
 enum filter_actions
-rde_filter(struct rde_peer *peer, struct rde_aspath *asp,
-    struct bgpd_addr *prefix, u_int8_t prefixlen, struct rde_peer *from,
-    enum directions dir)
+rde_filter(struct rde_aspath **new, struct filter_head *rules,
+    struct rde_peer *peer, struct rde_aspath *asp, struct bgpd_addr *prefix,
+    u_int8_t prefixlen, struct rde_peer *from, enum directions dir)
 {
 	struct filter_rule	*f;
 	enum filter_actions	 action = ACTION_ALLOW; /* default allow */
 
-	TAILQ_FOREACH(f, rules_l, entry) {
+	if (new != NULL)
+		*new = NULL;
+
+	TAILQ_FOREACH(f, rules, entry) {
 		if (dir != f->dir)
 			continue;
 		if (f->peer.groupid != 0 &&
@@ -46,10 +49,17 @@ rde_filter(struct rde_peer *peer, struct rde_aspath *asp,
 		if (f->peer.peerid != 0 &&
 		    f->peer.peerid != peer->conf.id)
 			continue;
-		if (rde_filter_match(f, asp, prefix, prefixlen)) {
-			if (asp != NULL)
+		if (rde_filter_match(f, asp, prefix, prefixlen, peer)) {
+			if (asp != NULL && new != NULL) {
+				/* asp may get modified so create a copy */
+				if (*new == NULL) {
+					*new = path_copy(asp);
+					/* ... and use the copy from now on */
+					asp = *new;
+				}
 				rde_apply_set(asp, &f->set, prefix->af,
-				    from, dir);
+				    from, peer);
+			}
 			if (f->action != ACTION_NONE)
 				action = f->action;
 			if (f->quick)
@@ -61,27 +71,18 @@ rde_filter(struct rde_peer *peer, struct rde_aspath *asp,
 
 void
 rde_apply_set(struct rde_aspath *asp, struct filter_set_head *sh,
-    sa_family_t af, struct rde_peer *from, enum directions dir)
+    sa_family_t af, struct rde_peer *from, struct rde_peer *peer)
 {
 	struct filter_set	*set;
 	struct aspath		*new;
-	struct attr		*a;
-	u_int16_t		 as;
+	int			 as, type;
+	u_int16_t		 prep_as;
 	u_int8_t		 prepend;
 
 	if (asp == NULL)
 		return;
 
 	TAILQ_FOREACH(set, sh, entry) {
-		/*
-		 * default outgoing overrides are only allowed to
-		 * set prepend-self and set nexthop no-modify
-		 */
-		if (dir == DIR_DEFAULT_OUT &&
-		    set->type != ACTION_SET_PREPEND_SELF &&
-		    set->type != ACTION_SET_NEXTHOP_NOMODIFY)
-			continue;
-
 		switch (set->type) {
 		case ACTION_SET_LOCALPREF:
 			asp->lpref = set->action.metric;
@@ -140,9 +141,6 @@ rde_apply_set(struct rde_aspath *asp, struct filter_set_head *sh,
 			}
 			break;
 		case ACTION_SET_PREPEND_SELF:
-			/* don't apply if this is a incoming default override */
-			if (dir == DIR_DEFAULT_IN)
-				break;
 			as = rde_local_as();
 			prepend = set->action.prepend;
 			new = aspath_prepend(asp->aspath, as, prepend);
@@ -152,9 +150,9 @@ rde_apply_set(struct rde_aspath *asp, struct filter_set_head *sh,
 		case ACTION_SET_PREPEND_PEER:
 			if (from == NULL)
 				break;
-			as = from->conf.remote_as;
+			prep_as = from->conf.remote_as;
 			prepend = set->action.prepend;
-			new = aspath_prepend(asp->aspath, as, prepend);
+			new = aspath_prepend(asp->aspath, prep_as, prepend);
 			aspath_put(asp->aspath);
 			asp->aspath = new;
 			break;
@@ -162,22 +160,62 @@ rde_apply_set(struct rde_aspath *asp, struct filter_set_head *sh,
 		case ACTION_SET_NEXTHOP_REJECT:
 		case ACTION_SET_NEXTHOP_BLACKHOLE:
 		case ACTION_SET_NEXTHOP_NOMODIFY:
-			if (set->type == ACTION_SET_NEXTHOP_NOMODIFY &&
-			    dir == DIR_DEFAULT_IN)
-				break;
 			nexthop_modify(asp, &set->action.nexthop, set->type,
 			    af);
 			break;
 		case ACTION_SET_COMMUNITY:
-			if ((a = attr_optget(asp, ATTR_COMMUNITIES)) == NULL) {
-				attr_optadd(asp, ATTR_OPTIONAL|ATTR_TRANSITIVE,
-				    ATTR_COMMUNITIES, NULL, 0);
-				if ((a = attr_optget(asp,
-				    ATTR_COMMUNITIES)) == NULL)
-					fatalx("internal community bug");
+			switch (set->action.community.as) {
+			case COMMUNITY_ERROR:
+			case COMMUNITY_ANY:
+				fatalx("rde_apply_set bad community string");
+			case COMMUNITY_NEIGHBOR_AS:
+				as = peer->conf.remote_as;
+				break;
+			default:
+				as = set->action.community.as;
+				break;
 			}
-			community_set(a, set->action.community.as,
-			    set->action.community.type);
+
+			switch (set->action.community.type) {
+			case COMMUNITY_ERROR:
+			case COMMUNITY_ANY:
+				fatalx("rde_apply_set bad community string");
+			case COMMUNITY_NEIGHBOR_AS:
+				type = peer->conf.remote_as;
+				break;
+			default:
+				type = set->action.community.type;
+				break;
+			}
+
+			community_set(asp, as, type);
+			break;
+		case ACTION_DEL_COMMUNITY:
+			switch (set->action.community.as) {
+			case COMMUNITY_ERROR:
+				fatalx("rde_apply_set bad community string");
+			case COMMUNITY_NEIGHBOR_AS:
+				as = peer->conf.remote_as;
+				break;
+			case COMMUNITY_ANY:
+			default:
+				as = set->action.community.as;
+				break;
+			}
+
+			switch (set->action.community.type) {
+			case COMMUNITY_ERROR:
+				fatalx("rde_apply_set bad community string");
+			case COMMUNITY_NEIGHBOR_AS:
+				type = peer->conf.remote_as;
+				break;
+			case COMMUNITY_ANY:
+			default:
+				type = set->action.community.type;
+				break;
+			}
+
+			community_delete(asp, as, type);
 			break;
 		case ACTION_PFTABLE:
 			/* convert pftable name to an id */
@@ -205,18 +243,41 @@ rde_apply_set(struct rde_aspath *asp, struct filter_set_head *sh,
 
 int
 rde_filter_match(struct filter_rule *f, struct rde_aspath *asp,
-    struct bgpd_addr *prefix, u_int8_t plen)
+    struct bgpd_addr *prefix, u_int8_t plen, struct rde_peer *peer)
 {
+	int	as, type;
 
 	if (asp != NULL && f->match.as.type != AS_NONE)
 		if (aspath_match(asp->aspath, f->match.as.type,
 		    f->match.as.as) == 0)
 			return (0);
 
-	if (asp != NULL && f->match.community.as != 0)
-		if (rde_filter_community(asp, f->match.community.as,
-		    f->match.community.type) == 0)
+	if (asp != NULL && f->match.community.as != 0) {
+		switch (f->match.community.as) {
+		case COMMUNITY_ERROR:
+			fatalx("rde_apply_set bad community string");
+		case COMMUNITY_NEIGHBOR_AS:
+			as = peer->conf.remote_as;
+			break;
+		default:
+			as = f->match.community.as;
+			break;
+		}
+
+		switch (f->match.community.type) {
+		case COMMUNITY_ERROR:
+			fatalx("rde_apply_set bad community string");
+		case COMMUNITY_NEIGHBOR_AS:
+			type = peer->conf.remote_as;
+			break;
+		default:
+			type = f->match.community.type;
+			break;
+		}
+
+		if (rde_filter_community(asp, as, type) == 0)
 			return (0);
+	}
 
 	if (f->match.prefix.addr.af != 0 &&
 	    f->match.prefix.addr.af == prefix->af) {
@@ -298,6 +359,69 @@ rde_filter_community(struct rde_aspath *asp, int as, int type)
 	return (community_match(a->data, a->len, as, type));
 }
 
+int
+rde_filter_equal(struct filter_head *a, struct filter_head *b,
+    struct rde_peer *peer, enum directions dir)
+{
+	struct filter_rule	*fa, *fb;
+
+	fa = TAILQ_FIRST(a);
+	fb = TAILQ_FIRST(b);
+
+	while (fa != NULL || fb != NULL) {
+		/* skip all rules with wrong direction */
+		if (fa != NULL && dir != fa->dir) {
+			fa = TAILQ_NEXT(fa, entry);
+			continue;
+		}
+		if (fb != NULL && dir != fb->dir) {
+			fb = TAILQ_NEXT(fb, entry);
+			continue;
+		}
+
+		/* skip all rules with wrong peer */
+		if (fa != NULL && fa->peer.groupid != 0 &&
+		    fa->peer.groupid != peer->conf.groupid) {
+			fa = TAILQ_NEXT(fa, entry);
+			continue;
+		}
+		if (fa != NULL && fa->peer.peerid != 0 &&
+		    fa->peer.peerid != peer->conf.id) {
+			fa = TAILQ_NEXT(fa, entry);
+			continue;
+		}
+
+		if (fb != NULL && fb->peer.groupid != 0 &&
+		    fb->peer.groupid != peer->conf.groupid) {
+			fb = TAILQ_NEXT(fb, entry);
+			continue;
+		}
+		if (fb != NULL && fb->peer.peerid != 0 &&
+		    fb->peer.peerid != peer->conf.id) {
+			fb = TAILQ_NEXT(fb, entry);
+			continue;
+		}
+
+		/* compare the two rules */
+		if ((fa == NULL && fb != NULL) || (fa != NULL && fb == NULL))
+			/* new rule added or removed */
+			return (0);
+
+		if (fa->action != fb->action || fa->quick != fb->quick)
+			return (0);
+		if (memcmp(&fa->peer, &fb->peer, sizeof(fa->peer)))
+			return (0);
+		if (memcmp(&fa->match, &fb->match, sizeof(fa->match)))
+			return (0);
+		if (!filterset_equal(&fa->set, &fb->set))
+			return (0);
+
+		fa = TAILQ_NEXT(fa, entry);
+		fb = TAILQ_NEXT(fb, entry);
+	}
+	return (1);
+}
+
 /* free a filterset and take care of possible name2id references */
 void
 filterset_free(struct filter_set_head *sh)
@@ -318,7 +442,8 @@ filterset_free(struct filter_set_head *sh)
  * this function is a bit more complicated than a memcmp() because there are
  * types that need to be considered equal e.g. ACTION_SET_MED and
  * ACTION_SET_RELATIVE_MED. Also ACTION_SET_COMMUNITY and ACTION_SET_NEXTHOP
- * need some special care.
+ * need some special care. It only checks the types and not the values so
+ * it does not do a real compare.
  */
 int
 filterset_cmp(struct filter_set *a, struct filter_set *b)
@@ -348,4 +473,95 @@ filterset_cmp(struct filter_set *a, struct filter_set *b)
 	return (0);
 }
 
+int
+filterset_equal(struct filter_set_head *ah, struct filter_set_head *bh)
+{
+	struct filter_set	*a, *b;
+	const char		*as, *bs;
+
+	for (a = TAILQ_FIRST(ah), b = TAILQ_FIRST(bh);
+	    a != NULL && b != NULL;
+	    a = TAILQ_NEXT(a, entry), b = TAILQ_NEXT(b, entry)) {
+		switch (a->type) {
+		case ACTION_SET_PREPEND_SELF:
+		case ACTION_SET_PREPEND_PEER:
+			if (a->type == b->type &&
+			    a->action.prepend == b->action.prepend)
+				continue;
+			break;
+		case ACTION_SET_LOCALPREF:
+		case ACTION_SET_MED:
+		case ACTION_SET_WEIGHT:
+			if (a->type == b->type &&
+			    a->action.metric == b->action.metric)
+				continue;
+			break;
+		case ACTION_SET_RELATIVE_LOCALPREF:
+		case ACTION_SET_RELATIVE_MED:
+		case ACTION_SET_RELATIVE_WEIGHT:
+			if (a->type == b->type &&
+			    a->action.relative == b->action.relative)
+				continue;
+			break;
+		case ACTION_SET_NEXTHOP:
+			if (a->type == b->type &&
+			    memcmp(&a->action.nexthop, &b->action.nexthop,
+			    sizeof(a->action.nexthop)) == 0)
+				continue;
+			break;
+		case ACTION_SET_NEXTHOP_BLACKHOLE:
+		case ACTION_SET_NEXTHOP_REJECT:
+		case ACTION_SET_NEXTHOP_NOMODIFY:
+			if (a->type == b->type)
+				continue;
+			break;
+		case ACTION_DEL_COMMUNITY:
+		case ACTION_SET_COMMUNITY:
+			if (a->type == b->type &&
+			    memcmp(&a->action.community, &b->action.community,
+			    sizeof(a->action.community)) == 0)
+				continue;
+			break;
+		case ACTION_PFTABLE:
+		case ACTION_PFTABLE_ID:
+			if (b->type == ACTION_PFTABLE)
+				bs = b->action.pftable;
+			else if (b->type == ACTION_PFTABLE_ID)
+				bs = pftable_id2name(b->action.id);
+			else
+				break;
+
+			if (a->type == ACTION_PFTABLE)
+				as = a->action.pftable;
+			else
+				as = pftable_id2name(a->action.id);
+
+			if (strcmp(as, bs) == 0)
+				continue;
+			break;
+		case ACTION_RTLABEL:
+		case ACTION_RTLABEL_ID:
+			if (b->type == ACTION_RTLABEL)
+				bs = b->action.rtlabel;
+			else if (b->type == ACTION_RTLABEL_ID)
+				bs = rtlabel_id2name(b->action.id);
+			else
+				break;
+
+			if (a->type == ACTION_RTLABEL)
+				as = a->action.rtlabel;
+			else
+				as = rtlabel_id2name(a->action.id);
+
+			if (strcmp(as, bs) == 0)
+				continue;
+			break;
+		}
+		/* compare failed */
+		return (0);
+	}
+	if (a != NULL || b != NULL)
+		return (0);
+	return (1);
+}
 

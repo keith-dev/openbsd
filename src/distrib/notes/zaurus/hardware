@@ -1,4 +1,4 @@
-dnl	$OpenBSD: hardware,v 1.14 2005/08/30 18:38:54 uwe Exp $
+dnl	$OpenBSD: hardware,v 1.20 2006/01/08 00:32:56 jolan Exp $
 dnl When more than one model is supported, turn this into a list...
 OpenBSD/MACHINE runs on the Sharp Zaurus C3000 and C3100 only, at
 the moment. Support for the C760 and C860 is under development.
@@ -18,7 +18,7 @@ Supported devices {:-include-:}:
 		    Elsa Microlink USB2Ethernet
 		    I/O Data USB ETTX
 		    Kingston KNU101TX
-		    LinkSys USB100TX, USB100H1 and USB10TA
+		    Linksys USB100TX, USB100H1 and USB10TA
 		    Melco Inc. LUA-TX
 		    Siemens SpeedStream USB
 		    SmartBridges smartNIC 2
@@ -36,7 +36,7 @@ Supported devices {:-include-:}:
 		    Hawking UF200
 		    Intellinet USB 2.0 to Ethernet (rev A)
 		    JVC MP-PRX1
-		    LinkSys USB200M
+		    Linksys USB200M
 		    Netgear FA120
 		    Sitecom LN-029
 		    SMC 2209USB/ETH
@@ -67,7 +67,7 @@ Supported devices {:-include-:}:
 		    Jaton USB XpressNet
 		    Kawasaki USB101
 		    Kingston Ethernet
-		    LinkSys USB10T
+		    Linksys USB10T
 		    Mobility Ethernet
 		    Netgear EA101
 		    Peracom USB
@@ -80,7 +80,9 @@ Supported devices {:-include-:}:
 		NE2000 compatible CF Ethernet adapters
 		    Billionton Systems CFLT2-10N
 		    Buffalo LPC-CF-CLT
+		    Hawking CF686TX
 		    Tamarack TC3299CE
+		    TRENDnet TE-CF100
 		RealTek RTL8150L based USB adapters, including:
 		    Abocom RTL8151
 		    BAFO BF-310
@@ -96,7 +98,7 @@ Supported devices {:-include-:}:
 		    NetComm NP1010
 		    Repotec RP-USB100-A
 		    SMC 2208USB/ETH
-		    TrendNet TU-ET100C
+		    TRENDnet TU-ET100C
 		    Zt USB10/100
 		    Z-TEK ZK-R02
 	Wireless Ethernet Adapters
@@ -173,10 +175,12 @@ Supported devices {:-include-:}:
 		    Sitecom WL-022
 		    Syntax USB-400
 		    US Robotics 1120
+		    ViewSonic Airsync
 		    Z-Com XI-725/726
 		    Z-Com XI-735
 		    ZyXEL ZyAIR B-200
 		Intersil PRISM 2-3 based IEEE 802.11b Compact Flash adapters
+		    AmbiCom WL1100C-CF
 		    ASUS WL-110
 		    Belkin F5D6060 (version 1)
 		    Buffalo AirStation
@@ -184,6 +188,7 @@ Supported devices {:-include-:}:
 		    ELSA XI800
 		    Linksys WCF12
 		    Netgear MA701
+		    Pretec Compact WLAN OC-WLBXX-A
 		    Senao NL-2511CF
 		Ralink RT2500 based USB 2.0 IEEE 802.11b/g adapters
 		    AMIT WL532U

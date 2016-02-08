@@ -1,4 +1,4 @@
-/*	$OpenBSD: time.h,v 1.16 2003/08/01 17:38:33 avsm Exp $	*/
+/*	$OpenBSD: time.h,v 1.18 2006/01/06 18:53:04 millert Exp $	*/
 /*	$NetBSD: time.h,v 1.9 1994/10/26 00:56:35 cgd Exp $	*/
 
 /*
@@ -41,7 +41,8 @@
 #ifndef _TIME_H_
 #define	_TIME_H_
 
-#include <machine/ansi.h>
+#include <sys/cdefs.h>
+#include <machine/_types.h>
 
 #ifndef	NULL
 #ifdef 	__GNUG__
@@ -51,22 +52,38 @@
 #endif
 #endif
 
-#ifdef	_BSD_CLOCK_T_
-typedef	_BSD_CLOCK_T_	clock_t;
-#undef	_BSD_CLOCK_T_
+#ifndef	_CLOCK_T_DEFINED_
+#define	_CLOCK_T_DEFINED_
+typedef	__clock_t	clock_t;
 #endif
 
-#ifdef	_BSD_TIME_T_
-typedef	_BSD_TIME_T_	time_t;
-#undef	_BSD_TIME_T_
+#ifndef	_TIME_T_DEFINED_
+#define	_TIME_T_DEFINED_
+typedef	__time_t	time_t;
 #endif
 
-#ifdef	_BSD_SIZE_T_
-typedef	_BSD_SIZE_T_	size_t;
-#undef	_BSD_SIZE_T_
+#ifndef	_SIZE_T_DEFINED_
+#define	_SIZE_T_DEFINED_
+typedef	__size_t	size_t;
 #endif
 
-#define CLOCKS_PER_SEC	100
+#if __POSIX_VISIBLE > 0 && __POSIX_VISIBLE < 200112 || __BSD_VISIBLE
+/*
+ * Frequency of the clock ticks reported by times().  Deprecated - use
+ * sysconf(_SC_CLK_TCK) instead.  (Removed in 1003.1-2001.)
+ */
+#define CLK_TCK		100
+#endif
+
+#define CLOCKS_PER_SEC	100	/* frequency of ticks reported by clock().  */
+
+#ifndef _TIMESPEC_DECLARED
+#define _TIMESPEC_DECLARED
+struct timespec {
+	time_t	tv_sec;		/* seconds */
+	long	tv_nsec;	/* and nanoseconds */
+};
+#endif
 
 struct tm {
 	int	tm_sec;		/* seconds after the minute [0-60] */
@@ -81,8 +98,6 @@ struct tm {
 	long	tm_gmtoff;	/* offset from UTC in seconds */
 	char	*tm_zone;	/* timezone abbreviation */
 };
-
-#include <sys/cdefs.h>
 
 __BEGIN_DECLS
 struct timespec;
@@ -105,19 +120,18 @@ struct tm *gmtime_r(const time_t *, struct tm *);
 struct tm *localtime_r(const time_t *, struct tm *);
 int nanosleep(const struct timespec *, struct timespec *);
 
-#if !defined(_ANSI_SOURCE)
-#define CLK_TCK		100
+#if __POSIX_VISIBLE
 extern char *tzname[2];
 void tzset(void);
-#endif /* not ANSI */
+#endif
 
-#if !defined(_ANSI_SOURCE) && !defined(_POSIX_SOURCE)
+#if __BSD_VISIBLE
 char *timezone(int, int);
 void tzsetwall(void);
 time_t timelocal(struct tm *);
 time_t timegm(struct tm *);
 time_t timeoff(struct tm *, const long);
-#endif /* neither ANSI nor POSIX */
+#endif
 __END_DECLS
 
 #endif /* !_TIME_H_ */

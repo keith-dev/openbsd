@@ -1,4 +1,4 @@
-/*	$OpenBSD: kroute.c,v 1.20 2005/08/08 08:38:42 claudio Exp $ */
+/*	$OpenBSD: kroute.c,v 1.25 2006/01/23 22:29:15 claudio Exp $ */
 
 /*
  * Copyright (c) 2004 Esben Norby <norby@openbsd.org>
@@ -26,6 +26,7 @@
 #include <arpa/inet.h>
 #include <net/if.h>
 #include <net/if_dl.h>
+#include <net/if_types.h>
 #include <net/route.h>
 #include <err.h>
 #include <errno.h>
@@ -74,6 +75,7 @@ struct kif_node		*kif_find(int);
 int			 kif_insert(struct kif_node *);
 int			 kif_remove(struct kif_node *);
 void			 kif_clear(void);
+int			 kif_validate(int);
 
 struct kroute_node	*kroute_match(in_addr_t);
 
@@ -171,8 +173,8 @@ kr_change(struct kroute *kroute)
 	}
 
 	/* nexthop within 127/8 -> ignore silently */
-	if ((kroute->nexthop.s_addr & htonl(0xff000000)) ==
-	    inet_addr("127.0.0.0"))
+	if ((kroute->nexthop.s_addr & htonl(IN_CLASSA_NET)) ==
+	    htonl(INADDR_LOOPBACK & IN_CLASSA_NET))
 		return (0);
 
 	if (send_rtmsg(kr_state.fd, action, kroute) == -1)
@@ -209,8 +211,8 @@ kr_delete(struct kroute *kroute)
 		return (0);
 
 	/* nexthop within 127/8 -> ignore silently */
-	if ((kroute->nexthop.s_addr & htonl(0xff000000)) ==
-	    inet_addr("127.0.0.0"))
+	if ((kroute->nexthop.s_addr & htonl(IN_CLASSA_NET)) ==
+	    htonl(INADDR_LOOPBACK & IN_CLASSA_NET))
 		return (0);
 
 	if (send_rtmsg(kr_state.fd, RTM_DELETE, kroute) == -1)
@@ -330,8 +332,28 @@ kr_redistribute(int type, struct kroute *kr)
 {
 	u_int32_t	a;
 
+
+	if (type == IMSG_NETWORK_DEL) {
+		/* was the route redistributed? */
+		if (kr->flags & F_REDISTRIBUTED) {
+			/* remove redistributed flag */
+			kr->flags &= ~F_REDISTRIBUTED;
+			main_imsg_compose_rde(type, 0, kr,
+			    sizeof(struct kroute));
+		}
+		return;
+	}
+
+	/* Only non-ospfd routes are considered for redistribution. */
+	if (kr->flags & F_OSPFD_INSERTED)
+		return;
+
 	/* Dynamic routes are not redistributable. */
 	if (kr->flags & F_DYNAMIC)
+		return;
+
+	/* interface is not up and running so don't announce */
+	if (kr->flags & F_DOWN)
 		return;
 
 	/*
@@ -348,6 +370,12 @@ kr_redistribute(int type, struct kroute *kr)
 	if (kr->nexthop.s_addr == htonl(INADDR_LOOPBACK))
 		return;
 
+	/* Should we redistrubute this route? */
+	if (!ospf_redistribute(kr))
+		return;
+
+	/* Does not matter if we resend the kr, the RDE will cope. */
+	kr->flags |= F_REDISTRIBUTED;
 	main_imsg_compose_rde(type, 0, kr, sizeof(struct kroute));
 }
 
@@ -394,8 +422,18 @@ kroute_insert(struct kroute_node *kr)
 		return (-1);
 	}
 
-	if (kr->r.flags & F_KERNEL)
-		kr_redistribute(IMSG_NETWORK_ADD, &kr->r);
+	if (kr->r.flags & F_OSPFD_INSERTED) {
+		/* don't validate or redistribute ospf route */
+		kr->r.flags &= ~F_DOWN;
+		return (0);
+	}
+
+	if (kif_validate(kr->r.ifindex))
+		kr->r.flags &= ~F_DOWN;
+	else
+		kr->r.flags |= F_DOWN;
+
+	kr_redistribute(IMSG_NETWORK_ADD, &kr->r);
 
 	return (0);
 }
@@ -409,8 +447,7 @@ kroute_remove(struct kroute_node *kr)
 		return (-1);
 	}
 
-	if (kr->r.flags & F_KERNEL)
-		kr_redistribute(IMSG_NETWORK_DEL, &kr->r);
+	kr_redistribute(IMSG_NETWORK_DEL, &kr->r);
 
 	free(kr);
 	return (0);
@@ -481,20 +518,6 @@ kif_clear(void)
 		kif_remove(kif);
 }
 
-void
-kif_update(struct kif *k)
-{
-	struct kif_node		*kif;
-
-	if ((kif = kif_find(k->ifindex)) == NULL) {
-		log_warnx("interface with index %u not found",
-		    k->ifindex);
-		return;
-	}
-
-	memcpy(&kif->k, k, sizeof(struct kif));
-}
-
 int
 kif_validate(int ifindex)
 {
@@ -538,7 +561,7 @@ protect_lo(void)
 		log_warn("protect_lo");
 		return (-1);
 	}
-	kr->r.prefix.s_addr = inet_addr("127.0.0.1");
+	kr->r.prefix.s_addr = htonl(INADDR_LOOPBACK);
 	kr->r.prefixlen = 8;
 	kr->r.flags = F_KERNEL|F_CONNECTED;
 
@@ -605,6 +628,8 @@ void
 if_change(u_short ifindex, int flags, struct if_data *ifd)
 {
 	struct kif_node		*kif;
+	struct kroute_node	*kr;
+	int			 type;
 	u_int8_t		 reachable;
 
 	if ((kif = kif_find(ifindex)) == NULL) {
@@ -619,12 +644,27 @@ if_change(u_short ifindex, int flags, struct if_data *ifd)
 	kif->k.baudrate = ifd->ifi_baudrate;
 
 	if ((reachable = (flags & IFF_UP) &&
-	    (ifd->ifi_link_state != LINK_STATE_DOWN)) == kif->k.nh_reachable)
+	    (ifd->ifi_link_state == LINK_STATE_UP ||
+	    (ifd->ifi_link_state == LINK_STATE_UNKNOWN &&
+	    ifd->ifi_type != IFT_CARP))) == kif->k.nh_reachable)
 		return;		/* nothing changed wrt nexthop validity */
 
 	kif->k.nh_reachable = reachable;
+	type = reachable ? IMSG_NETWORK_ADD : IMSG_NETWORK_DEL;
+
+	/* notify ospfe about interface link state */
 	main_imsg_compose_ospfe(IMSG_IFINFO, 0, &kif->k, sizeof(kif->k));
-	main_imsg_compose_rde(IMSG_IFINFO, 0, &kif->k, sizeof(kif->k));
+
+	/* update redistribute list */
+	RB_FOREACH(kr, kroute_tree, &krt)
+		if (kr->r.ifindex == ifindex) {
+			if (reachable)
+				kr->r.flags &= ~F_DOWN;
+			else
+				kr->r.flags |= F_DOWN;
+
+			kr_redistribute(type, &kr->r);
+		}
 }
 
 void
@@ -774,8 +814,7 @@ fetchtable(void)
 			return (-1);
 		}
 
-		if (!(rtm->rtm_flags & RTF_PROTO1))
-			kr->r.flags = F_KERNEL;
+		kr->r.flags = F_KERNEL;
 
 		switch (sa->sa_family) {
 		case AF_INET:
@@ -879,16 +918,19 @@ fetchifs(int ifindex)
 		kif->k.baudrate = ifm.ifm_data.ifi_baudrate;
 		kif->k.mtu = ifm.ifm_data.ifi_mtu;
 		kif->k.nh_reachable = (kif->k.flags & IFF_UP) &&
-		    (ifm.ifm_data.ifi_link_state != LINK_STATE_DOWN);
+		    (ifm.ifm_data.ifi_link_state == LINK_STATE_UP ||
+		    (ifm.ifm_data.ifi_link_state == LINK_STATE_UNKNOWN &&
+		    ifm.ifm_data.ifi_type != IFT_CARP));
 		if ((sa = rti_info[RTAX_IFP]) != NULL)
 			if (sa->sa_family == AF_LINK) {
 				sdl = (struct sockaddr_dl *)sa;
 				if (sdl->sdl_nlen >= sizeof(kif->k.ifname))
-					strlcpy(kif->k.ifname, sdl->sdl_data,
-					    sizeof(kif->k.ifname));
+					memcpy(kif->k.ifname, sdl->sdl_data,
+					    sizeof(kif->k.ifname) - 1);
 				else if (sdl->sdl_nlen > 0)
-					strlcpy(kif->k.ifname, sdl->sdl_data,
-					    sdl->sdl_nlen + 1);
+					memcpy(kif->k.ifname, sdl->sdl_data,
+					    sdl->sdl_nlen);
+				/* string already terminated via calloc() */
 			}
 
 		kif_insert(kif);
@@ -966,7 +1008,6 @@ dispatch_rtmsg(void)
 				break;
 			default:
 				continue;
-				/* not reached */
 			}
 		}
 
@@ -996,6 +1037,12 @@ dispatch_rtmsg(void)
 				if (kr->r.flags & F_KERNEL) {
 					kr->r.nexthop.s_addr = nexthop.s_addr;
 					kr->r.flags = flags;
+
+					if (kif_validate(kr->r.ifindex))
+						kr->r.flags &= ~F_DOWN;
+					else
+						kr->r.flags |= F_DOWN;
+
 					/* just readd, the RDE will care */
 					kr_redistribute(IMSG_NETWORK_ADD,
 					    &kr->r);

@@ -1,4 +1,4 @@
-/*	$OpenBSD: cinfo.c,v 1.12 2005/06/14 18:14:40 kjell Exp $	*/
+/*	$OpenBSD: cinfo.c,v 1.15 2005/12/13 06:01:27 kjell Exp $	*/
 
 /* This file is in the public domain. */
 
@@ -92,10 +92,10 @@ const char cinfo[256] = {
  * '\0'.  Returns NULL on failure.
  */
 char *
-keyname(char *cp, size_t len, int k)
+getkeyname(char *cp, size_t len, int k)
 {
-	const char  *np;
-	size_t	     copied;
+	const char	*np;
+	size_t		 copied;
 
 	if (k < 0)
 		k = CHARMASK(k);	/* sign extended char */
@@ -106,9 +106,6 @@ keyname(char *cp, size_t len, int k)
 	case CCHR('I'):
 		np = "TAB";
 		break;
-	case CCHR('J'):
-		np = "LFD";
-		break;		/* yuck, but that's what GNU calls it */
 	case CCHR('M'):
 		np = "RET";
 		break;
