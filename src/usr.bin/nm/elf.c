@@ -1,4 +1,4 @@
-/*	$OpenBSD: elf.c,v 1.8 2004/08/20 04:42:51 mickey Exp $	*/
+/*	$OpenBSD: elf.c,v 1.13 2005/01/19 19:37:29 grange Exp $	*/
 
 /*
  * Copyright (c) 2003 Michael Shalayeff
@@ -26,7 +26,25 @@
  * THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#if ELF_TARG_CLASS == ELFCLASS32
+#ifndef lint
+static const char rcsid[] = "$OpenBSD: elf.c,v 1.13 2005/01/19 19:37:29 grange Exp $";
+#endif /* not lint */
+
+#include <sys/param.h>
+#include <sys/mman.h>
+#include <unistd.h>
+#include <a.out.h>
+#include <elf_abi.h>
+#include <errno.h>
+#include <err.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <ctype.h>
+#include "elfuncs.h"
+#include "util.h"
+
+#if ELFSIZE == 32
 #define	swap_addr	swap32
 #define	swap_off	swap32
 #define	swap_sword	swap32
@@ -35,7 +53,17 @@
 #define	swap_xword	swap32
 #define	swap_half	swap16
 #define	swap_quarter	swap16
-#elif ELF_TARG_CLASS == ELFCLASS64
+#define	elf_fix_header	elf32_fix_header
+#define	elf_load_shdrs	elf32_load_shdrs
+#define	elf_load_phdrs	elf32_load_phdrs
+#define	elf_fix_shdrs	elf32_fix_shdrs
+#define	elf_fix_phdrs	elf32_fix_phdrs
+#define	elf_fix_sym	elf32_fix_sym
+#define	elf_size	elf32_size
+#define	elf_symload	elf32_symload
+#define	elf2nlist	elf32_2nlist
+#define	elf_shn2type	elf32_shn2type
+#elif ELFSIZE == 64
 #define	swap_addr	swap64
 #define	swap_off	swap64
 #ifdef __alpha__
@@ -49,12 +77,43 @@
 #define	swap_xword	swap64
 #define	swap_half	swap64
 #define	swap_quarter	swap16
+#define	elf_fix_header	elf64_fix_header
+#define	elf_load_shdrs	elf64_load_shdrs
+#define	elf_load_phdrs	elf64_load_phdrs
+#define	elf_fix_shdrs	elf64_fix_shdrs
+#define	elf_fix_phdrs	elf64_fix_phdrs
+#define	elf_fix_sym	elf64_fix_sym
+#define	elf_size	elf64_size
+#define	elf_symload	elf64_symload
+#define	elf2nlist	elf64_2nlist
+#define	elf_shn2type	elf64_shn2type
 #else
 #error "Unsupported ELF class"
 #endif
 
+#define	ELF_SDATA	".sdata"
 #define	ELF_SBSS	".sbss"
 #define	ELF_PLT		".plt"
+
+#ifndef	SHN_MIPS_ACOMMON
+#define	SHN_MIPS_ACOMMON	SHN_LOPROC + 0
+#endif
+#ifndef	SHN_MIPS_TEXT
+#define	SHN_MIPS_TEXT		SHN_LOPROC + 1
+#endif
+#ifndef	SHN_MIPS_DATA
+#define	SHN_MIPS_DATA		SHN_LOPROC + 2
+#endif
+#ifndef	SHN_MIPS_SUNDEFINED
+#define	SHN_MIPS_SUNDEFINED	SHN_LOPROC + 4
+#endif
+#ifndef	SHN_MIPS_SCOMMON
+#define	SHN_MIPS_SCOMMON	SHN_LOPROC + 3
+#endif
+
+#ifndef	STT_PARISC_MILLI
+#define	STT_PARISC_MILLI	STT_LOPROC + 0
+#endif
 
 int
 elf_fix_header(Elf_Ehdr *eh)
@@ -78,6 +137,60 @@ elf_fix_header(Elf_Ehdr *eh)
 	eh->e_shstrndx = swap16(eh->e_shstrndx);
 
 	return (1);
+}
+
+Elf_Shdr *
+elf_load_shdrs(const char *name, FILE *fp, off_t foff, Elf_Ehdr *head)
+{
+	Elf_Shdr *shdr;
+
+	elf_fix_header(head);
+
+	if ((shdr = malloc(head->e_shentsize * head->e_shnum)) == NULL) {
+		warn("%s: malloc shdr", name);
+		return (NULL);
+	}
+
+	if (fseeko(fp, foff + head->e_shoff, SEEK_SET)) {
+		warn("%s: fseeko", name);
+		free(shdr);
+		return (NULL);
+	}
+
+	if (fread(shdr, head->e_shentsize, head->e_shnum, fp) != head->e_shnum) {
+		warnx("%s: premature EOF", name);
+		free(shdr);
+		return (NULL);
+	}
+
+	elf_fix_shdrs(head, shdr);
+	return (shdr);
+}
+
+Elf_Phdr *
+elf_load_phdrs(const char *name, FILE *fp, off_t foff, Elf_Ehdr *head)
+{
+	Elf_Phdr *phdr;
+
+	if ((phdr = malloc(head->e_phentsize * head->e_phnum)) == NULL) {
+		warn("%s: malloc phdr", name);
+		return (NULL);
+	}
+
+	if (fseeko(fp, foff + head->e_phoff, SEEK_SET)) {
+		warn("%s: fseeko", name);
+		free(phdr);
+		return (NULL);
+	}
+
+	if (fread(phdr, head->e_phentsize, head->e_phnum, fp) != head->e_phnum) {
+		warnx("%s: premature EOF", name);
+		free(phdr);
+		return (NULL);
+	}
+
+	elf_fix_phdrs(head, phdr);
+	return (phdr);
 }
 
 int
@@ -143,6 +256,69 @@ elf_fix_sym(Elf_Ehdr *eh, Elf_Sym *sym)
 	return (1);
 }
 
+int
+elf_shn2type(Elf_Ehdr *eh, u_int shn, const char *sn)
+{
+	switch (shn) {
+	case SHN_MIPS_SUNDEFINED:
+		if (eh->e_machine == EM_MIPS)
+			return (N_UNDF | N_EXT);
+		break;
+
+	case SHN_UNDEF:
+		return (N_UNDF | N_EXT);
+
+	case SHN_ABS:
+		return (N_ABS);
+
+	case SHN_MIPS_ACOMMON:
+		if (eh->e_machine == EM_MIPS)
+			return (N_COMM);
+		break;
+
+	case SHN_MIPS_SCOMMON:
+		if (eh->e_machine == EM_MIPS)
+			return (N_COMM);
+		break;
+
+	case SHN_COMMON:
+		return (N_COMM);
+
+	case SHN_MIPS_TEXT:
+		if (eh->e_machine == EM_MIPS)
+			return (N_TEXT);
+		break;
+
+	case SHN_MIPS_DATA:
+		if (eh->e_machine == EM_MIPS)
+			return (N_DATA);
+		break;
+
+	default:
+		/* beyond 8 a table-driven binsearch shall be used */
+		if (sn == NULL)
+			return (-1);
+		else if (!strcmp(sn, ELF_TEXT))
+			return (N_TEXT);
+		else if (!strcmp(sn, ELF_RODATA))
+			return (N_SIZE);
+		else if (!strcmp(sn, ELF_DATA))
+			return (N_DATA);
+		else if (!strcmp(sn, ELF_SDATA))
+			return (N_DATA);
+		else if (!strcmp(sn, ELF_BSS))
+			return (N_BSS);
+		else if (!strcmp(sn, ELF_SBSS))
+			return (N_BSS);
+		else if (!strncmp(sn, ELF_GOT, sizeof(ELF_GOT) - 1))
+			return (N_DATA);
+		else if (!strncmp(sn, ELF_PLT, sizeof(ELF_PLT) - 1))
+			return (N_DATA);
+	}
+
+	return (-1);
+}
+
 /*
  * Devise nlist's type from Elf_Sym.
  * XXX this task is done as well in libc and kvm_mkdb.
@@ -150,114 +326,73 @@ elf_fix_sym(Elf_Ehdr *eh, Elf_Sym *sym)
 int
 elf2nlist(Elf_Sym *sym, Elf_Ehdr *eh, Elf_Shdr *shdr, char *shstr, struct nlist *np)
 {
+	u_char stt;
 	const char *sn;
+	int type;
 
 	if (sym->st_shndx < eh->e_shnum)
 		sn = shstr + shdr[sym->st_shndx].sh_name;
 	else
-		sn = "";
+		sn = NULL;
 #if 0
 	{
 		extern char *stab;
-		printf("%d:%s %d %s\n", sym->st_shndx, sn,
+		printf("%d:%s %d %s\n", sym->st_shndx, sn? sn : "",
 		    ELF_ST_TYPE(sym->st_info), stab + sym->st_name);
 	}
 #endif
-	switch(ELF_ST_TYPE(sym->st_info)) {
-	case STT_NOTYPE:
-		switch (sym->st_shndx) {
-		case SHN_UNDEF:
-			np->n_type = N_UNDF | N_EXT;
-			break;
-		case SHN_ABS:
-			np->n_type = N_ABS;
-			break;
-		case SHN_COMMON:
-			np->n_type = N_COMM;
-			break;
-		default:
-			if (sym->st_shndx >= eh->e_shnum)
-				np->n_type = N_COMM | N_EXT;
-			else if (!strcmp(sn, ELF_TEXT))
-				np->n_type = N_TEXT;
-			else if (!strcmp(sn, ELF_RODATA)) {
-				np->n_type = N_DATA;
-				np->n_other = 'r';
-			} else if (!strcmp(sn, ELF_DATA))
-				np->n_type = N_DATA;
-			else if (!strncmp(sn, ELF_GOT, sizeof(ELF_GOT) - 1))
-				np->n_type = N_DATA;
-			else if (!strncmp(sn, ELF_PLT, sizeof(ELF_PLT) - 1))
-				np->n_type = N_DATA;
-			else if (!strcmp(sn, ELF_BSS))
-				np->n_type = N_BSS;
-			else if (!strcmp(sn, ELF_SBSS))
-				np->n_type = N_BSS;
-			else
-				np->n_other = '?';
-			break;
-		}
-		break;
 
+	switch (stt = ELF_ST_TYPE(sym->st_info)) {
+	case STT_NOTYPE:
 	case STT_OBJECT:
-		np->n_type = N_DATA;
-		switch (sym->st_shndx) {
-		case SHN_ABS:
-			np->n_type = N_ABS;
-			break;
-		case SHN_COMMON:
-			np->n_type = N_COMM;
-			break;
-		default:
-			if (sym->st_shndx >= eh->e_shnum)
-				break;
-			else if (!strcmp(sn, ELF_SBSS))
-				np->n_type = N_BSS;
-			else if (!strcmp(sn, ELF_BSS))
-				np->n_type = N_BSS;
-			else if (!strcmp(sn, ELF_RODATA))
+		type = elf_shn2type(eh, sym->st_shndx, sn);
+		if (type < 0) {
+			if (sn == NULL)
+				np->n_other = '?';
+			else
+				np->n_type = stt == STT_NOTYPE? N_COMM : N_DATA;
+		} else {
+			/* a hack for .rodata check (; */
+			if (type == N_SIZE) {
+				np->n_type = N_DATA;
 				np->n_other = 'r';
+			} else
+				np->n_type = type;
 		}
 		break;
 
 	case STT_FUNC:
-		np->n_type = N_TEXT;
+		type = elf_shn2type(eh, sym->st_shndx, NULL);
+		np->n_type = type < 0? N_TEXT : type;
 		if (ELF_ST_BIND(sym->st_info) == STB_WEAK) {
 			np->n_type = N_INDR;
 			np->n_other = 'W';
-		} else if (sym->st_shndx == SHN_ABS)
-			np->n_type = N_ABS;
-		else if (sym->st_shndx == SHN_UNDEF)
-			np->n_type = N_UNDF | N_EXT;
-		else if (strcmp(sn, ELF_INIT) &&
+		} else if (sn != NULL &&
+		    strcmp(sn, ELF_INIT) &&
 		    strcmp(sn, ELF_TEXT) &&
 		    strcmp(sn, ELF_FINI))	/* XXX GNU compat */
 			np->n_other = '?';
 		break;
 
 	case STT_SECTION:
-		switch (sym->st_shndx) {
-		case SHN_ABS:
-			np->n_type = N_ABS;
-			break;
-		case SHN_COMMON:
-			np->n_type = N_COMM;
-			break;
-		default:
+		type = elf_shn2type(eh, sym->st_shndx, NULL);
+		if (type < 0)
 			np->n_other = '?';
-		}
+		else
+			np->n_type = type;
 		break;
 
 	case STT_FILE:
 		np->n_type = N_FN | N_EXT;
 		break;
 
-	/* XXX how about cross-nm then ? */
-#ifdef STT_PARISC_MILLI
 	case STT_PARISC_MILLI:
-		np->n_type = N_TEXT;
+		if (eh->e_machine == EM_PARISC)
+			np->n_type = N_TEXT;
+		else
+			np->n_other = '?';
 		break;
-#endif
+
 	default:
 		np->n_other = '?';
 		break;
@@ -266,6 +401,146 @@ elf2nlist(Elf_Sym *sym, Elf_Ehdr *eh, Elf_Shdr *shdr, char *shstr, struct nlist 
 		np->n_type |= N_EXT;
 		if (np->n_other)
 			np->n_other = toupper(np->n_other);
+	}
+
+	return (0);
+}
+
+int
+elf_size(Elf_Ehdr *head, Elf_Shdr *shdr,
+    u_long *ptext, u_long *pdata, u_long *pbss)
+{
+	int i;
+
+	*ptext = *pdata = *pbss = 0;
+
+	for (i = 0; i < head->e_shnum; i++) {
+		if (!(shdr[i].sh_flags & SHF_ALLOC))
+			;
+		else if (shdr[i].sh_flags & SHF_EXECINSTR ||
+		    !(shdr[i].sh_flags & SHF_WRITE))
+			*ptext += shdr[i].sh_size;
+		else if (shdr[i].sh_type == SHT_NOBITS)
+			*pbss += shdr[i].sh_size;
+		else
+			*pdata += shdr[i].sh_size;
+	}
+
+	return (0);
+}
+
+int
+elf_symload(const char *name, FILE *fp, off_t foff, Elf_Ehdr *eh,
+    Elf_Shdr *shdr, struct nlist **pnames, struct nlist ***psnames,
+    size_t *pstabsize, int *pnrawnames)
+{
+	long symsize, shstrsize;
+	struct nlist *np;
+	Elf_Sym sbuf;
+	char *shstr;
+	int i;
+
+	shstrsize = shdr[eh->e_shstrndx].sh_size;
+	if ((shstr = malloc(shstrsize)) == NULL) {
+		warn("%s: malloc shsrt", name);
+		return (1);
+	}
+
+	if (fseeko(fp, foff + shdr[eh->e_shstrndx].sh_offset, SEEK_SET)) {
+		warn("%s: fseeko", name);
+		free(shstr);
+		return (1);
+	}
+
+	if (fread(shstr, 1, shstrsize, fp) != shstrsize) {
+		warnx("%s: premature EOF", name);
+		free(shstr);
+		return(1);
+	}
+
+	stab = NULL;
+	*pnames = NULL; *psnames = NULL;
+	for (i = 0; i < eh->e_shnum; i++) {
+		if (!strcmp(shstr + shdr[i].sh_name, ELF_STRTAB)) {
+			*pstabsize = shdr[i].sh_size;
+			if (*pstabsize > SIZE_T_MAX) {
+				warnx("%s: corrupt file", name);
+				free(shstr);
+				return (1);
+			}
+
+			MMAP(stab, *pstabsize, PROT_READ, MAP_PRIVATE|MAP_FILE,
+			    fileno(fp), foff + shdr[i].sh_offset);
+			if (stab == MAP_FAILED) {
+				free(shstr);
+				return (1);
+			}
+		}
+	}
+	for (i = 0; i < eh->e_shnum; i++) {
+		if (!strcmp(shstr + shdr[i].sh_name, ELF_SYMTAB)) {
+			symsize = shdr[i].sh_size;
+			if (fseeko(fp, foff + shdr[i].sh_offset, SEEK_SET)) {
+				warn("%s: fseeko", name);
+				if (stab)
+					MUNMAP(stab, *pstabsize);
+				free(shstr);
+				return (1);
+			}
+
+			*pnrawnames = symsize / sizeof(sbuf);
+			if ((*pnames = calloc(*pnrawnames, sizeof(*np))) == NULL) {
+				warn("%s: malloc names", name);
+				if (stab)
+					MUNMAP(stab, *pstabsize);
+				free(*pnames);
+				free(shstr);
+				return (1);
+			}
+			if ((*psnames = malloc(*pnrawnames * sizeof(np))) == NULL) {
+				warn("%s: malloc snames", name);
+				if (stab)
+					MUNMAP(stab, *pstabsize);
+				free(shstr);
+				free(*pnames);
+				free(*psnames);
+				return (1);
+			}
+
+			for (np = *pnames; symsize > 0; symsize -= sizeof(sbuf)) {
+				if (fread(&sbuf, 1, sizeof(sbuf),
+				    fp) != sizeof(sbuf)) {
+					warn("%s: read symbol", name);
+					if (stab)
+						MUNMAP(stab, *pstabsize);
+					free(shstr);
+					free(*pnames);
+					free(*psnames);
+					return (1);
+				}
+
+				elf_fix_sym(eh, &sbuf);
+
+				if (!sbuf.st_name)
+					continue;
+
+				elf2nlist(&sbuf, eh, shdr, shstr, np);
+				np->n_value = sbuf.st_value;
+				np->n_un.n_strx = sbuf.st_name;
+				np++;
+			}
+			*pnrawnames = np - *pnames;
+		}
+	}
+
+	free(shstr);
+	if (stab == NULL) {
+		warnx("%s: no name list", name);
+		if (*pnames)
+			free(*pnames);
+		if (*psnames)
+			free(*psnames);
+		return (1);
 	}
 
 	return (0);

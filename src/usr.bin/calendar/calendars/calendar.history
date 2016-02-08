@@ -1,7 +1,7 @@
 /*
  * History
  *
- * $OpenBSD: calendar.history,v 1.33 2004/06/29 11:35:30 mickey Exp $
+ * $OpenBSD: calendar.history,v 1.38 2005/03/01 22:02:08 mickey Exp $
  */
 
 #ifndef _calendar_history_
@@ -52,6 +52,8 @@
 01/31	"Ham" the chimpanzee soars into space aboard Mercury-Redstone 2, 1961
 01/31	Explorer I launched, 1958.  Van Allen Belt discovered
 01/31	Irving Langmuir, 1881, invented tungsten filament lamp
+01/31	Dmitry Mendeleev, 1865, established optimal alcohol-water mixture ratio
+	in his PhD work on alcohol-water mixtures
 02/01	First TV soap: Secret Storm, 1954
 02/01	Space Shuttle Columbia (STS-107) explodes prior to landing, 2003
 02/01	Forces led by Khomeini take over Iran, 1979
@@ -78,7 +80,7 @@
 02/29	French and Indian raid on Deerfield MA, 1704
 03/01	Sarah Goode, Sarah Osborne, and Tituba arrested for witchcraft
 	in Salem, Massachusetts, 1692
-03/02	Blackthorn winds (New England) (Does anyone know what this is?)
+03/02	Blackthorn winds (New England)
 03/03	Gemini III launched with Virgil Grissom and John Young on board, 1965
 03/04	First meeting of Congress, 1789, in N.Y.C.
 03/06	Hindenburg explodes and burns upon landing at Lakehurst, NJ, 1939
@@ -188,8 +190,10 @@
 06/16	"The Blues Brothers" premieres in Chicago, 1980
 06/17	China explodes its first Hydrogen bomb, 1967
 06/17	Watergate Democratic National Committee break-in, 1972
-06/19	Julius and Ethel Rosenberg are executed in Sing-Sing prison, 1953
 06/19	Lizzie Bordon acquitted, 1893
+06/19	Julius and Ethel Rosenberg are executed in Sing-Sing prison, 1953
+06/19	Start of a bus boycott protesting discrimination,
+	Baton Rouge, Louisiana, 1953
 06/20	Victoria crowned, 1837
 06/21	Berlin airlift begins, 1948
 06/21	Sun rises over Heelstone at Stonehenge
@@ -204,7 +208,7 @@
 06/27	100 degrees, Fort Yukon, 1915
 06/27	Bill Graham closes the Fillmore East, 1971
 06/28	Supreme Court decides in favor of Alan Bakke, 1978
-06/30	"That" explosion in Siberia, 1908
+06/30	"That" explosion in Siberia at 7:17 local time, 1908
 06/30	China and Soviet Union announce split over ideology, 1960
 07/01	Battle of Gettysburg begins, 1863
 07/03	Dog days begin
@@ -445,8 +449,7 @@
 11/27	Hoosac Railroad Tunnel completed, 1873, in NW Massachusetts
 11/29	King Tut's tomb opened, 1922
 12/01	First national corn-husking championship, Alleman IA, 1924
-12/01	Martin Luther King Jr., leads black boycott of Montgomery buses, 1955
-12/01	Rosa Parks refuses to move to back of the bus (Montgomery, AL), 1953
+12/01	Rosa Parks refuses to move to back of the bus (Montgomery, AL), 1955
 12/03	First neon light display, Paris, 1910
 12/03	First successful human heart transplant led by Dr. Barnard, 1967
 12/03	The Montreux Casino burns down during a Frank Zappa concert, 1971
@@ -454,6 +457,7 @@
 12/05	Phi Beta Kappa founded, 1776
 12/05	The Eighteenth Amendment repealed,
 	ending the Prohibition of alcohol, 1933
+12/05	Martin Luther King Jr., leads black boycott of Montgomery buses, 1955
 12/07	Japan bombs Pearl Harbor, 1941
 12/09	Ball-bearing roller skates patented, 1884
 12/10	Metric system established in France, 1799

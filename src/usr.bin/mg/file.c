@@ -1,4 +1,4 @@
-/*	$OpenBSD: file.c,v 1.29 2004/07/22 01:25:25 vincent Exp $	*/
+/*	$OpenBSD: file.c,v 1.31 2005/03/10 18:27:47 henning Exp $	*/
 
 /*
  *	File commands.
@@ -54,8 +54,13 @@ filevisit(int f, int n)
 	curbp = bp;
 	if (showbuffer(bp, curwp, WFHARD) != TRUE)
 		return FALSE;
-	if (bp->b_fname[0] == 0)
-		return readin(adjf);
+	if (bp->b_fname[0] == 0) {
+		int status;
+
+		if ((status = readin(adjf)) != TRUE)
+			killbuffer(bp);
+		return status;
+	}
 	return TRUE;
 }
 
@@ -96,8 +101,13 @@ poptofile(int f, int n)
 		return FALSE;
 	curbp = bp;
 	curwp = wp;
-	if (bp->b_fname[0] == 0)
-		return readin(adjf);
+	if (bp->b_fname[0] == 0) {
+		int status;
+
+		if ((status = readin(adjf)) != TRUE)
+			killbuffer(bp);
+		return status;
+	}
 	return TRUE;
 }
 
@@ -140,7 +150,10 @@ readin(char *fname)
 	/* might be old */
 	if (bclear(curbp) != TRUE)
 		return TRUE;
-	status = insertfile(fname, fname, TRUE);
+	if ((status = insertfile(fname, fname, TRUE)) != TRUE) {
+		ewprintf("File is not readable: %s", fname);
+		return FALSE;
+	}
 
 	/*
 	 * Call auto-executing function if we need to.
@@ -184,11 +197,11 @@ readin(char *fname)
 /*
  * Insert a file in the current buffer, after dot.  Set mark at the end of
  * the text inserted; point at the beginning.  Return a standard status.
- * Print a summary (lines read, error message) out as well.  If the BACKUP
- * conditional is set, then this routine also does the read end of backup
- * processing.  The BFBAK flag, if set in a buffer, says that a backup
- * should be taken.  It is set when a file is read in, but not on a new
- * file.  (You don't need to make a backup copy of nothing.)
+ * Print a summary (lines read, error message) out as well.  Unless the
+ * NO_BACKUP conditional is set, this routine also does the read end of 
+ * backup processing.  The BFBAK flag, if set in a buffer, says that a
+ * backup should be taken.  It is set when a file is read in, but not on
+ * a new file.  (You don't need to make a backup copy of nothing.)
  */
 static char	*line = NULL;
 static int	linesize = 0;

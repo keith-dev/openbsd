@@ -28,29 +28,40 @@
  */
 
 #if defined(LIBC_SCCS) && !defined(lint)
-static char rcsid[] = "$OpenBSD: getservbyport.c,v 1.4 2003/06/02 20:18:35 millert Exp $";
+static char rcsid[] = "$OpenBSD: getservbyport.c,v 1.6 2004/10/25 03:09:01 millert Exp $";
 #endif /* LIBC_SCCS and not lint */
 
 #include <netdb.h>
+#include <stdio.h>
 #include <string.h>
 
-extern int _serv_stayopen;
-
-struct servent *
-getservbyport(port, proto)
-	int port;
-	const char *proto;
+int
+getservbyport_r(int port, const char *proto, struct servent *se,
+    struct servent_data *sd)
 {
-	register struct servent *p;
+	int error;
 
-	setservent(_serv_stayopen);
-	while ((p = getservent())) {
-		if (p->s_port != port)
+	setservent_r(sd->stayopen, sd);
+	while ((error = getservent_r(se, sd)) == 0) {
+		if (se->s_port != port)
 			continue;
-		if (proto == 0 || strcmp(p->s_proto, proto) == 0)
+		if (proto == 0 || strcmp(se->s_proto, proto) == 0)
 			break;
 	}
-	if (!_serv_stayopen)
-		endservent();
-	return (p);
+	if (!sd->stayopen && sd->fp != NULL) {
+		fclose(sd->fp);
+		sd->fp = NULL;
+	}
+	return (error);
+}
+
+struct servent *
+getservbyport(int port, const char *proto)
+{
+	extern struct servent_data _servent_data;
+	static struct servent serv;
+
+	if (getservbyport_r(port, proto, &serv, &_servent_data) != 0)
+		return (NULL);
+	return (&serv);
 }

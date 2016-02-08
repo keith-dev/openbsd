@@ -1,4 +1,4 @@
-/*	$OpenBSD: tcp_usrreq.c,v 1.86 2004/07/15 15:27:22 markus Exp $	*/
+/*	$OpenBSD: tcp_usrreq.c,v 1.89 2005/03/04 13:21:42 markus Exp $	*/
 /*	$NetBSD: tcp_usrreq.c,v 1.20 1996/02/13 23:44:16 christos Exp $	*/
 
 /*
@@ -78,6 +78,8 @@
 #include <sys/sysctl.h>
 #include <sys/domain.h>
 #include <sys/kernel.h>
+
+#include <dev/rndvar.h>
 
 #include <net/if.h>
 #include <net/route.h>
@@ -319,6 +321,11 @@ tcp_usrreq(so, req, m, nam, control)
 		}
 
 		so->so_state |= SS_CONNECTOUT;
+		
+		/* initialise the timestamp modulator */
+		if (tp->t_flags & TF_REQ_TSTMP)
+			tp->ts_modulate = arc4random();
+
 		/* Compute window scaling to request.  */
 		tcp_rscale(tp, so->so_rcv.sb_hiwat);
 
@@ -832,8 +839,8 @@ tcp_ident(oldp, oldlenp, newp, newlen, dodrop)
 
 	s = splsoftnet();
 	switch (tir.faddr.ss_family) {
-	case AF_INET6:
 #ifdef INET6
+	case AF_INET6:
 		inp = in6_pcbhashlookup(&tcbtable, &f6,
 		    fin6->sin6_port, &l6, lin6->sin6_port);
 		break;
@@ -938,6 +945,20 @@ tcp_sysctl(name, namelen, oldp, oldlenp, newp, newlen)
 			tcp_reass_limit = nval;
 		}
 		return (0);
+#ifdef TCP_SACK
+	case TCPCTL_SACKHOLE_LIMIT:
+		nval = tcp_sackhole_limit;
+		error = sysctl_int(oldp, oldlenp, newp, newlen, &nval);
+		if (error)
+			return (error);
+		if (nval != tcp_sackhole_limit) {
+			error = pool_sethardlimit(&sackhl_pool, nval, NULL, 0);
+			if (error)
+				return (error);
+			tcp_sackhole_limit = nval;
+		}
+		return (0);
+#endif
 	default:
 		if (name[0] < TCPCTL_MAXID)
 			return (sysctl_int_arr(tcpctl_vars, name, namelen,

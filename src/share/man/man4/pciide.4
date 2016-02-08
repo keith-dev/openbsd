@@ -1,4 +1,4 @@
-.\"	$OpenBSD: pciide.4,v 1.39 2004/03/15 21:45:46 grange Exp $
+.\"	$OpenBSD: pciide.4,v 1.45 2005/01/15 15:23:40 jsg Exp $
 .\"	$NetBSD: pciide.4,v 1.8 1999/03/16 01:19:17 garbled Exp $
 .\"
 .\" Copyright (c) 1998 Manuel Bouyer.
@@ -38,14 +38,14 @@
 .Nm pciide
 .Nd PCI IDE controller driver
 .Sh SYNOPSIS
-.Cd "pciide* at pci ? dev ? function ? flags 0x0000"
+.Cd "pciide* at pci? flags 0x0000"
 .Pp
 .Cd "option PCIIDE_AMD756_ENABLEDMA"
 .Cd "option PCIIDE_CMD064x_DISABLE"
 .Cd "option PCIIDE_CMD0646U_ENABLEUDMA"
 .Pp
-.Cd "atapiscsi* at pciide? channel ? flags 0x0000"
-.Cd "wd* at pciide? channel ? drive ? flags 0x0000"
+.Cd "atapiscsi* at pciide? flags 0x0000"
+.Cd "wd* at pciide? flags 0x0000"
 .Sh DESCRIPTION
 The
 .Nm
@@ -68,6 +68,8 @@ Acard ATP850U, ATP860, ATP860-A, ATP865-A, ATP865-R
 .It
 Acer Labs M5229
 .It
+Adaptec AAR-1210SA
+.It
 Advanced Micro Devices AMD-756, AMD-766, AMD-768, AMD-8111
 .It
 CMD Tech PCI0640, PCI0643, PCI0646, PCI0648, PCI0649, PCI0680
@@ -78,7 +80,9 @@ HighPoint HPT366, HPT370, HPT372, HPT302, HPT371, HPT374
 .It
 Intel PIIX, PIIX3, and PIIX4
 .It
-Intel 82801 (ICH/ICH0/ICH2/ICH3/ICH4/ICH4-M/ICH5/ICH5R)
+Intel 82801 (ICH/ICH0/ICH2/ICH3/ICH4/ICH4-M/ICH5/ICH5R/ICH6/ICH6R)
+.It
+Intel 6300ESB
 .It
 ITE IT8212F
 .It
@@ -86,14 +90,15 @@ National Semiconductor PC87415
 .It
 National Semiconductor SCx200 (found on SC1100 SoC)
 .It
-NVIDIA nForce/nForce2 (SATA controllers are not supported)
+NVIDIA nForce/nForce2/nForce2-400/nForce3/nForce3-250 (SATA controllers are not
+supported)
 .It
 Promise PDC20246, PDC20262, PDC20265, PDC20267, PDC20268, PDC20268R,
 PDC20269, PDC20271, PDC20275, PDC20276, PDC20277, PDC20376
 .It
 ServerWorks OSB4, CSB5, CSB6 (including support for the third channel)
 .It
-Silicon Image SiI3112
+Silicon Image SiI3112, SiI3512, SiI3114
 .It
 Silicon Integrated System 5513 (5597/5598), 540, 550, 620, 630, 630S,
 633, 635, 640, 645, 645DX, 648, 650, 651, 652, 655, 658, 730, 733, 735,

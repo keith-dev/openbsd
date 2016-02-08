@@ -1,4 +1,4 @@
-/* $OpenBSD: udp.c,v 1.79 2004/08/08 19:11:06 deraadt Exp $	 */
+/* $OpenBSD: udp.c,v 1.84 2005/03/05 12:21:34 ho Exp $	 */
 /* $EOM: udp.c,v 1.57 2001/01/26 10:09:57 niklas Exp $	 */
 
 /*
@@ -41,7 +41,6 @@
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include <ctype.h>
-#include <err.h>
 #include <limits.h>
 #include <netdb.h>
 #include <stdlib.h>
@@ -83,9 +82,6 @@ static void     udp_report(struct transport *);
 static void     udp_handle_message(struct transport *);
 static struct transport *udp_make(struct sockaddr *);
 static int      udp_send_message(struct message *, struct transport *);
-#if 0
-static in_port_t udp_decode_port(char *);
-#endif
 
 static struct transport_vtbl udp_transport_vtbl = {
 	{0}, "udp_physical",
@@ -105,8 +101,7 @@ static struct transport_vtbl udp_transport_vtbl = {
 };
 
 char		*udp_default_port = 0;
-char		*udp_bind_port = 0;
-int		bind_family = 0;
+int		 bind_family = 0;
 
 void
 udp_init(void)
@@ -277,7 +272,7 @@ udp_create(char *name)
 {
 	struct virtual_transport *v;
 	struct udp_transport *u;
-	struct transport *rv, *t;
+	struct transport *rv;
 	struct sockaddr	*dst, *addr;
 	char	*addr_str, *port_str;
 	struct conf_list *addr_list = 0;
@@ -295,7 +290,7 @@ udp_create(char *name)
 		    name);
 		return 0;
 	}
-	if (text2sockaddr(addr_str, port_str, &dst)) {
+	if (text2sockaddr(addr_str, port_str, &dst, 0, 0)) {
 		log_print("udp_create: address \"%s\" not understood",
 		    addr_str);
 		return 0;
@@ -322,7 +317,8 @@ udp_create(char *name)
 	if (addr_list) {
 		for (addr_node = TAILQ_FIRST(&addr_list->fields);
 		     addr_node; addr_node = TAILQ_NEXT(addr_node, link))
-			if (text2sockaddr(addr_node->field, port_str, &addr)
+			if (text2sockaddr(addr_node->field,
+			    port_str, &addr, 0, 0)
 			    == 0) {
 				v = virtual_listen_lookup(addr);
 				free(addr);
@@ -337,7 +333,7 @@ udp_create(char *name)
 			goto ret;
 		}
 	}
-	if (text2sockaddr(addr_str, port_str, &addr)) {
+	if (text2sockaddr(addr_str, port_str, &addr, 0, 0)) {
 		log_print("udp_create: address \"%s\" not understood",
 		    addr_str);
 		rv = 0;
@@ -352,7 +348,6 @@ udp_create(char *name)
 		rv = 0;
 		goto ret;
 	}
-	t = (struct transport *)v;
 	rv = udp_clone(v->main, dst);
 	if (rv)
 		rv->vtbl = &udp_transport_vtbl;
@@ -541,33 +536,3 @@ udp_decode_ids(struct transport *t)
 	snprintf(result, sizeof result, "src: %s dst: %s", idsrc, iddst);
 	return result;
 }
-
-#if 0
-/*
- * Take a string containing an ext representation of port and return a
- * binary port number in host byte order.  Return zero if anything goes wrong.
- * XXX Currently unused.
- */
-static in_port_t
-udp_decode_port(char *port_str)
-{
-	char           *port_str_end;
-	long            port_long;
-	struct servent *service;
-
-	port_long = ntohl(strtol(port_str, &port_str_end, 0));
-	if (port_str == port_str_end) {
-		service = getservbyname(port_str, "udp");
-		if (!service) {
-			log_print("udp_decode_port: service \"%s\" unknown",
-			    port_str);
-			return 0;
-		}
-		return ntohs(service->s_port);
-	} else if (port_long < 1 || port_long > 65535) {
-		log_print("udp_decode_port: port %ld out of range", port_long);
-		return 0;
-	}
-	return port_long;
-}
-#endif

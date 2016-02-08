@@ -1,4 +1,4 @@
-.\"	$OpenBSD: ichpcib.4,v 1.1 2004/05/06 19:51:00 grange Exp $
+.\"	$OpenBSD: ichpcib.4,v 1.5 2005/01/20 22:08:01 jmc Exp $
 .\"
 .\" Copyright (c) 2004 Alexander Yurchenko <grange@openbsd.org>
 .\"
@@ -15,13 +15,13 @@
 .\" OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 .\"
 .Dd March 31, 2004
-.Dt ICHPCIB 4
+.Dt ICHPCIB 4 i386
 .Os
 .Sh NAME
 .Nm ichpcib
 .Nd Intel ICHx/ICHx-M LPC bridges
 .Sh SYNOPSIS
-.Cd "ichpcib* at pci? dev ? function ?"
+.Cd "ichpcib* at pci?"
 .Cd "isa* at ichpcib?"
 .Sh DESCRIPTION
 The
@@ -35,8 +35,9 @@ driver supports Intel
 .Tn ICH3-M ,
 .Tn ICH4 ,
 .Tn ICH4-M ,
-and
 .Tn ICH-5
+and
+.Tn 6300ESB
 LPC bridges.
 These devices are mostly usual
 .Tn PCI-ISA
@@ -52,7 +53,7 @@ for the
 .Tn ICH3-M ,
 and
 .Tn ICH4-M
-chipsets.
+chipsets, and power management timer available for all chipsets.
 It allows the user to control CPU frequency with the
 .Xr sysctl 8
 program.

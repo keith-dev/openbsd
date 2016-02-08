@@ -1,4 +1,4 @@
-.\"	$OpenBSD: afterboot.8,v 1.99 2004/09/09 10:23:43 jmc Exp $
+.\"	$OpenBSD: afterboot.8,v 1.106 2005/03/02 16:08:47 jmc Exp $
 .\"
 .\" Copyright (c) 1997 Marshall M. Midden
 .\" All rights reserved.
@@ -245,22 +245,15 @@ you will have to kill it by running
 .Ic kill `cat /var/run/dhclient.pid`
 after you flush the routes.
 .Pp
-If you wish to route packets between interfaces, add the directive
+If you wish to route packets between interfaces, add one or both
+of the following directives (depending on whether IPv4 or IPv6 routing
+is required) to
+.Pa /etc/sysctl.conf :
 .Pp
 .Dl net.inet.ip.forwarding=1
-.Pp
-or
-.Pp
 .Dl net.inet6.ip6.forwarding=1
 .Pp
-to
-.Pa /etc/sysctl.conf .
 Packets are not forwarded by default, due to RFC requirements.
-.Pp
-You can add new
-.Dq virtual interfaces
-by adding the required entries to
-.Pa /etc/hostname.if .
 .Ss BIND Name Server (DNS)
 If you are using the BIND Name Server, check the
 .Pa /etc/resolv.conf
@@ -689,7 +682,8 @@ for the mount option:
 .Pp
 .Dl /dev/wd0j /altroot ffs xx 0 0
 .Pp
-and you must add a line to root's crontab:
+and you must add a line to root's
+.Xr crontab 5 :
 .Pp
 .Dl ROOTBACKUP=1
 .Pp
@@ -783,7 +777,21 @@ yet, or because licensing restrictions make binary redistribution
 impossible.
 Sometimes checking the mailing lists for
 past problems that people have encountered will result in a fix posted.
+.Ss Check the running system
+You can use
+.Xr ps 1 ,
+.Xr netstat 1 ,
+and
+.Xr fstat 1
+to check on running processes, network connections, and opened files,
+respectively.
 .Sh COMPILING A KERNEL
+Note:
+The standard
+.Ox
+kernel configuration (GENERIC) is suitable for most purposes.
+Use of an alternative kernel configuration is not recommended.
+.Pp
 First, review the system message buffer using the
 .Xr dmesg 8
 command to find out information on your system's devices as probed by the
@@ -853,6 +861,7 @@ boot time in the kernel image.
 .Xr date 1 ,
 .Xr df 1 ,
 .Xr domainname 1 ,
+.Xr fstat 1 ,
 .Xr hostname 1 ,
 .Xr ls 1 ,
 .Xr make 1 ,
@@ -860,6 +869,7 @@ boot time in the kernel image.
 .Xr netstat 1 ,
 .Xr passwd 1 ,
 .Xr pkg_add 1 ,
+.Xr ps 1 ,
 .Xr ssh 1 ,
 .Xr su 1 ,
 .Xr xdm 1 ,
@@ -878,6 +888,7 @@ boot time in the kernel image.
 .Xr printcap 5 ,
 .Xr resolv.conf 5 ,
 .Xr ssh_config 5 ,
+.Xr hier 7 ,
 .Xr hostname 7 ,
 .Xr packages 7 ,
 .Xr ports 7 ,

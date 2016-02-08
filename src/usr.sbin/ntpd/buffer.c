@@ -1,4 +1,4 @@
-/*	$OpenBSD: buffer.c,v 1.3 2004/08/10 19:18:23 henning Exp $ */
+/*	$OpenBSD: buffer.c,v 1.5 2005/02/02 18:57:09 henning Exp $ */
 
 /*
  * Copyright (c) 2003, 2004 Henning Brauer <henning@openbsd.org>
@@ -28,12 +28,11 @@
 
 #include "ntpd.h"
 
-int	buf_write(int, struct buf *);
 void	buf_enqueue(struct msgbuf *, struct buf *);
 void	buf_dequeue(struct msgbuf *, struct buf *);
 
 struct buf *
-buf_open(ssize_t len)
+buf_open(size_t len)
 {
 	struct buf	*buf;
 
@@ -49,7 +48,7 @@ buf_open(ssize_t len)
 }
 
 int
-buf_add(struct buf *buf, void *data, ssize_t len)
+buf_add(struct buf *buf, void *data, size_t len)
 {
 	if (buf->wpos + len > buf->size)
 		return (-1);
@@ -64,31 +63,6 @@ buf_close(struct msgbuf *msgbuf, struct buf *buf)
 {
 	buf_enqueue(msgbuf, buf);
 	return (1);
-}
-
-int
-buf_write(int sock, struct buf *buf)
-{
-	ssize_t	n;
-
-	if ((n = write(sock, buf->buf + buf->rpos,
-	    buf->size - buf->rpos)) == -1) {
-		if (errno == EAGAIN)	/* cannot write immediately */
-			return (0);
-		else
-			return (-1);
-	}
-
-	if (n == 0) {			/* connection closed */
-		errno = 0;
-		return (-2);
-	}
-
-	if (n < buf->size - buf->rpos) {	/* not all data written yet */
-		buf->rpos += n;
-		return (0);
-	} else
-		return (1);
 }
 
 void
@@ -153,7 +127,7 @@ msgbuf_write(struct msgbuf *msgbuf)
 	for (buf = TAILQ_FIRST(&msgbuf->bufs); buf != NULL && n > 0;
 	    buf = next) {
 		next = TAILQ_NEXT(buf, entries);
-		if (n >= buf->size - buf->rpos) {
+		if (buf->rpos + n >= buf->size) {
 			n -= buf->size - buf->rpos;
 			buf_dequeue(msgbuf, buf);
 		} else {

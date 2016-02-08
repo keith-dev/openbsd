@@ -13,9 +13,9 @@
 
 #include <sendmail.h>
 
-SM_RCSID("@(#)$Sendmail: recipient.c,v 8.335 2003/10/06 20:37:56 ca Exp $")
+SM_RCSID("@(#)$Sendmail: recipient.c,v 8.337 2004/08/03 19:57:23 ca Exp $")
 
-static void	includetimeout __P((void));
+static void	includetimeout __P((int));
 static ADDRESS	*self_reference __P((ADDRESS *));
 static int	sortexpensive __P((ADDRESS *, ADDRESS *));
 static int	sortbysignature __P((ADDRESS *, ADDRESS *));
@@ -1309,9 +1309,20 @@ writable(filename, ctladdr, flags)
 	}
 	else if (FileMailer != NULL && !bitset(SFF_ROOTOK, flags))
 	{
-		euid = FileMailer->m_uid;
-		egid = FileMailer->m_gid;
-		user = NULL;
+		if (FileMailer->m_uid == NO_UID)
+		{
+			euid = DefUid;
+			user = DefUser;
+		}
+		else
+		{
+			euid = FileMailer->m_uid;
+			user = NULL;
+		}
+		if (FileMailer->m_gid == NO_GID)
+			egid = DefGid;
+		else
+			egid = FileMailer->m_gid;
 	}
 	else
 	{
@@ -1863,7 +1874,8 @@ resetuid:
 }
 
 static void
-includetimeout()
+includetimeout(ignore)
+	int ignore;
 {
 	/*
 	**  NOTE: THIS CAN BE CALLED FROM A SIGNAL HANDLER.  DO NOT ADD

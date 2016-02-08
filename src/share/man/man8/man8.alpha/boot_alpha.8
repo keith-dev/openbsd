@@ -1,4 +1,4 @@
-.\"	$OpenBSD: boot_alpha.8,v 1.11 2004/02/09 19:21:52 espie Exp $
+.\"	$OpenBSD: boot_alpha.8,v 1.13 2004/12/27 16:41:09 miod Exp $
 .\"
 .\" Copyright (c) 2002, Miodrag Vallat.
 .\" All rights reserved.
@@ -112,6 +112,8 @@ It is also possible to force other behaviours from ddb.
 .Bl -tag -width /usr/mdec/netboot -compact
 .It Pa /bsd
 default system kernel
+.It Pa /bsd.rd
+standalone installation kernel, suitable for disaster recovery
 .It Pa /usr/mdec/bootxx
 primary bootstrap for
 .Dq ffs
@@ -140,8 +142,7 @@ network bootstrap
 .Re
 .Sh BUGS
 The device names used by
-.Ox
-.Ns Tn /alpha
+.Ox Ns / Ns alpha
 and the
 .Tn SRM Console
 often have no relation to each other.

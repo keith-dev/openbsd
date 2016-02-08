@@ -1,4 +1,4 @@
-/*	$OpenBSD: kvm.c,v 1.40 2004/08/11 18:45:58 jaredy Exp $ */
+/*	$OpenBSD: kvm.c,v 1.42 2004/09/15 19:31:31 miod Exp $ */
 /*	$NetBSD: kvm.c,v 1.43 1996/05/05 04:31:59 gwr Exp $	*/
 
 /*-
@@ -38,7 +38,7 @@
 #if 0
 static char sccsid[] = "@(#)kvm.c	8.2 (Berkeley) 2/13/94";
 #else
-static char *rcsid = "$OpenBSD: kvm.c,v 1.40 2004/08/11 18:45:58 jaredy Exp $";
+static char *rcsid = "$OpenBSD: kvm.c,v 1.42 2004/09/15 19:31:31 miod Exp $";
 #endif
 #endif /* LIBC_SCCS and not lint */
 
@@ -68,6 +68,8 @@ static char *rcsid = "$OpenBSD: kvm.c,v 1.40 2004/08/11 18:45:58 jaredy Exp $";
 #include <stdarg.h>
 
 #include "kvm_private.h"
+
+extern int __fdnlist(int, struct nlist *);
 
 static int	kvm_dbopen(kvm_t *, const char *);
 static int	_kvm_get_header(kvm_t *);
@@ -590,7 +592,7 @@ kvm_dump_wrtheader(kvm_t *kd, FILE *fp, int dumpsize)
 
 kvm_t *
 kvm_openfiles(const char *uf, const char *mf, const char *sf,
-    int flag, char *errout)
+    unsigned int flag, char *errout)
 {
 	kvm_t *kd;
 

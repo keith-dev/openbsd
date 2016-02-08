@@ -1,4 +1,4 @@
-/*	$OpenBSD: fileio.c,v 1.42 2004/07/09 13:50:40 vincent Exp $	*/
+/*	$OpenBSD: fileio.c,v 1.48 2005/03/10 16:58:57 deraadt Exp $	*/
 
 /*
  *	POSIX fileio.c
@@ -24,8 +24,11 @@ ffropen(const char *fn, BUFFER *bp)
 {
 	struct stat	statbuf;
 
-	if ((ffp = fopen(fn, "r")) == NULL)
-		return (FIOFNF);
+	if ((ffp = fopen(fn, "r")) == NULL) {
+		if (errno == ENOENT)
+			return (FIOFNF);
+		return (FIOERR);
+	}
 	if (bp && fstat(fileno(ffp), &statbuf) == 0) {
 		/* set highorder bit to make sure this isn't all zero */
 		bp->b_fi.fi_mode = statbuf.st_mode | 0x8000;
@@ -106,7 +109,7 @@ ffputbuf(BUFFER *bp)
 		}
 		if (lforw(lp) != lpend)		/* no implied \n on last line */
 			putc('\n', ffp);
-	}	
+	}
 	/*
 	 * XXX should be variable controlled (once we have variables)
 	 */
@@ -160,7 +163,7 @@ fbackupfile(const char *fn)
 	int		from, to, serrno;
 	ssize_t		nread;
 	char		buf[BUFSIZ];
-	char		*nname;
+	char		*nname, *tname;
 
 	if (stat(fn, &sb) == -1) {
 		ewprintf("Can't stat %s : %s", fn, strerror(errno));
@@ -168,20 +171,27 @@ fbackupfile(const char *fn)
 	}
 
 	if (asprintf(&nname, "%s~", fn) == -1) {
-		ewprintf("Can't allocate temp file name : %s",
-		    strerror(errno));
+		ewprintf("Can't allocate temp file name : %s", strerror(errno));
+		return (ABORT);
+	}
+
+	if (asprintf(&tname, "%s.XXXXXXXXXX", fn) == -1) {
+		ewprintf("Can't allocate temp file name : %s", strerror(errno));
+		free(nname);
 		return (ABORT);
 	}
 
 	if ((from = open(fn, O_RDONLY)) == -1) {
 		free(nname);
+		free(tname);
 		return (FALSE);
 	}
-	to = open(nname, O_WRONLY|O_CREAT|O_TRUNC, (sb.st_mode & 0777));
+	to = mkstemp(tname);
 	if (to == -1) {
 		serrno = errno;
 		close(from);
 		free(nname);
+		free(tname);
 		errno = serrno;
 		return (FALSE);
 	}
@@ -192,13 +202,21 @@ fbackupfile(const char *fn)
 		}
 	}
 	serrno = errno;
+	(void) fchmod(to, (sb.st_mode & 0777));
 	close(from);
 	close(to);
 	if (nread == -1) {
-		if (unlink(nname) == -1)
+		if (unlink(tname) == -1)
 			ewprintf("Can't unlink temp : %s", strerror(errno));
+	} else {
+		if (rename(tname, nname) == -1) {
+			ewprintf("Can't rename temp : %s", strerror(errno));
+			(void) unlink(tname);
+			nread = -1;
+		}
 	}
 	free(nname);
+	free(tname);
 	errno = serrno;
 
 	return (nread == -1 ? FALSE : TRUE);
@@ -265,7 +283,10 @@ adjustname(const char *fn)
 	}
 	strlcat(path, fn, sizeof path);
 
-	return (realpath(path, fnb));
+	if (realpath(path, fnb) == NULL)
+		strlcpy(fnb, path, sizeof(fnb));
+
+	return (fnb);
 }
 
 #ifndef NO_STARTUP

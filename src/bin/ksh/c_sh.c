@@ -1,31 +1,28 @@
-/*	$OpenBSD: c_sh.c,v 1.17 2003/03/13 09:03:07 deraadt Exp $	*/
+/*	$OpenBSD: c_sh.c,v 1.28 2005/02/02 07:53:01 otto Exp $	*/
 
 /*
  * built-in Bourne commands
  */
 
 #include "sh.h"
-#include "ksh_stat.h" 	/* umask() */
-#include "ksh_time.h"
-#include "ksh_times.h"
+#include <sys/stat.h>
+#include <sys/time.h>
+#include <sys/resource.h>
 
-static	char *clocktos ARGS((clock_t t));
-
+static void p_time(struct shf *, int, struct timeval *, int, char *, char *);
 
 /* :, false and true */
 int
-c_label(wp)
-	char **wp;
+c_label(char **wp)
 {
 	return wp[0][0] == 'f' ? 1 : 0;
 }
 
 int
-c_shift(wp)
-	char **wp;
+c_shift(char **wp)
 {
-	register struct block *l = e->loc;
-	register int n;
+	struct block *l = e->loc;
+	int n;
 	long val;
 	char *arg;
 
@@ -34,7 +31,7 @@ c_shift(wp)
 	arg = wp[builtin_opt.optind];
 
 	if (arg) {
-		evaluate(arg, &val, KSH_UNWIND_ERROR);
+		evaluate(arg, &val, KSH_UNWIND_ERROR, false);
 		n = val;
 	} else
 		n = 1;
@@ -53,13 +50,12 @@ c_shift(wp)
 }
 
 int
-c_umask(wp)
-	char **wp;
+c_umask(char **wp)
 {
-	register int i;
-	register char *cp;
+	int i;
+	char *cp;
 	int symbolic = 0;
-	int old_umask;
+	mode_t old_umask;
 	int optc;
 
 	while ((optc = ksh_getopt(wp, &builtin_opt, "S")) != EOF)
@@ -93,7 +89,7 @@ c_umask(wp)
 		} else
 			shprintf("%#3.3o\n", old_umask);
 	} else {
-		int new_umask;
+		mode_t new_umask;
 
 		if (digit(*cp)) {
 			for (new_umask = 0; *cp >= '0' && *cp <= '7'; cp++)
@@ -173,8 +169,7 @@ c_umask(wp)
 }
 
 int
-c_dot(wp)
-	char **wp;
+c_dot(char **wp)
 {
 	char *file, *cp;
 	char **argv;
@@ -212,10 +207,9 @@ c_dot(wp)
 }
 
 int
-c_wait(wp)
-	char **wp;
+c_wait(char **wp)
 {
-	int UNINITIALIZED(rv);
+	int rv = 0;
 	int sig;
 
 	if (ksh_getopt(wp, &builtin_opt, null) == '?')
@@ -235,32 +229,29 @@ c_wait(wp)
 }
 
 int
-c_read(wp)
-	char **wp;
+c_read(char **wp)
 {
-	register int c = 0;
+	int c = 0;
 	int expand = 1, history = 0;
 	int expanding;
 	int ecode = 0;
-	register char *cp;
+	char *cp;
 	int fd = 0;
 	struct shf *shf;
 	int optc;
 	const char *emsg;
 	XString cs, xs;
 	struct tbl *vp;
-	char UNINITIALIZED(*xp);
+	char *xp = NULL;
 
 	while ((optc = ksh_getopt(wp, &builtin_opt, "prsu,")) != EOF)
 		switch (optc) {
-#ifdef KSH
 		  case 'p':
 			if ((fd = coproc_getfd(R_OK, &emsg)) < 0) {
 				bi_errorf("-p: %s", emsg);
 				return 1;
 			}
 			break;
-#endif /* KSH */
 		  case 'r':
 			expand = 0;
 			break;
@@ -300,7 +291,6 @@ c_read(wp)
 		}
 	}
 
-#ifdef KSH
 	/* If we are reading from the co-process for the first time,
 	 * make sure the other side of the pipe is closed first.  This allows
 	 * the detection of eof.
@@ -311,7 +301,6 @@ c_read(wp)
 	 * If this call is removed, remove the eof check below, too.
 	 * coproc_readw_close(fd);
 	 */
-#endif /* KSH */
 
 	if (history)
 		Xinit(xs, xp, 128, ATEMP);
@@ -323,11 +312,7 @@ c_read(wp)
 				break;
 			while (1) {
 				c = shf_getc(shf);
-				if (c == '\0'
-#ifdef OS2
-				    || c == '\r'
-#endif /* OS2 */
-				    )
+				if (c == '\0')
 					continue;
 				if (c == EOF && shf_error(shf)
 				    && shf_errno(shf) == EINTR)
@@ -408,23 +393,20 @@ c_read(wp)
 		histsave(source->line, Xstring(xs, xp), 1);
 		Xfree(xs, xp);
 	}
-#ifdef KSH
 	/* if this is the co-process fd, close the file descriptor
 	 * (can get eof if and only if all processes are have died, ie,
 	 * coproc.njobs is 0 and the pipe is closed).
 	 */
 	if (c == EOF && !ecode)
 		coproc_read_close(fd);
-#endif /* KSH */
 
 	return ecode ? ecode : c == EOF;
 }
 
 int
-c_eval(wp)
-	char **wp;
+c_eval(char **wp)
 {
-	register struct source *s;
+	struct source *s;
 
 	if (ksh_getopt(wp, &builtin_opt, null) == '?')
 		return 1;
@@ -458,16 +440,15 @@ c_eval(wp)
 		exstat = subst_exstat;
 	}
 
-	return shell(s, FALSE);
+	return shell(s, false);
 }
 
 int
-c_trap(wp)
-	char **wp;
+c_trap(char **wp)
 {
 	int i;
 	char *s;
-	register Trap *p;
+	Trap *p;
 
 	if (ksh_getopt(wp, &builtin_opt, null) == '?')
 		return 1;
@@ -476,7 +457,7 @@ c_trap(wp)
 	if (*wp == NULL) {
 		int anydfl = 0;
 
-		for (p = sigtraps, i = SIGNALS+1; --i >= 0; p++) {
+		for (p = sigtraps, i = NSIG+1; --i >= 0; p++) {
 			if (p->trap == NULL)
 				anydfl = 1;
 			else {
@@ -491,7 +472,7 @@ c_trap(wp)
 		 */
 		if (anydfl) {
 			shprintf("trap -- -");
-			for (p = sigtraps, i = SIGNALS+1; --i >= 0; p++)
+			for (p = sigtraps, i = NSIG+1; --i >= 0; p++)
 				if (p->trap == NULL && p->name)
 					shprintf(" %s", p->name);
 			shprintf(newline);
@@ -505,13 +486,13 @@ c_trap(wp)
 	 * command 'exit' isn't confused with the pseudo-signal
 	 * 'EXIT'.
 	 */
-	s = (gettrap(*wp, FALSE) == NULL) ? *wp++ : NULL; /* get command */
+	s = (gettrap(*wp, false) == NULL) ? *wp++ : NULL; /* get command */
 	if (s != NULL && s[0] == '-' && s[1] == '\0')
 		s = NULL;
 
 	/* set/clear traps */
 	while (*wp != NULL) {
-		p = gettrap(*wp++, TRUE);
+		p = gettrap(*wp++, true);
 		if (p == NULL) {
 			bi_errorf("bad signal %s", wp[-1]);
 			return 1;
@@ -522,8 +503,7 @@ c_trap(wp)
 }
 
 int
-c_exitreturn(wp)
-	char **wp;
+c_exitreturn(char **wp)
 {
 	int how = LEXIT;
 	int n;
@@ -536,7 +516,7 @@ c_exitreturn(wp)
 	if (arg) {
 	    if (!getn(arg, &n)) {
 		    exstat = 1;
-		    warningf(TRUE, "%s: bad number", arg);
+		    warningf(true, "%s: bad number", arg);
 	    } else
 		    exstat = n;
 	}
@@ -558,15 +538,14 @@ c_exitreturn(wp)
 		how = LSHELL;
 	}
 
-	quitenv();	/* get rid of any i/o redirections */
+	quitenv(NULL);	/* get rid of any i/o redirections */
 	unwind(how);
 	/*NOTREACHED*/
 	return 0;
 }
 
 int
-c_brkcont(wp)
-	char **wp;
+c_brkcont(char **wp)
 {
 	int n, quit;
 	struct env *ep, *last_ep = (struct env *) 0;
@@ -602,7 +581,7 @@ c_brkcont(wp)
 		 * scripts, but don't generate an error (ie, keep going).
 		 */
 		if (n == quit) {
-			warningf(TRUE, "%s: cannot %s", wp[0], wp[0]);
+			warningf(true, "%s: cannot %s", wp[0], wp[0]);
 			return 0;
 		}
 		/* POSIX says if n is too big, the last enclosing loop
@@ -610,7 +589,7 @@ c_brkcont(wp)
 		 * do anyway 'cause the user messed up.
 		 */
 		last_ep->flags &= ~EF_BRKCONT_PASS;
-		warningf(TRUE, "%s: can only %s %d level(s)",
+		warningf(true, "%s: can only %s %d level(s)",
 			wp[0], wp[0], n - quit);
 	}
 
@@ -619,12 +598,11 @@ c_brkcont(wp)
 }
 
 int
-c_set(wp)
-	char **wp;
+c_set(char **wp)
 {
 	int argi, setargs;
 	struct block *l = e->loc;
-	register char **owp = wp;
+	char **owp = wp;
 
 	if (wp[1] == NULL) {
 		static const char *const args [] = { "set", "-", NULL };
@@ -655,10 +633,9 @@ c_set(wp)
 }
 
 int
-c_unset(wp)
-	char **wp;
+c_unset(char **wp)
 {
-	register char *id;
+	char *id;
 	int optc, unset_var = 1;
 	int ret = 0;
 
@@ -692,17 +669,31 @@ c_unset(wp)
 	return ret;
 }
 
-int
-c_times(wp)
-	char **wp;
+static void
+p_time(struct shf *shf, int posix, struct timeval *tv, int width, char *prefix,
+    char *suffix)
 {
-	struct tms all;
+	if (posix)
+		shf_fprintf(shf, "%s%*ld.%02ld%s", prefix ? prefix : "",
+		    width, tv->tv_sec, tv->tv_usec / 10000, suffix);
+	else
+		shf_fprintf(shf, "%s%*ldm%ld.%02lds%s", prefix ? prefix : "",
+		    width, tv->tv_sec / 60, tv->tv_sec % 60,
+		    tv->tv_usec / 10000, suffix);
+}
 
-	(void) ksh_times(&all);
-	shprintf("Shell: %8ss user ", clocktos(all.tms_utime));
-	shprintf("%8ss system\n", clocktos(all.tms_stime));
-	shprintf("Kids:  %8ss user ", clocktos(all.tms_cutime));
-	shprintf("%8ss system\n", clocktos(all.tms_cstime));
+int
+c_times(char **wp)
+{
+	struct rusage usage;
+
+	(void) getrusage(RUSAGE_SELF, &usage);
+	p_time(shl_stdout, 0, &usage.ru_utime, 0, NULL, " ");
+	p_time(shl_stdout, 0, &usage.ru_stime, 0, NULL, "\n");
+
+	(void) getrusage(RUSAGE_CHILDREN, &usage);
+	p_time(shl_stdout, 0, &usage.ru_utime, 0, NULL, " ");
+	p_time(shl_stdout, 0, &usage.ru_stime, 0, NULL, "\n");
 
 	return 0;
 }
@@ -711,21 +702,21 @@ c_times(wp)
  * time pipeline (really a statement, not a built-in command)
  */
 int
-timex(t, f)
-	struct op *t;
-	int f;
+timex(struct op *t, int f)
 {
 #define TF_NOARGS	BIT(0)
 #define TF_NOREAL	BIT(1)		/* don't report real time */
 #define TF_POSIX	BIT(2)		/* report in posix format */
 	int rv = 0;
-	struct tms t0, t1, tms;
-	clock_t t0t, t1t = 0;
+	struct rusage ru0, ru1, cru0, cru1;
+	struct timeval usrtime, systime, tv0, tv1;
 	int tf = 0;
-	extern clock_t j_usrtime, j_systime; /* computed by j_wait */
+	extern struct timeval j_usrtime, j_systime; /* computed by j_wait */
 	char opts[1];
 
-	t0t = ksh_times(&t0);
+	gettimeofday(&tv0, NULL);
+	getrusage(RUSAGE_SELF, &ru0);
+	getrusage(RUSAGE_CHILDREN, &cru0);
 	if (t->left) {
 		/*
 		 * Two ways of getting cpu usage of a command: just use t0
@@ -735,42 +726,52 @@ timex(t, f)
 		 * pdksh tries to do the later (the j_usrtime hack doesn't
 		 * really work as it only counts the last job).
 		 */
-		j_usrtime = j_systime = 0;
+		timerclear(&j_usrtime);
+		timerclear(&j_systime);
 		if (t->left->type == TCOM)
 			t->left->str = opts;
 		opts[0] = 0;
 		rv = execute(t->left, f | XTIME);
 		tf |= opts[0];
-		t1t = ksh_times(&t1);
+		gettimeofday(&tv1, NULL);
+		getrusage(RUSAGE_SELF, &ru1);
+		getrusage(RUSAGE_CHILDREN, &cru1);
 	} else
 		tf = TF_NOARGS;
 
 	if (tf & TF_NOARGS) { /* ksh93 - report shell times (shell+kids) */
 		tf |= TF_NOREAL;
-		tms.tms_utime = t0.tms_utime + t0.tms_cutime;
-		tms.tms_stime = t0.tms_stime + t0.tms_cstime;
+		timeradd(&ru0.ru_utime, &cru0.ru_utime, &usrtime);
+		timeradd(&ru0.ru_stime, &cru0.ru_stime, &systime);
 	} else {
-		tms.tms_utime = t1.tms_utime - t0.tms_utime + j_usrtime;
-		tms.tms_stime = t1.tms_stime - t0.tms_stime + j_systime;
+		timersub(&ru1.ru_utime, &ru0.ru_utime, &usrtime);
+		timeradd(&usrtime, &j_usrtime, &usrtime);
+		timersub(&ru1.ru_stime, &ru0.ru_stime, &systime);
+		timeradd(&systime, &j_systime, &systime);
 	}
 
-	if (!(tf & TF_NOREAL))
-		shf_fprintf(shl_out,
-			tf & TF_POSIX ? "real %8s\n" : "%8ss real ",
-			clocktos(t1t - t0t));
-	shf_fprintf(shl_out, tf & TF_POSIX ? "user %8s\n" : "%8ss user ",
-		clocktos(tms.tms_utime));
-	shf_fprintf(shl_out, tf & TF_POSIX ? "sys  %8s\n" : "%8ss system\n",
-		clocktos(tms.tms_stime));
+	if (!(tf & TF_NOREAL)) {
+		timersub(&tv1, &tv0, &tv1);
+		if (tf & TF_POSIX)
+			p_time(shl_out, 1, &tv1, 5, "real ", "\n");
+		else
+			p_time(shl_out, 0, &tv1, 5, NULL, " real ");
+	}
+	if (tf & TF_POSIX)
+		p_time(shl_out, 1, &usrtime, 5, "user ", "\n");
+	else
+		p_time(shl_out, 0, &usrtime, 5, NULL, " user ");
+	if (tf & TF_POSIX)
+		p_time(shl_out, 1, &systime, 5, "sys  ", "\n");
+	else
+		p_time(shl_out, 0, &systime, 5, NULL, " system\n");
 	shf_flush(shl_out);
 
 	return rv;
 }
 
 void
-timex_hook(t, app)
-	struct op *t;
-	char ** volatile *app;
+timex_hook(struct op *t, char **volatile *app)
 {
 	char **wp = *app;
 	int optc;
@@ -802,35 +803,9 @@ timex_hook(t, app)
 	*app = wp;
 }
 
-static char *
-clocktos(t)
-	clock_t t;
-{
-	static char temp[22]; /* enough for 64 bit clock_t */
-	register int i;
-	register char *cp = temp + sizeof(temp);
-
-	/* note: posix says must use max precision, ie, if clk_tck is
-	 * 1000, must print 3 places after decimal (if non-zero, else 1).
-	 */
-	if (CLK_TCK != 100)	/* convert to 1/100'ths */
-	    t = (t < 1000000000/CLK_TCK) ?
-		    (t * 100) / CLK_TCK : (t / CLK_TCK) * 100;
-
-	*--cp = '\0';
-	for (i = -2; i <= 0 || t > 0; i++) {
-		if (i == 0)
-			*--cp = '.';
-		*--cp = '0' + (char)(t%10);
-		t /= 10;
-	}
-	return cp;
-}
-
 /* exec with no args - args case is taken care of in comexec() */
 int
-c_exec(wp)
-	char ** wp;
+c_exec(char **wp)
 {
 	int i;
 
@@ -845,10 +820,8 @@ c_exec(wp)
 			 * happens is unspecified and the bourne shell
 			 * keeps them open).
 			 */
-#ifdef KSH
 			if (!Flag(FSH) && i > 2 && e->savefd[i])
-				fd_clexec(i);
-#endif /* KSH */
+				fcntl(i, F_SETFD, FD_CLOEXEC);
 		}
 		e->savefd = NULL;
 	}
@@ -857,14 +830,13 @@ c_exec(wp)
 
 /* dummy function, special case in comexec() */
 int
-c_builtin(wp)
-	char ** wp;
+c_builtin(char **wp)
 {
 	return 0;
 }
 
-extern	int c_test ARGS((char **wp));		/* in c_test.c */
-extern	int c_ulimit ARGS((char **wp));		/* in c_ulimit.c */
+extern	int c_test(char **wp);			/* in c_test.c */
+extern	int c_ulimit(char **wp);		/* in c_ulimit.c */
 
 /* A leading = means assignments before command are kept;
  * a leading * means a POSIX special builtin;
@@ -894,13 +866,5 @@ const struct builtin shbuiltins [] = {
 	{"ulimit", c_ulimit},
 	{"+umask", c_umask},
 	{"*=unset", c_unset},
-#ifdef OS2
-	/* In OS2, the first line of a file can be "extproc name", which
-	 * tells the command interpreter (cmd.exe) to use name to execute
-	 * the file.  For this to be useful, ksh must ignore commands
-	 * starting with extproc and this does the trick...
-	 */
-	{"extproc", c_label},
-#endif /* OS2 */
 	{NULL, NULL}
 };

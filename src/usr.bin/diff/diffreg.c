@@ -1,4 +1,4 @@
-/*	$OpenBSD: diffreg.c,v 1.57 2004/06/20 18:47:45 otto Exp $	*/
+/*	$OpenBSD: diffreg.c,v 1.62 2005/01/13 08:27:45 otto Exp $	*/
 
 /*
  * Copyright (C) Caldera International Inc.  2001-2002.
@@ -65,7 +65,7 @@
  */
 
 #ifndef lint
-static const char rcsid[] = "$OpenBSD: diffreg.c,v 1.57 2004/06/20 18:47:45 otto Exp $";
+static const char rcsid[] = "$OpenBSD: diffreg.c,v 1.62 2005/01/13 08:27:45 otto Exp $";
 #endif /* not lint */
 
 #include <sys/param.h>
@@ -156,7 +156,7 @@ struct cand {
 	int x;
 	int y;
 	int pred;
-} cand;
+};
 
 struct line {
 	int serial;
@@ -214,6 +214,7 @@ static void unravel(int);
 static void unsort(struct line *, int, int *);
 static void change(char *, FILE *, char *, FILE *, int, int, int, int);
 static void sort(struct line *, int);
+static void print_header(const char *, const char *);
 static int  ignoreline(char *);
 static int  asciifile(FILE *);
 static int  fetch(long *, int, int, FILE *, int, int);
@@ -423,7 +424,7 @@ diffreg(char *ofile1, char *ofile2, int flags)
 	klist = emalloc((slen[0] + 2) * sizeof(int));
 	clen = 0;
 	clistlen = 100;
-	clist = emalloc(clistlen * sizeof(cand));
+	clist = emalloc(clistlen * sizeof(struct cand));
 	i = stone(class, slen[0], member, klist);
 	free(member);
 	free(class);
@@ -688,7 +689,7 @@ newcand(int x, int y, int pred)
 
 	if (clen == clistlen) {
 		clistlen = clistlen * 11 / 10;
-		clist = erealloc(clist, clistlen * sizeof(cand));
+		clist = erealloc(clist, clistlen * sizeof(struct cand));
 	}
 	q = clist + clen;
 	q->x = x;
@@ -1048,16 +1049,7 @@ proceed:
 			/*
 			 * Print the context/unidiff header first time through.
 			 */
-			if (label != NULL)
-				printf("%s %s\n",
-				    format == D_CONTEXT ? "***" : "---", label);
-			else
-				printf("%s %s	%s",
-				    format == D_CONTEXT ? "***" : "---", file1,
-				    ctime(&stb1.st_mtime));
-			printf("%s %s	%s",
-			    format == D_CONTEXT ? "---" : "+++", file2,
-			    ctime(&stb2.st_mtime));
+			print_header(file1, file2);
 			anychange = 1;
 		} else if (a > context_vec_ptr->b + (2 * context) + 1 &&
 		    c > context_vec_ptr->d + (2 * context) + 1) {
@@ -1245,6 +1237,9 @@ readhash(FILE *f)
 		for (i = 0;;) {
 			switch (t = getc(f)) {
 			case '\t':
+			case '\r':
+			case '\v':
+			case '\f':
 			case ' ':
 				space++;
 				continue;
@@ -1276,7 +1271,7 @@ readhash(FILE *f)
 static int
 asciifile(FILE *f)
 {
-	char buf[BUFSIZ];
+	unsigned char buf[BUFSIZ];
 	int i, cnt;
 
 	if (aflag || f == NULL)
@@ -1303,7 +1298,7 @@ static __inline int max(int a, int b)
 static char *
 match_function(const long *f, int pos, FILE *file)
 {
-	char buf[FUNCTION_CONTEXT_SIZE];
+	unsigned char buf[FUNCTION_CONTEXT_SIZE];
 	size_t nc;
 	int last = lastline;
 	char *p;
@@ -1509,4 +1504,21 @@ dump_unified_vec(FILE *f1, FILE *f2)
 	fetch(ixnew, d + 1, upd, f2, ' ', 0);
 
 	context_vec_ptr = context_vec_start - 1;
+}
+
+static void
+print_header(const char *file1, const char *file2)
+{
+	if (label[0] != NULL)
+		printf("%s %s\n", format == D_CONTEXT ? "***" : "---",
+		    label[0]);
+	else
+		printf("%s %s\t%s", format == D_CONTEXT ? "***" : "---",
+		    file1, ctime(&stb1.st_mtime));
+	if (label[1] != NULL)
+		printf("%s %s\n", format == D_CONTEXT ? "---" : "+++",
+		    label[1]);
+	else
+		printf("%s %s\t%s", format == D_CONTEXT ? "---" : "+++",
+		    file2, ctime(&stb2.st_mtime));
 }

@@ -1,4 +1,4 @@
-/*	$OpenBSD: rde_rib.c,v 1.59 2004/08/17 15:39:36 claudio Exp $ */
+/*	$OpenBSD: rde_rib.c,v 1.64 2005/03/11 12:54:20 claudio Exp $ */
 
 /*
  * Copyright (c) 2003, 2004 Claudio Jeker <claudio@openbsd.org>
@@ -247,9 +247,8 @@ path_link(struct rde_aspath *asp, struct rde_peer *peer)
 	LIST_INSERT_HEAD(head, asp, path_l);
 	LIST_INSERT_HEAD(&peer->path_h, asp, peer_l);
 	asp->peer = peer;
-	asp->flags |= F_ATTR_LINKED;
-
 	nexthop_link(asp);
+	asp->flags |= F_ATTR_LINKED;
 }
 
 /*
@@ -497,7 +496,7 @@ prefix_write(u_char *buf, int len, struct bgpd_addr *prefix, u_int8_t plen)
 {
 	int	totlen;
 
-	if (prefix->af != AF_INET)
+	if (prefix->af != AF_INET && prefix->af != AF_INET6)
 		return (-1);
 
 	totlen = PREFIX_SIZE(plen);
@@ -726,14 +725,12 @@ nexthop_update(struct kroute_nexthop *msg)
 		nh->state = NEXTHOP_UNREACH;
 
 	if (msg->connected) {
-		if (!(nh->flags & NEXTHOP_LINKLOCAL))
-			/* use linklocal address if provided */
-			nh->true_nexthop = nh->exit_nexthop;
 		nh->flags |= NEXTHOP_CONNECTED;
-	} else {
-		nh->true_nexthop = msg->gateway;
-		nh->flags &= ~NEXTHOP_LINKLOCAL;
-	}
+		memcpy(&nh->true_nexthop, &nh->exit_nexthop,
+		    sizeof(nh->true_nexthop));
+	} else
+		memcpy(&nh->true_nexthop, &msg->gateway,
+		    sizeof(nh->true_nexthop));
 
 	nh->nexthop_netlen = msg->kr.kr4.prefixlen;
 	nh->nexthop_net.af = AF_INET;
@@ -752,23 +749,32 @@ nexthop_update(struct kroute_nexthop *msg)
 }
 
 void
-nexthop_modify(struct rde_aspath *asp, struct bgpd_addr *nexthop, int flags,
-    sa_family_t af)
+nexthop_modify(struct rde_aspath *asp, struct bgpd_addr *nexthop,
+    enum action_types type, sa_family_t af)
 {
 	struct nexthop	*nh;
 
-	if (flags & SET_NEXTHOP_REJECT)
+	if (type == ACTION_SET_NEXTHOP_REJECT) {
 		asp->flags |= F_NEXTHOP_REJECT;
-	if (flags & SET_NEXTHOP_BLACKHOLE)
+		return;
+	}
+	if (type  == ACTION_SET_NEXTHOP_BLACKHOLE) {
 		asp->flags |= F_NEXTHOP_BLACKHOLE;
-	if (!(flags & SET_NEXTHOP) ||
-	    af != nexthop->af)
+		return;
+	}
+	if (type == ACTION_SET_NEXTHOP_NOMODIFY) {
+		asp->flags |= F_NEXTHOP_NOMODIFY;
+		return;
+	}
+	if (af != nexthop->af)
 		return;
 
 	nh = nexthop_get(nexthop);
-	nexthop_unlink(asp);
+	if (asp->flags & F_ATTR_LINKED)
+		nexthop_unlink(asp);
 	asp->nexthop = nh;
-	nexthop_link(asp);
+	if (asp->flags & F_ATTR_LINKED)
+		nexthop_link(asp);
 }
 
 void

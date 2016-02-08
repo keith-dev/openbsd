@@ -1,4 +1,4 @@
-/*	$OpenBSD: xl.c,v 1.54 2004/06/04 21:49:02 brad Exp $	*/
+/*	$OpenBSD: xl.c,v 1.62 2005/01/15 05:24:11 brad Exp $	*/
 
 /*
  * Copyright (c) 1997, 1998, 1999
@@ -152,6 +152,8 @@
 int xl_newbuf(struct xl_softc *, struct xl_chain_onefrag *);
 void xl_stats_update(void *);
 int xl_encap(struct xl_softc *, struct xl_chain *,
+    struct mbuf * );
+int xl_encap_90xB(struct xl_softc *, struct xl_chain *,
     struct mbuf * );
 void xl_rxeof(struct xl_softc *);
 int xl_rx_resync(struct xl_softc *);
@@ -1707,9 +1709,10 @@ reload:
 		struct mbuf		*m_new = NULL;
 
 		MGETHDR(m_new, M_DONTWAIT, MT_DATA);
-		if (m_new == NULL)
+		if (m_new == NULL) {
 			m_freem(m_head);
 			return(1);
+		}
 		if (m_head->m_pkthdr.len > MHLEN) {
 			MCLGET(m_new, M_DONTWAIT);
 			if (!(m_new->m_flags & M_EXT)) {
@@ -1741,15 +1744,6 @@ reload:
 	c->xl_ptr->xl_frag[frag - 1].xl_len |= htole32(XL_LAST_FRAG);
 	c->xl_ptr->xl_status = htole32(total_len);
 	c->xl_ptr->xl_next = 0;
-
-#ifndef XL905B_TXCSUM_BROKEN
-	if (m_head->m_pkthdr.csum & M_IPV4_CSUM_OUT)
-		c->xl_ptr->xl_status |= htole32(XL_TXSTAT_IPCKSUM);
-	if (m_head->m_pkthdr.csum & M_TCPV4_CSUM_OUT)
-		c->xl_ptr->xl_status |= htole32(XL_TXSTAT_TCPCKSUM);
-	if (m_head->m_pkthdr.csum & M_UDPV4_CSUM_OUT)
-		c->xl_ptr->xl_status |= htole32(XL_TXSTAT_UDPCKSUM);
-#endif
 
 	bus_dmamap_sync(sc->sc_dmat, sc->sc_listmap,
 	    offsetof(struct xl_list_data, xl_tx_list[0]),
@@ -1899,6 +1893,72 @@ xl_start(ifp)
 	return;
 }
 
+int
+xl_encap_90xB(sc, c, m_head)
+	struct xl_softc *sc;
+	struct xl_chain *c;
+	struct mbuf *m_head;
+{
+	struct xl_frag *f = NULL;
+	struct xl_list *d;
+	int frag;
+	bus_dmamap_t map;
+
+	/*
+	 * Start packing the mbufs in this chain into
+	 * the fragment pointers. Stop when we run out
+	 * of fragments or hit the end of the mbuf chain.
+	 */
+	map = sc->sc_tx_sparemap;
+	d = c->xl_ptr;
+	d->xl_status = htole32(0);
+	d->xl_next = 0;
+
+	if (bus_dmamap_load_mbuf(sc->sc_dmat, map,
+	    m_head, BUS_DMA_NOWAIT) != 0)
+		return (ENOBUFS);
+
+	for (frag = 0; frag < map->dm_nsegs; frag++) {
+		if (frag == XL_MAXFRAGS)
+			break;
+		f = &d->xl_frag[frag];
+		f->xl_addr = htole32(map->dm_segs[frag].ds_addr);
+		f->xl_len = htole32(map->dm_segs[frag].ds_len);
+	}
+
+	bus_dmamap_sync(sc->sc_dmat, map, 0, map->dm_mapsize,
+	    BUS_DMASYNC_PREWRITE);
+
+	/* sync the old map, and unload it (if necessary) */
+	if (c->map->dm_nsegs != 0) {
+		bus_dmamap_sync(sc->sc_dmat, c->map, 0, c->map->dm_mapsize,
+		    BUS_DMASYNC_POSTWRITE);
+		bus_dmamap_unload(sc->sc_dmat, c->map);
+	}
+
+	c->xl_mbuf = m_head;
+	sc->sc_tx_sparemap = c->map;
+	c->map = map;
+	c->xl_ptr->xl_frag[frag - 1].xl_len |= htole32(XL_LAST_FRAG);
+	c->xl_ptr->xl_status = htole32(XL_TXSTAT_RND_DEFEAT);
+
+#ifndef XL905B_TXCSUM_BROKEN
+	if (m_head->m_pkthdr.csum & M_IPV4_CSUM_OUT)
+		c->xl_ptr->xl_status |= htole32(XL_TXSTAT_IPCKSUM);
+	if (m_head->m_pkthdr.csum & M_TCPV4_CSUM_OUT)
+		c->xl_ptr->xl_status |= htole32(XL_TXSTAT_TCPCKSUM);
+	if (m_head->m_pkthdr.csum & M_UDPV4_CSUM_OUT)
+		c->xl_ptr->xl_status |= htole32(XL_TXSTAT_UDPCKSUM);
+#endif
+
+	bus_dmamap_sync(sc->sc_dmat, sc->sc_listmap,
+	    offsetof(struct xl_list_data, xl_tx_list[0]),
+	    sizeof(struct xl_list) * XL_TX_LIST_CNT,
+	    BUS_DMASYNC_PREREAD | BUS_DMASYNC_PREWRITE);
+
+	return(0);
+}
+
 void
 xl_start_90xB(ifp)
 	struct ifnet *ifp;
@@ -1932,7 +1992,7 @@ xl_start_90xB(ifp)
 		cur_tx = &sc->xl_cdata.xl_tx_chain[idx];
 
 		/* Pack the data into the descriptor. */
-		error = xl_encap(sc, cur_tx, m_head);
+		error = xl_encap_90xB(sc, cur_tx, m_head);
 		if (error) {
 			cur_tx = prev_tx;
 			continue;
@@ -2142,7 +2202,6 @@ xl_init(xsc)
 	else
 		CSR_WRITE_2(sc, XL_COMMAND, XL_CMD_COAX_STOP);
 
-#if NVLAN > 0
 	/*
 	 * increase packet size to allow reception of 802.1q or ISL packets.
 	 * For the 3c90x chip, set the 'allow large packets' bit in the MAC
@@ -2158,7 +2217,6 @@ xl_init(xsc)
 		macctl |= XL_MACCTRL_ALLOW_LARGE_PACK;
 		CSR_WRITE_1(sc, XL_W3_MAC_CTRL, macctl);
 	}
-#endif
 
 	/* Clear out the stats counters. */
 	CSR_WRITE_2(sc, XL_COMMAND, XL_CMD_STATS_DISABLE);
@@ -2406,10 +2464,12 @@ xl_ioctl(ifp, command, data)
 			 * Multicast list has changed; set the hardware
 			 * filter accordingly.
 			 */
-			if (sc->xl_type == XL_TYPE_905B)
-				xl_setmulti_hash(sc);
-			else
-				xl_setmulti(sc);
+			if (ifp->if_flags & IFF_RUNNING) {
+				if (sc->xl_type == XL_TYPE_905B)
+					xl_setmulti_hash(sc);
+				else
+					xl_setmulti(sc);
+			}
 			error = 0;
 		}
 		break;
@@ -2668,13 +2728,9 @@ xl_attach(sc)
 	timeout_set(&sc->xl_stsup_tmo, xl_stats_update, sc);
 
 	ifp->if_softc = sc;
-	ifp->if_mtu = ETHERMTU;
 	ifp->if_flags = IFF_BROADCAST | IFF_SIMPLEX | IFF_MULTICAST;
 	ifp->if_ioctl = xl_ioctl;
-	ifp->if_output = ether_output;
-#if NVLAN > 0
-	ifp->if_capabilities |= IFCAP_VLAN_MTU;
-#endif
+	ifp->if_capabilities = IFCAP_VLAN_MTU;
 	if (sc->xl_type == XL_TYPE_905B) {
 		ifp->if_start = xl_start_90xB;
 #ifndef XL905B_TXCSUM_BROKEN

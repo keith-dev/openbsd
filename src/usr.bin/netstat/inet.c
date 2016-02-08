@@ -1,4 +1,4 @@
-/*	$OpenBSD: inet.c,v 1.88 2004/09/09 10:30:23 otto Exp $	*/
+/*	$OpenBSD: inet.c,v 1.92 2005/02/10 14:25:08 itojun Exp $	*/
 /*	$NetBSD: inet.c,v 1.14 1995/10/03 21:42:37 thorpej Exp $	*/
 
 /*
@@ -34,7 +34,7 @@
 #if 0
 static char sccsid[] = "from: @(#)inet.c	8.4 (Berkeley) 4/20/94";
 #else
-static const char *rcsid = "$OpenBSD: inet.c,v 1.88 2004/09/09 10:30:23 otto Exp $";
+static const char *rcsid = "$OpenBSD: inet.c,v 1.92 2005/02/10 14:25:08 itojun Exp $";
 #endif
 #endif /* not lint */
 
@@ -54,6 +54,7 @@ static const char *rcsid = "$OpenBSD: inet.c,v 1.88 2004/09/09 10:30:23 otto Exp
 #include <netinet/icmp_var.h>
 #include <netinet/igmp_var.h>
 #include <netinet/ip_var.h>
+#include <netinet/pim_var.h>
 #include <netinet/tcp.h>
 #include <netinet/tcpip.h>
 #include <netinet/tcp_seq.h>
@@ -575,6 +576,43 @@ igmp_stats(u_long off, char *name)
 #undef py
 }
 
+/*
+ * Dump PIM statistics structure.
+ */
+void
+pim_stats(u_long off, char *name)
+{
+	struct pimstat pimstat;
+
+	if (off == 0)
+		return;
+	if (kread(off, (char *)&pimstat, sizeof (pimstat)) != 0) {
+		/* XXX: PIM is probably not enabled in the kernel */
+		return;
+	}
+
+	printf("%s:\n", name);
+
+#define	p(f, m) if (pimstat.f || sflag <= 1) \
+	printf(m, pimstat.f, plural(pimstat.f))
+#define	py(f, m) if (pimstat.f || sflag <= 1) \
+	printf(m, pimstat.f, pimstat.f != 1 ? "ies" : "y")
+
+	p(pims_rcv_total_msgs, "\t%llu message%s received\n");
+	p(pims_rcv_total_bytes, "\t%llu byte%s received\n");
+	p(pims_rcv_tooshort, "\t%llu message%s received with too few bytes\n");
+	p(pims_rcv_badsum, "\t%llu message%s received with bad checksum\n");
+	p(pims_rcv_badversion, "\t%llu message%s received with bad version\n");
+	p(pims_rcv_registers_msgs, "\t%llu data register message%s received\n");
+	p(pims_rcv_registers_bytes, "\t%llu data register byte%s received\n");
+	p(pims_rcv_registers_wrongiif, "\t%llu data register message%s received on wrong iif\n");
+	p(pims_rcv_badregisters, "\t%llu bad register%s received\n");
+	p(pims_snd_registers_msgs, "\t%llu data register message%s sent\n");
+	p(pims_snd_registers_bytes, "\t%llu data register byte%s sent\n");
+#undef p
+#undef py
+}
+
 struct rpcnams {
 	struct rpcnams *next;
 	in_port_t port;
@@ -892,6 +930,7 @@ carp_stats(u_long off, char *name)
 	p(carps_ipackets, "\t%llu packet%s received (IPv4)\n");
 	p(carps_ipackets6, "\t%llu packet%s received (IPv6)\n");
 	p(carps_badif, "\t\t%llu packet%s discarded for bad interface\n");
+	p(carps_badttl, "\t\t%llu packet%s discarded for wrong TTL\n");
 	p(carps_hdrops, "\t\t%llu packet%s shorter than header\n");
 	p(carps_badsum, "\t\t%llu discarded for bad checksum%s\n");
 	p(carps_badver,	"\t\t%llu discarded packet%s with a bad version\n");
@@ -901,6 +940,7 @@ carp_stats(u_long off, char *name)
 	p2(carps_badaddrs, "\t\t%llu discarded because of a bad address list\n");
 	p(carps_opackets, "\t%llu packet%s sent (IPv4)\n");
 	p(carps_opackets6, "\t%llu packet%s sent (IPv6)\n");
+	p2(carps_onomem, "\t\t%llu send failed due to mbuf memory error\n");
 #undef p
 #undef p2
 }

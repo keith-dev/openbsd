@@ -1,4 +1,4 @@
-/*	$OpenBSD: ntpd.h,v 1.33 2004/08/12 16:33:59 henning Exp $ */
+/*	$OpenBSD: ntpd.h,v 1.53 2005/02/03 10:53:33 dtucker Exp $ */
 
 /*
  * Copyright (c) 2003, 2004 Henning Brauer <henning@openbsd.org>
@@ -20,7 +20,10 @@
 #include <sys/uio.h>
 #include <sys/socket.h>
 #include <sys/queue.h>
+#include <sys/time.h>
 #include <netinet/in.h>
+#include <netinet/in_systm.h>
+#include <netinet/ip.h>
 #include <arpa/inet.h>
 #include <netdb.h>
 #include <stdarg.h>
@@ -31,8 +34,6 @@
 #define	CONFFILE	"/etc/ntpd.conf"
 
 #define	READ_BUF_SIZE		65535
-#define	IDX2PEER_RESERVE	5
-#define	PFD_RESERVE		10
 
 #define	NTPD_OPT_VERBOSE	0x0001
 #define	NTPD_OPT_VERBOSE2	0x0002
@@ -44,12 +45,17 @@
 #define	TRUSTLEVEL_BADPEER		6
 #define	TRUSTLEVEL_PATHETIC		2
 #define	TRUSTLEVEL_AGRESSIVE		8
+#define	TRUSTLEVEL_MAX			10
+
+#define	MAX_SERVERS_DNS			8
 
 #define	QSCALE_OFF_MIN			0.05
 #define	QSCALE_OFF_MAX			0.50
 
 #define	QUERYTIME_MAX		15	/* single query might take n secs max */
 #define	OFFSET_ARRAY_SIZE	8
+#define	SETTIME_MIN_OFFSET	180	/* min offset for settime at start */
+#define	LOG_NEGLIGEE		128	/* negligible drift to not log (ms) */
 
 enum client_state {
 	STATE_NONE,
@@ -70,70 +76,74 @@ struct ntp_addr {
 
 struct ntp_addr_wrap {
 	char			*name;
-	u_int8_t		 pool;
 	struct ntp_addr		*a;
+	u_int8_t		 pool;
 };
 
 struct ntp_status {
-	u_int8_t	leap;
-	int8_t		precision;
 	double		rootdelay;
 	double		rootdispersion;
-	u_int32_t	refid;
 	double		reftime;
+	u_int32_t	refid;
+	u_int8_t	leap;
+	int8_t		precision;
 	u_int8_t	poll;
+	u_int8_t	stratum;
 };
 
 struct ntp_offset {
-	u_int8_t		good;
+	struct ntp_status	status;
 	double			offset;
 	double			delay;
 	double			error;
 	time_t			rcvd;
-	struct ntp_status	status;
+	u_int8_t		good;
 };
 
 struct ntp_peer {
 	TAILQ_ENTRY(ntp_peer)		 entry;
-	u_int32_t			 id;
 	struct ntp_addr_wrap		 addr_head;
 	struct ntp_addr			*addr;
 	struct ntp_query		*query;
+	struct ntp_offset		 reply[OFFSET_ARRAY_SIZE];
+	struct ntp_offset		 update;
 	enum client_state		 state;
 	time_t				 next;
 	time_t				 deadline;
-	struct ntp_offset		 reply[OFFSET_ARRAY_SIZE];
-	struct ntp_offset		 update;
+	u_int32_t			 id;
 	u_int8_t			 shift;
 	u_int8_t			 trustlevel;
+	int				 lasterror;
 };
 
 struct ntpd_conf {
 	TAILQ_HEAD(listen_addrs, listen_addr)	listen_addrs;
 	TAILQ_HEAD(ntp_peers, ntp_peer)		ntp_peers;
-	u_int8_t				opts;
-	u_int8_t				listen_all;
 	struct ntp_status			status;
+	u_int8_t				listen_all;
+	u_int8_t				settime;
+	u_int8_t				debug;
+	u_int32_t				scale;
 };
 
 struct buf {
 	TAILQ_ENTRY(buf)	 entries;
 	u_char			*buf;
-	ssize_t			 size;
-	ssize_t			 wpos;
-	ssize_t			 rpos;
+	size_t			 size;
+	size_t			 wpos;
+	size_t			 rpos;
 };
 
 struct msgbuf {
+	TAILQ_HEAD(bufs, buf)	 bufs;
 	u_int32_t		 queued;
 	int			 fd;
-	TAILQ_HEAD(bufs, buf)	 bufs;
 };
 
 struct buf_read {
+	ssize_t			 wpos;
 	u_char			 buf[READ_BUF_SIZE];
 	u_char			*rptr;
-	ssize_t			 wpos;
 };
 
 /* ipc messages */
@@ -151,14 +161,15 @@ struct imsgbuf {
 enum imsg_type {
 	IMSG_NONE,
 	IMSG_ADJTIME,
+	IMSG_SETTIME,
 	IMSG_HOST_DNS
 };
 
 struct imsg_hdr {
 	enum imsg_type	type;
-	u_int16_t	len;
 	u_int32_t	peerid;
 	pid_t		pid;
+	u_int16_t	len;
 };
 
 struct imsg {
@@ -179,8 +190,8 @@ void		 fatalx(const char *);
 const char *	 log_sockaddr(struct sockaddr *);
 
 /* buffer.c */
-struct buf	*buf_open(ssize_t);
-int		 buf_add(struct buf *, void *, ssize_t);
+struct buf	*buf_open(size_t);
+int		 buf_add(struct buf *, void *, size_t);
 int		 buf_close(struct msgbuf *, struct buf *);
 void		 buf_free(struct buf *);
 void		 msgbuf_init(struct msgbuf *);
@@ -191,22 +202,22 @@ int		 msgbuf_write(struct msgbuf *);
 void	 imsg_init(struct imsgbuf *, int);
 int	 imsg_read(struct imsgbuf *);
 int	 imsg_get(struct imsgbuf *, struct imsg *);
-int	 imsg_compose(struct imsgbuf *, int, u_int32_t, void *, u_int16_t);
-int	 imsg_compose_pid(struct imsgbuf *, int, pid_t, void *, u_int16_t);
-struct buf *imsg_create(struct imsgbuf *, int, u_int32_t, u_int16_t);
-struct buf *imsg_create_pid(struct imsgbuf *, int, pid_t, u_int16_t);
+int	 imsg_compose(struct imsgbuf *, enum imsg_type, u_int32_t, pid_t,
+	    void *, u_int16_t);
+struct buf	*imsg_create(struct imsgbuf *, enum imsg_type, u_int32_t, pid_t,
+		    u_int16_t);
 int	 imsg_add(struct buf *, void *, u_int16_t);
 int	 imsg_close(struct imsgbuf *, struct buf *);
 void	 imsg_free(struct imsg *);
 
 /* ntp.c */
 pid_t	 ntp_main(int[2], struct ntpd_conf *);
-void	 ntp_adjtime(void);
-void	 ntp_host_dns(char *, u_int32_t);
+void	 priv_adjtime(void);
+void	 priv_settime(double);
+void	 priv_host_dns(char *, u_int32_t);
 
 /* parse.y */
-int	 parse_config(char *, struct ntpd_conf *);
-int	 cmdline_symset(char *);
+int	 parse_config(const char *, struct ntpd_conf *);
 
 /* config.c */
 int		 host(const char *, struct ntp_addr **);
@@ -227,7 +238,12 @@ int	client_peer_init(struct ntp_peer *);
 int	client_addr_init(struct ntp_peer *);
 int	client_nextaddr(struct ntp_peer *);
 int	client_query(struct ntp_peer *);
-int	client_dispatch(struct ntp_peer *);
+int	client_dispatch(struct ntp_peer *, u_int8_t);
+void	client_log_error(struct ntp_peer *, const char *, int);
+void	update_scale(double);
+time_t	scale_interval(time_t);
+time_t	error_interval(void);
+void	set_next(struct ntp_peer *, time_t);
 
 /* util.c */
 double			gettime(void);

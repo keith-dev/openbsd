@@ -3,10 +3,10 @@
 # THIS FILE AUTOMATICALLY GENERATED.  DO NOT EDIT.
 # generated from:
 #
-#	OpenBSD: etc.i386/MAKEDEV.md,v 1.27 2004/09/06 10:06:05 deraadt Exp 
-#	OpenBSD: MAKEDEV.common,v 1.12 2004/08/19 07:05:20 miod Exp 
-#	OpenBSD: MAKEDEV.mi,v 1.72 2004/02/16 18:58:53 miod Exp 
-#	OpenBSD: MAKEDEV.sub,v 1.12 2004/02/20 19:13:01 miod Exp 
+#	OpenBSD: etc.i386/MAKEDEV.md,v 1.28 2004/10/03 21:28:34 jcs Exp 
+#	OpenBSD: MAKEDEV.common,v 1.16 2005/03/01 13:35:59 otto Exp 
+#	OpenBSD: MAKEDEV.mi,v 1.73 2005/02/07 06:14:18 david Exp 
+#	OpenBSD: MAKEDEV.sub,v 1.14 2005/02/07 06:14:18 david Exp 
 #
 #
 # Copyright (c) 2001-2004 Todd T. Fries <todd@OpenBSD.org>
@@ -83,6 +83,7 @@
 #	joy*	Joystick driver
 #	lkm	Loadable kernel modules interface
 #	music*	MIDI devices
+#	nvram	NVRAM access
 #	pci	PCI bus device
 #	pctr*	PC Performance Tuning Register access device
 #	pf*	Packet Filter
@@ -119,7 +120,7 @@ hex()
 
 alph2d()
 {
-	local t="$1"  
+	local t="$1"
 	local p="0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
 	local sub=${p%${t}*}
 	echo ${#sub}
@@ -325,6 +326,10 @@ pci)
 	M pci c 72 0 600
 	;;
 
+nvram)
+	M nvram c 84 0 440 kmem
+	;;
+
 music*)
 	M music$U     c 53 $U
 	M sequencer$U c 53 $(($U+128))
@@ -413,9 +418,9 @@ uhid*)
 
 ugen*)
 	n=$(($U*16))
-	for j in 00 01 02 03 04 05 06 07 08 09 10 11 12 13 14 15
+	for j in 0{0,1,2,3,4,5,6,7,8,9} 1{0,1,2,3,4,5}
 	do
-		M ugen$U.$j c 63 $(($n+$j)) 660
+		M ugen$U.$j c 63 $(($n+10#$j)) 660
 	done
 	;;
 
@@ -423,11 +428,12 @@ ttyU[0-9a-zA-Z])
 	U=${i#ttyU*}
 	o=$(alph2d $U)
 	M ttyU$U c 66 $o 660 dialer uucp
+	M cuaU$U c 66 $(($o+128)) 660 dialer uucp
 	;;
 
 uall)
 	R ttyU0 ttyU1 ugen0 ugen1 ulpt0 ulpt1 uhid0 uhid1 uhid2 uhid3
-	R uscanner0 urio0 usb0 usb1 usb2 usb3
+	R uscanner0 urio0 usb0 usb1 usb2 usb3 usb4 usb5
 	;;
 
 lpt*|lpa*)
@@ -460,7 +466,7 @@ tty[C-F]*)
 	ttyF*) n=F m=768;;
 	esac
 	case $U in
-	[0-9a-f]) M tty$n$U c 12 $(( 16#$U + $m )) 600;;
+	[0-9a-f]) M tty$n$U c 12 $((16#$U+$m)) 600;;
 	cfg) M tty${n}cfg c 12 $((255+$m)) 600;;
 	*) echo bad unit $U for $i; exit 1;;
 	esac
@@ -578,17 +584,17 @@ local)
 	;;
 
 all)
-	R gpio0 gpio1 gpio2 bktr0 ccd0 ccd1 ccd2 ccd3 vnd0 vnd1 vnd2
-	R vnd3 sd0 sd1 sd2 sd3 sd4 cd0 cd1 rd0 tun0 tun1 tun2 tun3
-	R bpf0 bpf1 bpf2 bpf3 bpf4 bpf5 bpf6 bpf7 bpf8 bpf9 pty0 fd1
-	R fd1B fd1C fd1D fd1E fd1F fd1G fd1H fd0 fd0B fd0C fd0D fd0E
-	R fd0F fd0G fd0H xfs0 ss0 ss1 ch0 ses0 hotplug ptm gpr0 local
-	R wscons pci iop0 iop1 uall rmidi0 rmidi1 rmidi2 rmidi3 rmidi4
-	R rmidi5 rmidi6 rmidi7 tuner0 radio0 music0 speaker audio0
-	R wdt0 wt0 uk0 random joy0 joy1 lpa0 lpa1 lpa2 lpt0 lpt1 lpt2
-	R lkm tty00 tty01 tty02 tty03 ttyc0 ttyc1 ttyc2 ttyc3 ttyc4
-	R ttyc5 ttyc6 ttyc7 apm crypto pf pctr systrace wd0 wd1 wd2
-	R wd3 raid0 raid1 raid2 raid3 std st0 st1 fd mcd0
+	R nvram gpio0 gpio1 gpio2 bktr0 ccd0 ccd1 ccd2 ccd3 vnd0 vnd1
+	R vnd2 vnd3 sd0 sd1 sd2 sd3 sd4 cd0 cd1 rd0 tun0 tun1 tun2
+	R tun3 bpf0 bpf1 bpf2 bpf3 bpf4 bpf5 bpf6 bpf7 bpf8 bpf9 pty0
+	R fd1 fd1B fd1C fd1D fd1E fd1F fd1G fd1H fd0 fd0B fd0C fd0D
+	R fd0E fd0F fd0G fd0H xfs0 ss0 ss1 ch0 ses0 hotplug ptm gpr0
+	R local wscons pci iop0 iop1 uall rmidi0 rmidi1 rmidi2 rmidi3
+	R rmidi4 rmidi5 rmidi6 rmidi7 tuner0 radio0 music0 speaker
+	R audio0 wdt0 wt0 uk0 random joy0 joy1 lpa0 lpa1 lpa2 lpt0
+	R lpt1 lpt2 lkm tty00 tty01 tty02 tty03 ttyc0 ttyc1 ttyc2
+	R ttyc3 ttyc4 ttyc5 ttyc6 ttyc7 apm crypto pf pctr systrace
+	R wd0 wd1 wd2 wd3 raid0 raid1 raid2 raid3 std st0 st1 fd mcd0
 	;;
 
 wd*|sd*|raid*|ccd*)

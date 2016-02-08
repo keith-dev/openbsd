@@ -1,4 +1,4 @@
-/*	$OpenBSD: ntp.c,v 1.23 2004/07/14 20:11:16 henning Exp $	*/
+/*	$OpenBSD: ntp.c,v 1.27 2004/10/26 09:48:59 henning Exp $	*/
 
 /*
  * Copyright (c) 1996, 1997 by N.M. Maclaren. All rights reserved.
@@ -67,7 +67,6 @@
 #define NTP_VERSION           4		/* The current version */
 #define NTP_VERSION_MIN       1		/* The minum valid version */
 #define NTP_VERSION_MAX       4		/* The maximum valid version */
-#define NTP_STRATUM_MIN       1		/* The minum valid stratum */
 #define NTP_STRATUM_MAX      14		/* The maximum valid stratum */
 #define NTP_INSANITY     3600.0		/* Errors beyond this are hopeless */
 
@@ -163,12 +162,11 @@ ntp_client(const char *hostname, int family, struct timeval *new,
 	freeaddrinfo(res0);
 
 #ifdef DEBUG
-	fprintf(stderr,"Correction: %.6f +/- %.6f\n", offset,error);
+	fprintf(stderr, "Correction: %.6f +/- %.6f\n", offset, error);
 #endif
 
-	if (accept < 1) {
+	if (accept < 1)
 		errx(1, "Unable to get a reasonable time estimate");
-	}
 
 	create_timeval(offset, new, adjust);
 }
@@ -189,7 +187,7 @@ sync_ntp(int fd, const struct sockaddr *peer, double *offset, double *error)
 
 	if (connect(fd, peer, SA_LEN(peer)) < 0) {
 		warn("Failed to connect to server");
-		return -1;
+		return (-1);
 	}
 
 	while (accepts < MAX_QUERIES && attempts < 2 * MAX_QUERIES) {
@@ -197,16 +195,16 @@ sync_ntp(int fd, const struct sockaddr *peer, double *offset, double *error)
 
 		if (current_time(JAN_1970) > deadline) {
 			warnx("Not enough valid responses received in time");
-			return -1;
+			return (-1);
 		}
 
 		if (write_packet(fd, &data) < 0)
-			return -1;
+			return (-1);
 
 		ret = read_packet(fd, &data, &x, &y);
 
 		if (ret < 0)
-			return -1;
+			return (-1);
 		else if (ret > 0) {
 #ifdef DEBUG
 			print_packet(&data);
@@ -214,15 +212,14 @@ sync_ntp(int fd, const struct sockaddr *peer, double *offset, double *error)
 
 			if (++rejects > MAX_QUERIES) {
 				warnx("Too many bad or lost packets");
-				return -1;
+				return (-1);
 			} else
 				continue;
 		} else
 			++accepts;
 
 #ifdef DEBUG
-		fprintf(stderr,"Offset: %.6f +/- %.6f\n",
-			x, y);
+		fprintf(stderr, "Offset: %.6f +/- %.6f\n", x, y);
 #endif
 
 		if ((a = x - *offset) < 0.0)
@@ -236,19 +233,19 @@ sync_ntp(int fd, const struct sockaddr *peer, double *offset, double *error)
 		}
 
 #ifdef DEBUG
-		fprintf(stderr,"Best: %.6f +/- %.6f\n", *offset, *error);
+		fprintf(stderr, "Best: %.6f +/- %.6f\n", *offset, *error);
 #endif
 
 		if (a > b) {
 			warnx("Inconsistent times received from NTP server");
-			return -1;
+			return (-1);
 		}
 
 		if (*error <= minerr)
 			break;
 	}
 
-	return accepts;
+	return (accepts);
 }
 
 /* Send out NTP packet. */
@@ -288,10 +285,10 @@ write_packet(int fd, struct ntp_data *data)
 
 	if (length != sizeof(packet)) {
 		warn("Unable to send NTP packet to server");
-		return -1;
+		return (-1);
 	}
 
-	return 0;
+	return (0);
 }
 
 /*
@@ -309,8 +306,7 @@ read_packet(int fd, struct ntp_data *data, double *off, double *error)
 	int	length, r;
 	fd_set	*rfds;
 
-	rfds = (fd_set *)calloc(howmany(fd + 1, NFDBITS), sizeof(fd_mask));
-
+	rfds = calloc(howmany(fd + 1, NFDBITS), sizeof(fd_mask));
 	if (rfds == NULL)
 		err(1, "calloc");
 
@@ -329,14 +325,12 @@ retry:
 			warn("select");
 
 		free(rfds);
-
-		return r;
+		return (r);
 	}
 
 	if (r != 1 || !FD_ISSET(fd, rfds)) {
 		free(rfds);
-
-		return 1;
+		return (1);
 	}
 
 	free(rfds);
@@ -345,41 +339,41 @@ retry:
 
 	if (length < 0) {
 		warn("Unable to receive NTP packet from server");
-		return -1;
+		return (-1);
 	}
 
 	if (length < NTP_PACKET_MIN || length > NTP_PACKET_MAX) {
 		warnx("Invalid NTP packet size, packet rejected");
-		return 1;
+		return (1);
 	}
 
 	unpack_ntp(data, receive);
 
 	if (data->recvck != data->xmitck) {
 		warnx("Invalid cookie received, packet rejected");
-		return 1;
+		return (1);
 	}
 
-	if (data->version != NTP_VERSION) {
-		warnx("Received different NTP version than sent,"
-		      "packet rejected");
-		return 1;
+	if (data->version < NTP_VERSION_MIN ||
+	    data->version > NTP_VERSION_MAX) {
+		warnx("Received NTP version %u, need %u or lower",
+		    data->version, NTP_VERSION);
+		return (1);
 	}
 
 	if (data->mode != NTP_MODE_SERVER) {
 		warnx("Invalid NTP server mode, packet rejected");
-		return 1;
+		return (1);
 	}
 
-	if (data->stratum < NTP_STRATUM_MIN ||
-	    data->stratum > NTP_STRATUM_MAX) {
+	if (data->stratum > NTP_STRATUM_MAX) {
 		warnx("Invalid stratum received, packet rejected");
-		return 1;
+		return (1);
 	}
 
 	if (data->transmit == 0.0) {
 		warnx("Server clock invalid, packet rejected");
-		return 1;
+		return (1);
 	}
 
 	x = data->receive - data->originate;
@@ -393,7 +387,7 @@ retry:
 	if (x > *error)
 		*error = x;
 
-	return 0;
+	return (0);
 }
 
 /*
@@ -416,11 +410,13 @@ unpack_ntp(struct ntp_data *data, u_char *packet)
 
 	for (i = 0, d = 0.0; i < 8; ++i)
 	    d = 256.0*d+packet[NTP_RECEIVE+i];
-	data->receive = d/NTP_SCALE;
+
+	data->receive = d / NTP_SCALE;
 
 	for (i = 0, d = 0.0; i < 8; ++i)
 	    d = 256.0*d+packet[NTP_TRANSMIT+i];
-	data->transmit = d/NTP_SCALE;
+
+	data->transmit = d / NTP_SCALE;
 
 	/* See write_packet for why this isn't an endian problem. */
 	data->recvck = *(u_int64_t *)(packet + NTP_ORIGINATE);
@@ -448,7 +444,7 @@ current_time(double offset)
 	if (corrleaps)
 		ntpleaps_sub(&t);
 
-	return offset + TAI64_TO_SEC(t) + 1.0e-6 * current.tv_usec;
+	return (offset + TAI64_TO_SEC(t) + 1.0e-6 * current.tv_usec);
 }
 
 /*

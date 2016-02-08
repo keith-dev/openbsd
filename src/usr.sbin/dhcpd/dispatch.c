@@ -1,4 +1,4 @@
-/*	$OpenBSD: dispatch.c,v 1.10 2004/05/25 17:41:54 canacar Exp $ */
+/*	$OpenBSD: dispatch.c,v 1.16 2005/01/31 18:27:38 millert Exp $ */
 
 /*
  * Copyright (c) 1995, 1996, 1997, 1998, 1999
@@ -48,7 +48,7 @@
 /* Most boxes has less than 16 interfaces, so this might be a good guess.  */
 #define INITIAL_IFREQ_COUNT 16
 
-struct interface_info *interfaces, *dummy_interfaces, *fallback_interface;
+struct interface_info *interfaces;
 struct protocol *protocols;
 struct timeout *timeouts;
 static struct timeout *free_timeouts;
@@ -57,8 +57,6 @@ void (*bootp_packet_handler)(struct interface_info *,
     struct dhcp_packet *, int, unsigned int, struct iaddr, struct hardware *);
 
 static int interface_status(struct interface_info *ifinfo);
-
-int quiet_interface_discovery;
 
 /* Use getifaddrs() to get a list of all the attached interfaces.
    For each interface that's of type INET and not the loopback interface,
@@ -176,7 +174,7 @@ discover_interfaces(int state)
 					subnet->interface = tmp;
 					subnet->interface_address = addr;
 				} else if (subnet->interface != tmp) {
-					warn("Multiple %s %s: %s %s",
+					warning("Multiple %s %s: %s %s",
 					    "interfaces match the",
 					    "same subnet",
 					    subnet->interface->name,
@@ -185,7 +183,7 @@ discover_interfaces(int state)
 				share = subnet->shared_network;
 				if (tmp->shared_network &&
 				    tmp->shared_network != share) {
-					warn("Interface %s matches %s",
+					warning("Interface %s matches %s",
 					    tmp->name,
 					    "multiple shared networks");
 				} else {
@@ -195,7 +193,7 @@ discover_interfaces(int state)
 				if (!share->interface) {
 					share->interface = tmp;
 				} else if (share->interface != tmp) {
-					warn("Multiple %s %s: %s %s",
+					warning("Multiple %s %s: %s %s",
 					    "interfaces match the",
 					    "same shared network",
 					    share->interface->name,
@@ -229,10 +227,6 @@ discover_interfaces(int state)
 			else
 				last->next = tmp->next;
 
-			/* Remember the interface in case we need to know
-			   about it later. */
-			tmp->next = dummy_interfaces;
-			dummy_interfaces = tmp;
 			continue;
 		}
 		last = tmp;
@@ -241,9 +235,9 @@ discover_interfaces(int state)
 
 		/* We must have a subnet declaration for each interface. */
 		if (!tmp->shared_network && (state == DISCOVER_SERVER)) {
-			warn("No subnet declaration for %s (%s).",
+			warning("No subnet declaration for %s (%s).",
 			    tmp->name, inet_ntoa(foo.sin_addr));
-			warn("Please write a subnet declaration in your %s",
+			warning("Please write a subnet declaration in your %s",
 			    "dhcpd.conf file for the");
 			error("network segment to which interface %s %s",
 			    tmp->name, "is attached.");
@@ -285,29 +279,32 @@ discover_interfaces(int state)
 void
 dispatch(void)
 {
-	int count, i, nfds = 0, to_msec;
+	int nfds, i, to_msec;
 	struct protocol *l;
-	struct pollfd *fds;
+	static struct pollfd *fds;
+	static int nfds_max;
 	time_t howlong;
 
-	for (l = protocols; l; l = l->next)
-		++nfds;
-	fds = (struct pollfd *)malloc((nfds) * sizeof (struct pollfd));
-	if (fds == NULL)
-		error("Can't allocate poll structures.");
+	for (nfds = 0, l = protocols; l; l = l->next)
+		nfds++;
+	if (nfds > nfds_max) {
+		fds = realloc(fds, nfds * sizeof(struct pollfd));
+		if (fds == NULL)
+			error("Can't allocate poll structures.");
+		nfds_max = nfds;
+	}
 
-	do {
+	for (;;) {
 		/*
 		 * Call any expired timeouts, and then if there's
-		 * still a timeout registered, time out the select
+		 * still a timeout registered, time out the poll
 		 * call then.
 		 */
+		time(&cur_time);
 another:
 		if (timeouts) {
-			struct timeout *t;
-
 			if (timeouts->when <= cur_time) {
-				t = timeouts;
+				struct timeout *t = timeouts;
 				timeouts = timeouts->next;
 				(*(t->func))(t->what);
 				t->next = free_timeouts;
@@ -319,7 +316,7 @@ another:
 			 * Figure timeout in milliseconds, and check for
 			 * potential overflow, so we can cram into an int
 			 * for poll, while not polling with a negative
-			 * timeout and blocking indefinetely.
+			 * timeout and blocking indefinitely.
 			 */
 			howlong = timeouts->when - cur_time;
 			if (howlong > INT_MAX / 1000)
@@ -329,43 +326,32 @@ another:
 			to_msec = -1;
 
 		/* Set up the descriptors to be polled. */
-		i = 0;
-
-		for (l = protocols; l; l = l->next) {
+		for (i = 0, l = protocols; l; l = l->next) {
 			struct interface_info *ip = l->local;
 
 			if (ip && (l->handler != got_one || !ip->dead)) {
 				fds[i].fd = l->fd;
 				fds[i].events = POLLIN;
-				fds[i].revents = 0;
 				++i;
 			}
 		}
-
 		if (i == 0)
 			error("No live interfaces to poll on - exiting.");
 
-		/* Wait for a packet or a timeout... XXX */
-		count = poll(fds, nfds, to_msec);
-
-		/* Not likely to be transitory... */
-		if (count == -1) {
-			if (errno == EAGAIN || errno == EINTR) {
-				time(&cur_time);
-				continue;
-			} else
+		/* Wait for a packet or a timeout... */
+		switch (poll(fds, nfds, to_msec)) {
+		case -1:
+			if (errno != EAGAIN && errno != EINTR)
 				error("poll: %m");
+			/* FALLTHROUGH */
+		case 0:
+			continue;	/* no packets */
 		}
 
-		/* Get the current time... */
-		time(&cur_time);
-
-		i = 0;
-		for (l = protocols; l; l = l->next) {
+		for (i = 0, l = protocols; l; l = l->next) {
 			struct interface_info *ip = l->local;
 
 			if ((fds[i].revents & (POLLIN | POLLHUP))) {
-				fds[i].revents = 0;
 				if (ip && (l->handler != got_one ||
 				    !ip->dead))
 					(*(l->handler))(l);
@@ -375,7 +361,7 @@ another:
 			++i;
 		}
 		interfaces_invalidated = 0;
-	} while (1);
+	}
 }
 
 
@@ -385,7 +371,7 @@ got_one(struct protocol *l)
 	struct sockaddr_in from;
 	struct hardware hfrom;
 	struct iaddr ifrom;
-	size_t result;
+	ssize_t result;
 	union {
 		unsigned char packbuf[4095];
 		struct dhcp_packet packet;
@@ -394,13 +380,13 @@ got_one(struct protocol *l)
 
 	if ((result = receive_packet (ip, u.packbuf, sizeof u,
 	    &from, &hfrom)) == -1) {
-		warn("receive_packet failed on %s: %s", ip->name,
+		warning("receive_packet failed on %s: %s", ip->name,
 		    strerror(errno));
 		ip->errors++;
 		if ((!interface_status(ip)) ||
 		    (ip->noifmedia && ip->errors > 20)) {
 			/* our interface has gone away. */
-			warn("Interface %s no longer appears valid.",
+			warning("Interface %s no longer appears valid.",
 			    ip->name);
 			ip->dead = 1;
 			interfaces_invalidated = 1;

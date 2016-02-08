@@ -7,7 +7,7 @@
  * the sendmail distribution.
  *
  *
- *	$Sendmail: mfapi.h,v 8.58 2004/04/29 18:04:48 gshapiro Exp $
+ *	$Sendmail: mfapi.h,v 8.60 2004/08/20 21:24:14 ca Exp $
  */
 
 /*
@@ -147,6 +147,9 @@ LIBMILTER_API int smfi_setdbg __P((int));
 LIBMILTER_API int smfi_settimeout __P((int));
 LIBMILTER_API int smfi_setconn __P((char *));
 LIBMILTER_API int smfi_stop __P((void));
+#if _FFR_MAXDATASIZE
+LIBMILTER_API size_t smfi_setmaxdatasize __P((size_t));
+#endif /* _FFR_MAXDATASIZE */
 
 /*
 **  What the filter might do -- values to be ORed together for
@@ -422,7 +425,6 @@ LIBMILTER_API int smfi_addrcpt __P((SMFICTX *, char *));
 
 LIBMILTER_API int smfi_delrcpt __P((SMFICTX *, char *));
 
-#if _FFR_SMFI_PROGRESS
 /*
 **  Send a "no-op" up to the MTA to tell it we're still alive, so long
 **  milter-side operations don't time out.
@@ -431,7 +433,6 @@ LIBMILTER_API int smfi_delrcpt __P((SMFICTX *, char *));
 */
 
 LIBMILTER_API int smfi_progress __P((SMFICTX *));
-#endif /* _FFR_SMFI_PROGRESS */
 
 /*
 **  Delete a recipient from the envelope

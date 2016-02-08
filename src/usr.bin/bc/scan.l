@@ -1,5 +1,5 @@
 %{
-/*      $OpenBSD: scan.l,v 1.14 2003/12/02 09:00:07 otto Exp $	*/
+/*      $OpenBSD: scan.l,v 1.16 2004/12/02 19:30:05 otto Exp $	*/
 
 /*
  * Copyright (c) 2003, Otto Moerbeek <otto@drijf.net>
@@ -18,14 +18,16 @@
  */
 
 #ifndef lint
-static const char rcsid[] = "$OpenBSD: scan.l,v 1.14 2003/12/02 09:00:07 otto Exp $";
+static const char rcsid[] = "$OpenBSD: scan.l,v 1.16 2004/12/02 19:30:05 otto Exp $";
 #endif /* not lint */
 
 #include <err.h>
+#include <signal.h>
 #include <stdbool.h>
 #include <string.h>
 
 #include "extern.h"
+#include "pathnames.h"
 #include "y.tab.h"
 
 int		lineno;
@@ -33,6 +35,7 @@ int		lineno;
 static char	*strbuf = NULL;
 static size_t	strbuf_sz = 1;
 static bool	dot_seen;
+static volatile sig_atomic_t	interactive = 0;
 
 static void	init_strbuf(void);
 static void	add_str(const char *);
@@ -222,8 +225,57 @@ add_str(const char *str)
 void
 abort_line(int sig)
 {
-	if (isatty(fileno(yyin))) {
+	const char str[] = "[\n]P\n";
+	int save_errno;
+
+	if (interactive) {
+		save_errno = errno;
 		YY_FLUSH_BUFFER;
-		printf("[\n]P\n");
+		write(STDOUT_FILENO, str, sizeof(str) - 1);
+		errno = save_errno;
 	}
 }
+
+int
+yywrap(void)
+{
+	static int state;
+	static YY_BUFFER_STATE buf;
+
+	if (fileindex == 0 && sargc > 0 && strcmp(sargv[0], _PATH_LIBB) == 0) {
+		filename = sargv[fileindex++];
+		yyin = fopen(filename, "r");
+		lineno = 1;
+		if (yyin == NULL)
+			err(1, "cannot open %s", filename);
+		return (0);
+	}
+	if (state == 0 && cmdexpr[0] != '\0') {
+		buf = yy_scan_string(cmdexpr);
+		state++;
+		lineno = 1;
+		filename = "command line";
+		return (0);
+	} else if (state == 1) {
+		yy_delete_buffer(buf);
+		free(cmdexpr);
+		state++;
+	}
+	if (fileindex < sargc) {
+		filename = sargv[fileindex++];
+		yyin = fopen(filename, "r");
+		lineno = 1;
+		if (yyin == NULL)
+			err(1, "cannot open %s", filename);
+		return (0);
+	} else if (fileindex == sargc) {
+		fileindex++;
+		yyin = stdin;
+		interactive = isatty(fileno(yyin));
+		lineno = 1;
+		filename = "stdin";
+		return (0);
+	}
+	return (1);
+}
+

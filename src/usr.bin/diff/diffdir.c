@@ -1,4 +1,4 @@
-/*	$OpenBSD: diffdir.c,v 1.27 2004/03/16 00:40:34 millert Exp $	*/
+/*	$OpenBSD: diffdir.c,v 1.29 2004/11/26 20:09:56 otto Exp $	*/
 
 /*
  * Copyright (c) 2003 Todd C. Miller <Todd.Miller@courtesan.com>
@@ -21,7 +21,7 @@
  */
 
 #ifndef lint
-static const char rcsid[] = "$OpenBSD: diffdir.c,v 1.27 2004/03/16 00:40:34 millert Exp $";
+static const char rcsid[] = "$OpenBSD: diffdir.c,v 1.29 2004/11/26 20:09:56 otto Exp $";
 #endif /* not lint */
 
 #include <sys/param.h>
@@ -165,7 +165,7 @@ static struct dirent **
 slurpdir(char *path, char **bufp, int enoentok)
 {
 	char *buf, *ebuf, *cp;
-	size_t bufsize;
+	size_t bufsize, have, need;
 	long base;
 	int fd, nbytes, entries;
 	struct stat sb;
@@ -181,20 +181,35 @@ slurpdir(char *path, char **bufp, int enoentok)
 		}
 		return (&dummy);
 	}
-	fstat(fd, &sb);
-
-	bufsize = sb.st_size;
-	if (bufsize < sb.st_blksize)
-		bufsize = sb.st_blksize;
-	buf = emalloc(bufsize);
-
-	nbytes = getdirentries(fd, buf, bufsize, &base);
-	if (nbytes <= 0) {
-		free(buf);
+	if (fstat(fd, &sb) == -1) {
 		warn("%s", path);
+		close(fd);
 		return (NULL);
 	}
-	ebuf = buf + nbytes;
+
+	need = roundup(sb.st_blksize, sizeof(struct dirent));
+	have = bufsize = roundup(MAX(sb.st_size, sb.st_blksize),
+	    sizeof(struct dirent)) + need;
+	ebuf = buf = emalloc(bufsize);
+
+	do {
+		if (have < need) {
+		    bufsize += need;
+		    have += need;
+		    cp = erealloc(buf, bufsize);
+		    ebuf = cp + (ebuf - buf);
+		    buf = cp;
+		}
+		nbytes = getdirentries(fd, ebuf, have, &base);
+		if (nbytes == -1) {
+			warn("%s", path);
+			free(buf);
+			close(fd);
+			return (NULL);
+		}
+		ebuf += nbytes;
+		have -= nbytes;
+	} while (nbytes != 0);
 	close(fd);
 
 	/*
@@ -224,7 +239,7 @@ slurpdir(char *path, char **bufp, int enoentok)
 	}
 	dirlist[entries] = NULL;
 
-	qsort(dirlist, entries, sizeof(struct dir *), dircompare);
+	qsort(dirlist, entries, sizeof(struct dirent *), dircompare);
 
 	*bufp = buf;
 	return (dirlist);

@@ -1,4 +1,4 @@
-/* $OpenBSD: message.c,v 1.88 2004/08/17 14:48:23 hshoexer Exp $	 */
+/* $OpenBSD: message.c,v 1.98 2005/03/05 12:35:03 ho Exp $	 */
 /* $EOM: message.c,v 1.156 2000/10/10 12:36:39 provos Exp $	 */
 
 /*
@@ -228,9 +228,9 @@ message_free(struct message *msg)
 	LOG_DBG((LOG_MESSAGE, 20, "message_free: freeing %p", msg));
 	if (!msg)
 		return;
-	if (msg->orig && msg->orig != (u_int8_t *) msg->iov[0].iov_base)
-		free(msg->orig);
 	if (msg->iov) {
+		if (msg->orig && msg->orig != (u_int8_t *)msg->iov[0].iov_base)
+			free(msg->orig);
 		for (i = 0; i < msg->iovlen; i++)
 			if (msg->iov[i].iov_base)
 				free(msg->iov[i].iov_base);
@@ -251,12 +251,14 @@ message_free(struct message *msg)
 		TAILQ_REMOVE(&msg->post_send, TAILQ_FIRST(&msg->post_send),
 		    link);
 
-	/* If we are on the send queue, remove us from there.  */
-	if (msg->flags & MSG_IN_TRANSIT)
-		TAILQ_REMOVE(msg->transport->vtbl->get_queue(msg), msg, link);
+	if (msg->transport) {
+		/* If we are on the send queue, remove us from there.  */
+		if (msg->flags & MSG_IN_TRANSIT)
+			TAILQ_REMOVE(msg->transport->vtbl->get_queue(msg),
+			    msg, link);
 
-	if (msg->transport)
 		transport_release(msg->transport);
+	}
 
 	if (msg->isakmp_sa)
 		sa_release(msg->isakmp_sa);
@@ -347,7 +349,8 @@ message_parse_payloads(struct message *msg, struct payload *p, u_int8_t next,
 		}
 		/* Ignore most private payloads.  */
 		if (next >= ISAKMP_PAYLOAD_PRIVATE_MIN &&
-		    next != ISAKMP_PAYLOAD_NAT_D) {
+		    next != ISAKMP_PAYLOAD_NAT_D &&
+		    next != ISAKMP_PAYLOAD_NAT_OA) {
 			LOG_DBG((LOG_MESSAGE, 30, "message_parse_payloads: "
 			    "private next payload type %s in payload of "
 			    "type %d ignored",
@@ -649,8 +652,6 @@ message_validate_delete(struct message *msg, struct payload *p)
 
 /*
  * Validate the hash payload P in message MSG.
- * XXX Currently hash payloads are processed by the particular exchanges,
- * except INFORMATIONAL.  This should be actually done here.
  */
 static int
 message_validate_hash(struct message *msg, struct payload *p)
@@ -660,7 +661,7 @@ message_validate_hash(struct message *msg, struct payload *p)
 	struct hash    *hash;
 	struct payload *hashp = payload_first(msg, ISAKMP_PAYLOAD_HASH);
 	struct prf     *prf;
-	u_int8_t       *comp_hash, *rest;
+	u_int8_t       *rest;
 	u_int8_t        message_id[ISAKMP_HDR_MESSAGE_ID_LEN];
 	size_t          rest_len;
 
@@ -668,42 +669,24 @@ message_validate_hash(struct message *msg, struct payload *p)
 	if (msg->exchange && (msg->exchange->type != ISAKMP_EXCH_INFO))
 		return 0;
 
-	if (isakmp_sa == NULL) {
-		log_print("message_validate_hash: invalid hash information");
-		message_drop(msg, ISAKMP_NOTIFY_INVALID_HASH_INFORMATION,
-		    0, 1, 1);
-		return -1;
-	}
+	if (isakmp_sa == NULL)
+		goto invalid;
+
 	isa = isakmp_sa->data;
 	hash = hash_get(isa->hash);
+	if (hash == NULL)
+		goto invalid;
 
-	if (hash == NULL) {
-		log_print("message_validate_hash: invalid hash information");
-		message_drop(msg, ISAKMP_NOTIFY_INVALID_HASH_INFORMATION,
-		    0, 1, 1);
-		return -1;
-	}
 	/* If no SKEYID_a, we can not do anything (should not happen).  */
-	if (!isa->skeyid_a) {
-		log_print("message_validate_hash: invalid hash information");
-		message_drop(msg, ISAKMP_NOTIFY_INVALID_HASH_INFORMATION,
-		    0, 1, 1);
-		return -1;
-	}
+	if (!isa->skeyid_a)
+		goto invalid;
+		
 	/* Allocate the prf and start calculating our HASH(1). */
 	LOG_DBG_BUF((LOG_MISC, 90, "message_validate_hash: SKEYID_a",
 	    isa->skeyid_a, isa->skeyid_len));
 	prf = prf_alloc(isa->prf_type, hash->type, isa->skeyid_a,
 	    isa->skeyid_len);
 	if (!prf) {
-		message_free(msg);
-		return -1;
-	}
-	comp_hash = (u_int8_t *)malloc(hash->hashsize);
-	if (!comp_hash) {
-		log_error("message_validate_hash: malloc (%lu) failed",
-		    (unsigned long)hash->hashsize);
-		prf_free(prf);
 		message_free(msg);
 		return -1;
 	}
@@ -720,20 +703,12 @@ message_validate_hash(struct message *msg, struct payload *p)
 	LOG_DBG_BUF((LOG_MISC, 90,
 	    "message_validate_hash: payloads after HASH(1)", rest, rest_len));
 	prf->Update(prf->prfctx, rest, rest_len);
-	prf->Final(comp_hash, prf->prfctx);
+	prf->Final(hash->digest, prf->prfctx);
 	prf_free(prf);
 
-	if (memcmp(hashp->p + ISAKMP_HASH_DATA_OFF, comp_hash,
-	    hash->hashsize)) {
-		log_print("message_validate_hash: invalid hash value for %s "
-		    "payload", payload_first(msg, ISAKMP_PAYLOAD_DELETE) ?
-		    "DELETE" : "NOTIFY");
-		message_drop(msg, ISAKMP_NOTIFY_INVALID_HASH_INFORMATION,
-		    0, 1, 1);
-		free(comp_hash);
-		return -1;
-	}
-	free(comp_hash);
+	if (memcmp(hashp->p + ISAKMP_HASH_DATA_OFF, hash->digest,
+	    hash->hashsize))
+		goto invalid;
 
 	/* Mark the HASH as handled. */
 	hashp->flags |= PL_MARK;
@@ -742,6 +717,11 @@ message_validate_hash(struct message *msg, struct payload *p)
 	msg->flags |= MSG_AUTHENTICATED;
 
 	return 0;
+
+  invalid:
+	log_print("message_validate_hash: invalid hash information");
+	message_drop(msg, ISAKMP_NOTIFY_INVALID_HASH_INFORMATION, 0, 1, 1);
+	return -1;
 }
 
 /* Validate the identification payload P in message MSG.  */
@@ -1224,12 +1204,14 @@ message_recv(struct message *msg)
 	struct keystate *ks = 0;
 	struct proto    tmp_proto;
 	struct sa       tmp_sa;
+#if defined (USE_NAT_TRAVERSAL)
+	struct transport *t;
+#endif
 
 	/* Messages shorter than an ISAKMP header are bad.  */
 	if (sz < ISAKMP_HDR_SZ || sz != GET_ISAKMP_HDR_LENGTH(buf)) {
 		log_print("message_recv: bad message length");
-		message_drop(msg, ISAKMP_NOTIFY_UNEQUAL_PAYLOAD_LENGTHS,
-		    0, 1, 1);
+		message_drop(msg, 0, 0, 1, 1);
 		return -1;
 	}
 #ifdef USE_DEBUG
@@ -1450,12 +1432,27 @@ message_recv(struct message *msg)
 			free(ks);
 		return -1;
 	}
+#if defined (USE_NAT_TRAVERSAL)
+	/*
+	 * NAT-T may have switched ports for us. We need to replace the
+	 * old ISAKMP SA transport here with one that contains the proper
+	 * (i.e translated) ports.
+	 */
+	if (msg->isakmp_sa && msg->exchange->phase == 1) {
+		t = msg->isakmp_sa->transport;
+		msg->isakmp_sa->transport = msg->transport;
+		transport_reference(msg->transport);
+		transport_release(t);
+	}
+#endif
 	/*
 	 * Now we can validate DOI-specific exchange types.  If we have no SA
 	 * DOI-specific exchange types are definitely wrong.
          */
 	if (exch_type >= ISAKMP_EXCH_DOI_MIN
+#if 0 /* always true; silence GCC3 warning */
 	    && exch_type <= ISAKMP_EXCH_DOI_MAX
+#endif
 	    && msg->exchange->doi->validate_exchange(exch_type)) {
 		log_print("message_recv: invalid DOI exchange type %d",
 		    exch_type);
@@ -1726,9 +1723,14 @@ message_send_delete(struct sa *sa)
 	args.u.d.nspis = 1;
 	for (proto = TAILQ_FIRST(&sa->protos); proto;
 	    proto = TAILQ_NEXT(proto, link)) {
+		if (proto->proto == ISAKMP_PROTO_ISAKMP) {
+			args.spi_sz = ISAKMP_HDR_COOKIES_LEN;
+			args.u.d.spis = sa->cookies;
+		} else {
+			args.spi_sz = proto->spi_sz[1];
+			args.u.d.spis = proto->spi[1];
+		}
 		args.proto = proto->proto;
-		args.spi_sz = proto->spi_sz[1];
-		args.u.d.spis = proto->spi[1];
 		exchange_establish_p2(isakmp_sa, ISAKMP_EXCH_INFO, 0, &args,
 		    0, 0);
 	}
@@ -2495,7 +2497,7 @@ message_init(void)
 {
 	u_int8_t	i;
 
-	memset(&payload_map, 0, sizeof payload_map);
+	bzero(&payload_map, sizeof payload_map);
 
 	payload_index_max = sizeof payload_revmap / sizeof payload_revmap[0];
 	for (i = 0; i < payload_index_max; i++) {

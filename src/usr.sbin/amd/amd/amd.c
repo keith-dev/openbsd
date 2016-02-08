@@ -32,7 +32,7 @@
  * SUCH DAMAGE.
  *
  *	from: @(#)amd.c	8.1 (Berkeley) 6/6/93
- *	$Id: amd.c,v 1.12 2003/06/02 23:36:51 millert Exp $
+ *	$Id: amd.c,v 1.14 2004/10/21 20:57:08 millert Exp $
  */
 
 #ifndef lint

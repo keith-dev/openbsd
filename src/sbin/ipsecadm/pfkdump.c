@@ -1,4 +1,4 @@
-/*	$OpenBSD: pfkdump.c,v 1.13 2004/08/10 16:03:00 ho Exp $	*/
+/*	$OpenBSD: pfkdump.c,v 1.15 2004/11/26 18:02:22 markus Exp $	*/
 
 /*
  * Copyright (c) 2003 Markus Friedl.  All rights reserved.
@@ -23,10 +23,11 @@
  * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
-#include <sys/types.h>
+#include <sys/param.h>
 #include <sys/socket.h>
 #include <sys/errno.h>
 #include <sys/time.h>
+#include <sys/sysctl.h>
 #include <net/pfkeyv2.h>
 #include <netinet/ip_ipsp.h>
 #include <netdb.h>
@@ -283,9 +284,9 @@ print_msg(struct sadb_msg *msg, int promisc)
 		printf("\terrno %u: %s\n", msg->sadb_msg_errno,
 		    strerror(msg->sadb_msg_errno));
 	for (ext = (struct sadb_ext *)(msg + 1);
-	    ext->sadb_ext_len > 0 &&
 	    (u_int8_t *)ext - (u_int8_t *)msg <
-	    msg->sadb_msg_len * PFKEY2_CHUNK;
+	    msg->sadb_msg_len * PFKEY2_CHUNK &&
+	    ext->sadb_ext_len > 0;
 	    ext = (struct sadb_ext *)((u_int8_t *)ext +
 	    ext->sadb_ext_len * PFKEY2_CHUNK))
 		print_ext(ext, msg);
@@ -635,5 +636,35 @@ ipsecadm_monitor(void)
 void
 ipsecadm_show(u_int8_t satype)
 {
-	do_pfkey(0, satype);
+	struct sadb_msg *msg;
+	int mib[5];
+	size_t need;
+	char *buf, *lim, *next;
+
+	mib[0] = CTL_NET;
+	mib[1] = PF_KEY;
+	mib[2] = PF_KEY_V2;
+	mib[3] = NET_KEY_SADB_DUMP;
+	mib[4] = satype;
+
+	/*
+	 * Dump the SADB using sysctl(3), but fall back to the pfkey
+	 * socket if sysctl fails.
+	 */
+	if (sysctl(mib, 5, NULL, &need, NULL, 0) == -1)
+		do_pfkey(0, satype);
+	if (need == 0)
+		return;
+	if ((buf = malloc(need)) == NULL)
+		err(1, "malloc");
+	if (sysctl(mib, 5, buf, &need, NULL, 0) == -1)
+		err(1, "sysctl");
+	lim = buf + need;
+	for (next = buf; next < lim;
+	    next += msg->sadb_msg_len * PFKEY2_CHUNK) {
+		msg = (struct sadb_msg *)next;
+		if (msg->sadb_msg_len == 0)
+			break;
+		print_msg(msg, 0);
+	}
 }

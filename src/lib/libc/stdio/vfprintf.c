@@ -31,7 +31,7 @@
  */
 
 #if defined(LIBC_SCCS) && !defined(lint)
-static char *rcsid = "$OpenBSD: vfprintf.c,v 1.20 2003/06/02 20:18:37 millert Exp $";
+static char *rcsid = "$OpenBSD: vfprintf.c,v 1.28 2004/09/28 18:12:44 otto Exp $";
 #endif /* LIBC_SCCS and not lint */
 
 /*
@@ -43,6 +43,7 @@ static char *rcsid = "$OpenBSD: vfprintf.c,v 1.20 2003/06/02 20:18:37 millert Ex
 #include <sys/types.h>
 #include <sys/mman.h>
 
+#include <stddef.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -61,11 +62,9 @@ static int __grow_type_table(unsigned char **typetable, int *tablesize);
  * then reset it so that it can be reused.
  */
 static int
-__sprint(fp, uio)
-	FILE *fp;
-	register struct __suio *uio;
+__sprint(FILE *fp, struct __suio *uio)
 {
-	register int err;
+	int err;
 
 	if (uio->uio_resid == 0) {
 		uio->uio_iovcnt = 0;
@@ -83,10 +82,7 @@ __sprint(fp, uio)
  * worries about ungetc buffers and so forth.
  */
 static int
-__sbprintf(fp, fmt, ap)
-	register FILE *fp;
-	const char *fmt;
-	va_list ap;
+__sbprintf(FILE *fp, const char *fmt, va_list ap)
 {
 	int ret;
 	FILE fake;
@@ -150,18 +146,18 @@ static int exponent(char *, int, int);
 #define	SHORTINT	0x040		/* short integer */
 #define	ZEROPAD		0x080		/* zero (as opposed to blank) pad */
 #define FPT		0x100		/* Floating point number */
+#define PTRINT		0x200		/* (unsigned) ptrdiff_t */
+#define SIZEINT		0x400		/* (signed) size_t */
+
 int
-vfprintf(fp, fmt0, ap)
-	FILE *fp;
-	const char *fmt0;
-	_BSD_VA_LIST_ ap;
+vfprintf(FILE *fp, const char *fmt0, _BSD_VA_LIST_ ap)
 {
-	register char *fmt;	/* format string */
-	register int ch;	/* character from fmt */
-	register int n, m, n2;	/* handy integers (short term usage) */
-	register char *cp;	/* handy char pointer (short term usage) */
-	register struct __siov *iovp;/* for PRINT macro */
-	register int flags;	/* flags as above */
+	char *fmt;	/* format string */
+	int ch;	/* character from fmt */
+	int n, m, n2;	/* handy integers (short term usage) */
+	char *cp;	/* handy char pointer (short term usage) */
+	struct __siov *iovp;/* for PRINT macro */
+	int flags;	/* flags as above */
 	int ret;		/* return value accumulator */
 	int width;		/* width from format (%8d), or 0 */
 	int prec;		/* precision from format (%.3d), or -1 */
@@ -247,11 +243,15 @@ vfprintf(fp, fmt0, ap)
 #define	SARG() \
 	(flags&QUADINT ? va_arg(ap, quad_t) : \
 	    flags&LONGINT ? GETARG(long) : \
+	    flags&PTRINT ? GETARG(ptrdiff_t) : \
+	    flags&SIZEINT ? GETARG(ssize_t) : \
 	    flags&SHORTINT ? (long)(short)GETARG(int) : \
 	    (long)GETARG(int))
 #define	UARG() \
 	(flags&QUADINT ? va_arg(ap, u_quad_t) : \
 	    flags&LONGINT ? GETARG(u_long) : \
+	    flags&PTRINT ? GETARG(ptrdiff_t) : /* XXX */ \
+	    flags&SIZEINT ? GETARG(size_t) : \
 	    flags&SHORTINT ? (u_long)(u_short)GETARG(int) : \
 	    (u_long)GETARG(u_int))
 
@@ -434,6 +434,12 @@ reswitch:	switch (ch) {
 		case 'q':
 			flags |= QUADINT;
 			goto rflag;
+		case 't':
+			flags |= PTRINT;
+			goto rflag;
+		case 'z':
+			flags |= SIZEINT;
+			goto rflag;
 		case 'c':
 			*(cp = buf) = GETARG(int);
 			size = 1;
@@ -524,6 +530,10 @@ reswitch:	switch (ch) {
 				*GETARG(long *) = ret;
 			else if (flags & SHORTINT)
 				*GETARG(short *) = ret;
+			else if (flags & PTRINT)
+				*GETARG(ptrdiff_t *) = ret;
+			else if (flags & SIZEINT)
+				*GETARG(ssize_t *) = ret;
 			else
 				*GETARG(int *) = ret;
 			continue;	/* no output */
@@ -784,25 +794,29 @@ error:
 #define T_LONG_DOUBLE	14
 #define TP_CHAR		15
 #define TP_VOID		16
+#define T_PTRINT	17
+#define TP_PTRINT	18
+#define T_SIZEINT	19
+#define T_SSIZEINT	20
+#define TP_SSIZEINT	21
 
 /*
  * Find all arguments when a positional parameter is encountered.  Returns a
  * table, indexed by argument number, of pointers to each arguments.  The
  * initial argument table should be an array of STATIC_ARG_TBL_SIZE entries.
- * It will be replaces with a malloc-ed on if it overflows.
+ * It will be replaced with a mmap-ed one if it overflows (malloc cannot be
+ * used since we are attempting to make snprintf thread safe, and alloca is
+ * problematic since we have nested functions..)
  */
 static void
-__find_arguments(fmt0, ap, argtable, argtablesiz)
-	const char *fmt0;
-	va_list ap;
-	va_list **argtable;
-	size_t *argtablesiz;
+__find_arguments(const char *fmt0, va_list ap, va_list **argtable,
+    size_t *argtablesiz)
 {
-	register char *fmt;	/* format string */
-	register int ch;	/* character from fmt */
-	register int n, n2;	/* handy integer (short term usage) */
-	register char *cp;	/* handy char pointer (short term usage) */
-	register int flags;	/* flags as above */
+	char *fmt;	/* format string */
+	int ch;	/* character from fmt */
+	int n, n2;	/* handy integer (short term usage) */
+	char *cp;	/* handy char pointer (short term usage) */
+	int flags;	/* flags as above */
 	unsigned char *typetable; /* table of types */
 	unsigned char stattypetable[STATIC_ARG_TBL_SIZE];
 	int tablesize;		/* current size of type table */
@@ -815,8 +829,8 @@ __find_arguments(fmt0, ap, argtable, argtablesiz)
 #define ADDTYPE(type) \
 	((nextarg >= tablesize) ? \
 		__grow_type_table(&typetable, &tablesize) : 0, \
-	typetable[nextarg++] = type, \
-	(nextarg > tablemax) ? tablemax = nextarg : 0)
+	(nextarg > tablemax) ? tablemax = nextarg : 0, \
+	typetable[nextarg++] = type)
 
 #define	ADDSARG() \
 	((flags&LONGINT) ? ADDTYPE(T_LONG) : \
@@ -907,10 +921,21 @@ reswitch:	switch (ch) {
 			flags |= SHORTINT;
 			goto rflag;
 		case 'l':
-			flags |= LONGINT;
+			if (*fmt == 'l') {
+				fmt++;
+				flags |= QUADINT;
+			} else {
+				flags |= LONGINT;
+			}
 			goto rflag;
 		case 'q':
 			flags |= QUADINT;
+			goto rflag;
+		case 't':
+			flags |= PTRINT;
+			goto rflag;
+		case 'z':
+			flags |= SIZEINT;
 			goto rflag;
 		case 'c':
 			ADDTYPE(T_INT);
@@ -920,11 +945,14 @@ reswitch:	switch (ch) {
 			/*FALLTHROUGH*/
 		case 'd':
 		case 'i':
-			if (flags & QUADINT) {
+			if (flags & QUADINT)
 				ADDTYPE(T_QUAD);
-			} else {
+			else if (flags & PTRINT)
+				ADDTYPE(T_PTRINT);
+			else if (flags & SIZEINT)
+				ADDTYPE(T_SSIZEINT);
+			else
 				ADDSARG();
-			}
 			break;
 #ifdef FLOATING_POINT
 		case 'e':
@@ -945,6 +973,10 @@ reswitch:	switch (ch) {
 				ADDTYPE(TP_LONG);
 			else if (flags & SHORTINT)
 				ADDTYPE(TP_SHORT);
+			else if (flags & PTRINT)
+				ADDTYPE(TP_PTRINT);
+			else if (flags & SIZEINT)
+				ADDTYPE(TP_SSIZEINT);
 			else
 				ADDTYPE(TP_INT);
 			continue;	/* no output */
@@ -976,6 +1008,10 @@ reswitch:	switch (ch) {
 		case 'x':
 			if (flags & QUADINT)
 				ADDTYPE(T_U_QUAD);
+			else if (flags & PTRINT)
+				ADDTYPE(T_PTRINT);
+			else if (flags & SIZEINT)
+				ADDTYPE(T_SIZEINT);
 			else
 				ADDUARG();
 			break;
@@ -1053,6 +1089,21 @@ done:
 		case TP_VOID:
 			(void) va_arg(ap, void *);
 			break;
+		case T_PTRINT:
+			(void) va_arg(ap, ptrdiff_t);
+			break;
+		case TP_PTRINT:
+			(void) va_arg(ap, ptrdiff_t *);
+			break;
+		case T_SIZEINT:
+			(void) va_arg(ap, size_t);
+			break;
+		case T_SSIZEINT:
+			(void) va_arg(ap, ssize_t);
+			break;
+		case TP_SSIZEINT:
+			(void) va_arg(ap, ssize_t *);
+			break;
 		}
 	}
 
@@ -1066,9 +1117,7 @@ done:
  * Increase the size of the type table.
  */
 static int
-__grow_type_table(typetable, tablesize)
-	unsigned char **typetable;
-	int *tablesize;
+__grow_type_table(unsigned char **typetable, int *tablesize)
 {
 	unsigned char *oldtable = *typetable;
 	int newsize = *tablesize * 2;
@@ -1080,7 +1129,7 @@ __grow_type_table(typetable, tablesize)
 		/* XXX unchecked */
 		bcopy(oldtable, *typetable, *tablesize);
 	} else {
-		char *new = (unsigned char *)mmap(NULL,
+		unsigned char *new = (unsigned char *)mmap(NULL,
 		    sizeof (unsigned char) * newsize, PROT_WRITE|PROT_READ,
 		    MAP_ANON|MAP_PRIVATE, -1, 0);
 		memmove(new, *typetable, *tablesize);
@@ -1100,10 +1149,8 @@ __grow_type_table(typetable, tablesize)
 extern char *__dtoa(double, int, int, int *, int *, char **);
 
 static char *
-cvt(value, ndigits, flags, sign, decpt, ch, length)
-	double value;
-	int ndigits, flags, *decpt, ch, *length;
-	char *sign;
+cvt(double value, int ndigits, int flags, char *sign, int *decpt, int ch, 
+    int *length)
 {
 	int mode, dsgn;
 	char *digits, *bp, *rve;
@@ -1144,11 +1191,9 @@ cvt(value, ndigits, flags, sign, decpt, ch, length)
 }
 
 static int
-exponent(p0, exp, fmtch)
-	char *p0;
-	int exp, fmtch;
+exponent(char *p0, int exp, int fmtch)
 {
-	register char *p, *t;
+	char *p, *t;
 	char expbuf[MAXEXP];
 
 	p = p0;

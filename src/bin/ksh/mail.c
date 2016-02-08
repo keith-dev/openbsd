@@ -1,4 +1,4 @@
-/*	$OpenBSD: mail.c,v 1.9 1999/06/15 01:18:35 millert Exp $	*/
+/*	$OpenBSD: mail.c,v 1.14 2004/12/22 17:14:34 millert Exp $	*/
 
 /*
  * Mailbox checking code by Robert J. Gibson, adapted for PD ksh by
@@ -7,10 +7,9 @@
 
 #include "config.h"
 
-#ifdef KSH
 #include "sh.h"
-#include "ksh_stat.h"
-#include "ksh_time.h"
+#include <sys/stat.h>
+#include <time.h>
 
 #define MBMESSAGE	"you have mail in $_"
 
@@ -32,14 +31,14 @@ static mbox_t	mbox;
 static time_t	mlastchkd;	/* when mail was last checked */
 static time_t	mailcheck_interval;
 
-static void     munset      ARGS((mbox_t *mlist)); /* free mlist and mval */
-static mbox_t * mballoc     ARGS((char *p, char *m)); /* allocate a new mbox */
-static void     mprintit    ARGS((mbox_t *mbp));
+static void     munset(mbox_t *); /* free mlist and mval */
+static mbox_t * mballoc(char *, char *); /* allocate a new mbox */
+static void     mprintit(mbox_t *);
 
 void
-mcheck()
+mcheck(void)
 {
-	register mbox_t	*mbp;
+	mbox_t		*mbp;
 	time_t		 now;
 	struct tbl	*vp;
 	struct stat	 stbuf;
@@ -81,15 +80,13 @@ mcheck()
 }
 
 void
-mcset(interval)
-	long interval;
+mcset(long int interval)
 {
 	mailcheck_interval = interval;
 }
 
 void
-mbset(p)
-	register char	*p;
+mbset(char *p)
 {
 	struct stat	stbuf;
 
@@ -107,11 +104,10 @@ mbset(p)
 }
 
 void
-mpset(mptoparse)
-	register char	*mptoparse;
+mpset(char *mptoparse)
 {
-	register mbox_t	*mbp;
-	register char	*mpath, *mmsg, *mval;
+	mbox_t	*mbp;
+	char	*mpath, *mmsg, *mval;
 	char *p;
 
 	munset( mplist );
@@ -119,7 +115,7 @@ mpset(mptoparse)
 	mval = str_save(mptoparse, APERM);
 	while (mval) {
 		mpath = mval;
-		if ((mval = strchr(mval, PATHSEP)) != NULL) {
+		if ((mval = strchr(mval, ':')) != NULL) {
 			*mval = '\0', mval++;
 		}
 		/* POSIX/bourne-shell say file%message */
@@ -147,10 +143,9 @@ mpset(mptoparse)
 }
 
 static void
-munset(mlist)
-register mbox_t	*mlist;
+munset(mbox_t *mlist)
 {
-	register mbox_t	*mbp;
+	mbox_t	*mbp;
 
 	while (mlist != NULL) {
 		mbp = mlist;
@@ -162,12 +157,10 @@ register mbox_t	*mlist;
 }
 
 static mbox_t *
-mballoc(p, m)
-	char	*p;
-	char	*m;
+mballoc(char *p, char *m)
 {
 	struct stat	stbuf;
-	register mbox_t	*mbp;
+	mbox_t	*mbp;
 
 	mbp = (mbox_t *)alloc(sizeof(mbox_t), APERM);
 	mbp->mb_next = NULL;
@@ -181,8 +174,7 @@ mballoc(p, m)
 }
 
 static void
-mprintit( mbp )
-mbox_t	*mbp;
+mprintit(mbox_t *mbp)
 {
 	struct tbl	*vp;
 
@@ -196,10 +188,9 @@ mbox_t	*mbp;
 	if (!Flag(FSH))
 #endif
 		/* Ignore setstr errors here (arbitrary) */
-		setstr((vp = local("_", FALSE)), mbp->mb_path, KSH_RETURN_ERROR);
+		setstr((vp = local("_", false)), mbp->mb_path, KSH_RETURN_ERROR);
 
 	shellf("%s\n", substitute(mbp->mb_msg ? mbp->mb_msg : MBMESSAGE, 0));
 
 	unset(vp, 0);
 }
-#endif /* KSH */

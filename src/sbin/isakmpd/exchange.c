@@ -1,4 +1,4 @@
-/* $OpenBSD: exchange.c,v 1.103 2004/08/23 11:53:24 ho Exp $	 */
+/* $OpenBSD: exchange.c,v 1.111 2005/03/10 17:19:08 cloder Exp $	 */
 /* $EOM: exchange.c,v 1.143 2000/12/04 00:02:25 angelos Exp $	 */
 
 /*
@@ -73,7 +73,9 @@
  */
 #define MAX_BUCKET_BITS 16
 
+#ifdef USE_DEBUG
 static void     exchange_dump(char *, struct exchange *);
+#endif
 static void     exchange_free_aux(void *);
 #if 0
 static void     exchange_resize(void);
@@ -188,8 +190,11 @@ exchange_script(struct exchange *exchange)
 		return script_transaction;
 #endif
 	default:
-		if (exchange->type >= ISAKMP_EXCH_DOI_MIN &&
-		    exchange->type <= ISAKMP_EXCH_DOI_MAX)
+		if (exchange->type >= ISAKMP_EXCH_DOI_MIN 
+#if 0 /* always true; silence GCC3 warning */
+		    && exchange->type <= ISAKMP_EXCH_DOI_MAX
+#endif
+		    )
 			return exchange->doi->exchange_script(exchange->type);
 	}
 	return 0;
@@ -448,7 +453,7 @@ exchange_resize(void)
 
 /* Lookup a phase 1 exchange out of just the initiator cookie.  */
 struct exchange *
-exchange_lookup_from_icookie(u_int8_t * cookie)
+exchange_lookup_from_icookie(u_int8_t *cookie)
 {
 	struct exchange *exchange;
 	int	i;
@@ -624,8 +629,8 @@ exchange_create(int phase, int initiator, int doi, int type)
 	exchange->phase = phase;
 	exchange->step = 0;
 	exchange->initiator = initiator;
-	memset(exchange->cookies, 0, ISAKMP_HDR_COOKIES_LEN);
-	memset(exchange->message_id, 0, ISAKMP_HDR_MESSAGE_ID_LEN);
+	bzero(exchange->cookies, ISAKMP_HDR_COOKIES_LEN);
+	bzero(exchange->message_id, ISAKMP_HDR_MESSAGE_ID_LEN);
 	exchange->doi = doi_lookup(doi);
 	exchange->type = type;
 	exchange->policy_id = -1;
@@ -777,7 +782,7 @@ exchange_establish_p1(struct transport *t, u_int8_t type, u_int32_t doi,
 			}
 			type = constant_value(isakmp_exch_cst, str);
 			if (!type) {
-				log_print("exchange_setup_p1: "
+				log_print("exchange_establish_p1: "
 				    "unknown exchange type %s", str);
 				return;
 			}
@@ -1139,9 +1144,9 @@ exchange_setup_p2(struct message *msg, u_int8_t doi)
 	    exchange->cookies + ISAKMP_HDR_ICOOKIE_LEN);
 	GET_ISAKMP_HDR_MESSAGE_ID(buf, exchange->message_id);
 #if defined (USE_NAT_TRAVERSAL)
-	if (msg->isakmp_sa->flags & SA_FLAG_NAT_T_ENABLE)
+	if (msg->isakmp_sa && (msg->isakmp_sa->flags & SA_FLAG_NAT_T_ENABLE))
 		exchange->flags |= EXCHANGE_FLAG_NAT_T_ENABLE;
-	if (msg->isakmp_sa->flags & SA_FLAG_NAT_T_KEEPALIVE)
+	if (msg->isakmp_sa && (msg->isakmp_sa->flags & SA_FLAG_NAT_T_KEEPALIVE))
 		exchange->flags |= EXCHANGE_FLAG_NAT_T_KEEPALIVE;
 #endif
 	exchange_enter(exchange);
@@ -1188,11 +1193,13 @@ exchange_dump_real(char *header, struct exchange *exchange, int class,
 	    decode_32(exchange->message_id), buf));
 }
 
+#ifdef USE_DEBUG
 static void
 exchange_dump(char *header, struct exchange *exchange)
 {
 	exchange_dump_real(header, exchange, LOG_EXCHANGE, 10);
 }
+#endif
 
 void
 exchange_report(void)
@@ -1530,6 +1537,18 @@ exchange_nonce(struct exchange *exchange, int peer, size_t nonce_sz,
 	int		initiator = exchange->initiator ^ peer;
 	char            header[32];
 
+	if (nonce_sz < 8 || nonce_sz > 256) {
+		/*
+		 * RFC2409, ch 5: The length of nonce payload MUST be 
+		 * between 8 and 256 bytes inclusive.
+		 * XXX I'm assuming the generic payload header is not included.
+		 */
+		LOG_DBG((LOG_EXCHANGE, 20,
+		    "exchange_nonce: invalid nonce length %lu",
+		    (unsigned long)nonce_sz));
+		return -1;
+	}
+
 	nonce = initiator ? &exchange->nonce_i : &exchange->nonce_r;
 	nonce_len =
 	    initiator ? &exchange->nonce_i_len : &exchange->nonce_r_len;
@@ -1757,6 +1776,7 @@ exchange_establish(char *name, void (*finalize)(struct exchange *, void *,
 				log_print("exchange_establish: "
 				    "[%s]:ISAKMP-peer's (%s) phase is not 1",
 				    name, peer);
+				free(name);
 				return;
 			}
 			/*
@@ -1778,8 +1798,12 @@ exchange_establish(char *name, void (*finalize)(struct exchange *, void *,
 			if (exchange)
 				exchange_add_finalization(exchange, finalize,
 				    arg);
-			else
-				finalize(0, arg, 1);	/* Indicate failure */
+			else {
+				/* Indicate failure */
+				if (finalize)
+					finalize(0, arg, 1);
+				free(name);
+			}
 			return;
 		} else
 			exchange_establish_p2(isakmp_sa, 0, name, 0, finalize,

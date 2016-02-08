@@ -1,5 +1,5 @@
 vers(__file__,
-	{-$OpenBSD: MAKEDEV.md,v 1.4 2004/08/06 23:16:31 mickey Exp $-},
+	{-$OpenBSD: MAKEDEV.md,v 1.9 2005/01/02 20:07:57 kettenis Exp $-},
 etc.MACHINE)dnl
 dnl
 dnl Copyright (c) 2001 Todd T. Fries <todd@OpenBSD.org>
@@ -27,25 +27,25 @@ dnl
 dnl
 _TITLE(make)
 _DEV(all)
-_DEV(std)
-_DEV(fdesc, 7)
-_DEV(local)
 _DEV(ramd)
-_TITLE(tap)
-_DEV(st, 10, 10)
+_DEV(std)
+_DEV(local)
 _TITLE(dis)
-_DEV(wd, 18, 4)
-_DEV(sd, 9, 0)
-_DEV(cd, 8, 3)
-_DEV(ch, 36)
-_DEV(vnd, 11, 2)
-_DEV(rd, 22, 8)
 _DEV(ccd, 23, 6)
+_DEV(cd, 8, 3)
+_DEV(rd, 22, 8)
+_DEV(sd, 9, 0)
+_DEV(vnd, 11, 2)
+_DEV(wd, 18, 4)
+_TITLE(tap)
+_DEV(ch, 36)
+_DEV(st, 10, 10)
 _TITLE(term)
 _DEV(com, 17)
 _TITLE(pty)
-_DEV(tty, 4)
+_DEV(ptm, 52)
 _DEV(pty, 5)
+_DEV(tty, 4)
 _TITLE(cons)
 _DEV(wscons)
 _DEV(wsdisp, 25)
@@ -54,26 +54,33 @@ _DEV(wsmux, 28)
 _TITLE(point)
 _DEV(wsmouse, 27)
 _TITLE(spec)
+_DEV(au, 44)
 _DEV(bpf, 12)
-_DEV(tun, 40)
-_DEV(rnd, 33)
-_DEV(uk, 32)
-_DEV(ss, 34)
+_DEV(cry, 47)
+_DEV(fdesc, 7)
+dnl _DEV(lkm)
+_DEV(pci, 29)
 _DEV(pf, 31)
+_DEV(rnd, 33)
+_DEV(ss, 34)
+_DEV(systrace, 50)
+_DEV(tun, 13)
+_DEV(uk, 32)
+_DEV(xfs, 51)
 dnl
 divert(__mddivert)dnl
 dnl
 _std(2, 3, 35, 1, 6)
 	;;
 dnl
-dnl *** sgimips specific targets
+dnl *** sgi specific targets
 dnl
 target(all, ses, 0)dnl
 target(all, ch, 0)dnl
 target(all, ss, 0, 1)dnl
 target(all, xfs, 0)dnl
-twrget(all, flo, fd, 0, 0B, 0C, 0D, 0E, 0F, 0G, 0H)dnl
-twrget(all, flo, fd, 1, 1B, 1C, 1D, 1E, 1F, 1G, 1H)dnl
+dnl twrget(all, flo, fd, 0, 0B, 0C, 0D, 0E, 0F, 0G, 0H)dnl
+dnl twrget(all, flo, fd, 1, 1B, 1C, 1D, 1E, 1F, 1G, 1H)dnl
 target(all, pty, 0, 1, 2)dnl
 target(all, bpf, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9)dnl
 target(all, tun, 0, 1, 2, 3)dnl

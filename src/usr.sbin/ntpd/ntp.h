@@ -1,4 +1,4 @@
-/*	$OpenBSD: ntp.h,v 1.8 2004/07/10 22:04:22 alexander Exp $ */
+/*	$OpenBSD: ntp.h,v 1.11 2004/12/13 12:22:52 dtucker Exp $ */
 
 /*
  * Copyright (c) 2004 Henning Brauer <henning@openbsd.org>
@@ -40,13 +40,13 @@
  *   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 */
 struct l_fixedpt {
-	u_int32_t int_part;
-	u_int32_t fraction;
+	u_int32_t int_partl;
+	u_int32_t fractionl;
 };
 
 struct s_fixedpt {
-	u_int16_t int_part;
-	u_int16_t fraction;
+	u_int16_t int_parts;
+	u_int16_t fractions;
 };
 
 /* RFC Section 4
@@ -98,7 +98,7 @@ struct ntp_msg {
 	u_int8_t stratum;	/* Stratum level */
 	u_int8_t ppoll;		/* poll value */
 	int8_t precision;
-	struct s_fixedpt distance;
+	struct s_fixedpt rootdelay;
 	struct s_fixedpt dispersion;
 	u_int32_t refid;
 	struct l_fixedpt reftime;
@@ -145,5 +145,6 @@ struct ntp_query {
 #define	JAN_1970	2208988800UL	/* 1970 - 1900 in seconds */
 
 #define	NTP_VERSION	4
+#define	NTP_MAXSTRATUM	15
 
 #endif	/* _NTP_H_ */

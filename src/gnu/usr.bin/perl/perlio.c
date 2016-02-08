@@ -9,6 +9,12 @@
  * over passes, and through long dales, and across many streams.
  */
 
+/* This file contains the functions needed to implement PerlIO, which
+ * is Perl's private replacement for the C stdio library. This is used
+ * by default unless you compile with -Uuseperlio or run with
+ * PERLIO=:stdio (but don't do this unless you know what you're doing)
+ */
+
 /*
  * If we have ActivePerl-like PERL_IMPLICIT_SYS then we need a dTHX to get
  * at the dispatch tables, even when we do not need it for other reasons.
@@ -448,7 +454,7 @@ PerlIO_debug(const char *fmt, ...)
     va_list ap;
     dSYS;
     va_start(ap, fmt);
-    if (!dbg) {
+    if (!dbg && !PL_tainting && PL_uid == PL_euid && PL_gid == PL_egid) {
 	char *s = PerlEnv_getenv("PERLIO_DEBUG");
 	if (s && *s)
 	    dbg = PerlLIO_open3(s, O_WRONLY | O_CREAT | O_APPEND, 0666);
@@ -465,7 +471,7 @@ PerlIO_debug(const char *fmt, ...)
 	s = CopFILE(PL_curcop);
 	if (!s)
 	    s = "(none)";
-	sprintf(buffer, "%s:%" IVdf " ", s, (IV) CopLINE(PL_curcop));
+	sprintf(buffer, "%.40s:%" IVdf " ", s, (IV) CopLINE(PL_curcop));
 	len = strlen(buffer);
 	vsprintf(buffer+len, fmt, ap);
 	PerlLIO_write(dbg, buffer, strlen(buffer));
@@ -2870,6 +2876,13 @@ PerlIOStdio_invalidate_fileno(pTHX_ FILE *f)
     return 1;
 #  elif defined(__FreeBSD__)
     /* There may be a better way on FreeBSD:
+        - we could insert a dummy func in the _close function entry
+	f->_close = (int (*)(void *)) dummy_close;
+     */
+    f->_file = -1;
+    return 1;
+#  elif defined(__OpenBSD__)
+    /* There may be a better way on OpenBSD:
         - we could insert a dummy func in the _close function entry
 	f->_close = (int (*)(void *)) dummy_close;
      */

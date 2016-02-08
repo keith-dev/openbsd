@@ -25,7 +25,7 @@ changecom(,)dnl
 .\" OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
 .\" SUCH DAMAGE.
 .\"
-.\" $OpenBSD: ppp.8.m4,v 1.19 2004/07/30 22:25:37 jmc Exp $
+.\" $OpenBSD: ppp.8.m4,v 1.22 2005/03/10 09:35:10 jmc Exp $
 .\"
 .Dd September 20, 1995
 .Dt PPP 8
@@ -772,10 +772,33 @@ for compatibility with older versions of
 .Nm ppp .
 .It
 A label name starts in the first column and is followed by
-a colon
-.Pq Sq \&: .
+a
+.Sq \&:
+character.
 .It
 A command line must contain a space or tab in the first column.
+.It
+A string starting with a
+.Sq $
+character is substituted with the value of the environment variable by
+the same name.
+Likewise, a string starting with a
+.Sq ~
+character is substituted with the full path to the home directory of
+the user account by the same name, and the
+.Sq ~
+character by itself is substituted with the full path to the home directory
+of the current user.
+To include a literal
+.Sq $
+or
+.Sq ~
+character in a command or argument, escape it with a
+.Sq \e
+character.
+For example:
+.Pp
+.Dl set password pa\e$ss\e~word
 .El
 .Pp
 The
@@ -3287,7 +3310,7 @@ of the currently existing line modes.
 The given
 .Ar command
 is executed in the background with the following words replaced:
-.Bl -tag -width COMPILATIONDATE
+.Bl -tag -width IPV6PACKETSOUT
 .It Li AUTHNAME
 This is replaced with the local
 .Ar authname
@@ -3295,10 +3318,6 @@ value.
 See the
 .Ic set authname
 command below.
-.It Li COMPILATIONDATE
-This is replaced with the date on which
-.Nm
-was compiled.
 .It Li DNS0 & DNS1
 These are replaced with the primary and secondary nameserver IP numbers.
 If nameservers are negotiated by IPCP, the values of these macros will change.
@@ -4969,7 +4988,9 @@ in any given negotiation session before giving up and closing that layer.
 .Ar value Ns ...
 .Xc
 This command allows the adjustment of the current log level.
-Refer to the Logging Facility section for further details.
+Refer to the
+.Sx LOGGING FACILITY
+section above for further details.
 .It Ic set login Ar chat-script
 This
 .Ar chat-script

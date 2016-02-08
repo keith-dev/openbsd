@@ -1,4 +1,4 @@
-.\"	$OpenBSD: pcmcia.4,v 1.36 2004/08/15 22:52:40 jmc Exp $
+.\"	$OpenBSD: pcmcia.4,v 1.40 2005/03/18 02:23:38 jsg Exp $
 .\"	$NetBSD: pcmcia.4,v 1.4 1998/06/07 09:10:30 enami Exp $
 .\"
 .\" Copyright (c) 1997 The NetBSD Foundation, Inc.
@@ -44,23 +44,23 @@
 .Cd "pcic1   at isa? port 0x3e2 iomem 0xe0000 iosiz 0x4000"
 .Cd "pcic2   at isa? port 0x3e4 iomem 0xe0000 iosiz 0x4000"
 .Cd "pcic*   at isapnp?"
-.Cd "pcic*   at pci? dev? function ?"
-.Cd "pcmcia* at pcic? controller ? socket ?"
+.Cd "pcic*   at pci? dev?"
+.Cd "pcmcia* at pcic?"
 .Pp
 .Cd "# i386"
 .Cd "tcic0   at isa? port 0x240 iomem 0xd0000 iosiz 0x10000"
-.Cd "pcmcia* at tcic? controller ? socket ?"
+.Cd "pcmcia* at tcic?"
 .Pp
 .Cd "# sparc"
-.Cd "tslot*  at sbus? slot ? offset ?"
-.Cd "pcmcia* at tslot? socket ?"
+.Cd "tslot*  at sbus?"
+.Cd "pcmcia* at tslot?"
 .Pp
 .Cd "# sparc/sparc64"
-.Cd "stp*    at sbus? slot ? offset ?"
-.Cd "pcmcia* at stp? socket ?"
+.Cd "stp*    at sbus?"
+.Cd "pcmcia* at stp?"
 .Pp
 .Cd "# all architectures"
-.Cd "cbb*      at pci? dev? function ?"
+.Cd "cbb*      at pci?"
 .Cd "cardslot* at cbb? flags 0x0000"
 .Cd "pcmcia*   at cardslot?"
 .Sh DESCRIPTION
@@ -85,9 +85,9 @@ GemPlus GPR400 smartcard reader.
 .Ss Network interfaces
 .Bl -tag -width 12n -offset ind -compact
 .It Xr an 4
-Aironet Communications 4500/4800 IEEE 802.11DS wireless controller.
+Aironet Communications 4500/4800 IEEE 802.11b wireless controllers.
 .It Xr awi 4
-BayStack 650 wireless 802.11FH wireless controller.
+BayStack 650 wireless 802.11FH wireless controllers.
 .It Xr cnw 4
 Xircom Creditcard Netwave cards.
 .It Xr ep 4
@@ -95,13 +95,13 @@ Xircom Creditcard Netwave cards.
 .It Xr ne 4
 NE2000 compatible cards.
 .It Xr ray 4
-Raytheon Raylink / WebGear Aviator IEEE 802.11FH 2Mbps wireless controller.
+Raytheon Raylink / WebGear Aviator IEEE 802.11FH 2Mbps wireless controllers.
 .It Xr rln 4
 Proxim RangeLAN2 PC-Card.
 .It Xr sm 4
 Megahertz Ethernet cards.
 .It Xr wi 4
-WaveLAN/IEEE, PRISM-II and Spectrum24 IEEE 802.11DS cards.
+WaveLAN/IEEE, PRISM-II and Spectrum24 IEEE 802.11b cards.
 .It Xr xe 4
 Xircom 16bit Ethernet cards.
 .El
@@ -114,7 +114,7 @@ Adaptec APA-14[56]0 and NewMedia BusToaster SCSI controller cards.
 .Bl -tag -width 12n -offset ind -compact
 .It Xr wdc 4
 Devices which implement an ATA/IDE interface, such as mini disk drives,
-CDROMs.
+CD-ROMs.
 This includes Compact Flash cards which emulate a disk drive.
 .El
 .Pp

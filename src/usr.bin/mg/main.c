@@ -1,4 +1,4 @@
-/*	$OpenBSD: main.c,v 1.33 2004/07/19 12:14:08 vincent Exp $	*/
+/*	$OpenBSD: main.c,v 1.37 2005/03/12 10:36:13 jmc Exp $	*/
 
 /*
  *	Mainline.
@@ -17,7 +17,7 @@
 int		 thisflag;			/* flags, this command	*/
 int		 lastflag;			/* flags, last command	*/
 int		 curgoal;			/* goal column		*/
-int		 startrow;			/* row to start         */
+int		 startrow;			/* row to start		*/
 BUFFER		*curbp;				/* current buffer	*/
 BUFFER		*bheadp;			/* BUFFER list head */
 MGWIN		*curwp;				/* current window	*/
@@ -31,10 +31,14 @@ main(int argc, char **argv)
 {
 	char	*cp, *init_fcn_name = NULL;
 	PF init_fcn = NULL;
-	int o, i, nfiles;
+	int o, i, nfiles, status;
+	int nobackups = 0;
 
-	while ((o = getopt(argc, argv, "f:")) != -1)
+	while ((o = getopt(argc, argv, "nf:")) != -1)
 		switch (o) {
+		case 'n':
+			nobackups = 1;
+			break;
 		case 'f':
 			if (init_fcn_name != NULL)
 				errx(1, "cannot specify more than one "
@@ -42,7 +46,7 @@ main(int argc, char **argv)
 			init_fcn_name = optarg;
 			break;
 		default:
-			errx(1, "usage: mg [-f <mode>] [files...]");
+			errx(1, "usage: mg [options] [file ...]");
 		}
 	argc -= optind;
 	argv += optind;
@@ -87,6 +91,9 @@ main(int argc, char **argv)
 		(void)load(cp);
 #endif	/* !NO_STARTUP */
 
+	if (nobackups)
+		makebkfile(FFARG, 0);
+
 	for (nfiles = 0, i = 0; i < argc; i++) {
 		if (argv[i][0] == '+' && strlen(argv[i]) >= 2) {
 			int lval;
@@ -105,10 +112,13 @@ notnum:
 				}
 				curbp = findbuffer(cp);
 				(void)showbuffer(curbp, curwp, 0);
-				(void)readin(cp);
-				if (init_fcn_name)
-					init_fcn(0, 1);
-				nfiles++;
+				if ((status = readin(cp)) != TRUE) {
+					killbuffer(curbp);
+				} else {
+					if (init_fcn_name)
+						init_fcn(0, 1);
+					nfiles++;
+				}
 			}
 		}
 	}

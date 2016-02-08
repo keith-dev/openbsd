@@ -1,4 +1,4 @@
-.\" $OpenBSD: intro.4,v 1.8 2004/08/30 08:52:23 jmc Exp $
+.\" $OpenBSD: intro.4,v 1.11 2005/03/18 02:23:39 jsg Exp $
 .\"
 .\" Copyright (c) 2002,2003 Paul Weissmann
 .\" All rights reserved.
@@ -163,6 +163,8 @@ The ASP I/O controller; found in most of the older machines which
 don't have LASI or WAX.
 Includes GSC-bus controller, to which most of the devices are attached.
 Most of I/O is still on external chips though.
+.It Xr an 4
+Aironet Communications 4500/4800 IEEE 802.11FH/b wireless network adapters.
 .It Xr com 4
 The RS-232 ports.
 .It Xr cpu 4
@@ -211,6 +213,8 @@ Phantom PseudoBC GSC+ Port.
 .It Xr power 4
 The power button interface allowing graceful shutdown of the
 system should being depressed on the running system.
+.It Xr uturn 4
+U2/Uturn, Runway to GSC Bus bridge & IOA.
 .It Xr siop 4
 .Tn LSI/Symbios Logic/NCR
 53C8xx SCSI I/O processor.
@@ -222,10 +226,15 @@ The other reincarnation of
 used for cheap
 .Tn ASIC
 implementations for add-on devices.
+.It Xr wi 4
+WaveLAN/IEEE, PRISM 2-3 and Spectrum24 IEEE 802.11b wireless network adapters.
 .El
 .Sh SEE ALSO
 .Xr autoconf 4 ,
+.Xr gsc 4 ,
 .Xr io 4 ,
+.Xr pci 4 ,
+.Xr runway 4 ,
 .Xr config 8
 .Sh HISTORY
 The

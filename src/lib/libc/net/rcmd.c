@@ -29,7 +29,7 @@
  */
 
 #if defined(LIBC_SCCS) && !defined(lint)
-static char *rcsid = "$OpenBSD: rcmd.c,v 1.48 2003/09/25 21:14:46 millert Exp $";
+static char *rcsid = "$OpenBSD: rcmd.c,v 1.51 2005/03/08 18:34:42 deraadt Exp $";
 #endif /* LIBC_SCCS and not lint */
 
 #include <sys/param.h>
@@ -161,11 +161,7 @@ rcmd_af(ahost, rport, locuser, remuser, cmd, fd2p, af)
 		if (r->ai_next) {
 			int oerrno = errno;
 			char hbuf[NI_MAXHOST];
-#ifdef NI_WITHSCOPEID
-			const int niflags = NI_NUMERICHOST | NI_WITHSCOPEID;
-#else
 			const int niflags = NI_NUMERICHOST;
-#endif
 
 			hbuf[0] = '\0';
 			if (getnameinfo(r->ai_addr, r->ai_addrlen,
@@ -217,8 +213,10 @@ rcmd_af(ahost, rport, locuser, remuser, cmd, fd2p, af)
 		if (s2 < 0)
 			goto bad;
 		readsp = (fd_set *)malloc(fdssize);
-		if (readsp == NULL)
+		if (readsp == NULL) {
+			close(s2);
 			goto bad;
+		}
 		listen(s2, 1);
 		(void)snprintf(num, sizeof(num), "%d", lport);
 		if (write(s, num, strlen(num)+1) != strlen(num)+1) {
@@ -246,6 +244,14 @@ again:
 			goto bad;
 		}
 		s3 = accept(s2, (struct sockaddr *)&from, &len);
+		if (s3 < 0) {
+			(void)fprintf(stderr,
+			    "rcmd: accept: %s\n", strerror(errno));
+			lport = 0;
+			close(s2);
+			goto bad;
+		}
+
 		/*
 		 * XXX careful for ftp bounce attacks. If discovered, shut them
 		 * down and check for the real auxiliary channel to connect.
@@ -264,12 +270,7 @@ again:
 			break;
 		}
 		(void)close(s2);
-		if (s3 < 0) {
-			(void)fprintf(stderr,
-			    "rcmd: accept: %s\n", strerror(errno));
-			lport = 0;
-			goto bad;
-		}
+
 		*fd2p = s3;
 		switch (from.ss_family) {
 		case AF_INET:
@@ -610,9 +611,6 @@ bail:
 /*
  * Returns "true" if match, 0 if no match.  If we do not find any
  * semblance of an A->PTR->A loop, allow a simple #.#.#.# match to work.
- *
- * NI_WITHSCOPEID is useful for comparing sin6_scope_id portion
- * if af == AF_INET6.
  */
 static int
 __icheckhost(raddr, salen, lhost)
@@ -623,11 +621,7 @@ __icheckhost(raddr, salen, lhost)
 	struct addrinfo hints, *res, *r;
 	char h1[NI_MAXHOST], h2[NI_MAXHOST];
 	int error;
-#ifdef NI_WITHSCOPEID
-	const int niflags = NI_NUMERICHOST | NI_WITHSCOPEID;
-#else
 	const int niflags = NI_NUMERICHOST;
-#endif
 
 	h1[0] = '\0';
 	if (getnameinfo(raddr, salen, h1, sizeof(h1), NULL, 0,
@@ -666,9 +660,6 @@ __icheckhost(raddr, salen, lhost)
  * Return the hostname associated with the supplied address.
  * Do a reverse lookup as well for security. If a loop cannot
  * be found, pack the result of inet_ntoa() into the string.
- *
- * NI_WITHSCOPEID is useful for comparing sin6_scope_id portion
- * if af == AF_INET6.
  */
 static char *
 __gethostloop(raddr, salen)
@@ -679,11 +670,7 @@ __gethostloop(raddr, salen)
 	char h1[NI_MAXHOST], h2[NI_MAXHOST];
 	struct addrinfo hints, *res, *r;
 	int error;
-#ifdef NI_WITHSCOPEID
-	const int niflags = NI_NUMERICHOST | NI_WITHSCOPEID;
-#else
 	const int niflags = NI_NUMERICHOST;
-#endif
 
 	h1[0] = remotehost[0] = '\0';
 	if (getnameinfo(raddr, salen, remotehost, sizeof(remotehost),

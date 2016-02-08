@@ -1,4 +1,4 @@
-/* $OpenBSD: machine.c,v 1.43 2004/06/13 18:49:02 otto Exp $	 */
+/* $OpenBSD: machine.c,v 1.47 2004/12/06 15:57:04 markus Exp $	 */
 
 /*-
  * Copyright (c) 1994 Thorsten Lockert <tholo@sigmasoft.com>
@@ -101,10 +101,10 @@ static long     cp_old[CPUSTATES];
 static long     cp_diff[CPUSTATES];
 
 /* these are for detailing the process states */
-int process_states[7];
+int process_states[8];
 char *procstatenames[] = {
 	"", " starting, ", " running, ", " idle, ",
-	" stopped, ", " zombie, ",
+	" stopped, ", " zombie, ", " dead, ", " on processor, ",
 	NULL
 };
 
@@ -264,7 +264,7 @@ get_system_info(struct system_info *si)
 
 static struct handle handle;
 
-static struct kinfo_proc2 *
+struct kinfo_proc2 *
 getprocs(int op, int arg, int *cnt)
 {
 	size_t size;
@@ -307,8 +307,8 @@ caddr_t
 get_process_info(struct system_info *si, struct process_select *sel,
     int (*compare) (const void *, const void *))
 {
-	int show_idle, show_system, show_uid;
-	int total_procs, active_procs, i;
+	int show_idle, show_system, show_uid, show_pid;
+	int total_procs, active_procs;
 	struct kinfo_proc2 **prefp, *pp;
 
 	if ((pbase = getprocs(KERN_PROC_KTHREAD, 0, &nproc)) == NULL) {
@@ -329,13 +329,14 @@ get_process_info(struct system_info *si, struct process_select *sel,
 	show_idle = sel->idle;
 	show_system = sel->system;
 	show_uid = sel->uid != (uid_t)-1;
+	show_pid = sel->pid != (pid_t)-1;
 
 	/* count up process states and get pointers to interesting procs */
 	total_procs = 0;
 	active_procs = 0;
 	memset((char *) process_states, 0, sizeof(process_states));
 	prefp = pref;
-	for (pp = pbase, i = 0; i < nproc; pp++, i++) {
+	for (pp = pbase; pp < &pbase[nproc]; pp++) {
 		/*
 		 *  Place pointers to each valid proc structure in pref[].
 		 *  Process slots that are actually in use have a non-zero
@@ -349,7 +350,8 @@ get_process_info(struct system_info *si, struct process_select *sel,
 			if (pp->p_stat != SZOMB &&
 			    (show_idle || pp->p_pctcpu != 0 ||
 			    pp->p_stat == SRUN) &&
-			    (!show_uid || pp->p_ruid == sel->uid)) {
+			    (!show_uid || pp->p_ruid == sel->uid) &&
+			    (!show_pid || pp->p_pid == sel->pid)) {
 				*prefp++ = pp;
 				active_procs++;
 			}

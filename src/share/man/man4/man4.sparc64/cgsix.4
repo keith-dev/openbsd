@@ -1,4 +1,4 @@
-.\"	$OpenBSD: cgsix.4,v 1.14 2004/06/21 04:43:41 miod Exp $
+.\"	$OpenBSD: cgsix.4,v 1.17 2005/03/05 01:48:59 miod Exp $
 .\"
 .\" Copyright (c) 2001 Jason L. Wright (jason@thought.net)
 .\" All rights reserved.
@@ -31,7 +31,7 @@
 .Nm cgsix
 .Nd accelerated 8-bit color frame buffer
 .Sh SYNOPSIS
-.Cd "cgsix* at sbus? slot ? offset ? flags 0x0"
+.Cd "cgsix* at sbus? flags 0x0"
 .Cd "wsdisplay* at cgsix?"
 .Sh DESCRIPTION
 The
@@ -145,12 +145,15 @@ on the GX+.
 .Xr agten 4 ,
 .Xr bwtwo 4 ,
 .Xr cgthree 4 ,
+.Xr cgtwelve 4 ,
 .Xr creator 4 ,
 .Xr intro 4 ,
 .Xr mgx 4 ,
 .Xr rfx 4 ,
 .Xr sbus 4 ,
+.Xr tvtwo 4 ,
 .Xr vgafb 4 ,
+.Xr vigra 4 ,
 .Xr wscons 4 ,
 .Xr wsdisplay 4 ,
 .Xr zx 4 ,

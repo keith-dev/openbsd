@@ -1,4 +1,4 @@
-/* $OpenBSD: ssl_engine_init.c,v 1.23 2003/11/17 18:57:06 henning Exp $ */
+/* $OpenBSD: ssl_engine_init.c,v 1.27 2005/02/09 12:13:10 henning Exp $ */
 
 /*                      _             _
 **  _ __ ___   ___   __| |    ___ ___| |  mod_ssl
@@ -125,9 +125,7 @@ void ssl_init_Module(server_rec *s, pool *p)
     SSLSrvConfigRec *sc;
     server_rec *s2;
     char *cp;
-#ifdef __OpenBSD__
     int SSLenabled = 0;
-#endif
 
     mc->nInitCount++;
 
@@ -178,11 +176,6 @@ void ssl_init_Module(server_rec *s, pool *p)
                 SERVER_BASEVERSION,
                 ssl_var_lookup(p, NULL, NULL, NULL, "SSL_VERSION_INTERFACE"),
                 ssl_var_lookup(p, NULL, NULL, NULL, "SSL_VERSION_LIBRARY"));
-#ifdef WIN32
-        ssl_log(s, SSL_LOG_WARN, "You are using mod_ssl under Win32. " 
-                "This combination is *NOT* officially supported. "
-                "Use it at your own risk!");
-#endif
     }
 
     /*
@@ -255,15 +248,9 @@ void ssl_init_Module(server_rec *s, pool *p)
 #endif
     if (mc->nInitCount == 1) {
         ssl_pphrase_Handle(s, p);
-#ifndef __OpenBSD__
-        ssl_init_TmpKeysHandle(SSL_TKP_GEN, s, p);
-#endif
-#ifndef WIN32
         return;
-#endif
     }
 
-#ifdef __OpenBSD__
     for (s2 = s; s2 != NULL; s2 = s2->next) {
         sc = mySrvConfig(s2);
        /* find out if anyone's actually doing SSL */
@@ -272,7 +259,6 @@ void ssl_init_Module(server_rec *s, pool *p)
     }
     if (SSLenabled) /* skip expensive bits if we're not doing SSL */
       ssl_init_TmpKeysHandle(SSL_TKP_GEN, s, p);
-#endif
 
     /*
      * SSL external crypto device ("engine") support
@@ -305,10 +291,8 @@ void ssl_init_Module(server_rec *s, pool *p)
     /*
      *  allocate the temporary RSA keys and DH params
      */
-#ifdef __OpenBSD__
     if (SSLenabled)  /* skip expensive bits if we're not doing SSL */
-#endif
-    ssl_init_TmpKeysHandle(SSL_TKP_ALLOC, s, p);
+	ssl_init_TmpKeysHandle(SSL_TKP_ALLOC, s, p);
 
     /*
      *  initialize servers
@@ -355,9 +339,6 @@ void ssl_init_Module(server_rec *s, pool *p)
  */
 void ssl_init_SSLLibrary(void)
 {
-#ifdef WIN32
-    CRYPTO_malloc_init();
-#endif
     SSL_load_error_strings();
     SSL_library_init();
     ssl_util_thread_setup();
@@ -470,11 +451,7 @@ void ssl_init_TmpKeysHandle(int action, server_rec *s, pool *p)
         if ((asn1 = (ssl_asn1_t *)ssl_ds_table_get(mc->tTmpKeys, "RSA:512")) != NULL) {
             ucp = asn1->cpData;
             if ((mc->pTmpKeys[SSL_TKPIDX_RSA512] = 
-#if SSL_LIBRARY_VERSION >= 0x00907000
                  (void *)d2i_RSAPrivateKey(NULL, (const unsigned char **)&ucp, asn1->nData)) == NULL) {
-#else
-                 (void *)d2i_RSAPrivateKey(NULL, &ucp, asn1->nData)) == NULL) {
-#endif
                 ssl_log(s, SSL_LOG_ERROR, "Init: Failed to load temporary 512 bit RSA private key");
                 ssl_die();
             }
@@ -488,11 +465,7 @@ void ssl_init_TmpKeysHandle(int action, server_rec *s, pool *p)
         if ((asn1 = (ssl_asn1_t *)ssl_ds_table_get(mc->tTmpKeys, "RSA:1024")) != NULL) {
             ucp = asn1->cpData;
             if ((mc->pTmpKeys[SSL_TKPIDX_RSA1024] = 
-#if SSL_LIBRARY_VERSION >= 0x00907000
                  (void *)d2i_RSAPrivateKey(NULL, (const unsigned char **)&ucp, asn1->nData)) == NULL) {
-#else
-                 (void *)d2i_RSAPrivateKey(NULL, &ucp, asn1->nData)) == NULL) {
-#endif
                 ssl_log(s, SSL_LOG_ERROR, "Init: Failed to load temporary 1024 bit RSA private key");
                 ssl_die();
             }
@@ -508,11 +481,7 @@ void ssl_init_TmpKeysHandle(int action, server_rec *s, pool *p)
         if ((asn1 = (ssl_asn1_t *)ssl_ds_table_get(mc->tTmpKeys, "DH:512")) != NULL) {
             ucp = asn1->cpData;
             if ((mc->pTmpKeys[SSL_TKPIDX_DH512] = 
-#if SSL_LIBRARY_VERSION >= 0x00907000
                  (void *)d2i_DHparams(NULL, (const unsigned char **)&ucp, asn1->nData)) == NULL) {
-#else
-                 (void *)d2i_DHparams(NULL, &ucp, asn1->nData)) == NULL) {
-#endif
                 ssl_log(s, SSL_LOG_ERROR, "Init: Failed to load temporary 512 bit DH parameters");
                 ssl_die();
             }
@@ -522,11 +491,7 @@ void ssl_init_TmpKeysHandle(int action, server_rec *s, pool *p)
         if ((asn1 = (ssl_asn1_t *)ssl_ds_table_get(mc->tTmpKeys, "DH:1024")) != NULL) {
             ucp = asn1->cpData;
             if ((mc->pTmpKeys[SSL_TKPIDX_DH1024] = 
-#if SSL_LIBRARY_VERSION >= 0x00907000
                  (void *)d2i_DHparams(NULL, (const unsigned char **)&ucp, asn1->nData)) == NULL) {
-#else
-                 (void *)d2i_DHparams(NULL, &ucp, asn1->nData)) == NULL) {
-#endif
                 ssl_log(s, SSL_LOG_ERROR, "Init: Failed to load temporary 1024 bit DH parameters");
                 ssl_die();
             }
@@ -638,6 +603,12 @@ void ssl_init_ConfigureServer(server_rec *s, pool *p, SSLSrvConfigRec *sc)
         SSL_CTX_set_session_cache_mode(ctx, SSL_SESS_CACHE_OFF);
     else
         SSL_CTX_set_session_cache_mode(ctx, SSL_SESS_CACHE_SERVER);
+
+    /*
+     * Disallow a session from being resumed during a renegotiation,
+     * so that an acceptable cipher suite can be negotiated.
+     */
+    SSL_CTX_set_options(ctx, SSL_OP_NO_SESSION_RESUMPTION_ON_RENEGOTIATION);
 
     /*
      *  Configure callbacks for SSL context

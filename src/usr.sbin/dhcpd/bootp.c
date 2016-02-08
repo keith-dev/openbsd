@@ -1,4 +1,4 @@
-/*	$OpenBSD: bootp.c,v 1.9 2004/05/11 04:08:35 deraadt Exp $	*/
+/*	$OpenBSD: bootp.c,v 1.12 2005/01/31 21:23:08 claudio Exp $	*/
 
 /*
  * BOOTP Protocol support.
@@ -52,12 +52,11 @@ bootp(struct packet *packet)
 	struct dhcp_packet raw;
 	struct sockaddr_in to;
 	struct in_addr from;
-	struct hardware hto;
 	struct tree_cache *options[256];
 	struct subnet *subnet = NULL;
 	struct lease *lease;
 	struct iaddr ip_address;
-	int result, i;
+	int i;
 
 	if (packet->raw->op != BOOTREQUEST)
 		return;
@@ -307,11 +306,6 @@ lose:
 	else
 		memcpy(raw.file, packet->raw->file, sizeof(raw.file));
 
-	/* Set up the hardware destination address... */
-	hto.htype = packet->raw->htype;
-	hto.hlen = packet->raw->hlen;
-	memcpy(hto.haddr, packet->raw->chaddr, hto.hlen);
-
 	from = packet->interface->primary_address;
 
 	/* Report what we're doing... */
@@ -332,12 +326,9 @@ lose:
 		to.sin_addr = raw.giaddr;
 		to.sin_port = server_port;
 
-		if (fallback_interface) {
-			result = send_packet(fallback_interface, &raw,
-			    outgoing.packet_length, from, &to, &hto);
-			return;
-		}
-
+		(void) send_packet(packet->interface, &raw,
+		    outgoing.packet_length, from, &to, packet->haddr);
+		return;
 	}
 
 	/*
@@ -355,6 +346,6 @@ lose:
 	}
 
 	errno = 0;
-	result = send_packet(packet->interface, &raw,
-	    outgoing.packet_length, from, &to, &hto);
+	(void) send_packet(packet->interface, &raw,
+	    outgoing.packet_length, from, &to, packet->haddr);
 }

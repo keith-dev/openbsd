@@ -1,4 +1,4 @@
-/*	$OpenBSD: bcode.c,v 1.22 2004/02/11 20:44:31 otto Exp $	*/
+/*	$OpenBSD: bcode.c,v 1.26 2004/12/01 08:40:12 otto Exp $	*/
 
 /*
  * Copyright (c) 2003, Otto Moerbeek <otto@drijf.net>
@@ -17,7 +17,7 @@
  */
 
 #ifndef lint
-static const char rcsid[] = "$OpenBSD: bcode.c,v 1.22 2004/02/11 20:44:31 otto Exp $";
+static const char rcsid[] = "$OpenBSD: bcode.c,v 1.26 2004/12/01 08:40:12 otto Exp $";
 #endif /* not lint */
 
 #include <ssl/ssl.h>
@@ -50,7 +50,7 @@ struct bmachine {
 	bool			extended_regs;
 	size_t			reg_array_size;
 	struct stack		*reg;
-	volatile bool		interrupted;
+	volatile sig_atomic_t	interrupted;
 	struct source		readstack[RECURSION_STACK_SIZE];
 };
 
@@ -101,7 +101,7 @@ static void		bdiv(void);
 static void		bmod(void);
 static void		bdivmod(void);
 static void		bexp(void);
-static bool		bsqrt_stop(const BIGNUM *, const BIGNUM *);
+static bool		bsqrt_stop(const BIGNUM *, const BIGNUM *, u_int *);
 static void		bsqrt(void);
 static void		not(void);
 static void		equal_numbers(void);
@@ -222,6 +222,7 @@ static const struct jump_entry jump_table_data[] = {
 #define JUMP_TABLE_DATA_SIZE \
 	(sizeof(jump_table_data)/sizeof(jump_table_data[0]))
 
+/* ARGSUSED */
 static void
 sighandler(int ignored)
 {
@@ -1237,7 +1238,7 @@ bexp(void)
 }
 
 static bool
-bsqrt_stop(const BIGNUM *x, const BIGNUM *y)
+bsqrt_stop(const BIGNUM *x, const BIGNUM *y, u_int *onecount)
 {
 	BIGNUM *r;
 	bool ret;
@@ -1245,9 +1246,11 @@ bsqrt_stop(const BIGNUM *x, const BIGNUM *y)
 	r = BN_new();
 	bn_checkp(r);
 	bn_check(BN_sub(r, x, y));
-	ret = BN_is_one(r) || BN_is_zero(r);
+	if (BN_is_one(r))
+		(*onecount)++;
+	ret = BN_is_zero(r);
 	BN_free(r);
-	return ret;
+	return ret || *onecount > 1;
 }
 
 static void
@@ -1256,9 +1259,10 @@ bsqrt(void)
 	struct number	*n;
 	struct number	*r;
 	BIGNUM		*x, *y;
-	u_int		scale;
+	u_int		scale, onecount;
 	BN_CTX		*ctx;
 
+	onecount = 0;
 	n = pop_number();
 	if (n == NULL) {
 		return;
@@ -1283,7 +1287,7 @@ bsqrt(void)
 			bn_check(BN_div(x, NULL, n->number, x, ctx));
 			bn_check(BN_add(x, x, y));
 			bn_check(BN_rshift1(x, x));
-			if (bsqrt_stop(x, y))
+			if (bsqrt_stop(x, y, &onecount))
 				break;
 		}
 		r = bmalloc(sizeof(*r));
@@ -1694,7 +1698,7 @@ eval(void)
 		ch = readch();
 		if (ch == EOF) {
 			if (bmachine.readsp == 0)
-				exit(0);
+				return;
 			src_free();
 			bmachine.readsp--;
 			continue;

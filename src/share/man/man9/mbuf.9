@@ -1,4 +1,4 @@
-.\"     $OpenBSD: mbuf.9,v 1.14 2004/04/16 21:23:08 jmc Exp $
+.\"     $OpenBSD: mbuf.9,v 1.18 2005/01/29 00:47:36 jmc Exp $
 .\"
 .\" Copyright (c) 2001 Jean-Jacques Bernard-Gundol <jjbg@openbsd.org>
 .\" All rights reserved.
@@ -109,7 +109,7 @@ struct m_hdr {
         caddr_t mh_data;
         u_int   mh_len;
         short   mh_type;
-        short   mh_flags;
+        u_short mh_flags;
 };
 
 struct  pkthdr {
@@ -117,7 +117,6 @@ struct  pkthdr {
         SLIST_HEAD(packet_tags, m_tag) tags;
         int     len;
         int     csum;
-
 };
 
 struct m_ext {
@@ -236,31 +235,11 @@ packet send/received as link-level multicast.
 .It Dv M_CONF
 packet was encrypted (ESP-transport).
 .It Dv M_AUTH
-packet was authenticated (AH).
-.It Dv M_COMP
-packet was compressed (IPCOMP).
+packet was authenticated (AH or ESP).
 .It Dv M_AUTH_AH
 header was authenticated (AH).
 .It Dv M_TUNNEL
-IP-in-IP added by tunnel mode IPsec.
-.It Dv M_IPV4_CSUM_OUT
-IPv4 checksum needed.
-.It Dv M_TCPV4_CSUM_OUT
-TCP checksum needed.
-.It Dv M_UDPV4_CSUM_OUT
-UDP checksum needed.
-.It Dv M_IPV4_CSUM_IN_OK
-IPv4 checksum verified.
-.It Dv M_IPV4_CSUM_IN_BAD
-IPv4 checksum bad.
-.It Dv M_TCP_CSUM_IN_OK
-TCP/IPv4 checksum verified.
-.It Dv M_TCP_CSUM_IN_BAD
-TCP/IPv4 checksum bad.
-.It Dv M_UDP_CSUM_IN_OK
-UDP/IPv4 checksum verified.
-.It Dv M_UDP_CSUM_IN_BAD
-UDP/IPv4 checksum bad.
+header was IP-in-IP encapsulated by tunnel mode IPsec.
 .It Dv M_ANYCAST6
 received as IPv6 anycast.
 .It Dv M_LOOP
@@ -290,10 +269,36 @@ The data part has then the following elements:
 .Bl -tag -width foobarmoocow
 .It Fa m_pkthdr
 packet header, containing the length of the data, a pointer to the
-interface on which the data was received and a generic pointer to a
-structure containing information for IPsec processing.
+interface on which the data was received, checksum information
+and list of
+.Xr mbuf_tags 9 .
 .It Fa m_pktdat
 buffer holding the data (size MHLEN).
+.El
+.Pp
+The
+.Fa m_pkthdr.csum
+variable can take the following values:
+.Pp
+.Bl -tag -compact -offset indent -width XXXXXXXXXXXXXXXXXX
+.It Dv M_IPV4_CSUM_OUT
+IPv4 checksum needed.
+.It Dv M_TCPV4_CSUM_OUT
+TCP checksum needed.
+.It Dv M_UDPV4_CSUM_OUT
+UDP checksum needed.
+.It Dv M_IPV4_CSUM_IN_OK
+IPv4 checksum verified.
+.It Dv M_IPV4_CSUM_IN_BAD
+IPv4 checksum bad.
+.It Dv M_TCP_CSUM_IN_OK
+TCP/IPv4 checksum verified.
+.It Dv M_TCP_CSUM_IN_BAD
+TCP/IPv4 checksum bad.
+.It Dv M_UDP_CSUM_IN_OK
+UDP/IPv4 checksum verified.
+.It Dv M_UDP_CSUM_IN_BAD
+UDP/IPv4 checksum bad.
 .El
 .Pp
 When only M_EXT flag is set, an external storage buffer is being used to
@@ -353,7 +358,7 @@ Free the mbuf pointed to by
 .Fa m .
 A pointer to the successor of the mbuf,
 if it exists, is returned by the function.
-.It Fn MFREE "m" "n"
+.It Fn MFREE "struct mbuf *m" "struct mbuf *n"
 Free the mbuf pointed to by
 .Fa m
 and use
@@ -378,7 +383,7 @@ is
 and resources are not available,
 .Fn m_get
 returns NULL.
-.It Fn MGET "m" "how" "type"
+.It Fn MGET "struct mbuf *m" "int how" "int type"
 Return a pointer to an mbuf in
 .Fa m
 of the type specified.
@@ -400,7 +405,7 @@ See
 .Fn m_get
 for a description of
 .Fa how .
-.It Fn MGETHDR "m" "int how" "int type"
+.It Fn MGETHDR "struct mbuf *m" "int how" "int type"
 Return a pointer to an mbuf of the type specified after initializing
 it to contain a packet header.
 See
@@ -422,7 +427,7 @@ See
 .Fn m_get
 for a description of
 .Fa how .
-.It Fn M_PREPEND "m" "plen" "how"
+.It Fn M_PREPEND "struct mbuf *m" "int plen" "int how"
 Prepend space of size
 .Fa plen
 to the mbuf pointed to by
@@ -600,7 +605,7 @@ for a description of
 Add pre-allocated storage to the mbuf pointed to by
 .Fa m .
 On success, the flag M_EXT is set in the mbuf.
-.It Fn M_ALIGN "m" "len"
+.It Fn M_ALIGN "struct mbuf *m" "int len"
 Set the
 .Fa m_data
 pointer of the newly allocated mbuf with
@@ -619,21 +624,21 @@ except it is for an mbuf allocated with
 .Fn m_gethdr
 or
 .Fn MGETHDR .
-.It Fn M_READONLY "m"
+.It Fn M_READONLY "struct mbuf *m"
 Check if the data of the mbuf pointed to by
 .Fa m
 is read-only.
 This is true for non-cluster external storage and for clusters that
 are being referenced by more than one mbuf.
-.It Fn M_LEADINGSPACE "m"
+.It Fn M_LEADINGSPACE "struct mbuf *m"
 Compute the amount of space available before the current start of data
 in the mbuf pointed to by
 .Fa m .
-.It Fn M_TRAILINGSPACE "m"
+.It Fn M_TRAILINGSPACE "struct mbuf *m"
 Compute the amount of space available after the end of data in the
 mbuf pointed to by
 .Fa m .
-.It Fn MCHTYPE "m" "type"
+.It Fn MCHTYPE "struct mbuf *m" "int type"
 Change the type of the mbuf pointed to by
 .Fa m
 to
@@ -645,8 +650,8 @@ to
 .Pa /usr/share/doc/smm/18.net .
 .Rs
 .%A Jun-Ichiro Hagino
-.%T Mbuf issues in 4.4BSD IPv6/IPsec support (experiences from KAME IPv6/IPsec implementation)
-.%B Proceedings of the Freenix Track: 2000 USENIX Annual Technical Conference
+.%T "Mbuf issues in 4.4BSD IPv6/IPsec support (experiences from KAME IPv6/IPsec implementation)"
+.%B "Proceedings of the Freenix Track: 2000 USENIX Annual Technical Conference"
 .%D June 2000
 .Re
 .Sh CODE REFERENCES

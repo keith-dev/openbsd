@@ -1,4 +1,4 @@
-/*	$OpenBSD: crontab.c,v 1.45 2004/06/22 03:15:33 avsm Exp $	*/
+/*	$OpenBSD: crontab.c,v 1.48 2005/01/30 21:00:31 millert Exp $	*/
 
 /* Copyright 1988,1990,1993,1994 by Paul Vixie
  * All rights reserved
@@ -22,7 +22,7 @@
  */
 
 #if !defined(lint) && !defined(LINT)
-static char const rcsid[] = "$OpenBSD: crontab.c,v 1.45 2004/06/22 03:15:33 avsm Exp $";
+static char const rcsid[] = "$OpenBSD: crontab.c,v 1.48 2005/01/30 21:00:31 millert Exp $";
 #endif
 
 /* crontab - install and manage per-user crontab files
@@ -284,7 +284,7 @@ edit_cmd(void) {
 	char n[MAX_FNAME], q[MAX_TEMPSTR], *editor;
 	FILE *f;
 	int ch, t, x;
-	struct stat statbuf;
+	struct stat statbuf, xstatbuf;
 	struct timespec mtimespec;
 	struct timeval tv[2];
 	WAIT_T waiter;
@@ -448,6 +448,11 @@ edit_cmd(void) {
 		goto fatal;
 	}
 	if (timespeccmp(&mtimespec, &statbuf.st_mtimespec, -) == 0) {
+		if (lstat(Filename, &xstatbuf) == 0 &&
+		    statbuf.st_ino != xstatbuf.st_ino) {
+			fprintf(stderr, "%s: crontab temp file moved, editor "
+			   "may create backup files improperly\n", ProgramName);
+		}
 		fprintf(stderr, "%s: no changes made to crontab\n",
 			ProgramName);
 		goto remove;
@@ -461,7 +466,10 @@ edit_cmd(void) {
 			printf("Do you want to retry the same edit? ");
 			fflush(stdout);
 			q[0] = '\0';
-			(void) fgets(q, sizeof q, stdin);
+			if (fgets(q, sizeof q, stdin) == NULL) {
+				putchar('\n');
+				goto abandon;
+			}
 			switch (q[0]) {
 			case 'y':
 			case 'Y':
@@ -508,8 +516,8 @@ replace_cmd(void) {
 		fprintf(stderr, "%s: Cannot allocate memory.\n", ProgramName);
 		return (-2);
 	}
-	if (snprintf(TempFilename, sizeof TempFilename, "%s/tmp.XXXXXXXXX", SPOOL_DIR) >=
-		sizeof(TempFilename)) {
+	if (snprintf(TempFilename, sizeof TempFilename, "%s/tmp.XXXXXXXXX",
+	    SPOOL_DIR) >= sizeof(TempFilename)) {
 		TempFilename[0] = '\0';
 		fprintf(stderr, "path too long\n");
 		return (-2);
@@ -542,7 +550,7 @@ replace_cmd(void) {
 	Set_LineNum(1)
 	while (EOF != (ch = get_char(NewCrontab)))
 		putc(ch, tmp);
-	ftruncate(fileno(tmp), ftell(tmp));	/* XXX redundant with "w+"? */
+	ftruncate(fileno(tmp), ftello(tmp));	/* XXX redundant with "w+"? */
 	fflush(tmp);  rewind(tmp);
 
 	if (ferror(tmp)) {

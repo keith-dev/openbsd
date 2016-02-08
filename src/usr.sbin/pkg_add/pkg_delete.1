@@ -1,4 +1,4 @@
-.\"	$OpenBSD: pkg_delete.1,v 1.8 2004/08/06 16:45:51 millert Exp $
+.\"	$OpenBSD: pkg_delete.1,v 1.17 2005/01/03 01:02:45 espie Exp $
 .\"
 .\" FreeBSD install - a package for the installation and maintenance
 .\" of non-core utilities.
@@ -25,9 +25,9 @@
 .Nd a utility for deleting previously installed software package distributions
 .Sh SYNOPSIS
 .Nm pkg_delete
-.Op Fl cDnqv
+.Op Fl cInqvx
 .Op Fl B Ar pkg-destdir
-.Op Fl f Ar keys
+.Op Fl F Ar keywords
 .Ar pkgname Op Ar ...
 .Sh DESCRIPTION
 The
@@ -57,35 +57,44 @@ The options are as follows:
 Set
 .Ar pkg-destdir
 as the prefix to prepend to any object deleted.
-.It Fl v
-Turn on verbose output.
-.It Fl D
-If a deinstallation script exists for a given package, do not execute it.
-.It Fl n
-Don't actually deinstall a package, just report the steps that
-would be taken if it were.
-.It Fl f Ar keys
-Force removal of the package.
-.Ar keys
-is a comma-separated list of keywords that state what failsafes
-should be waived.
-These include:
-.Bl -tag -width keyword
-.It Ar ambiguous
-delete all packages matching ambiguous package specifications.
-.It Ar dependencies
-also delete the whole set of packages that depends upon the requested packages.
-.It Ar nonroot
-uninstall even if not running as root.
-.It Ar uninstalled
-proceed even if some package names don't resolve to installed package names.
-.El
 .It Fl c
 Delete extra configuration file, mentioned as
 .Dl @extra file
 in the packing-list.
+.It Fl F Ar keywords
+Force removal of the package.
+.Ar keywords
+is a comma-separated list of keywords that state what failsafes
+should be waived.
+These include:
+.Bl -tag -width "dependenciesXX"
+.It Ar ambiguous
+delete all packages matching ambiguous package specifications.
+.It Ar baddepend
+force the deletion of packages even if they reference inexistent dependencies.
+.It Ar dependencies
+also delete the whole set of packages that depends upon the requested packages.
+.It Ar nonroot
+uninstall even if not running as root.
+.It Ar scripts
+external scripts may fail.
+.It Ar uninstalled
+proceed even if some package names don't resolve to installed package names.
+.El
+.It Fl I
+If scripts exist for a given package, do not execute them.
+.It Fl n
+Don't actually deinstall a package, just report the steps that
+would be taken if it were.
 .It Fl q
-Delete package quickly, do not bother checking md5s before removing files.
+Delete package quickly, do not bother checking MD5s before removing files.
+.It Fl v
+Turn on verbose output.
+Several
+.Fl v
+turn on more verbose output.
+.It Fl x
+Disable progress-meter.
 .El
 .Sh TECHNICAL DETAILS
 .Nm
@@ -140,7 +149,6 @@ Passing the keyword
 .Ar DEINSTALL
 lets you potentially write only one program/script that handles all
 aspects of installation and deletion.
-.Pp
 .Sh ENVIRONMENT
 .Bl -tag -width PKG_DESTDIR
 .It Ev PKG_DBDIR
@@ -162,8 +170,7 @@ script invoked from the package.
 .Xr pkg_add 1 ,
 .Xr pkg_create 1 ,
 .Xr pkg_info 1 ,
-.Xr mkstemp 3 ,
-.Xr mtree 8
+.Xr packages-specs 7
 .Sh AUTHORS
 .Bl -tag -width indent -compact
 .It "Jordan Hubbard"

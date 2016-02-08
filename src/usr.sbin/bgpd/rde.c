@@ -1,4 +1,4 @@
-/*	$OpenBSD: rde.c,v 1.142 2004/08/12 10:24:16 claudio Exp $ */
+/*	$OpenBSD: rde.c,v 1.153 2004/11/23 13:07:01 claudio Exp $ */
 
 /*
  * Copyright (c) 2003, 2004 Henning Brauer <henning@openbsd.org>
@@ -17,8 +17,10 @@
  */
 
 #include <sys/types.h>
+#include <sys/socket.h>
 
 #include <errno.h>
+#include <ifaddrs.h>
 #include <limits.h>
 #include <pwd.h>
 #include <poll.h>
@@ -61,13 +63,14 @@ int		 rde_reflector(struct rde_peer *, struct rde_aspath *);
 void		 rde_dump_rib_as(struct prefix *, pid_t);
 void		 rde_dump_rib_prefix(struct prefix *, pid_t);
 void		 rde_dump_upcall(struct pt_entry *, void *);
-void		 rde_dump_as(struct as_filter *, pid_t);
+void		 rde_dump_as(struct filter_as *, pid_t);
 void		 rde_dump_prefix_upcall(struct pt_entry *, void *);
 void		 rde_dump_prefix(struct ctl_show_rib_prefix *, pid_t);
 void		 rde_update_queue_runner(void);
 
 void		 peer_init(u_int32_t);
 void		 peer_shutdown(void);
+void		 peer_localaddrs(struct rde_peer *, struct bgpd_addr *);
 struct rde_peer	*peer_add(u_int32_t, struct peer_config *);
 void		 peer_remove(struct rde_peer *);
 struct rde_peer	*peer_get(u_int32_t);
@@ -82,6 +85,7 @@ void		 network_dump_upcall(struct pt_entry *, void *);
 void		 network_flush(int);
 
 void		 rde_shutdown(void);
+int		 sa_cmp(struct bgpd_addr *, struct sockaddr *);
 
 volatile sig_atomic_t	 rde_quit = 0;
 struct bgpd_config	*conf, *nconf;
@@ -90,8 +94,8 @@ struct rde_peer_head	 peerlist;
 struct rde_peer		 peerself;
 struct rde_peer		 peerdynamic;
 struct filter_head	*rules_l, *newrules;
-struct imsgbuf		 ibuf_se;
-struct imsgbuf		 ibuf_main;
+struct imsgbuf		*ibuf_se;
+struct imsgbuf		*ibuf_main;
 struct mrt		*mrt;
 
 void
@@ -161,8 +165,11 @@ rde_main(struct bgpd_config *config, struct peer *peer_l,
 	close(pipe_m2s[1]);
 
 	/* initialize the RIB structures */
-	imsg_init(&ibuf_se, pipe_s2r[1]);
-	imsg_init(&ibuf_main, pipe_m2r[1]);
+	if ((ibuf_se = malloc(sizeof(struct imsgbuf))) == NULL ||
+	    (ibuf_main = malloc(sizeof(struct imsgbuf))) == NULL)
+		fatal(NULL);
+	imsg_init(ibuf_se, pipe_s2r[1]);
+	imsg_init(ibuf_main, pipe_m2r[1]);
 
 	/* peer list, mrt list and listener list are not used in the RDE */
 	while ((p = peer_l) != NULL) {
@@ -195,14 +202,14 @@ rde_main(struct bgpd_config *config, struct peer *peer_l,
 
 	while (rde_quit == 0) {
 		bzero(&pfd, sizeof(pfd));
-		pfd[PFD_PIPE_MAIN].fd = ibuf_main.fd;
+		pfd[PFD_PIPE_MAIN].fd = ibuf_main->fd;
 		pfd[PFD_PIPE_MAIN].events = POLLIN;
-		if (ibuf_main.w.queued > 0)
+		if (ibuf_main->w.queued > 0)
 			pfd[PFD_PIPE_MAIN].events |= POLLOUT;
 
-		pfd[PFD_PIPE_SESSION].fd = ibuf_se.fd;
+		pfd[PFD_PIPE_SESSION].fd = ibuf_se->fd;
 		pfd[PFD_PIPE_SESSION].events = POLLIN;
-		if (ibuf_se.w.queued > 0)
+		if (ibuf_se->w.queued > 0)
 			pfd[PFD_PIPE_SESSION].events |= POLLOUT;
 
 		i = 2;
@@ -217,23 +224,23 @@ rde_main(struct bgpd_config *config, struct peer *peer_l,
 				fatal("poll error");
 
 		if (nfds > 0 && (pfd[PFD_PIPE_MAIN].revents & POLLOUT) &&
-		    ibuf_main.w.queued)
-			if (msgbuf_write(&ibuf_main.w) < 0)
+		    ibuf_main->w.queued)
+			if (msgbuf_write(&ibuf_main->w) < 0)
 				fatal("pipe write error");
 
 		if (nfds > 0 && pfd[PFD_PIPE_MAIN].revents & POLLIN) {
 			nfds--;
-			rde_dispatch_imsg_parent(&ibuf_main);
+			rde_dispatch_imsg_parent(ibuf_main);
 		}
 
 		if (nfds > 0 && (pfd[PFD_PIPE_SESSION].revents & POLLOUT) &&
-		    ibuf_se.w.queued)
-			if (msgbuf_write(&ibuf_se.w) < 0)
+		    ibuf_se->w.queued)
+			if (msgbuf_write(&ibuf_se->w) < 0)
 				fatal("pipe write error");
 
 		if (nfds > 0 && pfd[PFD_PIPE_SESSION].revents & POLLIN) {
 			nfds--;
-			rde_dispatch_imsg_session(&ibuf_se);
+			rde_dispatch_imsg_session(ibuf_se);
 		}
 
 		if (nfds > 0 && pfd[PFD_MRT_FILE].revents & POLLOUT) {
@@ -249,23 +256,30 @@ rde_main(struct bgpd_config *config, struct peer *peer_l,
 
 	rde_shutdown();
 
-	msgbuf_write(&ibuf_se.w);
-	msgbuf_clear(&ibuf_se.w);
-	msgbuf_write(&ibuf_main.w);
-	msgbuf_clear(&ibuf_main.w);
+	msgbuf_write(&ibuf_se->w);
+	msgbuf_clear(&ibuf_se->w);
+	free(ibuf_se);
+	msgbuf_write(&ibuf_main->w);
+	msgbuf_clear(&ibuf_main->w);
+	free(ibuf_main);
 
 	log_info("route decision engine exiting");
 	_exit(0);
 }
 
+struct network_config	 netconf_s, netconf_p;
+struct filter_set_head	*session_set, *parent_set;
+
 void
 rde_dispatch_imsg_session(struct imsgbuf *ibuf)
 {
 	struct imsg		 imsg;
-	struct session_up	 sup;
 	struct peer		 p;
+	struct peer_config	 pconf;
 	struct rrefresh		 r;
 	struct rde_peer		*peer;
+	struct session_up	 sup;
+	struct filter_set	*s;
 	pid_t			 pid;
 	int			 n;
 
@@ -284,11 +298,24 @@ rde_dispatch_imsg_session(struct imsgbuf *ibuf)
 		case IMSG_UPDATE:
 			rde_update_dispatch(&imsg);
 			break;
+		case IMSG_SESSION_ADD:
+			if (imsg.hdr.len - IMSG_HEADER_SIZE != sizeof(pconf))
+				fatalx("incorrect size of session request");
+			memcpy(&pconf, imsg.data, sizeof(pconf));
+			peer = peer_add(imsg.hdr.peerid, &pconf);
+			if (peer == NULL) {
+				log_warnx("peer_up: peer id %d already exists",
+				    imsg.hdr.peerid);
+				break;
+			}
+			session_set = &peer->conf.attrset;
+			break;
 		case IMSG_SESSION_UP:
 			if (imsg.hdr.len - IMSG_HEADER_SIZE != sizeof(sup))
 				fatalx("incorrect size of session request");
 			memcpy(&sup, imsg.data, sizeof(sup));
 			peer_up(imsg.hdr.peerid, &sup);
+			session_set = NULL;
 			break;
 		case IMSG_SESSION_DOWN:
 			peer_down(imsg.hdr.peerid);
@@ -307,7 +334,17 @@ rde_dispatch_imsg_session(struct imsgbuf *ibuf)
 				log_warnx("rde_dispatch: wrong imsg len");
 				break;
 			}
-			network_add(imsg.data, 0);
+			memcpy(&netconf_s, imsg.data, sizeof(netconf_s));
+			SIMPLEQ_INIT(&netconf_s.attrset);
+			session_set = &netconf_s.attrset;
+			break;
+		case IMSG_NETWORK_DONE:
+			if (imsg.hdr.len != IMSG_HEADER_SIZE) {
+				log_warnx("rde_dispatch: wrong imsg len");
+				break;
+			}
+			session_set = NULL;
+			network_add(&netconf_s, 0);
 			break;
 		case IMSG_NETWORK_REMOVE:
 			if (imsg.hdr.len - IMSG_HEADER_SIZE !=
@@ -315,7 +352,9 @@ rde_dispatch_imsg_session(struct imsgbuf *ibuf)
 				log_warnx("rde_dispatch: wrong imsg len");
 				break;
 			}
-			network_delete(imsg.data, 0);
+			memcpy(&netconf_s, imsg.data, sizeof(netconf_s));
+			SIMPLEQ_INIT(&netconf_s.attrset);
+			network_delete(&netconf_s, 0);
 			break;
 		case IMSG_NETWORK_FLUSH:
 			if (imsg.hdr.len != IMSG_HEADER_SIZE) {
@@ -324,6 +363,22 @@ rde_dispatch_imsg_session(struct imsgbuf *ibuf)
 			}
 			network_flush(0);
 			break;
+		case IMSG_FILTER_SET:
+			if (imsg.hdr.len - IMSG_HEADER_SIZE !=
+			    sizeof(struct filter_set)) {
+				log_warnx("rde_dispatch: wrong imsg len");
+				break;
+			}
+			if (session_set == NULL) {
+				log_warnx("rde_dispatch: "
+				    "IMSG_FILTER_SET unexpected");
+				break;
+			}
+			if ((s = malloc(sizeof(struct filter_set))) == NULL)
+				fatal(NULL);
+			memcpy(s, imsg.data, sizeof(struct filter_set));
+			SIMPLEQ_INSERT_TAIL(session_set, s, entry);
+			break;
 		case IMSG_CTL_SHOW_NETWORK:
 			if (imsg.hdr.len != IMSG_HEADER_SIZE) {
 				log_warnx("rde_dispatch: wrong imsg len");
@@ -331,7 +386,8 @@ rde_dispatch_imsg_session(struct imsgbuf *ibuf)
 			}
 			pid = imsg.hdr.pid;
 			pt_dump(network_dump_upcall, &pid, AF_UNSPEC);
-			imsg_compose_pid(&ibuf_se, IMSG_CTL_END, pid, NULL, 0);
+			imsg_compose(ibuf_se, IMSG_CTL_END, 0, pid, -1,
+			    NULL, 0);
 			break;
 		case IMSG_CTL_SHOW_RIB:
 			if (imsg.hdr.len != IMSG_HEADER_SIZE) {
@@ -340,17 +396,19 @@ rde_dispatch_imsg_session(struct imsgbuf *ibuf)
 			}
 			pid = imsg.hdr.pid;
 			pt_dump(rde_dump_upcall, &pid, AF_UNSPEC);
-			imsg_compose_pid(&ibuf_se, IMSG_CTL_END, pid, NULL, 0);
+			imsg_compose(ibuf_se, IMSG_CTL_END, 0, pid, -1,
+			    NULL, 0);
 			break;
 		case IMSG_CTL_SHOW_RIB_AS:
 			if (imsg.hdr.len - IMSG_HEADER_SIZE !=
-			    sizeof(struct as_filter)) {
+			    sizeof(struct filter_as)) {
 				log_warnx("rde_dispatch: wrong imsg len");
 				break;
 			}
 			pid = imsg.hdr.pid;
 			rde_dump_as(imsg.data, pid);
-			imsg_compose_pid(&ibuf_se, IMSG_CTL_END, pid, NULL, 0);
+			imsg_compose(ibuf_se, IMSG_CTL_END, 0, pid, -1,
+			    NULL, 0);
 			break;
 		case IMSG_CTL_SHOW_RIB_PREFIX:
 			if (imsg.hdr.len - IMSG_HEADER_SIZE !=
@@ -360,7 +418,8 @@ rde_dispatch_imsg_session(struct imsgbuf *ibuf)
 			}
 			pid = imsg.hdr.pid;
 			rde_dump_prefix(imsg.data, pid);
-			imsg_compose_pid(&ibuf_se, IMSG_CTL_END, pid, NULL, 0);
+			imsg_compose(ibuf_se, IMSG_CTL_END, 0, pid, -1,
+			    NULL, 0);
 			break;
 		case IMSG_CTL_SHOW_NEIGHBOR:
 			if (imsg.hdr.len - IMSG_HEADER_SIZE !=
@@ -372,12 +431,12 @@ rde_dispatch_imsg_session(struct imsgbuf *ibuf)
 			peer = peer_get(p.conf.id);
 			if (peer != NULL)
 				p.stats.prefix_cnt = peer->prefix_cnt;
-			imsg_compose_pid(&ibuf_se, IMSG_CTL_SHOW_NEIGHBOR,
-			    imsg.hdr.pid, &p, sizeof(struct peer));
+			imsg_compose(ibuf_se, IMSG_CTL_SHOW_NEIGHBOR, 0,
+			    imsg.hdr.pid, -1, &p, sizeof(struct peer));
 			break;
 		case IMSG_CTL_END:
-			imsg_compose_pid(&ibuf_se, IMSG_CTL_END, imsg.hdr.pid,
-			    NULL, 0);
+			imsg_compose(ibuf_se, IMSG_CTL_END, 0, imsg.hdr.pid,
+			    -1, NULL, 0);
 			break;
 		default:
 			break;
@@ -391,6 +450,7 @@ rde_dispatch_imsg_parent(struct imsgbuf *ibuf)
 {
 	struct imsg		 imsg;
 	struct filter_rule	*r;
+	struct filter_set	*s;
 	struct mrt		*xmrt;
 	int			 n;
 
@@ -418,7 +478,13 @@ rde_dispatch_imsg_parent(struct imsgbuf *ibuf)
 			memcpy(nconf, imsg.data, sizeof(struct bgpd_config));
 			break;
 		case IMSG_NETWORK_ADD:
-			network_add(imsg.data, 1);
+			memcpy(&netconf_p, imsg.data, sizeof(netconf_p));
+			SIMPLEQ_INIT(&netconf_p.attrset);
+			parent_set = &netconf_p.attrset;
+			break;
+		case IMSG_NETWORK_DONE:
+			parent_set = NULL;
+			network_add(&netconf_p, 1);
 			break;
 		case IMSG_RECONF_FILTER:
 			if (imsg.hdr.len - IMSG_HEADER_SIZE !=
@@ -427,6 +493,8 @@ rde_dispatch_imsg_parent(struct imsgbuf *ibuf)
 			if ((r = malloc(sizeof(struct filter_rule))) == NULL)
 				fatal(NULL);
 			memcpy(r, imsg.data, sizeof(struct filter_rule));
+			SIMPLEQ_INIT(&r->set);
+			parent_set = &r->set;
 			TAILQ_INSERT_TAIL(newrules, r, entry);
 			break;
 		case IMSG_RECONF_DONE:
@@ -444,6 +512,7 @@ rde_dispatch_imsg_parent(struct imsgbuf *ibuf)
 			memcpy(conf, nconf, sizeof(struct bgpd_config));
 			free(nconf);
 			nconf = NULL;
+			parent_set = NULL;
 			prefix_network_clean(&peerself, reloadtime);
 			while ((r = TAILQ_FIRST(rules_l)) != NULL) {
 				TAILQ_REMOVE(rules_l, r, entry);
@@ -455,6 +524,17 @@ rde_dispatch_imsg_parent(struct imsgbuf *ibuf)
 			break;
 		case IMSG_NEXTHOP_UPDATE:
 			nexthop_update(imsg.data);
+			break;
+		case IMSG_FILTER_SET:
+			if (parent_set == NULL) {
+				log_warnx("rde_dispatch: "
+				    "IMSG_FILTER_SET unexpected");
+				break;
+			}
+			if ((s = malloc(sizeof(struct filter_set))) == NULL)
+				fatal(NULL);
+			memcpy(s, imsg.data, sizeof(struct filter_set));
+			SIMPLEQ_INSERT_TAIL(parent_set, s, entry);
 			break;
 		case IMSG_MRT_OPEN:
 		case IMSG_MRT_REOPEN:
@@ -680,7 +760,7 @@ rde_update_dispatch(struct imsg *imsg)
 	}
 
 	/* apply default overrides */
-	rde_apply_set(asp, &peer->conf.attrset, AF_INET);
+	rde_apply_set(asp, &peer->conf.attrset, AF_INET, peer, DIR_DEFAULT_IN);
 
 	/* parse nlri prefix */
 	while (nlri_len > 0) {
@@ -756,7 +836,8 @@ rde_update_dispatch(struct imsg *imsg)
 		mplen -= pos;
 
 		/* apply default overrides */
-		rde_apply_set(asp, &peer->conf.attrset, AF_INET6);
+		rde_apply_set(asp, &peer->conf.attrset, AF_INET6, peer,
+		    DIR_DEFAULT_IN);
 
 		switch (afi) {
 		case AFI_IPv6:
@@ -784,7 +865,7 @@ rde_update_dispatch(struct imsg *imsg)
 
 				fasp = path_copy(asp);
 				/* input filter */
-				if (rde_filter(peer, asp, &prefix,
+				if (rde_filter(peer, fasp, &prefix,
 				    prefixlen, DIR_IN) == ACTION_DENY) {
 					path_put(fasp);
 					continue;
@@ -1207,7 +1288,7 @@ rde_get_mp_nexthop(u_char *data, u_int16_t len, u_int16_t afi,
 	bzero(&nexthop, sizeof(nexthop));
 	switch (afi) {
 	case AFI_IPv6:
-		/* 
+		/*
 		 * RFC2545 describes that there may be a link-local
 		 * address carried in nexthop. Yikes!
 		 * This is not only silly, it is wrong and we just ignore
@@ -1311,14 +1392,14 @@ rde_update_err(struct rde_peer *peer, u_int8_t error, u_int8_t suberr,
 {
 	struct buf	*wbuf;
 
-	if ((wbuf = imsg_create(&ibuf_se, IMSG_UPDATE_ERR, peer->conf.id,
+	if ((wbuf = imsg_create(ibuf_se, IMSG_UPDATE_ERR, peer->conf.id, 0,
 	    size + sizeof(error) + sizeof(suberr))) == NULL)
 		fatal("imsg_create error");
 	if (imsg_add(wbuf, &error, sizeof(error)) == -1 ||
 	    imsg_add(wbuf, &suberr, sizeof(suberr)) == -1 ||
 	    imsg_add(wbuf, data, size) == -1)
 		fatal("imsg_add error");
-	if (imsg_close(&ibuf_se, wbuf) == -1)
+	if (imsg_close(ibuf_se, wbuf) == -1)
 		fatal("imsg_close error");
 	peer->state = PEER_ERR;
 }
@@ -1433,14 +1514,14 @@ rde_dump_rib_as(struct prefix *p, pid_t pid)
 		rib.flags |= F_RIB_ELIGIBLE;
 	rib.aspath_len = aspath_length(p->aspath->aspath);
 
-	if ((wbuf = imsg_create_pid(&ibuf_se, IMSG_CTL_SHOW_RIB, pid,
+	if ((wbuf = imsg_create(ibuf_se, IMSG_CTL_SHOW_RIB, 0, pid,
 	    sizeof(rib) + rib.aspath_len)) == NULL)
 		return;
 	if (imsg_add(wbuf, &rib, sizeof(rib)) == -1 ||
 	    imsg_add(wbuf, aspath_dump(p->aspath->aspath),
 	    rib.aspath_len) == -1)
 		return;
-	if (imsg_close(&ibuf_se, wbuf) == -1)
+	if (imsg_close(ibuf_se, wbuf) == -1)
 		return;
 }
 
@@ -1462,7 +1543,7 @@ rde_dump_rib_prefix(struct prefix *p, pid_t pid)
 	if (p->aspath->nexthop == NULL ||
 	    p->aspath->nexthop->state == NEXTHOP_REACH)
 		prefix.flags |= F_RIB_ELIGIBLE;
-	if (imsg_compose_pid(&ibuf_se, IMSG_CTL_SHOW_RIB_PREFIX, pid,
+	if (imsg_compose(ibuf_se, IMSG_CTL_SHOW_RIB_PREFIX, 0, pid, -1,
 	    &prefix, sizeof(prefix)) == -1)
 		log_warnx("rde_dump_as: imsg_compose error");
 }
@@ -1480,7 +1561,7 @@ rde_dump_upcall(struct pt_entry *pt, void *ptr)
 }
 
 void
-rde_dump_as(struct as_filter *a, pid_t pid)
+rde_dump_as(struct filter_as *a, pid_t pid)
 {
 	extern struct path_table	 pathtable;
 	struct rde_aspath		*asp;
@@ -1587,7 +1668,7 @@ rde_send_kroute(struct prefix *new, struct prefix *old)
 	if (p->aspath->flags & F_NEXTHOP_BLACKHOLE)
 		kr.flags |= F_BLACKHOLE;
 
-	if (imsg_compose(&ibuf_main, type, 0, &kr, sizeof(kr)) == -1)
+	if (imsg_compose(ibuf_main, type, 0, 0, -1, &kr, sizeof(kr)) == -1)
 		fatal("imsg_compose error");
 }
 
@@ -1608,16 +1689,17 @@ rde_send_pftable(const char *table, struct bgpd_addr *addr,
 	memcpy(&pfm.addr, addr, sizeof(pfm.addr));
 	pfm.len = len;
 
-	if (imsg_compose(&ibuf_main,
+	if (imsg_compose(ibuf_main,
 	    del ? IMSG_PFTABLE_REMOVE : IMSG_PFTABLE_ADD,
-	    0, &pfm, sizeof(pfm)) == -1)
+	    0, 0, -1, &pfm, sizeof(pfm)) == -1)
 		fatal("imsg_compose error");
 }
 
 void
 rde_send_pftable_commit(void)
 {
-	if (imsg_compose(&ibuf_main, IMSG_PFTABLE_COMMIT, 0, NULL, 0) == -1)
+	if (imsg_compose(ibuf_main, IMSG_PFTABLE_COMMIT, 0, 0, -1, NULL, 0) ==
+	    -1)
 		fatal("imsg_compose error");
 }
 
@@ -1637,7 +1719,7 @@ rde_send_nexthop(struct bgpd_addr *next, int valid)
 
 	size = sizeof(struct bgpd_addr);
 
-	if (imsg_compose(&ibuf_main, type, 0, next,
+	if (imsg_compose(ibuf_main, type, 0, 0, -1, next,
 	    sizeof(struct bgpd_addr)) == -1)
 		fatal("imsg_compose error");
 }
@@ -1704,8 +1786,8 @@ rde_update_queue_runner(void)
 				continue;
 
 			/* finally send message to SE */
-			if (imsg_compose(&ibuf_se, IMSG_UPDATE, peer->conf.id,
-			    queue_buf, wpos) == -1)
+			if (imsg_compose(ibuf_se, IMSG_UPDATE, peer->conf.id,
+			    0, -1, queue_buf, wpos) == -1)
 				fatal("imsg_compose error");
 			sent++;
 		}
@@ -1725,6 +1807,12 @@ int
 rde_noevaluate(void)
 {
 	return (conf->flags & BGPD_FLAG_NO_EVALUATE);
+}
+
+int
+rde_decisionflags(void)
+{
+	return (conf->flags & BGPD_FLAG_DECISION_MASK);
 }
 
 /*
@@ -1798,6 +1886,7 @@ peer_add(u_int32_t id, struct peer_config *p_conf)
 
 	LIST_INIT(&peer->path_h);
 	memcpy(&peer->conf, p_conf, sizeof(struct peer_config));
+	SIMPLEQ_INIT(&peer->conf.attrset);
 	peer->remote_bgpid = 0;
 	peer->state = PEER_NONE;
 	up_init(peer);
@@ -1816,7 +1905,70 @@ peer_remove(struct rde_peer *peer)
 	LIST_REMOVE(peer, hash_l);
 	LIST_REMOVE(peer, peer_l);
 
+	rde_free_set(&peer->conf.attrset);
 	free(peer);
+}
+
+void
+peer_localaddrs(struct rde_peer *peer, struct bgpd_addr *laddr)
+{
+	struct ifaddrs	*ifap, *ifa, *match;
+
+	if (getifaddrs(&ifap) == -1)
+		fatal("getifaddrs");
+
+	for (match = ifap; match != NULL; match = match->ifa_next)
+		if (sa_cmp(laddr, match->ifa_addr) == 0)
+			break;
+
+	if (match == NULL)
+		fatalx("peer_localaddrs: local address not found");
+
+	for (ifa = ifap; ifa != NULL; ifa = ifa->ifa_next) {
+		if (ifa->ifa_addr->sa_family == AF_INET &&
+		    strcmp(ifa->ifa_name, match->ifa_name) == 0) {
+			if (ifa->ifa_addr->sa_family ==
+			    match->ifa_addr->sa_family)
+				ifa = match;
+			peer->local_v4_addr.af = AF_INET;
+			peer->local_v4_addr.v4.s_addr =
+			    ((struct sockaddr_in *)ifa->ifa_addr)->
+			    sin_addr.s_addr;
+			break;
+		}
+	}
+
+	for (ifa = ifap; ifa != NULL; ifa = ifa->ifa_next) {
+		if (ifa->ifa_addr->sa_family == AF_INET6 &&
+		    strcmp(ifa->ifa_name, match->ifa_name) == 0) {
+			/*
+			 * only accept global scope addresses except explicitly
+			 * specified.
+			 */
+			if (ifa->ifa_addr->sa_family ==
+			    match->ifa_addr->sa_family)
+				ifa = match;
+			else {
+				if (IN6_IS_ADDR_LINKLOCAL(
+				    &((struct sockaddr_in6 *)ifa->
+				    ifa_addr)->sin6_addr) ||
+				    IN6_IS_ADDR_SITELOCAL(
+				    &((struct sockaddr_in6 *)ifa->
+				    ifa_addr)->sin6_addr))
+					continue;
+			}
+			peer->local_v6_addr.af = AF_INET6;
+			memcpy(&peer->local_v6_addr.v6,
+			    &((struct sockaddr_in6 *)ifa->ifa_addr)->
+			    sin6_addr, sizeof(struct in6_addr));
+			peer->local_v6_addr.scope_id =
+			    ((struct sockaddr_in6 *)ifa->ifa_addr)->
+			    sin6_scope_id;
+			break;
+		}
+	}
+
+	freeifaddrs(ifap);
 }
 
 void
@@ -1824,7 +1976,7 @@ peer_up(u_int32_t id, struct session_up *sup)
 {
 	struct rde_peer	*peer;
 
-	peer = peer_add(id, &sup->conf);
+	peer = peer_get(id);
 	if (peer == NULL) {
 		log_warnx("peer_up: peer id %d already exists", id);
 		return;
@@ -1833,9 +1985,11 @@ peer_up(u_int32_t id, struct session_up *sup)
 	if (peer->state != PEER_DOWN && peer->state != PEER_NONE)
 		fatalx("peer_up: bad state");
 	peer->remote_bgpid = ntohl(sup->remote_bgpid);
-	memcpy(&peer->local_addr, &sup->local_addr, sizeof(peer->local_addr));
 	memcpy(&peer->remote_addr, &sup->remote_addr,
 	    sizeof(peer->remote_addr));
+
+	peer_localaddrs(peer, &sup->local_addr);
+
 	peer->state = PEER_UP;
 	up_init(peer);
 
@@ -1944,13 +2098,16 @@ network_add(struct network_config *nc, int flagstatic)
 	    F_ATTR_LOCALPREF | F_PREFIX_ANNOUNCED;
 	/* the nexthop is unset unless a default set overrides it */
 
-	/* apply default overrides */
-	rde_apply_set(asp, &nc->attrset, nc->prefix.af);
-
-	if (flagstatic)
+	if (flagstatic) {
+		rde_apply_set(asp, &nc->attrset, nc->prefix.af, &peerself,
+		    DIR_DEFAULT_IN);
 		path_update(&peerself, asp, &nc->prefix, nc->prefixlen);
-	else
+	} else {
+		rde_apply_set(asp, &nc->attrset, nc->prefix.af, &peerdynamic,
+		    DIR_DEFAULT_IN);
 		path_update(&peerdynamic, asp, &nc->prefix, nc->prefixlen);
+	}
+	rde_free_set(&nc->attrset);
 }
 
 void
@@ -1980,8 +2137,8 @@ network_dump_upcall(struct pt_entry *pt, void *ptr)
 		    k.prefixlen = p->prefix->prefixlen;
 		    if (p->peer == &peerself)
 			    k.flags = F_KERNEL;
-		    if (imsg_compose_pid(&ibuf_se, IMSG_CTL_SHOW_NETWORK, pid,
-			&k, sizeof(k)) == -1)
+		    if (imsg_compose(ibuf_se, IMSG_CTL_SHOW_NETWORK, 0, pid,
+			-1, &k, sizeof(k)) == -1)
 			    log_warnx("network_dump_upcall: "
 				"imsg_compose error");
 	    }
@@ -2061,5 +2218,43 @@ rde_shutdown(void)
 	pt_shutdown();
 	peer_shutdown();
 	free(mrt);
+}
+
+int
+sa_cmp(struct bgpd_addr *a, struct sockaddr *b)
+{
+	struct sockaddr_in	*in_b;
+	struct sockaddr_in6	*in6_b;
+
+	if (a->af != b->sa_family)
+		return (1);
+
+	switch (a->af) {
+	case AF_INET:
+		in_b = (struct sockaddr_in *)b;
+		if (a->v4.s_addr != in_b->sin_addr.s_addr)
+			return (1);
+		break;
+	case AF_INET6:
+		in6_b = (struct sockaddr_in6 *)b;
+#if defined(__KAME__) && defined(KAME_SCOPEID)
+		/* directly stolen from sbin/ifconfig/ifconfig.c */
+		if (IN6_IS_ADDR_LINKLOCAL(&in6_b->sin6_addr)) {
+			in6_b->sin6_scope_id =
+			    ntohs(*(u_int16_t *)&in6_b->sin6_addr.s6_addr[2]);
+			in6_b->sin6_addr.s6_addr[2] =
+			    in6_b->sin6_addr.s6_addr[3] = 0;
+		}
+#endif
+		if (bcmp(&a->v6, &in6_b->sin6_addr,
+		    sizeof(struct in6_addr)))
+			return (1);
+		break;
+	default:
+		fatal("king bula sez: unknown address family");
+		/* NOTREACHED */
+	}
+
+	return (0);
 }
 

@@ -1,4 +1,4 @@
-dnl	$OpenBSD: hardware,v 1.9 2004/04/19 22:54:07 pvalchev Exp $
+dnl	$OpenBSD: hardware,v 1.19 2005/03/18 23:51:39 miod Exp $
 OpenBSD/MACHINE runs on the Chalice/Simtec StrongARM 110 Evaluation Board.
 
 Supported devices {:-include-:}:
@@ -11,7 +11,9 @@ Supported devices {:-include-:}:
 		HighPoint HPT366, HPT370, HPT372, HPT302, HPT371, HPT374
 		    (RAID mode is not supported)
 		Intel PIIX, PIIX3, and PIIX4
-		Intel 82801 (ICH/ICH0/ICH2/ICH3/ICH4/ICH4-M/ICH5/ICH5R)
+		Intel 82801 (ICH/ICH0/ICH2/ICH3/ICH4/ICH4-M/ICH5/ICH5R/
+		    ICH6/ICH6R)
+		Intel 6300ESB
 		National Semiconductor PC87415
 		NVIDIA nForce/nForce2
 		Promise PDC20246, PDC20262, PDC20265, PDC20267, PDC20268,
@@ -24,9 +26,9 @@ Supported devices {:-include-:}:
 		(Other PCI IDE-compliant controllers should work, but
 		 those not listed above may not be capable of DMA modes)
 	SCSI Host Adapters
-		adaptec AIC-7770, AIC-7850, AIC-7860, AIC-7870, AIC-7880,
+		Adaptec AIC-7770, AIC-7850, AIC-7860, AIC-7870, AIC-7880,
 		    AIC-7890, AIC-7891, AIC-7892, AIC-7895, AIC-7896, AIC-7897
-		    and AIC-7899 based host adapters [C] including the
+		    and AIC-7899 based host adapters including the
 		    Adaptec cards
 			AHA-274X[W,T]
 			AHA-284X
@@ -99,9 +101,22 @@ Supported devices {:-include-:}:
 		    SMC EZ Connect USB
 		    SOHOware NUB100
 		ASIX Electronics AX88172 USB Ethernet adapters, including:
-		    D-Link DUBE100
+		    ATEN UC210T
+		    Billionton Systems USB2AR
+		    Buffalo(MELCO) LUA-U2-KTX
+		    Corega FEther USB2-TX
+		    D-Link DUB-E100
+		    Hawking UF200
+		    Intellinet USB 2.0 to Ethernet (rev A)
+		    JVC MP-PRX1
 		    LinkSys USB200M
 		    Netgear FA120
+		    Sitecom LN-029
+		    SnapPort USB 2.0 LAN Adapter
+		    ST Lab USB 2.0 Fast Ethernet
+		    Surecom EP-1427X-2
+		    System TALKS SGC-X2UL
+		    TRENDnet TU2-ET100
 		CATC USB-EL1210A-based USB adapters, including:
 		    CATC Netmate and Netmate II
 		    Belkin F5U011/F5U111
@@ -125,18 +140,29 @@ Supported devices {:-include-:}:
 		Kawasaki LSI KL5KUSB101B-based USB adapters, including:
 		    3Com 3c19250
 		    3Com 3c460 HomeConnect
+		    AboCom Systems URE450 Ethernet
 		    ADS Technologies USB-10T
 		    Aox USB101
+		    Asante USB to Ethernet
+		    ATen DSB-650C
 		    ATen UC10T
 		    Corega USB-T
-		    D-Link DSB-650
+		    D-Link DSB-650C
 		    Entegra NET-USB-E45
+		    I/O Data USB-ET/T
+		    Jaton USB XpressNet
 		    Kawasaki USB101
+		    Kingston Ethernet
 		    LinkSys USB10T
+		    Mobility Ethernet
 		    Netgear EA101
 		    Peracom USB
+		    Portgear Ethernet
+		    Portsmith Express Ethernet
+		    Psion Dacom Gold Port Ethernet
+		    Shark Pocket Adapter
+		    Silicom U2E
 		    SMC 2102/2104USB
-		    I/O Data USB-ET/T
 		Novell NE1000, NE2000
 		VIA Rhine/RhineII/RhineIII Ethernet adapters, including:
 		    Addtron AEF-360TX
@@ -146,18 +172,35 @@ Supported devices {:-include-:}:
 		USB Adapters
 		    Acer Warplink USB-400
 		    Actiontec HWU01170
+		    AirVast WM168b
+		    Ambit WLAN
+		    Apacer Wireless Steno MB112
+		    ASUS WL-140
+		    Compaq W100
 		    Corega WLUSB-11
+		    Corega WLUSB-11 Key
+		    D-Link DWL-120 (rev F)
+		    D-Link DWL-122
 		    I-O DATA WN-B11/USB
 		    Intel PRO/Wireless 2011B
 		    Intersil Prism 2X
 		    JVC MP-XP7250
 		    Linksys WUSB11 v3.0
 		    Linksys WUSB12
+		    Melco WLI-USB-KB11
 		    Melco WLI-USB-KS11G
-		    MicroSoft MN510
-		    Netgear MA111
+		    Melco WLI-USB-S11
+		    Microsoft MN510
+		    Netgear MA111 (version 1)
+		    Pheenet WL-503IA
+		    Planex GW-US11H
 		    Siemens SpeedStream SS1022
+		    Sitecom WL-022
 		    Syntax USB-400
+		    US Robotics 1120
+		    Z-Com XI-725/726
+		    Z-Com XI-735
+		    ZyXEL ZyAIR B-200
 	Gigabit Ethernet Adapters
 		Intel i82540, i82542, i82543, i82544, i82545, and i82546
 	       	based adapters, including:

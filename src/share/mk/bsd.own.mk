@@ -1,4 +1,4 @@
-#	$OpenBSD: bsd.own.mk,v 1.88 2004/09/06 06:38:02 deraadt Exp $
+#	$OpenBSD: bsd.own.mk,v 1.92 2005/01/18 00:28:42 mickey Exp $
 #	$NetBSD: bsd.own.mk,v 1.24 1996/04/13 02:08:09 thorpej Exp $
 
 # Host-specific overrides
@@ -31,14 +31,13 @@ ELF_TOOLCHAIN?=	no
 ELF_TOOLCHAIN?=	yes
 .endif
 
-# do the dew
-.if ${MACHINE} == "amd64" || ${MACHINE_ARCH} == "arm" || \
-    ${MACHINE_ARCH} == "hppa" || ${MACHINE_ARCH} == "hppa64" || \
-    ${MACHINE_ARCH} == "sparc64" || ${MACHINE_ARCH} == "x86_64" || \
-    ${MACHINE_ARCH} == "mips64"
-USE_GCC3?=yes
-.else
+# gcc3
+.if ${MACHINE_ARCH} == "alpha" || \
+    ${MACHINE_ARCH} == "m68k" || ${MACHINE_ARCH} == "m88k" || \
+    ${MACHINE_ARCH} == "sparc" || ${MACHINE_ARCH} == "vax"
 USE_GCC3?=no
+.else
+USE_GCC3?=yes
 .endif
 
 # where the system object and source trees are kept; can be configurable

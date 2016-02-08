@@ -1,4 +1,4 @@
-/*	$OpenBSD: cmd.c,v 1.35 2004/07/13 06:00:33 tom Exp $	*/
+/*	$OpenBSD: cmd.c,v 1.38 2005/01/19 15:48:20 deraadt Exp $	*/
 
 /*
  * Copyright (c) 1997 Tobias Weingartner
@@ -60,6 +60,7 @@ Xreinit(cmd_t *cmd, disk_t *disk, mbr_t *mbr, mbr_t *tt, int offset)
 	return (CMD_DIRTY);
 }
 
+/* ARGSUSED */
 int
 Xdisk(cmd_t *cmd, disk_t *disk, mbr_t *mbr, mbr_t *tt, int offset)
 {
@@ -92,6 +93,49 @@ Xdisk(cmd_t *cmd, disk_t *disk, mbr_t *mbr, mbr_t *tt, int offset)
 	return (CMD_CONT);
 }
 
+/* ARGSUSED */
+int
+Xswap(cmd_t *cmd, disk_t *disk, mbr_t *mbr, mbr_t *tt, int offset)
+{
+	int pf, pt, ret;
+	prt_t pp;
+
+	ret = CMD_CONT;
+
+	if (!isdigit(cmd->args[0])) {
+		printf("Invalid argument: %s <from partition number>\n",
+		    cmd->cmd);
+		return (ret);
+	}
+
+	pf = atoi(cmd->args);
+	if (pf < 0 || pf > 3) {
+		printf("Invalid partition number %d.\n", pf);
+		return (ret);
+	}
+
+	pt = ask_num("Swap with what paritition?", ASK_DEC,
+	    -1, 0, 3, NULL);
+	if (pt < 0 || pt > 3) {
+		printf("Invalid partition number %d.\n", pt);
+		return (ret);
+	}
+
+	if (pt == pf) {
+		printf("%d same partition as %d, doing nothing.\n", pt, pf);
+		return (ret);
+	}
+
+	pp = mbr->part[pt];
+	mbr->part[pt] = mbr->part[pf];
+	mbr->part[pf] = pp;
+
+	ret = CMD_DIRTY;
+	return (ret);
+}
+
+
+/* ARGSUSED */
 int
 Xedit(cmd_t *cmd, disk_t *disk, mbr_t *mbr, mbr_t *tt, int offset)
 {
@@ -177,6 +221,7 @@ Xedit(cmd_t *cmd, disk_t *disk, mbr_t *mbr, mbr_t *tt, int offset)
 	return (ret);
 }
 
+/* ARGSUSED */
 int
 Xsetpid(cmd_t *cmd, disk_t *disk, mbr_t *mbr, mbr_t *tt, int offset)
 {
@@ -212,6 +257,8 @@ Xsetpid(cmd_t *cmd, disk_t *disk, mbr_t *mbr, mbr_t *tt, int offset)
 #undef EDIT
 	return (ret);
 }
+
+/* ARGSUSED */
 int
 Xselect(cmd_t *cmd, disk_t *disk, mbr_t *mbr, mbr_t *tt, int offset)
 {
@@ -250,6 +297,7 @@ Xselect(cmd_t *cmd, disk_t *disk, mbr_t *mbr, mbr_t *tt, int offset)
 	return (CMD_CONT);
 }
 
+/* ARGSUSED */
 int
 Xprint(cmd_t *cmd, disk_t *disk, mbr_t *mbr, mbr_t *tt, int offset)
 {
@@ -261,6 +309,7 @@ Xprint(cmd_t *cmd, disk_t *disk, mbr_t *mbr, mbr_t *tt, int offset)
 	return (CMD_CONT);
 }
 
+/* ARGSUSED */
 int
 Xwrite(cmd_t *cmd, disk_t *disk, mbr_t *mbr, mbr_t *tt, int offset)
 {
@@ -276,6 +325,7 @@ Xwrite(cmd_t *cmd, disk_t *disk, mbr_t *mbr, mbr_t *tt, int offset)
 	return (CMD_CLEAN);
 }
 
+/* ARGSUSED */
 int
 Xquit(cmd, disk, r, tt, offset)
 	cmd_t *cmd;
@@ -289,6 +339,7 @@ Xquit(cmd, disk, r, tt, offset)
 	return (CMD_SAVE);
 }
 
+/* ARGSUSED */
 int
 Xabort(cmd_t *cmd, disk_t *disk, mbr_t *mbr, mbr_t *tt, int offset)
 {
@@ -299,6 +350,7 @@ Xabort(cmd_t *cmd, disk_t *disk, mbr_t *mbr, mbr_t *tt, int offset)
 }
 
 
+/* ARGSUSED */
 int
 Xexit(cmd_t *cmd, disk_t *disk, mbr_t *mbr, mbr_t *tt, int offset)
 {
@@ -307,6 +359,7 @@ Xexit(cmd_t *cmd, disk_t *disk, mbr_t *mbr, mbr_t *tt, int offset)
 	return (CMD_EXIT);
 }
 
+/* ARGSUSED */
 int
 Xhelp(cmd_t *cmd, disk_t *disk, mbr_t *mbr, mbr_t *tt, int offset)
 {
@@ -319,6 +372,7 @@ Xhelp(cmd_t *cmd, disk_t *disk, mbr_t *mbr, mbr_t *tt, int offset)
 	return (CMD_CONT);
 }
 
+/* ARGSUSED */
 int
 Xupdate(cmd_t *cmd, disk_t *disk, mbr_t *mbr, mbr_t *tt, int offset)
 {
@@ -330,6 +384,7 @@ Xupdate(cmd_t *cmd, disk_t *disk, mbr_t *mbr, mbr_t *tt, int offset)
 	return (CMD_DIRTY);
 }
 
+/* ARGSUSED */
 int
 Xflag(cmd_t *cmd, disk_t *disk, mbr_t *mbr, mbr_t *tt, int offset)
 {
@@ -359,22 +414,27 @@ Xflag(cmd_t *cmd, disk_t *disk, mbr_t *mbr, mbr_t *tt, int offset)
 	return (CMD_DIRTY);
 }
 
+/* ARGSUSED */
 int
 Xmanual(cmd_t *cmd, disk_t *disk, mbr_t *mbr, mbr_t *tt, int offset)
 {
 	char *pager = "/usr/bin/less";
 	char *p;
 	sig_t opipe;
-	extern char manpage[];
+	extern const char manpage[];
+	extern const int manpage_sz;
 	FILE *f;
 
 	opipe = signal(SIGPIPE, SIG_IGN);
 	if ((p = getenv("PAGER")) != NULL && (*p != '\0'))
 		pager = p;
-	f = popen(pager, "w");
-	if (f) {
-		(void) fwrite(manpage, strlen(manpage), 1, f);
-		pclose(f);
+	if (asprintf(&p, "gunzip -qc|%s", pager) != -1) {
+		f = popen(p, "w");
+		if (f) {
+			(void) fwrite(manpage, manpage_sz, 1, f);
+			pclose(f);
+		}
+		free(p);
 	}
 
 	(void)signal(SIGPIPE, opipe);

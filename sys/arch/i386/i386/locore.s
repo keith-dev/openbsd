@@ -1,4 +1,4 @@
-/*	$OpenBSD: locore.s,v 1.80 2004/07/20 20:16:44 art Exp $	*/
+/*	$OpenBSD: locore.s,v 1.82 2005/02/10 04:06:01 weingart Exp $	*/
 /*	$NetBSD: locore.s,v 1.145 1996/05/03 19:41:19 christos Exp $	*/
 
 /*-
@@ -261,6 +261,7 @@ _C_LABEL(atdevbase):	.long	0	# location of start of iomem in virtual
 _C_LABEL(bootapiver):	.long	0	# /boot API version
 _C_LABEL(bootargc):	.long	0	# /boot argc
 _C_LABEL(bootargv):	.long	0	# /boot argv
+_C_LABEL(bootdev):	.long	0	# device we booted from
 _C_LABEL(proc0paddr):	.long	0
 _C_LABEL(PTDpaddr):	.long	0	# paddr of PTD, for libkvm
 
@@ -1242,6 +1243,8 @@ ENTRY(copyoutstr)
 
 1:	decl	%edx
 	jz	2f
+	cmpl	$VM_MAXUSER_ADDRESS,%edi
+	jae	_C_LABEL(copystr_fault)
 	lodsb
 	stosb
 	testb	%al,%al

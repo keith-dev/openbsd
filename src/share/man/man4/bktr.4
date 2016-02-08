@@ -29,7 +29,7 @@
 .\" (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
 .\" THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 .\"
-.\" $OpenBSD: bktr.4,v 1.16 2004/06/28 14:23:41 mickey Exp $
+.\" $OpenBSD: bktr.4,v 1.19 2005/02/24 20:24:41 mickey Exp $
 .\" $FreeBSD: /c/ncvs/src/share/man/man4/bktr.4,v 1.9.2.5 2001/03/06 19:08:09 ru Exp $
 .\"
 .Dd January 28, 1998
@@ -39,7 +39,7 @@
 .Nm bktr
 .Nd video capture driver
 .Sh SYNOPSIS
-.Cd "bktr* at pci? dev ? function ?"
+.Cd "bktr* at pci?"
 .Cd "radio* at bktr?"
 .Pp
 .Cd "option BKTR_ALLOC_PAGES=nnn"
@@ -59,6 +59,7 @@ The driver also supports FM Radio if the Tuner supports it.
 Specifically, the following cards are known to work:
 .Bd -unfilled -offset indent
 Animation Technologies FlyVideo
+AOpen VA1000
 Askey/Dynalink Magic TView
 ATI TV-Wonder and Wonder/VE
 AverMedia cards
@@ -66,6 +67,7 @@ Hauppauge Wincast TV and WinTV/PCI
 IMS TV Turbo
 Intel Smart Video Recorder III
 I/O DATA GV-BCTV2/PCI
+I/O DATA GV-BCTV3/PCI
 KISS TV/FM PCI
 Leadtek Winfast TV 2000
 Miro PC TV
@@ -75,7 +77,7 @@ STB TV PCI Television Tuner
 Terratec TerraTVplus
 Video Highway XTreme
 VideoLogic Captivator PCI
-Zoltrix TV
+Zoltrix TV and Genie TV/FM
 .Ed
 .Pp
 The driver currently supports the following features:
@@ -112,6 +114,10 @@ Askey/Dynalink Magic TView
 AverMedia
 .It FLYVIDEO
 Animation Technologies FlyVideo
+.It AOPEN_VA1000
+AOpen VA1000
+.It TVWONDER
+ATI TV-Wonder/VE
 .It HAUPPAUGE
 Hauppauge Wincast TV and WinTV
 .It IMS_TURBO
@@ -120,6 +126,8 @@ IMS TV Turbo
 Intel Smart Video Recorder III
 .It IO_GV
 I/O DATA GV-BCTV2/PCI
+.It IO_BCTV3
+I/O DATA GV-BCTV3/PCI
 .It KISS
 KISS TV/FM PCI
 .It LEADTEK
@@ -138,6 +146,8 @@ Terratec TerraTVplus
 Video Highway XTreme
 .It ZOLTRIX
 Zoltrix TV
+.It ZOLTRIX_GENIE_FM
+Zoltrix Genie TV/FM
 .El
 .It Cd option BKTR_OVERRIDE_MSP=n
 Specifies whether the MSP3400C chip is present (overrides autodetection).

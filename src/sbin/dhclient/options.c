@@ -1,4 +1,4 @@
-/*	$OpenBSD: options.c,v 1.11 2004/05/06 22:29:15 deraadt Exp $	*/
+/*	$OpenBSD: options.c,v 1.15 2004/12/26 03:17:07 deraadt Exp $	*/
 
 /* DHCP options parsing and reassembly. */
 
@@ -126,7 +126,7 @@ parse_option_buffer(struct packet *packet,
 
 		/*
 		 * If the length is outrageous, silently skip the rest,
-		 * and mark the packet bad. Unfortuntely some crappy
+		 * and mark the packet bad. Unfortunately some crappy
 		 * dhcp servers always seem to give us garbage on the
 		 * end of a packet. so rather than keep refusing, give
 		 * up and try to take one after seeing a few without
@@ -313,9 +313,9 @@ cons_options(struct packet *inpacket, struct dhcp_packet *outpacket,
 				    &buffer[bufix], option_size - bufix);
 				mainbufix = option_size - bufix;
 				if (mainbufix < DHCP_FILE_LEN)
-					outpacket->file[mainbufix++] = DHO_END;
+					outpacket->file[mainbufix++] = (char)DHO_END;
 				while (mainbufix < DHCP_FILE_LEN)
-					outpacket->file[mainbufix++] = DHO_PAD;
+					outpacket->file[mainbufix++] = (char)DHO_PAD;
 			} else {
 				memcpy(outpacket->file,
 				    &buffer[bufix], DHCP_FILE_LEN);
@@ -328,9 +328,9 @@ cons_options(struct packet *inpacket, struct dhcp_packet *outpacket,
 
 			mainbufix = option_size - bufix;
 			if (mainbufix < DHCP_SNAME_LEN)
-				outpacket->file[mainbufix++] = DHO_END;
+				outpacket->file[mainbufix++] = (char)DHO_END;
 			while (mainbufix < DHCP_SNAME_LEN)
-				outpacket->file[mainbufix++] = DHO_PAD;
+				outpacket->file[mainbufix++] = (char)DHO_PAD;
 		}
 	}
 	return (length);
@@ -458,7 +458,7 @@ pretty_print_option(unsigned int code, unsigned char *data, int len,
 
 	/* Code should be between 0 and 255. */
 	if (code > 255)
-		error("pretty_print_option: bad code %d\n", code);
+		error("pretty_print_option: bad code %d", code);
 
 	if (emit_commas)
 		comma = ',';
@@ -600,7 +600,7 @@ pretty_print_option(unsigned int code, unsigned char *data, int len,
 			case 'l':
 				opcount = snprintf(op, opleft, "%ld",
 				    (long)getLong(dp));
-				if (opcount >= opleft)
+				if (opcount >= opleft || opcount == -1)
 					goto toobig;
 				opleft -= opcount;
 				dp += 4;
@@ -608,7 +608,7 @@ pretty_print_option(unsigned int code, unsigned char *data, int len,
 			case 'L':
 				opcount = snprintf(op, opleft, "%ld",
 				    (unsigned long)getULong(dp));
-				if (opcount >= opleft)
+				if (opcount >= opleft || opcount == -1)
 					goto toobig;
 				opleft -= opcount;
 				dp += 4;
@@ -616,7 +616,7 @@ pretty_print_option(unsigned int code, unsigned char *data, int len,
 			case 's':
 				opcount = snprintf(op, opleft, "%d",
 				    getShort(dp));
-				if (opcount >= opleft)
+				if (opcount >= opleft || opcount == -1)
 					goto toobig;
 				opleft -= opcount;
 				dp += 2;
@@ -624,7 +624,7 @@ pretty_print_option(unsigned int code, unsigned char *data, int len,
 			case 'S':
 				opcount = snprintf(op, opleft, "%d",
 				    getUShort(dp));
-				if (opcount >= opleft)
+				if (opcount >= opleft || opcount == -1)
 					goto toobig;
 				opleft -= opcount;
 				dp += 2;
@@ -632,19 +632,19 @@ pretty_print_option(unsigned int code, unsigned char *data, int len,
 			case 'b':
 				opcount = snprintf(op, opleft, "%d",
 				    *(char *)dp++);
-				if (opcount >= opleft)
+				if (opcount >= opleft || opcount == -1)
 					goto toobig;
 				opleft -= opcount;
 				break;
 			case 'B':
 				opcount = snprintf(op, opleft, "%d", *dp++);
-				if (opcount >= opleft)
+				if (opcount >= opleft || opcount == -1)
 					goto toobig;
 				opleft -= opcount;
 				break;
 			case 'x':
 				opcount = snprintf(op, opleft, "%x", *dp++);
-				if (opcount >= opleft)
+				if (opcount >= opleft || opcount == -1)
 					goto toobig;
 				opleft -= opcount;
 				break;

@@ -1,4 +1,4 @@
-/* $OpenBSD: netcat.c,v 1.73 2004/07/15 15:07:52 markus Exp $ */
+/* $OpenBSD: netcat.c,v 1.77 2005/02/08 15:26:23 otto Exp $ */
 /*
  * Copyright (c) 2001 Eric Jackson <ericj@monkey.org>
  *
@@ -86,8 +86,8 @@ void	build_ports(char *);
 void	help(void);
 int	local_listen(char *, char *, struct addrinfo);
 void	readwrite(int);
-int	remote_connect(char *, char *, struct addrinfo);
-int	socks_connect(char *, char *, struct addrinfo, char *, char *,
+int	remote_connect(const char *, const char *, struct addrinfo);
+int	socks_connect(const char *, const char *, struct addrinfo, const char *, const char *,
 	struct addrinfo, int);
 int	udptest(int);
 int	unix_connect(char *);
@@ -102,9 +102,9 @@ main(int argc, char *argv[])
 	struct addrinfo hints;
 	struct servent *sv;
 	socklen_t len;
-	struct sockaddr *cliaddr;
+	struct sockaddr_storage cliaddr;
 	char *proxy;
-	char *proxyhost = "", *proxyport = NULL;
+	const char *proxyhost = "", *proxyport = NULL;
 	struct addrinfo proxyhints;
 
 	ret = 1;
@@ -127,9 +127,14 @@ main(int argc, char *argv[])
 			family = AF_UNIX;
 			break;
 		case 'X':
-			socksv = (int)strtoul(optarg, &endp, 10);
-			if ((socksv != 4 && socksv != 5) || *endp != '\0')
-				errx(1, "only SOCKS version 4 and 5 supported");
+			if (strcasecmp(optarg, "connect") == 0)
+				socksv = -1; /* HTTP proxy CONNECT */
+			else if (strcmp(optarg, "4") == 0)
+				socksv = 4; /* SOCKS v.4 */
+			else if (strcmp(optarg, "5") == 0)
+				socksv = 5; /* SOCKS v.5 */
+			else
+				errx(1, "unsupported proxy protocol");
 			break;
 		case 'd':
 			dflag = 1;
@@ -447,7 +452,7 @@ unix_listen(char *path)
  * port or source address if needed. Returns -1 on failure.
  */
 int
-remote_connect(char *host, char *port, struct addrinfo hints)
+remote_connect(const char *host, const char *port, struct addrinfo hints)
 {
 	struct addrinfo *res, *res0;
 	int s, error, x = 1;
@@ -583,8 +588,8 @@ void
 readwrite(int nfd)
 {
 	struct pollfd pfd[2];
-	char buf[BUFSIZ];
-	int wfd = fileno(stdin), n, ret;
+	unsigned char buf[BUFSIZ];
+	int wfd = fileno(stdin), n;
 	int lfd = fileno(stdout);
 
 	/* Setup Network FD */
@@ -617,9 +622,8 @@ readwrite(int nfd)
 			} else {
 				if (tflag)
 					atelnet(nfd, buf, n);
-				if ((ret = atomicio(
-				    (ssize_t (*)(int, void *, size_t))write,
-				    lfd, buf, n)) != n)
+				if (atomicio((ssize_t (*)(int, void *, size_t))write,
+				    lfd, buf, n) != n)
 					return;
 			}
 		}
@@ -632,9 +636,8 @@ readwrite(int nfd)
 				pfd[1].fd = -1;
 				pfd[1].events = 0;
 			} else {
-				if ((ret = atomicio(
-				    (ssize_t (*)(int, void *, size_t))write,
-				    nfd, buf, n)) != n)
+				if (atomicio((ssize_t (*)(int, void *, size_t))write,
+				    nfd, buf, n) != n)
 					return;
 			}
 		}
@@ -645,7 +648,6 @@ readwrite(int nfd)
 void
 atelnet(int nfd, unsigned char *buf, unsigned int size)
 {
-	int ret;
 	unsigned char *p, *end;
 	unsigned char obuf[4];
 
@@ -666,9 +668,8 @@ atelnet(int nfd, unsigned char *buf, unsigned int size)
 			p++;
 			obuf[2] = *p;
 			obuf[3] = '\0';
-			if ((ret = atomicio(
-			    (ssize_t (*)(int, void *, size_t))write,
-			    nfd, obuf, 3)) != 3)
+			if (atomicio((ssize_t (*)(int, void *, size_t))write,
+			    nfd, obuf, 3) != 3)
 				warnx("Write Error!");
 			obuf[0] = '\0';
 		}
@@ -749,10 +750,10 @@ build_ports(char *p)
 int
 udptest(int s)
 {
-	int i, rv, ret;
+	int i, ret;
 
 	for (i = 0; i <= 3; i++) {
-		if ((rv = write(s, "X", 1)) == 1)
+		if (write(s, "X", 1) == 1)
 			ret = 1;
 		else
 			ret = -1;
@@ -783,8 +784,8 @@ help(void)
 	\t-u		UDP mode\n\
 	\t-v		Verbose\n\
 	\t-w secs\t	Timeout for connects and final net reads\n\
-	\t-X vers\t	SOCKS version (4 or 5)\n\
-	\t-x addr[:port]\tSpecify socks proxy address and port\n\
+	\t-X proto	Proxy protocol: \"4\", \"5\" (SOCKS) or \"connect\"\n\
+	\t-x addr[:port]\tSpecify proxy address and port\n\
 	\t-z		Zero-I/O mode [used for scanning]\n\
 	Port numbers can be individual or ranges: lo-hi [inclusive]\n");
 	exit(1);
@@ -794,7 +795,7 @@ void
 usage(int ret)
 {
 	fprintf(stderr, "usage: nc [-46DdhklnrStUuvz] [-i interval] [-p source_port]\n");
-	fprintf(stderr, "\t  [-s source_ip_address] [-w timeout] [-X socks_version]\n");
+	fprintf(stderr, "\t  [-s source_ip_address] [-w timeout] [-X proxy_version]\n");
 	fprintf(stderr, "\t  [-x proxy_address[:port]] [hostname] [port[s]]\n");
 	if (ret)
 		exit(1);

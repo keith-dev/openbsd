@@ -1,4 +1,4 @@
-/*	$OpenBSD: http_protocol.c,v 1.26 2004/06/07 04:24:00 brad Exp $ */
+/*	$OpenBSD: http_protocol.c,v 1.28 2005/02/09 12:13:09 henning Exp $ */
 /* ====================================================================
  * The Apache Software License, Version 1.1
  *
@@ -84,33 +84,6 @@
   do { if (r->sent_bodyct) \
           ap_bgetopt (r->connection->client, BO_BYTECT, &r->bytes_sent); \
   } while (0)
-
-#ifdef CHARSET_EBCDIC
-/* Save & Restore the current conversion settings
- * "input"  means: ASCII -> EBCDIC (when reading MIME Headers and PUT/POST data)
- * "output" means: EBCDIC -> ASCII (when sending MIME Headers and Chunks)
- */
-
-#define PUSH_EBCDIC_INPUTCONVERSION_STATE(_buff, _onoff) \
-        int _convert_in = ap_bgetflag(_buff, B_ASCII2EBCDIC); \
-        ap_bsetflag(_buff, B_ASCII2EBCDIC, _onoff);
-
-#define POP_EBCDIC_INPUTCONVERSION_STATE(_buff) \
-        ap_bsetflag(_buff, B_ASCII2EBCDIC, _convert_in);
-
-#define PUSH_EBCDIC_INPUTCONVERSION_STATE_r(_req, _onoff) \
-        ap_bsetflag(_req->connection->client, B_ASCII2EBCDIC, _onoff);
-
-#define POP_EBCDIC_INPUTCONVERSION_STATE_r(_req) \
-        ap_bsetflag(_req->connection->client, B_ASCII2EBCDIC, _req->ebcdic.conv_in);
-
-#define PUSH_EBCDIC_OUTPUTCONVERSION_STATE_r(_req, _onoff) \
-        ap_bsetflag(_req->connection->client, B_EBCDIC2ASCII, _onoff);
-
-#define POP_EBCDIC_OUTPUTCONVERSION_STATE_r(_req) \
-        ap_bsetflag(_req->connection->client, B_EBCDIC2ASCII, _req->ebcdic.conv_out);
-
-#endif /*CHARSET_EBCDIC*/
 
 /*
  * Builds the content-type that should be sent to the client from the
@@ -249,14 +222,6 @@ static int byterange_boundary(request_rec *r, long start, long end, int output)
 {
     int length = 0;
 
-#ifdef CHARSET_EBCDIC
-    /* determine current setting of conversion flag,
-     * set to ON (protocol strings MUST be converted)
-     * and reset to original setting before returning
-     */
-    PUSH_EBCDIC_OUTPUTCONVERSION_STATE_r(r, 1);
-#endif /*CHARSET_EBCDIC*/
-
     if (start < 0 || end < 0) {
 	if (output)
 	    ap_rvputs(r, CRLF "--", r->boundary, "--" CRLF, NULL);
@@ -276,10 +241,6 @@ static int byterange_boundary(request_rec *r, long start, long end, int output)
 	    length = 4 + strlen(r->boundary) + 16
 		+ strlen(ct) + 23 + strlen(ts) + 4;
     }
-
-#ifdef CHARSET_EBCDIC
-    POP_EBCDIC_OUTPUTCONVERSION_STATE_r(r);
-#endif /*CHARSET_EBCDIC*/
 
     return length;
 }
@@ -897,17 +858,6 @@ API_EXPORT(int) ap_getline(char *s, int n, BUFF *in, int fold)
     char *pos, next;
     int retval;
     int total = 0;
-#ifdef CHARSET_EBCDIC
-    /* When ap_getline() is called, the HTTP protocol is in a state
-     * where we MUST be reading "plain text" protocol stuff,
-     * (Request line, MIME headers, Chunk sizes) regardless of
-     * the MIME type and conversion setting of the document itself.
-     * Save the current setting of the ASCII-EBCDIC conversion flag
-     * for uploads, then temporarily set it to ON
-     * (and restore it before returning).
-     */
-    PUSH_EBCDIC_INPUTCONVERSION_STATE(in, 1);
-#endif /*CHARSET_EBCDIC*/
 
     pos = s;
 
@@ -952,11 +902,6 @@ API_EXPORT(int) ap_getline(char *s, int n, BUFF *in, int fold)
                   && (ap_blookc(&next, in) == 1)
                   && ((next == ' ') || (next == '\t')));
 
-#ifdef CHARSET_EBCDIC
-    /* restore ASCII->EBCDIC conversion state */
-    POP_EBCDIC_INPUTCONVERSION_STATE(in);
-#endif /*CHARSET_EBCDIC*/
-
     return total;
 }
 
@@ -990,18 +935,6 @@ CORE_EXPORT(void) ap_parse_uri(request_rec *r, const char *uri)
 	r->args = r->parsed_uri.query;
 	r->uri = r->parsed_uri.path ? r->parsed_uri.path
 				    : ap_pstrdup(r->pool, "/");
-#if defined(OS2) || defined(WIN32)
-	/* Handle path translations for OS/2 and plug security hole.
-	 * This will prevent "http://www.wherever.com/..\..\/" from
-	 * returning a directory for the root drive.
-	 */
-	{
-	    char *x;
-
-	    for (x = r->uri; (x = strchr(x, '\\')) != NULL; )
-		*x = '/';
-	}
-#endif  /* OS2 || WIN32 */
     }
     else {
 	r->args = NULL;
@@ -1047,9 +980,7 @@ static int read_request_line(request_rec *r)
         }
     }
     /* we've probably got something to do, ignore graceful restart requests */
-#ifdef SIGUSR1
     signal(SIGUSR1, SIG_IGN);
-#endif
 
     ap_bsetflag(conn->client, B_SAFEREAD, 0);
 
@@ -1220,14 +1151,7 @@ API_EXPORT(request_rec *) ap_read_request(conn_rec *conn)
     r->status          = HTTP_REQUEST_TIME_OUT;  /* Until we get a request */
     r->the_request     = NULL;
 
-#ifdef EAPI
     r->ctx = ap_ctx_new(r->pool);
-#endif /* EAPI */
-
-#ifdef CHARSET_EBCDIC
-    ap_bsetflag(r->connection->client, B_ASCII2EBCDIC, r->ebcdic.conv_in  = 1);
-    ap_bsetflag(r->connection->client, B_EBCDIC2ASCII, r->ebcdic.conv_out = 1);
-#endif
 
     /* Get the request... */
 
@@ -1381,9 +1305,7 @@ API_EXPORT(void) ap_set_sub_req_protocol(request_rec *rnew, const request_rec *r
 
     rnew->main = (request_rec *) r;
 
-#ifdef EAPI
     rnew->ctx = r->ctx;
-#endif /* EAPI */
 
 }
 
@@ -1469,9 +1391,6 @@ API_EXPORT(int) ap_get_basic_auth_pw(request_rec *r, const char **pw)
         return AUTH_REQUIRED;
     }
 
-    /* No CHARSET_EBCDIC Issue here because the line has already
-     * been converted to native text.
-     */
     while (*auth_line== ' ' || *auth_line== '\t')
         auth_line++;
 
@@ -1494,15 +1413,7 @@ API_EXPORT(int) ap_get_basic_auth_pw(request_rec *r, const char **pw)
  * and must be listed in order.
  */
 
-#ifdef UTS21
-/* The second const triggers an assembler bug on UTS 2.1.
- * Another workaround is to move some code out of this file into another,
- *   but this is easier.  Dave Dykstra, 3/31/99 
- */
-static const char * status_lines[RESPONSE_CODES] =
-#else
 static const char * const status_lines[RESPONSE_CODES] =
-#endif
 {
     "100 Continue",
     "101 Switching Protocols",
@@ -1631,10 +1542,6 @@ API_EXPORT(void) ap_basic_http_header(request_rec *r)
     else
         protocol = SERVER_PROTOCOL;
 
-#ifdef CHARSET_EBCDIC
-    PUSH_EBCDIC_OUTPUTCONVERSION_STATE_r(r, 1);
-#endif /*CHARSET_EBCDIC*/
-
     /* output the HTTP/1.x Status-Line */
     ap_rvputs(r, protocol, " ", r->status_line, CRLF, NULL);
 
@@ -1656,9 +1563,6 @@ API_EXPORT(void) ap_basic_http_header(request_rec *r)
     /* unset so we don't send them again */
     ap_table_unset(r->headers_out, "Date");        /* Avoid bogosity */
     ap_table_unset(r->headers_out, "Server");
-#ifdef CHARSET_EBCDIC
-    POP_EBCDIC_OUTPUTCONVERSION_STATE_r(r);
-#endif /*CHARSET_EBCDIC*/
 }
 
 /* Navigator versions 2.x, 3.x and 4.0 betas up to and including 4.0b2
@@ -1728,10 +1632,6 @@ API_EXPORT(int) ap_send_http_trace(request_rec *r)
 
     r->content_type = "message/http";
     ap_send_http_header(r);
-#ifdef CHARSET_EBCDIC
-    /* Server-generated response, converted */
-    ap_bsetflag(r->connection->client, B_EBCDIC2ASCII, r->ebcdic.conv_out = 1);
-#endif
 
     /* Now we recreate the request, and echo it back */
 
@@ -1869,11 +1769,6 @@ API_EXPORT(void) ap_send_http_header(request_rec *r)
     int i;
     const long int zero = 0L;
 
-#ifdef CHARSET_EBCDIC
-    /* Use previously determined conversion (output): */
-    ap_bsetflag(r->connection->client, B_EBCDIC2ASCII, ap_checkconv(r));
-#endif /*CHARSET_EBCDIC*/
-
     if (r->assbackwards) {
         if (!r->main)
             ap_bsetopt(r->connection->client, BO_BYTECT, &zero);
@@ -1907,10 +1802,6 @@ API_EXPORT(void) ap_send_http_header(request_rec *r)
     ap_hard_timeout("send headers", r);
 
     ap_basic_http_header(r);
-
-#ifdef CHARSET_EBCDIC
-    PUSH_EBCDIC_OUTPUTCONVERSION_STATE_r(r, 1);
-#endif /*CHARSET_EBCDIC*/
 
     ap_set_keepalive(r);
 
@@ -1961,9 +1852,6 @@ API_EXPORT(void) ap_send_http_header(request_rec *r)
     /* Set buffer flags for the body */
     if (r->chunked)
         ap_bsetflag(r->connection->client, B_CHUNK, 1);
-#ifdef CHARSET_EBCDIC
-    POP_EBCDIC_OUTPUTCONVERSION_STATE_r(r);
-#endif /*CHARSET_EBCDIC*/
 }
 
 /* finalize_request_protocol is called at completion of sending the
@@ -1974,9 +1862,6 @@ API_EXPORT(void) ap_send_http_header(request_rec *r)
 API_EXPORT(void) ap_finalize_request_protocol(request_rec *r)
 {
     if (r->chunked && !r->connection->aborted) {
-#ifdef CHARSET_EBCDIC
-        PUSH_EBCDIC_OUTPUTCONVERSION_STATE_r(r, 1);
-#endif
         /*
          * Turn off chunked encoding --- we can only do this once.
          */
@@ -1989,9 +1874,6 @@ API_EXPORT(void) ap_finalize_request_protocol(request_rec *r)
         ap_rputs(CRLF, r);
         ap_kill_timeout(r);
 
-#ifdef CHARSET_EBCDIC
-        POP_EBCDIC_OUTPUTCONVERSION_STATE_r(r);
-#endif /*CHARSET_EBCDIC*/
     }
 }
 
@@ -2102,16 +1984,6 @@ API_EXPORT(int) ap_setup_client_block(request_rec *r, int read_policy)
           "limit of %lu", lenp, max_body);
         return HTTP_REQUEST_ENTITY_TOO_LARGE;
     }
-
-#ifdef CHARSET_EBCDIC
-    {
-        /* Determine the EBCDIC conversion for the uploaded content
-         * by looking at the Content-Type MIME header. 
-         * If no Content-Type header is found, text conversion is assumed.
-         */
-        ap_bsetflag(r->connection->client, B_ASCII2EBCDIC, ap_checkconv_in(r));
-    }
-#endif
 
     return OK;
 }
@@ -2325,19 +2197,10 @@ API_EXPORT(long) ap_get_client_block(request_rec *r, char *buffer, int bufsiz)
     r->remaining -= len_read;
 
     if (r->remaining == 0) {    /* End of chunk, get trailing CRLF */
-#ifdef CHARSET_EBCDIC
-        /* Chunk end is Protocol stuff! Set conversion = 1 to read CR LF: */
-        PUSH_EBCDIC_INPUTCONVERSION_STATE_r(r, 1);
-#endif /*CHARSET_EBCDIC*/
 
         if ((c = ap_bgetc(r->connection->client)) == CR) {
             c = ap_bgetc(r->connection->client);
         }
-
-#ifdef CHARSET_EBCDIC
-        /* restore ASCII->EBCDIC conversion state */
-        POP_EBCDIC_INPUTCONVERSION_STATE_r(r);
-#endif /*CHARSET_EBCDIC*/
 
         if (c != LF) {
             r->connection->keepalive = -1;
@@ -2469,20 +2332,14 @@ API_EXPORT(long) ap_send_fb_length(BUFF *fb, request_rec *r, long length)
     long total_bytes_sent = 0;
     register int n, w, o, len, fd;
     fd_set fds;
-#ifdef TPF
-    struct timeval tv;
-#endif 
 
     if (length == 0)
         return 0;
 
     /* Make fb unbuffered and non-blocking */
     ap_bsetflag(fb, B_RD, 0);
-#ifndef TPF_NO_NONSOCKET_SELECT
     ap_bnonblock(fb, B_RD);
-#endif
     fd = ap_bfileno(fb, B_RD);
-#ifdef CHECK_FD_SETSIZE
     if (fd >= FD_SETSIZE) {
 	ap_log_error(APLOG_MARK, APLOG_NOERRNO|APLOG_WARNING, NULL,
 	    "send body: filedescriptor (%u) larger than FD_SETSIZE (%u) "
@@ -2490,21 +2347,11 @@ API_EXPORT(long) ap_send_fb_length(BUFF *fb, request_rec *r, long length)
 	    "larger FD_SETSIZE", fd, FD_SETSIZE);
 	return 0;
     }
-#endif
 
     ap_soft_timeout("send body", r);
 
     FD_ZERO(&fds);
     while (!r->connection->aborted) {
-#ifdef NDELAY_PIPE_RETURNS_ZERO
-	/* Contributed by dwd@bell-labs.com for UTS 2.1.2, where the fcntl */
-	/*   O_NDELAY flag causes read to return 0 when there's nothing */
-	/*   available when reading from a pipe.  That makes it tricky */
-	/*   to detect end-of-file :-(.  This stupid bug is even documented */
-	/*   in the read(2) man page where it says that everything but */
-	/*   pipes return -1 and EAGAIN.  That makes it a feature, right? */
-	int afterselect = 0;
-#endif
         if ((length > 0) && (total_bytes_sent + IOBUFSIZE) > length)
             len = length - total_bytes_sent;
         else
@@ -2512,13 +2359,8 @@ API_EXPORT(long) ap_send_fb_length(BUFF *fb, request_rec *r, long length)
 
         do {
             n = ap_bread(fb, buf, len);
-#ifdef NDELAY_PIPE_RETURNS_ZERO
-	    if ((n > 0) || (n == 0 && afterselect))
-		break;
-#else
             if (n >= 0)
                 break;
-#endif
             if (r->connection->aborted)
                 break;
             if (n < 0 && errno != EAGAIN)
@@ -2537,16 +2379,7 @@ API_EXPORT(long) ap_send_fb_length(BUFF *fb, request_rec *r, long length)
              * we don't care what select says, we might as well loop back
              * around and try another read
              */
-#ifdef TPF_HAVE_NONSOCKET_SELECT
-            tv.tv_sec =  1;
-            tv.tv_usec = 0;
-            ap_select(fd + 1, &fds, NULL, NULL, &tv);
-#else
             ap_select(fd + 1, &fds, NULL, NULL, NULL);
-#endif  
-#ifdef NDELAY_PIPE_RETURNS_ZERO
-	    afterselect = 1;
-#endif
         } while (!r->connection->aborted);
 
         if (n < 1 || r->connection->aborted) {
@@ -2808,10 +2641,6 @@ API_EXPORT(void) ap_send_error_response(request_rec *r, int recursive_error)
     int idx = ap_index_of_response(status);
     char *custom_response;
     const char *location = ap_table_get(r->headers_out, "Location");
-#ifdef CHARSET_EBCDIC
-    /* Error Responses (builtin / string literal / redirection) are TEXT! */
-    ap_bsetflag(r->connection->client, B_EBCDIC2ASCII, r->ebcdic.conv_out = 1);
-#endif
 
     /*
      * It's possible that the Location field might be in r->err_headers_out
@@ -2904,11 +2733,6 @@ API_EXPORT(void) ap_send_error_response(request_rec *r, int recursive_error)
             return;
         }
     }
-
-#ifdef CHARSET_EBCDIC
-    /* Server-generated response, converted */
-    ap_bsetflag(r->connection->client, B_EBCDIC2ASCII, r->ebcdic.conv_out = 1);
-#endif
 
     ap_hard_timeout("send error body", r);
 

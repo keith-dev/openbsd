@@ -32,7 +32,7 @@
  * SUCH DAMAGE.
  *
  *	from: @(#)nfs_start.c	8.1 (Berkeley) 6/6/93
- *	$Id: nfs_start.c,v 1.13 2003/06/02 23:36:51 millert Exp $
+ *	$Id: nfs_start.c,v 1.15 2004/10/21 20:57:08 millert Exp $
  */
 
 #include "am.h"

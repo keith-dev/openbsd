@@ -1,4 +1,4 @@
-/*	$OpenBSD: kbd_wscons.c,v 1.16 2004/05/09 03:21:52 deraadt Exp $ */
+/*	$OpenBSD: kbd_wscons.c,v 1.20 2004/10/08 19:30:31 jaredy Exp $ */
 
 /*
  * Copyright (c) 2001 Mats O Jansson.  All rights reserved.
@@ -51,6 +51,7 @@
 #define SA_HILKBD 6
 #define	SA_GSCKBD 7
 
+#ifndef NOKVM
 struct nlist nl[] = {
 	{ "_pckbd_keydesctab" },
 	{ "_ukbd_keydesctab" },
@@ -74,6 +75,10 @@ char *kbtype_tab[] = {
 	"gsc",
 };
 
+int rebuild = 0;
+
+#endif /* NOKVM */
+
 struct nameint {
 	int value;
 	char *name;
@@ -92,7 +97,6 @@ struct nameint kbdvar_tab[] = {
 };
 
 extern char *__progname;
-int rebuild = 0;
 
 void	kbd_show_enc(kvm_t *kd, int idx);
 void	kbd_list(void);
@@ -152,9 +156,11 @@ void
 kbd_list(void)
 {
 	int	fd, i, kbtype;
+#ifndef NOKVM
 	kvm_t	*kd;
+	char	errbuf[LINE_MAX];
+#endif
 	char	device[MAXPATHLEN];
-	char	errbuf[_POSIX2_LINE_MAX];
 	int	pc_kbd = 0;
 	int	usb_kbd = 0;
 	int	adb_kbd = 0;
@@ -228,7 +234,7 @@ kbd_list(void)
 	kvm_close(kd);
 
 	if (rebuild > 0) {
-		printf("Unknown encoding or variant. kbd(1) needs to be rebuilt.\n");
+		printf("Unknown encoding or variant. kbd(8) needs to be rebuilt.\n");
 	}
 #else
 	printf("List not available; sorry.\n");
@@ -238,7 +244,7 @@ kbd_list(void)
 void
 kbd_set(char *name, int verbose)
 {
-	char	buf[_POSIX2_LINE_MAX];
+	char	buf[LINE_MAX];
 	char	*c,*b;
 	struct nameint *n;
 	int	map = 0,v,i,fd;
@@ -246,7 +252,8 @@ kbd_set(char *name, int verbose)
 
 	c = name;
 	b = buf;
-	while ((*c != '.') && (*c != '\0')) {
+	while ((*c != '.') && (*c != '\0') &&
+	    (b < buf + sizeof(buf) - 1)) {
 		*b++ = *c++;
 	}
 	*b = '\0';
@@ -262,7 +269,8 @@ kbd_set(char *name, int verbose)
 	while (*c == '.') {
 		b = buf;
 		c++;
-		while ((*c != '.') && (*c != '\0')) {
+		while ((*c != '.') && (*c != '\0') &&
+		    (b < buf + sizeof(buf) - 1)) {
 			*b++ = *c++;
 		}
 		*b = '\0';
@@ -303,5 +311,5 @@ kbd_set(char *name, int verbose)
 	}
 
 	if (verbose && v > 0)
-		fprintf(stderr, "keyboard mapping set to %s\n", name);
+		fprintf(stderr, "kbd: keyboard mapping set to %s\n", name);
 }

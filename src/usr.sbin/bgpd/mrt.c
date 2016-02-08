@@ -1,4 +1,4 @@
-/*	$OpenBSD: mrt.c,v 1.44 2004/08/13 14:03:20 claudio Exp $ */
+/*	$OpenBSD: mrt.c,v 1.47 2004/12/23 16:09:26 henning Exp $ */
 
 /*
  * Copyright (c) 2003, 2004 Claudio Jeker <claudio@openbsd.org>
@@ -308,7 +308,7 @@ mrt_dump_entry_mp(struct mrt *mrt, struct prefix *p, u_int16_t snum,
 	attr_len = mrt_attr_length(p->aspath, 0);
 	p_len = PREFIX_SIZE(p->prefix->prefixlen);
 	pt_getaddr(p->prefix, &addr);
-	
+
 	af = peer->remote_addr.af == 0 ? addr.af : peer->remote_addr.af;
 	switch (af) {
 	case AF_INET:
@@ -350,12 +350,12 @@ mrt_dump_entry_mp(struct mrt *mrt, struct prefix *p, u_int16_t snum,
 	switch (af) {
 	case AF_INET:
 		DUMP_SHORT(buf, AFI_IPv4);
-		DUMP_NLONG(buf, peer->local_addr.v4.s_addr);
+		DUMP_NLONG(buf, peer->local_v4_addr.v4.s_addr);
 		DUMP_NLONG(buf, peer->remote_addr.v4.s_addr);
 		break;
 	case AF_INET6:
 		DUMP_SHORT(buf, AFI_IPv6);
-		if (buf_add(buf, &peer->local_addr.v6,
+		if (buf_add(buf, &peer->local_v6_addr.v6,
 		    sizeof(struct in6_addr)) == -1 ||
 		    buf_add(buf, &peer->remote_addr.v6,
 		    sizeof(struct in6_addr)) == -1) {
@@ -598,7 +598,7 @@ mrt_open(struct mrt *mrt, time_t now)
 
 	i = mrt->type == MRT_TABLE_DUMP ? 0 : 1;
 
-	if (imsg_compose_fdpass(mrt_imsgbuf[i], type, mrt->fd,
+	if (imsg_compose(mrt_imsgbuf[i], type, 0, 0, mrt->fd,
 	    mrt, sizeof(struct mrt)) == -1)
 		log_warn("mrt_open");
 

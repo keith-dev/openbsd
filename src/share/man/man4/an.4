@@ -1,4 +1,4 @@
-.\"	$OpenBSD: an.4,v 1.21 2004/09/06 20:16:01 millert Exp $
+.\"	$OpenBSD: an.4,v 1.28 2005/03/06 21:49:00 jmc Exp $
 .\"
 .\" Copyright (c) 1997, 1998, 1999
 .\"	Bill Paul <wpaul@ee.columbia.edu>. All rights reserved.
@@ -37,20 +37,20 @@
 .Os
 .Sh NAME
 .Nm an
-.Nd Aironet Communications 4500/4800 IEEE 802.11DS wireless network adapter
+.Nd Aironet Communications 4500/4800 IEEE 802.11FH/b wireless network driver
 .Sh SYNOPSIS
-.Cd "an* at pcmcia? function ?"
-.Cd "an* at pci? dev ? function ?"
+.Cd "an* at pcmcia?"
+.Cd "an* at pci?"
 .Cd "an* at isapnp?"
 .Sh DESCRIPTION
 The
 .Nm
 driver provides support for the Aironet Communications 4500, 4800
 (aka Cisco 340), and Cisco 350
-IEEE 802.11 Direct Sequence wireless network adapters.
+IEEE 802.11 wireless network adapters.
 This includes the ISA, PCI, and PCMCIA varieties.
-The 4500 series adapters operate at 1 and 2Mbps while
-the 4800 and 350 series can operate at 1, 2, 5.5, and 11Mbps.
+The 4500 series adapters operate at 1 and 2Mbps (FH) while
+the 4800 and 350 series can operate at 1, 2, 5.5, and 11Mbps (DS).
 The ISA, PCI,
 and PCMCIA devices are all based on the same core PCMCIA modules
 and all have the same programming interface.
@@ -73,30 +73,72 @@ require no switch settings of any kind and will be automatically
 probed and attached.
 .Pp
 All host/device interaction with the Aironet cards is via programmed I/O.
-The Aironet devices support 802.11 and 802.3 frames, power management,
-BSS (infrastructure), and IBSS (ad-hoc) operation modes.
 The
 .Nm
-driver encapsulates all IP and ARP traffic as 802.11 frames, however,
+driver encapsulates all IP and ARP traffic as 802.11 frames, though
 it can receive either 802.11 or 802.3 frames.
-Transmit speed is
-selectable between 1Mbps, 2Mbps, 5.5Mbps, 11Mbps or
-"auto" (the NIC automatically chooses the best speed).
 .Pp
-By default, the
+These are the modes the
 .Nm
-driver configures the Aironet card for BSS operation with an SSID
-of "".
-In this mode,
-stations can communicate among each other without the aid of an access
-point.
-To join a service set, the driver must be set for BSS mode using
+driver can operate in:
+.Bl -tag -width "IBSS-masterXX"
+.It BSS mode
+Also known as
+.Em infrastructure
+mode, this is used when associating with an access point, through
+which all traffic passes.
+This mode is the default.
+.It IBSS mode
+Also known as
+.Em IEEE ad-hoc
+mode or
+.Em peer-to-peer
+mode.
+This is the standardized method of operating without an access point.
+Stations associate with a service set.
+However, actual connections between stations are peer-to-peer.
+.El
+.Pp
+.Nm
+supports hardware WEP.
+Wired Equivalent Privacy (WEP) is the de facto encryption standard
+for wireless networks.
+It can be typically configured in one of three modes:
+no encryption; 40-bit encryption; or 104-bit encryption.
+Unfortunately, due to serious weaknesses in WEP protocol
+it is strongly recommended that it not be used as the
+sole mechanism to secure wireless communication.
+WEP is not enabled by default.
+.Pp
+The
+.Nm
+driver can be configured using
+.Xr ancontrol 8
+or on boot with
+.Xr hostname.if 5 .
+.Sh EXAMPLES
+Note that when setting options via
+.Xr ancontrol 8
+in a
+.Xr hostname.if 5
+file (e.g.\&
+.Pa /etc/hostname.an0 ) ,
 the
 .Xr ancontrol 8
-utility.
+commands should be specified first.
 .Pp
-For more information on configuring this device, see
-.Xr ifconfig 8 .
+The following
+.Xr hostname.if 5
+example will set the channel to 11 and enable WEP before configuring
+the interface as an IBSS peer:
+.Bd -literal -offset indent
+!/sbin/ancontrol \e$if -c 11 -W 1 -k 0x1deadbeef1 -n my_net -o 0
+inet 192.168.1.1 255.255.255.0 NONE
+.Ed
+.Pp
+Enable WEP:
+.Pp
+.Dl # ancontrol an0 -W 1
 .Sh DIAGNOSTICS
 .Bl -diag
 .It "an%d: init failed"
@@ -111,13 +153,12 @@ command.
 .El
 .Sh SEE ALSO
 .Xr arp 4 ,
-.Xr atw 4 ,
+.Xr ifmedia 4 ,
 .Xr intro 4 ,
 .Xr isapnp 4 ,
 .Xr netintro 4 ,
 .Xr pci 4 ,
 .Xr pcmcia 4 ,
-.Xr wi 4 ,
 .Xr hostname.if 5 ,
 .Xr ancontrol 8 ,
 .Xr ifconfig 8
@@ -138,3 +179,7 @@ and ported to
 .Ox
 by
 .An Michael Shalayeff Aq mickey@openbsd.org .
+.Sh CAVEATS
+.Nm
+is not configurable with
+.Xr ifconfig 8 .

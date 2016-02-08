@@ -1,4 +1,4 @@
-.\" $OpenBSD: bgpd.conf.5,v 1.37 2004/08/20 14:56:09 claudio Exp $
+.\" $OpenBSD: bgpd.conf.5,v 1.46 2005/03/15 23:41:52 henning Exp $
 .\"
 .\" Copyright (c) 2004 Claudio Jeker <claudio@openbsd.org>
 .\" Copyright (c) 2003, 2004 Henning Brauer <henning@openbsd.org>
@@ -88,13 +88,15 @@ number to
 .Ar as-number .
 The AS numbers are assigned by local RIRs, such as
 .Pp
-.Bl -tag -width xxxxx -compact
-.It RIPE
-for Europe,
-.It ARIN
-for America, and
+.Bl -tag -width xxxxxxxx -compact
 .It APNIC
-for the Asian-Pacific region.
+for the Asia Pacific region,
+.It ARIN
+for North America, parts of the Caribbean and Africa,
+.It LACNIC
+for Latin America and Caribbean, and
+.It RIPE NCC
+for Europe, the Middle East and parts of Asia and Africa.
 .El
 .Pp
 For example,
@@ -221,6 +223,19 @@ See also the
 section.
 .Pp
 .It Xo
+.Ic rde
+.Ic route-age
+.Pq Ic ignore Ns \&| Ns Ic evaluate
+.Xc
+If set to
+.Ic evaluate ,
+the best path selection will not only be based on the path attributes but
+also on the age of the route.
+In this case the decision process is no longer deterministic.
+The default is
+.Ic ignore .
+.Pp
+.It Xo
 .Ic route-collector
 .Pq Ic yes Ns \&| Ns Ic no
 .Xc
@@ -239,6 +254,17 @@ router-id 10.0.0.1
 .Pp
 If not given, the BGP ID is determined as the biggest IP address assigned
 to the local machine.
+.Pp
+.It Xo
+.Ic transparent-as
+.Pq Ic yes Ns \&| Ns Ic no
+.Xc
+If set to
+.Ic yes ,
+.Em AS paths
+to EBGP neighbors are not prepended with their own AS.
+The default is
+.Ic no .
 .El
 .Sh NEIGHBORS AND GROUPS
 .Xr bgpd 8
@@ -332,10 +358,30 @@ messages to announcements of the local AS.
 The default for IBGP peers is
 .Ic all .
 .Pp
+.It Ic depend on Ar interface
+The neighbor session will be kept in state
+.Em IDLE
+as long as
+.Ar interface
+reports no link.
+For
+.Xr carp 4
+interfaces, no link means that the interface is currently
+.Em backup .
+This is primarily intended to be used with
+.Xr carp 4
+to reduce failover times.
+.Pp
+The state of the network interfaces on the system can be viewed
+using the
+.Cm show interfaces
+command to
+.Xr bgpctl 8 .
+.Pp
 .It Ic descr Ar description
 Add a description.
-The description is used when logging neighbor events and in status
-reports, etc., and has no further meaning to
+The description is used when logging neighbor events, in status
+reports, for specifying neighbors, etc., but has no further meaning to
 .Xr bgpd 8 .
 .Pp
 .It Xo
@@ -615,7 +661,7 @@ where
 is an AS number and
 .Ar local
 is a locally significant number between zero and
-.Li 0xffff .
+.Li 65535 .
 Both
 .Ar as-number
 and
@@ -627,8 +673,9 @@ Alternatively, well-known communities may be given by name instead and
 include
 .Ic NO_EXPORT ,
 .Ic NO_ADVERTISE ,
+.Ic NO_EXPORT_SUBCONFED ,
 and
-.Ic NO_EXPORT_SUBCONFED .
+.Ic NO_PEER .
 .Pp
 .It Xo
 .Pq Ic from Ns \&| Ns Ic to
@@ -785,21 +832,42 @@ or
 Set the
 .Em LOCAL_PREF
 AS path attribute.
+If
+.Ar number
+starts with a plus or minus sign,
+.Em LOCAL_PREF
+will be adjusted by adding or subtracting
+.Ar number ;
+otherwise it will be set to
+.Ar number .
 .Pp
 .It Ic med Ar number
 Set the
 .Em MULTI_EXIT_DISC
 AS path attribute.
+If
+.Ar number
+starts with a plus or minus sign,
+.Em MULTI_EXIT_DISC
+will be adjusted by adding or subtracting
+.Ar number ;
+otherwise it will be set to
+.Ar number .
 .Pp
 .It Xo
 .Ic nexthop
-.Po Ar address Ns \&| Ns
-.Ic blackhole Ns \&| Ns Ic reject Pc
+.Sm off
+.Po Ar address \*(Ba
+.Ic blackhole \*(Ba
+.Ic reject \*(Ba
+.Ic no-modify Pc
+.Sm on
 .Xc
 Set the
 .Em NEXTHOP
 AS path attribute
-to a different nexthop address, or use blackhole or reject routes.
+to a different nexthop address, use blackhole or reject routes,
+or do not modify it.
 .Bd -literal -offset indent
 set nexthop 192.168.0.1
 set nexthop blackhole
@@ -811,6 +879,12 @@ Add the prefix in the update to the specified
 .Xr pf 4
 radix table, regardless of whether or not the path was selected for routing.
 This option may be useful in building realtime blacklists.
+.Pp
+.It Ic prepend-neighbor Ar number
+Prepend the neighbor's AS
+.Ar number
+times to the
+.Em AS path .
 .Pp
 .It Ic prepend-self Ar number
 Prepend the local AS

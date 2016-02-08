@@ -1,4 +1,4 @@
-/*	$OpenBSD: tree.c,v 1.10 2002/02/27 19:37:09 dhartmei Exp $	*/
+/*	$OpenBSD: tree.c,v 1.15 2004/12/20 11:34:26 otto Exp $	*/
 
 /*
  * command tree climbing
@@ -9,25 +9,22 @@
 #define INDENT	4
 
 #define tputc(c, shf)	shf_putchar(c, shf);
-static void 	ptree ARGS((struct op *t, int indent, struct shf *f));
-static void 	pioact ARGS((struct shf *f, int indent, struct ioword *iop));
-static void	tputC ARGS((int c, struct shf *shf));
-static void	tputS ARGS((char *wp, struct shf *shf));
-static void	vfptreef ARGS((struct shf *shf, int indent, const char *fmt, va_list va));
-static struct ioword **iocopy ARGS((struct ioword **iow, Area *ap));
-static void     iofree ARGS((struct ioword **iow, Area *ap));
+static void 	ptree(struct op *, int, struct shf *);
+static void 	pioact(struct shf *, int, struct ioword *);
+static void	tputC(int, struct shf *);
+static void	tputS(char *, struct shf *);
+static void	vfptreef(struct shf *, int, const char *, va_list);
+static struct ioword **iocopy(struct ioword **, Area *);
+static void     iofree(struct ioword **, Area *);
 
 /*
  * print a command tree
  */
 
 static void
-ptree(t, indent, shf)
-	register struct op *t;
-	int indent;
-	register struct shf *shf;
+ptree(struct op *t, int indent, struct shf *shf)
 {
-	register char **w;
+	char **w;
 	struct ioword **ioact;
 	struct op *t1;
 
@@ -97,11 +94,9 @@ ptree(t, indent, shf)
 		fptreef(shf, indent, " ]] ");
 		break;
 	  }
-#ifdef KSH
 	  case TSELECT:
 		fptreef(shf, indent, "select %s ", t->str);
 		/* fall through */
-#endif /* KSH */
 	  case TFOR:
 		if (t->type == TFOR)
 			fptreef(shf, indent, "for %s ", t->str);
@@ -209,10 +204,7 @@ ptree(t, indent, shf)
 }
 
 static void
-pioact(shf, indent, iop)
-	register struct shf *shf;
-	int indent;
-	register struct ioword *iop;
+pioact(struct shf *shf, int indent, struct ioword *iop)
 {
 	int flag = iop->flag;
 	int type = flag & IOTYPE;
@@ -270,9 +262,7 @@ pioact(shf, indent, iop)
  */
 
 static void
-tputC(c, shf)
-	register int c;
-	register struct shf *shf;
+tputC(int c, struct shf *shf)
 {
 	if ((c&0x60) == 0) {		/* C0|C1 */
 		tputc((c&0x80) ? '$' : '^', shf);
@@ -285,11 +275,9 @@ tputC(c, shf)
 }
 
 static void
-tputS(wp, shf)
-	register char *wp;
-	register struct shf *shf;
+tputS(char *wp, struct shf *shf)
 {
-	register int c, quoted=0;
+	int c, quoted=0;
 
 	/* problems:
 	 *	`...` -> $(...)
@@ -330,7 +318,7 @@ tputS(wp, shf)
 			wp++;
 			break;
 		  case OQUOTE:
-		  	quoted = 1;
+			quoted = 1;
 			tputc('"', shf);
 			break;
 		  case CQUOTE:
@@ -348,7 +336,6 @@ tputS(wp, shf)
 			if (*wp++ == '}')
 				tputc('}', shf);
 			break;
-#ifdef KSH
 		  case OPAT:
 			tputc(*wp++, shf);
 			tputc('(', shf);
@@ -359,7 +346,6 @@ tputS(wp, shf)
 		  case CPAT:
 			tputc(')', shf);
 			break;
-#endif /* KSH */
 		}
 }
 
@@ -369,19 +355,11 @@ tputS(wp, shf)
  */
 /* VARARGS */
 int
-#ifdef HAVE_PROTOTYPES
 fptreef(struct shf *shf, int indent, const char *fmt, ...)
-#else
-fptreef(shf, indent, fmt, va_alist)
-  struct shf *shf;
-  int indent;
-  const char *fmt;
-  va_dcl
-#endif
 {
   va_list	va;
 
-  SH_VA_START(va, fmt);
+  va_start(va, fmt);
 
   vfptreef(shf, indent, fmt, va);
   va_end(va);
@@ -390,22 +368,14 @@ fptreef(shf, indent, fmt, va_alist)
 
 /* VARARGS */
 char *
-#ifdef HAVE_PROTOTYPES
 snptreef(char *s, int n, const char *fmt, ...)
-#else
-snptreef(s, n, fmt, va_alist)
-  char *s;
-  int n;
-  const char *fmt;
-  va_dcl
-#endif
 {
   va_list va;
   struct shf shf;
 
   shf_sopen(s, n, SHF_WR | (s ? 0 : SHF_DYNAMIC), &shf);
 
-  SH_VA_START(va, fmt);
+  va_start(va, fmt);
   vfptreef(&shf, 0, fmt, va);
   va_end(va);
 
@@ -413,18 +383,14 @@ snptreef(s, n, fmt, va_alist)
 }
 
 static void
-vfptreef(shf, indent, fmt, va)
-	register struct shf *shf;
-	int indent;
-	const char *fmt;
-	register va_list va;
+vfptreef(struct shf *shf, int indent, const char *fmt, va_list va)
 {
-	register int c;
+	int c;
 
 	while ((c = *fmt++))
 	    if (c == '%') {
-		register long n;
-		register char *p;
+		long n;
+		char *p;
 		int neg;
 
 		switch ((c = *fmt++)) {
@@ -485,12 +451,10 @@ vfptreef(shf, indent, fmt, va)
  */
 
 struct op *
-tcopy(t, ap)
-	register struct op *t;
-	Area *ap;
+tcopy(struct op *t, Area *ap)
 {
-	register struct op *r;
-	register char **tw, **rw;
+	struct op *r;
+	char **tw, **rw;
 
 	if (t == NULL)
 		return NULL;
@@ -536,9 +500,7 @@ tcopy(t, ap)
 }
 
 char *
-wdcopy(wp, ap)
-	const char *wp;
-	Area *ap;
+wdcopy(const char *wp, Area *ap)
 {
 	size_t len = wdscan(wp, EOS) - wp;
 	return memcpy(alloc(len, ap), wp, len);
@@ -546,11 +508,9 @@ wdcopy(wp, ap)
 
 /* return the position of prefix c in wp plus 1 */
 char *
-wdscan(wp, c)
-	register const char *wp;
-	register int c;
+wdscan(const char *wp, int c)
 {
-	register int nest = 0;
+	int nest = 0;
 
 	while (1)
 		switch (*wp++) {
@@ -579,7 +539,6 @@ wdscan(wp, c)
 				return (char *) wp;
 			nest--;
 			break;
-#ifdef KSH
 		  case OPAT:
 			nest++;
 			wp++;
@@ -591,7 +550,6 @@ wdscan(wp, c)
 			if (wp[-1] == CPAT)
 				nest--;
 			break;
-#endif /* KSH */
 		  default:
 			internal_errorf(0,
 				"wdscan: unknown char 0x%x (carrying on)",
@@ -604,8 +562,7 @@ wdscan(wp, c)
  * (string is allocated from ATEMP)
  */
 char *
-wdstrip(wp)
-	const char *wp;
+wdstrip(const char *wp)
 {
 	struct shf shf;
 	int c;
@@ -656,7 +613,6 @@ wdstrip(wp)
 			if (*wp++ == '}')
 				shf_putchar('}', &shf);
 			break;
-#ifdef KSH
 		  case OPAT:
 			shf_putchar(*wp++, &shf);
 			shf_putchar('(', &shf);
@@ -667,24 +623,21 @@ wdstrip(wp)
 		  case CPAT:
 			shf_putchar(')', &shf);
 			break;
-#endif /* KSH */
 		}
 }
 
 static	struct ioword **
-iocopy(iow, ap)
-	register struct ioword **iow;
-	Area *ap;
+iocopy(struct ioword **iow, Area *ap)
 {
-	register struct ioword **ior;
-	register int i;
+	struct ioword **ior;
+	int i;
 
 	for (ior = iow; *ior++ != NULL; )
 		;
 	ior = (struct ioword **) alloc((ior - iow + 1) * sizeof(*ior), ap);
 
 	for (i = 0; iow[i] != NULL; i++) {
-		register struct ioword *p, *q;
+		struct ioword *p, *q;
 
 		p = iow[i];
 		q = (struct ioword *) alloc(sizeof(*p), ap);
@@ -707,11 +660,9 @@ iocopy(iow, ap)
  */
 
 void
-tfree(t, ap)
-	register struct op *t;
-	Area *ap;
+tfree(struct op *t, Area *ap)
 {
-	register char **w;
+	char **w;
 
 	if (t == NULL)
 		return;
@@ -741,12 +692,10 @@ tfree(t, ap)
 }
 
 static	void
-iofree(iow, ap)
-	struct ioword **iow;
-	Area *ap;
+iofree(struct ioword **iow, Area *ap)
 {
-	register struct ioword **iop;
-	register struct ioword *p;
+	struct ioword **iop;
+	struct ioword *p;
 
 	for (iop = iow; (p = *iop++) != NULL; ) {
 		if (p->name != NULL)

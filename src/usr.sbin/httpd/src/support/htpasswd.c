@@ -81,32 +81,15 @@
  */
 
 #include "ap_config.h"
-#ifndef NETWARE
 #include <sys/types.h>
-#endif
 #include <signal.h>
 #include <errno.h>
 #include "ap.h"
 #include "ap_md5.h"
 #include "ap_sha1.h"
 
-#ifdef HAVE_CRYPT_H
-#include <crypt.h>
-#endif
-
-#ifdef WIN32
-#include <conio.h>
-#include "../os/win32/getopt.h"
-#define unlink _unlink
-#endif
-
-#ifndef CHARSET_EBCDIC
 #define LF 10
 #define CR 13
-#else /*CHARSET_EBCDIC*/
-#define LF '\n'
-#define CR '\r'
-#endif /*CHARSET_EBCDIC*/
 
 #define MAX_STRING_LEN 256
 #define ALG_PLAIN 0
@@ -188,10 +171,6 @@ static int mkrecord(char *user, char *record, size_t rlen, char *passwd,
 	pw = passwd;
     }
     else {
-#ifdef TPF
-        fprintf(stderr, "Invalid entry. The -b option is required on TPF.\n");
-        return usage();
-#else
 	if (ap_getpass("New password: ", pwin, sizeof(pwin)) != 0) {
 	    ap_snprintf(record, (rlen - 1), "password too long (>%lu)",
 			(unsigned long) (sizeof(pwin) - 1));
@@ -204,7 +183,6 @@ static int mkrecord(char *user, char *record, size_t rlen, char *passwd,
 	}
 	pw = pwin;
         memset(pwv, '\0', sizeof(pwin));
-#endif /* TPF */
     }
     switch (alg) {
 
@@ -250,31 +228,17 @@ static int mkrecord(char *user, char *record, size_t rlen, char *passwd,
 
 static int usage(void)
 {
-    fprintf(stderr, "Usage:\n");
-    fprintf(stderr, "\thtpasswd [-cmdps] passwordfile username\n");
-    fprintf(stderr, "\thtpasswd -b[cmdps] passwordfile username password\n\n");
-    fprintf(stderr, "\thtpasswd -n[mdps] username\n");
-    fprintf(stderr, "\thtpasswd -nb[mdps] username password\n");
+    fprintf(stderr, "Usage:\thtpasswd [-c] [-d | -m | -p | -s] passwordfile username\n");
+    fprintf(stderr, "\thtpasswd -b [-c] [-d | -m | -p | -s] passwordfile username password\n");
+    fprintf(stderr, "\thtpasswd -n [-d | -m | -p | -s] username\n");
+    fprintf(stderr, "\thtpasswd -bn [-d | -m | -p | -s] username password\n");
+    fprintf(stderr, " -b  Use the password from the command line rather than prompting for it.\n");
     fprintf(stderr, " -c  Create a new file.\n");
+    fprintf(stderr, " -d  Force CRYPT encryption of the password (default).\n");
+    fprintf(stderr, " -m  Force MD5 encryption of the password.\n");
     fprintf(stderr, " -n  Don't update file; display results on stdout.\n");
-    fprintf(stderr, " -m  Force MD5 encryption of the password"
-#if defined(WIN32) || defined(TPF) || defined(NETWARE)
-	" (default)"
-#endif
-	".\n");
-    fprintf(stderr, " -d  Force CRYPT encryption of the password"
-#if (!(defined(WIN32) || defined(TPF) || defined(NETWARE)))
-	    " (default)"
-#endif
-	    ".\n");
     fprintf(stderr, " -p  Do not encrypt the password (plaintext).\n");
     fprintf(stderr, " -s  Force SHA encryption of the password.\n");
-    fprintf(stderr, " -b  Use the password from the command line rather "
-	    "than prompting for it.\n");
-    fprintf(stderr,
-	    "On Windows, TPF and NetWare systems the '-m' flag is used by default.\n");
-    fprintf(stderr,
-	    "On all other systems, the '-p' flag will probably not work.\n");
     return ERR_SYNTAX;
 }
 
@@ -324,18 +288,10 @@ static int writable(char *fname)
  */
 static int exists(char *fname)
 {
-#ifdef WIN32
-    struct _stat sbuf;
-#else
     struct stat sbuf;
-#endif
     int check;
 
-#ifdef WIN32
-    check = _stat(fname, &sbuf);
-#else
     check = stat(fname, &sbuf);
-#endif
     return ((check == -1) && (errno == ENOENT)) ? 0 : 1;
 }
 
@@ -433,11 +389,6 @@ int main(int argc, char *argv[])
     if ((argc - i) != args_left) {
 	return usage();
     }
-#ifdef NETWARE
-    UnAugmentAsterisk(TRUE);
-    SetCurrentNameSpace(NW_NS_LONG);
-    SetTargetNameSpace(NW_NS_LONG);
-#endif
     if (newfile && nofile) {
 	fprintf(stderr, "%s: -c and -n options conflict\n", argv[0]);
 	return ERR_SYNTAX;
@@ -472,24 +423,10 @@ int main(int argc, char *argv[])
 	strlcpy(password, argv[i + 2], sizeof(password));
     }
 
-#ifdef WIN32
-    if (alg == ALG_CRYPT) {
-	alg = ALG_APMD5;
-	fprintf(stderr, "Automatically using MD5 format on Windows.\n");
-    }
-#elif defined(TPF) || defined(NETWARE)
-    if (alg == ALG_CRYPT) {
-        alg = ALG_APMD5;
-        fprintf(stderr, "Automatically using MD5 format.\n");
-     }
-#endif
-
-#if (!(defined(WIN32) || defined(TPF) || defined(NETWARE)))
     if (alg == ALG_PLAIN) {
 	fprintf(stderr,"Warning: storing passwords as plain text might "
 		"just not work on this platform.\n");
     }
-#endif
     if (! nofile) {
 	/*
 	 * Only do the file checks if we're supposed to frob it.

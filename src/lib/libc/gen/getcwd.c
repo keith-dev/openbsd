@@ -28,7 +28,7 @@
  */
 
 #if defined(LIBC_SCCS) && !defined(lint)
-static char rcsid[] = "$OpenBSD: getcwd.c,v 1.9 2003/06/11 21:03:10 deraadt Exp $";
+static char rcsid[] = "$OpenBSD: getcwd.c,v 1.11 2005/01/06 03:26:02 millert Exp $";
 #endif /* LIBC_SCCS and not lint */
 
 #include <sys/param.h>
@@ -74,7 +74,7 @@ getcwd(char *pt, size_t size)
 		}
 		ept = pt + size;
 	} else {
-		if ((pt = malloc(ptsize = 1024 - 4)) == NULL)
+		if ((pt = malloc(ptsize = MAXPATHLEN)) == NULL)
 			return (NULL);
 		ept = pt + ptsize;
 	}
@@ -82,13 +82,13 @@ getcwd(char *pt, size_t size)
 	*bpt = '\0';
 
 	/*
-	 * Allocate bytes (1024 - malloc space) for the string of "../"'s.
+	 * Allocate bytes for the string of "../"'s.
 	 * Should always be enough (it's 340 levels).  If it's not, allocate
 	 * as necessary.  Special * case the first stat, it's ".", not "..".
 	 */
-	if ((up = malloc(upsize = 1024 - 4)) == NULL)
+	if ((up = malloc(upsize = MAXPATHLEN)) == NULL)
 		goto err;
-	eup = up + MAXPATHLEN;
+	eup = up + upsize;
 	bup = up;
 	up[0] = '.';
 	up[1] = '\0';
@@ -118,7 +118,7 @@ getcwd(char *pt, size_t size)
 			 * path to the beginning of the buffer, but it's always
 			 * been that way and stuff would probably break.
 			 */
-			bcopy(bpt, pt, ept - bpt);
+			memmove(pt, bpt, ept - bpt);
 			free(up);
 			return (pt);
 		}
@@ -133,8 +133,8 @@ getcwd(char *pt, size_t size)
 
 			if ((nup = realloc(up, upsize *= 2)) == NULL)
 				goto err;
+			bup = nup + (bup - up);
 			up = nup;
-			bup = up;
 			eup = up + upsize;
 		}
 		*bup++ = '.';
@@ -167,7 +167,7 @@ getcwd(char *pt, size_t size)
 					goto notfound;
 				if (ISDOT(dp))
 					continue;
-				bcopy(dp->d_name, bup, dp->d_namlen + 1);
+				memcpy(bup, dp->d_name, dp->d_namlen + 1);
 
 				/* Save the first error for later. */
 				if (lstat(up, &s)) {
@@ -185,27 +185,26 @@ getcwd(char *pt, size_t size)
 		 * leading slash.
 		 */
 		if (bpt - pt < dp->d_namlen + (first ? 1 : 2)) {
-			size_t len, off;
+			size_t len;
 			char *npt;
 
 			if (!ptsize) {
 				errno = ERANGE;
 				goto err;
 			}
-			off = bpt - pt;
 			len = ept - bpt;
 			if ((npt = realloc(pt, ptsize *= 2)) == NULL)
 				goto err;
+			bpt = npt + (bpt - pt);
 			pt = npt;
-			bpt = pt + off;
 			ept = pt + ptsize;
-			bcopy(bpt, ept - len, len);
+			memmove(ept - len, bpt, len);
 			bpt = ept - len;
 		}
 		if (!first)
 			*--bpt = '/';
 		bpt -= dp->d_namlen;
-		bcopy(dp->d_name, bpt, dp->d_namlen);
+		memcpy(bpt, dp->d_name, dp->d_namlen);
 		(void)closedir(dir);
 
 		/* Truncate any file name. */
@@ -224,8 +223,7 @@ notfound:
 err:
 	if (ptsize)
 		free(pt);
-	if (up)
-		free(up);
+	free(up);
 	if (dir)
 		(void)closedir(dir);
 	return (NULL);

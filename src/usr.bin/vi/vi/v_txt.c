@@ -1,4 +1,4 @@
-/*	$OpenBSD: v_txt.c,v 1.13 2002/02/17 19:42:34 millert Exp $	*/
+/*	$OpenBSD: v_txt.c,v 1.15 2005/01/08 05:20:34 pvalchev Exp $	*/
 
 /*-
  * Copyright (c) 1993, 1994
@@ -1458,6 +1458,7 @@ done:	/* Leave input mode. */
 
 err:
 alloc_err:
+	F_CLR(sp, SC_TINPUT);
 	txt_err(sp, &sp->tiq);
 	return (1);
 }
@@ -2218,8 +2219,8 @@ txt_fc_col(sp, argc, argv)
 
 	/* If the largest file name is too large, just print them. */
 	if (colwidth > sp->cols) {
-		p = msg_print(sp, av[0]->bp + prefix, &nf);
 		for (ac = argc, av = argv; ac > 0; --ac, ++av) {
+			p = msg_print(sp, av[0]->bp + prefix, &nf);
 			(void)ex_printf(sp, "%s\n", p);
 			if (F_ISSET(gp, G_INTERRUPTED))
 				break;

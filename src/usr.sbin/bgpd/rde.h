@@ -1,4 +1,4 @@
-/*	$OpenBSD: rde.h,v 1.55 2004/08/13 14:03:20 claudio Exp $ */
+/*	$OpenBSD: rde.h,v 1.63 2005/03/11 12:54:20 claudio Exp $ */
 
 /*
  * Copyright (c) 2003, 2004 Claudio Jeker <claudio@openbsd.org> and
@@ -50,26 +50,27 @@ struct rde_peer {
 	LIST_ENTRY(rde_peer)		 peer_l; /* list of all peers */
 	struct aspath_head		 path_h; /* list of all as paths */
 	struct peer_config		 conf;
-	enum peer_state			 state;
-	u_int32_t			 prefix_cnt;
-	u_int32_t			 remote_bgpid;
 	struct bgpd_addr		 remote_addr;
-	struct bgpd_addr		 local_addr;
-	u_int32_t			 up_pcnt;
-	u_int32_t			 up_acnt;
-	u_int32_t			 up_nlricnt;
-	u_int32_t			 up_wcnt;
+	struct bgpd_addr		 local_v4_addr;
+	struct bgpd_addr		 local_v6_addr;
 	struct uptree_prefix		 up_prefix;
 	struct uptree_attr		 up_attrs;
 	struct uplist_attr		 updates;
 	struct uplist_prefix		 withdraws;
 	struct uplist_attr		 updates6;
 	struct uplist_prefix		 withdraws6;
+	u_int32_t			 prefix_cnt;
+	u_int32_t			 remote_bgpid;
+	u_int32_t			 up_pcnt;
+	u_int32_t			 up_acnt;
+	u_int32_t			 up_nlricnt;
+	u_int32_t			 up_wcnt;
+	enum peer_state			 state;
 };
 
 #define AS_SET			1
 #define AS_SEQUENCE		2
-#define ASPATH_HEADER_SIZE	sizeof(struct aspath)
+#define ASPATH_HEADER_SIZE	(sizeof(struct aspath) - sizeof(u_char))
 
 LIST_HEAD(aspath_list, aspath);
 
@@ -78,7 +79,7 @@ struct aspath {
 	int			refcnt;	/* reference count */
 	u_int16_t		len;	/* total length of aspath in octets */
 	u_int16_t		ascnt;	/* number of AS hops in data */
-	u_char			data[0]; /* placeholder for actual data */
+	u_char			data[1]; /* placeholder for actual data */
 };
 
 enum attrtypes {
@@ -108,16 +109,16 @@ enum attrtypes {
 
 struct attr {
 	TAILQ_ENTRY(attr)		 entry;
+	u_char				*data;
+	u_int16_t			 len;
 	u_int8_t			 flags;
 	u_int8_t			 type;
-	u_int16_t			 len;
-	u_char				*data;
 };
 
 struct mpattr {
 	void		*reach;
-	u_int16_t	 reach_len;
 	void		*unreach;
+	u_int16_t	 reach_len;
 	u_int16_t	 unreach_len;
 };
 
@@ -130,18 +131,19 @@ struct path_table {
 
 LIST_HEAD(prefix_head, prefix);
 
-#define	F_ATTR_ORIGIN		0x001
-#define	F_ATTR_ASPATH		0x002
-#define	F_ATTR_NEXTHOP		0x004
-#define	F_ATTR_LOCALPREF	0x008
-#define	F_ATTR_MED		0x010
-#define	F_ATTR_MED_ANNOUNCE	0x020
-#define	F_ATTR_MP_REACH		0x040
-#define	F_ATTR_MP_UNREACH	0x080
-#define	F_PREFIX_ANNOUNCED	0x100
-#define	F_NEXTHOP_REJECT	0x200
-#define	F_NEXTHOP_BLACKHOLE	0x400
-#define	F_ATTR_LINKED		0x800
+#define	F_ATTR_ORIGIN		0x0001
+#define	F_ATTR_ASPATH		0x0002
+#define	F_ATTR_NEXTHOP		0x0004
+#define	F_ATTR_LOCALPREF	0x0008
+#define	F_ATTR_MED		0x0010
+#define	F_ATTR_MED_ANNOUNCE	0x0020
+#define	F_ATTR_MP_REACH		0x0040
+#define	F_ATTR_MP_UNREACH	0x0080
+#define	F_PREFIX_ANNOUNCED	0x0100
+#define	F_NEXTHOP_REJECT	0x0200
+#define	F_NEXTHOP_BLACKHOLE	0x0400
+#define	F_NEXTHOP_NOMODIFY	0x0800
+#define	F_ATTR_LINKED		0x1000
 
 #define ORIGIN_IGP		0
 #define ORIGIN_EGP		1
@@ -152,20 +154,17 @@ LIST_HEAD(prefix_head, prefix);
 struct rde_aspath {
 	LIST_ENTRY(rde_aspath)		 path_l, peer_l, nexthop_l;
 	struct prefix_head		 prefix_h;
+	struct attr_list		 others;
 	struct rde_peer			*peer;
-
-	/* path attributes */
 	struct aspath			*aspath;
 	struct nexthop			*nexthop;	/* may be NULL */
-	struct attr_list		 others;
+	char				 pftable[PFTABLE_LEN];
 	u_int32_t			 med;		/* multi exit disc */
 	u_int32_t			 lpref;		/* local pref */
-	u_int8_t			 origin;
-
 	u_int16_t			 flags;	/* internally used */
 	u_int16_t			 prefix_cnt; /* # of prefixes */
 	u_int16_t			 active_cnt; /* # of active prefixes */
-	char				 pftable[PFTABLE_LEN];
+	u_int8_t			 origin;
 };
 
 enum nexthop_state {
@@ -177,6 +176,9 @@ enum nexthop_state {
 struct nexthop {
 	LIST_ENTRY(nexthop)	nexthop_l;
 	struct aspath_head	path_h;
+	struct bgpd_addr	exit_nexthop;
+	struct bgpd_addr	true_nexthop;
+	struct bgpd_addr	nexthop_net;
 #if 0
 	/*
 	 * currently we use the boolean nexthop state, this could be exchanged
@@ -185,13 +187,9 @@ struct nexthop {
 	u_int32_t		costs;
 #endif
 	enum nexthop_state	state;
-	struct bgpd_addr	exit_nexthop;
-	struct bgpd_addr	true_nexthop;
-	struct bgpd_addr	nexthop_net;
 	u_int8_t		nexthop_netlen;
 	u_int8_t		flags;
 #define NEXTHOP_CONNECTED	0x01
-#define NEXTHOP_LINKLOCAL	0x02
 };
 
 /* generic entry without address specific part */
@@ -245,6 +243,7 @@ void		 rde_send_pftable_commit(void);
 void		 rde_generate_updates(struct prefix *, struct prefix *);
 u_int16_t	 rde_local_as(void);
 int		 rde_noevaluate(void);
+int		 rde_decisionflags(void);
 
 /* rde_attr.c */
 int		 attr_write(void *, u_int16_t, u_int8_t, u_int8_t, void *,
@@ -310,8 +309,8 @@ void		 prefix_network_clean(struct rde_peer *, time_t);
 
 void		 nexthop_init(u_int32_t);
 void		 nexthop_shutdown(void);
-void		 nexthop_modify(struct rde_aspath *, struct bgpd_addr *, int,
-		     sa_family_t);
+void		 nexthop_modify(struct rde_aspath *, struct bgpd_addr *,
+		     enum action_types, sa_family_t);
 void		 nexthop_link(struct rde_aspath *);
 void		 nexthop_unlink(struct rde_aspath *);
 void		 nexthop_update(struct kroute_nexthop *);
@@ -345,8 +344,9 @@ void		 pt_dump(void (*)(struct pt_entry *, void *), void *,
 /* rde_filter.c */
 enum filter_actions rde_filter(struct rde_peer *, struct rde_aspath *,
     struct bgpd_addr *, u_int8_t, enum directions);
-void		 rde_apply_set(struct rde_aspath *, struct filter_set *,
-		     sa_family_t);
+void		 rde_free_set(struct filter_set_head *);
+void		 rde_apply_set(struct rde_aspath *, struct filter_set_head *,
+		     sa_family_t, struct rde_peer *, enum directions);
 int		 rde_filter_community(struct rde_aspath *, int, int);
 
 #endif /* __RDE_H__ */

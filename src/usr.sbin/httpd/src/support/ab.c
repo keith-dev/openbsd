@@ -118,9 +118,6 @@
 
 /* -------------------------------------------------------------------- */
 
-/* affects include files on Solaris */
-#define BSD_COMP
-
 /* allow compilation outside an Apache build tree */
 #ifdef NO_APACHE_INCLUDES
 #include <sys/time.h>
@@ -144,39 +141,21 @@
 #else				/* (!)NO_APACHE_INCLUDES */
 #include "ap_config.h"
 #include "ap.h"
-#ifdef CHARSET_EBCDIC
-#include "ebcdic.h"
-#endif
 #include <fcntl.h>
-#ifndef MPE
 #include <sys/time.h>
-#endif
 
-#ifndef NO_WRITEV
 #include <sys/types.h>
 #include <sys/uio.h>
-#endif
 
 #endif				/* NO_APACHE_INCLUDES */
 
 #ifdef	USE_SSL
-#if ((!defined(RSAREF)) && (!defined(SYSSSL)))
-/* Libraries on most systems.. */
 #include <openssl/rsa.h>
 #include <openssl/crypto.h>
 #include <openssl/x509.h>
 #include <openssl/pem.h>
 #include <openssl/err.h>
 #include <openssl/ssl.h>
-#else
-/* Libraries for RSAref and SYSSSL */
-#include <rsa.h>
-#include <crypto.h>
-#include <x509.h>
-#include <pem.h>
-#include <err.h>
-#include <ssl.h>
-#endif
 #endif
 
 #include <math.h>
@@ -300,15 +279,9 @@ struct data *stats;		/* date for each request */
 fd_set readbits, writebits;	/* bits for select */
 struct sockaddr_in server;	/* server addr structure */
 
-#ifndef BEOS
 #define ab_close(s) close(s)
 #define ab_read(a,b,c) read(a,b,c)
 #define ab_write(a,b,c) write(a,b,c)
-#else
-#define ab_close(s) closesocket(s)
-#define ab_read(a,b,c) recv(a,b,c,0)
-#define ab_write(a,b,c) send(a,b,c,0)
-#endif
 
 static void close_connection(struct connection * c);
 #if (defined(NO_WRITEV) || defined(USE_SSL))
@@ -449,11 +422,7 @@ static int s_write(struct connection * c, char *buff, int len)
 static void nonblock(int fd)
 {
     int i = 1;
-#ifdef BEOS
-    setsockopt(fd, SOL_SOCKET, SO_NONBLOCK, &i, sizeof(i));
-#else
     ioctl(fd, FIONBIO, &i);
-#endif
 }
 
 /* --------------------------------------------------------- */
@@ -1035,11 +1004,7 @@ static void read_connection(struct connection * c)
 	int space = CBUFFSIZE - c->cbx - 1;	/* -1 to allow for 0
 						 * terminator */
 	int tocopy = (space < r) ? space : r;
-#ifndef CHARSET_EBCDIC
 	memcpy(c->cbuff + c->cbx, buffer, tocopy);
-#else				/* CHARSET_EBCDIC */
-	ascii2ebcdic(c->cbuff + c->cbx, buffer, tocopy);
-#endif				/* CHARSET_EBCDIC */
 	c->cbx += tocopy;
 	space -= tocopy;
 	c->cbuff[c->cbx] = 0;	/* terminate for benefit of strstr */
@@ -1292,10 +1257,6 @@ static void test(void)
 
     reqlen = strlen(request);
 
-#ifdef CHARSET_EBCDIC
-    ebcdic2ascii(request, request, reqlen);
-#endif				/* CHARSET_EBCDIC */
-
     /* ok - lets start */
     gettimeofday(&start, 0);
 
@@ -1357,14 +1318,14 @@ static void test(void)
 static void copyright(void)
 {
     if (!use_html) {
-	printf("This is ApacheBench, Version %s\n", VERSION " <$Revision: 1.15 $> apache-1.3");
+	printf("This is ApacheBench, Version %s\n", VERSION " <$Revision: 1.18 $> apache-1.3");
 	printf("Copyright (c) 1996 Adam Twiss, Zeus Technology Ltd, http://www.zeustech.net/\n");
 	printf("Copyright (c) 1998-2002 The Apache Software Foundation, http://www.apache.org/\n");
 	printf("\n");
     }
     else {
 	printf("<p>\n");
-	printf(" This is ApacheBench, Version %s <i>&lt;%s&gt;</i> apache-1.3<br>\n", VERSION, "$Revision: 1.15 $");
+	printf(" This is ApacheBench, Version %s <i>&lt;%s&gt;</i> apache-1.3<br>\n", VERSION, "$Revision: 1.18 $");
 	printf(" Copyright (c) 1996 Adam Twiss, Zeus Technology Ltd, http://www.zeustech.net/<br>\n");
 	printf(" Copyright (c) 1998-2002 The Apache Software Foundation, http://www.apache.org/<br>\n");
 	printf("</p>\n<p>\n");

@@ -30,7 +30,7 @@
 .\" OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
 .\" SUCH DAMAGE.
 .\"
-.\" $OpenBSD: login.conf.5,v 1.35 2004/08/10 15:53:31 millert Exp $
+.\" $OpenBSD: login.conf.5,v 1.38 2005/03/12 12:21:08 jmc Exp $
 .\" BSDI $From: login.conf.5,v 2.20 2000/06/26 14:50:38 prb Exp $
 .\"
 .Dd June 18, 2001
@@ -161,7 +161,7 @@ See
 .Xr login 1 .
 .\"
 .Pp
-.It localcipher Ta string Ta old Ta
+.It localcipher Ta string Ta blowfish,6 Ta
 The cipher to use for local passwords.
 Possible values are:
 .Dq old ,
@@ -349,7 +349,8 @@ to the capability name (e.g.,
 and
 .Va openfiles-cur ) .
 .Pp
-\*(oSwill never define capabilities which start with
+.Ox
+will never define capabilities which start with
 .Li x-
 or
 .Li X- ,
@@ -410,7 +411,7 @@ It may have a trailing
 .Li b
 to multiply the value by 512, a
 .Li k
-to multiply the value by 1 K (1024), and a
+to multiply the value by 1 K (1024), and an
 .Li m
 to multiply the value by 1 M (1048576).
 .\"
@@ -565,7 +566,7 @@ The authentication type,
 used to determine the available authentication styles.
 .It Ar username
 The name of the user to authenticate.
-The name may contain an instance, e.g.
+The name may contain an instance, e.g.\&
 .Dq user.root ,
 as used by Kerberos authentication.
 If the authentication style being used does not support such instances,

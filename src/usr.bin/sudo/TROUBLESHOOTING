@@ -11,9 +11,9 @@ A) This usually means you either don't have a working compiler.  This
 Q) Sudo compiles but when I run it I get "Sorry, sudo must be setuid root."
    and sudo quits.
 A) Sudo must be setuid root to do its work.  You need to do something like
-   `chmod 4111 /usr/local/bin/sudo'.  Also, the filesystem sudo resides
-   on must *not* be mounted with the nosuid mount option or sudo will
-   not be able to work.  Another possibility is you may have '.' in
+   `chmod 4111 /usr/local/bin/sudo'.  Also, the file system sudo resides
+   on must *not* be mounted (or exported) with the nosuid option or sudo
+   will not be able to work.  Another possibility is you may have '.' in
    your $PATH before the directory containing sudo.  If you are going
    to have '.' in your path you should make sure it is at the end.
 
@@ -25,9 +25,19 @@ A) The operating system you are running probably has broken support for
    option and rebuild sudo.
 
 Q) Sudo never gives me a chance to enter a password using PAM, it just
-   says 'Sorry, try again.' three times and quits.
-A) You didn't setup PAM to work with sudo.  On Linux this generally
-   means installing sample.pam as /etc/pam.d/sudo.
+   says 'Sorry, try again.' three times and exits.
+A) You didn't setup PAM to work with sudo.  On Redhat Linux or Fedora
+   Core this generally means installing sample.pam as /etc/pam.d/sudo.
+   See the sample.pam file for hints on what to use for other Linux
+   systems.
+
+Q) Sudo says 'Account expired or PAM config lacks an "account"
+   section for sudo, contact your system administrator' and exits
+   but I know my account has not expired.
+A) Your PAM config lacks an "account" specification.  On Linux this
+   usually means you are missing a line like:
+	account    required    pam_unix.so
+   in /etc/pam.d/sudo.
 
 Q) Sudo is setup to log via syslog(3) but I'm not getting any log
    messages.

@@ -1,4 +1,4 @@
-/*	$OpenBSD: ifconfig.c,v 1.112 2004/08/08 19:04:25 deraadt Exp $	*/
+/*	$OpenBSD: ifconfig.c,v 1.131 2005/02/15 19:45:22 reyk Exp $	*/
 /*	$NetBSD: ifconfig.c,v 1.40 1997/10/01 02:19:43 enami Exp $	*/
 
 /*
@@ -77,7 +77,7 @@ static const char copyright[] =
 #if 0
 static const char sccsid[] = "@(#)ifconfig.c	8.2 (Berkeley) 2/16/94";
 #else
-static const char rcsid[] = "$OpenBSD: ifconfig.c,v 1.112 2004/08/08 19:04:25 deraadt Exp $";
+static const char rcsid[] = "$OpenBSD: ifconfig.c,v 1.131 2005/02/15 19:45:22 reyk Exp $";
 #endif
 #endif /* not lint */
 
@@ -96,9 +96,11 @@ static const char rcsid[] = "$OpenBSD: ifconfig.c,v 1.112 2004/08/08 19:04:25 de
 #include <netinet/ip_ipsp.h>
 #include <netinet/if_ether.h>
 #include <net/if_enc.h>
-#include <net/if_ieee80211.h>
+#include <net80211/ieee80211.h>
+#include <net80211/ieee80211_ioctl.h>
 #include <net/pfvar.h>
 #include <net/if_pfsync.h>
+#include <net/if_pppoe.h>
 
 #include <netatalk/at.h>
 
@@ -126,7 +128,6 @@ static const char rcsid[] = "$OpenBSD: ifconfig.c,v 1.112 2004/08/08 19:04:25 de
 #include <ifaddrs.h>
 
 struct	ifreq		ifr, ridreq;
-struct	ifaliasreq	addreq;
 struct	in_aliasreq	in_addreq;
 #ifdef INET6
 struct	in6_ifreq	ifr6;
@@ -134,16 +135,20 @@ struct	in6_ifreq	in6_ridreq;
 struct	in6_aliasreq	in6_addreq;
 #endif /* INET6 */
 struct	sockaddr_in	netmask;
-struct  netrange	at_nr;		/* AppleTalk net range */
 
+#ifndef SMALL
+struct	ifaliasreq	addreq;
+struct  netrange	at_nr;		/* AppleTalk net range */
 int	ipx_type = IPX_ETHERTYPE_II;
+#endif /* SMALL */
+
 char	name[IFNAMSIZ];
 int	flags, setaddr, setipdst, doalias;
 u_long	metric, mtu;
 int	clearaddr, s;
 int	newaddr = 0;
 int	af = AF_INET;
-int	dflag, mflag, lflag, uflag;
+int	mflag;
 int	explicit_prefix = 0;
 #ifdef INET6
 int	Lflag = 1;
@@ -162,7 +167,10 @@ void	setifipdst(const char *, int);
 void	setifmetric(const char *, int);
 void	setifmtu(const char *, int);
 void	setifnwid(const char *, int);
+void	setifbssid(const char *, int);
 void	setifnwkey(const char *, int);
+void	setifchan(const char *, int);
+void	setiftxpower(const char *, int);
 void	setifpowersave(const char *, int);
 void	setifpowersavesleep(const char *, int);
 void	setifnetmask(const char *, int);
@@ -182,11 +190,13 @@ void	setia6eui64(const char *, int);
 void	checkatrange(struct sockaddr_at *);
 void	setmedia(const char *, int);
 void	setmediaopt(const char *, int);
+void	setmediamode(const char *, int);
 void	clone_create(const char *, int);
 void	clone_destroy(const char *, int);
 void	unsetmediaopt(const char *, int);
 void	setmediainst(const char *, int);
 void	settimeslot(const char *, int);
+void	timeslot_status(void);
 void	setvlantag(const char *, int);
 void	setvlandev(const char *, int);
 void	unsetvlandev(const char *, int);
@@ -198,12 +208,18 @@ void	setcarp_advskew(const char *, int);
 void	setcarp_passwd(const char *, int);
 void	setcarp_vhid(const char *, int);
 void	setcarp_state(const char *, int);
-void	setpfsync_syncif(const char *, int);
+void	setcarpdev(const char *, int);
+void	unsetcarpdev(const char *, int);
+void	setpfsync_syncdev(const char *, int);
 void	setpfsync_maxupd(const char *, int);
-void	unsetpfsync_syncif(const char *, int);
+void	unsetpfsync_syncdev(const char *, int);
 void	setpfsync_syncpeer(const char *, int);
 void	unsetpfsync_syncpeer(const char *, int);
 void	pfsync_status(void);
+void	setpppoe_dev(const char *,int);
+void	setpppoe_svc(const char *,int);
+void	setpppoe_ac(const char *,int);
+void	pppoe_status(void);
 int	main(int, char *[]);
 int	prefix(void *val, int);
 
@@ -225,6 +241,7 @@ int	actions;			/* Actions performed */
 #define	A_MEDIAOPTCLR	0x0004		/* -mediaopt command */
 #define	A_MEDIAOPT	(A_MEDIAOPTSET|A_MEDIAOPTCLR)
 #define	A_MEDIAINST	0x0008		/* instance or inst command */
+#define	A_MEDIAMODE	0x0010		/* mode command */
 
 #define	NEXTARG		0xffffff
 #define NEXTARG2	0xfffffe
@@ -258,8 +275,12 @@ const struct	cmd {
 	{ "metric",	NEXTARG,	0,		setifmetric },
 	{ "mtu",	NEXTARG,	0,		setifmtu },
 	{ "nwid",	NEXTARG,	0,		setifnwid },
+	{ "bssid",	NEXTARG,	0,		setifbssid },
+	{ "-bssid",	-1,		0,		setifbssid },
 	{ "nwkey",	NEXTARG,	0,		setifnwkey },
 	{ "-nwkey",	-1,		0,		setifnwkey },
+	{ "chan",	NEXTARG,	0,		setifchan },
+	{ "-chan",	-1,		0,		setifchan },
 	{ "powersave",	1,		0,		setifpowersave },
 	{ "-powersave",	0,		0,		setifpowersave },
 	{ "powersavesleep", NEXTARG,	0,		setifpowersavesleep },
@@ -275,6 +296,7 @@ const struct	cmd {
 	{ "vltime",	NEXTARG,	0,		setia6vltime },
 	{ "eui64",	0,		0,		setia6eui64 },
 #endif /*INET6*/
+#ifndef SMALL
 	{ "range",	NEXTARG,	0,		setatrange },
 	{ "phase",	NEXTARG,	0,		setatphase },
 	{ "802.2",	IPX_ETHERTYPE_8022,	0,	setipxframetype },
@@ -290,8 +312,12 @@ const struct	cmd {
 	{ "pass",	NEXTARG,	0,		setcarp_passwd },
 	{ "vhid",	NEXTARG,	0,		setcarp_vhid },
 	{ "state",	NEXTARG,	0,		setcarp_state },
-	{ "syncif",	NEXTARG,	0,		setpfsync_syncif },
-	{ "-syncif",	1,		0,		unsetpfsync_syncif },
+	{ "carpdev",	NEXTARG,	0,		setcarpdev },
+	{ "-carpdev",	1,		0,		unsetcarpdev },
+	{ "syncdev",	NEXTARG,	0,		setpfsync_syncdev },
+	{ "-syncdev",	1,		0,		unsetpfsync_syncdev },
+	{ "syncif",	NEXTARG,	0,		setpfsync_syncdev },
+	{ "-syncif",	1,		0,		unsetpfsync_syncdev },
 	{ "syncpeer",	NEXTARG,	0,		setpfsync_syncpeer },
 	{ "-syncpeer",	1,		0,		unsetpfsync_syncpeer },
 	{ "maxupd",	NEXTARG,	0,		setpfsync_maxupd },
@@ -299,6 +325,15 @@ const struct	cmd {
 	{ "giftunnel",  NEXTARG2,	0,		NULL, settunnel } ,
 	{ "tunnel",	NEXTARG2,	0,		NULL, settunnel } ,
 	{ "deletetunnel",  0,		0,		deletetunnel } ,
+	{ "pppoedev",	NEXTARG,	0,		setpppoe_dev },
+	{ "pppoesvc",	NEXTARG,	0,		setpppoe_svc },
+	{ "-pppoesvc",	1,		0,		setpppoe_svc },
+	{ "pppoeac",	NEXTARG,	0,		setpppoe_ac },
+	{ "-pppoeac",	1,		0,		setpppoe_ac },
+	{ "timeslot",	NEXTARG,	0,		settimeslot },
+	{ "txpower",	NEXTARG,	0,		setiftxpower },
+	{ "-txpower",	1,		0,		setiftxpower },
+#endif /* SMALL */
 #if 0
 	/* XXX `create' special-cased below */
 	{ "create",	0,		0,		clone_create } ,
@@ -313,9 +348,9 @@ const struct	cmd {
 	{ "media",	NEXTARG,	A_MEDIA,	setmedia },
 	{ "mediaopt",	NEXTARG,	A_MEDIAOPTSET,	setmediaopt },
 	{ "-mediaopt",	NEXTARG,	A_MEDIAOPTCLR,	unsetmediaopt },
+	{ "mode",	NEXTARG,	A_MEDIAMODE,	setmediamode },
 	{ "instance",	NEXTARG,	A_MEDIAINST,	setmediainst },
 	{ "inst",	NEXTARG,	A_MEDIAINST,	setmediainst },
-	{ "timeslot",	NEXTARG,	0,		settimeslot },
 	{ "description", NEXTARG,	0,		setifdesc },
 	{ "descr",	NEXTARG,	0,		setifdesc },
 	{ NULL, /*src*/	0,		0,		setifaddr },
@@ -328,7 +363,7 @@ void	getsock(int);
 void	printif(struct ifreq *, int);
 void	printb(char *, unsigned short, char *);
 void	status(int, struct sockaddr_dl *);
-void	usage(void);
+void	usage(int);
 const char *get_string(const char *, const char *, u_int8_t *, int *);
 void	print_string(const u_int8_t *, int);
 char	*sec2str(time_t);
@@ -336,6 +371,7 @@ void	list_cloners(void);
 
 const char *get_media_type_string(int);
 const char *get_media_subtype_string(int);
+int	get_media_mode(int, const char *);
 int	get_media_subtype(int, const char *);
 int	get_media_options(int, const char *);
 int	lookup_media_word(const struct ifmedia_description *, int,
@@ -344,7 +380,7 @@ void	print_media_word(int, int, int);
 void	process_media_commands(void);
 void	init_current_media(void);
 
-unsigned long get_ts_map(int ts_flag, int ts_start, int ts_stop);
+unsigned long get_ts_map(int, int, int);
 /*
  * XNS support liberally adapted from code written at the University of
  * Maryland principally by James O'Toole and Chris Torek.
@@ -386,12 +422,14 @@ const struct afswtch {
 	{ "inet6", AF_INET6, in6_status, in6_getaddr, in6_getprefix,
 	    SIOCDIFADDR_IN6, SIOCAIFADDR_IN6, C(in6_ridreq), C(in6_addreq) },
 #endif /* INET6 */
+#ifndef SMALL
 	{ "atalk", AF_APPLETALK, at_status, at_getaddr, NULL,
 	    SIOCDIFADDR, SIOCAIFADDR, C(addreq), C(addreq) },
 	{ "ns", AF_NS, xns_status, xns_getaddr, NULL,
 	    SIOCDIFADDR, SIOCAIFADDR, C(ridreq), C(addreq) },
 	{ "ipx", AF_IPX, ipx_status, ipx_getaddr, NULL,
 	    SIOCDIFADDR, SIOCAIFADDR, C(ridreq), C(addreq) },
+#endif
 	{ 0,	0,	    0,		0 }
 };
 
@@ -407,8 +445,11 @@ main(int argc, char *argv[])
 	int Cflag = 0;
 	int i;
 
-	if (argc < 2)
-		usage();
+	/* If no args at all, print all interfaces.  */
+	if (argc < 2) {
+		printif(NULL, ifaliases);
+		exit(0);
+	}
 	argc--, argv++;
 	if (!strcmp(*argv, "-a"))
 		aflag = 1;
@@ -426,11 +467,13 @@ main(int argc, char *argv[])
 		mflag = 1;
 		argc--, argv++;
 		if (argc < 1)
-			usage();
+			usage(1);
 		if (strlcpy(name, *argv, sizeof(name)) >= IFNAMSIZ)
 			errx(1, "interface name '%s' too long", *argv);
 	} else if (!strcmp(*argv, "-C")) {
 		Cflag = 1;
+	} else if (*argv[0] == '-') {
+		usage(0);
 	} else if (strlcpy(name, *argv, sizeof(name)) >= IFNAMSIZ)
 		errx(1, "interface name '%s' too long", *argv);
 	argc--, argv++;
@@ -447,13 +490,13 @@ main(int argc, char *argv[])
 	}
 	if (Cflag) {
 		if (argc > 0 || mflag || aflag)
-			usage();
+			usage(1);
 		list_cloners();
 		exit(0);
 	}
 	if (aflag) {
 		if (argc > 0)
-			usage();
+			usage(0);
 		printif(NULL, ifaliases);
 		exit(0);
 	}
@@ -528,6 +571,7 @@ main(int argc, char *argv[])
 		/* in6_getprefix("64", MASK) if MASK is available here... */
 	}
 
+#ifndef SMALL
 	switch (af) {
 	case AF_NS:
 		if (setipdst) {
@@ -557,11 +601,11 @@ main(int argc, char *argv[])
 		checkatrange((struct sockaddr_at *) &addreq.ifra_addr);
 		break;
 	}
+#endif /* SMALL */
 
 	if (clearaddr) {
-		int ret;
 		(void) strlcpy(rafp->af_ridreq, name, sizeof(ifr.ifr_name));
-		if ((ret = ioctl(s, rafp->af_difaddr, rafp->af_ridreq)) < 0) {
+		if (ioctl(s, rafp->af_difaddr, rafp->af_ridreq) < 0) {
 			if (errno == EADDRNOTAVAIL && (doalias >= 0)) {
 				/* means no previous address for interface */
 			} else
@@ -703,7 +747,8 @@ printif(struct ifreq *ifrm, int ifaliases)
 					(*p->af_status)(1);
 			} else {
 				for (p = afs; p->af_name; p++) {
-					if (ifa->ifa_addr->sa_family == p->af_af)
+					if (ifa->ifa_addr->sa_family ==
+					    p->af_af)
 						(*p->af_status)(0);
 				}
 			}
@@ -806,64 +851,21 @@ setifaddr(const char *addr, int param)
 	(*afp->af_getaddr)(addr, (doalias >= 0 ? ADDR : RIDADDR));
 }
 
-void
-settunnel(const char *src, const char *dst)
-{
-	struct addrinfo hints, *srcres, *dstres;
-	int ecode;
-	struct if_laddrreq req;
-
-	memset(&hints, 0, sizeof(hints));
-	hints.ai_family = afp->af_af;
-	hints.ai_socktype = SOCK_DGRAM;	/*dummy*/
-
-	if ((ecode = getaddrinfo(src, NULL, &hints, &srcres)) != 0)
-		errx(1, "error in parsing address string: %s",
-		    gai_strerror(ecode));
-
-	if ((ecode = getaddrinfo(dst, NULL, &hints, &dstres)) != 0)
-		errx(1, "error in parsing address string: %s",
-		    gai_strerror(ecode));
-
-	if (srcres->ai_addr->sa_family != dstres->ai_addr->sa_family)
-		errx(1,
-		    "source and destination address families do not match");
-
-	if (srcres->ai_addrlen > sizeof(req.addr) ||
-	    dstres->ai_addrlen > sizeof(req.dstaddr))
-		errx(1, "invalid sockaddr");
-
-	memset(&req, 0, sizeof(req));
-	(void) strlcpy(req.iflr_name, name, sizeof(req.iflr_name));
-	memcpy(&req.addr, srcres->ai_addr, srcres->ai_addrlen);
-	memcpy(&req.dstaddr, dstres->ai_addr, dstres->ai_addrlen);
-	if (ioctl(s, SIOCSLIFPHYADDR, &req) < 0)
-		warn("SIOCSLIFPHYADDR");
-
-	freeaddrinfo(srcres);
-	freeaddrinfo(dstres);
-}
-
-void
-deletetunnel(const char *ignored, int alsoignored)
-{
-	if (ioctl(s, SIOCDIFPHYADDR, &ifr) < 0)
-		warn("SIOCDIFPHYADDR");
-}
-
-
+/* ARGSUSED */
 void
 setifnetmask(const char *addr, int ignored)
 {
 	(*afp->af_getaddr)(addr, MASK);
 }
 
+/* ARGSUSED */
 void
 setifbroadaddr(const char *addr, int ignored)
 {
 	(*afp->af_getaddr)(addr, DSTADDR);
 }
 
+/* ARGSUSED */
 void
 setifdesc(const char *val, int ignored)
 {
@@ -872,6 +874,7 @@ setifdesc(const char *val, int ignored)
 		warn("SIOCSIFDESCR");
 }
 
+/* ARGSUSED */
 void
 setifipdst(const char *addr, int ignored)
 {
@@ -917,6 +920,7 @@ setifdstaddr(const char *addr, int param)
  * of the ifreq structure, which may confuse other parts of ifconfig.
  * Make a private copy so we can avoid that.
  */
+/* ARGSUSED */
 void
 setifflags(const char *vname, int value)
 {
@@ -1022,6 +1026,7 @@ setia6eui64(const char *cmd, int val)
 }
 #endif /* INET6 */
 
+/* ARGSUSED */
 void
 setifmetric(const char *val, int ignored)
 {
@@ -1036,11 +1041,11 @@ setifmetric(const char *val, int ignored)
 		warn("SIOCSIFMETRIC");
 }
 
+/* ARGSUSED */
 void
 setifmtu(const char *val, int d)
 {
 	const char *errmsg = NULL;
-	char *ep = NULL;
 
 	(void) strlcpy(ifr.ifr_name, name, sizeof(ifr.ifr_name));
 
@@ -1051,6 +1056,7 @@ setifmtu(const char *val, int d)
 		warn("SIOCSIFMTU");
 }
 
+/* ARGSUSED */
 void
 setifgroup(const char *group_name, int dummy)
 {
@@ -1065,6 +1071,7 @@ setifgroup(const char *group_name, int dummy)
 		err(1," SIOCAIFGROUP");
 }
 
+/* ARGSUSED */
 void
 unsetifgroup(const char *group_name, int dummy)
 {
@@ -1160,6 +1167,7 @@ print_string(const u_int8_t *buf, int len)
 	}
 }
 
+/* ARGSUSED */
 void
 setifnwid(const char *val, int d)
 {
@@ -1174,6 +1182,30 @@ setifnwid(const char *val, int d)
 	ifr.ifr_data = (caddr_t)&nwid;
 	if (ioctl(s, SIOCS80211NWID, (caddr_t)&ifr) < 0)
 		warn("SIOCS80211NWID");
+}
+
+void
+setifbssid(const char *val, int d)
+{
+
+	struct ieee80211_bssid bssid;
+	struct ether_addr *ea;
+
+	if (d != 0) {
+		/* no BSSID is especially desired */
+		memset(&bssid.i_bssid, 0, sizeof(bssid.i_bssid));
+	} else {
+		ea = ether_aton((char*)val);
+		if (ea == NULL) {
+			warnx("malformed BSSID: %s", val);
+			return;
+		}
+		memcpy(&bssid.i_bssid, ea->ether_addr_octet,
+		    sizeof(bssid.i_bssid));
+	}
+	strlcpy(bssid.i_name, name, sizeof(bssid.i_name));
+	if (ioctl(s, SIOCS80211BSSID, &bssid) == -1)
+		warn("SIOCS80211BSSID");
 }
 
 void
@@ -1202,7 +1234,7 @@ setifnwkey(const char *val, int d)
 		nwkey.i_wepon |= IEEE80211_NWKEY_PERSIST;
 		goto set_nwkey;
 	} else {
-  set_nwkey:
+ set_nwkey:
 		if (isdigit(val[0]) && val[1] == ':') {
 			/* specifying a full set of four keys */
 			nwkey.i_defkid = val[0] - '0';
@@ -1240,6 +1272,54 @@ setifnwkey(const char *val, int d)
 }
 
 void
+setifchan(const char *val, int d)
+{
+	struct ieee80211chanreq channel;
+	int chan;
+
+	if (d != 0)
+		chan = IEEE80211_CHAN_ANY;
+	else {
+		chan = atoi(val);
+		if (chan < 0 || chan > 0xffff) {
+			warnx("invalid channel: %s", val);
+			return;
+		}
+	}
+
+	strlcpy(channel.i_name, name, sizeof(channel.i_name));
+	channel.i_channel = (u_int16_t)chan;
+	if (ioctl(s, SIOCS80211CHANNEL, (caddr_t)&channel) == -1)
+		warn("SIOCS80211CHANNEL");
+}
+
+#ifndef SMALL
+void
+setiftxpower(const char *val, int d)
+{
+	const char *errmsg = NULL;
+	struct ieee80211_txpower txpower;
+	int dbm;
+
+	strlcpy(txpower.i_name, name, sizeof(txpower.i_name));
+
+	if (d == 1) {
+		txpower.i_mode = IEEE80211_TXPOWER_MODE_AUTO;
+	} else {
+		dbm = strtonum(val, SHRT_MIN, SHRT_MAX, &errmsg);
+		if (errmsg)
+			errx(1, "txpower %sdBm: %s", val, errmsg);
+		txpower.i_val = (int16_t)dbm;
+		txpower.i_mode = IEEE80211_TXPOWER_MODE_FIXED;
+	}
+
+	if (ioctl(s, SIOCS80211TXPOWER, (caddr_t)&txpower) == -1)
+		warn("SIOCS80211TXPOWER");
+}
+#endif
+
+/* ARGSUSED */
+void
 setifpowersave(const char *val, int d)
 {
 	struct ieee80211_power power;
@@ -1255,12 +1335,12 @@ setifpowersave(const char *val, int d)
 		warn("SIOCS80211POWER");
 }
 
+/* ARGSUSED */
 void
 setifpowersavesleep(const char *val, int d)
 {
 	struct ieee80211_power power;
 	const char *errmsg = NULL;
-	int len;
 
 	(void)strlcpy(power.i_name, name, sizeof(power.i_name));
 	if (ioctl(s, SIOCG80211POWER, (caddr_t)&power) == -1) {
@@ -1279,40 +1359,87 @@ setifpowersavesleep(const char *val, int d)
 void
 ieee80211_status(void)
 {
-	int len, i, nwkey_verbose;
+	int len, i, nwkey_verbose, inwid, inwkey, ichan, ipwr, ibssid, itxpower;
 	struct ieee80211_nwid nwid;
 	struct ieee80211_nwkey nwkey;
 	struct ieee80211_power power;
+	struct ieee80211chanreq channel;
+	struct ieee80211_bssid bssid;
+	struct ieee80211_txpower txpower;
+	u_int8_t zero_bssid[IEEE80211_ADDR_LEN];
 	u_int8_t keybuf[IEEE80211_WEP_NKID][16];
+	struct ether_addr ea;
 
+	/* get current status via ioctls */
 	memset(&ifr, 0, sizeof(ifr));
 	ifr.ifr_data = (caddr_t)&nwid;
-	(void)strlcpy(ifr.ifr_name, name, sizeof(ifr.ifr_name));
-	if (ioctl(s, SIOCG80211NWID, (caddr_t)&ifr) == 0) {
+	strlcpy(ifr.ifr_name, name, sizeof(ifr.ifr_name));
+	inwid = ioctl(s, SIOCG80211NWID, (caddr_t)&ifr);
+
+	memset(&nwkey, 0, sizeof(nwkey));
+	strlcpy(nwkey.i_name, name, sizeof(nwkey.i_name));
+	inwkey = ioctl(s, SIOCG80211NWKEY, (caddr_t)&nwkey);
+
+	memset(&power, 0, sizeof(power));
+	strlcpy(power.i_name, name, sizeof(power.i_name));
+	ipwr = ioctl(s, SIOCG80211POWER, &power);
+
+	memset(&channel, 0, sizeof(channel));
+	strlcpy(channel.i_name, name, sizeof(channel.i_name));
+	ichan = ioctl(s, SIOCG80211CHANNEL, (caddr_t)&channel);
+
+	memset(&bssid, 0, sizeof(bssid));
+	strlcpy(bssid.i_name, name, sizeof(bssid.i_name));
+	ibssid = ioctl(s, SIOCG80211BSSID, &bssid);
+
+	memset(&txpower, 0, sizeof(txpower));
+	strlcpy(txpower.i_name, name, sizeof(txpower.i_name));
+	itxpower = ioctl(s, SIOCG80211TXPOWER, &txpower);
+
+	/* check if any ieee80211 option is active */
+	if (inwid == 0 || inwkey == 0 || ipwr == 0 ||
+	    ichan == 0 || ibssid == 0 || itxpower == 0)
+		fputs("\tieee80211: ", stdout);
+	else
+		return;
+
+	if (inwid == 0) {
 		/* nwid.i_nwid is not NUL terminated. */
 		len = nwid.i_len;
 		if (len > IEEE80211_NWID_LEN)
 			len = IEEE80211_NWID_LEN;
-		fputs("\tnwid: ", stdout);
+		fputs("nwid ", stdout);
 		print_string(nwid.i_nwid, nwid.i_len);
-		putchar('\n');
+		putchar(' ');
 	}
 
-	memset(&nwkey, 0, sizeof(nwkey));
-	(void)strlcpy(nwkey.i_name, name, sizeof(nwkey.i_name));
-	if (ioctl(s, SIOCG80211NWKEY, (caddr_t)&nwkey) == 0 &&
-	    nwkey.i_wepon > 0) {
-		fputs("\tnwkey: ", stdout);
+	if (ichan == 0 && channel.i_channel != 0 &&
+	    channel.i_channel != (u_int16_t)-1)
+		printf("chan %u ", channel.i_channel);
+
+	memset(&zero_bssid, 0, sizeof(zero_bssid));
+	if (ibssid == 0 &&
+	    memcmp(bssid.i_bssid, zero_bssid, IEEE80211_ADDR_LEN) != 0) {
+		memcpy(&ea.ether_addr_octet, bssid.i_bssid,
+		    sizeof(ea.ether_addr_octet));
+		printf("bssid %s ", ether_ntoa(&ea));
+	}
+
+	if (inwkey == 0 && nwkey.i_wepon > 0) {
+		fputs("nwkey ", stdout);
 		/* try to retrieve WEP keys */
 		for (i = 0; i < IEEE80211_WEP_NKID; i++) {
 			nwkey.i_key[i].i_keydat = keybuf[i];
 			nwkey.i_key[i].i_keylen = sizeof(keybuf[i]);
 		}
 		if (ioctl(s, SIOCG80211NWKEY, (caddr_t)&nwkey) == -1) {
-			puts("<not displayed>");
+			fputs("<not displayed> ", stdout);
 		} else {
 			nwkey_verbose = 0;
-			/* check to see non default key or multiple keys defined */
+			/*
+			 * check to see non default key
+			 * or multiple keys defined
+			 */
 			if (nwkey.i_defkid != 1) {
 				nwkey_verbose = 1;
 			} else {
@@ -1331,7 +1458,7 @@ ieee80211_status(void)
 					nwkey_verbose = 1;
 				else if (nwkey.i_key[0].i_keylen >= 7 &&
 				    strncasecmp("persist",
-				    nwkey.i_key[0].i_keydat, 7) == 0)
+				    (char *)nwkey.i_key[0].i_keydat, 7) == 0)
 					nwkey_verbose = 1;
 			}
 			if (nwkey_verbose)
@@ -1342,26 +1469,29 @@ ieee80211_status(void)
 				if (nwkey.i_key[i].i_keylen < 0) {
 					fputs("persist", stdout);
 				} else {
-					/* XXX - sanity check nwkey.i_key[i].i_keylen */
+					/*
+					 * XXX
+					 * sanity check nwkey.i_key[i].i_keylen
+					 */
 					print_string(nwkey.i_key[i].i_keydat,
 					    nwkey.i_key[i].i_keylen);
 				}
 				if (!nwkey_verbose)
 					break;
 			}
-			putchar('\n');
+			putchar(' ');
 		}
 	}
 
-	memset(&power, 0, sizeof(power));
-	(void)strlcpy(power.i_name, name, sizeof(power.i_name));
-	if (ioctl(s, SIOCG80211POWER, &power) == 0) {
-		fputs("\tpowersave: ", stdout);
-		if (power.i_enabled)
-			printf("on (%dms sleep)\n", power.i_maxsleep);
-		else
-			puts("off");
-	}
+	if (ipwr == 0 && power.i_enabled)
+		printf("powersave on (%dms sleep) ", power.i_maxsleep);
+
+	if (itxpower == 0)
+		printf("%ddBm %s", txpower.i_val, 
+		    txpower.i_mode == IEEE80211_TXPOWER_MODE_AUTO ? 
+		    "(auto) " : "");
+
+	putchar('\n');
 }
 
 void
@@ -1373,7 +1503,7 @@ init_current_media(void)
 	 * If we have not yet done so, grab the currently-selected
 	 * media.
 	 */
-	if ((actions & (A_MEDIA|A_MEDIAOPT)) == 0) {
+	if ((actions & (A_MEDIA|A_MEDIAOPT|A_MEDIAMODE)) == 0) {
 		(void) memset(&ifmr, 0, sizeof(ifmr));
 		(void) strlcpy(ifmr.ifm_name, name, sizeof(ifmr.ifm_name));
 
@@ -1417,6 +1547,7 @@ process_media_commands(void)
 		err(1, "SIOCSIFMEDIA");
 }
 
+/* ARGSUSED */
 void
 setmedia(const char *val, int d)
 {
@@ -1427,6 +1558,10 @@ setmedia(const char *val, int d)
 	/* Only one media command may be given. */
 	if (actions & A_MEDIA)
 		errx(1, "only one `media' command may be issued");
+
+	/* Must not come after mode commands */
+	if (actions & A_MEDIAMODE)
+		errx(1, "may not issue `media' after `mode' commands");
 
 	/* Must not come after mediaopt commands */
 	if (actions & A_MEDIAOPT)
@@ -1449,6 +1584,29 @@ setmedia(const char *val, int d)
 	/* Media will be set after other processing is complete. */
 }
 
+/* ARGSUSED */
+void
+setmediamode(const char *val, int d)
+{
+	int type, subtype, options, inst, mode;
+
+	init_current_media();
+
+	/* Can only issue `mode' once. */
+	if (actions & A_MEDIAMODE)
+		errx(1, "only one `mode' command may be issued");
+
+	type = IFM_TYPE(media_current);
+	subtype = IFM_SUBTYPE(media_current);
+	options = IFM_OPTIONS(media_current);
+	inst = IFM_INST(media_current);
+
+	if ((mode = get_media_mode(type, val)) == -1)
+		errx(1, "invalid media mode: %s", val);
+	media_current = IFM_MAKEWORD(type, subtype, options, inst) | mode;
+	/* Media will be set after other processing is complete. */
+}
+
 void
 setmediaopt(const char *val, int d)
 {
@@ -1468,6 +1626,7 @@ setmediaopt(const char *val, int d)
 	/* Media will be set after other processing is complete. */
 }
 
+/* ARGSUSED */
 void
 unsetmediaopt(const char *val, int d)
 {
@@ -1492,6 +1651,7 @@ unsetmediaopt(const char *val, int d)
 	/* Media will be set after other processing is complete. */
 }
 
+/* ARGSUSED */
 void
 setmediainst(const char *val, int d)
 {
@@ -1521,6 +1681,14 @@ setmediainst(const char *val, int d)
 	/* Media will be set after other processing is complete. */
 }
 
+/*
+ * Note: 
+ * bits:       0   1   2   3   4   5   ....   24   25   ...   30   31
+ * T1 mode:   N/A ch1 ch2 ch3 ch4 ch5        ch24  N/A        N/A  N/A
+ * E1 mode:   ts0 ts1 ts2 ts3 ts4 ts5        ts24  ts25       ts30 ts31
+ */
+#ifndef SMALL
+/* ARGSUSED */
 void
 settimeslot(const char *val, int d)
 {
@@ -1530,12 +1698,12 @@ settimeslot(const char *val, int d)
 	unsigned long	ts_map = 0;
 	char	*ptr = (char*)val;
 	int		ts_flag = 0;
-	int		ts = 0, ts_start = 0, i;
+	int		ts = 0, ts_start = 0;
 
-	if (strcmp(val,"all") == 0){
+	if (strcmp(val,"all") == 0) {
 		ts_map = ALL_CHANNELS;
-	}else{
-		while(*ptr != '\0') {
+	} else {
+		while (*ptr != '\0') {
 			if (isdigit(*ptr)) {
 				ts = strtoul(ptr, &ptr, 10);
 				ts_flag |= SINGLE_CHANNEL;
@@ -1544,26 +1712,26 @@ settimeslot(const char *val, int d)
 					ts_flag |= RANGE_CHANNEL;
 					ts_start = ts;
 				} else {
-					ts_map |= get_ts_map(ts_flag, ts_start, ts);
+					ts_map |= get_ts_map(ts_flag,
+					    ts_start, ts);
 					ts_flag = 0;
 				}
 				ptr++;
 			}
 		}
-		if (ts_flag){
+		if (ts_flag)
 			ts_map |= get_ts_map(ts_flag, ts_start, ts);
-		}
+
 	}
 	(void) strlcpy(ifr.ifr_name, name, sizeof(ifr.ifr_name));
 	ifr.ifr_data = (caddr_t)&ts_map;
 
 	if (ioctl(s, SIOCSIFTIMESLOT, (caddr_t)&ifr) < 0)
 		err(1, "SIOCSIFTIMESLOT");
-
-
 }
 
-unsigned long get_ts_map(int ts_flag, int ts_start, int ts_stop)
+unsigned long
+get_ts_map(int ts_flag, int ts_start, int ts_stop)
 {
 	int		i = 0;
 	unsigned long	map = 0, mask = 0;
@@ -1571,22 +1739,63 @@ unsigned long get_ts_map(int ts_flag, int ts_start, int ts_stop)
 	if ((ts_flag & (SINGLE_CHANNEL | RANGE_CHANNEL)) == 0)
 		return 0;
 	if (ts_flag & RANGE_CHANNEL) { /* Range of channels */
-		for(i = ts_start; i <= ts_stop; i++) {
-			mask = 1 << (i - 1);
+		for (i = ts_start; i <= ts_stop; i++) {
+			mask = 1 << i;
 			map |=mask;
 		}
 	} else { /* Single channel */
-		mask = 1 << (ts_stop - 1);
+		mask = 1 << ts_stop;
 		map |= mask;
 	}
 	return map;
 }
+#endif /* SMALL */
+
+#ifndef SMALL
+void
+timeslot_status(void)
+{
+	char		*sep = " ";
+	unsigned long	 ts_map = 0;
+	int		 i, start = -1;
+
+	ifr.ifr_data = (caddr_t)&ts_map;
+
+	if (ioctl(s, SIOCGIFTIMESLOT, (caddr_t)&ifr) == -1)
+		return;
+
+	printf("\ttimeslot:");
+	for (i = 0; i < sizeof(ts_map) * 8; i++) {
+		if (start == -1 && ts_map & (1 << i))
+			start = i;
+		else if (start != -1 && !(ts_map & (1 << i))) {
+			if (start == i - 1)
+				printf("%s%d", sep, start);
+			else
+				printf("%s%d-%d", sep, start, i-1);
+			sep = ",";
+			start = -1;
+		}
+	}
+	if (start != -1) {
+		if (start == i - 1)
+			printf("%s%d", sep, start);
+		else
+			printf("%s%d-%d", sep, start, i-1);
+	}
+	printf("\n");
+}
+#endif
+
 
 const struct ifmedia_description ifm_type_descriptions[] =
     IFM_TYPE_DESCRIPTIONS;
 
 const struct ifmedia_description ifm_subtype_descriptions[] =
     IFM_SUBTYPE_DESCRIPTIONS;
+
+struct ifmedia_description ifm_mode_descriptions[] =
+    IFM_MODE_DESCRIPTIONS;
 
 const struct ifmedia_description ifm_option_descriptions[] =
     IFM_OPTION_DESCRIPTIONS;
@@ -1628,6 +1837,18 @@ get_media_subtype(int type, const char *val)
 		errx(1, "unknown %s media subtype: %s",
 		    get_media_type_string(type), val);
 
+	return (rval);
+}
+
+int
+get_media_mode(int type, const char *val)
+{
+	int rval;
+
+	rval = lookup_media_word(ifm_mode_descriptions, type, val);
+	if (rval == -1)
+		errx(1, "unknown %s media mode: %s",
+		    get_media_type_string(type), val);
 	return (rval);
 }
 
@@ -1682,6 +1903,18 @@ print_media_word(int ifmw, int print_type, int as_syntax)
 	printf("%s%s", as_syntax ? "media " : "",
 	    get_media_subtype_string(ifmw));
 
+	/* Find mode. */
+	if (IFM_MODE(ifmw) != 0) {
+		for (desc = ifm_mode_descriptions; desc->ifmt_string != NULL;
+		    desc++) {
+			if (IFM_TYPE_MATCH(desc->ifmt_word, ifmw) &&
+			    IFM_MODE(ifmw) == IFM_MODE(desc->ifmt_word)) {
+				printf(" mode %s", desc->ifmt_string);
+				break;
+			}
+		}
+	}
+
 	/* Find options. */
 	for (desc = ifm_option_descriptions; desc->ifmt_string != NULL;
 	    desc++) {
@@ -1703,17 +1936,14 @@ print_media_word(int ifmw, int print_type, int as_syntax)
 "\020\1UP\2BROADCAST\3DEBUG\4LOOPBACK\5POINTOPOINT\6NOTRAILERS\7RUNNING\10NOARP\
 \11PROMISC\12ALLMULTI\13OACTIVE\14SIMPLEX\15LINK0\16LINK1\17LINK2\20MULTICAST"
 
+/* ARGSUSED */
 static void
 phys_status(int force)
 {
 	char psrcaddr[NI_MAXHOST];
 	char pdstaddr[NI_MAXHOST];
 	const char *ver = "";
-#ifdef NI_WITHSCOPEID
-	const int niflag = NI_NUMERICHOST | NI_WITHSCOPEID;
-#else /* NI_WITHSCOPEID */
 	const int niflag = NI_NUMERICHOST;
-#endif /* NI_WITHSCOPEID */
 	struct if_laddrreq req;
 
 	psrcaddr[0] = pdstaddr[0] = '\0';
@@ -1780,9 +2010,13 @@ status(int link, struct sockaddr_dl *sdl)
 	    strlen(ifrdesc.ifr_data))
 		printf("\tdescription: %s\n", ifrdesc.ifr_data);
 
+#ifndef SMALL
 	vlan_status();
 	carp_status();
 	pfsync_status();
+	pppoe_status();
+	timeslot_status();
+#endif
 	ieee80211_status();
 	getifgroups();
 
@@ -1883,7 +2117,7 @@ status(int link, struct sockaddr_dl *sdl)
 	phys_status(0);
 }
 
-
+/* ARGSUSED */
 void
 in_status(int force)
 {
@@ -1944,6 +2178,7 @@ in_status(int force)
 	putchar('\n');
 }
 
+/* ARGSUSED */
 void
 setifprefixlen(const char *addr, int d)
 {
@@ -1973,11 +2208,7 @@ in6_alias(struct in6_ifreq *creq)
 	struct	in6_ifreq ifr6;		/* shadows file static variable */
 	u_int32_t scopeid;
 	char hbuf[NI_MAXHOST];
-#ifdef NI_WITHSCOPEID
-	const int niflag = NI_NUMERICHOST | NI_WITHSCOPEID;
-#else /* NI_WITHSCOPEID */
 	const int niflag = NI_NUMERICHOST;
-#endif /* NI_WITHSCOPEID */
 
 	/* Get the non-alias address for this interface. */
 	getsock(AF_INET6);
@@ -2063,16 +2294,16 @@ in6_alias(struct in6_ifreq *creq)
 			printf(" pltime ");
 			if (lifetime->ia6t_preferred) {
 				printf("%s", lifetime->ia6t_preferred < t
-					? "0"
-					: sec2str(lifetime->ia6t_preferred - t));
+				    ? "0" :
+				    sec2str( lifetime->ia6t_preferred - t));
 			} else
 				printf("infty");
 
 			printf(" vltime ");
 			if (lifetime->ia6t_expire) {
 				printf("%s", lifetime->ia6t_expire < t
-					? "0"
-					: sec2str(lifetime->ia6t_expire - t));
+				    ? "0"
+				    : sec2str(lifetime->ia6t_expire - t));
 			} else
 				printf("infty");
 		}
@@ -2087,6 +2318,53 @@ in6_status(int force)
 	in6_alias((struct in6_ifreq *)&ifr6);
 }
 #endif /*INET6*/
+
+#ifndef SMALL
+void
+settunnel(const char *src, const char *dst)
+{
+	struct addrinfo hints, *srcres, *dstres;
+	int ecode;
+	struct if_laddrreq req;
+
+	memset(&hints, 0, sizeof(hints));
+	hints.ai_family = afp->af_af;
+	hints.ai_socktype = SOCK_DGRAM;	/*dummy*/
+
+	if ((ecode = getaddrinfo(src, NULL, &hints, &srcres)) != 0)
+		errx(1, "error in parsing address string: %s",
+		    gai_strerror(ecode));
+
+	if ((ecode = getaddrinfo(dst, NULL, &hints, &dstres)) != 0)
+		errx(1, "error in parsing address string: %s",
+		    gai_strerror(ecode));
+
+	if (srcres->ai_addr->sa_family != dstres->ai_addr->sa_family)
+		errx(1,
+		    "source and destination address families do not match");
+
+	if (srcres->ai_addrlen > sizeof(req.addr) ||
+	    dstres->ai_addrlen > sizeof(req.dstaddr))
+		errx(1, "invalid sockaddr");
+
+	memset(&req, 0, sizeof(req));
+	(void) strlcpy(req.iflr_name, name, sizeof(req.iflr_name));
+	memcpy(&req.addr, srcres->ai_addr, srcres->ai_addrlen);
+	memcpy(&req.dstaddr, dstres->ai_addr, dstres->ai_addrlen);
+	if (ioctl(s, SIOCSLIFPHYADDR, &req) < 0)
+		warn("SIOCSLIFPHYADDR");
+
+	freeaddrinfo(srcres);
+	freeaddrinfo(dstres);
+}
+
+/* ARGSUSED */
+void
+deletetunnel(const char *ignored, int alsoignored)
+{
+	if (ioctl(s, SIOCDIFPHYADDR, &ifr) < 0)
+		warn("SIOCDIFPHYADDR");
+}
 
 void
 at_status(int force)
@@ -2182,6 +2460,7 @@ xns_status(int force)
 	putchar('\n');
 }
 
+/* ARGSUSED */
 void
 setipxframetype(const char *vname, int type)
 {
@@ -2254,6 +2533,620 @@ ipx_status(int force)
 	putchar('\n');
 }
 
+void
+at_getaddr(const char *addr, int which)
+{
+	struct sockaddr_at *sat = (struct sockaddr_at *) &addreq.ifra_addr;
+	u_int net, node;
+
+	sat->sat_family = AF_APPLETALK;
+	sat->sat_len = sizeof(*sat);
+	if (which == MASK)
+		errx(1, "AppleTalk does not use netmasks");
+	if (sscanf(addr, "%u.%u", &net, &node) != 2 ||
+	    net == 0 || net > 0xffff || node == 0 || node > 0xfe)
+		errx(1, "%s: illegal address", addr);
+	sat->sat_addr.s_net = htons(net);
+	sat->sat_addr.s_node = node;
+}
+
+/* ARGSUSED */
+void
+setatrange(const char *range, int d)
+{
+	u_int first = 123, last = 123;
+
+	if (sscanf(range, "%u-%u", &first, &last) != 2 ||
+	    first == 0 || first > 0xffff ||
+	    last == 0 || last > 0xffff || first > last)
+		errx(1, "%s: illegal net range: %u-%u", range, first, last);
+	at_nr.nr_firstnet = htons(first);
+	at_nr.nr_lastnet = htons(last);
+}
+
+/* ARGSUSED */
+void
+setatphase(const char *phase, int d)
+{
+	if (!strcmp(phase, "1"))
+		at_nr.nr_phase = 1;
+	else if (!strcmp(phase, "2"))
+		at_nr.nr_phase = 2;
+	else
+		errx(1, "%s: illegal phase", phase);
+}
+
+void
+checkatrange(struct sockaddr_at *sat)
+{
+	if (at_nr.nr_phase == 0)
+		at_nr.nr_phase = 2;	/* Default phase 2 */
+	if (at_nr.nr_firstnet == 0)	/* Default range of one */
+		at_nr.nr_firstnet = at_nr.nr_lastnet = sat->sat_addr.s_net;
+	printf("\tatalk %d.%d range %d-%d phase %d\n",
+	ntohs(sat->sat_addr.s_net), sat->sat_addr.s_node,
+	ntohs(at_nr.nr_firstnet), ntohs(at_nr.nr_lastnet), at_nr.nr_phase);
+	if ((u_short) ntohs(at_nr.nr_firstnet) >
+	    (u_short) ntohs(sat->sat_addr.s_net) ||
+	    (u_short) ntohs(at_nr.nr_lastnet) <
+	    (u_short) ntohs(sat->sat_addr.s_net))
+		errx(1, "AppleTalk address is not in range");
+	*((struct netrange *) &sat->sat_zero) = at_nr;
+}
+
+#define SNS(x) ((struct sockaddr_ns *) &(x))
+struct sockaddr_ns *snstab[] = {
+SNS(ridreq.ifr_addr), SNS(addreq.ifra_addr),
+SNS(addreq.ifra_mask), SNS(addreq.ifra_broadaddr)};
+
+void
+xns_getaddr(const char *addr, int which)
+{
+	struct sockaddr_ns *sns = snstab[which];
+
+	sns->sns_family = AF_NS;
+	sns->sns_len = sizeof(*sns);
+	sns->sns_addr = ns_addr(addr);
+	if (which == MASK)
+		printf("Attempt to set XNS netmask will be ineffectual\n");
+}
+
+#define SIPX(x) ((struct sockaddr_ipx *) &(x))
+struct sockaddr_ipx *sipxtab[] = {
+SIPX(ridreq.ifr_addr), SIPX(addreq.ifra_addr),
+SIPX(addreq.ifra_mask), SIPX(addreq.ifra_broadaddr)};
+
+void
+ipx_getaddr(const char *addr, int which)
+{
+	struct sockaddr_ipx *sipx = sipxtab[which];
+
+	sipx->sipx_family = AF_IPX;
+	sipx->sipx_len  = sizeof(*sipx);
+	sipx->sipx_addr = ipx_addr(addr);
+	sipx->sipx_type = ipx_type;
+	if (which == MASK)
+		printf("Attempt to set IPX netmask will be ineffectual\n");
+}
+
+static int __tag = 0;
+static int __have_tag = 0;
+
+void
+vlan_status(void)
+{
+	struct vlanreq vreq;
+
+	bzero((char *)&vreq, sizeof(struct vlanreq));
+	ifr.ifr_data = (caddr_t)&vreq;
+
+	if (ioctl(s, SIOCGETVLAN, (caddr_t)&ifr) == -1)
+		return;
+
+	if (vreq.vlr_tag || (vreq.vlr_parent[0] != '\0'))
+		printf("\tvlan: %d parent interface: %s\n",
+		    vreq.vlr_tag, vreq.vlr_parent[0] == '\0' ?
+		    "<none>" : vreq.vlr_parent);
+}
+
+/* ARGSUSED */
+void
+setvlantag(const char *val, int d)
+{
+	u_int16_t tag;
+	struct vlanreq vreq;
+	const char *errmsg = NULL;
+
+	__tag = tag = strtonum(val, 0, 65535, &errmsg);
+	if (errmsg)
+		errx(1, "vlan tag %s: %s", val, errmsg);
+	__have_tag = 1;
+
+	bzero((char *)&vreq, sizeof(struct vlanreq));
+	ifr.ifr_data = (caddr_t)&vreq;
+
+	if (ioctl(s, SIOCGETVLAN, (caddr_t)&ifr) == -1)
+		err(1, "SIOCGETVLAN");
+
+	vreq.vlr_tag = tag;
+
+	if (ioctl(s, SIOCSETVLAN, (caddr_t)&ifr) == -1)
+		err(1, "SIOCSETVLAN");
+}
+
+/* ARGSUSED */
+void
+setvlandev(const char *val, int d)
+{
+	struct vlanreq vreq;
+
+	if (!__have_tag)
+		errx(1, "must specify both vlan tag and device");
+
+	bzero((char *)&vreq, sizeof(struct vlanreq));
+	ifr.ifr_data = (caddr_t)&vreq;
+
+	if (ioctl(s, SIOCGETVLAN, (caddr_t)&ifr) == -1)
+		err(1, "SIOCGETVLAN");
+
+	(void) strlcpy(vreq.vlr_parent, val, sizeof(vreq.vlr_parent));
+	vreq.vlr_tag = __tag;
+
+	if (ioctl(s, SIOCSETVLAN, (caddr_t)&ifr) == -1)
+		err(1, "SIOCSETVLAN");
+}
+
+/* ARGSUSED */
+void
+unsetvlandev(const char *val, int d)
+{
+	struct vlanreq vreq;
+
+	bzero((char *)&vreq, sizeof(struct vlanreq));
+	ifr.ifr_data = (caddr_t)&vreq;
+
+	if (ioctl(s, SIOCGETVLAN, (caddr_t)&ifr) == -1)
+		err(1, "SIOCGETVLAN");
+
+	bzero((char *)&vreq.vlr_parent, sizeof(vreq.vlr_parent));
+	vreq.vlr_tag = 0;
+
+	if (ioctl(s, SIOCSETVLAN, (caddr_t)&ifr) == -1)
+		err(1, "SIOCSETVLAN");
+}
+
+static const char *carp_states[] = { CARP_STATES };
+
+void
+carp_status(void)
+{
+	const char *state;
+	struct carpreq carpr;
+
+	memset((char *)&carpr, 0, sizeof(struct carpreq));
+	ifr.ifr_data = (caddr_t)&carpr;
+
+	if (ioctl(s, SIOCGVH, (caddr_t)&ifr) == -1)
+		return;
+
+	if (carpr.carpr_vhid > 0) {
+		if (carpr.carpr_state > CARP_MAXSTATE)
+			state = "<UNKNOWN>";
+		else
+			state = carp_states[carpr.carpr_state];
+
+		printf("\tcarp: %s carpdev %s vhid %d advbase %d advskew %d\n",
+		    state, carpr.carpr_carpdev[0] != '\0' ?
+		    carpr.carpr_carpdev : "none", carpr.carpr_vhid,
+		    carpr.carpr_advbase, carpr.carpr_advskew);
+	}
+}
+
+/* ARGSUSED */
+void
+setcarp_passwd(const char *val, int d)
+{
+	struct carpreq carpr;
+
+	memset((char *)&carpr, 0, sizeof(struct carpreq));
+	ifr.ifr_data = (caddr_t)&carpr;
+
+	if (ioctl(s, SIOCGVH, (caddr_t)&ifr) == -1)
+		err(1, "SIOCGVH");
+
+	/* XXX Should hash the password into the key here, perhaps? */
+	strlcpy((char *)carpr.carpr_key, val, CARP_KEY_LEN);
+
+	if (ioctl(s, SIOCSVH, (caddr_t)&ifr) == -1)
+		err(1, "SIOCSVH");
+}
+
+/* ARGSUSED */
+void
+setcarp_vhid(const char *val, int d)
+{
+	const char *errmsg = NULL;
+	struct carpreq carpr;
+	int vhid;
+
+	vhid = strtonum(val, 0, 255, &errmsg);
+	if (errmsg)
+		errx(1, "vhid %s: %s", val, errmsg);
+
+	memset((char *)&carpr, 0, sizeof(struct carpreq));
+	ifr.ifr_data = (caddr_t)&carpr;
+
+	if (ioctl(s, SIOCGVH, (caddr_t)&ifr) == -1)
+		err(1, "SIOCGVH");
+
+	carpr.carpr_vhid = vhid;
+
+	if (ioctl(s, SIOCSVH, (caddr_t)&ifr) == -1)
+		err(1, "SIOCSVH");
+}
+
+/* ARGSUSED */
+void
+setcarp_advskew(const char *val, int d)
+{
+	const char *errmsg = NULL;
+	struct carpreq carpr;
+	int advskew;
+
+	advskew = strtonum(val, 0, 255, &errmsg);
+	if (errmsg)
+		errx(1, "advskew %s: %s", val, errmsg);
+
+	memset((char *)&carpr, 0, sizeof(struct carpreq));
+	ifr.ifr_data = (caddr_t)&carpr;
+
+	if (ioctl(s, SIOCGVH, (caddr_t)&ifr) == -1)
+		err(1, "SIOCGVH");
+
+	carpr.carpr_advskew = advskew;
+
+	if (ioctl(s, SIOCSVH, (caddr_t)&ifr) == -1)
+		err(1, "SIOCSVH");
+}
+
+/* ARGSUSED */
+void
+setcarp_advbase(const char *val, int d)
+{
+	const char *errmsg = NULL;
+	struct carpreq carpr;
+	int advbase;
+
+	advbase = strtonum(val, 0, 255, &errmsg);
+	if (errmsg)
+		errx(1, "advbase %s: %s", val, errmsg);
+
+	memset((char *)&carpr, 0, sizeof(struct carpreq));
+	ifr.ifr_data = (caddr_t)&carpr;
+
+	if (ioctl(s, SIOCGVH, (caddr_t)&ifr) == -1)
+		err(1, "SIOCGVH");
+
+	carpr.carpr_advbase = advbase;
+
+	if (ioctl(s, SIOCSVH, (caddr_t)&ifr) == -1)
+		err(1, "SIOCSVH");
+}
+
+/* ARGSUSED */
+void
+setcarp_state(const char *val, int d)
+{
+	struct carpreq carpr;
+	int i;
+
+	bzero((char *)&carpr, sizeof(struct carpreq));
+	ifr.ifr_data = (caddr_t)&carpr;
+
+	if (ioctl(s, SIOCGVH, (caddr_t)&ifr) == -1)
+		err(1, "SIOCGVH");
+
+	for (i = 0; i <= CARP_MAXSTATE; i++) {
+		if (!strcasecmp(val, carp_states[i])) {
+			carpr.carpr_state = i;
+			break;
+		}
+	}
+
+	if (ioctl(s, SIOCSVH, (caddr_t)&ifr) == -1)
+		err(1, "SIOCSVH");
+}
+
+/* ARGSUSED */
+void
+setcarpdev(const char *val, int d)
+{
+	struct carpreq carpr;
+
+	bzero((char *)&carpr, sizeof(struct carpreq));
+	ifr.ifr_data = (caddr_t)&carpr;
+
+	if (ioctl(s, SIOCGVH, (caddr_t)&ifr) == -1)
+		err(1, "SIOCGVH");
+
+	strlcpy(carpr.carpr_carpdev, val, sizeof(carpr.carpr_carpdev));
+
+	if (ioctl(s, SIOCSVH, (caddr_t)&ifr) == -1)
+		err(1, "SIOCSVH");
+}
+
+void
+unsetcarpdev(const char *val, int d)
+{
+	struct carpreq carpr;
+
+	bzero((char *)&carpr, sizeof(struct carpreq));
+	ifr.ifr_data = (caddr_t)&carpr;
+
+	if (ioctl(s, SIOCGVH, (caddr_t)&ifr) == -1)
+		err(1, "SIOCGVH");
+
+	bzero((char *)&carpr.carpr_carpdev, sizeof(carpr.carpr_carpdev));
+
+	if (ioctl(s, SIOCSVH, (caddr_t)&ifr) == -1)
+		err(1, "SIOCSVH");
+}
+
+void
+setpfsync_syncdev(const char *val, int d)
+{
+	struct pfsyncreq preq;
+
+	bzero((char *)&preq, sizeof(struct pfsyncreq));
+	ifr.ifr_data = (caddr_t)&preq;
+
+	if (ioctl(s, SIOCGETPFSYNC, (caddr_t)&ifr) == -1)
+		err(1, "SIOCGETPFSYNC");
+
+	strlcpy(preq.pfsyncr_syncdev, val, sizeof(preq.pfsyncr_syncdev));
+
+	if (ioctl(s, SIOCSETPFSYNC, (caddr_t)&ifr) == -1)
+		err(1, "SIOCSETPFSYNC");
+}
+
+/* ARGSUSED */
+void
+unsetpfsync_syncdev(const char *val, int d)
+{
+	struct pfsyncreq preq;
+
+	bzero((char *)&preq, sizeof(struct pfsyncreq));
+	ifr.ifr_data = (caddr_t)&preq;
+
+	if (ioctl(s, SIOCGETPFSYNC, (caddr_t)&ifr) == -1)
+		err(1, "SIOCGETPFSYNC");
+
+	bzero((char *)&preq.pfsyncr_syncdev, sizeof(preq.pfsyncr_syncdev));
+
+	if (ioctl(s, SIOCSETPFSYNC, (caddr_t)&ifr) == -1)
+		err(1, "SIOCSETPFSYNC");
+}
+
+/* ARGSUSED */
+void
+setpfsync_syncpeer(const char *val, int d)
+{
+	struct pfsyncreq preq;
+	struct addrinfo hints, *peerres;
+	int ecode;
+
+	bzero((char *)&preq, sizeof(struct pfsyncreq));
+	ifr.ifr_data = (caddr_t)&preq;
+
+	if (ioctl(s, SIOCGETPFSYNC, (caddr_t)&ifr) == -1)
+		err(1, "SIOCGETPFSYNC");
+
+	memset(&hints, 0, sizeof(hints));
+	hints.ai_family = AF_INET;
+	hints.ai_socktype = SOCK_DGRAM;	/*dummy*/
+
+	if ((ecode = getaddrinfo(val, NULL, &hints, &peerres)) != 0)
+		errx(1, "error in parsing address string: %s",
+		    gai_strerror(ecode));
+
+	if (peerres->ai_addr->sa_family != AF_INET)
+		errx(1, "only IPv4 addresses supported for the syncpeer");
+
+	preq.pfsyncr_syncpeer.s_addr = ((struct sockaddr_in *)
+	    peerres->ai_addr)->sin_addr.s_addr;
+
+	if (ioctl(s, SIOCSETPFSYNC, (caddr_t)&ifr) == -1)
+		err(1, "SIOCSETPFSYNC");
+}
+
+/* ARGSUSED */
+void
+unsetpfsync_syncpeer(const char *val, int d)
+{
+	struct pfsyncreq preq;
+
+	bzero((char *)&preq, sizeof(struct pfsyncreq));
+	ifr.ifr_data = (caddr_t)&preq;
+
+	if (ioctl(s, SIOCGETPFSYNC, (caddr_t)&ifr) == -1)
+		err(1, "SIOCGETPFSYNC");
+
+	preq.pfsyncr_syncpeer.s_addr = 0;
+
+	if (ioctl(s, SIOCSETPFSYNC, (caddr_t)&ifr) == -1)
+		err(1, "SIOCSETPFSYNC");
+}
+
+/* ARGSUSED */
+void
+setpfsync_maxupd(const char *val, int d)
+{
+	const char *errmsg = NULL;
+	struct pfsyncreq preq;
+	int maxupdates;
+
+	maxupdates = strtonum(val, 0, 255, &errmsg);
+	if (errmsg)
+		errx(1, "maxupd %s: %s", val, errmsg);
+
+	memset((char *)&preq, 0, sizeof(struct pfsyncreq));
+	ifr.ifr_data = (caddr_t)&preq;
+
+	if (ioctl(s, SIOCGETPFSYNC, (caddr_t)&ifr) == -1)
+		err(1, "SIOCGETPFSYNC");
+
+	preq.pfsyncr_maxupdates = maxupdates;
+
+	if (ioctl(s, SIOCSETPFSYNC, (caddr_t)&ifr) == -1)
+		err(1, "SIOCSETPFSYNC");
+}
+
+void
+pfsync_status(void)
+{
+	struct pfsyncreq preq;
+
+	bzero((char *)&preq, sizeof(struct pfsyncreq));
+	ifr.ifr_data = (caddr_t)&preq;
+
+	if (ioctl(s, SIOCGETPFSYNC, (caddr_t)&ifr) == -1)
+		return;
+
+	if (preq.pfsyncr_syncdev[0] != '\0') {
+		printf("\tpfsync: syncdev: %s ", preq.pfsyncr_syncdev);
+		if (preq.pfsyncr_syncpeer.s_addr != INADDR_PFSYNC_GROUP)
+			printf("syncpeer: %s ",
+			    inet_ntoa(preq.pfsyncr_syncpeer));
+		printf("maxupd: %d\n", preq.pfsyncr_maxupdates);
+	}
+}
+
+void
+pppoe_status(void)
+{
+	struct pppoediscparms parms;
+	struct pppoeconnectionstate state;
+	struct timeval temp_time;
+	long diff_time;
+	unsigned long day, hour, min, sec;
+	int e;
+
+	day = hour = min = sec = 0; /* XXX make gcc happy */
+
+	memset(&state, 0, sizeof(state));
+	memset(&temp_time, 0, sizeof(temp_time));
+
+	strlcpy(parms.ifname, name, sizeof(parms.ifname));
+	if (ioctl(s, PPPOEGETPARMS, &parms))
+		return;
+
+	printf("\tdev: %s ", parms.eth_ifname);
+
+	if (*parms.ac_name)
+		printf("ac: %s ", parms.ac_name);
+	if (*parms.service_name)
+		printf("svc: %s ", parms.service_name);
+
+	strlcpy(state.ifname, name, sizeof(state.ifname));
+	if (ioctl(s, PPPOEGETSESSION, &state))
+		err(1, "PPPOEGETSESSION");
+
+	printf("state: ");
+	switch (state.state) {
+	case PPPOE_STATE_INITIAL:
+		printf("initial"); break;
+	case PPPOE_STATE_PADI_SENT:
+		printf("PADI sent"); break;
+	case PPPOE_STATE_PADR_SENT:
+		printf("PADR sent"); break;
+	case PPPOE_STATE_SESSION:
+		printf("session"); break;
+	case PPPOE_STATE_CLOSING:
+		printf("closing"); break;
+	}
+	printf("\n\tsid: 0x%x", state.session_id);
+	printf(" PADI retries: %d", state.padi_retry_no);
+	printf(" PADR retries: %d", state.padr_retry_no);
+
+	if (state.state == PPPOE_STATE_SESSION) {
+		if (state.session_time.tv_sec != 0) {
+			gettimeofday(&temp_time, NULL);
+			diff_time = temp_time.tv_sec -
+			    state.session_time.tv_sec;
+
+			day = diff_time / (60 * 60 * 24);
+			diff_time %= (60 * 60 * 24);
+
+			hour = diff_time / (60 * 60);
+			diff_time %= (60 * 60);
+
+			min = diff_time / 60;
+			diff_time %= 60;
+
+			sec = diff_time;
+		}
+		printf(" time: ");
+		if (day != 0) printf("%ldd ", day);
+		printf("%ld:%ld:%ld", hour, min, sec);
+	}
+	putchar('\n');
+}
+
+/* ARGSUSED */
+void
+setpppoe_dev(const char *val, int d)
+{
+	struct pppoediscparms parms;
+
+	strlcpy(parms.ifname, name, sizeof(parms.ifname));
+	if (ioctl(s, PPPOEGETPARMS, &parms))
+		return;
+
+	strlcpy(parms.eth_ifname, val, sizeof(parms.eth_ifname));
+
+	if (ioctl(s, PPPOESETPARMS, &parms))
+		err(1, "PPPOESETPARMS");
+}
+
+/* ARGSUSED */
+void
+setpppoe_svc(const char *val, int d)
+{
+	struct pppoediscparms parms;
+
+	strlcpy(parms.ifname, name, sizeof(parms.ifname));
+	if (ioctl(s, PPPOEGETPARMS, &parms))
+		return;
+
+	if (d == 0)
+		strlcpy(parms.service_name, val, sizeof(parms.service_name));
+	else
+		memset(parms.service_name, 0, sizeof(parms.service_name));
+
+	if (ioctl(s, PPPOESETPARMS, &parms))
+		err(1, "PPPOESETPARMS");
+}
+
+/* ARGSUSED */
+void
+setpppoe_ac(const char *val, int d)
+{
+	struct pppoediscparms parms;
+
+	strlcpy(parms.ifname, name, sizeof(parms.ifname));
+	if (ioctl(s, PPPOEGETPARMS, &parms))
+		return;
+
+	if (d == 0)
+		strlcpy(parms.ac_name, val, sizeof(parms.ac_name));
+	else
+		memset(parms.ac_name, 0, sizeof(parms.ac_name));
+
+	if (ioctl(s, PPPOESETPARMS, &parms))
+		err(1, "PPPOESETPARMS");
+}
+#endif /* SMALL */
+
 #define SIN(x) ((struct sockaddr_in *) &(x))
 struct sockaddr_in *sintab[] = {
 SIN(ridreq.ifr_addr), SIN(in_addreq.ifra_addr),
@@ -2280,6 +3173,7 @@ in_getaddr(const char *s, int which)
 	}
 }
 
+/* ARGSUSED */
 void
 in_getprefix(const char *plen, int which)
 {
@@ -2424,232 +3318,56 @@ prefix(void *val, int size)
 			break;
 	for (; bit != 0; bit--)
 		if (name[byte] & (1 << bit))
-			return(0);
+			return (0);
 	byte++;
 	for (; byte < size; byte++)
 		if (name[byte])
-			return(0);
+			return (0);
 	return (plen);
 }
 #endif /*INET6*/
 
+/* Print usage, exit(value) if value is non-zero. */
 void
-at_getaddr(const char *addr, int which)
-{
-	struct sockaddr_at *sat = (struct sockaddr_at *) &addreq.ifra_addr;
-	u_int net, node;
-
-	sat->sat_family = AF_APPLETALK;
-	sat->sat_len = sizeof(*sat);
-	if (which == MASK)
-		errx(1, "AppleTalk does not use netmasks");
-	if (sscanf(addr, "%u.%u", &net, &node) != 2 ||
-	    net == 0 || net > 0xffff || node == 0 || node > 0xfe)
-		errx(1, "%s: illegal address", addr);
-	sat->sat_addr.s_net = htons(net);
-	sat->sat_addr.s_node = node;
-}
-
-void
-setatrange(const char *range, int d)
-{
-	u_int first = 123, last = 123;
-
-	if (sscanf(range, "%u-%u", &first, &last) != 2 ||
-	    first == 0 || first > 0xffff ||
-	    last == 0 || last > 0xffff || first > last)
-		errx(1, "%s: illegal net range: %u-%u", range, first, last);
-	at_nr.nr_firstnet = htons(first);
-	at_nr.nr_lastnet = htons(last);
-}
-
-void
-setatphase(const char *phase, int d)
-{
-	if (!strcmp(phase, "1"))
-		at_nr.nr_phase = 1;
-	else if (!strcmp(phase, "2"))
-		at_nr.nr_phase = 2;
-	else
-		errx(1, "%s: illegal phase", phase);
-}
-
-void
-checkatrange(struct sockaddr_at *sat)
-{
-	if (at_nr.nr_phase == 0)
-		at_nr.nr_phase = 2;	/* Default phase 2 */
-	if (at_nr.nr_firstnet == 0)	/* Default range of one */
-		at_nr.nr_firstnet = at_nr.nr_lastnet = sat->sat_addr.s_net;
-	printf("\tatalk %d.%d range %d-%d phase %d\n",
-	ntohs(sat->sat_addr.s_net), sat->sat_addr.s_node,
-	ntohs(at_nr.nr_firstnet), ntohs(at_nr.nr_lastnet), at_nr.nr_phase);
-	if ((u_short) ntohs(at_nr.nr_firstnet) >
-	    (u_short) ntohs(sat->sat_addr.s_net) ||
-	    (u_short) ntohs(at_nr.nr_lastnet) <
-	    (u_short) ntohs(sat->sat_addr.s_net))
-		errx(1, "AppleTalk address is not in range");
-	*((struct netrange *) &sat->sat_zero) = at_nr;
-}
-
-#define SNS(x) ((struct sockaddr_ns *) &(x))
-struct sockaddr_ns *snstab[] = {
-SNS(ridreq.ifr_addr), SNS(addreq.ifra_addr),
-SNS(addreq.ifra_mask), SNS(addreq.ifra_broadaddr)};
-
-void
-xns_getaddr(const char *addr, int which)
-{
-	struct sockaddr_ns *sns = snstab[which];
-
-	sns->sns_family = AF_NS;
-	sns->sns_len = sizeof(*sns);
-	sns->sns_addr = ns_addr(addr);
-	if (which == MASK)
-		printf("Attempt to set XNS netmask will be ineffectual\n");
-}
-
-#define SIPX(x) ((struct sockaddr_ipx *) &(x))
-struct sockaddr_ipx *sipxtab[] = {
-SIPX(ridreq.ifr_addr), SIPX(addreq.ifra_addr),
-SIPX(addreq.ifra_mask), SIPX(addreq.ifra_broadaddr)};
-
-void
-ipx_getaddr(const char *addr, int which)
-{
-	struct sockaddr_ipx *sipx = sipxtab[which];
-
-	sipx->sipx_family = AF_IPX;
-	sipx->sipx_len  = sizeof(*sipx);
-	sipx->sipx_addr = ipx_addr(addr);
-	sipx->sipx_type = ipx_type;
-	if (which == MASK)
-		printf("Attempt to set IPX netmask will be ineffectual\n");
-}
-
-void
-usage(void)
+usage(int value)
 {
 	fprintf(stderr,
-	    "usage: ifconfig interface [address_family] [address [dest_address]]\n"
+	    "usage: ifconfig [interface] [address_family] [address [dest_address]]\n"
 	    "\t[[-]alias] [[-]arp] [broadcast addr]\n"
 	    "\t[[-]debug] [delete] [up] [down] [ipdst addr]\n"
 	    "\t[tunnel src_address dest_address] [deletetunnel]\n"
 	    "\t[description value] [[-]group group-name]\n"
 	    "\t[[-]link0] [[-]link1] [[-]link2]\n"
-	    "\t[media type] [[-]mediaopt opts] [instance minst]\n"
+	    "\t[media type] [[-]mediaopt opts] [mode mode] [instance minst]\n"
 	    "\t[mtu value] [metric nhops] [netmask mask] [prefixlen n]\n"
 	    "\t[nwid id] [nwkey key] [nwkey persist[:key]] [-nwkey]\n"
-	    "\t[[-]powersave] [powersavesleep duration]\n"
+	    "\t[bssid bssid] [-bssid] [chan n] [-chan] [txpower dBm]\n"
+	    "\t[-txpower] [[-]powersave] [powersavesleep duration]\n"
 #ifdef INET6
 	    "\t[[-]anycast] [eui64] [pltime n] [vltime n] [[-]tentative]\n"
 #endif
 	    "\t[vlan vlan_tag vlandev parent_iface] [-vlandev] [vhid n]\n"
 	    "\t[advbase n] [advskew n] [maxupd n] [pass passphrase]\n"
 	    "\t[state init | backup | master]\n"
-	    "\t[syncif iface] [-syncif] [syncpeer peer_address] [-syncpeer]\n"
+	    "\t[syncdev iface] [-syncdev] [syncpeer peer_address] [-syncpeer]\n"
 	    "\t[phase n] [range netrange] [timeslot timeslot_range]\n"
 	    "\t[802.2] [802.2tr] [802.3] [snap] [EtherII]\n"
+	    "\t[pppoeac access-concentrator] [-pppoeac]\n"
+	    "\t[pppoesvc service] [-pppoesvc]\n"
 	    "       ifconfig -A | -Am | -a | -am [address_family]\n"
 	    "       ifconfig -C\n"
 	    "       ifconfig -m interface [address_family]\n"
 	    "       ifconfig interface create\n"
 	    "       ifconfig interface destroy\n");
-	exit(1);
+	exit(value);
 }
-
-static int __tag = 0;
-static int __have_tag = 0;
-
-void
-vlan_status(void)
-{
-	struct vlanreq vreq;
-
-	bzero((char *)&vreq, sizeof(struct vlanreq));
-	ifr.ifr_data = (caddr_t)&vreq;
-
-	if (ioctl(s, SIOCGETVLAN, (caddr_t)&ifr) == -1)
-		return;
-
-	if (vreq.vlr_tag || (vreq.vlr_parent[0] != '\0'))
-		printf("\tvlan: %d parent interface: %s\n",
-		    vreq.vlr_tag, vreq.vlr_parent[0] == '\0' ?
-		    "<none>" : vreq.vlr_parent);
-}
-
-void
-setvlantag(const char *val, int d)
-{
-	u_int16_t tag;
-	struct vlanreq vreq;
-	const char *errmsg = NULL;
-
-	__tag = tag = strtonum(val, 0, 65535, &errmsg);
-	if (errmsg)
-		errx(1, "vlan tag %s: %s", val, errmsg);
-	__have_tag = 1;
-
-	bzero((char *)&vreq, sizeof(struct vlanreq));
-	ifr.ifr_data = (caddr_t)&vreq;
-
-	if (ioctl(s, SIOCGETVLAN, (caddr_t)&ifr) == -1)
-		err(1, "SIOCGETVLAN");
-
-	vreq.vlr_tag = tag;
-
-	if (ioctl(s, SIOCSETVLAN, (caddr_t)&ifr) == -1)
-		err(1, "SIOCSETVLAN");
-}
-
-void
-setvlandev(const char *val, int d)
-{
-	struct vlanreq vreq;
-
-	if (!__have_tag)
-		errx(1, "must specify both vlan tag and device");
-
-	bzero((char *)&vreq, sizeof(struct vlanreq));
-	ifr.ifr_data = (caddr_t)&vreq;
-
-	if (ioctl(s, SIOCGETVLAN, (caddr_t)&ifr) == -1)
-		err(1, "SIOCGETVLAN");
-
-	(void) strlcpy(vreq.vlr_parent, val, sizeof(vreq.vlr_parent));
-	vreq.vlr_tag = __tag;
-
-	if (ioctl(s, SIOCSETVLAN, (caddr_t)&ifr) == -1)
-		err(1, "SIOCSETVLAN");
-}
-
-void
-unsetvlandev(const char *val, int d)
-{
-	struct vlanreq vreq;
-
-	bzero((char *)&vreq, sizeof(struct vlanreq));
-	ifr.ifr_data = (caddr_t)&vreq;
-
-	if (ioctl(s, SIOCGETVLAN, (caddr_t)&ifr) == -1)
-		err(1, "SIOCGETVLAN");
-
-	bzero((char *)&vreq.vlr_parent, sizeof(vreq.vlr_parent));
-	vreq.vlr_tag = 0;
-
-	if (ioctl(s, SIOCSETVLAN, (caddr_t)&ifr) == -1)
-		err(1, "SIOCSETVLAN");
-}
-
-
-static const char *carp_states[] = { CARP_STATES };
 
 void
 getifgroups(void)
 {
-	int len;
-	struct ifgroupreq ifgr;
-	struct ifgroup *ifg;
+	int			 len;
+	struct ifgroupreq	 ifgr;
+	struct ifg_req		*ifg;
 
 	memset(&ifgr, 0, sizeof(ifgr));
 	strlcpy(ifgr.ifgr_name, name, IFNAMSIZ);
@@ -2661,288 +3379,28 @@ getifgroups(void)
 			err(1, "SIOCGIFGROUP");
 
 	len = ifgr.ifgr_len;
-	ifgr.ifgr_groups = (struct ifgroup *)calloc(len / sizeof(struct ifgroup),
-	    sizeof(struct ifgroup));
+	ifgr.ifgr_groups =
+	    (struct ifg_req *)calloc(len / sizeof(struct ifg_req),
+	    sizeof(struct ifg_req));
 	if (ifgr.ifgr_groups == NULL)
 		err(1, "getifgroups");
 
 	if (ioctl(s, SIOCGIFGROUP, (caddr_t)&ifgr) == -1)
 		err(1, "SIOCGIFGROUP");
 
-	if (len -= sizeof(struct ifgroup)) {
-		len += sizeof(struct ifgroup);
+	if (len -= sizeof(struct ifg_req)) {
+		len += sizeof(struct ifg_req);
 		printf("\tgroups: ");
 		ifg = ifgr.ifgr_groups;
 		if (ifg) {
-			len -= sizeof(struct ifgroup);
+			len -= sizeof(struct ifg_req);
 			ifg++;
 		}
-		for (; ifg && len >= sizeof(struct ifgroup); ifg++) {
-			len -= sizeof(struct ifgroup);
-			printf("%s ", ifg->ifg_group);
+		for (; ifg && len >= sizeof(struct ifg_req); ifg++) {
+			len -= sizeof(struct ifg_req);
+			printf("%s ", ifg->ifgrq_group);
 		}
 		printf("\n");
-	}
-}
-
-void
-carp_status(void)
-{
-	const char *state;
-	struct carpreq carpr;
-
-	memset((char *)&carpr, 0, sizeof(struct carpreq));
-	ifr.ifr_data = (caddr_t)&carpr;
-
-	if (ioctl(s, SIOCGVH, (caddr_t)&ifr) == -1)
-		return;
-
-	if (carpr.carpr_vhid > 0) {
-		if (carpr.carpr_state > CARP_MAXSTATE)
-			state = "<UNKNOWN>";
-		else
-			state = carp_states[carpr.carpr_state];
-
-		printf("\tcarp: %s vhid %d advbase %d advskew %d\n",
-		    state, carpr.carpr_vhid, carpr.carpr_advbase,
-		    carpr.carpr_advskew);
-	}
-}
-
-void
-setcarp_passwd(const char *val, int d)
-{
-	struct carpreq carpr;
-
-	memset((char *)&carpr, 0, sizeof(struct carpreq));
-	ifr.ifr_data = (caddr_t)&carpr;
-
-	if (ioctl(s, SIOCGVH, (caddr_t)&ifr) == -1)
-		err(1, "SIOCGVH");
-
-	/* XXX Should hash the password into the key here, perhaps? */
-	strlcpy(carpr.carpr_key, val, CARP_KEY_LEN);
-
-	if (ioctl(s, SIOCSVH, (caddr_t)&ifr) == -1)
-		err(1, "SIOCSVH");
-}
-
-void
-setcarp_vhid(const char *val, int d)
-{
-	const char *errmsg = NULL;
-	struct carpreq carpr;
-	int vhid;
-
-	vhid = strtonum(val, 0, 255, &errmsg);
-	if (errmsg)
-		errx(1, "vhid %s: %s", val, errmsg);
-
-	memset((char *)&carpr, 0, sizeof(struct carpreq));
-	ifr.ifr_data = (caddr_t)&carpr;
-
-	if (ioctl(s, SIOCGVH, (caddr_t)&ifr) == -1)
-		err(1, "SIOCGVH");
-
-	carpr.carpr_vhid = vhid;
-
-	if (ioctl(s, SIOCSVH, (caddr_t)&ifr) == -1)
-		err(1, "SIOCSVH");
-}
-
-void
-setcarp_advskew(const char *val, int d)
-{
-	const char *errmsg = NULL;
-	struct carpreq carpr;
-	int advskew;
-
-	advskew = strtonum(val, 0, 255, &errmsg);
-	if (errmsg)
-		errx(1, "advskew %s: %s", val, errmsg);
-
-	memset((char *)&carpr, 0, sizeof(struct carpreq));
-	ifr.ifr_data = (caddr_t)&carpr;
-
-	if (ioctl(s, SIOCGVH, (caddr_t)&ifr) == -1)
-		err(1, "SIOCGVH");
-
-	carpr.carpr_advskew = advskew;
-
-	if (ioctl(s, SIOCSVH, (caddr_t)&ifr) == -1)
-		err(1, "SIOCSVH");
-}
-
-void
-setcarp_advbase(const char *val, int d)
-{
-	const char *errmsg = NULL;
-	struct carpreq carpr;
-	int advbase;
-
-	advbase = strtonum(val, 0, 255, &errmsg);
-	if (errmsg)
-		errx(1, "advbase %s: %s", val, errmsg);
-
-	memset((char *)&carpr, 0, sizeof(struct carpreq));
-	ifr.ifr_data = (caddr_t)&carpr;
-
-	if (ioctl(s, SIOCGVH, (caddr_t)&ifr) == -1)
-		err(1, "SIOCGVH");
-
-	carpr.carpr_advbase = advbase;
-
-	if (ioctl(s, SIOCSVH, (caddr_t)&ifr) == -1)
-		err(1, "SIOCSVH");
-}
-
-void
-setcarp_state(const char *val, int d)
-{
-	struct carpreq carpr;
-	int i;
-
-	bzero((char *)&carpr, sizeof(struct carpreq));
-	ifr.ifr_data = (caddr_t)&carpr;
-
-	if (ioctl(s, SIOCGVH, (caddr_t)&ifr) == -1)
-		err(1, "SIOCGVH");
-
-	for (i = 0; i <= CARP_MAXSTATE; i++) {
-		if (!strcasecmp(val, carp_states[i])) {
-			carpr.carpr_state = i;
-			break;
-		}
-	}
-
-	if (ioctl(s, SIOCSVH, (caddr_t)&ifr) == -1)
-		err(1, "SIOCSVH");
-}
-
-void
-setpfsync_syncif(const char *val, int d)
-{
-	struct pfsyncreq preq;
-
-	bzero((char *)&preq, sizeof(struct pfsyncreq));
-	ifr.ifr_data = (caddr_t)&preq;
-
-	if (ioctl(s, SIOCGETPFSYNC, (caddr_t)&ifr) == -1)
-		err(1, "SIOCGETPFSYNC");
-
-	strlcpy(preq.pfsyncr_syncif, val, sizeof(preq.pfsyncr_syncif));
-
-	if (ioctl(s, SIOCSETPFSYNC, (caddr_t)&ifr) == -1)
-		err(1, "SIOCSETPFSYNC");
-}
-
-void
-unsetpfsync_syncif(const char *val, int d)
-{
-	struct pfsyncreq preq;
-
-	bzero((char *)&preq, sizeof(struct pfsyncreq));
-	ifr.ifr_data = (caddr_t)&preq;
-
-	if (ioctl(s, SIOCGETPFSYNC, (caddr_t)&ifr) == -1)
-		err(1, "SIOCGETPFSYNC");
-
-	bzero((char *)&preq.pfsyncr_syncif, sizeof(preq.pfsyncr_syncif));
-
-	if (ioctl(s, SIOCSETPFSYNC, (caddr_t)&ifr) == -1)
-		err(1, "SIOCSETPFSYNC");
-}
-
-
-void
-setpfsync_syncpeer(const char *val, int d)
-{
-	struct pfsyncreq preq;
-	struct addrinfo hints, *peerres;
-	int ecode;
-	struct if_laddrreq req;
-
-	bzero((char *)&preq, sizeof(struct pfsyncreq));
-	ifr.ifr_data = (caddr_t)&preq;
-
-	if (ioctl(s, SIOCGETPFSYNC, (caddr_t)&ifr) == -1)
-		err(1, "SIOCGETPFSYNC");
-
-	memset(&hints, 0, sizeof(hints));
-	hints.ai_family = AF_INET;
-	hints.ai_socktype = SOCK_DGRAM;	/*dummy*/
-
-	if ((ecode = getaddrinfo(val, NULL, &hints, &peerres)) != 0)
-		errx(1, "error in parsing address string: %s",
-		    gai_strerror(ecode));
-
-	if (peerres->ai_addr->sa_family != AF_INET)
-		errx(1, "only IPv4 addresses supported for the syncpeer");
-
-	preq.pfsyncr_syncpeer.s_addr = ((struct sockaddr_in *)
-	    peerres->ai_addr)->sin_addr.s_addr;
-
-	if (ioctl(s, SIOCSETPFSYNC, (caddr_t)&ifr) == -1)
-		err(1, "SIOCSETPFSYNC");
-}
-
-void
-unsetpfsync_syncpeer(const char *val, int d)
-{
-	struct pfsyncreq preq;
-
-	bzero((char *)&preq, sizeof(struct pfsyncreq));
-	ifr.ifr_data = (caddr_t)&preq;
-
-	if (ioctl(s, SIOCGETPFSYNC, (caddr_t)&ifr) == -1)
-		err(1, "SIOCGETPFSYNC");
-
-	preq.pfsyncr_syncpeer.s_addr = 0;
-
-	if (ioctl(s, SIOCSETPFSYNC, (caddr_t)&ifr) == -1)
-		err(1, "SIOCSETPFSYNC");
-}
-
-void
-setpfsync_maxupd(const char *val, int d)
-{
-	const char *errmsg = NULL;
-	struct pfsyncreq preq;
-	int maxupdates;
-
-	maxupdates = strtonum(val, 0, 255, &errmsg);
-	if (errmsg)
-		errx(1, "maxupd %s: %s", val, errmsg);
-
-	memset((char *)&preq, 0, sizeof(struct pfsyncreq));
-	ifr.ifr_data = (caddr_t)&preq;
-
-	if (ioctl(s, SIOCGETPFSYNC, (caddr_t)&ifr) == -1)
-		err(1, "SIOCGETPFSYNC");
-
-	preq.pfsyncr_maxupdates = maxupdates;
-
-	if (ioctl(s, SIOCSETPFSYNC, (caddr_t)&ifr) == -1)
-		err(1, "SIOCSETPFSYNC");
-}
-
-void
-pfsync_status(void)
-{
-	struct pfsyncreq preq;
-
-	bzero((char *)&preq, sizeof(struct pfsyncreq));
-	ifr.ifr_data = (caddr_t)&preq;
-
-	if (ioctl(s, SIOCGETPFSYNC, (caddr_t)&ifr) == -1)
-		return;
-
-	if (preq.pfsyncr_syncif[0] != '\0') {
-		printf("\tpfsync: syncif: %s ", preq.pfsyncr_syncif);
-		if (preq.pfsyncr_syncpeer.s_addr != INADDR_PFSYNC_GROUP)
-			printf("syncpeer: %s ",
-			    inet_ntoa(preq.pfsyncr_syncpeer));
-		printf("maxupd: %d\n", preq.pfsyncr_maxupdates);
 	}
 }
 
@@ -2967,27 +3425,27 @@ sec2str(time_t total)
 			first = 0;
 			n = snprintf(p, end - p, "%dd", days);
 			if (n < 0 || n >= end - p)
-				return(result);
+				return (result);
 			p += n;
 		}
 		if (!first || hours) {
 			first = 0;
 			n = snprintf(p, end - p, "%dh", hours);
 			if (n < 0 || n >= end - p)
-				return(result);
+				return (result);
 			p += n;
 		}
 		if (!first || mins) {
 			first = 0;
 			n = snprintf(p, end - p, "%dm", mins);
 			if (n < 0 || n >= end - p)
-				return(result);
+				return (result);
 			p += n;
 		}
 		snprintf(p, end - p, "%ds", secs);
 	} else
 		snprintf(p, end - p, "%lu", (u_long)total);
 
-	return(result);
+	return (result);
 }
 #endif /* INET6 */

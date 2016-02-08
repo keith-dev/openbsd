@@ -1,4 +1,4 @@
-/*	$OpenBSD: util.c,v 1.27 2004/08/11 13:18:58 otto Exp $	*/
+/*	$OpenBSD: util.c,v 1.29 2004/10/03 19:23:02 otto Exp $	*/
 
 /*-
  * Copyright (c) 1999 James Howard and Dag-Erling Coïdan Smørgrav
@@ -246,7 +246,7 @@ fgrepcomp(fastgrep_t *fg, const char *pattern)
 			fg->pattern[i] = toupper(pattern[i]);
 		fg->pattern[fg->patternLen] = '\0';
 	} else
-		fg->pattern = (char *)pattern;	/* really const */
+		fg->pattern = (unsigned char *)pattern;	/* really const */
 
 	/* Preprocess pattern. */
 	for (i = 0; i <= UCHAR_MAX; i++)
@@ -274,7 +274,6 @@ fastcomp(fastgrep_t *fg, const char *pattern)
 	int i;
 	int bol = 0;
 	int eol = 0;
-	int origPatternLen;
 	int shiftPatternLen;
 	int hasDot = 0;
 	int firstHalfDot = -1;
@@ -282,7 +281,7 @@ fastcomp(fastgrep_t *fg, const char *pattern)
 	int lastHalfDot = 0;
 
 	/* Initialize. */
-	origPatternLen = fg->patternLen = strlen(pattern);
+	fg->patternLen = strlen(pattern);
 	fg->bol = 0;
 	fg->eol = 0;
 	fg->wmatch = 0;
@@ -293,7 +292,6 @@ fastcomp(fastgrep_t *fg, const char *pattern)
 		eol++;
 		fg->eol = 1;
 		fg->patternLen--;
-		boleol = 1;
 	}
 
 	/* Remove beginning-of-line character ('^'). */
@@ -301,7 +299,6 @@ fastcomp(fastgrep_t *fg, const char *pattern)
 		bol++;
 		fg->bol = 1;
 		fg->patternLen--;
-		boleol = 1;
 	}
 
 	/* Remove enclosing [[:<:]] and [[:>:]] (word match). */

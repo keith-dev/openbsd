@@ -1,4 +1,4 @@
-/*	$OpenBSD: printconf.c,v 1.29 2004/08/24 15:50:16 claudio Exp $	*/
+/*	$OpenBSD: printconf.c,v 1.37 2005/03/14 17:32:04 claudio Exp $	*/
 
 /*
  * Copyright (c) 2003, 2004 Henning Brauer <henning@openbsd.org>
@@ -17,6 +17,7 @@
  */
 
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include "bgpd.h"
@@ -24,15 +25,18 @@
 #include "session.h"
 
 void		 print_op(enum comp_ops);
-void		 print_set(struct filter_set *);
+void		 print_set(struct filter_set_head *);
 void		 print_mainconf(struct bgpd_config *);
 void		 print_network(struct network_config *);
-void		 print_peer(struct peer_config *, struct bgpd_config *);
+void		 print_peer(struct peer_config *, struct bgpd_config *,
+		    const char *);
 const char	*print_auth_alg(u_int8_t);
 const char	*print_enc_alg(u_int8_t);
 void		 print_rule(struct peer *, struct filter_rule *);
 const char *	 mrt_type(enum mrt_type);
-void		 print_mrt(u_int32_t, u_int32_t, const char *);
+void		 print_mrt(u_int32_t, u_int32_t, const char *, const char *);
+void		 print_groups(struct bgpd_config *, struct peer *);
+int		 peer_compare(const void *, const void *);
 
 void
 print_op(enum comp_ops op)
@@ -69,24 +73,56 @@ print_op(enum comp_ops op)
 }
 
 void
-print_set(struct filter_set *set)
+print_set(struct filter_set_head *set)
 {
-	if (set->flags) {
-		printf("set { ");
-		if (set->flags & SET_LOCALPREF)
-			printf("localpref %u ", set->localpref);
-		if (set->flags & SET_MED)
-			printf("med %u ", set->med);
-		if (set->flags & SET_NEXTHOP)
-			printf("nexthop %s ", log_addr(&set->nexthop));
-		if (set->flags & SET_NEXTHOP_REJECT)
+	struct filter_set	*s;
+
+	if (SIMPLEQ_EMPTY(set))
+		return;
+
+	printf("set { ");
+	SIMPLEQ_FOREACH(s, set, entry) {
+		switch (s->type) {
+		case ACTION_SET_LOCALPREF:
+			printf("localpref %u ", s->action.metric);
+			break;
+		case ACTION_SET_RELATIVE_LOCALPREF:
+			printf("localpref %+d ", s->action.relative);
+			break;
+		case ACTION_SET_MED:
+			printf("metric %u ", s->action.metric);
+			break;
+		case ACTION_SET_RELATIVE_MED:
+			printf("metric %+d ", s->action.relative);
+			break;
+		case ACTION_SET_NEXTHOP:
+			printf("nexthop %s ", log_addr(&s->action.nexthop));
+			break;
+		case ACTION_SET_NEXTHOP_REJECT:
 			printf("nexthop reject ");
-		if (set->flags & SET_NEXTHOP_BLACKHOLE)
+			break;
+		case ACTION_SET_NEXTHOP_BLACKHOLE:
 			printf("nexthop blackhole ");
-		if (set->flags & SET_PREPEND)
-			printf("prepend-self %u ", set->prepend);
-		printf("}");
+			break;
+		case ACTION_SET_NEXTHOP_NOMODIFY:
+			printf("nexthop no-modify ");
+			break;
+		case ACTION_SET_PREPEND_SELF:
+			printf("prepend-self %u ", s->action.prepend);
+			break;
+		case ACTION_SET_PREPEND_PEER:
+			printf("prepend-neighbor %u ", s->action.prepend);
+			break;
+		case ACTION_SET_COMMUNITY:
+			printf("community %u:%u ", s->action.community.as,
+			    s->action.community.type);
+			break;
+		case ACTION_PFTABLE:
+			printf("pftable %s ", s->action.pftable);
+			break;
+		}
 	}
+	printf("}");
 }
 
 void
@@ -111,6 +147,12 @@ print_mainconf(struct bgpd_config *conf)
 	if (conf->flags & BGPD_FLAG_NO_EVALUATE)
 		printf("route-collector yes\n");
 
+	if (conf->flags & BGPD_FLAG_DECISION_ROUTEAGE)
+		printf("rde route-age evaluate\n");
+
+	if (conf->flags & BGPD_FLAG_DECISION_TRANS_AS)
+		printf("transparent-as yes\n");
+
 	if (conf->log & BGPD_LOG_UPDATES)
 		printf("log updates\n");
 
@@ -123,26 +165,17 @@ void
 print_network(struct network_config *n)
 {
 	printf("network %s/%u", log_addr(&n->prefix), n->prefixlen);
-	if (n->attrset.flags)
+	if (!SIMPLEQ_EMPTY(&n->attrset))
 		printf(" ");
 	print_set(&n->attrset);
 	printf("\n");
 }
 
 void
-print_peer(struct peer_config *p, struct bgpd_config *conf)
+print_peer(struct peer_config *p, struct bgpd_config *conf, const char *c)
 {
-	const char	*tab	= "\t";
-	const char	*nada	= "";
-	const char	*c;
 	char		*method;
 	struct in_addr	 ina;
-
-	if (p->group[0]) {
-		printf("group \"%s\" {\n", p->group);
-		c = tab;
-	} else
-		c = nada;
 
 	if ((p->remote_addr.af == AF_INET && p->remote_masklen != 32) ||
 	    (p->remote_addr.af == AF_INET6 && p->remote_masklen != 128))
@@ -166,7 +199,7 @@ print_peer(struct peer_config *p, struct bgpd_config *conf)
 		printf("%s\tholdtime %u\n", c, p->holdtime);
 	if (p->min_holdtime)
 		printf("%s\tholdtime min %u\n", c, p->min_holdtime);
-	if (p->capabilities == 0)
+	if (p->announce_capa == 0)
 		printf("%s\tannounce capabilities no\n", c);
 	if (p->announce_type == ANNOUNCE_SELF)
 		printf("%s\tannounce self\n", c);
@@ -191,6 +224,8 @@ print_peer(struct peer_config *p, struct bgpd_config *conf)
 			    inet_ntoa(ina));
 		}
 	}
+	if (p->if_depend[0])
+		printf("%s\tdepend on \"%s\"\n", c, p->if_depend);
 
 	if (p->auth.method == AUTH_MD5SIG)
 		printf("%s\ttcp md5sig\n", c);
@@ -218,17 +253,15 @@ print_peer(struct peer_config *p, struct bgpd_config *conf)
 	else if (p->auth.method == AUTH_IPSEC_IKE_ESP)
 		printf("%s\tipsec esp ike\n", c);
 
-	if (p->attrset.flags)
+	if (!SIMPLEQ_EMPTY(&p->attrset))
 		printf("%s\t", c);
 	print_set(&p->attrset);
-	if (p->attrset.flags)
+	if (!SIMPLEQ_EMPTY(&p->attrset))
 		printf("\n");
 
-	print_mrt(p->id, p->groupid, c == nada ? "\t" : "\t\t");
+	print_mrt(p->id, p->groupid, c, "\t");
 
 	printf("%s}\n", c);
-	if (p->group[0])
-		printf("}\n");
 }
 
 const char *
@@ -368,7 +401,7 @@ mrt_type(enum mrt_type t)
 struct mrt_head	*xmrt_l = NULL;
 
 void
-print_mrt(u_int32_t pid, u_int32_t gid, const char *prep)
+print_mrt(u_int32_t pid, u_int32_t gid, const char *prep, const char *prep2)
 {
 	struct mrt	*m;
 
@@ -379,10 +412,10 @@ print_mrt(u_int32_t pid, u_int32_t gid, const char *prep)
 		if ((gid != 0 && m->group_id == gid) ||
 		    (m->peer_id == pid && m->group_id == gid)) {
 			if (MRT2MC(m)->ReopenTimerInterval == 0)
-				printf("%sdump %s %s\n", prep,
+				printf("%s%sdump %s %s\n", prep, prep2,
 				    mrt_type(m->type), MRT2MC(m)->name);
 			else
-				printf("%sdump %s %s %d\n", prep,
+				printf("%s%sdump %s %s %d\n", prep, prep2,
 				    mrt_type(m->type),
 				    MRT2MC(m)->name,
 				    MRT2MC(m)->ReopenTimerInterval);
@@ -390,23 +423,79 @@ print_mrt(u_int32_t pid, u_int32_t gid, const char *prep)
 }
 
 void
+print_groups(struct bgpd_config *conf, struct peer *peer_l)
+{
+	struct peer_config	**peerlist;
+	struct peer		 *p;
+	u_int			  peer_cnt, i;
+	u_int32_t		  prev_groupid;
+	const char		 *tab	= "\t";
+	const char		 *nada	= "";
+	const char		 *c;
+
+	peer_cnt = 0;
+	for (p = peer_l; p != NULL; p = p->next)
+		peer_cnt++;
+
+	if ((peerlist = calloc(peer_cnt, sizeof(struct peer_config *))) == NULL)
+		fatal("print_groups calloc");
+
+	i = 0;
+	for (p = peer_l; p != NULL; p = p->next)
+		peerlist[i++] = &p->conf;
+
+	qsort(peerlist, peer_cnt, sizeof(struct peer_config *), peer_compare);
+
+	prev_groupid = 0;
+	for (i = 0; i < peer_cnt; i++) {
+		if (peerlist[i]->groupid) {
+			c = tab;
+			if (peerlist[i]->groupid != prev_groupid) {
+				if (prev_groupid)
+					printf("}\n\n");
+				printf("group \"%s\" {\n", peerlist[i]->group);
+				prev_groupid = peerlist[i]->groupid;
+			}
+		} else
+			c = nada;
+
+		print_peer(peerlist[i], conf, c);
+	}
+
+	if (prev_groupid)
+		printf("}\n\n");
+
+	free(peerlist);
+}
+
+int
+peer_compare(const void *aa, const void *bb)
+{
+	const struct peer_config * const *a;
+	const struct peer_config * const *b;
+
+	a = aa;
+	b = bb;
+
+	return ((*a)->groupid - (*b)->groupid);
+}
+
+void
 print_config(struct bgpd_config *conf, struct network_head *net_l,
     struct peer *peer_l, struct filter_head *rules_l, struct mrt_head *mrt_l)
 {
-	struct peer		*p;
 	struct filter_rule	*r;
 	struct network		*n;
 
 	xmrt_l = mrt_l;
 	print_mainconf(conf);
 	printf("\n");
-	print_mrt(0, 0, "");
+	print_mrt(0, 0, "", "");
 	printf("\n");
 	TAILQ_FOREACH(n, net_l, entry)
 		print_network(&n->net);
 	printf("\n");
-	for (p = peer_l; p != NULL; p = p->next)
-		print_peer(&p->conf, conf);
+	print_groups(conf, peer_l);
 	printf("\n");
 	TAILQ_FOREACH(r, rules_l, entry)
 		print_rule(peer_l, r);

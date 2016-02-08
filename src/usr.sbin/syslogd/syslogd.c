@@ -1,4 +1,4 @@
-/*	$OpenBSD: syslogd.c,v 1.82 2004/07/03 23:40:44 djm Exp $	*/
+/*	$OpenBSD: syslogd.c,v 1.89 2005/03/12 08:05:58 markus Exp $	*/
 
 /*
  * Copyright (c) 1983, 1988, 1993, 1994
@@ -39,7 +39,7 @@ static const char copyright[] =
 #if 0
 static const char sccsid[] = "@(#)syslogd.c	8.3 (Berkeley) 4/4/94";
 #else
-static const char rcsid[] = "$OpenBSD: syslogd.c,v 1.82 2004/07/03 23:40:44 djm Exp $";
+static const char rcsid[] = "$OpenBSD: syslogd.c,v 1.89 2005/03/12 08:05:58 markus Exp $";
 #endif
 #endif /* not lint */
 
@@ -252,7 +252,7 @@ volatile sig_atomic_t MarkSet;
 volatile sig_atomic_t WantDie;
 volatile sig_atomic_t DoInit;
 
-void	cfline(char *, struct filed *, char *);
+struct filed *cfline(char *, char *);
 void    cvthname(struct sockaddr_in *, char *, size_t);
 int	decode(const char *, const CODE *);
 void	dodie(int);
@@ -264,6 +264,7 @@ void	fprintlog(struct filed *, int, char *);
 void	init(void);
 void	logerror(const char *);
 void	logmsg(int, char *, char *, int);
+struct filed *find_dup(struct filed *);
 void	printline(char *, char *);
 void	printsys(char *);
 void	reapchild(int);
@@ -374,9 +375,13 @@ main(int argc, char *argv[])
 				die(0);
 		} else {
 			InetInuse = 1;
-			double_rbuf(fd);
 			pfd[PFD_INET].fd = fd;
-			pfd[PFD_INET].events = POLLIN;
+			if (SecureMode) {
+				shutdown(fd, SHUT_RD);
+			} else {
+				double_rbuf(fd);
+				pfd[PFD_INET].events = POLLIN;
+			}
 		}
 	}
 
@@ -524,18 +529,14 @@ main(int argc, char *argv[])
 			len = sizeof(frominet);
 			i = recvfrom(pfd[PFD_INET].fd, line, MAXLINE, 0,
 			    (struct sockaddr *)&frominet, &len);
-			if (SecureMode) {
-				/* silently drop it */
-			} else {
-				if (i > 0) {
-					line[i] = '\0';
-					cvthname(&frominet, resolve,
-					    sizeof resolve);
-					dprintf("cvthname res: %s\n", resolve);
-					printline(resolve, line);
-				} else if (i < 0 && errno != EINTR)
-					logerror("recvfrom inet");
-			}
+			if (i > 0) {
+				line[i] = '\0';
+				cvthname(&frominet, resolve,
+				    sizeof resolve);
+				dprintf("cvthname res: %s\n", resolve);
+				printline(resolve, line);
+			} else if (i < 0 && errno != EINTR)
+				logerror("recvfrom inet");
 		}
 		if ((pfd[PFD_CTLSOCK].revents & POLLIN) != 0)
 			ctlsock_accept_handler();
@@ -546,14 +547,16 @@ main(int argc, char *argv[])
 
 		for (i = 0; i < nfunix; i++) {
 			if ((pfd[PFD_UNIX_0 + i].revents & POLLIN) != 0) {
+				ssize_t rlen;
+
 				len = sizeof(fromunix);
-				len = recvfrom(pfd[PFD_UNIX_0 + i].fd, line,
+				rlen = recvfrom(pfd[PFD_UNIX_0 + i].fd, line,
 				    MAXLINE, 0, (struct sockaddr *)&fromunix,
 				    &len);
-				if (len > 0) {
-					line[len] = '\0';
+				if (rlen > 0) {
+					line[rlen] = '\0';
 					printline(LocalHostName, line);
-				} else if (len < 0 && errno != EINTR)
+				} else if (rlen == -1 && errno != EINTR)
 					logerror("recvfrom unix");
 			}
 		}
@@ -852,8 +855,18 @@ fprintlog(struct filed *f, int flags, char *msg)
 		if (sendto(pfd[PFD_INET].fd, line, l, 0,
 		    (struct sockaddr *)&f->f_un.f_forw.f_addr,
 		    f->f_un.f_forw.f_addr.ss_len) != l) {
-			f->f_type = F_UNUSED;
-			logerror("sendto");
+			switch (errno) {
+			case EHOSTDOWN:
+			case EHOSTUNREACH:
+			case ENETDOWN:
+			case ENOBUFS:
+				/* silently dropped */
+				break;
+			default:
+				f->f_type = F_UNUSED;
+				logerror("sendto");
+				break;
+			}
 		}
 		break;
 
@@ -980,6 +993,7 @@ wallmsg(struct filed *f, struct iovec *iov)
 	reenter = 0;
 }
 
+/* ARGSUSED */
 void
 reapchild(int signo)
 {
@@ -1035,12 +1049,14 @@ dodie(int signo)
 	WantDie = signo;
 }
 
+/* ARGSUSED */
 void
 domark(int signo)
 {
 	MarkSet = 1;
 }
 
+/* ARGSUSED */
 void
 doinit(int signo)
 {
@@ -1141,10 +1157,8 @@ init(void)
 	/* open the configuration file */
 	if ((cf = priv_open_config()) == NULL) {
 		dprintf("cannot open %s\n", ConfFile);
-		*nextp = (struct filed *)calloc(1, sizeof(*f));
-		cfline("*.ERR\t/dev/console", *nextp, "*");
-		(*nextp)->f_next = (struct filed *)calloc(1, sizeof(*f));
-		cfline("*.PANIC\t*", (*nextp)->f_next, "*");
+		*nextp = cfline("*.ERR\t/dev/console", "*");
+		(*nextp)->f_next = cfline("*.PANIC\t*", "*");
 		Initialized = 1;
 		return;
 	}
@@ -1187,10 +1201,11 @@ init(void)
 				break;
 			}
 		*p = '\0';
-		f = (struct filed *)calloc(1, sizeof(*f));
-		*nextp = f;
-		nextp = &f->f_next;
-		cfline(cline, f, prog);
+		f = cfline(cline, prog);
+		if (f != NULL) {
+			*nextp = f;
+			nextp = &f->f_next;
+		}
 	}
 
 	/* close the configuration file */
@@ -1238,24 +1253,59 @@ init(void)
 	dprintf("syslogd: restarted\n");
 }
 
+#define progmatches(p1, p2) \
+	(p1 == p2 || (p1 != NULL && p2 != NULL && strcmp(p1, p2) == 0))
+
+/*
+ * Spot a line with a duplicate file, console, tty, or membuf target.
+ */
+struct filed *
+find_dup(struct filed *f)
+{
+	struct filed *list;
+
+	for (list = Files; list; list = list->f_next) {
+		if (list->f_quick || f->f_quick)
+			continue;
+		switch (list->f_type) {
+		case F_FILE:
+		case F_TTY:
+		case F_CONSOLE:
+			if (strcmp(list->f_un.f_fname, f->f_un.f_fname) == 0 &&
+			    progmatches(list->f_program, f->f_program))
+				return (list);
+			break;
+		case F_MEMBUF:
+			if (strcmp(list->f_un.f_mb.f_mname,
+			    f->f_un.f_mb.f_mname) == 0 &&
+			    progmatches(list->f_program, f->f_program))
+				return (list);
+			break;
+		}
+	}
+	return (NULL);
+}
+
 /*
  * Crack a configuration file line
  */
-void
-cfline(char *line, struct filed *f, char *prog)
+struct filed *
+cfline(char *line, char *prog)
 {
 	int i, pri, addr_len;
 	size_t rb_len;
 	char *bp, *p, *q, *cp;
 	char buf[MAXLINE], ebuf[100];
-	struct filed *xf;
+	struct filed *xf, *f, *d;
 
 	dprintf("cfline(\"%s\", f, \"%s\")\n", line, prog);
 
 	errno = 0;	/* keep strerror() stuff out of logerror messages */
 
-	/* clear out file entry */
-	memset(f, 0, sizeof(*f));
+	if ((f = calloc(1, sizeof(*f))) == NULL) {
+		logerror("Couldn't allocate struct filed");
+		die(0);
+	}
 	for (i = 0; i <= LOG_NFACILITIES; i++)
 		f->f_pmask[i] = INTERNAL_NOPRI;
 
@@ -1286,7 +1336,7 @@ cfline(char *line, struct filed *f, char *prog)
 		*bp = '\0';
 
 		/* skip cruft */
-		while (strchr(", ;", *q))
+		while (*q && strchr(", ;", *q))
 			q++;
 
 		/* decode priority name */
@@ -1303,7 +1353,8 @@ cfline(char *line, struct filed *f, char *prog)
 				(void)snprintf(ebuf, sizeof ebuf,
 				    "unknown priority name \"%s\"", buf);
 				logerror(ebuf);
-				return;
+				free(f);
+				return (NULL);
 			}
 		}
 
@@ -1322,7 +1373,8 @@ cfline(char *line, struct filed *f, char *prog)
 					    "unknown facility name \"%s\"",
 					    buf);
 					logerror(ebuf);
-					return;
+					free(f);
+					return (NULL);
 				}
 				f->f_pmask[i >> 3] = pri;
 			}
@@ -1365,6 +1417,14 @@ cfline(char *line, struct filed *f, char *prog)
 
 	case '/':
 		(void)strlcpy(f->f_un.f_fname, p, sizeof(f->f_un.f_fname));
+		d = find_dup(f);
+		if (d != NULL) {
+			for (i = 0; i <= LOG_NFACILITIES; i++)
+				if (f->f_pmask[i] != INTERNAL_NOPRI)
+					d->f_pmask[i] = f->f_pmask[i];
+			free(f);
+			return (NULL);
+		}
 		if (strcmp(p, ctty) == 0)
 			f->f_file = priv_open_tty(p);
 		else
@@ -1416,15 +1476,10 @@ cfline(char *line, struct filed *f, char *prog)
 		}
 
 		/* Make sure buffer name is unique */
-		for (xf = Files; i != 0 && xf != f; xf = xf->f_next) {
-			if (xf->f_type == F_MEMBUF &&
-			    strcmp(xf->f_un.f_mb.f_mname,
-			    f->f_un.f_mb.f_mname) == 0)
-				break;
-		}
+		xf = find_dup(f);
 
 		/* Error on missing or non-unique name, or bad buffer length */
-		if (i == 0 || rb_len > MAX_MEMBUF || xf != f) {
+		if (i == 0 || rb_len > MAX_MEMBUF || xf != NULL) {
 			f->f_type = F_UNUSED;
 			logerror(p);
 			break;
@@ -1456,6 +1511,7 @@ cfline(char *line, struct filed *f, char *prog)
 		f->f_type = F_USERS;
 		break;
 	}
+	return (f);
 }
 
 

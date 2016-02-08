@@ -1,4 +1,4 @@
-/*	$OpenBSD: udp_encap.c,v 1.7 2004/08/10 15:59:10 ho Exp $	*/
+/*	$OpenBSD: udp_encap.c,v 1.12 2005/03/05 12:21:35 ho Exp $	*/
 
 /*
  * Copyright (c) 1998, 1999, 2001 Niklas Hallqvist.  All rights reserved.
@@ -36,7 +36,6 @@
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include <ctype.h>
-#include <err.h>
 #include <limits.h>
 #include <netdb.h>
 #include <stdlib.h>
@@ -100,7 +99,6 @@ static struct transport_vtbl udp_encap_transport_vtbl = {
 };
 
 char	 *udp_encap_default_port = 0;
-char	 *udp_encap_bind_port = 0;
 
 void
 udp_encap_init(void)
@@ -120,8 +118,10 @@ udp_encap_make(struct sockaddr *laddr)
 	if (!t) {
 		log_print("udp_encap_make: malloc (%lu) failed",
 		    (unsigned long)sizeof *t);
+		free(laddr);
 		return 0;
 	}
+	t->src = laddr;
 
 	s = socket(laddr->sa_family, SOCK_DGRAM, IPPROTO_UDP);
 	if (s == -1) {
@@ -166,7 +166,6 @@ udp_encap_make(struct sockaddr *laddr)
 	}
 
 	t->transport.vtbl = &udp_encap_transport_vtbl;
-	t->src = laddr;
 	if (monitor_bind(s, t->src, sysdep_sa_len (t->src))) {
 		if (sockaddr2text(t->src, &tstr, 0))
 			log_error("udp_encap_make: bind (%d, %p, %lu)", s,
@@ -214,9 +213,9 @@ err:
 struct transport *
 udp_encap_bind(const struct sockaddr *addr)
 {
-	struct sockaddr	*src =
-	    malloc(sysdep_sa_len((struct sockaddr *)addr));
+	struct sockaddr	*src;
 
+	src = malloc(sysdep_sa_len((struct sockaddr *)addr));
 	if (!src)
 		return 0;
 
@@ -251,7 +250,7 @@ udp_encap_create(char *name)
 		    "for \"%s\"", name);
 		return 0;
 	}
-	if (text2sockaddr(addr_str, port_str, &dst)) {
+	if (text2sockaddr(addr_str, port_str, &dst, 0, 0)) {
 		log_print("udp_encap_create: address \"%s\" not understood",
 		    addr_str);
 		return 0;
@@ -280,7 +279,7 @@ udp_encap_create(char *name)
 		for (addr_node = TAILQ_FIRST(&addr_list->fields);
 		     addr_node; addr_node = TAILQ_NEXT(addr_node, link))
 			if (text2sockaddr(addr_node->field, port_str,
-			    &addr) == 0) {
+			    &addr, 0, 0) == 0) {
 				v = virtual_listen_lookup(addr);
 				free(addr);
 				if (v) {
@@ -295,7 +294,7 @@ udp_encap_create(char *name)
 			goto ret;
 		}
 	}
-	if (text2sockaddr(addr_str, port_str, &addr)) {
+	if (text2sockaddr(addr_str, port_str, &addr, 0, 0)) {
 		log_print("udp_encap_create: "
 		    "address \"%s\" not understood", addr_str);
 		rv = 0;
@@ -326,7 +325,7 @@ void
 udp_encap_report(struct transport *t)
 {
 	struct udp_transport *u = (struct udp_transport *)t;
-	char	 *src, *dst;
+	char	 *src = NULL, *dst = NULL;
 	in_port_t sport, dport;
 
 	if (sockaddr2text(u->src, &src, 0))
@@ -386,8 +385,12 @@ udp_encap_handle_message(struct transport *t)
 		return;
 	}
 
-	msg = message_alloc(t, buf + sizeof (u_int32_t),
-	    n - sizeof (u_int32_t));
+	/* NAT-Keepalive messages should not be processed further.  */
+	n -= sizeof(u_int32_t);
+	if (n == 1 && buf[sizeof(u_int32_t)] == 0xFF)
+		return;
+
+	msg = message_alloc(t, buf + sizeof (u_int32_t), n);
 	if (!msg) {
 		log_error("failed to allocate message structure, dropping "
 		    "packet received on transport %p", u);

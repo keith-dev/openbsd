@@ -1,4 +1,4 @@
-.\"	$OpenBSD: aue.4,v 1.19 2004/07/11 10:00:36 deraadt Exp $
+.\"	$OpenBSD: aue.4,v 1.24 2005/01/30 01:34:09 jsg Exp $
 .\"	$NetBSD: aue.4,v 1.9 2002/07/11 00:23:31 rh Exp $
 .\"
 .\" Copyright (c) 1997, 1998, 1999
@@ -40,7 +40,9 @@
 .Nm aue
 .Nd ADMtek AN986 / ADM8511 Pegasus family USB Ethernet driver
 .Sh SYNOPSIS
-.Cd "aue*   at uhub? port ?"
+.Cd "aue*   at uhub?"
+.Cd "acphy* at mii?"
+.Cd "bmtphy* at mii?"
 .Cd "ukphy* at mii?"
 .Sh DESCRIPTION
 The
@@ -57,6 +59,9 @@ This includes the following adapters:
 .It Tn Accton SpeedStream Ethernet
 .It Tn Admtek Pegasus
 .It Tn Admtek Pegasus II
+.It Tn AEI USB Fast Ethernet
+.It Tn Allied Telesyn AT-USB100
+.It Tn ATEN UC-110T
 .It Tn Belkin USB to LAN
 .It Tn Billionton Systems USB100
 .It Tn Billionton Systems USB100EL
@@ -67,13 +72,16 @@ This includes the following adapters:
 .It Tn D-Link DSB-650
 .It Tn D-Link DSB-650TX
 .It Tn D-Link DSB-650TX-PNA
+.It Tn ELCON Systemtechnik Goldpfeil P-LAN
 .It Tn Elecom LD-USB/TX
 .It Tn Elecom LD-USBL/TX
 .It Tn Elsa Microlink USB2Ethernet
+.It Tn GIGABYTE GN-BR402W
 .It Tn Hawking UF100
 .It Tn HP HN210E
 .It Tn I/O DATA USB ETTX
 .It Tn Kingston KNU101TX
+.It Tn Laneed LD-USBL/TX
 .It Tn LinkSys USB100TX
 .It Tn LinkSys USB100H1
 .It Tn LinkSys USB10T
@@ -82,12 +90,15 @@ This includes the following adapters:
 .It Tn Melco Inc. LUA-TX
 .It Tn Melco Inc. LUA2-TX
 .It Tn Microsoft MN110
+.It Tn Mobility EasiDock Ethernet
 .It Tn Netgear FA101
+.It Tn Omnidirectional Control Technology USB TO Ethernet
 .It Tn Siemens SpeedStream USB
 .It Tn Smartbridges smartNIC 2
 .It Tn SMC 2202USB
 .It Tn SMC EZ Connect USB
 .It Tn SOHOware NUB100
+.It Tn SOHOware NUB110
 .El
 .Pp
 The Pegasus family of chipsets contain a 10/100
@@ -166,10 +177,13 @@ before a timeout expired.
 The driver failed to allocate an mbuf for the receiver ring.
 .El
 .Sh SEE ALSO
+.Xr acphy 4 ,
 .Xr arp 4 ,
+.Xr bmtphy 4 ,
 .Xr ifmedia 4 ,
 .Xr intro 4 ,
 .Xr netintro 4 ,
+.Xr ukphy 4 ,
 .Xr usb 4 ,
 .Xr hostname.if 5 ,
 .Xr ifconfig 8

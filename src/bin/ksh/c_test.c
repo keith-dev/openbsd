@@ -1,4 +1,4 @@
-/*	$OpenBSD: c_test.c,v 1.10 2003/10/10 19:09:07 millert Exp $	*/
+/*	$OpenBSD: c_test.c,v 1.15 2005/02/02 07:53:01 otto Exp $	*/
 
 /*
  * test(1); version 7-like  --  author Erik Baalbergen
@@ -10,7 +10,7 @@
  */
 
 #include "sh.h"
-#include "ksh_stat.h"
+#include <sys/stat.h>
 #include "c_test.h"
 
 /* test(1) accepts the following grammar:
@@ -69,9 +69,7 @@ static const struct t_op u_ops [] = {
     };
 static const struct t_op b_ops [] = {
 	{"=",	TO_STEQL },
-#ifdef KSH
 	{"==",	TO_STEQL },
-#endif /* KSH */
 	{"!=",	TO_STNEQ },
 	{"<",	TO_STLT },
 	{">",	TO_STGT },
@@ -87,21 +85,20 @@ static const struct t_op b_ops [] = {
 	{"",	TO_NONOP }
     };
 
-static int	test_stat ARGS((const char *path, struct stat *statb));
-static int	test_eaccess ARGS((const char *path, int mode));
-static int	test_oexpr ARGS((Test_env *te, int do_eval));
-static int	test_aexpr ARGS((Test_env *te, int do_eval));
-static int	test_nexpr ARGS((Test_env *te, int do_eval));
-static int	test_primary ARGS((Test_env *te, int do_eval));
-static int	ptest_isa ARGS((Test_env *te, Test_meta meta));
-static const char *ptest_getopnd ARGS((Test_env *te, Test_op op, int do_eval));
-static int	ptest_eval ARGS((Test_env *te, Test_op op, const char *opnd1,
-				const char *opnd2, int do_eval));
-static void	ptest_error ARGS((Test_env *te, int offset, const char *msg));
+static int	test_stat(const char *, struct stat *);
+static int	test_eaccess(const char *, int);
+static int	test_oexpr(Test_env *, int);
+static int	test_aexpr(Test_env *, int);
+static int	test_nexpr(Test_env *, int);
+static int	test_primary(Test_env *, int);
+static int	ptest_isa(Test_env *, Test_meta);
+static const char *ptest_getopnd(Test_env *, Test_op, int);
+static int	ptest_eval(Test_env *, Test_op, const char *,
+		    const char *, int);
+static void	ptest_error(Test_env *, int, const char *);
 
 int
-c_test(wp)
-	char **wp;
+c_test(char **wp)
 {
 	int argc;
 	int res;
@@ -185,10 +182,7 @@ c_test(wp)
  */
 
 Test_op
-test_isop(te, meta, s)
-	Test_env *te;
-	Test_meta meta;
-	const char *s;
+test_isop(Test_env *te, Test_meta meta, const char *s)
 {
 	char sc1;
 	const struct t_op *otab;
@@ -208,12 +202,8 @@ test_isop(te, meta, s)
 }
 
 int
-test_eval(te, op, opnd1, opnd2, do_eval)
-	Test_env *te;
-	Test_op op;
-	const char *opnd1;
-	const char *opnd2;
-	int do_eval;
+test_eval(Test_env *te, Test_op op, const char *opnd1, const char *opnd2,
+    int do_eval)
 {
 	int res;
 	int not;
@@ -259,70 +249,23 @@ test_eval(te, op, opnd1, opnd2, do_eval)
 	  case TO_FILID: /* -d */
 		return test_stat(opnd1, &b1) == 0 && S_ISDIR(b1.st_mode);
 	  case TO_FILCDEV: /* -c */
-#ifdef S_ISCHR
 		return test_stat(opnd1, &b1) == 0 && S_ISCHR(b1.st_mode);
-#else
-		return 0;
-#endif
 	  case TO_FILBDEV: /* -b */
-#ifdef S_ISBLK
 		return test_stat(opnd1, &b1) == 0 && S_ISBLK(b1.st_mode);
-#else
-		return 0;
-#endif
 	  case TO_FILFIFO: /* -p */
-#ifdef S_ISFIFO
 		return test_stat(opnd1, &b1) == 0 && S_ISFIFO(b1.st_mode);
-#else
-		return 0;
-#endif
 	  case TO_FILSYM: /* -h -L */
-#ifdef S_ISLNK
 		return lstat(opnd1, &b1) == 0 && S_ISLNK(b1.st_mode);
-#else
-		return 0;
-#endif
 	  case TO_FILSOCK: /* -S */
-#ifdef S_ISSOCK
 		return test_stat(opnd1, &b1) == 0 && S_ISSOCK(b1.st_mode);
-#else
-		return 0;
-#endif
 	  case TO_FILCDF:/* -H HP context dependent files (directories) */
-#ifdef S_ISCDF
-	  {
-		/* Append a + to filename and check to see if result is a
-		 * setuid directory.  CDF stuff in general is hookey, since
-		 * it breaks for the following sequence: echo hi > foo+;
-		 * mkdir foo; echo bye > foo/default; chmod u+s foo
-		 * (foo+ refers to the file with hi in it, there is no way
-		 * to get at the file with bye in it - please correct me if
-		 * I'm wrong about this).
-		 */
-		int len = strlen(opnd1);
-		char *p = str_nsave(opnd1, len + 1, ATEMP);
-
-		p[len++] = '+';
-		p[len] = '\0';
-		return stat(p, &b1) == 0 && S_ISCDF(b1.st_mode);
-	  }
-#else
 		return 0;
-#endif
 	  case TO_FILSETU: /* -u */
-#ifdef S_ISUID
 		return test_stat(opnd1, &b1) == 0
 			&& (b1.st_mode & S_ISUID) == S_ISUID;
-#else
-		return 0;
-#endif
 	  case TO_FILSETG: /* -g */
-#ifdef S_ISGID
 		return test_stat(opnd1, &b1) == 0
 			&& (b1.st_mode & S_ISGID) == S_ISGID;
-#else
-		return 0;
-#endif
 	  case TO_FILSTCK: /* -k */
 		return test_stat(opnd1, &b1) == 0
 			&& (b1.st_mode & S_ISVTX) == S_ISVTX;
@@ -346,11 +289,11 @@ test_eval(te, op, opnd1, opnd2, do_eval)
 	 */
 	  case TO_STEQL: /* = */
 		if (te->flags & TEF_DBRACKET)
-			return gmatch(opnd1, opnd2, FALSE);
+			return gmatch(opnd1, opnd2, false);
 		return strcmp(opnd1, opnd2) == 0;
 	  case TO_STNEQ: /* != */
 		if (te->flags & TEF_DBRACKET)
-			return !gmatch(opnd1, opnd2, FALSE);
+			return !gmatch(opnd1, opnd2, false);
 		return strcmp(opnd1, opnd2) != 0;
 	  case TO_STLT: /* < */
 		return strcmp(opnd1, opnd2) < 0;
@@ -365,8 +308,8 @@ test_eval(te, op, opnd1, opnd2, do_eval)
 		{
 			long v1, v2;
 
-			if (!evaluate(opnd1, &v1, KSH_RETURN_ERROR)
-			    || !evaluate(opnd2, &v2, KSH_RETURN_ERROR))
+			if (!evaluate(opnd1, &v1, KSH_RETURN_ERROR, false)
+			    || !evaluate(opnd2, &v2, KSH_RETURN_ERROR, false))
 			{
 				/* error already printed.. */
 				te->flags |= TEF_ERROR;
@@ -418,17 +361,8 @@ test_eval(te, op, opnd1, opnd2, do_eval)
 
 /* Nasty kludge to handle Korn's bizarre /dev/fd hack */
 static int
-test_stat(path, statb)
-	const char *path;
-	struct stat *statb;
+test_stat(const char *path, struct stat *statb)
 {
-#if !defined(HAVE_DEV_FD)
-	int fd;
-
-	if (strncmp(path, "/dev/fd/", 8) == 0 && getn(path + 8, &fd))
-		return fstat(fd, statb);
-#endif /* !HAVE_DEV_FD */
-
 	return stat(path, statb);
 }
 
@@ -436,29 +370,11 @@ test_stat(path, statb)
  * non-directories when running as root.
  */
 static int
-test_eaccess(path, mode)
-	const char *path;
-	int mode;
+test_eaccess(const char *path, int mode)
 {
 	int res;
 
-#if !defined(HAVE_DEV_FD)
-	int fd;
-
-	/* Note: doesn't handle //dev/fd, etc.. (this is ok) */
-	if (strncmp(path, "/dev/fd/", 8) == 0 && getn(path + 8, &fd)) {
-		int flags;
-
-		if ((flags = fcntl(fd, F_GETFL, 0)) < 0
-		    || (mode & X_OK)
-		    || ((mode & W_OK) && (flags & O_ACCMODE) == O_RDONLY)
-		    || ((mode & R_OK) && (flags & O_ACCMODE) == O_WRONLY))
-			return -1;
-		return 0;
-	}
-#endif /* !HAVE_DEV_FD */
-
-	res = eaccess(path, mode);
+	res = access(path, mode);
 	/*
 	 * On most (all?) unixes, access() says everything is executable for
 	 * root - avoid this on files by using stat().
@@ -479,8 +395,7 @@ test_eaccess(path, mode)
 }
 
 int
-test_parse(te)
-	Test_env *te;
+test_parse(Test_env *te)
 {
 	int res;
 
@@ -493,9 +408,7 @@ test_parse(te)
 }
 
 static int
-test_oexpr(te, do_eval)
-	Test_env *te;
-	int do_eval;
+test_oexpr(Test_env *te, int do_eval)
 {
 	int res;
 
@@ -508,9 +421,7 @@ test_oexpr(te, do_eval)
 }
 
 static int
-test_aexpr(te, do_eval)
-	Test_env *te;
-	int do_eval;
+test_aexpr(Test_env *te, int do_eval)
 {
 	int res;
 
@@ -523,9 +434,7 @@ test_aexpr(te, do_eval)
 }
 
 static int
-test_nexpr(te, do_eval)
-	Test_env *te;
-	int do_eval;
+test_nexpr(Test_env *te, int do_eval)
 {
 	if (!(te->flags & TEF_ERROR) && (*te->isa)(te, TM_NOT))
 		return !test_nexpr(te, do_eval);
@@ -533,9 +442,7 @@ test_nexpr(te, do_eval)
 }
 
 static int
-test_primary(te, do_eval)
-	Test_env *te;
-	int do_eval;
+test_primary(Test_env *te, int do_eval)
 {
 	const char *opnd1, *opnd2;
 	int res;
@@ -594,9 +501,7 @@ test_primary(te, do_eval)
  * TM_UNOP and TM_BINOP, the returned value is a Test_op).
  */
 static int
-ptest_isa(te, meta)
-	Test_env *te;
-	Test_meta meta;
+ptest_isa(Test_env *te, Test_meta meta)
 {
 	/* Order important - indexed by Test_meta values */
 	static const char *const tokens[] = {
@@ -622,10 +527,7 @@ ptest_isa(te, meta)
 }
 
 static const char *
-ptest_getopnd(te, op, do_eval)
-	Test_env *te;
-	Test_op op;
-	int do_eval;
+ptest_getopnd(Test_env *te, Test_op op, int do_eval)
 {
 	if (te->pos.wp >= te->wp_end)
 		return op == TO_FILTT ? "1" : (const char *) 0;
@@ -633,21 +535,14 @@ ptest_getopnd(te, op, do_eval)
 }
 
 static int
-ptest_eval(te, op, opnd1, opnd2, do_eval)
-	Test_env *te;
-	Test_op op;
-	const char *opnd1;
-	const char *opnd2;
-	int do_eval;
+ptest_eval(Test_env *te, Test_op op, const char *opnd1, const char *opnd2,
+    int do_eval)
 {
 	return test_eval(te, op, opnd1, opnd2, do_eval);
 }
 
 static void
-ptest_error(te, offset, msg)
-	Test_env *te;
-	int offset;
-	const char *msg;
+ptest_error(Test_env *te, int offset, const char *msg)
 {
 	const char *op = te->pos.wp + offset >= te->wp_end ?
 				(const char *) 0 : te->pos.wp[offset];

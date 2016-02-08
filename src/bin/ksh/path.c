@@ -1,7 +1,7 @@
-/*	$OpenBSD: path.c,v 1.9 2003/10/22 07:40:38 jmc Exp $	*/
+/*	$OpenBSD: path.c,v 1.11 2004/12/20 11:34:26 otto Exp $	*/
 
 #include "sh.h"
-#include "ksh_stat.h"
+#include <sys/stat.h>
 
 /*
  *	Contains a routine to search a : separated list of
@@ -12,9 +12,7 @@
  *	Larry Bouzane (larry@cs.mun.ca)
  */
 
-#ifdef S_ISLNK
-static char	*do_phys_path ARGS((XString *xsp, char *xp, const char *path));
-#endif /* S_ISLNK */
+static char	*do_phys_path(XString *, char *, const char *);
 
 /*
  *	Makes a filename into result using the following algorithm.
@@ -32,12 +30,10 @@ static char	*do_phys_path ARGS((XString *xsp, char *xp, const char *path));
  *	was appended to result.
  */
 int
-make_path(cwd, file, cdpathp, xsp, phys_pathp)
-	const char *cwd;
-	const char *file;
-	char	**cdpathp;	/* & of : separated list */
-	XString	*xsp;
-	int	*phys_pathp;
+make_path(const char *cwd, const char *file,
+    char **cdpathp,		/* & of : separated list */
+    XString *xsp,
+    int *phys_pathp)
 {
 	int	rval = 0;
 	int	use_cdpath = 1;
@@ -49,7 +45,7 @@ make_path(cwd, file, cdpathp, xsp, phys_pathp)
 	if (!file)
 		file = null;
 
-	if (!ISRELPATH(file)) {
+	if (file[0] == '/') {
 		*phys_pathp = 0;
 		use_cdpath = 0;
 	} else {
@@ -58,7 +54,7 @@ make_path(cwd, file, cdpathp, xsp, phys_pathp)
 
 			if (c == '.')
 				c = file[2];
-			if (ISDIRSEP(c) || c == '\0')
+			if (c == '/' || c == '\0')
 				use_cdpath = 0;
 		}
 
@@ -68,29 +64,29 @@ make_path(cwd, file, cdpathp, xsp, phys_pathp)
 		else if (use_cdpath) {
 			char *pend;
 
-			for (pend = plist; *pend && *pend != PATHSEP; pend++)
+			for (pend = plist; *pend && *pend != ':'; pend++)
 				;
 			plen = pend - plist;
 			*cdpathp = *pend ? ++pend : (char *) 0;
 		}
 
-		if ((use_cdpath == 0 || !plen || ISRELPATH(plist))
+		if ((use_cdpath == 0 || !plen || plist[0] != '/')
 		    && (cwd && *cwd))
 		{
 			len = strlen(cwd);
 			XcheckN(*xsp, xp, len);
 			memcpy(xp, cwd, len);
 			xp += len;
-			if (!ISDIRSEP(cwd[len - 1]))
-				Xput(*xsp, xp, DIRSEP);
+			if (cwd[len - 1] != '/')
+				Xput(*xsp, xp, '/');
 		}
 		*phys_pathp = Xlength(*xsp, xp);
 		if (use_cdpath && plen) {
 			XcheckN(*xsp, xp, plen);
 			memcpy(xp, plist, plen);
 			xp += plen;
-			if (!ISDIRSEP(plist[plen - 1]))
-				Xput(*xsp, xp, DIRSEP);
+			if (plist[plen - 1] != '/')
+				Xput(*xsp, xp, '/');
 			rval = 1;
 		}
 	}
@@ -110,8 +106,7 @@ make_path(cwd, file, cdpathp, xsp, phys_pathp)
  * ie, simplify_path("/a/b/c/./../d/..") returns "/a/b"
  */
 void
-simplify_path(path)
-	char	*path;
+simplify_path(char *path)
 {
 	char	*cur;
 	char	*t;
@@ -122,12 +117,8 @@ simplify_path(path)
 	if (!*path)
 		return;
 
-	if ((isrooted = ISROOTEDPATH(path)))
+	if ((isrooted = path[0] == '/'))
 		very_start++;
-#if defined (OS2) || defined (__CYGWIN__)
-	if (path[0] && path[1] == ':')	/* skip a: */
-		very_start += 2;
-#endif /* OS2 || __CYGWIN__ */
 
 	/* Before			After
 	 *  /foo/			/foo
@@ -137,22 +128,11 @@ simplify_path(path)
 	 *  ..				..
 	 *  ./foo			foo
 	 *  foo/../../../bar		../../bar
-	 * OS2 and CYGWIN:
-	 *  a:/foo/../..		a:/
-	 *  a:.				a:
-	 *  a:..			a:..
-	 *  a:foo/../../blah		a:../blah
 	 */
-
-#ifdef __CYGWIN__
-       /* preserve leading double-slash on pathnames (for UNC paths) */
-       if (path[0] && ISDIRSEP(path[0]) && path[1] && ISDIRSEP(path[1]))
-               very_start++;
-#endif /* __CYGWIN__ */
 
 	for (cur = t = start = very_start; ; ) {
 		/* treat multiple '/'s as one '/' */
-		while (ISDIRSEP(*t))
+		while (*t == '/')
 			t++;
 
 		if (*t == '\0') {
@@ -164,18 +144,18 @@ simplify_path(path)
 		}
 
 		if (t[0] == '.') {
-			if (!t[1] || ISDIRSEP(t[1])) {
+			if (!t[1] || t[1] == '/') {
 				t += 1;
 				continue;
-			} else if (t[1] == '.' && (!t[2] || ISDIRSEP(t[2]))) {
+			} else if (t[1] == '.' && (!t[2] || t[2] == '/')) {
 				if (!isrooted && cur == start) {
 					if (cur != very_start)
-						*cur++ = DIRSEP;
+						*cur++ = '/';
 					*cur++ = '.';
 					*cur++ = '.';
 					start = cur;
 				} else if (cur != start)
-					while (--cur > start && !ISDIRSEP(*cur))
+					while (--cur > start && *cur != '/')
 						;
 				t += 2;
 				continue;
@@ -183,18 +163,17 @@ simplify_path(path)
 		}
 
 		if (cur != very_start)
-			*cur++ = DIRSEP;
+			*cur++ = '/';
 
 		/* find/copy next component of pathname */
-		while (*t && !ISDIRSEP(*t))
+		while (*t && *t != '/')
 			*cur++ = *t++;
 	}
 }
 
 
 void
-set_current_wd(path)
-	char *path;
+set_current_wd(char *path)
 {
 	int len;
 	char *p = path;
@@ -211,10 +190,8 @@ set_current_wd(path)
 		afree(p, ATEMP);
 }
 
-#ifdef S_ISLNK
 char *
-get_phys_path(path)
-	const char *path;
+get_phys_path(const char *path)
 {
 	XString xs;
 	char *xp;
@@ -227,17 +204,14 @@ get_phys_path(path)
 		return (char *) 0;
 
 	if (Xlength(xs, xp) == 0)
-		Xput(xs, xp, DIRSEP);
+		Xput(xs, xp, '/');
 	Xput(xs, xp, '\0');
 
 	return Xclose(xs, xp);
 }
 
 static char *
-do_phys_path(xsp, xp, path)
-	XString *xsp;
-	char *xp;
-	const char *path;
+do_phys_path(XString *xsp, char *xp, const char *path)
 {
 	const char *p, *q;
 	int len, llen;
@@ -246,24 +220,24 @@ do_phys_path(xsp, xp, path)
 
 	Xcheck(*xsp, xp);
 	for (p = path; p; p = q) {
-		while (ISDIRSEP(*p))
+		while (*p == '/')
 			p++;
 		if (!*p)
 			break;
-		len = (q = ksh_strchr_dirsep(p)) ? q - p : strlen(p);
+		len = (q = strchr(p, '/')) ? q - p : strlen(p);
 		if (len == 1 && p[0] == '.')
 			continue;
 		if (len == 2 && p[0] == '.' && p[1] == '.') {
 			while (xp > Xstring(*xsp, xp)) {
 				xp--;
-				if (ISDIRSEP(*xp))
+				if (*xp == '/')
 					break;
 			}
 			continue;
 		}
 
 		savepos = Xsavepos(*xsp, xp);
-		Xput(*xsp, xp, DIRSEP);
+		Xput(*xsp, xp, '/');
 		XcheckN(*xsp, xp, len + 1);
 		memcpy(xp, p, len);
 		xp += len;
@@ -279,18 +253,18 @@ do_phys_path(xsp, xp, path)
 		lbuf[llen] = '\0';
 
 		/* If absolute path, start from scratch.. */
-		xp = ISABSPATH(lbuf) ? Xstring(*xsp, xp)
-				     : Xrestpos(*xsp, xp, savepos);
+		xp = lbuf[0] == '/' ? Xstring(*xsp, xp)
+				    : Xrestpos(*xsp, xp, savepos);
 		if (!(xp = do_phys_path(xsp, xp, lbuf)))
 			return (char *) 0;
 	}
 	return xp;
 }
-#endif /* S_ISLNK */
 
 #ifdef	TEST
 
-main(argc, argv)
+int
+main(void)
 {
 	int	rv;
 	char	*cp, cdpath[256], pwd[256], file[256], result[256];

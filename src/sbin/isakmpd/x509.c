@@ -1,4 +1,4 @@
-/* $OpenBSD: x509.c,v 1.95 2004/08/10 19:21:01 deraadt Exp $	 */
+/* $OpenBSD: x509.c,v 1.97 2005/03/15 16:49:05 mpf Exp $	 */
 /* $EOM: x509.c,v 1.54 2001/01/16 18:42:16 ho Exp $	 */
 
 /*
@@ -684,7 +684,7 @@ x509_read_from_dir(X509_STORE *ctx, char *name, int hash)
 		fclose(certfp);
 
 		if (cert == NULL) {
-			log_print("x509_read_from_dir: PEM_read_bio_X509 "
+			log_print("x509_read_from_dir: PEM_read_X509 "
 			    "failed for %s", file->d_name);
 			continue;
 		}
@@ -1048,7 +1048,7 @@ x509_certreq_decode(u_int8_t *asn, u_int32_t len)
 		    "CA' info");
 		goto fail;
 	}
-	memset(&naca, 0, sizeof(naca));
+	bzero(&naca, sizeof(naca));
 
 	tmp = asn_decompose("aca.RelativeDistinguishedName."
 	    "AttributeValueAssertion", &aca);

@@ -1,4 +1,4 @@
-/* $OpenBSD: ike_auth.c,v 1.95 2004/08/08 19:11:06 deraadt Exp $	 */
+/* $OpenBSD: ike_auth.c,v 1.97 2005/02/22 16:57:48 hshoexer Exp $	 */
 /* $EOM: ike_auth.c,v 1.59 2000/11/21 00:21:31 angelos Exp $	 */
 
 /*
@@ -167,7 +167,7 @@ ike_auth_get_key(int type, char *id, char *local_id, size_t *keylen)
 		if (!key) {
 			log_print("ike_auth_get_key: "
 			    "no key found for peer \"%s\" or local ID \"%s\"",
-			    id, local_id);
+			    id, local_id ? local_id : "<none>");
 			return 0;
 		}
 		/* If the key starts with 0x it is in hex format.  */
@@ -381,7 +381,7 @@ pre_shared_gen_skeyid(struct exchange *exchange, size_t *sz)
 	 * has been passed to us through a mechanism like PFKEYv2.
          */
 	key = ike_auth_get_key(IKE_AUTH_PRE_SHARED, exchange->name,
-	    (char *) buf, &keylen);
+	    (char *)buf, &keylen);
 	if (buf)
 		free(buf);
 
@@ -461,7 +461,7 @@ sig_gen_skeyid(struct exchange *exchange, size_t *sz)
 		return 0;
 	}
 	LOG_DBG((LOG_NEGOTIATION, 80, "sig_gen_skeyid: g^xy length %lu",
-	    (unsigned long) ie->g_x_len));
+	    (unsigned long)ie->g_x_len));
 	LOG_DBG_BUF((LOG_NEGOTIATION, 80,
 	    "sig_gen_skeyid: SKEYID fed with g^xy", ie->g_xy, ie->g_x_len));
 
@@ -810,7 +810,7 @@ rsa_sig_decode_hash(struct message *msg)
 	exchange->recv_key = key;
 	exchange->recv_keytype = ISAKMP_KEY_RSA;
 
-	if (len != (int) hashsize) {
+	if (len != (int)hashsize) {
 		free(*hash_p);
 		*hash_p = 0;
 		log_print("rsa_sig_decode_hash: len %lu != hashsize %lu",
@@ -870,9 +870,9 @@ rsa_sig_encode_hash(struct message *msg)
 	id_len = initiator ? exchange->id_i_len : exchange->id_r_len;
 
 	/* We may have been provided these by the kernel */
-	buf = (u_int8_t *) conf_get_str(exchange->name, "Credentials");
+	buf = (u_int8_t *)conf_get_str(exchange->name, "Credentials");
 	if (buf && (idtype = conf_get_num(exchange->name, "Credential_Type",
-	    -1) != -1)) {
+	    -1)) != -1) {
 		exchange->sent_certtype = idtype;
 		handler = cert_get(idtype);
 		if (!handler) {
@@ -958,7 +958,7 @@ aftercert:
 skipcert:
 
 	/* Again, we may have these from the kernel */
-	buf = (u_int8_t *) conf_get_str(exchange->name, "PKAuthentication");
+	buf = (u_int8_t *)conf_get_str(exchange->name, "PKAuthentication");
 	if (buf) {
 		key_from_printable(ISAKMP_KEY_RSA, ISAKMP_KEYTYPE_PRIVATE,
 		    (char *)buf, &data, &datalen);
@@ -1153,6 +1153,9 @@ get_raw_key_from_file(int type, u_int8_t *id, size_t id_len, RSA **rsa)
 	keyfp = monitor_fopen(filename, "r");
 	if (keyfp) {
 		*rsa = PEM_read_RSA_PUBKEY(keyfp, NULL, NULL, NULL);
+		if (!*rsa)
+			log_print("get_raw_key_from_file: failed to get "
+			    "public key %s", filename);
 		fclose(keyfp);
 	} else if (errno != ENOENT) {
 		log_error("get_raw_key_from_file: monitor_fopen "

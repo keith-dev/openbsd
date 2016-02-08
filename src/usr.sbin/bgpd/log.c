@@ -1,4 +1,4 @@
-/*	$OpenBSD: log.c,v 1.39 2004/07/09 11:00:28 henning Exp $ */
+/*	$OpenBSD: log.c,v 1.42 2004/11/18 14:30:10 henning Exp $ */
 
 /*
  * Copyright (c) 2003, 2004 Henning Brauer <henning@openbsd.org>
@@ -245,11 +245,20 @@ fatal_ensure(const char *file, int line, const char *cond)
 }
 
 void
-log_statechange(const struct peer *peer, enum session_state nstate,
+log_statechange(struct peer *peer, enum session_state nstate,
     enum session_events event)
 {
 	char	*p;
 
+	/* don't clutter the logs with constant Connect -> Active -> Connect */
+	if (nstate == STATE_CONNECT && peer->state == STATE_ACTIVE &&
+	    peer->prev_state == STATE_CONNECT)
+		return;
+	if (nstate == STATE_ACTIVE && peer->state == STATE_CONNECT &&
+	    peer->prev_state == STATE_ACTIVE)
+		return;
+
+	peer->lasterr = 0;
 	p = log_fmt_peer(&peer->conf);
 	logit(LOG_INFO, "%s: state change %s -> %s, reason: %s",
 	    p, statenames[peer->state], statenames[nstate], eventnames[event]);

@@ -1,4 +1,4 @@
-#       $OpenBSD: install.md,v 1.21 2003/10/12 13:18:37 krw Exp $
+#       $OpenBSD: install.md,v 1.24 2004/12/10 20:18:34 miod Exp $
 #
 # Copyright (c) 2002, Miodrag Vallat.
 # All rights reserved.
@@ -63,7 +63,7 @@
 #
 
 # Machine-dependent install sets
-MDSETS="bsd.tgz bsd-sbc.tgz"
+MDSETS="bsdsbc bsdsbc.rd"
 MDTERM=vt100
 ARCH=ARCH
 
@@ -79,7 +79,7 @@ md_installboot() {
 md_checkfordisklabel() {
 	local rval=0
 
-	disklabel $1 >/dev/null 2>/tmp/checkfordisklabel
+	disklabel $1 >/tmp/checkfordisklabel 2>&1
 
 	if grep "disk label corrupted" /tmp/checkfordisklabel; then
 		rval=2
@@ -92,23 +92,24 @@ md_checkfordisklabel() {
 }
 
 md_prep_disklabel() {
-	local _disk=$1 _wflag="-W"
+	local _disk=$1
 
 	md_checkfordisklabel $_disk
 	case $? in
-	2)	echo "WARNING: Label on disk $_disk is corrupted. You will be repairing it.\n"
-		;;
 	3)	cat <<__EOT
-WARNING: This disk has been set up under Mac OS. For safety reasons, you
-	 will not be allowed to save any disklabel changes from OpenBSD.
-
+This disk has been setup under MacOS. You will now edit a MacOS partition
+table. Be careful not to remove the MacOS partitions in use.
 __EOT
-		_wflag="-N"
+		pdisk /dev/${_disk}c
+		;;
+	*)	cat <<__EOT
+This disk is not shared with MacOS. You will now edit a regular OpenBSD
+disklabel.
+__EOT
+		disklabel -W $_disk >/dev/null 2>&1
+		disklabel -f /tmp/fstab.$_disk -E $_disk
 		;;
 	esac
-
-	disklabel $_wflag $_disk >/dev/null 2>&1
-	disklabel -f /tmp/fstab.$_disk -E $_disk
 }
 
 md_congrats() {

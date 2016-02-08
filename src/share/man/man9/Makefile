@@ -1,25 +1,28 @@
-#	$OpenBSD: Makefile,v 1.80 2004/07/07 16:53:51 art Exp $
+#	$OpenBSD: Makefile,v 1.90 2005/03/01 19:22:10 damien Exp $
 #	$NetBSD: Makefile,v 1.4 1996/01/09 03:23:01 thorpej Exp $
 
 #	Makefile for section 9 (kernel function and variable) manual pages.
 
-MAN=	altq.9 audio.9 autoconf.9 boot.9 bus_dma.9 bus_space.9 \
+MAN=	altq.9 audio.9 autoconf.9 boot.9 buffercache.9 bus_dma.9 bus_space.9 \
 	copy.9 crypto.9 ctxsw.9 disk.9 disklabel.9 \
-	dohooks.9 dopowerhooks.9 doshutdownhooks.9 dostartuphooks.9 \
-	extattr.9 file.9 \
+	dohooks.9 dopowerhooks.9 \
+	domountroothooks.9 doshutdownhooks.9 dostartuphooks.9 \
+	evcount.9 extattr.9 file.9 \
 	fork1.9 extent.9 getdevvp.9 getnewvnode.9 hash.9 hashinit.9 \
 	hardclock.9 hook_establish.9 hz.9 hzto.9 iic.9 intro.9 inittodr.9 \
-	kern.9 knote.9 kthread.9 ktrace.9 lock.9 log.9 \
-	malloc.9 mbuf.9 mbuf_tags.9 md5.9 microtime.9 namei.9 \
+	kern.9 knote.9 kthread.9 ktrace.9 loadfirmware.9 lock.9 log.9 \
+	malloc.9 mbuf.9 mbuf_tags.9 md5.9 microtime.9 \
+	mountroothook_establish.9 mutex.9 namei.9 \
 	panic.9 pfind.9 physio.9 pmap.9 \
 	pool.9 powerhook_establish.9 ppsratecheck.9 printf.9 psignal.9 \
-	radio.9 random.9 rasops.9 ratecheck.9 resettodr.9 \
+	radio.9 random.9 rasops.9 ratecheck.9 resettodr.9 rssadapt.9 \
 	shutdownhook_establish.9 sleep.9 spl.9 startuphook_establish.9 \
 	style.9 syscall.9 systrace.9 \
-	time.9 timeout.9 tvtohz.9 uiomove.9 uvm.9 vfs.9 \
-	vaccess.9 vclean.9 vcount.9 vdevgone.9 vfinddev.9 vflush.9 vget.9 \
-	vgone.9 vhold.9 vinvalbuf.9 vput.9 vref.9 vrele.9 \
-	vnode.9 VOP_LOOKUP.9 vn_lock.9 vrecycle.9 vwaitforio.9
+	tc_init.9 time.9 timeout.9 tvtohz.9 uiomove.9 uvm.9 vfs.9 \
+	vaccess.9 vclean.9 vcount.9 vdevgone.9 vfinddev.9 vflush.9 \
+	vflushbuf.9 vget.9 vgone.9 vhold.9 vinvalbuf.9 vput.9 vref.9 \
+	vrele.9 vnode.9 VOP_LOOKUP.9 vn_lock.9 vrecycle.9 vwaitforio.9 \
+	vwakeup.9 wdog_register.9
 
 MLINKS+=autoconf.9 config_init.9 autoconf.9 config_search.9 \
 	autoconf.9 config_rootsearch.9 autoconf.9 config_found_sm.9 \
@@ -27,7 +30,12 @@ MLINKS+=autoconf.9 config_init.9 autoconf.9 config_search.9 \
 	autoconf.9 config_attach.9 autoconf.9 config_detach.9 \
 	autoconf.9 config_activate.9 autoconf.9 config_deactivate.9 \
 	autoconf.9 config_defer.9
-
+MLINKS+=buffercache.9 bread.9 buffercache.9 breadn.9 \
+	buffercache.9 bwrite.9 buffercache.9 bawrite.9 \
+	buffercache.9 bdwrite.9 buffercache.9 getblk.9 \
+	buffercache.9 geteblk.9 buffercache.9 incore.9 \
+	buffercache.9 allocbuf.9 buffercache.9 brelse.9 \
+	buffercache.9 biodone.9 buffercache.9 biowait.9
 MLINKS+=bus_dma.9 bus_dmamap_create.9 bus_dma.9 bus_dmamap_destroy.9 \
 	bus_dma.9 bus_dmamap_load.9 bus_dma.9 bus_dmamap_load_mbuf.9 \
 	bus_dma.9 bus_dmamap_load_uio.9 bus_dma.9 bus_dmamap_load_raw.9 \
@@ -100,6 +108,7 @@ MLINKS+=disk.9 disk_init.9 disk.9 disk_attach.9 disk.9 disk_detatch.9 \
 	disk.9 disk_resetstat.9
 MLINKS+=disklabel.9 readdisklabel.9 disklabel.9 writedisklabel.9 \
 	disklabel.9 setdisklabel.9 disklabel.9 bounds_check_with_label.9
+MLINKS+=evcount.9 evcount_attach.9 evcount.9 evcount_detach.9
 MLINKS+=extent.9 extent_create.9 extent.9 extent_destroy.9 \
 	extent.9 extent_alloc.9 extent.9 extent_alloc_subregion.9 \
 	extent.9 extent_alloc_region.9 extent.9 extent_free.9 \
@@ -138,6 +147,7 @@ MLINKS+=microtime.9 getmicrotime.9 microtime.9 microuptime.9 \
 	microtime.9 getnanouptime.9 microtime.9 bintime.9 \
 	microtime.9 getbintime.9 microtime.9 binuptime.9 \
 	microtime.9 getbinuptime.9
+MLINKS+=mutex.9 mtx_init.9 mutex.9 mtx_enter.9 mutex.9 mtx_leave.9
 MLINKS+=namei.9 lookup.9 namei.9 relookup.9 namei.9 NDINIT.9
 MLINKS+=random.9 add_true_randomness.9 \
 	random.9 add_timer_randomness.9 \
@@ -148,6 +158,11 @@ MLINKS+=random.9 add_true_randomness.9 \
 	random.9 add_audio_randomness.9 \
 	random.9 get_random_bytes.9 \
 	random.9 arc4random.9
+MLINKS+=rssadapt.9 ieee80211_rssadapt_choose.9 \
+	rssadapt.9 ieee80211_rssadapt_input.9 \
+	rssadapt.9 ieee80211_rssadapt_lower_rate.9 \
+	rssadapt.9 ieee80211_rssadapt_raise_rate.9 \
+	rssadapt.9 ieee80211_rssadapt_updatestats.9
 MLINKS+=pfind.9 pgfind.9
 MLINKS+=pmap.9 pmap_init.9 pmap.9 pmap_enter.9 pmap.9 pmap_remove.9 \
 	pmap.9 pmap_unwire.9 pmap.9 pmap_protect.9 pmap.9 pmap_page_protect.9 \
@@ -170,6 +185,7 @@ MLINKS+=printf.9 snprintf.9 printf.9 vsnprintf.9 printf.9 vprintf.9 \
 MLINKS+=psignal.9 pgsignal.9 psignal.9 gsignal.9
 MLINKS+=rasops.9 rasops_init.9 rasops.9 rasops_reconfig.9
 MLINKS+=shutdownhook_establish.9 shutdownhook_disestablish.9
+MLINKS+=mountroothook_establish.9 mountroothook_disestablish.9
 MLINKS+=sleep.9 tsleep.9 sleep.9 wakeup.9
 MLINKS+=spl.9 spl0.9 spl.9 splassert.9 spl.9 splbio.9 spl.9 splclock.9 \
 	spl.9 splhigh.9 spl.9 splimp.9 spl.9 spllowersoftclock.9 \

@@ -1,4 +1,4 @@
-.\" $OpenBSD: uplcom.4,v 1.5 2004/08/08 06:25:50 deraadt Exp $
+.\" $OpenBSD: uplcom.4,v 1.10 2004/10/26 00:37:07 jsg Exp $
 .\" $NetBSD: uplcom.4,v 1.6 2001/05/22 00:21:25 jhawk Exp $
 .\"
 .\" Copyright (c) 2001 The NetBSD Foundation, Inc.
@@ -42,29 +42,34 @@
 .Nm uplcom
 .Nd USB support for Prolific PL-2303 serial adapters driver
 .Sh SYNOPSIS
-.Cd "uplcom* at uhub? port ? configuration ?"
-.Cd "ucom*   at uplcom? portno ?"
+.Cd "uplcom* at uhub?"
+.Cd "ucom*   at uplcom?"
 .Sh HARDWARE
 The
 .Nm
 driver supports the following adapters:
 .Pp
 .Bl -tag -width Ds -offset indent -compact
-.It IOGEAR UC-232A
+.It ELECOM UC-SGT
+.It Ericsson DCU-10 & DCU-11, made by Susteen, Inc.
+.It HAL Crossam2+USB
+.It HIGH-EDGE HE800
 .It I/O DATA USB-RSAQ
 .It I/O DATA USB-RSAQ2
+.It IOGEAR UC-232A
+.It Pharos USB GPS
 .It PLANEX USB-RS232 URS-03
-.It Sitecom USB-Serial CNA-104
-.It ELECOM UC-SGT
 .It RATOC REX-USB60
+.It Sitecom USB-Serial CNA-104
+.It SOURCENEXT KeikaiDenwa 8
 .It TDK USB-PHS Adapter UHA6400
 .It TDK USB-PDC Adapter UPA9664
-.It Ericsson DCU-10 & DCU-11, made by Susteen, Inc.
+.It Tripp-Lite U209
 .El
 .Sh DESCRIPTION
 The
 .Nm
-driver provides support for Prolific PL-2303 USB-to-RS232 Bridge chip.
+driver provides support for the Prolific PL-2303 USB-to-RS232 Bridge chip.
 .Pp
 The device is accessed through the
 .Xr ucom 4

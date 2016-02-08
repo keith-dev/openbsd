@@ -1,4 +1,4 @@
-/*	$OpenBSD: nat_traversal.c,v 1.7 2004/08/08 19:11:06 deraadt Exp $	*/
+/*	$OpenBSD: nat_traversal.c,v 1.10 2005/03/05 12:22:40 ho Exp $	*/
 
 /*
  * Copyright (c) 2004 Håkan Olsson.  All rights reserved.
@@ -49,21 +49,17 @@
 #include "virtual.h"
 
 /*
- * XXX According to draft-ietf-ipsec-nat-t-ike-07.txt, the NAT-T
- * capability of the other peer is determined by a particular vendor ID
- * sent as the first message. This vendor ID string is supposed to be a
- * MD5 hash of "RFC XXXX", where XXXX is the future RFC number.
+ * NAT-T capability of the other peer is determined by a particular vendor
+ * ID sent in the first message. This vendor ID string is supposed to be a
+ * MD5 hash of "RFC 3947".
  *
  * These seem to be the "well" known variants of this string in use by
  * products today.
  */
 static const char *isakmp_nat_t_cap_text[] = {
-	"draft-ietf-ipsec-nat-t-ike-00",	/* V1 (XXX: may be obsolete) */
-	"draft-ietf-ipsec-nat-t-ike-02\n",	/* V2 */
-	"draft-ietf-ipsec-nat-t-ike-03",	/* V3 */
-#ifdef notyet
-	"RFC XXXX",
-#endif
+	"draft-ietf-ipsec-nat-t-ike-02\n",	/* draft, V2 */
+	"draft-ietf-ipsec-nat-t-ike-03",	/* draft, V3 */
+	"RFC 3947"
 };
 
 /* In seconds. Recommended in draft-ietf-ipsec-udp-encaps-09.  */
@@ -233,10 +229,8 @@ nat_t_generate_nat_d_hash(struct message *msg, struct sockaddr *sa,
 {
 	struct ipsec_exch *ie = (struct ipsec_exch *)msg->exchange->data;
 	struct hash	 *hash;
-	struct prf	 *prf;
 	u_int8_t	 *res;
 	in_port_t	  port;
-	int		  prf_type = PRF_HMAC; /* XXX */
 
 	hash = hash_get(ie->hash->type);
 	if (hash == NULL) {
@@ -244,30 +238,25 @@ nat_t_generate_nat_d_hash(struct message *msg, struct sockaddr *sa,
 		return NULL;
 	}
 
-	prf = prf_alloc(prf_type, hash->type, msg->exchange->cookies,
-	    ISAKMP_HDR_COOKIES_LEN);
-	if(!prf) {
-		log_print("nat_t_generate_nat_d_hash: prf_alloc failed");
-		return NULL;
-	}
+	*hashlen = hash->hashsize;
 
-	*hashlen = prf->blocksize;
 	res = (u_int8_t *)malloc((unsigned long)*hashlen);
 	if (!res) {
 		log_print("nat_t_generate_nat_d_hash: malloc (%lu) failed",
 		    (unsigned long)*hashlen);
-		prf_free(prf);
 		*hashlen = 0;
 		return NULL;
 	}
 
 	port = sockaddr_port(sa);
-	memset(res, 0, *hashlen);
+	bzero(res, *hashlen);
 
-	prf->Update(prf->prfctx, sockaddr_addrdata(sa), sockaddr_addrlen(sa));
-	prf->Update(prf->prfctx, (unsigned char *)&port, sizeof port);
-	prf->Final(res, prf->prfctx);
-	prf_free (prf);
+	hash->Init(hash->ctx);
+	hash->Update(hash->ctx, msg->exchange->cookies,
+	    sizeof msg->exchange->cookies);
+	hash->Update(hash->ctx, sockaddr_addrdata(sa), sockaddr_addrlen(sa));
+	hash->Update(hash->ctx, (unsigned char *)&port, sizeof port);
+	hash->Final(res, hash->ctx);
 
 	return res;
 }
@@ -312,11 +301,12 @@ nat_t_exchange_add_nat_d(struct message *msg)
 {
 	struct sockaddr *sa;
 
-	msg->transport->vtbl->get_src(msg->transport, &sa);
+	/* Remote address first. */
+	msg->transport->vtbl->get_dst(msg->transport, &sa);
 	if (nat_t_add_nat_d(msg, sa))
 		return -1;
 
-	msg->transport->vtbl->get_dst(msg->transport, &sa);
+	msg->transport->vtbl->get_src(msg->transport, &sa);
 	if (nat_t_add_nat_d(msg, sa))
 		return -1;
 

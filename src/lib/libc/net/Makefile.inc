@@ -1,4 +1,4 @@
-#	$OpenBSD: Makefile.inc,v 1.33 2004/07/13 21:06:58 millert Exp $
+#	$OpenBSD: Makefile.inc,v 1.39 2005/01/06 04:24:14 itojun Exp $
 
 # net sources
 .PATH: ${LIBCSRCDIR}/arch/${MACHINE_ARCH}/net ${LIBCSRCDIR}/net
@@ -28,12 +28,12 @@ SRCS+=	ip6opt.c rthdr.c vars6.c
 
 .include "${LIBCSRCDIR}/arch/${MACHINE_ARCH}/net/Makefile.inc"
 
-MAN+=	byteorder.3 ethers.3 getaddrinfo.3 gethostbyname.3 getifaddrs.3 \
-	getnameinfo.3 getnetent.3 getprotoent.3 getservent.3 inet.3 \
-	if_indextoname.3 inet_net.3 link_addr.3 ns.3 ipx.3 \
-	rcmd.3 rcmdsh.3 resolver.3 net_addrcmp.3 \
-	inet6_option_space.3 inet6_rthdr_space.3 \
-	getrrsetbyname.3
+MAN+=	byteorder.3 ethers.3 gai_strerror.3 getaddrinfo.3 gethostbyname.3 \
+	getifaddrs.3 getnameinfo.3 getnetent.3 getprotoent.3 \
+	getrrsetbyname.3 getservent.3 if_indextoname.3 inet.3 \
+	inet_net.3 inet6_option_space.3 inet6_rthdr_space.3 \
+	ipx.3 link_addr.3 net_addrcmp.3 ns.3 \
+	rcmd.3 rcmdsh.3 resolver.3
 
 MLINKS+=byteorder.3 htonl.3 byteorder.3 htons.3 byteorder.3 ntohl.3 \
 	byteorder.3 ntohs.3 byteorder.3 htobe16.3 byteorder.3 htobe32.3 \
@@ -44,7 +44,7 @@ MLINKS+=byteorder.3 htonl.3 byteorder.3 htons.3 byteorder.3 ntohl.3 \
 	byteorder.3 swap64.3
 MLINKS+=ethers.3 ether_aton.3 ethers.3 ether_hostton.3 ethers.3 ether_line.3 \
 	ethers.3 ether_ntoa.3 ethers.3 ether_ntohost.3 ethers.3 ether_addr.3
-MLINKS+= getaddrinfo.3 freeaddrinfo.3 getaddrinfo.3 gai_strerror.3
+MLINKS+=getaddrinfo.3 freeaddrinfo.3
 MLINKS+=gethostbyname.3 endhostent.3 gethostbyname.3 gethostbyaddr.3 \
 	gethostbyname.3 sethostent.3 gethostbyname.3 gethostent.3 \
 	gethostbyname.3 herror.3 gethostbyname.3 gethostbyname2.3 \
@@ -53,9 +53,15 @@ MLINKS+=getifaddrs.3 freeifaddrs.3
 MLINKS+=getnetent.3 endnetent.3 getnetent.3 getnetbyaddr.3 \
 	getnetent.3 getnetbyname.3 getnetent.3 setnetent.3
 MLINKS+=getprotoent.3 endprotoent.3 getprotoent.3 getprotobyname.3 \
-	getprotoent.3 getprotobynumber.3 getprotoent.3 setprotoent.3
+	getprotoent.3 getprotobynumber.3 getprotoent.3 setprotoent.3 \
+	getprotoent.3 getprotoent_r.3 getprotoent.3 getprotobyname_r.3 \
+	getprotoent.3 getprotobynumber_r.3 getprotoent.3 setprotoent_r.3 \
+	getprotoent.3 endprotoent_r.3
 MLINKS+=getservent.3 endservent.3 getservent.3 getservbyname.3 \
-	getservent.3 getservbyport.3 getservent.3 setservent.3
+	getservent.3 getservbyport.3 getservent.3 setservent.3 \
+	getservent.3 getservent_r.3 getservent.3 getservbyname_r.3 \
+	getservent.3 getservbyport_r.3 setservent.3 setservent_r.3 \
+	setservent.3 endservent_r.3
 MLINKS+= if_indextoname.3 if_nametoindex.3 if_indextoname.3 if_nameindex.3 \
 	if_indextoname.3 if_freenameindex.3
 MLINKS+=inet.3 addr.3 inet.3 inet_addr.3 inet.3 inet_aton.3 \
@@ -71,6 +77,7 @@ MLINKS+=rcmd.3 iruserok.3 rcmd.3 rresvport.3 rcmd.3 ruserok.3 \
 MLINKS+=resolver.3 dn_comp.3 resolver.3 dn_expand.3 resolver.3 res_init.3 \
 	resolver.3 res_mkquery.3 resolver.3 res_send.3 resolver.3 res_query.3 \
 	resolver.3 res_search.3
+MLINKS+=getrrsetbyname.3 freerrset.3
 MLINKS+=inet6_option_space.3 inet6_option_init.3 \
 	inet6_option_space.3 inet6_option_append.3 \
 	inet6_option_space.3 inet6_option_alloc.3 \
@@ -83,4 +90,3 @@ MLINKS+=inet6_rthdr_space.3 inet6_rthdr_init.3 \
 	inet6_rthdr_space.3 inet6_rthdr_segments.3 \
 	inet6_rthdr_space.3 inet6_rthdr_getaddr.3 \
 	inet6_rthdr_space.3 inet6_rthdr_getflags.3
-MLINKS+=getrrsetbyname.3 freerrset.3

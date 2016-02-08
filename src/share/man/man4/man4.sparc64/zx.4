@@ -1,4 +1,4 @@
-.\"	$OpenBSD: zx.4,v 1.4 2004/06/21 04:43:41 miod Exp $
+.\"	$OpenBSD: zx.4,v 1.9 2005/03/05 01:48:59 miod Exp $
 .\" Copyright (c) 2003 Miodrag Vallat.  All rights reserved.
 .\"
 .\" Redistribution and use in source and binary forms, with or without
@@ -29,7 +29,7 @@
 .Nm zx
 .Nd accelerated 24-bit color frame buffer
 .Sh SYNOPSIS
-.Cd "zx* at sbus? slot ? offset ?"
+.Cd "zx* at sbus?"
 .Cd "wsdisplay* at zx?"
 .Sh DESCRIPTION
 The ZX and TurboZX
@@ -94,19 +94,17 @@ The selected resolutions are:
 .Xr bwtwo 4 ,
 .Xr cgsix 4 ,
 .Xr cgthree 4 ,
+.Xr cgtwelve 4 ,
 .Xr creator 4 ,
 .Xr intro 4 ,
 .Xr mgx 4 ,
 .Xr rfx 4 ,
 .Xr sbus 4 ,
+.Xr tvtwo 4 ,
 .Xr vgafb 4 ,
+.Xr vigra 4 ,
 .Xr wscons 4 ,
-.Xr wsdisplay 4 ,
-.Xr boot_config 8 ,
-.Xr config 8
+.Xr wsdisplay 4
 .Sh CAVEATS
-.\" The ZX and TurboZX cards will not function
-.\" in an SBus expansion box, due to PROM limitations.
-.\" .Pp
 There is currently no software interface to change the frame buffer
 resolution at runtime.

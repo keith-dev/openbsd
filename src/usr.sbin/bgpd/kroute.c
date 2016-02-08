@@ -1,4 +1,4 @@
-/*	$OpenBSD: kroute.c,v 1.107 2004/08/19 10:38:34 henning Exp $ */
+/*	$OpenBSD: kroute.c,v 1.117 2005/03/15 10:18:39 henning Exp $ */
 
 /*
  * Copyright (c) 2003, 2004 Henning Brauer <henning@openbsd.org>
@@ -95,6 +95,7 @@ void			 kif_clear(void);
 int			 kif_kr_insert(struct kroute_node *);
 int			 kif_kr_remove(struct kroute_node *);
 
+int			 kroute_validate(struct kroute *kr);
 void			 knexthop_validate(struct knexthop_node *);
 struct kroute_node	*kroute_match(in_addr_t);
 void			 kroute_attach_nexthop(struct knexthop_node *,
@@ -114,19 +115,19 @@ int		dispatch_rtmsg(void);
 int		fetchtable(void);
 int		fetchifs(int);
 
-RB_HEAD(kroute_tree, kroute_node)	kroute_tree, krt;
+RB_HEAD(kroute_tree, kroute_node)	krt;
 RB_PROTOTYPE(kroute_tree, kroute_node, entry, kroute_compare)
 RB_GENERATE(kroute_tree, kroute_node, entry, kroute_compare)
 
-RB_HEAD(kroute6_tree, kroute6_node)	kroute6_tree, krt6;
+RB_HEAD(kroute6_tree, kroute6_node)	krt6;
 RB_PROTOTYPE(kroute6_tree, kroute6_node, entry, kroute6_compare)
 RB_GENERATE(kroute6_tree, kroute6_node, entry, kroute6_compare)
 
-RB_HEAD(knexthop_tree, knexthop_node)	knexthop_tree, knt;
+RB_HEAD(knexthop_tree, knexthop_node)	knt;
 RB_PROTOTYPE(knexthop_tree, knexthop_node, entry, knexthop_compare)
 RB_GENERATE(knexthop_tree, knexthop_node, entry, knexthop_compare)
 
-RB_HEAD(kif_tree, kif_node)		kif_tree, kit;
+RB_HEAD(kif_tree, kif_node)		kit;
 RB_PROTOTYPE(kif_tree, kif_node, entry, kif_compare)
 RB_GENERATE(kif_tree, kif_node, entry, kif_compare)
 
@@ -137,7 +138,8 @@ RB_GENERATE(kif_tree, kif_node, entry, kif_compare)
 int
 kr_init(int fs)
 {
-	int opt;
+	int		opt = 0, rcvbuf, default_rcvbuf;
+	socklen_t	optlen;
 
 	kr_state.fib_sync = fs;
 
@@ -150,6 +152,19 @@ kr_init(int fs)
 	if (setsockopt(kr_state.fd, SOL_SOCKET, SO_USELOOPBACK,
 	    &opt, sizeof(opt)) == -1)
 		log_warn("kr_init: setsockopt");	/* not fatal */
+
+	/* grow receive buffer, don't wanna miss messages */
+	optlen = sizeof(default_rcvbuf);
+	if (getsockopt(kr_state.fd, SOL_SOCKET, SO_RCVBUF,
+	    &default_rcvbuf, &optlen) == -1)
+		log_warn("kr_init getsockopt SOL_SOCKET SO_RCVBUF");
+	else
+		for (rcvbuf = MAX_RTSOCK_BUF;
+		    rcvbuf > default_rcvbuf &&
+		    setsockopt(kr_state.fd, SOL_SOCKET, SO_RCVBUF,
+		    &rcvbuf, sizeof(rcvbuf)) == -1 && errno == ENOBUFS;
+		    rcvbuf /= 2)
+			;	/* nothing */
 
 	kr_state.pid = getpid();
 	kr_state.rtseq = 1;
@@ -381,9 +396,11 @@ kr_show_route(struct imsg *imsg)
 		RB_FOREACH(h, knexthop_tree, &knt) {
 			bzero(&snh, sizeof(snh));
 			memcpy(&snh.addr, &h->nexthop, sizeof(snh.addr));
-			if (h->kroute != NULL)
-				if (!(h->kroute->r.flags & F_DOWN))
-					snh.valid = 1;
+			if (h->kroute != NULL) {
+				snh.valid = kroute_validate(&h->kroute->r);
+				if ((kif = kif_find(h->kroute->r.ifindex)) != NULL)
+					memcpy(&snh.kif, &kif->k, sizeof(snh.kif));
+			}
 			send_imsg_session(IMSG_CTL_SHOW_NEXTHOP, imsg->hdr.pid,
 			    &snh, sizeof(snh));
 		}
@@ -398,6 +415,19 @@ kr_show_route(struct imsg *imsg)
 	}
 
 	send_imsg_session(IMSG_CTL_END, imsg->hdr.pid, NULL, 0);
+}
+
+void
+kr_ifinfo(char *ifname)
+{
+	struct kif_node	*kif;
+
+	RB_FOREACH(kif, kif_tree, &kit)
+		if (!strcmp(ifname, kif->k.ifname)) {
+			send_imsg_session(IMSG_IFINFO, 0,
+			    &kif->k, sizeof(kif->k));
+			return;
+		}
 }
 
 /*
@@ -716,6 +746,24 @@ kif_kr_remove(struct kroute_node *kr)
  * nexthop validation
  */
 
+int
+kroute_validate(struct kroute *kr)
+{
+	struct kif_node		*kif;
+
+	if (kr->flags & F_DOWN)
+		return (0);
+
+	if ((kif = kif_find(kr->ifindex)) == NULL) {
+		log_warnx("interface with index %d not found, "
+		    "referenced from route for %s/%u",
+		    kr->ifindex, inet_ntoa(kr->prefix),
+		    kr->prefixlen);
+		return (1);
+	} else
+		return (kif->k.link_state != LINK_STATE_DOWN);
+}
+
 void
 knexthop_validate(struct knexthop_node *kn)
 {
@@ -723,8 +771,8 @@ knexthop_validate(struct knexthop_node *kn)
 	struct kroute_nexthop	 n;
 	int			 was_valid = 0;
 
-	if (kn->kroute != NULL && (!(kn->kroute->r.flags & F_DOWN)))
-		was_valid = 1;
+	if (kn->kroute != NULL)
+		was_valid = kroute_validate(&kn->kroute->r);
 
 	bzero(&n, sizeof(n));
 	memcpy(&n.nexthop, &kn->nexthop, sizeof(n.nexthop));
@@ -736,10 +784,7 @@ knexthop_validate(struct knexthop_node *kn)
 			if (was_valid)
 				send_nexthop_update(&n);
 		} else {					/* match */
-			if (kr->r.flags & F_DOWN) {		/* is down */
-				if (was_valid)
-					send_nexthop_update(&n);
-			} else {				/* valid */
+			if (kroute_validate(&kr->r)) {		/* valid */
 				n.valid = 1;
 				n.connected = kr->r.flags & F_CONNECTED;
 				if ((n.gateway.v4.s_addr =
@@ -747,7 +792,10 @@ knexthop_validate(struct knexthop_node *kn)
 					n.gateway.af = AF_INET;
 				memcpy(&n.kr, &kr->r, sizeof(n.kr));
 				send_nexthop_update(&n);
-			}
+			} else					/* down */
+				if (was_valid)
+					send_nexthop_update(&n);
+
 			kroute_attach_nexthop(kn, kr);
 		}
 		break;
@@ -875,6 +923,9 @@ mask2prefixlen6(struct in6_addr *in6a)
 in_addr_t
 prefixlen2mask(u_int8_t prefixlen)
 {
+	if (prefixlen == 0)
+		return (0);
+
 	return (0xffffffff << (32 - prefixlen));
 }
 
@@ -949,6 +1000,8 @@ if_change(u_short ifindex, int flags, struct if_data *ifd)
 	kif->k.media_type = ifd->ifi_type;
 	kif->k.baudrate = ifd->ifi_baudrate;
 
+	send_imsg_session(IMSG_IFINFO, 0, &kif->k, sizeof(kif->k));
+
 	if ((reachable = (flags & IFF_UP) &&
 	    (ifd->ifi_link_state != LINK_STATE_DOWN)) == kif->k.nh_reachable)
 		return;		/* nothing changed wrt nexthop validity */
@@ -971,7 +1024,7 @@ if_change(u_short ifindex, int flags, struct if_data *ifd)
 				bzero(&nh, sizeof(nh));
 				memcpy(&nh.nexthop, &n->nexthop,
 				    sizeof(nh.nexthop));
-				if (!(kkr->kr->r.flags & F_DOWN)) {
+				if (kroute_validate(&n->kroute->r)) {
 					nh.valid = 1;
 					nh.connected = 1;
 					if ((nh.gateway.v4.s_addr =
@@ -1139,6 +1192,7 @@ fetchtable(void)
 		}
 
 		kr->r.flags = F_KERNEL;
+		kr->r.ifindex = rtm->rtm_index;
 
 		switch (sa->sa_family) {
 		case AF_INET:
@@ -1159,7 +1213,6 @@ fetchtable(void)
 		default:
 			free(kr);
 			continue;
-			/* not reached */
 		}
 
 		if ((sa = rti_info[RTAX_GATEWAY]) != NULL)
@@ -1170,7 +1223,6 @@ fetchtable(void)
 				break;
 			case AF_LINK:
 				kr->r.flags |= F_CONNECTED;
-				kr->r.ifindex = rtm->rtm_index;
 				break;
 			}
 
@@ -1316,7 +1368,6 @@ dispatch_rtmsg(void)
 				break;
 			default:
 				continue;
-				/* not reached */
 			}
 		}
 

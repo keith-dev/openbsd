@@ -84,7 +84,6 @@ void ssl_scache_dbm_init(server_rec *s, pool *p)
     }
     ssl_dbm_close(dbm);
 
-#if !defined(OS2) && !defined(WIN32)
     /*
      * We have to make sure the Apache child processes have access to
      * the DBM file. But because there are brain-dead platforms where we
@@ -107,7 +106,6 @@ void ssl_scache_dbm_init(server_rec *s, pool *p)
                       ap_user_id, -1);
         }
     }
-#endif
     ssl_mutex_off(s);
     ssl_scache_dbm_expire(s);
     return;
@@ -234,7 +232,6 @@ SSL_SESSION *ssl_scache_dbm_retrieve(server_rec *s, UCHAR *id, int idlen)
         return NULL;
     }
     dbmval = ssl_dbm_fetch(dbm, dbmkey);
-    ssl_dbm_close(dbm);
     ssl_mutex_off(s);
 
     /* immediately return if not found */
@@ -248,6 +245,8 @@ SSL_SESSION *ssl_scache_dbm_retrieve(server_rec *s, UCHAR *id, int idlen)
         return NULL;
     memcpy(ucpData, (char *)dbmval.dptr+sizeof(time_t), nData);
     memcpy(&expiry, dbmval.dptr, sizeof(time_t));
+
+    ssl_dbm_close(dbm);
 
     /* make sure the stuff is still not expired */
     now = time(NULL);

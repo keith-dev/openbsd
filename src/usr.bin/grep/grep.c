@@ -1,4 +1,4 @@
-/*	$OpenBSD: grep.c,v 1.29 2004/08/05 21:47:33 deraadt Exp $	*/
+/*	$OpenBSD: grep.c,v 1.31 2004/10/03 19:23:02 otto Exp $	*/
 
 /*-
  * Copyright (c) 1999 James Howard and Dag-Erling Coïdan Smørgrav
@@ -97,8 +97,6 @@ enum {
 int	 first;		/* flag whether or not this is our first match */
 int	 tail;		/* lines left to print */
 int	 lead;		/* number of lines in leading context queue */
-int	 boleol;	/* At least one pattern has a bol or eol */
-size_t	 maxPatternLen;	/* Longest length of all patterns */
 
 extern char *__progname;
 
@@ -107,12 +105,12 @@ usage(void)
 {
 	fprintf(stderr,
 #ifdef NOZ
-	    "usage: %s [-AB num] [-CEFGHILPRSUVabchilnoqsvwx]\n"
+	    "usage: %s [-abcEFGHhIiLlnoPqRSsUVvwx] [-A num] [-B num] [-C[num]]\n"
 #else
-	    "usage: %s [-AB num] [-CEFGHILPRSUVZabchilnoqsvwx]\n"
+	    "usage: %s [-abcEFGHhIiLlnoPqRSsUVvwxZ] [-A num] [-B num] [-C[num]]\n"
 #endif
-	    "\t[--context[=num]] [--binary-files=value] [--line-buffered]\n"
-	    "\t[-e pattern] [-f file] [pattern] [file ...]\n", __progname);
+	    "\t[-e pattern] [-f file] [--binary-files=value] [--context[=num]]\n"
+	    "\t[--line-buffered] [pattern] [file ...]\n", __progname);
 	exit(2);
 }
 
@@ -193,9 +191,6 @@ add_pattern(char *pat, size_t len)
 		pattern[patterns][len] = '\0';
 	}
 	++patterns;
-
-	if (len > maxPatternLen)
-		maxPatternLen = len;
 }
 
 static void

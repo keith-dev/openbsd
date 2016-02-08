@@ -1,5 +1,5 @@
 # ex:ts=8 sw=4:
-# $OpenBSD: PackingList.pm,v 1.21 2004/08/06 10:23:45 espie Exp $
+# $OpenBSD: PackingList.pm,v 1.44 2004/12/16 11:19:59 espie Exp $
 #
 # Copyright (c) 2003-2004 Marc Espie <espie@openbsd.org>
 #
@@ -17,6 +17,34 @@
 
 use strict;
 use warnings;
+
+package OpenBSD::PackingList::State;
+my $dot = '.';
+
+sub new
+{
+	my $class = shift;
+	bless { default_owner=>'root', 
+	     default_group=>'bin', 
+	     default_mode=> 0444,
+	     cwd=>\$dot}, $class;
+}
+
+sub cwd
+{
+	return ${$_[0]->{cwd}};
+}
+
+sub set_cwd
+{
+	my ($self, $p) = @_;
+
+	require File::Spec;
+
+	$p = File::Spec->canonpath($p);
+	$self->{cwd} = \$p;
+}
+
 package OpenBSD::PackingList;
 
 use OpenBSD::PackingElement;
@@ -26,21 +54,20 @@ sub new
 {
 	my $class = shift;
 	bless {state => 
-	    {default_owner=>'root', 
-	     default_group=>'bin', 
-	     default_mode=> 0444} }, $class;
+		OpenBSD::PackingList::State->new()
+	}, $class;
 }
 
 sub read
 {
 	my ($a, $fh, $code) = @_;
 	my $plist;
+	$code = \&defaultCode if !defined $code;
 	if (ref $a) {
 		$plist = $a;
 	} else {
 		$plist = new $a;
 	}
-	$code = \&defaultCode if !defined $code;
 	&$code($fh,
 		sub {
 			local $_ = shift;
@@ -60,12 +87,28 @@ sub defaultCode
 	}
 }
 
-sub DirrmOnly
+sub SharedItemsOnly
 {
 	my ($fh, $cont) = @_;
 	local $_;
 	while (<$fh>) {
-		next unless m/^\@(?:cwd|dirrm|dir|fontdir|mandir|name)\b/ || m/^\@(?:sample|extra)\b.*\/$/ || m/^[^\@].*\/$/;
+		next unless m/^\@(?:cwd|dirrm|dir|fontdir|mandir|newuser|newgroup|name)\b/o || m/^\@(?:sample|extra)\b.*\/$/o || m/^[^\@].*\/$/o;
+		&$cont($_);
+	}
+}
+
+sub DirrmOnly
+{
+	&OpenBSD::PackingList::SharedItemsOnly;
+}
+
+sub LibraryOnly
+{
+	my ($fh, $cont) = @_;
+	local $_;
+	while (<$fh>) {
+		next unless m/^\@(?:cwd|lib|name)\b/o ||
+			m/^\@comment\s+subdir\=/o;
 		&$cont($_);
 	}
 }
@@ -75,7 +118,42 @@ sub FilesOnly
 	my ($fh, $cont) = @_;
 	local $_;
 	while (<$fh>) {
-	    	next unless m/^\@(?:cwd|name|info|man|file|lib)\b/ || !m/^\@/;
+	    	next unless m/^\@(?:cwd|name|info|man|file|lib|shell)\b/o || !m/^\@/o;
+		&$cont($_);
+	}
+}
+
+sub DependOnly
+{
+	my ($fh, $cont) = @_;
+	local $_;
+	while (<$fh>) {
+		# XXX optimization
+		if (m/^\@arch\b/o) {
+			while (<$fh>) {
+			    if (m/^\@(?:depend|wantlib|pkgdep|newdepend|libdepend)\b/o) {
+				    &$cont($_);
+			    } elsif (m/^\@(?:groups|users|cwd)\b/o) {
+				    last;
+			    }
+			}
+			return;
+		}
+		next unless m/^\@(?:depend|wantlib|pkgdep|newdepend|libdepend)\b/o;
+		&$cont($_);
+	}
+}
+
+sub ExtraInfoOnly
+{
+	my ($fh, $cont) = @_;
+	local $_;
+	while (<$fh>) {
+		# XXX optimization
+		if (m/^\@arch\b/o) {
+			return;
+		}
+		next unless m/^\@(?:name\b|comment\s+subdir\=)/o;
 		&$cont($_);
 	}
 }
@@ -85,7 +163,18 @@ sub ConflictOnly
 	my ($fh, $cont) = @_;
 	local $_;
 	while (<$fh>) {
-	    	next unless m/^\@(?:pkgcfl|option|name)\b/;
+		# XXX optimization
+		if (m/^\@arch\b/o) {
+			while (<$fh>) {
+			    if (m/^\@(?:pkgcfl|conflict|option|name)\b/o) {
+				    &$cont($_);
+			    } elsif (m/^\@(?:depend|wantlib|pkgdep|newdepend|libdepend|groups|users|cwd)\b/o) {
+				    last;
+			    }
+			}
+			return;
+		}
+	    	next unless m/^\@(?:pkgcfl|conflict|option|name)\b/o;
 		&$cont($_);
 	}
 }
@@ -115,25 +204,10 @@ sub write
 {
 	my ($self, $fh) = @_;
 
-	if (defined $self->{cvstags}) {
-		for my $item (@{$self->{cvstags}}) {
-			$item->write($fh);
-		}
-	}
-	for my $unique_item (qw(name no-default-conflict extrainfo arch)) {
-		$self->{$unique_item}->write($fh) if defined $self->{$unique_item};
-	}
-	for my $listname (qw(pkgcfl pkgdep newdepend libdepend items)) {
-		if (defined $self->{$listname}) {
-			for my $item (@{$self->{$listname}}) {
-				$item->write($fh);
-			}
-		}
-	}
-	for my $special (OpenBSD::PackageInfo::info_names()) {
-		$self->{$special}->write($fh) if defined $self->{$special};
-	}
+	$self->visit('write', $fh);
+
 }
+
 
 sub fromfile
 {
@@ -198,6 +272,108 @@ sub pkgbase($)
 	} else {
 		return '/usr/local';
 	}
+}
+
+
+{
+    package OpenBSD::PackingList::Visitor;
+    sub new
+    {
+	    my $class = shift;
+	    bless {list=>[], pass=>1}, $class;
+    }
+
+    sub revisit
+    {
+	    my ($self, $item) = @_;
+	    push(@{$self->{list}}, $item);
+    }
+}
+
+sub visit
+{
+	my ($self, $method, @l) = @_;
+
+	my $visitor = new OpenBSD::PackingList::Visitor;
+
+	push(@l, $visitor);
+
+	if (defined $self->{cvstags}) {
+		for my $item (@{$self->{cvstags}}) {
+			$item->$method(@l);
+		}
+	}
+
+	for my $unique_item (qw(name no-default-conflict manual-installation extrainfo arch)) {
+		$self->{$unique_item}->$method(@l) if defined $self->{$unique_item};
+	}
+
+	for my $special (OpenBSD::PackageInfo::info_names()) {
+		$self->{$special}->$method(@l) if defined $self->{$special};
+	}
+
+	for my $listname (qw(modules pkgcfl conflict depend wantlib pkgdep newdepend libdepend groups users items)) {
+		if (defined $self->{$listname}) {
+			for my $item (@{$self->{$listname}}) {
+				$item->$method(@l);
+			}
+		}
+	}
+	$visitor->{pass} = 2;
+	while (my $item = shift @{$visitor->{list}}) {
+		$item->method(@l);
+	}
+}
+
+my $plist_cache = {};
+
+sub from_installation
+{
+	my ($o, $pkgname, $code) = @_;
+
+	require OpenBSD::PackageInfo;
+
+	$code = \&defaultCode if !defined $code;
+
+	if ($code == \&DependOnly && defined $plist_cache->{$pkgname}) {
+	    return $plist_cache->{$pkgname};
+	}
+	my $plist =
+	    $o->fromfile(OpenBSD::PackageInfo::installed_contents($pkgname), 
+		$code);
+	if (defined $plist && $code == \&DependOnly) {
+		$plist_cache->{$pkgname} = $plist;
+	} 
+	return $plist;
+}
+
+sub to_cache
+{
+	my ($self) = @_;
+	return if defined $plist_cache->{$self->pkgname()};
+	my $plist = new OpenBSD::PackingList;
+	for my $c (qw(depend wantlib pkgdep newdepend libdepend)) {
+		if (defined $self->{$c}) {
+			$plist->{$c} = $self->{$c};
+		}
+	}
+	$plist_cache->{$self->pkgname()} = $plist;
+}
+
+sub to_installation
+{
+	my ($self) = @_;
+
+	require OpenBSD::PackageInfo;
+
+	return if $main::not;
+
+	$self->tofile(OpenBSD::PackageInfo::installed_contents($self->pkgname()));
+}
+
+
+sub forget
+{
 }
 
 1;

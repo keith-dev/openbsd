@@ -1,4 +1,4 @@
-/*	$OpenBSD: machdep.c,v 1.309 2004/08/24 05:15:50 mickey Exp $	*/
+/*	$OpenBSD: machdep.c,v 1.316 2005/02/24 21:14:11 grange Exp $	*/
 /*	$NetBSD: machdep.c,v 1.214 1996/11/10 03:16:17 thorpej Exp $	*/
 
 /*-
@@ -545,11 +545,8 @@ allocsys(v)
 	 * i/o buffers.
 	 */
 	if (bufpages == 0) {
-		if (physmem < btoc(2 * 1024 * 1024))
-			bufpages = physmem / 10;
-		else
-			bufpages = (btoc(2 * 1024 * 1024) + physmem) *
-			    bufcachepercent / 100;
+		bufpages = (btoc(2 * 1024 * 1024) + physmem) *
+		    bufcachepercent / 100;
 	}
 	if (nbuf == 0) {
 		nbuf = bufpages;
@@ -1154,6 +1151,7 @@ cyrix3_cpu_setup(cpu_device, model, step)
 {
 #if defined(I686_CPU)
 	u_int64_t msreg;
+	u_int32_t regs[4];
 	unsigned int val;
 #if !defined(SMALL_KERNEL)
 	extern void (*pagezero)(void *, size_t);
@@ -1166,8 +1164,8 @@ cyrix3_cpu_setup(cpu_device, model, step)
 	case 6: /* C3 Samuel 1 */
 	case 7: /* C3 Samuel 2 or C3 Ezra */
 	case 8: /* C3 Ezra-T */
-		__asm __volatile("cpuid"
-		    : "=d" (val) : "a" (0x80000001) : "ebx", "ecx");
+		cpuid(0x80000001, regs);
+		val = regs[3];
 		if (val & (1U << 31)) {
 			cpu_feature |= CPUID_3DNOW;
 		} else {
@@ -1193,11 +1191,11 @@ cyrix3_cpu_setup(cpu_device, model, step)
 		 * Bit 6 of MSR 0x110B set to 1 (the default), which will
 		 * show up as bit 3 set here.
 		 */
-		__asm __volatile("cpuid" /* Check for RNG */
-		    : "=a" (val) : "a" (0xC0000000) : "cc");
+		cpuid(0xC0000000, regs); /* Check for RNG */
+		val = regs[0];
 		if (val >= 0xC0000001) {
-			__asm __volatile("cpuid"
-			    : "=d" (val) : "a" (0xC0000001) : "cc");
+			cpuid(0xC0000001, regs);
+			val = regs[3];
 		} else
 			val = 0;
 
@@ -2695,7 +2693,7 @@ init386(paddr_t first_avail)
 	setsegment(&gdt[GUDATA_SEL].sd, 0, i386_btop(VM_MAXUSER_ADDRESS) - 1,
 	    SDT_MEMRWA, SEL_UPL, 1, 1);
 	setsegment(&gdt[GCPU_SEL].sd, &cpu_info_primary,
-	    sizeof(struct cpu_info)-1, SDT_MEMRWA, SEL_KPL, 1, 1);
+	    sizeof(struct cpu_info)-1, SDT_MEMRWA, SEL_KPL, 0, 0);
 
 	/* make ldt gates and memory segments */
 	setgate(&ldt[LSYS5CALLS_SEL].gd, &IDTVEC(osyscall), 1, SDT_SYS386CGT,
@@ -2999,20 +2997,6 @@ consinit()
 	initted = 1;
 	cninit();
 }
-
-#if (NPCKBC > 0) && (NPCKBD == 0)
-/*
- * glue code to support old console code with the
- * mi keyboard controller driver
- */
-int
-pckbc_machdep_cnattach(kbctag, kbcslot)
-	pckbc_tag_t kbctag;
-	pckbc_slot_t kbcslot;
-{
-	return (ENXIO);
-}
-#endif
 
 #ifdef KGDB
 void
@@ -3668,6 +3652,8 @@ _bus_dmamap_load_mbuf(t, map, m0, flags)
 	seg = 0;
 	error = 0;
 	for (m = m0; m != NULL && error == 0; m = m->m_next) {
+		if (m->m_len == 0)
+			continue;
 		error = _bus_dmamap_load_buffer(t, map, m->m_data, m->m_len,
 		    NULL, flags, &lastaddr, &seg, first);
 		first = 0;
@@ -4134,9 +4120,9 @@ splassert_check(int wantipl, const char *func)
 
 #ifdef MULTIPROCESSOR
 void
-i386_intlock(struct intrframe iframe)
+i386_intlock(int ipl)
 {
-	if (iframe.if_ppl < IPL_SCHED)
+	if (ipl < IPL_SCHED)
 #ifdef notdef
 		spinlockmgr(&kernel_lock, LK_EXCLUSIVE|LK_CANRECURSE, 0);
 #else
@@ -4145,9 +4131,9 @@ i386_intlock(struct intrframe iframe)
 }
 
 void
-i386_intunlock(struct intrframe iframe)
+i386_intunlock(int ipl)
 {
-	if (iframe.if_ppl < IPL_SCHED)
+	if (ipl < IPL_SCHED)
 #ifdef notdef
 		spinlockmgr(&kernel_lock, LK_RELEASE, 0);
 #else
@@ -4200,10 +4186,9 @@ int
 splraise(ncpl)
 	int ncpl;
 {
-	int ocpl = lapic_tpr;
+	int ocpl;
 
-	if (ncpl > ocpl)
-		lapic_tpr = ncpl;
+	_SPLRAISE(ocpl, ncpl);
 	return (ocpl);
 }
 
@@ -4215,9 +4200,7 @@ void
 splx(ncpl)
 	int ncpl;
 {
-	lapic_tpr = ncpl;
-	if (ipending & IUNMASK(ncpl))
-		Xspllower();
+	_SPLX(ncpl);
 }
 
 /*

@@ -1,4 +1,4 @@
-/*	$OpenBSD: def.h,v 1.56 2004/07/22 01:25:24 vincent Exp $	*/
+/*	$OpenBSD: def.h,v 1.59 2005/03/12 06:16:07 deraadt Exp $	*/
 
 #include <sys/queue.h>
 
@@ -8,9 +8,8 @@
  * general definitions and macros. It also contains some
  * conditional compilation flags. All of the per-system and
  * per-terminal definitions are in special header files.
- * The most common reason to edit this file would be to zap
- * the definition of CVMVAS or BACKUP.
  */
+
 #include	"sysdef.h"	/* Order is critical.		 */
 #include	"ttydef.h"
 #include	"chrdef.h"
@@ -202,7 +201,7 @@ typedef struct MGWIN {
 	char		w_force;	/* If NZ, forcing row.		*/
 	char		w_flag;		/* Flags.			*/
 	LIST_HEAD(, undo_rec) w_undo;	/* Undo actions list */
-	int             w_undopos;      /* Where we were during the last
+	int		w_undopos;	/* Where we were during the last
 					   undo action */
 	struct undo_rec *w_undoptr;
 	struct LINE	*w_wrapline;
@@ -379,7 +378,8 @@ MGWIN   *wpopup(void);
 int	 togglereadonly(int, int);
 BUFFER  *bfind(const char *, int);
 int	 poptobuffer(int, int);
-int	 killbuffer(int, int);
+int	 killbuffer(BUFFER *);
+int	 killbuffer_cmd(int, int);
 int	 savebuffers(int, int);
 int	 listbuffers(int, int);
 int	 addlinef(BUFFER *, char *, ...);

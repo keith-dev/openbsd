@@ -1,4 +1,4 @@
-/*	$OpenBSD: proc.h,v 1.75 2004/07/22 15:42:11 art Exp $	*/
+/*	$OpenBSD: proc.h,v 1.77 2005/03/10 17:26:10 tedu Exp $	*/
 /*	$NetBSD: proc.h,v 1.44 1996/04/22 01:23:21 christos Exp $	*/
 
 /*-
@@ -314,6 +314,16 @@ struct	pcred {
 };
 
 #ifdef _KERNEL
+
+struct uidinfo {
+	LIST_ENTRY(uidinfo) ui_hash;
+	uid_t   ui_uid;
+	long    ui_proccnt;	/* proc structs */
+	long	ui_lockcnt;	/* lockf structs */
+};
+
+struct uidinfo *uid_find(uid_t);
+
 /*
  * We use process IDs <= PID_MAX; PID_MAX + 1 must also fit in a pid_t,
  * as it is used to represent "no process group".
@@ -421,7 +431,7 @@ void	reaper(void);
 void	exit1(struct proc *, int);
 void	exit2(struct proc *);
 int	fork1(struct proc *, int, int, void *, size_t, void (*)(void *),
-	    void *, register_t *);
+	    void *, register_t *, struct proc **);
 void	rqinit(void);
 int	groupmember(gid_t, struct ucred *);
 #if !defined(cpu_switch)

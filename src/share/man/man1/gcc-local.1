@@ -1,4 +1,4 @@
-.\" $OpenBSD: gcc-local.1,v 1.4 2004/09/02 07:38:40 brad Exp $
+.\" $OpenBSD: gcc-local.1,v 1.10 2005/02/06 10:39:31 espie Exp $
 .\"
 .\" Copyright (c) 2002 Marc Espie
 .\" Copyright (c) 2003 Anil Madhavapeddy
@@ -25,7 +25,7 @@
 .\" (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
 .\" THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 .\"
-.Dd December 1, 2002
+.Dd January 3, 2005
 .Dt GCC-LOCAL 1
 .Os
 .Sh NAME
@@ -37,7 +37,7 @@ Some
 platforms use a derivative of
 .Nm gcc 2.95.3 ,
 others use a derivative of
-.Nm gcc 3.3.2 .
+.Nm gcc 3.3.5 .
 In both cases,
 the
 .Nm gcc
@@ -64,6 +64,17 @@ executable using
 .Xr mprotect 2 ,
 since the stack area is by default non-executable.
 .It
+On
+.Ox ,
+by default, trampoline code generation is disabled in
+.Nm gcc 3.3.5 .
+Code requiring trampolines will not compile without
+.Fl ftrampolines .
+The warning flag
+.Fl Wtrampolines
+can be used to locate trampoline instances if trampoline generation
+is re-enabled.
+.It
 The
 .Fl O2
 option does not include
@@ -76,7 +87,7 @@ already weak type system of C.
 The option
 .Fl fno-builtin-<function>
 was backported from
-.Nm gcc 3.3.2 ,
+.Nm gcc 3.3.5 ,
 to
 .Nm gcc 2.95.3 ,
 and can be used without having to differentiate between
@@ -134,11 +145,6 @@ and those calls can be traced using
 using
 .Xr syslog_r 3 .
 .It
-On i386, the optimizer for
-.Nm gcc 2.95.3
-features an extra peephole which reduces the function
-prologues enough to allow for the ramdisk to fit on one floppy.
-.It
 On
 .Ox ,
 .Nm gcc
@@ -147,7 +153,13 @@ comes with the
 stack protection extension, which is enabled by default.
 This extension reorders local variable declarations and adds stack consistency
 checks at run time, in order to detect stack overflows, and will attempt to
-report the problem in the system logs, and abort the faulting process.
+report the problem in the system logs by calling
+.Xr syslog 3
+with a
+.Dv LOG_CRIT
+priority message:
+.Dq stack overflow in function XXX ,
+and abort the faulting process.
 It can be turned off using the
 .Fl fno-stack-protector
 commandline option.
@@ -181,6 +193,24 @@ kernel.
 does not store its version string in objects.
 This behavior can be restored with
 .Fl fident .
+.It
+On
+.Ox ,
+.Nm gcc
+will not move variables initialized with the value zero
+from the data section to the bss section.
+The default behaviour of
+.Nm gcc 3.3.5
+on other systems is to perform this action, which can be restored for
+.Ox
+with
+.Fl fzero-initialized-in-bss .
+.It
+On
+.Ox ,
+.Nm gcc
+does not warn for cast expressions used as lvalues outside of
+.Fl pedantic .
 .El
 .Sh ATTRIBUTES
 The
@@ -297,8 +327,3 @@ The
 flag only works with statically allocated fixed-size buffers.
 Since it is applied at compile-time, dynamically allocated memory buffers
 and non-constant arguments are ignored.
-.Sh BUGS
-The
-.Dv __sentinel__
-attribute is not yet fully implemented for
-.Nm gcc 3.3.2 .

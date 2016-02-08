@@ -28,56 +28,46 @@
  */
 
 #if defined(LIBC_SCCS) && !defined(lint)
-static char rcsid[] = "$OpenBSD: getservbyname.c,v 1.6 2003/06/02 20:18:35 millert Exp $";
+static char rcsid[] = "$OpenBSD: getservbyname.c,v 1.9 2004/10/25 03:09:01 millert Exp $";
 #endif /* LIBC_SCCS and not lint */
 
 #include <netdb.h>
+#include <stdio.h>
 #include <string.h>
-#include "thread_private.h"
 
-extern int _serv_stayopen;
-
-_THREAD_PRIVATE_MUTEX(getservbyname_r);
-
-struct servent *
-getservbyname_r(name, proto, se, buf, buflen)
-	const char *name, *proto;
-	struct servent *se;
-	char *buf;
-	int buflen;
+int
+getservbyname_r(const char *name, const char *proto, struct servent *se,
+    struct servent_data *sd)
 {
-	register struct servent *p;
-	register char **cp;
+	char **cp;
+	int error;
 
-	_THREAD_PRIVATE_MUTEX_LOCK(getservbyname_r);
-	setservent(_serv_stayopen);
-	while ((p = getservent())) {
-		if (strcmp(name, p->s_name) == 0)
+	setservent_r(sd->stayopen, sd);
+	while ((error = getservent_r(se, sd)) == 0) {
+		if (strcmp(name, se->s_name) == 0)
 			goto gotname;
-		for (cp = p->s_aliases; *cp; cp++)
+		for (cp = se->s_aliases; *cp; cp++)
 			if (strcmp(name, *cp) == 0)
 				goto gotname;
 		continue;
 gotname:
-		if (proto == 0 || strcmp(p->s_proto, proto) == 0)
+		if (proto == 0 || strcmp(se->s_proto, proto) == 0)
 			break;
 	}
-	if (!_serv_stayopen)
-		endservent();
-	_THREAD_PRIVATE_MUTEX_UNLOCK(getservbyname_r);
-	return (p);
+	if (!sd->stayopen && sd->fp != NULL) {
+		fclose(sd->fp);
+		sd->fp = NULL;
+	}
+	return (error);
 }
 
-struct servent *getservbyname(name, proto)
-	const char *name, *proto;
+struct servent *
+getservbyname(const char *name, const char *proto)
 {
-	_THREAD_PRIVATE_KEY(getservbyname);
-	static char buf[4096];
-	char *bufp = (char*)_THREAD_PRIVATE(getservbyname, buf, NULL);
+	extern struct servent_data _servent_data;
+	static struct servent serv;
 
-	if (bufp == NULL)
+	if (getservbyname_r(name, proto, &serv, &_servent_data) != 0)
 		return (NULL);
-	return getservbyname_r(name, proto, (struct servent*) bufp, 
-		bufp + sizeof(struct servent), 
-		sizeof buf - sizeof(struct servent) );
+	return (&serv);
 }

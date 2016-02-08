@@ -1,4 +1,4 @@
-/* $OpenBSD: standalone.c,v 1.8 2004/07/20 17:07:34 millert Exp $ */
+/* $OpenBSD: standalone.c,v 1.10 2005/03/13 19:29:44 otto Exp $ */
 
 /*
  * Standalone POP server: accepts connections, checks the anti-flood limits,
@@ -136,8 +136,10 @@ int main(void)
 		i++;
 
 	pfds = calloc(i, sizeof(pfds[0]));
-	if (!pfds)
+	if (!pfds) {
+		freeaddrinfo(res0);
 		return log_error("malloc");
+	}
 
 	i = 0;
 	for (res = res0; res; res = res->ai_next) {
@@ -247,7 +249,8 @@ handle(int sock)
 	    hbuf, sizeof(hbuf), NULL, 0, NI_NUMERICHOST);
 	if (error) {
 		syslog(SYSLOG_PRI_HI,
-		    "%s: invalid IP address", hbuf);
+		    "could not get host address");
+		close(new);
 		return -1;
 	}
 
@@ -299,7 +302,8 @@ handle(int sock)
 	switch ((pid = fork())) {
 	case -1:
 		syslog(SYSLOG_PRI_ERROR, "%s: fork: %m", hbuf);
-		break;
+		close(new);
+		return -1;
 
 	case 0:
 #if DAEMON_LIBWRAP

@@ -1,4 +1,4 @@
-/*	$OpenBSD: bgpd.c,v 1.105 2004/08/24 11:43:16 henning Exp $ */
+/*	$OpenBSD: bgpd.c,v 1.113 2005/02/09 10:56:28 henning Exp $ */
 
 /*
  * Copyright (c) 2003, 2004 Henning Brauer <henning@openbsd.org>
@@ -36,21 +36,23 @@
 #include "bgpd.h"
 #include "session.h"
 
-void	sighdlr(int);
-void	usage(void);
-int	main(int, char *[]);
-int	check_child(pid_t, const char *);
-int	reconfigure(char *, struct bgpd_config *, struct mrt_head *,
-	    struct peer **, struct filter_head *);
-int	dispatch_imsg(struct imsgbuf *, int);
+void		sighdlr(int);
+__dead void	usage(void);
+int		main(int, char *[]);
+int		check_child(pid_t, const char *);
+int		send_filterset(struct imsgbuf *, struct filter_set_head *,
+		    int, int);
+int		reconfigure(char *, struct bgpd_config *, struct mrt_head *,
+		    struct peer **, struct filter_head *);
+int		dispatch_imsg(struct imsgbuf *, int);
 
-int			rfd = -1;
-volatile sig_atomic_t	mrtdump = 0;
-volatile sig_atomic_t	quit = 0;
-volatile sig_atomic_t	reconfig = 0;
-volatile sig_atomic_t	sigchld = 0;
-struct imsgbuf		ibuf_se;
-struct imsgbuf		ibuf_rde;
+int			 rfd = -1;
+volatile sig_atomic_t	 mrtdump = 0;
+volatile sig_atomic_t	 quit = 0;
+volatile sig_atomic_t	 reconfig = 0;
+volatile sig_atomic_t	 sigchld = 0;
+struct imsgbuf		*ibuf_se;
+struct imsgbuf		*ibuf_rde;
 
 void
 sighdlr(int sig)
@@ -73,7 +75,7 @@ sighdlr(int sig)
 	}
 }
 
-void
+__dead void
 usage(void)
 {
 	extern char *__progname;
@@ -211,9 +213,12 @@ main(int argc, char *argv[])
 	close(pipe_s2r[0]);
 	close(pipe_s2r[1]);
 
-	imsg_init(&ibuf_se, pipe_m2s[0]);
-	imsg_init(&ibuf_rde, pipe_m2r[0]);
-	mrt_init(&ibuf_rde, &ibuf_se);
+	if ((ibuf_se = malloc(sizeof(struct imsgbuf))) == NULL ||
+	    (ibuf_rde = malloc(sizeof(struct imsgbuf))) == NULL)
+		fatal(NULL);
+	imsg_init(ibuf_se, pipe_m2s[0]);
+	imsg_init(ibuf_rde, pipe_m2r[0]);
+	mrt_init(ibuf_rde, ibuf_se);
 	if ((rfd = kr_init(!(conf.flags & BGPD_FLAG_NO_FIB_UPDATE))) == -1)
 		quit = 1;
 	if (pftable_clear_all() != 0)
@@ -238,13 +243,13 @@ main(int argc, char *argv[])
 	mrt_reconfigure(&mrt_l);
 
 	while (quit == 0) {
-		pfd[PFD_PIPE_SESSION].fd = ibuf_se.fd;
+		pfd[PFD_PIPE_SESSION].fd = ibuf_se->fd;
 		pfd[PFD_PIPE_SESSION].events = POLLIN;
-		if (ibuf_se.w.queued)
+		if (ibuf_se->w.queued)
 			pfd[PFD_PIPE_SESSION].events |= POLLOUT;
-		pfd[PFD_PIPE_ROUTE].fd = ibuf_rde.fd;
+		pfd[PFD_PIPE_ROUTE].fd = ibuf_rde->fd;
 		pfd[PFD_PIPE_ROUTE].events = POLLIN;
-		if (ibuf_rde.w.queued)
+		if (ibuf_rde->w.queued)
 			pfd[PFD_PIPE_ROUTE].events |= POLLOUT;
 		pfd[PFD_SOCK_ROUTE].fd = rfd;
 		pfd[PFD_SOCK_ROUTE].events = POLLIN;
@@ -260,26 +265,26 @@ main(int argc, char *argv[])
 			}
 
 		if (nfds > 0 && (pfd[PFD_PIPE_SESSION].revents & POLLOUT))
-			if (msgbuf_write(&ibuf_se.w) < 0) {
+			if (msgbuf_write(&ibuf_se->w) < 0) {
 				log_warn("pipe write error (to SE)");
 				quit = 1;
 			}
 
 		if (nfds > 0 && (pfd[PFD_PIPE_ROUTE].revents & POLLOUT))
-			if (msgbuf_write(&ibuf_rde.w) < 0) {
+			if (msgbuf_write(&ibuf_rde->w) < 0) {
 				log_warn("pipe write error (to RDE)");
 				quit = 1;
 			}
 
 		if (nfds > 0 && pfd[PFD_PIPE_SESSION].revents & POLLIN) {
 			nfds--;
-			if (dispatch_imsg(&ibuf_se, PFD_PIPE_SESSION) == -1)
+			if (dispatch_imsg(ibuf_se, PFD_PIPE_SESSION) == -1)
 				quit = 1;
 		}
 
 		if (nfds > 0 && pfd[PFD_PIPE_ROUTE].revents & POLLIN) {
 			nfds--;
-			if (dispatch_imsg(&ibuf_rde, PFD_PIPE_ROUTE) == -1)
+			if (dispatch_imsg(ibuf_rde, PFD_PIPE_ROUTE) == -1)
 				quit = 1;
 		}
 
@@ -290,22 +295,26 @@ main(int argc, char *argv[])
 		}
 
 		if (reconfig) {
+			reconfig = 0;
 			log_info("rereading config");
 			reconfigure(conffile, &conf, &mrt_l, &peer_l, rules_l);
-			reconfig = 0;
 		}
 
 		if (sigchld) {
-			if (check_child(io_pid, "session engine"))
-				quit = 1;
-			if (check_child(rde_pid, "route decision engine"))
-				quit = 1;
 			sigchld = 0;
+			if (check_child(io_pid, "session engine")) {
+				quit = 1;
+				io_pid = 0;
+			}
+			if (check_child(rde_pid, "route decision engine")) {
+				quit = 1;
+				rde_pid = 0;
+			}
 		}
 
 		if (mrtdump == 1) {
-			mrt_handler(&mrt_l);
 			mrtdump = 0;
+			mrt_handler(&mrt_l);
 		}
 	}
 
@@ -338,6 +347,11 @@ main(int argc, char *argv[])
 			fatal("wait");
 	} while (pid != -1 || (pid == -1 && errno == EINTR));
 
+	msgbuf_clear(&ibuf_se->w);
+	free(ibuf_se);
+	msgbuf_clear(&ibuf_rde->w);
+	free(ibuf_rde);
+
 	log_info("Terminating");
 	return (0);
 }
@@ -363,6 +377,25 @@ check_child(pid_t pid, const char *pname)
 }
 
 int
+send_filterset(struct imsgbuf *i, struct filter_set_head *set, int id, int f)
+{
+	struct filter_set	*s;
+
+	for (s = SIMPLEQ_FIRST(set); s != NULL; ) {
+		if (imsg_compose(i, IMSG_FILTER_SET, id, 0, -1, s,
+		    sizeof(struct filter_set)) == -1)
+			return (-1);
+		if (f) {
+			SIMPLEQ_REMOVE_HEAD(set, entry);
+			free(s);
+			s = SIMPLEQ_FIRST(set);
+		} else
+			s = SIMPLEQ_NEXT(s, entry);
+	}
+	return (0);
+}
+
+int
 reconfigure(char *conffile, struct bgpd_config *conf, struct mrt_head *mrt_l,
     struct peer **peer_l, struct filter_head *rules_l)
 {
@@ -380,32 +413,43 @@ reconfigure(char *conffile, struct bgpd_config *conf, struct mrt_head *mrt_l,
 
 	prepare_listeners(conf);
 
-	if (imsg_compose(&ibuf_se, IMSG_RECONF_CONF, 0,
+	if (imsg_compose(ibuf_se, IMSG_RECONF_CONF, 0, 0, -1,
 	    conf, sizeof(struct bgpd_config)) == -1)
 		return (-1);
-	if (imsg_compose(&ibuf_rde, IMSG_RECONF_CONF, 0,
+	if (imsg_compose(ibuf_rde, IMSG_RECONF_CONF, 0, 0, -1,
 	    conf, sizeof(struct bgpd_config)) == -1)
 		return (-1);
-	for (p = *peer_l; p != NULL; p = p->next)
-		if (imsg_compose(&ibuf_se, IMSG_RECONF_PEER, p->conf.id,
+	for (p = *peer_l; p != NULL; p = p->next) {
+		if (imsg_compose(ibuf_se, IMSG_RECONF_PEER, p->conf.id, 0, -1,
 		    &p->conf, sizeof(struct peer_config)) == -1)
 			return (-1);
+		if (send_filterset(ibuf_se, &p->conf.attrset,
+		    p->conf.id, 0) == -1)
+			return (-1);
+	}
 	while ((n = TAILQ_FIRST(&net_l)) != NULL) {
-		if (imsg_compose(&ibuf_rde, IMSG_NETWORK_ADD, 0,
+		if (imsg_compose(ibuf_rde, IMSG_NETWORK_ADD, 0, 0, -1,
 		    &n->net, sizeof(struct network_config)) == -1)
+			return (-1);
+		if (send_filterset(ibuf_rde, &n->net.attrset, 0, 1) == -1)
+			return (-1);
+		if (imsg_compose(ibuf_rde, IMSG_NETWORK_DONE, 0, 0, -1,
+		    NULL, 0) == -1)
 			return (-1);
 		TAILQ_REMOVE(&net_l, n, entry);
 		free(n);
 	}
 	while ((r = TAILQ_FIRST(rules_l)) != NULL) {
-		if (imsg_compose(&ibuf_rde, IMSG_RECONF_FILTER, 0,
+		if (imsg_compose(ibuf_rde, IMSG_RECONF_FILTER, 0, 0, -1,
 		    r, sizeof(struct filter_rule)) == -1)
+			return (-1);
+		if (send_filterset(ibuf_rde, &r->set, 0, 1) == -1)
 			return (-1);
 		TAILQ_REMOVE(rules_l, r, entry);
 		free(r);
 	}
 	while ((la = TAILQ_FIRST(conf->listen_addrs)) != NULL) {
-		if (imsg_compose_fdpass(&ibuf_se, IMSG_RECONF_LISTENER, la->fd,
+		if (imsg_compose(ibuf_se, IMSG_RECONF_LISTENER, 0, 0, la->fd,
 		    la, sizeof(struct listen_addr)) == -1)
 			return (-1);
 		TAILQ_REMOVE(conf->listen_addrs, la, entry);
@@ -414,8 +458,8 @@ reconfigure(char *conffile, struct bgpd_config *conf, struct mrt_head *mrt_l,
 	free(conf->listen_addrs);
 	conf->listen_addrs = NULL;
 
-	if (imsg_compose(&ibuf_se, IMSG_RECONF_DONE, 0, NULL, 0) == -1 ||
-	    imsg_compose(&ibuf_rde, IMSG_RECONF_DONE, 0, NULL, 0) == -1)
+	if (imsg_compose(ibuf_se, IMSG_RECONF_DONE, 0, 0, -1, NULL, 0) == -1 ||
+	    imsg_compose(ibuf_rde, IMSG_RECONF_DONE, 0, 0, -1, NULL, 0) == -1)
 		return (-1);
 
 	/* mrt changes can be sent out of bound */
@@ -533,6 +577,14 @@ dispatch_imsg(struct imsgbuf *ibuf, int idx)
 			else
 				kr_show_route(&imsg);
 			break;
+		case IMSG_IFINFO:
+			if (idx != PFD_PIPE_SESSION)
+				log_warnx("IFINFO request not from SE");
+			else if (imsg.hdr.len != IMSG_HEADER_SIZE + IFNAMSIZ)
+				log_warnx("IFINFO request with wrong len");
+			else
+				kr_ifinfo(imsg.data);
+			break;
 		default:
 			break;
 		}
@@ -560,7 +612,7 @@ send_nexthop_update(struct kroute_nexthop *msg)
 
 	free(gw);
 
-	if (imsg_compose(&ibuf_rde, IMSG_NEXTHOP_UPDATE, 0,
+	if (imsg_compose(ibuf_rde, IMSG_NEXTHOP_UPDATE, 0, 0, -1,
 	    msg, sizeof(struct kroute_nexthop)) == -1)
 		quit = 1;
 }
@@ -568,5 +620,5 @@ send_nexthop_update(struct kroute_nexthop *msg)
 void
 send_imsg_session(int type, pid_t pid, void *data, u_int16_t datalen)
 {
-	imsg_compose_pid(&ibuf_se, type, pid, data, datalen);
+	imsg_compose(ibuf_se, type, 0, pid, -1, data, datalen);
 }

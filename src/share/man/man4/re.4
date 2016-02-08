@@ -1,4 +1,4 @@
-.\" $OpenBSD: re.4,v 1.5 2004/08/17 23:49:16 jaredy Exp $
+.\" $OpenBSD: re.4,v 1.10 2005/01/14 03:06:09 pvalchev Exp $
 .\" Copyright (c) 2003
 .\"	Bill Paul <wpaul@windriver.com>. All rights reserved.
 .\"
@@ -39,7 +39,9 @@
 .\" .Nd "RealTek 8139C+/8169/8169S/8110S PCI Ethernet adapter driver"
 .Nd "Realtek 8169/8169S/8110S PCI Ethernet adapter driver"
 .Sh SYNOPSIS
-.Cd "re* at pci? dev ? function ?"
+.Cd "re* at pci?"
+.Cd "re* at cardbus?"
+.Cd "rgephy* at mii?"
 .Sh DESCRIPTION
 The
 .Nm
@@ -51,14 +53,20 @@ the following:
 .Bl -bullet -compact
 .\" .It
 .\" Alloy Computer Products EtherGOLD 1439E 10/100 (8139C+)
+.It
+Buffalo LGY-PCI-GT (8169S)
 .\" .It
 .\" Compaq Evo N1015v Integrated Ethernet (8139C+)
+.It
+Corega CG-LAPCIGT (8169S)
 .It
 Gigabyte 7N400 Pro2 Integrated Gigabit Ethernet (8110S)
 .It
 PLANEX COMMUNICATIONS Inc. GN-1200TC (8169S)
 .It
 Xterasys XN-152 10/100/1000 NIC (8169)
+.It
+Netgear GA511 PC Card (8169)
 .El
 .\" .Pp
 .\" NICs based on the 8139C+ are capable of 10 and 100Mbps speeds over CAT5

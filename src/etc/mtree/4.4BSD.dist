@@ -1,4 +1,4 @@
-#	$OpenBSD: 4.4BSD.dist,v 1.169 2004/08/06 21:49:10 pefo Exp $
+#	$OpenBSD: 4.4BSD.dist,v 1.172 2005/03/15 18:13:42 deraadt Exp $
 
 /set type=dir uname=root gname=wheel mode=0755
 # .
@@ -41,6 +41,11 @@ authpf		uname=root mode=0755
 # ./etc/disklabels
 disklabels
 # ./etc/disklabels
+..
+
+# ./etc/firmware
+firmware
+# ./etc/firmware
 ..
 
 # ./etc/hotplug
@@ -1115,6 +1120,8 @@ sparc64
 ..
 vax
 ..
+zaurus
+..
 
 # ./usr/share/man/cat1
 ..
@@ -1134,6 +1141,18 @@ amd64
 i386
 
 # ./usr/share/man/cat2/i386
+..
+
+# ./usr/share/man/cat2/cats
+cats
+
+# ./usr/share/man/cat2/cats
+..
+
+# ./usr/share/man/cat2/zaurus
+zaurus
+
+# ./usr/share/man/cat2/zaurus
 ..
 
 # ./usr/share/man/cat2
@@ -1173,6 +1192,8 @@ sparc
 sparc64
 ..
 vax
+..
+zaurus
 ..
 
 # ./usr/share/man/cat3
@@ -1218,6 +1239,8 @@ sparc64
 ..
 vax
 ..
+zaurus
+..
 
 # ./usr/share/man/cat4
 ..
@@ -1256,6 +1279,8 @@ sparc
 sparc64
 ..
 vax
+..
+zaurus
 ..
 
 # ./usr/share/man/cat5
@@ -1306,6 +1331,8 @@ sparc64
 ..
 vax
 ..
+zaurus
+..
 
 # ./usr/share/man/cat8
 ..
@@ -1345,6 +1372,8 @@ sparc64
 ..
 vax
 ..
+zaurus
+..
 
 # ./usr/share/man/cat9
 ..
@@ -1383,6 +1412,8 @@ sparc
 sparc64
 ..
 vax
+..
+zaurus
 ..
 
 # ./usr/share/man/ps1
@@ -1436,6 +1467,8 @@ sparc64
 ..
 vax
 ..
+zaurus
+..
 
 # ./usr/share/man/ps3
 ..
@@ -1480,6 +1513,8 @@ sparc64
 ..
 vax
 ..
+zaurus
+..
 
 # ./usr/share/man/ps4
 ..
@@ -1518,6 +1553,8 @@ sparc
 sparc64
 ..
 vax
+..
+zaurus
 ..
 
 # ./usr/share/man/ps5
@@ -1568,6 +1605,8 @@ sparc64
 ..
 vax
 ..
+zaurus
+..
 
 # ./usr/share/man/ps8
 ..
@@ -1607,6 +1646,8 @@ sparc64
 ..
 vax
 ..
+zaurus
+..
 
 # ./usr/share/man/ps9
 ..
@@ -1645,6 +1686,8 @@ sparc
 sparc64
 ..
 vax
+..
+zaurus
 ..
 
 # ./usr/share/man/man1
@@ -1700,6 +1743,8 @@ sparc64
 ..
 vax
 ..
+zaurus
+..
 
 # ./usr/share/man/man4
 ..
@@ -1753,6 +1798,8 @@ sparc
 sparc64
 ..
 vax
+..
+zaurus
 ..
 
 # ./usr/share/man/man8

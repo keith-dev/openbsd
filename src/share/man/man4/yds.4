@@ -1,4 +1,4 @@
-.\"	$OpenBSD: yds.4,v 1.5 2004/04/16 21:23:08 jmc Exp $
+.\"	$OpenBSD: yds.4,v 1.8 2004/12/20 23:28:44 jmc Exp $
 .\"
 .\" Copyright (c) 2001 Aaron Campbell.
 .\" All rights reserved.
@@ -30,7 +30,7 @@
 .Nm yds
 .Nd Yamaha DS-XG sound hardware driver
 .Sh SYNOPSIS
-.Cd "yds* at pci? dev ? function ? flags 0x0000"
+.Cd "yds* at pci? flags 0x0000"
 .Cd "audio* at yds?"
 .Cd "opl* at yds?"
 .Sh DESCRIPTION
@@ -50,6 +50,13 @@ This is needed to make the floppy work on some machines
 but is disabled by default because it is known to break
 .Xr apm 4
 support.
+.Sh FILES
+The driver needs a firmware file,
+which is loaded on demand when the device is attached:
+.Pp
+.Bl -tag -width Ds -offset indent -compact
+.It Pa /etc/firmware/yds
+.El
 .Sh SEE ALSO
 .Xr ac97 4 ,
 .Xr audio 4 ,

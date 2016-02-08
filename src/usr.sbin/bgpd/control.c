@@ -1,4 +1,4 @@
-/*	$OpenBSD: control.c,v 1.37 2004/08/24 12:43:34 claudio Exp $ */
+/*	$OpenBSD: control.c,v 1.43 2005/03/11 15:48:58 deraadt Exp $ */
 
 /*
  * Copyright (c) 2003, 2004 Henning Brauer <henning@openbsd.org>
@@ -50,7 +50,6 @@ control_init(void)
 		return (-1);
 	}
 
-	old_umask = umask(S_IXUSR|S_IXGRP|S_IWOTH|S_IROTH|S_IXOTH);
 	bzero(&sun, sizeof(sun));
 	sun.sun_family = AF_UNIX;
 	strlcpy(sun.sun_path, SOCKET_NAME, sizeof(sun.sun_path));
@@ -62,19 +61,22 @@ control_init(void)
 			return (-1);
 		}
 
+	old_umask = umask(S_IXUSR|S_IXGRP|S_IWOTH|S_IROTH|S_IXOTH);
 	if (bind(fd, (struct sockaddr *)&sun, sizeof(sun)) == -1) {
 		log_warn("control_init: bind: %s", SOCKET_NAME);
 		close(fd);
-		return (-1);
-	}
-
-	if (chmod(SOCKET_NAME, S_IRUSR|S_IWUSR|S_IRGRP|S_IWGRP) == -1) {
-		log_warn("control_init chmod");
-		close(fd);
+		umask(old_umask);
 		return (-1);
 	}
 
 	umask(old_umask);
+
+	if (chmod(SOCKET_NAME, S_IRUSR|S_IWUSR|S_IRGRP|S_IWGRP) == -1) {
+		log_warn("control_init chmod");
+		close(fd);
+		(void)unlink(SOCKET_NAME);
+		return (-1);
+	}
 
 	session_socket_blockmode(fd, BM_NONBLOCK);
 	control_state.fd = fd;
@@ -185,7 +187,7 @@ control_dispatch_msg(struct pollfd *pfd, u_int *ctl_cnt)
 	struct ctl_conn		*c;
 	int			 n;
 	struct peer		*p;
-	struct bgpd_addr	*addr;
+	struct ctl_neighbor	*neighbor;
 
 	if ((c = control_connbyfd(pfd->fd)) == NULL) {
 		log_warn("control_dispatch_msg: fd %d: not found", pfd->fd);
@@ -219,9 +221,11 @@ control_dispatch_msg(struct pollfd *pfd, u_int *ctl_cnt)
 		case IMSG_CTL_SHOW_NEIGHBOR:
 			c->ibuf.pid = imsg.hdr.pid;
 			if (imsg.hdr.len == IMSG_HEADER_SIZE +
-			    sizeof(struct bgpd_addr)) {
-				addr = imsg.data;
-				p = getpeerbyaddr(addr);
+			    sizeof(struct ctl_neighbor)) {
+				neighbor = imsg.data;
+				p = getpeerbyaddr(&neighbor->addr);
+				if (p == NULL)
+					p = getpeerbydesc(neighbor->descr);
 				if (p != NULL)
 					imsg_compose_rde(imsg.hdr.type,
 					    imsg.hdr.pid,
@@ -242,9 +246,12 @@ control_dispatch_msg(struct pollfd *pfd, u_int *ctl_cnt)
 		case IMSG_CTL_NEIGHBOR_DOWN:
 		case IMSG_CTL_NEIGHBOR_CLEAR:
 			if (imsg.hdr.len == IMSG_HEADER_SIZE +
-			    sizeof(struct bgpd_addr)) {
-				addr = imsg.data;
-				p = getpeerbyaddr(addr);
+			    sizeof(struct ctl_neighbor)) {
+				neighbor = imsg.data;
+				neighbor->descr[PEER_DESCR_LEN - 1] = 0;
+				p = getpeerbyaddr(&neighbor->addr);
+				if (p == NULL)
+					p = getpeerbydesc(neighbor->descr);
 				if (p == NULL) {
 					log_warnx("IMSG_CTL_NEIGHBOR_ "
 					    "with unknown neighbor");
@@ -287,6 +294,8 @@ control_dispatch_msg(struct pollfd *pfd, u_int *ctl_cnt)
 		case IMSG_NETWORK_ADD:
 		case IMSG_NETWORK_REMOVE:
 		case IMSG_NETWORK_FLUSH:
+		case IMSG_NETWORK_DONE:
+		case IMSG_FILTER_SET:
 			imsg_compose_rde(imsg.hdr.type, 0,
 			    imsg.data, imsg.hdr.len - IMSG_HEADER_SIZE);
 			break;
@@ -307,6 +316,6 @@ control_imsg_relay(struct imsg *imsg)
 	if ((c = control_connbypid(imsg->hdr.pid)) == NULL)
 		return (0);
 
-	return (imsg_compose_pid(&c->ibuf, imsg->hdr.type, imsg->hdr.pid,
+	return (imsg_compose(&c->ibuf, imsg->hdr.type, 0, imsg->hdr.pid, -1,
 	    imsg->data, imsg->hdr.len - IMSG_HEADER_SIZE));
 }

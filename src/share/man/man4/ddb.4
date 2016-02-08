@@ -1,4 +1,4 @@
-.\"	$OpenBSD: ddb.4,v 1.36 2004/02/01 12:23:47 jmc Exp $
+.\"	$OpenBSD: ddb.4,v 1.41 2005/03/07 23:41:54 jmc Exp $
 .\"	$NetBSD: ddb.4,v 1.5 1994/11/30 16:22:09 jtc Exp $
 .\"
 .\" Mach Operating System
@@ -61,7 +61,7 @@ is set to 1.
 .Nm
 prompts for commands on the console with:
 .Pp
-.Dl ddb>
+.Dl ddb\*(Gt
 .Pp
 The general syntax of a
 .Nm
@@ -70,7 +70,7 @@ command is:
 .Ar command
 .Oo Ic / Ns Ar modifiers Oc " "
 .Oo Ar address Oc Ns
-.Oo Ic \&, Ns Ar count Oc
+.Op Ic \&, Ns Ar count
 .Ed
 .Pp
 To save typing,
@@ -142,9 +142,9 @@ and waits for a response.
 The valid responses are:
 .Pp
 .Bl -tag -width 10n -offset indent -compact
-.It Ic <space>
+.It Aq Ic space
 One more page.
-.It Ic <return>
+.It Aq Ic return
 One more line.
 .It Ic q
 Abort the current command, and return to the command input mode.
@@ -163,7 +163,7 @@ beginning of line
 end of line
 .It Ic ^w
 erase word back
-.It Ic ^h | <del>
+.It Ic ^h | Aq Ic del
 erase previous character
 .It Ic ^d
 erase next character
@@ -192,7 +192,7 @@ redraw line
 .\" .El
 .Sh COMMANDS
 The following commands may be typed at the
-.Ql ddb>
+.Ql ddb\*(Gt
 prompt.
 Some commands consist of more than one word, and if only the first word
 or words are entered, the possible alternatives to complete the command
@@ -204,7 +204,7 @@ List the available commands.
 .\" --------------------
 .It Xo
 .Oo Ic e Oc Ns
-.Ic x Ns Oo Ic amine Oc
+.Ic x Ns Op Ic amine
 .Op Cm /bhlaAxzodurcsmiI
 .Op Ar addr Ns
 .Op Ic \&, Ns Ar count
@@ -323,7 +323,7 @@ ecx = yyyyyy
 .\" .Ar expr Op expr ...
 .\" .Xc
 .It Xo
-.Ic w Ns Oo Ic rite Oc
+.Ic w Ns Op Ic rite
 .Op Cm /bhl
 .Op Ar addr
 .Ar expr Op Ar expr ...
@@ -426,7 +426,7 @@ behavior.
 .\" .Op Ar addr | Ic # Ns Ar number
 .\" .Xc
 .It Xo
-.Ic d Ns Oo Ic elete Oc
+.Ic d Ns Op Ic elete
 .Op Ar addr | Ic # Ns Ar number
 .Xc
 Delete the break point set with the
@@ -437,7 +437,7 @@ command.
 .\" .Op Ic \&, Ns Ar count
 .\" .Xc
 .It Xo
-.Ic s Ns Oo Ic tep Oc
+.Ic s Ns Op Ic tep
 .Op Cm /p
 .Op Ic \&, Ns Ar count
 .Xc
@@ -469,7 +469,7 @@ The number of arguments is currently limited to 10.
 .\" --------------------
 .\" .It Ic c Ns Op Cm /c
 .It Xo
-.Ic c Ns Oo Ic ontinue Oc
+.Ic c Ns Op Ic ontinue
 .Op Cm /c
 .Xc
 Continue execution until a breakpoint or watchpoint.
@@ -533,10 +533,7 @@ Hint: the
 .Xr nm 1
 utility might help.
 .\" --------------------
-.It Xo
-.Ic until
-.Op Cm /p
-.Xc
+.It Ic until Op Cm /p
 Stop at the next
 .Qq call
 or
@@ -629,10 +626,7 @@ command.
 .It Ic show extents
 Prints a detailed list of all extents.
 .\" --------------------
-.It Xo
-.Ic show malloc
-.Op Ar addr
-.Xc
+.It Ic show malloc Op Ar addr
 Prints malloc debugging information if available.
 If an optional address is specified, only information about that address
 is printed.
@@ -676,6 +670,9 @@ If the
 .Cm /f
 modifier is specified the complete page is printed.
 .\" --------------------
+.It Ic show panic
+Prints the panic string.
+.\" --------------------
 .It Xo
 .Ic show pool
 .Op Cm /clp
@@ -695,10 +692,7 @@ Print the log entries for this pool.
 Print the pagelist for this pool.
 .El
 .\" --------------------
-.It Xo
-.Ic show proc
-.Op Ar addr
-.Xc
+.It Ic show proc Op Ar addr
 Prints the
 .Li struct proc
 at
@@ -707,10 +701,7 @@ If an optional address is not specified
 .Li curproc
 is assumed.
 .\" --------------------
-.It Xo
-.Ic show registers
-.Op Cm /u
-.Xc
+.It Ic show registers Op Cm /u
 Display the register set.
 If the
 .Cm /u
@@ -729,10 +720,7 @@ Displays all watchpoints set with the
 .Ic watch
 command.
 .\" --------------------
-.It Xo
-.Ic show all procs
-.Op Cm /anw
-.Xc
+.It Ic show all procs Op Cm /anw
 Display information on all processes.
 .Pp
 .Bl -tag -width foo -compact
@@ -765,10 +753,7 @@ A synonym for the
 .Ic show all callout
 command.
 .\" --------------------
-.It Xo
-.Ic ps
-.Op Cm /anw
-.Xc
+.It Ic ps Op Cm /anw
 A synonym for
 .Ic show all procs .
 .\" --------------------
@@ -838,7 +823,7 @@ if supported by an object format dependent routine:
 .It
 .Sm off
 .Oo Ar filename Li \&: Oc Ar func
-.Oo \&: Ar linenumber Oc
+.Op \&: Ar linenumber
 .It
 .Op Ar filename \&:
 .Ar variable
@@ -848,7 +833,7 @@ if supported by an object format dependent routine:
 .Sm on
 .El
 The symbol may be prefixed with
-.Sq Ar symboltablename Ns \&::
+.Sq Ar symboltablename Ns ::
 (e.g.,
 .Ql emulator::mach_msg_trap )
 to specify other than kernel symbols.
@@ -868,7 +853,7 @@ the current address.
 .It Li +
 .Va next :
 the next address.
-.It Li \..
+.It Li ..
 The address of the start of the last line examined.
 Unlike
 .Va dot

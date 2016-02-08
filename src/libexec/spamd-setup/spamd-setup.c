@@ -1,4 +1,4 @@
-/*	$OpenBSD: spamd-setup.c,v 1.19 2004/06/29 11:19:07 mickey Exp $ */
+/*	$OpenBSD: spamd-setup.c,v 1.21 2005/03/02 16:45:30 dhartmei Exp $ */
 
 /*
  * Copyright (c) 2003 Bob Beck.  All rights reserved.
@@ -74,7 +74,7 @@ u_int32_t	ptoa(char *cp);
 int		parse_netblock(char *buf, struct bl *start, struct bl *end,
 		    int white);
 int		open_child(char *file, char **argv);
-int		fetch(char *url);
+int		fileget(char *url);
 int		open_file(char *method, char *file);
 char		*fix_quoted_colons(char *buf);
 void		do_message(FILE *sdc, char *msg);
@@ -178,16 +178,6 @@ atop(u_int32_t addr)
 	return(inet_ntoa(in));
 }
 
-u_int32_t
-ptoa(char *cp)
-{
-	struct in_addr in;
-
-	memset(&in, 0, sizeof(in));
-	(void) inet_aton(cp, &in);
-	return ntohl(in.s_addr);
-}
-
 int
 parse_netblock(char *buf, struct bl *start, struct bl *end, int white)
 {
@@ -258,12 +248,11 @@ parse_netblock(char *buf, struct bl *start, struct bl *end, int white)
 int
 open_child(char *file, char **argv)
 {
-	pid_t pid;
 	int pdes[2];
 
 	if (pipe(pdes) != 0)
 		return(-1);
-	switch (pid = fork()) {
+	switch (fork()) {
 	case -1:
 		close(pdes[0]);
 		close(pdes[1]);
@@ -285,9 +274,16 @@ open_child(char *file, char **argv)
 }
 
 int
-fetch(char *url)
+fileget(char *url)
 {
-	char *argv[6]= {"ftp", "-V", "-o", "-", url, NULL};
+	char *argv[6];
+
+	argv[0] = "ftp";
+	argv[1] = "-V";
+	argv[2] = "-o";
+	argv[3] = "-";
+	argv[4] = url;
+	argv[5] = NULL;
 
 	if (debug)
 		fprintf(stderr, "Getting %s\n", url);
@@ -309,7 +305,7 @@ open_file(char *method, char *file)
 		asprintf(&url, "%s://%s", method, file);
 		if (url == NULL)
 			return(-1);
-		i = fetch(url);
+		i = fileget(url);
 		free(url);
 		return(i);
 	} else if (strcmp(method, "exec") == 0) {
@@ -477,7 +473,7 @@ add_blacklist(struct bl *bl, int *blc, int *bls, gzFile gzf, int white)
 		if (bu == bs) {
 			char *tmp;
 
-			tmp = realloc(buf, bs + 8192);
+			tmp = realloc(buf, bs + 8192 + 1);
 			if (tmp == NULL) {
 				free(buf);
 				buf = NULL;
@@ -500,7 +496,7 @@ add_blacklist(struct bl *bl, int *blc, int *bls, gzFile gzf, int white)
 	}
  parse:
 	start = 0;
-	for (i = 0; i < bu; i++) {
+	for (i = 0; i <= bu; i++) {
 		if (*blc == *bls) {
 			struct bl *tmp;
 
@@ -513,7 +509,7 @@ add_blacklist(struct bl *bl, int *blc, int *bls, gzFile gzf, int white)
 			}
 			bl = tmp;
 		}
-		if (buf[i] == '\n') {
+		if (i == bu || buf[i] == '\n') {
 			buf[i] = '\0';
 			if (parse_netblock(buf + start,
 			    bl + *blc, bl + *blc + 1, white))
@@ -639,12 +635,11 @@ configure_pf(struct cidr **blacklists)
 	    "-f" "-", NULL};
 	static FILE *pf = NULL;
 	int pdes[2];
-	pid_t pid;
 
 	if (pf == NULL) {
 		if (pipe(pdes) != 0)
 			return(-1);
-		switch (pid = fork()) {
+		switch (fork()) {
 		case -1:
 			close(pdes[0]);
 			close(pdes[1]);

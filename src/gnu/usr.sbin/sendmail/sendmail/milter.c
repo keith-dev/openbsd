@@ -10,7 +10,7 @@
 
 #include <sendmail.h>
 
-SM_RCSID("@(#)$Sendmail: milter.c,v 8.223 2004/06/11 05:04:04 ca Exp $")
+SM_RCSID("@(#)$Sendmail: milter.c,v 8.228 2004/11/09 18:54:55 ca Exp $")
 
 #if MILTER
 # include <libmilter/mfapi.h>
@@ -29,7 +29,7 @@ SM_RCSID("@(#)$Sendmail: milter.c,v 8.223 2004/06/11 05:04:04 ca Exp $")
 
 # include <sm/fdset.h>
 
-static void	milter_connect_timeout __P((void));
+static void	milter_connect_timeout __P((int));
 static void	milter_error __P((struct milter *, ENVELOPE *));
 static int	milter_open __P((struct milter *, bool, ENVELOPE *));
 static void	milter_parse_timeouts __P((char *, struct milter *));
@@ -40,6 +40,7 @@ static char *MilterEnvFromMacros[MAXFILTERMACROS + 1];
 static char *MilterEnvRcptMacros[MAXFILTERMACROS + 1];
 static char *MilterDataMacros[MAXFILTERMACROS + 1];
 static char *MilterEOMMacros[MAXFILTERMACROS + 1];
+static size_t MilterMaxDataSize = MILTER_MAX_DATA_SIZE;
 
 # define MILTER_CHECK_DONE_MSG() \
 	if (*state == SMFIR_REPLYCODE || \
@@ -74,6 +75,8 @@ static char *MilterEOMMacros[MAXFILTERMACROS + 1];
 	} \
 	else if (bitnset(SMF_TEMPFAIL, m->mf_flags)) \
 		*state = SMFIR_TEMPFAIL; \
+	else if (bitnset(SMF_TEMPDROP, m->mf_flags)) \
+		*state = SMFIR_SHUTDOWN; \
 	else if (bitnset(SMF_REJECT, m->mf_flags)) \
 		*state = SMFIR_REJECT; \
 	else \
@@ -472,7 +475,7 @@ milter_write(m, cmd, buf, len, to, e)
 	**  The first is the size/command and the second is the command data.
 	*/
 
-	if (len < 0 || len > MILTER_CHUNK_SIZE)
+	if (len < 0 || len > MilterMaxDataSize)
 	{
 		if (tTd(64, 5))
 			sm_dprintf("milter_write(%s): length %ld out of range\n",
@@ -1126,7 +1129,8 @@ milter_open(m, parseonly, e)
 }
 
 static void
-milter_connect_timeout()
+milter_connect_timeout(ignore)
+	int ignore;
 {
 	/*
 	**  NOTE: THIS CAN BE CALLED FROM A SIGNAL HANDLER.  DO NOT ADD
@@ -1427,6 +1431,10 @@ static struct milteropt
 	{ "macros.eom",			MO_MACROS_EOM			},
 # define MO_LOGLEVEL			0x07
 	{ "loglevel",			MO_LOGLEVEL			},
+# if _FFR_MAXDATASIZE
+#  define MO_MAXDATASIZE			0x08
+	{ "maxdatasize",		MO_MAXDATASIZE			},
+# endif /* _FFR_MAXDATASIZE */
 	{ NULL,				0				},
 };
 
@@ -1481,6 +1489,12 @@ milter_set_option(name, val, sticky)
 	  case MO_LOGLEVEL:
 		MilterLogLevel = atoi(val);
 		break;
+
+#if _FFR_MAXDATASIZE
+	  case MO_MAXDATASIZE:
+		MilterMaxDataSize = (size_t)atol(val);
+		break;
+#endif /* _FFR_MAXDATASIZE */
 
 	  case MO_MACROS_CONNECT:
 		if (macros == NULL)
@@ -1575,9 +1589,8 @@ milter_reopen_df(e)
 	**  read only again).
 	**
 	**  In SuperSafe != SAFE_REALLY mode, e->e_dfp still points at the
-	**  buffered file I/O descriptor, still open for writing
-	**  so there isn't as much work to do, just truncate it
-	**  and go.
+	**  buffered file I/O descriptor, still open for writing so there
+	**  isn't any work to do here (except checking for consistency).
 	*/
 
 	if (SuperSafe == SAFE_REALLY)
@@ -1631,7 +1644,7 @@ milter_reset_df(e)
 		MILTER_DF_ERROR("milter_reset_df: error writing/flushing %s: %s");
 		return -1;
 	}
-	else if (SuperSafe != SAFE_REALLY && SuperSafe != SAFE_REALLY_POSTMILTER)
+	else if (SuperSafe != SAFE_REALLY)
 	{
 		/* skip next few clauses */
 		/* EMPTY */
@@ -2330,6 +2343,7 @@ milter_per_connection_check(e)
 **
 **	Parameters:
 **		m -- the broken filter.
+**		e -- current envelope.
 **
 **	Returns:
 **		none
@@ -2341,10 +2355,8 @@ milter_error(m, e)
 	ENVELOPE *e;
 {
 	/*
-	**  We could send a quit here but
-	**  we may have gotten here due to
-	**  an I/O error so we don't want
-	**  to try to make things worse.
+	**  We could send a quit here but we may have gotten here due to
+	**  an I/O error so we don't want to try to make things worse.
 	*/
 
 	if (m->mf_sock >= 0)
@@ -2822,13 +2834,21 @@ milter_changeheader(response, rlen, e)
 		if (*val == '\0')
 		{
 			if (tTd(64, 10))
-				sm_dprintf("Delete (noop) %s:\n", field);
+				sm_dprintf("Delete (noop) %s\n", field);
+			if (MilterLogLevel > 8)
+				sm_syslog(LOG_INFO, e->e_id,
+					"Milter delete (noop): header: %s"
+					, field);
 		}
 		else
 		{
 			/* treat modify value with no existing header as add */
 			if (tTd(64, 10))
 				sm_dprintf("Add %s: %s\n", field, val);
+			if (MilterLogLevel > 8)
+				sm_syslog(LOG_INFO, e->e_id,
+					"Milter change (add): header: %s: %s"
+					, field, val);
 			addheader(newstr(field), val, H_USER, e);
 		}
 		return;

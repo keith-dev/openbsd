@@ -1,4 +1,4 @@
-/*	$OpenBSD: dhclient.c,v 1.58 2004/08/30 07:43:32 otto Exp $	*/
+/*	$OpenBSD: dhclient.c,v 1.63 2005/02/06 17:10:13 krw Exp $	*/
 
 /*
  * Copyright 2004 Henning Brauer <henning@openbsd.org>
@@ -164,7 +164,9 @@ get_ifa(char *cp, int n)
 
 	return (NULL);
 }
+struct iaddr defaddr = { 4 };
 
+/* ARGSUSED */
 void
 routehandler(struct protocol *p)
 {
@@ -201,6 +203,8 @@ routehandler(struct protocol *p)
 		if ((a.len = sizeof(struct in_addr)) > sizeof(a.iabuf))
 			error("king bula sez: len mismatch");
 		memcpy(a.iabuf, &((struct sockaddr_in *)sa)->sin_addr, a.len);
+		if (addr_eq(a, defaddr))
+			break;
 
 		for (l = ifi->client->active; l != NULL; l = l->next)
 			if (addr_eq(a, l->address))
@@ -210,14 +214,13 @@ routehandler(struct protocol *p)
 			break;
 
 		goto die;
-		break;
 	case RTM_DELADDR:
 		ifam = (struct ifa_msghdr *)rtm;
 		if (ifam->ifam_index != ifi->index)
 			break;
 		if (findproto((char *)(ifam + 1), ifam->ifam_addrs) != AF_INET)
 			break;
-		if (scripttime == 0 || t < scripttime + 3)
+		if (scripttime == 0 || t < scripttime + 10)
 			break;
 		goto die;
 	case RTM_IFINFO:
@@ -309,7 +312,7 @@ main(int argc, char *argv[])
 	read_client_conf();
 
 	if (!interface_link_status(ifi->name)) {
-		fprintf(stderr, "%s: no link ", ifi->name);
+		fprintf(stderr, "%s: no link ...", ifi->name);
 		fflush(stderr);
 		sleep(1);
 		while (!interface_link_status(ifi->name)) {
@@ -321,7 +324,7 @@ main(int argc, char *argv[])
 			}
 			sleep(1);
 		}
-		fprintf(stderr, "got link\n");
+		fprintf(stderr, " got link\n");
 	}
 
 	if ((nullfd = open(_PATH_DEVNULL, O_RDWR, 0)) == -1)
@@ -1654,7 +1657,7 @@ rewrite_client_leases(void)
 		write_client_lease(ifi, ifi->client->active, 1);
 
 	fflush(leaseFile);
-	ftruncate(fileno(leaseFile), ftell(leaseFile));
+	ftruncate(fileno(leaseFile), ftello(leaseFile));
 	fsync(fileno(leaseFile));
 }
 
@@ -1767,7 +1770,7 @@ priv_script_init(char *reason, char *medium)
 		if (ip->client->scriptEnv == NULL)
 			error("script_init: no memory for environment");
 
-		ip->client->scriptEnv[0]=strdup(CLIENT_PATH);
+		ip->client->scriptEnv[0] = strdup(CLIENT_PATH);
 		if (ip->client->scriptEnv[0] == NULL)
 			error("script_init: no memory for environment");
 
@@ -2030,7 +2033,6 @@ priv_script_go(void)
 	} else {
 		execve(scriptName, argv, envp);
 		error("execve (%s, ...): %m", scriptName);
-		exit(0);
 	}
 
 	if (ip)
@@ -2305,7 +2307,7 @@ option_as_string(unsigned int code, unsigned char *data, int len)
 	unsigned char *dp = data;
 
 	if (code > 255)
-		error("option_as_string: bad code %d\n", code);
+		error("option_as_string: bad code %d", code);
 
 	for (; dp < data + len; dp++) {
 		if (!isascii(*dp) || !isprint(*dp)) {

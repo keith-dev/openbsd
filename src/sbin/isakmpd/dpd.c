@@ -1,4 +1,4 @@
-/*	$OpenBSD: dpd.c,v 1.4 2004/08/10 15:59:10 ho Exp $	*/
+/*	$OpenBSD: dpd.c,v 1.9 2005/02/24 16:16:46 markus Exp $	*/
 
 /*
  * Copyright (c) 2004 Håkan Olsson.  All rights reserved.
@@ -26,6 +26,7 @@
 
 #include <sys/types.h>
 #include <stdlib.h>
+#include <string.h>
 
 #include "sysdep.h"
 
@@ -109,8 +110,8 @@ dpd_check_vendor_payload(struct message *msg, struct payload *p)
 	vlen = GET_ISAKMP_GEN_LENGTH(pbuf) - ISAKMP_GEN_SZ;
 	if (vlen != sizeof dpd_vendor_id) {
 		LOG_DBG((LOG_EXCHANGE, 90,
-		    "dpd_check_vendor_payload: bad size %d != %d", vlen,
-		    sizeof dpd_vendor_id));
+		    "dpd_check_vendor_payload: bad size %lu != %lu",
+		    (unsigned long)vlen, (unsigned long)sizeof dpd_vendor_id));
 		return;
 	}
 
@@ -154,12 +155,17 @@ dpd_handle_notify(struct message *msg, struct payload *p)
 	switch (notify) {
 	case ISAKMP_NOTIFY_STATUS_DPD_R_U_THERE:
 		/* The other peer wants to know we're alive.  */
-		if (p_seq <= isakmp_sa->dpd_rseq) {
+		if (p_seq < isakmp_sa->dpd_rseq ||
+		    (p_seq == isakmp_sa->dpd_rseq &&
+		    ++isakmp_sa->dpd_rdupcount >= DPD_RETRANS_MAX)) {
 			log_print("dpd_handle_notify: bad R_U_THERE seqno "
 			    "%u <= %u", p_seq, isakmp_sa->dpd_rseq);
 			return;
 		}
-		isakmp_sa->dpd_rseq = p_seq;
+		if (isakmp_sa->dpd_rseq != p_seq) {
+			isakmp_sa->dpd_rdupcount = 0;
+			isakmp_sa->dpd_rseq = p_seq;
+		}
 		message_send_dpd_notify(isakmp_sa,
 		    ISAKMP_NOTIFY_STATUS_DPD_R_U_THERE_ACK, p_seq);
 		break;
@@ -174,6 +180,7 @@ dpd_handle_notify(struct message *msg, struct payload *p)
 		}
 		break;
 	default:
+		break;
 	}
 
 	/* Mark handled.  */
@@ -213,6 +220,7 @@ dpd_timer_reset(struct sa *sa, u_int32_t time_passed, enum dpd_tstate mode)
 	gettimeofday(&tv, 0);
 	switch (mode) {
 	case DPD_TIMER_NORMAL:
+		sa->dpd_failcount = 0;
 		tv.tv_sec += dpd_timer_interval(time_passed);
 		sa->dpd_event = timer_add_event("dpd_event", dpd_event, sa,
 		    &tv);
@@ -223,6 +231,7 @@ dpd_timer_reset(struct sa *sa, u_int32_t time_passed, enum dpd_tstate mode)
 		    dpd_check_event, sa, &tv);
 		break;
 	default:
+		break;
 	}
 	if (!sa->dpd_event) 
 		log_print("dpd_timer_reset: timer_add_event failed");
@@ -234,7 +243,9 @@ dpd_find_sa(struct sa *sa, void *v_sa)
 {
 	struct sa	*isakmp_sa = v_sa;
 
-	return (sa->phase == 2 && 
+	if (!isakmp_sa->id_i || !isakmp_sa->id_r)
+		return (0);
+	return (sa->phase == 2 && (sa->flags & SA_FLAG_READY) &&
 	    memcmp(sa->id_i, isakmp_sa->id_i, sa->id_i_len) == 0 &&
 	    memcmp(sa->id_r, isakmp_sa->id_r, sa->id_r_len) == 0);
 }

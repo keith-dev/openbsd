@@ -1,14 +1,16 @@
-.\"	$OpenBSD: vi.1,v 1.28 2004/04/09 12:12:44 jmc Exp $
+.\"	$OpenBSD: vi.1,v 1.35 2005/03/10 18:03:45 jmc Exp $
 .\"
 .\" Copyright (c) 1994
 .\"     The Regents of the University of California.  All rights reserved.
 .\" Copyright (c) 1994, 1995, 1996
 .\"	Keith Bostic.  All rights reserved.
 .\"
-.\" This document may not be republished without written permission from
-.\" Keith Bostic.
-.\"
-.\" See the LICENSE file for redistribution information.
+.\" The vi program is freely redistributable.
+.\" You are welcome to copy, modify and share it with others
+.\" under the conditions listed in the LICENSE file.
+.\" If any company (not individual!) finds vi sufficiently useful
+.\" that you would have purchased it, or if any company wishes to
+.\" redistribute it, contributions to the authors would be appreciated.
 .\"
 .\"     @(#)vi.1	8.51 (Berkeley) 10/10/96
 .\"
@@ -79,11 +81,11 @@ Anyone else should almost certainly read a good tutorial on the
 editor before this manual page.
 See the
 .Sx SEE ALSO
-section below, for a list of additional materials.
+section below for a list of additional materials.
 If you're in an unfamiliar environment,
 and you absolutely have to get work done immediately,
 read the section after the options description, entitled
-.Dq Fast Startup .
+.Sx FAST STARTUP .
 It's probably enough to get you going.
 .Pp
 The following options are available:
@@ -145,11 +147,11 @@ Start editing at the specified
 .Ar tag
 (see
 .Xr ctags 1 ) .
-.It Fl w Ar size
-Set the initial window size to the specified number of lines.
 .It Fl v
 Start editing in vi mode, as if the command name was
 .Nm vi .
+.It Fl w Ar size
+Set the initial window size to the specified number of lines.
 .El
 .Pp
 Command input for
@@ -201,30 +203,31 @@ There is only one key that takes you out of input mode,
 and that is the
 .Aq escape
 key.
-(Key names are written using less-than and greater-than signs, e.g.\&
+.Pp
+Key names are written using less-than and greater-than signs, e.g.\&
 .Aq escape
 means the
 .Dq escape
 key, usually labeled
 .Dq Esc
 on your
-terminal's keyboard.)
+terminal's keyboard.
 If you're ever confused as to which mode you're in,
 keep entering the
 .Aq escape
 key until
 .Nm vi
 beeps at you.
-(Generally,
+Generally,
 .Nm vi
 will beep at you if you try and do something that's not allowed.
-It will also display error messages.)
+It will also display error messages.
 .Pp
-To start editing a file, enter the command
+To start editing a file, enter the following command:
 .Pp
-.Dl vi file_name
+.Dl $ vi file
 .Pp
-The command you should enter as soon as you start editing is
+The command you should enter as soon as you start editing is:
 .Pp
 .Dl :set verbose showmode
 .Pp
@@ -1831,9 +1834,13 @@ Announce error messages with a bell.
 .It Cm exrc , ex Bq off
 Read the startup files in the local directory.
 .It Cm extended Bq off
-Regular expressions are extended (i.e.\&
-.Xr egrep 1
-style) expressions.
+Use extended regular expressions
+.Pq EREs
+rather than basic regular expressions
+.Pq BREs .
+See
+.Xr re_format 7
+for more information on regular expressions.
 .It Cm filec Bq no default
 Set the character to perform file path completion on the colon command line.
 .It Cm flash Bq on
@@ -2206,7 +2213,7 @@ Second choice for local directory startup file.
 .El
 .Sh SEE ALSO
 .Xr ctags 1 ,
-.Xr egrep 1
+.Xr re_format 7
 .Pp
 The
 .Qq Vi Quick Reference
@@ -2270,10 +2277,3 @@ replacements for the
 .Nm ex Ns / Ns Nm vi
 editor first appeared in
 .Bx 4.4 .
-.Sh LICENSE
-The vi program is freely redistributable.
-You are welcome to copy, modify and share it with others
-under the conditions listed in the LICENSE file.
-If any company (not individual!) finds vi sufficiently useful
-that you would have purchased it, or if any company wishes to redistribute it,
-contributions to the authors would be appreciated.

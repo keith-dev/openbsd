@@ -1,4 +1,4 @@
-/*	$OpenBSD: server.c,v 1.13 2004/09/07 22:43:07 henning Exp $ */
+/*	$OpenBSD: server.c,v 1.21 2005/01/28 12:01:32 dtucker Exp $ */
 
 /*
  * Copyright (c) 2003, 2004 Henning Brauer <henning@openbsd.org>
@@ -32,15 +32,16 @@ int
 setup_listeners(struct servent *se, struct ntpd_conf *conf, u_int *cnt)
 {
 	struct listen_addr	*la;
-	struct ifaddrs		*ifap;
+	struct ifaddrs		*ifa, *ifap;
 	struct sockaddr		*sa;
 	u_int			 new_cnt = 0;
+	int			 tos = IPTOS_LOWDELAY;
 
 	if (conf->listen_all) {
-		if (getifaddrs(&ifap) == -1)
+		if (getifaddrs(&ifa) == -1)
 			fatal("getifaddrs");
 
-		for (; ifap != NULL; ifap = ifap->ifa_next) {
+		for (ifap = ifa; ifap != NULL; ifap = ifap->ifa_next) {
 			sa = ifap->ifa_addr;
 
 			if (sa->sa_family != AF_INET &&
@@ -55,7 +56,7 @@ setup_listeners(struct servent *se, struct ntpd_conf *conf, u_int *cnt)
 			TAILQ_INSERT_TAIL(&conf->listen_addrs, la, entry);
 		}
 
-		freeifaddrs(ifap);
+		freeifaddrs(ifa);
 	}
 
 	TAILQ_FOREACH(la, &conf->listen_addrs, entry) {
@@ -82,6 +83,10 @@ setup_listeners(struct servent *se, struct ntpd_conf *conf, u_int *cnt)
 		if ((la->fd = socket(la->sa.ss_family, SOCK_DGRAM, 0)) == -1)
 			fatal("socket");
 
+		if (la->sa.ss_family == AF_INET && setsockopt(la->fd,
+		    IPPROTO_IP, IP_TOS, &tos, sizeof(tos)) == -1)
+			log_warn("setsockopt IPTOS_LOWDELAY");
+
 		if (bind(la->fd, (struct sockaddr *)&la->sa,
 		    SA_LEN((struct sockaddr *)&la->sa)) == -1)
 			fatal("bind");
@@ -107,7 +112,7 @@ server_dispatch(int fd, struct ntpd_conf *conf)
 	if ((size = recvfrom(fd, &buf, sizeof(buf), 0,
 	    (struct sockaddr *)&fsa, &fsa_len)) == -1) {
 		if (errno == EHOSTUNREACH || errno == EHOSTDOWN ||
-		    errno == ENETDOWN) {
+		    errno == ENETUNREACH || errno == ENETDOWN) {
 			log_warn("recvfrom %s",
 			    log_sockaddr((struct sockaddr *)&fsa));
 			return (0);
@@ -129,18 +134,19 @@ server_dispatch(int fd, struct ntpd_conf *conf)
 	else
 		reply.status |= MODE_SYM_PAS;
 
-	reply.stratum =	2;
+	reply.stratum =	conf->status.stratum;
 	reply.ppoll = query.ppoll;
 	reply.precision = conf->status.precision;
 	reply.rectime = d_to_lfp(rectime);
 	reply.reftime = d_to_lfp(conf->status.reftime);
 	reply.xmttime = d_to_lfp(gettime());
 	reply.orgtime = query.xmttime;
+	reply.rootdelay = d_to_sfp(conf->status.rootdelay);
 
 	if (version > 3)
-		reply.refid = reply.xmttime.fraction;
+		reply.refid = reply.xmttime.fractionl;
 	else
-		reply.refid = 0;	/* XXX */
+		reply.refid = conf->status.refid;
 
 	ntp_sendmsg(fd, (struct sockaddr *)&fsa, &reply, size, 0);
 	return (0);

@@ -1,4 +1,4 @@
-.\" $OpenBSD: neo.4,v 1.8 2003/06/06 10:29:41 jmc Exp $
+.\" $OpenBSD: neo.4,v 1.11 2004/11/22 22:49:22 jmc Exp $
 .\"
 .\" Copyright (c) 1998 Constantine Paul Sapuntzakis
 .\" All rights reserved
@@ -36,13 +36,20 @@
 .Nm neo
 .Nd NeoMagic 256AV/ZX audio driver
 .Sh SYNOPSIS
-.Cd "neo* at pci? dev ? function ?"
+.Cd "neo* at pci?"
 .Cd "audio* at neo?"
 .Sh DESCRIPTION
 The
 .Nm
 driver provides support for NeoMagic MagicMedia 256AV and 256ZX
 audio chips found in many laptops, and perhaps on some PCI cards.
+.Sh FILES
+The driver needs a firmware file,
+which is loaded on demand when the device is attached:
+.Pp
+.Bl -tag -width Ds -offset indent -compact
+.It Pa /etc/firmware/neo-coefficients
+.El
 .Sh SEE ALSO
 .Xr ac97 4 ,
 .Xr audio 4 ,

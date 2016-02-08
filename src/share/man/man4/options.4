@@ -1,4 +1,4 @@
-.\"	$OpenBSD: options.4,v 1.151 2004/09/02 08:23:15 brad Exp $
+.\"	$OpenBSD: options.4,v 1.155 2004/12/24 17:26:48 miod Exp $
 .\"	$NetBSD: options.4,v 1.21 1997/06/25 03:13:00 thorpej Exp $
 .\"
 .\" Copyright (c) 1998 Theo de Raadt
@@ -292,9 +292,10 @@ Adds code to the kernel that does internal consistency checks.
 This code will cause the kernel to panic if corruption of internal data
 structures is detected.
 .It Cd option SMALL_KERNEL
-Removes some optimizations from the kernel to reduce the size of the
-resulting kernel binary.
-This option can decrease system performance.
+Removes some features and some optimizations from the kernel to reduce the
+size of the resulting kernel binary.
+This option is used on some installation media and should not be used
+for general purpose kernels.
 .It Cd option NO_PROPOLICE
 Do not compile the kernel with the ProPolice stack protection.
 See
@@ -589,7 +590,9 @@ Makes the boot process more verbose for EISA peripherals.
 .It Cd option PCMCIAVERBOSE
 Makes the boot process more verbose for PCMCIA peripherals.
 .It Cd option MACOBIOVERBOSE
-Makes the boot process more verbose for Mac OBIO peripherals.
+Makes the boot process more verbose for OBIO peripherals on the
+.Va macppc
+architecture.
 .It Cd option APERTURE
 Provide in-kernel support for controlling VGA framebuffer mapping
 and PCI configuration registers by user-processes
@@ -716,6 +719,8 @@ server on some architectures.
 See
 .Xr vga 4
 for details.
+.It Cd option MULTIPROCESSOR
+On those architectures that have it, this enables multiprocessor support.
 .El
 .Ss Networking Options
 .Bl -ohang
@@ -759,8 +764,6 @@ Include support for the Xerox XNS protocol stack.
 See
 .Xr ns 4
 for details.
-.It Cd option EON
-Include support for OSI tunneling over IP.
 .It Cd option CCITT,LLC,HDLC
 Include support for the X.25 protocol stack.
 The state of this code is currently unknown.

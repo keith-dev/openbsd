@@ -1,4 +1,4 @@
-/*	$OpenBSD: binary.c,v 1.12 2004/05/06 20:18:51 otto Exp $	*/
+/*	$OpenBSD: binary.c,v 1.14 2005/02/07 08:47:18 otto Exp $	*/
 
 /*-
  * Copyright (c) 1999 James Howard and Dag-Erling Coïdan Smørgrav
@@ -27,6 +27,7 @@
  */
 
 #include <ctype.h>
+#include <err.h>
 #include <stdio.h>
 #include <zlib.h>
 
@@ -41,7 +42,7 @@ bin_file(FILE *f)
 	int		i, m;
 	int		ret = 0;
 
-	if (isatty(fileno(f)) || fseek(f, 0L, SEEK_SET) == -1)
+	if (fseek(f, 0L, SEEK_SET) == -1)
 		return 0;
 
 	if ((m = (int)fread(buf, 1, BUFSIZ, f)) == 0)
@@ -65,7 +66,7 @@ gzbin_file(gzFile *f)
 	int		i, m;
 	int		ret = 0;
 
-	if (gzseek(f, 0L, SEEK_SET) == -1)
+	if (gzseek(f, (z_off_t)0, SEEK_SET) == -1)
 		return 0;
 
 	if ((m = gzread(f, buf, BUFSIZ)) == 0)
@@ -77,7 +78,8 @@ gzbin_file(gzFile *f)
 			break;
 		}
 
-	gzrewind(f);
+	if (gzrewind(f) != 0)
+		err(1, "gzbin_file");
 	return ret;
 }
 #endif

@@ -66,16 +66,11 @@
 
 #include <stdio.h>
 #include <ctype.h>
-#ifndef NETWARE
 #include <sys/types.h>
-#endif
 #include <stdarg.h>
 #include <string.h>
 #include <stdlib.h>
 #include <math.h>
-#ifdef WIN32
-#include <float.h>
-#endif
 
 typedef enum {
     NO = 0, YES = 1
@@ -97,12 +92,7 @@ typedef enum {
 typedef WIDE_INT wide_int;
 typedef unsigned WIDE_INT u_wide_int;
 typedef WIDEST_INT widest_int;
-#ifdef __TANDEM
-/* Although Tandem supports "long long" there is no unsigned variant. */
-typedef unsigned long       u_widest_int;
-#else
 typedef unsigned WIDEST_INT u_widest_int;
-#endif
 typedef int bool_int;
 
 #define S_NULL			"(null)"
@@ -936,20 +926,16 @@ API_EXPORT(int) ap_vformatter(int (*flush_func)(ap_vformatter_buff *),
 		/*
 		 * * We use &num_buf[ 1 ], so that we have room for the sign
 		 */
-#ifdef HAVE_ISNAN
 		if (isnan(fp_num)) {
 		    s = "nan";
 		    s_len = 3;
 		}
 		else
-#endif
-#ifdef HAVE_ISINF
 		if (isinf(fp_num)) {
 		    s = "inf";
 		    s_len = 3;
 		}
 		else
-#endif
 		{
 		    s = conv_fp(*fmt, fp_num, alternate_form,
 			    (adjust_precision == NO) ? FLOAT_DIGITS : precision,

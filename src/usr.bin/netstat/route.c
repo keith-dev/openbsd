@@ -1,4 +1,4 @@
-/*	$OpenBSD: route.c,v 1.64 2004/06/06 16:55:31 cedric Exp $	*/
+/*	$OpenBSD: route.c,v 1.66 2004/11/17 01:47:20 itojun Exp $	*/
 /*	$NetBSD: route.c,v 1.15 1996/05/07 02:55:06 thorpej Exp $	*/
 
 /*
@@ -34,7 +34,7 @@
 #if 0
 static char sccsid[] = "from: @(#)route.c	8.3 (Berkeley) 3/9/94";
 #else
-static char *rcsid = "$OpenBSD: route.c,v 1.64 2004/06/06 16:55:31 cedric Exp $";
+static char *rcsid = "$OpenBSD: route.c,v 1.66 2004/11/17 01:47:20 itojun Exp $";
 #endif
 #endif /* not lint */
 
@@ -203,9 +203,6 @@ pr_family(int af)
 		break;
 	case AF_IPX:
 		afname = "IPX";
-		break;
-	case AF_ISO:
-		afname = "ISO";
 		break;
 	case AF_CCITT:
 		afname = "X.25";
@@ -467,7 +464,8 @@ p_sockaddr(struct sockaddr *sa, struct sockaddr *mask, int flags, int width)
 		struct sockaddr_in *sin = (struct sockaddr_in *)sa;
 		struct sockaddr_in *msin = (struct sockaddr_in *)mask;
 
-		cp = (sin->sin_addr.s_addr == 0) ? "default" :
+		cp = (sin->sin_addr.s_addr == 0 && mask &&
+		    msin->sin_addr.s_addr == 0) ? "default" :
 		    (mask == NULL || msin->sin_addr.s_addr == (in_addr_t)-1 ?
 		    routename(sin->sin_addr.s_addr) :
 		    netname(sin->sin_addr.s_addr, msin->sin_addr.s_addr));
@@ -749,11 +747,7 @@ netname6(struct sockaddr_in6 *sa6, struct in6_addr *mask)
 	int masklen, final = 0, illegal = 0;
 	int i;
 	char hbuf[NI_MAXHOST];
-#ifdef NI_WITHSCOPEID
-	int flag = NI_WITHSCOPEID;
-#else
 	int flag = 0;
-#endif
 	int error;
 
 	sin6 = *sa6;
@@ -839,11 +833,8 @@ char *
 routename6(struct sockaddr_in6 *sa6)
 {
 	static char line[NI_MAXHOST];
-#ifdef NI_WITHSCOPEID
-	const int niflag = NI_NUMERICHOST | NI_WITHSCOPEID;
-#else
 	const int niflag = NI_NUMERICHOST;
-#endif
+
 	if (getnameinfo((struct sockaddr *)sa6, sa6->sin6_len,
 	    line, sizeof(line), NULL, 0, niflag) != 0)
 		strlcpy(line, "", sizeof line);

@@ -1,4 +1,4 @@
-/*	$OpenBSD: buffer.c,v 1.34 2004/07/22 01:25:24 vincent Exp $	*/
+/*	$OpenBSD: buffer.c,v 1.36 2005/03/10 16:58:57 deraadt Exp $	*/
 
 /*
  *		Buffer handling.
@@ -102,12 +102,9 @@ poptobuffer(int f, int n)
  */
 /* ARGSUSED */
 int
-killbuffer(int f, int n)
+killbuffer_cmd(int f, int n)
 {
 	BUFFER *bp;
-	BUFFER *bp1;
-	BUFFER *bp2;
-	MGWIN  *wp;
 	char    bufn[NBUFN], *bufp;
 
 	if ((bufp = eread("Kill buffer: (default %s) ", bufn, NBUFN, EFNEW | EFBUF,
@@ -117,6 +114,15 @@ killbuffer(int f, int n)
 		bp = curbp;
 	else if ((bp = bfind(bufn, FALSE)) == NULL)
 		return FALSE;
+	return killbuffer(bp);
+}
+
+int
+killbuffer(BUFFER *bp)
+{
+	BUFFER *bp1;
+	BUFFER *bp2;
+	MGWIN  *wp;
 
 	/*
 	 * Find some other buffer to display. try the alternate buffer,
@@ -377,8 +383,8 @@ int
 anycb(int f)
 {
 	BUFFER *bp;
-	int     s = FALSE, save = FALSE;
-	char    prompt[NFILEN + 11];
+	int s = FALSE, save = FALSE;
+	char prompt[NFILEN + 11];
 
 	for (bp = bheadp; bp != NULL; bp = bp->b_bufp) {
 		if (bp->b_fname != NULL && *(bp->b_fname) != '\0' &&
@@ -569,9 +575,8 @@ bufferinsert(int f, int n)
 {
 	BUFFER *bp;
 	LINE   *clp;
-	int     clo;
-	int     nline;
-	char    bufn[NBUFN], *bufp;
+	int	clo, nline;
+	char	bufn[NBUFN], *bufp;
 
 	/* Get buffer to use from user */
 	if (curbp->b_altb != NULL)

@@ -1,4 +1,4 @@
-/*	$OpenBSD: pwd_gensalt.c,v 1.20 2004/07/15 17:23:44 millert Exp $ */
+/*	$OpenBSD: pwd_gensalt.c,v 1.22 2004/12/20 15:05:59 moritz Exp $ */
 
 /*
  * Copyright 1997 Niels Provos <provos@physnet.uni-hamburg.de>
@@ -51,33 +51,46 @@ int	pwd_gensalt(char *, int, login_cap_t *, char);
 int
 pwd_gensalt(char *salt, int saltlen, login_cap_t *lc, char type)
 {
-	char *next, *now;
+	char *next, *now, *oldnext;
 
 	*salt = '\0';
 
 	switch (type) {
 	case 'y':
-		next = login_getcapstr(lc, "ypcipher", YPCIPHER_DEF,
-		    YPCIPHER_DEF);
+		next = login_getcapstr(lc, "ypcipher", NULL, NULL);
+		if (next == NULL && (next = strdup(YPCIPHER_DEF)) == NULL) {
+			warn(NULL);
+			return 0;
+		}
 		break;
 	case 'l':
 	default:
-		next = login_getcapstr(lc, "localcipher", LOCALCIPHER_DEF,
-		    LOCALCIPHER_DEF);
+		next = login_getcapstr(lc, "localcipher", NULL, NULL);
+		if (next == NULL && (next = strdup(LOCALCIPHER_DEF)) == NULL) {
+			warn(NULL);
+			return 0;
+		}
 		break;
 	}
 
+	oldnext = next;
 	now = strsep(&next, ",");
 	if (!strcmp(now, "old")) {
-		if (saltlen < 3)
+		if (saltlen < 3) {
+			free(oldnext);
 			return 0;
+		}
 		to64(&salt[0], arc4random(), 2);
 		salt[2] = '\0';
 	} else if (!strcmp(now, "newsalt")) {
-		u_int32_t rounds = atol(next);
+		u_int32_t rounds = 7250;
 
-		if (saltlen < 10)
+		if (next)
+			rounds = atol(next);
+		if (saltlen < 10) {
+			free(oldnext);
 			return 0;
+		}
 		/* Check rounds, 24 bit is max */
 		if (rounds < 7250)
 			rounds = 7250;
@@ -88,23 +101,31 @@ pwd_gensalt(char *salt, int saltlen, login_cap_t *lc, char type)
 		to64(&salt[5], arc4random(), 4);
 		salt[9] = '\0';
 	} else if (!strcmp(now, "md5")) {
-		if (saltlen < 13)	/* $1$8salt$\0 */
+		if (saltlen < 13) {	/* $1$8salt$\0 */
+			free(oldnext);
 			return 0;
+		}
 
 		strlcpy(salt, "$1$", saltlen);
 		to64(&salt[3], arc4random(), 4);
 		to64(&salt[7], arc4random(), 4);
 		strlcpy(&salt[11], "$", saltlen - 11);
 	} else if (!strcmp(now, "blowfish")) {
-		int rounds = atoi(next);
+		int rounds = 6;
 
+		if (next)
+			rounds = atoi(next);
 		if (rounds < 4)
 			rounds = 4;
+		if (rounds > 31)
+			rounds = 31;
 		strlcpy(salt, bcrypt_gensalt(rounds), saltlen);
 	} else {
-		strlcpy(salt, ":", saltlen);
 		warnx("Unknown option %s.", now);
+		free(oldnext);
+		return 0;
 	}
+	free(oldnext);
 	return 1;
 }
 

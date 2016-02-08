@@ -1,6 +1,6 @@
 /* Top level of GNU C compiler
    Copyright (C) 1987, 1988, 1989, 1992, 1993, 1994, 1995, 1996, 1997, 1998,
-   1999, 2000, 2001, 2002, 2003 Free Software Foundation, Inc.
+   1999, 2000, 2001, 2002, 2003, 2004 Free Software Foundation, Inc.
 
 This file is part of GCC.
 
@@ -804,7 +804,11 @@ int flag_gnu_linker = 1;
 #endif
 
 /* Nonzero means put zero initialized data in the bss section.  */
+#ifdef OPENBSD_NATIVE
+int flag_zero_initialized_in_bss = 0;
+#else
 int flag_zero_initialized_in_bss = 1;
+#endif
 
 /* Enable SSA.  */
 int flag_ssa = 0;
@@ -916,6 +920,9 @@ int flag_stack_protection = 0;
 int flag_propolice_protection = 0;
 int flag_stack_protection = 0;
 #endif
+
+int flag_trampolines = 0;
+int warn_trampolines = 0;
 
 /* Table of supported debugging formats.  */
 static const struct
@@ -1205,6 +1212,8 @@ static const lang_independent_options f_options[] =
    N_("Enables stack protection") },
   {"stack-protector-all", &flag_stack_protection, 1,
    N_("Enables stack protection of every function") } ,
+  {"trampolines", &flag_trampolines, 1,
+   N_("Allows trampolines") },
 };
 
 /* Table of language-specific options.  */
@@ -1569,7 +1578,9 @@ static const lang_independent_options W_options[] =
   {"strict-aliasing", &warn_strict_aliasing, 1,
    N_ ("Warn about code which might break the strict aliasing rules") },
   {"stack-protector", &warn_stack_protector, 1,
-   N_("Warn when disabling stack protector for some reason")}
+   N_("Warn when disabling stack protector for some reason")},
+  {"trampolines", &warn_trampolines, 1,
+   N_("Warn when trampolines are emitted")},
 };
 
 void
@@ -2607,10 +2618,6 @@ rest_of_compilation (decl)
 
   delete_unreachable_blocks ();
 
-  /* We have to issue these warnings now already, because CFG cleanups
-     further down may destroy the required information.  */
-  check_function_return_warnings ();
-
   /* Turn NOTE_INSN_PREDICTIONs into branch predictions.  */
   if (flag_guess_branch_prob)
     {
@@ -2644,6 +2651,15 @@ rest_of_compilation (decl)
 	  delete_insn (insn);
     }
   close_dump_file (DFI_sibling, print_rtl, get_insns ());
+
+  /* We have to issue these warnings now already, because CFG cleanups
+     further down may destroy the required information.  However, this
+     must be done after the sibcall optimization pass because the barrier
+     emitted for noreturn calls that are candidate for the optimization
+     is folded into the CALL_PLACEHOLDER until after this pass, so the
+     CFG is inaccurate.  */
+  check_function_return_warnings ();
+
   timevar_pop (TV_JUMP);
 
   scope_to_insns_initialize ();
@@ -3076,6 +3092,13 @@ rest_of_compilation (decl)
 	dump_flow_info (rtl_dump_file);
       /* CFG is no longer maintained up-to-date.  */
       tem = cse_main (insns, max_reg_num (), 1, rtl_dump_file);
+
+      /* Run a pass to eliminate duplicated assignments to condition
+	 code registers.  We have to run this after bypass_jumps,
+	 because it makes it harder for that pass to determine whether
+	 a jump can be bypassed safely.  */
+      cse_condition_code_reg ();
+
       purge_all_dead_edges (0);
       delete_trivially_dead_insns (insns, max_reg_num ());
 
@@ -4922,7 +4945,9 @@ parse_options_and_default_flags (argc, argv)
       flag_schedule_insns_after_reload = 1;
 #endif
       flag_regmove = 1;
+#ifndef OPENBSD_NATIVE
       flag_delete_null_pointer_checks = 1;
+#endif
       flag_reorder_blocks = 1;
       flag_reorder_functions = 1;
     }

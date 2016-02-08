@@ -1,4 +1,4 @@
-/*	$OpenBSD: options.c,v 1.4 2004/05/04 21:25:27 deraadt Exp $	*/
+/*	$OpenBSD: options.c,v 1.6 2004/09/21 04:07:04 david Exp $	*/
 
 /* DHCP options parsing and reassembly. */
 
@@ -128,7 +128,7 @@ parse_option_buffer(struct packet *packet,
 
 		/*
 		 * If the length is outrageous, silently skip the rest,
-		 * and mark the packet bad. Unfortuntely some crappy
+		 * and mark the packet bad. Unfortunately some crappy
 		 * dhcp servers always seem to give us garbage on the
 		 * end of a packet. so rather than keep refusing, give
 		 * up and try to take one after seeing a few without
@@ -137,17 +137,17 @@ parse_option_buffer(struct packet *packet,
 		if (s + len + 2 > end) {
 		    bogus:
 			bad_options++;
-			warn("option %s (%d) %s.",
+			warning("option %s (%d) %s.",
 			    dhcp_options[code].name, len,
 			    "larger than buffer");
 			if (bad_options == bad_options_max) {
 				packet->options_valid = 1;
 				bad_options = 0;
-				warn("Many bogus options seen in offers.");
-				warn("Taking this offer in spite of bogus");
-				warn("options - hope for the best!");
+				warning("Many bogus options seen in offers.");
+				warning("Taking this offer in spite of bogus");
+				warning("options - hope for the best!");
 			} else {
-				warn("rejecting bogus offer.");
+				warning("rejecting bogus offer.");
 				packet->options_valid = 0;
 			}
 			return;
@@ -321,7 +321,7 @@ cons_options(struct packet *inpacket, struct dhcp_packet *outpacket,
 				    &buffer[bufix], option_size - bufix);
 				mainbufix = option_size - bufix;
 				if (mainbufix < DHCP_FILE_LEN)
-					outpacket->file[mainbufix++] = DHO_END;
+					outpacket->file[mainbufix++] = (char)DHO_END;
 				while (mainbufix < DHCP_FILE_LEN)
 					outpacket->file[mainbufix++] = DHO_PAD;
 			} else {
@@ -336,7 +336,7 @@ cons_options(struct packet *inpacket, struct dhcp_packet *outpacket,
 
 			mainbufix = option_size - bufix;
 			if (mainbufix < DHCP_SNAME_LEN)
-				outpacket->file[mainbufix++] = DHO_END;
+				outpacket->file[mainbufix++] = (char)DHO_END;
 			while (mainbufix < DHCP_SNAME_LEN)
 				outpacket->file[mainbufix++] = DHO_PAD;
 		}

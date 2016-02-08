@@ -1,4 +1,4 @@
-/*	$OpenBSD: dispatch.c,v 1.29 2004/06/22 01:10:49 canacar Exp $	*/
+/*	$OpenBSD: dispatch.c,v 1.31 2004/09/21 04:07:03 david Exp $	*/
 
 /*
  * Copyright 2004 Henning Brauer <henning@openbsd.org>
@@ -175,7 +175,7 @@ another:
 			 * Figure timeout in milliseconds, and check for
 			 * potential overflow, so we can cram into an
 			 * int for poll, while not polling with a
-			 * negative timeout and blocking indefinetely.
+			 * negative timeout and blocking indefinitely.
 			 */
 			howlong = timeouts->when - cur_time;
 			if (howlong > INT_MAX / 1000)
@@ -468,7 +468,7 @@ interface_link_status(char *ifname)
 	struct ifmediareq ifmr;
 	int sock;
 
-	if ((sock = socket (AF_INET, SOCK_DGRAM, 0)) == -1)
+	if ((sock = socket(AF_INET, SOCK_DGRAM, 0)) == -1)
 		error("Can't create socket");
 
 	memset(&ifmr, 0, sizeof(ifmr));

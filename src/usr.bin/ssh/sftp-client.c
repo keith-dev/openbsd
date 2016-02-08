@@ -20,7 +20,7 @@
 /* XXX: copy between two remote sites */
 
 #include "includes.h"
-RCSID("$OpenBSD: sftp-client.c,v 1.51 2004/07/11 17:48:47 deraadt Exp $");
+RCSID("$OpenBSD: sftp-client.c,v 1.53 2005/03/10 22:01:05 deraadt Exp $");
 
 #include <sys/queue.h>
 
@@ -172,6 +172,7 @@ get_handle(int fd, u_int expected_id, u_int *len)
 		int status = buffer_get_int(&msg);
 
 		error("Couldn't get handle: %s", fx2txt(status));
+		buffer_free(&msg);
 		return(NULL);
 	} else if (type != SSH2_FXP_HANDLE)
 		fatal("Expected SSH2_FXP_HANDLE(%u) packet, got %u",
@@ -206,6 +207,7 @@ get_decode_stat(int fd, u_int expected_id, int quiet)
 			debug("Couldn't stat remote file: %s", fx2txt(status));
 		else
 			error("Couldn't stat remote file: %s", fx2txt(status));
+		buffer_free(&msg);
 		return(NULL);
 	} else if (type != SSH2_FXP_ATTRS) {
 		fatal("Expected SSH2_FXP_ATTRS(%u) packet, got %u",
@@ -854,7 +856,7 @@ do_download(struct sftp_conn *conn, char *remote_path, char *local_path,
 		debug3("Received reply T:%u I:%u R:%d", type, id, max_req);
 
 		/* Find the request in our queue */
-		for(req = TAILQ_FIRST(&requests);
+		for (req = TAILQ_FIRST(&requests);
 		    req != NULL && req->id != id;
 		    req = TAILQ_NEXT(req, tq))
 			;
@@ -1103,7 +1105,7 @@ do_upload(struct sftp_conn *conn, char *local_path, char *remote_path,
 			debug3("SSH2_FXP_STATUS %d", status);
 
 			/* Find the request in our queue */
-			for(ack = TAILQ_FIRST(&acks);
+			for (ack = TAILQ_FIRST(&acks);
 			    ack != NULL && ack->id != r_id;
 			    ack = TAILQ_NEXT(ack, tq))
 				;

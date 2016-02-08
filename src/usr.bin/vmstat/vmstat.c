@@ -1,5 +1,5 @@
 /*	$NetBSD: vmstat.c,v 1.29.4.1 1996/06/05 00:21:05 cgd Exp $	*/
-/*	$OpenBSD: vmstat.c,v 1.89 2004/07/02 09:12:37 miod Exp $	*/
+/*	$OpenBSD: vmstat.c,v 1.94 2004/12/24 22:38:22 miod Exp $	*/
 
 /*
  * Copyright (c) 1980, 1986, 1991, 1993
@@ -40,7 +40,7 @@ static char copyright[] =
 #if 0
 static char sccsid[] = "@(#)vmstat.c	8.1 (Berkeley) 6/6/93";
 #else
-static const char rcsid[] = "$OpenBSD: vmstat.c,v 1.89 2004/07/02 09:12:37 miod Exp $";
+static const char rcsid[] = "$OpenBSD: vmstat.c,v 1.94 2004/12/24 22:38:22 miod Exp $";
 #endif
 #endif /* not lint */
 
@@ -92,17 +92,7 @@ struct nlist namelist[] = {
 	{ "_nselcoll" },
 #define X_POOLHEAD	7		/* sysctl */
 	{ "_pool_head" },
-#define X_ALLEVENTS	8		/* no sysctl */
-	{ "_allevents" },
-#define	X_INTRNAMES	9		/* no sysctl */
-	{ "_intrnames" },
-#define	X_EINTRNAMES	10		/* no sysctl */
-	{ "_eintrnames" },
-#define	X_INTRCNT	11		/* no sysctl */
-	{ "_intrcnt" },
-#define	X_EINTRCNT	12		/* no sysctl */
-	{ "_eintrcnt" },
-#define X_END		13		/* no sysctl */
+#define X_END		8
 	{ "" },
 };
 
@@ -471,6 +461,7 @@ printhdr(void)
 /*
  * Force a header to be prepended to the next output.
  */
+/* ARGSUSED */
 void
 needhdr(int signo)
 {
@@ -706,32 +697,23 @@ cpustats(void)
 	(void)printf("%2.0f", cur.cp_time[CP_IDLE] * pct);
 }
 
-static void dointr_sysctl(void);
-static void dointr_kvm(void);
-
 void
 dointr(void)
 {
-	if (nlistf == NULL && memf == NULL)
-		dointr_sysctl();
-	else
-		dointr_kvm();
-}
-
-static void
-dointr_sysctl(void)
-{
-	struct evcntlist allevents;
-	struct evcnt evcnt, *evptr;
 	struct device dev;
 
 	time_t uptime;
-	long inttotal;
+	u_int64_t inttotal;
 	int nintr;
 	char intrname[128];
 	int mib[4];
 	size_t siz;
 	int i;
+
+	if (nlistf != NULL || memf != NULL) {
+		errx(1,
+		    "interrupt statistics are only available on live kernels");
+	}
 
 	uptime = getuptime();
 
@@ -744,12 +726,12 @@ dointr_sysctl(void)
 		return;
 	}
 
-	(void)printf("interrupt               total     rate\n");
+	(void)printf("%-16s %20s %8s\n", "interrupt", "total", "rate");
 
 	inttotal = 0;
 	for (i = 0; i < nintr; i++) {
 		char name[128];
-		int cnt;
+		u_quad_t cnt;
 		int vector;
 
 		mib[0] = CTL_KERN;
@@ -781,83 +763,17 @@ dointr_sysctl(void)
 		siz = sizeof(cnt);
 		if (sysctl(mib, 4, &cnt, &siz, NULL, 0) < 0) {
 			warnx("could not read kern.intrcnt.cnt.%d", i);
-			return ;
+			return;
 		}
+
 		if (cnt || zflag)
-			(void)printf("%-16.16s %12d %8ld\n", intrname,
-			    cnt, (long)cnt / uptime);
+			(void)printf("%-16.16s %20llu %8llu\n", intrname,
+			    cnt, cnt / uptime);
 		inttotal += cnt;
 	}
 
-	kread(X_ALLEVENTS, &allevents, sizeof allevents);
-	evptr = allevents.tqh_first;
-	while (evptr) {
-		if (kvm_read(kd, (long)evptr, (void *)&evcnt,
-		    sizeof evcnt) != sizeof evcnt)
-			errx(1, "event chain trashed: %s", kvm_geterr(kd));
-		if (strcmp(evcnt.ev_name, "intr") == 0) {
-			if (kvm_read(kd, (long)evcnt.ev_dev, (void *)&dev,
-			    sizeof dev) != sizeof dev)
-				errx(1, "event chain trashed: %s", kvm_geterr(kd));
-			if (evcnt.ev_count)
-				(void)printf("%-14s %12d %8ld\n", dev.dv_xname,
-				    evcnt.ev_count, (long)(evcnt.ev_count / uptime));
-			inttotal += evcnt.ev_count++;
-		}
-		evptr = evcnt.ev_list.tqe_next;
-	}
-	(void)printf("Total            %12ld %8ld\n", inttotal, inttotal / uptime);
-}
-
-static void
-dointr_kvm(void)
-{
-	long *intrcnt, inttotal;
-	time_t uptime;
-	int nintr, inamlen;
-	char *intrname;
-	struct evcntlist allevents;
-	struct evcnt evcnt, *evptr;
-	struct device dev;
-
-	uptime = getuptime();
-	nintr = namelist[X_EINTRCNT].n_value - namelist[X_INTRCNT].n_value;
-	inamlen =
-	    namelist[X_EINTRNAMES].n_value - namelist[X_INTRNAMES].n_value;
-	intrcnt = malloc((size_t)nintr);
-	intrname = malloc((size_t)inamlen);
-	if (intrcnt == NULL || intrname == NULL)
-		err(1, "malloc");
-	kread(X_INTRCNT, intrcnt, (size_t)nintr);
-	kread(X_INTRNAMES, intrname, (size_t)inamlen);
-	(void)printf("interrupt             total     rate\n");
-	inttotal = 0;
-	nintr /= sizeof(long);
-	while (--nintr >= 0) {
-		if (*intrcnt)
-			(void)printf("%-14s %12ld %8ld\n", intrname,
-			    *intrcnt, *intrcnt / uptime);
-		intrname += strlen(intrname) + 1;
-		inttotal += *intrcnt++;
-	}
-	kread(X_ALLEVENTS, &allevents, sizeof allevents);
-	evptr = allevents.tqh_first;
-	while (evptr) {
-		if (kvm_read(kd, (long)evptr, (void *)&evcnt,
-		    sizeof evcnt) != sizeof evcnt)
-			errx(1, "event chain trashed: %s", kvm_geterr(kd));
-		if (strcmp(evcnt.ev_name, "intr") == 0) {
-			if (kvm_read(kd, (long)evcnt.ev_dev, (void *)&dev,
-			    sizeof dev) != sizeof dev)
-				errx(1, "event chain trashed: %s", kvm_geterr(kd));
-			if (evcnt.ev_count)
-				(void)printf("%-14s %12d %8ld\n", dev.dv_xname,
-				    evcnt.ev_count, (long)(evcnt.ev_count / uptime));
-			inttotal += evcnt.ev_count++;
-		}
-		evptr = evcnt.ev_list.tqe_next;
-	}
-	(void)printf("Total          %12ld %8ld\n", inttotal, inttotal / uptime);
+	(void)printf("%-16s %20llu %8llu\n", "Total", inttotal,
+	    inttotal / uptime);
 }
 
 /*
@@ -1112,8 +1028,7 @@ dopool_sysctl(void)
 	mib[2] = KERN_POOL_NPOOLS;
 	size = sizeof(npools);
 	if (sysctl(mib, 3, &npools, &size, NULL, 0) < 0) {
-		printf("Can't figure out number of pools in kernel: %s\n",
-			strerror(errno));
+		warn("can't figure out number of pools in kernel");
 		return;
 	}
 
@@ -1128,15 +1043,14 @@ dopool_sysctl(void)
 		if (sysctl(mib, 4, &pool, &size, NULL, 0) < 0) {
 			if (errno == ENOENT)
 				continue;
-			printf("error getting pool: %s\n", strerror(errno));
+			warn("error getting pool");
 			return;
 		}
 		npools--;
 		mib[2] = KERN_POOL_NAME;
 		size = sizeof(name);
 		if (sysctl(mib, 4, &name, &size, NULL, 0) < 0) {
-			printf("error getting pool name: %s\n",
-				strerror(errno));
+			warn("error getting pool name");
 			return;
 		}
 		print_pool(&pool, name);

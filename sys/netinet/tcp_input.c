@@ -1,4 +1,4 @@
-/*	$OpenBSD: tcp_input.c,v 1.175 2004/07/16 09:26:07 markus Exp $	*/
+/*	$OpenBSD: tcp_input.c,v 1.185 2005/03/12 08:07:09 markus Exp $	*/
 /*	$NetBSD: tcp_input.c,v 1.23 1996/02/13 23:43:44 christos Exp $	*/
 
 /*
@@ -126,6 +126,10 @@ struct timeval tcp_ackdrop_ppslim_last;
 /* for modulo comparisons of timestamps */
 #define TSTMP_LT(a,b)	((int)((a)-(b)) < 0)
 #define TSTMP_GEQ(a,b)	((int)((a)-(b)) >= 0)
+
+/* for TCP SACK comparisons */
+#define	SEQ_MIN(a,b)	(SEQ_LT(a,b) ? (a) : (b))
+#define	SEQ_MAX(a,b)	(SEQ_GT(a,b) ? (a) : (b))
 
 /*
  * Neighbor Discovery, Neighbor Unreachability Detection Upper layer hint.
@@ -932,12 +936,18 @@ after_listen:
 		if (tcp_dooptions(tp, optp, optlen, th, m, iphlen, &opti))
 			goto drop;
 
-#ifdef TCP_SACK
-	if (tp->sack_enable) {
-		tp->rcv_laststart = th->th_seq; /* last rec'vd segment*/
-		tp->rcv_lastend = th->th_seq + tlen;
+	if (opti.ts_present && opti.ts_ecr) {
+		int rtt_test;
+
+		/* subtract out the tcp timestamp modulator */
+		opti.ts_ecr -= tp->ts_modulate;
+                                                     
+		/* make sure ts_ecr is sensible */
+		rtt_test = tcp_now - opti.ts_ecr;
+		if (rtt_test < 0 || rtt_test > TCP_RTT_MAX)
+			opti.ts_ecr = 0;
 	}
-#endif /* TCP_SACK */
+
 #ifdef TCP_ECN
 	/* if congestion experienced, set ECE bit in subsequent packets. */
 	if ((iptos & IPTOS_ECN_MASK) == IPTOS_ECN_CE) {
@@ -989,10 +999,10 @@ after_listen:
 				 * this is a pure ack for outstanding data.
 				 */
 				++tcpstat.tcps_predack;
-				if (opti.ts_present)
-					tcp_xmit_timer(tp, tcp_now-opti.ts_ecr+1);
+				if (opti.ts_present && opti.ts_ecr)
+					tcp_xmit_timer(tp, tcp_now - opti.ts_ecr);
 				else if (tp->t_rtttime &&
-					    SEQ_GT(th->th_ack, tp->t_rtseq))
+				    SEQ_GT(th->th_ack, tp->t_rtseq))
 					tcp_xmit_timer(tp,
 					    tcp_now - tp->t_rtttime);
 				acked = th->th_ack - tp->snd_una;
@@ -1367,13 +1377,17 @@ trimthenstep6:
 
 	/*
 	 * If last ACK falls within this segment's sequence numbers,
-	 * record its timestamp.
-	 * Fix from Braden, see Stevens p. 870
+	 * record its timestamp if it's more recent.
+	 * Cf fix from Braden, see Stevens p. 870
 	 */
 	if (opti.ts_present && TSTMP_GEQ(opti.ts_val, tp->ts_recent) &&
 	    SEQ_LEQ(th->th_seq, tp->last_ack_sent)) {
+		if (SEQ_LEQ(tp->last_ack_sent, th->th_seq + tlen +
+		    ((tiflags & (TH_SYN|TH_FIN)) != 0)))
+			tp->ts_recent = opti.ts_val;
+		else
+			tp->ts_recent = 0;
 		tp->ts_recent_age = tcp_now;
-		tp->ts_recent = opti.ts_val;
 	}
 
 	/*
@@ -1751,8 +1765,8 @@ trimthenstep6:
 		 * timer backoff (cf., Phil Karn's retransmit alg.).
 		 * Recompute the initial retransmit timer.
 		 */
-		if (opti.ts_present)
-			tcp_xmit_timer(tp, tcp_now-opti.ts_ecr+1);
+		if (opti.ts_present && opti.ts_ecr)
+			tcp_xmit_timer(tp, tcp_now - opti.ts_ecr);
 		else if (tp->t_rtttime && SEQ_GT(th->th_ack, tp->t_rtseq))
 			tcp_xmit_timer(tp, tcp_now - tp->t_rtttime);
 
@@ -1995,7 +2009,7 @@ dodata:							/* XXX */
 		}
 #ifdef TCP_SACK
 		if (tp->sack_enable)
-			tcp_update_sack_list(tp);
+			tcp_update_sack_list(tp, th->th_seq, th->th_seq + tlen);
 #endif
 
 		/*
@@ -2253,8 +2267,7 @@ tcp_dooptions(tp, cp, cnt, th, m, iphlen, oi)
 				tp->t_flags |= TF_SACK_PERMIT;
 			break;
 		case TCPOPT_SACK:
-			if (tcp_sack_option(tp, th, cp, optlen))
-				continue;
+			tcp_sack_option(tp, th, cp, optlen);
 			break;
 #endif
 #ifdef TCP_SIGNATURE
@@ -2357,8 +2370,8 @@ tcp_seq_subtract(a, b)
  * prediction mode), and it updates the ordered list of sacks.
  */
 void
-tcp_update_sack_list(tp)
-	struct tcpcb *tp;
+tcp_update_sack_list(struct tcpcb *tp, tcp_seq rcv_laststart,
+    tcp_seq rcv_lastend)
 {
 	/*
 	 * First reported block MUST be the most recent one.  Subsequent
@@ -2387,10 +2400,10 @@ tcp_update_sack_list(tp)
 	tp->rcv_numsacks -= count;
 	if (tp->rcv_numsacks == 0) { /* no sack blocks currently (fast path) */
 		tcp_clean_sackreport(tp);
-		if (SEQ_LT(tp->rcv_nxt, tp->rcv_laststart)) {
+		if (SEQ_LT(tp->rcv_nxt, rcv_laststart)) {
 			/* ==> need first sack block */
-			tp->sackblks[0].start = tp->rcv_laststart;
-			tp->sackblks[0].end = tp->rcv_lastend;
+			tp->sackblks[0].start = rcv_laststart;
+			tp->sackblks[0].end = rcv_lastend;
 			tp->rcv_numsacks = 1;
 		}
 		return;
@@ -2398,14 +2411,14 @@ tcp_update_sack_list(tp)
 	/* Otherwise, sack blocks are already present. */
 	for (i = 0; i < tp->rcv_numsacks; i++)
 		tp->sackblks[i] = temp[i]; /* first copy back sack list */
-	if (SEQ_GEQ(tp->rcv_nxt, tp->rcv_lastend))
+	if (SEQ_GEQ(tp->rcv_nxt, rcv_lastend))
 		return;     /* sack list remains unchanged */
 	/*
 	 * From here, segment just received should be (part of) the 1st sack.
 	 * Go through list, possibly coalescing sack block entries.
 	 */
-	firstsack.start = tp->rcv_laststart;
-	firstsack.end = tp->rcv_lastend;
+	firstsack.start = rcv_laststart;
+	firstsack.end = rcv_lastend;
 	for (i = 0; i < tp->rcv_numsacks; i++) {
 		sack = tp->sackblks[i];
 		if (SEQ_LT(sack.end, firstsack.start) ||
@@ -2448,11 +2461,10 @@ tcp_update_sack_list(tp)
 }
 
 /*
- * Process the TCP SACK option.  Returns 1 if tcp_dooptions() should continue,
- * and 0 otherwise, if the option was fine.  tp->snd_holes is an ordered list
+ * Process the TCP SACK option.  tp->snd_holes is an ordered list
  * of holes (oldest to newest, in terms of the sequence space).
  */
-int
+void
 tcp_sack_option(struct tcpcb *tp, struct tcphdr *th, u_char *cp, int optlen)
 {
 	int tmp_olen;
@@ -2460,11 +2472,18 @@ tcp_sack_option(struct tcpcb *tp, struct tcphdr *th, u_char *cp, int optlen)
 	struct sackhole *cur, *p, *temp;
 
 	if (!tp->sack_enable)
-		return (1);
-
+		return;
+	/* SACK without ACK doesn't make sense. */
+	if ((th->th_flags & TH_ACK) == 0)
+	       return;
+	/* Make sure the ACK on this segment is in [snd_una, snd_max]. */
+	if (SEQ_LT(th->th_ack, tp->snd_una) ||
+	    SEQ_GT(th->th_ack, tp->snd_max))
+		return;
 	/* Note: TCPOLEN_SACK must be 2*sizeof(tcp_seq) */
 	if (optlen <= 2 || (optlen - 2) % TCPOLEN_SACK != 0)
-		return (1);
+		return;
+	/* Note: TCPOLEN_SACK must be 2*sizeof(tcp_seq) */
 	tmp_cp = cp + 2;
 	tmp_olen = optlen - 2;
 	if (tp->snd_numholes < 0)
@@ -2501,7 +2520,7 @@ tcp_sack_option(struct tcpcb *tp, struct tcphdr *th, u_char *cp, int optlen)
 			    pool_get(&sackhl_pool, PR_NOWAIT);
 			if (tp->snd_holes == NULL) {
 				/* ENOBUFS, so ignore SACKed block for now*/
-				continue;
+				goto done;
 			}
 			cur = tp->snd_holes;
 			cur->start = th->th_ack;
@@ -2565,7 +2584,7 @@ tcp_sack_option(struct tcpcb *tp, struct tcphdr *th, u_char *cp, int optlen)
 				}
 				/* otherwise, move start of hole forward */
 				cur->start = sack.end;
-				cur->rxmit = max (cur->rxmit, cur->start);
+				cur->rxmit = SEQ_MAX(cur->rxmit, cur->start);
 				p = cur;
 				cur = cur->next;
 				continue;
@@ -2579,7 +2598,7 @@ tcp_sack_option(struct tcpcb *tp, struct tcphdr *th, u_char *cp, int optlen)
 					    sack.start);
 #endif /* TCP_FACK */
 				cur->end = sack.start;
-				cur->rxmit = min(cur->rxmit, cur->end);
+				cur->rxmit = SEQ_MIN(cur->rxmit, cur->end);
 				cur->dups++;
 				if (((sack.end - cur->end)/tp->t_maxseg) >=
 				    tcprexmtthresh)
@@ -2597,7 +2616,7 @@ tcp_sack_option(struct tcpcb *tp, struct tcphdr *th, u_char *cp, int optlen)
 				temp = (struct sackhole *)
 				    pool_get(&sackhl_pool, PR_NOWAIT);
 				if (temp == NULL)
-					continue; /* ENOBUFS */
+					goto done; /* ENOBUFS */
 #if defined(TCP_SACK) && defined(TCP_FACK)
 				if (SEQ_GT(cur->rxmit, sack.end))
 					tp->retran_data -=
@@ -2612,9 +2631,9 @@ tcp_sack_option(struct tcpcb *tp, struct tcphdr *th, u_char *cp, int optlen)
 				temp->start = sack.end;
 				temp->end = cur->end;
 				temp->dups = cur->dups;
-				temp->rxmit = max(cur->rxmit, temp->start);
+				temp->rxmit = SEQ_MAX(cur->rxmit, temp->start);
 				cur->end = sack.start;
-				cur->rxmit = min(cur->rxmit, cur->end);
+				cur->rxmit = SEQ_MIN(cur->rxmit, cur->end);
 				cur->dups++;
 				if (((sack.end - cur->end)/tp->t_maxseg) >=
 					tcprexmtthresh)
@@ -2634,7 +2653,7 @@ tcp_sack_option(struct tcpcb *tp, struct tcphdr *th, u_char *cp, int optlen)
 			temp = (struct sackhole *)
 			    pool_get(&sackhl_pool, PR_NOWAIT);
 			if (temp == NULL)
-				continue; /* ENOBUFS */
+				goto done; /* ENOBUFS */
 			temp->start = tp->rcv_lastsack;
 			temp->end = sack.start;
 			temp->dups = min(tcprexmtthresh,
@@ -2648,6 +2667,7 @@ tcp_sack_option(struct tcpcb *tp, struct tcphdr *th, u_char *cp, int optlen)
 			tp->snd_numholes++;
 		}
 	}
+done:
 #if defined(TCP_SACK) && defined(TCP_FACK)
 	/*
 	 * Update retran_data and snd_awnd.  Go through the list of
@@ -2663,7 +2683,7 @@ tcp_sack_option(struct tcpcb *tp, struct tcphdr *th, u_char *cp, int optlen)
 	    tp->retran_data;
 #endif /* TCP_FACK */
 
-	return (0);
+	return;
 }
 
 /*
@@ -2792,25 +2812,32 @@ tcp_xmit_timer(tp, rtt)
 	short delta;
 	short rttmin;
 
+	if (rtt < 0)
+		rtt = 0;
+	else if (rtt > TCP_RTT_MAX)
+		rtt = TCP_RTT_MAX;
+
 	tcpstat.tcps_rttupdated++;
-	--rtt;
 	if (tp->t_srtt != 0) {
 		/*
-		 * srtt is stored as fixed point with 3 bits after the
-		 * binary point (i.e., scaled by 8).  The following magic
+		 * delta is fixed point with 2 (TCP_RTT_BASE_SHIFT) bits
+		 * after the binary point (scaled by 4), whereas
+		 * srtt is stored as fixed point with 5 bits after the
+		 * binary point (i.e., scaled by 32).  The following magic
 		 * is equivalent to the smoothing algorithm in rfc793 with
 		 * an alpha of .875 (srtt = rtt/8 + srtt*7/8 in fixed
-		 * point).  Adjust rtt to origin 0.
+		 * point).
 		 */
-		delta = (rtt << 2) - (tp->t_srtt >> TCP_RTT_SHIFT);
+		delta = (rtt << TCP_RTT_BASE_SHIFT) -
+		    (tp->t_srtt >> TCP_RTT_SHIFT);
 		if ((tp->t_srtt += delta) <= 0)
-			tp->t_srtt = 1;
+			tp->t_srtt = 1 << TCP_RTT_BASE_SHIFT;
 		/*
 		 * We accumulate a smoothed rtt variance (actually, a
 		 * smoothed mean difference), then set the retransmit
 		 * timer to smoothed rtt + 4 times the smoothed variance.
-		 * rttvar is stored as fixed point with 2 bits after the
-		 * binary point (scaled by 4).  The following is
+		 * rttvar is stored as fixed point with 4 bits after the
+		 * binary point (scaled by 16).  The following is
 		 * equivalent to rfc793 smoothing with an alpha of .75
 		 * (rttvar = rttvar*3/4 + |delta| / 4).  This replaces
 		 * rfc793's wired-in beta.
@@ -2819,15 +2846,16 @@ tcp_xmit_timer(tp, rtt)
 			delta = -delta;
 		delta -= (tp->t_rttvar >> TCP_RTTVAR_SHIFT);
 		if ((tp->t_rttvar += delta) <= 0)
-			tp->t_rttvar = 1;
+			tp->t_rttvar = 1 << TCP_RTT_BASE_SHIFT;
 	} else {
 		/*
 		 * No rtt measurement yet - use the unsmoothed rtt.
 		 * Set the variance to half the rtt (so our first
 		 * retransmit happens at 3*rtt).
 		 */
-		tp->t_srtt = rtt << (TCP_RTT_SHIFT + 2);
-		tp->t_rttvar = rtt << (TCP_RTTVAR_SHIFT + 2 - 1);
+		tp->t_srtt = (rtt + 1) << (TCP_RTT_SHIFT + TCP_RTT_BASE_SHIFT);
+		tp->t_rttvar = (rtt + 1) <<
+		    (TCP_RTTVAR_SHIFT + TCP_RTT_BASE_SHIFT - 1);
 	}
 	tp->t_rtttime = 0;
 	tp->t_rxtshift = 0;
@@ -2843,10 +2871,7 @@ tcp_xmit_timer(tp, rtt)
 	 * statistical, we have to test that we don't drop below
 	 * the minimum feasible timer (which is 2 ticks).
 	 */
-	if (tp->t_rttmin > rtt + 2)
-		rttmin = tp->t_rttmin;
-	else
-		rttmin = rtt + 2;
+	rttmin = min(max(rtt + 2, tp->t_rttmin), TCPTV_REXMTMAX);
 	TCPT_RANGESET(tp->t_rxtcur, TCP_REXMTVAL(tp), rttmin, TCPTV_REXMTMAX);
 
 	/*
@@ -3201,6 +3226,7 @@ do {									\
 
 #define	SYN_CACHE_RM(sc)						\
 do {									\
+	(sc)->sc_flags |= SCF_DEAD;					\
 	TAILQ_REMOVE(&tcp_syn_cache[(sc)->sc_bucketidx].sch_bucket,	\
 	    (sc), sc_bucketq);						\
 	(sc)->sc_tp = NULL;						\
@@ -3216,7 +3242,8 @@ do {									\
 		(void) m_free((sc)->sc_ipopts);				\
 	if ((sc)->sc_route4.ro_rt != NULL)				\
 		RTFREE((sc)->sc_route4.ro_rt);				\
-	pool_put(&syn_cache_pool, (sc));				\
+	timeout_set(&(sc)->sc_timer, syn_cache_reaper, (sc));		\
+	timeout_add(&(sc)->sc_timer, 0);				\
 } while (/*CONSTCOND*/0)
 
 struct pool syn_cache_pool;
@@ -3235,7 +3262,7 @@ do {									\
 	timeout_add(&(sc)->sc_timer, (sc)->sc_rxtcur * (hz / PR_SLOWHZ)); \
 } while (/*CONSTCOND*/0)
 
-#define	SYN_CACHE_TIMESTAMP(sc)	tcp_now
+#define	SYN_CACHE_TIMESTAMP(sc)	tcp_now + (sc)->sc_modulate
 
 void
 syn_cache_init()
@@ -3362,6 +3389,10 @@ syn_cache_timer(void *arg)
 	int s;
 
 	s = splsoftnet();
+	if (sc->sc_flags & SCF_DEAD) {
+		splx(s);
+		return;
+	}
 
 	if (__predict_false(sc->sc_rxtshift == TCP_MAXRXTSHIFT)) {
 		/* Drop it -- too many retransmissions. */
@@ -3392,6 +3423,18 @@ syn_cache_timer(void *arg)
 	SYN_CACHE_RM(sc);
 	SYN_CACHE_PUT(sc);
 	splx(s);
+}
+
+void
+syn_cache_reaper(void *arg)
+{
+	struct syn_cache *sc = arg;
+	int s;
+
+	s = splsoftnet();
+	pool_put(&syn_cache_pool, (sc));
+	splx(s);
+	return;
 }
 
 /*
@@ -3659,6 +3702,7 @@ syn_cache_get(src, dst, th, hlen, tlen, so, m)
 	tp->sack_enable = sc->sc_flags & SCF_SACK_PERMIT;
 #endif
 
+	tp->ts_modulate = sc->sc_modulate;
 	tp->iss = sc->sc_iss;
 	tp->irs = sc->sc_irs;
 	tcp_sendseqinit(tp);
@@ -4033,7 +4077,7 @@ syn_cache_respond(sc, m)
 		return (ENOBUFS);
 #endif
 	MGETHDR(m, M_DONTWAIT, MT_DATA);
-	if (m && tlen > MHLEN) {
+	if (m && max_linkhdr + tlen > MHLEN) {
 		MCLGET(m, M_DONTWAIT);
 		if ((m->m_flags & M_EXT) == 0) {
 			m_freem(m);
@@ -4114,6 +4158,7 @@ syn_cache_respond(sc, m)
 		u_int32_t *lp = (u_int32_t *)(optp);
 		/* Form timestamp option as shown in appendix A of RFC 1323. */
 		*lp++ = htonl(TCPOPT_TSTAMP_HDR);
+		sc->sc_modulate = arc4random();
 		*lp++ = htonl(SYN_CACHE_TIMESTAMP(sc));
 		*lp   = htonl(sc->sc_timestamp);
 		optp += TCPOLEN_TSTAMP_APPA;

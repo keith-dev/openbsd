@@ -1,4 +1,4 @@
-.\"	$OpenBSD: ne.4,v 1.18 2004/05/11 04:38:52 deraadt Exp $
+.\"	$OpenBSD: ne.4,v 1.23 2005/03/18 06:51:00 jsg Exp $
 .\"	$NetBSD: ne.4,v 1.4 1998/02/22 05:21:20 enami Exp $
 .\"
 .\" Copyright (c) 1997 The NetBSD Foundation, Inc.
@@ -47,13 +47,13 @@
 .Cd "ne1 at isa? port 0x300 irq 10"
 .Cd "ne2 at isa? port 0x280 irq 9"
 .Cd "ne* at isapnp?"
-.Cd "ne* at pci? dev ? function ?"
-.Cd "ne* at pcmcia? function ?"
+.Cd "ne* at pci?"
+.Cd "ne* at pcmcia?"
 .Pp
-.Cd "bmtphy* at mii? phy ?"
-.Cd "lxtphy* at mii? phy ?"
-.Cd "nsphyter* at mii? phy ?"
-.Cd "ukphy* at mii? phy ?"
+.Cd "bmtphy* at mii?"
+.Cd "lxtphy* at mii?"
+.Cd "nsphyter* at mii?"
+.Cd "ukphy* at mii?"
 .Sh DESCRIPTION
 The
 .Nm
@@ -68,7 +68,11 @@ cards, including:
 .It Li "AmbiCom AMB8002T" Ta PCMCIA
 .It Li "Arowana FE" Ta PCMCIA
 .It Li "Belkin F5D5020" Ta PCMCIA
+.It Li "Billionton Systems CFLT2-10N" Ta CF
 .It Li "Billionton Systems LNT-10TN" Ta PCMCIA
+.It Li "Buffalo LPC-CF-CLT" Ta CF
+.It Li "Buffalo LPC4-CLX" Ta PCMCIA
+.It Li "Buffalo LPC3-CLT" Ta PCMCIA
 .It Li "CNet NE2000, FastEthernet" Ta PCMCIA
 .It Li "Compex PCI Ethernet" Ta PCI
 .It Li "Compex Linkport ENET-B" Ta PCMCIA

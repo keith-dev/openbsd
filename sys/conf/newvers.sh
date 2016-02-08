@@ -1,6 +1,6 @@
 #!/bin/sh -
 #
-#	$OpenBSD: newvers.sh,v 1.64 2004/08/20 19:47:18 deraadt Exp $
+#	$OpenBSD: newvers.sh,v 1.68 2005/03/15 21:26:50 deraadt Exp $
 #	$NetBSD: newvers.sh,v 1.17.2.1 1995/10/12 05:17:11 jtc Exp $
 #
 # Copyright (c) 1984, 1986, 1990, 1993
@@ -42,22 +42,20 @@ v=`cat version` u=${USER-root} d=`pwd` h=`hostname` t=`date`
 id=`basename ${d}`
 
 # additional things which need version number upgrades:
-#	src/sys/sys/param.h:
+#	sys/sys/param.h:
 #		OpenBSD symbol
 #		OpenBSD_X_X symbol
-#	src/share/tmac/mdoc/doc-common
+#	share/tmac/mdoc/doc-common
 #		change	.       ds oS OpenBSD X.X
 #		add	.	if "\\$2"X.X"  .as oS \0X.X
-#	src/share/tmac/mdoc/doc-syms
-#		ensure new release is listed
-#	src/share/mk/sys.mk
+#	share/mk/sys.mk
 #		OSMAJOR
 #		OSMINOR
-#	src/distrib/miniroot/install.sub
+#	distrib/miniroot/install.sub
 #		VERSION
-#	src/etc/root/root.mail
+#	etc/root/root.mail
 #		VERSION and other bits
-#	src/sys/arch/macppc/stand/tbxidata/bsd.tbxi
+#	sys/arch/macppc/stand/tbxidata/bsd.tbxi
 #		change	/X.X/macppc/bsd.rd
 #
 # -current and -beta tagging:
@@ -66,14 +64,14 @@ id=`basename ${d}`
 #	A month or so before release, select STATUS "-beta"
 
 ost="OpenBSD"
-osr="3.6"
+osr="3.7"
 
 cat >vers.c <<eof
+#define STATUS ""			/* release */
 #if 0
 #define STATUS "-beta"
 #define STATUS "-current"
 #endif
-#define STATUS ""			/* release */
 
 const char ostype[] = "${ost}";
 const char osrelease[] = "${osr}";

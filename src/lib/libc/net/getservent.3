@@ -1,4 +1,4 @@
-.\"	$OpenBSD: getservent.3,v 1.13 2003/12/30 10:35:36 jmc Exp $
+.\"	$OpenBSD: getservent.3,v 1.16 2004/10/26 15:52:50 millert Exp $
 .\"
 .\" Copyright (c) 1983, 1991, 1993
 .\"	The Regents of the University of California.  All rights reserved.
@@ -27,28 +27,43 @@
 .\" OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
 .\" SUCH DAMAGE.
 .\"
-.Dd January 12, 1994
+.Dd October 13, 2004
 .Dt GETSERVENT 3
 .Os
 .Sh NAME
 .Nm getservent ,
+.Nm getservent_r ,
 .Nm getservbyport ,
+.Nm getservbyport_r ,
 .Nm getservbyname ,
+.Nm getservbyname_r ,
 .Nm setservent ,
-.Nm endservent
+.Nm setservent_r ,
+.Nm endservent ,
+.Nm endservent_r
 .Nd get service entry
 .Sh SYNOPSIS
 .Fd #include <netdb.h>
 .Ft struct servent *
 .Fn getservent "void"
+.Ft int
+.Fn getservent_r "struct servent *servent" "struct servent_data *servent_data"
 .Ft struct servent *
 .Fn getservbyname "const char *name" "const char *proto"
+.Ft int
+.Fn getservbyname_r "const char *name" "const char *proto" "struct servent *servent" "struct servent_data *servent_data"
 .Ft struct servent *
 .Fn getservbyport "int port" "const char *proto"
+.Ft int
+.Fn getservbyport_r "int port" "const char *proto" "struct servent *servent" "struct servent_data *servent_data"
 .Ft void
 .Fn setservent "int stayopen"
 .Ft void
+.Fn setservent_r "int stayopen" "struct servent_data *servent_data"
+.Ft void
 .Fn endservent "void"
+.Ft void
+.Fn endservent_r "struct servent_data *servent_data"
 .Sh DESCRIPTION
 The
 .Fn getservent ,
@@ -110,17 +125,75 @@ is found, or until
 is encountered.
 If a protocol name is also supplied (non-null),
 searches must also match the protocol.
+.Pp
+The
+.Fn getservent_r ,
+.Fn getservbyport_r ,
+.Fn getservbyname_r ,
+.Fn setservent_r ,
+and
+.Fn endservent_r
+functions are reentrant versions of the above functions that take a
+pointer to a
+.Fa servent_data
+structure which is used to store state information.
+The structure must be zero-filled before it is used
+and should be considered opaque for the sake of portability.
+.Pp
+The
+.Fn getservent_r ,
+.Fn getservbyport_r ,
+and
+.Fn getservbyname_r
+functions
+also take a pointer to a
+.Fa servent
+structure which is used to store the results of the database lookup.
 .Sh FILES
 .Bl -tag -width /etc/services -compact
 .It Pa /etc/services
 .El
-.Sh DIAGNOSTICS
-Null pointer (0) returned on
-.Dv EOF
-or error.
+.Sh RETURN VALUES
+The
+.Fn getservent ,
+.Fn getservbyport ,
+and
+.Fn getservbyname
+functions return a pointer to a
+.Fa servent
+structure on success or a null pointer if end-of-file
+is reached or an error occurs.
+.Pp
+The
+.Fn getservent_r ,
+.Fn getservbyport_r ,
+and
+.Fn getservbyname_r
+functions return 0 on success or \-1 if end-of-file
+is reached or an error occurs.
 .Sh SEE ALSO
 .Xr getprotoent 3 ,
 .Xr services 5
+.Sh STANDARDS
+The
+.Fn getservent ,
+.Fn getservbynumber ,
+.Fn getservbyname ,
+.Fn setservent ,
+and
+.Fn endservent
+functions conform to
+.St -p1003.1-2003 .
+.Pp
+The
+.Fn getservent_r ,
+.Fn getservbyport_r ,
+.Fn getservbyname_r ,
+.Fn setservent_r ,
+and
+.Fn endservent_r
+functions are not currently standardized.
+This implementation follows the API used by HP, IBM and Digital.
 .Sh HISTORY
 The
 .Fn getservent ,
@@ -130,8 +203,18 @@ The
 and
 .Fn endservent
 functions appeared in
+.Pp
 .Bx 4.2 .
+The
+.Fn getservent_r ,
+.Fn getservbyport_r ,
+.Fn getservbyname_r ,
+.Fn setservent_r ,
+and
+.Fn endservent_r
+functions appeared in
+.Ox 3.7 .
 .Sh BUGS
-These functions use static data storage; if the data is needed for future use,
-it should be copied before any subsequent calls overwrite it.
+The non-reentrant functions use static data storage; if the data is needed
+for future use, it should be copied before any subsequent calls overwrite it.
 Expecting port numbers to fit in a 32-bit quantity is probably naive.

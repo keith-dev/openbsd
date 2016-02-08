@@ -1,4 +1,4 @@
-/*	$OpenBSD: session.h,v 1.61 2004/08/06 11:51:19 claudio Exp $ */
+/*	$OpenBSD: session.h,v 1.75 2004/12/23 17:24:03 henning Exp $ */
 
 /*
  * Copyright (c) 2003, 2004 Henning Brauer <henning@openbsd.org>
@@ -25,6 +25,7 @@
 #define	INTERVAL_HOLD_INITIAL		240
 #define	INTERVAL_HOLD			90
 #define	INTERVAL_IDLE_HOLD_INITIAL	30
+#define	INTERVAL_HOLD_CLONED		3600
 #define	MAX_IDLE_HOLD			3600
 #define	MSGSIZE_HEADER			19
 #define	MSGSIZE_HEADER_MARKER		16
@@ -32,9 +33,8 @@
 #define	MSGSIZE_OPEN_MIN		29
 #define	MSGSIZE_UPDATE_MIN		23
 #define	MSGSIZE_KEEPALIVE		MSGSIZE_HEADER
-#define MSGSIZE_RREFRESH		MSGSIZE_HEADER + 4
-#define	PFD_RESERVE			5
-#define	PEER_L_RESERVE			2
+#define	MSGSIZE_RREFRESH		MSGSIZE_HEADER + 4
+#define	MSG_PROCESS_LIMIT		25
 
 enum session_state {
 	STATE_NONE,
@@ -112,17 +112,11 @@ struct msg_header {
 
 struct msg_open {
 	struct msg_header	 header;
-	u_int8_t		 version;
+	u_int32_t		 bgpid;
 	u_int16_t		 myas;
 	u_int16_t		 holdtime;
-	u_int32_t		 bgpid;
+	u_int8_t		 version;
 	u_int8_t		 optparamlen;
-};
-
-struct capa_mp {
-	u_int16_t		afi;
-	u_int8_t		pad;
-	u_int8_t		safi;
 };
 
 struct bgpd_sysdep {
@@ -153,35 +147,32 @@ struct peer_stats {
 	u_int32_t		 prefix_cnt;
 };
 
-struct peer_capa {
-	u_int8_t	announce;
-	u_int8_t	ann_mp;
-	u_int8_t	ann_refresh;
-	u_int8_t	mp_v4;		/* multiprotocol extensions, RFC 2858 */
-	u_int8_t	mp_v6;
-	u_int8_t	refresh;	/* route refresh, RFC 2918 */
-};
-
 struct peer {
 	struct peer_config	 conf;
 	struct peer_stats	 stats;
-	struct peer_capa	 capa;
-	u_int32_t		 remote_bgpid;
-	u_int16_t		 holdtime;
-	enum session_state	 state;
+	struct {
+		struct capabilities	ann;
+		struct capabilities	peer;
+	}			 capa;
+	struct sockaddr_storage	 sa_local;
+	struct sockaddr_storage	 sa_remote;
+	struct msgbuf		 wbuf;
+	struct buf_read		*rbuf;
+	struct peer		*next;
 	time_t			 ConnectRetryTimer;
 	time_t			 KeepaliveTimer;
 	time_t			 HoldTimer;
 	time_t			 IdleHoldTimer;
 	time_t			 IdleHoldResetTimer;
-	u_int			 IdleHoldTime;
 	int			 fd;
-	struct sockaddr_storage	 sa_local;
-	struct sockaddr_storage	 sa_remote;
-	struct msgbuf		 wbuf;
-	struct buf_read		*rbuf;
+	int			 lasterr;
+	u_int			 IdleHoldTime;
+	u_int32_t		 remote_bgpid;
+	enum session_state	 state;
+	enum session_state	 prev_state;
+	u_int16_t		 holdtime;
 	u_int8_t		 auth_established;
-	struct peer		*next;
+	u_int8_t		 depend_ok;
 };
 
 struct peer	*peers;
@@ -193,11 +184,12 @@ pid_t		 session_main(struct bgpd_config *, struct peer *,
 		    struct mrt_head *, int[2], int[2], int[2]);
 void		 bgp_fsm(struct peer *, enum session_events);
 struct peer	*getpeerbyaddr(struct bgpd_addr *);
+struct peer	*getpeerbydesc(const char *);
 int		 imsg_compose_parent(int, pid_t, void *, u_int16_t);
 int		 imsg_compose_rde(int, pid_t, void *, u_int16_t);
 
 /* log.c */
-void		 log_statechange(const struct peer *, enum session_state,
+void		 log_statechange(struct peer *, enum session_state,
 		    enum session_events);
 void		 log_notification(const struct peer *, u_int8_t, u_int8_t,
 		    u_char *, u_int16_t);

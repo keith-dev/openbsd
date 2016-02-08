@@ -13,7 +13,7 @@
 
 #include <sendmail.h>
 
-SM_RCSID("@(#)$Sendmail: conf.c,v 8.1044 2004/06/11 21:38:16 ca Exp $")
+SM_RCSID("@(#)$Sendmail: conf.c,v 8.1052 2004/12/15 22:45:55 ca Exp $")
 
 #include <sendmail/pathnames.h>
 #if NEWDB
@@ -35,6 +35,12 @@ static void	setupmaps __P((void));
 static void	setupmailers __P((void));
 static void	setupqueues __P((void));
 static int	get_num_procs_online __P((void));
+static int	add_hostnames __P((SOCKADDR *));
+
+#if NETINET6 && NEEDSGETIPNODE
+static struct hostent *getipnodebyname __P((char *, int, int, int *));
+static struct hostent *getipnodebyaddr __P((char *, int, int, int *));
+#endif /* NETINET6 && NEEDSGETIPNODE */
 
 
 /*
@@ -144,6 +150,9 @@ struct prival PrivacyValues[] =
 	{ "noreceipts",		PRIV_NORECEIPTS		},
 	{ "nobodyreturn",	PRIV_NOBODYRETN		},
 	{ "goaway",		PRIV_GOAWAY		},
+#if _FFR_PRIV_NOACTUALRECIPIENT
+	{ "noactualrecipient",	PRIV_NOACTUALRECIPIENT	},
+#endif /* _FFR_PRIV_NOACTUALRECIPIENT */
 	{ NULL,			0			}
 };
 
@@ -6016,14 +6025,14 @@ char	*FFRCompileOptions[] =
 	/* Extended daemon status. */
 	"_FFR_CONTROL_MSTAT",
 #endif /* _FFR_CONTROL_MSTAT */
+#if _FFR_CRLPATH
+	/* CRLPath; needs documentation; Al Smith */
+	"_FFR_CRLPATH",
+#endif /* _FFR_CRLPATH */
 #if _FFR_DAEMON_NETUNIX
 	/* Allow local (not just TCP) socket connection to server. */
 	"_FFR_DAEMON_NETUNIX",
 #endif /* _FFR_DAEMON_NETUNIX */
-#if _FFR_DEAL_WITH_ERROR_SSL
-	/* Deal with SSL errors by recognizing them as EOF. */
-	"_FFR_DEAL_WITH_ERROR_SSL",
-#endif /* _FFR_DEAL_WITH_ERROR_SSL */
 #if _FFR_DEPRECATE_MAILER_FLAG_I
 	/* What it says :-) */
 	"_FFR_DEPRECATE_MAILER_FLAG_I",
@@ -6104,6 +6113,10 @@ char	*FFRCompileOptions[] =
 	/* Set 'h' in {addr_type} for headers. */
 	"_FFR_HDR_TYPE",
 #endif /* _FFR_HDR_TYPE */
+#if _FFR_HELONAME
+	/* option to set heloname; Nik Clayton of FreeBSD */
+	"_FFR_HELONAME",
+#endif /* _FFR_HELONAME */
 #if _FFR_HPUX_NSSWITCH
 	/* Use nsswitch on HP-UX */
 	"_FFR_HPUX_NSSWITCH",
@@ -6116,6 +6129,16 @@ char	*FFRCompileOptions[] =
 	/* Ignore extensions offered in response to HELO */
 	"_FFR_IGNORE_EXT_ON_HELO",
 #endif /* _FFR_IGNORE_EXT_ON_HELO */
+#if _FFR_MAXDATASIZE
+	/*
+	**  It is possible that a header is larger than MILTER_CHUNK_SIZE,
+	**  hence this shouldn't be used as limit for milter communication.
+	**  see also libmilter/comm.c
+	**  Gurusamy Sarathy of ActiveState
+	*/
+
+	"_FFR_MAXDATASIZE",
+#endif /* _FFR_MAXDATASIZE */
 #if _FFR_MAX_FORWARD_ENTRIES
 	/* Try to limit number of .forward entries */
 	/* (doesn't work) */
@@ -6149,6 +6172,15 @@ char	*FFRCompileOptions[] =
 	/* Disable PIPELINING, delay client if used. */
 	"_FFR_NO_PIPE",
 #endif /* _FFR_NO_PIPE */
+#if _FFR_PRIV_NOACTUALRECIPIENT
+	/*
+	** PrivacyOptions=noactualrecipient stops sendmail from putting 
+	** X-Actual-Recipient lines in DSNs revealing the actual 
+	** account that addresses map to.  Patch from Dan Harkless.
+	*/
+
+	"_FFR_PRIV_NOACTUALRECIPIENT"
+#endif /* _FFR_PRIV_NOACTUALRECIPIENT */
 #if _FFR_QUEUEDELAY
 	/* Exponential queue delay; disabled in 8.13 since it isn't used. */
 	"_FFR_QUEUEDELAY",
@@ -6197,7 +6229,7 @@ char	*FFRCompileOptions[] =
 #endif /* _FFR_SHM_STATUS */
 #if _FFR_SKIP_DOMAINS
 	/* process every N'th domain instead of every N'th message */
-	"_FFR_SKIP_DOMAINS"
+	"_FFR_SKIP_DOMAINS",
 #endif /* _FFR_SKIP_DOMAINS */
 #if _FFR_SLEEP_USE_SELECT
 	/* Use select(2) in libsm/clock.c to emulate sleep(2) */

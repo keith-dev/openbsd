@@ -22,8 +22,10 @@
 #include "defs.h"
 #include "gdbcore.h"
 #include "regcache.h"
+#include "target.h"
 
 #include "i386-tdep.h"
+#include "i386bsd-nat.h"
 
 /* Support for debugging kernel virtual memory images.  */
 
@@ -58,14 +60,28 @@ i386nbsd_supply_pcb (struct regcache *regcache, struct pcb *pcb)
   if (pcb->pcb_esp == 0)
     return 0;
 
+  /* Read the stack frame, and check its validity.  We do this by
+     checking if the saved interrupt priority level in the stack frame
+     looks reasonable..  */
   read_memory (pcb->pcb_esp, (char *) &sf, sizeof sf);
-  pcb->pcb_esp += sizeof (struct switchframe);
-  regcache_raw_supply (regcache, I386_EDI_REGNUM, &sf.sf_edi);
-  regcache_raw_supply (regcache, I386_ESI_REGNUM, &sf.sf_esi);
+  if ((unsigned int) sf.sf_ppl < 0x100 && (sf.sf_ppl & 0xf) == 0)
+    {
+      /* Yes, we have a frame that matches cpu_switch().  */
+      pcb->pcb_esp += sizeof (struct switchframe);
+      regcache_raw_supply (regcache, I386_EDI_REGNUM, &sf.sf_edi);
+      regcache_raw_supply (regcache, I386_ESI_REGNUM, &sf.sf_esi);
+      regcache_raw_supply (regcache, I386_EBX_REGNUM, &sf.sf_ebx);
+      regcache_raw_supply (regcache, I386_EIP_REGNUM, &sf.sf_eip);
+    }
+  else
+    {
+      /* No, the pcb must have been last updated by savectx().  */
+      pcb->pcb_esp += 4;
+      regcache_raw_supply (regcache, I386_EIP_REGNUM, &sf);
+    }
+
   regcache_raw_supply (regcache, I386_EBP_REGNUM, &pcb->pcb_ebp);
   regcache_raw_supply (regcache, I386_ESP_REGNUM, &pcb->pcb_esp);
-  regcache_raw_supply (regcache, I386_EBX_REGNUM, &sf.sf_ebx);
-  regcache_raw_supply (regcache, I386_EIP_REGNUM, &sf.sf_eip);
 
   return 1;
 }
@@ -77,6 +93,9 @@ void _initialize_i386nbsd_nat (void);
 void
 _initialize_i386nbsd_nat (void)
 {
+  /* We've got nothing to add to the common *BSD/i386 target.  */
+  add_target (i386bsd_target ());
+
   /* Support debugging kernel virtual memory images.  */
   bsd_kvm_add_target (i386nbsd_supply_pcb);
 }

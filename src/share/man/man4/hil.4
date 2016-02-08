@@ -1,4 +1,4 @@
-.\"	$OpenBSD: hil.4,v 1.5 2003/08/19 03:44:44 mickey Exp $
+.\"	$OpenBSD: hil.4,v 1.7 2005/01/14 22:39:19 miod Exp $
 .\"
 .\" Copyright (c) 2003 Miodrag Vallat.
 .\" All rights reserved.
@@ -24,17 +24,19 @@
 .\" THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 .\"
 .\"
-.Dd February 11, 2003
+.Dd January 12, 2005
 .Dt HIL 4
 .Os
 .Sh NAME
 .Nm hil
 .Nd HP-HIL driver
 .Sh SYNOPSIS
-.Cd "hil* at gsc? irq 1"
-.Cd "hilkbd* at hil? code ?"
-.Cd "hilms* at hil? code ?"
-.Cd "hilid* at hil? code ?"
+.Cd "hil* at intio?                  " Pq hp300
+.Cd "hil* at gsc? irq 1              " Pq hppa
+.Pp
+.Cd "hilkbd* at hil?"
+.Cd "hilms* at hil?"
+.Cd "hilid* at hil?"
 .Sh DESCRIPTION
 The
 .Nm

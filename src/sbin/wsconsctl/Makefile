@@ -1,10 +1,11 @@
-#	$OpenBSD: Makefile,v 1.20 2004/08/06 22:41:07 pefo Exp $
+#	$OpenBSD: Makefile,v 1.22 2005/01/14 22:39:17 miod Exp $
 
 .if ${MACHINE} == "alpha" || ${MACHINE} == "amd64" || \
-    ${MACHINE} == "cats" || ${MACHINE} == "hppa" || \
-    ${MACHINE} == "i386" || ${MACHINE} == "luna88k" || \
-    ${MACHINE} == "macppc" || ${MACHINE} == "sparc" || \
-    ${MACHINE} == "sgi" || ${MACHINE} == "sparc64"
+    ${MACHINE} == "cats" || ${MACHINE} == "hp300" || \
+    ${MACHINE} == "hppa" || ${MACHINE} == "i386" || \
+    ${MACHINE} == "luna88k" || ${MACHINE} == "macppc" || \
+    ${MACHINE} == "sgi" || ${MACHINE} == "sparc" || \
+    ${MACHINE} == "sparc64" || ${MACHINE} == "zaurus"
 
 PROG=	wsconsctl
 SRCS=	display.c keyboard.c keysym.c map_parse.y map_scan.l \
@@ -25,6 +26,7 @@ NOPROG=yes
 .endif
 
 MAN=	wsconsctl.8
-MANSUBDIR=	alpha amd64 cats hppa i386 luna88k macppc sgi sparc sparc64
+MANSUBDIR=	alpha amd64 cats hp300 hppa i386 luna88k macppc sgi
+MANSUBDIR+=	sparc sparc64 zaurus
 
 .include <bsd.prog.mk>

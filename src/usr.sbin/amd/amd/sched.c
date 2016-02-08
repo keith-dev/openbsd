@@ -1,4 +1,4 @@
-/*	$OpenBSD: sched.c,v 1.11 2004/03/15 08:54:54 djm Exp $	*/
+/*	$OpenBSD: sched.c,v 1.13 2004/10/21 20:57:08 millert Exp $	*/
 
 /*
  * Copyright (c) 1990 Jan-Simon Pendry
@@ -34,7 +34,7 @@
  * SUCH DAMAGE.
  *
  *	from: @(#)sched.c	8.1 (Berkeley) 6/6/93
- *	$Id: sched.c,v 1.11 2004/03/15 08:54:54 djm Exp $
+ *	$Id: sched.c,v 1.13 2004/10/21 20:57:08 millert Exp $
  */
 
 /*

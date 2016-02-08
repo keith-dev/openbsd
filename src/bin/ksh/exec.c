@@ -1,4 +1,4 @@
-/*	$OpenBSD: exec.c,v 1.31 2003/12/15 05:25:52 otto Exp $	*/
+/*	$OpenBSD: exec.c,v 1.39 2004/12/22 18:57:28 otto Exp $	*/
 
 /*
  * execute command tree
@@ -7,74 +7,31 @@
 #include "sh.h"
 #include "c_test.h"
 #include <ctype.h>
-#include "ksh_stat.h"
+#include <sys/stat.h>
 
 /* Does ps4 get parameter substitutions done? */
-#ifdef KSH
 # define PS4_SUBSTITUTE(s)	substitute((s), 0)
-#else
-# define PS4_SUBSTITUTE(s)	(s)
-#endif /* KSH */
 
-static int	comexec	 ARGS((struct op *t, struct tbl *volatile tp, char **ap,
-			      int volatile flags));
-static void	scriptexec ARGS((struct op *tp, char **ap));
-static int	call_builtin ARGS((struct tbl *tp, char **wp));
-static int	iosetup ARGS((struct ioword *iop, struct tbl *tp));
-static int	herein ARGS((const char *content, int sub));
-#ifdef KSH
-static char 	*do_selectargs ARGS((char **ap, bool_t print_menu));
-#endif /* KSH */
-#ifdef KSH
-static int	dbteste_isa ARGS((Test_env *te, Test_meta meta));
-static const char *dbteste_getopnd ARGS((Test_env *te, Test_op op,
-					 int do_eval));
-static int	dbteste_eval ARGS((Test_env *te, Test_op op, const char *opnd1,
-				const char *opnd2, int do_eval));
-static void	dbteste_error ARGS((Test_env *te, int offset, const char *msg));
-#endif /* KSH */
-#ifdef OS2
-static int	search_access1 ARGS((const char *path, int mode, int *errnop));
-#endif /* OS2 */
-
-
-/*
- * handle systems that don't have F_SETFD
- */
-#ifndef F_SETFD
-# ifndef MAXFD
-#   define  MAXFD 64
-# endif
-/* a bit field would be smaller, but this will work */
-static char clexec_tab[MAXFD+1];
-#endif
-
-/*
- * we now use this function always.
- */
-int
-fd_clexec(fd)
-    int fd;
-{
-#ifndef F_SETFD
-	if (fd >= 0 && fd < sizeof(clexec_tab)) {
-		clexec_tab[fd] = 1;
-		return 0;
-	}
-	return -1;
-#else
-	return fcntl(fd, F_SETFD, 1);
-#endif
-}
+static int	comexec(struct op *, struct tbl *volatile, char **,
+		    int volatile);
+static void	scriptexec(struct op *, char **);
+static int	call_builtin(struct tbl *, char **);
+static int	iosetup(struct ioword *, struct tbl *);
+static int	herein(const char *, int);
+static char 	*do_selectargs(char **, bool);
+static int	dbteste_isa(Test_env *, Test_meta);
+static const char *dbteste_getopnd(Test_env *, Test_op, int);
+static int	dbteste_eval(Test_env *, Test_op, const char *, const char *,
+		    int);
+static void	dbteste_error(Test_env *, int, const char *);
 
 
 /*
  * execute command tree
  */
 int
-execute(t, flags)
-	struct op * volatile t;
-	volatile int flags;	/* if XEXEC don't fork */
+execute(struct op *volatile t,
+    volatile int flags)		/* if XEXEC don't fork */
 {
 	int i;
 	volatile int rv = 0;
@@ -89,9 +46,9 @@ execute(t, flags)
 
 	/* Is this the end of a pipeline?  If so, we want to evaluate the
 	 * command arguments
-	bool_t eval_done = FALSE;
+	bool eval_done = false;
 	if ((flags&XFORK) && !(flags&XEXEC) && (flags&XPCLOSE)) {
-		eval_done = TRUE;
+		eval_done = true;
 		tp = eval_execute_args(t, &ap);
 	}
 	 */
@@ -151,7 +108,7 @@ execute(t, flags)
 				goto Break;
 			}
 		}
-	
+
 	switch(t->type) {
 	  case TCOM:
 		rv = comexec(t, tp, ap, flags);
@@ -165,18 +122,18 @@ execute(t, flags)
 		flags |= XFORK;
 		flags &= ~XEXEC;
 		e->savefd[0] = savefd(0, 0);
-		(void) ksh_dup2(e->savefd[0], 0, FALSE); /* stdin of first */
+		(void) ksh_dup2(e->savefd[0], 0, false); /* stdin of first */
 		e->savefd[1] = savefd(1, 0);
 		while (t->type == TPIPE) {
 			openpipe(pv);
-			(void) ksh_dup2(pv[1], 1, FALSE); /* stdout of curr */
+			(void) ksh_dup2(pv[1], 1, false); /* stdout of curr */
 			/* Let exchild() close pv[0] in child
 			 * (if this isn't done, commands like
 			 *    (: ; cat /etc/termcap) | sleep 1
 			 *  will hang forever).
 			 */
 			exchild(t->left, flags|XPIPEO|XCCLOSE, pv[0]);
-			(void) ksh_dup2(pv[0], 0, FALSE); /* stdin of next */
+			(void) ksh_dup2(pv[0], 0, false); /* stdin of next */
 			closepipe(pv);
 			flags |= XPIPEI;
 			t = t->right;
@@ -197,33 +154,28 @@ execute(t, flags)
 		rv = execute(t, flags & XERROK);
 		break;
 
-#ifdef KSH
 	  case TCOPROC:
 	  {
-# ifdef JOB_SIGS
 		sigset_t	omask;
-# endif /* JOB_SIGS */
 
-# ifdef JOB_SIGS
 		/* Block sigchild as we are using things changed in the
 		 * signal handler
 		 */
 		sigprocmask(SIG_BLOCK, &sm_sigchld, &omask);
 		e->type = E_ERRH;
-		i = ksh_sigsetjmp(e->jbuf, 0);
+		i = sigsetjmp(e->jbuf, 0);
 		if (i) {
 			sigprocmask(SIG_SETMASK, &omask, (sigset_t *) 0);
-			quitenv();
+			quitenv(NULL);
 			unwind(i);
 			/*NOTREACHED*/
 		}
-# endif /* JOB_SIGS */
 		/* Already have a (live) co-process? */
 		if (coproc.job && coproc.write >= 0)
 			errorf("coprocess already exists");
 
 		/* Can we re-use the existing co-process pipe? */
-		coproc_cleanup(TRUE);
+		coproc_cleanup(true);
 
 		/* do this before opening pipes, in case these fail */
 		e->savefd[0] = savefd(0, 0);
@@ -231,27 +183,25 @@ execute(t, flags)
 
 		openpipe(pv);
 		if (pv[0] != 0) {
-			ksh_dup2(pv[0], 0, FALSE);
+			ksh_dup2(pv[0], 0, false);
 			close(pv[0]);
 		}
 		coproc.write = pv[1];
 		coproc.job = (void *) 0;
 
 		if (coproc.readw >= 0)
-			ksh_dup2(coproc.readw, 1, FALSE);
+			ksh_dup2(coproc.readw, 1, false);
 		else {
 			openpipe(pv);
 			coproc.read = pv[0];
-			ksh_dup2(pv[1], 1, FALSE);
+			ksh_dup2(pv[1], 1, false);
 			coproc.readw = pv[1];	 /* closed before first read */
 			coproc.njobs = 0;
 			/* create new coprocess id */
 			++coproc.id;
 		}
-# ifdef JOB_SIGS
 		sigprocmask(SIG_SETMASK, &omask, (sigset_t *) 0);
 		e->type = E_EXEC; /* no more need for error handler */
-# endif /* JOB_SIGS */
 
 		/* exchild() closes coproc.* in child after fork,
 		 * will also increment coproc.njobs when the
@@ -262,7 +212,6 @@ execute(t, flags)
 			coproc.readw);
 		break;
 	  }
-#endif /* KSH */
 
 	  case TASYNC:
 		/* XXX non-optimal, I think - "(foo &)", forks for (),
@@ -285,7 +234,6 @@ execute(t, flags)
 		rv = !execute(t->right, XERROK);
 		break;
 
-#ifdef KSH
 	  case TDBRACKET:
 	    {
 		Test_env te;
@@ -300,26 +248,23 @@ execute(t, flags)
 		rv = test_parse(&te);
 		break;
 	    }
-#endif /* KSH */
 
 	  case TFOR:
-#ifdef KSH
 	  case TSELECT:
 	    {
-		volatile bool_t is_first = TRUE;
-#endif /* KSH */
+		volatile bool is_first = true;
 		ap = (t->vars != NULL) ?
 			  eval(t->vars, DOBLANK|DOGLOB|DOTILDE)
 			: e->loc->argv + 1;
 		e->type = E_LOOP;
 		while (1) {
-			i = ksh_sigsetjmp(e->jbuf, 0);
+			i = sigsetjmp(e->jbuf, 0);
 			if (!i)
 				break;
 			if ((e->flags&EF_BRKCONT_PASS)
 			    || (i != LBREAK && i != LCONTIN))
 			{
-				quitenv();
+				quitenv(NULL);
 				unwind(i);
 			} else if (i == LBREAK) {
 				rv = 0;
@@ -332,34 +277,31 @@ execute(t, flags)
 				setstr(global(t->str), *ap++, KSH_UNWIND_ERROR);
 				rv = execute(t->left, flags & XERROK);
 			}
-		}
-#ifdef KSH
-		else { /* TSELECT */
+		} else { /* TSELECT */
 			for (;;) {
 				if (!(cp = do_selectargs(ap, is_first))) {
 					rv = 1;
 					break;
 				}
-				is_first = FALSE;
+				is_first = false;
 				setstr(global(t->str), cp, KSH_UNWIND_ERROR);
 				rv = execute(t->left, flags & XERROK);
 			}
 		}
 	    }
-#endif /* KSH */
 		break;
 
 	  case TWHILE:
 	  case TUNTIL:
 		e->type = E_LOOP;
 		while (1) {
-			i = ksh_sigsetjmp(e->jbuf, 0);
+			i = sigsetjmp(e->jbuf, 0);
 			if (!i)
 				break;
 			if ((e->flags&EF_BRKCONT_PASS)
 			    || (i != LBREAK && i != LCONTIN))
 			{
-				quitenv();
+				quitenv(NULL);
 				unwind(i);
 			} else if (i == LBREAK) {
 				rv = 0;
@@ -385,7 +327,7 @@ execute(t, flags)
 		for (t = t->left; t != NULL && t->type == TPAT; t = t->right)
 		    for (ap = t->vars; *ap; ap++)
 			if ((s = evalstr(*ap, DOTILDE|DOPAT))
-			    && gmatch(cp, s, FALSE))
+			    && gmatch(cp, s, false))
 				goto Found;
 		break;
 	  Found:
@@ -410,17 +352,9 @@ execute(t, flags)
 	  case TEXEC:		/* an eval'd TCOM */
 		s = t->args[0];
 		ap = makenv();
-#ifndef F_SETFD
-		for (i = 0; i < sizeof(clexec_tab); i++)
-			if (clexec_tab[i]) {
-				close(i);
-				clexec_tab[i] = 0;
-			}
-#endif
 		restoresigs();
 		cleanup_proc_env();
-		/* XINTACT bit is for OS2 */
-		ksh_execve(t->str, t->args, ap, (flags & XINTACT) ? 1 : 0);
+		execve(t->str, t->args, ap);
 		if (errno == ENOEXEC)
 			scriptexec(t, ap);
 		else
@@ -429,7 +363,7 @@ execute(t, flags)
     Break:
 	exstat = rv;
 
-	quitenv();		/* restores IO */
+	quitenv(NULL);		/* restores IO */
 	if ((flags&XEXEC))
 		unwind(LEXIT);	/* exit child */
 	if (rv != 0 && !(flags & XERROK)) {
@@ -445,23 +379,18 @@ execute(t, flags)
  */
 
 static int
-comexec(t, tp, ap, flags)
-	struct op *t;
-	struct tbl *volatile tp;
-	register char **ap;
-	int volatile flags;
+comexec(struct op *t, struct tbl *volatile tp, char **ap, volatile int flags)
 {
 	int i;
 	volatile int rv = 0;
-	register char *cp;
-	register char **lastp;
+	char *cp;
+	char **lastp;
 	static struct op texec; /* Must be static (XXX but why?) */
 	int type_flags;
 	int keepasn_ok;
 	int fcflags = FC_BI|FC_FUNC|FC_PATH;
 	int bourne_function_call = 0;
 
-#ifdef KSH
 	/* snag the last argument for $_ XXX not the same as at&t ksh,
 	 * which only seems to set $_ after a newline (but not in
 	 * functions/dot scripts, but in interactive and script) -
@@ -474,7 +403,6 @@ comexec(t, tp, ap, flags)
 		setstr(typeset("_", LOCAL, 0, INTEGER, 0), *--lastp,
 		       KSH_RETURN_ERROR);
 	}
-#endif /* KSH */
 
 	/* Deal with the shell builtins builtin, exec and command since
 	 * they can be followed by other commands.  This must be done before
@@ -521,7 +449,7 @@ comexec(t, tp, ap, flags)
 			fcflags = FC_BI|FC_PATH;
 			if (saw_p) {
 				if (Flag(FRESTRICTED)) {
-					warningf(TRUE,
+					warningf(true,
 						"command -p: restricted");
 					rv = 1;
 					goto Leave;
@@ -577,8 +505,8 @@ comexec(t, tp, ap, flags)
 		rv = subst_exstat;
 		goto Leave;
 	} else if (!tp) {
-		if (Flag(FRESTRICTED) && ksh_strchr_dirsep(cp)) {
-			warningf(TRUE, "%s: restricted", cp);
+		if (Flag(FRESTRICTED) && strchr(cp, '/')) {
+			warningf(true, "%s: restricted", cp);
 			rv = 1;
 			goto Leave;
 		}
@@ -601,28 +529,28 @@ comexec(t, tp, ap, flags)
 
 			if (!tp->u.fpath) {
 				if (tp->u2.errno_) {
-					warningf(TRUE,
+					warningf(true,
 				"%s: can't find function definition file - %s",
 						cp, strerror(tp->u2.errno_));
 					rv = 126;
 				} else {
-					warningf(TRUE,
+					warningf(true,
 				"%s: can't find function definition file", cp);
 					rv = 127;
 				}
 				break;
 			}
 			if (include(tp->u.fpath, 0, (char **) 0, 0) < 0) {
-				warningf(TRUE,
+				warningf(true,
 			    "%s: can't open function definition file %s - %s",
 					cp, tp->u.fpath, strerror(errno));
 				rv = 127;
 				break;
 			}
-			if (!(ftp = findfunc(cp, hash(cp), FALSE))
+			if (!(ftp = findfunc(cp, hash(cp), false))
 			    || !(ftp->flag & ISSET))
 			{
-				warningf(TRUE,
+				warningf(true,
 					"%s: function not defined by %s",
 					cp, tp->u.fpath);
 				rv = 127;
@@ -653,13 +581,13 @@ comexec(t, tp, ap, flags)
 		}
 
 		old_xflag = Flag(FXTRACE);
-		Flag(FXTRACE) = tp->flag & TRACE ? TRUE : FALSE;
+		Flag(FXTRACE) = tp->flag & TRACE ? true : false;
 
 		old_inuse = tp->flag & FINUSE;
 		tp->flag |= FINUSE;
 
 		e->type = E_FUNC;
-		i = ksh_sigsetjmp(e->jbuf, 0);
+		i = sigsetjmp(e->jbuf, 0);
 		if (i == 0) {
 			/* seems odd to pass XERROK here, but at&t ksh does */
 			exstat = execute(tp->val.t, flags & XERROK);
@@ -688,11 +616,11 @@ comexec(t, tp, ap, flags)
 		  case LEXIT:
 		  case LLEAVE:
 		  case LSHELL:
-			quitenv();
+			quitenv(NULL);
 			unwind(i);
 			/*NOTREACHED*/
 		  default:
-			quitenv();
+			quitenv(NULL);
 			internal_errorf(1, "CFUNC %d", i);
 		}
 		break;
@@ -707,24 +635,22 @@ comexec(t, tp, ap, flags)
 			 * useful error message and set the exit status to 126.
 			 */
 			if (tp->u2.errno_) {
-				warningf(TRUE, "%s: cannot execute - %s", cp,
+				warningf(true, "%s: cannot execute - %s", cp,
 					strerror(tp->u2.errno_));
 				rv = 126;	/* POSIX */
 			} else {
-				warningf(TRUE, "%s: not found", cp);
+				warningf(true, "%s: not found", cp);
 				rv = 127;
 			}
 			break;
 		}
 
-#ifdef KSH
 		if (!Flag(FSH)) {
 			/* set $_ to program's full path */
 			/* setstr() can't fail here */
 			setstr(typeset("_", LOCAL|EXPORT, 0, INTEGER, 0),
 			       tp->val.s, KSH_RETURN_ERROR);
 		}
-#endif /* KSH */
 
 		if (flags&XEXEC) {
 			j_exit();
@@ -751,9 +677,7 @@ comexec(t, tp, ap, flags)
 }
 
 static void
-scriptexec(tp, ap)
-	register struct op *tp;
-	register char **ap;
+scriptexec(struct op *tp, char **ap)
 {
 	char *shell;
 
@@ -764,111 +688,18 @@ scriptexec(tp, ap)
 		shell = EXECSHELL;
 
 	*tp->args-- = tp->str;
-#ifdef	SHARPBANG
-	{
-		char buf[LINE];
-		register char *cp;
-		register int fd, n;
-
-		buf[0] = '\0';
-		if ((fd = open(tp->str, O_RDONLY)) >= 0) {
-			if ((n = read(fd, buf, LINE - 1)) > 0)
-				buf[n] = '\0';
-			(void) close(fd);
-		}
-		if ((buf[0] == '#' && buf[1] == '!' && (cp = &buf[2]))
-# ifdef OS2
-		    || (strncmp(buf, "extproc", 7) == 0 && isspace(buf[7])
-			&& (cp = &buf[7]))
-# endif /* OS2 */
-		    )
-		{
-			while (*cp && (*cp == ' ' || *cp == '\t'))
-				cp++;
-			if (*cp && *cp != '\n') {
-				char *a0 = cp, *a1 = (char *) 0;
-# ifdef OS2
-				char *a2 = cp;
-# endif /* OS2 */
-
-				while (*cp && *cp != '\n' && *cp != ' '
-				       && *cp != '\t')
-				{
-# ifdef OS2
-			/* Allow shell search without prepended path
-			 * if shell with / in pathname cannot be found.
-			 * Use / explicitly so \ can be used if explicit
-			 * needs to be forced.
-			 */
-					if (*cp == '/')
-						a2 = cp + 1;
-# endif /* OS2 */
-					cp++;
-				}
-				if (*cp && *cp != '\n') {
-					*cp++ = '\0';
-					while (*cp
-					       && (*cp == ' ' || *cp == '\t'))
-						cp++;
-					if (*cp && *cp != '\n') {
-						a1 = cp;
-						/* all one argument */
-						while (*cp && *cp != '\n')
-							cp++;
-					}
-				}
-				if (*cp == '\n') {
-					*cp = '\0';
-					if (a1)
-						*tp->args-- = a1;
-# ifdef OS2
-					if (a0 != a2) {
-						char *tmp_a0 = str_nsave(a0,
-							strlen(a0) + 5, ATEMP);
-						if (search_access(tmp_a0, X_OK,
-								(int *) 0))
-							a0 = a2;
-						afree(tmp_a0, ATEMP);
-					}
-# endif /* OS2 */
-					shell = a0;
-				}
-			}
-# ifdef OS2
-		} else {
-		        /* Use ksh documented shell default if present
-			 * else use OS2_SHELL which is assumed to need
-			 * the /c option and '\' as dir separator.
-			 */
-		         char *p = shell;
-
-			 shell = str_val(global("EXECSHELL"));
-			 if (shell && *shell)
-				 shell = search(shell, path, X_OK, (int *) 0);
-			 if (!shell || !*shell) {
-				 shell = p;
-				 *tp->args-- = "/c";
-				 for (p = tp->str; *p; p++)
-					 if (*p == '/')
-						 *p = '\\';
-			 }
-# endif /* OS2 */
-		}
-	}
-#endif	/* SHARPBANG */
 	*tp->args = shell;
 
-	ksh_execve(tp->args[0], tp->args, ap, 0);
+	execve(tp->args[0], tp->args, ap);
 
 	/* report both the program that was run and the bogus shell */
 	errorf("%s: %s: %s", tp->str, shell, strerror(errno));
 }
 
 int
-shcomexec(wp)
-	register char **wp;
+shcomexec(char **wp)
 {
-	register struct tbl *tp;
+	struct tbl *tp;
 
 	tp = tsearch(&builtins, *wp, hash(*wp));
 	if (tp == NULL)
@@ -881,10 +712,7 @@ shcomexec(wp)
  * is created if none is found.
  */
 struct tbl *
-findfunc(name, h, create)
-	const char *name;
-	unsigned int h;
-	int create;
+findfunc(const char *name, unsigned int h, int create)
 {
 	struct block *l;
 	struct tbl *tp = (struct tbl *) 0;
@@ -909,15 +737,13 @@ findfunc(name, h, create)
  * function did not exist, returns 0 otherwise.
  */
 int
-define(name, t)
-	const char *name;
-	struct op *t;
+define(const char *name, struct op *t)
 {
 	struct tbl *tp;
 	int was_set = 0;
 
 	while (1) {
-		tp = findfunc(name, hash(name), TRUE);
+		tp = findfunc(name, hash(name), true);
 
 		if (tp->flag & ISSET)
 			was_set = 1;
@@ -954,11 +780,9 @@ define(name, t)
  * add builtin
  */
 void
-builtin(name, func)
-	const char *name;
-	int (*func) ARGS((char **));
+builtin(const char *name, int (*func) (char **))
 {
-	register struct tbl *tp;
+	struct tbl *tp;
 	Tflag flag;
 
 	/* see if any flags should be set for this builtin */
@@ -984,9 +808,9 @@ builtin(name, func)
  * either function, hashed command, or built-in (in that order)
  */
 struct tbl *
-findcom(name, flags)
-	const char *name;
-	int	flags;		/* FC_* */
+findcom(const char *name, int flags)
+	                 
+	   	      		/* FC_* */
 {
 	static struct tbl temp;
 	unsigned int h = hash(name);
@@ -995,7 +819,7 @@ findcom(name, flags)
 	char *fpath;			/* for function autoloading */
 	char *npath;
 
-	if (ksh_strchr_dirsep(name) != NULL) {
+	if (strchr(name, '/') != NULL) {
 		insert = 0;
 		/* prevent FPATH search below */
 		flags &= ~FC_FUNC;
@@ -1008,7 +832,7 @@ findcom(name, flags)
 	if ((flags & FC_SPECBI) && tbi && (tbi->flag & SPEC_BI))
 		tp = tbi;
 	if (!tp && (flags & FC_FUNC)) {
-		tp = findfunc(name, h, FALSE);
+		tp = findfunc(name, h, false);
 		if (tp && !(tp->flag & ISSET)) {
 			if ((fpath = str_val(global("FPATH"))) == null) {
 				tp->u.fpath = (char *) 0;
@@ -1032,7 +856,7 @@ findcom(name, flags)
 		tp = tbi;
 	if (!tp && (flags & FC_PATH) && !(flags & FC_DEFPATH)) {
 		tp = tsearch(&taliases, name, h);
-		if (tp && (tp->flag & ISSET) && eaccess(tp->val.s, X_OK) != 0) {
+		if (tp && (tp->flag & ISSET) && access(tp->val.s, X_OK) != 0) {
 			if (tp->flag & ALLOC) {
 				tp->flag &= ~ALLOC;
 				afree(tp->val.s, APERM);
@@ -1083,14 +907,14 @@ findcom(name, flags)
  * flush executable commands with relative paths
  */
 void
-flushcom(all)
-	int all;		/* just relative or all */
+flushcom(int all)
+	        		/* just relative or all */
 {
 	struct tbl *tp;
 	struct tstate ts;
 
 	for (twalk(&ts, &taliases); (tp = tnext(&ts)) != NULL; )
-		if ((tp->flag&ISSET) && (all || !ISDIRSEP(tp->val.s[0]))) {
+		if ((tp->flag&ISSET) && (all || tp->val.s[0] != '/')) {
 			if (tp->flag&ALLOC) {
 				tp->flag &= ~(ALLOC|ISSET);
 				afree(tp->val.s, APERM);
@@ -1101,18 +925,15 @@ flushcom(all)
 
 /* Check if path is something we want to find.  Returns -1 for failure. */
 int
-search_access(path, mode, errnop)
-	const char *path;
-	int mode;
-	int *errnop;		/* set if candidate found, but not suitable */
+search_access(const char *path, int mode,
+    int *errnop)	/* set if candidate found, but not suitable */
 {
-#ifndef OS2
 	int ret, err = 0;
 	struct stat statb;
 
 	if (stat(path, &statb) < 0)
 		return -1;
-	ret = eaccess(path, mode);
+	ret = access(path, mode);
 	if (ret < 0)
 		err = errno; /* File exists, but we can't access it */
 	else if (mode == X_OK
@@ -1126,83 +947,15 @@ search_access(path, mode, errnop)
 	if (err && errnop && !*errnop)
 		*errnop = err;
 	return ret;
-#else /* !OS2 */
-	/*
-	 * NOTE: ASSUMES path can be modified and has enough room at the
-	 *       end of the string for a suffix (ie, 4 extra characters).
-	 *	 Certain code knows this (eg, eval.c(globit()),
-	 *	 exec.c(search())).
-	 */
-	static char *xsuffixes[] = { ".ksh", ".exe", ".", ".sh", ".cmd",
-				     ".com", ".bat", (char *) 0
-				   };
-	static char *rsuffixes[] = { ".ksh", ".", ".sh", ".cmd", ".bat",
-				      (char *) 0
-				   };
-	int i;
-	char *mpath = (char *) path;
-	char *tp = mpath + strlen(mpath);
-	char *p;
-	char **sfx;
-
-	/* If a suffix has been specified, check if it is one of the
-	 * suffixes that indicate the file is executable - if so, change
-	 * the access test to R_OK...
-	 * This code assumes OS/2 files can have only one suffix...
-	 */
-	if ((p = strrchr((p = ksh_strrchr_dirsep(mpath)) ? p : mpath, '.'))) {
-		if (mode == X_OK)
-			mode = R_OK;
-		return search_access1(mpath, mode, errnop);
-	}
-	/* Try appending the various suffixes.  Different suffixes for
-	 * read and execute 'cause we don't want to read an executable...
-	 */
-	sfx = mode == R_OK ? rsuffixes : xsuffixes;
-	for (i = 0; sfx[i]; i++) {
-		strcpy(tp, p = sfx[i]);
-		if (search_access1(mpath, R_OK, errnop) == 0)
-			return 0;
-		*tp = '\0';
-	}
-	return -1;
-#endif /* !OS2 */
 }
-
-#ifdef OS2
-static int
-search_access1(path, mode, errnop)
-	const char *path;
-	int mode;
-	int *errnop;		/* set if candidate found, but not suitable */
-{
-	int ret, err = 0;
-	struct stat statb;
-
-	if (stat(path, &statb) < 0)
-		return -1;
-	ret = eaccess(path, mode);
-	if (ret < 0)
-		err = errno; /* File exists, but we can't access it */
-	else if (!S_ISREG(statb.st_mode)) {
-		ret = -1;
-		err = S_ISDIR(statb.st_mode) ? EISDIR : EACCES;
-	}
-	if (err && errnop && !*errnop)
-		*errnop = err;
-	return ret;
-}
-#endif /* OS2 */
 
 /*
  * search for command with PATH
  */
 char *
-search(name, path, mode, errnop)
-	const char *name;
-	const char *path;
-	int mode;		/* R_OK or X_OK */
-	int *errnop;		/* set if candidate found, but not suitable */
+search(const char *name, const char *path,
+    int mode,		/* R_OK or X_OK */
+    int *errnop)	/* set if candidate found, but not suitable */
 {
 	const char *sp, *p;
 	char *xp;
@@ -1211,26 +964,7 @@ search(name, path, mode, errnop)
 
 	if (errnop)
 		*errnop = 0;
-#ifdef OS2
-	/* Xinit() allocates 8 additional bytes, so appended suffixes won't
-	 * overflow the memory.
-	 */
-	namelen = strlen(name) + 1;
-	Xinit(xs, xp, namelen, ATEMP);
-	memcpy(Xstring(xs, xp), name, namelen);
-
- 	if (ksh_strchr_dirsep(name)) {
-		if (search_access(Xstring(xs, xp), mode, errnop) >= 0)
-			return Xstring(xs, xp); /* not Xclose() - see above */
-		Xfree(xs, xp);
-		return NULL;
-	}
-
-	/* Look in current context always. (os2 style) */
-	if (search_access(Xstring(xs, xp), mode, errnop) == 0)
-		return Xstring(xs, xp); /* not Xclose() - xp may be wrong */
-#else /* OS2 */
-	if (ksh_strchr_dirsep(name)) {
+	if (strchr(name, '/')) {
 		if (search_access(name, mode, errnop) == 0)
 			return (char *) name;
 		return NULL;
@@ -1238,28 +972,23 @@ search(name, path, mode, errnop)
 
 	namelen = strlen(name) + 1;
 	Xinit(xs, xp, 128, ATEMP);
-#endif /* OS2 */
 
 	sp = path;
 	while (sp != NULL) {
 		xp = Xstring(xs, xp);
-		if (!(p = strchr(sp, PATHSEP)))
+		if (!(p = strchr(sp, ':')))
 			p = sp + strlen(sp);
 		if (p != sp) {
 			XcheckN(xs, xp, p - sp);
 			memcpy(xp, sp, p - sp);
 			xp += p - sp;
-			*xp++ = DIRSEP;
+			*xp++ = '/';
 		}
 		sp = p;
 		XcheckN(xs, xp, namelen);
 		memcpy(xp, name, namelen);
- 		if (search_access(Xstring(xs, xp), mode, errnop) == 0)
-#ifdef OS2
- 			return Xstring(xs, xp); /* Not Xclose() - see above */
-#else /* OS2 */
+		if (search_access(Xstring(xs, xp), mode, errnop) == 0)
 			return Xclose(xs, xp + namelen);
-#endif /* OS2 */
 		if (*sp++ == '\0')
 			sp = NULL;
 	}
@@ -1268,9 +997,7 @@ search(name, path, mode, errnop)
 }
 
 static int
-call_builtin(tp, wp)
-	struct tbl *tp;
-	char **wp;
+call_builtin(struct tbl *tp, char **wp)
 {
 	int rv;
 
@@ -1291,14 +1018,12 @@ call_builtin(tp, wp)
  * set up redirection, saving old fd's in e->savefd
  */
 static int
-iosetup(iop, tp)
-	register struct ioword *iop;
-	struct tbl *tp;
+iosetup(struct ioword *iop, struct tbl *tp)
 {
-	register int u = -1;
+	int u = -1;
 	char *cp = iop->name;
 	int iotype = iop->flag & IOTYPE;
-	int do_open = 1, do_close = 0, UNINITIALIZED(flags);
+	int do_open = 1, do_close = 0, flags = 0;
 	struct ioword iotmp;
 	struct stat statb;
 
@@ -1357,7 +1082,7 @@ iosetup(iop, tp)
 				X_OK | ((iop->flag & IORDUP) ? R_OK : W_OK),
 				&emsg)) < 0)
 		{
-			warningf(TRUE, "%s: %s",
+			warningf(true, "%s: %s",
 				snptreef((char *) 0, 32, "%R", &iotmp), emsg);
 			return -1;
 		}
@@ -1368,19 +1093,15 @@ iosetup(iop, tp)
 	}
 	if (do_open) {
 		if (Flag(FRESTRICTED) && (flags & O_CREAT)) {
-			warningf(TRUE, "%s: restricted", cp);
+			warningf(true, "%s: restricted", cp);
 			return -1;
 		}
 		u = open(cp, flags, 0666);
-#ifdef OS2
-		if (u < 0 && strcmp(cp, "/dev/null") == 0)
-			u = open("nul", flags, 0666);
-#endif /* OS2 */
 	}
 	if (u < 0) {
 		/* herein() may already have printed message */
 		if (u == -1)
-			warningf(TRUE, "cannot %s %s: %s",
+			warningf(true, "cannot %s %s: %s",
 			       iotype == IODUP ? "dup"
 				: (iotype == IOREAD || iotype == IOHERE) ?
 				    "open" : "create", cp, strerror(errno));
@@ -1404,8 +1125,8 @@ iosetup(iop, tp)
 	if (do_close)
 		close(iop->unit);
 	else if (u != iop->unit) {
-		if (ksh_dup2(u, iop->unit, TRUE) < 0) {
-			warningf(TRUE,
+		if (ksh_dup2(u, iop->unit, true) < 0) {
+			warningf(true,
 				"could not finish (dup) redirection %s: %s",
 				snptreef((char *) 0, 32, "%R", &iotmp),
 				strerror(errno));
@@ -1415,7 +1136,6 @@ iosetup(iop, tp)
 		}
 		if (iotype != IODUP)
 			close(u);
-#ifdef KSH
 		/* Touching any co-process fd in an empty exec
 		 * causes the shell to close its copies
 		 */
@@ -1425,7 +1145,6 @@ iosetup(iop, tp)
 			else			/* possible exec >&p */
 				coproc_write_close(u);
 		}
-#endif /* KSH */
 	}
 	if (u == 2) /* Clear any write errors */
 		shf_reopen(2, SHF_WR, shl_out);
@@ -1437,9 +1156,7 @@ iosetup(iop, tp)
  * if unquoted here, expand here temp file into second temp file.
  */
 static int
-herein(content, sub)
-	const char *content;
-	int sub;
+herein(const char *content, int sub)
 {
 	volatile int fd = -1;
 	struct source *s, *volatile osource;
@@ -1449,7 +1166,7 @@ herein(content, sub)
 
 	/* ksh -c 'cat << EOF' can cause this... */
 	if (content == (char *) 0) {
-		warningf(TRUE, "here document missing");
+		warningf(true, "here document missing");
 		return -2; /* special to iosetup(): don't print error */
 	}
 
@@ -1458,7 +1175,7 @@ herein(content, sub)
 	 */
 	h = maketemp(ATEMP, TT_HEREDOC_EXP, &e->temps);
 	if (!(shf = h->shf) || (fd = open(h->name, O_RDONLY, 0)) < 0) {
-		warningf(TRUE, "can't %s temporary file %s: %s",
+		warningf(true, "can't %s temporary file %s: %s",
 			!shf ? "create" : "open",
 			h->name, strerror(errno));
 		if (shf)
@@ -1468,11 +1185,10 @@ herein(content, sub)
 
 	osource = source;
 	newenv(E_ERRH);
-	i = ksh_sigsetjmp(e->jbuf, 0);
+	i = sigsetjmp(e->jbuf, 0);
 	if (i) {
 		source = osource;
-		quitenv();
-		shf_close(shf);	/* after quitenv */
+		quitenv(shf);
 		close(fd);
 		return -2; /* special to iosetup(): don't print error */
 	}
@@ -1488,11 +1204,11 @@ herein(content, sub)
 	} else
 		shf_puts(content, shf);
 
-	quitenv();
+	quitenv(NULL);
 
 	if (shf_close(shf) == EOF) {
 		close(fd);
-		warningf(TRUE, "error writing %s: %s", h->name,
+		warningf(true, "error writing %s: %s", h->name,
 			strerror(errno));
 		return -2; /* special to iosetup(): don't print error */
 	}
@@ -1500,15 +1216,13 @@ herein(content, sub)
 	return fd;
 }
 
-#if defined(KSH) || defined(EDIT)
+#ifdef EDIT
 /*
  *	ksh special - the select command processing section
  *	print the args in column form - assuming that we can
  */
 static char *
-do_selectargs(ap, print_menu)
-	register char **ap;
-	bool_t print_menu;
+do_selectargs(char **ap, bool print_menu)
 {
 	static const char *const read_args[] = {
 					"read", "-r", "REPLY", (char *) 0
@@ -1544,15 +1258,11 @@ struct select_menu_info {
 	int	num_width;
 } info;
 
-static char *select_fmt_entry ARGS((void *arg, int i, char *buf, int buflen));
+static char *select_fmt_entry(void *arg, int i, char *buf, int buflen);
 
 /* format a single select menu item */
 static char *
-select_fmt_entry(arg, i, buf, buflen)
-	void *arg;
-	int i;
-	char *buf;
-	int buflen;
+select_fmt_entry(void *arg, int i, char *buf, int buflen)
 {
 	struct select_menu_info *smi = (struct select_menu_info *) arg;
 
@@ -1565,8 +1275,7 @@ select_fmt_entry(arg, i, buf, buflen)
  *	print a select style menu
  */
 int
-pr_menu(ap)
-	char *const *ap;
+pr_menu(char *const *ap)
 {
 	struct select_menu_info smi;
 	char *const *pp;
@@ -1606,22 +1315,17 @@ pr_menu(ap)
 
 /* XXX: horrible kludge to fit within the framework */
 
-static char *plain_fmt_entry ARGS((void *arg, int i, char *buf, int buflen));
+static char *plain_fmt_entry(void *arg, int i, char *buf, int buflen);
 
 static char *
-plain_fmt_entry(arg, i, buf, buflen)
-	void *arg;
-	int i;
-	char *buf;
-	int buflen;
+plain_fmt_entry(void *arg, int i, char *buf, int buflen)
 {
 	shf_snprintf(buf, buflen, "%s", ((char *const *)arg)[i]);
 	return buf;
 }
 
 int
-pr_list(ap)
-	char *const *ap;
+pr_list(char *const *ap)
 {
 	char *const *pp;
 	int nwidth;
@@ -1635,8 +1339,7 @@ pr_list(ap)
 
 	return n;
 }
-#endif /* KSH || EDIT */
-#ifdef KSH
+#endif /* EDIT */
 
 /*
  *	[[ ... ]] evaluation routines
@@ -1650,9 +1353,7 @@ extern const char db_close[];
  * TM_UNOP and TM_BINOP, the returned value is a Test_op).
  */
 static int
-dbteste_isa(te, meta)
-	Test_env *te;
-	Test_meta meta;
+dbteste_isa(Test_env *te, Test_meta meta)
 {
 	int ret = 0;
 	int uqword;
@@ -1691,10 +1392,7 @@ dbteste_isa(te, meta)
 }
 
 static const char *
-dbteste_getopnd(te, op, do_eval)
-	Test_env *te;
-	Test_op op;
-	int do_eval;
+dbteste_getopnd(Test_env *te, Test_op op, int do_eval)
 {
 	char *s = *te->pos.wp;
 
@@ -1715,23 +1413,15 @@ dbteste_getopnd(te, op, do_eval)
 }
 
 static int
-dbteste_eval(te, op, opnd1, opnd2, do_eval)
-	Test_env *te;
-	Test_op op;
-	const char *opnd1;
-	const char *opnd2;
-	int do_eval;
+dbteste_eval(Test_env *te, Test_op op, const char *opnd1, const char *opnd2,
+    int do_eval)
 {
 	return test_eval(te, op, opnd1, opnd2, do_eval);
 }
 
 static void
-dbteste_error(te, offset, msg)
-	Test_env *te;
-	int offset;
-	const char *msg;
+dbteste_error(Test_env *te, int offset, const char *msg)
 {
 	te->flags |= TEF_ERROR;
 	internal_errorf(0, "dbteste_error: %s (offset %d)", msg, offset);
 }
-#endif /* KSH */

@@ -1,4 +1,4 @@
-/*	$OpenBSD: bgpd.h,v 1.141 2004/08/20 15:49:02 henning Exp $ */
+/*	$OpenBSD: bgpd.h,v 1.159 2005/03/15 10:18:39 henning Exp $ */
 
 /*
  * Copyright (c) 2003, 2004 Henning Brauer <henning@openbsd.org>
@@ -43,6 +43,7 @@
 #define	MIN_HOLDTIME			3
 #define	READ_BUF_SIZE			65535
 #define	RT_BUF_SIZE			16384
+#define	MAX_RTSOCK_BUF			128 * 1024
 
 #define	BGPD_OPT_VERBOSE		0x0001
 #define	BGPD_OPT_VERBOSE2		0x0002
@@ -51,6 +52,9 @@
 #define	BGPD_FLAG_NO_FIB_UPDATE		0x0001
 #define	BGPD_FLAG_NO_EVALUATE		0x0002
 #define	BGPD_FLAG_REFLECTOR		0x0004
+#define	BGPD_FLAG_DECISION_MASK		0x0f00
+#define	BGPD_FLAG_DECISION_ROUTEAGE	0x0100
+#define	BGPD_FLAG_DECISION_TRANS_AS	0x0200
 
 #define	BGPD_LOG_UPDATES		0x0001
 
@@ -82,16 +86,16 @@ enum reconf_action {
 struct buf {
 	TAILQ_ENTRY(buf)	 entry;
 	u_char			*buf;
-	ssize_t			 size;
-	ssize_t			 wpos;
-	ssize_t			 rpos;
+	size_t			 size;
+	size_t			 wpos;
+	size_t			 rpos;
 	int			 fd;
 };
 
 struct msgbuf {
+	TAILQ_HEAD(bufs, buf)	 bufs;
 	u_int32_t		 queued;
 	int			 fd;
-	TAILQ_HEAD(bufs, buf)	 bufs;
 };
 
 struct bgpd_addr {
@@ -125,15 +129,15 @@ struct listen_addr {
 TAILQ_HEAD(listen_addrs, listen_addr);
 
 struct bgpd_config {
+	struct listen_addrs			*listen_addrs;
 	int					 opts;
-	u_int16_t				 as;
-	u_int32_t				 bgpid;
-	u_int32_t				 clusterid;
-	u_int16_t				 holdtime;
-	u_int16_t				 min_holdtime;
 	int					 flags;
 	int					 log;
-	struct listen_addrs			*listen_addrs;
+	u_int32_t				 bgpid;
+	u_int32_t				 clusterid;
+	u_int16_t				 as;
+	u_int16_t				 holdtime;
+	u_int16_t				 min_holdtime;
 };
 
 struct buf_read {
@@ -156,19 +160,6 @@ enum enforce_as {
 	ENFORCE_AS_ON
 };
 
-struct filter_set {
-	u_int16_t		flags;
-	u_int32_t		localpref;
-	u_int32_t		med;
-	struct bgpd_addr	nexthop;
-	u_int8_t		prepend;
-	char			pftable[PFTABLE_LEN];
-	struct {
-		int		as;
-		int		type;
-	} community;
-};
-
 enum auth_method {
 	AUTH_NONE,
 	AUTH_MD5SIG,
@@ -179,55 +170,65 @@ enum auth_method {
 };
 
 struct peer_auth {
-	enum auth_method	method;
 	char			md5key[TCP_MD5_KEY_LEN];
-	u_int8_t		md5key_len;
-	u_int32_t		spi_in;
-	u_int32_t		spi_out;
-	u_int8_t		auth_alg_in;
-	u_int8_t		auth_alg_out;
 	char			auth_key_in[IPSEC_AUTH_KEY_LEN];
 	char			auth_key_out[IPSEC_AUTH_KEY_LEN];
+	char			enc_key_in[IPSEC_ENC_KEY_LEN];
+	char			enc_key_out[IPSEC_ENC_KEY_LEN];
+	u_int32_t		spi_in;
+	u_int32_t		spi_out;
+	enum auth_method	method;
+	u_int8_t		md5key_len;
+	u_int8_t		auth_alg_in;
+	u_int8_t		auth_alg_out;
 	u_int8_t		auth_keylen_in;
 	u_int8_t		auth_keylen_out;
 	u_int8_t		enc_alg_in;
 	u_int8_t		enc_alg_out;
-	char			enc_key_in[IPSEC_ENC_KEY_LEN];
-	char			enc_key_out[IPSEC_ENC_KEY_LEN];
 	u_int8_t		enc_keylen_in;
 	u_int8_t		enc_keylen_out;
 };
 
+struct capabilities {
+	u_int8_t	mp_v4;		/* multiprotocol extensions, RFC 2858 */
+	u_int8_t	mp_v6;
+	u_int8_t	refresh;	/* route refresh, RFC 2918 */
+};
+
+SIMPLEQ_HEAD(filter_set_head, filter_set);
+
 struct peer_config {
-	u_int32_t		 id;
-	u_int32_t		 groupid;
-	char			 group[PEER_DESCR_LEN];
-	char			 descr[PEER_DESCR_LEN];
 	struct bgpd_addr	 remote_addr;
 	struct bgpd_addr	 local_addr;
+	struct peer_auth	 auth;
+	struct capabilities	 capabilities;
+	struct filter_set_head	 attrset;
+	char			 group[PEER_DESCR_LEN];
+	char			 descr[PEER_DESCR_LEN];
+	char			 if_depend[IFNAMSIZ];
+	u_int32_t		 id;
+	u_int32_t		 groupid;
+	u_int32_t		 max_prefix;
+	enum announce_type	 announce_type;
+	enum enforce_as		 enforce_as;
+	enum reconf_action	 reconf_action;
+	u_int16_t		 remote_as;
+	u_int16_t		 holdtime;
+	u_int16_t		 min_holdtime;
 	u_int8_t		 template;
 	u_int8_t		 remote_masklen;
 	u_int8_t		 cloned;
-	u_int32_t		 max_prefix;
-	u_int16_t		 remote_as;
 	u_int8_t		 ebgp;		/* 1 = ebgp, 0 = ibgp */
 	u_int8_t		 distance;	/* 1 = direct, >1 = multihop */
 	u_int8_t		 passive;
-	u_int16_t		 holdtime;
-	u_int16_t		 min_holdtime;
-	struct filter_set	 attrset;
-	enum announce_type	 announce_type;
-	enum enforce_as		 enforce_as;
-	struct peer_auth	 auth;
-	u_int8_t		 capabilities;
+	u_int8_t		 announce_capa;
 	u_int8_t		 reflector_client;
-	enum reconf_action	 reconf_action;
 };
 
 struct network_config {
 	struct bgpd_addr	prefix;
+	struct filter_set_head	attrset;
 	u_int8_t		prefixlen;
-	struct filter_set	attrset;
 };
 
 TAILQ_HEAD(network_head, network);
@@ -248,11 +249,11 @@ struct imsg_fd {
 };
 
 struct imsgbuf {
-	int				fd;
-	pid_t				pid;
 	TAILQ_HEAD(fds, imsg_fd)	fds;
 	struct buf_read			r;
 	struct msgbuf			w;
+	int				fd;
+	pid_t				pid;
 };
 
 enum imsg_type {
@@ -264,6 +265,7 @@ enum imsg_type {
 	IMSG_RECONF_DONE,
 	IMSG_UPDATE,
 	IMSG_UPDATE_ERR,
+	IMSG_SESSION_ADD,
 	IMSG_SESSION_UP,
 	IMSG_SESSION_DOWN,
 	IMSG_MRT_OPEN,
@@ -280,6 +282,8 @@ enum imsg_type {
 	IMSG_NETWORK_ADD,
 	IMSG_NETWORK_REMOVE,
 	IMSG_NETWORK_FLUSH,
+	IMSG_NETWORK_DONE,
+	IMSG_FILTER_SET,
 	IMSG_CTL_SHOW_NEIGHBOR,
 	IMSG_CTL_END,
 	IMSG_CTL_RELOAD,
@@ -296,14 +300,15 @@ enum imsg_type {
 	IMSG_CTL_SHOW_RIB_AS,
 	IMSG_CTL_SHOW_RIB_PREFIX,
 	IMSG_CTL_SHOW_NETWORK,
-	IMSG_REFRESH
+	IMSG_REFRESH,
+	IMSG_IFINFO
 };
 
 struct imsg_hdr {
-	enum imsg_type	type;
-	u_int16_t	len;
 	u_int32_t	peerid;
 	pid_t		pid;
+	enum imsg_type	type;
+	u_int16_t	len;
 };
 
 struct imsg {
@@ -352,57 +357,64 @@ enum suberr_cease {
 
 struct kroute {
 	struct in_addr	prefix;
-	u_int8_t	prefixlen;
 	struct in_addr	nexthop;
 	u_int16_t	flags;
 	u_short		ifindex;
+	u_int8_t	prefixlen;
 };
 
 struct kroute6 {
 	struct in6_addr	prefix;
-	u_int8_t	prefixlen;
 	struct in6_addr	nexthop;
 	u_int16_t	flags;
 	u_short		ifindex;
+	u_int8_t	prefixlen;
 };
 
 struct kroute_nexthop {
-	struct bgpd_addr	nexthop;
-	u_int8_t		valid;
-	u_int8_t		connected;
-	struct bgpd_addr	gateway;
 	union {
 		struct kroute		kr4;
 		struct kroute6		kr6;
 	} kr;
+	struct bgpd_addr	nexthop;
+	struct bgpd_addr	gateway;
+	u_int8_t		valid;
+	u_int8_t		connected;
 };
 
 struct kif {
-	u_short			 ifindex;
-	int			 flags;
 	char			 ifname[IFNAMSIZ];
+	u_long			 baudrate;
+	int			 flags;
+	u_short			 ifindex;
 	u_int8_t		 media_type;
 	u_int8_t		 link_state;
-	u_long			 baudrate;
 	u_int8_t		 nh_reachable;	/* for nexthop verification */
 };
 
 struct session_up {
-	u_int32_t		remote_bgpid;
 	struct bgpd_addr	local_addr;
 	struct bgpd_addr	remote_addr;
-	struct peer_config	conf;
+	struct capabilities	capa_announced;
+	struct capabilities	capa_received;
+	u_int32_t		remote_bgpid;
 };
 
 struct pftable_msg {
-	char			pftable[PFTABLE_LEN];
 	struct bgpd_addr	addr;
+	char			pftable[PFTABLE_LEN];
 	u_int8_t		len;
 };
 
 struct ctl_show_nexthop {
 	struct bgpd_addr	addr;
 	u_int8_t		valid;
+	struct kif		kif;
+};
+
+struct ctl_neighbor {
+	struct bgpd_addr	addr;
+	char			descr[PEER_DESCR_LEN];
 };
 
 #define	F_RIB_ELIGIBLE	0x01
@@ -411,23 +423,23 @@ struct ctl_show_nexthop {
 #define	F_RIB_ANNOUNCE	0x08
 
 struct ctl_show_rib {
+	struct bgpd_addr	nexthop;
+	struct bgpd_addr	prefix;
 	time_t			lastchange;
 	u_int32_t		local_pref;
 	u_int32_t		med;
 	u_int16_t		prefix_cnt;
 	u_int16_t		active_cnt;
-	struct bgpd_addr	nexthop;
-	struct bgpd_addr	prefix;
+	u_int16_t		aspath_len;
 	u_int8_t		prefixlen;
 	u_int8_t		origin;
 	u_int8_t		flags;
-	u_int16_t		aspath_len;
 	/* plus a aspath_len bytes long aspath */
 };
 
 struct ctl_show_rib_prefix {
-	time_t			lastchange;
 	struct bgpd_addr	prefix;
+	time_t			lastchange;
 	u_int8_t		prefixlen;
 	u_int8_t		flags;
 };
@@ -440,9 +452,9 @@ enum as_spec {
 	AS_EMPTY
 };
 
-struct as_filter {
-	u_int16_t	as;
+struct filter_as {
 	enum as_spec	type;
+	u_int16_t	as;
 };
 
 enum filter_actions {
@@ -452,8 +464,10 @@ enum filter_actions {
 };
 
 enum directions {
-	DIR_IN=1,
-	DIR_OUT
+	DIR_IN = 1,
+	DIR_OUT,
+	DIR_DEFAULT_IN,		/* only needed to apply default set */
+	DIR_DEFAULT_OUT
 };
 
 enum from_spec {
@@ -475,17 +489,6 @@ enum comp_ops {
 	OP_GT
 };
 
-/* set flags */
-#define	SET_LOCALPREF		0x0001
-#define	SET_MED			0x0002
-#define	SET_NEXTHOP		0x0004
-#define	SET_NEXTHOP6		0x0008
-#define	SET_PREPEND		0x0010
-#define	SET_PFTABLE		0x0020
-#define	SET_COMMUNITY		0x0040
-#define	SET_NEXTHOP_REJECT	0x0080
-#define	SET_NEXTHOP_BLACKHOLE	0x0100
-
 struct filter_peers {
 	u_int32_t	peerid;
 	u_int32_t	groupid;
@@ -506,8 +509,8 @@ struct filter_prefix {
 };
 
 struct filter_prefixlen {
-	sa_family_t		af;
 	enum comp_ops		op;
+	sa_family_t		af;
 	u_int8_t		len_min;
 	u_int8_t		len_max;
 };
@@ -520,7 +523,7 @@ struct filter_community {
 struct filter_match {
 	struct filter_prefix	prefix;
 	struct filter_prefixlen	prefixlen;
-	struct as_filter	as;
+	struct filter_as	as;
 	struct filter_community	community;
 };
 
@@ -528,12 +531,41 @@ TAILQ_HEAD(filter_head, filter_rule);
 
 struct filter_rule {
 	TAILQ_ENTRY(filter_rule)	entry;
+	struct filter_peers		peer;
+	struct filter_match		match;
+	struct filter_set_head		set;
 	enum filter_actions		action;
 	enum directions			dir;
 	u_int8_t			quick;
-	struct filter_peers		peer;
-	struct filter_match		match;
-	struct filter_set		set;
+};
+
+enum action_types {
+	ACTION_SET_LOCALPREF,
+	ACTION_SET_RELATIVE_LOCALPREF,
+	ACTION_SET_MED,
+	ACTION_SET_RELATIVE_MED,
+	ACTION_SET_PREPEND_SELF,
+	ACTION_SET_PREPEND_PEER,
+	ACTION_SET_NEXTHOP,
+	ACTION_SET_NEXTHOP_REJECT,
+	ACTION_SET_NEXTHOP_BLACKHOLE,
+	ACTION_SET_NEXTHOP_NOMODIFY,
+	ACTION_SET_COMMUNITY,
+/*	ACTION_SCRUB_COMMUNITY, */
+	ACTION_PFTABLE
+};
+
+struct filter_set {
+	SIMPLEQ_ENTRY(filter_set)	entry;
+	union {
+		u_int8_t		prepend;
+		u_int32_t		metric;
+		int32_t			relative;
+		struct bgpd_addr	nexthop;
+		struct filter_community	community;
+		char			pftable[PFTABLE_LEN];
+	} action;
+	enum action_types		type;
 };
 
 struct rrefresh {
@@ -547,9 +579,10 @@ struct rrefresh {
 #define	AFI_ALL		0xffff
 
 /* Subsequent Address Family Identifier as per rfc2858 */
-#define	SAFI_UNICAST	1
-#define	SAFI_MULTICAST	2
-#define	SAFI_BOTH	3
+#define	SAFI_NONE	0x00
+#define	SAFI_UNICAST	0x01
+#define	SAFI_MULTICAST	0x02
+#define	SAFI_BOTH	0x03
 #define	SAFI_ALL	0xff
 
 /* prototypes */
@@ -558,9 +591,9 @@ void		 send_nexthop_update(struct kroute_nexthop *);
 void		 send_imsg_session(int, pid_t, void *, u_int16_t);
 
 /* buffer.c */
-struct buf	*buf_open(ssize_t);
-int		 buf_add(struct buf *, void *, ssize_t);
-void		*buf_reserve(struct buf *, ssize_t);
+struct buf	*buf_open(size_t);
+int		 buf_add(struct buf *, void *, size_t);
+void		*buf_reserve(struct buf *, size_t);
 int		 buf_close(struct msgbuf *, struct buf *);
 int		 buf_write(int, struct buf *);
 void		 buf_free(struct buf *);
@@ -595,11 +628,10 @@ int	 host(const char *, struct bgpd_addr *, u_int8_t *);
 void	 imsg_init(struct imsgbuf *, int);
 int	 imsg_read(struct imsgbuf *);
 int	 imsg_get(struct imsgbuf *, struct imsg *);
-int	 imsg_compose(struct imsgbuf *, int, u_int32_t, void *, u_int16_t);
-int	 imsg_compose_pid(struct imsgbuf *, int, pid_t, void *, u_int16_t);
-int	 imsg_compose_fdpass(struct imsgbuf *, int, int, void *, u_int16_t);
-struct buf *imsg_create(struct imsgbuf *, int, u_int32_t, u_int16_t);
-struct buf *imsg_create_pid(struct imsgbuf *, int, pid_t, u_int16_t);
+int	 imsg_compose(struct imsgbuf *, enum imsg_type, u_int32_t, pid_t, int,
+	    void *, u_int16_t);
+struct buf	*imsg_create(struct imsgbuf *, enum imsg_type, u_int32_t, pid_t,
+		    u_int16_t);
 int	 imsg_add(struct buf *, void *, u_int16_t);
 int	 imsg_close(struct imsgbuf *, struct buf *);
 void	 imsg_free(struct imsg *);
@@ -616,11 +648,11 @@ int		 kr_dispatch_msg(void);
 int		 kr_nexthop_add(struct bgpd_addr *);
 void		 kr_nexthop_delete(struct bgpd_addr *);
 void		 kr_show_route(struct imsg *);
+void		 kr_ifinfo(char *);
 in_addr_t	 prefixlen2mask(u_int8_t);
 struct in6_addr	*prefixlen2mask6(u_int8_t prefixlen);
 void		 inet6applymask(struct in6_addr *, const struct in6_addr *,
 		    int);
-
 
 /* control.c */
 int	control_init(void);

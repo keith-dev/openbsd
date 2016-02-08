@@ -1,4 +1,4 @@
-/*	$OpenBSD: comsat.c,v 1.31 2003/09/26 01:58:55 deraadt Exp $	*/
+/*	$OpenBSD: comsat.c,v 1.33 2004/09/16 10:53:02 otto Exp $	*/
 
 /*
  * Copyright (c) 1980, 1993
@@ -37,7 +37,7 @@ static char copyright[] =
 
 #ifndef lint
 /*static char sccsid[] = "from: @(#)comsat.c	8.1 (Berkeley) 6/4/93";*/
-static char rcsid[] = "$OpenBSD: comsat.c,v 1.31 2003/09/26 01:58:55 deraadt Exp $";
+static char rcsid[] = "$OpenBSD: comsat.c,v 1.33 2004/09/16 10:53:02 otto Exp $";
 #endif /* not lint */
 
 #include <sys/limits.h>
@@ -129,8 +129,8 @@ main(int argc, char *argv[])
 
 	for (;;) {
 		if (wantreadutmp) {
-			doreadutmp();
 			wantreadutmp = 0;
+			doreadutmp();
 		}
 
 		cc = recv(0, msgbuf, sizeof(msgbuf) - 1, 0);
@@ -152,6 +152,7 @@ main(int argc, char *argv[])
 	}
 }
 
+/* ARGSUSED */
 void
 reapchildren(int signo)
 {
@@ -162,6 +163,7 @@ reapchildren(int signo)
 	errno = save_errno;
 }
 
+/* ARGSUSED */
 void
 readutmp(int signo)
 {

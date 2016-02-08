@@ -1,4 +1,4 @@
-/* $OpenBSD: monitor.c,v 1.29 2004/08/12 11:21:07 hshoexer Exp $	 */
+/* $OpenBSD: monitor.c,v 1.36 2005/03/11 12:39:55 hshoexer Exp $	 */
 
 /*
  * Copyright (c) 2003 Håkan Olsson.  All rights reserved.
@@ -31,6 +31,8 @@
 #include <sys/stat.h>
 #include <sys/wait.h>
 #include <netinet/in.h>
+
+#include <dirent.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <pwd.h>
@@ -58,7 +60,7 @@ struct monitor_state {
 	pid_t           pid;
 	int             s;
 	char            root[MAXPATHLEN];
-}               m_state;
+} m_state;
 
 volatile sig_atomic_t sigchlded = 0;
 extern volatile sig_atomic_t sigtermed;
@@ -66,7 +68,7 @@ static volatile sig_atomic_t cur_state = STATE_INIT;
 
 /* Private functions.  */
 int             m_write_int32(int, int32_t);
-int             m_write_raw(int, char *, size_t);
+int             m_write_raw(int, const char *, size_t);
 int             m_read_int32(int, int32_t *);
 int             m_read_raw(int, char *, size_t);
 void            m_flush(int);
@@ -95,7 +97,7 @@ monitor_init(int debug)
 	struct passwd  *pw;
 	int             p[2];
 
-	memset(&m_state, 0, sizeof m_state);
+	bzero(&m_state, sizeof m_state);
 
 	if (socketpair(AF_UNIX, SOCK_STREAM, PF_UNSPEC, p) != 0)
 		log_fatal("monitor_init: socketpair() failed");
@@ -130,7 +132,6 @@ monitor_init(int debug)
 	} else {
 		setproctitle("monitor [priv]");
 	}
-
 
 	/* With "-dd", stop and wait here. For gdb "attach" etc.  */
 	if (debug > 1) {
@@ -219,19 +220,19 @@ monitor_open(const char *path, int flags, mode_t mode)
 {
 	int	fd, mode32 = (int32_t) mode;
 	int32_t	err;
-	char	realpath[MAXPATHLEN];
+	char	pathreal[MAXPATHLEN];
 
 	if (path[0] == '/')
-		strlcpy(realpath, path, sizeof realpath);
+		strlcpy(pathreal, path, sizeof pathreal);
 	else
-		snprintf(realpath, sizeof realpath, "%s/%s", m_state.root,
+		snprintf(pathreal, sizeof pathreal, "%s/%s", m_state.root,
 		    path);
 
 	/* Write data to priv process.  */
 	if (m_write_int32(m_state.s, MONITOR_GET_FD))
 		goto errout;
 
-	if (m_write_raw(m_state.s, realpath, strlen(realpath) + 1))
+	if (m_write_raw(m_state.s, pathreal, strlen(pathreal) + 1))
 		goto errout;
 
 	if (m_write_int32(m_state.s, flags))
@@ -327,45 +328,6 @@ monitor_stat(const char *path, struct stat *sb)
 }
 
 int
-monitor_socket(int domain, int type, int protocol)
-{
-	int	s;
-	int32_t	err;
-
-	if (m_write_int32(m_state.s, MONITOR_GET_SOCKET))
-		goto errout;
-
-	if (m_write_int32(m_state.s, (int32_t)domain))
-		goto errout;
-
-	if (m_write_int32(m_state.s, (int32_t)type))
-		goto errout;
-
-	if (m_write_int32(m_state.s, (int32_t)protocol))
-		goto errout;
-
-	if (m_read_int32(m_state.s, &err))
-		goto errout;
-
-	if (err != 0) {
-		errno = (int)err;
-		return -1;
-	}
-	/* Read result.  */
-	s = mm_receive_fd(m_state.s);
-	if (s < 0) {
-		log_error("monitor_socket: mm_receive_fd () failed: %s",
-		    strerror(errno));
-		return -1;
-	}
-	return s;
-
-errout:
-	log_error("monitor_socket: problem talking to privileged process");
-	return -1;
-}
-
-int
 monitor_setsockopt(int s, int level, int optname, const void *optval,
     socklen_t optlen)
 {
@@ -382,7 +344,7 @@ monitor_setsockopt(int s, int level, int optname, const void *optval,
 		goto errout;
 	if (m_write_int32(m_state.s, (int32_t)optlen))
 		goto errout;
-	if (m_write_raw(m_state.s, (char *)optval, (size_t)optlen))
+	if (m_write_raw(m_state.s, (const char *)optval, (size_t)optlen))
 		goto errout;
 
 	if (m_read_int32(m_state.s, &err))
@@ -413,7 +375,7 @@ monitor_bind(int s, const struct sockaddr *name, socklen_t namelen)
 
 	if (m_write_int32(m_state.s, (int32_t)namelen))
 		goto errout;
-	if (m_write_raw(m_state.s, (char *)name, (size_t)namelen))
+	if (m_write_raw(m_state.s, (const char *)name, (size_t)namelen))
 		goto errout;
 
 	if (m_read_int32(m_state.s, &err))
@@ -517,13 +479,11 @@ monitor_readdir(struct monitor_dirents *direntries)
 	return NULL;
 }
 
-int
+void
 monitor_closedir(struct monitor_dirents *direntries)
 {
 	free(direntries->dirents);
 	free(direntries);
-
-	return 0;
 }
 
 void
@@ -540,6 +500,7 @@ monitor_init_done(void)
  */
 
 /* Help functions for monitor_loop().  */
+/* ARGSUSED */
 static void
 monitor_got_sigchld(int sig)
 {
@@ -563,6 +524,7 @@ monitor_loop(int debug)
 	pid_t	 pid;
 	fd_set	*fds;
 	size_t	 fdsn;
+	int32_t	 msgcode;
 	int	 status, n, maxfd;
 
 	if (!debug)
@@ -609,89 +571,80 @@ monitor_loop(int debug)
 			}
 		}
 
-		memset(fds, 0, fdsn);
+		bzero(fds, fdsn);
 		FD_SET(m_state.s, fds);
 
 		n = select(maxfd, fds, NULL, NULL, NULL);
-		if (n == -1) {
-			if (errno != EINTR) {
+		if (n <= 0) {
+			if (n && errno != EINTR) {
 				log_error("select");
 				sleep(1);
 			}
-		} else if (n)
-			if (FD_ISSET(m_state.s, fds)) {
-				int32_t	msgcode;
-				if (m_read_int32(m_state.s, &msgcode))
-					m_flush(m_state.s);
-				else
-					switch (msgcode) {
-					case MONITOR_GET_FD:
-						m_priv_getfd(m_state.s);
-						break;
-
-					case MONITOR_UI_INIT:
-						LOG_DBG((LOG_MISC, 80,
-						    "%s: MONITOR_UI_INIT",
-						    __func__));
-						m_priv_test_state(STATE_INIT);
-						m_priv_ui_init(m_state.s);
-						break;
-
-					case MONITOR_PFKEY_OPEN:
-						LOG_DBG((LOG_MISC, 80,
-						    "%s: MONITOR_PFKEY_OPEN",
-						    __func__));
-						m_priv_test_state(STATE_INIT);
-						m_priv_pfkey_open(m_state.s);
-						break;
-
-					case MONITOR_GET_SOCKET:
-						LOG_DBG((LOG_MISC, 80,
-						    "%s: MONITOR_GET_SOCKET",
-						    __func__));
-						m_priv_test_state(STATE_INIT);
-						m_priv_getsocket(m_state.s);
-						break;
-
-					case MONITOR_SETSOCKOPT:
-						LOG_DBG((LOG_MISC, 80,
-						    "%s: MONITOR_SETSOCKOPT",
-						    __func__));
-						m_priv_test_state(STATE_INIT);
-						m_priv_setsockopt(m_state.s);
-						break;
-
-					case MONITOR_BIND:
-						LOG_DBG((LOG_MISC, 80,
-						    "%s: MONITOR_BIND",
-						    __func__));
-						m_priv_test_state(STATE_INIT);
-						m_priv_bind(m_state.s);
-						break;
-
-					case MONITOR_INIT_DONE:
-						LOG_DBG((LOG_MISC, 80,
-						    "%s: MONITOR_INIT_DONE",
-						    __func__));
-						m_priv_test_state(STATE_INIT);
-						m_priv_increase_state(
-						    STATE_RUNNING);
-						break;
-
-					case MONITOR_SHUTDOWN:
-						LOG_DBG((LOG_MISC, 80,
-						    "%s: MONITOR_SHUTDOWN",
-						    __func__));
-						m_priv_increase_state(
-						    STATE_QUIT);
-						break;
-
-					default:
-						log_print("monitor_loop: "
-						    "got unknown code %d",
-						    msgcode);
-					}
+			continue;
+		}
+		if (FD_ISSET(m_state.s, fds)) {
+			if (m_read_int32(m_state.s, &msgcode)) {
+				m_flush(m_state.s);
+				continue;
 			}
+			switch (msgcode) {
+			case MONITOR_GET_FD:
+				m_priv_getfd(m_state.s);
+				break;
+
+			case MONITOR_UI_INIT:
+				LOG_DBG((LOG_MISC, 80,
+				    "monitor_loop: MONITOR_UI_INIT"));
+				m_priv_test_state(STATE_INIT);
+				m_priv_ui_init(m_state.s);
+				break;
+
+			case MONITOR_PFKEY_OPEN:
+				LOG_DBG((LOG_MISC, 80,
+				    "monitor_loop: MONITOR_PFKEY_OPEN"));
+				m_priv_test_state(STATE_INIT);
+				m_priv_pfkey_open(m_state.s);
+				break;
+
+			case MONITOR_GET_SOCKET:
+				LOG_DBG((LOG_MISC, 80,
+				    "monitor_loop: MONITOR_GET_SOCKET"));
+				m_priv_test_state(STATE_INIT);
+				m_priv_getsocket(m_state.s);
+				break;
+
+			case MONITOR_SETSOCKOPT:
+				LOG_DBG((LOG_MISC, 80,
+				    "monitor_loop: MONITOR_SETSOCKOPT"));
+				m_priv_test_state(STATE_INIT);
+				m_priv_setsockopt(m_state.s);
+				break;
+
+			case MONITOR_BIND:
+				LOG_DBG((LOG_MISC, 80,
+				    "monitor_loop: MONITOR_BIND"));
+				m_priv_test_state(STATE_INIT);
+				m_priv_bind(m_state.s);
+				break;
+
+			case MONITOR_INIT_DONE:
+				LOG_DBG((LOG_MISC, 80,
+				    "monitor_loop: MONITOR_INIT_DONE"));
+				m_priv_test_state(STATE_INIT);
+				m_priv_increase_state(STATE_RUNNING);
+				break;
+
+			case MONITOR_SHUTDOWN:
+				LOG_DBG((LOG_MISC, 80,
+				    "monitor_loop: MONITOR_SHUTDOWN"));
+				m_priv_increase_state(STATE_QUIT);
+				break;
+
+			default:
+				log_print("monitor_loop: got unknown code %d",
+				    msgcode);
+			}
+		}
 	}
 
 	free(fds);
@@ -871,7 +824,7 @@ m_priv_setsockopt(int s)
 	if (m_read_int32(s, &optname))
 		goto errout;
 
-	if (m_read_int32(s, &optlen))
+	if (m_read_int32(s, (int *)&optlen))
 		goto errout;
 
 	optval = (char *)malloc(optlen);
@@ -986,7 +939,7 @@ m_write_int32(int s, int32_t value)
 
 /* Write a number of bytes of data to a socket.  */
 int
-m_write_raw(int s, char *data, size_t dlen)
+m_write_raw(int s, const char *data, size_t dlen)
 {
 	if (m_write_int32(s, (int32_t) dlen))
 		return 1;
@@ -1156,7 +1109,7 @@ static void
 m_priv_increase_state(int state)
 {
 	if (state <= cur_state)
-		log_print("m_priv_increase_state: attempt to decrase state "
+		log_print("m_priv_increase_state: attempt to decrease state "
 		    "or match current state");
 	if (state < STATE_INIT || state > STATE_QUIT)
 		log_print("m_priv_increase_state: attempt to switch to "

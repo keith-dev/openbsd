@@ -1,11 +1,11 @@
-/*	$OpenBSD: shf.c,v 1.8 2003/02/28 09:45:09 jmc Exp $	*/
+/*	$OpenBSD: shf.c,v 1.11 2004/12/20 11:34:26 otto Exp $	*/
 
 /*
  *  Shell file I/O routines
  */
 
 #include "sh.h"
-#include "ksh_stat.h"
+#include <sys/stat.h>
 #include "ksh_limval.h"
 
 
@@ -19,19 +19,15 @@
  * file descriptors.
  */
 
-static int	shf_fillbuf	ARGS((struct shf *shf));
-static int	shf_emptybuf	ARGS((struct shf *shf, int flags));
+static int	shf_fillbuf(struct shf *);
+static int	shf_emptybuf(struct shf *, int);
 
 /* Open a file.  First three args are for open(), last arg is flags for
  * this package.  Returns NULL if file could not be opened, or if a dup
  * fails.
  */
 struct shf *
-shf_open(name, oflags, mode, sflags)
-	const char *name;
-	int oflags;
-	int mode;
-	int sflags;
+shf_open(const char *name, int oflags, int mode, int sflags)
 {
 	struct shf *shf;
 	int bsize = sflags & SHF_UNBUF ? (sflags & SHF_RD ? 1 : 0) : SHF_BSIZE;
@@ -53,7 +49,7 @@ shf_open(name, oflags, mode, sflags)
 	if ((sflags & SHF_MAPHI) && fd < FDBASE) {
 		int nfd;
 
-		nfd = ksh_dupbase(fd, FDBASE);
+		nfd = fcntl(fd, F_DUPFD, FDBASE);
 		close(fd);
 		if (nfd < 0) {
 			afree(shf, shf->areap);
@@ -71,10 +67,7 @@ shf_open(name, oflags, mode, sflags)
 
 /* Set up the shf structure for a file descriptor.  Doesn't fail. */
 struct shf *
-shf_fdopen(fd, sflags, shf)
-	int fd;
-	int sflags;
-	struct shf *shf;
+shf_fdopen(int fd, int sflags, struct shf *shf)
 {
 	int bsize = sflags & SHF_UNBUF ? (sflags & SHF_RD ? 1 : 0) : SHF_BSIZE;
 
@@ -118,16 +111,13 @@ shf_fdopen(fd, sflags, shf)
 	shf->errno_ = 0;
 	shf->bsize = bsize;
 	if (sflags & SHF_CLEXEC)
-		fd_clexec(fd);
+		fcntl(fd, F_SETFD, FD_CLOEXEC);
 	return shf;
 }
 
 /* Set up an existing shf (and buffer) to use the given fd */
 struct shf *
-shf_reopen(fd, sflags, shf)
-	int fd;
-	int sflags;
-	struct shf *shf;
+shf_reopen(int fd, int sflags, struct shf *shf)
 {
 	int bsize = sflags & SHF_UNBUF ? (sflags & SHF_RD ? 1 : 0) : SHF_BSIZE;
 
@@ -161,7 +151,7 @@ shf_reopen(fd, sflags, shf)
 	shf->flags = (shf->flags & (SHF_ALLOCS | SHF_ALLOCB)) | sflags;
 	shf->errno_ = 0;
 	if (sflags & SHF_CLEXEC)
-		fd_clexec(fd);
+		fcntl(fd, F_SETFD, FD_CLOEXEC);
 	return shf;
 }
 
@@ -174,11 +164,7 @@ shf_reopen(fd, sflags, shf)
  * When writing, a byte is reserved for a trailing null - see shf_sclose().
  */
 struct shf *
-shf_sopen(buf, bsize, sflags, shf)
-	char *buf;
-	int bsize;
-	int sflags;
-	struct shf *shf;
+shf_sopen(char *buf, int bsize, int sflags, struct shf *shf)
 {
 	/* can't have a read+write string */
 	if (!(sflags & (SHF_RD | SHF_WR))
@@ -211,8 +197,7 @@ shf_sopen(buf, bsize, sflags, shf)
 
 /* Flush and close file descriptor, free the shf structure */
 int
-shf_close(shf)
-	struct shf *shf;
+shf_close(struct shf *shf)
 {
 	int ret = 0;
 
@@ -231,8 +216,7 @@ shf_close(shf)
 
 /* Flush and close file descriptor, don't free file structure */
 int
-shf_fdclose(shf)
-	struct shf *shf;
+shf_fdclose(struct shf *shf)
 {
 	int ret = 0;
 
@@ -254,8 +238,7 @@ shf_fdclose(shf)
  * (does not free string if it was allocated).
  */
 char *
-shf_sclose(shf)
-	struct shf *shf;
+shf_sclose(struct shf *shf)
 {
 	unsigned char *s = shf->buf;
 
@@ -271,8 +254,7 @@ shf_sclose(shf)
 
 /* Flush and free file structure, don't close file descriptor */
 int
-shf_finish(shf)
-	struct shf *shf;
+shf_finish(struct shf *shf)
 {
 	int ret = 0;
 
@@ -290,8 +272,7 @@ shf_finish(shf)
  * buffered.  Returns 0 for success, EOF for (write) error.
  */
 int
-shf_flush(shf)
-	struct shf *shf;
+shf_flush(struct shf *shf)
 {
 	if (shf->flags & SHF_STRING)
 		return (shf->flags & SHF_WR) ? EOF : 0;
@@ -322,9 +303,7 @@ shf_flush(shf)
  * buffer.  Returns 0 for success, EOF for (write) error.
  */
 static int
-shf_emptybuf(shf, flags)
-	struct shf *shf;
-	int flags;
+shf_emptybuf(struct shf *shf, int flags)
 {
 	int ret = 0;
 
@@ -404,8 +383,7 @@ shf_emptybuf(shf, flags)
 
 /* Fill up a read buffer.  Returns EOF for a read error, 0 otherwise. */
 static int
-shf_fillbuf(shf)
-	struct shf *shf;
+shf_fillbuf(struct shf *shf)
 {
 	if (shf->flags & SHF_STRING)
 		return 0;
@@ -451,10 +429,7 @@ shf_fillbuf(shf)
  * buffer.  Returns 0 for success, EOF otherwise.
  */
 int
-shf_seek(shf, where, from)
-	struct shf *shf;
-	off_t where;
-	int from;
+shf_seek(struct shf *shf, off_t where, int from)
 {
 	if (shf->fd < 0) {
 		errno = EINVAL;
@@ -499,10 +474,7 @@ shf_seek(shf, where, from)
  * a read error occurred.
  */
 int
-shf_read(buf, bsize, shf)
-	char *buf;
-	int bsize;
-	struct shf *shf;
+shf_read(char *buf, int bsize, struct shf *shf)
 {
 	int orig_bsize = bsize;
 	int ncopy;
@@ -536,10 +508,7 @@ shf_read(buf, bsize, shf)
  * end of file, returns a pointer to the null byte in buf otherwise.
  */
 char *
-shf_getse(buf, bsize, shf)
-	char *buf;
-	int bsize;
-	struct shf *shf;
+shf_getse(char *buf, int bsize, struct shf *shf)
 {
 	unsigned char *end;
 	int ncopy;
@@ -571,14 +540,6 @@ shf_getse(buf, bsize, shf)
 		shf->rnleft -= ncopy;
 		buf += ncopy;
 		bsize -= ncopy;
-#ifdef OS2
-		if (end && buf > orig_buf + 1 && buf[-2] == '\r') {
-			buf--;
-			bsize++;
-			buf[-1] = '\n';
-		}
-#endif
-
 	} while (!end && bsize);
 	*buf = '\0';
 	return buf;
@@ -586,8 +547,7 @@ shf_getse(buf, bsize, shf)
 
 /* Returns the char read.  Returns EOF for error and end of file. */
 int
-shf_getchar(shf)
-	struct shf *shf;
+shf_getchar(struct shf *shf)
 {
 	if (!(shf->flags & SHF_RD))
 		internal_errorf(1, "shf_getchar: flags %x", shf->flags);
@@ -602,9 +562,7 @@ shf_getchar(shf)
  * successful, EOF if there is no room.
  */
 int
-shf_ungetc(c, shf)
-	int c;
-	struct shf *shf;
+shf_ungetc(int c, struct shf *shf)
 {
 	if (!(shf->flags & SHF_RD))
 		internal_errorf(1, "shf_ungetc: flags %x", shf->flags);
@@ -639,9 +597,7 @@ shf_ungetc(c, shf)
  * the char could not be written.
  */
 int
-shf_putchar(c, shf)
-	int c;
-	struct shf *shf;
+shf_putchar(int c, struct shf *shf)
 {
 	if (!(shf->flags & SHF_WR))
 		internal_errorf(1, "shf_putchar: flags %x", shf->flags);
@@ -683,9 +639,7 @@ shf_putchar(c, shf)
  * the string could not be written.
  */
 int
-shf_puts(s, shf)
-	const char *s;
-	struct shf *shf;
+shf_puts(const char *s, struct shf *shf)
 {
 	if (!s)
 		return EOF;
@@ -695,10 +649,7 @@ shf_puts(s, shf)
 
 /* Write a buffer.  Returns nbytes if successful, EOF if there is an error. */
 int
-shf_write(buf, nbytes, shf)
-	const char *buf;
-	int nbytes;
-	struct shf *shf;
+shf_write(const char *buf, int nbytes, struct shf *shf)
 {
 	int orig_nbytes = nbytes;
 	int n;
@@ -759,19 +710,12 @@ shf_write(buf, nbytes, shf)
 }
 
 int
-#ifdef HAVE_PROTOTYPES
 shf_fprintf(struct shf *shf, const char *fmt, ...)
-#else
-shf_fprintf(shf, fmt, va_alist)
-	struct shf *shf;
-	const char *fmt;
-	va_dcl
-#endif
 {
 	va_list args;
 	int n;
 
-	SH_VA_START(args, fmt);
+	va_start(args, fmt);
 	n = shf_vfprintf(shf, fmt, args);
 	va_end(args);
 
@@ -779,15 +723,7 @@ shf_fprintf(shf, fmt, va_alist)
 }
 
 int
-#ifdef HAVE_PROTOTYPES
 shf_snprintf(char *buf, int bsize, const char *fmt, ...)
-#else
-shf_snprintf(buf, bsize, fmt, va_alist)
-	char *buf;
-	int bsize;
-	const char *fmt;
-	va_dcl
-#endif
 {
 	struct shf shf;
 	va_list args;
@@ -798,7 +734,7 @@ shf_snprintf(buf, bsize, fmt, va_alist)
 			(long) buf, bsize);
 
 	shf_sopen(buf, bsize, SHF_WR, &shf);
-	SH_VA_START(args, fmt);
+	va_start(args, fmt);
 	n = shf_vfprintf(&shf, fmt, args);
 	va_end(args);
 	shf_sclose(&shf); /* null terminates */
@@ -806,19 +742,13 @@ shf_snprintf(buf, bsize, fmt, va_alist)
 }
 
 char *
-#ifdef HAVE_PROTOTYPES
 shf_smprintf(const char *fmt, ...)
-#else
-shf_smprintf(fmt, va_alist)
-	char *fmt;
-	va_dcl
-#endif
 {
 	struct shf shf;
 	va_list args;
 
 	shf_sopen((char *) 0, 0, SHF_WR|SHF_DYNAMIC, &shf);
-	SH_VA_START(args, fmt);
+	va_start(args, fmt);
 	shf_vfprintf(&shf, fmt, args);
 	va_end(args);
 	return shf_sclose(&shf); /* null terminates */
@@ -872,8 +802,7 @@ shf_smprintf(fmt, va_alist)
 #include <math.h>
 
 static double
-my_ceil(d)
-	double	d;
+my_ceil(double d)
 {
 	double		i;
 
@@ -882,13 +811,10 @@ my_ceil(d)
 #endif /* FP */
 
 int
-shf_vfprintf(shf, fmt, args)
-	struct shf *shf;
-	const char *fmt;
-	va_list args;
+shf_vfprintf(struct shf *shf, const char *fmt, va_list args)
 {
 	char		c, *s;
-	int		UNINITIALIZED(tmp);
+	int		tmp = 0;
 	int		field, precision;
 	int		len;
 	int		flags;

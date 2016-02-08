@@ -1,4 +1,4 @@
-#	$OpenBSD: Makefile,v 1.211 2004/08/26 03:34:15 deraadt Exp $
+#	$OpenBSD: Makefile,v 1.219 2005/03/19 00:11:21 deraadt Exp $
 
 TZDIR=		/usr/share/zoneinfo
 LOCALTIME=	Canada/Mountain
@@ -21,10 +21,11 @@ BIN1=	changelist ccd.conf csh.cshrc csh.login csh.logout daily dhcpd.conf \
 	etc.${MACHINE}/disktab dhclient.conf mailer.conf ntpd.conf
 
 .if ${MACHINE} == "alpha" || ${MACHINE} == "amd64" || \
-    ${MACHINE} == "cats" || ${MACHINE} == "hppa" || \
-    ${MACHINE} == "i386" || ${MACHINE} == "luna88k" || \
-    ${MACHINE} == "macppc" || ${MACHINE} == "sparc" || \
-    ${MACHINE} == "sparc64"
+    ${MACHINE} == "cats" || ${MACHINE} == "hp300" || \
+    ${MACHINE} == "hppa" || ${MACHINE} == "i386" || \
+    ${MACHINE} == "luna88k" || ${MACHINE} == "macppc" || \
+    ${MACHINE} == "sparc" || ${MACHINE} == "sparc64" || \
+    ${MACHINE} == "zaurus"
 BIN1+=	wsconsctl.conf
 .endif
 
@@ -78,6 +79,7 @@ distribution-etc-root-var: distrib-dirs
 	pwd_mkdb -p -d ${DESTDIR}/etc /etc/master.passwd
 	${INSTALL} -c -o root -g wheel -m 644 moduli ${DESTDIR}/etc
 	${INSTALL} -c -o root -g wheel -m 600 bgpd.conf ${DESTDIR}/etc
+	${INSTALL} -c -o root -g wheel -m 600 ospfd.conf ${DESTDIR}/etc
 	${INSTALL} -c -o root -g wheel -m 600 pf.conf ${DESTDIR}/etc
 	${INSTALL} -c -o root -g wheel -m 644 pf.os ${DESTDIR}/etc
 	${INSTALL} -c -o root -g wheel -m 644 sensorsd.conf ${DESTDIR}/etc
@@ -261,6 +263,8 @@ release: distribution snap_pre snap_md
 	-cp ${DESTDIR}/snapshot/cdbr ${RELEASEDIR}
 	-cp ${DESTDIR}/snapshot/*BOOT* ${RELEASEDIR}
 	-cp ${DESTDIR}/snapshot/cd*.iso ${RELEASEDIR}
+	-cp ${DESTDIR}/snapshot/*.ipk ${RELEASEDIR}
+	-cp ${DESTDIR}/snapshot/Packages ${RELEASEDIR}
 	-cp ${DESTDIR}/snapshot/INSTALL.* ${RELEASEDIR}
 	-cp ${DESTDIR}/snapshot/*.fs ${DESTDIR}/snapshot/*.fs.gz ${RELEASEDIR}
 	-cd ${RELEASEDIR}; \
@@ -339,6 +343,7 @@ MAKEDEVARCHS+= sgi
 MAKEDEVARCHS+= sparc
 MAKEDEVARCHS+= sparc64
 MAKEDEVARCHS+= vax
+MAKEDEVARCHS+= zaurus
 
 clean:
 	rm -f etc.${MACHINE}/MAKEDEV
@@ -368,12 +373,12 @@ allarchs: ${MAKEDEVSRC} ${MAKEDEVDOC}
 
 distrib:
 	cd ${.CURDIR}/../distrib && \
-	    ${MAKE} cleandir && ${MAKE} && exec ${SUDO} ${MAKE} install
+	    ${MAKE} && exec ${SUDO} ${MAKE} install
 
 DHSIZE=1024 1536 2048 3072 4096
 update-moduli:
 	( \
-		echo '#    $$OpenBSD: Makefile,v 1.211 2004/08/26 03:34:15 deraadt Exp $$'; \
+		echo '#    $$OpenBSD: Makefile,v 1.219 2005/03/19 00:11:21 deraadt Exp $$'; \
 		echo '# Time Type Tests Tries Size Generator Modulus'; \
 		( for i in ${DHSIZE}; do \
 			ssh-keygen -b $$i -G /dev/stdout; \

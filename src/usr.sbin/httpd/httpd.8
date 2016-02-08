@@ -1,4 +1,4 @@
-.\"	$OpenBSD: httpd.8,v 1.16 2003/07/14 15:38:51 jmc Exp $
+.\"	$OpenBSD: httpd.8,v 1.26 2005/01/02 18:20:10 jmc Exp $
 .\" Copyright (c) 1995-1997 David Robinson. All rights reserved.
 .\" Copyright (c) 1997-1999 The Apache Group. All rights reserved.
 .\" Copyright (c) 1998-1999 Bob Beck. All rights reserved.
@@ -59,12 +59,12 @@
 .Sh SYNOPSIS
 .Nm httpd
 .Bk -words
-.Op Fl FhlLStTuvVX
+.Op Fl FhLlSTtuVvX
+.Op Fl C Ar directive
+.Op Fl c Ar directive
+.Op Fl D Ar parameter
 .Op Fl d Ar serverroot
 .Op Fl f Ar config
-.Op Fl c Ar directive
-.Op Fl C Ar directive
-.Op Fl D Ar parameter
 .Op Fl R Ar libexecdir
 .Ek
 .Sh DESCRIPTION
@@ -78,54 +78,42 @@ To stop it, send a
 signal to the initial (parent) process.
 The PID of this process is written to a file as given in the
 configuration file.
-Alternatively
+Normally this service can be enabled for startup on
+.Ox
+by editing
+.Pa /etc/rc.conf.local .
+.Pp
+Alternatively,
 .Nm
 may be invoked by the Internet daemon
 .Xr inetd 8
 each
 time a connection to the HTTP service is made.
 .Pp
-Normally this service can be enabled for startup on
-.Ox
-by editing
-.Pa /etc/rc.conf .
-The
-.Fl u
-option is of particular importance.
+.Nm
+can be made to support HTTPS transactions
+if RSA certificates are generated
+and the utility is started with the
+.Va -DSSL
+flag.
+See
+.Xr ssl 8
+for further information.
 .Pp
-This manual page only lists the command line arguments.
-For details of the directives necessary to configure
-.Nm
-see the Apache manual,
-which is part of the Apache distribution or can be found at
-.Pa http://httpd.apache.org/docs/ ,
-or in
-.Pa /var/www/htdocs/manual .
-Paths in this manual page reflect those
-compiled into
-.Nm
-by default with
-.Ox .
-.Sh OPTIONS
-.Bl -tag -width Ds
-.It Fl u
-By default
+By default,
 .Nm
 will
 .Xr chroot 2
 to the
-.Va serverroot
+.Dq ServerRoot
+path,
+serving documents from the
+.Dq DocumentRoot
 path.
-The
-.Fl u
-option disables this behaviour, and returns
-.Nm
-to the expanded "unsecure" behaviour.
-.Pp
 As a result of the default secure behaviour,
 .Nm
 cannot access any objects outside
-.Va ServerRoot
+.Dq ServerRoot
 \- this security measure is taken in case
 .Nm
 is compromised.
@@ -133,21 +121,88 @@ This is not without drawbacks, though:
 .Pp
 CGI programs may fail due to the limited environment available inside
 this chroot space.
-UserDir, of course, cannot access files outside the directory space.
+.Dq UserDir ,
+of course, cannot access files outside the directory space.
 Other modules will also have issues.
-DocumentRoot directories or any other files needed must be inside
-.Va ServerRoot .
-For this to work, pathnames inside the
-.Va config
-file do not need adjustment relative to
-.Va ServerRoot .
+.Dq DocumentRoot
+directories or any other files needed must be inside
+.Dq ServerRoot .
+For this to work,
+pathnames inside the configuration file do not need adjustment relative to
+.Dq ServerRoot .
 For this option to remain secure, it is important that no files or directories
 writable by user
 .Ar www
 or group
 .Ar www
 are created inside the
-.Va ServerRoot .
+.Dq ServerRoot .
+.Pp
+The
+.Fl u
+option
+(see below)
+can be specified to disable
+.Xr chroot 2
+functionality.
+.Pp
+This manual page only lists the command line arguments.
+For details of the directives necessary to configure
+.Nm ,
+see the Apache manual in
+.Pa /var/www/htdocs/manual/ .
+Paths in this manual page reflect those
+compiled into
+.Nm
+by default with
+.Ox .
+.Pp
+The options are as follows:
+.Bl -tag -width Ds
+.It Fl C Ar directive
+Process the configuration
+.Ar directive
+before reading config files.
+.It Fl c Ar directive
+Process the configuration
+.Ar directive
+after reading config files.
+.It Fl D Ar parameter
+Sets a configuration
+.Ar parameter
+which can be used with
+<IfDefine>...</IfDefine> sections in the configuration files
+to conditionally skip or process commands.
+.It Fl d Ar serverroot
+Set the initial value for the
+.Dq ServerRoot
+directive to
+.Ar serverroot .
+This can be overridden by the
+.Dq ServerRoot
+command in the configuration file.
+The default is
+.Pa /var/www .
+.It Fl F
+Run the main process in foreground.
+For process supervisors.
+.It Fl f Ar config
+Execute the commands in the file
+.Ar config
+on startup.
+If
+.Ar config
+does not begin with a /, then it is taken to be a path relative to
+the ServerRoot.
+The default is
+.Pa conf/httpd.conf .
+.It Fl h
+Output a short summary of available command line options.
+.It Fl L
+Output a list of directives together with expected arguments and
+places where the directive is valid.
+.It Fl l
+Output a list of modules compiled into the server.
 .It Fl R Ar libexecdir
 This option is only available if
 .Nm
@@ -158,69 +213,42 @@ rule enabled which forces the
 core code to be placed into a dynamic shared object (DSO) file.
 This file is searched in a hardcoded path under ServerRoot per default.
 Use this option to override.
-.It Fl d Ar serverroot
-Set the initial value for the ServerRoot directive to
-.Va serverroot .
-This can be overridden by the ServerRoot command in the configuration file.
-The default is
-.Pa /var/www .
-.It Fl f Ar config
-Execute the commands in the file
-.Va config
-on startup.
-If
-.Va config
-does not begin with a /, then it is taken to be a path relative to
-the ServerRoot.
-The default is
-.Pa conf/httpd.conf .
-.It Fl C Ar directive
-Process the configuration
-.Va directive
-before reading config files.
-.It Fl c Ar directive
-Process the configuration
-.Va directive
-after reading config files.
-.It Fl D Ar parameter
-Sets a configuration
-.Va parameter
-which can be used with
-<IfDefine>...</IfDefine> sections in the configuration files
-to conditionally skip or process commands.
-.It Fl F
-Run the main process in foreground.
-For process supervisors.
-.It Fl h
-Output a short summary of available command line options.
-.It Fl l
-Output a list of modules compiled into the server.
-.It Fl L
-Output a list of directives together with expected arguments and
-places where the directive is valid.
 .It Fl S
 Show the settings as parsed from the config file (currently only shows the
 virtualhost settings).
-.It Fl t
-Run syntax tests for configuration files only, including DocumentRoot checks.
-The program immediately exits after this syntax parsing with either a return
-code of 0 (Syntax OK) or return code not equal to 0 (Syntax Error).
 .It Fl T
 Run syntax tests for configuration files only, without DocumentRoot checks.
 The program immediately exits after this syntax parsing with either a return
 code of 0 (Syntax OK) or return code not equal to 0 (Syntax Error).
-.It Fl X
-Run in single-process mode, for internal debugging purposes only; the daemon
-does not detach from the terminal or fork any children.
-Do NOT use this mode to provide ordinary web service.
-.It Fl v
-Print the version of
-.Nm httpd ,
-and then exit.
+.It Fl t
+Run syntax tests for configuration files only, including DocumentRoot checks.
+The program immediately exits after this syntax parsing with either a return
+code of 0 (Syntax OK) or return code not equal to 0 (Syntax Error).
+.It Fl u
+By default
+.Nm
+will
+.Xr chroot 2
+to the
+.Dq ServerRoot
+path.
+The
+.Fl u
+option disables this behaviour, and returns
+.Nm
+to the expanded "unsecure" behaviour.
 .It Fl V
 Print the version and build parameters of
 .Nm httpd ,
 and then exit.
+.It Fl v
+Print the version of
+.Nm httpd ,
+and then exit.
+.It Fl X
+Run in single-process mode, for internal debugging purposes only; the daemon
+does not detach from the terminal or fork any children.
+Do NOT use this mode to provide ordinary web service.
 .El
 .Pp
 The documents served by
@@ -228,25 +256,41 @@ The documents served by
 should not be owned by the user which
 .Nm
 is running as (usually user
-.Va www
+.Ar www
 and group
-.Va www ) .
+.Ar www ) .
 They must, however, be readable by this user.
 .Sh FILES
 .Bl -tag -width /etc/passwd -compact
+.It Pa /var/www/cgi-bin/
 .It Pa /var/www/conf/httpd.conf
-.It Pa /var/www/conf/mime.types
+.It Pa /var/www/conf/httpd.conf-dist
 .It Pa /var/www/conf/magic
-.It Pa /var/www/logs/error_log
+.It Pa /var/www/conf/mime.types
+.It Pa /var/www/icons/
 .It Pa /var/www/logs/access_log
-.It Pa /var/www/logs/httpd.pid
+.It Pa /var/www/logs/error_log
 .It Pa /var/www/logs/etag-state
+.It Pa /var/www/logs/httpd.pid
 .It Pa /var/www/logs/ssl_engine_log
 .It Pa /var/www/logs/ssl_request_log
 .It Pa /var/www/logs/ssl_scache.db
-.It Pa /etc/rc.conf
+.It Pa /var/www/users/
+.It Pa /etc/rc.conf.local
 .El
 .Sh SEE ALSO
+.Xr dbmmanage 1 ,
+.Xr htdigest 1 ,
+.Xr htpasswd 1 ,
 .Xr chroot 2 ,
+.Xr apachectl 8 ,
+.Xr apxs 8 ,
 .Xr inetd 8 ,
-.Xr rc 8
+.Xr logresolve 8 ,
+.Xr rc.conf.local 8 ,
+.Xr rotatelogs 8 ,
+.Xr ssl 8 ,
+.Xr suexec 8
+.Pp
+The Apache manual:
+.Pa /var/www/htdocs/manual/ .

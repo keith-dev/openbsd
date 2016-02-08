@@ -1,4 +1,4 @@
-#	$OpenBSD: bsd.prog.mk,v 1.39 2004/06/03 20:51:07 miod Exp $
+#	$OpenBSD: bsd.prog.mk,v 1.43 2004/12/23 23:58:36 espie Exp $
 #	$NetBSD: bsd.prog.mk,v 1.55 1996/04/08 21:19:26 jtc Exp $
 #	@(#)bsd.prog.mk	5.26 (Berkeley) 6/25/91
 
@@ -106,28 +106,24 @@ CLEANFILES+=strings
 
 .if defined(PROG)
 SRCS?=	${PROG}.c
-.if !empty(SRCS:N*.h:N*.sh)
+.  if !empty(SRCS:N*.h:N*.sh)
 OBJS+=	${SRCS:N*.h:N*.sh:R:S/$/.o/g}
 LOBJS+=	${LSRCS:.c=.ln} ${SRCS:M*.c:.c=.ln}
-.endif
+.  endif
 
-.if defined(OBJS) && !empty(OBJS)
-.if defined(DESTDIR)
-
+.  if defined(OBJS) && !empty(OBJS)
+.    if !empty(SRCS:M*.C) || !empty(SRCS:M*.cc) || !empty(SRCS:M*.cxx)
 ${PROG}: ${LIBCRT0} ${OBJS} ${LIBC} ${CRTBEGIN} ${CRTEND} ${DPADD}
-	${CC} ${LDFLAGS} ${LDSTATIC} -o ${.TARGET} -nostdlib -L${DESTDIR}/usr/lib ${LIBCRT0} ${CRTBEGIN} ${OBJS} ${LDADD} -lgcc -lc -lgcc ${CRTEND}
-
-.else
-
+	${CXX} ${LDFLAGS} ${LDSTATIC} -o ${.TARGET} ${OBJS} ${LDADD}
+.    else
 ${PROG}: ${LIBCRT0} ${OBJS} ${LIBC} ${CRTBEGIN} ${CRTEND} ${DPADD}
 	${CC} ${LDFLAGS} ${LDSTATIC} -o ${.TARGET} ${OBJS} ${LDADD}
+.    endif
+.  endif	# defined(OBJS) && !empty(OBJS)
 
-.endif	# defined(DESTDIR)
-.endif	# defined(OBJS) && !empty(OBJS)
-
-.if	!defined(MAN)
+.  if	!defined(MAN)
 MAN=	${PROG}.1
-.endif	# !defined(MAN)
+.  endif	# !defined(MAN)
 .endif	# defined(PROG)
 
 .MAIN: all
@@ -153,7 +149,7 @@ afterinstall:
 realinstall:
 .if defined(PROG)
 	${INSTALL} ${INSTALL_COPY} ${INSTALL_STRIP} -o ${BINOWN} -g ${BINGRP} \
-	    -m ${BINMODE} ${PROG} ${DESTDIR}${BINDIR}
+	    -m ${BINMODE} ${PROG} ${DESTDIR}${BINDIR}/${PROG}
 .endif
 .endif
 

@@ -1,5 +1,5 @@
 vers(__file__,
-        {-$OpenBSD: MAKEDEV.md,v 1.16 2004/04/11 18:05:23 millert Exp $-},
+	{-$OpenBSD: MAKEDEV.md,v 1.18 2005/02/07 06:14:18 david Exp $-},
 etc.MACHINE)dnl
 dnl
 dnl Copyright (c) 2001-2004 Todd T. Fries <todd@OpenBSD.org>
@@ -317,10 +317,10 @@ uhid*)
 	;;
 
 ugen*)
-	for j in 00 01 02 03 04 05 06 07 08 09 10 11 12 13 14 15
+	for j in 0{0,1,2,3,4,5,6,7,8,9} 1{0,1,2,3,4,5}
 	do
 		rm -f ugen$unit.$j
-		mknod ugen$unit.$j c 63 $(( $unit * 16 + $j ))
+		mknod ugen$unit.$j c 63 $(( $unit * 16 + 10#$j ))
 		chown root:wheel ugen$unit.$j
 		chmod 660 ugen$unit.$j
 	done
@@ -354,17 +354,17 @@ ttyCcfg)
 	rm -f ttyCcfg
 	mknod ttyCcfg c $major $minor
 	chown root:wheel ttyCcfg
-        ;;
+	;;
 
 ttyC*)
 	type=C
 	unit=${i##ttyC}
 	major=67
 	minor=$unit
-        rm -f tty$type$unit
-        mknod tty$type$unit c $major $minor
-        chown root:wheel tty$type$unit
-        ;;
+	rm -f tty$type$unit
+	mknod tty$type$unit c $major $minor
+	chown root:wheel tty$type$unit
+	;;
 
 bpf*)
 	unit=${i##*[a-z]}
