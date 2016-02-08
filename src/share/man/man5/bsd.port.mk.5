@@ -1,4 +1,4 @@
-.\" $OpenBSD: bsd.port.mk.5,v 1.402 2014/07/23 10:19:51 espie Exp $
+.\" $OpenBSD: bsd.port.mk.5,v 1.413 2015/02/24 14:05:50 espie Exp $
 .\"
 .\" Copyright (c) 2000-2008 Marc Espie
 .\"
@@ -24,7 +24,7 @@
 .\" (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
 .\" THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 .\"
-.Dd $Mdocdate: July 23 2014 $
+.Dd $Mdocdate: February 24 2015 $
 .Dt BSD.PORT.MK 5
 .Os
 .Sh NAME
@@ -84,9 +84,11 @@ run it, or to run regression tests.
 The output is formatted as package specification pairs, in a form suitable
 for
 .Xr tsort 1 .
-.It Ar full-{build,run,all}-depends
+.It Ar full-{all,build,run,test}-depends
 Print all dependencies a package depends upon for building, running,
-or both, as a list of package names.
+or both, as a list of package names, sorted by dependency order with
+.Xr tsort 1 ,
+most dependent port first.
 .It Ar {build,lib,test,run}-depends-list
 Print a list of first level package specifications a port depends as
 build dependencies, library dependencies, test dependencies or
@@ -219,7 +221,7 @@ Shorthand for `sub package'.
 Shorthand for `work flavors packages plist'.
 .El
 .It Ar clean-depends
-Short hand for make clean=depends.
+Shorthand for make clean=depends.
 .It Ar configure
 Configure the port.
 Might be a void operation.
@@ -237,7 +239,7 @@ Check all the port's dependencies, that is:
 Prints a one-line index entry of the port, suitable for
 .Pa ${PORTSDIR}/INDEX .
 .It Ar distclean
-Short-hand for make clean=dist.
+Shorthand for make clean=dist.
 .It Ar distpatch
 Apply distribution patches only.
 See
@@ -447,7 +449,7 @@ to fetch files, see
 .It Ar no-lib-depends-args
 Degenerate form of
 .Ar lib-depends-args
-that does not do anthing.
+that does not do anything.
 See
 .Ar print-package-args .
 .It Ar no-wantlib-args
@@ -574,7 +576,7 @@ see
 Print all dependency-related information that will be passed as parameters
 to
 .Xr pkg_create 1 ,
-\&.e.g.,
+e.g.,
 .Fl W Ar wantlib
 and
 .Fl P Ar depends
@@ -673,26 +675,6 @@ and
 so that the packing-list is complete.
 .It Ar rebuild
 Force rebuild of the port.
-.It Ar test
-Run regression tests for the port.
-Essentially depend on a correct build and invoke
-.Bd -literal
-env -i ${ALL_TEST_ENV} ${MAKE_PROGRAM} ${ALL_TEST_FLAGS} \e
-	-f ${MAKE_FILE} ${TEST_TARGET} ${TEST_LOG}
-.Ed
-.Pp
-If a port needs some other ports installed to run regression tests,
-use
-.Ev TEST_DEPENDS .
-If a port needs special configuration or build options to enable regression
-testing, define a
-.Sq test
-.Ev FLAVOR .
-.It Ar test-depends
-Verify packages needed for regression tests, using the same scheme as
-.Ar build-depends .
-Only invoked when regression tests are run, or explicitly through
-.Ar depends .
 .It Ar reinstall
 Force reinstallation of a port, by first cleaning the old installation.
 Seldom needed, as
@@ -758,6 +740,26 @@ Update an existing installation to a newer package, exactly
 like
 .Ar update ,
 but affects only one single subpackage in multi-packages ports.
+.It Ar test
+Run regression tests for the port.
+Essentially depend on a correct build and invoke
+.Bd -literal
+env -i ${ALL_TEST_ENV} ${MAKE_PROGRAM} ${ALL_TEST_FLAGS} \e
+	-f ${MAKE_FILE} ${TEST_TARGET} ${TEST_LOG}
+.Ed
+.Pp
+If a port needs some other ports installed to run regression tests,
+use
+.Ev TEST_DEPENDS .
+If a port needs special configuration or build options to enable regression
+testing, define a
+.Sq test
+.Ev FLAVOR .
+.It Ar test-depends
+Verify packages needed for regression tests, using the same scheme as
+.Ar build-depends .
+Only invoked when regression tests are run, or explicitly through
+.Ar depends .
 .It Ar unlink-categories
 Remove symbolic links in other directories that correspond to the port's
 .Ev CATEGORIES .
@@ -1171,12 +1173,6 @@ category.
 See
 .Ar link-categories ,
 .Ar unlink-categories .
-.It Ev CDIAGFLAGS
-Flags appended to
-.Ev CFLAGS
-if
-.Ev WARNINGS
-is set.
 .It Ev CCACHE_DIR
 Sets the cache directory used when
 .Ev USE_CCACHE
@@ -1188,6 +1184,12 @@ Sets additional environment variables when
 is set to yes.
 For instance, to enable verbose logging, set
 CCACHE_ENV="CCACHE_LOGFILE=/tmp/ccache.log"
+.It Ev CDIAGFLAGS
+Flags appended to
+.Ev CFLAGS
+if
+.Ev WARNINGS
+is set.
 .It Ev CDROM_SITE
 Path to a local source that holds distribution files (usually a CD-ROM
 or other similar media), used to retrieve distribution files before going
@@ -1196,7 +1198,7 @@ Defaults to empty, set to
 .Pa /cdrom/distfiles/${DIST_SUBDIR}
 to check that path.
 Distribution files are still copied or linked (see
-.Ev FETCH_SYMLINK_DISFILES )
+.Ev FETCH_SYMLINK_DISTFILES )
 into
 .Ev DISTDIR
 if they are found under CDROM_SITE.
@@ -1540,13 +1542,13 @@ cd ${WRKDIR}
 for archive in ${EXTRACT_ONLY}
 do
     case $$archive in
-	*.tar.xz)
+	*.tar.xz|*.tar.lzma)
 	  xzcat ${FULLDISTDIR}/$$archive| tar xf -;;
 	*.tar.lz)
 	  lunzip -c ${FULLDISTDIR}/$$archive| tar xf -;;
 	*.zip)
 	  unzip -q ${FULLDISTDIR}/$$archive -d ${WRKDIR};;
-	*.tar.bz2)
+	*.tar.bz2|*.tbz2|*.tbz)
 	  bzip2 -dc ${FULLDISTDIR}/$$archive| tar xf -;;
 	*.shar.gz|*.shar.Z|*.sh.Z|*.sh.gz)
 	  gzcat ${FULLDISTDIR}/$$archive | /bin/sh;;
@@ -1871,6 +1873,9 @@ Used after changing directory to ${WRKBUILD}.
 The make program that is used for building the port.
 Set to ${MAKE} or ${GMAKE} depending on USE_GMAKE.
 Read-only.
+.It Ev MAKEFILE_LIST
+Introspection variable, see
+.Xr make 1 .
 .It Ev MAKESUMFILES
 List of all files that need to be retrieved by
 .Ar fetch-all ,
@@ -2403,6 +2408,11 @@ Set to
 .Sq Yes
 to build xenocara through ports.
 This is highly experimental and not recommended.
+.It Ev PORTROACH
+Controls the behavior of
+.Pa misc/portroach
+as documented in detail at
+http://jasperla.github.io/portroach/docs/portroach-portconfig.txt .
 .It Ev PREFERRED_CIPHERS
 List of cryptographic ciphers to use, in order of preference.
 Default is
@@ -2548,41 +2558,6 @@ checksum off
 .Pa ftp.openbsd.org ,
 in the directory
 .Pa /pub/OpenBSD/distfiles/$cipher/$value/$file .
-.It Ev TEST_DEPENDS
-See
-.Ev BUILD_DEPENDS
-for specification.
-Test dependencies are only checked if the test stage is invoked.
-.It Ev TEST_ENV
-Additional environment variables passed to tests.
-Empty by default.
-.It Ev TEST_FLAGS
-Extra flags passed to ${MAKE_PROGRAM} to run the regression tests.
-Empty by default.
-.It Ev TEST_IS_INTERACTIVE
-Set to
-.Sq Yes
-if port needs human interaction to run its tests, or set to
-.Sq X11
-if the tests need an active X11 display to work.
-.It Ev TEST_LOG
-Command used to log the results of regression tests to TEST_LOGFILE.
-.It Ev TEST_LOGFILE
-Log file containing the results of regression tests.
-.It Ev TEST_TARGET
-Target to run regression tests.
-Defaults to
-.Sq regress ,
-except for
-.Sq perl
-and
-.Sq gnu
-.Ev CONFIGURE_STYLE ,
-which default to
-.Sq test
-and
-.Sq check ,
-respectively.
 .It Ev REORDER_DEPENDENCIES
 Points to a list of files that specify inter-dependencies for
 .Xr make 1 .
@@ -2752,6 +2727,12 @@ will substitute the value of
 .Ev FULLPKGNAME-foo
 for
 .Li ${FULLPKGNAME} .
+.It Ev SUBST_DATA , SUBST_MAN , SUBST_PROGRAM
+Specialized versions of
+.Ev SUBST_CMD
+that use
+.Fl c
+and appropriate owner/group/mode for data, manpages and programs respectively.
 .It Ev SUBST_VARS
 Make variables whose values get substituted to create the actual package
 information.
@@ -2851,6 +2832,41 @@ target.
 User settings.
 Defaults to
 .Pa ${PORTSDIR}/infrastructure/templates .
+.It Ev TEST_DEPENDS
+See
+.Ev BUILD_DEPENDS
+for specification.
+Test dependencies are only checked if the test stage is invoked.
+.It Ev TEST_ENV
+Additional environment variables passed to tests.
+Empty by default.
+.It Ev TEST_FLAGS
+Extra flags passed to ${MAKE_PROGRAM} to run the regression tests.
+Empty by default.
+.It Ev TEST_IS_INTERACTIVE
+Set to
+.Sq Yes
+if port needs human interaction to run its tests, or set to
+.Sq X11
+if the tests need an active X11 display to work.
+.It Ev TEST_LOG
+Command used to log the results of regression tests to TEST_LOGFILE.
+.It Ev TEST_LOGFILE
+Log file containing the results of regression tests.
+.It Ev TEST_TARGET
+Target to run regression tests.
+Defaults to
+.Sq regress ,
+except for
+.Sq perl
+and
+.Sq gnu
+.Ev CONFIGURE_STYLE ,
+which default to
+.Sq test
+and
+.Sq check ,
+respectively.
 .It Ev TRUEPREFIX
 Read-only.
 Mostly the same as ${PREFIX}, except it never gets ${DESTDIR} prepended
@@ -3071,6 +3087,12 @@ commands, but grouped here for convenience: easier to look for in
 .Xr dpb 1 Ns 's
 logs.
 .Bl -diag
+.It "Discovered old directory in ..."
+This message comes from
+.Xr make-plist 1 .
+A directory was found in the PLIST that used to be needed but is no longer,
+because it's now accounted for through dependencies.
+Indicates the old directory has been removed.
 .It "Error: change in plist between ..."
 Error message comes from
 .Xr register-plist 1 .
@@ -3816,7 +3838,7 @@ instead.
 Likewise, use
 .Ev EXTRACT_CASES
 instead.
-.It Ev FETCH_BEFORE_ARGS , Ev FETCH_AFTER_ARGS
+.It Ev FETCH_BEFORE_ARGS , FETCH_AFTER_ARGS
 Set
 .Ev FETCH_CMD
 to point to a script that does any required special treatment instead.

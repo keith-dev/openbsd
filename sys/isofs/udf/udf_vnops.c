@@ -1,4 +1,4 @@
-/*	$OpenBSD: udf_vnops.c,v 1.55 2014/07/12 18:50:00 tedu Exp $	*/
+/*	$OpenBSD: udf_vnops.c,v 1.59 2015/02/10 21:56:09 miod Exp $	*/
 
 /*
  * Copyright (c) 2001, 2002 Scott Long <scottl@freebsd.org>
@@ -44,11 +44,14 @@
 #include <sys/lock.h>
 #include <sys/mount.h>
 #include <sys/vnode.h>
+#include <sys/lock.h>
 #include <sys/dirent.h>
 #include <sys/queue.h>
-#include <sys/unistd.h>
 #include <sys/endian.h>
 #include <sys/specdev.h>
+#include <sys/unistd.h>
+
+#include <crypto/siphash.h>
 
 #include <isofs/udf/ecma167-udf.h>
 #include <isofs/udf/udf.h>
@@ -92,7 +95,8 @@ udf_hashlookup(struct umount *ump, udfino_t id, int flags, struct vnode **vpp)
 
 loop:
 	mtx_enter(&ump->um_hashmtx);
-	lh = &ump->um_hashtbl[id & ump->um_hashsz];
+	lh = &ump->um_hashtbl[SipHash24(&ump->um_hashkey, &id, sizeof(id)) &
+	    ump->um_hashsz];
 	if (lh == NULL) {
 		mtx_leave(&ump->um_hashmtx);
 		return (ENOENT);
@@ -127,7 +131,8 @@ udf_hashins(struct unode *up)
 
 	vn_lock(up->u_vnode, LK_EXCLUSIVE | LK_RETRY, p);
 	mtx_enter(&ump->um_hashmtx);
-	lh = &ump->um_hashtbl[up->u_ino & ump->um_hashsz];
+	lh = &ump->um_hashtbl[SipHash24(&ump->um_hashkey,
+	    &up->u_ino, sizeof(up->u_ino)) & ump->um_hashsz];
 	if (lh == NULL)
 		panic("hash entry is NULL, up->u_ino = %d", up->u_ino);
 	LIST_INSERT_HEAD(lh, up, u_le);
@@ -145,7 +150,8 @@ udf_hashrem(struct unode *up)
 	ump = up->u_ump;
 
 	mtx_enter(&ump->um_hashmtx);
-	lh = &ump->um_hashtbl[up->u_ino & ump->um_hashsz];
+	lh = &ump->um_hashtbl[SipHash24(&ump->um_hashkey,
+	    &up->u_ino, sizeof(up->u_ino)) & ump->um_hashsz];
 	if (lh == NULL)
 		panic("hash entry is NULL, up->u_ino = %d", up->u_ino);
 	LIST_REMOVE(up, u_le);
@@ -446,7 +452,7 @@ udf_read(void *v)
 			size = fsize - offset;
 		error = udf_readatoffset(up, &size, offset, &bp, &data);
 		if (error == 0)
-			error = uiomove(data, size, uio);
+			error = uiomovei(data, size, uio);
 		if (bp != NULL) {
 			brelse(bp);
 			bp = NULL;
@@ -547,7 +553,7 @@ udf_uiodir(struct udf_uiodir *uiodir, struct uio *uio, long off)
 	uiodir->dirent->d_off = off;
 	uiodir->dirent->d_reclen = de_size;
 
-	return (uiomove(uiodir->dirent, de_size, uio));
+	return (uiomovei(uiodir->dirent, de_size, uio));
 }
 
 static struct udf_dirstream *

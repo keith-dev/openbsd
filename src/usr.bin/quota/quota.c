@@ -1,4 +1,4 @@
-/*	$OpenBSD: quota.c,v 1.32 2013/11/26 13:19:07 deraadt Exp $	*/
+/*	$OpenBSD: quota.c,v 1.35 2015/02/08 23:40:34 deraadt Exp $	*/
 
 /*
  * Copyright (c) 1980, 1990, 1993
@@ -35,7 +35,7 @@
 /*
  * Disk quota reporting program.
  */
-#include <sys/param.h>
+#include <sys/param.h>	/* DEV_BSIZE dbtob */
 #include <sys/types.h>
 #include <sys/file.h>
 #include <sys/stat.h>
@@ -67,7 +67,7 @@ struct quotause {
 	struct	quotause *next;
 	long	flags;
 	struct	dqblk dqblk;
-	char	fsname[MAXPATHLEN + 1];
+	char	fsname[PATH_MAX + 1];
 };
 #define	FOUND	0x01
 
@@ -96,7 +96,7 @@ int
 main(int argc, char *argv[])
 {
 	int ngroups; 
-	gid_t mygid, gidset[NGROUPS];
+	gid_t mygid, gidset[NGROUPS_MAX];
 	int i, gflag = 0, uflag = 0;
 	int ch;
 	extern char *optarg;
@@ -105,16 +105,16 @@ main(int argc, char *argv[])
 	while ((ch = getopt(argc, argv, "ugvq")) != -1) {
 		switch(ch) {
 		case 'g':
-			gflag++;
+			gflag = 1;
 			break;
 		case 'u':
-			uflag++;
+			uflag = 1;
 			break;
 		case 'v':
-			vflag++;
+			vflag = 1;
 			break;
 		case 'q':
-			qflag++;
+			qflag = 1;
 			break;
 		default:
 			usage();
@@ -123,13 +123,13 @@ main(int argc, char *argv[])
 	argc -= optind;
 	argv += optind;
 	if (!uflag && !gflag)
-		uflag++;
+		uflag = 1;
 	if (argc == 0) {
 		if (uflag)
 			showuid(getuid());
 		if (gflag) {
 			mygid = getgid();
-			ngroups = getgroups(NGROUPS, gidset);
+			ngroups = getgroups(NGROUPS_MAX, gidset);
 			if (ngroups < 0)
 				err(1, "getgroups");
 			showgid(mygid);
@@ -226,7 +226,7 @@ showgid(gid_t gid)
 {
 	struct group *grp = getgrgid(gid);
 	int ngroups;
-	gid_t mygid, gidset[NGROUPS];
+	gid_t mygid, gidset[NGROUPS_MAX];
 	int i;
 	const char *name;
 
@@ -235,7 +235,7 @@ showgid(gid_t gid)
 	else
 		name = grp->gr_name;
 	mygid = getgid();
-	ngroups = getgroups(NGROUPS, gidset);
+	ngroups = getgroups(NGROUPS_MAX, gidset);
 	if (ngroups < 0) {
 		warn("getgroups");
 		return;
@@ -260,7 +260,7 @@ showgrpname(const char *name)
 {
 	struct group *grp = getgrnam(name);
 	int ngroups;
-	gid_t mygid, gidset[NGROUPS];
+	gid_t mygid, gidset[NGROUPS_MAX];
 	int i;
 
 	if (grp == NULL) {
@@ -268,7 +268,7 @@ showgrpname(const char *name)
 		return;
 	}
 	mygid = getgid();
-	ngroups = getgroups(NGROUPS, gidset);
+	ngroups = getgroups(NGROUPS_MAX, gidset);
 	if (ngroups < 0) {
 		warn("getgroups");
 		return;

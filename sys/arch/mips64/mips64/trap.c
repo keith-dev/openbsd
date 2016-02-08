@@ -1,4 +1,4 @@
-/*	$OpenBSD: trap.c,v 1.98 2014/06/12 20:52:15 kettenis Exp $	*/
+/*	$OpenBSD: trap.c,v 1.105 2015/02/08 05:40:48 uebayasi Exp $	*/
 
 /*
  * Copyright (c) 1988 University of Utah.
@@ -54,6 +54,7 @@
 #include <sys/syscall_mi.h>
 #include <sys/buf.h>
 #include <sys/device.h>
+#include <sys/atomic.h>
 #ifdef PTRACE
 #include <sys/ptrace.h>
 #endif
@@ -143,14 +144,14 @@ int	process_sstep(struct proc *, int);
  * Handle an AST for the current process.
  */
 void
-ast()
+ast(void)
 {
 	struct cpu_info *ci = curcpu();
 	struct proc *p = ci->ci_curproc;
 
 	p->p_md.md_astpending = 0;
 
-	atomic_add_int(&uvmexp.softs, 1);
+	atomic_inc_int(&uvmexp.softs);
 	mi_ast(p, ci->ci_want_resched);
 	userret(p);
 }
@@ -179,7 +180,7 @@ trap(struct trap_frame *trapframe)
 #else
 	if (type != T_SYSCALL)
 #endif
-		atomic_add_int(&uvmexp.traps, 1);
+		atomic_inc_int(&uvmexp.traps);
 	if (USERMODE(trapframe->sr)) {
 		type |= T_USER;
 		refreshcreds(p);
@@ -282,7 +283,7 @@ itsa(struct trap_frame *trapframe, struct cpu_info *ci, struct proc *p,
 			if (pmap_is_page_ro(pmap_kernel(),
 			    trunc_page(trapframe->badvaddr), entry)) {
 				/* write to read only page in the kernel */
-				ftype = VM_PROT_WRITE;
+				ftype = PROT_WRITE;
 				pcb = &p->p_addr->u_pcb;
 				goto kernel_fault;
 			}
@@ -319,7 +320,7 @@ itsa(struct trap_frame *trapframe, struct cpu_info *ci, struct proc *p,
 		if (pmap_is_page_ro(pmap,
 		    trunc_page(trapframe->badvaddr), entry)) {
 			/* write to read only page */
-			ftype = VM_PROT_WRITE;
+			ftype = PROT_WRITE;
 			pcb = &p->p_addr->u_pcb;
 			goto fault_common_no_miss;
 		}
@@ -339,7 +340,7 @@ itsa(struct trap_frame *trapframe, struct cpu_info *ci, struct proc *p,
 
 	case T_TLB_LD_MISS:
 	case T_TLB_ST_MISS:
-		ftype = (type == T_TLB_ST_MISS) ? VM_PROT_WRITE : VM_PROT_READ;
+		ftype = (type == T_TLB_ST_MISS) ? PROT_WRITE : PROT_READ;
 		pcb = &p->p_addr->u_pcb;
 		/* check for kernel address */
 		if (trapframe->badvaddr < 0) {
@@ -378,12 +379,12 @@ itsa(struct trap_frame *trapframe, struct cpu_info *ci, struct proc *p,
 		}
 
 	case T_TLB_LD_MISS+T_USER:
-		ftype = VM_PROT_READ;
+		ftype = PROT_READ;
 		pcb = &p->p_addr->u_pcb;
 		goto fault_common;
 
 	case T_TLB_ST_MISS+T_USER:
-		ftype = VM_PROT_WRITE;
+		ftype = PROT_WRITE;
 		pcb = &p->p_addr->u_pcb;
 fault_common:
 
@@ -452,13 +453,13 @@ fault_common_no_miss:
 
 	case T_ADDR_ERR_LD+T_USER:	/* misaligned or kseg access */
 	case T_ADDR_ERR_ST+T_USER:	/* misaligned or kseg access */
-		ucode = 0;		/* XXX should be VM_PROT_something */
+		ucode = 0;		/* XXX should be PROT_something */
 		i = SIGBUS;
 		typ = BUS_ADRALN;
 		break;
 	case T_BUS_ERR_IFETCH+T_USER:	/* BERR asserted to cpu */
 	case T_BUS_ERR_LD_ST+T_USER:	/* BERR asserted to cpu */
-		ucode = 0;		/* XXX should be VM_PROT_something */
+		ucode = 0;		/* XXX should be PROT_something */
 		i = SIGBUS;
 		typ = BUS_OBJERR;
 		break;
@@ -475,7 +476,7 @@ fault_common_no_miss:
 		} args;
 		register_t rval[2];
 
-		atomic_add_int(&uvmexp.syscalls, 1);
+		atomic_inc_int(&uvmexp.syscalls);
 
 		/* compute next PC after syscall instruction */
 		tpc = trapframe->pc; /* Remember if restart */
@@ -658,7 +659,7 @@ fault_common_no_miss:
 				    p->p_md.md_fppgva + PAGE_SIZE);
 				(void)uvm_map_protect(map, p->p_md.md_fppgva,
 				    p->p_md.md_fppgva + PAGE_SIZE,
-				    UVM_PROT_NONE, FALSE);
+				    PROT_NONE, FALSE);
 				return;
 			}
 			/* FALLTHROUGH */
@@ -784,6 +785,31 @@ fault_common_no_miss:
 		}
 		goto err;
 
+#ifdef CPU_R10000
+	case T_BUS_ERR_IFETCH:
+		/*
+		 * At least R16000 processor have been found triggering
+		 * reproduceable bus error on instruction fetch in the
+		 * kernel code, which are trivially recoverable (and
+		 * look like an obscure errata to me).
+		 *
+		 * Thus, ignore these exceptions if the faulting address
+		 * is in the kernel.
+		 */
+	    {
+		extern void *kernel_text;
+		extern void *etext;
+		vaddr_t va;
+
+		va = (vaddr_t)trapframe->pc;
+		if (trapframe->cause & CR_BR_DELAY)
+			va += 4;
+		if (va > (vaddr_t)&kernel_text && va < (vaddr_t)&etext)
+			return;
+	    }
+		goto err;
+#endif
+
 	default:
 	err:
 		disableintr();
@@ -821,8 +847,7 @@ fault_common_no_miss:
 }
 
 void
-child_return(arg)
-	void *arg;
+child_return(void *arg)
 {
 	struct proc *p = arg;
 	struct trap_frame *trapframe;
@@ -1139,8 +1164,7 @@ void stacktrace_subr(struct trap_frame *, int, int (*)(const char*, ...));
  * Print a stack backtrace.
  */
 void
-stacktrace(regs)
-	struct trap_frame *regs;
+stacktrace(struct trap_frame *regs)
 {
 	stacktrace_subr(regs, 6, printf);
 }
@@ -1214,9 +1238,20 @@ loop:
 	 * Watch out for function tail optimizations.
 	 */
 	sym = db_search_symbol(pc, DB_STGY_ANY, &diff);
-	db_symbol_values(sym, &symname, 0);
-	if (sym != DB_SYM_NULL)
+	if (sym != DB_SYM_NULL && diff == 0) {
+		instr = kdbpeek(pc - 2 * sizeof(int));
+		i.word = instr;
+		if (i.JType.op == OP_JAL) {
+			sym = db_search_symbol(pc - sizeof(int),
+			    DB_STGY_ANY, &diff);
+			if (sym != DB_SYM_NULL && diff != 0)
+				diff += sizeof(int);
+		}
+	}
+	if (sym != DB_SYM_NULL) {
+		db_symbol_values(sym, &symname, 0);
 		subr = pc - (vaddr_t)diff;
+	}
 #endif
 
 	/*
@@ -1344,8 +1379,13 @@ loop:
 
 end:
 	if (ra) {
+		extern void *kernel_text;
+		extern void *etext;
+
 		if (pc == ra && stksize == 0)
 			(*pr)("stacktrace: loop!\n");
+		else if (ra < (vaddr_t)&kernel_text || ra > (vaddr_t)&etext)
+			(*pr)("stacktrace: ra corrupted!\n");
 		else {
 			pc = ra;
 			sp += stksize;
@@ -1472,7 +1512,7 @@ fpe_branch_emulate(struct proc *p, struct trap_frame *tf, uint32_t insn,
 	 */
 
 	rc = uvm_map_protect(map, p->p_md.md_fppgva,
-	    p->p_md.md_fppgva + PAGE_SIZE, UVM_PROT_RWX, FALSE);
+	    p->p_md.md_fppgva + PAGE_SIZE, PROT_MASK, FALSE);
 	if (rc != 0) {
 #ifdef DEBUG
 		printf("%s: uvm_map_protect on %p failed: %d\n",
@@ -1481,7 +1521,7 @@ fpe_branch_emulate(struct proc *p, struct trap_frame *tf, uint32_t insn,
 		return rc;
 	}
 	rc = uvm_fault_wire(map, p->p_md.md_fppgva,
-	    p->p_md.md_fppgva + PAGE_SIZE, UVM_PROT_RWX);
+	    p->p_md.md_fppgva + PAGE_SIZE, PROT_MASK);
 	if (rc != 0) {
 #ifdef DEBUG
 		printf("%s: uvm_fault_wire on %p failed: %d\n",
@@ -1509,7 +1549,7 @@ fpe_branch_emulate(struct proc *p, struct trap_frame *tf, uint32_t insn,
 	}
 
 	(void)uvm_map_protect(map, p->p_md.md_fppgva,
-	    p->p_md.md_fppgva + PAGE_SIZE, UVM_PROT_RX, FALSE);
+	    p->p_md.md_fppgva + PAGE_SIZE, PROT_READ | PROT_EXEC, FALSE);
 	p->p_md.md_fpbranchva = dest;
 	p->p_md.md_fpslotva = (vaddr_t)tf->pc + 4;
 	p->p_md.md_flags |= MDP_FPUSED;
@@ -1522,7 +1562,7 @@ err:
 	uvm_fault_unwire(map, p->p_md.md_fppgva, p->p_md.md_fppgva + PAGE_SIZE);
 err2:
 	(void)uvm_map_protect(map, p->p_md.md_fppgva,
-	    p->p_md.md_fppgva + PAGE_SIZE, UVM_PROT_NONE, FALSE);
+	    p->p_md.md_fppgva + PAGE_SIZE, PROT_NONE, FALSE);
 	return rc;
 }
 #endif

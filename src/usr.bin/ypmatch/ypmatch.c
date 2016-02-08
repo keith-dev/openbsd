@@ -1,4 +1,4 @@
-/*	$OpenBSD: ypmatch.c,v 1.14 2009/10/27 23:59:50 deraadt Exp $ */
+/*	$OpenBSD: ypmatch.c,v 1.16 2015/02/08 23:40:35 deraadt Exp $ */
 /*	$NetBSD: ypmatch.c,v 1.8 1996/05/07 01:24:52 jtc Exp $	*/
 
 /*
@@ -27,7 +27,6 @@
  * SUCH DAMAGE.
  */
 
-#include <sys/param.h>
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <stdio.h>
@@ -94,10 +93,10 @@ main(int argc, char *argv[])
 			domainname = optarg;
 			break;
 		case 't':
-			notrans++;
+			notrans = 1;
 			break;
 		case 'k':
-			key++;
+			key = 1;
 			break;
 		default:
 			usage();

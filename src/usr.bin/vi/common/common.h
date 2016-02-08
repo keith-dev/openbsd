@@ -1,4 +1,4 @@
-/*	$OpenBSD: common.h,v 1.5 2009/01/28 13:02:22 sobrado Exp $	*/
+/*	$OpenBSD: common.h,v 1.7 2014/11/12 16:29:04 millert Exp $	*/
 
 /*-
  * Copyright (c) 1991, 1993, 1994
@@ -11,17 +11,6 @@
  *	@(#)common.h	10.13 (Berkeley) 9/25/96
  */
 
-/*
- * Porting information built at configuration time.  Included before
- * any of nvi's include files.
- */
-#include "port.h"
-
-/*
- * Pseudo-local includes.  These are files that are unlikely to exist
- * on most machines to which we're porting vi, and we want to include
- * them in a very specific order, regardless.
- */
 #include <db.h>
 #include <regex.h>
 

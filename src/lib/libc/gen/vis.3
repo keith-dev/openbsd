@@ -1,4 +1,4 @@
-.\"	$OpenBSD: vis.3,v 1.30 2013/06/05 03:39:22 tedu Exp $
+.\"	$OpenBSD: vis.3,v 1.34 2015/02/07 08:44:49 doug Exp $
 .\"
 .\" Copyright (c) 1989, 1991, 1993
 .\"	The Regents of the University of California.  All rights reserved.
@@ -27,14 +27,15 @@
 .\" OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
 .\" SUCH DAMAGE.
 .\"
-.Dd $Mdocdate: June 5 2013 $
+.Dd $Mdocdate: February 7 2015 $
 .Dt VIS 3
 .Os
 .Sh NAME
 .Nm vis ,
 .Nm strvis ,
 .Nm strnvis ,
-.Nm strvisx
+.Nm strvisx ,
+.Nm stravis
 .Nd visually encode characters
 .Sh SYNOPSIS
 .In stdlib.h
@@ -47,6 +48,8 @@
 .Fn strnvis "char *dst" "const char *src" "size_t dstsize" "int flag"
 .Ft int
 .Fn strvisx "char *dst" "const char *src" "size_t srclen" "int flag"
+.Ft int
+.Fn stravis "char **outp" "const char *src" "int flag"
 .Sh DESCRIPTION
 The
 .Fn vis
@@ -57,19 +60,9 @@ a string which represents the character
 If
 .Fa c
 needs no encoding, it is copied in unaltered.
-The string is NUL-terminated and a pointer to the end of the string is
-returned.
-The maximum length of any encoding is four
-characters (not including the trailing NUL);
-thus, when
-encoding a set of characters into a buffer, the size of the buffer should
-be four times the number of characters encoded, plus one for the trailing
-NUL.
-The
-.Fa flag
-parameter is used for altering the default range of
-characters considered for encoding and for altering the visual
-representation.
+.Fa dst
+will be NUL-terminated and must be at least 5 bytes long
+(maximum encoding requires 4 bytes plus the NUL).
 The additional character,
 .Fa nextc ,
 is only used when selecting the
@@ -93,7 +86,7 @@ function encodes characters from
 .Fa src
 up to the first NUL, into a buffer
 .Fa dst
-(which must be at least 4 * srclen + 1 long).
+(which must be at least 4 * strlen(src) + 1 long).
 .Pp
 The
 .Fn strnvis
@@ -116,7 +109,23 @@ into a buffer
 This
 is useful for encoding a block of data that may contain NULs.
 .Pp
-All three forms NUL-terminate
+The
+.Fn stravis
+function writes a visual representation of the string
+.Fa src
+into a newly allocated string
+.Fa outp ;
+it does not attempt to
+.Xr realloc 3
+.Fa outp .
+.Fa outp
+should be passed to
+.Xr free 3
+to release the allocated storage when it is no longer needed.
+.Fn stravis
+checks for integer overflow when allocating memory.
+.Pp
+All forms NUL-terminate
 .Fa dst ,
 except for
 .Fn strnvis
@@ -125,25 +134,13 @@ when
 is zero, in which case
 .Fa dst
 is not touched.
-.Fn strvis
-and
-.Fn strvisx
-return the number of characters in
-.Fa dst
-(not including the trailing NUL).
-.Fn strnvis
-returns the length that
-.Fa dst
-would become if it were of unlimited size (similar to
-.Xr snprintf 3
-or
-.Xr strlcpy 3 ) .
-This can be used to detect truncation but it also means that
-the return value of
-.Fn strnvis
-must not be used without checking it against
-.Fa dstsize .
 .Pp
+The
+.Fa flag
+parameter is used for altering the default range of
+characters considered for encoding and for altering the visual
+representation.
+.Ss Encodings
 The encoding is a unique, invertible representation composed entirely of
 graphic characters; it can be decoded back into the original form using
 the
@@ -252,7 +249,6 @@ Represents character
 Only used with
 .Dv VIS_ALL .
 .El
-.Pp
 .It Dv VIS_CSTYLE
 Use C-style backslash sequences to represent standard non-printable
 characters.
@@ -300,9 +296,77 @@ meta characters as
 .Ql M-C ) .
 With this flag set, the encoding is
 ambiguous and non-invertible.
+.Sh RETURN VALUES
+.Fn vis
+returns a pointer to the terminating NUL character of the string
+.Fa dst .
+.Pp
+.Fn strvis
+and
+.Fn strvisx
+return the number of characters in
+.Fa dst
+(not including the trailing NUL).
+.Pp
+.Fn strnvis
+returns the length that
+.Fa dst
+would become if it were of unlimited size (similar to
+.Xr snprintf 3
+or
+.Xr strlcpy 3 ) .
+This can be used to detect truncation, but it also means that
+the return value of
+.Fn strnvis
+must not be used without checking it against
+.Fa dstsize .
+.Pp
+Upon successful completion,
+.Fn stravis
+returns the number of characters in
+.Pf * Fa outp
+(not including the trailing NUL).
+Otherwise,
+.Fn stravis
+returns -1 and sets
+.Va errno
+to
+.Er ENOMEM .
+.Sh EXAMPLES
+.Fn strvis
+has unusual storage requirements that can lead to stack or heap corruption
+if the destination is not carefully constructed.
+A common mistake is to use the same size for the source and destination
+when the destination actually needs up to 4 * strlen(source) + 1 bytes.
+.Pp
+If the length of a string to be encoded is not known at compile time, use
+.Fn stravis :
+.Bd -literal -offset indent
+char *src, *dst;
+
+\&...
+if (stravis(&dst, src, VIS_OCTAL) == -1)
+	err(1, "stravis");
+
+\&...
+free(dst);
+.Ed
+.Pp
+To encode a fixed size buffer,
+.Fn strnvis
+can be used with a fixed size target buffer:
+.Bd -literal -offset indent
+char src[MAXPATHLEN];
+char dst[4 * MAXPATHLEN + 1];
+
+\&...
+if (strnvis(dst, src, sizeof(dst), VIS_OCTAL) >= sizeof(dst))
+	err(1, "strnvis");
+.Ed
 .Sh SEE ALSO
 .Xr unvis 1 ,
 .Xr vis 1 ,
+.Xr free 3 ,
 .Xr snprintf 3 ,
 .Xr strlcpy 3 ,
 .Xr unvis 3
@@ -313,11 +377,15 @@ The
 and
 .Fn strvisx
 functions first appeared in
-.Bx 4.4 .
-The
+.Bx 4.4 ,
 .Fn strnvis
-function first appeared in
-.Ox 2.9 .
+in
+.Ox 2.9
+and
+.Fn stravis
+in
+.Ox 5.7 .
+.Pp
 The
 .Dv VIS_ALL
 flag first appeared in

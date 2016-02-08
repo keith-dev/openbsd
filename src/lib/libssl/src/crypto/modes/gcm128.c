@@ -1,4 +1,4 @@
-/* $OpenBSD: gcm128.c,v 1.10 2014/07/09 16:06:13 miod Exp $ */
+/* $OpenBSD: gcm128.c,v 1.12 2015/02/10 09:46:30 miod Exp $ */
 /* ====================================================================
  * Copyright (c) 2010 The OpenSSL Project.  All rights reserved.
  *
@@ -59,7 +59,6 @@
 #  define NDEBUG
 # endif
 #endif
-#include <assert.h>
 
 #if defined(BSWAP4) && defined(__STRICT_ALIGNMENT)
 /* redefine, because alignment is ensured */
@@ -898,9 +897,6 @@ int CRYPTO_gcm128_encrypt(GCM128_CONTEXT *ctx,
 # endif
 #endif
 
-#if 0
-	n = (unsigned int)mlen%16; /* alternative to ctx->mres */
-#endif
 	mlen += len;
 	if (mlen>((U64(1)<<36)-32) || (sizeof(len)==8 && mlen<len))
 		return -1;

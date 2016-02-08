@@ -1,4 +1,4 @@
-/*	$OpenBSD: dhcpd.h,v 1.139 2014/05/23 15:26:22 krw Exp $	*/
+/*	$OpenBSD: dhcpd.h,v 1.149 2015/02/10 04:20:26 krw Exp $	*/
 
 /*
  * Copyright (c) 2004 Henning Brauer <henning@openbsd.org>
@@ -65,6 +65,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <signal.h>
 #include <syslog.h>
 #include <time.h>
 #include <unistd.h>
@@ -108,6 +109,7 @@ struct client_lease {
 
 /* Possible states in which the client can be. */
 enum dhcp_state {
+	S_PREBOOT,
 	S_REBOOTING,
 	S_INIT,
 	S_SELECTING,
@@ -162,6 +164,7 @@ struct client_state {
 	u_int32_t		 xid;
 	u_int16_t		 secs;
 	time_t			 first_sending;
+	time_t			 startup_time;
 	time_t			 interval;
 	struct dhcp_packet	 packet;
 	struct dhcp_packet	 bootrequest_packet;
@@ -171,24 +174,22 @@ struct client_state {
 
 struct interface_info {
 	struct ether_addr	hw_address;
-	struct in_addr	 primary_address;
 	char		 name[IFNAMSIZ];
-	int		 rfdesc;
-	int		 wfdesc;
-	int		 ufdesc; /* unicast */
+	int		 bfdesc; /* bpf - reading & broadcast writing*/
+	int		 ufdesc; /* udp - unicast writing */
 	unsigned char	*rbuf;
 	size_t		 rbuf_max;
 	size_t		 rbuf_offset;
 	size_t		 rbuf_len;
-	struct ifreq	*ifp;
-	int		 noifmedia;
 	int		 errors;
 	u_int16_t	 index;
 	int		 linkstat;
 	int		 rdomain;
 	int		 flags;
-#define IFI_NEW_LLADDR	0x00000001
-#define IFI_HUP		0x00000002
+#define	IFI_VALID_LLADDR	0x00000001
+#define IFI_NEW_LLADDR		0x00000002
+#define IFI_NOMEDIA		0x00000004
+#define IFI_HUP			0x00000008
 };
 
 struct dhcp_timeout {
@@ -252,7 +253,6 @@ ssize_t send_packet(struct in_addr, struct in_addr);
 ssize_t receive_packet(struct sockaddr_in *, struct ether_addr *);
 
 /* dispatch.c */
-void discover_interface(void);
 void dispatch(void);
 void set_timeout(time_t, void (*)(void));
 void set_timeout_interval(time_t, void (*)(void));
@@ -260,17 +260,11 @@ void cancel_timeout(void);
 void interface_link_forceup(char *);
 int interface_status(char *);
 int get_rdomain(char *);
+void get_hw_address(void);
 int subnet_exists(struct client_lease *);
 
 /* tables.c */
 extern const struct option dhcp_options[256];
-
-/* convert.c */
-u_int32_t getULong(unsigned char *);
-int32_t getLong(unsigned char *);
-u_int16_t getUShort(unsigned char *);
-int16_t getShort(unsigned char *);
-void putULong(unsigned char *, u_int32_t);
 
 /* dhclient.c */
 extern char *path_dhclient_conf;
@@ -299,17 +293,19 @@ void read_client_conf(void);
 void read_client_leases(void);
 
 /* kroute.c */
-void delete_addresses(char *, int);
-void delete_address(char *, int, struct in_addr);
+void delete_addresses(void);
+void delete_address(struct in_addr);
 
-void add_address(char *, int, struct in_addr, struct in_addr);
+void set_interface_mtu(int);
+void add_address(struct in_addr, struct in_addr);
 
-void flush_routes(char *, int);
+void flush_routes(void);
 
-void add_route(int, struct in_addr, struct in_addr, struct in_addr, int, int);
+void add_route(struct in_addr, struct in_addr, struct in_addr, struct in_addr,
+    int, int);
 
 void sendhup(struct client_lease *);
 
-int resolv_conf_priority(int);
+int resolv_conf_priority(void);
 
 void flush_unpriv_ibuf(const char *);

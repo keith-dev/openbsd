@@ -1,4 +1,4 @@
-/*	$OpenBSD: ksyms.c,v 1.25 2014/07/08 17:19:25 deraadt Exp $	*/
+/*	$OpenBSD: ksyms.c,v 1.27 2015/02/10 21:56:09 miod Exp $	*/
 /*
  * Copyright (c) 1998 Todd C. Miller <Todd.Miller@courtesan.com>
  * Copyright (c) 2001 Artur Grabowski <art@openbsd.org>
@@ -39,7 +39,7 @@
 #endif
 
 extern char *esym;				/* end of symbol table */
-#if defined(__sparc64__) || defined(__mips__)
+#if defined(__sparc64__) || defined(__mips__) || defined(__amd64__)
 extern char *ssym;				/* end of kernel */
 #else
 extern long end;				/* end of kernel */
@@ -61,7 +61,7 @@ void
 ksymsattach(int num)
 {
 
-#if defined(__sparc64__) || defined(__mips__)
+#if defined(__sparc64__) || defined(__mips__) || defined(__amd64__)
 	if (esym <= ssym) {
 		printf("/dev/ksyms: Symbol table not valid.\n");
 		return;
@@ -75,7 +75,7 @@ ksymsattach(int num)
 
 #ifdef _NLIST_DO_ELF
 	do {
-#if defined(__sparc64__) || defined(__mips__)
+#if defined(__sparc64__) || defined(__mips__) || defined(__amd64__)
 		caddr_t symtab = ssym;
 #else
 		caddr_t symtab = (caddr_t)&end;
@@ -171,7 +171,7 @@ ksymsread(dev_t dev, struct uio *uio, int flags)
 		if (len > uio->uio_resid)
 			len = uio->uio_resid;
 
-		if ((error = uiomove(v, len, uio)) != 0)
+		if ((error = uiomovei(v, len, uio)) != 0)
 			return (error);
 	}
 

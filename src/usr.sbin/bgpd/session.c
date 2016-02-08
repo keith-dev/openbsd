@@ -1,4 +1,4 @@
-/*	$OpenBSD: session.c,v 1.334 2014/01/22 04:08:08 claudio Exp $ */
+/*	$OpenBSD: session.c,v 1.338 2015/02/09 11:37:31 claudio Exp $ */
 
 /*
  * Copyright (c) 2003, 2004, 2005 Henning Brauer <henning@openbsd.org>
@@ -25,7 +25,6 @@
 #include <sys/un.h>
 #include <net/if_types.h>
 #include <netinet/in.h>
-#include <netinet/in_systm.h>
 #include <netinet/ip.h>
 #include <netinet/tcp.h>
 #include <arpa/inet.h>
@@ -168,8 +167,6 @@ setup_listeners(u_int *la_cnt)
 			log_warn("setup_listeners setsockopt hoplimit");
 			continue;
 		}
-
-		session_socket_blockmode(la->fd, BM_NONBLOCK);
 
 		if (listen(la->fd, MAX_BACKLOG)) {
 			close(la->fd);
@@ -314,8 +311,8 @@ session_main(int pipe_m2s[2], int pipe_s2r[2], int pipe_m2r[2],
 		}
 
 		if (peer_cnt > peer_l_elms) {
-			if ((newp = realloc(peer_l, sizeof(struct peer *) *
-			    peer_cnt)) == NULL) {
+			if ((newp = reallocarray(peer_l, peer_cnt,
+			    sizeof(struct peer *))) == NULL) {
 				/* panic for now  */
 				log_warn("could not resize peer_l from %u -> %u"
 				    " entries", peer_l_elms, peer_cnt);
@@ -339,8 +336,8 @@ session_main(int pipe_m2s[2], int pipe_s2r[2], int pipe_m2r[2],
 		}
 
 		if (mrt_cnt > mrt_l_elms) {
-			if ((newp = realloc(mrt_l, sizeof(struct mrt *) *
-			    mrt_cnt)) == NULL) {
+			if ((newp = reallocarray(mrt_l, mrt_cnt,
+			    sizeof(struct mrt *))) == NULL) {
 				/* panic for now  */
 				log_warn("could not resize mrt_l from %u -> %u"
 				    " entries", mrt_l_elms, mrt_cnt);
@@ -353,8 +350,8 @@ session_main(int pipe_m2s[2], int pipe_s2r[2], int pipe_m2r[2],
 		new_cnt = PFD_LISTENERS_START + listener_cnt + peer_cnt +
 		    ctl_cnt + mrt_cnt;
 		if (new_cnt > pfd_elms) {
-			if ((newp = realloc(pfd, sizeof(struct pollfd) *
-			    new_cnt)) == NULL) {
+			if ((newp = reallocarray(pfd, new_cnt,
+			    sizeof(struct pollfd))) == NULL) {
 				/* panic for now  */
 				log_warn("could not resize pfd from %u -> %u"
 				    " entries", pfd_elms, new_cnt);
@@ -1039,8 +1036,9 @@ session_accept(int listenfd)
 	struct peer		*p = NULL;
 
 	len = sizeof(cliaddr);
-	if ((connfd = accept(listenfd,
-	    (struct sockaddr *)&cliaddr, &len)) == -1) {
+	if ((connfd = accept4(listenfd,
+	    (struct sockaddr *)&cliaddr, &len,
+	    SOCK_CLOEXEC | SOCK_NONBLOCK)) == -1) {
 		if (errno == ENFILE || errno == EMFILE)
 			pauseaccept = getmonotime();
 		else if (errno != EWOULDBLOCK && errno != EINTR &&
@@ -1101,7 +1099,6 @@ open:
 			close(connfd);
 			return;
 		}
-		session_socket_blockmode(connfd, BM_NONBLOCK);
 		bgp_fsm(p, EVNT_CON_OPEN);
 		return;
 	} else if (p != NULL && p->state == STATE_ESTABLISHED &&
@@ -1130,8 +1127,8 @@ session_connect(struct peer *peer)
 	if (peer->fd != -1)
 		return (-1);
 
-	if ((peer->fd = socket(aid2af(peer->conf.remote_addr.aid), SOCK_STREAM,
-	    IPPROTO_TCP)) == -1) {
+	if ((peer->fd = socket(aid2af(peer->conf.remote_addr.aid),
+	    SOCK_STREAM | SOCK_CLOEXEC | SOCK_NONBLOCK, IPPROTO_TCP)) == -1) {
 		log_peer_warn(&peer->conf, "session_connect socket");
 		bgp_fsm(peer, EVNT_CON_OPENFAIL);
 		return (-1);
@@ -1173,8 +1170,6 @@ session_connect(struct peer *peer)
 		bgp_fsm(peer, EVNT_CON_OPENFAIL);
 		return (-1);
 	}
-
-	session_socket_blockmode(peer->fd, BM_NONBLOCK);
 
 	sa = addr2sa(&peer->conf.remote_addr, BGP_PORT);
 	if (connect(peer->fd, sa, sa->sa_len) == -1) {
@@ -1279,23 +1274,6 @@ session_setup_socket(struct peer *p)
 	}
 
 	return (0);
-}
-
-void
-session_socket_blockmode(int fd, enum blockmodes bm)
-{
-	int	flags;
-
-	if ((flags = fcntl(fd, F_GETFL, 0)) == -1)
-		fatal("fcntl F_GETFL");
-
-	if (bm == BM_NONBLOCK)
-		flags |= O_NONBLOCK;
-	else
-		flags &= ~O_NONBLOCK;
-
-	if ((flags = fcntl(fd, F_SETFL, flags)) == -1)
-		fatal("fcntl F_SETFL");
 }
 
 void
@@ -1891,7 +1869,7 @@ session_process_msg(struct peer *p)
 
 	if (rpos < av) {
 		left = av - rpos;
-		memcpy(&p->rbuf->buf, p->rbuf->buf + rpos, left);
+		memmove(&p->rbuf->buf, p->rbuf->buf + rpos, left);
 		p->rbuf->wpos = left;
 	} else
 		p->rbuf->wpos = 0;

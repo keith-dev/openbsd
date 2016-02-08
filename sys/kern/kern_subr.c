@@ -1,4 +1,4 @@
-/*	$OpenBSD: kern_subr.c,v 1.40 2014/07/13 15:48:41 tedu Exp $	*/
+/*	$OpenBSD: kern_subr.c,v 1.43 2015/02/10 21:56:09 miod Exp $	*/
 /*	$NetBSD: kern_subr.c,v 1.15 1996/04/09 17:21:56 ragge Exp $	*/
 
 /*
@@ -47,7 +47,7 @@
 #include <sys/resourcevar.h>
 
 int
-uiomove(void *cp, int n, struct uio *uio)
+uiomove(void *cp, size_t n, struct uio *uio)
 {
 	struct iovec *iov;
 	size_t cnt;
@@ -102,6 +102,15 @@ uiomove(void *cp, int n, struct uio *uio)
 		n -= cnt;
 	}
 	return (error);
+}
+
+int
+uiomovei(void *cp, int n, struct uio *uio)
+{
+	if (n < 0)
+		return 0;
+
+	return uiomove(cp, (size_t)n, uio);
 }
 
 /*
@@ -176,13 +185,11 @@ hashinit(int elements, int type, int flags, u_long *hashmask)
 }
 
 /*
- * "Shutdown/startup hook" types, functions, and variables.
+ * "Mountroot/startup hook" types, functions, and variables.
  */
 
 struct hook_desc_head startuphook_list =
     TAILQ_HEAD_INITIALIZER(startuphook_list);
-struct hook_desc_head shutdownhook_list =
-    TAILQ_HEAD_INITIALIZER(shutdownhook_list);
 struct hook_desc_head mountroothook_list =
     TAILQ_HEAD_INITIALIZER(mountroothook_list);
 
@@ -221,7 +228,7 @@ hook_disestablish(struct hook_desc_head *head, void *vhook)
 #endif
 	hdp = vhook;
 	TAILQ_REMOVE(head, hdp, hd_list);
-	free(hdp, M_DEVBUF, 0);
+	free(hdp, M_DEVBUF, sizeof(*hdp));
 }
 
 /*
@@ -244,7 +251,7 @@ dohooks(struct hook_desc_head *head, int flags)
 			TAILQ_REMOVE(head, hdp, hd_list);
 			(*hdp->hd_fn)(hdp->hd_arg);
 			if ((flags & HOOK_FREE) != 0)
-				free(hdp, M_DEVBUF, 0);
+				free(hdp, M_DEVBUF, sizeof(*hdp));
 		}
 	}
 }

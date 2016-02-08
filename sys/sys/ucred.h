@@ -1,4 +1,4 @@
-/*	$OpenBSD: ucred.h,v 1.9 2014/04/18 11:51:17 guenther Exp $	*/
+/*	$OpenBSD: ucred.h,v 1.11 2015/03/02 20:46:50 guenther Exp $	*/
 /*	$NetBSD: ucred.h,v 1.12 1995/06/01 22:44:50 jtc Exp $	*/
 
 /*
@@ -35,6 +35,8 @@
 #ifndef _SYS_UCRED_H_
 #define	_SYS_UCRED_H_
 
+#include <sys/syslimits.h>
+
 /*
  * Credentials.
  */
@@ -50,7 +52,7 @@ struct ucred {
 	gid_t	cr_rgid;		/* Real group id. */
 	gid_t	cr_svgid;		/* Saved effective group id. */
 	short	cr_ngroups;		/* number of groups */
-	gid_t	cr_groups[NGROUPS];	/* groups */
+	gid_t	cr_groups[NGROUPS_MAX];	/* groups */
 };
 #define NOCRED ((struct ucred *)-1)	/* no credential available */
 #define FSCRED ((struct ucred *)-2)	/* filesystem credential */
@@ -62,7 +64,7 @@ struct xucred {
 	uid_t	cr_uid;			/* user id */
 	gid_t	cr_gid;			/* group id */
 	short	cr_ngroups;		/* number of groups */
-	gid_t	cr_groups[NGROUPS];	/* groups */
+	gid_t	cr_groups[NGROUPS_MAX];	/* groups */
 };
 
 #ifdef _KERNEL
@@ -70,7 +72,7 @@ struct xucred {
 
 #define SUSER_NOACCT	0x1	/* don't mark accounting flags */
 
-void		crfromxucred(struct ucred *, const struct xucred *);
+int		crfromxucred(struct ucred *, const struct xucred *);
 void		crset(struct ucred *, const struct ucred *);
 struct ucred	*crcopy(struct ucred *cr);
 struct ucred	*crdup(struct ucred *cr);

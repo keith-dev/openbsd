@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_urtw.c,v 1.47 2014/07/13 15:52:49 mpi Exp $	*/
+/*	$OpenBSD: if_urtw.c,v 1.51 2015/02/10 23:25:46 mpi Exp $	*/
 
 /*-
  * Copyright (c) 2009 Martynas Venckus <martynas@openbsd.org>
@@ -29,9 +29,9 @@
 #include <sys/timeout.h>
 #include <sys/conf.h>
 #include <sys/device.h>
+#include <sys/endian.h>
 
 #include <machine/bus.h>
-#include <machine/endian.h>
 #if NBPFILTER > 0
 #include <net/bpf.h>
 #endif
@@ -607,6 +607,19 @@ urtw_attach(struct device *parent, struct device *self, void *aux)
 
 	sc->sc_udev = uaa->device;
 	sc->sc_hwrev = urtw_lookup(uaa->vendor, uaa->product)->rev;
+
+	if (usbd_set_config_no(sc->sc_udev, 1, 0) != 0) {
+		printf("%s: could not set configuration no\n",
+		    sc->sc_dev.dv_xname);
+		return;
+	}
+
+	/* Get the first interface handle. */
+	if (usbd_device2interface_handle(sc->sc_udev, 0, &sc->sc_iface) != 0) {
+		printf("%s: could not get interface handle\n",
+		    sc->sc_dev.dv_xname);
+		return;
+	}
 
 	printf("%s: ", sc->sc_dev.dv_xname);
 
@@ -2297,20 +2310,6 @@ urtw_init(struct ifnet *ifp)
 	sc->sc_txtimer = 0;
 
 	if (!(sc->sc_flags & URTW_INIT_ONCE)) {
-		error = usbd_set_config_no(sc->sc_udev, URTW_CONFIG_NO, 0);
-		if (error != 0) {
-			printf("%s: could not set configuration no\n",
-			    sc->sc_dev.dv_xname);
-			goto fail;
-		}
-		/* get the first interface handle */
-		error = usbd_device2interface_handle(sc->sc_udev,
-		    URTW_IFACE_INDEX, &sc->sc_iface);
-		if (error != 0) {
-			printf("%s: could not get interface handle\n",
-			    sc->sc_dev.dv_xname);
-			goto fail;
-		}
 		error = urtw_open_pipes(sc);
 		if (error != 0)
 			goto fail;
@@ -2378,10 +2377,8 @@ urtw_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 	case SIOCSIFADDR:
 		ifa = (struct ifaddr *)data;
 		ifp->if_flags |= IFF_UP;
-#ifdef INET
 		if (ifa->ifa_addr->sa_family == AF_INET)
 			arp_ifinit(&ic->ic_ac, ifa);
-#endif
 		/* FALLTHROUGH */
 	case SIOCSIFFLAGS:
 		if (ifp->if_flags & IFF_UP) {
@@ -3169,7 +3166,6 @@ urtw_rxeof(struct usbd_xfer *xfer, void *priv, usbd_status status)
 	data->buf = mtod(mnew, uint8_t *);
 
 	/* finalize mbuf */
-	m->m_pkthdr.rcvif = ifp;
 	m->m_pkthdr.len = m->m_len = flen - 4;
 
 	s = splnet();
@@ -3730,20 +3726,6 @@ urtw_8187b_init(struct ifnet *ifp)
 	sc->sc_txtimer = 0;
 
 	if (!(sc->sc_flags & URTW_INIT_ONCE)) {
-		error = usbd_set_config_no(sc->sc_udev, URTW_CONFIG_NO, 0);
-		if (error != 0) {
-			printf("%s: could not set configuration no\n",
-			    sc->sc_dev.dv_xname);
-			goto fail;
-		}
-		/* Get the first interface handle. */
-		error = usbd_device2interface_handle(sc->sc_udev,
-		    URTW_IFACE_INDEX, &sc->sc_iface);
-		if (error != 0) {
-			printf("%s: could not get interface handle\n",
-			    sc->sc_dev.dv_xname);
-			goto fail;
-		}
 		error = urtw_open_pipes(sc);
 		if (error != 0)
 			goto fail;

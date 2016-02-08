@@ -1,4 +1,4 @@
-/*	$OpenBSD: apprentice.c,v 1.31 2014/05/18 17:50:11 espie Exp $ */
+/*	$OpenBSD: apprentice.c,v 1.34 2015/01/16 18:08:15 millert Exp $ */
 /*
  * Copyright (c) Ian F. Darwin 1986-1995.
  * Software written by Ian F. Darwin and others;
@@ -30,7 +30,7 @@
  * apprentice - make one pass through /etc/magic, learning its secrets.
  */
 
-#include <sys/param.h>
+
 #include <sys/stat.h>
 #include <sys/types.h>
 
@@ -71,10 +71,6 @@
 
 #ifndef MAP_FILE
 #define MAP_FILE 0
-#endif
-
-#ifndef MAXPATHLEN
-#define MAXPATHLEN	1024
 #endif
 
 struct magic_entry {
@@ -620,7 +616,7 @@ apprentice_load(struct magic_set *ms, struct magic **magicp, uint32_t *nmagicp,
 	int errs = 0;
 	struct magic_entry *marray;
 	uint32_t marraycount, i, mentrycount = 0, starttest;
-	char subfn[MAXPATHLEN];
+	char subfn[PATH_MAX];
 	struct stat st;
 	DIR *dir;
 	struct dirent *d;
@@ -642,7 +638,7 @@ apprentice_load(struct magic_set *ms, struct magic **magicp, uint32_t *nmagicp,
 	if (stat(fn, &st) == 0 && S_ISDIR(st.st_mode)) {
 		dir = opendir(fn);
 		if (dir) {
-			while (d = readdir(dir)) {
+			while ((d = readdir(dir)) != NULL) {
 				snprintf(subfn, sizeof(subfn), "%s/%s",
 				    fn, d->d_name);
 				if (stat(subfn, &st) == 0 && S_ISREG(st.st_mode)) {
@@ -2034,7 +2030,7 @@ mkdbname(const char *fn, char **buf, int strip)
 	}
 
 	(void)asprintf(buf, "%s%s", fn, ext);
-	if (*buf && strlen(*buf) > MAXPATHLEN) {
+	if (*buf && strlen(*buf) > PATH_MAX) {
 		free(*buf);
 		*buf = NULL;
 	}

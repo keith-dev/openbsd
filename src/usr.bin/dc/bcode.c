@@ -1,4 +1,4 @@
-/*	$OpenBSD: bcode.c,v 1.45 2012/11/07 11:06:14 otto Exp $	*/
+/*	$OpenBSD: bcode.c,v 1.47 2015/02/16 20:53:34 jca Exp $	*/
 
 /*
  * Copyright (c) 2003, Otto Moerbeek <otto@drijf.net>
@@ -16,7 +16,6 @@
  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
 
-#include <ssl/ssl.h>
 #include <err.h>
 #include <limits.h>
 #include <signal.h>
@@ -1691,7 +1690,7 @@ eval_string(char *p)
 	if (bmachine.readsp == bmachine.readstack_sz - 1) {
 		size_t newsz = bmachine.readstack_sz * 2;
 		struct source *stack;
-		stack = realloc(bmachine.readstack, newsz *
+		stack = reallocarray(bmachine.readstack, newsz,
 		    sizeof(struct source));
 		if (stack == NULL)
 			err(1, "recursion too deep");

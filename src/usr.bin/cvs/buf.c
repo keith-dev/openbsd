@@ -1,4 +1,4 @@
-/*	$OpenBSD: buf.c,v 1.80 2010/09/08 20:49:11 nicm Exp $	*/
+/*	$OpenBSD: buf.c,v 1.82 2015/02/05 12:59:57 millert Exp $	*/
 /*
  * Copyright (c) 2003 Jean-Francois Brousseau <jfb@openbsd.org>
  * All rights reserved.
@@ -29,6 +29,7 @@
 
 #include <errno.h>
 #include <fcntl.h>
+#include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
@@ -286,6 +287,6 @@ buf_differ(const BUF *b1, const BUF *b2)
 static void
 buf_grow(BUF *b, size_t len)
 {
-	b->cb_buf = xrealloc(b->cb_buf, 1, b->cb_size + len);
+	b->cb_buf = xreallocarray(b->cb_buf, 1, b->cb_size + len);
 	b->cb_size += len;
 }

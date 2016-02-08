@@ -1,4 +1,4 @@
-/*	$OpenBSD: exec_subr.c,v 1.37 2014/07/13 15:29:04 tedu Exp $	*/
+/*	$OpenBSD: exec_subr.c,v 1.49 2015/02/16 05:23:43 miod Exp $	*/
 /*	$NetBSD: exec_subr.c,v 1.9 1994/12/04 03:10:42 mycroft Exp $	*/
 
 /*
@@ -41,7 +41,7 @@
 #include <sys/mman.h>
 #include <sys/resourcevar.h>
 
-#include <dev/rndvar.h>
+#include <uvm/uvm_extern.h>
 
 #ifdef DEBUG
 /*
@@ -91,11 +91,11 @@ vmcmdset_extend(struct exec_vmcmd_set *evsp)
 	evsp->evs_cnt += ocnt;
 
 	/* reallocate the command set */
-	nvcp = mallocarray(evsp->evs_cnt, sizeof(struct exec_vmcmd), M_EXEC,
+	nvcp = mallocarray(evsp->evs_cnt, sizeof(*nvcp), M_EXEC,
 	    M_WAITOK);
-	bcopy(evsp->evs_cmds, nvcp, (ocnt * sizeof(struct exec_vmcmd)));
+	memcpy(nvcp, evsp->evs_cmds, ocnt * sizeof(*nvcp));
 	if (evsp->evs_cmds != evsp->evs_start)
-		free(evsp->evs_cmds, M_EXEC, 0);
+		free(evsp->evs_cmds, M_EXEC, ocnt * sizeof(*nvcp));
 	evsp->evs_cmds = nvcp;
 }
 
@@ -186,7 +186,7 @@ vmcmd_map_pagedvn(struct proc *p, struct exec_vmcmd *cmd)
 	 * first, attach to the object
 	 */
 
-	uobj = uvn_attach(cmd->ev_vp, VM_PROT_READ|VM_PROT_EXECUTE);
+	uobj = uvn_attach(cmd->ev_vp, PROT_READ | PROT_EXEC);
 	if (uobj == NULL)
 		return (ENOMEM);
 
@@ -196,8 +196,8 @@ vmcmd_map_pagedvn(struct proc *p, struct exec_vmcmd *cmd)
 
 	error = uvm_map(&p->p_vmspace->vm_map, &cmd->ev_addr, cmd->ev_len,
 	    uobj, cmd->ev_offset, 0,
-	    UVM_MAPFLAG(cmd->ev_prot, VM_PROT_ALL, UVM_INH_COPY,
-	    UVM_ADV_NORMAL, UVM_FLAG_COPYONW|UVM_FLAG_FIXED));
+	    UVM_MAPFLAG(cmd->ev_prot, PROT_MASK, MAP_INHERIT_COPY,
+	    MADV_NORMAL, UVM_FLAG_COPYONW|UVM_FLAG_FIXED));
 
 	/*
 	 * check for error
@@ -234,9 +234,8 @@ vmcmd_map_readvn(struct proc *p, struct exec_vmcmd *cmd)
 	cmd->ev_addr = trunc_page(cmd->ev_addr); /* required by uvm_map */
 	error = uvm_map(&p->p_vmspace->vm_map, &cmd->ev_addr,
 	    round_page(cmd->ev_len), NULL, UVM_UNKNOWN_OFFSET, 0,
-	    UVM_MAPFLAG(prot | UVM_PROT_WRITE, UVM_PROT_ALL, UVM_INH_COPY,
-	    UVM_ADV_NORMAL,
-	    UVM_FLAG_FIXED|UVM_FLAG_OVERLAY|UVM_FLAG_COPYONW));
+	    UVM_MAPFLAG(prot | PROT_WRITE, PROT_MASK, MAP_INHERIT_COPY,
+	    MADV_NORMAL, UVM_FLAG_FIXED|UVM_FLAG_OVERLAY|UVM_FLAG_COPYONW));
 
 	if (error)
 		return (error);
@@ -247,7 +246,7 @@ vmcmd_map_readvn(struct proc *p, struct exec_vmcmd *cmd)
 	if (error)
 		return (error);
 
-	if ((prot & VM_PROT_WRITE) == 0) {
+	if ((prot & PROT_WRITE) == 0) {
 		/*
 		 * we had to map in the area at PROT_WRITE so that vn_rdwr()
 		 * could write to it.   however, the caller seems to want
@@ -264,28 +263,20 @@ vmcmd_map_readvn(struct proc *p, struct exec_vmcmd *cmd)
 
 /*
  * vmcmd_map_zero():
- *	handle vmcmd which specifies a zero-filled address space region.  The
- *	address range must be first allocated, then protected appropriately.
+ *	handle vmcmd which specifies a zero-filled address space region.
  */
 
 int
 vmcmd_map_zero(struct proc *p, struct exec_vmcmd *cmd)
 {
-	int error;
-
 	if (cmd->ev_len == 0)
 		return (0);
 	
 	cmd->ev_addr = trunc_page(cmd->ev_addr); /* required by uvm_map */
-	error = uvm_map(&p->p_vmspace->vm_map, &cmd->ev_addr,
+	return (uvm_map(&p->p_vmspace->vm_map, &cmd->ev_addr,
 	    round_page(cmd->ev_len), NULL, UVM_UNKNOWN_OFFSET, 0,
-	    UVM_MAPFLAG(cmd->ev_prot, UVM_PROT_ALL, UVM_INH_COPY,
-	    UVM_ADV_NORMAL, UVM_FLAG_FIXED|UVM_FLAG_COPYONW));
-
-	if (error)
-		return error;
-
-	return (0);
+	    UVM_MAPFLAG(cmd->ev_prot, PROT_MASK, MAP_INHERIT_COPY,
+	    MADV_NORMAL, UVM_FLAG_FIXED|UVM_FLAG_COPYONW)));
 }
 
 /*
@@ -298,16 +289,28 @@ vmcmd_randomize(struct proc *p, struct exec_vmcmd *cmd)
 {
 	char *buf;
 	int error;
+	size_t off = 0, len;
 
 	if (cmd->ev_len == 0)
 		return (0);
-	if (cmd->ev_len > 1024)
+	if (cmd->ev_len > ELF_RANDOMIZE_LIMIT)
 		return (EINVAL);
 
-	buf = malloc(cmd->ev_len, M_TEMP, M_WAITOK);
-	arc4random_buf(buf, cmd->ev_len);
-	error = copyout(buf, (void *)cmd->ev_addr, cmd->ev_len);
-	free(buf, M_TEMP, 0);
+	buf = malloc(PAGE_SIZE, M_TEMP, M_WAITOK);
+	len = cmd->ev_len;
+	do {
+		size_t sublen = MIN(len, PAGE_SIZE);
+
+		arc4random_buf(buf, sublen);
+		error = copyout(buf, (void *)cmd->ev_addr + off, sublen);
+		if (error)
+			break;
+		off += sublen;
+		len -= sublen;
+		if (len)
+			yield();
+	} while (len);
+	free(buf, M_TEMP, PAGE_SIZE);
 
 	return (error);
 }
@@ -327,6 +330,7 @@ vmcmd_randomize(struct proc *p, struct exec_vmcmd *cmd)
 int
 exec_setup_stack(struct proc *p, struct exec_package *epp)
 {
+	vaddr_t sgap;
 
 #ifdef MACHINE_STACK_GROWS_UP
 	epp->ep_maxsaddr = USRSTACK;
@@ -336,6 +340,19 @@ exec_setup_stack(struct proc *p, struct exec_package *epp)
 	epp->ep_minsaddr = USRSTACK;
 #endif
 	epp->ep_ssize = round_page(p->p_rlimit[RLIMIT_STACK].rlim_cur);
+
+	if (stackgap_random != 0) {
+		sgap = arc4random() & (stackgap_random - 1);
+		sgap = trunc_page(sgap);
+
+#ifdef MACHINE_STACK_GROWS_UP
+		epp->ep_maxsaddr += sgap;
+		epp->ep_minsaddr += sgap;
+#else
+		epp->ep_maxsaddr -= sgap;
+		epp->ep_minsaddr -= sgap;
+#endif
+	}
 
 	/*
 	 * set up commands for stack.  note that this takes *two*, one to
@@ -351,17 +368,17 @@ exec_setup_stack(struct proc *p, struct exec_package *epp)
 #ifdef MACHINE_STACK_GROWS_UP
 	NEW_VMCMD(&epp->ep_vmcmds, vmcmd_map_zero,
 	    ((epp->ep_minsaddr - epp->ep_ssize) - epp->ep_maxsaddr),
-	    epp->ep_maxsaddr + epp->ep_ssize, NULLVP, 0, VM_PROT_NONE);
+	    epp->ep_maxsaddr + epp->ep_ssize, NULLVP, 0, PROT_NONE);
 	NEW_VMCMD(&epp->ep_vmcmds, vmcmd_map_zero, epp->ep_ssize,
 	    epp->ep_maxsaddr, NULLVP, 0,
-	    VM_PROT_READ|VM_PROT_WRITE);
+	    PROT_READ | PROT_WRITE);
 #else
 	NEW_VMCMD(&epp->ep_vmcmds, vmcmd_map_zero,
 	    ((epp->ep_minsaddr - epp->ep_ssize) - epp->ep_maxsaddr),
-	    epp->ep_maxsaddr, NULLVP, 0, VM_PROT_NONE);
+	    epp->ep_maxsaddr, NULLVP, 0, PROT_NONE);
 	NEW_VMCMD(&epp->ep_vmcmds, vmcmd_map_zero, epp->ep_ssize,
 	    (epp->ep_minsaddr - epp->ep_ssize), NULLVP, 0,
-	    VM_PROT_READ|VM_PROT_WRITE);
+	    PROT_READ | PROT_WRITE);
 #endif
 
 	return (0);

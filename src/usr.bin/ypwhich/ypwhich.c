@@ -1,4 +1,4 @@
-/*	$OpenBSD: ypwhich.c,v 1.21 2013/11/15 22:20:04 millert Exp $	*/
+/*	$OpenBSD: ypwhich.c,v 1.23 2015/02/08 23:40:35 deraadt Exp $	*/
 /*	$NetBSD: ypwhich.c,v 1.6 1996/05/13 02:43:48 thorpej Exp $	*/
 
 /*
@@ -27,7 +27,6 @@
  * SUCH DAMAGE.
  */
 
-#include <sys/param.h>
 #include <sys/types.h>
 #include <sys/socket.h>
 
@@ -159,10 +158,10 @@ main(int argc, char *argv[])
 			domain = optarg;
 			break;
 		case 't':
-			notrans++;
+			notrans = 1;
 			break;
 		case 'm':
-			mode++;
+			mode = 1;
 			break;
 		default:
 			usage();

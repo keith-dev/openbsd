@@ -1,4 +1,4 @@
-/*	$OpenBSD: sensors.c,v 1.28 2014/07/09 08:04:45 jasper Exp $	*/
+/*	$OpenBSD: sensors.c,v 1.30 2015/01/16 00:03:38 deraadt Exp $	*/
 
 /*
  * Copyright (c) 2007 Deanna Phillips <deanna@openbsd.org>
@@ -19,7 +19,8 @@
  *
  */
 
-#include <sys/param.h>
+#include <sys/types.h>
+#include <sys/signal.h>
 #include <sys/sysctl.h>
 #include <sys/sensors.h>
 
@@ -102,7 +103,7 @@ next_sn(void)
 		size_t a = num_alloc + ADD_ALLOC;
 		if (a < num_alloc)
 			return NULL;
-		s = realloc(sensors, a * sizeof(struct sensinfo));
+		s = reallocarray(sensors, a, sizeof(struct sensinfo));
 		if (s == NULL)
 			return NULL;
 		sensors = s;

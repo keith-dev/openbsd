@@ -1,4 +1,4 @@
-/*	$OpenBSD: ip_ipsp.h,v 1.156 2013/11/11 09:15:35 mpi Exp $	*/
+/*	$OpenBSD: ip_ipsp.h,v 1.160 2015/01/19 18:36:51 deraadt Exp $	*/
 /*
  * The authors of this code are John Ioannidis (ji@tla.org),
  * Angelos D. Keromytis (kermit@csd.uch.gr),
@@ -45,8 +45,10 @@ struct m_tag;
 /* IPSP global definitions. */
 
 #include <sys/types.h>
-#include <sys/queue.h>
+#ifdef _KERNEL
 #include <sys/timeout.h>
+#endif
+#include <sys/queue.h>
 #include <netinet/in.h>
 
 union sockaddr_union {
@@ -132,6 +134,8 @@ struct sockaddr_encap {
 
 #define	IPSP_DIRECTION_IN	0x1
 #define	IPSP_DIRECTION_OUT	0x2
+
+#ifdef _KERNEL
 
 #define	sen_data		Sen.Data
 #define	sen_ip_src		Sen.Sip4.Src
@@ -257,18 +261,6 @@ struct ipsec_policy {
 #define	IPSP_IDENTITY_USERFQDN		3
 #define	IPSP_IDENTITY_CONNECTION	4
 
-/*
- * For encapsulation routes are possible not only for the destination
- * address but also for the protocol, source and destination ports
- * if available
- */
-
-struct route_enc {
-	struct rtentry		*re_rt;
-	u_long			re_tableid; /* u_long because of alignment */
-	struct sockaddr_encap	re_dst;
-};
-
 struct tdb {				/* tunnel descriptor block */
 	/*
 	 * Each TDB is on three hash tables: one keyed on dst/spi/sproto,
@@ -388,6 +380,8 @@ struct tdb {				/* tunnel descriptor block */
 	TAILQ_HEAD(tdb_policy_head, ipsec_policy)	tdb_policy_head;
 	TAILQ_ENTRY(tdb)	tdb_sync_entry;
 };
+
+#endif /* _KERNEL */
 
 struct tdb_ident {
 	u_int32_t spi;
@@ -535,9 +529,7 @@ void	ipe4_input(struct mbuf *, ...);
 void	ipip_input(struct mbuf *, int, struct ifnet *, int);
 int	ipip_output(struct mbuf *, struct tdb *, struct mbuf **, int, int);
 
-#ifdef INET
 void	ip4_input(struct mbuf *, ...);
-#endif /* INET */
 
 #ifdef INET6
 int	ip4_input6(struct mbuf **, int *, int);
@@ -551,11 +543,9 @@ int	ah_input(struct mbuf *, struct tdb *, int, int);
 int	ah_output(struct mbuf *, struct tdb *, struct mbuf **, int, int);
 int	ah_sysctl(int *, u_int, void *, size_t *, void *, size_t);
 
-#ifdef INET
 void	ah4_input(struct mbuf *, ...);
 void	*ah4_ctlinput(int, struct sockaddr *, u_int, void *);
 void	*udpencap_ctlinput(int, struct sockaddr *, u_int, void *);
-#endif /* INET */
 
 #ifdef INET6
 int	ah6_input(struct mbuf **, int *, int);
@@ -569,10 +559,8 @@ int	esp_input(struct mbuf *, struct tdb *, int, int);
 int	esp_output(struct mbuf *, struct tdb *, struct mbuf **, int, int);
 int	esp_sysctl(int *, u_int, void *, size_t *, void *, size_t);
 
-#ifdef INET
 void	esp4_input(struct mbuf *, ...);
 void	*esp4_ctlinput(int, struct sockaddr *, u_int, void *);
-#endif /* INET */
 
 #ifdef INET6
 int 	esp6_input(struct mbuf **, int *, int);
@@ -586,9 +574,7 @@ int	ipcomp_input(struct mbuf *, struct tdb *, int, int);
 int	ipcomp_output(struct mbuf *, struct tdb *, struct mbuf **, int, int);
 int	ipcomp_sysctl(int *, u_int, void *, size_t *, void *, size_t);
 
-#ifdef INET
 void	ipcomp4_input(struct mbuf *, ...);
-#endif /* INET */
 
 #ifdef INET6
 int	ipcomp6_input(struct mbuf **, int *, int);

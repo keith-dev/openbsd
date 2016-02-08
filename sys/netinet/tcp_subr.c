@@ -1,4 +1,4 @@
-/*	$OpenBSD: tcp_subr.c,v 1.132 2014/07/22 11:06:10 mpi Exp $	*/
+/*	$OpenBSD: tcp_subr.c,v 1.139 2014/12/19 17:14:40 tedu Exp $	*/
 /*	$NetBSD: tcp_subr.c,v 1.22 1996/02/13 23:44:00 christos Exp $	*/
 
 /*
@@ -92,13 +92,13 @@
 #include <netinet/tcp_timer.h>
 #include <netinet/tcp_var.h>
 #include <netinet/tcpip.h>
-#include <dev/rndvar.h>
 
 #ifdef INET6
 #include <netinet6/ip6protosw.h>
 #endif /* INET6 */
 
 #include <crypto/md5.h>
+#include <crypto/sha2.h>
 
 /* patchable/settable parameters for tcp */
 int	tcp_mssdflt = TCP_MSS;
@@ -150,13 +150,11 @@ void
 tcp_init()
 {
 	tcp_iss = 1;		/* wrong */
-	pool_init(&tcpcb_pool, sizeof(struct tcpcb), 0, 0, 0, "tcpcbpl",
-	    NULL);
-	pool_init(&tcpqe_pool, sizeof(struct tcpqent), 0, 0, 0, "tcpqepl",
-	    NULL);
+	pool_init(&tcpcb_pool, sizeof(struct tcpcb), 0, 0, 0, "tcpcb", NULL);
+	pool_init(&tcpqe_pool, sizeof(struct tcpqent), 0, 0, 0, "tcpqe", NULL);
 	pool_sethardlimit(&tcpqe_pool, tcp_reass_limit, NULL, 0);
 #ifdef TCP_SACK
-	pool_init(&sackhl_pool, sizeof(struct sackhole), 0, 0, 0, "sackhlpl",
+	pool_init(&sackhl_pool, sizeof(struct sackhole), 0, 0, 0, "sackhl",
 	    NULL);
 	pool_sethardlimit(&sackhl_pool, tcp_sackhole_limit, NULL, 0);
 #endif /* TCP_SACK */
@@ -209,11 +207,9 @@ tcp_template(tp)
 
 		switch (tp->pf) {
 		case 0:	/*default to PF_INET*/
-#ifdef INET
 		case AF_INET:
 			m->m_len = sizeof(struct ip);
 			break;
-#endif /* INET */
 #ifdef INET6
 		case AF_INET6:
 			m->m_len = sizeof(struct ip6_hdr);
@@ -237,7 +233,6 @@ tcp_template(tp)
 	}
 
 	switch(tp->pf) {
-#ifdef INET
 	case AF_INET:
 		{
 			struct ipovly *ipovly;
@@ -254,7 +249,6 @@ tcp_template(tp)
 				sizeof(struct ip));
 		}
 		break;
-#endif /* INET */
 #ifdef INET6
 	case AF_INET6:
 		{
@@ -945,38 +939,43 @@ tcp_mtudisc_increase(inp, errno)
 #define TCP_ISS_CONN_INC 4096
 int tcp_secret_init;
 u_char tcp_secret[16];
-MD5_CTX tcp_secret_ctx;
+SHA2_CTX tcp_secret_ctx;
 
 void
 tcp_set_iss_tsm(struct tcpcb *tp)
 {
-	MD5_CTX ctx;
-	u_int32_t digest[4];
+	SHA2_CTX ctx;
+	union {
+		uint8_t bytes[SHA512_DIGEST_LENGTH];
+		uint32_t words[2];
+	} digest;
+	u_int rdomain = rtable_l2(tp->t_inpcb->inp_rtableid);
 
 	if (tcp_secret_init == 0) {
 		arc4random_buf(tcp_secret, sizeof(tcp_secret));
-		MD5Init(&tcp_secret_ctx);
-		MD5Update(&tcp_secret_ctx, tcp_secret, sizeof(tcp_secret));
+		SHA512Init(&tcp_secret_ctx);
+		SHA512Update(&tcp_secret_ctx, tcp_secret, sizeof(tcp_secret));
 		tcp_secret_init = 1;
 	}
 	ctx = tcp_secret_ctx;
-	MD5Update(&ctx, (char *)&tp->t_inpcb->inp_lport, sizeof(u_short));
-	MD5Update(&ctx, (char *)&tp->t_inpcb->inp_fport, sizeof(u_short));
+	SHA512Update(&ctx, &rdomain, sizeof(rdomain));
+	SHA512Update(&ctx, &tp->t_inpcb->inp_lport, sizeof(u_short));
+	SHA512Update(&ctx, &tp->t_inpcb->inp_fport, sizeof(u_short));
 	if (tp->pf == AF_INET6) {
-		MD5Update(&ctx, (char *)&tp->t_inpcb->inp_laddr6,
+		SHA512Update(&ctx, &tp->t_inpcb->inp_laddr6,
 		    sizeof(struct in6_addr));
-		MD5Update(&ctx, (char *)&tp->t_inpcb->inp_faddr6,
+		SHA512Update(&ctx, &tp->t_inpcb->inp_faddr6,
 		    sizeof(struct in6_addr));
 	} else {
-		MD5Update(&ctx, (char *)&tp->t_inpcb->inp_laddr,
+		SHA512Update(&ctx, &tp->t_inpcb->inp_laddr,
 		    sizeof(struct in_addr));
-		MD5Update(&ctx, (char *)&tp->t_inpcb->inp_faddr,
+		SHA512Update(&ctx, &tp->t_inpcb->inp_faddr,
 		    sizeof(struct in_addr));
 	}
-	MD5Final((u_char *)digest, &ctx);
+	SHA512Final(digest.bytes, &ctx);
 	tcp_iss += TCP_ISS_CONN_INC;
-	tp->iss = digest[0] + tcp_iss;
-	tp->ts_modulate = digest[1];
+	tp->iss = digest.words[0] + tcp_iss;
+	tp->ts_modulate = digest.words[1];
 }
 
 #ifdef TCP_SIGNATURE
@@ -1058,7 +1057,6 @@ tcp_signature(struct tdb *tdb, int af, struct mbuf *m, struct tcphdr *th,
 
 	switch(af) {
 	case 0:
-#ifdef INET
 	case AF_INET: {
 		struct ippseudo ippseudo;
 		struct ip *ip;
@@ -1075,7 +1073,6 @@ tcp_signature(struct tdb *tdb, int af, struct mbuf *m, struct tcphdr *th,
 		    sizeof(struct ippseudo));
 		break;
 		}
-#endif
 #ifdef INET6
 	case AF_INET6: {
 		struct ip6_hdr_pseudo ip6pseudo;

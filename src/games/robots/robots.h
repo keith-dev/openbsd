@@ -1,4 +1,4 @@
-/*	$OpenBSD: robots.h,v 1.6 2003/06/03 03:01:41 millert Exp $	*/
+/*	$OpenBSD: robots.h,v 1.8 2014/11/16 04:49:48 guenther Exp $	*/
 /*	$NetBSD: robots.h,v 1.5 1995/04/24 12:24:54 cgd Exp $	*/
 
 /*
@@ -32,7 +32,6 @@
  *	@(#)robots.h	8.1 (Berkeley) 5/31/93
  */
 
-#include	<sys/param.h>
 #include	<sys/types.h>
 #include	<sys/time.h>
 #include	<ctype.h>
@@ -40,12 +39,14 @@
 #include	<err.h>
 #include	<errno.h>
 #include	<fcntl.h>
+#include	<limits.h>
 #include	<pwd.h>
 #include	<signal.h>
 #include	<string.h>
 #include	<stdlib.h>
 #include	<termios.h>
 #include	<unistd.h>
+#include	<poll.h>
 
 /*
  * miscellaneous constants
@@ -84,7 +85,7 @@ typedef struct {
 typedef struct {
 	uid_t	s_uid;
 	int	s_score;
-	char	s_name[MAXLOGNAME];
+	char	s_name[LOGIN_NAME_MAX];
 } SCORE;
 
 typedef struct passwd	PASSWD;
@@ -106,7 +107,6 @@ extern char	Cnt_move, Field[Y_FIELDSIZE][X_FIELDSIZE], *Next_move,
 extern int	Count, Level, Num_robots, Num_scores, Score,
 		Start_level, Wait_bonus;
 
-extern fd_set	rset;
 extern struct timeval	tv;
 
 extern COORD	Max, Min, My_pos, Robots[];

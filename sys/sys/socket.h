@@ -1,4 +1,4 @@
-/*	$OpenBSD: socket.h,v 1.83 2013/04/02 03:38:24 guenther Exp $	*/
+/*	$OpenBSD: socket.h,v 1.87 2015/01/21 02:23:14 guenther Exp $	*/
 /*	$NetBSD: socket.h,v 1.14 1996/02/09 18:25:36 christos Exp $	*/
 
 /*
@@ -35,12 +35,11 @@
 #ifndef _SYS_SOCKET_H_
 #define	_SYS_SOCKET_H_
 
-#include <sys/cdefs.h>
+/* get the definitions for struct iovec, size_t, ssize_t, and <sys/cdefs.h> */
+#include <sys/uio.h>
 
 #if __BSD_VISIBLE
 #include <sys/types.h>			/* for off_t, uid_t, and gid_t */
-#else
-#include <sys/_types.h>
 #endif
 
 #ifndef	_SOCKLEN_T_DEFINED_
@@ -51,16 +50,6 @@ typedef	__socklen_t	socklen_t;	/* length type for network syscalls */
 #ifndef	_SA_FAMILY_T_DEFINED_
 #define	_SA_FAMILY_T_DEFINED_
 typedef	__sa_family_t	sa_family_t;	/* sockaddr address family type */
-#endif
-
-#ifndef	_SIZE_T_DEFINED_
-#define	_SIZE_T_DEFINED_
-typedef	__size_t	size_t;
-#endif
-
-#ifndef	_SSIZE_T_DEFINED_
-#define	_SSIZE_T_DEFINED_
-typedef	__ssize_t	ssize_t;
 #endif
 
 
@@ -79,6 +68,17 @@ typedef	__ssize_t	ssize_t;
 #define	SOCK_RAW	3		/* raw-protocol interface */
 #define	SOCK_RDM	4		/* reliably-delivered message */
 #define	SOCK_SEQPACKET	5		/* sequenced packet stream */
+
+/*
+ * Socket creation flags
+ */
+#if __BSD_VISIBLE
+#define	SOCK_CLOEXEC		0x8000	/* set FD_CLOEXEC */
+#define	SOCK_NONBLOCK		0x4000	/* set O_NONBLOCK */
+#endif
+#ifdef _KERNEL
+#define	SOCK_NONBLOCK_INHERIT	0x2000	/* inherit O_NONBLOCK from listener */
+#endif
 
 /*
  * Option flags per-socket.
@@ -414,17 +414,18 @@ struct msghdr {
 	int		msg_flags;	/* flags on received message */
 };
 
-#define	MSG_OOB		0x1		/* process out-of-band data */
-#define	MSG_PEEK	0x2		/* peek at incoming message */
-#define	MSG_DONTROUTE	0x4		/* send without using routing tables */
-#define	MSG_EOR		0x8		/* data completes record */
-#define	MSG_TRUNC	0x10		/* data discarded before delivery */
-#define	MSG_CTRUNC	0x20		/* control data lost before delivery */
-#define	MSG_WAITALL	0x40		/* wait for full request or error */
-#define	MSG_DONTWAIT	0x80		/* this message should be nonblocking */
-#define	MSG_BCAST	0x100		/* this message rec'd as broadcast */
-#define	MSG_MCAST	0x200		/* this message rec'd as multicast */
-#define	MSG_NOSIGNAL	0x400		/* do not send SIGPIPE */
+#define	MSG_OOB			0x1	/* process out-of-band data */
+#define	MSG_PEEK		0x2	/* peek at incoming message */
+#define	MSG_DONTROUTE		0x4	/* send without using routing tables */
+#define	MSG_EOR			0x8	/* data completes record */
+#define	MSG_TRUNC		0x10	/* data discarded before delivery */
+#define	MSG_CTRUNC		0x20	/* control data lost before delivery */
+#define	MSG_WAITALL		0x40	/* wait for full request or error */
+#define	MSG_DONTWAIT		0x80	/* this message should be nonblocking */
+#define	MSG_BCAST		0x100	/* this message rec'd as broadcast */
+#define	MSG_MCAST		0x200	/* this message rec'd as multicast */
+#define	MSG_NOSIGNAL		0x400	/* do not send SIGPIPE */
+#define	MSG_CMSG_CLOEXEC	0x800	/* set FD_CLOEXEC on received fds */
 
 /*
  * Header for ancillary data objects in msg_control buffer.
@@ -475,17 +476,6 @@ struct cmsghdr {
 #define	SCM_RIGHTS	0x01		/* access rights (array of int) */
 #define	SCM_TIMESTAMP	0x04		/* timestamp (struct timeval) */
 
-#if __BSD_VISIBLE
-/*
- * 4.3 compat sockaddr, move to compat file later
- * XXX Needed by protocols/talkd.h
- */
-struct osockaddr {
-	unsigned short	sa_family;	/* address family */
-	char		sa_data[14];	/* up to 14 bytes of direct address */
-};
-#endif /* __BSD_VISIBLE */
-
 #ifndef _KERNEL
 
 __BEGIN_DECLS
@@ -505,8 +495,13 @@ ssize_t	sendto(int, const void *,
 ssize_t	sendmsg(int, const struct msghdr *, int);
 int	setsockopt(int, int, int, const void *, socklen_t);
 int	shutdown(int, int);
+int	sockatmark(int);
 int	socket(int, int, int);
 int	socketpair(int, int, int, int *);
+
+#if __BSD_VISIBLE
+int	accept4(int, struct sockaddr *__restrict, socklen_t *__restrict, int);
+#endif
 
 #if __BSD_VISIBLE
 int	getpeereid(int, uid_t *, gid_t *);

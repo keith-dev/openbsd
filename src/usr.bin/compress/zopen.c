@@ -1,4 +1,4 @@
-/*	$OpenBSD: zopen.c,v 1.18 2011/09/22 10:41:04 deraadt Exp $	*/
+/*	$OpenBSD: zopen.c,v 1.20 2015/02/01 11:50:23 tobias Exp $	*/
 /*	$NetBSD: zopen.c,v 1.5 1995/03/26 09:44:53 glass Exp $	*/
 
 /*-
@@ -58,7 +58,6 @@
  *	Any file produced by compress(1) can be read.
  */
 
-#include <sys/param.h>
 #include <sys/stat.h>
 
 #include <ctype.h>
@@ -70,6 +69,8 @@
 #include <unistd.h>
 #include <fcntl.h>
 #include "compress.h"
+
+#define MINIMUM(a, b)	(((a) < (b)) ? (a) : (b))
 
 #define	BITS		16		/* Default bits. */
 #define	HSIZE		69001		/* 95% occupancy */
@@ -277,7 +278,7 @@ zwrite(void *cookie, const char *wbp, int num)
 			/* Secondary hash (after G. Knott). */
 			disp = zs->zs_hsize_reg - i;
 			if (i == 0)
-			disp = 1;
+				disp = 1;
 probe:			if ((i -= disp) < 0)
 				i += zs->zs_hsize_reg;
 
@@ -636,7 +637,7 @@ getcode(struct s_zstate *zs)
 			zs->zs_ebp = bp + bits;
 		}
 		zs->zs_offset = 0;
-		zs->zs_size = MIN(zs->zs_n_bits, zs->zs_ebp - zs->zs_bp);
+		zs->zs_size = MINIMUM(zs->zs_n_bits, zs->zs_ebp - zs->zs_bp);
 		if (zs->zs_size == 0)
 			return -1;
 		/* Round size down to integral number of codes. */
@@ -737,6 +738,7 @@ cl_hash(struct s_zstate *zs, count_int cl_hsize)
 FILE *
 zopen(const char *name, const char *mode, int bits)
 {
+	FILE *fp;
 	int fd;
 	void *cookie;
 	if ((fd = open(name, (*mode=='r'? O_RDONLY:O_WRONLY|O_CREAT),
@@ -746,8 +748,13 @@ zopen(const char *name, const char *mode, int bits)
 		close(fd);
 		return NULL;
 	}
-	return funopen(cookie, (*mode == 'r'?zread:NULL),
-	    (*mode == 'w'?zwrite:NULL), NULL, zclose);
+	if ((fp = funopen(cookie, (*mode == 'r'?zread:NULL),
+	    (*mode == 'w'?zwrite:NULL), NULL, zclose)) == NULL) {
+		close(fd);
+		free(cookie);
+		return NULL;
+	}
+	return fp;
 }
 
 void *

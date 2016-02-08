@@ -1,4 +1,4 @@
-/*	$OpenBSD: qla.c,v 1.43 2014/07/13 23:10:23 deraadt Exp $ */
+/*	$OpenBSD: qla.c,v 1.49 2015/02/09 07:43:08 jmatthew Exp $ */
 
 /*
  * Copyright (c) 2011 David Gwynne <dlg@openbsd.org>
@@ -22,7 +22,6 @@
 #include <sys/buf.h>
 #include <sys/device.h>
 #include <sys/ioctl.h>
-#include <sys/proc.h>
 #include <sys/malloc.h>
 #include <sys/kernel.h>
 #include <sys/mutex.h>
@@ -30,6 +29,7 @@
 #include <sys/sensors.h>
 #include <sys/queue.h>
 
+#include <machine/atomic.h>
 #include <machine/bus.h>
 
 #include <scsi/scsi_all.h>
@@ -37,8 +37,6 @@
 
 #include <dev/ic/qlareg.h>
 #include <dev/ic/qlavar.h>
-
-#define QLA_DEBUG
 
 #ifdef QLA_DEBUG
 #define DPRINTF(m, f...) do { if ((qladebug & (m)) == (m)) printf(f); } \
@@ -89,7 +87,7 @@ void		qla_clear_isr(struct qla_softc *, u_int16_t);
 
 void		qla_update_start(struct qla_softc *, int);
 void		qla_update_done(struct qla_softc *, int);
-void		qla_do_update(void *, void*);
+void		qla_do_update(void *);
 
 void		qla_put_marker(struct qla_softc *, void *);
 void		qla_put_cmd(struct qla_softc *, void *, struct scsi_xfer *,
@@ -648,8 +646,8 @@ qla_attach(struct qla_softc *sc)
 		goto free_scratch;
 	}
 
-	sc->sc_update_taskq = taskq_create(DEVNAME(sc), 1, IPL_BIO);
-	task_set(&sc->sc_update_task, qla_do_update, sc, NULL);
+	sc->sc_update_taskq = taskq_create(DEVNAME(sc), 1, IPL_BIO, 0);
+	task_set(&sc->sc_update_task, qla_do_update, sc);
 
 	/* wait a bit for link to come up so we can scan and attach devices */
 	for (i = 0; i < QLA_WAIT_FOR_LOOP * 10000; i++) {
@@ -667,7 +665,7 @@ qla_attach(struct qla_softc *sc)
 	}
 
 	if (sc->sc_loop_up) {
-		qla_do_update(sc, NULL);
+		qla_do_update(sc);
 	} else {
 		DPRINTF(QLA_D_PORT, "%s: loop still down, giving up\n",
 		    DEVNAME(sc));
@@ -1741,7 +1739,7 @@ qla_clear_port_lists(struct qla_softc *sc)
 }
 
 void
-qla_do_update(void *xsc, void *x)
+qla_do_update(void *xsc)
 {
 	struct qla_softc *sc = xsc;
 	int firstport, lastport;
@@ -1964,7 +1962,7 @@ qla_do_update(void *xsc, void *x)
 				}
 			}
 
-			if (port == TAILQ_END(&sc->sc_ports))
+			if (port == NULL)
 				qla_update_done(sc,
 				    QLA_UPDATE_TASK_FABRIC_RELOGIN);
 			continue;
@@ -2465,7 +2463,7 @@ qla_read_nvram(struct qla_softc *sc)
 		csum += data[i] >> 8;
 	}
 
-	bcopy(data, &sc->sc_nvram, sizeof(sc->sc_nvram));
+	memcpy(&sc->sc_nvram, data, sizeof(sc->sc_nvram));
 	/* id field should be 'ISP ', version should be at least 1 */
 	if (sc->sc_nvram.id[0] != 'I' || sc->sc_nvram.id[1] != 'S' ||
 	    sc->sc_nvram.id[2] != 'P' || sc->sc_nvram.id[3] != ' ' ||

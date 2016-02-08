@@ -1,4 +1,4 @@
-/*	$OpenBSD: drm_crtc_helper.c,v 1.7 2014/03/09 11:07:18 jsg Exp $	*/
+/*	$OpenBSD: drm_crtc_helper.c,v 1.10 2015/02/11 07:01:36 jsg Exp $	*/
 /*
  * Copyright (c) 2006-2008 Intel Corporation
  * Copyright (c) 2007 Dave Airlie <airlied@linux.ie>
@@ -316,8 +316,7 @@ static bool drm_encoder_crtc_ok(struct drm_encoder *encoder,
 	struct drm_crtc *tmp;
 	int crtc_mask = 1;
 
-	if (crtc == NULL)
-		printf("%s checking null crtc?\n", __func__);
+	WARN(!crtc, "checking null crtc?\n");
 
 	dev = crtc->dev;
 
@@ -967,7 +966,7 @@ void drm_kms_helper_hotplug_event(struct drm_device *dev)
 EXPORT_SYMBOL(drm_kms_helper_hotplug_event);
 
 #define DRM_OUTPUT_POLL_SECONDS 10
-static void drm_output_poll_execute(void *arg1, void *arg2)
+static void drm_output_poll_execute(void *arg1)
 {
 	struct drm_device *dev = (struct drm_device *)arg1;
 	struct drm_connector *connector;
@@ -977,7 +976,7 @@ static void drm_output_poll_execute(void *arg1, void *arg2)
 	if (!drm_kms_helper_poll)
 		return;
 
-	rw_enter_write(&dev->mode_config.rwl);
+	mutex_lock(&dev->mode_config.mutex);
 	list_for_each_entry(connector, &dev->mode_config.connector_list, head) {
 
 		/* Ignore forced connectors. */
@@ -1008,7 +1007,7 @@ static void drm_output_poll_execute(void *arg1, void *arg2)
 		}
 	}
 
-	rw_exit_write(&dev->mode_config.rwl);
+	mutex_unlock(&dev->mode_config.mutex);
 
 	if (changed)
 		drm_kms_helper_hotplug_event(dev);
@@ -1057,8 +1056,7 @@ EXPORT_SYMBOL(drm_kms_helper_poll_enable);
 
 void drm_kms_helper_poll_init(struct drm_device *dev)
 {
-	task_set(&dev->mode_config.poll_task, drm_output_poll_execute, dev,
-	    NULL);
+	task_set(&dev->mode_config.poll_task, drm_output_poll_execute, dev);
 	timeout_set(&dev->mode_config.output_poll_to, drm_output_poll_tick,
 	    dev);
 	dev->mode_config.poll_enabled = true;
@@ -1082,7 +1080,7 @@ void drm_helper_hpd_irq_event(struct drm_device *dev)
 	if (!dev->mode_config.poll_enabled)
 		return;
 
-	rw_enter_write(&dev->mode_config.rwl);
+	mutex_lock(&dev->mode_config.mutex);
 	list_for_each_entry(connector, &dev->mode_config.connector_list, head) {
 
 		/* Only handle HPD capable connectors. */
@@ -1100,7 +1098,7 @@ void drm_helper_hpd_irq_event(struct drm_device *dev)
 			changed = true;
 	}
 
-	rw_exit_write(&dev->mode_config.rwl);
+	mutex_unlock(&dev->mode_config.mutex);
 
 	if (changed)
 		drm_kms_helper_hotplug_event(dev);

@@ -1,4 +1,4 @@
-/*	$OpenBSD: ip27_machdep.c,v 1.63 2014/07/13 20:29:05 miod Exp $	*/
+/*	$OpenBSD: ip27_machdep.c,v 1.65 2014/11/25 19:08:42 miod Exp $	*/
 
 /*
  * Copyright (c) 2008, 2009 Miodrag Vallat.
@@ -28,6 +28,7 @@
 #include <sys/malloc.h>
 #include <sys/reboot.h>
 #include <sys/tty.h>
+#include <sys/atomic.h>
 
 #include <mips64/arcbios.h>
 #include <mips64/archtype.h>
@@ -38,7 +39,6 @@
 #include <mips64/mips_cpu.h>
 #include <machine/memconf.h>
 #include <machine/mnode.h>
-#include <machine/atomic.h>
 
 #include <uvm/uvm_extern.h>
 
@@ -361,6 +361,8 @@ ip27_attach_node(struct device *parent, int16_t nasid)
 	currentnasid = nasid;
 	bzero(&u, sizeof u);
 	if (ip35) {
+		l1_display(nasid, TRUE, "OpenBSD/sgi");
+
 		u.maa.maa_name = "spdmem";
 		u.maa.maa_nasid = nasid;
 		for (dimm = 0; dimm < L1_SPD_DIMM_MAX; dimm++) {

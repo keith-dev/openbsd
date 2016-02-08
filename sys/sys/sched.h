@@ -1,4 +1,4 @@
-/*	$OpenBSD: sched.h,v 1.35 2014/03/29 18:09:31 guenther Exp $	*/
+/*	$OpenBSD: sched.h,v 1.38 2015/01/11 19:34:52 guenther Exp $	*/
 /* $NetBSD: sched.h,v 1.2 1999/02/28 18:14:58 ross Exp $ */
 
 /*-
@@ -153,6 +153,9 @@ void cpu_idle_cycle(void);
 void cpu_idle_leave(void);
 void sched_peg_curproc(struct cpu_info *ci);
 
+int sysctl_hwsetperf(void *, size_t *, void *, size_t);
+int sysctl_hwperfpolicy(void *, size_t *, void *, size_t);
+
 #ifdef MULTIPROCESSOR
 void sched_start_secondary_cpus(void);
 void sched_stop_secondary_cpus(void);
@@ -174,7 +177,13 @@ void remrunqueue(struct proc *);
 	(parent)->p_estcpu = ESTCPULIM((parent)->p_estcpu + (child)->p_estcpu);\
 } while (0)
 
-#if defined(MULTIPROCESSOR) || defined(LOCKDEBUG)
+/* Allow other processes to progress */
+#define	sched_pause() do {						\
+	if (curcpu()->ci_schedstate.spc_schedflags & SPCF_SHOULDYIELD)	\
+		yield();						\
+} while (0)
+
+#if defined(MULTIPROCESSOR)
 #include <sys/lock.h>
 
 /*
@@ -206,7 +215,7 @@ do {									\
 	splx(s);							\
 } while (/* CONSTCOND */ 0)
 
-#else /* ! MULTIPROCESSOR || LOCKDEBUG */
+#else /* ! MULTIPROCESSOR */
 
 #define	SCHED_ASSERT_LOCKED()		splassert(IPL_SCHED);
 #define	SCHED_ASSERT_UNLOCKED()		/* nothing */
@@ -216,7 +225,7 @@ do {									\
 #define	SCHED_LOCK(s)			s = splsched()
 #define	SCHED_UNLOCK(s)			splx(s)
 
-#endif /* MULTIPROCESSOR || LOCKDEBUG */
+#endif /* MULTIPROCESSOR */
 
 #endif	/* _KERNEL */
 #endif	/* _SYS_SCHED_H_ */

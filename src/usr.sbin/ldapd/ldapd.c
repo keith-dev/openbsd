@@ -1,4 +1,4 @@
-/*	$OpenBSD: ldapd.c,v 1.10 2013/11/02 13:31:51 deraadt Exp $ */
+/*	$OpenBSD: ldapd.c,v 1.12 2015/01/16 16:04:38 deraadt Exp $ */
 
 /*
  * Copyright (c) 2009, 2010 Martin Hedenfalk <martin@bzero.se>
@@ -298,7 +298,7 @@ ldapd_auth_classful(char *name, char *password)
 		auth_setitem(as, AUTHV_SERVICE, "response");
 		auth_setdata(as, "", 1);
 		auth_setdata(as, password, strlen(password) + 1);
-		memset(password, 0, strlen(password));
+		explicit_bzero(password, strlen(password));
 	} else
 		as = NULL;
 
@@ -351,7 +351,7 @@ ldapd_open_request(struct imsgev *iev, struct imsg *imsg)
 		fatal("invalid size of open request");
 
 	/* make sure path is null-terminated */
-	oreq->path[MAXPATHLEN] = '\0';
+	oreq->path[PATH_MAX] = '\0';
 
 	if (strncmp(oreq->path, DATADIR, strlen(DATADIR)) != 0) {
 		log_warnx("refusing to open file %s", oreq->path);

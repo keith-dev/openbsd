@@ -1,4 +1,4 @@
-/*	$OpenBSD: clparse.c,v 1.87 2014/05/12 13:12:41 krw Exp $	*/
+/*	$OpenBSD: clparse.c,v 1.91 2015/02/01 18:43:39 krw Exp $	*/
 
 /* Parser for dhclient config and lease files. */
 
@@ -129,7 +129,7 @@ read_client_leases(void)
 			warning("Corrupt lease file - possible data loss!");
 			break;
 		}
-	       	parse_client_lease_statement(cfile, 0);
+		parse_client_lease_statement(cfile, 0);
 	} while (1);
 	fclose(cfile);
 }
@@ -254,14 +254,12 @@ parse_client_statement(FILE *cfile)
 		break;
 	case TOK_FILENAME:
 		string = parse_string(cfile);
-		if (config->filename)
-			free(config->filename);
+		free(config->filename);
 		config->filename = string;
 		break;
 	case TOK_SERVER_NAME:
 		string = parse_string(cfile);
-		if (config->server_name)
-			free(config->server_name);
+		free(config->server_name);
 		config->server_name = string;
 		break;
 	case TOK_FIXED_ADDR:
@@ -458,7 +456,6 @@ parse_client_lease_statement(FILE *cfile, int is_static)
 	if (!lease)
 		error("no memory for lease.");
 
-	lease->is_static = is_static;
 	do {
 		token = peek_token(NULL, cfile);
 		if (token == EOF) {
@@ -491,12 +488,19 @@ parse_client_lease_statement(FILE *cfile, int is_static)
 	 */
 	TAILQ_FOREACH_SAFE(lp, &client->leases, next, pl) {
 		if (lp->address.s_addr == lease->address.s_addr &&
-		    lp->is_static == lease->is_static) {
+		    lp->is_static == is_static) {
 			TAILQ_REMOVE(&client->leases, lp, next);
+			lp->is_static = 0;	/* Else it won't be freed. */
 			free_client_lease(lp);
 		}
 	}
 
+	/*
+	 * If the lease is marked as static before now it will leak on parse
+	 * errors because free_client_lease() ignores attempts to free static
+	 * leases.
+	 */
+	lease->is_static = is_static;
 	if (is_static)
 		TAILQ_INSERT_TAIL(&client->leases, lease, next);
 	else
@@ -663,7 +667,7 @@ alloc:
 				memcpy(&hunkbuf[hunkix], dp, len);
 				hunkix += len;
 				break;
- 			case 'l':	/* Signed 32-bit integer. */
+			case 'l':	/* Signed 32-bit integer. */
 				if (!parse_decimal(cfile, buf, *fmt)) {
 					parse_warn("expecting signed 32-bit "
 					    "integer.");

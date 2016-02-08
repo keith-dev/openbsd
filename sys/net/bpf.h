@@ -1,4 +1,4 @@
-/*	$OpenBSD: bpf.h,v 1.46 2014/07/10 09:46:29 henning Exp $	*/
+/*	$OpenBSD: bpf.h,v 1.48 2015/02/10 00:53:55 pelikan Exp $	*/
 /*	$NetBSD: bpf.h,v 1.15 1996/12/13 07:57:33 mikel Exp $	*/
 
 /*
@@ -119,6 +119,8 @@ struct bpf_version {
 #define BIOCGDLTLIST	_IOWR('B',123, struct bpf_dltlist)
 #define BIOCGDIRFILT	_IOR('B',124, u_int)
 #define BIOCSDIRFILT	_IOW('B',125, u_int)
+#define BIOCGQUEUE	_IOR('B',126, u_int)
+#define BIOCSQUEUE	_IOW('B',127, u_int)
 
 /*
  * Direction filters for BIOCSDIRFILT/BIOCGDIRFILT
@@ -272,7 +274,6 @@ struct bpf_dltlist {
 int	 bpf_validate(struct bpf_insn *, int);
 int	 bpf_tap(caddr_t, u_char *, u_int, u_int);
 void	 bpf_mtap(caddr_t, struct mbuf *, u_int);
-void	 bpf_mtap_stripvlan(caddr_t, struct mbuf *, u_int);
 void	 bpf_mtap_hdr(caddr_t, caddr_t, u_int, struct mbuf *, u_int,
 	    void (*)(const void *, void *, size_t));
 void	 bpf_mtap_af(caddr_t, u_int32_t, struct mbuf *, u_int);

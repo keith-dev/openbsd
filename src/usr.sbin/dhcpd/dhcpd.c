@@ -1,4 +1,4 @@
-/*	$OpenBSD: dhcpd.c,v 1.45 2014/07/11 09:42:27 yasuoka Exp $ */
+/*	$OpenBSD: dhcpd.c,v 1.48 2015/02/10 23:06:13 krw Exp $ */
 
 /*
  * Copyright (c) 2004 Henning Brauer <henning@cvs.openbsd.org>
@@ -47,7 +47,7 @@
 
 void usage(void);
 
-time_t cur_time;
+time_t cur_time, last_scan;
 struct group root_group;
 
 u_int16_t server_port;
@@ -216,10 +216,12 @@ main(int argc, char *argv[])
 			exit(1);
 		case 0:
 			/* child process. start up table engine */
+			close(pfpipe[1]);
 			pftable_handler();
 			/* NOTREACHED */
 			exit(1);
 		default:
+			close(pfpipe[0]);
 			gotpipe = 1;
 			break;
 		}
@@ -320,6 +322,8 @@ lease_ping_timeout(void *vlp)
 /* from memory.c - needed to be able to walk the lease table */
 extern struct subnet *subnets;
 
+#define MINIMUM(a,b) (((a)<(b))?(a):(b))
+
 void
 periodic_scan(void *p)
 {
@@ -330,10 +334,10 @@ periodic_scan(void *p)
 	struct lease		*l;
 
 	/* find the shortest lease this server gives out */
-	x = MIN(root_group.default_lease_time, root_group.max_lease_time);
+	x = MINIMUM(root_group.default_lease_time, root_group.max_lease_time);
 	for (n = subnets; n; n = n->next_subnet)
 		for (g = n->group; g; g = g->next)
-			x = MIN(x, g->default_lease_time);
+			x = MINIMUM(x, g->default_lease_time);
 
 	/* use half of the shortest lease as the scan interval */
 	y = x / 2;
@@ -345,10 +349,10 @@ periodic_scan(void *p)
 		for (g = n->group; g; g = g->next)
 			for (s = g->shared_network; s; s = s->next)
 				for (l = s->leases; l && l->ends; l = l->next)
-					if (cur_time >= l->ends){
-						release_lease(l);
-						pfmsg('R', l);
-					}
+					if (cur_time >= l->ends)
+						if (l->ends > last_scan)
+							pfmsg('R', l);
 
+	last_scan = cur_time;
 	add_timeout(cur_time + y, periodic_scan, NULL);
 }

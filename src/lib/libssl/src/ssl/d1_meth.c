@@ -1,7 +1,7 @@
-/* $OpenBSD: d1_meth.c,v 1.5 2014/06/12 15:49:31 deraadt Exp $ */
-/* 
+/* $OpenBSD: d1_meth.c,v 1.9 2015/02/06 08:30:23 jsing Exp $ */
+/*
  * DTLS implementation written by Nagendra Modadugu
- * (nagendra@cs.stanford.edu) for the OpenSSL project 2005.  
+ * (nagendra@cs.stanford.edu) for the OpenSSL project 2005.
  */
 /* ====================================================================
  * Copyright (c) 1999-2005 The OpenSSL Project.  All rights reserved.
@@ -11,7 +11,7 @@
  * are met:
  *
  * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer. 
+ *    notice, this list of conditions and the following disclaimer.
  *
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in
@@ -58,7 +58,9 @@
  */
 
 #include <stdio.h>
+
 #include <openssl/objects.h>
+
 #include "ssl_locl.h"
 
 static const SSL_METHOD *dtls1_get_method(int ver);

@@ -1,4 +1,4 @@
-/*	$OpenBSD: bpf.c,v 1.19 2013/11/28 18:26:46 deraadt Exp $	*/
+/*	$OpenBSD: bpf.c,v 1.21 2015/01/16 06:40:19 deraadt Exp $	*/
 /*	$NetBSD: bpf.c,v 1.5.2.1 1995/11/14 08:45:42 thorpej Exp $	*/
 
 /*
@@ -43,7 +43,6 @@
  * Author: Jeff Forys, University of Utah CSS
  */
 
-#include <sys/param.h>
 #include <sys/ioctl.h>
 #include <sys/socket.h>
 
@@ -74,7 +73,7 @@ static u_int8_t *BpfPkt = NULL;
 **		None.
 **
 **	Returns:
-**		File descriptor of opened BPF device (for select() etc).
+**		File descriptor of opened BPF device
 **
 **	Side Effects:
 **		If an error is encountered, the program terminates here.

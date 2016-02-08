@@ -1,4 +1,4 @@
-/*	$OpenBSD: openpic.c,v 1.72 2014/07/12 18:44:42 tedu Exp $	*/
+/*	$OpenBSD: openpic.c,v 1.76 2015/01/04 13:01:42 mpi Exp $	*/
 
 /*-
  * Copyright (c) 2008 Dale Rahn <drahn@openbsd.org>
@@ -108,8 +108,6 @@ struct openpic_softc {
 
 int	openpic_match(struct device *parent, void *cf, void *aux);
 void	openpic_attach(struct device *, struct device *, void *);
-void	openpic_do_pending_int(int pcpl);
-void	openpic_do_pending_int_dis(int pcpl, int s);
 void	openpic_collect_preconf_intr(void);
 void	openpic_ext_intr(void);
 
@@ -235,28 +233,30 @@ openpic_attach(struct device *parent, struct device  *self, void *aux)
 	printf("\n");
 }
 
+/* Must be called with interrupt disable. */
 static inline void
 openpic_setipl(int newcpl)
 {
 	struct cpu_info *ci = curcpu();
-	int s;
-	/* XXX - try do to this without the disable */
-	s = ppc_intr_disable();
+
 	ci->ci_cpl = newcpl;
 	openpic_set_priority(ci->ci_cpuid, newcpl);
-	ppc_intr_enable(s);
 }
 
 int
 openpic_splraise(int newcpl)
 {
 	struct cpu_info *ci = curcpu();
-	newcpl = openpic_pri_share[newcpl];
 	int ocpl = ci->ci_cpl;
+	int s;
+
+	newcpl = openpic_pri_share[newcpl];
 	if (ocpl > newcpl)
 		newcpl = ocpl;
 
+	s = ppc_intr_disable();
 	openpic_setipl(newcpl);
+	ppc_intr_enable(s);
 
 	return ocpl;
 }
@@ -275,7 +275,17 @@ openpic_spllower(int newcpl)
 void
 openpic_splx(int newcpl)
 {
-	openpic_do_pending_int(newcpl);
+	struct cpu_info *ci = curcpu();
+	int intr, s;
+
+	intr = ppc_intr_disable();
+	openpic_setipl(newcpl);
+	if (newcpl < IPL_SOFTTTY && (ci->ci_ipending & ppc_smask[newcpl])) {
+		s = splsofttty();
+		dosoftint(newcpl);
+		openpic_setipl(s); /* no-overhead splx */
+	}
+	ppc_intr_enable(intr);
 }
 
 void
@@ -307,14 +317,16 @@ openpic_intr_establish(void *lcv, int irq, int type, int level,
 	struct intrq *iq;
 	int s;
 
+	if (!LEGAL_IRQ(irq) || type == IST_NONE) {
+		printf("%s: bogus irq %d or type %d", __func__, irq, type);
+		return (NULL);
+	}
+
 	/* no point in sleeping unless someone can free memory. */
 	ih = malloc(sizeof *ih, M_DEVBUF, cold ? M_NOWAIT : M_WAITOK);
 	if (ih == NULL)
-		panic("intr_establish: can't malloc handler info");
+		panic("%s: can't malloc handler info", __func__);
 	iq = &openpic_handler[irq];
-
-	if (!LEGAL_IRQ(irq) || type == IST_NONE)
-		panic("intr_establish: bogus irq or type");
 
 	switch (iq->iq_ist) {
 	case IST_NONE:
@@ -365,8 +377,10 @@ openpic_intr_disestablish(void *lcp, void *arg)
 	struct intrq *iq = &openpic_handler[irq];
 	int s;
 
-	if (!LEGAL_IRQ(irq))
-		panic("intr_disestablish: bogus irq");
+	if (!LEGAL_IRQ(irq)) {
+		printf("%s: bogus irq %d", __func__, irq);
+		return;
+	}
 
 	/*
 	 * Remove the handler from the chain.
@@ -435,71 +449,6 @@ openpic_calc_mask()
 
 	/* restore interrupts */
 	openpic_set_priority(ci->ci_cpuid, ci->ci_cpl);
-}
-
-void
-openpic_do_pending_int(int pcpl)
-{
-	int s;
-	s = ppc_intr_disable();
-	openpic_do_pending_int_dis(pcpl, s);
-	ppc_intr_enable(s);
-
-}
-
-/*
- * This function expect interrupts disabled on entry and exit,
- * the s argument indicates if interrupts may be enabled during
- * the processing of off level interrupts, s 'should' always be 1.
- */
-void
-openpic_do_pending_int_dis(int pcpl, int s)
-{
-	struct cpu_info *ci = curcpu();
-
-	(void)ppc_intr_disable();
-	if (ci->ci_iactive & CI_IACTIVE_PROCESSING_SOFT) {
-		/* soft interrupts are being processed, just set ipl/return */
-		openpic_setipl(pcpl);
-		ppc_intr_enable(s);
-		return;
-	}
-
-	atomic_setbits_int(&ci->ci_iactive, CI_IACTIVE_PROCESSING_SOFT);
-
-	do {
-		if ((ci->ci_ipending & SI_TO_IRQBIT(SI_SOFTCLOCK)) &&
-		    (pcpl < IPL_SOFTCLOCK)) {
- 			ci->ci_ipending &= ~SI_TO_IRQBIT(SI_SOFTCLOCK);
-			ppc_intr_enable(1);
-			KERNEL_LOCK();
-			softintr_dispatch(SI_SOFTCLOCK);
-			KERNEL_UNLOCK();
-			(void)ppc_intr_disable();
- 		}
-		if ((ci->ci_ipending & SI_TO_IRQBIT(SI_SOFTNET)) &&
-		    (pcpl < IPL_SOFTNET)) {
-			ci->ci_ipending &= ~SI_TO_IRQBIT(SI_SOFTNET);
-			ppc_intr_enable(1);
-			KERNEL_LOCK();
-			softintr_dispatch(SI_SOFTNET);
-			KERNEL_UNLOCK();
-			(void)ppc_intr_disable();
-		}
-		if ((ci->ci_ipending & SI_TO_IRQBIT(SI_SOFTTTY)) &&
-		    (pcpl < IPL_SOFTTTY)) {
-			ci->ci_ipending &= ~SI_TO_IRQBIT(SI_SOFTTTY);
-			ppc_intr_enable(1);
-			KERNEL_LOCK();
-			softintr_dispatch(SI_SOFTTTY);
-			KERNEL_UNLOCK();
-			(void)ppc_intr_disable();
-		}
-	} while (ci->ci_ipending & ppc_smask[pcpl]);
-	openpic_setipl(pcpl);	/* Don't use splx... we are here already! */
-
-	atomic_clearbits_int(&ci->ci_iactive, CI_IACTIVE_PROCESSING_SOFT);
-	ppc_intr_enable(s);
 }
 
 void
@@ -614,7 +563,7 @@ openpic_ext_intr()
 			    openpic_read(OPENPIC_CPU_PRIORITY(ci->ci_cpuid)));
 		if (iq->iq_ipl > maxipl)
 			maxipl = iq->iq_ipl;
-		splraise(iq->iq_ipl);
+		openpic_splraise(iq->iq_ipl);
 		openpic_eoi(ci->ci_cpuid);
 
 		spurious = 1;
@@ -645,14 +594,7 @@ openpic_ext_intr()
 		irq = openpic_read_irq(ci->ci_cpuid);
 	}
 
-	/*
-	 * sending 0 in to openpic_do_pending_int_dis will leave
-	 * external interrupts disabled, but since we are about
-	 * to return from interrupt leaving them disabled until then
-	 * prevents additional recursion.
-	 */
-	openpic_do_pending_int_dis(pcpl, 0);
-
+	openpic_splx(pcpl);	/* Process pendings. */
 	openpic_irqnest[ci->ci_cpuid]--;
 }
 
@@ -740,5 +682,7 @@ openpic_ipi_ddb()
 #ifdef OPENPIC_NOISY
 	printf("ipi_ddb() called\n");
 #endif
+#ifdef DDB
 	Debugger();
+#endif
 }

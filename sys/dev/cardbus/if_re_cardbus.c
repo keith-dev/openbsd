@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_re_cardbus.c,v 1.23 2013/08/07 01:06:26 bluhm Exp $	*/
+/*	$OpenBSD: if_re_cardbus.c,v 1.26 2014/11/24 02:03:37 brad Exp $	*/
 
 /*
  * Copyright (c) 2005 Peter Valchev <pvalchev@openbsd.org>
@@ -35,12 +35,8 @@
 #include <net/if_dl.h>
 #include <net/if_media.h>
 
-#ifdef INET
 #include <netinet/in.h>
-#include <netinet/in_systm.h>
-#include <netinet/ip.h>
 #include <netinet/if_ether.h>
-#endif
 
 #include <dev/mii/mii.h>
 #include <dev/mii/miivar.h>
@@ -90,7 +86,7 @@ const struct pci_matchid re_cardbus_devices[] = {
 };
 
 /*
- * Probe for a RealTek 8169/8110 chip. Check the PCI vendor and device
+ * Probe for a Realtek 8169/8110 chip. Check the PCI vendor and device
  * IDs against our list and return a device name if we find a match.
  */
 int
@@ -155,6 +151,8 @@ re_cardbus_attach(struct device *parent, struct device *self, void *aux)
 		return;
 	}
 	snprintf(intrstr, sizeof(intrstr), "irq %d", ca->ca_intrline);
+
+	sc->sc_product = PCI_PRODUCT(ca->ca_id);
 
 	/* Call bus-independent (common) attach routine */
 	if (re_attach(sc, intrstr)) {

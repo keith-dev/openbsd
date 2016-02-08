@@ -1,4 +1,4 @@
-/*	$OpenBSD: dd.c,v 1.18 2013/06/01 16:46:49 tedu Exp $	*/
+/*	$OpenBSD: dd.c,v 1.21 2015/01/16 06:39:31 deraadt Exp $	*/
 /*	$NetBSD: dd.c,v 1.6 1996/02/20 19:29:06 jtc Exp $	*/
 
 /*-
@@ -34,7 +34,7 @@
  * SUCH DAMAGE.
  */
 
-#include <sys/param.h>
+#include <sys/types.h>
 #include <sys/stat.h>
 #include <sys/ioctl.h>
 #include <sys/mtio.h>
@@ -56,6 +56,8 @@ static void dd_close(void);
 static void dd_in(void);
 static void getfdtype(IO *);
 static void setup(void);
+
+#define MAXIMUM(a, b)	(((a) > (b)) ? (a) : (b))
 
 IO	in, out;		/* input/output state */
 STAT	st;			/* statistics */
@@ -135,7 +137,7 @@ setup(void)
 			err(1, "input buffer");
 		out.db = in.db;
 	} else if ((in.db =
-	    malloc((u_int)(MAX(in.dbsz, cbsz) + cbsz))) == NULL ||
+	    malloc((u_int)(MAXIMUM(in.dbsz, cbsz) + cbsz))) == NULL ||
 	    (out.db = malloc((u_int)(out.dbsz + cbsz))) == NULL)
 		err(1, "output buffer");
 	in.dbp = in.db;
@@ -204,6 +206,22 @@ getfdtype(IO *io)
 	if (S_ISFIFO(sb.st_mode) || S_ISSOCK(sb.st_mode))
 		io->flags |= ISPIPE;
 }
+
+static void
+swapbytes(void *v, size_t len)
+{
+	unsigned char *p = v;
+	unsigned char t;
+
+	while (len > 1) {
+		t = p[0];
+		p[0] = p[1];
+		p[1] = t;
+		p += 2;
+		len -= 2;
+	}
+}
+
 
 static void
 dd_in(void)
@@ -288,11 +306,11 @@ dd_in(void)
 		}
 
 		if (ddflags & C_SWAB) {
-			if ((n = in.dbcnt) & 1) {
+			if ((n = in.dbrcnt) & 1) {
 				++st.swab;
 				--n;
 			}
-			swab(in.dbp, in.dbp, n);
+			swapbytes(in.dbp, n);
 		}
 
 		in.dbp += in.dbrcnt;

@@ -1,4 +1,4 @@
-/*	$OpenBSD: inode.c,v 1.22 2014/07/13 16:08:53 pelikan Exp $	*/
+/*	$OpenBSD: inode.c,v 1.25 2015/01/16 06:39:57 deraadt Exp $	*/
 /*	$NetBSD: inode.c,v 1.8 2000/01/28 16:01:46 bouyer Exp $	*/
 
 /*
@@ -31,7 +31,7 @@
  * SUCH DAMAGE.
  */
 
-#include <sys/param.h>
+#include <sys/param.h>	/* btodb */
 #include <sys/time.h>
 #include <ufs/ext2fs/ext2fs_dinode.h>
 #include <ufs/ext2fs/ext2fs_dir.h>
@@ -45,6 +45,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+#include <limits.h>
 
 #include "fsck.h"
 #include "fsutil.h"
@@ -118,7 +119,7 @@ ckinode(struct ext2fs_dinode *dp, struct inodesc *idesc)
 	struct ext2fs_dinode dino;
 	u_int64_t remsize, sizepb;
 	mode_t mode;
-	char pathbuf[MAXPATHLEN + 1];
+	char pathbuf[PATH_MAX + 1];
 
 	if (idesc->id_fix != IGNORE)
 		idesc->id_fix = DONTKNOW;
@@ -204,7 +205,7 @@ iblock(struct inodesc *idesc, long ilevel, u_int64_t isize)
 	int i, n, (*func)(struct inodesc *), nif;
 	u_int64_t sizepb;
 	char buf[BUFSIZ];
-	char pathbuf[MAXPATHLEN + 1];
+	char pathbuf[PATH_MAX + 1];
 	struct ext2fs_dinode *dp;
 
 	if (idesc->id_type == ADDR) {
@@ -398,8 +399,7 @@ resetinodebuf(void)
 		partialsize = inobufsize;
 	}
 	if (inodebuf == NULL &&
-	    (inodebuf = (struct ext2fs_dinode *)malloc((unsigned)inobufsize)) ==
-		NULL)
+	    (inodebuf = malloc((unsigned)inobufsize)) == NULL)
 		errexit("Cannot allocate space for inode buffer\n");
 	while (nextino < EXT2_ROOTINO)
 		(void)getnextinode(nextino);
@@ -431,8 +431,7 @@ cacheino(struct ext2fs_dinode *dp, ino_t inumber)
 	blks = howmany(inosize(dp), sblock.e2fs_bsize);
 	if (blks > NDADDR)
 		blks = NDADDR + NIADDR;
-	inp = (struct inoinfo *)
-		malloc(sizeof(*inp) + (blks - 1) * sizeof(daddr32_t));
+	inp = malloc(sizeof(*inp) + (blks - 1) * sizeof(daddr32_t));
 	if (inp == NULL)
 		return;
 	inpp = &inphead[inumber % numdirs];
@@ -450,8 +449,8 @@ cacheino(struct ext2fs_dinode *dp, ino_t inumber)
 	memcpy(&inp->i_blks[0], &dp->e2di_blocks[0], (size_t)inp->i_numblks);
 	if (inplast == listmax) {
 		listmax += 100;
-		inpsort = (struct inoinfo **)realloc((char *)inpsort,
-		    (unsigned)listmax * sizeof(struct inoinfo *));
+		inpsort = reallocarray(inpsort, listmax,
+		    sizeof(struct inoinfo *));
 		if (inpsort == NULL)
 			errexit("cannot increase directory list\n");
 	}

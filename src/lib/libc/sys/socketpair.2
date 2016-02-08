@@ -1,4 +1,4 @@
-.\"	$OpenBSD: socketpair.2,v 1.15 2013/04/08 19:49:55 guenther Exp $
+.\"	$OpenBSD: socketpair.2,v 1.18 2014/12/14 07:42:50 schwarze Exp $
 .\"	$NetBSD: socketpair.2,v 1.5 1995/02/27 12:38:00 cgd Exp $
 .\"
 .\" Copyright (c) 1983, 1991, 1993
@@ -30,14 +30,14 @@
 .\"
 .\"     @(#)socketpair.2	8.1 (Berkeley) 6/4/93
 .\"
-.Dd $Mdocdate: April 8 2013 $
+.Dd $Mdocdate: December 14 2014 $
 .Dt SOCKETPAIR 2
 .Os
 .Sh NAME
 .Nm socketpair
 .Nd create a pair of connected sockets
 .Sh SYNOPSIS
-.Fd #include <sys/socket.h>
+.In sys/socket.h
 .Ft int
 .Fn socketpair "int d" "int type" "int protocol" "int sv[2]"
 .Sh DESCRIPTION
@@ -56,8 +56,19 @@ are returned in
 and
 .Fa sv Ns [1] .
 The two sockets are indistinguishable.
+.Pp
+Any combination of the following flags may additionally be used in the
+.Fa type
+argument:
+.Pp
+.Bl -tag -width "SOCK_NONBLOCKX" -offset indent -compact
+.It SOCK_CLOEXEC
+Set close-on-exec flag on both the new descriptors.
+.It SOCK_NONBLOCK
+Set non-blocking I/O mode on both the new sockets.
+.El
 .Sh RETURN VALUES
-A 0 is returned if the call succeeds, \-1 if it fails.
+.Rv -std
 .Sh ERRORS
 The call succeeds unless:
 .Bl -tag -width Er
@@ -98,11 +109,9 @@ The
 function call appeared in
 .Bx 4.2 .
 .Sh BUGS
-This call is currently implemented only for the
-.Tn LOCAL
-domain.
+This call is currently implemented only for the LOCAL domain.
 Many operating systems only accept a
-.Ar protocol
+.Fa protocol
 of
 .Dv PF_UNSPEC ,
 so that should be used instead of

@@ -1,4 +1,4 @@
-/*	$OpenBSD: pfctl_parser.c,v 1.298 2014/01/20 02:59:13 henning Exp $ */
+/*	$OpenBSD: pfctl_parser.c,v 1.304 2015/02/14 23:32:41 sthen Exp $ */
 
 /*
  * Copyright (c) 2001 Daniel Hartmeier
@@ -37,7 +37,6 @@
 #include <net/if_dl.h>
 #include <net/if.h>
 #include <netinet/in.h>
-#include <netinet/in_systm.h>
 #include <netinet/ip.h>
 #include <netinet/ip_icmp.h>
 #include <netinet/icmp6.h>
@@ -55,6 +54,7 @@
 #include <err.h>
 #include <ifaddrs.h>
 #include <unistd.h>
+#include <limits.h>
 
 #define SYSLOG_NAMES
 #include <syslog.h>
@@ -309,8 +309,15 @@ string_to_loglevel(const char *name)
 	CODE *c;
 	char *p, buf[40];
 
-	if (isdigit((unsigned char)*name))
-		return (atoi(name));
+	if (isdigit((unsigned char)*name)) {
+		const char *errstr;
+		int val;
+
+		val = strtonum(name, 0, LOG_DEBUG, &errstr);
+		if (errstr)
+			return -1;
+		return val;
+	}
 
 	for (p = buf; *name && p < &buf[sizeof(buf) - 1]; p++, name++) {
 		if (isupper((unsigned char)*name))
@@ -846,6 +853,8 @@ print_rule(struct pf_rule *r, const char *anchor_call, int opts)
 	}
 	if (r->tos)
 		printf(" tos 0x%2.2x", r->tos);
+	if (r->prio)
+		printf(" prio %u", r->prio == PF_PRIO_ZERO ? 0 : r->prio);
 
 	if (r->scrub_flags & PFSTATE_SETMASK || r->qname[0]) {
 		char *comma = "";
@@ -1244,16 +1253,12 @@ int
 check_netmask(struct node_host *h, sa_family_t af)
 {
 	struct node_host	*n = NULL;
-	struct pf_addr	*m;
+	struct pf_addr		*m;
 
 	for (n = h; n != NULL; n = n->next) {
 		if (h->addr.type == PF_ADDR_TABLE)
 			continue;
 		m = &h->addr.v.a.mask;
-		/* fix up netmask for dynaddr */
-		if (af == AF_INET && h->addr.type == PF_ADDR_DYNIFTL &&
-		    unmask(m, AF_INET6) > 32)
-			set_ipmask(n, 32);
 		/* netmasks > 32 bit are invalid on v4 */
 		if (af == AF_INET &&
 		    (m->addr32[1] || m->addr32[2] || m->addr32[3])) {
@@ -1263,6 +1268,30 @@ check_netmask(struct node_host *h, sa_family_t af)
 		}
 	}
 	return (0);
+}
+
+struct node_host *
+gen_dynnode(struct node_host *h, sa_family_t af)
+{
+	struct node_host	*n;
+	struct pf_addr		*m;
+
+	if (h->addr.type != PF_ADDR_DYNIFTL)
+		return (NULL);
+
+	if ((n = calloc(1, sizeof(*n))) == NULL)
+		return (NULL);
+	bcopy(h, n, sizeof(*n));
+	n->ifname = NULL;
+	n->next = NULL;
+	n->tail = NULL;
+
+	/* fix up netmask */
+	m = &n->addr.v.a.mask;
+	if (af == AF_INET && unmask(m, AF_INET6) > 32)
+		set_ipmask(n, 32);
+
+	return (n);
 }
 
 /* interface lookup routines */

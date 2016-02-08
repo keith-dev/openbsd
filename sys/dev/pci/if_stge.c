@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_stge.c,v 1.56 2014/07/22 13:12:11 mpi Exp $	*/
+/*	$OpenBSD: if_stge.c,v 1.58 2014/12/22 02:28:52 tedu Exp $	*/
 /*	$NetBSD: if_stge.c,v 1.27 2005/05/16 21:35:32 bouyer Exp $	*/
 
 /*-
@@ -53,10 +53,8 @@
 #include <net/if.h>
 #include <net/if_dl.h>
 
-#ifdef INET
 #include <netinet/in.h>
 #include <netinet/if_ether.h>
-#endif
 
 #include <net/if_media.h>
 
@@ -676,10 +674,8 @@ stge_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 		if (!(ifp->if_flags & IFF_RUNNING))
 			stge_init(ifp);
 
-#ifdef INET
 		if (ifa->ifa_addr->sa_family == AF_INET)
 			arp_ifinit(&sc->sc_arpcom, ifa);
-#endif
 		break;
 
 	case SIOCSIFFLAGS:
@@ -708,9 +704,6 @@ stge_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 			stge_iff(sc);
 		error = 0;
 	}
-
-	/* Try to get more packets going. */
-	stge_start(ifp);
 
 	splx(s);
 	return (error);

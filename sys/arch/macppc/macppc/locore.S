@@ -1,4 +1,4 @@
-/*	$OpenBSD: locore.S,v 1.42 2013/12/29 21:06:37 miod Exp $	*/
+/*	$OpenBSD: locore.S,v 1.48 2014/10/27 21:56:57 kettenis Exp $	*/
 /*	$NetBSD: locore.S,v 1.2 1996/10/16 19:33:09 ws Exp $	*/
 
 /*
@@ -62,9 +62,6 @@ fwargsave:
 			.long 0
 			.long 0
 
-       .globl  _C_LABEL(hid0_idle),
-       .type   _C_LABEL(hid0_idle),@object
-_C_LABEL(hid0_idle):   .long   0       /* hid0 bits to set on idle, DOZE/NAP *
 /*
  * Startup entry
  */
@@ -218,29 +215,35 @@ switch_exited:
 	blr
 
 _ENTRY(_C_LABEL(cpu_idle_enter))
+	lis	%r4, _C_LABEL(ppc_cpuidle)@ha
+	lwz	%r4, _C_LABEL(ppc_cpuidle)@l(%r4)
+	cmpwi	%r4, 0
+	beq	1f
 	/* must disable external interrupts during idle queue checking */
 	mfmsr	%r3
 	andi.	%r3,%r3,~PSL_EE@l
 	mtmsr	%r3
+1:
 	blr
 
 _ENTRY(_C_LABEL(cpu_idle_cycle))
-	/*
-	 * interrupts were disabled in cpu_idle_enter, but must be enabled
-	 * for sleeping
-	 */
-	lis	%r4, _C_LABEL(hid0_idle)@ha
-	lwz	%r4, _C_LABEL(hid0_idle)@l(%r4)
-	mfmsr	%r3
-	//* if hid0_idle is 0, no low power */
+	lis	%r4, _C_LABEL(ppc_cpuidle)@ha
+	lwz	%r4, _C_LABEL(ppc_cpuidle)@l(%r4)
 	cmpwi	%r4, 0
 	beq	idledone
-	/* set HID0_(HID|NAP|DOZ) as appropriate in hid0 */
-	mfspr	%r5, 1008
-	or	%r5, %r5, %r4
-	mtspr	1008,	%r5
-	isync
+
+	/*
+	 * Interrupts were disabled in cpu_idle_enter, but must be
+	 * enabled for sleeping, but before that indicate that we
+	 * are entering sleep mode.
+	 */
+	GET_CPUINFO(%r4)
+	lwz	%r6,CI_FLAGS(%r4)
+	ori	%r6,%r6,CI_FLAGS_SLEEPING@l
+	stw	%r6,CI_FLAGS(%r4)
+
 	/* enable interrupts, required before setting POW */
+	mfmsr	%r3
 	ori	%r5,%r3,PSL_EE@l
 	mtmsr	%r5
 	oris	%r5, %r5, PSL_POW@h
@@ -251,35 +254,29 @@ _ENTRY(_C_LABEL(cpu_idle_cycle))
 	isync
 
 	/*
-	 * restore interrupts to disabled, so hid0 is only modified with
-	 * interrupts disabled.
+	 * restore interrupts to disabled, so CI_FLAGS is only modified
+	 * with interrupts disabled.
 	 */
 	mtmsr %r3
 	isync
 
-	/* clear HID0_(HID|NAP|DOZ) since sleeping is over */
-	mfspr	%r5, 1008
-	andc	%r5, %r5, %r4
-	mtspr	1008, %r5
+	/* clear CI_FLAGS_SLEEPING since sleeping is over */
+	andi.	%r6,%r6,~CI_FLAGS_SLEEPING@l
+	stw	%r6,CI_FLAGS(%r4)
 idledone:
-	/*
-	 * enable interrupts for a small window here to catch machines
-	 * that do not have any sleep mode
-	 */
-	ori     %r5,%r3,PSL_EE@l
-	mtmsr	%r5
-	isync
-	mtmsr	%r3
 	blr
 
-
 _ENTRY(_C_LABEL(cpu_idle_leave))
+	lis	%r4, _C_LABEL(ppc_cpuidle)@ha
+	lwz	%r4, _C_LABEL(ppc_cpuidle)@l(%r4)
+	cmpwi	%r4, 0
+	beq	1f
 	/* enable interrupts disabled in cpu_idle_enter. */
 	mfmsr	%r3
 	ori	%r3,%r3,PSL_EE@l
 	mtmsr	%r3
+1:
 	blr
-
 
 /*
  * This code gets copied to all the trap vectors
@@ -420,26 +417,6 @@ nop32_4e:
 	mfcr	%r29			/* save CR */
 	mfsrr1	%r31			/* test kernel mode */
 	mfsprg	%r1,1                   /* restore SP */
-nop64_2s:
-	mtcr	%r31
-	bc	12,17,1f		/* branch if PSL_PR is set */
-	mfsrr0	%r31			/* get fault address */
-	rlwinm	%r31,%r31,7,25,28		/* get segment * 8 */
-	addis	%r31,%r31,_C_LABEL(battable)@ha
-	lwz	%r30,_C_LABEL(battable)@l(%r31)	/* get batu */
-	mtcr	%r30
-	bc	4,30,1f			/* branch if supervisor valid is false */
-	mtibatu	3,%r30
-	lwz	%r30,_C_LABEL(battable)+4@l(%r31)	/* get batl */
-	mtibatl	3,%r30
-	mtcr	%r29			/* restore CR */
-	mtsprg	1,%r1
-	GET_CPUINFO(%r1)
-	lmw	%r28,CI_DISISAVE(%r1)	/* restore r28-r31 */
-	mfsprg	%r1,1
-	rfi				/* return to trapped code */
-1:
-nop64_2e:
 	bla	s_isitrap
 _C_LABEL(isisize) =	.-_C_LABEL(isitrap)
 
@@ -725,15 +702,19 @@ nop32_7e:
 _C_LABEL(ddbsize) =	.-_C_LABEL(ddblow)
 #endif  /* DDB */
 
-#define HID_IDLE_CHECK(sr1,sr2,sr3,rSRR0)				\
-	/* detect if interrupt occurred from idle */			\
-	mfspr	sr1, 1008;						\
-	lis	sr2,_C_LABEL(hid0_idle)@ha;				\
-	lwz	sr2,_C_LABEL(hid0_idle)@l(sr2);				\
-	and.	sr3,sr1,sr2;						\
-	andc	sr1,sr1,sr2;						\
-	beq+	1f;							\
-	mtspr	1008, sr1;						\
+/*
+ * If this interrupt occured between the runqueue check and the setting
+ * of the POW bit, do no enter to sleep.  We do that in order to process
+ * the result of this interrupt directly and not when coming back from
+ * sleep, when the next clock tick or interrupt will fire.
+ */
+#define CPU_IDLE_CHECK(sr1,sr2,sr3,rSRR0)				\
+	GET_CPUINFO(sr1);						\
+	lwz	sr2,CI_FLAGS(sr1);					\
+	andi.	sr3,sr2,CI_FLAGS_SLEEPING@l;				\
+	beq	1f;							\
+	andi.	sr2,sr2,~CI_FLAGS_SLEEPING@l;				\
+	stw	sr2,CI_FLAGS(sr1);					\
 	lis	rSRR0,_C_LABEL(idledone)@ha;				\
 	addi	rSRR0,rSRR0,_C_LABEL(idledone)@l;			\
 1:
@@ -798,7 +779,7 @@ _C_LABEL(ddbsize) =	.-_C_LABEL(ddblow)
 	stw	%r5,FRAME_EXC+8(%r1);					\
 	stw	%r28,FRAME_DAR+8(%r1);					\
 	stw	%r29,FRAME_DSISR+8(%r1);				\
-	HID_IDLE_CHECK(%r5,%r6,%r0,%r30)				\
+	CPU_IDLE_CHECK(%r5,%r6,%r0,%r30)				\
 	stw	%r30,FRAME_SRR0+8(%r1);					\
 	stw	%r31,FRAME_SRR1+8(%r1)
 
@@ -887,6 +868,7 @@ realtrap:
 /*
  * Now the common trap catching code.
  */
+	.globl	s_trap
 s_trap:
 	FRAME_SETUP(CI_TEMPSAVE)
 /* Now we can recover interrupts again: */
@@ -901,6 +883,8 @@ s_trap:
 trapagain:
 	addi	%r3,%r1,8
 	bl	_C_LABEL(trap)
+
+	.globl	trapexit
 trapexit:
 /* Disable interrupts: */
 	mfmsr	%r3
@@ -1008,7 +992,7 @@ s_isitrap:
 	mfsrr1	%r31			/* test if this may be a spill fault */
 	mtcr	%r31
 	mtsprg	1,%r1			/* save SP */
-	bc	4,%r1,disitrap		/* branch if table miss is false */
+	bc	4,1,disitrap		/* branch if table miss is false */
 	GET_CPUINFO(%r30)
 	lwz	%r30,CI_INTSTK(%r30)	/* get interrupt stack */
 	addi	%r1,%r30,SPILLSTK
@@ -1180,6 +1164,7 @@ rfi3:	rfi
 /*
  * Decrementer interrupt second level handler
  */
+	.globl	decrintr
 decrintr:
 	INTRENTER
 	addi	%r3,%r1,8			/* intr frame */
@@ -1281,6 +1266,17 @@ _C_LABEL(ddb_trap):
 	isync
 	GET_CPUINFO(%r3)
 	stmw	%r28,CI_DDBSAVE(%r3)
+
+	/*
+	 * If we are already running in interrupt context, the CPU
+	 * problably got interrupted while idle.  But since we are
+	 * about to enter to ddb(8), do not let FRAME_SETUP() below
+	 * change the return address of, and corrupt, this frame.
+	 */
+	lwz	%r28,CI_FLAGS(%r3)
+	andi.	%r28,%r28,~CI_FLAGS_SLEEPING@l
+	stw	%r28,CI_FLAGS(%r3)
+
 	mflr	%r28
 	li	%r29,EXC_BPT
 	mtlr	%r29
@@ -1330,14 +1326,15 @@ _C_LABEL(rfi_start):
 	.long	rfi1, rfi1 + 4
 	.long	rfi2, rfi2 + 4
 	.long	rfi3, rfi3 + 4
+#ifdef DDB
 	.long	rfi4, rfi4 + 4
+#endif
 	.long	0, 0
 
 
 	.globl  _C_LABEL(nop64_start)
 _C_LABEL(nop64_start):
 	.long	nop64_1s, nop64_1e
-	.long	nop64_2s, nop64_2e
 	.long	0, 0
 
 	.globl  _C_LABEL(nop32_start)
@@ -1348,5 +1345,7 @@ _C_LABEL(nop32_start):
 	.long	nop32_4s, nop32_4e
 	.long	nop32_5s, nop32_5e
 	.long	nop32_6s, nop32_6e
+#ifdef DDB
 	.long	nop32_7s, nop32_7e
+#endif
 	.long	0, 0

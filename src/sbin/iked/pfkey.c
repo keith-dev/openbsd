@@ -1,4 +1,4 @@
-/*	$OpenBSD: pfkey.c,v 1.38 2014/07/09 12:05:01 markus Exp $	*/
+/*	$OpenBSD: pfkey.c,v 1.41 2015/01/16 06:39:58 deraadt Exp $	*/
 
 /*
  * Copyright (c) 2010-2013 Reyk Floeter <reyk@openbsd.org>
@@ -19,7 +19,6 @@
  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
 
-#include <sys/param.h>
 #include <sys/queue.h>
 #include <sys/uio.h>
 #include <sys/socket.h>
@@ -31,6 +30,7 @@
 #include <err.h>
 #include <errno.h>
 #include <stdio.h>
+#include <poll.h>
 #include <string.h>
 #include <stdlib.h>
 #include <unistd.h>
@@ -1097,11 +1097,13 @@ pfkey_reply(int sd, u_int8_t **datap, ssize_t *lenp)
 {
 	struct pfkey_message	*pm;
 	struct sadb_msg		 hdr;
-	struct timeval		 tv;
 	ssize_t			 len;
 	u_int8_t		*data;
-	fd_set			*fds;
+	struct pollfd		pfd[1];
 	int			 n;
+
+	pfd[0].fd = sd;
+	pfd[0].events = POLLIN;
 
 	for (;;) {
 		/*
@@ -1111,21 +1113,9 @@ pfkey_reply(int sd, u_int8_t **datap, ssize_t *lenp)
 		 * and if it is not readable in that time, we fail
 		 * the read.
 		 */
-		n = howmany(sd + 1, NFDBITS);
-		if ((fds = calloc(n, sizeof(fd_mask))) == NULL) {
-			log_warn("%s: calloc(%lu, %lu) failed", __func__,
-			    (unsigned long) n,
-			    (unsigned long) sizeof(fd_mask));
-			return (-1);
-		}
-		FD_SET(sd, fds);
-		tv.tv_sec = 0;
-		tv.tv_usec = PFKEY_REPLY_TIMEOUT;
-		n = select(sd + 1, fds, 0, 0, &tv);
-		free(fds);
+		n = poll(pfd, 1, PFKEY_REPLY_TIMEOUT / 1000);
 		if (n == -1) {
-			log_warn("%s: select(%d, fds, 0, 0, &tv) failed",
-			    __func__, sd + 1);
+			log_warn("%s: poll() failed", __func__);
 			return (-1);
 		}
 		if (n == 0) {
@@ -1143,11 +1133,13 @@ pfkey_reply(int sd, u_int8_t **datap, ssize_t *lenp)
 			return (-1);
 		}
 
-		len = hdr.sadb_msg_len * PFKEYV2_CHUNK;
-		if ((data = malloc(len)) == NULL) {
+		if ((data = reallocarray(NULL, hdr.sadb_msg_len,
+		    PFKEYV2_CHUNK)) == NULL) {
 			log_warn("%s: malloc", __func__);
 			return (-1);
 		}
+		len = hdr.sadb_msg_len * PFKEYV2_CHUNK;
+
 		if (read(sd, data, len) != len) {
 			log_warnx("%s: short read", __func__);
 			free(data);
@@ -1519,11 +1511,13 @@ pfkey_dispatch(int sd, short event, void *arg)
 		return;
 	}
 
-	len = hdr.sadb_msg_len * PFKEYV2_CHUNK;
-	if ((data = malloc(len)) == NULL) {
+	if ((data = reallocarray(NULL, hdr.sadb_msg_len, PFKEYV2_CHUNK))
+	    == NULL) {
 		log_warn("%s: malloc", __func__);
 		return;
 	}
+	len = hdr.sadb_msg_len * PFKEYV2_CHUNK;
+
 	if (read(sd, data, len) != len) {
 		log_warn("%s: short read", __func__);
 		free(data);

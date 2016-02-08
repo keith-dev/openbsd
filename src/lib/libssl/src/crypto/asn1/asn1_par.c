@@ -1,4 +1,4 @@
-/* $OpenBSD: asn1_par.c,v 1.20 2014/07/12 16:03:36 miod Exp $ */
+/* $OpenBSD: asn1_par.c,v 1.22 2015/02/07 13:19:15 doug Exp $ */
 /* Copyright (C) 1995-1998 Eric Young (eay@cryptsoft.com)
  * All rights reserved.
  *
@@ -71,7 +71,6 @@ static int
 asn1_print_info(BIO *bp, int tag, int xclass, int constructed,
     int indent)
 {
-	static const char fmt[] = "%-18s";
 	char str[128];
 	const char *p;
 
@@ -95,7 +94,7 @@ asn1_print_info(BIO *bp, int tag, int xclass, int constructed,
 	else
 		p = ASN1_tag2str(tag);
 
-	if (BIO_printf(bp, fmt, p) <= 0)
+	if (BIO_printf(bp, "%-18s", p) <= 0)
 		goto err;
 	return (1);
 err:
@@ -127,11 +126,7 @@ asn1_parse2(BIO *bp, const unsigned char **pp, long length, int offset,
 	/* ASN1_BMPSTRING *bmp=NULL;*/
 	int dump_indent;
 
-#if 0
-	dump_indent = indent;
-#else
 	dump_indent = 6;	/* Because we know BIO_dump_indent() */
-#endif
 	p = *pp;
 	tot = p + length;
 	op = p - 1;

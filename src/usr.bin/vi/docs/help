@@ -165,8 +165,6 @@ EX COMMANDS:
       number: change display to number lines
 	open: enter "open" mode (not implemented)
        print: display lines
-	perl: run the perl interpreter with the command
-      perldo: run the perl interpreter with the command, on each line
     preserve: preserve an edit session for recovery
  [Pp]revious: edit the previous file in the file argument list
 	 put: append a cut buffer to the line
@@ -188,7 +186,6 @@ EX COMMANDS:
       tagpop: return to the previous group of tags
      tagprev: move to the previous tag
       tagtop: discard all tags
-	 tcl: run the tcl interpreter with the command
 	undo: undo the most recent change
 unabbreviate: delete an abbreviation
        unmap: delete an input or command map

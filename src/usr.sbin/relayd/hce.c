@@ -1,4 +1,4 @@
-/*	$OpenBSD: hce.c,v 1.64 2013/03/10 23:32:53 reyk Exp $	*/
+/*	$OpenBSD: hce.c,v 1.69 2015/01/22 17:42:09 reyk Exp $	*/
 
 /*
  * Copyright (c) 2006 Pierre-Yves Ritschard <pyr@openbsd.org>
@@ -16,28 +16,16 @@
  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
 
-#include <sys/param.h>
+#include <sys/types.h>
 #include <sys/queue.h>
 #include <sys/time.h>
-#include <sys/stat.h>
-#include <sys/socket.h>
-#include <sys/un.h>
+#include <sys/uio.h>
 
-#include <net/if.h>
-#include <netinet/in_systm.h>
-#include <netinet/in.h>
-#include <netinet/ip.h>
-
-#include <errno.h>
 #include <event.h>
-#include <fcntl.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
-#include <err.h>
-#include <pwd.h>
-
-#include <openssl/ssl.h>
+#include <imsg.h>
 
 #include "relayd.h"
 
@@ -49,6 +37,7 @@ void	 hce_disable_events(void);
 
 int	 hce_dispatch_parent(int, struct privsep_proc *, struct imsg *);
 int	 hce_dispatch_pfe(int, struct privsep_proc *, struct imsg *);
+int	 hce_dispatch_relay(int, struct privsep_proc *, struct imsg *);
 
 static struct relayd *env = NULL;
 int			 running = 0;
@@ -56,6 +45,7 @@ int			 running = 0;
 static struct privsep_proc procs[] = {
 	{ "parent",	PROC_PARENT,	hce_dispatch_parent },
 	{ "pfe",	PROC_PFE,	hce_dispatch_pfe },
+	{ "relay",	PROC_RELAY,	hce_dispatch_relay },
 };
 
 pid_t
@@ -79,8 +69,6 @@ hce_init(struct privsep *ps, struct privsep_proc *p, void *arg)
 
 	/* Allow maximum available sockets for TCP checks */
 	socket_rlimit(-1);
-
-	snmp_init(env, PROC_PARENT);
 }
 
 void
@@ -96,9 +84,9 @@ hce_setup_events(void)
 		evtimer_add(&env->sc_ev, &tv);
 	}
 
-	if (env->sc_flags & F_SSL) {
+	if (env->sc_flags & F_TLS) {
 		TAILQ_FOREACH(table, env->sc_tables, entry) {
-			if (!(table->conf.flags & F_SSL) ||
+			if (!(table->conf.flags & F_TLS) ||
 			    table->ssl_ctx != NULL)
 				continue;
 			table->ssl_ctx = ssl_ctx_create(env);
@@ -221,7 +209,7 @@ hce_notify_done(struct host *host, enum host_error he)
 			log_info("host %s, check %s%s (ignoring result, "
 			    "host disabled)",
 			    host->conf.name, table_check(table->conf.check),
-			    (table->conf.flags & F_SSL) ? " use ssl" : "");
+			    (table->conf.flags & F_TLS) ? " use tls" : "");
 		}
 		host->flags |= (F_CHECK_SENT|F_CHECK_DONE);
 		return;
@@ -270,13 +258,10 @@ hce_notify_done(struct host *host, enum host_error he)
 		log_info("host %s, check %s%s (%lums), state %s -> %s, "
 		    "availability %s",
 		    host->conf.name, table_check(table->conf.check),
-		    (table->conf.flags & F_SSL) ? " use ssl" : "", duration,
+		    (table->conf.flags & F_TLS) ? " use tls" : "", duration,
 		    host_status(host->last_up), host_status(host->up),
 		    print_availability(host->check_cnt, host->up_cnt));
 	}
-
-	if (host->last_up != host->up)
-		snmp_hosttrap(env, table, host);
 
 	host->last_up = host->up;
 
@@ -362,9 +347,6 @@ hce_dispatch_parent(int fd, struct privsep_proc *p, struct imsg *imsg)
 	case IMSG_CFG_HOST:
 		config_gethost(env, imsg);
 		break;
-	case IMSG_SNMPSOCK:
-		snmp_getsock(env, imsg);
-		break;
 	case IMSG_CFG_DONE:
 		config_getcfg(env, imsg);
 		break;
@@ -379,4 +361,15 @@ hce_dispatch_parent(int fd, struct privsep_proc *p, struct imsg *imsg)
 	}
 
 	return (0);
+}
+
+int
+hce_dispatch_relay(int fd, struct privsep_proc *p, struct imsg *imsg)
+{
+	switch (imsg->hdr.type) {
+	default:
+		break;
+	}
+
+	return (-1);
 }

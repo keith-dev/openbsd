@@ -1,4 +1,4 @@
-/*	$OpenBSD: machdep.c,v 1.160 2014/07/21 17:25:47 uebayasi Exp $	*/
+/*	$OpenBSD: machdep.c,v 1.168 2015/02/06 09:27:17 mpi Exp $	*/
 /*	$NetBSD: machdep.c,v 1.4 1996/10/16 19:33:11 ws Exp $	*/
 
 /*
@@ -40,6 +40,7 @@
 #include <sys/mbuf.h>
 #include <sys/mount.h>
 #include <sys/msgbuf.h>
+#include <sys/pool.h>
 #include <sys/sysctl.h>
 #include <sys/proc.h>
 #include <sys/signalvar.h>
@@ -130,12 +131,6 @@ void ppc_intr_setup(intr_establish_t *establish,
     intr_disestablish_t *disestablish);
 void *ppc_intr_establish(void *lcv, pci_intr_handle_t ih, int type,
     int level, int (*func)(void *), void *arg, const char *name);
-int bus_mem_add_mapping(bus_addr_t bpa, bus_size_t size, int flags,
-    bus_space_handle_t *bshp);
-bus_addr_t bus_space_unmap_p(bus_space_tag_t t, bus_space_handle_t bsh,
-    bus_size_t size);
-void bus_space_unmap(bus_space_tag_t t, bus_space_handle_t bsh,
-    bus_size_t size);
 
 
 /*
@@ -194,7 +189,7 @@ initppc(startkernel, endkernel, args)
 	 * Set up initial BAT table to only map the lowest 256 MB area
 	 */
 	battable[0].batl = BATL(0x00000000, BAT_M);
-	battable[0].batu = BATU(0x00000000);
+	battable[0].batu = BATU(0x00000000, BAT_BL_256M);
 
 	/*
 	 * Now setup fixed bat registers
@@ -202,13 +197,13 @@ initppc(startkernel, endkernel, args)
 	 * Note that we still run in real mode, and the BAT
 	 * registers were cleared above.
 	 */
-	/* IBAT0 used for initial 256 MB segment */
-	ppc_mtibat0l(battable[0].batl);
-	ppc_mtibat0u(battable[0].batu);
-
-	/* DBAT0 used similar */
+	/* DBAT0 used for initial 256 MB segment */
 	ppc_mtdbat0l(battable[0].batl);
 	ppc_mtdbat0u(battable[0].batu);
+
+	/* IBAT0 only covering the kernel .text */
+	ppc_mtibat0l(battable[0].batl);
+	ppc_mtibat0u(BATU(0x00000000, BAT_BL_8M));
 
 	/*
 	 * Set up trap vectors
@@ -280,31 +275,31 @@ initppc(startkernel, endkernel, args)
 	/* now that we know physmem size, map physical memory with BATs */
 	if (physmem > atop(0x10000000)) {
 		battable[0x1].batl = BATL(0x10000000, BAT_M);
-		battable[0x1].batu = BATU(0x10000000);
+		battable[0x1].batu = BATU(0x10000000, BAT_BL_256M);
 	}
 	if (physmem > atop(0x20000000)) {
 		battable[0x2].batl = BATL(0x20000000, BAT_M);
-		battable[0x2].batu = BATU(0x20000000);
+		battable[0x2].batu = BATU(0x20000000, BAT_BL_256M);
 	}
 	if (physmem > atop(0x30000000)) {
 		battable[0x3].batl = BATL(0x30000000, BAT_M);
-		battable[0x3].batu = BATU(0x30000000);
+		battable[0x3].batu = BATU(0x30000000, BAT_BL_256M);
 	}
 	if (physmem > atop(0x40000000)) {
 		battable[0x4].batl = BATL(0x40000000, BAT_M);
-		battable[0x4].batu = BATU(0x40000000);
+		battable[0x4].batu = BATU(0x40000000, BAT_BL_256M);
 	}
 	if (physmem > atop(0x50000000)) {
 		battable[0x5].batl = BATL(0x50000000, BAT_M);
-		battable[0x5].batu = BATU(0x50000000);
+		battable[0x5].batu = BATU(0x50000000, BAT_BL_256M);
 	}
 	if (physmem > atop(0x60000000)) {
 		battable[0x6].batl = BATL(0x60000000, BAT_M);
-		battable[0x6].batu = BATU(0x60000000);
+		battable[0x6].batu = BATU(0x60000000, BAT_BL_256M);
 	}
 	if (physmem > atop(0x70000000)) {
 		battable[0x7].batl = BATL(0x70000000, BAT_M);
-		battable[0x7].batu = BATU(0x70000000);
+		battable[0x7].batu = BATU(0x70000000, BAT_BL_256M);
 	}
 
 	/*
@@ -394,16 +389,17 @@ initppc(startkernel, endkernel, args)
 		printf("kernel does not support -c; continuing..\n");
 #endif
 	}
-	/*
-	 * Replace with real console.
-	 */
-	ofwconprobe();
-	consinit();
 
 #ifdef DDB
 	if (boothowto & RB_KDB)
 		Debugger();
 #endif
+
+	/*
+	 * Replace with real console.
+	 */
+	ofwconprobe();
+	consinit();
 
         pool_init(&ppc_vecpl, sizeof(struct vreg), 16, 0, 0, "ppcvec", NULL);
 
@@ -508,7 +504,7 @@ setregs(struct proc *p, struct exec_package *pack, u_long stack,
 	pargs = -roundup(-stack + 8, 16);
 	newstack = (u_int32_t)(pargs - 32);
 
-	copyin ((void *)(VM_MAX_ADDRESS-0x10), &args, 0x10);
+	copyin ((void *)p->p_p->ps_strings, &args, 0x10);
 
 	bzero(tf, sizeof *tf);
 	tf->fixreg[1] = newstack;
@@ -764,7 +760,7 @@ dumpsys()
                                     (ptoa(dumpsize) - maddr) / (1024 * 1024));
 
 			pmap_enter(pmap_kernel(), dumpspace, maddr,
-				VM_PROT_READ, PMAP_WIRED);
+				PROT_READ, PMAP_WIRED);
 			if ((error = (*dump)(dumpdev, blkno,
 			    (caddr_t)dumpspace, PAGE_SIZE)) != 0)
 				break;
@@ -803,7 +799,6 @@ lcsplx(int ipl)
 __dead void
 boot(int howto)
 {
-	struct device *mainbus;
 	static int syncing;
 
 	if (cold) {
@@ -833,10 +828,7 @@ boot(int howto)
 		dumpsys();
 
 haltsys:
-	doshutdownhooks();
-	mainbus = device_mainbus();
-	if (mainbus != NULL)
-		config_suspend(mainbus, DVACT_POWERDOWN);
+	config_suspend_all(DVACT_POWERDOWN);
 
 	if ((howto & RB_HALT) != 0) {
 		if ((howto & RB_POWERDOWN) != 0) {
@@ -957,331 +949,6 @@ void
 ppc_send_ipi(struct cpu_info *ci, int id)
 {
 	(*intr_send_ipi_func)(ci, id);
-}
-
-
-/* BUS functions */
-int
-bus_space_map(bus_space_tag_t t, bus_addr_t bpa, bus_size_t size,
-    int flags, bus_space_handle_t *bshp)
-{
-	int error;
-
-	if  (POWERPC_BUS_TAG_BASE(t) == 0) {
-		/* if bus has base of 0 fail. */
-		return EINVAL;
-	}
-	bpa |= POWERPC_BUS_TAG_BASE(t);
-	if ((error = extent_alloc_region(devio_ex, bpa, size, EX_NOWAIT |
-	    (ppc_malloc_ok ? EX_MALLOCOK : 0))))
-		return error;
-
-	if ((error = bus_mem_add_mapping(bpa, size, flags, bshp))) {
-		if (extent_free(devio_ex, bpa, size, EX_NOWAIT |
-			(ppc_malloc_ok ? EX_MALLOCOK : 0)))
-		{
-			printf("bus_space_map: pa 0x%lx, size 0x%lx\n",
-				bpa, size);
-			printf("bus_space_map: can't free region\n");
-		}
-	}
-	return error;
-}
-bus_addr_t
-bus_space_unmap_p(bus_space_tag_t t, bus_space_handle_t bsh, bus_size_t size)
-{
-	bus_addr_t paddr;
-
-	pmap_extract(pmap_kernel(), bsh, &paddr);
-	bus_space_unmap((t), (bsh), (size));
-	return paddr ;
-}
-void
-bus_space_unmap(bus_space_tag_t t, bus_space_handle_t bsh, bus_size_t size)
-{
-	bus_addr_t sva;
-	bus_size_t off, len;
-	bus_addr_t bpa;
-
-	/* should this verify that the proper size is freed? */
-	sva = trunc_page(bsh);
-	off = bsh - sva;
-	len = size+off;
-
-	if (pmap_extract(pmap_kernel(), sva, &bpa) == TRUE) {
-		if (extent_free(devio_ex, bpa | (bsh & PAGE_MASK), size, EX_NOWAIT |
-			(ppc_malloc_ok ? EX_MALLOCOK : 0)))
-		{
-			printf("bus_space_map: pa 0x%lx, size 0x%lx\n",
-				bpa, size);
-			printf("bus_space_map: can't free region\n");
-		}
-	}
-	/* do not free memory which was stolen from the vm system */
-	if (ppc_malloc_ok &&
-	    ((sva >= VM_MIN_KERNEL_ADDRESS) && (sva < VM_MAX_KERNEL_ADDRESS)))
-		uvm_km_free(kernel_map, sva, len);
-	else {
-		pmap_remove(pmap_kernel(), sva, sva + len);
-		pmap_update(pmap_kernel());
-	}
-}
-
-paddr_t
-bus_space_mmap(bus_space_tag_t t, bus_addr_t bpa, off_t off, int prot,
-    int flags)
-{
-	int pmapflags = PMAP_NOCACHE;
-
-	if (POWERPC_BUS_TAG_BASE(t) == 0)
-		return (-1);
-
-	bpa |= POWERPC_BUS_TAG_BASE(t);
-
-	if (flags & BUS_SPACE_MAP_CACHEABLE)
-		pmapflags &= ~PMAP_NOCACHE;
-
-	return ((bpa + off) | pmapflags);
-}
-
-vaddr_t ppc_kvm_stolen = VM_KERN_ADDRESS_SIZE;
-
-int
-bus_mem_add_mapping(bus_addr_t bpa, bus_size_t size, int flags,
-    bus_space_handle_t *bshp)
-{
-	bus_addr_t vaddr;
-	bus_addr_t spa, epa;
-	bus_size_t off;
-	int len;
-
-	spa = trunc_page(bpa);
-	epa = bpa + size;
-	off = bpa - spa;
-	len = size+off;
-
-#if 0
-	if (epa <= spa) {
-		panic("bus_mem_add_mapping: overflow");
-	}
-#endif
-	if (ppc_malloc_ok == 0) {
-		bus_size_t alloc_size;
-
-		/* need to steal vm space before kernel vm is initialized */
-		alloc_size = round_page(len);
-
-		vaddr = VM_MIN_KERNEL_ADDRESS + ppc_kvm_stolen;
-		ppc_kvm_stolen += alloc_size;
-		if (ppc_kvm_stolen > PPC_SEGMENT_LENGTH) {
-			panic("ppc_kvm_stolen, out of space");
-		}
-	} else {
-		vaddr = uvm_km_valloc(kernel_map, len);
-		if (vaddr == 0)
-			return (ENOMEM);
-	}
-	*bshp = vaddr + off;
-#ifdef DEBUG_BUS_MEM_ADD_MAPPING
-	printf("mapping %x size %x to %x vbase %x\n",
-		bpa, size, *bshp, spa);
-#endif
-	for (; len > 0; len -= PAGE_SIZE) {
-		pmap_kenter_cache(vaddr, spa, VM_PROT_READ | VM_PROT_WRITE,
-		    (flags & BUS_SPACE_MAP_CACHEABLE) ?
-		      PMAP_CACHE_WT : PMAP_CACHE_CI);
-		spa += PAGE_SIZE;
-		vaddr += PAGE_SIZE;
-	}
-	return 0;
-}
-
-int
-bus_space_alloc(bus_space_tag_t tag, bus_addr_t rstart, bus_addr_t rend,
-    bus_size_t size, bus_size_t alignment, bus_size_t boundary, int flags,
-    bus_addr_t *addrp, bus_space_handle_t *handlep)
-{
-
-	panic("bus_space_alloc: unimplemented");
-}
-
-void
-bus_space_free(bus_space_tag_t tag, bus_space_handle_t handle, bus_size_t size)
-{
-
-	panic("bus_space_free: unimplemented");
-}
-
-void *
-mapiodev(paddr_t pa, psize_t len)
-{
-	paddr_t spa;
-	vaddr_t vaddr, va;
-	int off;
-	int size;
-
-	spa = trunc_page(pa);
-	off = pa - spa;
-	size = round_page(off+len);
-	if (ppc_malloc_ok == 0) {
-		/* need to steal vm space before kernel vm is initialized */
-		va = VM_MIN_KERNEL_ADDRESS + ppc_kvm_stolen;
-		ppc_kvm_stolen += size;
-		if (ppc_kvm_stolen > PPC_SEGMENT_LENGTH) {
-			panic("ppc_kvm_stolen, out of space");
-		}
-	} else {
-		va = uvm_km_valloc(kernel_map, size);
-	}
-
-	if (va == 0)
-		return NULL;
-
-	for (vaddr = va; size > 0; size -= PAGE_SIZE) {
-		pmap_kenter_cache(vaddr, spa,
-			VM_PROT_READ | VM_PROT_WRITE, PMAP_CACHE_DEFAULT);
-		spa += PAGE_SIZE;
-		vaddr += PAGE_SIZE;
-	}
-	return (void *) (va+off);
-}
-void
-unmapiodev(void *kva, psize_t p_size)
-{
-	vaddr_t vaddr;
-	int size;
-
-	size = p_size;
-
-	vaddr = trunc_page((vaddr_t)kva);
-
-	uvm_km_free(kernel_map, vaddr, size);
-
-	for (; size > 0; size -= PAGE_SIZE) {
-		pmap_remove(pmap_kernel(), vaddr, vaddr + PAGE_SIZE - 1);
-		vaddr += PAGE_SIZE;
-	}
-	pmap_update(pmap_kernel());
-}
-
-
-
-/*
- * probably should be ppc_space_copy
- */
-
-#define _CONCAT(A,B) A ## B
-#define __C(A,B)	_CONCAT(A,B)
-
-#define BUS_SPACE_COPY_N(BYTES,TYPE)					\
-void									\
-__C(bus_space_copy_,BYTES)(void *v, bus_space_handle_t h1,		\
-    bus_size_t o1, bus_space_handle_t h2, bus_size_t o2,		\
-    bus_size_t c)							\
-{									\
-	TYPE *src, *dst;						\
-	int i;								\
-									\
-	src = (TYPE *) (h1+o1);						\
-	dst = (TYPE *) (h2+o2);						\
-									\
-	if (h1 == h2 && o2 > o1)					\
-		for (i = c-1; i >= 0; i--)				\
-			dst[i] = src[i];				\
-	else								\
-		for (i = 0; i < c; i++)					\
-			dst[i] = src[i];				\
-}
-BUS_SPACE_COPY_N(1,u_int8_t)
-BUS_SPACE_COPY_N(2,u_int16_t)
-BUS_SPACE_COPY_N(4,u_int32_t)
-
-void
-bus_space_set_region_1(bus_space_tag_t t, bus_space_handle_t h, bus_size_t o,
-    u_int8_t val, bus_size_t c)
-{
-	u_int8_t *dst;
-	int i;
-
-	dst = (u_int8_t *) (h+o);
-
-	for (i = 0; i < c; i++)
-		dst[i] = val;
-}
-
-void
-bus_space_set_region_2(bus_space_tag_t t, bus_space_handle_t h, bus_size_t o,
-    u_int16_t val, bus_size_t c)
-{
-	u_int16_t *dst;
-	int i;
-
-	dst = (u_int16_t *) (h+o);
-	val = swap16(val);
-
-	for (i = 0; i < c; i++)
-		dst[i] = val;
-}
-void
-bus_space_set_region_4(bus_space_tag_t t, bus_space_handle_t h, bus_size_t o,
-    u_int32_t val, bus_size_t c)
-{
-	u_int32_t *dst;
-	int i;
-
-	dst = (u_int32_t *) (h+o);
-	val = swap32(val);
-
-	for (i = 0; i < c; i++)
-		dst[i] = val;
-}
-
-#define BUS_SPACE_READ_RAW_MULTI_N(BYTES,SHIFT,TYPE)			\
-void									\
-__C(bus_space_read_raw_multi_,BYTES)(bus_space_tag_t bst,		\
-    bus_space_handle_t h, bus_addr_t o, u_int8_t *dst, bus_size_t size)	\
-{									\
-	TYPE *src;							\
-	TYPE *rdst = (TYPE *)dst;					\
-	int i;								\
-	int count = size >> SHIFT;					\
-									\
-	src = (TYPE *)(h+o);						\
-	for (i = 0; i < count; i++) {					\
-		rdst[i] = *src;						\
-		__asm__("eieio");					\
-	}								\
-}
-BUS_SPACE_READ_RAW_MULTI_N(2,1,u_int16_t)
-BUS_SPACE_READ_RAW_MULTI_N(4,2,u_int32_t)
-
-#define BUS_SPACE_WRITE_RAW_MULTI_N(BYTES,SHIFT,TYPE)			\
-void									\
-__C(bus_space_write_raw_multi_,BYTES)( bus_space_tag_t bst,		\
-    bus_space_handle_t h, bus_addr_t o, const u_int8_t *src,		\
-    bus_size_t size)							\
-{									\
-	int i;								\
-	TYPE *dst;							\
-	TYPE *rsrc = (TYPE *)src;					\
-	int count = size >> SHIFT;					\
-									\
-	dst = (TYPE *)(h+o);						\
-	for (i = 0; i < count; i++) {					\
-		*dst = rsrc[i];						\
-		__asm__("eieio");					\
-	}								\
-}
-
-BUS_SPACE_WRITE_RAW_MULTI_N(2,1,u_int16_t)
-BUS_SPACE_WRITE_RAW_MULTI_N(4,2,u_int32_t)
-
-int
-bus_space_subregion(bus_space_tag_t t, bus_space_handle_t bsh,
-    bus_size_t offset, bus_size_t size, bus_space_handle_t *nbshp)
-{
-	*nbshp = bsh + offset;
-	return (0);
 }
 
 /* bcopy(), error on fault */

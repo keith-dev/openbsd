@@ -1,4 +1,4 @@
-#	$OpenBSD: GENERIC,v 1.782 2014/07/13 22:28:03 miod Exp $
+#	$OpenBSD: GENERIC,v 1.794 2015/02/06 20:05:48 stsp Exp $
 #
 # For further information on compiling OpenBSD kernels, see the config(8)
 # man page.
@@ -26,7 +26,6 @@ option		MTRR		# CPU memory range attributes control
 
 option		COMPAT_LINUX	# binary compatibility with Linux
 
-#option		PROCFS		# /proc, currently broken
 #option		GPT		# GPT partition table support
 option		NTFS		# NTFS support
 option		HIBERNATE	# Hibernate support
@@ -185,6 +184,9 @@ nvt*	at iic?				# Novoton W83795G
 #isagpio0 at isa? port 0x78		# ISA I/O mapped as GPIO
 #isagpio1 at isa? port 0x80
 
+skgpio0 at isa? port 0x680		# Soekris net6501 GPIO and LEDs
+gpio* at skgpio?
+
 # ISA PCMCIA controllers
 #option PCMCIAVERBOSE
 pcic0	at isa? port 0x3e0 iomem 0xd0000 iosiz 0x10000
@@ -210,7 +212,7 @@ cbb*		at pci?
 cardslot*	at cbb?
 
 # USB Controllers
-#xhci*	at pci?				# eXtensible Host Controller
+xhci*	at pci?				# eXtensible Host Controller
 ehci*	at pci?				# Enhanced Host Controller
 ehci*	at cardbus?			# Enhanced Host Controller
 uhci*	at pci?				# Universal Host Controller (Intel)
@@ -219,7 +221,7 @@ ohci*	at pci?				# Open Host Controller
 ohci*	at cardbus?			# Open Host Controller
 
 # USB bus support
-#usb*	at xhci?
+usb*	at xhci?
 usb*	at ehci?
 usb*	at uhci?
 usb*	at ohci?
@@ -247,6 +249,8 @@ uark*	at uhub?		# Arkmicro ARK3116 serial
 ucom*	at uark?
 moscom*	at uhub?		# MosChip MCS7703 serial
 ucom*	at moscom?
+umcs*	at uhub?		# MosChip MCS78x0 serial
+ucom*	at umcs?
 uipaq*	at uhub?		# iPAQ serial adapter
 ucom*	at uipaq?
 umsm*	at uhub?		# Qualcomm MSM EVDO
@@ -270,6 +274,8 @@ ukbd*	at uhidev?		# USB keyboard
 wskbd*	at ukbd? mux 1
 ucycom*	at uhidev?		# Cypress serial
 ucom*	at ucycom?
+uslhcom* at uhidev?		# Silicon Labs CP2110 USB HID UART
+ucom*	at uslhcom?
 uticom* at uhub?		# TI serial
 ucom*	at uticom?
 uhid*	at uhidev?		# USB generic HID support
@@ -289,7 +295,6 @@ udav*	at uhub?		# Davicom DM9601 based Ethernet
 mos*	at uhub?		# MOSCHIP MCS7730/7830 10/100 Ethernet
 url*	at uhub?		# Realtek RTL8150L based adapters
 wi*	at uhub?		# WaveLAN IEEE 802.11DS
-urio*	at uhub?		# Diamond Multimedia Rio 500
 udsbr*	at uhub?		# D-Link DSB-R100 radio
 radio*	at udsbr?		# USB radio
 uberry*	at uhub?		# Research In Motion Blackberry
@@ -302,9 +307,9 @@ otus*	at uhub?		# Atheros AR9001U
 athn*	at uhub?		# Atheros AR9002U
 zyd*	at uhub?		# Zydas ZD1211
 upgt*	at uhub?		# Conexant/Intersil PrismGT SoftMAC USB
-urtw*	at uhub?		# RealTek 8187
-rsu*	at uhub?		# RealTek RTL8188SU/RTL8191SU/RTL8192SU
-urtwn*	at uhub?		# RealTek RTL8188CU/RTL8192CU
+urtw*	at uhub?		# Realtek 8187
+rsu*	at uhub?		# Realtek RTL8188SU/RTL8191SU/RTL8192SU
+urtwn*	at uhub?		# Realtek RTL8188CU/RTL8192CU
 udcf*	at uhub?		# Gude Expert mouseCLOCK
 umbg*	at uhub?		# Meinberg Funkuhren USB5131
 uthum*	at uhidev?		# TEMPerHUM sensor
@@ -543,8 +548,8 @@ sm*	at pcmcia?			# PCMCIA based sm ethernet
 xe*	at pcmcia?			# Xircom ethernet
 xl*	at pci?				# 3C9xx ethernet
 xl*	at cardbus?			# 3C575/3C656 ethernet
-rl*	at pci?				# RealTek 81[23]9 ethernet
-rl*	at cardbus?			# RealTek 81[23]9 ethernet
+rl*	at pci?				# Realtek 81[23]9 ethernet
+rl*	at cardbus?			# Realtek 81[23]9 ethernet
 mtd*	at pci?				# Myson MTD800/803/891
 epic*	at pci?				# SMC EPIC/100 ethernet
 tl*	at pci?				# Compaq Thunderlan ethernet
@@ -579,12 +584,11 @@ hme*	at pci?				# Sun Happy Meal
 bce*	at pci?				# Broadcom BCM4401
 vge*	at pci?				# VIA VT612x
 nfe*	at pci?				# NVIDIA nForce Ethernet
-musycc*	at pci?				# Conexant HDLC controller
-art*	at musycc?			# Accoom Artery E1/T1 cards
 xge*	at pci?				# Neterion Xframe-I/II 10Gb ethernet
 thtc*	at pci?				# Tehuti Networks 10Gb ethernet
 tht*	at thtc?
-gem*	at pci?				# Sun 'gem' ethernet
+gem*	at pci?				# Sun GEM 10/100/Gigabit
+cas*	at pci?				# Sun Cassini 100/Gigabit
 vic*	at pci?				# VMware VMXnet virtual interface
 vmx*	at pci?				# VMware VMXNET3 virtual interface
 et*	at pci?				# Agere/LSI ET1310
@@ -616,6 +620,7 @@ ipw*	at pci?				# Intel PRO/Wireless 2100
 iwi*	at pci?				# Intel PRO/Wireless 2200BG/2915ABG
 wpi*	at pci?				# Intel PRO/Wireless 3945ABG
 iwn*	at pci?				# Intel WiFi Link 4965/5000/1000/6000
+iwm*	at pci?				# Intel WiFi Link 7xxx
 ral*	at pci?				# Ralink RT2500/RT2501/RT2600
 ral*	at cardbus?			# Ralink RT2500/RT2501/RT2600
 rtw*	at pci?				# Realtek 8180
@@ -639,7 +644,7 @@ qsphy*	at mii?				# Quality Semi QS6612 PHYs
 luphy*	at mii?				# Lucent LU6612 PHY
 sqphy*	at mii?				# Seeq 8x220 PHYs
 tlphy*	at mii?				# ThunderLAN PHYs
-rlphy* at mii?				# RealTek 8139 internal PHYs
+rlphy* at mii?				# Realtek 8139 internal PHYs
 mtdphy* at mii?				# Myson MTD972 PHYs
 dcphy*	at mii?				# Digital Clone PHYs
 acphy*	at mii?				# Altima AC101 PHYs
@@ -759,8 +764,6 @@ joy*	at isapnp?
 
 # crypto support
 hifn*	at pci?			# Hi/fn 7751 crypto card
-lofn*	at pci?			# Hi/fn 6500 crypto card
-nofn*	at pci?			# Hi/fn 7814/7851/7854 crypto card
 ubsec*	at pci?			# Bluesteel Networks 5xxx crypto card
 safe*	at pci?			# SafeNet SafeXcel 1141/1741
 glxsb*	at pci?			# AMD Geode LX series processor security block
@@ -786,7 +789,6 @@ pseudo-device	hotplug		1	# devices hot plugging
 
 # mouse & keyboard multiplexor pseudo-devices
 pseudo-device	wsmux		2
-pseudo-device	crypto		1
 
 # Virtio devices
 virtio*		at pci? 	# Virtio PCI device

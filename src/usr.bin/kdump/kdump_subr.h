@@ -1,4 +1,4 @@
-/*	$OpenBSD: kdump_subr.h,v 1.12 2013/12/21 07:32:35 guenther Exp $	*/
+/*	$OpenBSD: kdump_subr.h,v 1.16 2014/12/15 01:48:54 guenther Exp $	*/
 /*
  * Copyright(c) 2006 2006 David Kirchner <dpk@dpk.net>
  *
@@ -34,10 +34,12 @@
 	print_or(#flag,orflag); }                  \
 	while (0)
 
-void fcntlcmdname(int, int);
+void fcntlcmdname(int);
 void rtprioname(int);
 void modename(int);
+void doflagsname(int, int);
 void flagsname(int);
+void openflagsname(int);
 void atflagsname(int);
 void accessmodename(int);
 void mmapprotname(int);
@@ -52,6 +54,7 @@ void sockoptname(int);
 void sockdomainname(int);
 void sockipprotoname(int);
 void socktypename(int);
+void sockflagsname(int);
 void sockfamilyname(int);
 void thrcreateflagsname(int);
 void mlockallname(int);
@@ -78,6 +81,7 @@ void sigprocmaskhowname(int);
 void lio_listioname(int);
 void minheritname(int);
 void quotactlname(int);
+void quotactlcmdname(int);
 void ptraceopname(int);
 void sigill_name(int);
 void sigtrap_name(int);
@@ -89,4 +93,5 @@ void sigchld_name(int);
 void ktracefacname(int);
 void itimername(int);
 
-extern int decimal, resolv, fancy;
+extern int decimal, fancy;
+extern int arg1;

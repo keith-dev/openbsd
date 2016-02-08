@@ -1,4 +1,4 @@
-/* $OpenBSD: ip_spd.c,v 1.72 2014/07/22 11:06:10 mpi Exp $ */
+/* $OpenBSD: ip_spd.c,v 1.77 2014/12/19 17:14:40 tedu Exp $ */
 /*
  * The author of this code is Angelos D. Keromytis (angelos@cis.upenn.edu)
  *
@@ -34,17 +34,12 @@
 #include <net/route.h>
 #include <net/netisr.h>
 
-#ifdef INET
 #include <netinet/in.h>
 #include <netinet/ip.h>
 #include <netinet/ip_var.h>
 #include <netinet/in_pcb.h>
-#endif /* INET */
 
 #ifdef INET6
-#ifndef INET
-#include <netinet/in.h>
-#endif
 #endif /* INET6 */
 
 #include <netinet/ip_ipsp.h>
@@ -87,9 +82,9 @@ struct tdb *
 ipsp_spd_lookup(struct mbuf *m, int af, int hlen, int *error, int direction,
     struct tdb *tdbp, struct inpcb *inp, u_int32_t ipsecflowinfo)
 {
-	struct route_enc re0, *re = &re0;
+	struct rtentry *rt;
 	union sockaddr_union sdst, ssrc;
-	struct sockaddr_encap *ddst;
+	struct sockaddr_encap *ddst, dst;
 	struct ipsec_policy *ipo;
 	struct ipsec_ref *dstid = NULL, *srcid = NULL;
 	struct tdb *tdbin = NULL;
@@ -116,15 +111,14 @@ ipsp_spd_lookup(struct mbuf *m, int af, int hlen, int *error, int direction,
 		return NULL;
 	}
 
-	memset(re, 0, sizeof(struct route_enc));
+	memset(&dst, 0, sizeof(dst));
 	memset(&sdst, 0, sizeof(union sockaddr_union));
 	memset(&ssrc, 0, sizeof(union sockaddr_union));
-	ddst = (struct sockaddr_encap *) &re->re_dst;
+	ddst = (struct sockaddr_encap *)&dst;
 	ddst->sen_family = PF_KEY;
 	ddst->sen_len = SENT_LEN;
 
 	switch (af) {
-#ifdef INET
 	case AF_INET:
 		if (hlen < sizeof (struct ip) || m->m_pkthdr.len < hlen) {
 			*error = EINVAL;
@@ -176,7 +170,6 @@ ipsp_spd_lookup(struct mbuf *m, int af, int hlen, int *error, int direction,
 		}
 
 		break;
-#endif /* INET */
 
 #ifdef INET6
 	case AF_INET6:
@@ -240,12 +233,9 @@ ipsp_spd_lookup(struct mbuf *m, int af, int hlen, int *error, int direction,
 		return NULL;
 	}
 
-	/* Set the rdomain that was obtained from the mbuf */
-	re->re_tableid = rdomain;
-
 	/* Actual SPD lookup. */
-	rtalloc((struct route *) re);
-	if (re->re_rt == NULL) {
+	rt = rtalloc((struct sockaddr *)&dst, RT_REPORT|RT_RESOLVE, rdomain);
+	if (rt == NULL) {
 		/*
 		 * Return whatever the socket requirements are, there are no
 		 * system-wide policies.
@@ -256,17 +246,17 @@ ipsp_spd_lookup(struct mbuf *m, int af, int hlen, int *error, int direction,
 	}
 
 	/* Sanity check. */
-	if ((re->re_rt->rt_gateway == NULL) ||
-	    (((struct sockaddr_encap *) re->re_rt->rt_gateway)->sen_type !=
+	if ((rt->rt_gateway == NULL) ||
+	    (((struct sockaddr_encap *)rt->rt_gateway)->sen_type !=
 		SENT_IPSP)) {
-		RTFREE(re->re_rt);
+		rtfree(rt);
 		*error = EHOSTUNREACH;
 		DPRINTF(("ip_spd_lookup: no gateway in SPD entry!"));
 		return NULL;
 	}
 
-	ipo = ((struct sockaddr_encap *) (re->re_rt->rt_gateway))->sen_ipsp;
-	RTFREE(re->re_rt);
+	ipo = ((struct sockaddr_encap *)(rt->rt_gateway))->sen_ipsp;
+	rtfree(rt);
 	if (ipo == NULL) {
 		*error = EHOSTUNREACH;
 		DPRINTF(("ip_spd_lookup: no policy attached to SPD entry!"));
@@ -297,13 +287,11 @@ ipsp_spd_lookup(struct mbuf *m, int af, int hlen, int *error, int direction,
 
 	/* Check for non-specific destination in the policy. */
 	switch (ipo->ipo_dst.sa.sa_family) {
-#ifdef INET
 	case AF_INET:
 		if ((ipo->ipo_dst.sin.sin_addr.s_addr == INADDR_ANY) ||
 		    (ipo->ipo_dst.sin.sin_addr.s_addr == INADDR_BROADCAST))
 			dignore = 1;
 		break;
-#endif /* INET */
 
 #ifdef INET6
 	case AF_INET6:
@@ -317,12 +305,10 @@ ipsp_spd_lookup(struct mbuf *m, int af, int hlen, int *error, int direction,
 
 	/* Likewise for source. */
 	switch (ipo->ipo_src.sa.sa_family) {
-#ifdef INET
 	case AF_INET:
 		if (ipo->ipo_src.sin.sin_addr.s_addr == INADDR_ANY)
 			signore = 1;
 		break;
-#endif /* INET */
 
 #ifdef INET6
 	case AF_INET6:
@@ -687,7 +673,6 @@ ipsec_update_policy(struct inpcb *inp, struct ipsec_policy *ipon, int af,
 
 	switch (af) {
 	case AF_INET:
-#ifdef INET
 		ipon->ipo_addr.sen_type = ipon->ipo_mask.sen_type = SENT_IP4;
 		ipon->ipo_addr.sen_ip_src = inp->inp_laddr;
 		ipon->ipo_addr.sen_ip_dst = inp->inp_faddr;
@@ -707,7 +692,6 @@ ipsec_update_policy(struct inpcb *inp, struct ipsec_policy *ipon, int af,
 		ipon->ipo_dst.sa.sa_len = sizeof(struct sockaddr_in);
 		ipon->ipo_src.sin.sin_addr = inp->inp_laddr;
 		ipon->ipo_dst.sin.sin_addr = inp->inp_faddr;
-#endif /* INET */
 		break;
 
 	case AF_INET6:
@@ -816,7 +800,6 @@ ipsp_acquire_sa(struct ipsec_policy *ipo, union sockaddr_union *gw,
 
 	/* Just copy the right information. */
 	switch (ipo->ipo_addr.sen_type) {
-#ifdef INET
 	case SENT_IP4:
 		ipa->ipa_info.sen_type = ipa->ipa_mask.sen_type = SENT_IP4;
 		ipa->ipa_info.sen_direction = ipo->ipo_addr.sen_direction;
@@ -849,7 +832,6 @@ ipsp_acquire_sa(struct ipsec_policy *ipo, union sockaddr_union *gw,
 			ipa->ipa_mask.sen_dport = ipo->ipo_mask.sen_dport;
 		}
 		break;
-#endif /* INET */
 
 #ifdef INET6
 	case SENT_IP6:

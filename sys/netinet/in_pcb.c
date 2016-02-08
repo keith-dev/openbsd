@@ -1,4 +1,4 @@
-/*	$OpenBSD: in_pcb.c,v 1.158 2014/07/22 11:06:10 mpi Exp $	*/
+/*	$OpenBSD: in_pcb.c,v 1.168 2015/02/10 03:07:56 claudio Exp $	*/
 /*	$NetBSD: in_pcb.c,v 1.25 1996/02/13 23:41:53 christos Exp $	*/
 
 /*
@@ -81,15 +81,16 @@
 #include <sys/pool.h>
 
 #include <net/if.h>
+#include <net/if_var.h>
 #include <net/route.h>
-#include <net/pfvar.h>
 
 #include <netinet/in.h>
 #include <netinet/ip.h>
 #include <netinet/in_pcb.h>
 #include <netinet/in_var.h>
 #include <netinet/ip_var.h>
-#include <dev/rndvar.h>
+
+#include <net/pfvar.h>
 
 #include <sys/mount.h>
 #include <nfs/nfsproto.h>
@@ -121,17 +122,68 @@ int in_pcbresize (struct inpcbtable *, int);
 
 #define	INPCBHASH_LOADFACTOR(_x)	(((_x) * 3) / 4)
 
+struct inpcbhead *in_pcbhash(struct inpcbtable *, int,
+    const struct in_addr *, u_short, const struct in_addr *, u_short);
+struct inpcbhead *in6_pcbhash(struct inpcbtable *, int,
+    const struct in6_addr *, u_short, const struct in6_addr *, u_short);
+struct inpcbhead *in_pcblhash(struct inpcbtable *, int, u_short);
+
+struct inpcbhead *
+in_pcbhash(struct inpcbtable *table, int rdom,
+    const struct in_addr *faddr, u_short fport,
+    const struct in_addr *laddr, u_short lport)
+{
+	SIPHASH_CTX ctx;
+	u_int32_t nrdom = htonl(rdom);
+
+	SipHash24_Init(&ctx, &table->inpt_key);
+	SipHash24_Update(&ctx, &nrdom, sizeof(nrdom));
+	SipHash24_Update(&ctx, faddr, sizeof(*faddr));
+	SipHash24_Update(&ctx, &fport, sizeof(fport));
+	SipHash24_Update(&ctx, laddr, sizeof(*laddr));
+	SipHash24_Update(&ctx, &lport, sizeof(lport));
+
+	return (&table->inpt_hashtbl[SipHash24_End(&ctx) & table->inpt_hash]);
+}
+
 #define	INPCBHASH(table, faddr, fport, laddr, lport, rdom) \
-	&(table)->inpt_hashtbl[(ntohl((faddr)->s_addr) + \
-	ntohs((fport)) + ntohs((lport)) + (rdom)) & (table->inpt_hash)]
+	in_pcbhash(table, rdom, faddr, fport, laddr, lport)
+
+struct inpcbhead *
+in6_pcbhash(struct inpcbtable *table, int rdom,
+    const struct in6_addr *faddr, u_short fport,
+    const struct in6_addr *laddr, u_short lport)
+{
+	SIPHASH_CTX ctx;
+	u_int32_t nrdom = htonl(rdom);
+
+	SipHash24_Init(&ctx, &table->inpt_key);
+	SipHash24_Update(&ctx, &nrdom, sizeof(nrdom));
+	SipHash24_Update(&ctx, faddr, sizeof(*faddr));
+	SipHash24_Update(&ctx, &fport, sizeof(fport));
+	SipHash24_Update(&ctx, laddr, sizeof(*laddr));
+	SipHash24_Update(&ctx, &lport, sizeof(lport));
+
+	return (&table->inpt_hashtbl[SipHash24_End(&ctx) & table->inpt_hash]);
+}
 
 #define	IN6PCBHASH(table, faddr, fport, laddr, lport, rdom) \
-	&(table)->inpt_hashtbl[(ntohl((faddr)->s6_addr32[0] ^ \
-	(faddr)->s6_addr32[3]) + ntohs((fport)) + ntohs((lport)) + (rdom)) & \
-	(table->inpt_hash)]
+	in6_pcbhash(table, rdom, faddr, fport, laddr, lport)
 
-#define	INPCBLHASH(table, lport, rdom) \
-	&(table)->inpt_lhashtbl[(ntohs((lport)) + (rdom)) & table->inpt_lhash]
+struct inpcbhead *
+in_pcblhash(struct inpcbtable *table, int rdom, u_short lport)
+{
+	SIPHASH_CTX ctx;
+	u_int32_t nrdom = htonl(rdom);
+
+	SipHash24_Init(&ctx, &table->inpt_key);
+	SipHash24_Update(&ctx, &nrdom, sizeof(nrdom));
+	SipHash24_Update(&ctx, &lport, sizeof(lport));
+
+	return (&table->inpt_lhashtbl[SipHash24_End(&ctx) & table->inpt_lhash]);
+}
+
+#define	INPCBLHASH(table, lport, rdom) in_pcblhash(table, rdom, lport)
 
 void
 in_pcbinit(struct inpcbtable *table, int hashsize)
@@ -148,6 +200,7 @@ in_pcbinit(struct inpcbtable *table, int hashsize)
 		panic("in_pcbinit: hashinit failed for lport");
 	table->inpt_lastport = 0;
 	table->inpt_count = 0;
+	arc4random_buf(&table->inpt_key, sizeof(table->inpt_key));
 }
 
 /*
@@ -176,6 +229,7 @@ in_pcballoc(struct socket *so, struct inpcbtable *table)
 {
 	struct inpcb *inp;
 	int s;
+	struct inpcbhead *head;
 
 	splsoftassert(IPL_SOFTNET);
 
@@ -199,11 +253,11 @@ in_pcballoc(struct socket *so, struct inpcbtable *table)
 	    table->inpt_count++ > INPCBHASH_LOADFACTOR(table->inpt_hash))
 		(void)in_pcbresize(table, (table->inpt_hash + 1) * 2);
 	TAILQ_INSERT_HEAD(&table->inpt_queue, inp, inp_queue);
-	LIST_INSERT_HEAD(INPCBLHASH(table, inp->inp_lport,
-	    inp->inp_rtableid), inp, inp_lhash);
-	LIST_INSERT_HEAD(INPCBHASH(table, &inp->inp_faddr, inp->inp_fport,
-	    &inp->inp_laddr, inp->inp_lport, rtable_l2(inp->inp_rtableid)),
-	    inp, inp_hash);
+	head = INPCBLHASH(table, inp->inp_lport, inp->inp_rtableid);
+	LIST_INSERT_HEAD(head, inp, inp_lhash);
+	head = INPCBHASH(table, &inp->inp_faddr, inp->inp_fport,
+	    &inp->inp_laddr, inp->inp_lport, rtable_l2(inp->inp_rtableid));
+	LIST_INSERT_HEAD(head, inp, inp_hash);
 	splx(s);
 	so->so_pcb = inp;
 	inp->inp_hops = -1;
@@ -245,7 +299,7 @@ in_pcbbind(struct inpcb *inp, struct mbuf *nam, struct proc *p)
 		wild = INPLOOKUP_WILDCARD;
 	if (nam) {
 		sin = mtod(nam, struct sockaddr_in *);
-		if (nam->m_len != sizeof (*sin))
+		if (nam->m_len != sizeof(*sin))
 			return (EINVAL);
 #ifdef notdef
 		/*
@@ -268,6 +322,9 @@ in_pcbbind(struct inpcb *inp, struct mbuf *nam, struct proc *p)
 				reuseport = SO_REUSEADDR|SO_REUSEPORT;
 		} else if (sin->sin_addr.s_addr != INADDR_ANY) {
 			sin->sin_port = 0;		/* yech... */
+			/* ... must also clear the zeropad in the sockaddr */
+			memset(sin->sin_zero, 0, sizeof(sin->sin_zero));
+
 			if (!((so->so_options & SO_BINDANY) ||
 			    (sin->sin_addr.s_addr == INADDR_BROADCAST &&
 			     so->so_type == SOCK_DGRAM))) {
@@ -394,7 +451,7 @@ in_pcbconnect(struct inpcb *inp, struct mbuf *nam)
 		panic("IPv6 pcb passed into in_pcbconnect");
 #endif /* INET6 */
 
-	if (nam->m_len != sizeof (*sin))
+	if (nam->m_len != sizeof(*sin))
 		return (EINVAL);
 	if (sin->sin_family != AF_INET)
 		return (EAFNOSUPPORT);
@@ -519,9 +576,9 @@ in_setsockaddr(struct inpcb *inp, struct mbuf *nam)
 {
 	struct sockaddr_in *sin;
 
-	nam->m_len = sizeof (*sin);
+	nam->m_len = sizeof(*sin);
 	sin = mtod(nam, struct sockaddr_in *);
-	bzero((caddr_t)sin, sizeof (*sin));
+	memset(sin, 0, sizeof(*sin));
 	sin->sin_family = AF_INET;
 	sin->sin_len = sizeof(*sin);
 	sin->sin_port = inp->inp_lport;
@@ -540,9 +597,9 @@ in_setpeeraddr(struct inpcb *inp, struct mbuf *nam)
 	}
 #endif /* INET6 */
 
-	nam->m_len = sizeof (*sin);
+	nam->m_len = sizeof(*sin);
 	sin = mtod(nam, struct sockaddr_in *);
-	bzero((caddr_t)sin, sizeof (*sin));
+	memset(sin, 0, sizeof(*sin));
 	sin->sin_family = AF_INET;
 	sin->sin_len = sizeof(*sin);
 	sin->sin_port = inp->inp_fport;
@@ -612,7 +669,8 @@ in_losing(struct inpcb *inp)
 
 	if ((rt = inp->inp_route.ro_rt)) {
 		inp->inp_route.ro_rt = 0;
-		bzero((caddr_t)&info, sizeof(info));
+
+		memset(&info, 0, sizeof(info));
 		info.rti_flags = rt->rt_flags;
 		info.rti_info[RTAX_DST] = &inp->inp_route.ro_dst;
 		info.rti_info[RTAX_GATEWAY] = rt->rt_gateway;
@@ -658,9 +716,11 @@ in_pcblookup(struct inpcbtable *table, void *faddrp, u_int fport_arg,
 	u_int16_t fport = fport_arg, lport = lport_arg;
 	struct in_addr faddr = *(struct in_addr *)faddrp;
 	struct in_addr laddr = *(struct in_addr *)laddrp;
+	struct inpcbhead *head;
 
 	rdomain = rtable_l2(rdomain);	/* convert passed rtableid to rdomain */
-	LIST_FOREACH(inp, INPCBLHASH(table, lport, rdomain), inp_lhash) {
+	head = INPCBLHASH(table, lport, rdomain);
+	LIST_FOREACH(inp, head, inp_lhash) {
 		if (rtable_l2(inp->inp_rtableid) != rdomain)
 			continue;
 		if (inp->inp_lport != lport)
@@ -741,7 +801,7 @@ in_pcbrtentry(struct inpcb *inp)
 
 	/* check if route is still valid */
 	if (ro->ro_rt && (ro->ro_rt->rt_flags & RTF_UP) == 0) {
-		RTFREE(ro->ro_rt);
+		rtfree(ro->ro_rt);
 		ro->ro_rt = NULL;
 	}
 
@@ -750,9 +810,9 @@ in_pcbrtentry(struct inpcb *inp)
 	 */
 	if (ro->ro_rt == NULL) {
 #ifdef INET6
-		bzero(ro, sizeof(struct route_in6));
+		memset(ro, 0, sizeof(struct route_in6));
 #else
-		bzero(ro, sizeof(struct route));
+		memset(ro, 0, sizeof(struct route));
 #endif
 
 		switch(sotopf(inp->inp_socket)) {
@@ -764,7 +824,8 @@ in_pcbrtentry(struct inpcb *inp)
 			ro->ro_dst.sa_len = sizeof(struct sockaddr_in6);
 			satosin6(&ro->ro_dst)->sin6_addr = inp->inp_faddr6;
 			ro->ro_tableid = inp->inp_rtableid;
-			rtalloc_mpath(ro, &inp->inp_laddr6.s6_addr32[0]);
+			ro->ro_rt = rtalloc_mpath(&ro->ro_dst,
+			    &inp->inp_laddr6.s6_addr32[0], ro->ro_tableid);
 			break;
 #endif /* INET6 */
 		case PF_INET:
@@ -774,7 +835,8 @@ in_pcbrtentry(struct inpcb *inp)
 			ro->ro_dst.sa_len = sizeof(struct sockaddr_in);
 			satosin(&ro->ro_dst)->sin_addr = inp->inp_faddr;
 			ro->ro_tableid = inp->inp_rtableid;
-			rtalloc_mpath(ro, &inp->inp_laddr.s_addr);
+			ro->ro_rt = rtalloc_mpath(&ro->ro_dst,
+			    &inp->inp_laddr.s_addr, ro->ro_tableid);
 			break;
 		}
 	}
@@ -796,10 +858,11 @@ in_selectsrc(struct in_addr **insrc, struct sockaddr_in *sin,
 	struct in_ifaddr *ia = NULL;
 
 	/*
-	 * If the source address is not specified but the socket(if any)
-	 * is already bound, use the bound address.
+	 * If the socket(if any) is already bound, use that bound address
+	 * unless it is INADDR_ANY or INADDR_BROADCAST.
 	 */
-	if (laddr && laddr->s_addr != INADDR_ANY) {
+	if (laddr && laddr->s_addr != INADDR_ANY &&
+	    laddr->s_addr != INADDR_BROADCAST) {
 		*insrc = laddr;
 		return (0);
 	}
@@ -812,7 +875,7 @@ in_selectsrc(struct in_addr **insrc, struct sockaddr_in *sin,
 	if (IN_MULTICAST(sin->sin_addr.s_addr) && mopts != NULL) {
 		struct ifnet *ifp;
 
-		ifp = mopts->imo_multicast_ifp;
+		ifp = if_get(mopts->imo_ifidx);
 		if (ifp != NULL) {
 			if (ifp->if_rdomain == rtable_l2(rtableid))
 				IFP_TO_IA(ifp, ia);
@@ -829,7 +892,7 @@ in_selectsrc(struct in_addr **insrc, struct sockaddr_in *sin,
 	 */
 	if (ro->ro_rt && ((ro->ro_rt->rt_flags & RTF_UP) == 0 ||
 	    (satosin(&ro->ro_dst)->sin_addr.s_addr != sin->sin_addr.s_addr))) {
-		RTFREE(ro->ro_rt);
+		rtfree(ro->ro_rt);
 		ro->ro_rt = NULL;
 	}
 	if ((ro->ro_rt == NULL || ro->ro_rt->rt_ifp == NULL)) {
@@ -838,14 +901,14 @@ in_selectsrc(struct in_addr **insrc, struct sockaddr_in *sin,
 		ro->ro_dst.sa_len = sizeof(struct sockaddr_in);
 		satosin(&ro->ro_dst)->sin_addr = sin->sin_addr;
 		ro->ro_tableid = rtableid;
-		rtalloc_mpath(ro, NULL);
+		ro->ro_rt = rtalloc_mpath(&ro->ro_dst, NULL, ro->ro_tableid);
 
 		/*
-		 * It is important to bzero out the rest of the
+		 * It is important to zero out the rest of the
 		 * struct sockaddr_in when mixing v6 & v4!
 		 */
 		sin2 = (struct sockaddr_in *)&ro->ro_dst;
-		bzero(sin2->sin_zero, sizeof(sin2->sin_zero));
+		memset(sin2->sin_zero, 0, sizeof(sin2->sin_zero));
 	}
 	/*
 	 * If we found a route, use the address
@@ -866,25 +929,24 @@ in_pcbrehash(struct inpcb *inp)
 {
 	struct inpcbtable *table = inp->inp_table;
 	int s;
+	struct inpcbhead *head;
 
 	s = splnet();
 	LIST_REMOVE(inp, inp_lhash);
-	LIST_INSERT_HEAD(INPCBLHASH(table, inp->inp_lport, inp->inp_rtableid),
-	    inp, inp_lhash);
+	head = INPCBLHASH(table, inp->inp_lport, inp->inp_rtableid);
+	LIST_INSERT_HEAD(head, inp, inp_lhash);
 	LIST_REMOVE(inp, inp_hash);
 #ifdef INET6
-	if (inp->inp_flags & INP_IPV6) {
-		LIST_INSERT_HEAD(IN6PCBHASH(table, &inp->inp_faddr6,
-		    inp->inp_fport, &inp->inp_laddr6, inp->inp_lport,
-		    rtable_l2(inp->inp_rtableid)), inp, inp_hash);
-	} else {
+	if (inp->inp_flags & INP_IPV6)
+		head = IN6PCBHASH(table, &inp->inp_faddr6, inp->inp_fport,
+		    &inp->inp_laddr6, inp->inp_lport,
+		    rtable_l2(inp->inp_rtableid));
+	else
 #endif /* INET6 */
-		LIST_INSERT_HEAD(INPCBHASH(table, &inp->inp_faddr,
-		    inp->inp_fport, &inp->inp_laddr, inp->inp_lport,
-		    rtable_l2(inp->inp_rtableid)), inp, inp_hash);
-#ifdef INET6
-	}
-#endif /* INET6 */
+		head = INPCBHASH(table, &inp->inp_faddr, inp->inp_fport,
+		    &inp->inp_laddr, inp->inp_lport,
+		    rtable_l2(inp->inp_rtableid));
+	LIST_INSERT_HEAD(head, inp, inp_hash);
 	splx(s);
 }
 
@@ -911,6 +973,7 @@ in_pcbresize(struct inpcbtable *table, int hashsize)
 	table->inpt_lhashtbl = nlhashtbl;
 	table->inpt_hash = nhash;
 	table->inpt_lhash = nlhash;
+	arc4random_buf(&table->inpt_key, sizeof(table->inpt_key));
 
 	TAILQ_FOREACH_SAFE(inp0, &table->inpt_queue, inp_queue, inp1) {
 		in_pcbrehash(inp0);

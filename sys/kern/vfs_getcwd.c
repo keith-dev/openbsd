@@ -1,4 +1,4 @@
-/* $OpenBSD: vfs_getcwd.c,v 1.22 2014/07/12 18:43:32 tedu Exp $ */
+/* $OpenBSD: vfs_getcwd.c,v 1.24 2014/12/16 18:30:04 tedu Exp $ */
 /* $NetBSD: vfs_getcwd.c,v 1.3.2.3 1999/07/11 10:24:09 sommerfeld Exp $ */
 
 /*
@@ -37,6 +37,7 @@
 #include <sys/kernel.h>
 #include <sys/file.h>
 #include <sys/stat.h>
+#include <sys/lock.h>
 #include <sys/vnode.h>
 #include <sys/mount.h>
 #include <sys/proc.h>
@@ -192,7 +193,7 @@ out:
 	vrele(lvp);
 	*lvpp = NULL;
 
-	free(dirbuf, M_TEMP, 0);
+	free(dirbuf, M_TEMP, dirbuflen);
 
 	return (error);
 }
@@ -420,7 +421,7 @@ sys___getcwd(struct proc *p, void *v, register_t *retval)
 	error = copyout(bp, SCARG(uap, buf), lenused);
 
 out:
-	free(path, M_TEMP, 0);
+	free(path, M_TEMP, len);
 
 	return (error);
 }

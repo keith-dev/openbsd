@@ -1,4 +1,4 @@
-/*	$OpenBSD: av530_machdep.c,v 1.12 2013/10/23 10:07:14 miod Exp $	*/
+/*	$OpenBSD: av530_machdep.c,v 1.14 2014/12/16 21:29:05 miod Exp $	*/
 /*
  * Copyright (c) 2006, 2007, 2010 Miodrag Vallat.
  *
@@ -59,9 +59,9 @@ void	av530_ipi_handler(struct trapframe *);
 
 const struct pmap_table
 av530_ptable[] = {
-	{ AV530_PROM,	AV530_PROM_SIZE,	UVM_PROT_RW,	CACHE_INH },
+	{ AV530_PROM,	AV530_PROM_SIZE,	PROT_READ | PROT_WRITE, CACHE_INH },
 #if 0	/* mapped by the hardcoded BATC entries */
-	{ AV530_UTILITY,AV530_UTILITY_SIZE,	UVM_PROT_RW,	CACHE_INH },
+	{ AV530_UTILITY,AV530_UTILITY_SIZE,	PROT_READ | PROT_WRITE, CACHE_INH },
 #endif
 	{ 0, (vsize_t)-1, 0, 0 }
 };
@@ -570,6 +570,9 @@ av530_intr(struct trapframe *eframe)
 #ifdef DIAGNOSTIC
 	static int problems = 0;
 #endif
+#ifdef MULTIPROCESSOR
+	int need_lock;
+#endif
 
 	cur_mask = ISR_GET_CURRENT_MASK(cpu);
 	cur_exmask = EXISR_GET_CURRENT_MASK(cpu);
@@ -611,11 +614,6 @@ av530_intr(struct trapframe *eframe)
 		if (cur_mask == 0 && cur_exmask == 0)
 			goto out;
 	}
-#endif
-
-#ifdef MULTIPROCESSOR
-	if (old_spl < IPL_SCHED)
-		__mp_lock(&kernel_lock);
 #endif
 
 	/*
@@ -706,10 +704,20 @@ av530_intr(struct trapframe *eframe)
 			 */
 			ret = 0;
 			SLIST_FOREACH(intr, list, ih_link) {
+#ifdef MULTIPROCESSOR
+				need_lock = intr->ih_ipl < IPL_SCHED &&
+				    intr->ih_ipl != IPL_CLOCK;
+				if (need_lock)
+					__mp_lock(&kernel_lock);
+#endif
 				if (ISSET(intr->ih_flags, INTR_WANTFRAME))
 					ret = (*intr->ih_fn)((void *)eframe);
 				else
 					ret = (*intr->ih_fn)(intr->ih_arg);
+#ifdef MULTIPROCESSOR
+				if (need_lock)
+					__mp_unlock(&kernel_lock);
+#endif
 				if (ret != 0) {
 					intr->ih_count.ec_count++;
 					break;
@@ -758,11 +766,6 @@ av530_intr(struct trapframe *eframe)
 			panic("%s: broken interrupt behaviour", __func__);
 	} else
 		problems = 0;
-#endif
-
-#ifdef MULTIPROCESSOR
-	if (old_spl < IPL_SCHED)
-		__mp_unlock(&kernel_lock);
 #endif
 
 out:

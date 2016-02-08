@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_ipw.c,v 1.101 2014/07/22 13:12:11 mpi Exp $	*/
+/*	$OpenBSD: if_ipw.c,v 1.107 2015/02/10 23:25:46 mpi Exp $	*/
 
 /*-
  * Copyright (c) 2004-2008
@@ -25,16 +25,16 @@
 
 #include <sys/param.h>
 #include <sys/sockio.h>
-#include <sys/workq.h>
+#include <sys/task.h>
 #include <sys/mbuf.h>
 #include <sys/kernel.h>
 #include <sys/socket.h>
 #include <sys/systm.h>
 #include <sys/conf.h>
 #include <sys/device.h>
+#include <sys/endian.h>
 
 #include <machine/bus.h>
-#include <machine/endian.h>
 #include <machine/intr.h>
 
 #include <dev/pci/pcireg.h>
@@ -96,8 +96,8 @@ int		ipw_reset(struct ipw_softc *);
 int		ipw_load_ucode(struct ipw_softc *, u_char *, int);
 int		ipw_load_firmware(struct ipw_softc *, u_char *, int);
 int		ipw_read_firmware(struct ipw_softc *, struct ipw_firmware *);
-void		ipw_scan(void *, void *);
-void		ipw_auth_and_assoc(void *, void *);
+void		ipw_scan(void *);
+void		ipw_auth_and_assoc(void *);
 int		ipw_config(struct ipw_softc *);
 int		ipw_init(struct ifnet *);
 void		ipw_stop(struct ifnet *, int);
@@ -204,6 +204,9 @@ ipw_attach(struct device *parent, struct device *self, void *aux)
 		return;
 	}
 	printf(": %s", intrstr);
+
+	task_set(&sc->sc_scantask, ipw_scan, sc);
+	task_set(&sc->sc_authandassoctask, ipw_auth_and_assoc, sc);
 
 	if (ipw_reset(sc) != 0) {
 		printf(": could not reset adapter\n");
@@ -606,6 +609,9 @@ ipw_release(struct ipw_softc *sc)
 			bus_dmamap_destroy(sc->sc_dmat, sbuf->map);
 		}
 	}
+
+	task_del(systq, &sc->sc_scantask);
+	task_del(systq, &sc->sc_authandassoctask);
 }
 
 int
@@ -676,19 +682,14 @@ int
 ipw_newstate(struct ieee80211com *ic, enum ieee80211_state nstate, int arg)
 {
 	struct ipw_softc *sc = ic->ic_softc;
-	int error;
 
 	switch (nstate) {
 	case IEEE80211_S_SCAN:
-		error = workq_add_task(NULL, 0, ipw_scan, sc, NULL);
-		if (error != 0)
-			return error;
+		task_add(systq, &sc->sc_scantask);
 		break;
 
 	case IEEE80211_S_AUTH:
-		error = workq_add_task(NULL, 0, ipw_auth_and_assoc, sc, NULL);
-		if (error != 0)
-			return error;
+		task_add(systq, &sc->sc_authandassoctask);
 		break;
 
 	case IEEE80211_S_RUN:
@@ -878,7 +879,6 @@ ipw_data_intr(struct ipw_softc *sc, struct ipw_status *status,
 	sbd->bd->physaddr = htole32(sbuf->map->dm_segs[0].ds_addr);
 
 	/* finalize mbuf */
-	m->m_pkthdr.rcvif = ifp;
 	m->m_pkthdr.len = m->m_len = letoh32(status->len);
 
 #if NBPFILTER > 0
@@ -1394,10 +1394,8 @@ ipw_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 	case SIOCSIFADDR:
 		ifa = (struct ifaddr *)data;
 		ifp->if_flags |= IFF_UP;
-#ifdef INET
 		if (ifa->ifa_addr->sa_family == AF_INET)
 			arp_ifinit(&ic->ic_ac, ifa);
-#endif
 		/* FALLTHROUGH */
 	case SIOCSIFFLAGS:
 		if (ifp->if_flags & IFF_UP) {
@@ -1693,7 +1691,7 @@ fail:	free(fw->data, M_DEVBUF, 0);
 }
 
 void
-ipw_scan(void *arg1, void *arg2)
+ipw_scan(void *arg1)
 {
 	struct ipw_softc *sc = arg1;
 	struct ifnet *ifp = &sc->sc_ic.ic_if;
@@ -1740,7 +1738,7 @@ fail:
 }
 
 void
-ipw_auth_and_assoc(void *arg1, void *arg2)
+ipw_auth_and_assoc(void *arg1)
 {
 	struct ipw_softc *sc = arg1;
 	struct ieee80211com *ic = &sc->sc_ic;

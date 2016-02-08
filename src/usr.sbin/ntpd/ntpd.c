@@ -1,4 +1,4 @@
-/*	$OpenBSD: ntpd.c,v 1.79 2014/02/10 09:12:34 dtucker Exp $ */
+/*	$OpenBSD: ntpd.c,v 1.92 2015/02/11 03:16:57 reyk Exp $ */
 
 /*
  * Copyright (c) 2003, 2004 Henning Brauer <henning@openbsd.org>
@@ -30,6 +30,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 #include <unistd.h>
 #include <err.h>
 
@@ -57,7 +58,6 @@ volatile sig_atomic_t	 quit = 0;
 volatile sig_atomic_t	 reconfig = 0;
 volatile sig_atomic_t	 sigchld = 0;
 struct imsgbuf		*ibuf;
-int			 debugsyslog = 0;
 int			 timeout = INFTIM;
 
 const char		*showopt;
@@ -89,7 +89,8 @@ usage(void)
 	extern char *__progname;
 
 	if (strcmp(__progname, "ntpctl") == 0)
-		fprintf(stderr, "usage: ntpctl [-s all | peers | Sensors | status]\n");
+		fprintf(stderr,
+		    "usage: ntpctl [-s all | peers | Sensors | status]\n");
 	else
 		fprintf(stderr, "usage: %s [-dnSsv] [-f file]\n",
 		    __progname);
@@ -109,10 +110,10 @@ main(int argc, char *argv[])
 	int			 fd_ctl, ch, nfds;
 	int			 pipe_chld[2];
 	struct passwd		*pw;
-	extern char 		*__progname;
+	extern char		*__progname;
 
 	if (strcmp(__progname, "ntpctl") == 0) {
-		ctl_main (argc, argv);
+		ctl_main(argc, argv);
 		/* NOTREACHED */
 	}
 
@@ -126,6 +127,7 @@ main(int argc, char *argv[])
 		switch (ch) {
 		case 'd':
 			lconf.debug = 1;
+			log_verbose(1);
 			break;
 		case 'f':
 			conffile = optarg;
@@ -140,7 +142,7 @@ main(int argc, char *argv[])
 			lconf.settime = 0;
 			break;
 		case 'v':
-			debugsyslog = 1;
+			log_verbose(1);
 			break;
 		default:
 			usage();
@@ -220,7 +222,7 @@ main(int argc, char *argv[])
 			lconf.settime = 0;
 			timeout = INFTIM;
 			log_init(lconf.debug);
-			log_debug("no reply received in time, skipping initial "
+			log_warnx("no reply received in time, skipping initial "
 			    "time setting");
 			if (!lconf.debug)
 				if (daemon(1, 0))
@@ -293,11 +295,8 @@ int
 dispatch_imsg(struct ntpd_conf *lconf)
 {
 	struct imsg		 imsg;
-	int			 n, cnt;
+	int			 n;
 	double			 d;
-	char			*name;
-	struct ntp_addr		*h, *hn;
-	struct ibuf		*buf;
 
 	if ((n = imsg_read(ibuf)) == -1)
 		return (-1);
@@ -343,27 +342,6 @@ dispatch_imsg(struct ntpd_conf *lconf)
 					fatal("daemon");
 			lconf->settime = 0;
 			timeout = INFTIM;
-			break;
-		case IMSG_HOST_DNS:
-			name = imsg.data;
-			if (imsg.hdr.len < 1 + IMSG_HEADER_SIZE)
-				fatalx("invalid IMSG_HOST_DNS received");
-			imsg.hdr.len -= 1 + IMSG_HEADER_SIZE;
-			if (name[imsg.hdr.len] != '\0' ||
-			    strlen(name) != imsg.hdr.len)
-				fatalx("invalid IMSG_HOST_DNS received");
-			if ((cnt = host_dns(name, &hn)) == -1)
-				break;
-			buf = imsg_create(ibuf, IMSG_HOST_DNS,
-			    imsg.hdr.peerid, 0,
-			    cnt * sizeof(struct sockaddr_storage));
-			if (buf == NULL)
-				break;
-			if (cnt > 0)
-				for (h = hn; h != NULL; h = h->next)
-					imsg_add(buf, &h->ss, sizeof(h->ss));
-
-			imsg_close(ibuf, buf);
 			break;
 		default:
 			break;
@@ -486,9 +464,10 @@ readfreq(void)
 	if (adjfreq(NULL, &current) == -1)
 		log_warn("adjfreq failed");
 	else if (current == 0) {
-		if (fscanf(fp, "%le", &d) == 1)
+		if (fscanf(fp, "%lf", &d) == 1) {
+			d /= 1e6;	/* scale from ppm */
 			ntpd_adjfreq(d, 0);
-		else
+		} else
 			log_warnx("can't read %s", DRIFTFILE);
 	}
 	fclose(fp);
@@ -510,7 +489,7 @@ writefreq(double d)
 		return 0;
 	}
 
-	fprintf(fp, "%e\n", d);
+	fprintf(fp, "%.3f\n", d * 1e6);		/* scale to ppm */
 	r = ferror(fp);
 	if (fclose(fp) != 0 || r != 0) {
 		if (warnonce) {
@@ -526,7 +505,7 @@ writefreq(double d)
 void
 ctl_main(int argc, char *argv[])
 {
-	struct sockaddr_un	 sun;
+	struct sockaddr_un	 sa;
 	struct imsg		 imsg;
 	struct imsgbuf		*ibuf_ctl;
 	int			 fd, n, done, ch, action;
@@ -569,22 +548,21 @@ ctl_main(int argc, char *argv[])
 		case 'a':
 			action = CTL_SHOW_ALL;
 			break;
-		default:
-			usage();
-			/* NOTREACHED */
 		}
-	} else
+	}
+	if (action == -1)
 		usage();
+		/* NOTREACHED */
 
 	if ((fd = socket(AF_UNIX, SOCK_STREAM, 0)) == -1)
 		err(1, "ntpctl: socket");
 
-	bzero(&sun, sizeof(sun));
-	sun.sun_family = AF_UNIX;
-	if (strlcpy(sun.sun_path, sockname, sizeof(sun.sun_path)) >=
-	    sizeof(sun.sun_path))
+	bzero(&sa, sizeof(sa));
+	sa.sun_family = AF_UNIX;
+	if (strlcpy(sa.sun_path, sockname, sizeof(sa.sun_path)) >=
+	    sizeof(sa.sun_path))
 		errx(1, "ctl socket name too long");
-	if (connect(fd, (struct sockaddr *)&sun, sizeof(sun)) == -1)
+	if (connect(fd, (struct sockaddr *)&sa, sizeof(sa)) == -1)
 		err(1, "connect: %s", sockname);
 
 	if ((ibuf_ctl = malloc(sizeof(struct imsgbuf))) == NULL)
@@ -678,7 +656,7 @@ ctl_main(int argc, char *argv[])
 	}
 	close(fd);
 	free(ibuf_ctl);
-	exit (0);
+	exit(0);
 }
 
 const char *
@@ -701,6 +679,7 @@ show_status_msg(struct imsg *imsg)
 {
 	struct ctl_show_status	*cstatus;
 	double			 clock_offset;
+	struct timeval		 tv;
 
 	if (imsg->hdr.len != IMSG_HEADER_SIZE + sizeof(struct ctl_show_status))
 		fatalx("invalid IMSG_CTL_SHOW_STATUS received");
@@ -714,6 +693,18 @@ show_status_msg(struct imsg *imsg)
 	if (cstatus->sensorcnt > 0)
 		printf("%d/%d sensors valid, ",
 		    cstatus->valid_sensors, cstatus->sensorcnt);
+
+	if (cstatus->constraint_median) {
+		tv.tv_sec = cstatus->constraint_median +
+		    (getmonotime() - cstatus->constraint_last);
+		tv.tv_usec = 0;
+		d_to_tv(gettime_from_timeval(&tv) - gettime(), &tv);
+		printf("constraint offset %llds", (long long)tv.tv_sec);
+		if (cstatus->constraint_errors)
+			printf(" (%d errors)",
+			    cstatus->constraint_errors);
+		printf(", ");
+	}
 
 	if (cstatus->peercnt + cstatus->sensorcnt == 0)
 		printf("no peers and no sensors configured\n");
@@ -768,7 +759,7 @@ show_peer_msg(struct imsg *imsg, int calledfromshowall)
 	if (cpeer->stratum > 0)
 		snprintf(stratum, sizeof(stratum), "%2u", cpeer->stratum);
 	else
-		strlcpy (stratum, " -", sizeof (stratum));
+		strlcpy(stratum, " -", sizeof (stratum));
 
 	printf("%s\n %1s %2u %2u %2s %4llds %4llds",
 	    cpeer->peer_desc, cpeer->syncedto == 1 ? "*" : " ",

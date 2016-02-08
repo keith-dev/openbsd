@@ -1,4 +1,4 @@
-/*	$OpenBSD: esm.c,v 1.55 2014/07/12 18:44:41 tedu Exp $ */
+/*	$OpenBSD: esm.c,v 1.57 2014/12/10 12:27:56 mikeb Exp $ */
 
 /*
  * Copyright (c) 2005 Jordan Hargrave <jordan@openbsd.org>
@@ -23,7 +23,6 @@
 #include <sys/kernel.h>
 #include <sys/malloc.h>
 #include <sys/timeout.h>
-#include <sys/proc.h>
 #include <sys/queue.h>
 #include <sys/sensors.h>
 
@@ -46,6 +45,7 @@ int	esmdebug = 3;
 
 int		esm_match(struct device *, void *, void *);
 void		esm_attach(struct device *, struct device *, void *);
+int		esm_activate(struct device *, int);
 
 enum esm_sensor_type {
 	ESM_S_UNKNOWN, /* XXX */
@@ -125,7 +125,8 @@ struct esm_softc {
 };
 
 struct cfattach esm_ca = {
-	sizeof(struct esm_softc), esm_match, esm_attach
+	sizeof(struct esm_softc), esm_match, esm_attach,
+	NULL, esm_activate
 };
 
 struct cfdriver esm_cd = {
@@ -272,6 +273,18 @@ esm_attach(struct device *parent, struct device *self, void *aux)
 		timeout_set(&sc->sc_timeout, esm_refresh, sc);
 		timeout_add_sec(&sc->sc_timeout, 1);
 	}
+}
+
+int
+esm_activate(struct device *self, int act)
+{
+	switch (act) {
+	case DVACT_POWERDOWN:
+		wdog_shutdown(self);
+		break;
+	}
+
+	return (0);
 }
 
 int

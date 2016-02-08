@@ -1,4 +1,4 @@
-/* $OpenBSD: cmd-queue.c,v 1.16 2014/04/17 07:55:43 nicm Exp $ */
+/* $OpenBSD: cmd-queue.c,v 1.22 2015/02/12 09:56:19 nicm Exp $ */
 
 /*
  * Copyright (c) 2013 Nicholas Marriott <nicm@users.sourceforge.net>
@@ -57,7 +57,7 @@ cmdq_free(struct cmd_q *cmdq)
 }
 
 /* Show message from command. */
-void printflike2
+void
 cmdq_print(struct cmd_q *cmdq, const char *fmt, ...)
 {
 	struct client	*c = cmdq->client;
@@ -87,23 +87,22 @@ cmdq_print(struct cmd_q *cmdq, const char *fmt, ...)
 }
 
 /* Show error from command. */
-void printflike2
+void
 cmdq_error(struct cmd_q *cmdq, const char *fmt, ...)
 {
 	struct client	*c = cmdq->client;
 	struct cmd	*cmd = cmdq->cmd;
 	va_list		 ap;
-	char		*msg, *cause;
+	char		*msg;
 	size_t		 msglen;
 
 	va_start(ap, fmt);
 	msglen = xvasprintf(&msg, fmt, ap);
 	va_end(ap);
 
-	if (c == NULL) {
-		xasprintf(&cause, "%s:%u: %s", cmd->file, cmd->line, msg);
-		ARRAY_ADD(&cfg_causes, cause);
-	} else if (c->session == NULL || (c->flags & CLIENT_CONTROL)) {
+	if (c == NULL)
+		cfg_add_cause("%s:%u: %s", cmd->file, cmd->line, msg);
+	else if (c->session == NULL || (c->flags & CLIENT_CONTROL)) {
 		evbuffer_add(c->stderr_data, msg, msglen);
 		evbuffer_add(c->stderr_data, "\n", 1);
 
@@ -118,20 +117,17 @@ cmdq_error(struct cmd_q *cmdq, const char *fmt, ...)
 }
 
 /* Print a guard line. */
-int
+void
 cmdq_guard(struct cmd_q *cmdq, const char *guard, int flags)
 {
 	struct client	*c = cmdq->client;
 
-	if (c == NULL)
-		return 0;
-	if (!(c->flags & CLIENT_CONTROL))
-		return 0;
+	if (c == NULL || !(c->flags & CLIENT_CONTROL))
+		return;
 
 	evbuffer_add_printf(c->stdout_data, "%%%s %ld %u %d\n", guard,
 	    (long) cmdq->time, cmdq->number, flags);
 	server_push_stdout(c);
-	return 1;
 }
 
 /* Add command list to queue and begin processing if needed. */
@@ -164,9 +160,10 @@ cmdq_continue(struct cmd_q *cmdq)
 {
 	struct cmd_q_item	*next;
 	enum cmd_retval		 retval;
-	int			 empty, guard, flags;
+	int			 empty, flags;
 	char			 s[1024];
 
+	cmdq->references++;
 	notify_disable();
 
 	empty = TAILQ_EMPTY(&cmdq->queue);
@@ -180,8 +177,6 @@ cmdq_continue(struct cmd_q *cmdq)
 		cmdq->cmd = TAILQ_NEXT(cmdq->cmd, qentry);
 
 	do {
-		next = TAILQ_NEXT(cmdq->item, qentry);
-
 		while (cmdq->cmd != NULL) {
 			cmd_print(cmdq->cmd, s, sizeof s);
 			log_debug("cmdq %p: %s (client %d)", cmdq, s,
@@ -191,16 +186,14 @@ cmdq_continue(struct cmd_q *cmdq)
 			cmdq->number++;
 
 			flags = !!(cmdq->cmd->flags & CMD_CONTROL);
-			guard = cmdq_guard(cmdq, "begin", flags);
+			cmdq_guard(cmdq, "begin", flags);
 
 			retval = cmdq->cmd->entry->exec(cmdq->cmd, cmdq);
 
-			if (guard) {
-				if (retval == CMD_RETURN_ERROR)
-					cmdq_guard(cmdq, "error", flags);
-				else
-					cmdq_guard(cmdq, "end", flags);
-			}
+			if (retval == CMD_RETURN_ERROR)
+				cmdq_guard(cmdq, "error", flags);
+			else
+				cmdq_guard(cmdq, "end", flags);
 
 			if (retval == CMD_RETURN_ERROR)
 				break;
@@ -213,6 +206,7 @@ cmdq_continue(struct cmd_q *cmdq)
 
 			cmdq->cmd = TAILQ_NEXT(cmdq->cmd, qentry);
 		}
+		next = TAILQ_NEXT(cmdq->item, qentry);
 
 		TAILQ_REMOVE(&cmdq->queue, cmdq->item, qentry);
 		cmd_list_free(cmdq->item->cmdlist);
@@ -227,11 +221,13 @@ empty:
 	if (cmdq->client_exit > 0)
 		cmdq->client->flags |= CLIENT_EXIT;
 	if (cmdq->emptyfn != NULL)
-		cmdq->emptyfn(cmdq); /* may free cmdq */
+		cmdq->emptyfn(cmdq);
 	empty = 1;
 
 out:
 	notify_enable();
+	cmdq_free(cmdq);
+
 	return (empty);
 }
 

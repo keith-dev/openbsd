@@ -1,4 +1,4 @@
-/*	$OpenBSD: pucdata.c,v 1.92 2014/02/02 19:25:41 miod Exp $	*/
+/*	$OpenBSD: pucdata.c,v 1.95 2014/12/07 03:59:25 deraadt Exp $	*/
 /*	$NetBSD: pucdata.c,v 1.6 1999/07/03 05:55:23 cgd Exp $	*/
 
 /*
@@ -55,8 +55,36 @@ const struct puc_device_description puc_devs[] = {
 		{ PUC_COM_POW2(0), 0x10, 0x0000 },
 	    },
 	},
-	{	/* Series KT */
+	{	/* 7 Series KT */
 	    {	PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_7SERIES_KT, 0x0000, 0x0000 },
+	    {	0xffff, 0xffff,					0x0000, 0x0000 },
+	    {
+		{ PUC_COM_POW2(0), 0x10, 0x0000 },
+	    },
+	},
+	{	/* 8 Series KT */
+	    {	PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_8SERIES_KT, 0x0000, 0x0000 },
+	    {	0xffff, 0xffff,					0x0000, 0x0000 },
+	    {
+		{ PUC_COM_POW2(0), 0x10, 0x0000 },
+	    },
+	},
+	{	/* 8 Series LP KT */
+	    {	PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_8SERIES_LP_KT, 0x0000, 0x0000 },
+	    {	0xffff, 0xffff,					0x0000, 0x0000 },
+	    {
+		{ PUC_COM_POW2(0), 0x10, 0x0000 },
+	    },
+	},
+	{	/* 9 Series KT */
+	    {	PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_9SERIES_KT, 0x0000, 0x0000 },
+	    {	0xffff, 0xffff,					0x0000, 0x0000 },
+	    {
+		{ PUC_COM_POW2(0), 0x10, 0x0000 },
+	    },
+	},
+	{	/* 9 Series LP KT */
+	    {	PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_9SERIES_LP_KT, 0x0000, 0x0000 },
 	    {	0xffff, 0xffff,					0x0000, 0x0000 },
 	    {
 		{ PUC_COM_POW2(0), 0x10, 0x0000 },
@@ -141,13 +169,6 @@ const struct puc_device_description puc_devs[] = {
 	},
 	{	/* 3400 KT */
 	    {	PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_3400_KT, 0x0000, 0x0000 },
-	    {	0xffff, 0xffff,					0x0000, 0x0000 },
-	    {
-		{ PUC_COM_POW2(0), 0x10, 0x0000 },
-	    },
-	},
-	{	/* 8 Series KT */
-	    {	PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_8SERIES_KT, 0x0000, 0x0000 },
 	    {	0xffff, 0xffff,					0x0000, 0x0000 },
 	    {
 		{ PUC_COM_POW2(0), 0x10, 0x0000 },
@@ -2051,12 +2072,36 @@ const struct puc_device_description puc_devs[] = {
 		{ PUC_COM_POW2(0), 0x10, 0x0000 },
 	    },
 	},
+	{   /* "WinChipHead CH351 (2S)", */
+	    {	PCI_VENDOR_WCH2, PCI_PRODUCT_WCH2_CH351,	0, 0	},
+	    {	0xffff,	0xffff,					0, 0	},
+	    {
+		{ PUC_COM_POW2(0), 0x10, 0x0000 },
+		{ PUC_COM_POW2(0), 0x14, 0x0000 },
+	    },
+	},
 	{   /* "WinChipHead CH352", */
 	    {	PCI_VENDOR_WCH, PCI_PRODUCT_WCH_CH352,		0, 0	},
 	    {	0xffff,	0xffff,					0, 0	},
 	    {
 		{ PUC_COM_POW2(0), 0x10, 0x0000 },
 		{ PUC_COM_POW2(0), 0x14, 0x0000 },
+	    },
+	},
+	{   /* "WinChipHead CH382 (2S)", */
+	    {	PCI_VENDOR_WCH2, PCI_PRODUCT_WCH2_CH382_1,	0, 0	},
+	    {	0xffff,	0xffff,					0, 0	},
+	    {
+		{ PUC_COM_POW2(0), 0x10, 0x00c0 },
+		{ PUC_COM_POW2(0), 0x10, 0x00c8 },
+	    },
+	},
+	{   /* "WinChipHead CH382 (2S1P)", */
+	    {	PCI_VENDOR_WCH2, PCI_PRODUCT_WCH2_CH382_2,	0, 0	},
+	    {	0xffff,	0xffff,					0, 0	},
+	    {
+		{ PUC_COM_POW2(0), 0x10, 0x00c0 },
+		{ PUC_COM_POW2(0), 0x10, 0x00c8 },
 	    },
 	},
 	{   /* "NetMos NM9820 UART" */

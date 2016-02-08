@@ -1,4 +1,4 @@
-/*	$OpenBSD: xd.c,v 1.62 2014/07/11 16:35:40 jsg Exp $	*/
+/*	$OpenBSD: xd.c,v 1.72 2015/02/08 01:30:09 dlg Exp $	*/
 /*	$NetBSD: xd.c,v 1.37 1997/07/29 09:58:16 fair Exp $	*/
 
 /*
@@ -81,7 +81,6 @@
 
 #include <sparc/dev/xdreg.h>
 #include <sparc/dev/xdvar.h>
-#include <sparc/dev/xio.h>
 #include <sparc/sparc/vaddrs.h>
 #include <sparc/sparc/cpuvar.h>
 
@@ -205,10 +204,9 @@ extern int pil_to_vme[];	/* from obio.c */
 
 /* internals */
 int	xdc_cmd(struct xdc_softc *, int, int, int, int, int, char *, int);
-char   *xdc_e2str(int);
+const char *xdc_e2str(int);
 int	xdc_error(struct xdc_softc *, struct xd_iorq *,
 		   struct xd_iopb *, int, int);
-int	xdc_ioctlcmd(struct xd_softc *, dev_t dev, struct xd_iocmd *);
 void	xdc_perror(struct xd_iorq *, struct xd_iopb *, int);
 int	xdc_piodriver(struct xdc_softc *, int, int);
 int	xdc_remove_iorq(struct xdc_softc *);
@@ -218,7 +216,7 @@ inline void xdc_rqinit(struct xd_iorq *, struct xdc_softc *,
 			    caddr_t, struct buf *);
 void	xdc_rqtopb(struct xd_iorq *, struct xd_iopb *, int, int);
 void	xdc_start(struct xdc_softc *, int);
-int	xdc_startbuf(struct xdc_softc *, struct xd_softc *, struct buf *);
+int	xdc_startbuf(struct xdc_softc *);
 int	xdc_submit_iorq(struct xdc_softc *, int, int);
 void	xdc_tick(void *);
 void	xdc_xdreset(struct xdc_softc *, struct xd_softc *);
@@ -233,7 +231,7 @@ int	xdmatch(struct device *, void *, void *);
 void	xdattach(struct device *, struct device *, void *);
 
 static	void xddummystrat(struct buf *);
-int	xdgetdisklabel(struct xd_softc *, void *);
+int	xdgetdisklabel(dev_t, struct xd_softc *, struct disklabel *, int);
 
 /*
  * cfdrivers: device driver interface to autoconfig
@@ -264,73 +262,87 @@ struct xdc_attach_args {	/* this is the "aux" args to xdattach */
 	int	booting;	/* are we booting or not? */
 };
 
-/*
- * start: disk label fix code (XXX)
- */
-
-static void *xd_labeldata;
-
 static void
 xddummystrat(bp)
 	struct buf *bp;
 {
-	if (bp->b_bcount != XDFM_BPS)
-		panic("xddummystrat");
-	bcopy(xd_labeldata, bp->b_data, XDFM_BPS);
+	struct xd_softc *xd;
+	size_t sz;
+
+	xd = (struct xd_softc *)xd_cd.cd_devs[DISKUNIT(bp->b_dev)];
+	sz = MIN(bp->b_bcount, XDFM_BPS);
+	bcopy(xd->xd_labeldata, bp->b_data, sz);
+	bp->b_resid = bp->b_bcount - sz;
+	if (bp->b_resid != 0) {
+		bp->b_flags |= B_ERROR;
+		bp->b_error = EIO;
+	}
 	bp->b_flags |= B_DONE;
 }
 
 int
-xdgetdisklabel(xd, b)
+xdgetdisklabel(dev, xd, lp, spoofonly)
+	dev_t dev;
 	struct xd_softc *xd;
-	void *b;
+	struct disklabel *lp;
+	int spoofonly;
 {
-	struct disklabel *lp = xd->sc_dk.dk_label;
-	struct sun_disklabel *sl = b;
 	int error;
 
 	bzero(lp, sizeof(struct disklabel));
 	/* Required parameters for readdisklabel() */
 	lp->d_secsize = XDFM_BPS;
-	if (sl->sl_magic == SUN_DKMAGIC) {
-		lp->d_secpercyl = sl->sl_nsectors * sl->sl_ntracks;
-		DL_SETDSIZE(lp, (u_int64_t)lp->d_secpercyl * sl->sl_ncylinders);
-	} else {
+	if (xd->state == XD_DRIVE_ATTACHING || xd->state == XD_DRIVE_NOLABEL) {
+		/* needs to be nonzero */
 		lp->d_secpercyl = 1;
+	} else {
+		/*
+		 * Disk geometry is known from a previously found label.
+		 * Use it.
+		 */
+		lp->d_ntracks = xd->nhead;
+		lp->d_nsectors = xd->nsect;
+		lp->d_ncylinders = xd->ncyl;
+		lp->d_acylinders = xd->acyl;
+		lp->d_secpercyl = lp->d_ntracks * lp->d_nsectors;
+		DL_SETDSIZE(lp, (u_int64_t)lp->d_secpercyl * lp->d_ncylinders);
 	}
+	lp->d_type = DTYPE_SMD;
+	lp->d_version = 1;
 
-	/* We already have the label data in `b'; setup for dummy strategy */
-	xd_labeldata = b;
+	/* These are as defined in <ufs/ffs/fs.h> */
+	lp->d_bbsize = 8192; /* BBSIZE */
+	lp->d_sbsize = 8192; /* SBSIZE */
 
-	error = readdisklabel(MAKEDISKDEV(0, xd->sc_dev.dv_unit, RAW_PART),
-	    xddummystrat, lp, 0);
+	lp->d_magic = DISKMAGIC;
+	lp->d_magic2 = DISKMAGIC;
+	lp->d_checksum = dkcksum(lp);
+
+	error = readdisklabel(DISKLABELDEV(dev),
+	    xd->state == XD_DRIVE_ATTACHING ? xddummystrat : xdstrategy,
+	    lp, spoofonly);
 	if (error)
-		return (error);
+		return error;
 
-	/* Ok, we have the label; fill in `pcyl' if there's SunOS magic */
-	sl = b;
-	if (sl->sl_magic == SUN_DKMAGIC)
-		xd->pcyl = sl->sl_pcylinders;
-	else {
-		printf("%s: WARNING: no `pcyl' in disk label.\n",
-			xd->sc_dev.dv_xname);
-		xd->pcyl = lp->d_ncylinders +
-			lp->d_acylinders;
-		printf("%s: WARNING: guessing pcyl=%d (ncyl+acyl)\n",
-		xd->sc_dev.dv_xname, xd->pcyl);
+	/*
+	 * If a label was found, get our geometry from it.
+	 */
+	if (xd->state == XD_DRIVE_ATTACHING || xd->state == XD_DRIVE_NOLABEL) {
+		/*
+		 * Note that this relies upon pcyl == cyl + acyl, and will
+		 * ignore the explicit pcyl value from the converted SunOS
+		 * label.
+		 */
+		xd->pcyl = lp->d_ncylinders + lp->d_acylinders;
+		xd->ncyl = lp->d_ncylinders;
+		xd->acyl = lp->d_acylinders;
+		xd->nhead = lp->d_ntracks;
+		xd->nsect = lp->d_nsectors;
+		xd->sectpercyl = lp->d_secpercyl;
 	}
 
-	xd->ncyl = lp->d_ncylinders;
-	xd->acyl = lp->d_acylinders;
-	xd->nhead = lp->d_ntracks;
-	xd->nsect = lp->d_nsectors;
-	xd->sectpercyl = lp->d_secpercyl;
-	return (0);
+	return 0;
 }
-
-/*
- * end: disk label fix code (XXX)
- */
 
 /*
  * a u t o c o n f i g   f u n c t i o n s
@@ -435,10 +447,7 @@ xdcattach(parent, self, aux)
 	xdc->ndone = 0;
 
 	/* init queue of waiting bufs */
-
-	xdc->sc_wq.b_active = 0;
-	xdc->sc_wq.b_actf = 0;
-	xdc->sc_wq.b_actb = &xdc->sc_wq.b_actf;
+	bufq_init(&xdc->sc_bufq, BUFQ_FIFO);
 
 	/*
 	 * section 7 of the manual tells us how to init the controller:
@@ -653,8 +662,12 @@ xdattach(parent, self, aux)
 	/* Attach the disk: must be before getdisklabel to malloc label */
 	disk_attach(&xd->sc_dev, &xd->sc_dk);
 
-	if (xdgetdisklabel(xd, xa->buf) != XD_ERR_AOK)
+	xd->xd_labeldata = xa->buf;
+	if (xdgetdisklabel(MAKEDISKDEV(0, xd->sc_dev.dv_unit, 0), xd,
+	    xd->sc_dk.dk_label, 0) != 0) {
+		printf("%s: no label, unknown geometry\n", xd->sc_dev.dv_xname);
 		goto done;
+	}
 
 	/* inform the user of what is up */
 	printf("%s: <%s>, pcyl %d, hw_spt %d\n", xd->sc_dev.dv_xname,
@@ -786,19 +799,6 @@ xddump(dev, blkno, va, size)
 	    'a' + part);
 
 	return ENXIO;
-
-	/* outline: globals: "dumplo" == sector number of partition to start
-	 * dump at (convert to physical sector with partition table)
-	 * "dumpsize" == size of dump in clicks "physmem" == size of physical
-	 * memory (clicks, ptoa() to get bytes) (normal case: dumpsize ==
-	 * physmem)
-	 *
-	 * dump a copy of physical memory to the dump device starting at sector
-	 * "dumplo" in the swap partition (make sure > 0).   map in pages as
-	 * we go.   use polled I/O.
-	 *
-	 * XXX how to handle NON_CONTIG? */
-
 }
 
 /*
@@ -814,7 +814,6 @@ xdioctl(dev, command, addr, flag, p)
 
 {
 	struct xd_softc *xd;
-	struct xd_iocmd *xio;
 	int     error, s, unit;
 
 	unit = DISKUNIT(dev);
@@ -833,14 +832,17 @@ xdioctl(dev, command, addr, flag, p)
 		splx(s);
 		return 0;
 
+	case DIOCGPDINFO:
+		xdgetdisklabel(dev, xd, (struct disklabel *)addr, 1);
+		return 0;
+
 	case DIOCGDINFO:	/* get disk label */
-	case DIOCGPDINFO:	/* no separate 'physical' info available. */
 		bcopy(xd->sc_dk.dk_label, addr, sizeof(struct disklabel));
 		return 0;
 
 	case DIOCGPART:	/* get partition info */
-		((struct partinfo *) addr)->disklab = xd->sc_dk.dk_label;
-		((struct partinfo *) addr)->part =
+		((struct partinfo *)addr)->disklab = xd->sc_dk.dk_label;
+		((struct partinfo *)addr)->part =
 		    &xd->sc_dk.dk_label->d_partitions[DISKPART(dev)];
 		return 0;
 
@@ -849,7 +851,7 @@ xdioctl(dev, command, addr, flag, p)
 		if ((flag & FWRITE) == 0)
 			return EBADF;
 		error = setdisklabel(xd->sc_dk.dk_label,
-		    (struct disklabel *) addr, /* xd->sc_dk.dk_openmask : */ 0);
+		    (struct disklabel *)addr, /* xd->sc_dk.dk_openmask : */ 0);
 		if (error == 0) {
 			if (xd->state == XD_DRIVE_NOLABEL)
 				xd->state = XD_DRIVE_ONLINE;
@@ -867,12 +869,6 @@ xdioctl(dev, command, addr, flag, p)
 			}
 		}
 		return error;
-
-	case DIOSXDCMD:
-		xio = (struct xd_iocmd *) addr;
-		if ((error = suser(p, 0)) != 0)
-			return (error);
-		return (xdc_ioctlcmd(xd, dev, xio));
 
 	default:
 		return ENOTTY;
@@ -1000,7 +996,6 @@ xdstrategy(bp)
 {
 	struct xd_softc *xd;
 	struct xdc_softc *parent;
-	struct buf *wq;
 	int     s, unit;
 	struct xdc_attach_args xa;
 
@@ -1039,41 +1034,15 @@ xdstrategy(bp)
 	/*
 	 * now we know we have a valid buf structure that we need to do I/O
 	 * on.
-	 *
-	 * note that we don't disksort because the controller has a sorting
-	 * algorithm built into the hardware.
 	 */
-
-	s = splbio();		/* protect the queues */
-
-	/* first, give jobs in front of us a chance */
 	parent = xd->parent;
-	while (parent->nfree > 0 && parent->sc_wq.b_actf)
-		if (xdc_startbuf(parent, NULL, NULL) != XD_ERR_AOK)
+	bufq_queue(&parent->sc_bufq, bp);
+
+	s = splbio();
+	while (parent->nfree > 0 && bufq_peek(&parent->sc_bufq)) {
+		if (xdc_startbuf(parent) != XD_ERR_AOK)
 			break;
-
-	/* if there are no free iorq's, then we just queue and return. the
-	 * buffs will get picked up later by xdcintr().
-	 */
-
-	if (parent->nfree == 0) {
-		wq = &xd->parent->sc_wq;
-		bp->b_actf = 0;
-		bp->b_actb = wq->b_actb;
-		*wq->b_actb = bp;
-		wq->b_actb = &bp->b_actf;
-		splx(s);
-		return;
 	}
-
-	/* now we have free iopb's and we are at splbio... start 'em up */
-	if (xdc_startbuf(parent, xd, bp) != XD_ERR_AOK) {
-		splx(s);
-		return;
-	}
-
-	/* done! */
-
 	splx(s);
 	return;
 
@@ -1112,8 +1081,8 @@ xdcintr(v)
 
 	/* fill up any remaining iorq's with queue'd buffers */
 
-	while (xdcsc->nfree > 0 && xdcsc->sc_wq.b_actf)
-		if (xdc_startbuf(xdcsc, NULL, NULL) != XD_ERR_AOK)
+	while (xdcsc->nfree > 0 && bufq_peek(&xdcsc->sc_bufq))
+		if (xdc_startbuf(xdcsc) != XD_ERR_AOK)
 			break;
 
 	return (1);
@@ -1338,16 +1307,15 @@ xdc_cmd(xdcsc, cmd, subfn, unit, block, scnt, dptr, fullmode)
  */
 
 int
-xdc_startbuf(xdcsc, xdsc, bp)
+xdc_startbuf(xdcsc)
 	struct xdc_softc *xdcsc;
-	struct xd_softc *xdsc;
-	struct buf *bp;
 
 {
 	int     rqno, partno;
+	struct xd_softc *xdsc;
 	struct xd_iorq *iorq;
 	struct xd_iopb *iopb;
-	struct buf *wq;
+	struct buf *bp;
 	u_long  block;
 	caddr_t dbuf;
 
@@ -1358,19 +1326,11 @@ xdc_startbuf(xdcsc, xdsc, bp)
 	iopb = iorq->iopb;
 
 	/* get buf */
+	bp = bufq_dequeue(&xdcsc->sc_bufq);
+	if (bp == NULL)
+		panic("xdc_startbuf bp");
 
-	if (bp == NULL) {
-		bp = xdcsc->sc_wq.b_actf;
-		if (!bp)
-			panic("xdc_startbuf bp");
-		wq = bp->b_actf;
-		if (wq)
-			wq->b_actb = bp->b_actb;
-		else
-			xdcsc->sc_wq.b_actb = bp->b_actb;
-		*bp->b_actb = wq;
-		xdsc = xdcsc->sc_drives[DISKUNIT(bp->b_dev)];
-	}
+	xdsc = xdcsc->sc_drives[DISKUNIT(bp->b_dev)];
 	partno = DISKPART(bp->b_dev);
 #ifdef XDC_DEBUG
 	printf("xdc_startbuf: %s%c: %s block %lld\n",
@@ -1396,11 +1356,7 @@ xdc_startbuf(xdcsc, xdsc, bp)
 		printf("%s: warning: out of DVMA space\n",
 			xdcsc->sc_dev.dv_xname);
 		XDC_FREE(xdcsc, rqno);
-		wq = &xdcsc->sc_wq;	/* put at end of queue */
-		bp->b_actf = 0;
-		bp->b_actb = wq->b_actb;
-		*wq->b_actb = bp;
-		wq->b_actb = &bp->b_actf;
+		bufq_queue(&xdcsc->sc_bufq, bp); /* put at end of queue */
 		return (XD_ERR_FAIL);	/* XXX: need some sort of
 					 * call-back scheme here? */
 	}
@@ -1601,8 +1557,8 @@ xdc_piodriver(xdcsc, iorqno, freeone)
 	/* now that we've drained everything, start up any bufs that have
 	 * queued */
 
-	while (xdcsc->nfree > 0 && xdcsc->sc_wq.b_actf)
-		if (xdc_startbuf(xdcsc, NULL, NULL) != XD_ERR_AOK)
+	while (xdcsc->nfree > 0 && bufq_peek(&xdcsc->sc_bufq))
+		if (xdc_startbuf(xdcsc) != XD_ERR_AOK)
 			break;
 
 	return (retval);
@@ -1879,7 +1835,7 @@ xdc_remove_iorq(xdcsc)
 				iopb->headno =
 					(iorq->blockno / iorq->xd->nhead) %
 						iorq->xd->nhead;
-				iopb->sectno = iorq->blockno % XDFM_BPS;
+				iopb->sectno = iorq->blockno % iorq->xd->nsect;
 				iopb->daddr = (u_long) iorq->dbuf - DVMA_BASE;
 				XDC_HWAIT(xdcsc, rqno);
 				xdc_start(xdcsc, 1);	/* resubmit */
@@ -2003,8 +1959,9 @@ xdc_error(xdcsc, iorq, iopb, rqno, comm)
 			/* second to last acyl */
 			i = iorq->xd->sectpercyl - 1 - i;	/* follow bad144
 								 * standard */
-			iopb->headno = i / iorq->xd->nhead;
-			iopb->sectno = i % iorq->xd->nhead;
+			iopb->headno = i % iorq->xd->nhead;
+			iopb->sectno = i / iorq->xd->nhead;
+			iopb->daddr = (u_long) iorq->dbuf - DVMA_BASE;
 			XDC_HWAIT(xdcsc, rqno);
 			xdc_start(xdcsc, 1);	/* resubmit */
 			return (XD_ERR_AOK);	/* recovered! */
@@ -2108,8 +2065,10 @@ xdc_tick(arg)
 		    XD_STATE(xdcsc->reqs[lcv].mode) == XD_SUB_DONE)
 			continue;
 		xdcsc->reqs[lcv].ttl--;
-		if (xdcsc->reqs[lcv].ttl == 0)
+		if (xdcsc->reqs[lcv].ttl == 0) {
 			reset = 1;
+			break;	/* we're going to fail all requests anyway */
+		}
 	}
 	if (reset) {
 		printf("%s: watchdog timeout\n", xdcsc->sc_dev.dv_xname);
@@ -2123,140 +2082,9 @@ xdc_tick(arg)
 }
 
 /*
- * xdc_ioctlcmd: this function provides a user level interface to the
- * controller via ioctl.   this allows "format" programs to be written
- * in user code, and is also useful for some debugging.   we return
- * an error code.   called at user priority.
- */
-int
-xdc_ioctlcmd(xd, dev, xio)
-	struct xd_softc *xd;
-	dev_t   dev;
-	struct xd_iocmd *xio;
-
-{
-	int     s, err, rqno, dummy;
-	caddr_t dvmabuf = NULL, buf = NULL;
-	struct xdc_softc *xdcsc;
-
-	/* check sanity of requested command */
-
-	switch (xio->cmd) {
-
-	case XDCMD_NOP:	/* no op: everything should be zero */
-		if (xio->subfn || xio->dptr || xio->dlen ||
-		    xio->block || xio->sectcnt)
-			return (EINVAL);
-		break;
-
-	case XDCMD_RD:		/* read / write sectors (up to XD_IOCMD_MAXS) */
-	case XDCMD_WR:
-		if (xio->subfn || xio->sectcnt > XD_IOCMD_MAXS ||
-		    xio->sectcnt * XDFM_BPS != xio->dlen || xio->dptr == NULL)
-			return (EINVAL);
-		break;
-
-	case XDCMD_SK:		/* seek: doesn't seem useful to export this */
-		return (EINVAL);
-
-	case XDCMD_WRP:	/* write parameters */
-		return (EINVAL);/* not useful, except maybe drive
-				 * parameters... but drive parameters should
-				 * go via disklabel changes */
-
-	case XDCMD_RDP:	/* read parameters */
-		if (xio->subfn != XDFUN_DRV ||
-		    xio->dlen || xio->block || xio->dptr)
-			return (EINVAL);	/* allow read drive params to
-						 * get hw_spt */
-		xio->sectcnt = xd->hw_spt;	/* we already know the answer */
-		return (0);
-		break;
-
-	case XDCMD_XRD:	/* extended read/write */
-	case XDCMD_XWR:
-
-		switch (xio->subfn) {
-
-		case XDFUN_THD:/* track headers */
-			if (xio->sectcnt != xd->hw_spt ||
-			    (xio->block % xd->nsect) != 0 ||
-			    xio->dlen != XD_IOCMD_HSZ * xd->hw_spt ||
-			    xio->dptr == NULL)
-				return (EINVAL);
-			xio->sectcnt = 0;
-			break;
-
-		case XDFUN_FMT:/* NOTE: also XDFUN_VFY */
-			if (xio->cmd == XDCMD_XRD)
-				return (EINVAL);	/* no XDFUN_VFY */
-			if (xio->sectcnt || xio->dlen ||
-			    (xio->block % xd->nsect) != 0 || xio->dptr)
-				return (EINVAL);
-			break;
-
-		case XDFUN_HDR:/* header, header verify, data, data ECC */
-			return (EINVAL);	/* not yet */
-
-		case XDFUN_DM:	/* defect map */
-		case XDFUN_DMX:/* defect map (alternate location) */
-			if (xio->sectcnt || xio->dlen != XD_IOCMD_DMSZ ||
-			    (xio->block % xd->nsect) != 0 || xio->dptr == NULL)
-				return (EINVAL);
-			break;
-
-		default:
-			return (EINVAL);
-		}
-		break;
-
-	case XDCMD_TST:	/* diagnostics */
-		return (EINVAL);
-
-	default:
-		return (EINVAL);/* ??? */
-	}
-
-	/* create DVMA buffer for request if needed */
-
-	if (xio->dlen) {
-		dvmabuf = dvma_malloc(xio->dlen, &buf, M_WAITOK);
-		if (xio->cmd == XDCMD_WR || xio->cmd == XDCMD_XWR) {
-			if ((err = copyin(xio->dptr, buf, xio->dlen)) != 0) {
-				dvma_free(dvmabuf, xio->dlen, &buf);
-				return (err);
-			}
-		}
-	}
-	/* do it! */
-
-	err = 0;
-	xdcsc = xd->parent;
-	s = splbio();
-	rqno = xdc_cmd(xdcsc, xio->cmd, xio->subfn, xd->xd_drive, xio->block,
-	    xio->sectcnt, dvmabuf, XD_SUB_WAIT);
-	if (rqno == XD_ERR_FAIL) {
-		err = EIO;
-		goto done;
-	}
-	xio->errno = xdcsc->reqs[rqno].errno;
-	xio->tries = xdcsc->reqs[rqno].tries;
-	XDC_DONE(xdcsc, rqno, dummy);
-
-	if (xio->cmd == XDCMD_RD || xio->cmd == XDCMD_XRD)
-		err = copyout(buf, xio->dptr, xio->dlen);
-
-done:
-	splx(s);
-	if (dvmabuf)
-		dvma_free(dvmabuf, xio->dlen, &buf);
-	return (err);
-}
-
-/*
  * xdc_e2str: convert error code number into an error string
  */
-char *
+const char *
 xdc_e2str(no)
 	int     no;
 {

@@ -1,4 +1,4 @@
-/*	$OpenBSD: kern_prot.c,v 1.60 2014/04/18 11:51:17 guenther Exp $	*/
+/*	$OpenBSD: kern_prot.c,v 1.63 2015/03/02 20:46:50 guenther Exp $	*/
 /*	$NetBSD: kern_prot.c,v 1.33 1996/02/09 18:59:42 christos Exp $	*/
 
 /*
@@ -256,13 +256,13 @@ sys_setpgid(struct proc *curp, void *v, register_t *retval)
 {
 	struct sys_setpgid_args /* {
 		syscallarg(pid_t) pid;
-		syscallarg(int) pgid;
+		syscallarg(pid_t) pgid;
 	} */ *uap = v;
 	struct process *curpr = curp->p_p;
 	struct process *targpr;		/* target process */
 	struct pgrp *pgrp, *newpgrp;	/* target pgrp */
-	pid_t pid;
-	int pgid, error;
+	pid_t pid, pgid;
+	int error;
 
 	pid = SCARG(uap, pid);
 	pgid = SCARG(uap, pgid);
@@ -860,14 +860,14 @@ sys_setgroups(struct proc *p, void *v, register_t *retval)
 	} */ *uap = v;
 	struct process *pr = p->p_p;
 	struct ucred *pruc, *newcred;
-	gid_t groups[NGROUPS];
+	gid_t groups[NGROUPS_MAX];
 	u_int ngrp;
 	int error;
 
 	if ((error = suser(p, 0)) != 0)
 		return (error);
 	ngrp = SCARG(uap, gidsetsize);
-	if (ngrp > NGROUPS)
+	if (ngrp > NGROUPS_MAX)
 		return (EINVAL);
 	error = copyin(SCARG(uap, gidset), groups, ngrp * sizeof(gid_t));
 	if (error == 0) {
@@ -988,15 +988,18 @@ crdup(struct ucred *cr)
 /*
  * Convert the userspace xucred to a kernel ucred
  */
-void
+int
 crfromxucred(struct ucred *cr, const struct xucred *xcr)
 {
+	if (xcr->cr_ngroups < 0 || xcr->cr_ngroups > NGROUPS_MAX)
+		return (EINVAL);
 	cr->cr_ref = 1;
 	cr->cr_uid = xcr->cr_uid;
 	cr->cr_gid = xcr->cr_gid;
 	cr->cr_ngroups = xcr->cr_ngroups;
 	memcpy(cr->cr_groups, xcr->cr_groups,
 	    sizeof(cr->cr_groups[0]) * xcr->cr_ngroups);
+	return (0);
 }
 
 /*

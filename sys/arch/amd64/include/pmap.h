@@ -1,4 +1,4 @@
-/*	$OpenBSD: pmap.h,v 1.45 2014/07/11 16:35:40 jsg Exp $	*/
+/*	$OpenBSD: pmap.h,v 1.54 2015/02/19 03:19:11 mlarkin Exp $	*/
 /*	$NetBSD: pmap.h,v 1.1 2003/04/26 18:39:46 fvdl Exp $	*/
 
 /*
@@ -70,6 +70,7 @@
 
 #ifndef _LOCORE
 #ifdef _KERNEL
+#include <sys/mman.h>
 #include <machine/cpufunc.h>
 #include <machine/segments.h>
 #endif /* _KERNEL */
@@ -79,17 +80,14 @@
 
 /*
  * The x86_64 pmap module closely resembles the i386 one. It uses
- * the same recursive entry scheme, and the same alternate area
- * trick for accessing non-current pmaps. See the i386 pmap.h
- * for a description. The first obvious difference is that 2 extra
- * levels of page table need to be dealt with. The level 1 page
- * table pages are at:
+ * the same recursive entry scheme. See the i386 pmap.h for a
+ * description. The alternate area trick for accessing non-current
+ * pmaps has been removed, though, because it performs badly on SMP
+ * systems.
+ * The most obvious difference to i386 is that 2 extra levels of page
+ * table need to be dealt with. The level 1 page table pages are at:
  *
  * l1: 0x00007f8000000000 - 0x00007fffffffffff     (39 bits, needs PML4 entry)
- *
- * The alternate space is at:
- *
- * l1: 0xffffff0000000000 - 0xffffff7fffffffff     (39 bits, needs PML4 entry)
  *
  * The other levels are kept as physical pages in 3 UVM objects and are
  * temporarily mapped for virtual access when needed.
@@ -97,17 +95,17 @@
  * The other obvious difference from i386 is that it has a direct map of all
  * physical memory in the VA range:
  *
- *     0xfffffe8000000000 - 0xfffffeffffffffff
+ *     0xffffff0000000000 - 0xffffff7fffffffff
+ *
+ * The direct map is used in some cases to access PTEs of non-current pmaps.
  *
  * Note that address space is signed, so the layout for 48 bits is:
  *
  *  +---------------------------------+ 0xffffffffffffffff
  *  |         Kernel Image            |
  *  +---------------------------------+ 0xffffff8000000000
- *  |    alt.L1 table (PTE pages)     |
- *  +---------------------------------+ 0xffffff0000000000
  *  |         Direct Map              |
- *  +---------------------------------+ 0xfffffe8000000000
+ *  +---------------------------------+ 0xffffff0000000000
  *  ~                                 ~
  *  |                                 |
  *  |         Kernel Space            |
@@ -155,44 +153,34 @@
 #define L4_SLOT_PTE		255
 #define L4_SLOT_KERN		256
 #define L4_SLOT_KERNBASE	511
-#define L4_SLOT_APTE		510
-#define L4_SLOT_DIRECT		509
+#define L4_SLOT_DIRECT		510
 
 #define PDIR_SLOT_KERN		L4_SLOT_KERN
 #define PDIR_SLOT_PTE		L4_SLOT_PTE
-#define PDIR_SLOT_APTE		L4_SLOT_APTE
 #define PDIR_SLOT_DIRECT	L4_SLOT_DIRECT
 
 /*
  * the following defines give the virtual addresses of various MMU
  * data structures:
- * PTE_BASE and APTE_BASE: the base VA of the linear PTE mappings
- * PTD_BASE and APTD_BASE: the base VA of the recursive mapping of the PTD
- * PDP_PDE and APDP_PDE: the VA of the PDE that points back to the PDP/APDP
+ * PTE_BASE: the base VA of the linear PTE mappings
+ * PTD_BASE: the base VA of the recursive mapping of the PTD
+ * PDP_PDE: the VA of the PDE that points back to the PDP
  *
  */
 
 #define PTE_BASE  ((pt_entry_t *) (L4_SLOT_PTE * NBPD_L4))
-#define APTE_BASE ((pt_entry_t *) (VA_SIGN_NEG((L4_SLOT_APTE * NBPD_L4))))
 #define PMAP_DIRECT_BASE	(VA_SIGN_NEG((L4_SLOT_DIRECT * NBPD_L4)))
 #define PMAP_DIRECT_END		(VA_SIGN_NEG(((L4_SLOT_DIRECT + 1) * NBPD_L4)))
 
 #define L1_BASE		PTE_BASE
-#define AL1_BASE	APTE_BASE
 
 #define L2_BASE ((pd_entry_t *)((char *)L1_BASE + L4_SLOT_PTE * NBPD_L3))
 #define L3_BASE ((pd_entry_t *)((char *)L2_BASE + L4_SLOT_PTE * NBPD_L2))
 #define L4_BASE ((pd_entry_t *)((char *)L3_BASE + L4_SLOT_PTE * NBPD_L1))
 
-#define AL2_BASE ((pd_entry_t *)((char *)AL1_BASE + L4_SLOT_PTE * NBPD_L3))
-#define AL3_BASE ((pd_entry_t *)((char *)AL2_BASE + L4_SLOT_PTE * NBPD_L2))
-#define AL4_BASE ((pd_entry_t *)((char *)AL3_BASE + L4_SLOT_PTE * NBPD_L1))
-
 #define PDP_PDE		(L4_BASE + PDIR_SLOT_PTE)
-#define APDP_PDE	(L4_BASE + PDIR_SLOT_APTE)
 
 #define PDP_BASE	L4_BASE
-#define APDP_BASE	AL4_BASE
 
 #define NKL4_MAX_ENTRIES	(unsigned long)1
 #define NKL3_MAX_ENTRIES	(unsigned long)(NKL4_MAX_ENTRIES * 512)
@@ -217,8 +205,6 @@
 #define NKL1_START_ENTRIES	0	/* XXX */
 
 #define NTOPLEVEL_PDES		(PAGE_SIZE / (sizeof (pd_entry_t)))
-
-#define KERNSPACE		(NKL4_ENTRIES * NBPD_L4)
 
 #define NPDPG			(PAGE_SIZE / sizeof (pd_entry_t))
 
@@ -249,7 +235,6 @@
 				  NKL3_MAX_ENTRIES, NKL4_MAX_ENTRIES }
 #define NBPD_INITIALIZER	{ NBPD_L1, NBPD_L2, NBPD_L3, NBPD_L4 }
 #define PDES_INITIALIZER	{ L2_BASE, L3_BASE, L4_BASE }
-#define APDES_INITIALIZER	{ AL2_BASE, AL3_BASE, AL4_BASE }
 
 /*
  * PTP macros:
@@ -297,7 +282,7 @@ LIST_HEAD(pmap_head, pmap); /* struct pmap_head: head of a pmap list */
 /*
  * the pmap structure
  *
- * note that the pm_obj contains the simple_lock, the reference count,
+ * note that the pm_obj contains the reference count,
  * page list, and number of PTPs within the pmap.
  *
  * pm_lock is the same as the spinlock for vm object 0. Changes to
@@ -347,18 +332,6 @@ struct pv_entry {			/* locked by its list's pvh_lock */
 };
 
 /*
- * pmap_remove_record: a record of VAs that have been unmapped, used to
- * flush TLB.  if we have more than PMAP_RR_MAX then we stop recording.
- */
-
-#define PMAP_RR_MAX	16	/* max of 16 pages (64K) */
-
-struct pmap_remove_record {
-	int prr_npages;
-	vaddr_t prr_vas[PMAP_RR_MAX];
-};
-
-/*
  * global kernel variables
  */
 
@@ -390,7 +363,7 @@ extern long nkptp[], nbpd[], nkptpmax[];
 
 #define pmap_proc_iflush(p,va,len)	/* nothing */
 #define pmap_unuse_final(p)		/* nothing */
-#define	pmap_remove_holes(map)		do { /* nothing */ } while (0)
+#define	pmap_remove_holes(vm)		do { /* nothing */ } while (0)
 
 
 /*
@@ -412,15 +385,6 @@ void		pmap_write_protect(struct pmap *, vaddr_t,
 
 vaddr_t reserve_dumppages(vaddr_t); /* XXX: not a pmap fn */
 
-void	pmap_tlb_shootpage(struct pmap *, vaddr_t);
-void	pmap_tlb_shootrange(struct pmap *, vaddr_t, vaddr_t);
-void	pmap_tlb_shoottlb(void);
-#ifdef MULTIPROCESSOR
-void	pmap_tlb_shootwait(void);
-#else
-#define	pmap_tlb_shootwait()
-#endif
-
 paddr_t	pmap_prealloc_lowmem_ptps(paddr_t);
 
 void	pagezero(vaddr_t);
@@ -438,12 +402,6 @@ void	pmap_flush_cache(vaddr_t, vsize_t);
 
 #define	PMAP_STEAL_MEMORY	/* enable pmap_steal_memory() */
 #define PMAP_GROWKERNEL		/* turn on pmap_growkernel interface */
-
-/*
- * Do idle page zero'ing uncached to avoid polluting the cache.
- */
-boolean_t	pmap_pageidlezero(struct vm_page *);
-#define	PMAP_PAGEIDLEZERO(pg)	pmap_pageidlezero((pg))
 
 /*
  * inline functions
@@ -489,8 +447,8 @@ pmap_update_2pg(vaddr_t va, vaddr_t vb)
 __inline static void
 pmap_page_protect(struct vm_page *pg, vm_prot_t prot)
 {
-	if ((prot & VM_PROT_WRITE) == 0) {
-		if (prot & (VM_PROT_READ|VM_PROT_EXECUTE)) {
+	if ((prot & PROT_WRITE) == 0) {
+		if (prot & (PROT_READ | PROT_EXEC)) {
 			(void) pmap_clear_attrs(pg, PG_RW);
 		} else {
 			pmap_page_remove(pg);
@@ -509,8 +467,8 @@ pmap_page_protect(struct vm_page *pg, vm_prot_t prot)
 __inline static void
 pmap_protect(struct pmap *pmap, vaddr_t sva, vaddr_t eva, vm_prot_t prot)
 {
-	if ((prot & VM_PROT_WRITE) == 0) {
-		if (prot & (VM_PROT_READ|VM_PROT_EXECUTE)) {
+	if ((prot & PROT_WRITE) == 0) {
+		if (prot & (PROT_READ| PROT_EXEC)) {
 			pmap_write_protect(pmap, sva, eva, prot);
 		} else {
 			pmap_remove(pmap, sva, eva);
@@ -549,14 +507,8 @@ kvtopte(vaddr_t va)
 	return (PTE_BASE + pl1_i(va));
 }
 
-#define pmap_pte_set(p, n)		x86_atomic_testset_u64(p, n)
-#define pmap_pte_clearbits(p, b)	x86_atomic_clearbits_u64(p, b)
-#define pmap_pte_setbits(p, b)		x86_atomic_setbits_u64(p, b)
-#define pmap_cpu_has_pg_n()		(1)
-#define pmap_cpu_has_invlpg		(1)
-
-#define PMAP_DIRECT_MAP(pa)	((vaddr_t)PMAP_DIRECT_BASE + pa)
-#define PMAP_DIRECT_UNMAP(va)	((paddr_t)va - PMAP_DIRECT_BASE)
+#define PMAP_DIRECT_MAP(pa)	((vaddr_t)PMAP_DIRECT_BASE + (pa))
+#define PMAP_DIRECT_UNMAP(va)	((paddr_t)(va) - PMAP_DIRECT_BASE)
 #define pmap_map_direct(pg)	PMAP_DIRECT_MAP(VM_PAGE_TO_PHYS(pg))
 #define pmap_unmap_direct(va)	PHYS_TO_VM_PAGE(PMAP_DIRECT_UNMAP(va))
 

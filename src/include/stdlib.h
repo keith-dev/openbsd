@@ -1,4 +1,4 @@
-/*	$OpenBSD: stdlib.h,v 1.59 2014/07/09 16:57:49 beck Exp $	*/
+/*	$OpenBSD: stdlib.h,v 1.64 2015/02/08 02:58:50 tedu Exp $	*/
 /*	$NetBSD: stdlib.h,v 1.25 1995/12/27 21:19:08 jtc Exp $	*/
 
 /*-
@@ -131,13 +131,14 @@ void	 qsort(void *, size_t, size_t, int (*)(const void *, const void *));
 int	 rand(void);
 void	*realloc(void *, size_t);
 void	 srand(unsigned);
-double	 strtod(const char *, char **);
-float	 strtof(const char *, char **);
-long	 strtol(const char *, char **, int);
+void	 srand_deterministic(unsigned);
+double	 strtod(const char *__restrict, char **__restrict);
+float	 strtof(const char *__restrict, char **__restrict);
+long	 strtol(const char *__restrict, char **__restrict, int);
 long double
-	 strtold(const char *, char **);
+	 strtold(const char *__restrict, char **__restrict);
 unsigned long
-	 strtoul(const char *, char **, int);
+	 strtoul(const char *__restrict, char **__restrict, int);
 int	 system(const char *);
 
 /* these are currently just stubs */
@@ -159,11 +160,14 @@ double	 drand48(void);
 double	 erand48(unsigned short[3]);
 long	 jrand48(unsigned short[3]);
 void	 lcong48(unsigned short[7]);
+void	 lcong48_deterministic(unsigned short[7]);
 long	 lrand48(void);
 long	 mrand48(void);
 long	 nrand48(unsigned short[3]);
 unsigned short *seed48(unsigned short[3]);
+unsigned short *seed48_deterministic(unsigned short[3]);
 void	 srand48(long);
+void	 srand48_deterministic(long);
 
 int	 putenv(char *);
 #endif
@@ -190,11 +194,10 @@ char	*initstate(unsigned int, char *, size_t)
 long	 random(void);
 char	*setstate(char *);
 void	 srandom(unsigned int);
+void	 srandom_deterministic(unsigned int);
 
 char	*realpath(const char *, char *)
 		__attribute__((__bounded__ (__minbytes__,2,1024)));
-
-int	 setkey(const char *);
 
 /*
  * XSI functions marked LEGACY in XPG5 and removed in IEEE Std 1003.1-2001
@@ -223,9 +226,9 @@ long long
 lldiv_t
 	 lldiv(long long, long long);
 long long
-	 strtoll(const char *, char **, int);
+	 strtoll(const char *__restrict, char **__restrict, int);
 unsigned long long
-	 strtoull(const char *, char **, int);
+	 strtoull(const char *__restrict, char **__restrict, int);
 #endif
 
 /*
@@ -256,8 +259,15 @@ char	*mkdtemp(char *);
 int     getsubopt(char **, char * const *, char **);
 #endif
 
+/*
+ * The Open Group Base Specifications, post-Issue 7
+ */
 #if __BSD_VISIBLE
-void	*alloca(size_t); 
+int	mkostemp(char *, int);
+#endif
+
+#if __BSD_VISIBLE
+#define alloca(n) __builtin_alloca(n)
 
 char	*getbsize(int *, long *);
 char	*cgetcap(char *, const char *, int);
@@ -276,8 +286,6 @@ int	 daemon(int, int);
 char	*devname(int, mode_t);
 int	 getloadavg(double [], int);
 
-void	 cfree(void *);
-
 const char *
 	getprogname(void);
 void	setprogname(const char *);
@@ -285,6 +293,7 @@ void	setprogname(const char *);
 extern	 char *suboptarg;		/* getsubopt(3) external variable */
 
 int	 mkstemps(char *, int);
+int	 mkostemps(char *, int, int);
 
 int	 heapsort(void *, size_t, size_t, int (*)(const void *, const void *));
 int	 mergesort(void *, size_t, size_t, int (*)(const void *, const void *));
@@ -302,8 +311,8 @@ void	 setproctitle(const char *, ...)
 
 quad_t	 qabs(quad_t);
 qdiv_t	 qdiv(quad_t, quad_t);
-quad_t	 strtoq(const char *, char **, int);
-u_quad_t strtouq(const char *, char **, int);
+quad_t	 strtoq(const char *__restrict, char **__restrict, int);
+u_quad_t strtouq(const char *__restrict, char **__restrict, int);
 
 uint32_t arc4random(void);
 uint32_t arc4random_uniform(uint32_t);

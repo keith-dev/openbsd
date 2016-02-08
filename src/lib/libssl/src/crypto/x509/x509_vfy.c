@@ -1,4 +1,4 @@
-/* $OpenBSD: x509_vfy.c,v 1.37 2014/07/17 07:13:02 logan Exp $ */
+/* $OpenBSD: x509_vfy.c,v 1.40 2015/02/11 02:17:59 jsing Exp $ */
 /* Copyright (C) 1995-1998 Eric Young (eay@cryptsoft.com)
  * All rights reserved.
  *
@@ -377,16 +377,6 @@ X509_verify_cert(X509_STORE_CTX *ctx)
 	if (!ok)
 		goto end;
 
-#ifndef OPENSSL_NO_RFC3779
-	/* RFC 3779 path validation, now that CRL check has been done */
-	ok = v3_asid_validate_path(ctx);
-	if (!ok)
-		goto end;
-	ok = v3_addr_validate_path(ctx);
-	if (!ok)
-		goto end;
-#endif
-
 	/* If we get this far evaluate policies */
 	if (!bad_chain && (ctx->param->flags & X509_V_FLAG_POLICY_CHECK))
 		ok = ctx->check_policy(ctx);
@@ -747,6 +737,7 @@ check_cert(X509_STORE_CTX *ctx)
 				goto err;
 		}
 
+		ctx->current_crl = NULL;
 		X509_CRL_free(crl);
 		X509_CRL_free(dcrl);
 		crl = NULL;
@@ -762,10 +753,9 @@ check_cert(X509_STORE_CTX *ctx)
 	}
 
 err:
+	ctx->current_crl = NULL;
 	X509_CRL_free(crl);
 	X509_CRL_free(dcrl);
-
-	ctx->current_crl = NULL;
 	return ok;
 }
 
@@ -2100,13 +2090,8 @@ X509_STORE_CTX_init(X509_STORE_CTX *ctx, X509_STORE *store, X509 *x509,
 	ctx->check_policy = check_policy;
 
 
-	/* This memset() can't make any sense anyway, so it's removed. As
-	 * X509_STORE_CTX_cleanup does a proper "free" on the ex_data, we put a
-	 * corresponding "new" here and remove this bogus initialisation. */
-	/* memset(&(ctx->ex_data),0,sizeof(CRYPTO_EX_DATA)); */
-	if (!CRYPTO_new_ex_data(CRYPTO_EX_INDEX_X509_STORE_CTX, ctx,
-	    &(ctx->ex_data))) {
-		free(ctx);
+	if (CRYPTO_new_ex_data(CRYPTO_EX_INDEX_X509_STORE_CTX, ctx,
+	    &(ctx->ex_data)) == 0) {
 		X509err(X509_F_X509_STORE_CTX_INIT, ERR_R_MALLOC_FAILURE);
 		return 0;
 	}
@@ -2207,11 +2192,3 @@ X509_STORE_CTX_set0_param(X509_STORE_CTX *ctx, X509_VERIFY_PARAM *param)
 		X509_VERIFY_PARAM_free(ctx->param);
 	ctx->param = param;
 }
-
-IMPLEMENT_STACK_OF(X509)
-IMPLEMENT_ASN1_SET_OF(X509)
-
-IMPLEMENT_STACK_OF(X509_NAME)
-
-IMPLEMENT_STACK_OF(X509_ATTRIBUTE)
-IMPLEMENT_ASN1_SET_OF(X509_ATTRIBUTE)

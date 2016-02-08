@@ -1,4 +1,4 @@
-/* $OpenBSD: xhcivar.h,v 1.4 2014/04/29 12:45:29 mpi Exp $ */
+/* $OpenBSD: xhcivar.h,v 1.8 2015/01/18 20:35:11 mpi Exp $ */
 
 /*
  * Copyright (c) 2014 Martin Pieuchot
@@ -19,21 +19,33 @@
 #ifndef	_XHCIVAR_H_
 #define	_XHCIVAR_H_
 
-#define	XHCI_MAX_COMMANDS	(16 * 1)
-#define	XHCI_MAX_EVENTS		(16 * 13)
-#define	XHCI_MAX_TRANSFERS	(16 * 16)
+/* Default command execution time (implementation defined). */
+#define	XHCI_CMD_TIMEOUT	500	/* ms */
 
+#define	XHCI_MAX_CMDS		(16 * 1)
+#define	XHCI_MAX_EVTS		(16 * 13)
+#define	XHCI_MAX_XFER		(16 * 16)
+
+struct usbd_dma_info {
+	bus_dma_tag_t		 tag;
+	bus_dmamap_t		 map;
+	bus_dma_segment_t	 seg;
+	int			 nsegs;
+	bus_addr_t		 paddr;
+	caddr_t			 vaddr;
+	bus_size_t		 size;
+};
 
 struct xhci_xfer {
 	struct usbd_xfer	 xfer;
-	int			 index;		/* Index of the first TRB */
+	int			 index;		/* Index of the last TRB */
 	size_t			 ntrb;		/* Number of associated TRBs */
 };
 
 struct xhci_ring {
 	struct xhci_trb		*trbs;
 	size_t			 ntrb;
-	struct usb_dma		 dma;
+	struct usbd_dma_info	 dma;
 
 	uint32_t		 index;
 	uint32_t		 toggle;	/* Producer/Consumer bit */
@@ -43,9 +55,9 @@ struct xhci_soft_dev {
 	struct xhci_inctx	*input_ctx;	/* Input context */
 	struct xhci_sctx	*slot_ctx;
 	struct xhci_epctx	*ep_ctx[31];
-	struct usb_dma		 ictx_dma;
+	struct usbd_dma_info	 ictx_dma;
 
-	struct usb_dma		 octx_dma;	/* Output context */
+	struct usbd_dma_info	 octx_dma;	/* Output context */
 
 	struct xhci_pipe	*pipes[31];
 };
@@ -53,22 +65,19 @@ struct xhci_soft_dev {
 /* Device context segment table. */
 struct xhci_devctx {
 	uint64_t		*segs;		/* at most USB_MAX_DEVICES+1 */
-	size_t			 size;
-	struct usb_dma		 dma;
+	struct usbd_dma_info	 dma;
 };
 
 /* Event ring segment table. */
 struct xhci_erst {
 	struct xhci_erseg	*segs;		/* One segment per event ring */
-	size_t			 size;
-	struct usb_dma		 dma;
+	struct usbd_dma_info	 dma;
 };
 
 struct xhci_scratchpad {
-	struct usb_dma		 table_dma;
-	struct usb_dma		 pages_dma;
+	struct usbd_dma_info	 table_dma;
+	struct usbd_dma_info	 pages_dma;
 	int			 npage;
-
 };
 
 struct xhci_softc {
@@ -109,6 +118,7 @@ struct xhci_softc {
 };
 
 int	xhci_init(struct xhci_softc *);
+void	xhci_config(struct xhci_softc *);
 int	xhci_intr(void *);
 int	xhci_detach(struct device *, int);
 int	xhci_activate(struct device *, int);

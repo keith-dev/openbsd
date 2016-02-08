@@ -1,4 +1,4 @@
-/*	$OpenBSD: apm.c,v 1.27 2012/07/11 13:27:13 deraadt Exp $	*/
+/*	$OpenBSD: apm.c,v 1.29 2015/01/16 06:40:15 deraadt Exp $	*/
 
 /*
  *  Copyright (c) 1996 John T. Kohl
@@ -29,7 +29,7 @@
  * 
  */
 
-#include <sys/param.h>
+#include <sys/types.h>
 #include <sys/sysctl.h>
 #include <sys/socket.h>
 #include <sys/un.h>
@@ -59,7 +59,7 @@ int send_command(int fd, struct apm_command *cmd, struct apm_reply *reply);
 void
 usage(void)
 {
-	fprintf(stderr,"usage: %s [-AabCHLlmPSvZz] [-f sockname]\n",
+	fprintf(stderr,"usage: %s [-AabHLlmPSvZz] [-f sockname]\n",
 	    __progname);
 	exit(1);
 }

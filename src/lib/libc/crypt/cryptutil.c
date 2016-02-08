@@ -1,4 +1,4 @@
-/* $OpenBSD: cryptutil.c,v 1.1 2014/05/12 19:13:14 tedu Exp $ */
+/* $OpenBSD: cryptutil.c,v 1.9 2015/02/24 19:19:32 tedu Exp $ */
 /*
  * Copyright (c) 2014 Ted Unangst <tedu@openbsd.org>
  *
@@ -18,18 +18,19 @@
 #include <unistd.h>
 #include <string.h>
 #include <pwd.h>
+#include <login_cap.h>
 #include <errno.h>
+
+int bcrypt_autorounds(void);
 
 int
 crypt_checkpass(const char *pass, const char *goodhash)
 {
 	char dummy[_PASSWORD_LEN];
-	char *res;
 
 	if (goodhash == NULL) {
 		/* fake it */
-		bcrypt_newhash(pass, 8, dummy, sizeof(dummy));
-		goto fail;
+		goto fake;
 	}
 
 	/* empty password */
@@ -37,18 +38,44 @@ crypt_checkpass(const char *pass, const char *goodhash)
 		return 0;
 
 	if (goodhash[0] == '$' && goodhash[1] == '2') {
-		return bcrypt_checkpass(pass, goodhash);
+		if (bcrypt_checkpass(pass, goodhash))
+			goto fail;
+		return 0;
 	}
 
-	/* have to do it the hard way */
-	res = crypt(pass, goodhash);
-	if (strlen(res) != strlen(goodhash) ||
-	    timingsafe_bcmp(res, goodhash, strlen(goodhash)) != 0) {
-		goto fail;
-	}
-
-	return 0;
+	/* unsupported. fake it. */
+fake:
+	bcrypt_newhash(pass, 8, dummy, sizeof(dummy));
 fail:
 	errno = EACCES;
 	return -1;
+}
+
+int
+crypt_newhash(const char *pass, const char *pref, char *hash, size_t hashlen)
+{
+	int rv = -1;
+	const char *defaultpref = "blowfish,8";
+	const char *errstr;
+	int rounds;
+
+	if (pref == NULL)
+		pref = defaultpref;
+	if (strncmp(pref, "blowfish,", 9) != 0) {
+		errno = EINVAL;
+		goto err;
+	}
+	if (strcmp(pref + 9, "a") == 0) {
+		rounds = bcrypt_autorounds();
+	} else {
+		rounds = strtonum(pref + 9, 4, 31, &errstr);
+		if (errstr) {
+			errno = EINVAL;
+			goto err;
+		}
+	}
+	rv = bcrypt_newhash(pass, rounds, hash, hashlen);
+
+err:
+	return rv;
 }

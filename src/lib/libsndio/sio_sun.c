@@ -1,4 +1,4 @@
-/*	$OpenBSD: sio_sun.c,v 1.11 2014/03/05 20:40:49 ratchov Exp $	*/
+/*	$OpenBSD: sio_sun.c,v 1.14 2015/02/16 06:04:06 ratchov Exp $	*/
 /*
  * Copyright (c) 2008 Alexandre Ratchov <alex@caoua.org>
  *
@@ -13,17 +13,6 @@
  * WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN
  * ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
- */
-/*
- * TODO:
- *
- * remove filling code from sio_sun_write() and create sio_sun_fill()
- *
- * allow block size to be set
- *
- * call hdl->cb_pos() from sio_sun_read() and sio_sun_write(), or better:
- * implement generic blocking sio_read() and sio_write() with poll(2)
- * and use non-blocking sio_ops only
  */
 
 #include <sys/types.h>
@@ -345,7 +334,6 @@ _sio_sun_open(const char *str, unsigned int mode, int nbio)
 
 	switch (*str) {
 	case '/':
-	case ':': /* XXX: for backward compat */
 		str++;
 		break;
 	default:
@@ -363,15 +351,11 @@ _sio_sun_open(const char *str, unsigned int mode, int nbio)
 	else
 		flags = (mode & SIO_PLAY) ? O_WRONLY : O_RDONLY;
 
-	while ((fd = open(path, flags | O_NONBLOCK)) < 0) {
+	while ((fd = open(path, flags | O_NONBLOCK | O_CLOEXEC)) < 0) {
 		if (errno == EINTR)
 			continue;
 		DPERROR(path);
 		goto bad_free;
-	}
-	if (fcntl(fd, F_SETFD, FD_CLOEXEC) < 0) {
-		DPERROR("FD_CLOEXEC");
-		goto bad_close;
 	}
 
 	/*
@@ -717,6 +701,7 @@ sio_sun_getpar(struct sio_hdl *sh, struct sio_par *par)
 	    aui.play.block_size / (par->bps * par->pchan);
 	par->appbufsz = aui.hiwat * par->round;
 	par->bufsz = par->appbufsz;
+	par->xrun = SIO_IGNORE;
 	return 1;
 }
 

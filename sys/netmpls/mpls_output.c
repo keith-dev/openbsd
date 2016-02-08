@@ -1,4 +1,4 @@
-/* $OpenBSD: mpls_output.c,v 1.17 2014/07/22 11:06:10 mpi Exp $ */
+/* $OpenBSD: mpls_output.c,v 1.20 2014/12/23 03:24:08 tedu Exp $ */
 
 /*
  * Copyright (c) 2008 Claudio Jeker <claudio@openbsd.org>
@@ -23,14 +23,13 @@
 #include <sys/socket.h>
 
 #include <net/if.h>
+#include <net/if_var.h>
 #include <net/route.h>
 
 #include <netmpls/mpls.h>
 
-#ifdef INET
 #include <netinet/in.h>
 #include <netinet/ip.h>
-#endif
 
 #ifdef INET6
 #include <netinet/ip6.h>
@@ -121,7 +120,7 @@ mpls_output(struct ifnet *ifp0, struct mbuf *m, struct sockaddr *dst,
 			break;
 
 		smpls->smpls_label = shim->shim_label & MPLS_LABEL_MASK;
-		rt = rtalloc1(smplstosa(smpls), RT_REPORT, 0);
+		rt = rtalloc(smplstosa(smpls), RT_REPORT|RT_RESOLVE, 0);
 		if (rt == NULL) {
 			/* no entry for this label */
 #ifdef MPLS_DEBUG
@@ -168,7 +167,6 @@ bad:
 void
 mpls_do_cksum(struct mbuf *m)
 {
-#ifdef INET
 	struct ip *ip;
 	u_int16_t hlen;
 
@@ -180,7 +178,6 @@ mpls_do_cksum(struct mbuf *m)
 		ip->ip_sum = in_cksum(m, hlen);
 		m->m_pkthdr.csum_flags &= ~M_IPV4_CSUM_OUT;
 	}
-#endif
 }
 
 u_int8_t

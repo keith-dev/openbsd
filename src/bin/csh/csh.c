@@ -1,4 +1,4 @@
-/*	$OpenBSD: csh.c,v 1.25 2009/10/27 23:59:21 deraadt Exp $	*/
+/*	$OpenBSD: csh.c,v 1.28 2015/02/08 05:51:37 tedu Exp $	*/
 /*	$NetBSD: csh.c,v 1.14 1995/04/29 23:21:28 mycroft Exp $	*/
 
 /*-
@@ -33,7 +33,6 @@
 #include <sys/types.h>
 #include <sys/ioctl.h>
 #include <sys/stat.h>
-#include <sys/param.h>
 #include <fcntl.h>
 #include <errno.h>
 #include <pwd.h>
@@ -41,6 +40,7 @@
 #include <string.h>
 #include <locale.h>
 #include <unistd.h>
+#include <limits.h>
 #include <vis.h>
 #include <stdarg.h>
 
@@ -207,7 +207,7 @@ main(int argc, char *argv[])
      */
     set(STRstatus, Strsave(STR0));
 
-    if ((tcp = getenv("HOME")) != NULL && strlen(tcp) < MAXPATHLEN)
+    if ((tcp = getenv("HOME")) != NULL && strlen(tcp) < PATH_MAX)
 	cp = SAVE(tcp);
     else
 	cp = NULL;
@@ -625,7 +625,7 @@ srccat(Char *cp, Char *dp)
     Char *ep = Strspl(cp, dp);
     char   *ptr = short2str(ep);
 
-    xfree((ptr_t) ep);
+    xfree(ep);
     return srcfile(ptr, mflag ? 0 : 1, 0);
 }
 
@@ -734,8 +734,8 @@ srcunit(int unit, bool onlyown, bool hflg)
 	/* We made it to the new state... free up its storage */
 	/* This code could get run twice but xfree doesn't care */
 	for (i = 0; i < fblocks; i++)
-	    xfree((ptr_t) fbuf[i]);
-	xfree((ptr_t) fbuf);
+	    xfree(fbuf[i]);
+	xfree(fbuf);
 
 	/* Reset input arena */
 	memcpy(&B, &saveB, sizeof(B));
@@ -1035,7 +1035,7 @@ process(bool catch)
 	    (void) fflush(cshout);
 	}
 	if (seterr) {
-	    xfree((ptr_t) seterr);
+	    xfree(seterr);
 	    seterr = NULL;
 	}
 
@@ -1115,7 +1115,7 @@ dosource(Char **v, struct command *t)
     (void) Strlcpy(buf, *v, sizeof buf/sizeof(Char));
     f = globone(buf, G_ERROR);
     (void) strlcpy(sbuf, short2str(f), sizeof sbuf);
-    xfree((ptr_t) f);
+    xfree(f);
     if (!srcfile(sbuf, 0, hflg) && !hflg)
 	stderror(ERR_SYSTEM, sbuf, strerror(errno));
 }
@@ -1288,7 +1288,7 @@ defaultpath(void)
     Char  **blk, **blkp;
     struct stat stb;
 
-    blkp = blk = (Char **) xmalloc((size_t) sizeof(Char *) * 10);
+    blkp = blk = xreallocarray(NULL, 10, sizeof(Char *));
 
 #define DIRAPPEND(a)  \
 	if (stat(ptr = a, &stb) == 0 && S_ISDIR(stb.st_mode)) \

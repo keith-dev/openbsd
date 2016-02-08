@@ -1,4 +1,4 @@
-/*	$OpenBSD: getgrent.c,v 1.40 2014/03/12 10:54:36 schwarze Exp $ */
+/*	$OpenBSD: getgrent.c,v 1.42 2015/01/16 16:48:51 deraadt Exp $ */
 /*
  * Copyright (c) 1989, 1993
  *	The Regents of the University of California.  All rights reserved.
@@ -30,10 +30,10 @@
  */
 
 #include <sys/types.h>
-#include <sys/param.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <limits.h>
 #include <grp.h>
 #include <errno.h>
 #ifdef YP
@@ -207,7 +207,7 @@ start_gr(void)
 #endif
 		return(1);
 	}
-	return((_gr_fp = fopen(_PATH_GROUP, "r")) ? 1 : 0);
+	return((_gr_fp = fopen(_PATH_GROUP, "re")) ? 1 : 0);
 }
 
 void

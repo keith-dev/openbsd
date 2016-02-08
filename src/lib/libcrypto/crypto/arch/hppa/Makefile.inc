@@ -1,4 +1,4 @@
-# $OpenBSD: Makefile.inc,v 1.4 2014/05/02 22:23:00 miod Exp $
+# $OpenBSD: Makefile.inc,v 1.8 2015/03/05 20:35:28 miod Exp $
 
 # hppa-specific libcrypto build rules
 
@@ -12,6 +12,8 @@ SRCS+= bf_enc.c
 SRCS+= bn_asm.c
 SSLASM+= bn parisc-mont parisc-mont
 CFLAGS+= -DOPENSSL_BN_ASM_MONT -DBN_DIV2W
+# camellia
+SRCS+= camellia.c cmll_cbc.c cmll_misc.c
 # des
 SRCS+= des_enc.c fcrypt_b.c
 # modes
@@ -28,10 +30,12 @@ SRCS+= rc4_enc.c rc4_skey.c
 # sha
 CFLAGS+= -DSHA1_ASM
 SSLASM+= sha sha1-parisc sha1-parisc
+.if 0	# sha512 subtly broken, sha256 probably as well
 CFLAGS+= -DSHA256_ASM
 SSLASM+= sha sha512-parisc sha256-parisc
 CFLAGS+= -DSHA512_ASM
 SSLASM+= sha sha512-parisc sha512-parisc
+.endif
 # whrlpool
 SRCS+= wp_block.c
 

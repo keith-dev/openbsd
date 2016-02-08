@@ -1,4 +1,4 @@
-/*	$OpenBSD: yp.c,v 1.12 2013/10/01 12:00:34 deraadt Exp $ */
+/*	$OpenBSD: yp.c,v 1.14 2015/02/11 01:26:00 pelikan Exp $ */
 /*
  * Copyright (c) 2008 Pierre-Yves Ritschard <pyr@openbsd.org>
  *
@@ -16,7 +16,6 @@
  */
 
 #include <sys/types.h>
-#include <sys/param.h>
 #include <sys/queue.h>
 #include <sys/socket.h>
 #include <sys/select.h>
@@ -33,6 +32,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <limits.h>
 
 #include <rpc/rpc.h>
 #include <rpc/xdr.h>
@@ -209,7 +209,7 @@ yp_dispatch(struct svc_req *req, SVCXPRT *trans)
 		if (yp_check(req) == -1)
 			return;
 		svcerr_noproc(trans);
-		break;
+		return;
 	case YPPROC_CLEAR:
 		log_debug("ypproc_clear");
 		if (yp_check(req) == -1)

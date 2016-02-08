@@ -1,4 +1,4 @@
-/* $OpenBSD: cmd-choose-buffer.c,v 1.18 2014/05/13 07:34:35 nicm Exp $ */
+/* $OpenBSD: cmd-choose-buffer.c,v 1.21 2015/02/05 10:29:43 nicm Exp $ */
 
 /*
  * Copyright (c) 2010 Nicholas Marriott <nicm@users.sourceforge.net>
@@ -27,6 +27,9 @@
  * Enter choice mode to choose a buffer.
  */
 
+#define CHOOSE_BUFFER_TEMPLATE						\
+	"#{buffer_name}: #{buffer_size} bytes: #{buffer_sample}"
+
 enum cmd_retval	 cmd_choose_buffer_exec(struct cmd *, struct cmd_q *);
 
 const struct cmd_entry cmd_choose_buffer_entry = {
@@ -34,7 +37,6 @@ const struct cmd_entry cmd_choose_buffer_entry = {
 	"F:t:", 0, 1,
 	CMD_TARGET_WINDOW_USAGE " [-F format] [template]",
 	0,
-	NULL,
 	cmd_choose_buffer_exec
 };
 
@@ -81,7 +83,7 @@ cmd_choose_buffer_exec(struct cmd *self, struct cmd_q *cmdq)
 		cdata->idx = idx;
 
 		cdata->ft_template = xstrdup(template);
-		format_paste_buffer(cdata->ft, pb, utf8flag);
+		format_defaults_paste_buffer(cdata->ft, pb, utf8flag);
 
 		xasprintf(&action_data, "%s", pb->name);
 		cdata->command = cmd_template_replace(action, action_data, 1);

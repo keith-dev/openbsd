@@ -1,4 +1,4 @@
-/* $OpenBSD: imxenet.c,v 1.6 2014/07/12 20:07:34 brad Exp $ */
+/* $OpenBSD: imxenet.c,v 1.10 2015/01/17 02:57:16 jsg Exp $ */
 /*
  * Copyright (c) 2012-2013 Patrick Wildt <patrick@blueri.se>
  *
@@ -37,12 +37,8 @@
 #include <net/bpf.h>
 #endif
 
-#ifdef INET
 #include <netinet/in.h>
-#include <netinet/in_systm.h>
-#include <netinet/ip.h>
 #include <netinet/if_ether.h>
-#endif
 
 #include <dev/mii/mii.h>
 #include <dev/mii/miivar.h>
@@ -136,10 +132,19 @@
 #define ENET_MII_CLK		2500
 #define ENET_ALIGNMENT		16
 
-#define ENET_SABRELITE_PHY	6
-#define ENET_PHYFLEX_PHY	3
-#define ENET_PHYFLEX_PHY_RST	87
-#define ENET_WANDBOARD_PHY	1
+#define ENET_HUMMINGBOARD_PHY			0
+#define ENET_HUMMINGBOARD_PHY_RST		(3*32+15)
+#define ENET_SABRELITE_PHY			6
+#define ENET_SABRELITE_PHY_RST			(2*32+23)
+#define ENET_NITROGEN6X_PHY			6
+#define ENET_NITROGEN6X_PHY_RST			(0*32+27)
+#define ENET_UDOO_PHY				6
+#define ENET_UDOO_PHY_RST			(2*32+23)
+#define ENET_UDOO_PWR				(1*32+31)
+#define ENET_UTILITE_PHY			0
+#define ENET_WANDBOARD_PHY			1
+#define ENET_PHYFLEX_PHY			3
+#define ENET_PHYFLEX_PHY_RST			(2*32+23)
 
 #define HREAD4(sc, reg)							\
 	(bus_space_read_4((sc)->sc_iot, (sc)->sc_ioh, (reg)))
@@ -225,13 +230,39 @@ imxenet_attach(struct device *parent, struct device *self, void *args)
 
 	switch (board_id)
 	{
+	case BOARD_ID_IMX6_CUBOXI:
+	case BOARD_ID_IMX6_HUMMINGBOARD:
+		/* We need to reset the AR8035 PHY twice. */
+		imxgpio_clear_bit(ENET_HUMMINGBOARD_PHY_RST);
+		imxgpio_set_dir(ENET_HUMMINGBOARD_PHY_RST, IMXGPIO_DIR_OUT);
+		delay(2000);
+		imxgpio_set_bit(ENET_HUMMINGBOARD_PHY_RST);
+		delay(2000);
+		imxgpio_clear_bit(ENET_HUMMINGBOARD_PHY_RST);
+		delay(2000);
+		imxgpio_set_bit(ENET_HUMMINGBOARD_PHY_RST);
+		delay(2000);
+		break;
 	case BOARD_ID_IMX6_PHYFLEX:
 	case BOARD_ID_IMX6_SABRELITE:
 		/* phyFLEX i.MX6 and SABRE Lite PHY reset */
-		imxgpio_set_dir(ENET_PHYFLEX_PHY_RST, IMXGPIO_DIR_OUT);
-		delay(10);
-		imxgpio_set_bit(ENET_PHYFLEX_PHY_RST);
-		delay(10);
+		imxgpio_clear_bit(ENET_SABRELITE_PHY_RST);
+		imxgpio_set_dir(ENET_SABRELITE_PHY_RST, IMXGPIO_DIR_OUT);
+		imxgpio_clear_bit(ENET_NITROGEN6X_PHY_RST);
+		imxgpio_set_dir(ENET_NITROGEN6X_PHY_RST, IMXGPIO_DIR_OUT);
+		delay(1000 * 10);
+		imxgpio_set_bit(ENET_SABRELITE_PHY_RST);
+		imxgpio_set_bit(ENET_NITROGEN6X_PHY_RST);
+		delay(100);
+		break;
+	case BOARD_ID_IMX6_UDOO:
+		imxgpio_set_bit(ENET_UDOO_PWR);
+		imxgpio_set_dir(ENET_UDOO_PWR, IMXGPIO_DIR_OUT);
+		imxgpio_clear_bit(ENET_UDOO_PHY_RST);
+		imxgpio_set_dir(ENET_UDOO_PHY_RST, IMXGPIO_DIR_OUT);
+		delay(1000 * 1);
+		imxgpio_set_bit(ENET_UDOO_PHY_RST);
+		delay(1000 * 100);
 		break;
 	}
 
@@ -357,11 +388,21 @@ imxenet_chip_init(struct imxenet_softc *sc)
 
 	switch (board_id)
 	{
-	case BOARD_ID_IMX6_SABRELITE:
-		phy = ENET_SABRELITE_PHY;
+	case BOARD_ID_IMX6_CUBOXI:
+	case BOARD_ID_IMX6_HUMMINGBOARD:
+		phy = ENET_HUMMINGBOARD_PHY;
 		break;
 	case BOARD_ID_IMX6_PHYFLEX:
 		phy = ENET_PHYFLEX_PHY;
+		break;
+	case BOARD_ID_IMX6_SABRELITE:
+		phy = ENET_SABRELITE_PHY;
+		break;
+	case BOARD_ID_IMX6_UDOO:
+		phy = ENET_UDOO_PHY;
+		break;
+	case BOARD_ID_IMX6_UTILITE:
+		phy = ENET_UTILITE_PHY;
 		break;
 	case BOARD_ID_IMX6_WANDBOARD:
 		phy = ENET_WANDBOARD_PHY;
@@ -370,8 +411,36 @@ imxenet_chip_init(struct imxenet_softc *sc)
 
 	switch (board_id)
 	{
+	case BOARD_ID_IMX6_UDOO:	/* Micrel KSZ9031 */
+		/* prefer master mode */
+		imxenet_miibus_writereg(dev, phy, 0x9, 0x1c00);
+
+		/* control data pad skew */
+		imxenet_miibus_writereg(dev, phy, 0x0d, 0x0002);
+		imxenet_miibus_writereg(dev, phy, 0x0e, 0x0004);
+		imxenet_miibus_writereg(dev, phy, 0x0d, 0x4002);
+		imxenet_miibus_writereg(dev, phy, 0x0e, 0x0000);
+
+		/* rx data pad skew */
+		imxenet_miibus_writereg(dev, phy, 0x0d, 0x0002);
+		imxenet_miibus_writereg(dev, phy, 0x0e, 0x0005);
+		imxenet_miibus_writereg(dev, phy, 0x0d, 0x4002);
+		imxenet_miibus_writereg(dev, phy, 0x0e, 0x0000);
+
+		/* tx data pad skew */
+		imxenet_miibus_writereg(dev, phy, 0x0d, 0x0002);
+		imxenet_miibus_writereg(dev, phy, 0x0e, 0x0006);
+		imxenet_miibus_writereg(dev, phy, 0x0d, 0x4002);
+		imxenet_miibus_writereg(dev, phy, 0x0e, 0x0000);
+
+		/* gtx and rx data pad skew */
+		imxenet_miibus_writereg(dev, phy, 0x0d, 0x0002);
+		imxenet_miibus_writereg(dev, phy, 0x0e, 0x0008);
+		imxenet_miibus_writereg(dev, phy, 0x0d, 0x4002);
+		imxenet_miibus_writereg(dev, phy, 0x0e, 0x03ff);
+		break;
 	case BOARD_ID_IMX6_PHYFLEX:
-	case BOARD_ID_IMX6_SABRELITE:
+	case BOARD_ID_IMX6_SABRELITE:	/* Micrel KSZ9021 */
 		/* prefer master mode */
 		imxenet_miibus_writereg(dev, phy, 0x9, 0x1f00);
 
@@ -391,7 +460,10 @@ imxenet_chip_init(struct imxenet_softc *sc)
 		/* enable all interrupts */
 		imxenet_miibus_writereg(dev, phy, 0x1b, 0xff00);
 		break;
-	case BOARD_ID_IMX6_WANDBOARD:
+	case BOARD_ID_IMX6_CUBOXI:		/* AR8035 */
+	case BOARD_ID_IMX6_HUMMINGBOARD:	/* AR8035 */
+	case BOARD_ID_IMX6_UTILITE:
+	case BOARD_ID_IMX6_WANDBOARD:		/* AR8031 */
 		/* disable SmartEEE */
 		imxenet_miibus_writereg(dev, phy, 0x0d, 0x0003);
 		imxenet_miibus_writereg(dev, phy, 0x0e, 0x805d);
@@ -611,10 +683,8 @@ imxenet_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 		ifp->if_flags |= IFF_UP;
 		if (!(ifp->if_flags & IFF_RUNNING))
 			imxenet_init(sc);
-#ifdef INET
 		if (ifa->ifa_addr->sa_family == AF_INET)
 			arp_ifinit(&sc->sc_ac, ifa);
-#endif
 		break;
 
 	case SIOCSIFFLAGS:

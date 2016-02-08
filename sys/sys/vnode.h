@@ -1,4 +1,4 @@
-/*	$OpenBSD: vnode.h,v 1.124 2014/04/08 18:48:41 beck Exp $	*/
+/*	$OpenBSD: vnode.h,v 1.129 2015/01/09 05:01:57 tedu Exp $	*/
 /*	$NetBSD: vnode.h,v 1.38 1996/02/29 20:59:05 cgd Exp $	*/
 
 /*
@@ -41,9 +41,6 @@
 #include <sys/selinfo.h>
 #include <sys/tree.h>
 
-#include <uvm/uvm_extern.h>
-#include <uvm/uvm_vnode.h>
-
 /*
  * The vnode is the focus of all file activity in UNIX.  There is a
  * unique vnode allocated for each active file, each current directory,
@@ -74,7 +71,7 @@ enum vtagtype	{
 
 #define	VTAG_NAMES \
     "NON", "UFS", "NFS", "MFS", "MSDOSFS",			\
-    "PORTAL", "PROCFS", "AFS", "ISOFS", "ADOSFS",		\
+    "unused", "unused", "unused", "ISOFS", "unused",		\
     "EXT2FS", "VFS", "NTFS", "UDF", "FUSEFS", "TMPFS"
 
 /*
@@ -86,10 +83,12 @@ LIST_HEAD(buflists, buf);
 RB_HEAD(buf_rb_bufs, buf);
 RB_HEAD(namecache_rb_cache, namecache);
 
+struct uvm_vnode;
 struct vnode {
-	struct uvm_vnode v_uvm;			/* uvm data */
+	struct uvm_vnode *v_uvm;		/* uvm data */
 	struct vops *v_op;			/* vnode operations vector */
 	enum	vtype v_type;			/* vnode type */
+	enum	vtagtype v_tag;			/* type of underlying data */
 	u_int	v_flag;				/* vnode flags (see below) */
 	u_int   v_usecount;			/* reference count of users */
 	/* reference count of writers */
@@ -117,7 +116,6 @@ struct vnode {
 	struct namecache_rb_cache v_nc_tree;
 	TAILQ_HEAD(, namecache) v_cache_dst;	 /* cache entries to us */
 
-	enum	vtagtype v_tag;			/* type of underlying data */
 	void	*v_data;			/* private data for fs */
 	struct	selinfo v_selectinfo;		/* identity of poller(s) */
 };
@@ -207,14 +205,6 @@ struct vattr {
  */
 #define	VNOVAL	(-1)
 
-/*
- * Structure returned by the KERN_VNODE sysctl
- */
-struct e_vnode {
-	struct vnode *vptr;
-	struct vnode vnode;
-};
-
 #ifdef _KERNEL
 /*
  * Convert between vnode types and inode formats (since POSIX.1
@@ -252,7 +242,7 @@ extern struct freelst vnode_free_list;	/* vnode free list */
  * Global vnode data.
  */
 extern	struct vnode *rootvnode;	/* root (i.e. "/") vnode */
-extern	int desiredvnodes;		/* XXX number of vnodes desired */
+extern	int initialvnodes;		/* XXX number of vnodes to start */
 extern	int maxvnodes;			/* XXX number of vnodes to allocate */
 extern	int syncdelay;			/* seconds to delay syncing vnodes */
 extern	int rushjob;			/* # of slots syncer should run ASAP */
@@ -661,6 +651,13 @@ void	vn_syncer_add_to_worklist(struct vnode *, int);
 int	vn_isdisk(struct vnode *, int *);
 int	softdep_fsync(struct vnode *);
 int 	getvnode(struct filedesc *, int, struct file **);
+
+/* uvm */
+void	uvm_vnp_setsize(struct vnode *, off_t);
+void	uvm_vnp_sync(struct mount *);
+void	uvm_vnp_terminate(struct vnode *);
+int	uvm_vnp_uncache(struct vnode *);
+
 
 #endif /* _KERNEL */
 #endif /* _SYS_VNODE_H_ */

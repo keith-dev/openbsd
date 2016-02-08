@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_vio.c,v 1.18 2014/07/12 18:48:52 tedu Exp $	*/
+/*	$OpenBSD: if_vio.c,v 1.24 2015/02/09 03:09:57 dlg Exp $	*/
 
 /*
  * Copyright (c) 2012 Stefan Fritsch, Alexander Fiveg.
@@ -48,10 +48,8 @@
 #include <net/if_media.h>
 #include <net/if_types.h>
 
-#ifdef INET
 #include <netinet/in.h>
 #include <netinet/if_ether.h>
-#endif
 
 #if NBPFILTER > 0
 #include <net/bpf.h>
@@ -431,13 +429,15 @@ vio_alloc_mem(struct vio_softc *sc)
 		sc->sc_ctrl_mac_tbl_mc = (void*)(kva + offset);
 	}
 
-	allocsize = (rxqsize + txqsize) *
-	    (2 * sizeof(bus_dmamap_t) + sizeof(struct mbuf *));
-	sc->sc_arrays = malloc(allocsize, M_DEVBUF, M_WAITOK|M_CANFAIL|M_ZERO);
+	sc->sc_arrays = mallocarray(rxqsize + txqsize,
+	    2 * sizeof(bus_dmamap_t) + sizeof(struct mbuf *), M_DEVBUF,
+	    M_WAITOK | M_CANFAIL | M_ZERO);
 	if (sc->sc_arrays == NULL) {
 		printf("unable to allocate mem for dmamaps\n");
 		goto err_hdr;
 	}
+	allocsize = (rxqsize + txqsize) *
+	    (2 * sizeof(bus_dmamap_t) + sizeof(struct mbuf *));
 
 	sc->sc_tx_dmamaps = sc->sc_arrays + rxqsize;
 	sc->sc_rx_mbufs = (void*) (sc->sc_tx_dmamaps + txqsize);
@@ -667,7 +667,8 @@ vio_init(struct ifnet *ifp)
 	struct vio_softc *sc = ifp->if_softc;
 
 	vio_stop(ifp, 0);
-	if_rxr_init(&sc->sc_rx_ring, 4, sc->sc_vq[VQRX].vq_num);
+	if_rxr_init(&sc->sc_rx_ring, 2 * ((ifp->if_hardmtu / MCLBYTES) + 1),
+	    sc->sc_vq[VQRX].vq_num);
 	vio_populate_rx_mbufs(sc);
 	ifp->if_flags |= IFF_RUNNING;
 	ifp->if_flags &= ~IFF_OACTIVE;
@@ -822,8 +823,9 @@ int
 vio_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 {
 	struct vio_softc *sc = ifp->if_softc;
-	int s, r = 0;
 	struct ifaddr *ifa = (struct ifaddr *)data;
+	struct ifreq *ifr = (struct ifreq *)data;
+	int s, r = 0;
 
 	s = splnet();
 	switch (cmd) {
@@ -831,10 +833,8 @@ vio_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 		ifp->if_flags |= IFF_UP;
 		if (!(ifp->if_flags & IFF_RUNNING))
 			vio_init(ifp);
-#ifdef INET
 		if (ifa->ifa_addr->sa_family == AF_INET)
 			arp_ifinit(&sc->sc_ac, ifa);
-#endif
 		break;
 	case SIOCSIFFLAGS:
 		if (ifp->if_flags & IFF_UP) {
@@ -853,8 +853,11 @@ vio_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 		break;
 	case SIOCGIFMEDIA:
 	case SIOCSIFMEDIA:
-		r = ifmedia_ioctl(ifp, (struct ifreq *)data, &sc->sc_media,
-		    cmd);
+		r = ifmedia_ioctl(ifp, ifr, &sc->sc_media, cmd);
+		break;
+	case SIOCGIFRXR:
+		r = if_rxr_ioctl((struct if_rxrinfo *)ifr->ifr_data,
+		    NULL, MCLBYTES, &sc->sc_rx_ring);
 		break;
 	default:
 		r = ether_ioctl(ifp, &sc->sc_ac, cmd, data);
@@ -970,6 +973,7 @@ vio_rxeof(struct vio_softc *sc)
 	struct virtio_softc *vsc = sc->sc_virtio;
 	struct virtqueue *vq = &sc->sc_vq[VQRX];
 	struct ifnet *ifp = &sc->sc_ac.ac_if;
+	struct mbuf_list ml = MBUF_LIST_INITIALIZER();
 	struct mbuf *m, *m0 = NULL, *mlast;
 	int r = 0;
 	int slot, len, bufs_left;
@@ -985,7 +989,6 @@ vio_rxeof(struct vio_softc *sc)
 		sc->sc_rx_mbufs[slot] = NULL;
 		virtio_dequeue_commit(vq, slot);
 		if_rxr_put(&sc->sc_rx_ring, 1);
-		m->m_pkthdr.rcvif = ifp;
 		m->m_len = m->m_pkthdr.len = len;
 		m->m_pkthdr.csum_flags = 0;
 		if (m0 == NULL) {
@@ -1007,11 +1010,7 @@ vio_rxeof(struct vio_softc *sc)
 
 		if (bufs_left == 0) {
 			ifp->if_ipackets++;
-#if NBPFILTER > 0
-			if (ifp->if_bpf)
-				bpf_mtap(ifp->if_bpf, m0, BPF_DIRECTION_IN);
-#endif
-			ether_input_mbuf(ifp, m0);
+			ml_enqueue(&ml, m0);
 			m0 = NULL;
 		}
 	}
@@ -1021,6 +1020,8 @@ vio_rxeof(struct vio_softc *sc)
 		ifp->if_ierrors++;
 		m_freem(m0);
 	}
+
+	if_input(ifp, &ml);
 	return r;
 }
 

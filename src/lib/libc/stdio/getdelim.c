@@ -1,4 +1,4 @@
-/*	$OpenBSD: getdelim.c,v 1.1 2012/03/21 23:44:35 fgsch Exp $	*/
+/*	$OpenBSD: getdelim.c,v 1.3 2015/02/06 23:21:58 millert Exp $	*/
 /* $NetBSD: getdelim.c,v 1.13 2011/07/22 23:12:30 joerg Exp $ */
 
 /*
@@ -30,6 +30,7 @@
 
 #include <errno.h>
 #include <limits.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -78,13 +79,12 @@ getdelim(char **__restrict buf, size_t *__restrict buflen,
 		else
 			len = (p - fp->_p) + 1;
 
-		newlen = off + len;
 		/* Ensure we can handle it */
-		if (newlen < off || newlen > SSIZE_MAX) {
+		if (off > SSIZE_MAX || len + 1 > SSIZE_MAX - off) {
 			errno = EOVERFLOW;
 			goto error;
 		}
-		newlen++; /* reserve space for the NULL terminator */
+		newlen = off + len + 1; /* reserve space for NUL terminator */
 		if (newlen > *buflen) {
 			if (newlen < MINBUF)
 				newlen = MINBUF;
@@ -97,7 +97,7 @@ getdelim(char **__restrict buf, size_t *__restrict buflen,
 				newlen |= newlen >> 4;
 				newlen |= newlen >> 8;
 				newlen |= newlen >> 16;
-#if SIZE_T_MAX > 0xffffffffU
+#if SIZE_MAX > 0xffffffffU
 				newlen |= newlen >> 32;
 #endif
 				newlen++;

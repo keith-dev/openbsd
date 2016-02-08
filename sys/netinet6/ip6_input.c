@@ -1,4 +1,4 @@
-/*	$OpenBSD: ip6_input.c,v 1.128 2014/07/22 11:06:10 mpi Exp $	*/
+/*	$OpenBSD: ip6_input.c,v 1.139 2015/02/09 12:23:22 claudio Exp $	*/
 /*	$KAME: ip6_input.c,v 1.188 2001/03/29 05:34:31 itojun Exp $	*/
 
 /*
@@ -79,6 +79,7 @@
 #include <sys/syslog.h>
 
 #include <net/if.h>
+#include <net/if_var.h>
 #include <net/if_types.h>
 #include <net/if_dl.h>
 #include <net/route.h>
@@ -86,16 +87,13 @@
 
 #include <netinet/in.h>
 
-#ifdef INET
 #include <netinet/ip.h>
-#endif
 
 #include <netinet/in_pcb.h>
 #include <netinet6/in6_var.h>
 #include <netinet/ip6.h>
 #include <netinet6/ip6_var.h>
 #include <netinet/icmp6.h>
-#include <netinet6/in6_ifattach.h>
 #include <netinet6/nd6.h>
 
 #include <netinet6/ip6protosw.h>
@@ -192,8 +190,8 @@ ip6_input(struct mbuf *m)
 	struct ifnet *ifp;
 	struct ip6_hdr *ip6;
 	int off, nest;
-	u_int32_t plen;
-	u_int32_t rtalert = ~0;
+	u_int16_t src_scope, dst_scope;
+	u_int32_t plen, rtalert = ~0;
 	int nxt, ours = 0;
 	struct ifnet *deliverifp = NULL;
 #if NPF > 0
@@ -267,6 +265,13 @@ ip6_input(struct mbuf *m)
 		    in6_ifstat_inc(ifp, ifs6_in_addrerr);
 		    goto bad;
 	}
+	/* Drop packets if interface ID portion is already filled. */
+	if (((IN6_IS_SCOPE_EMBED(&ip6->ip6_src) && ip6->ip6_src.s6_addr16[1]) ||
+	    (IN6_IS_SCOPE_EMBED(&ip6->ip6_dst) && ip6->ip6_dst.s6_addr16[1])) &&
+	    (ifp->if_flags & IFF_LOOPBACK) == 0) {
+		ip6stat.ip6s_badscope++;
+		goto bad;
+	}
 	if (IN6_IS_ADDR_MC_INTFACELOCAL(&ip6->ip6_dst) &&
 	    !(m->m_flags & M_LOOP)) {
 		/*
@@ -314,6 +319,22 @@ ip6_input(struct mbuf *m)
 	}
 #endif
 
+	/*
+	 * If the packet has been received on a loopback interface it
+	 * can be destinated to any local address, not necessarily to
+	 * an address configured on `ifp'.
+	 */
+	if (ifp->if_flags & IFF_LOOPBACK) {
+		if (IN6_IS_SCOPE_EMBED(&ip6->ip6_src)) {
+			src_scope = ip6->ip6_src.s6_addr16[1];
+			ip6->ip6_src.s6_addr16[1] = 0;
+		}
+		if (IN6_IS_SCOPE_EMBED(&ip6->ip6_dst)) {
+			dst_scope = ip6->ip6_dst.s6_addr16[1];
+			ip6->ip6_dst.s6_addr16[1] = 0;
+		}
+	}
+
 #if NPF > 0
         /*
          * Packet filter
@@ -327,6 +348,22 @@ ip6_input(struct mbuf *m)
 	ip6 = mtod(m, struct ip6_hdr *);
 	srcrt = !IN6_ARE_ADDR_EQUAL(&odst, &ip6->ip6_dst);
 #endif
+
+	/*
+	 * Without embedded scope ID we cannot find link-local
+	 * addresses in the routing table.
+	 */
+	if (ifp->if_flags & IFF_LOOPBACK) {
+		if (IN6_IS_SCOPE_EMBED(&ip6->ip6_src))
+			ip6->ip6_src.s6_addr16[1] = src_scope;
+		if (IN6_IS_SCOPE_EMBED(&ip6->ip6_dst))
+			ip6->ip6_dst.s6_addr16[1] = dst_scope;
+	} else {
+		if (IN6_IS_SCOPE_EMBED(&ip6->ip6_src))
+			ip6->ip6_src.s6_addr16[1] = htons(ifp->if_index);
+		if (IN6_IS_SCOPE_EMBED(&ip6->ip6_dst))
+			ip6->ip6_dst.s6_addr16[1] = htons(ifp->if_index);
+	}
 
 	/*
 	 * Be more secure than RFC5095 and scan for type 0 routing headers.
@@ -349,43 +386,6 @@ ip6_input(struct mbuf *m)
 		goto hbhcheck;
 	}
 
-	/* drop packets if interface ID portion is already filled */
-	if ((IN6_IS_SCOPE_EMBED(&ip6->ip6_src) && ip6->ip6_src.s6_addr16[1]) ||
-	    (IN6_IS_SCOPE_EMBED(&ip6->ip6_dst) && ip6->ip6_dst.s6_addr16[1])) {
-		if ((ifp->if_flags & IFF_LOOPBACK) == 0) {
-			ip6stat.ip6s_badscope++;
-			goto bad;
-		}
-	}
-
-	if (IN6_IS_SCOPE_EMBED(&ip6->ip6_src))
-		ip6->ip6_src.s6_addr16[1] = htons(ifp->if_index);
-	if (IN6_IS_SCOPE_EMBED(&ip6->ip6_dst))
-		ip6->ip6_dst.s6_addr16[1] = htons(ifp->if_index);
-
-	/*
-	 * We use rt->rt_ifp to determine if the address is ours or not.
-	 * If rt_ifp is lo0, the address is ours.
-	 * The problem here is, rt->rt_ifp for fe80::%lo0/64 is set to lo0,
-	 * so any address under fe80::%lo0/64 will be mistakenly considered
-	 * local.  The special case is supplied to handle the case properly
-	 * by actually looking at interface addresses
-	 * (using in6ifa_ifpwithaddr).
-	 */
-	if ((ifp->if_flags & IFF_LOOPBACK) != 0 &&
-	    IN6_IS_ADDR_LINKLOCAL(&ip6->ip6_dst)) {
-		if (!in6ifa_ifpwithaddr(ifp, &ip6->ip6_dst)) {
-			icmp6_error(m, ICMP6_DST_UNREACH,
-			    ICMP6_DST_UNREACH_ADDR, 0);
-			/* m is already freed */
-			return;
-		}
-
-		ours = 1;
-		deliverifp = ifp;
-		goto hbhcheck;
-	}
-
 	if (m->m_pkthdr.pf.flags & PF_TAG_DIVERTED) {
 		ours = 1;
 		deliverifp = ifp;
@@ -397,6 +397,13 @@ ip6_input(struct mbuf *m)
 	 */
 	if (IN6_IS_ADDR_MULTICAST(&ip6->ip6_dst)) {
 	  	struct	in6_multi *in6m = 0;
+
+		/*
+		 * Make sure M_MCAST is set.  It should theoretically
+		 * already be there, but let's play safe because upper
+		 * layers check for this flag.
+		 */
+		m->m_flags |= M_MCAST;
 
 		in6_ifstat_inc(ifp, ifs6_in_mcast);
 		/*
@@ -439,8 +446,8 @@ ip6_input(struct mbuf *m)
 		if (ip6_forward_rt.ro_rt) {
 			/* route is down or destination is different */
 			ip6stat.ip6s_forward_cachemiss++;
-			RTFREE(ip6_forward_rt.ro_rt);
-			ip6_forward_rt.ro_rt = 0;
+			rtfree(ip6_forward_rt.ro_rt);
+			ip6_forward_rt.ro_rt = NULL;
 		}
 
 		bzero(&ip6_forward_rt.ro_dst, sizeof(struct sockaddr_in6));
@@ -449,23 +456,18 @@ ip6_input(struct mbuf *m)
 		ip6_forward_rt.ro_dst.sin6_addr = ip6->ip6_dst;
 		ip6_forward_rt.ro_tableid = rtableid;
 
-		rtalloc_mpath((struct route *)&ip6_forward_rt,
-		    &ip6->ip6_src.s6_addr32[0]);
+		ip6_forward_rt.ro_rt = rtalloc_mpath(
+		    sin6tosa(&ip6_forward_rt.ro_dst),
+		    &ip6->ip6_src.s6_addr32[0],
+		    ip6_forward_rt.ro_tableid);
 	}
 
 	/*
-	 * Accept the packet if the forwarding interface to the destination
-	 * according to the routing table is the loopback interface,
-	 * unless the associated route has a gateway.
-	 * Note that this approach causes to accept a packet if there is a
-	 * route to the loopback interface for the destination of the packet.
-	 * But we think it's even useful in some situations, e.g. when using
-	 * a special daemon which wants to intercept the packet.
+	 * Accept the packet if the route to the destination is marked
+	 * as local.
 	 */
 	if (ip6_forward_rt.ro_rt &&
-	    (ip6_forward_rt.ro_rt->rt_flags &
-	     (RTF_HOST|RTF_GATEWAY)) == RTF_HOST &&
-	    ip6_forward_rt.ro_rt->rt_ifp->if_type == IFT_LOOP) {
+	    ISSET(ip6_forward_rt.ro_rt->rt_flags, RTF_LOCAL)) {
 		struct in6_ifaddr *ia6 =
 			ifatoia6(ip6_forward_rt.ro_rt->rt_ifa);
 		if (ia6->ia6_flags & IN6_IFF_ANYCAST)
@@ -1403,9 +1405,9 @@ ip6_sysctl(int *name, u_int namelen, void *oldp, size_t *oldlenp,
 #endif
 	int error, s;
 
-	/* All sysctl names at this level are terminal. */
-	if (namelen != 1)
-		return ENOTDIR;
+	/* Almost all sysctl names at this level are terminal. */
+	if (namelen != 1 && name[0] != IPV6CTL_IFQUEUE)
+		return (ENOTDIR);
 
 	switch (name[0]) {
 	case IPV6CTL_V6ONLY:
@@ -1417,19 +1419,27 @@ ip6_sysctl(int *name, u_int namelen, void *oldp, size_t *oldlenp,
 			return (EPERM);
 		return (sysctl_struct(oldp, oldlenp, newp, newlen,
 		    &ip6stat, sizeof(ip6stat)));
-	case IPV6CTL_MRTSTATS:
 #ifdef MROUTING
+	case IPV6CTL_MRTSTATS:
 		if (newp != NULL)
 			return (EPERM);
 		return (sysctl_struct(oldp, oldlenp, newp, newlen,
 		    &mrt6stat, sizeof(mrt6stat)));
-#else
-		return (EOPNOTSUPP);
-#endif
 	case IPV6CTL_MRTPROTO:
-#ifdef MROUTING
 		return sysctl_rdint(oldp, oldlenp, newp, ip6_mrtproto);
+	case IPV6CTL_MRTMIF:
+		if (newp)
+			return (EPERM);
+		return mrt6_sysctl_mif(oldp, oldlenp);
+	case IPV6CTL_MRTMFC:
+		if (newp)
+			return (EPERM);
+		return mrt6_sysctl_mfc(oldp, oldlenp);
 #else
+	case IPV6CTL_MRTSTATS:
+	case IPV6CTL_MRTPROTO:
+	case IPV6CTL_MRTMIF:
+	case IPV6CTL_MRTMFC:
 		return (EOPNOTSUPP);
 #endif
 	case IPV6CTL_MTUDISCTIMEOUT:
@@ -1442,6 +1452,9 @@ ip6_sysctl(int *name, u_int namelen, void *oldp, size_t *oldlenp,
 			splx(s);
 		}
 		return (error);
+	case IPV6CTL_IFQUEUE:
+		return (sysctl_ifq(name + 1, namelen - 1,
+		    oldp, oldlenp, newp, newlen, &ip6intrq));
 	default:
 		if (name[0] < IPV6CTL_MAXID)
 			return (sysctl_int_arr(ipv6ctl_vars, name, namelen,

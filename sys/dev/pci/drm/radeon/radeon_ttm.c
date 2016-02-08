@@ -1,4 +1,4 @@
-/*	$OpenBSD: radeon_ttm.c,v 1.6 2014/07/12 18:48:52 tedu Exp $	*/
+/*	$OpenBSD: radeon_ttm.c,v 1.10 2015/02/11 07:01:37 jsg Exp $	*/
 /*
  * Copyright 2009 Jerome Glisse.
  * All Rights Reserved.
@@ -627,8 +627,8 @@ struct ttm_tt *radeon_ttm_tt_create(struct ttm_bo_device *bdev,
 		return NULL;
 	}
 
-	gtt->segs = malloc(gtt->ttm.ttm.num_pages * sizeof(bus_dma_segment_t),
-			   M_DRM, M_WAITOK | M_ZERO);
+	gtt->segs = mallocarray(gtt->ttm.ttm.num_pages,
+	    sizeof(bus_dma_segment_t), M_DRM, M_WAITOK | M_ZERO);
 	if (gtt->segs == NULL) {
 		ttm_dma_tt_fini(&gtt->ttm);
 		free(gtt, M_DRM, 0);
@@ -815,20 +815,16 @@ int radeon_ttm_init(struct radeon_device *rdev)
 		radeon_bo_unref(&rdev->stollen_vga_memory);
 		return r;
 	}
-#ifdef DRMDEBUG
 	DRM_INFO("radeon: %uM of VRAM memory ready\n",
 		 (unsigned) (rdev->mc.real_vram_size / (1024 * 1024)));
-#endif
 	r = ttm_bo_init_mm(&rdev->mman.bdev, TTM_PL_TT,
 				rdev->mc.gtt_size >> PAGE_SHIFT);
 	if (r) {
 		DRM_ERROR("Failed initializing GTT heap.\n");
 		return r;
 	}
-#ifdef DRMDEBUG
 	DRM_INFO("radeon: %uM of GTT memory ready.\n",
 		 (unsigned)(rdev->mc.gtt_size / (1024 * 1024)));
-#endif
 #ifdef notyet
 	rdev->mman.bdev.dev_mapping = rdev->ddev->dev_mapping;
 #endif
@@ -895,10 +891,10 @@ radeon_ttm_fault(struct uvm_faultinfo *ufi, vaddr_t vaddr, vm_page_t *pps,
 
 	bo = (struct ttm_buffer_object *)ufi->entry->object.uvm_obj;
 	rdev = radeon_get_rdev(bo->bdev);
-	rw_enter_read(&rdev->pm.mclk_lock);
+	down_read(&rdev->pm.mclk_lock);
 	r = ttm_vm_ops->pgo_fault(ufi, vaddr, pps, npages, centeridx,
 				  fault_type, access_type, flags);
-	rw_exit_read(&rdev->pm.mclk_lock);
+	up_read(&rdev->pm.mclk_lock);
 	return r;
 }
 
@@ -944,9 +940,9 @@ static int radeon_mm_dump_table(struct seq_file *m, void *data)
 	int ret;
 	struct ttm_bo_global *glob = rdev->mman.bdev.glob;
 
-	mtx_enter(&glob->lru_lock);
+	spin_lock(&glob->lru_lock);
 	ret = drm_mm_dump_table(m, mm);
-	mtx_leave(&glob->lru_lock);
+	spin_unlock(&glob->lru_lock);
 	return ret;
 }
 #endif

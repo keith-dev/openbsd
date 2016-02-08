@@ -1,4 +1,4 @@
-/*	$OpenBSD: xl.c,v 1.115 2014/07/22 13:12:12 mpi Exp $	*/
+/*	$OpenBSD: xl.c,v 1.121 2014/12/22 02:28:51 tedu Exp $	*/
 
 /*
  * Copyright (c) 1997, 1998, 1999
@@ -111,7 +111,6 @@
 #include <sys/errno.h>
 #include <sys/malloc.h>
 #include <sys/kernel.h>
-#include <sys/proc.h>   /* only for declaration of wakeup() used by vm.h */
 #include <sys/device.h>
 
 #include <net/if.h>
@@ -119,10 +118,8 @@
 #include <net/if_types.h>
 #include <net/if_media.h>
 
-#ifdef INET
 #include <netinet/in.h>
 #include <netinet/if_ether.h>
-#endif
 
 #include <dev/mii/mii.h>
 #include <dev/mii/miivar.h>
@@ -202,14 +199,11 @@ xl_activate(struct device *self, int act)
 
 	switch (act) {
 	case DVACT_SUSPEND:
-		if (ifp->if_flags & IFF_RUNNING) {
-			xl_reset(sc);
+		if (ifp->if_flags & IFF_RUNNING)
 			xl_stop(sc);
-		}
 		rv = config_activate_children(self, act);
 		break;
 	case DVACT_RESUME:
-		xl_reset(sc);
 		if (ifp->if_flags & IFF_UP)
 			xl_init(sc);
 		break;
@@ -682,10 +676,10 @@ xl_testpacket(struct xl_softc *sc)
 	if (m == NULL)
 		return;
 
-	bcopy(&sc->sc_arpcom.ac_enaddr,
-		mtod(m, struct ether_header *)->ether_dhost, ETHER_ADDR_LEN);
-	bcopy(&sc->sc_arpcom.ac_enaddr,
-		mtod(m, struct ether_header *)->ether_shost, ETHER_ADDR_LEN);
+	memcpy(mtod(m, struct ether_header *)->ether_dhost,
+	    &sc->sc_arpcom.ac_enaddr, ETHER_ADDR_LEN);
+	memcpy(mtod(m, struct ether_header *)->ether_shost,
+	    &sc->sc_arpcom.ac_enaddr, ETHER_ADDR_LEN);
 	mtod(m, struct ether_header *)->ether_type = htons(3);
 	mtod(m, unsigned char *)[14] = 0;
 	mtod(m, unsigned char *)[15] = 0;
@@ -1489,6 +1483,9 @@ xl_intr(void *arg)
 		if (sc->intr_ack)
 			(*sc->intr_ack)(sc);
 
+		if (!(ifp->if_flags & IFF_RUNNING))
+			return (claimed);
+
 		if (status & XL_STAT_UP_COMPLETE)
 			xl_rxeof(sc);
 
@@ -1504,10 +1501,8 @@ xl_intr(void *arg)
 			xl_txeoc(sc);
 		}
 
-		if (status & XL_STAT_ADFAIL) {
-			xl_reset(sc);
+		if (status & XL_STAT_ADFAIL)
 			xl_init(sc);
-		}
 
 		if (status & XL_STAT_STATSOFLOW) {
 			sc->xl_stats_no_timeout = 1;
@@ -1915,6 +1910,9 @@ xl_init(void *xsc)
 	 */
 	xl_stop(sc);
 
+	/* Reset the chip to a known state. */
+	xl_reset(sc);
+
 	if (sc->xl_hasmii)
 		mii = &sc->sc_mii;
 
@@ -2215,10 +2213,8 @@ xl_ioctl(struct ifnet *ifp, u_long command, caddr_t data)
 		ifp->if_flags |= IFF_UP;
 		if (!(ifp->if_flags & IFF_RUNNING))
 			xl_init(sc);
-#ifdef INET
 		if (ifa->ifa_addr->sa_family == AF_INET)
 			arp_ifinit(&sc->sc_arpcom, ifa);
-#endif
 		break;
 
 	case SIOCSIFFLAGS:
@@ -2243,6 +2239,11 @@ xl_ioctl(struct ifnet *ifp, u_long command, caddr_t data)
 		else
 			error = ifmedia_ioctl(ifp, ifr,
 			    &mii->mii_media, command);
+		break;
+
+	case SIOCGIFRXR:
+		error = if_rxr_ioctl((struct if_rxrinfo *)ifr->ifr_data,
+		    NULL, MCLBYTES, &sc->xl_cdata.xl_rx_ring);
 		break;
 
 	default:
@@ -2278,7 +2279,6 @@ xl_watchdog(struct ifnet *ifp)
 	xl_txeoc(sc);
 	xl_txeof(sc);
 	xl_rxeof(sc);
-	xl_reset(sc);
 	xl_init(sc);
 
 	if (!IFQ_IS_EMPTY(&ifp->if_snd))
@@ -2340,6 +2340,8 @@ xl_stop(struct xl_softc *sc)
 	timeout_del(&sc->xl_stsup_tmo);
 
 	ifp = &sc->sc_arpcom.ac_if;
+
+	ifp->if_flags &= ~(IFF_RUNNING | IFF_OACTIVE);
 	ifp->if_timer = 0;
 
 	CSR_WRITE_2(sc, XL_COMMAND, XL_CMD_RX_DISABLE);
@@ -2364,8 +2366,6 @@ xl_stop(struct xl_softc *sc)
 
 	if (sc->intr_ack)
 		(*sc->intr_ack)(sc);
-
-	ifp->if_flags &= ~(IFF_RUNNING | IFF_OACTIVE);
 
 	xl_freetxrx(sc);
 }
@@ -2404,7 +2404,7 @@ xl_attach(struct xl_softc *sc)
 		    sc->sc_dev.dv_xname);
 		return;
 	}
-	bcopy(enaddr, &sc->sc_arpcom.ac_enaddr, ETHER_ADDR_LEN);
+	memcpy(&sc->sc_arpcom.ac_enaddr, enaddr, ETHER_ADDR_LEN);
 
 	if (bus_dmamem_alloc(sc->sc_dmat, sizeof(struct xl_list_data),
 	    PAGE_SIZE, 0, sc->sc_listseg, 1, &sc->sc_listnseg,
@@ -2509,7 +2509,7 @@ xl_attach(struct xl_softc *sc)
 	ifp->if_baudrate = 10000000;
 	IFQ_SET_MAXLEN(&ifp->if_snd, XL_TX_LIST_CNT - 1);
 	IFQ_SET_READY(&ifp->if_snd);
-	bcopy(sc->sc_dev.dv_xname, ifp->if_xname, IFNAMSIZ);
+	memcpy(ifp->if_xname, sc->sc_dev.dv_xname, IFNAMSIZ);
 
 	ifp->if_capabilities = IFCAP_VLAN_MTU;
 
@@ -2562,12 +2562,8 @@ xl_attach(struct xl_softc *sc)
 	 * a 10/100 card of some kind, we need to force the transceiver
 	 * type to something sane.
 	 */
-	if (sc->xl_xcvr == XL_XCVR_AUTO) {
+	if (sc->xl_xcvr == XL_XCVR_AUTO)
 		xl_choose_xcvr(sc, 0);
-		i = splnet();
-		xl_reset(sc);
-		splx(i);
-	}
 
 	if (sc->xl_media & XL_MEDIAOPT_BT) {
 		ifmedia_add(ifm, IFM_ETHER|IFM_10_T, 0, NULL);

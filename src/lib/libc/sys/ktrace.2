@@ -1,4 +1,4 @@
-.\"	$OpenBSD: ktrace.2,v 1.24 2014/01/21 03:15:45 schwarze Exp $
+.\"	$OpenBSD: ktrace.2,v 1.27 2015/01/19 15:54:11 millert Exp $
 .\"	$NetBSD: ktrace.2,v 1.2 1995/02/27 12:33:58 cgd Exp $
 .\"
 .\" Copyright (c) 1993
@@ -30,17 +30,17 @@
 .\"
 .\"     @(#)ktrace.2	8.1 (Berkeley) 6/4/93
 .\"
-.Dd $Mdocdate: January 21 2014 $
+.Dd $Mdocdate: January 19 2015 $
 .Dt KTRACE 2
 .Os
 .Sh NAME
 .Nm ktrace
 .Nd process tracing
 .Sh SYNOPSIS
-.Fd #include <sys/types.h>
-.Fd #include <sys/param.h>
-.Fd #include <sys/uio.h>
-.Fd #include <sys/ktrace.h>
+.In sys/types.h
+.In sys/param.h
+.In sys/uio.h
+.In sys/ktrace.h
 .Ft int
 .Fn ktrace "const char *tracefile" "int ops" "int trpoints" "pid_t pid"
 .Sh DESCRIPTION
@@ -64,7 +64,7 @@ previous trace data.
 If tracing points are being disabled (see
 .Dv KTROP_CLEAR
 below),
-.Ar tracefile
+.Fa tracefile
 may be
 .Dv NULL .
 .Pp
@@ -76,10 +76,10 @@ The defined operations are:
 .Bl -tag -width KTRFLAG_DESCEND -offset indent -compact
 .It Dv KTROP_SET
 Enable trace points specified in
-.Ar trpoints .
+.Fa trpoints .
 .It Dv KTROP_CLEAR
 Disable trace points specified in
-.Ar trpoints .
+.Fa trpoints .
 .It Dv KTROP_CLEARFILE
 Stop all tracing.
 .It Dv KTRFLAG_DESCEND
@@ -162,10 +162,7 @@ The type specific records are defined in the
 .In sys/ktrace.h
 include file.
 .Sh RETURN VALUES
-On successful completion a value of 0 is returned.
-Otherwise, a value of \-1 is returned and
-.Va errno
-is set to show the error.
+.Rv -std
 .Sh ERRORS
 .Fn ktrace
 will fail if:
@@ -175,8 +172,12 @@ A component of the path prefix is not a directory.
 .It Bq Er EINVAL
 No trace points were selected.
 .It Bq Er ENAMETOOLONG
-A component of a pathname exceeded 255 characters,
-or an entire path name exceeded 1023 characters.
+A component of a pathname exceeded
+.Dv NAME_MAX
+characters, or an entire pathname (including the terminating NUL)
+exceeded
+.Dv PATH_MAX
+bytes.
 .It Bq Er ENOENT
 The named tracefile does not exist.
 .It Bq Er EACCES

@@ -1,4 +1,4 @@
-/*	$OpenBSD: dir.c,v 1.16 2014/07/12 02:47:51 guenther Exp $	*/
+/*	$OpenBSD: dir.c,v 1.20 2015/02/08 06:09:50 tedu Exp $	*/
 /*	$NetBSD: dir.c,v 1.9 1995/03/21 09:02:42 cgd Exp $	*/
 
 /*-
@@ -30,12 +30,12 @@
  * SUCH DAMAGE.
  */
 
-#include <sys/param.h>
 #include <sys/stat.h>
 #include <errno.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include <limits.h>
 #include <stdarg.h>
 
 #include "csh.h"
@@ -66,11 +66,11 @@ dinit(Char *hp)
     char *tcp;
     Char *cp;
     struct directory *dp;
-    char    path[MAXPATHLEN];
+    char    path[PATH_MAX];
     static const char emsg[] = "csh: Trying to start from \"%s\"\n";
 
     /* Don't believe the login shell home, because it may be a symlink */
-    tcp = getcwd(path, MAXPATHLEN);
+    tcp = getcwd(path, PATH_MAX);
     if (tcp == NULL || *tcp == '\0') {
 	(void) fprintf(csherr, "csh: %s\n", strerror(errno));
 	if (hp && *hp) {
@@ -116,7 +116,7 @@ dinit(Char *hp)
 	}
     }
 
-    dp = (struct directory *) xcalloc(1, sizeof(struct directory));
+    dp = xcalloc(1, sizeof(struct directory));
     dp->di_name = Strsave(cp);
     dp->di_count = 0;
     dhead.di_next = dhead.di_prev = dp;
@@ -132,7 +132,7 @@ dset(Char *dp)
      * Don't call set() directly cause if the directory contains ` or
      * other junk characters glob will fail.
      */
-    Char **vec = (Char **) xmalloc((size_t) (2 * sizeof(Char **)));
+    Char **vec = xreallocarray(NULL, 2, sizeof(Char **));
 
     vec[0] = Strsave(dp);
     vec[1] = 0;
@@ -267,7 +267,7 @@ dnormalize(Char *cp)
 	size_t	len;
 
 	len = (size_t) (Strlen(dcwd->di_name) + 3);
-	cwd = (Char *) xmalloc(len * sizeof(Char));
+	cwd = xreallocarray(NULL, len, sizeof(Char));
 	(void) Strlcpy(cwd, dcwd->di_name, len);
 
 	/*
@@ -299,7 +299,7 @@ dnormalize(Char *cp)
 	    cwd[dotdot = Strlen(cwd)] = '/';
 	    cwd[dotdot + 1] = '\0';
 	    dp = Strspl(cwd, cp);
-	    xfree((ptr_t) cwd);
+	    xfree(cwd);
 	    return dp;
 	}
 	else {
@@ -351,7 +351,7 @@ dochngd(Char **v, struct command *t)
     }
     else
 	cp = dfollow(*v);
-    dp = (struct directory *) xcalloc(1, sizeof(struct directory));
+    dp = xcalloc(1, sizeof(struct directory));
     dp->di_name = cp;
     dp->di_count = 0;
     dp->di_next = dcwd->di_next;
@@ -377,7 +377,7 @@ dgoto(Char *cp)
 	    cwdlen = 0;
 	for (p = cp; *p++;)
 	    continue;
-	dp = (Char *) xmalloc((size_t)((cwdlen + (p - cp) + 1) * sizeof(Char)));
+	dp = xreallocarray(NULL, (cwdlen + (p - cp) + 1), sizeof(Char));
 	for (p = dp, q = dcwd->di_name; (*p++ = *q++) != '\0';)
 	    continue;
 	if (cwdlen)
@@ -386,7 +386,7 @@ dgoto(Char *cp)
 	    p--;		/* don't add a / after root */
 	for (q = cp; (*p++ = *q++) != '\0';)
 	    continue;
-	xfree((ptr_t) cp);
+	xfree(cp);
 	cp = dp;
 	dp += cwdlen;
     }
@@ -405,7 +405,7 @@ dfollow(Char *cp)
 {
     Char *dp;
     struct varent *c;
-    char    ebuf[MAXPATHLEN];
+    char    ebuf[PATH_MAX];
     int serrno;
 
     cp = globone(cp, G_ERROR);
@@ -414,11 +414,11 @@ dfollow(Char *cp)
      */
     dp = dnormalize(cp);
     if (chdir(short2str(dp)) >= 0) {
-	xfree((ptr_t) cp);
+	xfree(cp);
 	return dgoto(dp);
     }
     else {
-	xfree((ptr_t) dp);
+	xfree(dp);
 	if (chdir(short2str(cp)) >= 0)
 	    return dgoto(cp);
 	serrno = errno;
@@ -428,7 +428,7 @@ dfollow(Char *cp)
 	&& (c = adrof(STRcdpath))) {
 	Char  **cdp;
 	Char *p;
-	Char    buf[MAXPATHLEN];
+	Char    buf[PATH_MAX];
 
 	for (cdp = c->vec; *cdp; cdp++) {
 	    for (dp = buf, p = *cdp; (*dp++ = *p++) != '\0';)
@@ -438,7 +438,7 @@ dfollow(Char *cp)
 		continue;
 	    if (chdir(short2str(buf)) >= 0) {
 		printd = 1;
-		xfree((ptr_t) cp);
+		xfree(cp);
 		cp = Strsave(buf);
 		return dgoto(cp);
 	    }
@@ -446,13 +446,13 @@ dfollow(Char *cp)
     }
     dp = value(cp);
     if ((dp[0] == '/' || dp[0] == '.') && chdir(short2str(dp)) >= 0) {
-	xfree((ptr_t) cp);
+	xfree(cp);
 	cp = Strsave(dp);
 	printd = 1;
 	return dgoto(cp);
     }
     (void) strlcpy(ebuf, short2str(cp), sizeof ebuf);
-    xfree((ptr_t) cp);
+    xfree(cp);
     stderror(ERR_SYSTEM, ebuf, strerror(serrno));
     return (NULL);
 }
@@ -502,7 +502,7 @@ dopushd(Char **v, struct command *t)
 	Char *ccp;
 
 	ccp = dfollow(*v);
-	dp = (struct directory *) xcalloc(1, sizeof(struct directory));
+	dp = xcalloc(1, sizeof(struct directory));
 	dp->di_name = ccp;
 	dp->di_count = 0;
 	dp->di_prev = dcwd;
@@ -594,7 +594,7 @@ dfree(struct directory *dp)
     }
     else {
 	xfree((char *) dp->di_name);
-	xfree((ptr_t) dp);
+	xfree(dp);
     }
 }
 
@@ -610,8 +610,8 @@ dcanon(Char *cp, Char *p)
     Char *p1, *p2;	/* general purpose */
     bool    slash;
 
-    Char    link[MAXPATHLEN];
-    char    tlink[MAXPATHLEN];
+    Char    link[PATH_MAX];
+    char    tlink[PATH_MAX];
     int     cc;
     Char   *newcp;
 
@@ -620,17 +620,17 @@ dcanon(Char *cp, Char *p)
      * cwd does not start with a path or the result would be too long abort().
      */
     if (*cp != '/') {
-	Char    tmpdir[MAXPATHLEN];
+	Char    tmpdir[PATH_MAX];
 
 	p1 = value(STRcwd);
 	if (p1 == NULL || *p1 != '/')
 	    abort();
-	if (Strlen(p1) + Strlen(cp) + 1 >= MAXPATHLEN)
+	if (Strlen(p1) + Strlen(cp) + 1 >= PATH_MAX)
 	    abort();
 	(void) Strlcpy(tmpdir, p1, sizeof tmpdir/sizeof(Char));
 	(void) Strlcat(tmpdir, STRslash, sizeof tmpdir/sizeof(Char));
 	(void) Strlcat(tmpdir, cp, sizeof tmpdir/sizeof(Char));
-	xfree((ptr_t) cp);
+	xfree(cp);
 	cp = p = Strsave(tmpdir);
     }
 
@@ -701,9 +701,8 @@ dcanon(Char *cp, Char *p)
 		    /*
 		     * New length is "yyy/" + link + "/.." and rest
 		     */
-		    p1 = newcp = (Char *) xmalloc((size_t)
-						(((sp - cp) + cc + (p1 - p)) *
-						 sizeof(Char)));
+		    p1 = newcp = xreallocarray(NULL,
+			(sp - cp) + cc + (p1 - p), sizeof(Char));
 		    /*
 		     * Copy new path into newcp
 		     */
@@ -722,8 +721,8 @@ dcanon(Char *cp, Char *p)
 		    /*
 		     * New length is link + "/.." and rest
 		     */
-		    p1 = newcp = (Char *) xmalloc((size_t)
-					    ((cc + (p1 - p)) * sizeof(Char)));
+		    p1 = newcp = xreallocarray(NULL, cc + (p1 - p),
+		        sizeof(Char));
 		    /*
 		     * Copy new path into newcp
 		     */
@@ -736,7 +735,7 @@ dcanon(Char *cp, Char *p)
 		     */
 		    p = newcp;
 		}
-		xfree((ptr_t) cp);
+		xfree(cp);
 		cp = newcp;
 		continue;	/* canonicalize the link */
 	    }
@@ -792,9 +791,8 @@ dcanon(Char *cp, Char *p)
 		    /*
 		     * New length is "yyy/" + link + "/.." and rest
 		     */
-		    p1 = newcp = (Char *) xmalloc((size_t)
-						  (((sp - cp) + cc + (p1 - p))
-						   * sizeof(Char)));
+		    p1 = newcp = xreallocarray(NULL,
+			  (sp - cp) + cc + (p1 - p), sizeof(Char));
 		    /*
 		     * Copy new path into newcp
 		     */
@@ -813,8 +811,7 @@ dcanon(Char *cp, Char *p)
 		    /*
 		     * New length is link + the rest
 		     */
-		    p1 = newcp = (Char *) xmalloc((size_t)
-					    ((cc + (p1 - p)) * sizeof(Char)));
+		    p1 = newcp = xreallocarray(NULL, cc + (p1 - p), sizeof(Char));
 		    /*
 		     * Copy new path into newcp
 		     */
@@ -827,7 +824,7 @@ dcanon(Char *cp, Char *p)
 		     */
 		    p = newcp;
 		}
-		xfree((ptr_t) cp);
+		xfree(cp);
 		cp = newcp;
 		continue;	/* canonicalize the link */
 	    }
@@ -882,7 +879,7 @@ dcanon(Char *cp, Char *p)
 	     * Use STRhome to make '~' work
 	     */
 	    newcp = Strspl(p1, cp + Strlen(p2));
-	    xfree((ptr_t) cp);
+	    xfree(cp);
 	    cp = newcp;
 	}
     }

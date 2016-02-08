@@ -1,4 +1,4 @@
-/*	$OpenBSD: uvm_init.c,v 1.33 2014/07/11 16:35:40 jsg Exp $	*/
+/*	$OpenBSD: uvm_init.c,v 1.38 2015/02/07 08:21:24 miod Exp $	*/
 /*	$NetBSD: uvm_init.c,v 1.14 2000/06/27 17:29:23 mrg Exp $	*/
 
 /*
@@ -38,7 +38,6 @@
 #include <sys/filedesc.h>
 #include <sys/resourcevar.h>
 #include <sys/mman.h>
-#include <sys/proc.h>
 #include <sys/malloc.h>
 #include <sys/vnode.h>
 #include <sys/pool.h>
@@ -53,6 +52,12 @@
 
 struct uvm uvm;		/* decl */
 struct uvmexp uvmexp;	/* decl */
+
+#if defined(VM_MIN_KERNEL_ADDRESS)
+vaddr_t vm_min_kernel_address = VM_MIN_KERNEL_ADDRESS;
+#else
+vaddr_t vm_min_kernel_address;
+#endif
 
 /*
  * local prototypes
@@ -96,7 +101,7 @@ uvm_init(void)
 	 * kmem_object.
 	 */
 
-	uvm_km_init(kvm_start, kvm_end);
+	uvm_km_init(vm_min_kernel_address, kvm_start, kvm_end);
 
 	/*
 	 * step 4.5: init (tune) the fault recovery code.
@@ -139,8 +144,7 @@ uvm_init(void)
 	 * the VM system is now up!  now that malloc is up we can
 	 * enable paging of kernel objects.
 	 */
-	uao_create(VM_MAX_KERNEL_ADDRESS - VM_MIN_KERNEL_ADDRESS,
-	    UAO_FLAG_KERNSWAP);
+	uao_create(VM_KERNEL_SPACE_SIZE, UAO_FLAG_KERNSWAP);
 
 	/*
 	 * reserve some unmapped space for malloc/pool use after free usage
@@ -148,15 +152,15 @@ uvm_init(void)
 #ifdef DEADBEEF0
 	kvm_start = trunc_page(DEADBEEF0) - PAGE_SIZE;
 	if (uvm_map(kernel_map, &kvm_start, 3 * PAGE_SIZE,
-	    NULL, UVM_UNKNOWN_OFFSET, 0, UVM_MAPFLAG(UVM_PROT_NONE,
-	    UVM_PROT_NONE, UVM_INH_NONE, UVM_ADV_RANDOM, UVM_FLAG_FIXED)))
+	    NULL, UVM_UNKNOWN_OFFSET, 0, UVM_MAPFLAG(PROT_NONE,
+	    PROT_NONE, MAP_INHERIT_NONE, MADV_RANDOM, UVM_FLAG_FIXED)))
 		panic("uvm_init: cannot reserve dead beef @0x%x", DEADBEEF0);
 #endif
 #ifdef DEADBEEF1
 	kvm_start = trunc_page(DEADBEEF1) - PAGE_SIZE;
 	if (uvm_map(kernel_map, &kvm_start, 3 * PAGE_SIZE,
-	    NULL, UVM_UNKNOWN_OFFSET, 0, UVM_MAPFLAG(UVM_PROT_NONE,
-	    UVM_PROT_NONE, UVM_INH_NONE, UVM_ADV_RANDOM, UVM_FLAG_FIXED)))
+	    NULL, UVM_UNKNOWN_OFFSET, 0, UVM_MAPFLAG(PROT_NONE,
+	    PROT_NONE, MAP_INHERIT_NONE, MADV_RANDOM, UVM_FLAG_FIXED)))
 		panic("uvm_init: cannot reserve dead beef @0x%x", DEADBEEF1);
 #endif
 	/*

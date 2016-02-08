@@ -1,4 +1,4 @@
-/* $OpenBSD: ike_phase_1.c,v 1.72 2010/06/29 19:50:16 reyk Exp $	 */
+/* $OpenBSD: ike_phase_1.c,v 1.74 2015/02/15 01:56:42 tedu Exp $	 */
 /* $EOM: ike_phase_1.c,v 1.31 2000/12/11 23:47:56 niklas Exp $	 */
 
 /*
@@ -717,6 +717,7 @@ ike_phase_1_post_exchange_KE_NONCE(struct message *msg)
 		key = malloc(keylen);
 		if (!key) {
 			/* XXX - Notify peer.  */
+			prf_free(prf);
 			log_error("ike_phase_1_post_exchange_KE_NONCE: "
 			    "malloc (%d) failed", keylen);
 			return -1;
@@ -1069,7 +1070,7 @@ ike_phase_1_recv_ID(struct message *msg)
 		}
 
 		/* Compare expected/desired and received remote ID */
-		if (bcmp(rid, payload->p + ISAKMP_ID_DATA_OFF, sz)) {
+		if (memcmp(rid, payload->p + ISAKMP_ID_DATA_OFF, sz) != 0) {
 			free(rid);
 			log_print("ike_phase_1_recv_ID: "
 			    "received remote ID other than expected %s", p);

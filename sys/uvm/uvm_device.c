@@ -1,4 +1,4 @@
-/*	$OpenBSD: uvm_device.c,v 1.48 2014/07/12 18:44:01 tedu Exp $	*/
+/*	$OpenBSD: uvm_device.c,v 1.50 2014/11/16 12:31:00 deraadt Exp $	*/
 /*	$NetBSD: uvm_device.c,v 1.30 2000/11/25 06:27:59 chs Exp $	*/
 
 /*
@@ -35,7 +35,6 @@
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/conf.h>
-#include <sys/proc.h>
 #include <sys/malloc.h>
 #include <sys/mutex.h>
 #include <sys/vnode.h>
@@ -119,7 +118,6 @@ udv_attach(dev_t device, vm_prot_t accessprot, voff_t off, vsize_t size)
 	 * Check that the specified range of the device allows the
 	 * desired protection.
 	 * 
-	 * XXX assumes VM_PROT_* == PROT_*
 	 * XXX clobbers off and size, but nothing else here needs them.
 	 */
 	while (size != 0) {

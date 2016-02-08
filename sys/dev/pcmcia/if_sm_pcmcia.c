@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_sm_pcmcia.c,v 1.33 2013/08/07 01:06:40 bluhm Exp $	*/
+/*	$OpenBSD: if_sm_pcmcia.c,v 1.35 2014/12/03 20:09:32 krw Exp $	*/
 /*	$NetBSD: if_sm_pcmcia.c,v 1.11 1998/08/15 20:47:32 thorpej Exp $  */
 
 /*-
@@ -48,12 +48,8 @@
 #include <net/if_dl.h>
 #include <net/if_media.h>
 
-#ifdef INET
 #include <netinet/in.h>
-#include <netinet/in_systm.h>
-#include <netinet/ip.h>
 #include <netinet/if_ether.h>
-#endif
 
 #if NBPFILTER > 0
 #include <net/bpf.h>
@@ -61,8 +57,6 @@
 
 #include <machine/intr.h>
 #include <machine/bus.h>
-
-#include <net/if_media.h>
 
 #include <dev/mii/mii.h>
 #include <dev/mii/miivar.h>

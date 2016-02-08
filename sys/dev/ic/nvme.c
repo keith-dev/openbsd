@@ -1,4 +1,4 @@
-/*	$OpenBSD: nvme.c,v 1.6 2014/07/13 23:10:23 deraadt Exp $ */
+/*	$OpenBSD: nvme.c,v 1.10 2014/11/04 12:48:22 dlg Exp $ */
 
 /*
  * Copyright (c) 2014 David Gwynne <dlg@openbsd.org>
@@ -150,16 +150,16 @@ nvme_dumpregs(struct nvme_softc *sc)
 	    (u_int)NVME_CAP_MPSMIN(r8), (1 << NVME_CAP_MPSMIN(r8)));
 	printf("%s:  css %llu\n", DEVNAME(sc), NVME_CAP_CSS(r8));
 	printf("%s:  nssrs %llu\n", DEVNAME(sc), NVME_CAP_NSSRS(r8));
-	printf("%s:  dstrd %llu\n", DEVNAME(sc), NVME_CAP_DSTRD(r8));
+	printf("%s:  dstrd %u\n", DEVNAME(sc), NVME_CAP_DSTRD(r8));
 	printf("%s:  to %llu msec\n", DEVNAME(sc), NVME_CAP_TO(r8));
 	printf("%s:  ams %llu\n", DEVNAME(sc), NVME_CAP_AMS(r8));
 	printf("%s:  cqr %llu\n", DEVNAME(sc), NVME_CAP_CQR(r8));
 	printf("%s:  mqes %llu\n", DEVNAME(sc), NVME_CAP_MQES(r8));
 
-	printf("%s: vs   0x%08lx\n", DEVNAME(sc), nvme_read4(sc, NVME_VS));
+	printf("%s: vs   0x%04x\n", DEVNAME(sc), nvme_read4(sc, NVME_VS));
 
 	r4 = nvme_read4(sc, NVME_CC);
-	printf("%s: cc   0x%08lx\n", DEVNAME(sc), r4);
+	printf("%s: cc   0x%04x\n", DEVNAME(sc), r4);
 	printf("%s:  iocqes %u\n", DEVNAME(sc), NVME_CC_IOCQES_R(r4));
 	printf("%s:  iosqes %u\n", DEVNAME(sc), NVME_CC_IOSQES_R(r4));
 	printf("%s:  shn %u\n", DEVNAME(sc), NVME_CC_SHN_R(r4));
@@ -168,8 +168,8 @@ nvme_dumpregs(struct nvme_softc *sc)
 	printf("%s:  css %u\n", DEVNAME(sc), NVME_CC_CSS_R(r4));
 	printf("%s:  en %u\n", DEVNAME(sc), ISSET(r4, NVME_CC_EN));
 	
-	printf("%s: csts 0x%08lx\n", DEVNAME(sc), nvme_read4(sc, NVME_CSTS));
-	printf("%s: aqa  0x%08lx\n", DEVNAME(sc), nvme_read4(sc, NVME_AQA));
+	printf("%s: csts 0x%08x\n", DEVNAME(sc), nvme_read4(sc, NVME_CSTS));
+	printf("%s: aqa  0x%08x\n", DEVNAME(sc), nvme_read4(sc, NVME_AQA));
 	printf("%s: asq  0x%016llx\n", DEVNAME(sc), nvme_read8(sc, NVME_ASQ));
 	printf("%s: acq  0x%016llx\n", DEVNAME(sc), nvme_read8(sc, NVME_ACQ));
 }
@@ -333,8 +333,8 @@ nvme_q_submit(struct nvme_softc *sc, struct nvme_queue *q, struct nvme_ccb *ccb,
 	bus_dmamap_sync(sc->sc_dmat, NVME_DMA_MAP(q->q_sq_dmamem),
 	    sizeof(*sqe) * tail, sizeof(*sqe), BUS_DMASYNC_POSTWRITE);
 	memset(sqe, 0, sizeof(*sqe));
-	sqe->cid = ccb->ccb_id;
 	(*fill)(sc, ccb, sqe);
+	sqe->cid = ccb->ccb_id;
 	bus_dmamap_sync(sc->sc_dmat, NVME_DMA_MAP(q->q_sq_dmamem),
 	    sizeof(*sqe) * tail, sizeof(*sqe), BUS_DMASYNC_PREWRITE);
 
@@ -357,7 +357,6 @@ nvme_poll(struct nvme_softc *sc, struct nvme_queue *q, struct nvme_ccb *ccb,
 	u_int16_t flags;
 
 	memset(&state, 0, sizeof(state));
-	state.s.cid = ccb->ccb_id;
 	(*fill)(sc, ccb, &state.s);
 
 	done = ccb->ccb_done;
@@ -438,7 +437,7 @@ nvme_q_complete(struct nvme_softc *sc, struct nvme_queue *q)
 	}
 
 	if (rv)
-		nvme_write4(sc, q->q_sqtdbl, q->q_cq_head = head);
+		nvme_write4(sc, q->q_cqhdbl, q->q_cq_head = head);
 	mtx_leave(&q->q_cq_mtx);
 
 	return (rv);
@@ -472,6 +471,8 @@ nvme_identify(struct nvme_softc *sc, u_int mps)
 	rv = nvme_poll(sc, sc->sc_admin_q, ccb, nvme_fill_identify);
 	bus_dmamap_sync(sc->sc_dmat, NVME_DMA_MAP(mem),
 	    0, sizeof(*identify), BUS_DMASYNC_POSTREAD);
+
+	nvme_ccb_put(sc, ccb);
 
 	if (rv != 0)
 		goto done;

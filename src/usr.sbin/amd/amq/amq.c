@@ -32,7 +32,7 @@
  * SUCH DAMAGE.
  *
  *	from: @(#)amq.c	8.1 (Berkeley) 6/7/93
- *	$Id: amq.c,v 1.14 2013/04/17 15:55:46 deraadt Exp $
+ *	$Id: amq.c,v 1.18 2015/01/21 09:50:25 guenther Exp $
  */
 
 /*
@@ -55,7 +55,6 @@ static int stats_flag;
 static int getvers_flag;
 static char *debug_opts;
 static char *logfile;
-static char *mount_map;
 static char *xlog_optstr;
 static char localhost[] = "localhost";
 static char *def_server = localhost;
@@ -92,7 +91,7 @@ show_mti(amq_mount_tree *mt, enum show_opt e, int *mwid, int *dwid,
 	    }
 
 	case Full: {
-		time_t t = *mt->mt_mounttime;
+		time_t t = mt->mt_mounttime;
 
 		struct tm *tp = localtime(&t);
 
@@ -110,7 +109,7 @@ show_mti(amq_mount_tree *mt, enum show_opt e, int *mwid, int *dwid,
 	    }
 
 	case Stats: {
-		time_t t = *mt->mt_mounttime;
+		time_t t = mt->mt_mounttime;
 
 		struct tm *tp = localtime(&t);
 
@@ -184,17 +183,7 @@ show_mi(amq_mount_info_list *ml, enum show_opt e, int *mwid,
 			    mi->mi_up > 0 ? "up" :
 			    mi->mi_up < 0 ? "starting" : "down");
 			if (mi->mi_error > 0) {
-#ifdef HAS_STRERROR
 				printf(" (%s)", strerror(mi->mi_error));
-#else
-				extern char *sys_errlist[];
-				extern int sys_nerr;
-
-				if (mi->mi_error < sys_nerr)
-					printf(" (%s)", sys_errlist[mi->mi_error]);
-				else
-					printf(" (Error %d)", mi->mi_error);
-#endif
 			} else if (mi->mi_error < 0) {
 				fputs(" (in progress)", stdout);
 			}
@@ -241,7 +230,7 @@ main(int argc, char *argv[])
 	/*
 	 * Parse arguments
 	 */
-	while ((opt_ch = getopt(argc, argv, "fh:l:msuvx:D:M:")) != -1)
+	while ((opt_ch = getopt(argc, argv, "fh:l:msuvx:D:")) != -1)
 		switch (opt_ch) {
 		case 'f':
 			flush_flag = 1;
@@ -287,11 +276,6 @@ main(int argc, char *argv[])
 			nodefault = 1;
 			break;
 
-		case 'M':
-			mount_map = optarg;
-			nodefault = 1;
-			break;
-
 		default:
 			errs = 1;
 			break;
@@ -321,7 +305,7 @@ show_usage:
 	bzero(&server_addr, sizeof server_addr);
 	server_addr.sin_family = AF_INET;
 	if (hp) {
-		bcopy((void *)hp->h_addr, (void *)&server_addr.sin_addr,
+		bcopy(hp->h_addr, &server_addr.sin_addr,
 			sizeof(server_addr.sin_addr));
 	} else {
 		/* fake "localhost" */
@@ -353,7 +337,7 @@ show_usage:
 		amq_setopt opt;
 		opt.as_opt = AMOPT_DEBUG;
 		opt.as_str = debug_opts;
-		rc = amqproc_setopt_1(&opt, clnt);
+		rc = amqproc_setopt_57(&opt, clnt);
 		if (rc && *rc < 0) {
 			fprintf(stderr,
 			    "%s: daemon not compiled for debug", __progname);
@@ -374,7 +358,7 @@ show_usage:
 		amq_setopt opt;
 		opt.as_opt = AMOPT_XLOG;
 		opt.as_str = xlog_optstr;
-		rc = amqproc_setopt_1(&opt, clnt);
+		rc = amqproc_setopt_57(&opt, clnt);
 		if (!rc || *rc) {
 			fprintf(stderr, "%s: setting log level to \"%s\" failed\n",
 			    __progname, xlog_optstr);
@@ -390,7 +374,7 @@ show_usage:
 		amq_setopt opt;
 		opt.as_opt = AMOPT_LOGFILE;
 		opt.as_str = logfile;
-		rc = amqproc_setopt_1(&opt, clnt);
+		rc = amqproc_setopt_57(&opt, clnt);
 		if (!rc || *rc) {
 			fprintf(stderr, "%s: setting logfile to \"%s\" failed\n",
 			    __progname, logfile);
@@ -406,7 +390,7 @@ show_usage:
 		amq_setopt opt;
 		opt.as_opt = AMOPT_FLUSHMAPC;
 		opt.as_str = "";
-		rc = amqproc_setopt_1(&opt, clnt);
+		rc = amqproc_setopt_57(&opt, clnt);
 		if (!rc || *rc) {
 			fprintf(stderr,
 			    "%s: amd on %s cannot flush the map cache\n",
@@ -420,7 +404,7 @@ show_usage:
 	 */
 	if (minfo_flag) {
 		int dummy;
-		amq_mount_info_list *ml = amqproc_getmntfs_1(&dummy, clnt);
+		amq_mount_info_list *ml = amqproc_getmntfs_57(&dummy, clnt);
 		if (ml) {
 			int mwid = 0, dwid = 0, twid = 0;
 			show_mi(ml, Calc, &mwid, &dwid, &twid);
@@ -433,28 +417,10 @@ show_usage:
 	}
 
 	/*
-	 * Mount map
-	 */
-	if (mount_map) {
-		int *rc;
-		do {
-			rc = amqproc_mount_1(&mount_map, clnt);
-		} while (rc && *rc < 0);
-		if (!rc || *rc > 0) {
-			if (rc)
-				errno = *rc;
-			else
-				errno = ETIMEDOUT;
-			fprintf(stderr, "%s: could not start new ", __progname);
-			perror("autmount point");
-		}
-	}
-
-	/*
 	 * Get Version
 	 */
 	if (getvers_flag) {
-		amq_string *spp = amqproc_getvers_1((void *)0, clnt);
+		amq_string *spp = amqproc_getvers_57(NULL, clnt);
 		if (spp && *spp) {
 			printf("%s.\n", *spp);
 			free(*spp);
@@ -475,12 +441,12 @@ show_usage:
 				/*
 				 * Unmount request
 				 */
-				amqproc_umnt_1(&fs, clnt);
+				amqproc_umnt_57(&fs, clnt);
 			} else {
 				/*
 				 * Stats request
 				 */
-				amq_mount_tree_p *mtp = amqproc_mnttree_1(&fs, clnt);
+				amq_mount_tree_p *mtp = amqproc_mnttree_57(&fs, clnt);
 				if (mtp) {
 					amq_mount_tree *mt = *mtp;
 					if (mt) {
@@ -512,7 +478,7 @@ show_usage:
 	} else if (unmount_flag) {
 		goto show_usage;
 	} else if (stats_flag) {
-		amq_mount_stats *ms = amqproc_stats_1((void *)0, clnt);
+		amq_mount_stats *ms = amqproc_stats_57(NULL, clnt);
 		if (ms) {
 			show_ms(ms);
 		} else {
@@ -521,7 +487,7 @@ show_usage:
 			errs = 1;
 		}
 	} else if (!nodefault) {
-		amq_mount_tree_list *mlp = amqproc_export_1((void *)0, clnt);
+		amq_mount_tree_list *mlp = amqproc_export_57(NULL, clnt);
 		if (mlp) {
 			enum show_opt e = Calc;
 			int mwid = 0, dwid = 0, pwid = 0;

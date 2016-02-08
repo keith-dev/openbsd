@@ -1,4 +1,4 @@
-/*	$OpenBSD: ikev2_msg.c,v 1.35 2014/05/07 13:04:01 markus Exp $	*/
+/*	$OpenBSD: ikev2_msg.c,v 1.41 2015/02/15 01:56:42 tedu Exp $	*/
 
 /*
  * Copyright (c) 2010-2013 Reyk Floeter <reyk@openbsd.org>
@@ -16,21 +16,19 @@
  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
 
-#include <sys/param.h>
+#include <sys/param.h>	/* roundup */
 #include <sys/queue.h>
 #include <sys/socket.h>
 #include <sys/wait.h>
 #include <sys/uio.h>
 
 #include <netinet/in.h>
-#include <netinet/ip_ipsp.h>
 #include <arpa/inet.h>
 
 #include <stdlib.h>
 #include <stdio.h>
 #include <unistd.h>
 #include <string.h>
-#include <getopt.h>
 #include <signal.h>
 #include <errno.h>
 #include <err.h>
@@ -77,7 +75,7 @@ ikev2_msg_cb(int fd, short event, void *arg)
 
 	if (socket_getport((struct sockaddr *)&msg.msg_local) ==
 	    IKED_NATT_PORT) {
-		if (bcmp(&natt, buf, sizeof(natt)) != 0)
+		if (memcmp(&natt, buf, sizeof(natt)) != 0)
 			return;
 		msg.msg_natt = 1;
 		off = sizeof(natt);
@@ -408,7 +406,7 @@ ikev2_msg_encrypt(struct iked *env, struct iked_sa *sa, struct ibuf *src)
 
 	if ((ptr = ibuf_advance(dst, integrlen)) == NULL)
 		goto done;
-	bzero(ptr, integrlen);
+	explicit_bzero(ptr, integrlen);
 
 	log_debug("%s: length %zu, padding %d, output length %zu",
 	    __func__, len + sizeof(pad), pad, ibuf_size(dst));
@@ -773,10 +771,6 @@ ikev2_msg_authverify(struct iked *env, struct iked_sa *sa,
 		log_debug("%s: authentication successful", __func__);
 		sa_state(env, sa, IKEV2_STATE_AUTH_SUCCESS);
 		sa_stateflags(sa, IKED_REQ_AUTHVALID);
-
-		if (!sa->sa_policy->pol_auth.auth_eap &&
-		    auth->auth_method == IKEV2_AUTH_SHARED_KEY_MIC)
-			sa_state(env, sa, IKEV2_STATE_VALID);
 	} else {
 		log_debug("%s: authentication failed", __func__);
 		sa_state(env, sa, IKEV2_STATE_AUTH_REQUEST);

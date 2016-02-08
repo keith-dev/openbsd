@@ -1,4 +1,4 @@
-/*	$OpenBSD: net80211.c,v 1.10 2013/11/21 17:32:13 mikeb Exp $	*/
+/*	$OpenBSD: net80211.c,v 1.13 2015/01/16 06:40:10 deraadt Exp $	*/
 
 /*
  * Copyright (c) 2005 Reyk Floeter <reyk@openbsd.org>
@@ -16,17 +16,15 @@
  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
 
-#include <sys/param.h>
+#include <sys/types.h>
 #include <sys/time.h>
 #include <sys/socket.h>
 #include <sys/file.h>
 #include <sys/ioctl.h>
 
 #include <net/if.h>
-#include <net/if_var.h>
 
 #include <netinet/in.h>
-#include <netinet/in_systm.h>
 #include <netinet/if_ether.h>
 
 #include <net80211/ieee80211.h>

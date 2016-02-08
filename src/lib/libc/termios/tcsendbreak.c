@@ -1,4 +1,4 @@
-/*	$OpenBSD: tcsendbreak.c,v 1.6 2005/08/05 13:03:00 espie Exp $ */
+/*	$OpenBSD: tcsendbreak.c,v 1.8 2014/10/10 00:39:38 millert Exp $ */
 /*-
  * Copyright (c) 1989, 1993
  *	The Regents of the University of California.  All rights reserved.
@@ -28,28 +28,22 @@
  * SUCH DAMAGE.
  */
 
-#include <sys/types.h>
 #include <sys/ioctl.h>
-#include <sys/tty.h>
-#include <sys/time.h>
-#include <sys/fcntl.h>
-
-#include <errno.h>
-#include <stdio.h>
 #include <termios.h>
-#include <unistd.h>
+#include <time.h>
 
 /* ARGSUSED */
 int
 tcsendbreak(int fd, int len)
 {
-	struct timeval sleepytime;
+	struct timespec sleepytime;
 
 	sleepytime.tv_sec = 0;
-	sleepytime.tv_usec = 400000;
+	sleepytime.tv_nsec = 400000000;
+
 	if (ioctl(fd, TIOCSBRK, 0) == -1)
 		return (-1);
-	(void)select(0, 0, 0, 0, &sleepytime);
+	(void)nanosleep(&sleepytime, NULL);
 	if (ioctl(fd, TIOCCBRK, 0) == -1)
 		return (-1);
 	return (0);

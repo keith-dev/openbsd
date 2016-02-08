@@ -1,4 +1,4 @@
-/* $OpenBSD: drmP.h,v 1.178 2014/07/12 18:48:52 tedu Exp $ */
+/* $OpenBSD: drmP.h,v 1.181 2015/02/12 08:48:32 jsg Exp $ */
 /* drmP.h -- Private header for Direct Rendering Manager -*- linux-c -*-
  * Created: Mon Jan  4 10:05:05 1999 by faith@precisioninsight.com
  */
@@ -85,10 +85,6 @@
 #define DRM_IF_VERSION(maj, min) (maj << 16 | min)
 
 #define DRM_CURRENTPID		curproc->p_pid
-#define DRM_LOCK()		rw_enter_write(&dev->dev_lock)
-#define DRM_UNLOCK()		rw_exit_write(&dev->dev_lock)
-#define DRM_READLOCK()		rw_enter_read(&dev->dev_lock)
-#define DRM_READUNLOCK()	rw_exit_read(&dev->dev_lock)
 #define DRM_MAXUNITS		8
 
 /* DRM_SUSER returns true if the user is superuser */
@@ -328,6 +324,13 @@ div_u64(uint64_t x, uint32_t y)
 #define smp_mb__before_atomic_inc()	DRM_MEMORYBARRIER()
 #define smp_mb__after_atomic_inc()	DRM_MEMORYBARRIER()
 
+#define mb()				DRM_MEMORYBARRIER()
+#define rmb()				DRM_READMEMORYBARRIER()
+#define wmb()				DRM_WRITEMEMORYBARRIER()
+#define smp_rmb()			DRM_READMEMORYBARRIER()
+#define smp_wmb()			DRM_WRITEMEMORYBARRIER()
+#define mmiowb()			DRM_WRITEMEMORYBARRIER()
+
 #define	DRM_COPY_TO_USER(user, kern, size)	copyout(kern, user, size)
 #define	DRM_COPY_FROM_USER(kern, user, size)	copyin(user, kern, size)
 
@@ -398,7 +401,11 @@ mdelay(unsigned long msecs)
 	    curproc->p_pid, __func__ , ## arg)
 
 
+#ifdef DRM_DEBUG
 #define DRM_INFO(fmt, arg...)  printf("drm: " fmt, ## arg)
+#else
+#define DRM_INFO(fmt, arg...) do { } while(/* CONSTCOND */ 0)
+#endif
 
 #ifdef DRMDEBUG
 #undef DRM_DEBUG
@@ -442,18 +449,6 @@ mdelay(unsigned long msecs)
 #else
 #define DRM_DEBUG_DRIVER(fmt, arg...) do { } while(/* CONSTCOND */ 0)
 #endif
-
-#define dev_warn(dev, fmt, arg...) do {					\
-	DRM_ERROR(fmt, ## arg);						\
-} while(0)
-
-#define dev_err(dev, fmt, arg...) do {					\
-	DRM_ERROR(fmt, ## arg);						\
-} while(0)
-
-#define dev_info(dev, fmt, arg...) do {					\
-	printf("%s: " fmt, dev.dv_xname, ## arg);			\
-} while(0)
 
 #define PCI_ANY_ID (uint16_t) (~0U)
 
@@ -799,7 +794,7 @@ struct drm_device {
 	
 	int		  if_version;	/* Highest interface version set */
 				/* Locks */
-	struct rwlock	  dev_lock;	/* protects everything else */
+	struct rwlock	  struct_mutex;	/* protects everything else */
 
 				/* Usage Counters */
 	int		  open_count;	/* Outstanding files open	   */
@@ -808,7 +803,7 @@ struct drm_device {
 	SPLAY_HEAD(drm_file_tree, drm_file)	files;
 	drm_magic_t	  magicid;
 
-	/* Linked list of mappable regions. Protected by dev_lock */
+	/* Linked list of mappable regions. Protected by struct_mutex */
 	struct extent				*handle_ext;
 	TAILQ_HEAD(drm_map_list, drm_local_map)	 maplist;
 
@@ -1071,9 +1066,9 @@ drm_gem_object_unreference_unlocked(struct drm_gem_object *obj)
 {
 	struct drm_device *dev = obj->dev;
 
-	DRM_LOCK();
+	mutex_lock(&dev->struct_mutex);
 	drm_unref(&obj->uobj);
-	DRM_UNLOCK();
+	mutex_unlock(&dev->struct_mutex);
 }
 
 static __inline__ int drm_core_check_feature(struct drm_device *dev,

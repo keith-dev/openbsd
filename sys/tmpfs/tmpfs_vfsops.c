@@ -1,4 +1,4 @@
-/*	$OpenBSD: tmpfs_vfsops.c,v 1.4 2014/07/12 18:50:25 tedu Exp $	*/
+/*	$OpenBSD: tmpfs_vfsops.c,v 1.7 2015/01/21 22:26:52 deraadt Exp $	*/
 /*	$NetBSD: tmpfs_vfsops.c,v 1.52 2011/09/27 01:10:43 christos Exp $	*/
 
 /*
@@ -42,11 +42,6 @@
  * allocate and release resources.
  */
 
-#if 0
-#include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: tmpfs_vfsops.c,v 1.52 2011/09/27 01:10:43 christos Exp $");
-#endif
-
 #include <sys/param.h>
 #include <sys/types.h>
 #include <sys/mount.h>
@@ -78,10 +73,10 @@ int
 tmpfs_init(struct vfsconf *vfsp)
 {
 
-	pool_init(&tmpfs_dirent_pool, sizeof(tmpfs_dirent_t), 0, 0, 0,
-	    "tmpfs_dirent", &pool_allocator_nointr);
-	pool_init(&tmpfs_node_pool, sizeof(tmpfs_node_t), 0, 0, 0,
-	    "tmpfs_node", &pool_allocator_nointr);
+	pool_init(&tmpfs_dirent_pool, sizeof(tmpfs_dirent_t), 0, 0, PR_WAITOK,
+	    "tmpfs_dirent", NULL);
+	pool_init(&tmpfs_node_pool, sizeof(tmpfs_node_t), 0, 0, PR_WAITOK,
+	    "tmpfs_node", NULL);
 
 	return 0;
 }
@@ -255,7 +250,7 @@ tmpfs_unmount(struct mount *mp, int mntflags, struct proc *p)
 	tmpfs_mntmem_destroy(tmp);
 	/* mutex_destroy(&tmp->tm_lock); */
 	/* kmem_free(tmp, sizeof(*tmp)); */
-	free(tmp, M_MISCFSMNT, 0);
+	free(tmp, M_MISCFSMNT, sizeof(tmpfs_mount_t));
 	mp->mnt_data = NULL;
 
 	return 0;

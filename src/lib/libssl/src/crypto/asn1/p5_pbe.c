@@ -1,4 +1,4 @@
-/* $OpenBSD: p5_pbe.c,v 1.16 2014/07/11 08:44:47 jsing Exp $ */
+/* $OpenBSD: p5_pbe.c,v 1.20 2015/02/11 04:00:39 jsing Exp $ */
 /* Written by Dr Stephen N Henson (steve@openssl.org) for the OpenSSL
  * project 1999.
  */
@@ -57,21 +57,62 @@
  */
 
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include <openssl/asn1t.h>
 #include <openssl/err.h>
-#include <openssl/rand.h>
 #include <openssl/x509.h>
 
 /* PKCS#5 password based encryption structure */
 
-ASN1_SEQUENCE(PBEPARAM) = {
-	ASN1_SIMPLE(PBEPARAM, salt, ASN1_OCTET_STRING),
-	ASN1_SIMPLE(PBEPARAM, iter, ASN1_INTEGER)
-} ASN1_SEQUENCE_END(PBEPARAM)
+static const ASN1_TEMPLATE PBEPARAM_seq_tt[] = {
+	{
+		.offset = offsetof(PBEPARAM, salt),
+		.field_name = "salt",
+		.item = &ASN1_OCTET_STRING_it,
+	},
+	{
+		.offset = offsetof(PBEPARAM, iter),
+		.field_name = "iter",
+		.item = &ASN1_INTEGER_it,
+	},
+};
 
-IMPLEMENT_ASN1_FUNCTIONS(PBEPARAM)
+const ASN1_ITEM PBEPARAM_it = {
+	.itype = ASN1_ITYPE_SEQUENCE,
+	.utype = V_ASN1_SEQUENCE,
+	.templates = PBEPARAM_seq_tt,
+	.tcount = sizeof(PBEPARAM_seq_tt) / sizeof(ASN1_TEMPLATE),
+	.size = sizeof(PBEPARAM),
+	.sname = "PBEPARAM",
+};
+
+
+PBEPARAM *
+d2i_PBEPARAM(PBEPARAM **a, const unsigned char **in, long len)
+{
+	return (PBEPARAM *)ASN1_item_d2i((ASN1_VALUE **)a, in, len,
+	    &PBEPARAM_it);
+}
+
+int
+i2d_PBEPARAM(PBEPARAM *a, unsigned char **out)
+{
+	return ASN1_item_i2d((ASN1_VALUE *)a, out, &PBEPARAM_it);
+}
+
+PBEPARAM *
+PBEPARAM_new(void)
+{
+	return (PBEPARAM *)ASN1_item_new(&PBEPARAM_it);
+}
+
+void
+PBEPARAM_free(PBEPARAM *a)
+{
+	ASN1_item_free((ASN1_VALUE *)a, &PBEPARAM_it);
+}
 
 
 /* Set an algorithm identifier for a PKCS#5 PBE algorithm */
@@ -104,8 +145,8 @@ PKCS5_pbe_set0_algor(X509_ALGOR *algor, int alg, int iter,
 	sstr = ASN1_STRING_data(pbe->salt);
 	if (salt)
 		memcpy(sstr, salt, saltlen);
-	else if (RAND_pseudo_bytes(sstr, saltlen) < 0)
-		goto err;
+	else
+		arc4random_buf(sstr, saltlen);
 
 	if (!ASN1_item_pack(pbe, ASN1_ITEM_rptr(PBEPARAM), &pbe_str)) {
 		ASN1err(ASN1_F_PKCS5_PBE_SET0_ALGOR, ERR_R_MALLOC_FAILURE);

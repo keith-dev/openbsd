@@ -1,4 +1,4 @@
-/*	$OpenBSD: uvm_page.c,v 1.131 2014/07/11 16:35:40 jsg Exp $	*/
+/*	$OpenBSD: uvm_page.c,v 1.136 2015/02/28 06:11:04 mlarkin Exp $	*/
 /*	$NetBSD: uvm_page.c,v 1.44 2000/11/27 08:40:04 chs Exp $	*/
 
 /*
@@ -385,7 +385,7 @@ uvm_pageboot_alloc(vsize_t size)
 		 * Note this memory is no longer managed, so using
 		 * pmap_kenter is safe.
 		 */
-		pmap_kenter_pa(vaddr, paddr, VM_PROT_READ|VM_PROT_WRITE);
+		pmap_kenter_pa(vaddr, paddr, PROT_READ | PROT_WRITE);
 	}
 	pmap_update(pmap_kernel());
 	return(addr);
@@ -751,7 +751,7 @@ uvm_pglistalloc(psize_t size, paddr_t low, paddr_t high, paddr_t alignment,
 	/*
 	 * XXX uvm_pglistalloc is currently only used for kernel
 	 * objects. Unlike the checks in uvm_pagealloc, below, here
-	 * we are always allowed to use the kernel reseve. However, we
+	 * we are always allowed to use the kernel reserve. However, we
 	 * have to enforce the pagedaemon reserve here or allocations
 	 * via this path could consume everything and we can't
 	 * recover in the page daemon.
@@ -1097,7 +1097,7 @@ uvm_page_unbusy(struct vm_page **pgs, int npgs)
 			uobj = pg->uobject;
 			if (uobj != NULL) {
 				uvm_lock_pageq();
-				pmap_page_protect(pg, VM_PROT_NONE);
+				pmap_page_protect(pg, PROT_NONE);
 				/* XXX won't happen right now */
 				if (pg->pg_flags & PQ_AOBJ)
 					uao_dropswap(uobj,
@@ -1151,85 +1151,6 @@ uvm_page_own(struct vm_page *pg, char *tag)
 	return;
 }
 #endif
-
-/*
- * uvm_pageidlezero: zero free pages while the system is idle.
- *
- * => we do at least one iteration per call, if we are below the target.
- * => we loop until we either reach the target or whichqs indicates that
- *	there is a process ready to run.
- */
-void
-uvm_pageidlezero(void)
-{
-#if 0 /* disabled: need new code */
-	struct vm_page *pg;
-	struct pgfreelist *pgfl;
-	int free_list;
-
-	do {
-		uvm_lock_fpageq();
-
-		if (uvmexp.zeropages >= UVM_PAGEZERO_TARGET) {
-			uvm.page_idle_zero = FALSE;
-			uvm_unlock_fpageq();
-			return;
-		}
-
-		for (free_list = 0; free_list < VM_NFREELIST; free_list++) {
-			pgfl = &uvm.page_free[free_list];
-			if ((pg = TAILQ_FIRST(&pgfl->pgfl_queues[
-			    PGFL_UNKNOWN])) != NULL)
-				break;
-		}
-
-		if (pg == NULL) {
-			/*
-			 * No non-zero'd pages; don't bother trying again
-			 * until we know we have non-zero'd pages free.
-			 */
-			uvm.page_idle_zero = FALSE;
-			uvm_unlock_fpageq();
-			return;
-		}
-
-		TAILQ_REMOVE(&pgfl->pgfl_queues[PGFL_UNKNOWN], pg, pageq);
-		uvmexp.free--;
-		uvm_unlock_fpageq();
-
-#ifdef PMAP_PAGEIDLEZERO
-		if (PMAP_PAGEIDLEZERO(pg) == FALSE) {
-			/*
-			 * The machine-dependent code detected some
-			 * reason for us to abort zeroing pages,
-			 * probably because there is a process now
-			 * ready to run.
-			 */
-			uvm_lock_fpageq();
-			TAILQ_INSERT_HEAD(&pgfl->pgfl_queues[PGFL_UNKNOWN],
-			    pg, pageq);
-			uvmexp.free++;
-			uvmexp.zeroaborts++;
-			uvm_unlock_fpageq();
-			return;
-		}
-#else
-		/*
-		 * XXX This will toast the cache unless the pmap_zero_page()
-		 * XXX implementation does uncached access.
-		 */
-		pmap_zero_page(pg);
-#endif
-		atomic_setbits_int(&pg->pg_flags, PG_ZERO);
-
-		uvm_lock_fpageq();
-		TAILQ_INSERT_HEAD(&pgfl->pgfl_queues[PGFL_ZEROS], pg, pageq);
-		uvmexp.free++;
-		uvmexp.zeropages++;
-		uvm_unlock_fpageq();
-	} while (curcpu_is_idle());
-#endif /* 0 */
-}
 
 /*
  * when VM_PHYSSEG_MAX is 1, we can simplify these functions

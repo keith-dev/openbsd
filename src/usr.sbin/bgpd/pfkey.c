@@ -1,4 +1,4 @@
-/*	$OpenBSD: pfkey.c,v 1.41 2010/12/09 13:50:41 claudio Exp $ */
+/*	$OpenBSD: pfkey.c,v 1.44 2015/02/10 05:18:39 claudio Exp $ */
 
 /*
  * Copyright (c) 2003, 2004 Henning Brauer <henning@openbsd.org>
@@ -407,6 +407,8 @@ pfkey_read(int sd, struct sadb_msg *h)
 	struct sadb_msg hdr;
 
 	if (recv(sd, &hdr, sizeof(hdr), MSG_PEEK) != sizeof(hdr)) {
+		if (errno == EAGAIN || errno == EINTR)
+			return (0);
 		log_warn("pfkey peek");
 		return (-1);
 	}
@@ -421,6 +423,8 @@ pfkey_read(int sd, struct sadb_msg *h)
 
 	/* not ours, discard */
 	if (read(sd, &hdr, sizeof(hdr)) == -1) {
+		if (errno == EAGAIN || errno == EINTR)
+			return (0);
 		log_warn("pfkey read");
 		return (-1);
 	}
@@ -453,11 +457,11 @@ pfkey_reply(int sd, u_int32_t *spip)
 			return (-1);
 		}
 	}
-	len = hdr.sadb_msg_len * PFKEY2_CHUNK;
-	if ((data = malloc(len)) == NULL) {
+	if ((data = reallocarray(NULL, hdr.sadb_msg_len, PFKEY2_CHUNK)) == NULL) {
 		log_warn("pfkey malloc");
 		return (-1);
 	}
+	len = hdr.sadb_msg_len * PFKEY2_CHUNK;
 	if (read(sd, data, len) != len) {
 		log_warn("pfkey read");
 		bzero(data, len);
@@ -734,7 +738,8 @@ pfkey_remove(struct peer *p)
 int
 pfkey_init(struct bgpd_sysdep *sysdep)
 {
-	if ((fd = socket(PF_KEY, SOCK_RAW, PF_KEY_V2)) == -1) {
+	if ((fd = socket(PF_KEY, SOCK_RAW | SOCK_CLOEXEC | SOCK_NONBLOCK,
+	    PF_KEY_V2)) == -1) {
 		if (errno == EPROTONOSUPPORT) {
 			log_warnx("PF_KEY not available, disabling ipsec");
 			sysdep->no_pfkey = 1;

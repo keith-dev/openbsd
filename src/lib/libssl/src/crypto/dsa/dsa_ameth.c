@@ -1,4 +1,4 @@
-/* $OpenBSD: dsa_ameth.c,v 1.14 2014/07/13 12:45:01 miod Exp $ */
+/* $OpenBSD: dsa_ameth.c,v 1.17 2015/02/14 15:11:22 miod Exp $ */
 /* Written by Dr Stephen N Henson (steve@openssl.org) for the OpenSSL
  * project 2006.
  */
@@ -143,9 +143,14 @@ dsa_pub_encode(X509_PUBKEY *pk, const EVP_PKEY *pkey)
 		ASN1_STRING *str;
 
 		str = ASN1_STRING_new();
+		if (str == NULL) {
+			DSAerr(DSA_F_DSA_PUB_ENCODE, ERR_R_MALLOC_FAILURE);
+			goto err;
+		}
 		str->length = i2d_DSAparams(dsa, &str->data);
 		if (str->length <= 0) {
 			DSAerr(DSA_F_DSA_PUB_ENCODE, ERR_R_MALLOC_FAILURE);
+			ASN1_STRING_free(str);
 			goto err;
 		}
 		pval = str;

@@ -1,4 +1,4 @@
-/*	$OpenBSD: pax.h,v 1.18 2014/01/30 13:30:11 espie Exp $	*/
+/*	$OpenBSD: pax.h,v 1.24 2015/02/21 22:48:23 guenther Exp $	*/
 /*	$NetBSD: pax.h,v 1.3 1995/03/21 09:07:41 cgd Exp $	*/
 
 /*-
@@ -49,7 +49,7 @@
 #define DEVBLK		8192	/* default read blksize for devices */
 #define FILEBLK		10240	/* default read blksize for files */
 #define PAXPATHLEN	3072	/* maximum path length for pax. MUST be */
-				/* longer than the system MAXPATHLEN */
+				/* longer than the system PATH_MAX */
 
 /*
  * Pax modes of operation
@@ -224,9 +224,7 @@ typedef struct oplist {
 /*
  * General Macros
  */
-#ifndef MIN
-#define	MIN(a,b) (((a)<(b))?(a):(b))
-#endif
+#define MINIMUM(a, b)	(((a) < (b)) ? (a) : (b))
 #define MAJOR(x)	major(x)
 #define MINOR(x)	minor(x)
 #define TODEV(x, y)	makedev((x), (y))

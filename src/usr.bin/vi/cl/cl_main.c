@@ -1,4 +1,4 @@
-/*	$OpenBSD: cl_main.c,v 1.20 2009/10/27 23:59:47 deraadt Exp $	*/
+/*	$OpenBSD: cl_main.c,v 1.25 2014/11/19 03:42:40 bentley Exp $	*/
 
 /*-
  * Copyright (c) 1993, 1994
@@ -18,6 +18,7 @@
 #include <curses.h>
 #include <errno.h>
 #include <fcntl.h>
+#include <paths.h>
 #include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -27,11 +28,7 @@
 #include <unistd.h>
 
 #include "../common/common.h"
-#ifdef RUNNING_IP
-#include "../ip/ip.h"
-#endif
 #include "cl.h"
-#include "pathnames.h"
 
 GS *__global_list;				/* GLOBAL: List of screens. */
 sigset_t __sigblockset;				/* GLOBAL: Blocked signals. */
@@ -57,10 +54,6 @@ main(int argc, char *argv[])
 	size_t rows, cols;
 	int rval;
 	char *ttype;
-#ifdef RUNNING_IP
-	char *ip_arg;
-	char **p_av, **t_av;
-#endif
 
 	/* If loaded at 0 and jumping through a NULL pointer, stop. */
 	if (reenter++)
@@ -69,47 +62,6 @@ main(int argc, char *argv[])
 	/* Create and initialize the global structure. */
 	__global_list = gp = gs_init(argv[0]);
 
-	/*
-	 * Strip out any arguments that vi isn't going to understand.  There's
-	 * no way to portably call getopt twice, so arguments parsed here must
-	 * be removed from the argument list.
-	 */
-#ifdef RUNNING_IP
-	ip_arg = NULL;
-	for (p_av = t_av = argv;;) {
-		if (*t_av == NULL) {
-			*p_av = NULL;
-			break;
-		}
-		if (!strcmp(*t_av, "--")) {
-			while ((*p_av++ = *t_av++) != NULL);
-			break;
-		}
-		if (!memcmp(*t_av, "-I", sizeof("-I") - 1)) {
-			if (t_av[0][2] != '\0') {
-				ip_arg = t_av[0] + 2;
-				++t_av;
-				--argc;
-				continue;
-			}
-			if (t_av[1] != NULL) {
-				ip_arg = t_av[1];
-				t_av += 2;
-				argc -= 2;
-				continue;
-			}
-		}
-		*p_av++ = *t_av++;
-	}
-
-	/*
-	 * If we're being called as an editor library, we're done here, we
-	 * get loaded with the curses screen, we don't share much code.
-	 */
-	if (ip_arg != NULL)
-		exit (ip_main(argc, argv, gp, ip_arg));
-#endif
-		
 	/* Create and initialize the CL_PRIVATE structure. */
 	clp = cl_init(gp);
 
@@ -176,7 +128,7 @@ main(int argc, char *argv[])
 	}
 
 	/* Free the global and CL private areas. */
-#if defined(DEBUG) || defined(PURIFY) || defined(LIBRARY)
+#if defined(DEBUG) || defined(PURIFY)
 	free(clp);
 	free(gp);
 #endif
@@ -189,8 +141,7 @@ main(int argc, char *argv[])
  *	Create and partially initialize the GS structure.
  */
 static GS *
-gs_init(name)
-	char *name;
+gs_init(char *name)
 {
 	GS *gp;
 	char *p;
@@ -214,8 +165,7 @@ gs_init(name)
  *	Create and partially initialize the CL structure.
  */
 static CL_PRIVATE *
-cl_init(gp)
-	GS *gp;
+cl_init(GS *gp)
 {
 	CL_PRIVATE *clp;
 	int fd;
@@ -263,8 +213,7 @@ tcfail:			perr(gp->progname, "tcgetattr");
  *	Initialize terminal information.
  */
 static void
-term_init(name, ttype)
-	char *name, *ttype;
+term_init(char *name, char *ttype)
 {
 	int err;
 
@@ -285,8 +234,7 @@ term_init(name, ttype)
 #define	GLOBAL_CLP \
 	CL_PRIVATE *clp = GCLP(__global_list);
 static void
-h_hup(signo)
-	int signo;
+h_hup(int signo)
 {
 	GLOBAL_CLP;
 
@@ -295,8 +243,7 @@ h_hup(signo)
 }
 
 static void
-h_int(signo)
-	int signo;
+h_int(int signo)
 {
 	GLOBAL_CLP;
 
@@ -304,8 +251,7 @@ h_int(signo)
 }
 
 static void
-h_term(signo)
-	int signo;
+h_term(int signo)
 {
 	GLOBAL_CLP;
 
@@ -314,8 +260,7 @@ h_term(signo)
 }
 
 static void
-h_winch(signo)
-	int signo;
+h_winch(int signo)
 {
 	GLOBAL_CLP;
 
@@ -330,9 +275,7 @@ h_winch(signo)
  * PUBLIC: int sig_init(GS *, SCR *);
  */
 int
-sig_init(gp, sp)
-	GS *gp;
-	SCR *sp;
+sig_init(GS *gp, SCR *sp)
 {
 	CL_PRIVATE *clp;
 
@@ -345,12 +288,9 @@ sig_init(gp, sp)
 		    sigaddset(&__sigblockset, SIGINT) ||
 		    setsig(SIGINT, &clp->oact[INDX_INT], h_int) ||
 		    sigaddset(&__sigblockset, SIGTERM) ||
-		    setsig(SIGTERM, &clp->oact[INDX_TERM], h_term)
-#ifdef SIGWINCH
-		    ||
+		    setsig(SIGTERM, &clp->oact[INDX_TERM], h_term) ||
 		    sigaddset(&__sigblockset, SIGWINCH) ||
 		    setsig(SIGWINCH, &clp->oact[INDX_WINCH], h_winch)
-#endif
 		    ) {
 			perr(gp->progname, NULL);
 			return (1);
@@ -358,11 +298,8 @@ sig_init(gp, sp)
 	} else
 		if (setsig(SIGHUP, NULL, h_hup) ||
 		    setsig(SIGINT, NULL, h_int) ||
-		    setsig(SIGTERM, NULL, h_term)
-#ifdef SIGWINCH
-		    ||
+		    setsig(SIGTERM, NULL, h_term) ||
 		    setsig(SIGWINCH, NULL, h_winch)
-#endif
 		    ) {
 			msgq(sp, M_SYSERR, "signal-reset");
 		}
@@ -374,10 +311,7 @@ sig_init(gp, sp)
  *	Set a signal handler.
  */
 static int
-setsig(signo, oactp, handler)
-	int signo;
-	struct sigaction *oactp;
-	void (*handler)(int);
+setsig(int signo, struct sigaction *oactp, void (*handler)(int))
 {
 	struct sigaction act;
 
@@ -408,8 +342,7 @@ setsig(signo, oactp, handler)
  *	End signal setup.
  */
 static void
-sig_end(gp)
-	GS *gp;
+sig_end(GS *gp)
 {
 	CL_PRIVATE *clp;
 
@@ -417,9 +350,7 @@ sig_end(gp)
 	(void)sigaction(SIGHUP, NULL, &clp->oact[INDX_HUP]);
 	(void)sigaction(SIGINT, NULL, &clp->oact[INDX_INT]);
 	(void)sigaction(SIGTERM, NULL, &clp->oact[INDX_TERM]);
-#ifdef SIGWINCH
 	(void)sigaction(SIGWINCH, NULL, &clp->oact[INDX_WINCH]);
-#endif
 }
 
 /*
@@ -427,8 +358,7 @@ sig_end(gp)
  *	Initialize the standard curses functions.
  */
 static void
-cl_func_std(gp)
-	GS *gp;
+cl_func_std(GS *gp)
 {
 	gp->scr_addstr = cl_addstr;
 	gp->scr_attr = cl_attr;
@@ -458,8 +388,7 @@ cl_func_std(gp)
  *	Print system error.
  */
 static void
-perr(name, msg)
-	char *name, *msg;
+perr(char *name, char *msg)
 {
 	(void)fprintf(stderr, "%s:", name);
 	if (msg != NULL)

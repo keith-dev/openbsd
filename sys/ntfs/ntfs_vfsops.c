@@ -1,4 +1,4 @@
-/*	$OpenBSD: ntfs_vfsops.c,v 1.40 2014/07/12 18:43:52 tedu Exp $	*/
+/*	$OpenBSD: ntfs_vfsops.c,v 1.43 2014/12/16 19:56:33 tedu Exp $	*/
 /*	$NetBSD: ntfs_vfsops.c,v 1.7 2003/04/24 07:50:19 christos Exp $	*/
 
 /*-
@@ -35,12 +35,12 @@
 #include <sys/proc.h>
 #include <sys/kernel.h>
 #include <sys/vnode.h>
+#include <sys/lock.h>
 #include <sys/mount.h>
 #include <sys/buf.h>
 #include <sys/disk.h>
 #include <sys/fcntl.h>
 #include <sys/malloc.h>
-#include <sys/systm.h>
 #include <sys/device.h>
 #include <sys/conf.h>
 #include <sys/specdev.h>
@@ -412,7 +412,7 @@ ntfs_mountfs(struct vnode *devvp, struct mount *mp, struct ntfs_args *argsp,
 		}
 
 		/* Alloc memory for attribute definitions */
-		ntmp->ntm_ad = malloc(num * sizeof(struct ntvattrdef),
+		ntmp->ntm_ad = mallocarray(num, sizeof(struct ntvattrdef),
 		    M_NTFSMNT, M_WAITOK);
 
 		ntmp->ntm_adnum = num;

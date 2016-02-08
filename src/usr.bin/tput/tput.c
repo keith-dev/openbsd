@@ -1,4 +1,4 @@
-/*	$OpenBSD: tput.c,v 1.19 2013/11/27 15:23:01 yasuoka Exp $	*/
+/*	$OpenBSD: tput.c,v 1.21 2015/01/16 06:40:13 deraadt Exp $	*/
 
 /*
  * Copyright (c) 1999 Todd C. Miller <Todd.Miller@courtesan.com>
@@ -44,8 +44,6 @@
  * SUCH DAMAGE.
  */
 
-#include <sys/param.h>
-
 #include <ctype.h>
 #include <err.h>
 #include <curses.h>
@@ -54,7 +52,10 @@
 #include <stdlib.h>
 #include <termios.h>
 #include <unistd.h>
+#include <limits.h>
 #include <string.h>
+
+#define MAXIMUM(a, b)	(((a) > (b)) ? (a) : (b))
 
 #include <sys/wait.h>
 
@@ -126,7 +127,8 @@ main(int argc, char *argv[])
 				/* grow av as needed */
 				if (argc + 1 >= n) {
 					n += 64;
-					av = (char **)realloc(av, sizeof(char *) * n);
+					av = reallocarray(av, n,
+					    sizeof(char *));
 					if (av == NULL)
 						errx(1, "out of memory");
 				}
@@ -228,7 +230,7 @@ process(char *cap, char *str, char **argv)
 			}
 		}
 	}
-	arg_need = MAX(arg_need, popcount);
+	arg_need = MAXIMUM(arg_need, popcount);
 	if (arg_need > 9)
 		errx(2, "too many arguments (%d) for capability `%s'",
 		    arg_need, cap);

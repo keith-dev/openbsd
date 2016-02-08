@@ -1,4 +1,4 @@
-/*	$OpenBSD: sysctl.c,v 1.202 2014/05/07 01:49:36 tedu Exp $	*/
+/*	$OpenBSD: sysctl.c,v 1.210 2015/02/13 00:02:21 guenther Exp $	*/
 /*	$NetBSD: sysctl.c,v 1.9 1995/09/30 07:12:50 thorpej Exp $	*/
 
 /*
@@ -30,7 +30,7 @@
  * SUCH DAMAGE.
  */
 
-#include <sys/param.h>
+#include <sys/types.h>
 #include <sys/gmon.h>
 #include <sys/mount.h>
 #include <sys/sem.h>
@@ -38,17 +38,16 @@
 #include <sys/sysctl.h>
 #include <sys/socket.h>
 #include <sys/malloc.h>
-#include <sys/dkstat.h>
 #include <sys/uio.h>
 #include <sys/tty.h>
 #include <sys/namei.h>
+#include <sys/sched.h>
 #include <sys/sensors.h>
 #include <sys/vmmeter.h>
 #include <net/route.h>
 #include <net/if.h>
 
 #include <netinet/in.h>
-#include <netinet/in_systm.h>
 #include <netinet/ip.h>
 #include <netinet/in_pcb.h>
 #include <netinet/ip_icmp.h>
@@ -179,6 +178,7 @@ int	Aflag, aflag, nflag, qflag;
 #define	LONGARRAY	0x00000800
 #define	KMEMSTATS	0x00001000
 #define	SENSORS		0x00002000
+#define	SMALLBUF	0x00004000
 
 /* prototypes */
 void debuginit(void);
@@ -388,11 +388,6 @@ parse(char *string, int flags)
 				return;
 			warnx("use dmesg to view %s", string);
 			return;
-		case KERN_VNODE:
-			if (flags == 0)
-				return;
-			warnx("use pstat to view %s information", string);
-			return;
 		case KERN_PROC:
 			if (flags == 0)
 				return;
@@ -410,6 +405,7 @@ parse(char *string, int flags)
 		case KERN_HOSTID:
 		case KERN_ARND:
 			special |= UNSIGNED;
+			special |= SMALLBUF;
 			break;
 		case KERN_CPTIME:
 			special |= LONGARRAY;
@@ -540,6 +536,8 @@ parse(char *string, int flags)
 
 			if ((mib[2] == IPPROTO_IP && mib[3] == IPCTL_MRTSTATS) ||
 			    (mib[2] == IPPROTO_IP && mib[3] == IPCTL_STATS) ||
+			    (mib[2] == IPPROTO_IP && mib[3] == IPCTL_MRTMFC) ||
+			    (mib[2] == IPPROTO_IP && mib[3] == IPCTL_MRTVIF) ||
 			    (mib[2] == IPPROTO_TCP && mib[3] == TCPCTL_STATS) ||
 			    (mib[2] == IPPROTO_UDP && mib[3] == UDPCTL_STATS) ||
 			    (mib[2] == IPPROTO_ESP && mib[3] == ESPCTL_STATS) ||
@@ -577,6 +575,8 @@ parse(char *string, int flags)
 				return;
 
 			if ((mib[2] == IPPROTO_PIM && mib[3] == PIM6CTL_STATS) ||
+			    (mib[2] == IPPROTO_IPV6 && mib[3] == IPV6CTL_MRTMFC) ||
+			    (mib[2] == IPPROTO_IPV6 && mib[3] == IPV6CTL_MRTMIF) ||
 			    (mib[2] == IPPROTO_DIVERT && mib[3] == DIVERT6CTL_STATS)) {
 				if (flags == 0)
 					return;
@@ -728,7 +728,7 @@ parse(char *string, int flags)
 			break;
 		}
 	}
-	size = SYSCTL_BUFSIZ;
+	size = (special & SMALLBUF) ? 512 : SYSCTL_BUFSIZ;
 	if (sysctl(mib, len, buf, &size, newval, newsize) == -1) {
 		if (flags == 0)
 			return;
@@ -2133,6 +2133,20 @@ sysctl_inet6(char *string, char **bufpp, int mib[], int flags, int *typep)
 		return (-1);
 	mib[3] = indx;
 	*typep = lp->list[indx].ctl_type;
+	if (*typep == CTLTYPE_NODE) {
+		int tindx;
+
+		if (*bufpp == NULL) {
+			listall(string, &ifqlist);
+			return(-1);
+		}
+		lp = &ifqlist;
+		if ((tindx = findname(string, "fifth", bufpp, lp)) == -1)
+			return (-1);
+		mib[4] = tindx;
+		*typep = lp->list[tindx].ctl_type;
+		return(5);
+	}
 	return (4);
 }
 #endif
@@ -2555,7 +2569,7 @@ print_sensor(struct sensor *s)
 				name = "unknown";
 				break;
 			}
-			printf(name);
+			printf("%s", name);
 			break;
 		case SENSOR_TIMEDELTA:
 			printf("%.6f secs", s->value / 1000000000.0);

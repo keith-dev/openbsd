@@ -8,10 +8,9 @@
 
 ENTRY(memset)
 	movq	%rsi,%rax
+	andq	$0xff,%rax
 	movq	%rdx,%rcx
 	movq	%rdi,%r11
-
-	cld				/* set fill direction forward */
 
 	/*
 	 * if the string is too short, it's really not worth the overhead

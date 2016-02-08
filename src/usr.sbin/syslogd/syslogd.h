@@ -1,3 +1,5 @@
+/*	$OpenBSD: syslogd.h,v 1.16 2014/10/05 18:14:01 bluhm Exp $ */
+
 /*
  * Copyright (c) 2003 Anil Madhavapeddy <anil@recoil.org>
  *
@@ -26,8 +28,8 @@ FILE *priv_open_utmp(void);
 FILE *priv_open_config(void);
 void  priv_config_parse_done(void);
 int   priv_config_modified(void);
-int   priv_gethostserv(char *, char *, struct sockaddr *, size_t);
-int   priv_gethostbyaddr(char *, int, int, char *, size_t);
+int   priv_getaddrinfo(char *, char *, char *, struct sockaddr *, size_t);
+int   priv_getnameinfo(struct sockaddr *, socklen_t, char *, size_t);
 
 /* Terminal message */
 char *ttymsg(struct iovec *, int, char *, int);
@@ -37,24 +39,16 @@ void send_fd(int, int);
 int  receive_fd(int);
 
 /* The list of domain sockets */
-#define MAXFUNIX	21
-extern int nfunix;
-extern char *funixn[MAXFUNIX];
-extern char *ctlsock_path;
+#define MAXUNIX	21
+extern int nunix;
+extern char *path_unix[MAXUNIX];
+extern char *path_ctlsock;
+extern int fd_ctlsock, fd_ctlconn, fd_klog, fd_sendsys;
+extern int fd_udp, fd_udp6, fd_unix[MAXUNIX];
 
 #define dprintf(_f...)	do { if (Debug) printf(_f); } while (0)
 extern int Debug;
 extern int Startup;
-
-/* fds to poll */
-#define PFD_KLOG	0		/* Offset of /dev/klog entry */
-#define PFD_INET	1		/* Offset of inet socket entry */
-#define PFD_CTLSOCK	2		/* Offset of control socket entry */
-#define PFD_CTLCONN	3		/* Offset of control connection entry */
-#define PFD_INET6	4		/* Offset of inet6 socket entry */
-#define PFD_UNIX_0	5		/* Start of Unix socket entries */
-#define N_PFD		(PFD_UNIX_0 + MAXFUNIX)	/* # of pollfd entries */
-extern struct pollfd pfd[N_PFD];
 
 struct ringbuf {
 	char *buf;

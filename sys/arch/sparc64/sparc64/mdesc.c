@@ -1,4 +1,4 @@
-/*	$OpenBSD: mdesc.c,v 1.4 2014/04/03 09:15:06 mpi Exp $	*/
+/*	$OpenBSD: mdesc.c,v 1.7 2014/11/30 22:26:15 kettenis Exp $	*/
 /*
  * Copyright (c) 2009 Mark Kettenis
  *
@@ -58,7 +58,7 @@ again:
 	if (err != H_EOK)
 		goto fail;
 
-	va = uvm_km_valloc(kernel_map, len);
+	va = (vaddr_t)km_alloc(size, &kv_any, &kp_none, &kd_nowait);
 	if (va == 0)
 		panic("%s: out of memory", __func__);
 
@@ -69,8 +69,9 @@ again:
 	m = TAILQ_FIRST(&mlist);
 	for (; m != NULL; m = TAILQ_NEXT(m,pageq)) {
 		pa = VM_PAGE_TO_PHYS(m);
-		pmap_enter(pmap_kernel(), va, pa, VM_PROT_READ|VM_PROT_WRITE,
-		    VM_PROT_READ|VM_PROT_WRITE|PMAP_WIRED);
+		pmap_enter(pmap_kernel(), va, pa,
+		    PROT_READ | PROT_WRITE,
+		    PROT_READ | PROT_WRITE | PMAP_WIRED);
 		va += PAGE_SIZE;
 	}
 	pmap_update(pmap_kernel());
@@ -137,6 +138,32 @@ mdesc_get_prop_str(int idx, const char *name)
 	return (NULL);
 }
 
+const char *
+mdesc_get_prop_data(int idx, const char *name, size_t *len)
+{
+	struct md_header *hdr;
+	struct md_element *elem;
+	const char *name_blk;
+	const char *data_blk;
+	const char *str;
+
+	hdr = (struct md_header *)mdesc;
+	elem = (struct md_element *)(mdesc + sizeof(struct md_header));
+	name_blk = mdesc + sizeof(struct md_header) + hdr->node_blk_sz;
+	data_blk = name_blk + hdr->name_blk_sz;
+
+	while (elem[idx].tag != 'E') {
+		str = name_blk + elem[idx].name_offset;
+		if (elem[idx].tag == 'd' && strcmp(str, name) == 0) {
+			*len = elem[idx].d.y.data_len;
+			return (data_blk + elem[idx].d.y.data_offset);
+		}
+		idx++;
+	}
+
+	return (NULL);
+}
+
 int
 mdesc_find(const char *name, uint64_t cfg_handle)
 {
@@ -183,6 +210,28 @@ mdesc_find_child(int idx, const char *name, uint64_t cfg_handle)
 		val = mdesc_get_prop_val(arc, "cfg-handle");
 		if (str && strcmp(str, name) == 0 && val == cfg_handle)
 			return (arc);
+	}
+
+	return (-1);
+}
+
+int
+mdesc_find_node(const char *name)
+{
+	struct md_header *hdr;
+	struct md_element *elem;
+	const char *name_blk;
+	const char *str;
+	int idx;
+
+	hdr = (struct md_header *)mdesc;
+	elem = (struct md_element *)(mdesc + sizeof(struct md_header));
+	name_blk = mdesc + sizeof(struct md_header) + hdr->node_blk_sz;
+
+	for (idx = 0; elem[idx].tag == 'N'; idx = elem[idx].d.val) {
+		str = name_blk + elem[idx].name_offset;
+		if (str && strcmp(str, name) == 0)
+			return (idx);
 	}
 
 	return (-1);

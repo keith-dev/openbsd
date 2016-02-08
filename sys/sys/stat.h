@@ -1,4 +1,4 @@
-/*	$OpenBSD: stat.h,v 1.24 2013/09/14 01:35:02 guenther Exp $	*/
+/*	$OpenBSD: stat.h,v 1.27 2014/12/08 20:56:11 guenther Exp $	*/
 /*	$NetBSD: stat.h,v 1.20 1996/05/16 22:17:49 cgd Exp $	*/
 
 /*-
@@ -63,8 +63,8 @@ struct stat {
 	long	  st_ctimensec;		/* nsec of last file status change */
 #endif /* __POSIX_VISIBLE >= 200809 || __BSD_VISIBLE */
 	off_t	  st_size;		/* file size, in bytes */
-	int64_t	  st_blocks;		/* blocks allocated for file */
-	u_int32_t st_blksize;		/* optimal blocksize for I/O */
+	blkcnt_t  st_blocks;		/* blocks allocated for file */
+	blksize_t st_blksize;		/* optimal blocksize for I/O */
 	u_int32_t st_flags;		/* user defined flags for file */
 	u_int32_t st_gen;		/* file generation number */
 #if __POSIX_VISIBLE >= 200809 || __BSD_VISIBLE
@@ -209,6 +209,7 @@ int	futimens(int, const struct timespec [2]);
 #endif
 #if __BSD_VISIBLE
 int	chflags(const char *, unsigned int);
+int	chflagsat(int, const char *, unsigned int, int);
 int	fchflags(int, unsigned int);
 int	fchmod(int, mode_t);
 int	lstat(const char *, struct stat *);

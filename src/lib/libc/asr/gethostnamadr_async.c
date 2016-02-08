@@ -1,4 +1,4 @@
-/*	$OpenBSD: gethostnamadr_async.c,v 1.30 2014/07/23 21:26:25 eric Exp $	*/
+/*	$OpenBSD: gethostnamadr_async.c,v 1.35 2015/03/02 14:22:48 brynet Exp $	*/
 /*
  * Copyright (c) 2012 Eric Faurot <eric@openbsd.org>
  *
@@ -20,12 +20,6 @@
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include <arpa/nameser.h>
-#ifdef YP
-#include <rpc/rpc.h>
-#include <rpcsvc/yp.h>
-#include <rpcsvc/ypclnt.h>
-#include "ypinternal.h"
-#endif
 #include <netdb.h>
 
 #include <asr.h>
@@ -36,11 +30,19 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include <limits.h>
+
+#ifdef YP
+#include <rpc/rpc.h>
+#include <rpcsvc/yp.h>
+#include <rpcsvc/ypclnt.h>
+#include "ypinternal.h"
+#endif
 
 #include "asr_private.h"
 
-#define MAXALIASES	16
-#define MAXADDRS	16
+#define MAXALIASES	35
+#define MAXADDRS	35
 
 struct hostent_ext {
 	struct hostent	 h;
@@ -247,7 +249,7 @@ gethostnamadr_async_run(struct asr_query *as, struct asr_result *ar)
 
 			/* Try to find a match in the host file */
 
-			if ((f = fopen(as->as_ctx->ac_hostfile, "r")) == NULL)
+			if ((f = fopen(as->as_ctx->ac_hostfile, "re")) == NULL)
 				break;
 
 			if (as->as_type == ASR_GETHOSTBYNAME) {
@@ -357,13 +359,12 @@ gethostnamadr_async_run(struct asr_query *as, struct asr_result *ar)
 		}
 
 		/*
-		 * No address found in the dns packet. The blocking version
-		 * reports this as an error.
+		 * No valid hostname or address found in the dns packet.
+		 * Ignore it.
 		 */
 		if ((as->as_type == ASR_GETHOSTBYNAME &&
 		     h->h.h_addr_list[0] == NULL) ||
-		    (as->as_type == ASR_GETHOSTBYADDR &&
-		     h->h.h_name == NULL)) {
+		    h->h.h_name == NULL) {
 			free(h);
 			async_set_state(as, ASR_STATE_NEXT_DB);
 			break;
@@ -608,7 +609,7 @@ hostent_add_alias(struct hostent_ext *h, const char *name, int isdname)
 		if (h->aliases[i] == NULL)
 			break;
 	if (i == MAXALIASES)
-		return (-1);
+		return (0);
 
 	if (isdname) {
 		asr_strdname(name, buf, sizeof buf);
@@ -620,7 +621,7 @@ hostent_add_alias(struct hostent_ext *h, const char *name, int isdname)
 
 	n = strlen(name) + 1;
 	if (h->pos + n >= h->end)
-		return (-1);
+		return (0);
 
 	h->aliases[i] = h->pos;
 	memmove(h->pos, name, n);
@@ -637,10 +638,10 @@ hostent_add_addr(struct hostent_ext *h, const void *addr, size_t size)
 		if (h->addrs[i] == NULL)
 			break;
 	if (i == MAXADDRS)
-		return (-1);
+		return (0);
 
 	if (h->pos + size >= h->end)
-		return (-1);
+		return (0);
 
 	h->addrs[i] = h->pos;
 	memmove(h->pos, addr, size);
@@ -655,7 +656,7 @@ _yp_gethostnamadr(int type, const void *data)
 	static char		*domain = NULL;
 	struct hostent_ext	*h = NULL;
 	const char		*name;
-	char			 buf[MAXHOSTNAMELEN];
+	char			 buf[HOST_NAME_MAX+1];
 	char			*res = NULL;
 	int			 r, len;
 

@@ -1,4 +1,4 @@
-#	$OpenBSD: install.md,v 1.23 2014/02/23 11:08:02 jsing Exp $
+#	$OpenBSD: install.md,v 1.27 2015/03/08 13:13:48 deraadt Exp $
 #
 # machine dependent section of installation/upgrade script.
 #
@@ -6,10 +6,10 @@
 MDTERM=vt100
 NCPU=$(sysctl -n hw.ncpufound)
 
-((NCPU > 1)) && { DEFAULTSETS="bsd bsd.rd bsd.mp" ; SANESETS="bsd bsd.mp" ; }
+((NCPU > 1)) && { DEFAULTSETS="bsd bsd.rd bsd.mp"; SANESETS="bsd bsd.mp"; }
 
 md_installboot() {
-	if ! installboot -r /mnt ${1} ; then
+	if ! installboot -r /mnt ${1}; then
 		echo "\nFailed to install bootblocks."
 		echo "You will not be able to boot OpenBSD from ${1}."
 		exit
@@ -18,6 +18,8 @@ md_installboot() {
 
 md_prep_disklabel() {
 	local _disk=$1 _f _op
+
+	installboot $_disk
 
 	_f=/tmp/fstab.$_disk
 	if [[ $_disk == $ROOTDISK ]]; then

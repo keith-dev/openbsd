@@ -1,10 +1,6 @@
-/*	$OpenBSD: job.c,v 1.8 2009/10/27 23:59:51 deraadt Exp $	*/
+/*	$OpenBSD: job.c,v 1.11 2015/02/09 22:35:08 deraadt Exp $	*/
 
 /* Copyright 1988,1990,1993,1994 by Paul Vixie
- * All rights reserved
- */
-
-/*
  * Copyright (c) 2004 by Internet Systems Consortium, Inc. ("ISC")
  * Copyright (c) 1997,2000 by Internet Software Consortium, Inc.
  *
@@ -32,7 +28,8 @@ typedef	struct _job {
 static job	*jhead = NULL, *jtail = NULL;
 
 void
-job_add(entry *e, user *u) {
+job_add(entry *e, user *u)
+{
 	job *j;
 
 	/* if already on queue, keep going */
@@ -41,7 +38,7 @@ job_add(entry *e, user *u) {
 			return;
 
 	/* build a job queue element */
-	if ((j = (job *)malloc(sizeof(job))) == NULL)
+	if ((j = malloc(sizeof(job))) == NULL)
 		return;
 	j->next = NULL;
 	j->e = e;
@@ -56,7 +53,8 @@ job_add(entry *e, user *u) {
 }
 
 int
-job_runqueue(void) {
+job_runqueue(void)
+{
 	job *j, *jn;
 	int run = 0;
 

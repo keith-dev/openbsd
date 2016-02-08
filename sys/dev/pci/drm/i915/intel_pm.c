@@ -1,4 +1,4 @@
-/*	$OpenBSD: intel_pm.c,v 1.21 2014/03/24 17:06:49 kettenis Exp $	*/
+/*	$OpenBSD: intel_pm.c,v 1.29 2015/02/12 06:30:56 jsg Exp $	*/
 /*
  * Copyright © 2012 Intel Corporation
  *
@@ -275,13 +275,13 @@ bool intel_fbc_enabled(struct drm_device *dev)
 	return dev_priv->display.fbc_enabled(dev);
 }
 
-static void intel_fbc_work_fn(void *arg1, void *arg2)
+static void intel_fbc_work_fn(void *arg1)
 {
 	struct intel_fbc_work *work = arg1;
 	struct drm_device *dev = work->crtc->dev;
 	struct drm_i915_private *dev_priv = dev->dev_private;
 
-	DRM_LOCK();
+	mutex_lock(&dev->struct_mutex);
 	if (work == dev_priv->fbc_work) {
 		/* Double check that we haven't switched fb without cancelling
 		 * the prior work.
@@ -297,7 +297,7 @@ static void intel_fbc_work_fn(void *arg1, void *arg2)
 
 		dev_priv->fbc_work = NULL;
 	}
-	DRM_UNLOCK();
+	mutex_unlock(&dev->struct_mutex);
 
 	kfree(work);
 }
@@ -354,7 +354,7 @@ void intel_enable_fbc(struct drm_crtc *crtc, unsigned long interval)
 	work->crtc = crtc;
 	work->fb = crtc->fb;
 	work->interval = interval;
-	task_set(&work->task, intel_fbc_work_fn, work, NULL);
+	task_set(&work->task, intel_fbc_work_fn, work);
 	timeout_set(&work->to, intel_fbc_work_tick, work);
 
 	dev_priv->fbc_work = work;
@@ -2282,9 +2282,7 @@ intel_alloc_context_page(struct drm_device *dev)
 	struct drm_i915_gem_object *ctx;
 	int ret;
 
-#ifdef notyet
 	WARN_ON(!mutex_is_locked(&dev->struct_mutex));
-#endif
 
 	ctx = i915_gem_alloc_object(dev, 4096);
 	if (!ctx) {
@@ -2310,7 +2308,7 @@ err_unpin:
 	i915_gem_object_unpin(ctx);
 err_unref:
 	drm_gem_object_unreference(&ctx->base);
-	DRM_UNLOCK();
+	mutex_unlock(&dev->struct_mutex);
 	return NULL;
 }
 
@@ -2328,7 +2326,7 @@ bool ironlake_set_drps(struct drm_device *dev, u8 val)
 	struct drm_i915_private *dev_priv = dev->dev_private;
 	u16 rgvswctl;
 
-	MUTEX_ASSERT_LOCKED(&mchdev_lock);
+	assert_spin_locked(&mchdev_lock);
 
 	rgvswctl = I915_READ16(MEMSWCTL);
 	if (rgvswctl & MEMCTL_CMD_STS) {
@@ -2354,7 +2352,7 @@ static void ironlake_enable_drps(struct drm_device *dev)
 	u8 fmax, fmin, fstart, vstart;
 	int retries;
 
-	mtx_enter(&mchdev_lock);
+	spin_lock_irq(&mchdev_lock);
 
 	/* Enable temp reporting */
 	I915_WRITE16(PMMISC, I915_READ(PMMISC) | MCPPCE_EN);
@@ -2418,7 +2416,7 @@ static void ironlake_enable_drps(struct drm_device *dev)
 	dev_priv->ips.last_count2 = I915_READ(0x112f4);
 	nanouptime(&dev_priv->ips.last_time2);
 
-	mtx_leave(&mchdev_lock);
+	spin_unlock_irq(&mchdev_lock);
 }
 
 static void ironlake_disable_drps(struct drm_device *dev)
@@ -2426,7 +2424,7 @@ static void ironlake_disable_drps(struct drm_device *dev)
 	struct drm_i915_private *dev_priv = dev->dev_private;
 	u16 rgvswctl;
 
-	mtx_enter(&mchdev_lock);
+	spin_lock_irq(&mchdev_lock);
 
 	rgvswctl = I915_READ16(MEMSWCTL);
 
@@ -2444,7 +2442,7 @@ static void ironlake_disable_drps(struct drm_device *dev)
 	I915_WRITE(MEMSWCTL, rgvswctl);
 	DELAY(1000);
 
-	mtx_leave(&mchdev_lock);
+	spin_unlock_irq(&mchdev_lock);
 }
 
 /* There's a funny hw issue where the hw returns all 0 when reading from
@@ -2481,7 +2479,7 @@ void gen6_set_rps(struct drm_device *dev, u8 val)
 	struct drm_i915_private *dev_priv = dev->dev_private;
 	u32 limits = gen6_rps_limits(dev_priv, &val);
 
-	rw_assert_wrlock(&dev_priv->rps.hw_lock);
+	WARN_ON(!mutex_is_locked(&dev_priv->rps.hw_lock));
 	WARN_ON(val > dev_priv->rps.max_delay);
 	WARN_ON(val < dev_priv->rps.min_delay);
 
@@ -2518,9 +2516,9 @@ static void gen6_disable_rps(struct drm_device *dev)
 	 * register (PMIMR) to mask PM interrupts. The only risk is in leaving
 	 * stale bits in PMIIR and PMIMR which gen6_enable_rps will clean up. */
 
-	mtx_enter(&dev_priv->rps.lock);
+	spin_lock_irq(&dev_priv->rps.lock);
 	dev_priv->rps.pm_iir = 0;
-	mtx_leave(&dev_priv->rps.lock);
+	spin_unlock_irq(&dev_priv->rps.lock);
 
 	I915_WRITE(GEN6_PMIIR, I915_READ(GEN6_PMIIR));
 }
@@ -2561,7 +2559,7 @@ static void gen6_enable_rps(struct drm_device *dev)
 	int rc6_mode;
 	int i, ret;
 
-	rw_assert_wrlock(&dev_priv->rps.hw_lock);
+	WARN_ON(!mutex_is_locked(&dev_priv->rps.hw_lock));
 
 	/* Here begins a magic sequence of register writes to enable
 	 * auto-downclocking.
@@ -2606,7 +2604,7 @@ static void gen6_enable_rps(struct drm_device *dev)
 	I915_WRITE(GEN6_RC6pp_THRESHOLD, 64000); /* unused */
 
 	/* Check if we are enabling RC6 */
-	rc6_mode = intel_enable_rc6(dev);
+	rc6_mode = intel_enable_rc6(dev_priv->dev);
 	if (rc6_mode & INTEL_RC6_ENABLE)
 		rc6_mask |= GEN6_RC_CTL_RC6_ENABLE;
 
@@ -2619,7 +2617,7 @@ static void gen6_enable_rps(struct drm_device *dev)
 			rc6_mask |= GEN6_RC_CTL_RC6pp_ENABLE;
 	}
 
-	DRM_DEBUG("Enabling RC6 states: RC6 %s, RC6p %s, RC6pp %s\n",
+	DRM_INFO("Enabling RC6 states: RC6 %s, RC6p %s, RC6pp %s\n",
 			(rc6_mask & GEN6_RC_CTL_RC6_ENABLE) ? "on" : "off",
 			(rc6_mask & GEN6_RC_CTL_RC6p_ENABLE) ? "on" : "off",
 			(rc6_mask & GEN6_RC_CTL_RC6pp_ENABLE) ? "on" : "off");
@@ -2667,14 +2665,14 @@ static void gen6_enable_rps(struct drm_device *dev)
 		DRM_DEBUG_DRIVER("Failed to set the min frequency\n");
 	}
 
-	gen6_set_rps(dev, (gt_perf_status & 0xff00) >> 8);
+	gen6_set_rps(dev_priv->dev, (gt_perf_status & 0xff00) >> 8);
 
 	/* requires MSI enabled */
 	I915_WRITE(GEN6_PMIER, GEN6_PM_DEFERRED_EVENTS);
-	mtx_enter(&dev_priv->rps.lock);
+	spin_lock_irq(&dev_priv->rps.lock);
 	WARN_ON(dev_priv->rps.pm_iir != 0);
 	I915_WRITE(GEN6_PMIMR, 0);
-	mtx_leave(&dev_priv->rps.lock);
+	spin_unlock_irq(&dev_priv->rps.lock);
 	/* enable all PM interrupts */
 	I915_WRITE(GEN6_PMINTRMSK, 0);
 
@@ -2703,7 +2701,7 @@ static void gen6_update_ring_freq(struct drm_device *dev)
 	unsigned int ia_freq, max_ia_freq;
 	int scaling_factor = 180;
 
-	rw_assert_wrlock(&dev_priv->rps.hw_lock);
+	WARN_ON(!mutex_is_locked(&dev_priv->rps.hw_lock));
 
 #ifdef notyet
 	max_ia_freq = cpufreq_quick_get_max(0);
@@ -2818,9 +2816,7 @@ static void ironlake_enable_rc6(struct drm_device *dev)
 	if (!intel_enable_rc6(dev))
 		return;
 
-#ifdef notyet
 	WARN_ON(!mutex_is_locked(&dev->struct_mutex));
-#endif
 
 	ret = ironlake_setup_rc6(dev);
 	if (ret)
@@ -2905,7 +2901,7 @@ static unsigned long __i915_chipset_val(struct drm_i915_private *dev_priv)
 	unsigned long now = jiffies_to_msecs(ticks), diff1;
 	int i;
 
-	MUTEX_ASSERT_LOCKED(&mchdev_lock);
+	assert_spin_locked(&mchdev_lock);
 
 	diff1 = now - dev_priv->ips.last_time1;
 
@@ -2959,11 +2955,11 @@ unsigned long i915_chipset_val(struct drm_i915_private *dev_priv)
 	if (dev_priv->info->gen != 5)
 		return 0;
 
-	mtx_enter(&mchdev_lock);
+	spin_lock_irq(&mchdev_lock);
 
 	val = __i915_chipset_val(dev_priv);
 
-	mtx_leave(&mchdev_lock);
+	spin_unlock_irq(&mchdev_lock);
 
 	return val;
 }
@@ -3131,7 +3127,7 @@ static void __i915_update_gfx_val(struct drm_i915_private *dev_priv)
 	unsigned long diffms;
 	u32 count;
 
-	MUTEX_ASSERT_LOCKED(&mchdev_lock);
+	assert_spin_locked(&mchdev_lock);
 
 	nanouptime(&now);
 	timespecsub(&now, &dev_priv->ips.last_time2, &diff1);
@@ -3164,11 +3160,11 @@ void i915_update_gfx_val(struct drm_i915_private *dev_priv)
 	if (dev_priv->info->gen != 5)
 		return;
 
-	mtx_enter(&mchdev_lock);
+	spin_lock_irq(&mchdev_lock);
 
 	__i915_update_gfx_val(dev_priv);
 
-	mtx_leave(&mchdev_lock);
+	spin_unlock_irq(&mchdev_lock);
 }
 
 static unsigned long __i915_gfx_val(struct drm_i915_private *dev_priv)
@@ -3176,7 +3172,7 @@ static unsigned long __i915_gfx_val(struct drm_i915_private *dev_priv)
 	unsigned long t, corr, state1, corr2, state2;
 	u32 pxvid, ext_v;
 
-	MUTEX_ASSERT_LOCKED(&mchdev_lock);
+	assert_spin_locked(&mchdev_lock);
 
 	pxvid = I915_READ(PXVFREQ_BASE + (dev_priv->rps.cur_delay * 4));
 	pxvid = (pxvid >> 24) & 0x7f;
@@ -3215,11 +3211,11 @@ unsigned long i915_gfx_val(struct drm_i915_private *dev_priv)
 	if (dev_priv->info->gen != 5)
 		return 0;
 
-	mtx_enter(&mchdev_lock);
+	spin_lock_irq(&mchdev_lock);
 
 	val = __i915_gfx_val(dev_priv);
 
-	mtx_leave(&mchdev_lock);
+	spin_unlock_irq(&mchdev_lock);
 
 	return val;
 }
@@ -3235,7 +3231,7 @@ unsigned long i915_read_mch_val(void)
 	struct drm_i915_private *dev_priv;
 	unsigned long chipset_val, graphics_val, ret = 0;
 
-	mtx_enter(&mchdev_lock);
+	spin_lock_irq(&mchdev_lock);
 	if (!i915_mch_dev)
 		goto out_unlock;
 	dev_priv = i915_mch_dev;
@@ -3246,7 +3242,7 @@ unsigned long i915_read_mch_val(void)
 	ret = chipset_val + graphics_val;
 
 out_unlock:
-	mtx_leave(&mchdev_lock);
+	spin_unlock_irq(&mchdev_lock);
 
 	return ret;
 }
@@ -3261,7 +3257,7 @@ bool i915_gpu_raise(void)
 	struct drm_i915_private *dev_priv;
 	bool ret = true;
 
-	mtx_enter(&mchdev_lock);
+	spin_lock_irq(&mchdev_lock);
 	if (!i915_mch_dev) {
 		ret = false;
 		goto out_unlock;
@@ -3272,7 +3268,7 @@ bool i915_gpu_raise(void)
 		dev_priv->ips.max_delay--;
 
 out_unlock:
-	mtx_leave(&mchdev_lock);
+	spin_unlock_irq(&mchdev_lock);
 
 	return ret;
 }
@@ -3288,7 +3284,7 @@ bool i915_gpu_lower(void)
 	struct drm_i915_private *dev_priv;
 	bool ret = true;
 
-	mtx_enter(&mchdev_lock);
+	spin_lock_irq(&mchdev_lock);
 	if (!i915_mch_dev) {
 		ret = false;
 		goto out_unlock;
@@ -3299,7 +3295,7 @@ bool i915_gpu_lower(void)
 		dev_priv->ips.max_delay++;
 
 out_unlock:
-	mtx_leave(&mchdev_lock);
+	spin_unlock_irq(&mchdev_lock);
 
 	return ret;
 }
@@ -3316,7 +3312,7 @@ bool i915_gpu_busy(void)
 	bool ret = false;
 	int i;
 
-	mtx_enter(&mchdev_lock);
+	spin_lock_irq(&mchdev_lock);
 	if (!i915_mch_dev)
 		goto out_unlock;
 	dev_priv = i915_mch_dev;
@@ -3325,7 +3321,7 @@ bool i915_gpu_busy(void)
 		ret |= !list_empty(&ring->request_list);
 
 out_unlock:
-	mtx_leave(&mchdev_lock);
+	spin_unlock_irq(&mchdev_lock);
 
 	return ret;
 }
@@ -3339,23 +3335,22 @@ out_unlock:
 bool i915_gpu_turbo_disable(void)
 {
 	struct drm_i915_private *dev_priv;
-	struct drm_device *dev;
 	bool ret = true;
 
-	mtx_enter(&mchdev_lock);
+	spin_lock_irq(&mchdev_lock);
 	if (!i915_mch_dev) {
 		ret = false;
 		goto out_unlock;
 	}
 	dev_priv = i915_mch_dev;
-	dev = (struct drm_device *)dev_priv->drmdev;
+
 	dev_priv->ips.max_delay = dev_priv->ips.fstart;
 
-	if (!ironlake_set_drps(dev, dev_priv->ips.fstart))
+	if (!ironlake_set_drps(dev_priv->dev, dev_priv->ips.fstart))
 		ret = false;
 
 out_unlock:
-	mtx_leave(&mchdev_lock);
+	spin_unlock_irq(&mchdev_lock);
 
 	return ret;
 }
@@ -3386,19 +3381,19 @@ void intel_gpu_ips_init(struct drm_i915_private *dev_priv)
 {
 	/* We only register the i915 ips part with intel-ips once everything is
 	 * set up, to avoid intel-ips sneaking in and reading bogus values. */
-	mtx_enter(&mchdev_lock);
+	spin_lock_irq(&mchdev_lock);
 	i915_mch_dev = dev_priv;
-	mtx_leave(&mchdev_lock);
+	spin_unlock_irq(&mchdev_lock);
 
 //	ips_ping_for_i915_load();
 }
 
 void intel_gpu_ips_teardown(void)
 {
-	mtx_enter(&mchdev_lock);
+	spin_lock_irq(&mchdev_lock);
 	i915_mch_dev = NULL;
-	mtx_leave(&mchdev_lock);
-} 
+	spin_unlock_irq(&mchdev_lock);
+}
 static void intel_init_emon(struct drm_device *dev)
 {
 	struct drm_i915_private *dev_priv = dev->dev_private;
@@ -3480,21 +3475,21 @@ void intel_disable_gt_powersave(struct drm_device *dev)
 	} else if (INTEL_INFO(dev)->gen >= 6 && !IS_VALLEYVIEW(dev)) {
 		timeout_del(&dev_priv->rps.delayed_resume_to);
 		task_del(systq, &dev_priv->rps.delayed_resume_task);
-		rw_enter_write(&dev_priv->rps.hw_lock);
+		mutex_lock(&dev_priv->rps.hw_lock);
 		gen6_disable_rps(dev);
-		rw_exit_write(&dev_priv->rps.hw_lock);
+		mutex_unlock(&dev_priv->rps.hw_lock);
 	}
 }
 
-static void intel_gen6_powersave_work(void *arg1, void *arg2)
+static void intel_gen6_powersave_work(void *arg1)
 {
 	drm_i915_private_t *dev_priv = arg1;
-	struct drm_device *dev = (struct drm_device *)dev_priv->drmdev;
+	struct drm_device *dev = dev_priv->dev;
 
-	rw_enter_write(&dev_priv->rps.hw_lock);
+	mutex_lock(&dev_priv->rps.hw_lock);
 	gen6_enable_rps(dev);
 	gen6_update_ring_freq(dev);
-	rw_exit_write(&dev_priv->rps.hw_lock);
+	mutex_unlock(&dev_priv->rps.hw_lock);
 }
 
 static void
@@ -4118,7 +4113,7 @@ void intel_init_power_wells(struct drm_device *dev)
 	if (!IS_HASWELL(dev))
 		return;
 
-	DRM_LOCK();
+	mutex_lock(&dev->struct_mutex);
 
 	for (i = 0; i < ARRAY_SIZE(power_wells); i++) {
 		int well = I915_READ(power_wells[i]);
@@ -4135,7 +4130,7 @@ void intel_init_power_wells(struct drm_device *dev)
 		}
 	}
 
-	DRM_UNLOCK();
+	mutex_unlock(&dev->struct_mutex);
 }
 
 /* Set up chip specific power management-related functions */
@@ -4264,11 +4259,10 @@ void intel_init_pm(struct drm_device *dev)
 
 static void __gen6_gt_wait_for_thread_c0(struct drm_i915_private *dev_priv)
 {
-	struct drm_device *dev = (struct drm_device *)dev_priv->drmdev;
 	u32 gt_thread_status_mask;
 	int retries;
 
-	if (IS_HASWELL(dev))
+	if (IS_HASWELL(dev_priv->dev))
 		gt_thread_status_mask = GEN6_GT_THREAD_STATUS_CORE_MASK_HSW;
 	else
 		gt_thread_status_mask = GEN6_GT_THREAD_STATUS_CORE_MASK;
@@ -4294,11 +4288,10 @@ static void __gen6_gt_force_wake_reset(struct drm_i915_private *dev_priv)
 
 static void __gen6_gt_force_wake_get(struct drm_i915_private *dev_priv)
 {
-	struct drm_device *dev = (struct drm_device *)dev_priv->drmdev;
 	u32 forcewake_ack;
 	int count;
 
-	if (IS_HASWELL(dev))
+	if (IS_HASWELL(dev_priv->dev))
 		forcewake_ack = FORCEWAKE_ACK_HSW;
 	else
 		forcewake_ack = FORCEWAKE_ACK;
@@ -4326,11 +4319,10 @@ static void __gen6_gt_force_wake_mt_reset(struct drm_i915_private *dev_priv)
 
 static void __gen6_gt_force_wake_mt_get(struct drm_i915_private *dev_priv)
 {
-	struct drm_device *dev = (struct drm_device *)dev_priv->drmdev;
 	u32 forcewake_ack;
 	int count;
 
-	if (IS_HASWELL(dev))
+	if (IS_HASWELL(dev_priv->dev))
 		forcewake_ack = FORCEWAKE_ACK_HSW;
 	else
 		forcewake_ack = FORCEWAKE_MT_ACK;
@@ -4358,10 +4350,12 @@ static void __gen6_gt_force_wake_mt_get(struct drm_i915_private *dev_priv)
  */
 void gen6_gt_force_wake_get(struct drm_i915_private *dev_priv)
 {
-	mtx_enter(&dev_priv->gt_lock);
+	unsigned long irqflags;
+
+	spin_lock_irqsave(&dev_priv->gt_lock, irqflags);
 	if (dev_priv->forcewake_count++ == 0)
 		dev_priv->gt.force_wake_get(dev_priv);
-	mtx_leave(&dev_priv->gt_lock);
+	spin_unlock_irqrestore(&dev_priv->gt_lock, irqflags);
 }
 
 void gen6_gt_check_fifodbg(struct drm_i915_private *dev_priv)
@@ -4394,10 +4388,12 @@ static void __gen6_gt_force_wake_mt_put(struct drm_i915_private *dev_priv)
  */
 void gen6_gt_force_wake_put(struct drm_i915_private *dev_priv)
 {
-	mtx_enter(&dev_priv->gt_lock);
+	unsigned long irqflags;
+
+	spin_lock_irqsave(&dev_priv->gt_lock, irqflags);
 	if (--dev_priv->forcewake_count == 0)
 		dev_priv->gt.force_wake_put(dev_priv);
-	mtx_leave(&dev_priv->gt_lock);
+	spin_unlock_irqrestore(&dev_priv->gt_lock, irqflags);
 }
 
 int __gen6_gt_wait_for_fifo(struct drm_i915_private *dev_priv)
@@ -4491,11 +4487,11 @@ void intel_gt_init(struct drm_device *dev)
 		 * (correctly) interpreted by the test below as MT
 		 * forcewake being disabled.
 		 */
-		DRM_LOCK();
+		mutex_lock(&dev->struct_mutex);
 		__gen6_gt_force_wake_mt_get(dev_priv);
 		ecobus = I915_READ_NOTRACE(ECOBUS);
 		__gen6_gt_force_wake_mt_put(dev_priv);
-		DRM_UNLOCK();
+		mutex_unlock(&dev->struct_mutex);
 
 		if (ecobus & FORCEWAKE_MT_ENABLE) {
 			dev_priv->gt.force_wake_get =
@@ -4519,7 +4515,7 @@ void intel_pm_init(struct drm_device *dev)
 	struct drm_i915_private *dev_priv = dev->dev_private;
 
 	task_set(&dev_priv->rps.delayed_resume_task, intel_gen6_powersave_work,
-	    dev_priv, NULL);
+	    dev_priv);
 	timeout_set(&dev_priv->rps.delayed_resume_to, intel_gen6_powersave_tick,
 	    dev_priv);
 }
@@ -4527,7 +4523,7 @@ void intel_pm_init(struct drm_device *dev)
 int sandybridge_pcode_read(struct drm_i915_private *dev_priv, u8 mbox, u32 *val)
 {
 	int retries;
-	rw_assert_wrlock(&dev_priv->rps.hw_lock);
+	WARN_ON(!mutex_is_locked(&dev_priv->rps.hw_lock));
 
 	if (I915_READ(GEN6_PCODE_MAILBOX) & GEN6_PCODE_READY) {
 		DRM_DEBUG_DRIVER("warning: pcode (read) mailbox access failed\n");
@@ -4556,7 +4552,7 @@ int sandybridge_pcode_read(struct drm_i915_private *dev_priv, u8 mbox, u32 *val)
 int sandybridge_pcode_write(struct drm_i915_private *dev_priv, u8 mbox, u32 val)
 {
 	int retries;
-	rw_assert_wrlock(&dev_priv->rps.hw_lock);
+	WARN_ON(!mutex_is_locked(&dev_priv->rps.hw_lock));
 
 	if (I915_READ(GEN6_PCODE_MAILBOX) & GEN6_PCODE_READY) {
 		DRM_DEBUG_DRIVER("warning: pcode (write) mailbox access failed\n");

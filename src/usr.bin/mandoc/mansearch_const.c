@@ -1,4 +1,4 @@
-/*	$Id: mansearch_const.c,v 1.4 2014/04/10 02:45:04 schwarze Exp $ */
+/*	$OpenBSD: mansearch_const.c,v 1.6 2014/12/01 08:05:02 schwarze Exp $ */
 /*
  * Copyright (c) 2014 Ingo Schwarze <schwarze@openbsd.org>
  *
@@ -15,9 +15,9 @@
  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
 #include <sys/types.h>
+
 #include <stdint.h>
 
-#include "manpath.h"
 #include "mansearch.h"
 
 const int mansearch_keymax = 40;

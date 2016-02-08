@@ -1,4 +1,4 @@
-/*	$OpenBSD: fstat.c,v 1.77 2014/05/30 07:14:46 guenther Exp $	*/
+/*	$OpenBSD: fstat.c,v 1.80 2015/01/16 06:40:08 deraadt Exp $	*/
 
 /*
  * Copyright (c) 2009 Todd C. Miller <Todd.Miller@courtesan.com>
@@ -45,7 +45,7 @@
  * SUCH DAMAGE.
  */
 
-#include <sys/param.h>
+#include <sys/types.h>
 #include <sys/queue.h>
 #include <sys/mount.h>
 #include <sys/stat.h>
@@ -84,6 +84,8 @@
 
 #include "fstat.h"
 
+#define MAXIMUM(a, b)	(((a) > (b)) ? (a) : (b))
+
 struct fileargs fileargs = SLIST_HEAD_INITIALIZER(fileargs);
 
 int	fsflg;	/* show files on same filesystem as file(s) argument */
@@ -107,7 +109,6 @@ void fstat_header(void);
 void getinetproto(int);
 void usage(void);
 int getfname(char *);
-void cryptotrans(struct kinfo_file *);
 void kqueuetrans(struct kinfo_file *);
 void pipetrans(struct kinfo_file *);
 struct kinfo_file *splice_find(char, u_int64_t);
@@ -360,10 +361,6 @@ fstat_dofile(struct kinfo_file *kf)
 		if (checkfile == 0)
 			kqueuetrans(kf);
 		break;
-	case DTYPE_CRYPTO:
-		if (checkfile == 0)
-			cryptotrans(kf);
-		break;
 	case DTYPE_SYSTRACE:
 		if (checkfile == 0)
 			systracetrans(kf);
@@ -485,7 +482,7 @@ pipetrans(struct kinfo_file *kf)
 	 * same visible addr. (it's the higher address because when the other
 	 * end closes, it becomes 0)
 	 */
-	maxaddr = (void *)(uintptr_t)MAX(kf->f_data, kf->pipe_peer);
+	maxaddr = (void *)(uintptr_t)MAXIMUM(kf->f_data, kf->pipe_peer);
 
 	printf("pipe ");
 	hide(maxaddr);
@@ -515,18 +512,6 @@ kqueuetrans(struct kinfo_file *kf)
 	    (kf->kq_state & KQ_SEL) ? "S" : "",
 	    (kf->kq_state & KQ_SLEEP) ? "W" : "");
 	return;
-}
-
-void
-cryptotrans(struct kinfo_file *kf)
-{
-	PREFIX(kf->fd_fd);
-
-	printf(" ");
-
-	printf("crypto ");
-	hide((void *)(uintptr_t)kf->f_data);
-	printf("\n");
 }
 
 void
@@ -787,12 +772,6 @@ socktrans(struct kinfo_file *kf)
 	case AF_ROUTE:
 		/* print protocol number and socket address */
 		printf("* route %s", stype);
-		printf(" %d ", kf->so_protocol);
-		hide((void *)(uintptr_t)kf->f_data);
-		break;
-	case AF_BLUETOOTH:
-		/* print protocol number and socket address */
-		printf("* bluetooth %s", stype);
 		printf(" %d ", kf->so_protocol);
 		hide((void *)(uintptr_t)kf->f_data);
 		break;

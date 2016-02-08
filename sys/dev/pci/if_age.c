@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_age.c,v 1.22 2014/07/22 13:12:11 mpi Exp $	*/
+/*	$OpenBSD: if_age.c,v 1.25 2014/12/22 02:28:51 tedu Exp $	*/
 
 /*-
  * Copyright (c) 2008, Pyun YongHyeon <yongari@FreeBSD.org>
@@ -50,10 +50,8 @@
 #include <net/if_dl.h>
 #include <net/if_media.h>
 
-#ifdef INET
 #include <netinet/in.h>
 #include <netinet/if_ether.h>
-#endif
 
 #include <net/if_types.h>
 #include <net/if_vlan_var.h>
@@ -61,8 +59,6 @@
 #if NBPFILTER > 0
 #include <net/bpf.h>
 #endif
-
-#include <dev/rndvar.h>
 
 #include <dev/mii/mii.h>
 #include <dev/mii/miivar.h>
@@ -1054,10 +1050,8 @@ age_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 		ifp->if_flags |= IFF_UP;
 		if (!(ifp->if_flags & IFF_RUNNING))
 			 age_init(ifp);
-#ifdef INET
 		if (ifa->ifa_addr->sa_family == AF_INET)
 			arp_ifinit(&sc->sc_arpcom, ifa);
-#endif
 		break;
 
 	case SIOCSIFFLAGS:
@@ -1606,7 +1600,7 @@ age_init(struct ifnet *ifp)
 	 * it's hard to separate code path between Tx and Rx without
 	 * locking. If L1 hardware have a separate mail box register
 	 * for Tx and Rx consumer/producer management we could have
-	 * indepent Tx/Rx handler which in turn Rx handler could have
+	 * independent Tx/Rx handler which in turn Rx handler could have
 	 * been run without any locking.
 	*/
 	AGE_COMMIT_MBOX(sc);

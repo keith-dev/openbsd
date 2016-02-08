@@ -1,4 +1,4 @@
-/*	$OpenBSD: uvm_addr.c,v 1.8 2014/06/10 20:08:48 kettenis Exp $	*/
+/*	$OpenBSD: uvm_addr.c,v 1.11 2014/12/23 02:01:57 tedu Exp $	*/
 
 /*
  * Copyright (c) 2011 Ariane van der Steldt <ariane@stack.nl>
@@ -22,7 +22,6 @@
 #include <uvm/uvm.h>
 #include <uvm/uvm_addr.h>
 #include <sys/pool.h>
-#include <dev/rndvar.h>
 
 /* Max gap between hint allocations. */
 #define UADDR_HINT_MAXGAP	(4 * PAGE_SIZE)
@@ -281,15 +280,15 @@ void
 uvm_addr_init(void)
 {
 	pool_init(&uaddr_pool, sizeof(struct uvm_addr_state),
-	    0, 0, 0, "uaddr", &pool_allocator_nointr);
+	    0, 0, PR_WAITOK, "uaddr", NULL);
 	pool_init(&uaddr_hint_pool, sizeof(struct uaddr_hint_state),
-	    0, 0, 0, "uaddrhint", &pool_allocator_nointr);
+	    0, 0, PR_WAITOK, "uaddrhint", NULL);
 	pool_init(&uaddr_bestfit_pool, sizeof(struct uaddr_bestfit_state),
-	    0, 0, 0, "uaddrbest", &pool_allocator_nointr);
+	    0, 0, PR_WAITOK, "uaddrbest", NULL);
 	pool_init(&uaddr_pivot_pool, sizeof(struct uaddr_pivot_state),
-	    0, 0, 0, "uaddrpivot", &pool_allocator_nointr);
+	    0, 0, PR_WAITOK, "uaddrpivot", NULL);
 	pool_init(&uaddr_rnd_pool, sizeof(struct uaddr_rnd_state),
-	    0, 0, 0, "uaddrrnd", &pool_allocator_nointr);
+	    0, 0, PR_WAITOK, "uaddrrnd", NULL);
 
 	uaddr_kbootstrap.uaddr_minaddr = PAGE_SIZE;
 	uaddr_kbootstrap.uaddr_maxaddr = -(vaddr_t)PAGE_SIZE;
@@ -1369,7 +1368,7 @@ uaddr_pivot_create(vaddr_t minaddr, vaddr_t maxaddr)
 	uaddr->up_uaddr.uaddr_maxaddr = maxaddr;
 	uaddr->up_uaddr.uaddr_functions = &uaddr_pivot_functions;
 	RB_INIT(&uaddr->up_free);
-	bzero(uaddr->up_pivots, sizeof(uaddr->up_pivots));
+	memset(uaddr->up_pivots, 0, sizeof(uaddr->up_pivots));
 
 	return &uaddr->up_uaddr;
 }

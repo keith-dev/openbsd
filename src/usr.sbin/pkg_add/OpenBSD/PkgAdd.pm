@@ -1,7 +1,7 @@
 #! /usr/bin/perl
 
 # ex:ts=8 sw=4:
-# $OpenBSD: PkgAdd.pm,v 1.74 2014/07/30 12:44:26 espie Exp $
+# $OpenBSD: PkgAdd.pm,v 1.83 2015/01/27 09:35:35 espie Exp $
 #
 # Copyright (c) 2003-2014 Marc Espie <espie@openbsd.org>
 #
@@ -39,7 +39,7 @@ sub has_different_sig
 	if (!defined $plist->{different_sig}) {
 		my $n = OpenBSD::PackingList->from_installation($plist->pkgname)->signature;
 		my $o = $plist->signature;
-		my $r = $n->compare($o);
+		my $r = $n->compare($o, $state->defines("SHORTENED"));
 		$state->print("Comparing full signature for #1 \"#2\" vs. \"#3\":",
 		    $plist->pkgname, $o->string, $n->string)
 			if $state->verbose >= 3;
@@ -176,6 +176,12 @@ sub updateset_from_location
 	    OpenBSD::Handle->from_location($location));
 }
 
+sub display_timestamp
+{
+	my ($state, $pkgname, $timestamp) = @_;
+	$state->say("#1 signed on #2", $pkgname, $timestamp);
+}
+
 OpenBSD::Auto::cache(updater,
     sub {
 	require OpenBSD::Update;
@@ -271,6 +277,7 @@ sub check_security
 	my ($set, $state, $plist, $h) = @_;
 	return if $checked->{$plist->fullpkgpath};
 	$checked->{$plist->fullpkgpath} = 1;
+	return if $set->{quirks};
 	my ($error, $bad);
 	$state->run_quirks(
 		sub {
@@ -305,7 +312,7 @@ sub display_timestamp
 	if (!$plist->check_signature($state)) {
 		$state->fatal("#1 is corrupted", $pkgname);
 	}
-	$state->say("#1 signed on #2", $pkgname, 
+	$state->display_timestamp($pkgname,
 	    $plist->get('digital-signature')->iso8601);
 }
 
@@ -558,14 +565,10 @@ sub check_forward_dependencies
 		if ($state->defines('updatedepends')) {
 			$state->errsay("Forcing update");
 			return $no_merge;
-		} elsif ($state->{interactive}) {
-			if ($state->confirm("Proceed with update anyway", 0)) {
+		} elsif ($state->confirm("Proceed with update anyway", 0)) {
 				return $no_merge;
-			} else {
-				return undef;
-			}
 		} else {
-			return undef;
+				return undef;
 		}
 	}
 	return 1;
@@ -710,11 +713,7 @@ sub check_digital_signature
 			} else {
 				$url = $pkgname;
 			}
-			if ($state->{interactive}) {
-				$state->errprint('UNSIGNED PACKAGE #1: ', 
-				    $url);
-				$okay = $state->confirm("install anyway", 0);
-			}
+			$okay = $state->confirm("UNSIGNED PACKAGE $url: install anyway", 0);
 			if (!$okay) {
 				$state->fatal("Unsigned package #1", $url);
 			}
@@ -774,9 +773,6 @@ sub really_add
 	if ($set->older_to_do) {
 		$replacing = 1;
 	}
-#	if (defined $plist->{old_libs}) {
-#		$replacing = 1;
-#	}
 	$state->{replacing} = $replacing;
 
 	my $handler = sub {
@@ -863,9 +859,6 @@ sub really_add
 		add_installed($pkgname);
 		delete $handle->{partial};
 		OpenBSD::PkgCfl::register($handle, $state);
-		if ($plist->has(DISPLAY)) {
-			$plist->get(DISPLAY)->prepare($state);
-		}
 	}
 	delete $state->{partial};
 	$set->{solver}->register_dependencies($state);
@@ -926,9 +919,26 @@ sub newer_is_bad_arch
 	return 0;
 }
 
+sub may_tie_files
+{
+	my ($set, $state) = @_;
+	if ($set->newer > 0 && $set->older_to_do > 0 && !$state->defines('donttie')) {
+		my $sha = {};
+
+		for my $o ($set->older_to_do) {
+			$o->{plist}->hash_files($sha, $state);
+		}
+		for my $n ($set->newer) {
+			$n->{plist}->tie_files($sha, $state);
+		}
+	}
+}
+
 sub process_set
 {
 	my ($self, $set, $state) = @_;
+
+	$state->{current_set} = $set;
 
 	if (!$state->updater->process_set($set, $state)) {
 		return ();
@@ -1029,16 +1039,7 @@ sub process_set
 			return ();
 		}
 	}
-	if ($set->newer > 0 && $set->older_to_do > 0 && !$state->defines('donttie')) {
-		my $sha = {};
-
-		for my $o ($set->older_to_do) {
-			$o->{plist}->hash_files($sha, $state);
-		}
-		for my $n ($set->newer) {
-			$n->{plist}->tie_files($sha, $state);
-		}
-	}
+	may_tie_files($set, $state);
 	if ($set->newer > 0 || $set->older_to_do > 0) {
 		for my $h ($set->newer) {
 			$h->plist->set_infodir($h->location->info);
@@ -1072,7 +1073,7 @@ sub inform_user_of_problems
 		    });
 
 		$state->say("Couldn't find updates for #1", 
-		    join(', ', sort @cantupdate));
+		    join(', ', sort @cantupdate)) if @cantupdate > 0;
 	}
 	if (defined $state->{issues}) {
 		$state->say("There were some ambiguities. ".
@@ -1172,13 +1173,13 @@ sub finish_display
 		$warn = 1;
 	}
 	if ($warn && $state->{packages_without_sig}) {
-		print "UNSIGNED PACKAGES: ",
-		    join(', ', keys %{$state->{packages_without_sig}}), "\n";
+		$state->say("UNSIGNED PACKAGES: ",
+		    join(', ', keys %{$state->{packages_without_sig}}));
 	}
 	if (defined $state->{updatedepends} && %{$state->{updatedepends}}) {
-		print "Forced updates, bogus dependencies for ",
+		$state->say("Forced updates, bogus dependencies for ",
 		    join(' ', sort(keys %{$state->{updatedepends}})),
-		    " may remain\n";
+		    " may remain");
 	}
 	inform_user_of_problems($state);
 }

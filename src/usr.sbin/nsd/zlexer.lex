@@ -107,7 +107,9 @@ parser_pop_stringbuf(void)
 SPACE   [ \t]
 LETTER  [a-zA-Z]
 NEWLINE [\n\r]
-ZONESTR [^ \t\n\r();.\"\$]
+ZONESTR [^ \t\n\r();.\"\$]|\\.|\\\n
+CHARSTR [^ \t\n\r();.]|\\.|\\\n
+QUOTE   \"
 DOLLAR  \$
 COMMENT ;
 DOT     \.
@@ -281,7 +283,7 @@ ANY     [^\"\n\\]|\\.
 }
 
 	/* Quoted strings.  Strip leading and ending quotes.  */
-\"			{ BEGIN(quotedstring); LEXOUT(("\" ")); }
+{QUOTE}			{ BEGIN(quotedstring); LEXOUT(("\" ")); }
 <quotedstring><<EOF>> 	{
 	zc_error("EOF inside quoted string");
 	BEGIN(INITIAL);
@@ -290,14 +292,14 @@ ANY     [^\"\n\\]|\\.
 }
 <quotedstring>{ANY}*	{ LEXOUT(("STR ")); yymore(); }
 <quotedstring>\n 	{ ++parser->line; yymore(); }
-<quotedstring>\" {
+<quotedstring>{QUOTE} {
 	LEXOUT(("\" "));
 	BEGIN(INITIAL);
 	yytext[yyleng - 1] = '\0';
 	return parse_token(STR, yytext, &lexer_state);
 }
 
-({ZONESTR}|\\.|\\\n)+ {
+{ZONESTR}({CHARSTR})* {
 	/* Any allowed word.  */
 	return parse_token(STR, yytext, &lexer_state);
 }
@@ -344,7 +346,7 @@ zoctet(char *text)
 		if (s[0] != '\\') {
 			/* Ordinary character.  */
 			*p = *s;
-		} else if (isdigit((int)s[1]) && isdigit((int)s[2]) && isdigit((int)s[3])) {
+		} else if (isdigit((unsigned char)s[1]) && isdigit((unsigned char)s[2]) && isdigit((unsigned char)s[3])) {
 			/* \DDD escape.  */
 			int val = (hexdigit_to_int(s[1]) * 100 +
 				   hexdigit_to_int(s[2]) * 10 +

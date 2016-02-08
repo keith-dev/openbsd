@@ -1,10 +1,6 @@
-/*	$OpenBSD: env.c,v 1.23 2011/01/18 14:29:21 millert Exp $	*/
+/*	$OpenBSD: env.c,v 1.29 2015/02/09 22:35:08 deraadt Exp $	*/
 
 /* Copyright 1988,1990,1993,1994 by Paul Vixie
- * All rights reserved
- */
-
-/*
  * Copyright (c) 2004 by Internet Systems Consortium, Inc. ("ISC")
  * Copyright (c) 1997,2000 by Internet Software Consortium, Inc.
  *
@@ -24,8 +20,9 @@
 #include "cron.h"
 
 char **
-env_init(void) {
-	char **p = (char **) malloc(sizeof(char **));
+env_init(void)
+{
+	char **p = malloc(sizeof(char **));
 
 	if (p != NULL)
 		p[0] = NULL;
@@ -33,7 +30,8 @@ env_init(void) {
 }
 
 void
-env_free(char **envp) {
+env_free(char **envp)
+{
 	char **p;
 
 	for (p = envp; *p != NULL; p++)
@@ -42,13 +40,14 @@ env_free(char **envp) {
 }
 
 char **
-env_copy(char **envp) {
+env_copy(char **envp)
+{
 	int count, i, save_errno;
 	char **p;
 
 	for (count = 0; envp[count] != NULL; count++)
 		continue;
-	p = (char **) calloc(count+1, sizeof(char *));  /* 1 for the NULL */
+	p = reallocarray(NULL, count+1, sizeof(char *));  /* 1 for the NULL */
 	if (p != NULL) {
 		for (i = 0; i < count; i++)
 			if ((p[i] = strdup(envp[i])) == NULL) {
@@ -65,7 +64,8 @@ env_copy(char **envp) {
 }
 
 char **
-env_set(char **envp, char *envstr) {
+env_set(char **envp, char *envstr)
+{
 	int count, found;
 	char **p, *envtmp;
 
@@ -99,8 +99,7 @@ env_set(char **envp, char *envstr) {
 	 */
 	if ((envtmp = strdup(envstr)) == NULL)
 		return (NULL);
-	p = (char **) realloc((void *) envp,
-			      (size_t) ((count+1) * sizeof(char **)));
+	p = reallocarray(envp, count+1, sizeof(char **));
 	if (p == NULL) {
 		free(envtmp);
 		return (NULL);
@@ -122,12 +121,13 @@ enum env_state {
 	ERROR		/* Error */
 };
 
-/* return	ERR = end of file
+/* return	-1 = end of file
  *		FALSE = not an env setting (file was repositioned)
  *		TRUE = was an env setting
  */
 int
-load_env(char *envstr, FILE *f) {
+load_env(char *envstr, FILE *f)
+{
 	long filepos;
 	int fileline;
 	enum env_state state;
@@ -138,9 +138,7 @@ load_env(char *envstr, FILE *f) {
 	fileline = LineNumber;
 	skip_comments(f);
 	if (EOF == get_string(envstr, MAX_ENVSTR, f, "\n"))
-		return (ERR);
-
-	Debug(DPARS, ("load_env, read <%s>\n", envstr))
+		return (-1);
 
 	bzero(name, sizeof name);
 	bzero(val, sizeof val);
@@ -207,7 +205,6 @@ load_env(char *envstr, FILE *f) {
 		}
 	}
 	if (state != FINI && !(state == VALUE && !quotechar)) {
-		Debug(DPARS, ("load_env, not an env var, state = %d\n", state))
 		fseek(f, filepos, SEEK_SET);
 		Set_LineNum(fileline);
 		return (FALSE);
@@ -227,12 +224,12 @@ load_env(char *envstr, FILE *f) {
 	 */
 	if (snprintf(envstr, MAX_ENVSTR, "%s=%s", name, val) >= MAX_ENVSTR)
 		return (FALSE);
-	Debug(DPARS, ("load_env, <%s> <%s> -> <%s>\n", name, val, envstr))
 	return (TRUE);
 }
 
 char *
-env_get(char *name, char **envp) {
+env_get(char *name, char **envp)
+{
 	int len = strlen(name);
 	char *p, *q;
 

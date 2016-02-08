@@ -1,4 +1,4 @@
-/*	$OpenBSD: in6_ifattach.c,v 1.72 2014/07/01 19:37:07 benno Exp $	*/
+/*	$OpenBSD: in6_ifattach.c,v 1.85 2015/02/05 03:01:03 mpi Exp $	*/
 /*	$KAME: in6_ifattach.c,v 1.124 2001/07/18 08:32:51 jinmei Exp $	*/
 
 /*
@@ -37,7 +37,7 @@
 #include <sys/kernel.h>
 #include <sys/syslog.h>
 
-#include <crypto/md5.h>
+#include <crypto/sha2.h>
 
 #include <net/if.h>
 #include <net/if_var.h>
@@ -52,17 +52,10 @@
 #include <netinet/ip6.h>
 #include <netinet6/ip6_var.h>
 #include <netinet6/in6_ifattach.h>
-#include <netinet6/ip6_var.h>
 #include <netinet6/nd6.h>
 #ifdef MROUTING
 #include <netinet6/ip6_mroute.h>
 #endif
-
-#include <dev/rndvar.h>
-
-unsigned long in6_maxmtu = 0;
-
-int ip6_auto_linklocal = 1;	/* enable by default */
 
 int get_last_resort_ifid(struct ifnet *, struct in6_addr *);
 int get_hw_ifid(struct ifnet *, struct in6_addr *);
@@ -85,15 +78,15 @@ int in6_ifattach_loopback(struct ifnet *);
  * IEEE802/EUI64 address sources.
  * The goal here is to get an interface identifier that is
  * (1) random enough and (2) does not change across reboot.
- * We currently use MD5(hostname) for it.
+ * We currently use SHA512(hostname) for it.
  *
  * in6 - upper 64bits are preserved
  */
 int
 get_last_resort_ifid(struct ifnet *ifp, struct in6_addr *in6)
 {
-	MD5_CTX ctxt;
-	u_int8_t digest[16];
+	SHA2_CTX ctx;
+	u_int8_t digest[SHA512_DIGEST_LENGTH];
 
 #if 0
 	/* we need at least several letters as seed for ifid */
@@ -102,10 +95,9 @@ get_last_resort_ifid(struct ifnet *ifp, struct in6_addr *in6)
 #endif
 
 	/* generate 8 bytes of pseudo-random value. */
-	bzero(&ctxt, sizeof(ctxt));
-	MD5Init(&ctxt);
-	MD5Update(&ctxt, hostname, hostnamelen);
-	MD5Final(digest, &ctxt);
+	SHA512Init(&ctx);
+	SHA512Update(&ctx, hostname, hostnamelen);
+	SHA512Final(digest, &ctx);
 
 	/* assumes sizeof(digest) > sizeof(ifid) */
 	bcopy(digest, &in6->s6_addr[8], 8);
@@ -350,7 +342,6 @@ in6_ifattach_linklocal(struct ifnet *ifp, struct in6_addr *ifid)
 	/*
 	 * Do not let in6_update_ifa() do DAD, since we need a random delay
 	 * before sending an NS at the first time the interface becomes up.
-	 * Instead, in6_if_up() will start DAD with a proper random delay.
 	 */
 	ifra.ifra_flags |= IN6_IFF_NODAD;
 
@@ -380,7 +371,7 @@ in6_ifattach_linklocal(struct ifnet *ifp, struct in6_addr *ifid)
 	}
 
 	/*
-	 * Adjust ia6_flags so that in6_if_up will perform DAD.
+	 * Adjust ia6_flags so that in6_ifattach() will perform DAD.
 	 * XXX: Some P2P interfaces seem not to send packets just after
 	 * becoming up, so we skip p2p interfaces for safety.
 	 */
@@ -438,15 +429,12 @@ in6_ifattach_linklocal(struct ifnet *ifp, struct in6_addr *ifid)
 	return 0;
 }
 
-/*
- * ifp - must be IFT_LOOP
- */
-
 int
 in6_ifattach_loopback(struct ifnet *ifp)
 {
 	struct in6_aliasreq ifra;
-	int error;
+
+	KASSERT(ifp->if_flags & IFF_LOOPBACK);
 
 	bzero(&ifra, sizeof(ifra));
 
@@ -483,14 +471,7 @@ in6_ifattach_loopback(struct ifnet *ifp)
 	 * We are sure that this is a newly assigned address, so we can set
 	 * NULL to the 3rd arg.
 	 */
-	if ((error = in6_update_ifa(ifp, &ifra, NULL)) != 0) {
-		nd6log((LOG_ERR, "in6_ifattach_loopback: failed to configure "
-		    "the loopback address on %s (errno=%d)\n",
-		    ifp->if_xname, error));
-		return (-1);
-	}
-
-	return 0;
+	return (in6_update_ifa(ifp, &ifra, NULL));
 }
 
 /*
@@ -505,8 +486,8 @@ in6_nigroup(struct ifnet *ifp, const char *name, int namelen,
 {
 	const char *p;
 	u_int8_t *q;
-	MD5_CTX ctxt;
-	u_int8_t digest[16];
+	SHA2_CTX ctx;
+	u_int8_t digest[SHA512_DIGEST_LENGTH];
 	u_int8_t l;
 	u_int8_t n[64];	/* a single label must not exceed 63 chars */
 
@@ -527,11 +508,10 @@ in6_nigroup(struct ifnet *ifp, const char *name, int namelen,
 	}
 
 	/* generate 8 bytes of pseudo-random value. */
-	bzero(&ctxt, sizeof(ctxt));
-	MD5Init(&ctxt);
-	MD5Update(&ctxt, &l, sizeof(l));
-	MD5Update(&ctxt, n, l);
-	MD5Final(digest, &ctxt);
+	SHA512Init(&ctx);
+	SHA512Update(&ctx, &l, sizeof(l));
+	SHA512Update(&ctx, n, l);
+	SHA512Final(digest, &ctx);
 
 	bzero(sa6, sizeof(*sa6));
 	sa6->sin6_family = AF_INET6;
@@ -550,11 +530,11 @@ in6_nigroup(struct ifnet *ifp, const char *name, int namelen,
  * nodelocal address needs to be configured onto only one of them.
  * XXX multiple link-local address case
  */
-void
+int
 in6_ifattach(struct ifnet *ifp)
 {
-	struct in6_ifaddr *ia6;
-	struct in6_addr in6;
+	struct ifaddr *ifa;
+	int dad_delay = 0;		/* delay ticks before DAD output */
 
 	/* some of the interfaces are inherently not IPv6 capable */
 	switch (ifp->if_type) {
@@ -562,7 +542,7 @@ in6_ifattach(struct ifnet *ifp)
 	case IFT_ENC:
 	case IFT_PFLOG:
 	case IFT_PFSYNC:
-		return;
+		return (0);
 	}
 
 	/*
@@ -570,48 +550,40 @@ in6_ifattach(struct ifnet *ifp)
 	 * remember there could be some link-layer that has special
 	 * fragmentation logic.
 	 */
-	if (ifp->if_mtu < IPV6_MMTU) {
-		nd6log((LOG_INFO, "in6_ifattach: "
-		    "%s has too small MTU, IPv6 not enabled\n",
-		    ifp->if_xname));
-		return;
-	}
+	if (ifp->if_mtu < IPV6_MMTU)
+		return (EINVAL);
 
-	/*
-	 * usually, we require multicast capability to the interface
-	 */
-	if ((ifp->if_flags & IFF_MULTICAST) == 0) {
-		nd6log((LOG_INFO, "in6_ifattach: "
-		    "%s is not multicast capable, IPv6 not enabled\n",
-		    ifp->if_xname));
-		return;
-	}
+	if ((ifp->if_flags & IFF_MULTICAST) == 0)
+		return (EINVAL);
 
-	/*
-	 * assign loopback address for loopback interface.
-	 * XXX multiple loopback interface case.
-	 */
-	if ((ifp->if_flags & IFF_LOOPBACK) != 0) {
-		in6 = in6addr_loopback;
-		if (in6ifa_ifpwithaddr(ifp, &in6) == NULL) {
-			if (in6_ifattach_loopback(ifp) != 0)
-				return;
+	/* Assign a link-local address, if there's none. */
+	if (in6ifa_ifpforlinklocal(ifp, 0) == NULL) {
+		if (in6_ifattach_linklocal(ifp, NULL) != 0) {
+			/* failed to assign linklocal address. bark? */
 		}
 	}
 
-	/*
-	 * assign a link-local address, if there's none.
-	 */
-	if (ip6_auto_linklocal) {
-		ia6 = in6ifa_ifpforlinklocal(ifp, 0);
-		if (ia6 == NULL) {
-			if (in6_ifattach_linklocal(ifp, NULL) == 0) {
-				/* linklocal address assigned */
-			} else {
-				/* failed to assign linklocal address. bark? */
-			}
-		}
+	/* Assign loopback address, if there's none. */
+	if (ifp->if_flags & IFF_LOOPBACK) {
+		struct in6_addr in6 = in6addr_loopback;
+		if (in6ifa_ifpwithaddr(ifp, &in6) != NULL)
+			return (0);
+
+		return (in6_ifattach_loopback(ifp));
 	}
+
+	/* Perform DAD. */
+	TAILQ_FOREACH(ifa, &ifp->if_addrlist, ifa_list) {
+		if (ifa->ifa_addr->sa_family != AF_INET6)
+			continue;
+		if (ifatoia6(ifa)->ia6_flags & IN6_IFF_TENTATIVE)
+			nd6_dad_start(ifa, &dad_delay);
+	}
+
+	if (ifp->if_xflags & IFXF_AUTOCONF6)
+		nd6_rs_output_set_timo(ND6_RS_OUTPUT_QUICK_INTERVAL);
+
+	return (0);
 }
 
 /*
@@ -656,17 +628,9 @@ in6_ifdetach(struct ifnet *ifp)
 	sin6.sin6_family = AF_INET6;
 	sin6.sin6_addr = in6addr_intfacelocal_allnodes;
 	sin6.sin6_addr.s6_addr16[1] = htons(ifp->if_index);
-	rt = rtalloc1(sin6tosa(&sin6), 0, ifp->if_rdomain);
+	rt = rtalloc(sin6tosa(&sin6), 0, ifp->if_rdomain);
 	if (rt && rt->rt_ifp == ifp) {
-		struct rt_addrinfo info;
-
-		bzero(&info, sizeof(info));
-		info.rti_flags = rt->rt_flags;
-		info.rti_info[RTAX_DST] = rt_key(rt);
-		info.rti_info[RTAX_GATEWAY] = rt->rt_gateway;
-		info.rti_info[RTAX_NETMASK] = rt_mask(rt);
-		rtrequest1(RTM_DELETE, &info, rt->rt_priority, NULL,
-		    ifp->if_rdomain);
+		rtdeletemsg(rt, ifp->if_rdomain);
 		rtfree(rt);
 	}
 
@@ -676,17 +640,19 @@ in6_ifdetach(struct ifnet *ifp)
 	sin6.sin6_family = AF_INET6;
 	sin6.sin6_addr = in6addr_linklocal_allnodes;
 	sin6.sin6_addr.s6_addr16[1] = htons(ifp->if_index);
-	rt = rtalloc1(sin6tosa(&sin6), 0, ifp->if_rdomain);
+	rt = rtalloc(sin6tosa(&sin6), 0, ifp->if_rdomain);
 	if (rt && rt->rt_ifp == ifp) {
-		struct rt_addrinfo info;
-
-		bzero(&info, sizeof(info));
-		info.rti_flags = rt->rt_flags;
-		info.rti_info[RTAX_DST] = rt_key(rt);
-		info.rti_info[RTAX_GATEWAY] = rt->rt_gateway;
-		info.rti_info[RTAX_NETMASK] = rt_mask(rt);
-		rtrequest1(RTM_DELETE, &info, rt->rt_priority, NULL,
-		    ifp->if_rdomain);
+		rtdeletemsg(rt, ifp->if_rdomain);
 		rtfree(rt);
+	}
+
+	if (ifp->if_xflags & IFXF_AUTOCONF6) {
+		nd6_rs_timeout_count--;
+		if (nd6_rs_timeout_count == 0)
+			timeout_del(&nd6_rs_output_timer);
+		if (RS_LHCOOKIE(ifp) != NULL)
+			hook_disestablish(ifp->if_linkstatehooks,
+			    RS_LHCOOKIE(ifp));
+		ifp->if_xflags &= ~IFXF_AUTOCONF6;
 	}
 }

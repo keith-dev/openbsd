@@ -1,4 +1,4 @@
-/*	$OpenBSD: bpf.c,v 1.103 2014/07/12 18:44:22 tedu Exp $	*/
+/*	$OpenBSD: bpf.c,v 1.118 2015/02/10 21:56:10 miod Exp $	*/
 /*	$NetBSD: bpf.c,v 1.33 1997/02/21 23:59:35 thorpej Exp $	*/
 
 /*
@@ -41,6 +41,7 @@
 #include "bpfilter.h"
 
 #include <sys/param.h>
+#include <sys/systm.h>
 #include <sys/mbuf.h>
 #include <sys/proc.h>
 #include <sys/signalvar.h>
@@ -52,6 +53,7 @@
 #include <sys/poll.h>
 #include <sys/kernel.h>
 #include <sys/sysctl.h>
+#include <sys/rwlock.h>
 
 #include <net/if.h>
 #include <net/bpf.h>
@@ -91,7 +93,6 @@ void	bpf_ifname(struct ifnet *, struct ifreq *);
 void	_bpf_mtap(caddr_t, struct mbuf *, u_int,
 	    void (*)(const void *, void *, size_t));
 void	bpf_mcopy(const void *, void *, size_t);
-void	bpf_mcopy_stripvlan(const void *, void *, size_t);
 int	bpf_movein(struct uio *, u_int, struct mbuf **,
 	    struct sockaddr *, struct bpf_insn *);
 void	bpf_attachd(struct bpf_d *, struct bpf_if *);
@@ -108,6 +109,8 @@ int	bpf_setdlt(struct bpf_d *, u_int);
 
 void	filt_bpfrdetach(struct knote *);
 int	filt_bpfread(struct knote *, long);
+
+int	bpf_sysctl_locked(int *, u_int, void *, size_t *, void *, size_t);
 
 struct bpf_d *bpfilter_lookup(int);
 struct bpf_d *bpfilter_create(int);
@@ -172,7 +175,7 @@ bpf_movein(struct uio *uio, u_int linktype, struct mbuf **mp,
 		return (EIO);
 	}
 
-	if (uio->uio_resid > MCLBYTES)
+	if (uio->uio_resid > MAXMCLBYTES)
 		return (EIO);
 	len = uio->uio_resid;
 
@@ -181,7 +184,7 @@ bpf_movein(struct uio *uio, u_int linktype, struct mbuf **mp,
 	m->m_pkthdr.len = len - hlen;
 
 	if (len > MHLEN) {
-		MCLGET(m, M_WAIT);
+		MCLGETI(m, M_WAIT, NULL, len);
 		if ((m->m_flags & M_EXT) == 0) {
 			error = ENOBUFS;
 			goto bad;
@@ -190,7 +193,7 @@ bpf_movein(struct uio *uio, u_int linktype, struct mbuf **mp,
 	m->m_len = len;
 	*mp = m;
 
-	error = uiomove(mtod(m, caddr_t), len, uio);
+	error = uiomovei(mtod(m, caddr_t), len, uio);
 	if (error)
 		goto bad;
 
@@ -224,9 +227,7 @@ bpf_movein(struct uio *uio, u_int linktype, struct mbuf **mp,
 	/*
 	 * Prepend the data link type as a mbuf tag
 	 */
-	mtag = m_tag_get(PACKET_TAG_DLT, sizeof(u_int), M_NOWAIT);
-	if (mtag == NULL)
-		return (ENOMEM);
+	mtag = m_tag_get(PACKET_TAG_DLT, sizeof(u_int), M_WAIT);
 	*(u_int *)(mtag + 1) = linktype;
 	m_tag_prepend(m, mtag);
 
@@ -304,10 +305,6 @@ bpf_detachd(struct bpf_d *d)
 #define D_GET(d) ((d)->bd_ref++)
 #define D_PUT(d) bpf_freed(d)
 
-/*
- * bpfilterattach() is called at boot time in new systems.  We do
- * nothing here since old systems will not call this.
- */
 /* ARGSUSED */
 void
 bpfilterattach(int n)
@@ -478,7 +475,7 @@ bpfread(dev_t dev, struct uio *uio, int ioflag)
 	 * We know the entire buffer is transferred since
 	 * we checked above that the read buffer is bpf_bufsize bytes.
 	 */
-	error = uiomove(d->bd_hbuf, d->bd_hlen, uio);
+	error = uiomovei(d->bd_hbuf, d->bd_hlen, uio);
 
 	s = splnet();
 	d->bd_fbuf = d->bd_hbuf;
@@ -843,6 +840,14 @@ bpfioctl(dev_t dev, u_long cmd, caddr_t addr, int flag, struct proc *p)
 		    (BPF_DIRECTION_IN|BPF_DIRECTION_OUT);
 		break;
 
+	case BIOCGQUEUE:	/* get queue */
+		*(u_int *)addr = d->bd_queue;
+		break;
+
+	case BIOCSQUEUE:	/* set queue */
+		d->bd_queue = *(u_int *)addr;
+		break;
+
 	case FIONBIO:		/* Non-blocking I/O */
 		if (*(int *)addr)
 			d->bd_rtout = -1;
@@ -920,8 +925,8 @@ bpf_setf(struct bpf_d *d, struct bpf_program *fp, int wf)
 	if (flen > BPF_MAXINSNS)
 		return (EINVAL);
 
+	fcode = mallocarray(flen, sizeof(*fp->bf_insns), M_DEVBUF, M_WAITOK);
 	size = flen * sizeof(*fp->bf_insns);
-	fcode = (struct bpf_insn *)malloc(size, M_DEVBUF, M_WAITOK);
 	if (copyin((caddr_t)fp->bf_insns, (caddr_t)fcode, size) == 0 &&
 	    bpf_validate(fcode, (int)flen)) {
 		s = splnet();
@@ -935,7 +940,7 @@ bpf_setf(struct bpf_d *d, struct bpf_program *fp, int wf)
 
 		return (0);
 	}
-	free(fcode, M_DEVBUF, 0);
+	free(fcode, M_DEVBUF, size);
 	return (EINVAL);
 }
 
@@ -1064,11 +1069,13 @@ bpfkqfilter(dev_t dev, struct knote *kn)
 		return (EINVAL);
 	}
 
-	kn->kn_hook = (caddr_t)((u_long)dev);
+	kn->kn_hook = d;
 
 	s = splnet();
 	D_GET(d);
 	SLIST_INSERT_HEAD(klist, kn, kn_selnext);
+	if (d->bd_rtout != -1 && d->bd_rdStart == 0)
+		d->bd_rdStart = ticks;
 	splx(s);
 
 	return (0);
@@ -1077,11 +1084,9 @@ bpfkqfilter(dev_t dev, struct knote *kn)
 void
 filt_bpfrdetach(struct knote *kn)
 {
-	dev_t dev = (dev_t)((u_long)kn->kn_hook);
-	struct bpf_d *d;
+	struct bpf_d *d = kn->kn_hook;
 	int s;
 
-	d = bpfilter_lookup(minor(dev));
 	s = splnet();
 	SLIST_REMOVE(&d->bd_sel.si_note, kn, knote, kn_selnext);
 	D_PUT(d);
@@ -1091,10 +1096,8 @@ filt_bpfrdetach(struct knote *kn)
 int
 filt_bpfread(struct knote *kn, long hint)
 {
-	dev_t dev = (dev_t)((u_long)kn->kn_hook);
-	struct bpf_d *d;
+	struct bpf_d *d = kn->kn_hook;
 
-	d = bpfilter_lookup(minor(dev));
 	kn->kn_data = d->bd_hlen;
 	if (d->bd_immediate)
 		kn->kn_data += d->bd_slen;
@@ -1165,46 +1168,6 @@ bpf_mcopy(const void *src_arg, void *dst_arg, size_t len)
 }
 
 /*
- * Copy an ethernet frame from an mbuf chain into a buffer, strip the
- * vlan header bits
- */
-void
-bpf_mcopy_stripvlan(const void *src_arg, void *dst_arg, size_t len)
-{
-#if NVLAN > 0
-	const struct mbuf		*m;
-	u_int				 count, copied = 0, hdrdone = 0;
-	u_char				*dst;
-	struct ether_vlan_header	*evh;
-
-	m = src_arg;
-	dst = dst_arg;
-	evh = dst_arg;
-	while (len > 0) {
-		if (m == 0)
-			panic("bpf_mcopy_stripvlan");
-		count = min(m->m_len, len);
-		bcopy(mtod(m, caddr_t), (caddr_t)dst, count);
-		m = m->m_next;
-		dst += count;
-		len -= count;
-		copied += count;
-		if (!hdrdone && copied >= sizeof(struct ether_vlan_header) &&
-		    (ntohs(evh->evl_encap_proto) == ETHERTYPE_VLAN ||
-		    ntohs(evh->evl_encap_proto) == ETHERTYPE_QINQ)) {
-			/* move up by 4 bytes, overwrite encap_proto + tag */
-			memmove(&evh->evl_encap_proto, &evh->evl_proto, copied -
-			    offsetof(struct ether_vlan_header, evl_proto));
-			dst -= (offsetof(struct ether_vlan_header, evl_proto) -
-			    offsetof(struct ether_vlan_header,
-			    evl_encap_proto)); /* long expression for "4" */
-			hdrdone = 1;
-		}
-	}
-#endif
-}
-
-/*
  * like bpf_mtap, but copy fn can be given. used by various bpf_mtap*
  */
 void
@@ -1232,6 +1195,8 @@ _bpf_mtap(caddr_t arg, struct mbuf *m, u_int direction,
 		++d->bd_rcount;
 		if ((direction & d->bd_dirfilt) != 0)
 			slen = 0;
+		else if (d->bd_queue && m->m_pkthdr.pf.qid != d->bd_queue)
+			slen = 0;
 		else
 			slen = bpf_filter(d->bd_rfilter, (u_char *)m,
 			    pktlen, 0);
@@ -1254,13 +1219,6 @@ void
 bpf_mtap(caddr_t arg, struct mbuf *m, u_int direction)
 {
 	_bpf_mtap(arg, m, direction, NULL);
-}
-
-/* like bpf_mtap, but strip the vlan header, leave regular ethernet hdr */
-void
-bpf_mtap_stripvlan(caddr_t arg, struct mbuf *m, u_int direction)
-{
-	_bpf_mtap(arg, m, direction, bpf_mcopy_stripvlan);
 }
 
 /*
@@ -1536,14 +1494,11 @@ bpfdetach(struct ifnet *ifp)
 }
 
 int
-bpf_sysctl(int *name, u_int namelen, void *oldp, size_t *oldlenp, void *newp,
-    size_t newlen)
+bpf_sysctl_locked(int *name, u_int namelen, void *oldp, size_t *oldlenp,
+    void *newp, size_t newlen)
 {
 	int newval;
 	int error;
-
-	if (namelen != 1)
-		return (ENOTDIR);
 
 	switch (name[0]) {
 	case NET_BPF_BUFSIZE:
@@ -1568,6 +1523,30 @@ bpf_sysctl(int *name, u_int namelen, void *oldp, size_t *oldlenp, void *newp,
 		return (EOPNOTSUPP);
 	}
 	return (0);
+}
+
+int
+bpf_sysctl(int *name, u_int namelen, void *oldp, size_t *oldlenp, void *newp,
+    size_t newlen)
+{
+	static struct rwlock bpf_sysctl_lk = RWLOCK_INITIALIZER("bpfsz");
+	int flags = RW_INTR;
+	int error;
+
+	if (namelen != 1)
+		return (ENOTDIR);
+
+	flags |= (newp == NULL) ? RW_READ : RW_WRITE;
+
+	error = rw_enter(&bpf_sysctl_lk, flags);
+	if (error != 0)
+		return (error);
+
+	error = bpf_sysctl_locked(name, namelen, oldp, oldlenp, newp, newlen);
+
+	rw_exit(&bpf_sysctl_lk);
+
+	return (error);
 }
 
 struct bpf_d *
@@ -1599,7 +1578,7 @@ void
 bpfilter_destroy(struct bpf_d *bd)
 {
 	LIST_REMOVE(bd, bd_list);
-	free(bd, M_DEVBUF, 0);
+	free(bd, M_DEVBUF, sizeof(*bd));
 }
 
 /*

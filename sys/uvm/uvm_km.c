@@ -1,4 +1,4 @@
-/*	$OpenBSD: uvm_km.c,v 1.114 2014/07/11 16:35:40 jsg Exp $	*/
+/*	$OpenBSD: uvm_km.c,v 1.126 2015/02/07 08:21:24 miod Exp $	*/
 /*	$NetBSD: uvm_km.c,v 1.42 2001/01/14 02:10:01 thorpej Exp $	*/
 
 /* 
@@ -70,8 +70,8 @@
  * overview of kernel memory management:
  *
  * the kernel virtual address space is mapped by "kernel_map."   kernel_map
- * starts at VM_MIN_KERNEL_ADDRESS and goes to VM_MAX_KERNEL_ADDRESS.
- * note that VM_MIN_KERNEL_ADDRESS is equal to vm_map_min(kernel_map).
+ * starts at a machine-dependent address and is VM_KERNEL_SPACE_SIZE bytes
+ * large.
  *
  * the kernel_map has several "submaps."   submaps can only appear in 
  * the kernel_map (user processes can't use them).   submaps "take over"
@@ -98,8 +98,8 @@
  * reference count is set to UVM_OBJ_KERN (thus indicating that the objects
  * are "special" and never die).   all kernel objects should be thought of
  * as large, fixed-sized, sparsely populated uvm_objects.   each kernel 
- * object is equal to the size of kernel virtual address space (i.e. the
- * value "VM_MAX_KERNEL_ADDRESS - VM_MIN_KERNEL_ADDRESS").
+ * object is equal to the size of kernel virtual address space (i.e.
+ * VM_KERNEL_SPACE_SIZE).
  *
  * most kernel private memory lives in kernel_object.   the only exception
  * to this is for memory that belongs to submaps that must be protected
@@ -114,9 +114,9 @@
  * offsets that are managed by the submap.
  *
  * note that the "offset" in a kernel object is always the kernel virtual
- * address minus the VM_MIN_KERNEL_ADDRESS (aka vm_map_min(kernel_map)).
+ * address minus the vm_map_min(kernel_map).
  * example:
- *   suppose VM_MIN_KERNEL_ADDRESS is 0xf8000000 and the kernel does a
+ *   suppose kernel_map starts at 0xf8000000 and the kernel does a
  *   uvm_km_alloc(kernel_map, PAGE_SIZE) [allocate 1 wired down page in the
  *   kernel map].    if uvm_km_alloc returns virtual address 0xf8235000,
  *   then that means that the page at offset 0x235000 in kernel_object is
@@ -131,7 +131,6 @@
 
 #include <sys/param.h>
 #include <sys/systm.h>
-#include <sys/proc.h>
 #include <sys/kthread.h>
 #include <uvm/uvm.h>
 
@@ -153,21 +152,16 @@ static struct vm_map		kernel_map_store;
  * uvm_km_init: init kernel maps and objects to reflect reality (i.e.
  * KVM already allocated for text, data, bss, and static data structures).
  *
- * => KVM is defined by VM_MIN_KERNEL_ADDRESS/VM_MAX_KERNEL_ADDRESS.
- *    we assume that [min -> start] has already been allocated and that
- *    "end" is the end.
+ * => KVM is defined by [base.. base + VM_KERNEL_SPACE_SIZE].
+ *    we assume that [base -> start] has already been allocated and that
+ *    "end" is the end of the kernel image span.
  */
 void
-uvm_km_init(vaddr_t start, vaddr_t end)
+uvm_km_init(vaddr_t base, vaddr_t start, vaddr_t end)
 {
-	vaddr_t base = VM_MIN_KERNEL_ADDRESS;
-
-	/* next, init kernel memory objects. */
-
 	/* kernel_object: for pageable anonymous kernel memory */
 	uao_init();
-	uvm.kernel_object = uao_create(VM_MAX_KERNEL_ADDRESS -
-				 VM_MIN_KERNEL_ADDRESS, UAO_FLAG_KERNOBJ);
+	uvm.kernel_object = uao_create(VM_KERNEL_SPACE_SIZE, UAO_FLAG_KERNOBJ);
 
 	/*
 	 * init the map and reserve already allocated kernel space 
@@ -183,8 +177,9 @@ uvm_km_init(vaddr_t start, vaddr_t end)
 	    );
 	kernel_map_store.pmap = pmap_kernel();
 	if (base != start && uvm_map(&kernel_map_store, &base, start - base,
-	    NULL, UVM_UNKNOWN_OFFSET, 0, UVM_MAPFLAG(UVM_PROT_ALL, UVM_PROT_ALL,
-	    UVM_INH_NONE, UVM_ADV_RANDOM,UVM_FLAG_FIXED)) != 0)
+	    NULL, UVM_UNKNOWN_OFFSET, 0,
+	    UVM_MAPFLAG(PROT_READ | PROT_WRITE, PROT_READ | PROT_WRITE,
+	    MAP_INHERIT_NONE, MADV_RANDOM, UVM_FLAG_FIXED)) != 0)
 		panic("uvm_km_init: could not reserve space for kernel");
 	
 	kernel_map = &kernel_map_store;
@@ -210,8 +205,8 @@ uvm_km_suballoc(struct vm_map *map, vaddr_t *min, vaddr_t *max, vsize_t size,
 
 	/* first allocate a blank spot in the parent map */
 	if (uvm_map(map, min, size, NULL, UVM_UNKNOWN_OFFSET, 0,
-	    UVM_MAPFLAG(UVM_PROT_ALL, UVM_PROT_ALL, UVM_INH_NONE,
-	    UVM_ADV_RANDOM, mapflags)) != 0) {
+	    UVM_MAPFLAG(PROT_READ | PROT_WRITE, PROT_READ | PROT_WRITE,
+	    MAP_INHERIT_NONE, MADV_RANDOM, mapflags)) != 0) {
 	       panic("uvm_km_suballoc: unable to allocate space in parent map");
 	}
 
@@ -264,6 +259,7 @@ uvm_km_pgremove(struct uvm_object *uobj, vaddr_t start, vaddr_t end)
 		slot = uao_dropswap(uobj, curoff >> PAGE_SHIFT);
 
 		if (pp != NULL) {
+			atomic_clearbits_int(&pp->pg_flags, PQ_AOBJ);
 			uvm_lock_pageq();
 			uvm_pagefree(pp);
 			uvm_unlock_pageq();
@@ -339,8 +335,8 @@ uvm_km_kmemalloc_pla(struct vm_map *map, struct uvm_object *obj, vsize_t size,
 
 	/* allocate some virtual space */
 	if (__predict_false(uvm_map(map, &kva, size, obj, UVM_UNKNOWN_OFFSET,
-	      valign, UVM_MAPFLAG(UVM_PROT_RW, UVM_PROT_RW, UVM_INH_NONE,
-			  UVM_ADV_RANDOM, (flags & UVM_KMF_TRYLOCK))) != 0)) {
+	    valign, UVM_MAPFLAG(PROT_READ | PROT_WRITE, PROT_READ | PROT_WRITE,
+	    MAP_INHERIT_NONE, MADV_RANDOM, (flags & UVM_KMF_TRYLOCK))) != 0)) {
 		return(0);
 	}
 
@@ -391,11 +387,11 @@ uvm_km_kmemalloc_pla(struct vm_map *map, struct uvm_object *obj, vsize_t size,
 		 */
 		if (obj == NULL) {
 			pmap_kenter_pa(loopva, VM_PAGE_TO_PHYS(pg),
-			    UVM_PROT_RW);
+			    PROT_READ | PROT_WRITE);
 		} else {
 			pmap_enter(map->pmap, loopva, VM_PAGE_TO_PHYS(pg),
-			    UVM_PROT_RW,
-			    PMAP_WIRED | VM_PROT_READ | VM_PROT_WRITE);
+			    PROT_READ | PROT_WRITE,
+			    PROT_READ | PROT_WRITE | PMAP_WIRED);
 		}
 		loopva += PAGE_SIZE;
 		offset += PAGE_SIZE;
@@ -455,8 +451,10 @@ uvm_km_alloc1(struct vm_map *map, vsize_t size, vsize_t align, boolean_t zeroit)
 
 	/* allocate some virtual space */
 	if (__predict_false(uvm_map(map, &kva, size, uvm.kernel_object,
-	    UVM_UNKNOWN_OFFSET, align, UVM_MAPFLAG(UVM_PROT_ALL, UVM_PROT_ALL,
-	    UVM_INH_NONE, UVM_ADV_RANDOM, 0)) != 0)) {
+	    UVM_UNKNOWN_OFFSET, align,
+	    UVM_MAPFLAG(PROT_READ | PROT_WRITE,
+	    PROT_READ | PROT_WRITE | PROT_EXEC,
+	    MAP_INHERIT_NONE, MADV_RANDOM, 0)) != 0)) {
 		return(0);
 	}
 
@@ -492,7 +490,8 @@ uvm_km_alloc1(struct vm_map *map, vsize_t size, vsize_t align, boolean_t zeroit)
 		 * object, so we always use regular old pmap_enter().
 		 */
 		pmap_enter(map->pmap, loopva, VM_PAGE_TO_PHYS(pg),
-		    UVM_PROT_ALL, PMAP_WIRED | VM_PROT_READ | VM_PROT_WRITE);
+		    PROT_READ | PROT_WRITE,
+		    PROT_READ | PROT_WRITE | PMAP_WIRED);
 
 		loopva += PAGE_SIZE;
 		offset += PAGE_SIZE;
@@ -541,8 +540,9 @@ uvm_km_valloc_align(struct vm_map *map, vsize_t size, vsize_t align, int flags)
 	/* allocate some virtual space, demand filled by kernel_object. */
 
 	if (__predict_false(uvm_map(map, &kva, size, uvm.kernel_object,
-	    UVM_UNKNOWN_OFFSET, align, UVM_MAPFLAG(UVM_PROT_ALL, UVM_PROT_ALL,
-	    UVM_INH_NONE, UVM_ADV_RANDOM, flags)) != 0)) {
+	    UVM_UNKNOWN_OFFSET, align,
+	    UVM_MAPFLAG(PROT_READ | PROT_WRITE, PROT_READ | PROT_WRITE,
+	    MAP_INHERIT_NONE, MADV_RANDOM, flags)) != 0)) {
 		return(0);
 	}
 
@@ -575,8 +575,9 @@ uvm_km_valloc_prefer_wait(struct vm_map *map, vsize_t size, voff_t prefer)
 		 * by kernel_object.
 		 */
 		if (__predict_true(uvm_map(map, &kva, size, uvm.kernel_object,
-		    prefer, 0, UVM_MAPFLAG(UVM_PROT_ALL,
-		    UVM_PROT_ALL, UVM_INH_NONE, UVM_ADV_RANDOM, 0)) == 0)) {
+		    prefer, 0,
+		    UVM_MAPFLAG(PROT_READ | PROT_WRITE, PROT_READ | PROT_WRITE,
+		    MAP_INHERIT_NONE, MADV_RANDOM, 0)) == 0)) {
 			return(kva);
 		}
 
@@ -659,8 +660,9 @@ uvm_km_page_init(void)
 		addr = vm_map_min(kernel_map);
 		if (uvm_map(kernel_map, &addr, (vsize_t)bulk << PAGE_SHIFT,
 		    NULL, UVM_UNKNOWN_OFFSET, 0,
-		    UVM_MAPFLAG(UVM_PROT_RW, UVM_PROT_RW, UVM_INH_NONE,
-		    UVM_ADV_RANDOM, UVM_KMF_TRYLOCK)) != 0) {
+		    UVM_MAPFLAG(PROT_READ | PROT_WRITE,
+		    PROT_READ | PROT_WRITE, MAP_INHERIT_NONE,
+		    MADV_RANDOM, UVM_KMF_TRYLOCK)) != 0) {
 			bulk /= 2;
 			continue;
 		}
@@ -722,10 +724,10 @@ uvm_km_thread(void *arg)
 			 * So, only use UVM_KMF_TRYLOCK for the first page
 			 * if fp != NULL
 			 */
-			flags = UVM_MAPFLAG(UVM_PROT_RW, UVM_PROT_RW,
-			    UVM_INH_NONE, UVM_ADV_RANDOM,
-			    fp != NULL ? UVM_KMF_TRYLOCK : 0);
-			bzero(pg, sizeof(pg));
+			flags = UVM_MAPFLAG(PROT_READ | PROT_WRITE,
+			    PROT_READ | PROT_WRITE, MAP_INHERIT_NONE,
+			    MADV_RANDOM, fp != NULL ? UVM_KMF_TRYLOCK : 0);
+			memset(pg, 0, sizeof(pg));
 			for (i = 0; i < nitems(pg); i++) {
 				pg[i] = vm_map_min(kernel_map);
 				if (uvm_map(kernel_map, &pg[i], PAGE_SIZE,
@@ -735,9 +737,9 @@ uvm_km_thread(void *arg)
 				}
 
 				/* made progress, so don't sleep for more */
-				flags = UVM_MAPFLAG(UVM_PROT_RW, UVM_PROT_RW,
-				    UVM_INH_NONE, UVM_ADV_RANDOM,
-				    UVM_KMF_TRYLOCK);
+				flags = UVM_MAPFLAG(PROT_READ | PROT_WRITE,
+				    PROT_READ | PROT_WRITE, MAP_INHERIT_NONE,
+				    MADV_RANDOM, UVM_KMF_TRYLOCK);
 			}
 
 			mtx_enter(&uvm_km_pages.mtx);
@@ -803,11 +805,9 @@ km_alloc(size_t sz, const struct kmem_va_mode *kv,
 	struct pglist pgl;
 	int mapflags = 0;
 	vm_prot_t prot;
+	paddr_t pla_align;
 	int pla_flags;
 	int pla_maxseg;
-#ifdef __HAVE_PMAP_DIRECT
-	paddr_t pa;
-#endif
 	vaddr_t va, sva;
 
 	KASSERT(sz == round_page(sz));
@@ -822,54 +822,37 @@ km_alloc(size_t sz, const struct kmem_va_mode *kv,
 	if (kp->kp_zero)
 		pla_flags |= UVM_PLA_ZERO;
 
+	pla_align = kp->kp_align;
+#ifdef __HAVE_PMAP_DIRECT
+	if (pla_align < kv->kv_align)
+		pla_align = kv->kv_align;
+#endif
 	pla_maxseg = kp->kp_maxseg;
 	if (pla_maxseg == 0)
 		pla_maxseg = sz / PAGE_SIZE;
 
 	if (uvm_pglistalloc(sz, kp->kp_constraint->ucr_low,
-	    kp->kp_constraint->ucr_high, kp->kp_align, kp->kp_boundary,
+	    kp->kp_constraint->ucr_high, pla_align, kp->kp_boundary,
 	    &pgl, pla_maxseg, pla_flags)) {	
 		return (NULL);
 	}
 
 #ifdef __HAVE_PMAP_DIRECT
-	if (kv->kv_align || kv->kv_executable)
-		goto alloc_va;
-#if 1
 	/*
-	 * For now, only do DIRECT mappings for single page
-	 * allocations, until we figure out a good way to deal
-	 * with contig allocations in km_free.
+	 * Only use direct mappings for single page or single segment
+	 * allocations.
 	 */
-	if (!kv->kv_singlepage)
-		goto alloc_va;
-#endif
-	/*
-	 * Dubious optimization. If we got a contig segment, just map it
-	 * through the direct map.
-	 */
-	TAILQ_FOREACH(pg, &pgl, pageq) {
-		if (pg != TAILQ_FIRST(&pgl) &&
-		    VM_PAGE_TO_PHYS(pg) != pa + PAGE_SIZE)
-			break;
-		pa = VM_PAGE_TO_PHYS(pg);
-	}
-	if (pg == NULL) {
+	if (kv->kv_singlepage || kp->kp_maxseg == 1) {
 		TAILQ_FOREACH(pg, &pgl, pageq) {
-			vaddr_t v;
-			v = pmap_map_direct(pg);
+			va = pmap_map_direct(pg);
 			if (pg == TAILQ_FIRST(&pgl))
-				va = v;
+				sva = va;
 		}
-		return ((void *)va);
+		return ((void *)sva);
 	}
 #endif
 alloc_va:
-	if (kv->kv_executable) {
-		prot = VM_PROT_READ | VM_PROT_WRITE | VM_PROT_EXECUTE;
-	} else {
-		prot = VM_PROT_READ | VM_PROT_WRITE;
-	}
+	prot = PROT_READ | PROT_WRITE;
 
 	if (kp->kp_pageable) {
 		KASSERT(kp->kp_object);
@@ -914,8 +897,8 @@ try_map:
 		map = *kv->kv_map;
 		va = vm_map_min(map);
 		if (uvm_map(map, &va, sz, uobj, kd->kd_prefer,
-		    kv->kv_align, UVM_MAPFLAG(prot, prot, UVM_INH_NONE,
-		    UVM_ADV_RANDOM, mapflags))) {
+		    kv->kv_align, UVM_MAPFLAG(prot, prot, MAP_INHERIT_NONE,
+		    MADV_RANDOM, mapflags))) {
 			if (kv->kv_wait && kd->kd_waitok) {
 				tsleep(map, PVM, "km_allocva", 0);
 				goto try_map;
@@ -945,28 +928,35 @@ km_free(void *v, size_t sz, const struct kmem_va_mode *kv,
 	struct vm_page *pg;
 	struct pglist pgl;
 
-	sva = va = (vaddr_t)v;
-	eva = va + sz;
+	sva = (vaddr_t)v;
+	eva = sva + sz;
 
-	if (kp->kp_nomem) {
+	if (kp->kp_nomem)
 		goto free_va;
-	}
 
-	if (kv->kv_singlepage) {
 #ifdef __HAVE_PMAP_DIRECT
-		pg = pmap_unmap_direct(va);
-		uvm_pagefree(pg);
+	if (kv->kv_singlepage || kp->kp_maxseg == 1) {
+		TAILQ_INIT(&pgl);
+		for (va = sva; va < eva; va += PAGE_SIZE) {
+			pg = pmap_unmap_direct(va);
+			TAILQ_INSERT_TAIL(&pgl, pg, pageq);
+		}
+		uvm_pglistfree(&pgl);
+		return;
+	}
 #else
+	if (kv->kv_singlepage) {
 		struct uvm_km_free_page *fp = v;
+
 		mtx_enter(&uvm_km_pages.mtx);
 		fp->next = uvm_km_pages.freelist;
 		uvm_km_pages.freelist = fp;
 		if (uvm_km_pages.freelistlen++ > 16)
 			wakeup(&uvm_km_pages.km_proc);
 		mtx_leave(&uvm_km_pages.mtx);
-#endif
 		return;
 	}
+#endif
 
 	if (kp->kp_pageable) {
 		pmap_remove(pmap_kernel(), sva, eva);

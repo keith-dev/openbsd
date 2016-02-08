@@ -1,4 +1,4 @@
-/*	$OpenBSD: ifconfig.c,v 1.287 2014/07/12 19:58:17 henning Exp $	*/
+/*	$OpenBSD: ifconfig.c,v 1.296 2015/02/05 10:30:25 henning Exp $	*/
 /*	$NetBSD: ifconfig.c,v 1.40 1997/10/01 02:19:43 enami Exp $	*/
 
 /*
@@ -101,10 +101,14 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include <limits.h>
 #include <util.h>
 #include <ifaddrs.h>
 
 #include "brconfig.h"
+
+#define MINIMUM(a, b)	(((a) < (b)) ? (a) : (b))
+#define MAXIMUM(a, b)	(((a) > (b)) ? (a) : (b))
 
 #define HWFEATURESBITS							\
 	"\024\1CSUM_IPv4\2CSUM_TCPv4\3CSUM_UDPv4"			\
@@ -148,6 +152,7 @@ void	setiflladdr(const char *, int);
 void	setifdstaddr(const char *, int);
 void	setifflags(const char *, int);
 void	setifxflags(const char *, int);
+void	addaf(const char *, int);
 void	removeaf(const char *, int);
 void	setifbroadaddr(const char *, int);
 void	setifmtu(const char *, int);
@@ -205,6 +210,11 @@ void	unsetifgroup(const char *, int);
 void	setgroupattribs(char *, int, char *[]);
 int	printgroup(char *, int);
 void	setautoconf(const char *, int);
+void	settrunkport(const char *, int);
+void	unsettrunkport(const char *, int);
+void	settrunkproto(const char *, int);
+void	trunk_status(void);
+void	list_cloners(void);
 
 #ifndef SMALL
 void	carp_status(void);
@@ -240,10 +250,6 @@ void	setsppppeerflag(const char *, int);
 void	unsetsppppeerflag(const char *, int);
 void	sppp_status(void);
 void	sppp_printproto(const char *, struct sauthreq *);
-void	settrunkport(const char *, int);
-void	unsettrunkport(const char *, int);
-void	settrunkproto(const char *, int);
-void	trunk_status(void);
 void	setifpriority(const char *, int);
 void	setifpowersave(const char *, int);
 void	setifmetric(const char *, int);
@@ -254,7 +260,6 @@ void	unsetpflow_sender(const char *, int);
 void	setpflow_receiver(const char *, int);
 void	unsetpflow_receiver(const char *, int);
 void	setpflowproto(const char *, int);
-void	list_cloners(void);
 void	setifipdst(const char *, int);
 void	setifdesc(const char *, int);
 void	unsetifdesc(const char *, int);
@@ -337,6 +342,9 @@ const struct	cmd {
 	{ "-group",	NEXTARG,	0,		unsetifgroup },
 	{ "autoconf",	1,		0,		setautoconf },
 	{ "-autoconf",	-1,		0,		setautoconf },
+	{ "trunkport",	NEXTARG,	0,		settrunkport },
+	{ "-trunkport",	NEXTARG,	0,		unsettrunkport },
+	{ "trunkproto",	NEXTARG,	0,		settrunkproto },
 #ifdef INET6
 	{ "anycast",	IN6_IFF_ANYCAST,	0,	setia6flags },
 	{ "-anycast",	-IN6_IFF_ANYCAST,	0,	setia6flags },
@@ -397,9 +405,6 @@ const struct	cmd {
 	{ "timeslot",	NEXTARG,	0,		settimeslot },
 	{ "txpower",	NEXTARG,	0,		setiftxpower },
 	{ "-txpower",	1,		0,		setiftxpower },
-	{ "trunkport",	NEXTARG,	0,		settrunkport },
-	{ "-trunkport",	NEXTARG,	0,		unsettrunkport },
-	{ "trunkproto",	NEXTARG,	0,		settrunkproto },
 	{ "authproto",	NEXTARG,	0,		setspppproto },
 	{ "authname",	NEXTARG,	0,		setspppname },
 	{ "authkey",	NEXTARG,	0,		setspppkey },
@@ -415,6 +420,7 @@ const struct	cmd {
 	{ "flowdst",	NEXTARG,	0,		setpflow_receiver },
 	{ "-flowdst", 1,		0,		unsetpflow_receiver },
 	{ "pflowproto", NEXTARG,	0,		setpflowproto },
+	{ "-inet",	AF_INET,	0,		removeaf },
 	{ "-inet6",	AF_INET6,	0,		removeaf },
 	{ "keepalive",	NEXTARG2,	0,		NULL, setkeepalive },
 	{ "-keepalive",	1,		0,		unsetkeepalive },
@@ -476,6 +482,7 @@ const struct	cmd {
 	{ "txpower",	NEXTARG,	0,		setignore },
 	{ "nwflag",	NEXTARG,	0,		setignore },
 	{ "rdomain",	NEXTARG,	0,		setignore },
+	{ "-inet",	AF_INET,	0,		removeaf },
 	{ "-inet6",	AF_INET6,	0,		removeaf },
 	{ "description", NEXTARG,	0,		setignore },
 	{ "descr",	NEXTARG,	0,		setignore },
@@ -581,9 +588,7 @@ main(int argc, char *argv[])
 {
 	const struct afswtch *rafp = NULL;
 	int create = 0;
-#ifndef SMALL
 	int Cflag = 0;
-#endif
 	int gflag = 0;
 	int i;
 	int noprint = 0;
@@ -612,12 +617,10 @@ main(int argc, char *argv[])
 			case 'g':
 				gflag = 1;
 				break;
-#ifndef SMALL
 			case 'C':
 				Cflag = 1;
 				nomore = 1;
 				break;
-#endif
 			default:
 				usage(1);
 				break;
@@ -644,14 +647,12 @@ main(int argc, char *argv[])
 		rafp = afp;
 		af = ifr.ifr_addr.sa_family = rafp->af_af;
 	}
-#ifndef SMALL
 	if (Cflag) {
 		if (argc > 0 || aflag)
 			usage(1);
 		list_cloners();
 		exit(0);
 	}
-#endif
 	if (gflag) {
 		if (argc == 0)
 			printgroupattribs(name);
@@ -682,7 +683,7 @@ main(int argc, char *argv[])
 	}
 #ifdef INET6
 	if (argc != 0 && af == AF_INET6)
-		setifxflags("inet6", -IFXF_NOINET6);
+		addaf(name, AF_INET6);
 #endif
 	while (argc > 0) {
 		const struct cmd *p;
@@ -973,14 +974,14 @@ printif(char *ifname, int ifaliases)
 		if (ifa->ifa_addr->sa_family == AF_INET6) {
 			memset(&ifr6, 0, sizeof(ifr6));
 			memcpy(&ifr6.ifr_addr, ifa->ifa_addr,
-			    MIN(sizeof(ifr6.ifr_addr), ifa->ifa_addr->sa_len));
+			    MINIMUM(sizeof(ifr6.ifr_addr), ifa->ifa_addr->sa_len));
 			ifrp = (struct ifreq *)&ifr6;
 		} else
 #endif
 		{
 			memset(&ifr, 0, sizeof(ifr));
 			memcpy(&ifr.ifr_addr, ifa->ifa_addr,
-			    MIN(sizeof(ifr.ifr_addr), ifa->ifa_addr->sa_len));
+			    MINIMUM(sizeof(ifr.ifr_addr), ifa->ifa_addr->sa_len));
 			ifrp = &ifr;
 		}
 		strlcpy(name, ifa->ifa_name, sizeof(name));
@@ -1052,7 +1053,6 @@ clone_destroy(const char *addr, int param)
 		err(1, "SIOCIFDESTROY");
 }
 
-#ifndef SMALL
 void
 list_cloners(void)
 {
@@ -1083,6 +1083,9 @@ list_cloners(void)
 	if (ifcr.ifcr_count > ifcr.ifcr_total)
 		ifcr.ifcr_count = ifcr.ifcr_total;
 
+	qsort(buf, ifcr.ifcr_count, IFNAMSIZ,
+	    (int(*)(const void *, const void *))strcmp);
+
 	for (cp = buf, idx = 0; idx < ifcr.ifcr_count; idx++, cp += IFNAMSIZ) {
 		if (idx > 0)
 			putchar(' ');
@@ -1092,7 +1095,6 @@ list_cloners(void)
 	putchar('\n');
 	free(buf);
 }
-#endif
 
 #define RIDADDR 0
 #define ADDR	1
@@ -1258,18 +1260,25 @@ setifxflags(const char *vname, int value)
 }
 
 void
+addaf(const char *vname, int value)
+{
+	struct if_afreq	ifar;
+
+	strlcpy(ifar.ifar_name, name, sizeof(ifar.ifar_name));
+	ifar.ifar_af = value;
+	if (ioctl(s, SIOCIFAFATTACH, (caddr_t)&ifar) < 0)
+		warn("SIOCIFAFATTACH");
+}
+
+void
 removeaf(const char *vname, int value)
 {
-	switch (value) {
-#ifdef INET6
-	case AF_INET6:
-		setifxflags(vname, IFXF_NOINET6);
-		setifxflags(vname, -IFXF_AUTOCONF6);
-		break;
-#endif
-	default:
-		errx(1, "removeaf not implemented for this AF");
-	}
+	struct if_afreq	ifar;
+
+	strlcpy(ifar.ifar_name, name, sizeof(ifar.ifar_name));
+	ifar.ifar_af = value;
+	if (ioctl(s, SIOCIFAFDETACH, (caddr_t)&ifar) < 0)
+		warn("SIOCIFAFDETACH");
 }
 
 #ifdef INET6
@@ -1331,7 +1340,9 @@ setia6eui64(const char *cmd, int val)
 
 	if (afp->af_af != AF_INET6)
 		errx(1, "%s not allowed for the AF", cmd);
-	setifxflags("inet6", -IFXF_NOINET6);
+#ifdef INET6
+	addaf(name, AF_INET6);
+#endif
 	in6 = (struct in6_addr *)&in6_addreq.ifra_addr.sin6_addr;
 	if (memcmp(&in6addr_any.s6_addr[8], &in6->s6_addr[8], 8) != 0)
 		errx(1, "interface index is already filled");
@@ -2082,7 +2093,7 @@ ieee80211_status(void)
 			if (nr.nr_max_rssi)
 				printf(" %u%%", IEEE80211_NODEREQ_RSSI(&nr));
 			else
-				printf(" %udB", nr.nr_rssi);
+				printf(" %ddBm", nr.nr_rssi);
 		}
 	}
 
@@ -2226,6 +2237,17 @@ ieee80211_listchans(void)
 	}
 }
 
+/*
+ * Returns an integer less than, equal to, or greater than zero if nr1's
+ * RSSI is respectively greater than, equal to, or less than nr2's RSSI.
+ */
+static int
+rssicmp(const void *nr1, const void *nr2)
+{
+	const struct ieee80211_nodereq *x = nr1, *y = nr2;
+	return y->nr_rssi < x->nr_rssi ? -1 : y->nr_rssi > x->nr_rssi;
+}
+
 void
 ieee80211_listnodes(void)
 {
@@ -2261,6 +2283,8 @@ ieee80211_listnodes(void)
 
 	if (!na.na_nodes)
 		printf("\t\tnone\n");
+	else
+		qsort(nr, na.na_nodes, sizeof(*nr), rssicmp);
 
 	for (i = 0; i < na.na_nodes; i++) {
 		printf("\t\t");
@@ -2300,7 +2324,7 @@ ieee80211_printnode(struct ieee80211_nodereq *nr)
 	if (nr->nr_max_rssi)
 		printf("%u%% ", IEEE80211_NODEREQ_RSSI(nr));
 	else
-		printf("%udB ", nr->nr_rssi);
+		printf("%ddBm ", nr->nr_rssi);
 
 	if (nr->nr_pwrsave)
 		printf("powersave ");
@@ -2917,10 +2941,10 @@ status(int link, struct sockaddr_dl *sdl, int ls)
 	pppoe_status();
 	timeslot_status();
 	sppp_status();
-	trunk_status();
 	mpe_status();
 	pflow_status();
 #endif
+	trunk_status();
 	getifgroups();
 
 	(void) memset(&ifmr, 0, sizeof(ifmr));
@@ -3243,7 +3267,7 @@ in6_status(int force)
 void
 settunnel(const char *src, const char *dst)
 {
-	char buf[MAXHOSTNAMELEN+sizeof (":65535")], *dstport;
+	char buf[HOST_NAME_MAX+1 + sizeof (":65535")], *dstport;
 	const char *dstip;
 	struct addrinfo *srcres, *dstres;
 	int ecode;
@@ -3467,6 +3491,124 @@ unsetvlandev(const char *val, int d)
 
 	if (ioctl(s, SIOCSETVLAN, (caddr_t)&ifr) == -1)
 		err(1, "SIOCSETVLAN");
+}
+
+void
+settrunkport(const char *val, int d)
+{
+	struct trunk_reqport rp;
+
+	bzero(&rp, sizeof(rp));
+	strlcpy(rp.rp_ifname, name, sizeof(rp.rp_ifname));
+	strlcpy(rp.rp_portname, val, sizeof(rp.rp_portname));
+
+	if (ioctl(s, SIOCSTRUNKPORT, &rp))
+		err(1, "SIOCSTRUNKPORT");
+}
+
+void
+unsettrunkport(const char *val, int d)
+{
+	struct trunk_reqport rp;
+
+	bzero(&rp, sizeof(rp));
+	strlcpy(rp.rp_ifname, name, sizeof(rp.rp_ifname));
+	strlcpy(rp.rp_portname, val, sizeof(rp.rp_portname));
+
+	if (ioctl(s, SIOCSTRUNKDELPORT, &rp))
+		err(1, "SIOCSTRUNKDELPORT");
+}
+
+void
+settrunkproto(const char *val, int d)
+{
+	struct trunk_protos tpr[] = TRUNK_PROTOS;
+	struct trunk_reqall ra;
+	int i;
+
+	bzero(&ra, sizeof(ra));
+	ra.ra_proto = TRUNK_PROTO_MAX;
+
+	for (i = 0; i < (sizeof(tpr) / sizeof(tpr[0])); i++) {
+		if (strcmp(val, tpr[i].tpr_name) == 0) {
+			ra.ra_proto = tpr[i].tpr_proto;
+			break;
+		}
+	}
+	if (ra.ra_proto == TRUNK_PROTO_MAX)
+		errx(1, "Invalid trunk protocol: %s", val);
+
+	strlcpy(ra.ra_ifname, name, sizeof(ra.ra_ifname));
+	if (ioctl(s, SIOCSTRUNK, &ra) != 0)
+		err(1, "SIOCSTRUNK");
+}
+
+void
+trunk_status(void)
+{
+	struct trunk_protos tpr[] = TRUNK_PROTOS;
+	struct trunk_reqport rp, rpbuf[TRUNK_MAX_PORTS];
+	struct trunk_reqall ra;
+	struct lacp_opreq *lp;
+	const char *proto = "<unknown>";
+	int i, isport = 0;
+
+	bzero(&rp, sizeof(rp));
+	bzero(&ra, sizeof(ra));
+
+	strlcpy(rp.rp_ifname, name, sizeof(rp.rp_ifname));
+	strlcpy(rp.rp_portname, name, sizeof(rp.rp_portname));
+
+	if (ioctl(s, SIOCGTRUNKPORT, &rp) == 0)
+		isport = 1;
+
+	strlcpy(ra.ra_ifname, name, sizeof(ra.ra_ifname));
+	ra.ra_size = sizeof(rpbuf);
+	ra.ra_port = rpbuf;
+
+	if (ioctl(s, SIOCGTRUNK, &ra) == 0) {
+		lp = (struct lacp_opreq *)&ra.ra_lacpreq;
+
+		for (i = 0; i < (sizeof(tpr) / sizeof(tpr[0])); i++) {
+			if (ra.ra_proto == tpr[i].tpr_proto) {
+				proto = tpr[i].tpr_name;
+				break;
+			}
+		}
+
+		printf("\ttrunk: trunkproto %s", proto);
+		if (isport)
+			printf(" trunkdev %s", rp.rp_ifname);
+		putchar('\n');
+		if (ra.ra_proto == TRUNK_PROTO_LACP) {
+			char *act_mac = strdup(
+			    ether_ntoa((struct ether_addr*)lp->actor_mac));
+			if (act_mac == NULL)
+				err(1, "strdup");
+			printf("\ttrunk id: [(%04X,%s,%04X,%04X,%04X),\n"
+			    "\t\t (%04X,%s,%04X,%04X,%04X)]\n",
+			    lp->actor_prio, act_mac,
+			    lp->actor_key, lp->actor_portprio, lp->actor_portno,
+			    lp->partner_prio,
+			    ether_ntoa((struct ether_addr*)lp->partner_mac),
+			    lp->partner_key, lp->partner_portprio,
+			    lp->partner_portno);
+			free(act_mac);
+		}
+
+		for (i = 0; i < ra.ra_ports; i++) {
+			printf("\t\ttrunkport %s ", rpbuf[i].rp_portname);
+			printb_status(rpbuf[i].rp_flags, TRUNK_PORT_BITS);
+			putchar('\n');
+		}
+
+		if (showmediaflag) {
+			printf("\tsupported trunk protocols:\n");
+			for (i = 0; i < (sizeof(tpr) / sizeof(tpr[0])); i++)
+				printf("\t\ttrunkproto %s\n", tpr[i].tpr_name);
+		}
+	} else if (isport)
+		printf("\ttrunk: trunkdev %s\n", rp.rp_ifname);
 }
 
 #ifndef SMALL
@@ -4019,7 +4161,7 @@ setpflow_receiver(const char *val, int d)
 	struct pflowreq preq;
 	struct addrinfo hints, *receiver;
 	int ecode;
-	char *ip, *port, buf[MAXHOSTNAMELEN+sizeof (":65535")];
+	char *ip, *port, buf[HOST_NAME_MAX+1 + sizeof (":65535")];
 
 	if (strchr (val, ':') == NULL)
 		errx(1, "%s bad value", val);
@@ -4405,124 +4547,6 @@ sppp_status(void)
 }
 
 void
-settrunkport(const char *val, int d)
-{
-	struct trunk_reqport rp;
-
-	bzero(&rp, sizeof(rp));
-	strlcpy(rp.rp_ifname, name, sizeof(rp.rp_ifname));
-	strlcpy(rp.rp_portname, val, sizeof(rp.rp_portname));
-
-	if (ioctl(s, SIOCSTRUNKPORT, &rp))
-		err(1, "SIOCSTRUNKPORT");
-}
-
-void
-unsettrunkport(const char *val, int d)
-{
-	struct trunk_reqport rp;
-
-	bzero(&rp, sizeof(rp));
-	strlcpy(rp.rp_ifname, name, sizeof(rp.rp_ifname));
-	strlcpy(rp.rp_portname, val, sizeof(rp.rp_portname));
-
-	if (ioctl(s, SIOCSTRUNKDELPORT, &rp))
-		err(1, "SIOCSTRUNKDELPORT");
-}
-
-void
-settrunkproto(const char *val, int d)
-{
-	struct trunk_protos tpr[] = TRUNK_PROTOS;
-	struct trunk_reqall ra;
-	int i;
-
-	bzero(&ra, sizeof(ra));
-	ra.ra_proto = TRUNK_PROTO_MAX;
-
-	for (i = 0; i < (sizeof(tpr) / sizeof(tpr[0])); i++) {
-		if (strcmp(val, tpr[i].tpr_name) == 0) {
-			ra.ra_proto = tpr[i].tpr_proto;
-			break;
-		}
-	}
-	if (ra.ra_proto == TRUNK_PROTO_MAX)
-		errx(1, "Invalid trunk protocol: %s", val);
-
-	strlcpy(ra.ra_ifname, name, sizeof(ra.ra_ifname));
-	if (ioctl(s, SIOCSTRUNK, &ra) != 0)
-		err(1, "SIOCSTRUNK");
-}
-
-void
-trunk_status(void)
-{
-	struct trunk_protos tpr[] = TRUNK_PROTOS;
-	struct trunk_reqport rp, rpbuf[TRUNK_MAX_PORTS];
-	struct trunk_reqall ra;
-	struct lacp_opreq *lp;
-	const char *proto = "<unknown>";
-	int i, isport = 0;
-
-	bzero(&rp, sizeof(rp));
-	bzero(&ra, sizeof(ra));
-
-	strlcpy(rp.rp_ifname, name, sizeof(rp.rp_ifname));
-	strlcpy(rp.rp_portname, name, sizeof(rp.rp_portname));
-
-	if (ioctl(s, SIOCGTRUNKPORT, &rp) == 0)
-		isport = 1;
-
-	strlcpy(ra.ra_ifname, name, sizeof(ra.ra_ifname));
-	ra.ra_size = sizeof(rpbuf);
-	ra.ra_port = rpbuf;
-
-	if (ioctl(s, SIOCGTRUNK, &ra) == 0) {
-		lp = (struct lacp_opreq *)&ra.ra_lacpreq;
-
-		for (i = 0; i < (sizeof(tpr) / sizeof(tpr[0])); i++) {
-			if (ra.ra_proto == tpr[i].tpr_proto) {
-				proto = tpr[i].tpr_name;
-				break;
-			}
-		}
-
-		printf("\ttrunk: trunkproto %s", proto);
-		if (isport)
-			printf(" trunkdev %s", rp.rp_ifname);
-		putchar('\n');
-		if (ra.ra_proto == TRUNK_PROTO_LACP) {
-			char *act_mac = strdup(
-			    ether_ntoa((struct ether_addr*)lp->actor_mac));
-			if (act_mac == NULL)
-				err(1, "strdup");
-			printf("\ttrunk id: [(%04X,%s,%04X,%04X,%04X),\n"
-			    "\t\t (%04X,%s,%04X,%04X,%04X)]\n",
-			    lp->actor_prio, act_mac,
-			    lp->actor_key, lp->actor_portprio, lp->actor_portno,
-			    lp->partner_prio,
-			    ether_ntoa((struct ether_addr*)lp->partner_mac),
-			    lp->partner_key, lp->partner_portprio,
-			    lp->partner_portno);
-			free(act_mac);
-		}
-
-		for (i = 0; i < ra.ra_ports; i++) {
-			printf("\t\ttrunkport %s ", rpbuf[i].rp_portname);
-			printb_status(rpbuf[i].rp_flags, TRUNK_PORT_BITS);
-			putchar('\n');
-		}
-
-		if (showmediaflag) {
-			printf("\tsupported trunk protocols:\n");
-			for (i = 0; i < (sizeof(tpr) / sizeof(tpr[0])); i++)
-				printf("\t\ttrunkproto %s\n", tpr[i].tpr_name);
-		}
-	} else if (isport)
-		printf("\ttrunk: trunkdev %s\n", rp.rp_ifname);
-}
-
-void
 setkeepalive(const char *timeout, const char *count)
 {
 	const char *errmsg = NULL;
@@ -4703,7 +4727,7 @@ in6_getaddr(const char *s, int which)
 {
 	struct sockaddr_in6 *sin6 = sin6tab[which];
 	struct addrinfo hints, *res;
-	char buf[MAXHOSTNAMELEN+sizeof("/128")], *pfxlen;
+	char buf[HOST_NAME_MAX+1 + sizeof("/128")], *pfxlen;
 	int error;
 
 	memset(&hints, 0, sizeof(hints));

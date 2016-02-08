@@ -1,4 +1,4 @@
-/*	$OpenBSD: uvm_anon.c,v 1.39 2014/07/11 16:35:40 jsg Exp $	*/
+/*	$OpenBSD: uvm_anon.c,v 1.43 2014/12/23 04:56:47 tedu Exp $	*/
 /*	$NetBSD: uvm_anon.c,v 1.10 2000/11/25 06:27:59 chs Exp $	*/
 
 /*
@@ -32,10 +32,10 @@
 
 #include <sys/param.h>
 #include <sys/systm.h>
-#include <sys/proc.h>
 #include <sys/malloc.h>
 #include <sys/pool.h>
 #include <sys/kernel.h>
+#include <sys/atomic.h>
 
 #include <uvm/uvm.h>
 #include <uvm/uvm_swap.h>
@@ -48,8 +48,8 @@ struct pool uvm_anon_pool;
 void
 uvm_anon_init(void)
 {
-	pool_init(&uvm_anon_pool, sizeof(struct vm_anon), 0, 0, 0, "anonpl",
-	    &pool_allocator_nointr);
+	pool_init(&uvm_anon_pool, sizeof(struct vm_anon), 0, 0,
+	    PR_WAITOK, "anonpl", NULL);
 	pool_sethiwat(&uvm_anon_pool, uvmexp.free / 16);
 }
 
@@ -122,7 +122,7 @@ uvm_anfree(struct vm_anon *anon)
 				atomic_setbits_int(&pg->pg_flags, PG_RELEASED);
 				return;
 			} 
-			pmap_page_protect(pg, VM_PROT_NONE);
+			pmap_page_protect(pg, PROT_NONE);
 			uvm_lock_pageq();	/* lock out pagedaemon */
 			uvm_pagefree(pg);	/* bye bye */
 			uvm_unlock_pageq();	/* free the daemon */
@@ -251,7 +251,7 @@ uvm_anon_pagein(struct vm_anon *anon)
 
 	/* deactivate the page (to put it on a page queue) */
 	pmap_clear_reference(pg);
-	pmap_page_protect(pg, VM_PROT_NONE);
+	pmap_page_protect(pg, PROT_NONE);
 	uvm_lock_pageq();
 	uvm_pagedeactivate(pg);
 	uvm_unlock_pageq();

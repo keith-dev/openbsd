@@ -1,4 +1,4 @@
-/*	$OpenBSD: syslogd.c,v 1.111 2014/07/14 04:02:33 deraadt Exp $	*/
+/*	$OpenBSD: syslogd.c,v 1.160 2015/02/24 01:29:49 bluhm Exp $	*/
 
 /*
  * Copyright (c) 1983, 1988, 1993, 1994
@@ -50,24 +50,28 @@
  * extensive changes by Ralph Campbell
  * more extensive changes by Eric Allman (again)
  * memory buffer logging by Damien Miller
+ * IPv6, libevent, sending over TCP and TLS by Alexander Bluhm
  */
 
-#define	MAXLINE		1024		/* maximum line length */
+#define MAXLINE		8192		/* maximum line length */
+#define MAX_UDPMSG	1180		/* maximum UDP send size */
 #define MIN_MEMBUF	(MAXLINE * 4)	/* Minimum memory buffer size */
 #define MAX_MEMBUF	(256 * 1024)	/* Maximum memory buffer size */
 #define MAX_MEMBUF_NAME	64		/* Max length of membuf log name */
+#define MAX_TCPBUF	(256 * 1024)	/* Maximum tcp event buffer size */
 #define	MAXSVLINE	120		/* maximum saved line length */
 #define DEFUPRI		(LOG_USER|LOG_NOTICE)
 #define DEFSPRI		(LOG_KERN|LOG_CRIT)
 #define TIMERINTVL	30		/* interval for checking flush, mark */
 #define TTYMSGTIME	1		/* timeout passed to ttymsg */
+#define ERRBUFSIZE	256
 
-#include <sys/param.h>
 #include <sys/ioctl.h>
 #include <sys/stat.h>
 #include <sys/wait.h>
 #include <sys/socket.h>
 #include <sys/msgbuf.h>
+#include <sys/queue.h>
 #include <sys/uio.h>
 #include <sys/sysctl.h>
 #include <sys/un.h>
@@ -79,23 +83,30 @@
 #include <arpa/inet.h>
 
 #include <ctype.h>
-#include <errno.h>
 #include <err.h>
+#include <errno.h>
+#include <event.h>
 #include <fcntl.h>
+#include <limits.h>
 #include <paths.h>
 #include <poll.h>
 #include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <tls.h>
 #include <unistd.h>
 #include <utmp.h>
 #include <vis.h>
+
+#define MAXIMUM(a, b)	(((a) > (b)) ? (a) : (b))
+#define MINIMUM(a, b)	(((a) < (b)) ? (a) : (b))
 
 #define SYSLOG_NAMES
 #include <sys/syslog.h>
 
 #include "syslogd.h"
+#include "evbuffer_tls.h"
 
 char *ConfFile = _PATH_LOGCONF;
 const char ctty[] = _PATH_CONSOLE;
@@ -118,19 +129,26 @@ const char ctty[] = _PATH_CONSOLE;
  */
 
 struct filed {
-	struct	filed *f_next;		/* next in linked list */
-	short	f_type;			/* entry type, see below */
-	short	f_file;			/* file descriptor */
+	SIMPLEQ_ENTRY(filed) f_next;	/* next in linked list */
+	int	f_type;			/* entry type, see below */
+	int	f_file;			/* file descriptor */
 	time_t	f_time;			/* time this was last written */
 	u_char	f_pmask[LOG_NFACILITIES+1];	/* priority mask */
 	char	*f_program;		/* program this applies to */
 	union {
 		char	f_uname[MAXUNAMES][UT_NAMESIZE+1];
 		struct {
-			char	f_hname[MAXHOSTNAMELEN];
-			struct sockaddr_storage	f_addr;
+			char	f_loghost[1+4+3+1+NI_MAXHOST+1+NI_MAXSERV];
+				/* @proto46://[hostname]:servname\0 */
+			struct sockaddr_storage	 f_addr;
+			struct buffertls	 f_buftls;
+			struct bufferevent	*f_bufev;
+			struct tls		*f_ctx;
+			char			*f_host;
+			int			 f_reconnectwait;
+			int			 f_dropped;
 		} f_forw;		/* forwarding address */
-		char	f_fname[MAXPATHLEN];
+		char	f_fname[PATH_MAX];
 		struct {
 			char	f_mname[MAX_MEMBUF_NAME];
 			struct ringbuf *f_rb;
@@ -141,7 +159,7 @@ struct filed {
 	} f_un;
 	char	f_prevline[MAXSVLINE];		/* last message logged */
 	char	f_lasttime[16];			/* time of last occurrence */
-	char	f_prevhost[MAXHOSTNAMELEN];	/* host from which recd. */
+	char	f_prevhost[HOST_NAME_MAX+1];	/* host from which recd. */
 	int	f_prevpri;			/* pri of f_prevline */
 	int	f_prevlen;			/* length of f_prevline */
 	int	f_prevcount;			/* repetition cnt of prevline */
@@ -167,37 +185,45 @@ int	repeatinterval[] = { 30, 120, 600 };	/* # of secs before flush */
 #define F_FILE		1		/* regular file */
 #define F_TTY		2		/* terminal */
 #define F_CONSOLE	3		/* console terminal */
-#define F_FORW		4		/* remote machine */
+#define F_FORWUDP	4		/* remote machine via UDP */
 #define F_USERS		5		/* list of users */
 #define F_WALL		6		/* everyone logged on */
 #define F_MEMBUF	7		/* memory buffer */
 #define F_PIPE		8		/* pipe to external program */
+#define F_FORWTCP	9		/* remote machine via TCP */
+#define F_FORWTLS	10		/* remote machine via TLS */
 
-char	*TypeNames[9] = {
+char	*TypeNames[] = {
 	"UNUSED",	"FILE",		"TTY",		"CONSOLE",
-	"FORW",		"USERS",	"WALL",		"MEMBUF",
-	"PIPE"
+	"FORWUDP",	"USERS",	"WALL",		"MEMBUF",
+	"PIPE",		"FORWTCP",	"FORWTLS",
 };
 
-struct	filed *Files;
+SIMPLEQ_HEAD(filed_list, filed) Files;
 struct	filed consfile;
 
-int	nfunix = 1;		/* Number of Unix domain sockets requested */
-char	*funixn[MAXFUNIX] = { _PATH_LOG }; /* Paths to Unix domain sockets */
+int	nunix = 1;		/* Number of Unix domain sockets requested */
+char	*path_unix[MAXUNIX] = { _PATH_LOG }; /* Paths to Unix domain sockets */
 int	Debug;			/* debug flag */
 int	Startup = 1;		/* startup flag */
-char	LocalHostName[MAXHOSTNAMELEN];	/* our hostname */
+char	LocalHostName[HOST_NAME_MAX+1];	/* our hostname */
 char	*LocalDomain;		/* our local domain name */
-int	InetInuse = 0;		/* non-zero if INET sockets are being used */
 int	Initialized = 0;	/* set when we have initialized ourselves */
 
 int	MarkInterval = 20 * 60;	/* interval between marks in seconds */
 int	MarkSeq = 0;		/* mark sequence number */
 int	SecureMode = 1;		/* when true, speak only unix domain socks */
 int	NoDNS = 0;		/* when true, will refrain from doing DNS lookups */
+int	IPv4Only = 0;		/* when true, disable IPv6 */
+int	IPv6Only = 0;		/* when true, disable IPv4 */
 int	IncludeHostname = 0;	/* include RFC 3164 style hostnames when forwarding */
 
-char	*ctlsock_path = NULL;	/* Path to control socket */
+char	*path_ctlsock = NULL;	/* Path to control socket */
+
+struct	tls_config *tlsconfig = NULL;
+const char *CAfile = "/etc/ssl/cert.pem"; /* file containing CA certificates */
+int	NoVerify = 0;		/* do not verify TLS server x509 certificate */
+int	tcpbuf_dropped = 0;	/* count messages dropped from TCP or TLS */
 
 #define CTL_READING_CMD		1
 #define CTL_WRITING_REPLY	2
@@ -243,19 +269,38 @@ char	*reply_text;		/* Start of reply text in buffer */
 size_t	ctl_reply_size = 0;	/* Number of bytes used in reply */
 size_t	ctl_reply_offset = 0;	/* Number of bytes of reply written so far */
 
-struct pollfd pfd[N_PFD];
+char	*linebuf;
+int	 linesize;
 
-volatile sig_atomic_t MarkSet;
-volatile sig_atomic_t WantDie;
-volatile sig_atomic_t DoInit;
+int		 fd_ctlsock, fd_ctlconn, fd_klog, fd_sendsys,
+		 fd_udp, fd_udp6, fd_unix[MAXUNIX];
+struct event	 ev_ctlaccept, ev_ctlread, ev_ctlwrite, ev_klog, ev_sendsys,
+		 ev_udp, ev_udp6, ev_unix[MAXUNIX],
+		 ev_hup, ev_int, ev_quit, ev_term, ev_mark;
+
+void	 klog_readcb(int, short, void *);
+void	 udp_readcb(int, short, void *);
+void	 unix_readcb(int, short, void *);
+int	 tcp_socket(struct filed *);
+void	 tcp_readcb(struct bufferevent *, void *);
+void	 tcp_writecb(struct bufferevent *, void *);
+void	 tcp_errorcb(struct bufferevent *, short, void *);
+void	 tcp_connectcb(int, short, void *);
+struct tls *tls_socket(struct filed *);
+int	 tcpbuf_countmsg(struct bufferevent *bufev);
+void	 die_signalcb(int, short, void *);
+void	 mark_timercb(int, short, void *);
+void	 init_signalcb(int, short, void *);
+void	 ctlsock_acceptcb(int, short, void *);
+void	 ctlconn_readcb(int, short, void *);
+void	 ctlconn_writecb(int, short, void *);
+void	 ctlconn_logto(char *);
+void	 ctlconn_cleanup(void);
 
 struct filed *cfline(char *, char *);
-void    cvthname(struct sockaddr_in *, char *, size_t);
+void	cvthname(struct sockaddr *, char *, size_t);
 int	decode(const char *, const CODE *);
-void	dodie(int);
-void	doinit(int);
 void	die(int);
-void	domark(int);
 void	markit(void);
 void	fprintlog(struct filed *, int, char *);
 void	init(void);
@@ -264,34 +309,38 @@ void	logmsg(int, char *, char *, int);
 struct filed *find_dup(struct filed *);
 void	printline(char *, char *);
 void	printsys(char *);
-void	reapchild(int);
 char   *ttymsg(struct iovec *, int, char *, int);
 void	usage(void);
 void	wallmsg(struct filed *, struct iovec *);
+int	loghost(char *, char **, char **, char **);
 int	getmsgbufsize(void);
 int	unix_socket(char *, int, mode_t);
 void	double_rbuf(int);
-void	ctlsock_accept_handler(void);
-void	ctlconn_read_handler(void);
-void	ctlconn_write_handler(void);
 void	tailify_replytext(char *, int);
-void	logto_ctlconn(char *);
 
 int
 main(int argc, char *argv[])
 {
-	int ch, i, linesize, fd;
-	struct sockaddr_un fromunix;
-	struct sockaddr_in frominet;
-	socklen_t len;
-	char *p, *line;
-	char resolve[MAXHOSTNAMELEN];
-	int lockpipe[2] = { -1, -1}, pair[2], nullfd;
-	struct addrinfo hints, *res, *res0;
-	FILE *fp;
+	struct addrinfo	 hints, *res, *res0;
+	struct timeval	 to;
+	const char	*errstr;
+	char		*p;
+	int		 ch, i;
+	int		 lockpipe[2] = { -1, -1}, pair[2], nullfd, fd;
 
-	while ((ch = getopt(argc, argv, "dhnuf:m:p:a:s:")) != -1)
+	while ((ch = getopt(argc, argv, "46C:dhnuf:m:p:a:s:V")) != -1)
 		switch (ch) {
+		case '4':		/* disable IPv6 */
+			IPv4Only = 1;
+			IPv6Only = 0;
+			break;
+		case '6':		/* disable IPv4 */
+			IPv6Only = 1;
+			IPv4Only = 0;
+			break;
+		case 'C':		/* file containing CA certificates */
+			CAfile = optarg;
+			break;
 		case 'd':		/* debug */
 			Debug++;
 			break;
@@ -302,27 +351,30 @@ main(int argc, char *argv[])
 			IncludeHostname = 1;
 			break;
 		case 'm':		/* mark interval */
-			MarkInterval = atoi(optarg) * 60;
+			MarkInterval = strtonum(optarg, 0, 365*24*60, &errstr);
+			if (errstr)
+				errx(1, "mark_interval %s: %s", errstr, optarg);
+			MarkInterval *= 60;
 			break;
 		case 'n':		/* don't do DNS lookups */
 			NoDNS = 1;
 			break;
 		case 'p':		/* path */
-			funixn[0] = optarg;
+			path_unix[0] = optarg;
 			break;
 		case 'u':		/* allow udp input port */
 			SecureMode = 0;
 			break;
 		case 'a':
-			if (nfunix >= MAXFUNIX)
-				fprintf(stderr, "syslogd: "
-				    "out of descriptors, ignoring %s\n",
-				    optarg);
-			else
-				funixn[nfunix++] = optarg;
+			if (nunix >= MAXUNIX)
+				errx(1, "out of descriptors: %s", optarg);
+			path_unix[nunix++] = optarg;
 			break;
 		case 's':
-			ctlsock_path = optarg;
+			path_ctlsock = optarg;
+			break;
+		case 'V':		/* do not verify certificates */
+			NoVerify = 1;
 			break;
 		default:
 			usage();
@@ -331,13 +383,13 @@ main(int argc, char *argv[])
 		usage();
 
 	if (Debug)
-		setlinebuf(stdout);
+		setvbuf(stdout, NULL, _IOLBF, 0);
 
-	if ((fd = nullfd = open(_PATH_DEVNULL, O_RDWR)) == -1) {
+	if ((nullfd = open(_PATH_DEVNULL, O_RDWR)) == -1) {
 		logerror("Couldn't open /dev/null");
 		die(0);
 	}
-	while (fd++ <= 2) {
+	for (fd = nullfd + 1; fd <= 2; fd++) {
 		if (fcntl(fd, F_GETFL, 0) == -1)
 			if (dup2(nullfd, fd) == -1)
 				logerror("dup2");
@@ -357,19 +409,13 @@ main(int argc, char *argv[])
 	if (linesize < MAXLINE)
 		linesize = MAXLINE;
 	linesize++;
-	if ((line = malloc(linesize)) == NULL) {
+	if ((linebuf = malloc(linesize)) == NULL) {
 		logerror("Couldn't allocate line buffer");
 		die(0);
 	}
 
-	/* Clear poll array, set all fds to ignore */
-	for (i = 0; i < N_PFD; i++) {
-		pfd[i].fd = -1;
-		pfd[i].events = 0;
-	}
-
 	memset(&hints, 0, sizeof(hints));
-	hints.ai_family = AF_INET;
+	hints.ai_family = AF_UNSPEC;
 	hints.ai_socktype = SOCK_DGRAM;
 	hints.ai_protocol = IPPROTO_UDP;
 	hints.ai_flags = AI_PASSIVE;
@@ -381,43 +427,46 @@ main(int argc, char *argv[])
 		die(0);
 	}
 
+	fd_udp = fd_udp6 = -1;
 	for (res = res0; res; res = res->ai_next) {
-		struct pollfd *pfdp;
+		int *fdp;
 
-		if (res->ai_family == AF_INET)
-			pfdp = &pfd[PFD_INET];
-		else {
-			/*
-			 * XXX AF_INET6 is skipped on purpose, need to
-			 * fix '@' handling first.
-			 */
+		switch (res->ai_family) {
+		case AF_INET:
+			if (IPv6Only)
+				continue;
+			fdp = &fd_udp;
+			break;
+		case AF_INET6:
+			if (IPv4Only)
+				continue;
+			fdp = &fd_udp6;
+			break;
+		default:
 			continue;
 		}
 
-		if (pfdp->fd >= 0)
+		if (*fdp >= 0)
 			continue;
 
-		fd = socket(res->ai_family, res->ai_socktype, res->ai_protocol);
-		if (fd < 0)
+		*fdp = socket(res->ai_family, res->ai_socktype,
+		    res->ai_protocol);
+		if (*fdp == -1)
 			continue;
 
-		if (bind(fd, res->ai_addr, res->ai_addrlen) < 0) {
+		if (bind(*fdp, res->ai_addr, res->ai_addrlen) < 0) {
 			logerror("bind");
-			close(fd);
+			close(*fdp);
+			*fdp = -1;
 			if (!Debug)
 				die(0);
-			fd = -1;
 			continue;
 		}
 
-		InetInuse = 1;
-		pfdp->fd = fd;
 		if (SecureMode)
-			shutdown(pfdp->fd, SHUT_RD);
-		else {
-			double_rbuf(pfdp->fd);
-			pfdp->events = POLLIN;
-		}
+			shutdown(*fdp, SHUT_RD);
+		else
+			double_rbuf(*fdp);
 	}
 
 	freeaddrinfo(res0);
@@ -425,48 +474,82 @@ main(int argc, char *argv[])
 #ifndef SUN_LEN
 #define SUN_LEN(unp) (strlen((unp)->sun_path) + 2)
 #endif
-	for (i = 0; i < nfunix; i++) {
-		if ((fd = unix_socket(funixn[i], SOCK_DGRAM, 0666)) == -1) {
+	for (i = 0; i < nunix; i++) {
+		fd_unix[i] = unix_socket(path_unix[i], SOCK_DGRAM, 0666);
+		if (fd_unix[i] == -1) {
 			if (i == 0 && !Debug)
 				die(0);
 			continue;
 		}
-		double_rbuf(fd);
-		pfd[PFD_UNIX_0 + i].fd = fd;
-		pfd[PFD_UNIX_0 + i].events = POLLIN;
+		double_rbuf(fd_unix[i]);
 	}
 
-	nfunix++;
 	if (socketpair(AF_UNIX, SOCK_DGRAM, PF_UNSPEC, pair) == -1)
 		die(0);
-	fd = pair[0];
-	double_rbuf(fd);
-	pfd[PFD_UNIX_0 + i].fd = fd;
-	pfd[PFD_UNIX_0 + i].events = POLLIN;
+	fd_sendsys = pair[0];
+	double_rbuf(fd_sendsys);
 
-	if (ctlsock_path != NULL) {
-		fd = unix_socket(ctlsock_path, SOCK_STREAM, 0600);
-		if (fd != -1) {
-			if (listen(fd, 16) == -1) {
+	fd_ctlsock = fd_ctlconn = -1;
+	if (path_ctlsock != NULL) {
+		fd_ctlsock = unix_socket(path_ctlsock, SOCK_STREAM, 0600);
+		if (fd_ctlsock == -1) {
+			dprintf("can't open %s (%d)\n", path_ctlsock, errno);
+			if (!Debug)
+				die(0);
+		} else {
+			if (listen(fd_ctlsock, 16) == -1) {
 				logerror("ctlsock listen");
 				die(0);
 			}
-			pfd[PFD_CTLSOCK].fd = fd;
-			pfd[PFD_CTLSOCK].events = POLLIN;
-		} else if (!Debug)
-			die(0);
+		}
 	}
 
-	if ((fd = open(_PATH_KLOG, O_RDONLY, 0)) == -1) {
+	fd_klog = open(_PATH_KLOG, O_RDONLY, 0);
+	if (fd_klog == -1) {
 		dprintf("can't open %s (%d)\n", _PATH_KLOG, errno);
 	} else {
-		pfd[PFD_KLOG].fd = fd;
-		pfd[PFD_KLOG].events = POLLIN;
+		if (ioctl(fd_klog, LIOCSFD, &pair[1]) == -1)
+			dprintf("LIOCSFD errno %d\n", errno);
 	}
-
-	if (ioctl(fd, LIOCSFD, &pair[1]) == -1)
-		dprintf("LIOCSFD errno %d\n", errno);
 	close(pair[1]);
+
+	if (tls_init() == -1) {
+		logerror("tls_init");
+	} else if ((tlsconfig = tls_config_new()) == NULL) {
+		logerror("tls_config_new");
+	} else if (NoVerify) {
+		tls_config_insecure_noverifycert(tlsconfig);
+		tls_config_insecure_noverifyname(tlsconfig);
+	} else {
+		struct stat sb;
+
+		fd = -1;
+		p = NULL;
+		errno = 0;
+		if ((fd = open(CAfile, O_RDONLY)) == -1) {
+			logerror("open CAfile");
+		} else if (fstat(fd, &sb) == -1) {
+			logerror("fstat CAfile");
+		} else if (sb.st_size > 1024*1024*1024) {
+			logerror("CAfile larger than 1GB");
+		} else if ((p = calloc(sb.st_size, 1)) == NULL) {
+			logerror("calloc CAfile");
+		} else if (read(fd, p, sb.st_size) != sb.st_size) {
+			logerror("read CAfile");
+		} else if (tls_config_set_ca_mem(tlsconfig, p, sb.st_size)
+		    == -1) {
+			logerror("tls_config_set_ca_mem");
+		} else {
+			dprintf("CAfile %s, size %lld\n", CAfile, sb.st_size);
+		}
+		free(p);
+		close(fd);
+	}
+	if (tlsconfig) {
+		tls_config_set_protocols(tlsconfig, TLS_PROTOCOLS_ALL);
+		if (tls_config_set_ciphers(tlsconfig, "compat") != 0)
+			logerror("tls set ciphers");
+	}
 
 	dprintf("off & running....\n");
 
@@ -495,6 +578,8 @@ main(int argc, char *argv[])
 
 	/* tuck my process id away */
 	if (!Debug) {
+		FILE *fp;
+
 		fp = fopen(_PATH_LOGPID, "w");
 		if (fp != NULL) {
 			fprintf(fp, "%ld\n", (long)getpid());
@@ -507,12 +592,36 @@ main(int argc, char *argv[])
 		errx(1, "unable to privsep");
 
 	/* Process is now unprivileged and inside a chroot */
+	event_init();
+
+	event_set(&ev_ctlaccept, fd_ctlsock, EV_READ|EV_PERSIST,
+	    ctlsock_acceptcb, &ev_ctlaccept);
+	event_set(&ev_ctlread, fd_ctlconn, EV_READ|EV_PERSIST,
+	    ctlconn_readcb, &ev_ctlread);
+	event_set(&ev_ctlwrite, fd_ctlconn, EV_WRITE|EV_PERSIST,
+	    ctlconn_writecb, &ev_ctlwrite);
+	event_set(&ev_klog, fd_klog, EV_READ|EV_PERSIST, klog_readcb, &ev_klog);
+	event_set(&ev_sendsys, fd_sendsys, EV_READ|EV_PERSIST, unix_readcb,
+	    &ev_sendsys);
+	event_set(&ev_udp, fd_udp, EV_READ|EV_PERSIST, udp_readcb, &ev_udp);
+	event_set(&ev_udp6, fd_udp6, EV_READ|EV_PERSIST, udp_readcb, &ev_udp6);
+	for (i = 0; i < nunix; i++)
+		event_set(&ev_unix[i], fd_unix[i], EV_READ|EV_PERSIST,
+		    unix_readcb, &ev_unix[i]);
+
+	signal_set(&ev_hup, SIGHUP, init_signalcb, &ev_hup);
+	signal_set(&ev_int, SIGINT, die_signalcb, &ev_int);
+	signal_set(&ev_quit, SIGQUIT, die_signalcb, &ev_quit);
+	signal_set(&ev_term, SIGTERM, die_signalcb, &ev_term);
+
+	evtimer_set(&ev_mark, mark_timercb, &ev_mark);
+
 	init();
 
 	Startup = 0;
 
 	/* Allocate ctl socket reply buffer if we have a ctl socket */
-	if (pfd[PFD_CTLSOCK].fd != -1 &&
+	if (fd_ctlsock != -1 &&
 	    (ctl_reply = malloc(CTL_REPLY_MAXSIZE)) == NULL) {
 		logerror("Couldn't allocate ctlsock reply buffer");
 		die(0);
@@ -523,10 +632,10 @@ main(int argc, char *argv[])
 		dup2(nullfd, STDIN_FILENO);
 		dup2(nullfd, STDOUT_FILENO);
 		dup2(nullfd, STDERR_FILENO);
-		if (nullfd > 2)
-			close(nullfd);
 		close(lockpipe[1]);
 	}
+	if (nullfd > 2)
+		close(nullfd);
 
 	/*
 	 * Signal to the priv process that the initial config parsing is done
@@ -534,92 +643,325 @@ main(int argc, char *argv[])
 	 */
 	priv_config_parse_done();
 
-	(void)signal(SIGHUP, doinit);
-	(void)signal(SIGTERM, dodie);
-	(void)signal(SIGINT, Debug ? dodie : SIG_IGN);
-	(void)signal(SIGQUIT, Debug ? dodie : SIG_IGN);
-	(void)signal(SIGCHLD, reapchild);
-	(void)signal(SIGALRM, domark);
+	if (fd_ctlsock != -1)
+		event_add(&ev_ctlaccept, NULL);
+	if (fd_klog != -1)
+		event_add(&ev_klog, NULL);
+	if (fd_sendsys != -1)
+		event_add(&ev_sendsys, NULL);
+	if (!SecureMode) {
+		if (fd_udp != -1)
+			event_add(&ev_udp, NULL);
+		if (fd_udp6 != -1)
+			event_add(&ev_udp6, NULL);
+	}
+	for (i = 0; i < nunix; i++)
+		if (fd_unix[i] != -1)
+			event_add(&ev_unix[i], NULL);
+
+	signal_add(&ev_hup, NULL);
+	signal_add(&ev_term, NULL);
+	if (Debug) {
+		signal_add(&ev_int, NULL);
+		signal_add(&ev_quit, NULL);
+	} else {
+		(void)signal(SIGINT, SIG_IGN);
+		(void)signal(SIGQUIT, SIG_IGN);
+	}
+	(void)signal(SIGCHLD, SIG_IGN);
 	(void)signal(SIGPIPE, SIG_IGN);
-	(void)alarm(TIMERINTVL);
+
+	to.tv_sec = TIMERINTVL;
+	to.tv_usec = 0;
+	evtimer_add(&ev_mark, &to);
 
 	logmsg(LOG_SYSLOG|LOG_INFO, "syslogd: start", LocalHostName, ADDDATE);
 	dprintf("syslogd: started\n");
 
-	for (;;) {
-		if (MarkSet)
-			markit();
-		if (WantDie)
-			die(WantDie);
+	event_dispatch();
+	/* NOTREACHED */
+	return (0);
+}
 
-		if (DoInit) {
-			init();
-			DoInit = 0;
+void
+klog_readcb(int fd, short event, void *arg)
+{
+	struct event		*ev = arg;
+	ssize_t			 n;
 
-			logmsg(LOG_SYSLOG|LOG_INFO, "syslogd: restart",
-			    LocalHostName, ADDDATE);
-			dprintf("syslogd: restarted\n");
-		}
+	n = read(fd, linebuf, linesize - 1);
+	if (n > 0) {
+		linebuf[n] = '\0';
+		printsys(linebuf);
+	} else if (n < 0 && errno != EINTR) {
+		logerror("klog");
+		event_del(ev);
+	}
+}
 
-		switch (poll(pfd, PFD_UNIX_0 + nfunix, -1)) {
-		case 0:
-			continue;
-		case -1:
-			if (errno != EINTR)
-				logerror("poll");
-			continue;
-		}
+void
+udp_readcb(int fd, short event, void *arg)
+{
+	struct sockaddr_storage	 sa;
+	socklen_t		 salen;
+	ssize_t			 n;
 
-		if ((pfd[PFD_KLOG].revents & POLLIN) != 0) {
-			i = read(pfd[PFD_KLOG].fd, line, linesize - 1);
-			if (i > 0) {
-				line[i] = '\0';
-				printsys(line);
-			} else if (i < 0 && errno != EINTR) {
-				logerror("klog");
-				pfd[PFD_KLOG].fd = -1;
-				pfd[PFD_KLOG].events = 0;
+	salen = sizeof(sa);
+	n = recvfrom(fd, linebuf, MAXLINE, 0, (struct sockaddr *)&sa, &salen);
+	if (n > 0) {
+		char	 resolve[NI_MAXHOST];
+
+		linebuf[n] = '\0';
+		cvthname((struct sockaddr *)&sa, resolve, sizeof(resolve));
+		dprintf("cvthname res: %s\n", resolve);
+		printline(resolve, linebuf);
+	} else if (n < 0 && errno != EINTR)
+		logerror("recvfrom udp");
+}
+
+void
+unix_readcb(int fd, short event, void *arg)
+{
+	struct sockaddr_un	 sa;
+	socklen_t		 salen;
+	ssize_t			 n;
+
+	salen = sizeof(sa);
+	n = recvfrom(fd, linebuf, MAXLINE, 0, (struct sockaddr *)&sa, &salen);
+	if (n > 0) {
+		linebuf[n] = '\0';
+		printline(LocalHostName, linebuf);
+	} else if (n < 0 && errno != EINTR)
+		logerror("recvfrom unix");
+}
+
+int
+tcp_socket(struct filed *f)
+{
+	int	 s, flags;
+	char	 ebuf[ERRBUFSIZE];
+
+	if ((s = socket(f->f_un.f_forw.f_addr.ss_family, SOCK_STREAM,
+	    IPPROTO_TCP)) == -1) {
+		snprintf(ebuf, sizeof(ebuf), "socket \"%s\"",
+		    f->f_un.f_forw.f_loghost);
+		logerror(ebuf);
+		return (-1);
+	}
+	/* Connect must not block the process. */
+	if ((flags = fcntl(s, F_GETFL)) == -1 ||
+	    fcntl(s, F_SETFL, flags | O_NONBLOCK) == -1) {
+		snprintf(ebuf, sizeof(ebuf), "fcntl \"%s\" O_NONBLOCK",
+		    f->f_un.f_forw.f_loghost);
+		logerror(ebuf);
+		close(s);
+		return (-1);
+	}
+	if (connect(s, (struct sockaddr *)&f->f_un.f_forw.f_addr,
+	    f->f_un.f_forw.f_addr.ss_len) == -1 && errno != EINPROGRESS) {
+		snprintf(ebuf, sizeof(ebuf), "connect \"%s\"",
+		    f->f_un.f_forw.f_loghost);
+		logerror(ebuf);
+		close(s);
+		return (-1);
+	}
+	return (s);
+}
+
+void
+tcp_readcb(struct bufferevent *bufev, void *arg)
+{
+	struct filed	*f = arg;
+
+	/*
+	 * Drop data received from the forward log server.
+	 */
+	dprintf("loghost \"%s\" did send %zu bytes back\n",
+	    f->f_un.f_forw.f_loghost, EVBUFFER_LENGTH(bufev->input));
+	evbuffer_drain(bufev->input, -1);
+}
+
+void
+tcp_writecb(struct bufferevent *bufev, void *arg)
+{
+	struct filed	*f = arg;
+	char		 ebuf[ERRBUFSIZE];
+
+	/*
+	 * Successful write, connection to server is good, reset wait time.
+	 */
+	dprintf("loghost \"%s\" successful write\n", f->f_un.f_forw.f_loghost);
+	f->f_un.f_forw.f_reconnectwait = 0;
+
+	if (f->f_un.f_forw.f_dropped > 0 &&
+	    EVBUFFER_LENGTH(f->f_un.f_forw.f_bufev->output) < MAX_TCPBUF) {
+		snprintf(ebuf, sizeof(ebuf),
+		    "syslogd: dropped %d messages to loghost \"%s\"",
+		    f->f_un.f_forw.f_dropped, f->f_un.f_forw.f_loghost);
+		f->f_un.f_forw.f_dropped = 0;
+		logmsg(LOG_SYSLOG|LOG_WARNING, ebuf, LocalHostName, ADDDATE);
+	}
+}
+
+void
+tcp_errorcb(struct bufferevent *bufev, short event, void *arg)
+{
+	struct filed	*f = arg;
+	char		*p, *buf, *end;
+	int		 l;
+	char		 ebuf[ERRBUFSIZE];
+
+	if (event & EVBUFFER_EOF)
+		snprintf(ebuf, sizeof(ebuf),
+		    "syslogd: loghost \"%s\" connection close",
+		    f->f_un.f_forw.f_loghost);
+	else
+		snprintf(ebuf, sizeof(ebuf),
+		    "syslogd: loghost \"%s\" connection error: %s",
+		    f->f_un.f_forw.f_loghost, f->f_un.f_forw.f_ctx ?
+		    tls_error(f->f_un.f_forw.f_ctx) : strerror(errno));
+	dprintf("%s\n", ebuf);
+
+	/* The SIGHUP handler may also close the socket, so invalidate it. */
+	if (f->f_un.f_forw.f_ctx) {
+		tls_close(f->f_un.f_forw.f_ctx);
+		tls_free(f->f_un.f_forw.f_ctx);
+		f->f_un.f_forw.f_ctx = NULL;
+	}
+	close(f->f_file);
+	f->f_file = -1;
+
+	/*
+	 * The messages in the output buffer may be out of sync.
+	 * Check that the buffer starts with "1234 <1234 octets>\n".
+	 * Otherwise remove the partial message from the beginning.
+	 */
+	buf = EVBUFFER_DATA(bufev->output);
+	end = buf + EVBUFFER_LENGTH(bufev->output);
+	for (p = buf; p < end && p < buf + 4; p++) {
+		if (!isdigit(*p))
+			break;
+	}
+	/* Using atoi() is safe as buf starts with 1 to 4 digits and a space. */
+	if (buf < end && !(buf + 1 <= p && p < end && *p == ' ' &&
+	    (l = atoi(buf)) > 0 && buf + l < end && buf[l] == '\n')) {
+		for (p = buf; p < end; p++) {
+			if (*p == '\n') {
+				evbuffer_drain(bufev->output, p - buf + 1);
+				break;
 			}
 		}
-		if ((pfd[PFD_INET].revents & POLLIN) != 0) {
-			len = sizeof(frominet);
-			i = recvfrom(pfd[PFD_INET].fd, line, MAXLINE, 0,
-			    (struct sockaddr *)&frominet, &len);
-			if (i > 0) {
-				line[i] = '\0';
-				cvthname(&frominet, resolve,
-				    sizeof resolve);
-				dprintf("cvthname res: %s\n", resolve);
-				printline(resolve, line);
-			} else if (i < 0 && errno != EINTR)
-				logerror("recvfrom inet");
+		/* Without '\n' discard everything. */
+		if (p == end)
+			evbuffer_drain(bufev->output, p - buf);
+		dprintf("loghost \"%s\" dropped partial message\n",
+		    f->f_un.f_forw.f_loghost);
+		f->f_un.f_forw.f_dropped++;
+	}
+
+	tcp_connectcb(-1, 0, f);
+
+	/* Log the connection error to the fresh buffer after reconnecting. */
+	logmsg(LOG_SYSLOG|LOG_WARNING, ebuf, LocalHostName, ADDDATE);
+}
+
+void
+tcp_connectcb(int fd, short event, void *arg)
+{
+	struct filed		*f = arg;
+	struct bufferevent	*bufev = f->f_un.f_forw.f_bufev;
+	struct tls		*ctx;
+	struct timeval		 to;
+	int			 s;
+
+	if ((event & EV_TIMEOUT) == 0 && f->f_un.f_forw.f_reconnectwait > 0)
+		goto retry;
+
+	/* Avoid busy reconnect loop, delay until successful write. */
+	if (f->f_un.f_forw.f_reconnectwait == 0)
+		f->f_un.f_forw.f_reconnectwait = 1;
+
+	if ((s = tcp_socket(f)) == -1)
+		goto retry;
+	dprintf("tcp connect callback: socket success, event %#x\n", event);
+	f->f_file = s;
+
+	bufferevent_setfd(bufev, s);
+	bufferevent_setcb(bufev, tcp_readcb, tcp_writecb, tcp_errorcb, f);
+	/*
+	 * Although syslog is a write only protocol, enable reading from
+	 * the socket to detect connection close and errors.
+	 */
+	bufferevent_enable(bufev, EV_READ|EV_WRITE);
+
+	if (f->f_type == F_FORWTLS) {
+		if ((ctx = tls_socket(f)) == NULL) {
+			close(f->f_file);
+			f->f_file = -1;
+			goto retry;
 		}
-		if ((pfd[PFD_CTLSOCK].revents & POLLIN) != 0)
-			ctlsock_accept_handler();
-		if ((pfd[PFD_CTLCONN].revents & POLLIN) != 0)
-			ctlconn_read_handler();
-		if ((pfd[PFD_CTLCONN].revents & POLLOUT) != 0)
-			ctlconn_write_handler();
+		dprintf("tcp connect callback: TLS context success\n");
+		f->f_un.f_forw.f_ctx = ctx;
 
-		for (i = 0; i < nfunix; i++) {
-			if ((pfd[PFD_UNIX_0 + i].revents & POLLIN) != 0) {
-				ssize_t rlen;
+		buffertls_set(&f->f_un.f_forw.f_buftls, bufev, ctx, s);
+		buffertls_connect(&f->f_un.f_forw.f_buftls, s,
+		    f->f_un.f_forw.f_host);
+	}
 
-				len = sizeof(fromunix);
-				rlen = recvfrom(pfd[PFD_UNIX_0 + i].fd, line,
-				    MAXLINE, 0, (struct sockaddr *)&fromunix,
-				    &len);
-				if (rlen > 0) {
-					line[rlen] = '\0';
-					printline(LocalHostName, line);
-				} else if (rlen == -1 && errno != EINTR)
-					logerror("recvfrom unix");
-			}
+	return;
+
+ retry:
+	f->f_un.f_forw.f_reconnectwait <<= 1;
+	if (f->f_un.f_forw.f_reconnectwait > 600)
+		f->f_un.f_forw.f_reconnectwait = 600;
+	to.tv_sec = f->f_un.f_forw.f_reconnectwait;
+	to.tv_usec = 0;
+
+	dprintf("tcp connect callback: retry, event %#x, wait %d\n",
+	    event, f->f_un.f_forw.f_reconnectwait);
+	bufferevent_setfd(bufev, -1);
+	/* We can reuse the write event as bufferevent is disabled. */
+	evtimer_set(&bufev->ev_write, tcp_connectcb, f);
+	evtimer_add(&bufev->ev_write, &to);
+}
+
+struct tls *
+tls_socket(struct filed *f)
+{
+	struct tls	*ctx;
+	char		 ebuf[ERRBUFSIZE];
+
+	if ((ctx = tls_client()) == NULL) {
+		snprintf(ebuf, sizeof(ebuf), "tls_client \"%s\"",
+		    f->f_un.f_forw.f_loghost);
+		logerror(ebuf);
+		return (NULL);
+	}
+	if (tlsconfig) {
+		if (tls_configure(ctx, tlsconfig) < 0) {
+			snprintf(ebuf, sizeof(ebuf), "tls_configure \"%s\": %s",
+			    f->f_un.f_forw.f_loghost, tls_error(ctx));
+			logerror(ebuf);
+			tls_free(ctx);
+			return (NULL);
 		}
 	}
-	/* NOTREACHED */
-	free(pfd);
-	return (0);
+	return (ctx);
+}
+
+int
+tcpbuf_countmsg(struct bufferevent *bufev)
+{
+	char	*p, *buf, *end;
+	int	 i = 0;
+
+	buf = EVBUFFER_DATA(bufev->output);
+	end = buf + EVBUFFER_LENGTH(bufev->output);
+	for (p = buf; p < end; p++) {
+		if (*p == '\n')
+			i++;
+	}
+	return (i);
 }
 
 void
@@ -627,8 +969,8 @@ usage(void)
 {
 
 	(void)fprintf(stderr,
-	    "usage: syslogd [-dhnu] [-a path] [-f config_file] [-m mark_interval]\n"
-	    "               [-p log_socket] [-s reporting_socket]\n");
+	    "usage: syslogd [-46dhnuV] [-a path] [-C CAfile] [-f config_file]\n"
+	    "               [-m mark_interval] [-p log_socket] [-s reporting_socket]\n");
 	exit(1);
 }
 
@@ -640,7 +982,7 @@ void
 printline(char *hname, char *msg)
 {
 	int pri;
-	char *p, *q, line[MAXLINE + 1];
+	char *p, *q, line[MAXLINE + 4 + 1];  /* message, encoding, NUL */
 
 	/* test for special codes */
 	pri = DEFUPRI;
@@ -663,13 +1005,13 @@ printline(char *hname, char *msg)
 	if (LOG_FAC(pri) == LOG_KERN)
 		pri = LOG_USER | LOG_PRI(pri);
 
-	for (q = line; *p && q < &line[sizeof(line) - 4]; p++) {
+	for (q = line; *p && q < &line[MAXLINE]; p++) {
 		if (*p == '\n')
 			*q++ = ' ';
 		else
 			q = vis(q, *p, 0, 0);
 	}
-	*q = '\0';
+	line[MAXLINE] = *q = '\0';
 
 	logmsg(pri, line, hname, 0);
 }
@@ -720,17 +1062,11 @@ logmsg(int pri, char *msg, char *from, int flags)
 {
 	struct filed *f;
 	int fac, msglen, prilev, i;
-	sigset_t mask, omask;
 	char *timestamp;
 	char prog[NAME_MAX+1];
 
 	dprintf("logmsg: pri 0%o, flags 0x%x, from %s, msg %s\n",
 	    pri, flags, from, msg);
-
-	sigemptyset(&mask);
-	sigaddset(&mask, SIGALRM);
-	sigaddset(&mask, SIGHUP);
-	sigprocmask(SIG_BLOCK, &mask, &omask);
 
 	/*
 	 * Check to see if msg looks non-standard.
@@ -752,8 +1088,11 @@ logmsg(int pri, char *msg, char *from, int flags)
 	/* extract facility and priority level */
 	if (flags & MARK)
 		fac = LOG_NFACILITIES;
-	else
+	else {
 		fac = LOG_FAC(pri);
+		if (fac >= LOG_NFACILITIES || fac < 0)
+			fac = LOG_USER;
+	}
 	prilev = LOG_PRI(pri);
 
 	/* extract program name */
@@ -776,10 +1115,9 @@ logmsg(int pri, char *msg, char *from, int flags)
 			(void)close(f->f_file);
 			f->f_file = -1;
 		}
-		(void)sigprocmask(SIG_SETMASK, &omask, NULL);
 		return;
 	}
-	for (f = Files; f; f = f->f_next) {
+	SIMPLEQ_FOREACH(f, &Files, f_next) {
 		/* skip messages that are incorrect priority */
 		if (f->f_pmask[fac] < prilev ||
 		    f->f_pmask[fac] == INTERNAL_NOPRI)
@@ -841,7 +1179,6 @@ logmsg(int pri, char *msg, char *from, int flags)
 		if (f->f_quick)
 			break;
 	}
-	(void)sigprocmask(SIG_SETMASK, &omask, NULL);
 }
 
 void
@@ -854,10 +1191,10 @@ fprintlog(struct filed *f, int flags, char *msg)
 
 	v = iov;
 	if (f->f_type == F_WALL) {
-		if ((l = snprintf(greetings, sizeof(greetings),
+		l = snprintf(greetings, sizeof(greetings),
 		    "\r\n\7Message from syslogd@%s at %.24s ...\r\n",
-		    f->f_prevhost, ctime(&now))) >= sizeof(greetings) ||
-		    l == -1)
+		    f->f_prevhost, ctime(&now));
+		if (l < 0 || (size_t)l >= sizeof(greetings))
 			l = strlen(greetings);
 		v->iov_base = greetings;
 		v->iov_len = l;
@@ -884,9 +1221,9 @@ fprintlog(struct filed *f, int flags, char *msg)
 		v->iov_base = msg;
 		v->iov_len = strlen(msg);
 	} else if (f->f_prevcount > 1) {
-		if ((l = snprintf(repbuf, sizeof(repbuf),
-		    "last message repeated %d times", f->f_prevcount)) >=
-		    sizeof(repbuf) || l == -1)
+		l = snprintf(repbuf, sizeof(repbuf),
+		    "last message repeated %d times", f->f_prevcount);
+		if (l < 0 || (size_t)l >= sizeof(repbuf))
 			l = strlen(repbuf);
 		v->iov_base = repbuf;
 		v->iov_len = l;
@@ -904,15 +1241,16 @@ fprintlog(struct filed *f, int flags, char *msg)
 		dprintf("\n");
 		break;
 
-	case F_FORW:
-		dprintf(" %s\n", f->f_un.f_forw.f_hname);
-		if ((l = snprintf(line, sizeof(line), "<%d>%.15s %s%s%s",
-		    f->f_prevpri, (char *)iov[0].iov_base,
+	case F_FORWUDP:
+		dprintf(" %s\n", f->f_un.f_forw.f_loghost);
+		l = snprintf(line, MINIMUM(MAX_UDPMSG + 1, sizeof(line)),
+		    "<%d>%.15s %s%s%s", f->f_prevpri, (char *)iov[0].iov_base,
 		    IncludeHostname ? LocalHostName : "",
 		    IncludeHostname ? " " : "",
-		    (char *)iov[4].iov_base)) >= sizeof(line) || l == -1)
-			l = strlen(line);
-		if (sendto(pfd[PFD_INET].fd, line, l, 0,
+		    (char *)iov[4].iov_base);
+		if (l < 0 || (size_t)l > MINIMUM(MAX_UDPMSG, sizeof(line)))
+			l = MINIMUM(MAX_UDPMSG, sizeof(line));
+		if (sendto(f->f_file, line, l, 0,
 		    (struct sockaddr *)&f->f_un.f_forw.f_addr,
 		    f->f_un.f_forw.f_addr.ss_len) != l) {
 			switch (errno) {
@@ -929,6 +1267,61 @@ fprintlog(struct filed *f, int flags, char *msg)
 				break;
 			}
 		}
+		break;
+
+	case F_FORWTLS:
+		if (f->f_un.f_forw.f_buftls.bt_flags & BT_WRITE_AGAIN) {
+			/*
+			 * After an OpenSSL SSL_ERROR_WANT_WRITE you must not
+			 * modify the buffer pointer or length until the next
+			 * successful write.  Otherwise there will be an
+			 * error SSL3_WRITE_PENDING:bad write retry.
+			 * XXX This should be handled in the buffertls layer.
+			 */
+			dprintf(" %s (dropped tls write again)\n",
+			    f->f_un.f_forw.f_loghost);
+			f->f_un.f_forw.f_dropped++;
+			break;
+		}
+		/* FALLTHROUGH */
+	case F_FORWTCP:
+		dprintf(" %s", f->f_un.f_forw.f_loghost);
+		if (EVBUFFER_LENGTH(f->f_un.f_forw.f_bufev->output) >=
+		    MAX_TCPBUF) {
+			dprintf(" (dropped)\n");
+			f->f_un.f_forw.f_dropped++;
+			break;
+		}
+		/*
+		 * Syslog over TLS  RFC 5425  4.3.  Sending Data
+		 * Syslog over TCP  RFC 6587  3.4.1.  Octet Counting
+		 * Use an additional '\n' to split messages.  This allows
+		 * buffer synchronisation, helps legacy implementations,
+		 * and makes line based testing easier.
+		 */
+		l = snprintf(line, sizeof(line), "<%d>%.15s %s%s\n",
+		    f->f_prevpri, (char *)iov[0].iov_base,
+		    IncludeHostname ? LocalHostName : "",
+		    IncludeHostname ? " " : "");
+		if (l < 0) {
+			dprintf(" (dropped snprintf)\n");
+			f->f_un.f_forw.f_dropped++;
+			break;
+		}
+		l = evbuffer_add_printf(f->f_un.f_forw.f_bufev->output,
+		    "%zu <%d>%.15s %s%s%s\n",
+		    (size_t)l + strlen(iov[4].iov_base),
+		    f->f_prevpri, (char *)iov[0].iov_base,
+		    IncludeHostname ? LocalHostName : "",
+		    IncludeHostname ? " " : "",
+		    (char *)iov[4].iov_base);
+		if (l < 0) {
+			dprintf(" (dropped evbuffer_add_printf)\n");
+			f->f_un.f_forw.f_dropped++;
+			break;
+		}
+		bufferevent_enable(f->f_un.f_forw.f_bufev, EV_WRITE);
+		dprintf("\n");
 		break;
 
 	case F_CONSOLE:
@@ -1014,12 +1407,12 @@ fprintlog(struct filed *f, int flags, char *msg)
 	case F_MEMBUF:
 		dprintf("\n");
 		snprintf(line, sizeof(line), "%.15s %s %s",
-		    (char *)iov[0].iov_base, (char *)iov[2].iov_base, 
+		    (char *)iov[0].iov_base, (char *)iov[2].iov_base,
 		    (char *)iov[4].iov_base);
 		if (ringbuf_append_line(f->f_un.f_mb.f_rb, line) == 1)
 			f->f_un.f_mb.f_overflow = 1;
 		if (f->f_un.f_mb.f_attached)
-			logto_ctlconn(line);
+			ctlconn_logto(line);
 		break;
 	}
 	f->f_prevcount = 0;
@@ -1080,74 +1473,56 @@ wallmsg(struct filed *f, struct iovec *iov)
 	reenter = 0;
 }
 
-/* ARGSUSED */
-void
-reapchild(int signo)
-{
-	int save_errno = errno;
-	int status;
-
-	while (waitpid(-1, &status, WNOHANG) > 0)
-		;
-	errno = save_errno;
-}
-
 /*
  * Return a printable representation of a host address.
  */
 void
-cvthname(struct sockaddr_in *f, char *result, size_t res_len)
+cvthname(struct sockaddr *f, char *result, size_t res_len)
 {
-	sigset_t omask, nmask;
-	char *p, *ip;
-	int ret_len;
-
-	if (f->sin_family != AF_INET) {
+	if (getnameinfo(f, f->sa_len, result, res_len, NULL, 0,
+	    NI_NUMERICHOST|NI_NUMERICSERV|NI_DGRAM) != 0) {
 		dprintf("Malformed from address\n");
 		strlcpy(result, "???", res_len);
 		return;
 	}
-
-	ip = inet_ntoa(f->sin_addr);
-	dprintf("cvthname(%s)\n", ip);
-	if (NoDNS) {
-		strlcpy(result, ip, res_len);
+	dprintf("cvthname(%s)\n", result);
+	if (NoDNS)
 		return;
+
+	if (priv_getnameinfo(f, f->sa_len, result, res_len) != 0)
+		dprintf("Host name for your address (%s) unknown\n", result);
+}
+
+void
+die_signalcb(int signum, short event, void *arg)
+{
+	die(signum);
+}
+
+void
+mark_timercb(int unused, short event, void *arg)
+{
+	markit();
+}
+
+void
+init_signalcb(int signum, short event, void *arg)
+{
+	char	 ebuf[ERRBUFSIZE];
+
+	init();
+
+	logmsg(LOG_SYSLOG|LOG_INFO, "syslogd: restart",
+	    LocalHostName, ADDDATE);
+	dprintf("syslogd: restarted\n");
+
+	if (tcpbuf_dropped > 0) {
+		snprintf(ebuf, sizeof(ebuf),
+		    "syslogd: dropped %d messages to remote loghost",
+		    tcpbuf_dropped);
+		tcpbuf_dropped = 0;
+		logmsg(LOG_SYSLOG|LOG_WARNING, ebuf, LocalHostName, ADDDATE);
 	}
-
-	sigemptyset(&nmask);
-	sigaddset(&nmask, SIGHUP);
-	sigprocmask(SIG_BLOCK, &nmask, &omask);
-
-	ret_len = priv_gethostbyaddr((char *)&f->sin_addr,
-		sizeof(struct in_addr), f->sin_family, result, res_len);
-
-	sigprocmask(SIG_SETMASK, &omask, NULL);
-	if (ret_len == 0) {
-		dprintf("Host name for your address (%s) unknown\n", ip);
-		strlcpy(result, ip, res_len);
-	} else if ((p = strchr(result, '.')) && strcmp(p + 1, LocalDomain) == 0)
-		*p = '\0';
-}
-
-void
-dodie(int signo)
-{
-	WantDie = signo;
-}
-
-/* ARGSUSED */
-void
-domark(int signo)
-{
-	MarkSet = 1;
-}
-
-/* ARGSUSED */
-void
-doinit(int signo)
-{
-	DoInit = 1;
 }
 
 /*
@@ -1156,19 +1531,19 @@ doinit(int signo)
 void
 logerror(const char *type)
 {
-	char buf[100];
+	char ebuf[ERRBUFSIZE];
 
 	if (errno)
-		(void)snprintf(buf, sizeof(buf), "syslogd: %s: %s",
+		(void)snprintf(ebuf, sizeof(ebuf), "syslogd: %s: %s",
 		    type, strerror(errno));
 	else
-		(void)snprintf(buf, sizeof(buf), "syslogd: %s", type);
+		(void)snprintf(ebuf, sizeof(ebuf), "syslogd: %s", type);
 	errno = 0;
-	dprintf("%s\n", buf);
+	dprintf("%s\n", ebuf);
 	if (Startup)
-		fprintf(stderr, "%s\n", buf);
+		fprintf(stderr, "%s\n", ebuf);
 	else
-		logmsg(LOG_SYSLOG|LOG_ERR, buf, LocalHostName, ADDDATE);
+		logmsg(LOG_SYSLOG|LOG_ERR, ebuf, LocalHostName, ADDDATE);
 }
 
 void
@@ -1176,21 +1551,35 @@ die(int signo)
 {
 	struct filed *f;
 	int was_initialized = Initialized;
-	char buf[100];
+	char ebuf[ERRBUFSIZE];
 
 	Initialized = 0;		/* Don't log SIGCHLDs */
-	alarm(0);
-	for (f = Files; f != NULL; f = f->f_next) {
+	SIMPLEQ_FOREACH(f, &Files, f_next) {
 		/* flush any pending output */
 		if (f->f_prevcount)
 			fprintlog(f, 0, (char *)NULL);
+		if (f->f_type == F_FORWTLS || f->f_type == F_FORWTCP) {
+			tcpbuf_dropped += f->f_un.f_forw.f_dropped +
+			    tcpbuf_countmsg(f->f_un.f_forw.f_bufev);
+			f->f_un.f_forw.f_dropped = 0;
+		}
 	}
 	Initialized = was_initialized;
+
+	if (tcpbuf_dropped > 0) {
+		snprintf(ebuf, sizeof(ebuf),
+		    "syslogd: dropped %d messages to remote loghost",
+		    tcpbuf_dropped);
+		tcpbuf_dropped = 0;
+		logmsg(LOG_SYSLOG|LOG_WARNING, ebuf, LocalHostName, ADDDATE);
+	}
+
 	if (signo) {
 		dprintf("syslogd: exiting on signal %d\n", signo);
-		(void)snprintf(buf, sizeof buf, "exiting on signal %d", signo);
+		(void)snprintf(ebuf, sizeof(ebuf), "exiting on signal %d",
+		    signo);
 		errno = 0;
-		logerror(buf);
+		logerror(ebuf);
 	}
 	dprintf("[unpriv] syslogd child about to exit\n");
 	exit(0);
@@ -1203,7 +1592,8 @@ void
 init(void)
 {
 	char cline[LINE_MAX], prog[NAME_MAX+1], *p;
-	struct filed *f, *next, **nextp, *mb, *m;
+	struct filed_list mb;
+	struct filed *f, *m;
 	FILE *cf;
 	int i;
 
@@ -1219,41 +1609,51 @@ init(void)
 	 *  Close all open log files.
 	 */
 	Initialized = 0;
-	mb = NULL;
-	for (f = Files; f != NULL; f = next) {
+	SIMPLEQ_INIT(&mb);
+	while (!SIMPLEQ_EMPTY(&Files)) {
+		f = SIMPLEQ_FIRST(&Files);
+		SIMPLEQ_REMOVE_HEAD(&Files, f_next);
 		/* flush any pending output */
 		if (f->f_prevcount)
 			fprintlog(f, 0, (char *)NULL);
 
 		switch (f->f_type) {
+		case F_FORWTLS:
+			if (f->f_un.f_forw.f_ctx) {
+				tls_close(f->f_un.f_forw.f_ctx);
+				tls_free(f->f_un.f_forw.f_ctx);
+			}
+			free(f->f_un.f_forw.f_host);
+			/* FALLTHROUGH */
+		case F_FORWTCP:
+			tcpbuf_dropped += f->f_un.f_forw.f_dropped +
+			     tcpbuf_countmsg(f->f_un.f_forw.f_bufev);
+			bufferevent_free(f->f_un.f_forw.f_bufev);
+			/* FALLTHROUGH */
 		case F_FILE:
 		case F_TTY:
 		case F_CONSOLE:
 		case F_PIPE:
 			(void)close(f->f_file);
 			break;
-		case F_FORW:
-			break;
 		}
-		next = f->f_next;
 		if (f->f_program)
 			free(f->f_program);
 		if (f->f_type == F_MEMBUF) {
-			f->f_next = mb;
 			f->f_program = NULL;
-			dprintf("add %p to mb: %p\n", f, mb);
-			mb = f;
+			dprintf("add %p to mb\n", f);
+			SIMPLEQ_INSERT_HEAD(&mb, f, f_next);
 		} else
-			free((char *)f);
+			free(f);
 	}
-	Files = NULL;
-	nextp = &Files;
+	SIMPLEQ_INIT(&Files);
 
 	/* open the configuration file */
 	if ((cf = priv_open_config()) == NULL) {
 		dprintf("cannot open %s\n", ConfFile);
-		*nextp = cfline("*.ERR\t/dev/console", "*");
-		(*nextp)->f_next = cfline("*.PANIC\t*", "*");
+		SIMPLEQ_INSERT_TAIL(&Files, cfline("*.ERR\t/dev/console", "*"),
+		    f_next);
+		SIMPLEQ_INSERT_TAIL(&Files, cfline("*.PANIC\t*", "*"), f_next);
 		Initialized = 1;
 		return;
 	}
@@ -1299,19 +1699,17 @@ init(void)
 			}
 		*p = '\0';
 		f = cfline(cline, prog);
-		if (f != NULL) {
-			*nextp = f;
-			nextp = &f->f_next;
-		}
+		if (f != NULL)
+			SIMPLEQ_INSERT_TAIL(&Files, f, f_next);
 	}
 
 	/* Match and initialize the memory buffers */
-	for (f = Files; f != NULL; f = f->f_next) {
+	SIMPLEQ_FOREACH(f, &Files, f_next) {
 		if (f->f_type != F_MEMBUF)
 			continue;
 		dprintf("Initialize membuf %s at %p\n", f->f_un.f_mb.f_mname, f);
 
-		for (m = mb; m != NULL; m = m->f_next) {
+		SIMPLEQ_FOREACH(m, &mb, f_next) {
 			if (m->f_un.f_mb.f_rb == NULL)
 				continue;
 			if (strcmp(m->f_un.f_mb.f_mname,
@@ -1333,15 +1731,15 @@ init(void)
 	}
 
 	/* make sure remaining buffers are freed */
-	while (mb != NULL) {
-		m = mb;
+	while (!SIMPLEQ_EMPTY(&mb)) {
+		m = SIMPLEQ_FIRST(&mb);
+		SIMPLEQ_REMOVE_HEAD(&mb, f_next);
 		if (m->f_un.f_mb.f_rb != NULL) {
 			logerror("Mismatched membuf");
 			ringbuf_free(m->f_un.f_mb.f_rb);
 		}
 		dprintf("Freeing membuf %p\n", m);
 
-		mb = m->f_next;
 		free(m);
 	}
 
@@ -1351,7 +1749,7 @@ init(void)
 	Initialized = 1;
 
 	if (Debug) {
-		for (f = Files; f; f = f->f_next) {
+		SIMPLEQ_FOREACH(f, &Files, f_next) {
 			for (i = 0; i <= LOG_NFACILITIES; i++)
 				if (f->f_pmask[i] == INTERNAL_NOPRI)
 					printf("X ");
@@ -1366,8 +1764,10 @@ init(void)
 				printf("%s", f->f_un.f_fname);
 				break;
 
-			case F_FORW:
-				printf("%s", f->f_un.f_forw.f_hname);
+			case F_FORWUDP:
+			case F_FORWTCP:
+			case F_FORWTLS:
+				printf("%s", f->f_un.f_forw.f_loghost);
 				break;
 
 			case F_USERS:
@@ -1398,7 +1798,7 @@ find_dup(struct filed *f)
 {
 	struct filed *list;
 
-	for (list = Files; list; list = list->f_next) {
+	SIMPLEQ_FOREACH(list, &Files, f_next) {
 		if (list->f_quick || f->f_quick)
 			continue;
 		switch (list->f_type) {
@@ -1427,11 +1827,12 @@ find_dup(struct filed *f)
 struct filed *
 cfline(char *line, char *prog)
 {
-	int i, pri, addr_len;
+	int i, pri;
 	size_t rb_len;
-	char *bp, *p, *q, *cp;
-	char buf[MAXLINE], ebuf[100];
+	char *bp, *p, *q, *proto, *host, *port, *ipproto;
+	char buf[MAXLINE], ebuf[ERRBUFSIZE];
 	struct filed *xf, *f, *d;
+	struct timeval to;
 
 	dprintf("cfline(\"%s\", f, \"%s\")\n", line, prog);
 
@@ -1452,11 +1853,8 @@ cfline(char *line, char *prog)
 		f->f_quick = 0;
 	if (!strcmp(prog, "*"))
 		prog = NULL;
-	else {
-		f->f_program = calloc(1, strlen(prog)+1);
-		if (f->f_program)
-			strlcpy(f->f_program, prog, strlen(prog)+1);
-	}
+	else
+		f->f_program = strdup(prog);
 
 	/* scan through the list of selectors */
 	for (p = line; *p && *p != '\t';) {
@@ -1526,28 +1924,120 @@ cfline(char *line, char *prog)
 
 	switch (*p) {
 	case '@':
-		if (!InetInuse)
-			break;
-		if ((cp = strrchr(++p, ':')) != NULL)
-			*cp++ = '\0';
-		if ((strlcpy(f->f_un.f_forw.f_hname, p,
-		    sizeof(f->f_un.f_forw.f_hname)) >=
-		    sizeof(f->f_un.f_forw.f_hname))) {
-			snprintf(ebuf, sizeof(ebuf), "hostname too long \"%s\"",
+		if ((strlcpy(f->f_un.f_forw.f_loghost, p,
+		    sizeof(f->f_un.f_forw.f_loghost)) >=
+		    sizeof(f->f_un.f_forw.f_loghost))) {
+			snprintf(ebuf, sizeof(ebuf), "loghost too long \"%s\"",
 			    p);
 			logerror(ebuf);
 			break;
 		}
-		addr_len = priv_gethostserv(f->f_un.f_forw.f_hname, 
-		    cp == NULL ? "syslog" : cp, 
-		    (struct sockaddr*)&f->f_un.f_forw.f_addr, 
-		    sizeof(f->f_un.f_forw.f_addr));
-		if (addr_len < 1) {
-			snprintf(ebuf, sizeof(ebuf), "bad hostname \"%s\"", p);
+		if (loghost(++p, &proto, &host, &port) == -1) {
+			snprintf(ebuf, sizeof(ebuf), "bad loghost \"%s\"",
+			    f->f_un.f_forw.f_loghost);
 			logerror(ebuf);
 			break;
 		}
-		f->f_type = F_FORW;
+		if (proto == NULL)
+			proto = "udp";
+		ipproto = proto;
+		if (strcmp(proto, "udp") == 0) {
+			if (fd_udp == -1)
+				proto = "udp6";
+			if (fd_udp6 == -1)
+				proto = "udp4";
+			ipproto = proto;
+		} else if (strcmp(proto, "udp4") == 0) {
+			if (fd_udp == -1) {
+				snprintf(ebuf, sizeof(ebuf), "no udp4 \"%s\"",
+				    f->f_un.f_forw.f_loghost);
+				logerror(ebuf);
+				break;
+			}
+		} else if (strcmp(proto, "udp6") == 0) {
+			if (fd_udp6 == -1) {
+				snprintf(ebuf, sizeof(ebuf), "no udp6 \"%s\"",
+				    f->f_un.f_forw.f_loghost);
+				logerror(ebuf);
+				break;
+			}
+		} else if (strcmp(proto, "tcp") == 0 ||
+		    strcmp(proto, "tcp4") == 0 || strcmp(proto, "tcp6") == 0) {
+			;
+		} else if (strcmp(proto, "tls") == 0) {
+			ipproto = "tcp";
+		} else if (strcmp(proto, "tls4") == 0) {
+			ipproto = "tcp4";
+		} else if (strcmp(proto, "tls6") == 0) {
+			ipproto = "tcp6";
+		} else {
+			snprintf(ebuf, sizeof(ebuf), "bad protocol \"%s\"",
+			    f->f_un.f_forw.f_loghost);
+			logerror(ebuf);
+			break;
+		}
+		if (strlen(host) >= NI_MAXHOST) {
+			snprintf(ebuf, sizeof(ebuf), "host too long \"%s\"",
+			    f->f_un.f_forw.f_loghost);
+			logerror(ebuf);
+			break;
+		}
+		if (port == NULL)
+			port = strncmp(proto, "tls", 3) == 0 ?
+			    "syslog-tls" : "syslog";
+		if (strlen(port) >= NI_MAXSERV) {
+			snprintf(ebuf, sizeof(ebuf), "port too long \"%s\"",
+			    f->f_un.f_forw.f_loghost);
+			logerror(ebuf);
+			break;
+		}
+		if (priv_getaddrinfo(ipproto, host, port,
+		    (struct sockaddr*)&f->f_un.f_forw.f_addr,
+		    sizeof(f->f_un.f_forw.f_addr)) != 0) {
+			snprintf(ebuf, sizeof(ebuf), "bad hostname \"%s\"",
+			    f->f_un.f_forw.f_loghost);
+			logerror(ebuf);
+			break;
+		}
+		f->f_file = -1;
+		if (strncmp(proto, "udp", 3) == 0) {
+			switch (f->f_un.f_forw.f_addr.ss_family) {
+			case AF_INET:
+				f->f_file = fd_udp;
+				break;
+			case AF_INET6:
+				f->f_file = fd_udp6;
+				break;
+			}
+			f->f_type = F_FORWUDP;
+		} else if (strncmp(ipproto, "tcp", 3) == 0) {
+			if ((f->f_un.f_forw.f_bufev = bufferevent_new(-1,
+			    tcp_readcb, tcp_writecb, tcp_errorcb, f)) == NULL) {
+				snprintf(ebuf, sizeof(ebuf),
+				    "bufferevent \"%s\"",
+				    f->f_un.f_forw.f_loghost);
+				logerror(ebuf);
+				break;
+			}
+			if (strncmp(proto, "tls", 3) == 0) {
+				f->f_un.f_forw.f_host = strdup(host);
+				f->f_type = F_FORWTLS;
+			} else {
+				f->f_type = F_FORWTCP;
+			}
+			/*
+			 * If we try to connect to a TLS server immediately
+			 * syslogd gets an SIGPIPE as the signal handlers have
+			 * not been set up.  Delay the connection until the
+			 * event loop is started.  We can reuse the write event
+			 * for that as bufferevent is still disabled.
+			 */
+			to.tv_sec = 0;
+			to.tv_usec = 1;
+			evtimer_set(&f->f_un.f_forw.f_bufev->ev_write,
+			    tcp_connectcb, f);
+			evtimer_add(&f->f_un.f_forw.f_bufev->ev_write, &to);
+		}
 		break;
 
 	case '/':
@@ -1610,7 +2100,7 @@ cfline(char *line, char *prog)
 		rb_len *= 1024;
 
 		/* Copy buffer name */
-		for(i = 0; i < sizeof(f->f_un.f_mb.f_mname) - 1; i++) {
+		for(i = 0; (size_t)i < sizeof(f->f_un.f_mb.f_mname) - 1; i++) {
 			if (!isalnum((unsigned char)q[i]))
 				break;
 			f->f_un.f_mb.f_mname[i] = q[i];
@@ -1627,7 +2117,7 @@ cfline(char *line, char *prog)
 		}
 
 		/* Set buffer length */
-		rb_len = MAX(rb_len, MIN_MEMBUF);
+		rb_len = MAXIMUM(rb_len, MIN_MEMBUF);
 		f->f_un.f_mb.f_len = rb_len;
 		f->f_un.f_mb.f_overflow = 0;
 		f->f_un.f_mb.f_attached = 0;
@@ -1652,6 +2142,33 @@ cfline(char *line, char *prog)
 	return (f);
 }
 
+/*
+ * Parse the host and port parts from a loghost string.
+ */
+int
+loghost(char *str, char **proto, char **host, char **port)
+{
+	*proto = NULL;
+	if ((*host = strchr(str, ':')) &&
+	    (*host)[1] == '/' && (*host)[2] == '/') {
+		*proto = str;
+		**host = '\0';
+		str = *host + 3;
+	}
+	*host = str;
+	if (**host == '[') {
+		(*host)++;
+		str = strchr(*host, ']');
+		if (str == NULL)
+			return (-1);
+		*str++ = '\0';
+	}
+	*port = strrchr(str, ':');
+	if (*port != NULL)
+		*(*port)++ = '\0';
+
+	return (0);
+}
 
 /*
  * Retrieve the size of the kernel message buffer, via sysctl.
@@ -1681,9 +2198,6 @@ decode(const char *name, const CODE *codetab)
 	const CODE *c;
 	char *p, buf[40];
 
-	if (isdigit((unsigned char)*name))
-		return (atoi(name));
-
 	for (p = buf; *name && p < &buf[sizeof(buf) - 1]; p++, name++) {
 		if (isupper((unsigned char)*name))
 			*p = tolower((unsigned char)*name);
@@ -1711,7 +2225,7 @@ markit(void)
 		MarkSeq = 0;
 	}
 
-	for (f = Files; f; f = f->f_next) {
+	SIMPLEQ_FOREACH(f, &Files, f_next) {
 		if (f->f_prevcount && now >= REPEATTIME(f)) {
 			dprintf("flush %s: repeated %d times, %d sec.\n",
 			    TypeNames[f->f_type], f->f_prevcount,
@@ -1720,25 +2234,22 @@ markit(void)
 			BACKOFF(f);
 		}
 	}
-	MarkSet = 0;
-	(void)alarm(TIMERINTVL);
 }
 
 int
 unix_socket(char *path, int type, mode_t mode)
 {
 	struct sockaddr_un s_un;
-	char errbuf[512];
-	int fd;
+	char ebuf[512];
+	int fd, optval;
 	mode_t old_umask;
 
 	memset(&s_un, 0, sizeof(s_un));
 	s_un.sun_family = AF_UNIX;
-	if (strlcpy(s_un.sun_path, path, sizeof(s_un.sun_path)) >
+	if (strlcpy(s_un.sun_path, path, sizeof(s_un.sun_path)) >=
 	    sizeof(s_un.sun_path)) {
-		snprintf(errbuf, sizeof(errbuf), "socket path too long: %s",
-		    path);
-		logerror(errbuf);
+		snprintf(ebuf, sizeof(ebuf), "socket path too long: %s", path);
+		logerror(ebuf);
 		die(0);
 	}
 
@@ -1761,8 +2272,8 @@ unix_socket(char *path, int type, mode_t mode)
 
 	unlink(path);
 	if (bind(fd, (struct sockaddr *)&s_un, SUN_LEN(&s_un)) == -1) {
-		snprintf(errbuf, sizeof(errbuf), "cannot bind %s", path);
-		logerror(errbuf);
+		snprintf(ebuf, sizeof(ebuf), "cannot bind %s", path);
+		logerror(ebuf);
 		umask(old_umask);
 		close(fd);
 		return (-1);
@@ -1771,12 +2282,17 @@ unix_socket(char *path, int type, mode_t mode)
 	umask(old_umask);
 
 	if (chmod(path, mode) == -1) {
-		snprintf(errbuf, sizeof(errbuf), "cannot chmod %s", path);
-		logerror(errbuf);
+		snprintf(ebuf, sizeof(ebuf), "cannot chmod %s", path);
+		logerror(ebuf);
 		close(fd);
 		unlink(path);
 		return (-1);
 	}
+
+	optval = MAXLINE + PATH_MAX;
+	if (setsockopt(fd, SOL_SOCKET, SO_RCVBUF, &optval, sizeof(optval))
+	    == -1)
+		logerror("cannot setsockopt unix");
 
 	return (fd);
 }
@@ -1793,21 +2309,20 @@ double_rbuf(int fd)
 	}
 }
 
-static void
+void
 ctlconn_cleanup(void)
 {
 	struct filed *f;
 
-	if (pfd[PFD_CTLCONN].fd != -1)
-		close(pfd[PFD_CTLCONN].fd);
-
-	pfd[PFD_CTLCONN].fd = -1;
-	pfd[PFD_CTLCONN].events = pfd[PFD_CTLCONN].revents = 0;
-
-	pfd[PFD_CTLSOCK].events = POLLIN;
+	if (close(fd_ctlconn) == -1)
+		logerror("close ctlconn");
+	fd_ctlconn = -1;
+	event_del(&ev_ctlread);
+	event_del(&ev_ctlwrite);
+	event_add(&ev_ctlaccept, NULL);
 
 	if (ctl_state == CTL_WRITING_CONT_REPLY)
-		for (f = Files; f != NULL; f = f->f_next)
+		SIMPLEQ_FOREACH(f, &Files, f_next)
 			if (f->f_type == F_MEMBUF)
 				f->f_un.f_mb.f_attached = 0;
 
@@ -1815,12 +2330,13 @@ ctlconn_cleanup(void)
 }
 
 void
-ctlsock_accept_handler(void)
+ctlsock_acceptcb(int fd, short event, void *arg)
 {
-	int fd, flags;
+	struct event		*ev = arg;
+	int			 flags;
 
 	dprintf("Accepting control connection\n");
-	fd = accept(pfd[PFD_CTLSOCK].fd, NULL, NULL);
+	fd = accept(fd, NULL, NULL);
 	if (fd == -1) {
 		if (errno != EINTR && errno != EWOULDBLOCK &&
 		    errno != ECONNABORTED)
@@ -1828,20 +2344,26 @@ ctlsock_accept_handler(void)
 		return;
 	}
 
-	ctlconn_cleanup();
+	if (fd_ctlconn != -1)
+		ctlconn_cleanup();
 
 	/* Only one connection at a time */
-	pfd[PFD_CTLSOCK].events = pfd[PFD_CTLSOCK].revents = 0;
+	event_del(ev);
 
 	if ((flags = fcntl(fd, F_GETFL)) == -1 ||
 	    fcntl(fd, F_SETFL, flags | O_NONBLOCK) == -1) {
-		logerror("fcntl ctlconn");
+		logerror("fcntl ctlconn O_NONBLOCK");
 		close(fd);
 		return;
 	}
 
-	pfd[PFD_CTLCONN].fd = fd;
-	pfd[PFD_CTLCONN].events = POLLIN;
+	fd_ctlconn = fd;
+	/* file descriptor has changed, reset event */
+	event_set(&ev_ctlread, fd_ctlconn, EV_READ|EV_PERSIST,
+	    ctlconn_readcb, &ev_ctlread);
+	event_set(&ev_ctlwrite, fd_ctlconn, EV_WRITE|EV_PERSIST,
+	    ctlconn_writecb, &ev_ctlwrite);
+	event_add(&ev_ctlread, NULL);
 	ctl_state = CTL_READING_CMD;
 	ctl_cmd_bytes = 0;
 }
@@ -1851,7 +2373,7 @@ static struct filed
 {
 	struct filed *f;
 
-	for (f = Files; f != NULL; f = f->f_next) {
+	SIMPLEQ_FOREACH(f, &Files, f_next) {
 		if (f->f_type == F_MEMBUF &&
 		    strcmp(f->f_un.f_mb.f_mname, name) == 0)
 			break;
@@ -1860,12 +2382,12 @@ static struct filed
 }
 
 void
-ctlconn_read_handler(void)
+ctlconn_readcb(int fd, short event, void *arg)
 {
-	ssize_t n;
-	struct filed *f;
-	u_int32_t flags = 0;
-	struct ctl_reply_hdr *reply_hdr = (struct ctl_reply_hdr *)ctl_reply;
+	struct filed		*f;
+	struct ctl_reply_hdr	*reply_hdr = (struct ctl_reply_hdr *)ctl_reply;
+	ssize_t			 n;
+	u_int32_t		 flags = 0;
 
 	if (ctl_state == CTL_WRITING_REPLY ||
 	    ctl_state == CTL_WRITING_CONT_REPLY) {
@@ -1875,7 +2397,7 @@ ctlconn_read_handler(void)
 	}
 
  retry:
-	n = read(pfd[PFD_CTLCONN].fd, (char*)&ctl_cmd + ctl_cmd_bytes,
+	n = read(fd, (char*)&ctl_cmd + ctl_cmd_bytes,
 	    sizeof(ctl_cmd) - ctl_cmd_bytes);
 	switch (n) {
 	case -1:
@@ -1889,7 +2411,6 @@ ctlconn_read_handler(void)
 	default:
 		ctl_cmd_bytes += n;
 	}
-
 	if (ctl_cmd_bytes < sizeof(ctl_cmd))
 		return;
 
@@ -1955,7 +2476,7 @@ ctlconn_read_handler(void)
 		}
 		break;
 	case CMD_LIST:
-		for (f = Files; f != NULL; f = f->f_next) {
+		SIMPLEQ_FOREACH(f, &Files, f_next) {
 			if (f->f_type == F_MEMBUF) {
 				strlcat(reply_text, f->f_un.f_mb.f_mname,
 				    MAX_MEMBUF);
@@ -1983,21 +2504,18 @@ ctlconn_read_handler(void)
 	ctl_state = (ctl_cmd.cmd == CMD_READ_CONT) ?
 	    CTL_WRITING_CONT_REPLY : CTL_WRITING_REPLY;
 
-	pfd[PFD_CTLCONN].events = POLLOUT;
-
-	/* monitor terminating syslogc */
-	pfd[PFD_CTLCONN].events |= POLLIN;
+	event_add(&ev_ctlwrite, NULL);
 
 	/* another syslogc can kick us out */
 	if (ctl_state == CTL_WRITING_CONT_REPLY)
-		pfd[PFD_CTLSOCK].events = POLLIN;
-
+		event_add(&ev_ctlaccept, NULL);
 }
 
 void
-ctlconn_write_handler(void)
+ctlconn_writecb(int fd, short event, void *arg)
 {
-	ssize_t n;
+	struct event		*ev = arg;
+	ssize_t			 n;
 
 	if (!(ctl_state == CTL_WRITING_REPLY ||
 	    ctl_state == CTL_WRITING_CONT_REPLY)) {
@@ -2006,8 +2524,9 @@ ctlconn_write_handler(void)
 		ctlconn_cleanup();
 		return;
 	}
+
  retry:
-	n = write(pfd[PFD_CTLCONN].fd, ctl_reply + ctl_reply_offset,
+	n = write(fd, ctl_reply + ctl_reply_offset,
 	    ctl_reply_size - ctl_reply_offset);
 	switch (n) {
 	case -1:
@@ -2022,26 +2541,29 @@ ctlconn_write_handler(void)
 	default:
 		ctl_reply_offset += n;
 	}
-	if (ctl_reply_offset >= ctl_reply_size) {
-		/*
-		 * Make space in the buffer for continous writes.
-		 * Set offset behind reply header to skip it
-		 */
-		if (ctl_state == CTL_WRITING_CONT_REPLY) {
-			*reply_text = '\0';
-			ctl_reply_offset = ctl_reply_size = CTL_REPLY_SIZE;
+	if (ctl_reply_offset < ctl_reply_size)
+		return;
 
-			/* Now is a good time to report dropped lines */
-			if (membuf_drop) {
-				strlcat(reply_text, "<ENOBUFS>\n", MAX_MEMBUF);
-				ctl_reply_size = CTL_REPLY_SIZE;
-				membuf_drop = 0;
-			} else {
-				/* Nothing left to write */
-				pfd[PFD_CTLCONN].events = POLLIN;
-			}
-		} else
-			ctlconn_cleanup();
+	if (ctl_state != CTL_WRITING_CONT_REPLY) {
+		ctlconn_cleanup();
+		return;
+	}
+
+	/*
+	 * Make space in the buffer for continous writes.
+	 * Set offset behind reply header to skip it
+	 */
+	*reply_text = '\0';
+	ctl_reply_offset = ctl_reply_size = CTL_REPLY_SIZE;
+
+	/* Now is a good time to report dropped lines */
+	if (membuf_drop) {
+		strlcat(reply_text, "<ENOBUFS>\n", MAX_MEMBUF);
+		ctl_reply_size = CTL_REPLY_SIZE;
+		membuf_drop = 0;
+	} else {
+		/* Nothing left to write */
+		event_del(ev);
 	}
 }
 
@@ -2068,7 +2590,7 @@ tailify_replytext(char *replytext, int lines)
 }
 
 void
-logto_ctlconn(char *line)
+ctlconn_logto(char *line)
 {
 	size_t l;
 
@@ -2084,5 +2606,5 @@ logto_ctlconn(char *line)
 	memcpy(ctl_reply + ctl_reply_size, line, l);
 	memcpy(ctl_reply + ctl_reply_size + l, "\n", 2);
 	ctl_reply_size += l + 1;
-	pfd[PFD_CTLCONN].events |= POLLOUT;
+	event_add(&ev_ctlwrite, NULL);
 }

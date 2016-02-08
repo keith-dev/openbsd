@@ -1,4 +1,4 @@
-/*	$OpenBSD: systrace.c,v 1.58 2012/12/04 02:24:47 deraadt Exp $	*/
+/*	$OpenBSD: systrace.c,v 1.62 2015/01/16 00:19:12 deraadt Exp $	*/
 /*
  * Copyright 2002 Niels Provos <provos@citi.umich.edu>
  * All rights reserved.
@@ -70,11 +70,11 @@ int iamroot = 0;		/* Set if we are running as root */
 int cradle = 0;			/* Set if we are running in cradle mode */
 int logtofile = 0;		/* Log to file instead of syslog */
 FILE *logfile;			/* default logfile to send to if enabled */
-char cwd[MAXPATHLEN];		/* Current working directory */
-char home[MAXPATHLEN];		/* Home directory of user */
+char cwd[PATH_MAX];		/* Current working directory */
+char home[PATH_MAX];		/* Home directory of user */
 char username[LOGIN_NAME_MAX];	/* Username: predicate match and expansion */
 char *guipath = _PATH_XSYSTRACE; /* Path to GUI executable */
-char dirpath[MAXPATHLEN];
+char dirpath[PATH_MAX];
 
 static struct event ev_read;
 static struct event ev_timeout;
@@ -503,7 +503,7 @@ requestor_start(char *path, int docradle)
 				err(1, "dup2");
 			if (dup2(pair[1], fileno(stdout)) == -1)
 				err(1, "dup2");
-			setlinebuf(stdout);
+			setvbuf(stdout, NULL, _IOLBF, 0);
 
 			close(pair[1]);
 		}
@@ -524,7 +524,7 @@ requestor_start(char *path, int docradle)
 
 		close(pair[0]);
 
-		setlinebuf(stdout);
+		setvbuf(stdout, NULL, _IOLBF, 0);
 
 		connected = 1;
 	}
@@ -537,7 +537,7 @@ static void
 cradle_setup(char *pathtogui)
 {
 	struct stat sb;
-	char cradlepath[MAXPATHLEN], cradleuipath[MAXPATHLEN];
+	char cradlepath[PATH_MAX], cradleuipath[PATH_MAX];
 
 	snprintf(dirpath, sizeof(dirpath), "/tmp/systrace-%d", getuid());
 
@@ -576,7 +576,7 @@ get_uid_gid(const char *argument, uid_t *uid, gid_t *gid)
 	u = strsep(&g, ":");
 
 	if ((pw = getpwnam(u)) != NULL) {
-		memset(pw->pw_passwd, 0, strlen(pw->pw_passwd));
+		explicit_bzero(pw->pw_passwd, strlen(pw->pw_passwd));
 		*uid = pw->pw_uid;
 		*gid = pw->pw_gid;
 		/* Ok if group not specified. */
@@ -753,7 +753,8 @@ main(int argc, char **argv)
 
 	if (pidattach == 0) {
 		/* Run a command and attach to it */
-		if ((args = calloc(argc + 1, sizeof(char *))) == NULL)
+		args = reallocarray(NULL, argc + 1, sizeof(char *));
+		if (args == NULL)
 			err(1, "malloc");
 
 		for (i = 0; i < argc; i++)

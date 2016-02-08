@@ -1,4 +1,4 @@
-/*	$OpenBSD: socketvar.h,v 1.55 2013/01/15 11:12:57 bluhm Exp $	*/
+/*	$OpenBSD: socketvar.h,v 1.58 2015/01/19 19:57:59 guenther Exp $	*/
 /*	$NetBSD: socketvar.h,v 1.18 1996/02/09 18:25:38 christos Exp $	*/
 
 /*-
@@ -81,13 +81,17 @@ struct socket {
 	uid_t	so_siguid;		/* uid of process who set so_pgid */
 	uid_t	so_sigeuid;		/* euid of process who set so_pgid */
 	u_long	so_oobmark;		/* chars to oob mark */
-
-	struct	socket *so_splice;	/* send data to drain socket */
-	struct	socket *so_spliceback;	/* back ref for notify and cleanup */
-	off_t	so_splicelen;		/* number of bytes spliced so far */
-	off_t	so_splicemax;		/* maximum number of bytes to splice */
-	struct	timeval so_idletv;	/* idle timeout */
-	struct	timeout so_idleto;
+/*
+ * Variables for socket splicing, allocated only when needed.
+ */
+	struct sosplice {
+		struct	socket *ssp_socket;	/* send data to drain socket */
+		struct	socket *ssp_soback;	/* back ref to source socket */
+		off_t	ssp_len;		/* number of bytes spliced */
+		off_t	ssp_max;		/* maximum number of bytes */
+		struct	timeval ssp_idletv;	/* idle timeout */
+		struct	timeout ssp_idleto;
+	} *so_sp;
 /*
  * Variables for socket buffering.
  */
@@ -140,7 +144,6 @@ struct socket {
 #define	SS_PRIV			0x080	/* privileged for broadcast, raw... */
 #define	SS_NBIO			0x100	/* non-blocking ops */
 #define	SS_ASYNC		0x200	/* async i/o notify */
-#define	SS_ISCONFIRMING		0x400	/* deciding to accept connection req */
 #define	SS_CONNECTOUT		0x1000	/* connect, not accept, at this end */
 #define	SS_ISSENDING		0x2000	/* hint for lower layer */
 
@@ -148,6 +151,9 @@ struct socket {
 /*
  * Macros for sockets and socket buffering.
  */
+
+#define isspliced(so)		((so)->so_sp && (so)->so_sp->ssp_socket)
+#define issplicedback(so)	((so)->so_sp && (so)->so_sp->ssp_soback)
 
 /*
  * Do we need to notify the other side when I/O is possible?
@@ -174,7 +180,7 @@ struct socket {
 
 /* can we read something from so? */
 #define	soreadable(so)	\
-    ((so)->so_splice == NULL && \
+    (!isspliced(so) && \
     ((so)->so_rcv.sb_cc >= (so)->so_rcv.sb_lowat || \
     ((so)->so_state & SS_CANTRCVMORE) || \
     (so)->so_qlen || (so)->so_error))
@@ -318,6 +324,8 @@ int	sockargs(struct mbuf **, const void *, size_t, int);
 int	sendit(struct proc *, int, struct msghdr *, int, register_t *);
 int	recvit(struct proc *, int, struct msghdr *, caddr_t,
 		    register_t *);
+int	doaccept(struct proc *, int, struct sockaddr *, socklen_t *, int,
+	    register_t *);
 
 #ifdef SOCKBUF_DEBUG
 void	sblastrecordchk(struct sockbuf *, const char *);

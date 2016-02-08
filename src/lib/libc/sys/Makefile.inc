@@ -1,4 +1,4 @@
-#	$OpenBSD: Makefile.inc,v 1.119 2014/07/12 02:28:56 deraadt Exp $
+#	$OpenBSD: Makefile.inc,v 1.124 2014/12/08 20:56:11 guenther Exp $
 #	$NetBSD: Makefile.inc,v 1.35 1995/10/16 23:49:07 jtc Exp $
 #	@(#)Makefile.inc	8.1 (Berkeley) 6/17/93
 
@@ -22,14 +22,14 @@ SRCS+=	ftruncate.c lseek.c mquery.c mmap.c ptrace.c semctl.c truncate.c \
 # stack protector helper functions
 SRCS+=	stack_protector.c
 
-# modules with default implementations on all architectures, unless overriden
+# modules with default implementations on all architectures, unless overridden
 # below:
 ASM=	__get_tcb.o __getcwd.o __semctl.o __set_tcb.o __syscall.o \
 	__sysctl.o __threxit.o __thrsigdivert.o __thrsleep.o \
-	__thrwakeup.o accept.o access.o acct.o adjfreq.o adjtime.o \
-	bind.o chdir.o chflags.o chmod.o chown.o chroot.o \
+	__thrwakeup.o accept.o accept4.o access.o acct.o adjfreq.o adjtime.o \
+	bind.o chdir.o chflags.o chflagsat.o chmod.o chown.o chroot.o \
 	clock_getres.o clock_gettime.o clock_settime.o close.o \
-	closefrom.o connect.o dup.o dup2.o execve.o faccessat.o \
+	closefrom.o connect.o dup.o dup2.o dup3.o execve.o faccessat.o \
 	fchdir.o fchflags.o fchmod.o fchmodat.o fchown.o \
 	fchownat.o fcntl.o fhopen.o fhstat.o fhstatfs.o \
 	flock.o fpathconf.o fstat.o fstatat.o fstatfs.o \
@@ -45,7 +45,8 @@ ASM=	__get_tcb.o __getcwd.o __semctl.o __set_tcb.o __syscall.o \
 	mknod.o mknodat.o mlock.o mlockall.o mount.o mprotect.o \
 	msgctl.o msgget.o msgrcv.o msgsnd.o msync.o munlock.o \
 	munlockall.o munmap.o nanosleep.o nfssvc.o \
-	open.o openat.o pathconf.o pipe.o poll.o ppoll.o profil.o pselect.o \
+	open.o openat.o pathconf.o pipe.o pipe2.o \
+	poll.o ppoll.o profil.o pselect.o \
 	quotactl.o read.o readlink.o readlinkat.o readv.o reboot.o \
 	recvfrom.o recvmsg.o rename.o renameat.o revoke.o rmdir.o \
 	sched_yield.o select.o semget.o semop.o sendmsg.o sendsyslog.o sendto.o \
@@ -204,14 +205,14 @@ MAN+=	__get_tcb.2 __thrsigdivert.2 __thrsleep.2 _exit.2 accept.2 \
 	getfh.2 getfsstat.2 getgid.2 getgroups.2 getitimer.2 getlogin.2 \
 	getpeername.2 getpgrp.2 getpid.2 getpriority.2 getrlimit.2 \
 	getrtable.2 getrusage.2 getsid.2 getsockname.2 getsockopt.2 \
-	gettimeofday.2 getuid.2 intro.2 ioctl.2 issetugid.2 \
+	getthrid.2 gettimeofday.2 getuid.2 intro.2 ioctl.2 issetugid.2 \
 	kill.2 kqueue.2 ktrace.2 link.2 listen.2 lseek.2 madvise.2 \
 	mincore.2 minherit.2 mkdir.2 mkfifo.2 mknod.2 mlock.2 \
 	mlockall.2 mmap.2 mount.2 mprotect.2 mquery.2 msgctl.2 \
 	msgget.2 msgrcv.2 msgsnd.2 msync.2 munmap.2 nanosleep.2 \
 	nfssvc.2 open.2 pathconf.2 pipe.2 poll.2 profil.2 \
 	ptrace.2 quotactl.2 read.2 readlink.2 reboot.2 recv.2 \
-	rename.2 revoke.2 rmdir.2 select.2 semctl.2 semget.2 \
+	rename.2 revoke.2 rmdir.2 sched_yield.2 select.2 semctl.2 semget.2 \
 	semop.2 send.2 setgroups.2 setpgid.2 setregid.2 \
 	setresuid.2 setreuid.2 setsid.2 sendsyslog.2 setuid.2 shmat.2 \
 	shmctl.2 shmget.2 shutdown.2 sigaction.2 sigaltstack.2 sigpending.2 \
@@ -223,15 +224,17 @@ MAN+=	__get_tcb.2 __thrsigdivert.2 __thrsleep.2 _exit.2 accept.2 \
 MLINKS+=__get_tcb.2 __set_tcb.2
 MLINKS+=__thrsleep.2 __thrwakeup.2
 MLINKS+=_exit.2 _Exit.2
+MLINKS+=accept.2 accept4.2
 MLINKS+=access.2 faccessat.2
 MLINKS+=brk.2 sbrk.2
 MLINKS+=chdir.2 fchdir.2
-MLINKS+=chflags.2 fchflags.2
+MLINKS+=chflags.2 chflagsat.2 chflags.2 fchflags.2
 MLINKS+=chmod.2 fchmod.2 chmod.2 fchmodat.2
 MLINKS+=chown.2 fchown.2 chown.2 fchownat.2 chown.2 lchown.2
 MLINKS+=clock_gettime.2 clock_getres.2
 MLINKS+=clock_gettime.2 clock_settime.2
 MLINKS+=dup.2 dup2.2
+MLINKS+=dup.2 dup3.2
 MLINKS+=execve.2 exect.2
 MLINKS+=fhopen.2 fhstat.2 fhopen.2 fhstatfs.2
 MLINKS+=fsync.2 fdatasync.2
@@ -263,6 +266,7 @@ MLINKS+=mlockall.2 munlockall.2
 MLINKS+=mount.2 unmount.2
 MLINKS+=open.2 openat.2
 MLINKS+=pathconf.2 fpathconf.2
+MLINKS+=pipe.2 pipe2.2
 MLINKS+=poll.2 ppoll.2
 MLINKS+=read.2 readv.2 read.2 pread.2 read.2 preadv.2
 MLINKS+=readlink.2 readlinkat.2

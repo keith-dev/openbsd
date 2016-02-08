@@ -5905,7 +5905,7 @@ _bfd_mips_elf_size_dynamic_sections (bfd *output_bfd,
   if (elf_hash_table (info)->dynamic_sections_created)
     {
       /* Set the contents of the .interp section to the interpreter.  */
-      if (info->executable)
+      if (info->executable && !info->static_link)
 	{
 	  s = bfd_get_section_by_name (dynobj, ".interp");
 	  BFD_ASSERT (s != NULL);
@@ -7642,11 +7642,10 @@ _bfd_mips_elf_hide_symbol (struct bfd_link_info *info,
   h->forced_local = force_local;
 
   dynobj = elf_hash_table (info)->dynobj;
-  if (dynobj != NULL && force_local)
+  if (dynobj != NULL && force_local && h->root.type != STT_TLS
+      && (got = mips_elf_got_section (dynobj, FALSE)) != NULL
+      && (g = mips_elf_section_data (got)->u.got_info) != NULL)
     {
-      got = mips_elf_got_section (dynobj, FALSE);
-      g = mips_elf_section_data (got)->u.got_info;
-
       if (g->next)
 	{
 	  struct mips_got_entry e;

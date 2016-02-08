@@ -1,4 +1,4 @@
-/*	$OpenBSD: malo.c,v 1.101 2014/07/22 13:12:12 mpi Exp $ */
+/*	$OpenBSD: malo.c,v 1.105 2015/02/10 23:25:46 mpi Exp $ */
 
 /*
  * Copyright (c) 2006 Claudio Jeker <claudio@openbsd.org>
@@ -26,13 +26,12 @@
 #include <sys/kernel.h>
 #include <sys/malloc.h>
 #include <sys/mbuf.h>
-#include <sys/proc.h>
 #include <sys/socket.h>
 #include <sys/sockio.h>
 #include <sys/systm.h>
+#include <sys/endian.h>
 
 #include <machine/bus.h>
-#include <machine/endian.h>
 #include <machine/intr.h>
 
 #include <net/if.h>
@@ -947,10 +946,8 @@ malo_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 	case SIOCSIFADDR:
 		ifa = (struct ifaddr *)data;
 		ifp->if_flags |= IFF_UP;
-#ifdef INET
 		if (ifa->ifa_addr->sa_family == AF_INET)
 			arp_ifinit(&ic->ic_ac, ifa);
-#endif
 		/* FALLTHROUGH */
 	case SIOCSIFFLAGS:
 		if (ifp->if_flags & IFF_UP) {
@@ -1693,7 +1690,6 @@ malo_rx_intr(struct malo_softc *sc)
 		desc->physdata = htole32(data->map->dm_segs->ds_addr);
 
 		/* finalize mbuf */
-		m->m_pkthdr.rcvif = ifp;
 		m->m_pkthdr.len = m->m_len = letoh16(desc->len);
 
 		/*

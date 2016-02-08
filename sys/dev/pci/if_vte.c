@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_vte.c,v 1.9 2014/07/22 13:12:11 mpi Exp $	*/
+/*	$OpenBSD: if_vte.c,v 1.11 2014/12/22 02:28:52 tedu Exp $	*/
 /*-
  * Copyright (c) 2010, Pyun YongHyeon <yongari@FreeBSD.org>
  * All rights reserved.
@@ -49,10 +49,8 @@
 #include <net/if_dl.h>
 #include <net/if_media.h>
 
-#ifdef INET
 #include <netinet/in.h>
 #include <netinet/if_ether.h>
-#endif
 
 #include <net/if_types.h>
 #include <net/if_vlan_var.h>
@@ -60,8 +58,6 @@
 #if NBPFILTER > 0
 #include <net/bpf.h>
 #endif
-
-#include <dev/rndvar.h>
 
 #include <dev/mii/mii.h>
 #include <dev/mii/miivar.h>
@@ -740,10 +736,8 @@ vte_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 		ifp->if_flags |= IFF_UP;
 		if (!(ifp->if_flags & IFF_RUNNING))
 			vte_init(ifp);
-#ifdef INET
 		if (ifa->ifa_addr->sa_family == AF_INET)
 			arp_ifinit(&sc->sc_arpcom, ifa);
-#endif
 		break;
 	case SIOCSIFFLAGS:
 		if (ifp->if_flags & IFF_UP) {

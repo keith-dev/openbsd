@@ -1,4 +1,4 @@
-/*	$OpenBSD: spamd-setup.c,v 1.38 2012/12/04 02:24:47 deraadt Exp $ */
+/*	$OpenBSD: spamd-setup.c,v 1.45 2015/01/20 16:54:06 millert Exp $ */
 
 /*
  * Copyright (c) 2003 Bob Beck.  All rights reserved.
@@ -34,7 +34,6 @@
 #include <string.h>
 #include <unistd.h>
 #include <err.h>
-#include <netinet/ip_ipsp.h>
 #include <netdb.h>
 #include <zlib.h>
 
@@ -60,13 +59,12 @@ struct blacklist {
 	struct bl *bl;
 	size_t blc, bls;
 	u_int8_t black;
-	int count;
 };
 
 u_int32_t	 imask(u_int8_t);
 u_int8_t	 maxblock(u_int32_t, u_int8_t);
 u_int8_t	 maxdiff(u_int32_t, u_int32_t);
-struct cidr	*range2cidrlist(struct cidr *, int *, int *, u_int32_t,
+struct cidr	*range2cidrlist(struct cidr *, u_int *, u_int *, u_int32_t,
 		     u_int32_t);
 void		 cidr2range(struct cidr, u_int32_t *, u_int32_t *);
 char		*atop(u_int32_t);
@@ -78,8 +76,8 @@ char		*fix_quoted_colons(char *);
 void		 do_message(FILE *, char *);
 struct bl	*add_blacklist(struct bl *, size_t *, size_t *, gzFile, int);
 int		 cmpbl(const void *, const void *);
-struct cidr	*collapse_blacklist(struct bl *, size_t);
-int		 configure_spamd(u_short, char *, char *, struct cidr *);
+struct cidr	*collapse_blacklist(struct bl *, size_t, u_int *);
+int		 configure_spamd(u_short, char *, char *, struct cidr *, u_int);
 int		 configure_pf(struct cidr *);
 int		 getlist(char **, char *, struct blacklist *, struct blacklist *);
 __dead void	 usage(void);
@@ -90,12 +88,14 @@ int		  greyonly = 1;
 
 extern char 	 *__progname;
 
+#define MAXIMUM(a,b) (((a)>(b))?(a):(b))
+
 u_int32_t
 imask(u_int8_t b)
 {
 	if (b == 0)
 		return (0);
-	return (0xffffffff << (32 - b));
+	return (0xffffffffU << (32 - b));
 }
 
 u_int8_t
@@ -131,7 +131,7 @@ maxdiff(u_int32_t a, u_int32_t b)
 }
 
 struct cidr *
-range2cidrlist(struct cidr *list, int *cli, int *cls, u_int32_t start,
+range2cidrlist(struct cidr *list, u_int *cli, u_int *cls, u_int32_t start,
     u_int32_t end)
 {
 	u_int8_t maxsize, diff;
@@ -141,11 +141,12 @@ range2cidrlist(struct cidr *list, int *cli, int *cls, u_int32_t start,
 		maxsize = maxblock(start, 32);
 		diff = maxdiff(start, end);
 
-		maxsize = MAX(maxsize, diff);
+		maxsize = MAXIMUM(maxsize, diff);
 		if (*cls <= *cli + 1) {		/* one extra for terminator */
-			tmp = realloc(list, (*cls + 32) * sizeof(struct cidr));
+			tmp = reallocarray(list, *cls + 32,
+			    sizeof(struct cidr));
 			if (tmp == NULL)
-				errx(1, "malloc failed");
+				err(1, NULL);
 			list = tmp;
 			*cls += 32;
 		}
@@ -307,7 +308,7 @@ open_file(char *method, char *file)
 		len = strlen(file);
 		argv = calloc(len, sizeof(char *));
 		if (argv == NULL)
-			errx(1, "malloc failed");
+			err(1, NULL);
 		for (ap = argv; ap < &argv[len - 1] &&
 		    (*ap = strsep(&file, " \t")) != NULL;) {
 			if (**ap != '\0')
@@ -399,7 +400,7 @@ do_message(FILE *sdc, char *msg)
 			if (bu == bs) {
 				tmp = realloc(buf, bs + 8192);
 				if (tmp == NULL)
-					errx(1, "malloc failed");
+					err(1, NULL);
 				bs += 8192;
 				buf = tmp;
 			}
@@ -478,12 +479,12 @@ add_blacklist(struct bl *bl, size_t *blc, size_t *bls, gzFile gzf, int white)
 	}
  parse:
 	start = 0;
-	/* we assume that there is an IP for every 16 bytes */
-	if (*blc + bu / 8 >= *bls) {
-		*bls += bu / 8;
-		blt = realloc(bl, *bls * sizeof(struct bl));
+	/* we assume that there is an IP for every 14 bytes */
+	if (*blc + bu / 7 >= *bls) {
+		*bls += bu / 7;
+		blt = reallocarray(bl, *bls, sizeof(struct bl));
 		if (blt == NULL) {
-			*bls -= bu / 8;
+			*bls -= bu / 7;
 			serrno = errno;
 			goto bldone;
 		}
@@ -492,7 +493,7 @@ add_blacklist(struct bl *bl, size_t *blc, size_t *bls, gzFile gzf, int white)
 	for (i = 0; i <= bu; i++) {
 		if (*blc + 1 >= *bls) {
 			*bls += 1024;
-			blt = realloc(bl, *bls * sizeof(struct bl));
+			blt = reallocarray(bl, *bls, sizeof(struct bl));
 			if (blt == NULL) {
 				*bls -= 1024;
 				serrno = errno;
@@ -535,9 +536,10 @@ cmpbl(const void *a, const void *b)
  * printable form to pfctl or spamd.
  */
 struct cidr *
-collapse_blacklist(struct bl *bl, size_t blc)
+collapse_blacklist(struct bl *bl, size_t blc, u_int *clc)
 {
-	int bs = 0, ws = 0, state=0, cli, cls, i;
+	int bs = 0, ws = 0, state=0;
+	u_int cli, cls, i;
 	u_int32_t bstart = 0;
 	struct cidr *cl;
 	int laststate;
@@ -545,12 +547,16 @@ collapse_blacklist(struct bl *bl, size_t blc)
 
 	if (blc == 0)
 		return (NULL);
+
+	/*
+	 * Overallocate by 10% to avoid excessive realloc due to white
+	 * entries splitting up CIDR blocks.
+	 */
 	cli = 0;
-	cls = (blc / 2) + 1;
-	cl = calloc(cls, sizeof(struct cidr));
-	if (cl == NULL) {
+	cls = (blc / 2) + (blc / 20) + 1;
+	cl = reallocarray(NULL, cls, sizeof(struct cidr));
+	if (cl == NULL)
 		return (NULL);
-	}
 	qsort(bl, blc, sizeof(struct bl), cmpbl);
 	for (i = 0; i < blc;) {
 		laststate = state;
@@ -578,12 +584,13 @@ collapse_blacklist(struct bl *bl, size_t blc)
 		laststate = state;
 	}
 	cl[cli].addr = 0;
+	*clc = cli;
 	return (cl);
 }
 
 int
 configure_spamd(u_short dport, char *name, char *message,
-    struct cidr *blacklists)
+    struct cidr *blacklists, u_int count)
 {
 	int lport = IPPORT_RESERVED - 1, s;
 	struct sockaddr_in sin;
@@ -604,8 +611,9 @@ configure_spamd(u_short dport, char *name, char *message,
 		close(s);
 		return (-1);
 	}
-	fprintf(sdc, "%s", name);
+	fputs(name, sdc);
 	do_message(sdc, message);
+	fprintf(sdc, ";inet;%u", count);
 	while (blacklists->addr != 0) {
 		fprintf(sdc, ";%s/%u", atop(blacklists->addr),
 		    blacklists->bits);
@@ -695,7 +703,7 @@ getlist(char ** db_array, char *name, struct blacklist *blist,
 			errx(1, "No msg for blacklist \"%s\"", name);
 		break;
 	case -2:
-		errx(1, "malloc failed");
+		err(1, NULL);
 	}
 
 	switch (cgetstr(buf, "method", &method)) {
@@ -703,7 +711,7 @@ getlist(char ** db_array, char *name, struct blacklist *blist,
 		method = NULL;
 		break;
 	case -2:
-		errx(1, "malloc failed");
+		err(1, NULL);
 	}
 
 	switch (cgetstr(buf, "file", &file)) {
@@ -711,7 +719,7 @@ getlist(char ** db_array, char *name, struct blacklist *blist,
 		errx(1, "No file given for %slist %s",
 		    black ? "black" : "white", name);
 	case -2:
-		errx(1, "malloc failed");
+		err(1, NULL);
 	default:
 		fd = open_file(method, file);
 		if (fd == -1)
@@ -734,6 +742,9 @@ getlist(char ** db_array, char *name, struct blacklist *blist,
 		return (0);
 	}
 	if (black) {
+		if (debug)
+			fprintf(stderr, "blacklist %s %zu entries\n",
+			    name, blc / 2);
 		blistnew->message = message;
 		blistnew->name = name;
 		blistnew->black = black;
@@ -742,13 +753,13 @@ getlist(char ** db_array, char *name, struct blacklist *blist,
 		blistnew->bls = bls;
 	} else {
 		/* whitelist applied to last active blacklist */
+		if (debug)
+			fprintf(stderr, "whitelist %s %zu entries\n",
+			    name, (blc - blist->blc) / 2);
 		blist->bl = bl;
 		blist->blc = blc;
 		blist->bls = bls;
 	}
-	if (debug)
-		fprintf(stderr, "%slist %s %zu entries\n",
-		    black ? "black" : "white", name, blc / 2);
 	return (black);
 }
 
@@ -756,14 +767,15 @@ void
 send_blacklist(struct blacklist *blist, in_port_t port)
 {
 	struct cidr *cidrs;
+	u_int clc;
 
 	if (blist->blc > 0) {
-		cidrs = collapse_blacklist(blist->bl, blist->blc);
+		cidrs = collapse_blacklist(blist->bl, blist->blc, &clc);
 		if (cidrs == NULL)
-			errx(1, "malloc failed");
+			err(1, NULL);
 		if (!dryrun) {
 			if (configure_spamd(port, blist->name,
-			    blist->message, cidrs) == -1)
+			    blist->message, cidrs, clc) == -1)
 				err(1, "Can't connect to spamd on port %d",
 				    port);
 			if (!greyonly && configure_pf(cidrs) == -1)
@@ -837,10 +849,10 @@ main(int argc, char *argv[])
 				struct blacklist *tmp;
 
 				bls += 32;
-				tmp = realloc(blists,
-				    bls * sizeof(struct blacklist));
+				tmp = reallocarray(blists, bls,
+				    sizeof(struct blacklist));
 				if (tmp == NULL)
-					errx(1, "malloc failed");
+					err(1, NULL);
 				blists = tmp;
 			}
 			if (blc == 0)

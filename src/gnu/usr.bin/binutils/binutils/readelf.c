@@ -5722,7 +5722,7 @@ process_symbol_table (FILE *file)
 
 	      printf ("  %6s", get_symbol_type (ELF_ST_TYPE (psym->st_info)));
 	      printf (" %6s",  get_symbol_binding (ELF_ST_BIND (psym->st_info)));
-	      printf (" %3s",  get_symbol_visibility (ELF_ST_VISIBILITY (psym->st_other)));
+	      printf (" %7s",  get_symbol_visibility (ELF_ST_VISIBILITY (psym->st_other)));
 	      printf (" %3.3s ", get_symbol_index_type (psym->st_shndx));
 	      print_symbol (25, dynamic_strings + psym->st_name);
 	      putchar ('\n');
@@ -5781,7 +5781,7 @@ process_symbol_table (FILE *file)
 	      print_vma (psym->st_size, DEC_5);
 	      printf (" %-7s", get_symbol_type (ELF_ST_TYPE (psym->st_info)));
 	      printf (" %-6s", get_symbol_binding (ELF_ST_BIND (psym->st_info)));
-	      printf (" %-3s", get_symbol_visibility (ELF_ST_VISIBILITY (psym->st_other)));
+	      printf (" %-7s", get_symbol_visibility (ELF_ST_VISIBILITY (psym->st_other)));
 	      printf (" %4s ", get_symbol_index_type (psym->st_shndx));
 	      print_symbol (25, strtab + psym->st_name);
 
@@ -8549,6 +8549,9 @@ Frame_Chunk;
 /* A marker for a col_type that means this column was never referenced
    in the frame info.  */
 #define DW_CFA_unreferenced (-1)
+/* Like DW_CFA_unreferenced, except indicating that it was referenced before
+   (and therefore needs space in the columnar output). */
+#define DW_CFA_placeholder  (-2)
 
 static void
 frame_need_space (Frame_Chunk *fc, int reg)
@@ -8624,6 +8627,9 @@ frame_display_row (Frame_Chunk *fc, int *need_col_headers, int *max_regs)
 	      break;
 	    case DW_CFA_expression:
 	      strcpy (tmp, "exp");
+	      break;
+	    case DW_CFA_placeholder:
+	      tmp[0] = '\0';
 	      break;
 	    default:
 	      strcpy (tmp, "n/a");
@@ -9056,7 +9062,9 @@ display_debug_frames (Elf_Internal_Shdr *section,
 	    case DW_CFA_restore:
 	      if (! do_debug_frames_interp)
 		printf ("  DW_CFA_restore: r%d\n", opa);
-	      fc->col_type[opa] = cie->col_type[opa];
+	      if ((fc->col_type[opa] = cie->col_type[opa]) ==
+		  DW_CFA_unreferenced)
+	        fc->col_type[opa] = DW_CFA_placeholder;
 	      fc->col_offset[opa] = cie->col_offset[opa];
 	      break;
 
@@ -9119,7 +9127,9 @@ display_debug_frames (Elf_Internal_Shdr *section,
 	      reg = LEB ();
 	      if (! do_debug_frames_interp)
 		printf ("  DW_CFA_restore_extended: r%ld\n", reg);
-	      fc->col_type[reg] = cie->col_type[reg];
+	      if ((fc->col_type[opa] = cie->col_type[opa]) ==
+		  DW_CFA_unreferenced)
+	        fc->col_type[opa] = DW_CFA_placeholder;
 	      fc->col_offset[reg] = cie->col_offset[reg];
 	      break;
 
@@ -10623,6 +10633,8 @@ main (int argc, char **argv)
 #endif
   bindtextdomain (PACKAGE, LOCALEDIR);
   textdomain (PACKAGE);
+
+  expandargv (&argc, &argv);
 
   parse_args (argc, argv);
 

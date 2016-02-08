@@ -1,4 +1,4 @@
-/*	$OpenBSD: uipc_usrreq.c,v 1.76 2014/07/13 15:52:38 tedu Exp $	*/
+/*	$OpenBSD: uipc_usrreq.c,v 1.79 2014/12/11 19:21:57 tedu Exp $	*/
 /*	$NetBSD: uipc_usrreq.c,v 1.18 1996/02/09 19:00:50 christos Exp $	*/
 
 /*
@@ -66,11 +66,11 @@ uipc_setaddr(const struct unpcb *unp, struct mbuf *nam)
 {
 	if (unp != NULL && unp->unp_addr != NULL) {
 		nam->m_len = unp->unp_addr->m_len;
-		bcopy(mtod(unp->unp_addr, caddr_t), mtod(nam, caddr_t),
+		memcpy(mtod(nam, caddr_t), mtod(unp->unp_addr, caddr_t),
 		    nam->m_len);
 	} else {
 		nam->m_len = sizeof(sun_noname);
-		bcopy(&sun_noname, mtod(nam, struct sockaddr *),
+		memcpy(mtod(nam, struct sockaddr *), &sun_noname,
 		    nam->m_len);
 	}
 }
@@ -636,7 +636,7 @@ unp_drop(struct unpcb *unp, int errno)
 		so->so_pcb = NULL;
 		sofree(so);
 		m_freem(unp->unp_addr);
-		free(unp, M_PCB, 0);
+		free(unp, M_PCB, sizeof(*unp));
 	}
 }
 
@@ -648,7 +648,7 @@ unp_drain(void)
 #endif
 
 int
-unp_externalize(struct mbuf *rights, socklen_t controllen)
+unp_externalize(struct mbuf *rights, socklen_t controllen, int flags)
 {
 	struct proc *p = curproc;		/* XXX */
 	struct cmsghdr *cm = mtod(rights, struct cmsghdr *);
@@ -744,6 +744,9 @@ restart:
 		 * in the loop below.
 		 */
 		p->p_fd->fd_ofiles[fdp[i]] = *rp++;
+
+		if (flags & MSG_CMSG_CLOEXEC)
+			p->p_fd->fd_ofileflags[fdp[i]] |= UF_EXCLOSE;
 	}
 
 	/*
@@ -810,14 +813,14 @@ morespace:
 		/* allocate a cluster and try again */
 		MCLGET(control, M_WAIT);
 		if ((control->m_flags & M_EXT) == 0) {
-			free(tmp, M_TEMP, 0);
+			free(tmp, M_TEMP, control->m_len);
 			return (ENOBUFS);       /* allocation failed */
 		}
 
 		/* copy the data back into the cluster */
 		cm = mtod(control, struct cmsghdr *);
 		memcpy(cm, tmp, control->m_len);
-		free(tmp, M_TEMP, 0);
+		free(tmp, M_TEMP, control->m_len);
 		goto morespace;
 	}
 
@@ -828,7 +831,7 @@ morespace:
 	ip = ((int *)CMSG_DATA(cm)) + nfds - 1;
 	rp = ((struct file **)CMSG_DATA(cm)) + nfds - 1;
 	for (i = 0; i < nfds; i++) {
-		bcopy(ip, &fd, sizeof fd);
+		memcpy(&fd, ip, sizeof fd);
 		ip--;
 		if ((fp = fd_getfile(fdp, fd)) == NULL) {
 			error = EBADF;
@@ -845,7 +848,7 @@ morespace:
 			error = EINVAL;
 			goto fail;
 		}
-		bcopy(&fp, rp, sizeof fp);
+		memcpy(rp, &fp, sizeof fp);
 		rp--;
 		fp->f_count++;
 		fp->f_msgcount++;
@@ -856,7 +859,7 @@ fail:
 	/* Back out what we just did. */
 	for ( ; i > 0; i--) {
 		rp++;
-		bcopy(rp, &fp, sizeof(fp));
+		memcpy(&fp, rp, sizeof(fp));
 		fp->f_count--;
 		fp->f_msgcount--;
 		unp_rights--;

@@ -1,4 +1,4 @@
-/*	$OpenBSD: pax.c,v 1.37 2014/05/24 03:49:49 guenther Exp $	*/
+/*	$OpenBSD: pax.c,v 1.40 2015/02/21 22:48:23 guenther Exp $	*/
 /*	$NetBSD: pax.c,v 1.5 1996/03/26 23:54:20 mrg Exp $	*/
 
 /*-
@@ -225,7 +225,7 @@ main(int argc, char **argv)
 	/*
 	 * Keep a reference to cwd, so we can always come back home.
 	 */
-	cwdfd = open(".", O_RDONLY);
+	cwdfd = open(".", O_RDONLY | O_CLOEXEC);
 	if (cwdfd < 0) {
 		syswarn(1, errno, "Can't open current working directory.");
 		return(exit_val);

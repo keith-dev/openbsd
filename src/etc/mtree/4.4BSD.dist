@@ -1,4 +1,4 @@
-#	$OpenBSD: 4.4BSD.dist,v 1.261 2014/07/18 18:20:42 deraadt Exp $
+#	$OpenBSD: 4.4BSD.dist,v 1.269 2014/12/22 15:39:28 tedu Exp $
 
 /set type=dir uname=root gname=wheel mode=0755
 
@@ -84,8 +84,6 @@ etc
     ..
     mtree
     ..
-    nginx
-    ..
     npppd
     ..
     ppp
@@ -99,9 +97,7 @@ etc
         ..
     ..
 
-    # ./etc/sliphome
-    sliphome
-    ..
+    # ./etc/signify
     signify
     ..
     ssh
@@ -149,10 +145,6 @@ usr
             std			gname=bin uname=root mode=0755
             ..
         ..
-
-        # ./usr/include/libmilter
-        libmilter		gname=bin uname=root mode=0755
-        ..
         objc			gname=bin uname=root mode=0755
         ..
         openssl			gname=bin uname=root mode=0755
@@ -189,18 +181,10 @@ usr
     libexec
         auth			type=dir uname=root gname=auth mode=0750
         ..
-        sm.bin
-        ..
         lpr
-        ..
-        sendmail		type=dir uname=root gname=wheel mode=0755
         ..
         smtpd			type=dir uname=root gname=wheel mode=0755
         ..
-    ..
-
-    # ./usr/lkm
-    lkm
     ..
 
     # ./usr/local
@@ -462,14 +446,6 @@ usr
         info
         ..
 
-        # ./usr/share/lkm
-        lkm			gname=bin uname=root
-            misc		gname=bin uname=root
-            ..
-            syscall		gname=bin uname=root
-            ..
-        ..
-
         # ./usr/share/locale
         locale
         ..
@@ -638,28 +614,6 @@ usr
         nls
         ..
 
-        # ./usr/share/sendmail
-        sendmail
-            cf
-            ..
-            domain
-            ..
-            feature
-            ..
-            hack
-            ..
-            m4
-            ..
-            mailer
-            ..
-            ostype
-            ..
-            sh
-            ..
-            siteconfig
-            ..
-        ..
-
         # ./usr/share/snmp
         snmp
             mibs
@@ -769,20 +723,6 @@ var
     mail
     ..
 
-    # ./var/named
-    named
-        etc			uname=root gname=named mode=0750
-        ..
-        master
-        ..
-        slave			uname=root gname=named mode=0775
-        ..
-        standard
-        ..
-        tmp			uname=root gname=named mode=0775
-        ..
-    ..
-
     # ./var/nsd
     nsd
         db			uname=root gname=_nsd mode=0775
@@ -806,13 +746,9 @@ var
     ..
     run
     ..
-    rwho
-    ..
 
     # ./var/spool
     spool
-        clientmqueue		mode=0770 uname=smmsp gname=smmsp
-        ..
 
         # ./var/spool/ftp
         ftp			mode=0555
@@ -829,8 +765,6 @@ var
         # ./var/spool/lock
         lock			uname=uucp gname=dialer mode=1775
         ..
-        mqueue			mode=0700
-        ..
         output			gname=daemon mode=0775
         ..
         smtpd			type=dir uname=root gname=wheel mode=0711
@@ -840,12 +774,6 @@ var
         uucp			uname=uucp gname=daemon
         ..
         uucppublic		uname=uucp gname=daemon mode=0755
-        ..
-    ..
-
-    # ./var/tmp
-    tmp				mode=01777
-        vi.recover		mode=01777
         ..
     ..
 

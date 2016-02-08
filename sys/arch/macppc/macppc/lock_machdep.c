@@ -1,4 +1,4 @@
-/*	$OpenBSD: lock_machdep.c,v 1.3 2014/03/29 18:09:30 guenther Exp $	*/
+/*	$OpenBSD: lock_machdep.c,v 1.5 2015/02/11 07:05:39 dlg Exp $	*/
 
 /*
  * Copyright (c) 2007 Artur Grabowski <art@openbsd.org>
@@ -18,7 +18,6 @@
 
 
 #include <sys/param.h>
-#include <sys/lock.h>
 #include <sys/systm.h>
 
 #include <machine/atomic.h>
@@ -58,7 +57,7 @@ __mp_lock_spin(struct __mp_lock *mpl)
 		SPINLOCK_SPIN_HOOK;
 
 	if (ticks == 0) {
-		db_printf("__mp_lock(0x%x): lock spun out", mpl);
+		db_printf("__mp_lock(%p): lock spun out", mpl);
 		Debugger();
 	}
 #endif

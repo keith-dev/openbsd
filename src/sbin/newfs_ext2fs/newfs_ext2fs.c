@@ -1,4 +1,4 @@
-/* $OpenBSD: newfs_ext2fs.c,v 1.13 2014/06/29 00:32:50 deraadt Exp $ */
+/* $OpenBSD: newfs_ext2fs.c,v 1.15 2015/01/16 06:40:00 deraadt Exp $ */
 /*	$NetBSD: newfs_ext2fs.c,v 1.8 2009/03/02 10:38:13 tsutsui Exp $	*/
 
 /*
@@ -33,11 +33,11 @@
 /*
  * newfs: friendly front end to mke2fs
  */
-#include <sys/param.h>
+#include <sys/param.h>	/* powerof2 */
+#include <sys/types.h>
 #include <sys/ioctl.h>
 #include <sys/dkio.h>
 #include <sys/disklabel.h>
-#include <sys/file.h>
 #include <sys/mount.h>
 
 #include <ufs/ext2fs/ext2fs.h>
@@ -46,6 +46,7 @@
 #include <ctype.h>
 #include <err.h>
 #include <errno.h>
+#include <fcntl.h>
 #include <inttypes.h>
 #include <limits.h>
 #include <paths.h>
@@ -55,6 +56,8 @@
 #include <string.h>
 #include <unistd.h>
 #include <util.h>
+
+#define MINIMUM(a, b)	(((a) < (b)) ? (a) : (b))
 
 #include "extern.h"
 
@@ -101,7 +104,7 @@ uint	num_inodes;		/* number of inodes (overrides density) */
 char	*volname = NULL;	/* volume name */
 
 static char *disktype = NULL;
-static char device[MAXPATHLEN];
+static char device[PATH_MAX];
 
 struct disklabel *getdisklabel(const char *, int);
 struct partition *getpartition(int, const char *, char *[], struct disklabel **);
@@ -344,7 +347,7 @@ main(int argc, char *argv[])
 			    "size %" PRId64 " bytes, in %d byte chunks.\n",
 			    special, bufrem, bufsize);
 		while (bufrem > 0) {
-			i = write(fso, buf, MIN(bufsize, bufrem));
+			i = write(fso, buf, MINIMUM(bufsize, bufrem));
 			if (i == -1)
 				err(1, "writing image");
 			bufrem -= i;

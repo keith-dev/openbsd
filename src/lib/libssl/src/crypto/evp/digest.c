@@ -1,4 +1,4 @@
-/* $OpenBSD: digest.c,v 1.23 2014/07/13 11:14:02 miod Exp $ */
+/* $OpenBSD: digest.c,v 1.26 2015/02/11 03:19:37 doug Exp $ */
 /* Copyright (C) 1995-1998 Eric Young (eay@cryptsoft.com)
  * All rights reserved.
  *
@@ -114,6 +114,7 @@
 
 #include <openssl/opensslconf.h>
 
+#include <openssl/err.h>
 #include <openssl/evp.h>
 #include <openssl/objects.h>
 
@@ -249,7 +250,10 @@ EVP_DigestFinal_ex(EVP_MD_CTX *ctx, unsigned char *md, unsigned int *size)
 {
 	int ret;
 
-	OPENSSL_assert(ctx->digest->md_size <= EVP_MAX_MD_SIZE);
+	if ((size_t)ctx->digest->md_size > EVP_MAX_MD_SIZE) {
+		EVPerr(EVP_F_EVP_DIGESTFINAL_EX, EVP_R_TOO_LARGE);
+		return 0;
+	}
 	ret = ctx->digest->final(ctx, md);
 	if (size != NULL)
 		*size = ctx->digest->md_size;
@@ -374,4 +378,28 @@ EVP_MD_CTX_cleanup(EVP_MD_CTX *ctx)
 	memset(ctx, 0, sizeof *ctx);
 
 	return 1;
+}
+
+int
+EVP_MD_CTX_ctrl(EVP_MD_CTX *ctx, int type, int arg, void *ptr)
+{
+	int ret;
+
+	if (!ctx->digest) {
+		EVPerr(EVP_F_EVP_MD_CTX_CTRL, EVP_R_NO_CIPHER_SET);
+		return 0;
+	}
+
+	if (!ctx->digest->md_ctrl) {
+		EVPerr(EVP_F_EVP_MD_CTX_CTRL, EVP_R_CTRL_NOT_IMPLEMENTED);
+		return 0;
+	}
+
+	ret = ctx->digest->md_ctrl(ctx, type, arg, ptr);
+	if (ret == -1) {
+		EVPerr(EVP_F_EVP_MD_CTX_CTRL,
+		    EVP_R_CTRL_OPERATION_NOT_IMPLEMENTED);
+		return 0;
+	}
+	return ret;
 }

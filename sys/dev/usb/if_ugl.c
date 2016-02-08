@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_ugl.c,v 1.7 2014/07/13 15:52:49 mpi Exp $	*/
+/*	$OpenBSD: if_ugl.c,v 1.9 2015/02/04 05:12:13 mpi Exp $	*/
 /*	$NetBSD: if_upl.c,v 1.19 2002/07/11 21:14:26 augustss Exp $	*/
 /*
  * Copyright (c) 2013 SASANO Takayoshi <uaa@uaa.org.uk>
@@ -510,12 +510,6 @@ ugl_rxeof(struct usbd_xfer *xfer, void *priv, usbd_status status)
 	}
 
 #if NBPFILTER > 0
-	/*
-	 * Handle BPF listeners. Let the BPF user see the packet, but
-	 * don't pass it up to the ether_input() layer unless it's
-	 * a broadcast packet, multicast packet, matches our ethernet
-	 * address or the interface is in promiscuous mode.
-	 */
 	if (ifp->if_bpf) {
 		bpf_mtap(ifp->if_bpf, m, BPF_DIRECTION_IN);
 	}
@@ -815,10 +809,8 @@ ugl_ioctl(struct ifnet *ifp, u_long command, caddr_t data)
 		ifp->if_flags |= IFF_UP;
 		if (!(ifp->if_flags & IFF_RUNNING))
 			ugl_init(sc);
-#ifdef INET
 		if (ifa->ifa_addr->sa_family == AF_INET)
 			arp_ifinit(&sc->sc_arpcom, ifa);
-#endif
 		break;
 
 	case SIOCSIFFLAGS:

@@ -1,4 +1,4 @@
-/*	$OpenBSD: dhcp.c,v 1.38 2014/07/11 16:48:29 yasuoka Exp $ */
+/*	$OpenBSD: dhcp.c,v 1.41 2014/11/11 19:59:47 krw Exp $ */
 
 /*
  * Copyright (c) 1995, 1996, 1997, 1998, 1999
@@ -187,7 +187,7 @@ dhcprequest(struct packet *packet)
 	int ours = 0;
 
 	cip.len = 4;
-	if (packet->options[DHO_DHCP_REQUESTED_ADDRESS].len)
+	if (packet->options[DHO_DHCP_REQUESTED_ADDRESS].len == 4)
 		memcpy(cip.iabuf,
 		    packet->options[DHO_DHCP_REQUESTED_ADDRESS].data, 4);
 	else
@@ -251,7 +251,7 @@ dhcprequest(struct packet *packet)
 	 */
 	if (!packet->shared_network ||
 	    (packet->raw->ciaddr.s_addr && packet->raw->giaddr.s_addr) ||
-	    (packet->options[DHO_DHCP_REQUESTED_ADDRESS].len &&
+	    (packet->options[DHO_DHCP_REQUESTED_ADDRESS].len == 4 &&
 	    !packet->raw->ciaddr.s_addr)) {
 
 		/*
@@ -471,7 +471,7 @@ dhcpdecline(struct packet *packet)
 	struct iaddr cip;
 
 	/* DHCPDECLINE must specify address. */
-	if (!packet->options[DHO_DHCP_REQUESTED_ADDRESS].len)
+	if (packet->options[DHO_DHCP_REQUESTED_ADDRESS].len != 4)
 		return;
 
 	cip.len = 4;
@@ -513,7 +513,7 @@ dhcpinform(struct packet *packet)
 		if (memcmp(&packet->raw->ciaddr.s_addr,
 		    packet->client_addr.iabuf, 4) != 0) {
 			note("DHCPINFORM from %s but ciaddr %s is not "
-			    "consitent with actual address",
+			    "consistent with actual address",
 			    piaddr(packet->client_addr),
 			    inet_ntoa(packet->raw->ciaddr));
 			return;
@@ -913,7 +913,7 @@ ack_lease(struct packet *packet, struct lease *lease, unsigned int offer,
 
 	/* Set a flag if this client is a lame Microsoft client that NUL
 	   terminates string options and expects us to do likewise. */
-	if (packet->options[DHO_HOST_NAME].data &&
+	if (packet->options[DHO_HOST_NAME].len &&
 	    packet->options[DHO_HOST_NAME].data[
 	    packet->options[DHO_HOST_NAME].len - 1] == '\0')
 		lease->flags |= MS_NULL_TERMINATION;
@@ -1306,13 +1306,22 @@ dhcp_reply(struct lease *lease)
 	raw.op = BOOTREPLY;
 
 	/* Say what we're doing... */
-	note("%s on %s to %s via %s",
-	    (state->offer ? (state->offer == DHCPACK ? "DHCPACK" : "DHCPOFFER") :
-	    "BOOTREPLY"),
-	    piaddr(lease->ip_addr),
-	    print_hw_addr(lease->hardware_addr.htype, lease->hardware_addr.hlen,
-	    lease->hardware_addr.haddr),
-	    state->giaddr.s_addr ? inet_ntoa(state->giaddr) : state->ip->name);
+	if ((state->offer == DHCPACK) && (lease->flags & INFORM_NOLEASE))
+		note("DHCPACK to %s (%s) via %s",
+		    inet_ntoa(state->ciaddr),
+		    print_hw_addr(lease->hardware_addr.htype,
+		        lease->hardware_addr.hlen, lease->hardware_addr.haddr),
+		    state->giaddr.s_addr ? inet_ntoa(state->giaddr) :
+		        state->ip->name);
+	else
+		note("%s on %s to %s via %s",
+		    (state->offer ? (state->offer == DHCPACK ? "DHCPACK" :
+			"DHCPOFFER") : "BOOTREPLY"),
+		    piaddr(lease->ip_addr),
+		    print_hw_addr(lease->hardware_addr.htype,
+		        lease->hardware_addr.hlen, lease->hardware_addr.haddr),
+		    state->giaddr.s_addr ? inet_ntoa(state->giaddr) :
+		        state->ip->name);
 
 	memset(&to, 0, sizeof to);
 	to.sin_family = AF_INET;
@@ -1394,8 +1403,7 @@ find_lease(struct packet *packet, struct shared_network *share,
 	struct lease *fixed_lease;
 
 	/* Figure out what IP address the client is requesting, if any. */
-	if (packet->options[DHO_DHCP_REQUESTED_ADDRESS].len &&
-	    packet->options[DHO_DHCP_REQUESTED_ADDRESS].len == 4) {
+	if (packet->options[DHO_DHCP_REQUESTED_ADDRESS].len == 4) {
 		packet->got_requested_address = 1;
 		cip.len = 4;
 		memcpy(cip.iabuf,

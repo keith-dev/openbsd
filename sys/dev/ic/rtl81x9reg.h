@@ -1,4 +1,4 @@
-/*	$OpenBSD: rtl81x9reg.h,v 1.85 2014/07/08 05:35:18 dlg Exp $	*/
+/*	$OpenBSD: rtl81x9reg.h,v 1.92 2015/03/08 01:54:04 tobiasu Exp $	*/
 
 /*
  * Copyright (c) 1997, 1998
@@ -35,7 +35,7 @@
  */
 
 /*
- * RealTek 8129/8139 register offsets
+ * Realtek 8129/8139 register offsets
  */
 #define	RL_IDR0		0x0000		/* ID register 0 (station addr) */
 #define RL_IDR1		0x0001		/* Must use 32-bit accesses (?) */
@@ -76,6 +76,14 @@
 #define RL_TIMERCNT	0x0048		/* timer count register */
 #define RL_MISSEDPKT	0x004C		/* missed packet counter */
 #define RL_EECMD	0x0050		/* EEPROM command register */
+
+/* RTL8139/RTL8139C+ only */
+#define RL_8139_CFG0	0x0051		/* config register #0 */
+#define RL_8139_CFG1	0x0052		/* config register #1 */
+#define RL_8139_CFG3	0x0059		/* config register #3 */
+#define RL_8139_CFG4	0x005A		/* config register #4 */
+#define RL_8139_CFG5	0x00D8		/* config register #5 */
+
 #define RL_CFG0		0x0051		/* config register #0 */
 #define RL_CFG1		0x0052		/* config register #1 */
 #define RL_CFG2		0x0053		/* config register #2 */
@@ -149,6 +157,7 @@
  */
 #define RL_TXCFG_CLRABRT	0x00000001	/* retransmit aborted pkt */
 #define RL_TXCFG_MAXDMA		0x00000700	/* max DMA burst size */
+#define RL_TXCFG_QUEUE_EMPTY	0x00000800	/* 8168E-VL or higher */
 #define RL_TXCFG_CRCAPPEND	0x00010000	/* CRC append (0 = yes) */
 #define RL_TXCFG_LOOPBKTST	0x00060000	/* loopback test */
 #define RL_TXCFG_IFG2		0x00080000	/* 8169 only */
@@ -255,12 +264,11 @@
 
 #define RL_INTRS_CPLUS	\
 	(RL_ISR_RX_OK|RL_ISR_RX_ERR|RL_ISR_TX_ERR|			\
-	RL_ISR_RX_OVERRUN|RL_ISR_FIFO_OFLOW|RL_ISR_LINKCHG|		\
+	RL_ISR_RX_OVERRUN|RL_ISR_FIFO_OFLOW|				\
 	RL_ISR_SYSTEM_ERR|RL_ISR_TX_OK)
 
-#define RL_INTRS_TIMER							\
-	(RL_ISR_RX_ERR|RL_ISR_TX_ERR|					\
-	RL_ISR_LINKCHG|RL_ISR_SYSTEM_ERR|				\
+#define RL_INTRS_TIMER	\
+	(RL_ISR_RX_ERR|RL_ISR_TX_ERR|RL_ISR_SYSTEM_ERR|			\
 	RL_ISR_TIMEOUT_EXPIRED)
 
 /*
@@ -521,7 +529,7 @@
 #define RL_GMEDIASTAT_TBI	0x80	/* TBI enabled */
 
 /*
- * The RealTek doesn't use a fragment-based descriptor mechanism.
+ * The Realtek doesn't use a fragment-based descriptor mechanism.
  * Instead, there are only four register sets, each of which represents
  * one 'descriptor.' Basically, each TX descriptor is just a contiguous
  * packet buffer (32-bit aligned!) and we place the buffer addresses in
@@ -736,7 +744,15 @@ struct rl_stats {
 
 /* see comment in dev/ic/re.c */
 #define RL_JUMBO_FRAMELEN	7440
-#define RL_JUMBO_MTU		(RL_JUMBO_FRAMELEN-ETHER_HDR_LEN-ETHER_CRC_LEN)
+#define RL_JUMBO_MTU_4K		\
+	((4 * 1024) - ETHER_HDR_LEN - ETHER_CRC_LEN - ETHER_VLAN_ENCAP_LEN)
+#define RL_JUMBO_MTU_6K		\
+	((6 * 1024) - ETHER_HDR_LEN - ETHER_CRC_LEN - ETHER_VLAN_ENCAP_LEN)
+#define RL_JUMBO_MTU_7K		\
+	(RL_JUMBO_FRAMELEN - ETHER_HDR_LEN - ETHER_CRC_LEN - ETHER_VLAN_ENCAP_LEN)
+#define RL_JUMBO_MTU_9K		\
+	((9 * 1024) - ETHER_HDR_LEN - ETHER_CRC_LEN - ETHER_VLAN_ENCAP_LEN)
+#define RL_MTU			ETHERMTU
 
 #define MAX_NUM_MULTICAST_ADDRESSES	128
 
@@ -823,10 +839,18 @@ struct rl_softc {
 	struct mii_data		sc_mii;		/* MII information */
 	u_int8_t		rl_type;
 	u_int32_t		sc_hwrev;
+	u_int16_t		sc_product;
+	int			rl_max_mtu;
 	int			rl_eecmd_read;
 	int			rl_eewidth;
 	int			rl_bus_speed;
 	int			rl_txthresh;
+	bus_size_t		rl_cfg0;
+	bus_size_t		rl_cfg1;
+	bus_size_t		rl_cfg2;
+	bus_size_t		rl_cfg3;
+	bus_size_t		rl_cfg4;
+	bus_size_t		rl_cfg5;
 	struct rl_chain_data	rl_cdata;
 	struct timeout		sc_tick_tmo;
 
@@ -841,23 +865,27 @@ struct rl_softc {
 #define	RL_FLAG_MSI		0x00000001
 #define	RL_FLAG_PCI64		0x00000002
 #define	RL_FLAG_PCIE		0x00000004
-#define	RL_FLAG_INVMAR		0x00000008
-#define	RL_FLAG_PHYWAKE		0x00000010
-#define	RL_FLAG_NOJUMBO		0x00000020
-#define	RL_FLAG_PAR		0x00000040
-#define	RL_FLAG_DESCV2		0x00000080
-#define	RL_FLAG_MACSTAT		0x00000100
-#define	RL_FLAG_HWIM		0x00000200
-#define	RL_FLAG_TIMERINTR	0x00000400
-#define	RL_FLAG_MACLDPS		0x00000800
-#define	RL_FLAG_CMDSTOP		0x00001000
-#define	RL_FLAG_MACSLEEP	0x00002000
-#define	RL_FLAG_AUTOPAD		0x00004000
-#define	RL_FLAG_LINK		0x00008000
-#define	RL_FLAG_PHYWAKE_PM	0x00010000
-#define	RL_FLAG_EARLYOFF	0x00020000
-#define	RL_FLAG_EARLYOFFV2	0x00040000
-#define	RL_FLAG_RXDV_GATED	0x00080000
+#define	RL_FLAG_PHYWAKE		0x00000008
+#define	RL_FLAG_PAR		0x00000010
+#define	RL_FLAG_DESCV2		0x00000020
+#define	RL_FLAG_MACSTAT		0x00000040
+#define	RL_FLAG_HWIM		0x00000080
+#define	RL_FLAG_TIMERINTR	0x00000100
+#define	RL_FLAG_MACRESET	0x00000200
+#define	RL_FLAG_CMDSTOP		0x00000400
+#define	RL_FLAG_MACSLEEP	0x00000800
+#define	RL_FLAG_AUTOPAD		0x00001000
+#define	RL_FLAG_LINK		0x00002000
+#define	RL_FLAG_PHYWAKE_PM	0x00004000
+#define	RL_FLAG_EARLYOFF	0x00008000
+#define	RL_FLAG_EARLYOFFV2	0x00010000
+#define	RL_FLAG_RXDV_GATED	0x00020000
+#define	RL_FLAG_FASTETHER	0x00040000
+#define	RL_FLAG_CMDSTOP_WAIT_TXQ 0x00080000
+#define	RL_FLAG_JUMBOV2		0x00100000
+#define	RL_FLAG_WOL_MANLINK	0x00200000
+#define	RL_FLAG_WAIT_TXPOLL	0x00400000
+#define	RL_FLAG_WOLRXENB	0x00800000
 
 	u_int16_t		rl_intrs;
 	u_int16_t		rl_tx_ack;
@@ -930,12 +958,12 @@ struct rl_softc {
 /*
  * General constants that are fun to know.
  *
- * RealTek PCI vendor ID
+ * Realtek PCI vendor ID
  */
 #define	RT_VENDORID				0x10EC
 
 /*
- * RealTek chip device IDs.
+ * Realtek chip device IDs.
  */
 #define RT_DEVICEID_8129			0x8129
 #define RT_DEVICEID_8101E			0x8136

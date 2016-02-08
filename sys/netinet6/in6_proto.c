@@ -1,4 +1,4 @@
-/*	$OpenBSD: in6_proto.c,v 1.73 2014/07/22 11:06:10 mpi Exp $	*/
+/*	$OpenBSD: in6_proto.c,v 1.77 2014/12/19 17:14:40 tedu Exp $	*/
 /*	$KAME: in6_proto.c,v 1.66 2000/10/10 15:35:47 itojun Exp $	*/
 
 /*
@@ -69,6 +69,7 @@
 #include <sys/mbuf.h>
 
 #include <net/if.h>
+#include <net/if_var.h>
 #include <net/radix.h>
 #ifndef SMALL_KERNEL
 #include <net/radix_mpath.h>
@@ -93,7 +94,7 @@
 #include <netinet/ip_esp.h>
 #include <netinet/ip_ipip.h>
 
-#ifdef MROUTING
+#ifdef PIM
 #include <netinet6/pim6_var.h>
 #endif
 
@@ -138,11 +139,7 @@ struct ip6protosw inet6sw[] = {
 { SOCK_STREAM,	&inet6domain,	IPPROTO_TCP,	PR_CONNREQUIRED|PR_WANTRCVD|PR_ABRTACPTDIS|PR_SPLICE,
   tcp6_input,	0,		tcp6_ctlinput,	tcp_ctloutput,
   tcp_usrreq,
-#ifdef INET	/* don't call initialization and timeout routines twice */
   0,		0,		0,		0,
-#else
-  tcp_init,	tcp_fasttimo,	tcp_slowtimo,	0,
-#endif
   tcp_sysctl,
 },
 { SOCK_RAW,	&inet6domain,	IPPROTO_RAW,	PR_ATOMIC|PR_ADDR,
@@ -202,34 +199,30 @@ struct ip6protosw inet6sw[] = {
   rip6_usrreq,	/* XXX */
   0,		0,		0,		0,
 },
-#ifdef INET
 { SOCK_RAW,	&inet6domain,	IPPROTO_IPV4,	PR_ATOMIC|PR_ADDR,
   in6_gif_input, rip6_output, 	0,		rip6_ctloutput,
   rip6_usrreq,	/* XXX */
   0,		0,		0,		0,
 },
-#endif /* INET */
 #else /* NGIF */
 { SOCK_RAW,	&inet6domain,	IPPROTO_IPV6,	PR_ATOMIC|PR_ADDR,
   ip4_input6,	rip6_output,	0,		rip6_ctloutput,
   rip6_usrreq,	/* XXX */
   0,		0,		0,		0,		ipip_sysctl
 },
-#ifdef INET
 { SOCK_RAW,	&inet6domain,	IPPROTO_IPV4,	PR_ATOMIC|PR_ADDR,
   ip4_input6,	rip6_output,	0,		rip6_ctloutput,
   rip6_usrreq,	/* XXX */
   0,		0,		0,		0,
 },
-#endif /* INET */
 #endif /* GIF */
-#ifdef MROUTING
+#ifdef PIM
 { SOCK_RAW,	&inet6domain,	IPPROTO_PIM,	PR_ATOMIC|PR_ADDR,
   pim6_input,	rip6_output,	0,		rip6_ctloutput,
   rip6_usrreq,
   0,		0,		0,		0,		pim6_sysctl
 },
-#endif
+#endif /* PIM */
 #if NCARP > 0
 { SOCK_RAW,	&inet6domain,	IPPROTO_CARP,	PR_ATOMIC|PR_ADDR,
   carp6_proto_input,	rip6_output,	0,	rip6_ctloutput,
@@ -303,7 +296,6 @@ u_long	rip6_sendspace = RIPV6SNDQ;
 u_long	rip6_recvspace = RIPV6RCVQ;
 
 /* ICMPV6 parameters */
-int	icmp6_rediraccept = 0;		/* don't process redirects by default */
 int	icmp6_redirtimeout = 10 * 60;	/* 10 minutes */
 int	icmp6errppslim = 100;		/* 100pps */
 int	ip6_mtudisc_timeout = IPMTUDISCTIMEOUT;

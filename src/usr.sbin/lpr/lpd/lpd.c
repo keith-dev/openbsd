@@ -1,4 +1,4 @@
-/*	$OpenBSD: lpd.c,v 1.54 2014/07/12 02:56:01 deraadt Exp $ */
+/*	$OpenBSD: lpd.c,v 1.58 2015/02/09 23:00:14 deraadt Exp $ */
 /*	$NetBSD: lpd.c,v 1.33 2002/01/21 14:42:29 wiz Exp $	*/
 
 /*
@@ -63,7 +63,6 @@
  * Users can't touch the spool w/o the help of one of the lp* programs.
  */
 
-#include <sys/param.h>
 #include <sys/wait.h>
 #include <sys/types.h>
 #include <sys/socket.h>
@@ -86,6 +85,7 @@
 #include <string.h>
 #include <syslog.h>
 #include <unistd.h>
+#include <limits.h>
 
 #include "lp.h"
 #include "lp.local.h"
@@ -154,23 +154,17 @@ main(int argc, char **argv)
 		switch (i) {
 		case 'b':
 			if (blist_addrs >= blist_size) {
-				if (blist == NULL) {
-					blist_size += sizeof(char *) * 4;
-					blist = malloc(blist_size);
+				char **newblist;
+				int newblist_size = blist_size +
+				    sizeof(char *) * 4;
+				newblist = realloc(blist, newblist_size);
+				if (newblist == NULL) {
+					free(blist);
+					blist_size = 0;
+					blist = NULL;
 				}
-				else {
-					char **newblist;
-					int newblist_size = blist_size +
-					    sizeof(char *) * 4;
-					newblist = realloc(blist, newblist_size);
-					if (newblist == NULL) {
-						free(blist);
-						blist_size = 0;
-						blist = NULL;
-					}
-					blist = newblist;
-					blist_size = newblist_size;
-				}
+				blist = newblist;
+				blist_size = newblist_size;
 				if (blist == NULL)
 					err(1, "cant allocate bind addr list");
 			}
@@ -182,7 +176,7 @@ main(int argc, char **argv)
 			options |= SO_DEBUG;
 			break;
 		case 'l':
-			lflag++;
+			lflag = 1;
 			break;
 		case 'n':
 			child_max = strtol(optarg, &cp, 10);
@@ -191,10 +185,10 @@ main(int argc, char **argv)
 				    optarg);
 			break;
 		case 'r':
-			rflag++;
+			rflag = 1;
 			break;
 		case 's':
-			sflag++;
+			sflag = 1;
 			break;
 		case 'w':
 			l = strtol(optarg, &cp, 10);
@@ -777,7 +771,7 @@ socksetup(int af, int options, const char *port)
 			if (socks)
 				*socks = 0; /* num of sockets ctr at start */
 		} else {
-			newsocks = realloc(socks, (maxs + 1) * sizeof(int));
+			newsocks = reallocarray(socks, maxs + 1, sizeof(int));
 			if (newsocks)
 				socks = newsocks;
 			else {

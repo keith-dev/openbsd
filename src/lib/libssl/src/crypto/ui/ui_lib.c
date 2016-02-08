@@ -1,4 +1,4 @@
-/* $OpenBSD: ui_lib.c,v 1.28 2014/07/22 02:21:20 beck Exp $ */
+/* $OpenBSD: ui_lib.c,v 1.30 2015/02/10 11:22:21 jsing Exp $ */
 /* Written by Richard Levitte (richard@levitte.org) for the OpenSSL
  * project 2001.
  */
@@ -66,7 +66,7 @@
 
 #include "ui_locl.h"
 
-IMPLEMENT_STACK_OF(UI_STRING_ST) static const UI_METHOD *default_UI_meth = NULL;
+static const UI_METHOD *default_UI_meth = NULL;
 
 UI *
 UI_new(void)
@@ -386,7 +386,6 @@ UI_dup_error_string(UI *ui, const char *text)
 char *
 UI_construct_prompt(UI *ui, const char *object_desc, const char *object_name)
 {
-	const char *format = "Enter %s for %s:";
 	char *prompt;
 
 	if (ui->meth->ui_construct_prompt)
@@ -395,10 +394,15 @@ UI_construct_prompt(UI *ui, const char *object_desc, const char *object_name)
 
 	if (object_desc == NULL)
 		return NULL;
-	if (object_name == NULL)
-		format = "Enter %s:";
-	if (asprintf(&prompt, format, object_desc, object_name) == -1)
-		return NULL;
+
+	if (object_name == NULL) {
+		if (asprintf(&prompt, "Enter %s:", object_desc) == -1)
+			return (NULL);
+	} else {
+		if (asprintf(&prompt, "Enter %s for %s:", object_desc,
+		    object_name) == -1)
+			return (NULL);
+	}
 
 	return prompt;
 }

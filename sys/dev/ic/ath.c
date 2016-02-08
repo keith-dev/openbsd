@@ -1,4 +1,4 @@
-/*      $OpenBSD: ath.c,v 1.101 2014/07/12 18:48:17 tedu Exp $  */
+/*      $OpenBSD: ath.c,v 1.104 2015/02/10 23:25:46 mpi Exp $  */
 /*	$NetBSD: ath.c,v 1.37 2004/08/18 21:59:39 dyoung Exp $	*/
 
 /*-
@@ -55,8 +55,8 @@
 #include <sys/errno.h>
 #include <sys/timeout.h>
 #include <sys/gpio.h>
+#include <sys/endian.h>
 
-#include <machine/endian.h>
 #include <machine/bus.h>
 
 #include <net/if.h>
@@ -66,10 +66,8 @@
 #if NBPFILTER > 0
 #include <net/bpf.h>
 #endif
-#ifdef INET
 #include <netinet/in.h>
 #include <netinet/if_ether.h>
-#endif
 
 #include <net80211/ieee80211_var.h>
 #include <net80211/ieee80211_rssadapt.h>
@@ -987,11 +985,9 @@ ath_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 	switch (cmd) {
 	case SIOCSIFADDR:
 		ifp->if_flags |= IFF_UP;
-#ifdef INET
 		if (ifa->ifa_addr->sa_family == AF_INET) {
 			arp_ifinit(&ic->ic_ac, ifa);
 		}
-#endif  /* INET */
 		/* FALLTHROUGH */
 	case SIOCSIFFLAGS:
 		if (ifp->if_flags & IFF_UP) {
@@ -1958,7 +1954,6 @@ ath_rx_proc(void *arg, int npending)
 
 		bus_dmamap_unload(sc->sc_dmat, bf->bf_dmamap);
 		bf->bf_m = NULL;
-		m->m_pkthdr.rcvif = ifp;
 		m->m_pkthdr.len = m->m_len = len;
 
 #if NBPFILTER > 0
@@ -2134,7 +2129,7 @@ ath_tx_start(struct ath_softc *sc, struct ieee80211_node *ni,
 		 * NB: Preserve byte order of IV for packet
 		 *     sniffers; it doesn't matter otherwise.
 		 */
-#if _BYTE_ORDER == _BIG_ENDIAN
+#if BYTE_ORDER == BIG_ENDIAN
 		ivp[0] = iv >> 0;
 		ivp[1] = iv >> 8;
 		ivp[2] = iv >> 16;

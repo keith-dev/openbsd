@@ -1,4 +1,4 @@
-/* 	$OpenBSD: compat_dir.c,v 1.9 2014/07/12 18:50:00 tedu Exp $	*/
+/* 	$OpenBSD: compat_dir.c,v 1.11 2014/12/16 21:25:28 tedu Exp $	*/
 
 /*
  * Copyright (c) 2000 Constantine Sapuntzakis
@@ -28,7 +28,6 @@
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/namei.h>
-#include <sys/proc.h>
 #include <sys/file.h>
 #include <sys/stat.h>
 #include <sys/filedesc.h>
@@ -36,6 +35,7 @@
 #include <sys/kernel.h>
 #include <sys/malloc.h>
 #include <sys/vnode.h>
+#include <sys/lock.h>
 #include <sys/dirent.h>
 
 #include <compat/common/compat_dir.h>

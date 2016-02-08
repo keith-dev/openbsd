@@ -1,4 +1,4 @@
-/*	$OpenBSD: lex.c,v 1.14 2009/10/27 23:59:21 deraadt Exp $	*/
+/*	$OpenBSD: lex.c,v 1.16 2015/02/08 06:09:50 tedu Exp $	*/
 /*	$NetBSD: lex.c,v 1.9 1995/09/27 00:38:46 jtc Exp $	*/
 
 /*-
@@ -155,7 +155,7 @@ lex(struct wordent *hp)
     do {
 	struct wordent *new;
 
-	new = (struct wordent *) xmalloc((size_t) sizeof(*wdp));
+	new = xmalloc((size_t) sizeof(*wdp));
 	new->word = 0;
 	new->prev = wdp;
 	new->next = hp;
@@ -192,7 +192,7 @@ copylex(struct wordent *hp, struct wordent *fp)
     do {
 	struct wordent *new;
 
-	new = (struct wordent *) xmalloc((size_t) sizeof(*wdp));
+	new = xmalloc((size_t) sizeof(*wdp));
 	new->prev = wdp;
 	new->next = hp;
 	wdp->next = new;
@@ -211,8 +211,8 @@ freelex(struct wordent *vp)
     while (vp->next != vp) {
 	fp = vp->next;
 	vp->next = fp->next;
-	xfree((ptr_t) fp->word);
-	xfree((ptr_t) fp);
+	xfree(fp->word);
+	xfree(fp);
     }
     vp->prev = vp;
 }
@@ -843,8 +843,7 @@ dosub(int sc, struct wordent *en, bool global)
 
     wdp = hp;
     while (--i >= 0) {
-	struct wordent *new =
-		(struct wordent *) xcalloc(1, sizeof *wdp);
+	struct wordent *new = xcalloc(1, sizeof *wdp);
 
 	new->word = 0;
 	new->prev = wdp;
@@ -864,11 +863,11 @@ dosub(int sc, struct wordent *en, bool global)
 			otword = tword;
 			tword = subword(otword, sc, &didone);
 			if (Strcmp(tword, otword) == 0) {
-			    xfree((ptr_t) otword);
+			    xfree(otword);
 			    break;
 			}
 			else
-			    xfree((ptr_t) otword);
+			    xfree(otword);
 		    }
 		}
 	    }
@@ -1428,16 +1427,15 @@ bgetc(void)
 again:
     buf = (int) fseekp / BUFSIZ;
     if (buf >= fblocks) {
-	Char **nfbuf =
-	(Char **) xcalloc((size_t) (fblocks + 2),
+	Char **nfbuf = xcalloc((size_t) (fblocks + 2),
 			  sizeof(Char **));
 
 	if (fbuf) {
 	    (void) blkcpy(nfbuf, fbuf);
-	    xfree((ptr_t) fbuf);
+	    xfree(fbuf);
 	}
 	fbuf = nfbuf;
-	fbuf[fblocks] = (Char *) xcalloc(BUFSIZ, sizeof(Char));
+	fbuf[fblocks] = xcalloc(BUFSIZ, sizeof(Char));
 	fblocks++;
 	if (!intty)
 	    goto again;
@@ -1512,7 +1510,7 @@ bfree(void)
     sb = (int) (fseekp - 1) / BUFSIZ;
     if (sb > 0) {
 	for (i = 0; i < sb; i++)
-	    xfree((ptr_t) fbuf[i]);
+	    xfree(fbuf[i]);
 	(void) blkcpy(fbuf, &fbuf[sb]);
 	fseekp -= BUFSIZ * sb;
 	feobp -= BUFSIZ * sb;
@@ -1585,9 +1583,9 @@ settell(void)
 	return;
     if (lseek(SHIN, (off_t) 0, SEEK_CUR) < 0 || errno == ESPIPE)
 	return;
-    fbuf = (Char **) xcalloc(2, sizeof(Char **));
+    fbuf = xcalloc(2, sizeof(Char **));
     fblocks = 1;
-    fbuf[0] = (Char *) xcalloc(BUFSIZ, sizeof(Char));
+    fbuf[0] = xcalloc(BUFSIZ, sizeof(Char));
     fseekp = fbobp = feobp = lseek(SHIN, (off_t) 0, SEEK_CUR);
     cantell = 1;
 }

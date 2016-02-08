@@ -1,4 +1,4 @@
-/*	$OpenBSD: machdep.c,v 1.71 2014/07/22 01:04:04 uebayasi Exp $	*/
+/*	$OpenBSD: machdep.c,v 1.77 2015/01/20 19:43:20 kettenis Exp $	*/
 
 /*
  * Copyright (c) 2005 Michael Shalayeff
@@ -29,7 +29,7 @@
 #include <sys/file.h>
 #include <sys/timeout.h>
 #include <sys/malloc.h>
-#include <sys/mbuf.h>
+#include <sys/pool.h>
 #include <sys/msgbuf.h>
 #include <sys/ioctl.h>
 #include <sys/tty.h>
@@ -120,8 +120,6 @@ struct consdev *cn_tab;
 
 struct vm_map *exec_map = NULL;
 struct vm_map *phys_map = NULL;
-/* Virtual page frame for /dev/mem (see mem.c) */
-vaddr_t vmmap;
 
 void delay_init(void);
 static __inline void fall(int, int, int, int, int);
@@ -378,7 +376,7 @@ cpu_startup(void)
 	printf("%s%s\n", version, cpu_model);
 	printf("real mem = %lu (%luMB)\n", ptoa((psize_t)physmem),
 	    ptoa((psize_t)physmem) / 1024 / 1024);
-	printf("rsvd mem = %u (%uKB)\n", ptoa(resvmem), ptoa(resvmem) / 1024);
+	printf("rsvd mem = %lu (%luKB)\n", ptoa(resvmem), ptoa(resvmem) / 1024);
 
 	/*
 	 * Allocate a submap for exec arguments.  This map effectively
@@ -401,7 +399,6 @@ cpu_startup(void)
 	 * Set up buffers, so they can be used to read disk labels.
 	 */
 	bufinit();
-	vmmap = uvm_km_valloc_wait(kernel_map, NBPG);
 
 	/*
 	 * Configure the system.
@@ -535,8 +532,6 @@ int waittime = -1;
 __dead void
 boot(int howto)
 {
-	struct device *mainbus;
-
 	/*
 	 * On older systems without software power control, prevent mi code
 	 * from spinning disks off, in case the operator changes his mind
@@ -574,10 +569,7 @@ boot(int howto)
 		dumpsys();
 
 haltsys:
-	doshutdownhooks();
-	mainbus = device_mainbus();
-	if (mainbus != NULL)
-		config_suspend(mainbus, DVACT_POWERDOWN);
+	config_suspend_all(DVACT_POWERDOWN);
 
 	/* in case we came on powerfail interrupt */
 	if (cold_hook)
@@ -816,7 +808,7 @@ setregs(struct proc *p, struct exec_package *pack, u_long stack,
 	tf->tf_iioq[1] = 4 +
 	    (tf->tf_iioq[0] = pack->ep_entry | HPPA_PC_PRIV_USER);
 	tf->tf_rp = 0;
-	tf->tf_args[0] = (u_long)PS_STRINGS;
+	tf->tf_args[0] = p->p_p->ps_strings;
 	tf->tf_args[1] = tf->tf_args[2] = 0; /* XXX dynload stuff */
 
 	/* setup terminal stack frame */

@@ -1,4 +1,4 @@
-/*	$OpenBSD: bus_space.c,v 1.23 2014/03/29 18:09:28 guenther Exp $	*/
+/*	$OpenBSD: bus_space.c,v 1.25 2014/11/16 12:30:56 deraadt Exp $	*/
 /*	$NetBSD: bus_space.c,v 1.2 2003/03/14 18:47:53 christos Exp $	*/
 
 /*-
@@ -495,7 +495,7 @@ x86_mem_add_mapping(bus_addr_t bpa, bus_size_t size, int flags,
 
 	map_size = endpa - pa;
 
-	va = uvm_km_valloc(kernel_map, map_size);
+	va = (vaddr_t)km_alloc(map_size, &kv_any, &kp_none, &kd_nowait);
 	if (va == 0)
 		return (ENOMEM);
 
@@ -508,8 +508,7 @@ x86_mem_add_mapping(bus_addr_t bpa, bus_size_t size, int flags,
 
 	for (; map_size > 0;
 	    pa += PAGE_SIZE, va += PAGE_SIZE, map_size -= PAGE_SIZE)
-		pmap_kenter_pa(va, pa | pmap_flags,
-		    VM_PROT_READ | VM_PROT_WRITE);
+		pmap_kenter_pa(va, pa | pmap_flags, PROT_READ | PROT_WRITE);
 	pmap_update(pmap_kernel());
 
 	return 0;
@@ -559,7 +558,7 @@ _bus_space_unmap(bus_space_tag_t t, bus_space_handle_t bsh, bus_size_t size,
 		/*
 		 * Free the kernel virtual mapping.
 		 */
-		uvm_km_free(kernel_map, va, endva - va);
+		km_free((void *)va, endva - va, &kv_any, &kp_none);
 	} else
 		panic("bus_space_unmap: bad bus space tag");
 
@@ -604,7 +603,7 @@ bus_space_unmap(bus_space_tag_t t, bus_space_handle_t bsh, bus_size_t size)
 		/*
 		 * Free the kernel virtual mapping.
 		 */
-		uvm_km_free(kernel_map, va, endva - va);
+		km_free((void *)va, endva - va, &kv_any, &kp_none);
 	} else
 		panic("bus_space_unmap: bad bus space tag");
 

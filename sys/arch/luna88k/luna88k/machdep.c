@@ -1,4 +1,4 @@
-/*	$OpenBSD: machdep.c,v 1.108 2014/07/21 17:25:47 uebayasi Exp $	*/
+/*	$OpenBSD: machdep.c,v 1.116 2015/02/25 17:41:22 miod Exp $	*/
 /*
  * Copyright (c) 1998, 1999, 2000, 2001 Steve Murphree, Jr.
  * Copyright (c) 1996 Nivas Madhur
@@ -124,7 +124,7 @@ char	*nvram_by_symbol(char *);
 void	powerdown(void);
 void	savectx(struct pcb *);
 void	secondary_main(void);
-vaddr_t	secondary_pre_main(void);
+void   *secondary_pre_main(void);
 void	setlevel(u_int);
 vaddr_t size_memory(void);
 
@@ -134,6 +134,16 @@ extern void	get_autoboot_device(void);	/* in autoconf.c */
 /*
  * *int_mask_reg[CPU]
  * Points to the hardware interrupt status register for each CPU.
+ *
+ * When write:
+ * Bits 31 to 26 are used to enable ('1') or disable ('0') each
+ * interrupt level.  Bit 31 is for level 6, bit 26 is for level 1.
+ * 
+ * When read:
+ * Bits 31 to 29 shows the highest level of current (or most recent?)
+ * interrupt in 3 bits binary value (0 to 7).
+ * Bits 23 to 18 shows the current mask, which is the most recent
+ * written value in bits 31 to 26 as described above.
  */
 volatile u_int32_t *int_mask_reg[] = {
 	(u_int32_t *)INT_ST_MASK0,
@@ -167,17 +177,6 @@ volatile u_int32_t *swi_reg[] = {
 };
 
 /*
- * *clock_reg[CPU]
- * Points to the clock register for each CPU.
- */
-volatile u_int32_t *clock_reg[] = {
-	(u_int32_t *)OBIO_CLOCK0,
-	(u_int32_t *)OBIO_CLOCK1,
-	(u_int32_t *)OBIO_CLOCK2,
-	(u_int32_t *)OBIO_CLOCK3
-};
-
-/*
  * FUSE ROM and NVRAM data
  */
 struct fuse_rom_byte {
@@ -204,7 +203,8 @@ struct vm_map *phys_map = NULL;
 __cpu_simple_lock_t cpu_hatch_mutex = __SIMPLELOCK_UNLOCKED;
 #ifdef MULTIPROCESSOR
 __cpu_simple_lock_t cpu_boot_mutex = __SIMPLELOCK_LOCKED;
-int hatch_pending_count;
+unsigned int hatch_pending_count;
+vaddr_t hatch_stacks[MAXCPUS - 1];
 #endif
 
 struct uvm_constraint_range  dma_constraint = { 0x0, (paddr_t)-1 };
@@ -410,22 +410,6 @@ cpu_startup()
 		break;
 	}
 
-#if 0 /* just for test */
-	/*
-	 * Get boot arguments
-	 */
-	{
-		char buf[256];
-		char **p = (volatile char **)0x00001120;
-
-		strncpy(buf, *p, 256);
-		if (buf[255] != '\0')
-			buf[255] = '\0';
-
-		printf("boot arg: (0x%x) %s\n", *p, buf);
-	}
-#endif
-
 	/*
 	 * Allocate a submap for exec arguments.  This map effectively
 	 * limits the number of processes exec'ing at any time.
@@ -468,8 +452,6 @@ cpu_startup()
 __dead void
 boot(int howto)
 {
-	struct device *mainbus;
-
 	if (curproc && curproc->p_addr)
 		savectx(curpcb);
 
@@ -499,10 +481,7 @@ boot(int howto)
 		dumpsys();
 
 haltsys:
-	doshutdownhooks();
-	mainbus = device_mainbus();
-	if (mainbus != NULL)
-		config_suspend(mainbus, DVACT_POWERDOWN);
+	config_suspend_all(DVACT_POWERDOWN);
 
 	/* LUNA-88K supports automatic powerdown */
 	if ((howto & RB_POWERDOWN) != 0) {
@@ -688,9 +667,27 @@ void
 cpu_setup_secondary_processors()
 {
 #ifdef MULTIPROCESSOR
+	unsigned int cpu;
+
 	hatch_pending_count = ncpusfound - 1;
+
+	/*
+	 * Allocate idle stack for all the secondary processors here.
+	 *
+	 * We can't have this done by the secondaries themselves, because
+	 * the main processor owns the kernel lock at this point; and we
+	 * can't know in advance which cpuid our secondary processors will
+	 * have, so we can't fill m88k_cpus[] directly.
+	 *
+	 * Allocation failure will be checked by the secondary processors
+	 * so that we can still run in degraded mode if hell gets loose.
+	 */
+	for (cpu = 0; cpu < hatch_pending_count; cpu++)
+		hatch_stacks[cpu] = uvm_km_zalloc(kernel_map, USPACE);
 #endif
+
 	__cpu_simple_unlock(&cpu_hatch_mutex);
+
 #ifdef MULTIPROCESSOR
 	while (hatch_pending_count != 0)
 		delay(10000);	/* 10ms */
@@ -710,15 +707,14 @@ cpu_boot_secondary_processors()
 
 /*
  * Secondary CPU early initialization routine.
- * Determine CPU number and set it, then allocate the startup stack.
+ * Determine CPU number and set it, then return the startup stack.
  *
  * Running on a minimal stack here, with interrupts disabled; do nothing fancy.
  */
-vaddr_t
+void *
 secondary_pre_main()
 {
 	struct cpu_info *ci;
-	vaddr_t init_stack;
 
         /*
          * Invoke the CMMU initialization routine as early as possible,
@@ -743,18 +739,17 @@ secondary_pre_main()
 	pmap_bootstrap_cpu(ci->ci_cpuid);
 
 	/*
-	 * Allocate UPAGES contiguous pages for the idle PCB and stack.
+	 * Return our idle stack for the caller to switch to it.
 	 */
-	init_stack = uvm_km_zalloc(kernel_map, USPACE);
-	if (init_stack == (vaddr_t)NULL) {
-		printf("cpu%d: unable to allocate startup stack\n",
-		    ci->ci_cpuid);
+	ci->ci_curpcb = (void *)hatch_stacks[hatch_pending_count - 1];
+	if (ci->ci_curpcb == NULL) {
+		printf("cpu%d: unable to get startup stack\n", ci->ci_cpuid);
 		hatch_pending_count--;
 		__cpu_simple_unlock(&cpu_hatch_mutex);
 		for (;;) ;
 	}
 
-	return (init_stack);
+	return ci->ci_curpcb;
 }
 
 /*
@@ -824,13 +819,14 @@ luna88k_ext_int(struct trapframe *eframe)
 
 	cur_int_level = cur_isr >> 29;
 
-	if (cur_int_level == 0) {
-		/*
-		 * ignore level 0 interrupt, as CMU Mach do.
-		 */
-		flush_pipeline();	/* need this? */
+	/*
+	 * Ignore level 0 interrupt and 'hardware lied' interrupt,
+	 * as same as CMU Mach do.  The 'hardware lied' means that
+	 * the received interrupt level is what we have masked before.
+	 */
+	if (cur_int_level == 0 ||
+	    !(cur_isr & (1 << (cur_int_level + 17))))
 		goto out;
-	}
 
 	uvmexp.intrs++;
 
@@ -849,16 +845,10 @@ luna88k_ext_int(struct trapframe *eframe)
 		cur_isr = *int_mask_reg[cpu];
 		cur_int_level = cur_isr >> 29;
 	}
-	if (cur_int_level == 0) {
-		flush_pipeline();	/* need this? */
+	if (cur_int_level == 0)
 		goto out;
-	}
 #endif
 
-#ifdef MULTIPROCESSOR
-	if (old_spl < IPL_SCHED)
-		__mp_lock(&kernel_lock);
-#endif
 	/*
 	 * Service the highest interrupt, in order.
 	 */
@@ -879,10 +869,14 @@ luna88k_ext_int(struct trapframe *eframe)
 		case 4:
 		case 3:
 #ifdef MULTIPROCESSOR
-			if (cpu == master_cpu) {
+			if (CPU_IS_PRIMARY(ci)) {
+				if (old_spl < IPL_SCHED)
+					__mp_lock(&kernel_lock);
 #endif
 				isrdispatch_autovec(cur_int_level);
 #ifdef MULTIPROCESSOR
+				if (old_spl < IPL_SCHED)
+					__mp_unlock(&kernel_lock);
 			}
 #endif
 			break;
@@ -895,11 +889,6 @@ luna88k_ext_int(struct trapframe *eframe)
 		cur_isr = *int_mask_reg[cpu];
 		cur_int_level = cur_isr >> 29;
 	} while (cur_int_level != 0);
-
-#ifdef MULTIPROCESSOR
-	if (old_spl < IPL_SCHED)
-		__mp_unlock(&kernel_lock);
-#endif
 
 out:
 	/*
@@ -1122,10 +1111,6 @@ romttycnputc(dev, c)
 {
 	int s;
 
-#if 0
-	if ((char)c == '\n')
-		ROMPUTC('\r');
-#endif
 	s = splhigh();
 	ROMPUTC(c);
 	splx(s);
@@ -1248,7 +1233,7 @@ setlevel(u_int level)
 	set_value = int_set_val[level];
 
 #ifdef MULTIPROCESSOR
-	if (cpu != master_cpu)
+	if (!CPU_IS_PRIMARY(ci))
 		set_value &= INT_SLAVE_MASK;
 #endif
 

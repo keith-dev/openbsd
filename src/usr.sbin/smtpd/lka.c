@@ -1,4 +1,4 @@
-/*	$OpenBSD: lka.c,v 1.172 2014/07/10 15:54:55 eric Exp $	*/
+/*	$OpenBSD: lka.c,v 1.175 2015/01/20 17:37:54 deraadt Exp $	*/
 
 /*
  * Copyright (c) 2008 Pierre-Yves Ritschard <pyr@openbsd.org>
@@ -36,6 +36,7 @@
 #include <openssl/ssl.h>
 #include <pwd.h>
 #include <resolv.h>
+#include <limits.h>
 #include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -75,7 +76,7 @@ lka_imsg(struct mproc *p, struct imsg *imsg)
 	struct envelope		 evp;
 	struct msg		 m;
 	union lookup		 lk;
-	char			 buf[SMTPD_MAXLINESIZE];
+	char			 buf[LINE_MAX];
 	const char		*tablename, *username, *password, *label;
 	uint64_t		 reqid;
 	size_t			 i;
@@ -522,6 +523,7 @@ static int
 lka_authenticate(const char *tablename, const char *user, const char *password)
 {
 	struct table		*table;
+	char			*cpass;
 	union lookup		 lk;
 
 	log_debug("debug: lka: authenticating for %s:%s", tablename, user);
@@ -540,7 +542,10 @@ lka_authenticate(const char *tablename, const char *user, const char *password)
 	case 0:
 		return (LKA_PERMFAIL);
 	default:
-		if (!strcmp(lk.creds.password, crypt(password, lk.creds.password)))
+		cpass = crypt(password, lk.creds.password);
+		if (cpass == NULL)
+			return (LKA_PERMFAIL);
+		if (!strcmp(lk.creds.password, cpass))
 			return (LKA_OK);
 		return (LKA_PERMFAIL);
 	}

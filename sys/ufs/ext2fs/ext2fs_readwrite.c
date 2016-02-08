@@ -1,4 +1,4 @@
-/*	$OpenBSD: ext2fs_readwrite.c,v 1.32 2014/07/13 13:28:26 pelikan Exp $	*/
+/*	$OpenBSD: ext2fs_readwrite.c,v 1.34 2015/02/10 21:56:10 miod Exp $	*/
 /*	$NetBSD: ext2fs_readwrite.c,v 1.16 2001/02/27 04:37:47 chs Exp $	*/
 
 /*-
@@ -41,7 +41,6 @@
 #include <sys/file.h>
 #include <sys/stat.h>
 #include <sys/buf.h>
-#include <sys/proc.h>
 #include <sys/conf.h>
 #include <sys/mount.h>
 #include <sys/vnode.h>
@@ -150,7 +149,7 @@ ext2_ind_read(struct vnode *vp, struct inode *ip, struct m_ext2fs *fs,
 				break;
 			xfersize = size;
 		}
-		error = uiomove((char *)bp->b_data + blkoffset, xfersize, uio);
+		error = uiomovei((char *)bp->b_data + blkoffset, xfersize, uio);
 		if (error)
 			break;
 		brelse(bp);
@@ -230,7 +229,7 @@ ext4_ext_read(struct vnode *vp, struct inode *ip, struct m_ext2fs *fs, struct ui
 			}
 			xfersize = size;
 		}
-		error = uiomove(bp->b_data + blkoffset, xfersize, uio);
+		error = uiomovei(bp->b_data + blkoffset, xfersize, uio);
 		brelse(bp);
 		if (error)
 			return (error);
@@ -330,7 +329,7 @@ ext2fs_write(void *v)
 			xfersize = size;
 
 		error =
-			uiomove((char *)bp->b_data + blkoffset, (int)xfersize, uio);
+			uiomovei((char *)bp->b_data + blkoffset, (int)xfersize, uio);
 #if 0
 		if (ioflag & IO_NOCACHE)
 			bp->b_flags |= B_NOCACHE;

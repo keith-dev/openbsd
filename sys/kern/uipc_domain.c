@@ -1,4 +1,4 @@
-/*	$OpenBSD: uipc_domain.c,v 1.37 2014/07/11 21:54:38 tedu Exp $	*/
+/*	$OpenBSD: uipc_domain.c,v 1.39 2014/12/23 03:26:24 tedu Exp $	*/
 /*	$NetBSD: uipc_domain.c,v 1.14 1996/02/09 19:00:44 christos Exp $	*/
 
 /*
@@ -40,7 +40,6 @@
 #include <sys/time.h>
 #include <sys/kernel.h>
 #include <sys/systm.h>
-#include <sys/proc.h>
 #include <sys/sysctl.h>
 #include <sys/timeout.h>
 
@@ -77,9 +76,7 @@ domaininit(void)
 	 * it will be initialized as the *first* element.  confusing!
 	 */
 	ADDDOMAIN(unix);
-#ifdef INET
 	ADDDOMAIN(inet);
-#endif
 #ifdef INET6
 	ADDDOMAIN(inet6);
 #endif /* INET6 */

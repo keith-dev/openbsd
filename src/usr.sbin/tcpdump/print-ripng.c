@@ -1,4 +1,4 @@
-/*	$OpenBSD: print-ripng.c,v 1.2 2009/10/27 23:59:55 deraadt Exp $	*/
+/*	$OpenBSD: print-ripng.c,v 1.4 2015/01/16 06:40:21 deraadt Exp $	*/
 
 /*
  * Copyright (c) 1989, 1990, 1991, 1993, 1994
@@ -23,13 +23,11 @@
 
 #ifdef INET6
 
-#include <sys/param.h>
 #include <sys/time.h>
 #include <sys/types.h>
 #include <sys/socket.h>
 
 #include <netinet/in.h>
-#include <netinet/in_systm.h>
 #include <netinet/ip.h>
 #include <netinet/ip_var.h>
 #include <netinet/udp.h>

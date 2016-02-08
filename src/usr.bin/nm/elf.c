@@ -1,4 +1,4 @@
-/*	$OpenBSD: elf.c,v 1.23 2013/11/26 13:19:07 deraadt Exp $	*/
+/*	$OpenBSD: elf.c,v 1.26 2015/02/06 23:21:59 millert Exp $	*/
 
 /*
  * Copyright (c) 2003 Michael Shalayeff
@@ -26,13 +26,13 @@
  * THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include <sys/param.h>
 #include <sys/mman.h>
 #include <unistd.h>
 #include <a.out.h>
 #include <elf_abi.h>
 #include <errno.h>
 #include <err.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -454,7 +454,7 @@ elf_symloadx(const char *name, FILE *fp, off_t foff, Elf_Ehdr *eh,
 	for (i = 0; i < eh->e_shnum; i++) {
 		if (!strcmp(shstr + shdr[i].sh_name, strtab)) {
 			*pstabsize = shdr[i].sh_size;
-			if (*pstabsize > SIZE_T_MAX) {
+			if (*pstabsize > SIZE_MAX) {
 				warnx("%s: corrupt file", name);
 				return (1);
 			}
@@ -550,7 +550,7 @@ elf_symload(const char *name, FILE *fp, off_t foff, Elf_Ehdr *eh,
 	}
 
 	stab = NULL;
-	*pnames = NULL; *psnames = NULL;
+	*pnames = NULL; *psnames = NULL; *pnrawnames = 0;
 	elf_symloadx(name, fp, foff, eh, shdr, shstr, pnames,
 	    psnames, pstabsize, pnrawnames, ELF_STRTAB, ELF_SYMTAB);
 	if (stab == NULL) {

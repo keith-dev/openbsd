@@ -1,4 +1,4 @@
-/*	$OpenBSD: sysv_sem.c,v 1.49 2014/07/13 15:29:04 tedu Exp $	*/
+/*	$OpenBSD: sysv_sem.c,v 1.52 2014/12/19 05:59:21 tedu Exp $	*/
 /*	$NetBSD: sysv_sem.c,v 1.26 1996/02/09 19:00:25 christos Exp $	*/
 
 /*
@@ -62,10 +62,9 @@ void
 seminit(void)
 {
 
-	pool_init(&sema_pool, sizeof(struct semid_ds), 0, 0, 0, "semapl",
-	    &pool_allocator_nointr);
-	pool_init(&semu_pool, SEMUSZ, 0, 0, 0, "semupl",
-	    &pool_allocator_nointr);
+	pool_init(&sema_pool, sizeof(struct semid_ds), 0, 0, PR_WAITOK,
+	    "semapl", NULL);
+	pool_init(&semu_pool, SEMUSZ, 0, 0, PR_WAITOK, "semupl", NULL);
 	sema = mallocarray(seminfo.semmni, sizeof(struct semid_ds *),
 	    M_SEM, M_WAITOK|M_ZERO);
 	semseqs = mallocarray(seminfo.semmni, sizeof(unsigned short),
@@ -184,11 +183,11 @@ void
 semundo_clear(int semid, int semnum)
 {
 	struct sem_undo *suptr = SLIST_FIRST(&semu_list);
-	struct sem_undo *suprev = SLIST_END(&semu_list);
+	struct sem_undo *suprev = NULL;
 	struct undo *sunptr;
 	int i;
 
-	while (suptr != SLIST_END(&semu_list)) {
+	while (suptr != NULL) {
 		sunptr = &suptr->un_ent[0];
 		for (i = 0; i < suptr->un_cnt; i++, sunptr++) {
 			if (sunptr->un_id == semid) {
@@ -877,11 +876,11 @@ sysctl_sysvsem(int *name, u_int namelen, void *oldp, size_t *oldlenp,
 		/* Expand semsegs and semseqs arrays */
 		sema_new = mallocarray(val, sizeof(struct semid_ds *),
 		    M_SEM, M_WAITOK|M_ZERO);
-		bcopy(sema, sema_new,
+		memcpy(sema_new, sema,
 		    seminfo.semmni * sizeof(struct semid_ds *));
 		newseqs = mallocarray(val, sizeof(unsigned short), M_SEM,
 		    M_WAITOK|M_ZERO);
-		bcopy(semseqs, newseqs,
+		memcpy(newseqs, semseqs,
 		    seminfo.semmni * sizeof(unsigned short));
 		free(sema, M_SEM, 0);
 		free(semseqs, M_SEM, 0);

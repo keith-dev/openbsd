@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_var.h,v 1.12 2014/07/08 04:02:14 dlg Exp $	*/
+/*	$OpenBSD: if_var.h,v 1.20 2015/02/09 03:09:57 dlg Exp $	*/
 /*	$NetBSD: if.h,v 1.23 1996/05/07 02:40:27 thorpej Exp $	*/
 
 /*
@@ -69,14 +69,17 @@
 #include <sys/time.h>
 
 struct mbuf;
+struct mbuf_list;
 struct proc;
 struct rtentry;
 struct socket;
+struct timeout;
 struct ether_header;
 struct arpcom;
 struct rt_addrinfo;
 struct ifnet;
 struct hfsc_if;
+struct task;
 
 /*
  * Structure describing a `cloning' interface.
@@ -106,6 +109,14 @@ struct	ifqueue {
 	int			 ifq_drops;
 	struct hfsc_if		*ifq_hfsc;
 	struct timeout		*ifq_congestion;
+};
+
+/*
+ * Interface input hooks.
+ */
+struct ifih {
+	SLIST_ENTRY(ifih) ifih_next;
+	int		(*ifih_input)(struct ifnet *, void *, struct mbuf *);
 };
 
 /*
@@ -147,8 +158,12 @@ struct ifnet {				/* and the entries */
 	char	if_description[IFDESCRSIZE]; /* interface description */
 	u_short	if_rtlabelid;		/* next route label */
 	u_int8_t if_priority;
+	struct	timeout *if_slowtimo;	/* watchdog timeout */
+	struct	task *if_linkstatetask; /* task to do route updates */
 
 	/* procedure handles */
+	SLIST_HEAD(, ifih) if_inputs;	/* input routines (dequeue) */
+
 					/* output routine (enqueue) */
 	int	(*if_output)(struct ifnet *, struct mbuf *, struct sockaddr *,
 		     struct rtentry *);
@@ -165,7 +180,6 @@ struct ifnet {				/* and the entries */
 					/* timer routine */
 	void	(*if_watchdog)(struct ifnet *);
 	int	(*if_wol)(struct ifnet *, int);
-	struct	ifaddr *if_lladdr;	/* pointer to link-level address */
 	struct	ifqueue if_snd;		/* output queue */
 	struct sockaddr_dl *if_sadl;	/* pointer to our sockaddr_dl */
 
@@ -192,7 +206,65 @@ struct ifnet {				/* and the entries */
 #define	if_lastchange	if_data.ifi_lastchange
 #define	if_capabilities	if_data.ifi_capabilities
 
+/*
+ * The ifaddr structure contains information about one address
+ * of an interface.  They are maintained by the different address families,
+ * are allocated and attached when an address is set, and are linked
+ * together so all addresses for an interface can be located.
+ */
+struct ifaddr {
+	struct	sockaddr *ifa_addr;	/* address of interface */
+	struct	sockaddr *ifa_dstaddr;	/* other end of p-to-p link */
+#define	ifa_broadaddr	ifa_dstaddr	/* broadcast address interface */
+	struct	sockaddr *ifa_netmask;	/* used to determine subnet */
+	struct	ifnet *ifa_ifp;		/* back-pointer to interface */
+	TAILQ_ENTRY(ifaddr) ifa_list;	/* list of addresses for interface */
+					/* check or clean routes (+ or -)'d */
+	void	(*ifa_rtrequest)(int, struct rtentry *);
+	u_int	ifa_flags;		/* interface flags, see below */
+	u_int	ifa_refcnt;		/* number of `rt_ifa` references */
+	int	ifa_metric;		/* cost of going out this interface */
+};
+
+#define	IFA_ROUTE		0x01	/* Auto-magically installed route */
+
+/*
+ * Interface multicast address.
+ */
+struct ifmaddr {
+	struct sockaddr		*ifma_addr;	/* Protocol address */
+	unsigned short		 ifma_ifidx;	/* Index of the interface */
+	unsigned int		 ifma_refcnt;	/* Count of references */
+	TAILQ_ENTRY(ifmaddr)	 ifma_list;	/* Per-interface list */
+};
+
+/*
+ * interface groups
+ */
+
+struct ifg_group {
+	char			 ifg_group[IFNAMSIZ];
+	u_int			 ifg_refcnt;
+	caddr_t			 ifg_pf_kif;
+	int			 ifg_carp_demoted;
+	TAILQ_HEAD(, ifg_member) ifg_members;
+	TAILQ_ENTRY(ifg_group)	 ifg_next;
+};
+
+struct ifg_member {
+	TAILQ_ENTRY(ifg_member)	 ifgm_next;
+	struct ifnet		*ifgm_ifp;
+};
+
+struct ifg_list {
+	struct ifg_group	*ifgl_group;
+	TAILQ_ENTRY(ifg_list)	 ifgl_next;
+};
+
 #ifdef _KERNEL
+#define	IFQ_MAXLEN	256
+#define	IFNET_SLOWHZ	1		/* granularity is 1 second */
+
 /*
  * Output queues (ifp->if_snd) and internetwork datagram level (pup level 1)
  * input routines have queues of messages stored on ifqueue structures
@@ -269,66 +341,6 @@ do {									\
 #define	IF_LEN(ifq)		((ifq)->ifq_len)
 #define	IF_IS_EMPTY(ifq)	((ifq)->ifq_len == 0)
 
-#define	IFQ_MAXLEN	256
-#define	IFNET_SLOWHZ	1		/* granularity is 1 second */
-#endif
-
-/*
- * The ifaddr structure contains information about one address
- * of an interface.  They are maintained by the different address families,
- * are allocated and attached when an address is set, and are linked
- * together so all addresses for an interface can be located.
- */
-struct ifaddr {
-	struct	sockaddr *ifa_addr;	/* address of interface */
-	struct	sockaddr *ifa_dstaddr;	/* other end of p-to-p link */
-#define	ifa_broadaddr	ifa_dstaddr	/* broadcast address interface */
-	struct	sockaddr *ifa_netmask;	/* used to determine subnet */
-	struct	ifnet *ifa_ifp;		/* back-pointer to interface */
-	TAILQ_ENTRY(ifaddr) ifa_list;	/* list of addresses for interface */
-					/* check or clean routes (+ or -)'d */
-	void	(*ifa_rtrequest)(int, struct rtentry *);
-	u_int	ifa_flags;		/* interface flags, see below */
-	u_int	ifa_refcnt;		/* number of `rt_ifa` references */
-	int	ifa_metric;		/* cost of going out this interface */
-};
-
-#define	IFA_ROUTE		0x01	/* Auto-magically installed route */
-
-/*
- * Interface multicast address.
- */
-struct ifmaddr {
-	struct sockaddr		*ifma_addr;	/* Protocol address */
-	unsigned short		 ifma_ifidx;	/* Index of the interface */
-	unsigned int		 ifma_refcnt;	/* Count of references */
-	TAILQ_ENTRY(ifmaddr)	 ifma_list;	/* Per-interface list */
-};
-
-/*
- * interface groups
- */
-
-struct ifg_group {
-	char			 ifg_group[IFNAMSIZ];
-	u_int			 ifg_refcnt;
-	caddr_t			 ifg_pf_kif;
-	int			 ifg_carp_demoted;
-	TAILQ_HEAD(, ifg_member) ifg_members;
-	TAILQ_ENTRY(ifg_group)	 ifg_next;
-};
-
-struct ifg_member {
-	TAILQ_ENTRY(ifg_member)	 ifgm_next;
-	struct ifnet		*ifgm_ifp;
-};
-
-struct ifg_list {
-	struct ifg_group	*ifgl_group;
-	TAILQ_ENTRY(ifg_list)	 ifgl_next;
-};
-
-#ifdef _KERNEL
 /* XXX pattr unused */
 #define	IFQ_ENQUEUE(ifq, m, pattr, err)					\
 do {									\
@@ -375,9 +387,6 @@ do {									\
 
 #define	IFQ_LEN(ifq)			IF_LEN(ifq)
 #define	IFQ_IS_EMPTY(ifq)		((ifq)->ifq_len == 0)
-#define	IFQ_INC_LEN(ifq)		((ifq)->ifq_len++)
-#define	IFQ_DEC_LEN(ifq)		(--(ifq)->ifq_len)
-#define	IFQ_INC_DROPS(ifq)		((ifq)->ifq_drops++)
 #define	IFQ_SET_MAXLEN(ifq, len)	((ifq)->ifq_maxlen = (len))
 
 /* default interface priorities */
@@ -387,40 +396,18 @@ do {									\
 extern struct ifnet_head ifnet;
 extern struct ifnet *lo0ifp;
 
+void	if_start(struct ifnet *);
+void	if_input(struct ifnet *, struct mbuf_list *);
+
 #define	ether_input_mbuf(ifp, m)        ether_input((ifp), NULL, (m))
 
 void	ether_ifattach(struct ifnet *);
 void	ether_ifdetach(struct ifnet *);
 int	ether_ioctl(struct ifnet *, struct arpcom *, u_long, caddr_t);
-void	ether_input(struct ifnet *, struct ether_header *, struct mbuf *);
+int	ether_input(struct ifnet *, void *, struct mbuf *);
 int	ether_output(struct ifnet *,
 	    struct mbuf *, struct sockaddr *, struct rtentry *);
 char	*ether_sprintf(u_char *);
-
-void	if_alloc_sadl(struct ifnet *);
-void	if_free_sadl(struct ifnet *);
-void	if_attach(struct ifnet *);
-void	if_attachdomain(void);
-void	if_attachtail(struct ifnet *);
-void	if_attachhead(struct ifnet *);
-void	if_detach(struct ifnet *);
-void	if_down(struct ifnet *);
-void	if_downall(void);
-void	if_link_state_change(struct ifnet *);
-void	if_slowtimo(void *);
-void	if_up(struct ifnet *);
-int	ifconf(u_long, caddr_t);
-void	ifinit(void);
-int	ifioctl(struct socket *, u_long, caddr_t, struct proc *);
-int	ifpromisc(struct ifnet *, int);
-struct	ifg_group *if_creategroup(const char *);
-int	if_addgroup(struct ifnet *, const char *);
-int	if_delgroup(struct ifnet *, const char *);
-void	if_group_routechange(struct sockaddr *, struct sockaddr *);
-struct	ifnet *ifunit(const char *);
-struct	ifnet *if_get(unsigned int);
-void	if_start(struct ifnet *);
-void	ifnewlladdr(struct ifnet *);
 
 struct	ifaddr *ifa_ifwithaddr(struct sockaddr *, u_int);
 struct	ifaddr *ifa_ifwithdstaddr(struct sockaddr *, u_int);

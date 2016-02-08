@@ -1,4 +1,4 @@
-# $OpenBSD: Makefile,v 1.46 2014/07/28 17:57:18 tedu Exp $
+# $OpenBSD: Makefile,v 1.56 2015/02/10 13:28:17 jsing Exp $
 
 LIB=	crypto
 
@@ -58,7 +58,7 @@ SRCS+= bio_lib.c bio_cb.c bio_err.c
 SRCS+= bss_mem.c bss_null.c bss_fd.c
 SRCS+= bss_file.c bss_sock.c bss_conn.c
 SRCS+= bf_null.c bf_buff.c b_print.c b_dump.c
-SRCS+= b_sock.c bss_acpt.c bf_nbio.c bss_log.c bss_bio.c
+SRCS+= b_posix.c b_sock.c bss_acpt.c bf_nbio.c bss_log.c bss_bio.c
 SRCS+= bss_dgram.c
 
 # bn/
@@ -72,7 +72,7 @@ SRCS+= bn_depr.c bn_const.c bn_x931p.c
 SRCS+= buffer.c buf_err.c buf_str.c
 
 # camellia/
-#SRCS+= cmll_ecb.c cmll_ofb.c cmll_cfb.c cmll_ctr.c cmll_utl.c
+SRCS+= cmll_cfb.c cmll_ctr.c cmll_ecb.c cmll_ofb.c
 
 # cast/
 SRCS+= c_skey.c c_ecb.c c_enc.c c_cfb64.c c_ofb64.c
@@ -96,7 +96,7 @@ SRCS+= conf_err.c conf_lib.c conf_api.c conf_def.c conf_mod.c
 SRCS+= conf_mall.c conf_sap.c
 
 # des/
-SRCS+= cbc_cksm.c cbc_enc.c cfb64enc.c cfb_enc.c 
+SRCS+= cbc_cksm.c cbc_enc.c cfb64enc.c cfb_enc.c
 SRCS+= ecb3_enc.c ecb_enc.c  enc_read.c enc_writ.c
 SRCS+= fcrypt.c ofb64enc.c ofb_enc.c  pcbc_enc.c
 SRCS+= qud_cksm.c rand_key.c set_key.c xcbc_enc.c
@@ -144,16 +144,23 @@ SRCS+= err.c err_all.c err_prn.c
 SRCS+= encode.c digest.c evp_enc.c evp_key.c
 SRCS+= e_des.c e_bf.c e_idea.c e_des3.c e_camellia.c
 SRCS+= e_rc4.c e_aes.c names.c
-SRCS+= e_xcbc_d.c e_rc2.c e_cast.c e_rc5.c
+SRCS+= e_xcbc_d.c e_rc2.c e_cast.c
 SRCS+= m_null.c m_md4.c m_md5.c m_sha.c m_sha1.c m_wp.c
 SRCS+= m_dss.c m_dss1.c m_mdc2.c m_ripemd.c m_ecdsa.c
 SRCS+= p_open.c p_seal.c p_sign.c p_verify.c p_lib.c p_enc.c p_dec.c
 SRCS+= bio_md.c bio_b64.c bio_enc.c evp_err.c e_null.c
-SRCS+= c_all.c c_allc.c c_alld.c evp_lib.c
+SRCS+= c_all.c evp_lib.c
 SRCS+= evp_pkey.c evp_pbe.c p5_crpt.c p5_crpt2.c
 SRCS+= e_old.c pmeth_lib.c pmeth_fn.c pmeth_gn.c m_sigver.c
 SRCS+= e_aes_cbc_hmac_sha1.c e_rc4_hmac_md5.c
 SRCS+= e_chacha.c evp_aead.c e_chacha20poly1305.c
+SRCS+= e_gost2814789.c m_gost2814789.c m_gostr341194.c m_streebog.c
+
+# gost/
+SRCS+= gost2814789.c gost89_keywrap.c gost89_params.c gost89imit_ameth.c
+SRCS+= gost89imit_pmeth.c gost_asn1.c gost_err.c gostr341001.c
+SRCS+= gostr341001_ameth.c gostr341001_key.c gostr341001_params.c
+SRCS+= gostr341001_pmeth.c gostr341194.c streebog.c
 
 # hmac/
 SRCS+= hmac.c hm_ameth.c hm_pmeth.c
@@ -208,9 +215,6 @@ SRCS+= randfile.c rand_lib.c rand_err.c
 # rc2/
 SRCS+= rc2_ecb.c rc2_skey.c rc2_cbc.c rc2cfb64.c rc2ofb64.c
 
-# rc5/
-#SRCS+= rc5_skey.c rc5_ecb.c rc5cfb64.c rc5ofb64.c
-
 # ripemd/
 SRCS+= rmd_dgst.c rmd_one.c
 
@@ -225,9 +229,6 @@ SRCS+= sha_dgst.c sha1dgst.c sha_one.c sha1_one.c sha256.c sha512.c
 
 # stack/
 SRCS+= stack.c
-
-# store/
-#SRCS+= str_err.c str_lib.c str_meth.c str_mem.c
 
 # ts/
 SRCS+= ts_err.c ts_req_utils.c ts_req_print.c ts_rsp_utils.c ts_rsp_print.c
@@ -249,7 +250,7 @@ SRCS+= x509_obj.c x509_req.c x509spki.c x509_vfy.c
 SRCS+= x509_set.c x509cset.c x509rset.c x509_err.c
 SRCS+= x509name.c x509_v3.c x509_ext.c x509_att.c
 SRCS+= x509type.c x509_lu.c x_all.c x509_txt.c
-SRCS+= x509_trs.c by_file.c by_dir.c x509_vpm.c
+SRCS+= x509_trs.c by_file.c by_dir.c by_mem.c x509_vpm.c
 
 # x509v3/
 SRCS+= v3_bcons.c v3_bitst.c v3_conf.c v3_extku.c v3_ia5.c v3_lib.c
@@ -257,7 +258,6 @@ SRCS+= v3_prn.c v3_utl.c v3err.c v3_genn.c v3_alt.c v3_skey.c v3_akey.c v3_pku.c
 SRCS+= v3_int.c v3_enum.c v3_sxnet.c v3_cpols.c v3_crld.c v3_purp.c v3_info.c
 SRCS+= v3_ocsp.c v3_akeya.c v3_pmaps.c v3_pcons.c v3_ncons.c v3_pcia.c v3_pci.c
 SRCS+= pcy_cache.c pcy_node.c pcy_data.c pcy_map.c pcy_tree.c pcy_lib.c
-SRCS+= v3_asid.c v3_addr.c
 
 .PATH:	${.CURDIR}/arch/${MACHINE_CPU} \
 	${LCRYPTO_SRC} \
@@ -285,6 +285,7 @@ SRCS+= v3_asid.c v3_addr.c
 	${LCRYPTO_SRC}/engine \
 	${LCRYPTO_SRC}/err \
 	${LCRYPTO_SRC}/evp \
+	${LCRYPTO_SRC}/gost \
 	${LCRYPTO_SRC}/hmac \
 	${LCRYPTO_SRC}/idea \
 	${LCRYPTO_SRC}/krb5 \
@@ -303,12 +304,10 @@ SRCS+= v3_asid.c v3_addr.c
 	${LCRYPTO_SRC}/rand \
 	${LCRYPTO_SRC}/rc2 \
 	${LCRYPTO_SRC}/rc4 \
-	${LCRYPTO_SRC}/rc5 \
 	${LCRYPTO_SRC}/ripemd \
 	${LCRYPTO_SRC}/rsa \
 	${LCRYPTO_SRC}/sha \
 	${LCRYPTO_SRC}/stack \
-	${LCRYPTO_SRC}/store \
 	${LCRYPTO_SRC}/threads \
 	${LCRYPTO_SRC}/ts \
 	${LCRYPTO_SRC}/txt_db \
@@ -346,6 +345,7 @@ HDRS=\
 	crypto/engine/engine.h \
 	crypto/err/err.h \
 	crypto/evp/evp.h \
+	crypto/gost/gost.h \
 	crypto/hmac/hmac.h \
 	crypto/idea/idea.h \
 	crypto/krb5/krb5_asn.h \
@@ -367,13 +367,11 @@ HDRS=\
 	crypto/rand/rand.h \
 	crypto/rc2/rc2.h \
 	crypto/rc4/rc4.h \
-	crypto/rc5/rc5.h \
 	crypto/ripemd/ripemd.h \
 	crypto/rsa/rsa.h \
 	crypto/sha/sha.h \
 	crypto/stack/safestack.h \
 	crypto/stack/stack.h \
-	crypto/store/store.h \
 	crypto/ts/ts.h \
 	crypto/txt_db/txt_db.h \
 	crypto/ui/ui.h \
@@ -424,12 +422,12 @@ obj_dat.h: obj_mac.h
 .include "${.CURDIR}/arch/${MACHINE_CPU}/Makefile.inc"
 .else
 CFLAGS+=-DOPENSSL_NO_ASM
-SRCS+= aes_core.c aes_cbc.c 
+SRCS+= aes_core.c aes_cbc.c
 SRCS+= bf_enc.c
 SRCS+= bn_asm.c
+SRCS+= camellia.c cmll_cbc.c cmll_misc.c
 SRCS+= des_enc.c fcrypt_b.c
 SRCS+= rc4_enc.c rc4_skey.c
-#SRCS+= rc5_enc.c 
 SRCS+= wp_block.c
 .endif
 

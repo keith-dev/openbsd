@@ -1,4 +1,4 @@
-/*	$OpenBSD: pfctl_optimize.c,v 1.33 2013/11/22 04:12:48 deraadt Exp $ */
+/*	$OpenBSD: pfctl_optimize.c,v 1.35 2015/01/21 21:50:33 deraadt Exp $ */
 
 /*
  * Copyright (c) 2004 Mike Frantzen <frantzen@openbsd.org>
@@ -20,11 +20,10 @@
 #include <sys/ioctl.h>
 #include <sys/socket.h>
 
-#include <net/if.h>
-#include <net/pfvar.h>
-
 #include <netinet/in.h>
 #include <arpa/inet.h>
+#include <net/if.h>
+#include <net/pfvar.h>
 
 #include <assert.h>
 #include <ctype.h>
@@ -844,7 +843,7 @@ block_feedback(struct pfctl *pf, struct superblock *block)
 				break;
 			}
 		}
-		if (por2 == TAILQ_END(&block->sb_rules))
+		if (por2 == NULL)
 			TAILQ_INSERT_TAIL(&block->sb_rules, por1, por_entry);
 	}
 

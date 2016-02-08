@@ -1,4 +1,4 @@
-/*	$OpenBSD: if.h,v 1.157 2014/07/14 03:45:43 dlg Exp $	*/
+/*	$OpenBSD: if.h,v 1.160 2015/02/08 06:00:52 mpi Exp $	*/
 /*	$NetBSD: if.h,v 1.23 1996/05/07 02:40:27 thorpej Exp $	*/
 
 /*
@@ -206,7 +206,6 @@ struct if_status_description {
 	    IFF_SIMPLEX|IFF_MULTICAST|IFF_ALLMULTI)
 
 #define IFXF_TXREADY		0x1		/* interface is ready to tx */
-#define	IFXF_NOINET6		0x2		/* don't do inet6 */
 #define	IFXF_INET6_NOPRIVACY	0x4		/* don't autoconf privacy */
 #define	IFXF_MPLS		0x8		/* supports MPLS */
 #define	IFXF_WOL		0x10		/* wake on lan enabled */
@@ -429,11 +428,43 @@ struct if_laddrreq {
 	struct sockaddr_storage dstaddr; /* out */
 };
 
+/* SIOCIFAFDETACH */
+struct if_afreq {
+	char		ifar_name[IFNAMSIZ];
+	sa_family_t	ifar_af;
+};
+
 #include <net/if_arp.h>
 
 #ifdef _KERNEL
-#include <net/if_var.h>
-#endif
+struct socket;
+struct ifnet;
+
+void	if_alloc_sadl(struct ifnet *);
+void	if_free_sadl(struct ifnet *);
+void	if_attach(struct ifnet *);
+void	if_attachdomain(void);
+void	if_attachtail(struct ifnet *);
+void	if_attachhead(struct ifnet *);
+void	if_detach(struct ifnet *);
+void	if_down(struct ifnet *);
+void	if_downall(void);
+void	if_link_state_change(struct ifnet *);
+void	if_slowtimo(void *);
+void	if_up(struct ifnet *);
+int	ifconf(u_long, caddr_t);
+void	ifinit(void);
+int	ifioctl(struct socket *, u_long, caddr_t, struct proc *);
+int	ifpromisc(struct ifnet *, int);
+struct	ifg_group *if_creategroup(const char *);
+int	if_addgroup(struct ifnet *, const char *);
+int	if_delgroup(struct ifnet *, const char *);
+void	if_group_routechange(struct sockaddr *, struct sockaddr *);
+struct	ifnet *ifunit(const char *);
+struct	ifnet *if_get(unsigned int);
+void	ifnewlladdr(struct ifnet *);
+
+#endif /* _KERNEL */
 
 #endif /* __BSD_VISIBLE */
 

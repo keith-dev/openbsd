@@ -1,4 +1,4 @@
-/*	$OpenBSD: ntfs_subr.c,v 1.38 2014/07/12 18:43:52 tedu Exp $	*/
+/*	$OpenBSD: ntfs_subr.c,v 1.43 2015/02/10 22:04:00 miod Exp $	*/
 /*	$NetBSD: ntfs_subr.c,v 1.4 2003/04/10 21:37:32 jdolecek Exp $	*/
 
 /*-
@@ -32,9 +32,9 @@
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/namei.h>
-#include <sys/proc.h>
 #include <sys/kernel.h>
 #include <sys/vnode.h>
+#include <sys/lock.h>
 #include <sys/mount.h>
 #include <sys/buf.h>
 #include <sys/file.h>
@@ -612,8 +612,8 @@ ntfs_runtovrun(cn_t **rcnp, cn_t **rclp, u_long *rcntp, u_int8_t *run)
 		off += (run[off] & 0xF) + ((run[off] >> 4) & 0xF) + 1;
 		cnt++;
 	}
-	cn = malloc(cnt * sizeof(cn_t), M_NTFSRUN, M_WAITOK);
-	cl = malloc(cnt * sizeof(cn_t), M_NTFSRUN, M_WAITOK);
+	cn = mallocarray(cnt, sizeof(cn_t), M_NTFSRUN, M_WAITOK);
+	cl = mallocarray(cnt, sizeof(cn_t), M_NTFSRUN, M_WAITOK);
 
 	off = 0;
 	cnt = 0;
@@ -1457,7 +1457,7 @@ ntfs_writentvattr_plain(struct ntfsmount *ntmp, struct ntnode *ip,
 				}
 			}
 			if (uio) {
-				error = uiomove(bp->b_data + off, tocopy, uio);
+				error = uiomovei(bp->b_data + off, tocopy, uio);
 				if (error != 0)
 					break;
 			} else
@@ -1555,7 +1555,7 @@ ntfs_readntvattr_plain(struct ntfsmount *ntmp, struct ntnode *ip,
 						return (error);
 					}
 					if (uio) {
-						error = uiomove(bp->b_data + off,
+						error = uiomovei(bp->b_data + off,
 							tocopy, uio);
 						if (error != 0)
 							break;
@@ -1601,7 +1601,7 @@ ntfs_readntvattr_plain(struct ntfsmount *ntmp, struct ntnode *ip,
 	} else {
 		DDPRINTF("ntfs_readnvattr_plain: data is in mft record\n");
 		if (uio) 
-			error = uiomove(vap->va_datap + roff, rsize, uio);
+			error = uiomovei(vap->va_datap + roff, rsize, uio);
 		else
 			memcpy(rdata, vap->va_datap + roff, rsize);
 		*initp += rsize;
@@ -1712,7 +1712,7 @@ ntfs_readattr(struct ntfsmount *ntmp, struct ntnode *ip, u_int32_t attrnum,
 
 			if (init == ntfs_cntob(NTFS_COMPUNIT_CL)) {
 				if (uio)
-					error = uiomove(cup + off, tocopy, uio);
+					error = uiomovei(cup + off, tocopy, uio);
 				else
 					memcpy(data, cup + off, tocopy);
 			} else if (init == 0) {
@@ -1731,7 +1731,7 @@ ntfs_readattr(struct ntfsmount *ntmp, struct ntnode *ip, u_int32_t attrnum,
 				if (error)
 					break;
 				if (uio)
-					error = uiomove(uup + off, tocopy, uio);
+					error = uiomovei(uup + off, tocopy, uio);
 				else
 					memcpy(data, uup + off, tocopy);
 			}

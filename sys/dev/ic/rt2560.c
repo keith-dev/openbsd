@@ -1,4 +1,4 @@
-/*	$OpenBSD: rt2560.c,v 1.66 2014/07/22 13:12:12 mpi Exp $  */
+/*	$OpenBSD: rt2560.c,v 1.70 2015/02/10 23:25:46 mpi Exp $  */
 
 /*-
  * Copyright (c) 2005, 2006
@@ -34,9 +34,9 @@
 #include <sys/timeout.h>
 #include <sys/conf.h>
 #include <sys/device.h>
+#include <sys/endian.h>
 
 #include <machine/bus.h>
-#include <machine/endian.h>
 #include <machine/intr.h>
 
 #if NBPFILTER > 0
@@ -57,10 +57,6 @@
 
 #include <dev/ic/rt2560reg.h>
 #include <dev/ic/rt2560var.h>
-
-#include <dev/pci/pcireg.h>
-#include <dev/pci/pcivar.h>
-#include <dev/pci/pcidevs.h>
 
 #ifdef RAL_DEBUG
 #define DPRINTF(x)	do { if (rt2560_debug > 0) printf x; } while (0)
@@ -1169,7 +1165,6 @@ rt2560_decryption_intr(struct rt2560_softc *sc)
 		desc->physaddr = htole32(data->map->dm_segs->ds_addr);
 
 		/* finalize mbuf */
-		m->m_pkthdr.rcvif = ifp;
 		m->m_pkthdr.len = m->m_len =
 		    (letoh32(desc->flags) >> 16) & 0xfff;
 
@@ -2022,10 +2017,8 @@ rt2560_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 	case SIOCSIFADDR:
 		ifa = (struct ifaddr *)data;
 		ifp->if_flags |= IFF_UP;
-#ifdef INET
 		if (ifa->ifa_addr->sa_family == AF_INET)
 			arp_ifinit(&ic->ic_ac, ifa);
-#endif
 		/* FALLTHROUGH */
 	case SIOCSIFFLAGS:
 		if (ifp->if_flags & IFF_UP) {

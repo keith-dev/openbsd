@@ -1,4 +1,4 @@
-/*	$OpenBSD: tty.c,v 1.113 2014/07/13 15:29:04 tedu Exp $	*/
+/*	$OpenBSD: tty.c,v 1.121 2015/02/10 21:56:10 miod Exp $	*/
 /*	$NetBSD: tty.c,v 1.68.4.2 1996/06/06 16:04:52 thorpej Exp $	*/
 
 /*-
@@ -46,20 +46,25 @@
 #undef	TTYDEFCHARS
 #include <sys/file.h>
 #include <sys/conf.h>
-#include <sys/dkstat.h>
 #include <sys/uio.h>
 #include <sys/kernel.h>
 #include <sys/vnode.h>
+#include <sys/lock.h>
 #include <sys/syslog.h>
 #include <sys/malloc.h>
+#include <sys/msgbuf.h>
 #include <sys/signalvar.h>
 #include <sys/resourcevar.h>
 #include <sys/sysctl.h>
 #include <sys/pool.h>
 #include <sys/poll.h>
+#include <sys/unistd.h>
 
 #include <sys/namei.h>
 
+#include <uvm/uvm_extern.h>
+
+#include <dev/cons.h>
 #include <dev/rndvar.h>
 
 #include "pty.h"
@@ -814,7 +819,7 @@ ttioctl(struct tty *tp, u_long cmd, caddr_t data, int flag, struct proc *p)
 	case TIOCGETA: {		/* get termios struct */
 		struct termios *t = (struct termios *)data;
 
-		bcopy(&tp->t_termios, t, sizeof(struct termios));
+		memcpy(t, &tp->t_termios, sizeof(struct termios));
 		break;
 	}
 	case TIOCGETD:			/* get line discipline */
@@ -926,7 +931,7 @@ ttioctl(struct tty *tp, u_long cmd, caddr_t data, int flag, struct proc *p)
 		else
 			CLR(t->c_lflag, EXTPROC);
 		tp->t_lflag = t->c_lflag | ISSET(tp->t_lflag, PENDIN);
-		bcopy(t->c_cc, tp->t_cc, sizeof(t->c_cc));
+		memcpy(tp->t_cc, t->c_cc, sizeof(t->c_cc));
 		splx(s);
 		break;
 	}
@@ -1284,7 +1289,7 @@ void
 ttychars(struct tty *tp)
 {
 
-	bcopy(ttydefchars, tp->t_cc, sizeof(ttydefchars));
+	memcpy(tp->t_cc, ttydefchars, sizeof(ttydefchars));
 }
 
 /*
@@ -1776,13 +1781,24 @@ loop:
 		if (cc == 0) {
 			cc = MIN(uio->uio_resid, OBUFSIZ);
 			cp = obuf;
-			error = uiomove(cp, cc, uio);
+			error = uiomovei(cp, cc, uio);
 			if (error) {
 				cc = 0;
 				break;
 			}
 			if (cc > obufcc)
 				obufcc = cc;
+
+			/* duplicate /dev/console output into console buffer */
+			if (consbufp && cn_tab &&
+			    cn_tab->cn_dev == tp->t_dev && tp->t_gen == 0) {
+				int i;
+				for (i = 0; i < cc; i++) {
+					char c = cp[i];
+					if (c != '\0' && c != '\r' && c != 0177)
+						msgbuf_putchar(consbufp, c);
+				}
+			}
 		}
 		/*
 		 * If nothing fancy need be done, grab those characters we
@@ -2091,15 +2107,14 @@ ttspeedtab(int speed, const struct speedtab *table)
 void
 ttsetwater(struct tty *tp)
 {
-	int cps, x, omost;
+	int cps, x;
 
 #define CLAMP(x, h, l)	((x) > h ? h : ((x) < l) ? l : (x))
 
 	cps = tp->t_ospeed / 10;
 	tp->t_lowat = x = CLAMP(cps / 2, TTMAXLOWAT, TTMINLOWAT);
 	x += cps;
-	omost = MIN(tp->t_outq.c_cn - 200, tp->t_outq.c_cn);
-	tp->t_hiwat = CLAMP(x, omost, 100);
+	tp->t_hiwat = CLAMP(x, tp->t_outq.c_cn, 100);
 #undef	CLAMP
 }
 

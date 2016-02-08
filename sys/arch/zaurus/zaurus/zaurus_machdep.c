@@ -1,4 +1,4 @@
-/*	$OpenBSD: zaurus_machdep.c,v 1.51 2014/07/21 17:25:47 uebayasi Exp $	*/
+/*	$OpenBSD: zaurus_machdep.c,v 1.56 2015/01/18 10:17:42 jsg Exp $	*/
 /*	$NetBSD: lubbock_machdep.c,v 1.2 2003/07/15 00:25:06 lukem Exp $ */
 
 /*
@@ -127,7 +127,6 @@
 
 #include <sys/conf.h>
 #include <sys/queue.h>
-#include <sys/device.h>
 #include <dev/cons.h>
 #include <dev/ic/smc91cxxreg.h>
 #include <sys/socket.h>
@@ -190,11 +189,7 @@ u_int cpu_reset_address = 0;
 /* Define various stack sizes in pages */
 #define IRQ_STACK_SIZE	1
 #define ABT_STACK_SIZE	1
-#ifdef IPKDB
-#define UND_STACK_SIZE	2
-#else
 #define UND_STACK_SIZE	1
-#endif
 
 int zaurusmod;
 
@@ -292,7 +287,6 @@ int comcnmode = CONMODE;
 __dead void
 boot(int howto)
 {
-	struct device *mainbus;
 	extern int lid_suspend;
 
 	if ((howto & RB_POWERDOWN) != 0)
@@ -322,12 +316,9 @@ boot(int howto)
 
 	if ((howto & (RB_DUMP | RB_HALT)) == RB_DUMP)
 		dumpsys();
-	
+
 haltsys:
-	doshutdownhooks();
-	mainbus = device_mainbus();
-	if (mainbus != NULL)
-		config_suspend(mainbus, DVACT_POWERDOWN);
+	config_suspend_all(DVACT_POWERDOWN);
 
 	/* Make sure IRQ's are disabled */
 	IRQdisable;
@@ -435,7 +426,7 @@ map_io_area(paddr_t pagedir)
 		for (sz = 0; sz < l1_sec_table[loop].size; sz += L1_S_SIZE)
 			pmap_map_section(pagedir, l1_sec_table[loop].va + sz,
 			    l1_sec_table[loop].pa + sz,
-			    VM_PROT_READ|VM_PROT_WRITE,
+			    PROT_READ | PROT_WRITE,
 			    l1_sec_table[loop].flags);
 		++loop;
 	}
@@ -462,7 +453,7 @@ bootstrap_bs_map(void *t, bus_addr_t bpa, bus_size_t size,
 
 	startpa = trunc_page(bpa);
 	pmap_map_section((vaddr_t)pagedir, va, startpa, 
-	    VM_PROT_READ | VM_PROT_WRITE, PTE_NOCACHE);
+	    PROT_READ | PROT_WRITE, PTE_NOCACHE);
 	cpu_tlb_flushD();
 
 	*bshp = (bus_space_handle_t)(va + (bpa - startpa));
@@ -719,7 +710,6 @@ initarm(void *arg0, void *arg1, void *arg2)
 	kgdb_port_init();
 #endif
 
-
 	/* Talk to the user */
 	printf("\nOpenBSD/zaurus booting ...\n");
 
@@ -942,10 +932,10 @@ initarm(void *arg0, void *arg1, void *arg2)
 
 		logical += pmap_map_chunk(l1pagetable, KERNEL_BASE + logical,
 		    physical_start + logical, textsize,
-		    VM_PROT_READ|VM_PROT_WRITE, PTE_CACHE);
+		    PROT_READ | PROT_WRITE, PTE_CACHE);
 		pmap_map_chunk(l1pagetable, KERNEL_BASE + logical,
 		    physical_start + logical, totalsize - textsize,
-		    VM_PROT_READ|VM_PROT_WRITE, PTE_CACHE);
+		    PROT_READ | PROT_WRITE, PTE_CACHE);
 	}
 
 #ifdef VERBOSE_INIT_ARM
@@ -954,21 +944,21 @@ initarm(void *arg0, void *arg1, void *arg2)
 
 	/* Map the stack pages */
 	pmap_map_chunk(l1pagetable, irqstack.pv_va, irqstack.pv_pa,
-	    IRQ_STACK_SIZE * PAGE_SIZE, VM_PROT_READ|VM_PROT_WRITE, PTE_CACHE);
+	    IRQ_STACK_SIZE * PAGE_SIZE, PROT_READ | PROT_WRITE, PTE_CACHE);
 	pmap_map_chunk(l1pagetable, abtstack.pv_va, abtstack.pv_pa,
-	    ABT_STACK_SIZE * PAGE_SIZE, VM_PROT_READ|VM_PROT_WRITE, PTE_CACHE);
+	    ABT_STACK_SIZE * PAGE_SIZE, PROT_READ | PROT_WRITE, PTE_CACHE);
 	pmap_map_chunk(l1pagetable, undstack.pv_va, undstack.pv_pa,
-	    UND_STACK_SIZE * PAGE_SIZE, VM_PROT_READ|VM_PROT_WRITE, PTE_CACHE);
+	    UND_STACK_SIZE * PAGE_SIZE, PROT_READ | PROT_WRITE, PTE_CACHE);
 	pmap_map_chunk(l1pagetable, kernelstack.pv_va, kernelstack.pv_pa,
-	    UPAGES * PAGE_SIZE, VM_PROT_READ | VM_PROT_WRITE, PTE_CACHE);
+	    UPAGES * PAGE_SIZE, PROT_READ | PROT_WRITE, PTE_CACHE);
 
 	pmap_map_chunk(l1pagetable, kernel_l1pt.pv_va, kernel_l1pt.pv_pa,
-	    L1_TABLE_SIZE, VM_PROT_READ | VM_PROT_WRITE, PTE_PAGETABLE);
+	    L1_TABLE_SIZE, PROT_READ | PROT_WRITE, PTE_PAGETABLE);
 
 	for (loop = 0; loop < NUM_KERNEL_PTS; ++loop) {
 		pmap_map_chunk(l1pagetable, kernel_pt_table[loop].pv_va,
 		    kernel_pt_table[loop].pv_pa, L2_TABLE_SIZE,
-		    VM_PROT_READ|VM_PROT_WRITE, PTE_PAGETABLE);
+		    PROT_READ | PROT_WRITE, PTE_PAGETABLE);
 	}
 
 	/* Map the Mini-Data cache clean area. */
@@ -980,10 +970,10 @@ initarm(void *arg0, void *arg1, void *arg2)
 	/* MULTI-ICE requires that page 0 is NC/NB so that it can download the
 	 * cache-clean code there.  */
 	pmap_map_entry(l1pagetable, vector_page, systempage.pv_pa,
-	    VM_PROT_READ|VM_PROT_WRITE, PTE_NOCACHE);
+	    PROT_READ | PROT_WRITE, PTE_NOCACHE);
 #else
 	pmap_map_entry(l1pagetable, vector_page, systempage.pv_pa,
-	    VM_PROT_READ|VM_PROT_WRITE, PTE_CACHE);
+	    PROT_READ | PROT_WRITE, PTE_CACHE);
 #endif
 
 	/*
@@ -1107,13 +1097,6 @@ initarm(void *arg0, void *arg1, void *arg2)
 	/* Update dump information */
 	cpu_kcore_hdr.pmap_kernel_l1 = (u_int32_t)pmap_kernel()->pm_l1;
 	cpu_kcore_hdr.pmap_kernel_l2 = (u_int32_t)&(pmap_kernel()->pm_l2);
-
-#ifdef IPKDB
-	/* Initialise ipkdb */
-	ipkdb_init();
-	if (boothowto & RB_KDB)
-		ipkdb_connect(0);
-#endif
 
 #ifdef KGDB
 	if (boothowto & RB_KDB) {

@@ -1,4 +1,4 @@
-.\"	$OpenBSD: netstat.1,v 1.71 2014/05/10 23:31:40 jmc Exp $
+.\"	$OpenBSD: netstat.1,v 1.76 2015/02/12 13:14:54 jmc Exp $
 .\"	$NetBSD: netstat.1,v 1.11 1995/10/03 21:42:43 thorpej Exp $
 .\"
 .\" Copyright (c) 1983, 1990, 1992, 1993
@@ -30,7 +30,7 @@
 .\"
 .\"	from: @(#)netstat.1	8.8 (Berkeley) 4/18/94
 .\"
-.Dd $Mdocdate: May 10 2014 $
+.Dd $Mdocdate: February 12 2015 $
 .Dt NETSTAT 1
 .Os
 .Sh NAME
@@ -105,20 +105,19 @@ the specified wireless (802.11) device.
 The options are as follows:
 .Bl -tag -width Ds
 .It Fl A
-With the default display,
-show the address of any protocol control blocks associated with sockets; used
-for debugging, e.g. with the
+Show the address of any protocol control blocks associated with sockets;
+useful for debugging e.g. with the
 .Fl P
 flag.
+When used with the
+.Fl r
+flag it shows the internal addresses of the routing table.
+Only the super-user can see these addresses;
+unprivileged users will see them as 0x0.
 .It Fl a
 With the default display,
 show the state of all sockets; normally sockets used by
 server processes are not shown.
-With the interface display (options
-.Fl I
-or
-.Fl i ) ,
-show multicast addresses.
 .It Fl B
 With the default display,
 show buffer sizes for TCP sockets.
@@ -156,12 +155,10 @@ of the specified
 The following address families are recognized:
 .Bl -column "Address Family" "AF_APPLETA" "Description" -offset indent
 .It Sy "Address Family" Ta Sy "Constant" Ta Sy "Description"
-.It "encap" Ta Dv "PF_KEY" Ta "IPsec"
 .It "inet" Ta Dv "AF_INET" Ta "IP Version 4"
 .It "inet6" Ta Dv "AF_INET6" Ta "IP Version 6"
 .It "local" Ta Dv "AF_LOCAL" Ta "Local to Host (i.e., pipes)"
 .It "mpls" Ta Dv "AF_MPLS" Ta "MPLS"
-.It "pflow" Ta Dv "PF_FLOW" Ta "pflow data export"
 .It "unix" Ta Dv "AF_UNIX" Ta "Local to Host (i.e., pipes)"
 .El
 .It Fl h
@@ -184,13 +181,6 @@ used with a
 interval as described below.
 .Pp
 If the
-.Fl a
-option is also present, multicast addresses currently in use are shown
-for the given interface and for each IP interface address.
-Multicast addresses are shown on separate lines following the interface
-address with which they are associated.
-.Pp
-If the
 .Fl f Ar address_family
 option (with the
 .Fl s
@@ -201,13 +191,6 @@ statistics on the given interface for the specified
 Show the state of interfaces which have been auto-configured
 (interfaces statically configured into a system but not
 located at boot-time are not shown).
-.Pp
-If the
-.Fl a
-option is also present, multicast addresses currently in use are shown
-for each Ethernet interface and for each IP interface address.
-Multicast addresses are shown on separate lines following the interface
-address with which they are associated.
 .Pp
 If the
 .Fl f Ar address_family
@@ -239,7 +222,7 @@ interprets addresses and attempts to display them
 symbolically).
 This option may be used with any of the display formats.
 .It Fl P Ar pcbaddr
-Display the contents of the socket or protocol control block (PCB)
+Display the contents of the protocol control block (PCB)
 located at the kernel virtual address
 .Ar pcbaddr .
 PCB addresses can be obtained using the
@@ -248,6 +231,9 @@ flag.
 When used with the
 .Fl v
 option, also print socket, domain and protocol specific structures.
+Only the super-user can use the
+.Fl P
+option.
 .It Fl p Ar protocol
 Restrict the output to
 .Ar protocol ,
@@ -312,12 +298,10 @@ Address formats are of the form
 or
 .Dq network.port
 if a socket's address specifies a network but no specific host address.
-When known, the host and network addresses are displayed symbolically
-according to the databases
-.Pa /etc/hosts
-and
-.Pa /etc/networks ,
-respectively.
+When known, the host addresses are displayed symbolically
+according to the
+.Xr hosts 5
+database.
 If a symbolic name for an address is unknown, or if the
 .Fl n
 option is specified, the address is printed numerically, according
@@ -427,7 +411,6 @@ Subsequent lines of output show values accumulated over the preceding interval.
 .Xr netintro 4 ,
 .Xr route 4 ,
 .Xr hosts 5 ,
-.Xr networks 5 ,
 .Xr protocols 5 ,
 .Xr services 5 ,
 .Xr iostat 8 ,

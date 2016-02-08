@@ -1,4 +1,4 @@
-/* $OpenBSD: pms.c,v 1.52 2014/07/12 18:48:52 tedu Exp $ */
+/* $OpenBSD: pms.c,v 1.57 2015/02/09 04:05:25 mpi Exp $ */
 /* $NetBSD: psm.c,v 1.11 2000/06/05 22:20:57 sommerfeld Exp $ */
 
 /*-
@@ -26,6 +26,7 @@
 
 #include <sys/param.h>
 #include <sys/systm.h>
+#include <sys/rwlock.h>
 #include <sys/device.h>
 #include <sys/ioctl.h>
 #include <sys/malloc.h>
@@ -38,6 +39,16 @@
 
 #include <dev/wscons/wsconsio.h>
 #include <dev/wscons/wsmousevar.h>
+
+#if defined(__i386__) || defined(__amd64__)
+#include "acpi.h"
+#endif
+
+#if !defined(SMALL_KERNEL) && NACPI > 0
+extern int mouse_has_softbtn;
+#else
+int mouse_has_softbtn;
+#endif
 
 #ifdef DEBUG
 #define DPRINTF(x...)	do { printf(x); } while (0);
@@ -76,6 +87,12 @@ struct synaptics_softc {
 	int resolution, dimension;
 
 	int mode;
+
+	int mask;
+#define SYNAPTICS_MASK_NEWABS_STRICT	0xc8
+#define SYNAPTICS_MASK_NEWABS_RELAXED	0xc0
+#define SYNAPTICS_VALID_NEWABS_FIRST	0x80
+#define SYNAPTICS_VALID_NEWABS_NEXT	0xc0
 
 	int res_x, res_y;
 	int min_x, min_y;
@@ -125,8 +142,15 @@ struct elantech_softc {
 	struct {
 		unsigned int x;
 		unsigned int y;
+		unsigned int z;
 	} mt[ELANTECH_MAX_FINGERS];
-	int fingers[ELANTECH_MAX_FINGERS];
+	int mt_slots;
+	int mt_count;
+	int mt_filter;
+	int mt_lastid;
+	int mt_lastcount;
+	int mt_buttons;
+
 	int width;
 
 	u_char parity[256];
@@ -147,6 +171,8 @@ struct pms_softc {		/* driver status information */
 #define PMS_STATE_DISABLED	0
 #define PMS_STATE_ENABLED	1
 #define PMS_STATE_SUSPENDED	2
+
+	struct rwlock sc_state_lock;
 
 	int sc_dev_enable;
 #define PMS_DEV_IGNORE		0x00
@@ -295,6 +321,7 @@ int	elantech_set_absolute_mode_v2(struct pms_softc *);
 int	elantech_set_absolute_mode_v3(struct pms_softc *);
 int	elantech_set_absolute_mode_v4(struct pms_softc *);
 
+void	elantech_send_mt_input(struct pms_softc *, int);
 
 struct cfattach pms_ca = {
 	sizeof(struct pms_softc), pmsprobe, pmsattach, NULL,
@@ -605,14 +632,10 @@ pms_proc_mouse(struct pms_softc *sc)
 	dy = (sc->packet[0] & PMS_PS2_YNEG) ?
 	    (int)sc->packet[2] - 256 : sc->packet[2];
 
-	switch (sc->protocol->type) {
-	case PMS_STANDARD:
-		dz = 0;
-		break;
-	case PMS_INTELLI:
+	if (sc->protocol->type == PMS_INTELLI)
 		dz = (signed char)sc->packet[3];
-		break;
-	}
+	else
+		dz = 0;
 
 	wsmouse_input(sc->sc_wsmousedev,
 	    buttons, dx, dy, dz, 0, WSMOUSE_INPUT_DELTA);
@@ -661,6 +684,8 @@ pmsattach(struct device *parent, struct device *self, void *aux)
 
 	a.accessops = &pms_accessops;
 	a.accesscookie = sc;
+
+	rw_init(&sc->sc_state_lock, "pmsst");
 
 	/*
 	 * Attach the wsmouse, saving a handle to it.
@@ -762,8 +787,13 @@ int
 pms_enable(void *v)
 {
 	struct pms_softc *sc = v;
+	int rv;
 
-	return pms_change_state(sc, PMS_STATE_ENABLED, PMS_DEV_PRIMARY);
+	rw_enter_write(&sc->sc_state_lock);
+	rv = pms_change_state(sc, PMS_STATE_ENABLED, PMS_DEV_PRIMARY);
+	rw_exit_write(&sc->sc_state_lock);
+
+	return (rv);
 }
 
 void
@@ -771,7 +801,9 @@ pms_disable(void *v)
 {
 	struct pms_softc *sc = v;
 
+	rw_enter_write(&sc->sc_state_lock);
 	pms_change_state(sc, PMS_STATE_DISABLED, PMS_DEV_PRIMARY);
+	rw_exit_write(&sc->sc_state_lock);
 }
 
 int
@@ -789,8 +821,13 @@ int
 pms_sec_enable(void *v)
 {
 	struct pms_softc *sc = v;
+	int rv;
 
-	return (pms_change_state(sc, PMS_STATE_ENABLED, PMS_DEV_SECONDARY));
+	rw_enter_write(&sc->sc_state_lock);
+	rv = pms_change_state(sc, PMS_STATE_ENABLED, PMS_DEV_SECONDARY);
+	rw_exit_write(&sc->sc_state_lock);
+
+	return (rv);
 }
 
 void
@@ -798,7 +835,9 @@ pms_sec_disable(void *v)
 {
 	struct pms_softc *sc = v;
 
+	rw_enter_write(&sc->sc_state_lock);
 	pms_change_state(sc, PMS_STATE_DISABLED, PMS_DEV_SECONDARY);
+	rw_exit_write(&sc->sc_state_lock);
 }
 
 int
@@ -916,6 +955,12 @@ synaptics_get_hwinfo(struct pms_softc *sc)
 		return (-1);
 	}
 
+	if ((SYNAPTICS_ID_MAJOR(syn->identify) == 5) &&
+	    (SYNAPTICS_ID_MINOR(syn->identify) == 9))
+		syn->mask = SYNAPTICS_MASK_NEWABS_RELAXED;
+	else
+		syn->mask = SYNAPTICS_MASK_NEWABS_STRICT;
+
 	return (0);
 }
 
@@ -964,7 +1009,7 @@ pms_enable_synaptics(struct pms_softc *sc)
 	if (synaptics_knock(sc)) {
 		if (sc->synaptics == NULL)
 			goto err;
-		/* 
+		/*
 		 * Some synaptics touchpads don't resume quickly.
 		 * Retry a few times.
 		 */
@@ -1046,7 +1091,11 @@ pms_ioctl_synaptics(struct pms_softc *sc, u_long cmd, caddr_t data, int flag,
 
 	switch (cmd) {
 	case WSMOUSEIO_GTYPE:
-		*(u_int *)data = WSMOUSE_TYPE_SYNAPTICS;
+		if ((syn->ext_capabilities & SYNAPTICS_EXT_CAP_CLICKPAD) &&
+		    mouse_has_softbtn)
+			*(u_int *)data = WSMOUSE_TYPE_SYNAP_SBTN;
+		else
+			*(u_int *)data = WSMOUSE_TYPE_SYNAPTICS;
 		break;
 	case WSMOUSEIO_GCALIBCOORDS:
 		wsmc->minx = syn->min_x;
@@ -1072,13 +1121,15 @@ pms_ioctl_synaptics(struct pms_softc *sc, u_long cmd, caddr_t data, int flag,
 int
 pms_sync_synaptics(struct pms_softc *sc, int data)
 {
+	struct synaptics_softc *syn = sc->synaptics;
+
 	switch (sc->inputstate) {
 	case 0:
-		if ((data & 0xc8) != 0x80)
+		if ((data & syn->mask) != SYNAPTICS_VALID_NEWABS_FIRST)
 			return (-1);
 		break;
 	case 3:
-		if ((data & 0xc8) != 0xc0)
+		if ((data & syn->mask) != SYNAPTICS_VALID_NEWABS_NEXT)
 			return (-1);
 		break;
 	}
@@ -2215,75 +2266,66 @@ void
 pms_proc_elantech_v4(struct pms_softc *sc)
 {
 	struct elantech_softc *elantech = sc->elantech;
-	int z, delta_x1 = 0, delta_x2 = 0, delta_y1 = 0, delta_y2 = 0;
-	int i, weight, finger, fingers = 0, id, sid;
+	int n, id, slots, weight, dx, dy;
 
 	switch (sc->packet[3] & 0x1f) {
 	case ELANTECH_V4_PKT_STATUS:
-		fingers = sc->packet[1] & 0x1f;
-		for (i = 0; i < ELANTECH_MAX_FINGERS; i++) {
-			finger = ((fingers & (1 << i)) != 0);
-			if (elantech->fingers[i] && !finger)
-				/* notify that we lifted */
-				elantech_send_input(sc, elantech->mt[i].x,
-				    elantech->mt[i].y, 0, 0);
+		if (elantech->mt_slots == 0)
+			elantech->mt_lastid = -1;
+		slots = sc->packet[1] & 0x1f;
+		if (slots == 0 && elantech->mt_lastid > -1)
+			/* Notify that we lifted. */
+			elantech_send_input(sc,
+			    elantech->mt[elantech->mt_lastid].x,
+			    elantech->mt[elantech->mt_lastid].y, 0, 0);
 
-			elantech->fingers[i] = finger;
-		}
+		elantech->mt_filter = elantech->mt_slots = slots;
+
+		for (elantech->mt_count = 0; slots != 0; slots >>= 1)
+			elantech->mt_count += (1 & slots);
 
 		break;
 
 	case ELANTECH_V4_PKT_HEAD:
 		id = ((sc->packet[3] & 0xe0) >> 5) - 1;
-		if (id < 0)
-			return;
+		if (id > -1 && id < ELANTECH_MAX_FINGERS) {
+			elantech->mt[id].x =
+			    ((sc->packet[1] & 0x0f) << 8) | sc->packet[2];
+			elantech->mt[id].y =
+			    ((sc->packet[4] & 0x0f) << 8) | sc->packet[5];
+			elantech->mt[id].z =
+			    (sc->packet[1] & 0xf0)
+			    | ((sc->packet[4] & 0xf0) >> 4);
 
-		for (i = 0; i < ELANTECH_MAX_FINGERS; i++)
-			if (elantech->fingers[i])
-				fingers++;
-
-		elantech->mt[id].x = ((sc->packet[1] & 0x0f) << 8) |
-		    sc->packet[2];
-		elantech->mt[id].y = (((sc->packet[4] & 0x0f) << 8) |
-		    sc->packet[5]);
-		z = (sc->packet[1] & 0xf0) | ((sc->packet[4] & 0xf0) >> 4);
-
-		elantech_send_input(sc, elantech->mt[id].x, elantech->mt[id].y,
-		    z, fingers);
-
+			if (elantech->mt_filter & (1 << id)) {
+				elantech_send_mt_input(sc, id);
+				elantech->mt_filter = (1 << id);
+			}
+		}
 		break;
 
 	case ELANTECH_V4_PKT_MOTION:
-		id = ((sc->packet[0] & 0xe0) >> 5) - 1;
-		if (id < 0)
-			return;
-
-		sid = ((sc->packet[3] & 0xe0) >> 5) - 1;
 		weight = (sc->packet[0] & 0x10) ? ELANTECH_V4_WEIGHT_VALUE : 1;
+		for (n = 0; n < 6; n += 3) {
+			id = ((sc->packet[n] & 0xe0) >> 5) - 1;
+			if (id < 0 || id >= ELANTECH_MAX_FINGERS)
+				continue;
+			dx = weight * (signed char)sc->packet[n + 1];
+			dy = weight * (signed char)sc->packet[n + 2];
+			elantech->mt[id].x += dx;
+			elantech->mt[id].y += dy;
+			elantech->mt[id].z = 1;
+			if (elantech->mt_filter & (1 << id)) {
+				if ((dx | dy)
+				    || elantech->mt_count !=
+				    elantech->mt_lastcount
+				    || (sc->packet[0] & 3) !=
+				    elantech->mt_buttons)
+					elantech_send_mt_input(sc, id);
 
-		delta_x1 = (signed char)sc->packet[1];
-		delta_y1 = (signed char)sc->packet[2];
-		delta_x2 = (signed char)sc->packet[4];
-		delta_y2 = (signed char)sc->packet[5];
-
-		elantech->mt[id].x += delta_x1 * weight;
-		elantech->mt[id].y -= delta_y1 * weight;
-
-		for (i = 0; i < ELANTECH_MAX_FINGERS; i++)
-			if (elantech->fingers[i])
-				fingers++;
-
-		elantech_send_input(sc, elantech->mt[id].x, elantech->mt[id].y,
-		    1, fingers);
-
-		if (sid >= 0) {
-			elantech->mt[sid].x += delta_x2 * weight;
-			elantech->mt[sid].y -= delta_y2 * weight;
-			/* XXX: can only send one finger of input */
-			/*
-			elantech_send_input(sc, elantech->mt[sid].x,
-			    elantech->mt[sid].y, 1, fingers);
-			*/
+				elantech->mt_filter = (dx | dy) ?
+				    (1 << id) : elantech->mt_slots;
+			}
 		}
 
 		break;
@@ -2293,6 +2335,37 @@ pms_proc_elantech_v4(struct pms_softc *sc)
 		    sc->packet[3] & 0x1f);
 		return;
 	}
+}
+
+void
+elantech_send_mt_input(struct pms_softc *sc, int id)
+{
+	struct elantech_softc *elantech = sc->elantech;
+
+	if (id != elantech->mt_lastid) {
+		/* Correct for compatibility mode, but not useful yet: */
+		elantech->old_x = elantech->mt[id].x;
+		elantech->old_y = elantech->mt[id].y;
+		/*
+		 * To avoid a jump of the cursor, simulate a change of the
+		 * number of touches (without producing tapping gestures
+		 * accidentally). It should suffice to do that only if
+		 * mt_count hasn't changed, but we cannot rely on the
+		 * synaptics driver, which alters its finger counts when
+		 * handling click-and-drag actions (see HandleTapProcessing
+		 * and ComputeDeltas in synaptics.c).
+		 */
+		if (elantech->mt_lastid > -1)
+			elantech_send_input(sc,
+			    elantech->mt[id].x, elantech->mt[id].y,
+			    elantech->mt[id].z, ELANTECH_MAX_FINGERS);
+		elantech->mt_lastid = id;
+	}
+	elantech->mt_lastcount = elantech->mt_count;
+	elantech->mt_buttons = sc->packet[0] & 3;
+	elantech_send_input(sc,
+	    elantech->mt[id].x, elantech->mt[id].y,
+	    elantech->mt[id].z, elantech->mt_count);
 }
 
 void

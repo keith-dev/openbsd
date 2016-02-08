@@ -1,4 +1,4 @@
-/*	$OpenBSD: mount.c,v 1.58 2014/07/17 06:25:12 guenther Exp $	*/
+/*	$OpenBSD: mount.c,v 1.60 2015/01/16 06:39:59 deraadt Exp $	*/
 /*	$NetBSD: mount.c,v 1.24 1995/11/18 03:34:29 cgd Exp $	*/
 
 /*
@@ -30,7 +30,7 @@
  * SUCH DAMAGE.
  */
 
-#include <sys/param.h>
+#include <sys/types.h>
 #include <sys/mount.h>
 #include <sys/socket.h>
 #include <sys/wait.h>
@@ -48,6 +48,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include <limits.h>
 #include <util.h>
 
 #include "pathnames.h"
@@ -105,7 +106,7 @@ main(int argc, char * const argv[])
 	FILE *mountdfp;
 	pid_t pid;
 	int all, ch, forceall, i, mntsize, rval, new;
-	char *options, mntpath[MAXPATHLEN];
+	char *options, mntpath[PATH_MAX];
 
 	all = forceall = 0;
 	options = NULL;
@@ -345,7 +346,7 @@ mountfs(const char *vfstype, const char *spec, const char *name,
 	struct statfs sf;
 	pid_t pid;
 	int argc, i, status, argvsize;
-	char *optbuf, execname[MAXPATHLEN], mntpath[MAXPATHLEN];
+	char *optbuf, execname[PATH_MAX], mntpath[PATH_MAX];
 
 	if (realpath(name, mntpath) == NULL) {
 		warn("realpath %s", name);
@@ -595,13 +596,6 @@ prmount(struct statfs *sf)
 			(void)printf("%s%s", !f++ ? " (" : ", ", "gens");
 		if (iso_args->flags & ISOFSMNT_EXTATT)
 			(void)printf("%s%s", !f++ ? " (" : ", ", "extatt");
-	} else if (strcmp(sf->f_fstypename, MOUNT_PROCFS) == 0) {
-		struct procfs_args *procfs_args = &sf->mount_info.procfs_args;
-
-		if (verbose)
-			(void)printf("version %d", procfs_args->version);
-		if (procfs_args->flags & PROCFSMNT_LINUXCOMPAT)
-			(void)printf("%s%s", !f++ ? " (" : ", ", "linux");
 	}
 	(void)printf(f ? ")\n" : "\n");
 }

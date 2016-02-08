@@ -1,4 +1,4 @@
-/* $OpenBSD: machdep.c,v 1.164 2014/07/21 17:25:47 uebayasi Exp $ */
+/* $OpenBSD: machdep.c,v 1.169 2015/02/11 01:14:16 dlg Exp $ */
 /* $NetBSD: machdep.c,v 1.210 2000/06/01 17:12:38 thorpej Exp $ */
 
 /*-
@@ -104,6 +104,9 @@
 #include <machine/cpuconf.h>
 #ifndef NO_IEEE
 #include <machine/ieeefp.h>
+#endif
+#ifdef MULTIPROCESSOR
+#include <machine/lock.h>
 #endif
 
 #include <dev/pci/pcivar.h>
@@ -485,10 +488,10 @@ nobootinfo:
 			    memc->mddt_usage & MDDT_NONVOLATILE || /* XXX */
 			    memc->mddt_usage & MDDT_PALCODE)
 				mem_clusters[mem_cluster_cnt].size |=
-				    VM_PROT_READ;
+				    PROT_READ;
 			else
 				mem_clusters[mem_cluster_cnt].size |=
-				    VM_PROT_READ | VM_PROT_WRITE | VM_PROT_EXECUTE;
+				    PROT_READ | PROT_WRITE | PROT_EXEC;
 			mem_cluster_cnt++;
 		} /* XXX else print something! */
 
@@ -971,7 +974,6 @@ struct pcb dumppcb;
 __dead void
 boot(int howto)
 {
-	struct device *mainbus;
 #if defined(MULTIPROCESSOR)
 	u_long wait_mask;
 	int i;
@@ -1029,10 +1031,7 @@ boot(int howto)
 		dumpsys();
 
 haltsys:
-	doshutdownhooks();
-	mainbus = device_mainbus();
-	if (mainbus != NULL)
-		config_suspend(mainbus, DVACT_POWERDOWN);
+	config_suspend_all(DVACT_POWERDOWN);
 
 #ifdef BOOTKEY
 	printf("hit any key to %s...\n",
@@ -1433,11 +1432,7 @@ sendsig(catcher, sig, mask, code, type, val)
 	}
 
 	/*
-	 * Allocate and validate space for the signal handler
-	 * context. Note that if the stack is in P0 space, the
-	 * call to uvm_grow() is a nop, and the useracc() check
-	 * will fail if the process has not already allocated
-	 * the space with a `brk'.
+	 * Allocate space for the signal handler context.
 	 */
 	if ((p->p_sigstk.ss_flags & SS_DISABLE) == 0 &&
 	    !sigonstack(oldsp) && (psp->ps_sigonstack & sigmask(sig)))
@@ -1445,8 +1440,6 @@ sendsig(catcher, sig, mask, code, type, val)
 		    p->p_sigstk.ss_size - rndfsize);
 	else
 		scp = (struct sigcontext *)(oldsp - rndfsize);
-	if ((u_long)scp <= USRSTACK - ptoa(p->p_vmspace->vm_ssize))
-		(void)uvm_grow(p, (u_long)scp);
 #ifdef DEBUG
 	if ((sigdebug & SDB_KSTACK) && p->p_pid == sigpid)
 		printf("sendsig(%d): sig %d ssp %p usp %p\n", p->p_pid,
@@ -1908,9 +1901,9 @@ alpha_pa_access(pa)
 	 * access.  Otherwise, grant read/write.
 	 */
 	if (securelevel > 0)
-		return (VM_PROT_NONE);
+		return (PROT_NONE);
 	else
-		return (VM_PROT_READ | VM_PROT_WRITE);
+		return (PROT_READ | PROT_WRITE);
 }
 
 /* XXX XXX BEGIN XXX XXX */

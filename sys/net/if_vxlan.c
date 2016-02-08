@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_vxlan.c,v 1.15 2014/07/22 11:06:09 mpi Exp $	*/
+/*	$OpenBSD: if_vxlan.c,v 1.21 2015/01/24 00:29:06 deraadt Exp $	*/
 
 /*
  * Copyright (c) 2013 Reyk Floeter <reyk@openbsd.org>
@@ -30,16 +30,13 @@
 #include <sys/ioctl.h>
 
 #include <net/if.h>
+#include <net/if_var.h>
 #include <net/if_dl.h>
 #include <net/if_media.h>
 #include <net/route.h>
 
 #if NBPFILTER > 0
 #include <net/bpf.h>
-#endif
-
-#if NPF > 0
-#include <net/pfvar.h>
 #endif
 
 #include <netinet/in.h>
@@ -50,6 +47,10 @@
 #include <netinet/udp.h>
 #include <netinet/udp_var.h>
 #include <netinet/in_pcb.h>
+
+#if NPF > 0
+#include <net/pfvar.h>
+#endif
 
 #if NBRIDGE > 0
 #include <net/if_bridge.h>
@@ -140,9 +141,7 @@ vxlan_clone_create(struct if_clone *ifc, int unit)
 	 * at least 1550 bytes. The following is disabled by default.
 	 */
 	ifp->if_mtu = ETHERMTU - sizeof(struct ether_header);
-#ifdef INET
 	ifp->if_mtu -= sizeof(struct vxlanudpiphdr);
-#endif
 #endif
 
 	LIST_INSERT_HEAD(&vxlan_tagh[VXLAN_TAGHASH(0)], sc, sc_entry);
@@ -168,7 +167,7 @@ vxlan_clone_destroy(struct ifnet *ifp)
 	ether_ifdetach(ifp);
 	if_detach(ifp);
 	free(sc->sc_imo.imo_membership, M_IPMOPTS, 0);
-	free(sc, M_DEVBUF, 0);
+	free(sc, M_DEVBUF, sizeof(*sc));
 
 	return (0);
 }
@@ -178,8 +177,9 @@ vxlan_multicast_cleanup(struct ifnet *ifp)
 {
 	struct vxlan_softc	*sc = (struct vxlan_softc *)ifp->if_softc;
 	struct ip_moptions	*imo = &sc->sc_imo;
-	struct ifnet		*mifp = imo->imo_multicast_ifp;
+	struct ifnet		*mifp;
 
+	mifp = if_get(imo->imo_ifidx);
 	if (mifp != NULL) {
 		if (sc->sc_ahcookie != NULL) {
 			hook_disestablish(mifp->if_addrhooks, sc->sc_ahcookie);
@@ -199,7 +199,7 @@ vxlan_multicast_cleanup(struct ifnet *ifp)
 
 	if (imo->imo_num_memberships > 0) {
 		in_delmulti(imo->imo_membership[--imo->imo_num_memberships]);
-		imo->imo_multicast_ifp = NULL;
+		imo->imo_ifidx = 0;
 	}
 }
 
@@ -228,12 +228,12 @@ vxlan_multicast_join(struct ifnet *ifp, struct sockaddr_in *src,
 		return (ENOBUFS);
 
 	imo->imo_num_memberships++;
-	imo->imo_multicast_ifp = mifp;
+	imo->imo_ifidx = mifp->if_index;
 	if (sc->sc_ttl > 0)
-		imo->imo_multicast_ttl = sc->sc_ttl;
+		imo->imo_ttl = sc->sc_ttl;
 	else
-		imo->imo_multicast_ttl = IP_DEFAULT_MULTICAST_TTL;
-	imo->imo_multicast_loop = 0;
+		imo->imo_ttl = IP_DEFAULT_MULTICAST_TTL;
+	imo->imo_loop = 0;
 
 	/*
 	 * Use interface hooks to track any changes on the interface
@@ -279,9 +279,7 @@ int
 vxlan_config(struct ifnet *ifp, struct sockaddr *src, struct sockaddr *dst)
 {
 	struct vxlan_softc	*sc = (struct vxlan_softc *)ifp->if_softc;
-#ifdef INET
 	struct sockaddr_in	*src4, *dst4;
-#endif
 	int			 reset = 0, error;
 
 	if (src != NULL && dst != NULL) {
@@ -295,24 +293,20 @@ vxlan_config(struct ifnet *ifp, struct sockaddr *src, struct sockaddr *dst)
 		reset = 1;
 	}
 
-#ifdef INET
 	src4 = satosin(src);
 	dst4 = satosin(dst);
 
 	if (src4->sin_len != sizeof(*src4) || dst4->sin_len != sizeof(*dst4))
 		return (EINVAL);
-#endif
 
 	vxlan_multicast_cleanup(ifp);
 
-#ifdef INET
 	if (IN_MULTICAST(dst4->sin_addr.s_addr)) {
 		if ((error = vxlan_multicast_join(ifp, src4, dst4)) != 0)
 			return (error);
 	}
 	if (dst4->sin_port)
 		sc->sc_dstport = dst4->sin_port;
-#endif
 
 	if (!reset) {
 		bzero(&sc->sc_src, sizeof(sc->sc_src));
@@ -333,9 +327,7 @@ int
 vxlanioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 {
 	struct vxlan_softc	*sc = (struct vxlan_softc *)ifp->if_softc;
-#ifdef INET
 	struct ifaddr		*ifa = (struct ifaddr *)data;
-#endif
 	struct ifreq		*ifr = (struct ifreq *)data;
 	struct if_laddrreq	*lifr = (struct if_laddrreq *)data;
 	struct proc		*p = curproc;
@@ -344,10 +336,8 @@ vxlanioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 	switch (cmd) {
 	case SIOCSIFADDR:
 		ifp->if_flags |= IFF_UP;
-#ifdef INET
 		if (ifa->ifa_addr->sa_family == AF_INET)
 			arp_ifinit(&sc->sc_ac, ifa);
-#endif
 		/* FALLTHROUGH */
 
 	case SIOCSIFFLAGS:
@@ -558,7 +548,6 @@ int
 vxlan_output(struct ifnet *ifp, struct mbuf *m)
 {
 	struct vxlan_softc	*sc = (struct vxlan_softc *)ifp->if_softc;
-#ifdef INET
 	struct udpiphdr		*ui;
 	struct vxlanudpiphdr	*vi;
 	u_int16_t		 len = m->m_pkthdr.len;
@@ -566,10 +555,8 @@ vxlan_output(struct ifnet *ifp, struct mbuf *m)
 #if NBRIDGE > 0
 	struct sockaddr_in	*sin;
 #endif
-#endif
 	int			 error;
 
-#ifdef INET
 	/* VXLAN header */
 	M_PREPEND(m, sizeof(*vi), M_DONTWAIT);
 	if (m == NULL) {
@@ -622,7 +609,6 @@ vxlan_output(struct ifnet *ifp, struct mbuf *m)
 
 	/* UDP checksum should be 0 */
 	ui->ui_sum = 0;
-#endif
 
 	ifp->if_opackets++;
 	ifp->if_obytes += m->m_pkthdr.len;
@@ -633,12 +619,10 @@ vxlan_output(struct ifnet *ifp, struct mbuf *m)
 	pf_pkt_addr_changed(m);
 #endif
 
-#ifdef INET
 	if ((error =
 	    ip_output(m, NULL, NULL, IP_RAWOUTPUT, &sc->sc_imo, NULL, 0))) {
 		ifp->if_oerrors++;
 	}
-#endif
 
 	return (error);
 }

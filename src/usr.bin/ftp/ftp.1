@@ -1,5 +1,5 @@
-.\" 	$OpenBSD: ftp.1,v 1.93 2014/07/11 03:31:52 lteo Exp $
-.\" 	$NetBSD: ftp.1,v 1.22 1997/08/18 10:20:22 lukem Exp $
+.\"	$OpenBSD: ftp.1,v 1.97 2015/02/17 22:39:32 tedu Exp $
+.\"	$NetBSD: ftp.1,v 1.22 1997/08/18 10:20:22 lukem Exp $
 .\"
 .\" Copyright (c) 1985, 1989, 1990, 1993
 .\"	The Regents of the University of California.  All rights reserved.
@@ -30,7 +30,7 @@
 .\"
 .\"	@(#)ftp.1	8.3 (Berkeley) 10/9/94
 .\"
-.Dd $Mdocdate: July 11 2014 $
+.Dd $Mdocdate: February 17 2015 $
 .Dt FTP 1
 .Os
 .Sh NAME
@@ -38,7 +38,7 @@
 .Nd Internet file transfer program
 .Sh SYNOPSIS
 .Nm ftp
-.Op Fl 46AadEegimnptVv
+.Op Fl 46AadEegiMmnptVv
 .Op Fl D Ar title
 .Op Fl k Ar seconds
 .Op Fl P Ar port
@@ -181,6 +181,11 @@ transfer.
 By default,
 .Nm
 will send a byte every 60 seconds.
+.It Fl M
+Causes
+.Nm
+to never display the progress meter in cases where it would do
+so by default.
 .It Fl m
 Causes
 .Nm
@@ -273,7 +278,8 @@ Enables packet tracing.
 Set
 .Ar useragent
 as the User-Agent for HTTP(S) URL requests.
-If not specified, the default User-Agent is ``OpenBSD ftp''.
+If not specified, the default User-Agent is
+.Dq OpenBSD ftp .
 .It Fl V
 Disable verbose mode, overriding the default of enabled when input
 is from a terminal.
@@ -1223,11 +1229,6 @@ The remote server will report the unique name.
 Default value is off.
 .It Ic system
 Show the type of operating system running on the remote machine.
-.It Ic tenex
-Set the file transfer type to that needed to
-talk to
-.Tn TENEX
-machines.
 .It Ic trace Op Ic on | off
 Toggle packet tracing.
 .It Ic type Op Ar type-name
@@ -1475,8 +1476,7 @@ Failing the above checks, if
 is enabled,
 local file names are expanded
 according to the rules used in the
-.Xr csh 1 ;
-c.f. the
+.Xr csh 1
 .Ic glob
 command.
 If the
@@ -1524,17 +1524,10 @@ The
 may be one of
 .Dq ascii ,
 .Dq binary ,
-.Dq image ,
-.Dq ebcdic
-.Pq currently not supported
 or
-.Dq tenex
-(local byte size 8, for PDP-10's and PDP-20's mostly).
+.Dq image .
 .Nm
-supports the ASCII and image types of file transfer,
-plus local byte size 8 for
-.Ic tenex
-mode transfers.
+supports the ASCII and image types of file transfer.
 .Pp
 .Nm
 supports only the default values for the remaining

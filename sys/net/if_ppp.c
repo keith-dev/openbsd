@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_ppp.c,v 1.76 2014/07/22 11:06:09 mpi Exp $	*/
+/*	$OpenBSD: if_ppp.c,v 1.80 2014/12/19 17:14:39 tedu Exp $	*/
 /*	$NetBSD: if_ppp.c,v 1.39 1997/05/17 21:11:59 christos Exp $	*/
 
 /*
@@ -120,26 +120,16 @@
 #include <sys/malloc.h>
 
 #include <net/if.h>
+#include <net/if_var.h>
 #include <net/if_types.h>
 #include <net/netisr.h>
 #include <net/route.h>
 #include <net/bpf.h>
 
-#ifdef INET
 #include <netinet/in.h>
 #include <netinet/ip.h>
-#else
-#ifdef _KERNEL
-#ifdef VJC
-#error ppp device with VJC assumes INET
-#endif
-#endif
-#endif
 
 #include "bpfilter.h"
-#if NBPFILTER > 0
-#include <net/bpf.h>
-#endif
 
 #ifdef VJC
 #include <net/slcompress.h>
@@ -564,8 +554,9 @@ pppioctl(struct ppp_softc *sc, u_long cmd, caddr_t data, int flag,
 	if ((unsigned) nbp->bf_len > BPF_MAXINSNS)
 	    return EINVAL;
 	newcodelen = nbp->bf_len * sizeof(struct bpf_insn);
-	if (newcodelen != 0) {
-	    newcode = malloc(newcodelen, M_DEVBUF, M_WAITOK);
+	if (nbp->bf_len != 0) {
+	    newcode = mallocarray(nbp->bf_len, sizeof(struct bpf_insn),
+		M_DEVBUF, M_WAITOK);
 	    if ((error = copyin((caddr_t)nbp->bf_insns, (caddr_t)newcode,
 			       newcodelen)) != 0) {
 		free(newcode, M_DEVBUF, 0);
@@ -706,7 +697,6 @@ pppoutput(struct ifnet *ifp, struct mbuf *m0, struct sockaddr *dst,
      */
     m0->m_flags &= ~M_HIGHPRI;
     switch (dst->sa_family) {
-#ifdef INET
     case AF_INET:
 	address = PPP_ALLSTATIONS;
 	control = PPP_UI;
@@ -721,7 +711,6 @@ pppoutput(struct ifnet *ifp, struct mbuf *m0, struct sockaddr *dst,
 	if (ip->ip_tos & IPTOS_LOWDELAY)
 	    m0->m_flags |= M_HIGHPRI;
 	break;
-#endif
     case AF_UNSPEC:
 	address = PPP_ADDRESS(dst->sa_data);
 	control = PPP_CONTROL(dst->sa_data);
@@ -1460,7 +1449,6 @@ ppp_inproc(struct ppp_softc *sc, struct mbuf *m)
 
     rv = 0;
     switch (proto) {
-#ifdef INET
     case PPP_IP:
 	/*
 	 * IP packet - take off the ppp header and pass it up to IP.
@@ -1477,7 +1465,6 @@ ppp_inproc(struct ppp_softc *sc, struct mbuf *m)
 	schednetisr(NETISR_IP);
 	inq = &ipintrq;
 	break;
-#endif
 
     default:
 	/*

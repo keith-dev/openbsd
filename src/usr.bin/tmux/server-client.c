@@ -1,4 +1,4 @@
-/* $OpenBSD: server-client.c,v 1.122 2014/07/13 20:51:08 krw Exp $ */
+/* $OpenBSD: server-client.c,v 1.128 2015/02/06 17:17:12 nicm Exp $ */
 
 /*
  * Copyright (c) 2009 Nicholas Marriott <nicm@users.sourceforge.net>
@@ -160,7 +160,7 @@ server_client_lost(struct client *c)
 	evbuffer_free(c->stdin_data);
 	evbuffer_free(c->stdout_data);
 	if (c->stderr_data != c->stdout_data)
-		evbuffer_free (c->stderr_data);
+		evbuffer_free(c->stderr_data);
 
 	status_free_jobs(&c->status_new);
 	status_free_jobs(&c->status_old);
@@ -329,6 +329,7 @@ server_client_check_mouse(struct client *c, struct window_pane *wp)
 	if (options_get_number(oo, "mouse-select-pane") &&
 	    (m->event == MOUSE_EVENT_DOWN || m->event == MOUSE_EVENT_WHEEL)) {
 		window_set_active_at(wp->window, m->x, m->y);
+		server_status_window(wp->window);
 		server_redraw_window_borders(wp->window);
 		wp = wp->window->active; /* may have changed */
 	}
@@ -637,7 +638,7 @@ server_client_reset_state(struct client *c)
 	if (!window_pane_visible(wp) || wp->yoff + s->cy >= c->tty.sy - status)
 		tty_cursor(&c->tty, 0, 0);
 	else {
-		o = status && options_get_number (oo, "status-position") == 0;
+		o = status && options_get_number(oo, "status-position") == 0;
 		tty_cursor(&c->tty, wp->xoff + s->cx, o + wp->yoff + s->cy);
 	}
 
@@ -647,7 +648,7 @@ server_client_reset_state(struct client *c)
 	 */
 	mode = s->mode;
 	if ((c->tty.mouse.flags & MOUSE_RESIZE_PANE) &&
-	    !(mode & (MODE_MOUSE_BUTTON|MODE_MOUSE_ANY)))
+	    !(mode & MODE_MOUSE_BUTTON))
 		mode |= MODE_MOUSE_BUTTON;
 
 	/*
@@ -772,19 +773,25 @@ server_client_check_redraw(struct client *c)
 void
 server_client_set_title(struct client *c)
 {
-	struct session	*s = c->session;
-	const char	*template;
-	char		*title;
+	struct session		*s = c->session;
+	const char		*template;
+	char			*title;
+	struct format_tree	*ft;
 
 	template = options_get_string(&s->options, "set-titles-string");
 
-	title = status_replace(c, NULL, NULL, NULL, template, time(NULL), 1);
+	ft = format_create();
+	format_defaults(ft, c, NULL, NULL, NULL);
+
+	title = format_expand_time(ft, template, time(NULL));
 	if (c->title == NULL || strcmp(title, c->title) != 0) {
 		free(c->title);
 		c->title = xstrdup(title);
 		tty_set_title(&c->tty, c->title);
 	}
 	free(title);
+
+	format_free(ft);
 }
 
 /* Dispatch message from client. */
@@ -914,7 +921,7 @@ server_client_msg_command(struct client *c, struct imsg *imsg)
 		fatalx("bad MSG_COMMAND size");
 	memcpy(&data, imsg->data, sizeof data);
 
-	buf = (char*)imsg->data + sizeof data;
+	buf = (char *)imsg->data + sizeof data;
 	len = imsg->hdr.len  - IMSG_HEADER_SIZE - sizeof data;
 	if (len > 0 && buf[len - 1] != '\0')
 		fatalx("bad MSG_COMMAND string");

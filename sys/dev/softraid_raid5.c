@@ -1,4 +1,4 @@
-/* $OpenBSD: softraid_raid5.c,v 1.15 2014/01/23 00:22:35 jsing Exp $ */
+/* $OpenBSD: softraid_raid5.c,v 1.17 2014/11/18 02:37:30 tedu Exp $ */
 /*
  * Copyright (c) 2014 Joel Sing <jsing@openbsd.org>
  * Copyright (c) 2009 Marco Peereboom <marco@peereboom.us>
@@ -24,7 +24,6 @@
 #include <sys/buf.h>
 #include <sys/device.h>
 #include <sys/ioctl.h>
-#include <sys/proc.h>
 #include <sys/malloc.h>
 #include <sys/kernel.h>
 #include <sys/disk.h>
@@ -45,7 +44,6 @@
 #include <scsi/scsi_disk.h>
 
 #include <dev/softraidvar.h>
-#include <dev/rndvar.h>
 
 /* RAID 5 functions. */
 int	sr_raid5_create(struct sr_discipline *, struct bioc_createraid *,

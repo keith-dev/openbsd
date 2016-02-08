@@ -1,4 +1,4 @@
-/* $OpenBSD: t1_meth.c,v 1.12 2014/06/12 15:49:31 deraadt Exp $ */
+/* $OpenBSD: t1_meth.c,v 1.16 2015/02/06 08:30:23 jsing Exp $ */
 /* Copyright (C) 1995-1998 Eric Young (eay@cryptsoft.com)
  * All rights reserved.
  *
@@ -57,7 +57,9 @@
  */
 
 #include <stdio.h>
+
 #include <openssl/objects.h>
+
 #include "ssl_locl.h"
 
 static const SSL_METHOD *tls1_get_method(int ver);
@@ -159,21 +161,21 @@ const SSL_METHOD TLSv1_2_method_data = {
 };
 
 const SSL_METHOD *
-TLSv1_method(void) 
+TLSv1_method(void)
 {
-	return &TLSv1_method_data; 
+	return &TLSv1_method_data;
 }
 
 const SSL_METHOD *
-TLSv1_1_method(void) 
+TLSv1_1_method(void)
 {
-	return &TLSv1_1_method_data; 
+	return &TLSv1_1_method_data;
 }
 
 const SSL_METHOD *
-TLSv1_2_method(void) 
+TLSv1_2_method(void)
 {
-	return &TLSv1_2_method_data; 
+	return &TLSv1_2_method_data;
 }
 
 static const SSL_METHOD *

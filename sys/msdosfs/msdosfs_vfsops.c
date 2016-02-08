@@ -1,4 +1,4 @@
-/*	$OpenBSD: msdosfs_vfsops.c,v 1.68 2014/07/12 18:50:41 tedu Exp $	*/
+/*	$OpenBSD: msdosfs_vfsops.c,v 1.71 2015/02/13 13:35:03 millert Exp $	*/
 /*	$NetBSD: msdosfs_vfsops.c,v 1.48 1997/10/18 02:54:57 briggs Exp $	*/
 
 /*-
@@ -54,6 +54,7 @@
 #include <sys/proc.h>
 #include <sys/kernel.h>
 #include <sys/vnode.h>
+#include <sys/lock.h>
 #include <sys/specdev.h> /* XXX */	/* defines v_rdev */
 #include <sys/mount.h>
 #include <sys/buf.h>
@@ -63,6 +64,7 @@
 #include <sys/malloc.h>
 #include <sys/dirent.h>
 #include <sys/disk.h>
+#include <sys/stdint.h>
 
 #include <msdosfs/bpb.h>
 #include <msdosfs/bootsect.h>
@@ -524,7 +526,7 @@ msdosfs_mountfs(struct vnode *devvp, struct mount *mp, struct proc *p,
 		error = EINVAL;
 		goto error_exit;
 	}
-	pmp->pm_inusemap = malloc(bmapsiz * sizeof(*pmp->pm_inusemap),
+	pmp->pm_inusemap = mallocarray(bmapsiz, sizeof(*pmp->pm_inusemap),
 	    M_MSDOSFSFAT, M_WAITOK | M_CANFAIL);
 	if (pmp->pm_inusemap == NULL) {
 		error = EINVAL;

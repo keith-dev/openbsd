@@ -1,4 +1,4 @@
-/*	$OpenBSD: uhub.c,v 1.69 2014/07/12 18:48:52 tedu Exp $ */
+/*	$OpenBSD: uhub.c,v 1.83 2015/02/12 05:07:52 uebayasi Exp $ */
 /*	$NetBSD: uhub.c,v 1.64 2003/02/08 03:32:51 ichiro Exp $	*/
 /*	$FreeBSD: src/sys/dev/usb/uhub.c,v 1.18 1999/11/17 22:33:43 n_hibma Exp $	*/
 
@@ -112,11 +112,15 @@ uhub_attach(struct device *parent, struct device *self, void *aux)
 	struct usb_attach_arg *uaa = aux;
 	struct usbd_device *dev = uaa->device;
 	struct usbd_hub *hub = NULL;
-	usb_hub_descriptor_t hubdesc;
-	int p, port, nports, pwrdly;
+	union {
+		usb_hub_descriptor_t	hs;
+		usb_hub_ss_descriptor_t	ss;
+	} hd;
+	int p, port, nports, powerdelay;
 	struct usbd_interface *iface;
 	usb_endpoint_descriptor_t *ed;
 	struct usbd_tt *tts = NULL;
+	uint8_t ttthink = 0;
 	usbd_status err;
 #ifdef UHUB_DEBUG
 	int nremov;
@@ -137,11 +141,37 @@ uhub_attach(struct device *parent, struct device *self, void *aux)
 		return;
 	}
 
+	/*
+	 * Super-Speed hubs need to know their depth to be able to
+	 * parse the bits of the route-string that correspond to
+	 * their downstream port number.
+	 *
+	 * This does no apply to root hubs.
+	 */
+	if (dev->depth != 0 && dev->speed == USB_SPEED_SUPER) {
+		if (usbd_set_hub_depth(dev, dev->depth - 1)) {
+			printf("%s: unable to set HUB depth\n",
+			    sc->sc_dev.dv_xname);
+			return;
+		}
+	}
+
 	/* Get hub descriptor. */
-	err = usbd_get_hub_descriptor(dev, &hubdesc, 1);
-	nports = hubdesc.bNbrPorts;
-	if (!err && nports > 7)
-		usbd_get_hub_descriptor(dev, &hubdesc, nports);
+	if (dev->speed == USB_SPEED_SUPER) {
+		err = usbd_get_hub_ss_descriptor(dev, &hd.ss, 1);
+		nports = hd.ss.bNbrPorts;
+		powerdelay = (hd.ss.bPwrOn2PwrGood * UHD_PWRON_FACTOR);
+		if (!err && nports > 7)
+			usbd_get_hub_ss_descriptor(dev, &hd.ss, nports);
+	} else {
+		err = usbd_get_hub_descriptor(dev, &hd.hs, 1);
+		nports = hd.hs.bNbrPorts;
+		powerdelay = (hd.hs.bPwrOn2PwrGood * UHD_PWRON_FACTOR);
+		ttthink = UGETW(hd.hs.wHubCharacteristics) & UHD_TT_THINK;
+		if (!err && nports > 7)
+			usbd_get_hub_descriptor(dev, &hd.hs, nports);
+	}
+
 	if (err) {
 		DPRINTF("%s: getting hub descriptor failed, error=%s\n",
 			 sc->sc_dev.dv_xname, usbd_errstr(err));
@@ -149,9 +179,15 @@ uhub_attach(struct device *parent, struct device *self, void *aux)
 	}
 
 #ifdef UHUB_DEBUG
-	for (nremov = 0, port = 1; port <= nports; port++)
-		if (!UHD_NOT_REMOV(&hubdesc, port))
-			nremov++;
+	for (nremov = 0, port = 1; port <= nports; port++) {
+		if (dev->speed == USB_SPEED_SUPER) {
+			if (!UHD_NOT_REMOV(&hd.ss, port))
+				nremov++;
+		} else {
+			if (!UHD_NOT_REMOV(&hd.hs, port))
+				nremov++;
+		}
+	}
 
 	printf("%s: %d port%s with %d removable, %s powered",
 	       sc->sc_dev.dv_xname, nports, nports != 1 ? "s" : "",
@@ -174,7 +210,7 @@ uhub_attach(struct device *parent, struct device *self, void *aux)
 	hub = malloc(sizeof(*hub), M_USBDEV, M_NOWAIT);
 	if (hub == NULL)
 		return;
-	hub->ports = malloc(sizeof(struct usbd_port) * nports,
+	hub->ports = mallocarray(nports, sizeof(struct usbd_port),
 	    M_USBDEV, M_NOWAIT);
 	if (hub->ports == NULL) {
 		free(hub, M_USBDEV, 0);
@@ -183,7 +219,9 @@ uhub_attach(struct device *parent, struct device *self, void *aux)
 	dev->hub = hub;
 	dev->hub->hubsoftc = sc;
 	hub->explore = uhub_explore;
-	hub->hubdesc = hubdesc;
+	hub->nports = nports;
+	hub->powerdelay = powerdelay;
+	hub->ttthink = ttthink >> 5;
 
 	if (!dev->self_powered && dev->powersrc->parent != NULL &&
 	    !dev->powersrc->parent->self_powered) {
@@ -251,7 +289,7 @@ uhub_attach(struct device *parent, struct device *self, void *aux)
 	 */
 
 	if (UHUB_IS_HIGH_SPEED(sc)) {
-		tts = malloc((UHUB_IS_SINGLE_TT(sc) ? 1 : nports) *
+		tts = mallocarray((UHUB_IS_SINGLE_TT(sc) ? 1 : nports),
 		    sizeof (struct usbd_tt), M_USBDEV, M_NOWAIT);
 		if (!tts)
 			goto bad;
@@ -261,7 +299,7 @@ uhub_attach(struct device *parent, struct device *self, void *aux)
 		struct usbd_port *up = &hub->ports[p];
 		up->device = NULL;
 		up->parent = dev;
-		up->portno = p+1;
+		up->portno = p + 1;
 		if (dev->self_powered)
 			/* Self powered hub, give ports maximum current. */
 			up->power = USB_MAX_POWER;
@@ -277,10 +315,6 @@ uhub_attach(struct device *parent, struct device *self, void *aux)
 		}
 	}
 
-	/* XXX should check for none, individual, or ganged power? */
-
-	pwrdly = dev->hub->hubdesc.bPwrOn2PwrGood * UHD_PWRON_FACTOR
-	    + USB_EXTRA_POWER_UP_TIME;
 	for (port = 1; port <= nports; port++) {
 		/* Turn the power on. */
 		err = usbd_set_port_feature(dev, port, UHF_PORT_POWER);
@@ -290,9 +324,9 @@ uhub_attach(struct device *parent, struct device *self, void *aux)
 			       usbd_errstr(err));
 	}
 
-	/* Wait for stable power.  Root hubs delay in their event thread. */
+	/* Wait for stable power. */
         if (dev->powersrc->parent != NULL)
-		usbd_delay_ms(dev, pwrdly);
+		usbd_delay_ms(dev, powerdelay + USB_EXTRA_POWER_UP_TIME);
 
 	/* The usual exploration will finish the setup. */
 
@@ -314,7 +348,6 @@ uhub_attach(struct device *parent, struct device *self, void *aux)
 int
 uhub_explore(struct usbd_device *dev)
 {
-	usb_hub_descriptor_t *hd = &dev->hub->hubdesc;
 	struct uhub_softc *sc = dev->hub->hubsoftc;
 	struct usbd_port *up;
 	usbd_status err;
@@ -332,7 +365,7 @@ uhub_explore(struct usbd_device *dev)
 	if (dev->depth > USB_HUB_MAX_DEPTH)
 		return (EOPNOTSUPP);
 
-	for (port = 1; port <= hd->bNbrPorts; port++) {
+	for (port = 1; port <= dev->hub->nports; port++) {
 		up = &dev->hub->ports[port-1];
 		err = usbd_get_port_status(dev, port, &up->status);
 		if (err) {
@@ -378,7 +411,6 @@ uhub_explore(struct usbd_device *dev)
 
 		/* We have a connect status change, handle it. */
 		usbd_clear_port_feature(dev, port, UHF_C_PORT_CONNECTION);
-		/*usbd_clear_port_feature(dev, port, UHF_C_PORT_ENABLE);*/
 		/*
 		 * If there is already a device on the port the change status
 		 * must mean that is has disconnected.  Looking at the
@@ -400,15 +432,17 @@ uhub_explore(struct usbd_device *dev)
 		}
 
 		/* Connected */
-		if (!(status & UPS_PORT_POWER))
-			printf("%s: strange, connected port %d has no power\n",
+		if (!(status & (UPS_PORT_POWER|UPS_PORT_POWER_SS))) {
+			printf("%s: connected port %d has no power\n",
 			       sc->sc_dev.dv_xname, port);
+			continue;
+		}
 
 		/* Wait for maximum device power up time. */
 		usbd_delay_ms(dev, USB_PORT_POWERUP_DELAY);
 
 		/* Reset port, which implies enabling it. */
-		if (usbd_reset_port(dev, port, &up->status)) {
+		if (usbd_reset_port(dev, port)) {
 			printf("%s: port %d reset failed\n",
 			       sc->sc_dev.dv_xname, port);
 			continue;
@@ -429,15 +463,38 @@ uhub_explore(struct usbd_device *dev)
 			continue;
 		}
 
-		/* Figure out device speed */
+		/*
+		 * Figure out device speed.  This is a bit tricky because
+		 * UPS_PORT_POWER_SS and UPS_LOW_SPEED share the same bit.
+		 */
+		if ((status & UPS_PORT_POWER) == 0)
+			status &= ~UPS_PORT_POWER_SS;
+
 		if (status & UPS_SUPER_SPEED)
 			speed = USB_SPEED_SUPER;
 		else if (status & UPS_HIGH_SPEED)
 			speed = USB_SPEED_HIGH;
 		else if (status & UPS_LOW_SPEED)
 			speed = USB_SPEED_LOW;
-		else
-			speed = USB_SPEED_FULL;
+		else {
+			/*
+			 * If there is no power bit set, it is certainly
+			 * a Super Speed device, so use the speed of its
+			 * parent hub.
+			 */
+			if (status & UPS_PORT_POWER)
+				speed = USB_SPEED_FULL;
+			else
+				speed = sc->sc_hub->speed;
+		}
+
+		/*
+		 * Reduce the speed, otherwise we won't setup the proper
+		 * transfer methods.
+		 */
+		if (speed > sc->sc_hub->speed)
+			speed = sc->sc_hub->speed;
+
 		/* Get device info and set its address. */
 		err = usbd_new_device(&sc->sc_dev, dev->bus,
 			  dev->depth + 1, speed, port, up);
@@ -478,7 +535,7 @@ uhub_detach(struct device *self, int flags)
 	struct uhub_softc *sc = (struct uhub_softc *)self;
 	struct usbd_hub *hub = sc->sc_hub->hub;
 	struct usbd_port *rup;
-	int port, nports;
+	int port;
 
 	if (hub == NULL)		/* Must be partially working */
 		return (0);
@@ -486,8 +543,7 @@ uhub_detach(struct device *self, int flags)
 	usbd_abort_pipe(sc->sc_ipipe);
 	usbd_close_pipe(sc->sc_ipipe);
 
-	nports = hub->hubdesc.bNbrPorts;
-	for(port = 0; port < nports; port++) {
+	for (port = 0; port < hub->nports; port++) {
 		rup = &hub->ports[port];
 		if (rup->device != NULL) {
 			usbd_detach(rup->device, self);
@@ -508,10 +564,9 @@ uhub_detach(struct device *self, int flags)
 }
 
 /*
- * Hub interrupt.
- * This an indication that some port has changed status.
- * Notify the bus event handler thread that we need
- * to be explored again.
+ * This is an indication that some port has changed status.  Remember
+ * the ports that need attention and notify the USB task thread that
+ * we need to be explored again.
  */
 void
 uhub_intr(struct usbd_xfer *xfer, void *addr, usbd_status status)
@@ -522,6 +577,7 @@ uhub_intr(struct usbd_xfer *xfer, void *addr, usbd_status status)
 		return;
 
 	DPRINTF("%s: intr status=%d\n", sc->sc_dev.dv_xname, status);
+
 	if (status == USBD_STALLED)
 		usbd_clear_endpoint_stall_async(sc->sc_ipipe);
 	else if (status == USBD_NORMAL_COMPLETION)

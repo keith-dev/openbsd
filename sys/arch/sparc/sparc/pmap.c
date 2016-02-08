@@ -1,4 +1,4 @@
-/*	$OpenBSD: pmap.c,v 1.165 2014/07/12 18:44:43 tedu Exp $	*/
+/*	$OpenBSD: pmap.c,v 1.174 2015/02/15 21:34:33 miod Exp $	*/
 /*	$NetBSD: pmap.c,v 1.118 1998/05/19 19:00:18 thorpej Exp $ */
 
 /*
@@ -66,7 +66,6 @@
 #include <sys/exec.h>
 #include <sys/core.h>
 #include <sys/kcore.h>
-#include <sys/lock.h>
 #include <sys/pool.h>
 
 #include <uvm/uvm_extern.h>
@@ -668,35 +667,35 @@ sparc_protection_init4m(void)
 
 	for (prot = 0; prot < 8; prot++) {
 		switch (prot) {
-		case VM_PROT_READ | VM_PROT_WRITE | VM_PROT_EXECUTE:
+		case PROT_READ | PROT_WRITE | PROT_EXEC:
 			kp[prot] = PPROT_N_RWX;
 			up[prot] = PPROT_RWX_RWX;
 			break;
-		case VM_PROT_READ | VM_PROT_WRITE | VM_PROT_NONE:
+		case PROT_READ | PROT_WRITE | PROT_NONE:
 			kp[prot] = PPROT_N_RWX;
 			up[prot] = PPROT_RW_RW;
 			break;
-		case VM_PROT_READ | VM_PROT_NONE  | VM_PROT_EXECUTE:
+		case PROT_READ | PROT_NONE  | PROT_EXEC:
 			kp[prot] = PPROT_N_RX;
 			up[prot] = PPROT_RX_RX;
 			break;
-		case VM_PROT_READ | VM_PROT_NONE  | VM_PROT_NONE:
+		case PROT_READ | PROT_NONE  | PROT_NONE:
 			kp[prot] = PPROT_N_RX;
 			up[prot] = PPROT_R_R;
 			break;
-		case VM_PROT_NONE | VM_PROT_WRITE | VM_PROT_EXECUTE:
+		case PROT_NONE | PROT_WRITE | PROT_EXEC:
 			kp[prot] = PPROT_N_RWX;
 			up[prot] = PPROT_RWX_RWX;
 			break;
-		case VM_PROT_NONE | VM_PROT_WRITE | VM_PROT_NONE:
+		case PROT_NONE | PROT_WRITE | PROT_NONE:
 			kp[prot] = PPROT_N_RWX;
 			up[prot] = PPROT_RW_RW;
 			break;
-		case VM_PROT_NONE | VM_PROT_NONE  | VM_PROT_EXECUTE:
+		case PROT_NONE | PROT_NONE  | PROT_EXEC:
 			kp[prot] = PPROT_N_RX;
 			up[prot] = PPROT_X_X;
 			break;
-		case VM_PROT_NONE | VM_PROT_NONE  | VM_PROT_NONE:
+		case PROT_NONE | PROT_NONE  | PROT_NONE:
 			kp[prot] = PPROT_N_RX;
 			up[prot] = PPROT_R_R;
 			break;
@@ -1393,14 +1392,12 @@ me_alloc(mh, newpm, newvreg, newvseg)
 	} while (--i > 0);
 
 	/* update segment tables */
-	simple_lock(&pm->pm_lock); /* what if other cpu takes mmuentry ?? */
 	if (CTX_USABLE(pm,rp))
 		setsegmap(VSTOVA(me->me_vreg,me->me_vseg), seginval);
 	sp->sg_pmeg = seginval;
 
 	/* off old pmap chain */
 	TAILQ_REMOVE(&pm->pm_seglist, me, me_pmchain);
-	simple_unlock(&pm->pm_lock);
 	setcontext4(ctx);	/* done with old context */
 
 	/* onto new pmap chain; new pmap is already locked, if needed */
@@ -1569,14 +1566,12 @@ region_alloc(mh, newpm, newvr)
 	}
 
 	/* update region tables */
-	simple_lock(&pm->pm_lock); /* what if other cpu takes mmuentry ?? */
 	if (pm->pm_ctx)
 		setregmap(VRTOVA(me->me_vreg), reginval);
 	rp->rg_smeg = reginval;
 
 	/* off old pmap chain */
 	TAILQ_REMOVE(&pm->pm_reglist, me, me_pmchain);
-	simple_unlock(&pm->pm_lock);
 	setcontext4(ctx);	/* done with old context */
 
 	/* onto new pmap chain; new pmap is already locked, if needed */
@@ -1655,8 +1650,8 @@ mmu_pagein(pm, va, prot)
 	struct regmap *rp;
 	struct segmap *sp;
 
-	if (prot != VM_PROT_NONE)
-		bits = PG_V | ((prot & VM_PROT_WRITE) ? PG_W : 0);
+	if (prot != PROT_NONE)
+		bits = PG_V | ((prot & PROT_WRITE) ? PG_W : 0);
 	else
 		bits = 0;
 
@@ -2777,7 +2772,6 @@ pmap_bootstrap4_4c(void *top, int nctx, int nregion, int nsegment)
 	 * Initialize the kernel pmap.
 	 */
 	/* kernel_pmap_store.pm_ctxnum = 0; */
-	simple_lock_init(&kernel_pmap_store.pm_lock);
 	kernel_pmap_store.pm_refcount = 1;
 #if defined(SUN4_MMU3L)
 	TAILQ_INIT(&kernel_pmap_store.pm_reglist);
@@ -3121,7 +3115,6 @@ pmap_bootstrap4m(void *top)
 	 * Initialize the kernel pmap.
 	 */
 	/* kernel_pmap_store.pm_ctxnum = 0; */
-	simple_lock_init(&kernel_pmap_store.pm_lock);
 	kernel_pmap_store.pm_refcount = 1;
 
 	/*
@@ -3402,6 +3395,7 @@ mmu_install_tables(sc)
 #endif
 }
 
+#ifdef MULTIPROCESSOR
 /*
  * Allocate per-CPU page tables.
  * Note: this routine is called in the context of the boot CPU
@@ -3448,7 +3442,7 @@ pmap_alloc_cpu(sc)
 	bcopy(sp->sg_pte, pagtable, SRMMU_L3SIZE * sizeof(int));
 	pagtable[vpg] =
 		(VA2PA((caddr_t)cpustore) >> SRMMU_PPNPASHIFT) |
-		(SRMMU_TEPTE | PPROT_RWX_RWX | SRMMU_PG_C);
+		(SRMMU_TEPTE | PPROT_RW_RW | SRMMU_PG_C);
 
 	/* Install L1 table in context 0 */
 	ctxtable[0] = ((u_int)regtable >> SRMMU_PPNPASHIFT) | SRMMU_TEPTD;
@@ -3462,6 +3456,8 @@ pmap_alloc_cpu(sc)
 	}
 #endif
 }
+#endif /* MULTIPROCESSOR */
+
 #endif /* defined sun4m */
 
 
@@ -3562,7 +3558,6 @@ pmap_create()
 	pm->pm_regstore = urp = malloc(size, M_VMPMAP, M_WAITOK);
 	qzero((caddr_t)urp, size);
 	/* pm->pm_ctx = NULL; */
-	simple_lock_init(&pm->pm_lock);
 	pm->pm_refcount = 1;
 	pm->pm_regmap = urp;
 
@@ -3628,9 +3623,7 @@ pmap_destroy(pm)
 	if (pmapdebug & PDB_DESTROY)
 		printf("pmap_destroy(%p)\n", pm);
 #endif
-	simple_lock(&pm->pm_lock);
 	count = --pm->pm_refcount;
-	simple_unlock(&pm->pm_lock);
 	if (count == 0) {
 		pmap_release(pm);
 		free(pm, M_VMPMAP, 0);
@@ -3718,12 +3711,8 @@ void
 pmap_reference(pm)
 	struct pmap *pm;
 {
-
-	if (pm != NULL) {
-		simple_lock(&pm->pm_lock);
+	if (pm != NULL)
 		pm->pm_refcount++;
-		simple_unlock(&pm->pm_lock);
-	}
 }
 
 /*
@@ -3764,7 +3753,6 @@ pmap_remove(pm, va, endva)
 
 	ctx = getcontext();
 	s = splvm();		/* XXX conservative */
-	simple_lock(&pm->pm_lock);
 	for (; va < endva; va = nva) {
 		/* do one virtual segment at a time */
 		vr = VA_VREG(va);
@@ -3775,7 +3763,6 @@ pmap_remove(pm, va, endva)
 		if (pm->pm_regmap[vr].rg_nsegmap != 0)
 			(*rm)(pm, va, nva, vr, vs);
 	}
-	simple_unlock(&pm->pm_lock);
 	splx(s);
 	setcontext(ctx);
 }
@@ -3796,7 +3783,6 @@ pmap_kremove(va, len)
 
 	ctx = getcontext();
 	s = splvm();		/* XXX conservative */
-	simple_lock(pm->pm_lock);
 
 	for (; va < endva; va = nva) {
 		/* do one virtual segment at a time */
@@ -3809,7 +3795,6 @@ pmap_kremove(va, len)
 			pmap_rmk(pm, va, nva, vr, vs);
 	}
 
-	simple_unlock(pm->pm_lock);
 	splx(s);
 	setcontext(ctx);
 }
@@ -4331,17 +4316,17 @@ pmap_page_protect4_4c(struct vm_page *pg, vm_prot_t prot)
 
 #ifdef DEBUG
 	if ((pmapdebug & PDB_CHANGEPROT) ||
-	    (pmapdebug & PDB_REMOVE && prot == VM_PROT_NONE))
+	    (pmapdebug & PDB_REMOVE && prot == PROT_NONE))
 		printf("pmap_page_protect(0x%lx, 0x%x)\n", pg, prot);
 #endif
 	pv = &pg->mdpage.pv_head;
 	/*
 	 * Skip operations that do not take away write permission.
 	 */
-	if (prot & VM_PROT_WRITE)
+	if (prot & PROT_WRITE)
 		return;
 	write_user_windows();	/* paranoia */
-	if (prot & VM_PROT_READ) {
+	if (prot & PROT_READ) {
 		pv_changepte4_4c(pv, 0, PG_W);
 		return;
 	}
@@ -4514,10 +4499,10 @@ pmap_protect4_4c(struct pmap *pm, vaddr_t sva, vaddr_t eva, vm_prot_t prot)
 	struct regmap *rp;
 	struct segmap *sp;
 
-	if (pm == NULL || prot & VM_PROT_WRITE)
+	if (pm == NULL || prot & PROT_WRITE)
 		return;
 
-	if ((prot & VM_PROT_READ) == 0) {
+	if ((prot & PROT_READ) == 0) {
 		pmap_remove(pm, sva, eva);
 		return;
 	}
@@ -4525,7 +4510,6 @@ pmap_protect4_4c(struct pmap *pm, vaddr_t sva, vaddr_t eva, vm_prot_t prot)
 	write_user_windows();
 	ctx = getcontext4();
 	s = splvm();
-	simple_lock(&pm->pm_lock);
 
 	for (va = sva; va < eva;) {
 		vr = VA_VREG(va);
@@ -4597,7 +4581,6 @@ if (nva == 0) panic("pmap_protect: last segment");	/* cannot happen */
 			}
 		}
 	}
-	simple_unlock(&pm->pm_lock);
 	splx(s);
 	setcontext4(ctx);
 }
@@ -4628,9 +4611,9 @@ pmap_changeprot4_4c(pm, va, prot, wired)
 
 	va = trunc_page(va);
 	if (pm == pmap_kernel())
-		newprot = prot & VM_PROT_WRITE ? PG_S|PG_W : PG_S;
+		newprot = prot & PROT_WRITE ? PG_S|PG_W : PG_S;
 	else
-		newprot = prot & VM_PROT_WRITE ? PG_W : 0;
+		newprot = prot & PROT_WRITE ? PG_W : 0;
 	vr = VA_VREG(va);
 	vs = VA_VSEG(va);
 	s = splvm();		/* conservative */
@@ -4728,17 +4711,17 @@ pmap_page_protect4m(struct vm_page *pg, vm_prot_t prot)
 
 #ifdef DEBUG
 	if ((pmapdebug & PDB_CHANGEPROT) ||
-	    (pmapdebug & PDB_REMOVE && prot == VM_PROT_NONE))
+	    (pmapdebug & PDB_REMOVE && prot == PROT_NONE))
 		printf("pmap_page_protect(0x%lx, 0x%x)\n", pg, prot);
 #endif
 	pv = &pg->mdpage.pv_head;
 	/*
 	 * Skip operations that do not take away write permission.
 	 */
-	if (prot & VM_PROT_WRITE)
+	if (prot & PROT_WRITE)
 		return;
 	write_user_windows();	/* paranoia */
-	if (prot & VM_PROT_READ) {
+	if (prot & PROT_READ) {
 		pv_changepte4m(pv, 0, PPROT_WRITE);
 		return;
 	}
@@ -4841,22 +4824,21 @@ pmap_protect4m(struct pmap *pm, vaddr_t sva, vaddr_t eva, vm_prot_t prot)
 	struct segmap *sp;
 	int newprot;
 
-	if ((prot & VM_PROT_READ) == 0) {
+	if ((prot & PROT_READ) == 0) {
 		pmap_remove(pm, sva, eva);
 		return;
 	}
 
 	/*
-	 * Since the caller might request either a removal of PROT_EXECUTE
+	 * Since the caller might request either a removal of PROT_EXEC
 	 * or PROT_WRITE, we don't attempt to guess what to do, just lower
 	 * to read-only and let the real protection be faulted in.
 	 */
-	newprot = pte_prot4m(pm, VM_PROT_READ);
+	newprot = pte_prot4m(pm, PROT_READ);
 
 	write_user_windows();
 	ctx = getcontext4m();
 	s = splvm();
-	simple_lock(&pm->pm_lock);
 
 	for (va = sva; va < eva;) {
 		vr = VA_VREG(va);
@@ -4913,7 +4895,6 @@ pmap_protect4m(struct pmap *pm, vaddr_t sva, vaddr_t eva, vm_prot_t prot)
 			setpgt4m(&sp->sg_pte[VA_SUN4M_VPG(va)], npte);
 		}
 	}
-	simple_unlock(&pm->pm_lock);
 	splx(s);
 	setcontext4m(ctx);
 }
@@ -5031,7 +5012,7 @@ pmap_enter4_4c(pm, va, pa, prot, flags)
 		pv = NULL;
 
 	pteproto |= atop(pa) & PG_PFNUM;
-	if (prot & VM_PROT_WRITE)
+	if (prot & PROT_WRITE)
 		pteproto |= PG_W;
 
 	ctx = getcontext4();
@@ -5350,7 +5331,7 @@ pmap_kenter_pa4_4c(va, pa, prot)
 	int pteproto, ctx;
 
 	pteproto = PG_S | PG_V | PMAP_T2PTE_4(pa);
-	if (prot & VM_PROT_WRITE)
+	if (prot & PROT_WRITE)
 		pteproto |= PG_W;
 
 	pa &= ~PMAP_TNC_4;
@@ -5440,9 +5421,9 @@ pmap_enter4m(pm, va, pa, prot, flags)
 		panic("pmap_enter4m: can't fail, but did");
 #endif
 	if (pv) {
-		if (flags & VM_PROT_WRITE)
+		if (flags & PROT_WRITE)
 			pv->pv_flags |= PV_MOD4M;
-		if (flags & VM_PROT_READ)
+		if (flags & PROT_READ)
 			pv->pv_flags |= PV_REF4M;
 	}
 	setcontext4m(ctx);
@@ -5684,7 +5665,7 @@ pmap_kenter_pa4m(va, pa, prot)
 
 	pteproto = ((pa & PMAP_NC) == 0 ? SRMMU_PG_C : 0) |
 		PMAP_T2PTE_SRMMU(pa) | SRMMU_TEPTE |
-		((prot & VM_PROT_WRITE) ? PPROT_N_RWX : PPROT_N_RX);
+		((prot & PROT_WRITE) ? PPROT_N_RWX : PPROT_N_RX);
 
 	pa &= ~PMAP_TNC_SRMMU;
 
@@ -6260,10 +6241,11 @@ pmap_prefer(vaddr_t foff, vaddr_t va)
 }
 
 void
-pmap_remove_holes(struct vm_map *map)
+pmap_remove_holes(struct vmspace *vm)
 {
 #if defined(SUN4) || defined(SUN4C) || defined(SUN4E)
 	if (mmu_has_hole) {
+		struct vm_map *map = &vm->vm_map;
 		vaddr_t shole, ehole;
 
 		shole = max(vm_map_min(map), (vaddr_t)MMU_HOLE_START);
@@ -6274,8 +6256,8 @@ pmap_remove_holes(struct vm_map *map)
 
 		(void)uvm_map(map, &shole, ehole - shole, NULL,
 		    UVM_UNKNOWN_OFFSET, 0,
-		    UVM_MAPFLAG(UVM_PROT_NONE, UVM_PROT_NONE, UVM_INH_SHARE,
-		      UVM_ADV_RANDOM,
+		    UVM_MAPFLAG(PROT_NONE, PROT_NONE, MAP_INHERIT_SHARE,
+		      MADV_RANDOM,
 		      UVM_FLAG_NOMERGE | UVM_FLAG_HOLE | UVM_FLAG_FIXED));
 	}
 #endif

@@ -1,4 +1,4 @@
-/*	$OpenBSD: print-ether.c,v 1.27 2010/01/14 04:57:06 jsing Exp $	*/
+/*	$OpenBSD: print-ether.c,v 1.29 2015/01/16 06:40:21 deraadt Exp $	*/
 
 /*
  * Copyright (c) 1988, 1989, 1990, 1991, 1992, 1993, 1994, 1995, 1996, 1997
@@ -21,7 +21,6 @@
  * MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE.
  */
 
-#include <sys/param.h>
 #include <sys/time.h>
 #include <sys/socket.h>
 
@@ -31,7 +30,6 @@ struct rtentry;
 
 #include <netinet/in.h>
 #include <netinet/if_ether.h>
-#include <netinet/in_systm.h>
 #include <netinet/ip.h>
 #include <netinet/ip_var.h>
 #include <netinet/udp.h>

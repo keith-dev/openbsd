@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_iwi.c,v 1.118 2014/07/22 13:12:11 mpi Exp $	*/
+/*	$OpenBSD: if_iwi.c,v 1.123 2015/02/10 23:25:46 mpi Exp $	*/
 
 /*-
  * Copyright (c) 2004-2008
@@ -32,9 +32,9 @@
 #include <sys/conf.h>
 #include <sys/device.h>
 #include <sys/task.h>
+#include <sys/endian.h>
 
 #include <machine/bus.h>
-#include <machine/endian.h>
 #include <machine/intr.h>
 
 #include <dev/pci/pcireg.h>
@@ -56,7 +56,6 @@
 #include <net80211/ieee80211_var.h>
 #include <net80211/ieee80211_radiotap.h>
 
-#include <dev/rndvar.h>
 #include <crypto/arc4.h>
 
 #include <dev/pci/if_iwireg.h>
@@ -73,7 +72,7 @@ int		iwi_match(struct device *, void *, void *);
 void		iwi_attach(struct device *, struct device *, void *);
 int		iwi_activate(struct device *, int);
 void		iwi_wakeup(struct iwi_softc *);
-void		iwi_init_task(void *, void *);
+void		iwi_init_task(void *);
 int		iwi_alloc_cmd_ring(struct iwi_softc *, struct iwi_cmd_ring *);
 void		iwi_reset_cmd_ring(struct iwi_softc *, struct iwi_cmd_ring *);
 void		iwi_free_cmd_ring(struct iwi_softc *, struct iwi_cmd_ring *);
@@ -323,7 +322,7 @@ iwi_attach(struct device *parent, struct device *self, void *aux)
 	sc->sc_txtap.wt_ihdr.it_present = htole32(IWI_TX_RADIOTAP_PRESENT);
 #endif
 
-	task_set(&sc->init_task, iwi_init_task, sc, NULL);
+	task_set(&sc->init_task, iwi_init_task, sc);
 	return;
 
 fail:	while (--ac >= 0)
@@ -360,11 +359,11 @@ iwi_wakeup(struct iwi_softc *sc)
 	data &= ~0x0000ff00;
 	pci_conf_write(sc->sc_pct, sc->sc_pcitag, 0x40, data);
 
-	iwi_init_task(sc, NULL);
+	iwi_init_task(sc);
 }
 
 void
-iwi_init_task(void *arg1, void *arg2)
+iwi_init_task(void *arg1)
 {
 	struct iwi_softc *sc = arg1;
 	struct ifnet *ifp = &sc->sc_ic.ic_if;
@@ -924,7 +923,6 @@ iwi_frame_intr(struct iwi_softc *sc, struct iwi_rx_data *data,
 	CSR_WRITE_4(sc, data->reg, data->map->dm_segs[0].ds_addr);
 
 	/* finalize mbuf */
-	m->m_pkthdr.rcvif = ifp;
 	m->m_pkthdr.len = m->m_len = sizeof (struct iwi_hdr) +
 	    sizeof (struct iwi_frame) + letoh16(frame->len);
 	m_adj(m, sizeof (struct iwi_hdr) + sizeof (struct iwi_frame));
@@ -1491,10 +1489,8 @@ iwi_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 	case SIOCSIFADDR:
 		ifa = (struct ifaddr *)data;
 		ifp->if_flags |= IFF_UP;
-#ifdef INET
 		if (ifa->ifa_addr->sa_family == AF_INET)
 			arp_ifinit(&ic->ic_ac, ifa);
-#endif
 		/* FALLTHROUGH */
 	case SIOCSIFFLAGS:
 		if (ifp->if_flags & IFF_UP) {

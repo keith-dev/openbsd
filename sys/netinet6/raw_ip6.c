@@ -1,4 +1,4 @@
-/*	$OpenBSD: raw_ip6.c,v 1.68 2014/07/22 11:06:10 mpi Exp $	*/
+/*	$OpenBSD: raw_ip6.c,v 1.73 2015/03/04 11:10:55 mpi Exp $	*/
 /*	$KAME: raw_ip6.c,v 1.69 2001/03/04 15:55:44 itojun Exp $	*/
 
 /*
@@ -74,11 +74,9 @@
 #include <sys/sysctl.h>
 
 #include <net/if.h>
+#include <net/if_var.h>
 #include <net/route.h>
 #include <net/if_types.h>
-#if NPF > 0
-#include <net/pfvar.h>
-#endif
 
 #include <netinet/in.h>
 #include <netinet6/in6_var.h>
@@ -93,6 +91,10 @@
 #include <netinet6/nd6.h>
 #include <netinet6/ip6protosw.h>
 #include <netinet6/raw_ip6.h>
+
+#if NPF > 0
+#include <net/pfvar.h>
+#endif
 
 #include <sys/stdarg.h>
 
@@ -143,7 +145,7 @@ rip6_input(struct mbuf **mp, int *offp, int proto)
 	rip6src.sin6_len = sizeof(struct sockaddr_in6);
 	rip6src.sin6_family = AF_INET6;
 	/* KAME hack: recover scopeid */
-	(void)in6_recoverscope(&rip6src, &ip6->ip6_src, m->m_pkthdr.rcvif);
+	(void)in6_recoverscope(&rip6src, &ip6->ip6_src, NULL);
 
 	TAILQ_FOREACH(in6p, &rawin6pcbtable.inpt_queue, inp_queue) {
 		if (in6p->inp_socket->so_state & SS_CANTRCVMORE)
@@ -469,6 +471,11 @@ rip6_output(struct mbuf *m, ...)
 	/* force routing table */
 	m->m_pkthdr.ph_rtableid = in6p->inp_rtableid;
 
+#if NPF > 0
+	if (in6p->inp_socket->so_state & SS_ISCONNECTED)
+		m->m_pkthdr.pf.inp = in6p;
+#endif
+
 	error = ip6_output(m, optp, &in6p->inp_route6, flags,
 	    in6p->inp_moptions6, &oifp, in6p);
 	if (so->so_proto->pr_protocol == IPPROTO_ICMPV6) {
@@ -665,7 +672,7 @@ rip6_usrreq(struct socket *so, int req, struct mbuf *m, struct mbuf *nam,
 			error = EINVAL;
 			break;
 		}
-		if (TAILQ_EMPTY(&ifnet) || (addr->sin6_family != AF_INET6)) {
+		if (addr->sin6_family != AF_INET6) {
 			error = EADDRNOTAVAIL;
 			break;
 		}
@@ -708,10 +715,6 @@ rip6_usrreq(struct socket *so, int req, struct mbuf *m, struct mbuf *nam,
 
 		if (nam->m_len != sizeof(*addr)) {
 			error = EINVAL;
-			break;
-		}
-		if (TAILQ_EMPTY(&ifnet)) {
-			error = EADDRNOTAVAIL;
 			break;
 		}
 		if (addr->sin6_family != AF_INET6) {

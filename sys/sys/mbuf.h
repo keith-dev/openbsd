@@ -1,4 +1,4 @@
-/*	$OpenBSD: mbuf.h,v 1.180 2014/07/13 09:52:48 dlg Exp $	*/
+/*	$OpenBSD: mbuf.h,v 1.187 2015/02/10 03:46:30 lteo Exp $	*/
 /*	$NetBSD: mbuf.h,v 1.19 1996/02/09 18:25:14 christos Exp $	*/
 
 /*
@@ -36,14 +36,21 @@
 #define _SYS_MBUF_H_
 
 #include <sys/malloc.h>
-#include <sys/pool.h>
 #include <sys/queue.h>
 
 /*
- * Mbufs are of a single size, MSIZE (sys/param.h), which
- * includes overhead.  An mbuf may add a single "mbuf cluster" of size
- * MCLBYTES (also in sys/param.h), which has no additional overhead
- * and is used instead of the internal data area; this is done when
+ * Constants related to network buffer management.
+ * MCLBYTES must be no larger than PAGE_SIZE (the software page size) and,
+ * on machines that exchange pages of input or output buffers with mbuf
+ * clusters (MAPPED_MBUFS), MCLBYTES must also be an integral multiple
+ * of the hardware page size.
+ */
+#define	MSIZE		256		/* size of an mbuf */
+
+/*
+ * Mbufs are of a single size, MSIZE, which includes overhead.  An mbuf may
+ * add a single "mbuf cluster" of size MCLBYTES, which has no additional
+ * overhead and is used instead of the internal data area; this is done when
  * at least MINCLSIZE of data must be stored.
  */
 
@@ -53,6 +60,11 @@
 #define	MAXMCLBYTES	(64 * 1024)		/* largest cluster from the stack */
 #define	MINCLSIZE	(MHLEN + MLEN + 1)	/* smallest amount to put in cluster */
 #define	M_MAXCOMPRESS	(MHLEN / 2)		/* max amount to copy for compression */
+
+#define	MCLSHIFT	11		/* convert bytes to m_buf clusters */
+					/* 2K cluster can hold Ether frame */
+#define	MCLBYTES	(1 << MCLSHIFT)	/* size of a m_buf cluster */
+#define	MCLOFSET	(MCLBYTES - 1)
 
 /* Packet tags structure */
 struct m_tag {
@@ -157,7 +169,6 @@ struct mbuf {
 #define	m_type		m_hdr.mh_type
 #define	m_flags		m_hdr.mh_flags
 #define	m_nextpkt	m_hdr.mh_nextpkt
-#define	m_act		m_nextpkt
 #define	m_pkthdr	M_dat.MH.MH_pkthdr
 #define	m_ext		M_dat.MH.MH_dat.MH_ext
 #define	m_pktdat	M_dat.MH.MH_dat.MH_databuf
@@ -246,8 +257,6 @@ struct mbuf {
 
 /*
  * Macros for tracking external storage associated with an mbuf.
- *
- * Note: add and delete reference must be called at splnet().
  */
 #ifdef DEBUG
 #define MCLREFDEBUGN(m, file, line) do {				\
@@ -265,16 +274,7 @@ struct mbuf {
 
 #define	MCLISREFERENCED(m)	((m)->m_ext.ext_nextref != (m))
 
-#define	MCLADDREFERENCE(o, n)	do {					\
-		int ms = splnet();					\
-		(n)->m_flags |= ((o)->m_flags & (M_EXT|M_EXTWR));	\
-		(n)->m_ext.ext_nextref = (o)->m_ext.ext_nextref;	\
-		(n)->m_ext.ext_prevref = (o);				\
-		(o)->m_ext.ext_nextref = (n);				\
-		(n)->m_ext.ext_nextref->m_ext.ext_prevref = (n);	\
-		splx(ms);						\
-		MCLREFDEBUGN((n), __FILE__, __LINE__);			\
-	} while (/* CONSTCOND */ 0)
+#define	MCLADDREFERENCE(o, n)	m_extref((o), (n))
 
 #define	MCLINITREFERENCE(m)	do {					\
 		(m)->m_ext.ext_prevref = (m);				\
@@ -412,7 +412,6 @@ void	mbinit(void);
 struct	mbuf *m_copym2(struct mbuf *, int, int, int);
 struct	mbuf *m_copym(struct mbuf *, int, int, int);
 struct	mbuf *m_free(struct mbuf *);
-struct	mbuf *m_free_unlocked(struct mbuf *);
 struct	mbuf *m_get(int, int);
 struct	mbuf *m_getclr(int, int);
 struct	mbuf *m_gethdr(int, int);
@@ -427,6 +426,7 @@ struct  mbuf *m_getptr(struct mbuf *, int, int *);
 int	m_leadingspace(struct mbuf *);
 int	m_trailingspace(struct mbuf *);
 struct mbuf *m_clget(struct mbuf *, int, struct ifnet *, u_int);
+void	m_extref(struct mbuf *, struct mbuf *);
 void	m_extfree_pool(caddr_t, u_int, void *);
 void	m_adj(struct mbuf *, int);
 int	m_copyback(struct mbuf *, int, int, const void *, int);
@@ -479,6 +479,61 @@ struct m_tag *m_tag_next(struct mbuf *, struct m_tag *);
  * has payload larger than the value below.
  */
 #define PACKET_TAG_MAXSIZE		52
+
+/*
+ * mbuf lists
+ */
+
+#include <sys/mutex.h>
+
+struct mbuf_list {
+	struct mbuf		*ml_head;
+	struct mbuf		*ml_tail;
+	u_int			ml_len;
+};
+
+#define MBUF_LIST_INITIALIZER() { NULL, NULL, 0 }
+
+void			ml_init(struct mbuf_list *);
+void			ml_enqueue(struct mbuf_list *, struct mbuf *);
+struct mbuf *		ml_dequeue(struct mbuf_list *);
+struct mbuf *		ml_dechain(struct mbuf_list *);
+struct mbuf *		ml_filter(struct mbuf_list *,
+			    int (*)(void *, const struct mbuf *), void *);
+
+#define	ml_len(_ml)		((_ml)->ml_len)
+#define	ml_empty(_ml)		((_ml)->ml_len == 0)
+
+#define MBUF_LIST_FOREACH(_ml, _m) \
+	for ((_m) = (_ml)->ml_head; (_m) != NULL; (_m) = (_m)->m_nextpkt)
+
+/*
+ * mbuf queues
+ */
+
+struct mbuf_queue {
+	struct mutex		mq_mtx;
+	struct mbuf_list	mq_list;
+	u_int			mq_maxlen;
+	u_int			mq_drops;
+};
+
+#define MBUF_QUEUE_INITIALIZER(_maxlen, _ipl) \
+    { MUTEX_INITIALIZER(_ipl), MBUF_LIST_INITIALIZER(), (_maxlen), 0 }
+
+void			mq_init(struct mbuf_queue *, u_int, int);
+int			mq_enqueue(struct mbuf_queue *, struct mbuf *);
+struct mbuf *		mq_dequeue(struct mbuf_queue *);
+int			mq_enlist(struct mbuf_queue *, struct mbuf_list *);
+void			mq_delist(struct mbuf_queue *, struct mbuf_list *);
+struct mbuf *		mq_dechain(struct mbuf_queue *);
+struct mbuf *		mq_filter(struct mbuf_queue *,
+			    int (*)(void *, const struct mbuf *), void *);
+
+#define	mq_len(_mq)		ml_len(&(_mq)->mq_list)
+#define	mq_empty(_mq)		ml_empty(&(_mq)->mq_list)
+#define	mq_drops(_mq)		((_mq)->mq_drops)
+#define	mq_set_maxlen(_mq, _l)	((_mq)->mq_maxlen = (_l))
 
 #endif /* _KERNEL */
 #endif /* _SYS_MBUF_H_ */

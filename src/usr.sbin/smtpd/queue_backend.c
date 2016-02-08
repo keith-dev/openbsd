@@ -1,4 +1,4 @@
-/*	$OpenBSD: queue_backend.c,v 1.52 2014/07/08 15:45:32 eric Exp $	*/
+/*	$OpenBSD: queue_backend.c,v 1.55 2015/01/20 17:37:54 deraadt Exp $	*/
 
 /*
  * Copyright (c) 2011 Gilles Chehade <gilles@poolp.org>
@@ -28,6 +28,7 @@
 #include <event.h>
 #include <fcntl.h>
 #include <imsg.h>
+#include <limits.h>
 #include <inttypes.h>
 #include <libgen.h>
 #include <pwd.h>
@@ -179,7 +180,7 @@ queue_message_create(uint32_t *msgid)
 int
 queue_message_delete(uint32_t msgid)
 {
-	char	msgpath[MAXPATHLEN];
+	char	msgpath[PATH_MAX];
 	int	r;
 
 	profile_enter("queue_message_delete");
@@ -200,8 +201,8 @@ int
 queue_message_commit(uint32_t msgid)
 {
 	int	r;
-	char	msgpath[MAXPATHLEN];
-	char	tmppath[MAXPATHLEN];
+	char	msgpath[PATH_MAX];
+	char	tmppath[PATH_MAX];
 	FILE	*ifp = NULL;
 	FILE	*ofp = NULL;
 
@@ -368,7 +369,7 @@ err:
 int
 queue_message_fd_rw(uint32_t msgid)
 {
-	char buf[SMTPD_MAXPATHLEN];
+	char buf[PATH_MAX];
 
 	queue_message_path(msgid, buf, sizeof(buf));
 
@@ -650,7 +651,7 @@ queue_generate_msgid(void)
 {
 	uint32_t msgid;
 
-	while ((msgid = arc4random_uniform(0xffffffff)) == 0)
+	while ((msgid = arc4random()) == 0)
 		;
 
 	return msgid;
@@ -662,7 +663,7 @@ queue_generate_evpid(uint32_t msgid)
 	uint32_t rnd;
 	uint64_t evpid;
 
-	while ((rnd = arc4random_uniform(0xffffffff)) == 0)
+	while ((rnd = arc4random()) == 0)
 		;
 
 	evpid = msgid;

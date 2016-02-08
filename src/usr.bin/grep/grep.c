@@ -1,4 +1,4 @@
-/*	$OpenBSD: grep.c,v 1.45 2012/12/29 01:32:44 millert Exp $	*/
+/*	$OpenBSD: grep.c,v 1.49 2015/01/10 13:48:02 tedu Exp $	*/
 
 /*-
  * Copyright (c) 1999 James Howard and Dag-Erling Coïdan Smørgrav
@@ -61,7 +61,6 @@ int	 Aflag;		/* -A x: print x lines trailing each match */
 int	 Bflag;		/* -B x: print x lines leading each match */
 int	 Eflag;		/* -E: interpret pattern as extended regexp */
 int	 Fflag;		/* -F: interpret pattern as list of fixed strings */
-int	 Gflag;		/* -G: interpret pattern as basic regexp */
 int	 Hflag;		/* -H: always print filename header */
 int	 Lflag;		/* -L: only show names of files with no matches */
 int	 Rflag;		/* -R: recursively search directory trees */
@@ -119,12 +118,12 @@ usage(void)
 }
 
 #ifdef NOZ
-static char *optstr = "0123456789A:B:CEFGHILRUVabce:f:hilnoqrsuvwxy";
+static const char optstr[] = "0123456789A:B:CEFGHILRUVabce:f:hilnoqrsuvwxy";
 #else
-static char *optstr = "0123456789A:B:CEFGHILRUVZabce:f:hilnoqrsuvwxy";
+static const char optstr[] = "0123456789A:B:CEFGHILRUVZabce:f:hilnoqrsuvwxy";
 #endif
 
-struct option long_options[] =
+static const struct option long_options[] =
 {
 	{"binary-files",	required_argument,	NULL, BIN_OPT},
 	{"help",		no_argument,		NULL, HELP_OPT},
@@ -174,7 +173,7 @@ add_pattern(char *pat, size_t len)
 	}
 	if (patterns == pattern_sz) {
 		pattern_sz *= 2;
-		pattern = grep_realloc(pattern, ++pattern_sz * sizeof(*pattern));
+		pattern = grep_reallocarray(pattern, ++pattern_sz, sizeof(*pattern));
 	}
 	if (len > 0 && pat[len - 1] == '\n')
 		--len;
@@ -242,26 +241,20 @@ main(int argc, char *argv[])
 	SLIST_INIT(&patfilelh);
 	switch (__progname[0]) {
 	case 'e':
-		Eflag++;
+		Eflag = 1;
 		break;
 	case 'f':
-		Fflag++;
-		break;
-	case 'g':
-		Gflag++;
+		Fflag = 1;
 		break;
 #ifndef NOZ
 	case 'z':
-		Zflag++;
+		Zflag = 1;
 		switch(__progname[1]) {
 		case 'e':
-			Eflag++;
+			Eflag = 1;
 			break;
 		case 'f':
-			Fflag++;
-			break;
-		case 'g':
-			Gflag++;
+			Fflag = 1;
 			break;
 		}
 		break;
@@ -308,19 +301,18 @@ main(int argc, char *argv[])
 			}
 			break;
 		case 'E':
-			Fflag = Gflag = 0;
-			Eflag++;
+			Fflag = 0;
+			Eflag = 1;
 			break;
 		case 'F':
-			Eflag = Gflag = 0;
-			Fflag++;
+			Eflag = 0;
+			Fflag = 1;
 			break;
 		case 'G':
 			Eflag = Fflag = 0;
-			Gflag++;
 			break;
 		case 'H':
-			Hflag++;
+			Hflag = 1;
 			break;
 		case 'I':
 			binbehave = BIN_FILE_SKIP;
@@ -331,7 +323,7 @@ main(int argc, char *argv[])
 			break;
 		case 'R':
 		case 'r':
-			Rflag++;
+			Rflag = 1;
 			break;
 		case 'U':
 			binbehave = BIN_FILE_BIN;
@@ -342,7 +334,7 @@ main(int argc, char *argv[])
 			break;
 #ifndef NOZ
 		case 'Z':
-			Zflag++;
+			Zflag = 1;
 			break;
 #endif
 		case 'a':
@@ -358,7 +350,8 @@ main(int argc, char *argv[])
 			/* defer adding of expressions until all arguments are parsed */
 			if (exprs == expr_sz) {
 				expr_sz *= 2;
-				expr = grep_realloc(expr, ++expr_sz * sizeof(*expr));
+				expr = grep_reallocarray(expr, ++expr_sz,
+				    sizeof(*expr));
 			}
 			needpattern = 0;
 			expr[exprs] = optarg;
@@ -484,7 +477,7 @@ main(int argc, char *argv[])
 	}
 
 	if (lbflag)
-		setlinebuf(stdout);
+		setvbuf(stdout, NULL, _IOLBF, 0);
 
 	if ((argc == 0 || argc == 1) && !Rflag && !Hflag)
 		hflag = 1;

@@ -1,4 +1,4 @@
-/*	$OpenBSD: ntp.c,v 1.120 2013/11/13 20:44:39 benno Exp $ */
+/*	$OpenBSD: ntp.c,v 1.130 2015/03/02 10:31:17 bcook Exp $ */
 
 /*
  * Copyright (c) 2003, 2004 Henning Brauer <henning@openbsd.org>
@@ -17,7 +17,7 @@
  * OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
 
-#include <sys/param.h>
+#include <sys/types.h>
 #include <sys/time.h>
 #include <sys/stat.h>
 #include <errno.h>
@@ -30,6 +30,7 @@
 #include <string.h>
 #include <time.h>
 #include <unistd.h>
+#include <tls.h>
 
 #include "ntpd.h"
 
@@ -41,12 +42,14 @@
 
 volatile sig_atomic_t	 ntp_quit = 0;
 volatile sig_atomic_t	 ntp_report = 0;
+volatile sig_atomic_t	 ntp_sigchld = 0;
 struct imsgbuf		*ibuf_main;
 struct imsgbuf		*ibuf_dns;
 struct ntpd_conf	*conf;
 struct ctl_conns	 ctl_conns;
 u_int			 peer_cnt;
 u_int			 sensors_cnt;
+u_int			 constraint_cnt;
 time_t			 lastreport;
 
 void	ntp_sighdlr(int);
@@ -67,6 +70,9 @@ ntp_sighdlr(int sig)
 	case SIGINFO:
 		ntp_report = 1;
 		break;
+	case SIGCHLD:
+		ntp_sigchld = 1;
+		break;
 	}
 }
 
@@ -76,20 +82,22 @@ ntp_main(int pipe_prnt[2], int fd_ctl, struct ntpd_conf *nconf,
 {
 	int			 a, b, nfds, i, j, idx_peers, timeout;
 	int			 hotplugfd, nullfd, pipe_dns[2], idx_clients;
+	int			 ctls;
 	u_int			 pfd_elms = 0, idx2peer_elms = 0;
 	u_int			 listener_cnt, new_cnt, sent_cnt, trial_cnt;
 	u_int			 ctl_cnt;
-	pid_t			 pid, dns_pid;
+	pid_t			 pid;
 	struct pollfd		*pfd = NULL;
 	struct servent		*se;
 	struct listen_addr	*la;
 	struct ntp_peer		*p;
 	struct ntp_peer		**idx2peer = NULL;
 	struct ntp_sensor	*s, *next_s;
+	struct constraint	*cstr;
 	struct timespec		 tp;
 	struct stat		 stb;
 	struct ctl_conn		*cc;
-	time_t			 nextaction, last_sensor_scan = 0;
+	time_t			 nextaction, last_sensor_scan = 0, now;
 	void			*newp;
 
 	switch (pid = fork()) {
@@ -101,6 +109,13 @@ ntp_main(int pipe_prnt[2], int fd_ctl, struct ntpd_conf *nconf,
 	default:
 		return (pid);
 	}
+
+	tls_init();
+
+	/* Verification will be turned off if CA is not found */
+	if ((conf->ca = tls_load_file(CONSTRAINT_CA,
+	    &conf->ca_len, NULL)) == NULL)
+		log_warnx("constraint certificate verification turned off");
 
 	/* in this case the parent didn't init logging and didn't daemonize */
 	if (nconf->settime && !nconf->debug) {
@@ -118,13 +133,16 @@ ntp_main(int pipe_prnt[2], int fd_ctl, struct ntpd_conf *nconf,
 	close(pipe_prnt[0]);
 	if (socketpair(AF_UNIX, SOCK_STREAM, PF_UNSPEC, pipe_dns) == -1)
 		fatal("socketpair");
-	dns_pid = ntp_dns(pipe_dns, nconf, pw);
+	ntp_dns(pipe_dns, nconf, pw);
 	close(pipe_dns[1]);
 
-	if (stat(pw->pw_dir, &stb) == -1)
-		fatal("stat");
-	if (stb.st_uid != 0 || (stb.st_mode & (S_IWGRP|S_IWOTH)) != 0)
-		fatalx("bad privsep dir permissions");
+	if (stat(pw->pw_dir, &stb) == -1) {
+		fatal("privsep dir %s could not be opened", pw->pw_dir);
+	}
+	if (stb.st_uid != 0 || (stb.st_mode & (S_IWGRP|S_IWOTH)) != 0) {
+		fatalx("bad privsep dir %s permissions: %o",
+		    pw->pw_dir, stb.st_mode);
+	}
 	if (chroot(pw->pw_dir) == -1)
 		fatal("chroot");
 	if (chdir("/") == -1)
@@ -154,7 +172,7 @@ ntp_main(int pipe_prnt[2], int fd_ctl, struct ntpd_conf *nconf,
 	signal(SIGINFO, ntp_sighdlr);
 	signal(SIGPIPE, SIG_IGN);
 	signal(SIGHUP, SIG_IGN);
-	signal(SIGCHLD, SIG_DFL);
+	signal(SIGCHLD, ntp_sighdlr);
 
 	if ((ibuf_main = malloc(sizeof(struct imsgbuf))) == NULL)
 		fatal(NULL);
@@ -162,6 +180,12 @@ ntp_main(int pipe_prnt[2], int fd_ctl, struct ntpd_conf *nconf,
 	if ((ibuf_dns = malloc(sizeof(struct imsgbuf))) == NULL)
 		fatal(NULL);
 	imsg_init(ibuf_dns, pipe_dns[0]);
+
+	constraint_cnt = 0;
+	conf->constraint_median = 0;
+	conf->constraint_last = getmonotime();
+	TAILQ_FOREACH(cstr, &conf->constraints, entry)
+		constraint_cnt += constraint_init(cstr);
 
 	TAILQ_FOREACH(p, &conf->ntp_peers, entry)
 		client_peer_init(p);
@@ -199,8 +223,8 @@ ntp_main(int pipe_prnt[2], int fd_ctl, struct ntpd_conf *nconf,
 
 	while (ntp_quit == 0) {
 		if (peer_cnt > idx2peer_elms) {
-			if ((newp = realloc(idx2peer, sizeof(void *) *
-			    peer_cnt)) == NULL) {
+			if ((newp = reallocarray(idx2peer, peer_cnt,
+			    sizeof(*idx2peer))) == NULL) {
 				/* panic for now */
 				log_warn("could not resize idx2peer from %u -> "
 				    "%u entries", idx2peer_elms, peer_cnt);
@@ -210,10 +234,11 @@ ntp_main(int pipe_prnt[2], int fd_ctl, struct ntpd_conf *nconf,
 			idx2peer_elms = peer_cnt;
 		}
 
-		new_cnt = PFD_MAX + peer_cnt + listener_cnt + ctl_cnt;
+		new_cnt = PFD_MAX +
+		    peer_cnt + listener_cnt + ctl_cnt + constraint_cnt;
 		if (new_cnt > pfd_elms) {
-			if ((newp = realloc(pfd, sizeof(struct pollfd) *
-			    new_cnt)) == NULL) {
+			if ((newp = reallocarray(pfd, new_cnt,
+			    sizeof(*pfd))) == NULL) {
 				/* panic for now */
 				log_warn("could not resize pfd from %u -> "
 				    "%u entries", pfd_elms, new_cnt);
@@ -223,8 +248,8 @@ ntp_main(int pipe_prnt[2], int fd_ctl, struct ntpd_conf *nconf,
 			pfd_elms = new_cnt;
 		}
 
-		bzero(pfd, sizeof(struct pollfd) * pfd_elms);
-		bzero(idx2peer, sizeof(void *) * idx2peer_elms);
+		bzero(pfd, sizeof(*pfd) * pfd_elms);
+		bzero(idx2peer, sizeof(*idx2peer) * idx2peer_elms);
 		nextaction = getmonotime() + 3600;
 		pfd[PFD_PIPE_MAIN].fd = ibuf_main->fd;
 		pfd[PFD_PIPE_MAIN].events = POLLIN;
@@ -245,6 +270,9 @@ ntp_main(int pipe_prnt[2], int fd_ctl, struct ntpd_conf *nconf,
 		idx_peers = i;
 		sent_cnt = trial_cnt = 0;
 		TAILQ_FOREACH(p, &conf->ntp_peers, entry) {
+			if (constraint_cnt && conf->constraint_median == 0)
+				continue;
+
 			if (p->next > 0 && p->next <= getmonotime()) {
 				if (p->state > STATE_DNS_INPROGRESS)
 					trial_cnt++;
@@ -323,8 +351,21 @@ ntp_main(int pipe_prnt[2], int fd_ctl, struct ntpd_conf *nconf,
 				pfd[i].events |= POLLOUT;
 			i++;
 		}
+		ctls = i;
 
-		timeout = nextaction - getmonotime();
+		TAILQ_FOREACH(cstr, &conf->constraints, entry) {
+			if (constraint_query(cstr) == -1)
+				continue;
+			pfd[i].fd = cstr->fd;
+			pfd[i].events = POLLIN;
+			i++;
+		}
+
+		now = getmonotime();
+		if (constraint_cnt)
+			nextaction = now + 1;
+
+		timeout = nextaction - now;
 		if (timeout < 0)
 			timeout = 0;
 
@@ -386,8 +427,13 @@ ntp_main(int pipe_prnt[2], int fd_ctl, struct ntpd_conf *nconf,
 			}
 		}
 
-		for (; nfds > 0 && j < i; j++)
+		for (; nfds > 0 && j < ctls; j++) {
 			nfds -= control_dispatch_msg(&pfd[j], &ctl_cnt);
+		}
+
+		for (; nfds > 0 && j < i; j++) {
+			nfds -= constraint_dispatch_msg(&pfd[j]);
+		}
 
 		for (s = TAILQ_FIRST(&conf->ntp_sensors); s != NULL;
 		    s = next_s) {
@@ -397,6 +443,11 @@ ntp_main(int pipe_prnt[2], int fd_ctl, struct ntpd_conf *nconf,
 		}
 		report_peers(ntp_report);
 		ntp_report = 0;
+
+		if (ntp_sigchld) {
+			constraint_check_child();
+			ntp_sigchld = 0;
+		}
 	}
 
 	msgbuf_write(&ibuf_main->w);
@@ -529,6 +580,10 @@ ntp_dispatch_imsg_dns(void)
 				peer_remove(peer);
 			else
 				client_addr_init(peer);
+			break;
+		case IMSG_CONSTRAINT_DNS:
+			constraint_dns(imsg.hdr.peerid,
+			    imsg.data, imsg.hdr.len - IMSG_HEADER_SIZE);
 			break;
 		default:
 			break;
@@ -710,12 +765,12 @@ priv_settime(double offset)
 }
 
 void
-priv_host_dns(char *name, u_int32_t peerid)
+priv_dns(int cmd, char *name, u_int32_t peerid)
 {
 	u_int16_t	dlen;
 
 	dlen = strlen(name) + 1;
-	imsg_compose(ibuf_dns, IMSG_HOST_DNS, peerid, 0, -1, name, dlen);
+	imsg_compose(ibuf_dns, cmd, peerid, 0, -1, name, dlen);
 }
 
 void
@@ -740,7 +795,7 @@ scale_interval(time_t requested)
 	time_t interval, r;
 
 	interval = requested * conf->scale;
-	r = arc4random_uniform(MAX(5, interval / 10));
+	r = arc4random_uniform(MAXIMUM(5, interval / 10));
 	return (interval + r);
 }
 

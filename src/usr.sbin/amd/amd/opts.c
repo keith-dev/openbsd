@@ -268,7 +268,7 @@ eval_opts(char *opts, char *mapkey)
 			 */
 			if (FSTREQ(op->name, f)) {
 				switch (vs_opt) {
-#if AMD_COMPAT <= 5000108
+#if 1	/* XXX ancient compat */
 				case OldSyn:
 					plog(XLOG_WARNING, "key %s: Old syntax selector found: %s=%s", mapkey, f, opt);
 					if (!op->sel_p) {
@@ -276,7 +276,7 @@ eval_opts(char *opts, char *mapkey)
 						break;
 					}
 					/* fall through ... */
-#endif /* 5000108 */
+#endif
 				case SelEQ:
 				case SelNE:
 					if (op->sel_p && (STREQ(*op->sel_p, opt) == (vs_opt == SelNE))) {
@@ -312,7 +312,6 @@ eval_opts(char *opts, char *mapkey)
 /*
  * Free an option
  */
-/*ARGSUSED*/
 static void
 free_op(opt_apply *p, int b)
 {
@@ -735,9 +734,9 @@ eval_fs_opts(am_opts *fo, char *opts, char *g_opts, char *path,
 	/*
 	 * Clear out the option table
 	 */
-	bzero((void *)&fs_static, sizeof(fs_static));
-	bzero((void *)vars, sizeof(vars));
-	bzero((void *)fo, sizeof(*fo));
+	bzero(&fs_static, sizeof(fs_static));
+	bzero(vars, sizeof(vars));
+	bzero(fo, sizeof(*fo));
 
 	/*
 	 * Set key, map & path before expansion

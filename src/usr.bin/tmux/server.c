@@ -1,4 +1,4 @@
-/* $OpenBSD: server.c,v 1.115 2014/07/21 10:52:48 nicm Exp $ */
+/* $OpenBSD: server.c,v 1.118 2014/12/09 19:23:35 nicm Exp $ */
 
 /*
  * Copyright (c) 2007 Nicholas Marriott <nicm@users.sourceforge.net>
@@ -165,25 +165,18 @@ server_start(int lockfd, char *lockfile)
 	cfg_cmd_q->emptyfn = cfg_default_done;
 	cfg_finished = 0;
 	cfg_references = 1;
-	ARRAY_INIT(&cfg_causes);
 	cfg_client = ARRAY_FIRST(&clients);
 	if (cfg_client != NULL)
 		cfg_client->references++;
 
 	if (access(TMUX_CONF, R_OK) == 0) {
-		if (load_cfg(TMUX_CONF, cfg_cmd_q, &cause) == -1) {
-			xasprintf(&cause, "%s: %s", TMUX_CONF, cause);
-			ARRAY_ADD(&cfg_causes, cause);
-		}
-	} else if (errno != ENOENT) {
-		xasprintf(&cause, "%s: %s", TMUX_CONF, strerror(errno));
-		ARRAY_ADD(&cfg_causes, cause);
-	}
+		if (load_cfg(TMUX_CONF, cfg_cmd_q, &cause) == -1)
+			cfg_add_cause("%s: %s", TMUX_CONF, cause);
+	} else if (errno != ENOENT)
+		cfg_add_cause("%s: %s", TMUX_CONF, strerror(errno));
 	if (cfg_file != NULL) {
-		if (load_cfg(cfg_file, cfg_cmd_q, &cause) == -1) {
-			xasprintf(&cause, "%s: %s", cfg_file, cause);
-			ARRAY_ADD(&cfg_causes, cause);
-		}
+		if (load_cfg(cfg_file, cfg_cmd_q, &cause) == -1)
+			cfg_add_cause("%s: %s", cfg_file, cause);
 	}
 	cmdq_continue(cfg_cmd_q);
 
@@ -217,16 +210,30 @@ server_loop(void)
 int
 server_should_shutdown(void)
 {
-	u_int	i;
+	struct client	*c;
+	u_int		 i;
 
 	if (!options_get_number(&global_options, "exit-unattached")) {
 		if (!RB_EMPTY(&sessions))
 			return (0);
 	}
+
+	for (i = 0; i < ARRAY_LENGTH(&clients); i++) {
+		c = ARRAY_ITEM(&clients, i);
+		if (c != NULL && c->session != NULL)
+			return (0);
+	}
+
+	/*
+	 * No attached clients therefore want to exit - flush any waiting
+	 * clients but don't actually exit until they've gone.
+	 */
+	cmd_wait_for_flush();
 	for (i = 0; i < ARRAY_LENGTH(&clients); i++) {
 		if (ARRAY_ITEM(&clients, i) != NULL)
 			return (0);
 	}
+
 	return (1);
 }
 
@@ -237,6 +244,8 @@ server_send_shutdown(void)
 	struct client	*c;
 	struct session	*s, *next_s;
 	u_int		 i;
+
+	cmd_wait_for_flush();
 
 	for (i = 0; i < ARRAY_LENGTH(&clients); i++) {
 		c = ARRAY_ITEM(&clients, i);
@@ -432,6 +441,7 @@ server_child_exited(pid_t pid, int status)
 			continue;
 		TAILQ_FOREACH(wp, &w->panes, entry) {
 			if (wp->pid == pid) {
+				wp->status = status;
 				server_destroy_pane(wp);
 				break;
 			}

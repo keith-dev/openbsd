@@ -1,4 +1,4 @@
-/*	$OpenBSD: defs.h,v 1.8 2013/04/20 20:17:17 miod Exp $	*/
+/*	$OpenBSD: defs.h,v 1.10 2015/01/19 07:41:01 deraadt Exp $	*/
 /*	$NetBSD: defs.h,v 1.5 1995/10/06 05:12:14 thorpej Exp $	*/
 
 /*
@@ -50,23 +50,6 @@
 **  Common #define's and external variables.  All other files should
 **  include this.
 */
-
-/*
- *  This may be defined in <sys/param.h>, if not, it's defined here.
- */
-#ifndef	MAXHOSTNAMELEN
-#define	MAXHOSTNAMELEN 64
-#endif
-
-/*
- *  SIGUSR1 and SIGUSR2 are defined in <signal.h> for 4.3BSD systems.
- */
-#ifndef SIGUSR1
-#define	SIGUSR1 SIGEMT
-#endif
-#ifndef SIGUSR2
-#define	SIGUSR2 SIGFPE
-#endif
 
 /*
  *  These can be faster & more efficient than strcmp()/strncmp()...

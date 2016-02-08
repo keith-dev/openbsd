@@ -1,4 +1,4 @@
-/*	$OpenBSD: tape.c,v 1.42 2014/07/21 01:51:11 guenther Exp $	*/
+/*	$OpenBSD: tape.c,v 1.45 2015/01/16 06:40:00 deraadt Exp $	*/
 /*	$NetBSD: tape.c,v 1.26 1997/04/15 07:12:25 lukem Exp $	*/
 
 /*
@@ -35,7 +35,7 @@
  * SUCH DAMAGE.
  */
 
-#include <sys/param.h>
+#include <sys/param.h>	/* MAXBSIZE */
 #include <sys/ioctl.h>
 #include <sys/mtio.h>
 #include <sys/stat.h>
@@ -51,6 +51,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include <limits.h>
 
 #include "restore.h"
 #include "extern.h"
@@ -72,7 +73,7 @@ static char	*host = NULL;
 
 static int	ofile;
 static char	*map;
-static char	lnkbuf[MAXPATHLEN + 1];
+static char	lnkbuf[PATH_MAX + 1];
 static size_t	pathlen;
 
 int		oldinofmt;	/* old inode format conversion required */
@@ -118,7 +119,6 @@ static void	 setdumpnum(void);
 static void	 swap_header(struct s_spcl *);
 static void	 swap_old_header(struct s_ospcl *);
 static void	 terminateinput(void);
-static void	 xtrfile(char *, size_t);
 static void	 xtrlnkfile(char *, size_t);
 static void	 xtrlnkskip(char *, size_t);
 static void	 xtrmap(char *, size_t);
@@ -724,7 +724,7 @@ loop:
 /*
  * Write out the next block of a file.
  */
-static void
+void
 xtrfile(char *buf, size_t size)
 {
 
@@ -756,7 +756,7 @@ xtrlnkfile(char *buf, size_t size)
 {
 
 	pathlen += size;
-	if (pathlen > MAXPATHLEN)
+	if (pathlen > PATH_MAX)
 		errx(1, "symbolic link name: %s->%s%s; too long %lu",
 		    curfile.name, lnkbuf, buf, (u_long)pathlen);
 	(void)strlcat(lnkbuf, buf, sizeof(lnkbuf));
@@ -915,7 +915,7 @@ getmore:
 			return;
 		}
 		if (rd % TP_BSIZE != 0)
-			panic("partial block read: %d should be %d\n",
+			panic("partial block read: %ld should be %ld\n",
 				rd, ntrec * TP_BSIZE);
 		terminateinput();
 		memcpy(&tapebuf[rd], &endoftapemark, TP_BSIZE);

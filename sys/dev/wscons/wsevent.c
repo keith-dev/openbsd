@@ -1,4 +1,4 @@
-/* $OpenBSD: wsevent.c,v 1.9 2014/07/12 18:48:53 tedu Exp $ */
+/* $OpenBSD: wsevent.c,v 1.12 2015/02/10 21:56:09 miod Exp $ */
 /* $NetBSD: wsevent.c,v 1.16 2003/08/07 16:31:29 agc Exp $ */
 
 /*
@@ -78,7 +78,6 @@
 #include <sys/param.h>
 #include <sys/fcntl.h>
 #include <sys/malloc.h>
-#include <sys/proc.h>
 #include <sys/systm.h>
 #include <sys/vnode.h>
 #include <sys/selinfo.h>
@@ -101,7 +100,7 @@ wsevent_init(struct wseventvar *ev)
 		return;
 	}
 	ev->get = ev->put = 0;
-	ev->q = malloc((u_long)WSEVENT_QSIZE * sizeof(struct wscons_event),
+	ev->q = malloc(WSEVENT_QSIZE * sizeof(struct wscons_event),
 	    M_DEVBUF, M_WAITOK | M_ZERO);
 }
 
@@ -161,7 +160,7 @@ wsevent_read(struct wseventvar *ev, struct uio *uio, int flags)
 	n = howmany(uio->uio_resid, sizeof(struct wscons_event));
 	if (cnt > n)
 		cnt = n;
-	error = uiomove((caddr_t)&ev->q[ev->get],
+	error = uiomovei((caddr_t)&ev->q[ev->get],
 	    cnt * sizeof(struct wscons_event), uio);
 	n -= cnt;
 	/*
@@ -174,7 +173,7 @@ wsevent_read(struct wseventvar *ev, struct uio *uio, int flags)
 		return (error);
 	if (cnt > n)
 		cnt = n;
-	error = uiomove((caddr_t)&ev->q[0],
+	error = uiomovei((caddr_t)&ev->q[0],
 	    cnt * sizeof(struct wscons_event), uio);
 	ev->get = cnt;
 	return (error);

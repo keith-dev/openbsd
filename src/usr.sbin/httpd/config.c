@@ -1,7 +1,7 @@
-/*	$OpenBSD: config.c,v 1.21 2014/08/06 18:21:14 reyk Exp $	*/
+/*	$OpenBSD: config.c,v 1.36 2015/02/23 11:48:41 reyk Exp $	*/
 
 /*
- * Copyright (c) 2011 - 2014 Reyk Floeter <reyk@openbsd.org>
+ * Copyright (c) 2011 - 2015 Reyk Floeter <reyk@openbsd.org>
  *
  * Permission to use, copy, modify, and distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -17,36 +17,22 @@
  */
 
 #include <sys/types.h>
-#include <sys/socket.h>
-#include <sys/stat.h>
 #include <sys/queue.h>
+#include <sys/tree.h>
+#include <sys/time.h>
 #include <sys/uio.h>
 
-#include <net/if.h>
-#include <net/pfvar.h>
-#include <netinet/in.h>
-#include <arpa/inet.h>
-#include <arpa/nameser.h>
-#include <net/route.h>
-
-#include <ctype.h>
 #include <unistd.h>
-#include <err.h>
-#include <errno.h>
-#include <event.h>
-#include <limits.h>
-#include <stdint.h>
 #include <stdlib.h>
-#include <stdarg.h>
 #include <stdio.h>
-#include <netdb.h>
 #include <string.h>
-#include <ifaddrs.h>
+#include <imsg.h>
 
 #include "httpd.h"
 
 int	 config_getserver_config(struct httpd *, struct server *,
 	    struct imsg *);
+int	 config_getserver_auth(struct httpd *, struct server_config *);
 
 int
 config_init(struct httpd *env)
@@ -59,7 +45,8 @@ config_init(struct httpd *env)
 		env->sc_prefork_server = SERVER_NUMPROC;
 
 		ps->ps_what[PROC_PARENT] = CONFIG_ALL;
-		ps->ps_what[PROC_SERVER] = CONFIG_SERVERS|CONFIG_MEDIA;
+		ps->ps_what[PROC_SERVER] =
+		    CONFIG_SERVERS|CONFIG_MEDIA|CONFIG_AUTH;
 		ps->ps_what[PROC_LOGGER] = CONFIG_SERVERS;
 	}
 
@@ -80,6 +67,13 @@ config_init(struct httpd *env)
 		RB_INIT(env->sc_mediatypes);
 	}
 
+	if (what & CONFIG_AUTH) {
+		if ((env->sc_auth =
+		    calloc(1, sizeof(*env->sc_auth))) == NULL)
+			return (-1);
+		TAILQ_INIT(env->sc_auth);
+	}
+
 	return (0);
 }
 
@@ -88,6 +82,7 @@ config_purge(struct httpd *env, u_int reset)
 {
 	struct privsep		*ps = env->sc_ps;
 	struct server		*srv;
+	struct auth		*auth;
 	u_int			 what;
 
 	what = ps->ps_what[privsep_process] & reset;
@@ -99,6 +94,13 @@ config_purge(struct httpd *env, u_int reset)
 
 	if (what & CONFIG_MEDIA && env->sc_mediatypes != NULL)
 		media_purge(env->sc_mediatypes);
+
+	if (what & CONFIG_AUTH && env->sc_auth != NULL) {
+		while ((auth = TAILQ_FIRST(env->sc_auth)) != NULL) {
+			auth_free(env->sc_auth, auth);
+			free(auth);
+		}
+	}
 }
 
 int
@@ -176,21 +178,28 @@ config_setserver(struct httpd *env, struct server *srv)
 		if ((what & CONFIG_SERVERS) == 0 || id == privsep_process)
 			continue;
 
-		DPRINTF("%s: sending server %s to %s fd %d", __func__,
-		    srv->srv_conf.name, ps->ps_title[id], srv->srv_s);
+		DPRINTF("%s: sending %s \"%s[%u]\" to %s fd %d", __func__,
+		    (srv->srv_conf.flags & SRVFLAG_LOCATION) ?
+		    "location" : "server",
+		    srv->srv_conf.name, srv->srv_conf.id,
+		    ps->ps_title[id], srv->srv_s);
 
 		memcpy(&s, &srv->srv_conf, sizeof(s));
 
 		c = 0;
 		iov[c].iov_base = &s;
 		iov[c++].iov_len = sizeof(s);
-		if (srv->srv_conf.ssl_cert_len != 0) {
-			iov[c].iov_base = srv->srv_conf.ssl_cert;
-			iov[c++].iov_len = srv->srv_conf.ssl_cert_len;
+		if (srv->srv_conf.return_uri_len != 0) {
+			iov[c].iov_base = srv->srv_conf.return_uri;
+			iov[c++].iov_len = srv->srv_conf.return_uri_len;
 		}
-		if (srv->srv_conf.ssl_key_len != 0) {
-			iov[c].iov_base = srv->srv_conf.ssl_key;
-			iov[c++].iov_len = srv->srv_conf.ssl_key_len;
+		if (srv->srv_conf.tls_cert_len != 0) {
+			iov[c].iov_base = srv->srv_conf.tls_cert;
+			iov[c++].iov_len = srv->srv_conf.tls_cert_len;
+		}
+		if (srv->srv_conf.tls_key_len != 0) {
+			iov[c].iov_base = srv->srv_conf.tls_key;
+			iov[c++].iov_len = srv->srv_conf.tls_key_len;
 		}
 
 		if (id == PROC_SERVER &&
@@ -199,7 +208,9 @@ config_setserver(struct httpd *env, struct server *srv)
 			n = -1;
 			proc_range(ps, id, &n, &m);
 			for (n = 0; n < m; n++) {
-				if ((fd = dup(srv->srv_s)) == -1)
+				if (srv->srv_s == -1)
+					fd = -1;
+				else if ((fd = dup(srv->srv_s)) == -1)
 					return (-1);
 				proc_composev_imsg(ps, id, n,
 				    IMSG_CFG_SERVER, fd, iov, c);
@@ -210,8 +221,21 @@ config_setserver(struct httpd *env, struct server *srv)
 		}
 	}
 
-	close(srv->srv_s);
-	srv->srv_s = -1;
+	return (0);
+}
+
+int
+config_getserver_auth(struct httpd *env, struct server_config *srv_conf)
+{
+	struct privsep		*ps = env->sc_ps;
+
+	if ((ps->ps_what[privsep_process] & CONFIG_AUTH) == 0 ||
+	    (srv_conf->flags & SRVFLAG_AUTH) == 0)
+		return (0);
+
+	if ((srv_conf->auth = auth_byid(env->sc_auth,
+	    srv_conf->auth_id)) == NULL)
+		return (-1);
 
 	return (0);
 }
@@ -223,28 +247,54 @@ config_getserver_config(struct httpd *env, struct server *srv,
 #ifdef DEBUG
 	struct privsep		*ps = env->sc_ps;
 #endif
-	struct server_config	*srv_conf;
+	struct server_config	*srv_conf, *parent;
 	u_int8_t		*p = imsg->data;
 	u_int			 f;
+	size_t			 s;
 
 	if ((srv_conf = calloc(1, sizeof(*srv_conf))) == NULL)
 		return (-1);
 
 	IMSG_SIZE_CHECK(imsg, srv_conf);
 	memcpy(srv_conf, p, sizeof(*srv_conf));
+	s = sizeof(*srv_conf);
+
+	/* Reset these variables to avoid free'ing invalid pointers */
+	serverconfig_reset(srv_conf);
+
+	TAILQ_FOREACH(parent, &srv->srv_hosts, entry) {
+		if (strcmp(parent->name, srv_conf->name) == 0)
+			break;
+	}
+	if (parent == NULL)
+		parent = &srv->srv_conf;
+
+	if (config_getserver_auth(env, srv_conf) != 0)
+		goto fail;
+
+	/*
+	 * Get variable-length values for the virtual host.  The tls_* ones
+	 * aren't needed in the virtual hosts unless we implement SNI.
+	 */
+	if (srv_conf->return_uri_len != 0) {
+		if ((srv_conf->return_uri = get_data(p + s,
+		    srv_conf->return_uri_len)) == NULL)
+			goto fail;
+		s += srv_conf->return_uri_len;
+	}
 
 	if (srv_conf->flags & SRVFLAG_LOCATION) {
 		/* Inherit configuration from the parent */
 		f = SRVFLAG_INDEX|SRVFLAG_NO_INDEX;
 		if ((srv_conf->flags & f) == 0) {
-			srv_conf->flags |= srv->srv_conf.flags & f;
-			(void)strlcpy(srv_conf->index, srv->srv_conf.index,
+			srv_conf->flags |= parent->flags & f;
+			(void)strlcpy(srv_conf->index, parent->index,
 			    sizeof(srv_conf->index));
 		}
 
 		f = SRVFLAG_AUTO_INDEX|SRVFLAG_NO_AUTO_INDEX;
 		if ((srv_conf->flags & f) == 0)
-			srv_conf->flags |= srv->srv_conf.flags & f;
+			srv_conf->flags |= parent->flags & f;
 
 		f = SRVFLAG_SOCKET|SRVFLAG_FCGI;
 		if ((srv_conf->flags & f) == SRVFLAG_FCGI) {
@@ -255,65 +305,93 @@ config_getserver_config(struct httpd *env, struct server *srv,
 
 		f = SRVFLAG_ROOT;
 		if ((srv_conf->flags & f) == 0) {
-			srv_conf->flags |= srv->srv_conf.flags & f;
-			(void)strlcpy(srv_conf->root, srv->srv_conf.root,
+			srv_conf->flags |= parent->flags & f;
+			(void)strlcpy(srv_conf->root, parent->root,
 			    sizeof(srv_conf->root));
 		}
 
 		f = SRVFLAG_FCGI|SRVFLAG_NO_FCGI;
 		if ((srv_conf->flags & f) == 0)
-			srv_conf->flags |= srv->srv_conf.flags & f;
+			srv_conf->flags |= parent->flags & f;
 
 		f = SRVFLAG_LOG|SRVFLAG_NO_LOG;
 		if ((srv_conf->flags & f) == 0) {
-			srv_conf->flags |= srv->srv_conf.flags & f;
-			srv_conf->logformat = srv->srv_conf.logformat;
+			srv_conf->flags |= parent->flags & f;
+			srv_conf->logformat = parent->logformat;
 		}
 
 		f = SRVFLAG_SYSLOG|SRVFLAG_NO_SYSLOG;
 		if ((srv_conf->flags & f) == 0)
-			srv_conf->flags |= srv->srv_conf.flags & f;
+			srv_conf->flags |= parent->flags & f;
 
-		f = SRVFLAG_SSL;
-		srv_conf->flags |= srv->srv_conf.flags & f;
+		f = SRVFLAG_AUTH|SRVFLAG_NO_AUTH;
+		if ((srv_conf->flags & f) == 0) {
+			srv_conf->flags |= parent->flags & f;
+			srv_conf->auth = parent->auth;
+			srv_conf->auth_id = parent->auth_id;
+			(void)strlcpy(srv_conf->auth_realm,
+			    parent->auth_realm,
+			    sizeof(srv_conf->auth_realm));
+		}
+
+		f = SRVFLAG_TLS;
+		srv_conf->flags |= parent->flags & f;
 
 		f = SRVFLAG_ACCESS_LOG;
 		if ((srv_conf->flags & f) == 0) {
-			srv_conf->flags |= srv->srv_conf.flags & f;
+			srv_conf->flags |= parent->flags & f;
 			(void)strlcpy(srv_conf->accesslog,
-			    srv->srv_conf.accesslog,
+			    parent->accesslog,
 			    sizeof(srv_conf->accesslog));
 		}
 
 		f = SRVFLAG_ERROR_LOG;
 		if ((srv_conf->flags & f) == 0) {
-			srv_conf->flags |= srv->srv_conf.flags & f;
+			srv_conf->flags |= parent->flags & f;
 			(void)strlcpy(srv_conf->errorlog,
-			    srv->srv_conf.errorlog,
+			    parent->errorlog,
 			    sizeof(srv_conf->errorlog));
 		}
 
-		memcpy(&srv_conf->timeout, &srv->srv_conf.timeout,
+		f = SRVFLAG_BLOCK|SRVFLAG_NO_BLOCK;
+		if ((srv_conf->flags & f) == 0) {
+			free(srv_conf->return_uri);
+			srv_conf->flags |= parent->flags & f;
+			srv_conf->return_code = parent->return_code;
+			srv_conf->return_uri_len = parent->return_uri_len;
+			if (srv_conf->return_uri_len &&
+			    (srv_conf->return_uri =
+			    strdup(parent->return_uri)) == NULL)
+				goto fail;
+		}
+
+		memcpy(&srv_conf->timeout, &parent->timeout,
 		    sizeof(srv_conf->timeout));
-		srv_conf->maxrequests = srv->srv_conf.maxrequests;
-		srv_conf->maxrequestbody = srv->srv_conf.maxrequestbody;
+		srv_conf->maxrequests = parent->maxrequests;
+		srv_conf->maxrequestbody = parent->maxrequestbody;
 
 		DPRINTF("%s: %s %d location \"%s\", "
-		    "parent \"%s\", flags: %s",
+		    "parent \"%s[%u]\", flags: %s",
 		    __func__, ps->ps_title[privsep_process], ps->ps_instance,
-		    srv_conf->location, srv->srv_conf.name,
+		    srv_conf->location, parent->name, parent->id,
 		    printb_flags(srv_conf->flags, SRVFLAG_BITS));
 	} else {
 		/* Add a new "virtual" server */
-		DPRINTF("%s: %s %d server \"%s\", parent \"%s\", flags: %s",
-		    __func__, ps->ps_title[privsep_process], ps->ps_instance,
-		    srv_conf->name, srv->srv_conf.name,
+		DPRINTF("%s: %s %d server \"%s[%u]\", parent \"%s[%u]\", "
+		    "flags: %s", __func__,
+		    ps->ps_title[privsep_process], ps->ps_instance,
+		    srv_conf->name, srv_conf->id, parent->name, parent->id,
 		    printb_flags(srv_conf->flags, SRVFLAG_BITS));
 	}
 
 	TAILQ_INSERT_TAIL(&srv->srv_hosts, srv_conf, entry);
 
 	return (0);
+
+ fail:
+	serverconfig_free(srv_conf);
+	free(srv_conf);
+	return (-1);
 }
 
 int
@@ -331,8 +409,12 @@ config_getserver(struct httpd *env, struct imsg *imsg)
 	memcpy(&srv_conf, p, sizeof(srv_conf));
 	s = sizeof(srv_conf);
 
-	if ((u_int)(IMSG_DATA_SIZE(imsg) - s) <
-	    (srv_conf.ssl_cert_len + srv_conf.ssl_key_len)) {
+	/* Reset these variables to avoid free'ing invalid pointers */
+	serverconfig_reset(&srv_conf);
+
+	if ((IMSG_DATA_SIZE(imsg) - s) <
+	    (srv_conf.tls_cert_len + srv_conf.tls_key_len +
+	    srv_conf.return_uri_len)) {
 		log_debug("%s: invalid message length", __func__);
 		goto fail;
 	}
@@ -341,8 +423,12 @@ config_getserver(struct httpd *env, struct imsg *imsg)
 	if ((srv = server_byaddr((struct sockaddr *)
 	    &srv_conf.ss, srv_conf.port)) != NULL) {
 		/* Add "host" to existing listening server */
-		if (imsg->fd != -1)
-			close(imsg->fd);
+		if (imsg->fd != -1) {
+			if (srv->srv_s == -1)
+				srv->srv_s = imsg->fd;
+			else
+				close(imsg->fd);
+		}
 		return (config_getserver_config(env, srv, imsg));
 	}
 
@@ -350,13 +436,14 @@ config_getserver(struct httpd *env, struct imsg *imsg)
 		fatalx("invalid location");
 
 	/* Otherwise create a new server */
-	if ((srv = calloc(1, sizeof(*srv))) == NULL) {
-		close(imsg->fd);
-		return (-1);
-	}
+	if ((srv = calloc(1, sizeof(*srv))) == NULL)
+		goto fail;
 
 	memcpy(&srv->srv_conf, &srv_conf, sizeof(srv->srv_conf));
 	srv->srv_s = imsg->fd;
+
+	if (config_getserver_auth(env, &srv->srv_conf) != 0)
+		goto fail;
 
 	SPLAY_INIT(&srv->srv_clients);
 	TAILQ_INIT(&srv->srv_hosts);
@@ -364,29 +451,42 @@ config_getserver(struct httpd *env, struct imsg *imsg)
 	TAILQ_INSERT_TAIL(&srv->srv_hosts, &srv->srv_conf, entry);
 	TAILQ_INSERT_TAIL(env->sc_servers, srv, srv_entry);
 
-	DPRINTF("%s: %s %d configuration \"%s\", flags: %s", __func__,
+	DPRINTF("%s: %s %d configuration \"%s[%u]\", flags: %s", __func__,
 	    ps->ps_title[privsep_process], ps->ps_instance,
-	    srv->srv_conf.name,
+	    srv->srv_conf.name, srv->srv_conf.id,
 	    printb_flags(srv->srv_conf.flags, SRVFLAG_BITS));
 
-	if (srv->srv_conf.ssl_cert_len != 0) {
-		if ((srv->srv_conf.ssl_cert = get_data(p + s,
-		    srv->srv_conf.ssl_cert_len)) == NULL)
+	/*
+	 * Get all variable-length values for the parent server.
+	 */
+	if (srv->srv_conf.return_uri_len != 0) {
+		if ((srv->srv_conf.return_uri = get_data(p + s,
+		    srv->srv_conf.return_uri_len)) == NULL)
 			goto fail;
-		s += srv->srv_conf.ssl_cert_len;
+		s += srv->srv_conf.return_uri_len;
 	}
-	if (srv->srv_conf.ssl_key_len != 0) {
-		if ((srv->srv_conf.ssl_key = get_data(p + s,
-		    srv->srv_conf.ssl_key_len)) == NULL)
+	if (srv->srv_conf.tls_cert_len != 0) {
+		if ((srv->srv_conf.tls_cert = get_data(p + s,
+		    srv->srv_conf.tls_cert_len)) == NULL)
 			goto fail;
-		s += srv->srv_conf.ssl_key_len;
+		s += srv->srv_conf.tls_cert_len;
+	}
+	if (srv->srv_conf.tls_key_len != 0) {
+		if ((srv->srv_conf.tls_key = get_data(p + s,
+		    srv->srv_conf.tls_key_len)) == NULL)
+			goto fail;
+		s += srv->srv_conf.tls_key_len;
 	}
 
 	return (0);
 
  fail:
-	free(srv->srv_conf.ssl_cert);
-	free(srv->srv_conf.ssl_key);
+	if (imsg->fd != -1)
+		close(imsg->fd);
+	if (srv != NULL) {
+		free(srv->srv_conf.tls_cert);
+		free(srv->srv_conf.tls_key);
+	}
 	free(srv);
 
 	return (-1);
@@ -436,6 +536,54 @@ config_getmedia(struct httpd *env, struct imsg *imsg)
 	DPRINTF("%s: %s %d received media \"%s\"", __func__,
 	    ps->ps_title[privsep_process], ps->ps_instance,
 	    media.media_name);
+
+	return (0);
+}
+
+int
+config_setauth(struct httpd *env, struct auth *auth)
+{
+	struct privsep		*ps = env->sc_ps;
+	int			 id;
+	u_int			 what;
+
+	for (id = 0; id < PROC_MAX; id++) {
+		what = ps->ps_what[id];
+
+		if ((what & CONFIG_AUTH) == 0 || id == privsep_process)
+			continue;
+
+		DPRINTF("%s: sending auth \"%s[%u]\" to %s", __func__,
+		    auth->auth_htpasswd, auth->auth_id, ps->ps_title[id]);
+
+		proc_compose_imsg(ps, id, -1, IMSG_CFG_AUTH, -1,
+		    auth, sizeof(*auth));
+	}
+
+	return (0);
+}
+
+int
+config_getauth(struct httpd *env, struct imsg *imsg)
+{
+#ifdef DEBUG
+	struct privsep		*ps = env->sc_ps;
+#endif
+	struct auth		 auth;
+	u_int8_t		*p = imsg->data;
+
+	IMSG_SIZE_CHECK(imsg, &auth);
+	memcpy(&auth, p, sizeof(auth));
+
+	if (auth_add(env->sc_auth, &auth) == NULL) {
+		log_debug("%s: failed to add auth \"%s[%u]\"",
+		    __func__, auth.auth_htpasswd, auth.auth_id);
+		return (-1);
+	}
+
+	DPRINTF("%s: %s %d received auth \"%s[%u]\"", __func__,
+	    ps->ps_title[privsep_process], ps->ps_instance,
+	    auth.auth_htpasswd, auth.auth_id);
 
 	return (0);
 }

@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_msk.c,v 1.106 2014/07/22 13:12:11 mpi Exp $	*/
+/*	$OpenBSD: if_msk.c,v 1.112 2014/12/22 02:28:52 tedu Exp $	*/
 
 /*
  * Copyright (c) 1997, 1998, 1999, 2000
@@ -103,10 +103,8 @@
 #include <net/if_dl.h>
 #include <net/if_types.h>
 
-#ifdef INET
 #include <netinet/in.h>
 #include <netinet/if_ether.h>
-#endif
 
 #include <net/if_media.h>
 #include <net/if_vlan_var.h>
@@ -211,6 +209,7 @@ const struct pci_matchid mskc_devices[] = {
 	{ PCI_VENDOR_MARVELL,		PCI_PRODUCT_MARVELL_YUKON_8071 },
 	{ PCI_VENDOR_MARVELL,		PCI_PRODUCT_MARVELL_YUKON_8072 },
 	{ PCI_VENDOR_MARVELL,		PCI_PRODUCT_MARVELL_YUKON_8075 },
+	{ PCI_VENDOR_MARVELL,		PCI_PRODUCT_MARVELL_YUKON_8079 },
 	{ PCI_VENDOR_MARVELL,		PCI_PRODUCT_MARVELL_YUKON_C032 },
 	{ PCI_VENDOR_MARVELL,		PCI_PRODUCT_MARVELL_YUKON_C033 },
 	{ PCI_VENDOR_MARVELL,		PCI_PRODUCT_MARVELL_YUKON_C034 },
@@ -458,8 +457,8 @@ msk_init_tx_ring(struct sk_if_softc *sc_if)
 			nexti = i + 1;
 		cd->sk_tx_chain[i].sk_next = &cd->sk_tx_chain[nexti];
 
-		if (bus_dmamap_create(sc->sc_dmatag, SK_JLEN, SK_NTXSEG,
-		   SK_JLEN, 0, BUS_DMA_NOWAIT, &dmamap))
+		if (bus_dmamap_create(sc->sc_dmatag, sc_if->sk_pktlen,
+		    SK_NTXSEG, sc_if->sk_pktlen, 0, BUS_DMA_NOWAIT, &dmamap))
 			return (ENOBUFS);
 
 		entry = malloc(sizeof(*entry), M_DEVBUF, M_NOWAIT);
@@ -592,10 +591,8 @@ msk_ioctl(struct ifnet *ifp, u_long command, caddr_t data)
 		ifp->if_flags |= IFF_UP;
 		if (!(ifp->if_flags & IFF_RUNNING))
 			msk_init(sc_if);
-#ifdef INET
 		if (ifa->ifa_addr->sa_family == AF_INET)
 			arp_ifinit(&sc_if->arpcom, ifa);
-#endif
 		break;
 
 	case SIOCSIFFLAGS:
@@ -615,6 +612,11 @@ msk_ioctl(struct ifnet *ifp, u_long command, caddr_t data)
 		mii = &sc_if->sk_mii;
 		error = ifmedia_ioctl(ifp, ifr, &mii->mii_media, command);
 		break;
+
+	case SIOCGIFRXR:
+		error = if_rxr_ioctl((struct if_rxrinfo *)ifr->ifr_data,
+		    NULL, sc_if->sk_pktlen, &sc_if->sk_cdata.sk_rx_ring);
+ 		break;
 
 	default:
 		error = ether_ioctl(ifp, &sc_if->arpcom, command, data);
@@ -764,6 +766,8 @@ mskc_reset(struct sk_softc *sc)
 	case SK_YUKON_SUPR:
 	case SK_YUKON_ULTRA2:
 	case SK_YUKON_OPTIMA:
+	case SK_YUKON_PRM:
+	case SK_YUKON_OPTIMA2:
 		imtimer_ticks = SK_IMTIMER_TICKS_YUKON_EC;
 		break;
 	case SK_YUKON_FE:
@@ -830,6 +834,8 @@ msk_probe(struct device *parent, void *match, void *aux)
 	case SK_YUKON_SUPR:
 	case SK_YUKON_ULTRA2:
 	case SK_YUKON_OPTIMA:
+	case SK_YUKON_PRM:
+	case SK_YUKON_OPTIMA2:
 		return (1);
 	}
 
@@ -1213,10 +1219,16 @@ mskc_attach(struct device *parent, struct device *self, void *aux)
 		sc->sk_name = "Yukon-2 Supreme";
 		break;
 	case SK_YUKON_ULTRA2:
-		sc->sk_name = "Yukon-2 Ultra2";
+		sc->sk_name = "Yukon-2 Ultra 2";
 		break;
 	case SK_YUKON_OPTIMA:
 		sc->sk_name = "Yukon-2 Optima";
+		break;
+	case SK_YUKON_PRM:
+		sc->sk_name = "Yukon-2 Optima Prime";
+		break;
+	case SK_YUKON_OPTIMA2:
+		sc->sk_name = "Yukon-2 Optima 2";
 		break;
 	default:
 		sc->sk_name = "Yukon (Unknown)";
@@ -1268,6 +1280,9 @@ mskc_attach(struct device *parent, struct device *self, void *aux)
 		case SK_YUKON_EC_U_REV_B0:
 			revstr = "B0";
 			break;
+		case SK_YUKON_EC_U_REV_B1:
+			revstr = "B1";
+			break;
 		default:
 			;
 		}
@@ -1302,9 +1317,34 @@ mskc_attach(struct device *parent, struct device *self, void *aux)
 		}
 	}
 
-	if (sc->sk_type == SK_YUKON_SUPR && sc->sk_rev == SK_YUKON_SUPR_REV_A0)
-		revstr = "A0";
+	if (sc->sk_type == SK_YUKON_SUPR) {
+		switch (sc->sk_rev) {
+		case SK_YUKON_SUPR_REV_A0:
+			revstr = "A0";
+			break;
+		case SK_YUKON_SUPR_REV_B0:
+			revstr = "B0";
+			break;
+		case SK_YUKON_SUPR_REV_B1:
+			revstr = "B1";
+			break;
+		default:
+			;
+		}
+	}
 
+	if (sc->sk_type == SK_YUKON_PRM) {
+		switch (sc->sk_rev) {
+		case SK_YUKON_PRM_REV_Z1:
+			revstr = "Z1";
+			break;
+		case SK_YUKON_PRM_REV_A0:
+			revstr = "A0";
+			break;
+		default:
+			;
+		}
+	}
 
 	/* Announce the product name. */
 	printf(", %s", sc->sk_name);

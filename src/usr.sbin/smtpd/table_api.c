@@ -1,4 +1,4 @@
-/*	$OpenBSD: table_api.c,v 1.5 2014/07/08 13:49:09 eric Exp $	*/
+/*	$OpenBSD: table_api.c,v 1.7 2015/01/20 17:37:54 deraadt Exp $	*/
 
 /*
  * Copyright (c) 2013 Eric Faurot <eric@openbsd.org>
@@ -18,7 +18,11 @@
 
 #include <sys/types.h>
 #include <sys/queue.h>
-#include <sys/uio.h>
+#include <sys/tree.h>
+#include <sys/socket.h>
+
+#include <netinet/in.h>
+#include <netdb.h>
 
 #include <event.h>
 #include <fcntl.h>
@@ -28,6 +32,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include <limits.h>
 
 #include "smtpd-defines.h"
 #include "smtpd-api.h"
@@ -138,6 +143,7 @@ table_msg_dispatch(void)
 	char		 res[4096];
 	int		 type, r;
 
+	memset(res, 0, sizeof res);
 	switch (imsg.hdr.type) {
 	case PROC_TABLE_OPEN:
 		table_msg_get(&op, sizeof op);

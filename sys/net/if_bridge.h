@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_bridge.h,v 1.39 2013/10/13 12:09:54 reyk Exp $	*/
+/*	$OpenBSD: if_bridge.h,v 1.41 2015/01/24 00:29:06 deraadt Exp $	*/
 
 /*
  * Copyright (c) 1999, 2000 Jason L. Wright (jason@thought.net)
@@ -407,7 +407,7 @@ struct bridge_rtnode {
 	u_int8_t			brt_flags;	/* address flags */
 	u_int8_t			brt_age;	/* age counter */
 	struct				ether_addr brt_addr;	/* dst addr */
-	union sockaddr_union		brt_tunnel;	/* tunnel endpoint */
+	union pfsockaddr_union		brt_tunnel;	/* tunnel endpoint */
 };
 
 #ifndef BRIDGE_RTABLE_SIZE
@@ -425,7 +425,7 @@ struct bridge_softc {
 	u_int32_t			sc_brtmax;	/* max # addresses */
 	u_int32_t			sc_brtcnt;	/* current # addrs */
 	int				sc_brttimeout;	/* timeout ticks */
-	u_int32_t			sc_hashkey;	/* hash key */
+	u_int64_t			sc_hashkey[2];	/* siphash key */
 	struct timeout			sc_brtimeout;	/* timeout state */
 	struct bstp_state		*sc_stp;	/* stp state */
 	TAILQ_HEAD(, bridge_iflist)	sc_iflist;	/* interface list */

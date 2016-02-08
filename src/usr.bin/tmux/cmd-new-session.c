@@ -1,4 +1,4 @@
-/* $OpenBSD: cmd-new-session.c,v 1.60 2014/05/13 08:08:32 nicm Exp $ */
+/* $OpenBSD: cmd-new-session.c,v 1.64 2015/02/05 10:29:43 nicm Exp $ */
 
 /*
  * Copyright (c) 2007 Nicholas Marriott <nicm@users.sourceforge.net>
@@ -31,6 +31,8 @@
  * Create a new session and attach to the current terminal unless -d is given.
  */
 
+#define NEW_SESSION_TEMPLATE "#{session_name}:"
+
 enum cmd_retval	 cmd_new_session_exec(struct cmd *, struct cmd_q *);
 
 const struct cmd_entry cmd_new_session_entry = {
@@ -40,7 +42,14 @@ const struct cmd_entry cmd_new_session_entry = {
 	"[-s session-name] " CMD_TARGET_SESSION_USAGE " [-x width] "
 	"[-y height] [command]",
 	CMD_STARTSERVER|CMD_CANTNEST,
-	NULL,
+	cmd_new_session_exec
+};
+
+const struct cmd_entry cmd_has_session_entry = {
+	"has-session", "has",
+	"t:", 0, 0,
+	CMD_TARGET_SESSION_USAGE,
+	0,
 	cmd_new_session_exec
 };
 
@@ -61,6 +70,12 @@ cmd_new_session_exec(struct cmd *self, struct cmd_q *cmdq)
 	u_int			 sx, sy;
 	struct format_tree	*ft;
 	struct environ_entry	*envent;
+
+	if (self->entry == &cmd_has_session_entry) {
+		if (cmd_find_session(cmdq, args_get(args, 't'), 0) == NULL)
+			return (CMD_RETURN_ERROR);
+		return (CMD_RETURN_NORMAL);
+	}
 
 	if (args_has(args, 't') && (args->argc != 0 || args_has(args, 'n'))) {
 		cmdq_error(cmdq, "command or window name given with target");
@@ -104,8 +119,8 @@ cmd_new_session_exec(struct cmd *self, struct cmd_q *cmdq)
 	/* Get the new session working directory. */
 	if (args_has(args, 'c')) {
 		ft = format_create();
-		if ((c0 = cmd_find_client(cmdq, NULL, 1)) != NULL)
-			format_client(ft, c0);
+		format_defaults(ft, cmd_find_client(cmdq, NULL, 1), NULL, NULL,
+		    NULL);
 		cp = format_expand(ft, args_get(args, 'c'));
 		format_free(ft);
 
@@ -272,9 +287,8 @@ cmd_new_session_exec(struct cmd *self, struct cmd_q *cmdq)
 			template = NEW_SESSION_TEMPLATE;
 
 		ft = format_create();
-		if ((c0 = cmd_find_client(cmdq, NULL, 1)) != NULL)
-			format_client(ft, c0);
-		format_session(ft, s);
+		format_defaults(ft, cmd_find_client(cmdq, NULL, 1), s, NULL,
+		    NULL);
 
 		cp = format_expand(ft, template);
 		cmdq_print(cmdq, "%s", cp);

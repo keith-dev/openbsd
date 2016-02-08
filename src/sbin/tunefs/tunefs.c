@@ -1,4 +1,4 @@
-/*	$OpenBSD: tunefs.c,v 1.34 2014/05/20 21:11:16 krw Exp $	*/
+/*	$OpenBSD: tunefs.c,v 1.37 2015/02/07 02:09:14 deraadt Exp $	*/
 /*	$NetBSD: tunefs.c,v 1.33 2005/01/19 20:46:16 xtraeme Exp $	*/
 
 /*
@@ -33,7 +33,7 @@
 /*
  * tunefs: change layout parameters to an existing file system.
  */
-#include <sys/param.h>
+#include <sys/param.h>	/* DEV_BSIZE MAXBSIZE */
 
 #include <ufs/ufs/dinode.h>
 #include <ufs/ffs/fs.h>
@@ -48,6 +48,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include <limits.h>
 #include <util.h>
 
 /* the optimization warning string template */
@@ -93,15 +94,15 @@ main(int argc, char *argv[])
 		switch (ch) {
 
 		case 'A':
-			Aflag++;
+			Aflag = 1;
 			break;
 
 		case 'F':
-			Fflag++;
+			Fflag = 1;
 			break;
 
 		case 'N':
-			Nflag++;
+			Nflag = 1;
 			break;
 
 		case 'e':
@@ -308,7 +309,7 @@ bread(daddr_t blk, char *buffer, int cnt, const char *file)
 static int
 openpartition(char *name, int flags, char **devicep)
 {
-	char		rawspec[MAXPATHLEN], *p;
+	char		rawspec[PATH_MAX], *p;
 	struct fstab	*fs;
 	int		fd;
 

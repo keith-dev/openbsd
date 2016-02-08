@@ -1,4 +1,4 @@
-/*	$OpenBSD: iommu.c,v 1.69 2014/07/12 18:44:43 tedu Exp $	*/
+/*	$OpenBSD: iommu.c,v 1.72 2015/01/09 14:23:25 kettenis Exp $	*/
 /*	$NetBSD: iommu.c,v 1.47 2002/02/08 20:03:45 eeh Exp $	*/
 
 /*
@@ -176,7 +176,7 @@ iommu_init(char *name, struct iommu_state *is, int tsbsize, u_int32_t iovabase)
 	    (paddr_t)PAGE_SIZE, (paddr_t)0, &mlist, 1, UVM_PLA_NOWAIT) != 0)
 		panic("iommu_init: no memory");
 
-	va = uvm_km_valloc(kernel_map, size);
+	va = (vaddr_t)km_alloc(size, &kv_any, &kp_none, &kd_nowait);
 	if (va == 0)
 		panic("iommu_init: no memory");
 	is->is_tsb = (int64_t *)va;
@@ -188,8 +188,8 @@ iommu_init(char *name, struct iommu_state *is, int tsbsize, u_int32_t iovabase)
 	for (; m != NULL; m = TAILQ_NEXT(m,pageq)) {
 		pa = VM_PAGE_TO_PHYS(m);
 		pmap_enter(pmap_kernel(), va, pa | PMAP_NVC,
-			VM_PROT_READ|VM_PROT_WRITE,
-			VM_PROT_READ|VM_PROT_WRITE|PMAP_WIRED);
+		    PROT_READ | PROT_WRITE,
+		    PROT_READ | PROT_WRITE | PMAP_WIRED);
 		va += PAGE_SIZE;
 	}
 	pmap_update(pmap_kernel());
@@ -1252,8 +1252,8 @@ iommu_dvmamap_load_mlist(bus_dma_tag_t t, struct iommu_state *is,
 	for (m = TAILQ_FIRST(mlist); m != NULL; m = TAILQ_NEXT(m,pageq)) {
 		pa = VM_PAGE_TO_PHYS(m);
 
-		err = iommu_dvmamap_append_range(t, map, pa, PAGE_SIZE,
-		    flags, boundary);
+		err = iommu_dvmamap_append_range(t, map, pa,
+		    MIN(PAGE_SIZE, size), flags, boundary);
 		if (err == EFBIG)
 			return (err);
 		if (err) {
@@ -1262,6 +1262,9 @@ iommu_dvmamap_load_mlist(bus_dma_tag_t t, struct iommu_state *is,
 			    pa + PAGE_SIZE, PAGE_SIZE, PAGE_SIZE);
 			return (err);
 		}
+		if (size < PAGE_SIZE)
+			break;
+		size -= PAGE_SIZE;
 	}
 
 	return (0);

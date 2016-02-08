@@ -1,4 +1,4 @@
-/*	$OpenBSD: yp_bind.c,v 1.20 2014/05/25 17:47:04 tedu Exp $ */
+/*	$OpenBSD: yp_bind.c,v 1.22 2015/01/16 16:48:51 deraadt Exp $ */
 /*
  * Copyright (c) 1992, 1993, 1996 Theo de Raadt <deraadt@theos.com>
  * All rights reserved.
@@ -25,7 +25,6 @@
  * SUCH DAMAGE.
  */
 
-#include <sys/param.h>
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <sys/uio.h>
@@ -35,6 +34,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include <limits.h>
 #include <rpc/rpc.h>
 #include <rpc/xdr.h>
 #include <rpcsvc/yp.h>
@@ -42,7 +42,7 @@
 #include "ypinternal.h"
 
 struct dom_binding *_ypbindlist;
-char _yp_domain[MAXHOSTNAMELEN];
+char _yp_domain[HOST_NAME_MAX+1];
 int _yplib_timeout = 10;
 
 int

@@ -1,4 +1,4 @@
-/*	$OpenBSD: radeon_kms.c,v 1.29 2014/07/06 08:24:54 jsg Exp $	*/
+/*	$OpenBSD: radeon_kms.c,v 1.35 2015/02/11 07:01:37 jsg Exp $	*/
 /*
  * Copyright 2008 Advanced Micro Devices, Inc.
  * Copyright 2008 Red Hat Inc.
@@ -302,7 +302,7 @@ int radeondrm_alloc_screen(void *, const struct wsscreen_descr *,
 void radeondrm_free_screen(void *, void *);
 int radeondrm_show_screen(void *, void *, int,
     void (*)(void *, int, int), void *);
-void radeondrm_doswitch(void *, void *);
+void radeondrm_doswitch(void *);
 #ifdef __sparc64__
 void radeondrm_setcolor(void *, u_int, u_int8_t, u_int8_t, u_int8_t);
 #endif
@@ -379,26 +379,26 @@ radeondrm_show_screen(void *v, void *cookie, int waitok,
 
 	rdev->switchcb = cb;
 	rdev->switchcbarg = cbarg;
+	rdev->switchcookie = cookie;
 	if (cb) {
-		workq_queue_task(NULL, &rdev->switchwqt, 0,
-		    radeondrm_doswitch, v, cookie);
+		task_add(systq, &rdev->switchtask);
 		return (EAGAIN);
 	}
 
-	radeondrm_doswitch(v, cookie);
+	radeondrm_doswitch(v);
 
 	return (0);
 }
 
 void
-radeondrm_doswitch(void *v, void *cookie)
+radeondrm_doswitch(void *v)
 {
 	struct rasops_info *ri = v;
 	struct radeon_device *rdev = ri->ri_hw;
 	struct radeon_crtc *radeon_crtc;
 	int i, crtc;
 
-	rasops_show_screen(ri, cookie, 0, NULL, NULL);
+	rasops_show_screen(ri, rdev->switchcookie, 0, NULL, NULL);
 	for (crtc = 0; crtc < rdev->num_crtc; crtc++) {
 		for (i = 0; i < 256; i++) {
 			radeon_crtc = rdev->mode_info.crtcs[crtc];
@@ -671,7 +671,7 @@ radeondrm_attachhook(void *xsc)
 	 */
 	r = radeon_device_init(rdev, rdev->ddev);
 	if (r) {
-		printf(": Fatal error during GPU init\n");
+		dev_err(&dev->pdev->dev, "Fatal error during GPU init\n");
 		radeon_fatal_error = 1;
 		radeondrm_forcedetach(rdev);
 		return;
@@ -683,7 +683,7 @@ radeondrm_attachhook(void *xsc)
 	 */
 	r = radeon_modeset_init(rdev);
 	if (r)
-		printf("Fatal error during modeset init\n");
+		dev_err(&dev->pdev->dev, "Fatal error during modeset init\n");
 
 	/* Call ACPI methods: require modeset init
 	 * but failure is not fatal
@@ -697,6 +697,8 @@ radeondrm_attachhook(void *xsc)
 {
 	struct wsemuldisplaydev_attach_args aa;
 	struct rasops_info *ri = &rdev->ro;
+
+	task_set(&rdev->switchtask, radeondrm_doswitch, ri);
 
 	if (ri->ri_bits == NULL)
 		return;
@@ -756,6 +758,9 @@ radeondrm_activate_kms(struct device *self, int act)
 	struct radeon_device *rdev = (struct radeon_device *)self;
 	int rv = 0;
 
+	if (rdev->ddev == NULL)
+		return (0);
+
 	switch (act) {
 	case DVACT_QUIESCE:
 		rv = config_activate_children(self, act);
@@ -790,7 +795,7 @@ radeon_set_filp_rights(struct drm_device *dev,
 				   struct drm_file *applier,
 				   uint32_t *value)
 {
-	DRM_LOCK();
+	mutex_lock(&dev->struct_mutex);
 	if (*value == 1) {
 		/* wants rights */
 		if (!*owner)
@@ -801,7 +806,7 @@ radeon_set_filp_rights(struct drm_device *dev,
 			*owner = NULL;
 	}
 	*value = *owner == applier ? 1 : 0;
-	DRM_UNLOCK();
+	mutex_unlock(&dev->struct_mutex);
 }
 
 /*
@@ -1230,6 +1235,7 @@ u32 radeon_get_vblank_counter_kms(struct drm_device *dev, int crtc)
 int radeon_enable_vblank_kms(struct drm_device *dev, int crtc)
 {
 	struct radeon_device *rdev = dev->dev_private;
+	unsigned long irqflags;
 	int r;
 
 	if (crtc < 0 || crtc >= rdev->num_crtc) {
@@ -1237,10 +1243,10 @@ int radeon_enable_vblank_kms(struct drm_device *dev, int crtc)
 		return -EINVAL;
 	}
 
-	mtx_enter(&rdev->irq.lock);
+	spin_lock_irqsave(&rdev->irq.lock, irqflags);
 	rdev->irq.crtc_vblank_int[crtc] = true;
 	r = radeon_irq_set(rdev);
-	mtx_leave(&rdev->irq.lock);
+	spin_unlock_irqrestore(&rdev->irq.lock, irqflags);
 	return r;
 }
 
@@ -1255,16 +1261,17 @@ int radeon_enable_vblank_kms(struct drm_device *dev, int crtc)
 void radeon_disable_vblank_kms(struct drm_device *dev, int crtc)
 {
 	struct radeon_device *rdev = dev->dev_private;
+	unsigned long irqflags;
 
 	if (crtc < 0 || crtc >= rdev->num_crtc) {
 		DRM_ERROR("Invalid crtc %d\n", crtc);
 		return;
 	}
 
-	mtx_enter(&rdev->irq.lock);
+	spin_lock_irqsave(&rdev->irq.lock, irqflags);
 	rdev->irq.crtc_vblank_int[crtc] = false;
 	radeon_irq_set(rdev);
-	mtx_leave(&rdev->irq.lock);
+	spin_unlock_irqrestore(&rdev->irq.lock, irqflags);
 }
 
 /**

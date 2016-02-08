@@ -1,4 +1,4 @@
-/* $OpenBSD: if_cpsw.c,v 1.22 2014/05/06 14:44:08 jasper Exp $ */
+/* $OpenBSD: if_cpsw.c,v 1.24 2014/12/22 02:26:53 tedu Exp $ */
 /*	$NetBSD: if_cpsw.c,v 1.3 2013/04/17 14:36:34 bouyer Exp $	*/
 
 /*
@@ -59,6 +59,7 @@
 #include <sys/systm.h>
 #include <sys/sockio.h>
 #include <sys/mbuf.h>
+#include <sys/pool.h>
 #include <sys/queue.h>
 #include <sys/kernel.h>
 #include <sys/device.h>
@@ -574,10 +575,8 @@ cpsw_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 	switch (cmd) {
 	case SIOCSIFADDR:
 		ifp->if_flags |= IFF_UP;
-#ifdef INET
 		if (ifa->ifa_addr->sa_family == AF_INET)
 			arp_ifinit(&sc->sc_ac, ifa);
-#endif
 
 	case SIOCSIFFLAGS:
 		if (ifp->if_flags & IFF_UP) {

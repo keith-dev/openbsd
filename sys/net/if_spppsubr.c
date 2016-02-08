@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_spppsubr.c,v 1.125 2014/07/22 11:06:09 mpi Exp $	*/
+/*	$OpenBSD: if_spppsubr.c,v 1.130 2015/01/27 03:17:36 dlg Exp $	*/
 /*
  * Synchronous PPP/Cisco link level subroutines.
  * Keepalive protocol implemented in both Cisco and PPP modes.
@@ -49,22 +49,18 @@
 #include <crypto/md5.h>
 
 #include <net/if.h>
+#include <net/if_var.h>
 #include <net/netisr.h>
 #include <net/if_types.h>
 #include <net/route.h>
 
-/* for arc4random() */
-#include <dev/rndvar.h>
-
 #include <sys/stdarg.h>
 
-#ifdef INET
 #include <netinet/in.h>
 #include <netinet/in_var.h>
 #include <netinet/ip.h>
 #include <netinet/tcp.h>
 #include <netinet/if_ether.h>
-#endif
 
 #ifdef INET6
 #include <netinet6/in6_ifattach.h>
@@ -321,7 +317,7 @@ const char *sppp_ipv6cp_opt_name(u_char opt);
 void sppp_get_ip6_addrs(struct sppp *sp, struct in6_addr *src,
 			       struct in6_addr *dst, struct in6_addr *srcmask);
 void sppp_set_ip6_addr(struct sppp *sp, const struct in6_addr *src, const struct in6_addr *dst);
-void sppp_update_ip6_addr(void *arg1, void *arg2);
+void sppp_update_ip6_addr(void *sp);
 void sppp_suggest_ip6_addr(struct sppp *sp, struct in6_addr *suggest);
 
 void sppp_pap_input(struct sppp *sp, struct mbuf *m);
@@ -362,8 +358,8 @@ void sppp_print_string(const char *p, u_short len);
 void sppp_qflush(struct ifqueue *ifq);
 int sppp_update_gw_walker(struct radix_node *rn, void *arg, u_int);
 void sppp_update_gw(struct ifnet *ifp);
-void sppp_set_ip_addrs(void *, void *);
-void sppp_clear_ip_addrs(void *, void *);
+void sppp_set_ip_addrs(void *);
+void sppp_clear_ip_addrs(void *);
 void sppp_set_phase(struct sppp *sp);
 
 /* our control protocol descriptors */
@@ -377,11 +373,7 @@ static const struct cp lcp = {
 
 static const struct cp ipcp = {
 	PPP_IPCP, IDX_IPCP,
-#ifdef INET	/* don't run IPCP if there's no IPv4 support */
 	CP_NCP,
-#else
-	0,
-#endif
 	"ipcp",
 	sppp_ipcp_up, sppp_ipcp_down, sppp_ipcp_open, sppp_ipcp_close,
 	sppp_ipcp_TO, sppp_ipcp_RCR, sppp_ipcp_RCN_rej, sppp_ipcp_RCN_nak,
@@ -539,7 +531,6 @@ sppp_input(struct ifnet *ifp, struct mbuf *m)
 				sppp_chap_input(sp, m);
 			m_freem (m);
 			return;
-#ifdef INET
 		case PPP_IPCP:
 			if (sp->pp_phase == PHASE_NETWORK)
 				sppp_cp_input(&ipcp, sp, m);
@@ -552,7 +543,6 @@ sppp_input(struct ifnet *ifp, struct mbuf *m)
 				sp->pp_last_activity = tv.tv_sec;
 			}
 			break;
-#endif
 #ifdef INET6
 		case PPP_IPV6CP:
 			if (sp->pp_phase == PHASE_NETWORK)
@@ -589,12 +579,10 @@ sppp_input(struct ifnet *ifp, struct mbuf *m)
 			sppp_cisco_input ((struct sppp*) ifp, m);
 			m_freem (m);
 			return;
-#ifdef INET
 		case ETHERTYPE_IP:
 			schednetisr (NETISR_IP);
 			inq = &ipintrq;
 			break;
-#endif
 #ifdef INET6
 		case ETHERTYPE_IPV6:
 			schednetisr (NETISR_IPV6);
@@ -679,7 +667,6 @@ sppp_output(struct ifnet *ifp, struct mbuf *m,
 		s = splnet();
 	}
 
-#ifdef INET
 	/*
 	 * Put low delay, telnet, rlogin and ftp control packets
 	 * in front of the queue.
@@ -719,7 +706,6 @@ sppp_output(struct ifnet *ifp, struct mbuf *m,
 				return (0);
 		}
 	}
-#endif
 
 	if (sp->pp_flags & PP_NOFRAMING)
 		goto skip_header;
@@ -750,7 +736,6 @@ sppp_output(struct ifnet *ifp, struct mbuf *m,
 
  skip_header:
 	switch (dst->sa_family) {
-#ifdef INET
 	case AF_INET:   /* Internet Protocol */
 		if (sp->pp_flags & PP_CISCO)
 			protocol = htons (ETHERTYPE_IP);
@@ -769,7 +754,6 @@ sppp_output(struct ifnet *ifp, struct mbuf *m,
 				rv = ENETDOWN;
 		}
 		break;
-#endif
 #ifdef INET6
 	case AF_INET6:   /* Internet Protocol v6 */
 		if (sp->pp_flags & PP_CISCO)
@@ -2625,8 +2609,8 @@ sppp_ipcp_init(struct sppp *sp)
 	sp->ipcp.flags = 0;
 	sp->state[IDX_IPCP] = STATE_INITIAL;
 	sp->fail_counter[IDX_IPCP] = 0;
-	task_set(&sp->ipcp.set_addr_task, sppp_set_ip_addrs, sp, NULL);
-	task_set(&sp->ipcp.clear_addr_task, sppp_clear_ip_addrs, sp, NULL);
+	task_set(&sp->ipcp.set_addr_task, sppp_set_ip_addrs, sp);
+	task_set(&sp->ipcp.clear_addr_task, sppp_clear_ip_addrs, sp);
 }
 
 void
@@ -3074,8 +3058,7 @@ sppp_ipv6cp_init(struct sppp *sp)
 	sp->ipv6cp.flags = 0;
 	sp->state[IDX_IPV6CP] = STATE_INITIAL;
 	sp->fail_counter[IDX_IPV6CP] = 0;
-	task_set(&sp->ipv6cp.set_addr_task, sppp_update_ip6_addr, sp,
-	    &sp->ipv6cp.req_ifid);
+	task_set(&sp->ipv6cp.set_addr_task, sppp_update_ip6_addr, sp);
 }
 
 void
@@ -4574,7 +4557,7 @@ sppp_update_gw(struct ifnet *ifp)
  * If an address is 0, leave it the way it is.
  */
 void
-sppp_set_ip_addrs(void *arg1, void *arg2)
+sppp_set_ip_addrs(void *arg1)
 {
 	struct sppp *sp = arg1;
 	u_int32_t myaddr;
@@ -4647,7 +4630,7 @@ sppp_set_ip_addrs(void *arg1, void *arg2)
  * Clear IP addresses.
  */
 void
-sppp_clear_ip_addrs(void *arg1, void *arg2)
+sppp_clear_ip_addrs(void *arg1)
 {
 	struct sppp *sp = (struct sppp *)arg1;
 	struct ifnet *ifp = &sp->pp_if;
@@ -4744,11 +4727,11 @@ sppp_get_ip6_addrs(struct sppp *sp, struct in6_addr *src, struct in6_addr *dst,
 
 /* Task to update my IPv6 address from process context. */
 void
-sppp_update_ip6_addr(void *arg1, void *arg2)
+sppp_update_ip6_addr(void *arg)
 {
-	struct sppp *sp = arg1;
+	struct sppp *sp = arg;
 	struct ifnet *ifp = &sp->pp_if;
-	struct in6_aliasreq *ifra = arg2;
+	struct in6_aliasreq *ifra = &sp->ipv6cp.req_ifid;
 	struct in6_addr mask = in6mask128;
 	struct in6_ifaddr *ia6;
 	int s, error;
@@ -5187,6 +5170,7 @@ sppp_proto_name(u_short proto)
 	switch (proto) {
 	case PPP_LCP:	return "lcp";
 	case PPP_IPCP:	return "ipcp";
+	case PPP_IPV6CP: return "ipv6cp";
 	case PPP_PAP:	return "pap";
 	case PPP_CHAP:	return "chap";
 	}

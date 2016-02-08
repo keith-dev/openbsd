@@ -1,4 +1,4 @@
-/*	$OpenBSD: slowcgi.c,v 1.34 2014/07/13 21:46:25 claudio Exp $ */
+/*	$OpenBSD: slowcgi.c,v 1.44 2015/01/22 18:22:27 florian Exp $ */
 /*
  * Copyright (c) 2013 David Gwynne <dlg@openbsd.org>
  * Copyright (c) 2013 Florian Obser <florian@openbsd.org>
@@ -20,18 +20,19 @@
 #include <sys/ioctl.h>
 #include <sys/queue.h>
 #include <sys/socket.h>
-#include <sys/socketvar.h>
 #include <sys/stat.h>
+#include <sys/time.h>
 #include <sys/un.h>
 #include <sys/wait.h>
+#include <arpa/inet.h>
 #include <err.h>
 #include <fcntl.h>
-#include <ctype.h>
 #include <errno.h>
 #include <event.h>
-#include <netdb.h>
+#include <limits.h>
 #include <pwd.h>
 #include <signal.h>
+#include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -118,7 +119,7 @@ struct request {
 	struct fcgi_response_head	response_head;
 	struct fcgi_stdin_head		stdin_head;
 	uint16_t			id;
-	char				script_name[MAXPATHLEN];
+	char				script_name[PATH_MAX];
 	struct env_head			env;
 	int				env_count;
 	pid_t				script_pid;
@@ -191,8 +192,8 @@ void		dump_fcgi_end_request_body(const char *,
 void		cleanup_request(struct request *);
 
 struct loggers {
-	void (*err)(int, const char *, ...);
-	void (*errx)(int, const char *, ...);
+	__dead void (*err)(int, const char *, ...);
+	__dead void (*errx)(int, const char *, ...);
 	void (*warn)(const char *, ...);
 	void (*warnx)(const char *, ...);
 	void (*info)(const char *, ...);
@@ -208,13 +209,13 @@ const struct loggers conslogger = {
 	warnx /* debug */
 };
 
-void	syslog_err(int, const char *, ...);
-void	syslog_errx(int, const char *, ...);
-void	syslog_warn(const char *, ...);
-void	syslog_warnx(const char *, ...);
-void	syslog_info(const char *, ...);
-void	syslog_debug(const char *, ...);
-void	syslog_vstrerror(int, int, const char *, va_list);
+__dead void	syslog_err(int, const char *, ...);
+__dead void	syslog_errx(int, const char *, ...);
+void		syslog_warn(const char *, ...);
+void		syslog_warnx(const char *, ...);
+void		syslog_info(const char *, ...);
+void		syslog_debug(const char *, ...);
+void		syslog_vstrerror(int, int, const char *, va_list);
 
 const struct loggers syslogger = {
 	syslog_err,
@@ -354,20 +355,18 @@ slowcgi_listen(char *path, struct passwd *pw)
 {
 	struct listener		 *l = NULL;
 	struct sockaddr_un	 sun;
-	size_t			 len;
-	mode_t			 old_umask, mode;
+	mode_t			 old_umask;
 	int			 fd;
 
-	if ((fd = socket(AF_UNIX, SOCK_STREAM, 0)) == -1)
+	if ((fd = socket(AF_UNIX, SOCK_STREAM | SOCK_NONBLOCK | SOCK_CLOEXEC,
+	    0)) == -1)
 		lerr(1, "slowcgi_listen: socket");
-	fcntl(fd, F_SETFD, FD_CLOEXEC);
 
 	bzero(&sun, sizeof(sun));
 	sun.sun_family = AF_UNIX;
-	len = strlcpy(sun.sun_path, path, sizeof(sun.sun_path));
-	if (len >= sizeof(sun.sun_path))
+	if (strlcpy(sun.sun_path, path, sizeof(sun.sun_path)) >=
+	    sizeof(sun.sun_path))
 		lerrx(1, "socket path to long");
-	sun.sun_len = len;
 
 	if (unlink(path) == -1)
 		if (errno != ENOENT)
@@ -383,9 +382,6 @@ slowcgi_listen(char *path, struct passwd *pw)
 
 	if (chown(path, pw->pw_uid, pw->pw_gid) == -1)
 		lerr(1, "slowcgi_listen: chown: %s", path);
-
-	if (ioctl(fd, FIONBIO, &on) == -1)
-		lerr(1, "listener ioctl(FIONBIO)");
 
 	if (listen(fd, 5) == -1)
 		lerr(1, "listen");
@@ -420,7 +416,8 @@ accept_reserve(int sockfd, struct sockaddr *addr, socklen_t *addrlen,
 		return -1;
 	}
 
-	if ((ret = accept(sockfd, addr, addrlen)) > -1) {
+	if ((ret = accept4(sockfd, addr, addrlen, SOCK_NONBLOCK | SOCK_CLOEXEC))
+	    > -1) {
 		(*counter)++;
 		ldebug("inflight incremented, now %d", *counter);
 	}
@@ -432,15 +429,15 @@ slowcgi_accept(int fd, short events, void *arg)
 {
 	struct listener		*l;
 	struct sockaddr_storage	 ss;
-	struct timeval		 pause;
+	struct timeval		 backoff;
 	struct request		*c;
 	struct requests		*requests;
 	socklen_t		 len;
 	int			 s;
 
 	l = arg;
-	pause.tv_sec = 1;
-	pause.tv_usec = 0;
+	backoff.tv_sec = 1;
+	backoff.tv_usec = 0;
 	c = NULL;
 
 	len = sizeof(ss);
@@ -454,16 +451,12 @@ slowcgi_accept(int fd, short events, void *arg)
 		case EMFILE:
 		case ENFILE:
 			event_del(&l->ev);
-			evtimer_add(&l->pause, &pause);
+			evtimer_add(&l->pause, &backoff);
 			return;
 		default:
 			lerr(1, "accept");
 		}
 	}
-
-	fcntl(s, F_SETFD, FD_CLOEXEC);
-	if (ioctl(s, FIONBIO, &on) == -1)
-		lerr(1, "request ioctl(FIONBIO)");
 
 	c = calloc(1, sizeof(*c));
 	if (c == NULL) {
@@ -517,7 +510,7 @@ slowcgi_sig_handler(int sig, short event, void *arg)
 
 	switch (sig) {
 	case SIGCHLD:
-		while((pid = waitpid(WAIT_ANY, &status, WNOHANG)) > 0) {
+		while ((pid = waitpid(WAIT_ANY, &status, WNOHANG)) > 0) {
 			c = NULL;
 			SLIST_FOREACH(ncs, &p->requests, entry)
 				if (ncs->request->script_pid == pid) {
@@ -602,10 +595,10 @@ void
 slowcgi_request(int fd, short events, void *arg)
 {
 	struct request	*c;
-	size_t		 n, parsed;
+	ssize_t		 n;
+	size_t		 parsed;
 
 	c = arg;
-	parsed = 0;
 
 	n = read(fd, c->buf + c->buf_pos + c->buf_len,
 	    FCGI_RECORD_SIZE - c->buf_pos-c->buf_len);
@@ -655,8 +648,6 @@ fail:
 void
 parse_begin_request(uint8_t *buf, uint16_t n, struct request *c, uint16_t id)
 {
-	struct fcgi_begin_request_body	*b;
-
 	/* XXX -- FCGI_CANT_MPX_CONN */
 	if (c->request_started) {
 		lwarnx("unexpected FCGI_BEGIN_REQUEST, ignoring");
@@ -670,7 +661,6 @@ parse_begin_request(uint8_t *buf, uint16_t n, struct request *c, uint16_t id)
 	}
 
 	c->request_started = 1;
-	b = (struct fcgi_begin_request_body*) buf;
 
 	c->id = id;
 	SLIST_INIT(&c->env);
@@ -691,8 +681,6 @@ parse_params(uint8_t *buf, uint16_t n, struct request *c, uint16_t id)
 		lwarnx("unexpected id, ignoring");
 		return;
 	}
-
-	name_len = val_len = 0;
 
 	/*
 	 * If this is the last FastCGI parameter record,
@@ -733,7 +721,9 @@ parse_params(uint8_t *buf, uint16_t n, struct request *c, uint16_t id)
 				} else
 					return;
 			}
-		}
+		} else
+			return;
+
 		if (n < name_len + val_len)
 			return;
 
@@ -754,11 +744,11 @@ parse_params(uint8_t *buf, uint16_t n, struct request *c, uint16_t id)
 		n -= name_len;
 
 		env_entry->val[name_len] = '\0';
-		if (val_len < MAXPATHLEN && strcmp(env_entry->val,
+		if (val_len < PATH_MAX && strcmp(env_entry->val,
 		    "SCRIPT_NAME") == 0 && c->script_name[0] == '\0') {
 			bcopy(buf, c->script_name, val_len);
 			c->script_name[val_len] = '\0';
-		} else if (val_len < MAXPATHLEN && strcmp(env_entry->val,
+		} else if (val_len < PATH_MAX && strcmp(env_entry->val,
 		    "SCRIPT_FILENAME") == 0) {
 			bcopy(buf, c->script_name, val_len);
 			c->script_name[val_len] = '\0';
@@ -1201,7 +1191,7 @@ syslog_vstrerror(int e, int priority, const char *fmt, va_list ap)
 	free(s);
 }
 
-void
+__dead void
 syslog_err(int ecode, const char *fmt, ...)
 {
 	va_list ap;
@@ -1212,7 +1202,7 @@ syslog_err(int ecode, const char *fmt, ...)
 	exit(ecode);
 }
 
-void
+__dead void
 syslog_errx(int ecode, const char *fmt, ...)
 {
 	va_list ap;

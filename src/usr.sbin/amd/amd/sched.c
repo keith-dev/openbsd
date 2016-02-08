@@ -1,4 +1,4 @@
-/*	$OpenBSD: sched.c,v 1.14 2011/11/06 01:43:50 guenther Exp $	*/
+/*	$OpenBSD: sched.c,v 1.18 2014/10/26 03:28:41 guenther Exp $	*/
 
 /*
  * Copyright (c) 1990 Jan-Simon Pendry
@@ -34,7 +34,7 @@
  * SUCH DAMAGE.
  *
  *	from: @(#)sched.c	8.1 (Berkeley) 6/6/93
- *	$Id: sched.c,v 1.14 2011/11/06 01:43:50 guenther Exp $
+ *	$Id: sched.c,v 1.18 2014/10/26 03:28:41 guenther Exp $
  */
 
 /*
@@ -43,7 +43,7 @@
 
 #include "am.h"
 #include <signal.h>
-#include WAIT
+#include <sys/wait.h>
 #include <setjmp.h>
 extern jmp_buf select_intr;
 extern int select_intr_valid;
@@ -106,7 +106,7 @@ run_task(task_fun tf, void *ta, cb_fun cf, void *ca)
 	pjob *p = sched_job(cf, ca);
 	sigset_t mask, omask;
 
-	p->wchan = (void *)p;
+	p->wchan = p;
 
 	sigemptyset(&mask);
 	sigaddset(&mask, SIGCHLD);
@@ -137,7 +137,7 @@ sched_task(cb_fun cf, void *ca, void *wchan)
 #endif
 	p->wchan = wchan;
 	p->pid = 0;
-	bzero((void *)&p->w, sizeof(p->w));
+	bzero(&p->w, sizeof(p->w));
 }
 
 static void
@@ -188,7 +188,6 @@ wakeup_task(int rc, int term, void *cl)
 	wakeup(cl);
 }
 
-/*ARGSUSED*/
 
 void
 sigchld(int sig)
@@ -197,25 +196,21 @@ sigchld(int sig)
 	int save_errno = errno;
 	pid_t pid;
 
-#ifdef SYS5_SIGNALS
-	if ((pid = wait(&w)) > 0) {
-#else
 	while ((pid = waitpid((pid_t)-1, &w, WNOHANG)) > 0) {
-#endif /* SYS5_SIGNALS */
 		pjob *p, *p2;
 
 		if (WIFSIGNALED(w))
-			plog(XLOG_ERROR, "Process %ld exited with signal %ld",
+			plog(XLOG_ERROR, "Process %ld exited with signal %d",
 				(long)pid, WTERMSIG(w));
 #ifdef DEBUG
 		else
-			dlog("Process %ld exited with status %ld",
+			dlog("Process %ld exited with status %d",
 				(long)pid, WEXITSTATUS(w));
 #endif /* DEBUG */
 
 		for (p = FIRST(pjob, &proc_wait_list);
-				p2 = NEXT(pjob, p), p != HEAD(pjob, &proc_wait_list);
-				p = p2) {
+		     p2 = NEXT(pjob, p), p != HEAD(pjob, &proc_wait_list);
+		     p = p2) {
 			if (p->pid == pid) {
 				p->w = w;
 				wakeupjob(p);
@@ -229,9 +224,6 @@ sigchld(int sig)
 #endif /* DEBUG */
 	}
 
-#ifdef SYS5_SIGNALS
-	signal(sig, sigchld);
-#endif /* SYS5_SIGNALS */
 	if (select_intr_valid)
 		longjmp(select_intr, sig);
 	errno = save_errno;
@@ -267,6 +259,6 @@ do_task_notify(void)
 				WIFSIGNALED(p->w) ? WTERMSIG(p->w) : 0,
 				p->cb_closure);
 
-		free((void *)p);
+		free(p);
 	}
 }

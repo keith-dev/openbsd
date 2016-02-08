@@ -1,4 +1,4 @@
-/*	$OpenBSD: ieee80211_proto.c,v 1.47 2014/07/12 18:44:23 tedu Exp $	*/
+/*	$OpenBSD: ieee80211_proto.c,v 1.50 2014/12/23 03:24:08 tedu Exp $	*/
 /*	$NetBSD: ieee80211_proto.c,v 1.8 2004/04/30 23:58:20 dyoung Exp $	*/
 
 /*-
@@ -44,7 +44,6 @@
 #include <sys/sockio.h>
 #include <sys/endian.h>
 #include <sys/errno.h>
-#include <sys/proc.h>
 #include <sys/sysctl.h>
 
 #include <net/if.h>
@@ -57,15 +56,11 @@
 #include <net/bpf.h>
 #endif
 
-#ifdef INET
 #include <netinet/in.h>
 #include <netinet/if_ether.h>
-#endif
 
 #include <net80211/ieee80211_var.h>
 #include <net80211/ieee80211_priv.h>
-
-#include <dev/rndvar.h>
 
 const char * const ieee80211_mgt_subtype_name[] = {
 	"assoc_req",	"assoc_resp",	"reassoc_req",	"reassoc_resp",

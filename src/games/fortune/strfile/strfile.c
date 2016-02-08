@@ -1,4 +1,4 @@
-/*	$OpenBSD: strfile.c,v 1.19 2013/08/29 20:22:12 naddy Exp $	*/
+/*	$OpenBSD: strfile.c,v 1.21 2014/11/16 04:49:48 guenther Exp $	*/
 /*	$NetBSD: strfile.c,v 1.4 1995/04/24 12:23:09 cgd Exp $	*/
 
 /*-
@@ -33,9 +33,9 @@
  * SUCH DAMAGE.
  */
 
-#include	<sys/param.h>
 #include	<ctype.h>
 #include	<err.h>
+#include	<limits.h>
 #include	<stdio.h>
 #include	<stdlib.h>
 #include	<string.h>
@@ -76,7 +76,9 @@
 			if (ptr == NULL) \
 				ptr = calloc(CHUNKSIZE, sizeof *ptr); \
 			else if (((sz) + 1) % CHUNKSIZE == 0) \
-				ptr = realloc((void *) ptr, ((sz) + CHUNKSIZE) * sizeof *ptr); \
+				ptr = reallocarray(ptr, \
+						   (sz) + CHUNKSIZE, \
+						   sizeof(*ptr)); \
 			if (ptr == NULL) \
 				err(1, NULL); \
 		} while (0)
@@ -87,7 +89,7 @@ typedef struct {
 } STR;
 
 char	*Infile		= NULL,		/* input file name */
-	Outfile[MAXPATHLEN] = "",	/* output file name */
+	Outfile[PATH_MAX] = "",		/* output file name */
 	Delimch		= '%';		/* delimiting character */
 
 int	Sflag		= FALSE;	/* silent run flag */
@@ -289,7 +291,7 @@ getargs(int argc, char *argv[])
 	}
 	if (*Outfile == '\0') {
 		(void) strlcpy(Outfile, Infile, sizeof(Outfile));
-		if (strlcat(Outfile, ".dat", sizeof(Outfile)) >= MAXPATHLEN)
+		if (strlcat(Outfile, ".dat", sizeof(Outfile)) >= sizeof(Outfile))
 			errx(1, "`%s': name too long", Infile);
 	}
 }

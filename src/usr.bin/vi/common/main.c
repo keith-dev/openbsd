@@ -1,4 +1,4 @@
-/*	$OpenBSD: main.c,v 1.22 2013/12/01 20:22:34 krw Exp $	*/
+/*	$OpenBSD: main.c,v 1.26 2014/11/20 08:50:53 bentley Exp $	*/
 
 /*-
  * Copyright (c) 1992, 1993, 1994
@@ -20,6 +20,7 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <limits.h>
+#include <paths.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -27,7 +28,6 @@
 
 #include "common.h"
 #include "../vi/vi.h"
-#include "pathnames.h"
 
 #ifdef DEBUG
 static void	 attach(GS *);
@@ -42,10 +42,7 @@ static int	 v_obsolete(char *, char *[]);
  * PUBLIC: int editor(GS *, int, char *[]);
  */
 int
-editor(gp, argc, argv)
-	GS *gp;
-	int argc;
-	char *argv[];
+editor(GS *gp, int argc, char *argv[])
 {
 	extern int optind;
 	extern char *optarg;
@@ -445,8 +442,7 @@ err:		rval = 1;
  * PUBLIC: void v_end(GS *);
  */
 void
-v_end(gp)
-	GS *gp;
+v_end(GS *gp)
 {
 	MSGS *mp;
 	SCR *sp;
@@ -461,11 +457,7 @@ v_end(gp)
 	while ((sp = TAILQ_FIRST(&gp->hq)))
 		(void)screen_end(sp);	/* Removes sp from the queue. */
 
-#ifdef HAVE_PERL_INTERP
-	perl_end(gp);
-#endif
-
-#if defined(DEBUG) || defined(PURIFY) || defined(LIBRARY)
+#if defined(DEBUG) || defined(PURIFY)
 	{ FREF *frp;
 		/* Free FREF's. */
 		while ((frp = TAILQ_FIRST(&gp->frefq))) {
@@ -509,13 +501,13 @@ v_end(gp)
 		(void)fprintf(stderr, "%s%.*s",
 		    mp->mtype == M_ERR ? "ex/vi: " : "", (int)mp->len, mp->buf);
 		LIST_REMOVE(mp, q);
-#if defined(DEBUG) || defined(PURIFY) || defined(LIBRARY)
+#if defined(DEBUG) || defined(PURIFY)
 		free(mp->buf);
 		free(mp);
 #endif
 	}
 
-#if defined(DEBUG) || defined(PURIFY) || defined(LIBRARY)
+#if defined(DEBUG) || defined(PURIFY)
 	/* Free any temporary space. */
 	if (gp->tmp_bp != NULL)
 		free(gp->tmp_bp);
@@ -533,8 +525,7 @@ v_end(gp)
  *	Convert historic arguments into something getopt(3) will like.
  */
 static int
-v_obsolete(name, argv)
-	char *name, *argv[];
+v_obsolete(char *name, char *argv[])
 {
 	size_t len;
 	char *p;
@@ -586,8 +577,7 @@ nomem:					v_estr(name, errno, NULL);
 
 #ifdef DEBUG
 static void
-attach(gp)
-	GS *gp;
+attach(GS *gp)
 {
 	int fd;
 	char ch;
@@ -612,9 +602,7 @@ attach(gp)
 #endif
 
 static void
-v_estr(name, eno, msg)
-	char *name, *msg;
-	int eno;
+v_estr(char *name, int eno, char *msg)
 {
 	(void)fprintf(stderr, "%s", name);
 	if (msg != NULL)

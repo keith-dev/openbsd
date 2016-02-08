@@ -1,4 +1,4 @@
-/*	$OpenBSD: route.c,v 1.169 2014/07/24 17:45:35 jca Exp $	*/
+/*	$OpenBSD: route.c,v 1.172 2015/02/06 03:22:00 reyk Exp $	*/
 /*	$NetBSD: route.c,v 1.16 1996/04/15 18:27:05 cgd Exp $	*/
 
 /*
@@ -30,7 +30,6 @@
  * SUCH DAMAGE.
  */
 
-#include <sys/param.h>
 #include <sys/socket.h>
 #include <sys/ioctl.h>
 #include <sys/sysctl.h>
@@ -46,6 +45,7 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <unistd.h>
+#include <limits.h>
 #include <stdio.h>
 #include <ctype.h>
 #include <stddef.h>
@@ -320,7 +320,7 @@ flushroutes(int argc, char **argv)
 			print_rtmsg(rtm, rtm->rtm_msglen);
 		if ((rtm->rtm_flags & (RTF_GATEWAY|RTF_STATIC|RTF_LLINFO)) == 0)
 			continue;
-		if ((rtm->rtm_flags & RTF_LOCAL) != 0)
+		if ((rtm->rtm_flags & (RTF_LOCAL|RTF_BROADCAST)) != 0)
 			continue;
 		sa = (struct sockaddr *)(next + rtm->rtm_hdrlen);
 		if (af && sa->sa_family != af)
@@ -678,9 +678,6 @@ show(int argc, char *argv[])
 				break;
 			case K_MPLS:
 				af = AF_MPLS;
-				break;
-			case K_ENCAP:
-				af = PF_KEY;
 				break;
 			case K_GATEWAY:
 				Fflag = 1;

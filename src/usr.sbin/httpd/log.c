@@ -1,4 +1,4 @@
-/*	$OpenBSD: log.c,v 1.2 2014/08/04 11:09:25 reyk Exp $	*/
+/*	$OpenBSD: log.c,v 1.5 2015/01/21 22:21:05 reyk Exp $	*/
 
 /*
  * Copyright (c) 2003, 2004 Henning Brauer <henning@openbsd.org>
@@ -17,15 +17,8 @@
  */
 
 #include <sys/types.h>
-#include <sys/queue.h>
 #include <sys/socket.h>
-#include <sys/tree.h>
-
-#include <net/if.h>
-#include <netinet/in_systm.h>
-#include <netinet/in.h>
-#include <netinet/ip.h>
-#include <arpa/inet.h>
+#include <sys/time.h>
 
 #include <errno.h>
 #include <stdarg.h>
@@ -33,7 +26,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <syslog.h>
-#include <event.h>
+#include <time.h>
 #include <netdb.h>
 #include <ctype.h>
 

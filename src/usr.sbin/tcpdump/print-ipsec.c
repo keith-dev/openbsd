@@ -1,4 +1,4 @@
-/*	$OpenBSD: print-ipsec.c,v 1.18 2014/01/11 04:35:52 lteo Exp $	*/
+/*	$OpenBSD: print-ipsec.c,v 1.20 2015/01/16 06:40:21 deraadt Exp $	*/
 
 /*
  * Copyright (c) 1990, 1991, 1992, 1993, 1994, 1995, 1996, 1997, 1998, 1999
@@ -26,18 +26,15 @@
  *         in co-operation with SSH Communications Security, Espoo, Finland    
  */
 
-#include <sys/param.h>
 #include <sys/time.h>
 #include <sys/socket.h>
 
 #include <netinet/in.h>
-#include <netinet/in_systm.h>
 #include <netinet/ip.h>
 #include <netinet/ip_var.h>
 #include <netinet/udp.h>
 #include <netinet/udp_var.h>
 #include <netinet/tcp.h>
-#include <netinet/tcpip.h>
 
 #include <stdio.h>
 #include <stdlib.h>

@@ -1,4 +1,4 @@
-/*	$OpenBSD: print-pim.c,v 1.5 2009/10/27 23:59:55 deraadt Exp $	*/
+/*	$OpenBSD: print-pim.c,v 1.7 2015/01/16 06:40:21 deraadt Exp $	*/
 
 /*
  * Copyright (c) 1995, 1996
@@ -21,18 +21,15 @@
  * MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE.
  */
 
-#include <sys/param.h>
 #include <sys/time.h>
 #include <sys/socket.h>
 
 #include <netinet/in.h>
-#include <netinet/in_systm.h>
 #include <netinet/ip.h>
 #include <netinet/ip_var.h>
 #include <netinet/udp.h>
 #include <netinet/udp_var.h>
 #include <netinet/tcp.h>
-#include <netinet/tcpip.h>
 
 #include <stdio.h>
 #include <stdlib.h>

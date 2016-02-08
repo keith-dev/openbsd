@@ -1,4 +1,4 @@
-/*	$OpenBSD: mpi.c,v 1.193 2014/07/13 23:10:23 deraadt Exp $ */
+/*	$OpenBSD: mpi.c,v 1.199 2015/01/27 03:17:36 dlg Exp $ */
 
 /*
  * Copyright (c) 2005, 2006, 2009 David Gwynne <dlg@openbsd.org>
@@ -24,13 +24,13 @@
 #include <sys/buf.h>
 #include <sys/device.h>
 #include <sys/ioctl.h>
-#include <sys/proc.h>
 #include <sys/malloc.h>
 #include <sys/kernel.h>
 #include <sys/mutex.h>
 #include <sys/rwlock.h>
 #include <sys/sensors.h>
 #include <sys/dkio.h>
+#include <sys/task.h>
 
 #include <machine/bus.h>
 
@@ -146,8 +146,7 @@ void			mpi_eventack_done(struct mpi_ccb *);
 int			mpi_evt_sas(struct mpi_softc *, struct mpi_rcb *);
 void			mpi_evt_sas_detach(void *, void *);
 void			mpi_evt_sas_detach_done(struct mpi_ccb *);
-void			mpi_evt_fc_rescan(struct mpi_softc *);
-void			mpi_fc_rescan(void *, void *);
+void			mpi_fc_rescan(void *);
 
 int			mpi_req_cfg_header(struct mpi_softc *, u_int8_t,
 			    u_int8_t, u_int32_t, int, void *);
@@ -223,7 +222,7 @@ mpi_attach(struct mpi_softc *sc)
 	printf("\n");
 
 	rw_init(&sc->sc_lock, "mpi_lock");
-	mtx_init(&sc->sc_evt_rescan_mtx, IPL_BIO);
+	task_set(&sc->sc_evt_rescan, mpi_fc_rescan, sc);
 
 	/* disable interrupts */
 	mpi_write(sc, MPI_INTR_MASK,
@@ -1311,6 +1310,8 @@ mpi_scsi_cmd(struct scsi_xfer *xs)
 
 	DNPRINTF(MPI_D_CMD, "%s: mpi_scsi_cmd\n", DEVNAME(sc));
 
+	KERNEL_UNLOCK();
+
 	if (xs->cmdlen > MPI_CDB_LEN) {
 		DNPRINTF(MPI_D_CMD, "%s: CBD too big %d\n",
 		    DEVNAME(sc), xs->cmdlen);
@@ -1319,8 +1320,7 @@ mpi_scsi_cmd(struct scsi_xfer *xs)
 		xs->sense.flags = SKEY_ILLEGAL_REQUEST;
 		xs->sense.add_sense_code = 0x20;
 		xs->error = XS_SENSE;
-		scsi_done(xs);
-		return;
+		goto done;
 	}
 
 	ccb = xs->io;
@@ -1372,23 +1372,25 @@ mpi_scsi_cmd(struct scsi_xfer *xs)
 	htolem32(&io->sense_buf_low_addr, ccb->ccb_cmd_dva +
 	    ((u_int8_t *)&mcb->mcb_sense - (u_int8_t *)mcb));
 
-	if (mpi_load_xs(ccb) != 0) {
-		xs->error = XS_DRIVER_STUFFUP;
-		scsi_done(xs);
-		return;
-	}
+	if (mpi_load_xs(ccb) != 0)
+		goto stuffup;
 
 	timeout_set(&xs->stimeout, mpi_timeout_xs, ccb);
 
 	if (xs->flags & SCSI_POLL) {
-		if (mpi_poll(sc, ccb, xs->timeout) != 0) {
-			xs->error = XS_DRIVER_STUFFUP;
-			scsi_done(xs);
-		}
-		return;
-	}
+		if (mpi_poll(sc, ccb, xs->timeout) != 0)
+			goto stuffup;
+	} else
+		mpi_start(sc, ccb);
 
-	mpi_start(sc, ccb);
+	KERNEL_LOCK();
+	return;
+
+stuffup:
+	xs->error = XS_DRIVER_STUFFUP;
+done:
+	KERNEL_LOCK();
+	scsi_done(xs);
 }
 
 void
@@ -1415,7 +1417,9 @@ mpi_scsi_cmd_done(struct mpi_ccb *ccb)
 	if (ccb->ccb_rcb == NULL) {
 		/* no scsi error, we're ok so drop out early */
 		xs->status = SCSI_OK;
+		KERNEL_LOCK();
 		scsi_done(xs);
+		KERNEL_UNLOCK();
 		return;
 	}
 
@@ -1523,7 +1527,8 @@ mpi_load_xs(struct mpi_ccb *ccb)
 	struct scsi_xfer		*xs = ccb->ccb_cookie;
 	struct mpi_ccb_bundle		*mcb = ccb->ccb_cmd;
 	struct mpi_msg_scsi_io		*io = &mcb->mcb_io;
-	struct mpi_sge			*sge, *nsge = &mcb->mcb_sgl[0];
+	struct mpi_sge			*sge = NULL;
+	struct mpi_sge			*nsge = &mcb->mcb_sgl[0];
 	struct mpi_sge			*ce = NULL, *nce;
 	bus_dmamap_t			dmap = ccb->ccb_dmamap;
 	u_int32_t			addr, flags;
@@ -2328,7 +2333,7 @@ mpi_eventnotify_done(struct mpi_ccb *ccb)
 	case MPI_EVENT_RESCAN:
 		if (sc->sc_scsibus != NULL &&
 		    sc->sc_porttype == MPI_PORTFACTS_PORTTYPE_FC)
-			mpi_evt_fc_rescan(sc);
+			task_add(systq, &sc->sc_evt_rescan);
 		break;
 
 	default:
@@ -2370,14 +2375,18 @@ mpi_evt_sas(struct mpi_softc *sc, struct mpi_rcb *rcb)
 	switch (ch->reason) {
 	case MPI_EVT_SASCH_REASON_ADDED:
 	case MPI_EVT_SASCH_REASON_NO_PERSIST_ADDED:
+		KERNEL_LOCK();
 		if (scsi_req_probe(sc->sc_scsibus, ch->target, -1) != 0) {
 			printf("%s: unable to request attach of %d\n",
 			    DEVNAME(sc), ch->target);
 		}
+		KERNEL_UNLOCK();
 		break;
 
 	case MPI_EVT_SASCH_REASON_NOT_RESPONDING:
+		KERNEL_LOCK();
 		scsi_activate(sc->sc_scsibus, ch->target, -1, DVACT_DEACTIVATE);
+		KERNEL_UNLOCK();
 
 		mtx_enter(&sc->sc_evt_scan_mtx);
 		SIMPLEQ_INSERT_TAIL(&sc->sc_evt_scan_queue, rcb, rcb_link);
@@ -2451,36 +2460,20 @@ mpi_evt_sas_detach_done(struct mpi_ccb *ccb)
 	struct mpi_softc			*sc = ccb->ccb_sc;
 	struct mpi_msg_scsi_task_reply		*r = ccb->ccb_rcb->rcb_reply;
 
+	KERNEL_LOCK();
 	if (scsi_req_detach(sc->sc_scsibus, r->target_id, -1,
 	    DETACH_FORCE) != 0) {
 		printf("%s: unable to request detach of %d\n",
 		    DEVNAME(sc), r->target_id);
 	}
+	KERNEL_UNLOCK();
 
 	mpi_push_reply(sc, ccb->ccb_rcb);
 	scsi_io_put(&sc->sc_iopool, ccb);
 }
 
 void
-mpi_evt_fc_rescan(struct mpi_softc *sc)
-{
-	int					queue = 1;
-
-	mtx_enter(&sc->sc_evt_rescan_mtx);
-	if (sc->sc_evt_rescan_sem)
-		queue = 0;
-	else
-		sc->sc_evt_rescan_sem = 1;
-	mtx_leave(&sc->sc_evt_rescan_mtx);
-
-	if (queue) {
-		workq_queue_task(NULL, &sc->sc_evt_rescan, 0,
-		    mpi_fc_rescan, sc, NULL);
-	}
-}
-
-void
-mpi_fc_rescan(void *xsc, void *xarg)
+mpi_fc_rescan(void *xsc)
 {
 	struct mpi_softc			*sc = xsc;
 	struct mpi_cfg_hdr			hdr;
@@ -2489,10 +2482,6 @@ mpi_fc_rescan(void *xsc, void *xarg)
 	u_int8_t				devmap[256 / NBBY];
 	u_int32_t				id = 0xffffff;
 	int					i;
-
-	mtx_enter(&sc->sc_evt_rescan_mtx);
-	sc->sc_evt_rescan_sem = 0;
-	mtx_leave(&sc->sc_evt_rescan_mtx);
 
 	memset(devmap, 0, sizeof(devmap));
 

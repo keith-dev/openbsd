@@ -1,4 +1,4 @@
-/*	$OpenBSD: gprof.c,v 1.19 2009/10/27 23:59:38 deraadt Exp $	*/
+/*	$OpenBSD: gprof.c,v 1.21 2014/12/22 18:21:10 tedu Exp $	*/
 /*	$NetBSD: gprof.c,v 1.8 1995/04/19 07:15:59 cgd Exp $	*/
 
 /*
@@ -62,7 +62,7 @@ main(int argc, char *argv[])
 	    cyclethreshold = atoi( *++argv );
 	    break;
 	case 'c':
-#if defined(__i386__) || defined(__vax__) || defined(__tahoe__) || \
+#if defined(__i386__) || defined(__vax__) || \
     defined(__sparc__) || defined(__sparc64__)
 	    cflag = TRUE;
 #else
@@ -72,7 +72,7 @@ main(int argc, char *argv[])
 	    break;
 	case 'd':
 	    dflag = TRUE;
-	    setlinebuf(stdout);
+	    setvbuf(stdout, NULL, _IOLBF, 0);
 	    debug |= atoi( *++argv );
 	    debug |= ANYDEBUG;
 #	    ifdef DEBUG

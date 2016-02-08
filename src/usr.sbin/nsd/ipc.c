@@ -224,10 +224,23 @@ child_is_done(struct nsd* nsd, int fd)
 	for(i=0; i<nsd->child_count; ++i)
 		if(nsd->children[i].child_fd == fd) {
 			nsd->children[i].child_fd = -1;
-			nsd->children[i].has_exited = 1;
 			nsd->children[i].handler->fd = -1;
-			DEBUG(DEBUG_IPC,1, (LOG_INFO, "server %d is done",
-				(int)nsd->children[i].pid));
+			if(nsd->children[i].need_to_exit) {
+				DEBUG(DEBUG_IPC,1, (LOG_INFO, "server %d is done",
+					(int)nsd->children[i].pid));
+				nsd->children[i].has_exited = 1;
+			} else {
+				log_msg(LOG_WARNING,
+				       "server %d died unexpectedly, restarting",
+				       (int)nsd->children[i].pid);
+				/* this child is now going to be re-forked as
+				 * a subprocess of this server-main, and if a
+				 * reload is in progress the other children
+				 * are subprocesses of reload.  Until the
+				 * reload is done and they are all reforked. */
+				nsd->children[i].pid = -1;
+				nsd->restart_children = 1;
+			}
 		}
 	parent_check_all_children_exited(nsd);
 }
@@ -262,6 +275,34 @@ stats_add(struct nsdst* total, struct nsdst* s)
 
 	total->db_disk = s->db_disk;
 	total->db_mem = s->db_mem;
+}
+
+/** subtract stats from total */
+void
+stats_subtract(struct nsdst* total, struct nsdst* s)
+{
+	unsigned i;
+	for(i=0; i<sizeof(total->qtype)/sizeof(stc_t); i++)
+		total->qtype[i] -= s->qtype[i];
+	for(i=0; i<sizeof(total->qclass)/sizeof(stc_t); i++)
+		total->qclass[i] -= s->qclass[i];
+	total->qudp -= s->qudp;
+	total->qudp6 -= s->qudp6;
+	total->ctcp -= s->ctcp;
+	total->ctcp6 -= s->ctcp6;
+	for(i=0; i<sizeof(total->rcode)/sizeof(stc_t); i++)
+		total->rcode[i] -= s->rcode[i];
+	for(i=0; i<sizeof(total->opcode)/sizeof(stc_t); i++)
+		total->opcode[i] -= s->opcode[i];
+	total->dropped -= s->dropped;
+	total->truncated -= s->truncated;
+	total->wrongzone -= s->wrongzone;
+	total->txerr -= s->txerr;
+	total->rxerr -= s->rxerr;
+	total->edns -= s->edns;
+	total->ednserr -= s->ednserr;
+	total->raxfr -= s->raxfr;
+	total->nona -= s->nona;
 }
 
 #define FINAL_STATS_TIMEOUT 10 /* seconds */
@@ -480,6 +521,7 @@ parent_handle_reload_command(netio_type *ATTR_UNUSED(netio),
 			handler->fd = -1;
 		}
 		log_msg(LOG_ERR, "handle_reload_cmd: reload closed cmd channel");
+		nsd->reload_failed = 1;
 		return;
 	}
 	switch (mode) {
@@ -703,12 +745,10 @@ xfrd_handle_ipc_read(struct event* handler, xfrd_state_t* xfrd)
 	case NSD_RELOAD_DONE:
 		/* reload has finished */
 		DEBUG(DEBUG_IPC,1, (LOG_INFO, "xfrd: ipc recv RELOAD_DONE"));
-#ifdef BIND8_STATS
 		if(block_read(NULL, handler->ev_fd, &xfrd->reload_pid,
 			sizeof(pid_t), -1) != sizeof(pid_t)) {
 			log_msg(LOG_ERR, "xfrd cannot get reload_pid");
 		}
-#endif /* BIND8_STATS */
 		/* read the not-mytask for the results and soainfo */
 		xfrd_process_task_result(xfrd,
 			xfrd->nsd->task[1-xfrd->nsd->mytask]);

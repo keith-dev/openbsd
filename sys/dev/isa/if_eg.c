@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_eg.c,v 1.34 2013/11/15 16:46:27 brad Exp $	*/
+/*	$OpenBSD: if_eg.c,v 1.36 2014/12/22 02:28:51 tedu Exp $	*/
 /*	$NetBSD: if_eg.c,v 1.26 1996/05/12 23:52:27 mycroft Exp $	*/
 
 /*
@@ -56,12 +56,8 @@
 #include <net/if_types.h>
 #include <net/netisr.h>
 
-#ifdef INET
 #include <netinet/in.h>
-#include <netinet/in_systm.h>
-#include <netinet/ip.h>
 #include <netinet/if_ether.h>
-#endif
 
 #if NBPFILTER > 0
 #include <net/bpf.h>
@@ -763,12 +759,10 @@ egioctl(register struct ifnet *ifp, u_long cmd, caddr_t data)
 		ifp->if_flags |= IFF_UP;
 
 		switch (ifa->ifa_addr->sa_family) {
-#ifdef INET
 		case AF_INET:
 			eginit(sc);
 			arp_ifinit(&sc->sc_arpcom, ifa);
 			break;
-#endif
 		default:
 			eginit(sc);
 			break;

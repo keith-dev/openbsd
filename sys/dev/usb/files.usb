@@ -1,4 +1,4 @@
-#	$OpenBSD: files.usb,v 1.117 2014/07/12 21:56:57 tedu Exp $
+#	$OpenBSD: files.usb,v 1.121 2015/01/03 20:22:56 uaa Exp $
 #	$NetBSD: files.usb,v 1.16 2000/02/14 20:29:54 augustss Exp $
 #
 # Config file and device description for machine-independent USB code.
@@ -110,6 +110,11 @@ device	ucycom: hid, ucombus
 attach	ucycom at uhidbus
 file	dev/usb/ucycom.c		ucycom			needs-flag
 
+# Silicon Labs USB HID based UART controller
+device	uslhcom: hid, ucombus
+attach	uslhcom at uhidbus
+file	dev/usb/uslhcom.c		uslhcom			needs-flag
+
 # Printers
 device	ulpt: firmload
 attach	ulpt at uhub
@@ -174,11 +179,6 @@ file	dev/usb/udcf.c			udcf
 device	umbg
 attach	umbg at uhub
 file	dev/usb/umbg.c			umbg
-
-# Diamond Multimedia Rio 500
-device	urio
-attach	urio at uhub
-file	dev/usb/urio.c			urio			needs-flag
 
 # Handspring Visor
 device	uvisor: ucombus
@@ -310,6 +310,11 @@ device	moscom: ucombus
 attach	moscom at uhub
 file	dev/usb/moscom.c		moscom
 
+# MosChip MCS78x0 serials
+device	umcs: ucombus
+attach	umcs at uhub
+file	dev/usb/umcs.c			umcs
+
 # simple serial
 device	uscom: ucombus
 attach	uscom at uhub
@@ -370,7 +375,7 @@ device	upgt: ether, ifnet, ifmedia, wlan, firmload
 attach	upgt at uhub
 file	dev/usb/if_upgt.c		upgt
 
-# RealTek 8187
+# Realtek 8187
 device	urtw: ether, ifnet, ifmedia, wlan
 attach	urtw at uhub
 file	dev/usb/if_urtw.c		urtw

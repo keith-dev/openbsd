@@ -1,4 +1,4 @@
-/*	$OpenBSD: azalia.c,v 1.215 2014/07/13 23:10:23 deraadt Exp $	*/
+/*	$OpenBSD: azalia.c,v 1.220 2015/02/10 06:19:44 dlg Exp $	*/
 /*	$NetBSD: azalia.c,v 1.20 2006/05/07 08:31:44 kent Exp $	*/
 
 /*-
@@ -145,7 +145,6 @@ typedef struct {
 
 typedef struct azalia_t {
 	struct device dev;
-	struct device *audiodev;
 
 	pci_chipset_tag_t pc;
 	pcitag_t tag;
@@ -463,6 +462,9 @@ azalia_configure_pci(azalia_t *az)
 	case PCI_PRODUCT_INTEL_7SERIES_HDA:
 	case PCI_PRODUCT_INTEL_8SERIES_HDA:
 	case PCI_PRODUCT_INTEL_8SERIES_LP_HDA:
+	case PCI_PRODUCT_INTEL_9SERIES_HDA:
+	case PCI_PRODUCT_INTEL_9SERIES_LP_HDA:
+	case PCI_PRODUCT_INTEL_BAYTRAIL_HDA:
 		reg = azalia_pci_read(az->pc, az->tag,
 		    INTEL_PCIE_NOSNOOP_REG);
 		reg &= INTEL_PCIE_NOSNOOP_MASK;
@@ -549,7 +551,7 @@ azalia_pci_attach(struct device *parent, struct device *self, void *aux)
 	if (azalia_init_streams(sc))
 		goto err_exit;
 
-	sc->audiodev = audio_attach_mi(&azalia_hw_if, sc, &sc->dev);
+	audio_attach_mi(&azalia_hw_if, sc, &sc->dev);
 
 	return;
 
@@ -575,10 +577,6 @@ azalia_pci_activate(struct device *self, int act)
 		azalia_resume(sc);
 		rv = config_activate_children(self, act);
 		break;
-	case DVACT_DEACTIVATE:
-		if (sc->audiodev != NULL)
-			rv = config_deactivate(sc->audiodev);
-		break;
 	default:
 		rv = config_activate_children(self, act);
 		break;
@@ -603,10 +601,7 @@ azalia_pci_detach(struct device *self, int flags)
 	if (az->detached > 1)
 		return 0;
 
-	if (az->audiodev != NULL) {
-		config_detach(az->audiodev, flags);
-		az->audiodev = NULL;
-	}
+	config_detach_children(self, flags);
 
 	/* disable unsolicited responses if soft detaching */
 	if (az->detached == 1) {
@@ -667,33 +662,13 @@ azalia_pci_detach(struct device *self, int flags)
 	return 0;
 }
 
-/*
-#define AZALIA_LOG_MP
-*/
-#ifdef AZALIA_LOG_MP
-#include <machine/lock.h>
-#include <machine/cpufunc.h>
-#endif
-
 int
 azalia_intr(void *v)
 {
-#ifdef AZALIA_LOG_MP
-	volatile struct cpu_info *ci;
-#endif
 	azalia_t *az = v;
 	uint32_t intsts;
 	int ret = 0;
 
-#ifdef AZALIA_LOG_MP
-	ci = kernel_lock.mpl_cpu;
-	if (ci == NULL)
-		printf("azalia_intr: mp not held\n");
-	else {
-		printf("azalia_intr: lock held by %p, id = %u\n",
-		    ci, ci->ci_cpuid);
-	}
-#endif
 	mtx_enter(&audio_lock);
 	intsts = AZ_READ_4(az, INTSTS);
 	if (intsts == 0 || intsts == 0xffffffff) {
@@ -2354,14 +2329,23 @@ azalia_codec_find_defdac(codec_t *this, int index, int depth)
 				if (ret >= 0)
 					return ret;
 			}
-		} else {
-			index = w->connections[w->selected];
-			if (VALID_WIDGET_NID(index, this)) {
-				ret = azalia_codec_find_defdac(this, index,
-				    depth);
-				if (ret >= 0)
-					return ret;
-			}
+		/* 7.3.3.2 Connection Select Control
+		 * If an attempt is made to Set an index value greater than
+		 * the number of list entries (index is equal to or greater
+		 * than the Connection List Length property for the widget)
+		 * the behavior is not predictable.
+		 */
+
+		/* negative index values are wrong too */
+		} else if (w->selected >= 0 &&
+			w->selected < sizeof(w->connections)) {
+				index = w->connections[w->selected];
+				if (VALID_WIDGET_NID(index, this)) {
+					ret = azalia_codec_find_defdac(this,
+						index, depth);
+					if (ret >= 0)
+						return ret;
+				}
 		}
 	}
 
@@ -2399,14 +2383,23 @@ azalia_codec_find_defadc_sub(codec_t *this, nid_t node, int index, int depth)
 				if (ret >= 0)
 					return ret;
 			}
-		} else {
-			index = w->connections[w->selected];
-			if (VALID_WIDGET_NID(index, this)) {
-				ret = azalia_codec_find_defadc_sub(this, node,
-				    index, depth);
-				if (ret >= 0)
-					return ret;
-			}
+		/* 7.3.3.2 Connection Select Control
+		 * If an attempt is made to Set an index value greater than
+		 * the number of list entries (index is equal to or greater
+		 * than the Connection List Length property for the widget)
+		 * the behavior is not predictable.
+		 */
+
+		/* negative index values are wrong too */
+		} else if (w->selected >= 0 &&
+			w->selected < sizeof(w->connections)) {
+				index = w->connections[w->selected];
+				if (VALID_WIDGET_NID(index, this)) {
+					ret = azalia_codec_find_defadc_sub(this,
+						node, index, depth);
+					if (ret >= 0)
+						return ret;
+				}
 		}
 	}
 	return -1;

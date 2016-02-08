@@ -1,4 +1,4 @@
-/*	$OpenBSD: ulpt.c,v 1.47 2014/07/12 20:26:33 mpi Exp $ */
+/*	$OpenBSD: ulpt.c,v 1.49 2015/02/10 21:56:09 miod Exp $ */
 /*	$NetBSD: ulpt.c,v 1.57 2003/01/05 10:19:42 scw Exp $	*/
 /*	$FreeBSD: src/sys/dev/usb/ulpt.c,v 1.24 1999/11/17 22:33:44 n_hibma Exp $	*/
 
@@ -100,6 +100,7 @@ struct ulpt_softc {
 #define	ULPT_INIT	0x04	/* waiting to initialize for open */
 	u_char sc_flags;
 #define	ULPT_NOPRIME	0x40	/* don't prime on open */
+#define	ULPT_EFIRMWARE	0x80	/* error loading firmware */
 	u_char sc_laststatus;
 
 	int sc_refcnt;
@@ -193,9 +194,12 @@ ulpt_load_firmware(void *arg)
 	usbd_status err;
 
 	err = (sc->sc_fwdev->ucode_loader)(sc);
-	if (err != USBD_NORMAL_COMPLETION)
+	if (err != USBD_NORMAL_COMPLETION) {
+		sc->sc_flags |= ULPT_EFIRMWARE;
 		printf("%s: could not load firmware '%s'\n",
 		    sc->sc_dev.dv_xname, sc->sc_fwdev->ucode_name);
+	} else
+		sc->sc_flags &= ~ULPT_EFIRMWARE;
 }
 
 #define ulpt_lookup(v, p) \
@@ -469,6 +473,13 @@ ulptopen(dev_t dev, int flag, int mode, struct proc *p)
 	if (sc->sc_state)
 		return (EBUSY);
 
+	/* If a previous attempt to load firmware failed, retry. */
+	if (sc->sc_flags & ULPT_EFIRMWARE) {
+		ulpt_load_firmware(sc);
+		if (sc->sc_flags & ULPT_EFIRMWARE)
+			return (EIO);
+	}
+
 	sc->sc_state = ULPT_INIT;
 	sc->sc_flags = flags;
 	DPRINTF(("ulptopen: flags=0x%x\n", (unsigned)flags));
@@ -613,7 +624,7 @@ ulpt_do_write(struct ulpt_softc *sc, struct uio *uio, int flags)
 	}
 	while ((n = min(ULPT_BSIZE, uio->uio_resid)) != 0) {
 		ulpt_statusmsg(ulpt_status(sc), sc);
-		error = uiomove(bufp, n, uio);
+		error = uiomovei(bufp, n, uio);
 		if (error)
 			break;
 		DPRINTFN(1, ("ulptwrite: transfer %d bytes\n", n));
@@ -640,7 +651,7 @@ ulptwrite(dev_t dev, struct uio *uio, int flags)
 
 	sc = ulpt_cd.cd_devs[ULPTUNIT(dev)];
 
-	if (usbd_is_dying(sc->sc_udev))
+	if (usbd_is_dying(sc->sc_udev) || (sc->sc_flags & ULPT_EFIRMWARE))
 		return (EIO);
 
 	sc->sc_refcnt++;

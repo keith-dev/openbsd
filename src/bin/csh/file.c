@@ -1,4 +1,4 @@
-/*	$OpenBSD: file.c,v 1.16 2009/10/27 23:59:21 deraadt Exp $	*/
+/*	$OpenBSD: file.c,v 1.19 2015/02/08 05:47:28 tedu Exp $	*/
 /*	$NetBSD: file.c,v 1.11 1996/11/08 19:34:37 christos Exp $	*/
 
 /*-
@@ -32,7 +32,7 @@
 
 #ifdef FILEC
 
-#include <sys/param.h>
+#include <sys/types.h>
 #include <sys/ioctl.h>
 #include <sys/stat.h>
 #include <termios.h>
@@ -40,6 +40,7 @@
 #include <pwd.h>
 #include <stdlib.h>
 #include <unistd.h>
+#include <limits.h>
 #ifndef SHORT_STRINGS
 #include <string.h>
 #endif /* SHORT_STRINGS */
@@ -200,7 +201,7 @@ copyn(Char *des, Char *src, int count)
 static  Char
 filetype(Char *dir, Char *file)
 {
-    Char    path[MAXPATHLEN];
+    Char    path[PATH_MAX];
     struct stat statb;
 
     Strlcpy(path, dir, sizeof path/sizeof(Char));
@@ -281,7 +282,7 @@ tilde(Char *new, Char *old)
     static Char person[40];
 
     if (old[0] != '~') {
-	Strlcpy(new, old, MAXPATHLEN);
+	Strlcpy(new, old, PATH_MAX);
 	return new;
     }
 
@@ -289,14 +290,14 @@ tilde(Char *new, Char *old)
 	continue;
     *p = '\0';
     if (person[0] == '\0')
-	(void) Strlcpy(new, value(STRhome), MAXPATHLEN);
+	(void) Strlcpy(new, value(STRhome), PATH_MAX);
     else {
 	pw = getpwnam(short2str(person));
 	if (pw == NULL)
 	    return (NULL);
-	(void) Strlcpy(new, str2short(pw->pw_dir), MAXPATHLEN);
+	(void) Strlcpy(new, str2short(pw->pw_dir), PATH_MAX);
     }
-    (void) Strlcat(new, o, MAXPATHLEN);
+    (void) Strlcat(new, o, PATH_MAX);
     return (new);
 }
 
@@ -394,8 +395,8 @@ free_items(Char **items, int numitems)
     int i;
 
     for (i = 0; i < numitems; i++)
-	xfree((ptr_t) items[i]);
-    xfree((ptr_t) items);
+	xfree(items[i]);
+    xfree(items);
 }
 
 #define FREE_ITEMS(items) { \
@@ -417,7 +418,7 @@ tsearch(Char *word, COMMAND command, int max_word_length)
     DIR *dir_fd;
     int numitems = 0, ignoring = TRUE, nignored = 0;
     int name_length, looking_for_lognames;
-    Char    tilded_dir[MAXPATHLEN], dir[MAXPATHLEN];
+    Char    tilded_dir[PATH_MAX], dir[PATH_MAX];
     Char    name[MAXNAMLEN + 1], extended_name[MAXNAMLEN + 1];
     Char   *entry;
     Char   **items = NULL;
@@ -450,14 +451,9 @@ again:				/* search for matches */
 	if (command == LIST) {
 	    if (numitems >= maxitems) {
 		maxitems += 1024;
-		if (items == NULL)
-			items = (Char **) xmalloc(sizeof(*items) * maxitems);
-		else
-			items = (Char **) xrealloc((ptr_t) items,
-			    sizeof(*items) * maxitems);
+		items = xreallocarray(items, maxitems, sizeof(*items));
 	    }
-	    items[numitems] = (Char *) xmalloc((size_t) (Strlen(entry) + 1) *
-					       sizeof(Char));
+	    items[numitems] = xreallocarray(NULL, (Strlen(entry) + 1), sizeof(Char));
 	    copyn(items[numitems], entry, MAXNAMLEN);
 	    numitems++;
 	}
@@ -496,7 +492,7 @@ again:				/* search for matches */
 	return (numitems);
     }
     else {			/* LIST */
-	qsort((ptr_t) items, numitems, sizeof(*items),
+	qsort(items, numitems, sizeof(*items),
 		(int (*)(const void *, const void *)) sortscmp);
 	print_by_column(looking_for_lognames ? NULL : tilded_dir,
 			items, numitems);

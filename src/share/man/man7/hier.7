@@ -1,4 +1,4 @@
-.\"	$OpenBSD: hier.7,v 1.128 2014/07/23 15:18:05 schwarze Exp $
+.\"	$OpenBSD: hier.7,v 1.137 2014/11/17 18:19:08 deraadt Exp $
 .\"	$NetBSD: hier.7,v 1.7 1994/11/30 19:07:10 jtc Exp $
 .\"
 .\" Copyright (c) 1990, 1993
@@ -30,7 +30,7 @@
 .\"
 .\"	@(#)hier.7	8.1 (Berkeley) 6/5/93
 .\"
-.Dd $Mdocdate: July 23 2014 $
+.Dd $Mdocdate: November 17 2014 $
 .Dt HIER 7
 .Os
 .Sh NAME
@@ -117,9 +117,6 @@ System mail configuration files.
 .It mtree/
 .Xr mtree 8
 configuration files.
-.It nginx/
-.Xr nginx 8
-configuration files.
 .It npppd/
 .Xr npppd 8
 configuration files.
@@ -143,9 +140,6 @@ Example
 .It skey/
 One-time password user database for
 .Xr skey 1 .
-.It sliphome/
-Configuration files for
-.Xr sliplogin 8 .
 .It ssh/
 Configuration files for
 .Xr ssh 1
@@ -231,10 +225,6 @@ Device-specific C include files.
 Include files for the GNU C++ compiler.
 .It isofs/
 C include files for the ISO standard file systems (currently only cd9660).
-.It libmilter/
-C include files for the
-.Xr sendmail 8
-mail filter API.
 .It machine/
 Machine specific C include files.
 .It miscfs/
@@ -314,20 +304,11 @@ scripts.
 .It lpr/
 Contains the lpf filter for
 .Xr lpd 8 .
-.It sendmail/
-Contains the
-.Xr sendmail 8
-binary.
-.It sm.bin/
-Binaries to be run by
-.Xr smrsh 8 .
 .It smtpd/
 Binaries related to
 .Xr smtpd 8 .
 .El
 .Pp
-.It lkm/
-Loadable kernel modules.
 .It local/
 Local executables, libraries, etc.
 .It mdec/
@@ -385,23 +366,10 @@ Custom word lists.
 .Pp
 .It doc/
 Miscellaneous documentation.
-.Pp
-.Bl -tag -width html/ -compact
-.It html/
-HTML documentation.
-.It mg/
-Tutorial for the
-.Xr mg 1
-editor.
-.El
-.Pp
 .It games/
 ASCII text files used by various games.
 .It info/
 Texinfo source files.
-.It lkm/
-Example source code implementing several lkm module types (see
-.Xr lkm 4 ) .
 .It locale/
 Locales for multi-language support.
 .It man/
@@ -452,9 +420,6 @@ Templates for
 .Xr make 1 .
 .It nls/
 National Language Support (NLS) catalogs.
-.It sendmail/
-Example files for
-.Xr sendmail 8 .
 .It snmp/
 Data files for
 .Xr snmpd 8 .
@@ -465,9 +430,9 @@ Management Information Base (MIB) definitions.
 .El
 .Pp
 .It sysmerge/
-.Xr sysmerge 8
-checksum files.
-.Pp
+Checksum files and reference sets
+for
+.Xr sysmerge 8 .
 .It tabset/
 Tab description files for a variety of terminals; used in
 the termcap file (see
@@ -540,7 +505,7 @@ tree.
 .It /var/
 Multi-purpose log, temporary, transient, and spool files.
 .Pp
-.Bl -tag -width "account" -compact
+.Bl -tag -width "account/" -compact
 .It account/
 System accounting files.
 .Pp
@@ -600,9 +565,6 @@ Log files for
 .Pp
 .It mail/
 User mailbox files.
-.It named/
-Chroot directory for
-.Xr named 8 .
 .It nsd/
 Database and zone files for
 .Xr nsd 8 .
@@ -624,19 +586,12 @@ Timestamps for
 .It spool/
 Miscellaneous printer and mail system spooling directories.
 .Pp
-.Bl -tag -width "clientmqueue/" -compact
-.It clientmqueue/
-Mail messages waiting to be processed by the sendmail clientmqueue helper
-task (see
-.Xr sendmail 8 ) .
+.Bl -tag -width "uucppublic/" -compact
 .It ftp/
 Commonly ~ftp; the anonymous ftp root directory.
 .It lock/
 Lock files for utilities such as
 .Xr tip 1 .
-.It mqueue/
-Undelivered mail queue (see
-.Xr sendmail 8 ) .
 .It output/
 Line printer spooling directories.
 .It smtpd/
@@ -648,16 +603,22 @@ uucp spool directory.
 Commonly ~uucp; public uucp temporary directory.
 .El
 .Pp
-.It tmp/
-Temporary files that are kept between system reboots.
+.It tmp -> ../tmp
+A symbolic link to the system
+.Pa /tmp
+directory.
+To protect other users of
+.Pa /var
+from overfill conditions, this is no longer a space you can trust to
+retain storage over a reboot.
 Periodically cleaned by
 .Xr daily 8 .
 .It unbound/
 Configuration files for
 .Xr unbound 8 .
 .It www/
-ServerRoot point for
-.Xr nginx 8 .
+Configuration files for
+.Xr httpd 8 .
 .It yp/
 Files for the
 .Xr yp 8

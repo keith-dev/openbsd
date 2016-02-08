@@ -1,4 +1,4 @@
-/*	$OpenBSD: readline.c,v 1.10 2011/07/08 05:41:11 nicm Exp $	*/
+/*	$OpenBSD: readline.c,v 1.14 2015/02/06 23:21:58 millert Exp $	*/
 /*	$NetBSD: readline.c,v 1.91 2010/08/28 15:44:59 christos Exp $	*/
 
 /*-
@@ -34,6 +34,7 @@
 
 #include <sys/types.h>
 #include <sys/stat.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <dirent.h>
 #include <string.h>
@@ -786,13 +787,14 @@ _history_expand_command(const char *command, size_t offs, size_t cmdlen,
 						cmd++;
 					if (len >= size) {
 						char *nwhat;
-						nwhat = realloc(what,
-								(size <<= 1));
+						nwhat = reallocarray(what,
+						    size, 2);
 						if (nwhat == NULL) {
 							free(what);
 							free(tmp);
 							return 0;
 						}
+						size *= 2;
 						what = nwhat;
 					}
 					what[len++] = *cmd;
@@ -1091,12 +1093,13 @@ history_tokenize(const char *str)
 
 		if (idx + 2 >= size) {
 			char **nresult;
-			size <<= 1;
-			nresult = realloc(result, size * sizeof(char *));
+			nresult = reallocarray(result, size,
+			    2 * sizeof(char *));
 			if (nresult == NULL) {
 				free(result);
 				return NULL;
 			}
+			size *= 2;
 			result = nresult;
 		}
 		len = i - start;
@@ -2108,7 +2111,7 @@ rl_completion_matches(const char *str, rl_compentry_func_t *fun)
 
 	len = 1;
 	max = 10;
-	if ((list = malloc(max * sizeof(*list))) == NULL)
+	if ((list = reallocarray(NULL, max, sizeof(*list))) == NULL)
 		return NULL;
 
 	while ((match = (*fun)(str, (int)(len - 1))) != NULL) {
@@ -2116,7 +2119,7 @@ rl_completion_matches(const char *str, rl_compentry_func_t *fun)
 		if (len == max) {
 			char **nl;
 			max += 10;
-			if ((nl = realloc(list, max * sizeof(*nl))) == NULL)
+			if ((nl = reallocarray(list, max, sizeof(*nl))) == NULL)
 				goto out;
 			list = nl;
 		}
@@ -2131,7 +2134,7 @@ rl_completion_matches(const char *str, rl_compentry_func_t *fun)
 	}
 	qsort(&list[1], len - 1, sizeof(*list),
 	    (int (*)(const void *, const void *)) strcmp);
-	min = SIZE_T_MAX;
+	min = SIZE_MAX;
 	for (i = 1, a = list[i]; i < len - 1; i++, a = b) {
 		b = list[i + 1];
 		for (j = 0; a[j] && a[j] == b[j]; j++)
@@ -2239,6 +2242,13 @@ rl_cleanup_after_signal(void)
 
 int
 rl_on_new_line(void)
+{
+	return 0;
+}
+
+int
+/*ARGSUSED*/
+rl_set_keyboard_input_timeout(int u)
 {
 	return 0;
 }

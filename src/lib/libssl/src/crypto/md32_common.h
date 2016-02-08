@@ -1,4 +1,4 @@
-/* $OpenBSD: md32_common.h,v 1.16 2014/07/10 22:45:56 jsing Exp $ */
+/* $OpenBSD: md32_common.h,v 1.20 2014/11/09 19:08:24 miod Exp $ */
 /* ====================================================================
  * Copyright (c) 1999-2007 The OpenSSL Project.  All rights reserved.
  *
@@ -64,8 +64,7 @@
  * HASH_CBLOCK
  *	size of a unit chunk HASH_BLOCK operates on.
  * HASH_LONG
- *	has to be at lest 32 bit wide, if it's wider, then
- *	HASH_LONG_LOG2 *has to* be defined along
+ *	has to be at least 32 bit wide.
  * HASH_CTX
  *	context structure that at least contains following
  *	members:
@@ -98,7 +97,6 @@
  *	#define DATA_ORDER_IS_LITTLE_ENDIAN
  *
  *	#define HASH_LONG		MD5_LONG
- *	#define HASH_LONG_LOG2		MD5_LONG_LOG2
  *	#define HASH_CTX		MD5_CTX
  *	#define HASH_CBLOCK		MD5_CBLOCK
  *	#define HASH_UPDATE		MD5_Update
@@ -108,6 +106,8 @@
  *
  *					<appro@fy.chalmers.se>
  */
+
+#include <stdint.h>
 
 #include <openssl/opensslconf.h>
 
@@ -131,8 +131,8 @@
 #ifndef HASH_TRANSFORM
 #error "HASH_TRANSFORM must be defined!"
 #endif
-#ifndef HASH_FINAL
-#error "HASH_FINAL must be defined!"
+#if !defined(HASH_FINAL) && !defined(HASH_NO_FINAL)
+#error "HASH_FINAL or HASH_NO_FINAL must be defined!"
 #endif
 
 #ifndef HASH_BLOCK_DATA_ORDER
@@ -140,47 +140,14 @@
 #endif
 
 /*
- * Engage compiler specific rotate intrinsic function if available.
+ * This common idiom is recognized by the compiler and turned into a
+ * CPU-specific intrinsic as appropriate. 
+ * e.g. GCC optimizes to roll on amd64 at -O0
  */
-#undef ROTATE
-#if defined(__GNUC__) && __GNUC__>=2 && !defined(OPENSSL_NO_ASM) && !defined(OPENSSL_NO_INLINE_ASM)
-  /*
-   * Some GNU C inline assembler templates. Note that these are
-   * rotates by *constant* number of bits! But that's exactly
-   * what we need here...
-   * 					<appro@fy.chalmers.se>
-   */
-# if defined(__i386) || defined(__i386__) || defined(__x86_64) || defined(__x86_64__)
-#  define ROTATE(a,n)	({ register unsigned int ret;	\
-				asm (			\
-				"roll %1,%0"		\
-				: "=r"(ret)		\
-				: "I"(n), "0"((unsigned int)(a))	\
-				: "cc");		\
-			   ret;				\
-			})
-# elif defined(_ARCH_PPC) || defined(_ARCH_PPC64) || \
-	defined(__powerpc) || defined(__ppc__) || defined(__powerpc64__)
-#  define ROTATE(a,n)	({ register unsigned int ret;	\
-				asm (			\
-				"rlwinm %0,%1,%2,0,31"	\
-				: "=r"(ret)		\
-				: "r"(a), "I"(n));	\
-			   ret;				\
-			})
-# elif defined(__s390x__)
-#  define ROTATE(a,n) ({ register unsigned int ret;	\
-				asm ("rll %0,%1,%2"	\
-				: "=r"(ret)		\
-				: "r"(a), "I"(n));	\
-			  ret;				\
-			})
-# endif
-#endif
-
-#ifndef ROTATE
-#define ROTATE(a,n)     (((a)<<(n))|(((a)&0xffffffff)>>(32-(n))))
-#endif
+static inline uint32_t ROTATE(uint32_t a, uint32_t n)
+{
+	return (a<<n)|(a>>(32-n));
+}
 
 #if defined(DATA_ORDER_IS_BIG_ENDIAN)
 
@@ -198,27 +165,27 @@
 				   (c)+=4; (l)=r;			})
 #  define HOST_l2c(l,c)	({ unsigned int r=(l);			\
 				   asm ("bswapl %0":"=r"(r):"0"(r));	\
-				   *((unsigned int *)(c))=r; (c)+=4; r;	})
+				   *((unsigned int *)(c))=r; (c)+=4;	})
 # endif
 #endif
 #if defined(__s390__) || defined(__s390x__)
-# define HOST_c2l(c,l) ((l)=*((const unsigned int *)(c)), (c)+=4, (l))
-# define HOST_l2c(l,c) (*((unsigned int *)(c))=(l), (c)+=4, (l))
+# define HOST_c2l(c,l) ((l)=*((const unsigned int *)(c)), (c)+=4)
+# define HOST_l2c(l,c) (*((unsigned int *)(c))=(l), (c)+=4)
 #endif
 
 #ifndef HOST_c2l
-#define HOST_c2l(c,l)	(l =(((unsigned long)(*((c)++)))<<24),		\
-			 l|=(((unsigned long)(*((c)++)))<<16),		\
-			 l|=(((unsigned long)(*((c)++)))<< 8),		\
-			 l|=(((unsigned long)(*((c)++)))    ),		\
-			 l)
+#define HOST_c2l(c,l) do {l =(((unsigned long)(*((c)++)))<<24);	\
+			  l|=(((unsigned long)(*((c)++)))<<16);	\
+			  l|=(((unsigned long)(*((c)++)))<< 8);	\
+			  l|=(((unsigned long)(*((c)++)))    );	\
+		      } while (0)
 #endif
 #ifndef HOST_l2c
-#define HOST_l2c(l,c)	(*((c)++)=(unsigned char)(((l)>>24)&0xff),	\
-			 *((c)++)=(unsigned char)(((l)>>16)&0xff),	\
-			 *((c)++)=(unsigned char)(((l)>> 8)&0xff),	\
-			 *((c)++)=(unsigned char)(((l)    )&0xff),	\
-			 l)
+#define HOST_l2c(l,c) do {*((c)++)=(unsigned char)(((l)>>24)&0xff);	\
+			  *((c)++)=(unsigned char)(((l)>>16)&0xff);	\
+			  *((c)++)=(unsigned char)(((l)>> 8)&0xff);	\
+			  *((c)++)=(unsigned char)(((l)    )&0xff);	\
+		      } while (0)
 #endif
 
 #elif defined(DATA_ORDER_IS_LITTLE_ENDIAN)
@@ -227,30 +194,30 @@
 # if defined(__s390x__)
 #  define HOST_c2l(c,l)	({ asm ("lrv	%0,%1"			\
 				   :"=d"(l) :"m"(*(const unsigned int *)(c)));\
-				   (c)+=4; (l);				})
+				   (c)+=4; 				})
 #  define HOST_l2c(l,c)	({ asm ("strv	%1,%0"			\
 				   :"=m"(*(unsigned int *)(c)) :"d"(l));\
-				   (c)+=4; (l);				})
+				   (c)+=4; 				})
 # endif
 #endif
 #if defined(__i386) || defined(__i386__) || defined(__x86_64) || defined(__x86_64__)
-#  define HOST_c2l(c,l)	((l)=*((const unsigned int *)(c)), (c)+=4, l)
-#  define HOST_l2c(l,c)	(*((unsigned int *)(c))=(l), (c)+=4, l)
+#  define HOST_c2l(c,l)	((l)=*((const unsigned int *)(c)), (c)+=4)
+#  define HOST_l2c(l,c)	(*((unsigned int *)(c))=(l), (c)+=4)
 #endif
 
 #ifndef HOST_c2l
-#define HOST_c2l(c,l)	(l =(((unsigned long)(*((c)++)))    ),		\
-			 l|=(((unsigned long)(*((c)++)))<< 8),		\
-			 l|=(((unsigned long)(*((c)++)))<<16),		\
-			 l|=(((unsigned long)(*((c)++)))<<24),		\
-			 l)
+#define HOST_c2l(c,l) do {l =(((unsigned long)(*((c)++)))    );	\
+			  l|=(((unsigned long)(*((c)++)))<< 8);	\
+			  l|=(((unsigned long)(*((c)++)))<<16);	\
+			  l|=(((unsigned long)(*((c)++)))<<24);	\
+		      } while (0)
 #endif
 #ifndef HOST_l2c
-#define HOST_l2c(l,c)	(*((c)++)=(unsigned char)(((l)    )&0xff),	\
-			 *((c)++)=(unsigned char)(((l)>> 8)&0xff),	\
-			 *((c)++)=(unsigned char)(((l)>>16)&0xff),	\
-			 *((c)++)=(unsigned char)(((l)>>24)&0xff),	\
-			 l)
+#define HOST_l2c(l,c) do {*((c)++)=(unsigned char)(((l)    )&0xff);	\
+			  *((c)++)=(unsigned char)(((l)>> 8)&0xff);	\
+			  *((c)++)=(unsigned char)(((l)>>16)&0xff);	\
+			  *((c)++)=(unsigned char)(((l)>>24)&0xff);	\
+		      } while (0)
 #endif
 
 #endif
@@ -320,6 +287,7 @@ void HASH_TRANSFORM (HASH_CTX *c, const unsigned char *data)
 }
 
 
+#ifndef HASH_NO_FINAL
 int HASH_FINAL (unsigned char *md, HASH_CTX *c)
 {
 	unsigned char *p = (unsigned char *)c->data;
@@ -337,11 +305,11 @@ int HASH_FINAL (unsigned char *md, HASH_CTX *c)
 
 	p += HASH_CBLOCK - 8;
 #if   defined(DATA_ORDER_IS_BIG_ENDIAN)
-	(void)HOST_l2c(c->Nh, p);
-	(void)HOST_l2c(c->Nl, p);
+	HOST_l2c(c->Nh, p);
+	HOST_l2c(c->Nl, p);
 #elif defined(DATA_ORDER_IS_LITTLE_ENDIAN)
-	(void)HOST_l2c(c->Nl, p);
-	(void)HOST_l2c(c->Nh, p);
+	HOST_l2c(c->Nl, p);
+	HOST_l2c(c->Nh, p);
 #endif
 	p -= HASH_CBLOCK;
 	HASH_BLOCK_DATA_ORDER (c, p, 1);
@@ -356,6 +324,7 @@ int HASH_FINAL (unsigned char *md, HASH_CTX *c)
 
 	return 1;
 }
+#endif
 
 #ifndef MD32_REG_T
 #if defined(__alpha) || defined(__sparcv9) || defined(__mips)

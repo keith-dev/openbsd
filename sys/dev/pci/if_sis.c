@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_sis.c,v 1.117 2014/07/22 13:12:11 mpi Exp $ */
+/*	$OpenBSD: if_sis.c,v 1.123 2015/02/11 21:36:02 brad Exp $ */
 /*
  * Copyright (c) 1997, 1998, 1999
  *	Bill Paul <wpaul@ctr.columbia.edu>.  All rights reserved.
@@ -75,10 +75,8 @@
 #include <net/if_dl.h>
 #include <net/if_types.h>
 
-#ifdef INET
 #include <netinet/in.h>
 #include <netinet/if_ether.h>
-#endif
 
 #include <net/if_media.h>
 
@@ -334,12 +332,16 @@ sis_read_cmos(struct sis_softc *sc, struct pci_attach_args *pa,
 void
 sis_read_mac(struct sis_softc *sc, struct pci_attach_args *pa)
 {
+	uint32_t rxfilt, csrsave;
 	u_int16_t *enaddr = (u_int16_t *) &sc->arpcom.ac_enaddr;
 
-	SIS_SETBIT(sc, SIS_CSR, SIS_CSR_RELOAD);
-	SIS_CLRBIT(sc, SIS_CSR, SIS_CSR_RELOAD);
+	rxfilt = CSR_READ_4(sc, SIS_RXFILT_CTL);
+	csrsave = CSR_READ_4(sc, SIS_CSR);
 
-	SIS_CLRBIT(sc, SIS_RXFILT_CTL, SIS_RXFILTCTL_ENABLE);
+	CSR_WRITE_4(sc, SIS_CSR, SIS_CSR_RELOAD | csrsave);
+	CSR_WRITE_4(sc, SIS_CSR, 0);
+
+	CSR_WRITE_4(sc, SIS_RXFILT_CTL, rxfilt & ~SIS_RXFILTCTL_ENABLE);
 
 	CSR_WRITE_4(sc, SIS_RXFILT_CTL, SIS_FILTADDR_PAR0);
 	enaddr[0] = letoh16(CSR_READ_4(sc, SIS_RXFILT_DATA) & 0xffff);
@@ -348,7 +350,8 @@ sis_read_mac(struct sis_softc *sc, struct pci_attach_args *pa)
 	CSR_WRITE_4(sc, SIS_RXFILT_CTL, SIS_FILTADDR_PAR2);
 	enaddr[2] = letoh16(CSR_READ_4(sc, SIS_RXFILT_DATA) & 0xffff);
 
-	SIS_SETBIT(sc, SIS_RXFILT_CTL, SIS_RXFILTCTL_ENABLE);
+	CSR_WRITE_4(sc, SIS_RXFILT_CTL, rxfilt);
+	CSR_WRITE_4(sc, SIS_CSR, csrsave);
 }
 
 void
@@ -790,6 +793,13 @@ sis_iff_ns(struct sis_softc *sc)
 	int			bit, index;
 
 	rxfilt = CSR_READ_4(sc, SIS_RXFILT_CTL);
+	if (rxfilt & SIS_RXFILTCTL_ENABLE) {
+		/*
+		 * Filter should be disabled to program other bits.
+		 */
+		CSR_WRITE_4(sc, SIS_RXFILT_CTL, rxfilt & ~SIS_RXFILTCTL_ENABLE);
+		CSR_READ_4(sc, SIS_RXFILT_CTL);
+	}
 	rxfilt &= ~(SIS_RXFILTCTL_ALLMULTI | SIS_RXFILTCTL_ALLPHYS |
 	    NS_RXFILTCTL_ARP | SIS_RXFILTCTL_BROAD | NS_RXFILTCTL_MCHASH |
 	    NS_RXFILTCTL_PERFECT);
@@ -817,7 +827,7 @@ sis_iff_ns(struct sis_softc *sc)
 
 		/* first, zot all the existing hash bits */
 		for (i = 0; i < 32; i++) {
-			CSR_WRITE_4(sc, SIS_RXFILT_CTL, NS_FILTADDR_FMEM_LO + (i*2));
+			CSR_WRITE_4(sc, SIS_RXFILT_CTL, NS_FILTADDR_FMEM_LO + (i * 2));
 			CSR_WRITE_4(sc, SIS_RXFILT_DATA, 0);
 		}
 
@@ -840,6 +850,9 @@ sis_iff_ns(struct sis_softc *sc)
 	}
 
 	CSR_WRITE_4(sc, SIS_RXFILT_CTL, rxfilt);
+	/* Turn the receive filter on. */
+	CSR_WRITE_4(sc, SIS_RXFILT_CTL, rxfilt | SIS_RXFILTCTL_ENABLE);
+	CSR_READ_4(sc, SIS_RXFILT_CTL);
 }
 
 void
@@ -860,6 +873,13 @@ sis_iff_sis(struct sis_softc *sc)
 		maxmulti = 8;
 
 	rxfilt = CSR_READ_4(sc, SIS_RXFILT_CTL);
+	if (rxfilt & SIS_RXFILTCTL_ENABLE) {
+		/*
+		 * Filter should be disabled to program other bits.
+		 */
+		CSR_WRITE_4(sc, SIS_RXFILT_CTL, rxfilt & ~SIS_RXFILTCTL_ENABLE);
+		CSR_READ_4(sc, SIS_RXFILT_CTL);
+	}
 	rxfilt &= ~(SIS_RXFILTCTL_ALLMULTI | SIS_RXFILTCTL_ALLPHYS |
 	    SIS_RXFILTCTL_BROAD);
 	ifp->if_flags &= ~IFF_ALLMULTI;
@@ -898,6 +918,9 @@ sis_iff_sis(struct sis_softc *sc)
 	}
 
 	CSR_WRITE_4(sc, SIS_RXFILT_CTL, rxfilt);
+	/* Turn the receive filter on. */
+	CSR_WRITE_4(sc, SIS_RXFILT_CTL, rxfilt | SIS_RXFILTCTL_ENABLE);
+	CSR_READ_4(sc, SIS_RXFILT_CTL);
 }
 
 void
@@ -1145,13 +1168,13 @@ sis_attach(struct device *parent, struct device *self, void *aux)
 
 	for (i = 0; i < SIS_TX_LIST_CNT; i++) {
 		if (bus_dmamap_create(sc->sc_dmat, MCLBYTES,
-		    SIS_TX_LIST_CNT - 3, MCLBYTES, 0, BUS_DMA_NOWAIT,
+		    SIS_MAXTXSEGS, MCLBYTES, 0, BUS_DMA_NOWAIT,
 		    &sc->sis_ldata->sis_tx_list[i].map) != 0) {
 			printf(": can't create tx map\n");
 			goto fail_2;
 		}
 	}
-	if (bus_dmamap_create(sc->sc_dmat, MCLBYTES, SIS_TX_LIST_CNT - 3,
+	if (bus_dmamap_create(sc->sc_dmat, MCLBYTES, SIS_MAXTXSEGS,
 	    MCLBYTES, 0, BUS_DMA_NOWAIT, &sc->sc_tx_sparemap) != 0) {
 		printf(": can't create tx spare map\n");
 		goto fail_2;
@@ -1552,10 +1575,8 @@ sis_intr(void *arg)
 		    sis_rx_list[sc->sis_cdata.sis_rx_cons]));
 	}
 
-	if (status & SIS_ISR_SYSERR) {
-		sis_reset(sc);
+	if (status & SIS_ISR_SYSERR)
 		sis_init(sc);
-	}
 
 	/*
 	 * XXX: Re-enable RX engine every time otherwise it occasionally
@@ -1577,13 +1598,32 @@ int
 sis_encap(struct sis_softc *sc, struct mbuf *m_head, u_int32_t *txidx)
 {
 	struct sis_desc		*f = NULL;
-	int			frag, cur, i;
 	bus_dmamap_t		map;
+	int			frag, cur, i, error;
 
 	map = sc->sc_tx_sparemap;
-	if (bus_dmamap_load_mbuf(sc->sc_dmat, map,
-	    m_head, BUS_DMA_NOWAIT) != 0)
+
+	error = bus_dmamap_load_mbuf(sc->sc_dmat, map, m_head,
+	    BUS_DMA_NOWAIT);
+	switch (error) {
+	case 0:
+		break;
+
+	case EFBIG:
+		if (m_defrag(m_head, M_DONTWAIT) == 0 &&
+		    bus_dmamap_load_mbuf(sc->sc_dmat, map, m_head,
+		    BUS_DMA_NOWAIT) == 0)
+			break;
+
+		/* FALLTHROUGH */
+	default:
 		return (ENOBUFS);
+	}
+
+	if ((SIS_TX_LIST_CNT - (sc->sis_cdata.sis_tx_cnt + map->dm_nsegs)) < 2) {
+		bus_dmamap_unload(sc->sc_dmat, map);
+		return (ENOBUFS);
+	}
 
 	/*
  	 * Start packing the mbufs in this chain into
@@ -1593,8 +1633,6 @@ sis_encap(struct sis_softc *sc, struct mbuf *m_head, u_int32_t *txidx)
 	cur = frag = *txidx;
 
 	for (i = 0; i < map->dm_nsegs; i++) {
-		if ((SIS_TX_LIST_CNT - (sc->sis_cdata.sis_tx_cnt + i)) < 2)
-			return(ENOBUFS);
 		f = &sc->sis_ldata->sis_tx_list[frag];
 		f->sis_ctl = htole32(SIS_CMDSTS_MORE | map->dm_segs[i].ds_len);
 		f->sis_ptr = htole32(map->dm_segs[i].ds_addr);
@@ -1610,7 +1648,7 @@ sis_encap(struct sis_softc *sc, struct mbuf *m_head, u_int32_t *txidx)
 	sc->sis_ldata->sis_tx_list[cur].sis_mbuf = m_head;
 	sc->sis_ldata->sis_tx_list[cur].sis_ctl &= ~htole32(SIS_CMDSTS_MORE);
 	sc->sis_ldata->sis_tx_list[*txidx].sis_ctl |= htole32(SIS_CMDSTS_OWN);
-	sc->sis_cdata.sis_tx_cnt += i;
+	sc->sis_cdata.sis_tx_cnt += map->dm_nsegs;
 	*txidx = frag;
 
 	bus_dmamap_sync(sc->sc_dmat, sc->sc_listmap,
@@ -1697,6 +1735,11 @@ sis_init(void *xsc)
 	 */
 	sis_stop(sc);
 
+	/*
+	 * Reset the chip to a known state.
+	 */
+	sis_reset(sc);
+
 #if NS_IHR_DELAY > 0
 	/* Configure interrupt holdoff register. */
 	if (sc->sis_type == SIS_TYPE_83815 && sc->sis_srr == NS_SRR_16A)
@@ -1762,9 +1805,6 @@ sis_init(void *xsc)
 	 * Program promiscuous mode and multicast filters.
 	 */
 	sis_iff(sc);
-
-	/* Turn the receive filter on */
-	SIS_SETBIT(sc, SIS_RXFILT_CTL, SIS_RXFILTCTL_ENABLE);
 
 	/*
 	 * Load the address of the RX and TX lists.
@@ -1868,10 +1908,8 @@ sis_ioctl(struct ifnet *ifp, u_long command, caddr_t data)
 		ifp->if_flags |= IFF_UP;
 		if (!(ifp->if_flags & IFF_RUNNING))
 			sis_init(sc);
-#ifdef INET
 		if (ifa->ifa_addr->sa_family == AF_INET)
 			arp_ifinit(&sc->arpcom, ifa);
-#endif
 		break;
 
 	case SIOCSIFFLAGS:
@@ -1890,6 +1928,11 @@ sis_ioctl(struct ifnet *ifp, u_long command, caddr_t data)
 	case SIOCSIFMEDIA:
 		mii = &sc->sc_mii;
 		error = ifmedia_ioctl(ifp, ifr, &mii->mii_media, command);
+		break;
+
+	case SIOCGIFRXR:
+		error = if_rxr_ioctl((struct if_rxrinfo *)ifr->ifr_data,
+		    NULL, MCLBYTES, &sc->sis_cdata.sis_rx_ring);
 		break;
 
 	default:
@@ -1921,8 +1964,6 @@ sis_watchdog(struct ifnet *ifp)
 	printf("%s: watchdog timeout\n", sc->sc_dev.dv_xname);
 
 	s = splnet();
-	sis_stop(sc);
-	sis_reset(sc);
 	sis_init(sc);
 
 	if (!IFQ_IS_EMPTY(&ifp->if_snd))

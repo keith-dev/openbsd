@@ -1,4 +1,4 @@
-/*	$OpenBSD: sys_process.c,v 1.64 2014/07/13 15:00:40 tedu Exp $	*/
+/*	$OpenBSD: sys_process.c,v 1.67 2015/01/20 19:43:21 kettenis Exp $	*/
 /*	$NetBSD: sys_process.c,v 1.55 1996/05/15 06:17:47 tls Exp $	*/
 
 /*-
@@ -70,6 +70,7 @@
 int	process_auxv_offset(struct proc *, struct proc *, struct uio *);
 
 #ifdef PTRACE
+int	global_ptrace;	/* permit tracing of not children */
 /*
  * Process debugging system call.
  */
@@ -207,6 +208,13 @@ sys_ptrace(struct proc *p, void *v, register_t *retval)
 		 */
 		if ((tr->ps_ucred->cr_ruid != p->p_ucred->cr_ruid ||
 		    ISSET(tr->ps_flags, PS_SUGIDEXEC | PS_SUGID)) &&
+		    (error = suser(p, 0)) != 0)
+			return (error);
+
+		/*
+		 * 	(4.5) it's not a child of the tracing process.
+		 */
+		if (global_ptrace == 0 && !inferior(tr, p->p_p) &&
 		    (error = suser(p, 0)) != 0)
 			return (error);
 
@@ -528,7 +536,7 @@ sys_ptrace(struct proc *p, void *v, register_t *retval)
 
 	case  PT_ATTACH:
 		/*
-		 * As done in procfs:
+		 * As was done in procfs:
 		 * Go ahead and set the trace flag.
 		 * Save the old parent (it's reset in
 		 *   _DETACH, and also in kern_exit.c:wait4()
@@ -740,6 +748,7 @@ process_domem(struct proc *curp, struct proc *p, struct uio *uio, int req)
 int
 process_auxv_offset(struct proc *curp, struct proc *p, struct uio *uiop)
 {
+	struct process *pr = p->p_p;
 	struct ps_strings pss;
 	struct iovec iov;
 	struct uio uio;
@@ -749,7 +758,7 @@ process_auxv_offset(struct proc *curp, struct proc *p, struct uio *uiop)
 	iov.iov_len = sizeof(pss);
 	uio.uio_iov = &iov;
 	uio.uio_iovcnt = 1;	
-	uio.uio_offset = (off_t)(vaddr_t)PS_STRINGS;
+	uio.uio_offset = (off_t)pr->ps_strings;
 	uio.uio_resid = sizeof(pss);
 	uio.uio_segflg = UIO_SYSSPACE;
 	uio.uio_rw = UIO_READ;
@@ -763,13 +772,13 @@ process_auxv_offset(struct proc *curp, struct proc *p, struct uio *uiop)
 
 	uiop->uio_offset += (off_t)(vaddr_t)(pss.ps_envstr + pss.ps_nenvstr + 1);
 #ifdef MACHINE_STACK_GROWS_UP
-	if (uiop->uio_offset < (off_t)(vaddr_t)PS_STRINGS)
+	if (uiop->uio_offset < (off_t)pr->ps_strings)
 		return (EIO);
 #else
-	if (uiop->uio_offset > (off_t)(vaddr_t)PS_STRINGS)
+	if (uiop->uio_offset > (off_t)pr->ps_strings)
 		return (EIO);
-	if ((uiop->uio_offset + uiop->uio_resid) > (off_t)(vaddr_t)PS_STRINGS)
-		uiop->uio_resid = (off_t)(vaddr_t)PS_STRINGS - uiop->uio_offset;
+	if ((uiop->uio_offset + uiop->uio_resid) > (off_t)pr->ps_strings)
+		uiop->uio_resid = (off_t)pr->ps_strings - uiop->uio_offset;
 #endif
 
 	return (0);

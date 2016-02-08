@@ -1,4 +1,4 @@
-/* $OpenBSD: t1_enc.c,v 1.69 2014/08/07 20:02:23 miod Exp $ */
+/* $OpenBSD: t1_enc.c,v 1.77 2015/02/22 15:54:27 jsing Exp $ */
 /* Copyright (C) 1995-1998 Eric Young (eay@cryptsoft.com)
  * All rights reserved.
  *
@@ -136,11 +136,12 @@
  */
 
 #include <stdio.h>
+
 #include "ssl_locl.h"
+
 #include <openssl/evp.h>
 #include <openssl/hmac.h>
 #include <openssl/md5.h>
-#include <openssl/rand.h>
 
 /* seed1 through seed5 are virtually concatenated */
 static int
@@ -447,6 +448,18 @@ tls1_change_cipher_state_cipher(SSL *s, char is_read, char use_client_keys,
 		    mac_secret_size, (unsigned char *)mac_secret);
 	}
 
+	if (s->s3->tmp.new_cipher->algorithm_enc == SSL_eGOST2814789CNT) {
+		int nid;
+		if (s->s3->tmp.new_cipher->algorithm2 & SSL_HANDSHAKE_MAC_GOST94)
+			nid = NID_id_Gost28147_89_CryptoPro_A_ParamSet;
+		else
+			nid = NID_id_tc26_gost_28147_param_Z;
+
+		EVP_CIPHER_CTX_ctrl(cipher_ctx, EVP_CTRL_GOST_SET_SBOX, nid, 0);
+		if (s->s3->tmp.new_cipher->algorithm_mac == SSL_GOST89MAC)
+			EVP_MD_CTX_ctrl(mac_ctx, EVP_MD_CTRL_GOST_SET_SBOX, nid, 0);
+	}
+
 	return (1);
 
 err:
@@ -592,7 +605,7 @@ tls1_setup_key_block(SSL *s)
 		key_len = EVP_CIPHER_key_length(cipher);
 		iv_len = EVP_CIPHER_iv_length(cipher);
 
-		/* If GCM mode only part of IV comes from PRF. */ 
+		/* If GCM mode only part of IV comes from PRF. */
 		if (EVP_CIPHER_mode(cipher) == EVP_CIPH_GCM_MODE)
 			iv_len = EVP_GCM_TLS_FIXED_IV_LEN;
 	}
@@ -603,14 +616,14 @@ tls1_setup_key_block(SSL *s)
 	s->s3->tmp.new_mac_pkey_type = mac_type;
 	s->s3->tmp.new_mac_secret_size = mac_secret_size;
 
-	key_block_len = (mac_secret_size + key_len + iv_len) * 2;
-
 	ssl3_cleanup_key_block(s);
 
-	if ((key_block = malloc(key_block_len)) == NULL) {
+	if ((key_block = reallocarray(NULL, mac_secret_size + key_len + iv_len,
+	    2)) == NULL) {
 		SSLerr(SSL_F_TLS1_SETUP_KEY_BLOCK, ERR_R_MALLOC_FAILURE);
 		goto err;
 	}
+	key_block_len = (mac_secret_size + key_len + iv_len) * 2;
 
 	s->s3->tmp.key_block_length = key_block_len;
 	s->s3->tmp.key_block = key_block;
@@ -810,8 +823,8 @@ tls1_enc(SSL *s, int send)
 					fprintf(stderr,
 					    "%s:%d: rec->data != rec->input\n",
 					    __FILE__, __LINE__);
-				else if (RAND_bytes(rec->input, ivlen) <= 0)
-					return -1;
+				else
+					arc4random_buf(rec->input, ivlen);
 			}
 		}
 	} else {
@@ -1041,12 +1054,13 @@ tls1_mac(SSL *ssl, unsigned char *md, int send)
 		 * timing-side channel information about how many blocks of
 		 * data we are hashing because that gives an attacker a
 		 * timing-oracle. */
-		ssl3_cbc_digest_record(mac_ctx,
+		if (!ssl3_cbc_digest_record(mac_ctx,
 		    md, &md_size, header, rec->input,
 		    rec->length + md_size, orig_len,
 		    ssl->s3->read_mac_secret,
 		    ssl->s3->read_mac_secret_size,
-		    0 /* not SSLv3 */);
+		    0 /* not SSLv3 */))
+			return -1;
 	} else {
 		EVP_DigestSignUpdate(mac_ctx, header, sizeof(header));
 		EVP_DigestSignUpdate(mac_ctx, rec->input, rec->length);
@@ -1068,13 +1082,11 @@ tls1_generate_master_secret(SSL *s, unsigned char *out, unsigned char *p,
     int len)
 {
 	unsigned char buff[SSL_MAX_MASTER_KEY_LENGTH];
-	const void *co = NULL, *so = NULL;
-	int col = 0, sol = 0;
 
 	tls1_PRF(ssl_get_algorithm2(s),
 	    TLS_MD_MASTER_SECRET_CONST, TLS_MD_MASTER_SECRET_CONST_SIZE,
-	    s->s3->client_random, SSL3_RANDOM_SIZE, co, col,
-	    s->s3->server_random, SSL3_RANDOM_SIZE, so, sol,
+	    s->s3->client_random, SSL3_RANDOM_SIZE, NULL, 0,
+	    s->s3->server_random, SSL3_RANDOM_SIZE, NULL, 0,
 	    p, len, s->session->master_key, buff, sizeof buff);
 
 	return (SSL3_MASTER_SECRET_SIZE);
@@ -1228,6 +1240,8 @@ tls1_alert_code(int code)
 		return (TLS1_AD_BAD_CERTIFICATE_HASH_VALUE);
 	case SSL_AD_UNKNOWN_PSK_IDENTITY:
 		return (TLS1_AD_UNKNOWN_PSK_IDENTITY);
+	case SSL_AD_INAPPROPRIATE_FALLBACK:
+		return(TLS1_AD_INAPPROPRIATE_FALLBACK);
 	default:
 		return (-1);
 	}

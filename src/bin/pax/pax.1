@@ -1,4 +1,4 @@
-.\"	$OpenBSD: pax.1,v 1.68 2014/06/04 07:57:27 jmc Exp $
+.\"	$OpenBSD: pax.1,v 1.70 2015/01/15 19:06:31 schwarze Exp $
 .\"	$NetBSD: pax.1,v 1.3 1995/03/21 09:07:37 cgd Exp $
 .\"
 .\" Copyright (c) 1992 Keith Muller.
@@ -34,7 +34,7 @@
 .\"
 .\"	@(#)pax.1	8.4 (Berkeley) 4/18/94
 .\"
-.Dd $Mdocdate: June 4 2014 $
+.Dd $Mdocdate: January 15 2015 $
 .Dt PAX 1
 .Os
 .Sh NAME
@@ -305,8 +305,7 @@ bytes per write to the archive file.
 The
 .Ar blocksize
 must be a multiple of 512 bytes with a maximum of 64512 bytes.
-Archive block sizes larger than 32256 bytes violate the
-.Tn POSIX
+Archive block sizes larger than 32256 bytes violate the POSIX
 standard and will not be portable to all systems.
 A
 .Ar blocksize
@@ -1119,4 +1118,5 @@ flag,
 and the flawed archive handling during list and read operations
 are extensions to that specification.
 .Sh AUTHORS
-Keith Muller at the University of California, San Diego.
+.An Keith Muller
+at the University of California, San Diego.

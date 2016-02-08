@@ -1,5 +1,5 @@
 %{
-/*	$OpenBSD: bc.y,v 1.44 2013/11/20 21:33:54 deraadt Exp $	*/
+/*	$OpenBSD: bc.y,v 1.47 2014/11/26 18:34:51 millert Exp $	*/
 
 /*
  * Copyright (c) 2003, Otto Moerbeek <otto@drijf.net>
@@ -750,7 +750,7 @@ grow(void)
 
 	if (current == instr_sz) {
 		newsize = instr_sz * 2 + 1;
-		p = realloc(instructions, newsize * sizeof(*p));
+		p = reallocarray(instructions, newsize, sizeof(*p));
 		if (p == NULL) {
 			free(instructions);
 			err(1, NULL);
@@ -1095,9 +1095,9 @@ main(int argc, char *argv[])
 	char	*q;
 
 	init();
-	setlinebuf(stdout);
+	setvbuf(stdout, NULL, _IOLBF, 0);
 
-	sargv = malloc(argc * sizeof(char *));
+	sargv = reallocarray(NULL, argc, sizeof(char *));
 	if (sargv == NULL)
 		err(1, NULL);
 

@@ -1,4 +1,4 @@
-/*	$OpenBSD: mtd8xx.c,v 1.21 2013/11/26 09:50:33 mpi Exp $	*/
+/*	$OpenBSD: mtd8xx.c,v 1.24 2014/12/22 02:28:51 tedu Exp $	*/
 
 /*
  * Copyright (c) 2003 Oleg Safiullin <form@pdp11.org.ru>
@@ -44,10 +44,8 @@
 #include <net/bpf.h>
 #endif
 
-#ifdef INET
 #include <netinet/in.h>
 #include <netinet/if_ether.h>
-#endif
 
 #include <machine/bus.h>
 
@@ -55,7 +53,6 @@
 #include <dev/mii/miivar.h>
 
 #include <dev/pci/pcidevs.h>
-#include <dev/pci/pcivar.h>
 
 #include <dev/ic/mtd8xxreg.h>
 #include <dev/ic/mtd8xxvar.h>
@@ -586,11 +583,9 @@ mtd_ioctl(struct ifnet *ifp, u_long command, caddr_t data)
 		ifp->if_flags |= IFF_UP;
 		mtd_init(ifp);
 		switch (ifa->ifa_addr->sa_family) {
-#ifdef INET
 		case AF_INET:
 			arp_ifinit(&sc->sc_arpcom, ifa);
 			break;
-#endif /* INET */
 		}
 		break;
 
@@ -635,6 +630,11 @@ mtd_init(struct ifnet *ifp)
 	 * Cancel pending I/O and free all RX/TX buffers.
 	 */
 	mtd_stop(ifp);
+
+	/*
+	 * Reset the chip to a known state.
+	 */
+	mtd_reset(sc);
 
 	/*
 	 * Set cache alignment and burst length.
@@ -802,8 +802,6 @@ mtd_watchdog(struct ifnet *ifp)
 	ifp->if_oerrors++;
 	printf("%s: watchdog timeout\n", sc->sc_dev.dv_xname);
 
-	mtd_stop(ifp);
-	mtd_reset(sc);
 	mtd_init(ifp);
 
 	if (!IFQ_IS_EMPTY(&ifp->if_snd))

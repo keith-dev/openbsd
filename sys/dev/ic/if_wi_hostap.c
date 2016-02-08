@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_wi_hostap.c,v 1.44 2014/07/22 13:12:12 mpi Exp $	*/
+/*	$OpenBSD: if_wi_hostap.c,v 1.47 2014/11/18 02:37:30 tedu Exp $	*/
 
 /*
  * Copyright (c) 2002
@@ -46,7 +46,6 @@
 #include <sys/malloc.h>
 #include <sys/kernel.h>
 #include <sys/timeout.h>
-#include <sys/proc.h>
 #include <sys/ucred.h>
 #include <sys/socket.h>
 #include <sys/queue.h>
@@ -67,8 +66,6 @@
 
 #include <net80211/ieee80211_var.h>
 #include <net80211/ieee80211_ioctl.h>
-
-#include <dev/rndvar.h>
 
 #include <dev/ic/if_wireg.h>
 #include <dev/ic/if_wi_ieee.h>
@@ -287,8 +284,7 @@ wihap_shutdown(struct wi_softc *sc)
 	timeout_del(&whi->tmo);
 
 	/* Delete all stations from the list. */
-	for (sta = TAILQ_FIRST(&whi->sta_list);
-	    sta != TAILQ_END(&whi->sta_list); sta = next) {
+	for (sta = TAILQ_FIRST(&whi->sta_list); sta != NULL; sta = next) {
 		timeout_del(&sta->tmo);
 		if (sc->sc_ic.ic_if.if_flags & IFF_DEBUG)
 			printf("wihap_shutdown: free(sta=%p)\n", sta);
@@ -351,8 +347,8 @@ wihap_timeout(void *v)
 	s = splnet();
 
 	for (i = 10, sta = TAILQ_FIRST(&whi->sta_list);
-	    i != 0 && sta != TAILQ_END(&whi->sta_list) &&
-	    (sta->flags & WI_SIFLAGS_DEAD); i--, sta = next) {
+	    i != 0 && sta != NULL && (sta->flags & WI_SIFLAGS_DEAD);
+	    i--, sta = next) {
 		next = TAILQ_NEXT(sta, list);
 		if (timeout_pending(&sta->tmo)) {
 			/* Became alive again, move to end of list. */

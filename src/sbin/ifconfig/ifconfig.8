@@ -1,4 +1,4 @@
-.\"	$OpenBSD: ifconfig.8,v 1.245 2014/07/12 12:46:28 jmc Exp $
+.\"	$OpenBSD: ifconfig.8,v 1.252 2015/02/28 21:51:57 bentley Exp $
 .\"	$NetBSD: ifconfig.8,v 1.11 1996/01/04 21:27:29 pk Exp $
 .\"     $FreeBSD: ifconfig.8,v 1.16 1998/02/01 07:03:29 steve Exp $
 .\"
@@ -31,7 +31,7 @@
 .\"
 .\"     @(#)ifconfig.8	8.4 (Berkeley) 6/1/94
 .\"
-.Dd $Mdocdate: July 12 2014 $
+.Dd $Mdocdate: February 28 2015 $
 .Dt IFCONFIG 8
 .Os
 .Sh NAME
@@ -155,9 +155,11 @@ Disable the use of ARP.
 Enable autoconfiguration.
 Valid for
 .Dq inet6
-only,
+only.
+If
 .Cm autoconf
-controls whether router advertisements will be accepted on this interface.
+is enabled router advertisements are accepted on this interface and
+the kernel sends periodic router solicitations from this interface.
 .It Fl autoconf
 Disable autoconfiguration.
 .It Cm broadcast Ar addr
@@ -181,7 +183,6 @@ At least the following devices can be created on demand:
 .Xr pfsync 4 ,
 .Xr ppp 4 ,
 .Xr pppoe 4 ,
-.Xr sl 4 ,
 .Xr trunk 4 ,
 .Xr tun 4 ,
 .Xr vether 4 ,
@@ -287,6 +288,10 @@ The device supports Wake on LAN (WoL).
 .It Sy hardmtu
 The maximum MTU supported.
 .El
+.It Fl inet
+Remove all configured
+.Xr inet 4
+addresses on the given interface.
 .It Fl inet6
 Disable
 .Xr inet6 4
@@ -294,8 +299,7 @@ on the given interface and remove all configured
 .Xr inet6 4
 addresses, including the link-local ones.
 This is the default.
-To turn inet6 on, use eui64, assign any inet6 address or run
-.Xr rtsol 8 .
+To turn inet6 on, use eui64, use autoconf or assign any inet6 address.
 .It Cm instance Ar minst
 Set the media instance to
 .Ar minst .
@@ -309,12 +313,11 @@ Enable special processing of the link level of the interface.
 These three options are interface specific in actual effect; however,
 they are in general used to select special modes of operation.
 An example
-of this is to enable SLIP compression, or to select the connector type
-for some Ethernet cards.
+of this is to select the connector type for some Ethernet cards.
 Refer to the man page for the specific driver for more information.
 .It Fl link[0-2]
 Disable special processing at the link level with the specified interface.
-.It Cm lladdr Ar etheraddr Ns \*(Ba Ns Cm random
+.It Cm lladdr Ar etheraddr Ns | Ns Cm random
 Change the link layer address (MAC address) of the interface.
 This should be specified as six colon-separated hex values, or can
 be chosen randomly.
@@ -382,8 +385,14 @@ Disable MPLS on the interface.
 .It Cm mtu Ar value
 Set the MTU for this device to the given
 .Ar value .
-Cloned routes will inherit this value as a default.
-Currently, not all devices support setting the MTU.
+Cloned routes inherit this value as a default.
+For Ethernet devices which support setting the MTU,
+a value greater than 1500 enables jumbo frames.
+The
+.Sy hardmtu
+output from
+.Cm hwfeatures
+shows the maximum supported MTU.
 .It Cm netmask Ar mask
 (inet and inet6)
 Specify how much of the address to reserve for subdividing
@@ -706,8 +715,8 @@ connected to a shared network segment,
 like a hub or a wireless network.
 .It Xo
 .Cm rule
-.Cm block Ns \*(Ba Ns Cm pass
-.Op Cm in \*(Ba out
+.Cm block Ns | Ns Cm pass
+.Op Cm in | out
 .Cm on Ar interface
 .Op Cm src Ar address
 .Op Cm dst Ar address
@@ -1565,9 +1574,9 @@ Create the gif1 network interface:
 .Pp
 .Dl # ifconfig gif1 create
 .Pp
-Scan for wireless networks using bwi0:
+Put the athn0 wireless interface into monitor mode:
 .Pp
-.Dl # ifconfig bwi0 scan
+.Dl # ifconfig athn0 mediaopt monitor
 .Sh DIAGNOSTICS
 Messages indicating the specified interface does not exist, the
 requested address is unknown, or the user is not privileged and

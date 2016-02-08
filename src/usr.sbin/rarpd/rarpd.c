@@ -1,4 +1,4 @@
-/*	$OpenBSD: rarpd.c,v 1.53 2012/04/06 18:03:52 deraadt Exp $ */
+/*	$OpenBSD: rarpd.c,v 1.59 2015/01/19 23:51:54 guenther Exp $ */
 /*	$NetBSD: rarpd.c,v 1.25 1998/04/23 02:48:33 mrg Exp $	*/
 
 /*
@@ -26,28 +26,30 @@
  * rarpd - Reverse ARP Daemon
  */
 
-#include <stdio.h>
-#include <stdlib.h>
-#include <syslog.h>
-#include <string.h>
-#include <stdarg.h>
-#include <sys/param.h>
-#include <unistd.h>
 #include <sys/time.h>
-#include <net/bpf.h>
+#include <sys/file.h>
 #include <sys/socket.h>
 #include <sys/ioctl.h>
+#include <net/bpf.h>
 #include <net/if.h>
 #include <net/if_dl.h>
 #include <net/if_types.h>
 #include <netinet/in.h>
 #include <netinet/if_ether.h>
-#include <sys/file.h>
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <syslog.h>
+#include <string.h>
+#include <stdarg.h>
+#include <unistd.h>
+#include <limits.h>
 #include <errno.h>
 #include <netdb.h>
 #include <arpa/inet.h>
 #include <dirent.h>
 #include <util.h>
+#include <poll.h>
 #include <ifaddrs.h>
 #include <paths.h>
 
@@ -85,7 +87,7 @@ void   usage(void);
 void   rarp_process(struct if_info *, u_char *);
 void   rarp_reply(struct if_info *, struct if_addr *,
 	    struct ether_header *, u_int32_t, struct hostent *);
-void   update_arptab(u_char *, u_int32_t);
+int    arptab_set(u_char *, u_int32_t);
 void   error(int, const char *,...);
 void   debug(const char *,...);
 u_int32_t ipaddrtonetmask(u_int32_t);
@@ -170,7 +172,7 @@ main(int argc, char *argv[])
 			(void) close(f);
 		}
 		(void) chdir("/");
-		(void) setpgrp(0, getpid());
+		(void) setpgid(0, 0);
 		devnull = open(_PATH_DEVNULL, O_RDWR);
 		if (devnull >= 0) {
 			(void) dup2(devnull, STDIN_FILENO);
@@ -384,9 +386,9 @@ rarp_check(u_char *p, int len)
 void
 rarp_loop(void)
 {
-	int	cc, fd, fdsn, maxfd = 0;
+	int	cc, fd, numfd = 0, i;
 	u_int	bufsize;
-	fd_set  *fdsp, *lfdsp;
+	struct pollfd *pfd;
 	u_char	*buf, *bp, *ep;
 	struct if_info *ii;
 
@@ -404,48 +406,37 @@ rarp_loop(void)
 		/* NOTREACHED */
 	}
 	/*
-	 * Find the highest numbered file descriptor for select().
 	 * Initialize the set of descriptors to listen to.
 	 */
 	for (ii = iflist; ii; ii = ii->ii_next)
-		if (ii->ii_fd > maxfd)
-			maxfd = ii->ii_fd;
-
-	fdsn = howmany(maxfd+1, NFDBITS) * sizeof(fd_mask);
-	if ((fdsp = (fd_set *)malloc(fdsn)) == NULL)
-		error(FATAL, "malloc");
-	if ((lfdsp = (fd_set *)malloc(fdsn)) == NULL)
-		error(FATAL, "malloc");
-
-	memset(fdsp, 0, fdsn);
-	for (ii = iflist; ii; ii = ii->ii_next)
-		FD_SET(ii->ii_fd, fdsp);
+		numfd++;
+	pfd = reallocarray(NULL, numfd, sizeof(*pfd));
+	if (pfd == NULL) {
+		error(FATAL, "malloc: %s", strerror(errno));
+		/* NOTREACHED */
+	}
+	for (i = 0, ii = iflist; ii; ii = ii->ii_next, i++) {
+		pfd[i].fd = ii->ii_fd;
+		pfd[i].events = POLLIN;
+	}
 
 	while (1) {
-		memcpy(lfdsp, fdsp, fdsn);
-		if (select(maxfd + 1, lfdsp, (fd_set *) 0,
-			(fd_set *) 0, (struct timeval *) 0) < 0) {
+		if (poll(pfd, numfd, -1) == -1) {
+			if (errno == EINTR)
+				continue;
 			error(FATAL, "select: %s", strerror(errno));
 			/* NOTREACHED */
 		}
-		for (ii = iflist; ii; ii = ii->ii_next) {
-			fd = ii->ii_fd;
-			if (!FD_ISSET(fd, lfdsp))
+		for (i = 0, ii = iflist; ii; ii = ii->ii_next, i++) {
+			if (pfd[i].revents == 0)
 				continue;
+			fd = ii->ii_fd;
 		again:
-			cc = read(fd, (char *) buf, bufsize);
+			cc = read(fd, (char *)buf, bufsize);
 			/* Don't choke when we get ptraced */
 			if (cc < 0 && errno == EINTR)
 				goto again;
-			/* Due to a SunOS bug, after 2^31 bytes, the file
-			 * offset overflows and read fails with EINVAL.  The
-			 * lseek() to 0 will fix things. */
 			if (cc < 0) {
-				if (errno == EINVAL &&
-				    (lseek(fd, (off_t)0, SEEK_CUR) + bufsize) < 0) {
-					(void) lseek(fd, (off_t)0, SEEK_SET);
-					goto again;
-				}
 				error(FATAL, "read: %s", strerror(errno));
 				/* NOTREACHED */
 			}
@@ -464,6 +455,7 @@ rarp_loop(void)
 			}
 		}
 	}
+	free(pfd);
 }
 
 #ifndef TFTP_DIR
@@ -527,7 +519,7 @@ choose_ipaddr(u_int32_t **alist, u_int32_t net, u_int32_t netmask)
 void
 rarp_process(struct if_info *ii, u_char *pkt)
 {
-	char    ename[MAXHOSTNAMELEN];
+	char    ename[HOST_NAME_MAX+1];
 	u_int32_t  target_ipaddr;
 	struct ether_header *ep;
 	struct ether_addr *ea;
@@ -606,7 +598,7 @@ lookup_addrs(char *ifname, struct if_info *p)
 				    eaddr[3], eaddr[4], eaddr[5]);
 			found = 1;
 		} else if (sdl->sdl_family == AF_INET) {
-			ia = malloc (sizeof (struct if_addr));
+			ia = malloc(sizeof (struct if_addr));
 			if (ia == NULL)
 				error(FATAL, "lookup_addrs: malloc: %s",
 				    strerror(errno));
@@ -637,48 +629,6 @@ lookup_addrs(char *ifname, struct if_info *p)
 		error(FATAL, "lookup_addrs: Never saw interface `%s'!", ifname);
 }
 
-int arptab_set(u_char *eaddr, u_int32_t host);
-
-/*
- * Poke the kernel arp tables with the ethernet/ip address combinataion
- * given.  When processing a reply, we must do this so that the booting
- * host (i.e. the guy running rarpd), won't try to ARP for the hardware
- * address of the guy being booted (he cannot answer the ARP).
- */
-void
-update_arptab(u_char *ep, u_int32_t ipaddr)
-{
-#ifdef SIOCSARP
-	struct sockaddr_in *sin;
-	struct arpreq request;
-	u_int32_t host;
-	u_char *eaddr;
-	int s;
-
-	request.arp_flags = 0;
-	sin = (struct sockaddr_in *)&request.arp_pa;
-	sin->sin_family = AF_INET;
-	sin->sin_addr.s_addr = ipaddr;
-	request.arp_ha.sa_family = AF_UNSPEC;
-	/* This is needed #if defined(COMPAT_43) && BYTE_ORDER != BIG_ENDIAN,
-	   because AF_UNSPEC is zero and the kernel assumes that a zero
-	   sa_family means that the real sa_family value is in sa_len.  */
-	request.arp_ha.sa_len = 16; /* XXX */
-	memcpy((char *) request.arp_ha.sa_data, (char *) ep, 6);
-
-	s = socket(AF_INET, SOCK_DGRAM, 0);
-	if (s < 0) {
-		error(NONFATAL, "socket: %s", strerror(errno));
-	} else {
-		if (ioctl(s, SIOCSARP, (caddr_t)&request) < 0)
-		    error(NONFATAL, "SIOCSARP: %s", strerror(errno));
-		(void) close(s);
-	}
-#else
-	if (arptab_set(ep, ipaddr) > 0)
-		syslog(LOG_ERR, "couldn't update arp table");
-#endif
-}
 /*
  * Build a reverse ARP packet and sent it out on the interface.
  * 'ep' points to a valid ARPOP_REVREQUEST.  The ARPOP_REVREPLY is built
@@ -719,7 +669,15 @@ rarp_reply(struct if_info *ii, struct if_addr *ia, struct ether_header *ep,
 	struct ether_arp *ap = (struct ether_arp *) (ep + 1);
 	int len, n;
 
-	update_arptab((u_char *)&ap->arp_sha, ipaddr);
+	/*
+	 * Poke the kernel arp tables with the ethernet/ip address
+	 * combinataion given.  When processing a reply, we must
+	 * do this so that the booting host (i.e. the guy running
+	 * rarpd), won't try to ARP for the hardware address of the
+	 * guy being booted (he cannot answer the ARP).
+	 */
+	if (arptab_set((u_char *)&ap->arp_sha, ipaddr) > 0)
+		syslog(LOG_ERR, "couldn't update arp table");
 
 	/* Build the rarp reply by modifying the rarp request in place. */
 	ep->ether_type = htons(ETHERTYPE_REVARP);

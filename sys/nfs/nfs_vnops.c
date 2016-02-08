@@ -1,4 +1,4 @@
-/*	$OpenBSD: nfs_vnops.c,v 1.152 2014/07/12 18:43:52 tedu Exp $	*/
+/*	$OpenBSD: nfs_vnops.c,v 1.161 2015/02/10 21:56:10 miod Exp $	*/
 /*	$NetBSD: nfs_vnops.c,v 1.62.4.1 1996/07/08 20:26:52 jtc Exp $	*/
 
 /*
@@ -41,7 +41,6 @@
  */
 
 #include <sys/param.h>
-#include <sys/proc.h>
 #include <sys/kernel.h>
 #include <sys/systm.h>
 #include <sys/resourcevar.h>
@@ -55,10 +54,10 @@
 #include <sys/conf.h>
 #include <sys/namei.h>
 #include <sys/vnode.h>
+#include <sys/lock.h>
 #include <sys/dirent.h>
 #include <sys/fcntl.h>
 #include <sys/lockf.h>
-#include <sys/hash.h>
 #include <sys/queue.h>
 #include <sys/specdev.h>
 #include <sys/unistd.h>
@@ -74,10 +73,10 @@
 #include <nfs/nfsm_subs.h>
 #include <nfs/nfs_var.h>
 
+#include <uvm/uvm_extern.h>
+
 #include <net/if.h>
 #include <netinet/in.h>
-
-#include <dev/rndvar.h>
 
 void nfs_cache_enter(struct vnode *, struct vnode *, struct componentname *);
 
@@ -1177,13 +1176,13 @@ nfs_writerpc(struct vnode *vp, struct uio *uiop, int *iomode, int *must_commit)
 				commit == NFSV3WRITE_UNSTABLE)
 				committed = commit;
 			if ((nmp->nm_flag & NFSMNT_HASWRITEVERF) == 0) {
-				bcopy((caddr_t)tl, (caddr_t)nmp->nm_verf,
+				bcopy(tl, nmp->nm_verf,
 				    NFSX_V3WRITEVERF);
 				nmp->nm_flag |= NFSMNT_HASWRITEVERF;
-			} else if (bcmp((caddr_t)tl,
-			    (caddr_t)nmp->nm_verf, NFSX_V3WRITEVERF)) {
+			} else if (bcmp(tl,
+			    nmp->nm_verf, NFSX_V3WRITEVERF)) {
 				*must_commit = 1;
-				bcopy((caddr_t)tl, (caddr_t)nmp->nm_verf,
+				bcopy(tl, nmp->nm_verf,
 				    NFSX_V3WRITEVERF);
 			}
 		} else {
@@ -2031,7 +2030,7 @@ nfs_readdir(void *v)
 				break;
 			}
 
-			if ((error = uiomove(dp, dp->d_reclen, uio)))
+			if ((error = uiomovei(dp, dp->d_reclen, uio)))
 				break;
 
 			newoff = fxdr_hyper(&ndp->cookie[0]);
@@ -2040,7 +2039,7 @@ nfs_readdir(void *v)
 		}
 	} while (!error && !done && !eof && cnt--);
 
-	free(data, M_TEMP, 0);
+	free(data, M_TEMP, NFS_DIRBLKSIZ);
 	data = NULL;
 
 	uio->uio_offset = newoff;
@@ -2499,7 +2498,7 @@ nfs_sillyrename(struct vnode *dvp, struct vnode *vp, struct componentname *cnp)
 
 	cache_purge(dvp);
 	np = VTONFS(vp);
-	sp = malloc(sizeof(struct sillyrename), M_NFSREQ, M_WAITOK);
+	sp = malloc(sizeof(*sp), M_NFSREQ, M_WAITOK);
 	sp->s_cred = crdup(cnp->cn_cred);
 	sp->s_dvp = dvp;
 	vref(dvp);
@@ -2538,7 +2537,7 @@ nfs_sillyrename(struct vnode *dvp, struct vnode *vp, struct componentname *cnp)
 bad:
 	vrele(sp->s_dvp);
 	crfree(sp->s_cred);
-	free(sp, M_NFSREQ, 0);
+	free(sp, M_NFSREQ, sizeof(*sp));
 	return (error);
 }
 
@@ -2584,7 +2583,7 @@ nfs_lookitup(struct vnode *dvp, char *name, int len, struct ucred *cred,
 		if (*npp) {
 			np = *npp;
 			np->n_fhp = &np->n_fh;
-			bcopy((caddr_t)nfhp, (caddr_t)np->n_fhp, fhlen);
+			bcopy(nfhp, np->n_fhp, fhlen);
 			np->n_fhsize = fhlen;
 			newvp = NFSTOV(np);
 		} else if (NFS_CMPFH(dnp, nfhp, fhlen)) {
@@ -2652,9 +2651,9 @@ nfs_commit(struct vnode *vp, u_quad_t offset, int cnt, struct proc *procp)
 
 	if (!error) {
 		nfsm_dissect(tl, u_int32_t *, NFSX_V3WRITEVERF);
-		if (bcmp((caddr_t)nmp->nm_verf, (caddr_t)tl,
+		if (bcmp(nmp->nm_verf, tl,
 			NFSX_V3WRITEVERF)) {
-			bcopy((caddr_t)tl, (caddr_t)nmp->nm_verf,
+			bcopy(tl, nmp->nm_verf,
 				NFSX_V3WRITEVERF);
 			error = NFSERR_STALEWRITEVERF;
 		}
@@ -2843,7 +2842,7 @@ loop:
 			if (waitfor != MNT_WAIT || passone)
 				continue;
 			bp->b_flags |= B_WANTED;
-			error = tsleep((caddr_t)bp, slpflag | (PRIBIO + 1),
+			error = tsleep(bp, slpflag | (PRIBIO + 1),
 				"nfsfsync", slptimeo);
 			splx(s);
 			if (error) {

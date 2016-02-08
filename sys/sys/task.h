@@ -1,4 +1,4 @@
-/*	$OpenBSD: task.h,v 1.6 2014/06/11 08:47:53 blambert Exp $ */
+/*	$OpenBSD: task.h,v 1.8 2015/02/09 03:15:41 dlg Exp $ */
 
 /*
  * Copyright (c) 2013 David Gwynne <dlg@openbsd.org>
@@ -25,26 +25,27 @@ struct taskq;
 
 struct task {
 	TAILQ_ENTRY(task) t_entry;
-	void		(*t_func)(void *, void *);
-	void		*t_arg1;
-	void		*t_arg2;
+	void		(*t_func)(void *);
+	void		*t_arg;
 	unsigned int	t_flags;
 };
+
+#define TASKQ_MPSAFE		(1 << 0)
+#define TASKQ_CANTSLEEP		(1 << 1)
 
 #ifdef _KERNEL
 extern struct taskq *const systq;
 extern struct taskq *const systqmp;
 
-struct taskq	*taskq_create(const char *, unsigned int, int);
+struct taskq	*taskq_create(const char *, unsigned int, int, unsigned int);
 void		 taskq_destroy(struct taskq *);
 
-void		 task_set(struct task *, void (*)(void *, void *),
-		     void *, void *);
+void		 task_set(struct task *, void (*)(void *), void *);
 int		 task_add(struct taskq *, struct task *);
 int		 task_del(struct taskq *, struct task *);
 
-#define TASK_INITIALIZER(_f, _a1, _a2) \
-	{ { NULL, NULL }, (_f), (_a1), (_a2), 0 }
+#define TASK_INITIALIZER(_f, _a) \
+	{ { NULL, NULL }, (_f), (_a), 0 }
 
 #endif /* _KERNEL */
 

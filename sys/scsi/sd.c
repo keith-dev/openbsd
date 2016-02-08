@@ -1,4 +1,4 @@
-/*	$OpenBSD: sd.c,v 1.255 2014/07/12 18:50:25 tedu Exp $	*/
+/*	$OpenBSD: sd.c,v 1.258 2014/12/15 02:11:57 tedu Exp $	*/
 /*	$NetBSD: sd.c,v 1.111 1997/04/02 02:29:41 mycroft Exp $	*/
 
 /*-
@@ -65,7 +65,6 @@
 #include <sys/device.h>
 #include <sys/disklabel.h>
 #include <sys/disk.h>
-#include <sys/proc.h>
 #include <sys/conf.h>
 #include <sys/scsiio.h>
 #include <sys/dkio.h>
@@ -293,7 +292,8 @@ sdactivate(struct device *self, int act)
 			sd_flush(sc, SCSI_AUTOCONF);
 		if (boothowto & RB_POWERDOWN)
 			scsi_start(sc->sc_link, SSS_STOP,
-			    SCSI_IGNORE_ILLEGAL_REQUEST | SCSI_AUTOCONF);
+			    SCSI_IGNORE_ILLEGAL_REQUEST |
+			    SCSI_IGNORE_NOT_READY | SCSI_AUTOCONF);
 		break;
 	case DVACT_RESUME:
 		scsi_start(sc->sc_link, SSS_START,
@@ -862,8 +862,8 @@ sdioctl(dev_t dev, u_long cmd, caddr_t addr, int flag, struct proc *p)
 	case DIOCRLDINFO:
 		lp = malloc(sizeof(*lp), M_TEMP, M_WAITOK);
 		sdgetdisklabel(dev, sc, lp, 0);
-		bcopy(lp, sc->sc_dk.dk_label, sizeof(*lp));
-		free(lp, M_TEMP, 0);
+		memcpy(sc->sc_dk.dk_label, lp, sizeof(*lp));
+		free(lp, M_TEMP, sizeof(*lp));
 		goto exit;
 
 	case DIOCGPDINFO:
@@ -1095,7 +1095,7 @@ sdgetdisklabel(dev_t dev, struct sd_softc *sc, struct disklabel *lp,
 	 * always null terminated and len does not count the terminating null.
 	 * d_packname is not a null terminated string.
 	 */
-	bcopy(packname, lp->d_packname, len);
+	memcpy(lp->d_packname, packname, len);
 
 	DL_SETDSIZE(lp, sc->params.disksize);
 	lp->d_version = 1;
@@ -1137,6 +1137,9 @@ sd_interpret_sense(struct scsi_xfer *xs)
 	    ((sense->flags & SSD_KEY) != SKEY_NOT_READY) ||
 	    (sense->extra_len < 6))
 		return (scsi_interpret_sense(xs));
+
+	if ((xs->flags & SCSI_IGNORE_NOT_READY) != 0)
+		return (0);
 
 	switch (ASC_ASCQ(sense)) {
 	case SENSE_NOT_READY_BECOMING_READY:

@@ -1,4 +1,4 @@
-/*	$OpenBSD: realpath.c,v 1.16 2013/04/05 12:59:54 kurt Exp $ */
+/*	$OpenBSD: realpath.c,v 1.19 2015/01/16 16:48:51 deraadt Exp $ */
 /*
  * Copyright (c) 2003 Constantin S. Svintsoff <kostik@iclub.nsu.ru>
  *
@@ -27,13 +27,13 @@
  * SUCH DAMAGE.
  */
 
-#include <sys/param.h>
 #include <sys/stat.h>
 
 #include <errno.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include <limits.h>
 
 /* A slightly modified copy of this file exists in libexec/ld.so */
 
@@ -156,7 +156,7 @@ realpath(const char *path, char *resolved)
 			goto err;
 		}
 		if (S_ISLNK(sb.st_mode)) {
-			if (symlinks++ > MAXSYMLINKS) {
+			if (symlinks++ > SYMLOOP_MAX) {
 				errno = ELOOP;
 				goto err;
 			}

@@ -1,4 +1,4 @@
-/* $OpenBSD: pk7_smime.c,v 1.18 2014/07/11 08:44:49 jsing Exp $ */
+/* $OpenBSD: pk7_smime.c,v 1.20 2015/02/07 14:21:41 doug Exp $ */
 /* Written by Dr Stephen N Henson (steve@openssl.org) for the OpenSSL
  * project.
  */
@@ -192,6 +192,8 @@ PKCS7_sign_add_signer(PKCS7 *p7, X509 *signcert, EVP_PKEY *pkey,
 			}
 			if (!add_cipher_smcap(smcap, NID_aes_256_cbc, -1) ||
 			    !add_digest_smcap(smcap, NID_id_GostR3411_94, -1) ||
+			    !add_digest_smcap(smcap, NID_id_tc26_gost3411_2012_256, -1) ||
+			    !add_digest_smcap(smcap, NID_id_tc26_gost3411_2012_512, -1) ||
 			    !add_cipher_smcap(smcap, NID_id_Gost28147_89, -1) ||
 			    !add_cipher_smcap(smcap, NID_aes_192_cbc, -1) ||
 			    !add_cipher_smcap(smcap, NID_aes_128_cbc, -1) ||
@@ -285,17 +287,16 @@ PKCS7_verify(PKCS7 *p7, STACK_OF(X509) *certs, X509_STORE *store, BIO *indata,
 		PKCS7err(PKCS7_F_PKCS7_VERIFY, PKCS7_R_NO_CONTENT);
 		return 0;
 	}
-#if 0
-	/* NB: this test commented out because some versions of Netscape
-	 * illegally include zero length content when signing data.
-	 */
 
+	/*
+	 * Very old Netscape illegally included empty content with
+	 * a detached signature.  Very old users should upgrade.
+	 */
 	/* Check for data and content: two sets of data */
 	if (!PKCS7_get_detached(p7) && indata) {
 		PKCS7err(PKCS7_F_PKCS7_VERIFY, PKCS7_R_CONTENT_AND_DATA_PRESENT);
 		return 0;
 	}
-#endif
 
 	sinfos = PKCS7_get_signer_info(p7);
 

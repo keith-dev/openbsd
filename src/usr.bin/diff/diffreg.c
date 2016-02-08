@@ -1,4 +1,4 @@
-/*	$OpenBSD: diffreg.c,v 1.82 2012/07/08 15:48:56 stsp Exp $	*/
+/*	$OpenBSD: diffreg.c,v 1.85 2015/02/05 12:59:57 millert Exp $	*/
 
 /*
  * Copyright (C) Caldera International Inc.  2001-2002.
@@ -64,7 +64,6 @@
  *	@(#)diffreg.c   8.1 (Berkeley) 6/6/93
  */
 
-#include <sys/param.h>
 #include <sys/stat.h>
 #include <sys/wait.h>
 
@@ -73,14 +72,19 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <stddef.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include <limits.h>
 
 #include "diff.h"
 #include "pathnames.h"
 #include "xmalloc.h"
+
+#define MINIMUM(a, b)	(((a) < (b)) ? (a) : (b))
+#define MAXIMUM(a, b)	(((a) > (b)) ? (a) : (b))
 
 /*
  * diff - compare two files.
@@ -495,7 +499,7 @@ files_differ(FILE *f1, FILE *f2, int flags)
 static FILE *
 opentemp(const char *file)
 {
-	char buf[BUFSIZ], *tempdir, tempfile[MAXPATHLEN];
+	char buf[BUFSIZ], *tempdir, tempfile[PATH_MAX];
 	ssize_t nread;
 	int ifd, ofd;
 
@@ -653,7 +657,7 @@ stone(int *a, int n, int *b, int *c, int flags)
 		bound = UINT_MAX;
 	else {
 		sq = isqrt(n);
-		bound = MAX(256, sq);
+		bound = MAXIMUM(256, sq);
 	}
 
 	k = 0;
@@ -778,10 +782,14 @@ check(FILE *f1, FILE *f2, int flags)
 				 * GNU diff ignores a missing newline
 				 * in one file for -b or -w.
 				 */
-				if ((flags & (D_FOLDBLANKS|D_IGNOREBLANKS)) &&
-				    ((c == EOF && d == '\n') ||
-				    (c == '\n' && d == EOF))) {
-					break;
+				if (flags & (D_FOLDBLANKS|D_IGNOREBLANKS)) {
+					if (c == EOF && d == '\n') {
+						ctnew++;
+						break;
+					} else if (c == '\n' && d == EOF) {
+						ctold++;
+						break;
+					}
 				}
 				ctold++;
 				ctnew++;
@@ -1356,10 +1364,10 @@ dump_context_vec(FILE *f1, FILE *f2, int flags)
 		return;
 
 	b = d = 0;		/* gcc */
-	lowa = MAX(1, cvp->a - diff_context);
-	upb = MIN(len[0], context_vec_ptr->b + diff_context);
-	lowc = MAX(1, cvp->c - diff_context);
-	upd = MIN(len[1], context_vec_ptr->d + diff_context);
+	lowa = MAXIMUM(1, cvp->a - diff_context);
+	upb = MINIMUM(len[0], context_vec_ptr->b + diff_context);
+	lowc = MAXIMUM(1, cvp->c - diff_context);
+	upd = MINIMUM(len[1], context_vec_ptr->d + diff_context);
 
 	diff_output("***************");
 	if ((flags & D_PROTOTYPE)) {
@@ -1459,10 +1467,10 @@ dump_unified_vec(FILE *f1, FILE *f2, int flags)
 		return;
 
 	b = d = 0;		/* gcc */
-	lowa = MAX(1, cvp->a - diff_context);
-	upb = MIN(len[0], context_vec_ptr->b + diff_context);
-	lowc = MAX(1, cvp->c - diff_context);
-	upd = MIN(len[1], context_vec_ptr->d + diff_context);
+	lowa = MAXIMUM(1, cvp->a - diff_context);
+	upb = MINIMUM(len[0], context_vec_ptr->b + diff_context);
+	lowc = MAXIMUM(1, cvp->c - diff_context);
+	upd = MINIMUM(len[1], context_vec_ptr->d + diff_context);
 
 	diff_output("@@ -");
 	uni_range(lowa, upb);

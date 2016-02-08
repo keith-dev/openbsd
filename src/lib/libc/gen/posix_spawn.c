@@ -1,4 +1,4 @@
-/*	$OpenBSD: posix_spawn.c,v 1.3 2012/12/05 23:20:00 deraadt Exp $	*/
+/*	$OpenBSD: posix_spawn.c,v 1.6 2014/11/14 23:26:34 jmatthew Exp $	*/
 /*-
  * Copyright (c) 2008 Ed Schouten <ed@FreeBSD.org>
  * All rights reserved.
@@ -124,7 +124,7 @@ process_spawnattr(const posix_spawnattr_t sa)
 	}
 
 	if (sa->sa_flags & POSIX_SPAWN_SETSIGDEF) {
-		for (i = 1; i <= _NSIG; i++) {
+		for (i = 1; i < _NSIG; i++) {
 			if (sigismember(&sa->sa_sigdefault, i))
 				if (sigaction(i, &sigact, NULL) != 0)
 					return (errno);
@@ -155,8 +155,18 @@ process_file_actions_entry(posix_spawn_file_actions_entry_t *fae)
 		}
 		break;
 	case FAE_DUP2:
-		/* Perform a dup2() */
-		if (dup2(fae->fae_fildes, fae->fae_newfildes) == -1)
+		/*
+		 * Perform a dup2(), making sure the FD_CLOEXEC flag is clear
+		 */
+		fd = fae->fae_fildes;
+		if (fd == fae->fae_newfildes) {
+			int flags = fcntl(fd, F_GETFD);
+
+			if (flags == -1 ||
+			    ((flags & FD_CLOEXEC) &&
+			    fcntl(fd, F_SETFD, flags & ~FD_CLOEXEC) == -1))
+				return (errno);
+		} else if (dup2(fd, fae->fae_newfildes) == -1)
 			return (errno);
 		break;
 	case FAE_CLOSE:

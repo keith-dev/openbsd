@@ -1,4 +1,4 @@
-#	$OpenBSD: Makefile.vax,v 1.71 2014/05/08 19:06:35 miod Exp $
+#	$OpenBSD: Makefile.vax,v 1.74 2015/01/13 01:12:50 deraadt Exp $
 
 # For instructions on building kernels consult the config(8) and options(4)
 # manual pages.
@@ -23,9 +23,9 @@ _archdir?=	$S/arch/${_arch}
 
 INCLUDES=	-nostdinc -I$S -I. -I$S/arch
 CPPFLAGS=	${INCLUDES} ${IDENT} ${PARAM} -D_KERNEL -MD -MP
-CWARNFLAGS=	-Werror -Wall -Wstrict-prototypes -Wmissing-prototypes \
+CWARNFLAGS=	-Werror -Wall -Wimplicit-function-declaration \
 		-Wno-main -Wno-uninitialized \
-		-Wstack-larger-than-2047
+		-Wframe-larger-than=2047
 
 CMACHFLAGS=
 CMACHFLAGS+=	-fno-builtin-printf -fno-builtin-snprintf \
@@ -147,8 +147,7 @@ MACHINE_NAME!=  uname -n
 install: install-kernel-${MACHINE_NAME}
 .if !target(install-kernel-${MACHINE_NAME}})
 install-kernel-${MACHINE_NAME}:
-	rm -f /obsd
-	ln /bsd /obsd
+	cmp -s bsd /bsd || ln -f /bsd /obsd
 	cp bsd /nbsd
 	mv /nbsd /bsd
 .endif

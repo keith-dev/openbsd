@@ -1,4 +1,4 @@
-/*	$OpenBSD: trpt.c,v 1.28 2011/07/04 07:06:49 guenther Exp $	*/
+/*	$OpenBSD: trpt.c,v 1.31 2015/02/09 23:00:15 deraadt Exp $	*/
 
 /*-
  * Copyright (c) 1997 The NetBSD Foundation, Inc.
@@ -59,7 +59,6 @@
  * SUCH DAMAGE.
  */
 
-#include <sys/param.h>
 #include <sys/queue.h>
 #include <sys/socket.h>
 #define PRUREQUESTS
@@ -136,14 +135,14 @@ main(int argc, char *argv[])
 	while ((ch = getopt(argc, argv, "afjM:N:p:st")) != -1) {
 		switch (ch) {
 		case 'a':
-			++aflag;
+			aflag = 1;
 			break;
 		case 'f':
-			++follow;
-			setlinebuf(stdout);
+			follow = 1;
+			setvbuf(stdout, NULL, _IOLBF, 0);
 			break;
 		case 'j':
-			++jflag;
+			jflag = 1;
 			break;
 		case 'p':
 			if (npcbs >= TCP_NDEBUG)
@@ -157,10 +156,10 @@ main(int argc, char *argv[])
 			npcbs++;
 			break;
 		case 's':
-			++sflag;
+			sflag = 1;
 			break;
 		case 't':
-			++tflag;
+			tflag = 1;
 			break;
 		case 'N':
 			sys = optarg;

@@ -1,4 +1,4 @@
-/*	$OpenBSD: kern_tc.c,v 1.25 2014/07/12 18:43:32 tedu Exp $ */
+/*	$OpenBSD: kern_tc.c,v 1.28 2014/12/10 02:44:47 tedu Exp $ */
 
 /*
  * Copyright (c) 2000 Poul-Henning Kamp <phk@FreeBSD.org>
@@ -23,7 +23,7 @@
 
 #include <sys/param.h>
 #include <sys/kernel.h>
-#include <sys/proc.h>
+#include <sys/timeout.h>
 #include <sys/sysctl.h>
 #include <sys/syslog.h>
 #include <sys/systm.h>
@@ -393,7 +393,7 @@ tc_windup(void)
 	th = tho->th_next;
 	ogen = th->th_generation;
 	th->th_generation = 0;
-	bcopy(tho, th, offsetof(struct timehands, th_generation));
+	memcpy(th, tho, offsetof(struct timehands, th_generation));
 
 	/*
 	 * Capture a timecounter delta on the current timecounter and if
@@ -541,7 +541,7 @@ sysctl_tc_choice(void *oldp, size_t *oldlenp, void *newp, size_t newlen)
 		strlcat(choices, buf, maxlen);
 	}
 	error = sysctl_rdstring(oldp, oldlenp, newp, choices);
-	free(choices, M_TEMP, 0);
+	free(choices, M_TEMP, maxlen);
 	return (error);
 }
 

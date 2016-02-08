@@ -1,4 +1,4 @@
-/*	$OpenBSD: config.c,v 1.31 2014/05/06 14:10:53 markus Exp $	*/
+/*	$OpenBSD: config.c,v 1.35 2015/02/06 10:39:01 deraadt Exp $	*/
 
 /*
  * Copyright (c) 2010-2013 Reyk Floeter <reyk@openbsd.org>
@@ -16,7 +16,6 @@
  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
 
-#include <sys/param.h>
 #include <sys/queue.h>
 #include <sys/wait.h>
 #include <sys/socket.h>
@@ -26,7 +25,6 @@
 #include <stdio.h>
 #include <unistd.h>
 #include <string.h>
-#include <getopt.h>
 #include <signal.h>
 #include <errno.h>
 #include <err.h>
@@ -68,9 +66,9 @@ config_getspi(void)
 {
 	u_int64_t	 spi;
 
-	spi = ((u_int64_t)arc4random() << 32) | arc4random();
-	if (spi == 0)
-		return (config_getspi());
+	do {
+		arc4random_buf(&spi, sizeof spi);
+	} while (spi == 0);
 
 	return (spi);
 }
@@ -335,8 +333,8 @@ config_add_transform(struct iked_proposal *prop, u_int type,
 		}
 	}
 
-	if ((xform = realloc(prop->prop_xforms,
-	    (prop->prop_nxforms + 1) * sizeof(*xform))) == NULL) {
+	if ((xform = reallocarray(prop->prop_xforms,
+	    prop->prop_nxforms + 1, sizeof(*xform))) == NULL) {
 		return (NULL);
 	}
 

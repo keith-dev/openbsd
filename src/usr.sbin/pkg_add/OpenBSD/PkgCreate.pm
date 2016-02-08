@@ -1,6 +1,6 @@
 #! /usr/bin/perl
 # ex:ts=8 sw=4:
-# $OpenBSD: PkgCreate.pm,v 1.108 2014/07/10 10:33:10 espie Exp $
+# $OpenBSD: PkgCreate.pm,v 1.114 2014/12/22 14:24:56 espie Exp $
 #
 # Copyright (c) 2003-2014 Marc Espie <espie@openbsd.org>
 #
@@ -47,6 +47,7 @@ sub error
 	my $self = shift;
 	my $msg = shift;
 	$self->{bad}++;
+	$self->progress->disable;
 	$self->errsay("Error: $msg", @_);
 }
 
@@ -136,18 +137,19 @@ sub create_package
 
 	$self->archive($state);
 	if ($state->verbose) {
-		$self->comment_create_package;
+		$self->comment_create_package($state);
 	}
 }
 
 sub pretend_to_archive
 {
 	my ($self, $state) = @_;
-	$self->comment_create_package;
+	$self->comment_create_package($state);
 }
 
 sub record_digest {}
 sub archive {}
+sub really_archived { 0 }
 sub comment_create_package {}
 sub grab_manpages {}
 
@@ -234,7 +236,7 @@ sub compute_checksum
 		}
 		$result->make_symlink($value);
 	} elsif (-f _) {
-		my ($dev, $ino, $size) = (stat _)[0,1,7];
+		my ($dev, $ino, $size, $mtime) = (stat _)[0,1,7, 9];
 		if (defined $state->stash("$dev/$ino")) {
 			$result->make_hardlink($state->stash("$dev/$ino"));
 		} else {
@@ -242,6 +244,7 @@ sub compute_checksum
 			$result->add_digest($self->compute_digest($fname))
 			    unless $state->{bad};
 			$result->add_size($size);
+			$result->add_timestamp($mtime);
 		}
 	} elsif (-d _) {
 		$state->error("#1 should be a file and not a directory", $fname);
@@ -303,6 +306,27 @@ sub find_every_library
 {
 }
 
+package OpenBSD::PackingElement::StreamMarker;
+our @ISA = qw(OpenBSD::PackingElement::Meta);
+sub new
+{
+	my $class = shift;
+	bless {}, $class;
+}
+
+sub comment_create_package
+{
+	my ($self, $state) = @_;
+	$self->SUPER::comment_create_package($state);
+	$state->say("Gzip: next chunk");
+}
+
+sub archive
+{
+	my ($self, $state) = @_;
+	$state->new_gstream;
+}
+
 package OpenBSD::PackingElement::Meta;
 sub record_digest
 {
@@ -347,8 +371,8 @@ sub may_add
 
 sub comment_create_package
 {
-	my ($self) = @_;
-	print "Adding ", $self->name, "\n";
+	my ($self, $state) = @_;
+	$state->say("Adding #1", $self->name);
 }
 
 sub makesum_plist
@@ -395,6 +419,13 @@ sub archive
 	$state->new_gstream;
 }
 
+sub comment_create_package
+{
+	my ($self, $state) = @_;
+	$self->SUPER::comment_create_package($state);
+	$state->say("GZIP: END OF SIGNATURE CHUNK");
+}
+
 package OpenBSD::PackingElement::Cwd;
 sub archive
 {
@@ -404,13 +435,13 @@ sub archive
 sub pretend_to_archive
 {
 	my ($self, $state) = @_;
-	$self->comment_create_package;
+	$self->comment_create_package($state);
 }
 
 sub comment_create_package
 {
-	my ($self) = @_;
-	print "Cwd: ", $self->name, "\n";
+	my ($self, $state) = @_;
+	$state->say("Cwd: #1", $self->name);
 }
 
 package OpenBSD::PackingElement::FileBase;
@@ -444,19 +475,20 @@ sub archive
 	$o->write unless $state->{bad};
 }
 
+sub really_archived { 1 }
 sub pretend_to_archive
 {
 	my ($self, $state) = @_;
 
 	$self->set_destdir($state);
 	$self->prepare_for_archival($state);
-	$self->comment_create_package;
+	$self->comment_create_package($state);
 }
 
 sub comment_create_package
 {
-	my ($self) = @_;
-	print "Adding ", $self->name, "\n";
+	my ($self, $state) = @_;
+	$state->say("Adding #1", $self->name);
 }
 
 sub print_file
@@ -1385,7 +1417,7 @@ sub save_history
 	# split list
 	# - first, unknown stuff
 	for my $h (@new) {
-		if ($known{$h} && $entries->{$h}[0]->{name} !~ /\.py$/) {
+		if ($known{$h}) {
 			$found{$h} = $known{$h};
 		} else {
 			print $f "$h\n" if defined $f;
@@ -1401,8 +1433,22 @@ sub save_history
 		close($f);
 		rename("$fname.new", $fname);
 	}
-	push(@$list, @$tail);
-	return $list;
+	# create a new list with check points.
+	my $l = [@$tail];
+	my $i = 0;
+	my $end_marker = OpenBSD::PackingElement::StreamMarker->new;
+	while (@$list > 0) {
+		my $e = pop @$list;
+		if ($e->really_archived && $i++ % 16 == 0) {
+			unshift @$l, $end_marker;
+		}
+		unshift @$l, $e;
+	}
+	# remove extraneous marker if @$tail is empty.
+	if ($l->[-1] eq $end_marker) {
+		pop @$l;
+	}
+	return $l;
 }
 
 sub parse_and_run

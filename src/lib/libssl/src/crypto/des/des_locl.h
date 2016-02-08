@@ -1,4 +1,4 @@
-/* $OpenBSD: des_locl.h,v 1.16 2014/07/10 22:45:56 jsing Exp $ */
+/* $OpenBSD: des_locl.h,v 1.18 2014/10/28 07:35:58 jsg Exp $ */
 /* Copyright (C) 1995-1997 Eric Young (eay@cryptsoft.com)
  * All rights reserved.
  *
@@ -60,6 +60,7 @@
 #define HEADER_DES_LOCL_H
 
 #include <math.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -131,20 +132,10 @@
 				} \
 			}
 
-#if defined(__GNUC__) && __GNUC__>=2 && !defined(__STRICT_ANSI__) && !defined(OPENSSL_NO_ASM) && !defined(OPENSSL_NO_INLINE_ASM)
-# if defined(__i386) || defined(__i386__) || defined(__x86_64) || defined(__x86_64__)
-#  define ROTATE(a,n)	({ register unsigned int ret;	\
-				asm ("rorl %1,%0"	\
-					: "=r"(ret)	\
-					: "I"(n),"0"(a)	\
-					: "cc");	\
-			   ret;				\
-			})
-# endif
-#endif
-#ifndef ROTATE
-#define	ROTATE(a,n)	(((a)>>(n))+((a)<<(32-(n))))
-#endif
+static inline uint32_t ROTATE(uint32_t a, uint32_t n)
+{
+	return (a>>n)+(a<<(32-n));
+}
 
 /* Don't worry about the LOAD_DATA() stuff, that is used by
  * fcrypt() to add it's little bit to the front */
@@ -372,7 +363,7 @@
 
 #define IP(l,r) \
 	{ \
-	register DES_LONG tt; \
+	DES_LONG tt; \
 	PERM_OP(r,l,tt, 4,0x0f0f0f0fL); \
 	PERM_OP(l,r,tt,16,0x0000ffffL); \
 	PERM_OP(r,l,tt, 2,0x33333333L); \
@@ -382,7 +373,7 @@
 
 #define FP(l,r) \
 	{ \
-	register DES_LONG tt; \
+	DES_LONG tt; \
 	PERM_OP(l,r,tt, 1,0x55555555L); \
 	PERM_OP(r,l,tt, 8,0x00ff00ffL); \
 	PERM_OP(l,r,tt, 2,0x33333333L); \

@@ -1,4 +1,4 @@
-/* $OpenBSD: if_pppoe.c,v 1.40 2014/07/12 18:44:22 tedu Exp $ */
+/* $OpenBSD: if_pppoe.c,v 1.43 2014/12/05 15:50:04 mpi Exp $ */
 /* $NetBSD: if_pppoe.c,v 1.51 2003/11/28 08:56:48 keihan Exp $ */
 
 /*
@@ -44,15 +44,13 @@
 #include <sys/syslog.h>
 #include <sys/ioctl.h>
 #include <net/if.h>
+#include <net/if_var.h>
 #include <net/if_types.h>
 #include <net/if_sppp.h>
 #include <net/if_pppoe.h>
 #include <net/netisr.h>
 #include <netinet/in.h>
 #include <netinet/if_ether.h>
-
-/* for arc4random() */
-#include <dev/rndvar.h>
 
 #if NBPFILTER > 0
 #include <net/bpf.h>
@@ -1398,6 +1396,9 @@ pppoe_send_padt(struct ifnet *outgoing_if, u_int session, const u_int8_t *dest)
 	memcpy(&eh->ether_dhost, dest, ETHER_ADDR_LEN);
 
 	m0->m_flags &= ~(M_BCAST|M_MCAST);
+	/* encapsulated packet is forced into rdomain of physical interface */
+	m0->m_pkthdr.ph_rtableid = outgoing_if->if_rdomain;
+
 	return (outgoing_if->if_output(outgoing_if, m0, &dst, NULL));
 }
 

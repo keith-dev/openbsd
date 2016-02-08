@@ -1,4 +1,4 @@
-/*	$OpenBSD: acpivar.h,v 1.77 2014/01/05 20:23:57 mlarkin Exp $	*/
+/*	$OpenBSD: acpivar.h,v 1.79 2014/12/08 07:12:37 mlarkin Exp $	*/
 /*
  * Copyright (c) 2005 Thorsten Lockert <tholo@sigmasoft.com>
  *
@@ -18,7 +18,8 @@
 #ifndef _DEV_ACPI_ACPIVAR_H_
 #define _DEV_ACPI_ACPIVAR_H_
 
-#define ACPI_TRAMPOLINE		(17 * NBPG)
+#define ACPI_TRAMPOLINE		(19 * NBPG)
+#define ACPI_TRAMP_DATA		(20 * NBPG)
 
 #ifndef _ACPI_WAKECODE
 

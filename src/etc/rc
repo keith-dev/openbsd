@@ -1,4 +1,4 @@
-#	$OpenBSD: rc,v 1.438 2014/08/04 20:17:09 naddy Exp $
+#	$OpenBSD: rc,v 1.447 2015/01/22 19:00:24 krw Exp $
 
 # System startup script run by init on autoboot
 # or after single-user.
@@ -144,19 +144,6 @@ start_daemon()
 
 make_keys()
 {
-	if [ X"${named_flags}" != X"NO" ]; then
-		if ! cmp -s /etc/rndc.key /var/named/etc/rndc.key ; then
-			echo -n "rndc-confgen: generating shared secret... "
-			if rndc-confgen -a -t /var/named >/dev/null 2>&1; then
-				chmod 0640 /var/named/etc/rndc.key \
-				    >/dev/null 2>&1
-				echo done.
-			else
-				echo failed.
-			fi
-		fi
-	fi
-
 	if [ ! -f /etc/isakmpd/private/local.key ]; then
 		echo -n "openssl: generating isakmpd/iked RSA key... "
 		if openssl genrsa -out /etc/isakmpd/private/local.key 2048 \
@@ -331,8 +318,8 @@ wsconsctl_conf
 if [ X"${pf}" != X"NO" ]; then
 	RULES="block all"
 	RULES="$RULES\npass on lo0"
-	RULES="$RULES\npass in proto tcp from any to any port 22 keep state"
-	RULES="$RULES\npass out proto { tcp, udp } from any to any port 53 keep state"
+	RULES="$RULES\npass in proto tcp from any to any port ssh keep state"
+	RULES="$RULES\npass out proto { tcp, udp } from any to any port domain keep state"
 	RULES="$RULES\npass out inet proto icmp all icmp-type echoreq keep state"
 	RULES="$RULES\npass out inet proto udp from any port bootpc to any port bootps"
 	RULES="$RULES\npass in inet proto udp from any port bootps to any port bootpc"
@@ -350,8 +337,8 @@ if [ X"${pf}" != X"NO" ]; then
 	*[1-9]*)
 		# don't kill NFS
 		RULES="set reassemble yes no-df\n$RULES"
-		RULES="$RULES\npass in proto { tcp, udp } from any port { 111, 2049 } to any"
-		RULES="$RULES\npass out proto { tcp, udp } from any to any port { 111, 2049 } !received-on any"
+		RULES="$RULES\npass in proto { tcp, udp } from any port { sunrpc, nfsd } to any"
+		RULES="$RULES\npass out proto { tcp, udp } from any to any port { sunrpc, nfsd } !received-on any"
 		;;
 	esac
 	echo $RULES | pfctl -f -
@@ -371,8 +358,8 @@ if [ -f /etc/resolv.conf.save ]; then
 	mv -f /etc/resolv.conf.save /etc/resolv.conf
 	touch /etc/resolv.conf
 fi
-. /etc/netstart
-dmesg > /dev/random	# any write triggers an RC4 rekey
+sh /etc/netstart
+dmesg > /dev/random	# any write triggers a rekey
 
 if [ X"${pf}" != X"NO" ]; then
 	if [ -f ${pf_rules} ]; then
@@ -400,7 +387,7 @@ dmesg >/var/run/dmesg.boot
 make_keys
 
 echo -n 'starting early daemons:'
-start_daemon syslogd ldattach pflogd named nsd unbound ntpd
+start_daemon syslogd ldattach pflogd nsd unbound ntpd
 start_daemon iscsid isakmpd iked sasyncd ldapd npppd
 echo '.'
 
@@ -451,12 +438,12 @@ fi
 
 echo clearing /tmp
 
-# prune quickly with one rm, then use find to clean up /tmp/[lq]*
+# prune quickly with one rm, then use find to clean up /tmp/[lqv]*
 # (not needed with mfs /tmp, but doesn't hurt there...)
-(cd /tmp && rm -rf [a-km-pr-zA-Z]*)
+(cd /tmp && rm -rf [a-km-pr-uw-zA-Z]*)
 (cd /tmp &&
-    find . ! -name . ! -name lost+found ! -name quota.user \
-	! -name quota.group -execdir rm -rf -- {} \; -type d -prune)
+    find . -maxdepth 1 ! -name . ! -name lost+found ! -name quota.user \
+	! -name quota.group ! -name vi.recover -execdir rm -rf -- {} \;)
 
 setup_X_sockets
 
@@ -504,14 +491,12 @@ start_daemon relayd dhcpd dhcrelay mrouted dvmrpd
 
 if ifconfig lo0 inet6 >/dev/null 2>&1; then
 	fw=`sysctl -n net.inet6.ip6.forwarding`
-	if [ X"${fw}" = X"0" ]; then
-		start_daemon rtsold
-	else
+	if [ X"${fw}" = X"1" ]; then
 		start_daemon route6d rtadvd
 	fi
 fi
 
-start_daemon hostapd lpd sendmail smtpd slowcgi nginx httpd ftpd
+start_daemon hostapd lpd smtpd slowcgi httpd ftpd
 start_daemon ftpproxy tftpd tftpproxy identd inetd rarpd bootparamd
 start_daemon rbootd mopd spamd spamlogd sndiod
 echo '.'

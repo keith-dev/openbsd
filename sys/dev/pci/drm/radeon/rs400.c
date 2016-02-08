@@ -1,4 +1,4 @@
-/*	$OpenBSD: rs400.c,v 1.4 2014/02/09 12:33:44 jsg Exp $	*/
+/*	$OpenBSD: rs400.c,v 1.6 2015/02/22 13:09:46 jsg Exp $	*/
 /*
  * Copyright 2008 Advanced Micro Devices, Inc.
  * Copyright 2008 Red Hat Inc.
@@ -220,7 +220,7 @@ int rs400_gart_set_page(struct radeon_device *rdev, int i, uint64_t addr)
 		return -EINVAL;
 	}
 
-	entry = (lower_32_bits(addr) & PAGE_MASK) |
+	entry = (lower_32_bits(addr) & ~PAGE_MASK) |
 		((upper_32_bits(addr) & 0xff) << 4) |
 		RS400_PTE_WRITEABLE | RS400_PTE_READABLE;
 	entry = cpu_to_le32(entry);
@@ -249,7 +249,7 @@ static void rs400_gpu_init(struct radeon_device *rdev)
 	/* FIXME: is this correct ? */
 	r420_pipes_init(rdev);
 	if (rs400_mc_wait_for_idle(rdev)) {
-		DRM_ERROR("rs400: Failed to wait MC idle while "
+		printk(KERN_WARNING "rs400: Failed to wait MC idle while "
 		       "programming pipes. Bad things might happen. %08x\n", RREG32(RADEON_MC_STATUS));
 	}
 }

@@ -1,4 +1,4 @@
-/*	$OpenBSD: intel_lvds.c,v 1.11 2014/01/22 22:33:24 jsg Exp $	*/
+/*	$OpenBSD: intel_lvds.c,v 1.13 2015/02/11 07:01:37 jsg Exp $	*/
 /*
  * Copyright © 2006-2007 Intel Corporation
  * Copyright (c) 2006 Dave Airlie <airlied@linux.ie>
@@ -483,7 +483,7 @@ static int intel_lvds_get_modes(struct drm_connector *connector)
 
 static int intel_no_modeset_on_lid_dmi_callback(const struct dmi_system_id *id)
 {
-	printf("Skipping forced modeset for %s\n", id->ident);
+	DRM_INFO("Skipping forced modeset for %s\n", id->ident);
 	return 1;
 }
 
@@ -542,9 +542,9 @@ static int intel_lid_notify(struct notifier_block *nb, unsigned long val,
 
 	dev_priv->modeset_on_lid = 0;
 
-	rw_enter_write(&dev->mode_config.rwl);
+	mutex_lock(&dev->mode_config.mutex);
 	intel_modeset_setup_hw_state(dev, true);
-	rw_exit_write(&dev->mode_config.rwl);
+	mutex_unlock(&dev->mode_config.mutex);
 
 	return NOTIFY_OK;
 }
@@ -638,7 +638,7 @@ static const struct drm_encoder_funcs intel_lvds_enc_funcs = {
 
 static int __init intel_no_lvds_dmi_callback(const struct dmi_system_id *id)
 {
-	printf("Skipping LVDS initialization for %s\n", id->ident);
+	DRM_INFO("Skipping LVDS initialization for %s\n", id->ident);
 	return 1;
 }
 

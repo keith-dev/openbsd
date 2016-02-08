@@ -1,4 +1,4 @@
-/* $OpenBSD: eng_rsax.c,v 1.10 2014/07/12 16:03:37 miod Exp $ */
+/* $OpenBSD: eng_rsax.c,v 1.13 2015/02/09 15:49:22 jsing Exp $ */
 /* Copyright (c) 2010-2010 Intel Corp.
  *   Author: Vinodh.Gopal@intel.com
  *           Jim Guilford
@@ -67,8 +67,6 @@
 #include <stdio.h>
 #include <string.h>
 
-#include <openssl/opensslconf.h>
-
 #include <openssl/crypto.h>
 #include <openssl/buffer.h>
 #include <openssl/engine.h>
@@ -81,8 +79,9 @@
 /* RSAX is available **ONLY* on x86_64 CPUs */
 #undef COMPILE_RSAX
 
-#if (defined(__x86_64) || defined(__x86_64__) || \
-     defined(_M_AMD64) || defined (_M_X64)) && !defined(OPENSSL_NO_ASM)
+#if !defined(OPENSSL_NO_ASM) && defined(RSA_ASM) && \
+	(defined(__x86_64) || defined(__x86_64__) || \
+     defined(_M_AMD64) || defined (_M_X64))
 #define COMPILE_RSAX
 static ENGINE *ENGINE_rsax (void);
 #endif
@@ -520,9 +519,12 @@ e_rsax_rsa_mod_exp(BIGNUM *r0, const BIGNUM *I, RSA *rsa, BN_CTX *ctx)
 	int ret = 0;
 
 	BN_CTX_start(ctx);
-	r1 = BN_CTX_get(ctx);
-	m1 = BN_CTX_get(ctx);
-	vrfy = BN_CTX_get(ctx);
+	if ((r1 = BN_CTX_get(ctx)) == NULL)
+		goto err;
+	if ((m1 = BN_CTX_get(ctx)) == NULL)
+		goto err;
+	if ((vrfy = BN_CTX_get(ctx)) == NULL)
+		goto err;
 
 	{
 		BIGNUM local_p, local_q;

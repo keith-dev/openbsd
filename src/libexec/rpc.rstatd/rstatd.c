@@ -1,4 +1,4 @@
-/*	$OpenBSD: rstatd.c,v 1.23 2009/10/27 23:59:31 deraadt Exp $	*/
+/*	$OpenBSD: rstatd.c,v 1.25 2014/11/18 20:51:00 krw Exp $	*/
 
 /*-
  * Copyright (c) 1993, John Brezak
@@ -38,7 +38,6 @@
 #include <pwd.h>
 #include <syslog.h>
 #include <errno.h>
-#include <stdlib.h>
 #include <rpc/rpc.h>
 #include <rpcsvc/rstat.h>
 
@@ -161,7 +160,7 @@ my_svc_run(void)
 			exit(0);
 		}
 		if (svc_max_pollfd > saved_max_pollfd) {
-			newp = realloc(pfd, sizeof(*pfd) * svc_max_pollfd);
+			newp = reallocarray(pfd, svc_max_pollfd, sizeof(*pfd));
 			if (newp == NULL) {
 				free(pfd);
 				perror("svc_run: - realloc failed");
@@ -170,7 +169,7 @@ my_svc_run(void)
 			pfd = newp;
 			saved_max_pollfd = svc_max_pollfd;
 		}
-		memcpy(pfd, svc_pollfd, sizeof(*pfd) * svc_max_pollfd);
+		memcpy(pfd, svc_pollfd, svc_max_pollfd * sizeof(*pfd));
 
 		nready = poll(pfd, svc_max_pollfd, INFTIM);
 		switch (nready) {

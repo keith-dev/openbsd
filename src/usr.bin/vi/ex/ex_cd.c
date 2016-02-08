@@ -1,4 +1,4 @@
-/*	$OpenBSD: ex_cd.c,v 1.9 2009/10/27 23:59:47 deraadt Exp $	*/
+/*	$OpenBSD: ex_cd.c,v 1.11 2015/01/16 06:40:14 deraadt Exp $	*/
 
 /*-
  * Copyright (c) 1992, 1993, 1994
@@ -11,7 +11,6 @@
 
 #include "config.h"
 
-#include <sys/param.h>
 #include <sys/queue.h>
 
 #include <bitstring.h>
@@ -32,15 +31,13 @@
  * PUBLIC: int ex_cd(SCR *, EXCMD *);
  */
 int
-ex_cd(sp, cmdp)
-	SCR *sp;
-	EXCMD *cmdp;
+ex_cd(SCR *sp, EXCMD *cmdp)
 {
 	struct passwd *pw;
 	ARGS *ap;
 	CHAR_T savech;
 	char *dir, *p, *t;	/* XXX: END OF THE STACK, DON'T TRUST GETCWD. */
-	char buf[MAXPATHLEN * 2];
+	char buf[PATH_MAX * 2];
 
 	/*
 	 * !!!

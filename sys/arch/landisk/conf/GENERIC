@@ -1,4 +1,4 @@
-# $OpenBSD: GENERIC,v 1.45 2014/07/12 21:56:56 tedu Exp $
+# $OpenBSD: GENERIC,v 1.48 2015/01/03 21:24:19 uaa Exp $
 #
 # For further information on compiling OpenBSD kernels, see the config(8)
 # man page.
@@ -106,6 +106,8 @@ uark*	at uhub?		# Arkmicro ARK3116 serial
 ucom*	at uark?
 moscom*	at uhub?		# MosChip MCS7703 serial
 ucom*	at moscom?
+umcs*	at uhub?		# MosChip MCS78x0 serial
+ucom*	at umcs?
 uipaq*	at uhub?		# iPAQ serial adapter
 ucom*	at uipaq?
 umsm*	at uhub?		# Qualcomm MSM EVDO
@@ -125,6 +127,8 @@ ukbd*	at uhidev?		# USB keyboard
 wskbd*	at ukbd? mux 1
 ucycom*	at uhidev?		# Cypress serial
 ucom*	at ucycom?
+uslhcom* at uhidev?		# Silicon Labs CP2110 USB HID UART
+ucom*	at uslhcom?
 uhid*	at uhidev?		# USB generic HID support
 upd*	at uhidev?		# USB Power Devices sensors
 aue*	at uhub?		# ADMtek AN986 Pegasus Ethernet
@@ -141,7 +145,6 @@ ugl*	at uhub?		# Genesys Logic GL620USB-A host-to-host `network'
 udav*	at uhub?		# Davicom DM9601 based Ethernet
 url*	at uhub?		# Realtek RTL8150L based adapters
 wi*	at uhub?		# WaveLAN IEEE 802.11DS
-urio*	at uhub?		# Diamond Multimedia Rio 500
 udsbr*	at uhub?		# D-Link DSB-R100 radio
 radio*	at udsbr?		# USB radio
 ugen*	at uhub?		# USB Generic driver

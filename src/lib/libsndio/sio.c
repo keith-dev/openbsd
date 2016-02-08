@@ -1,4 +1,4 @@
-/*	$OpenBSD: sio.c,v 1.17 2014/03/05 20:40:49 ratchov Exp $	*/
+/*	$OpenBSD: sio.c,v 1.19 2015/01/16 16:48:52 deraadt Exp $	*/
 /*
  * Copyright (c) 2008 Alexandre Ratchov <alex@caoua.org>
  *
@@ -15,7 +15,6 @@
  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
 
-#include <sys/param.h>
 #include <sys/types.h>
 #include <sys/stat.h>
 
@@ -390,7 +389,7 @@ sio_revents(struct sio_hdl *hdl, struct pollfd *pfd)
 #ifdef DEBUG
 	struct timespec ts0, ts1;
 
-	if (_sndio_debug >= 2)
+	if (_sndio_debug >= 4)
 		clock_gettime(CLOCK_MONOTONIC, &ts0);
 #endif
 	if (hdl->eof)

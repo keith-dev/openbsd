@@ -1,4 +1,4 @@
-/*	$OpenBSD: if.c,v 1.21 2014/06/23 03:46:16 guenther Exp $ */
+/*	$OpenBSD: if.c,v 1.23 2015/01/16 00:03:37 deraadt Exp $ */
 /*
  * Copyright (c) 2004 Markus Friedl <markus@openbsd.org>
  *
@@ -15,8 +15,8 @@
  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
 
-#include <sys/param.h>
-#include <sys/types.h>
+#include <sys/param.h>	/* roundup */
+#include <sys/signal.h>
 #include <sys/socket.h>
 #include <sys/sysctl.h>
 #include <net/if.h>
@@ -217,8 +217,8 @@ fetchifstat(void)
 		    !(ifm.ifm_addrs & RTA_IFP))
 			continue;
 		if (ifm.ifm_index >= nifs) {
-			if ((newstats = realloc(ifstats, (ifm.ifm_index + 4)
-			    * sizeof(struct ifstat))) == NULL)
+			if ((newstats = reallocarray(ifstats, ifm.ifm_index + 4,
+			    sizeof(struct ifstat))) == NULL)
 				continue;
 			ifstats = newstats;
 			for (; nifs < ifm.ifm_index + 4; nifs++)

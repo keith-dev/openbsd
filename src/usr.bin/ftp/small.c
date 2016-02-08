@@ -1,4 +1,4 @@
-/*	$OpenBSD: small.c,v 1.1 2009/05/05 19:35:30 martynas Exp $	*/
+/*	$OpenBSD: small.c,v 1.4 2015/01/30 04:45:45 tedu Exp $	*/
 /*	$NetBSD: cmds.c,v 1.27 1997/08/18 10:20:15 lukem Exp $	*/
 
 /*
@@ -77,6 +77,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include <errno.h>
 
 #include "ftp_var.h"
 #include "pathnames.h"
@@ -90,13 +91,10 @@ struct	types {
 	char	*t_name;
 	char	*t_mode;
 	int	t_type;
-	char	*t_arg;
 } types[] = {
-	{ "ascii",	"A",	TYPE_A,	0 },
-	{ "binary",	"I",	TYPE_I,	0 },
-	{ "image",	"I",	TYPE_I,	0 },
-	{ "ebcdic",	"E",	TYPE_E,	0 },
-	{ "tenex",	"L",	TYPE_L,	bytename },
+	{ "ascii",	"A",	TYPE_A },
+	{ "binary",	"I",	TYPE_I },
+	{ "image",	"I",	TYPE_I },
 	{ NULL }
 };
 
@@ -135,10 +133,7 @@ settype(int argc, char *argv[])
 		code = -1;
 		return;
 	}
-	if ((p->t_arg != NULL) && (*(p->t_arg) != '\0'))
-		comret = command("TYPE %s %s", p->t_mode, p->t_arg);
-	else
-		comret = command("TYPE %s", p->t_mode);
+	comret = command("TYPE %s", p->t_mode);
 	if (comret == COMPLETE) {
 		(void)strlcpy(typename, p->t_name, sizeof typename);
 		curtype = type = p->t_type;
@@ -241,7 +236,7 @@ usage:
 	}
 	globargv2 = argv[2];
 	if (loc && mcase) {
-		char *tp = argv[1], *tp2, tmpbuf[MAXPATHLEN];
+		char *tp = argv[1], *tp2, tmpbuf[PATH_MAX];
 
 		while (*tp && !islower(*tp)) {
 			tp++;
@@ -301,15 +296,21 @@ freegetit:
 void
 mabort(int signo)
 {
+	int save_errno = errno;
+
 	alarmtimer(0);
-	putc('\n', ttyout);
-	(void)fflush(ttyout);
+	(void) write(fileno(ttyout), "\n\r", 2);
 #ifndef SMALL
-	if (mflag && fromatty)
-		if (confirm(mname, NULL))
+	if (mflag && fromatty) {
+		/* XXX signal race, crazy unbelievable stdio misuse */
+		if (confirm(mname, NULL)) {
+			errno = save_errno;
 			longjmp(jabort, 1);
+		}
+	}
 #endif /* !SMALL */
 	mflag = 0;
+	errno = save_errno;
 	longjmp(jabort, 1);
 }
 
@@ -322,7 +323,7 @@ mget(int argc, char *argv[])
 	extern int optind, optreset;
 	sig_t oldintr;
 	int ch, xargc = 2;
-	char *cp, localcwd[MAXPATHLEN], *xargv[] = { argv[0], NULL, NULL };
+	char *cp, localcwd[PATH_MAX], *xargv[] = { argv[0], NULL, NULL };
 	static int restartit = 0;
 #ifndef SMALL
 	extern char *optarg;
@@ -525,7 +526,7 @@ disconnect(int argc, char *argv[])
 char *
 dotrans(char *name)
 {
-	static char new[MAXPATHLEN];
+	static char new[PATH_MAX];
 	char *cp1, *cp2 = new;
 	int i, ostop, found;
 
@@ -553,7 +554,7 @@ dotrans(char *name)
 char *
 domap(char *name)
 {
-	static char new[MAXPATHLEN];
+	static char new[PATH_MAX];
 	char *cp1 = name, *cp2 = mapin;
 	char *tp[9], *te[9];
 	int i, toks[9], toknum = 0, match = 1;

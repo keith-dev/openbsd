@@ -1,4 +1,4 @@
-/*	$OpenBSD: ftp-proxy.c,v 1.28 2013/03/15 13:31:27 benno Exp $ */
+/*	$OpenBSD: ftp-proxy.c,v 1.30 2015/01/21 21:50:33 deraadt Exp $ */
 
 /*
  * Copyright (c) 2004, 2005 Camiel Dobbelaar, <cd@sentia.nl>
@@ -22,10 +22,10 @@
 #include <sys/resource.h>
 #include <sys/socket.h>
 
-#include <net/if.h>
-#include <net/pfvar.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
+#include <net/if.h>
+#include <net/pfvar.h>
 
 #include <err.h>
 #include <errno.h>
@@ -322,7 +322,7 @@ exit_daemon(void)
 {
 	struct session *s, *next;
 
-	for (s = LIST_FIRST(&sessions); s != LIST_END(&sessions); s = next) {
+	for (s = LIST_FIRST(&sessions); s != NULL; s = next) {
 		next = LIST_NEXT(s, entry);
 		end_session(s);
 	}

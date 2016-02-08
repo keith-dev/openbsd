@@ -1,4 +1,4 @@
-/*	$OpenBSD: rde_attr.c,v 1.91 2012/08/12 14:24:56 claudio Exp $ */
+/*	$OpenBSD: rde_attr.c,v 1.93 2014/12/12 18:15:51 tedu Exp $ */
 
 /*
  * Copyright (c) 2004 Claudio Jeker <claudio@openbsd.org>
@@ -17,7 +17,6 @@
  */
 
 #include <sys/types.h>
-#include <sys/hash.h>
 #include <sys/queue.h>
 
 #include <netinet/in.h>
@@ -26,6 +25,7 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
+#include <siphash.h>
 
 #include "bgpd.h"
 #include "rde.h"
@@ -99,6 +99,8 @@ struct attr_table {
 	u_int32_t		 hashmask;
 } attrtable;
 
+SIPHASH_KEY attrtablekey;
+
 #define ATTR_HASH(x)				\
 	&attrtable.hashtbl[(x) & attrtable.hashmask]
 
@@ -107,6 +109,7 @@ attr_init(u_int32_t hashsize)
 {
 	u_int32_t	hs, i;
 
+	arc4random_buf(&attrtablekey, sizeof(attrtablekey));
 	for (hs = 1; hs < hashsize; hs <<= 1)
 		;
 	attrtable.hashtbl = calloc(hs, sizeof(struct attr_list));
@@ -176,8 +179,8 @@ attr_optadd(struct rde_aspath *asp, u_int8_t flags, u_int8_t type,
 		fatalx("attr_optadd: others_len overflow");
 
 	asp->others_len++;
-	if ((p = realloc(asp->others,
-	    asp->others_len * sizeof(struct attr *))) == NULL)
+	if ((p = reallocarray(asp->others,
+	    asp->others_len, sizeof(struct attr *))) == NULL)
 		fatal("attr_optadd");
 	asp->others = p;
 
@@ -316,6 +319,7 @@ struct attr *
 attr_alloc(u_int8_t flags, u_int8_t type, const void *data, u_int16_t len)
 {
 	struct attr	*a;
+	SIPHASH_CTX	ctx;
 
 	a = calloc(1, sizeof(struct attr));
 	if (a == NULL)
@@ -324,9 +328,7 @@ attr_alloc(u_int8_t flags, u_int8_t type, const void *data, u_int16_t len)
 
 	flags &= ~ATTR_DEFMASK;	/* normalize mask */
 	a->flags = flags;
-	a->hash = hash32_buf(&flags, sizeof(flags), HASHINIT);
 	a->type = type;
-	a->hash = hash32_buf(&type, sizeof(type), a->hash);
 	a->len = len;
 	if (len != 0) {
 		if ((a->data = malloc(len)) == NULL)
@@ -338,8 +340,12 @@ attr_alloc(u_int8_t flags, u_int8_t type, const void *data, u_int16_t len)
 	} else
 		a->data = NULL;
 
-	a->hash = hash32_buf(&len, sizeof(len), a->hash);
-	a->hash = hash32_buf(a->data, a->len, a->hash);
+	SipHash24_Init(&ctx, &attrtablekey);
+	SipHash24_Update(&ctx, &flags, sizeof(flags));
+	SipHash24_Update(&ctx, &type, sizeof(type));
+	SipHash24_Update(&ctx, &len, sizeof(len));
+	SipHash24_Update(&ctx, a->data, a->len);
+	a->hash = SipHash24_End(&ctx);
 	LIST_INSERT_HEAD(ATTR_HASH(a->hash), a, entry);
 
 	return (a);
@@ -351,12 +357,16 @@ attr_lookup(u_int8_t flags, u_int8_t type, const void *data, u_int16_t len)
 	struct attr_list	*head;
 	struct attr		*a;
 	u_int32_t		 hash;
+	SIPHASH_CTX		ctx;
 
 	flags &= ~ATTR_DEFMASK;	/* normalize mask */
-	hash = hash32_buf(&flags, sizeof(flags), HASHINIT);
-	hash = hash32_buf(&type, sizeof(type), hash);
-	hash = hash32_buf(&len, sizeof(len), hash);
-	hash = hash32_buf(data, len, hash);
+
+	SipHash24_Init(&ctx, &attrtablekey);
+	SipHash24_Update(&ctx, &flags, sizeof(flags));
+	SipHash24_Update(&ctx, &type, sizeof(type));
+	SipHash24_Update(&ctx, &len, sizeof(len));
+	SipHash24_Update(&ctx, data, len);
+	hash = SipHash24_End(&ctx);
 	head = ATTR_HASH(hash);
 
 	LIST_FOREACH(a, head, entry) {
@@ -401,6 +411,8 @@ struct aspath_table {
 	struct aspath_list	*hashtbl;
 	u_int32_t		 hashmask;
 } astable;
+
+SIPHASH_KEY astablekey;
 
 #define ASPATH_HASH(x)				\
 	&astable.hashtbl[(x) & astable.hashmask]
@@ -464,6 +476,7 @@ aspath_init(u_int32_t hashsize)
 		LIST_INIT(&astable.hashtbl[i]);
 
 	astable.hashmask = hs - 1;
+	arc4random_buf(&astablekey, sizeof(astablekey));
 }
 
 void
@@ -500,8 +513,8 @@ aspath_get(void *data, u_int16_t len)
 		memcpy(aspath->data, data, len);
 
 		/* link */
-		head = ASPATH_HASH(hash32_buf(aspath->data, aspath->len,
-		    HASHINIT));
+		head = ASPATH_HASH(SipHash24(&astablekey, aspath->data,
+		    aspath->len));
 		LIST_INSERT_HEAD(head, aspath, entry);
 	}
 	aspath->refcnt++;
@@ -831,7 +844,7 @@ aspath_lookup(const void *data, u_int16_t len)
 	struct aspath		*aspath;
 	u_int32_t		 hash;
 
-	hash = hash32_buf(data, len, HASHINIT);
+	hash = SipHash24(&astablekey, data, len);
 	head = ASPATH_HASH(hash);
 
 	LIST_FOREACH(aspath, head, entry) {
@@ -1000,7 +1013,7 @@ community_set(struct rde_aspath *asp, int as, int type)
 	attr = attr_optget(asp, ATTR_COMMUNITIES);
 	if (attr != NULL) {
 		p = attr->data;
-		ncommunities = attr->len >> 2; /* divide by four */
+		ncommunities = attr->len / 4;
 	}
 
 	/* first check if the community is not already set */
@@ -1016,7 +1029,7 @@ community_set(struct rde_aspath *asp, int as, int type)
 		/* overflow */
 		return (0);
 
-	if ((p = malloc(ncommunities << 2)) == NULL)
+	if ((p = reallocarray(NULL, ncommunities, 4)) == NULL)
 		fatal("community_set");
 
 	p[0] = as >> 8;
@@ -1030,7 +1043,7 @@ community_set(struct rde_aspath *asp, int as, int type)
 		attr_free(asp, attr);
 	}
 
-	attr_optadd(asp, f, ATTR_COMMUNITIES, p, ncommunities << 2);
+	attr_optadd(asp, f, ATTR_COMMUNITIES, p, ncommunities * 4);
 
 	free(p);
 	return (1);
@@ -1156,7 +1169,7 @@ community_ext_set(struct rde_aspath *asp, struct filter_extcommunity *c,
 		/* overflow */
 		return (0);
 
-	if ((p = malloc(ncommunities * sizeof(community))) == NULL)
+	if ((p = reallocarray(NULL, ncommunities, sizeof(community))) == NULL)
 		fatal("community_ext_set");
 
 	memcpy(p, &community, sizeof(community));

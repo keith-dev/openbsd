@@ -1,4 +1,4 @@
-/*	$OpenBSD: ext2fs_df.c,v 1.11 2004/09/14 22:46:04 deraadt Exp $	*/
+/*	$OpenBSD: ext2fs_df.c,v 1.13 2015/03/01 20:59:05 tobias Exp $	*/
 
 /*
  * This file is substantially derived from src/sys/ufs/ext2fs/ext2fs_vfsops.c:e2fs_statfs().
@@ -38,7 +38,7 @@
  *	@(#)ffs_vfsops.c	8.14 (Berkeley) 11/28/94
  */
 
-#include <sys/param.h>
+#include <sys/types.h>
 #include <sys/mount.h>
 #include <ufs/ext2fs/ext2fs.h>
 #include <ufs/ext2fs/ext2fs_dinode.h>
@@ -77,8 +77,9 @@ e2fs_df(int rfd, char *file, struct statfs *sfsp)
 	sfsp->f_bsize = 1024 << sblock.e2fs_log_bsize;
 	sfsp->f_iosize = 1024 << sblock.e2fs_log_bsize;
 
-	ipb = sfsp->f_bsize / sizeof(struct ext2fs_dinode);
-	itpg = sblock.e2fs_ipg/ipb;
+	if ((ipb = sfsp->f_bsize / sizeof(struct ext2fs_dinode)) == 0)
+		return (-1);
+	itpg = sblock.e2fs_ipg / ipb;
 
 	ncg = howmany(sblock.e2fs_bcount - sblock.e2fs_first_dblock,
 		sblock.e2fs_bpg);

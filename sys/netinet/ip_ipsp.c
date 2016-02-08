@@ -1,4 +1,4 @@
-/*	$OpenBSD: ip_ipsp.c,v 1.197 2014/07/22 11:06:10 mpi Exp $	*/
+/*	$OpenBSD: ip_ipsp.c,v 1.203 2015/01/24 00:29:06 deraadt Exp $	*/
 /*
  * The authors of this code are John Ioannidis (ji@tla.org),
  * Angelos D. Keromytis (kermit@csd.uch.gr),
@@ -45,11 +45,15 @@
 #include <sys/mbuf.h>
 #include <sys/socket.h>
 #include <sys/kernel.h>
-#include <sys/proc.h>
 #include <sys/timeout.h>
 
 #include <net/if.h>
 #include <net/route.h>
+
+#include <netinet/in.h>
+#include <netinet/ip.h>
+#include <netinet/in_pcb.h>
+#include <netinet/ip_var.h>
 
 #if NPF > 0
 #include <net/pfvar.h>
@@ -59,23 +63,9 @@
 #include <net/if_pfsync.h>
 #endif
 
-#ifdef INET
-#include <netinet/in.h>
-#include <netinet/ip.h>
-#include <netinet/in_pcb.h>
-#include <netinet/ip_var.h>
-#endif /* INET */
-
-#ifdef INET6
-#ifndef INET
-#include <netinet/in.h>
-#endif
-#endif /* INET6 */
-
 #include <netinet/ip_ipsp.h>
 #include <net/pfkeyv2.h>
 #include <crypto/xform.h>
-#include <dev/rndvar.h>
 
 #ifdef DDB
 #include <ddb/db_output.h>
@@ -601,11 +591,11 @@ tdb_rehash(void)
 
 	tdb_hashmask = (tdb_hashmask << 1) | 1;
 
-	new_tdbh = malloc(sizeof(struct tdb *) * (tdb_hashmask + 1), M_TDB,
+	new_tdbh = mallocarray(tdb_hashmask + 1, sizeof(struct tdb *), M_TDB,
 	    M_WAITOK | M_ZERO);
-	new_tdbaddr = malloc(sizeof(struct tdb *) * (tdb_hashmask + 1), M_TDB,
+	new_tdbaddr = mallocarray(tdb_hashmask + 1, sizeof(struct tdb *), M_TDB,
 	    M_WAITOK | M_ZERO);
-	new_srcaddr = malloc(sizeof(struct tdb *) * (tdb_hashmask + 1), M_TDB,
+	new_srcaddr = mallocarray(tdb_hashmask + 1, sizeof(struct tdb *), M_TDB,
 	    M_WAITOK | M_ZERO);
 
 	for (i = 0; i <= old_hashmask; i++) {
@@ -657,11 +647,11 @@ puttdb(struct tdb *tdbp)
 	int s = splsoftnet();
 
 	if (tdbh == NULL) {
-		tdbh = malloc(sizeof(struct tdb *) * (tdb_hashmask + 1), M_TDB,
-		    M_WAITOK | M_ZERO);
-		tdbaddr = malloc(sizeof(struct tdb *) * (tdb_hashmask + 1),
+		tdbh = mallocarray(tdb_hashmask + 1, sizeof(struct tdb *),
 		    M_TDB, M_WAITOK | M_ZERO);
-		tdbsrc = malloc(sizeof(struct tdb *) * (tdb_hashmask + 1),
+		tdbaddr = mallocarray(tdb_hashmask + 1, sizeof(struct tdb *),
+		    M_TDB, M_WAITOK | M_ZERO);
+		tdbsrc = mallocarray(tdb_hashmask + 1, sizeof(struct tdb *),
 		    M_TDB, M_WAITOK | M_ZERO);
 	}
 
@@ -992,11 +982,9 @@ ipsp_address(union sockaddr_union sa)
 	buf = ipspbuf[ipspround];
 
 	switch (sa.sa.sa_family) {
-#ifdef INET
 	case AF_INET:
 		return inet_ntop(AF_INET, &sa.sin.sin_addr,
 		    buf, INET_ADDRSTRLEN);
-#endif /* INET */
 
 #ifdef INET6
 	case AF_INET6:
@@ -1015,13 +1003,11 @@ int
 ipsp_is_unspecified(union sockaddr_union addr)
 {
 	switch (addr.sa.sa_family) {
-#ifdef INET
 	case AF_INET:
 		if (addr.sin.sin_addr.s_addr == INADDR_ANY)
 			return 1;
 		else
 			return 0;
-#endif /* INET */
 
 #ifdef INET6
 	case AF_INET6:
@@ -1109,9 +1095,7 @@ ipsp_parse_headers(struct mbuf *m, int off, u_int8_t proto)
 	struct m_tag *mtag;
 	struct tdb *tdb;
 
-#ifdef INET
 	struct ip iph;
-#endif /* INET */
 
 #ifdef INET6
 	struct in6_addr ip6_dst;
@@ -1125,7 +1109,6 @@ ipsp_parse_headers(struct mbuf *m, int off, u_int8_t proto)
 
 	while (1) {
 		switch (proto) {
-#ifdef INET
 		case IPPROTO_IPV4: /* Also IPPROTO_IPIP */
 		{
 			/*
@@ -1138,7 +1121,6 @@ ipsp_parse_headers(struct mbuf *m, int off, u_int8_t proto)
 			off += iph.ip_hl << 2;
 			break;
 		}
-#endif /* INET */
 
 #ifdef INET6
 		case IPPROTO_IPV6:
@@ -1208,13 +1190,11 @@ ipsp_parse_headers(struct mbuf *m, int off, u_int8_t proto)
 
 			s = splsoftnet();
 
-#ifdef INET
 			if (ipv4sa) {
 				su.sin.sin_family = AF_INET;
 				su.sin.sin_len = sizeof(struct sockaddr_in);
 				su.sin.sin_addr = iph.ip_dst;
 			}
-#endif /* INET */
 
 #ifdef INET6
 			if (!ipv4sa) {
@@ -1276,7 +1256,6 @@ ipsp_parse_headers(struct mbuf *m, int off, u_int8_t proto)
 			tdbi->proto = proto; /* AH or ESP */
 			tdbi->rdomain = rtable_l2(m->m_pkthdr.ph_rtableid);
 
-#ifdef INET
 			/* Last network header was IPv4. */
 			if (ipv4sa) {
 				tdbi->dst.sin.sin_family = AF_INET;
@@ -1284,7 +1263,6 @@ ipsp_parse_headers(struct mbuf *m, int off, u_int8_t proto)
 				    sizeof(struct sockaddr_in);
 				tdbi->dst.sin.sin_addr = iph.ip_dst;
 			}
-#endif /* INET */
 
 #ifdef INET6
 			/* Last network header was IPv6. */

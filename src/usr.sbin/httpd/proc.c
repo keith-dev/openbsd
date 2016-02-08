@@ -1,4 +1,4 @@
-/*	$OpenBSD: proc.c,v 1.4 2014/08/04 15:49:28 reyk Exp $	*/
+/*	$OpenBSD: proc.c,v 1.8 2015/01/21 22:21:05 reyk Exp $	*/
 
 /*
  * Copyright (c) 2010 - 2014 Reyk Floeter <reyk@openbsd.org>
@@ -21,13 +21,6 @@
 #include <sys/queue.h>
 #include <sys/socket.h>
 #include <sys/wait.h>
-#include <sys/tree.h>
-
-#include <net/if.h>
-#include <netinet/in_systm.h>
-#include <netinet/in.h>
-#include <netinet/ip.h>
-#include <arpa/inet.h>
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -37,6 +30,7 @@
 #include <signal.h>
 #include <pwd.h>
 #include <event.h>
+#include <imsg.h>
 
 #include "httpd.h"
 
@@ -352,7 +346,7 @@ proc_run(struct privsep *ps, struct privsep_proc *p,
 		fatal("proc_run: cannot fork");
 	case 0:
 		/* Set the process group of the current process */
-		setpgrp(0, getpid());
+		setpgid(0, 0);
 		break;
 	default:
 		return (pid);

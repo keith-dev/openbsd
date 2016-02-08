@@ -1,4 +1,4 @@
-/*	$OpenBSD: file.c,v 1.23 2011/04/15 16:05:34 stsp Exp $ */
+/*	$OpenBSD: file.c,v 1.26 2015/01/16 18:08:15 millert Exp $ */
 /*
  * Copyright (c) Ian F. Darwin 1986-1995.
  * Software written by Ian F. Darwin and others;
@@ -31,7 +31,6 @@
  */
 
 #include <sys/types.h>
-#include <sys/param.h>	/* for MAXPATHLEN */
 #include <sys/stat.h>
 
 #include "file.h"
@@ -40,6 +39,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
+#include <limits.h>
 #include <string.h>
 #ifdef RESTORE_TIME
 # if (__COHERENT__ >= 0x420)
@@ -80,10 +80,6 @@ int getopt_long(int argc, char * const *argv, const char *optstring, const struc
 
 # define USAGE  "Usage: %s [-bcik" SYMLINKFLAG "nNprsvz0] [-e test] [-f namefile] [-F separator] [-m magicfiles] file...\n" \
 		"       %s -C -m magicfiles\n"
-
-#ifndef MAXPATHLEN
-#define	MAXPATHLEN	512
-#endif
 
 private int 		/* Global command-line options 		*/
 	bflag = 0,	/* brief output format	 		*/
@@ -355,7 +351,7 @@ load(const char *m, int flags)
 private void
 unwrap(char *fn)
 {
-	char buf[MAXPATHLEN];
+	char buf[PATH_MAX];
 	FILE *f;
 	int wid = 0, cwid;
 

@@ -1,4 +1,4 @@
-/*	$OpenBSD: pfkdump.c,v 1.35 2014/01/22 09:36:04 markus Exp $	*/
+/*	$OpenBSD: pfkdump.c,v 1.37 2015/01/16 06:39:58 deraadt Exp $	*/
 
 /*
  * Copyright (c) 2003 Markus Friedl.  All rights reserved.
@@ -23,7 +23,7 @@
  * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
-#include <sys/param.h>
+
 #include <sys/socket.h>
 #include <sys/time.h>
 #include <sys/sysctl.h>
@@ -157,8 +157,6 @@ struct idname auth_types[] = {
 	{ SADB_X_AALG_AES128GMAC,	"gmac-aes-128",		NULL },
 	{ SADB_X_AALG_AES192GMAC,	"gmac-aes-192",		NULL },
 	{ SADB_X_AALG_AES256GMAC,	"gmac-aes-256",		NULL },
-	{ SADB_X_AALG_MD5,		"md5",			NULL },
-	{ SADB_X_AALG_SHA1,		"sha1",			NULL },
 	{ 0,				NULL,			NULL }
 };
 

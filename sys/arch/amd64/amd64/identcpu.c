@@ -1,4 +1,4 @@
-/*	$OpenBSD: identcpu.c,v 1.54 2014/07/13 12:11:01 jasper Exp $	*/
+/*	$OpenBSD: identcpu.c,v 1.60 2015/02/08 04:41:48 deraadt Exp $	*/
 /*	$NetBSD: identcpu.c,v 1.1 2003/04/26 18:39:28 fvdl Exp $	*/
 
 /*
@@ -39,7 +39,6 @@
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/kernel.h>
-#include <sys/proc.h>
 #include <sys/sysctl.h>
 #include <machine/cpu.h>
 #include <machine/cpufunc.h>
@@ -130,6 +129,7 @@ const struct {
 	{ CPUIDECX_AVX,		"AVX" },
 	{ CPUIDECX_F16C,	"F16C" },
 	{ CPUIDECX_RDRAND,	"RDRAND" },
+	{ CPUIDECX_HV,		"HV" },
 }, cpu_ecpuid_ecxfeatures[] = {
 	{ CPUIDECX_LAHF,	"LAHF" },
 	{ CPUIDECX_CMPLEG,	"CMPLEG" },
@@ -180,12 +180,16 @@ void	intelcore_update_sensor(void *args);
 /*
  * Temperature read on the CPU is relative to the maximum
  * temperature supported by the CPU, Tj(Max).
- * Poorly documented, refer to:
- * http://softwarecommunity.intel.com/isn/Community/
- * en-US/forums/thread/30228638.aspx
- * Basically, depending on a bit in one msr, the max is either 85 or 100.
- * Then we subtract the temperature portion of thermal status from
- * max to get current temperature.
+ * Refer to:
+ * 64-ia-32-architectures-software-developer-vol-3c-part-3-manual.pdf
+ * Section 35 and
+ * http://www.intel.com/content/dam/www/public/us/en/documents/
+ * white-papers/cpu-monitoring-dts-peci-paper.pdf
+ *
+ * The temperature on Intel CPUs can be between 70 and 105 degC, since
+ * Westmere we can read the TJmax from the die. For older CPUs we have
+ * to guess or use undocumented MSRs. Then we subtract the temperature
+ * portion of thermal status from max to get current temperature.
  */
 void
 intelcore_update_sensor(void *args)
@@ -195,9 +199,21 @@ intelcore_update_sensor(void *args)
 	int max = 100;
 
 	/* Only some Core family chips have MSR_TEMPERATURE_TARGET. */
-	if (ci->ci_model == 0xe &&
-	    (rdmsr(MSR_TEMPERATURE_TARGET) & MSR_TEMPERATURE_TARGET_LOW_BIT))
+	if (ci->ci_model == 0x0e &&
+	    (rdmsr(MSR_TEMPERATURE_TARGET_UNDOCUMENTED) &
+	     MSR_TEMPERATURE_TARGET_LOW_BIT_UNDOCUMENTED))
 		max = 85;
+
+	/*
+	 * Newer CPUs can tell you what their max temperature is.
+	 * See: '64-ia-32-architectures-software-developer-
+	 * vol-3c-part-3-manual.pdf'
+	 */
+	if (ci->ci_model > 0x17 && ci->ci_model != 0x1c &&
+	    ci->ci_model != 0x26 && ci->ci_model != 0x27 &&
+	    ci->ci_model != 0x35 && ci->ci_model != 0x36)
+		max = MSR_TEMPERATURE_TARGET_TJMAX(
+		    rdmsr(MSR_TEMPERATURE_TARGET));
 
 	msr = rdmsr(MSR_THERM_STATUS);
 	if (msr & MSR_THERM_STATUS_VALID_BIT) {
@@ -400,7 +416,7 @@ identifycpu(struct cpu_info *ci)
 		ci->ci_feature_flags |= (ci->ci_feature_eflags & CPUID_NXE);
 		if (ci->ci_flags & CPUF_PRIMARY)
 			ecpu_ecxfeature = ecx;
-		/* Let cpu_fature be the common bits */
+		/* Let cpu_feature be the common bits */
 		cpu_feature &= ci->ci_feature_flags;
 	}
 
@@ -409,7 +425,7 @@ identifycpu(struct cpu_info *ci)
 	CPUID(0x80000004, brand[8], brand[9], brand[10], brand[11]);
 	strlcpy(mycpu_model, (char *)brand, sizeof(mycpu_model));
 
-	/* Remove leading and duplicated spaces from mycpu_model */
+	/* Remove leading, trailing and duplicated spaces from mycpu_model */
 	brandstr_from = brandstr_to = mycpu_model;
 	skipspace = 1;
 	while (*brandstr_from != '\0') {
@@ -421,6 +437,8 @@ identifycpu(struct cpu_info *ci)
 			skipspace = 1;
 		brandstr_from++;
 	}
+	if (skipspace && brandstr_to > mycpu_model)
+		brandstr_to--;
 	*brandstr_to = '\0';
 
 	if (mycpu_model[0] == 0)
@@ -544,7 +562,8 @@ identifycpu(struct cpu_info *ci)
 		ci->ci_cflushsz = ((cflushsz >> 8) & 0xff) * 8;
 	}
 
-	if (!strcmp(cpu_vendor, "GenuineIntel") && cpuid_level >= 0x06 ) {
+	if (CPU_IS_PRIMARY(ci) && !strcmp(cpu_vendor, "GenuineIntel") &&
+	    cpuid_level >= 0x06 ) {
 		CPUID(0x06, val, dummy, dummy, dummy);
 		if (val & 0x1) {
 			strlcpy(ci->ci_sensordev.xname, ci->ci_dev->dv_xname,
@@ -561,7 +580,7 @@ identifycpu(struct cpu_info *ci)
 	if (!strcmp(cpu_vendor, "AuthenticAMD"))
 		amd64_errata(ci);
 
-	if (!strcmp(cpu_vendor, "CentaurHauls")) {
+	if (CPU_IS_PRIMARY(ci) && !strcmp(cpu_vendor, "CentaurHauls")) {
 		ci->cpu_setup = via_nano_setup;
 #ifndef SMALL_KERNEL
 		strlcpy(ci->ci_sensordev.xname, ci->ci_dev->dv_xname,

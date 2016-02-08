@@ -1,4 +1,4 @@
-/* $OpenBSD: xmalloc.c,v 1.9 2009/06/07 08:39:13 ray Exp $ */
+/* $OpenBSD: xmalloc.c,v 1.11 2015/02/05 12:59:57 millert Exp $ */
 /*
  * Author: Tatu Ylonen <ylo@cs.hut.fi>
  * Copyright (c) 1995 Tatu Ylonen <ylo@cs.hut.fi>, Espoo, Finland
@@ -13,7 +13,7 @@
  * called by a name other than "ssh" or "Secure Shell".
  */
 
-#include <limits.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -51,7 +51,7 @@ xcalloc(size_t nmemb, size_t size)
 }
 
 void *
-xrealloc(void *ptr, size_t nmemb, size_t size)
+xreallocarray(void *ptr, size_t nmemb, size_t size)
 {
 	void *new_ptr;
 	size_t new_size = nmemb * size;
@@ -60,10 +60,7 @@ xrealloc(void *ptr, size_t nmemb, size_t size)
 		fatal("xrealloc: zero size");
 	if (SIZE_MAX / nmemb < size)
 		fatal("xrealloc: nmemb * size > SIZE_MAX");
-	if (ptr == NULL)
-		new_ptr = malloc(new_size);
-	else
-		new_ptr = realloc(ptr, new_size);
+	new_ptr = realloc(ptr, new_size);
 	if (new_ptr == NULL)
 		fatal("xrealloc: out of memory (new_size %lu bytes)",
 		    (u_long) new_size);

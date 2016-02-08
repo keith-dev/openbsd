@@ -1,25 +1,25 @@
-/* $OpenBSD: ssl_cert.c,v 1.41 2014/07/10 08:25:00 guenther Exp $ */
+/* $OpenBSD: ssl_cert.c,v 1.49 2014/12/14 15:30:50 jsing Exp $ */
 /* Copyright (C) 1995-1998 Eric Young (eay@cryptsoft.com)
  * All rights reserved.
  *
  * This package is an SSL implementation written
  * by Eric Young (eay@cryptsoft.com).
  * The implementation was written so as to conform with Netscapes SSL.
- * 
+ *
  * This library is free for commercial and non-commercial use as long as
  * the following conditions are aheared to.  The following conditions
  * apply to all code found in this distribution, be it the RC4, RSA,
  * lhash, DES, etc., code; not just the SSL code.  The SSL documentation
  * included with this distribution is covered by the same copyright terms
  * except that the holder is Tim Hudson (tjh@cryptsoft.com).
- * 
+ *
  * Copyright remains Eric Young's, and as such any Copyright notices in
  * the code are not to be removed.
  * If this package is used in a product, Eric Young should be given attribution
  * as the author of the parts of the library used.
  * This can be in the form of a textual message at program startup or
  * in documentation (online or textual) provided with the package.
- * 
+ *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
  * are met:
@@ -34,10 +34,10 @@
  *     Eric Young (eay@cryptsoft.com)"
  *    The word 'cryptographic' can be left out if the rouines from the library
  *    being used are not cryptographic related :-).
- * 4. If you include any Windows specific code (or a derivative thereof) from 
+ * 4. If you include any Windows specific code (or a derivative thereof) from
  *    the apps directory (application code) you must include an acknowledgement:
  *    "This product includes software written by Tim Hudson (tjh@cryptsoft.com)"
- * 
+ *
  * THIS SOFTWARE IS PROVIDED BY ERIC YOUNG ``AS IS'' AND
  * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
  * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
@@ -49,7 +49,7 @@
  * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
- * 
+ *
  * The licence and distribution terms for any publically available version or
  * derivative of this code cannot be changed.  i.e. this code cannot simply be
  * copied and put under another distribution licence
@@ -63,7 +63,7 @@
  * are met:
  *
  * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer. 
+ *    notice, this list of conditions and the following disclaimer.
  *
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in
@@ -110,23 +110,24 @@
  */
 /* ====================================================================
  * Copyright 2002 Sun Microsystems, Inc. ALL RIGHTS RESERVED.
- * ECC cipher suite support in OpenSSL originally developed by 
+ * ECC cipher suite support in OpenSSL originally developed by
  * SUN MICROSYSTEMS, INC., and contributed to the OpenSSL project.
  */
 
 #include <sys/types.h>
 
+#include <dirent.h>
 #include <stdio.h>
 #include <unistd.h>
-#include <dirent.h>
 
-#include <openssl/opensslconf.h>
-#include <openssl/objects.h>
 #include <openssl/bio.h>
+#include <openssl/bn.h>
+#include <openssl/dh.h>
+#include <openssl/objects.h>
+#include <openssl/opensslconf.h>
 #include <openssl/pem.h>
 #include <openssl/x509v3.h>
-#include <openssl/dh.h>
-#include <openssl/bn.h>
+
 #include "ssl_locl.h"
 
 int
@@ -165,6 +166,9 @@ ssl_cert_set_default_md(CERT *cert)
 	cert->pkeys[SSL_PKEY_RSA_SIGN].digest = EVP_sha1();
 	cert->pkeys[SSL_PKEY_RSA_ENC].digest = EVP_sha1();
 	cert->pkeys[SSL_PKEY_ECC].digest = EVP_sha1();
+#ifndef OPENSSL_NO_GOST
+	cert->pkeys[SSL_PKEY_GOST01].digest = EVP_gostr341194();
+#endif
 }
 
 CERT *
@@ -205,12 +209,6 @@ ssl_cert_dup(CERT *cert)
 	ret->mask_k = cert->mask_k;
 	ret->mask_a = cert->mask_a;
 
-	if (cert->rsa_tmp != NULL) {
-		RSA_up_ref(cert->rsa_tmp);
-		ret->rsa_tmp = cert->rsa_tmp;
-	}
-	ret->rsa_tmp_cb = cert->rsa_tmp_cb;
-
 	if (cert->dh_tmp != NULL) {
 		ret->dh_tmp = DHparams_dup(cert->dh_tmp);
 		if (ret->dh_tmp == NULL) {
@@ -235,6 +233,7 @@ ssl_cert_dup(CERT *cert)
 		}
 	}
 	ret->dh_tmp_cb = cert->dh_tmp_cb;
+	ret->dh_tmp_auto = cert->dh_tmp_auto;
 
 	if (cert->ecdh_tmp) {
 		ret->ecdh_tmp = EC_KEY_dup(cert->ecdh_tmp);
@@ -244,6 +243,7 @@ ssl_cert_dup(CERT *cert)
 		}
 	}
 	ret->ecdh_tmp_cb = cert->ecdh_tmp_cb;
+	ret->ecdh_tmp_auto = cert->ecdh_tmp_auto;
 
 	for (i = 0; i < SSL_PKEY_NUM; i++) {
 		if (cert->pkeys[i].x509 != NULL) {
@@ -304,7 +304,6 @@ ssl_cert_dup(CERT *cert)
 	return (ret);
 
 err:
-	RSA_free(ret->rsa_tmp);
 	DH_free(ret->dh_tmp);
 	EC_KEY_free(ret->ecdh_tmp);
 
@@ -330,7 +329,6 @@ ssl_cert_free(CERT *c)
 	if (i > 0)
 		return;
 
-	RSA_free(c->rsa_tmp);
 	DH_free(c->dh_tmp);
 	EC_KEY_free(c->ecdh_tmp);
 
@@ -407,7 +405,6 @@ ssl_sess_cert_free(SESS_CERT *sc)
 			X509_free(sc->peer_pkeys[i].x509);
 	}
 
-	RSA_free(sc->peer_rsa_tmp);
 	DH_free(sc->peer_dh_tmp);
 	EC_KEY_free(sc->peer_ecdh_tmp);
 

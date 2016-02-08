@@ -1,4 +1,4 @@
-/*	$OpenBSD: labelmapping.c,v 1.28 2013/10/17 17:52:20 renato Exp $ */
+/*	$OpenBSD: labelmapping.c,v 1.31 2015/02/09 11:53:25 claudio Exp $ */
 
 /*
  * Copyright (c) 2009 Michele Marchetto <michele@openbsd.org>
@@ -21,7 +21,6 @@
 #include <sys/uio.h>
 
 #include <netinet/in.h>
-#include <netinet/in_systm.h>
 #include <netinet/ip.h>
 #include <arpa/inet.h>
 #include <net/if_dl.h>
@@ -122,7 +121,7 @@ recv_labelmessage(struct nbr *nbr, char *buf, u_int16_t len, u_int16_t type)
 {
 	struct ldp_msg		 	 lm;
 	struct tlv			 ft;
-	u_int32_t			 label, reqid;
+	u_int32_t			 label, reqid = 0;
 	u_int8_t			 flags = 0;
 
 	int				 feclen, lbllen, tlen;
@@ -213,6 +212,7 @@ recv_labelmessage(struct nbr *nbr, char *buf, u_int16_t len, u_int16_t type)
 	/* Optional Parameters */
 	while (len > 0) {
 		struct tlv 	tlv;
+		u_int32_t reqbuf, labelbuf;
 
 		if (len < sizeof(tlv)) {
 			session_shutdown(nbr, S_BAD_TLV_LEN, lm.msgid,
@@ -236,7 +236,8 @@ recv_labelmessage(struct nbr *nbr, char *buf, u_int16_t len, u_int16_t type)
 				}
 
 				flags |= F_MAP_REQ_ID;
-				reqid = ntohl(*(u_int32_t *)buf);
+				memcpy(&reqbuf, buf, sizeof(reqbuf));
+				reqid = ntohl(reqbuf);
 				break;
 			default:
 				/* ignore */
@@ -257,7 +258,8 @@ recv_labelmessage(struct nbr *nbr, char *buf, u_int16_t len, u_int16_t type)
 					goto err;
 				}
 
-				label = ntohl(*(u_int32_t *)buf);
+				memcpy(&labelbuf, buf, sizeof(labelbuf));
+				label = ntohl(labelbuf);
 				flags |= F_MAP_OPTLABEL;
 				break;
 			default:

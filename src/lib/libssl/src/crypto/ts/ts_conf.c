@@ -1,4 +1,4 @@
-/* $OpenBSD: ts_conf.c,v 1.7 2014/07/11 08:44:49 jsing Exp $ */
+/* $OpenBSD: ts_conf.c,v 1.9 2015/02/11 03:19:37 doug Exp $ */
 /* Written by Zoltan Glozik (zglozik@stones.com) for the OpenSSL
  * project 2002.
  */
@@ -61,6 +61,7 @@
 #include <openssl/opensslconf.h>
 
 #include <openssl/crypto.h>
+#include <openssl/err.h>
 #include <openssl/pem.h>
 #include <openssl/ts.h>
 
@@ -110,7 +111,8 @@ end:
 	return x;
 }
 
-STACK_OF(X509) *TS_CONF_load_certs(const char *file)
+STACK_OF(X509) *
+TS_CONF_load_certs(const char *file)
 {
 	BIO *certs = NULL;
 	STACK_OF(X509) *othercerts = NULL;
@@ -126,7 +128,11 @@ STACK_OF(X509) *TS_CONF_load_certs(const char *file)
 	for (i = 0; i < sk_X509_INFO_num(allcerts); i++) {
 		X509_INFO *xi = sk_X509_INFO_value(allcerts, i);
 		if (xi->x509) {
-			sk_X509_push(othercerts, xi->x509);
+			if (sk_X509_push(othercerts, xi->x509) == 0) {
+				sk_X509_pop_free(othercerts, X509_free);
+				othercerts = NULL;
+				goto end;
+			}
 			xi->x509 = NULL;
 		}
 	}

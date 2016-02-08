@@ -1,4 +1,4 @@
-/*	$OpenBSD: if.c,v 1.68 2014/06/23 03:46:17 guenther Exp $	*/
+/*	$OpenBSD: if.c,v 1.73 2015/02/12 13:06:47 sthen Exp $	*/
 /*	$NetBSD: if.c,v 1.16.4.2 1996/06/07 21:46:46 thorpej Exp $	*/
 
 /*
@@ -30,7 +30,7 @@
  * SUCH DAMAGE.
  */
 
-#include <sys/param.h>
+#include <sys/param.h>	/* roundup() */
 #include <sys/types.h>
 #include <sys/ioctl.h>
 #include <sys/protosw.h>
@@ -38,7 +38,6 @@
 #include <sys/sysctl.h>
 
 #include <net/if.h>
-#include <net/if_var.h>
 #include <net/if_dl.h>
 #include <net/if_types.h>
 #include <net/route.h>
@@ -75,7 +74,7 @@ intpr(int interval, int repeatcount)
 	struct if_msghdr ifm;
 	int mib[6] = { CTL_NET, PF_ROUTE, 0, 0, NET_RT_IFLIST, 0 };
 	char name[IFNAMSIZ + 1];	/* + 1 for the '*' */
-	char *buf, *next, *lim, *cp;
+	char *buf = NULL, *next, *lim, *cp;
 	struct rt_msghdr *rtm;
 	struct ifa_msghdr *ifam;
 	struct if_data *ifd;
@@ -89,12 +88,7 @@ intpr(int interval, int repeatcount)
 		return;
 	}
 
-	if (sysctl(mib, 6, NULL, &len, NULL, 0) == -1)
-		err(1, "sysctl");
-	if ((buf = malloc(len)) == NULL)
-		err(1, NULL);
-	if (sysctl(mib, 6, buf, &len, NULL, 0) == -1)
-		err(1, "sysctl");
+	len = get_sysctl(mib, 6, &buf);
 
 	printf("%-7.7s %-5.5s %-11.11s %-17.17s ",
 	    "Name", "Mtu", "Network", "Address");
@@ -209,20 +203,6 @@ print_addr(struct sockaddr *sa, struct sockaddr **rtinfo, struct if_data *ifd)
 			n = 17;
 		printf("%-*.*s ", n, n, cp);
 
-#if 0
-		if (aflag) {
-			u_long multiaddr;
-			struct in_multi inm;
-
-			multiaddr = (u_long)LIST_FIRST(&ifaddr.in.ia_multiaddrs);
-			while (multiaddr != 0) {
-				kread(multiaddr, &inm, sizeof inm);
-				printf("\n%25s %-17.17s ", "",
-				    routename4(inm.inm_addr.s_addr));
-				multiaddr = (u_long)LIST_NEXT(&inm, inm_list);
-			}
-		}
-#endif
 		break;
 	case AF_INET6:
 		sin6 = (struct sockaddr_in6 *)sa;
@@ -248,40 +228,6 @@ print_addr(struct sockaddr *sa, struct sockaddr **rtinfo, struct if_data *ifd)
 		else
 			n = 17;
 		printf("%-*.*s ", n, n, cp);
-#if 0
-		if (aflag) {
-			u_long multiaddr;
-			struct in6_multi inm;
-			struct sockaddr_in6 m6;
-
-			multiaddr = (u_long)LIST_FIRST(&ifaddr.in6.ia6_multiaddrs);
-			while (multiaddr != 0) {
-				kread(multiaddr, &inm, sizeof inm);
-				memset(&m6, 0, sizeof(m6));
-				m6.sin6_len = sizeof(struct sockaddr_in6);
-				m6.sin6_family = AF_INET6;
-				m6.sin6_addr = inm.in6m_addr;
-#ifdef __KAME__
-				if (IN6_IS_ADDR_MC_LINKLOCAL(&m6.sin6_addr) ||
-				    IN6_IS_ADDR_MC_INTFACELOCAL(&m6.sin6_addr)) {
-					m6.sin6_scope_id =
-					    ntohs(*(u_int16_t *)
-					    &m6.sin6_addr.s6_addr[2]);
-					m6.sin6_addr.s6_addr[2] = 0;
-					m6.sin6_addr.s6_addr[3] = 0;
-				}
-#endif
-				cp = routename6(&m6);
-				if (vflag)
-					n = strlen(cp) < 17 ? 17 : strlen(cp);
-				else
-					n = 17;
-				printf("\n%25s %-*.*s ", "",
-				    n, n, cp);
-				multiaddr = (u_long)LIST_NEXT(&inm, in6m_entry);
-			}
-		}
-#endif
 		break;
 	case AF_LINK:
 		sdl = (struct sockaddr_dl *)sa;
@@ -557,18 +503,13 @@ fetchifs(void)
 	struct if_data *ifd;
 	struct sockaddr *sa, *rti_info[RTAX_MAX];
 	struct sockaddr_dl *sdl;
-	char *buf, *next, *lim;
+	char *buf = NULL, *next, *lim;
 	char name[IFNAMSIZ];
 	size_t len;
 	int takeit = 0;
 	int foundone = 0;
 
-	if (sysctl(mib, 6, NULL, &len, NULL, 0) == -1)
-		err(1, "sysctl");
-	if ((buf = malloc(len)) == NULL)
-		err(1, NULL);
-	if (sysctl(mib, 6, buf, &len, NULL, 0) == -1)
-		err(1, "sysctl");
+	len = get_sysctl(mib, 6, &buf);
 
 	memset(&ip_cur, 0, sizeof(ip_cur));
 	lim = buf + len;

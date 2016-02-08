@@ -1,4 +1,4 @@
-/*	$OpenBSD: mta_session.c,v 1.68 2014/07/04 15:24:46 eric Exp $	*/
+/*	$OpenBSD: mta_session.c,v 1.71 2015/01/20 17:37:54 deraadt Exp $	*/
 
 /*
  * Copyright (c) 2008 Pierre-Yves Ritschard <pyr@openbsd.org>
@@ -35,6 +35,7 @@
 #include <openssl/ssl.h>
 #include <pwd.h>
 #include <resolv.h>
+#include <limits.h>
 #include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -583,8 +584,8 @@ mta_enter_state(struct mta_session *s, int newstate)
 	size_t			 envid_sz;
 	int			 oldstate;
 	ssize_t			 q;
-	char			 ibuf[SMTPD_MAXLINESIZE];
-	char			 obuf[SMTPD_MAXLINESIZE];
+	char			 ibuf[LINE_MAX];
+	char			 obuf[LINE_MAX];
 	int			 offset;
 
     again:
@@ -874,7 +875,7 @@ mta_response(struct mta_session *s, char *line)
 	struct sockaddr		*sa;
 	const char		*domain;
 	socklen_t		 sa_len;
-	char			 buf[SMTPD_MAXLINESIZE];
+	char			 buf[LINE_MAX];
 	int			 delivery;
 
 	switch (s->state) {
@@ -1192,7 +1193,7 @@ mta_io(struct io *io, int evt)
 	    nextline:
 		line = iobuf_getline(&s->iobuf, &len);
 		if (line == NULL) {
-			if (iobuf_len(&s->iobuf) >= SMTPD_MAXLINESIZE) {
+			if (iobuf_len(&s->iobuf) >= LINE_MAX) {
 				mta_error(s, "Input too long");
 				mta_free(s);
 				return;
@@ -1307,6 +1308,22 @@ mta_io(struct io *io, int evt)
 		mta_free(s);
 		break;
 
+	case IO_TLSERROR:
+		log_debug("debug: mta: %p: TLS IO error: %s", s, io->error);
+		if (!(s->flags & (MTA_FORCE_TLS|MTA_FORCE_ANYSSL))) {
+			/* error in non-strict SSL negotiation, downgrade to plain */
+			log_info("smtp-out: TLS Error on session %016"PRIx64
+			    ": TLS failed, "
+			    "downgrading to plain", s->id);
+			s->flags &= ~MTA_TLS;
+			s->flags |= MTA_DOWNGRADE_PLAIN;
+			mta_connect(s);
+			break;
+		}
+		mta_error(s, "IO Error: %s", io->error);
+		mta_free(s);
+		break;
+
 	case IO_DISCONNECTED:
 		log_debug("debug: mta: %p: disconnected in state %s",
 		    s, mta_strstate(s->state));
@@ -1380,7 +1397,7 @@ mta_flush_task(struct mta_session *s, int delivery, const char *error, size_t co
 	int cache)
 {
 	struct mta_envelope	*e;
-	char			 relay[SMTPD_MAXLINESIZE];
+	char			 relay[LINE_MAX];
 	size_t			 n;
 	struct sockaddr_storage	 ss;
 	struct sockaddr		*sa;

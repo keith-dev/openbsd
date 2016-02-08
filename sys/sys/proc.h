@@ -1,4 +1,4 @@
-/*	$OpenBSD: proc.h,v 1.190 2014/07/13 16:41:21 claudio Exp $	*/
+/*	$OpenBSD: proc.h,v 1.199 2015/02/10 05:28:18 guenther Exp $	*/
 /*	$NetBSD: proc.h,v 1.44 1996/04/22 01:23:21 christos Exp $	*/
 
 /*-
@@ -42,6 +42,7 @@
 
 #include <machine/proc.h>		/* Machine-dependent proc substruct. */
 #include <sys/selinfo.h>		/* For struct selinfo */
+#include <sys/syslimits.h>		/* For LOGIN_NAME_MAX */
 #include <sys/queue.h>
 #include <sys/timeout.h>		/* For struct timeout */
 #include <sys/event.h>			/* For struct klist */
@@ -62,7 +63,7 @@ struct	session {
 	struct	process *s_leader;	/* Session leader. */
 	struct	vnode *s_ttyvp;		/* Vnode of controlling terminal. */
 	struct	tty *s_ttyp;		/* Controlling terminal. */
-	char	s_login[MAXLOGNAME];	/* Setlogin() name. */
+	char	s_login[LOGIN_NAME_MAX];	/* Setlogin() name. */
 };
 
 /*
@@ -89,7 +90,7 @@ struct	emul {
 	char	e_name[8];		/* Symbolic name */
 	int	*e_errno;		/* Errno array */
 					/* Signal sending function */
-	void	(*e_sendsig)(sig_t, int, int, u_long, int, union sigval);
+	void	(*e_sendsig)(void (*)(int), int, int, u_long, int, union sigval);
 	int	e_nosys;		/* Offset of the nosys() syscall */
 	int	e_nsysent;		/* Number of system call entries */
 	struct sysent *e_sysent;	/* System call array */
@@ -198,6 +199,8 @@ struct process {
 	struct	plimit *ps_limit;	/* Process limits. */
 	struct	pgrp *ps_pgrp;		/* Pointer to process group. */
 	struct	emul *ps_emul;		/* Emulation information */
+	vaddr_t	ps_strings;		/* User pointers to argv/env */
+	vaddr_t	ps_stackgap;		/* User pointer to the "stackgap" */
 	vaddr_t	ps_sigcode;		/* User pointer to the signal code */
 	u_int	ps_rtableid;		/* Process routing table/domain. */
 	char	ps_nice;		/* Process "nice" value. */
@@ -250,10 +253,11 @@ struct process {
 #define	PS_NOBROADCASTKILL 0x00080000	/* Process excluded from kill -1. */
 
 #define	PS_BITS \
-    ("\20\01CONTROLT\02EXEC\03INEXEC\04EXITING\05SUGID" \
-     "\06SUGIDEXEC\07PPWAIT\010ISPWAIT\011PROFIL\012TRACED" \
-     "\013WAITED\014COREDUMP\015SINGLEEXIT\016SINGLEUNWIND" \
-     "\017NOZOMBIE\020STOPPED\021SYSTEM\022EMBRYO\023ZOMBIE\024NOBROADCASTKILL")
+    ("\20" "\01CONTROLT" "\02EXEC" "\03INEXEC" "\04EXITING" "\05SUGID" \
+     "\06SUGIDEXEC" "\07PPWAIT" "\010ISPWAIT" "\011PROFIL" "\012TRACED" \
+     "\013WAITED" "\014COREDUMP" "\015SINGLEEXIT" "\016SINGLEUNWIND" \
+     "\017NOZOMBIE" "\020STOPPED" "\021SYSTEM" "\022EMBRYO" "\023ZOMBIE" \
+     "\024NOBROADCASTKILL")
 
 
 struct proc {
@@ -281,7 +285,6 @@ struct proc {
 #define	p_startzero	p_dupfd
 	int	p_dupfd;	 /* Sideways return value from filedescopen. XXX */
 
-	int	p_sigwait;	/* signal handled by sigwait() */
 	long 	p_thrslpid;	/* for thrsleep syscall */
 
 	/* scheduling */
@@ -306,7 +309,6 @@ struct proc {
 	void	*p_emuldata;		/* Per-process emulation data, or */
 					/* NULL. Malloc type M_EMULDATA */
 	int	 p_siglist;		/* Signals arrived but not delivered. */
-	sigset_t p_sigdivert;		/* Signals to be diverted to thread. */
 
 /* End area that is zeroed on creation. */
 #define	p_endzero	p_startcopy
@@ -363,6 +365,7 @@ struct proc {
 #define	P_PROFPEND	0x000002	/* SIGPROF needs to be posted */
 #define	P_ALRMPEND	0x000004	/* SIGVTALRM needs to be posted */
 #define	P_SIGSUSPEND	0x000008	/* Need to restore before-suspend mask*/
+#define	P_CANTSLEEP	0x000010	/* insomniac thread */
 #define	P_SELECT	0x000040	/* Selecting; wakeup/waiting danger. */
 #define	P_SINTR		0x000080	/* Sleep is interruptible. */
 #define	P_SYSTEM	0x000200	/* No sigs, stats or swapping. */
@@ -378,11 +381,10 @@ struct proc {
 #define P_CPUPEG	0x40000000	/* Do not move to another cpu. */
 
 #define	P_BITS \
-    ("\20\01INKTR\02PROFPEND\03ALRMPEND\04SIGSUSPEND\07SELECT" \
-     "\010SINTR\012SYSTEM" \
-     "\013TIMEOUT\016WEXIT\020OWEUPC\024SUSPSINGLE" \
-     "\027SYSTRACE\030CONTINUED\033THREAD" \
-     "\034SUSPSIG\035SOFTDEP\037CPUPEG")
+    ("\20" "\01INKTR" "\02PROFPEND" "\03ALRMPEND" "\04SIGSUSPEND" \
+     "\05CANTSLEEP" "\07SELECT" "\010SINTR" "\012SYSTEM" "\013TIMEOUT" \
+     "\016WEXIT" "\020OWEUPC" "\024SUSPSINGLE" "\027SYSTRACE" \
+     "\030CONTINUED" "\033THREAD" "\034SUSPSIG" "\035SOFTDEP" "\037CPUPEG")
 
 #define	THREAD_PID_OFFSET	1000000
 
@@ -491,6 +493,7 @@ void	exit2(struct proc *);
 int	dowait4(struct proc *, pid_t, int *, int, struct rusage *,
 	    register_t *);
 void	cpu_exit(struct proc *);
+void	process_initialize(struct process *, struct proc *);
 int	fork1(struct proc *, int, void *, pid_t *, void (*)(void *),
 	    void *, register_t *, struct proc **);
 int	groupmember(gid_t, struct ucred *);

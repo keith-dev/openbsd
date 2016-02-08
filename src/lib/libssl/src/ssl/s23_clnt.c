@@ -1,4 +1,4 @@
-/* $OpenBSD: s23_clnt.c,v 1.31 2014/07/11 08:17:36 miod Exp $ */
+/* $OpenBSD: s23_clnt.c,v 1.36 2015/02/06 08:30:23 jsing Exp $ */
 /* Copyright (C) 1995-1998 Eric Young (eay@cryptsoft.com)
  * All rights reserved.
  *
@@ -110,11 +110,12 @@
  */
 
 #include <stdio.h>
+
 #include "ssl_locl.h"
+
 #include <openssl/buffer.h>
-#include <openssl/rand.h>
-#include <openssl/objects.h>
 #include <openssl/evp.h>
+#include <openssl/objects.h>
 
 static const SSL_METHOD *ssl23_get_client_method(int ver);
 static int ssl23_client_hello(SSL *s);
@@ -140,7 +141,7 @@ const SSL_METHOD SSLv23_client_method_data = {
 	.ssl_ctrl = ssl3_ctrl,
 	.ssl_ctx_ctrl = ssl3_ctx_ctrl,
 	.get_cipher_by_char = ssl3_get_cipher_by_char,
-	.put_cipher_by_char = ssl23_put_cipher_by_char,
+	.put_cipher_by_char = ssl3_put_cipher_by_char,
 	.ssl_pending = ssl_undefined_const_function,
 	.num_ciphers = ssl3_num_ciphers,
 	.get_cipher = ssl3_get_cipher,
@@ -231,7 +232,10 @@ ssl23_connect(SSL *s)
 				goto end;
 			}
 
-			ssl3_init_finished_mac(s);
+			if (!ssl3_init_finished_mac(s)) {
+				ret = -1;
+				goto end;
+			}
 
 			s->state = SSL23_ST_CW_CLNT_HELLO_A;
 			s->ctx->stats.sess_connect++;
@@ -319,8 +323,7 @@ ssl23_client_hello(SSL *s)
 
 	buf = (unsigned char *)s->init_buf->data;
 	if (s->state == SSL23_ST_CW_CLNT_HELLO_A) {
-		p = s->s3->client_random;
-		RAND_pseudo_bytes(p, SSL3_RANDOM_SIZE);
+		arc4random_buf(s->s3->client_random, SSL3_RANDOM_SIZE);
 
 		if (version == TLS1_2_VERSION) {
 			version_major = TLS1_2_VERSION_MAJOR;
@@ -360,8 +363,7 @@ ssl23_client_hello(SSL *s)
 		*(p++) = 0;
 
 		/* Ciphers supported (using SSL 3.0/TLS 1.0 format) */
-		i = ssl_cipher_list_to_bytes(s, SSL_get_ciphers(s), &(p[2]),
-		    ssl3_put_cipher_by_char);
+		i = ssl_cipher_list_to_bytes(s, SSL_get_ciphers(s), &p[2]);
 		if (i == 0) {
 			SSLerr(SSL_F_SSL23_CLIENT_HELLO,
 			    SSL_R_NO_CIPHERS_AVAILABLE);

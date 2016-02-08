@@ -1,4 +1,4 @@
-/*	$OpenBSD: ca.c,v 1.8 2014/05/04 16:38:19 reyk Exp $	*/
+/*	$OpenBSD: ca.c,v 1.12 2015/01/22 17:42:09 reyk Exp $	*/
 
 /*
  * Copyright (c) 2014 Reyk Floeter <reyk@openbsd.org>
@@ -16,22 +16,16 @@
  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
 
-#include <sys/param.h>
+#include <sys/types.h>
 #include <sys/queue.h>
-#include <sys/socket.h>
 #include <sys/uio.h>
 
-#include <net/if.h>
-#include <netinet/in.h>
-
-#include <limits.h>
-#include <event.h>
-#include <fcntl.h>
 #include <unistd.h>
 #include <string.h>
 #include <stdlib.h>
-#include <errno.h>
+#include <imsg.h>
 
+#include <openssl/bio.h>
 #include <openssl/pem.h>
 #include <openssl/evp.h>
 #include <openssl/rsa.h>
@@ -94,12 +88,12 @@ ca_launch(void)
 	struct relay	*rlay;
 
 	TAILQ_FOREACH(rlay, env->sc_relays, rl_entry) {
-		if ((rlay->rl_conf.flags & (F_SSL|F_SSLCLIENT)) == 0)
+		if ((rlay->rl_conf.flags & (F_TLS|F_TLSCLIENT)) == 0)
 			continue;
 
-		if (rlay->rl_conf.ssl_key_len) {
-			if ((in = BIO_new_mem_buf(rlay->rl_ssl_key,
-			    rlay->rl_conf.ssl_key_len)) == NULL)
+		if (rlay->rl_conf.tls_key_len) {
+			if ((in = BIO_new_mem_buf(rlay->rl_tls_key,
+			    rlay->rl_conf.tls_key_len)) == NULL)
 				fatalx("ca_launch: key");
 
 			if ((pkey = PEM_read_bio_PrivateKey(in,
@@ -107,22 +101,22 @@ ca_launch(void)
 				fatalx("ca_launch: PEM");
 			BIO_free(in);
 
-			rlay->rl_ssl_pkey = pkey;
+			rlay->rl_tls_pkey = pkey;
 
 			if (pkey_add(env, pkey,
-			    rlay->rl_conf.ssl_keyid) == NULL)
-				fatalx("ssl pkey");
+			    rlay->rl_conf.tls_keyid) == NULL)
+				fatalx("tls pkey");
 
-			purge_key(&rlay->rl_ssl_key,
-			    rlay->rl_conf.ssl_key_len);
+			purge_key(&rlay->rl_tls_key,
+			    rlay->rl_conf.tls_key_len);
 		}
-		if (rlay->rl_conf.ssl_cert_len) {
-			purge_key(&rlay->rl_ssl_cert,
-			    rlay->rl_conf.ssl_cert_len);
+		if (rlay->rl_conf.tls_cert_len) {
+			purge_key(&rlay->rl_tls_cert,
+			    rlay->rl_conf.tls_cert_len);
 		}
-		if (rlay->rl_conf.ssl_cakey_len) {
-			if ((in = BIO_new_mem_buf(rlay->rl_ssl_cakey,
-			    rlay->rl_conf.ssl_cakey_len)) == NULL)
+		if (rlay->rl_conf.tls_cakey_len) {
+			if ((in = BIO_new_mem_buf(rlay->rl_tls_cakey,
+			    rlay->rl_conf.tls_cakey_len)) == NULL)
 				fatalx("ca_launch: key");
 
 			if ((pkey = PEM_read_bio_PrivateKey(in,
@@ -130,18 +124,18 @@ ca_launch(void)
 				fatalx("ca_launch: PEM");
 			BIO_free(in);
 
-			rlay->rl_ssl_capkey = pkey;
+			rlay->rl_tls_capkey = pkey;
 
 			if (pkey_add(env, pkey,
-			    rlay->rl_conf.ssl_cakeyid) == NULL)
+			    rlay->rl_conf.tls_cakeyid) == NULL)
 				fatalx("ca pkey");
 
-			purge_key(&rlay->rl_ssl_cakey,
-			    rlay->rl_conf.ssl_cakey_len);
+			purge_key(&rlay->rl_tls_cakey,
+			    rlay->rl_conf.tls_cakey_len);
 		}
-		if (rlay->rl_conf.ssl_cacert_len) {
-			purge_key(&rlay->rl_ssl_cacert,
-			    rlay->rl_conf.ssl_cacert_len);
+		if (rlay->rl_conf.tls_cacert_len) {
+			purge_key(&rlay->rl_tls_cacert,
+			    rlay->rl_conf.tls_cacert_len);
 		}
 	}
 }
@@ -455,8 +449,6 @@ ca_engine_init(struct relayd *x_env)
 	if (rsa_default->flags & RSA_FLAG_SIGN_VER)
 		fatalx("unsupported RSA engine");
 
-	if (rsa_default->rsa_mod_exp == NULL)
-		rsae_method.rsa_mod_exp = NULL;
 	if (rsa_default->rsa_mod_exp == NULL)
 		rsae_method.rsa_mod_exp = NULL;
 	if (rsa_default->bn_mod_exp == NULL)

@@ -1,4 +1,4 @@
-/*	$OpenBSD: util.c,v 1.66 2014/01/29 16:58:21 dcoppa Exp $	*/
+/*	$OpenBSD: util.c,v 1.70 2015/02/09 04:10:50 tedu Exp $	*/
 /*	$NetBSD: util.c,v 1.12 1997/08/18 10:20:27 lukem Exp $	*/
 
 /*-
@@ -75,7 +75,6 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <libgen.h>
-#include <limits.h>
 #include <glob.h>
 #include <pwd.h>
 #include <signal.h>
@@ -88,6 +87,9 @@
 
 #include "ftp_var.h"
 #include "pathnames.h"
+
+#define MINIMUM(a, b)	(((a) < (b)) ? (a) : (b))
+#define MAXIMUM(a, b)	(((a) > (b)) ? (a) : (b))
 
 static void updateprogressmeter(int);
 
@@ -166,11 +168,6 @@ setpeer(int argc, char *argv[])
 		if (autologin)
 			(void)ftp_login(argv[1], NULL, NULL);
 
-#if (defined(unix) || defined(BSD)) && NBBY == 8
-/*
- * this ifdef is to keep someone form "porting" this to an incompatible
- * system and not checking this out. This way they have to think about it.
- */
 		overbose = verbose;
 #ifndef SMALL
 		if (!debug)
@@ -206,14 +203,8 @@ setpeer(int argc, char *argv[])
 				unix_proxy = 0;
 			else
 				unix_server = 0;
-			if (overbose &&
-			    !strncmp(reply_string, "215 TOPS20", 10))
-				fputs(
-"Remember to set tenex mode when transferring binary files from this machine.\n",
-				    ttyout);
 		}
 		verbose = overbose;
-#endif /* unix || BSD */
 	}
 }
 
@@ -223,8 +214,8 @@ setpeer(int argc, char *argv[])
 int
 ftp_login(const char *host, char *user, char *pass)
 {
-	char tmp[80], *acctname = NULL, host_name[MAXHOSTNAMELEN];
-	char anonpass[MAXLOGNAME + 1 + MAXHOSTNAMELEN];	/* "user@hostname" */
+	char tmp[80], *acctname = NULL, host_name[HOST_NAME_MAX+1];
+	char anonpass[LOGIN_NAME_MAX + 1 + HOST_NAME_MAX+1];	/* "user@hostname" */
 	int n, aflag = 0, retry = 0;
 	struct passwd *pw;
 
@@ -375,8 +366,8 @@ another(int *pargc, char ***pargv, const char *prompt)
 char *
 remglob2(char *argv[], int doswitch, char **errbuf, FILE **ftemp, char *type)
 {
-	char temp[MAXPATHLEN], *bufp, *cp, *lmode;
-	static char buf[MAXPATHLEN], **args;
+	char temp[PATH_MAX], *bufp, *cp, *lmode;
+	static char buf[PATH_MAX], **args;
 	int oldverbose, oldhash, fd;
 
 	if (!mflag) {
@@ -687,8 +678,8 @@ remotemodtime(const char *file, int noisy)
 int
 fileindir(const char *file, const char *dir)
 {
-	char	parentdirbuf[MAXPATHLEN], *parentdir;
-	char	realdir[MAXPATHLEN];
+	char	parentdirbuf[PATH_MAX], *parentdir;
+	char	realdir[PATH_MAX];
 	size_t	dirlen;
 
 		 			/* determine parent directory of file */
@@ -787,8 +778,8 @@ progressmeter(int flag, const char *filename)
 		ratio = cursize * 100 / filesize;
 	else
 		ratio = 100;
-	ratio = MAX(ratio, 0);
-	ratio = MIN(ratio, 100);
+	ratio = MAXIMUM(ratio, 0);
+	ratio = MINIMUM(ratio, 100);
 	if (!verbose && flag == -1) {
 		filename = basename(filename);
 		if (filename != NULL)
@@ -944,17 +935,21 @@ ptransfer(int siginfo)
 	meg = 0;
 	if (bs > (1024 * 1024))
 		meg = 1;
+
+	/* XXX floating point printf in signal handler */
 	(void)snprintf(buf, sizeof(buf),
 	    "%lld byte%s %s in %.2f seconds (%.2f %sB/s)\n",
 	    (long long)bytes, bytes == 1 ? "" : "s", direction, elapsed,
 	    bs / (1024.0 * (meg ? 1024.0 : 1.0)), meg ? "M" : "K");
-	if (siginfo && bytes > 0 && elapsed > 0.0 && filesize >= 0
-	    && bytes + restart_point <= filesize) {
+
+	if (siginfo && bytes > 0 && elapsed > 0.0 && filesize >= 0 &&
+	    bytes + restart_point <= filesize) {
 		remaining = (int)((filesize - restart_point) /
-				  (bytes / elapsed) - elapsed);
+		    (bytes / elapsed) - elapsed);
 		hh = remaining / 3600;
 		remaining %= 3600;
-			/* "buf+len(buf) -1" to overwrite \n */
+
+		/* "buf+len(buf) -1" to overwrite \n */
 		snprintf(buf + strlen(buf) - 1, sizeof(buf) - strlen(buf),
 		    "  ETA: %02d:%02d:%02d\n", hh, remaining / 60,
 		    remaining % 60);
@@ -1028,12 +1023,14 @@ setttywidth(int signo)
 void
 alarmtimer(int wait)
 {
+	int save_errno = errno;
 	struct itimerval itv;
 
 	itv.it_value.tv_sec = wait;
 	itv.it_value.tv_usec = 0;
 	itv.it_interval = itv.it_value;
 	setitimer(ITIMER_REAL, &itv, NULL);
+	errno = save_errno;
 }
 
 /*

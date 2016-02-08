@@ -1,4 +1,4 @@
-/*	$OpenBSD: sgec.c,v 1.23 2014/08/06 15:40:40 jsg Exp $	*/
+/*	$OpenBSD: sgec.c,v 1.25 2014/12/22 02:26:54 tedu Exp $	*/
 /*      $NetBSD: sgec.c,v 1.5 2000/06/04 02:14:14 matt Exp $ */
 /*
  * Copyright (c) 1999 Ludd, University of Lule}, Sweden. All rights reserved.
@@ -234,7 +234,7 @@ sgec_attach(sc)
  fail_6:
 	for (i = 0; i < RXDESCS; i++) {
 		if (sc->sc_rxmbuf[i] != NULL) {
-			bus_dmamap_unload(sc->sc_dmat, sc->sc_xmtmap[i]);
+			bus_dmamap_unload(sc->sc_dmat, sc->sc_rcvmap[i]);
 			m_freem(sc->sc_rxmbuf[i]);
 		}
 	}
@@ -464,7 +464,6 @@ sgec_rxintr(struct ze_softc *sc)
 {
 	struct ze_cdata *zc = sc->sc_zedata;
 	struct ifnet *ifp = &sc->sc_if;
-	struct ether_header *eh;
 	struct mbuf *m;
 	u_short rdes0;
 	int len;
@@ -492,7 +491,6 @@ sgec_rxintr(struct ze_softc *sc)
 		if (m != NULL) {
 			m->m_pkthdr.rcvif = ifp;
 			m->m_pkthdr.len = m->m_len = len;
-			eh = mtod(m, struct ether_header *);
 #if NBPFILTER > 0
 			if (ifp->if_bpf)
 				bpf_mtap(ifp->if_bpf, m, BPF_DIRECTION_IN);
@@ -633,12 +631,10 @@ zeioctl(ifp, cmd, data)
 	case SIOCSIFADDR:
 		ifp->if_flags |= IFF_UP;
 		switch(ifa->ifa_addr->sa_family) {
-#ifdef INET
 		case AF_INET:
 			zeinit(sc);
 			arp_ifinit(&sc->sc_ac, ifa);
 			break;
-#endif
 		}
 		break;
 

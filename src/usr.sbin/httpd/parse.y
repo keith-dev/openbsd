@@ -1,7 +1,7 @@
-/*	$OpenBSD: parse.y,v 1.34 2014/08/06 20:29:54 reyk Exp $	*/
+/*	$OpenBSD: parse.y,v 1.65 2015/02/12 04:40:23 jsing Exp $	*/
 
 /*
- * Copyright (c) 2007 - 2014 Reyk Floeter <reyk@openbsd.org>
+ * Copyright (c) 2007 - 2015 Reyk Floeter <reyk@openbsd.org>
  * Copyright (c) 2008 Gilles Chehade <gilles@openbsd.org>
  * Copyright (c) 2006 Pierre-Yves Ritschard <pyr@openbsd.org>
  * Copyright (c) 2004, 2005 Esben Norby <norby@openbsd.org>
@@ -29,21 +29,19 @@
 #include <sys/socket.h>
 #include <sys/stat.h>
 #include <sys/queue.h>
+#include <sys/tree.h>
 #include <sys/ioctl.h>
-#include <sys/hash.h>
+#include <sys/sockio.h>
+#include <sys/time.h>
 
 #include <net/if.h>
-#include <net/pfvar.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
-#include <arpa/nameser.h>
-#include <net/route.h>
 
 #include <ctype.h>
 #include <unistd.h>
 #include <err.h>
 #include <errno.h>
-#include <event.h>
 #include <limits.h>
 #include <stdint.h>
 #include <stdarg.h>
@@ -69,7 +67,9 @@ int		 popfile(void);
 int		 check_file_secrecy(int, const char *);
 int		 yyparse(void);
 int		 yylex(void);
-int		 yyerror(const char *, ...);
+int		 yyerror(const char *, ...)
+    __attribute__((__format__ (printf, 1, 2)))
+    __attribute__((__nonnull__ (1)));
 int		 kw_cmp(const void *, const void *);
 int		 lookup(char *);
 int		 lgetc(int);
@@ -91,6 +91,7 @@ struct httpd		*conf = NULL;
 static int		 errors = 0;
 static int		 loadcfg = 0;
 uint32_t		 last_server_id = 0;
+uint32_t		 last_auth_id = 0;
 
 static struct server	*srv = NULL, *parentsrv = NULL;
 static struct server_config *srv_conf = NULL;
@@ -106,6 +107,8 @@ int		 host_if(const char *, struct addresslist *,
 int		 host(const char *, struct addresslist *,
 		    int, struct portrange *, const char *, int);
 void		 host_free(struct addresslist *);
+struct server	*server_inherit(struct server *, const char *,
+		    struct server_config *);
 int		 getservice(char *);
 int		 is_if_in_group(const char *, const char *);
 
@@ -115,9 +118,10 @@ typedef struct {
 		char			*string;
 		struct timeval		 tv;
 		struct portrange	 port;
+		struct auth		 auth;
 		struct {
 			struct sockaddr_storage	 ss;
-			char			 name[MAXHOSTNAMELEN];
+			char			 name[HOST_NAME_MAX+1];
 		}			 addr;
 	} v;
 	int lineno;
@@ -125,16 +129,19 @@ typedef struct {
 
 %}
 
-%token	ACCESS AUTO BACKLOG BODY BUFFER CERTIFICATE CHROOT CIPHERS COMMON
-%token	COMBINED CONNECTION DIRECTORY ERR FCGI INDEX IP KEY LISTEN LOCATION
-%token	LOG MAXIMUM NO NODELAY ON PORT PREFORK REQUEST REQUESTS ROOT SACK
-%token	SERVER SOCKET SSL STYLE SYSLOG TCP TIMEOUT TYPES
-%token	ERROR INCLUDE
+%token	ACCESS ALIAS AUTO BACKLOG BODY BUFFER CERTIFICATE CHROOT CIPHERS COMMON
+%token	COMBINED CONNECTION DHE DIRECTORY ECDHE ERR FCGI INDEX IP KEY LISTEN
+%token	LOCATION LOG LOGDIR MAXIMUM NO NODELAY ON PORT PREFORK PROTOCOLS
+%token	REQUEST REQUESTS ROOT SACK SERVER SOCKET STRIP STYLE SYSLOG TCP TIMEOUT
+%token	TLS TYPES
+%token	ERROR INCLUDE AUTHENTICATE WITH BLOCK DROP RETURN PASS
 %token	<v.string>	STRING
 %token  <v.number>	NUMBER
 %type	<v.port>	port
-%type	<v.number>	optssl
+%type	<v.number>	opttls
 %type	<v.tv>		timeout
+%type	<v.string>	numberstring optstring
+%type	<v.auth>	authopts
 
 %%
 
@@ -171,8 +178,8 @@ varset		: STRING '=' STRING	{
 		}
 		;
 
-optssl		: /*empty*/	{ $$ = 0; }
-		| SSL		{ $$ = 1; }
+opttls		: /*empty*/	{ $$ = 0; }
+		| TLS		{ $$ = 1; }
 		;
 
 main		: PREFORK NUMBER	{
@@ -180,13 +187,16 @@ main		: PREFORK NUMBER	{
 				break;
 			if ($2 <= 0 || $2 > SERVER_MAXPROC) {
 				yyerror("invalid number of preforked "
-				    "servers: %d", $2);
+				    "servers: %lld", $2);
 				YYERROR;
 			}
 			conf->sc_prefork_server = $2;
 		}
 		| CHROOT STRING		{
 			conf->sc_chroot = $2;
+		}
+		| LOGDIR STRING		{
+			conf->sc_logdir = $2;
 		}
 		;
 
@@ -196,15 +206,6 @@ server		: SERVER STRING		{
 			if (!loadcfg) {
 				free($2);
 				YYACCEPT;
-			}
-
-			TAILQ_FOREACH(s, conf->sc_servers, srv_entry)
-				if (!strcmp(s->srv_conf.name, $2))
-					break;
-			if (s != NULL) {
-				yyerror("server %s defined twice", $2);
-				free($2);
-				YYERROR;
 			}
 
 			if ((s = calloc(1, sizeof (*s))) == NULL)
@@ -229,19 +230,29 @@ server		: SERVER STRING		{
 			strlcpy(s->srv_conf.errorlog, HTTPD_ERROR_LOG,
 			    sizeof(s->srv_conf.errorlog));
 			s->srv_conf.id = ++last_server_id;
+			s->srv_conf.parent_id = s->srv_conf.id;
+			s->srv_s = -1;
 			s->srv_conf.timeout.tv_sec = SERVER_TIMEOUT;
 			s->srv_conf.maxrequests = SERVER_MAXREQUESTS;
 			s->srv_conf.maxrequestbody = SERVER_MAXREQUESTBODY;
 			s->srv_conf.flags |= SRVFLAG_LOG;
 			s->srv_conf.logformat = LOG_FORMAT_COMMON;
-			if ((s->srv_conf.ssl_cert_file =
-			    strdup(HTTPD_SSL_CERT)) == NULL)
+			s->srv_conf.tls_protocols = TLS_PROTOCOLS_ALL;
+			if ((s->srv_conf.tls_cert_file =
+			    strdup(HTTPD_TLS_CERT)) == NULL)
 				fatal("out of memory");
-			if ((s->srv_conf.ssl_key_file =
-			    strdup(HTTPD_SSL_KEY)) == NULL)
+			if ((s->srv_conf.tls_key_file =
+			    strdup(HTTPD_TLS_KEY)) == NULL)
 				fatal("out of memory");
-			strlcpy(s->srv_conf.ssl_ciphers, HTTPD_SSL_CIPHERS,
-			    sizeof(s->srv_conf.ssl_ciphers));
+			strlcpy(s->srv_conf.tls_ciphers,
+			    HTTPD_TLS_CIPHERS,
+			    sizeof(s->srv_conf.tls_ciphers));
+			strlcpy(s->srv_conf.tls_dhe_params,
+			    HTTPD_TLS_DHE_PARAMS,
+			    sizeof(s->srv_conf.tls_dhe_params));
+			strlcpy(s->srv_conf.tls_ecdhe_curve,
+			    HTTPD_TLS_ECDHE_CURVE,
+			    sizeof(s->srv_conf.tls_ecdhe_curve));
 
 			if (last_server_id == INT_MAX) {
 				yyerror("too many servers defined");
@@ -252,18 +263,100 @@ server		: SERVER STRING		{
 			srv_conf = &srv->srv_conf;
 
 			SPLAY_INIT(&srv->srv_clients);
-			TAILQ_INSERT_TAIL(conf->sc_servers, srv, srv_entry);
+			TAILQ_INIT(&srv->srv_hosts);
+
+			TAILQ_INSERT_TAIL(&srv->srv_hosts, srv_conf, entry);
 		} '{' optnl serveropts_l '}'	{
+			struct server		*s = NULL, *sn;
+			struct server_config	*a, *b;
+
+			srv_conf = &srv->srv_conf;
+
+			TAILQ_FOREACH(s, conf->sc_servers, srv_entry) {
+				if ((s->srv_conf.flags &
+				    SRVFLAG_LOCATION) == 0 &&
+				    strcmp(s->srv_conf.name,
+				    srv->srv_conf.name) == 0 &&
+				    s->srv_conf.port == srv->srv_conf.port &&
+				    sockaddr_cmp(
+				    (struct sockaddr *)&s->srv_conf.ss,
+				    (struct sockaddr *)&srv->srv_conf.ss,
+				    s->srv_conf.prefixlen) == 0)
+					break;
+			}
+			if (s != NULL) {
+				yyerror("server \"%s\" defined twice",
+				    srv->srv_conf.name);
+				serverconfig_free(srv_conf);
+				free(srv);
+				YYABORT;
+			}
+
 			if (srv->srv_conf.ss.ss_family == AF_UNSPEC) {
 				yyerror("listen address not specified");
-				free($2);
+				serverconfig_free(srv_conf);
+				free(srv);
 				YYERROR;
 			}
-			if (server_ssl_load_keypair(srv) == -1) {
+
+			if ((srv->srv_conf.flags & SRVFLAG_TLS) &&
+			    srv->srv_conf.tls_protocols == 0) {
+				yyerror("no TLS protocols");
+				free(srv);
+				YYERROR;
+			}
+
+			if (server_tls_load_keypair(srv) == -1) {
 				yyerror("failed to load public/private keys "
 				    "for server %s", srv->srv_conf.name);
+				serverconfig_free(srv_conf);
+				free(srv);
 				YYERROR;
 			}
+
+			DPRINTF("adding server \"%s[%u]\"",
+			    srv->srv_conf.name, srv->srv_conf.id);
+
+			TAILQ_INSERT_TAIL(conf->sc_servers, srv, srv_entry);
+
+			/*
+			 * Add aliases and additional listen addresses as
+			 * individual servers.
+			 */
+			TAILQ_FOREACH(a, &srv->srv_hosts, entry) {
+				/* listen address */
+				if (a->ss.ss_family == AF_UNSPEC)
+					continue;
+				TAILQ_FOREACH(b, &srv->srv_hosts, entry) {
+					/* alias name */
+					if (*b->name == '\0' ||
+					    (b == &srv->srv_conf && b == a))
+						continue;
+
+					if ((sn = server_inherit(srv,
+					    b->name, a)) == NULL) {
+						serverconfig_free(srv_conf);
+						free(srv);
+						YYABORT;
+					}
+
+					DPRINTF("adding server \"%s[%u]\"",
+					    sn->srv_conf.name, sn->srv_conf.id);
+
+					TAILQ_INSERT_TAIL(conf->sc_servers,
+					    sn, srv_entry);
+				}
+			}
+
+			/* Remove temporary aliases */
+			TAILQ_FOREACH_SAFE(a, &srv->srv_hosts, entry, b) {
+				TAILQ_REMOVE(&srv->srv_hosts, a, entry);
+				if (a == &srv->srv_conf)
+					continue;
+				serverconfig_free(a);
+				free(a);
+			}
+
 			srv = NULL;
 			srv_conf = NULL;
 		}
@@ -273,10 +366,10 @@ serveropts_l	: serveropts_l serveroptsl nl
 		| serveroptsl optnl
 		;
 
-serveroptsl	: LISTEN ON STRING optssl port {
+serveroptsl	: LISTEN ON STRING opttls port {
 			struct addresslist	 al;
 			struct address		*h;
-			struct server		*s;
+			struct server_config	*s_conf, *alias = NULL;
 
 			if (parentsrv != NULL) {
 				yyerror("listen %s inside location", $3);
@@ -285,16 +378,14 @@ serveroptsl	: LISTEN ON STRING optssl port {
 			}
 
 			if (srv->srv_conf.ss.ss_family != AF_UNSPEC) {
-				yyerror("listen address already specified");
-				free($3);
-				YYERROR;
+				if ((alias = calloc(1,
+				    sizeof(*alias))) == NULL)
+					fatal("out of memory");
+
+				/* Add as an alias */
+				s_conf = alias;
 			} else
-				s = srv;
-			if ($5.op != PF_OP_EQ) {
-				yyerror("invalid port");
-				free($3);
-				YYERROR;
-			}
+				s_conf = &srv->srv_conf;
 
 			TAILQ_INIT(&al);
 			if (host($3, &al, 1, &$5, NULL, -1) <= 0) {
@@ -304,49 +395,67 @@ serveroptsl	: LISTEN ON STRING optssl port {
 			}
 			free($3);
 			h = TAILQ_FIRST(&al);
-			memcpy(&srv->srv_conf.ss, &h->ss,
-			    sizeof(s->srv_conf.ss));
-			s->srv_conf.port = h->port.val[0];
-			s->srv_conf.prefixlen = h->prefixlen;
+			memcpy(&s_conf->ss, &h->ss, sizeof(s_conf->ss));
+			s_conf->port = h->port.val[0];
+			s_conf->prefixlen = h->prefixlen;
 			host_free(&al);
 
 			if ($4) {
-				s->srv_conf.flags |= SRVFLAG_SSL;
+				s_conf->flags |= SRVFLAG_TLS;
+			}
+
+			if (alias != NULL) {
+				TAILQ_INSERT_TAIL(&srv->srv_hosts,
+				    alias, entry);
 			}
 		}
-		| TCP			{
+		| ALIAS STRING		{
+			struct server_config	*alias;
+
+			if (parentsrv != NULL) {
+				yyerror("alias inside location");
+				free($2);
+				YYERROR;
+			}
+
+			if ((alias = calloc(1, sizeof(*alias))) == NULL)
+				fatal("out of memory");
+
+			if (strlcpy(alias->name, $2, sizeof(alias->name)) >=
+			    sizeof(alias->name)) {
+				yyerror("server alias truncated");
+				free($2);
+				free(alias);
+				YYERROR;
+			}
+			free($2);
+
+			TAILQ_INSERT_TAIL(&srv->srv_hosts, alias, entry);
+		}
+		| tcpip			{
 			if (parentsrv != NULL) {
 				yyerror("tcp flags inside location");
 				YYERROR;
 			}
-		} tcpip
-		| CONNECTION		{
+		}
+		| connection		{
 			if (parentsrv != NULL) {
 				yyerror("connection options inside location");
 				YYERROR;
 			}
-		} connection
-		| SSL			{
-			if (parentsrv != NULL) {
-				yyerror("ssl configuration inside location");
-				YYERROR;
-			}
-		} ssl
-		| ROOT STRING		{
-			if (strlcpy(srv->srv_conf.root, $2,
-			    sizeof(srv->srv_conf.root)) >=
-			    sizeof(srv->srv_conf.root)) {
-				yyerror("document root too long");
-				free($2);
-				YYERROR;
-			}
-			free($2);
-			srv->srv_conf.flags |= SRVFLAG_ROOT;
 		}
-		| DIRECTORY dirflags
-		| DIRECTORY '{' dirflags_l '}'
+		| tls			{
+			if (parentsrv != NULL) {
+				yyerror("tls configuration inside location");
+				YYERROR;
+			}
+		}
+		| root
+		| directory
 		| logformat
 		| fastcgi
+		| authenticate
+		| filter
 		| LOCATION STRING		{
 			struct server	*s;
 
@@ -365,17 +474,6 @@ serveroptsl	: LISTEN ON STRING optssl port {
 			if (!loadcfg) {
 				free($2);
 				YYACCEPT;
-			}
-
-			TAILQ_FOREACH(s, conf->sc_servers, srv_entry)
-				if (strcmp(s->srv_conf.name,
-				    srv->srv_conf.name) == 0 &&
-				    strcmp(s->srv_conf.location, $2) == 0)
-					break;
-			if (s != NULL) {
-				yyerror("location %s defined twice", $2);
-				free($2);
-				YYERROR;
 			}
 
 			if ((s = calloc(1, sizeof (*s))) == NULL)
@@ -399,9 +497,11 @@ serveroptsl	: LISTEN ON STRING optssl port {
 				YYERROR;
 			}
 
+			s->srv_conf.id = ++last_server_id;
 			/* A location entry uses the parent id */
-			s->srv_conf.id = srv->srv_conf.id;
+			s->srv_conf.parent_id = srv->srv_conf.id;
 			s->srv_conf.flags = SRVFLAG_LOCATION;
+			s->srv_s = -1;
 			memcpy(&s->srv_conf.ss, &srv->srv_conf.ss,
 			    sizeof(s->srv_conf.ss));
 			s->srv_conf.port = srv->srv_conf.port;
@@ -416,12 +516,35 @@ serveroptsl	: LISTEN ON STRING optssl port {
 			srv = s;
 			srv_conf = &srv->srv_conf;
 			SPLAY_INIT(&srv->srv_clients);
-			TAILQ_INSERT_TAIL(conf->sc_servers, srv, srv_entry);
 		} '{' optnl serveropts_l '}'	{
+			struct server	*s = NULL;
+
+			TAILQ_FOREACH(s, conf->sc_servers, srv_entry) {
+				if ((s->srv_conf.flags & SRVFLAG_LOCATION) &&
+				    s->srv_conf.id == srv_conf->id &&
+				    strcmp(s->srv_conf.location,
+				    srv_conf->location) == 0)
+					break;
+			}
+			if (s != NULL) {
+				yyerror("location \"%s\" defined twice",
+				    srv->srv_conf.location);
+				serverconfig_free(srv_conf);
+				free(srv);
+				YYABORT;
+			}
+
+			DPRINTF("adding location \"%s\" for \"%s[%u]\"",
+			    srv->srv_conf.location,
+			    srv->srv_conf.name, srv->srv_conf.id);
+
+			TAILQ_INSERT_TAIL(conf->sc_servers, srv, srv_entry);
+
 			srv = parentsrv;
 			srv_conf = &parentsrv->srv_conf;
 			parentsrv = NULL;
 		}
+		| include
 		;
 
 fastcgi		: NO FCGI		{
@@ -435,15 +558,15 @@ fastcgi		: NO FCGI		{
 		| FCGI			{
 			srv_conf->flags &= ~SRVFLAG_NO_FCGI;
 			srv_conf->flags |= SRVFLAG_FCGI;
-		} '{' fcgiflags_l '}'
+		} '{' optnl fcgiflags_l '}'
 		| FCGI			{
 			srv_conf->flags &= ~SRVFLAG_NO_FCGI;
 			srv_conf->flags |= SRVFLAG_FCGI;
 		} fcgiflags
 		;
 
-fcgiflags_l	: fcgiflags comma fcgiflags_l
-		| fcgiflags
+fcgiflags_l	: fcgiflags optcommanl fcgiflags_l
+		| fcgiflags optnl
 		;
 
 fcgiflags	: SOCKET STRING		{
@@ -459,12 +582,12 @@ fcgiflags	: SOCKET STRING		{
 		}
 		;
 
-connection	: '{' conflags_l '}'
-		| conflags
+connection	: CONNECTION '{' optnl conflags_l '}'
+		| CONNECTION conflags
 		;
 
-conflags_l	: conflags comma conflags_l
-		| conflags
+conflags_l	: conflags optcommanl conflags_l
+		| conflags optnl
 		;
 
 conflags	: TIMEOUT timeout		{
@@ -479,31 +602,60 @@ conflags	: TIMEOUT timeout		{
 		}
 		;
 
-ssl		: '{' sslopts_l '}'
-		| sslopts
+tls		: TLS '{' optnl tlsopts_l '}'
+		| TLS tlsopts
 		;
 
-sslopts_l	: sslopts comma sslopts_l
-		| sslopts
+tlsopts_l	: tlsopts optcommanl tlsopts_l
+		| tlsopts optnl
 		;
 
-sslopts		: CERTIFICATE STRING		{
-			free(srv_conf->ssl_cert_file);
-			if ((srv_conf->ssl_cert_file = strdup($2)) == NULL)
+tlsopts		: CERTIFICATE STRING		{
+			free(srv_conf->tls_cert_file);
+			if ((srv_conf->tls_cert_file = strdup($2)) == NULL)
 				fatal("out of memory");
 			free($2);
 		}
 		| KEY STRING			{
-			free(srv_conf->ssl_key_file);
-			if ((srv_conf->ssl_key_file = strdup($2)) == NULL)
+			free(srv_conf->tls_key_file);
+			if ((srv_conf->tls_key_file = strdup($2)) == NULL)
 				fatal("out of memory");
 			free($2);
 		}
 		| CIPHERS STRING		{
-			if (strlcpy(srv_conf->ssl_ciphers, $2,
-			    sizeof(srv_conf->ssl_ciphers)) >=
-			    sizeof(srv_conf->ssl_ciphers)) {
+			if (strlcpy(srv_conf->tls_ciphers, $2,
+			    sizeof(srv_conf->tls_ciphers)) >=
+			    sizeof(srv_conf->tls_ciphers)) {
 				yyerror("ciphers too long");
+				free($2);
+				YYERROR;
+			}
+			free($2);
+		}
+		| DHE STRING			{
+			if (strlcpy(srv_conf->tls_dhe_params, $2,
+			    sizeof(srv_conf->tls_dhe_params)) >=
+			    sizeof(srv_conf->tls_dhe_params)) {
+				yyerror("dhe too long");
+				free($2);
+				YYERROR;
+			}
+			free($2);
+		}
+		| ECDHE STRING			{
+			if (strlcpy(srv_conf->tls_ecdhe_curve, $2,
+			    sizeof(srv_conf->tls_ecdhe_curve)) >=
+			    sizeof(srv_conf->tls_ecdhe_curve)) {
+				yyerror("ecdhe too long");
+				free($2);
+				YYERROR;
+			}
+			free($2);
+		}
+		| PROTOCOLS STRING		{
+			if (tls_config_parse_protocols(
+			    &srv_conf->tls_protocols, $2) != 0) {
+				yyerror("invalid TLS protocols");
 				free($2);
 				YYERROR;
 			}
@@ -511,8 +663,96 @@ sslopts		: CERTIFICATE STRING		{
 		}
 		;
 
-dirflags_l	: dirflags comma dirflags_l
-		| dirflags
+root		: ROOT rootflags
+		| ROOT '{' optnl rootflags_l '}'
+		;
+
+rootflags_l	: rootflags optcommanl rootflags_l
+		| rootflags optnl
+		;
+
+rootflags	: STRING		{
+			if (strlcpy(srv->srv_conf.root, $1,
+			    sizeof(srv->srv_conf.root)) >=
+			    sizeof(srv->srv_conf.root)) {
+				yyerror("document root too long");
+				free($1);
+				YYERROR;
+			}
+			free($1);
+			srv->srv_conf.flags |= SRVFLAG_ROOT;
+		}
+		| STRIP NUMBER		{
+			if ($2 < 0 || $2 > INT_MAX) {
+				yyerror("invalid strip number");
+				YYERROR;
+			}
+			srv->srv_conf.strip = $2;
+		}
+		;
+
+authenticate	: NO AUTHENTICATE		{
+			srv->srv_conf.flags |= SRVFLAG_NO_AUTH;
+		}
+		| AUTHENTICATE authopts		{
+			struct auth	*auth;
+
+			if ((auth = auth_add(conf->sc_auth, &$2)) == NULL) {
+				yyerror("failed to add auth");
+				YYERROR;
+			}
+
+			if (auth->auth_id == 0) {
+				/* New htpasswd, get new Id */
+				auth->auth_id = ++last_auth_id;
+				if (last_auth_id == INT_MAX) {
+					yyerror("too many auth ids defined");
+					auth_free(conf->sc_auth, auth);
+					YYERROR;
+				}
+			}
+
+			srv->srv_conf.auth_id = auth->auth_id;
+			srv->srv_conf.flags |= SRVFLAG_AUTH;
+		}
+		;
+
+authopts	: STRING WITH STRING	{
+			if (strlcpy(srv->srv_conf.auth_realm, $1,
+			    sizeof(srv->srv_conf.auth_realm)) >=
+			    sizeof(srv->srv_conf.auth_realm)) {
+				yyerror("basic auth realm name too long");
+				free($1);
+				YYERROR;
+			}
+			free($1);
+			if (strlcpy($$.auth_htpasswd, $3,
+			    sizeof($$.auth_htpasswd)) >=
+			    sizeof($$.auth_htpasswd)) {
+				yyerror("password file name too long");
+				free($3);
+				YYERROR;
+			}
+			free($3);
+
+		}
+		| WITH STRING		{
+			if (strlcpy($$.auth_htpasswd, $2,
+			    sizeof($$.auth_htpasswd)) >=
+			    sizeof($$.auth_htpasswd)) {
+				yyerror("password file name too long");
+				free($2);
+				YYERROR;
+			}
+			free($2);
+		};
+
+directory	: DIRECTORY dirflags
+		| DIRECTORY '{' optnl dirflags_l '}'
+		;
+
+dirflags_l	: dirflags optcommanl dirflags_l
+		| dirflags optnl
 		;
 
 dirflags	: INDEX STRING		{
@@ -543,17 +783,16 @@ dirflags	: INDEX STRING		{
 
 
 logformat	: LOG logflags
-		| LOG '{' logflags_l '}'
+		| LOG '{' optnl logflags_l '}'
 		| NO LOG		{
 			srv_conf->flags &= ~SRVFLAG_LOG;
 			srv_conf->flags |= SRVFLAG_NO_LOG;
 		}
 		;
 
-logflags_l	: logflags comma logflags_l
-		| logflags
+logflags_l	: logflags optcommanl logflags_l
+		| logflags optnl
 		;
-
 
 logflags	: STYLE logstyle
 		| SYSLOG		{
@@ -605,12 +844,56 @@ logstyle	: COMMON		{
 		}
 		;
 
-tcpip		: '{' tcpflags_l '}'
-		| tcpflags
+filter		: block RETURN NUMBER optstring	{
+			if ($3 <= 0 || server_httperror_byid($3) == NULL) {
+				yyerror("invalid return code: %lld", $3);
+				free($4);
+				YYERROR;
+			}
+			srv_conf->return_code = $3;
+
+			if ($4 != NULL) {
+				/* Only for 3xx redirection headers */
+				if ($3 < 300 || $3 > 399) {
+					yyerror("invalid return code for "
+					    "location URI");
+					free($4);
+					YYERROR;
+				}
+				srv_conf->return_uri = $4;
+				srv_conf->return_uri_len = strlen($4) + 1;
+			}
+		}
+		| block DROP			{
+			/* No return code, silently drop the connection */
+			srv_conf->return_code = 0;
+		}
+		| block				{
+			/* Forbidden */
+			srv_conf->return_code = 403;
+		}
+		| PASS				{
+			srv_conf->flags &= ~SRVFLAG_BLOCK;
+			srv_conf->flags |= SRVFLAG_NO_BLOCK;
+		}
 		;
 
-tcpflags_l	: tcpflags comma tcpflags_l
-		| tcpflags
+block		: BLOCK				{
+			srv_conf->flags &= ~SRVFLAG_NO_BLOCK;
+			srv_conf->flags |= SRVFLAG_BLOCK;
+		}
+		;
+
+optstring	: /* empty */		{ $$ = NULL; }
+		| STRING		{ $$ = $1; }
+		;
+
+tcpip		: TCP '{' optnl tcpflags_l '}'
+		| TCP tcpflags
+		;
+
+tcpflags_l	: tcpflags optcommanl tcpflags_l
+		| tcpflags optnl
 		;
 
 tcpflags	: SACK			{ srv_conf->tcpflags |= TCPFLAG_SACK; }
@@ -623,7 +906,7 @@ tcpflags	: SACK			{ srv_conf->tcpflags |= TCPFLAG_SACK; }
 		}
 		| BACKLOG NUMBER	{
 			if ($2 < 0 || $2 > SERVER_MAX_CLIENTS) {
-				yyerror("invalid backlog: %d", $2);
+				yyerror("invalid backlog: %lld", $2);
 				YYERROR;
 			}
 			srv_conf->tcpbacklog = $2;
@@ -631,13 +914,13 @@ tcpflags	: SACK			{ srv_conf->tcpflags |= TCPFLAG_SACK; }
 		| SOCKET BUFFER NUMBER	{
 			srv_conf->tcpflags |= TCPFLAG_BUFSIZ;
 			if ((srv_conf->tcpbufsiz = $3) < 0) {
-				yyerror("invalid socket buffer size: %d", $3);
+				yyerror("invalid socket buffer size: %lld", $3);
 				YYERROR;
 			}
 		}
 		| IP STRING NUMBER	{
 			if ($3 < 0) {
-				yyerror("invalid ttl: %d", $3);
+				yyerror("invalid ttl: %lld", $3);
 				free($2);
 				YYERROR;
 			}
@@ -660,7 +943,7 @@ types		: TYPES	'{' optnl mediaopts_l '}'
 		;
 
 mediaopts_l	: mediaopts_l mediaoptsl nl
-		| mediaoptsl optnl
+		| mediaoptsl nl
 		;
 
 mediaoptsl	: STRING '/' STRING	{
@@ -677,14 +960,15 @@ mediaoptsl	: STRING '/' STRING	{
 			}
 			free($1);
 			free($3);
-		} medianames_l ';'
+		} medianames_l optsemicolon
+		| include
 		;
 
 medianames_l	: medianames_l medianamesl
 		| medianamesl
 		;
 
-medianamesl	: STRING				{
+medianamesl	: numberstring				{
 			if (strlcpy(media.media_name, $1,
 			    sizeof(media.media_name)) >=
 			    sizeof(media.media_name)) {
@@ -694,6 +978,9 @@ medianamesl	: STRING				{
 			}
 			free($1);
 
+			if (!loadcfg)
+				break;
+
 			if (media_add(conf->sc_mediatypes, &media) == NULL) {
 				yyerror("failed to add media type");
 				YYERROR;
@@ -701,46 +988,31 @@ medianamesl	: STRING				{
 		}
 		;
 
-port		: PORT STRING {
-			char		*a, *b;
-			int		 p[2];
-
-			p[0] = p[1] = 0;
-
-			a = $2;
-			b = strchr($2, ':');
-			if (b == NULL)
-				$$.op = PF_OP_EQ;
-			else {
-				*b++ = '\0';
-				if ((p[1] = getservice(b)) == -1) {
-					free($2);
-					YYERROR;
-				}
-				$$.op = PF_OP_RRG;
-			}
-			if ((p[0] = getservice(a)) == -1) {
-				free($2);
-				YYERROR;
-			}
-			$$.val[0] = p[0];
-			$$.val[1] = p[1];
-			free($2);
-		}
-		| PORT NUMBER {
+port		: PORT NUMBER {
 			if ($2 <= 0 || $2 >= (int)USHRT_MAX) {
-				yyerror("invalid port: %d", $2);
+				yyerror("invalid port: %lld", $2);
 				YYERROR;
 			}
 			$$.val[0] = htons($2);
-			$$.op = PF_OP_EQ;
+		}
+		| PORT STRING {
+			int	 val;
+
+			if ((val = getservice($2)) == -1) {
+				yyerror("invalid port: %s", $2);
+				free($2);
+				YYERROR;
+			}
+			free($2);
+
+			$$.val[0] = val;
 		}
 		;
 
 timeout		: NUMBER
 		{
 			if ($1 < 0) {
-				yyerror("invalid timeout: %d\n", $1);
+				yyerror("invalid timeout: %lld", $1);
 				YYERROR;
 			}
 			$$.tv_sec = $1;
@@ -748,13 +1020,27 @@ timeout		: NUMBER
 		}
 		;
 
-comma		: ','
-		| nl
-		| /* empty */
+numberstring	: NUMBER		{
+			char *s;
+			if (asprintf(&s, "%lld", $1) == -1) {
+				yyerror("asprintf: number");
+				YYERROR;
+			}
+			$$ = s;
+		}
+		| STRING
+		;
+
+optsemicolon	: ';'
+		|
 		;
 
 optnl		: '\n' optnl
 		|
+		;
+
+optcommanl	: ',' optnl
+		| nl
 		;
 
 nl		: '\n' optnl
@@ -771,15 +1057,15 @@ int
 yyerror(const char *fmt, ...)
 {
 	va_list		 ap;
-	char		*nfmt;
+	char		*msg;
 
 	file->errors++;
 	va_start(ap, fmt);
-	if (asprintf(&nfmt, "%s:%d: %s", file->name, yylval.lineno, fmt) == -1)
-		fatalx("yyerror asprintf");
-	vlog(LOG_CRIT, nfmt, ap);
+	if (vasprintf(&msg, fmt, ap) == -1)
+		fatalx("yyerror vasprintf");
 	va_end(ap);
-	free(nfmt);
+	logit(LOG_CRIT, "%s:%d: %s", file->name, yylval.lineno, msg);
+	free(msg);
 	return (0);
 }
 
@@ -795,8 +1081,11 @@ lookup(char *s)
 	/* this has to be sorted always */
 	static const struct keywords keywords[] = {
 		{ "access",		ACCESS },
+		{ "alias",		ALIAS },
+		{ "authenticate",	AUTHENTICATE},
 		{ "auto",		AUTO },
 		{ "backlog",		BACKLOG },
+		{ "block",		BLOCK },
 		{ "body",		BODY },
 		{ "buffer",		BUFFER },
 		{ "certificate",	CERTIFICATE },
@@ -805,7 +1094,10 @@ lookup(char *s)
 		{ "combined",		COMBINED },
 		{ "common",		COMMON },
 		{ "connection",		CONNECTION },
+		{ "dhe",		DHE },
 		{ "directory",		DIRECTORY },
+		{ "drop",		DROP },
+		{ "ecdhe",		ECDHE },
 		{ "error",		ERR },
 		{ "fastcgi",		FCGI },
 		{ "include",		INCLUDE },
@@ -815,24 +1107,30 @@ lookup(char *s)
 		{ "listen",		LISTEN },
 		{ "location",		LOCATION },
 		{ "log",		LOG },
+		{ "logdir",		LOGDIR },
 		{ "max",		MAXIMUM },
 		{ "no",			NO },
 		{ "nodelay",		NODELAY },
 		{ "on",			ON },
+		{ "pass",		PASS },
 		{ "port",		PORT },
 		{ "prefork",		PREFORK },
+		{ "protocols",		PROTOCOLS },
 		{ "request",		REQUEST },
 		{ "requests",		REQUESTS },
+		{ "return",		RETURN },
 		{ "root",		ROOT },
 		{ "sack",		SACK },
 		{ "server",		SERVER },
 		{ "socket",		SOCKET },
-		{ "ssl",		SSL },
+		{ "strip",		STRIP },
 		{ "style",		STYLE },
 		{ "syslog",		SYSLOG },
 		{ "tcp",		TCP },
 		{ "timeout",		TIMEOUT },
-		{ "types",		TYPES }
+		{ "tls",		TLS },
+		{ "types",		TYPES },
+		{ "with",		WITH }
 	};
 	const struct keywords	*p;
 
@@ -1006,6 +1304,9 @@ top:
 			} else if (c == quotec) {
 				*p = '\0';
 				break;
+			} else if (c == '\0') {
+				yyerror("syntax error");
+				return (findeol());
 			}
 			if (p + 1 >= buf + sizeof(buf) - 1) {
 				yyerror("string too long");
@@ -1061,7 +1362,7 @@ nodigits:
 	x != '!' && x != '=' && x != '#' && \
 	x != ',' && x != ';' && x != '/'))
 
-	if (isalnum(c) || c == ':' || c == '_') {
+	if (isalnum(c) || c == ':' || c == '_' || c == '*') {
 		do {
 			*p++ = c;
 			if ((unsigned)(p-buf) >= sizeof(buf)) {
@@ -1206,6 +1507,7 @@ load_config(const char *filename, struct httpd *x_conf)
 	loadcfg = 1;
 	errors = 0;
 	last_server_id = 0;
+	last_auth_id = 0;
 
 	srv = NULL;
 
@@ -1411,6 +1713,7 @@ host_dns(const char *s, struct addresslist *al, int max,
 	memset(&hints, 0, sizeof(hints));
 	hints.ai_family = PF_UNSPEC;
 	hints.ai_socktype = SOCK_DGRAM; /* DUMMY */
+	hints.ai_flags = AI_ADDRCONFIG;
 	error = getaddrinfo(s, NULL, &hints, &res0);
 	if (error == EAI_AGAIN || error == EAI_NODATA || error == EAI_NONAME)
 		return (0);
@@ -1543,6 +1846,9 @@ host(const char *s, struct addresslist *al, int max,
 {
 	struct address *h;
 
+	if (strcmp("*", s) == 0)
+		s = "0.0.0.0";
+
 	h = host_v4(s);
 
 	/* IPv6 address? */
@@ -1580,6 +1886,112 @@ host_free(struct addresslist *al)
 		TAILQ_REMOVE(al, h, entry);
 		free(h);
 	}
+}
+
+struct server *
+server_inherit(struct server *src, const char *name,
+    struct server_config *addr)
+{
+	struct server	*dst, *s, *dstl;
+
+	if ((dst = calloc(1, sizeof(*dst))) == NULL)
+		fatal("out of memory");
+
+	/* Copy the source server and assign a new Id */
+	memcpy(&dst->srv_conf, &src->srv_conf, sizeof(dst->srv_conf));
+	if ((dst->srv_conf.tls_cert_file =
+	    strdup(src->srv_conf.tls_cert_file)) == NULL)
+		fatal("out of memory");
+	if ((dst->srv_conf.tls_key_file =
+	    strdup(src->srv_conf.tls_key_file)) == NULL)
+		fatal("out of memory");
+	dst->srv_conf.tls_cert = NULL;
+	dst->srv_conf.tls_key = NULL;
+
+	if (src->srv_conf.return_uri != NULL &&
+	    (dst->srv_conf.return_uri =
+	    strdup(src->srv_conf.return_uri)) == NULL)
+		fatal("out of memory");
+
+	dst->srv_conf.id = ++last_server_id;
+	dst->srv_conf.parent_id = dst->srv_conf.id;
+	dst->srv_s = -1;
+
+	if (last_server_id == INT_MAX) {
+		yyerror("too many servers defined");
+		serverconfig_free(&dst->srv_conf);
+		free(dst);
+		return (NULL);
+	}
+
+	/* Now set alias and listen address */
+	strlcpy(dst->srv_conf.name, name, sizeof(dst->srv_conf.name));
+	memcpy(&dst->srv_conf.ss, &addr->ss, sizeof(dst->srv_conf.ss));
+	dst->srv_conf.port = addr->port;
+	dst->srv_conf.prefixlen = addr->prefixlen;
+	if (addr->flags & SRVFLAG_TLS)
+		dst->srv_conf.flags |= SRVFLAG_TLS;
+	else
+		dst->srv_conf.flags &= ~SRVFLAG_TLS;
+
+	if (server_tls_load_keypair(dst) == -1) {
+		yyerror("failed to load public/private keys "
+		    "for server %s", dst->srv_conf.name);
+		serverconfig_free(&dst->srv_conf);
+		free(dst);
+		return (NULL);
+	}
+
+	/* Check if the new server already exists */
+	TAILQ_FOREACH(s, conf->sc_servers, srv_entry) {
+		if ((s->srv_conf.flags &
+		    SRVFLAG_LOCATION) == 0 &&
+		    strcmp(s->srv_conf.name,
+		    dst->srv_conf.name) == 0 &&
+		    s->srv_conf.port == dst->srv_conf.port &&
+		    sockaddr_cmp(
+		    (struct sockaddr *)&s->srv_conf.ss,
+		    (struct sockaddr *)&dst->srv_conf.ss,
+		    s->srv_conf.prefixlen) == 0)
+			break;
+	}
+	if (s != NULL) {
+		yyerror("server \"%s\" defined twice",
+		    dst->srv_conf.name);
+		serverconfig_free(&dst->srv_conf);
+		free(dst);
+		return (NULL);
+	}
+
+	/* Copy all the locations of the source server */
+	TAILQ_FOREACH(s, conf->sc_servers, srv_entry) {
+		if (!(s->srv_conf.flags & SRVFLAG_LOCATION &&
+		    s->srv_conf.parent_id == src->srv_conf.parent_id))
+			continue;
+
+		if ((dstl = calloc(1, sizeof(*dstl))) == NULL)
+			fatal("out of memory");
+
+		memcpy(&dstl->srv_conf, &s->srv_conf, sizeof(dstl->srv_conf));
+		strlcpy(dstl->srv_conf.name, name, sizeof(dstl->srv_conf.name));
+
+		/* Copy the new Id and listen address */
+		dstl->srv_conf.id = ++last_server_id;
+		dstl->srv_conf.parent_id = dst->srv_conf.id;
+		memcpy(&dstl->srv_conf.ss, &addr->ss,
+		    sizeof(dstl->srv_conf.ss));
+		dstl->srv_conf.port = addr->port;
+		dstl->srv_conf.prefixlen = addr->prefixlen;
+		dstl->srv_s = -1;
+
+		DPRINTF("adding location \"%s\" for \"%s[%u]\"",
+		    dstl->srv_conf.location,
+		    dstl->srv_conf.name, dstl->srv_conf.id);
+
+		TAILQ_INSERT_TAIL(conf->sc_servers, dstl, srv_entry);
+	}
+
+	return (dst);
 }
 
 int

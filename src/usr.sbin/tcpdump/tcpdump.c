@@ -1,4 +1,4 @@
-/*	$OpenBSD: tcpdump.c,v 1.66 2014/06/30 04:25:11 deraadt Exp $	*/
+/*	$OpenBSD: tcpdump.c,v 1.68 2015/02/09 23:00:14 deraadt Exp $	*/
 
 /*
  * Copyright (c) 1988, 1989, 1990, 1991, 1992, 1993, 1994, 1995, 1996, 1997
@@ -230,12 +230,12 @@ main(int argc, char **argv)
 		switch (op) {
 
 		case 'A':
-			if (xflag == 0) ++xflag;
-			++Aflag;
+			xflag = 1;
+			Aflag = 1;
 			break;
 
 		case 'a':
-			++aflag;
+			aflag = 1;
 			break;
 
 		case 'c':
@@ -257,11 +257,11 @@ main(int argc, char **argv)
 			++dflag;
 			break;
 		case 'e':
-			++eflag;
+			eflag = 1;
 			break;
 
 		case 'f':
-			++fflag;
+			fflag = 1;
 			break;
 
 		case 'F':
@@ -273,25 +273,21 @@ main(int argc, char **argv)
 			break;
 
 		case 'I':
-			++Iflag;
+			Iflag = 1;
 			break;
 
 		case 'l':
-#ifdef HAVE_SETLINEBUF
-			setlinebuf(stdout);
-#else
 			setvbuf(stdout, NULL, _IOLBF, 0);
-#endif
 			break;
 		case 'L':
-			++Lflag;
+			Lflag = 1;
 			break;
 		case 'n':
-			++nflag;
+			nflag = 1;
 			break;
 
 		case 'N':
-			++Nflag;
+			Nflag = 1;
 			break;
 
 		case 'O':
@@ -303,11 +299,11 @@ main(int argc, char **argv)
 			break;
 
 		case 'p':
-			++pflag;
+			pflag = 1;
 			break;
 
 		case 'q':
-			++qflag;
+			qflag = 1;
 			break;
 
 		case 'r':
@@ -321,7 +317,7 @@ main(int argc, char **argv)
 			break;
 
 		case 'S':
-			++Sflag;
+			Sflag = 1;
 			break;
 
 		case 't':
@@ -379,12 +375,12 @@ main(int argc, char **argv)
 			break;
 
 		case 'x':
-			++xflag;
+			xflag = 1;
 			break;
 
 		case 'X':
-			++Xflag;
-			if (xflag == 0) ++xflag;
+			Xflag = 1;
+			xflag = 1;
 			break;
 
 		case 'E':

@@ -1,4 +1,4 @@
-/*	$OpenBSD: rcsparse.c,v 1.7 2013/06/03 17:04:35 jcs Exp $	*/
+/*	$OpenBSD: rcsparse.c,v 1.11 2014/12/01 21:58:46 deraadt Exp $	*/
 /*
  * Copyright (c) 2010 Tobias Stoeckmann <tobias@openbsd.org>
  *
@@ -224,7 +224,7 @@ rcsparse_init(RCSFILE *rfp)
 	if (rfp->rf_flags & RCS_PARSED)
 		return (0);
 
-	pdp = xmalloc(sizeof(*pdp));
+	pdp = xcalloc(1, sizeof(*pdp));
 	pdp->rp_buf = xmalloc(RCS_BUFSIZE);
 	pdp->rp_blen = RCS_BUFSIZE;
 	pdp->rp_bufend = pdp->rp_buf + pdp->rp_blen - 1;
@@ -1202,7 +1202,7 @@ rcsparse_growbuf(RCSFILE *rfp)
 {
 	struct rcs_pdata *pdp = (struct rcs_pdata *)rfp->rf_pdata;
 	
-	pdp->rp_buf = xrealloc(pdp->rp_buf, 1,
+	pdp->rp_buf = xreallocarray(pdp->rp_buf, 1,
 		pdp->rp_blen + RCS_BUFEXTSIZE);
 	pdp->rp_blen += RCS_BUFEXTSIZE;
 	pdp->rp_bufend = pdp->rp_buf + pdp->rp_blen - 1;
@@ -1259,15 +1259,16 @@ rcsparse_warnx(RCSFILE *rfp, char *fmt, ...)
 {
 	struct rcs_pdata *pdp;
 	va_list ap;
-	char *nfmt;
+	char *msg;
 
 	pdp = (struct rcs_pdata *)rfp->rf_pdata;
 	va_start(ap, fmt);
-	if (asprintf(&nfmt, "%s:%d: %s", rfp->rf_path, pdp->rp_msglineno, fmt)
-	    == -1)
-		nfmt = fmt;
-	cvs_vlog(LP_ERR, nfmt, ap);
+	if (vasprintf(&msg, fmt, ap) == -1) {
+		cvs_log(LP_ERRNO, "vasprintf");
+		va_end(ap);
+		return;
+	}
 	va_end(ap);
-	if (nfmt != fmt)
-		free(nfmt);
+	cvs_log(LP_ERR, "%s:%d: %s", rfp->rf_path, pdp->rp_msglineno, msg);
+	free(msg);
 }

@@ -1,4 +1,4 @@
-/*	$OpenBSD: print-atm.c,v 1.9 2009/10/27 23:59:55 deraadt Exp $	*/
+/*	$OpenBSD: print-atm.c,v 1.12 2015/01/16 06:40:21 deraadt Exp $	*/
 
 /*
  * Copyright (c) 1994, 1995, 1996, 1997
@@ -21,7 +21,6 @@
  * MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE.
  */
 
-#include <sys/param.h>
 #include <sys/time.h>
 #include <sys/socket.h>
 
@@ -31,7 +30,6 @@ struct rtentry;
 
 #include <netinet/in.h>
 #include <netinet/if_ether.h>
-#include <netinet/in_systm.h>
 #include <netinet/ip.h>
 #include <netinet/ip_var.h>
 #include <netinet/udp.h>
@@ -66,6 +64,11 @@ atm_if_print(u_char *user, const struct pcap_pkthdr *h, const u_char *p)
 	}
 	if (p[0] != 0xaa || p[1] != 0xaa || p[2] != 0x03) {
 		/*XXX assume 802.6 MAC header from fore driver */
+#define MIN_ATM_8026_HDRLEN (20 + 8)
+		if (caplen < MIN_ATM_8026_HDRLEN) {
+			printf("[|atm]");
+			goto out;
+		}
 		if (eflag)
 			printf("%04x%04x %04x%04x ",
 			       p[0] << 24 | p[1] << 16 | p[2] << 8 | p[3],

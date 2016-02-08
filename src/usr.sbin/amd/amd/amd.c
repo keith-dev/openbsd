@@ -32,7 +32,7 @@
  * SUCH DAMAGE.
  *
  *	from: @(#)amd.c	8.1 (Berkeley) 6/6/93
- *	$Id: amd.c,v 1.17 2010/12/21 18:45:54 deraadt Exp $
+ *	$Id: amd.c,v 1.21 2014/10/26 02:43:50 guenther Exp $
  */
 
 /*
@@ -46,10 +46,19 @@
 #include <fcntl.h>
 #include <unistd.h>
 #include <setjmp.h>
+#include <endian.h>
 
 #include <rpc/rpc.h>
 #include <rpcsvc/ypclnt.h>
 #include <rpcsvc/yp_prot.h>
+
+#if BYTE_ORDER == LITTLE_ENDIAN
+#define ARCH_ENDIAN "little"
+#elif BYTE_ORDER == BIG_ENDIAN
+#define ARCH_ENDIAN "big"
+#else
+#error "unknown endian"
+#endif
 
 char pid_fsname[16 + MAXHOSTNAMELEN];	/* "kiska.southseas.nz:(pid%d)" */
 #ifdef HAS_HOST
@@ -61,7 +70,7 @@ char *auto_dir = "/tmp_mnt";
 char *hostdomain = "unknown.domain";
 char hostname[MAXHOSTNAMELEN] = "localhost"; /* Hostname */
 char hostd[2*MAXHOSTNAMELEN];		/* Host+domain */
-char *op_sys = OS_REP;			/* Name of current op_sys */
+char *op_sys = "bsd44";			/* Name of current op_sys */
 char *arch = ARCH_REP;			/* Name of current architecture */
 char *endian = ARCH_ENDIAN;		/* Big or Little endian */
 char *wire;
@@ -84,9 +93,6 @@ int orig_umask;
 static void
 sigterm(int sig)
 {
-#ifdef SYS5_SIGNALS
-	signal(sig, sigterm);
-#endif /* SYS5_SIGNALS */
 
 	switch (sig) {
 	case SIGINT:
@@ -109,13 +115,9 @@ sigterm(int sig)
  * Hook for cache reload.
  * When a SIGHUP arrives it schedules a call to mapc_reload
  */
-/*ARGSUSED*/
 static void
 sighup(int sig)
 {
-#ifdef SYS5_SIGNALS
-	signal(sig, sighup);
-#endif /* SYS5_SIGNALS */
 
 #ifdef DEBUG
 	if (sig != SIGHUP)
@@ -128,7 +130,6 @@ sighup(int sig)
 		do_mapc_reload = 0;
 }
 
-/*ARGSUSED*/
 static void
 parent_exit(int sig)
 {
@@ -295,7 +296,6 @@ main(int argc, char *argv[])
 		going_down(1);
 	}
 
-#ifdef HAS_NIS_MAPS
 	/*
 	 * If the domain was specified then bind it here
 	 * to circumvent any default bindings that may
@@ -305,7 +305,6 @@ main(int argc, char *argv[])
 		plog(XLOG_FATAL, "Can't bind to domain \"%s\"", domain);
 		going_down(1);
 	}
-#endif /* HAS_NIS_MAPS */
 
 #ifdef DEBUG
 	Debug(D_DAEMON)

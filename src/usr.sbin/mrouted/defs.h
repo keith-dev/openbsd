@@ -18,7 +18,6 @@
 #include <syslog.h>
 #include <signal.h>
 #include <string.h>
-#include <sys/param.h>
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <sys/ioctl.h>
@@ -28,7 +27,6 @@
 #include <sys/time.h>
 #include <net/if.h>
 #include <netinet/in.h>
-#include <netinet/in_systm.h>
 #include <netinet/ip.h>
 #include <netinet/igmp.h>
 #include <netinet/ip_mroute.h>
@@ -90,7 +88,6 @@ typedef void (*ihfunc_t)(int);
 #ifdef SYSV
 #define bcopy(a, b, c)	memcpy(b, a, c)
 #define bzero(s, n)	memset((s), 0, (n))
-#define setlinebuf(s)	setvbuf(s, NULL, _IOLBF, 0)
 #define signal(s,f)	sigset(s,f)
 #endif
 
@@ -128,12 +125,6 @@ extern char		s1[];
 extern char		s2[];
 extern char		s3[];
 extern char		s4[];
-
-#if !(defined(BSD) && (BSD >= 199103))
-extern int		errno;
-extern int		sys_nerr;
-extern char *		sys_errlist[];
-#endif
 
 #ifdef OLD_KERNEL
 #define	MRT_INIT	DVMRP_INIT

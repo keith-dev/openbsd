@@ -1,4 +1,4 @@
-/* $OpenBSD: pmap.h,v 1.32 2014/01/30 18:16:41 miod Exp $ */
+/* $OpenBSD: pmap.h,v 1.36 2015/02/15 21:34:33 miod Exp $ */
 /* $NetBSD: pmap.h,v 1.37 2000/11/19 03:16:35 thorpej Exp $ */
 
 /*-
@@ -74,7 +74,6 @@
 
 #ifdef _KERNEL
 
-#include <sys/lock.h>
 #include <sys/queue.h>
 
 /*
@@ -99,7 +98,6 @@ struct pmap {
 	TAILQ_ENTRY(pmap)	pm_list;	/* list of all pmaps */
 	pt_entry_t		*pm_lev1map;	/* level 1 map */
 	int			pm_count;	/* pmap reference count */
-	struct simplelock	pm_slock;	/* lock on pmap */
 	struct pmap_statistics	pm_stats;	/* pmap statistics */
 	unsigned long		pm_cpus;	/* mask of CPUs using pmap */
 	unsigned long		pm_needisync;	/* mask of CPUs needing isync */
@@ -146,7 +144,6 @@ typedef struct pv_entry {
 
 #define	PGU_ISPTPAGE(pgu)	((pgu) >= PGU_L1PT)
 
-#ifndef _LKM
 #if defined(NEW_SCC_DRIVER)
 #if defined(DEC_KN8AE)
 #define	_PMAP_MAY_USE_PROM_CONSOLE
@@ -173,7 +170,6 @@ void	pmap_do_tlb_shootdown(struct cpu_info *, struct trapframe *);
 #define	PMAP_TLB_SHOOTDOWN(pm, va, pte)		/* nothing */
 #define	PMAP_TLB_SHOOTNOW()			/* nothing */
 #endif /* MULTIPROCESSOR */
-#endif /* _LKM */
  
 #define	pmap_resident_count(pmap)	((pmap)->pm_stats.resident_count)
 #define	pmap_wired_count(pmap)		((pmap)->pm_stats.wired_count)
@@ -183,7 +179,7 @@ void	pmap_do_tlb_shootdown(struct cpu_info *, struct trapframe *);
 
 #define pmap_proc_iflush(p, va, len)	/* nothing */
 #define pmap_unuse_final(p)		/* nothing */
-#define	pmap_remove_holes(map)		do { /* nothing */ } while (0)
+#define	pmap_remove_holes(vm)		do { /* nothing */ } while (0)
 
 extern	pt_entry_t *VPT;		/* Virtual Page Table */
 
@@ -278,17 +274,6 @@ pmap_l3pte(pmap, v, l2pte)
 	lev3map = (pt_entry_t *)ALPHA_PHYS_TO_K0SEG(pmap_pte_pa(l2pte));
 	return (&lev3map[l3pte_index(v)]);
 }
-
-/*
- * Macros for locking pmap structures.
- *
- * Note that we if we access the kernel pmap in interrupt context, it
- * is only to update statistics.  Since stats are updated using atomic
- * operations, locking the kernel pmap is not necessary.  Therefore,
- * it is not necessary to block interrupts when locking pmap structures.
- */
-#define	PMAP_LOCK(pmap)		simple_lock(&(pmap)->pm_slock)
-#define	PMAP_UNLOCK(pmap)	simple_unlock(&(pmap)->pm_slock)
 
 /*
  * Macro for processing deferred I-stream synchronization.

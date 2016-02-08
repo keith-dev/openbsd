@@ -1,4 +1,4 @@
-/*	$OpenBSD: clock.c,v 1.37 2014/05/09 18:16:15 miod Exp $	*/
+/*	$OpenBSD: clock.c,v 1.39 2014/11/11 21:02:06 mpi Exp $	*/
 /*	$NetBSD: clock.c,v 1.1 1996/09/30 16:34:40 ws Exp $	*/
 
 /*
@@ -227,8 +227,6 @@ decr_intr(struct clockframe *frame)
 	if (ci->ci_cpl >= IPL_CLOCK) {
 		ci->ci_statspending += nstats;
 	} else {
-		KERNEL_LOCK();
-
 		nstats += ci->ci_statspending;
 		ci->ci_statspending = 0;
 
@@ -258,7 +256,6 @@ decr_intr(struct clockframe *frame)
 		/* if a tick has occurred while dealing with these,
 		 * dont service it now, delay until the next tick.
 		 */
-		KERNEL_UNLOCK();
 	}
 }
 
@@ -354,15 +351,11 @@ void
 delay(unsigned n)
 {
 	u_int64_t tb;
-	u_int32_t tbh, tbl, scratch;
 
 	tb = ppc_mftb();
 	tb += (n * 1000 + ns_per_tick - 1) / ns_per_tick;
-	tbh = tb >> 32;
-	tbl = (u_int32_t)tb;
-	asm ("1: mftbu %0; cmplw %0,%1; blt 1b; bgt 2f;"
-	     " mftb %0; cmplw %0,%2; blt 1b; 2:"
-	     :: "r"(scratch), "r"(tbh), "r"(tbl));
+	while (tb > ppc_mftb())
+		;
 }
 
 /*

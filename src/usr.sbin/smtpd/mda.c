@@ -1,4 +1,4 @@
-/*	$OpenBSD: mda.c,v 1.107 2014/07/08 07:59:31 sobrado Exp $	*/
+/*	$OpenBSD: mda.c,v 1.109 2015/01/20 17:37:54 deraadt Exp $	*/
 
 /*
  * Copyright (c) 2008 Gilles Chehade <gilles@poolp.org>
@@ -37,6 +37,7 @@
 #include <string.h>
 #include <time.h>
 #include <unistd.h>
+#include <limits.h>
 #include <vis.h>
 
 #include "smtpd.h"
@@ -65,8 +66,8 @@ struct mda_user {
 	uint64_t			id;
 	TAILQ_ENTRY(mda_user)		entry;
 	TAILQ_ENTRY(mda_user)		entry_runnable;
-	char				name[SMTPD_MAXLOGNAME];
-	char				usertable[SMTPD_MAXPATHLEN];
+	char				name[LOGIN_NAME_MAX];
+	char				usertable[PATH_MAX];
 	size_t				evpcount;
 	TAILQ_HEAD(, mda_envelope)	envelopes;
 	int				flags;
@@ -119,8 +120,9 @@ mda_imsg(struct mproc *p, struct imsg *imsg)
 	const void		*data;
 	const char		*error, *parent_error;
 	uint64_t		 reqid;
+	time_t			 now;
 	size_t			 sz;
-	char			 out[256], buf[SMTPD_MAXLINESIZE];
+	char			 out[256], buf[LINE_MAX];
 	int			 n;
 	enum lka_resp_status	status;
 
@@ -237,16 +239,29 @@ mda_imsg(struct mproc *p, struct imsg *imsg)
 				return;
 			}
 
-			/* start queueing delivery headers */
-			if (e->sender[0])
-				/* XXX: remove existing Return-Path, if any */
-				n = iobuf_fqueue(&s->iobuf,
-				    "Return-Path: %s\nDelivered-To: %s\n",
-				    e->sender, e->rcpt ? e->rcpt : e->dest);
-			else
-				n = iobuf_fqueue(&s->iobuf,
-				    "Delivered-To: %s\n",
-				    e->rcpt ? e->rcpt : e->dest);
+			n = 0;
+			/* prepend "From " separator ... for A_MDA and A_FILENAME backends only */
+			if (e->method == A_MDA || e->method == A_FILENAME) {
+				time(&now);
+				if (e->sender[0])
+					n = iobuf_fqueue(&s->iobuf,
+					    "From %s %s", e->sender, ctime(&now));
+				else
+					n = iobuf_fqueue(&s->iobuf,
+					    "From MAILER-DAEMON@%s %s", env->sc_hostname, ctime(&now));
+			}
+			if (n != -1) {
+				/* start queueing delivery headers */
+				if (e->sender[0])
+					/* XXX: remove existing Return-Path, if any */
+					n = iobuf_fqueue(&s->iobuf,
+					    "Return-Path: %s\nDelivered-To: %s\n",
+					    e->sender, e->rcpt ? e->rcpt : e->dest);
+				else
+					n = iobuf_fqueue(&s->iobuf,
+					    "Delivered-To: %s\n",
+					    e->rcpt ? e->rcpt : e->dest);
+			}
 			if (n == -1) {
 				log_warn("warn: mda: "
 				    "fail to write delivery info");
@@ -585,7 +600,7 @@ static int
 mda_getlastline(int fd, char *dst, size_t dstsz)
 {
 	FILE	*fp;
-	char	*ln, buf[SMTPD_MAXLINESIZE];
+	char	*ln, buf[LINE_MAX];
 	size_t	 len;
 
 	memset(buf, 0, sizeof buf);
@@ -733,7 +748,7 @@ mda_done(struct mda_session *s)
 static void
 mda_log(const struct mda_envelope *evp, const char *prefix, const char *status)
 {
-	char rcpt[SMTPD_MAXLINESIZE];
+	char rcpt[LINE_MAX];
 	const char *method;
 
 	rcpt[0] = '\0';
@@ -868,7 +883,7 @@ static struct mda_envelope *
 mda_envelope(const struct envelope *evp)
 {
 	struct mda_envelope	*e;
-	char			 buf[SMTPD_MAXLINESIZE];
+	char			 buf[LINE_MAX];
 
 	e = xcalloc(1, sizeof *e, "mda_envelope");
 	e->id = evp->id;

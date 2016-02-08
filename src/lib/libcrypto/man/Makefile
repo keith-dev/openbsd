@@ -1,4 +1,4 @@
-# $OpenBSD: Makefile,v 1.12 2014/07/12 20:56:21 miod Exp $
+# $OpenBSD: Makefile,v 1.19 2015/02/23 17:43:24 schwarze Exp $
 
 .include <bsd.own.mk>		# for NOMAN
 
@@ -51,6 +51,8 @@ MAN=	\
 	BN_set_bit.3 \
 	BN_swap.3 \
 	BN_zero.3 \
+
+GENMAN= \
 	BUF_MEM_new.3 \
 	CONF_modules_free.3 \
 	CONF_modules_load_file.3 \
@@ -194,6 +196,8 @@ MAN=	\
 	ui.3 \
 	ui_compat.3 \
 	x509.3 \
+
+MAN+=	${GENMAN}
 
 #MAN+=	BIO_new_CMS.3 \
 #	CMS_add0_cert.3 \
@@ -666,12 +670,18 @@ MLINKS+=\
 	EVP_EncryptInit.3 EVP_CIPHER_param_to_asn1.3 \
 	EVP_EncryptInit.3 EVP_CIPHER_type.3 \
 	EVP_EncryptInit.3 EVP_CipherFinal.3 \
+	EVP_EncryptInit.3 EVP_CipherFinal_ex.3 \
 	EVP_EncryptInit.3 EVP_CipherInit.3 \
+	EVP_EncryptInit.3 EVP_CipherInit_ex.3 \
 	EVP_EncryptInit.3 EVP_CipherUpdate.3 \
 	EVP_EncryptInit.3 EVP_DecryptFinal.3 \
+	EVP_EncryptInit.3 EVP_DecryptFinal_ex.3 \
 	EVP_EncryptInit.3 EVP_DecryptInit.3 \
+	EVP_EncryptInit.3 EVP_DecryptInit_ex.3 \
 	EVP_EncryptInit.3 EVP_DecryptUpdate.3 \
 	EVP_EncryptInit.3 EVP_EncryptFinal.3 \
+	EVP_EncryptInit.3 EVP_EncryptFinal_ex.3 \
+	EVP_EncryptInit.3 EVP_EncryptInit_ex.3 \
 	EVP_EncryptInit.3 EVP_EncryptUpdate.3 \
 	EVP_EncryptInit.3 EVP_aes_128_ccm.3 \
 	EVP_EncryptInit.3 EVP_aes_128_gcm.3 \
@@ -1052,10 +1062,6 @@ MLINKS+=\
 	d2i_X509_REQ.3 i2d_X509_REQ.3 \
 	d2i_X509_REQ.3 i2d_X509_REQ_bio.3 \
 	d2i_X509_REQ.3 i2d_X509_REQ_fp.3 \
-	dsa.3 DSA_SIG_free.3 \
-	dsa.3 DSA_do_verify.3 \
-	dsa.3 DSA_get_ex_data.3 \
-	dsa.3 DSA_set_ex_data.3 \
 	ecdsa.3 ECDSA_OpenSSL.3 \
 	ecdsa.3 ECDSA_SIG_free.3 \
 	ecdsa.3 ECDSA_SIG_new.3 \
@@ -1144,4 +1150,4 @@ maninstall:
 .include <bsd.subdir.mk>
 
 clean cleandir:
-	rm -f ${MAN} ${MANLINT}
+	rm -f ${GENMAN}

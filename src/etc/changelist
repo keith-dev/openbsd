@@ -1,4 +1,4 @@
-#	$OpenBSD: changelist,v 1.98 2014/07/22 21:01:58 ajacoutot Exp $
+#	$OpenBSD: changelist,v 1.103 2014/10/02 09:02:48 mpi Exp $
 #
 # List of files which the security script backs up and checks
 # for modifications.
@@ -55,22 +55,9 @@
 /etc/locate.rc
 /etc/login.conf
 /etc/mail.rc
-/etc/mail/access
 /etc/mail/aliases
-/etc/mail/genericstable
-/etc/mail/helpfile
-/etc/mail/local-host-names
-/etc/mail/localhost.cf
-/etc/mail/mailertable
-/etc/mail/relay-domains
-+/etc/mail/secrets
-/etc/mail/sendmail.cf
 /etc/mail/smtpd.conf
 /etc/mail/spamd.conf
-/etc/mail/submit.cf
-/etc/mail/trusted-users
-/etc/mail/virtual
-/etc/mail/virtusertable
 /etc/mailer.conf
 /etc/man.conf
 /etc/master.passwd
@@ -89,8 +76,6 @@
 /etc/netstart
 /etc/networks
 /etc/newsyslog.conf
-/etc/nginx/mime.types
-/etc/nginx/nginx.conf
 /etc/npppd/npppd.conf
 +/etc/npppd/npppd-users
 /etc/ntpd.conf
@@ -117,15 +102,12 @@
 /etc/resolv.conf
 /etc/resolv.conf.tail
 /etc/ripd.conf
-+/etc/rndc.key
 /etc/rpc
 /etc/rtadvd.conf
 /etc/sasyncd.conf
 /etc/sensorsd.conf
 /etc/services
 /etc/shells
-/etc/slip.hosts
-/etc/slip.login
 /etc/snmpd.conf
 +/etc/spwd.db
 /etc/ssh/ssh_config
@@ -163,12 +145,6 @@
 /var/cron/cron.allow
 /var/cron/cron.deny
 /var/cron/tabs/root
-/var/named/etc/named.conf
-+/var/named/etc/rndc.key
-/var/named/etc/root.hint
-/var/named/standard/localhost
-/var/named/standard/loopback
-/var/named/standard/loopback6.arpa
 /var/nsd/etc/nsd.conf
 /var/unbound/etc/root.key
 /var/unbound/etc/unbound.conf

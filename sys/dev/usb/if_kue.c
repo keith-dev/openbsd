@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_kue.c,v 1.74 2014/07/13 15:52:49 mpi Exp $ */
+/*	$OpenBSD: if_kue.c,v 1.77 2015/02/04 05:12:13 mpi Exp $ */
 /*	$NetBSD: if_kue.c,v 1.50 2002/07/16 22:00:31 augustss Exp $	*/
 /*
  * Copyright (c) 1997, 1998, 1999, 2000
@@ -463,7 +463,7 @@ kue_attachhook(void *xsc)
 		return;
 	}
 
-	sc->kue_mcfilters = malloc(KUE_MCFILTCNT(sc) * ETHER_ADDR_LEN,
+	sc->kue_mcfilters = mallocarray(KUE_MCFILTCNT(sc), ETHER_ADDR_LEN,
 	    M_USBDEV, M_NOWAIT);
 	if (sc->kue_mcfilters == NULL) {
 		printf("%s: no memory for multicast filter buffer\n",
@@ -741,12 +741,6 @@ kue_rxeof(struct usbd_xfer *xfer, void *priv, usbd_status status)
 	}
 
 #if NBPFILTER > 0
-	/*
-	 * Handle BPF listeners. Let the BPF user see the packet, but
-	 * don't pass it up to the ether_input() layer unless it's
-	 * a broadcast packet, multicast packet, matches our ethernet
-	 * address or the interface is in promiscuous mode.
-	 */
 	if (ifp->if_bpf)
 		bpf_mtap(ifp->if_bpf, m, BPF_DIRECTION_IN);
 #endif
@@ -1039,11 +1033,9 @@ kue_ioctl(struct ifnet *ifp, u_long command, caddr_t data)
 		kue_init(sc);
 
 		switch (ifa->ifa_addr->sa_family) {
-#ifdef INET
 		case AF_INET:
 			arp_ifinit(&sc->arpcom, ifa);
 			break;
-#endif /* INET */
 		}
 		break;
 

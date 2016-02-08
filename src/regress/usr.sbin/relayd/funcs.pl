@@ -1,6 +1,6 @@
-#	$OpenBSD: funcs.pl,v 1.16 2014/07/20 19:18:32 bluhm Exp $
+#	$OpenBSD: funcs.pl,v 1.18 2015/01/05 22:41:37 bluhm Exp $
 
-# Copyright (c) 2010-2013 Alexander Bluhm <bluhm@openbsd.org>
+# Copyright (c) 2010-2014 Alexander Bluhm <bluhm@openbsd.org>
 #
 # Permission to use, copy, modify, and distribute this software for any
 # purpose with or without fee is hereby granted, provided that the above
@@ -175,8 +175,12 @@ sub http_request {
 			print STDERR "<<< $_\n";
 			last if /^$/;
 			if (/^Content-Length: (.*)/) {
-				$1 == $len or die ref($self),
-				    " bad content length $1";
+				if ($self->{httpnok}) {
+					$len = $1;
+				} else {
+					$1 == $len or die ref($self),
+					    " bad content length $1";
+				}
 			}
 			if (/^Transfer-Encoding: chunked$/) {
 				$chunked = 1;
@@ -439,8 +443,7 @@ sub check_loggrep {
 
 	my %name2proc = (client => $c, relayd => $r, server => $s);
 	foreach my $name (qw(client relayd server)) {
-		my $p = $name2proc{$name}
-		    or next;
+		my $p = $name2proc{$name} or next;
 		my $pattern = $args{$name}{loggrep} or next;
 		$pattern = [ $pattern ] unless ref($pattern) eq 'ARRAY';
 		foreach my $pat (@$pattern) {
@@ -448,12 +451,12 @@ sub check_loggrep {
 				while (my($re, $num) = each %$pat) {
 					my @matches = $p->loggrep($re);
 					@matches == $num
-					    or die "$name matches @matches: ",
-					    "$re => $num";
+					    or die "$name matches '@matches': ",
+					    "'$re' => $num";
 				}
 			} else {
 				$p->loggrep($pat)
-				    or die "$name log missing pattern: $pat";
+				    or die "$name log missing pattern: '$pat'";
 			}
 		}
 	}

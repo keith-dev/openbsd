@@ -1,4 +1,4 @@
-/*	$OpenBSD: print-pflog.c,v 1.24 2011/10/13 18:32:30 claudio Exp $	*/
+/*	$OpenBSD: print-pflog.c,v 1.27 2015/01/20 18:26:58 deraadt Exp $	*/
 
 /*
  * Copyright (c) 1990, 1991, 1993, 1994, 1995, 1996
@@ -21,8 +21,7 @@
  * MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE.
  */
 
-#include <sys/types.h>
-#include <sys/param.h>
+#include <sys/param.h>	/* MAXCOMLEN */
 #include <sys/time.h>
 #include <sys/socket.h>
 #include <sys/file.h>
@@ -35,14 +34,12 @@
 #endif
 
 struct rtentry;
-#include <net/if.h>
-#include <net/if_pflog.h>
 
 #include <netinet/in.h>
-#include <netinet/in_systm.h>
 #include <netinet/ip.h>
-
+#include <net/if.h>
 #include <net/pfvar.h>
+#include <net/if_pflog.h>
 
 #include <arpa/inet.h>
 

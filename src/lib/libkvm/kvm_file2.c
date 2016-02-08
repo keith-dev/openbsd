@@ -1,4 +1,4 @@
-/*	$OpenBSD: kvm_file2.c,v 1.36 2014/07/04 05:58:31 guenther Exp $	*/
+/*	$OpenBSD: kvm_file2.c,v 1.44 2015/02/11 05:11:04 claudio Exp $	*/
 
 /*
  * Copyright (c) 2009 Todd C. Miller <Todd.Miller@courtesan.com>
@@ -95,9 +95,11 @@
 
 #include <net/route.h>
 #include <netinet/in.h>
-#include <netinet/in_systm.h>
 #include <netinet/ip.h>
 #include <netinet/in_pcb.h>
+#include <netinet/tcp.h>
+#include <netinet/tcp_timer.h>
+#include <netinet/tcp_var.h>
 
 #ifdef INET6
 #include <netinet/ip6.h>
@@ -109,9 +111,9 @@
 #include <db.h>
 #include <stddef.h>
 #include <stdlib.h>
-#include <stddef.h>
 #include <string.h>
 #include <unistd.h>
+#include <limits.h>
 
 #include "kvm_private.h"
 #include "kvm_file.h"
@@ -179,11 +181,6 @@ kvm_getfiles(kvm_t *kd, int op, int arg, size_t esize, int *cnt)
 	    deadway:
 		switch (op) {
 		case KERN_FILE_BYFILE:
-			if (arg != 0) {
-				_kvm_err(kd, kd->program,
-				    "%d: invalid argument", arg);
-				return (NULL);
-			}
 			return (kvm_deadfile_byfile(kd, op, arg, esize, cnt));
 			break;
 		case KERN_FILE_BYPID:
@@ -227,11 +224,11 @@ kvm_deadfile_byfile(kvm_t *kd, int op, int arg, size_t esize, int *cnt)
 		_kvm_err(kd, kd->program, "can't read nfiles");
 		return (NULL);
 	}
-	buflen = nfiles * esize;
-	where = _kvm_malloc(kd, buflen);
+	where = _kvm_reallocarray(kd, NULL, nfiles, esize);
 	kd->filebase = (void *)where;
 	if (kd->filebase == NULL)
 		return (NULL);
+	buflen = nfiles * esize;
 
 	for (fp = LIST_FIRST(&filehead);
 	    fp != NULL && esize <= buflen;
@@ -240,6 +237,10 @@ kvm_deadfile_byfile(kvm_t *kd, int op, int arg, size_t esize, int *cnt)
 			_kvm_err(kd, kd->program, "can't read kfp");
 			return (NULL);
 		}
+		if (file.f_count == 0)
+			continue;
+		if (arg != 0 && file.f_type != arg)
+			continue;
 		if (fill_file(kd, &kf, &file, (u_long)fp, NULL, NULL, 0, 0)
 		    == -1)
 			return (NULL);
@@ -300,11 +301,11 @@ kvm_deadfile_byid(kvm_t *kd, int op, int arg, size_t esize, int *cnt)
 		return (NULL);
 	}
 	/* this may be more room than we need but counting is expensive */
-	buflen = (nfiles + 10) * esize;
-	where = _kvm_malloc(kd, buflen);
+	where = _kvm_reallocarray(kd, NULL, nfiles + 10, esize);
 	kd->filebase = (void *)where;
 	if (kd->filebase == NULL)
 		return (NULL);
+	buflen = (nfiles + 10) * esize;
 
 	for (pr = LIST_FIRST(&allprocess);
 	    pr != NULL;
@@ -358,9 +359,11 @@ kvm_deadfile_byid(kvm_t *kd, int op, int arg, size_t esize, int *cnt)
 			filed.fd_ofiles = filed0.fd_dfiles;
 			filed.fd_ofileflags = filed0.fd_dfileflags;
 		} else {
-			size_t fsize = filed.fd_nfiles * OFILESIZE;
-			char *tmp = realloc(filebuf, fsize);
+			size_t fsize;
+			char *tmp = reallocarray(filebuf,
+			    filed.fd_nfiles, OFILESIZE);
 
+			fsize = filed.fd_nfiles * OFILESIZE;
 			if (tmp == NULL) {
 				_kvm_syserr(kd, kd->program, "realloc ofiles");
 				goto cleanup;
@@ -541,6 +544,7 @@ fill_file(kvm_t *kd, struct kinfo_file *kf, struct file *fp, u_long fpaddr,
 
 	case DTYPE_SOCKET: {
 		struct socket sock;
+		struct sosplice ssp;
 		struct protosw protosw;
 		struct domain domain;
 
@@ -564,11 +568,18 @@ fill_file(kvm_t *kd, struct kinfo_file *kf, struct file *fp, u_long fpaddr,
 		kf->so_family = domain.dom_family;
 		kf->so_rcv_cc = sock.so_rcv.sb_cc;
 		kf->so_snd_cc = sock.so_snd.sb_cc;
-		if (sock.so_splice) {
-			kf->so_splice = PTRTOINT64(sock.so_splice);
-			kf->so_splicelen = sock.so_splicelen;
-		} else if (sock.so_spliceback)
-			kf->so_splicelen = -1;
+		if (sock.so_sp) {
+			if (KREAD(kd, (u_long)sock.so_sp, &ssp)) {
+				_kvm_err(kd, kd->program, "can't read splice");
+				return (-1);
+			}
+			if (ssp.ssp_socket) {
+				kf->so_splice = PTRTOINT64(ssp.ssp_socket);
+				kf->so_splicelen = ssp.ssp_len;
+			} else if (ssp.ssp_soback) {
+				kf->so_splicelen = -1;
+			}
+		}
 		if (!sock.so_pcb)
 			break;
 		switch (kf->so_family) {
@@ -585,6 +596,20 @@ fill_file(kvm_t *kd, struct kinfo_file *kf, struct file *fp, u_long fpaddr,
 			kf->inp_fport = inpcb.inp_fport;
 			kf->inp_faddru[0] = inpcb.inp_faddr.s_addr;
 			kf->inp_rtableid = inpcb.inp_rtableid;
+			if (sock.so_type == SOCK_RAW)
+				kf->inp_proto = inpcb.inp_ip.ip_p;
+			if (protosw.pr_protocol == IPPROTO_TCP) {
+				struct tcpcb tcpcb;
+				if (KREAD(kd, (u_long)inpcb.inp_ppcb, &tcpcb)) {
+					_kvm_err(kd, kd->program,
+					    "can't read tcpcb");
+					return (-1);
+				}
+				kf->t_rcv_wnd = tcpcb.rcv_wnd;
+				kf->t_snd_wnd = tcpcb.snd_wnd;
+				kf->t_snd_cwnd = tcpcb.snd_cwnd;
+				kf->t_state = tcpcb.t_state;
+			}
 			break;
 		    }
 		case AF_INET6: {
@@ -607,6 +632,20 @@ fill_file(kvm_t *kd, struct kinfo_file *kf, struct file *fp, u_long fpaddr,
 			kf->inp_faddru[2] = inpcb.inp_faddr6.s6_addr32[2];
 			kf->inp_faddru[3] = inpcb.inp_faddr6.s6_addr32[3];
 			kf->inp_rtableid = inpcb.inp_rtableid;
+			if (sock.so_type == SOCK_RAW)
+				kf->inp_proto = inpcb.inp_ipv6.ip6_nxt;
+			if (protosw.pr_protocol == IPPROTO_TCP) {
+				struct tcpcb tcpcb;
+				if (KREAD(kd, (u_long)inpcb.inp_ppcb, &tcpcb)) {
+					_kvm_err(kd, kd->program,
+					    "can't read tcpcb");
+					return (-1);
+				}
+				kf->t_rcv_wnd = tcpcb.rcv_wnd;
+				kf->t_snd_wnd = tcpcb.snd_wnd;
+				kf->t_snd_cwnd = tcpcb.snd_cwnd;
+				kf->t_state = tcpcb.t_state;
+			}
 			break;
 		    }
 		case AF_UNIX: {

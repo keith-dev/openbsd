@@ -1,4 +1,4 @@
-/* $OpenBSD: grid-view.c,v 1.16 2014/04/17 14:45:49 nicm Exp $ */
+/* $OpenBSD: grid-view.c,v 1.21 2015/01/06 21:14:42 nicm Exp $ */
 
 /*
  * Copyright (c) 2008 Nicholas Marriott <nicm@users.sourceforge.net>

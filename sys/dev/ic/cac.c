@@ -1,4 +1,4 @@
-/*	$OpenBSD: cac.c,v 1.52 2014/07/13 23:10:23 deraadt Exp $	*/
+/*	$OpenBSD: cac.c,v 1.54 2014/12/19 07:23:57 deraadt Exp $	*/
 /*	$NetBSD: cac.c,v 1.15 2000/11/08 19:20:35 ad Exp $	*/
 
 /*
@@ -72,7 +72,6 @@
 #include <sys/ioctl.h>
 #include <sys/device.h>
 #include <sys/queue.h>
-#include <sys/proc.h>
 #include <sys/buf.h>
 #include <sys/endian.h>
 #include <sys/malloc.h>
@@ -582,7 +581,7 @@ cac_copy_internal_data(xs, v, size)
 		printf("uio move is not yet supported\n");
 	else {
 		copy_cnt = MIN(size, xs->datalen);
-		bcopy(v, xs->data, copy_cnt);
+		memcpy(xs->data, v, copy_cnt);
 	}
 }
 

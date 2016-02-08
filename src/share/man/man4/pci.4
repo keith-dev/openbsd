@@ -1,4 +1,4 @@
-.\"	$OpenBSD: pci.4,v 1.330 2014/06/28 06:39:50 matthew Exp $
+.\"	$OpenBSD: pci.4,v 1.337 2015/02/07 00:02:04 sthen Exp $
 .\"	$NetBSD: pci.4,v 1.29 2000/04/01 00:32:23 tsarna Exp $
 .\"
 .\" Copyright (c) 2000 Theo de Raadt.  All rights reserved.
@@ -31,7 +31,7 @@
 .\" (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
 .\" THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 .\"
-.Dd $Mdocdate: June 28 2014 $
+.Dd $Mdocdate: February 7 2015 $
 .Dt PCI 4
 .Os
 .Sh NAME
@@ -176,8 +176,6 @@ Attansic L1 10/100/Gigabit Ethernet device
 Atheros AR813x/AR815x 10/100/Gigabit Ethernet device
 .It Xr ale 4
 Atheros AR8121/AR8113/AR8114 10/100/Gigabit Ethernet device
-.It Xr art 4
-Accoom Networks Artery T1/E1 network device
 .It Xr bce 4
 Broadcom BCM4401 10/100 Ethernet device
 .It Xr bge 4
@@ -229,6 +227,8 @@ Myson Technology MTD800/MTD803/MTD891 10/100/Gigabit Ethernet device
 Myricom Myri-10G PCI Express 10Gb Ethernet device
 .It Xr ne 4
 NE2000 and compatible 10/100 Ethernet device
+.It Xr nep 4
+Sun Neptune 10Gb Ethernet device
 .It Xr nfe 4
 NVIDIA nForce MCP 10/100/Gigabit Ethernet device
 .It Xr nge 4
@@ -287,7 +287,7 @@ Aironet Communications 4500/4800 IEEE 802.11FH/b wireless network device
 .It Xr ath 4
 Atheros IEEE 802.11a/b/g wireless network device with GPIO
 .It Xr athn 4
-Atheros IEEE 802.11a/g/n wireless network device
+Atheros IEEE 802.11a/b/g/n wireless network device
 .It Xr atw 4
 ADMtek ADM8211 IEEE 802.11b wireless network device
 .It Xr bwi 4
@@ -298,13 +298,15 @@ Intel PRO/Wireless 2100 IEEE 802.11b wireless network device
 Intel
 PRO/Wireless 2200BG/2225BG/2915ABG IEEE 802.11a/b/g wireless network device
 .It Xr iwn 4
-Intel WiFi Link and Centrino IEEE 802.11a/g/n wireless network devices
+Intel WiFi Link and Centrino IEEE 802.11a/b/g/n wireless network devices
+.It Xr iwm 4
+Intel 7200 IEEE 802.11a/ac/b/g/n wireless network devices
 .It Xr malo 4
 Marvell Libertas IEEE 802.11b/g wireless network device
 .It Xr pgt 4
 Conexant/Intersil Prism GT Full-MAC IEEE 802.11a/b/g wireless network device
 .It Xr ral 4
-Ralink Technology IEEE 802.11a/g/n wireless network device
+Ralink Technology IEEE 802.11a/b/g/n wireless network device
 .It Xr rtw 4
 Realtek RTL8180L IEEE 802.11b wireless network device
 .It Xr wi 4
@@ -319,10 +321,6 @@ Intel PRO/Wireless 3945ABG IEEE 802.11a/b/g wireless network device
 Geode LX Security Block crypto accelerator
 .It Xr hifn 4
 Hifn 7751/7811/7951/7955/7956/9751 crypto accelerator
-.It Xr lofn 4
-Hifn 6500 crypto accelerator
-.It Xr nofn 4
-Hifn 7814/7851/7854 HIPP1 crypto accelerator
 .It Xr safe 4
 SafeNet crypto accelerator
 .It Xr ubsec 4
@@ -335,7 +333,9 @@ Cyclades Cyclom-4Y, -8Y, and -16Y asynchronous serial communications devices
 .It Xr cz 4
 Cyclades-Z series multi-port serial adapter device
 .It Xr puc 4
-PCI ``universal'' communications card driver
+PCI
+.Dq universal
+communications card driver
 .El
 .Ss Display adapters
 .Bl -tag -width 10n -offset ind -compact

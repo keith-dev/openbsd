@@ -1,4 +1,4 @@
-/*	$OpenBSD: est.c,v 1.43 2014/07/12 18:44:41 tedu Exp $ */
+/*	$OpenBSD: est.c,v 1.45 2014/12/09 06:58:28 doug Exp $ */
 /*
  * Copyright (c) 2003 Michael Eriksson.
  * All rights reserved.
@@ -55,7 +55,6 @@
 
 #include <sys/param.h>
 #include <sys/systm.h>
-#include <sys/proc.h>
 #include <sys/sysctl.h>
 #include <sys/malloc.h>
 
@@ -982,7 +981,7 @@ est_acpi_init()
 	    == NULL)
 		goto nolist;
 
-	if ((acpilist->table = malloc(sizeof(struct est_op) * nstates,
+	if ((acpilist->table = mallocarray(nstates, sizeof(struct est_op),
 	    M_DEVBUF, M_NOWAIT)) == NULL)
 		goto notable;
 
@@ -1022,7 +1021,7 @@ est_acpi_pss_changed(struct acpicpu_pss *pss, int npss)
 		return;
 	}
 
-	if ((acpilist->table = malloc(sizeof(struct est_op) * npss,
+	if ((acpilist->table = mallocarray(npss, sizeof(struct est_op),
 	    M_DEVBUF, M_NOWAIT)) == NULL) {
 		printf("est_acpi_pss_changed: cannot allocate memory for new "
 		    "operating points");

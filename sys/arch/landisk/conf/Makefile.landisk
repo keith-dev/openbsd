@@ -1,4 +1,4 @@
-#	$OpenBSD: Makefile.landisk,v 1.50 2014/05/08 21:43:04 miod Exp $
+#	$OpenBSD: Makefile.landisk,v 1.53 2015/01/13 01:12:49 deraadt Exp $
 
 # For instructions on building kernels consult the config(8) and options(4)
 # manual pages.
@@ -23,9 +23,9 @@ _archdir?=	$S/arch/${_arch}
 
 INCLUDES=	-nostdinc -I$S -I. -I$S/arch
 CPPFLAGS=	${INCLUDES} ${IDENT} ${PARAM} -D_KERNEL -D__${_mach}__ -MD -MP
-CWARNFLAGS=	-Werror -Wall -Wstrict-prototypes -Wmissing-prototypes \
+CWARNFLAGS=	-Werror -Wall -Wimplicit-function-declaration \
 		-Wno-main -Wno-uninitialized \
-		-Wstack-larger-than-2047
+		-Wframe-larger-than=2047
 
 CMACHFLAGS=	-m4-nofpu
 CMACHFLAGS+=	-fno-builtin-printf -fno-builtin-snprintf \
@@ -146,8 +146,7 @@ MACHINE_NAME!=  uname -n
 install: install-kernel-${MACHINE_NAME}
 .if !target(install-kernel-${MACHINE_NAME}})
 install-kernel-${MACHINE_NAME}:
-	rm -f /obsd
-	ln /bsd /obsd
+	cmp -s bsd /bsd || ln -f /bsd /obsd
 	cp bsd /nbsd
 	mv /nbsd /bsd
 .endif

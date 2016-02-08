@@ -1,4 +1,4 @@
-/*	$OpenBSD: parse.y,v 1.12 2014/01/22 00:21:16 henning Exp $ */
+/*	$OpenBSD: parse.y,v 1.16 2014/11/20 05:51:20 jsg Exp $ */
 
 /*
  * Copyright (c) 2009, 2010 Martin Hedenfalk <martinh@openbsd.org>
@@ -59,7 +59,9 @@ int		 popfile(void);
 int		 check_file_secrecy(int, const char *);
 int		 yyparse(void);
 int		 yylex(void);
-int		 yyerror(const char *, ...);
+int		 yyerror(const char *, ...)
+    __attribute__((__format__ (printf, 1, 2)))
+    __attribute__((__nonnull__ (1)));
 int		 kw_cmp(const void *, const void *);
 int		 lookup(char *);
 int		 lgetc(int);
@@ -383,15 +385,15 @@ int
 yyerror(const char *fmt, ...)
 {
 	va_list		 ap;
-	char		*nfmt;
+	char		*msg;
 
 	file->errors++;
 	va_start(ap, fmt);
-	if (asprintf(&nfmt, "%s:%d: %s", file->name, yylval.lineno, fmt) == -1)
-		fatalx("yyerror asprintf");
-	vlog(LOG_CRIT, nfmt, ap);
+	if (vasprintf(&msg, fmt, ap) == -1)
+		fatalx("yyerror vasprintf");
 	va_end(ap);
-	free(nfmt);
+	logit(LOG_CRIT, "%s:%d: %s", file->name, yylval.lineno, msg);
+	free(msg);
 	return (0);
 }
 
@@ -617,6 +619,9 @@ top:
 			} else if (c == quotec) {
 				*p = '\0';
 				break;
+			} else if (c == '\0') {
+				yyerror("syntax error");
+				return (findeol());
 			}
 			if (p + 1 >= buf + sizeof(buf) - 1) {
 				log_warnx("string too long");
@@ -1131,9 +1136,9 @@ mk_aci(int type, int rights, enum scope scope, char *target, char *subject)
 	log_debug("%s %02X access to %s scope %d by %s",
 	    aci->type == ACI_DENY ? "deny" : "allow",
 	    aci->rights,
-	    aci->target ?: "any",
+	    aci->target ? aci->target : "any",
 	    aci->scope,
-	    aci->subject ?: "any");
+	    aci->subject ? aci->subject : "any");
 
 	return aci;
 }

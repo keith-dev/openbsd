@@ -1,4 +1,4 @@
-/*	$OpenBSD: table.c,v 1.14 2009/10/27 23:59:31 deraadt Exp $	*/
+/*	$OpenBSD: table.c,v 1.16 2015/01/16 06:39:51 deraadt Exp $	*/
 
 /*
  * Copyright (c) 1983 Regents of the University of California.
@@ -37,7 +37,6 @@
  *
  * Consider this a mis-guided attempt at modularity
  */
-#include <sys/param.h>
 #include <sys/time.h>
 #include <sys/socket.h>
 #include <sys/queue.h>
@@ -166,7 +165,7 @@ insert_table(CTL_MSG *request, CTL_RESPONSE *response)
 	request->id_num = new_id();
 	response->id_num = htonl(request->id_num);
 	/* insert a new entry into the top of the list */
-	ptr = (TABLE_ENTRY *)malloc(sizeof(TABLE_ENTRY));
+	ptr = malloc(sizeof(TABLE_ENTRY));
 	if (ptr == NULL) {
 		syslog(LOG_ERR, "insert_table: Out of memory");
 		_exit(1);

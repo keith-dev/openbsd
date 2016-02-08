@@ -1,4 +1,4 @@
-/*	$OpenBSD: machdep.c,v 1.189 2014/07/21 17:25:47 uebayasi Exp $	*/
+/*	$OpenBSD: machdep.c,v 1.206 2015/01/12 16:33:31 deraadt Exp $	*/
 /*	$NetBSD: machdep.c,v 1.3 2003/05/07 22:58:18 fvdl Exp $	*/
 
 /*-
@@ -108,7 +108,6 @@
 #include <machine/fpu.h>
 #include <machine/biosvar.h>
 #include <machine/mpbiosvar.h>
-#include <machine/reg.h>
 #include <machine/kcore.h>
 #include <machine/tss.h>
 
@@ -178,8 +177,6 @@ paddr_t	dumpmem_paddr;
 vaddr_t	dumpmem_vaddr;
 psize_t	dumpmem_sz;
 
-
-char	*ssym = NULL;
 vaddr_t kern_end;
 
 vaddr_t	msgbuf_vaddr;
@@ -193,19 +190,13 @@ paddr_t lo32_paddr;
 paddr_t tramp_pdirpa;
 
 int kbd_reset;
-int lid_suspend;
+int lid_suspend = 1;
 
 /*
  * safepri is a safe priority for sleep to set for a spin-wait
  * during autoconfiguration or after a panic.
  */
 int	safepri = 0;
-
-#ifdef LKM
-vaddr_t lkm_start, lkm_end;
-static struct vm_map lkm_map_store;
-extern struct vm_map *lkm_map;
-#endif
 
 struct vm_map *exec_map = NULL;
 struct vm_map *phys_map = NULL;
@@ -252,12 +243,6 @@ int bootinfo_size = BOOTARGC_MAX;
 void getbootinfo(char *, int);
 
 /* Data passed to us by /boot, filled in by getbootinfo() */
-#if NAPM > 0 || defined(DEBUG)
-bios_apminfo_t	*apm;
-#endif
-#if NPCI > 0
-bios_pciinfo_t	*bios_pciinfo;
-#endif
 bios_diskinfo_t	*bios_diskinfo;
 bios_memmap_t	*bios_memmap;
 u_int32_t	bios_cksumlen;
@@ -339,12 +324,6 @@ cpu_startup(void)
 	phys_map = uvm_km_suballoc(kernel_map, &minaddr, &maxaddr,
 				   VM_PHYS_SIZE, 0, FALSE, NULL);
 
-#ifdef LKM
-	uvm_map_setup(&lkm_map_store, lkm_start, lkm_end, VM_MAP_PAGEABLE);
-	lkm_map_store.pmap = pmap_kernel();
-	lkm_map = &lkm_map_store;
-#endif
-
 	printf("avail mem = %lu (%luMB)\n", ptoa((psize_t)uvmexp.free),
 	    ptoa((psize_t)uvmexp.free)/1024/1024);
 
@@ -354,7 +333,7 @@ cpu_startup(void)
 #ifdef BOOT_CONFIG
 		user_config();
 #else
-		printf("kernel does not support - c; continuing..\n");
+		printf("kernel does not support -c; continuing..\n");
 #endif
 	}
 
@@ -556,7 +535,7 @@ sendsig(sig_t catcher, int sig, int mask, u_long code, int type,
 		    p->p_comm, p->p_pid, sig, catcher);
 #endif
 
-	bcopy(tf, &ksc, sizeof(*tf));
+	memcpy(&ksc, tf, sizeof(*tf));
 	bzero((char *)&ksc + sizeof(*tf), sizeof(ksc) - sizeof(*tf));
 	ksc.sc_mask = mask;
 
@@ -668,7 +647,7 @@ sys_sigreturn(struct proc *p, void *v, register_t *retval)
 
 	ksc.sc_trapno = tf->tf_trapno;
 	ksc.sc_err = tf->tf_err;
-	bcopy(&ksc, tf, sizeof(*tf));
+	memcpy(tf, &ksc, sizeof(*tf));
 
 	/* Restore signal mask. */
 	p->p_sigmask = ksc.sc_mask & ~sigcantmask;
@@ -746,8 +725,6 @@ struct pcb dumppcb;
 __dead void
 boot(int howto)
 {
-	struct device *mainbus;
-
 	if ((howto & RB_POWERDOWN) != 0)
 		lid_suspend = 0;
 
@@ -780,10 +757,7 @@ boot(int howto)
 		dumpsys();
 
 haltsys:
-	doshutdownhooks();
-	mainbus = device_mainbus();
-	if (mainbus != NULL)
-		config_suspend(mainbus, DVACT_POWERDOWN);
+	config_suspend_all(DVACT_POWERDOWN);
 
 #ifdef MULTIPROCESSOR
 	x86_broadcast_ipi(X86_IPI_HALT);
@@ -869,7 +843,7 @@ cpu_dump(void)
 	 * memory and bounce
 	 */
 	if (dumpmem_vaddr != 0) {
-		bcopy(buf, (char *)dumpmem_vaddr, sizeof(buf));
+		memcpy((char *)dumpmem_vaddr, buf, sizeof(buf));
 		va = (caddr_t)dumpmem_vaddr;
 	} else {
 		va = (caddr_t)buf;
@@ -984,7 +958,7 @@ dumpsys(void)
 				va = (void *)dumpmem_vaddr;
 				if (n > dumpmem_sz)
 					n = dumpmem_sz;
-				bcopy((void *)PMAP_DIRECT_MAP(maddr), va, n);
+				memcpy(va, (void *)PMAP_DIRECT_MAP(maddr), n);
 			} else {
 				va = (void *)PMAP_DIRECT_MAP(maddr);
 			}
@@ -1090,7 +1064,6 @@ setregs(struct proc *p, struct exec_package *pack, u_long stack,
 
 struct gate_descriptor *idt;
 char idt_allocmap[NIDT];
-struct simplelock idt_lock;
 char *gdtstore;
 extern  struct user *proc0paddr;
 
@@ -1167,8 +1140,6 @@ void cpu_init_idt(void)
 	lidt(&region); 
 }
 
-#define	KBTOB(x)	((size_t)(x) * 1024UL)
-
 void
 cpu_init_extents(void)
 {
@@ -1200,10 +1171,19 @@ cpu_init_extents(void)
 #if defined(MULTIPROCESSOR) || \
     (NACPI > 0 && !defined(SMALL_KERNEL))
 void
-map_tramps(void) {
+map_tramps(void)
+{
 	struct pmap *kmp = pmap_kernel();
+	extern paddr_t tramp_pdirpa;
+#ifdef MULTIPROCESSOR
+	extern u_char cpu_spinup_trampoline[];
+	extern u_char cpu_spinup_trampoline_end[];
+	extern u_char mp_tramp_data_start[];
+	extern u_char mp_tramp_data_end[];
+	extern u_int32_t mp_pdirpa;
+#endif
 
-	pmap_kenter_pa(lo32_vaddr, lo32_paddr, VM_PROT_ALL);
+	pmap_kenter_pa(lo32_vaddr, lo32_paddr, PROT_READ | PROT_WRITE);
 
 	/*
 	 * The initial PML4 pointer must be below 4G, so if the
@@ -1216,15 +1196,34 @@ map_tramps(void) {
 	} else
 		tramp_pdirpa = kmp->pm_pdirpa;
 
-#ifdef MULTIPROCESSOR
-	pmap_kenter_pa((vaddr_t)MP_TRAMPOLINE,	/* virtual */
-	    (paddr_t)MP_TRAMPOLINE,	/* physical */
-	    VM_PROT_ALL);		/* protection */
-#endif /* MULTIPROCESSOR */
+	pmap_kremove(lo32_vaddr, PAGE_SIZE);
 
-	pmap_kenter_pa((vaddr_t)ACPI_TRAMPOLINE, /* virtual */
-	    (paddr_t)ACPI_TRAMPOLINE,	/* physical */
-	    VM_PROT_ALL);		/* protection */
+#ifdef MULTIPROCESSOR
+	/* Map MP tramp code and data pages RW for copy */
+	pmap_kenter_pa(MP_TRAMPOLINE, MP_TRAMPOLINE,
+	    PROT_READ | PROT_WRITE);
+
+	pmap_kenter_pa(MP_TRAMP_DATA, MP_TRAMP_DATA,
+	    PROT_READ | PROT_WRITE);
+
+	memcpy((caddr_t)MP_TRAMPOLINE,
+	    cpu_spinup_trampoline,
+	    cpu_spinup_trampoline_end-cpu_spinup_trampoline);
+
+	memcpy((caddr_t)MP_TRAMP_DATA,
+		mp_tramp_data_start,
+		mp_tramp_data_end - mp_tramp_data_start);
+
+	/*
+	 * We need to patch this after we copy the tramp data,
+	 * the symbol points into the copied tramp data page.
+	 */
+	mp_pdirpa = tramp_pdirpa;
+
+	/* Unmap, will be remapped in cpu_start_secondary */
+	pmap_kremove(MP_TRAMPOLINE, PAGE_SIZE);
+	pmap_kremove(MP_TRAMP_DATA, PAGE_SIZE);
+#endif /* MULTIPROCESSOR */
 }
 #endif
 
@@ -1311,11 +1310,15 @@ init_x86_64(paddr_t first_avail)
 #ifdef MULTIPROCESSOR
 	if (avail_start < MP_TRAMPOLINE + PAGE_SIZE)
 		avail_start = MP_TRAMPOLINE + PAGE_SIZE;
+	if (avail_start < MP_TRAMP_DATA + PAGE_SIZE)
+		avail_start = MP_TRAMP_DATA + PAGE_SIZE;
 #endif
 
 #if (NACPI > 0 && !defined(SMALL_KERNEL))
 	if (avail_start < ACPI_TRAMPOLINE + PAGE_SIZE)
 		avail_start = ACPI_TRAMPOLINE + PAGE_SIZE;
+	if (avail_start < ACPI_TRAMP_DATA + PAGE_SIZE)
+		avail_start = ACPI_TRAMP_DATA + PAGE_SIZE;
 #endif
 
 #ifdef HIBERNATE
@@ -1404,12 +1407,6 @@ init_x86_64(paddr_t first_avail)
 	/* Make sure the end of the space used by the kernel is rounded. */
 	first_avail = round_page(first_avail);
 	kern_end = KERNBASE + first_avail;
-
-#ifdef LKM
-	lkm_start = KERNTEXTOFF + first_avail;
-	/* set it to the end of the jumpable region, should be safe enough */
-	lkm_end = 0xffffffffffffffff;
-#endif
 
 	/*
 	 * Now, load the memory clusters (which have already been
@@ -1537,9 +1534,9 @@ init_x86_64(paddr_t first_avail)
 
 	pmap_growkernel(VM_MIN_KERNEL_ADDRESS + 32 * 1024 * 1024);
 
-	pmap_kenter_pa(idt_vaddr, idt_paddr, VM_PROT_READ|VM_PROT_WRITE);
+	pmap_kenter_pa(idt_vaddr, idt_paddr, PROT_READ | PROT_WRITE);
 	pmap_kenter_pa(idt_vaddr + PAGE_SIZE, idt_paddr + PAGE_SIZE,
-	    VM_PROT_READ|VM_PROT_WRITE);
+	    PROT_READ | PROT_WRITE);
 
 #if defined(MULTIPROCESSOR) || \
     (NACPI > 0 && !defined(SMALL_KERNEL))
@@ -1745,15 +1742,12 @@ idt_vec_alloc(int low, int high)
 {
 	int vec;
 
-	simple_lock(&idt_lock);
 	for (vec = low; vec <= high; vec++) {
 		if (idt_allocmap[vec] == 0) {
 			idt_allocmap[vec] = 1;
-			simple_unlock(&idt_lock);
 			return vec;
 		}
 	}
-	simple_unlock(&idt_lock);
 	return 0;
 }
 
@@ -1771,10 +1765,8 @@ idt_vec_set(int vec, void (*function)(void))
 void
 idt_vec_free(int vec)
 {
-	simple_lock(&idt_lock);
 	unsetgate(&idt[vec]);
 	idt_allocmap[vec] = 0;
-	simple_unlock(&idt_lock);
 }
 
 #ifdef DIAGNOSTIC
@@ -1782,14 +1774,15 @@ void
 splassert_check(int wantipl, const char *func)
 {
 	int cpl = curcpu()->ci_ilevel;
+	int floor = curcpu()->ci_handled_intr_level;
 
 	if (cpl < wantipl) {
 		splassert_fail(wantipl, cpl, func);
 	}
-
-	if (wantipl == IPL_NONE && curcpu()->ci_idepth != 0) {
-		splassert_fail(-1, curcpu()->ci_idepth, func);
+	if (floor > wantipl) {
+		splassert_fail(wantipl, floor, func);
 	}
+	
 }
 #endif
 
@@ -1824,32 +1817,18 @@ getbootinfo(char *bootinfo, int bootinfo_size)
 			printf(" diskinfo %p", bios_diskinfo);
 #endif
 			break;
-#if 0
-#if NAPM > 0 || defined(DEBUG)
 		case BOOTARG_APMINFO:
-#ifdef BOOTINFO_DEBUG
-			printf(" apminfo %p", q->ba_arg);
-#endif
-			apm = (bios_apminfo_t *)q->ba_arg;
+			/* generated by i386 boot loader */
 			break;
-#endif
-#endif
 		case BOOTARG_CKSUMLEN:
 			bios_cksumlen = *(u_int32_t *)q->ba_arg;
 #ifdef BOOTINFO_DEBUG
 			printf(" cksumlen %d", bios_cksumlen);
 #endif
 			break;
-#if 0
-#if NPCI > 0
 		case BOOTARG_PCIINFO:
-			bios_pciinfo = (bios_pciinfo_t *)q->ba_arg;
-#ifdef BOOTINFO_DEBUG
-			printf(" pciinfo %p", bios_pciinfo);
-#endif
+			/* generated by i386 boot loader */
 			break;
-#endif
-#endif
 		case BOOTARG_CONSDEV:
 			if (q->ba_size >= sizeof(bios_consdev_t) +
 			    offsetof(struct _boot_args32, ba_arg)) {
@@ -1893,15 +1872,15 @@ getbootinfo(char *bootinfo, int bootinfo_size)
 
 		case BOOTARG_BOOTDUID:
 			bios_bootduid = (bios_bootduid_t *)q->ba_arg;
-			bcopy(bios_bootduid, bootduid, sizeof(bootduid));
+			memcpy(bootduid, bios_bootduid, sizeof(bootduid));
 			break;
 
 		case BOOTARG_BOOTSR:
 			bios_bootsr = (bios_bootsr_t *)q->ba_arg;
 #if NSOFTRAID > 0
-			bcopy(&bios_bootsr->uuid, &sr_bootuuid,
+			memcpy(&sr_bootuuid, &bios_bootsr->uuid,
 			    sizeof(sr_bootuuid));
-			bcopy(&bios_bootsr->maskkey, &sr_bootkey,
+			memcpy(&sr_bootkey, &bios_bootsr->maskkey,
 			    sizeof(sr_bootkey));
 #endif
 			explicit_bzero(bios_bootsr, sizeof(bios_bootsr_t));

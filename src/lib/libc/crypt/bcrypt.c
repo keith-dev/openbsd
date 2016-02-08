@@ -1,4 +1,4 @@
-/*	$OpenBSD: bcrypt.c,v 1.45 2014/07/20 04:22:34 guenther Exp $	*/
+/*	$OpenBSD: bcrypt.c,v 1.52 2015/01/28 23:33:52 tedu Exp $	*/
 
 /*
  * Copyright (c) 2014 Ted Unangst <tedu@openbsd.org>
@@ -34,6 +34,7 @@
 #include <sys/types.h>
 #include <blf.h>
 #include <ctype.h>
+#include <errno.h>
 #include <pwd.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -46,10 +47,11 @@
 
 #define BCRYPT_VERSION '2'
 #define BCRYPT_MAXSALT 16	/* Precomputation is just so nice */
-#define BCRYPT_BLOCKS 6		/* Ciphertext blocks */
+#define BCRYPT_WORDS 6		/* Ciphertext words */
 #define BCRYPT_MINLOGROUNDS 4	/* we have log2(rounds) in salt */
 
 #define	BCRYPT_SALTSPACE	(7 + (BCRYPT_MAXSALT * 4 + 2) / 3 + 1)
+#define	BCRYPT_HASHSPACE	61
 
 char   *bcrypt_gensalt(u_int8_t);
 
@@ -64,8 +66,10 @@ bcrypt_initsalt(int log_rounds, uint8_t *salt, size_t saltbuflen)
 {
 	uint8_t csalt[BCRYPT_MAXSALT];
 
-	if (saltbuflen < BCRYPT_SALTSPACE)
+	if (saltbuflen < BCRYPT_SALTSPACE) {
+		errno = EINVAL;
 		return -1;
+	}
 
 	arc4random_buf(csalt, sizeof(csalt));
 
@@ -92,17 +96,20 @@ bcrypt_hashpass(const char *key, const char *salt, char *encrypted,
 	u_int16_t j;
 	size_t key_len;
 	u_int8_t salt_len, logr, minor;
-	u_int8_t ciphertext[4 * BCRYPT_BLOCKS] = "OrpheanBeholderScryDoubt";
+	u_int8_t ciphertext[4 * BCRYPT_WORDS] = "OrpheanBeholderScryDoubt";
 	u_int8_t csalt[BCRYPT_MAXSALT];
-	u_int32_t cdata[BCRYPT_BLOCKS];
+	u_int32_t cdata[BCRYPT_WORDS];
+
+	if (encryptedlen < BCRYPT_HASHSPACE)
+		goto inval;
 
 	/* Check and discard "$" identifier */
 	if (salt[0] != '$')
-		return -1;
+		goto inval;
 	salt += 1;
 
 	if (salt[0] != BCRYPT_VERSION)
-		return -1;
+		goto inval;
 
 	/* Check for minor versions */
 	switch ((minor = salt[1])) {
@@ -120,20 +127,20 @@ bcrypt_hashpass(const char *key, const char *salt, char *encrypted,
 		key_len++; /* include the NUL */
 		break;
 	default:
-		 return -1;
+		 goto inval;
 	}
 	if (salt[2] != '$')
-		return -1;
+		goto inval;
 	/* Discard version + "$" identifier */
 	salt += 3;
 
 	/* Check and parse num rounds */
 	if (!isdigit((unsigned char)salt[0]) ||
 	    !isdigit((unsigned char)salt[1]) || salt[2] != '$')
-		return -1;
+		goto inval;
 	logr = atoi(salt);
 	if (logr < BCRYPT_MINLOGROUNDS || logr > 31)
-		return -1;
+		goto inval;
 	/* Computer power doesn't increase linearly, 2^x should be fine */
 	rounds = 1U << logr;
 
@@ -141,11 +148,11 @@ bcrypt_hashpass(const char *key, const char *salt, char *encrypted,
 	salt += 3;
 
 	if (strlen(salt) * 3 / 4 < BCRYPT_MAXSALT)
-		return -1;
+		goto inval;
 
 	/* We dont want the base64 salt but the raw data */
 	if (decode_base64(csalt, BCRYPT_MAXSALT, salt))
-		return -1;
+		goto inval;
 	salt_len = BCRYPT_MAXSALT;
 
 	/* Setting up S-Boxes and Subkeys */
@@ -159,14 +166,14 @@ bcrypt_hashpass(const char *key, const char *salt, char *encrypted,
 
 	/* This can be precomputed later */
 	j = 0;
-	for (i = 0; i < BCRYPT_BLOCKS; i++)
-		cdata[i] = Blowfish_stream2word(ciphertext, 4 * BCRYPT_BLOCKS, &j);
+	for (i = 0; i < BCRYPT_WORDS; i++)
+		cdata[i] = Blowfish_stream2word(ciphertext, 4 * BCRYPT_WORDS, &j);
 
 	/* Now do the encryption */
 	for (k = 0; k < 64; k++)
-		blf_enc(&state, cdata, BCRYPT_BLOCKS / 2);
+		blf_enc(&state, cdata, BCRYPT_WORDS / 2);
 
-	for (i = 0; i < BCRYPT_BLOCKS; i++) {
+	for (i = 0; i < BCRYPT_WORDS; i++) {
 		ciphertext[4 * i + 3] = cdata[i] & 0xff;
 		cdata[i] = cdata[i] >> 8;
 		ciphertext[4 * i + 2] = cdata[i] & 0xff;
@@ -177,22 +184,18 @@ bcrypt_hashpass(const char *key, const char *salt, char *encrypted,
 	}
 
 
-	i = 0;
-	encrypted[i++] = '$';
-	encrypted[i++] = BCRYPT_VERSION;
-	encrypted[i++] = minor;
-	encrypted[i++] = '$';
-
-	snprintf(encrypted + i, 4, "%2.2u$", logr);
-
-	encode_base64(encrypted + i + 3, csalt, BCRYPT_MAXSALT);
-	encode_base64(encrypted + strlen(encrypted), ciphertext,
-	    4 * BCRYPT_BLOCKS - 1);
+	snprintf(encrypted, 8, "$2%c$%2.2u$", minor, logr);
+	encode_base64(encrypted + 7, csalt, BCRYPT_MAXSALT);
+	encode_base64(encrypted + 7 + 22, ciphertext, 4 * BCRYPT_WORDS - 1);
 	explicit_bzero(&state, sizeof(state));
 	explicit_bzero(ciphertext, sizeof(ciphertext));
 	explicit_bzero(csalt, sizeof(csalt));
 	explicit_bzero(cdata, sizeof(cdata));
 	return 0;
+
+inval:
+	errno = EINVAL;
+	return -1;
 }
 
 /*
@@ -216,16 +219,52 @@ bcrypt_newhash(const char *pass, int log_rounds, char *hash, size_t hashlen)
 int
 bcrypt_checkpass(const char *pass, const char *goodhash)
 {
-	char hash[_PASSWORD_LEN];
+	char hash[BCRYPT_HASHSPACE];
 
 	if (bcrypt_hashpass(pass, goodhash, hash, sizeof(hash)) != 0)
 		return -1;
 	if (strlen(hash) != strlen(goodhash) ||
-	    timingsafe_bcmp(hash, goodhash, strlen(goodhash)) != 0)
+	    timingsafe_bcmp(hash, goodhash, strlen(goodhash)) != 0) {
+		errno = EACCES;
 		return -1;
+	}
 
 	explicit_bzero(hash, sizeof(hash));
 	return 0;
+}
+
+/*
+ * Measure this system's performance by measuring the time for 8 rounds.
+ * We are aiming for something that takes around 0.1s, but not too much over.
+ */
+int
+bcrypt_autorounds(void)
+{
+	struct timespec before, after;
+	int r = 8;
+	char buf[_PASSWORD_LEN];
+	int duration;
+
+	clock_gettime(CLOCK_THREAD_CPUTIME_ID, &before);
+	bcrypt_newhash("testpassword", r, buf, sizeof(buf));
+	clock_gettime(CLOCK_THREAD_CPUTIME_ID, &after);
+
+	duration = after.tv_sec - before.tv_sec;
+	duration *= 1000000;
+	duration += (after.tv_nsec - before.tv_nsec) / 1000;
+
+	/* too quick? slow it down. */
+	while (r < 16 && duration <= 60000) {
+		r += 1;
+		duration *= 2;
+	}
+	/* too slow? speed it up. */
+	while (r > 4 && duration > 120000) {
+		r -= 1;
+		duration /= 2;
+	}
+
+	return r;
 }
 
 /*
@@ -345,7 +384,7 @@ bcrypt_gensalt(u_int8_t log_rounds)
 char *
 bcrypt(const char *pass, const char *salt)
 {
-	static char    gencrypted[_PASSWORD_LEN];
+	static char    gencrypted[BCRYPT_HASHSPACE];
 	static char    gerror[2];
 
 	/* How do I handle errors ? Return ':' */
@@ -355,4 +394,3 @@ bcrypt(const char *pass, const char *salt)
 
 	return gencrypted;
 }
-

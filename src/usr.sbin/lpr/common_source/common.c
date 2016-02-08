@@ -1,4 +1,4 @@
-/*	$OpenBSD: common.c,v 1.35 2013/12/10 16:38:04 naddy Exp $	*/
+/*	$OpenBSD: common.c,v 1.38 2015/01/16 06:40:17 deraadt Exp $	*/
 /*	$NetBSD: common.c,v 1.21 2000/08/09 14:28:50 itojun Exp $	*/
 
 /*
@@ -35,7 +35,6 @@
  * SUCH DAMAGE.
  */
 
-#include <sys/param.h>
 #include <sys/stat.h>
 #include <sys/time.h>
 
@@ -48,6 +47,7 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <unistd.h>
+#include <limits.h>
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
@@ -270,15 +270,14 @@ getq(struct queue ***namelist)
 		 */
 		if (nitems == arraysz) {
 			struct queue **newqueue;
-			size_t newarraysz = arraysz * 2;
-			newqueue = (struct queue **)realloc(queue,
-				newarraysz * sizeof(struct queue *));
+			newqueue = reallocarray(queue,
+			    arraysz, 2 * sizeof(struct queue *));
 			if (newqueue == NULL) {
 				free(q);
 				goto errdone;
 			}
+			arraysz *= 2;
 			queue = newqueue;
-			arraysz = newarraysz;
 		}
 		queue[nitems++] = q;
 	}
@@ -416,13 +415,13 @@ done:
 void
 delay(int n)
 {
-	struct timeval tdelay;
+	struct timespec tdelay;
 
 	if (n <= 0 || n > 10000)
 		fatal("unreasonable delay period (%d)", n);
 	tdelay.tv_sec = n / 1000;
-	tdelay.tv_usec = n * 1000 % 1000000;
-	(void) select(0, (fd_set *)0, (fd_set *)0, (fd_set *)0, &tdelay);
+	tdelay.tv_nsec = n * 1000000 % 1000000000;
+	nanosleep(&tdelay, NULL);
 }
 
 __dead void

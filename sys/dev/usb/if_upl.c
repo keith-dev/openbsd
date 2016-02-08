@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_upl.c,v 1.58 2014/07/13 15:52:49 mpi Exp $ */
+/*	$OpenBSD: if_upl.c,v 1.62 2015/02/04 05:12:13 mpi Exp $ */
 /*	$NetBSD: if_upl.c,v 1.19 2002/07/11 21:14:26 augustss Exp $	*/
 /*
  * Copyright (c) 2000 The NetBSD Foundation, Inc.
@@ -263,6 +263,7 @@ upl_attach(struct device *parent, struct device *self, void *aux)
 	ifp = &sc->sc_if;
 	ifp->if_softc = sc;
 	ifp->if_mtu = UPL_BUFSZ;
+	ifp->if_hardmtu = UPL_BUFSZ;
 	ifp->if_flags = IFF_POINTOPOINT | IFF_NOARP | IFF_SIMPLEX;
 	ifp->if_ioctl = upl_ioctl;
 	ifp->if_start = upl_start;
@@ -468,12 +469,6 @@ upl_rxeof(struct usbd_xfer *xfer, void *priv, usbd_status status)
 	}
 
 #if NBPFILTER > 0
-	/*
-	 * Handle BPF listeners. Let the BPF user see the packet, but
-	 * don't pass it up to the ether_input() layer unless it's
-	 * a broadcast packet, multicast packet, matches our ethernet
-	 * address or the interface is in promiscuous mode.
-	 */
 	if (ifp->if_bpf) {
 		bpf_mtap(ifp->if_bpf, m, BPF_DIRECTION_IN);
 	}
@@ -641,9 +636,6 @@ upl_init(void *xsc)
 
 	DPRINTFN(10,("%s: %s: enter\n", sc->sc_dev.dv_xname,__func__));
 
-	if (ifp->if_flags & IFF_RUNNING)
-		return;
-
 	s = splnet();
 
 	/* Init TX ring. */
@@ -766,7 +758,6 @@ int
 upl_ioctl(struct ifnet *ifp, u_long command, caddr_t data)
 {
 	struct upl_softc	*sc = ifp->if_softc;
-	struct ifaddr 		*ifa = (struct ifaddr *)data;
 	struct ifreq		*ifr = (struct ifreq *)data;
 	int			s, error = 0;
 
@@ -781,37 +772,35 @@ upl_ioctl(struct ifnet *ifp, u_long command, caddr_t data)
 	switch(command) {
 	case SIOCSIFADDR:
 		ifp->if_flags |= IFF_UP;
-		upl_init(sc);
-
-		switch (ifa->ifa_addr->sa_family) {
-#ifdef INET
-		case AF_INET:
-			break;
-#endif /* INET */
-		}
-		break;
-
-	case SIOCSIFMTU:
-		if (ifr->ifr_mtu > UPL_BUFSZ)
-			error = EINVAL;
-		else
-			ifp->if_mtu = ifr->ifr_mtu;
+		if (!(ifp->if_flags & IFF_RUNNING))
+			upl_init(sc);
 		break;
 
 	case SIOCSIFFLAGS:
 		if (ifp->if_flags & IFF_UP) {
-			if (!(ifp->if_flags & IFF_RUNNING))
+			if (ifp->if_flags & IFF_RUNNING)
+				error = ENETRESET;
+			else
 				upl_init(sc);
 		} else {
 			if (ifp->if_flags & IFF_RUNNING)
 				upl_stop(sc);
 		}
-		error = 0;
 		break;
+
+	case SIOCSIFMTU:
+		if (ifr->ifr_mtu < ETHERMIN || ifr->ifr_mtu > ifp->if_hardmtu)
+			error = EINVAL;
+		else
+			ifp->if_mtu = ifr->ifr_mtu;
+		break;
+
 	default:
 		error = ENOTTY;
-		break;
 	}
+
+	if (error == ENETRESET)
+		error = 0;
 
 	splx(s);
 	return (error);

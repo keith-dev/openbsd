@@ -1,6 +1,7 @@
-/*	$OpenBSD: spamd.c,v 1.114 2014/03/26 13:09:02 gsoares Exp $	*/
+/*	$OpenBSD: spamd.c,v 1.125 2015/02/22 14:55:40 jsing Exp $	*/
 
 /*
+ * Copyright (c) 2015 Henning Brauer <henning@openbsd.org>
  * Copyright (c) 2002-2007 Bob Beck.  All rights reserved.
  * Copyright (c) 2002 Theo de Raadt.  All rights reserved.
  *
@@ -17,25 +18,28 @@
  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
 
-#include <sys/param.h>
-#include <sys/file.h>
-#include <sys/wait.h>
+#include <sys/types.h>
 #include <sys/socket.h>
 #include <sys/sysctl.h>
 #include <sys/resource.h>
+#include <sys/signal.h>
+#include <sys/stat.h>
 
 #include <netinet/in.h>
 #include <arpa/inet.h>
 
 #include <err.h>
 #include <errno.h>
-#include <getopt.h>
+#include <fcntl.h>
+#include <limits.h>
 #include <pwd.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <syslog.h>
 #include <unistd.h>
+#include <limits.h>
+#include <tls.h>
 
 #include <netdb.h>
 
@@ -57,6 +61,7 @@ struct con {
 	char caddr[32];
 	char helo[MAX_MAIL], mail[MAX_MAIL], rcpt[MAX_MAIL];
 	struct sdlist **blacklists;
+	struct tls *cctx;
 
 	/*
 	 * we will do stuttering by changing these to time_t's of
@@ -89,7 +94,6 @@ int      parse_configline(char *);
 void     parse_configs(void);
 void     do_config(void);
 int      append_error_string (struct con *, size_t, char *, int, void *);
-void     build_reply(struct  con *);
 void     doreply(struct con *);
 void     setlog(char *, size_t, char *);
 void     initcon(struct con *, int, struct sockaddr *);
@@ -102,8 +106,9 @@ char    *loglists(struct con *);
 void     getcaddr(struct con *);
 void     gethelo(char *, size_t, char *);
 int      read_configline(FILE *);
+void	 spamd_tls_init(char *, char *);
 
-char hostname[MAXHOSTNAMELEN];
+char hostname[HOST_NAME_MAX+1];
 struct syslog_data sdata = SYSLOG_DATA_INIT;
 char *nreply = "450";
 char *spamd = "spamd IP-based SPAM blocker";
@@ -119,6 +124,8 @@ struct passwd *pw;
 pid_t jail_pid = -1;
 u_short cfg_port;
 u_short sync_port;
+struct tls_config *tlscfg;
+struct tls *tlsctx;
 
 extern struct sdlist *blacklists;
 extern int pfdev;
@@ -149,16 +156,18 @@ int syncrecv;
 int syncsend;
 #define MAXTIME 400
 
+#define MAXIMUM(a,b) (((a)>(b))?(a):(b))
+
 void
 usage(void)
 {
 	extern char *__progname;
 
 	fprintf(stderr,
-	    "usage: %s [-45bdv] [-B maxblack] [-c maxcon] "
+	    "usage: %s [-45bdv] [-B maxblack] [-C file] [-c maxcon] "
 	    "[-G passtime:greyexp:whiteexp]\n"
-	    "\t[-h hostname] [-l address] [-M address] [-n name] [-p port]\n"
-	    "\t[-S secs] [-s secs] "
+	    "\t[-h hostname] [-K file] [-l address] [-M address] [-n name]\n"
+	    "\t[-p port] [-S secs] [-s secs] "
 	    "[-w window] [-Y synctarget] [-y synclisten]\n",
 	    __progname);
 
@@ -186,11 +195,12 @@ grow_obuf(struct con *cp, int off)
 int
 parse_configline(char *line)
 {
-	char *cp, prev, *name, *msg;
-	static char **av = NULL;
-	static size_t ac = 0;
-	size_t au = 0;
+	char *cp, prev, *name, *msg, *tmp;
+	char **v4 = NULL, **v6 = NULL;
+	const char *errstr;
+	u_int nv4 = 0, nv6 = 0;
 	int mdone = 0;
+	sa_family_t af;
 
 	name = line;
 
@@ -221,11 +231,16 @@ parse_configline(char *line)
 				if (*cp == ';') {
 					mdone = 1;
 					*cp = '\0';
-				} else
+				} else {
+					if (debug > 0)
+						printf("bad message: %s\n", msg);
 					goto parse_error;
+				}
 			}
 			break;
 		case '\0':
+			if (debug > 0)
+				printf("bad message: %s\n", msg);
 			goto parse_error;
 		default:
 			prev = '\0';
@@ -233,35 +248,91 @@ parse_configline(char *line)
 		}
 	}
 
-	do {
-		if (ac == au) {
-			char **tmp;
+	while ((tmp = strsep(&cp, ";")) != NULL) {
+		char **av;
+		u_int au, ac;
 
-			tmp = realloc(av, (ac + 2048) * sizeof(char *));
-			if (tmp == NULL) {
-				free(av);
-				av = NULL;
-				ac = 0;
-				return (-1);
+		if (*tmp == '\0')
+			continue;
+
+		if (strncmp(tmp, "inet", 4) != 0)
+			goto parse_error;
+		switch (tmp[4]) {
+		case '\0':
+			af = AF_INET;
+			break;
+		case '6':
+			if (tmp[5] == '\0') {
+				af = AF_INET6;
+				break;
 			}
-			av = tmp;
-			ac += 2048;
+			/* FALLTHROUGH */
+		default:
+			if (debug > 0)
+				printf("unsupported address family: %s\n", tmp);
+			goto parse_error;
 		}
-	} while ((av[au++] = strsep(&cp, ";")) != NULL);
 
-	/* toss empty last entry to allow for trailing ; */
-	while (au > 0 && (av[au - 1] == NULL || av[au - 1][0] == '\0'))
-		au--;
+		tmp = strsep(&cp, ";");
+		if (tmp == NULL) {
+			if (debug > 0)
+				printf("missing address count\n");
+			goto parse_error;
+		}
+		ac = strtonum(tmp, 0, UINT_MAX, &errstr);
+		if (errstr != NULL) {
+			if (debug > 0)
+				printf("count \"%s\" is %s\n", tmp, errstr);
+			goto parse_error;
+		}
 
-	if (au < 1)
+		av = reallocarray(NULL, ac, sizeof(char *));
+		for (au = 0; au < ac; au++) {
+			tmp = strsep(&cp, ";");
+			if (tmp == NULL) {
+				if (debug > 0)
+					printf("expected %u addrs, got %u\n",
+					    ac, au + 1);
+				free(av);
+				goto parse_error;
+			}
+			if (*tmp == '\0')
+				continue;
+			av[au] = tmp;
+		}
+		if (af == AF_INET) {
+			if (v4 != NULL) {
+				if (debug > 0)
+					printf("duplicate inet\n");
+				goto parse_error;
+			}
+			v4 = av;
+			nv4 = ac;
+		} else {
+			if (v6 != NULL) {
+				if (debug > 0)
+					printf("duplicate inet6\n");
+				goto parse_error;
+			}
+			v6 = av;
+			nv6 = ac;
+		}
+	}
+	if (nv4 == 0 && nv6 == 0) {
+		if (debug > 0)
+			printf("no addresses\n");
 		goto parse_error;
-	else
-		sdl_add(name, msg, av, au);
+	}
+	sdl_add(name, msg, v4, nv4, v6, nv6);
+	free(v4);
+	free(v6);
 	return (0);
 
 parse_error:
 	if (debug > 0)
-		printf("bogus config line - need 'tag;message;a/m;a/m;a/m...'\n");
+		printf("bogus config line - need 'tag;message;af;count;a/m;a/m;a/m...'\n");
+	free(v4);
+	free(v6);
 	return (-1);
 }
 
@@ -269,23 +340,9 @@ void
 parse_configs(void)
 {
 	char *start, *end;
-	int i;
+	size_t i;
 
-	if (cbu == cbs) {
-		char *tmp;
-
-		tmp = realloc(cb, cbs + 8192);
-		if (tmp == NULL) {
-			if (debug > 0)
-				warn("realloc");
-			free(cb);
-			cb = NULL;
-			cbs = cbu = 0;
-			return;
-		}
-		cbs += 8192;
-		cb = tmp;
-	}
+	/* We always leave an extra byte for the NUL. */
 	cb[cbu++] = '\0';
 
 	start = cb;
@@ -311,19 +368,17 @@ do_config(void)
 	if (debug > 0)
 		printf("got configuration connection\n");
 
-	if (cbu == cbs) {
+	/* Leave an extra byte for the terminating NUL. */
+	if (cbu + 1 >= cbs) {
 		char *tmp;
 
-		tmp = realloc(cb, cbs + 8192);
+		tmp = realloc(cb, cbs + (1024 * 1024));
 		if (tmp == NULL) {
 			if (debug > 0)
 				warn("realloc");
-			free(cb);
-			cb = NULL;
-			cbs = 0;
 			goto configdone;
 		}
-		cbs += 8192;
+		cbs += 1024 * 1024;
 		cb = tmp;
 	}
 
@@ -331,7 +386,8 @@ do_config(void)
 	if (debug > 0)
 		printf("read %d config bytes\n", n);
 	if (n == 0) {
-		parse_configs();
+		if (cbu != 0)
+			parse_configs();
 		goto configdone;
 	} else if (n == -1) {
 		if (debug > 0)
@@ -342,6 +398,9 @@ do_config(void)
 	return;
 
 configdone:
+	free(cb);
+	cb = NULL;
+	cbs = 0;
 	cbu = 0;
 	close(conffd);
 	conffd = -1;
@@ -365,6 +424,37 @@ read_configline(FILE *config)
 		return (-1);
 	}
 	return (0);
+}
+
+void
+spamd_tls_init(char *keyfile, char *certfile)
+{
+	if (keyfile == NULL && certfile == NULL)
+		return;
+	if (keyfile == NULL || certfile == NULL)
+		errx(1, "need key and certificate for TLS");
+
+	if (tls_init() != 0)
+		errx(1, "failed to initialise tls");
+	if ((tlscfg = tls_config_new()) == NULL)
+		errx(1, "failed to get tls config");
+	if ((tlsctx = tls_server()) == NULL)
+		errx(1, "failed to get tls server");
+
+	tls_config_set_protocols(tlscfg, TLS_PROTOCOLS_ALL);
+
+	/* might need user-specified ciphers, tls_config_set_ciphers */
+	if (tls_config_set_ciphers(tlscfg, "compat") != 0)
+		errx(1, "failed to set tls ciphers");
+
+	if (tls_config_set_cert_file(tlscfg, certfile) != 0)
+		err(1, "could not load certificate %s", certfile);
+	if (tls_config_set_key_file(tlscfg, keyfile) != 0)
+		err(1, "could not load key %s", keyfile);
+	if (tls_configure(tlsctx, tlscfg) != 0)
+		errx(1, "failed to configure TLS - %s", tls_error(tlsctx));
+
+	/* set hostname to cert's CN unless explicitely given? */
 }
 
 int
@@ -482,7 +572,7 @@ loglists(struct con *cp)
 }
 
 void
-build_reply(struct con *cp)
+doreply(struct con *cp)
 {
 	struct sdlist **matches;
 	int off = 0;
@@ -492,7 +582,6 @@ build_reply(struct con *cp)
 		goto nomatch;
 	for (; *matches; matches++) {
 		int used = 0;
-		char *c = cp->obuf + off;
 		int left = cp->osize - off;
 
 		used = append_error_string(cp, off, matches[0]->string,
@@ -503,8 +592,7 @@ build_reply(struct con *cp)
 		left -= used;
 		if (cp->obuf[off - 1] != '\n') {
 			if (left < 1) {
-				c = grow_obuf(cp, off);
-				if (c == NULL)
+				if (grow_obuf(cp, off) == NULL)
 					goto bad;
 			}
 			cp->obuf[off++] = '\n';
@@ -516,21 +604,17 @@ nomatch:
 	/* No match. give generic reply */
 	free(cp->obuf);
 	cp->obuf = NULL;
-	cp->osize = 0;
 	if (cp->blacklists != NULL)
-		asprintf(&cp->obuf,
+		cp->osize = asprintf(&cp->obuf,
 		    "%s-Sorry %s\n"
 		    "%s-You are trying to send mail from an address "
 		    "listed by one\n"
 		    "%s or more IP-based registries as being a SPAM source.\n",
 		    nreply, cp->addr, nreply, nreply);
 	else
-		asprintf(&cp->obuf,
+		cp->osize = asprintf(&cp->obuf,
 		    "451 Temporary failure, please try again later.\r\n");
-	if (cp->obuf != NULL)
-		cp->osize = strlen(cp->obuf) + 1;
-	else
-		cp->osize = 0;
+	cp->osize++; /* size includes the NUL (also changes -1 to 0) */
 	return;
 bad:
 	if (cp->obuf != NULL) {
@@ -538,12 +622,6 @@ bad:
 		cp->obuf = NULL;
 		cp->osize = 0;
 	}
-}
-
-void
-doreply(struct con *cp)
-{
-	build_reply(cp);
 }
 
 void
@@ -620,7 +698,7 @@ initcon(struct con *cp, int fd, struct sockaddr *sa)
 {
 	socklen_t len = sa->sa_len;
 	time_t tt;
-	char *tmp;
+	char ctimebuf[26];
 	int error;
 
 	time(&tt);
@@ -635,6 +713,7 @@ initcon(struct con *cp, int fd, struct sockaddr *sa)
 	if (grow_obuf(cp, 0) == NULL)
 		err(1, "malloc");
 	cp->fd = fd;
+	cp->cctx = NULL;
 	if (len > sizeof(cp->ss))
 		errx(1, "sockaddr size");
 	if (sa->sa_family != AF_INET)
@@ -651,13 +730,10 @@ initcon(struct con *cp, int fd, struct sockaddr *sa)
 	if (error)
 		errx(1, "%s", gai_strerror(error));
 #endif
-	tmp = strdup(ctime(&t));
-	if (tmp == NULL)
-		err(1, "malloc");
-	tmp[strlen(tmp) - 1] = '\0'; /* nuke newline */
+	ctime_r(&t, ctimebuf);
+	ctimebuf[sizeof(ctimebuf) - 2] = '\0'; /* nuke newline */
 	snprintf(cp->obuf, cp->osize, "220 %s ESMTP %s; %s\r\n",
-	    hostname, spamd, tmp);
-	free(tmp);
+	    hostname, spamd, ctimebuf);
 	cp->op = cp->obuf;
 	cp->ol = strlen(cp->op);
 	cp->w = tt + cp->stutter;
@@ -681,7 +757,11 @@ closecon(struct con *cp)
 {
 	time_t tt;
 
-	close(cp->fd);
+	if (cp->cctx) {
+		tls_close(cp->cctx);
+		tls_free(cp->cctx);
+	} else
+		close(cp->fd);
 	slowdowntill = 0;
 
 	time(&tt);
@@ -760,9 +840,16 @@ nextstate(struct con *cp)
 				snprintf(cp->obuf, cp->osize,
 				    "501 helo requires domain name.\r\n");
 			} else {
-				snprintf(cp->obuf, cp->osize,
-				    "250 Hello, spam sender. "
-				    "Pleased to be wasting your time.\r\n");
+				if (tlsctx != NULL && cp->blacklists == NULL &&
+				    match(cp->ibuf, "EHLO")) {
+					snprintf(cp->obuf, cp->osize,
+					    "250 STARTTLS\r\n");
+					nextstate = 7;
+				} else {
+					snprintf(cp->obuf, cp->osize,
+					    "250 Hello, spam sender. Pleased "
+					    "to be wasting your time.\r\n");
+				}
 			}
 			cp->op = cp->obuf;
 			cp->ol = strlen(cp->op);
@@ -773,6 +860,7 @@ nextstate(struct con *cp)
 		}
 		goto mail;
 	case 2:
+	tlsinitdone:
 		/* sent 250 Hello, wait for input */
 		cp->ip = cp->ibuf;
 		cp->il = sizeof(cp->ibuf) - 1;
@@ -848,6 +936,39 @@ nextstate(struct con *cp)
 		cp->state = 5;
 		cp->r = t;
 		break;
+	case 7:
+		/* sent 250 STARTTLS, wait for input */
+		cp->ip = cp->ibuf;
+		cp->il = sizeof(cp->ibuf) - 1;
+		cp->laststate = cp->state;
+		cp->state = 8;
+		cp->r = t;
+		break;
+	case 8:
+		if (tlsctx != NULL && cp->blacklists == NULL &&
+		    cp->cctx == NULL && match(cp->ibuf, "STARTTLS")) {
+			snprintf(cp->obuf, cp->osize,
+			    "220 glad you want to burn more CPU cycles on "
+			    "your spam\r\n");
+			cp->op = cp->obuf;
+			cp->ol = strlen(cp->op);
+			cp->laststate = cp->state;
+			cp->state = 9;
+			cp->w = t + cp->stutter;
+			break;
+		}
+		goto mail;
+	case 9:
+		if (tls_accept_socket(tlsctx, &cp->cctx, cp->fd) == -1) {
+			snprintf(cp->obuf, cp->osize,
+			    "500 STARTTLS failed\r\n");
+			cp->op = cp->obuf;
+			cp->ol = strlen(cp->op);
+			cp->laststate = cp->state;
+			cp->state = 98;
+			goto done;
+		}	
+		goto tlsinitdone;
 
 	case 50:
 	spam:
@@ -956,7 +1077,14 @@ handler(struct con *cp)
 	int n;
 
 	if (cp->r) {
-		n = read(cp->fd, cp->ip, cp->il);
+		if (cp->cctx) {
+			size_t outlen;
+			n = -1;
+			if (tls_read(cp->cctx, cp->ip, cp->il, &outlen) == 0)
+				n = outlen;
+		} else
+			n = read(cp->fd, cp->ip, cp->il);
+
 		if (n == 0)
 			closecon(cp);
 		else if (n == -1) {
@@ -986,6 +1114,7 @@ void
 handlew(struct con *cp, int one)
 {
 	int n;
+	size_t outlen;
 
 	/* kill stutter on greylisted connections after initial delay */
 	if (cp->stutter && greylist && cp->blacklists == NULL &&
@@ -995,7 +1124,13 @@ handlew(struct con *cp, int one)
 	if (cp->w) {
 		if (*cp->op == '\n' && !cp->sr) {
 			/* insert \r before \n */
-			n = write(cp->fd, "\r", 1);
+			if (cp->cctx) {
+				n = -1;
+				if (tls_write(cp->cctx, "\r", 1, &outlen) == 0)
+					n = outlen;
+			} else
+				n = write(cp->fd, "\r", 1);
+
 			if (n == 0) {
 				closecon(cp);
 				goto handled;
@@ -1010,7 +1145,14 @@ handlew(struct con *cp, int one)
 			cp->sr = 1;
 		else
 			cp->sr = 0;
-		n = write(cp->fd, cp->op, (one && cp->stutter) ? 1 : cp->ol);
+		if (cp->cctx) {
+			n = -1;
+			if (tls_write(cp->cctx, cp->op, cp->ol, &outlen) == 0)
+				n = outlen;
+		} else
+			n = write(cp->fd, cp->op,
+			   (one && cp->stutter) ? 1 : cp->ol);
+
 		if (n == 0)
 			closecon(cp);
 		else if (n == -1) {
@@ -1063,6 +1205,8 @@ main(int argc, char *argv[])
 	const char *errstr;
 	char *sync_iface = NULL;
 	char *sync_baddr = NULL;
+	char *tlskeyfile = NULL;
+	char *tlscertfile = NULL;
 
 	tzset();
 	openlog_r("spamd", LOG_PID | LOG_NDELAY, LOG_DAEMON, &sdata);
@@ -1085,7 +1229,7 @@ main(int argc, char *argv[])
 	if (maxblack > maxfiles)
 		maxblack = maxfiles;
 	while ((ch =
-	    getopt(argc, argv, "45l:c:B:p:bdG:h:s:S:M:n:vw:y:Y:")) != -1) {
+	    getopt(argc, argv, "45l:c:B:p:bdG:h:s:S:M:n:vw:y:Y:C:K:")) != -1) {
 		switch (ch) {
 		case '4':
 			nreply = "450";
@@ -1174,6 +1318,12 @@ main(int argc, char *argv[])
 		case 'y':
 			sync_baddr = optarg;
 			syncrecv++;
+			break;
+		case 'C':
+			tlscertfile = optarg;
+			break;
+		case 'K':
+			tlskeyfile = optarg;
 			break;
 		default:
 			usage();
@@ -1323,6 +1473,8 @@ main(int argc, char *argv[])
 	}
 
 jail:
+	spamd_tls_init(tlskeyfile, tlscertfile);
+
 	if (chroot("/var/empty") == -1 || chdir("/") == -1) {
 		syslog(LOG_ERR, "cannot chdir to /var/empty.");
 		exit(1);
@@ -1349,16 +1501,16 @@ jail:
 		int max, n;
 		int writers;
 
-		max = MAX(s, conflisten);
+		max = MAXIMUM(s, conflisten);
 		if (syncrecv)
-			max = MAX(max, syncfd);
-		max = MAX(max, conffd);
-		max = MAX(max, trapfd);
+			max = MAXIMUM(max, syncfd);
+		max = MAXIMUM(max, conffd);
+		max = MAXIMUM(max, trapfd);
 
 		time(&t);
 		for (i = 0; i < maxcon; i++)
 			if (con[i].fd != -1)
-				max = MAX(max, con[i].fd);
+				max = MAXIMUM(max, con[i].fd);
 
 		if (max > omax) {
 			free(fdsr);

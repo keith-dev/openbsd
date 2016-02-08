@@ -1,4 +1,4 @@
-/*	$OpenBSD: umass.c,v 1.66 2014/07/12 18:48:52 tedu Exp $ */
+/*	$OpenBSD: umass.c,v 1.69 2015/01/27 11:04:45 mpi Exp $ */
 /*	$NetBSD: umass.c,v 1.116 2004/06/30 05:53:46 mycroft Exp $	*/
 
 /*
@@ -180,19 +180,15 @@ char *states[TSTATE_STATES+1] = {
 int umass_match(struct device *, void *, void *); 
 void umass_attach(struct device *, struct device *, void *); 
 int umass_detach(struct device *, int); 
-int umass_activate(struct device *, int); 
 
 struct cfdriver umass_cd = { 
 	NULL, "umass", DV_DULL 
 }; 
 
-const struct cfattach umass_ca = { 
-	sizeof(struct umass_softc), 
-	umass_match, 
-	umass_attach, 
-	umass_detach, 
-	umass_activate, 
+const struct cfattach umass_ca = {
+	sizeof(struct umass_softc), umass_match, umass_attach, umass_detach
 };
+
 void umass_disco(struct umass_softc *sc);
 
 /* generic transfer functions */
@@ -668,32 +664,6 @@ umass_detach(struct device *self, int flags)
 	return (rv);
 }
 
-int
-umass_activate(struct device *dev, int act)
-{
-	struct umass_softc *sc = (struct umass_softc *)dev;
-	struct umassbus_softc *scbus = sc->bus;
-	int rv = 0;
-
-	DPRINTF(UDMASS_USB, ("%s: umass_activate: %d\n",
-	    sc->sc_dev.dv_xname, act));
-
-	switch (act) {
-	case DVACT_DEACTIVATE:
-		usbd_deactivate(sc->sc_udev);
-		if (scbus == NULL || scbus->sc_child == NULL)
-			break;
-		rv = config_deactivate(scbus->sc_child);
-		DPRINTF(UDMASS_USB, ("%s: umass_activate: child "
-		    "returned %d\n", sc->sc_dev.dv_xname, rv));
-		break;
-	default:
-		rv = config_activate_children(dev, act);
-		break;
-	}
-	return (rv);
-}
-
 void
 umass_disco(struct umass_softc *sc)
 {
@@ -701,18 +671,22 @@ umass_disco(struct umass_softc *sc)
 
 	DPRINTF(UDMASS_GEN, ("umass_disco\n"));
 
-	/* Free the xfers. */
-	for (i = 0; i < XFER_NR; i++)
-		if (sc->transfer_xfer[i] != NULL) {
-			usbd_free_xfer(sc->transfer_xfer[i]);
-			sc->transfer_xfer[i] = NULL;
-		}
-
 	/* Remove all the pipes. */
 	for (i = 0 ; i < UMASS_NEP ; i++) {
 		if (sc->sc_pipe[i] != NULL) {
 			usbd_close_pipe(sc->sc_pipe[i]);
 			sc->sc_pipe[i] = NULL;
+		}
+	}
+
+	/* Make sure there is no stuck control transfer left. */
+	usbd_abort_pipe(sc->sc_udev->default_pipe);
+
+	/* Free the xfers. */
+	for (i = 0; i < XFER_NR; i++) {
+		if (sc->transfer_xfer[i] != NULL) {
+			usbd_free_xfer(sc->transfer_xfer[i]);
+			sc->transfer_xfer[i] = NULL;
 		}
 	}
 }
@@ -1208,10 +1182,10 @@ umass_bbb_state(struct usbd_xfer *xfer, void *priv, usbd_status err)
 		 * err == 0 and the following if block is passed.
 		 */
 		if (err) {	/* should not occur */
-			printf("%s: BBB bulk-%s stall clear failed, %s\n",
-			    sc->sc_dev.dv_xname,
+			DPRINTF(UDMASS_BBB, ("%s: BBB bulk-%s stall clear"
+			    " failed, %s\n", sc->sc_dev.dv_xname,
 			    (sc->transfer_dir == DIR_IN? "in":"out"),
-			    usbd_errstr(err));
+			    usbd_errstr(err)));
 			umass_bbb_reset(sc, STATUS_WIRE_FAILED);
 			return;
 		}
@@ -1353,8 +1327,8 @@ umass_bbb_state(struct usbd_xfer *xfer, void *priv, usbd_status err)
 	/***** Bulk Reset *****/
 	case TSTATE_BBB_RESET1:
 		if (err)
-			printf("%s: BBB reset failed, %s\n",
-				sc->sc_dev.dv_xname, usbd_errstr(err));
+			DPRINTF(UDMASS_BBB, ("%s: BBB reset failed, %s\n",
+				sc->sc_dev.dv_xname, usbd_errstr(err)));
 
 		sc->transfer_state = TSTATE_BBB_RESET2;
 		umass_clear_endpoint_stall(sc, UMASS_BULKIN,
@@ -1363,8 +1337,9 @@ umass_bbb_state(struct usbd_xfer *xfer, void *priv, usbd_status err)
 		return;
 	case TSTATE_BBB_RESET2:
 		if (err)	/* should not occur */
-			printf("%s: BBB bulk-in clear stall failed, %s\n",
-			       sc->sc_dev.dv_xname, usbd_errstr(err));
+			DPRINTF(UDMASS_BBB, ("%s: BBB bulk-in clear stall"
+				" failed, %s\n", sc->sc_dev.dv_xname,
+				usbd_errstr(err)));
 			/* no error recovery, otherwise we end up in a loop */
 
 		sc->transfer_state = TSTATE_BBB_RESET3;
@@ -1374,8 +1349,9 @@ umass_bbb_state(struct usbd_xfer *xfer, void *priv, usbd_status err)
 		return;
 	case TSTATE_BBB_RESET3:
 		if (err)	/* should not occur */
-			printf("%s: BBB bulk-out clear stall failed, %s\n",
-			       sc->sc_dev.dv_xname, usbd_errstr(err));
+			DPRINTF(UDMASS_BBB,("%s: BBB bulk-out clear stall"
+				" failed, %s\n", sc->sc_dev.dv_xname,
+				usbd_errstr(err)));
 			/* no error recovery, otherwise we end up in a loop */
 
 		sc->transfer_state = TSTATE_IDLE;

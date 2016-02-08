@@ -1,4 +1,4 @@
-/* $OpenBSD: input.c,v 1.69 2014/06/06 13:21:41 nicm Exp $ */
+/* $OpenBSD: input.c,v 1.72 2015/01/20 08:18:04 nicm Exp $ */
 
 /*
  * Copyright (c) 2007 Nicholas Marriott <nicm@users.sourceforge.net>
@@ -909,7 +909,7 @@ input_ground(struct input_ctx *ictx)
 
 	if (ictx->input_space > INPUT_BUF_START) {
 		ictx->input_space = INPUT_BUF_START;
-		ictx->input_buf = xrealloc(ictx->input_buf, 1, INPUT_BUF_START);
+		ictx->input_buf = xrealloc(ictx->input_buf, INPUT_BUF_START);
 	}
 }
 
@@ -974,7 +974,7 @@ input_input(struct input_ctx *ictx)
 			ictx->flags |= INPUT_DISCARD;
 			return (0);
 		}
-		ictx->input_buf = xrealloc(ictx->input_buf, 1, available);
+		ictx->input_buf = xrealloc(ictx->input_buf, available);
 		ictx->input_space = available;
 	}
 	ictx->input_buf[ictx->input_len++] = ictx->ch;
@@ -1342,6 +1342,9 @@ input_csi_dispatch_rm(struct input_ctx *ictx)
 		case 4:		/* IRM */
 			screen_write_mode_clear(&ictx->ctx, MODE_INSERT);
 			break;
+		case 34:
+			screen_write_mode_set(&ictx->ctx, MODE_BLINKING);
+			break;
 		default:
 			log_debug("%s: unknown '%c'", __func__, ictx->ch);
 			break;
@@ -1368,13 +1371,15 @@ input_csi_dispatch_rm_private(struct input_ctx *ictx)
 		case 7:		/* DECAWM */
 			screen_write_mode_clear(&ictx->ctx, MODE_WRAP);
 			break;
+		case 12:
+			screen_write_mode_clear(&ictx->ctx, MODE_BLINKING);
+			break;
 		case 25:	/* TCEM */
 			screen_write_mode_clear(&ictx->ctx, MODE_CURSOR);
 			break;
 		case 1000:
 		case 1001:
 		case 1002:
-		case 1003:
 			screen_write_mode_clear(&ictx->ctx, ALL_MOUSE_MODES);
 			break;
 		case 1004:
@@ -1414,6 +1419,9 @@ input_csi_dispatch_sm(struct input_ctx *ictx)
 		case 4:		/* IRM */
 			screen_write_mode_set(&ictx->ctx, MODE_INSERT);
 			break;
+		case 34:
+			screen_write_mode_clear(&ictx->ctx, MODE_BLINKING);
+			break;
 		default:
 			log_debug("%s: unknown '%c'", __func__, ictx->ch);
 			break;
@@ -1440,6 +1448,9 @@ input_csi_dispatch_sm_private(struct input_ctx *ictx)
 		case 7:		/* DECAWM */
 			screen_write_mode_set(&ictx->ctx, MODE_WRAP);
 			break;
+		case 12:
+			screen_write_mode_set(&ictx->ctx, MODE_BLINKING);
+			break;
 		case 25:	/* TCEM */
 			screen_write_mode_set(&ictx->ctx, MODE_CURSOR);
 			break;
@@ -1450,10 +1461,6 @@ input_csi_dispatch_sm_private(struct input_ctx *ictx)
 		case 1002:
 			screen_write_mode_clear(&ictx->ctx, ALL_MOUSE_MODES);
 			screen_write_mode_set(&ictx->ctx, MODE_MOUSE_BUTTON);
-			break;
-		case 1003:
-			screen_write_mode_clear(&ictx->ctx, ALL_MOUSE_MODES);
-			screen_write_mode_set(&ictx->ctx, MODE_MOUSE_ANY);
 			break;
 		case 1004:
 			if (ictx->ctx.s->mode & MODE_FOCUSON)

@@ -1,9 +1,10 @@
-/*	$OpenBSD: arc4random_osx.h,v 1.7 2014/07/20 20:51:13 bcook Exp $	*/
+/*	$OpenBSD: arc4random_osx.h,v 1.9 2015/01/15 06:57:18 deraadt Exp $	*/
 
 /*
  * Copyright (c) 1996, David Mazieres <dm@uun.org>
  * Copyright (c) 2008, Damien Miller <djm@openbsd.org>
  * Copyright (c) 2013, Markus Friedl <markus@openbsd.org>
+ * Copyright (c) 2014, Theo de Raadt <deraadt@openbsd.org>
  *
  * Permission to use, copy, modify, and distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -70,7 +71,7 @@ _rs_allocate(struct _rs **rsp, struct _rsx **rsxp)
 
 	if ((*rsxp = mmap(NULL, sizeof(**rsxp), PROT_READ|PROT_WRITE,
 	    MAP_ANON|MAP_PRIVATE, -1, 0)) == MAP_FAILED) {
-		munmap(*rsxp, sizeof(**rsxp));
+		munmap(*rsp, sizeof(**rsp));
 		return -1;
 	}
 

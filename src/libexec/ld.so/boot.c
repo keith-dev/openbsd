@@ -1,4 +1,4 @@
-/*	$OpenBSD: boot.c,v 1.2 2014/07/06 17:33:10 otto Exp $ */
+/*	$OpenBSD: boot.c,v 1.5 2015/01/16 16:18:07 deraadt Exp $ */
 
 /*
  * Copyright (c) 1998 Per Fogelstrom, Opsycon AB
@@ -37,7 +37,6 @@
 #include <sys/types.h>
 #include <sys/mman.h>
 #include <sys/exec.h>
-#include <sys/param.h>
 #include <sys/sysctl.h>
 #include <nlist.h>
 #include <link.h>
@@ -51,7 +50,7 @@
 #include "stdlib.h"
 #include "dl_prebind.h"
 
-#include "../../lib/csu/common_elf/os-note-elf.h"
+#include "../../lib/csu/os-note-elf.h"
 
 /*
  * Local decls.
@@ -115,6 +114,7 @@ _dl_boot_bind(const long sp, long *dl_data, Elf_Dyn *dynamicp)
 #else
 	dynp = (Elf_Dyn *)((long)_DYNAMIC + loff);
 #endif
+	_dl_memset(dynld.Dyn.info, 0, sizeof(dynld.Dyn.info));
 	while (dynp != NULL && dynp->d_tag != DT_NULL) {
 		if (dynp->d_tag < DT_NUM)
 			dynld.Dyn.info[dynp->d_tag] = dynp->d_un.d_val;

@@ -1,4 +1,4 @@
-/*	$OpenBSD: rtsock.c,v 1.150 2014/07/29 12:18:41 mpi Exp $	*/
+/*	$OpenBSD: rtsock.c,v 1.157 2015/02/11 23:34:43 mpi Exp $	*/
 /*	$NetBSD: rtsock.c,v 1.18 1996/03/29 00:32:10 cgd Exp $	*/
 
 /*
@@ -72,6 +72,7 @@
 #include <sys/protosw.h>
 
 #include <net/if.h>
+#include <net/if_var.h>
 #include <net/route.h>
 #include <net/raw_cb.h>
 
@@ -108,6 +109,15 @@ struct routecb {
 	u_int		rtableid;
 };
 #define	sotoroutecb(so)	((struct routecb *)(so)->so_pcb)
+
+struct route_cb {
+	int		ip_count;
+	int		ip6_count;
+	int		mpls_count;
+	int		any_count;
+};
+
+struct route_cb route_cb;
 
 /*
  * These flags and timeout are used for indicating to userland (via a 
@@ -533,13 +543,20 @@ route_output(struct mbuf *m, ...)
 	}
 
 
+	/* Do not let userland play with kernel-only flags. */
+	if ((rtm->rtm_flags & (RTF_LOCAL|RTF_BROADCAST)) != 0) {
+		error = EINVAL;
+		goto fail;
+	}
+
 	/* make sure that kernel-only bits are not set */
 	rtm->rtm_priority &= RTP_MASK;
 	rtm->rtm_flags &= ~(RTF_DONE|RTF_CLONED);
 	rtm->rtm_fmask &= RTF_FMASK;
 
 	if (rtm->rtm_priority != 0) {
-		if (rtm->rtm_priority > RTP_MAX) {
+		if (rtm->rtm_priority > RTP_MAX ||
+		    rtm->rtm_priority == RTP_LOCAL) {
 			error = EINVAL;
 			goto fail;
 		}
@@ -724,13 +741,6 @@ report:
 			break;
 
 		case RTM_CHANGE:
-			/*
-			 * new gateway could require new ifaddr, ifp;
-			 * flags may also be different; ifp may be specified
-			 * by ll sockaddr when protocol address is ambiguous
-			 */
-			if ((error = rt_getifa(&info, tableid)) != 0)
-				goto flush;
 			newgate = 0;
 			if (info.rti_info[RTAX_GATEWAY] != NULL)
 				if (rt->rt_gateway == NULL ||
@@ -740,12 +750,20 @@ report:
 					newgate = 1;
 				}
 			if (info.rti_info[RTAX_GATEWAY] != NULL &&
-			    rt_setgate(rt, rt_key(rt),
-			    info.rti_info[RTAX_GATEWAY], tableid)) {
-				error = EDQUOT;
+			    (error = rt_setgate(rt, info.rti_info[RTAX_GATEWAY],
+			     tableid)))
 				goto flush;
+			/*
+			 * new gateway could require new ifaddr, ifp;
+			 * flags may also be different; ifp may be specified
+			 * by ll sockaddr when protocol address is ambiguous
+			 */
+			if (newgate || info.rti_info[RTAX_IFP] != NULL ||
+			    info.rti_info[RTAX_IFA] != NULL) {
+				if ((error = rt_getifa(&info, tableid)) != 0)
+					goto flush;
+				ifa = info.rti_ifa;
 			}
-			ifa = info.rti_ifa;
 			if (ifa) {
 				if (rt->rt_ifa != ifa) {
 					if (rt->rt_ifa->ifa_rtrequest)
@@ -1119,70 +1137,36 @@ rt_ifmsg(struct ifnet *ifp)
  * copies of it.
  */
 void
-rt_newaddrmsg(int cmd, struct ifaddr *ifa, int error, struct rtentry *rt)
+rt_sendaddrmsg(struct rtentry *rt, int cmd)
 {
-	struct rt_addrinfo	 info;
-	struct sockaddr		*sa = NULL;
-	int			 pass;
-	struct mbuf		*m = NULL;
+	struct ifaddr		*ifa = rt->rt_ifa;
 	struct ifnet		*ifp = ifa->ifa_ifp;
+	struct mbuf		*m = NULL;
+	struct rt_addrinfo	 info;
+	struct ifa_msghdr	*ifam;
 
 	if (route_cb.any_count == 0)
 		return;
-	for (pass = 1; pass < 3; pass++) {
-		bzero(&info, sizeof(info));
-		if ((cmd == RTM_ADD && pass == 1) ||
-		    (cmd == RTM_DELETE && pass == 2)) {
-			struct ifa_msghdr	*ifam;
-			int			 ncmd;
 
-			if (cmd == RTM_ADD)
-				ncmd = RTM_NEWADDR;
-			else
-				ncmd = RTM_DELADDR;
+	memset(&info, 0, sizeof(info));
+	info.rti_info[RTAX_IFA] = ifa->ifa_addr;
+	info.rti_info[RTAX_IFP] = (struct sockaddr *)ifp->if_sadl;
+	info.rti_info[RTAX_NETMASK] = ifa->ifa_netmask;
+	info.rti_info[RTAX_BRD] = ifa->ifa_dstaddr;
+	if ((m = rt_msg1(cmd, &info)) == NULL)
+		return;
+	ifam = mtod(m, struct ifa_msghdr *);
+	ifam->ifam_index = ifp->if_index;
+	ifam->ifam_metric = ifa->ifa_metric;
+	ifam->ifam_flags = ifa->ifa_flags;
+	ifam->ifam_addrs = info.rti_addrs;
+	ifam->ifam_tableid = ifp->if_rdomain;
 
-			info.rti_info[RTAX_IFA] = sa = ifa->ifa_addr;
-			info.rti_info[RTAX_IFP] =
-			    (struct sockaddr *)ifp->if_sadl;
-			info.rti_info[RTAX_NETMASK] = ifa->ifa_netmask;
-			info.rti_info[RTAX_BRD] = ifa->ifa_dstaddr;
-			if ((m = rt_msg1(ncmd, &info)) == NULL)
-				continue;
-			ifam = mtod(m, struct ifa_msghdr *);
-			ifam->ifam_index = ifp->if_index;
-			ifam->ifam_metric = ifa->ifa_metric;
-			ifam->ifam_flags = ifa->ifa_flags;
-			ifam->ifam_addrs = info.rti_addrs;
-			ifam->ifam_tableid = ifp->if_rdomain;
-		}
-		if ((cmd == RTM_ADD && pass == 2) ||
-		    (cmd == RTM_DELETE && pass == 1)) {
-			struct rt_msghdr *rtm;
-			struct sockaddr_rtlabel sa_rl;
-			
-			if (rt == 0)
-				continue;
-			info.rti_info[RTAX_NETMASK] = rt_mask(rt);
-			info.rti_info[RTAX_DST] = sa = rt_key(rt);
-			info.rti_info[RTAX_GATEWAY] = rt->rt_gateway;
-			info.rti_info[RTAX_LABEL] =
-			    rtlabel_id2sa(rt->rt_labelid, &sa_rl);
-			if ((m = rt_msg1(cmd, &info)) == NULL)
-				continue;
-			rtm = mtod(m, struct rt_msghdr *);
-			rtm->rtm_index = ifp->if_index;
-			rtm->rtm_flags |= rt->rt_flags;
-			rtm->rtm_priority = rt->rt_priority & RTP_MASK;
-			rtm->rtm_errno = error;
-			rtm->rtm_addrs = info.rti_addrs;
-			rtm->rtm_tableid = ifp->if_rdomain;
-		}
-		if (sa == NULL)
-			route_proto.sp_protocol = 0;
-		else
-			route_proto.sp_protocol = sa->sa_family;
-		route_input(m, &route_proto, &route_src, &route_dst);
-	}
+	if (ifa->ifa_addr == NULL)
+		route_proto.sp_protocol = 0;
+	else
+		route_proto.sp_protocol = ifa->ifa_addr->sa_family;
+	route_input(m, &route_proto, &route_src, &route_dst);
 }
 
 /*

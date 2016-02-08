@@ -1,4 +1,4 @@
-/*	$OpenBSD: qe.c,v 1.25 2013/11/26 09:50:33 mpi Exp $	*/
+/*	$OpenBSD: qe.c,v 1.27 2014/12/22 02:28:52 tedu Exp $	*/
 /*	$NetBSD: qe.c,v 1.16 2001/03/30 17:30:18 christos Exp $	*/
 
 /*-
@@ -85,12 +85,8 @@
 #include <net/netisr.h>
 #include <net/if_media.h>
 
-#ifdef INET
 #include <netinet/in.h>
-#include <netinet/in_systm.h>
-#include <netinet/ip.h>
 #include <netinet/if_ether.h>
-#endif
 
 #if NBPFILTER > 0
 #include <net/bpf.h>
@@ -908,12 +904,10 @@ qeioctl(ifp, cmd, data)
 	case SIOCSIFADDR:
 		ifp->if_flags |= IFF_UP;
 		switch (ifa->ifa_addr->sa_family) {
-#ifdef INET
 		case AF_INET:
 			qeinit(sc);
 			arp_ifinit(&sc->sc_arpcom, ifa);
 			break;
-#endif /* INET */
 		default:
 			qeinit(sc);
 			break;

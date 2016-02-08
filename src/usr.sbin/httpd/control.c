@@ -1,4 +1,4 @@
-/*	$OpenBSD: control.c,v 1.4 2014/08/04 15:49:28 reyk Exp $	*/
+/*	$OpenBSD: control.c,v 1.6 2015/01/21 22:21:05 reyk Exp $	*/
 
 /*
  * Copyright (c) 2003, 2004 Henning Brauer <henning@openbsd.org>
@@ -16,13 +16,11 @@
  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
 
-#include <sys/types.h>
 #include <sys/queue.h>
 #include <sys/stat.h>
 #include <sys/socket.h>
+#include <sys/time.h>
 #include <sys/un.h>
-
-#include <net/if.h>
 
 #include <errno.h>
 #include <event.h>
@@ -30,7 +28,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
-#include <signal.h>
+#include <imsg.h>
 
 #include "httpd.h"
 

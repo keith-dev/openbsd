@@ -178,15 +178,8 @@
 #include <openssl/dh.h>
 #include <openssl/bn.h>
 
-#define _XOPEN_SOURCE_EXTENDED	1
-/* Or gethostname won't be declared properly
-   on Compaq platforms (at least with DEC C).
-   Do not try to put it earlier, or IPv6 includes
-   get screwed... */
-
-
-#  define TEST_SERVER_CERT "../apps/server.pem"
-#  define TEST_CLIENT_CERT "../apps/client.pem"
+#define TEST_SERVER_CERT "../apps/server.pem"
+#define TEST_CLIENT_CERT "../apps/client.pem"
 
 static int verify_callback(int ok, X509_STORE_CTX *ctx);
 static RSA *tmp_rsa_cb(SSL *s, int is_export, int keylength);
@@ -201,12 +194,214 @@ struct app_verify_arg {
 	char *proxy_cond;
 };
 
-static DH *get_dh512(void);
 static DH *get_dh1024(void);
 static DH *get_dh1024dsa(void);
 
 static BIO *bio_err = NULL;
 static BIO *bio_stdout = NULL;
+
+/* Note that this code assumes that this is only a one element list: */
+static const char NEXT_PROTO_STRING[] = "\x09testproto";
+int npn_client = 0;
+int npn_server = 0;
+int npn_server_reject = 0;
+
+static int
+cb_client_npn(SSL *s, unsigned char **out, unsigned char *outlen,
+    const unsigned char *in, unsigned int inlen, void *arg)
+{
+	/*
+	 * This callback only returns the protocol string, rather than a length
+	 * prefixed set. We assume that NEXT_PROTO_STRING is a one element list
+	 * and remove the first byte to chop off the length prefix.
+	 */
+	*out = (unsigned char *)NEXT_PROTO_STRING + 1;
+	*outlen = sizeof(NEXT_PROTO_STRING) - 2;
+	return (SSL_TLSEXT_ERR_OK);
+}
+
+static int
+cb_server_npn(SSL *s, const unsigned char **data, unsigned int *len, void *arg)
+{
+	*data = (const unsigned char *)NEXT_PROTO_STRING;
+	*len = sizeof(NEXT_PROTO_STRING) - 1;
+	return (SSL_TLSEXT_ERR_OK);
+}
+
+static int
+cb_server_rejects_npn(SSL *s, const unsigned char **data, unsigned int *len,
+    void *arg)
+{
+	return (SSL_TLSEXT_ERR_NOACK);
+}
+
+static int
+verify_npn(SSL *client, SSL *server)
+{
+	const unsigned char *client_s;
+	unsigned int client_len;
+	const unsigned char *server_s;
+	unsigned int server_len;
+
+	SSL_get0_next_proto_negotiated(client, &client_s, &client_len);
+	SSL_get0_next_proto_negotiated(server, &server_s, &server_len);
+
+	if (client_len) {
+		BIO_printf(bio_stdout, "Client NPN: ");
+		BIO_write(bio_stdout, client_s, client_len);
+		BIO_printf(bio_stdout, "\n");
+	}
+
+	if (server_len) {
+		BIO_printf(bio_stdout, "Server NPN: ");
+		BIO_write(bio_stdout, server_s, server_len);
+		BIO_printf(bio_stdout, "\n");
+	}
+
+	/*
+	 * If an NPN string was returned, it must be the protocol that we
+	 * expected to negotiate.
+	 */
+	if (client_len && (client_len != sizeof(NEXT_PROTO_STRING) - 2 ||
+	    memcmp(client_s, NEXT_PROTO_STRING + 1, client_len)))
+		return (-1);
+	if (server_len && (server_len != sizeof(NEXT_PROTO_STRING) - 2 ||
+	    memcmp(server_s, NEXT_PROTO_STRING + 1, server_len)))
+		return (-1);
+
+	if (!npn_client && client_len)
+		return (-1);
+	if (!npn_server && server_len)
+		return (-1);
+	if (npn_server_reject && server_len)
+		return (-1);
+	if (npn_client && npn_server && (!client_len || !server_len))
+		return (-1);
+
+	return (0);
+}
+
+static const char *alpn_client;
+static const char *alpn_server;
+static const char *alpn_expected;
+static unsigned char *alpn_selected;
+
+/*
+ * next_protos_parse parses a comma separated list of strings into a string
+ * in a format suitable for passing to SSL_CTX_set_next_protos_advertised.
+ *   outlen: (output) set to the length of the resulting buffer on success.
+ *   err: (maybe NULL) on failure, an error message line is written to this BIO.
+ *   in: a NUL terminated string like "abc,def,ghi"
+ *
+ *   returns: a malloced buffer or NULL on failure.
+ */
+static unsigned char *
+next_protos_parse(unsigned short *outlen, const char *in)
+{
+	size_t i, len, start = 0;
+	unsigned char *out;
+
+	len = strlen(in);
+	if (len >= 65535)
+		return (NULL);
+
+	if ((out = malloc(strlen(in) + 1)) == NULL)
+		return (NULL);
+
+	for (i = 0; i <= len; ++i) {
+		if (i == len || in[i] == ',') {
+			if (i - start > 255) {
+				free(out);
+				return (NULL);
+			}
+			out[start] = i - start;
+			start = i + 1;
+		} else
+			out[i+1] = in[i];
+	}
+	*outlen = len + 1;
+	return (out);
+}
+
+static int
+cb_server_alpn(SSL *s, const unsigned char **out, unsigned char *outlen,
+    const unsigned char *in, unsigned int inlen, void *arg)
+{
+	unsigned char *protos;
+	unsigned short protos_len;
+
+	if ((protos = next_protos_parse(&protos_len, alpn_server)) == NULL) {
+		fprintf(stderr,
+		    "failed to parser ALPN server protocol string: %s\n",
+		    alpn_server);
+		abort();
+	}
+
+	if (SSL_select_next_proto((unsigned char **)out, outlen, protos,
+	    protos_len, in, inlen) != OPENSSL_NPN_NEGOTIATED) {
+		free(protos);
+		return (SSL_TLSEXT_ERR_NOACK);
+	}
+
+	/*
+	 * Make a copy of the selected protocol which will be freed in
+	 * verify_alpn.
+	 */
+	if ((alpn_selected = malloc(*outlen)) == NULL) {
+		fprintf(stderr, "malloc failed\n");
+		abort();
+	}
+	memcpy(alpn_selected, *out, *outlen);
+	*out = alpn_selected;
+	free(protos);
+
+	return (SSL_TLSEXT_ERR_OK);
+}
+
+static int
+verify_alpn(SSL *client, SSL *server)
+{
+	const unsigned char *client_proto, *server_proto;
+	unsigned int client_proto_len = 0, server_proto_len = 0;
+
+	SSL_get0_alpn_selected(client, &client_proto, &client_proto_len);
+	SSL_get0_alpn_selected(server, &server_proto, &server_proto_len);
+
+	free(alpn_selected);
+	alpn_selected = NULL;
+
+	if (client_proto_len != server_proto_len ||
+	    memcmp(client_proto, server_proto, client_proto_len) != 0) {
+		BIO_printf(bio_stdout, "ALPN selected protocols differ!\n");
+		goto err;
+	}
+
+	if (client_proto_len > 0 && alpn_expected == NULL) {
+		BIO_printf(bio_stdout, "ALPN unexpectedly negotiated\n");
+		goto err;
+	}
+
+	if (alpn_expected != NULL &&
+	    (client_proto_len != strlen(alpn_expected) ||
+	     memcmp(client_proto, alpn_expected, client_proto_len) != 0)) {
+		BIO_printf(bio_stdout, "ALPN selected protocols not equal to "
+		    "expected protocol: %s\n", alpn_expected);
+		goto err;
+	}
+
+	return (0);
+
+err:
+	BIO_printf(bio_stdout, "ALPN results: client: '");
+	BIO_write(bio_stdout, client_proto, client_proto_len);
+	BIO_printf(bio_stdout, "', server: '");
+	BIO_write(bio_stdout, server_proto, server_proto_len);
+	BIO_printf(bio_stdout, "'\n");
+	BIO_printf(bio_stdout, "ALPN configured: client: '%s', server: '%s'\n",
+	    alpn_client, alpn_server);
+
+	return (-1);
+}
 
 static char *cipher = NULL;
 static int verbose = 0;
@@ -232,7 +427,6 @@ sv_usage(void)
 	fprintf(stderr, " -reuse        - use session-id reuse\n");
 	fprintf(stderr, " -num <val>    - number of connections to perform\n");
 	fprintf(stderr, " -bytes <val>  - number of bytes to swap between client/server\n");
-	fprintf(stderr, " -dhe1024      - use 1024 bit key (safe prime) for DHE\n");
 	fprintf(stderr, " -dhe1024dsa   - use 1024 bit key (with 160-bit subprime) for DHE\n");
 	fprintf(stderr, " -no_dhe       - disable DHE\n");
 	fprintf(stderr, " -no_ecdhe     - disable ECDHE\n");
@@ -253,6 +447,12 @@ sv_usage(void)
 	               "                 Use \"openssl ecparam -list_curves\" for all names\n"  \
 	               "                 (default is sect163r2).\n");
 	fprintf(stderr, " -test_cipherlist - verifies the order of the ssl cipher lists\n");
+	fprintf(stderr, " -npn_client - have client side offer NPN\n");
+	fprintf(stderr, " -npn_server - have server side offer NPN\n");
+	fprintf(stderr, " -npn_server_reject - have server reject NPN\n");
+	fprintf(stderr, " -alpn_client <string> - have client side offer ALPN\n");
+	fprintf(stderr, " -alpn_server <string> - have server side offer ALPN\n");
+	fprintf(stderr, " -alpn_expected <string> - the ALPN protocol that should be negotiated\n");
 }
 
 static void
@@ -350,7 +550,7 @@ main(int argc, char *argv[])
 	int badop = 0;
 	int bio_pair = 0;
 	int force = 0;
-	int tls1 = 0, ssl2 = 0, ssl3 = 0, dtls1 = 0, ret = 1;
+	int tls1 = 0, ssl3 = 0, dtls1 = 0, ret = 1;
 	int client_auth = 0;
 	int server_auth = 0, i;
 	struct app_verify_arg app_verify_arg =
@@ -367,7 +567,7 @@ main(int argc, char *argv[])
 	int number = 1, reuse = 0;
 	long bytes = 256L;
 	DH *dh;
-	int dhe1024 = 0, dhe1024dsa = 0;
+	int dhe1024dsa = 0;
 	EC_KEY *ecdh = NULL;
 	int no_dhe = 0;
 	int no_ecdhe = 0;
@@ -410,9 +610,7 @@ main(int argc, char *argv[])
 			debug = 1;
 		else if (strcmp(*argv, "-reuse") == 0)
 			reuse = 1;
-		else if (strcmp(*argv, "-dhe1024") == 0) {
-			dhe1024 = 1;
-		} else if (strcmp(*argv, "-dhe1024dsa") == 0) {
+		else if (strcmp(*argv, "-dhe1024dsa") == 0) {
 			dhe1024dsa = 1;
 		} else if (strcmp(*argv, "-no_dhe") == 0)
 			no_dhe = 1;
@@ -420,8 +618,6 @@ main(int argc, char *argv[])
 			no_ecdhe = 1;
 		else if (strcmp(*argv, "-dtls1") == 0)
 			dtls1 = 1;
-		else if (strcmp(*argv, "-ssl2") == 0)
-			ssl2 = 1;
 		else if (strcmp(*argv, "-ssl3") == 0)
 			ssl3 = 1;
 		else if (strcmp(*argv, "-tls1") == 0)
@@ -495,6 +691,26 @@ main(int argc, char *argv[])
 			app_verify_arg.allow_proxy_certs = 1;
 		} else if (strcmp(*argv, "-test_cipherlist") == 0) {
 			test_cipherlist = 1;
+		}
+		else if (strcmp(*argv, "-npn_client") == 0) {
+			npn_client = 1;
+		} else if (strcmp(*argv, "-npn_server") == 0) {
+			npn_server = 1;
+		} else if (strcmp(*argv, "-npn_server_reject") == 0) {
+			npn_server_reject = 1;
+		}
+		else if (strcmp(*argv, "-alpn_client") == 0) {
+			if (--argc < 1)
+				goto bad;
+			alpn_client = *(++argv);
+		} else if (strcmp(*argv, "-alpn_server") == 0) {
+			if (--argc < 1)
+				goto bad;
+			alpn_server = *(++argv);
+		} else if (strcmp(*argv, "-alpn_expected") == 0) {
+			if (--argc < 1)
+				goto bad;
+			alpn_expected = *(++argv);
 		} else {
 			fprintf(stderr, "unknown option %s\n", *argv);
 			badop = 1;
@@ -517,12 +733,12 @@ bad:
 		goto end;
 	}
 
-	if (!dtls1 && !ssl2 && !ssl3 && !tls1 &&
+	if (!dtls1 && !ssl3 && !tls1 &&
 	    number > 1 && !reuse && !force) {
 		fprintf(stderr,
 		    "This case cannot work.  Use -f to perform "
 		    "the test anyway (and\n-d to see what happens), "
-		    "or add one of -dtls1, -ssl2, -ssl3, -tls1, -reuse\n"
+		    "or add one of -dtls1, -ssl3, -tls1, -reuse\n"
 		    "to avoid protocol mismatch.\n");
 		exit(1);
 	}
@@ -540,7 +756,6 @@ bad:
 
 	SSL_library_init();
 	SSL_load_error_strings();
-
 
 	if (dtls1)
 		meth = DTLSv1_method();
@@ -568,10 +783,8 @@ bad:
 			/* use SSL_OP_SINGLE_DH_USE to avoid small subgroup attacks */
 			SSL_CTX_set_options(s_ctx, SSL_OP_SINGLE_DH_USE);
 			dh = get_dh1024dsa();
-		} else if (dhe1024)
+		} else
 			dh = get_dh1024();
-		else
-			dh = get_dh512();
 		SSL_CTX_set_tmp_dh(s_ctx, dh);
 		DH_free(dh);
 	}
@@ -653,6 +866,37 @@ bad:
 		    (void *)&session_id_context, sizeof(session_id_context));
 	}
 
+	if (npn_client)
+		SSL_CTX_set_next_proto_select_cb(c_ctx, cb_client_npn, NULL);
+	if (npn_server) {
+		if (npn_server_reject) {
+			BIO_printf(bio_err, "Can't have both -npn_server and "
+			    "-npn_server_reject\n");
+			goto end;
+		}
+		SSL_CTX_set_next_protos_advertised_cb(s_ctx,
+		    cb_server_npn, NULL);
+	}
+	if (npn_server_reject) {
+		SSL_CTX_set_next_protos_advertised_cb(s_ctx,
+		    cb_server_rejects_npn, NULL);
+	}
+
+	if (alpn_server != NULL)
+		SSL_CTX_set_alpn_select_cb(s_ctx, cb_server_alpn, NULL);
+
+	if (alpn_client != NULL) {
+		unsigned short alpn_len;
+		unsigned char *alpn = next_protos_parse(&alpn_len, alpn_client);
+
+		if (alpn == NULL) {
+			BIO_printf(bio_err, "Error parsing -alpn_client argument\n");
+			goto end;
+		}
+		SSL_CTX_set_alpn_protos(c_ctx, alpn, alpn_len);
+		free(alpn);
+	}
+
 	c_ssl = SSL_new(c_ctx);
 	s_ssl = SSL_new(s_ctx);
 
@@ -698,13 +942,9 @@ bad:
 	SSL_free(c_ssl);
 
 end:
-	if (s_ctx != NULL)
-		SSL_CTX_free(s_ctx);
-	if (c_ctx != NULL)
-		SSL_CTX_free(c_ctx);
-
-	if (bio_stdout != NULL)
-		BIO_free(bio_stdout);
+	SSL_CTX_free(s_ctx);
+	SSL_CTX_free(c_ctx);
+	BIO_free(bio_stdout);
 
 	free_tmp_rsa();
 #ifndef OPENSSL_NO_ENGINE
@@ -715,8 +955,8 @@ end:
 	ERR_remove_thread_state(NULL);
 	EVP_cleanup();
 	CRYPTO_mem_leaks(bio_err);
-	if (bio_err != NULL)
-		BIO_free(bio_err);
+	BIO_free(bio_err);
+
 	exit(ret);
 	return ret;
 }
@@ -1054,24 +1294,28 @@ doit_biopair(SSL *s_ssl, SSL *c_ssl, long count, clock_t *s_time,
 
 	if (verbose)
 		print_details(c_ssl, "DONE via BIO pair: ");
+
+	if (verify_npn(c_ssl, s_ssl) < 0) {
+		ret = 1;
+		goto err;
+	}
+	if (verify_alpn(c_ssl, s_ssl) < 0) {
+		ret = 1;
+		goto err;
+	}
+
 end:
 	ret = 0;
 
 err:
 	ERR_print_errors(bio_err);
 
-	if (server)
-		BIO_free(server);
-	if (server_io)
-		BIO_free(server_io);
-	if (client)
-		BIO_free(client);
-	if (client_io)
-		BIO_free(client_io);
-	if (s_ssl_bio)
-		BIO_free(s_ssl_bio);
-	if (c_ssl_bio)
-		BIO_free(c_ssl_bio);
+	BIO_free(server);
+	BIO_free(server_io);
+	BIO_free(client);
+	BIO_free(client_io);
+	BIO_free(s_ssl_bio);
+	BIO_free(c_ssl_bio);
 
 	return ret;
 }
@@ -1305,6 +1549,16 @@ doit(SSL *s_ssl, SSL *c_ssl, long count)
 
 	if (verbose)
 		print_details(c_ssl, "DONE: ");
+
+	if (verify_npn(c_ssl, s_ssl) < 0) {
+		ret = 1;
+		goto err;
+	}
+	if (verify_alpn(c_ssl, s_ssl) < 0) {
+		ret = 1;
+		goto err;
+	}
+
 	ret = 0;
 err:
 	/* We have to set the BIO's to NULL otherwise they will be
@@ -1323,14 +1577,11 @@ err:
 		c_ssl->wbio = NULL;
 	}
 
-	if (c_to_s != NULL)
-		BIO_free(c_to_s);
-	if (s_to_c != NULL)
-		BIO_free(s_to_c);
-	if (c_bio != NULL)
-		BIO_free_all(c_bio);
-	if (s_bio != NULL)
-		BIO_free_all(s_bio);
+	BIO_free(c_to_s);
+	BIO_free(s_to_c);
+	BIO_free_all(c_bio);
+	BIO_free_all(s_bio);
+
 	return (ret);
 }
 
@@ -1832,38 +2083,10 @@ free_tmp_rsa(void)
 }
 
 /* These DH parameters have been generated as follows:
- *    $ openssl dhparam -C -noout 512
  *    $ openssl dhparam -C -noout 1024
  *    $ openssl dhparam -C -noout -dsaparam 1024
- * (The third function has been renamed to avoid name conflicts.)
+ * (The second function has been renamed to avoid name conflicts.)
  */
-static DH *
-get_dh512()
-{
-	static unsigned char dh512_p[] = {
-		0xCB, 0xC8, 0xE1, 0x86, 0xD0, 0x1F, 0x94, 0x17, 0xA6, 0x99, 0xF0, 0xC6,
-		0x1F, 0x0D, 0xAC, 0xB6, 0x25, 0x3E, 0x06, 0x39, 0xCA, 0x72, 0x04, 0xB0,
-		0x6E, 0xDA, 0xC0, 0x61, 0xE6, 0x7A, 0x77, 0x25, 0xE8, 0x3B, 0xB9, 0x5F,
-		0x9A, 0xB6, 0xB5, 0xFE, 0x99, 0x0B, 0xA1, 0x93, 0x4E, 0x35, 0x33, 0xB8,
-		0xE1, 0xF1, 0x13, 0x4F, 0x59, 0x1A, 0xD2, 0x57, 0xC0, 0x26, 0x21, 0x33,
-		0x02, 0xC5, 0xAE, 0x23,
-	};
-	static unsigned char dh512_g[] = {
-		0x02,
-	};
-	DH *dh;
-
-	if ((dh = DH_new()) == NULL)
-		return (NULL);
-	dh->p = BN_bin2bn(dh512_p, sizeof(dh512_p), NULL);
-	dh->g = BN_bin2bn(dh512_g, sizeof(dh512_g), NULL);
-	if ((dh->p == NULL) || (dh->g == NULL)) {
-		DH_free(dh);
-		return (NULL);
-	}
-	return (dh);
-}
-
 static DH *
 get_dh1024()
 {

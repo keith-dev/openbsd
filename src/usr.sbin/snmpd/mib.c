@@ -1,4 +1,4 @@
-/*	$OpenBSD: mib.c,v 1.71 2014/07/04 05:58:31 guenther Exp $	*/
+/*	$OpenBSD: mib.c,v 1.75 2015/01/21 21:50:33 deraadt Exp $	*/
 
 /*
  * Copyright (c) 2012 Joel Knight <joel@openbsd.org>
@@ -17,10 +17,9 @@
  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
 
+#include <sys/param.h>	/* MAXCOMLEN */
 #include <sys/queue.h>
-#include <sys/param.h>
 #include <sys/proc.h>
-#include <sys/types.h>
 #include <sys/stat.h>
 #include <sys/socket.h>
 #include <sys/un.h>
@@ -30,21 +29,19 @@
 #include <sys/sysctl.h>
 #include <sys/sensors.h>
 #include <sys/sched.h>
-#include <sys/socket.h>
 #include <sys/mount.h>
 #include <sys/ioctl.h>
 #include <sys/disk.h>
 
-#include <net/if.h>
-#include <net/if_types.h>
-#include <net/pfvar.h>
-#include <net/if_pfsync.h>
 #include <netinet/in.h>
-#include <netinet/in_systm.h>
 #include <netinet/ip.h>
 #include <netinet/ip_carp.h>
 #include <netinet/ip_var.h>
 #include <arpa/inet.h>
+#include <net/if.h>
+#include <net/if_types.h>
+#include <net/pfvar.h>
+#include <net/if_pfsync.h>
 
 #include <stdlib.h>
 #include <stdio.h>

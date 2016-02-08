@@ -1,4 +1,4 @@
-/*	$OpenBSD: kern_rwlock.c,v 1.22 2014/07/09 13:32:00 guenther Exp $	*/
+/*	$OpenBSD: kern_rwlock.c,v 1.25 2015/02/11 00:14:11 dlg Exp $	*/
 
 /*
  * Copyright (c) 2002, 2003 Artur Grabowski <art@openbsd.org>
@@ -22,11 +22,24 @@
 #include <sys/proc.h>
 #include <sys/rwlock.h>
 #include <sys/limits.h>
-
-#include <machine/lock.h>
+#include <sys/atomic.h>
 
 /* XXX - temporary measure until proc0 is properly aligned */
 #define RW_PROC(p) (((long)p) & ~RWLOCK_MASK)
+
+#ifdef MULTIPROCESSOR
+#define rw_cas(p, o, n)	(atomic_cas_ulong(p, o, n) != o)
+#else
+static inline int
+rw_cas(volatile unsigned long *p, unsigned long o, unsigned long n)
+{
+	if (*p != o)
+		return (1);
+	*p = n;
+
+	return (0);
+}
+#endif
 
 /*
  * Magic wand for lock operations. Every operation checks if certain
@@ -73,10 +86,6 @@ static const struct rwlock_op {
 	},
 };
 
-#ifndef __HAVE_MD_RWLOCK
-/*
- * Simple cases that should be in MD code and atomic.
- */
 void
 rw_enter_read(struct rwlock *rwl)
 {
@@ -85,6 +94,8 @@ rw_enter_read(struct rwlock *rwl)
 	if (__predict_false((owner & RWLOCK_WRLOCK) ||
 	    rw_cas(&rwl->rwl_owner, owner, owner + RWLOCK_READ_INCR)))
 		rw_enter(rwl, RW_READ);
+	else
+		membar_enter();
 }
 
 void
@@ -95,6 +106,8 @@ rw_enter_write(struct rwlock *rwl)
 	if (__predict_false(rw_cas(&rwl->rwl_owner, 0,
 	    RW_PROC(p) | RWLOCK_WRLOCK)))
 		rw_enter(rwl, RW_WRITE);
+	else
+		membar_enter();
 }
 
 void
@@ -104,6 +117,7 @@ rw_exit_read(struct rwlock *rwl)
 
 	rw_assert_rdlock(rwl);
 
+	membar_exit();
 	if (__predict_false((owner & RWLOCK_WAIT) ||
 	    rw_cas(&rwl->rwl_owner, owner, owner - RWLOCK_READ_INCR)))
 		rw_exit(rwl);
@@ -116,24 +130,11 @@ rw_exit_write(struct rwlock *rwl)
 
 	rw_assert_wrlock(rwl);
 
+	membar_exit();
 	if (__predict_false((owner & RWLOCK_WAIT) ||
 	    rw_cas(&rwl->rwl_owner, owner, 0)))
 		rw_exit(rwl);
 }
-
-#ifndef rw_cas
-int
-rw_cas(volatile unsigned long *p, unsigned long o, unsigned long n)
-{
-	if (*p != o)
-		return (1);
-	*p = n;
-
-	return (0);
-}
-#endif
-
-#endif
 
 #ifdef DIAGNOSTIC
 /*
@@ -215,6 +216,7 @@ retry:
 
 	if (__predict_false(rw_cas(&rwl->rwl_owner, o, o + inc)))
 		goto retry;
+	membar_enter();
 
 	/*
 	 * If old lock had RWLOCK_WAIT and RWLOCK_WRLOCK set, it means we
@@ -240,6 +242,7 @@ rw_exit(struct rwlock *rwl)
 	else
 		rw_assert_rdlock(rwl);
 
+	membar_exit();
 	do {
 		owner = rwl->rwl_owner;
 		if (wrlock)

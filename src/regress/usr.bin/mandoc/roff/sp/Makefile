@@ -1,5 +1,6 @@
-# $OpenBSD: Makefile,v 1.3 2012/07/13 14:15:50 schwarze Exp $
+# $OpenBSD: Makefile,v 1.5 2015/02/06 09:38:22 schwarze Exp $
 
-REGRESS_TARGETS = badargs-mdoc badargs-man negative
+REGRESS_TARGETS	= badargs-man badargs-mdoc negative scaling-man scaling-mdoc
+LINT_TARGETS	= badargs-man
 
 .include <bsd.regress.mk>

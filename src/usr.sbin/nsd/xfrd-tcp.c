@@ -30,17 +30,20 @@ xfrd_pipe_cmp(const void* a, const void* b)
 	const struct xfrd_tcp_pipeline* x = (struct xfrd_tcp_pipeline*)a;
 	const struct xfrd_tcp_pipeline* y = (struct xfrd_tcp_pipeline*)b;
 	int r;
+	if(x == y)
+		return 0;
 	if(y->ip_len != x->ip_len)
+		/* subtraction works because nonnegative and small numbers */
 		return (int)y->ip_len - (int)x->ip_len;
 	r = memcmp(&x->ip, &y->ip, x->ip_len);
 	if(r != 0)
 		return r;
-	/* sort that num_unused is sorted ascending,
-	 * thus, if(x=10, y=1) then result 'bigger', 10-1>0*/
-	if(x->num_unused != y->num_unused)
-		return x->num_unused - y->num_unused;
+	/* sort that num_unused is sorted ascending, */
+	if(x->num_unused != y->num_unused) {
+		return (x->num_unused < y->num_unused) ? -1 : 1;
+	}
 	/* different pipelines are different still, even with same numunused*/
-	return (int)(a - b);
+	return (uintptr_t)x < (uintptr_t)y ? -1 : 1;
 }
 
 xfrd_tcp_set_t* xfrd_tcp_set_create(struct region* region)
@@ -894,7 +897,11 @@ xfrd_tcp_release(xfrd_tcp_set_t* set, xfrd_zone_t* zone)
 	/* if pipe was full, but no more, then see if waiting element is
 	 * for the same master, and can fill the unused ID */
 	if(tp->num_unused == 1 && set->tcp_waiting_first) {
+#ifdef INET6
 		struct sockaddr_storage to;
+#else
+		struct sockaddr_in to;
+#endif
 		socklen_t to_len = xfrd_acl_sockaddr_to(
 			set->tcp_waiting_first->master, &to);
 		if(to_len == tp->ip_len && memcmp(&to, &tp->ip, to_len) == 0) {
@@ -937,7 +944,9 @@ xfrd_tcp_pipe_release(xfrd_tcp_set_t* set, struct xfrd_tcp_pipeline* tp,
 	(void)rbtree_delete(xfrd->tcp_set->pipetree, &tp->node);
 
 	/* a waiting zone can use the free tcp slot (to another server) */
-	if(set->tcp_count == XFRD_MAX_TCP && set->tcp_waiting_first) {
+	/* if that zone fails to set-up or connect, we try to start the next
+	 * waiting zone in the list */
+	while(set->tcp_count == XFRD_MAX_TCP && set->tcp_waiting_first) {
 		int i;
 
 		/* pop first waiting process */
@@ -945,15 +954,16 @@ xfrd_tcp_pipe_release(xfrd_tcp_set_t* set, struct xfrd_tcp_pipeline* tp,
 		/* start it */
 		assert(zone->tcp_conn == -1);
 		zone->tcp_conn = conn;
+		tcp_zone_waiting_list_popfirst(set, zone);
 
 		/* stop udp (if any) */
 		if(zone->zone_handler.ev_fd != -1)
 			xfrd_udp_release(zone);
 		if(!xfrd_tcp_open(set, tp, zone)) {
 			zone->tcp_conn = -1;
-			set->tcp_count --;
 			xfrd_set_refresh_now(zone);
-			return;
+			/* try to start the next zone (if any) */
+			continue;
 		}
 		/* re-init this tcppipe */
 		/* ip and ip_len set by tcp_open */
@@ -969,15 +979,15 @@ xfrd_tcp_pipe_release(xfrd_tcp_set_t* set, struct xfrd_tcp_pipeline* tp,
 
 		/* insert into tree */
 		(void)rbtree_insert(set->pipetree, &tp->node);
-		/* succeeded? remove zone from lists and setup write */
+		/* setup write */
 		xfrd_unset_timer(zone);
-		tcp_zone_waiting_list_popfirst(set, zone);
 		pipeline_setup_new_zone(set, tp, zone);
+		/* started a task, no need for cleanups, so return */
+		return;
 	}
-	else {
-		assert(!set->tcp_waiting_first);
-		set->tcp_count --;
-		assert(set->tcp_count >= 0);
-	}
+	/* no task to start, cleanup */
+	assert(!set->tcp_waiting_first);
+	set->tcp_count --;
+	assert(set->tcp_count >= 0);
 }
 

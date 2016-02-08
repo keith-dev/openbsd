@@ -1,4 +1,4 @@
-/*	$OpenBSD: ums.c,v 1.38 2013/11/15 08:17:44 pirofti Exp $ */
+/*	$OpenBSD: ums.c,v 1.40 2014/12/28 15:24:08 matthieu Exp $ */
 /*	$NetBSD: ums.c,v 1.60 2003/03/11 16:44:00 augustss Exp $	*/
 
 /*
@@ -73,21 +73,16 @@ const struct wsmouse_accessops ums_accessops = {
 	ums_disable,
 };
 
-int ums_match(struct device *, void *, void *); 
-void ums_attach(struct device *, struct device *, void *); 
-int ums_detach(struct device *, int); 
-int ums_activate(struct device *, int); 
+int ums_match(struct device *, void *, void *);
+void ums_attach(struct device *, struct device *, void *);
+int ums_detach(struct device *, int);
 
-struct cfdriver ums_cd = { 
-	NULL, "ums", DV_DULL 
-}; 
+struct cfdriver ums_cd = {
+	NULL, "ums", DV_DULL
+};
 
-const struct cfattach ums_ca = { 
-	sizeof(struct ums_softc), 
-	ums_match, 
-	ums_attach, 
-	ums_detach, 
-	ums_activate, 
+const struct cfattach ums_ca = {
+	sizeof(struct ums_softc), ums_match, ums_attach, ums_detach
 };
 
 int
@@ -98,6 +93,10 @@ ums_match(struct device *parent, void *match, void *aux)
 	void *desc;
 
 	uhidev_get_report_desc(uha->parent, &desc, &size);
+
+	if (hid_is_collection(desc, size, uha->reportid,
+	    HID_USAGE2(HUP_GENERIC_DESKTOP, HUG_POINTER)))
+		return (UMATCH_IFACECLASS);
 
 	if (hid_is_collection(desc, size, uha->reportid,
 	    HID_USAGE2(HUP_GENERIC_DESKTOP, HUG_MOUSE)))
@@ -161,22 +160,6 @@ ums_attach(struct device *parent, struct device *self, void *aux)
 	}
 
 	hidms_attach(ms, &ums_accessops);
-}
-
-int
-ums_activate(struct device *self, int act)
-{
-	struct ums_softc *sc = (struct ums_softc *)self;
-	struct hidms *ms = &sc->sc_ms;
-	int rv = 0;
-
-	switch (act) {
-	case DVACT_DEACTIVATE:
-		if (ms->sc_wsmousedev != NULL)
-			rv = config_deactivate(ms->sc_wsmousedev);
-		break;
-	}
-	return (rv);
 }
 
 int

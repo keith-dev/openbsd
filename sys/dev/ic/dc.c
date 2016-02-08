@@ -1,4 +1,4 @@
-/*	$OpenBSD: dc.c,v 1.134 2014/07/22 13:12:11 mpi Exp $	*/
+/*	$OpenBSD: dc.c,v 1.137 2015/01/23 12:49:13 dlg Exp $	*/
 
 /*
  * Copyright (c) 1997, 1998, 1999
@@ -788,7 +788,6 @@ dc_miibus_writereg(struct device *self, int phy, int reg, int data)
 			printf("%s: phy_write: bad phy register %x\n",
 			    sc->sc_dev.dv_xname, reg);
 			return;
-			break;
 		}
 
 		CSR_WRITE_4(sc, phy_reg, data);
@@ -2481,10 +2480,8 @@ dc_intr(void *arg)
 			}
 		}
 
-		if (status & DC_ISR_BUS_ERR) {
-			dc_reset(sc);
+		if (status & DC_ISR_BUS_ERR)
 			dc_init(sc);
-		}
 	}
 
 	/* Re-enable interrupts. */
@@ -2936,10 +2933,8 @@ dc_ioctl(struct ifnet *ifp, u_long command, caddr_t data)
 		ifp->if_flags |= IFF_UP;
 		if (!(ifp->if_flags & IFF_RUNNING))
 			dc_init(sc);
-#ifdef INET
 		if (ifa->ifa_addr->sa_family == AF_INET)
 			arp_ifinit(&sc->sc_arpcom, ifa);
-#endif
 		break;
 	case SIOCSIFFLAGS:
 		if (ifp->if_flags & IFF_UP) {
@@ -2986,8 +2981,6 @@ dc_watchdog(struct ifnet *ifp)
 	ifp->if_oerrors++;
 	printf("%s: watchdog timeout\n", sc->sc_dev.dv_xname);
 
-	dc_stop(sc, 0);
-	dc_reset(sc);
 	dc_init(sc);
 
 	if (IFQ_IS_EMPTY(&ifp->if_snd) == 0)

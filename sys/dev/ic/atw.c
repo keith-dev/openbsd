@@ -1,4 +1,4 @@
-/*	$OpenBSD: atw.c,v 1.83 2014/07/12 18:48:17 tedu Exp $	*/
+/*	$OpenBSD: atw.c,v 1.86 2015/02/10 23:25:46 mpi Exp $	*/
 /*	$NetBSD: atw.c,v 1.69 2004/07/23 07:07:55 dyoung Exp $	*/
 
 /*-
@@ -46,8 +46,7 @@
 #include <sys/errno.h>
 #include <sys/device.h>
 #include <sys/time.h>
-
-#include <machine/endian.h>
+#include <sys/endian.h>
 
 #include <net/if.h>
 #include <net/if_dl.h>
@@ -57,10 +56,8 @@
 #include <net/bpf.h>
 #endif
 
-#ifdef INET
 #include <netinet/in.h>
 #include <netinet/if_ether.h>
-#endif
 
 #include <net80211/ieee80211_var.h>
 #include <net80211/ieee80211_radiotap.h>
@@ -3132,7 +3129,6 @@ atw_rxintr(struct atw_softc *sc)
 
 		if (sc->sc_opmode & ATW_NAR_PR)
 			len -= IEEE80211_CRC_LEN;
-		m->m_pkthdr.rcvif = ifp;
 		m->m_pkthdr.len = m->m_len = MIN(m->m_ext.ext_size, len);
 
 		if (rate0 >= sizeof(rate_tbl) / sizeof(rate_tbl[0]))
@@ -4023,11 +4019,9 @@ atw_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 	switch (cmd) {
         case SIOCSIFADDR:
                 ifp->if_flags |= IFF_UP;
-#ifdef INET
                 if (ifa->ifa_addr->sa_family == AF_INET) {
                         arp_ifinit(&ic->ic_ac, ifa);
                 }
-#endif  /* INET */
 		/* FALLTHROUGH */
 
 	case SIOCSIFFLAGS:

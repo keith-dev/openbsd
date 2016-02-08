@@ -1,4 +1,4 @@
-/*	$OpenBSD: ikeca.c,v 1.27 2014/07/20 01:38:40 guenther Exp $	*/
+/*	$OpenBSD: ikeca.c,v 1.30 2015/01/16 06:40:17 deraadt Exp $	*/
 
 /*
  * Copyright (c) 2010 Jonathan Gray <jsg@openbsd.org>
@@ -16,7 +16,6 @@
  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
 
-#include <sys/param.h>
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <stdio.h>
@@ -29,6 +28,7 @@
 #include <fcntl.h>
 #include <fts.h>
 #include <dirent.h>
+#include <limits.h>
 
 #include <openssl/rand.h>
 #include <openssl/rsa.h>
@@ -52,7 +52,7 @@
 #endif
 
 #ifndef PATH_OPENSSL
-#define PATH_OPENSSL	"/usr/sbin/openssl"
+#define PATH_OPENSSL	"/usr/bin/openssl"
 #endif
 #ifndef PATH_ZIP
 #define PATH_ZIP	"/usr/local/bin/zip"
@@ -189,7 +189,7 @@ int
 ca_sign(struct ca *ca, char *keyname, int type, char *envargs)
 {
 	char		cmd[PATH_MAX * 2];
-	char		hostname[MAXHOSTNAMELEN];
+	char		hostname[HOST_NAME_MAX+1];
 	char		name[128];
 
 	strlcpy(name, keyname, sizeof(name));
@@ -795,7 +795,7 @@ ca_revoke(struct ca *ca, char *keyname)
 	    pass, ca->sslpath, ca->sslpath);
 	system(cmd);
 
-	bzero(pass, len);
+	explicit_bzero(pass, len);
 	free(pass);
 
 	return (0);

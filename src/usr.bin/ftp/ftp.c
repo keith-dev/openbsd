@@ -1,4 +1,4 @@
-/*	$OpenBSD: ftp.c,v 1.86 2014/05/20 01:25:23 guenther Exp $	*/
+/*	$OpenBSD: ftp.c,v 1.91 2015/02/09 08:24:20 tedu Exp $	*/
 /*	$NetBSD: ftp.c,v 1.27 1997/08/18 10:20:23 lukem Exp $	*/
 
 /*
@@ -64,7 +64,6 @@
 #include <sys/socket.h>
 
 #include <netinet/in.h>
-#include <netinet/in_systm.h>
 #include <netinet/ip.h>
 #include <arpa/inet.h>
 #include <arpa/ftp.h>
@@ -113,7 +112,7 @@ char *
 hookup(char *host, char *port)
 {
 	int s, tos, error;
-	static char hostnamebuf[MAXHOSTNAMELEN];
+	static char hostnamebuf[HOST_NAME_MAX+1];
 	struct addrinfo hints, *res, *res0, *ares;
 	char hbuf[NI_MAXHOST];
 	char *cause = "unknown";
@@ -185,11 +184,7 @@ hookup(char *host, char *port)
 	
 	s = -1;
 	for (res = res0; res; res = res->ai_next) {
-#if 0	/*old behavior*/
-		if (res != res0)	/* not on the first address */
-#else
 		if (res0->ai_next)	/* if we have multiple possibilities */
-#endif
 		{
 			if (getnameinfo(res->ai_addr, res->ai_addrlen,
 			    hbuf, sizeof(hbuf), NULL, 0, NI_NUMERICHOST) != 0)
@@ -267,13 +262,11 @@ hookup(char *host, char *port)
 		code = -1;
 		goto bad;
 	}
-#if defined(IPPROTO_IP) && defined(IP_TOS)
 	if (hisctladdr.su_family == AF_INET) {
 		tos = IPTOS_LOWDELAY;
 		if (setsockopt(s, IPPROTO_IP, IP_TOS, (char *)&tos, sizeof(int)) < 0)
 			warn("setsockopt TOS (ignored)");
 	}
-#endif
 	cin = fdopen(s, "r");
 	cout = fdopen(s, "w");
 	if (cin == NULL || cout == NULL) {
@@ -295,7 +288,6 @@ hookup(char *host, char *port)
 		code = -1;
 		goto bad;
 	}
-#ifdef SO_OOBINLINE
 	{
 	int ret, on = 1;
 
@@ -305,7 +297,6 @@ hookup(char *host, char *port)
 		warn("setsockopt");
 #endif /* !SMALL */
 	}
-#endif /* SO_OOBINLINE */
 
 	return (hostname);
 bad:
@@ -317,11 +308,13 @@ bad:
 void
 cmdabort(int signo)
 {
+	int save_errno = errno;
 
 	alarmtimer(0);
-	putc('\n', ttyout);
-	(void)fflush(ttyout);
+	(void) write(fileno(ttyout), "\n\r", 2);
 	abrtflag++;
+
+	errno = save_errno;
 	if (ptflag)
 		longjmp(ptabort, 1);
 }
@@ -575,12 +568,15 @@ jmp_buf	sendabort;
 void
 abortsend(int signo)
 {
-
+	int save_errno = errno;
 	alarmtimer(0);
 	mflag = 0;
 	abrtflag = 0;
-	fputs("\nsend aborted\nwaiting for remote to finish abort.\n", ttyout);
-	(void)fflush(ttyout);
+#define MSG "\nsend aborted\nwaiting for remote to finish abort.\n"
+	(void) write(fileno(ttyout), MSG, strlen(MSG));
+#undef MSG
+
+	errno = save_errno;
 	longjmp(sendabort, 1);
 }
 
@@ -703,7 +699,6 @@ sendrequest(const char *cmd, const char *local, const char *remote,
 			rc = fseeko(fin, restart_point, SEEK_SET);
 			break;
 		case TYPE_I:
-		case TYPE_L:
 			if (lseek(fileno(fin), restart_point, SEEK_SET) != -1)
 				rc = 0;
 			break;
@@ -755,7 +750,6 @@ sendrequest(const char *cmd, const char *local, const char *remote,
 	switch (curtype) {
 
 	case TYPE_I:
-	case TYPE_L:
 		d = 0;
 		while ((c = read(fileno(fin), buf, sizeof(buf))) > 0) {
 			may_send_noop_char();
@@ -806,12 +800,6 @@ sendrequest(const char *cmd, const char *local, const char *remote,
 			}
 			(void)putc(c, dout);
 			bytes++;
-#if 0	/* this violates RFC */
-			if (c == '\r') {
-				(void)putc('\0', dout);
-				bytes++;
-			}
-#endif
 		}
 		if (ferror(fin) || ferror(dout))
 			serrno = errno;
@@ -1071,7 +1059,6 @@ recvrequest(const char *cmd, const char * volatile local, const char *remote,
 	switch (curtype) {
 
 	case TYPE_I:
-	case TYPE_L:
 		if (restart_point &&
 		    lseek(fileno(fout), restart_point, SEEK_SET) < 0) {
 			warn("local: %s", local);
@@ -1538,14 +1525,12 @@ reinit:
 			warn("connect");
 			goto bad;
 		}
-#if defined(IPPROTO_IP) && defined(IP_TOS)
 		if (data_addr.su_family == AF_INET) {
 			on = IPTOS_THROUGHPUT;
 			if (setsockopt(data, IPPROTO_IP, IP_TOS, (char *)&on,
 				       sizeof(int)) < 0)
 				warn("setsockopt TOS (ignored)");
 		}
-#endif
 		return (0);
 	}
 
@@ -1679,14 +1664,12 @@ noport:
 	}
 	if (tmpno)
 		sendport = 1;
-#if defined(IPPROTO_IP) && defined(IP_TOS)
 	if (data_addr.su_family == AF_INET) {
 		on = IPTOS_THROUGHPUT;
 		if (setsockopt(data, IPPROTO_IP, IP_TOS, (char *)&on,
 			       sizeof(int)) < 0)
 			warn("setsockopt TOS (ignored)");
 	}
-#endif
 	return (0);
 bad:
 	(void)close(data), data = -1;
@@ -1713,7 +1696,6 @@ dataconn(const char *lmode)
 	}
 	(void)close(data);
 	data = s;
-#if defined(IPPROTO_IP) && defined(IP_TOS)
 	if (from.su_family == AF_INET) {
 		int tos = IPTOS_THROUGHPUT;
 		if (setsockopt(s, IPPROTO_IP, IP_TOS, (char *)&tos,
@@ -1721,7 +1703,6 @@ dataconn(const char *lmode)
 			warn("setsockopt TOS (ignored)");
 		}
 	}
-#endif
 	return (fdopen(data, lmode));
 }
 
@@ -1751,7 +1732,7 @@ pswitch(int flag)
 	sig_t oldintr;
 	static struct comvars {
 		int connect;
-		char name[MAXHOSTNAMELEN];
+		char name[HOST_NAME_MAX+1];
 		union sockunion mctl;
 		union sockunion hctl;
 		FILE *in;
@@ -1766,8 +1747,8 @@ pswitch(int flag)
 		char nti[17];
 		char nto[17];
 		int mapflg;
-		char mi[MAXPATHLEN];
-		char mo[MAXPATHLEN];
+		char mi[PATH_MAX];
+		char mo[PATH_MAX];
 	} proxstruct, tmpstruct;
 	struct comvars *ip, *op;
 
@@ -1992,7 +1973,7 @@ reset(int argc, char *argv[])
 char *
 gunique(const char *local)
 {
-	static char new[MAXPATHLEN];
+	static char new[PATH_MAX];
 	char *cp = strrchr(local, '/');
 	int d, count=0;
 	char ext = '1';
@@ -2040,14 +2021,13 @@ jmp_buf forceabort;
 static void
 abortforce(int signo)
 {
-	fputs("Forced abort.  The connection will be closed.\n", ttyout);
-	(void)fflush(ttyout);
+	int save_errno = errno;
 
-	if (cout) {
-		(void)fclose(cout);
-	}
-	cout = NULL;
+#define MSG	"Forced abort.  The connection will be closed.\n"
+	(void) write(fileno(ttyout), MSG, strlen(MSG));
+#undef MSG
 
+	errno = save_errno;
 	longjmp(forceabort, 1);
 }
 
@@ -2061,6 +2041,8 @@ abort_remote(FILE *din)
 	sig_t oldintr;
 
 	if (cout == NULL || setjmp(forceabort)) {
+		if (cout)
+			fclose(cout);
 		warnx("Lost control connection for abort.");
 		if (ptabflg)
 			code = -1;

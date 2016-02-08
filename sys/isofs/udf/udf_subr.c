@@ -1,4 +1,4 @@
-/*	$OpenBSD: udf_subr.c,v 1.22 2011/04/16 03:21:16 krw Exp $	*/
+/*	$OpenBSD: udf_subr.c,v 1.25 2014/12/16 18:30:03 tedu Exp $	*/
 
 /*
  * Copyright (c) 2006, Miodrag Vallat
@@ -35,9 +35,11 @@
 #include <sys/stat.h>
 #include <sys/mount.h>
 #include <sys/vnode.h>
+#include <sys/lock.h>
 #include <sys/dirent.h>
-#include <sys/unistd.h>
 #include <sys/disklabel.h>
+
+#include <crypto/siphash.h>
 
 #include <isofs/udf/ecma167-udf.h>
 #include <isofs/udf/udf.h>

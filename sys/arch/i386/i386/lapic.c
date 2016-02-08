@@ -1,4 +1,4 @@
-/*	$OpenBSD: lapic.c,v 1.35 2014/03/29 18:09:29 guenther Exp $	*/
+/*	$OpenBSD: lapic.c,v 1.37 2014/09/21 16:14:52 sf Exp $	*/
 /* $NetBSD: lapic.c,v 1.1.2.8 2000/02/23 06:10:50 sommerfeld Exp $ */
 
 /*-
@@ -33,7 +33,6 @@
  */
 
 #include <sys/param.h>
-#include <sys/proc.h>
 #include <sys/systm.h>
 #include <sys/device.h>
 
@@ -462,13 +461,13 @@ i386_ipi_init(int target)
 
 	i82489_icr_wait();
 
-	return (i82489_readreg(LAPIC_ICRLO) & LAPIC_DLSTAT_BUSY) ? EBUSY : 0;
+	return 0;
 }
 
 int
 i386_ipi(int vec, int target, int dl)
 {
-	int result, s;
+	int s;
 
 	s = splhigh();
 
@@ -482,10 +481,8 @@ i386_ipi(int vec, int target, int dl)
 
 	i82489_icr_wait();
 
-	result = (i82489_readreg(LAPIC_ICRLO) & LAPIC_DLSTAT_BUSY) ? EBUSY : 0;
-
 	splx(s);
 
-	return result;
+	return 0;
 }
 #endif /* MULTIPROCESSOR */

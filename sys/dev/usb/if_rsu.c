@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_rsu.c,v 1.22 2014/07/13 15:52:49 mpi Exp $	*/
+/*	$OpenBSD: if_rsu.c,v 1.25 2015/02/10 23:25:46 mpi Exp $	*/
 
 /*-
  * Copyright (c) 2010 Damien Bergamini <damien.bergamini@free.fr>
@@ -31,9 +31,9 @@
 #include <sys/timeout.h>
 #include <sys/conf.h>
 #include <sys/device.h>
+#include <sys/endian.h>
 
 #include <machine/bus.h>
-#include <machine/endian.h>
 #include <machine/intr.h>
 
 #if NBPFILTER > 0
@@ -1118,7 +1118,6 @@ rsu_event_survey(struct rsu_softc *sc, uint8_t *buf, int len)
 
 	/* Finalize mbuf. */
 	m->m_pkthdr.len = m->m_len = pktlen;
-	m->m_pkthdr.rcvif = ifp;
 
 	ni = ieee80211_find_rxnode(ic, wh);
 	rxi.rxi_flags = 0;
@@ -1313,7 +1312,6 @@ rsu_rx_frame(struct rsu_softc *sc, uint8_t *buf, int pktlen)
 		}
 	}
 	/* Finalize mbuf. */
-	m->m_pkthdr.rcvif = ifp;
 	/* Hardware does Rx TCP checksum offload. */
 	if (rxdw3 & R92S_RXDW3_TCPCHKVALID) {
 		if (__predict_true(rxdw3 & R92S_RXDW3_TCPCHKRPT))
@@ -1695,10 +1693,8 @@ rsu_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 	case SIOCSIFADDR:
 		ifa = (struct ifaddr *)data;
 		ifp->if_flags |= IFF_UP;
-#ifdef INET
 		if (ifa->ifa_addr->sa_family == AF_INET)
 			arp_ifinit(&ic->ic_ac, ifa);
-#endif
 		/* FALLTHROUGH */
 	case SIOCSIFFLAGS:
 		if (ifp->if_flags & IFF_UP) {

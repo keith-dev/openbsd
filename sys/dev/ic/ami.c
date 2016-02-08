@@ -1,4 +1,4 @@
-/*	$OpenBSD: ami.c,v 1.228 2014/07/13 23:10:23 deraadt Exp $	*/
+/*	$OpenBSD: ami.c,v 1.230 2014/11/05 01:02:10 daniel Exp $	*/
 
 /*
  * Copyright (c) 2001 Michael Shalayeff
@@ -57,7 +57,6 @@
 #include <sys/device.h>
 #include <sys/kernel.h>
 #include <sys/malloc.h>
-#include <sys/proc.h>
 #include <sys/rwlock.h>
 #include <sys/pool.h>
 
@@ -1365,7 +1364,8 @@ ami_scsi_cmd(struct scsi_xfer *xs)
 		cmd = &ccb->ccb_cmd;
 		cmd->acc_cmd = AMI_FLUSH;
 
-		return (ami_start_xs(sc, ccb, xs));
+		ami_start_xs(sc, ccb, xs);
+		return;
 
 	case TEST_UNIT_READY:
 		/* save off sd? after autoconf */

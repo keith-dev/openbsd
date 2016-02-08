@@ -1,4 +1,4 @@
-/* $OpenBSD: cu.c,v 1.19 2014/04/12 12:47:43 nicm Exp $ */
+/* $OpenBSD: cu.c,v 1.21 2015/02/08 17:33:35 nicm Exp $ */
 
 /*
  * Copyright (c) 2012 Nicholas Marriott <nicm@openbsd.org>
@@ -16,7 +16,6 @@
  * OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
 
-#include <sys/param.h>
 #include <sys/ioctl.h>
 
 #include <ctype.h>
@@ -32,6 +31,7 @@
 #include <string.h>
 #include <termios.h>
 #include <unistd.h>
+#include <limits.h>
 
 #include "cu.h"
 
@@ -65,8 +65,9 @@ void		try_remote(const char *, const char *, const char *);
 __dead void
 usage(void)
 {
-	fprintf(stderr, "usage: %s [-l line] [-s speed | -speed] [host]\n",
+	fprintf(stderr, "usage: %s [-l line] [-s speed | -speed]\n",
 	    __progname);
+	fprintf(stderr, "       %s [host]\n", __progname);
 	exit(1);
 }
 
@@ -113,20 +114,24 @@ main(int argc, char **argv)
 	if (argc != 0 && argc != 1)
 		usage();
 
-	if (argc == 1)
-		host = argv[0];
-	else
-		host = getenv("HOST");
-	if (host != NULL && *host != '\0') {
-		if (*host == '/') {
-			if (line_path == NULL)
+	if (line_path != NULL || line_speed != -1) {
+		if (argc != 0)
+			usage();
+	} else {
+		if (argc == 1)
+			host = argv[0];
+		else
+			host = getenv("HOST");
+		if (host != NULL && *host != '\0') {
+			if (*host == '/')
 				line_path = host;
-		} else {
-			s = getenv("REMOTE");
-			if (s != NULL && *s == '/')
-				try_remote(host, s, NULL);
-			else
-				try_remote(host, NULL, s);
+			else {
+				s = getenv("REMOTE");
+				if (s != NULL && *s == '/')
+					try_remote(host, s, NULL);
+				else
+					try_remote(host, NULL, s);
+			}
 		}
 	}
 
@@ -391,7 +396,7 @@ tilde_expand(const char *filename1)
 
 	if ((rv = asprintf(&out, "%s%s%s", pw->pw_dir, sep, filename)) == -1)
 		cu_err(1, "asprintf");
-	if (rv >= MAXPATHLEN) {
+	if (rv >= PATH_MAX) {
 		free(out);
 		goto no_change;
 	}

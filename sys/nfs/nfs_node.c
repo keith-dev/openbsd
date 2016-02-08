@@ -1,4 +1,4 @@
-/*	$OpenBSD: nfs_node.c,v 1.56 2014/07/12 18:43:52 tedu Exp $	*/
+/*	$OpenBSD: nfs_node.c,v 1.61 2014/12/23 07:54:13 tedu Exp $	*/
 /*	$NetBSD: nfs_node.c,v 1.16 1996/02/18 11:53:42 fvdl Exp $	*/
 
 /*
@@ -38,10 +38,11 @@
 
 #include <sys/param.h>
 #include <sys/systm.h>
-#include <sys/proc.h>
+#include <sys/timeout.h>
 #include <sys/mount.h>
 #include <sys/namei.h>
 #include <sys/vnode.h>
+#include <sys/lock.h>
 #include <sys/kernel.h>
 #include <sys/malloc.h>
 #include <sys/pool.h>
@@ -199,7 +200,7 @@ nfs_inactive(void *v)
 		nfs_removeit(sp);
 		crfree(sp->s_cred);
 		vrele(sp->s_dvp);
-		free(sp, M_NFSREQ, 0);
+		free(sp, M_NFSREQ, sizeof(*sp));
 	}
 	np->n_flag &= (NMODIFIED | NFLUSHINPROG | NFLUSHWANT);
 

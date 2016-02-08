@@ -1,4 +1,4 @@
-/* $OpenBSD: cmd-new-window.c,v 1.40 2014/05/13 08:08:32 nicm Exp $ */
+/* $OpenBSD: cmd-new-window.c,v 1.45 2015/02/05 10:32:39 nicm Exp $ */
 
 /*
  * Copyright (c) 2007 Nicholas Marriott <nicm@users.sourceforge.net>
@@ -30,6 +30,8 @@
  * Create a new window.
  */
 
+#define NEW_WINDOW_TEMPLATE "#{session_name}:#{window_index}.#{pane_index}"
+
 enum cmd_retval	cmd_new_window_exec(struct cmd *, struct cmd_q *);
 
 const struct cmd_entry cmd_new_window_entry = {
@@ -38,7 +40,6 @@ const struct cmd_entry cmd_new_window_entry = {
 	"[-adkP] [-c start-directory] [-F format] [-n window-name] "
 	CMD_TARGET_WINDOW_USAGE " [command]",
 	0,
-	NULL,
 	cmd_new_window_exec
 };
 
@@ -48,7 +49,6 @@ cmd_new_window_exec(struct cmd *self, struct cmd_q *cmdq)
 	struct args		*args = self->args;
 	struct session		*s;
 	struct winlink		*wl;
-	struct client		*c;
 	const char		*cmd, *path, *template;
 	char		       **argv, *cause, *cp;
 	int			 argc, idx, last, detached, cwd, fd = -1;
@@ -88,7 +88,7 @@ cmd_new_window_exec(struct cmd *self, struct cmd_q *cmdq)
 		cmd = options_get_string(&s->options, "default-command");
 		if (cmd != NULL && *cmd != '\0') {
 			argc = 1;
-			argv = (char**)&cmd;
+			argv = (char **)&cmd;
 		} else {
 			argc = 0;
 			argv = NULL;
@@ -108,11 +108,8 @@ cmd_new_window_exec(struct cmd *self, struct cmd_q *cmdq)
 
 	if (args_has(args, 'c')) {
 		ft = format_create();
-		if ((c = cmd_find_client(cmdq, NULL, 1)) != NULL)
-			format_client(ft, c);
-		format_session(ft, s);
-		format_winlink(ft, s, s->curw);
-		format_window_pane(ft, s->curw->window->active);
+		format_defaults(ft, cmd_find_client(cmdq, NULL, 1), s, NULL,
+		    NULL);
 		cp = format_expand(ft, args_get(args, 'c'));
 		format_free(ft);
 
@@ -172,11 +169,8 @@ cmd_new_window_exec(struct cmd *self, struct cmd_q *cmdq)
 			template = NEW_WINDOW_TEMPLATE;
 
 		ft = format_create();
-		if ((c = cmd_find_client(cmdq, NULL, 1)) != NULL)
-			format_client(ft, c);
-		format_session(ft, s);
-		format_winlink(ft, s, wl);
-		format_window_pane(ft, wl->window->active);
+		format_defaults(ft, cmd_find_client(cmdq, NULL, 1), s, wl,
+		    NULL);
 
 		cp = format_expand(ft, template);
 		cmdq_print(cmdq, "%s", cp);

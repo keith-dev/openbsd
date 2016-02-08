@@ -1,4 +1,4 @@
-/*	$OpenBSD: tcp_var.h,v 1.105 2014/01/23 23:51:29 henning Exp $	*/
+/*	$OpenBSD: tcp_var.h,v 1.107 2015/02/08 04:40:50 yasuoka Exp $	*/
 /*	$NetBSD: tcp_var.h,v 1.17 1996/02/13 23:44:24 christos Exp $	*/
 
 /*
@@ -34,6 +34,8 @@
 
 #ifndef _NETINET_TCP_VAR_H_
 #define _NETINET_TCP_VAR_H_
+
+#include <sys/timeout.h>
 
 /*
  * Kernel variables for tcp.
@@ -406,6 +408,7 @@ struct	tcpstat {
 	u_int32_t tcps_pcbhashmiss;	/* input packets missing pcb hash */
 	u_int32_t tcps_noport;		/* no socket on port */
 	u_int32_t tcps_badsyn;		/* SYN packet with src==dst rcv'ed */
+	u_int32_t tcps_dropsyn;		/* SYN packet dropped */
 
 	u_int32_t tcps_rcvbadsig;	/* rcvd bad/missing TCP signatures */
 	u_int64_t tcps_rcvgoodsig;	/* rcvd good TCP signatures */

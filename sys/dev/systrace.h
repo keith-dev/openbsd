@@ -1,4 +1,4 @@
-/*	$OpenBSD: systrace.h,v 1.23 2011/09/18 23:24:14 matthew Exp $	*/
+/*	$OpenBSD: systrace.h,v 1.25 2015/01/20 01:48:13 deraadt Exp $	*/
 /*
  * Copyright 2002 Niels Provos <provos@citi.umich.edu>
  * All rights reserved.
@@ -32,6 +32,7 @@
 #ifndef _SYSTRACE_H_
 #define _SYSTRACE_H_
 
+#include <sys/syslimits.h>
 #include <sys/ioccom.h>
 #include <sys/rwlock.h>
 
@@ -47,7 +48,7 @@ struct str_msg_ugid {
 };
 
 struct str_msg_execve {
-	char path[MAXPATHLEN];
+	char path[PATH_MAX];
 };
 
 #define SYSTR_MAX_POLICIES	64
@@ -109,7 +110,7 @@ struct systrace_answer {
 
 struct systrace_scriptname {
 	pid_t sn_pid;
-	char  sn_scriptname[MAXPATHLEN];
+	char  sn_scriptname[PATH_MAX];
 };
 
 #define SYSTR_READ		1

@@ -67,7 +67,7 @@ nsec3_add_params(const char* hash_algo_str, const char* flag_str,
 %token <type> T_OPT T_APL T_UINFO T_UID T_GID T_UNSPEC T_TKEY T_TSIG T_IXFR
 %token <type> T_AXFR T_MAILB T_MAILA T_DS T_DLV T_SSHFP T_RRSIG T_NSEC T_DNSKEY
 %token <type> T_SPF T_NSEC3 T_IPSECKEY T_DHCID T_NSEC3PARAM T_TLSA
-%token <type> T_NID T_L32 T_L64 T_LP T_EUI48 T_EUI64 T_CAA
+%token <type> T_NID T_L32 T_L64 T_LP T_EUI48 T_EUI64 T_CAA T_CDS T_CDNSKEY
 
 /* other tokens */
 %token	       DOLLAR_TTL DOLLAR_ORIGIN NL SP
@@ -336,13 +336,11 @@ wire_rel_dname:	wire_label
     }
     ;
 
-
-
-str_seq:	STR
+str_seq:	dotted_str
     {
 	    zadd_rdata_txt_wireformat(zparser_conv_text(parser->rr_region, $1.str, $1.len), 1);
     }
-    |	str_seq sp STR
+    |	str_seq sp dotted_str
     {
 	    zadd_rdata_txt_wireformat(zparser_conv_text(parser->rr_region, $3.str, $3.len), 0);
     }
@@ -614,6 +612,10 @@ type_and_rdata:
     |	T_EUI64 sp rdata_unknown { $$ = $1; parse_unknown_rdata($1, $3); }
     |	T_CAA sp rdata_caa
     |	T_CAA sp rdata_unknown { $$ = $1; parse_unknown_rdata($1, $3); }
+    |	T_CDS sp rdata_ds
+    |	T_CDS sp rdata_unknown { $$ = $1; parse_unknown_rdata($1, $3); }
+    |	T_CDNSKEY sp rdata_dnskey
+    |	T_CDNSKEY sp rdata_unknown { $$ = $1; parse_unknown_rdata($1, $3); }
     |	T_UTYPE sp rdata_unknown { $$ = $1; parse_unknown_rdata($1, $3); }
     |	STR error NL
     {

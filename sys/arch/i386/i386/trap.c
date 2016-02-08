@@ -1,4 +1,4 @@
-/*	$OpenBSD: trap.c,v 1.117 2014/07/09 07:29:00 guenther Exp $	*/
+/*	$OpenBSD: trap.c,v 1.120 2015/01/11 19:34:52 guenther Exp $	*/
 /*	$NetBSD: trap.c,v 1.95 1996/05/05 06:50:02 mycroft Exp $	*/
 
 /*-
@@ -138,10 +138,10 @@ trap(struct trapframe *frame)
 
 	/* SIGSEGV and SIGBUS need this */
 	if (frame->tf_err & PGEX_W) {
-		vftype = VM_PROT_WRITE;
-		ftype = VM_PROT_READ | VM_PROT_WRITE;
+		vftype = PROT_WRITE;
+		ftype = PROT_READ | PROT_WRITE;
 	} else
-		ftype = vftype = VM_PROT_READ;
+		ftype = vftype = PROT_READ;
 
 #ifdef DEBUG
 	if (trapdebug) {
@@ -381,15 +381,6 @@ trap(struct trapframe *frame)
 	case T_PAGEFLT:			/* allow page faults in kernel mode */
 		if (p == 0 || p->p_addr == 0)
 			goto we_re_toast;
-#ifdef LOCKDEBUG
-		/* If we page-fault while in scheduler, we're doomed. */
-#ifdef notyet
-		if (simple_lock_held(&sched_lock))
-#else
-		if (__mp_lock_held(&sched_lock))
-#endif
-			goto we_re_toast;
-#endif
 
 		pcb = &p->p_addr->u_pcb;
 #if 0

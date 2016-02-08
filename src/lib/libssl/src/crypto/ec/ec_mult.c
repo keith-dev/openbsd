@@ -1,4 +1,4 @@
-/* $OpenBSD: ec_mult.c,v 1.14 2014/07/12 16:03:37 miod Exp $ */
+/* $OpenBSD: ec_mult.c,v 1.18 2015/02/15 08:44:35 miod Exp $ */
 /*
  * Originally written by Bodo Moeller and Nils Larsch for the OpenSSL project.
  */
@@ -348,6 +348,7 @@ ec_wNAF_mul(const EC_GROUP * group, EC_POINT * r, const BIGNUM * scalar,
 	int r_is_at_infinity = 1;
 	size_t *wsize = NULL;	/* individual window sizes */
 	signed char **wNAF = NULL;	/* individual wNAFs */
+	signed char *tmp_wNAF = NULL;
 	size_t *wNAF_len = NULL;
 	size_t max_len = 0;
 	size_t num_val;
@@ -425,17 +426,23 @@ ec_wNAF_mul(const EC_GROUP * group, EC_POINT * r, const BIGNUM * scalar,
 	}
 	totalnum = num + numblocks;
 
-	wsize = reallocarray(NULL, totalnum, sizeof wsize[0]);
-	wNAF_len = reallocarray(NULL, totalnum, sizeof wNAF_len[0]);
 	/* includes space for pivot */
 	wNAF = reallocarray(NULL, (totalnum + 1), sizeof wNAF[0]);
-	val_sub = reallocarray(NULL, totalnum, sizeof val_sub[0]);
-
-	if (!wsize || !wNAF_len || !wNAF || !val_sub) {
+	if (wNAF == NULL) {
 		ECerr(EC_F_EC_WNAF_MUL, ERR_R_MALLOC_FAILURE);
 		goto err;
 	}
+
 	wNAF[0] = NULL;		/* preliminary pivot */
+
+	wsize = reallocarray(NULL, totalnum, sizeof wsize[0]);
+	wNAF_len = reallocarray(NULL, totalnum, sizeof wNAF_len[0]);
+	val_sub = reallocarray(NULL, totalnum, sizeof val_sub[0]);
+
+	if (wsize == NULL || wNAF_len == NULL || val_sub == NULL) {
+		ECerr(EC_F_EC_WNAF_MUL, ERR_R_MALLOC_FAILURE);
+		goto err;
+	}
 
 	/* num_val will be the total number of temporarily precomputed points */
 	num_val = 0;
@@ -464,7 +471,6 @@ ec_wNAF_mul(const EC_GROUP * group, EC_POINT * r, const BIGNUM * scalar,
 			}
 			/* we have already generated a wNAF for 'scalar' */
 		} else {
-			signed char *tmp_wNAF = NULL;
 			size_t tmp_len = 0;
 
 			if (num_scalar != 0) {
@@ -477,7 +483,7 @@ ec_wNAF_mul(const EC_GROUP * group, EC_POINT * r, const BIGNUM * scalar,
 			 */
 			wsize[num] = pre_comp->w;
 			tmp_wNAF = compute_wNAF(scalar, wsize[num], &tmp_len);
-			if (!tmp_wNAF)
+			if (tmp_wNAF == NULL)
 				goto err;
 
 			if (tmp_len <= max_len) {
@@ -491,6 +497,7 @@ ec_wNAF_mul(const EC_GROUP * group, EC_POINT * r, const BIGNUM * scalar,
 				totalnum = num + 1;	/* don't use wNAF
 							 * splitting */
 				wNAF[num] = tmp_wNAF;
+				tmp_wNAF = NULL;
 				wNAF[num + 1] = NULL;
 				wNAF_len[num] = tmp_len;
 				if (tmp_len > max_len)
@@ -547,7 +554,6 @@ ec_wNAF_mul(const EC_GROUP * group, EC_POINT * r, const BIGNUM * scalar,
 					wNAF[i] = malloc(wNAF_len[i]);
 					if (wNAF[i] == NULL) {
 						ECerr(EC_F_EC_WNAF_MUL, ERR_R_MALLOC_FAILURE);
-						free(tmp_wNAF);
 						goto err;
 					}
 					memcpy(wNAF[i], pp, wNAF_len[i]);
@@ -556,14 +562,12 @@ ec_wNAF_mul(const EC_GROUP * group, EC_POINT * r, const BIGNUM * scalar,
 
 					if (*tmp_points == NULL) {
 						ECerr(EC_F_EC_WNAF_MUL, ERR_R_INTERNAL_ERROR);
-						free(tmp_wNAF);
 						goto err;
 					}
 					val_sub[i] = tmp_points;
 					tmp_points += pre_points_per_block;
 					pp += blocksize;
 				}
-				free(tmp_wNAF);
 			}
 		}
 	}
@@ -621,11 +625,8 @@ ec_wNAF_mul(const EC_GROUP * group, EC_POINT * r, const BIGNUM * scalar,
 		}
 	}
 
-#if 1				/* optional; EC_window_bits_for_scalar_size
-				 * assumes we do this step */
 	if (!EC_POINTs_make_affine(group, num_val, val, ctx))
 		goto err;
-#endif
 
 	r_is_at_infinity = 1;
 
@@ -683,6 +684,7 @@ err:
 	EC_POINT_free(tmp);
 	free(wsize);
 	free(wNAF_len);
+	free(tmp_wNAF);
 	if (wNAF != NULL) {
 		signed char **w;
 
@@ -750,8 +752,7 @@ ec_wNAF_precompute_mult(EC_GROUP * group, BN_CTX * ctx)
 			goto err;
 	}
 	BN_CTX_start(ctx);
-	order = BN_CTX_get(ctx);
-	if (order == NULL)
+	if ((order = BN_CTX_get(ctx)) == NULL)
 		goto err;
 
 	if (!EC_GROUP_get_order(group, order, ctx))

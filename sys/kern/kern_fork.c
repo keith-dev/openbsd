@@ -1,4 +1,4 @@
-/*	$OpenBSD: kern_fork.c,v 1.173 2014/07/13 15:46:21 uebayasi Exp $	*/
+/*	$OpenBSD: kern_fork.c,v 1.178 2015/02/10 05:28:18 guenther Exp $	*/
 /*	$NetBSD: kern_fork.c,v 1.29 1996/02/09 18:59:34 christos Exp $	*/
 
 /*
@@ -54,11 +54,11 @@
 #include <sys/ktrace.h>
 #include <sys/sched.h>
 #include <sys/sysctl.h>
-#include <dev/rndvar.h>
 #include <sys/pool.h>
 #include <sys/mman.h>
 #include <sys/ptrace.h>
 #include <sys/atomic.h>
+#include <sys/unistd.h>
 
 #include <sys/syscallargs.h>
 
@@ -93,7 +93,6 @@ fork_return(void *arg)
 	child_return(p);
 }
 
-/*ARGSUSED*/
 int
 sys_fork(struct proc *p, void *v, register_t *retval)
 {
@@ -105,7 +104,6 @@ sys_fork(struct proc *p, void *v, register_t *retval)
 	return (fork1(p, flags, NULL, 0, fork_return, NULL, retval, NULL));
 }
 
-/*ARGSUSED*/
 int
 sys_vfork(struct proc *p, void *v, register_t *retval)
 {
@@ -151,6 +149,30 @@ tfork_child_return(void *arg)
 }
 
 /*
+ * Initialize common bits of a process structure, given the initial thread.
+ */
+void
+process_initialize(struct process *pr, struct proc *p)
+{
+	/* initialize the thread links */
+	pr->ps_mainproc = p;
+	TAILQ_INIT(&pr->ps_threads);
+	TAILQ_INSERT_TAIL(&pr->ps_threads, p, p_thr_link);
+	pr->ps_refcnt = 1;
+	p->p_p = pr;
+
+	/* give the process the same creds as the initial thread */
+	pr->ps_ucred = p->p_ucred;
+	crhold(pr->ps_ucred);
+	KASSERT(p->p_ucred->cr_ref >= 2);	/* new thread and new process */
+
+	LIST_INIT(&pr->ps_children);
+
+	timeout_set(&pr->ps_realit_to, realitexpire, pr);
+}
+
+
+/*
  * Allocate and initialize a new process.
  */
 void
@@ -159,13 +181,6 @@ process_new(struct proc *p, struct process *parent, int flags)
 	struct process *pr;
 
 	pr = pool_get(&process_pool, PR_WAITOK);
-	pr->ps_mainproc = p;
-
-	TAILQ_INIT(&pr->ps_threads);
-	TAILQ_INSERT_TAIL(&pr->ps_threads, p, p_thr_link);
-	pr->ps_pptr = parent;
-	LIST_INIT(&pr->ps_children);
-	pr->ps_refcnt = 1;
 
 	/*
 	 * Make a process structure for the new process.
@@ -177,24 +192,20 @@ process_new(struct proc *p, struct process *parent, int flags)
 	memcpy(&pr->ps_startcopy, &parent->ps_startcopy,
 	    (caddr_t)&pr->ps_endcopy - (caddr_t)&pr->ps_startcopy);
 
+	process_initialize(pr, p);
+
 	/* post-copy fixups */
-	pr->ps_ucred = p->p_ucred;
-	crhold(pr->ps_ucred);
-	KASSERT(p->p_ucred->cr_ref >= 3); /* fork thr, new thr, new process */
+	pr->ps_pptr = parent;
 	pr->ps_limit->p_refcnt++;
 
-	/* bump references to the text vnode (for procfs) */
+	/* bump references to the text vnode (for sysctl) */
 	pr->ps_textvp = parent->ps_textvp;
 	if (pr->ps_textvp)
 		vref(pr->ps_textvp);
 
-	timeout_set(&pr->ps_realit_to, realitexpire, pr);
-
 	pr->ps_flags = parent->ps_flags & (PS_SUGID | PS_SUGIDEXEC);
 	if (parent->ps_session->s_ttyvp != NULL)
 		pr->ps_flags |= parent->ps_flags & PS_CONTROLT;
-
-	p->p_p = pr;
 
 	/*
 	 * Duplicate sub-structures as needed.
@@ -493,7 +504,7 @@ fork1(struct proc *curp, int flags, void *stack, pid_t *tidptr,
 		p->p_cpu = arg;
 
 	if (newptstat)
-		free(newptstat, M_SUBPROC, 0);
+		free(newptstat, M_SUBPROC, sizeof(*newptstat));
 
 	/*
 	 * Notify any interested parties about the new process.

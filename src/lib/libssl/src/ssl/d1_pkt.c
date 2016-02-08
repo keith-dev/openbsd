@@ -1,7 +1,7 @@
-/* $OpenBSD: d1_pkt.c,v 1.34 2014/08/07 20:02:23 miod Exp $ */
-/* 
+/* $OpenBSD: d1_pkt.c,v 1.40 2015/02/09 10:53:28 jsing Exp $ */
+/*
  * DTLS implementation written by Nagendra Modadugu
- * (nagendra@cs.stanford.edu) for the OpenSSL project 2005.  
+ * (nagendra@cs.stanford.edu) for the OpenSSL project 2005.
  */
 /* ====================================================================
  * Copyright (c) 1998-2005 The OpenSSL Project.  All rights reserved.
@@ -11,7 +11,7 @@
  * are met:
  *
  * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer. 
+ *    notice, this list of conditions and the following disclaimer.
  *
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in
@@ -62,21 +62,21 @@
  * This package is an SSL implementation written
  * by Eric Young (eay@cryptsoft.com).
  * The implementation was written so as to conform with Netscapes SSL.
- * 
+ *
  * This library is free for commercial and non-commercial use as long as
  * the following conditions are aheared to.  The following conditions
  * apply to all code found in this distribution, be it the RC4, RSA,
  * lhash, DES, etc., code; not just the SSL code.  The SSL documentation
  * included with this distribution is covered by the same copyright terms
  * except that the holder is Tim Hudson (tjh@cryptsoft.com).
- * 
+ *
  * Copyright remains Eric Young's, and as such any Copyright notices in
  * the code are not to be removed.
  * If this package is used in a product, Eric Young should be given attribution
  * as the author of the parts of the library used.
  * This can be in the form of a textual message at program startup or
  * in documentation (online or textual) provided with the package.
- * 
+ *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
  * are met:
@@ -91,10 +91,10 @@
  *     Eric Young (eay@cryptsoft.com)"
  *    The word 'cryptographic' can be left out if the rouines from the library
  *    being used are not cryptographic related :-).
- * 4. If you include any Windows specific code (or a derivative thereof) from 
+ * 4. If you include any Windows specific code (or a derivative thereof) from
  *    the apps directory (application code) you must include an acknowledgement:
  *    "This product includes software written by Tim Hudson (tjh@cryptsoft.com)"
- * 
+ *
  * THIS SOFTWARE IS PROVIDED BY ERIC YOUNG ``AS IS'' AND
  * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
  * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
@@ -106,20 +106,22 @@
  * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
- * 
+ *
  * The licence and distribution terms for any publically available version or
  * derivative of this code cannot be changed.  i.e. this code cannot simply be
  * copied and put under another distribution licence
  * [including the GNU Public Licence.]
  */
 
-#include <stdio.h>
-#include <errno.h>
 #include <machine/endian.h>
+
+#include <errno.h>
+#include <stdio.h>
+
 #include "ssl_locl.h"
-#include <openssl/evp.h>
+
 #include <openssl/buffer.h>
-#include <openssl/rand.h>
+#include <openssl/evp.h>
 
 #include "pqueue.h"
 
@@ -220,7 +222,7 @@ dtls1_buffer_record(SSL *s, record_pqueue *queue, unsigned char *priority)
 	rdata = malloc(sizeof(DTLS1_RECORD_DATA));
 	item = pitem_new(priority, rdata);
 	if (rdata == NULL || item == NULL)
-		goto err;
+		goto init_err;
 
 	rdata->packet = s->packet;
 	rdata->packet_length = s->packet_length;
@@ -229,13 +231,6 @@ dtls1_buffer_record(SSL *s, record_pqueue *queue, unsigned char *priority)
 
 	item->data = rdata;
 
-#ifndef OPENSSL_NO_SCTP
-	/* Store bio_dgram_sctp_rcvinfo struct */
-	if (BIO_dgram_is_sctp(SSL_get_rbio(s)) &&
-		(s->state == SSL3_ST_SR_FINISHED_A || s->state == SSL3_ST_CR_FINISHED_A)) {
-		BIO_ctrl(SSL_get_rbio(s), BIO_CTRL_DGRAM_SCTP_GET_RCVINFO, sizeof(rdata->recordinfo), &rdata->recordinfo);
-	}
-#endif
 
 	s->packet = NULL;
 	s->packet_length = 0;
@@ -252,10 +247,13 @@ dtls1_buffer_record(SSL *s, record_pqueue *queue, unsigned char *priority)
 	return (1);
 
 err:
+	free(rdata->rbuf.buf);
+
+init_err:
 	SSLerr(SSL_F_DTLS1_BUFFER_RECORD, ERR_R_INTERNAL_ERROR);
 	free(rdata);
 	pitem_free(item);
-	return (0);
+	return (-1);
 }
 
 
@@ -278,7 +276,7 @@ dtls1_retrieve_buffered_record(SSL *s, record_pqueue *queue)
 }
 
 
-/* retrieve a buffered record that belongs to the new epoch, i.e., not processed 
+/* retrieve a buffered record that belongs to the new epoch, i.e., not processed
  * yet */
 #define dtls1_get_unprocessed_record(s) \
                    dtls1_retrieve_buffered_record((s), \
@@ -306,12 +304,13 @@ dtls1_process_buffered_records(SSL *s)
 			dtls1_get_unprocessed_record(s);
 			if (! dtls1_process_record(s))
 				return (0);
-			dtls1_buffer_record(s, &(s->d1->processed_rcds),
-			s->s3->rrec.seq_num);
+			if (dtls1_buffer_record(s, &(s->d1->processed_rcds),
+			    s->s3->rrec.seq_num) < 0)
+				return (-1);
 		}
 	}
 
-    /* sync epoch numbers once all the unprocessed records 
+    /* sync epoch numbers once all the unprocessed records
      * have been processed */
 	s->d1->processed_rcds.epoch = s->d1->r_epoch;
 	s->d1->unprocessed_rcds.epoch = s->d1->r_epoch + 1;
@@ -342,7 +341,7 @@ dtls1_process_record(SSL *s)
 	 * need to be copied into rr->data by either
 	 * the decryption or by the decompression
 	 * When the data is 'copied' into the rr->data buffer,
-	 * rr->input will be pointed at the new buffer */ 
+	 * rr->input will be pointed at the new buffer */
 
 	/* We now have - encrypted [ MAC [ compressed [ plain ] ] ]
 	 * rr->length bytes of encrypted compressed stuff. */
@@ -444,7 +443,6 @@ dtls1_process_record(SSL *s)
 
 	/* we have pulled in a full packet so zero things */
 	s->packet_length = 0;
-	dtls1_record_bitmap_update(s, &(s->d1->bitmap));/* Mark receipt of record. */
 	return (1);
 
 f_err:
@@ -478,7 +476,8 @@ dtls1_get_record(SSL *s)
 
 	/* The epoch may have changed.  If so, process all the
 	 * pending records.  This is a non-blocking operation. */
-	dtls1_process_buffered_records(s);
+	if (dtls1_process_buffered_records(s) < 0)
+		return (-1);
 
 	/* if we're renegotiating, then there may be buffered records */
 	if (dtls1_get_processed_record(s))
@@ -576,10 +575,6 @@ again:
 		/* get another record */
 	}
 
-#ifndef OPENSSL_NO_SCTP
-	/* Only do replay check if no SCTP bio */
-	if (!BIO_dgram_is_sctp(SSL_get_rbio(s))) {
-#endif
 		/* Check whether this is a repeat, or aged record.
 		 * Don't check if we're listening and this message is
 		 * a ClientHello. They can look as if they're replayed,
@@ -587,16 +582,13 @@ again:
 		 * would be dropped unnecessarily.
 		 */
 		if (!(s->d1->listen && rr->type == SSL3_RT_HANDSHAKE &&
-		    *p == SSL3_MT_CLIENT_HELLO) &&
+		    p != NULL && *p == SSL3_MT_CLIENT_HELLO) &&
 		    !dtls1_record_replay_check(s, bitmap)) {
 			rr->length = 0;
 			s->packet_length=0; /* dump this record */
 			goto again;
 			/* get another record */
 		}
-#ifndef OPENSSL_NO_SCTP
-	}
-#endif
 
 	/* just read a 0 length packet */
 	if (rr->length == 0)
@@ -609,7 +601,11 @@ again:
 	 */
 	if (is_next_epoch) {
 		if ((SSL_in_init(s) || s->in_handshake) && !s->d1->listen) {
-			dtls1_buffer_record(s, &(s->d1->unprocessed_rcds), rr->seq_num);
+			if (dtls1_buffer_record(s, &(s->d1->unprocessed_rcds),
+			    rr->seq_num) < 0)
+				return (-1);
+			/* Mark receipt of record. */
+			dtls1_record_bitmap_update(s, bitmap);
 		}
 		rr->length = 0;
 		s->packet_length = 0;
@@ -623,6 +619,8 @@ again:
 		goto again;
 		/* get another record */
 	}
+	/* Mark receipt of record. */
+	dtls1_record_bitmap_update(s, bitmap);
 
 	return (1);
 
@@ -680,18 +678,7 @@ dtls1_read_bytes(SSL *s, int type, unsigned char *buf, int len, int peek)
 
 	/* Now s->d1->handshake_fragment_len == 0 if type == SSL3_RT_HANDSHAKE. */
 
-#ifndef OPENSSL_NO_SCTP
-	/* Continue handshake if it had to be interrupted to read
-	 * app data with SCTP.
-	 */
-	if ((!s->in_handshake && SSL_in_init(s)) ||
-	    (BIO_dgram_is_sctp(SSL_get_rbio(s)) &&
-	    (s->state == DTLS1_SCTP_ST_SR_READ_SOCK ||
-	    s->state == DTLS1_SCTP_ST_CR_READ_SOCK) &&
-	    s->s3->in_read_app_data != 2))
-#else
 	if (!s->in_handshake && SSL_in_init(s))
-#endif
 	{
 		/* type == SSL3_RT_APPLICATION_DATA */
 		i = s->handshake_func(s);
@@ -720,13 +707,6 @@ start:
 		pitem *item;
 		item = pqueue_pop(s->d1->buffered_app_data.q);
 		if (item) {
-#ifndef OPENSSL_NO_SCTP
-			/* Restore bio_dgram_sctp_rcvinfo struct */
-			if (BIO_dgram_is_sctp(SSL_get_rbio(s))) {
-				DTLS1_RECORD_DATA *rdata = (DTLS1_RECORD_DATA *) item->data;
-				BIO_ctrl(SSL_get_rbio(s), BIO_CTRL_DGRAM_SCTP_SET_RCVINFO, sizeof(rdata->recordinfo), &rdata->recordinfo);
-			}
-#endif
 
 			dtls1_copy_record(s, item);
 
@@ -767,7 +747,11 @@ start:
 		 * buffer the application data for later processing rather
 		 * than dropping the connection.
 		 */
-		dtls1_buffer_record(s, &(s->d1->buffered_app_data), rr->seq_num);
+		if (dtls1_buffer_record(s, &(s->d1->buffered_app_data),
+		    rr->seq_num) < 0) {
+			SSLerr(SSL_F_DTLS1_READ_BYTES, ERR_R_INTERNAL_ERROR);
+			return (-1);
+		}
 		rr->length = 0;
 		goto start;
 	}
@@ -810,29 +794,6 @@ start:
 			}
 		}
 
-#ifndef OPENSSL_NO_SCTP
-		/* We were about to renegotiate but had to read
-		 * belated application data first, so retry.
-		 */
-		if (BIO_dgram_is_sctp(SSL_get_rbio(s)) &&
-		    rr->type == SSL3_RT_APPLICATION_DATA &&
-		    (s->state == DTLS1_SCTP_ST_SR_READ_SOCK ||
-		    s->state == DTLS1_SCTP_ST_CR_READ_SOCK)) {
-			s->rwstate = SSL_READING;
-			BIO_clear_retry_flags(SSL_get_rbio(s));
-			BIO_set_retry_read(SSL_get_rbio(s));
-		}
-
-		/* We might had to delay a close_notify alert because
-		 * of reordered app data. If there was an alert and there
-		 * is no message to read anymore, finally set shutdown.
-		 */
-		if (BIO_dgram_is_sctp(SSL_get_rbio(s)) &&
-			s->d1->shutdown_received && !BIO_dgram_sctp_msg_waiting(SSL_get_rbio(s))) {
-			s->shutdown |= SSL_RECEIVED_SHUTDOWN;
-			return (0);
-		}
-#endif			
 		return (n);
 	}
 
@@ -990,20 +951,6 @@ start:
 		{
 			s->s3->warn_alert = alert_descr;
 			if (alert_descr == SSL_AD_CLOSE_NOTIFY) {
-#ifndef OPENSSL_NO_SCTP
-				/* With SCTP and streams the socket may deliver app data
-				 * after a close_notify alert. We have to check this
-				 * first so that nothing gets discarded.
-				 */
-				if (BIO_dgram_is_sctp(SSL_get_rbio(s)) &&
-					BIO_dgram_sctp_msg_waiting(SSL_get_rbio(s))) {
-					s->d1->shutdown_received = 1;
-					s->rwstate = SSL_READING;
-					BIO_clear_retry_flags(SSL_get_rbio(s));
-					BIO_set_retry_read(SSL_get_rbio(s));
-					return -1;
-				}
-#endif
 				s->shutdown |= SSL_RECEIVED_SHUTDOWN;
 				return (0);
 			}
@@ -1077,14 +1024,6 @@ start:
 		if (s->version == DTLS1_BAD_VER)
 			s->d1->handshake_read_seq++;
 
-#ifndef OPENSSL_NO_SCTP
-		/* Remember that a CCS has been received,
-		 * so that an old key of SCTP-Auth can be
-		 * deleted when a CCS is sent. Will be ignored
-		 * if no SCTP is used
-		 */
-		BIO_ctrl(SSL_get_wbio(s), BIO_CTRL_DGRAM_SCTP_AUTH_CCS_RCVD, 1, NULL);
-#endif
 
 		goto start;
 	}
@@ -1201,17 +1140,7 @@ dtls1_write_app_data_bytes(SSL *s, int type, const void *buf_, int len)
 {
 	int i;
 
-#ifndef OPENSSL_NO_SCTP
-	/* Check if we have to continue an interrupted handshake
-	 * for reading belated app data with SCTP.
-	 */
-	if ((SSL_in_init(s) && !s->in_handshake) ||
-	    (BIO_dgram_is_sctp(SSL_get_wbio(s)) &&
-	    (s->state == DTLS1_SCTP_ST_SR_READ_SOCK ||
-	    s->state == DTLS1_SCTP_ST_CR_READ_SOCK)))
-#else
 	if (SSL_in_init(s) && !s->in_handshake)
-#endif
 	{
 		i = s->handshake_func(s);
 		if (i < 0)
@@ -1232,7 +1161,7 @@ dtls1_write_app_data_bytes(SSL *s, int type, const void *buf_, int len)
 }
 
 
-	/* this only happens when a client hello is received and a handshake 
+	/* this only happens when a client hello is received and a handshake
 	 * is started. */
 static int
 have_handshake_fragment(SSL *s, int type, unsigned char *buf,
@@ -1380,7 +1309,7 @@ do_dtls1_write(SSL *s, int type, const unsigned char *buf, unsigned int len)
 	/* ssl3_enc can only have an error on read */
 	if (bs)	/* bs != 0 in case of CBC */
 	{
-		RAND_pseudo_bytes(p, bs);
+		arc4random_buf(p, bs);
 		/* master IV and last CBC residue stand for
 		 * the rest of randomness */
 		wr->length += bs;

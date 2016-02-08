@@ -1,9 +1,43 @@
-BL-TAG(1)                  OpenBSD Reference Manual                  BL-TAG(1)
+BL-TAG(1)                   General Commands Manual                  BL-TAG(1)
 
 NNAAMMEE
      BBll--ttaagg - tagged lists
 
 DDEESSCCRRIIPPTTIIOONN
+     tag
+   x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x
+   x x
+
+     tag
+    x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x
+    x x x
+
+     tag
+     x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x
+     x x x
+
+     tag
+      x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x
+      x x x x
+
+     tag
+       x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x
+       x x x x
+
+     tag
+        x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x
+        x x x x x
+
+     tag
+         x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x
+         x x x x x
+
+     tag  x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x
+          x x x x x x
+
+     tag   x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x
+           x x x x x x
+
      tag    x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x
             x x x x x x x
 
@@ -46,6 +80,8 @@ DDEESSCCRRIIPPTTIIOONN
 
      a      b
 
+            white space only
+
      a      b
 
      Non-numeric width specification:
@@ -53,6 +89,15 @@ DDEESSCCRRIIPPTTIIOONN
      tag  text
 
      tag         text
+
+     Scaling units other than n:
+
+     tag   text
+
+     tag       text
+
+     tag
+         text
 
      Indented list:
 
@@ -66,4 +111,4 @@ DDEESSCCRRIIPPTTIIOONN
 
              second paragraph
 
-OpenBSD                          April 8, 2014                         OpenBSD
+OpenBSD                        December 25, 2014                       OpenBSD

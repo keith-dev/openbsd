@@ -1,4 +1,4 @@
-/*	$OpenBSD: print-ospf6.c,v 1.6 2014/07/04 08:42:38 bluhm Exp $	*/
+/*	$OpenBSD: print-ospf6.c,v 1.8 2015/01/16 06:40:21 deraadt Exp $	*/
 
 
 /*
@@ -26,12 +26,10 @@
 
 #ifdef INET6
 
-#include <sys/param.h>
 #include <sys/time.h>
 #include <sys/socket.h>
 
 #include <netinet/in.h>
-#include <netinet/in_systm.h>
 #include <netinet/ip.h>
 #include <netinet/ip_var.h>
 

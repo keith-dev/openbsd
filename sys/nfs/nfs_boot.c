@@ -1,4 +1,4 @@
-/*	$OpenBSD: nfs_boot.c,v 1.32 2014/05/07 08:26:38 mpi Exp $ */
+/*	$OpenBSD: nfs_boot.c,v 1.36 2014/12/05 15:50:04 mpi Exp $ */
 /*	$NetBSD: nfs_boot.c,v 1.26 1996/05/07 02:51:25 thorpej Exp $	*/
 
 /*
@@ -33,7 +33,6 @@
 #include <sys/kernel.h>
 #include <sys/conf.h>
 #include <sys/ioctl.h>
-#include <sys/proc.h>
 #include <sys/mount.h>
 #include <sys/mbuf.h>
 #include <sys/reboot.h>
@@ -42,7 +41,7 @@
 #include <sys/queue.h>
 
 #include <net/if.h>
-#include <net/route.h>
+#include <net/if_var.h>
 
 #include <netinet/in.h>
 #include <netinet/in_var.h>
@@ -180,7 +179,7 @@ nfs_boot_init(struct nfs_diskless *nd, struct proc *procp)
 	 * Do enough of ifconfig(8) so that the chosen interface
 	 * can talk to the servers.  (just set the address)
 	 */
-	bzero(&ifra, sizeof(ifra));
+	memset(&ifra, 0, sizeof(ifra));
 	bcopy(ifp->if_xname, ifra.ifra_name, sizeof(ifra.ifra_name));
 
 	sin = (struct sockaddr_in *)&ifra.ifra_addr;
@@ -206,7 +205,7 @@ nfs_boot_init(struct nfs_diskless *nd, struct proc *procp)
 	 * The server address returned by the WHOAMI call
 	 * is used for all subsequent bootparam RPCs.
 	 */
-	bzero((caddr_t)&bp_sin, sizeof(bp_sin));
+	memset(&bp_sin, 0, sizeof(bp_sin));
 	bp_sin.sin_len = sizeof(bp_sin);
 	bp_sin.sin_family = AF_INET;
 	bp_sin.sin_addr.s_addr = ifatoia(ifa)->ia_broadaddr.sin_addr.s_addr;
@@ -242,7 +241,7 @@ nfs_boot_getfh(struct sockaddr_in *bpsin, char *key,
 	args = &ndmntp->ndm_args;
 
 	/* Initialize mount args. */
-	bzero((caddr_t) args, sizeof(*args));
+	memset(args, 0, sizeof(*args));
 	args->addr     = (struct sockaddr *)&ndmntp->ndm_saddr;
 	args->addrlen  = args->addr->sa_len;
 	args->sotype   = SOCK_DGRAM;
@@ -482,7 +481,7 @@ bp_getfile(struct sockaddr_in *bpsin, char *key, struct sockaddr_in *md_sin,
 
 	/* setup server socket address */
 	sin = md_sin;
-	bzero((caddr_t)sin, sizeof(*sin));
+	memset(sin, 0, sizeof(*sin));
 	sin->sin_len = sizeof(*sin);
 	sin->sin_family = AF_INET;
 	sin->sin_addr = inaddr;

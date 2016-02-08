@@ -1,4 +1,4 @@
-/*	$OpenBSD: trap.c,v 1.30 2014/07/10 14:21:20 deraadt Exp $	*/
+/*	$OpenBSD: trap.c,v 1.33 2015/02/09 09:32:53 miod Exp $	*/
 /*	$NetBSD: exception.c,v 1.32 2006/09/04 23:57:52 uwe Exp $	*/
 /*	$NetBSD: syscall.c,v 1.6 2006/03/07 07:21:50 thorpej Exp $	*/
 
@@ -177,18 +177,22 @@ general_exception(struct proc *p, struct trapframe *tf, uint32_t va)
 
 	switch (expevt) {
 	case EXPEVT_BREAK:
+#ifdef DDB
 		if (kdb_trap(EXPEVT_BREAK, 0, tf))
 			return;
 		else
+#endif
 			goto do_panic;
 		break;
 	case EXPEVT_TRAPA:
+#ifdef DDB
 		/* Check for ddb request */
 		tra = _reg_read_4(SH_(TRA));
 		if (tra == (_SH_TRA_BREAK << 2) &&
 		    kdb_trap(expevt, tra, tf))
 			return;
 		else
+#endif
 			goto do_panic;
 		break;
 	case EXPEVT_TRAPA | EXP_USER:
@@ -346,15 +350,15 @@ tlb_exception(struct proc *p, struct trapframe *tf, uint32_t va)
 	switch (tf->tf_expevt) {
 	case EXPEVT_TLB_MISS_LD:
 		track = PVH_REFERENCED;
-		ftype = VM_PROT_READ;
+		ftype = PROT_READ;
 		break;
 	case EXPEVT_TLB_MISS_ST:
 		track = PVH_REFERENCED;
-		ftype = VM_PROT_WRITE;
+		ftype = PROT_WRITE;
 		break;
 	case EXPEVT_TLB_MOD:
 		track = PVH_REFERENCED | PVH_MODIFIED;
-		ftype = VM_PROT_WRITE;
+		ftype = PROT_WRITE;
 		break;
 	case EXPEVT_TLB_PROT_LD:
 		TLB_ASSERT((int)va > 0,
@@ -372,7 +376,7 @@ tlb_exception(struct proc *p, struct trapframe *tf, uint32_t va)
 
 	case EXPEVT_TLB_PROT_ST:
 		track = 0;	/* call uvm_fault first. (COW) */
-		ftype = VM_PROT_WRITE;
+		ftype = PROT_WRITE;
 		break;
 
 	default:
@@ -412,8 +416,7 @@ tlb_exception(struct proc *p, struct trapframe *tf, uint32_t va)
 
 	/* User stack extension */
 	if (map != kernel_map &&
-	    (va >= (vaddr_t)p->p_vmspace->vm_maxsaddr) &&
-	    (va < USRSTACK)) {
+	    va >= (vaddr_t)p->p_vmspace->vm_maxsaddr) {
 		if (err == 0)
 			uvm_grow(p, va);
 		else if (err == EACCES)

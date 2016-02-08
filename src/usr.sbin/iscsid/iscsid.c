@@ -1,4 +1,4 @@
-/*	$OpenBSD: iscsid.c,v 1.16 2014/07/13 17:07:00 claudio Exp $ */
+/*	$OpenBSD: iscsid.c,v 1.18 2015/01/16 15:57:06 deraadt Exp $ */
 
 /*
  * Copyright (c) 2009 Claudio Jeker <claudio@openbsd.org>
@@ -16,8 +16,7 @@
  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
 
-#include <sys/types.h>
-#include <sys/param.h>
+#include <sys/param.h>	/* nitems */
 #include <sys/queue.h>
 #include <sys/socket.h>
 #include <sys/sysctl.h>
@@ -315,13 +314,13 @@ done:
 }
 
 #define MERGE_MIN(r, a, b, v)				\
-	res->v = (mine->v < his->v ? mine->v : his->v)
+	r->v = (a->v < b->v ? a->v : b->v)
 #define MERGE_MAX(r, a, b, v)				\
-	res->v = (mine->v > his->v ? mine->v : his->v)
+	r->v = (a->v > b->v ? a->v : b->v)
 #define MERGE_OR(r, a, b, v)				\
-	res->v = (mine->v || his->v)
+	r->v = (a->v || b->v)
 #define MERGE_AND(r, a, b, v)				\
-	res->v = (mine->v && his->v)
+	r->v = (a->v && b->v)
 
 void
 iscsi_merge_sess_params(struct session_params *res,

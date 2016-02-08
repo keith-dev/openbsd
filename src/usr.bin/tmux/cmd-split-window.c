@@ -1,4 +1,4 @@
-/* $OpenBSD: cmd-split-window.c,v 1.50 2014/05/13 08:08:32 nicm Exp $ */
+/* $OpenBSD: cmd-split-window.c,v 1.56 2015/02/05 10:32:39 nicm Exp $ */
 
 /*
  * Copyright (c) 2009 Nicholas Marriott <nicm@users.sourceforge.net>
@@ -31,26 +31,18 @@
  * Split a window (add a new pane).
  */
 
-void		 cmd_split_window_key_binding(struct cmd *, int);
+#define SPLIT_WINDOW_TEMPLATE "#{session_name}:#{window_index}.#{pane_index}"
+
 enum cmd_retval	 cmd_split_window_exec(struct cmd *, struct cmd_q *);
 
 const struct cmd_entry cmd_split_window_entry = {
 	"split-window", "splitw",
-	"c:dF:l:hp:Pt:v", 0, -1,
-	"[-dhvP] [-c start-directory] [-F format] [-p percentage|-l size] "
+	"bc:dF:l:hp:Pt:v", 0, -1,
+	"[-bdhvP] [-c start-directory] [-F format] [-p percentage|-l size] "
 	CMD_TARGET_PANE_USAGE " [command]",
 	0,
-	cmd_split_window_key_binding,
 	cmd_split_window_exec
 };
-
-void
-cmd_split_window_key_binding(struct cmd *self, int key)
-{
-	self->args = args_create(0);
-	if (key == '%')
-		args_set(self->args, 'h', NULL);
-}
 
 enum cmd_retval
 cmd_split_window_exec(struct cmd *self, struct cmd_q *cmdq)
@@ -67,7 +59,6 @@ cmd_split_window_exec(struct cmd *self, struct cmd_q *cmdq)
 	int			 argc, size, percentage, cwd, fd = -1;
 	enum layout_type	 type;
 	struct layout_cell	*lc;
-	struct client		*c;
 	struct format_tree	*ft;
 	struct environ_entry	*envent;
 
@@ -85,7 +76,7 @@ cmd_split_window_exec(struct cmd *self, struct cmd_q *cmdq)
 		cmd = options_get_string(&s->options, "default-command");
 		if (cmd != NULL && *cmd != '\0') {
 			argc = 1;
-			argv = (char**)&cmd;
+			argv = (char **)&cmd;
 		} else {
 			argc = 0;
 			argv = NULL;
@@ -97,11 +88,8 @@ cmd_split_window_exec(struct cmd *self, struct cmd_q *cmdq)
 
 	if (args_has(args, 'c')) {
 		ft = format_create();
-		if ((c = cmd_find_client(cmdq, NULL, 1)) != NULL)
-			format_client(ft, c);
-		format_session(ft, s);
-		format_winlink(ft, s, s->curw);
-		format_window_pane(ft, s->curw->window->active);
+		format_defaults(ft, cmd_find_client(cmdq, NULL, 1), s, NULL,
+		    NULL);
 		cp = format_expand(ft, args_get(args, 'c'));
 		format_free(ft);
 
@@ -153,7 +141,8 @@ cmd_split_window_exec(struct cmd *self, struct cmd_q *cmdq)
 	if (*shell == '\0' || areshell(shell))
 		shell = _PATH_BSHELL;
 
-	if ((lc = layout_split_pane(wp, type, size, 0)) == NULL) {
+	lc = layout_split_pane(wp, type, size, args_has(args, 'b'));
+	if (lc == NULL) {
 		cause = xstrdup("pane too small");
 		goto error;
 	}
@@ -188,11 +177,8 @@ cmd_split_window_exec(struct cmd *self, struct cmd_q *cmdq)
 			template = SPLIT_WINDOW_TEMPLATE;
 
 		ft = format_create();
-		if ((c = cmd_find_client(cmdq, NULL, 1)) != NULL)
-			format_client(ft, c);
-		format_session(ft, s);
-		format_winlink(ft, s, wl);
-		format_window_pane(ft, new_wp);
+		format_defaults(ft, cmd_find_client(cmdq, NULL, 1), s, wl,
+		    new_wp);
 
 		cp = format_expand(ft, template);
 		cmdq_print(cmdq, "%s", cp);

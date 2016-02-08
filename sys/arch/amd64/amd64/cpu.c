@@ -1,4 +1,4 @@
-/*	$OpenBSD: cpu.c,v 1.64 2014/07/10 11:56:56 mlarkin Exp $	*/
+/*	$OpenBSD: cpu.c,v 1.79 2015/02/11 00:54:39 dlg Exp $	*/
 /* $NetBSD: cpu.c,v 1.1 2003/04/26 18:39:26 fvdl Exp $ */
 
 /*-
@@ -68,15 +68,17 @@
 #include "ioapic.h"
 
 #include <sys/param.h>
-#include <sys/proc.h>
+#include <sys/timeout.h>
 #include <sys/systm.h>
 #include <sys/device.h>
 #include <sys/malloc.h>
 #include <sys/memrange.h>
 #include <dev/rndvar.h>
+#include <sys/atomic.h>
 
 #include <uvm/uvm_extern.h>
 
+#include <machine/codepatch.h>
 #include <machine/cpu.h>
 #include <machine/cpufunc.h>
 #include <machine/cpuvar.h>
@@ -110,6 +112,7 @@
 
 int     cpu_match(struct device *, void *, void *);
 void    cpu_attach(struct device *, struct device *, void *);
+int     cpu_activate(struct device *, int);
 void	patinit(struct cpu_info *ci);
 
 struct cpu_softc {
@@ -120,66 +123,23 @@ struct cpu_softc {
 #ifndef SMALL_KERNEL
 void	replacesmap(void);
 
-extern long _copyout_stac;
-extern long _copyout_clac;
-extern long _copyin_stac;
-extern long _copyin_clac;
-extern long _copy_fault_clac;
-extern long _copyoutstr_stac;
-extern long _copyinstr_stac;
-extern long _copystr_fault_clac;
 extern long _stac;
 extern long _clac;
-
-static const struct {
-	void *daddr;
-	void *saddr;
-} ireplace[] = {
-	{ &_copyout_stac, &_stac },
-	{ &_copyout_clac, &_clac },
-	{ &_copyin_stac, &_stac },
-	{ &_copyin_clac, &_clac },
-	{ &_copy_fault_clac, &_clac },
-	{ &_copyoutstr_stac, &_stac },
-	{ &_copyinstr_stac, &_stac },
-	{ &_copystr_fault_clac, &_clac },
-};
 
 void
 replacesmap(void)
 {
 	static int replacedone = 0;
-	int i, s;
-	vaddr_t nva;
+	int s;
 
 	if (replacedone)
 		return;
 	replacedone = 1;
 
 	s = splhigh();
-	/*
-	 * Create writeable aliases of memory we need
-	 * to write to as kernel is mapped read-only
-	 */
-	nva = (vaddr_t)km_alloc(2 * PAGE_SIZE, &kv_any, &kp_none, &kd_waitok);
 
-	for (i = 0; i < nitems(ireplace); i++) {
-		paddr_t kva = trunc_page((paddr_t)ireplace[i].daddr);
-		paddr_t po = (paddr_t)ireplace[i].daddr & PAGE_MASK;
-		paddr_t pa1, pa2;
-
-		pmap_extract(pmap_kernel(), kva, &pa1);
-		pmap_extract(pmap_kernel(), kva + PAGE_SIZE, &pa2);
-		pmap_kenter_pa(nva, pa1, VM_PROT_READ | VM_PROT_WRITE);
-		pmap_kenter_pa(nva + PAGE_SIZE, pa2, VM_PROT_READ | 
-		    VM_PROT_WRITE);
-		pmap_update(pmap_kernel());
-
-		/* replace 3 byte nops with stac/clac instructions */
-		bcopy(ireplace[i].saddr, (void *)(nva + po), 3);
-	}
-
-	km_free((void *)nva, 2 * PAGE_SIZE, &kv_any, &kp_none);
+	codepatch_replace(CPTAG_STAC, &_stac, 3);
+	codepatch_replace(CPTAG_CLAC, &_clac, 3);
 	
 	splx(s);
 }
@@ -193,7 +153,7 @@ struct cpu_functions mp_cpu_funcs = { mp_cpu_start, NULL,
 #endif /* MULTIPROCESSOR */
 
 struct cfattach cpu_ca = {
-	sizeof(struct cpu_softc), cpu_match, cpu_attach
+	sizeof(struct cpu_softc), cpu_match, cpu_attach, NULL, cpu_activate
 };
 
 struct cfdriver cpu_cd = {
@@ -220,18 +180,6 @@ void    	cpu_hatch(void *);
 void    	cpu_boot_secondary(struct cpu_info *ci);
 void    	cpu_start_secondary(struct cpu_info *ci);
 void		cpu_copy_trampoline(void);
-
-/*
- * Runs once per boot once multiprocessor goo has been detected and
- * the local APIC on the boot processor has been mapped.
- *
- * Called from lapic_boot_init() (from mpbios_scan()).
- */
-void
-cpu_init_first(void)
-{
-	cpu_copy_trampoline();
-}
 #endif
 
 int
@@ -360,6 +308,8 @@ cpu_init_mwait(struct cpu_softc *sc)
 	else
 		mwait_size = largest;
 	printf("\n");
+	/* XXX disable mwait: ACPI says not to use it on too many systems */
+	mwait_size = 0;
 }
 
 void
@@ -442,8 +392,7 @@ cpu_attach(struct device *parent, struct device *self, void *aux)
 	ci->ci_cpuid = 0;	/* False for APs, but they're not used anyway */
 #endif
 	ci->ci_func = caa->cpu_func;
-
-	simple_lock_init(&ci->ci_slock);
+	ci->ci_handled_intr_level = IPL_NONE;
 
 #if defined(MULTIPROCESSOR)
 	/*
@@ -626,6 +575,9 @@ cpu_start_secondary(struct cpu_info *ci)
 
 	ci->ci_flags |= CPUF_AP;
 
+        pmap_kenter_pa(MP_TRAMPOLINE, MP_TRAMPOLINE, PROT_READ | PROT_EXEC);
+        pmap_kenter_pa(MP_TRAMP_DATA, MP_TRAMP_DATA, PROT_READ | PROT_WRITE);
+
 	CPU_STARTUP(ci);
 
 	/*
@@ -655,6 +607,9 @@ cpu_start_secondary(struct cpu_info *ci)
 	}
 
 	CPU_START_CLEANUP(ci);
+
+	pmap_kremove(MP_TRAMPOLINE, PAGE_SIZE);
+	pmap_kremove(MP_TRAMP_DATA, PAGE_SIZE);
 }
 
 void
@@ -792,6 +747,8 @@ cpu_copy_trampoline(void)
 	 */
 	extern u_char cpu_spinup_trampoline[];
 	extern u_char cpu_spinup_trampoline_end[];
+	extern u_char mp_tramp_data_start[];
+	extern u_char mp_tramp_data_end[];
 
 	extern u_int32_t mp_pdirpa;
 	extern paddr_t tramp_pdirpa;
@@ -800,11 +757,21 @@ cpu_copy_trampoline(void)
 	    cpu_spinup_trampoline,
 	    cpu_spinup_trampoline_end-cpu_spinup_trampoline);
 
+	pmap_kenter_pa(MP_TRAMP_DATA, MP_TRAMP_DATA,
+		PROT_READ | PROT_WRITE);
+	memcpy((caddr_t)MP_TRAMP_DATA,
+		mp_tramp_data_start,
+		mp_tramp_data_end - mp_tramp_data_start);
+
 	/*
-	 * We need to patch this after we copy the trampoline,
-	 * the symbol points into the copied trampoline.
+	 * We need to patch this after we copy the tramp data,
+	 * the symbol points into the copied tramp data page.
 	 */
 	mp_pdirpa = tramp_pdirpa;
+
+	/* Unmap, will be remapped in cpu_start_secondary */
+	pmap_kremove(MP_TRAMPOLINE, PAGE_SIZE);
+	pmap_kremove(MP_TRAMP_DATA, PAGE_SIZE);
 }
 
 
@@ -831,7 +798,7 @@ mp_cpu_start(struct cpu_info *ci)
 	dwordptr[0] = 0;
 	dwordptr[1] = MP_TRAMPOLINE >> 4;
 
-	pmap_kenter_pa(0, 0, VM_PROT_READ|VM_PROT_WRITE);
+	pmap_kenter_pa(0, 0, PROT_READ | PROT_WRITE);
 	memcpy((u_int8_t *) 0x467, dwordptr, 4);
 	pmap_kremove(0, PAGE_SIZE);
 
@@ -887,14 +854,11 @@ cpu_init_msrs(struct cpu_info *ci)
 	    ((uint64_t)GSEL(GUCODE32_SEL, SEL_UPL) << 48));
 	wrmsr(MSR_LSTAR, (uint64_t)Xsyscall);
 	wrmsr(MSR_CSTAR, (uint64_t)Xsyscall32);
-	wrmsr(MSR_SFMASK, PSL_NT|PSL_T|PSL_I|PSL_C);
+	wrmsr(MSR_SFMASK, PSL_NT|PSL_T|PSL_I|PSL_C|PSL_D);
 
 	wrmsr(MSR_FSBASE, 0);
 	wrmsr(MSR_GSBASE, (u_int64_t)ci);
 	wrmsr(MSR_KERNELGSBASE, 0);
-
-	if (cpu_feature & CPUID_NXE)
-		wrmsr(MSR_EFER, rdmsr(MSR_EFER) | EFER_NXE);
 }
 
 void
@@ -936,6 +900,7 @@ void
 rdrand(void *v)
 {
 	struct timeout *tmo = v;
+	extern int	has_rdrand;
 	union {
 		uint64_t u64;
 		uint32_t u32[2];
@@ -943,6 +908,8 @@ rdrand(void *v)
 	uint64_t valid;
 	int i;
 
+	if (has_rdrand == 0)
+		return;
 	for (i = 0; i < 2; i++) {
 		__asm volatile(
 		    "xor	%1, %1\n\t"
@@ -956,5 +923,21 @@ rdrand(void *v)
 		}
 	}
 
-	timeout_add_msec(tmo, 10);
+	if (tmo)
+		timeout_add_msec(tmo, 10);
+}
+
+int
+cpu_activate(struct device *self, int act)
+{
+	struct cpu_softc *sc = (struct cpu_softc *)self;
+
+	switch (act) {
+	case DVACT_RESUME:
+		if (sc->sc_info->ci_cpuid == 0)
+			rdrand(NULL);
+		break;
+	}
+
+	return (0);
 }

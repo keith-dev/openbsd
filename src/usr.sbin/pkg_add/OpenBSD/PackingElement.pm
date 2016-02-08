@@ -1,5 +1,5 @@
 # ex:ts=8 sw=4:
-# $OpenBSD: PackingElement.pm,v 1.235 2014/07/10 10:32:01 espie Exp $
+# $OpenBSD: PackingElement.pm,v 1.239 2015/02/25 16:37:15 sthen Exp $
 #
 # Copyright (c) 2003-2014 Marc Espie <espie@openbsd.org>
 #
@@ -162,6 +162,7 @@ sub stringize
 
 sub IsFile() { 0 }
 
+sub is_a_library() { 0 }
 sub NoDuplicateNames() { 0 }
 
 
@@ -242,9 +243,15 @@ sub compute_modes
 	}
 	if (defined $state->{owner}) {
 		$self->{owner} = $state->{owner};
+		if (defined $state->{uid}) {
+			$self->{uid} = $state->{uid};
+		}
 	}
 	if (defined $state->{group}) {
 		$self->{group} = $state->{group};
+		if (defined $state->{gid}) {
+			$self->{gid} = $state->{gid};
+		}
 	}
 }
 
@@ -504,6 +511,20 @@ sub destate
 
 sub dirclass() { "OpenBSD::PackingElement::Sampledir" }
 
+package OpenBSD::PackingElement::Ghost;
+our @ISA = qw(OpenBSD::PackingElement::FileObject);
+
+sub keyword() { "ghost" }
+sub absolute_okay() { 1 }
+__PACKAGE__->register_with_factory;
+
+sub destate
+{
+	my ($self, $state) = @_;
+	$self->compute_fullname($state);
+	$self->compute_modes($state);
+}
+
 package OpenBSD::PackingElement::Sampledir;
 our @ISA=qw(OpenBSD::PackingElement::DirBase OpenBSD::PackingElement::Sample);
 
@@ -548,7 +569,7 @@ sub report
 	if (@l > 0) {
 		$state->say("The following new rcscripts were installed: #1",
 		    join(' ', @l));
-		$state->say("See rc.d(8) for details.");
+		$state->say("See rcctl(8) for details.");
 	}
 }
 
@@ -671,6 +692,8 @@ sub parse
 		return undef;
 	}
 }
+
+sub is_a_library() { 1 }
 
 package OpenBSD::PackingElement::PkgConfig;
 our @ISA=qw(OpenBSD::PackingElement::FileBase);
@@ -1119,6 +1142,12 @@ sub new
 	    comment => $comment, home => $home, shell => $shell }, $class;
 }
 
+sub destate
+{
+	my ($self, $state) = @_;
+	$state->{owners}{$self->{name}} = $self->{uid};
+}
+
 sub check
 {
 	my $self = shift;
@@ -1174,6 +1203,12 @@ sub new
 	bless { name => $name, gid => $gid }, $class;
 }
 
+sub destate
+{
+	my ($self, $state) = @_;
+	$state->{groups}{$self->{name}} = $self->{gid};
+}
+
 sub check
 {
 	my $self = shift;
@@ -1216,10 +1251,14 @@ sub destate
 {
 	my ($self, $state) = @_;
 
+	delete $state->{uid};
 	if ($self->name eq '') {
 		undef $state->{owner};
 	} else {
 		$state->{owner} = $self->name;
+		if (defined $state->{owners}{$self->name}) {
+			$state->{uid} = $state->{owners}{$self->name};
+		}
 	}
 }
 
@@ -1233,10 +1272,14 @@ sub destate
 {
 	my ($self, $state) = @_;
 
+	delete $state->{gid};
 	if ($self->name eq '') {
 		undef $state->{group};
 	} else {
 		$state->{group} = $self->name;
+		if (defined $state->{groups}{$self->name}) {
+			$state->{gid} = $state->{groups}{$self->name};
+		}
 	}
 }
 

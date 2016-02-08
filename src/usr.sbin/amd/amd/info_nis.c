@@ -32,7 +32,7 @@
  * SUCH DAMAGE.
  *
  *	from: @(#)info_nis.c	8.1 (Berkeley) 6/6/93
- *	$Id: info_nis.c,v 1.10 2003/06/02 23:36:51 millert Exp $
+ *	$Id: info_nis.c,v 1.13 2014/10/26 03:28:41 guenther Exp $
  */
 
 /*
@@ -43,7 +43,6 @@
 
 #include <unistd.h>
 
-#ifdef HAS_NIS_MAPS
 #include <rpcsvc/yp_prot.h>
 #include <rpcsvc/ypclnt.h>
 #include <time.h>
@@ -84,20 +83,20 @@ determine_nis_domain(void)
 }
 
 
-#ifdef HAS_NIS_RELOAD
 struct nis_callback_data {
 	mnt_map *ncd_m;
 	char *ncd_map;
-	void (*ncd_fn)();
+	void (*ncd_fn)(mnt_map *, char *, char *);
 };
 
 /*
  * Callback from yp_all
  */
 static int
-callback(int status, char *key, int kl, char *val,
-    int vl, struct nis_callback_data *data)
+callback(unsigned long status, char *key, int kl, char *val, int vl, void *arg)
 {
+	struct nis_callback_data *data = arg;
+
 	if (status == YP_TRUE) {
 		/*
 		 * Add to list of maps
@@ -134,7 +133,7 @@ callback(int status, char *key, int kl, char *val,
 }
 
 int
-nis_reload(mnt_map *m, char *map, void (*fn)())
+nis_reload(mnt_map *m, char *map, void (*fn)(mnt_map *, char *, char *))
 {
 	struct ypall_callback cbinfo;
 	int error;
@@ -150,7 +149,7 @@ nis_reload(mnt_map *m, char *map, void (*fn)())
 	data.ncd_map = map;
 	data.ncd_fn = fn;
 	cbinfo.data = (void *)&data;
-	cbinfo.foreach = (void *)&callback;
+	cbinfo.foreach = &callback;
 
 	error = yp_all(domain, map, &cbinfo);
 
@@ -160,7 +159,6 @@ nis_reload(mnt_map *m, char *map, void (*fn)())
 
 	return error;
 }
-#endif /* HAS_NIS_RELOAD */
 
 /*
  * Try to locate a key using NIS.
@@ -282,4 +280,3 @@ nis_init(char *map, time_t *tp)
 	}
 	return 0;
 }
-#endif /* HAS_NIS_MAPS */

@@ -1,4 +1,4 @@
-/*	$OpenBSD: diff.c,v 1.34 2013/05/16 12:44:48 stsp Exp $	*/
+/*	$OpenBSD: diff.c,v 1.37 2015/01/16 06:40:11 deraadt Exp $	*/
 /*
  * Copyright (C) Caldera International Inc.  2001-2002.
  * All rights reserved.
@@ -64,20 +64,24 @@
  *	@(#)diffreg.c   8.1 (Berkeley) 6/6/93
  */
 
-#include <sys/param.h>
 #include <sys/stat.h>
 
 #include <ctype.h>
 #include <err.h>
 #include <stdarg.h>
+#include <stdint.h>
 #include <stddef.h>
 #include <stdio.h>
 #include <string.h>
 #include <unistd.h>
+#include <limits.h>
 
 #include "buf.h"
 #include "diff.h"
 #include "xmalloc.h"
+
+#define MINIMUM(a, b)	(((a) < (b)) ? (a) : (b))
+#define MAXIMUM(a, b)	(((a) > (b)) ? (a) : (b))
 
 /*
  * diff - compare two files.
@@ -359,11 +363,11 @@ diffreg(const char *file1, const char *file2, BUF *out, int flags)
 
 	member = (int *)file[1];
 	equiv(sfile[0], slen[0], sfile[1], slen[1], member);
-	member = xrealloc(member, slen[1] + 2, sizeof(*member));
+	member = xreallocarray(member, slen[1] + 2, sizeof(*member));
 
 	class = (int *)file[0];
 	unsort(sfile[0], slen[0], class);
-	class = xrealloc(class, slen[0] + 2, sizeof(*class));
+	class = xreallocarray(class, slen[0] + 2, sizeof(*class));
 
 	klist = xcalloc(slen[0] + 2, sizeof(*klist));
 	clen = 0;
@@ -373,13 +377,13 @@ diffreg(const char *file1, const char *file2, BUF *out, int flags)
 	xfree(member);
 	xfree(class);
 
-	J = xrealloc(J, len[0] + 2, sizeof(*J));
+	J = xreallocarray(J, len[0] + 2, sizeof(*J));
 	unravel(klist[i]);
 	xfree(clist);
 	xfree(klist);
 
-	ixold = xrealloc(ixold, len[0] + 2, sizeof(*ixold));
-	ixnew = xrealloc(ixnew, len[1] + 2, sizeof(*ixnew));
+	ixold = xreallocarray(ixold, len[0] + 2, sizeof(*ixold));
+	ixnew = xreallocarray(ixnew, len[1] + 2, sizeof(*ixnew));
 	check(f1, f2, flags);
 	output(f1, f2, flags);
 
@@ -440,7 +444,7 @@ prepare(int i, FILE *fd, off_t filesize, int flags)
 	for (j = 0; (h = readhash(fd, flags));) {
 		if (j == sz) {
 			sz = sz * 3 / 2;
-			p = xrealloc(p, sz + 3, sizeof(*p));
+			p = xreallocarray(p, sz + 3, sizeof(*p));
 		}
 		p[++j].value = h;
 	}
@@ -527,7 +531,7 @@ stone(int *a, int n, int *b, int *c, int flags)
 		bound = UINT_MAX;
 	else {
 		sq = isqrt(n);
-		bound = MAX(256, sq);
+		bound = MAXIMUM(256, sq);
 	}
 
 	k = 0;
@@ -571,7 +575,7 @@ newcand(int x, int y, int pred)
 
 	if (clen == clistlen) {
 		clistlen = clistlen * 11 / 10;
-		clist = xrealloc(clist, clistlen, sizeof(*clist));
+		clist = xreallocarray(clist, clistlen, sizeof(*clist));
 	}
 	q = clist + clen;
 	q->x = x;
@@ -910,7 +914,7 @@ proceed:
 		if (context_vec_ptr == context_vec_end - 1) {
 			ptrdiff_t offset = context_vec_ptr - context_vec_start;
 			max_context <<= 1;
-			context_vec_start = xrealloc(context_vec_start,
+			context_vec_start = xreallocarray(context_vec_start,
 			    max_context, sizeof(*context_vec_start));
 			context_vec_end = context_vec_start + max_context;
 			context_vec_ptr = context_vec_start + offset;
@@ -1200,10 +1204,10 @@ dump_context_vec(FILE *f1, FILE *f2, int flags)
 		return;
 
 	b = d = 0;		/* gcc */
-	lowa = MAX(1, cvp->a - diff_context);
-	upb = MIN(len[0], context_vec_ptr->b + diff_context);
-	lowc = MAX(1, cvp->c - diff_context);
-	upd = MIN(len[1], context_vec_ptr->d + diff_context);
+	lowa = MAXIMUM(1, cvp->a - diff_context);
+	upb = MINIMUM(len[0], context_vec_ptr->b + diff_context);
+	lowc = MAXIMUM(1, cvp->c - diff_context);
+	upd = MINIMUM(len[1], context_vec_ptr->d + diff_context);
 
 	diff_output("***************");
 	if ((flags & D_PROTOTYPE)) {
@@ -1302,11 +1306,11 @@ dump_unified_vec(FILE *f1, FILE *f2, int flags)
 	if (context_vec_start > context_vec_ptr)
 		return;
 
-	b = d = 0;		/* gcc */
-	lowa = MAX(1, cvp->a - diff_context);
-	upb = MIN(len[0], context_vec_ptr->b + diff_context);
-	lowc = MAX(1, cvp->c - diff_context);
-	upd = MIN(len[1], context_vec_ptr->d + diff_context);
+	d = 0; /* gcc */
+	lowa = MAXIMUM(1, cvp->a - diff_context);
+	upb = MINIMUM(len[0], context_vec_ptr->b + diff_context);
+	lowc = MAXIMUM(1, cvp->c - diff_context);
+	upd = MINIMUM(len[1], context_vec_ptr->d + diff_context);
 
 	diff_output("@@ -");
 	uni_range(lowa, upb);

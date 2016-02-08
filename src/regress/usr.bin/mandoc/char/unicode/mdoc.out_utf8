@@ -1,4 +1,4 @@
-CHAR-UNICODE-MDOC(1)       OpenBSD Reference Manual       CHAR-UNICODE-MDOC(1)
+CHAR-UNICODE-MDOC(1)        General Commands Manual       CHAR-UNICODE-MDOC(1)
 
 NNAAMMEE
      cchhaarr--uunniiccooddee--mmddoocc – unicode characters in mdoc code
@@ -10,4 +10,6 @@ DDEESSCCRRIIPPTTIIOONN
 
      nabla: 𝛁 = 𝛁
 
-OpenBSD                        November 10, 2013                       OpenBSD
+     not really Unicode: up arrows: ↑⇑ = ↑⇑ = ↑⇑
+
+OpenBSD                        October 13, 2014                        OpenBSD

@@ -1,4 +1,4 @@
-/*	$OpenBSD: authpf.c,v 1.120 2014/04/02 02:12:24 deraadt Exp $	*/
+/*	$OpenBSD: authpf.c,v 1.123 2015/01/21 21:50:32 deraadt Exp $	*/
 
 /*
  * Copyright (C) 1998 - 2007 Bob Beck (beck@openbsd.org).
@@ -24,9 +24,10 @@
 #include <sys/time.h>
 #include <sys/wait.h>
 
+#include <netinet/in.h>
+#include <arpa/inet.h>
 #include <net/if.h>
 #include <net/pfvar.h>
-#include <arpa/inet.h>
 
 #include <err.h>
 #include <errno.h>
@@ -54,15 +55,15 @@ static void	authpf_kill_states(void);
 
 int	dev;			/* pf device */
 char	anchorname[PF_ANCHOR_NAME_SIZE] = "authpf";
-char	rulesetname[MAXPATHLEN - PF_ANCHOR_NAME_SIZE - 2];
+char	rulesetname[PATH_MAX - PF_ANCHOR_NAME_SIZE - 2];
 char	tablename[PF_TABLE_NAME_SIZE] = "authpf_users";
 int	user_ip = 1;	/* controls whether $user_ip is set */
 
 FILE	*pidfp;
 int	pidfd = -1;
-char	 luser[MAXLOGNAME];	/* username */
+char	 luser[LOGIN_NAME_MAX];	/* username */
 char	 ipsrc[256];		/* ip as a string */
-char	 pidfile[MAXPATHLEN];	/* we save pid in this file. */
+char	 pidfile[PATH_MAX];	/* we save pid in this file. */
 
 struct timeval	Tstart, Tend;	/* start and end times of session */
 
@@ -213,7 +214,7 @@ main(int argc, char *argv[])
 
 	do {
 		int	save_errno, otherpid = -1;
-		char	otherluser[MAXLOGNAME];
+		char	otherluser[LOGIN_NAME_MAX];
 
 		if ((pidfd = open(pidfile, O_RDWR|O_CREAT, 0644)) == -1 ||
 		    (pidfp = fdopen(pidfd, "r+")) == NULL) {
@@ -491,8 +492,8 @@ allowed_luser(struct passwd *pw)
 		 * "public" gateway, such as it is, so let
 		 * everyone use it.
 		 */
-		int gl_init = 0, ngroups = NGROUPS + 1;
-		gid_t groups[NGROUPS + 1];
+		int gl_init = 0, ngroups = NGROUPS_MAX + 1;
+		gid_t groups[NGROUPS_MAX + 1];
 
 		lbuf = NULL;
 		matched = 0;
@@ -502,7 +503,7 @@ allowed_luser(struct passwd *pw)
 			if (buf[len - 1] == '\n')
 				buf[len - 1] = '\0';
 			else {
-				if ((lbuf = (char *)malloc(len + 1)) == NULL)
+				if ((lbuf = malloc(len + 1)) == NULL)
 					err(1, NULL);
 				memcpy(lbuf, buf, len);
 				lbuf[len] = '\0';
@@ -582,7 +583,7 @@ check_luser(char *luserdir, char *luser)
 {
 	FILE	*f;
 	int	 n;
-	char	 tmp[MAXPATHLEN];
+	char	 tmp[PATH_MAX];
 
 	n = snprintf(tmp, sizeof(tmp), "%s/%s", luserdir, luser);
 	if (n < 0 || (u_int)n >= sizeof(tmp)) {

@@ -1,4 +1,4 @@
-/*	$OpenBSD: parse.c,v 1.9 2009/10/27 23:59:21 deraadt Exp $	*/
+/*	$OpenBSD: parse.c,v 1.11 2015/02/08 06:09:50 tedu Exp $	*/
 /*	$NetBSD: parse.c,v 1.6 1995/03/21 09:03:10 cgd Exp $	*/
 
 /*-
@@ -170,7 +170,7 @@ asyn3(struct wordent *p1, struct wordent *p2)
 	Char   *cp = alout.next->word;
 
 	alout.next->word = Strspl(STRQNULL, cp);
-	xfree((ptr_t) cp);
+	xfree(cp);
     }
     p1 = freenod(p1, redid ? p2 : p1->next);
     if (alout.next != &alout) {
@@ -178,8 +178,8 @@ asyn3(struct wordent *p1, struct wordent *p2)
 	alout.prev->prev->next = p1->next;
 	alout.next->prev = p1;
 	p1->next = alout.next;
-	xfree((ptr_t) alout.prev->word);
-	xfree((ptr_t) (alout.prev));
+	xfree(alout.prev->word);
+	xfree((alout.prev));
     }
     reset();			/* throw! */
 }
@@ -190,9 +190,9 @@ freenod(struct wordent *p1, struct wordent *p2)
     struct wordent *retp = p1->prev;
 
     while (p1 != p2) {
-	xfree((ptr_t) p1->word);
+	xfree(p1->word);
 	p1 = p1->next;
-	xfree((ptr_t) (p1->prev));
+	xfree((p1->prev));
     }
     retp->next = p2;
     p2->prev = retp;
@@ -266,7 +266,7 @@ syn0(struct wordent *p1, struct wordent *p2, int flags)
 	    if (t1->t_dtyp == NODE_LIST ||
 		t1->t_dtyp == NODE_AND ||
 		t1->t_dtyp == NODE_OR) {
-		t = (struct command *) xcalloc(1, sizeof(*t));
+		t = xcalloc(1, sizeof(*t));
 		t->t_dtyp = NODE_PAREN;
 		t->t_dflg = F_AMPERSAND | F_NOINTERRUPT;
 		t->t_dspr = t1;
@@ -274,7 +274,7 @@ syn0(struct wordent *p1, struct wordent *p2, int flags)
 	    }
 	    else
 		t1->t_dflg |= F_AMPERSAND | F_NOINTERRUPT;
-	    t = (struct command *) xcalloc(1, sizeof(*t));
+	    t = xcalloc(1, sizeof(*t));
 	    t->t_dtyp = NODE_LIST;
 	    t->t_dflg = 0;
 	    t->t_dcar = t1;
@@ -315,7 +315,7 @@ syn1(struct wordent *p1, struct wordent *p2, int flags)
 	case '\n':
 	    if (l != 0)
 		break;
-	    t = (struct command *) xcalloc(1, sizeof(*t));
+	    t = xcalloc(1, sizeof(*t));
 	    t->t_dtyp = NODE_LIST;
 	    t->t_dcar = syn1a(p1, p, flags);
 	    t->t_dcdr = syntax(p->next, p2, flags);
@@ -353,7 +353,7 @@ syn1a(struct wordent *p1, struct wordent *p2, int flags)
 	    if (p->word[1] != '|')
 		continue;
 	    if (l == 0) {
-		t = (struct command *) xcalloc(1, sizeof(*t));
+		t = xcalloc(1, sizeof(*t));
 		t->t_dtyp = NODE_OR;
 		t->t_dcar = syn1b(p1, p, flags);
 		t->t_dcdr = syn1a(p->next, p2, flags);
@@ -390,7 +390,7 @@ syn1b(struct wordent *p1, struct wordent *p2, int flags)
 
 	case '&':
 	    if (p->word[1] == '&' && l == 0) {
-		t = (struct command *) xcalloc(1, sizeof(*t));
+		t = xcalloc(1, sizeof(*t));
 		t->t_dtyp = NODE_AND;
 		t->t_dcar = syn2(p1, p, flags);
 		t->t_dcdr = syn1b(p->next, p2, flags);
@@ -430,7 +430,7 @@ syn2(struct wordent *p1, struct wordent *p2, int flags)
 	case '|':
 	    if (l != 0)
 		continue;
-	    t = (struct command *) xcalloc(1, sizeof(*t));
+	    t = xcalloc(1, sizeof(*t));
 	    f = flags | POUT;
 	    pn = p->next;
 	    if (pn != p2 && pn->word[0] == '&') {
@@ -529,8 +529,8 @@ again:
 	}
     if (n < 0)
 	n = 0;
-    t = (struct command *) xcalloc(1, sizeof(*t));
-    av = (Char **) xcalloc((size_t) (n + 1), sizeof(Char **));
+    t = xcalloc(1, sizeof(*t));
+    av = xcalloc((size_t) (n + 1), sizeof(Char **));
     t->t_dcom = av;
     n = 0;
     if (p2->word[0] == ')')
@@ -645,15 +645,15 @@ freesyn(struct command *t)
 
     case NODE_COMMAND:
 	for (v = t->t_dcom; *v; v++)
-	    xfree((ptr_t) * v);
-	xfree((ptr_t) (t->t_dcom));
-	xfree((ptr_t) t->t_dlef);
-	xfree((ptr_t) t->t_drit);
+	    xfree(* v);
+	xfree((t->t_dcom));
+	xfree(t->t_dlef);
+	xfree(t->t_drit);
 	break;
     case NODE_PAREN:
 	freesyn(t->t_dspr);
-	xfree((ptr_t) t->t_dlef);
-	xfree((ptr_t) t->t_drit);
+	xfree(t->t_dlef);
+	xfree(t->t_drit);
 	break;
 
     case NODE_AND:
@@ -663,5 +663,5 @@ freesyn(struct command *t)
 	freesyn(t->t_dcar), freesyn(t->t_dcdr);
 	break;
     }
-    xfree((ptr_t) t);
+    xfree(t);
 }

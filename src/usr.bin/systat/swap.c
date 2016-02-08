@@ -1,4 +1,4 @@
-/*	$OpenBSD: swap.c,v 1.24 2012/12/05 23:20:26 deraadt Exp $	*/
+/*	$OpenBSD: swap.c,v 1.26 2015/01/16 00:03:38 deraadt Exp $	*/
 /*	$NetBSD: swap.c,v 1.9 1998/12/26 07:05:08 marc Exp $	*/
 
 /*-
@@ -31,8 +31,8 @@
  * SUCH DAMAGE.
  */
 
-#include <sys/param.h>
-#include <sys/buf.h>
+#include <sys/types.h>
+#include <sys/signal.h>
 #include <sys/conf.h>
 #include <sys/ioctl.h>
 #include <sys/stat.h>

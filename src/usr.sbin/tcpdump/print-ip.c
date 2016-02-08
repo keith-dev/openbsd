@@ -1,4 +1,4 @@
-/*	$OpenBSD: print-ip.c,v 1.38 2014/06/20 04:04:52 lteo Exp $	*/
+/*	$OpenBSD: print-ip.c,v 1.43 2015/01/16 06:40:21 deraadt Exp $	*/
 
 /*
  * Copyright (c) 1988, 1989, 1990, 1991, 1992, 1993, 1994, 1995, 1996, 1997
@@ -21,18 +21,15 @@
  * MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE.
  */
 
-#include <sys/param.h>
 #include <sys/time.h>
 #include <sys/socket.h>
 
 #include <netinet/in.h>
-#include <netinet/in_systm.h>
 #include <netinet/ip.h>
 #include <netinet/ip_var.h>
 #include <netinet/udp.h>
 #include <netinet/udp_var.h>
 #include <netinet/tcp.h>
-#include <netinet/tcpip.h>
 
 #include <inttypes.h>
 #include <stdio.h>
@@ -358,14 +355,21 @@ ip_print(register const u_char *bp, register u_int length)
 	register const struct ip *ip;
 	register u_int hlen, len, off;
 	register const u_char *cp;
+	const u_char *pktp = packetp;
+	const u_char *send = snapend;
 
 	ip = (const struct ip *)bp;
+	if ((u_char *)(ip + 1) > snapend) {
+		printf("[|ip]");
+		return;
+	}
+
 	/*
 	 * If the IP header is not aligned, copy into abuf.
 	 * This will never happen with BPF.  It does happen with raw packet
 	 * dumps from -r.
 	 */
-	if ((intptr_t)ip & (sizeof(long)-1)) {
+	if ((intptr_t)ip & (sizeof(u_int32_t)-1)) {
 		static u_char *abuf = NULL;
 		static int didwarn = 0;
 		int clen = snapend - bp;
@@ -391,7 +395,7 @@ ip_print(register const u_char *bp, register u_int length)
 	TCHECK(*ip);
 	if (ip->ip_v != IPVERSION) {
 		(void)printf("bad-ip-version %u", ip->ip_v);
-		return;
+		goto out;
 	}
 
 	len = ntohs(ip->ip_len);
@@ -404,7 +408,7 @@ ip_print(register const u_char *bp, register u_int length)
 	hlen = ip->ip_hl * 4;
 	if (hlen < sizeof(struct ip) || hlen > len) {
 		(void)printf("bad-hlen %d", hlen);
-		return;
+		goto out;
 	}
 
 	len -= hlen;
@@ -469,7 +473,7 @@ ip_print(register const u_char *bp, register u_int length)
 			ip_print(cp, len);
 			if (! vflag) {
 				printf(" (encap)");
-				return;
+				goto out;
 			}
 			break;
 
@@ -486,7 +490,7 @@ ip_print(register const u_char *bp, register u_int length)
 			ip6_print(cp, len);
 			if (! vflag) {
  				printf(" (encap)");
- 				return;
+				goto out;
  			}
  			break;
 #endif /*INET6*/
@@ -503,7 +507,7 @@ ip_print(register const u_char *bp, register u_int length)
 			gre_print(cp, len);
 			if (! vflag) {
 				printf(" (gre encap)");
-				return;
+				goto out;
   			}
   			break;
 
@@ -532,7 +536,7 @@ ip_print(register const u_char *bp, register u_int length)
 			mobile_print(cp, len);
 			if (! vflag) {
 				printf(" (mobile encap)");
-				return;
+				goto out;
 			}
 			break;
 
@@ -657,6 +661,9 @@ ip_print(register const u_char *bp, register u_int length)
 		}
 		printf(")");
 	}
+out:
+	packetp = pktp;
+	snapend = send;
 	return;
 
 trunc:

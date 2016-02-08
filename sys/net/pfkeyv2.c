@@ -1,4 +1,4 @@
-/* $OpenBSD: pfkeyv2.c,v 1.133 2014/07/12 18:44:22 tedu Exp $ */
+/* $OpenBSD: pfkeyv2.c,v 1.138 2014/12/19 17:14:40 tedu Exp $ */
 
 /*
  *	@(#)COPYRIGHT	1.1 (NRL) 17 January 1995
@@ -369,14 +369,12 @@ pfkeyv2_policy(struct ipsec_acquire *ipa, void **headers, void **buffer)
 	bzero(&sunion, sizeof(union sockaddr_union));
 
 	switch (ipa->ipa_info.sen_type) {
-#ifdef INET
 	case SENT_IP4:
 		i += 4 * PADUP(sizeof(struct sockaddr_in));
 		sunion.sa.sa_family = AF_INET;
 		sunion.sa.sa_len = sizeof(struct sockaddr_in);
 		dir = ipa->ipa_info.sen_direction;
 		break;
-#endif /* INET */
 
 #ifdef INET6
 	case SENT_IP6:
@@ -402,12 +400,10 @@ pfkeyv2_policy(struct ipsec_acquire *ipa, void **headers, void **buffer)
 	else
 		headers[SADB_X_EXT_DST_FLOW] = p;
 	switch (sunion.sa.sa_family) {
-#ifdef INET
 	case AF_INET:
 		sunion.sin.sin_addr = ipa->ipa_info.sen_ip_src;
 		sunion.sin.sin_port = ipa->ipa_info.sen_sport;
 		break;
-#endif /* INET */
 
 #ifdef INET6
 	case AF_INET6:
@@ -423,12 +419,10 @@ pfkeyv2_policy(struct ipsec_acquire *ipa, void **headers, void **buffer)
 	else
 		headers[SADB_X_EXT_DST_MASK] = p;
 	switch (sunion.sa.sa_family) {
-#ifdef INET
 	case AF_INET:
 		sunion.sin.sin_addr = ipa->ipa_mask.sen_ip_src;
 		sunion.sin.sin_port = ipa->ipa_mask.sen_sport;
 		break;
-#endif /* INET */
 
 #ifdef INET6
 	case AF_INET6:
@@ -444,12 +438,10 @@ pfkeyv2_policy(struct ipsec_acquire *ipa, void **headers, void **buffer)
 	else
 		headers[SADB_X_EXT_SRC_FLOW] = p;
 	switch (sunion.sa.sa_family) {
-#ifdef INET
 	case AF_INET:
 		sunion.sin.sin_addr = ipa->ipa_info.sen_ip_dst;
 		sunion.sin.sin_port = ipa->ipa_info.sen_dport;
 		break;
-#endif /* INET */
 
 #ifdef INET6
 	case AF_INET6:
@@ -465,12 +457,10 @@ pfkeyv2_policy(struct ipsec_acquire *ipa, void **headers, void **buffer)
 	else
 		headers[SADB_X_EXT_SRC_MASK] = p;
 	switch (sunion.sa.sa_family) {
-#ifdef INET
 	case AF_INET:
 		sunion.sin.sin_addr = ipa->ipa_mask.sen_ip_dst;
 		sunion.sin.sin_port = ipa->ipa_mask.sen_dport;
 		break;
-#endif /* INET */
 
 #ifdef INET6
 	case AF_INET6:
@@ -486,13 +476,11 @@ pfkeyv2_policy(struct ipsec_acquire *ipa, void **headers, void **buffer)
 	sp->sadb_protocol_len = sizeof(struct sadb_protocol) /
 	    sizeof(u_int64_t);
 	switch (sunion.sa.sa_family) {
-#ifdef INET
 	case AF_INET:
 		if (ipa->ipa_mask.sen_proto)
 			sp->sadb_protocol_proto = ipa->ipa_info.sen_proto;
 		sp->sadb_protocol_direction = ipa->ipa_info.sen_direction;
 		break;
-#endif /* INET */
 
 #ifdef INET6
 	case AF_INET6:
@@ -567,12 +555,10 @@ pfkeyv2_get(struct tdb *sa, void **headers, void **buffer, int *lenp)
 
 		/* We'll need four of them: src, src mask, dst, dst mask. */
 		switch (sa->tdb_filter.sen_type) {
-#ifdef INET
 		case SENT_IP4:
 			i += 4 * PADUP(sizeof(struct sockaddr_in));
 			i += 4 * sizeof(struct sadb_address);
 			break;
-#endif /* INET */
 #ifdef INET6
 		case SENT_IP6:
 			i += 4 * PADUP(sizeof(struct sockaddr_in6));
@@ -1525,7 +1511,7 @@ pfkeyv2_send(struct socket *socket, void *message, int len)
 	{
 		struct sadb_protocol *sab;
 		union sockaddr_union *ssrc;
-		struct route_enc re;
+		struct rtentry *rt;
 		int exists = 0;
 
 		sab = (struct sadb_protocol *) headers[SADB_X_EXT_FLOW_TYPE];
@@ -1561,18 +1547,13 @@ pfkeyv2_send(struct socket *socket, void *message, int len)
 
 		/* Determine whether the exact same SPD entry already exists. */
 		bzero(&encapgw, sizeof(struct sockaddr_encap));
-		bzero(&re, sizeof(struct route_enc));
-		bcopy(&encapdst, &re.re_dst, sizeof(struct sockaddr_encap));
 
 		s = splsoftnet();
-
-		/* Set the rdomain that was obtained from the socket */
-		re.re_tableid = rdomain;
-
-		rtalloc((struct route *) &re);
-		if (re.re_rt != NULL) {
-			ipo = ((struct sockaddr_encap *) re.re_rt->rt_gateway)->sen_ipsp;
-			RTFREE(re.re_rt);
+		rt = rtalloc((struct sockaddr *)&encapdst, RT_REPORT|RT_RESOLVE,
+		    rdomain);
+		if (rt != NULL) {
+			ipo = ((struct sockaddr_encap *)rt->rt_gateway)->sen_ipsp;
+			rtfree(rt);
 
 			/* Verify that the entry is identical */
 			if (bcmp(&ipo->ipo_addr, &encapdst,
@@ -2319,12 +2300,10 @@ pfkeyv2_dump_policy(struct ipsec_policy *ipo, void **headers, void **buffer,
 
 	/* We'll need four of them: src, src mask, dst, dst mask. */
 	switch (ipo->ipo_addr.sen_type) {
-#ifdef INET
 	case SENT_IP4:
 		i += 4 * PADUP(sizeof(struct sockaddr_in));
 		i += 4 * sizeof(struct sadb_address);
 		break;
-#endif /* INET */
 #ifdef INET6
 	case SENT_IP6:
 		i += 4 * PADUP(sizeof(struct sockaddr_in6));
@@ -2339,12 +2318,10 @@ pfkeyv2_dump_policy(struct ipsec_policy *ipo, void **headers, void **buffer,
 	switch (ipo->ipo_src.sa.sa_family) {
 	case 0:
 		break;
-#ifdef INET
 	case AF_INET:
 		i += PADUP(sizeof(struct sockaddr_in));
 		i += sizeof(struct sadb_address);
 		break;
-#endif /* INET */
 #ifdef INET6
 	case AF_INET6:
 		i += PADUP(sizeof(struct sockaddr_in6));
@@ -2359,12 +2336,10 @@ pfkeyv2_dump_policy(struct ipsec_policy *ipo, void **headers, void **buffer,
 	switch (ipo->ipo_dst.sa.sa_family) {
 	case 0:
 		break;
-#ifdef INET
 	case AF_INET:
 		i += PADUP(sizeof(struct sockaddr_in));
 		i += sizeof(struct sadb_address);
 		break;
-#endif /* INET */
 #ifdef INET6
 	case AF_INET6:
 		i += PADUP(sizeof(struct sockaddr_in6));

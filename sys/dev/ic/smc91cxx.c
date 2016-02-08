@@ -1,4 +1,4 @@
-/*	$OpenBSD: smc91cxx.c,v 1.35 2014/07/22 13:12:12 mpi Exp $	*/
+/*	$OpenBSD: smc91cxx.c,v 1.37 2014/12/22 02:28:51 tedu Exp $	*/
 /*	$NetBSD: smc91cxx.c,v 1.11 1998/08/08 23:51:41 mycroft Exp $	*/
 
 /*-
@@ -92,10 +92,8 @@
 #include <net/if_dl.h>
 #include <net/if_media.h> 
 
-#ifdef INET
 #include <netinet/in.h> 
 #include <netinet/if_ether.h>
-#endif
 
 #if NBPFILTER > 0
 #include <net/bpf.h>
@@ -697,7 +695,6 @@ smc91cxx_start(ifp)
 	ifp->if_timer = 5;
 
 #if NBPFILTER > 0
-	/* Hand off a copy to the bpf. */
 	if (ifp->if_bpf)
 		bpf_mtap(ifp->if_bpf, top, BPF_DIRECTION_OUT);
 #endif
@@ -997,10 +994,6 @@ smc91cxx_read(sc)
 	ifp->if_ipackets++;
 
 #if NBPFILTER > 0
-	/*
-	 * Hand the packet off to bpf listeners.  If there's a bpf listener,
-	 * we need to check if the packet is ours.
-	 */
 	if (ifp->if_bpf)
 		bpf_mtap(ifp->if_bpf, m, BPF_DIRECTION_IN);
 #endif
@@ -1047,12 +1040,10 @@ smc91cxx_ioctl(ifp, cmd, data)
 			break;
 		ifp->if_flags |= IFF_UP;
 		switch (ifa->ifa_addr->sa_family) {
-#ifdef INET
 		case AF_INET:
 			smc91cxx_init(sc);
 			arp_ifinit(&sc->sc_arpcom, ifa);
 			break;
-#endif
 		default:
 			smc91cxx_init(sc);
 			break;
@@ -1239,9 +1230,6 @@ smc91cxx_detach(self, flags)
 	/* Delete all media. */
 	ifmedia_delete_instance(&sc->sc_mii.mii_media, IFM_INST_ANY);
 
-#if NBPFILTER > 0
-	bpfdetach(ifp);
-#endif
 	ether_ifdetach(ifp);
 	if_detach(ifp);
 

@@ -1,4 +1,4 @@
-/*	$OpenBSD: vfs_syscalls.c,v 1.208 2014/07/12 18:43:32 tedu Exp $	*/
+/*	$OpenBSD: vfs_syscalls.c,v 1.216 2014/12/16 18:30:04 tedu Exp $	*/
 /*	$NetBSD: vfs_syscalls.c,v 1.71 1996/04/23 10:29:02 mycroft Exp $	*/
 
 /*
@@ -45,6 +45,7 @@
 #include <sys/sysctl.h>
 #include <sys/file.h>
 #include <sys/stat.h>
+#include <sys/lock.h>
 #include <sys/vnode.h>
 #include <sys/mount.h>
 #include <sys/proc.h>
@@ -55,6 +56,7 @@
 #include <sys/dkio.h>
 #include <sys/disklabel.h>
 #include <sys/ktrace.h>
+#include <sys/unistd.h>
 
 #include <sys/syscallargs.h>
 
@@ -69,7 +71,6 @@ int copyout_statfs(struct statfs *, void *, struct proc *);
 
 int doopenat(struct proc *, int, const char *, int, mode_t, register_t *);
 int domknodat(struct proc *, int, const char *, mode_t, dev_t);
-int domkfifoat(struct proc *, int, const char *, mode_t);
 int dolinkat(struct proc *, int, const char *, int, const char *, int);
 int dosymlinkat(struct proc *, const char *, int, const char *);
 int dounlinkat(struct proc *, int, const char *, int);
@@ -77,6 +78,8 @@ int dofaccessat(struct proc *, int, const char *, int, int);
 int dofstatat(struct proc *, int, const char *, struct stat *, int);
 int doreadlinkat(struct proc *, int, const char *, char *, size_t,
     register_t *);
+int dochflagsat(struct proc *, int, const char *, u_int, int);
+int dovchflags(struct proc *, struct vnode *, u_int);
 int dofchmodat(struct proc *, int, const char *, mode_t, int);
 int dofchownat(struct proc *, int, const char *, uid_t, gid_t, int);
 int dorenameat(struct proc *, int, const char *, int, const char *);
@@ -232,8 +235,7 @@ sys_mount(struct proc *p, void *v, register_t *retval)
 	/*
 	 * Allocate and initialize the file system.
 	 */
-	mp = (struct mount *)malloc((u_long)sizeof(struct mount),
-		M_MOUNT, M_WAITOK|M_ZERO);
+	mp = malloc(sizeof(*mp), M_MOUNT, M_WAITOK|M_ZERO);
 	(void) vfs_busy(mp, VB_READ|VB_NOWAIT);
 	mp->mnt_op = vfsp->vfc_vfsops;
 	mp->mnt_vfc = vfsp;
@@ -304,7 +306,7 @@ update:
 	} else {
 		mp->mnt_vnodecovered->v_mountedhere = NULL;
 		vfs_unbusy(mp);
-		free(mp, M_MOUNT, 0);
+		free(mp, M_MOUNT, sizeof(*mp));
 		vput(vp);
 	}
 	return (error);
@@ -454,7 +456,7 @@ dounmount(struct mount *mp, int flags, struct proc *p, struct vnode *olddp)
 		panic("unmount: dangling vnode");
 
 	vfs_unbusy(mp);
-	free(mp, M_MOUNT, 0);
+	free(mp, M_MOUNT, sizeof(*mp));
 
 	return (0);
 }
@@ -1173,7 +1175,7 @@ sys_fhstatfs(struct proc *p, void *v, register_t *retval)
 }
 
 /*
- * Create a special file.
+ * Create a special file or named pipe.
  */
 /* ARGSUSED */
 int
@@ -1211,10 +1213,12 @@ domknodat(struct proc *p, int fd, const char *path, mode_t mode, dev_t dev)
 	int error;
 	struct nameidata nd;
 
-	if ((error = suser(p, 0)) != 0)
-		return (error);
-	if (p->p_fd->fd_rdir)
-		return (EINVAL);
+	if (!S_ISFIFO(mode) || dev != 0) {
+		if ((error = suser(p, 0)) != 0)
+			return (error);
+		if (p->p_fd->fd_rdir)
+			return (EINVAL);
+	}
 	NDINITAT(&nd, CREATE, LOCKPARENT, UIO_USERSPACE, fd, path, p);
 	if ((error = namei(&nd)) != 0)
 		return (error);
@@ -1236,6 +1240,16 @@ domknodat(struct proc *p, int fd, const char *path, mode_t mode, dev_t dev)
 		case S_IFBLK:
 			vattr.va_type = VBLK;
 			break;
+		case S_IFIFO:
+#ifndef FIFO
+			return (EOPNOTSUPP);
+#else
+			if (dev == 0) {
+				vattr.va_type = VFIFO;
+				break;
+			}
+			/* FALLTHROUGH */
+#endif /* FIFO */
 		default:
 			error = EINVAL;
 			break;
@@ -1267,7 +1281,8 @@ sys_mkfifo(struct proc *p, void *v, register_t *retval)
 		syscallarg(mode_t) mode;
 	} */ *uap = v;
 
-	return (domkfifoat(p, AT_FDCWD, SCARG(uap, path), SCARG(uap, mode)));
+	return (domknodat(p, AT_FDCWD, SCARG(uap, path),
+	    (SCARG(uap, mode) & ALLPERMS) | S_IFIFO, 0));
 }
 
 int
@@ -1279,37 +1294,8 @@ sys_mkfifoat(struct proc *p, void *v, register_t *retval)
 		syscallarg(mode_t) mode;
 	} */ *uap = v;
 
-	return (domkfifoat(p, SCARG(uap, fd), SCARG(uap, path),
-	    SCARG(uap, mode)));
-}
-
-int
-domkfifoat(struct proc *p, int fd, const char *path, mode_t mode)
-{
-#ifndef FIFO
-	return (EOPNOTSUPP);
-#else
-	struct vattr vattr;
-	int error;
-	struct nameidata nd;
-
-	NDINITAT(&nd, CREATE, LOCKPARENT, UIO_USERSPACE, fd, path, p);
-	if ((error = namei(&nd)) != 0)
-		return (error);
-	if (nd.ni_vp != NULL) {
-		VOP_ABORTOP(nd.ni_dvp, &nd.ni_cnd);
-		if (nd.ni_dvp == nd.ni_vp)
-			vrele(nd.ni_dvp);
-		else
-			vput(nd.ni_dvp);
-		vrele(nd.ni_vp);
-		return (EEXIST);
-	}
-	VATTR_NULL(&vattr);
-	vattr.va_type = VFIFO;
-	vattr.va_mode = (mode & ALLPERMS) &~ p->p_fd->fd_cmask;
-	return (VOP_MKNOD(nd.ni_dvp, &nd.ni_vp, &nd.ni_cnd, &vattr));
-#endif /* FIFO */
+	return (domknodat(p, SCARG(uap, fd), SCARG(uap, path),
+	    (SCARG(uap, mode) & ALLPERMS) | S_IFIFO, 0));
 }
 
 /*
@@ -1600,11 +1586,11 @@ sys_access(struct proc *p, void *v, register_t *retval)
 {
 	struct sys_access_args /* {
 		syscallarg(const char *) path;
-		syscallarg(int) flags;
+		syscallarg(int) amode;
 	} */ *uap = v;
 
 	return (dofaccessat(p, AT_FDCWD, SCARG(uap, path),
-	    SCARG(uap, flags), 0));
+	    SCARG(uap, amode), 0));
 }
 
 int
@@ -1842,7 +1828,6 @@ doreadlinkat(struct proc *p, int fd, const char *path, char *buf,
 /*
  * Change flags of a file given a path name.
  */
-/* ARGSUSED */
 int
 sys_chflags(struct proc *p, void *v, register_t *retval)
 {
@@ -1850,43 +1835,44 @@ sys_chflags(struct proc *p, void *v, register_t *retval)
 		syscallarg(const char *) path;
 		syscallarg(u_int) flags;
 	} */ *uap = v;
-	struct vnode *vp;
-	struct vattr vattr;
-	int error;
-	struct nameidata nd;
-	u_int flags = SCARG(uap, flags);
 
-	NDINIT(&nd, LOOKUP, FOLLOW, UIO_USERSPACE, SCARG(uap, path), p);
+	return (dochflagsat(p, AT_FDCWD, SCARG(uap, path),
+	    SCARG(uap, flags), 0));
+}
+
+int
+sys_chflagsat(struct proc *p, void *v, register_t *retval)
+{
+	struct sys_chflagsat_args /* {
+		syscallarg(int) fd;
+		syscallarg(const char *) path;
+		syscallarg(u_int) flags;
+		syscallarg(int) atflags;
+	} */ *uap = v;
+
+	return (dochflagsat(p, SCARG(uap, fd), SCARG(uap, path),
+	    SCARG(uap, flags), SCARG(uap, atflags)));
+}
+
+int
+dochflagsat(struct proc *p, int fd, const char *path, u_int flags, int atflags)
+{
+	struct nameidata nd;
+	int error, follow;
+
+	if (atflags & ~AT_SYMLINK_NOFOLLOW)
+		return (EINVAL);
+
+	follow = (atflags & AT_SYMLINK_NOFOLLOW) ? NOFOLLOW : FOLLOW;
+	NDINITAT(&nd, LOOKUP, follow, UIO_USERSPACE, fd, path, p);
 	if ((error = namei(&nd)) != 0)
 		return (error);
-	vp = nd.ni_vp;
-	vn_lock(vp, LK_EXCLUSIVE | LK_RETRY, p);
-	if (vp->v_mount->mnt_flag & MNT_RDONLY)
-		error = EROFS;
-	else if (flags == VNOVAL)
-		error = EINVAL;
-	else {
-		if (suser(p, 0)) {
-			if ((error = VOP_GETATTR(vp, &vattr, p->p_ucred, p)) != 0)
-				goto out;
-			if (vattr.va_type == VCHR || vattr.va_type == VBLK) {
-				error = EINVAL;
-				goto out;
-			}
-		}
-		VATTR_NULL(&vattr);
-		vattr.va_flags = flags;
-		error = VOP_SETATTR(vp, &vattr, p->p_ucred, p);
-	}
-out:
-	vput(vp);
-	return (error);
+	return (dovchflags(p, nd.ni_vp, flags));
 }
 
 /*
  * Change flags of a file given a file descriptor.
  */
-/* ARGSUSED */
 int
 sys_fchflags(struct proc *p, void *v, register_t *retval)
 {
@@ -1894,15 +1880,24 @@ sys_fchflags(struct proc *p, void *v, register_t *retval)
 		syscallarg(int) fd;
 		syscallarg(u_int) flags;
 	} */ *uap = v;
-	struct vattr vattr;
-	struct vnode *vp;
 	struct file *fp;
+	struct vnode *vp;
 	int error;
-	u_int flags = SCARG(uap, flags);
 
 	if ((error = getvnode(p->p_fd, SCARG(uap, fd), &fp)) != 0)
 		return (error);
-	vp = (struct vnode *)fp->f_data;
+	vp = fp->f_data;
+	vref(vp);
+	FRELE(fp, p);
+	return (dovchflags(p, vp, SCARG(uap, flags)));
+}
+
+int
+dovchflags(struct proc *p, struct vnode *vp, u_int flags)
+{
+	struct vattr vattr;
+	int error;
+
 	vn_lock(vp, LK_EXCLUSIVE | LK_RETRY, p);
 	if (vp->v_mount && vp->v_mount->mnt_flag & MNT_RDONLY)
 		error = EROFS;
@@ -1923,8 +1918,7 @@ sys_fchflags(struct proc *p, void *v, register_t *retval)
 		error = VOP_SETATTR(vp, &vattr, p->p_ucred, p);
 	}
 out:
-	VOP_UNLOCK(vp, 0, p);
-	FRELE(fp, p);
+	vput(vp);
 	return (error);
 }
 

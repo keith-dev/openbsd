@@ -1,4 +1,4 @@
-/*	$OpenBSD: ndp.c,v 1.53 2013/10/21 12:41:52 jmc Exp $	*/
+/*	$OpenBSD: ndp.c,v 1.59 2015/01/16 06:40:18 deraadt Exp $	*/
 /*	$KAME: ndp.c,v 1.101 2002/07/17 08:46:33 itojun Exp $	*/
 
 /*
@@ -74,7 +74,6 @@
  */
 
 
-#include <sys/param.h>
 #include <sys/file.h>
 #include <sys/ioctl.h>
 #include <sys/socket.h>
@@ -506,10 +505,11 @@ delete(char *host)
 	sin = (struct sockaddr_in6 *)((char *)rtm + rtm->rtm_hdrlen);
 	sdl = (struct sockaddr_dl *)(ROUNDUP(sin->sin6_len) + (char *)sin);
 	if (IN6_ARE_ADDR_EQUAL(&sin->sin6_addr, &sin_m.sin6_addr)) {
-		if (sdl->sdl_family == AF_LINK &&
-		    (rtm->rtm_flags & RTF_LLINFO) &&
-		    !(rtm->rtm_flags & RTF_GATEWAY)) {
-			goto delete;
+		if (sdl->sdl_family == AF_LINK && rtm->rtm_flags & RTF_LLINFO) {
+			if (rtm->rtm_flags & (RTF_LOCAL|RTF_BROADCAST))
+				return (0);
+			if (!(rtm->rtm_flags & RTF_GATEWAY))
+				goto delete;
 		}
 		/*
 		 * IPv4 arp command retries with sin_other = SIN_PROXY here.
@@ -563,7 +563,6 @@ dump(struct in6_addr *addr, int cflag)
 	int addrwidth;
 	int llwidth;
 	int ifwidth;
-	char flgbuf[8];
 	char *ifname;
 
 	/* Print header */
@@ -709,29 +708,10 @@ again:;
 			printf("  ");
 		}
 
-		/*
-		 * other flags. R: router, P: proxy, W: ??
-		 */
-		if ((rtm->rtm_addrs & RTA_NETMASK) == 0) {
-			snprintf(flgbuf, sizeof(flgbuf), "%s%s",
-			    isrouter ? "R" : "",
-			    (rtm->rtm_flags & RTF_ANNOUNCE) ? "p" : "");
-		} else {
-			sin = (struct sockaddr_in6 *)
-			    (sdl->sdl_len + (char *)sdl);
-#if 0	/* W and P are mystery even for us */
-			snprintf(flgbuf, sizeof(flgbuf), "%s%s%s%s",
-			    isrouter ? "R" : "",
-			    !IN6_IS_ADDR_UNSPECIFIED(&sin->sin6_addr) ? "P" : "",
-			    (sin->sin6_len != sizeof(struct sockaddr_in6)) ? "W" : "",
-			    (rtm->rtm_flags & RTF_ANNOUNCE) ? "p" : "");
-#else
-			snprintf(flgbuf, sizeof(flgbuf), "%s%s",
-			    isrouter ? "R" : "",
-			    (rtm->rtm_flags & RTF_ANNOUNCE) ? "p" : "");
-#endif
-		}
-		printf(" %s", flgbuf);
+		printf(" %s%s%s",
+		    (rtm->rtm_flags & RTF_LOCAL) ? "l" : "",
+		    isrouter ? "R" : "",
+		    (rtm->rtm_flags & RTF_ANNOUNCE) ? "p" : "");
 
 		if (prbs)
 			printf(" %d", prbs);
@@ -780,7 +760,7 @@ ether_str(struct sockaddr_dl *sdl)
 
 	if (sdl->sdl_alen) {
 		cp = (u_char *)LLADDR(sdl);
-		snprintf(hbuf, sizeof(hbuf), "%x:%x:%x:%x:%x:%x",
+		snprintf(hbuf, sizeof(hbuf), "%02x:%02x:%02x:%02x:%02x:%02x",
 		    cp[0], cp[1], cp[2], cp[3], cp[4], cp[5]);
 	} else
 		snprintf(hbuf, sizeof(hbuf), "(incomplete)");

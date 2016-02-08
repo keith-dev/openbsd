@@ -1,4 +1,4 @@
-/*      $OpenBSD: ip_gre.c,v 1.50 2014/07/22 11:06:10 mpi Exp $ */
+/*      $OpenBSD: ip_gre.c,v 1.52 2014/12/19 17:14:40 tedu Exp $ */
 /*	$NetBSD: ip_gre.c,v 1.9 1999/10/25 19:18:11 drochner Exp $ */
 
 /*
@@ -46,23 +46,18 @@
 #include <sys/protosw.h>
 #include <sys/socket.h>
 #include <sys/socketvar.h>
-#include <sys/proc.h>
 #include <sys/sysctl.h>
 #include <net/if.h>
 #include <net/netisr.h>
 #include <net/route.h>
 #include <net/bpf.h>
 
-#ifdef INET
 #include <netinet/in.h>
 #include <netinet/ip.h>
 #include <netinet/ip_var.h>
 #include <netinet/ip_gre.h>
 #include <netinet/if_ether.h>
 #include <netinet/in_pcb.h>
-#else
-#error "ip_gre used without inet"
-#endif
 
 #ifdef MPLS
 #include <netmpls/mpls.h>

@@ -1,4 +1,4 @@
-/*	$OpenBSD: raw_ip.c,v 1.74 2014/07/22 11:06:10 mpi Exp $	*/
+/*	$OpenBSD: raw_ip.c,v 1.79 2015/01/24 00:29:06 deraadt Exp $	*/
 /*	$NetBSD: raw_ip.c,v 1.25 1996/02/18 18:58:33 christos Exp $	*/
 
 /*
@@ -76,8 +76,8 @@
 #include <sys/socketvar.h>
 
 #include <net/if.h>
+#include <net/if_var.h>
 #include <net/route.h>
-#include <net/pfvar.h>
 
 #include <netinet/in.h>
 #include <netinet/ip.h>
@@ -86,6 +86,8 @@
 #include <netinet/in_pcb.h>
 #include <netinet/in_var.h>
 #include <netinet/ip_icmp.h>
+
+#include <net/pfvar.h>
 
 #include "pf.h"
 
@@ -276,6 +278,12 @@ rip_output(struct mbuf *m, ...)
 	/* force routing table */
 	m->m_pkthdr.ph_rtableid = inp->inp_rtableid;
 
+#if NPF > 0
+	if (inp->inp_socket->so_state & SS_ISCONNECTED &&
+	    ip->ip_p != IPPROTO_ICMP)
+		m->m_pkthdr.pf.inp = inp;
+#endif
+
 	error = ip_output(m, inp->inp_options, &inp->inp_route, flags,
 	    inp->inp_moptions, inp, 0);
 	if (error == EACCES)	/* translate pf(4) error for userland */
@@ -363,8 +371,6 @@ rip_ctloutput(int op, struct socket *so, int level, int optname,
 	case MRT_ASSERT:
 	case MRT_API_SUPPORT:
 	case MRT_API_CONFIG:
-	case MRT_ADD_BW_UPCALL:
-	case MRT_DEL_BW_UPCALL:
 #ifdef MROUTING
 		switch (op) {
 		case PRCO_SETOPT:
@@ -459,7 +465,7 @@ rip_usrreq(struct socket *so, int req, struct mbuf *m, struct mbuf *nam,
 			error = EINVAL;
 			break;
 		}
-		if (TAILQ_EMPTY(&ifnet) || addr->sin_family != AF_INET) {
+		if (addr->sin_family != AF_INET) {
 			error = EADDRNOTAVAIL;
 			break;
 		}
@@ -479,10 +485,6 @@ rip_usrreq(struct socket *so, int req, struct mbuf *m, struct mbuf *nam,
 
 		if (nam->m_len != sizeof(*addr)) {
 			error = EINVAL;
-			break;
-		}
-		if (TAILQ_EMPTY(&ifnet)) {
-			error = EADDRNOTAVAIL;
 			break;
 		}
 		if (addr->sin_family != AF_INET) {

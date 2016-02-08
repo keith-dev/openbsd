@@ -1,5 +1,5 @@
 # ex:ts=8 sw=4:
-# $OpenBSD: AddCreateDelete.pm,v 1.25 2014/06/03 13:13:53 espie Exp $
+# $OpenBSD: AddCreateDelete.pm,v 1.33 2015/02/09 11:01:08 espie Exp $
 #
 # Copyright (c) 2007-2014 Marc Espie <espie@openbsd.org>
 #
@@ -49,26 +49,53 @@ sub not
 	return $self->{not};
 }
 
-sub _print
+sub sync_display
 {
 	my $self = shift;
-	$self->progress->print(@_);
-}
-
-sub _errprint
-{
-	my $self = shift;
-	$self->progress->errprint(@_);
+	$self->progress->clear;
 }
 
 sub handle_options
 {
 	my ($state, $opt_string, @usage) = @_;
 
-	$state->SUPER::handle_options($opt_string.'L:mnx', @usage);
+	my $i;
+	$state->{opt}{i} //= sub {
+		$i++;
+	};
+	$state->SUPER::handle_options($opt_string.'IiL:mnx', @usage);
 
 	$state->progress->setup($state->opt('x'), $state->opt('m'), $state);
 	$state->{not} = $state->opt('n');
+	if ($state->opt('I')) {
+		$i = 0;
+	} elsif (!defined $i) {
+		$i = -t STDIN;
+	}
+	if ($i) {
+		require OpenBSD::Interactive;
+		$state->{interactive} = OpenBSD::Interactive->new($state, $i);
+	} else {
+		$state->{interactive} = OpenBSD::InteractiveStub->new($state);
+	}
+}
+
+
+sub is_interactive
+{
+	return shift->{interactive}->is_interactive;
+}
+
+sub confirm
+{
+	my $self = shift;
+	return $self->{interactive}->confirm(@_);
+}
+
+sub ask_list
+{
+	my $self = shift;
+	return $self->{interactive}->ask_list(@_);
 }
 
 sub vsystem
@@ -84,7 +111,6 @@ sub vsystem
 sub system
 {
 	my $self = shift;
-	$self->progress->clear;
 	$self->SUPER::system(@_);
 }
 
@@ -114,7 +140,9 @@ sub ntogo_string
 {
 	my ($self, $offset) = @_;
 
-	return $self->todo($offset // 0);
+	return $self->{wantntogo} ?
+	    $self->f(" (#1)", $self->ntodo($offset // 0)) :
+	    $self->f("");
 }
 
 OpenBSD::Auto::cache(signer_list,
@@ -140,4 +168,27 @@ sub handle_options
 	$state->handle_options($opt_string, $self, @usage);
 }
 
+package OpenBSD::InteractiveStub;
+sub new
+{
+	my $class = shift;
+	bless {}, $class;
+}
+
+sub ask_list
+{
+	my ($self, $prompt, @values) = @_;
+	return $values[0];
+}
+
+sub confirm
+{
+	my ($self, $prompt, $yesno) = @_;
+	return $yesno;
+}
+
+sub is_interactive
+{
+	return 0;
+}
 1;

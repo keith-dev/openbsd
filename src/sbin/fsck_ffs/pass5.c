@@ -1,4 +1,4 @@
-/*	$OpenBSD: pass5.c,v 1.45 2014/07/08 17:19:24 deraadt Exp $	*/
+/*	$OpenBSD: pass5.c,v 1.48 2015/01/20 18:22:21 deraadt Exp $	*/
 /*	$NetBSD: pass5.c,v 1.16 1996/09/27 22:45:18 christos Exp $	*/
 
 /*
@@ -30,7 +30,7 @@
  * SUCH DAMAGE.
  */
 
-#include <sys/param.h>
+#include <sys/param.h>	/* MAXBSIZE roundup setbit */
 #include <sys/time.h>
 #include <sys/lock.h>
 #include <sys/ucred.h>
@@ -40,10 +40,13 @@
 #include <ufs/ffs/ffs_extern.h>
 #include <stdio.h>
 #include <string.h>
+#include <limits.h>
 
 #include "fsutil.h"
 #include "fsck.h"
 #include "extern.h"
+
+#define MINIMUM(a, b)	(((a) < (b)) ? (a) : (b))
 
 static int info_cg;
 static int info_maxcg;
@@ -95,7 +98,7 @@ pass5(void)
 			if (doit) {
 				i = fs->fs_contigsumsize;
 				fs->fs_contigsumsize =
-				    MIN(fs->fs_maxcontig, FS_MAXCONTIG);
+				    MINIMUM(fs->fs_maxcontig, FS_MAXCONTIG);
 				if (CGSIZE(fs) > fs->fs_bsize) {
 					pwarn("CANNOT %s CLUSTER MAPS\n", doit);
 					fs->fs_contigsumsize = i;
@@ -336,8 +339,8 @@ pass5(void)
 						continue;
 					if (cg_inosused(cg)[i] & (1 << k))
 						continue;
-					pwarn("ALLOCATED INODE %ld MARKED FREE\n",
-					      c * fs->fs_ipg + i * 8 + k);
+					pwarn("ALLOCATED INODE %lld MARKED FREE\n",
+					      ((long long)c * fs->fs_ipg + i * 8) + k);
 				}
 			}
 			for (i = 0; i < blkmapsize; i++) {
@@ -347,10 +350,10 @@ pass5(void)
 				for (k = 0; k < NBBY; k++) {
 					if ((j & (1 << k)) == 0)
 						continue;
-					if (cg_inosused(cg)[i] & (1 << k))
+					if (cg_blksfree(newcg)[i] & (1 << k))
 						continue;
-					pwarn("ALLOCATED FRAG %ld MARKED FREE\n",
-					      c * fs->fs_fpg + i * 8 + k);
+					pwarn("ALLOCATED FRAG %lld MARKED FREE\n",
+					      ((long long)c * fs->fs_fpg + i * 8) + k);
 				}
 			}
 		}

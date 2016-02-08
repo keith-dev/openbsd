@@ -1,4 +1,4 @@
-/*	$OpenBSD: npppd.c,v 1.36 2014/07/08 18:49:27 yasuoka Exp $ */
+/*	$OpenBSD: npppd.c,v 1.40 2015/01/19 01:48:59 deraadt Exp $ */
 
 /*-
  * Copyright (c) 2005-2008,2009 Internet Initiative Japan Inc.
@@ -29,16 +29,15 @@
  * Next pppd(nppd). This file provides a npppd daemon process and operations
  * for npppd instance.
  * @author	Yasuoka Masahiko
- * $Id: npppd.c,v 1.36 2014/07/08 18:49:27 yasuoka Exp $
+ * $Id: npppd.c,v 1.40 2015/01/19 01:48:59 deraadt Exp $
  */
 #include "version.h"
+#include <sys/param.h>	/* ALIGNED_POINTER */
 #include <sys/types.h>
 #include <sys/socket.h>
-#include <sys/param.h>
 #include <sys/sysctl.h>
 #include <sys/wait.h>
 #include <netinet/in.h>
-#include <netinet/in_systm.h>
 #include <netinet/ip.h>
 #include <net/route.h>
 #include <arpa/inet.h>
@@ -840,7 +839,7 @@ npppd_network_output(npppd *_this, npppd_ppp *ppp, int proto, u_char *pktp,
 		ppp_log(ppp, LOG_DEBUG, "Received IP packet is too small");
 		return;
 	}
-	lbuf = MIN(lpktp, sizeof(buf));
+	lbuf = MINIMUM(lpktp, sizeof(buf));
 	if (!ALIGNED_POINTER(pktp, struct ip)) {
 		memcpy(buf, pktp, lbuf);
 		pip = (struct ip *)buf;
@@ -1752,6 +1751,7 @@ npppd_set_radish(npppd *_this, void *radish_head)
 	}
 	if (radish_head == NULL)
 		npppd_get_all_users(_this, &delppp);
+	_this->rd = radish_head;
 
 	for (slist_itr_first(&delppp); slist_itr_has_next(&delppp);) {
 		ppp = slist_itr_next(&delppp);
@@ -1761,7 +1761,6 @@ npppd_set_radish(npppd *_this, void *radish_head)
 		ppp_stop(ppp, NULL);
 	}
 	slist_fini(&delppp);
-	_this->rd = radish_head;
 
 	return 0;
 fail:
@@ -2132,13 +2131,14 @@ npppd_ppp_bind_iface(npppd *_this, npppd_ppp *ppp)
 		return 1;
 
 	if (_this->conf.max_session > 0 &&
-	    _this->nsession++ >= _this->conf.max_session) {
+	    _this->nsession >= _this->conf.max_session) {
 		ppp_log(ppp, LOG_WARNING,
 		    "Number of sessions reaches out of the limit=%d",
 		    _this->conf.max_session);
 		return 1;
 	}
 	ppp->ifidx = ifidx;
+	_this->nsession++;
 
 	return 0;
 }
@@ -2147,7 +2147,8 @@ npppd_ppp_bind_iface(npppd *_this, npppd_ppp *ppp)
 void
 npppd_ppp_unbind_iface(npppd *_this, npppd_ppp *ppp)
 {
-	_this->nsession--;
+	if (ppp->ifidx >= 0)
+		_this->nsession--;
 	ppp->ifidx = -1;
 }
 

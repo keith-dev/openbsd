@@ -1,4 +1,4 @@
-/*	$OpenBSD: autoconf.c,v 1.120 2014/07/12 18:44:43 tedu Exp $	*/
+/*	$OpenBSD: autoconf.c,v 1.123 2014/11/30 22:26:14 kettenis Exp $	*/
 /*	$NetBSD: autoconf.c,v 1.51 2001/07/24 19:32:11 eeh Exp $ */
 
 /*
@@ -67,6 +67,7 @@
 #include <uvm/uvm_extern.h>
 
 #include <machine/bus.h>
+#include <machine/boot_flag.h>
 #include <machine/autoconf.h>
 #include <machine/hypervisor.h>
 #include <machine/mdesc.h>
@@ -79,6 +80,8 @@
 #include <sparc64/sparc64/timerreg.h>
 #include <sparc64/dev/vbusvar.h>
 #include <sparc64/dev/cbusvar.h>
+
+#include <stand/boot/bootarg.h>
 
 #include <dev/ata/atavar.h>
 #include <dev/pci/pcivar.h>
@@ -94,6 +97,16 @@
 #include <machine/db_machdep.h>
 #include <ddb/db_sym.h>
 #include <ddb/db_extern.h>
+#endif
+
+#include "softraid.h"
+#if NSOFTRAID > 0
+#include <sys/sensors.h>
+#include <dev/softraidvar.h>
+
+/* XXX */
+#undef DPRINTF
+#undef DNPRINTF
 #endif
 
 int printspl = 0;
@@ -126,6 +139,8 @@ int	bootnode;
 static	void bootpath_build(void);
 static	void bootpath_print(struct bootpath *);
 void bootpath_nodes(struct bootpath *, int);
+
+struct openbsd_bootdata obd __attribute__((section(".openbsd.bootdata")));
 
 int bus_class(struct device *);
 int instance_match(struct device *, void *, struct bootpath *bp);
@@ -273,8 +288,7 @@ done:
  * We will try to run out of the prom until we get to cpu_init().
  */
 void
-bootstrap(nctx)
-	int nctx;
+bootstrap(int nctx)
 {
 	extern int end;	/* End of kernel */
 	struct trapvec *romtba;
@@ -588,8 +602,7 @@ bootpath_build()
  */
 
 static void
-bootpath_print(bp)
-	struct bootpath *bp;
+bootpath_print(struct bootpath *bp)
 {
 	printf("bootpath: ");
 	while (bp->name[0]) {
@@ -613,9 +626,7 @@ bootpath_print(bp)
  * device_register(), and use this to recover the bootpath.
  */
 struct bootpath *
-bootpath_store(storep, bp)
-	int storep;
-	struct bootpath *bp;
+bootpath_store(int storep, struct bootpath *bp)
 {
 	static struct bootpath *save;
 	struct bootpath *retval;
@@ -637,9 +648,57 @@ void
 cpu_configure()
 {
 #ifdef SUN4V
-	if (CPU_ISSUN4V)
+	int pause = 0;
+
+	if (CPU_ISSUN4V) {
+		const char *prop;
+		size_t len;
+		int idx;
+
 		mdesc_init();
+		idx = mdesc_find_node("cpu");
+		prop = mdesc_get_prop_data(idx, "hwcap-list", &len);
+		if (prop) {
+			while (len > 0) {
+				if (strcmp(prop, "pause") == 0)
+					pause = 1;
+				len -= strlen(prop) + 1;
+				prop += strlen(prop) + 1;
+			}
+		}
+	}
+
+	if (pause) {
+		struct sun4v_patch {
+			u_int32_t addr;
+			u_int32_t insn;
+		} *p;
+		paddr_t pa;
+
+		extern struct sun4v_patch sun4v_pause_patch;
+		extern struct sun4v_patch sun4v_pause_patch_end;
+
+		/*
+		 * Use physical addresses to patch since kernel .text
+		 * is already mapped read-only at this point.
+		 */
+		for (p = &sun4v_pause_patch; p < &sun4v_pause_patch_end; p++) {
+			pmap_extract(pmap_kernel(), (vaddr_t)p->addr, &pa);
+			stwa(pa, ASI_PHYS_NON_CACHED, p->insn);
+			flush((void *)(vaddr_t)p->addr);
+		}
+	}
 #endif
+
+	if (obd.version == BOOTDATA_VERSION &&
+	    obd.len == sizeof(struct openbsd_bootdata)) {
+#if NSOFTRAID > 0
+		memcpy(sr_bootuuid.sui_id, obd.sr_uuid,
+		    sizeof(sr_bootuuid.sui_id));
+		memcpy(sr_bootkey, obd.sr_maskkey, sizeof(sr_bootkey));
+#endif
+		explicit_bzero(obd.sr_maskkey, sizeof(obd.sr_maskkey));
+	}
 
 	/* build the bootpath */
 	bootpath_build();
@@ -745,8 +804,7 @@ sync_crash()
 }
 
 char *
-clockfreq(freq)
-	long freq;
+clockfreq(long freq)
 {
 	char *p;
 	static char buf[10];
@@ -765,9 +823,7 @@ clockfreq(freq)
 
 /* ARGSUSED */
 static int
-mbprint(aux, name)
-	void *aux;
-	const char *name;
+mbprint(void *aux, const char *name)
 {
 	struct mainbus_attach_args *ma = aux;
 
@@ -783,7 +839,7 @@ mbprint(aux, name)
 int
 findroot()
 {
-	register int node;
+	int node;
 
 	if ((node = rootnode) == 0 && (node = OF_peer(0)) == 0)
 		panic("no PROM root device");
@@ -796,9 +852,7 @@ findroot()
  * Return the node number, or 0 if not found.
  */
 int
-findnode(first, name)
-	int first;
-	register const char *name;
+findnode(int first, const char *name)
 {
 	int node;
 	char buf[32];
@@ -812,12 +866,8 @@ findnode(first, name)
 }
 
 int
-mainbus_match(parent, cf, aux)
-	struct device *parent;
-	void *cf;
-	void *aux;
+mainbus_match(struct device *parent, void *cf, void *aux)
 {
-
 	return (1);
 }
 
@@ -829,9 +879,7 @@ mainbus_match(parent, cf, aux)
  * We also record the `node id' of the default frame buffer, if any.
  */
 static void
-mainbus_attach(parent, dev, aux)
-	struct device *parent, *dev;
-	void *aux;
+mainbus_attach(struct device *parent, struct device *dev, void *aux)
 {
 extern struct sparc_bus_dma_tag mainbus_dma_tag;
 extern bus_space_tag_t mainbus_space_tag;
@@ -1073,12 +1121,7 @@ struct cfattach mainbus_ca = {
 };
 
 int
-getprop(node, name, size, nitem, bufp)
-	int	node;
-	char	*name;
-	size_t	size;
-	int	*nitem;
-	void	**bufp;
+getprop(int node, char *name, size_t size, int *nitem, void **bufp)
 {
 	void	*buf;
 	long	len;
@@ -1110,9 +1153,7 @@ getprop(node, name, size, nitem, bufp)
  * Internal form of proplen().  Returns the property length.
  */
 long
-getproplen(node, name)
-	int node;
-	char *name;
+getproplen(int node, char *name)
 {
 	return (OF_getproplen(node, name));
 }
@@ -1123,9 +1164,7 @@ getproplen(node, name)
  * subsequent calls.
  */
 char *
-getpropstring(node, name)
-	int node;
-	char *name;
+getpropstring(int node, char *name)
 {
 	static char stringbuf[32];
 
@@ -1134,10 +1173,7 @@ getpropstring(node, name)
 
 /* Alternative getpropstring(), where caller provides the buffer */
 char *
-getpropstringA(node, name, buffer)
-	int node;
-	char *name;
-	char *buffer;
+getpropstringA(int node, char *name, char *buffer)
 {
 	int blen;
 
@@ -1153,10 +1189,7 @@ getpropstringA(node, name, buffer)
  * The return value is the property, or the default if there was none.
  */
 int
-getpropint(node, name, deflt)
-	int node;
-	char *name;
-	int deflt;
+getpropint(int node, char *name, int deflt)
 {
 	int intbuf;
 
@@ -1167,9 +1200,7 @@ getpropint(node, name, deflt)
 }
 
 int
-getpropspeed(node, name)
-	int node;
-	char *name;
+getpropspeed(int node, char *name)
 {
 	char buf[128];
 	int i, speed = 0;
@@ -1194,16 +1225,14 @@ getpropspeed(node, name)
  * from the rest of the kernel.
  */
 int
-firstchild(node)
-	int node;
+firstchild(int node)
 {
 
 	return OF_child(node);
 }
 
 int
-nextsibling(node)
-	int node;
+nextsibling(int node)
 {
 
 	return OF_peer(node);
@@ -1230,10 +1259,9 @@ checkstatus(int node)
 	return 1;
 }
 
+/* returns 1 if node has given property */
 int
-node_has_property(node, prop)	/* returns 1 if node has given property */
-	register int node;
-	register const char *prop;
+node_has_property(int node, const char *prop)
 {
 	return (OF_getproplen(node, (caddr_t)prop) != -1);
 }
@@ -1243,8 +1271,7 @@ node_has_property(node, prop)	/* returns 1 if node has given property */
  * variables.  Returns nonzero on error.
  */
 int
-romgetcursoraddr(rowp, colp)
-	int **rowp, **colp;
+romgetcursoraddr(int **rowp, int **colp)
 {
 	cell_t row = 0, col = 0;
 
@@ -1275,9 +1302,7 @@ callrom()
  * find a device matching "name" and unit number
  */
 struct device *
-getdevunit(name, unit)
-	char *name;
-	int unit;
+getdevunit(char *name, int unit)
 {
 	struct device *dev = TAILQ_FIRST(&alldevs);
 	char num[10], fullname[16];
@@ -1456,9 +1481,7 @@ device_register(struct device *dev, void *aux)
 }
 
 void
-nail_bootdev(dev, bp)
-	struct device *dev;
-	struct bootpath *bp;
+nail_bootdev(struct device *dev, struct bootpath *bp)
 {
 
 	if (bp->dev != NULL)

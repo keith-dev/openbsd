@@ -1,4 +1,4 @@
-/*	$OpenBSD: subr_hibernate.c,v 1.99 2014/07/21 01:57:55 mlarkin Exp $	*/
+/*	$OpenBSD: subr_hibernate.c,v 1.115 2015/02/07 02:50:53 mlarkin Exp $	*/
 
 /*
  * Copyright (c) 2011 Ariane van der Steldt <ariane@stack.nl>
@@ -28,8 +28,11 @@
 #include <sys/buf.h>
 #include <sys/fcntl.h>
 #include <sys/stat.h>
+#include <sys/atomic.h>
+
 #include <uvm/uvm.h>
 #include <uvm/uvm_swap.h>
+
 #include <machine/hibernate.h>
 
 /*
@@ -47,12 +50,11 @@
  * 1*PAGE_SIZE			I/O page used during hibernate suspend
  * 2*PAGE_SIZE			I/O page used during hibernate suspend
  * 3*PAGE_SIZE			copy page used during hibernate suspend
- * 4*PAGE_SIZE			final chunk ordering list (8 pages)
- * 12*PAGE_SIZE			piglet chunk ordering list (8 pages)
- * 20*PAGE_SIZE			temp chunk ordering list (8 pages)
+ * 4*PAGE_SIZE			final chunk ordering list (24 pages)
  * 28*PAGE_SIZE			RLE utility page
  * 29*PAGE_SIZE			start of hiballoc area
- * 109*PAGE_SIZE		end of hiballoc area (80 pages)
+ * 30*PAGE_SIZE			preserved entropy
+ * 110*PAGE_SIZE		end of hiballoc area (80 pages)
  * ...				unused
  * HIBERNATE_CHUNK_SIZE		start of hibernate chunk table
  * 2*HIBERNATE_CHUNK_SIZE	bounce area for chunks being unpacked
@@ -66,8 +68,21 @@ vaddr_t hibernate_rle_page;
 
 /* Hibernate info as read from disk during resume */
 union hibernate_info disk_hib;
+
+/*
+ * Global copy of the pig start address. This needs to be a global as we
+ * switch stacks after computing it - it can't be stored on the stack.
+ */
 paddr_t global_pig_start;
+
+/*
+ * Global copies of the piglet start addresses (PA/VA). We store these
+ * as globals to avoid having to carry them around as parameters, as the
+ * piglet is allocated early and freed late - its lifecycle extends beyond
+ * that of the hibernate info union which is calculated on suspend/resume.
+ */
 vaddr_t global_piglet_va;
+paddr_t global_piglet_pa;
 
 /* #define HIB_DEBUG */
 #ifdef HIB_DEBUG
@@ -235,6 +250,16 @@ hib_alloc(struct hiballoc_arena *arena, size_t alloc_sz)
 	return hib_entry_to_addr(new_entry);
 }
 
+void
+hib_getentropy(char **bufp, size_t *bufplen)
+{
+	if (!bufp || !bufplen)
+		return;
+
+	*bufp = (char *)(global_piglet_va + (29 * PAGE_SIZE));
+	*bufplen = PAGE_SIZE;
+}
+
 /*
  * Free a pointer previously allocated from this arena.
  *
@@ -392,85 +417,42 @@ uvm_pmr_dirty_everything(void)
 }
 
 /*
- * Allocate the highest address that can hold sz.
- *
- * sz in bytes.
+ * Allocate an area that can hold sz bytes and doesn't overlap with
+ * the piglet at piglet_pa.
  */
 int
-uvm_pmr_alloc_pig(paddr_t *addr, psize_t sz)
+uvm_pmr_alloc_pig(paddr_t *pa, psize_t sz, paddr_t piglet_pa)
 {
-	struct uvm_pmemrange	*pmr;
-	struct vm_page		*pig_pg, *pg;
+	struct uvm_constraint_range pig_constraint;
+	struct kmem_pa_mode kp_pig = {
+		.kp_constraint = &pig_constraint,
+		.kp_maxseg = 1
+	};
+	vaddr_t va;
 
-	/*
-	 * Convert sz to pages, since that is what pmemrange uses internally.
-	 */
-	sz = atop(round_page(sz));
+	sz = round_page(sz);
 
-	uvm_lock_fpageq();
+	pig_constraint.ucr_low = piglet_pa + 4 * HIBERNATE_CHUNK_SIZE;
+	pig_constraint.ucr_high = -1;
 
-	TAILQ_FOREACH(pmr, &uvm.pmr_control.use, pmr_use) {
-		RB_FOREACH_REVERSE(pig_pg, uvm_pmr_addr, &pmr->addr) {
-			if (pig_pg->fpgsz >= sz) {
-				goto found;
-			}
-		}
+	va = (vaddr_t)km_alloc(sz, &kv_any, &kp_pig, &kd_nowait);
+	if (va == 0) {
+		pig_constraint.ucr_low = 0;
+		pig_constraint.ucr_high = piglet_pa - 1;
+
+		va = (vaddr_t)km_alloc(sz, &kv_any, &kp_pig, &kd_nowait);
+		if (va == 0)
+			return ENOMEM;
 	}
 
-	/*
-	 * Allocation failure.
-	 */
-	uvm_unlock_fpageq();
-	return ENOMEM;
-
-found:
-	/* Remove page from freelist. */
-	uvm_pmr_remove_size(pmr, pig_pg);
-	pig_pg->fpgsz -= sz;
-	pg = pig_pg + pig_pg->fpgsz;
-	if (pig_pg->fpgsz == 0)
-		uvm_pmr_remove_addr(pmr, pig_pg);
-	else
-		uvm_pmr_insert_size(pmr, pig_pg);
-
-	uvmexp.free -= sz;
-	*addr = VM_PAGE_TO_PHYS(pg);
-
-	/*
-	 * Update pg flags.
-	 *
-	 * Note that we trash the sz argument now.
-	 */
-	while (sz > 0) {
-		KASSERT(pg->pg_flags & PQ_FREE);
-
-		atomic_clearbits_int(&pg->pg_flags, PG_PMAPMASK);
-
-		if (pg->pg_flags & PG_ZERO)
-			uvmexp.zeropages -= sz;
-		atomic_clearbits_int(&pg->pg_flags,
-		    PG_ZERO|PQ_FREE);
-
-		pg->uobject = NULL;
-		pg->uanon = NULL;
-		pg->pg_version++;
-
-		/*
-		 * Next.
-		 */
-		pg++;
-		sz--;
-	}
-
-	/* Return. */
-	uvm_unlock_fpageq();
+	pmap_extract(pmap_kernel(), va, pa);
 	return 0;
 }
 
 /*
  * Allocate a piglet area.
  *
- * This is as low as possible.
+ * This needs to be in DMA-safe memory.
  * Piglets are aligned.
  *
  * sz and align in bytes.
@@ -482,17 +464,14 @@ found:
 int
 uvm_pmr_alloc_piglet(vaddr_t *va, paddr_t *pa, vsize_t sz, paddr_t align)
 {
-	paddr_t			 pg_addr, piglet_addr;
-	struct uvm_pmemrange	*pmr;
-	struct vm_page		*pig_pg, *pg;
-	struct pglist		 pageq;
-	int			 pdaemon_woken;
-	vaddr_t			 piglet_va;
+	struct kmem_pa_mode kp_piglet = {
+		.kp_constraint = &dma_constraint,
+		.kp_align = align,
+		.kp_maxseg = 1
+	};
 
 	/* Ensure align is a power of 2 */
 	KASSERT((align & (align - 1)) == 0);
-
-	pdaemon_woken = 0; /* Didn't wake the pagedaemon. */
 
 	/*
 	 * Fixup arguments: align must be at least PAGE_SIZE,
@@ -500,100 +479,15 @@ uvm_pmr_alloc_piglet(vaddr_t *va, paddr_t *pa, vsize_t sz, paddr_t align)
 	 * pmemrange uses internally.
 	 */
 	if (align < PAGE_SIZE)
-		align = PAGE_SIZE;
+		kp_piglet.kp_align = PAGE_SIZE;
+		
 	sz = round_page(sz);
 
-	uvm_lock_fpageq();
-
-	TAILQ_FOREACH_REVERSE(pmr, &uvm.pmr_control.use, uvm_pmemrange_use,
-	    pmr_use) {
-retry:
-		/*
-		 * Search for a range with enough space.
-		 * Use the address tree, to ensure the range is as low as
-		 * possible.
-		 */
-		RB_FOREACH(pig_pg, uvm_pmr_addr, &pmr->addr) {
-			pg_addr = VM_PAGE_TO_PHYS(pig_pg);
-			piglet_addr = (pg_addr + (align - 1)) & ~(align - 1);
-
-			if (atop(pg_addr) + pig_pg->fpgsz >=
-			    atop(piglet_addr) + atop(sz))
-				goto found;
-		}
-	}
-
-	/*
-	 * Try to coerce the pagedaemon into freeing memory
-	 * for the piglet.
-	 *
-	 * pdaemon_woken is set to prevent the code from
-	 * falling into an endless loop.
-	 */
-	if (!pdaemon_woken) {
-		pdaemon_woken = 1;
-		if (uvm_wait_pla(ptoa(pmr->low), ptoa(pmr->high) - 1,
-		    sz, UVM_PLA_FAILOK) == 0)
-			goto retry;
-	}
-
-	/* Return failure. */
-	uvm_unlock_fpageq();
-	return ENOMEM;
-
-found:
-	/*
-	 * Extract piglet from pigpen.
-	 */
-	TAILQ_INIT(&pageq);
-	uvm_pmr_extract_range(pmr, pig_pg,
-	    atop(piglet_addr), atop(piglet_addr) + atop(sz), &pageq);
-
-	*pa = piglet_addr;
-	uvmexp.free -= atop(sz);
-
-	/*
-	 * Update pg flags.
-	 *
-	 * Note that we trash the sz argument now.
-	 */
-	TAILQ_FOREACH(pg, &pageq, pageq) {
-		KASSERT(pg->pg_flags & PQ_FREE);
-
-		atomic_clearbits_int(&pg->pg_flags, PG_PMAPMASK);
-
-		if (pg->pg_flags & PG_ZERO)
-			uvmexp.zeropages--;
-		atomic_clearbits_int(&pg->pg_flags,
-		    PG_ZERO|PQ_FREE);
-
-		pg->uobject = NULL;
-		pg->uanon = NULL;
-		pg->pg_version++;
-	}
-
-	uvm_unlock_fpageq();
-
-	/*
-	 * Now allocate a va.
-	 * Use direct mappings for the pages.
-	 */
-
-	piglet_va = *va = (vaddr_t)km_alloc(sz, &kv_any, &kp_none, &kd_waitok);
-	if (!piglet_va) {
-		uvm_pglistfree(&pageq);
+	*va = (vaddr_t)km_alloc(sz, &kv_any, &kp_piglet, &kd_nowait);
+	if (*va == 0)
 		return ENOMEM;
-	}
 
-	/*
-	 * Map piglet to va.
-	 */
-	TAILQ_FOREACH(pg, &pageq, pageq) {
-		pmap_kenter_pa(piglet_va, VM_PAGE_TO_PHYS(pg), UVM_PROT_RW);
-		piglet_va += PAGE_SIZE;
-	}
-	pmap_update(pmap_kernel());
-
+	pmap_extract(pmap_kernel(), *va, pa);
 	return 0;
 }
 
@@ -603,35 +497,15 @@ found:
 void
 uvm_pmr_free_piglet(vaddr_t va, vsize_t sz)
 {
-	paddr_t			 pa;
-	struct vm_page		*pg;
-
 	/*
 	 * Fix parameters.
 	 */
 	sz = round_page(sz);
 
 	/*
-	 * Find the first page in piglet.
-	 * Since piglets are contiguous, the first pg is all we need.
-	 */
-	if (!pmap_extract(pmap_kernel(), va, &pa))
-		panic("uvm_pmr_free_piglet: piglet 0x%lx has no pages", va);
-	pg = PHYS_TO_VM_PAGE(pa);
-	if (pg == NULL)
-		panic("uvm_pmr_free_piglet: unmanaged page 0x%lx", pa);
-
-	/*
-	 * Unmap.
-	 */
-	pmap_kremove(va, sz);
-	pmap_update(pmap_kernel());
-
-	/*
 	 * Free the physical and virtual memory.
 	 */
-	uvm_pmr_freepages(pg, atop(sz));
-	km_free((void *)va, sz, &kv_any, &kp_none);
+	km_free((void *)va, sz, &kv_any, &kp_dma_contig);
 }
 
 /*
@@ -676,7 +550,6 @@ uvm_page_rle(paddr_t addr)
 int
 get_hibernate_info(union hibernate_info *hib, int suspend)
 {
-	int chunktable_size;
 	struct disklabel dl;
 	char err_string[128], *dl_ret;
 
@@ -717,21 +590,15 @@ get_hibernate_info(union hibernate_info *hib, int suspend)
 	hib->sig_offset = DL_GETPSIZE(&dl.d_partitions[1]) -
 	    sizeof(union hibernate_info)/DEV_BSIZE;
 
-	chunktable_size = HIBERNATE_CHUNK_TABLE_SIZE / DEV_BSIZE;
-
 	/* Stash kernel version information */
 	memset(&hib->kernel_version, 0, 128);
 	bcopy(version, &hib->kernel_version,
 	    min(strlen(version), sizeof(hib->kernel_version)-1));
 
 	if (suspend) {
-		/* Allocate piglet region */
-		if (uvm_pmr_alloc_piglet(&hib->piglet_va,
-		    &hib->piglet_pa, HIBERNATE_CHUNK_SIZE * 4,
-		    HIBERNATE_CHUNK_SIZE)) {
-			printf("Hibernate failed to allocate the piglet\n");
-			return (1);
-		}
+		/* Grab the previously-allocated piglet addresses */
+		hib->piglet_va = global_piglet_va;
+		hib->piglet_pa = global_piglet_pa;
 		hib->io_page = (void *)hib->piglet_va;
 
 		/*
@@ -758,16 +625,12 @@ get_hibernate_info(union hibernate_info *hib, int suspend)
 			goto fail;
 	}
 
-
 	if (get_hibernate_info_md(hib))
 		goto fail;
 
 	return (0);
-fail:
-	if (suspend)
-		uvm_pmr_free_piglet(hib->piglet_va,
-		    HIBERNATE_CHUNK_SIZE * 4);
 
+fail:
 	return (1);
 }
 
@@ -818,7 +681,7 @@ hibernate_inflate_page(int *rle)
 	    (struct hibernate_zlib_state *)HIBERNATE_HIBALLOC_PAGE;
 
 	/* Set up the stream for RLE code inflate */
-	hibernate_state->hib_stream.next_out = (char *)rle;
+	hibernate_state->hib_stream.next_out = (unsigned char *)rle;
 	hibernate_state->hib_stream.avail_out = sizeof(*rle);
 
 	/* Inflate RLE code */
@@ -856,8 +719,9 @@ hibernate_inflate_page(int *rle)
 	if (*rle != 0)
 		return (0);
 
-	/* Set up the stream for page inflate */	
-	hibernate_state->hib_stream.next_out = (char *)HIBERNATE_INFLATE_PAGE;
+	/* Set up the stream for page inflate */
+	hibernate_state->hib_stream.next_out =
+		(unsigned char *)HIBERNATE_INFLATE_PAGE;
 	hibernate_state->hib_stream.avail_out = PAGE_SIZE;
 
 	/* Process next block of data */
@@ -903,7 +767,7 @@ hibernate_inflate_region(union hibernate_info *hib, paddr_t dest,
 	hibernate_state =
 	    (struct hibernate_zlib_state *)HIBERNATE_HIBALLOC_PAGE;
 
-	hibernate_state->hib_stream.next_in = (char *)src;
+	hibernate_state->hib_stream.next_in = (unsigned char *)src;
 	hibernate_state->hib_stream.avail_in = size;
 
 	do {
@@ -948,10 +812,10 @@ hibernate_deflate(union hibernate_info *hib, paddr_t src,
 	    (struct hibernate_zlib_state *)HIBERNATE_HIBALLOC_PAGE;
 
 	/* Set up the stream for deflate */
-	hibernate_state->hib_stream.next_in = (caddr_t)src;
+	hibernate_state->hib_stream.next_in = (unsigned char *)src;
 	hibernate_state->hib_stream.avail_in = PAGE_SIZE - (src & PAGE_MASK);
-	hibernate_state->hib_stream.next_out = (caddr_t)hibernate_io_page +
-	    (PAGE_SIZE - *remaining);
+	hibernate_state->hib_stream.next_out =
+		(unsigned char *)hibernate_io_page + (PAGE_SIZE - *remaining);
 	hibernate_state->hib_stream.avail_out = *remaining;
 
 	/* Process next block of data */
@@ -986,7 +850,6 @@ hibernate_write_signature(union hibernate_info *hib)
 int
 hibernate_write_chunktable(union hibernate_info *hib)
 {
-	struct hibernate_disk_chunk *chunks;
 	vaddr_t hibernate_chunk_table_start;
 	size_t hibernate_chunk_table_size;
 	int i, err;
@@ -995,9 +858,6 @@ hibernate_write_chunktable(union hibernate_info *hib)
 
 	hibernate_chunk_table_start = hib->piglet_va +
 	    HIBERNATE_CHUNK_SIZE;
-
-	chunks = (struct hibernate_disk_chunk *)(hib->piglet_va +
-	    HIBERNATE_CHUNK_SIZE);
 
 	/* Write chunk table */
 	for (i = 0; i < hibernate_chunk_table_size; i += MAXPHYS) {
@@ -1037,34 +897,6 @@ hibernate_clear_signature(void)
 	    hib.sig_offset,
 	    DEV_BSIZE, (vaddr_t)&blank_hiber_info, 1))
 		printf("Warning: could not clear hibernate signature\n");
-
-	return (0);
-}
-
-/*
- * Check chunk range overlap when calculating whether or not to copy a
- * compressed chunk to the piglet area before decompressing.
- *
- * returns zero if the ranges do not overlap, non-zero otherwise.
- */
-int
-hibernate_check_overlap(paddr_t r1s, paddr_t r1e, paddr_t r2s, paddr_t r2e)
-{
-	/* case A : end of r1 overlaps start of r2 */
-	if (r1s < r2s && r1e > r2s)
-		return (1);
-
-	/* case B : r1 entirely inside r2 */
-	if (r1s >= r2s && r1e <= r2e)
-		return (1);
-
-	/* case C : r2 entirely inside r1 */
-	if (r2s >= r1s && r2e <= r1e)
-		return (1);
-
-	/* case D : end of r2 overlaps start of r1 */
-	if (r2s < r1s && r2e > r1s)
-		return (1);
 
 	return (0);
 }
@@ -1173,6 +1005,34 @@ hibernate_block_io(union hibernate_info *hib, daddr_t blkctr,
 }
 
 /*
+ * Preserve one page worth of random data, generated from the resuming
+ * kernel's arc4random. After resume, this preserved entropy can be used
+ * to further improve the un-hibernated machine's entropy pool. This
+ * random data is stored in the piglet, which is preserved across the
+ * unpack operation, and is restored later in the resume process (see
+ * hib_getentropy)
+ */
+void
+hibernate_preserve_entropy(union hibernate_info *hib)
+{
+	void *entropy;
+
+	entropy = km_alloc(PAGE_SIZE, &kv_any, &kp_none, &kd_nowait);
+
+	if (!entropy)
+		return;
+
+	pmap_activate(curproc);
+	pmap_kenter_pa((vaddr_t)entropy,
+	    (paddr_t)(hib->piglet_pa + (29 * PAGE_SIZE)),
+	    PROT_READ | PROT_WRITE);
+
+	arc4random_buf((void *)entropy, PAGE_SIZE);
+	pmap_kremove((vaddr_t)entropy, PAGE_SIZE);
+	km_free(entropy, PAGE_SIZE, &kv_any, &kp_none);
+}
+
+/*
  * Reads the signature block from swap, checks against the current machine's
  * information. If the information matches, perform a resume by reading the
  * saved image into the pig area, and unpacking.
@@ -1243,7 +1103,7 @@ hibernate_resume(void)
 		goto fail;
 
 	DPRINTF("hibernate: quiescing devices\n");
-	if (config_suspend(device_mainbus(), DVACT_QUIESCE) != 0)
+	if (config_suspend_all(DVACT_QUIESCE) != 0)
 		goto fail;
 
 	(void) splhigh();
@@ -1251,15 +1111,13 @@ hibernate_resume(void)
 	cold = 1;
 
 	DPRINTF("hibernate: suspending devices\n");
-	if (config_suspend(device_mainbus(), DVACT_SUSPEND) != 0) {
+	if (config_suspend_all(DVACT_SUSPEND) != 0) {
 		cold = 0;
 		hibernate_enable_intr_machdep();
 		goto fail;
 	}
 
-	pmap_kenter_pa(HIBERNATE_HIBALLOC_PAGE, HIBERNATE_HIBALLOC_PAGE,
-	    VM_PROT_ALL);
-	pmap_activate(curproc);
+	hibernate_preserve_entropy(&disk_hib);
 
 	printf("Unpacking image...\n");
 
@@ -1295,10 +1153,6 @@ hibernate_unpack_image(union hibernate_info *hib)
 	paddr_t image_cur = global_pig_start;
 	short i, *fchunks;
 	char *pva;
-	struct hibernate_zlib_state *hibernate_state;
-
-	hibernate_state =
-	    (struct hibernate_zlib_state *)HIBERNATE_HIBALLOC_PAGE;
 
 	/* Piglet will be identity mapped (VA == PA) */
 	pva = (char *)hib->piglet_pa;
@@ -1507,42 +1361,11 @@ hibernate_write_chunks(union hibernate_info *hib)
 	hib->chunk_ctr = 0;
 
 	/*
-	 * Allocate VA for the temp and copy page.
-	 * 
-	 * These will become part of the suspended kernel and will
-	 * be freed in hibernate_free, upon resume.
-	 */
-	hibernate_temp_page = (vaddr_t)km_alloc(PAGE_SIZE, &kv_any,
-	    &kp_none, &kd_nowait);
-	if (!hibernate_temp_page) {
-		DPRINTF("out of memory allocating hibernate_temp_page\n");
-		return (ENOMEM);
-	}
-
-	hibernate_copy_page = (vaddr_t)km_alloc(PAGE_SIZE, &kv_any,
-	    &kp_none, &kd_nowait);
-	if (!hibernate_copy_page) {
-		DPRINTF("out of memory allocating hibernate_copy_page\n");
-		return (ENOMEM);
-	}
-
-	hibernate_rle_page = (vaddr_t)km_alloc(PAGE_SIZE, &kv_any,
-	    &kp_none, &kd_nowait);
-	if (!hibernate_rle_page) {
-		DPRINTF("out of memory allocating hibernate_rle_page\n");
-		return (ENOMEM);
-	}
-
-	/*
 	 * Map the utility VAs to the piglet. See the piglet map at the
 	 * top of this file for piglet layout information.
 	 */
-	pmap_kenter_pa(hibernate_copy_page,
-		(hib->piglet_pa + 3 * PAGE_SIZE), VM_PROT_ALL);
-	pmap_kenter_pa(hibernate_rle_page,
-		(hib->piglet_pa + 28 * PAGE_SIZE), VM_PROT_ALL);
-
-	pmap_activate(curproc);
+	hibernate_copy_page = hib->piglet_va + 3 * PAGE_SIZE;
+	hibernate_rle_page = hib->piglet_va + 28 * PAGE_SIZE;
 
 	chunks = (struct hibernate_disk_chunk *)(hib->piglet_va +
 	    HIBERNATE_CHUNK_SIZE);
@@ -1614,9 +1437,7 @@ hibernate_write_chunks(union hibernate_info *hib)
 					if (rle == 0) {
 						pmap_kenter_pa(hibernate_temp_page,
 							inaddr & PMAP_PA_MASK,
-							VM_PROT_ALL);
-
-						pmap_activate(curproc);
+							PROT_READ);
 
 						bcopy((caddr_t)hibernate_temp_page,
 							(caddr_t)hibernate_copy_page,
@@ -1663,10 +1484,11 @@ hibernate_write_chunks(union hibernate_info *hib)
 			out_remaining = PAGE_SIZE;
 
 		/* Finish compress */
-		hibernate_state->hib_stream.next_in = (caddr_t)inaddr;
+		hibernate_state->hib_stream.next_in = (unsigned char *)inaddr;
 		hibernate_state->hib_stream.avail_in = 0;
 		hibernate_state->hib_stream.next_out =
-		    (caddr_t)hibernate_io_page + (PAGE_SIZE - out_remaining);
+		    (unsigned char *)hibernate_io_page +
+			(PAGE_SIZE - out_remaining);
 
 		/* We have an extra output page available for finalize */
 		hibernate_state->hib_stream.avail_out =
@@ -1730,7 +1552,7 @@ hibernate_zlib_reset(union hibernate_info *hib, int deflate)
 	 * See piglet layout information at the start of this file for
 	 * information on the zlib page assignments.
 	 */
-	hibernate_zlib_start = (vaddr_t)(pva + (29 * PAGE_SIZE));
+	hibernate_zlib_start = (vaddr_t)(pva + (30 * PAGE_SIZE));
 	hibernate_zlib_size = 80 * PAGE_SIZE;
 
 	memset((void *)hibernate_zlib_start, 0, hibernate_zlib_size);
@@ -1791,7 +1613,7 @@ hibernate_read_image(union hibernate_info *hib)
 	/* Map chunktable pages */
 	for (i = 0; i < HIBERNATE_CHUNK_TABLE_SIZE; i += PAGE_SIZE)
 		pmap_kenter_pa(chunktable + i, piglet_chunktable + i,
-		    VM_PROT_ALL);
+		    PROT_READ | PROT_WRITE);
 	pmap_update(pmap_kernel());
 
 	/* Read the chunktable from disk into the piglet chunktable */
@@ -1816,7 +1638,7 @@ hibernate_read_image(union hibernate_info *hib)
 
 	/* Allocate the pig area */
 	pig_sz = compressed_size + HIBERNATE_CHUNK_SIZE;
-	if (uvm_pmr_alloc_pig(&pig_start, pig_sz) == ENOMEM) {
+	if (uvm_pmr_alloc_pig(&pig_start, pig_sz, hib->piglet_pa) == ENOMEM) {
 		status = 1;
 		goto unmap;
 	}
@@ -1865,8 +1687,6 @@ hibernate_read_chunks(union hibernate_info *hib, paddr_t pig_start,
 	piglet_base = hib->piglet_pa;
 	global_pig_start = pig_start;
 
-	pmap_activate(curproc);
-
 	/*
 	 * These mappings go into the resuming kernel's page table, and are
 	 * used only during image read. They dissappear from existence
@@ -1887,7 +1707,8 @@ hibernate_read_chunks(union hibernate_info *hib, paddr_t pig_start,
 	/* Map the chunk ordering region */
 	for(i = 0; i < 24 ; i++)
 		pmap_kenter_pa(hibernate_fchunk_area + (i * PAGE_SIZE),
-			piglet_base + ((4 + i) * PAGE_SIZE), VM_PROT_ALL);
+			piglet_base + ((4 + i) * PAGE_SIZE),
+			PROT_READ | PROT_WRITE);
 	pmap_update(pmap_kernel());
 
 	nchunks = hib->chunk_ctr;
@@ -1947,7 +1768,8 @@ hibernate_read_chunks(union hibernate_info *hib, paddr_t pig_start,
 			/* Map pages for this read */
 			for (j = 0; j < num_io_pages; j ++)
 				pmap_kenter_pa(tempva + j * PAGE_SIZE,
-					img_cur + j * PAGE_SIZE, VM_PROT_ALL);
+				    img_cur + j * PAGE_SIZE,
+				    PROT_READ | PROT_WRITE);
 
 			pmap_update(pmap_kernel());
 
@@ -2016,13 +1838,7 @@ hibernate_suspend(void)
 	DPRINTF("hibernate @ block %lld max-length %lu blocks\n",
 	    hib.image_offset, ctod(end) - ctod(start));
 
-	pmap_kenter_pa(HIBERNATE_HIBALLOC_PAGE, HIBERNATE_HIBALLOC_PAGE,
-		VM_PROT_ALL);
 	pmap_activate(curproc);
-
-	/* Stash the piglet VA so we can free it in the resuming kernel */
-	global_piglet_va = hib.piglet_va;
-
 	DPRINTF("hibernate: writing chunks\n");
 	if (hibernate_write_chunks(&hib)) {
 		DPRINTF("hibernate_write_chunks failed\n");
@@ -2049,41 +1865,61 @@ hibernate_suspend(void)
 	 * done, and that it can clean up or shutdown as needed.
 	 */
 	hib.io_func(hib.dev, 0, (vaddr_t)NULL, 0, HIB_DONE, hib.io_page);
+	return (0);
+}
+
+int
+hibernate_alloc(void)
+{
+	KASSERT(global_piglet_va == 0);
+	KASSERT(hibernate_temp_page == 0);
+
+	pmap_activate(curproc);
+	pmap_kenter_pa(HIBERNATE_HIBALLOC_PAGE, HIBERNATE_HIBALLOC_PAGE,
+		PROT_READ | PROT_WRITE);
+
+	/* Allocate a piglet, store its addresses in the supplied globals */
+	if (uvm_pmr_alloc_piglet(&global_piglet_va, &global_piglet_pa,
+	    HIBERNATE_CHUNK_SIZE * 4, HIBERNATE_CHUNK_SIZE))
+		return (ENOMEM);
+
+	/*
+	 * Allocate VA for the temp page.
+	 * 
+	 * This will become part of the suspended kernel and will
+	 * be freed in hibernate_free, upon resume (or hibernate
+	 * failure)
+	 */
+	hibernate_temp_page = (vaddr_t)km_alloc(PAGE_SIZE, &kv_any,
+	    &kp_none, &kd_nowait);
+	if (!hibernate_temp_page) {
+		DPRINTF("out of memory allocating hibernate_temp_page\n");
+		return (ENOMEM);
+	}
 
 	return (0);
 }
 
 /*
- * Free items allocated by hibernate_suspend()
+ * Free items allocated by hibernate_alloc()
  */
 void
 hibernate_free(void)
 {
+	pmap_activate(curproc);
+
 	if (global_piglet_va)
 		uvm_pmr_free_piglet(global_piglet_va,
 		    4 * HIBERNATE_CHUNK_SIZE);
 
-	if (hibernate_copy_page)
-		pmap_kremove(hibernate_copy_page, PAGE_SIZE);
-	if (hibernate_temp_page)
+	if (hibernate_temp_page) {
 		pmap_kremove(hibernate_temp_page, PAGE_SIZE);
-	if (hibernate_rle_page)
-		pmap_kremove(hibernate_rle_page, PAGE_SIZE);
-
-	pmap_update(pmap_kernel());
-
-	if (hibernate_copy_page)
-		km_free((void *)hibernate_copy_page, PAGE_SIZE,
-		    &kv_any, &kp_none);
-	if (hibernate_temp_page)
 		km_free((void *)hibernate_temp_page, PAGE_SIZE,
 		    &kv_any, &kp_none);
-	if (hibernate_rle_page)
-		km_free((void *)hibernate_rle_page, PAGE_SIZE,
-		    &kv_any, &kp_none);
+	}
 
 	global_piglet_va = 0;
-	hibernate_copy_page = 0;
 	hibernate_temp_page = 0;
-	hibernate_rle_page = 0;
+	pmap_kremove(HIBERNATE_HIBALLOC_PAGE, PAGE_SIZE);
+	pmap_update(pmap_kernel());
 }

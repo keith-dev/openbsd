@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_fxp_cardbus.c,v 1.32 2013/12/06 21:03:02 deraadt Exp $ */
+/*	$OpenBSD: if_fxp_cardbus.c,v 1.34 2014/12/19 22:44:58 guenther Exp $ */
 /*	$NetBSD: if_fxp_cardbus.c,v 1.12 2000/05/08 18:23:36 thorpej Exp $	*/
 
 /*
@@ -46,24 +46,19 @@
 #include <sys/kernel.h>
 #include <sys/timeout.h>
 #include <sys/device.h>
+#include <sys/endian.h>
 
 #include <net/if.h>
 #include <net/if_dl.h>
 #include <net/if_types.h>
 #include <net/if_media.h>
 
-#include <machine/endian.h>
-
 #if NBPFILTER > 0
 #include <net/bpf.h>
 #endif
 
-#ifdef INET
 #include <netinet/in.h>
-#include <netinet/in_systm.h>
-#include <netinet/ip.h>
 #include <netinet/if_ether.h>
-#endif
 
 #include <machine/bus.h>
 #include <machine/intr.h>

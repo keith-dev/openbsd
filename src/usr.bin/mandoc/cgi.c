@@ -1,4 +1,4 @@
-/*	$Id: cgi.c,v 1.31 2014/07/25 21:05:38 schwarze Exp $ */
+/*	$OpenBSD: cgi.c,v 1.43 2015/02/10 08:05:07 schwarze Exp $ */
 /*
  * Copyright (c) 2011, 2012 Kristaps Dzonsons <kristaps@bsd.lv>
  * Copyright (c) 2014 Ingo Schwarze <schwarze@usta.de>
@@ -15,10 +15,14 @@
  * ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
+#include <sys/types.h>
+#include <sys/time.h>
+
 #include <ctype.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <limits.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -52,10 +56,10 @@ static	void		 catman(const struct req *, const char *);
 static	void		 format(const struct req *, const char *);
 static	void		 html_print(const char *);
 static	void		 html_putchar(char);
-static	int 		 http_decode(char *);
+static	int		 http_decode(char *);
 static	void		 http_parse(struct req *, const char *);
 static	void		 http_print(const char *);
-static	void 		 http_putchar(char);
+static	void		 http_putchar(char);
 static	void		 http_printquery(const struct req *, const char *);
 static	void		 pathgen(struct req *);
 static	void		 pg_error_badrequest(const char *);
@@ -86,14 +90,14 @@ static	const char *const sec_names[] = {
     "All Sections",
     "1 - General Commands",
     "2 - System Calls",
-    "3 - Subroutines",
-    "3p - Perl Subroutines",
-    "4 - Special Files",
+    "3 - Library Functions",
+    "3p - Perl Library",
+    "4 - Device Drivers",
     "5 - File Formats",
     "6 - Games",
-    "7 - Macros and Conventions",
-    "8 - Maintenance Commands",
-    "9 - Kernel Interface"
+    "7 - Miscellaneous Information",
+    "8 - System Manager\'s Manual",
+    "9 - Kernel Developer\'s Manual"
 };
 static	const int sec_MAX = sizeof(sec_names) / sizeof(char *);
 
@@ -157,8 +161,7 @@ http_printquery(const struct req *req, const char *sep)
 		printf("%sarch=", sep);
 		http_print(req->q.arch);
 	}
-	if (NULL != req->q.manpath &&
-	    strcmp(req->q.manpath, req->p[0])) {
+	if (strcmp(req->q.manpath, req->p[0])) {
 		printf("%smanpath=", sep);
 		http_print(req->q.manpath);
 	}
@@ -181,7 +184,7 @@ http_print(const char *p)
 static void
 html_print(const char *p)
 {
-	
+
 	if (NULL == p)
 		return;
 	while ('\0' != *p)
@@ -292,11 +295,6 @@ next:
 		if (*qs != '\0')
 			qs++;
 	}
-
-	/* Fall back to the default manpath. */
-
-	if (req->q.manpath == NULL)
-		req->q.manpath = mandoc_strdup(req->p[0]);
 }
 
 static void
@@ -370,13 +368,10 @@ resp_begin_html(int code, const char *msg)
 
 	resp_begin_http(code, msg);
 
-	printf("<!DOCTYPE HTML PUBLIC "
-	       " \"-//W3C//DTD HTML 4.01//EN\""
-	       " \"http://www.w3.org/TR/html4/strict.dtd\">\n"
+	printf("<!DOCTYPE html>\n"
 	       "<HTML>\n"
 	       "<HEAD>\n"
-	       "<META HTTP-EQUIV=\"Content-Type\""
-	       " CONTENT=\"text/html; charset=utf-8\">\n"
+	       "<META CHARSET=\"UTF-8\" />\n"
 	       "<LINK REL=\"stylesheet\" HREF=\"%s/man-cgi.css\""
 	       " TYPE=\"text/css\" media=\"all\">\n"
 	       "<LINK REL=\"stylesheet\" HREF=\"%s/man.css\""
@@ -466,8 +461,7 @@ resp_searchform(const struct req *req)
 		puts("<SELECT NAME=\"manpath\">");
 		for (i = 0; i < (int)req->psz; i++) {
 			printf("<OPTION ");
-			if (NULL == req->q.manpath ? 0 == i :
-			    0 == strcmp(req->q.manpath, req->p[i]))
+			if (strcmp(req->q.manpath, req->p[i]) == 0)
 				printf("SELECTED=\"selected\" ");
 			printf("VALUE=\"");
 			html_print(req->p[i]);
@@ -625,7 +619,7 @@ pg_searchres(const struct req *req, struct manpage *r, size_t sz)
 	for (i = 0; i < sz; i++) {
 		printf("<TR>\n"
 		       "<TD CLASS=\"title\">\n"
-		       "<A HREF=\"%s/%s/%s?", 
+		       "<A HREF=\"%s/%s/%s?",
 		    scriptname, req->q.manpath, r[i].file);
 		http_printquery(req, "&amp;");
 		printf("\">");
@@ -705,7 +699,7 @@ catman(const struct req *req, const char *file)
 	while (NULL != (p = fgetln(f, &len))) {
 		bold = italic = 0;
 		for (i = 0; i < (int)len - 1; i++) {
-			/* 
+			/*
 			 * This means that the catpage is out of state.
 			 * Ignore it and keep going (although the
 			 * catpage is bogus).
@@ -746,7 +740,7 @@ catman(const struct req *req, const char *file)
 				continue;
 			}
 
-			/* 
+			/*
 			 * Handle funny behaviour troff-isms.
 			 * These grok'd from the original man2html.c.
 			 */
@@ -784,7 +778,7 @@ catman(const struct req *req, const char *file)
 			}
 
 			/* Bold mode. */
-			
+
 			if (italic)
 				printf("</I>");
 			if ( ! bold)
@@ -795,9 +789,9 @@ catman(const struct req *req, const char *file)
 			html_putchar(p[i]);
 		}
 
-		/* 
+		/*
 		 * Clean up the last character.
-		 * We can get to a newline; don't print that. 
+		 * We can get to a newline; don't print that.
 		 */
 
 		if (italic)
@@ -821,11 +815,11 @@ static void
 format(const struct req *req, const char *file)
 {
 	struct mparse	*mp;
+	struct mchars	*mchars;
 	struct mdoc	*mdoc;
 	struct man	*man;
 	void		*vp;
 	char		*opts;
-	enum mandoclevel rc;
 	int		 fd;
 	int		 usepath;
 
@@ -834,17 +828,11 @@ format(const struct req *req, const char *file)
 		return;
 	}
 
-	mp = mparse_alloc(MPARSE_SO, MANDOCLEVEL_FATAL, NULL,
-	    req->q.manpath);
-	rc = mparse_readfd(mp, fd, file);
+	mchars = mchars_alloc();
+	mp = mparse_alloc(MPARSE_SO, MANDOCLEVEL_BADARG, NULL,
+	    mchars, req->q.manpath);
+	mparse_readfd(mp, fd, file);
 	close(fd);
-
-	if (rc >= MANDOCLEVEL_FATAL) {
-		fprintf(stderr, "fatal mandoc error: %s/%s\n",
-		    req->q.manpath, file);
-		pg_error_internal();
-		return;
-	}
 
 	usepath = strcmp(req->q.manpath, req->p[0]);
 	mandoc_asprintf(&opts,
@@ -861,10 +849,11 @@ format(const struct req *req, const char *file)
 		    req->q.manpath, file);
 		pg_error_internal();
 		mparse_free(mp);
+		mchars_free(mchars);
 		return;
 	}
 
-	vp = html_alloc(opts);
+	vp = html_alloc(mchars, opts);
 
 	if (NULL != mdoc)
 		html_mdoc(vp, mdoc);
@@ -873,6 +862,7 @@ format(const struct req *req, const char *file)
 
 	html_free(vp);
 	mparse_free(mp);
+	mchars_free(mchars);
 	free(opts);
 }
 
@@ -899,7 +889,7 @@ pg_show(struct req *req, const char *fullpath)
 		pg_error_badrequest(
 		    "You did not specify a page to show.");
 		return;
-	} 
+	}
 	manpath = mandoc_strndup(fullpath, file - fullpath);
 	file++;
 
@@ -948,10 +938,10 @@ pg_search(const struct req *req)
 	struct mansearch	  search;
 	struct manpaths		  paths;
 	struct manpage		 *res;
-	char			**cp;
-	const char		 *ep, *start;
+	char			**argv;
+	char			 *query, *rp, *wp;
 	size_t			  ressz;
-	int			  i, sz;
+	int			  argc;
 
 	/*
 	 * Begin by chdir()ing into the root of the manpath.
@@ -968,54 +958,54 @@ pg_search(const struct req *req)
 
 	search.arch = req->q.arch;
 	search.sec = req->q.sec;
-	search.deftype = req->q.equal ? TYPE_Nm : (TYPE_Nm | TYPE_Nd);
-	search.flags = req->q.equal ? MANSEARCH_MAN : 0;
+	search.outkey = "Nd";
+	search.argmode = req->q.equal ? ARG_NAME : ARG_EXPR;
+	search.firstmatch = 1;
 
 	paths.sz = 1;
 	paths.paths = mandoc_malloc(sizeof(char *));
 	paths.paths[0] = mandoc_strdup(".");
 
 	/*
-	 * Poor man's tokenisation: just break apart by spaces.
-	 * Yes, this is half-ass.  But it works for now.
+	 * Break apart at spaces with backslash-escaping.
 	 */
 
-	ep = req->q.query;
-	while (ep && isspace((unsigned char)*ep))
-		ep++;
-
-	sz = 0;
-	cp = NULL;
-	while (ep && '\0' != *ep) {
-		cp = mandoc_reallocarray(cp, sz + 1, sizeof(char *));
-		start = ep;
-		while ('\0' != *ep && ! isspace((unsigned char)*ep))
-			ep++;
-		cp[sz] = mandoc_malloc((ep - start) + 1);
-		memcpy(cp[sz], start, ep - start);
-		cp[sz++][ep - start] = '\0';
-		while (isspace((unsigned char)*ep))
-			ep++;
+	argc = 0;
+	argv = NULL;
+	rp = query = mandoc_strdup(req->q.query);
+	for (;;) {
+		while (isspace((unsigned char)*rp))
+			rp++;
+		if (*rp == '\0')
+			break;
+		argv = mandoc_reallocarray(argv, argc + 1, sizeof(char *));
+		argv[argc++] = wp = rp;
+		for (;;) {
+			if (isspace((unsigned char)*rp)) {
+				*wp = '\0';
+				rp++;
+				break;
+			}
+			if (rp[0] == '\\' && rp[1] != '\0')
+				rp++;
+			if (wp != rp)
+				*wp = *rp;
+			if (*rp == '\0')
+				break;
+			wp++;
+			rp++;
+		}
 	}
 
-	if (0 == mansearch(&search, &paths, sz, cp, "Nd", &res, &ressz))
+	if (0 == mansearch(&search, &paths, argc, argv, &res, &ressz))
 		pg_noresult(req, "You entered an invalid query.");
 	else if (0 == ressz)
 		pg_noresult(req, "No results found.");
 	else
 		pg_searchres(req, res, ressz);
 
-	for (i = 0; i < sz; i++)
-		free(cp[i]);
-	free(cp);
-
-	for (i = 0; i < (int)ressz; i++) {
-		free(res[i].file);
-		free(res[i].names);
-		free(res[i].output);
-	}
-	free(res);
-
+	free(query);
+	mansearch_free(res, ressz);
 	free(paths.paths[0]);
 	free(paths.paths);
 }
@@ -1024,9 +1014,22 @@ int
 main(void)
 {
 	struct req	 req;
+	struct itimerval itimer;
 	const char	*path;
 	const char	*querystring;
 	int		 i;
+
+	/* Poor man's ReDoS mitigation. */
+
+	itimer.it_value.tv_sec = 2;
+	itimer.it_value.tv_usec = 0;
+	itimer.it_interval.tv_sec = 2;
+	itimer.it_interval.tv_usec = 0;
+	if (setitimer(ITIMER_VIRTUAL, &itimer, NULL) == -1) {
+		fprintf(stderr, "setitimer: %s\n", strerror(errno));
+		pg_error_internal();
+		return(EXIT_FAILURE);
+	}
 
 	/* Scan our run-time environment. */
 
@@ -1051,7 +1054,7 @@ main(void)
 		    MAN_DIR, strerror(errno));
 		pg_error_internal();
 		return(EXIT_FAILURE);
-	} 
+	}
 
 	memset(&req, 0, sizeof(struct req));
 	pathgen(&req);
@@ -1061,8 +1064,9 @@ main(void)
 	if (NULL != (querystring = getenv("QUERY_STRING")))
 		http_parse(&req, querystring);
 
-	if ( ! (NULL == req.q.manpath ||
-	    validate_manpath(&req, req.q.manpath))) {
+	if (req.q.manpath == NULL)
+		req.q.manpath = mandoc_strdup(req.p[0]);
+	else if ( ! validate_manpath(&req, req.q.manpath)) {
 		pg_error_badrequest(
 		    "You specified an invalid manpath.");
 		return(EXIT_FAILURE);

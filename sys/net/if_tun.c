@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_tun.c,v 1.127 2014/07/22 11:06:09 mpi Exp $	*/
+/*	$OpenBSD: if_tun.c,v 1.132 2015/02/10 21:56:10 miod Exp $	*/
 /*	$NetBSD: if_tun.c,v 1.24 1996/05/07 02:40:48 thorpej Exp $	*/
 
 /*
@@ -60,13 +60,10 @@
 #include <net/if.h>
 #include <net/if_types.h>
 #include <net/netisr.h>
-#include <net/route.h>
 
-#ifdef INET
 #include <netinet/in.h>
 #include <netinet/ip.h>
 #include <netinet/if_ether.h>
-#endif
 
 #ifdef PIPEX
 #include <net/pipex.h>
@@ -227,7 +224,7 @@ tun_clone_destroy(struct ifnet *ifp)
 	int			 s;
 
 #ifdef PIPEX
-	pipex_iface_stop(&tp->pipex_iface);
+	pipex_iface_fini(&tp->pipex_iface);
 #endif
 	tun_wakeup(tp);
 
@@ -415,7 +412,6 @@ tuninit(struct tun_softc *tp)
 
 	tp->tun_flags &= ~(TUN_IASET|TUN_DSTADDR|TUN_BRDADDR);
 	TAILQ_FOREACH(ifa, &ifp->if_addrlist, ifa_list) {
-#ifdef INET
 		if (ifa->ifa_addr->sa_family == AF_INET) {
 			struct sockaddr_in *sin;
 
@@ -437,7 +433,6 @@ tuninit(struct tun_softc *tp)
 			} else
 				tp->tun_flags &= ~TUN_BRDADDR;
 		}
-#endif
 #ifdef INET6
 		if (ifa->ifa_addr->sa_family == AF_INET6) {
 			struct sockaddr_in6 *sin;
@@ -479,11 +474,9 @@ tun_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 		TUNDEBUG(("%s: address set\n", ifp->if_xname));
 		if (tp->tun_flags & TUN_LAYER2) {
 			switch (ifa->ifa_addr->sa_family) {
-#ifdef INET
 			case AF_INET:
 				arp_ifinit(&tp->arpcom, ifa);
 				break;
-#endif
 			default:
 				break;
 			}
@@ -680,7 +673,6 @@ tunioctl(dev_t dev, u_long cmd, caddr_t data, int flag, struct proc *p)
 	case TIOCGPGRP:
 		*(int *)data = tp->tun_pgid;
 		break;
-	case OSIOCGIFADDR:
 	case SIOCGIFADDR:
 		if (!(tp->tun_flags & TUN_LAYER2)) {
 			splx(s);
@@ -766,7 +758,7 @@ tunread(dev_t dev, struct uio *uio, int ioflag)
 	while (m0 != NULL && uio->uio_resid > 0 && error == 0) {
 		len = min(uio->uio_resid, m0->m_len);
 		if (len != 0)
-			error = uiomove(mtod(m0, caddr_t), len, uio);
+			error = uiomovei(mtod(m0, caddr_t), len, uio);
 		MFREE(m0, m);
 		m0 = m;
 	}
@@ -834,7 +826,7 @@ tunwrite(dev_t dev, struct uio *uio, int ioflag)
 	}
 	while (error == 0 && uio->uio_resid > 0) {
 		m->m_len = min(mlen, uio->uio_resid);
-		error = uiomove(mtod (m, caddr_t), m->m_len, uio);
+		error = uiomovei(mtod (m, caddr_t), m->m_len, uio);
 		*mp = m;
 		mp = &m->m_next;
 		if (error == 0 && uio->uio_resid > 0) {
@@ -894,12 +886,10 @@ tunwrite(dev_t dev, struct uio *uio, int ioflag)
 	top->m_pkthdr.ph_rtableid = ifp->if_rdomain;
 
 	switch (ntohl(*th)) {
-#ifdef INET
 	case AF_INET:
 		ifq = &ipintrq;
 		isr = NETISR_IP;
 		break;
-#endif
 #ifdef INET6
 	case AF_INET6:
 		ifq = &ip6intrq;

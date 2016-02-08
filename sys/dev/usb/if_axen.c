@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_axen.c,v 1.8 2014/07/13 15:52:49 mpi Exp $	*/
+/*	$OpenBSD: if_axen.c,v 1.11 2015/01/22 10:23:47 mpi Exp $	*/
 
 /*
  * Copyright (c) 2013 Yojiro UO <yuo@openbsd.org>
@@ -176,7 +176,7 @@ int
 axen_miibus_readreg(struct device *dev, int phy, int reg)
 {
 	struct axen_softc	*sc = (void *)dev;
-	usbd_status		err;
+	int			err;
 	uWord			val;
 	int			ival;
 
@@ -212,7 +212,7 @@ void
 axen_miibus_writereg(struct device *dev, int phy, int reg, int val)
 {
 	struct axen_softc	*sc = (void *)dev;
-	usbd_status		err;
+	int			err;
 	uWord			uval;
 
 	if (usbd_is_dying(sc->axen_udev))
@@ -1032,7 +1032,7 @@ axen_rxeof(struct usbd_xfer *xfer, void *priv, usbd_status status)
 
 		pkt_hdr = letoh32(*hdr_p);
 		pkt_len = (pkt_hdr >> 16) & 0x1fff;
-		DPRINTFN(10,("rxeof: packet#%d, pkt_hdr 0x%08x, pkt_len %d\n", 
+		DPRINTFN(10,("rxeof: packet#%d, pkt_hdr 0x%08x, pkt_len %zu\n",
 		   pkt_count, pkt_hdr, pkt_len));
 
 		if ((pkt_hdr & AXEN_RXHDR_CRC_ERR) ||
@@ -1184,7 +1184,6 @@ axen_tick_task(void *xsc)
 {
 	int			s;
 	struct axen_softc	*sc;
-	struct ifnet		*ifp;
 	struct mii_data		*mii;
 
 	sc = xsc;
@@ -1195,7 +1194,6 @@ axen_tick_task(void *xsc)
 	if (usbd_is_dying(sc->axen_udev))
 		return;
 
-	ifp = GET_IFP(sc);
 	mii = GET_MII(sc);
 	if (mii == NULL)
 		return;
@@ -1401,10 +1399,8 @@ axen_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 		ifp->if_flags |= IFF_UP;
 		if (!(ifp->if_flags & IFF_RUNNING))
 			axen_init(sc);
-#ifdef INET
 		if (ifa->ifa_addr->sa_family == AF_INET)
 			arp_ifinit(&sc->arpcom, ifa);
-#endif
 		break;
 
 	case SIOCSIFFLAGS:

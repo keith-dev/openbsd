@@ -1,4 +1,4 @@
-/*	$OpenBSD: spec_vnops.c,v 1.78 2013/10/30 03:16:49 guenther Exp $	*/
+/*	$OpenBSD: spec_vnops.c,v 1.83 2015/02/10 21:56:09 miod Exp $	*/
 /*	$NetBSD: spec_vnops.c,v 1.29 1996/04/22 01:42:38 christos Exp $	*/
 
 /*
@@ -41,6 +41,7 @@
 #include <sys/mount.h>
 #include <sys/namei.h>
 #include <sys/vnode.h>
+#include <sys/lock.h>
 #include <sys/stat.h>
 #include <sys/errno.h>
 #include <sys/ioctl.h>
@@ -51,6 +52,9 @@
 #include <sys/dkio.h>
 #include <sys/malloc.h>
 #include <sys/specdev.h>
+#include <sys/unistd.h>
+
+#include <uvm/uvm_extern.h>
 
 #define v_lastr v_specinfo->si_lastr
 
@@ -252,7 +256,7 @@ spec_read(void *v)
 				brelse(bp);
 				return (error);
 			}
-			error = uiomove((char *)bp->b_data + on, n, uio);
+			error = uiomovei((char *)bp->b_data + on, n, uio);
 			brelse(bp);
 		} while (error == 0 && uio->uio_resid > 0 && n != 0);
 		return (error);
@@ -334,7 +338,7 @@ spec_write(void *v)
 				brelse(bp);
 				return (error);
 			}
-			error = uiomove((char *)bp->b_data + on, n, uio);
+			error = uiomovei((char *)bp->b_data + on, n, uio);
 			if (n + on == bsize)
 				bawrite(bp);
 			else
@@ -423,8 +427,7 @@ spec_fsync(void *v)
 	 */
 loop:
 	s = splbio();
-	for (bp = LIST_FIRST(&vp->v_dirtyblkhd);
-	    bp != LIST_END(&vp->v_dirtyblkhd); bp = nbp) {
+	for (bp = LIST_FIRST(&vp->v_dirtyblkhd); bp != NULL; bp = nbp) {
 		nbp = LIST_NEXT(bp, b_vnbufs);
 		if ((bp->b_flags & B_BUSY))
 			continue;

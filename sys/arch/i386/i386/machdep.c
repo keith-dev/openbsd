@@ -1,4 +1,4 @@
-/*	$OpenBSD: machdep.c,v 1.550 2014/07/21 17:25:47 uebayasi Exp $	*/
+/*	$OpenBSD: machdep.c,v 1.567 2015/02/08 04:41:48 deraadt Exp $	*/
 /*	$NetBSD: machdep.c,v 1.214 1996/11/10 03:16:17 thorpej Exp $	*/
 
 /*-
@@ -111,7 +111,6 @@
 #include <machine/gdt.h>
 #include <machine/kcore.h>
 #include <machine/pio.h>
-#include <machine/bus.h>
 #include <machine/psl.h>
 #include <machine/reg.h>
 #include <machine/specialreg.h>
@@ -238,7 +237,7 @@ void (*update_cpuspeed)(void) = NULL;
 void	via_update_sensor(void *args);
 #endif
 int kbd_reset;
-int lid_suspend;
+int lid_suspend = 1;
 
 /*
  * safepri is a safe priority for sleep to set for a spin-wait
@@ -392,7 +391,7 @@ cpu_startup()
 	pa = avail_end;
 	va = (vaddr_t)msgbufp;
 	for (i = 0; i < atop(MSGBUFSIZE); i++) {
-		pmap_kenter_pa(va, pa, VM_PROT_READ|VM_PROT_WRITE);
+		pmap_kenter_pa(va, pa, PROT_READ | PROT_WRITE);
 		va += PAGE_SIZE;
 		pa += PAGE_SIZE;
 	}
@@ -1037,6 +1036,7 @@ const struct cpu_cpuid_feature i386_cpuid_ecxfeatures[] = {
 	{ CPUIDECX_AVX,		"AVX" },
 	{ CPUIDECX_F16C,	"F16C" },
 	{ CPUIDECX_RDRAND,	"RDRAND" },
+	{ CPUIDECX_HV,		"HV" },
 };
 
 const struct cpu_cpuid_feature i386_ecpuid_ecxfeatures[] = {
@@ -1159,7 +1159,8 @@ cyrix3_cpu_setup(struct cpu_info *ci)
 	case 13: /* C7-M Type D */
 	case 15: /* Nano */
 #if !defined(SMALL_KERNEL)
-		if (model == 10 || model == 13 || model == 15) {
+		if (CPU_IS_PRIMARY(ci) &&
+		    (model == 10 || model == 13 || model == 15)) {
 			/* Setup the sensors structures */
 			strlcpy(ci->ci_sensordev.xname, ci->ci_dev.dv_xname,
 			    sizeof(ci->ci_sensordev.xname));
@@ -1427,12 +1428,16 @@ amd_family6_setup(struct cpu_info *ci)
 /*
  * Temperature read on the CPU is relative to the maximum
  * temperature supported by the CPU, Tj(Max).
- * Poorly documented, refer to:
- * http://softwarecommunity.intel.com/isn/Community/
- * en-US/forums/thread/30228638.aspx
- * Basically, depending on a bit in one msr, the max is either 85 or 100.
- * Then we subtract the temperature portion of thermal status from
- * max to get current temperature.
+ * Refer to:
+ * 64-ia-32-architectures-software-developer-vol-3c-part-3-manual.pdf
+ * Section 35 and
+ * http://www.intel.com/content/dam/www/public/us/en/documents/
+ * white-papers/cpu-monitoring-dts-peci-paper.pdf
+ *
+ * The temperature on Intel CPUs can be between 70 and 105 degC, since
+ * Westmere we can read the TJmax from the die. For older CPUs we have
+ * to guess or use undocumented MSRs. Then we subtract the temperature
+ * portion of thermal status from max to get current temperature.
  */
 void
 intelcore_update_sensor(void *args)
@@ -1442,9 +1447,21 @@ intelcore_update_sensor(void *args)
 	int max = 100;
 
 	/* Only some Core family chips have MSR_TEMPERATURE_TARGET. */
-	if (ci->ci_model == 0xe &&
-	    (rdmsr(MSR_TEMPERATURE_TARGET) & MSR_TEMPERATURE_TARGET_LOW_BIT))
+	if (ci->ci_model == 0x0e &&
+	    (rdmsr(MSR_TEMPERATURE_TARGET_UNDOCUMENTED) &
+	     MSR_TEMPERATURE_TARGET_LOW_BIT_UNDOCUMENTED))
 		max = 85;
+
+	/*
+	 * Newer CPUs can tell you what their max temperature is.
+	 * See: '64-ia-32-architectures-software-developer-
+	 * vol-3c-part-3-manual.pdf'
+	 */
+	if (ci->ci_model > 0x17 && ci->ci_model != 0x1c &&
+	    ci->ci_model != 0x26 && ci->ci_model != 0x27 &&
+	    ci->ci_model != 0x35 && ci->ci_model != 0x36)
+		max = MSR_TEMPERATURE_TARGET_TJMAX(
+		    rdmsr(MSR_TEMPERATURE_TARGET));
 
 	msr = rdmsr(MSR_THERM_STATUS);
 	if (msr & MSR_THERM_STATUS_VALID_BIT) {
@@ -1465,7 +1482,7 @@ intel686_cpusensors_setup(struct cpu_info *ci)
 {
 	u_int regs[4];
 
-	if (cpuid_level < 0x06)
+	if (!CPU_IS_PRIMARY(ci) || cpuid_level < 0x06)
 		return;
 
 	/* CPUID.06H.EAX[0] = 1 tells us if we have on-die sensor */
@@ -1650,6 +1667,14 @@ cyrix3_cpu_name(int model, int step)
  * information; however, the chance of multi-vendor SMP actually
  * ever *working* is sufficiently low that it's probably safe to assume
  * all processors are of the same vendor.
+ *
+ * Note that identifycpu() is called twice for the primary CPU: the first
+ * is very early (right after the "OpenBSD X.Y" line) with the CPUF_PRIMARY
+ * flag *not* set, then again later in the config sequence with CPUF_PRIMARY
+ * set.  Thus, the tests here for ((ci->ci_flags & CPUF_PRIMARY) == 0) are
+ * actually saying "do this on the first call for each CPU".  Don't change
+ * them to use CPU_IS_PRIMARY() because then they would be done on both
+ * calls in the SP build.
  */
 
 void
@@ -1815,7 +1840,7 @@ identifycpu(struct cpu_info *ci)
 		}
 	}
 
-	/* Remove leading and duplicated spaces from cpu_brandstr */
+	/* Remove leading, trailing and duplicated spaces from cpu_brandstr */
 	brandstr_from = brandstr_to = cpu_brandstr;
 	skipspace = 1;
 	while (*brandstr_from != '\0') {
@@ -1827,6 +1852,8 @@ identifycpu(struct cpu_info *ci)
 			skipspace = 1;
 		brandstr_from++;
 	}
+	if (skipspace && brandstr_to > cpu_brandstr)
+		brandstr_to--;
 	*brandstr_to = '\0';
 
 	if (cpu_brandstr[0] == '\0') {
@@ -2557,8 +2584,6 @@ struct pcb dumppcb;
 __dead void
 boot(int howto)
 {
-	struct device *mainbus;
-
 	if ((howto & RB_POWERDOWN) != 0)
 		lid_suspend = 0;
 
@@ -2591,10 +2616,7 @@ boot(int howto)
 		dumpsys();
 
 haltsys:
-	doshutdownhooks();
-	mainbus = device_mainbus();
-	if (mainbus != NULL)
-		config_suspend(mainbus, DVACT_POWERDOWN);
+	config_suspend_all(DVACT_POWERDOWN);
 
 #ifdef MULTIPROCESSOR
 	i386_broadcast_ipi(I386_IPI_HALT);
@@ -2796,7 +2818,7 @@ dumpsys()
 			printf("(%x %lld) ", maddr, (long long)blkno);
 #endif
 			pmap_enter(pmap_kernel(), dumpspace, maddr,
-			    VM_PROT_READ, PMAP_WIRED);
+			    PROT_READ, PMAP_WIRED);
 			if ((error = (*dump)(dumpdev, blkno,
 			    (caddr_t)dumpspace, NBPG)))
 				break;
@@ -2882,7 +2904,7 @@ setregs(struct proc *p, struct exec_package *pack, u_long stack,
 	tf->tf_edi = 0;
 	tf->tf_esi = 0;
 	tf->tf_ebp = 0;
-	tf->tf_ebx = (int)PS_STRINGS;
+	tf->tf_ebx = (int)p->p_p->ps_strings;
 	tf->tf_edx = 0;
 	tf->tf_ecx = 0;
 	tf->tf_eax = 0;
@@ -3150,8 +3172,8 @@ init386(paddr_t first_avail)
 			panic("cannot reserve /boot args memory");
 
 		pmap_enter(pmap_kernel(), (vaddr_t)bootargp, (paddr_t)bootargv,
-		    VM_PROT_READ|VM_PROT_WRITE,
-		    VM_PROT_READ|VM_PROT_WRITE|PMAP_WIRED);
+		    PROT_READ | PROT_WRITE,
+		    PROT_READ | PROT_WRITE | PMAP_WIRED);
 
 		bios_getopt();
 
@@ -3163,10 +3185,8 @@ init386(paddr_t first_avail)
 		panic("no BIOS memory map supplied");
 #endif
  
-#if defined(MULTIPROCESSOR)
 	/* install the lowmem ptp after boot args for 1:1 mappings */
 	pmap_prealloc_lowmem_ptp(round_page((paddr_t)(bootargv + bootargc)));
-#endif
 
 	/*
 	 * account all the memory passed in the map from /boot
@@ -3322,15 +3342,15 @@ init386(paddr_t first_avail)
 #endif
 
 #ifdef MULTIPROCESSOR
-	pmap_kenter_pa((vaddr_t)MP_TRAMPOLINE,  /* virtual */
-	    (paddr_t)MP_TRAMPOLINE,             /* physical */
-	    VM_PROT_ALL);                       /* protection */
+	pmap_kenter_pa((vaddr_t)MP_TRAMPOLINE,		/* virtual */
+	    (paddr_t)MP_TRAMPOLINE,			/* physical */
+	    PROT_READ | PROT_WRITE | PROT_EXEC);	/* protection */
 #endif
 
 #if NACPI > 0 && !defined(SMALL_KERNEL)
-	pmap_kenter_pa((vaddr_t)ACPI_TRAMPOLINE,/* virtual */
-	    (paddr_t)ACPI_TRAMPOLINE,           /* physical */
-	    VM_PROT_ALL);                       /* protection */
+	pmap_kenter_pa((vaddr_t)ACPI_TRAMPOLINE,	/* virtual */
+	    (paddr_t)ACPI_TRAMPOLINE,			/* physical */
+	    PROT_READ | PROT_WRITE | PROT_EXEC);	/* protection */
 #endif
 
 	tlbflush();
@@ -3578,18 +3598,13 @@ bus_space_map(bus_space_tag_t t, bus_addr_t bpa, bus_size_t size, int flags,
 	/*
 	 * Pick the appropriate extent map.
 	 */
-	switch (t) {
-	case I386_BUS_SPACE_IO:
+	if (t == I386_BUS_SPACE_IO) {
 		ex = ioport_ex;
 		if (flags & BUS_SPACE_MAP_LINEAR)
 			return (EINVAL);
-		break;
-
-	case I386_BUS_SPACE_MEM:
+	} else if (t == I386_BUS_SPACE_MEM) {
 		ex = iomem_ex;
-		break;
-
-	default:
+	} else {
 		panic("bus_space_map: bad bus space tag");
 	}
 
@@ -3663,16 +3678,11 @@ bus_space_alloc(bus_space_tag_t t, bus_addr_t rstart, bus_addr_t rend,
 	/*
 	 * Pick the appropriate extent map.
 	 */
-	switch (t) {
-	case I386_BUS_SPACE_IO:
+	if (t == I386_BUS_SPACE_IO) {
 		ex = ioport_ex;
-		break;
-
-	case I386_BUS_SPACE_MEM:
+	} else if (t == I386_BUS_SPACE_MEM) {
 		ex = iomem_ex;
-		break;
-
-	default:
+	} else {
 		panic("bus_space_alloc: bad bus space tag");
 	}
 
@@ -3738,7 +3748,7 @@ bus_mem_add_mapping(bus_addr_t bpa, bus_size_t size, int flags,
 
 	map_size = endpa - pa;
 
-	va = uvm_km_valloc(kernel_map, map_size);
+	va = (vaddr_t)km_alloc(map_size, &kv_any, &kp_none, &kd_nowait);
 	if (va == 0)
 		return (ENOMEM);
 
@@ -3752,7 +3762,7 @@ bus_mem_add_mapping(bus_addr_t bpa, bus_size_t size, int flags,
 	for (; map_size > 0;
 	    pa += PAGE_SIZE, va += PAGE_SIZE, map_size -= PAGE_SIZE)
 		pmap_kenter_pa(va, pa | pmap_flags,
-		    VM_PROT_READ | VM_PROT_WRITE);
+		    PROT_READ | PROT_WRITE);
 	pmap_update(pmap_kernel());
 
 	return 0;
@@ -3794,7 +3804,7 @@ bus_space_unmap(bus_space_tag_t t, bus_space_handle_t bsh, bus_size_t size)
 		/*
 		 * Free the kernel virtual mapping.
 		 */
-		uvm_km_free(kernel_map, va, endva - va);
+		km_free((void *)va, endva - va, &kv_any, &kp_none);
 	} else
 		panic("bus_space_unmap: bad bus space tag");
 
@@ -3841,7 +3851,7 @@ _bus_space_unmap(bus_space_tag_t t, bus_space_handle_t bsh, bus_size_t size,
 		/*
 		 * Free the kernel virtual mapping.
 		 */
-		uvm_km_free(kernel_map, va, endva - va);
+		km_free((void *)va, endva - va, &kv_any, &kp_none);
 	} else
 		panic("bus_space_unmap: bad bus space tag");
 

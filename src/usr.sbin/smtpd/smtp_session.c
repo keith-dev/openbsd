@@ -1,4 +1,4 @@
-/*	$OpenBSD: smtp_session.c,v 1.215 2014/07/09 12:44:54 eric Exp $	*/
+/*	$OpenBSD: smtp_session.c,v 1.227 2015/01/20 17:37:54 deraadt Exp $	*/
 
 /*
  * Copyright (c) 2008 Gilles Chehade <gilles@poolp.org>
@@ -31,6 +31,7 @@
 #include <errno.h>
 #include <event.h>
 #include <imsg.h>
+#include <limits.h>
 #include <inttypes.h>
 #include <openssl/ssl.h>
 #include <resolv.h>
@@ -49,6 +50,8 @@
 
 #define SMTP_KICK_CMD		5
 #define SMTP_KICK_RCPTFAIL	50
+
+#define	APPEND_DOMAIN_BUFFER_SIZE	4096
 
 enum smtp_phase {
 	PHASE_INIT = 0,
@@ -82,12 +85,14 @@ enum session_flags {
 };
 
 enum message_flags {
-	MF_QUEUE_ENVELOPE_FAIL	= 0x0001,
-	MF_ERROR_SIZE		= 0x1000,
-	MF_ERROR_IO		= 0x2000,
-	MF_ERROR_LOOP		= 0x4000,
+	MF_QUEUE_ENVELOPE_FAIL	= 0x00001,
+	MF_ERROR_SIZE		= 0x01000,
+	MF_ERROR_IO		= 0x02000,
+	MF_ERROR_LOOP		= 0x04000,
+	MF_ERROR_MALFORMED     	= 0x08000,
+	MF_ERROR_RESOURCES     	= 0x10000,
 };
-#define MF_ERROR	(MF_ERROR_SIZE | MF_ERROR_IO | MF_ERROR_LOOP)
+#define MF_ERROR	(MF_ERROR_SIZE | MF_ERROR_IO | MF_ERROR_LOOP | MF_ERROR_MALFORMED | MF_ERROR_RESOURCES)
 
 enum smtp_command {
 	CMD_HELO = 0,
@@ -117,17 +122,17 @@ struct smtp_session {
 	struct listener		*listener;
 	void			*ssl_ctx;
 	struct sockaddr_storage	 ss;
-	char			 hostname[SMTPD_MAXHOSTNAMELEN];
-	char			 smtpname[SMTPD_MAXHOSTNAMELEN];
-	char			 sni[SMTPD_MAXHOSTNAMELEN];
+	char			 hostname[HOST_NAME_MAX+1];
+	char			 smtpname[HOST_NAME_MAX+1];
+	char			 sni[HOST_NAME_MAX+1];
 
 	int			 flags;
 	int			 phase;
 	enum smtp_state		 state;
 
-	char			 helo[SMTPD_MAXLINESIZE];
-	char			 cmd[SMTPD_MAXLINESIZE];
-	char			 username[SMTPD_MAXLOGNAME];
+	char			 helo[LINE_MAX];
+	char			 cmd[LINE_MAX];
+	char			 username[LOGIN_NAME_MAX];
 
 	struct envelope		 evp;
 
@@ -147,6 +152,8 @@ struct smtp_session {
 	int			 rcvcount;
 
 	struct event		 pause;
+
+	struct rfc2822_parser	 rfc2822_parser;
 };
 
 #define ADVERTISE_TLS(s) \
@@ -224,6 +231,237 @@ static struct tree wait_ssl_init;
 static struct tree wait_ssl_verify;
 
 static void
+header_default_callback(const struct rfc2822_header *hdr, void *arg)
+{
+	struct smtp_session    *s = arg;
+	struct rfc2822_line    *l;
+	size_t			len;
+
+	len = strlen(hdr->name) + 1;
+	if (fprintf(s->ofile, "%s:", hdr->name) != (int)len) {
+		s->msgflags |= MF_ERROR_IO;
+		return;
+	}
+	s->datalen += len;
+
+	TAILQ_FOREACH(l, &hdr->lines, next) {
+		len = strlen(l->buffer) + 1;
+		if (fprintf(s->ofile, "%s\n", l->buffer) != (int)len) {
+			s->msgflags |= MF_ERROR_IO;
+			return;
+		}
+		s->datalen += len;
+	}
+}
+
+static void
+dataline_callback(const char *line, void *arg)
+{
+	struct smtp_session	*s = arg;
+	size_t			len;
+
+	len = strlen(line) + 1;
+
+	if (s->datalen + len > env->sc_maxsize) {
+		s->msgflags |= MF_ERROR_SIZE;
+		return;
+	}
+
+	if (fprintf(s->ofile, "%s\n", line) != (int)len) {
+		s->msgflags |= MF_ERROR_IO;
+		return;
+	}
+
+	s->datalen += len;
+}
+
+static void
+header_bcc_callback(const struct rfc2822_header *hdr, void *arg)
+{
+}
+
+static void
+header_append_domain_buffer(char *buffer, char *domain, size_t len)
+{
+	size_t	i;
+	int	escape, quote, comment, bracket;
+	int	has_domain, has_bracket, has_group;
+	int	pos_bracket, pos_component, pos_insert;
+	char	copy[APPEND_DOMAIN_BUFFER_SIZE];
+
+	i = 0;
+	escape = quote = comment = bracket = 0;
+	has_domain = has_bracket = has_group = 0;
+	pos_bracket = pos_insert = pos_component = 0;
+	for (i = 0; buffer[i]; ++i) {
+		if (buffer[i] == '(' && !escape && !quote)
+			comment++;
+		if (buffer[i] == '"' && !escape && !comment)
+			quote = !quote;
+		if (buffer[i] == ')' && !escape && !quote && comment)
+			comment--;
+		if (buffer[i] == '\\' && !escape && !comment && !quote)
+			escape = 1;
+		else
+			escape = 0;
+		if (buffer[i] == '<' && !escape && !comment && !quote && !bracket) {
+			bracket++;
+			has_bracket = 1;
+		}
+		if (buffer[i] == '>' && !escape && !comment && !quote && bracket) {
+			bracket--;
+			pos_bracket = i;
+		}
+		if (buffer[i] == '@' && !escape && !comment && !quote)
+			has_domain = 1;
+		if (buffer[i] == ':' && !escape && !comment && !quote)
+			has_group = 1;
+
+		/* update insert point if not in comment and not on a whitespace */
+		if (!comment && buffer[i] != ')' && !isspace((unsigned char)buffer[i]))
+			pos_component = i;
+	}
+
+	/* parse error, do not attempt to modify */
+	if (escape || quote || comment || bracket)
+		return;
+
+	/* domain already present, no need to modify */
+	if (has_domain)
+		return;
+
+	/* address is group, skip */
+	if (has_group)
+		return;
+
+	/* there's an address between brackets, just append domain */
+	if (has_bracket) {
+		pos_bracket--;
+		while (isspace((unsigned char)buffer[pos_bracket]))
+			pos_bracket--;
+		if (buffer[pos_bracket] == '<')
+			return;
+		pos_insert = pos_bracket + 1;
+	}
+	else {
+		/* otherwise append address to last component */
+		pos_insert = pos_component + 1;
+
+		/* empty address */
+                if (buffer[pos_component] == '\0' ||
+		    isspace((unsigned char)buffer[pos_component]))
+                        return;
+	}
+
+	if (snprintf(copy, sizeof copy, "%.*s@%s%s",
+		(int)pos_insert, buffer,
+		domain,
+		buffer+pos_insert) >= (int)sizeof copy)
+		return;
+
+	memcpy(buffer, copy, len);
+}
+
+static void
+header_masquerade_callback(const struct rfc2822_header *hdr, void *arg)
+{
+	struct smtp_session    *s = arg;
+	struct rfc2822_line    *l;
+	size_t			i, j;
+	int			escape, quote, comment, skip;
+	size_t			len;
+	char			buffer[APPEND_DOMAIN_BUFFER_SIZE];
+
+	len = strlen(hdr->name) + 1;
+	if (fprintf(s->ofile, "%s:", hdr->name) != (int)len)
+		goto ioerror;
+	s->datalen += len;
+
+	i = j = 0;
+	escape = quote = comment = skip = 0;
+	memset(buffer, 0, sizeof buffer);
+
+	TAILQ_FOREACH(l, &hdr->lines, next) {
+		for (i = 0; i < strlen(l->buffer); ++i) {
+			if (l->buffer[i] == '(' && !escape && !quote)
+				comment++;
+			if (l->buffer[i] == '"' && !escape && !comment)
+				quote = !quote;
+			if (l->buffer[i] == ')' && !escape && !quote && comment)
+				comment--;
+			if (l->buffer[i] == '\\' && !escape && !comment && !quote)
+				escape = 1;
+			else
+				escape = 0;
+
+			/* found a separator, buffer contains a full address */
+			if (l->buffer[i] == ',' && !escape && !quote && !comment) {
+				if (!skip && j + strlen(s->listener->hostname) + 1 < sizeof buffer)
+					header_append_domain_buffer(buffer, s->listener->hostname, sizeof buffer);
+				len = strlen(buffer) + 1;
+				if (fprintf(s->ofile, "%s,", buffer) != (int)len)
+					goto ioerror;
+				s->datalen += len;
+				j = 0;
+				skip = 0;
+				memset(buffer, 0, sizeof buffer);
+			}
+			else {
+				if (skip) {
+					if (fprintf(s->ofile, "%c", l->buffer[i]) != (int)1)
+						goto ioerror;
+					s->datalen += 1;
+				}
+				else {
+					buffer[j++] = l->buffer[i];
+					if (j == sizeof (buffer) - 1) {
+						len = strlen(buffer);
+						if (fprintf(s->ofile, "%s", buffer) != (int)len)
+							goto ioerror;
+						s->datalen += len;
+						skip = 1;
+						j = 0;
+						memset(buffer, 0, sizeof buffer);
+					}
+				}
+			}
+		}
+		if (skip) {
+			if (fprintf(s->ofile, "\n") != (int)1)
+				goto ioerror;
+			s->datalen += 1;
+		}
+		else {
+			buffer[j++] = '\n';
+			if (j == sizeof (buffer) - 1) {
+				len = strlen(buffer);
+				if (fprintf(s->ofile, "%s", buffer) != (int)len)
+					goto ioerror;
+				s->datalen += len;
+				skip = 1;
+				j = 0;
+				memset(buffer, 0, sizeof buffer);
+			}
+		}
+	}
+
+	/* end of header, if buffer is not empty we'll process it */
+	if (buffer[0]) {
+		if (j + strlen(s->listener->hostname) + 1 < sizeof buffer)
+			header_append_domain_buffer(buffer, s->listener->hostname, sizeof buffer);
+		len = strlen(buffer);
+		if (fprintf(s->ofile, "%s", buffer) != (int)len)
+			goto ioerror;
+		s->datalen += len;
+	}
+	return;
+
+ioerror:
+	s->msgflags |= MF_ERROR_IO;
+	return;
+}
+
+static void
 smtp_session_init(void)
 {
 	static int	init = 0;
@@ -255,7 +493,7 @@ smtp_session(struct listener *listener, int sock,
 
 	if ((s = calloc(1, sizeof(*s))) == NULL)
 		return (-1);
-	if (iobuf_init(&s->iobuf, SMTPD_MAXLINESIZE, SMTPD_MAXLINESIZE) == -1) {
+	if (iobuf_init(&s->iobuf, LINE_MAX, LINE_MAX) == -1) {
 		free(s);
 		return (-1);
 	}
@@ -272,6 +510,21 @@ smtp_session(struct listener *listener, int sock,
 	s->phase = PHASE_INIT;
 
 	(void)strlcpy(s->smtpname, listener->hostname, sizeof(s->smtpname));
+
+	/* Setup parser and callbacks before smtp_connected() can be called */
+	rfc2822_parser_init(&s->rfc2822_parser);
+	rfc2822_header_default_callback(&s->rfc2822_parser,
+	    header_default_callback, s);
+	rfc2822_header_callback(&s->rfc2822_parser, "bcc",
+	    header_bcc_callback, s);
+	rfc2822_header_callback(&s->rfc2822_parser, "from",
+	    header_masquerade_callback, s);
+	rfc2822_header_callback(&s->rfc2822_parser, "to",
+	    header_masquerade_callback, s);
+	rfc2822_header_callback(&s->rfc2822_parser, "cc",
+	    header_masquerade_callback, s);
+	rfc2822_body_callback(&s->rfc2822_parser,
+	    dataline_callback, s);
 
 	/* For local enqueueing, the hostname is already set */
 	if (hostname) {
@@ -290,6 +543,8 @@ smtp_session(struct listener *listener, int sock,
 		tree_xset(&wait_lka_ptr, s->id, s);
 	}
 
+	/* session may have been freed by now */
+
 	return (0);
 }
 
@@ -302,7 +557,7 @@ smtp_session_imsg(struct mproc *p, struct imsg *imsg)
 	struct smtp_rcpt		*rcpt;
 	void				*ssl;
 	char				*pkiname;
-	char				 user[SMTPD_MAXLOGNAME];
+	char				 user[LOGIN_NAME_MAX];
 	struct msg			 m;
 	const char			*line, *helo;
 	uint64_t			 reqid, evpid;
@@ -831,8 +1086,8 @@ smtp_io(struct io *io, int evt)
 	case IO_DATAIN:
 	    nextline:
 		line = iobuf_getline(&s->iobuf, &len);
-		if ((line == NULL && iobuf_len(&s->iobuf) >= SMTPD_MAXLINESIZE) ||
-		    (line && len >= SMTPD_MAXLINESIZE)) {
+		if ((line == NULL && iobuf_len(&s->iobuf) >= LINE_MAX) ||
+		    (line && len >= LINE_MAX)) {
 			s->flags |= SF_BADINPUT;
 			smtp_reply(s, "500 %s: Line too long",
 			    esc_code(ESC_STATUS_PERMFAIL, ESC_OTHER_STATUS));
@@ -1227,6 +1482,8 @@ smtp_command(struct smtp_session *s, char *line)
 			break;
 		}
 
+		rfc2822_parser_reset(&s->rfc2822_parser);
+
 		smtp_filter_data(s);
 		break;
 	/*
@@ -1329,7 +1586,7 @@ abort:
 static void
 smtp_rfc4954_auth_login(struct smtp_session *s, char *arg)
 {
-	char		buf[SMTPD_MAXLINESIZE];
+	char		buf[LINE_MAX];
 
 	switch (s->state) {
 	case STATE_HELO:
@@ -1543,7 +1800,7 @@ smtp_enter_state(struct smtp_session *s, int newstate)
 static void
 smtp_message_write(struct smtp_session *s, const char *line)
 {
-	size_t	len;
+	int	ret;
 
 	log_trace(TRACE_SMTP, "<<< [MSG] %s", line);
 
@@ -1560,24 +1817,21 @@ smtp_message_write(struct smtp_session *s, const char *line)
 			s->rcvcount++;
 		if (s->rcvcount == MAX_HOPS_COUNT) {
 			s->msgflags |= MF_ERROR_LOOP;
-			log_warn("warn: loop detected");
+			log_warnx("warn: loop detected");
 			return;
 		}
 	}
 
-	len = strlen(line) + 1;
-
-	if (s->datalen + len > env->sc_maxsize) {
-		s->msgflags |= MF_ERROR_SIZE;
+	ret = rfc2822_parser_feed(&s->rfc2822_parser, line);
+	if (ret == -1) {
+		s->msgflags |= MF_ERROR_RESOURCES;
+		return;
+		
+	}
+	if (ret == 0) {
+		s->msgflags |= MF_ERROR_MALFORMED;
 		return;
 	}
-
-	if (fprintf(s->ofile, "%s\n", line) != (int)len) {
-		s->msgflags |= MF_ERROR_IO;
-		return;
-	}
-
-	s->datalen += len;
 }
 
 static void
@@ -1604,6 +1858,13 @@ smtp_message_end(struct smtp_session *s)
 			smtp_reply(s, "500 %s %s: Loop detected",
 			    esc_code(ESC_STATUS_PERMFAIL, ESC_ROUTING_LOOP_DETECTED),
 			    esc_description(ESC_ROUTING_LOOP_DETECTED));
+		else if (s->msgflags & MF_ERROR_RESOURCES)
+			smtp_reply(s, "421 %s: Temporary Error",
+			    esc_code(ESC_STATUS_TEMPFAIL, ESC_OTHER_MAIL_SYSTEM_STATUS));
+		else if (s->msgflags & MF_ERROR_MALFORMED)
+			smtp_reply(s, "550 %s %s: Message is not RFC 2822 compliant",
+			    esc_code(ESC_STATUS_PERMFAIL, ESC_DELIVERY_NOT_AUTHORIZED_MESSAGE_REFUSED),
+			    esc_description(ESC_DELIVERY_NOT_AUTHORIZED_MESSAGE_REFUSED));
 		else
 			smtp_reply(s, "%d Message rejected", s->msgcode);
 		smtp_message_reset(s, 0);
@@ -1655,12 +1916,12 @@ smtp_reply(struct smtp_session *s, char *fmt, ...)
 {
 	va_list	 ap;
 	int	 n;
-	char	 buf[SMTPD_MAXLINESIZE], tmp[SMTPD_MAXLINESIZE];
+	char	 buf[LINE_MAX], tmp[LINE_MAX];
 
 	va_start(ap, fmt);
 	n = vsnprintf(buf, sizeof buf, fmt, ap);
 	va_end(ap);
-	if (n == -1 || n >= SMTPD_MAXLINESIZE)
+	if (n == -1 || n >= LINE_MAX)
 		fatalx("smtp_reply: line too long");
 	if (n < 4)
 		fatalx("smtp_reply: response too short");
@@ -1720,6 +1981,8 @@ smtp_free(struct smtp_session *s, const char * reason)
 		free(rcpt);
 	}
 
+	rfc2822_parser_release(&s->rfc2822_parser);
+
 	io_clear(&s->io);
 	iobuf_clear(&s->iobuf);
 	free(s);
@@ -1758,21 +2021,20 @@ smtp_mailaddr(struct mailaddr *maddr, char *line, int mailfrom, char **args,
 
 	if (!valid_localpart(maddr->user) ||
 	    !valid_domainpart(maddr->domain)) {
-		/* We accept empty sender for MAIL FROM */
-		if (mailfrom &&
-		    maddr->user[0] == '\0' &&
-		    maddr->domain[0] == '\0')
+		/* accept empty return-path in MAIL FROM, required for bounces */
+		if (mailfrom && maddr->user[0] == '\0' && maddr->domain[0] == '\0')
 			return (1);
 
-		/* We accept empty domain for RCPT TO if user is postmaster */
-		if (!mailfrom &&
-		    strcasecmp(maddr->user, "postmaster") == 0 &&
-		    maddr->domain[0] == '\0') {
+		/* no user-part, reject */
+		if (maddr->user[0] == '\0')
+			return (0);
+
+		/* no domain, local user */
+		if (maddr->domain[0] == '\0') {
 			(void)strlcpy(maddr->domain, domain,
 			    sizeof(maddr->domain));
 			return (1);
 		}
-			
 		return (0);
 	}
 

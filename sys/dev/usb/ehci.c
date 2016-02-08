@@ -1,4 +1,4 @@
-/*	$OpenBSD: ehci.c,v 1.164 2014/08/05 20:26:15 mpi Exp $ */
+/*	$OpenBSD: ehci.c,v 1.176 2015/03/06 22:53:03 mpi Exp $ */
 /*	$NetBSD: ehci.c,v 1.66 2004/06/30 03:11:56 mycroft Exp $	*/
 
 /*
@@ -49,9 +49,9 @@
 #include <sys/queue.h>
 #include <sys/timeout.h>
 #include <sys/pool.h>
+#include <sys/endian.h>
 
 #include <machine/bus.h>
-#include <machine/endian.h>
 
 #include <dev/usb/usb.h>
 #include <dev/usb/usbdi.h>
@@ -60,8 +60,6 @@
 
 #include <dev/usb/ehcireg.h>
 #include <dev/usb/ehcivar.h>
-
-#include <dev/rndvar.h>
 
 struct cfdriver ehci_cd = {
 	NULL, "ehci", DV_DULL
@@ -99,6 +97,7 @@ struct ehci_pipe {
 u_int8_t		ehci_reverse_bits(u_int8_t, int);
 
 usbd_status	ehci_open(struct usbd_pipe *);
+int		ehci_setaddr(struct usbd_device *, int);
 void		ehci_poll(struct usbd_bus *);
 void		ehci_softintr(void *);
 int		ehci_intr1(struct ehci_softc *);
@@ -215,7 +214,7 @@ void		ehci_dump_exfer(struct ehci_xfer *);
 
 struct usbd_bus_methods ehci_bus_methods = {
 	.open_pipe = ehci_open,
-	.dev_setaddr = usbd_set_address,
+	.dev_setaddr = ehci_setaddr,
 	.soft_intr = ehci_softintr,
 	.do_poll = ehci_poll,
 	.allocx = ehci_allocx,
@@ -334,6 +333,7 @@ ehci_init(struct ehci_softc *sc)
 		}
 		pool_init(ehcixfer, sizeof(struct ehci_xfer), 0, 0, 0,
 		    "ehcixfer", NULL);
+		pool_setipl(ehcixfer, IPL_SOFTUSB);
 	}
 
 	/* frame list size at default, read back what we got and use that */
@@ -362,8 +362,8 @@ ehci_init(struct ehci_softc *sc)
 
 	EOWRITE4(sc, EHCI_PERIODICLISTBASE, DMAADDR(&sc->sc_fldma, 0));
 
-	sc->sc_softitds = malloc(sc->sc_flsize * sizeof(struct ehci_soft_itd *),
-	    M_USB, M_NOWAIT | M_ZERO);
+	sc->sc_softitds = mallocarray(sc->sc_flsize,
+	    sizeof(struct ehci_soft_itd *), M_USB, M_NOWAIT | M_ZERO);
 	if (sc->sc_softitds == NULL)
 		return (ENOMEM);
 	LIST_INIT(&sc->sc_freeitds);
@@ -524,11 +524,12 @@ ehci_intr1(struct ehci_softc *sc)
 		return (0);
 	}
 
-	intrs = EHCI_STS_INTRS(EOREAD4(sc, EHCI_USBSTS));
+	intrs = EOREAD4(sc, EHCI_USBSTS);
 	if (intrs == 0xffffffff) {
 		sc->sc_bus.dying = 1;
 		return (0);
 	}
+	intrs = EHCI_STS_INTRS(intrs);
 	if (!intrs)
 		return (0);
 
@@ -595,13 +596,47 @@ ehci_pcd(struct ehci_softc *sc, struct usbd_xfer *xfer)
 	for (i = 1; i <= m; i++) {
 		/* Pick out CHANGE bits from the status reg. */
 		if (EOREAD4(sc, EHCI_PORTSC(i)) & EHCI_PS_CLEAR)
-			p[i/8] |= 1 << (i%8);
+			p[i / 8] |= 1 << (i % 8);
 	}
 	DPRINTF(("ehci_pcd: change=0x%02x\n", *p));
 	xfer->actlen = xfer->length;
 	xfer->status = USBD_NORMAL_COMPLETION;
 
 	usb_transfer_complete(xfer);
+}
+
+/*
+ * Work around the half configured control (default) pipe when setting
+ * the address of a device.
+ *
+ * Because a single QH is setup per endpoint in ehci_open(), and the
+ * control pipe is configured before we could have set the address
+ * of the device or read the wMaxPacketSize of the endpoint, we have
+ * to re-open the pipe twice here.
+ */
+int
+ehci_setaddr(struct usbd_device *dev, int addr)
+{
+	/* Root Hub */
+	if (dev->depth == 0)
+		return (0);
+
+	/* Re-establish the default pipe with the new max packet size. */
+	ehci_close_pipe(dev->default_pipe);
+	if (ehci_open(dev->default_pipe))
+		return (EINVAL);
+
+	if (usbd_set_address(dev, addr))
+		return (1);
+
+	dev->address = addr;
+
+	/* Re-establish the default pipe with the new address. */
+	ehci_close_pipe(dev->default_pipe);
+	if (ehci_open(dev->default_pipe))
+		return (EINVAL);
+
+	return (0);
 }
 
 void
@@ -1172,10 +1207,8 @@ ehci_allocx(struct usbd_bus *bus)
 
 	ex = pool_get(ehcixfer, PR_NOWAIT | PR_ZERO);
 #ifdef DIAGNOSTIC
-	if (ex != NULL) {
+	if (ex != NULL)
 		ex->isdone = 1;
-		ex->xfer.busy_free = XFER_BUSY;
-	}
 #endif
 	return ((struct usbd_xfer *)ex);
 }
@@ -1186,11 +1219,6 @@ ehci_freex(struct usbd_bus *bus, struct usbd_xfer *xfer)
 	struct ehci_xfer *ex = (struct ehci_xfer*)xfer;
 
 #ifdef DIAGNOSTIC
-	if (xfer->busy_free != XFER_BUSY) {
-		printf("%s: xfer=%p not busy, 0x%08x\n", __func__, xfer,
-		    xfer->busy_free);
-		return;
-	}
 	if (!ex->isdone) {
 		printf("%s: !isdone\n", __func__);
 		return;
@@ -1373,7 +1401,7 @@ ehci_dump_itd(struct ehci_soft_itd *itd)
 
 	printf("ITD: next phys=%X\n", itd->itd.itd_next);
 
-	for (i = 0; i < 8;i++) {
+	for (i = 0; i < 8; i++) {
 		t = letoh32(itd->itd.itd_ctl[i]);
 		printf("ITDctl %d: stat=%X len=%X ioc=%X pg=%X offs=%X\n", i,
 		    EHCI_ITD_GET_STATUS(t), EHCI_ITD_GET_LEN(t),
@@ -3619,7 +3647,7 @@ ehci_device_isoc_start(struct usbd_xfer *xfer)
 		 * and what to not.
 		 */
 
-		for (j=0; j < 7; j++) {
+		for (j = 0; j < 7; j++) {
 			/*
 			 * Don't try to lookup a page that's past the end
 			 * of buffer

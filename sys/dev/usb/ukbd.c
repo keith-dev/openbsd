@@ -1,4 +1,4 @@
-/*	$OpenBSD: ukbd.c,v 1.67 2014/05/12 09:50:44 mpi Exp $	*/
+/*	$OpenBSD: ukbd.c,v 1.70 2015/01/19 20:16:10 miod Exp $	*/
 /*      $NetBSD: ukbd.c,v 1.85 2003/03/11 16:44:00 augustss Exp $        */
 
 /*
@@ -162,18 +162,13 @@ const struct wskbd_accessops ukbd_accessops = {
 int ukbd_match(struct device *, void *, void *); 
 void ukbd_attach(struct device *, struct device *, void *); 
 int ukbd_detach(struct device *, int); 
-int ukbd_activate(struct device *, int); 
 
 struct cfdriver ukbd_cd = { 
 	NULL, "ukbd", DV_DULL 
 }; 
 
-const struct cfattach ukbd_ca = { 
-	sizeof(struct ukbd_softc), 
-	ukbd_match, 
-	ukbd_attach, 
-	ukbd_detach, 
-	ukbd_activate, 
+const struct cfattach ukbd_ca = {
+	sizeof(struct ukbd_softc), ukbd_match, ukbd_attach, ukbd_detach
 };
 
 struct ukbd_translation {
@@ -185,6 +180,7 @@ struct ukbd_translation {
 void	ukbd_gdium_munge(void *, uint8_t *, u_int);
 #endif
 void	ukbd_apple_munge(void *, uint8_t *, u_int);
+void	ukbd_apple_mba_munge(void *, uint8_t *, u_int);
 void	ukbd_apple_iso_munge(void *, uint8_t *, u_int);
 uint8_t	ukbd_translate(const struct ukbd_translation *, size_t, uint8_t);
 
@@ -240,19 +236,29 @@ ukbd_attach(struct device *parent, struct device *self, void *aux)
 		return;
 
 	if (uha->uaa->vendor == USB_VENDOR_APPLE) {
-		int iso = 0;
-
-		if ((uha->uaa->product == USB_PRODUCT_APPLE_FOUNTAIN_ISO) ||
- 		    (uha->uaa->product == USB_PRODUCT_APPLE_GEYSER_ISO))
- 		    	iso = 1;
-
 		if (hid_locate(desc, dlen, HID_USAGE2(HUP_APPLE, HUG_FN_KEY),
 		    uha->reportid, hid_input, &sc->sc_apple_fn, &qflags)) {
 			if (qflags & HIO_VARIABLE) {
-				if (iso)
+				switch (uha->uaa->product) {
+				case USB_PRODUCT_APPLE_FOUNTAIN_ISO:
+				case USB_PRODUCT_APPLE_GEYSER_ISO:
 					sc->sc_munge = ukbd_apple_iso_munge;
-				else
+					break;
+				case USB_PRODUCT_APPLE_WELLSPRING4A_ANSI:
+				case USB_PRODUCT_APPLE_WELLSPRING4A_ISO:
+				case USB_PRODUCT_APPLE_WELLSPRING4A_JIS:
+				case USB_PRODUCT_APPLE_WELLSPRING4_ANSI:
+				case USB_PRODUCT_APPLE_WELLSPRING4_ISO:
+				case USB_PRODUCT_APPLE_WELLSPRING4_JIS:
+				case USB_PRODUCT_APPLE_WELLSPRING_ANSI:
+				case USB_PRODUCT_APPLE_WELLSPRING_ISO:
+				case USB_PRODUCT_APPLE_WELLSPRING_JIS:
+					sc->sc_munge = ukbd_apple_mba_munge;
+					break;
+				default:
 					sc->sc_munge = ukbd_apple_munge;
+					break;
+				}
 			}
 		}
 	}
@@ -305,22 +311,6 @@ ukbd_attach(struct device *parent, struct device *self, void *aux)
 	ukbd_set_leds(sc, 0);
 
 	hidkbd_attach_wskbd(kbd, layout, &ukbd_accessops);
-}
-
-int
-ukbd_activate(struct device *self, int act)
-{
-	struct ukbd_softc *sc = (struct ukbd_softc *)self;
-	struct hidkbd *kbd = &sc->sc_kbd;
-	int rv = 0;
-
-	switch (act) {
-	case DVACT_DEACTIVATE:
-		if (kbd->sc_wskbddev != NULL)
-			rv = config_deactivate(kbd->sc_wskbddev);
-		break;
-	}
-	return (rv);
 }
 
 int
@@ -384,8 +374,8 @@ ukbd_set_leds(void *v, int leds)
 		return;
 
 	if (sc->sc_ledsize && hidkbd_set_leds(kbd, leds, &res) != 0)
-		uhidev_set_report_async(&sc->sc_hdev, UHID_OUTPUT_REPORT,
-		    sc->sc_hdev.sc_report_id, &res, 1);
+		uhidev_set_report_async(sc->sc_hdev.sc_parent,
+		    UHID_OUTPUT_REPORT, sc->sc_hdev.sc_report_id, &res, 1);
 }
 
 int
@@ -499,6 +489,52 @@ ukbd_apple_munge(void *vsc, uint8_t *ibuf, u_int ilen)
 		{ 67, 127 },	/* F10 -> audio mute */
 		{ 68, 129 },	/* F11 -> audio lower */
 		{ 69, 128 },	/* F12 -> audio raise */
+#endif
+		{ 79, 77 },	/* right -> end */
+		{ 80, 74 },	/* left -> home */
+		{ 81, 78 },	/* down -> page down */
+		{ 82, 75 }	/* up -> page up */
+	};
+
+	if (!hid_get_data(ibuf, ilen, &sc->sc_apple_fn))
+		return;
+
+	spos = ibuf + kbd->sc_keycodeloc.pos / 8;
+	epos = spos + kbd->sc_nkeycode;
+
+	for (pos = spos; pos != epos; pos++) {
+		xlat = ukbd_translate(apple_fn_trans,
+		    nitems(apple_fn_trans), *pos);
+		if (xlat != 0)
+			*pos = xlat;
+	}
+}
+
+void
+ukbd_apple_mba_munge(void *vsc, uint8_t *ibuf, u_int ilen)
+{
+	struct ukbd_softc *sc = vsc;
+	struct hidkbd *kbd = &sc->sc_kbd;
+	uint8_t *pos, *spos, *epos, xlat;
+
+	static const struct ukbd_translation apple_fn_trans[] = {
+		{ 40, 73 },	/* return -> insert */
+		{ 42, 76 },	/* backspace -> delete */
+#ifdef notyet
+		{ 58, 0 },	/* F1 -> screen brightness down */
+		{ 59, 0 },	/* F2 -> screen brightness up */
+		{ 60, 0 },	/* F3 */
+		{ 61, 0 },	/* F4 */
+		{ 62, 0 },	/* F5 */
+		{ 63, 0 },	/* F6 -> audio back */
+		{ 64, 0 },	/* F7 -> audio pause/play */
+		{ 65, 0 },	/* F8 -> audio next */
+#endif
+		{ 66, 127 },	/* F9 -> audio mute */
+		{ 67, 129 },	/* F10 -> audio lower */
+		{ 68, 128 },	/* F11 -> audio raise */
+#ifdef notyet
+		{ 69, 0 },	/* F12 -> eject */
 #endif
 		{ 79, 77 },	/* right -> end */
 		{ 80, 74 },	/* left -> home */

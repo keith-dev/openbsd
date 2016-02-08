@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_otus.c,v 1.42 2014/07/13 15:52:49 mpi Exp $	*/
+/*	$OpenBSD: if_otus.c,v 1.45 2015/02/10 23:25:46 mpi Exp $	*/
 
 /*-
  * Copyright (c) 2009 Damien Bergamini <damien.bergamini@free.fr>
@@ -31,9 +31,9 @@
 #include <sys/timeout.h>
 #include <sys/conf.h>
 #include <sys/device.h>
+#include <sys/endian.h>
 
 #include <machine/bus.h>
-#include <machine/endian.h>
 #include <machine/intr.h>
 
 #if NBPFILTER > 0
@@ -1143,7 +1143,6 @@ otus_sub_rxeof(struct otus_softc *sc, uint8_t *buf, int len)
 		}
 	}
 	/* Finalize mbuf. */
-	m->m_pkthdr.rcvif = ifp;
 	m->m_data += align;
 	memcpy(mtod(m, caddr_t), wh, mlen);
 	m->m_pkthdr.len = m->m_len = mlen;
@@ -1491,10 +1490,8 @@ otus_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 	case SIOCSIFADDR:
 		ifa = (struct ifaddr *)data;
 		ifp->if_flags |= IFF_UP;
-#ifdef INET
 		if (ifa->ifa_addr->sa_family == AF_INET)
 			arp_ifinit(&ic->ic_ac, ifa);
-#endif
 		/* FALLTHROUGH */
 	case SIOCSIFFLAGS:
 		if (ifp->if_flags & IFF_UP) {

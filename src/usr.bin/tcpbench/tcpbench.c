@@ -25,7 +25,6 @@
 #include <net/route.h>
 
 #include <netinet/in.h>
-#include <netinet/in_systm.h>
 #include <netinet/ip.h>
 #include <netinet/tcp.h>
 #include <netinet/tcp_timer.h>
@@ -180,10 +179,10 @@ usage(void)
 {
 	fprintf(stderr,
 	    "usage: tcpbench -l\n"
-	    "       tcpbench [-uv] [-B buf] [-b addr] [-k kvars] [-n connections]\n"
+	    "       tcpbench [-46uv] [-B buf] [-b addr] [-k kvars] [-n connections]\n"
 	    "                [-p port] [-r interval] [-S space] [-T toskeyword]\n"
 	    "                [-t secs] [-V rtable] hostname\n"
-	    "       tcpbench -s [-uv] [-B buf] [-k kvars] [-p port]\n"
+	    "       tcpbench -s [-46uv] [-B buf] [-k kvars] [-p port]\n"
 	    "                [-r interval] [-S space] [-T toskeyword] [-V rtable]\n");
 	exit(1);
 }
@@ -447,8 +446,8 @@ check_prepare_kvars(char *list)
 
 	while ((item = strsep(&list, ", \t\n")) != NULL) {
 		check_kvar(item);
-		if ((ret = realloc(ret, sizeof(*ret) * (++n + 1))) == NULL)
-			errx(1, "realloc(kvars)");
+		if ((ret = reallocarray(ret, (++n + 1), sizeof(*ret))) == NULL)
+			errx(1, "reallocarray(kvars)");
 		if ((ret[n - 1] = strdup(item)) == NULL)
 			errx(1, "strdup");
 		ret[n] = NULL;
@@ -997,13 +996,14 @@ main(int argc, char **argv)
 	const char *errstr;
 	struct rlimit rl;
 	int ch, herr, nconn;
+	int family = PF_UNSPEC;
 	struct nlist nl[] = { { "_tcbtable" }, { "" } };
 	const char *host = NULL, *port = DEFAULT_PORT, *srcbind = NULL;
 	struct event ev_sigint, ev_sigterm, ev_sighup, ev_progtimer;
 	struct statctx *udp_sc = NULL;
 
 	/* Init world */
-	setlinebuf(stdout);
+	setvbuf(stdout, NULL, _IOLBF, 0);
 	ptb = &tcpbench;
 	ptb->dummybuf_len = 0;
 	ptb->Sflag = ptb->sflag = ptb->vflag = 0;
@@ -1015,8 +1015,14 @@ main(int argc, char **argv)
 	aib = NULL;
 	secs = 0;
 
-	while ((ch = getopt(argc, argv, "b:B:hlk:n:p:r:sS:t:T:uvV:")) != -1) {
+	while ((ch = getopt(argc, argv, "46b:B:hlk:n:p:r:sS:t:T:uvV:")) != -1) {
 		switch (ch) {
+		case '4':
+			family = PF_INET;
+			break;
+		case '6':
+			family = PF_INET6;
+			break;
 		case 'b':
 			srcbind = optarg;
 			break;
@@ -1108,6 +1114,17 @@ main(int argc, char **argv)
 	    (UDP_MODE && (ptb->kvars || nconn != 1)))
 		usage();
 
+	if (ptb->kvars) {
+		if ((ptb->kvmh = kvm_openfiles(NULL, NULL, NULL,
+		    O_RDONLY, kerr)) == NULL)
+			errx(1, "kvm_open: %s", kerr);
+		drop_gid();
+		if (kvm_nlist(ptb->kvmh, nl) < 0 || nl[0].n_type == 0)
+			errx(1, "kvm: no namelist");
+		ptb->ktcbtab = nl[0].n_value;
+	} else
+		drop_gid();
+
 	if (!ptb->sflag)
 		host = argv[0];
 	/*
@@ -1124,6 +1141,7 @@ main(int argc, char **argv)
 	}
 
 	bzero(&hints, sizeof(hints));
+	hints.ai_family = family;
 	if (UDP_MODE) {
 		hints.ai_socktype = SOCK_DGRAM;
 		hints.ai_protocol = IPPROTO_UDP;
@@ -1150,16 +1168,6 @@ main(int argc, char **argv)
 		else
 			errx(1, "getaddrinfo: %s", gai_strerror(herr));
 	}
-	if (ptb->kvars) {
-		if ((ptb->kvmh = kvm_openfiles(NULL, NULL, NULL,
-		    O_RDONLY, kerr)) == NULL)
-			errx(1, "kvm_open: %s", kerr);
-		drop_gid();
-		if (kvm_nlist(ptb->kvmh, nl) < 0 || nl[0].n_type == 0)
-			errx(1, "kvm: no namelist");
-		ptb->ktcbtab = nl[0].n_value;
-	} else
-		drop_gid();
 
 	if (getrlimit(RLIMIT_NOFILE, &rl) == -1)
 		err(1, "getrlimit");

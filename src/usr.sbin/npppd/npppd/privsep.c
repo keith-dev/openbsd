@@ -1,4 +1,4 @@
-/*	$OpenBSD: privsep.c,v 1.14 2014/07/18 13:16:22 yasuoka Exp $ */
+/*	$OpenBSD: privsep.c,v 1.16 2015/01/19 01:48:59 deraadt Exp $ */
 
 /*
  * Copyright (c) 2010 Yasuoka Masahiko <yasuoka@openbsd.org>
@@ -15,7 +15,6 @@
  * ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
-#include <sys/param.h>
 #include <sys/queue.h>
 #include <sys/uio.h>
 #include <sys/socket.h>
@@ -282,11 +281,16 @@ FILE *
 priv_fopen(const char *path)
 {
 	int f;
+	FILE *fp;
 
 	if ((f = priv_open(path, O_RDONLY, 0600)) < 0)
 		return (NULL);
 
-	return fdopen(f, "r");
+	if ((fp = fdopen(f, "r")) == NULL) {
+		close(f);
+		return (NULL);
+	} else
+		return (fp);
 }
 
 int

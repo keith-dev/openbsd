@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_ste.c,v 1.55 2014/07/22 13:12:11 mpi Exp $ */
+/*	$OpenBSD: if_ste.c,v 1.57 2014/12/22 02:28:52 tedu Exp $ */
 /*
  * Copyright (c) 1997, 1998, 1999
  *	Bill Paul <wpaul@ctr.columbia.edu>.  All rights reserved.
@@ -50,10 +50,8 @@
 #include <net/if_dl.h>
 #include <net/if_types.h>
 
-#ifdef INET
 #include <netinet/in.h>
 #include <netinet/if_ether.h>
-#endif
 
 #include <net/if_media.h>
 
@@ -589,10 +587,8 @@ ste_intr(void *xsc)
 		if (status & STE_ISR_LINKEVENT)
 			mii_pollstat(&sc->sc_mii);
 
-		if (status & STE_ISR_HOSTERR) {
-			ste_reset(sc);
+		if (status & STE_ISR_HOSTERR)
 			ste_init(sc);
-		}
 	}
 
 	/* Re-enable interrupts */
@@ -724,7 +720,6 @@ ste_txeoc(struct ste_softc *sc)
 			printf("%s: transmission error: %x\n",
 			    sc->sc_dev.dv_xname, txstat);
 
-			ste_reset(sc);
 			ste_init(sc);
 
 			if (txstat & STE_TXSTATUS_UNDERRUN &&
@@ -1049,6 +1044,8 @@ ste_init(void *xsc)
 	s = splnet();
 
 	ste_stop(sc);
+	/* Reset the chip to a known state. */
+	ste_reset(sc);
 
 	mii = &sc->sc_mii;
 
@@ -1215,10 +1212,8 @@ ste_ioctl(struct ifnet *ifp, u_long command, caddr_t data)
 		ifp->if_flags |= IFF_UP;
 		if (!(ifp->if_flags & IFF_RUNNING))
 			ste_init(sc);
-#ifdef INET
 		if (ifa->ifa_addr->sa_family == AF_INET)
 			arp_ifinit(&sc->arpcom, ifa);
-#endif
 		break;
 
 	case SIOCSIFFLAGS:
@@ -1405,7 +1400,6 @@ ste_watchdog(struct ifnet *ifp)
 	ste_txeof(sc);
 	ste_rxeoc(sc);
 	ste_rxeof(sc);
-	ste_reset(sc);
 	ste_init(sc);
 
 	if (!IFQ_IS_EMPTY(&ifp->if_snd))

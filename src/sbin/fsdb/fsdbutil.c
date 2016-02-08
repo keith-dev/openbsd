@@ -1,4 +1,4 @@
-/*	$OpenBSD: fsdbutil.c,v 1.15 2013/04/24 13:46:29 deraadt Exp $	*/
+/*	$OpenBSD: fsdbutil.c,v 1.17 2015/01/20 18:22:21 deraadt Exp $	*/
 /*	$NetBSD: fsdbutil.c,v 1.5 1996/09/28 19:30:37 christos Exp $	*/
 
 /*-
@@ -30,9 +30,7 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include <sys/types.h>
 #include <sys/stat.h>
-#include <sys/param.h>
 #include <sys/time.h>
 #include <sys/mount.h>
 #include <ctype.h>

@@ -1,4 +1,4 @@
-/*	$OpenBSD: sha2.c,v 1.18 2014/07/20 04:22:34 guenther Exp $	*/
+/*	$OpenBSD: sha2.c,v 1.23 2015/01/15 13:05:59 millert Exp $	*/
 
 /*
  * FILE:	sha2.c
@@ -52,6 +52,11 @@
  *   #define SHA2_UNROLL_TRANSFORM
  *
  */
+#ifndef SHA2_SMALL
+#if defined(__amd64__) || defined(__i386__)
+#define SHA2_UNROLL_TRANSFORM
+#endif
+#endif
 
 /*** SHA-224/256/384/512 Machine Architecture Definitions *****************/
 /*
@@ -311,7 +316,7 @@ SHA224Final(u_int8_t digest[SHA224_DIGEST_LENGTH], SHA2_CTX *context)
 #else
 	memcpy(digest, context->state.st32, SHA224_DIGEST_LENGTH);
 #endif
-	memset(context, 0, sizeof(*context));
+	explicit_bzero(context, sizeof(*context));
 }
 #endif /* !defined(SHA2_SMALL) */
 
@@ -586,7 +591,7 @@ SHA256Final(u_int8_t digest[SHA256_DIGEST_LENGTH], SHA2_CTX *context)
 #else
 	memcpy(digest, context->state.st32, SHA256_DIGEST_LENGTH);
 #endif
-	memset(context, 0, sizeof(*context));
+	explicit_bzero(context, sizeof(*context));
 }
 
 
@@ -862,7 +867,7 @@ SHA512Final(u_int8_t digest[SHA512_DIGEST_LENGTH], SHA2_CTX *context)
 #else
 	memcpy(digest, context->state.st64, SHA512_DIGEST_LENGTH);
 #endif
-	memset(context, 0, sizeof(*context));
+	explicit_bzero(context, sizeof(*context));
 }
 
 #if !defined(SHA2_SMALL)
@@ -896,6 +901,6 @@ SHA384Final(u_int8_t digest[SHA384_DIGEST_LENGTH], SHA2_CTX *context)
 	memcpy(digest, context->state.st64, SHA384_DIGEST_LENGTH);
 #endif
 	/* Zero out state data */
-	memset(context, 0, sizeof(*context));
+	explicit_bzero(context, sizeof(*context));
 }
 #endif /* !defined(SHA2_SMALL) */

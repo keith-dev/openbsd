@@ -1,4 +1,4 @@
-.\"	$OpenBSD: spamd.8,v 1.119 2012/09/27 20:12:32 jmc Exp $
+.\"	$OpenBSD: spamd.8,v 1.126 2015/02/15 22:27:51 bentley Exp $
 .\"
 .\" Copyright (c) 2002 Theo de Raadt.  All rights reserved.
 .\"
@@ -22,7 +22,7 @@
 .\" (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
 .\" THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 .\"
-.Dd $Mdocdate: September 27 2012 $
+.Dd $Mdocdate: February 15 2015 $
 .Dt SPAMD 8
 .Os
 .Sh NAME
@@ -33,12 +33,11 @@
 .Bk -words
 .Op Fl 45bdv
 .Op Fl B Ar maxblack
+.Op Fl C Ar file
 .Op Fl c Ar maxcon
-.Oo
-.Fl G
-.Ar passtime : Ns Ar greyexp : Ns Ar whiteexp
-.Oc
+.Op Fl G Ar passtime : Ns Ar greyexp : Ns Ar whiteexp
 .Op Fl h Ar hostname
+.Op Fl K Ar file
 .Op Fl l Ar address
 .Op Fl M Ar address
 .Op Fl n Ar name
@@ -51,9 +50,7 @@
 .Ek
 .Sh DESCRIPTION
 .Nm
-is a fake
-.Xr sendmail 8 Ns -like
-daemon which rejects false mail.
+is a fake mail daemon which rejects false mail.
 It is designed to be very efficient so that it does not slow down the
 receiving machine.
 .Pp
@@ -75,7 +72,7 @@ hosts do not talk to
 .Nm .
 Their connections are instead sent to a real mail server,
 such as
-.Xr sendmail 8 .
+.Xr smtpd 8 .
 .Pp
 .Em greylisted
 hosts are redirected to
@@ -132,6 +129,9 @@ When this value is exceeded new blacklisted connections will not be stuttered
 at.
 .It Fl b
 Run in blacklist-only mode.
+.It Fl C Ar file
+Load the certificate for TLS from the given
+.Ar file .
 .It Fl c Ar maxcon
 The maximum number of concurrent connections to allow.
 .Ar maxcon
@@ -158,6 +158,9 @@ and
 to 864 (hours, approximately 36 days).
 .It Fl h Ar hostname
 The hostname that is reported in the SMTP banner.
+.It Fl K Ar file
+Load the private key for TLS from the given
+.Ar file .
 .It Fl l Ar address
 Specify the local address to which
 .Nm
@@ -223,12 +226,7 @@ below.
 .It Fl y Ar synclisten
 Listen on
 .Ar synclisten
-for incoming synchronisation messages.
-The format for
-.Ar synclisten
-is the same as for
-.Ar synctarget ,
-above.
+network interface for incoming synchronisation messages.
 This option can be specified only once.
 See also
 .Sx SYNCHRONISATION
@@ -270,11 +268,11 @@ regularly scans the
 .Pa /var/db/spamd
 database and configures all whitelist addresses as the
 .Xr pf 4
-.Aq spamd-white
+<spamd-white>
 table,
 allowing connections to pass to the real MTA.
 Any addresses not found in
-.Aq spamd-white
+<spamd-white>
 are redirected to
 .Nm .
 .Pp
@@ -356,7 +354,7 @@ The following
 section can be used to log connection details to a dedicated file:
 .Bd -literal -offset indent
 !spamd
-daemon.err;daemon.warn;daemon.info	/var/log/spamd
+daemon.info	/var/log/spamd
 .Ed
 .Pp
 A typical entry shows the time of the connection and
@@ -387,7 +385,7 @@ spamtrap address,
 it is blacklisted for 24 hours by adding the host to the
 .Nm
 blacklist
-.Aq spamd-greytrap .
+<spamd-greytrap>.
 Spamtrap addresses are added to the
 .Pa /var/db/spamd
 database with the following
@@ -470,7 +468,7 @@ a slightly modified
 .Xr pf.conf 5
 ruleset is required,
 redirecting any addresses found in the
-.Aq spamd
+<spamd>
 table to
 .Nm .
 Any other addresses
@@ -490,7 +488,7 @@ like:
 .Pp
 .Xr spamd-setup 8
 can also be used to load addresses into the
-.Aq spamd
+<spamd>
 table.
 It has the added benefit of being able to remove addresses from
 blacklists, and will connect to
@@ -563,11 +561,11 @@ add the unicast targets
 .Ar foo.somewhere.org
 and
 .Ar bar.somewhere.org ,
-and accept incoming unicast messages sent to
-.Ar example.somewhere.org
+and accept incoming unicast messages received on
+.Ar bge0
 only.
 .Bd -literal -offset indent
-# /usr/libexec/spamd -y example.somewhere.org -Y em0:2 \e
+# /usr/libexec/spamd -y bge0 -Y em0:2 \e
 	-Y foo.somewhere.org -Y bar.somewhere.org
 .Ed
 .Pp
@@ -580,7 +578,7 @@ and use it as a shared key to authenticate the synchronisation messages.
 The file itself can contain any data.
 For example, to create a secure random key:
 .Bd -literal -offset indent
-# dd if=/dev/arandom of=/etc/mail/spamd.key bs=2048 count=1
+# dd if=/dev/random of=/etc/mail/spamd.key bs=2048 count=1
 .Ed
 .Pp
 The file needs to be copied to all hosts

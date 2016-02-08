@@ -1,4 +1,4 @@
-/*	$OpenBSD: sti.c,v 1.72 2014/07/12 18:48:17 tedu Exp $	*/
+/*	$OpenBSD: sti.c,v 1.74 2014/11/16 12:31:00 deraadt Exp $	*/
 
 /*
  * Copyright (c) 2000-2003 Michael Shalayeff
@@ -312,7 +312,7 @@ sti_rom_setup(struct sti_rom *rom, bus_space_tag_t iot, bus_space_tag_t memt,
 		return (ENOMEM);
 	}
 #ifdef STIDEBUG
-	printf("code=0x%x[%x]\n", rom->rom_code, size);
+	printf("code=0x%lx[%x]\n", rom->rom_code, size);
 #endif
 
 	/*
@@ -337,7 +337,7 @@ sti_rom_setup(struct sti_rom *rom, bus_space_tag_t iot, bus_space_tag_t memt,
 	STI_DISABLE_ROM(rom->rom_softc);
 
 	if ((error = uvm_map_protect(kernel_map, rom->rom_code,
-	    rom->rom_code + round_page(size), UVM_PROT_RX, FALSE))) {
+	    rom->rom_code + round_page(size), PROT_READ | PROT_EXEC, FALSE))) {
 		printf(": uvm_map_protect failed (%d)\n", error);
 		uvm_km_free(kernel_map, rom->rom_code, round_page(size));
 		return (error);
@@ -397,7 +397,7 @@ sti_region_setup(struct sti_screen *scr)
 	bus_addr_t addr;
 
 #ifdef STIDEBUG
-	printf("stiregions @%p:\n", dd->dd_reglst);
+	printf("stiregions @%p:\n", (void *)dd->dd_reglst);
 #endif
 
 	/*
@@ -440,7 +440,7 @@ sti_region_setup(struct sti_screen *scr)
 		addr = bases[regno] + (r->offset << PGSHIFT);
 
 #ifdef STIDEBUG
-		printf("%08x @ 0x%08x%s%s%s%s\n",
+		printf("%08x @ 0x%08lx%s%s%s%s\n",
 		    r->length << PGSHIFT, addr, r->sys_only ? " sys" : "",
 		    r->cache ? " cache" : "", r->btlb ? " btlb" : "",
 		    r->last ? " last" : "");
@@ -774,8 +774,8 @@ rescan:
 #ifdef STIDEBUG
 		STI_DISABLE_ROM(rom->rom_softc);
 		printf("font@%p: %d-%d, %dx%d, type %d, next %x\n",
-		    addr, fp->first, fp->last, fp->width, fp->height, fp->type,
-		    fp->next);
+		    (void *)addr, fp->first, fp->last, fp->width, fp->height,
+		    fp->type, fp->next);
 		STI_ENABLE_ROM(rom->rom_softc);
 #endif
 

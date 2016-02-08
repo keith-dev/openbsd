@@ -1,4 +1,4 @@
-/*	$OpenBSD: sys_generic.c,v 1.92 2014/07/13 15:48:41 tedu Exp $	*/
+/*	$OpenBSD: sys_generic.c,v 1.96 2015/02/12 22:27:04 millert Exp $	*/
 /*	$NetBSD: sys_generic.c,v 1.24 1996/03/29 00:25:32 cgd Exp $	*/
 
 /*
@@ -195,7 +195,7 @@ dofilereadv(struct proc *p, int fd, struct file *fp, const struct iovec *iovp,
 	 */
 	if (KTRPOINT(p, KTR_GENIO)) {
 		ktriov = malloc(iovlen, M_TEMP, M_WAITOK);
-		bcopy(auio.uio_iov, ktriov, iovlen);
+		memcpy(ktriov, auio.uio_iov, iovlen);
 	}
 #endif
 	cnt = auio.uio_resid;
@@ -212,13 +212,13 @@ dofilereadv(struct proc *p, int fd, struct file *fp, const struct iovec *iovp,
 	if (ktriov != NULL) {
 		if (error == 0)
 			ktrgenio(p, fd, UIO_READ, ktriov, cnt);
-		free(ktriov, M_TEMP, 0);
+		free(ktriov, M_TEMP, iovlen);
 	}
 #endif
 	*retval = cnt;
  done:
 	if (needfree)
-		free(needfree, M_IOV, 0);
+		free(needfree, M_IOV, iovlen);
  out:
 	FRELE(fp, p);
 	return (error);
@@ -348,7 +348,7 @@ dofilewritev(struct proc *p, int fd, struct file *fp, const struct iovec *iovp,
 	 */
 	if (KTRPOINT(p, KTR_GENIO)) {
 		ktriov = malloc(iovlen, M_TEMP, M_WAITOK);
-		bcopy(auio.uio_iov, ktriov, iovlen);
+		memcpy(ktriov, auio.uio_iov, iovlen);
 	}
 #endif
 	cnt = auio.uio_resid;
@@ -368,13 +368,13 @@ dofilewritev(struct proc *p, int fd, struct file *fp, const struct iovec *iovp,
 	if (ktriov != NULL) {
 		if (error == 0)
 			ktrgenio(p, fd, UIO_WRITE, ktriov, cnt);
-		free(ktriov, M_TEMP, 0);
+		free(ktriov, M_TEMP, iovlen);
 	}
 #endif
 	*retval = cnt;
  done:
 	if (needfree)
-		free(needfree, M_IOV, 0);
+		free(needfree, M_IOV, iovlen);
  out:
 	FRELE(fp, p);
 	return (error);
@@ -518,7 +518,7 @@ sys_ioctl(struct proc *p, void *v, register_t *retval)
 out:
 	FRELE(fp, p);
 	if (memp)
-		free(memp, M_IOCTLOPS, 0);
+		free(memp, M_IOCTLOPS, size);
 	return (error);
 }
 
@@ -711,7 +711,7 @@ done:
 	}
 
 	if (pibits[0] != (fd_set *)&bits[0])
-		free(pibits[0], M_TEMP, 0);
+		free(pibits[0], M_TEMP, 6 * ni);
 	return (error);
 }
 
@@ -935,17 +935,20 @@ doppoll(struct proc *p, struct pollfd *fds, u_int nfds,
 	struct pollfd pfds[4], *pl = pfds;
 	struct timespec ats, rts, tts;
 	int timo, ncoll, i, s, error;
-	extern int nselcoll, selwait;
 
 	/* Standards say no more than MAX_OPEN; this is possibly better. */
 	if (nfds > min((int)p->p_rlimit[RLIMIT_NOFILE].rlim_cur, maxfiles))
 		return (EINVAL);
 
-	sz = sizeof(struct pollfd) * nfds;
-
 	/* optimize for the default case, of a small nfds value */
-	if (sz > sizeof(pfds))
-		pl = malloc(sz, M_TEMP, M_WAITOK);
+	if (nfds > nitems(pfds)) {
+		pl = mallocarray(nfds, sizeof(*pl), M_TEMP,
+		    M_WAITOK | M_CANFAIL);
+		if (pl == NULL)
+			return (EINVAL);
+	}
+
+	sz = nfds * sizeof(*pl);
 
 	if ((error = copyin(fds, pl, sz)) != 0)
 		goto bad;
@@ -1009,7 +1012,7 @@ done:
 	}
 bad:
 	if (pl != pfds)
-		free(pl, M_TEMP, 0);
+		free(pl, M_TEMP, sz);
 	return (error);
 }
 

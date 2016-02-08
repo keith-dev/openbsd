@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_atw_pci.c,v 1.15 2012/10/18 21:44:21 deraadt Exp $	*/
+/*	$OpenBSD: if_atw_pci.c,v 1.17 2014/12/22 02:28:51 tedu Exp $	*/
 /*	$NetBSD: if_atw_pci.c,v 1.7 2004/07/23 07:07:55 dyoung Exp $	*/
 
 /*-
@@ -46,16 +46,13 @@
 #include <sys/ioctl.h>
 #include <sys/errno.h>
 #include <sys/device.h>
-
-#include <machine/endian.h>
+#include <sys/endian.h>
  
 #include <net/if.h>
 #include <net/if_dl.h>
 #include <net/if_media.h>
-#ifdef INET
 #include <netinet/in.h>
 #include <netinet/if_ether.h>
-#endif
 
 #include <net80211/ieee80211_radiotap.h>
 #include <net80211/ieee80211_var.h>

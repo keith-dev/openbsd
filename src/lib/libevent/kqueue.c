@@ -1,4 +1,4 @@
-/*	$OpenBSD: kqueue.c,v 1.28 2012/02/08 09:01:00 nicm Exp $	*/
+/*	$OpenBSD: kqueue.c,v 1.36 2014/10/30 16:45:37 bluhm Exp $	*/
 
 /*
  * Copyright 2000-2002 Niels Provos <provos@citi.umich.edu>
@@ -26,20 +26,12 @@
  * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
-#ifdef HAVE_CONFIG_H
-#include "config.h"
-#endif
-
-#define _GNU_SOURCE 1
 
 #include <sys/types.h>
-#ifdef HAVE_SYS_TIME_H
 #include <sys/time.h>
-#else
-#include <sys/_libevent_time.h>
-#endif
 #include <sys/queue.h>
 #include <sys/event.h>
+
 #include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -47,18 +39,7 @@
 #include <unistd.h>
 #include <errno.h>
 #include <assert.h>
-#ifdef HAVE_INTTYPES_H
 #include <inttypes.h>
-#endif
-
-/* Some platforms apparently define the udata field of struct kevent as
- * intptr_t, whereas others define it as void*.  There doesn't seem to be an
- * easy way to tell them apart via autoconf, so we need to use OS macros. */
-#if defined(HAVE_INTTYPES_H) && !defined(__OpenBSD__) && !defined(__FreeBSD__) && !defined(__darwin__) && !defined(__APPLE__)
-#define PTR_TO_UDATA(x)	((intptr_t)(x))
-#else
-#define PTR_TO_UDATA(x)	(x)
-#endif
 
 #include "event.h"
 #include "event-internal.h"
@@ -103,14 +84,14 @@ kq_init(struct event_base *base)
 	struct kqop *kqueueop;
 
 	/* Disable kqueue when this environment variable is set */
-	if (evutil_getenv("EVENT_NOKQUEUE"))
+	if (!issetugid() && getenv("EVENT_NOKQUEUE"))
 		return (NULL);
 
 	if (!(kqueueop = calloc(1, sizeof(struct kqop))))
 		return (NULL);
 
 	/* Initalize the kernel queue */
-	
+
 	if ((kq = kqueue()) == -1) {
 		event_warn("kqueue");
 		free (kqueueop);
@@ -140,27 +121,6 @@ kq_init(struct event_base *base)
 		TAILQ_INIT(&kqueueop->evsigevents[i]);
 	}
 
-	/* Check for Mac OS X kqueue bug. */
-	kqueueop->changes[0].ident = -1;
-	kqueueop->changes[0].filter = EVFILT_READ;
-	kqueueop->changes[0].flags = EV_ADD;
-	/* 
-	 * If kqueue works, then kevent will succeed, and it will
-	 * stick an error in events[0].  If kqueue is broken, then
-	 * kevent will fail.
-	 */
-	if (kevent(kq,
-		kqueueop->changes, 1, kqueueop->events, NEVENT, NULL) != 1 ||
-	    kqueueop->events[0].ident != -1 ||
-	    kqueueop->events[0].flags != EV_ERROR) {
-		event_warn("%s: detected broken kqueue; not using.", __func__);
-		free(kqueueop->changes);
-		free(kqueueop->events);
-		free(kqueueop);
-		close(kq);
-		return (NULL);
-	}
-
 	return (kqueueop);
 }
 
@@ -175,16 +135,16 @@ kq_insert(struct kqop *kqop, struct kevent *kev)
 
 		nevents *= 2;
 
-		newchange = realloc(kqop->changes,
-				    nevents * sizeof(struct kevent));
+		newchange = reallocarray(kqop->changes,
+		    nevents, sizeof(struct kevent));
 		if (newchange == NULL) {
 			event_warn("%s: malloc", __func__);
 			return (-1);
 		}
 		kqop->changes = newchange;
 
-		newresult = realloc(kqop->events,
-				    nevents * sizeof(struct kevent));
+		newresult = reallocarray(kqop->events,
+		    nevents, sizeof(struct kevent));
 
 		/*
 		 * If we fail, we don't have to worry about freeing,
@@ -202,7 +162,7 @@ kq_insert(struct kqop *kqop, struct kevent *kev)
 	memcpy(&kqop->changes[kqop->nchanges++], kev, sizeof(struct kevent));
 
 	event_debug(("%s: fd %d %s%s",
-		__func__, (int)kev->ident, 
+		__func__, (int)kev->ident,
 		kev->filter == EVFILT_READ ? "EVFILT_READ" : "EVFILT_WRITE",
 		kev->flags == EV_DELETE ? " (del)" : ""));
 
@@ -235,7 +195,7 @@ kq_dispatch(struct event_base *base, void *arg, struct timeval *tv)
 	kqop->nchanges = 0;
 	if (res == -1) {
 		if (errno != EINTR) {
-                        event_warn("kevent");
+			event_warn("kevent");
 			return (-1);
 		}
 
@@ -331,13 +291,13 @@ kq_add(void *arg, struct event *ev)
 		assert(nsignal >= 0 && nsignal < NSIG);
 		if (TAILQ_EMPTY(&kqop->evsigevents[nsignal])) {
 			struct timespec timeout = { 0, 0 };
-			
+
 			memset(&kev, 0, sizeof(kev));
 			kev.ident = nsignal;
 			kev.filter = EVFILT_SIGNAL;
 			kev.flags = EV_ADD;
-			kev.udata = PTR_TO_UDATA(&kqop->evsigevents[nsignal]);
-			
+			kev.udata = &kqop->evsigevents[nsignal];
+
 			/* Be ready for the signal if it is sent any
 			 * time between now and the next call to
 			 * kq_dispatch. */
@@ -356,18 +316,16 @@ kq_add(void *arg, struct event *ev)
 	}
 
 	if (ev->ev_events & EV_READ) {
- 		memset(&kev, 0, sizeof(kev));
+		memset(&kev, 0, sizeof(kev));
 		kev.ident = ev->ev_fd;
 		kev.filter = EVFILT_READ;
-#ifdef NOTE_EOF
 		/* Make it behave like select() and poll() */
 		kev.fflags = NOTE_EOF;
-#endif
 		kev.flags = EV_ADD;
 		if (!(ev->ev_events & EV_PERSIST))
 			kev.flags |= EV_ONESHOT;
-		kev.udata = PTR_TO_UDATA(ev);
-		
+		kev.udata = ev;
+
 		if (kq_insert(kqop, &kev) == -1)
 			return (-1);
 
@@ -375,14 +333,14 @@ kq_add(void *arg, struct event *ev)
 	}
 
 	if (ev->ev_events & EV_WRITE) {
- 		memset(&kev, 0, sizeof(kev));
+		memset(&kev, 0, sizeof(kev));
 		kev.ident = ev->ev_fd;
 		kev.filter = EVFILT_WRITE;
 		kev.flags = EV_ADD;
 		if (!(ev->ev_events & EV_PERSIST))
 			kev.flags |= EV_ONESHOT;
-		kev.udata = PTR_TO_UDATA(ev);
-		
+		kev.udata = ev;
+
 		if (kq_insert(kqop, &kev) == -1)
 			return (-1);
 
@@ -412,7 +370,7 @@ kq_del(void *arg, struct event *ev)
 			kev.ident = nsignal;
 			kev.filter = EVFILT_SIGNAL;
 			kev.flags = EV_DELETE;
-		
+
 			/* Because we insert signal events
 			 * immediately, we need to delete them
 			 * immediately, too */
@@ -429,11 +387,11 @@ kq_del(void *arg, struct event *ev)
 	}
 
 	if (ev->ev_events & EV_READ) {
- 		memset(&kev, 0, sizeof(kev));
+		memset(&kev, 0, sizeof(kev));
 		kev.ident = ev->ev_fd;
 		kev.filter = EVFILT_READ;
 		kev.flags = EV_DELETE;
-		
+
 		if (kq_insert(kqop, &kev) == -1)
 			return (-1);
 
@@ -441,11 +399,11 @@ kq_del(void *arg, struct event *ev)
 	}
 
 	if (ev->ev_events & EV_WRITE) {
- 		memset(&kev, 0, sizeof(kev));
+		memset(&kev, 0, sizeof(kev));
 		kev.ident = ev->ev_fd;
 		kev.filter = EVFILT_WRITE;
 		kev.flags = EV_DELETE;
-		
+
 		if (kq_insert(kqop, &kev) == -1)
 			return (-1);
 

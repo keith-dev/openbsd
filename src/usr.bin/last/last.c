@@ -1,4 +1,4 @@
-/*	$OpenBSD: last.c,v 1.42 2014/04/22 12:36:36 okan Exp $	*/
+/*	$OpenBSD: last.c,v 1.46 2015/02/08 23:40:34 deraadt Exp $	*/
 /*	$NetBSD: last.c,v 1.6 1994/12/24 16:49:02 cgd Exp $	*/
 
 /*
@@ -30,7 +30,6 @@
  * SUCH DAMAGE.
  */
 
-#include <sys/param.h>
 #include <sys/stat.h>
 
 #include <ctype.h>
@@ -45,6 +44,7 @@
 #include <time.h>
 #include <tzfile.h>
 #include <unistd.h>
+#include <limits.h>
 #include <utmp.h>
 
 #define	NO	0				/* false/no */
@@ -112,7 +112,7 @@ main(int argc, char *argv[])
 			maxrec = (maxrec * 10) + (ch - '0');
 			break;
 		case 'c':
-			calculate++;
+			calculate = 1;
 			break;
 		case 'f':
 			file = optarg;
@@ -130,7 +130,7 @@ main(int argc, char *argv[])
 				exit(0);
 			break;
 		case 's':
-			seconds++;
+			seconds = 1;
 			break;
 		case 't':
 			addarg(TTY_TYPE, ttyconv(optarg));
@@ -152,7 +152,7 @@ main(int argc, char *argv[])
 		exit(0);
 
 	if (argc) {
-		setlinebuf(stdout);
+		setvbuf(stdout, NULL, _IOLBF, 0);
 		for (argv += optind; *argv; ++argv) {
 #define	COMPATIBILITY
 #ifdef	COMPATIBILITY
@@ -241,7 +241,7 @@ wtmp(void)
 {
 	time_t	delta, total = 0;
 	int	timesize, wfd, snapfound = 0;
-	char	*ct, *crmsg;
+	char	*ct, *crmsg = "invalid";
 	struct utmp	*bp;
 	struct stat	stb;
 	ssize_t	bytes;
@@ -494,7 +494,7 @@ addtty(char *ttyname)
 void
 hostconv(char *arg)
 {
-	static char *hostdot, name[MAXHOSTNAMELEN];
+	static char *hostdot, name[HOST_NAME_MAX+1];
 	static int first = 1;
 	char *argdot;
 

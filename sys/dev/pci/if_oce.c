@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_oce.c,v 1.77 2014/07/22 13:12:11 mpi Exp $	*/
+/*	$OpenBSD: if_oce.c,v 1.81 2014/12/22 02:28:52 tedu Exp $	*/
 
 /*
  * Copyright (c) 2012 Mike Belopuhov
@@ -73,10 +73,8 @@
 #include <net/if_dl.h>
 #include <net/if_media.h>
 
-#ifdef INET
 #include <netinet/in.h>
 #include <netinet/if_ether.h>
-#endif
 
 #ifdef INET6
 #include <netinet/ip6.h>
@@ -376,6 +374,7 @@ int 	oce_pci_alloc(struct oce_softc *, struct pci_attach_args *);
 void	oce_attachhook(void *);
 void	oce_attach_ifp(struct oce_softc *);
 int 	oce_ioctl(struct ifnet *, u_long, caddr_t);
+int	oce_rxrinfo(struct oce_softc *, struct if_rxrinfo *);
 void	oce_iff(struct oce_softc *);
 void	oce_link_status(struct oce_softc *);
 void	oce_media_status(struct ifnet *, struct ifmediareq *);
@@ -862,10 +861,8 @@ oce_ioctl(struct ifnet *ifp, u_long command, caddr_t data)
 		ifp->if_flags |= IFF_UP;
 		if (!(ifp->if_flags & IFF_RUNNING))
 			oce_init(sc);
-#ifdef INET
 		if (ifa->ifa_addr->sa_family == AF_INET)
 			arp_ifinit(&sc->sc_ac, ifa);
-#endif
 		break;
 	case SIOCSIFFLAGS:
 		if (ifp->if_flags & IFF_UP) {
@@ -878,17 +875,12 @@ oce_ioctl(struct ifnet *ifp, u_long command, caddr_t data)
 				oce_stop(sc);
 		}
 		break;
-	case SIOCSIFMTU:
-		if (ifr->ifr_mtu < OCE_MIN_MTU || ifr->ifr_mtu > OCE_MAX_MTU)
-			error = EINVAL;
-		else if (ifp->if_mtu != ifr->ifr_mtu) {
-			ifp->if_mtu = ifr->ifr_mtu;
-			oce_init(sc);
-		}
-		break;
 	case SIOCGIFMEDIA:
 	case SIOCSIFMEDIA:
 		error = ifmedia_ioctl(ifp, ifr, &sc->sc_media, command);
+		break;
+	case SIOCGIFRXR:
+		error = oce_rxrinfo(sc, (struct if_rxrinfo *)ifr->ifr_data);
 		break;
 	default:
 		error = ether_ioctl(ifp, &sc->sc_ac, command, data);
@@ -905,6 +897,36 @@ oce_ioctl(struct ifnet *ifp, u_long command, caddr_t data)
 
 	return (error);
 }
+
+int
+oce_rxrinfo(struct oce_softc *sc, struct if_rxrinfo *ifri)
+{
+	struct if_rxring_info *ifr, ifr1;
+	struct oce_rq *rq;
+	int error, i;
+	u_int n = 0;
+
+	if (sc->sc_nrq > 1) {
+		if ((ifr = mallocarray(sc->sc_nrq, sizeof(*ifr), M_DEVBUF,
+		    M_WAITOK | M_ZERO)) == NULL)
+			return (ENOMEM);
+	} else
+		ifr = &ifr1;
+
+	OCE_RQ_FOREACH(sc, rq, i) {
+		ifr[n].ifr_size = MCLBYTES;
+		snprintf(ifr[n].ifr_name, sizeof(ifr[n].ifr_name), "/%d", i);
+		ifr[n].ifr_info = rq->rxring;
+		n++;
+	}
+
+	error = if_rxr_info_ioctl(ifri, sc->sc_nrq, ifr);
+
+	if (sc->sc_nrq > 1)
+		free(ifr, M_DEVBUF, sc->sc_nrq * sizeof(*ifr));
+	return (error);
+}
+
 
 void
 oce_iff(struct oce_softc *sc)
@@ -1050,7 +1072,7 @@ oce_init(void *arg)
 		goto error;
 
 	OCE_RQ_FOREACH(sc, rq, i) {
-		rq->mtu = ifp->if_mtu + ETHER_HDR_LEN + ETHER_CRC_LEN +
+		rq->mtu = ifp->if_hardmtu + ETHER_HDR_LEN + ETHER_CRC_LEN +
 		    ETHER_VLAN_ENCAP_LEN;
 		if (oce_new_rq(sc, rq)) {
 			printf("%s: failed to create rq\n",
@@ -1312,9 +1334,7 @@ struct mbuf *
 oce_tso(struct oce_softc *sc, struct mbuf **mpp)
 {
 	struct mbuf *m;
-#ifdef INET
 	struct ip *ip;
-#endif
 #ifdef INET6
 	struct ip6_hdr *ip6;
 #endif
@@ -1343,7 +1363,6 @@ oce_tso(struct oce_softc *sc, struct mbuf **mpp)
 	}
 
 	switch (etype) {
-#ifdef INET
 	case ETHERTYPE_IP:
 		ip = (struct ip *)(m->m_data + ehdrlen);
 		if (ip->ip_p != IPPROTO_TCP)
@@ -1352,7 +1371,6 @@ oce_tso(struct oce_softc *sc, struct mbuf **mpp)
 
 		total_len = ehdrlen + (ip->ip_hl << 2) + (th->th_off << 2);
 		break;
-#endif
 #ifdef INET6
 	case ETHERTYPE_IPV6:
 		ip6 = (struct ip6_hdr *)(m->m_data + ehdrlen);

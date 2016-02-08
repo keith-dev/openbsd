@@ -1,4 +1,4 @@
-/*	$OpenBSD: print-ospf.c,v 1.17 2014/07/04 08:42:38 bluhm Exp $	*/
+/*	$OpenBSD: print-ospf.c,v 1.19 2015/01/16 06:40:21 deraadt Exp $	*/
 
 /*
  * Copyright (c) 1992, 1993, 1994, 1995, 1996, 1997
@@ -23,12 +23,10 @@
  * OSPF support contributed by Jeffrey Honig (jch@mitchell.cit.cornell.edu)
  */
 
-#include <sys/param.h>
 #include <sys/time.h>
 #include <sys/socket.h>
 
 #include <netinet/in.h>
-#include <netinet/in_systm.h>
 #include <netinet/ip.h>
 #include <netinet/ip_var.h>
 

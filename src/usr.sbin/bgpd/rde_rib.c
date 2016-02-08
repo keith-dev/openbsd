@@ -1,4 +1,4 @@
-/*	$OpenBSD: rde_rib.c,v 1.138 2013/08/14 20:34:27 claudio Exp $ */
+/*	$OpenBSD: rde_rib.c,v 1.141 2014/12/18 19:28:44 tedu Exp $ */
 
 /*
  * Copyright (c) 2003, 2004 Claudio Jeker <claudio@openbsd.org>
@@ -18,10 +18,10 @@
 
 #include <sys/types.h>
 #include <sys/queue.h>
-#include <sys/hash.h>
 
 #include <stdlib.h>
 #include <string.h>
+#include <siphash.h>
 
 #include "bgpd.h"
 #include "rde.h"
@@ -53,7 +53,6 @@ u_int16_t
 rib_new(char *name, u_int rtableid, u_int16_t flags)
 {
 	struct rib	*xribs;
-	size_t		newsize;
 	u_int16_t	id;
 
 	for (id = 0; id < rib_size; id++) {
@@ -65,8 +64,8 @@ rib_new(char *name, u_int rtableid, u_int16_t flags)
 		fatalx("rib_new: trying to use reserved id");
 
 	if (id >= rib_size) {
-		newsize = sizeof(struct rib) * (id + 1);
-		if ((xribs = realloc(ribs, newsize)) == NULL) {
+		if ((xribs = reallocarray(ribs, id + 1,
+		    sizeof(struct rib))) == NULL) {
 			/* XXX this is not clever */
 			fatal("rib_add");
 		}
@@ -358,9 +357,11 @@ static void	path_link(struct rde_aspath *, struct rde_peer *);
 
 struct path_table pathtable;
 
+SIPHASH_KEY pathtablekey;
+
 /* XXX the hash should also include communities and the other attrs */
 #define PATH_HASH(x)				\
-	&pathtable.path_hashtbl[hash32_buf((x)->data, (x)->len, HASHINIT) & \
+	&pathtable.path_hashtbl[SipHash24(&pathtablekey, (x)->data, (x)->len) & \
 	    pathtable.path_hashmask]
 
 void
@@ -378,6 +379,7 @@ path_init(u_int32_t hashsize)
 		LIST_INIT(&pathtable.path_hashtbl[i]);
 
 	pathtable.path_hashmask = hs - 1;
+	arc4random_buf(&pathtablekey, sizeof(pathtablekey));
 }
 
 void
@@ -1062,6 +1064,8 @@ struct nexthop_table {
 	u_int32_t				 nexthop_hashmask;
 } nexthoptable;
 
+SIPHASH_KEY nexthoptablekey;
+
 void
 nexthop_init(u_int32_t hashsize)
 {
@@ -1075,6 +1079,7 @@ nexthop_init(u_int32_t hashsize)
 
 	for (i = 0; i < hs; i++)
 		LIST_INIT(&nexthoptable.nexthop_hashtbl[i]);
+	arc4random_buf(&nexthoptablekey, sizeof(nexthoptablekey));
 
 	nexthoptable.nexthop_hashmask = hs - 1;
 }
@@ -1305,17 +1310,16 @@ nexthop_hash(struct bgpd_addr *nexthop)
 
 	switch (nexthop->aid) {
 	case AID_INET:
-		h = (AF_INET ^ ntohl(nexthop->v4.s_addr) ^
-		    ntohl(nexthop->v4.s_addr) >> 13) &
-		    nexthoptable.nexthop_hashmask;
+		h = SipHash24(&nexthoptablekey, &nexthop->v4.s_addr,
+		    sizeof(nexthop->v4.s_addr));
 		break;
 	case AID_INET6:
-		h = hash32_buf(&nexthop->v6, sizeof(struct in6_addr),
-		    HASHINIT) & nexthoptable.nexthop_hashmask;
+		h = SipHash24(&nexthoptablekey, &nexthop->v6,
+		    sizeof(struct in6_addr));
 		break;
 	default:
 		fatalx("nexthop_hash: unsupported AF");
 	}
-	return (&nexthoptable.nexthop_hashtbl[h]);
+	return (&nexthoptable.nexthop_hashtbl[h & nexthoptable.nexthop_hashmask]);
 }
 

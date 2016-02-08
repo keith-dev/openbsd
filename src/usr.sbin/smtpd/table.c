@@ -1,4 +1,4 @@
-/*	$OpenBSD: table.c,v 1.17 2014/07/08 13:49:09 eric Exp $	*/
+/*	$OpenBSD: table.c,v 1.19 2015/01/20 17:37:54 deraadt Exp $	*/
 
 /*
  * Copyright (c) 2013 Eric Faurot <eric@openbsd.org>
@@ -34,6 +34,8 @@
 #include <imsg.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <netdb.h>
+#include <limits.h>
 #include <string.h>
 #include <unistd.h>
 
@@ -102,7 +104,7 @@ table_service_name(enum table_service s)
 struct table *
 table_find(const char *name, const char *tag)
 {
-	char buf[SMTPD_MAXLINESIZE];
+	char buf[LINE_MAX];
 
 	if (tag == NULL)
 		return dict_get(env->sc_tables_dict, name);
@@ -188,8 +190,8 @@ table_create(const char *backend, const char *name, const char *tag,
 {
 	struct table		*t;
 	struct table_backend	*tb;
-	char			 buf[SMTPD_MAXLINESIZE];
-	char			 path[SMTPD_MAXLINESIZE];
+	char			 buf[LINE_MAX];
+	char			 path[LINE_MAX];
 	size_t			 n;
 	struct stat		 sb;
 
@@ -347,6 +349,12 @@ table_update(struct table *t)
 	return (t->t_backend->update(t));
 }
 
+
+/*
+ * quick reminder:
+ * in *_match() s1 comes from session, s2 comes from table
+ */
+
 int
 table_domain_match(const char *s1, const char *s2)
 {
@@ -358,6 +366,7 @@ table_mailaddr_match(const char *s1, const char *s2)
 {
 	struct mailaddr m1;
 	struct mailaddr m2;
+	char	       *p;
 
 	if (! text_to_mailaddr(&m1, s1))
 		return 0;
@@ -367,9 +376,17 @@ table_mailaddr_match(const char *s1, const char *s2)
 	if (! table_domain_match(m1.domain, m2.domain))
 		return 0;
 
-	if (m2.user[0])
+	if (m2.user[0]) {
+		/* if address from table has a tag, we must respect it */
+		if (strchr(m2.user, '+') == NULL) {
+			/* otherwise, strip tag from session address if any */
+			p = strchr(m1.user, '+');
+			if (p)
+				*p = '\0';
+		}
 		if (strcasecmp(m1.user, m2.user))
 			return 0;
+	}
 	return 1;
 }
 
@@ -521,7 +538,7 @@ int
 table_parse_lookup(enum table_service service, const char *key,
     const char *line, union lookup *lk)
 {
-	char	buffer[SMTPD_MAXLINESIZE], *p;
+	char	buffer[LINE_MAX], *p;
 	size_t	len;
 
 	len = strlen(line);
@@ -550,7 +567,7 @@ table_parse_lookup(enum table_service service, const char *key,
 			return (-1);
 
 		/* too big to fit in a smtp session line */
-		if (len >= SMTPD_MAXLINESIZE)
+		if (len >= LINE_MAX)
 			return (-1);
 
 		p = strchr(line, ':');
@@ -616,7 +633,7 @@ table_parse_lookup(enum table_service service, const char *key,
 static const char *
 table_dump_lookup(enum table_service s, union lookup *lk)
 {
-	static char	buf[SMTPD_MAXLINESIZE];
+	static char	buf[LINE_MAX];
 	int		ret;
 
 	switch (s) {

@@ -1,4 +1,4 @@
-/*	$OpenBSD: print-sl.c,v 1.15 2013/12/03 00:21:21 deraadt Exp $	*/
+/*	$OpenBSD: print-sl.c,v 1.18 2015/01/16 06:40:21 deraadt Exp $	*/
 
 /*
  * Copyright (c) 1989, 1990, 1991, 1993, 1994, 1995, 1996, 1997
@@ -22,18 +22,15 @@
  */
 
 #ifdef HAVE_NET_SLIP_H
-#include <sys/param.h>
 #include <sys/time.h>
 #include <sys/file.h>
 #include <sys/ioctl.h>
-#include <sys/mbuf.h>
 #include <sys/socket.h>
 
 struct rtentry;
 #include <net/if.h>
 
 #include <netinet/in.h>
-#include <netinet/in_systm.h>
 #include <netinet/ip.h>
 #include <netinet/if_ether.h>
 #include <netinet/udp.h>
@@ -46,6 +43,7 @@ struct rtentry;
 #include <netdb.h>
 #include <pcap.h>
 #include <stdio.h>
+#include <limits.h>
 
 #include "interface.h"
 #include "addrtoname.h"
@@ -76,7 +74,7 @@ sl_if_print(u_char *user, const struct pcap_pkthdr *h, const u_char *p)
 
 	ts_print(&h->ts);
 
-	if (caplen < SLIP_HDRLEN) {
+	if (caplen < SLIP_HDRLEN || length < SLIP_HDRLEN) {
 		printf("[|slip]");
 		goto out;
 	}

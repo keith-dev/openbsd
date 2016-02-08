@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_vmx.c,v 1.19 2014/07/22 13:12:11 mpi Exp $	*/
+/*	$OpenBSD: if_vmx.c,v 1.24 2015/02/10 02:57:32 pelikan Exp $	*/
 
 /*
  * Copyright (c) 2013 Tsubai Masanari
@@ -132,7 +132,7 @@ struct {
 };
 #endif
 
-#define JUMBO_LEN (1024 * 9 - ETHER_ALIGN)
+#define JUMBO_LEN (1024 * 9)
 #define DMAADDR(map) ((map)->dm_segs[0].ds_addr)
 
 #define READ_BAR0(sc, reg) bus_space_read_4((sc)->sc_iot0, (sc)->sc_ioh0, reg)
@@ -164,10 +164,9 @@ void vmxnet3_iff(struct vmxnet3_softc *);
 void vmxnet3_rx_csum(struct vmxnet3_rxcompdesc *, struct mbuf *);
 int vmxnet3_getbuf(struct vmxnet3_softc *, struct vmxnet3_rxring *);
 void vmxnet3_stop(struct ifnet *);
-void vmxnet3_reset(struct ifnet *);
+void vmxnet3_reset(struct vmxnet3_softc *);
 int vmxnet3_init(struct vmxnet3_softc *);
 int vmxnet3_ioctl(struct ifnet *, u_long, caddr_t);
-int vmxnet3_change_mtu(struct vmxnet3_softc *, int);
 void vmxnet3_start(struct ifnet *);
 int vmxnet3_load_mbuf(struct vmxnet3_softc *, struct mbuf *);
 void vmxnet3_watchdog(struct ifnet *);
@@ -358,7 +357,7 @@ vmxnet3_dma_init(struct vmxnet3_softc *sc)
 	ds->driver_data_len = sizeof(struct vmxnet3_softc);
 	ds->queue_shared = qs_pa;
 	ds->queue_shared_len = qs_len;
-	ds->mtu = ETHERMTU;
+	ds->mtu = VMXNET3_MAX_MTU;
 	ds->ntxqueue = NTXQUEUE;
 	ds->nrxqueue = NRXQUEUE;
 	ds->mcast_table = mcast_pa;
@@ -631,7 +630,7 @@ vmxnet3_evintr(struct vmxnet3_softc *sc)
 		rs = sc->sc_rxq[0].rs;
 		if (rs->stopped)
 			printf("%s: RX error 0x%x\n", ifp->if_xname, rs->error);
-		vmxnet3_reset(ifp);
+		vmxnet3_init(sc);
 	}
 
 	if (event & VMXNET3_EVENT_DIC)
@@ -665,7 +664,7 @@ vmxnet3_txintr(struct vmxnet3_softc *sc, struct vmxnet3_txqueue *tq)
 
 		sop = ring->next;
 		if (ring->m[sop] == NULL)
-			panic("vmxnet3_txintr");
+			panic("%s: NULL ring->m[%u]", __func__, sop);
 		m_freem(ring->m[sop]);
 		ring->m[sop] = NULL;
 		bus_dmamap_unload(sc->sc_dmat, ring->dmap[sop]);
@@ -688,6 +687,7 @@ vmxnet3_rxintr(struct vmxnet3_softc *sc, struct vmxnet3_rxqueue *rq)
 	struct vmxnet3_rxdesc *rxd;
 	struct vmxnet3_rxcompdesc *rxcd;
 	struct ifnet *ifp = &sc->sc_arpcom.ac_if;
+	struct mbuf_list ml = MBUF_LIST_INITIALIZER();
 	struct mbuf *m;
 	int idx, len;
 	u_int slots;
@@ -720,7 +720,7 @@ vmxnet3_rxintr(struct vmxnet3_softc *sc, struct vmxnet3_rxqueue *rq)
 		bus_dmamap_unload(sc->sc_dmat, ring->dmap[idx]);
 
 		if (m == NULL)
-			panic("NULL mbuf");
+			panic("%s: NULL ring->m[%u]", __func__, idx);
 
 		if (letoh32((rxd->rx_word2 >> VMXNET3_RX_BTYPE_S) &
 		    VMXNET3_RX_BTYPE_M) != VMXNET3_BTYPE_HEAD) {
@@ -733,16 +733,11 @@ vmxnet3_rxintr(struct vmxnet3_softc *sc, struct vmxnet3_rxqueue *rq)
 			goto skip_buffer;
 		}
 		if (len < VMXNET3_MIN_MTU) {
-			printf("%s: short packet (%d)\n", ifp->if_xname, len);
 			m_freem(m);
 			goto skip_buffer;
 		}
 
-		ifp->if_ipackets++;
-		ifp->if_ibytes += len;
-
 		vmxnet3_rx_csum(rxcd, m);
-		m->m_pkthdr.rcvif = ifp;
 		m->m_pkthdr.len = m->m_len = len;
 		if (letoh32(rxcd->rxc_word2 & VMXNET3_RXC_VLAN)) {
 			m->m_flags |= M_VLANTAG;
@@ -750,11 +745,7 @@ vmxnet3_rxintr(struct vmxnet3_softc *sc, struct vmxnet3_rxqueue *rq)
 			    VMXNET3_RXC_VLANTAG_S) & VMXNET3_RXC_VLANTAG_M);
 		}
 
-#if NBPFILTER > 0
-		if (ifp->if_bpf)
-			bpf_mtap_ether(ifp->if_bpf, m, BPF_DIRECTION_IN);
-#endif
-		ether_input_mbuf(ifp, m);
+		ml_enqueue(&ml, m);
 
 skip_buffer:
 #ifdef VMXNET3_STAT
@@ -773,6 +764,9 @@ skip_buffer:
 			}
 		}
 	}
+
+	ifp->if_ipackets += ml_len(&ml);
+	if_input(ifp, &ml);
 
 	/* XXX Should we (try to) allocate buffers for ring 2 too? */
 	ring = &rq->cmd_ring[0];
@@ -909,9 +903,10 @@ vmxnet3_stop(struct ifnet *ifp)
 	struct vmxnet3_softc *sc = ifp->if_softc;
 	int queue;
 
-	vmxnet3_disable_all_intrs(sc);
 	ifp->if_flags &= ~(IFF_RUNNING | IFF_OACTIVE);
 	ifp->if_timer = 0;
+
+	vmxnet3_disable_all_intrs(sc);
 
 	WRITE_CMD(sc, VMXNET3_CMD_DISABLE);
 
@@ -922,13 +917,9 @@ vmxnet3_stop(struct ifnet *ifp)
 }
 
 void
-vmxnet3_reset(struct ifnet *ifp)
+vmxnet3_reset(struct vmxnet3_softc *sc)
 {
-	struct vmxnet3_softc *sc = ifp->if_softc;
-
-	vmxnet3_stop(ifp);
 	WRITE_CMD(sc, VMXNET3_CMD_RESET);
-	vmxnet3_init(sc);
 }
 
 int
@@ -937,8 +928,15 @@ vmxnet3_init(struct vmxnet3_softc *sc)
 	struct ifnet *ifp = &sc->sc_arpcom.ac_if;
 	int queue;
 
-	ifp->if_flags |= IFF_RUNNING;
-	ifp->if_flags &= ~IFF_OACTIVE;
+	/*
+	 * Cancel pending I/O and free all RX/TX buffers.
+	 */
+	vmxnet3_stop(ifp);
+
+#if 0
+	/* Put controller into known state. */
+	vmxnet3_reset(sc);
+#endif
 
 	for (queue = 0; queue < NTXQUEUE; queue++)
 		vmxnet3_txinit(sc, &sc->sc_txq[queue]);
@@ -957,25 +955,17 @@ vmxnet3_init(struct vmxnet3_softc *sc)
 		WRITE_BAR0(sc, VMXNET3_BAR0_RXH2(queue), 0);
 	}
 
+	/* Program promiscuous mode and multicast filters. */
 	vmxnet3_iff(sc);
+
 	vmxnet3_enable_all_intrs(sc);
+
 	vmxnet3_link_state(sc);
+
+	ifp->if_flags |= IFF_RUNNING;
+	ifp->if_flags &= ~IFF_OACTIVE;
+
 	return 0;
-}
-
-int
-vmxnet3_change_mtu(struct vmxnet3_softc *sc, int mtu)
-{
-	struct vmxnet3_driver_shared *ds = sc->sc_ds;
-	struct ifnet *ifp = &sc->sc_arpcom.ac_if;
-	int error;
-
-	if (mtu < VMXNET3_MIN_MTU || mtu > VMXNET3_MAX_MTU)
-		return EINVAL;
-	vmxnet3_stop(ifp);
-	ifp->if_mtu = ds->mtu = mtu;
-	error = vmxnet3_init(sc);
-	return error;
 }
 
 int
@@ -993,10 +983,8 @@ vmxnet3_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 		ifp->if_flags |= IFF_UP;
 		if ((ifp->if_flags & IFF_RUNNING) == 0)
 			error = vmxnet3_init(sc);
-#ifdef INET
 		if (ifa->ifa_addr->sa_family == AF_INET)
 			arp_ifinit(&sc->sc_arpcom, ifa);
-#endif
 		break;
 	case SIOCSIFFLAGS:
 		if (ifp->if_flags & IFF_UP) {
@@ -1009,12 +997,13 @@ vmxnet3_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 				vmxnet3_stop(ifp);
 		}
 		break;
-	case SIOCSIFMTU:
-		error = vmxnet3_change_mtu(sc, ifr->ifr_mtu);
-		break;
 	case SIOCSIFMEDIA:
 	case SIOCGIFMEDIA:
 		error = ifmedia_ioctl(ifp, ifr, &sc->sc_media, cmd);
+		break;
+	case SIOCGIFRXR:
+		error = if_rxr_ioctl((struct if_rxrinfo *)ifr->ifr_data,
+		    NULL, JUMBO_LEN, &sc->sc_rxq[0].cmd_ring[0].rxr);
 		break;
 	default:
 		error = ether_ioctl(ifp, &sc->sc_arpcom, cmd, data);
@@ -1172,7 +1161,6 @@ vmxnet3_watchdog(struct ifnet *ifp)
 
 	printf("%s: device timeout\n", ifp->if_xname);
 	s = splnet();
-	vmxnet3_stop(ifp);
 	vmxnet3_init(sc);
 	splx(s);
 }

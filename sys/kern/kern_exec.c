@@ -1,4 +1,4 @@
-/*	$OpenBSD: kern_exec.c,v 1.144 2014/07/12 18:43:32 tedu Exp $	*/
+/*	$OpenBSD: kern_exec.c,v 1.160 2015/02/09 11:52:47 miod Exp $	*/
 /*	$NetBSD: kern_exec.c,v 1.75 1996/02/09 18:59:28 christos Exp $	*/
 
 /*-
@@ -59,19 +59,24 @@
 
 #include <sys/syscallargs.h>
 
+#include <uvm/uvm_extern.h>
+
 #include <machine/reg.h>
 
 #ifdef __HAVE_MD_TCB
 # include <machine/tcb.h>
 #endif
 
-#include <dev/rndvar.h>
-
 #include "systrace.h"
 
 #if NSYSTRACE > 0
 #include <dev/systrace.h>
 #endif
+
+const struct kmem_va_mode kv_exec = {
+	.kv_wait = 1,
+	.kv_map = &exec_map
+};
 
 /*
  * Map the shared signal code.
@@ -80,7 +85,7 @@ int exec_sigcode_map(struct process *, struct emul *);
 
 /*
  * If non-zero, stackgap_random specifies the upper limit of the random gap size
- * added to the fixed stack gap. Must be n^2.
+ * added to the fixed stack position. Must be n^2.
  */
 int stackgap_random = STACKGAP_RANDOM;
 
@@ -317,7 +322,7 @@ sys_execve(struct proc *p, void *v, register_t *retval)
 	/* XXX -- THE FOLLOWING SECTION NEEDS MAJOR CLEANUP */
 
 	/* allocate an argument buffer */
-	argp = (char *) uvm_km_valloc_wait(exec_map, NCARGS);
+	argp = km_alloc(NCARGS, &kv_exec, &kp_pageable, &kd_waitok);
 #ifdef DIAGNOSTIC
 	if (argp == NULL)
 		panic("execve: argp == NULL");
@@ -368,6 +373,12 @@ sys_execve(struct proc *p, void *v, register_t *retval)
 		argc++;
 	}
 
+	/* must have at least one argument */
+	if (argc == 0) {
+		error = EINVAL;
+		goto bad;
+	}
+
 	envc = 0;
 	/* environment does not need to be there */
 	if ((cpp = SCARG(uap, envp)) != NULL ) {
@@ -391,8 +402,14 @@ sys_execve(struct proc *p, void *v, register_t *retval)
 	dp = (char *)(((long)dp + _STACKALIGNBYTES) & ~_STACKALIGNBYTES);
 
 	sgap = STACKGAPLEN;
+
+	/*
+	 * If we have enabled random stackgap, the stack itself has already
+	 * been moved from a random location, but is still aligned to a page
+	 * boundary.  Provide the lower bits of random placement now.
+	 */
 	if (stackgap_random != 0) {
-		sgap += arc4random() & (stackgap_random - 1);
+		sgap += arc4random() & PAGE_MASK;
 		sgap = (sgap + _STACKALIGNBYTES) & ~_STACKALIGNBYTES;
 	}
 
@@ -424,10 +441,12 @@ sys_execve(struct proc *p, void *v, register_t *retval)
 
 	vm = pr->ps_vmspace;
 	/* Now map address space */
-	vm->vm_taddr = (char *)pack.ep_taddr;
-	vm->vm_tsize = atop(round_page(pack.ep_tsize));
-	vm->vm_daddr = (char *)pack.ep_daddr;
-	vm->vm_dsize = atop(round_page(pack.ep_dsize));
+	vm->vm_taddr = (char *)trunc_page(pack.ep_taddr);
+	vm->vm_tsize = atop(round_page(pack.ep_taddr + pack.ep_tsize) -
+	    trunc_page(pack.ep_taddr));
+	vm->vm_daddr = (char *)trunc_page(pack.ep_daddr);
+	vm->vm_dsize = atop(round_page(pack.ep_daddr + pack.ep_dsize) -
+	    trunc_page(pack.ep_daddr));
 	vm->vm_dused = 0;
 	vm->vm_ssize = atop(round_page(pack.ep_ssize));
 	vm->vm_maxsaddr = (char *)pack.ep_maxsaddr;
@@ -444,22 +463,38 @@ sys_execve(struct proc *p, void *v, register_t *retval)
 	if (error)
 		goto exec_abort;
 
+	/* old "stackgap" is gone now */
+	pr->ps_stackgap = 0;
+
+#ifdef MACHINE_STACK_GROWS_UP
+	pr->ps_strings = (vaddr_t)vm->vm_maxsaddr + sgap;
+        if (uvm_map_protect(&vm->vm_map, (vaddr_t)vm->vm_maxsaddr,
+            trunc_page(pr->ps_strings), PROT_NONE, TRUE))
+                goto exec_abort;
+#else
+	pr->ps_strings = (vaddr_t)vm->vm_minsaddr - sizeof(arginfo) - sgap;
+        if (uvm_map_protect(&vm->vm_map,
+            round_page(pr->ps_strings + sizeof(arginfo)),
+            (vaddr_t)vm->vm_minsaddr, PROT_NONE, TRUE))
+                goto exec_abort;
+#endif
+
 	/* remember information about the process */
 	arginfo.ps_nargvstr = argc;
 	arginfo.ps_nenvstr = envc;
 
 #ifdef MACHINE_STACK_GROWS_UP
-	stack = (char *)USRSTACK + sizeof(arginfo) + sgap;
+	stack = (char *)vm->vm_maxsaddr + sizeof(arginfo) + sgap;
 	slen = len - sizeof(arginfo) - sgap;
 #else
-	stack = (char *)(USRSTACK - len);
+	stack = (char *)(vm->vm_minsaddr - len);
 #endif
 	/* Now copy argc, args & environ to new stack */
 	if (!(*pack.ep_emul->e_copyargs)(&pack, &arginfo, stack, argp))
 		goto exec_abort;
 
 	/* copy out the process's ps_strings structure */
-	if (copyout(&arginfo, (char *)PS_STRINGS, sizeof(arginfo)))
+	if (copyout(&arginfo, (char *)pr->ps_strings, sizeof(arginfo)))
 		goto exec_abort;
 
 	stopprofclock(pr);	/* stop profiling */
@@ -470,10 +505,10 @@ sys_execve(struct proc *p, void *v, register_t *retval)
 	/* set command name & other accounting info */
 	memset(p->p_comm, 0, sizeof(p->p_comm));
 	len = min(nid.ni_cnd.cn_namelen, MAXCOMLEN);
-	bcopy(nid.ni_cnd.cn_nameptr, p->p_comm, len);
+	memcpy(p->p_comm, nid.ni_cnd.cn_nameptr, len);
 	pr->ps_acflag &= ~AFORK;
 
-	/* record proc's vnode, for use by procfs and others */
+	/* record proc's vnode, for use by sysctl */
 	otvp = pr->ps_textvp;
 	vref(pack.ep_vp);
 	pr->ps_textvp = pack.ep_vp;
@@ -537,17 +572,6 @@ sys_execve(struct proc *p, void *v, register_t *retval)
 			 * shared because we're suid.
 			 */
 			fp = fd_getfile(p->p_fd, i);
-#ifdef PROCFS
-			/*
-			 * Close descriptors that are writing to procfs.
-			 */
-			if (fp && fp->f_type == DTYPE_VNODE &&
-			    ((struct vnode *)(fp->f_data))->v_tag == VT_PROCFS &&
-			    (fp->f_flag & FWRITE)) {
-				fdrelease(p, i);
-				fp = NULL;
-			}
-#endif
 
 			/*
 			 * Ensure that stdin, stdout, and stderr are already
@@ -628,7 +652,7 @@ sys_execve(struct proc *p, void *v, register_t *retval)
 	timespecclear(&p->p_tu.tu_runtime);
 	p->p_tu.tu_uticks = p->p_tu.tu_sticks = p->p_tu.tu_iticks = 0;
 
-	uvm_km_free_wakeup(exec_map, (vaddr_t) argp, NCARGS);
+	km_free(argp, NCARGS, &kv_exec, &kp_pageable);
 
 	pool_put(&namei_pool, nid.ni_cnd.cn_pnbuf);
 	vn_close(pack.ep_vp, FREAD, cred, p);
@@ -728,7 +752,7 @@ bad:
 	/* close and put the exec'd file */
 	vn_close(pack.ep_vp, FREAD, cred, p);
 	pool_put(&namei_pool, nid.ni_cnd.cn_pnbuf);
-	uvm_km_free_wakeup(exec_map, (vaddr_t) argp, NCARGS);
+	km_free(argp, NCARGS, &kv_exec, &kp_pageable);
 
  freehdr:
 	free(pack.ep_hdr, M_EXEC, 0);
@@ -757,7 +781,7 @@ exec_abort:
 		free(pack.ep_emul_arg, M_TEMP, 0);
 	pool_put(&namei_pool, nid.ni_cnd.cn_pnbuf);
 	vn_close(pack.ep_vp, FREAD, cred, p);
-	uvm_km_free_wakeup(exec_map, (vaddr_t) argp, NCARGS);
+	km_free(argp, NCARGS, &kv_exec, &kp_pageable);
 
 free_pack_abort:
 	free(pack.ep_hdr, M_EXEC, 0);
@@ -839,8 +863,8 @@ exec_sigcode_map(struct process *pr, struct emul *e)
 		uao_reference(e->e_sigobject);	/* permanent reference */
 
 		if ((r = uvm_map(kernel_map, &va, round_page(sz), e->e_sigobject,
-		    0, 0, UVM_MAPFLAG(UVM_PROT_RW, UVM_PROT_RW,
-		    UVM_INH_SHARE, UVM_ADV_RANDOM, 0)))) {
+		    0, 0, UVM_MAPFLAG(PROT_READ | PROT_WRITE, PROT_READ | PROT_WRITE,
+		    MAP_INHERIT_SHARE, MADV_RANDOM, 0)))) {
 			uao_detach(e->e_sigobject);
 			return (ENOMEM);
 		}
@@ -851,8 +875,9 @@ exec_sigcode_map(struct process *pr, struct emul *e)
 	pr->ps_sigcode = 0; /* no hint */
 	uao_reference(e->e_sigobject);
 	if (uvm_map(&pr->ps_vmspace->vm_map, &pr->ps_sigcode, round_page(sz),
-	    e->e_sigobject, 0, 0, UVM_MAPFLAG(UVM_PROT_RX, UVM_PROT_RX,
-	    UVM_INH_SHARE, UVM_ADV_RANDOM, 0))) {
+	    e->e_sigobject, 0, 0, UVM_MAPFLAG(PROT_READ | PROT_EXEC,
+	    PROT_READ | PROT_WRITE | PROT_EXEC, MAP_INHERIT_COPY,
+	    MADV_RANDOM, UVM_FLAG_COPYONW))) {
 		uao_detach(e->e_sigobject);
 		return (ENOMEM);
 	}

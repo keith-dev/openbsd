@@ -1,4 +1,4 @@
-/*	$OpenBSD: nfs_vfsops.c,v 1.100 2014/07/12 18:43:52 tedu Exp $	*/
+/*	$OpenBSD: nfs_vfsops.c,v 1.106 2015/01/17 17:49:27 deraadt Exp $	*/
 /*	$NetBSD: nfs_vfsops.c,v 1.46.4.1 1996/05/25 22:40:35 fvdl Exp $	*/
 
 /*
@@ -42,6 +42,7 @@
 #include <sys/proc.h>
 #include <sys/namei.h>
 #include <sys/vnode.h>
+#include <sys/lock.h>
 #include <sys/kernel.h>
 #include <sys/mount.h>
 #include <sys/swap.h>
@@ -55,7 +56,6 @@
 #include <sys/queue.h>
 
 #include <net/if.h>
-#include <net/route.h>
 #include <netinet/in.h>
 
 #include <nfs/rpcv2.h>
@@ -292,8 +292,8 @@ nfs_mountroot(void)
 	proc0.p_ucred->cr_uid = ntohl(nfs_diskless.swap_ucred.cr_uid);
 	proc0.p_ucred->cr_gid = ntohl(nfs_diskless.swap_ucred.cr_gid);
 	if ((proc0.p_ucred->cr_ngroups = ntohs(nfs_diskless.swap_ucred.cr_ngroups)) >
-		NGROUPS)
-		proc0.p_ucred->cr_ngroups = NGROUPS;
+		NGROUPS_MAX)
+		proc0.p_ucred->cr_ngroups = NGROUPS_MAX;
 	for (i = 0; i < proc0.p_ucred->cr_ngroups; i++)
 	    proc0.p_ucred->cr_groups[i] = ntohl(nfs_diskless.swap_ucred.cr_groups[i]);
 #endif
@@ -375,7 +375,7 @@ nfs_mount_diskless(struct nfs_dlmount *ndmntp, char *mntname, int mntflag)
 
 	/* Get mbuf for server sockaddr. */
 	m = m_get(M_WAIT, MT_SONAME);
-	bcopy((caddr_t)ndmntp->ndm_args.addr, mtod(m, caddr_t),
+	bcopy(ndmntp->ndm_args.addr, mtod(m, caddr_t),
 	    (m->m_len = ndmntp->ndm_args.addr->sa_len));
 
 	error = mountnfs(&ndmntp->ndm_args, mp, m, mntname,
@@ -512,7 +512,7 @@ nfs_decode_args(struct nfsmount *nmp, struct nfs_args *argp,
 		if (nmp->nm_sotype == SOCK_DGRAM)
 			while (nfs_connect(nmp, NULL)) {
 				printf("nfs_args: retrying connect\n");
-				(void) tsleep((caddr_t)&lbolt,
+				(void) tsleep(&lbolt,
 					      PSOCK, "nfscon", 0);
 			}
 	}
@@ -556,11 +556,10 @@ nfs_mount(struct mount *mp, const char *path, void *data,
 	if (error)
 		return (error);
 	if (args.version == 3) {
-		error = copyin (data, (caddr_t)&args,
-				sizeof (struct nfs_args3));
+		error = copyin(data, &args, sizeof(struct nfs_args3));
 		args.flags &= ~(NFSMNT_INTERNAL|NFSMNT_NOAC);
 	} else if (args.version == NFS_ARGSVERSION) {
-		error = copyin(data, (caddr_t)&args, sizeof (struct nfs_args));
+		error = copyin(data, &args, sizeof(struct nfs_args));
 		args.flags &= ~NFSMNT_NOAC; /* XXX - compatibility */
 	} else
 		return (EPROGMISMATCH);
@@ -591,13 +590,13 @@ nfs_mount(struct mount *mp, const char *path, void *data,
 	}
 	if (args.fhsize < 0 || args.fhsize > NFSX_V3FHMAX)
 		return (EINVAL);
-	error = copyin((caddr_t)args.fh, (caddr_t)nfh, args.fhsize);
+	error = copyin(args.fh, nfh, args.fhsize);
 	if (error)
 		return (error);
 	error = copyinstr(args.hostname, hst, MNAMELEN-1, &len);
 	if (error)
 		return (error);
-	bzero(&hst[len], MNAMELEN - len);
+	memset(&hst[len], 0, MNAMELEN - len);
 	/* sockargs() call must be after above copyin() calls */
 	error = sockargs(&nam, args.addr, args.addrlen, MT_SONAME);
 	if (error)
@@ -623,7 +622,7 @@ mountnfs(struct nfs_args *argp, struct mount *mp, struct mbuf *nam,
 		m_freem(nam);
 		return (0);
 	} else {
-		nmp = malloc(sizeof(struct nfsmount), M_NFSMNT,
+		nmp = malloc(sizeof(*nmp), M_NFSMNT,
 		    M_WAITOK|M_ZERO);
 		mp->mnt_data = (qaddr_t)nmp;
 	}
@@ -642,7 +641,7 @@ mountnfs(struct nfs_args *argp, struct mount *mp, struct mbuf *nam,
 	nmp->nm_acregmax = NFS_MAXATTRTIMO;
 	nmp->nm_acdirmin = NFS_MINATTRTIMO;
 	nmp->nm_acdirmax = NFS_MAXATTRTIMO;
-	bcopy((caddr_t)argp->fh, (caddr_t)nmp->nm_fh, argp->fhsize);
+	bcopy(argp->fh, nmp->nm_fh, argp->fhsize);
 	strncpy(&mp->mnt_stat.f_fstypename[0], mp->mnt_vfc->vfc_name, MFSNAMELEN);
 	bcopy(pth, mp->mnt_stat.f_mntonname, MNAMELEN);
 	bcopy(hst, mp->mnt_stat.f_mntfromname, MNAMELEN);
@@ -678,7 +677,7 @@ mountnfs(struct nfs_args *argp, struct mount *mp, struct mbuf *nam,
 	return (0);
 bad:
 	nfs_disconnect(nmp);
-	free((caddr_t)nmp, M_NFSMNT, 0);
+	free(nmp, M_NFSMNT, sizeof(*nmp));
 	m_freem(nam);
 	return (error);
 }
@@ -703,7 +702,7 @@ nfs_unmount(struct mount *mp, int mntflags, struct proc *p)
 	nfs_disconnect(nmp);
 	m_freem(nmp->nm_nam);
 	timeout_del(&nmp->nm_rtimeout);
-	free(nmp, M_NFSMNT, 0);
+	free(nmp, M_NFSMNT, sizeof(*nmp));
 	return (0);
 }
 

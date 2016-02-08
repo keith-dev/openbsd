@@ -1,4 +1,4 @@
-/*	$OpenBSD: rdistd.c,v 1.8 2009/10/27 23:59:42 deraadt Exp $	*/
+/*	$OpenBSD: rdistd.c,v 1.10 2015/02/08 23:40:34 deraadt Exp $	*/
 
 /*
  * Copyright (c) 1983 Regents of the University of California.
@@ -29,7 +29,11 @@
  * SUCH DAMAGE.
  */
 
-#include "defs.h"
+#include <stdio.h>
+#include <stdlib.h>
+#include <unistd.h>
+
+#include "server.h"
 
 int main(int, char **, char **);
 static void usage(void);
@@ -64,7 +68,7 @@ main(int argc, char **argv, char **envp)
 	while ((c = getopt(argc, argv, "SDV")) != -1)
 		switch (c) {
 		case 'S':
-			isserver++;
+			isserver = 1;
 			break;
 
 		case 'D':

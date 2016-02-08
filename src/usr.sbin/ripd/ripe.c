@@ -1,4 +1,4 @@
-/*	$OpenBSD: ripe.c,v 1.16 2014/07/12 20:16:38 krw Exp $ */
+/*	$OpenBSD: ripe.c,v 1.18 2015/02/09 12:34:07 claudio Exp $ */
 
 /*
  * Copyright (c) 2006 Michele Marchetto <mydecay@openbeer.it>
@@ -35,7 +35,6 @@
 #include <err.h>
 #include <errno.h>
 #include <stdio.h>
-#include <stdlib.h>
 
 #include "ripd.h"
 #include "rip.h"
@@ -93,7 +92,8 @@ ripe(struct ripd_conf *xconf, int pipe_parent2ripe[2], int pipe_ripe2rde[2],
 	addr.sin_port = htons(RIP_PORT);
 	addr.sin_addr.s_addr = INADDR_ANY;
 
-	if ((xconf->rip_socket = socket(AF_INET, SOCK_DGRAM,
+	if ((xconf->rip_socket = socket(AF_INET,
+	    SOCK_DGRAM | SOCK_CLOEXEC | SOCK_NONBLOCK,
 	    IPPROTO_UDP)) == -1)
 		fatalx("error creating socket");
 

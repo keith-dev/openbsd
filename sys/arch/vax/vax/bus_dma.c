@@ -1,4 +1,4 @@
-/*	$OpenBSD: bus_dma.c,v 1.29 2014/07/12 18:44:43 tedu Exp $	*/
+/*	$OpenBSD: bus_dma.c,v 1.32 2014/12/23 21:39:12 miod Exp $	*/
 /*	$NetBSD: bus_dma.c,v 1.5 1999/11/13 00:32:20 thorpej Exp $	*/
 
 /*-
@@ -129,6 +129,7 @@ _bus_dmamap_destroy(t, map)
 	bus_dma_tag_t t;
 	bus_dmamap_t map;
 {
+	size_t mapsize;
 
 #ifdef DEBUG_DMA
 	printf("dmamap_destroy: t=%p map=%p\n", t, map);
@@ -137,7 +138,9 @@ _bus_dmamap_destroy(t, map)
 	if (map->dm_nsegs > 0)
 		printf("bus_dmamap_destroy() called for map with valid mappings\n");
 #endif	/* DIAGNOSTIC */
-	free(map, M_DEVBUF, 0);
+	mapsize = sizeof(struct vax_bus_dmamap) +
+	    (sizeof(bus_dma_segment_t) * (map->_dm_segcnt - 1));
+	free(map, M_DEVBUF, mapsize);
 }
 
 /*
@@ -444,7 +447,7 @@ _bus_dmamem_map(t, segs, nsegs, size, kvap, flags)
 		if (vax_boardtype == VAX_BTYP_43) {
 			pmap_map((vaddr_t)*kvap, segs[0].ds_addr|KA43_DIAGMEM,
 			    (segs[0].ds_addr|KA43_DIAGMEM) + size,
-			    VM_PROT_READ|VM_PROT_WRITE);
+			    PROT_READ | PROT_WRITE);
 		}
 		return 0;
 	}
@@ -467,8 +470,8 @@ _bus_dmamem_map(t, segs, nsegs, size, kvap, flags)
 			if (vax_boardtype == VAX_BTYP_43)
 				addr |= KA43_DIAGMEM;
 			error = pmap_enter(pmap_kernel(), va, addr,
-			    VM_PROT_READ | VM_PROT_WRITE, VM_PROT_READ |
-			    VM_PROT_WRITE | PMAP_WIRED | PMAP_CANFAIL);
+			    PROT_READ | PROT_WRITE,
+			    PROT_READ | PROT_WRITE | PMAP_WIRED | PMAP_CANFAIL);
 			if (error) {
 				pmap_update(pmap_kernel());
 				km_free((void *)sva, ssize, &kv_any, &kp_none);
@@ -727,7 +730,7 @@ _bus_dmamem_alloc_range(t, size, alignment, boundary, segs, nsegs, rsegs,
 #endif	/* DEBUG_DMA */
 	m = TAILQ_NEXT(m, pageq);
 
-	for (; m != TAILQ_END(&mlist); m = TAILQ_NEXT(m, pageq)) {
+	for (; m != NULL; m = TAILQ_NEXT(m, pageq)) {
 		curaddr = VM_PAGE_TO_PHYS(m);
 #ifdef DIAGNOSTIC
 		if (curaddr < low || curaddr >= high) {

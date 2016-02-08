@@ -1,4 +1,4 @@
-.Dd December 24, 2009
+.Dd December 13, 2014
 .Dt BL-COLUMN 1
 .Os OpenBSD
 .Sh NAME
@@ -14,6 +14,10 @@
 .\" avoid "c" which means "cm"
 .Bl -column "a" "b" "cc"
 .It a Ta b Ta cc
+.It a	b	cc
+.It "a"	b	cc
+.It "a	b"	cc
+.It "a	b	cc"
 .El
 .Bl -column "a" "b" "cc" "d"
 .It a Ta b Ta cc Ta d
@@ -61,4 +65,16 @@
 .It a	b
 .It a 	b
 .It a  	b
+.El
+.\" Wrong number of columns.
+.Bl -column "a" "b"
+.It "a"
+.It "a" Ta "b"
+.It "a" Ta "b" Ta "c"
+.It "a" Ta "b" Ta "c" Ta "d"
+.It "a" Ta "b" Ta "c" Ta "d" Ta "e"
+.El
+.\" Interrupted column list
+.Bl -column "aa" -width 6n -compact "bb" "cc"
+.It aa Ta bb Ta cc Ta dd
 .El

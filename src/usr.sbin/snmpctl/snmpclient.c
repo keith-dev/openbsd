@@ -1,4 +1,4 @@
-/*	$OpenBSD: snmpclient.c,v 1.11 2014/05/08 14:48:31 mikeb Exp $	*/
+/*	$OpenBSD: snmpclient.c,v 1.13 2015/01/16 06:40:21 deraadt Exp $	*/
 
 /*
  * Copyright (c) 2013 Reyk Floeter <reyk@openbsd.org>
@@ -17,7 +17,6 @@
  */
 
 #include <sys/queue.h>
-#include <sys/param.h>
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <sys/socket.h>
@@ -35,7 +34,6 @@
 #include <event.h>
 #include <fcntl.h>
 #include <string.h>
-#include <unistd.h>
 #include <ctype.h>
 #include <poll.h>
 #include <err.h>

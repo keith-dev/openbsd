@@ -1,4 +1,4 @@
-/*	$OpenBSD: uvm_page.h,v 1.54 2014/07/11 16:35:40 jsg Exp $	*/
+/*	$OpenBSD: uvm_page.h,v 1.57 2015/02/07 01:46:27 kettenis Exp $	*/
 /*	$NetBSD: uvm_page.h,v 1.19 2000/12/28 08:24:55 chs Exp $	*/
 
 /* 
@@ -88,8 +88,6 @@
  *	Fields in this structure are possibly locked by the lock on the page
  *	queues (P).
  */
-
-#include <uvm/uvm_extern.h>
 
 TAILQ_HEAD(pglist, vm_page);
 
@@ -227,7 +225,6 @@ void		uvm_page_own(struct vm_page *, char *);
 #if !defined(PMAP_STEAL_MEMORY)
 boolean_t	uvm_page_physget(paddr_t *);
 #endif
-void		uvm_pageidlezero(void);
 
 void		uvm_pageactivate(struct vm_page *);
 vaddr_t		uvm_pageboot_alloc(vsize_t);
@@ -296,7 +293,7 @@ int		vm_physseg_find(paddr_t, int *);
 #define uvm_lock_fpageq()	mtx_enter(&uvm.fpageqlock);
 #define uvm_unlock_fpageq()	mtx_leave(&uvm.fpageqlock);
 
-#define	UVM_PAGEZERO_TARGET	(uvmexp.free)
+#define	UVM_PAGEZERO_TARGET	(uvmexp.free / 8)
 
 #define VM_PAGE_TO_PHYS(entry)	((entry)->phys_addr)
 

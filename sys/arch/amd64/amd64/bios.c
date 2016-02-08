@@ -1,4 +1,4 @@
-/*	$OpenBSD: bios.c,v 1.27 2014/07/13 12:11:01 jasper Exp $	*/
+/*	$OpenBSD: bios.c,v 1.30 2014/12/15 01:53:45 tedu Exp $	*/
 /*
  * Copyright (c) 2006 Gordon Willem Klok <gklok@cogeco.ca>
  *
@@ -23,7 +23,6 @@
 #include <sys/malloc.h>
 
 #include <uvm/uvm_extern.h>
-#include <sys/proc.h>
 #include <sys/sysctl.h>
 
 #include <machine/conf.h>
@@ -134,7 +133,7 @@ bios_attach(struct device *parent, struct device *self, void *aux)
 		smbios_entry.count = hdr->count;
 
 		for (; pa < end; pa+= NBPG, va+= NBPG)
-			pmap_kenter_pa(va, pa, VM_PROT_READ);
+			pmap_kenter_pa(va, pa, PROT_READ);
 
 		printf(": SMBIOS rev. %d.%d @ 0x%x (%d entries)",
 		    hdr->majrev, hdr->minrev, hdr->addr, hdr->count);
@@ -300,7 +299,7 @@ smbios_get_string(struct smbtable *st, u_int8_t indx, char *dest, size_t len)
 	if (i == indx) {
 		if (va + len < end) {
 			ret = dest;
-			bcopy(va, ret, len);
+			memcpy(ret, va, len);
 			ret[len-1] = '\0';
 		}
 	}
@@ -331,7 +330,7 @@ fixstring(char *s)
 	for (e = s + strlen(s) - 1; e > s && *e == ' '; e--)
 		;
 	if (p > s || e < s + strlen(s) - 1) {
-		bcopy(p, s, e-p + 1);
+		memmove(s, p, e - p + 1);
 		s[e - p + 1] = '\0';
 	}
 

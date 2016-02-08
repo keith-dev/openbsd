@@ -1,4 +1,4 @@
-/*	$OpenBSD: main.c,v 1.92 2014/07/16 04:52:43 lteo Exp $	*/
+/*	$OpenBSD: main.c,v 1.102 2015/02/22 15:09:54 jsing Exp $	*/
 /*	$NetBSD: main.c,v 1.24 1997/08/18 10:20:26 lukem Exp $	*/
 
 /*
@@ -67,7 +67,6 @@
 
 #include <ctype.h>
 #include <err.h>
-#include <limits.h>
 #include <netdb.h>
 #include <pwd.h>
 #include <stdio.h>
@@ -76,7 +75,7 @@
 #include <string.h>
 #include <unistd.h>
 
-#include <ressl.h>
+#include <tls.h>
 
 #include "cmds.h"
 #include "ftp_var.h"
@@ -98,7 +97,7 @@ char * const ssl_verify_opts[] = {
 	NULL
 };
 
-struct ressl_config *ressl_config;
+struct tls_config *tls_config;
 #endif /* !SMALL */
 
 int family = PF_UNSPEC;
@@ -109,7 +108,7 @@ main(volatile int argc, char *argv[])
 {
 	int ch, top, rval;
 	struct passwd *pw = NULL;
-	char *cp, homedir[MAXPATHLEN];
+	char *cp, homedir[PATH_MAX];
 	char *outfile = NULL;
 	const char *errstr;
 	int dumb_terminal = 0;
@@ -171,8 +170,8 @@ main(volatile int argc, char *argv[])
 	if (strcmp(__progname, "gate-ftp") == 0)
 		gatemode = 1;
 	gateserver = getenv("FTPSERVER");
-	if (gateserver == NULL || *gateserver == '\0')
-		gateserver = GATE_SERVER;
+	if (gateserver == NULL)
+		gateserver = "";
 	if (gatemode) {
 		if (*gateserver == '\0') {
 			warnx(
@@ -199,11 +198,20 @@ main(volatile int argc, char *argv[])
 
 #ifndef SMALL
 	cookiefile = getenv("http_cookies");
+	if (tls_config == NULL) {
+		tls_config = tls_config_new();
+		if (tls_config == NULL)
+			errx(1, "tls config failed");
+		tls_config_set_protocols(tls_config, TLS_PROTOCOLS_ALL);
+		if (tls_config_set_ciphers(tls_config, "compat") != 0)
+			errx(1, "tls set ciphers failed");
+	}
 #endif /* !SMALL */
+
 	httpuseragent = NULL;
 
 	while ((ch = getopt(argc, argv,
-		    "46AaCc:dD:Eegik:mno:pP:r:S:s:tU:vV")) != -1) {
+		    "46AaCc:dD:Eegik:Mmno:pP:r:S:s:tU:vV")) != -1) {
 		switch (ch) {
 		case '4':
 			family = PF_INET;
@@ -269,6 +277,9 @@ main(volatile int argc, char *argv[])
 				usage();
 			}
 			break;
+		case 'M':
+			progress = 0;
+			break;
 		case 'm':
 			progress = -1;
 			break;
@@ -309,12 +320,6 @@ main(volatile int argc, char *argv[])
 
 		case 'S':
 #ifndef SMALL
-			if (ressl_config == NULL) {
-				ressl_config = ressl_config_new();
-				if (ressl_config == NULL)
-					errx(1, "ressl config failed");
-			}
-
 			cp = optarg;
 			while (*cp) {
 				char	*str;
@@ -322,28 +327,33 @@ main(volatile int argc, char *argv[])
 				case SSL_CAFILE:
 					if (str == NULL)
 						errx(1, "missing CA file");
-					ressl_config_set_ca_file(ressl_config,
-					    str);
+					if (tls_config_set_ca_file(
+					    tls_config, str) != 0)
+						errx(1, "tls ca file failed");
 					break;
 				case SSL_CAPATH:
 					if (str == NULL)
 						errx(1, "missing CA directory"
 						    " path");
-					ressl_config_set_ca_path(ressl_config,
-					    str);
+					if (tls_config_set_ca_path(
+					    tls_config, str) != 0)
+						errx(1, "tls ca path failed");
 					break;
 				case SSL_CIPHERS:
 					if (str == NULL)
 						errx(1, "missing cipher list");
-					ressl_config_set_ciphers(ressl_config,
-					    str);
+					if (tls_config_set_ciphers(
+					    tls_config, str) != 0)
+						errx(1, "tls ciphers failed");
 					break;
 				case SSL_DONTVERIFY:
-					ressl_config_insecure_no_verify(
-					    ressl_config);
+					tls_config_insecure_noverifycert(
+					    tls_config);
+					tls_config_insecure_noverifyname(
+					    tls_config);
 					break;
 				case SSL_DOVERIFY:
-					ressl_config_verify(ressl_config);
+					tls_config_verify(tls_config);
 					break;
 				case SSL_VERIFYDEPTH:
 					if (str == NULL)
@@ -354,8 +364,8 @@ main(volatile int argc, char *argv[])
 						errx(1, "certificate "
 						    "validation depth is %s",
 						    errstr);
-					ressl_config_set_verify_depth(
-					    ressl_config, (int)depth);
+					tls_config_set_verify_depth(
+					    tls_config, (int)depth);
 					break;
 				default:
 					errx(1, "unknown -S suboption `%s'",
@@ -869,7 +879,7 @@ usage(void)
 {
 	fprintf(stderr, "usage: "
 #ifndef SMALL
-	    "%1$s [-46AadEegimnptVv] [-D title] [-k seconds] [-P port] "
+	    "%1$s [-46AadEegiMmnptVv] [-D title] [-k seconds] [-P port] "
 	    "[-r seconds]\n"
 	    "           [-s srcaddr] [host [port]]\n"
 	    "       %1$s [-C] [-o output] [-s srcaddr]\n"

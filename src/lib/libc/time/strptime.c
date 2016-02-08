@@ -1,6 +1,5 @@
-/*	$OpenBSD: strptime.c,v 1.16 2014/02/13 23:16:03 millert Exp $ */
+/*	$OpenBSD: strptime.c,v 1.19 2015/02/09 13:32:51 tedu Exp $ */
 /*	$NetBSD: strptime.c,v 1.12 1998/01/20 21:39:40 mycroft Exp $	*/
-
 /*-
  * Copyright (c) 1997, 1998, 2005, 2008 The NetBSD Foundation, Inc.
  * All rights reserved.
@@ -34,7 +33,8 @@
 #include <locale.h>
 #include <string.h>
 #include <time.h>
-#include <tzfile.h>
+
+#include "tzfile.h"
 
 #define	_ctloc(x)		(_CurrentTimeLocale->x)
 
@@ -56,9 +56,7 @@
 #define FIELD_TM_YEAR	(1 << 4)
 
 static char gmt[] = { "GMT" };
-#ifdef TM_ZONE
 static char utc[] = { "UTC" };
-#endif
 /* RFC-822/RFC-2822 */
 static const char * const nast[5] = {
        "EST",    "CST",    "MST",    "PST",    "\0\0\0"
@@ -409,19 +407,29 @@ literal:
 				tm->TM_ZONE = gmt;
 #endif
 				bp += 3;
+			} else if (strncmp((const char *)bp, utc, 3) == 0) {
+				tm->tm_isdst = 0;
+#ifdef TM_GMTOFF
+				tm->TM_GMTOFF = 0;
+#endif
+#ifdef TM_ZONE
+				tm->TM_ZONE = utc;
+#endif
+				bp += 3;
 			} else {
 				ep = _find_string(bp, &i,
 					       	 (const char * const *)tzname,
 					       	  NULL, 2);
-				if (ep != NULL) {
-					tm->tm_isdst = i;
+				if (ep == NULL)
+					return (NULL);
+
+				tm->tm_isdst = i;
 #ifdef TM_GMTOFF
-					tm->TM_GMTOFF = -(timezone);
+				tm->TM_GMTOFF = -(timezone);
 #endif
 #ifdef TM_ZONE
-					tm->TM_ZONE = tzname[i];
+				tm->TM_ZONE = tzname[i];
 #endif
-				}
 				bp = ep;
 			}
 			continue;

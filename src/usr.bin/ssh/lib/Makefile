@@ -1,4 +1,4 @@
-#	$OpenBSD: Makefile,v 1.79 2014/06/24 01:13:22 djm Exp $
+#	$OpenBSD: Makefile,v 1.83 2015/03/03 21:21:13 djm Exp $
 
 .PATH:		${.CURDIR}/..
 .include "${.CURDIR}/../Makefile.inc"
@@ -7,11 +7,14 @@ LIB=	ssh
 
 # These are files intended for a standalone libopenssh in the future.
 LIB_SRCS= \
+	ssh_api.c \
 	ssherr.c \
 	sshbuf.c \
 	sshbuf-getput-basic.c \
 	sshbuf-misc.c \
-	sshkey.c
+	sshkey.c \
+	bitmap.c \
+	krl.c
 
 .if (${OPENSSL:L} == "yes")
 LIB_SRCS+=	sshbuf-getput-crypto.c digest-openssl.c
@@ -22,20 +25,28 @@ LIB_SRCS+=	digest-libc.c
 SRCS=	${LIB_SRCS} \
 	authfd.c authfile.c bufaux.c buffer.c canohost.c \
 	channels.c cipher.c \
-	cleanup.c compat.c compress.c crc32.c deattack.c fatal.c \
-	hostfile.c log.c match.c nchan.c packet.c readpass.c \
+	cleanup.c compat.c crc32.c deattack.c fatal.c \
+	hostfile.c log.c match.c nchan.c packet.c opacket.c readpass.c \
 	ttymodes.c xmalloc.c atomicio.c \
 	key.c dispatch.c kex.c mac.c uidswap.c uuencode.c misc.c \
 	msg.c progressmeter.c dns.c \
 	monitor_fdpass.c addrmatch.c \
-	smult_curve25519_ref.c kexc25519.c kexc25519c.c \
+	smult_curve25519_ref.c \
+	kexc25519.c kexc25519c.c kexc25519s.c \
+	roaming_dummy.c \
 	chacha.c poly1305.c cipher-chachapoly.c ssh-ed25519.c hmac.c umac.c
 
+.if (${SSH1:L} == "yes")
+SRCS+=	cipher-3des1.c cipher-bf1.c
+.endif
+
 .if (${OPENSSL:L} == "yes")
-SRCS+=	bufec.c bufbn.c cipher-3des1.c cipher-bf1.c rsa.c \
-	ssh-dss.c ssh-rsa.c ssh-ecdsa.c dh.c kexdh.c kexgex.c kexecdh.c \
-	kexdhc.c kexgexc.c kexecdhc.c ssh-pkcs11.c \
-	krl.c
+SRCS+=	bufec.c bufbn.c rsa.c \
+	ssh-dss.c ssh-rsa.c ssh-ecdsa.c dh.c \
+	kexdh.c kexgex.c kexecdh.c \
+	kexdhc.c kexgexc.c kexecdhc.c \
+	kexdhs.c kexgexs.c kexecdhs.c \
+	ssh-pkcs11.c
 .else
 SRCS+=	rijndael.c cipher-aesctr.c
 .endif

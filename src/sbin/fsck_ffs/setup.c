@@ -1,4 +1,4 @@
-/*	$OpenBSD: setup.c,v 1.54 2014/05/29 12:02:50 krw Exp $	*/
+/*	$OpenBSD: setup.c,v 1.57 2015/01/20 18:22:21 deraadt Exp $	*/
 /*	$NetBSD: setup.c,v 1.27 1996/09/27 22:45:19 christos Exp $	*/
 
 /*
@@ -30,8 +30,8 @@
  * SUCH DAMAGE.
  */
 
+#include <sys/param.h>	/* MAXBSIZE DEV_BSIZE roundup */
 #define DKTYPENAMES
-#include <sys/param.h>
 #include <sys/time.h>
 #include <ufs/ufs/dinode.h>
 #include <ufs/ffs/fs.h>
@@ -47,11 +47,14 @@
 #include <string.h>
 #include <util.h>
 #include <unistd.h>
+#include <limits.h>
 #include <ctype.h>
 
 #include "fsck.h"
 #include "extern.h"
 #include "fsutil.h"
+
+#define MAXIMUM(a, b)	(((a) > (b)) ? (a) : (b))
 
 #define altsblock (*asblk.b_un.b_fs)
 #define POWEROF2(num)	(((num) & ((num) - 1)) == 0)
@@ -61,7 +64,7 @@ int calcsb(char *, int, struct fs *);
 static struct disklabel *getdisklabel(char *, int);
 static int readsb(int);
 static int cmpsb(struct fs *, struct fs *);
-static char rdevname[MAXPATHLEN];
+static char rdevname[PATH_MAX];
 
 long numdirs, listmax, inplast;
 
@@ -75,7 +78,8 @@ static const int altsbtry[] = { 32, 64, 128, 144, 160, 192, 256 };
 int
 setup(char *dev)
 {
-	long cg, size, asked, i, j, bmapsize;
+	long cg, size, asked, i, j;
+	size_t bmapsize;
 	struct disklabel *lp;
 	off_t sizepb;
 	struct stat statb;
@@ -382,20 +386,19 @@ found:
 	 * allocate and initialize the necessary maps
 	 */
 	bmapsize = roundup(howmany(maxfsblock, NBBY), sizeof(int16_t));
-	blockmap = calloc((unsigned)bmapsize, sizeof(char));
+	blockmap = calloc(bmapsize, sizeof(char));
 	if (blockmap == NULL) {
-		printf("cannot alloc %u bytes for blockmap\n",
-		    (unsigned)bmapsize);
+		printf("cannot alloc %zu bytes for blockmap\n", bmapsize);
 		goto badsblabel;
 	}
 	inostathead = calloc((unsigned)(sblock.fs_ncg),
 	    sizeof(struct inostatlist));
 	if (inostathead == NULL) {
-		printf("cannot alloc %u bytes for inostathead\n",
-		    (unsigned)(sizeof(struct inostatlist) * (sblock.fs_ncg)));
+		printf("cannot alloc %zu bytes for inostathead\n",
+		    (unsigned)sblock.fs_ncg * sizeof(struct inostatlist));
 		goto badsblabel;
 	}
-	numdirs = MAX(sblock.fs_cstotal.cs_ndir, 128);
+	numdirs = MAXIMUM(sblock.fs_cstotal.cs_ndir, 128);
 	inplast = 0;
 	listmax = numdirs + 10;
 	inpsort = calloc((unsigned)listmax, sizeof(struct inoinfo *));

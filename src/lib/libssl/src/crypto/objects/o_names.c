@@ -1,4 +1,4 @@
-/* $OpenBSD: o_names.c,v 1.18 2014/06/12 15:49:30 deraadt Exp $ */
+/* $OpenBSD: o_names.c,v 1.20 2015/02/10 11:22:21 jsing Exp $ */
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -24,7 +24,6 @@ typedef struct name_funcs_st {
 } NAME_FUNCS;
 
 DECLARE_STACK_OF(NAME_FUNCS)
-IMPLEMENT_STACK_OF(NAME_FUNCS)
 
 static STACK_OF(NAME_FUNCS) *name_funcs_stack;
 
@@ -74,7 +73,11 @@ OBJ_NAME_new_index(unsigned long (*hash_func)(const char *),
 		name_funcs->hash_func = lh_strhash;
 		name_funcs->cmp_func = strcmp;
 		name_funcs->free_func = NULL;
-		sk_NAME_FUNCS_push(name_funcs_stack, name_funcs);
+		if (sk_NAME_FUNCS_push(name_funcs_stack, name_funcs) == 0) {
+			free(name_funcs);
+			OBJerr(OBJ_F_OBJ_NAME_NEW_INDEX, ERR_R_MALLOC_FAILURE);
+			return (0);
+		}
 	}
 	name_funcs = sk_NAME_FUNCS_value(name_funcs_stack, ret);
 	if (hash_func != NULL)

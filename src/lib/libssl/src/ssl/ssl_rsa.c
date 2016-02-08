@@ -1,25 +1,25 @@
-/* $OpenBSD: ssl_rsa.c,v 1.16 2014/07/12 16:03:37 miod Exp $ */
+/* $OpenBSD: ssl_rsa.c,v 1.20 2015/02/06 01:37:11 reyk Exp $ */
 /* Copyright (C) 1995-1998 Eric Young (eay@cryptsoft.com)
  * All rights reserved.
  *
  * This package is an SSL implementation written
  * by Eric Young (eay@cryptsoft.com).
  * The implementation was written so as to conform with Netscapes SSL.
- * 
+ *
  * This library is free for commercial and non-commercial use as long as
  * the following conditions are aheared to.  The following conditions
  * apply to all code found in this distribution, be it the RC4, RSA,
  * lhash, DES, etc., code; not just the SSL code.  The SSL documentation
  * included with this distribution is covered by the same copyright terms
  * except that the holder is Tim Hudson (tjh@cryptsoft.com).
- * 
+ *
  * Copyright remains Eric Young's, and as such any Copyright notices in
  * the code are not to be removed.
  * If this package is used in a product, Eric Young should be given attribution
  * as the author of the parts of the library used.
  * This can be in the form of a textual message at program startup or
  * in documentation (online or textual) provided with the package.
- * 
+ *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
  * are met:
@@ -34,10 +34,10 @@
  *     Eric Young (eay@cryptsoft.com)"
  *    The word 'cryptographic' can be left out if the rouines from the library
  *    being used are not cryptographic related :-).
- * 4. If you include any Windows specific code (or a derivative thereof) from 
+ * 4. If you include any Windows specific code (or a derivative thereof) from
  *    the apps directory (application code) you must include an acknowledgement:
  *    "This product includes software written by Tim Hudson (tjh@cryptsoft.com)"
- * 
+ *
  * THIS SOFTWARE IS PROVIDED BY ERIC YOUNG ``AS IS'' AND
  * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
  * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
@@ -49,7 +49,7 @@
  * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
- * 
+ *
  * The licence and distribution terms for any publically available version or
  * derivative of this code cannot be changed.  i.e. this code cannot simply be
  * copied and put under another distribution licence
@@ -57,15 +57,19 @@
  */
 
 #include <stdio.h>
+
 #include "ssl_locl.h"
+
 #include <openssl/bio.h>
-#include <openssl/objects.h>
 #include <openssl/evp.h>
-#include <openssl/x509.h>
+#include <openssl/objects.h>
 #include <openssl/pem.h>
+#include <openssl/x509.h>
 
 static int ssl_set_cert(CERT *c, X509 *x509);
 static int ssl_set_pkey(CERT *c, EVP_PKEY *pkey);
+static int ssl_ctx_use_certificate_chain_bio(SSL_CTX *, BIO *);
+
 int
 SSL_use_certificate(SSL *ssl, X509 *x)
 {
@@ -637,29 +641,17 @@ SSL_CTX_use_PrivateKey_ASN1(int type, SSL_CTX *ctx, const unsigned char *d,
 
 
 /*
- * Read a file that contains our certificate in "PEM" format,
+ * Read a bio that contains our certificate in "PEM" format,
  * possibly followed by a sequence of CA certificates that should be
  * sent to the peer in the Certificate message.
  */
-int
-SSL_CTX_use_certificate_chain_file(SSL_CTX *ctx, const char *file)
+static int
+ssl_ctx_use_certificate_chain_bio(SSL_CTX *ctx, BIO *in)
 {
-	BIO *in;
 	int ret = 0;
 	X509 *x = NULL;
 
 	ERR_clear_error(); /* clear error stack for SSL_CTX_use_certificate() */
-
-	in = BIO_new(BIO_s_file_internal());
-	if (in == NULL) {
-		SSLerr(SSL_F_SSL_CTX_USE_CERTIFICATE_CHAIN_FILE, ERR_R_BUF_LIB);
-		goto end;
-	}
-
-	if (BIO_read_filename(in, file) <= 0) {
-		SSLerr(SSL_F_SSL_CTX_USE_CERTIFICATE_CHAIN_FILE, ERR_R_SYS_LIB);
-		goto end;
-	}
 
 	x = PEM_read_bio_X509_AUX(in, NULL, ctx->default_passwd_callback,
 	    ctx->default_passwd_callback_userdata);
@@ -716,6 +708,48 @@ SSL_CTX_use_certificate_chain_file(SSL_CTX *ctx, const char *file)
 end:
 	if (x != NULL)
 		X509_free(x);
+	return (ret);
+}
+
+int
+SSL_CTX_use_certificate_chain_file(SSL_CTX *ctx, const char *file)
+{
+	BIO *in;
+	int ret = 0;
+
+	in = BIO_new(BIO_s_file_internal());
+	if (in == NULL) {
+		SSLerr(SSL_F_SSL_CTX_USE_CERTIFICATE_CHAIN_FILE, ERR_R_BUF_LIB);
+		goto end;
+	}
+
+	if (BIO_read_filename(in, file) <= 0) {
+		SSLerr(SSL_F_SSL_CTX_USE_CERTIFICATE_CHAIN_FILE, ERR_R_SYS_LIB);
+		goto end;
+	}
+
+	ret = ssl_ctx_use_certificate_chain_bio(ctx, in);
+
+end:
+	BIO_free(in);
+	return (ret);
+}
+
+int
+SSL_CTX_use_certificate_chain_mem(SSL_CTX *ctx, void *buf, int len)
+{
+	BIO *in;
+	int ret = 0;
+
+	in = BIO_new_mem_buf(buf, len);
+	if (in == NULL) {
+		SSLerr(SSL_F_SSL_CTX_USE_CERTIFICATE_CHAIN_FILE, ERR_R_BUF_LIB);
+		goto end;
+	}
+
+	ret = ssl_ctx_use_certificate_chain_bio(ctx, in);
+
+end:
 	BIO_free(in);
 	return (ret);
 }

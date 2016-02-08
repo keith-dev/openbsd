@@ -1,4 +1,4 @@
-/* $OpenBSD: options-table.c,v 1.50 2014/04/17 12:57:28 nicm Exp $ */
+/* $OpenBSD: options-table.c,v 1.53 2015/02/06 15:09:34 nicm Exp $ */
 
 /*
  * Copyright (c) 2011 Nicholas Marriott <nicm@users.sourceforge.net>
@@ -275,40 +275,6 @@ const struct options_table_entry session_options_table[] = {
 	  .default_num = 0
 	},
 
-	{ .name = "pane-active-border-bg",
-	  .type = OPTIONS_TABLE_COLOUR,
-	  .default_num = 8,
-	  .style = "pane-active-border-style"
-	},
-
-	{ .name = "pane-active-border-fg",
-	  .type = OPTIONS_TABLE_COLOUR,
-	  .default_num = 2,
-	  .style = "pane-active-border-style"
-	},
-
-	{ .name = "pane-active-border-style",
-	  .type = OPTIONS_TABLE_STYLE,
-	  .default_str = "fg=green"
-	},
-
-	{ .name = "pane-border-bg",
-	  .type = OPTIONS_TABLE_COLOUR,
-	  .default_num = 8,
-	  .style = "pane-border-style"
-	},
-
-	{ .name = "pane-border-fg",
-	  .type = OPTIONS_TABLE_COLOUR,
-	  .default_num = 8,
-	  .style = "pane-border-style"
-	},
-
-	{ .name = "pane-border-style",
-	  .type = OPTIONS_TABLE_STYLE,
-	  .default_str = "default"
-	},
-
 	{ .name = "prefix",
 	  .type = OPTIONS_TABLE_KEY,
 	  .default_num = '\002',
@@ -390,7 +356,7 @@ const struct options_table_entry session_options_table[] = {
 
 	{ .name = "status-left",
 	  .type = OPTIONS_TABLE_STRING,
-	  .default_str = "[#S]"
+	  .default_str = "[#S] "
 	},
 
 	{ .name = "status-left-attr",
@@ -431,7 +397,7 @@ const struct options_table_entry session_options_table[] = {
 
 	{ .name = "status-right",
 	  .type = OPTIONS_TABLE_STRING,
-	  .default_str = "\"#{=22:pane_title}\" %H:%M %d-%b-%y"
+	  .default_str = " \"#{=21:pane_title}\" %H:%M %d-%b-%y"
 	},
 
 	{ .name = "status-right-attr",
@@ -646,11 +612,45 @@ const struct options_table_entry window_options_table[] = {
 	  .default_num = 0
 	},
 
+	{ .name = "pane-active-border-bg",
+	  .type = OPTIONS_TABLE_COLOUR,
+	  .default_num = 8,
+	  .style = "pane-active-border-style"
+	},
+
+	{ .name = "pane-active-border-fg",
+	  .type = OPTIONS_TABLE_COLOUR,
+	  .default_num = 2,
+	  .style = "pane-active-border-style"
+	},
+
+	{ .name = "pane-active-border-style",
+	  .type = OPTIONS_TABLE_STYLE,
+	  .default_str = "fg=green"
+	},
+
 	{ .name = "pane-base-index",
 	  .type = OPTIONS_TABLE_NUMBER,
 	  .minimum = 0,
 	  .maximum = USHRT_MAX,
 	  .default_num = 0
+	},
+
+	{ .name = "pane-border-bg",
+	  .type = OPTIONS_TABLE_COLOUR,
+	  .default_num = 8,
+	  .style = "pane-border-style"
+	},
+
+	{ .name = "pane-border-fg",
+	  .type = OPTIONS_TABLE_COLOUR,
+	  .default_num = 8,
+	  .style = "pane-border-style"
+	},
+
+	{ .name = "pane-border-style",
+	  .type = OPTIONS_TABLE_STYLE,
+	  .default_str = "default"
 	},
 
 	{ .name = "remain-on-exit",

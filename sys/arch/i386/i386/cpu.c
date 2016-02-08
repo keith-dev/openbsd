@@ -1,4 +1,4 @@
-/*	$OpenBSD: cpu.c,v 1.55 2014/03/29 18:09:29 guenther Exp $	*/
+/*	$OpenBSD: cpu.c,v 1.61 2015/02/11 05:54:48 dlg Exp $	*/
 /* $NetBSD: cpu.c,v 1.1.2.7 2000/06/26 02:04:05 sommerfeld Exp $ */
 
 /*-
@@ -68,11 +68,12 @@
 #include "ioapic.h"
 
 #include <sys/param.h>
-#include <sys/proc.h>
+#include <sys/timeout.h>
 #include <sys/systm.h>
 #include <sys/device.h>
 #include <sys/malloc.h>
 #include <sys/memrange.h>
+#include <sys/atomic.h>
 
 #include <uvm/uvm_extern.h>
 
@@ -107,6 +108,7 @@
 
 int     cpu_match(struct device *, void *, void *);
 void    cpu_attach(struct device *, struct device *, void *);
+int     cpu_activate(struct device *, int);
 void	patinit(struct cpu_info *ci);
 void	cpu_idle_mwait_cycle(void);
 void	cpu_init_mwait(struct device *);
@@ -155,7 +157,7 @@ cpu_init_first()
 #endif
 
 struct cfattach cpu_ca = {
-	sizeof(struct cpu_info), cpu_match, cpu_attach
+	sizeof(struct cpu_info), cpu_match, cpu_attach, NULL, cpu_activate
 };
 
 struct cfdriver cpu_cd = {
@@ -219,9 +221,8 @@ replacesmap(void)
 
 		pmap_extract(pmap_kernel(), kva, &pa1);
 		pmap_extract(pmap_kernel(), kva + PAGE_SIZE, &pa2);
-		pmap_kenter_pa(nva, pa1, VM_PROT_READ | VM_PROT_WRITE);
-		pmap_kenter_pa(nva + PAGE_SIZE, pa2, VM_PROT_READ | 
-		    VM_PROT_WRITE);
+		pmap_kenter_pa(nva, pa1, PROT_READ | PROT_WRITE);
+		pmap_kenter_pa(nva + PAGE_SIZE, pa2, PROT_READ | PROT_WRITE);
 		pmap_update(pmap_kernel());
 
 		/* replace 3 byte nops with stac/clac instructions */
@@ -315,7 +316,6 @@ cpu_attach(struct device *parent, struct device *self, void *aux)
 	    sizeof (struct trapframe);
 	pcb->pcb_pmap = pmap_kernel();
 	pcb->pcb_cr3 = pcb->pcb_pmap->pm_pdirpa;
-	/* pcb->pcb_cr3 = pcb->pcb_pmap->pm_pdir - KERNBASE; XXX ??? */
 
 	cpu_default_ldt(ci);	/* Use the `global' ldt until one alloc'd */
 #endif
@@ -484,9 +484,12 @@ void
 rdrand(void *v)
 {
 	struct timeout *tmo = v;
+	extern int      has_rdrand;
 	uint32_t r, valid;
 	int i;
 
+	if (has_rdrand == 0)
+		return;
 	for (i = 0; i < 4; i++) {
 		__asm volatile(
 		    "xor        %1, %1\n\t"
@@ -497,7 +500,23 @@ rdrand(void *v)
 			add_true_randomness(r);
 	}
 
-	timeout_add_msec(tmo, 10);
+	if (tmo)
+		timeout_add_msec(tmo, 10);
+}
+
+int
+cpu_activate(struct device *self, int act)
+{
+	struct cpu_info *sc = (struct cpu_info *)self;
+
+	switch (act) {
+	case DVACT_RESUME:
+		if (sc->ci_cpuid == 0)
+			rdrand(NULL);
+		break;
+	}
+
+	return (0);
 }
 
 #ifdef MULTIPROCESSOR
@@ -724,7 +743,7 @@ mp_cpu_start(struct cpu_info *ci)
 
 	pmap_activate(curproc);
 
-	pmap_kenter_pa(0, 0, VM_PROT_READ|VM_PROT_WRITE);
+	pmap_kenter_pa(0, 0, PROT_READ | PROT_WRITE);
 	memcpy((u_int8_t *)0x467, dwordptr, 4);
 	pmap_kremove(0, PAGE_SIZE);
 
@@ -834,6 +853,8 @@ cpu_init_mwait(struct device *dv)
 	else
 		mwait_size = largest;
 	printf("\n");
+	/* XXX disable mwait: ACPI says not to use it on too many systems */
+	mwait_size = 0;
 }
 
 void

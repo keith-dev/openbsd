@@ -1,4 +1,4 @@
-/*	$OpenBSD: nfs_bio.c,v 1.76 2014/07/08 17:19:26 deraadt Exp $	*/
+/*	$OpenBSD: nfs_bio.c,v 1.79 2015/02/10 21:56:10 miod Exp $	*/
 /*	$NetBSD: nfs_bio.c,v 1.25.4.2 1996/07/08 20:47:04 jtc Exp $	*/
 
 /*
@@ -132,7 +132,7 @@ nfs_bioread(struct vnode *vp, struct uio *uio, int ioflag, struct ucred *cred)
 	    if ((vp->v_flag & VROOT) && vp->v_type == VLNK) {
 		    return (nfs_readlinkrpc(vp, uio, cred));
 	    }
-	    baddr = (caddr_t)0;
+	    baddr = NULL;
 	    switch (vp->v_type) {
 	    case VREG:
 		nfsstats.biocache_reads++;
@@ -224,7 +224,7 @@ again:
 	    if (n > 0) {
 		if (!baddr)
 			baddr = bp->b_data;
-		error = uiomove(baddr + on, (int)n, uio);
+		error = uiomovei(baddr + on, (int)n, uio);
 	    }
 
 	    if (vp->v_type == VLNK)
@@ -350,7 +350,7 @@ again:
 			goto again;
 		}
 
-		error = uiomove((char *)bp->b_data + on, n, uio);
+		error = uiomovei((char *)bp->b_data + on, n, uio);
 		if (error) {
 			bp->b_flags |= B_ERROR;
 			brelse(bp);
@@ -592,7 +592,7 @@ nfs_doio(struct buf *bp, struct proc *p)
 				+ diff);
 			if (len > 0) {
 			    len = min(len, uiop->uio_resid);
-			    bzero((char *)bp->b_data + diff, len);
+			    memset((char *)bp->b_data + diff, 0, len);
 			    bp->b_validend = diff + len;
 			} else
 			    bp->b_validend = diff;

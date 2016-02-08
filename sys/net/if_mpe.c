@@ -1,4 +1,4 @@
-/* $OpenBSD: if_mpe.c,v 1.35 2014/07/22 11:06:09 mpi Exp $ */
+/* $OpenBSD: if_mpe.c,v 1.41 2014/12/22 11:05:53 mpi Exp $ */
 
 /*
  * Copyright (c) 2008 Pierre-Yves Ritschard <pyr@spootnik.org>
@@ -25,20 +25,16 @@
 #include <sys/ioctl.h>
 
 #include <net/if.h>
+#include <net/if_var.h>
 #include <net/if_types.h>
 #include <net/netisr.h>
 #include <net/route.h>
 
-#ifdef	INET
 #include <netinet/in.h>
 #include <netinet/ip.h>
-#endif
 
 #ifdef INET6
 #include <netinet/ip6.h>
-#ifndef INET
-#include <netinet/in.h>
-#endif
 #endif /* INET6 */
 
 #include "bpfilter.h"
@@ -84,7 +80,6 @@ mpe_clone_create(struct if_clone *ifc, int unit)
 {
 	struct ifnet 		*ifp;
 	struct mpe_softc	*mpeif;
-	int 			 s;
 
 	if ((mpeif = malloc(sizeof(*mpeif),
 	    M_DEVBUF, M_NOWAIT|M_ZERO)) == NULL)
@@ -110,9 +105,7 @@ mpe_clone_create(struct if_clone *ifc, int unit)
 	bpfattach(&ifp->if_bpf, ifp, DLT_LOOP, sizeof(u_int32_t));
 #endif
 
-	s = splnet();
 	LIST_INSERT_HEAD(&mpeif_list, mpeif, sc_list);
-	splx(s);
 
 	return (0);
 }
@@ -121,11 +114,8 @@ int
 mpe_clone_destroy(struct ifnet *ifp)
 {
 	struct mpe_softc	*mpeif = ifp->if_softc;
-	int			 s;
 
-	s = splnet();
 	LIST_REMOVE(mpeif, sc_list);
-	splx(s);
 
 	if_detach(ifp);
 	free(mpeif, M_DEVBUF, 0);
@@ -169,7 +159,7 @@ mpestart(struct ifnet *ifp)
 			continue;
 		}
 
-		rt = rtalloc1(sa, RT_REPORT, 0);
+		rt = rtalloc(sa, RT_REPORT|RT_RESOLVE, 0);
 		if (rt == NULL) {
 			/* no route give up */
 			m_freem(m);
@@ -192,7 +182,7 @@ mpestart(struct ifnet *ifp)
 		sa->sa_family = AF_MPLS;
 
 		mpls_output(rt->rt_ifp, m, sa, rt);
-		RTFREE(rt);
+		rtfree(rt);
 	}
 }
 
@@ -219,7 +209,6 @@ mpeoutput(struct ifnet *ifp, struct mbuf *m, struct sockaddr *dst,
 
 	error = 0;
 	switch (dst->sa_family) {
-#ifdef INET
 	case AF_INET:
 		if (rt && rt->rt_flags & RTF_MPLS) {
 			shim.shim_label =
@@ -248,7 +237,6 @@ mpeoutput(struct ifnet *ifp, struct mbuf *m, struct sockaddr *dst,
 		m_copyback(m, sizeof(sa_family_t), sizeof(in_addr_t),
 		    (caddr_t)&((satosin(dst)->sin_addr)), M_NOWAIT);
 		break;
-#endif
 	default:
 		m_freem(m);
 		error = EPFNOSUPPORT;
@@ -277,13 +265,12 @@ out:
 int
 mpeioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 {
-	int			 error;
 	struct mpe_softc	*ifm;
 	struct ifreq		*ifr;
 	struct shim_hdr		 shim;
+	int			 s, error = 0;
 
 	ifr = (struct ifreq *)data;
-	error = 0;
 	switch (cmd) {
 	case SIOCSIFADDR:
 		if (!ISSET(ifp->if_flags, IFF_UP))
@@ -331,12 +318,14 @@ mpeioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 		if (error)
 			break;
 		ifm = ifp->if_softc;
+		s = splsoftnet();
 		if (ifm->sc_shim.shim_label) {
 			/* remove old MPLS route */
 			mpe_newlabel(ifp, RTM_DELETE, &ifm->sc_shim);
 		}
 		/* add new MPLS route */
 		error = mpe_newlabel(ifp, RTM_ADD, &shim);
+		splx(s);
 		if (error)
 			break;
 		ifm->sc_shim.shim_label = shim.shim_label;
@@ -347,7 +336,9 @@ mpeioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 		if (ifr->ifr_rdomainid != ifp->if_rdomain) {
 			if (ifm->sc_shim.shim_label) {
 				shim.shim_label = ifm->sc_shim.shim_label;
+				s = splsoftnet();
 				error = mpe_newlabel(ifp, RTM_ADD, &shim);
+				splx(s);
 			}
 		}
 		/* return with ENOTTY so that the parent handler finishes */

@@ -1,4 +1,4 @@
-/* $OpenBSD: wsmoused.c,v 1.32 2014/05/14 18:23:22 shadchin Exp $ */
+/* $OpenBSD: wsmoused.c,v 1.35 2014/12/23 10:24:22 shadchin Exp $ */
 
 /*
  * Copyright (c) 2001 Jean-Baptiste Marchand, Julien Montagne and Jerome Verdon
@@ -218,14 +218,6 @@ mouse_installmap(char *arg)
 	return TRUE;
 }
 
-/* mouse_map : converts physical buttons to logical buttons */
-static void
-mouse_map(struct wscons_event *orig, struct wscons_event *mapped)
-{
-	mapped->type = orig->type;
-	mapped->value = p2l[orig->value];
-}
-
 /* terminate signals handler */
 static void
 terminate(int sig)
@@ -262,7 +254,9 @@ mouse_click(struct wscons_event *event)
 	struct timeval max_date;
 	struct timeval now;
 	struct timeval delay;
-	int i = event->value; /* button number */
+	int i; /* button number */
+	
+	i = event->value = p2l[event->value];
 
 	gettimeofday(&now, NULL);
 	delay.tv_sec = mouse.clickthreshold / 1000;
@@ -329,24 +323,15 @@ normalize_event(struct wscons_event *event)
 }
 
 /* send a wscons_event to the kernel */
-static int
+static void
 treat_event(struct wscons_event *event)
 {
-	struct wscons_event mapped_event;
-
 	if (IS_MOTION_EVENT(event->type)) {
 		ioctl(mouse.cfd, WSDISPLAYIO_WSMOUSED, event);
-		return 1;
 	} else if (IS_BUTTON_EVENT(event->type) &&
 	    (uint)event->value < MOUSE_MAXBUTTON) {
-		mouse_map(event, &mapped_event);
-		mouse_click(&mapped_event);
-		return 1;
+		mouse_click(event);
 	}
-	if (event->type == WSCONS_EVENT_WSMOUSED_CLOSE)
-		/* we have to close mouse fd */
-		return 0;
-	return 1;
 }
 
 /* split a full mouse event into multiples wscons events */
@@ -407,24 +392,9 @@ wsmoused(void)
 	struct pollfd pfd[1];
 	int res;
 	u_char b;
-	struct stat mdev_stat;
-
-	/* initialization */
-
-	event.type = WSCONS_EVENT_WSMOUSED_ON;
-	if (mouse.proto == P_WSCONS) {
-		/* get major and minor of mouse device */
-		res = stat(mouse.portname, &mdev_stat);
-		if (res != -1)
-			event.value = mdev_stat.st_rdev;
-		else
-			event.value = 0;
-	} else {
-		/* X11 won't start when using wsmoused(8) with a serial mouse */
-		event.value = 0;
-	}
 
 	/* notify kernel the start of wsmoused */
+	event.type = WSCONS_EVENT_WSMOUSED_ON;
 	res = ioctl(mouse.cfd, WSDISPLAYIO_WSMOUSED, &event);
 	if (res != 0) {
 		/* the display driver has no getchar() method */
@@ -446,56 +416,7 @@ wsmoused(void)
 		if (mouse.proto == P_WSCONS) {
 			/* wsmouse supported mouse */
 			read(mouse.mfd, &event, sizeof(event));
-			res = treat_event(&event);
-			if (!res) {
-				/*
-				 * close mouse device and sleep until
-				 * the X server releases it
-				 */
-
-				struct wscons_event sleeping;
-				unsigned int tries;
-
-				/* restore mouse resolution to default value */
-				res = WSMOUSE_RES_DEFAULT;
-				ioctl(mouse.mfd, WSMOUSEIO_SRES, &res);
-
-				close(mouse.mfd);
-				mouse.mfd = -1;
-
-				/* sleep until X server releases mouse device */
-				sleeping.type = WSCONS_EVENT_WSMOUSED_SLEEP;
-				sleeping.value = 0;
-				ioctl(mouse.cfd, WSDISPLAYIO_WSMOUSED,
-				    &sleeping);
-
-				/*
-				 * Since the X server could still be running
-				 * (e.g. when switching from the graphics
-				 * screen to a virtual text console), it might
-				 * not have freed the device yet.
-				 *
-				 * Try to open the device until it succeeds.
-				 */
-				tries = 0;
-				for (;;) {
-					if ((mouse.mfd = open(mouse.portname,
-					    O_RDONLY | O_NONBLOCK, 0)) != -1)
-						break;
-
-					if (tries < 10) {
-						tries++;
-						sleep(1);
-					} else {
-						logwarn("unable to open %s, "
-						    "will retry in 10 seconds",
-						    mouse.portname);
-						sleep(10);
-					}
-				}
-
-				wsmouse_init();
-			}
+			treat_event(&event);
 		} else {
 			/* serial mouse (not supported by wsmouse) */
 			res = read(mouse.mfd, &b, 1);

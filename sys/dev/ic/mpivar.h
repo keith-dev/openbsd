@@ -1,4 +1,4 @@
-/*	$OpenBSD: mpivar.h,v 1.37 2014/04/16 01:19:28 dlg Exp $ */
+/*	$OpenBSD: mpivar.h,v 1.39 2014/09/03 00:46:04 dlg Exp $ */
 
 /*
  * Copyright (c) 2005 David Gwynne <dlg@openbsd.org>
@@ -16,6 +16,8 @@
  * ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
+
+#include <sys/task.h>
 
 /* #define MPI_DEBUG */
 #ifdef MPI_DEBUG
@@ -149,9 +151,7 @@ struct mpi_softc {
 	struct mutex		sc_evt_scan_mtx;
 	struct scsi_iohandler	sc_evt_scan_handler;
 
-	struct workq_task	sc_evt_rescan;
-	struct mutex		sc_evt_rescan_mtx;
-	u_int			sc_evt_rescan_sem;
+	struct task		sc_evt_rescan;
 
 	size_t			sc_fw_len;
 	struct mpi_dmamem	*sc_fw;

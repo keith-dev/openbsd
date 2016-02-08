@@ -1,4 +1,4 @@
-/*	$OpenBSD: i915_dma.c,v 1.16 2014/02/18 02:36:49 jsg Exp $	*/
+/*	$OpenBSD: i915_dma.c,v 1.18 2015/02/12 04:56:03 kettenis Exp $	*/
 /* i915_dma.c -- DMA support for the I915 -*- linux-c -*-
  */
 /*
@@ -194,7 +194,7 @@ int
 intel_setup_mchbar(struct inteldrm_softc *dev_priv,
     struct pci_attach_args *bpa)
 {
-	struct drm_device	*dev = (struct drm_device *)dev_priv->drmdev;
+	struct drm_device	*dev = dev_priv->dev;
 	u_int64_t		 mchbar_addr;
 	pcireg_t		 tmp, low, high = 0;
 	u_long			 addr;
@@ -264,7 +264,7 @@ void
 intel_teardown_mchbar(struct inteldrm_softc *dev_priv,
     struct pci_attach_args *bpa, int disable)
 {
-	struct drm_device	*dev = (struct drm_device *)dev_priv->drmdev;
+	struct drm_device	*dev = dev_priv->dev;
 	u_int64_t		 mchbar_addr;
 	pcireg_t		 tmp, low, high = 0;
 	int			 reg;
@@ -357,9 +357,9 @@ i915_load_modeset_init(struct drm_device *dev)
 cleanup_irq:
 	drm_irq_uninstall(dev);
 cleanup_gem:
-	DRM_LOCK();
+	mutex_lock(&dev->struct_mutex);
 	i915_gem_cleanup_ringbuffer(dev);
-	DRM_UNLOCK();
+	mutex_unlock(&dev->struct_mutex);
 	i915_gem_cleanup_aliasing_ppgtt(dev);
 cleanup_gem_stolen:
 #ifdef notyet
@@ -407,9 +407,9 @@ i915_driver_close(struct drm_device *dev, struct drm_file *file)
 {
 	struct drm_i915_file_private *file_priv = file->driver_priv;
 
-	DRM_LOCK();
+	mutex_lock(&dev->struct_mutex);
 	i915_gem_context_close(dev, file);
 	i915_gem_release(dev, file);
-	DRM_UNLOCK();
+	mutex_unlock(&dev->struct_mutex);
 	kfree(file_priv);
 }

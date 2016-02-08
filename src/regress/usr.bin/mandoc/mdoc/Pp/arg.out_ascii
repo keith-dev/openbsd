@@ -1,4 +1,4 @@
-PP-ARG(1)                  OpenBSD Reference Manual                  PP-ARG(1)
+PP-ARG(1)                   General Commands Manual                  PP-ARG(1)
 
 NNAAMMEE
      PPpp--aarrgg - paragraph macro with arguments
@@ -7,5 +7,8 @@ DDEESSCCRRIIPPTTIIOONN
      line 1
 
      line 2
+     line 3
 
-OpenBSD                       September 20, 2010                       OpenBSD
+     line 4
+
+OpenBSD                        February 4, 2015                        OpenBSD

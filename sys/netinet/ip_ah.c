@@ -1,4 +1,4 @@
-/*	$OpenBSD: ip_ah.c,v 1.111 2014/07/22 11:06:10 mpi Exp $ */
+/*	$OpenBSD: ip_ah.c,v 1.114 2014/12/28 10:02:37 tedu Exp $ */
 /*
  * The authors of this code are John Ioannidis (ji@tla.org),
  * Angelos D. Keromytis (kermit@csd.uch.gr) and
@@ -44,18 +44,14 @@
 #include <sys/socket.h>
 
 #include <net/if.h>
+#include <net/if_var.h>
 #include <net/bpf.h>
 
-#ifdef INET
 #include <netinet/in.h>
 #include <netinet/ip.h>
 #include <netinet/ip_var.h>
-#endif /* INET */
 
 #ifdef INET6
-#ifndef INET
-#include <netinet/in.h>
-#endif /* INET */
 #include <netinet/ip6.h>
 #endif /* INET6 */
 
@@ -133,14 +129,6 @@ ah_init(struct tdb *tdbp, struct xformsw *xsp, struct ipsecinit *ii)
 		thash = &auth_hash_hmac_sha2_512_256;
 		break;
 
-	case SADB_X_AALG_MD5:
-		thash = &auth_hash_key_md5;
-		break;
-
-	case SADB_X_AALG_SHA1:
-		thash = &auth_hash_key_sha1;
-		break;
-
 	default:
 		DPRINTF(("ah_init(): unsupported authentication algorithm %d specified\n", ii->ii_authalg));
 		return EINVAL;
@@ -209,9 +197,7 @@ ah_massage_headers(struct mbuf **m0, int proto, int skip, int alg, int out)
 	unsigned char *ptr;
 	int off, count;
 
-#ifdef INET
 	struct ip *ip;
-#endif /* INET */
 
 #ifdef INET6
 	struct ip6_ext *ip6e;
@@ -220,7 +206,6 @@ ah_massage_headers(struct mbuf **m0, int proto, int skip, int alg, int out)
 #endif /* INET6 */
 
 	switch (proto) {
-#ifdef INET
 	case AF_INET:
 		/*
 		 * This is the least painful way of dealing with IPv4 header
@@ -239,15 +224,7 @@ ah_massage_headers(struct mbuf **m0, int proto, int skip, int alg, int out)
 		ip->ip_tos = 0;
 		ip->ip_ttl = 0;
 		ip->ip_sum = 0;
-
-		/*
-		 * On input, fix ip_len which has been byte-swapped
-		 * at ip_input().
-		 */
-		if (alg == CRYPTO_MD5_KPDK || alg == CRYPTO_SHA1_KPDK)
-			ip->ip_off &= htons(IP_DF);
-		else
-			ip->ip_off = 0;
+		ip->ip_off = 0;
 
 		ptr = mtod(m, unsigned char *) + sizeof(struct ip);
 
@@ -352,7 +329,6 @@ ah_massage_headers(struct mbuf **m0, int proto, int skip, int alg, int out)
 		}
 
 		break;
-#endif /* INET */
 
 #ifdef INET6
 	case AF_INET6:  /* Ugly... */
@@ -1037,7 +1013,6 @@ ah_output(struct mbuf *m, struct tdb *tdb, struct mbuf **mp, int skip,
 	rplen = AH_FLENGTH + sizeof(u_int32_t);
 
 	switch (tdb->tdb_dst.sa.sa_family) {
-#ifdef INET
 	case AF_INET:
 		/* Check for IP maximum packet size violations. */
 		if (rplen + ahx->authsize + m->m_pkthdr.len > IP_MAXPACKET) {
@@ -1049,7 +1024,6 @@ ah_output(struct mbuf *m, struct tdb *tdb, struct mbuf **mp, int skip,
 			return EMSGSIZE;
 		}
 		break;
-#endif /* INET */
 
 #ifdef INET6
 	case AF_INET6:
@@ -1208,7 +1182,6 @@ ah_output(struct mbuf *m, struct tdb *tdb, struct mbuf **mp, int skip,
 		 * header length as it will be fixed by our caller.
 		 */
 		switch (tdb->tdb_dst.sa.sa_family) {
-#ifdef INET
 		case AF_INET:
 			bcopy(((caddr_t)(tc + 1)) +
 			    offsetof(struct ip, ip_len),
@@ -1217,7 +1190,6 @@ ah_output(struct mbuf *m, struct tdb *tdb, struct mbuf **mp, int skip,
 			m_copyback(m, offsetof(struct ip, ip_len),
 			    sizeof(u_int16_t), &iplen, M_NOWAIT);
 			break;
-#endif /* INET */
 
 #ifdef INET6
 		case AF_INET6:

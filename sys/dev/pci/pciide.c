@@ -1,4 +1,4 @@
-/*	$OpenBSD: pciide.c,v 1.347 2014/07/13 23:19:51 sasano Exp $	*/
+/*	$OpenBSD: pciide.c,v 1.351 2015/01/09 07:29:45 jsg Exp $	*/
 /*	$NetBSD: pciide.c,v 1.127 2001/08/03 01:31:08 tsutsui Exp $	*/
 
 /*
@@ -89,9 +89,9 @@ int wdcdebug_pciide_mask = WDCDEBUG_PCIIDE_MASK;
 #include <sys/systm.h>
 #include <sys/device.h>
 #include <sys/malloc.h>
+#include <sys/endian.h>
 
 #include <machine/bus.h>
-#include <machine/endian.h>
 
 #include <dev/ata/atavar.h>
 #include <dev/ata/satareg.h>
@@ -561,6 +561,18 @@ const struct pciide_product_desc pciide_intel_products[] =  {
 	  0,
 	  piixsata_chip_map
 	},
+	{ PCI_PRODUCT_INTEL_C610_SATA_1, /* Intel C610 SATA */
+	  0,
+	  piixsata_chip_map
+	},
+	{ PCI_PRODUCT_INTEL_C610_SATA_2, /* Intel C610 SATA */
+	  0,
+	  piixsata_chip_map
+	},
+	{ PCI_PRODUCT_INTEL_C610_SATA_3, /* Intel C610 SATA */
+	  0,
+	  piixsata_chip_map
+	},
 	{ PCI_PRODUCT_INTEL_6SERIES_SATA_1, /* Intel 6 Series SATA */
 	  0,
 	  piixsata_chip_map
@@ -622,6 +634,14 @@ const struct pciide_product_desc pciide_intel_products[] =  {
 	  piixsata_chip_map
 	},
 	{ PCI_PRODUCT_INTEL_8SERIES_LP_SATA_4, /* Intel 8 Series SATA */
+	  0,
+	  piixsata_chip_map
+	},
+	{ PCI_PRODUCT_INTEL_9SERIES_SATA_1, /* Intel 9 Series SATA */
+	  0,
+	  piixsata_chip_map
+	},
+	{ PCI_PRODUCT_INTEL_9SERIES_SATA_2, /* Intel 9 Series SATA */
 	  0,
 	  piixsata_chip_map
 	},
@@ -1567,9 +1587,9 @@ pciide_activate(struct device *self, int act)
 			sc->sc_save2[2] = pciide_pci_read(sc->sc_pc,
 			    sc->sc_tag, ICH_SATA_PCS);
 		} else if (sc->sc_pp->chip_map == sii3112_chip_map) {
-			sc->sc_save[0] = pci_conf_read(sc->sc_pc,
+			sc->sc_save2[0] = pci_conf_read(sc->sc_pc,
 			    sc->sc_tag, SII3112_SCS_CMD);
-			sc->sc_save[1] = pci_conf_read(sc->sc_pc,
+			sc->sc_save2[1] = pci_conf_read(sc->sc_pc,
 			    sc->sc_tag, SII3112_PCI_CFGCTL);
 		} else if (sc->sc_pp->chip_map == ite_chip_map) {
 			sc->sc_save2[0] = pci_conf_read(sc->sc_pc,
@@ -1614,10 +1634,10 @@ pciide_activate(struct device *self, int act)
 			    ICH_SATA_PCS, sc->sc_save2[2]);
 		} else if (sc->sc_pp->chip_map == sii3112_chip_map) {
 			pci_conf_write(sc->sc_pc, sc->sc_tag,
-			    SII3112_SCS_CMD, sc->sc_save[0]);
+			    SII3112_SCS_CMD, sc->sc_save2[0]);
 			delay(50 * 1000);
 			pci_conf_write(sc->sc_pc, sc->sc_tag,
-			    SII3112_PCI_CFGCTL, sc->sc_save[1]);
+			    SII3112_PCI_CFGCTL, sc->sc_save2[1]);
 			delay(50 * 1000);
 		} else if (sc->sc_pp->chip_map == ite_chip_map) {
 			pci_conf_write(sc->sc_pc, sc->sc_tag,

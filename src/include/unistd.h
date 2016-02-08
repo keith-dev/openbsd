@@ -1,4 +1,4 @@
-/*	$OpenBSD: unistd.h,v 1.89 2014/07/08 21:35:39 tedu Exp $ */
+/*	$OpenBSD: unistd.h,v 1.97 2014/12/13 20:42:41 tedu Exp $ */
 /*	$NetBSD: unistd.h,v 1.26.4.1 1996/05/28 02:31:51 mrg Exp $	*/
 
 /*-
@@ -144,7 +144,7 @@
 #define _XOPEN_UNIX				(-1)
 
 /* Define the POSIX.2 version we target for compliance. */
-#define _POSIX2_VERSION				199212L
+#define _POSIX2_VERSION				200809L
 
 /* the sysconf(3) variable values are part of the ABI */
 
@@ -404,17 +404,15 @@ int	 fsync(int);
 int	 ftruncate(int, off_t);
 int	 getlogin_r(char *, size_t)
 		__attribute__((__bounded__(__string__,1,2)));
+ssize_t	 readlink(const char * __restrict, char * __restrict, size_t)
+		__attribute__ ((__bounded__(__string__,2,3)));
 #endif
 #if __POSIX_VISIBLE >= 199506
 int	 fdatasync(int);
 #endif
 
 #if __XPG_VISIBLE || __BSD_VISIBLE
-#if __BSD_VISIBLE
-int	crypt_checkpass(const char *, const char *);
-#endif
 char	*crypt(const char *, const char *);
-int	 encrypt(char *, int);
 int	 fchdir(int);
 int	 fchown(int, uid_t, gid_t);
 long	 gethostid(void);
@@ -424,13 +422,9 @@ int	 lchown(const char *, uid_t, gid_t);
 int	 mkstemp(char *);
 char	*mktemp(char *);
 int	 nice(int);
-int	 readlink(const char *, char *, size_t)
-		__attribute__ ((__bounded__(__string__,2,3)));
-int	 setkey(const char *);
-int	 setpgrp(pid_t pid, pid_t pgrp);	/* obsoleted by setpgid() */
 int	 setregid(gid_t, gid_t);
 int	 setreuid(uid_t, uid_t);
-void	 swab(const void *, void *, size_t);
+void	 swab(const void *__restrict, void *__restrict, ssize_t);
 void	 sync(void);
 int	 truncate(const char *, off_t);
 useconds_t	 ualarm(useconds_t, useconds_t);
@@ -485,10 +479,15 @@ int	unlinkat(int, const char *, int);
 #endif
 
 #if __BSD_VISIBLE
+int	dup3(int, int, int);
+int	pipe2(int [2], int);
+#endif
+
+#if __BSD_VISIBLE
 int	 acct(const char *);
 int	 closefrom(int);
-int	 des_cipher(const char *, char *, int32_t, int);
-int	 des_setkey(const char *);
+int	 crypt_checkpass(const char *, const char *);
+int	 crypt_newhash(const char *, const char *, char *, size_t);
 void	 endusershell(void);
 int	 exect(const char *, char * const *, char * const *);
 char	*fflagstostr(u_int32_t);
@@ -499,6 +498,7 @@ int	 getgrouplist(const char *, gid_t, gid_t *, int *);
 mode_t	 getmode(const void *, mode_t);
 int	 getresgid(gid_t *, gid_t *, gid_t *);
 int	 getresuid(uid_t *, uid_t *, uid_t *);
+pid_t	 getthrid(void);
 char	*getusershell(void);
 int	 initgroups(const char *, gid_t);
 int	 iruserok(u_int32_t, int, const char *, const char *);
@@ -532,6 +532,7 @@ int	 sethostid(long);
 int	 sethostname(const char *, size_t);
 int	 setlogin(const char *);
 void	*setmode(const char *);
+int	 setpgrp(pid_t _pid, pid_t _pgrp);	/* BSD compat version */
 int	 setresgid(gid_t, gid_t, gid_t);
 int	 setresuid(uid_t, uid_t, uid_t);
 void	 setusershell(void);

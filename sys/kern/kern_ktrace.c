@@ -1,4 +1,4 @@
-/*	$OpenBSD: kern_ktrace.c,v 1.69 2014/07/13 15:46:21 uebayasi Exp $	*/
+/*	$OpenBSD: kern_ktrace.c,v 1.73 2014/12/29 05:29:27 miod Exp $	*/
 /*	$NetBSD: kern_ktrace.c,v 1.23 1996/02/09 18:59:36 christos Exp $	*/
 
 /*
@@ -39,6 +39,7 @@
 #include <sys/file.h>
 #include <sys/namei.h>
 #include <sys/vnode.h>
+#include <sys/lock.h>
 #include <sys/ktrace.h>
 #include <sys/malloc.h>
 #include <sys/syslog.h>
@@ -47,6 +48,8 @@
 #include <sys/mount.h>
 #include <sys/syscall.h>
 #include <sys/syscallargs.h>
+
+#include <uvm/uvm_extern.h>
 
 void	ktrinitheaderraw(struct ktr_header *, uint, pid_t, pid_t);
 void	ktrinitheader(struct ktr_header *, struct proc *, int);
@@ -132,7 +135,7 @@ ktrinitheader(struct ktr_header *kth, struct proc *p, int type)
 {
 	ktrinitheaderraw(kth, type, p->p_p->ps_pid,
 	    p->p_pid + THREAD_PID_OFFSET);
-	bcopy(p->p_comm, kth->ktr_comm, MAXCOMLEN);
+	memcpy(kth->ktr_comm, p->p_comm, MAXCOMLEN);
 }
 
 void
@@ -341,7 +344,7 @@ ktrstruct(struct proc *p, const char *name, const void *data, size_t datalen)
 	buflen = strlen(name) + 1 + datalen;
 	buf = malloc(buflen, M_TEMP, M_WAITOK);
 	strlcpy(buf, name, buflen);
-	bcopy(data, buf + strlen(name) + 1, datalen);
+	memcpy(buf + strlen(name) + 1, data, datalen);
 	kth.ktr_len = buflen;
 
 	ktrwrite(p, &kth, buf);
@@ -423,7 +426,6 @@ sys_ktrace(struct proc *curp, void *v, register_t *retval)
 		 * an operation which requires a file argument.
 		 */
 		cred = curp->p_ucred;
-		crhold(cred);
 		NDINIT(&nd, LOOKUP, FOLLOW, UIO_USERSPACE, SCARG(uap, fname),
 		    curp);
 		if ((error = vn_open(&nd, FREAD|FWRITE|O_NOFOLLOW, 0)) != 0)
@@ -500,8 +502,6 @@ sys_ktrace(struct proc *curp, void *v, register_t *retval)
 done:
 	if (vp != NULL)
 		(void) vn_close(vp, FREAD|FWRITE, cred, curp);
-	if (cred != NULL)
-		crfree(cred);
 	return (error);
 }
 

@@ -1,4 +1,4 @@
-/*	$OpenBSD: kroute.c,v 1.198 2014/06/23 03:46:17 guenther Exp $ */
+/*	$OpenBSD: kroute.c,v 1.202 2015/02/11 05:48:53 claudio Exp $ */
 
 /*
  * Copyright (c) 2003, 2004 Henning Brauer <henning@openbsd.org>
@@ -199,7 +199,8 @@ kr_init(void)
 	unsigned int	tid = RTABLE_ANY;
 	socklen_t	optlen;
 
-	if ((kr_state.fd = socket(AF_ROUTE, SOCK_RAW, 0)) == -1) {
+	if ((kr_state.fd = socket(AF_ROUTE,
+	    SOCK_RAW | SOCK_CLOEXEC | SOCK_NONBLOCK, 0)) == -1) {
 		log_warn("kr_init: socket");
 		return (-1);
 	}
@@ -245,19 +246,20 @@ ktable_new(u_int rtableid, u_int rdomid, char *name, char *ifname, int fs,
 {
 	struct ktable	**xkrt;
 	struct ktable	 *kt;
-	size_t		  newsize, oldsize;
+	size_t		  oldsize;
 
 	/* resize index table if needed */
 	if (rtableid >= krt_size) {
 		oldsize = sizeof(struct ktable *) * krt_size;
-		newsize = sizeof(struct ktable *) * (rtableid + 1);
-		if ((xkrt = realloc(krt, newsize)) == NULL) {
+		if ((xkrt = reallocarray(krt, rtableid + 1,
+		    sizeof(struct ktable *))) == NULL) {
 			log_warn("ktable_new");
 			return (-1);
 		}
 		krt = xkrt;
 		krt_size = rtableid + 1;
-		bzero((char *)krt + oldsize, newsize - oldsize);
+		bzero((char *)krt + oldsize,
+		    krt_size * sizeof(struct ktable *) - oldsize);
 	}
 
 	if (krt[rtableid])
@@ -3022,6 +3024,8 @@ dispatch_rtmsg(void)
 	struct ktable		*kt;
 
 	if ((n = read(kr_state.fd, &buf, sizeof(buf))) == -1) {
+		if (errno == EAGAIN || errno == EINTR)
+			return (0);
 		log_warn("dispatch_rtmsg: read error");
 		return (-1);
 	}
@@ -3034,6 +3038,9 @@ dispatch_rtmsg(void)
 	lim = buf + n;
 	for (next = buf; next < lim; next += rtm->rtm_msglen) {
 		rtm = (struct rt_msghdr *)next;
+		if (lim < next + sizeof(u_short) ||
+		    lim < next + rtm->rtm_msglen)
+			fatalx("dispatch_rtmsg: partial rtm in buffer");
 		if (rtm->rtm_version != RTM_VERSION)
 			continue;
 

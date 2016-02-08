@@ -1,4 +1,4 @@
-/*	$OpenBSD: vfs_cache.c,v 1.36 2013/11/27 15:48:43 jsing Exp $	*/
+/*	$OpenBSD: vfs_cache.c,v 1.46 2015/01/28 20:16:04 tedu Exp $	*/
 /*	$NetBSD: vfs_cache.c,v 1.13 1996/02/04 02:18:09 christos Exp $	*/
 
 /*
@@ -37,6 +37,7 @@
 #include <sys/time.h>
 #include <sys/mount.h>
 #include <sys/vnode.h>
+#include <sys/lock.h>
 #include <sys/namei.h>
 #include <sys/errno.h>
 #include <sys/malloc.h>
@@ -348,7 +349,7 @@ cache_enter(struct vnode *dvp, struct vnode *vp, struct componentname *cnp)
 	/*
 	 * allocate, or recycle (free and allocate) an ncp.
 	 */
-	if (numcache >= desiredvnodes) {
+	if (numcache >= initialvnodes) {
 		if ((ncp = TAILQ_FIRST(&nclruhead)) != NULL)
 			cache_zap(ncp);
 		else if ((ncp = TAILQ_FIRST(&nclruneghead)) != NULL)
@@ -367,7 +368,7 @@ cache_enter(struct vnode *dvp, struct vnode *vp, struct componentname *cnp)
 	ncp->nc_dvp = dvp;
 	ncp->nc_dvpid = dvp->v_id;
 	ncp->nc_nlen = cnp->cn_namelen;
-	bcopy(cnp->cn_nameptr, ncp->nc_name, (unsigned)ncp->nc_nlen);
+	memcpy(ncp->nc_name, cnp->cn_nameptr, ncp->nc_nlen);
 	if (RB_EMPTY(&dvp->v_nc_tree)) {
 		vhold(dvp);
 	}
@@ -399,7 +400,7 @@ cache_enter(struct vnode *dvp, struct vnode *vp, struct componentname *cnp)
 		TAILQ_INSERT_TAIL(&nclruneghead, ncp, nc_neg);
 		numneg++;
 	}
-	if (numneg  > desiredvnodes) {
+	if (numneg  > initialvnodes) {
 		if ((ncp = TAILQ_FIRST(&nclruneghead))
 		    != NULL)
 			cache_zap(ncp);
@@ -417,8 +418,8 @@ nchinit()
 {
 	TAILQ_INIT(&nclruhead);
 	TAILQ_INIT(&nclruneghead);
-	pool_init(&nch_pool, sizeof(struct namecache), 0, 0, 0, "nchpl",
-	    &pool_allocator_nointr);
+	pool_init(&nch_pool, sizeof(struct namecache), 0, 0, PR_WAITOK,
+	    "nchpl", NULL);
 }
 
 /*
@@ -447,10 +448,6 @@ cache_purge(struct vnode *vp)
 /*
  * Cache flush, a whole filesystem; called when filesys is umounted to
  * remove entries that would now be invalid
- *
- * The line "nxtcp = nchhead" near the end is to avoid potential problems
- * if the cache lru chain is modified while we are dumping the
- * inode.  This makes the algorithm O(n^2), but do you think I care?
  */
 void
 cache_purgevfs(struct mount *mp)
@@ -458,27 +455,21 @@ cache_purgevfs(struct mount *mp)
 	struct namecache *ncp, *nxtcp;
 
 	/* whack the regular entries */
-	for (ncp = TAILQ_FIRST(&nclruhead); ncp != TAILQ_END(&nclruhead);
-	    ncp = nxtcp) {
+	for (ncp = TAILQ_FIRST(&nclruhead); ncp != NULL; ncp = nxtcp) {
+		nxtcp = TAILQ_NEXT(ncp, nc_lru);
 		if (ncp->nc_dvp == NULL || ncp->nc_dvp->v_mount != mp) {
-			nxtcp = TAILQ_NEXT(ncp, nc_lru);
 			continue;
 		}
 		/* free the resources we had */
 		cache_zap(ncp);
-		/* cause rescan of list, it may have altered */
-		nxtcp = TAILQ_FIRST(&nclruhead);
 	}
 	/* whack the negative entries */
-	for (ncp = TAILQ_FIRST(&nclruneghead); ncp != TAILQ_END(&nclruneghead);
-	    ncp = nxtcp) {
+	for (ncp = TAILQ_FIRST(&nclruneghead); ncp != NULL; ncp = nxtcp) {
+		nxtcp = TAILQ_NEXT(ncp, nc_neg);
 		if (ncp->nc_dvp == NULL || ncp->nc_dvp->v_mount != mp) {
-			nxtcp = TAILQ_NEXT(ncp, nc_neg);
 			continue;
 		}
 		/* free the resources we had */
 		cache_zap(ncp);
-		/* cause rescan of list, it may have altered */
-		nxtcp = TAILQ_FIRST(&nclruneghead);
 	}
 }

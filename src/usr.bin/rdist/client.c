@@ -1,4 +1,4 @@
-/*	$OpenBSD: client.c,v 1.31 2014/07/12 03:48:04 guenther Exp $	*/
+/*	$OpenBSD: client.c,v 1.34 2015/01/21 03:18:31 guenther Exp $	*/
 
 /*
  * Copyright (c) 1983 Regents of the University of California.
@@ -29,9 +29,16 @@
  * SUCH DAMAGE.
  */
 
+#include <ctype.h>
 #include <dirent.h>
+#include <errno.h>
+#include <fcntl.h>
+#include <limits.h>
+#include <stdlib.h>
+#include <string.h>
+#include <unistd.h>
 
-#include "defs.h"
+#include "client.h"
 #include "y.tab.h"
 
 /*
@@ -78,7 +85,6 @@ static int sendit(char *, opt_t, int);
 char *
 remfilename(char *src, char *dest, char *path, char *rname, int destdir)
 {
-	extern struct namelist *filelist;
 	char *lname, *cp;
 	static char buff[BUFSIZ];
 	int srclen, pathlen;
@@ -157,7 +163,6 @@ static void
 runspecial(char *starget, opt_t opts, char *rname, int destdir)
 {
 	struct subcmd *sc;
-	extern struct subcmd *subcmds;
 	char *rfile;
 
  	rfile = remfilename(source, Tdest, target, rname, destdir);
@@ -192,7 +197,6 @@ addcmdspecialfile(char *starget, char *rname, int destdir)
 	char *rfile;
 	struct namelist *new;
 	struct subcmd *sc;
-	extern struct subcmd *subcmds;
 	int isokay = 0;
 
  	rfile = remfilename(source, Tdest, target, rname, destdir);
@@ -347,9 +351,9 @@ linkinfo(struct stat *statp)
 static int
 sendhardlink(opt_t opts, struct linkbuf *lp, char *rname, int destdir)
 {
-	static char buff[MAXPATHLEN];
+	static char buff[PATH_MAX];
 	char *lname;	/* name of file to link to */
-	char ername[MAXPATHLEN*4], elname[MAXPATHLEN*4];
+	char ername[PATH_MAX*4], elname[PATH_MAX*4];
 
 	debugmsg(DM_MISC, 
 	       "sendhardlink: rname='%s' pathname='%s' src='%s' target='%s'\n",
@@ -367,8 +371,7 @@ sendhardlink(opt_t opts, struct linkbuf *lp, char *rname, int destdir)
 	}
 	ENCODE(elname, lname);
 	ENCODE(ername, rname);
-	(void) sendcmd(C_RECVHARDLINK, "%lo %s %s", 
-		       opts, elname, ername);
+	(void) sendcmd(C_RECVHARDLINK, "%o %s %s", opts, elname, ername);
 
 	return(response());
 }
@@ -382,7 +385,7 @@ sendfile(char *rname, opt_t opts, struct stat *stb, char *user,
 {
 	int goterr, f;
 	off_t i;
-	char ername[MAXPATHLEN*4];
+	char ername[PATH_MAX*4];
 
 	if (stb->st_nlink > 1) {
 		struct linkbuf *lp;
@@ -401,7 +404,7 @@ sendfile(char *rname, opt_t opts, struct stat *stb, char *user,
 	 */
 	ENCODE(ername, rname);
 
-	(void) sendcmd(C_RECVREG, "%lo %04o %lld %lld %lld %s %s %s", 
+	(void) sendcmd(C_RECVREG, "%o %04o %lld %lld %lld %s %s %s", 
 		       opts, stb->st_mode & 07777, (long long) stb->st_size, 
 		       (long long)stb->st_mtime, (long long)stb->st_atime,
 		       user, group, ername);
@@ -492,7 +495,7 @@ rmchk(opt_t opts)
 	struct stat stb;
 	int didupdate = 0;
 	int n;
-	char targ[MAXPATHLEN*4];
+	char targ[PATH_MAX*4];
 
 	debugmsg(DM_CALL, "rmchk()\n");
 
@@ -584,13 +587,13 @@ senddir(char *rname, opt_t opts, struct stat *stb, char *user,
 	char *optarget, *cp;
 	int len;
 	int didupdate = 0;
-	char ername[MAXPATHLEN*4];
+	char ername[PATH_MAX*4];
 
 	/*
 	 * Send recvdir command in recvit() format.
 	 */
 	ENCODE(ername, rname);
-	(void) sendcmd(C_RECVDIR, "%lo %04o 0 0 0 %s %s %s", 
+	(void) sendcmd(C_RECVDIR, "%o %04o 0 0 0 %s %s %s", 
 		       opts, stb->st_mode & 07777, user, group, ername);
 	if (response() < 0)
 		return(-1);
@@ -620,7 +623,7 @@ senddir(char *rname, opt_t opts, struct stat *stb, char *user,
 		if (!strcmp(dp->d_name, ".") ||
 		    !strcmp(dp->d_name, ".."))
 			continue;
-		if (len + 1 + (int) strlen(dp->d_name) >= MAXPATHLEN - 1) {
+		if (len + 1 + (int) strlen(dp->d_name) >= PATH_MAX - 1) {
 			error("%s/%s: Name too long", target,
 			      dp->d_name);
 			continue;
@@ -656,11 +659,11 @@ sendlink(char *rname, opt_t opts, struct stat *stb, char *user,
 {
 	int f, n;
 	static char tbuf[BUFSIZ];
-	char lbuf[MAXPATHLEN];
+	char lbuf[PATH_MAX];
 	u_char *s;
-	char ername[MAXPATHLEN*4];
+	char ername[PATH_MAX*4];
 
-	debugmsg(DM_CALL, "sendlink(%s, %lx, stb, %d)\n", rname, opts, destdir);
+	debugmsg(DM_CALL, "sendlink(%s, %#x, stb, %d)\n", rname, opts, destdir);
 
 	if (stb->st_nlink > 1) {
 		struct linkbuf *lp;
@@ -673,7 +676,7 @@ sendlink(char *rname, opt_t opts, struct stat *stb, char *user,
 	 * Gather and send basic link info
 	 */
 	ENCODE(ername, rname);
-	(void) sendcmd(C_RECVSYMLINK, "%lo %04o %lld %lld %lld %s %s %s", 
+	(void) sendcmd(C_RECVSYMLINK, "%o %04o %lld %lld %lld %s %s %s", 
 		       opts, stb->st_mode & 07777, (long long) stb->st_size, 
 		       (long long)stb->st_mtime, (long long)stb->st_atime,
 		       user, group, ername);
@@ -777,9 +780,9 @@ update(char *rname, opt_t opts, struct stat *statp)
 	char *owner = NULL, *group = NULL;
 	int done, n;
 	u_char *cp;
-	char ername[MAXPATHLEN*4];
+	char ername[PATH_MAX*4];
 
-	debugmsg(DM_CALL, "update(%s, 0x%lx, %p)\n", rname, opts, statp);
+	debugmsg(DM_CALL, "update(%s, %#x, %p)\n", rname, opts, statp);
 
 	switch (statp->st_mode & S_IFMT) {
 	case S_IFBLK:
@@ -926,7 +929,7 @@ update(char *rname, opt_t opts, struct stat *statp)
 	 */
 	lmode = statp->st_mode & 07777;
 
-	debugmsg(DM_MISC, "update(%s,) local mode %04o remote mode %04o\n", 
+	debugmsg(DM_MISC, "update(%s,) local mode %#04o remote mode %#04o\n", 
 		 rname, lmode, rmode);
 	debugmsg(DM_MISC, "update(%s,) size %lld mtime %lld owner '%s' grp '%s'"
 		 "\n", rname, (long long) size, (long long)mtime, owner, group);
@@ -948,7 +951,7 @@ update(char *rname, opt_t opts, struct stat *statp)
 	} 
 
 	if (!IS_ON(opts, DO_NOCHKMODE) && lmode != rmode) {
-		debugmsg(DM_MISC, "modes do not match (%04o != %04o).\n",
+		debugmsg(DM_MISC, "modes do not match (%#04o != %#04o).\n",
 			 lmode, rmode);
 		return(US_CHMOG);
 	}
@@ -1041,21 +1044,21 @@ statupdate(int u, char *starget, opt_t opts, char *rname, int destdir,
 	   struct stat *st, char *user, char *group)
 {
 	int rv = 0;
-	char ername[MAXPATHLEN*4];
+	char ername[PATH_MAX*4];
 	int lmode = st->st_mode & 07777;
 
 	if (u == US_CHMOG) {
 		if (IS_ON(opts, DO_VERIFY)) {
 			message(MT_INFO,
-				"%s: need to change to perm %04o, owner %s, group %s",
+				"%s: need to change to perm %#04o, owner %s, group %s",
 				starget, lmode, user, group);
 			runspecial(starget, opts, rname, destdir);
 		}
 		else {
-			message(MT_CHANGE, "%s: change to perm %04o, owner %s, group %s", 
+			message(MT_CHANGE, "%s: change to perm %#04o, owner %s, group %s", 
 				starget, lmode, user, group);
 			ENCODE(ername, rname);
-			(void) sendcmd(C_CHMOG, "%lo %04o %s %s %s",
+			(void) sendcmd(C_CHMOG, "%o %04o %s %s %s",
 				       opts, lmode, user, group, ername);
 			(void) response();
 		}
@@ -1117,7 +1120,7 @@ fullupdate(int u, char *starget, opt_t opts, char *rname, int destdir,
 		}
 		return (sendfile(rname, opts, st, user, group, destdir) == 0);
 	} else {
-		message(MT_INFO, "%s: unknown file type 0%o", starget,
+		message(MT_INFO, "%s: unknown file type %#o", starget,
 			st->st_mode);
 		return(0);
 	}
@@ -1148,7 +1151,7 @@ sendit(char *rname, opt_t opts, int destdir)
 	if (checkfilename(rname) != 0)
 		return(-1);
 
-	debugmsg(DM_CALL, "sendit(%s, 0x%lx) called\n", rname, opts);
+	debugmsg(DM_CALL, "sendit(%s, %#x) called\n", rname, opts);
 
 	if (except(target))
 		return(0);
@@ -1160,7 +1163,7 @@ sendit(char *rname, opt_t opts, int destdir)
 	 * Does rname need updating?
 	 */
 	u = update(rname, opts, &stb);
-	debugmsg(DM_MISC, "sendit(%s, 0x%lx): update status of %s is %d\n", 
+	debugmsg(DM_MISC, "sendit(%s, %#x): update status of %s is %d\n", 
 		 rname, opts, target, u);
 
 	/*
@@ -1214,13 +1217,13 @@ cleanup(int dummy)
 int
 install(char *src, char *dest, int ddir, int destdir, opt_t opts)
 {
-	static char destcopy[MAXPATHLEN];
+	static char destcopy[PATH_MAX];
 	char *rname;
 	int didupdate = 0;
-	char ername[MAXPATHLEN*4];
+	char ername[PATH_MAX*4];
 
 	debugmsg(DM_CALL,
-		"install(src=%s,dest=%s,ddir=%d,destdir=%d,opts=%ld) start\n",
+		"install(src=%s,dest=%s,ddir=%d,destdir=%d,opts=%#x) start\n",
 		(src?src:"NULL"), (dest?dest:"NULL"), ddir, destdir, opts);
 	/*
 	 * Save source name
@@ -1290,9 +1293,9 @@ install(char *src, char *dest, int ddir, int destdir, opt_t opts)
 	 */
 	ENCODE(ername, dest);
  	if (ddir)
-		(void) sendcmd(C_DIRTARGET, "%lo %s", opts, ername);
+		(void) sendcmd(C_DIRTARGET, "%o %s", opts, ername);
 	else
-		(void) sendcmd(C_TARGET, "%lo %s", opts, ername);
+		(void) sendcmd(C_TARGET, "%o %s", opts, ername);
 	if (response() < 0)
 		return(-1);
 

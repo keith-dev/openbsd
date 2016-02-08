@@ -1,4 +1,4 @@
-/* $OpenBSD: fusebuf.c,v 1.7 2014/07/12 18:43:52 tedu Exp $ */
+/* $OpenBSD: fusebuf.c,v 1.10 2014/12/03 23:00:49 deraadt Exp $ */
 /*
  * Copyright (c) 2012-2013 Sylvestre Gallon <ccna.syl@gmail.com>
  *
@@ -20,13 +20,10 @@
 #include <sys/malloc.h>
 #include <sys/mount.h>
 #include <sys/pool.h>
-#include <sys/proc.h>
 #include <sys/statvfs.h>
 #include <sys/systm.h>
 #include <sys/vnode.h>
 #include <sys/fusebuf.h>
-
-#include <dev/rndvar.h>
 
 #include "fusefs_node.h"
 #include "fusefs.h"
@@ -39,7 +36,7 @@ fb_setup(size_t len, ino_t ino, int op, struct proc *p)
 	fbuf = pool_get(&fusefs_fbuf_pool, PR_WAITOK | PR_ZERO);
 	fbuf->fb_len = len;
 	fbuf->fb_err = 0;
-	fbuf->fb_uuid = ((uint64_t)arc4random() << 32 | arc4random());
+	arc4random_buf(&fbuf->fb_uuid, sizeof fbuf->fb_uuid);
 	fbuf->fb_type = op;
 	fbuf->fb_ino = ino;
 	if (len == 0)

@@ -1,4 +1,4 @@
-/*	$OpenBSD: ntp_dns.c,v 1.5 2014/02/10 09:12:34 dtucker Exp $ */
+/*	$OpenBSD: ntp_dns.c,v 1.9 2015/02/12 01:54:57 reyk Exp $ */
 
 /*
  * Copyright (c) 2003-2008 Henning Brauer <henning@openbsd.org>
@@ -16,7 +16,7 @@
  * OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
 
-#include <sys/param.h>
+#include <sys/types.h>
 #include <sys/resource.h>
 #include <sys/time.h>
 
@@ -129,6 +129,7 @@ dns_dispatch_imsg(void)
 	char			*name;
 	struct ntp_addr		*h, *hn;
 	struct ibuf		*buf;
+	const char		*str;
 
 	if ((n = imsg_read(ibuf_dns)) == -1)
 		return (-1);
@@ -147,25 +148,37 @@ dns_dispatch_imsg(void)
 
 		switch (imsg.hdr.type) {
 		case IMSG_HOST_DNS:
+		case IMSG_CONSTRAINT_DNS:
+			if (imsg.hdr.type == IMSG_HOST_DNS)
+				str = "IMSG_HOST_DNS";
+			else
+				str = "IMSG_CONSTRAINT_DNS";
 			name = imsg.data;
 			if (imsg.hdr.len < 1 + IMSG_HEADER_SIZE)
-				fatalx("invalid IMSG_HOST_DNS received");
+				fatalx("invalid %s received", str);
 			imsg.hdr.len -= 1 + IMSG_HEADER_SIZE;
 			if (name[imsg.hdr.len] != '\0' ||
 			    strlen(name) != imsg.hdr.len)
-				fatalx("invalid IMSG_HOST_DNS received");
+				fatalx("invalid %s received", str);
 			if ((cnt = host_dns(name, &hn)) == -1)
 				break;
-			buf = imsg_create(ibuf_dns, IMSG_HOST_DNS,
+			buf = imsg_create(ibuf_dns, imsg.hdr.type,
 			    imsg.hdr.peerid, 0,
 			    cnt * sizeof(struct sockaddr_storage));
-			if (buf == NULL)
-				break;
-			if (cnt > 0)
-				for (h = hn; h != NULL; h = h->next)
-					imsg_add(buf, &h->ss, sizeof(h->ss));
-
-			imsg_close(ibuf_dns, buf);
+			if (cnt > 0) {
+				if (buf) {
+					for (h = hn; h != NULL; h = h->next)
+						if (imsg_add(buf, &h->ss,
+						    sizeof(h->ss)) == -1) {
+							buf = NULL;
+							break;
+						}
+				}
+				host_dns_free(hn);
+				hn = NULL;
+			}
+			if (buf)
+				imsg_close(ibuf_dns, buf);
 			break;
 		default:
 			break;

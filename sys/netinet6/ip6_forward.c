@@ -1,4 +1,4 @@
-/*	$OpenBSD: ip6_forward.c,v 1.67 2014/06/03 13:32:24 mpi Exp $	*/
+/*	$OpenBSD: ip6_forward.c,v 1.71 2014/12/05 15:50:04 mpi Exp $	*/
 /*	$KAME: ip6_forward.c,v 1.75 2001/06/29 12:42:13 jinmei Exp $	*/
 
 /*
@@ -44,6 +44,7 @@
 #include <sys/syslog.h>
 
 #include <net/if.h>
+#include <net/if_var.h>
 #include <net/if_enc.h>
 #include <net/route.h>
 
@@ -91,7 +92,6 @@ ip6_forward(struct mbuf *m, int srcrt)
 	struct rtentry *rt;
 	int error = 0, type = 0, code = 0;
 	struct mbuf *mcopy = NULL;
-	struct ifnet *origifp;	/* maybe unnecessary */
 #ifdef IPSEC
 	u_int8_t sproto = 0;
 	struct m_tag *mtag;
@@ -245,13 +245,15 @@ reroute:
 		    (ip6_forward_rt.ro_rt->rt_flags & RTF_UP) == 0 ||
 		    ip6_forward_rt.ro_tableid != rtableid) {
 			if (ip6_forward_rt.ro_rt) {
-				RTFREE(ip6_forward_rt.ro_rt);
-				ip6_forward_rt.ro_rt = 0;
+				rtfree(ip6_forward_rt.ro_rt);
+				ip6_forward_rt.ro_rt = NULL;
 			}
 			/* this probably fails but give it a try again */
 			ip6_forward_rt.ro_tableid = rtableid;
-			rtalloc_mpath((struct route *)&ip6_forward_rt,
-			    &ip6->ip6_src.s6_addr32[0]);
+			ip6_forward_rt.ro_rt = rtalloc_mpath(
+			    sin6tosa(&ip6_forward_rt.ro_dst),
+			    &ip6->ip6_src.s6_addr32[0],
+			    ip6_forward_rt.ro_tableid);
 		}
 
 		if (ip6_forward_rt.ro_rt == 0) {
@@ -269,17 +271,18 @@ reroute:
 	   !IN6_ARE_ADDR_EQUAL(&ip6->ip6_dst, &dst->sin6_addr) ||
 	   ip6_forward_rt.ro_tableid != rtableid) {
 		if (ip6_forward_rt.ro_rt) {
-			RTFREE(ip6_forward_rt.ro_rt);
-			ip6_forward_rt.ro_rt = 0;
+			rtfree(ip6_forward_rt.ro_rt);
+			ip6_forward_rt.ro_rt = NULL;
 		}
 		bzero(dst, sizeof(*dst));
 		dst->sin6_len = sizeof(struct sockaddr_in6);
 		dst->sin6_family = AF_INET6;
 		dst->sin6_addr = ip6->ip6_dst;
 		ip6_forward_rt.ro_tableid = rtableid;
-
-		rtalloc_mpath((struct route *)&ip6_forward_rt,
-		    &ip6->ip6_src.s6_addr32[0]);
+		ip6_forward_rt.ro_rt = rtalloc_mpath(
+		    sin6tosa(&ip6_forward_rt.ro_dst),
+		    &ip6->ip6_src.s6_addr32[0],
+		    ip6_forward_rt.ro_tableid);
 
 		if (ip6_forward_rt.ro_rt == 0) {
 			ip6stat.ip6s_noroute++;
@@ -419,36 +422,6 @@ reroute:
 	 * link identifiers, we can do this stuff after making a copy for
 	 * returning an error.
 	 */
-	if ((rt->rt_ifp->if_flags & IFF_LOOPBACK) != 0) {
-		/*
-		 * See corresponding comments in ip6_output.
-		 * XXX: but is it possible that ip6_forward() sends a packet
-		 *      to a loopback interface? I don't think so, and thus
-		 *      I bark here. (jinmei@kame.net)
-		 * XXX: it is common to route invalid packets to loopback.
-		 *	also, the codepath will be visited on use of ::1 in
-		 *	rthdr. (itojun)
-		 */
-#if 1
-		if (0)
-#else
-		if ((rt->rt_flags & (RTF_BLACKHOLE|RTF_REJECT)) == 0)
-#endif
-		{
-			inet_ntop(AF_INET6, &ip6->ip6_src, src6, sizeof(src6));
-			inet_ntop(AF_INET6, &ip6->ip6_dst, dst6, sizeof(dst6));
-			printf("ip6_forward: outgoing interface is loopback. "
-			       "src %s, dst %s, nxt %d, rcvif %s, outif %s\n",
-			       src6, dst6,
-			       ip6->ip6_nxt, m->m_pkthdr.rcvif->if_xname,
-			       rt->rt_ifp->if_xname);
-		}
-
-		/* we can just use rcvif in forwarding. */
-		origifp = m->m_pkthdr.rcvif;
-	}
-	else
-		origifp = rt->rt_ifp;
 	if (IN6_IS_SCOPE_EMBED(&ip6->ip6_src))
 		ip6->ip6_src.s6_addr16[1] = 0;
 	if (IN6_IS_SCOPE_EMBED(&ip6->ip6_dst))
@@ -489,7 +462,7 @@ reroute:
 		goto freert;
 	}
 
-	error = nd6_output(rt->rt_ifp, origifp, m, dst, rt);
+	error = nd6_output(rt->rt_ifp, m, dst, rt);
 	if (error) {
 		in6_ifstat_inc(rt->rt_ifp, ifs6_out_discard);
 		ip6stat.ip6s_cantforward++;
@@ -543,8 +516,8 @@ senderr:
 #ifndef SMALL_KERNEL
 	if (ip6_multipath && ip6_forward_rt.ro_rt &&
 	    (ip6_forward_rt.ro_rt->rt_flags & RTF_MPATH)) {
-		RTFREE(ip6_forward_rt.ro_rt);
-		ip6_forward_rt.ro_rt = 0;
+		rtfree(ip6_forward_rt.ro_rt);
+		ip6_forward_rt.ro_rt = NULL;
 	}
 #endif
 	return;

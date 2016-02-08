@@ -1,4 +1,4 @@
-/*	$OpenBSD: pool.h,v 1.47 2014/07/02 00:23:36 dlg Exp $	*/
+/*	$OpenBSD: pool.h,v 1.57 2015/02/10 06:16:13 dlg Exp $	*/
 /*	$NetBSD: pool.h,v 1.27 2001/06/06 22:00:17 rafal Exp $	*/
 
 /*-
@@ -73,16 +73,16 @@ struct kinfo_pool {
 #include <sys/mutex.h>
 
 struct pool;
+struct pool_request;
+TAILQ_HEAD(pool_requests, pool_request);
 
 struct pool_allocator {
 	void *(*pa_alloc)(struct pool *, int, int *);
 	void (*pa_free)(struct pool *, void *);
 	int pa_pagesz;
-	int pa_pagemask;
-	int pa_pageshift;
 };
 
-LIST_HEAD(pool_pagelist, pool_item_header);
+TAILQ_HEAD(pool_pagelist, pool_item_header);
 
 struct pool {
 	struct mutex	pr_mtx;
@@ -97,8 +97,6 @@ struct pool {
 	struct pool_item_header	*
 			pr_curpage;
 	unsigned int	pr_size;	/* Size of item */
-	unsigned int	pr_align;	/* Requested alignment, must be 2^n */
-	unsigned int	pr_itemoffset;	/* Align this offset in item */
 	unsigned int	pr_minitems;	/* minimum # of items to keep */
 	unsigned int	pr_minpages;	/* same in page units */
 	unsigned int	pr_maxpages;	/* maximum # of idle pages to keep */
@@ -110,19 +108,16 @@ struct pool {
 	unsigned int	pr_hardlimit;	/* hard limit to number of allocated
 					   items */
 	unsigned int	pr_serial;	/* unique serial number of the pool */
+	unsigned int	pr_pgsize;	/* Size of a "page" */
+	vaddr_t		pr_pgmask;	/* Mask with an item to get a page */
 	struct pool_allocator *
 			pr_alloc;	/* backend allocator */
 	const char *	pr_wchan;	/* tsleep(9) identifier */
-	unsigned int	pr_flags;	/* r/w flags */
-	unsigned int	pr_roflags;	/* r/o flags */
 #define PR_WAITOK	0x0001 /* M_WAITOK */
 #define PR_NOWAIT	0x0002 /* M_NOWAIT */
 #define PR_LIMITFAIL	0x0004 /* M_CANFAIL */
 #define PR_ZERO		0x0008 /* M_ZERO */
 #define PR_WANTED	0x0100
-#define PR_PHINPAGE	0x0200
-#define PR_LOGGING	0x0400
-#define PR_DEBUG	0x0800
 #define PR_DEBUGCHK	0x1000
 
 	int		pr_ipl;
@@ -130,8 +125,8 @@ struct pool {
 	RB_HEAD(phtree, pool_item_header)
 			pr_phtree;
 
-	int		pr_maxcolor;	/* Cache colouring */
-	int		pr_curcolor;
+	u_int		pr_align;
+	u_int		pr_maxcolors;	/* Cache coloring */
 	int		pr_phoffset;	/* Offset in page of page header */
 
 	/*
@@ -141,6 +136,14 @@ struct pool {
 	const char	*pr_hardlimit_warning;
 	struct timeval	pr_hardlimit_ratecap;
 	struct timeval	pr_hardlimit_warning_last;
+
+	/*
+	 * pool item requests queue
+	 */
+	struct mutex	pr_requests_mtx;
+	struct pool_requests
+			pr_requests;
+	unsigned int	pr_requesting;
 
 	/*
 	 * Instrumentation
@@ -164,7 +167,13 @@ struct pool {
 
 extern struct pool_allocator pool_allocator_nointr;
 
-/* these functions are not locked */
+struct pool_request {
+	TAILQ_ENTRY(pool_request) pr_entry;
+	void (*pr_handler)(void *, void *);
+	void *pr_cookie;
+	void *pr_item;
+};
+
 void		pool_init(struct pool *, size_t, u_int, u_int, int,
 		    const char *, struct pool_allocator *);
 void		pool_destroy(struct pool *);
@@ -176,8 +185,10 @@ struct uvm_constraint_range; /* XXX */
 void		pool_set_constraints(struct pool *,
 		    const struct kmem_pa_mode *mode);
 
-/* these functions are locked */
 void		*pool_get(struct pool *, int) __malloc;
+void		pool_request_init(struct pool_request *,
+		    void (*)(void *, void *), void *);
+void		pool_request(struct pool *, struct pool_request *);
 void		pool_put(struct pool *, void *);
 int		pool_reclaim(struct pool *);
 void		pool_reclaim_all(void);

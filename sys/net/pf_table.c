@@ -1,4 +1,4 @@
-/*	$OpenBSD: pf_table.c,v 1.102 2014/07/12 18:44:22 tedu Exp $	*/
+/*	$OpenBSD: pf_table.c,v 1.105 2015/01/20 17:25:35 mikeb Exp $	*/
 
 /*
  * Copyright (c) 2002 Cedric Berger
@@ -39,7 +39,6 @@
 #include <sys/syslog.h>
 
 #include <net/if.h>
-#include <net/route.h>
 #include <netinet/in.h>
 #include <netinet/ip_ipsp.h>
 #include <net/pfvar.h>
@@ -721,12 +720,10 @@ pfr_validate_addr(struct pfr_addr *ad)
 	int i;
 
 	switch (ad->pfra_af) {
-#ifdef INET
 	case AF_INET:
 		if (ad->pfra_net > 32)
 			return (-1);
 		break;
-#endif /* INET */
 #ifdef INET6
 	case AF_INET6:
 		if (ad->pfra_net > 128)
@@ -1899,6 +1896,7 @@ pfr_setflags_ktable(struct pfr_ktable *kt, int newf)
 	struct pfr_kentryworkq	addrq;
 
 	if (!(newf & PFR_TFLAG_REFERENCED) &&
+	    !(newf & PFR_TFLAG_REFDANCHOR) &&
 	    !(newf & PFR_TFLAG_PERSIST))
 		newf &= ~PFR_TFLAG_ACTIVE;
 	if (!(newf & PFR_TFLAG_ACTIVE))
@@ -2056,14 +2054,12 @@ pfr_match_addr(struct pfr_ktable *kt, struct pf_addr *a, sa_family_t af)
 		return (0);
 
 	switch (af) {
-#ifdef INET
 	case AF_INET:
 		pfr_sin.sin_addr.s_addr = a->addr32[0];
 		ke = (struct pfr_kentry *)rn_match(&pfr_sin, kt->pfrkt_ip4);
 		if (ke && KENTRY_RNF_ROOT(ke))
 			ke = NULL;
 		break;
-#endif /* INET */
 #ifdef INET6
 	case AF_INET6:
 		bcopy(a, &pfr_sin6.sin6_addr, sizeof(pfr_sin6.sin6_addr));
@@ -2097,14 +2093,12 @@ pfr_update_stats(struct pfr_ktable *kt, struct pf_addr *a, struct pf_pdesc *pd,
 		return;
 
 	switch (af) {
-#ifdef INET
 	case AF_INET:
 		pfr_sin.sin_addr.s_addr = a->addr32[0];
 		ke = (struct pfr_kentry *)rn_match(&pfr_sin, kt->pfrkt_ip4);
 		if (ke && KENTRY_RNF_ROOT(ke))
 			ke = NULL;
 		break;
-#endif /* INET */
 #ifdef INET6
 	case AF_INET6:
 		bcopy(a, &pfr_sin6.sin6_addr, sizeof(pfr_sin6.sin6_addr));
@@ -2364,11 +2358,9 @@ pfr_kentry_byidx(struct pfr_ktable *kt, int idx, int af)
 	w.pfrw_cnt = idx;
 
 	switch (af) {
-#ifdef INET
 	case AF_INET:
 		rn_walktree(kt->pfrkt_ip4, pfr_walktree, &w);
 		return (w.pfrw_kentry);
-#endif /* INET */
 #ifdef INET6
 	case AF_INET6:
 		rn_walktree(kt->pfrkt_ip6, pfr_walktree, &w);
@@ -2438,12 +2430,10 @@ pfr_kentry_byaddr(struct pfr_ktable *kt, struct pf_addr *addr, sa_family_t af,
 	bzero(&p, sizeof(p));
 	p.pfra_af = af;
 	switch (af) {
-#ifdef INET
 	case AF_INET:
 		p.pfra_net = 32;
 		p.pfra_ip4addr = addr->v4;
 		break;
-#endif /* INET */
 #ifdef INET6
 	case AF_INET6:
 		p.pfra_net = 128;

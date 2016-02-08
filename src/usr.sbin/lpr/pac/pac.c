@@ -1,4 +1,4 @@
-/*	$OpenBSD: pac.c,v 1.21 2014/01/22 09:50:51 jsg Exp $ */
+/*	$OpenBSD: pac.c,v 1.24 2015/02/09 23:00:14 deraadt Exp $ */
 /*	$NetBSD: pac.c,v 1.14 2000/04/27 13:40:18 msaitoh Exp $	*/
 
 /*
@@ -38,16 +38,15 @@
  * to print the usage information for the named people.
  */
 
-#include <sys/param.h>
-
 #include <ctype.h>
+#include <signal.h>
 #include <dirent.h>
 #include <err.h>
 #include <errno.h>
 #include <stdlib.h>
 #include <unistd.h>
+#include <limits.h>
 #include <stdio.h>
-#include <stdlib.h>
 #include <string.h>
 
 #include "lp.h"
@@ -128,14 +127,14 @@ main(int argc, char **argv)
 			/*
 			 * Summarize and compress accounting file.
 			 */
-			summarize++;
+			summarize = 1;
 			continue;
 
 		case 'c':
 			/*
 			 * Sort by cost.
 			 */
-			sort++;
+			sort = 1;
 			continue;
 
 		case 'm':
@@ -149,7 +148,7 @@ main(int argc, char **argv)
 			/*
 			 * Reverse sorting order.
 			 */
-			reverse++;
+			reverse = 1;
 			continue;
 
 		default:

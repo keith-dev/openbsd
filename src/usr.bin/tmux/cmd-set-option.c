@@ -1,4 +1,4 @@
-/* $OpenBSD: cmd-set-option.c,v 1.69 2014/04/17 14:45:49 nicm Exp $ */
+/* $OpenBSD: cmd-set-option.c,v 1.71 2014/10/20 22:29:25 nicm Exp $ */
 
 /*
  * Copyright (c) 2007 Nicholas Marriott <nicm@users.sourceforge.net>
@@ -69,7 +69,6 @@ const struct cmd_entry cmd_set_option_entry = {
 	"agoqst:uw", 1, 2,
 	"[-agosquw] [-t target-session|target-window] option [value]",
 	0,
-	NULL,
 	cmd_set_option_exec
 };
 
@@ -78,7 +77,6 @@ const struct cmd_entry cmd_set_window_option_entry = {
 	"agoqt:u", 1, 2,
 	"[-agoqu] " CMD_TARGET_WINDOW_USAGE " option [value]",
 	0,
-	NULL,
 	cmd_set_option_exec
 };
 
@@ -201,7 +199,7 @@ cmd_set_option_exec(struct cmd *self, struct cmd_q *cmdq)
 
 /* Set user option. */
 enum cmd_retval
-cmd_set_option_user(struct cmd *self, struct cmd_q *cmdq, const char* optstr,
+cmd_set_option_user(struct cmd *self, struct cmd_q *cmdq, const char *optstr,
     const char *valstr)
 {
 	struct args	*args = self->args;
@@ -254,7 +252,7 @@ cmd_set_option_user(struct cmd *self, struct cmd_q *cmdq, const char* optstr,
 		if (args_has(args, 'o') && options_find1(oo, optstr) != NULL) {
 			if (!args_has(args, 'q')) {
 				cmdq_error(cmdq, "already set: %s", optstr);
-				return CMD_RETURN_ERROR;
+				return (CMD_RETURN_ERROR);
 			}
 			return (CMD_RETURN_NORMAL);
 		}

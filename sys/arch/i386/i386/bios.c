@@ -1,4 +1,4 @@
-/*	$OpenBSD: bios.c,v 1.104 2014/03/29 18:09:29 guenther Exp $	*/
+/*	$OpenBSD: bios.c,v 1.109 2015/01/21 18:39:54 tedu Exp $	*/
 
 /*
  * Copyright (c) 1997-2001 Michael Shalayeff
@@ -33,7 +33,6 @@
 #include <sys/kernel.h>
 #include <sys/device.h>
 #include <sys/errno.h>
-#include <sys/proc.h>
 #include <sys/malloc.h>
 #include <sys/reboot.h>
 #include <sys/extent.h>
@@ -169,25 +168,17 @@ biosattach(struct device *parent, struct device *self, void *aux)
 	struct smbtable bios;
 	volatile u_int8_t *va;
 	char scratch[64], *str;
-	int flags, smbiosrev = 0, ncpu = 0, usingacpi = 0;
+	int flags, smbiosrev = 0, ncpu = 0;
+#if NACPI > 0
+	int usingacpi = 0;
+#endif
 
 	/* remember flags */
 	flags = sc->sc_dev.dv_cfdata->cf_flags;
 
 	va = ISA_HOLE_VADDR(0xffff0);
-	switch (va[14]) {
-	default:
-	case 0xff: str = "PC";		break;
-	case 0xfe: str = "PC/XT";	break;
-	case 0xfd: str = "PCjr";	break;
-	case 0xfc: str = "AT/286+";	break;
-	case 0xfb: str = "PC/XT+";	break;
-	case 0xfa: str = "PS/2 25/30";	break;
-	case 0xf9: str = "PC Convertible";break;
-	case 0xf8: str = "PS/2 386+";	break;
-	}
-	printf(": %s BIOS, date %c%c/%c%c/%c%c",
-	    str, va[5], va[6], va[8], va[9], va[11], va[12]);
+	printf(": date %c%c/%c%c/%c%c",
+	    va[5], va[6], va[8], va[9], va[11], va[12]);
 
 	/*
 	 * Determining whether BIOS32 extensions are available is
@@ -283,7 +274,7 @@ biosattach(struct device *parent, struct device *self, void *aux)
 			smbios_entry.count = sh->count;
 
 			for (; pa < end; pa+= NBPG, eva+= NBPG)
-				pmap_kenter_pa(eva, pa, VM_PROT_READ);
+				pmap_kenter_pa(eva, pa, PROT_READ);
 
 			printf(", SMBIOS rev. %d.%d @ 0x%x (%hd entries)",
 			    sh->majrev, sh->minrev, sh->addr, sh->count);
@@ -564,6 +555,7 @@ bios_getopt()
 					comconsunit = unit;
 					comconsaddr = consaddr;
 					comconsrate = cdp->conspeed;
+					comconsiot = I386_BUS_SPACE_IO;
 
 					/* Probe the serial port this time. */
 					cninit();
@@ -670,14 +662,14 @@ bios32_service(u_int32_t service, bios32_entry_t e, bios32_entry_info_t ei)
 	    va += trunc_page(BIOS32_START);
 	    pa < endpa; pa += NBPG, va += NBPG) {
 		pmap_enter(pmap_kernel(), va, pa,
-		    VM_PROT_READ | VM_PROT_WRITE,
-		    VM_PROT_READ | VM_PROT_WRITE | PMAP_WIRED);
+		    PROT_READ | PROT_WRITE,
+		    PROT_READ | PROT_WRITE | PMAP_WIRED);
 
 		/* for all you, broken hearted */
 		if (pa >= trunc_page(base)) {
 			pmap_enter(pmap_kernel(), sva, pa,
-			    VM_PROT_READ | VM_PROT_WRITE,
-			    VM_PROT_READ | VM_PROT_WRITE | PMAP_WIRED);
+			    PROT_READ | PROT_WRITE,
+			    PROT_READ | PROT_WRITE | PMAP_WIRED);
 			sva += NBPG;
 		}
 	}

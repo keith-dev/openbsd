@@ -1,6 +1,7 @@
-# $OpenBSD: Makefile,v 1.7 2014/07/07 21:35:42 schwarze Exp $
+# $OpenBSD: Makefile,v 1.10 2015/02/06 07:12:34 schwarze Exp $
 
-REGRESS_TARGETS	= breaking empty literal lonelyRE nested noRE width
-LINT_TARGETS	= lonelyRE noRE
+REGRESS_TARGETS	 = breaking broken empty literal lonelyRE
+REGRESS_TARGETS	+= nested noRE REarg width
+LINT_TARGETS	 = empty lonelyRE noRE REarg
 
 .include <bsd.regress.mk>

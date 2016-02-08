@@ -1,4 +1,4 @@
-/* $OpenBSD: tcpdrop.c,v 1.14 2014/06/29 00:58:45 deraadt Exp $ */
+/* $OpenBSD: tcpdrop.c,v 1.17 2015/01/16 06:40:21 deraadt Exp $ */
 
 /*
  * Copyright (c) 2004 Markus Friedl <markus@openbsd.org>
@@ -16,7 +16,6 @@
  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
 
-#include <sys/param.h>
 #include <sys/socket.h>
 #include <sys/sysctl.h>
 #include <sys/queue.h>
@@ -33,7 +32,21 @@
 #include <stdlib.h>
 #include <netdb.h>
 
-extern char *__progname;
+__dead void	 usage(void);
+
+__dead void
+usage(void)
+{
+	extern char	*__progname;
+
+	fprintf(stderr,
+	    "usage: %s local-addr local-port remote-addr remote-port\n",
+	    __progname);
+	fprintf(stderr,
+	    "       %s local-addr:local-port remote-addr:remote-port\n",
+	    __progname);
+	exit(1);
+}
 
 /*
  * Drop a tcp connection.
@@ -61,7 +74,7 @@ main(int argc, char **argv)
 		if (port1)
 			*port1++ = '\0';
 		else
-			goto fail;
+			usage();
 
 		faddr2 = addr2 = strdup(argv[2]);
 		if (!addr2)
@@ -70,22 +83,14 @@ main(int argc, char **argv)
 		if (port2)
 			*port2++ = '\0';
 		else
-			goto fail;
+			usage();
 	} else if (argc == 5) {
 		laddr1 = addr1 = argv[1];
 		port1 = argv[2];
 		faddr2 = addr2 = argv[3];
 		port2 = argv[4];
-	} else {
-fail:
-		fprintf(stderr,
-		    "usage: %s local-addr local-port remote-addr remote-port\n",
-		    __progname);
-		fprintf(stderr,
-		    "       %s local-addr:local-port remote-addr:remote-port\n",
-		    __progname);
-		exit(1);
-	}
+	} else
+		usage();
 
 	if (addr1[0] == '[' && addr1[strlen(addr1) - 1] == ']') {
 		laddr1 = strdup(addr1);
@@ -106,11 +111,9 @@ fail:
 		errx(1, "%s port %s: %s", addr1, port1,
 		    gai_strerror(gaierr));
 
-	if ((gaierr = getaddrinfo(faddr2, port2, &hints, &faddr)) != 0) {
-		freeaddrinfo(laddr);
+	if ((gaierr = getaddrinfo(faddr2, port2, &hints, &faddr)) != 0)
 		errx(1, "%s port %s: %s", addr2, port2,
 		    gai_strerror(gaierr));
-	}
 
 	rval = 1;
 	for (ail = laddr; ail; ail = ail->ai_next) {

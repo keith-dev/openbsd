@@ -1,4 +1,4 @@
-TP-EOF(1)                  OpenBSD Reference Manual                  TP-EOF(1)
+TP-EOF(1)                   General Commands Manual                  TP-EOF(1)
 
 
 
@@ -7,7 +7,6 @@ NNAAMMEE
 
 DDEESSCCRRIIPPTTIIOONN
        The last line of the file is TP:
-
 
 
 

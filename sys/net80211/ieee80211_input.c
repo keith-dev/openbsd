@@ -1,4 +1,4 @@
-/*	$OpenBSD: ieee80211_input.c,v 1.126 2014/07/12 18:44:22 tedu Exp $	*/
+/*	$OpenBSD: ieee80211_input.c,v 1.132 2015/02/09 03:09:57 dlg Exp $	*/
 
 /*-
  * Copyright (c) 2001 Atsushi Onoe
@@ -40,7 +40,6 @@
 #include <sys/sockio.h>
 #include <sys/endian.h>
 #include <sys/errno.h>
-#include <sys/proc.h>
 #include <sys/sysctl.h>
 #include <sys/task.h>
 
@@ -54,10 +53,8 @@
 #include <net/bpf.h>
 #endif
 
-#ifdef INET
 #include <netinet/in.h>
 #include <netinet/if_ether.h>
-#endif
 
 #include <net80211/ieee80211_var.h>
 #include <net80211/ieee80211_priv.h>
@@ -134,7 +131,7 @@ void	ieee80211_bar_tid(struct ieee80211com *, struct ieee80211_node *,
 #endif
 void	ieee80211_input_print(struct ieee80211com *,  struct ifnet *,
 	    struct ieee80211_frame *, struct ieee80211_rxinfo *);
-void	ieee80211_input_print_task(void *, void *);
+void	ieee80211_input_print_task(void *);
 
 struct ieee80211printmsg {
 	struct task	task;
@@ -167,7 +164,7 @@ ieee80211_get_hdrlen(const struct ieee80211_frame *wh)
  * frames are received and the interface is put in debug mode.
  */
 void
-ieee80211_input_print_task(void *arg1, void *arg2)
+ieee80211_input_print_task(void *arg1)
 {
 	struct ieee80211printmsg *msg = arg1;
 
@@ -217,7 +214,7 @@ ieee80211_input_print(struct ieee80211com *ic,  struct ifnet *ifp,
 	    ieee80211_phymode_name[ieee80211_chan2mode(
 	        ic, ic->ic_bss->ni_chan)]);
 
-	task_set(&msg->task, ieee80211_input_print_task, msg, NULL);
+	task_set(&msg->task, ieee80211_input_print_task, msg);
 	task_add(systq, &msg->task);
 }
 
@@ -862,19 +859,22 @@ ieee80211_deliver_data(struct ieee80211com *ic, struct mbuf *m,
 	}
 #endif
 	if (m != NULL) {
-#if NBPFILTER > 0
-		/*
-		 * If we forward frame into transmitter of the AP,
-		 * we don't need to duplicate for DLT_EN10MB.
-		 */
-		if (ifp->if_bpf && m1 == NULL)
-			bpf_mtap(ifp->if_bpf, m, BPF_DIRECTION_IN);
-#endif
 		if ((ic->ic_flags & IEEE80211_F_RSNON) &&
-		    eh->ether_type == htons(ETHERTYPE_PAE))
+		    eh->ether_type == htons(ETHERTYPE_PAE)) {
+#if NBPFILTER > 0
+			/*
+			 * If we forward frame into transmitter of the AP,
+			 * we don't need to duplicate for DLT_EN10MB.
+			 */
+			if (ifp->if_bpf && m1 == NULL)
+				bpf_mtap(ifp->if_bpf, m, BPF_DIRECTION_IN);
+#endif
 			ieee80211_eapol_key_input(ic, m, ni);
-		else
-			ether_input_mbuf(ifp, m);
+		} else {
+			struct mbuf_list ml = MBUF_LIST_INITIALIZER();
+			ml_enqueue(&ml, m);
+			if_input(ifp, &ml);
+		}
 	}
 }
 
@@ -1636,18 +1636,8 @@ ieee80211_recv_probe_resp(struct ieee80211com *ic, struct mbuf *m,
 	/* NB: must be after ni_chan is setup */
 	ieee80211_setup_rates(ic, ni, rates, xrates, IEEE80211_F_DOSORT);
 
-	/*
-	 * When scanning we record results (nodes) with a zero
-	 * refcnt.  Otherwise we want to hold the reference for
-	 * ibss neighbors so the nodes don't get released prematurely.
-	 * Anything else can be discarded (XXX and should be handled
-	 * above so we don't do so much work).
-	 */
-	if (
 #ifndef IEEE80211_STA_ONLY
-	    ic->ic_opmode == IEEE80211_M_IBSS ||
-#endif
-	    (is_new && isprobe)) {
+	if (ic->ic_opmode == IEEE80211_M_IBSS && is_new && isprobe) {
 		/*
 		 * Fake an association so the driver can setup it's
 		 * private state.  The rate set has been setup above;
@@ -1656,6 +1646,7 @@ ieee80211_recv_probe_resp(struct ieee80211com *ic, struct mbuf *m,
 		if (ic->ic_newassoc)
 			(*ic->ic_newassoc)(ic, ni, 1);
 	}
+#endif
 }
 
 #ifndef IEEE80211_STA_ONLY

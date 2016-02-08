@@ -1,4 +1,4 @@
-/* $OpenBSD: xmalloc.c,v 1.4 2012/07/10 11:53:01 nicm Exp $ */
+/* $OpenBSD: xmalloc.c,v 1.7 2014/10/20 23:57:14 nicm Exp $ */
 
 /*
  * Copyright (c) 2004 Nicholas Marriott <nicm@users.sourceforge.net>
@@ -16,10 +16,8 @@
  * OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
 
-#include <sys/param.h>
+#include <sys/types.h>
 
-#include <errno.h>
-#include <libgen.h>
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
@@ -68,7 +66,20 @@ xmalloc(size_t size)
 }
 
 void *
-xrealloc(void *oldptr, size_t nmemb, size_t size)
+xrealloc(void *oldptr, size_t newsize)
+{
+	void	*newptr;
+
+	if (newsize == 0)
+		fatalx("zero size");
+	if ((newptr = realloc(oldptr, newsize)) == NULL)
+		fatal("xrealloc failed");
+
+	return (newptr);
+}
+
+void *
+xreallocarray(void *oldptr, size_t nmemb, size_t size)
 {
 	size_t	 newsize = nmemb * size;
 	void	*newptr;
@@ -78,12 +89,12 @@ xrealloc(void *oldptr, size_t nmemb, size_t size)
 	if (SIZE_MAX / nmemb < size)
 		fatalx("nmemb * size > SIZE_MAX");
 	if ((newptr = realloc(oldptr, newsize)) == NULL)
-		fatal("xrealloc failed");
+		fatal("xreallocarray failed");
 
 	return (newptr);
 }
 
-int printflike2
+int
 xasprintf(char **ret, const char *fmt, ...)
 {
 	va_list ap;
@@ -108,7 +119,7 @@ xvasprintf(char **ret, const char *fmt, va_list ap)
 	return (i);
 }
 
-int printflike3
+int
 xsnprintf(char *buf, size_t len, const char *fmt, ...)
 {
 	va_list ap;

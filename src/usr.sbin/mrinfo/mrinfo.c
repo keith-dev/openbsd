@@ -81,6 +81,7 @@
 #include <arpa/inet.h>
 #include <stdarg.h>
 #include <poll.h>
+#include <limits.h>
 #include <err.h>
 
 #define DEFAULT_TIMEOUT	4	/* How long to wait before retrying requests */
@@ -298,7 +299,7 @@ main(int argc, char *argv[])
 	if (setresuid(uid, uid, uid) == -1)
 		err(1, "setresuid");
 
-	setlinebuf(stderr);
+	setvbuf(stderr, NULL, _IOLBF, 0);
 
 	while ((ch = getopt(argc, argv, "d::nr:t:")) != -1) {
 		switch (ch) {
@@ -370,9 +371,7 @@ main(int argc, char *argv[])
 		addrlen = sizeof(addr);
 		memset(&addr, 0, sizeof addr);
 		addr.sin_family = AF_INET;
-#if (defined(BSD) && (BSD >= 199103))
 		addr.sin_len = sizeof addr;
-#endif
 		addr.sin_addr.s_addr = target_addr;
 		addr.sin_port = htons(2000);	/* any port over 1024 will
 						 * do... */

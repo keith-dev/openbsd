@@ -1,4 +1,4 @@
-/*	$OpenBSD: ip_esp.c,v 1.126 2014/07/22 11:06:10 mpi Exp $ */
+/*	$OpenBSD: ip_esp.c,v 1.129 2014/12/19 17:14:40 tedu Exp $ */
 /*
  * The authors of this code are John Ioannidis (ji@tla.org),
  * Angelos D. Keromytis (kermit@csd.uch.gr) and
@@ -43,20 +43,14 @@
 #include <sys/socket.h>
 
 #include <net/if.h>
+#include <net/if_var.h>
 #include <net/bpf.h>
 
-#include <dev/rndvar.h>
-
-#ifdef INET
 #include <netinet/in.h>
 #include <netinet/ip.h>
 #include <netinet/ip_var.h>
-#endif /* INET */
 
 #ifdef INET6
-#ifndef INET
-#include <netinet/in.h>
-#endif
 #include <netinet/ip6.h>
 #endif /* INET6 */
 
@@ -821,7 +815,6 @@ esp_output(struct mbuf *m, struct tdb *tdb, struct mbuf **mp, int skip,
 	espstat.esps_output++;
 
 	switch (tdb->tdb_dst.sa.sa_family) {
-#ifdef INET
 	case AF_INET:
 		/* Check for IP maximum packet size violations. */
 		if (skip + hlen + rlen + padding + alen > IP_MAXPACKET)	{
@@ -833,7 +826,6 @@ esp_output(struct mbuf *m, struct tdb *tdb, struct mbuf **mp, int skip,
 			return EMSGSIZE;
 		}
 		break;
-#endif /* INET */
 
 #ifdef INET6
 	case AF_INET6:

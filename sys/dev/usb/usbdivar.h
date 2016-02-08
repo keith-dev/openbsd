@@ -1,4 +1,4 @@
-/*	$OpenBSD: usbdivar.h,v 1.61 2014/07/09 18:15:04 mpi Exp $ */
+/*	$OpenBSD: usbdivar.h,v 1.69 2014/12/21 12:04:01 mpi Exp $ */
 /*	$NetBSD: usbdivar.h,v 1.70 2002/07/11 21:14:36 augustss Exp $	*/
 /*	$FreeBSD: src/sys/dev/usb/usbdivar.h,v 1.11 1999/11/17 22:33:51 n_hibma Exp $	*/
 
@@ -90,8 +90,10 @@ struct usbd_port {
 struct usbd_hub {
 	int		      (*explore)(struct usbd_device *);
 	void		       *hubsoftc;
-	usb_hub_descriptor_t	hubdesc;
-	struct usbd_port        *ports;
+	struct usbd_port       *ports;
+	int			nports;
+	u_int8_t		powerdelay;
+	u_int8_t		ttthink;
 };
 
 struct usbd_bus {
@@ -181,7 +183,7 @@ struct usbd_pipe {
 struct usbd_xfer {
 	struct usbd_pipe       *pipe;
 	void		       *priv;
-	void		       *buffer;
+	char		       *buffer;
 	u_int32_t		length;
 	u_int32_t		actlen;
 	u_int16_t		flags;
@@ -191,8 +193,7 @@ struct usbd_xfer {
 	volatile char		done;
 #ifdef DIAGNOSTIC
 	u_int32_t		busy_free;
-#define XFER_FREE 0x46524545
-#define XFER_BUSY 0x42555359
+#define XFER_FREE 0x42555359
 #define XFER_ONQU 0x4f4e5155
 #endif
 
@@ -220,21 +221,17 @@ struct usbd_xfer {
 	struct timeout		timeout_handle;
 };
 
-#ifdef USB_DEBUG
 void usbd_dump_iface(struct usbd_interface *);
 void usbd_dump_device(struct usbd_device *);
 void usbd_dump_endpoint(struct usbd_endpoint *);
 void usbd_dump_queue(struct usbd_pipe *);
 void usbd_dump_pipe(struct usbd_pipe *);
-#endif
 
 /* Routines from usb_subr.c */
 int		usbctlprint(void *, const char *);
 void		usb_delay_ms(struct usbd_bus *, u_int);
-usbd_status	usbd_port_disown_to_1_1(struct usbd_device *, 
-		    int, usb_port_status_t *);
-usbd_status	usbd_reset_port(struct usbd_device *,
-		    int, usb_port_status_t *);
+usbd_status	usbd_port_disown_to_1_1(struct usbd_device *, int);
+int		usbd_reset_port(struct usbd_device *, int);
 usbd_status	usbd_setup_pipe(struct usbd_device *,
 		    struct usbd_interface *, struct usbd_endpoint *, int,
 		    struct usbd_pipe **);
@@ -252,39 +249,8 @@ void		usb_needs_explore(struct usbd_device *, int);
 void		usb_needs_reattach(struct usbd_device *);
 void		usb_schedsoftintr(struct usbd_bus *);
 
-/* Locator stuff. */
-
-/* XXX these values are used to statically bind some elements in the USB tree
- * to specific driver instances. This should be somehow emulated in FreeBSD
- * but can be done later on.
- * The values are copied from the files.usb file in the NetBSD sources.
- */
-#define UHUBCF_PORT_DEFAULT -1
-#define UHUBCF_CONFIGURATION_DEFAULT -1
-#define UHUBCF_INTERFACE_DEFAULT -1
-#define UHUBCF_VENDOR_DEFAULT -1
-#define UHUBCF_PRODUCT_DEFAULT -1
-#define UHUBCF_RELEASE_DEFAULT -1
-
-#define	UHUBCF_PORT		0
-#define	UHUBCF_CONFIGURATION	1
-#define	UHUBCF_INTERFACE	2
-#define	UHUBCF_VENDOR		3
-#define	UHUBCF_PRODUCT		4
-#define	UHUBCF_RELEASE		5
-
-#define	uhubcf_port		cf_loc[UHUBCF_PORT]
-#define	uhubcf_configuration	cf_loc[UHUBCF_CONFIGURATION]
-#define	uhubcf_interface	cf_loc[UHUBCF_INTERFACE]
-#define	uhubcf_vendor		cf_loc[UHUBCF_VENDOR]
-#define	uhubcf_product		cf_loc[UHUBCF_PRODUCT]
-#define	uhubcf_release		cf_loc[UHUBCF_RELEASE]
-#define	UHUB_UNK_PORT		UHUBCF_PORT_DEFAULT /* wildcarded 'port' */
-#define	UHUB_UNK_CONFIGURATION	UHUBCF_CONFIGURATION_DEFAULT /* wildcarded 'configuration' */
-#define	UHUB_UNK_INTERFACE	UHUBCF_INTERFACE_DEFAULT /* wildcarded 'interface' */
-#define	UHUB_UNK_VENDOR		UHUBCF_VENDOR_DEFAULT /* wildcarded 'vendor' */
-#define	UHUB_UNK_PRODUCT	UHUBCF_PRODUCT_DEFAULT /* wildcarded 'product' */
-#define	UHUB_UNK_RELEASE	UHUBCF_RELEASE_DEFAULT /* wildcarded 'release' */
+#define	UHUB_UNK_CONFIGURATION	-1
+#define	UHUB_UNK_INTERFACE	-1
 
 static inline int
 usbd_xfer_isread(struct usbd_xfer *xfer)

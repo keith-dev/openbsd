@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_pppx.c,v 1.32 2014/07/22 11:06:09 mpi Exp $ */
+/*	$OpenBSD: if_pppx.c,v 1.36 2015/02/10 21:56:10 miod Exp $ */
 
 /*
  * Copyright (c) 2010 Claudio Jeker <claudio@openbsd.org>
@@ -63,17 +63,15 @@
 
 #include <net/if.h>
 #include <net/if_types.h>
-#include <net/route.h>
+#include <net/radix.h>
 #include <net/netisr.h>
 #include <netinet/in.h>
 #include <netinet/if_ether.h>
 #include <net/if_dl.h>
 
-#ifdef INET
 #include <netinet/in_var.h>
 #include <netinet/ip.h>
 #include <netinet/ip_var.h>
-#endif
 
 #ifdef INET6
 #include <netinet6/in6_var.h>
@@ -133,8 +131,8 @@ struct rwlock			pppx_devs_lk = RWLOCK_INITIALIZER("pppxdevs");
 LIST_HEAD(, pppx_dev)		pppx_devs = LIST_HEAD_INITIALIZER(pppx_devs);
 struct pool			*pppx_if_pl;
 
-struct pppx_dev			*pppx_dev_lookup(int);
-struct pppx_dev			*pppx_dev2pxd(int);
+struct pppx_dev			*pppx_dev_lookup(dev_t);
+struct pppx_dev			*pppx_dev2pxd(dev_t);
 
 struct pppx_if_key {
 	int			pxik_session_id;
@@ -302,7 +300,7 @@ pppxread(dev_t dev, struct uio *uio, int ioflag)
 	while (m0 != NULL && uio->uio_resid > 0 && error == 0) {
 		len = min(uio->uio_resid, m0->m_len);
 		if (len != 0)
-			error = uiomove(mtod(m0, caddr_t), len, uio);
+			error = uiomovei(mtod(m0, caddr_t), len, uio);
 		MFREE(m0, m);
 		m0 = m;
 	}
@@ -346,7 +344,7 @@ pppxwrite(dev_t dev, struct uio *uio, int ioflag)
 
 	while (error == 0 && uio->uio_resid > 0) {
 		m->m_len = min(mlen, uio->uio_resid);
-		error = uiomove(mtod (m, caddr_t), m->m_len, uio);
+		error = uiomovei(mtod (m, caddr_t), m->m_len, uio);
 		*mp = m;
 		mp = &m->m_next;
 		if (error == 0 && uio->uio_resid > 0) {
@@ -381,12 +379,10 @@ pppxwrite(dev_t dev, struct uio *uio, int ioflag)
 	m_adj(top, sizeof(struct pppx_hdr));
 
 	switch (ntohl(th->pppx_proto)) {
-#ifdef INET
 	case AF_INET:
 		ifq = &ipintrq;
 		isr = NETISR_IP;
 		break;
-#endif
 #ifdef INET6
 	case AF_INET6:
 		ifq = &ip6intrq;

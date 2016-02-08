@@ -1,4 +1,4 @@
-/*	$OpenBSD: lapic.c,v 1.31 2014/03/29 18:09:28 guenther Exp $	*/
+/*	$OpenBSD: lapic.c,v 1.37 2015/01/06 12:50:47 dlg Exp $	*/
 /* $NetBSD: lapic.c,v 1.2 2003/05/08 01:04:35 fvdl Exp $ */
 
 /*-
@@ -33,7 +33,6 @@
  */
 
 #include <sys/param.h>
-#include <sys/proc.h>
 #include <sys/systm.h>
 #include <sys/device.h>
 
@@ -110,12 +109,8 @@ lapic_map(paddr_t lapic_base)
 	 */
 
 	pte = kvtopte(va);
-	*pte = lapic_base | PG_RW | PG_V | PG_N | PG_G;
+	*pte = lapic_base | PG_RW | PG_V | PG_N | PG_G | pg_nx;
 	invlpg(va);
-
-#ifdef MULTIPROCESSOR
-	cpu_init_first();
-#endif
 
 	lapic_tpr = s;
 	enable_intr();
@@ -277,8 +272,13 @@ u_int32_t lapic_delaytab[26];
 void
 lapic_clockintr(void *arg, struct intrframe frame)
 {
+	struct cpu_info *ci = curcpu();
+	int floor;
 
+	floor = ci->ci_handled_intr_level;
+	ci->ci_handled_intr_level = ci->ci_ilevel;
 	hardclock((struct clockframe *)&frame);
+	ci->ci_handled_intr_level = floor;
 
 	clk_count.ec_count++;
 }
@@ -499,13 +499,13 @@ x86_ipi_init(int target)
 
 	i82489_icr_wait();
 
-	return (i82489_readreg(LAPIC_ICRLO) & LAPIC_DLSTAT_BUSY) ? EBUSY : 0;
+	return 0;
 }
 
 int
 x86_ipi(int vec, int target, int dl)
 {
-	int result, s;
+	int s;
 
 	s = splhigh();
 
@@ -519,11 +519,9 @@ x86_ipi(int vec, int target, int dl)
 
 	i82489_icr_wait();
 
-	result = (i82489_readreg(LAPIC_ICRLO) & LAPIC_DLSTAT_BUSY) ? EBUSY : 0;
-
 	splx(s);
 
-	return result;
+	return 0;
 }
 #endif /* MULTIPROCESSOR */
 

@@ -1,4 +1,4 @@
-/*	$OpenBSD: sysctl.h,v 1.148 2014/07/13 16:41:22 claudio Exp $	*/
+/*	$OpenBSD: sysctl.h,v 1.155 2015/02/11 05:09:33 claudio Exp $	*/
 /*	$NetBSD: sysctl.h,v 1.16 1996/04/09 20:55:36 cgd Exp $	*/
 
 /*
@@ -113,9 +113,9 @@ struct ctlname {
 #define	KERN_HOSTNAME		10	/* string: hostname */
 #define	KERN_HOSTID		11	/* int: host identifier */
 #define	KERN_CLOCKRATE		12	/* struct: struct clockinfo */
-#define	KERN_VNODE		13	/* struct: vnode structures */
-/*define gap: was KERN_PROC	14	*/
-/*define gap: was KERN_FILE	15	*/
+/* was KERN_VNODE		13	*/
+/* was KERN_PROC		14	*/
+/* was KERN_FILE		15	*/
 #define	KERN_PROF		16	/* node: kernel profiling info */
 #define	KERN_POSIX1		17	/* int: POSIX.1 version */
 #define	KERN_NGROUPS		18	/* int: # of supplemental group ids */
@@ -152,15 +152,15 @@ struct ctlname {
 #define	KERN_POOL		49	/* struct: pool information */
 #define	KERN_STACKGAPRANDOM	50	/* int: stackgap_random */
 #define	KERN_SYSVIPC_INFO	51	/* struct: SysV sem/shm/msg info */
-#define KERN_USERCRYPTO		52	/* int: usercrypto */
-#define KERN_CRYPTODEVALLOWSOFT	53	/* int: cryptodevallowsoft */
+/* was KERN_USERCRYPTO	52	*/
+/* was KERN_CRYPTODEVALLOWSOFT	53	*/
 #define KERN_SPLASSERT		54	/* int: splassert */
 #define KERN_PROC_ARGS		55	/* node: proc args and env */
 #define	KERN_NFILES		56	/* int: number of open files */
 #define	KERN_TTYCOUNT		57	/* int: number of tty devices */
 #define KERN_NUMVNODES		58	/* int: number of vnodes in use */
 #define	KERN_MBSTAT		59	/* struct: mbuf statistics */
-#define KERN_USERASYMCRYPTO	60	/* int: usercrypto */
+/* was KERN_USERASYMCRYPTO	60	*/
 #define	KERN_SEMINFO		61	/* struct: SysV struct seminfo */
 #define	KERN_SHMINFO		62	/* struct: SysV struct shminfo */
 #define KERN_INTRCNT		63	/* node: interrupt counters */
@@ -174,13 +174,17 @@ struct ctlname {
 #define	KERN_CPTIME2		71	/* array: cp_time2 */
 #define	KERN_CACHEPCT		72	/* buffer cache % of physmem */
 #define	KERN_FILE		73	/* struct: file entries */
-/* was define KERN_RTHREADS	74	*/
+/* was KERN_RTHREADS	74	*/
 #define	KERN_CONSDEV		75	/* dev_t: console terminal device */
 #define	KERN_NETLIVELOCKS	76	/* int: number of network livelocks */
 #define	KERN_POOL_DEBUG		77	/* int: enable pool_debug */
 #define	KERN_PROC_CWD		78      /* node: proc cwd */
 #define	KERN_PROC_NOBROADCASTKILL 79	/* node: proc no broadcast kill */
-#define	KERN_MAXID		80	/* number of valid kern ids */
+#define	KERN_PROC_VMMAP		80      /* node: proc vmmap */
+#define	KERN_GLOBAL_PTRACE	81	/* allow ptrace globally */
+#define	KERN_CONSBUFSIZE	82	/* int: console message buffer size */
+#define	KERN_CONSBUF		83	/* console message buffer */
+#define	KERN_MAXID		84	/* number of valid kern ids */
 
 #define	CTL_KERN_NAMES { \
 	{ 0, 0 }, \
@@ -196,7 +200,7 @@ struct ctlname {
 	{ "hostname", CTLTYPE_STRING }, \
 	{ "hostid", CTLTYPE_INT }, \
 	{ "clockrate", CTLTYPE_STRUCT }, \
-	{ "vnode", CTLTYPE_STRUCT }, \
+	{ "gap", 0 }, \
 	{ "gap", 0 }, \
 	{ "gap", 0 }, \
 	{ "profiling", CTLTYPE_NODE }, \
@@ -235,15 +239,15 @@ struct ctlname {
 	{ "pool", CTLTYPE_NODE }, \
 	{ "stackgap_random", CTLTYPE_INT }, \
 	{ "sysvipc_info", CTLTYPE_INT }, \
-	{ "usercrypto", CTLTYPE_INT }, \
-	{ "cryptodevallowsoft", CTLTYPE_INT }, \
+	{ "gap", 0 }, \
+	{ "gap", 0 }, \
 	{ "splassert", CTLTYPE_INT }, \
 	{ "procargs", CTLTYPE_NODE }, \
 	{ "nfiles", CTLTYPE_INT }, \
 	{ "ttycount", CTLTYPE_INT }, \
 	{ "numvnodes", CTLTYPE_INT }, \
 	{ "mbstat", CTLTYPE_STRUCT }, \
-	{ "userasymcrypto", CTLTYPE_INT }, \
+	{ "gap", 0 }, \
 	{ "seminfo", CTLTYPE_STRUCT }, \
 	{ "shminfo", CTLTYPE_STRUCT }, \
 	{ "intrcnt", CTLTYPE_NODE }, \
@@ -263,6 +267,8 @@ struct ctlname {
 	{ "pool_debug", CTLTYPE_INT }, \
 	{ "proc_cwd", CTLTYPE_NODE }, \
 	{ "proc_nobroadcastkill", CTLTYPE_NODE }, \
+	{ "proc_vmmap", CTLTYPE_NODE }, \
+	{ "global_ptrace", CTLTYPE_INT }, \
 }
 
 /*
@@ -436,6 +442,50 @@ struct kinfo_proc {
 	int32_t   p_tid;		/* PID_T: Thread identifier. */
 	u_int32_t p_rtableid;		/* U_INT: Routing table identifier. */
 };
+
+/*
+ * VM address range entry, matching struct vm_map_entry.  Useful for
+ * debuggers to know process's addresses.
+ *
+ * To iterate entries, set the last kve_end as the base address into
+ * kve_start.
+ */
+struct kinfo_vmentry {
+	u_long kve_start;		/* vaddr_t */
+	u_long kve_end;			/* vaddr_t */
+	u_long kve_guard;		/* vsize_t */
+	u_long kve_fspace;		/* vsize_t */
+	u_long kve_fspace_augment;	/* vsize_t */
+	u_int64_t kve_offset;		/* voff_t */
+	int kve_wired_count;
+	int kve_etype;
+	int kve_protection;
+	int kve_max_protection;
+	int kve_advice;
+	int kve_inheritance;
+	u_int8_t kve_flags;		/* u_int8_t */
+};
+
+#define KVE_ET_OBJ		0x00000001
+#define KVE_ET_SUBMAP		0x00000002
+#define KVE_ET_COPYONWRITE 	0x00000004
+#define KVE_ET_NEEDSCOPY	0x00000008
+#define KVE_ET_HOLE		0x00000010
+#define KVE_ET_NOFAULT		0x00000020
+#define KVE_ET_FREEMAPPED	0x00000080
+#define KVE_PROT_NONE		0x00000000
+#define KVE_PROT_READ		0x00000001
+#define KVE_PROT_WRITE		0x00000002
+#define KVE_PROT_EXEC		0x00000004
+#define KVE_ADV_NORMAL		0x00000000
+#define KVE_ADV_RANDOM		0x00000001
+#define KVE_ADV_SEQUENTIAL	0x00000002
+#define KVE_INH_SHARE		0x00000000
+#define KVE_INH_COPY		0x00000010
+#define KVE_INH_NONE		0x00000020
+#define KVE_INH_ZERO		0x00000030
+#define KVE_F_STATIC		0x01
+#define KVE_F_KMEM		0x02
 
 #if defined(_KERNEL) || defined(_LIBKVM)
 
@@ -703,6 +753,11 @@ struct kinfo_file {
 	uint64_t	unp_nextref;	/* PTR: link to next connected socket */
 	uint64_t	unp_addr;	/* PTR: address of the socket address */
 	char		unp_path[KI_UNPPATHLEN];
+	uint32_t	inp_proto;	/* CHAR: raw protocol id */
+	uint32_t	t_state;	/* SHORT: tcp state */
+	uint64_t	t_rcv_wnd;	/* ULONG: tcp receive window */
+	uint64_t	t_snd_wnd;	/* ULONG: tcp send window */
+	uint64_t	t_snd_cwnd;	/* ULONG: congestion-controlled win */
 };
 
 /*
@@ -798,7 +853,8 @@ struct kinfo_file {
 #define	HW_USERMEM64		20	/* quad: non-kernel memory */
 #define	HW_NCPUFOUND		21	/* int: number of cpus found*/
 #define	HW_ALLOWPOWERDOWN	22	/* allow power button shutdown */
-#define	HW_MAXID		23	/* number of valid hw ids */
+#define	HW_PERFPOLICY		23	/* set performance policy */
+#define	HW_MAXID		24	/* number of valid hw ids */
 
 #define	CTL_HW_NAMES { \
 	{ 0, 0 }, \
@@ -824,6 +880,7 @@ struct kinfo_file {
 	{ "usermem", CTLTYPE_QUAD }, \
 	{ "ncpufound", CTLTYPE_INT }, \
 	{ "allowpowerdown", CTLTYPE_INT }, \
+	{ "perfpolicy", CTLTYPE_STRING }, \
 }
 
 /*

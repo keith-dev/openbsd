@@ -1,4 +1,4 @@
-/*	$OpenBSD: bus.h,v 1.9 2014/03/29 18:09:30 guenther Exp $	*/
+/*	$OpenBSD: bus.h,v 1.11 2015/01/24 20:59:42 kettenis Exp $	*/
 
 /*
  * Copyright (c) 1997 Per Fogelstrom.  All rights reserved.
@@ -76,10 +76,19 @@ int	bus_space_alloc(bus_space_tag_t tag, bus_addr_t rstart,
 	    bus_space_handle_t *handlep);
 void	bus_space_free(bus_space_tag_t tag, bus_space_handle_t handle,
 	    bus_size_t size);
+paddr_t	bus_space_mmap(bus_space_tag_t, bus_addr_t, off_t, int, int);
 
 #define	BUS_SPACE_MAP_CACHEABLE		0x01
 #define	BUS_SPACE_MAP_LINEAR		0x02
 #define	BUS_SPACE_MAP_PREFETCHABLE	0x04
+
+/*
+ *	void *bus_space_vaddr(bus_space_tag_t, bus_space_handle_t);
+ *
+ * Get the kernel virtual address for the mapped bus space.
+ * Only allowed for regions mapped with BUS_SPACE_MAP_LINEAR.
+ */
+#define bus_space_vaddr(t, h) ((void *)(h))
 
 #define bus_space_read(n,m)						      \
 static __inline CAT3(u_int,m,_t)					      \
@@ -439,18 +448,19 @@ bus_space_copy_4(void *v, bus_space_handle_t h1, bus_space_handle_t h2,
 #define BUS_SPACE_BARRIER_READ  0x01		/* force read barrier */ 
 #define BUS_SPACE_BARRIER_WRITE 0x02		/* force write barrier */
 
-#define	BUS_DMA_WAITOK		0x000	/* safe to sleep (pseudo-flag) */
-#define	BUS_DMA_NOWAIT		0x001	/* not safe to sleep */
-#define	BUS_DMA_ALLOCNOW	0x002	/* perform resource allocation now */
-#define	BUS_DMA_COHERENT	0x008	/* hint: map memory DMA coherent */
-#define	BUS_DMA_BUS1		0x010	/* placeholders for bus functions... */
-#define	BUS_DMA_BUS2		0x020
-#define	BUS_DMA_BUS3		0x040
-#define	BUS_DMA_BUS4		0x080
-#define BUS_DMA_READ            0x100	/* mapping is device -> memory only */
-#define	BUS_DMA_WRITE		0x200	/* mapping is memory -> device only */
-#define	BUS_DMA_STREAMING	0x400	/* hint: sequential, unidirectional */
-#define	BUS_DMA_ZERO		0x800	/* zero memory in dmamem_alloc */
+#define	BUS_DMA_WAITOK		0x0000	/* safe to sleep (pseudo-flag) */
+#define	BUS_DMA_NOWAIT		0x0001	/* not safe to sleep */
+#define	BUS_DMA_ALLOCNOW	0x0002	/* perform resource allocation now */
+#define	BUS_DMA_COHERENT	0x0008	/* hint: map memory DMA coherent */
+#define	BUS_DMA_BUS1		0x0010	/* placeholders for bus functions... */
+#define	BUS_DMA_BUS2		0x0020
+#define	BUS_DMA_BUS3		0x0040
+#define	BUS_DMA_BUS4		0x0080
+#define	BUS_DMA_READ		0x0100	/* mapping is device -> memory only */
+#define	BUS_DMA_WRITE		0x0200	/* mapping is memory -> device only */
+#define	BUS_DMA_STREAMING	0x0400	/* hint: sequential, unidirectional */
+#define	BUS_DMA_ZERO		0x0800	/* zero memory in dmamem_alloc */
+#define	BUS_DMA_NOCACHE		0x1000	/* map memory uncached */
 
 
 /* Forwards needed by prototypes below. */
@@ -511,6 +521,9 @@ struct powerpc_bus_dma_tag {
 	 */
 	int	(*_dmamem_alloc)(bus_dma_tag_t, bus_size_t, bus_size_t,
 		    bus_size_t, bus_dma_segment_t *, int, int *, int);
+	int	(*_dmamem_alloc_range)(bus_dma_tag_t, bus_size_t, bus_size_t,
+		    bus_size_t, bus_dma_segment_t *, int, int *, int,
+		    bus_addr_t, bus_addr_t);
 	void	(*_dmamem_free)(bus_dma_tag_t, bus_dma_segment_t *, int);
 	int	(*_dmamem_map)(bus_dma_tag_t, bus_dma_segment_t *,
 		    int, size_t, caddr_t *, int);
@@ -539,6 +552,9 @@ struct powerpc_bus_dma_tag {
 
 #define	bus_dmamem_alloc(t, s, a, b, sg, n, r, f)		\
 	(*(t)->_dmamem_alloc)((t)->_cookie, (s), (a), (b), (sg), (n), (r), (f))
+#define	bus_dmamem_alloc_range(t, s, a, b, sg, n, r, f, l, h)	\
+	(*(t)->_dmamem_alloc_range)((t), (s), (a), (b), (sg),	\
+		(n), (r), (f), (l), (h))
 #define	bus_dmamem_free(t, sg, n)				\
 	(*(t)->_dmamem_free)((t)->_cookie, (sg), (n))
 #define	bus_dmamem_map(t, sg, n, s, k, f)			\
@@ -563,6 +579,9 @@ void	_dmamap_sync(bus_dma_tag_t, bus_dmamap_t, bus_addr_t, bus_size_t,
 
 int	_dmamem_alloc(bus_dma_tag_t, bus_size_t, bus_size_t,
 	    bus_size_t, bus_dma_segment_t *, int, int *, int);
+int	_dmamem_alloc_range( bus_dma_tag_t, bus_size_t, bus_size_t,
+	    bus_size_t, bus_dma_segment_t *, int, int *, int,
+	    bus_addr_t, bus_addr_t);
 void	_dmamem_free(bus_dma_tag_t, bus_dma_segment_t *, int);
 int	_dmamem_map(bus_dma_tag_t, bus_dma_segment_t *,
 	    int, size_t, caddr_t *, int);

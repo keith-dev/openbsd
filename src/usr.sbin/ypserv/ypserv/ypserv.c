@@ -1,4 +1,4 @@
-/*	$OpenBSD: ypserv.c,v 1.39 2013/12/05 14:22:42 jca Exp $ */
+/*	$OpenBSD: ypserv.c,v 1.41 2015/01/15 00:40:26 deraadt Exp $ */
 
 /*
  * Copyright (c) 1994 Mats O Jansson <moj@stacken.kth.se>
@@ -29,7 +29,6 @@
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <sys/ioctl.h>
-#include <sys/ttycom.h>
 #include <netinet/in.h>
 #include <rpcsvc/yp.h>
 #include "ypv1.h"
@@ -352,7 +351,7 @@ my_svc_run(void)
 			hup();
 		}
 		if (svc_max_pollfd > saved_max_pollfd) {
-			newp = realloc(pfd, sizeof(*pfd) * svc_max_pollfd);
+			newp = reallocarray(pfd, svc_max_pollfd, sizeof(*pfd));
 			if (newp == NULL) {
 				free(pfd);
 				perror("svc_run: - realloc failed");

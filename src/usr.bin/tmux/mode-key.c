@@ -1,4 +1,4 @@
-/* $OpenBSD: mode-key.c,v 1.59 2014/05/13 07:54:20 nicm Exp $ */
+/* $OpenBSD: mode-key.c,v 1.61 2014/11/06 09:17:25 nicm Exp $ */
 
 /*
  * Copyright (c) 2008 Nicholas Marriott <nicm@users.sourceforge.net>
@@ -130,6 +130,7 @@ const struct mode_key_cmdstr mode_key_cmdstr_copy[] = {
 	{ MODEKEYCOPY_NEXTSPACEEND, "next-space-end" },
 	{ MODEKEYCOPY_NEXTWORD, "next-word" },
 	{ MODEKEYCOPY_NEXTWORDEND, "next-word-end" },
+	{ MODEKEYCOPY_OTHEREND, "other-end" },
 	{ MODEKEYCOPY_PREVIOUSPAGE, "page-up" },
 	{ MODEKEYCOPY_PREVIOUSSPACE, "previous-space" },
 	{ MODEKEYCOPY_PREVIOUSWORD, "previous-word" },
@@ -288,6 +289,7 @@ const struct mode_key_entry mode_key_vi_copy[] = {
 	{ 'M',			    0, MODEKEYCOPY_MIDDLELINE },
 	{ 'N',			    0, MODEKEYCOPY_SEARCHREVERSE },
 	{ 'T',			    0, MODEKEYCOPY_JUMPTOBACK },
+	{ 'V',			    0, MODEKEYCOPY_SELECTLINE },
 	{ 'W',			    0, MODEKEYCOPY_NEXTSPACE },
 	{ '\002' /* C-b */,	    0, MODEKEYCOPY_PREVIOUSPAGE },
 	{ '\003' /* C-c */,	    0, MODEKEYCOPY_CANCEL },

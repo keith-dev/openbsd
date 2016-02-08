@@ -1,4 +1,4 @@
-/*	$OpenBSD: sginode.c,v 1.29 2011/05/30 22:25:22 oga Exp $	*/
+/*	$OpenBSD: sginode.c,v 1.31 2015/02/06 22:12:19 miod Exp $	*/
 /*
  * Copyright (c) 2008, 2009, 2011 Miodrag Vallat.
  *
@@ -360,6 +360,8 @@ kl_first_pass_comp(klinfo_t *comp, void *arg)
 		scsi2comp = (klscctl_t *)comp;
 		for (i = 0; i < scsi2comp->scsi_buscnt; i++) {
 			scsicomp = (klscsi_t *)scsi2comp->scsi_bus[i];
+			if (scsicomp == NULL)
+				continue;
 			DB_PRF(("\t\tbus %d, physid 0x%02x virtid %d,"
 			    " specific %ld, numdevs %d\n",
 			    i, scsicomp->scsi_info.physid,
@@ -531,7 +533,7 @@ kl_add_memory_ip27(int16_t nasid, int16_t *sizes, unsigned int cnt)
 				 * We could hijack the smallest segment here.
 				 * But is it really worth doing?
 				 */
-				bios_printf("%u MB of memory could not be "
+				bios_printf("%lu MB of memory could not be "
 				    "managed, increase MAXMEMSEGS\n",
 				    ptoa(np) >> 20);
 			}
@@ -578,7 +580,7 @@ kl_add_memory_ip35(int16_t nasid, int16_t *sizes, unsigned int cnt)
 				 * We could hijack the smallest segment here.
 				 * But is it really worth doing?
 				 */
-				bios_printf("%u MB of memory could not be "
+				bios_printf("%lu MB of memory could not be "
 				    "managed, increase MAXMEMSEGS\n",
 				    ptoa(np) >> 20);
 			}

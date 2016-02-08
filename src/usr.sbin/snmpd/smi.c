@@ -1,4 +1,4 @@
-/*	$OpenBSD: smi.c,v 1.15 2014/04/28 12:48:36 blambert Exp $	*/
+
 
 /*
  * Copyright (c) 2007, 2008 Reyk Floeter <reyk@openbsd.org>
@@ -17,7 +17,6 @@
  */
 
 #include <sys/queue.h>
-#include <sys/param.h>
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <sys/socket.h>
@@ -41,11 +40,14 @@
 #include <fcntl.h>
 #include <string.h>
 #include <unistd.h>
+#include <limits.h>
 #include <pwd.h>
 #include <vis.h>
 
 #include "snmpd.h"
 #include "mib.h"
+
+#define MINIMUM(a, b)	(((a) < (b)) ? (a) : (b))
 
 extern struct snmpd *env;
 
@@ -181,7 +183,7 @@ smi_delete(struct oid *oid)
 	}
 }
 
-void
+int
 smi_insert(struct oid *oid)
 {
 	struct oid		 key, *value;
@@ -193,9 +195,10 @@ smi_insert(struct oid *oid)
 	bcopy(&oid->o_id, &key.o_id, sizeof(struct ber_oid));
 	value = RB_FIND(oidtree, &smi_oidtree, &key);
 	if (value != NULL)
-		smi_delete(value);
+		return (-1);
 
 	RB_INSERT(oidtree, &smi_oidtree, oid);
+	return (0);
 }
 
 void
@@ -564,15 +567,17 @@ smi_oid_cmp(struct oid *a, struct oid *b)
 {
 	size_t	 i;
 
-	for (i = 0; i < MIN(a->o_oidlen, b->o_oidlen); i++)
+	for (i = 0; i < MINIMUM(a->o_oidlen, b->o_oidlen); i++)
 		if (a->o_oid[i] != b->o_oid[i])
 			return (a->o_oid[i] - b->o_oid[i]);
 
 	/*
 	 * Return success if the matched object is a table
+	 * or a MIB registered by a subagent
 	 * (it will match any sub-elements)
 	 */
-	if ((b->o_flags & OID_TABLE) &&
+	if ((b->o_flags & OID_TABLE ||
+	    b->o_flags & OID_REGISTERED) &&
 	    (a->o_flags & OID_KEY) == 0 &&
 	    (a->o_oidlen > b->o_oidlen))
 		return (0);

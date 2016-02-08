@@ -1,4 +1,4 @@
-/* $OpenBSD: err.c,v 1.38 2014/07/11 08:44:48 jsing Exp $ */
+/* $OpenBSD: err.c,v 1.41 2014/11/09 19:17:13 miod Exp $ */
 /* Copyright (C) 1995-1998 Eric Young (eay@cryptsoft.com)
  * All rights reserved.
  *
@@ -157,6 +157,7 @@ static ERR_STRING_DATA ERR_str_libraries[] = {
 	{ERR_PACK(ERR_LIB_FIPS,0,0),		"FIPS routines"},
 	{ERR_PACK(ERR_LIB_CMS,0,0),		"CMS routines"},
 	{ERR_PACK(ERR_LIB_HMAC,0,0),		"HMAC routines"},
+	{ERR_PACK(ERR_LIB_GOST,0,0),		"GOST routines"},
 	{0, NULL},
 };
 
@@ -596,7 +597,7 @@ build_SYS_str_reasons(void)
 		if (str->string == NULL) {
 			char (*dest)[LEN_SYS_STR_REASON] =
 			    &(strerror_tab[i - 1]);
-			char *src = strerror(i);
+			const char *src = strerror(i);
 			if (src != NULL) {
 				strlcpy(*dest, src, sizeof *dest);
 				str->string = *dest;
@@ -1105,8 +1106,9 @@ ERR_add_error_vdata(int num, va_list args)
 {
 	char format[129];
 	char *errbuf;
-	format[0] = '\0';
 	int i;
+
+	format[0] = '\0';
 	for (i = 0; i < num; i++) {
 		if (strlcat(format, "%s", sizeof(format)) >= sizeof(format)) {
 			ERR_set_error_data("too many errors", ERR_TXT_STRING);

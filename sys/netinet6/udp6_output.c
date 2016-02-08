@@ -1,4 +1,4 @@
-/*	$OpenBSD: udp6_output.c,v 1.31 2014/07/22 11:06:10 mpi Exp $	*/
+/*	$OpenBSD: udp6_output.c,v 1.33 2014/12/05 15:50:04 mpi Exp $	*/
 /*	$KAME: udp6_output.c,v 1.21 2001/02/07 11:51:54 itojun Exp $	*/
 
 /*
@@ -59,6 +59,8 @@
  * SUCH DAMAGE.
  */
 
+#include "pf.h"
+
 #include <sys/param.h>
 #include <sys/mbuf.h>
 #include <sys/protosw.h>
@@ -70,6 +72,7 @@
 #include <sys/syslog.h>
 
 #include <net/if.h>
+#include <net/if_var.h>
 #include <net/route.h>
 #include <net/if_types.h>
 
@@ -222,6 +225,11 @@ udp6_output(struct inpcb *in6p, struct mbuf *m, struct mbuf *addr6,
 
 	/* force routing table */
 	m->m_pkthdr.ph_rtableid = in6p->inp_rtableid;
+
+#if NPF > 0
+	if (in6p->inp_socket->so_state & SS_ISCONNECTED)
+		m->m_pkthdr.pf.inp = in6p;
+#endif
 
 	error = ip6_output(m, optp, &in6p->inp_route6,
 	    flags, in6p->inp_moptions6, NULL, in6p);

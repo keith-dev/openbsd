@@ -1,4 +1,4 @@
-/* $OpenBSD: acpibtn.c,v 1.35 2013/08/21 20:10:47 landry Exp $ */
+/* $OpenBSD: acpibtn.c,v 1.41 2015/01/27 19:40:14 kettenis Exp $ */
 /*
  * Copyright (c) 2005 Marco Peereboom <marco@openbsd.org>
  *
@@ -16,7 +16,6 @@
  */
 
 #include <sys/param.h>
-#include <sys/proc.h>
 #include <sys/signalvar.h>
 #include <sys/systm.h>
 #include <sys/device.h>
@@ -56,7 +55,6 @@ struct acpibtn_softc {
 #define ACPIBTN_SLEEP	3
 };
 
-int	acpibtn_getsta(struct acpibtn_softc *);
 int	acpibtn_setpsw(struct acpibtn_softc *, int);
 
 struct acpi_lid {
@@ -75,6 +73,37 @@ struct cfdriver acpibtn_cd = {
 };
 
 const char *acpibtn_hids[] = { ACPI_DEV_LD, ACPI_DEV_PBD, ACPI_DEV_SBD, 0 };
+
+/*
+ * acpibtn_numopenlids
+ *
+ * Return the number of _LID devices that are in the "open" state.
+ * Used to determine if we should go back to sleep/hibernate if we
+ * woke up with the all the lids still closed for some reason. If
+ * the machine has no lids, returns -1.
+ */
+int
+acpibtn_numopenlids(void)
+{
+	struct acpi_lid *lid;
+	int64_t val;
+	int ct = 0;
+
+	/* If we have no lids ... */
+	if (SLIST_EMPTY(&acpibtn_lids))
+		return (-1);
+
+	/*
+	 * Determine how many lids are open. Assumes _LID evals to
+	 * non-0 or 0, for on / off (which is what the spec says).
+	 */
+	SLIST_FOREACH(lid, &acpibtn_lids, abl_link)
+		if (!aml_evalinteger(lid->abl_softc->sc_acpi,
+		    lid->abl_softc->sc_devnode, "_LID", 0, NULL, &val) &&
+		    val != 0)
+			ct++;
+	return (ct);
+}
 
 int
 acpibtn_setpsw(struct acpibtn_softc *sc, int psw)
@@ -127,25 +156,31 @@ acpibtn_attach(struct device *parent, struct device *self, void *aux)
 	struct acpi_attach_args *aa = aux;
 	struct acpi_lid		*lid;
 	int64_t			lid_open;
+	int64_t			st;
 
 	sc->sc_acpi = (struct acpi_softc *)parent;
 	sc->sc_devnode = aa->aaa_node;
 
+	printf(": %s\n", sc->sc_devnode->name);
+
+	if (aml_evalinteger(sc->sc_acpi, sc->sc_devnode, "_STA", 0, NULL, &st))
+		st = STA_PRESENT | STA_ENABLED | STA_DEV_OK;
+	if ((st & (STA_PRESENT | STA_ENABLED | STA_DEV_OK)) !=
+	    (STA_PRESENT | STA_ENABLED | STA_DEV_OK))
+		return;
+
 	if (!strcmp(aa->aaa_dev, ACPI_DEV_LD)) {
 		sc->sc_btn_type = ACPIBTN_LID;
-		if (acpibtn_setpsw(sc, 0) == 0) {
-			lid = malloc(sizeof(*lid), M_DEVBUF, M_WAITOK | M_ZERO);
-			lid->abl_softc = sc;
-			SLIST_INSERT_HEAD(&acpibtn_lids, lid, abl_link);
-		}
+
+		/* Set PSW (if present) to disable wake on this LID */
+		(void)acpibtn_setpsw(sc, 0);
+		lid = malloc(sizeof(*lid), M_DEVBUF, M_WAITOK | M_ZERO);
+		lid->abl_softc = sc;
+		SLIST_INSERT_HEAD(&acpibtn_lids, lid, abl_link);
 	} else if (!strcmp(aa->aaa_dev, ACPI_DEV_PBD))
 		sc->sc_btn_type = ACPIBTN_POWER;
 	else if (!strcmp(aa->aaa_dev, ACPI_DEV_SBD))
 		sc->sc_btn_type = ACPIBTN_SLEEP;
-
-	acpibtn_getsta(sc);
-
-	printf(": %s\n", sc->sc_devnode->name);
 
 	if (sc->sc_btn_type == ACPIBTN_LID) {
 		strlcpy(sc->sc_sensdev.xname, DEVNAME(sc),
@@ -163,17 +198,6 @@ acpibtn_attach(struct device *parent, struct device *self, void *aux)
 
 	aml_register_notify(sc->sc_devnode, aa->aaa_dev, acpibtn_notify,
 	    sc, ACPIDEV_NOPOLL);
-}
-
-int
-acpibtn_getsta(struct acpibtn_softc *sc)
-{
-	if (aml_evalname(sc->sc_acpi, sc->sc_devnode, "_STA", 0, NULL, NULL) != 0) {
-		dnprintf(20, "%s: no _STA\n", DEVNAME(sc));
-		/* XXX not all buttons have _STA so FALLTROUGH */
-	}
-
-	return (0);
 }
 
 int

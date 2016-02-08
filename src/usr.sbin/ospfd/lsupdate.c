@@ -1,4 +1,4 @@
-/*	$OpenBSD: lsupdate.c,v 1.41 2013/01/17 09:06:35 markus Exp $ */
+/*	$OpenBSD: lsupdate.c,v 1.44 2015/01/28 22:03:17 bluhm Exp $ */
 
 /*
  * Copyright (c) 2005 Claudio Jeker <claudio@openbsd.org>
@@ -18,13 +18,13 @@
  */
 
 #include <sys/types.h>
-#include <sys/hash.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
 
 #include <stdlib.h>
 #include <string.h>
+#include <siphash.h>
 
 #include "ospf.h"
 #include "ospfd.h"
@@ -329,8 +329,15 @@ ls_retrans_list_del(struct nbr *nbr, struct lsa_hdr *lsa_hdr)
 
 	if ((le = ls_retrans_list_get(nbr, lsa_hdr)) == NULL)
 		return (-1);
+	/*
+	 * Compare LSA with the Ack by comparing not only the seq_num and
+	 * checksum but also the age field.  Since we only care about MAX_AGE
+	 * vs. non-MAX_AGE LSA, a simple >= comparison is good enough.  This
+	 * ensures that a LSA withdrawal is not acked by a previous update.
+	 */
 	if (lsa_hdr->seq_num == le->le_ref->hdr.seq_num &&
-	    lsa_hdr->ls_chksum == le->le_ref->hdr.ls_chksum) {
+	    lsa_hdr->ls_chksum == le->le_ref->hdr.ls_chksum &&
+	    ntohs(lsa_hdr->age) >= ntohs(le->le_ref->hdr.age)) {
 		ls_retrans_list_free(nbr, le);
 		return (0);
 	}
@@ -528,6 +535,8 @@ struct lsa_cache {
 	u_int32_t		 hashmask;
 } lsacache;
 
+SIPHASH_KEY lsacachekey;
+
 struct lsa_ref		*lsa_cache_look(struct lsa_hdr *);
 
 void
@@ -543,8 +552,15 @@ lsa_cache_init(u_int32_t hashsize)
 
 	for (i = 0; i < hs; i++)
 		LIST_INIT(&lsacache.hashtbl[i]);
+	arc4random_buf(&lsacachekey, sizeof(lsacachekey));
 
 	lsacache.hashmask = hs - 1;
+}
+
+static uint32_t
+lsa_hash_hdr(const struct lsa_hdr *hdr)
+{
+	return SipHash24(&lsacachekey, hdr, sizeof(*hdr));
 }
 
 struct lsa_ref *
@@ -573,8 +589,7 @@ lsa_cache_add(void *data, u_int16_t len)
 	ref->len = len;
 	ref->refcnt = 1;
 
-	head = &lsacache.hashtbl[hash32_buf(&ref->hdr, sizeof(ref->hdr),
-	    HASHINIT) & lsacache.hashmask];
+	head = &lsacache.hashtbl[lsa_hash_hdr(&ref->hdr) & lsacache.hashmask];
 	LIST_INSERT_HEAD(head, ref, entry);
 	return (ref);
 }
@@ -612,8 +627,7 @@ lsa_cache_look(struct lsa_hdr *lsa_hdr)
 	struct lsa_cache_head	*head;
 	struct lsa_ref		*ref;
 
-	head = &lsacache.hashtbl[hash32_buf(lsa_hdr, sizeof(*lsa_hdr),
-	    HASHINIT) & lsacache.hashmask];
+	head = &lsacache.hashtbl[lsa_hash_hdr(lsa_hdr) & lsacache.hashmask];
 
 	LIST_FOREACH(ref, head, entry) {
 		if (memcmp(&ref->hdr, lsa_hdr, sizeof(*lsa_hdr)) == 0)

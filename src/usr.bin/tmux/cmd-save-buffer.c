@@ -1,4 +1,4 @@
-/* $OpenBSD: cmd-save-buffer.c,v 1.25 2014/05/13 07:34:35 nicm Exp $ */
+/* $OpenBSD: cmd-save-buffer.c,v 1.27 2014/10/20 22:29:25 nicm Exp $ */
 
 /*
  * Copyright (c) 2009 Tiago Cunha <me@tiagocunha.org>
@@ -39,7 +39,6 @@ const struct cmd_entry cmd_save_buffer_entry = {
 	"ab:", 1, 1,
 	"[-a] " CMD_BUFFER_USAGE " path",
 	0,
-	NULL,
 	cmd_save_buffer_exec
 };
 
@@ -48,7 +47,6 @@ const struct cmd_entry cmd_show_buffer_entry = {
 	"b:", 0, 0,
 	CMD_BUFFER_USAGE,
 	0,
-	NULL,
 	cmd_save_buffer_exec
 };
 
@@ -147,7 +145,7 @@ do_print:
 			size = pb->size - used;
 
 		msglen = size * 4 + 1;
-		msg = xrealloc(msg, 1, msglen);
+		msg = xrealloc(msg, msglen);
 
 		strvisx(msg, start, size, VIS_OCTAL|VIS_TAB);
 		cmdq_print(cmdq, "%s", msg);

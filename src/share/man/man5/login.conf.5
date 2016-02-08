@@ -30,10 +30,10 @@
 .\" OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
 .\" SUCH DAMAGE.
 .\"
-.\" $OpenBSD: login.conf.5,v 1.54 2014/04/22 12:48:17 sobrado Exp $
+.\" $OpenBSD: login.conf.5,v 1.59 2015/02/11 04:03:40 tedu Exp $
 .\" BSDI $From: login.conf.5,v 2.20 2000/06/26 14:50:38 prb Exp $
 .\"
-.Dd $Mdocdate: April 22 2014 $
+.Dd $Mdocdate: February 11 2015 $
 .Dt LOGIN.CONF 5
 .Os
 .Sh NAME
@@ -92,7 +92,7 @@ file are either boolean or use a
 .Ql =
 to separate the capability from the value.
 The types are described after the capability table.
-.Bl -column "approve-service" "program" "blowfish,6" "Description"
+.Bl -column "approve-service" "program" "blowfish,8" "Description"
 .It Sy Name Ta Sy Type Ta Sy Default Ta Sy Description
 .\"
 .It approve Ta program Ta "" Ta
@@ -159,30 +159,11 @@ See
 .Xr login 1 .
 .\"
 .Pp
-.It localcipher Ta string Ta blowfish,6 Ta
-The cipher to use for local passwords.
-Possible values are:
-.Dq old ,
-.Dq newsalt,<rounds> ,
-.Dq md5 ,
-and
-.Dq blowfish,<rounds>
-where
-.Dq old
-means classic 56-bit DES.
-For
-.Dq newsalt
-the value of rounds is a 24-bit integer with a minimum of 7250 rounds.
-For
-.Dq blowfish
-the value can be between 4 and 31.
-It specifies the base 2 logarithm of the number of rounds.
-.\"
-.Pp
-.It ypcipher Ta string Ta old Ta
-The cipher to use for YP passwords.
-The possible values are the same as for
-.Ar localcipher .
+.It localcipher Ta string Ta blowfish,8 Ta
+The cipher to use for encrypting passwords.
+Refer to
+.Xr crypt_newhash 3
+for possible values.
 .\"
 .Pp
 .It login-backoff Ta number Ta 3 Ta
@@ -308,6 +289,13 @@ The
 environment variable will contain the shell specified in the password file.
 .\"
 .Pp
+.It tc Ta string Ta "" Ta
+Interpolate/expands records from corresponding
+.Pa login.conf .
+See
+.Xr getcap 3 .
+.\"
+.Pp
 .It term Ta string Ta Dv su Ta
 Default terminal type if not able to determine from other means.
 .\"
@@ -330,7 +318,7 @@ File containing welcome message.
 .El
 .Pp
 The resource limit entries
-.No ( Ns Va cputime , filesize , datasize , stacksize , coredumpsize ,
+.Va ( cputime , filesize , datasize , stacksize , coredumpsize ,
 .Va memoryuse , memorylocked , maxproc ,
 and
 .Va openfiles )

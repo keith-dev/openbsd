@@ -1,4 +1,4 @@
-/*	$OpenBSD: eap.c,v 1.10 2014/02/17 11:00:14 reyk Exp $	*/
+/*	$OpenBSD: eap.c,v 1.13 2015/02/06 10:39:01 deraadt Exp $	*/
 
 /*
  * Copyright (c) 2010-2013 Reyk Floeter <reyk@openbsd.org>
@@ -16,21 +16,18 @@
  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
 
-#include <sys/param.h>
 #include <sys/queue.h>
 #include <sys/socket.h>
 #include <sys/wait.h>
 #include <sys/uio.h>
 
 #include <netinet/in.h>
-#include <netinet/ip_ipsp.h>
 #include <arpa/inet.h>
 
 #include <stdlib.h>
 #include <stdio.h>
 #include <unistd.h>
 #include <string.h>
-#include <getopt.h>
 #include <signal.h>
 #include <errno.h>
 #include <err.h>

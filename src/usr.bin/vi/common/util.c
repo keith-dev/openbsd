@@ -1,4 +1,4 @@
-/*	$OpenBSD: util.c,v 1.8 2009/10/27 23:59:47 deraadt Exp $	*/
+/*	$OpenBSD: util.c,v 1.10 2015/01/16 06:40:14 deraadt Exp $	*/
 
 /*-
  * Copyright (c) 1991, 1993, 1994
@@ -11,7 +11,6 @@
 
 #include "config.h"
 
-#include <sys/param.h>
 #include <sys/queue.h>
 
 #include <bitstring.h>
@@ -24,6 +23,8 @@
 
 #include "common.h"
 
+#define MAXIMUM(a, b)	(((a) > (b)) ? (a) : (b))
+
 /*
  * binc --
  *	Increase the size of a buffer.
@@ -31,10 +32,7 @@
  * PUBLIC: void *binc(SCR *, void *, size_t *, size_t);
  */
 void *
-binc(sp, bp, bsizep, min)
-	SCR *sp;			/* sp MAY BE NULL!!! */
-	void *bp;
-	size_t *bsizep, min;
+binc(SCR *sp, void *bp, size_t *bsizep, size_t min)
 {
 	size_t csize;
 
@@ -42,7 +40,7 @@ binc(sp, bp, bsizep, min)
 	if (min && *bsizep >= min)
 		return (bp);
 
-	csize = *bsizep + MAX(min, 256);
+	csize = *bsizep + MAXIMUM(min, 256);
 	REALLOC(sp, bp, void *, csize);
 
 	if (bp == NULL) {
@@ -71,10 +69,7 @@ binc(sp, bp, bsizep, min)
  * PUBLIC: int nonblank(SCR *, recno_t, size_t *);
  */
 int
-nonblank(sp, lno, cnop)
-	SCR *sp;
-	recno_t lno;
-	size_t *cnop;
+nonblank(SCR *sp, recno_t lno, size_t *cnop)
 {
 	char *p;
 	size_t cnt, len, off;
@@ -107,8 +102,7 @@ nonblank(sp, lno, cnop)
  * PUBLIC: char *tail(char *);
  */
 char *
-tail(path)
-	char *path;
+tail(char *path)
 {
 	char *p;
 
@@ -124,10 +118,7 @@ tail(path)
  * PUBLIC: CHAR_T *v_strdup(SCR *, const CHAR_T *, size_t);
  */
 CHAR_T *
-v_strdup(sp, str, len)
-	SCR *sp;
-	const CHAR_T *str;
-	size_t len;
+v_strdup(SCR *sp, const CHAR_T *str, size_t len)
 {
 	CHAR_T *copy;
 
@@ -146,11 +137,7 @@ v_strdup(sp, str, len)
  * PUBLIC: enum nresult nget_uslong(u_long *, const char *, char **, int);
  */
 enum nresult
-nget_uslong(valp, p, endp, base)
-	u_long *valp;
-	const char *p;
-	char **endp;
-	int base;
+nget_uslong(u_long *valp, const char *p, char **endp, int base)
 {
 	errno = 0;
 	*valp = strtoul(p, endp, base);
@@ -168,11 +155,7 @@ nget_uslong(valp, p, endp, base)
  * PUBLIC: enum nresult nget_slong(long *, const char *, char **, int);
  */
 enum nresult
-nget_slong(valp, p, endp, base)
-	long *valp;
-	const char *p;
-	char **endp;
-	int base;
+nget_slong(long *valp, const char *p, char **endp, int base)
 {
 	errno = 0;
 	*valp = strtol(p, endp, base);

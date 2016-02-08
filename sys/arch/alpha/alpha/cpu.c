@@ -1,4 +1,4 @@
-/* $OpenBSD: cpu.c,v 1.36 2014/05/08 20:46:49 miod Exp $ */
+/* $OpenBSD: cpu.c,v 1.38 2015/01/04 18:52:46 miod Exp $ */
 /* $NetBSD: cpu.c,v 1.44 2000/05/23 05:12:53 thorpej Exp $ */
 
 /*-
@@ -145,9 +145,9 @@ static const char *ev4minor[] = {
 	"pass 2.2.3 or 2.2.5", "pass 2.2.4", "pass 2.5", "pass 2.4.1",
 	"pass 2.5.1", "pass 2.6", 0
 }, *ev68cbminor[] = {
-	/* what are the values for pass 2.3 and pass 2.4? */
-	"", "", "", "", "", "",
-	"pass 4.0", 0
+	/* what is the value for pass 2.3? */
+	"", "", "", "", "",
+	"pass 2.4", "pass 4.0", 0
 };
 
 struct cputable_struct {
@@ -298,7 +298,6 @@ recognized:
 		ci = malloc(sizeof(*ci), M_DEVBUF, M_WAITOK | M_ZERO);
 
 	cpu_info[ma->ma_slot] = ci;
-	simple_lock_init(&ci->ci_slock);
 #else
 	ci = &cpu_info_primary;
 #endif

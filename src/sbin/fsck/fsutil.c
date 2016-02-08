@@ -1,4 +1,4 @@
-/*	$OpenBSD: fsutil.c,v 1.18 2010/08/12 15:26:34 jsing Exp $	*/
+/*	$OpenBSD: fsutil.c,v 1.20 2015/01/16 06:39:57 deraadt Exp $	*/
 /*	$NetBSD: fsutil.c,v 1.2 1996/10/03 20:06:31 christos Exp $	*/
 
 /*
@@ -30,13 +30,13 @@
  * SUCH DAMAGE.
  */
 
-#include <sys/param.h>
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
 #include <stdarg.h>
 #include <errno.h>
 #include <fstab.h>
+#include <limits.h>
 #include <err.h>
 
 #include <sys/types.h>
@@ -169,7 +169,7 @@ unrawname(char *name)
 char *
 rawname(char *name)
 {
-	static char rawbuf[MAXPATHLEN];
+	static char rawbuf[PATH_MAX];
 	char *dp;
 
 	if ((dp = strrchr(name, '/')) == NULL)
@@ -248,13 +248,13 @@ emalloc(size_t s)
 
 
 void *
-erealloc(void *p, size_t s)
+ereallocarray(void *p, size_t n, size_t s)
 {
 	void *newp;
 
 	if (s == 0)
 		err(1, "realloc failed");
-	newp = realloc(p, s);
+	newp = reallocarray(p, n, s);
 	if (newp == NULL) {
 		if (p)
 			free(p);

@@ -1,5 +1,5 @@
 # ex:ts=8 sw=4:
-# $OpenBSD: PackageRepository.pm,v 1.111 2014/07/13 17:24:06 espie Exp $
+# $OpenBSD: PackageRepository.pm,v 1.113 2015/03/04 13:55:32 espie Exp $
 #
 # Copyright (c) 2003-2010 Marc Espie <espie@openbsd.org>
 #
@@ -111,6 +111,8 @@ sub parse
 	} elsif ($u =~ m/^https\:/io) {
 		return $class->https->parse_fullurl($r, $state);
 	} elsif ($u =~ m/^scp\:/io) {
+		return undef if $state->defines("NO_SCP");
+
 		require OpenBSD::PackageRepository::SCP;
 
 		return $class->scp->parse_fullurl($r, $state);
@@ -519,6 +521,10 @@ sub open_pipe
 
 	my ($self, $object) = @_;
 	$object->{errors} = OpenBSD::Temp->file;
+	if (!defined $object->{errors}) {
+		$self->{state}->fatal("#1 not writable",
+		    $OpenBSD::Temp::tempbase);
+	}
 	$object->{cache_dir} = $ENV{'PKG_CACHE'};
 	$object->{parent} = $$;
 
@@ -700,6 +706,10 @@ sub list
 	if (!defined $self->{list}) {
 		$self->make_room;
 		my $error = OpenBSD::Temp->file;
+		if (!defined $error) {
+			$self->{state}->fatal("#1 not writable",
+			    $OpenBSD::Temp::tempbase);
+		}
 		$self->{list} = $self->obtain_list($error);
 		$self->parse_problems($error);
 		if ($self->{no_such_dir}) {

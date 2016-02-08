@@ -1,4 +1,4 @@
-#	$OpenBSD: Makefile,v 1.22 2014/03/02 05:46:26 deraadt Exp $
+#	$OpenBSD: Makefile,v 1.24 2014/09/21 13:44:45 deraadt Exp $
 
 TOP=	${.CURDIR}/..
 
@@ -11,16 +11,14 @@ RELDIR?=	/home/rel-${MACHINE}
 ALLIP=		22 27 28 30 32
 
 BASE=		${RELDIR}/base${OSrev}.tgz ${RELDIR}/comp${OSrev}.tgz \
-		${RELDIR}/etc${OSrev}.tgz ${RELDIR}/game${OSrev}.tgz \
-		${RELDIR}/man${OSrev}.tgz \
+		${RELDIR}/game${OSrev}.tgz ${RELDIR}/man${OSrev}.tgz \
 		${RELDIR}/INSTALL.${MACHINE}
 .for IP in ${ALLIP}
 BASE+=		${RELDIR}/bsd.IP${IP} ${RELDIR}/bsd.rd.IP${IP}
 .endfor
 BASE+=		${RELDIR}/bsd.mp.IP30
-XBASE=		${RELXDIR}/xbase${OSrev}.tgz ${RELXDIR}/xetc${OSrev}.tgz \
-		${RELXDIR}/xfont${OSrev}.tgz ${RELXDIR}/xshare${OSrev}.tgz \
-		${RELXDIR}/xserv${OSrev}.tgz
+XBASE=		${RELXDIR}/xbase${OSrev}.tgz ${RELXDIR}/xfont${OSrev}.tgz \
+		${RELXDIR}/xshare${OSrev}.tgz ${RELXDIR}/xserv${OSrev}.tgz
 
 all: ${CDROM}
 

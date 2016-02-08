@@ -1,4 +1,4 @@
-/*	$OpenBSD: ipmi.c,v 1.72 2014/07/12 18:48:17 tedu Exp $ */
+/*	$OpenBSD: ipmi.c,v 1.75 2015/01/07 07:49:18 yasuoka Exp $ */
 
 /*
  * Copyright (c) 2005 Jordan Hargrave
@@ -158,6 +158,7 @@ int	ipmi_watchdog(void *, int);
 int	ipmi_intr(void *);
 int	ipmi_match(struct device *, void *, void *);
 void	ipmi_attach(struct device *, struct device *, void *);
+int	ipmi_activate(struct device *, int);
 
 long	ipow(long, int);
 long	ipmi_convert(u_int8_t, struct sdrtype1 *, long);
@@ -284,7 +285,7 @@ bmc_io_wait(struct ipmi_softc *sc, int offset, u_int8_t mask, u_int8_t value,
 	volatile u_int8_t	v;
 	struct ipmi_bmc_args	args;
 
-	if (cold)
+	if (cold || sc->sc_poll)
 		return (bmc_io_wait_cold(sc, offset, mask, value, lbl));
 
 	sc->sc_retries = 0;
@@ -741,7 +742,7 @@ kcs_recvmsg(struct ipmi_softc *sc, int maxlen, int *rxlen, u_int8_t * data)
 	sts = kcs_wait(sc, KCS_IBF, 0, "recv");
 	*rxlen = idx;
 	if (sts != KCS_IDLE_STATE) {
-		dbg_printf(1, "kcs read = %d/%d <%.2x>\n", idx, maxlen, sts);
+		dbg_printf(1, "kcs recvmsg = %d/%d <%.2x>\n", idx, maxlen, sts);
 		return (-1);
 	}
 
@@ -835,7 +836,8 @@ struct ipmi_bmc_response {
 };
 
 struct cfattach ipmi_ca = {
-	sizeof(struct ipmi_softc), ipmi_match, ipmi_attach
+	sizeof(struct ipmi_softc), ipmi_match, ipmi_attach,
+	NULL, ipmi_activate
 };
 
 struct cfdriver ipmi_cd = {
@@ -1047,7 +1049,8 @@ ipmi_recvcmd(struct ipmi_softc *sc, int maxlen, int *rxlen, void *data)
 		return (-1);
 	}
 	/* Receive message from interface, copy out result data */
-	if (sc->sc_if->recvmsg(sc, maxlen + 3, &rawlen, buf))
+	if (sc->sc_if->recvmsg(sc, maxlen + 3, &rawlen, buf) ||
+	    rawlen < IPMI_MSG_DATARCV)
 		return (-1);
 
 	*rxlen = rawlen - IPMI_MSG_DATARCV;
@@ -1057,7 +1060,7 @@ ipmi_recvcmd(struct ipmi_softc *sc, int maxlen, int *rxlen, void *data)
 	rc = buf[IPMI_MSG_CCODE];
 #ifdef IPMI_DEBUG
 	if (rc != 0)
-		dbg_printf(1, "ipmi_recvmsg: nfln=%.2x cmd=%.2x err=%.2x\n",
+		dbg_printf(1, "ipmi_recvcmd: nfln=%.2x cmd=%.2x err=%.2x\n",
 		    buf[IPMI_MSG_NFLN], buf[IPMI_MSG_CMD], buf[IPMI_MSG_CCODE]);
 #endif
 
@@ -1077,10 +1080,11 @@ void
 ipmi_delay(struct ipmi_softc *sc, int period)
 {
 	/* period is in 10 ms increments */
-	if (cold)
+	if (cold || sc->sc_poll)
 		delay(period * 10000);
 	else
-		while (tsleep(sc, PWAIT, "ipmicmd", period) != EWOULDBLOCK);
+		while (tsleep(sc, PWAIT, "ipmicmd", period) != EWOULDBLOCK)
+			continue;
 }
 
 /* Read a partial SDR entry */
@@ -1611,7 +1615,8 @@ ipmi_poll_thread(void *arg)
 			printf("%s: no SDRs IPMI disabled\n", DEVNAME(sc));
 			goto done;
 		}
-		while (tsleep(sc, PUSER + 1, "ipmirun", 1) != EWOULDBLOCK);
+		while (tsleep(sc, PUSER + 1, "ipmirun", 1) != EWOULDBLOCK)
+			continue;
 	}
 
 	/* initialize sensor list for thread */
@@ -1759,19 +1764,33 @@ ipmi_attach(struct device *parent, struct device *self, void *aux)
 }
 
 int
+ipmi_activate(struct device *self, int act)
+{
+	switch (act) {
+	case DVACT_POWERDOWN:
+		wdog_shutdown(self);
+		break;
+	}
+
+	return (0);
+}
+
+int
 ipmi_watchdog(void *arg, int period)
 {
 	struct ipmi_softc	*sc = arg;
-	struct ipmi_watchdog	wdog;
+	uint8_t			wdog[IPMI_GET_WDOG_MAX];
 	int			s, rc, len;
 
 	if (sc->sc_wdog_period == period) {
 		if (period != 0) {
 			s = splsoftclock();
+			sc->sc_poll = 1;
 			/* tickle the watchdog */
 			rc = ipmi_sendcmd(sc, BMC_SA, BMC_LUN, APP_NETFN,
 			    APP_RESET_WATCHDOG, 0, NULL);
 			rc = ipmi_recvcmd(sc, 0, &len, NULL);
+			sc->sc_poll = 0;
 			splx(s);
 		}
 		return (period);
@@ -1781,21 +1800,25 @@ ipmi_watchdog(void *arg, int period)
 		period = 10;
 
 	s = splsoftclock();
+	sc->sc_poll = 1;
 	/* XXX what to do if poking wdog fails? */
 	rc = ipmi_sendcmd(sc, BMC_SA, BMC_LUN, APP_NETFN,
 	    APP_GET_WATCHDOG_TIMER, 0, NULL);
-	rc = ipmi_recvcmd(sc, sizeof(wdog), &len, &wdog);
+	rc = ipmi_recvcmd(sc, IPMI_GET_WDOG_MAX, &len, wdog);
 
 	/* Period is 10ths/sec */
-	wdog.wdog_timeout = htole32(period * 10);
-	wdog.wdog_action &= ~IPMI_WDOG_MASK;
-	wdog.wdog_action |= (period == 0) ? IPMI_WDOG_DISABLED :
+	uint16_t timo = htole16(period * 10);
+
+	memcpy(&wdog[IPMI_SET_WDOG_TIMOL], &timo, 2);
+	wdog[IPMI_SET_WDOG_ACTION] &= ~IPMI_WDOG_MASK;
+	wdog[IPMI_SET_WDOG_ACTION] |= (period == 0) ? IPMI_WDOG_DISABLED :
 	    IPMI_WDOG_REBOOT;
 
 	rc = ipmi_sendcmd(sc, BMC_SA, BMC_LUN, APP_NETFN,
-	    APP_SET_WATCHDOG_TIMER, sizeof(wdog), &wdog);
+	    APP_SET_WATCHDOG_TIMER, IPMI_SET_WDOG_MAX, wdog);
 	rc = ipmi_recvcmd(sc, 0, &len, NULL);
 
+	sc->sc_poll = 0;
 	splx(s);
 
 	sc->sc_wdog_period = period;

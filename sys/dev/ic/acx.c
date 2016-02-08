@@ -1,4 +1,4 @@
-/*	$OpenBSD: acx.c,v 1.104 2014/07/22 13:12:11 mpi Exp $ */
+/*	$OpenBSD: acx.c,v 1.110 2015/02/10 23:25:46 mpi Exp $ */
 
 /*
  * Copyright (c) 2006 Jonathan Gray <jsg@openbsd.org>
@@ -93,14 +93,14 @@
 #include <sys/kernel.h>
 #include <sys/malloc.h>
 #include <sys/mbuf.h>
-#include <sys/proc.h>
 #include <sys/socket.h>
 #include <sys/sockio.h>
 #include <sys/ioctl.h>
-#include <sys/types.h>
+#include <sys/errno.h>
+#include <sys/device.h>
+#include <sys/endian.h>
 
 #include <machine/bus.h>
-#include <machine/endian.h>
 #include <machine/intr.h>
 
 #include <net/if.h>
@@ -113,18 +113,12 @@
 #include <net/bpf.h>
 #endif
 
-#ifdef INET
 #include <netinet/in.h>
 #include <netinet/if_ether.h>
-#endif
 
 #include <net80211/ieee80211_var.h>
 #include <net80211/ieee80211_amrr.h>
 #include <net80211/ieee80211_radiotap.h>
-
-#include <dev/pci/pcireg.h>
-#include <dev/pci/pcivar.h>
-#include <dev/pci/pcidevs.h>
 
 #include <dev/ic/acxvar.h>
 #include <dev/ic/acxreg.h>
@@ -857,10 +851,8 @@ acx_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 	case SIOCSIFADDR:
 		ifa = (struct ifaddr *)data;
 		ifp->if_flags |= IFF_UP;
-#ifdef INET
 		if (ifa->ifa_addr->sa_family == AF_INET)
 			 arp_ifinit(&ic->ic_ac, ifa);
-#endif
 		/* FALLTHROUGH */
 	case SIOCSIFFLAGS:
 		if (ifp->if_flags & IFF_UP) {
@@ -1396,7 +1388,6 @@ acx_rxeof(struct acx_softc *sc)
 			}
 
 			m->m_len = m->m_pkthdr.len = len;
-			m->m_pkthdr.rcvif = &ic->ic_if;
 
 #if NBPFILTER > 0
 			if (sc->sc_drvbpf != NULL) {

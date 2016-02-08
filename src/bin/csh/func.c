@@ -1,4 +1,4 @@
-/*    $OpenBSD: func.c,v 1.25 2009/10/27 23:59:21 deraadt Exp $       */
+/*    $OpenBSD: func.c,v 1.28 2015/02/08 06:09:50 tedu Exp $       */
 /*    $NetBSD: func.c,v 1.11 1996/02/09 02:28:29 christos Exp $       */
 
 /*-
@@ -127,7 +127,7 @@ doonintr(Char **v, struct command *t)
 	stderror(ERR_NAME | ERR_TERMINAL);
     cp = gointr;
     gointr = 0;
-    xfree((ptr_t) cp);
+    xfree(cp);
     if (vv == 0) {
 	if (setintr) {
 	    sigemptyset(&sigset);
@@ -300,7 +300,7 @@ dogoto(Char **v, struct command *t)
     Char   *lp;
 
     gotolab(lp = globone(v[1], G_ERROR));
-    xfree((ptr_t) lp);
+    xfree(lp);
 }
 
 void
@@ -341,7 +341,7 @@ doswitch(Char **v, struct command *t)
     if (*v)
 	stderror(ERR_SYNTAX);
     search(T_SWITCH, 0, lp = globone(cp, G_ERROR));
-    xfree((ptr_t) lp);
+    xfree(lp);
 }
 
 void
@@ -399,7 +399,7 @@ doforeach(Char **v, struct command *t)
     v = globall(v);
     if (v == 0)
 	stderror(ERR_NAME | ERR_NOMATCH);
-    nwp = (struct whyle *) xcalloc(1, sizeof *nwp);
+    nwp = xcalloc(1, sizeof *nwp);
     nwp->w_fe = nwp->w_fe0 = v;
     gargv = 0;
     btell(&nwp->w_start);
@@ -436,8 +436,7 @@ dowhile(Char **v, struct command *t)
     if (*v)
 	stderror(ERR_NAME | ERR_EXPRESSION);
     if (!again) {
-	struct whyle *nwp =
-	(struct whyle *) xcalloc(1, sizeof(*nwp));
+	struct whyle *nwp = xcalloc(1, sizeof(*nwp));
 
 	nwp->w_start = lineloc;
 	nwp->w_end.type = F_SEEK;
@@ -661,7 +660,7 @@ search(int type, int level, Char *goal)
 	    cp = strip(Dfix1(aword));
 	    if (Gmatch(goal, cp))
 		level = -1;
-	    xfree((ptr_t) cp);
+	    xfree(cp);
 	    break;
 
 	case T_DEFAULT:
@@ -826,8 +825,8 @@ wfree(void)
 	if (wp->w_fe0)
 	    blkfree(wp->w_fe0);
 	if (wp->w_fename)
-	    xfree((ptr_t) wp->w_fename);
-	xfree((ptr_t) wp);
+	    xfree(wp->w_fename);
+	xfree(wp);
     }
 }
 
@@ -931,7 +930,7 @@ dosetenv(Char **v, struct command *t)
 	AsciiOnly = 0;
 #endif				/* NLS */
     }
-    xfree((ptr_t) lp);
+    xfree(lp);
 }
 
 void
@@ -943,7 +942,7 @@ dounsetenv(Char **v, struct command *t)
     static Char *name = NULL;
 
     if (name)
-	xfree((ptr_t) name);
+	xfree(name);
     /*
      * Find the longest environment variable
      */
@@ -954,7 +953,7 @@ dounsetenv(Char **v, struct command *t)
 	    maxi = i;
     }
 
-    name = (Char *) xmalloc((size_t) (maxi + 1) * sizeof(Char));
+    name = xreallocarray(NULL, maxi + 1, sizeof(Char));
 
     while (++v && *v)
 	for (maxi = 1; maxi;)
@@ -984,7 +983,7 @@ dounsetenv(Char **v, struct command *t)
 		Unsetenv(name);
 		break;
 	    }
-    xfree((ptr_t) name);
+    xfree(name);
     name = NULL;
 }
 
@@ -1002,21 +1001,21 @@ Setenv(Char *name, Char *val)
 	if (*cp != 0 || *dp != '=')
 	    continue;
 	cp = Strspl(STRequal, val);
-	xfree((ptr_t) * ep);
+	xfree(* ep);
 	*ep = strip(Strspl(name, cp));
-	xfree((ptr_t) cp);
+	xfree(cp);
 	blkfree((Char **) environ);
 	environ = short2blk(STR_environ);
 	return;
     }
     cp = Strspl(name, STRequal);
     blk[0] = strip(Strspl(cp, val));
-    xfree((ptr_t) cp);
+    xfree(cp);
     blk[1] = 0;
     STR_environ = blkspl(STR_environ, blk);
     blkfree((Char **) environ);
     environ = short2blk(STR_environ);
-    xfree((ptr_t) oep);
+    xfree(oep);
 }
 
 static void
@@ -1036,8 +1035,8 @@ Unsetenv(Char *name)
 	STR_environ = blkspl(STR_environ, ep + 1);
 	environ = short2blk(STR_environ);
 	*ep = cp;
-	xfree((ptr_t) cp);
-	xfree((ptr_t) oep);
+	xfree(cp);
+	xfree(oep);
 	return;
     }
 }

@@ -1,4 +1,4 @@
-/*	$OpenBSD: screen.c,v 1.10 2013/11/28 22:12:40 krw Exp $	*/
+/*	$OpenBSD: screen.c,v 1.12 2014/11/20 08:50:53 bentley Exp $	*/
 
 /*-
  * Copyright (c) 1993, 1994
@@ -33,9 +33,7 @@
  * PUBLIC: int screen_init(GS *, SCR *, SCR **);
  */
 int
-screen_init(gp, orig, spp)
-	GS *gp;
-	SCR *orig, **spp;
+screen_init(GS *gp, SCR *orig, SCR **spp)
 {
 	SCR *sp;
 	size_t len;
@@ -127,8 +125,7 @@ err:	screen_end(sp);
  * PUBLIC: int screen_end(SCR *);
  */
 int
-screen_end(sp)
-	SCR *sp;
+screen_end(SCR *sp)
 {
 	int rval;
 	SCR *tsp;
@@ -160,10 +157,6 @@ screen_end(sp)
 	F_CLR(sp, SC_SCR_EX | SC_SCR_VI);
 
 	rval = 0;
-#ifdef HAVE_PERL_INTERP
-	if (perl_screen_end(sp))		/* End perl. */
-		rval = 1;
-#endif
 	if (v_screen_end(sp))			/* End vi. */
 		rval = 1;
 	if (ex_screen_end(sp))			/* End ex. */
@@ -216,8 +209,7 @@ screen_end(sp)
  * PUBLIC: SCR *screen_next(SCR *);
  */
 SCR *
-screen_next(sp)
-	SCR *sp;
+screen_next(SCR *sp)
 {
 	GS *gp;
 	SCR *next;

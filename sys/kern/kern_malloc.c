@@ -1,4 +1,4 @@
-/*	$OpenBSD: kern_malloc.c,v 1.114 2014/07/13 14:59:28 tedu Exp $	*/
+/*	$OpenBSD: kern_malloc.c,v 1.127 2015/02/13 13:35:03 millert Exp $	*/
 /*	$NetBSD: kern_malloc.c,v 1.15.4.2 1996/06/13 17:10:56 cgd Exp $	*/
 
 /*
@@ -33,15 +33,13 @@
  */
 
 #include <sys/param.h>
-#include <sys/proc.h>
 #include <sys/kernel.h>
 #include <sys/malloc.h>
+#include <sys/stdint.h>
 #include <sys/systm.h>
 #include <sys/sysctl.h>
 #include <sys/time.h>
 #include <sys/rwlock.h>
-
-#include <dev/rndvar.h>
 
 #include <uvm/uvm_extern.h>
 
@@ -163,7 +161,7 @@ malloc(size_t size, int type, int flags)
 	struct kmemstats *ksp = &kmemstats[type];
 
 	if (((unsigned long)type) <= 1 || ((unsigned long)type) >= M_LAST)
-		panic("malloc - bogus type");
+		panic("malloc: bogus type %d", type);
 #endif
 
 	KASSERT(flags & (M_WAITOK | M_NOWAIT));
@@ -295,7 +293,7 @@ malloc(size_t size, int type, int flags)
 
 		vm_map_lock(kmem_map);
 		rv = uvm_map_checkprot(kmem_map, addr,
-		    addr + sizeof(struct kmem_freelist), VM_PROT_WRITE);
+		    addr + sizeof(struct kmem_freelist), PROT_WRITE);
 		vm_map_unlock(kmem_map);
 
 		if (!rv)  {
@@ -385,13 +383,16 @@ free(void *addr, int type, size_t freedsize)
 	kup = btokup(addr);
 	size = 1 << kup->ku_indx;
 	kbp = &bucket[kup->ku_indx];
+	if (size > MAXALLOCSAVE)
+		size = kup->ku_pagecnt << PAGE_SHIFT;
 	s = splvm();
 #ifdef DIAGNOSTIC
 	if (freedsize != 0 && freedsize > size)
-		panic("freed too much: %zu > %ld (%p)", freedsize, size, addr);
+		panic("free: size too large %zu > %ld (%p) type %s",
+		    freedsize, size, addr, memname[type]);
 	if (freedsize != 0 && size > MINALLOCSIZE && freedsize < size / 2)
-		panic("freed too little: %zu < %ld / 2 (%p)",
-		    freedsize, size, addr);
+		panic("free: size too small %zu < %ld / 2 (%p) type %s",
+		    freedsize, size, addr, memname[type]);
 	/*
 	 * Check for returns of data that do not point to the
 	 * beginning of the allocation.
@@ -407,7 +408,6 @@ free(void *addr, int type, size_t freedsize)
 	if (size > MAXALLOCSAVE) {
 		uvm_km_free(kmem_map, (vaddr_t)addr, ptoa(kup->ku_pagecnt));
 #ifdef KMEMSTATS
-		size = kup->ku_pagecnt << PAGE_SHIFT;
 		ksp->ks_memuse -= size;
 		kup->ku_indx = 0;
 		kup->ku_pagecnt = 0;
@@ -572,6 +572,9 @@ sysctl_malloc(int *name, u_int namelen, void *oldp, size_t *oldlenp, void *newp,
     size_t newlen, struct proc *p)
 {
 	struct kmembuckets kb;
+#if defined(KMEMSTATS) || defined(DIAGNOSTIC) || defined(FFS_SOFTUPDATES)
+	int error;
+#endif
 	int i, siz;
 
 	if (namelen != 2 && name[0] != KERN_MALLOC_BUCKETS &&
@@ -597,7 +600,7 @@ sysctl_malloc(int *name, u_int namelen, void *oldp, size_t *oldlenp, void *newp,
 		return (sysctl_rdstring(oldp, oldlenp, newp, buckstring));
 
 	case KERN_MALLOC_BUCKET:
-		bcopy(&bucket[BUCKETINDX(name[1])], &kb, sizeof(kb));
+		memcpy(&kb, &bucket[BUCKETINDX(name[1])], sizeof(kb));
 		memset(&kb.kb_freelist, 0, sizeof(kb.kb_freelist));
 		return (sysctl_rdstruct(oldp, oldlenp, newp, &kb, sizeof(kb)));
 	case KERN_MALLOC_KMEMSTATS:
@@ -611,12 +614,11 @@ sysctl_malloc(int *name, u_int namelen, void *oldp, size_t *oldlenp, void *newp,
 #endif
 	case KERN_MALLOC_KMEMNAMES:
 #if defined(KMEMSTATS) || defined(DIAGNOSTIC) || defined(FFS_SOFTUPDATES)
+		error = rw_enter(&sysctl_kmemlock, RW_WRITE|RW_INTR);
+		if (error)
+			return (error);
 		if (memall == NULL) {
 			int totlen;
-
-			i = rw_enter(&sysctl_kmemlock, RW_WRITE|RW_INTR);
-			if (i)
-				return (i);
 
 			/* Figure out how large a buffer we need */
 			for (totlen = 0, i = 0; i < M_LAST; i++) {
@@ -640,8 +642,8 @@ sysctl_malloc(int *name, u_int namelen, void *oldp, size_t *oldlenp, void *newp,
 			for (i = 0; i < totlen; i++)
 				if (memall[i] == ' ')
 					memall[i] = '_';
-			rw_exit_write(&sysctl_kmemlock);
 		}
+		rw_exit_write(&sysctl_kmemlock);
 		return (sysctl_rdstring(oldp, oldlenp, newp, memall));
 #else
 		return (EOPNOTSUPP);
@@ -724,7 +726,7 @@ mallocarray(size_t nmemb, size_t size, int type, int flags)
 	    nmemb > 0 && SIZE_MAX / nmemb < size) {
 		if (flags & M_CANFAIL)
 			return (NULL);
-		panic("mallocarray overflow: %zu * %zu", nmemb, size);
+		panic("mallocarray: overflow %zu * %zu", nmemb, size);
 	}
 	return (malloc(size * nmemb, type, flags));
 }

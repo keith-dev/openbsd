@@ -1,4 +1,4 @@
-/*	$OpenBSD: sysv_shm.c,v 1.58 2014/07/13 15:29:04 tedu Exp $	*/
+/*	$OpenBSD: sysv_shm.c,v 1.65 2015/01/15 20:36:17 millert Exp $	*/
 /*	$NetBSD: sysv_shm.c,v 1.50 1998/10/21 22:24:29 tron Exp $	*/
 
 /*
@@ -212,7 +212,7 @@ sys_shmat(struct proc *p, void *v, register_t *retval)
 		syscallarg(const void *) shmaddr;
 		syscallarg(int) shmflg;
 	} */ *uap = v;
-	int error, i, flags;
+	int error, i, flags = 0;
 	struct ucred *cred = p->p_ucred;
 	struct shmid_ds *shmseg;
 	struct shmmap_head *shmmap_h;
@@ -248,12 +248,11 @@ sys_shmat(struct proc *p, void *v, register_t *retval)
 	if (i >= shmmap_h->shmseg)
 		return (EMFILE);
 	size = round_page(shmseg->shm_segsz);
-	prot = VM_PROT_READ;
+	prot = PROT_READ;
 	if ((SCARG(uap, shmflg) & SHM_RDONLY) == 0)
-		prot |= VM_PROT_WRITE;
-	flags = MAP_ANON | MAP_SHARED;
+		prot |= PROT_WRITE;
 	if (SCARG(uap, shmaddr)) {
-		flags |= MAP_FIXED;
+		flags |= UVM_FLAG_FIXED;
 		if (SCARG(uap, shmflg) & SHM_RND) 
 			attach_va =
 			    (vaddr_t)SCARG(uap, shmaddr) & ~(SHMLBA-1);
@@ -267,7 +266,7 @@ sys_shmat(struct proc *p, void *v, register_t *retval)
 	uao_reference(shm_handle->shm_object);
 	error = uvm_map(&p->p_vmspace->vm_map, &attach_va, size,
 	    shm_handle->shm_object, 0, 0, UVM_MAPFLAG(prot, prot,
-	    UVM_INH_SHARE, UVM_ADV_RANDOM, 0));
+	    MAP_INHERIT_SHARE, MADV_RANDOM, flags));
 	if (error) {
 		uao_detach(shm_handle->shm_object);
 		return (error);
@@ -494,7 +493,7 @@ shmfork(struct vmspace *vm1, struct vmspace *vm2)
 	shmmap_h = (struct shmmap_head *)vm1->vm_shm;
 	size = sizeof(int) + shmmap_h->shmseg * sizeof(struct shmmap_state);
 	vm2->vm_shm = malloc(size, M_SHM, M_WAITOK);
-	bcopy(vm1->vm_shm, vm2->vm_shm, size);
+	memcpy(vm2->vm_shm, vm1->vm_shm, size);
 	for (i = 0, shmmap_s = shmmap_h->state; i < shmmap_h->shmseg;
 	    i++, shmmap_s++) {
 		if (shmmap_s->shmid != -1 &&
@@ -526,11 +525,10 @@ shminit(void)
 {
 
 	pool_init(&shm_pool, sizeof(struct shmid_ds) +
-	    sizeof(struct shm_handle), 0, 0, 0, "shmpl",
-	    &pool_allocator_nointr);
-	shmsegs = malloc(shminfo.shmmni * sizeof(struct shmid_ds *),
+	    sizeof(struct shm_handle), 0, 0, PR_WAITOK, "shmpl", NULL);
+	shmsegs = mallocarray(shminfo.shmmni, sizeof(struct shmid_ds *),
 	    M_SHM, M_WAITOK|M_ZERO);
-	shmseqs = malloc(shminfo.shmmni * sizeof(unsigned short),
+	shmseqs = mallocarray(shminfo.shmmni, sizeof(unsigned short),
 	    M_SHM, M_WAITOK|M_ZERO);
 
 	shminfo.shmmax *= PAGE_SIZE;	/* actually in pages */
@@ -594,13 +592,13 @@ sysctl_sysvshm(int *name, u_int namelen, void *oldp, size_t *oldlenp,
 		/* Expand shmsegs and shmseqs arrays */
 		newsegs = mallocarray(val, sizeof(struct shmid_ds *),
 		    M_SHM, M_WAITOK|M_ZERO);
-		bcopy(shmsegs, newsegs,
+		memcpy(newsegs, shmsegs,
 		    shminfo.shmmni * sizeof(struct shmid_ds *));
 		free(shmsegs, M_SHM, 0);
 		shmsegs = newsegs;
 		newseqs = mallocarray(val, sizeof(unsigned short), M_SHM,
 		    M_WAITOK|M_ZERO);
-		bcopy(shmseqs, newseqs,
+		memcpy(newseqs, shmseqs,
 		    shminfo.shmmni * sizeof(unsigned short));
 		free(shmseqs, M_SHM, 0);
 		shmseqs = newseqs;

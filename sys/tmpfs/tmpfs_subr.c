@@ -1,4 +1,4 @@
-/*	$OpenBSD: tmpfs_subr.c,v 1.6 2014/03/28 17:57:11 mpi Exp $	*/
+/*	$OpenBSD: tmpfs_subr.c,v 1.13 2015/02/10 21:56:10 miod Exp $	*/
 /*	$NetBSD: tmpfs_subr.c,v 1.79 2012/03/13 18:40:50 elad Exp $	*/
 
 /*
@@ -75,11 +75,6 @@
  *			struct vnode::v_interlock
  */
 
-#if 0
-#include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: tmpfs_subr.c,v 1.79 2012/03/13 18:40:50 elad Exp $");
-#endif
-
 #include <sys/param.h>
 #include <sys/dirent.h>
 #include <sys/event.h>
@@ -92,8 +87,6 @@ __KERNEL_RCSID(0, "$NetBSD: tmpfs_subr.c,v 1.79 2012/03/13 18:40:50 elad Exp $")
 #include <sys/vnode.h>
 
 #include <uvm/uvm_aobj.h>
-
-#include <dev/rndvar.h>
 
 #include <tmpfs/tmpfs.h>
 #include <tmpfs/tmpfs_vnops.h>
@@ -397,6 +390,11 @@ tmpfs_alloc_file(struct vnode *dvp, struct vnode **vpp, struct vattr *vap,
 
 	if (TMPFS_DIRSEQ_FULL(dnode)) {
 		error = ENOSPC;
+		goto out;
+	}
+
+	if (dnode->tn_links == 0) {
+		error = ENOENT;
 		goto out;
 	}
 
@@ -742,7 +740,7 @@ tmpfs_dir_getdotents(tmpfs_node_t *node, struct dirent *dp, struct uio *uio)
 		return EJUSTRETURN;
 	}
 
-	if ((error = uiomove(dp, dp->d_reclen, uio)) != 0) {
+	if ((error = uiomovei(dp, dp->d_reclen, uio)) != 0) {
 		return error;
 	}
 
@@ -839,7 +837,7 @@ tmpfs_dir_getdents(tmpfs_node_t *node, struct uio *uio)
 		}
 
 		/* Copy out the directory entry and continue. */
-		error = uiomove(&dent, dent.d_reclen, uio);
+		error = uiomovei(&dent, dent.d_reclen, uio);
 		if (error) {
 			break;
 		}
@@ -1222,15 +1220,15 @@ tmpfs_uiomove(tmpfs_node_t *node, struct uio *uio, vsize_t len)
 	if (pgoff + len < PAGE_SIZE) {
 		va = tmpfs_uio_lookup(node, pgnum);
 		if (va != (vaddr_t)NULL)
-			return uiomove((void *)va + pgoff, len, uio);
+			return uiomovei((void *)va + pgoff, len, uio);
 	}
 
 	if (len >= TMPFS_UIO_MAXBYTES) {
 		sz = TMPFS_UIO_MAXBYTES;
-		adv = UVM_ADV_NORMAL;
+		adv = MADV_NORMAL;
 	} else {
 		sz = len;
-		adv = UVM_ADV_SEQUENTIAL;
+		adv = MADV_SEQUENTIAL;
 	}
 
 	if (tmpfs_uio_cached(node))
@@ -1239,14 +1237,14 @@ tmpfs_uiomove(tmpfs_node_t *node, struct uio *uio, vsize_t len)
 	uao_reference(node->tn_uobj);
 
 	error = uvm_map(kernel_map, &va, round_page(pgoff + sz), node->tn_uobj,
-	    trunc_page(uio->uio_offset), 0, UVM_MAPFLAG(UVM_PROT_RW,
-	    UVM_PROT_RW, UVM_INH_NONE, adv, 0));
+	    trunc_page(uio->uio_offset), 0, UVM_MAPFLAG(PROT_READ | PROT_WRITE,
+	    PROT_READ | PROT_WRITE, MAP_INHERIT_NONE, adv, 0));
 	if (error) {
 		uao_detach(node->tn_uobj); /* Drop reference. */
 		return error;
 	}
 
-	error = uiomove((void *)va + pgoff, sz, uio);
+	error = uiomovei((void *)va + pgoff, sz, uio);
 	if (error == 0 && pgoff + sz < PAGE_SIZE)
 		tmpfs_uio_cache(node, pgnum, va);
 	else
@@ -1266,8 +1264,8 @@ tmpfs_zeropg(tmpfs_node_t *node, voff_t pgnum, vaddr_t pgoff)
 	uao_reference(node->tn_uobj);
 
 	error = uvm_map(kernel_map, &va, PAGE_SIZE, node->tn_uobj, pgnum, 0,
-	    UVM_MAPFLAG(UVM_PROT_RW, UVM_PROT_RW, UVM_INH_NONE, UVM_ADV_NORMAL,
-	    0));
+	    UVM_MAPFLAG(PROT_READ | PROT_WRITE, PROT_READ | PROT_WRITE,
+	    MAP_INHERIT_NONE, MADV_NORMAL, 0));
 	if (error) {
 		uao_detach(node->tn_uobj); /* Drop reference. */
 		return error;

@@ -1,4 +1,4 @@
-/*	$OpenBSD: ohci.c,v 1.137 2014/08/05 20:26:15 mpi Exp $ */
+/*	$OpenBSD: ohci.c,v 1.142 2014/12/19 22:44:59 guenther Exp $ */
 /*	$NetBSD: ohci.c,v 1.139 2003/02/22 05:24:16 tsutsui Exp $	*/
 /*	$FreeBSD: src/sys/dev/usb/ohci.c,v 1.22 1999/11/17 22:33:40 n_hibma Exp $	*/
 
@@ -40,9 +40,9 @@
 #include <sys/queue.h>
 #include <sys/timeout.h>
 #include <sys/pool.h>
+#include <sys/endian.h>
 
 #include <machine/bus.h>
-#include <machine/endian.h>
 
 #include <dev/usb/usb.h>
 #include <dev/usb/usbdi.h>
@@ -88,6 +88,7 @@ usbd_status	ohci_alloc_std_chain(struct ohci_softc *, u_int,
 		    struct ohci_soft_td **);
 
 usbd_status	ohci_open(struct usbd_pipe *);
+int		ohci_setaddr(struct usbd_device *, int);
 void		ohci_poll(struct usbd_bus *);
 void		ohci_softintr(void *);
 void		ohci_waitintr(struct ohci_softc *, struct usbd_xfer *);
@@ -232,7 +233,7 @@ struct ohci_pipe {
 
 struct usbd_bus_methods ohci_bus_methods = {
 	.open_pipe = ohci_open,
-	.dev_setaddr = usbd_set_address,
+	.dev_setaddr = ohci_setaddr,
 	.soft_intr = ohci_softintr,
 	.do_poll = ohci_poll,
 	.allocx = ohci_allocx,
@@ -726,6 +727,7 @@ ohci_init(struct ohci_softc *sc)
 		}
 		pool_init(ohcixfer, sizeof(struct ohci_xfer), 0, 0, 0,
 		    "ohcixfer", NULL);
+		pool_setipl(ohcixfer, IPL_SOFTUSB);
 	}
 
 	/* XXX determine alignment by R/W */
@@ -938,30 +940,13 @@ ohci_init(struct ohci_softc *sc)
 struct usbd_xfer *
 ohci_allocx(struct usbd_bus *bus)
 {
-	struct ohci_xfer *ox;
-
-	ox = pool_get(ohcixfer, PR_NOWAIT | PR_ZERO);
-#ifdef DIAGNOSTIC
-	if (ox != NULL) {
-		ox->xfer.busy_free = XFER_BUSY;
-	}
-#endif
-	return ((struct usbd_xfer *)ox);
+	return (pool_get(ohcixfer, PR_NOWAIT | PR_ZERO));
 }
 
 void
 ohci_freex(struct usbd_bus *bus, struct usbd_xfer *xfer)
 {
-	struct ohci_xfer *ox = (struct ohci_xfer*)xfer;
-
-#ifdef DIAGNOSTIC
-	if (xfer->busy_free != XFER_BUSY) {
-		printf("%s: xfer=%p not busy, 0x%08x\n", __func__, xfer,
-		    xfer->busy_free);
-		return;
-	}
-#endif
-	pool_put(ohcixfer, ox);
+	pool_put(ohcixfer, xfer);
 }
 
 #ifdef OHCI_DEBUG
@@ -1326,6 +1311,8 @@ ohci_softintr(void *v)
 
 			if (cc == OHCI_CC_STALL)
 				xfer->status = USBD_STALLED;
+			else if (cc == OHCI_CC_DATA_UNDERRUN)
+				xfer->status = USBD_NORMAL_COMPLETION;
 			else
 				xfer->status = USBD_IOERROR;
 			s = splusb();
@@ -2019,6 +2006,40 @@ ohci_open(struct usbd_pipe *pipe)
  bad0:
 	return (USBD_NOMEM);
 
+}
+
+/*
+ * Work around the half configured control (default) pipe when setting
+ * the address of a device.
+ *
+ * Because a single ED is setup per endpoint in ohci_open(), and the
+ * control pipe is configured before we could have set the address
+ * of the device or read the wMaxPacketSize of the endpoint, we have
+ * to re-open the pipe twice here.
+ */
+int
+ohci_setaddr(struct usbd_device *dev, int addr)
+{
+	/* Root Hub */
+	if (dev->depth == 0)
+		return (0);
+
+	/* Re-establish the default pipe with the new max packet size. */
+	ohci_device_ctrl_close(dev->default_pipe);
+	if (ohci_open(dev->default_pipe))
+		return (EINVAL);
+
+	if (usbd_set_address(dev, addr))
+		return (1);
+
+	dev->address = addr;
+
+	/* Re-establish the default pipe with the new address. */
+	ohci_device_ctrl_close(dev->default_pipe);
+	if (ohci_open(dev->default_pipe))
+		return (EINVAL);
+
+	return (0);
 }
 
 /*

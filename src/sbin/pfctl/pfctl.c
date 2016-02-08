@@ -1,4 +1,4 @@
-/*	$OpenBSD: pfctl.c,v 1.325 2014/04/19 14:22:32 henning Exp $ */
+/*	$OpenBSD: pfctl.c,v 1.329 2015/01/16 06:40:00 deraadt Exp $ */
 
 /*
  * Copyright (c) 2001 Daniel Hartmeier
@@ -61,6 +61,7 @@
 void	 usage(void);
 int	 pfctl_enable(int, int);
 int	 pfctl_disable(int, int);
+void	 pfctl_clear_queues(struct pf_qihead *);
 int	 pfctl_clear_stats(int, const char *, int);
 int	 pfctl_clear_interface_flags(int, int);
 int	 pfctl_clear_rules(int, int, char *);
@@ -226,6 +227,10 @@ static const char *debugopt_list[] = {
 static const char *optiopt_list[] = {
 	"none", "basic", "profile", NULL
 };
+
+struct pf_qihead qspecs = TAILQ_HEAD_INITIALIZER(qspecs);
+struct pf_qihead rootqs = TAILQ_HEAD_INITIALIZER(rootqs);
+
 
 void
 usage(void)
@@ -744,14 +749,14 @@ pfctl_show_rules(int dev, char *path, int opts, enum pfctl_show format,
 
 	memset(&pr, 0, sizeof(pr));
 	if (anchorname[0] == '/') {
-		if ((npath = calloc(1, MAXPATHLEN)) == NULL)
+		if ((npath = calloc(1, PATH_MAX)) == NULL)
 			errx(1, "pfctl_rules: calloc");
-		strlcpy(npath, anchorname, MAXPATHLEN);
+		strlcpy(npath, anchorname, PATH_MAX);
 	} else {
 		if (path[0])
-			snprintf(&path[len], MAXPATHLEN - len, "/%s", anchorname);
+			snprintf(&path[len], PATH_MAX - len, "/%s", anchorname);
 		else
-			snprintf(&path[len], MAXPATHLEN - len, "%s", anchorname);
+			snprintf(&path[len], PATH_MAX - len, "%s", anchorname);
 		npath = path;
 	}
 
@@ -1104,9 +1109,6 @@ pfctl_ruleset_trans(struct pfctl *pf, char *path, struct pf_anchor *a)
 	return (0);
 }
 
-TAILQ_HEAD(qspecs, pfctl_qsitem) qspecs = TAILQ_HEAD_INITIALIZER(qspecs);
-TAILQ_HEAD(rootqs, pfctl_qsitem) rootqs = TAILQ_HEAD_INITIALIZER(rootqs);
-
 int
 pfctl_add_queue(struct pfctl *pf, struct pf_queuespec *q)
 {
@@ -1130,6 +1132,18 @@ pfctl_add_queue(struct pfctl *pf, struct pf_queuespec *q)
 	return (0);
 }
 
+struct pfctl_qsitem *
+pfctl_find_queue(char *what, struct pf_qihead *where)
+{
+	struct pfctl_qsitem *q;
+
+	TAILQ_FOREACH(q, where, entries)
+		if (strcmp(q->qs.qname, what) == 0)
+			return (q);
+
+	return (NULL);
+}
+
 u_int
 pfctl_find_childqs(struct pfctl_qsitem *qi)
 {
@@ -1144,11 +1158,7 @@ pfctl_find_childqs(struct pfctl_qsitem *qi)
 		if (++p->matches > 10000)
 			errx(1, "pfctl_find_childqs: excessive matches, loop?");
 
-		/* check wether a children with that name is already there */
-		TAILQ_FOREACH(q, &qi->children, entries)
-			if (!strcmp(q->qs.qname, p->qs.qname))
-				break;
-		if (q == NULL) {
+		if ((q = pfctl_find_queue(p->qs.qname, &qi->children)) == NULL) {
 			/* insert */
 			if ((n = calloc(1, sizeof(*n))) == NULL)
 				err(1, "calloc");
@@ -1190,21 +1200,20 @@ pfctl_load_queue(struct pfctl *pf, u_int32_t ticket, struct pfctl_qsitem *qi)
 			err(1, "DIOCADDQUEUE");
 	if (pf->opts & PF_OPT_VERBOSE)
 		print_queuespec(&qi->qs);
-	while ((p = TAILQ_FIRST(&qi->children)) != NULL) {
-		TAILQ_REMOVE(&qi->children, p, entries);
+
+	TAILQ_FOREACH(p, &qi->children, entries) {
 		strlcpy(p->qs.ifname, qi->qs.ifname, IFNAMSIZ);
 		pfctl_load_queue(pf, ticket, p);
-		free(p);
 	}
 }
 
 int
 pfctl_load_queues(struct pfctl *pf)
 {
-	struct pfctl_qsitem	*qi, rqi;
+	struct pfctl_qsitem	*qi, *tempqi, rqi;
 	u_int32_t		 ticket;
 
-	while ((qi = TAILQ_FIRST(&qspecs)) != NULL) {
+	TAILQ_FOREACH(qi, &qspecs, entries) {
 		if (qi->matches == 0)
 			errx(1, "queue %s: parent %s not found\n", qi->qs.qname,
 			    qi->qs.parent);
@@ -1214,14 +1223,12 @@ pfctl_load_queues(struct pfctl *pf)
 		    qi->qs.upperlimit.m1.percent ||
 		    qi->qs.upperlimit.m2.percent)
 			errx(1, "only absolute bandwidth specs for now");
-
-		TAILQ_REMOVE(&qspecs, qi, entries);
-		free(qi);
 	}
 
 	if ((pf->opts & PF_OPT_NOACTION) == 0)
 		ticket = pfctl_get_ticket(pf->trans, PF_TRANS_RULESET, "");
-	while ((qi = TAILQ_FIRST(&rootqs)) != NULL) {
+
+	TAILQ_FOREACH_SAFE(qi, &rootqs, entries, tempqi) {
 		TAILQ_REMOVE(&rootqs, qi, entries);
 
 		/*
@@ -1240,9 +1247,22 @@ pfctl_load_queues(struct pfctl *pf)
 
 		pfctl_load_queue(pf, ticket, &rqi);
 
+		TAILQ_INSERT_HEAD(&rootqs, qi, entries);
 	}
 
 	return (0);
+}
+
+void
+pfctl_clear_queues(struct pf_qihead *head)
+{
+	struct pfctl_qsitem *qi;
+
+	while ((qi = TAILQ_FIRST(head)) != NULL) {
+		TAILQ_REMOVE(head, qi, entries);
+		pfctl_clear_queues(&qi->children);
+		free(qi);
+	}
 }
 
 u_int
@@ -1310,9 +1330,9 @@ pfctl_load_ruleset(struct pfctl *pf, char *path, struct pf_ruleset *rs,
 	pf->anchor = rs->anchor;
 
 	if (path[0])
-		snprintf(&path[len], MAXPATHLEN - len, "/%s", pf->anchor->name);
+		snprintf(&path[len], PATH_MAX - len, "/%s", pf->anchor->name);
 	else
-		snprintf(&path[len], MAXPATHLEN - len, "%s", pf->anchor->name);
+		snprintf(&path[len], PATH_MAX - len, "%s", pf->anchor->name);
 
 	if (depth) {
 		if (TAILQ_FIRST(rs->rules.active.ptr) != NULL) {
@@ -1376,10 +1396,10 @@ pfctl_load_rule(struct pfctl *pf, char *path, struct pf_rule *r, int depth)
 	if (r->anchor) {
 		if (r->anchor->match) {
 			if (path[0])
-				snprintf(&path[len], MAXPATHLEN - len,
+				snprintf(&path[len], PATH_MAX - len,
 				    "/%s", r->anchor->name);
 			else
-				snprintf(&path[len], MAXPATHLEN - len,
+				snprintf(&path[len], PATH_MAX - len,
 				    "%s", r->anchor->name);
 			name = r->anchor->name;
 		} else
@@ -1435,7 +1455,7 @@ pfctl_rules(int dev, char *filename, int opts, int optimize,
 
 	memset(&pf, 0, sizeof(pf));
 	memset(&trs, 0, sizeof(trs));
-	if ((path = calloc(1, MAXPATHLEN)) == NULL)
+	if ((path = calloc(1, PATH_MAX)) == NULL)
 		ERRX("pfctl_rules: calloc");
 	if (strlcpy(trs.pfrt_anchor, anchorname,
 	    sizeof(trs.pfrt_anchor)) >= sizeof(trs.pfrt_anchor))
@@ -1501,10 +1521,13 @@ pfctl_rules(int dev, char *filename, int opts, int optimize,
 	free(path);
 	path = NULL;
 
-	/* process "load anchor" directives */
-	if (!anchorname[0])
+	/* process "load anchor" directives that might have used queues */
+	if (!anchorname[0]) {
 		if (pfctl_load_anchors(dev, &pf, t) == -1)
 			ERRX("load anchors");
+		pfctl_clear_queues(&qspecs);
+		pfctl_clear_queues(&rootqs);
+	}
 
 	if (trans == NULL && (opts & PF_OPT_NOACTION) == 0) {
 		if (!anchorname[0])
@@ -1689,9 +1712,11 @@ pfctl_load_limit(struct pfctl *pf, unsigned int index, unsigned int limit)
 	pl.limit = limit;
 	if (ioctl(pf->dev, DIOCSETLIMIT, &pl)) {
 		if (errno == EBUSY)
-			warnx("Current pool size exceeds requested hard limit");
+			warnx("Current pool size exceeds requested %s limit %u",
+			    pf_limits[index].name, limit);
 		else
-			warnx("cannot set '%s' limit", pf_limits[index].name);
+			warnx("Cannot set %s limit to %u",
+			    pf_limits[index].name, limit);
 		return (1);
 	}
 	return (0);
@@ -1955,7 +1980,7 @@ pfctl_show_anchors(int dev, int opts, char *anchorname)
 	}
 	mnr = pr.nr;
 	for (nr = 0; nr < mnr; ++nr) {
-		char sub[MAXPATHLEN];
+		char sub[PATH_MAX];
 
 		pr.nr = nr;
 		if (ioctl(dev, DIOCGETRULESET, &pr))
@@ -2072,7 +2097,7 @@ main(int argc, char *argv[])
 	int	 opts = 0;
 	int	 optimize = PF_OPTIMIZE_BASIC;
 	int	 level;
-	char	 anchorname[MAXPATHLEN];
+	char	 anchorname[PATH_MAX];
 	int	 anchor_wildcard = 0;
 	char	*path;
 	char	*lfile = NULL, *sfile = NULL;
@@ -2227,7 +2252,7 @@ main(int argc, char *argv[])
 		/* NOTREACHED */
 	}
 
-	if ((path = calloc(1, MAXPATHLEN)) == NULL)
+	if ((path = calloc(1, PATH_MAX)) == NULL)
 		errx(1, "pfctl: calloc");
 	memset(anchorname, 0, sizeof(anchorname));
 	if (anchoropt != NULL) {

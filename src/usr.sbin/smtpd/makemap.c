@@ -1,4 +1,4 @@
-/*	$OpenBSD: makemap.c,v 1.49 2014/07/08 13:49:09 eric Exp $	*/
+/*	$OpenBSD: makemap.c,v 1.52 2015/01/20 17:37:54 deraadt Exp $	*/
 
 /*
  * Copyright (c) 2008 Gilles Chehade <gilles@poolp.org>
@@ -34,6 +34,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include <limits.h>
 #include <util.h>
 
 #include "smtpd.h"
@@ -90,7 +91,7 @@ int
 main(int argc, char *argv[])
 {
 	struct stat	 sb;
-	char		 dbname[SMTPD_MAXPATHLEN];
+	char		 dbname[PATH_MAX];
 	char		*opts;
 	char		*conf;
 	int		 ch;
@@ -234,7 +235,7 @@ parse_map(char *filename)
 	char	*line;
 	size_t	 len;
 	size_t	 lineno = 0;
-	char	 delim[] = { '\\', 0, 0 };
+	char	 delim[] = { '\\', '\\', '#' };
 
 	if (strcmp(filename, "-") == 0)
 		fp = fdopen(0, "r");

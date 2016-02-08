@@ -1,4 +1,4 @@
-/*	$OpenBSD: systrace-error.c,v 1.2 2002/12/05 19:39:27 fgsch Exp $	*/
+/*	$OpenBSD: systrace-error.c,v 1.4 2015/01/16 00:19:12 deraadt Exp $	*/
 /*
  * Copyright 2002 Niels Provos <provos@citi.umich.edu>
  * All rights reserved.
@@ -34,6 +34,7 @@
 #include <sys/tree.h>
 #include <stdlib.h>
 #include <unistd.h>
+#include <limits.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -128,7 +129,15 @@ struct systrace_error {
 	{ "EAUTH", SYSTRACE_EAUTH },
 	{ "ENEEDAUTH", SYSTRACE_ENEEDAUTH },
 	{ "EIPSEC", SYSTRACE_EIPSEC },
-	{ "ELAST", SYSTRACE_ELAST },
+	{ "ENOATTR", SYSTRACE_ENOATTR },
+	{ "EILSEQ", SYSTRACE_EILSEQ },
+	{ "ENOMEDIUM", SYSTRACE_ENOMEDIUM },
+	{ "EMEDIUMTYPE", SYSTRACE_EMEDIUMTYPE },
+	{ "EOVERFLOW", SYSTRACE_EOVERFLOW },
+	{ "ECANCELED", SYSTRACE_ECANCELED },
+	{ "EIDRM", SYSTRACE_EIDRM },
+	{ "ENOMSG", SYSTRACE_ENOMSG },
+	{ "ENOTSUP", SYSTRACE_ENOTSUP },
 	{ NULL, 0}
 };
 

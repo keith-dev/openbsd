@@ -1,4 +1,4 @@
-/*	$OpenBSD: pass1.c,v 1.38 2013/06/11 16:42:04 deraadt Exp $	*/
+/*	$OpenBSD: pass1.c,v 1.42 2015/01/20 18:22:21 deraadt Exp $	*/
 /*	$NetBSD: pass1.c,v 1.16 1996/09/27 22:45:15 christos Exp $	*/
 
 /*
@@ -30,7 +30,7 @@
  * SUCH DAMAGE.
  */
 
-#include <sys/param.h>
+#include <sys/param.h>	/* MIN setbit btodb isset */
 #include <sys/time.h>
 #include <ufs/ufs/dinode.h>
 #include <ufs/ufs/dir.h>
@@ -40,6 +40,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include <limits.h>
 
 #include "fsck.h"
 #include "extern.h"
@@ -139,8 +140,7 @@ pass1(void)
 		info = calloc((unsigned)inosused, sizeof(struct inostat));
 		inospace = (unsigned)inosused * sizeof(struct inostat);
 		if (info == NULL)
-			errexit("cannot alloc %u bytes for inoinfo",
-			    (unsigned)(sizeof(struct inostat) * inosused));
+			errexit("cannot alloc %zu bytes for inoinfo", inospace);
 		inostathead[c].il_stat = info;
 		/*
 		 * Scan the allocated inodes.
@@ -174,20 +174,17 @@ pass1(void)
 		}
 		if (ninosused != inosused) {
 			struct inostat *ninfo;
-			size_t ninospace = ninosused * sizeof(*ninfo);
-			if (ninospace / sizeof(*info) != ninosused) {
-				pfatal("too many inodes %llu\n",
+			size_t ninospace;
+
+			ninfo = reallocarray(info, ninosused, sizeof(*ninfo));
+			if (ninfo == NULL) {
+				pfatal("too many inodes %llu, or out of memory\n",
 				    (unsigned long long)ninosused);
 				exit(8);
 			}
-			ninfo = realloc(info, ninospace);
-			if (ninfo == NULL) {
-				pfatal("cannot realloc %zu bytes to %zu "
-				    "for inoinfo\n", inospace, ninospace);
-				exit(8);
-			}
+			ninospace = ninosused * sizeof(*ninfo);
 			if (ninosused > inosused)
-				(void)memset(&ninfo[inosused], 0, ninospace - inospace);
+				memset(&ninfo[inosused], 0, ninospace - inospace);
 			inostathead[c].il_stat = ninfo;
 		}
 	}
@@ -282,8 +279,8 @@ checkinode(ino_t inumber, struct inodesc *idesc)
 	for (j = ndb; j < NDADDR; j++)
 		if (DIP(dp, di_db[j]) != 0) {
 			if (debug)
-				printf("bad direct addr: %ld\n",
-				    (long)DIP(dp, di_db[j]));
+				printf("bad direct addr: %lld\n",
+				    (long long)DIP(dp, di_db[j]));
 			goto unknown;
 		}
 	for (j = 0, ndb -= NDADDR; ndb > 0; j++)
@@ -291,8 +288,8 @@ checkinode(ino_t inumber, struct inodesc *idesc)
 	for (; j < NIADDR; j++)
 		if (DIP(dp, di_ib[j]) != 0) {
 			if (debug)
-				printf("bad indirect addr: %ld\n",
-				    (long)DIP(dp, di_ib[j]));
+				printf("bad indirect addr: %lld\n",
+				    (long long)DIP(dp, di_ib[j]));
 			goto unknown;
 		}
 	if (ftypeok(dp) == 0)
@@ -327,9 +324,9 @@ checkinode(ino_t inumber, struct inodesc *idesc)
 	(void)ckinode(dp, idesc);
 	idesc->id_entryno *= btodb(sblock.fs_fsize);
 	if (DIP(dp, di_blocks) != idesc->id_entryno) {
-		pwarn("INCORRECT BLOCK COUNT I=%llu (%ld should be %d)",
-		    (unsigned long long)inumber, (long)DIP(dp, di_blocks),
-		    idesc->id_entryno);
+		pwarn("INCORRECT BLOCK COUNT I=%llu (%lld should be %lld)",
+		    (unsigned long long)inumber, (long long)DIP(dp, di_blocks),
+		    (long long)idesc->id_entryno);
 		if (preen)
 			printf(" (CORRECTED)\n");
 		else if (reply("CORRECT") == 0)

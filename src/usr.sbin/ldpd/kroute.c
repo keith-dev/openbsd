@@ -1,4 +1,4 @@
-/*	$OpenBSD: kroute.c,v 1.33 2014/06/23 03:46:17 guenther Exp $ */
+/*	$OpenBSD: kroute.c,v 1.37 2015/02/11 05:56:51 claudio Exp $ */
 
 /*
  * Copyright (c) 2009 Michele Marchetto <michele@openbsd.org>
@@ -18,7 +18,6 @@
  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
 
-#include <sys/param.h>
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <sys/sysctl.h>
@@ -38,6 +37,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include <limits.h>
 
 #include "ldpd.h"
 #include "log.h"
@@ -103,7 +103,7 @@ int		send_rtmsg(int, int, struct kroute *, u_int32_t);
 int		dispatch_rtmsg(void);
 int		fetchtable(void);
 int		fetchifs(u_short);
-int		rtmsg_process(char *, int);
+int		rtmsg_process(char *, size_t);
 
 RB_HEAD(kroute_tree, kroute_node)	krt;
 RB_PROTOTYPE(kroute_tree, kroute_node, entry, kroute_compare)
@@ -154,7 +154,8 @@ kr_init(int fs)
 
 	kr_state.fib_sync = fs;
 
-	if ((kr_state.fd = socket(AF_ROUTE, SOCK_RAW, 0)) == -1) {
+	if ((kr_state.fd = socket(AF_ROUTE,
+	    SOCK_RAW | SOCK_CLOEXEC | SOCK_NONBLOCK, 0)) == -1) {
 		log_warn("kr_init: socket");
 		return (-1);
 	}
@@ -1173,6 +1174,8 @@ dispatch_rtmsg(void)
 	ssize_t			 n;
 
 	if ((n = read(kr_state.fd, &buf, sizeof(buf))) == -1) {
+		if (errno == EAGAIN || errno == EINTR)
+			return (0);
 		log_warn("dispatch_rtmsg: read error");
 		return (-1);
 	}
@@ -1186,7 +1189,7 @@ dispatch_rtmsg(void)
 }
 
 int
-rtmsg_process(char *buf, int len)
+rtmsg_process(char *buf, size_t len)
 {
 	struct rt_msghdr	*rtm;
 	struct if_msghdr	 ifm;
@@ -1198,13 +1201,15 @@ rtmsg_process(char *buf, int len)
 	u_int8_t		 prefixlen, prio;
 	int			 flags, mpath;
 	u_short			 ifindex = 0;
-
-	int			 offset;
+	size_t			 offset;
 	char			*next;
 
 	for (offset = 0; offset < len; offset += rtm->rtm_msglen) {
 		next = buf + offset;
 		rtm = (struct rt_msghdr *)next;
+		if (len < offset + sizeof(u_short) ||
+		    len < offset + rtm->rtm_msglen)
+			fatalx("rtmsg_process: partial rtm in buffer");
 		if (rtm->rtm_version != RTM_VERSION)
 			continue;
 		log_rtmsg(rtm->rtm_type);

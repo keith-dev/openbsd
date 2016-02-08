@@ -1,4 +1,4 @@
-/*	$OpenBSD: pci.c,v 1.103 2014/07/12 18:48:52 tedu Exp $	*/
+/*	$OpenBSD: pci.c,v 1.109 2014/11/27 19:03:44 kettenis Exp $	*/
 /*	$NetBSD: pci.c,v 1.31 1997/06/06 23:48:04 thorpej Exp $	*/
 
 /*
@@ -39,7 +39,6 @@
 #include <sys/systm.h>
 #include <sys/device.h>
 #include <sys/malloc.h>
-#include <sys/proc.h>
 
 #include <dev/pci/pcireg.h>
 #include <dev/pci/pcivar.h>
@@ -574,8 +573,7 @@ pci_detach_devices(struct pci_softc *sc, int flags)
 	if (ret != 0)
 		return (ret);
 
-	for (pd = LIST_FIRST(&sc->sc_devs);
-	     pd != LIST_END(&sc->sc_devs); pd = next) {
+	for (pd = LIST_FIRST(&sc->sc_devs); pd != NULL; pd = next) {
 		next = LIST_NEXT(pd, pd_next);
 		free(pd, M_DEVBUF, 0);
 	}
@@ -799,12 +797,14 @@ pci_reserve_resources(struct pci_attach_args *pa)
 	pci_chipset_tag_t pc = pa->pa_pc;
 	pcitag_t tag = pa->pa_tag;
 	pcireg_t bhlc, blr, type, bir;
+	pcireg_t addr, mask;
 	bus_addr_t base, limit;
 	bus_size_t size;
-	int reg, reg_start, reg_end;
+	int reg, reg_start, reg_end, reg_rom;
 	int bus, dev, func;
 	int sec, sub;
 	int flags;
+	int s;
 
 	pci_decompose_tag(pc, tag, &bus, &dev, &func);
 
@@ -813,14 +813,17 @@ pci_reserve_resources(struct pci_attach_args *pa)
 	case 0:
 		reg_start = PCI_MAPREG_START;
 		reg_end = PCI_MAPREG_END;
+		reg_rom = PCI_ROM_REG;
 		break;
 	case 1: /* PCI-PCI bridge */
 		reg_start = PCI_MAPREG_START;
 		reg_end = PCI_MAPREG_PPB_END;
+		reg_rom = 0;	/* 0x38 */
 		break;
 	case 2: /* PCI-CardBus bridge */
 		reg_start = PCI_MAPREG_START;
 		reg_end = PCI_MAPREG_PCB_END;
+		reg_rom = 0;
 		break;
 	default:
 		return (0);
@@ -844,6 +847,23 @@ pci_reserve_resources(struct pci_attach_args *pa)
 			    base, size, EX_NOWAIT) == 0) {
 				break;
 			}
+#ifdef __sparc64__
+			/*
+			 * Certain SPARC T5 systems assign
+			 * non-prefetchable 64-bit BARs of its onboard
+			 * mpii(4) controllers addresses in the
+			 * prefetchable memory range.  This is
+			 * (probably) safe, as reads from the device
+			 * registers mapped by these BARs are
+			 * side-effect free.  So assume the firmware
+			 * knows what it is doing.
+			 */
+			if (base >= 0x100000000 &&
+			    pa->pa_pmemex && extent_alloc_region(pa->pa_pmemex,
+			    base, size, EX_NOWAIT) == 0) {
+				break;
+			}
+#endif
 			if (pa->pa_memex && extent_alloc_region(pa->pa_memex,
 			    base, size, EX_NOWAIT)) {
 				printf("%d:%d:%d: mem address conflict 0x%lx/0x%lx\n",
@@ -865,6 +885,28 @@ pci_reserve_resources(struct pci_attach_args *pa)
 
 		if (type & PCI_MAPREG_MEM_TYPE_64BIT)
 			reg += 4;
+	}
+
+	if (reg_rom != 0) {
+		s = splhigh();
+		addr = pci_conf_read(pc, tag, PCI_ROM_REG);
+		pci_conf_write(pc, tag, PCI_ROM_REG, ~PCI_ROM_ENABLE);
+		mask = pci_conf_read(pc, tag, PCI_ROM_REG);
+		pci_conf_write(pc, tag, PCI_ROM_REG, addr);
+		splx(s);
+
+		base = PCI_ROM_ADDR(addr);
+		size = PCI_ROM_SIZE(mask);
+		if (base != 0 && size != 0) {
+			if (pa->pa_pmemex && extent_alloc_region(pa->pa_pmemex,
+			    base, size, EX_NOWAIT) &&
+			    pa->pa_memex && extent_alloc_region(pa->pa_memex,
+			    base, size, EX_NOWAIT)) {
+				printf("%d:%d:%d: mem address conflict 0x%lx/0x%lx\n",
+				    bus, dev, func, base, size);
+				pci_conf_write(pc, tag, PCI_ROM_REG, 0);
+			}
+		}
 	}
 
 	if (PCI_HDRTYPE_TYPE(bhlc) != 1)
@@ -911,6 +953,12 @@ pci_reserve_resources(struct pci_attach_args *pa)
 	blr = pci_conf_read(pc, tag, PPB_REG_PREFMEM);
 	base = (blr & 0x0000fff0) << 16;
 	limit = (blr & 0xfff00000) | 0x000fffff;
+#ifdef __LP64__
+	blr = pci_conf_read(pc, pa->pa_tag, PPB_REG_PREFBASE_HI32);
+	base |= ((uint64_t)blr) << 32;
+	blr = pci_conf_read(pc, pa->pa_tag, PPB_REG_PREFLIM_HI32);
+	limit |= ((uint64_t)blr) << 32;
+#endif
 	if (limit > base)
 		size = (limit - base + 1);
 	else

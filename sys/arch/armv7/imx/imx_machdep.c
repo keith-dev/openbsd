@@ -1,4 +1,4 @@
-/*	$OpenBSD	*/
+/*	$OpenBSD: imx_machdep.c,v 1.10 2015/01/22 14:33:01 krw Exp $	*/
 /*
  * Copyright (c) 2013 Sylvestre Gallon <ccna.syl@gmail.com>
  *
@@ -52,14 +52,18 @@ platform_init_cons(void)
 	paddr_t paddr;
 
 	switch (board_id) {
+	case BOARD_ID_IMX6_CUBOXI:
+	case BOARD_ID_IMX6_HUMMINGBOARD:
+	case BOARD_ID_IMX6_WANDBOARD:
+		paddr = 0x02020000;
+		break;
 	case BOARD_ID_IMX6_PHYFLEX:
+	case BOARD_ID_IMX6_UTILITE:
 		paddr = 0x021f0000;
 		break;
 	case BOARD_ID_IMX6_SABRELITE:
+	case BOARD_ID_IMX6_UDOO:
 		paddr = 0x021e8000;
-		break;
-	case BOARD_ID_IMX6_WANDBOARD:
-		paddr = 0x02020000;
 		break;
 	default:
 		printf("board type %x unknown", board_id);
@@ -85,6 +89,14 @@ void
 platform_print_board_type(void)
 {
 	switch (board_id) {
+	case BOARD_ID_IMX6_CUBOXI:
+		amptimer_frequency = 396 * 1000 * 1000;
+		printf("board type: CuBox-i\n");
+		break;
+	case BOARD_ID_IMX6_HUMMINGBOARD:
+		amptimer_frequency = 396 * 1000 * 1000;
+		printf("board type: HummingBoard\n");
+		break;
 	case BOARD_ID_IMX6_PHYFLEX:
 		amptimer_frequency = 396 * 1000 * 1000;
 		printf("board type: phyFLEX-i.MX6\n");
@@ -92,6 +104,14 @@ platform_print_board_type(void)
 	case BOARD_ID_IMX6_SABRELITE:
 		amptimer_frequency = 396 * 1000 * 1000;
 		printf("board type: SABRE Lite\n");
+		break;
+	case BOARD_ID_IMX6_UDOO:
+		amptimer_frequency = 396 * 1000 * 1000;
+		printf("board type: UDOO\n");
+		break;
+	case BOARD_ID_IMX6_UTILITE:
+		amptimer_frequency = 396 * 1000 * 1000;
+		printf("board type: Utilite\n");
 		break;
 	case BOARD_ID_IMX6_WANDBOARD:
 		amptimer_frequency = 396 * 1000 * 1000;

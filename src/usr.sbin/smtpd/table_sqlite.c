@@ -1,4 +1,4 @@
-/*	$OpenBSD: table_sqlite.c,v 1.14 2014/07/08 13:49:09 eric Exp $	*/
+/*	$OpenBSD: table_sqlite.c,v 1.16 2015/01/20 17:37:54 deraadt Exp $	*/
 
 /*
  * Copyright (c) 2013 Eric Faurot <eric@openbsd.org>
@@ -17,15 +17,23 @@
  */
 
 #include <sys/types.h>
+#include <sys/queue.h>
+#include <sys/tree.h>
+#include <sys/socket.h>
+
+#include <netinet/in.h>
+#include <netdb.h>
 
 #include <ctype.h>
 #include <fcntl.h>
 #include <sqlite3.h>
 #include <stdio.h>
+#include <limits.h>
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
 #include <unistd.h>
+#include <limits.h>
 
 #include "smtpd-defines.h"
 #include "smtpd-api.h"

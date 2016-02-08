@@ -1,4 +1,4 @@
-/*	$OpenBSD: kern_sensors.c,v 1.28 2014/07/12 18:43:32 tedu Exp $	*/
+/*	$OpenBSD: kern_sensors.c,v 1.35 2015/02/09 03:15:41 dlg Exp $	*/
 
 /*
  * Copyright (c) 2005 David Gwynne <dlg@openbsd.org>
@@ -18,7 +18,6 @@
  */
 
 #include <sys/param.h>
-#include <sys/proc.h>
 #include <sys/systm.h>
 #include <sys/kernel.h>
 #include <sys/malloc.h>
@@ -181,7 +180,7 @@ struct sensor_task {
 };
 
 void	sensor_task_tick(void *);
-void	sensor_task_work(void *, void *);
+void	sensor_task_work(void *);
 
 struct sensor_task *
 sensor_task_register(void *arg, void (*func)(void *), unsigned int period)
@@ -194,10 +193,10 @@ sensor_task_register(void *arg, void (*func)(void *), unsigned int period)
 #endif
 
 	if (sensors_taskq == NULL &&
-	    (sensors_taskq = taskq_create("sensors", 1, IPL_HIGH)) == NULL)
+	    (sensors_taskq = taskq_create("sensors", 1, IPL_HIGH, 0)) == NULL)
 		sensors_taskq = systq;
 
-	st = malloc(sizeof(struct sensor_task), M_DEVBUF, M_NOWAIT);
+	st = malloc(sizeof(*st), M_DEVBUF, M_NOWAIT);
 	if (st == NULL)
 		return (NULL);
 
@@ -205,7 +204,7 @@ sensor_task_register(void *arg, void (*func)(void *), unsigned int period)
 	st->arg = arg;
 	st->period = period;
 	timeout_set(&st->timeout, sensor_task_tick, st);
-	task_set(&st->task, sensor_task_work, st, NULL);
+	task_set(&st->task, sensor_task_work, st);
 	rw_init(&st->lock, "sensor");
 
 	sensor_task_tick(st);
@@ -236,7 +235,7 @@ sensor_task_tick(void *arg)
 }
 
 void
-sensor_task_work(void *xst, void *arg)
+sensor_task_work(void *xst)
 {
 	struct sensor_task *st = xst;
 	unsigned int period = 0;
@@ -248,7 +247,7 @@ sensor_task_work(void *xst, void *arg)
 	rw_exit_write(&st->lock);
 
 	if (period == 0)
-		free(st, M_DEVBUF, 0);
+		free(st, M_DEVBUF, sizeof(*st));
 	else 
 		timeout_add_sec(&st->timeout, period);
 }

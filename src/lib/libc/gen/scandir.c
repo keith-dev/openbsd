@@ -1,4 +1,4 @@
-/*	$OpenBSD: scandir.c,v 1.16 2013/04/17 17:40:35 tedu Exp $ */
+/*	$OpenBSD: scandir.c,v 1.19 2015/02/05 12:59:57 millert Exp $ */
 /*
  * Copyright (c) 1983, 1993
  *	The Regents of the University of California.  All rights reserved.
@@ -35,14 +35,16 @@
  * struct dirent (through namelist). Returns -1 if there were any errors.
  */
 
-#include <sys/param.h>
+#include <sys/types.h>
 #include <sys/stat.h>
 #include <dirent.h>
 #include <errno.h>
-#include <limits.h>
+#include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
 #include "telldir.h"
+
+#define MAXIMUM(a, b)	(((a) > (b)) ? (a) : (b))
 
 /*
  * The DIRSIZ macro is the minimum record length which will hold the directory
@@ -75,7 +77,7 @@ scandir(const char *dirname, struct dirent ***namelist,
 	 * estimate the array size by taking the size of the directory file
 	 * and dividing it by a multiple of the minimum size entry. 
 	 */
-	arraysz = MAX(stb.st_size / 24, 16);
+	arraysz = MAXIMUM(stb.st_size / 24, 16);
 	if (arraysz > SIZE_MAX / sizeof(struct dirent *)) {
 		errno = ENOMEM;
 		goto fail;
@@ -101,8 +103,8 @@ scandir(const char *dirname, struct dirent ***namelist,
 			arraysz *= 2;
 			if (SIZE_MAX / sizeof(struct dirent *) < arraysz)
 				goto fail;
-			nnames = (struct dirent **)realloc((char *)names,
-				arraysz * sizeof(struct dirent *));
+			nnames = reallocarray(names,
+			    arraysz, sizeof(struct dirent *));
 			if (nnames == NULL)
 				goto fail;
 

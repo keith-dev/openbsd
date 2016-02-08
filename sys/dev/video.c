@@ -1,4 +1,4 @@
-/*	$OpenBSD: video.c,v 1.31 2014/07/12 18:48:51 tedu Exp $	*/
+/*	$OpenBSD: video.c,v 1.35 2015/02/10 21:56:09 miod Exp $	*/
 
 /*
  * Copyright (c) 2008 Robert Nagy <robert@openbsd.org>
@@ -19,7 +19,6 @@
 
 #include <sys/param.h>
 #include <sys/systm.h>
-#include <sys/proc.h>
 #include <sys/errno.h>
 #include <sys/ioctl.h>
 #include <sys/fcntl.h>
@@ -33,6 +32,8 @@
 
 #include <dev/video_if.h>
 #include <dev/videovar.h>
+
+#include <uvm/uvm_extern.h>
 
 #ifdef VIDEO_DEBUG
 #define	DPRINTF(x)	do { printf x; } while (0)
@@ -172,7 +173,7 @@ videoread(dev_t dev, struct uio *uio, int ioflag)
 		size = sc->sc_fsize;
 	else
 		size = uio->uio_resid;
-	error = uiomove(sc->sc_fbuffer, size, uio);
+	error = uiomovei(sc->sc_fbuffer, size, uio);
 	sc->sc_frames_ready--;
 	if (error)
 		return (error);
@@ -249,6 +250,11 @@ videoioctl(dev_t dev, u_long cmd, caddr_t data, int flags, struct proc *p)
 		if (sc->hw_if->s_input)
 			error = (sc->hw_if->s_input)(sc->hw_hdl,
 			    (int)*data);
+		break;
+	case VIDIOC_G_INPUT:
+		if (sc->hw_if->g_input)
+			error = (sc->hw_if->g_input)(sc->hw_hdl,
+			    (int *)data);
 		break;
 	case VIDIOC_REQBUFS:
 		if (sc->hw_if->reqbufs)

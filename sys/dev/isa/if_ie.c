@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_ie.c,v 1.38 2013/11/26 09:50:33 mpi Exp $	*/
+/*	$OpenBSD: if_ie.c,v 1.40 2014/12/22 02:28:51 tedu Exp $	*/
 /*	$NetBSD: if_ie.c,v 1.51 1996/05/12 23:52:48 mycroft Exp $	*/
 
 /*-
@@ -130,12 +130,8 @@ iomem, and to make 16-pointers, we subtract sc_maddr and and with 0xffff.
 #include <net/bpf.h>
 #endif
 
-#ifdef INET
 #include <netinet/in.h>
-#include <netinet/in_systm.h>
-#include <netinet/ip.h>
 #include <netinet/if_ether.h>
-#endif
 
 #include <machine/cpu.h>
 #include <machine/bus.h>
@@ -2129,12 +2125,10 @@ ieioctl(ifp, cmd, data)
 		ifp->if_flags |= IFF_UP;
 
 		switch (ifa->ifa_addr->sa_family) {
-#ifdef INET
 		case AF_INET:
 			ieinit(sc);
 			arp_ifinit(&sc->sc_arpcom, ifa);
 			break;
-#endif
 		default:
 			ieinit(sc);
 			break;

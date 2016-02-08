@@ -1,4 +1,4 @@
-/*	$OpenBSD: rasops.c,v 1.31 2014/07/12 18:48:52 tedu Exp $	*/
+/*	$OpenBSD: rasops.c,v 1.38 2015/01/27 03:17:36 dlg Exp $	*/
 /*	$NetBSD: rasops.c,v 1.35 2001/02/02 06:01:01 marcus Exp $	*/
 
 /*-
@@ -34,9 +34,8 @@
 #include <sys/malloc.h>
 #include <sys/systm.h>
 #include <sys/time.h>
-#include <sys/workq.h>
-
-#include <machine/endian.h>
+#include <sys/task.h>
+#include <sys/endian.h>
 
 #include <dev/wscons/wsdisplayvar.h>
 #include <dev/wscons/wsconsio.h>
@@ -143,7 +142,7 @@ int	rasops_do_cursor(struct rasops_info *);
 void	rasops_init_devcmap(struct rasops_info *);
 void	rasops_unpack_attr(void *, long, int *, int *, int *);
 #if NRASOPS_BSWAP > 0
-static void slow_ovbcopy(void *, void *, size_t);
+static void slow_bcopy(void *, void *, size_t);
 #endif
 #if NRASOPS_ROTATION > 0
 void	rasops_copychar(void *, int, int, int, int);
@@ -165,7 +164,7 @@ struct	rotatedfont {
 };
 #endif
 
-void	rasops_doswitch(void *, void *);
+void	rasops_doswitch(void *);
 int	rasops_vcons_cursor(void *, int, int, int);
 int	rasops_vcons_mapchar(void *, int, u_int *);
 int	rasops_vcons_putchar(void *, int, int, u_int, long);
@@ -274,6 +273,8 @@ rasops_init(struct rasops_info *ri, int wantrows, int wantcols)
 		ri->ri_ops.alloc_attr = rasops_vcons_alloc_attr;
 		ri->ri_ops.unpack_attr = rasops_vcons_unpack_attr;
 	}
+
+	task_set(&ri->ri_switchtask, rasops_doswitch, ri);
 
 	rasops_init_devcmap(ri);
 	return (0);
@@ -644,7 +645,7 @@ rasops_copyrows(void *cookie, int src, int dst, int num)
 /*
  * Copy columns. This is slow, and hard to optimize due to alignment,
  * and the fact that we have to copy both left->right and right->left.
- * We simply cop-out here and use ovbcopy(), since it handles all of
+ * We simply cop-out here and use bcopy(), since it handles all of
  * these cases anyway.
  */
 int
@@ -694,7 +695,7 @@ rasops_copycols(void *cookie, int row, int src, int dst, int num)
 #if NRASOPS_BSWAP > 0
 	if (ri->ri_flg & RI_BSWAP) {
 		while (height--) {
-			slow_ovbcopy(sp, dp, num);
+			slow_bcopy(sp, dp, num);
 			dp += ri->ri_stride;
 			sp += ri->ri_stride;
 		}
@@ -1201,7 +1202,7 @@ rasops_copychar(void *cookie, int srcrow, int dstrow, int srccol, int dstcol)
 #if NRASOPS_BSWAP > 0
 	if (ri->ri_flg & RI_BSWAP) {
 		while (height--) {
-			slow_ovbcopy(sp, dp, ri->ri_xscale);
+			slow_bcopy(sp, dp, ri->ri_xscale);
 			dp += ri->ri_stride;
 			sp += ri->ri_stride;
 		}
@@ -1330,13 +1331,13 @@ rasops_eraserows_rotated(void *cookie, int row, int num, long attr)
 
 #if NRASOPS_BSWAP > 0
 /*
- * Strictly byte-only ovbcopy() version, to be used with RI_BSWAP, as the
- * regular ovbcopy() may want to optimize things by doing larger-than-byte
+ * Strictly byte-only bcopy() version, to be used with RI_BSWAP, as the
+ * regular bcopy() may want to optimize things by doing larger-than-byte
  * reads or write. This may confuse things if src and dst have different
  * alignments.
  */
 void
-slow_ovbcopy(void *s, void *d, size_t len)
+slow_bcopy(void *s, void *d, size_t len)
 {
 	u_int8_t *src = s;
 	u_int8_t *dst = d;
@@ -1377,12 +1378,14 @@ rasops_alloc_screen(void *v, void **cookiep,
 	if (scr == NULL)
 		return (ENOMEM);
 
-	size = ri->ri_rows * ri->ri_cols * sizeof(struct wsdisplay_charcell);
-	scr->rs_bs = malloc(size, M_DEVBUF, M_NOWAIT);
+	scr->rs_bs = mallocarray(ri->ri_rows,
+	    ri->ri_cols * sizeof(struct wsdisplay_charcell), M_DEVBUF,
+	    M_NOWAIT);
 	if (scr->rs_bs == NULL) {
 		free(scr, M_DEVBUF, 0);
 		return (ENOMEM);
 	}
+	size = ri->ri_rows * ri->ri_cols * sizeof(struct wsdisplay_charcell);
 
 	*cookiep = scr;
 	*curxp = 0;
@@ -1424,23 +1427,23 @@ rasops_show_screen(void *v, void *cookie, int waitok,
 {
 	struct rasops_info *ri = v;
 
+	ri->ri_switchcookie = cookie;
 	if (cb) {
 		ri->ri_switchcb = cb;
 		ri->ri_switchcbarg = cbarg;
-		workq_queue_task(NULL, &ri->ri_switchwqt, 0,
-		    rasops_doswitch, v, cookie);
+		task_add(systq, &ri->ri_switchtask);
 		return (EAGAIN);
 	}
 
-	rasops_doswitch(v, cookie);
+	rasops_doswitch(ri);
 	return (0);
 }
 
 void
-rasops_doswitch(void *v, void *cookie)
+rasops_doswitch(void *v)
 {
 	struct rasops_info *ri = v;
-	struct rasops_screen *scr = cookie;
+	struct rasops_screen *scr = ri->ri_switchcookie;
 	int row, col;
 	long attr;
 

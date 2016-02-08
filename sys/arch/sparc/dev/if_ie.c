@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_ie.c,v 1.47 2014/07/22 10:35:35 mpi Exp $	*/
+/*	$OpenBSD: if_ie.c,v 1.50 2015/01/11 15:35:38 miod Exp $	*/
 /*	$NetBSD: if_ie.c,v 1.33 1997/07/29 17:55:38 fair Exp $	*/
 
 /*-
@@ -557,7 +557,7 @@ ieattach(parent, self, aux)
 			panic("ie pmap_extract");
 		pmap_enter(pmap_kernel(), trunc_page(IEOB_ADBASE+IE_SCP_ADDR),
                     (paddr_t)pa | PMAP_NC /*| PMAP_IOC*/,
-                    VM_PROT_READ | VM_PROT_WRITE, PMAP_WIRED);
+                    PROT_READ | PROT_WRITE, PMAP_WIRED);
 		pmap_update(pmap_kernel());
 
 		sc->scp = (volatile struct ie_sys_conf_ptr *)
@@ -1421,7 +1421,7 @@ iestart(ifp)
 
 		for (m0 = m; m && (len +m->m_len) < IE_TBUF_SIZE;
 		                                           m = m->m_next) {
-			bcopy(mtod(m, caddr_t), buffer, m->m_len);
+			(sc->memcopy)(mtod(m, caddr_t), buffer, m->m_len);
 			buffer += m->m_len;
 			len += m->m_len;
 		}
@@ -1431,7 +1431,7 @@ iestart(ifp)
 		m_freem(m0);
 
 		if (len < ETHER_MIN_LEN - ETHER_CRC_LEN) {
-			bzero(buffer, ETHER_MIN_LEN - ETHER_CRC_LEN - len);
+			(sc->memzero)(buffer, ETHER_MIN_LEN - ETHER_CRC_LEN - len);
 			len = ETHER_MIN_LEN - ETHER_CRC_LEN;
 			buffer += ETHER_MIN_LEN - ETHER_CRC_LEN;
 		}
@@ -1949,12 +1949,10 @@ ieioctl(ifp, cmd, data)
 		ifp->if_flags |= IFF_UP;
 
 		switch(ifa->ifa_addr->sa_family) {
-#ifdef INET
 		case AF_INET:
 			ieinit(sc);
 			arp_ifinit(&sc->sc_arpcom, ifa);
 			break;
-#endif
 		default:
 			ieinit(sc);
 			break;

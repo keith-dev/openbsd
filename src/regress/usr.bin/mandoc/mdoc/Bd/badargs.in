@@ -16,7 +16,7 @@ last
 wins
 .Ed
 no type:
-.Bd -offset 0n
+.Bd -offset 0n -bogus args
 displayed
 text
 .Ed
@@ -28,4 +28,19 @@ unfilled
 .Bd -unfilled -compact -ragged
 unfilled
 ragged
+.Ed
+file /dev/null:
+.Bd -ragged -file /dev/null -offset indent
+ragged
+offset indent
+.Ed
+trailing -file:
+.Bd -ragged -offset indent -file
+ragged
+offset indent
+.Ed
+missing -file argument:
+.Bd -ragged -offset indent -file -compact
+ragged
+offset indent
 .Ed

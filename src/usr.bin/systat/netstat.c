@@ -1,4 +1,4 @@
-/*	$OpenBSD: netstat.c,v 1.39 2013/12/25 01:46:00 tedu Exp $	*/
+/*	$OpenBSD: netstat.c,v 1.44 2015/01/20 18:26:57 deraadt Exp $	*/
 /*	$NetBSD: netstat.c,v 1.3 1995/06/18 23:53:07 cgd Exp $	*/
 
 /*-
@@ -33,7 +33,8 @@
 /*
  * netstat
  */
-#include <sys/param.h>
+
+#include <sys/signal.h>
 #include <sys/socket.h>
 #include <sys/socketvar.h>
 #include <sys/mbuf.h>
@@ -41,20 +42,17 @@
 
 #include <netinet/in.h>
 #include <net/route.h>
-#include <netinet/in_systm.h>
 #include <netinet/ip.h>
 #include <netinet/in_pcb.h>
 #include <netinet/ip_icmp.h>
 #include <netinet/icmp_var.h>
 #include <netinet/ip_var.h>
 #include <netinet/tcp.h>
-#include <netinet/tcpip.h>
 #include <netinet/tcp_seq.h>
 #define TCPSTATES
 #include <netinet/tcp_fsm.h>
 #include <netinet/tcp_timer.h>
 #include <netinet/tcp_var.h>
-#include <netinet/tcp_debug.h>
 #include <netinet/udp.h>
 #include <netinet/udp_var.h>
 #include <arpa/inet.h>
@@ -166,7 +164,7 @@ next_ns(void)
 		size_t a = num_alloc + ADD_ALLOC;
 		if (a < num_alloc)
 			return NULL;
-		ni = realloc(netinfos, a * sizeof(*ni));
+		ni = reallocarray(netinfos, a, sizeof(*ni));
 		if (ni == NULL)
 			return NULL;
 		netinfos = ni;
@@ -212,18 +210,10 @@ enter(struct inpcb *inp, struct socket *so, int state, char *proto)
 int
 select_ns(void)
 {
-	static int init = 0;
 	if (kd == NULL) {
 		num_disp = 1;
 		return (0);
 	}
-
-	if (!init) {
-		sethostent(1);
-		setnetent(1);
-		init = 1;
-	}
-
 	num_disp = num_ns;
 	return (0);
 }

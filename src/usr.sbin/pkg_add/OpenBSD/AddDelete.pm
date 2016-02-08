@@ -1,5 +1,5 @@
 # ex:ts=8 sw=4:
-# $OpenBSD: AddDelete.pm,v 1.66 2014/07/11 12:50:15 espie Exp $
+# $OpenBSD: AddDelete.pm,v 1.71 2015/01/04 14:20:04 espie Exp $
 #
 # Copyright (c) 2007-2010 Marc Espie <espie@openbsd.org>
 #
@@ -175,16 +175,6 @@ sub handle_options
 	}
 	# XXX RequiredBy
 	$main::not = $state->{not};
-	if ($state->opt('i') && $state->opt('I')) {
-		$state->usage("-i and -I are reverse options, make up your mind");
-	}
-	if ($state->opt('i')) {
-		$state->{interactive} = 1;
-	} elsif ($state->opt('I')) {
-		$state->{interactive} = 0;
-	} else {
-		$state->{interactive} = -t STDIN;
-	}
 	$state->{localbase} = $state->opt('L') // OpenBSD::Paths->localbase;
 	$ENV{PATH} = join(':',
 	    '/bin',
@@ -230,7 +220,7 @@ sub syslog
 	Sys::Syslog::syslog('info', $self->f(@_));
 }
 
-sub todo
+sub ntodo
 {
 	my ($state, $offset) = @_;
 	return $state->tracker->sets_todo($offset);
@@ -343,35 +333,16 @@ sub choose_location
 	}
 
 	my %h = map {($_->name, $_)} @$list;
-	if ($state->{interactive}) {
-		require OpenBSD::Interactive;
-
+	if ($state->is_interactive) {
 		$h{'<None>'} = undef;
 		$state->progress->clear;
-		my $result = $state->ask_list("Ambiguous: choose package for $name", 1, sort keys %h);
+		my $result = $state->ask_list("Ambiguous: choose package for $name", sort keys %h);
 		return $h{$result};
 	} else {
 		$state->errsay("Ambiguous: #1 could be #2",
 		    $name, join(' ', keys %h));
 		return undef;
 	}
-}
-
-sub confirm
-{
-	my ($state, $prompt, $default) = @_;
-
-	return 0 if !$state->{interactive};
-	require OpenBSD::Interactive;
-	return OpenBSD::Interactive::confirm($prompt, $default);
-}
-
-sub ask_list
-{
-	my ($state, $prompt, $interactive, @values) = @_;
-
-	require OpenBSD::Interactive;
-	return OpenBSD::Interactive::ask_list($prompt, $interactive, @values);
 }
 
 sub status
@@ -476,7 +447,7 @@ sub print
 		$object = "Parameters";
 	}
 
-	$state->say($what." #1 (#2)", $object, $state->ntogo_string);
+	$state->say($what." #1#2", $object, $state->ntogo_string);
 	if ($state->defines('carp')) {
 		require Carp;
 		Carp::cluck("currently here");

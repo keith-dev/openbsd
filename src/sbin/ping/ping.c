@@ -1,4 +1,4 @@
-/*	$OpenBSD: ping.c,v 1.111 2014/07/11 15:30:47 florian Exp $	*/
+/*	$OpenBSD: ping.c,v 1.114 2015/01/16 06:40:00 deraadt Exp $	*/
 /*	$NetBSD: ping.c,v 1.20 1995/08/11 22:37:58 cgd Exp $	*/
 
 /*
@@ -54,10 +54,8 @@
 #include <sys/types.h>
 #include <sys/queue.h>
 #include <sys/socket.h>
-#include <sys/file.h>
 #include <sys/time.h>
 
-#include <netinet/in_systm.h>
 #include <netinet/in.h>
 #include <netinet/ip.h>
 #include <netinet/ip_icmp.h>
@@ -72,6 +70,7 @@
 #include <errno.h>
 #include <poll.h>
 #include <string.h>
+#include <limits.h>
 #include <stdlib.h>
 
 struct tv32 {
@@ -181,7 +180,7 @@ main(int argc, char *argv[])
 	struct in_addr saddr;
 	int ch, i, optval = 1, packlen, preload, maxsize, df = 0, tos = 0;
 	u_char *datap, *packet, ttl = MAXTTL, loop = 1;
-	char *target, hnamebuf[MAXHOSTNAMELEN];
+	char *target, hnamebuf[HOST_NAME_MAX+1];
 	char rspace[3 + 4 * NROUTES + 1];	/* record route space */
 	socklen_t maxsizelen;
 	const char *errstr;
@@ -1209,7 +1208,7 @@ pr_addr(in_addr_t a)
 {
 	struct hostent *hp;
 	struct in_addr in;
-	static char buf[16+3+MAXHOSTNAMELEN];
+	static char buf[16+3+HOST_NAME_MAX+1];
 
 	in.s_addr = a;
 	if ((options & F_NUMERIC) ||

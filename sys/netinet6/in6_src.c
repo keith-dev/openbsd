@@ -1,4 +1,4 @@
-/*	$OpenBSD: in6_src.c,v 1.45 2014/07/22 11:06:10 mpi Exp $	*/
+/*	$OpenBSD: in6_src.c,v 1.50 2014/12/17 09:45:59 mpi Exp $	*/
 /*	$KAME: in6_src.c,v 1.36 2001/02/06 04:08:17 itojun Exp $	*/
 
 /*
@@ -72,6 +72,7 @@
 #include <sys/time.h>
 
 #include <net/if.h>
+#include <net/if_var.h>
 #include <net/route.h>
 
 #include <netinet/in.h>
@@ -199,7 +200,7 @@ in6_selectsrc(struct in6_addr **in6src, struct sockaddr_in6 *dstsock,
 	 * choose a loopback interface as the outgoing interface.
 	 */
 	if (IN6_IS_ADDR_MULTICAST(dst)) {
-		ifp = mopts ? mopts->im6o_multicast_ifp : NULL;
+		ifp = mopts ? if_get(mopts->im6o_ifidx) : NULL;
 
 		if (!ifp && dstsock->sin6_scope_id)
 			ifp = if_get(htons(dstsock->sin6_scope_id));
@@ -248,8 +249,8 @@ in6_selectsrc(struct in6_addr **in6src, struct sockaddr_in6 *dstsock,
 	if (ro) {
 		if (ro->ro_rt && ((ro->ro_rt->rt_flags & RTF_UP) == 0 ||
 		    !IN6_ARE_ADDR_EQUAL(&ro->ro_dst.sin6_addr, dst))) {
-			RTFREE(ro->ro_rt);
-			ro->ro_rt = (struct rtentry *)0;
+			rtfree(ro->ro_rt);
+			ro->ro_rt = NULL;
 		}
 		if (ro->ro_rt == (struct rtentry *)0 ||
 		    ro->ro_rt->rt_ifp == (struct ifnet *)0) {
@@ -264,9 +265,11 @@ in6_selectsrc(struct in6_addr **in6src, struct sockaddr_in6 *dstsock,
 			sa6->sin6_addr = *dst;
 			sa6->sin6_scope_id = dstsock->sin6_scope_id;
 			if (IN6_IS_ADDR_MULTICAST(dst)) {
-				rtalloc((struct route *)ro);
+				ro->ro_rt = rtalloc(sin6tosa(&ro->ro_dst),
+				    RT_REPORT|RT_RESOLVE, ro->ro_tableid);
 			} else {
-				rtalloc_mpath((struct route *)ro, NULL);
+				ro->ro_rt = rtalloc_mpath(sin6tosa(&ro->ro_dst),
+				    NULL, ro->ro_tableid);
 			}
 		}
 
@@ -342,7 +345,7 @@ selectroute(struct sockaddr_in6 *dstsock, struct ip6_pktopts *opts,
 	 * interface for the address is specified by the caller, use it.
 	 */
 	if (IN6_IS_ADDR_MULTICAST(dst) &&
-	    mopts != NULL && (ifp = mopts->im6o_multicast_ifp) != NULL) {
+	    mopts != NULL && (ifp = if_get(mopts->im6o_ifidx)) != NULL) {
 		goto done; /* we do not need a route for multicast. */
 	}
 
@@ -373,18 +376,20 @@ selectroute(struct sockaddr_in6 *dstsock, struct ip6_pktopts *opts,
 		    !IN6_ARE_ADDR_EQUAL(&ron->ro_dst.sin6_addr,
 		    &sin6_next->sin6_addr)) {
 			if (ron->ro_rt) {
-				RTFREE(ron->ro_rt);
+				rtfree(ron->ro_rt);
 				ron->ro_rt = NULL;
 			}
 			ron->ro_dst = *sin6_next;
 			ron->ro_tableid = rtableid;
 		}
 		if (ron->ro_rt == NULL) {
-			rtalloc((struct route *)ron); /* multi path case? */
+			/* multi path case? */
+			ron->ro_rt = rtalloc(sin6tosa(&ron->ro_dst),
+			    RT_REPORT|RT_RESOLVE, ron->ro_tableid);
 			if (ron->ro_rt == NULL ||
 			    (ron->ro_rt->rt_flags & RTF_GATEWAY)) {
 				if (ron->ro_rt) {
-					RTFREE(ron->ro_rt);
+					rtfree(ron->ro_rt);
 					ron->ro_rt = NULL;
 				}
 				error = EHOSTUNREACH;
@@ -392,7 +397,7 @@ selectroute(struct sockaddr_in6 *dstsock, struct ip6_pktopts *opts,
 			}
 		}
 		if (!nd6_is_addr_neighbor(sin6_next, ron->ro_rt->rt_ifp)) {
-			RTFREE(ron->ro_rt);
+			rtfree(ron->ro_rt);
 			ron->ro_rt = NULL;
 			error = EHOSTUNREACH;
 			goto done;
@@ -418,7 +423,7 @@ selectroute(struct sockaddr_in6 *dstsock, struct ip6_pktopts *opts,
 		    (!(ro->ro_rt->rt_flags & RTF_UP) ||
 		     sin6tosa(&ro->ro_dst)->sa_family != AF_INET6 ||
 		     !IN6_ARE_ADDR_EQUAL(&ro->ro_dst.sin6_addr, dst))) {
-			RTFREE(ro->ro_rt);
+			rtfree(ro->ro_rt);
 			ro->ro_rt = NULL;
 		}
 		if (ro->ro_rt == NULL) {
@@ -431,7 +436,8 @@ selectroute(struct sockaddr_in6 *dstsock, struct ip6_pktopts *opts,
 			*sa6 = *dstsock;
 			sa6->sin6_scope_id = 0;
 			ro->ro_tableid = rtableid;
-			rtalloc_mpath((struct route *)ro, NULL);
+			ro->ro_rt = rtalloc_mpath(sin6tosa(&ro->ro_dst),
+			    NULL, ro->ro_tableid);
 		}
 
 		/*
@@ -445,7 +451,7 @@ selectroute(struct sockaddr_in6 *dstsock, struct ip6_pktopts *opts,
 			ifp = ro->ro_rt->rt_ifp;
 
 			if (ifp == NULL) { /* can this really happen? */
-				RTFREE(ro->ro_rt);
+				rtfree(ro->ro_rt);
 				ro->ro_rt = NULL;
 			}
 		}
@@ -611,8 +617,7 @@ in6_embedscope(struct in6_addr *in6, const struct sockaddr_in6 *sin6,
 			in6->s6_addr16[1] = htons(pi->ipi6_ifindex);
 		} else if (in6p && IN6_IS_ADDR_MULTICAST(in6) &&
 			   in6p->inp_moptions6 &&
-			   in6p->inp_moptions6->im6o_multicast_ifp) {
-			ifp = in6p->inp_moptions6->im6o_multicast_ifp;
+			   (ifp = if_get(in6p->inp_moptions6->im6o_ifidx))) {
 			in6->s6_addr16[1] = htons(ifp->if_index);
 		} else if (scopeid) {
 			ifp = if_get(scopeid);

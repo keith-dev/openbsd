@@ -1,4 +1,4 @@
-/* $OpenBSD: t1_srvr.c,v 1.13 2014/06/12 15:49:31 deraadt Exp $ */
+/* $OpenBSD: t1_srvr.c,v 1.18 2015/02/06 08:30:23 jsing Exp $ */
 /* Copyright (C) 1995-1998 Eric Young (eay@cryptsoft.com)
  * All rights reserved.
  *
@@ -57,11 +57,12 @@
  */
 
 #include <stdio.h>
+
 #include "ssl_locl.h"
+
 #include <openssl/buffer.h>
-#include <openssl/rand.h>
-#include <openssl/objects.h>
 #include <openssl/evp.h>
+#include <openssl/objects.h>
 #include <openssl/x509.h>
 
 static const SSL_METHOD *tls1_get_server_method(int ver);
@@ -163,21 +164,21 @@ const SSL_METHOD TLSv1_2_server_method_data = {
 };
 
 const SSL_METHOD *
-TLSv1_server_method(void) 
+TLSv1_server_method(void)
 {
-	return &TLSv1_server_method_data; 
+	return &TLSv1_server_method_data;
 }
 
 const SSL_METHOD *
-TLSv1_1_server_method(void) 
+TLSv1_1_server_method(void)
 {
-	return &TLSv1_1_server_method_data; 
+	return &TLSv1_1_server_method_data;
 }
 
 const SSL_METHOD *
-TLSv1_2_server_method(void) 
+TLSv1_2_server_method(void)
 {
-	return &TLSv1_2_server_method_data; 
+	return &TLSv1_2_server_method_data;
 }
 
 static const SSL_METHOD *

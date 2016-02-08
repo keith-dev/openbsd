@@ -1,4 +1,4 @@
-/*	$OpenBSD: pmap_table.c,v 1.11 2014/04/16 12:01:33 aoyama Exp $	*/
+/*	$OpenBSD: pmap_table.c,v 1.13 2014/11/21 12:28:13 aoyama Exp $	*/
 
 /* 
  * Mach Operating System
@@ -34,8 +34,8 @@
 #include <machine/board.h>
 #include <machine/pmap_table.h>
 
-#define	R	VM_PROT_READ
-#define	RW	(VM_PROT_READ | VM_PROT_WRITE)
+#define	R	PROT_READ
+#define	RW	(PROT_READ | PROT_WRITE)
 #define	CW	CACHE_WT
 #define	CI	CACHE_INH
 #define	CG	CACHE_GLOBAL
@@ -44,7 +44,7 @@
 const struct pmap_table
 luna88k_board_table[] = {
 	{ PROM_ADDR,		PROM_SPACE,		R,	CI },
-	{ FUSE_ROM_ADDR,	FUSE_ROM_SPACE,		RW,	CI },
+	{ FUSE_ROM_ADDR,	FUSE_ROM_SPACE,		R,	CI },
 	{ NVRAM_ADDR,		NVRAM_SPACE,		RW,	CI },
 	{ NVRAM_ADDR_88K2,	PAGE_SIZE,		RW,	CI },
 	{ OBIO_PIO0_BASE,	PAGE_SIZE,		RW,	CI },

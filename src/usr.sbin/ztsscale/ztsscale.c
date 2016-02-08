@@ -1,4 +1,4 @@
-/*	$OpenBSD: ztsscale.c,v 1.16 2013/12/31 07:16:50 matthieu Exp $	*/
+/*	$OpenBSD: ztsscale.c,v 1.18 2015/01/16 06:40:23 deraadt Exp $	*/
 
 /*
  * Copyright (c) 2005 Matthieu Herrb
@@ -16,7 +16,7 @@
  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
 
-#include <sys/param.h>
+#include <sys/types.h>
 #include <sys/mman.h>
 #include <sys/ioctl.h>
 #include <machine/cpu.h>
@@ -131,9 +131,9 @@ save_screen(void)
 
 	if (ioctl(fd, WSDISPLAYIO_SMODE, &mode) == -1)
 		warn("ioctl SMODE");
-	mapaddr = (void *)mmap(0, WIDTH*HEIGHT*sizeof(short),
+	mapaddr = mmap(0, WIDTH*HEIGHT*sizeof(short),
 	    PROT_READ|PROT_WRITE, MAP_SHARED, fd, (off_t)0);
-	if (mapaddr == (void *)-1)
+	if (mapaddr == MAP_FAILED)
 		err(2, "mmap");
 	save = (u_short *)malloc(WIDTH*HEIGHT*sizeof(u_short));
 	if (save == NULL)

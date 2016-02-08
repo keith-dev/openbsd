@@ -32,7 +32,7 @@
  * SUCH DAMAGE.
  *
  *	from: @(#)nfs_start.c	8.1 (Berkeley) 6/6/93
- *	$Id: nfs_start.c,v 1.16 2013/04/17 15:55:44 deraadt Exp $
+ *	$Id: nfs_start.c,v 1.19 2015/01/21 09:50:25 guenther Exp $
  */
 
 #include "am.h"
@@ -52,9 +52,6 @@ extern int select_intr_valid;
 #define	svcudp_create svcudp2_create
 extern SVCXPRT *svcudp2_create(int);
 #endif /* HAS_TFS */
-
-extern void nfs_program_2();
-extern void amq_program_1();
 
 unsigned short nfs_port;
 SVCXPRT *nfsxprt, *lnfsxprt;
@@ -154,7 +151,7 @@ do_select(sigset_t *mask, sigset_t *omask, int fds, fd_set *fdp,
  * the RPC input queue.
  */
 static int
-rpc_pending_now()
+rpc_pending_now(void)
 {
 	struct timeval tvv;
 	int nsel;
@@ -206,7 +203,6 @@ run_rpc(void)
 		struct timeval tvv;
 		int nsel;
 		time_t now;
-#ifdef RPC_4
 #ifdef __OpenBSD__
 		extern int __svc_fdsetsize;
 		extern fd_set *__svc_fdset;
@@ -230,12 +226,6 @@ run_rpc(void)
 		memcpy(fdsp, &svc_fdset, bytes);
 		FD_SET(fwd_sock, fdsp);
 #endif
-#else
-		fd_set readfds;
-		FD_ZERO(&readfds);
-		readfds.fds_bits[0] = svc_fds;
-		FD_SET(fwd_sock, &readfds);
-#endif /* RPC_4 */
 
 #ifdef DEBUG
 		checkup();
@@ -306,15 +296,11 @@ run_rpc(void)
 				 * Anything left must be a normal
 				 * RPC request.
 				 */
-#ifdef RPC_4
 #ifdef __OpenBSD__
 				svc_getreqset2(fdsp, fdsn);
 #else
 				svc_getreqset(fdsp);
 #endif
-#else
-				svc_getreq(readfds.fds_bits[0]);
-#endif /* RPC_4 */
 			}
 			break;
 		}
@@ -456,7 +442,7 @@ mount_automounter(pid_t ppid)
 	 */
 	unregister_amq();
 
-	if (!svc_register(amqp, AMQ_PROGRAM, AMQ_VERSION, amq_program_1, IPPROTO_UDP)) {
+	if (!svc_register(amqp, AMQ_PROGRAM, AMQ_VERSION, amq_program_57, IPPROTO_UDP)) {
 		plog(XLOG_FATAL, "unable to register (AMQ_PROGRAM, AMQ_VERSION, udp)");
 		return 3;
 	}

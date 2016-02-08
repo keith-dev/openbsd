@@ -1,4 +1,4 @@
-/*	$OpenBSD: rtl81x9.c,v 1.82 2014/07/22 13:12:12 mpi Exp $ */
+/*	$OpenBSD: rtl81x9.c,v 1.87 2015/01/08 00:49:18 brad Exp $ */
 
 /*
  * Copyright (c) 1997, 1998
@@ -33,10 +33,10 @@
  */
 
 /*
- * RealTek 8129/8139 PCI NIC driver
+ * Realtek 8129/8139 PCI NIC driver
  *
  * Supports several extremely cheap PCI 10/100 adapters based on
- * the RealTek chipset. Datasheets can be obtained from
+ * the Realtek chipset. Datasheets can be obtained from
  * www.realtek.com.tw.
  *
  * Written by Bill Paul <wpaul@ctr.columbia.edu>
@@ -45,7 +45,7 @@
  */
 
 /*
- * The RealTek 8139 PCI NIC redefines the meaning of 'low end.' This is
+ * The Realtek 8139 PCI NIC redefines the meaning of 'low end.' This is
  * probably the worst PCI ethernet controller ever made, with the possible
  * exception of the FEAST chip made by SMC. The 8139 supports bus-master
  * DMA, but it has a terrible interface that nullifies any performance
@@ -99,10 +99,8 @@
 #include <net/if_dl.h>
 #include <net/if_types.h>
 
-#ifdef INET
 #include <netinet/in.h>
 #include <netinet/if_ether.h>
-#endif
 
 #include <net/if_media.h>
 
@@ -114,9 +112,6 @@
 
 #include <dev/mii/mii.h>
 #include <dev/mii/miivar.h>
-#include <dev/pci/pcireg.h>
-#include <dev/pci/pcivar.h>
-#include <dev/pci/pcidevs.h>
 
 #include <dev/ic/rtl81x9reg.h>
 
@@ -590,11 +585,11 @@ rl_rxeof(struct rl_softc *sc)
 
 		/*
 		 * Here's a totally undocumented fact for you. When the
-		 * RealTek chip is in the process of copying a packet into
+		 * Realtek chip is in the process of copying a packet into
 		 * RAM for you, the length will be 0xfff0. If you spot a
 		 * packet header with this value, you need to stop. The
 		 * datasheet makes absolutely no mention of this and
-		 * RealTek should be shot for this.
+		 * Realtek should be shot for this.
 		 */
 		rxstat = htole32(rxstat);
 		total_len = rxstat >> 16;
@@ -620,7 +615,7 @@ rl_rxeof(struct rl_softc *sc)
 		rx_bytes += total_len + 4;
 
 		/*
-		 * XXX The RealTek chip includes the CRC with every
+		 * XXX The Realtek chip includes the CRC with every
 		 * received frame, and there's no way to turn this
 		 * behavior off (at least, I can't find anything in
 		 * the manual that explains how to do it) so we have
@@ -742,7 +737,6 @@ rl_txeof(struct rl_softc *sc)
 				CSR_WRITE_4(sc, RL_TXCFG, RL_TXCFG_CONFIG);
 			oldthresh = sc->rl_txthresh;
 			/* error recovery */
-			rl_reset(sc);
 			rl_init(sc);
 			/* restore original threshold */
 			sc->rl_txthresh = oldthresh;
@@ -782,10 +776,8 @@ rl_intr(void *arg)
 			rl_rxeof(sc);
 		if ((status & RL_ISR_TX_OK) || (status & RL_ISR_TX_ERR))
 			rl_txeof(sc);
-		if (status & RL_ISR_SYSTEM_ERR) {
-			rl_reset(sc);
+		if (status & RL_ISR_SYSTEM_ERR)
 			rl_init(sc);
-		}
 		claimed = 1;
 	}
 
@@ -808,7 +800,7 @@ rl_encap(struct rl_softc *sc, struct mbuf *m_head)
 	struct mbuf	*m_new;
 
 	/*
-	 * The RealTek is brain damaged and wants longword-aligned
+	 * The Realtek is brain damaged and wants longword-aligned
 	 * TX buffers, plus we can only have one fragment buffer
 	 * per packet. We have to copy pretty much all the time.
 	 */
@@ -929,6 +921,9 @@ rl_init(void *xsc)
 	 */
 	rl_stop(sc);
 
+	/* Put controller into known state. */
+	rl_reset(sc);
+
 	/*
 	 * Init our MAC address.  Even though the chipset
 	 * documentation doesn't mention it, we need to enter "Config
@@ -979,7 +974,7 @@ rl_init(void *xsc)
 
 	mii_mediachg(&sc->sc_mii);
 
-	CSR_WRITE_1(sc, RL_CFG1, RL_CFG1_DRVLOAD|RL_CFG1_FULLDUPLEX);
+	CSR_WRITE_1(sc, sc->rl_cfg1, RL_CFG1_DRVLOAD|RL_CFG1_FULLDUPLEX);
 
 	ifp->if_flags |= IFF_RUNNING;
 	ifp->if_flags &= ~IFF_OACTIVE;
@@ -1029,10 +1024,8 @@ rl_ioctl(struct ifnet *ifp, u_long command, caddr_t data)
 		ifp->if_flags |= IFF_UP;
 		if (!(ifp->if_flags & IFF_RUNNING))
 			rl_init(sc);
-#ifdef INET
 		if (ifa->ifa_addr->sa_family == AF_INET)
 			arp_ifinit(&sc->sc_arpcom, ifa);
-#endif
 		break;
 
 	case SIOCSIFFLAGS:
@@ -1124,6 +1117,13 @@ rl_attach(struct rl_softc *sc)
 	u_int16_t	rl_id;
 	caddr_t		kva;
 	int		addr_len;
+
+	sc->rl_cfg0 = RL_8139_CFG0;
+	sc->rl_cfg1 = RL_8139_CFG1;
+	sc->rl_cfg2 = 0;
+	sc->rl_cfg3 = RL_8139_CFG3;
+	sc->rl_cfg4 = RL_8139_CFG4;
+	sc->rl_cfg5 = RL_8139_CFG5;
 
 	rl_reset(sc);
 

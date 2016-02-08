@@ -1,7 +1,6 @@
-#	$OpenBSD: list,v 1.10 2014/07/20 02:37:35 deraadt Exp $
+#	$OpenBSD: list,v 1.14 2015/02/23 08:09:46 deraadt Exp $
 
 SRCDIRS distrib/special
-SRCDIRS bin sbin
 
 # copy the crunched binary, link to it, and kill it
 COPY	${OBJDIR}/instbin			instbin
@@ -13,7 +12,6 @@ LINK	instbin					bin/cp
 LINK	instbin					bin/dd
 LINK	instbin					bin/df
 LINK	instbin					bin/ed
-LINK	instbin					bin/expr
 LINK	instbin					bin/hostname
 LINK	instbin					bin/ksh bin/sh
 ARGVLINK ksh					-sh
@@ -52,9 +50,9 @@ LINK	instbin					sbin/ping
 LINK	instbin					sbin/ping6
 LINK	instbin					sbin/reboot sbin/halt
 LINK	instbin					sbin/route
-LINK	instbin					sbin/rtsol
 LINK	instbin					sbin/sysctl
 LINK	instbin					sbin/umount
+LINK	instbin					usr/bin/encrypt
 LINK	instbin					usr/bin/ftp
 LINK	instbin					usr/bin/grep usr/bin/fgrep usr/bin/egrep
 LINK	instbin					usr/bin/gzip usr/bin/gunzip usr/bin/gzcat

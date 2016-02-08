@@ -1,25 +1,25 @@
-/* $OpenBSD: s3_both.c,v 1.28 2014/08/07 20:02:23 miod Exp $ */
+/* $OpenBSD: s3_both.c,v 1.37 2014/12/14 21:49:29 bcook Exp $ */
 /* Copyright (C) 1995-1998 Eric Young (eay@cryptsoft.com)
  * All rights reserved.
  *
  * This package is an SSL implementation written
  * by Eric Young (eay@cryptsoft.com).
  * The implementation was written so as to conform with Netscapes SSL.
- * 
+ *
  * This library is free for commercial and non-commercial use as long as
  * the following conditions are aheared to.  The following conditions
  * apply to all code found in this distribution, be it the RC4, RSA,
  * lhash, DES, etc., code; not just the SSL code.  The SSL documentation
  * included with this distribution is covered by the same copyright terms
  * except that the holder is Tim Hudson (tjh@cryptsoft.com).
- * 
+ *
  * Copyright remains Eric Young's, and as such any Copyright notices in
  * the code are not to be removed.
  * If this package is used in a product, Eric Young should be given attribution
  * as the author of the parts of the library used.
  * This can be in the form of a textual message at program startup or
  * in documentation (online or textual) provided with the package.
- * 
+ *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
  * are met:
@@ -34,10 +34,10 @@
  *     Eric Young (eay@cryptsoft.com)"
  *    The word 'cryptographic' can be left out if the rouines from the library
  *    being used are not cryptographic related :-).
- * 4. If you include any Windows specific code (or a derivative thereof) from 
+ * 4. If you include any Windows specific code (or a derivative thereof) from
  *    the apps directory (application code) you must include an acknowledgement:
  *    "This product includes software written by Tim Hudson (tjh@cryptsoft.com)"
- * 
+ *
  * THIS SOFTWARE IS PROVIDED BY ERIC YOUNG ``AS IS'' AND
  * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
  * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
@@ -49,7 +49,7 @@
  * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
- * 
+ *
  * The licence and distribution terms for any publically available version or
  * derivative of this code cannot be changed.  i.e. this code cannot simply be
  * copied and put under another distribution licence
@@ -63,7 +63,7 @@
  * are met:
  *
  * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer. 
+ *    notice, this list of conditions and the following disclaimer.
  *
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in
@@ -110,18 +110,19 @@
  */
 /* ====================================================================
  * Copyright 2002 Sun Microsystems, Inc. ALL RIGHTS RESERVED.
- * ECC cipher suite support in OpenSSL originally developed by 
+ * ECC cipher suite support in OpenSSL originally developed by
  * SUN MICROSYSTEMS, INC., and contributed to the OpenSSL project.
  */
 
 #include <limits.h>
-#include <string.h>
 #include <stdio.h>
+#include <string.h>
+
 #include "ssl_locl.h"
+
 #include <openssl/buffer.h>
-#include <openssl/rand.h>
-#include <openssl/objects.h>
 #include <openssl/evp.h>
+#include <openssl/objects.h>
 #include <openssl/x509.h>
 
 /* send s->init_buf in records of type 'type' (SSL3_RT_HANDSHAKE or SSL3_RT_CHANGE_CIPHER_SPEC) */
@@ -153,34 +154,32 @@ int
 ssl3_send_finished(SSL *s, int a, int b, const char *sender, int slen)
 {
 	unsigned char *p, *d;
-	int i;
 	unsigned long l;
+	int md_len;
 
 	if (s->state == a) {
 		d = (unsigned char *)s->init_buf->data;
 		p = &(d[4]);
 
-		i = s->method->ssl3_enc->final_finish_mac(s,
-		sender, slen, s->s3->tmp.finish_md);
-		if (i == 0)
-			return 0;
-		s->s3->tmp.finish_md_len = i;
-		memcpy(p, s->s3->tmp.finish_md, i);
-		p += i;
-		l = i;
+		md_len = s->method->ssl3_enc->finish_mac_length;
+		if (s->method->ssl3_enc->final_finish_mac(s, sender, slen,
+		    s->s3->tmp.finish_md) != md_len)
+			return (0);
+		s->s3->tmp.finish_md_len = md_len;
+		memcpy(p, s->s3->tmp.finish_md, md_len);
+		p += md_len;
+		l = md_len;
 
-                /* Copy the finished so we can use it for
-                   renegotiation checks */
+		/* Copy finished so we can use it for renegotiation checks. */
+		OPENSSL_assert(md_len <= EVP_MAX_MD_SIZE);
 		if (s->type == SSL_ST_CONNECT) {
-			OPENSSL_assert(i <= EVP_MAX_MD_SIZE);
 			memcpy(s->s3->previous_client_finished,
-			s->s3->tmp.finish_md, i);
-			s->s3->previous_client_finished_len = i;
+			    s->s3->tmp.finish_md, md_len);
+			s->s3->previous_client_finished_len = md_len;
 		} else {
-			OPENSSL_assert(i <= EVP_MAX_MD_SIZE);
 			memcpy(s->s3->previous_server_finished,
-			s->s3->tmp.finish_md, i);
-			s->s3->previous_server_finished_len = i;
+			    s->s3->tmp.finish_md, md_len);
+			s->s3->previous_server_finished_len = md_len;
 		}
 
 		*(d++) = SSL3_MT_FINISHED;
@@ -195,7 +194,6 @@ ssl3_send_finished(SSL *s, int a, int b, const char *sender, int slen)
 	return (ssl3_do_write(s, SSL3_RT_HANDSHAKE));
 }
 
-#ifndef OPENSSL_NO_NEXTPROTONEG
 /* ssl3_take_mac calculates the Finished MAC for the handshakes messages seen to far. */
 static void
 ssl3_take_mac(SSL *s)
@@ -218,20 +216,14 @@ ssl3_take_mac(SSL *s)
 	s->s3->tmp.peer_finish_md_len = s->method->ssl3_enc->final_finish_mac(s,
 	sender, slen, s->s3->tmp.peer_finish_md);
 }
-#endif
 
 int
 ssl3_get_finished(SSL *s, int a, int b)
 {
-	int al, i, ok;
+	int al, ok, md_len;
 	long n;
 	unsigned char *p;
 
-#ifdef OPENSSL_NO_NEXTPROTONEG
-	/* the mac has already been generated when we received the
-	 * change cipher spec message and is in s->s3->tmp.peer_finish_md.
-	 */ 
-#endif
 
 	n = s->method->ssl_get_message(s, a, b, SSL3_MT_FINISHED,
 	    64, /* should actually be 36+4 :-) */ &ok);
@@ -247,33 +239,31 @@ ssl3_get_finished(SSL *s, int a, int b)
 	}
 	s->s3->change_cipher_spec = 0;
 
+	md_len = s->method->ssl3_enc->finish_mac_length;
 	p = (unsigned char *)s->init_msg;
-	i = s->s3->tmp.peer_finish_md_len;
 
-	if (i != n) {
+	if (s->s3->tmp.peer_finish_md_len != md_len || n != md_len) {
 		al = SSL_AD_DECODE_ERROR;
 		SSLerr(SSL_F_SSL3_GET_FINISHED, SSL_R_BAD_DIGEST_LENGTH);
 		goto f_err;
 	}
 
-	if (timingsafe_memcmp(p, s->s3->tmp.peer_finish_md, i) != 0) {
+	if (timingsafe_memcmp(p, s->s3->tmp.peer_finish_md, md_len) != 0) {
 		al = SSL_AD_DECRYPT_ERROR;
 		SSLerr(SSL_F_SSL3_GET_FINISHED, SSL_R_DIGEST_CHECK_FAILED);
 		goto f_err;
 	}
 
-        /* Copy the finished so we can use it for
-           renegotiation checks */
+	/* Copy finished so we can use it for renegotiation checks. */
+	OPENSSL_assert(md_len <= EVP_MAX_MD_SIZE);
 	if (s->type == SSL_ST_ACCEPT) {
-		OPENSSL_assert(i <= EVP_MAX_MD_SIZE);
 		memcpy(s->s3->previous_client_finished,
-		s->s3->tmp.peer_finish_md, i);
-		s->s3->previous_client_finished_len = i;
+		    s->s3->tmp.peer_finish_md, md_len);
+		s->s3->previous_client_finished_len = md_len;
 	} else {
-		OPENSSL_assert(i <= EVP_MAX_MD_SIZE);
 		memcpy(s->s3->previous_server_finished,
-		s->s3->tmp.peer_finish_md, i);
-		s->s3->previous_server_finished_len = i;
+		    s->s3->tmp.peer_finish_md, md_len);
+		s->s3->previous_server_finished_len = md_len;
 	}
 
 	return (1);
@@ -467,7 +457,11 @@ ssl3_get_message(SSL *s, int st1, int stn, int mt, long max, int *ok)
 			 * start a new handshake?). We need to restart the mac.
 			 * Don't increment {num,total}_renegotiations because
 			 * we have not completed the handshake. */
-			ssl3_init_finished_mac(s);
+			if (!ssl3_init_finished_mac(s)) {
+				SSLerr(SSL_F_SSL3_GET_MESSAGE,
+				    ERR_R_MALLOC_FAILURE);
+				goto err;
+			}
 		}
 
 		s->s3->tmp.message_type= *(p++);
@@ -504,12 +498,10 @@ ssl3_get_message(SSL *s, int st1, int stn, int mt, long max, int *ok)
 		n -= i;
 	}
 
-#ifndef OPENSSL_NO_NEXTPROTONEG
 	/* If receiving Finished, record MAC of prior handshake messages for
 	 * Finished verification. */
 	if (*s->init_buf->data == SSL3_MT_FINISHED)
 		ssl3_take_mac(s);
-#endif
 
 	/* Feed this message into MAC computation. */
 	ssl3_finish_mac(s, (unsigned char *)s->init_buf->data, s->init_num + 4);
@@ -545,9 +537,6 @@ ssl_cert_type(X509 *x, EVP_PKEY *pkey)
 	}
 	else if (i == EVP_PKEY_EC) {
 		ret = SSL_PKEY_ECC;
-	}
-	else if (i == NID_id_GostR3410_94 || i == NID_id_GostR3410_94_cc) {
-		ret = SSL_PKEY_GOST94;
 	} else if (i == NID_id_GostR3410_2001 || i == NID_id_GostR3410_2001_cc) {
 		ret = SSL_PKEY_GOST01;
 	}
@@ -621,16 +610,14 @@ int
 ssl3_setup_read_buffer(SSL *s)
 {
 	unsigned char *p;
-	size_t len, align = 0, headerlen;
+	size_t len, align, headerlen;
 
 	if (SSL_IS_DTLS(s))
 		headerlen = DTLS1_RT_HEADER_LENGTH;
 	else
 		headerlen = SSL3_RT_HEADER_LENGTH;
 
-#if defined(SSL3_ALIGN_PAYLOAD) && SSL3_ALIGN_PAYLOAD!=0
-	align = (-SSL3_RT_HEADER_LENGTH)&(SSL3_ALIGN_PAYLOAD - 1);
-#endif
+	align = (-SSL3_RT_HEADER_LENGTH) & (SSL3_ALIGN_PAYLOAD - 1);
 
 	if (s->s3->rbuf.buf == NULL) {
 		len = SSL3_RT_MAX_PLAIN_LENGTH +
@@ -657,16 +644,14 @@ int
 ssl3_setup_write_buffer(SSL *s)
 {
 	unsigned char *p;
-	size_t len, align = 0, headerlen;
+	size_t len, align, headerlen;
 
 	if (SSL_IS_DTLS(s))
 		headerlen = DTLS1_RT_HEADER_LENGTH + 1;
 	else
 		headerlen = SSL3_RT_HEADER_LENGTH;
 
-#if defined(SSL3_ALIGN_PAYLOAD) && SSL3_ALIGN_PAYLOAD!=0
-	align = (-SSL3_RT_HEADER_LENGTH)&(SSL3_ALIGN_PAYLOAD - 1);
-#endif
+	align = (-SSL3_RT_HEADER_LENGTH) & (SSL3_ALIGN_PAYLOAD - 1);
 
 	if (s->s3->wbuf.buf == NULL) {
 		len = s->max_send_fragment +

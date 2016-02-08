@@ -1,4 +1,4 @@
-/*	$OpenBSD: autoconf.c,v 1.38 2014/03/21 22:00:59 miod Exp $	*/
+/*	$OpenBSD: autoconf.c,v 1.40 2015/01/02 22:38:46 sebastia Exp $	*/
 /*
  * Copyright (c) 2009, 2010 Miodrag Vallat.
  *
@@ -174,10 +174,10 @@ memrange_register(uint64_t startpfn, uint64_t endpfn, uint64_t bmask)
 	extern int console_ok;
 
 	if (console_ok)
-		printf("%s: memory from %p to %p\n",
+		printf("%s: memory from 0x%lx to 0x%lx\n",
 		    __func__, ptoa(startpfn), ptoa(endpfn));
 	else
-		bios_printf("%s: memory from %p to %p\n",
+		bios_printf("%s: memory from 0x%lx to 0x%lx\n",
 		     __func__, ptoa(startpfn), ptoa(endpfn));
 }
 #endif
@@ -641,6 +641,8 @@ dksc_scan_cmp(klinfo_t *cmp, void *arg)
 		scsi2comp = (klscctl_t *)cmp;
 		for (i = 0; i < scsi2comp->scsi_buscnt; i++) {
 			scsicomp = (klscsi_t *)scsi2comp->scsi_bus[i];
+			if (scsicomp == NULL)
+				continue;
 			if (scsicomp->scsi_info.virtid == dksc_ctrl) {
 				kl_get_location(cmp, &dksc_device);
 				dksc_device.specific = i;	/* port # */

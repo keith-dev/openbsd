@@ -1,4 +1,4 @@
-/*	$OpenBSD: ssl.c,v 1.69 2014/07/10 20:16:48 jsg Exp $	*/
+/*	$OpenBSD: ssl.c,v 1.75 2015/02/06 01:37:11 reyk Exp $	*/
 
 /*
  * Copyright (c) 2008 Pierre-Yves Ritschard <pyr@openbsd.org>
@@ -69,12 +69,17 @@ ssl_setup(SSL_CTX **ctxp, struct pki *pki)
 {
 	DH	*dh;
 	SSL_CTX	*ctx;
+	u_int8_t sid[SSL_MAX_SID_CTX_LENGTH];
 
 	ctx = ssl_ctx_create(pki->pki_name, pki->pki_cert, pki->pki_cert_len);
 
-	if (!SSL_CTX_set_session_id_context(ctx,
-		(const unsigned char *)pki->pki_name,
-		strlen(pki->pki_name) + 1))
+	/*
+	 * Set session ID context to a random value.  We don't support
+	 * persistent caching of sessions so it is OK to set a temporary
+	 * session ID context that is valid during run time.
+	 */
+	arc4random_buf(sid, sizeof(sid));
+	if (!SSL_CTX_set_session_id_context(ctx, sid, sizeof(sid)))
 		goto err;
 
 	if (pki->pki_dhparams_len == 0)
@@ -146,7 +151,7 @@ ssl_password_cb(char *buf, int size, int rwflag, void *u)
 {
 	size_t	len;
 	if (u == NULL) {
-		memset(buf, 0, size);
+		explicit_bzero(buf, size);
 		return (0);
 	}
 	if ((len = strlcpy(buf, u, size)) >= (size_t)size)
@@ -171,7 +176,7 @@ ssl_password_cb(char *buf, int size, int rwflag, void *u)
 	ret = len;
 end:
 	if (len)
-		memset(pass, 0, len);
+		explicit_bzero(pass, len);
 	return ret;
 }
 
@@ -263,7 +268,7 @@ ssl_ctx_create(const char *pkiname, char *cert, off_t cert_len)
 	SSL_CTX_set_session_cache_mode(ctx, SSL_SESS_CACHE_OFF);
 	SSL_CTX_set_timeout(ctx, SSL_SESSION_TIMEOUT);
 	SSL_CTX_set_options(ctx,
-	    SSL_OP_ALL | SSL_OP_NO_SSLv2 | SSL_OP_NO_TICKET);
+	    SSL_OP_ALL | SSL_OP_NO_SSLv2 | SSL_OP_NO_SSLv3 | SSL_OP_NO_TICKET);
 	SSL_CTX_set_options(ctx,
 	    SSL_OP_NO_SESSION_RESUMPTION_ON_RENEGOTIATION);
 
@@ -275,7 +280,7 @@ ssl_ctx_create(const char *pkiname, char *cert, off_t cert_len)
 	if (cert != NULL) {
 		if (pkiname != NULL)
 			pkinamelen = strlen(pkiname) + 1;
-		if (!ssl_ctx_use_certificate_chain(ctx, cert, cert_len)) {
+		if (!SSL_CTX_use_certificate_chain_mem(ctx, cert, cert_len)) {
 			ssl_error("ssl_ctx_create");
 			fatal("ssl_ctx_create: invalid certificate chain");
 		} else if (!ssl_ctx_fake_private_key(ctx,
@@ -491,6 +496,7 @@ ssl_load_pkey(const void *data, size_t datalen, char *buf, off_t len,
 	}
 
 	BIO_free(in);
+	in = NULL;
 
 	if (data != NULL && datalen) {
 		if ((rsa = EVP_PKEY_get1_RSA(pkey)) == NULL ||

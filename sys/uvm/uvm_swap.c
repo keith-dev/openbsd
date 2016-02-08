@@ -1,4 +1,4 @@
-/*	$OpenBSD: uvm_swap.c,v 1.128 2014/07/12 18:44:01 tedu Exp $	*/
+/*	$OpenBSD: uvm_swap.c,v 1.134 2015/01/27 03:17:37 dlg Exp $	*/
 /*	$NetBSD: uvm_swap.c,v 1.40 2000/11/17 11:39:39 mrg Exp $	*/
 
 /*
@@ -61,7 +61,6 @@
 
 #include <uvm/uvm.h>
 #ifdef UVM_SWAP_ENCRYPT
-#include <dev/rndvar.h>
 #include <sys/syslog.h>
 #endif
 
@@ -193,6 +192,7 @@ struct vndxfer {
 
 struct vndbuf {
 	struct buf	vb_buf;
+	struct vndxfer	*vb_vnx;
 	struct task	vb_task;
 };
 
@@ -202,25 +202,6 @@ struct vndbuf {
 struct pool vndxfer_pool;
 struct pool vndbuf_pool;
 
-#define	getvndxfer(vnx)	do {						\
-	int s = splbio();						\
-	vnx = pool_get(&vndxfer_pool, PR_WAITOK);			\
-	splx(s);							\
-} while (0)
-
-#define putvndxfer(vnx) {						\
-	pool_put(&vndxfer_pool, (void *)(vnx));				\
-}
-
-#define	getvndbuf(vbp)	do {						\
-	int s = splbio();						\
-	vbp = pool_get(&vndbuf_pool, PR_WAITOK);			\
-	splx(s);							\
-} while (0)
-
-#define putvndbuf(vbp) {						\
-	pool_put(&vndbuf_pool, (void *)(vbp));				\
-}
 
 /*
  * local variables
@@ -250,7 +231,7 @@ int swap_off(struct proc *, struct swapdev *);
 
 void sw_reg_strategy(struct swapdev *, struct buf *, int);
 void sw_reg_iodone(struct buf *);
-void sw_reg_iodone_internal(void *, void *);
+void sw_reg_iodone_internal(void *);
 void sw_reg_start(struct swapdev *);
 
 int uvm_swap_io(struct vm_page **, int, int, int);
@@ -299,8 +280,10 @@ uvm_swap_init(void)
 	/* allocate pools for structures used for swapping to files. */
 	pool_init(&vndxfer_pool, sizeof(struct vndxfer), 0, 0, 0, "swp vnx",
 	    NULL);
+	pool_setipl(&vndxfer_pool, IPL_BIO);
 	pool_init(&vndbuf_pool, sizeof(struct vndbuf), 0, 0, 0, "swp vnd",
 	    NULL);
+	pool_setipl(&vndbuf_pool, IPL_BIO);
 
 	/* Setup the initial swap partition */
 	swapmount();
@@ -497,7 +480,7 @@ swaplist_insert(struct swapdev *sdp, struct swappri *newspp, int priority)
 			LIST_INSERT_HEAD(&swap_priority, spp, spi_swappri);
 	} else {
 	  	/* we don't need a new priority structure, free it */
-		free(newspp, M_VMSWAP, 0);
+		free(newspp, M_VMSWAP, sizeof(*newspp));
 	}
 
 	/*
@@ -555,7 +538,7 @@ swaplist_trim(void)
 		if (!TAILQ_EMPTY(&spp->spi_swapdev))
 			continue;
 		LIST_REMOVE(spp, spi_swappri);
-		free(spp, M_VMSWAP, 0);
+		free(spp, M_VMSWAP, sizeof(*spp));
 	}
 }
 
@@ -728,7 +711,7 @@ sys_swapctl(struct proc *p, void *v, register_t *retval)
 			swaplist_trim();
 		}
 		if (error)
-			free(spp, M_VMSWAP, 0);
+			free(spp, M_VMSWAP, sizeof(*spp));
 		break;
 	case SWAP_ON:
 		/*
@@ -759,8 +742,7 @@ sys_swapctl(struct proc *p, void *v, register_t *retval)
 
 		sdp->swd_pathlen = len;
 		sdp->swd_path = malloc(sdp->swd_pathlen, M_VMSWAP, M_WAITOK);
-		if (copystr(userpath, sdp->swd_path, sdp->swd_pathlen, 0) != 0)
-			panic("swapctl: copystr");
+		strlcpy(sdp->swd_path, userpath, len);
 
 		/*
 		 * we've now got a FAKE placeholder in the swap list.
@@ -776,7 +758,7 @@ sys_swapctl(struct proc *p, void *v, register_t *retval)
 				crfree(sdp->swd_cred);
 			}
 			free(sdp->swd_path, M_VMSWAP, 0);
-			free(sdp, M_VMSWAP, 0);
+			free(sdp, M_VMSWAP, sizeof(*sdp));
 			break;
 		}
 		break;
@@ -1052,7 +1034,8 @@ swap_off(struct proc *p, struct swapdev *sdp)
 	extent_free(swapmap, sdp->swd_drumoffset, sdp->swd_drumsize,
 		    EX_WAITOK);
 	extent_destroy(sdp->swd_ex);
-	free(sdp, M_VMSWAP, 0);
+	/* free sdp->swd_path ? */
+	free(sdp, M_VMSWAP, sizeof(*sdp));
 	return (0);
 }
 
@@ -1136,7 +1119,7 @@ sw_reg_strategy(struct swapdev *sdp, struct buf *bp, int bn)
 	 * allocate a vndxfer head for this transfer and point it to
 	 * our buffer.
 	 */
-	getvndxfer(vnx);
+	vnx = pool_get(&vndxfer_pool, PR_WAITOK);
 	vnx->vx_flags = VX_BUSY;
 	vnx->vx_error = 0;
 	vnx->vx_pending = 0;
@@ -1206,7 +1189,7 @@ sw_reg_strategy(struct swapdev *sdp, struct buf *bp, int bn)
 		 * at the front of the nbp structure so that you can
 		 * cast pointers between the two structure easily.
 		 */
-		getvndbuf(nbp);
+		nbp = pool_get(&vndbuf_pool, PR_WAITOK);
 		nbp->vb_buf.b_flags    = bp->b_flags | B_CALL;
 		nbp->vb_buf.b_bcount   = sz;
 		nbp->vb_buf.b_bufsize  = sz;
@@ -1247,11 +1230,12 @@ sw_reg_strategy(struct swapdev *sdp, struct buf *bp, int bn)
 		}
 
 		/* patch it back to the vnx */
-		task_set(&nbp->vb_task, sw_reg_iodone_internal, nbp, vnx);
+		nbp->vb_vnx = vnx;
+		task_set(&nbp->vb_task, sw_reg_iodone_internal, nbp);
 
 		s = splbio();
 		if (vnx->vx_error != 0) {
-			putvndbuf(nbp);
+			pool_put(&vndbuf_pool, nbp);
 			goto out;
 		}
 		vnx->vx_pending++;
@@ -1280,7 +1264,7 @@ out: /* Arrive here at splbio */
 			bp->b_error = vnx->vx_error;
 			bp->b_flags |= B_ERROR;
 		}
-		putvndxfer(vnx);
+		pool_put(&vndxfer_pool, vnx);
 		biodone(bp);
 	}
 	splx(s);
@@ -1331,10 +1315,10 @@ sw_reg_iodone(struct buf *bp)
 }
 
 void
-sw_reg_iodone_internal(void *xvbp, void *xvnx)
+sw_reg_iodone_internal(void *xvbp)
 {
 	struct vndbuf *vbp = xvbp;
-	struct vndxfer *vnx = xvnx;
+	struct vndxfer *vnx = vbp->vb_vnx;
 	struct buf *pbp = vnx->vx_bp;		/* parent buffer */
 	struct swapdev	*sdp = vnx->vx_sdp;
 	int resid, s;
@@ -1355,7 +1339,7 @@ sw_reg_iodone_internal(void *xvbp, void *xvnx)
 	}
 
 	/* kill vbp structure */
-	putvndbuf(vbp);
+	pool_put(&vndbuf_pool, vbp);
 
 	/*
 	 * wrap up this transaction if it has run to completion or, in
@@ -1366,13 +1350,13 @@ sw_reg_iodone_internal(void *xvbp, void *xvnx)
 		pbp->b_flags |= B_ERROR;
 		pbp->b_error = vnx->vx_error;
 		if ((vnx->vx_flags & VX_BUSY) == 0 && vnx->vx_pending == 0) {
-			putvndxfer(vnx);
+			pool_put(&vndxfer_pool, vnx);
 			biodone(pbp);
 		}
 	} else if (pbp->b_resid == 0) {
 		KASSERT(vnx->vx_pending == 0);
 		if ((vnx->vx_flags & VX_BUSY) == 0) {
-			putvndxfer(vnx);
+			pool_put(&vndxfer_pool, vnx);
 			biodone(pbp);
 		}
 	}
@@ -1724,11 +1708,9 @@ uvm_swap_io(struct vm_page **pps, int startslot, int npages, int flags)
 	 * now allocate a buf for the i/o.
 	 * [make sure we don't put the pagedaemon to sleep...]
 	 */
-	s = splbio();
 	pflag = (async || curproc == uvm.pagedaemon_proc) ? PR_NOWAIT :
 	    PR_WAITOK;
-	bp = pool_get(&bufpool, pflag);
-	splx(s);
+	bp = pool_get(&bufpool, pflag | PR_ZERO);
 
 	/*
 	 * if we failed to get a swapbuf, return "try again"
@@ -1880,52 +1862,49 @@ swapmount(void)
 	struct vnode *vp;
 	dev_t swap_dev = swdevt[0].sw_dev;
 	char *nam;
+	char path[MNAMELEN + 1];
 
 	/*
 	 * No locking here since we happen to know that we will just be called
 	 * once before any other process has forked.
 	 */
-
 	if (swap_dev == NODEV)
 		return;
 
+#if defined(NFSCLIENT)
+	if (swap_dev == NETDEV) {
+		extern struct nfs_diskless nfs_diskless;
+
+		snprintf(path, sizeof(path), "%s",
+		    nfs_diskless.nd_swap.ndm_host);
+		vp = nfs_diskless.sw_vp;
+		goto gotit;
+	} else
+#endif
+	if (bdevvp(swap_dev, &vp))
+		return;
+
+	/* Construct a potential path to swap */
+	if ((nam = findblkname(major(swap_dev))))
+		snprintf(path, sizeof(path), "/dev/%s%d%c", nam,
+		    DISKUNIT(swap_dev), 'a' + DISKPART(swap_dev));
+	else
+		snprintf(path, sizeof(path), "blkdev0x%x",
+		    swap_dev);
+
+#if defined(NFSCLIENT)
+gotit:
+#endif
 	sdp = malloc(sizeof(*sdp), M_VMSWAP, M_WAITOK|M_ZERO);
 	spp = malloc(sizeof(*spp), M_VMSWAP, M_WAITOK);
 
 	sdp->swd_flags = SWF_FAKE;
 	sdp->swd_dev = swap_dev;
 
-	/* Construct a potential path to swap */
-	sdp->swd_pathlen = MNAMELEN + 1;
+	sdp->swd_pathlen = strlen(path) + 1;
 	sdp->swd_path = malloc(sdp->swd_pathlen, M_VMSWAP, M_WAITOK | M_ZERO);
-#if defined(NFSCLIENT)
-	if (swap_dev == NETDEV) {
-		extern struct nfs_diskless nfs_diskless;
+	strlcpy(sdp->swd_path, path, sdp->swd_pathlen);
 
-		snprintf(sdp->swd_path, sdp->swd_pathlen, "%s",
-		    nfs_diskless.nd_swap.ndm_host);
-		vp = nfs_diskless.sw_vp;
-		goto gotit;
-	} else
-#endif
-	if (bdevvp(swap_dev, &vp)) {
-		free(sdp->swd_path, M_VMSWAP, 0);
-		free(sdp, M_VMSWAP, 0);
-		free(spp, M_VMSWAP, 0);
-		return;
-	}
-
-	if ((nam = findblkname(major(swap_dev))))
-		snprintf(sdp->swd_path, sdp->swd_pathlen, "/dev/%s%d%c", nam,
-		    DISKUNIT(swap_dev), 'a' + DISKPART(swap_dev));
-	else
-		snprintf(sdp->swd_path, sdp->swd_pathlen, "blkdev0x%x",
-		    swap_dev);
-
-#if defined(NFSCLIENT)
-gotit:
-#endif
-	sdp->swd_pathlen = strlen(sdp->swd_path) + 1;
 	sdp->swd_vp = vp;
 
 	swaplist_insert(sdp, spp, 0);
@@ -1935,7 +1914,7 @@ gotit:
 		swaplist_trim();
 		vput(sdp->swd_vp);
 		free(sdp->swd_path, M_VMSWAP, 0);
-		free(sdp, M_VMSWAP, 0);
+		free(sdp, M_VMSWAP, sizeof(*sdp));
 		return;
 	}
 }

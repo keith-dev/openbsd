@@ -1,4 +1,4 @@
-/*	$OpenBSD: scsi_base.c,v 1.214 2014/07/01 02:31:16 dlg Exp $	*/
+/*	$OpenBSD: scsi_base.c,v 1.218 2015/01/27 03:17:37 dlg Exp $	*/
 /*	$NetBSD: scsi_base.c,v 1.43 1997/04/02 02:29:36 mycroft Exp $	*/
 
 /*
@@ -43,8 +43,8 @@
 #include <sys/uio.h>
 #include <sys/errno.h>
 #include <sys/device.h>
-#include <sys/proc.h>
 #include <sys/pool.h>
+#include <sys/task.h>
 
 #include <scsi/scsi_all.h>
 #include <scsi/scsi_disk.h>
@@ -66,14 +66,15 @@ struct pool		scsi_xfer_pool;
 struct pool		scsi_plug_pool;
 
 struct scsi_plug {
-	struct workq_task	wqt;
+	struct task		task;
+	struct scsibus_softc	*sc;
 	int			target;
 	int			lun;
 	int			how;
 };
 
-void	scsi_plug_probe(void *, void *);
-void	scsi_plug_detach(void *, void *);
+void	scsi_plug_probe(void *);
+void	scsi_plug_detach(void *);
 
 struct scsi_xfer *	scsi_xs_io(struct scsi_link *, void *, int);
 
@@ -144,10 +145,12 @@ scsi_req_probe(struct scsibus_softc *sc, int target, int lun)
 	if (p == NULL)
 		return (ENOMEM);
 
+	task_set(&p->task, scsi_plug_probe, p);
+	p->sc = sc;
 	p->target = target;
 	p->lun = lun;
 
-	workq_queue_task(NULL, &p->wqt, 0, scsi_plug_probe, sc, p);
+	task_add(systq, &p->task);
 
 	return (0);
 }
@@ -161,20 +164,22 @@ scsi_req_detach(struct scsibus_softc *sc, int target, int lun, int how)
 	if (p == NULL)
 		return (ENOMEM);
 
+	task_set(&p->task, scsi_plug_detach, p);
+	p->sc = sc;
 	p->target = target;
 	p->lun = lun;
 	p->how = how;
 
-	workq_queue_task(NULL, &p->wqt, 0, scsi_plug_detach, sc, p);
+	task_add(systq, &p->task);
 
 	return (0);
 }
 
 void
-scsi_plug_probe(void *xsc, void *xp)
+scsi_plug_probe(void *xp)
 {
-	struct scsibus_softc *sc = xsc;
 	struct scsi_plug *p = xp;
+	struct scsibus_softc *sc = p->sc;
 	int target = p->target, lun = p->lun;
 
 	pool_put(&scsi_plug_pool, p);
@@ -183,10 +188,10 @@ scsi_plug_probe(void *xsc, void *xp)
 }
 
 void
-scsi_plug_detach(void *xsc, void *xp)
+scsi_plug_detach(void *xp)
 {
-	struct scsibus_softc *sc = xsc;
 	struct scsi_plug *p = xp;
+	struct scsibus_softc *sc = p->sc;
 	int target = p->target, lun = p->lun;
 	int how = p->how;
 

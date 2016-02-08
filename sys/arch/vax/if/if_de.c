@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_de.c,v 1.24 2014/02/13 09:20:07 mpi Exp $	*/
+/*	$OpenBSD: if_de.c,v 1.27 2015/02/01 15:27:11 miod Exp $	*/
 /*	$NetBSD: if_de.c,v 1.27 1997/04/19 15:02:29 ragge Exp $	*/
 
 /*
@@ -59,19 +59,15 @@
 #include <net/if.h>
 #include <net/if_dl.h>
 
-#ifdef INET
 #include <netinet/in.h>
-#include <netinet/in_systm.h>
 #include <netinet/ip.h>
 #include <netinet/if_ether.h>
-#endif
 
 #include <machine/cpu.h>
 #include <machine/mtpr.h>
 
 #include <vax/if/if_dereg.h>
 #include <vax/if/if_uba.h>
-#include <vax/uba/ubareg.h>
 #include <vax/uba/ubavar.h>
 
 #define NXMT	3	/* number of transmit buffers */
@@ -580,11 +576,9 @@ deioctl(ifp, cmd, data)
 		deinit(ds);
 
 		switch (ifa->ifa_addr->sa_family) {
-#ifdef INET
 		case AF_INET:
 			arp_ifinit(&ds->ds_ac, ifa);
 			break;
-#endif
 		}
 		break;
 

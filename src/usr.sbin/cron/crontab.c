@@ -1,10 +1,6 @@
-/*	$OpenBSD: crontab.c,v 1.64 2011/08/22 19:32:42 millert Exp $	*/
+/*	$OpenBSD: crontab.c,v 1.71 2015/02/09 22:35:08 deraadt Exp $	*/
 
 /* Copyright 1988,1990,1993,1994 by Paul Vixie
- * All rights reserved
- */
-
-/*
  * Copyright (c) 2004 by Internet Systems Consortium, Inc. ("ISC")
  * Copyright (c) 1997,2000 by Internet Software Consortium, Inc.
  *
@@ -36,14 +32,9 @@
 
 enum opt_t	{ opt_unknown, opt_list, opt_delete, opt_edit, opt_replace };
 
-#if DEBUGGING
-static char	*Options[] = { "???", "list", "delete", "edit", "replace" };
-static char	*getoptargs = "u:lerx:";
-#else
 static char	*getoptargs = "u:ler";
-#endif
 
-static	PID_T		Pid;
+static	pid_t		Pid;
 static	char		User[MAX_UNAME], RealUser[MAX_UNAME];
 static	char		Filename[MAX_FNAME], TempFilename[MAX_FNAME];
 static	FILE		*NewCrontab;
@@ -61,7 +52,8 @@ static	void		list_cmd(void),
 static	int		replace_cmd(void);
 
 static void
-usage(const char *msg) {
+usage(const char *msg)
+{
 	fprintf(stderr, "%s: usage error: %s\n", ProgramName, msg);
 	fprintf(stderr, "usage: %s [-u user] file\n", ProgramName);
 	fprintf(stderr, "       %s [-e | -l | -r] [-u user]\n", ProgramName);
@@ -74,7 +66,8 @@ usage(const char *msg) {
 }
 
 int
-main(int argc, char *argv[]) {
+main(int argc, char *argv[])
+{
 	int exitstatus;
 
 	Pid = getpid();
@@ -82,9 +75,7 @@ main(int argc, char *argv[]) {
 
 	setlocale(LC_ALL, "");
 
-#if defined(BSD)
-	setlinebuf(stderr);
-#endif
+	setvbuf(stderr, NULL, _IOLBF, 0);
 	parse_args(argc, argv);		/* sets many globals, opens a file */
 	set_cron_cwd();
 	if (!allowed(RealUser, CRON_ALLOW, CRON_DENY)) {
@@ -119,7 +110,8 @@ main(int argc, char *argv[]) {
 }
 
 static void
-parse_args(int argc, char *argv[]) {
+parse_args(int argc, char *argv[])
+{
 	int argch;
 
 	if (!(pw = getpwuid(getuid()))) {
@@ -138,14 +130,8 @@ parse_args(int argc, char *argv[]) {
 	Option = opt_unknown;
 	while (-1 != (argch = getopt(argc, argv, getoptargs))) {
 		switch (argch) {
-#if DEBUGGING
-		case 'x':
-			if (!set_debug_flags(optarg))
-				usage("bad debug option");
-			break;
-#endif
 		case 'u':
-			if (MY_UID(pw) != ROOT_UID) {
+			if (getuid() != ROOT_UID) {
 				fprintf(stderr,
 					"must be privileged to use -u\n");
 				exit(EXIT_FAILURE);
@@ -209,7 +195,7 @@ parse_args(int argc, char *argv[]) {
 			 * the race.
 			 */
 
-			if (swap_gids() < OK) {
+			if (swap_gids() < 0) {
 				perror("swapping gids");
 				exit(EXIT_FAILURE);
 			}
@@ -217,19 +203,17 @@ parse_args(int argc, char *argv[]) {
 				perror(Filename);
 				exit(EXIT_FAILURE);
 			}
-			if (swap_gids_back() < OK) {
+			if (swap_gids_back() < 0) {
 				perror("swapping gids back");
 				exit(EXIT_FAILURE);
 			}
 		}
 	}
-
-	Debug(DMISC, ("user=%s, file=%s, option=%s\n",
-		      User, Filename, Options[(int)Option]))
 }
 
 static void
-list_cmd(void) {
+list_cmd(void)
+{
 	char n[MAX_FNAME];
 	FILE *f;
 
@@ -255,7 +239,8 @@ list_cmd(void) {
 }
 
 static void
-delete_cmd(void) {
+delete_cmd(void)
+{
 	char n[MAX_FNAME];
 
 	log_it(RealUser, Pid, "DELETE", User);
@@ -274,13 +259,15 @@ delete_cmd(void) {
 }
 
 static void
-check_error(const char *msg) {
+check_error(const char *msg)
+{
 	CheckErrorCount++;
 	fprintf(stderr, "\"%s\":%d: %s\n", Filename, LineNumber-1, msg);
 }
 
 static void
-edit_cmd(void) {
+edit_cmd(void)
+{
 	char n[MAX_FNAME], q[MAX_TEMPSTR];
 	const char *tmpdir;
 	FILE *f;
@@ -328,12 +315,12 @@ edit_cmd(void) {
 		fprintf(stderr, "path too long\n");
 		goto fatal;
 	}
-	if (swap_gids() < OK) {
+	if (swap_gids() < 0) {
 		perror("swapping gids");
 		exit(EXIT_FAILURE);
 	}
 	t = mkstemp(Filename);
-	if (swap_gids_back() < OK) {
+	if (swap_gids_back() < 0) {
 		perror("swapping gids back");
 		exit(EXIT_FAILURE);
 	}
@@ -350,7 +337,7 @@ edit_cmd(void) {
 
 	copy_crontab(f, NewCrontab);
 	fclose(f);
-	if (fflush(NewCrontab) < OK) {
+	if (fflush(NewCrontab) < 0) {
 		perror(Filename);
 		exit(EXIT_FAILURE);
 	}
@@ -361,12 +348,12 @@ edit_cmd(void) {
 		fprintf(stderr, "%s: error while writing new crontab to %s\n",
 			ProgramName, Filename);
  fatal:
-		if (swap_gids() < OK) {
+		if (swap_gids() < 0) {
 			perror("swapping gids");
 			exit(EXIT_FAILURE);
 		}
 		unlink(Filename);
-		if (swap_gids_back() < OK) {
+		if (swap_gids_back() < 0) {
 			perror("swapping gids back");
 			exit(EXIT_FAILURE);
 		}
@@ -390,7 +377,7 @@ edit_cmd(void) {
 		goto fatal;
 	}
 	if (timespeccmp(&ts[1], &statbuf.st_mtim, ==)) {
-		if (swap_gids() < OK) {
+		if (swap_gids() < 0) {
 			perror("swapping gids");
 			exit(EXIT_FAILURE);
 		}
@@ -399,7 +386,7 @@ edit_cmd(void) {
 			fprintf(stderr, "%s: crontab temp file moved, editor "
 			   "may create backup files improperly\n", ProgramName);
 		}
-		if (swap_gids_back() < OK) {
+		if (swap_gids_back() < 0) {
 			perror("swapping gids back");
 			exit(EXIT_FAILURE);
 		}
@@ -443,12 +430,12 @@ edit_cmd(void) {
 		goto fatal;
 	}
  remove:
-	if (swap_gids() < OK) {
+	if (swap_gids() < 0) {
 		perror("swapping gids");
 		exit(EXIT_FAILURE);
 	}
 	unlink(Filename);
-	if (swap_gids_back() < OK) {
+	if (swap_gids_back() < 0) {
 		perror("swapping gids back");
 		exit(EXIT_FAILURE);
 	}
@@ -461,7 +448,8 @@ edit_cmd(void) {
  *		-2	on install error
  */
 static int
-replace_cmd(void) {
+replace_cmd(void)
+{
 	char n[MAX_FNAME], envstr[MAX_ENVSTR];
 	FILE *tmp;
 	int ch, eof, fd;
@@ -530,7 +518,7 @@ replace_cmd(void) {
 	CheckErrorCount = 0;  eof = FALSE;
 	while (!CheckErrorCount && !eof) {
 		switch (load_env(envstr, tmp)) {
-		case ERR:
+		case -1:
 			/* check for data before the EOF */
 			if (envstr[0] != '\0') {
 				Set_LineNum(LineNumber + 1);
@@ -555,21 +543,12 @@ replace_cmd(void) {
 		goto done;
 	}
 
-#ifdef HAVE_FCHOWN
-	if (fchown(fileno(tmp), pw->pw_uid, -1) < OK) {
+	if (fchown(fileno(tmp), pw->pw_uid, -1) < 0) {
 		perror("fchown");
 		fclose(tmp);
 		error = -2;
 		goto done;
 	}
-#else
-	if (chown(TempFilename, pw->pw_uid, -1) < OK) {
-		perror("chown");
-		fclose(tmp);
-		error = -2;
-		goto done;
-	}
-#endif
 
 	if (fclose(tmp) == EOF) {
 		perror("fclose");
@@ -660,14 +639,16 @@ editit(const char *pathname)
 }
 
 static void
-die(int x) {
+die(int x)
+{
 	if (TempFilename[0])
 		(void) unlink(TempFilename);
 	_exit(EXIT_FAILURE);
 }
 
 static void
-copy_crontab(FILE *f, FILE *out) {
+copy_crontab(FILE *f, FILE *out)
+{
 	int ch, x;
 
 	/* ignore the top few comments since we probably put them there.

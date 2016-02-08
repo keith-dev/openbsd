@@ -1,4 +1,4 @@
-/*	$OpenBSD: inet6.c,v 1.45 2014/06/23 03:46:17 guenther Exp $	*/
+/*	$OpenBSD: inet6.c,v 1.48 2015/02/12 01:49:02 claudio Exp $	*/
 /*	BSDI inet.c,v 2.3 1995/10/24 02:19:29 prb Exp	*/
 /*
  * Copyright (c) 1983, 1988, 1993
@@ -29,7 +29,7 @@
  * SUCH DAMAGE.
  */
 
-#include <sys/param.h>
+#include <sys/types.h>
 #include <sys/socket.h>
 #include <sys/socketvar.h>
 #include <sys/ioctl.h>
@@ -41,7 +41,6 @@
 #include <netinet/in.h>
 #include <netinet/ip6.h>
 #include <netinet/icmp6.h>
-#include <netinet/in_systm.h>
 #include <netinet/ip.h>
 #include <netinet/ip_var.h>
 #include <netinet6/ip6_var.h>
@@ -61,12 +60,12 @@
 #include <stdio.h>
 #include <string.h>
 #include <unistd.h>
+#include <limits.h>
 #include "netstat.h"
 
 struct	socket sockb;
 
 char	*inet6name(struct in6_addr *);
-void	inet6print(struct in6_addr *, int, char *);
 
 static	char *ip6nh[] = {
 	"hop by hop",
@@ -1063,7 +1062,7 @@ div6_stats(char *name)
  */
 
 void
-inet6print(struct in6_addr *in6, int port, char *proto)
+inet6print(struct in6_addr *in6, int port, const char *proto)
 {
 
 #define GETSERVBYPORT6(port, proto, ret) do { \
@@ -1114,7 +1113,7 @@ inet6name(struct in6_addr *in6p)
 	char *cp;
 	static char line[NI_MAXHOST];
 	struct hostent *hp;
-	static char domain[MAXHOSTNAMELEN];
+	static char domain[HOST_NAME_MAX+1];
 	static int first = 1;
 	char hbuf[NI_MAXHOST];
 	struct sockaddr_in6 sin6;

@@ -1,4 +1,4 @@
-/*	$OpenBSD: eehandlers.c,v 1.18 2014/07/24 19:19:26 miod Exp $	*/
+/*	$OpenBSD: eehandlers.c,v 1.20 2015/01/15 20:48:51 miod Exp $	*/
 /*	$NetBSD: eehandlers.c,v 1.2 1996/02/28 01:13:22 thorpej Exp $	*/
 
 /*-
@@ -38,7 +38,6 @@
 #include <string.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <string.h>
 #include <time.h>
 #include <unistd.h>
 
@@ -111,7 +110,7 @@ ee_hwupdate(struct keytabent *ktent, char *arg)
 	if ((cp2 = strrchr(cp, '\n')) != NULL)
 		*cp2 = '\0';
 
-	printf("%s=%d (%s)\n", ktent->kt_keyword, t, cp);
+	printf("%s=%lld (%s)\n", ktent->kt_keyword, (long long)t, cp);
 }
 #endif
 

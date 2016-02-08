@@ -1,4 +1,4 @@
-/*      $OpenBSD: if_ath_cardbus.c,v 1.16 2010/09/06 19:20:21 deraadt Exp $   */
+/*      $OpenBSD: if_ath_cardbus.c,v 1.18 2014/12/22 02:28:51 tedu Exp $   */
 /*	$NetBSD: if_ath_cardbus.c,v 1.4 2004/08/02 19:14:28 mycroft Exp $ */
 
 /*
@@ -48,17 +48,14 @@
 #include <sys/errno.h>
 #include <sys/device.h>
 #include <sys/gpio.h>
-
-#include <machine/endian.h>
+#include <sys/endian.h>
  
 #include <net/if.h>
 #include <net/if_dl.h>
 #include <net/if_media.h>
 
-#ifdef INET
 #include <netinet/in.h> 
 #include <netinet/if_ether.h>
-#endif
 
 #include <net80211/ieee80211_var.h>
 #include <net80211/ieee80211_rssadapt.h>

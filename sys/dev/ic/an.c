@@ -1,4 +1,4 @@
-/*	$OpenBSD: an.c,v 1.61 2014/07/22 13:12:11 mpi Exp $	*/
+/*	$OpenBSD: an.c,v 1.64 2015/02/10 23:25:46 mpi Exp $	*/
 /*	$NetBSD: an.c,v 1.34 2005/06/20 02:49:18 atatat Exp $	*/
 /*
  * Copyright (c) 1997, 1998, 1999
@@ -88,7 +88,6 @@
 #include <sys/socket.h>
 #include <sys/timeout.h>
 #include <sys/device.h>
-#include <sys/proc.h>
 #include <sys/endian.h>
 #include <sys/tree.h>
 
@@ -100,10 +99,8 @@
 #include <net/if_media.h>
 #include <net/if_types.h>
 
-#ifdef INET
 #include <netinet/in.h>
 #include <netinet/if_ether.h>
-#endif
 
 #include <net80211/ieee80211_radiotap.h>
 #include <net80211/ieee80211_var.h>
@@ -444,7 +441,6 @@ an_rxeof(struct an_softc *sc)
 	    len;
 
 	memcpy(m->m_data, &frmhdr.an_whdr, sizeof(struct ieee80211_frame));
-	m->m_pkthdr.rcvif = ifp;
 	CSR_WRITE_2(sc, AN_EVENT_ACK, AN_EV_RX);
 
 #if NBPFILTER > 0
@@ -890,12 +886,10 @@ an_ioctl(struct ifnet *ifp, u_long command, caddr_t data)
 	case SIOCSIFADDR:
 		ifp->if_flags |= IFF_UP;
 		switch (ifa->ifa_addr->sa_family) {
-#ifdef INET
 		case AF_INET:
 			error = an_init(ifp);
 			arp_ifinit(&sc->sc_ic.ic_ac, ifa);
 			break;
-#endif
 		default:
 			error = an_init(ifp);
 			break;

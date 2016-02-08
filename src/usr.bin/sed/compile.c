@@ -1,4 +1,4 @@
-/*	$OpenBSD: compile.c,v 1.35 2013/11/28 18:24:55 deraadt Exp $	*/
+/*	$OpenBSD: compile.c,v 1.37 2014/12/12 03:32:55 jsg Exp $	*/
 
 /*-
  * Copyright (c) 1992 Diomidis Spinellis.
@@ -128,8 +128,8 @@ compile(void)
 	*compile_stream(&prog) = NULL;
 	fixuplabel(prog, NULL);
 	uselabel();
-	appends = xmalloc(sizeof(struct s_appends) * appendnum);
-	match = xmalloc((maxnsub + 1) * sizeof(regmatch_t));
+	appends = xreallocarray(NULL, appendnum, sizeof(struct s_appends));
+	match = xreallocarray(NULL, maxnsub + 1, sizeof(regmatch_t));
 }
 
 #define EATSPACE() do {							\
@@ -538,7 +538,7 @@ compile_flags(char *p, struct s_subst *s)
 {
 	int gn;			/* True if we have seen g or n */
 	long l;
-	char wfile[PATH_MAX], *q;
+	char wfile[PATH_MAX], *q, *eq;
 
 	s->n = 1;				/* Default */
 	s->p = 0;
@@ -584,9 +584,12 @@ compile_flags(char *p, struct s_subst *s)
 #endif
 			EATSPACE();
 			q = wfile;
+			eq = wfile + sizeof(wfile) - 1;
 			while (*p) {
 				if (*p == '\n')
 					break;
+				if (q >= eq)
+					err(COMPILE, "wfile too long");
 				*q++ = *p++;
 			}
 			*q = '\0';

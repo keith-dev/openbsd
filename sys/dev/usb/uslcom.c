@@ -1,4 +1,4 @@
-/*	$OpenBSD: uslcom.c,v 1.31 2014/07/12 21:24:33 mpi Exp $	*/
+/*	$OpenBSD: uslcom.c,v 1.33 2014/11/23 21:18:46 sasano Exp $	*/
 
 /*
  * Copyright (c) 2006 Jonathan Gray <jsg@openbsd.org>
@@ -28,7 +28,6 @@
 #include <dev/usb/usbdi_util.h>
 #include <dev/usb/usbdevs.h>
 
-#include <dev/usb/usbdevs.h>
 #include <dev/usb/ucomvar.h>
 
 #ifdef USLCOM_DEBUG
@@ -165,7 +164,6 @@ static const struct usb_devno uslcom_devs[] = {
 	{ USB_VENDOR_SILABS,		USB_PRODUCT_SILABS_CP210X_1 },
 	{ USB_VENDOR_SILABS,		USB_PRODUCT_SILABS_CP210X_2 },
 	{ USB_VENDOR_SILABS,		USB_PRODUCT_SILABS_CP210X_3 },
-	{ USB_VENDOR_SILABS,		USB_PRODUCT_SILABS_CP210X_4 },
 	{ USB_VENDOR_SILABS,		USB_PRODUCT_SILABS_CRUMB128 },
 	{ USB_VENDOR_SILABS,		USB_PRODUCT_SILABS_CYGNAL },
 	{ USB_VENDOR_SILABS,		USB_PRODUCT_SILABS_CYGNAL_DEBUG },

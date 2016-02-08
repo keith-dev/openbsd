@@ -1,4 +1,4 @@
-/*	$OpenBSD: ahci_pci.c,v 1.6 2014/07/10 14:21:20 deraadt Exp $ */
+/*	$OpenBSD: ahci_pci.c,v 1.10 2015/02/27 15:29:18 kettenis Exp $ */
 
 /*
  * Copyright (c) 2006 David Gwynne <dlg@openbsd.org>
@@ -147,7 +147,11 @@ static const struct ahci_device ahci_devices[] = {
 	{ PCI_VENDOR_INTEL,	PCI_PRODUCT_INTEL_EP80579_AHCI,
 	    NULL,		ahci_intel_attach },
 
+	{ PCI_VENDOR_SAMSUNG2,	PCI_PRODUCT_SAMSUNG2_S4LN053X01,
+	    NULL,		ahci_samsung_attach },
 	{ PCI_VENDOR_SAMSUNG2,	PCI_PRODUCT_SAMSUNG2_XP941,
+	    NULL,		ahci_samsung_attach },
+	{ PCI_VENDOR_SAMSUNG2,	PCI_PRODUCT_SAMSUNG2_SM951,
 	    NULL,		ahci_samsung_attach },
 
 	{ PCI_VENDOR_VIATECH,	PCI_PRODUCT_VIATECH_VT8251_SATA,
@@ -287,13 +291,22 @@ int
 ahci_intel_attach(struct ahci_softc *sc, struct pci_attach_args *pa)
 {
 	sc->sc_flags |= AHCI_F_NO_PMP;
+
 	return (0);
 }
 
 int
 ahci_samsung_attach(struct ahci_softc *sc, struct pci_attach_args *pa)
 {
+	/*
+	 * Disable MSI with the Samsung S4LN053X01 SSD controller as found
+	 * in some Apple MacBook Air models such as the 6,1 and 6,2, as well
+	 * as the XP941 SSD controller.
+	 * https://bugzilla.kernel.org/show_bug.cgi?id=60731
+	 * https://bugzilla.kernel.org/show_bug.cgi?id=89171
+	 */
 	sc->sc_flags |= AHCI_F_NO_MSI;
+
 	return (0);
 }
 
@@ -328,7 +341,6 @@ ahci_pci_attach(struct device *parent, struct device *self, void *aux)
 	struct pci_attach_args		*pa = aux;
 	const struct ahci_device	*ad;
 	pci_intr_handle_t		ih;
-	int				mapped = 0;
 
 	psc->psc_pc = pa->pa_pc;
 	psc->psc_tag = pa->pa_tag;
@@ -342,10 +354,10 @@ ahci_pci_attach(struct device *parent, struct device *self, void *aux)
 		}
 	}
 
-	if (!(sc->sc_flags & AHCI_F_NO_MSI))
-		mapped = pci_intr_map_msi(pa, &ih) != 0 ? 0 : 1;
-	
-	if (!mapped && pci_intr_map(pa, &ih) != 0) {
+	if (sc->sc_flags & AHCI_F_NO_MSI)
+		pa->pa_flags &= ~PCI_FLAGS_MSI_ENABLED;
+
+	if (pci_intr_map_msi(pa, &ih) != 0 && pci_intr_map(pa, &ih) != 0) {
 		printf(": unable to map interrupt\n");
 		return;
 	}

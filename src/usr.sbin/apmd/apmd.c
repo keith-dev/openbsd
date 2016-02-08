@@ -1,4 +1,4 @@
-/*	$OpenBSD: apmd.c,v 1.65 2014/07/26 10:48:59 mpi Exp $	*/
+/*	$OpenBSD: apmd.c,v 1.75 2015/02/06 08:16:50 dcoppa Exp $	*/
 
 /*
  *  Copyright (c) 1995, 1996 John T. Kohl
@@ -29,7 +29,6 @@
  *
  */
 
-#include <sys/param.h>
 #include <sys/stat.h>
 #include <sys/ioctl.h>
 #include <sys/socket.h>
@@ -37,7 +36,7 @@
 #include <sys/wait.h>
 #include <sys/event.h>
 #include <sys/time.h>
-#include <sys/dkstat.h>
+#include <sys/sched.h>
 #include <sys/sysctl.h>
 #include <stdio.h>
 #include <syslog.h>
@@ -48,7 +47,9 @@
 #include <signal.h>
 #include <errno.h>
 #include <err.h>
+#include <limits.h>
 #include <machine/apmvar.h>
+
 #include "pathnames.h"
 #include "apm-proto.h"
 
@@ -61,12 +62,6 @@ const char sockfile[] = _PATH_APM_SOCKET;
 int debug = 0;
 
 int doperf = PERF_NONE;
-#define PERFINC 50
-#define PERFDEC 20
-#define PERFMIN 0
-#define PERFMAX 100
-#define PERFINCTHRES 10
-#define PERFDECTHRES 30
 
 extern char *__progname;
 
@@ -80,7 +75,7 @@ void perf_status(struct apm_power_info *pinfo, int ncpu);
 void suspend(int ctl_fd);
 void stand_by(int ctl_fd);
 void hibernate(int ctl_fd);
-void setperf(int new_perf);
+void setperfpolicy(char *policy);
 void sigexit(int signo);
 void do_etc_file(const char *file);
 void sockunlink(void);
@@ -99,7 +94,7 @@ void
 usage(void)
 {
 	fprintf(stderr,
-	    "usage: %s [-AaCdHLs] [-f devname] [-S sockname] [-t seconds]\n",
+	    "usage: %s [-AadHLs] [-f devname] [-S sockname] [-t seconds]\n",
 	    __progname);
 	exit(1);
 }
@@ -196,162 +191,7 @@ power_status(int fd, int force, struct apm_power_info *pinfo)
 	return acon;
 }
 
-/* multi- and uni-processor case */
-int
-get_avg_idle_mp(int ncpu)
-{
-	static int64_t **cp_time_old;
-	static int64_t **cp_time;
-	static int *avg_idle;
-	int64_t change, sum, idle;
-	int i, cpu, min_avg_idle;
-	size_t cp_time_sz = CPUSTATES * sizeof(int64_t);
-
-	if (!cp_time_old)
-		if ((cp_time_old = calloc(sizeof(int64_t *), ncpu)) == NULL)
-			return -1;
-
-	if (!cp_time)
-		if ((cp_time = calloc(sizeof(int64_t *), ncpu)) == NULL)
-			return -1;
-
-	if (!avg_idle)
-		if ((avg_idle = calloc(sizeof(int), ncpu)) == NULL)
-			return -1;
-
-	min_avg_idle = 0;
-	for (cpu = 0; cpu < ncpu; cpu++) {
-		int cp_time_mib[] = {CTL_KERN, KERN_CPTIME2, cpu};
-
-		if (!cp_time_old[cpu])
-			if ((cp_time_old[cpu] =
-			    calloc(sizeof(int64_t), CPUSTATES)) == NULL)
-				return -1;
-
-		if (!cp_time[cpu])
-			if ((cp_time[cpu] =
-			    calloc(sizeof(int64_t), CPUSTATES)) == NULL)
-				return -1;
-
-		if (sysctl(cp_time_mib, 3, cp_time[cpu], &cp_time_sz, NULL, 0)
-		    < 0)
-			syslog(LOG_INFO, "cannot read kern.cp_time2");
-
-		sum = 0;
-		for (i = 0; i < CPUSTATES; i++) {
-			if ((change = cp_time[cpu][i] - cp_time_old[cpu][i])
-			    < 0) {
-				/* counter wrapped */
-				change = ((uint64_t)cp_time[cpu][i] -
-				    (uint64_t)cp_time_old[cpu][i]);
-			}
-			sum += change;
-			if (i == CP_IDLE)
-				idle = change;
-		}
-		if (sum == 0)
-			sum = 1;
-
-		/* smooth data */
-		avg_idle[cpu] = (avg_idle[cpu] + (100 * idle) / sum) / 2;
-
-		if (cpu == 0)
-			min_avg_idle = avg_idle[cpu];
-
-		if (avg_idle[cpu] < min_avg_idle)
-			min_avg_idle = avg_idle[cpu];
-
-		memcpy(cp_time_old[cpu], cp_time[cpu], cp_time_sz);
-	}
-
-	return min_avg_idle;
-}
-
-int
-get_avg_idle_up(void)
-{
-	static long cp_time_old[CPUSTATES];
-	static int avg_idle;
-	long change, cp_time[CPUSTATES];
-	int cp_time_mib[] = {CTL_KERN, KERN_CPTIME};
-	size_t cp_time_sz = sizeof(cp_time);
-	int i, idle, sum = 0;
-
-	if (sysctl(cp_time_mib, 2, &cp_time, &cp_time_sz, NULL, 0) < 0)
-		syslog(LOG_INFO, "cannot read kern.cp_time");
-
-	for (i = 0; i < CPUSTATES; i++) {
-		if ((change = cp_time[i] - cp_time_old[i]) < 0) {
-			/* counter wrapped */
-			change = ((unsigned long)cp_time[i] -
-			    (unsigned long)cp_time_old[i]);
-		}
-		sum += change;
-		if (i == CP_IDLE)
-			idle = change;
-	}
-	if (sum == 0)
-		sum = 1;
-
-	/* smooth data */
-	avg_idle = (avg_idle + (100 * idle) / sum) / 2;
-
-	memcpy(cp_time_old, cp_time, sizeof(cp_time_old));
-
-	return avg_idle;
-}
-
-void
-perf_status(struct apm_power_info *pinfo, int ncpu)
-{
-	int avg_idle;
-	int hw_perf_mib[] = {CTL_HW, HW_SETPERF};
-	int perf;
-	int forcehi = 0;
-	size_t perf_sz = sizeof(perf);
-
-	if (ncpu > 1) {
-		avg_idle = get_avg_idle_mp(ncpu);
-	} else {
-		avg_idle = get_avg_idle_up();
-	}
-
-	if (avg_idle == -1)
-		return;
-
-	switch (doperf) {
-	case PERF_AUTO:
-		/*
-		 * force setperf towards the max if we are connected to AC
-		 * power and have a battery life greater than 15%, or if
-		 * the battery is absent
-		 */
-		if ((pinfo->ac_state == APM_AC_ON && pinfo->battery_life > 15) ||
-		    pinfo->battery_state == APM_BATTERY_ABSENT)
-			forcehi = 1;		
-		break;
-	case PERF_COOL:
-		forcehi = 0;
-		break;
-	}
-	
-	if (sysctl(hw_perf_mib, 2, &perf, &perf_sz, NULL, 0) < 0)
-		syslog(LOG_INFO, "cannot read hw.setperf");
-
-	if (forcehi || (avg_idle < PERFINCTHRES && perf < PERFMAX)) {
-		perf += PERFINC;
-		if (perf > PERFMAX)
-			perf = PERFMAX;
-		setperf(perf);
-	} else if (avg_idle > PERFDECTHRES && perf > PERFMIN) {
-		perf -= PERFDEC;
-		if (perf < PERFMIN)
-			perf = PERFMIN;
-		setperf(perf);
-	}
-}
-
-char socketname[MAXPATHLEN];
+char socketname[PATH_MAX];
 
 void
 sockunlink(void)
@@ -367,7 +207,7 @@ bind_socket(const char *sockname)
 	mode_t old_umask;
 	int sock;
 
-	sock = socket(AF_UNIX, SOCK_STREAM, 0);
+	sock = socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0);
 	if (sock == -1)
 		error("cannot create local socket", NULL);
 
@@ -438,24 +278,21 @@ handle_client(int sock_fd, int ctl_fd)
 	case SETPERF_LOW:
 		doperf = PERF_MANUAL;
 		reply.newstate = NORMAL;
-		syslog(LOG_NOTICE, "setting hw.setperf to %d", PERFMIN);
-		setperf(PERFMIN);
+		syslog(LOG_NOTICE, "setting hw.perfpolicy to manual");
+		setperfpolicy("low");
 		break;
 	case SETPERF_HIGH:
 		doperf = PERF_MANUAL;
 		reply.newstate = NORMAL;
-		syslog(LOG_NOTICE, "setting hw.setperf to %d", PERFMAX);
-		setperf(PERFMAX);
+		syslog(LOG_NOTICE, "setting hw.perfpolicy to high");
+		setperfpolicy("high");
 		break;
 	case SETPERF_AUTO:
+	case SETPERF_COOL:
 		doperf = PERF_AUTO;
 		reply.newstate = NORMAL;
-		syslog(LOG_NOTICE, "setting hw.setperf automatically");
-		break;
-	case SETPERF_COOL:
-		doperf = PERF_COOL;
-		reply.newstate = NORMAL;
-		syslog(LOG_NOTICE, "setting hw.setperf for cool running");
+		syslog(LOG_NOTICE, "setting hw.perfpolicy to auto");
+		setperfpolicy("auto");
 		break;
 	default:
 		reply.newstate = NORMAL;
@@ -511,7 +348,7 @@ int
 main(int argc, char *argv[])
 {
 	const char *fname = apmdev;
-	int ctl_fd, sock_fd, ch, suspends, standbys, resumes;
+	int ctl_fd, sock_fd, ch, suspends, standbys, hibernates, resumes;
 	int statonly = 0;
 	int powerstatus = 0, powerbak = 0, powerchange = 0;
 	int noacsleep = 0;
@@ -548,26 +385,23 @@ main(int argc, char *argv[])
 			statonly = 1;
 			break;
 		case 'A':
-			if (doperf != PERF_NONE)
-				usage();
-			doperf = PERF_AUTO;
-			break;
 		case 'C':
 			if (doperf != PERF_NONE)
 				usage();
-			doperf = PERF_COOL;
+			doperf = PERF_AUTO;
+			setperfpolicy("auto");
 			break;
 		case 'L':
 			if (doperf != PERF_NONE)
 				usage();
 			doperf = PERF_MANUAL;
-			setperf(PERFMIN);
+			setperfpolicy("low");
 			break;
 		case 'H':
 			if (doperf != PERF_NONE)
 				usage();
 			doperf = PERF_MANUAL;
-			setperf(PERFMAX);
+			setperfpolicy("high");
 			break;
 		case '?':
 		default:
@@ -596,16 +430,12 @@ main(int argc, char *argv[])
 	(void) signal(SIGHUP, sigexit);
 	(void) signal(SIGINT, sigexit);
 
-	if ((ctl_fd = open(fname, O_RDWR)) == -1) {
+	if ((ctl_fd = open(fname, O_RDWR | O_CLOEXEC)) == -1) {
 		if (errno != ENXIO && errno != ENOENT)
 			error("cannot open device file `%s'", fname);
-	} else if (fcntl(ctl_fd, F_SETFD, FD_CLOEXEC) == -1)
-		error("cannot set close-on-exec for `%s'", fname);
+	}
 
 	sock_fd = bind_socket(sockname);
-
-	if (fcntl(sock_fd, F_SETFD, FD_CLOEXEC) == -1)
-		error("cannot set close-on-exec for the socket", NULL);
 
 	power_status(ctl_fd, 1, &pinfo);
 
@@ -633,21 +463,12 @@ main(int argc, char *argv[])
 	if (sysctl(ncpu_mib, 2, &ncpu, &ncpu_sz, NULL, 0) < 0)
 		error("cannot read hw.ncpu", NULL);
 
-	if (doperf == PERF_AUTO || doperf == PERF_COOL) {
-		setperf(0);
-		setperf(100);
-	}
 	for (;;) {
 		int rv;
 
 		sts = ts;
 
-		if (doperf == PERF_AUTO || doperf == PERF_COOL) {
-			sts.tv_sec = 1;
-			perf_status(&pinfo, ncpu);
-		}
-
-		apmtimeout += sts.tv_sec;
+		apmtimeout += 1;
 		if ((rv = kevent(kq, NULL, 0, ev, 1, &sts)) < 0)
 			break;
 
@@ -666,7 +487,7 @@ main(int argc, char *argv[])
 			continue;
 
 		if (ev->ident == ctl_fd) {
-			suspends = standbys = resumes = 0;
+			suspends = standbys = hibernates = resumes = 0;
 			syslog(LOG_DEBUG, "apmevent %04x index %d",
 			    (int)APM_EVENT_TYPE(ev->data),
 			    (int)APM_EVENT_INDEX(ev->data));
@@ -681,6 +502,9 @@ main(int argc, char *argv[])
 			case APM_USER_STANDBY_REQ:
 			case APM_STANDBY_REQ:
 				standbys++;
+				break;
+			case APM_USER_HIBERNATE_REQ:
+				hibernates++;
 				break;
 #if 0
 			case APM_CANCEL:
@@ -715,6 +539,8 @@ main(int argc, char *argv[])
 				suspend(ctl_fd);
 			else if (standbys)
 				stand_by(ctl_fd);
+			else if (hibernates)
+				hibernate(ctl_fd);
 			else if (resumes) {
 				do_etc_file(_PATH_APM_ETC_RESUME);
 				syslog(LOG_NOTICE,
@@ -750,14 +576,29 @@ main(int argc, char *argv[])
 }
 
 void
-setperf(int new_perf)
+setperfpolicy(char *policy)
 {
-	int hw_perf_mib[] = {CTL_HW, HW_SETPERF};
-	int perf;
-	size_t perf_sz = sizeof(perf);
+	int hw_perfpol_mib[] = { CTL_HW, HW_PERFPOLICY };
+	char oldpolicy[32];
+	size_t oldsz = sizeof(oldpolicy);
+	int setlo = 0;
 
-	if (sysctl(hw_perf_mib, 2, &perf, &perf_sz, &new_perf, perf_sz) < 0)
-		syslog(LOG_INFO, "cannot set hw.setperf");
+	if (strcmp(policy, "low") == 0) {
+		policy = "manual";
+		setlo = 1;
+	}
+
+	if (sysctl(hw_perfpol_mib, 2, oldpolicy, &oldsz, policy, strlen(policy) + 1) < 0)
+		syslog(LOG_INFO, "cannot set hw.perfpolicy");
+
+	if (setlo == 1) {
+		int hw_perf_mib[] = {CTL_HW, HW_SETPERF};
+		int perf;
+		int new_perf = 0;
+		size_t perf_sz = sizeof(perf);
+		if (sysctl(hw_perf_mib, 2, &perf, &perf_sz, &new_perf, perf_sz) < 0)
+			syslog(LOG_INFO, "cannot set hw.setperf");
+	}
 }
 
 void

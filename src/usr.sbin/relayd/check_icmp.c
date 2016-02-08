@@ -1,4 +1,4 @@
-/*	$OpenBSD: check_icmp.c,v 1.36 2013/03/10 23:32:53 reyk Exp $	*/
+/*	$OpenBSD: check_icmp.c,v 1.40 2015/01/22 17:42:09 reyk Exp $	*/
 
 /*
  * Copyright (c) 2006 Pierre-Yves Ritschard <pyr@openbsd.org>
@@ -16,28 +16,23 @@
  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
 
-#include <sys/param.h>
 #include <sys/types.h>
 #include <sys/queue.h>
 #include <sys/socket.h>
 #include <sys/sysctl.h>
+#include <sys/time.h>
 
-#include <net/if.h>
-#include <netinet/in_systm.h>
 #include <netinet/in.h>
 #include <netinet/ip.h>
 #include <netinet/ip_icmp.h>
 #include <netinet/icmp6.h>
 #include <arpa/inet.h>
 
-#include <limits.h>
 #include <event.h>
 #include <errno.h>
 #include <unistd.h>
 #include <string.h>
 #include <stdlib.h>
-
-#include <openssl/ssl.h>
 
 #include "relayd.h"
 

@@ -1,4 +1,4 @@
-/*	$OpenBSD: i386_installboot.c,v 1.5 2014/07/08 17:19:26 deraadt Exp $	*/
+/*	$OpenBSD: i386_installboot.c,v 1.8 2015/01/20 18:22:21 deraadt Exp $	*/
 /*	$NetBSD: installboot.c,v 1.5 1995/11/17 23:23:50 gwr Exp $ */
 
 /*
@@ -37,7 +37,8 @@
 
 #define ELFSIZE 32
 
-#include <sys/param.h>
+#include <sys/param.h>	/* DEV_BSIZE */
+#include <sys/types.h>
 #include <sys/disklabel.h>
 #include <sys/dkio.h>
 #include <sys/ioctl.h>
@@ -310,11 +311,10 @@ loadproto(char *fname, long *size)
 		errx(1, "%s: %u ELF load sections (only support 1)",
 		    fname, eh.e_phnum);
 
-	phsize = eh.e_phnum * sizeof(Elf_Phdr);
-	ph = malloc(phsize);
+	ph = reallocarray(NULL, eh.e_phnum, sizeof(Elf_Phdr));
 	if (ph == NULL)
 		err(1, NULL);
-
+	phsize = eh.e_phnum * sizeof(Elf_Phdr);
 	lseek(fd, eh.e_phoff, SEEK_SET);
 
 	if (read(fd, ph, phsize) != phsize)

@@ -1,4 +1,4 @@
-/*	$OpenBSD: ieee80211_node.c,v 1.81 2014/07/12 18:44:22 tedu Exp $	*/
+/*	$OpenBSD: ieee80211_node.c,v 1.86 2014/12/23 03:24:08 tedu Exp $	*/
 /*	$NetBSD: ieee80211_node.c,v 1.14 2004/05/09 09:18:47 dyoung Exp $	*/
 
 /*-
@@ -42,7 +42,6 @@
 #include <sys/sockio.h>
 #include <sys/endian.h>
 #include <sys/errno.h>
-#include <sys/proc.h>
 #include <sys/sysctl.h>
 #include <sys/tree.h>
 
@@ -55,10 +54,8 @@
 #include <net/bpf.h>
 #endif
 
-#ifdef INET
 #include <netinet/in.h>
 #include <netinet/if_ether.h>
-#endif
 
 #if NBRIDGE > 0
 #include <net/if_bridge.h>
@@ -66,8 +63,6 @@
 
 #include <net80211/ieee80211_var.h>
 #include <net80211/ieee80211_priv.h>
-
-#include <dev/rndvar.h>
 
 struct ieee80211_node *ieee80211_node_alloc(struct ieee80211com *);
 void ieee80211_node_free(struct ieee80211com *, struct ieee80211_node *);
@@ -1134,6 +1129,21 @@ ieee80211_free_allnodes(struct ieee80211com *ic)
 		ieee80211_node_cleanup(ic, ic->ic_bss);	/* for station mode */
 }
 
+void
+ieee80211_clean_cached(struct ieee80211com *ic)
+{
+	struct ieee80211_node *ni, *next_ni;
+	int s;
+
+	s = splnet();
+	for (ni = RB_MIN(ieee80211_tree, &ic->ic_tree);
+	    ni != NULL; ni = next_ni) {
+		next_ni = RB_NEXT(ieee80211_tree, &ic->ic_tree, ni);
+		if (ni->ni_state == IEEE80211_STA_CACHE)
+			ieee80211_free_node(ic, ni);
+	}
+	splx(s);
+}
 /*
  * Timeout inactive nodes.
  *
@@ -1289,7 +1299,6 @@ ieee80211_setup_rates(struct ieee80211com *ic, struct ieee80211_node *ni,
 int
 ieee80211_iserp_sta(const struct ieee80211_node *ni)
 {
-#define N(a)	(sizeof (a) / sizeof (a)[0])
 	static const u_int8_t rates[] = { 2, 4, 11, 22, 12, 24, 48 };
 	const struct ieee80211_rateset *rs = &ni->ni_rates;
 	int i, j;
@@ -1298,7 +1307,7 @@ ieee80211_iserp_sta(const struct ieee80211_node *ni)
 	 * A STA supports ERP operation if it includes all the Clause 19
 	 * mandatory rates in its supported rate set.
 	 */
-	for (i = 0; i < N(rates); i++) {
+	for (i = 0; i < nitems(rates); i++) {
 		for (j = 0; j < rs->rs_nrates; j++) {
 			if ((rs->rs_rates[j] & IEEE80211_RATE_VAL) == rates[i])
 				break;
@@ -1307,7 +1316,6 @@ ieee80211_iserp_sta(const struct ieee80211_node *ni)
 			return 0;
 	}
 	return 1;
-#undef N
 }
 
 /*

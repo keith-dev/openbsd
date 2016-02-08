@@ -1,10 +1,6 @@
-/*	$OpenBSD: config.h,v 1.17 2004/06/17 22:11:55 millert Exp $	*/
+/*	$OpenBSD: config.h,v 1.21 2015/02/09 23:00:14 deraadt Exp $	*/
 
 /* Copyright 1988,1990,1993,1994 by Paul Vixie
- * All rights reserved
- */
-
-/*
  * Copyright (c) 2004 by Internet Systems Consortium, Inc. ("ISC")
  * Copyright (c) 1997,2000 by Internet Software Consortium, Inc.
  *
@@ -27,10 +23,6 @@
 /*
  * these are site-dependent
  */
-
-#ifndef DEBUGGING
-#define DEBUGGING 1	/* 1 or 0 -- do you want debugging code built in? */
-#endif
 
 			/*
 			 * choose one of these mailer commands.  some use
@@ -78,12 +70,15 @@
 			 * are both defined, then logging will go to both
 			 * places.
 			 */
-#define SYSLOG	 			/*-*/
+#define SYSLOG				/*-*/
 
 			/* if you have a tm_gmtoff member in struct tm.
 			 * If not, we will have to compute the value ourselves.
 			 */
-#define HAVE_TM_GMTOFF		 	/*-*/
+#define HAVE_TM_GMTOFF			/*-*/
+
+			/* if your OS has the paths.h header */
+#define HAVE_PATHS_H			/*-*/
 
 			/* if your OS supports a BSD-style login.conf file */
 #define LOGIN_CAP			/*-*/
@@ -93,6 +88,12 @@
 
 			/* if your OS has a getloadavg() function */
 #define HAVE_GETLOADAVG			/*-*/
+
+			/* if your OS has a setlogin() function */
+#define HAVE_SETLOGIN			/*-*/
+
+			/* if your OS has a pw_expire field in struct passwd */
+#define HAVE_PW_EXPIRE			/*-*/
 
 			/* maximum load at which batch jobs will still run */
 #define BATCH_MAXLOAD	1.5		/*-*/

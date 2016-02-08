@@ -1,4 +1,4 @@
-/*	$OpenBSD: cpu.h,v 1.85 2014/07/11 10:53:07 uebayasi Exp $	*/
+/*	$OpenBSD: cpu.h,v 1.90 2015/01/15 15:30:17 sf Exp $	*/
 /*	$NetBSD: cpu.h,v 1.1 2003/04/26 18:39:39 fvdl Exp $	*/
 
 /*-
@@ -46,16 +46,9 @@
 #include <machine/segments.h>
 #include <machine/cacheinfo.h>
 #include <machine/intrdefs.h>
-
-#ifdef MULTIPROCESSOR
-#include <machine/i82489reg.h>
-#include <machine/i82489var.h>
-#endif
-
 #endif /* _KERNEL */
 
 #include <sys/device.h>
-#include <sys/lock.h>
 #include <sys/sched.h>
 #include <sys/sensors.h>
 
@@ -69,7 +62,6 @@ struct cpu_info {
 	struct cpu_info *ci_next;
 
 	struct proc *ci_curproc;
-	struct simplelock ci_slock;
 	u_int ci_cpuid;
 	u_int ci_apicid;
 	u_int32_t ci_randseed;
@@ -87,6 +79,7 @@ struct cpu_info {
 	u_int64_t	ci_ipending;
 	int		ci_ilevel;
 	int		ci_idepth;
+	int		ci_handled_intr_level;
 	u_int64_t	ci_imask[NIPL];
 	u_int64_t	ci_iunmask[NIPL];
 #ifdef DIAGNOSTIC
@@ -135,12 +128,6 @@ struct cpu_info {
 #define CI_DDB_STOPPED		2
 #define CI_DDB_ENTERDDB		3
 #define CI_DDB_INDDB		4
-
-	volatile int ci_setperf_state;
-#define CI_SETPERF_READY	0
-#define CI_SETPERF_SHOULDSTOP	1
-#define CI_SETPERF_INTRANSIT	2
-#define CI_SETPERF_DONE		3
 
 	struct ksensordev	ci_sensordev;
 	struct ksensor		ci_sensor;

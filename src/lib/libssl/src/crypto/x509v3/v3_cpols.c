@@ -1,4 +1,4 @@
-/* $OpenBSD: v3_cpols.c,v 1.15 2014/07/11 08:44:49 jsing Exp $ */
+/* $OpenBSD: v3_cpols.c,v 1.19 2015/02/14 15:17:52 miod Exp $ */
 /* Written by Dr Stephen N Henson (steve@openssl.org) for the OpenSSL
  * project 1999.
  */
@@ -97,14 +97,62 @@ ASN1_ITEM_TEMPLATE(CERTIFICATEPOLICIES) =
 	POLICYINFO)
 ASN1_ITEM_TEMPLATE_END(CERTIFICATEPOLICIES)
 
-IMPLEMENT_ASN1_FUNCTIONS(CERTIFICATEPOLICIES)
+
+CERTIFICATEPOLICIES *
+d2i_CERTIFICATEPOLICIES(CERTIFICATEPOLICIES **a, const unsigned char **in, long len)
+{
+	return (CERTIFICATEPOLICIES *)ASN1_item_d2i((ASN1_VALUE **)a, in, len,
+	    &CERTIFICATEPOLICIES_it);
+}
+
+int
+i2d_CERTIFICATEPOLICIES(CERTIFICATEPOLICIES *a, unsigned char **out)
+{
+	return ASN1_item_i2d((ASN1_VALUE *)a, out, &CERTIFICATEPOLICIES_it);
+}
+
+CERTIFICATEPOLICIES *
+CERTIFICATEPOLICIES_new(void)
+{
+	return (CERTIFICATEPOLICIES *)ASN1_item_new(&CERTIFICATEPOLICIES_it);
+}
+
+void
+CERTIFICATEPOLICIES_free(CERTIFICATEPOLICIES *a)
+{
+	ASN1_item_free((ASN1_VALUE *)a, &CERTIFICATEPOLICIES_it);
+}
 
 ASN1_SEQUENCE(POLICYINFO) = {
 	ASN1_SIMPLE(POLICYINFO, policyid, ASN1_OBJECT),
 	ASN1_SEQUENCE_OF_OPT(POLICYINFO, qualifiers, POLICYQUALINFO)
 } ASN1_SEQUENCE_END(POLICYINFO)
 
-IMPLEMENT_ASN1_FUNCTIONS(POLICYINFO)
+
+POLICYINFO *
+d2i_POLICYINFO(POLICYINFO **a, const unsigned char **in, long len)
+{
+	return (POLICYINFO *)ASN1_item_d2i((ASN1_VALUE **)a, in, len,
+	    &POLICYINFO_it);
+}
+
+int
+i2d_POLICYINFO(POLICYINFO *a, unsigned char **out)
+{
+	return ASN1_item_i2d((ASN1_VALUE *)a, out, &POLICYINFO_it);
+}
+
+POLICYINFO *
+POLICYINFO_new(void)
+{
+	return (POLICYINFO *)ASN1_item_new(&POLICYINFO_it);
+}
+
+void
+POLICYINFO_free(POLICYINFO *a)
+{
+	ASN1_item_free((ASN1_VALUE *)a, &POLICYINFO_it);
+}
 
 ASN1_ADB_TEMPLATE(policydefault) =
     ASN1_SIMPLE(POLICYQUALINFO, d.other, ASN1_ANY);
@@ -119,21 +167,93 @@ ASN1_SEQUENCE(POLICYQUALINFO) = {
 	ASN1_ADB_OBJECT(POLICYQUALINFO)
 } ASN1_SEQUENCE_END(POLICYQUALINFO)
 
-IMPLEMENT_ASN1_FUNCTIONS(POLICYQUALINFO)
+
+POLICYQUALINFO *
+d2i_POLICYQUALINFO(POLICYQUALINFO **a, const unsigned char **in, long len)
+{
+	return (POLICYQUALINFO *)ASN1_item_d2i((ASN1_VALUE **)a, in, len,
+	    &POLICYQUALINFO_it);
+}
+
+int
+i2d_POLICYQUALINFO(POLICYQUALINFO *a, unsigned char **out)
+{
+	return ASN1_item_i2d((ASN1_VALUE *)a, out, &POLICYQUALINFO_it);
+}
+
+POLICYQUALINFO *
+POLICYQUALINFO_new(void)
+{
+	return (POLICYQUALINFO *)ASN1_item_new(&POLICYQUALINFO_it);
+}
+
+void
+POLICYQUALINFO_free(POLICYQUALINFO *a)
+{
+	ASN1_item_free((ASN1_VALUE *)a, &POLICYQUALINFO_it);
+}
 
 ASN1_SEQUENCE(USERNOTICE) = {
 	ASN1_OPT(USERNOTICE, noticeref, NOTICEREF),
 	ASN1_OPT(USERNOTICE, exptext, DISPLAYTEXT)
 } ASN1_SEQUENCE_END(USERNOTICE)
 
-IMPLEMENT_ASN1_FUNCTIONS(USERNOTICE)
+
+USERNOTICE *
+d2i_USERNOTICE(USERNOTICE **a, const unsigned char **in, long len)
+{
+	return (USERNOTICE *)ASN1_item_d2i((ASN1_VALUE **)a, in, len,
+	    &USERNOTICE_it);
+}
+
+int
+i2d_USERNOTICE(USERNOTICE *a, unsigned char **out)
+{
+	return ASN1_item_i2d((ASN1_VALUE *)a, out, &USERNOTICE_it);
+}
+
+USERNOTICE *
+USERNOTICE_new(void)
+{
+	return (USERNOTICE *)ASN1_item_new(&USERNOTICE_it);
+}
+
+void
+USERNOTICE_free(USERNOTICE *a)
+{
+	ASN1_item_free((ASN1_VALUE *)a, &USERNOTICE_it);
+}
 
 ASN1_SEQUENCE(NOTICEREF) = {
 	ASN1_SIMPLE(NOTICEREF, organization, DISPLAYTEXT),
 	ASN1_SEQUENCE_OF(NOTICEREF, noticenos, ASN1_INTEGER)
 } ASN1_SEQUENCE_END(NOTICEREF)
 
-IMPLEMENT_ASN1_FUNCTIONS(NOTICEREF)
+
+NOTICEREF *
+d2i_NOTICEREF(NOTICEREF **a, const unsigned char **in, long len)
+{
+	return (NOTICEREF *)ASN1_item_d2i((ASN1_VALUE **)a, in, len,
+	    &NOTICEREF_it);
+}
+
+int
+i2d_NOTICEREF(NOTICEREF *a, unsigned char **out)
+{
+	return ASN1_item_i2d((ASN1_VALUE *)a, out, &NOTICEREF_it);
+}
+
+NOTICEREF *
+NOTICEREF_new(void)
+{
+	return (NOTICEREF *)ASN1_item_new(&NOTICEREF_it);
+}
+
+void
+NOTICEREF_free(NOTICEREF *a)
+{
+	ASN1_item_free((ASN1_VALUE *)a, &NOTICEREF_it);
+}
 
 static
 STACK_OF(POLICYINFO) *r2i_certpol(X509V3_EXT_METHOD *method, X509V3_CTX *ctx,
@@ -160,7 +280,7 @@ STACK_OF(POLICYINFO) *r2i_certpol(X509V3_EXT_METHOD *method, X509V3_CTX *ctx,
 	ia5org = 0;
 	for (i = 0; i < sk_CONF_VALUE_num(vals); i++) {
 		cnf = sk_CONF_VALUE_value(vals, i);
-		if (cnf->value || !cnf->name ) {
+		if (cnf->value || !cnf->name) {
 			X509V3err(X509V3_F_R2I_CERTPOL,
 			    X509V3_R_INVALID_POLICY_IDENTIFIER);
 			X509V3_conf_err(cnf);
@@ -304,7 +424,11 @@ notice_section(X509V3_CTX *ctx, STACK_OF(CONF_VALUE) *unot, int ia5org)
 	for (i = 0; i < sk_CONF_VALUE_num(unot); i++) {
 		cnf = sk_CONF_VALUE_value(unot, i);
 		if (!strcmp(cnf->name, "explicitText")) {
-			not->exptext = M_ASN1_VISIBLESTRING_new();
+			if (not->exptext == NULL) {
+				not->exptext = M_ASN1_VISIBLESTRING_new();
+				if (not->exptext == NULL)
+					goto merr;
+			}
 			if (!ASN1_STRING_set(not->exptext, cnf->value,
 			    strlen(cnf->value)))
 				goto merr;
@@ -330,12 +454,16 @@ notice_section(X509V3_CTX *ctx, STACK_OF(CONF_VALUE) *unot, int ia5org)
 				if (!(nref = NOTICEREF_new()))
 					goto merr;
 				not->noticeref = nref;
-			} else nref = not->noticeref;
-				nos = X509V3_parse_list(cnf->value);
+			} else
+				nref = not->noticeref;
+			nos = X509V3_parse_list(cnf->value);
 			if (!nos || !sk_CONF_VALUE_num(nos)) {
 				X509V3err(X509V3_F_NOTICE_SECTION,
 				    X509V3_R_INVALID_NUMBERS);
 				X509V3_conf_err(cnf);
+				if (nos != NULL)
+					sk_CONF_VALUE_pop_free(nos,
+					    X509V3_conf_free);
 				goto err;
 			}
 			ret = nref_nos(nref->noticenos, nos);
@@ -487,6 +615,3 @@ X509_POLICY_NODE_print(BIO *out, X509_POLICY_NODE *node, int indent)
 	else
 		BIO_printf(out, "%*sNo Qualifiers\n", indent + 2, "");
 }
-
-IMPLEMENT_STACK_OF(X509_POLICY_NODE)
-IMPLEMENT_STACK_OF(X509_POLICY_DATA)

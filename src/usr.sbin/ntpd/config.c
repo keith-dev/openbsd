@@ -1,4 +1,4 @@
-/*	$OpenBSD: config.c,v 1.19 2006/05/27 17:01:07 henning Exp $ */
+/*	$OpenBSD: config.c,v 1.26 2015/02/10 06:40:08 reyk Exp $ */
 
 /*
  * Copyright (c) 2003, 2004 Henning Brauer <henning@openbsd.org>
@@ -21,10 +21,8 @@
 #include <sys/stat.h>
 
 #include <netinet/in.h>
-#include <arpa/nameser.h>
 
 #include <errno.h>
-#include <resolv.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
@@ -35,8 +33,9 @@ struct ntp_addr	*host_v4(const char *);
 struct ntp_addr	*host_v6(const char *);
 
 static u_int32_t		 maxid = 0;
+static u_int32_t		 constraint_maxid = 0;
 
-int
+void
 host(const char *s, struct ntp_addr **hn)
 {
 	struct ntp_addr	*h = NULL;
@@ -54,11 +53,9 @@ host(const char *s, struct ntp_addr **hn)
 		h = host_v6(s);
 
 	if (h == NULL)
-		return (0);
+		return;
 
 	*hn = h;
-
-	return (1);
 }
 
 struct ntp_addr	*
@@ -111,6 +108,17 @@ host_v6(const char *s)
 	return (h);
 }
 
+void
+host_dns_free(struct ntp_addr *hn)
+{
+	struct ntp_addr	*h = hn, *tmp;
+	while (h) {
+		tmp = h;
+		h = h->next;
+		free(tmp);
+	}
+}
+
 int
 host_dns(const char *s, struct ntp_addr **hn)
 {
@@ -123,6 +131,7 @@ host_dns(const char *s, struct ntp_addr **hn)
 	bzero(&hints, sizeof(hints));
 	hints.ai_family = PF_UNSPEC;
 	hints.ai_socktype = SOCK_DGRAM; /* DUMMY */
+	/* ntpd MUST NOT use AI_ADDRCONFIG here */
 	error = getaddrinfo(s, NULL, &hints, &res0);
 	if (error == EAI_AGAIN || error == EAI_NODATA || error == EAI_NONAME)
 			return (0);
@@ -185,3 +194,16 @@ new_sensor(char *device)
 
 	return (s);
 }
+
+struct constraint *
+new_constraint(void)
+{
+	struct constraint	*p;
+
+	if ((p = calloc(1, sizeof(struct constraint))) == NULL)
+		fatal("new_constraint calloc");
+	p->id = ++constraint_maxid;
+
+	return (p);
+}
+

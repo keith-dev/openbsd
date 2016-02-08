@@ -1,4 +1,4 @@
-/*	$OpenBSD: loader.c,v 1.150 2014/07/10 09:03:01 otto Exp $ */
+/*	$OpenBSD: loader.c,v 1.153 2015/01/22 05:48:17 deraadt Exp $ */
 
 /*
  * Copyright (c) 1998 Per Fogelstrom, Opsycon AB
@@ -31,7 +31,6 @@
 #include <sys/types.h>
 #include <sys/mman.h>
 #include <sys/exec.h>
-#include <sys/param.h>
 #include <sys/sysctl.h>
 #include <nlist.h>
 #include <string.h>
@@ -140,7 +139,7 @@ _dl_run_all_dtors(void)
 		}
 
 		if (fini_complete && initfirst_skipped)
-                        fini_complete = initfirst_skipped = skip_initfirst = 0;
+			fini_complete = initfirst_skipped = skip_initfirst = 0;
 	}
 }
 
@@ -399,23 +398,14 @@ _dl_boot(const char **argv, char **envp, const long dyn_loff, long *dl_data)
 	{
 		extern char *__got_start;
 		extern char *__got_end;
-#ifdef RTLD_PROTECT_PLT
-		extern char *__plt_start;
-		extern char *__plt_end;
-#endif
 
-		_dl_mprotect((void *)ELF_TRUNC((long)&__got_start, _dl_pagesz),
-		    ELF_ROUND((long)&__got_end,_dl_pagesz) -
-		    ELF_TRUNC((long)&__got_start, _dl_pagesz),
-		    GOT_PERMS);
-
-#ifdef RTLD_PROTECT_PLT
-		/* only for DATA_PLT or BSS_PLT */
-		_dl_mprotect((void *)ELF_TRUNC((long)&__plt_start, _dl_pagesz),
-		    ELF_ROUND((long)&__plt_end,_dl_pagesz) -
-		    ELF_TRUNC((long)&__plt_start, _dl_pagesz),
-		    PROT_READ|PROT_EXEC);
-#endif
+		if (&__got_start != &__got_end) {
+			_dl_mprotect((void *)ELF_TRUNC((long)&__got_start,
+			    _dl_pagesz),
+			    ELF_ROUND((long)&__got_end,_dl_pagesz) -
+			    ELF_TRUNC((long)&__got_start, _dl_pagesz),
+			    GOT_PERMS);
+		}
 	}
 #endif
 
@@ -506,7 +496,7 @@ _dl_boot(const char **argv, char **envp, const long dyn_loff, long *dl_data)
 	 */
 	dynp = (Elf_Dyn *)((void *)_DYNAMIC);
 	ehdr = (Elf_Ehdr *)dl_data[AUX_base];
-        dyn_obj = _dl_finalize_object(us, dynp,
+	dyn_obj = _dl_finalize_object(us, dynp,
 	    (Elf_Phdr *)((char *)dl_data[AUX_base] + ehdr->e_phoff),
 	    ehdr->e_phnum, OBJTYPE_LDR, dl_data[AUX_base], dyn_loff);
 	_dl_add_object(dyn_obj);

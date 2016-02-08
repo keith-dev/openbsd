@@ -1,4 +1,4 @@
-/*	$OpenBSD: sort.c,v 1.41 2013/11/13 15:07:27 deraadt Exp $	*/
+/*	$OpenBSD: sort.c,v 1.43 2014/10/26 05:10:29 brad Exp $	*/
 
 /*-
  * Copyright (c) 1993
@@ -82,8 +82,8 @@ static void usage(char *);
 #define CHECK_NFIELDS						\
 	if (++nfields == ND) {					\
 		ND += 10;					\
-		if ((p = realloc(fldtab,			\
-		    ND * sizeof(*fldtab))) == NULL)		\
+		if ((p = reallocarray(fldtab, ND,		\
+		    sizeof(*fldtab))) == NULL)			\
 			errx(2, "cannot allocate memory");	\
 		ftpos = p + (ftpos - fldtab);			\
 		fldtab = p;					\
@@ -292,8 +292,8 @@ main(int argc, char *argv[])
 		act.sa_handler = onsig;
 		for (i = 0; sigtable[i]; ++i)	/* always unlink toutpath */
 			if (sigaction(sigtable[i], NULL, &oact) < 0 ||
-			    oact.sa_handler != SIG_IGN &&
-			    sigaction(sigtable[i], &act, NULL) < 0)
+			    (oact.sa_handler != SIG_IGN &&
+			    sigaction(sigtable[i], &act, NULL) < 0))
 				err(2, "sigaction");
 	} else
 		outfile = outpath;

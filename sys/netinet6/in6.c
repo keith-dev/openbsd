@@ -1,4 +1,4 @@
-/*	$OpenBSD: in6.c,v 1.138 2014/07/12 18:44:23 tedu Exp $	*/
+/*	$OpenBSD: in6.c,v 1.153 2015/02/19 22:23:05 bluhm Exp $	*/
 /*	$KAME: in6.c,v 1.372 2004/06/14 08:14:21 itojun Exp $	*/
 
 /*
@@ -71,6 +71,7 @@
 #include <sys/socket.h>
 #include <sys/socketvar.h>
 #include <sys/sockio.h>
+#include <sys/mbuf.h>
 #include <sys/systm.h>
 #include <sys/time.h>
 #include <sys/kernel.h>
@@ -112,6 +113,8 @@ const struct in6_addr in6addr_intfacelocal_allnodes =
 	IN6ADDR_INTFACELOCAL_ALLNODES_INIT;
 const struct in6_addr in6addr_linklocal_allnodes =
 	IN6ADDR_LINKLOCAL_ALLNODES_INIT;
+const struct in6_addr in6addr_linklocal_allrouters =
+	IN6ADDR_LINKLOCAL_ALLROUTERS_INIT;
 
 const struct in6_addr in6mask0 = IN6MASK0;
 const struct in6_addr in6mask32 = IN6MASK32;
@@ -170,7 +173,7 @@ in6_control(struct socket *so, u_long cmd, caddr_t data, struct ifnet *ifp)
 	struct	in6_ifaddr *ia6 = NULL;
 	struct	in6_aliasreq *ifra = (struct in6_aliasreq *)data;
 	struct sockaddr_in6 *sa6;
-	int privileged;
+	int s, privileged;
 
 	privileged = 0;
 	if ((so->so_state & SS_PRIV) != 0)
@@ -461,7 +464,6 @@ in6_control(struct socket *so, u_long cmd, caddr_t data, struct ifnet *ifp)
 	{
 		int i, error = 0;
 		struct nd_prefix pr0, *pr;
-		int s;
 
 		/* reject read-only flags */
 		if ((ifra->ifra_flags & IN6_IFF_DUPLICATED) != 0 ||
@@ -472,9 +474,11 @@ in6_control(struct socket *so, u_long cmd, caddr_t data, struct ifnet *ifp)
 		}
 		/*
 		 * first, make or update the interface address structure,
-		 * and link it to the list.
+		 * and link it to the list. try to enable inet6 if there
+		 * is no link-local yet.
 		 */
  		s = splsoftnet();
+		in6_ifattach(ifp);
 		error = in6_update_ifa(ifp, ifra, ia6);
 		splx(s);
 		if (error != 0)
@@ -548,6 +552,7 @@ in6_control(struct socket *so, u_long cmd, caddr_t data, struct ifnet *ifp)
 			pr->ndpr_refcnt++;
 		}
 
+		s = splsoftnet();
 		/*
 		 * this might affect the status of autoconfigured addresses,
 		 * that is, this address might make other addresses detached.
@@ -555,12 +560,15 @@ in6_control(struct socket *so, u_long cmd, caddr_t data, struct ifnet *ifp)
 		pfxlist_onlink_check();
 
 		dohooks(ifp->if_addrhooks, 0);
+		splx(s);
 		break;
 	}
 
 	case SIOCDIFADDR_IN6:
+		s = splsoftnet();
 		in6_purgeaddr(&ia6->ia_ifa);
 		dohooks(ifp->if_addrhooks, 0);
+		splx(s);
 		break;
 
 	default:
@@ -601,10 +609,6 @@ in6_update_ifa(struct ifnet *ifp, struct in6_aliasreq *ifra,
 	if ((ifp->if_flags & IFF_POINTOPOINT) != 0 &&
 	    ifra->ifra_dstaddr.sin6_family != AF_INET6 &&
 	    ifra->ifra_dstaddr.sin6_family != AF_UNSPEC)
-		return (EAFNOSUPPORT);
-
-	/* must have link-local */
-	if (ifp->if_xflags & IFXF_NOINET6)
 		return (EAFNOSUPPORT);
 
 	/*
@@ -867,7 +871,7 @@ in6_update_ifa(struct ifnet *ifp, struct in6_aliasreq *ifra,
 		 * actually do not need the routes, since they usually specify
 		 * the outgoing interface.
 		 */
-		rt = rtalloc1(sin6tosa(&mltaddr), 0, ifp->if_rdomain);
+		rt = rtalloc(sin6tosa(&mltaddr), 0, ifp->if_rdomain);
 		if (rt) {
 			/*
 			 * 32bit came from "mltmask"
@@ -875,7 +879,7 @@ in6_update_ifa(struct ifnet *ifp, struct in6_aliasreq *ifra,
 			if (memcmp(&mltaddr.sin6_addr,
 			    &satosin6(rt_key(rt))->sin6_addr,
 			    32 / 8)) {
-				RTFREE(rt);
+				rtfree(rt);
 				rt = NULL;
 			}
 		}
@@ -894,7 +898,7 @@ in6_update_ifa(struct ifnet *ifp, struct in6_aliasreq *ifra,
 			if (error)
 				goto cleanup;
 		} else {
-			RTFREE(rt);
+			rtfree(rt);
 		}
 		imm = in6_joingroup(ifp, &mltaddr.sin6_addr, &error);
 		if (!imm) {
@@ -938,13 +942,13 @@ in6_update_ifa(struct ifnet *ifp, struct in6_aliasreq *ifra,
 		mltaddr.sin6_scope_id = 0;
 
 		/* XXX: again, do we really need the route? */
-		rt = rtalloc1(sin6tosa(&mltaddr), 0, ifp->if_rdomain);
+		rt = rtalloc(sin6tosa(&mltaddr), 0, ifp->if_rdomain);
 		if (rt) {
 			/* 32bit came from "mltmask" */
 			if (memcmp(&mltaddr.sin6_addr,
 			    &satosin6(rt_key(rt))->sin6_addr,
 			    32 / 8)) {
-				RTFREE(rt);
+				rtfree(rt);
 				rt = NULL;
 			}
 		}
@@ -962,7 +966,7 @@ in6_update_ifa(struct ifnet *ifp, struct in6_aliasreq *ifra,
 			if (error)
 				goto cleanup;
 		} else {
-			RTFREE(rt);
+			rtfree(rt);
 		}
 		imm = in6_joingroup(ifp, &mltaddr.sin6_addr, &error);
 		if (!imm) {
@@ -1050,6 +1054,9 @@ in6_purgeaddr(struct ifaddr *ifa)
 	 * XXX: we should avoid such a configuration in IPv6...
 	 */
 	TAILQ_FOREACH(tmp, &in6_ifaddr, ia_list) {
+		if (tmp->ia_ifp->if_rdomain != ifp->if_rdomain)
+			continue;
+
 		if (IN6_ARE_ADDR_EQUAL(&tmp->ia_addr.sin6_addr,
 		    &ia6->ia_addr.sin6_addr)) {
 			ia6_count++;
@@ -1059,7 +1066,7 @@ in6_purgeaddr(struct ifaddr *ifa)
 	}
 
 	if (ia6_count == 1)
-		rt_ifa_delloop(&(ia6->ia_ifa));
+		rt_ifa_dellocal(&(ia6->ia_ifa));
 
 	/*
 	 * leave from multicast groups we have joined for the interface
@@ -1076,7 +1083,7 @@ in6_purgeaddr(struct ifaddr *ifa)
 void
 in6_unlink_ifa(struct in6_ifaddr *ia6, struct ifnet *ifp)
 {
-	int	s = splnet();
+	splsoftassert(IPL_SOFTNET);
 
 	ifa_del(ifp, &ia6->ia_ifa);
 
@@ -1105,8 +1112,6 @@ in6_unlink_ifa(struct in6_ifaddr *ia6, struct ifnet *ifp)
 	 * Note that we should decrement the refcnt at least once for all *BSD.
 	 */
 	ifafree(&ia6->ia_ifa);
-
-	splx(s);
 }
 
 /*
@@ -1353,8 +1358,9 @@ int
 in6_ifinit(struct ifnet *ifp, struct in6_ifaddr *ia6, int newhost)
 {
 	int	error = 0, plen, ifacount = 0;
-	int	s = splnet();
 	struct ifaddr *ifa;
+
+	splsoftassert(IPL_SOFTNET);
 
 	/*
 	 * Give the interface a chance to initialize
@@ -1370,12 +1376,11 @@ in6_ifinit(struct ifnet *ifp, struct in6_ifaddr *ia6, int newhost)
 	}
 
 	if ((ifacount <= 1 || ifp->if_type == IFT_CARP ||
-	    (ifp->if_flags & IFF_POINTOPOINT)) && ifp->if_ioctl &&
+	    (ifp->if_flags & (IFF_LOOPBACK|IFF_POINTOPOINT))) &&
+	    ifp->if_ioctl &&
 	    (error = (*ifp->if_ioctl)(ifp, SIOCSIFADDR, (caddr_t)ia6))) {
-		splx(s);
 		return (error);
 	}
-	splx(s);
 
 	ia6->ia_ifa.ifa_metric = ifp->if_metric;
 
@@ -1402,7 +1407,7 @@ in6_ifinit(struct ifnet *ifp, struct in6_ifaddr *ia6, int newhost)
 		if ((ifp->if_flags & (IFF_LOOPBACK | IFF_POINTOPOINT)) == 0)
 			ia6->ia_ifa.ifa_rtrequest = nd6_rtrequest;
 
-		rt_ifa_addloop(&(ia6->ia_ifa));
+		rt_ifa_addlocal(&(ia6->ia_ifa));
 	}
 
 	return (error);
@@ -1604,7 +1609,7 @@ in6_ifpprefix(const struct ifnet *ifp, const struct in6_addr *addr)
 	dst.sin6_len = sizeof(struct sockaddr_in6);
 	dst.sin6_family = AF_INET6;
 	dst.sin6_addr = *addr;
-	rt = rtalloc1(sin6tosa(&dst), RT_NOCLONING, tableid);
+	rt = rtalloc(sin6tosa(&dst), 0, tableid);
 
 	if (rt == NULL)
 		return (0);
@@ -1620,11 +1625,11 @@ in6_ifpprefix(const struct ifnet *ifp, const struct in6_addr *addr)
 	    rt->rt_ifp->if_carpdev != ifp->if_carpdev) &&
 #endif
 	    1)) {
-		RTFREE(rt);
+		rtfree(rt);
 		return (0);
 	}
 
-	RTFREE(rt);
+	rtfree(rt);
 	return (1);
 }
 
@@ -2027,8 +2032,26 @@ in6_ifawithscope(struct ifnet *oifp, struct in6_addr *dst, u_int rdomain)
 			}
 			tlen = in6_matchlen(IFA_IN6(ifa), dst);
 			matchcmp = tlen - blen;
-			if (matchcmp > 0) /* (8) */
+			if (matchcmp > 0) { /* (8) */
+#if NCARP > 0
+				/* 
+				 * Don't let carp interfaces win a tie against
+				 * the output interface based on matchlen.
+				 * We should only use a carp address if no
+				 * other interface has a usable address.
+				 * Otherwise, when communicating from a carp
+				 * master to a carp slave, the slave won't
+				 * respond since the carp address is also
+				 * configured as a local address on the slave.
+				 * Note that carp interfaces in backup state
+				 * were already skipped above.
+				 */
+				if (ifp->if_type == IFT_CARP &&
+				    oifp->if_type != IFT_CARP)
+					continue;
+#endif
 				goto replace;
+			}
 			if (matchcmp < 0) /* (9) */
 				continue;
 			if (oifp == ifp) /* (a) */
@@ -2064,31 +2087,6 @@ in6_ifawithscope(struct ifnet *oifp, struct in6_addr *dst, u_int rdomain)
 	return (ia6_best);
 }
 
-/*
- * perform DAD when interface becomes IFF_UP.
- */
-void
-in6_if_up(struct ifnet *ifp)
-{
-	struct ifaddr *ifa;
-	struct in6_ifaddr *ia6;
-	int dad_delay;		/* delay ticks before DAD output */
-
-	/*
-	 * special cases, like 6to4, are handled in in6_ifattach
-	 */
-	in6_ifattach(ifp);
-
-	dad_delay = 0;
-	TAILQ_FOREACH(ifa, &ifp->if_addrlist, ifa_list) {
-		if (ifa->ifa_addr->sa_family != AF_INET6)
-			continue;
-		ia6 = ifatoia6(ifa);
-		if (ia6->ia6_flags & IN6_IFF_TENTATIVE)
-			nd6_dad_start(ifa, &dad_delay);
-	}
-}
-
 int
 in6if_do_dad(struct ifnet *ifp)
 {
@@ -2120,28 +2118,6 @@ in6if_do_dad(struct ifnet *ifp)
 
 		return (1);
 	}
-}
-
-/*
- * Calculate max IPv6 MTU through all the interfaces and store it
- * to in6_maxmtu.
- */
-void
-in6_setmaxmtu(void)
-{
-	unsigned long maxmtu = 0;
-	struct ifnet *ifp;
-
-	TAILQ_FOREACH(ifp, &ifnet, if_list) {
-		/* this function can be called during ifnet initialization */
-		if (!ifp->if_afdata[AF_INET6])
-			continue;
-		if ((ifp->if_flags & IFF_LOOPBACK) == 0 &&
-		    IN6_LINKMTU(ifp) > maxmtu)
-			maxmtu = IN6_LINKMTU(ifp);
-	}
-	if (maxmtu)	     /* update only when maxmtu is positive */
-		in6_maxmtu = maxmtu;
 }
 
 void *

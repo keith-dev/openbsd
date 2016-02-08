@@ -1,4 +1,4 @@
-/*	$OpenBSD: timer.c,v 1.2 2012/09/17 16:43:59 reyk Exp $	*/
+/*	$OpenBSD: timer.c,v 1.4 2015/01/16 00:05:13 deraadt Exp $	*/
 
 /*
  * Copyright (c) 2008 Reyk Floeter <reyk@openbsd.org>
@@ -17,7 +17,6 @@
  */
 
 #include <sys/queue.h>
-#include <sys/param.h>
 #include <sys/types.h>
 #include <sys/sched.h>
 #include <sys/socket.h>
@@ -26,7 +25,6 @@
 #include <net/if.h>
 #include <net/if_types.h>
 #include <netinet/in.h>
-#include <netinet/in_systm.h>
 #include <netinet/ip.h>
 #include <netinet/ip_var.h>
 #include <arpa/inet.h>

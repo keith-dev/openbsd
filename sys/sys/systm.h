@@ -1,4 +1,4 @@
-/*	$OpenBSD: systm.h,v 1.101 2014/07/13 15:46:21 uebayasi Exp $	*/
+/*	$OpenBSD: systm.h,v 1.107 2015/02/10 21:56:10 miod Exp $	*/
 /*	$NetBSD: systm.h,v 1.50 1996/06/09 04:55:09 briggs Exp $	*/
 
 /*-
@@ -150,8 +150,6 @@ int	enoioctl(void);
 int	enxio(void);
 int	eopnotsupp(void *);
 
-int	lkmenodev(void);
-
 struct vnodeopv_desc;
 void vfs_opv_init_explicit(struct vnodeopv_desc *);
 void vfs_opv_init_default(struct vnodeopv_desc *);
@@ -217,6 +215,11 @@ int	copyin(const void *, void *, size_t)
 		__attribute__ ((__bounded__(__buffer__,2,3)));
 int	copyout(const void *, void *, size_t);
 
+void	arc4random_buf(void *, size_t)
+		__attribute__ ((__bounded__(__buffer__,1,2)));
+u_int32_t arc4random(void);
+u_int32_t arc4random_uniform(u_int32_t);
+
 struct timeval;
 struct timespec;
 int	hzto(const struct timeval *);
@@ -257,14 +260,11 @@ int	msleep(const volatile void *, struct mutex *, int,  const char*, int);
 void	yield(void);
 
 void	wdog_register(int (*)(void *, int), void *);
-void	wdog_shutdown(int (*)(void *, int), void *);
+void	wdog_shutdown(void *);
 
 /*
- * Startup/shutdown hooks.  Startup hooks are functions running after
- * the scheduler has started but before any threads have been created
- * or root has been mounted. The shutdown hooks are functions to be run
- * with all interrupts disabled immediately before the system is
- * halted or rebooted.
+ * Startup hooks are functions running after the scheduler has started
+ * but before any threads have been created or root has been mounted.
  */
 
 struct hook_desc {
@@ -274,8 +274,7 @@ struct hook_desc {
 };
 TAILQ_HEAD(hook_desc_head, hook_desc);
 
-extern struct hook_desc_head shutdownhook_list, startuphook_list,
-    mountroothook_list;
+extern struct hook_desc_head startuphook_list, mountroothook_list;
 
 void	*hook_establish(struct hook_desc_head *, int, void (*)(void *), void *);
 void	hook_disestablish(struct hook_desc_head *, void *);
@@ -290,12 +289,6 @@ void	dohooks(struct hook_desc_head *, int);
 	hook_disestablish(&startuphook_list, (vhook))
 #define dostartuphooks() dohooks(&startuphook_list, HOOK_REMOVE|HOOK_FREE)
 
-#define shutdownhook_establish(fn, arg) \
-	hook_establish(&shutdownhook_list, 0, (fn), (arg))
-#define shutdownhook_disestablish(vhook) \
-	hook_disestablish(&shutdownhook_list, (vhook))
-#define doshutdownhooks() dohooks(&shutdownhook_list, HOOK_REMOVE)
-
 #define mountroothook_establish(fn, arg) \
 	hook_establish(&mountroothook_list, 1, (fn), (arg))
 #define mountroothook_disestablish(vhook) \
@@ -303,7 +296,8 @@ void	dohooks(struct hook_desc_head *, int);
 #define domountroothooks() dohooks(&mountroothook_list, HOOK_REMOVE|HOOK_FREE)
 
 struct uio;
-int	uiomove(void *, int, struct uio *);
+int	uiomove(void *, size_t, struct uio *);
+int	uiomovei(void *, int, struct uio *);
 
 #if defined(_KERNEL)
 __returns_twice int	setjmp(label_t *);

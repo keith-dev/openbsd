@@ -30,6 +30,7 @@
 #include <sys/types.h>
 #include <stdlib.h>
 
+static int rand_deterministic;
 static u_int next = 1;
 
 int
@@ -41,27 +42,31 @@ rand_r(u_int *seed)
 
 #if defined(APIWARN)
 __warn_references(rand_r,
-    "warning: rand_r() isn't random; consider using arc4random()");
+    "warning: rand_r() is not random, it is deterministic.");
 #endif
 
 int
 rand(void)
 {
+	if (rand_deterministic == 0)
+		return (arc4random() % ((u_int)RAND_MAX + 1));
 	return (rand_r(&next));
 }
 
 #if defined(APIWARN)
 __warn_references(rand,
-    "warning: rand() isn't random; consider using arc4random()");
+    "warning: rand() may return deterministic values, is that what you want?");
 #endif
 
 void
 srand(u_int seed)
 {
-	next = seed;
+	rand_deterministic = 0;
 }
 
-#if defined(APIWARN)
-__warn_references(srand,
-    "warning: srand() seed choices are invariably poor");
-#endif
+void
+srand_deterministic(u_int seed)
+{
+	rand_deterministic = 1;
+	next = seed;
+}

@@ -1,4 +1,4 @@
-/*	$Id: term_ascii.c,v 1.15 2014/07/27 21:51:53 schwarze Exp $ */
+/*	$OpenBSD: term_ascii.c,v 1.30 2015/02/16 13:58:32 tedu Exp $ */
 /*
  * Copyright (c) 2010, 2011 Kristaps Dzonsons <kristaps@bsd.lv>
  * Copyright (c) 2014 Ingo Schwarze <schwarze@openbsd.org>
@@ -17,6 +17,7 @@
  */
 #include <sys/types.h>
 
+#include <assert.h>
 #include <locale.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -30,7 +31,8 @@
 #include "term.h"
 #include "main.h"
 
-static	struct termp	 *ascii_init(enum termenc, char *);
+static	struct termp	 *ascii_init(enum termenc,
+				const struct mchars *, char *);
 static	double		  ascii_hspan(const struct termp *,
 				const struct roffsu *);
 static	size_t		  ascii_width(const struct termp *, int);
@@ -48,16 +50,22 @@ static	size_t		  locale_width(const struct termp *, int);
 
 
 static struct termp *
-ascii_init(enum termenc enc, char *outopts)
+ascii_init(enum termenc enc, const struct mchars *mchars, char *outopts)
 {
-	const char	*toks[4];
+	const char	*toks[5];
 	char		*v;
 	struct termp	*p;
+	const char	*errstr;
+	int		num;
 
 	p = mandoc_calloc(1, sizeof(struct termp));
 
+	p->symtab = mchars;
 	p->tabwidth = 5;
 	p->defrmargin = p->lastrmargin = 78;
+	p->fontq = mandoc_reallocarray(NULL,
+	     (p->fontsz = 8), sizeof(enum termfont));
+	p->fontq[0] = p->fontl = TERMFONT_NONE;
 
 	p->begin = ascii_begin;
 	p->end = ascii_end;
@@ -87,15 +95,20 @@ ascii_init(enum termenc enc, char *outopts)
 	toks[0] = "indent";
 	toks[1] = "width";
 	toks[2] = "mdoc";
-	toks[3] = NULL;
+	toks[3] = "synopsis";
+	toks[4] = NULL;
 
 	while (outopts && *outopts)
 		switch (getsubopt(&outopts, UNCONST(toks), &v)) {
 		case 0:
-			p->defindent = (size_t)atoi(v);
+			num = strtonum(v, 0, 1000, &errstr);
+			if (!errstr)
+				p->defindent = num;
 			break;
 		case 1:
-			p->defrmargin = (size_t)atoi(v);
+			num = strtonum(v, 0, 1000, &errstr);
+			if (!errstr)
+				p->defrmargin = num;
 			break;
 		case 2:
 			/*
@@ -104,6 +117,9 @@ ascii_init(enum termenc enc, char *outopts)
 			 */
 			p->mdocstyle = 1;
 			p->defindent = 5;
+			break;
+		case 3:
+			p->synopsisonly = 1;
 			break;
 		default:
 			break;
@@ -117,24 +133,24 @@ ascii_init(enum termenc enc, char *outopts)
 }
 
 void *
-ascii_alloc(char *outopts)
+ascii_alloc(const struct mchars *mchars, char *outopts)
 {
 
-	return(ascii_init(TERMENC_ASCII, outopts));
+	return(ascii_init(TERMENC_ASCII, mchars, outopts));
 }
 
 void *
-utf8_alloc(char *outopts)
+utf8_alloc(const struct mchars *mchars, char *outopts)
 {
 
-	return(ascii_init(TERMENC_UTF8, outopts));
+	return(ascii_init(TERMENC_UTF8, mchars, outopts));
 }
 
 void *
-locale_alloc(char *outopts)
+locale_alloc(const struct mchars *mchars, char *outopts)
 {
 
-	return(ascii_init(TERMENC_LOCALE, outopts));
+	return(ascii_init(TERMENC_LOCALE, mchars, outopts));
 }
 
 static void
@@ -142,14 +158,30 @@ ascii_setwidth(struct termp *p, int iop, size_t width)
 {
 
 	p->rmargin = p->defrmargin;
-	if (0 < iop)
+	if (iop > 0)
 		p->defrmargin += width;
-	else if (0 > iop)
+	else if (iop == 0)
+		p->defrmargin = width ? width : p->lastrmargin;
+	else if (p->defrmargin > width)
 		p->defrmargin -= width;
 	else
-		p->defrmargin = width ? width : p->lastrmargin;
+		p->defrmargin = 0;
 	p->lastrmargin = p->rmargin;
 	p->rmargin = p->maxrmargin = p->defrmargin;
+}
+
+void
+ascii_sepline(void *arg)
+{
+	struct termp	*p;
+	size_t		 i;
+
+	p = (struct termp *)arg;
+	putchar('\n');
+	for (i = 0; i < p->defrmargin; i++)
+		putchar('-');
+	putchar('\n');
+	putchar('\n');
 }
 
 static size_t
@@ -209,35 +241,122 @@ ascii_hspan(const struct termp *p, const struct roffsu *su)
 	double		 r;
 
 	/*
-	 * Approximate based on character width.  These are generated
-	 * entirely by eyeballing the screen, but appear to be correct.
+	 * Approximate based on character width.
+	 * None of these will be actually correct given that an inch on
+	 * the screen depends on character size, terminal, etc., etc.
 	 */
-
 	switch (su->unit) {
+	case SCALE_BU:
+		r = su->scale * 10.0 / 240.0;
+		break;
 	case SCALE_CM:
-		r = 4 * su->scale;
+		r = su->scale * 10.0 / 2.54;
+		break;
+	case SCALE_FS:
+		r = su->scale * 2730.666;
 		break;
 	case SCALE_IN:
-		r = 10 * su->scale;
-		break;
-	case SCALE_PC:
-		r = (10 * su->scale) / 6;
-		break;
-	case SCALE_PT:
-		r = (10 * su->scale) / 72;
+		r = su->scale * 10.0;
 		break;
 	case SCALE_MM:
-		r = su->scale / 1000;
+		r = su->scale / 100.0;
+		break;
+	case SCALE_PC:
+		r = su->scale * 10.0 / 6.0;
+		break;
+	case SCALE_PT:
+		r = su->scale * 10.0 / 72.0;
 		break;
 	case SCALE_VS:
-		r = su->scale * 2 - 1;
+		r = su->scale * 2.0 - 1.0;
 		break;
-	default:
+	case SCALE_EN:
+		/* FALLTHROUGH */
+	case SCALE_EM:
 		r = su->scale;
 		break;
+	default:
+		abort();
+		/* NOTREACHED */
 	}
 
 	return(r);
+}
+
+const char *
+ascii_uc2str(int uc)
+{
+	static const char nbrsp[2] = { ASCII_NBRSP, '\0' };
+	static const char *tab[] = {
+	"<NUL>","<SOH>","<STX>","<ETX>","<EOT>","<ENQ>","<ACK>","<BEL>",
+	"<BS>",	"\t",	"<LF>",	"<VT>",	"<FF>",	"<CR>",	"<SO>",	"<SI>",
+	"<DLE>","<DC1>","<DC2>","<DC3>","<DC4>","<NAK>","<SYN>","<ETB>",
+	"<CAN>","<EM>",	"<SUB>","<ESC>","<FS>",	"<GS>",	"<RS>",	"<US>",
+	" ",	"!",	"\"",	"#",	"$",	"%",	"&",	"'",
+	"(",	")",	"*",	"+",	",",	"-",	".",	"/",
+	"0",	"1",	"2",	"3",	"4",	"5",	"6",	"7",
+	"8",	"9",	":",	";",	"<",	"=",	">",	"?",
+	"@",	"A",	"B",	"C",	"D",	"E",	"F",	"G",
+	"H",	"I",	"J",	"K",	"L",	"M",	"N",	"O",
+	"P",	"Q",	"R",	"S",	"T",	"U",	"V",	"W",
+	"X",	"Y",	"Z",	"[",	"\\",	"]",	"^",	"_",
+	"`",	"a",	"b",	"c",	"d",	"e",	"f",	"g",
+	"h",	"i",	"j",	"k",	"l",	"m",	"n",	"o",
+	"p",	"q",	"r",	"s",	"t",	"u",	"v",	"w",
+	"x",	"y",	"z",	"{",	"|",	"}",	"~",	"<DEL>",
+	"<80>",	"<81>",	"<82>",	"<83>",	"<84>",	"<85>",	"<86>",	"<87>",
+	"<88>",	"<89>",	"<8A>",	"<8B>",	"<8C>",	"<8D>",	"<8E>",	"<8F>",
+	"<90>",	"<91>",	"<92>",	"<93>",	"<94>",	"<95>",	"<96>",	"<97>",
+	"<99>",	"<99>",	"<9A>",	"<9B>",	"<9C>",	"<9D>",	"<9E>",	"<9F>",
+	nbrsp,	"!",	"/\bc",	"GBP",	"o\bx",	"=\bY",	"|",	"<sec>",
+	"\"",	"(C)",	"_\ba",	"<<",	"~",	"",	"(R)",	"-",
+	"<deg>","+-",	"2",	"3",	"'",	",\bu",	"<par>",".",
+	",",	"1",	"_\bo",	">>",	"1/4",	"1/2",	"3/4",	"?",
+	"`\bA",	"'\bA",	"^\bA",	"~\bA",	"\"\bA","o\bA",	"AE",	",\bC",
+	"`\bE",	"'\bE",	"^\bE",	"\"\bE","`\bI",	"'\bI",	"^\bI",	"\"\bI",
+	"-\bD",	"~\bN",	"`\bO",	"'\bO",	"^\bO",	"~\bO",	"\"\bO","x",
+	"/\bO",	"`\bU",	"'\bU",	"^\bU",	"\"\bU","'\bY",	"Th",	"ss",
+	"`\ba",	"'\ba",	"^\ba",	"~\ba",	"\"\ba","o\ba",	"ae",	",\bc",
+	"`\be",	"'\be",	"^\be",	"\"\be","`\bi",	"'\bi",	"^\bi",	"\"\bi",
+	"d",	"~\bn",	"`\bo",	"'\bo",	"^\bo",	"~\bo",	"\"\bo","-:-",
+	"/\bo",	"`\bu",	"'\bu",	"^\bu",	"\"\bu","'\by",	"th",	"\"\by",
+	"A",	"a",	"A",	"a",	"A",	"a",	"'\bC",	"'\bc",
+	"^\bC",	"^\bc",	"C",	"c",	"C",	"c",	"D",	"d",
+	"/\bD",	"/\bd",	"E",	"e",	"E",	"e",	"E",	"e",
+	"E",	"e",	"E",	"e",	"^\bG",	"^\bg",	"G",	"g",
+	"G",	"g",	",\bG",	",\bg",	"^\bH",	"^\bh",	"/\bH",	"/\bh",
+	"~\bI",	"~\bi",	"I",	"i",	"I",	"i",	"I",	"i",
+	"I",	"i",	"IJ",	"ij",	"^\bJ",	"^\bj",	",\bK",	",\bk",
+	"q",	"'\bL",	"'\bl",	",\bL",	",\bl",	"L",	"l",	"L",
+	"l",	"/\bL",	"/\bl",	"'\bN",	"'\bn",	",\bN",	",\bn",	"N",
+	"n",	"'n",	"Ng",	"ng",	"O",	"o",	"O",	"o",
+	"O",	"o",	"OE",	"oe",	"'\bR",	"'\br",	",\bR",	",\br",
+	"R",	"r",	"'\bS",	"'\bs",	"^\bS",	"^\bs",	",\bS",	",\bs",
+	"S",	"s",	",\bT",	",\bt",	"T",	"t",	"/\bT",	"/\bt",
+	"~\bU",	"~\bu",	"U",	"u",	"U",	"u",	"U",	"u",
+	"U",	"u",	"U",	"u",	"^\bW",	"^\bw",	"^\bY",	"^\by",
+	"\"\bY","'\bZ",	"'\bz",	"Z",	"z",	"Z",	"z",	"s",
+	"b",	"B",	"B",	"b",	"6",	"6",	"O",	"C",
+	"c",	"D",	"D",	"D",	"d",	"d",	"3",	"@",
+	"E",	"F",	",\bf",	"G",	"G",	"hv",	"I",	"/\bI",
+	"K",	"k",	"/\bl",	"l",	"W",	"N",	"n",	"~\bO",
+	"O",	"o",	"OI",	"oi",	"P",	"p",	"YR",	"2",
+	"2",	"SH",	"sh",	"t",	"T",	"t",	"T",	"U",
+	"u",	"Y",	"V",	"Y",	"y",	"/\bZ",	"/\bz",	"ZH",
+	"ZH",	"zh",	"zh",	"/\b2",	"5",	"5",	"ts",	"w",
+	"|",	"||",	"|=",	"!",	"DZ",	"Dz",	"dz",	"LJ",
+	"Lj",	"lj",	"NJ",	"Nj",	"nj",	"A",	"a",	"I",
+	"i",	"O",	"o",	"U",	"u",	"U",	"u",	"U",
+	"u",	"U",	"u",	"U",	"u",	"@",	"A",	"a",
+	"A",	"a",	"AE",	"ae",	"/\bG",	"/\bg",	"G",	"g",
+	"K",	"k",	"O",	"o",	"O",	"o",	"ZH",	"zh",
+	"j",	"DZ",	"Dz",	"dz",	"'\bG",	"'\bg",	"HV",	"W",
+	"`\bN",	"`\bn",	"A",	"a",	"'\bAE","'\bae","O",	"o"};
+
+	assert(uc >= 0);
+	if ((size_t)uc < sizeof(tab)/sizeof(tab[0]))
+		return(tab[uc]);
+	return(mchars_uc2str(uc));
 }
 
 static size_t

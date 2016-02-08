@@ -65,6 +65,13 @@ struct xfrd_state {
 	/* counter for xfr file numbers */
 	uint64_t xfrfilenumber;
 
+	/* the zonestat array size that we last saw and is safe to use */
+	unsigned zonestat_safe;
+	/* size currently of the clear array */
+	size_t zonestat_clear_num;
+	/* array of malloced entries with cumulative cleared stat values */
+	struct nsdst** zonestat_clear;
+
 	/* timer for NSD reload */
 	struct timeval reload_timeout;
 	struct event reload_handler;
@@ -73,6 +80,14 @@ struct xfrd_state {
 	time_t reload_cmd_last_sent;
 	uint8_t can_send_reload;
 	pid_t reload_pid;
+	/* timeout for lost sigchild and reaping children */
+	struct event child_timer;
+	int child_timer_added;
+
+	/* timeout event for zonefiles_write events */
+	struct event write_timer;
+	/* set to 1 if zones have received xfrs since the last write_timer */
+	int write_zonefile_needed;
 
 	/* communication channel with server_main */
 	struct event ipc_handler;
@@ -230,7 +245,8 @@ enum xfrd_packet_result {
 extern xfrd_state_t* xfrd;
 
 /* start xfrd, new start. Pass socket to server_main. */
-void xfrd_init(int socket, struct nsd* nsd, int shortsoa, int reload_active);
+void xfrd_init(int socket, struct nsd* nsd, int shortsoa, int reload_active,
+	pid_t nsd_pid);
 
 /* add new slave zone, dname(from zone_opt) and given options */
 void xfrd_init_slave_zone(xfrd_state_t* xfrd, zone_options_t* zone_opt);
@@ -332,6 +348,9 @@ void xfrd_process_task_result(xfrd_state_t* xfrd, struct udb_base* taskudb);
 
 /* set to reload right away (for user controlled reload events) */
 void xfrd_set_reload_now(xfrd_state_t* xfrd);
+
+/* send expiry notifications to nsd */
+void xfrd_send_expire_notification(xfrd_zone_t* zone);
 
 /* handle incoming notify (soa or NULL) and start zone xfr if necessary */
 void xfrd_handle_notify_and_start_xfr(xfrd_zone_t* zone, xfrd_soa_t* soa);

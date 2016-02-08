@@ -1,4 +1,4 @@
-/*	$OpenBSD: bus_dma.c,v 1.37 2014/07/17 19:51:58 miod Exp $ */
+/*	$OpenBSD: bus_dma.c,v 1.39 2014/11/16 12:30:58 deraadt Exp $ */
 
 /*
  * Copyright (c) 2003-2004 Opsycon AB  (www.opsycon.se / www.opsycon.com)
@@ -505,8 +505,8 @@ _dmamem_map(bus_dma_tag_t t, bus_dma_segment_t *segs, int nsegs, size_t size,
 #endif
 			pa = (*t->_device_to_pa)(addr);
 			error = pmap_enter(pmap_kernel(), va, pa,
-			    VM_PROT_READ | VM_PROT_WRITE, VM_PROT_READ |
-			    VM_PROT_WRITE | pmap_flags);
+			    PROT_READ | PROT_WRITE,
+			    PROT_READ | PROT_WRITE | pmap_flags);
 			if (error) {
 				pmap_update(pmap_kernel());
 				km_free((void *)sva, ssize, &kv_any, &kp_none);
@@ -728,7 +728,7 @@ _dmamem_alloc_range(bus_dma_tag_t t, bus_size_t size, bus_size_t alignment,
 	segs[curseg].ds_len = PAGE_SIZE;
 	m = TAILQ_NEXT(m, pageq);
 
-	for (; m != TAILQ_END(&mlist); m = TAILQ_NEXT(m, pageq)) {
+	for (; m != NULL; m = TAILQ_NEXT(m, pageq)) {
 		curaddr = VM_PAGE_TO_PHYS(m);
 #ifdef DIAGNOSTIC
 		if (curaddr < low || curaddr >= high) {

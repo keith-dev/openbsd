@@ -1,4 +1,4 @@
-/* $OpenBSD: s23_srvr.c,v 1.33 2014/08/07 19:46:31 miod Exp $ */
+/* $OpenBSD: s23_srvr.c,v 1.38 2015/02/06 08:30:23 jsing Exp $ */
 /* Copyright (C) 1995-1998 Eric Young (eay@cryptsoft.com)
  * All rights reserved.
  *
@@ -110,11 +110,12 @@
  */
 
 #include <stdio.h>
+
 #include "ssl_locl.h"
+
 #include <openssl/buffer.h>
-#include <openssl/rand.h>
-#include <openssl/objects.h>
 #include <openssl/evp.h>
+#include <openssl/objects.h>
 
 static const SSL_METHOD *ssl23_get_server_method(int ver);
 int ssl23_get_client_hello(SSL *s);
@@ -139,7 +140,7 @@ const SSL_METHOD SSLv23_server_method_data = {
 	.ssl_ctrl = ssl3_ctrl,
 	.ssl_ctx_ctrl = ssl3_ctx_ctrl,
 	.get_cipher_by_char = ssl3_get_cipher_by_char,
-	.put_cipher_by_char = ssl23_put_cipher_by_char,
+	.put_cipher_by_char = ssl3_put_cipher_by_char,
 	.ssl_pending = ssl_undefined_const_function,
 	.num_ciphers = ssl3_num_ciphers,
 	.get_cipher = ssl3_get_cipher,
@@ -220,7 +221,10 @@ ssl23_accept(SSL *s)
 				s->init_buf = buf;
 			}
 
-			ssl3_init_finished_mac(s);
+			if (!ssl3_init_finished_mac(s)) {
+				ret = -1;
+				goto end;
+			}
 
 			s->state = SSL23_ST_SR_CLNT_HELLO_A;
 			s->ctx->stats.sess_accept++;

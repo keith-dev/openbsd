@@ -1,4 +1,4 @@
-/*	$OpenBSD: clnt_simple.c,v 1.15 2010/09/01 14:43:34 millert Exp $ */
+/*	$OpenBSD: clnt_simple.c,v 1.17 2015/01/16 16:48:51 deraadt Exp $ */
 
 /*
  * Copyright (c) 2010, Oracle America, Inc.
@@ -36,13 +36,13 @@
  * Simplified front end to rpc.
  */
 
-#include <sys/param.h>
 #include <sys/socket.h>
 #include <netdb.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include <limits.h>
 #include <rpc/rpc.h>
 
 static struct callrpc_private {
@@ -70,7 +70,7 @@ callrpc(char *host, int prognum, int versnum, int procnum, xdrproc_t inproc,
 		callrpc_private = crp;
 	}
 	if (crp->oldhost == NULL) {
-		crp->oldhost = malloc(MAXHOSTNAMELEN);
+		crp->oldhost = malloc(HOST_NAME_MAX+1);
 		if (crp->oldhost == NULL) {
 			free(crp);
 			callrpc_private = save_callrpc_private;
@@ -84,13 +84,15 @@ callrpc(char *host, int prognum, int versnum, int procnum, xdrproc_t inproc,
 		/* reuse old client */		
 	} else {
 		crp->valid = 0;
-		if (crp->socket != -1)
+		if (crp->socket != -1) {
 			(void)close(crp->socket);
-		crp->socket = RPC_ANYSOCK;
+			crp->socket = -1;
+		}
 		if (crp->client) {
-			clnt_destroy(crp->client);
+			CLNT_DESTROY(crp->client);
 			crp->client = NULL;
 		}
+		crp->socket = RPC_ANYSOCK;
 		if ((hp = gethostbyname(host)) == NULL)
 			return ((int) RPC_UNKNOWNHOST);
 		timeout.tv_usec = 0;
@@ -106,7 +108,7 @@ callrpc(char *host, int prognum, int versnum, int procnum, xdrproc_t inproc,
 		crp->valid = 1;
 		crp->oldprognum = prognum;
 		crp->oldversnum = versnum;
-		strlcpy(crp->oldhost, host, MAXHOSTNAMELEN);
+		strlcpy(crp->oldhost, host, HOST_NAME_MAX+1);
 	}
 	tottimeout.tv_sec = 25;
 	tottimeout.tv_usec = 0;

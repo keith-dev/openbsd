@@ -1,4 +1,4 @@
-/*	$OpenBSD: machdep.c,v 1.71 2014/07/21 17:25:47 uebayasi Exp $	*/
+/*	$OpenBSD: machdep.c,v 1.74 2015/02/25 17:41:22 miod Exp $	*/
 /*
  * Copyright (c) 2007 Miodrag Vallat.
  *
@@ -122,7 +122,7 @@ void	dumpconf(void);
 void	dumpsys(void);
 void	savectx(struct pcb *);
 void	secondary_main(void);
-vaddr_t	secondary_pre_main(void);
+void   *secondary_pre_main(void);
 
 extern void bootstack(void);
 
@@ -132,9 +132,10 @@ struct vm_map *exec_map = NULL;
 struct vm_map *phys_map = NULL;
 
 #ifdef MULTIPROCESSOR
-u_int	hatch_pending_count = 0;
 __cpu_simple_lock_t cpu_hatch_mutex = __SIMPLELOCK_LOCKED;
 __cpu_simple_lock_t cpu_boot_mutex = __SIMPLELOCK_LOCKED;
+unsigned int hatch_pending_count;
+unsigned int hatch_mask;
 #endif
 
 struct uvm_constraint_range  dma_constraint = { 0x0, (paddr_t)-1 };
@@ -294,8 +295,6 @@ doboot()
 __dead void
 boot(int howto)
 {
-	struct device *mainbus;
-
 	if (curproc && curproc->p_addr)
 		savectx(curpcb);
 
@@ -325,10 +324,7 @@ boot(int howto)
 		dumpsys();
 
 haltsys:
-	doshutdownhooks();
-	mainbus = device_mainbus();
-	if (mainbus != NULL)
-		config_suspend(mainbus, DVACT_POWERDOWN);
+	config_suspend_all(DVACT_POWERDOWN);
 
 	if ((howto & RB_HALT) != 0) {
 		printf("System halted.\n\n");
@@ -506,15 +502,14 @@ abort:
 
 /*
  * Secondary CPU early initialization routine.
- * Determine CPU number and set it, then allocate its startup stack.
+ * Determine CPU number and set it, then return the startup stack.
  *
  * Running on a minimal stack here, with interrupts disabled; do nothing fancy.
  */
-vaddr_t
+void *
 secondary_pre_main()
 {
 	struct cpu_info *ci;
-	vaddr_t init_stack;
 
 	/*
 	 * Invoke the CMMU initialization routine as early as possible,
@@ -538,13 +533,8 @@ secondary_pre_main()
 	 */
 	pmap_bootstrap_cpu(ci->ci_cpuid);
 
-	/*
-	 * Allocate UPAGES contiguous pages for the startup stack.
-	 */
-	init_stack = uvm_km_zalloc(kernel_map, USPACE);
-	if (init_stack == (vaddr_t)NULL) {
-		printf("cpu%d: unable to allocate startup stack\n",
-		    ci->ci_cpuid);
+	if (ci->ci_curpcb == NULL) {
+		printf("cpu%d: unable to get startup stack\n", ci->ci_cpuid);
 		/*
 		 * Release cpu_hatch_mutex to let other secondary processors
 		 * have a chance to run.
@@ -553,7 +543,7 @@ secondary_pre_main()
 		for (;;) ;
 	}
 
-	return (init_stack);
+	return ci->ci_curpcb;
 }
 
 /*
@@ -787,6 +777,7 @@ cpu_hatch_secondary_processors()
 			rc = scm_jpstart(cpu, (vaddr_t)secondary_start);
 			switch (rc) {
 			case JPSTART_OK:
+				hatch_mask |= 1U << cpu;
 				break;
 			case JPSTART_SINGLE_JP:
 				/* this should never happen, but just in case */
@@ -811,6 +802,20 @@ cpu_hatch_secondary_processors()
 void
 cpu_setup_secondary_processors()
 {
+	cpuid_t cpu;
+
+	/*
+	 * Allocate UPAGES contiguous pages for the idle stack of every
+	 * running secondary processor.
+	 */
+	for (cpu = 0; cpu < MAX_CPUS; cpu++) {
+		if ((hatch_mask & (1U << cpu)) == 0)
+			continue;
+
+		m88k_cpus[cpu].ci_curpcb =
+		    (void *)uvm_km_zalloc(kernel_map, USPACE);
+	}
+
 	__cpu_simple_unlock(&cpu_hatch_mutex);
 	while (hatch_pending_count != 0)
 		delay(10000);	/* 10ms */

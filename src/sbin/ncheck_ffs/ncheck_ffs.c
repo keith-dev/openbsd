@@ -1,4 +1,4 @@
-/*	$OpenBSD: ncheck_ffs.c,v 1.46 2014/07/09 11:21:48 krw Exp $	*/
+/*	$OpenBSD: ncheck_ffs.c,v 1.50 2015/02/07 02:09:13 deraadt Exp $	*/
 
 /*-
  * Copyright (c) 1995, 1996 SigmaSoft, Th. Lockert <tholo@sigmasoft.com>
@@ -54,7 +54,7 @@
  * SUCH DAMAGE.
  */
 
-#include <sys/param.h>
+#include <sys/param.h>	/* MAXBSIZE DEV_BSIZE */
 #include <sys/time.h>
 #include <sys/stat.h>
 #include <sys/ioctl.h>
@@ -70,6 +70,7 @@
 #include <string.h>
 #include <ctype.h>
 #include <unistd.h>
+#include <limits.h>
 #include <fstab.h>
 #include <errno.h>
 #include <err.h>
@@ -475,7 +476,7 @@ searchdir(ufsino_t ino, daddr_t blkno, long size, off_t filesize,
 char *
 rawname(char *name)
 {
-	static char newname[MAXPATHLEN];
+	static char newname[PATH_MAX];
 	char *p;
 
 	if ((p = strrchr(name, '/')) == NULL)
@@ -512,10 +513,10 @@ main(int argc, char *argv[])
 	while ((c = getopt(argc, argv, "af:i:ms")) != -1)
 		switch (c) {
 		case 'a':
-			aflag++;
+			aflag = 1;
 			break;
 		case 'i':
-			iflag++;
+			iflag = 1;
 
 			errno = 0;
 			ullval = strtoull(optarg, &ep, 10);
@@ -545,10 +546,10 @@ main(int argc, char *argv[])
 			format = optarg;
 			break;
 		case 'm':
-			mflag++;
+			mflag = 1;
 			break;
 		case 's':
-			sflag++;
+			sflag = 1;
 			break;
 		default:
 			usage();
@@ -615,7 +616,6 @@ format_entry(const char *path, struct direct *dp)
 {
 	static size_t size;
 	static char *buf;
-	size_t nsize;
 	char *src, *dst, *newbuf;
 	int len;
 
@@ -629,12 +629,10 @@ format_entry(const char *path, struct direct *dp)
 		/* Need room for at least one character in buf. */
 		if (size <= dst - buf) {
 		    expand_buf:
-			nsize = size << 1;
-
-			if ((newbuf = realloc(buf, nsize)) == NULL)
+			if ((newbuf = reallocarray(buf, size, 2)) == NULL)
 				err(1, "realloc");
 			buf = newbuf;
-			size = nsize;
+			size = size * 2;
 		}
 		if (src[0] =='\\') {
 			switch (src[1]) {

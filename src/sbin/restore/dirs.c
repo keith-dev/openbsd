@@ -1,4 +1,4 @@
-/*	$OpenBSD: dirs.c,v 1.37 2014/07/21 01:51:11 guenther Exp $	*/
+/*	$OpenBSD: dirs.c,v 1.40 2015/01/20 18:22:21 deraadt Exp $	*/
 /*	$NetBSD: dirs.c,v 1.26 1997/07/01 05:37:49 lukem Exp $	*/
 
 /*
@@ -35,7 +35,6 @@
  * SUCH DAMAGE.
  */
 
-#include <sys/param.h>
 #include <sys/stat.h>
 #include <sys/time.h>
 
@@ -53,6 +52,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include <limits.h>
 
 #include "restore.h"
 #include "extern.h"
@@ -101,8 +101,8 @@ struct rstdirdesc {
 static long	seekpt;
 static FILE	*df, *mf;
 static RST_DIR	*dirp;
-static char	dirfile[MAXPATHLEN] = "#";	/* No file */
-static char	modefile[MAXPATHLEN] = "#";	/* No file */
+static char	dirfile[PATH_MAX] = "#";	/* No file */
+static char	modefile[PATH_MAX] = "#";	/* No file */
 static char	dot[2] = ".";			/* So it can be modified */
 
 /*
@@ -222,7 +222,7 @@ treescan(char *pname, ino_t ino, long (*todo)(char *, ino_t, int))
 	struct direct *dp;
 	size_t namelen;
 	long bpt;
-	char locname[MAXPATHLEN + 1];
+	char locname[PATH_MAX + 1];
 
 	itp = inotablookup(ino);
 	if (itp == NULL) {
@@ -285,7 +285,7 @@ pathsearch(const char *pathname)
 {
 	ino_t ino;
 	struct direct *dp;
-	char *path, *name, buffer[MAXPATHLEN];
+	char *path, *name, buffer[PATH_MAX];
 
 	strlcpy(buffer, pathname, sizeof buffer);
 	path = buffer;
@@ -423,7 +423,7 @@ static void
 flushent(void)
 {
 	((struct direct *)(dirbuf + prev))->d_reclen = DIRBLKSIZ - prev;
-	(void)fwrite(dirbuf, (int)dirloc, 1, df);
+	(void)fwrite(dirbuf, dirloc, 1, df);
 	seekpt = ftell(df);
 	dirloc = 0;
 }
@@ -651,17 +651,10 @@ genliteraldir(char *name, ino_t ino)
 	dp = dup(dirp->dd_fd);
 	for (i = itp->t_size; i > 0; i -= BUFSIZ) {
 		size = i < BUFSIZ ? i : BUFSIZ;
-		if (read(dp, buf, (int) size) == -1) {
-			warnx("write error extracting inode %llu, name %s",
+		if (read(dp, buf, size) == -1)
+			err(1, "read error extracting inode %llu, name %s",
 			    (unsigned long long)curfile.ino, curfile.name);
-			err(1, "read");
-		}
-		if (!Nflag && write(ofile, buf, (int) size) == -1) {
-			fprintf(stderr,
-			    "write error extracting inode %llu, name %s\n",
-			    (unsigned long long)curfile.ino, curfile.name);
-			err(1, "write");
-		}
+		xtrfile(buf, size);
 	}
 	(void)close(dp);
 	(void)close(ofile);

@@ -1,4 +1,4 @@
-/*	$OpenBSD: ping6.c,v 1.99 2014/07/11 15:28:27 florian Exp $	*/
+/*	$OpenBSD: ping6.c,v 1.101 2015/01/16 06:40:00 deraadt Exp $	*/
 /*	$KAME: ping6.c,v 1.163 2002/10/25 02:19:06 itojun Exp $	*/
 
 /*
@@ -602,9 +602,7 @@ main(int argc, char *argv[])
 			*datap++ = i;
 
 	ident = getpid() & 0xFFFF;
-	memset(nonce, 0, sizeof(nonce));
-	for (i = 0; i < sizeof(nonce); i += sizeof(u_int32_t))
-		*((u_int32_t *)&nonce[i]) = arc4random();
+	arc4random_buf(nonce, sizeof(nonce));
 
 	optval = 1;
 
@@ -1187,6 +1185,8 @@ dnsdecode(const u_char **sp, const u_char *ep, const u_char *base,
 	return buf;
 }
 
+#define MINIMUM(a,b) (((a)<(b))?(a):(b))
+
 /*
  * pr_pack --
  *	Print out the packet, if it came from us.  This logic is necessary
@@ -1307,7 +1307,7 @@ pr_pack(u_char *buf, int cc, struct msghdr *mhdr)
 
 				(void)printf(" (%d bytes %s)",
 				    abs(delta), delta > 0 ? "extra" : "short");
-				end = buf + MIN(cc, ICMP6ECHOLEN + datalen);
+				end = buf + MINIMUM(cc, ICMP6ECHOLEN + datalen);
 			}
 			for (i = 8; cp < end; ++i, ++cp, ++dp) {
 				if (*cp != *dp) {

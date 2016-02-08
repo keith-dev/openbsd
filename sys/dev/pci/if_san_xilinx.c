@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_san_xilinx.c,v 1.30 2014/07/22 13:12:11 mpi Exp $	*/
+/*	$OpenBSD: if_san_xilinx.c,v 1.32 2014/12/05 15:50:04 mpi Exp $	*/
 
 /*-
  * Copyright (c) 2001-2004 Sangoma Technologies (SAN)
@@ -41,7 +41,6 @@
 #include <sys/malloc.h>
 #include <sys/errno.h>
 #include <sys/mbuf.h>
-#include <sys/proc.h>
 #include <sys/socket.h>
 #include <sys/kernel.h>
 #include <sys/time.h>
@@ -49,12 +48,12 @@
 
 #include <net/bpf.h>
 #include <net/if.h>
+#include <net/if_var.h>
 #include <net/if_media.h>
-#include <net/netisr.h>
-#include <net/if_sppp.h>
 #include <netinet/in.h>
 #include <netinet/udp.h>
 #include <netinet/ip.h>
+#include <net/if_sppp.h>
 
 #include <machine/bus.h>
 

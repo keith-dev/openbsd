@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_axe.c,v 1.126 2014/07/13 15:52:49 mpi Exp $	*/
+/*	$OpenBSD: if_axe.c,v 1.129 2015/02/12 22:39:27 mpi Exp $	*/
 
 /*
  * Copyright (c) 2005, 2006, 2007 Jonathan Gray <jsg@openbsd.org>
@@ -65,7 +65,7 @@
 
 /*
  * The AX88172 provides USB ethernet supports at 10 and 100Mbps.
- * It uses an external PHY (reference designs use a RealTek chip),
+ * It uses an external PHY (reference designs use a Realtek chip),
  * and has a 64-bit multicast hash filter. There is some information
  * missing from the manual which one needs to know in order to make
  * the chip function:
@@ -973,6 +973,7 @@ axe_rxeof(struct usbd_xfer *xfer, void *priv, usbd_status status)
 	struct axe_chain	*c = (struct axe_chain *)priv;
 	struct axe_softc	*sc = c->axe_sc;
 	struct ifnet		*ifp = GET_IFP(sc);
+	struct mbuf_list	ml = MBUF_LIST_INITIALIZER();
 	u_char			*buf = c->axe_buf;
 	u_int32_t		total_len;
 	u_int16_t		pktlen = 0;
@@ -1047,25 +1048,20 @@ axe_rxeof(struct usbd_xfer *xfer, void *priv, usbd_status status)
 		}
 
 		ifp->if_ipackets++;
-		m->m_pkthdr.rcvif = ifp;
 		m->m_pkthdr.len = m->m_len = pktlen;
 
 		memcpy(mtod(m, char *), buf, pktlen);
 
-		/* push the packet up */
-		s = splnet();
-#if NBPFILTER > 0
-		if (ifp->if_bpf)
-			bpf_mtap(ifp->if_bpf, m, BPF_DIRECTION_IN);
-#endif
-
-		ether_input_mbuf(ifp, m);
-
-		splx(s);
+		ml_enqueue(&ml, m);
 
 	} while (total_len > 0);
 
 done:
+	/* push the packet up */
+	s = splnet();
+	if_input(ifp, &ml);
+	splx(s);
+
 	memset(c->axe_buf, 0, sc->axe_bufsz);
 
 	/* Setup new transfer. */
@@ -1395,10 +1391,8 @@ axe_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 		ifp->if_flags |= IFF_UP;
 		if (!(ifp->if_flags & IFF_RUNNING))
 			axe_init(sc);
-#ifdef INET
 		if (ifa->ifa_addr->sa_family == AF_INET)
 			arp_ifinit(&sc->arpcom, ifa);
-#endif
 		break;
 
 	case SIOCSIFFLAGS:

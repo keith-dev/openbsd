@@ -1,4 +1,4 @@
-/*	$OpenBSD: print-raw.c,v 1.6 2009/10/27 23:59:55 deraadt Exp $	*/
+/*	$OpenBSD: print-raw.c,v 1.8 2015/01/16 06:40:21 deraadt Exp $	*/
 
 /*
  * Copyright (c) 1996
@@ -21,7 +21,6 @@
  * MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE.
  */
 
-#include <sys/param.h>
 #include <sys/time.h>
 #include <sys/socket.h>
 #include <sys/file.h>
@@ -32,7 +31,6 @@ struct rtentry;
 #include <net/if.h>
 
 #include <netinet/in.h>
-#include <netinet/in_systm.h>
 #include <netinet/ip.h>
 #include <netinet/if_ether.h>
 #include <netinet/ip_var.h>

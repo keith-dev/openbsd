@@ -1,4 +1,4 @@
-/*	$OpenBSD: ex_subst.c,v 1.18 2013/11/25 23:27:11 krw Exp $	*/
+/*	$OpenBSD: ex_subst.c,v 1.22 2015/01/16 06:40:14 deraadt Exp $	*/
 
 /*-
  * Copyright (c) 1992, 1993, 1994
@@ -11,7 +11,6 @@
 
 #include "config.h"
 
-#include <sys/param.h>
 #include <sys/queue.h>
 #include <sys/time.h>
 
@@ -26,6 +25,8 @@
 
 #include "../common/common.h"
 #include "../vi/vi.h"
+
+#define MAXIMUM(a, b)	(((a) > (b)) ? (a) : (b))
 
 #define	SUB_FIRST	0x01		/* The 'r' flag isn't reasonable. */
 #define	SUB_MUSTSETR	0x02		/* The 'r' flag is required. */
@@ -45,9 +46,7 @@ static int s(SCR *, EXCMD *, char *, regex_t *, u_int);
  * PUBLIC: int ex_s(SCR *, EXCMD *);
  */
 int
-ex_s(sp, cmdp)
-	SCR *sp;
-	EXCMD *cmdp;
+ex_s(SCR *sp, EXCMD *cmdp)
 {
 	regex_t *re;
 	size_t blen, len;
@@ -252,9 +251,7 @@ tilde:				++p;
  * PUBLIC: int ex_subagain(SCR *, EXCMD *);
  */
 int
-ex_subagain(sp, cmdp)
-	SCR *sp;
-	EXCMD *cmdp;
+ex_subagain(SCR *sp, EXCMD *cmdp)
 {
 	if (sp->subre == NULL) {
 		ex_emsg(sp, NULL, EXM_NOPREVRE);
@@ -276,9 +273,7 @@ ex_subagain(sp, cmdp)
  * PUBLIC: int ex_subtilde(SCR *, EXCMD *);
  */
 int
-ex_subtilde(sp, cmdp)
-	SCR *sp;
-	EXCMD *cmdp;
+ex_subtilde(SCR *sp, EXCMD *cmdp)
 {
 	if (sp->re == NULL) {
 		ex_emsg(sp, NULL, EXM_NOPREVRE);
@@ -307,8 +302,8 @@ ex_subtilde(sp, cmdp)
 #define	NEEDNEWLINE(sp) {						\
 	if ((sp)->newl_len == (sp)->newl_cnt) {				\
 		(sp)->newl_len += 25;					\
-		REALLOC((sp), (sp)->newl, size_t *,			\
-		    (sp)->newl_len * sizeof(size_t));			\
+		REALLOCARRAY((sp), (sp)->newl, size_t *,		\
+		    (sp)->newl_len, sizeof(size_t));			\
 		if ((sp)->newl == NULL) {				\
 			(sp)->newl_len = 0;				\
 			return (1);					\
@@ -318,7 +313,7 @@ ex_subtilde(sp, cmdp)
 
 #define	BUILD(sp, l, len) {						\
 	if (lbclen + (len) > lblen) {					\
-		lblen += MAX(lbclen + (len), 256);			\
+		lblen += MAXIMUM(lbclen + (len), 256);			\
 		REALLOC((sp), lb, char *, lblen);			\
 		if (lb == NULL) {					\
 			lbclen = 0;					\
@@ -331,7 +326,7 @@ ex_subtilde(sp, cmdp)
 
 #define	NEEDSP(sp, len, pnt) {						\
 	if (lbclen + (len) > lblen) {					\
-		lblen += MAX(lbclen + (len), 256);			\
+		lblen += MAXIMUM(lbclen + (len), 256);			\
 		REALLOC((sp), lb, char *, lblen);			\
 		if (lb == NULL) {					\
 			lbclen = 0;					\
@@ -342,12 +337,7 @@ ex_subtilde(sp, cmdp)
 }
 
 static int
-s(sp, cmdp, s, re, flags)
-	SCR *sp;
-	EXCMD *cmdp;
-	char *s;
-	regex_t *re;
-	u_int flags;
+s(SCR *sp, EXCMD *cmdp, char *s, regex_t *re, u_int flags)
 {
 	EVENT ev;
 	MARK from, to;
@@ -889,12 +879,8 @@ err:		rval = 1;
  * PUBLIC:     char *, size_t, char **, size_t *, regex_t *, u_int);
  */
 int
-re_compile(sp, ptrn, plen, ptrnp, lenp, rep, flags)
-	SCR *sp;
-	char *ptrn, **ptrnp;
-	size_t plen, *lenp;
-	regex_t *rep;
-	u_int flags;
+re_compile(SCR *sp, char *ptrn, size_t plen, char **ptrnp, size_t *lenp,
+    regex_t *rep, u_int flags)
 {
 	size_t len;
 	int reflags, replaced, rval;
@@ -1004,16 +990,16 @@ re_compile(sp, ptrn, plen, ptrnp, lenp, rep, flags)
  *	Convert vi's regular expressions into something that the
  *	the POSIX 1003.2 RE functions can handle.
  *
- * There are three conversions we make to make vi's RE's (specifically
+ * There are two conversions we make to make vi's RE's (specifically
  * the global, search, and substitute patterns) work with POSIX RE's.
+ * We assume that \<ptrn\> does "word" searches, which is non-standard
+ * but supported by most regexp libraries..
  *
  * 1: If O_MAGIC is not set, strip backslashes from the magic character
  *    set (.[*~) that have them, and add them to the ones that don't.
  * 2: If O_MAGIC is not set, the string "\~" is replaced with the text
  *    from the last substitute command's replacement string.  If O_MAGIC
  *    is set, it's the string "~".
- * 3: The pattern \<ptrn\> does "word" searches, convert it to use the
- *    new RE escapes.
  *
  * !!!/XXX
  * This doesn't exactly match the historic behavior of vi because we do
@@ -1022,11 +1008,7 @@ re_compile(sp, ptrn, plen, ptrnp, lenp, rep, flags)
  * weren't historically.  It's a bug.
  */
 static int
-re_conv(sp, ptrnp, plenp, replacedp)
-	SCR *sp;
-	char **ptrnp;
-	size_t *plenp;
-	int *replacedp;
+re_conv(SCR *sp, char **ptrnp, size_t *plenp, int *replacedp)
 {
 	size_t blen, len, needlen;
 	int magic;
@@ -1045,14 +1027,6 @@ re_conv(sp, ptrnp, plenp, replacedp)
 			if (len > 1) {
 				--len;
 				switch (*++p) {
-				case '<':
-					magic = 1;
-					needlen += sizeof(RE_WSTART);
-					break;
-				case '>':
-					magic = 1;
-					needlen += sizeof(RE_WSTOP);
-					break;
 				case '~':
 					if (!O_ISSET(sp, O_MAGIC)) {
 						magic = 1;
@@ -1107,16 +1081,6 @@ re_conv(sp, ptrnp, plenp, replacedp)
 			if (len > 1) {
 				--len;
 				switch (*++p) {
-				case '<':
-					memcpy(t,
-					    RE_WSTART, sizeof(RE_WSTART) - 1);
-					t += sizeof(RE_WSTART) - 1;
-					break;
-				case '>':
-					memcpy(t,
-					    RE_WSTOP, sizeof(RE_WSTOP) - 1);
-					t += sizeof(RE_WSTOP) - 1;
-					break;
 				case '~':
 					if (O_ISSET(sp, O_MAGIC))
 						*t++ = '~';
@@ -1170,11 +1134,7 @@ re_conv(sp, ptrnp, plenp, replacedp)
  *	1003.2 RE functions can handle.
  */
 static int
-re_tag_conv(sp, ptrnp, plenp, replacedp)
-	SCR *sp;
-	char **ptrnp;
-	size_t *plenp;
-	int *replacedp;
+re_tag_conv(SCR *sp, char **ptrnp, size_t *plenp, int *replacedp)
 {
 	size_t blen, len;
 	int lastdollar;
@@ -1241,11 +1201,7 @@ re_tag_conv(sp, ptrnp, plenp, replacedp)
  *      1003.2 RE functions can handle.
  */
 static int
-re_cscope_conv(sp, ptrnp, plenp, replacedp)
-	SCR *sp;
-	char **ptrnp;
-	size_t *plenp;
-	int *replacedp;
+re_cscope_conv(SCR *sp, char **ptrnp, size_t *plenp, int *replacedp)
 {
 	size_t blen, len, nspaces;
 	char *bp, *p, *t;
@@ -1302,10 +1258,7 @@ re_cscope_conv(sp, ptrnp, plenp, replacedp)
  * PUBLIC: void re_error(SCR *, int, regex_t *);
  */
 void
-re_error(sp, errcode, preg)
-	SCR *sp;
-	int errcode;
-	regex_t *preg;
+re_error(SCR *sp, int errcode, regex_t *preg)
 {
 	size_t s;
 	char *oe;
@@ -1325,12 +1278,8 @@ re_error(sp, errcode, preg)
  * 	Do the substitution for a regular expression.
  */
 static int
-re_sub(sp, ip, lbp, lbclenp, lblenp, match)
-	SCR *sp;
-	char *ip;			/* Input line. */
-	char **lbp;
-	size_t *lbclenp, *lblenp;
-	regmatch_t match[10];
+re_sub(SCR *sp, char *ip, char **lbp, size_t *lbclenp, size_t *lblenp,
+    regmatch_t match[10])
 {
 	enum { C_NOTSET, C_LOWER, C_ONELOWER, C_ONEUPPER, C_UPPER } conv;
 	size_t lbclen, lblen;		/* Local copies. */

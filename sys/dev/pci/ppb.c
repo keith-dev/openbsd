@@ -1,4 +1,4 @@
-/*	$OpenBSD: ppb.c,v 1.58 2014/07/12 18:48:52 tedu Exp $	*/
+/*	$OpenBSD: ppb.c,v 1.61 2015/01/27 03:17:36 dlg Exp $	*/
 /*	$NetBSD: ppb.c,v 1.16 1997/06/06 23:48:05 thorpej Exp $	*/
 
 /*
@@ -107,13 +107,13 @@ struct cfdriver ppb_cd = {
 
 void	ppb_alloc_resources(struct ppb_softc *, struct pci_attach_args *);
 int	ppb_intr(void *);
-void	ppb_hotplug_insert(void *, void *);
+void	ppb_hotplug_insert(void *);
 void	ppb_hotplug_insert_finish(void *);
 int	ppb_hotplug_fixup(struct pci_attach_args *);
 int	ppb_hotplug_fixup_type0(pci_chipset_tag_t, pcitag_t, pcitag_t);
 int	ppb_hotplug_fixup_type1(pci_chipset_tag_t, pcitag_t, pcitag_t);
-void	ppb_hotplug_rescan(void *, void *);
-void	ppb_hotplug_remove(void *, void *);
+void	ppb_hotplug_rescan(void *);
+void	ppb_hotplug_remove(void *);
 int	ppbprint(void *, const char *pnp);
 
 int
@@ -146,6 +146,7 @@ ppbattach(struct device *parent, struct device *self, void *aux)
 	struct pci_attach_args *pa = aux;
 	pci_chipset_tag_t pc = pa->pa_pc;
 	struct pcibus_attach_args pba;
+	pci_interface_t interface;
 	pci_intr_handle_t ih;
 	pcireg_t busdata, reg, blr;
 	char *name;
@@ -176,9 +177,9 @@ ppbattach(struct device *parent, struct device *self, void *aux)
 	/* Check for PCI Express capabilities and setup hotplug support. */
 	if (pci_get_capability(pc, pa->pa_tag, PCI_CAP_PCIEXPRESS,
 	    &sc->sc_cap_off, &reg) && (reg & PCI_PCIE_XCAP_SI)) {
-		task_set(&sc->sc_insert_task, ppb_hotplug_insert, sc, NULL);
-		task_set(&sc->sc_rescan_task, ppb_hotplug_rescan, sc, NULL);
-		task_set(&sc->sc_remove_task, ppb_hotplug_remove, sc, NULL);
+		task_set(&sc->sc_insert_task, ppb_hotplug_insert, sc);
+		task_set(&sc->sc_rescan_task, ppb_hotplug_rescan, sc);
+		task_set(&sc->sc_remove_task, ppb_hotplug_remove, sc);
 		timeout_set(&sc->sc_to, ppb_hotplug_insert_finish, sc);
 
 #ifdef __i386__
@@ -206,9 +207,18 @@ ppbattach(struct device *parent, struct device *self, void *aux)
 
 	printf("\n");
 
-	if (PCI_VENDOR(pa->pa_id) != PCI_VENDOR_INTEL ||
-	    (PCI_PRODUCT(pa->pa_id) != PCI_PRODUCT_INTEL_82801BA_HPB &&
-	    PCI_PRODUCT(pa->pa_id) != PCI_PRODUCT_INTEL_82801BAM_HPB))
+	interface = PCI_INTERFACE(pa->pa_class);
+
+	/*
+	 * The Intel 82801BAM Hub-to-PCI can decode subtractively but
+	 * doesn't advertise itself as such.
+	 */
+	if (PCI_VENDOR(pa->pa_id) == PCI_VENDOR_INTEL &&
+	    (PCI_PRODUCT(pa->pa_id) == PCI_PRODUCT_INTEL_82801BA_HPB ||
+	    PCI_PRODUCT(pa->pa_id) == PCI_PRODUCT_INTEL_82801BAM_HPB))
+		interface = PPB_INTERFACE_SUBTRACTIVE;
+
+	if (interface != PPB_INTERFACE_SUBTRACTIVE)
 		ppb_alloc_resources(sc, pa);
 
 	for (pin = PCI_INTERRUPT_PIN_A; pin <= PCI_INTERRUPT_PIN_D; pin++) {
@@ -251,7 +261,7 @@ ppbattach(struct device *parent, struct device *self, void *aux)
 		name = malloc(32, M_DEVBUF, M_NOWAIT);
 		if (name) {
 			snprintf(name, 32, "%s pcimem", sc->sc_dev.dv_xname);
-			sc->sc_memex = extent_create(name, 0, 0xffffffff,
+			sc->sc_memex = extent_create(name, 0, (u_long)-1L,
 			    M_DEVBUF, NULL, 0, EX_NOWAIT | EX_FILLED);
 			extent_free(sc->sc_memex, sc->sc_membase,
 			    sc->sc_memlimit - sc->sc_membase + 1,
@@ -263,7 +273,7 @@ ppbattach(struct device *parent, struct device *self, void *aux)
 	blr = pci_conf_read(pc, pa->pa_tag, PPB_REG_PREFMEM);
 	sc->sc_pmembase = (blr & 0x0000fff0) << 16;
 	sc->sc_pmemlimit = (blr & 0xfff00000) | 0x000fffff;
-#ifdef __LP64__	/* XXX because extents use long... */
+#ifdef __LP64__
 	blr = pci_conf_read(pc, pa->pa_tag, PPB_REG_PREFBASE_HI32);
 	sc->sc_pmembase |= ((uint64_t)blr) << 32;
 	blr = pci_conf_read(pc, pa->pa_tag, PPB_REG_PREFLIM_HI32);
@@ -281,14 +291,7 @@ ppbattach(struct device *parent, struct device *self, void *aux)
 		}
 	}
 
-	/*
-	 * The Intel 82801BAM Hub-to-PCI can decode subtractively.
-	 * XXX We probably should handle subtractive decode bridges
-	 * in general.
-	 */
-	if (PCI_VENDOR(pa->pa_id) == PCI_VENDOR_INTEL &&
-	    (PCI_PRODUCT(pa->pa_id) == PCI_PRODUCT_INTEL_82801BA_HPB ||
-	    PCI_PRODUCT(pa->pa_id) == PCI_PRODUCT_INTEL_82801BAM_HPB)) {
+	if (interface == PPB_INTERFACE_SUBTRACTIVE) {
 		if (sc->sc_ioex == NULL)
 			sc->sc_ioex = pa->pa_ioex;
 		if (sc->sc_memex == NULL)
@@ -673,9 +676,9 @@ extern int pci_enumerate_bus(struct pci_softc *,
 #endif
 
 void
-ppb_hotplug_insert(void *arg1, void *arg2)
+ppb_hotplug_insert(void *xsc)
 {
-	struct ppb_softc *sc = arg1;
+	struct ppb_softc *sc = xsc;
 	struct pci_softc *psc = (struct pci_softc *)sc->sc_psc;
 
 	if (!LIST_EMPTY(&psc->sc_devs))
@@ -787,9 +790,9 @@ ppb_hotplug_fixup_type1(pci_chipset_tag_t pc, pcitag_t tag, pcitag_t bridgetag)
 }
 
 void
-ppb_hotplug_rescan(void *arg1, void *arg2)
+ppb_hotplug_rescan(void *xsc)
 {
-	struct ppb_softc *sc = arg1;
+	struct ppb_softc *sc = xsc;
 	struct pci_softc *psc = (struct pci_softc *)sc->sc_psc;
 
 	if (psc) {
@@ -802,9 +805,9 @@ ppb_hotplug_rescan(void *arg1, void *arg2)
 }
 
 void
-ppb_hotplug_remove(void *arg1, void *arg2)
+ppb_hotplug_remove(void *xsc)
 {
-	struct ppb_softc *sc = arg1;
+	struct ppb_softc *sc = xsc;
 	struct pci_softc *psc = (struct pci_softc *)sc->sc_psc;
 
 	if (psc) {

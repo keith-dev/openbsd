@@ -1,4 +1,4 @@
-/*	$OpenBSD: i915_gem_tiling.c,v 1.14 2014/01/30 15:10:48 kettenis Exp $	*/
+/*	$OpenBSD: i915_gem_tiling.c,v 1.16 2015/02/10 01:39:32 jsg Exp $	*/
 /*
  * Copyright (c) 2008-2009 Owain G. Ainsworth <oga@openbsd.org>
  *
@@ -370,7 +370,7 @@ i915_gem_set_tiling(struct drm_device *dev, void *data,
 		}
 	}
 
-	DRM_LOCK();
+	mutex_lock(&dev->struct_mutex);
 	if (args->tiling_mode != obj->tiling_mode ||
 	    args->stride != obj->stride) {
 		/* We need to rebind the object if its current allocation
@@ -417,7 +417,7 @@ i915_gem_set_tiling(struct drm_device *dev, void *data,
 	args->stride = obj->stride;
 	args->tiling_mode = obj->tiling_mode;
 	drm_gem_object_unreference(&obj->base);
-	DRM_UNLOCK();
+	mutex_unlock(&dev->struct_mutex);
 
 	return ret;
 }
@@ -437,7 +437,7 @@ i915_gem_get_tiling(struct drm_device *dev, void *data,
 	if (&obj->base == NULL)
 		return -ENOENT;
 
-	DRM_LOCK();
+	mutex_lock(&dev->struct_mutex);
 
 	args->tiling_mode = obj->tiling_mode;
 	switch (obj->tiling_mode) {
@@ -461,7 +461,7 @@ i915_gem_get_tiling(struct drm_device *dev, void *data,
 		args->swizzle_mode = I915_BIT_6_SWIZZLE_9_10;
 
 	drm_gem_object_unreference(&obj->base);
-	DRM_UNLOCK();
+	mutex_unlock(&dev->struct_mutex);
 
 	return 0;
 }
@@ -483,7 +483,7 @@ i915_gem_swizzle_page(struct vm_page *pg)
 	va = pmap_map_direct(pg);
 #else
 	va = uvm_km_valloc_wait(phys_map, PAGE_SIZE);
-	pmap_kenter_pa(va, VM_PAGE_TO_PHYS(pg), VM_PROT_READ|VM_PROT_WRITE);
+	pmap_kenter_pa(va, VM_PAGE_TO_PHYS(pg), PROT_READ | PROT_WRITE);
 	pmap_update(pmap_kernel());
 #endif
 	vaddr = (char *)va;

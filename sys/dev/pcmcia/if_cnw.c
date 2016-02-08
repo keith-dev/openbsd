@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_cnw.c,v 1.24 2013/08/07 01:06:39 bluhm Exp $	*/
+/*	$OpenBSD: if_cnw.c,v 1.26 2014/12/22 02:28:52 tedu Exp $	*/
 /*-
  * Copyright (c) 1998 The NetBSD Foundation, Inc.
  * All rights reserved.
@@ -68,12 +68,8 @@
 #include <net/if.h>
 #include <net/if_dl.h>
 
-#ifdef INET
 #include <netinet/in.h>
-#include <netinet/in_systm.h>
-#include <netinet/ip.h>
 #include <netinet/if_ether.h>
-#endif
 
 #if NBPFILTER > 0
 #include <net/bpf.h>
@@ -785,11 +781,9 @@ cnw_ioctl(ifp, cmd, data)
 			break;
 		ifp->if_flags |= IFF_UP;
 		switch (ifa->ifa_addr->sa_family) {
-#ifdef INET
 		case AF_INET:
 			arp_ifinit(&sc->sc_arpcom, ifa);
 			break;
-#endif
 		}
 		break;
 

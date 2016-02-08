@@ -1,4 +1,4 @@
-/*	$OpenBSD: init.c,v 1.11 2009/10/27 23:59:23 deraadt Exp $	*/
+/*	$OpenBSD: init.c,v 1.13 2014/12/31 15:45:57 tedu Exp $	*/
 /*	$NetBSD: init.c,v 1.4 1996/05/21 21:53:05 mrg Exp $	*/
 
 /*-
@@ -56,6 +56,11 @@ int     setbit[16] = {1, 2, 4, 010, 020, 040, 0100, 0200, 0400, 01000, 02000,
 void
 init(void)			/* everything for 1st time run */
 {
+	/*
+	 * We need deterministic randomness for the obfuscation schemes
+	 * in io.c and setup.c.
+	 */
+	srandom_deterministic(1);
 	rdata();		/* read data from orig. file */
 	linkdata();
 	poof();
@@ -213,7 +218,6 @@ void
 startup(void)
 {
 	demo = Start();
-	srandomdev();
 	hinted[3] = yes(65, 1, 0);
 	newloc = 1;
 	delhit = 0;

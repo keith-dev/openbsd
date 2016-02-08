@@ -1,7 +1,7 @@
-/* $OpenBSD: d1_srvr.c,v 1.35 2014/08/06 20:11:09 miod Exp $ */
-/* 
+/* $OpenBSD: d1_srvr.c,v 1.49 2015/02/09 10:53:28 jsing Exp $ */
+/*
  * DTLS implementation written by Nagendra Modadugu
- * (nagendra@cs.stanford.edu) for the OpenSSL project 2005.  
+ * (nagendra@cs.stanford.edu) for the OpenSSL project 2005.
  */
 /* ====================================================================
  * Copyright (c) 1999-2007 The OpenSSL Project.  All rights reserved.
@@ -11,7 +11,7 @@
  * are met:
  *
  * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer. 
+ *    notice, this list of conditions and the following disclaimer.
  *
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in
@@ -62,21 +62,21 @@
  * This package is an SSL implementation written
  * by Eric Young (eay@cryptsoft.com).
  * The implementation was written so as to conform with Netscapes SSL.
- * 
+ *
  * This library is free for commercial and non-commercial use as long as
  * the following conditions are aheared to.  The following conditions
  * apply to all code found in this distribution, be it the RC4, RSA,
  * lhash, DES, etc., code; not just the SSL code.  The SSL documentation
  * included with this distribution is covered by the same copyright terms
  * except that the holder is Tim Hudson (tjh@cryptsoft.com).
- * 
+ *
  * Copyright remains Eric Young's, and as such any Copyright notices in
  * the code are not to be removed.
  * If this package is used in a product, Eric Young should be given attribution
  * as the author of the parts of the library used.
  * This can be in the form of a textual message at program startup or
  * in documentation (online or textual) provided with the package.
- * 
+ *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
  * are met:
@@ -91,10 +91,10 @@
  *     Eric Young (eay@cryptsoft.com)"
  *    The word 'cryptographic' can be left out if the rouines from the library
  *    being used are not cryptographic related :-).
- * 4. If you include any Windows specific code (or a derivative thereof) from 
+ * 4. If you include any Windows specific code (or a derivative thereof) from
  *    the apps directory (application code) you must include an acknowledgement:
  *    "This product includes software written by Tim Hudson (tjh@cryptsoft.com)"
- * 
+ *
  * THIS SOFTWARE IS PROVIDED BY ERIC YOUNG ``AS IS'' AND
  * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
  * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
@@ -106,7 +106,7 @@
  * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
- * 
+ *
  * The licence and distribution terms for any publically available version or
  * derivative of this code cannot be changed.  i.e. this code cannot simply be
  * copied and put under another distribution licence
@@ -114,15 +114,16 @@
  */
 
 #include <stdio.h>
+
 #include "ssl_locl.h"
-#include <openssl/buffer.h>
-#include <openssl/rand.h>
-#include <openssl/objects.h>
-#include <openssl/evp.h>
-#include <openssl/x509.h>
-#include <openssl/md5.h>
+
 #include <openssl/bn.h>
+#include <openssl/buffer.h>
 #include <openssl/dh.h>
+#include <openssl/evp.h>
+#include <openssl/md5.h>
+#include <openssl/objects.h>
+#include <openssl/x509.h>
 
 static const SSL_METHOD *dtls1_get_server_method(int ver);
 static int dtls1_send_hello_verify_request(SSL *s);
@@ -181,10 +182,6 @@ dtls1_accept(SSL *s)
 	int ret = -1;
 	int new_state, state, skip = 0;
 	int listen;
-#ifndef OPENSSL_NO_SCTP
-	unsigned char sctpauthkey[64];
-	char labelbuffer[sizeof(DTLS1_SCTP_AUTH_LABEL)];
-#endif
 
 	ERR_clear_error();
 	errno = 0;
@@ -202,14 +199,6 @@ dtls1_accept(SSL *s)
 		SSL_clear(s);
 
 	s->d1->listen = listen;
-#ifndef OPENSSL_NO_SCTP
-	/* Notify SCTP BIO socket to enter handshake
-	 * mode and prevent stream identifier other
-	 * than 0. Will be ignored if no SCTP is used.
-	 */
-	BIO_ctrl(SSL_get_wbio(s), BIO_CTRL_DGRAM_SCTP_SET_IN_HANDSHAKE,
-	    s->in_handshake, NULL);
-#endif
 
 	if (s->cert == NULL) {
 		SSLerr(SSL_F_DTLS1_ACCEPT, SSL_R_NO_CERTIFICATE_SET);
@@ -265,15 +254,16 @@ dtls1_accept(SSL *s)
 				 * the output is sent in a way that TCP likes :-)
 				 * ...but not with SCTP :-)
 				 */
-#ifndef OPENSSL_NO_SCTP
-				if (!BIO_dgram_is_sctp(SSL_get_wbio(s)))
-#endif
 				if (!ssl_init_wbio_buffer(s, 1)) {
 					ret = -1;
 					goto end;
 				}
 
-				ssl3_init_finished_mac(s);
+				if (!ssl3_init_finished_mac(s)) {
+					ret = -1;
+					goto end;
+				}
+
 				s->state = SSL3_ST_SR_CLNT_HELLO_A;
 				s->ctx->stats.sess_accept++;
 			} else {
@@ -298,7 +288,10 @@ dtls1_accept(SSL *s)
 			s->state = SSL3_ST_SW_FLUSH;
 			s->init_num = 0;
 
-			ssl3_init_finished_mac(s);
+			if (!ssl3_init_finished_mac(s)) {
+				ret = -1;
+				goto end;
+			}
 			break;
 
 		case SSL3_ST_SW_HELLO_REQ_C:
@@ -352,44 +345,14 @@ dtls1_accept(SSL *s)
 			s->s3->tmp.next_state = SSL3_ST_SR_CLNT_HELLO_A;
 
 			/* HelloVerifyRequest resets Finished MAC */
-			if (s->version != DTLS1_BAD_VER)
-				ssl3_init_finished_mac(s);
-			break;
-
-#ifndef OPENSSL_NO_SCTP
-		case DTLS1_SCTP_ST_SR_READ_SOCK:
-
-			if (BIO_dgram_sctp_msg_waiting(SSL_get_rbio(s))) {
-				s->s3->in_read_app_data = 2;
-				s->rwstate = SSL_READING;
-				BIO_clear_retry_flags(SSL_get_rbio(s));
-				BIO_set_retry_read(SSL_get_rbio(s));
-				ret = -1;
-				goto end;
-			}
-
-			s->state = SSL3_ST_SR_FINISHED_A;
-			break;
-
-		case DTLS1_SCTP_ST_SW_WRITE_SOCK:
-			ret = BIO_dgram_sctp_wait_for_dry(SSL_get_wbio(s));
-			if (ret < 0)
-				goto end;
-
-			if (ret == 0) {
-				if (s->d1->next_state != SSL_ST_OK) {
-					s->s3->in_read_app_data = 2;
-					s->rwstate = SSL_READING;
-					BIO_clear_retry_flags(SSL_get_rbio(s));
-					BIO_set_retry_read(SSL_get_rbio(s));
+			if (s->version != DTLS1_BAD_VER) {
+				if (!ssl3_init_finished_mac(s)) {
 					ret = -1;
 					goto end;
 				}
 			}
-
-			s->state = s->d1->next_state;
 			break;
-#endif
+
 
 		case SSL3_ST_SW_SRVR_HELLO_A:
 		case SSL3_ST_SW_SRVR_HELLO_B:
@@ -400,22 +363,6 @@ dtls1_accept(SSL *s)
 				goto end;
 
 			if (s->hit) {
-#ifndef OPENSSL_NO_SCTP
-				/* Add new shared key for SCTP-Auth,
-				 * will be ignored if no SCTP used.
-				 */
-				snprintf((char*)labelbuffer,
-				    sizeof(DTLS1_SCTP_AUTH_LABEL),
-				    DTLS1_SCTP_AUTH_LABEL);
-
-				SSL_export_keying_material(s, sctpauthkey,
-				    sizeof(sctpauthkey), labelbuffer,
-				    sizeof(labelbuffer), NULL, 0, 0);
-
-				BIO_ctrl(SSL_get_wbio(s),
-				    BIO_CTRL_DGRAM_SCTP_ADD_AUTH_KEY,
-				    sizeof(sctpauthkey), sctpauthkey);
-#endif
 				if (s->tlsext_ticket_expected)
 					s->state = SSL3_ST_SW_SESSION_TICKET_A;
 				else
@@ -449,28 +396,8 @@ dtls1_accept(SSL *s)
 		case SSL3_ST_SW_KEY_EXCH_B:
 			alg_k = s->s3->tmp.new_cipher->algorithm_mkey;
 
-			/* clear this, it may get reset by
-			 * send_server_key_exchange */
-			if ((s->options & SSL_OP_EPHEMERAL_RSA)
-			)
-				/* option SSL_OP_EPHEMERAL_RSA sends temporary RSA key
-				 * even when forbidden by protocol specs
-				 * (handshake may fail as clients are not required to
-				 * be able to handle this) */
-				s->s3->tmp.use_rsa_tmp = 1;
-			else
-				s->s3->tmp.use_rsa_tmp = 0;
-
-			/* only send if a DH key exchange or
-			 * RSA but we have a sign only certificate */
-			if (s->s3->tmp.use_rsa_tmp
-			|| (alg_k & (SSL_kDHE|SSL_kDHr|SSL_kDHd))
-			|| (alg_k & SSL_kECDHE)
-			|| ((alg_k & SSL_kRSA)
-			&& (s->cert->pkeys[SSL_PKEY_RSA_ENC].privatekey == NULL
-			)
-			)
-			) {
+			/* Only send if using a DH key exchange. */
+			if (alg_k & (SSL_kDHE|SSL_kECDHE)) {
 				dtls1_start_timer(s);
 				ret = dtls1_send_server_key_exchange(s);
 				if (ret <= 0)
@@ -511,36 +438,13 @@ dtls1_accept(SSL *s)
 				skip = 1;
 				s->s3->tmp.cert_request = 0;
 				s->state = SSL3_ST_SW_SRVR_DONE_A;
-#ifndef OPENSSL_NO_SCTP
-				if (BIO_dgram_is_sctp(SSL_get_wbio(s))) {
-					s->d1->next_state = SSL3_ST_SW_SRVR_DONE_A;
-					s->state = DTLS1_SCTP_ST_SW_WRITE_SOCK;
-				}
-#endif
 			} else {
 				s->s3->tmp.cert_request = 1;
 				dtls1_start_timer(s);
 				ret = dtls1_send_certificate_request(s);
 				if (ret <= 0)
 					goto end;
-#ifndef NETSCAPE_HANG_BUG
 				s->state = SSL3_ST_SW_SRVR_DONE_A;
-#ifndef OPENSSL_NO_SCTP
-				if (BIO_dgram_is_sctp(SSL_get_wbio(s))) {
-					s->d1->next_state = SSL3_ST_SW_SRVR_DONE_A;
-					s->state = DTLS1_SCTP_ST_SW_WRITE_SOCK;
-				}
-#endif
-#else
-				s->state = SSL3_ST_SW_FLUSH;
-				s->s3->tmp.next_state = SSL3_ST_SR_CERT_A;
-#ifndef OPENSSL_NO_SCTP
-				if (BIO_dgram_is_sctp(SSL_get_wbio(s))) {
-					s->d1->next_state = s->s3->tmp.next_state;
-					s->s3->tmp.next_state = DTLS1_SCTP_ST_SW_WRITE_SOCK;
-				}
-#endif
-#endif
 				s->init_num = 0;
 			}
 			break;
@@ -597,22 +501,6 @@ dtls1_accept(SSL *s)
 			ret = ssl3_get_client_key_exchange(s);
 			if (ret <= 0)
 				goto end;
-#ifndef OPENSSL_NO_SCTP
-			/* Add new shared key for SCTP-Auth,
-			 * will be ignored if no SCTP used.
-			 */
-			snprintf((char *)labelbuffer,
-			    sizeof(DTLS1_SCTP_AUTH_LABEL),
-			    DTLS1_SCTP_AUTH_LABEL);
-
-			SSL_export_keying_material(s, sctpauthkey,
-			    sizeof(sctpauthkey), labelbuffer,
-			    sizeof(labelbuffer), NULL, 0, 0);
-
-			BIO_ctrl(SSL_get_wbio(s),
-			    BIO_CTRL_DGRAM_SCTP_ADD_AUTH_KEY,
-			    sizeof(sctpauthkey), sctpauthkey);
-#endif
 
 			s->state = SSL3_ST_SR_CERT_VRFY_A;
 			s->init_num = 0;
@@ -630,7 +518,7 @@ dtls1_accept(SSL *s)
 				s->init_num = 0;
 
 				/* We need to get hashes here so if there is
-				 * a client cert, it can be verified */ 
+				 * a client cert, it can be verified */
 				s->method->ssl3_enc->cert_verify_mac(s,
 				    NID_md5, &(s->s3->tmp.cert_verify_md[0]));
 				s->method->ssl3_enc->cert_verify_mac(s,
@@ -647,12 +535,6 @@ dtls1_accept(SSL *s)
 			ret = ssl3_get_cert_verify(s);
 			if (ret <= 0)
 				goto end;
-#ifndef OPENSSL_NO_SCTP
-			if (BIO_dgram_is_sctp(SSL_get_wbio(s)) &&
-			    state == SSL_ST_RENEGOTIATE)
-				s->state = DTLS1_SCTP_ST_SR_READ_SOCK;
-			else
-#endif			
 				s->state = SSL3_ST_SR_FINISHED_A;
 			s->init_num = 0;
 			break;
@@ -708,15 +590,6 @@ dtls1_accept(SSL *s)
 			if (ret <= 0)
 				goto end;
 
-#ifndef OPENSSL_NO_SCTP
-			if (!s->hit) {
-				/* Change to new shared key of SCTP-Auth,
-				 * will be ignored if no SCTP used.
-				 */
-				BIO_ctrl(SSL_get_wbio(s),
-				    BIO_CTRL_DGRAM_SCTP_NEXT_AUTH_KEY, 0, NULL);
-			}
-#endif
 
 			s->state = SSL3_ST_SW_FINISHED_A;
 			s->init_num = 0;
@@ -742,21 +615,8 @@ dtls1_accept(SSL *s)
 			if (s->hit) {
 				s->s3->tmp.next_state = SSL3_ST_SR_FINISHED_A;
 
-#ifndef OPENSSL_NO_SCTP
-				/* Change to new shared key of SCTP-Auth,
-				 * will be ignored if no SCTP used.
-				 */
-				BIO_ctrl(SSL_get_wbio(s),
-				    BIO_CTRL_DGRAM_SCTP_NEXT_AUTH_KEY, 0, NULL);
-#endif
 			} else {
 				s->s3->tmp.next_state = SSL_ST_OK;
-#ifndef OPENSSL_NO_SCTP
-				if (BIO_dgram_is_sctp(SSL_get_wbio(s))) {
-					s->d1->next_state = s->s3->tmp.next_state;
-					s->s3->tmp.next_state = DTLS1_SCTP_ST_SW_WRITE_SOCK;
-				}
-#endif
 			}
 			s->init_num = 0;
 			break;
@@ -821,14 +681,6 @@ end:
 	/* BIO_flush(s->wbio); */
 
 	s->in_handshake--;
-#ifndef OPENSSL_NO_SCTP
-	/* Notify SCTP BIO socket to leave handshake
-	 * mode and prevent stream identifier other
-	 * than 0. Will be ignored if no SCTP is used.
-	 */
-	BIO_ctrl(SSL_get_wbio(s), BIO_CTRL_DGRAM_SCTP_SET_IN_HANDSHAKE,
-	    s->in_handshake, NULL);
-#endif
 
 	if (cb != NULL)
 		cb(s, SSL_CB_ACCEPT_EXIT, ret);
@@ -838,84 +690,65 @@ end:
 int
 dtls1_send_hello_request(SSL *s)
 {
-	unsigned char *p;
-
 	if (s->state == SSL3_ST_SW_HELLO_REQ_A) {
-		p = (unsigned char *)s->init_buf->data;
-		p = dtls1_set_message_header(s, p, SSL3_MT_HELLO_REQUEST, 0, 0, 0);
+		ssl3_handshake_msg_start(s, SSL3_MT_HELLO_REQUEST);
+		ssl3_handshake_msg_finish(s, 0);
 
 		s->state = SSL3_ST_SW_HELLO_REQ_B;
-		/* number of bytes to write */
-		s->init_num = DTLS1_HM_HEADER_LENGTH;
-		s->init_off = 0;
-
-		/* no need to buffer this message, since there are no retransmit 
-		 * requests for it */
 	}
 
 	/* SSL3_ST_SW_HELLO_REQ_B */
-	return (dtls1_do_write(s, SSL3_RT_HANDSHAKE));
+	return (ssl3_handshake_write(s));
 }
 
 int
 dtls1_send_hello_verify_request(SSL *s)
 {
-	unsigned int msg_len;
-	unsigned char *msg, *buf, *p;
+	unsigned char *d, *p;
 
 	if (s->state == DTLS1_ST_SW_HELLO_VERIFY_REQUEST_A) {
-		buf = (unsigned char *)s->init_buf->data;
+		d = p = ssl3_handshake_msg_start(s,
+		    DTLS1_MT_HELLO_VERIFY_REQUEST);
 
-		msg = p = &(buf[DTLS1_HM_HEADER_LENGTH]);
 		*(p++) = s->version >> 8;
 		*(p++) = s->version & 0xFF;
 
 		if (s->ctx->app_gen_cookie_cb == NULL ||
-			s->ctx->app_gen_cookie_cb(s, s->d1->cookie,
-		&(s->d1->cookie_len)) == 0) {
-			SSLerr(SSL_F_DTLS1_SEND_HELLO_VERIFY_REQUEST, ERR_R_INTERNAL_ERROR);
+		    s->ctx->app_gen_cookie_cb(s, s->d1->cookie,
+			&(s->d1->cookie_len)) == 0) {
+			SSLerr(SSL_F_DTLS1_SEND_HELLO_VERIFY_REQUEST,
+			    ERR_R_INTERNAL_ERROR);
 			return 0;
 		}
 
 		*(p++) = (unsigned char) s->d1->cookie_len;
 		memcpy(p, s->d1->cookie, s->d1->cookie_len);
 		p += s->d1->cookie_len;
-		msg_len = p - msg;
 
-		dtls1_set_message_header(s, buf,
-		DTLS1_MT_HELLO_VERIFY_REQUEST, msg_len, 0, msg_len);
+		ssl3_handshake_msg_finish(s, p - d);
 
 		s->state = DTLS1_ST_SW_HELLO_VERIFY_REQUEST_B;
-		/* number of bytes to write */
-		s->init_num = p - buf;
-		s->init_off = 0;
 	}
 
 	/* s->state = DTLS1_ST_SW_HELLO_VERIFY_REQUEST_B */
-	return (dtls1_do_write(s, SSL3_RT_HANDSHAKE));
+	return (ssl3_handshake_write(s));
 }
 
 int
 dtls1_send_server_hello(SSL *s)
 {
-	unsigned char *buf;
+	unsigned char *bufend;
 	unsigned char *p, *d;
-	int i;
 	unsigned int sl;
-	unsigned long l;
 
 	if (s->state == SSL3_ST_SW_SRVR_HELLO_A) {
-		buf = (unsigned char *)s->init_buf->data;
-		p = s->s3->server_random;
-		RAND_pseudo_bytes(p, SSL3_RANDOM_SIZE);
-
-		/* Do the message type and length last */
-		d = p= &(buf[DTLS1_HM_HEADER_LENGTH]);
+		d = p = ssl3_handshake_msg_start(s, SSL3_MT_SERVER_HELLO);
 
 		*(p++) = s->version >> 8;
-		*(p++) = s->version&0xff;
+		*(p++) = s->version & 0xff;
 
 		/* Random stuff */
+		arc4random_buf(s->s3->server_random, SSL3_RANDOM_SIZE);
 		memcpy(p, s->s3->server_random, SSL3_RANDOM_SIZE);
 		p += SSL3_RANDOM_SIZE;
 
@@ -932,7 +765,8 @@ dtls1_send_server_hello(SSL *s)
 
 		sl = s->session->session_id_length;
 		if (sl > sizeof s->session->session_id) {
-			SSLerr(SSL_F_DTLS1_SEND_SERVER_HELLO, ERR_R_INTERNAL_ERROR);
+			SSLerr(SSL_F_DTLS1_SEND_SERVER_HELLO,
+			    ERR_R_INTERNAL_ERROR);
 			return -1;
 		}
 		*(p++) = sl;
@@ -942,58 +776,40 @@ dtls1_send_server_hello(SSL *s)
 		/* put the cipher */
 		if (s->s3->tmp.new_cipher == NULL)
 			return -1;
-		i = ssl3_put_cipher_by_char(s->s3->tmp.new_cipher, p);
-		p += i;
+		s2n(ssl3_cipher_get_value(s->s3->tmp.new_cipher), p);
 
 		/* put the compression method */
 		*(p++) = 0;
 
-		if ((p = ssl_add_serverhello_tlsext(s, p, buf + SSL3_RT_MAX_PLAIN_LENGTH)) == NULL) {
-			SSLerr(SSL_F_DTLS1_SEND_SERVER_HELLO, ERR_R_INTERNAL_ERROR);
+		bufend = (unsigned char *)s->init_buf->data +
+		    SSL3_RT_MAX_PLAIN_LENGTH;
+		if ((p = ssl_add_serverhello_tlsext(s, p, bufend)) == NULL) {
+			SSLerr(SSL_F_DTLS1_SEND_SERVER_HELLO,
+			    ERR_R_INTERNAL_ERROR);
 			return -1;
 		}
 
-		/* do the header */
-		l = (p - d);
-		d = buf;
-
-		d = dtls1_set_message_header(s, d, SSL3_MT_SERVER_HELLO, l, 0, l);
+		ssl3_handshake_msg_finish(s, p - d);
 
 		s->state = SSL3_ST_SW_SRVR_HELLO_B;
-		/* number of bytes to write */
-		s->init_num = p - buf;
-		s->init_off = 0;
-
-		/* buffer the message to handle re-xmits */
-		dtls1_buffer_message(s, 0);
 	}
 
 	/* SSL3_ST_SW_SRVR_HELLO_B */
-	return (dtls1_do_write(s, SSL3_RT_HANDSHAKE));
+	return (ssl3_handshake_write(s));
 }
 
 int
 dtls1_send_server_done(SSL *s)
 {
-	unsigned char *p;
-
 	if (s->state == SSL3_ST_SW_SRVR_DONE_A) {
-		p = (unsigned char *)s->init_buf->data;
-
-		/* do the header */
-		p = dtls1_set_message_header(s, p, SSL3_MT_SERVER_DONE, 0, 0, 0);
+		ssl3_handshake_msg_start(s, SSL3_MT_SERVER_DONE);
+		ssl3_handshake_msg_finish(s, 0);
 
 		s->state = SSL3_ST_SW_SRVR_DONE_B;
-		/* number of bytes to write */
-		s->init_num = DTLS1_HM_HEADER_LENGTH;
-		s->init_off = 0;
-
-		/* buffer the message to handle re-xmits */
-		dtls1_buffer_message(s, 0);
 	}
 
 	/* SSL3_ST_SW_SRVR_DONE_B */
-	return (dtls1_do_write(s, SSL3_RT_HANDSHAKE));
+	return (ssl3_handshake_write(s));
 }
 
 int
@@ -1001,7 +817,6 @@ dtls1_send_server_key_exchange(SSL *s)
 {
 	unsigned char *q;
 	int j, num;
-	RSA *rsa;
 	unsigned char md_buf[MD5_DIGEST_LENGTH + SHA_DIGEST_LENGTH];
 	unsigned int u;
 	DH *dh = NULL, *dhp;
@@ -1031,28 +846,7 @@ dtls1_send_server_key_exchange(SSL *s)
 
 		r[0] = r[1] = r[2] = r[3] = NULL;
 		n = 0;
-		if (type & SSL_kRSA) {
-			rsa = cert->rsa_tmp;
-			if ((rsa == NULL) && (s->cert->rsa_tmp_cb != NULL)) {
-				rsa = s->cert->rsa_tmp_cb(s, 0,
-				    SSL_C_PKEYLENGTH(s->s3->tmp.new_cipher));
-				if (rsa == NULL) {
-					al = SSL_AD_HANDSHAKE_FAILURE;
-					SSLerr(SSL_F_DTLS1_SEND_SERVER_KEY_EXCHANGE, SSL_R_ERROR_GENERATING_TMP_RSA_KEY);
-					goto f_err;
-				}
-				RSA_up_ref(rsa);
-				cert->rsa_tmp = rsa;
-			}
-			if (rsa == NULL) {
-				al = SSL_AD_HANDSHAKE_FAILURE;
-				SSLerr(SSL_F_DTLS1_SEND_SERVER_KEY_EXCHANGE, SSL_R_MISSING_TMP_RSA_KEY);
-				goto f_err;
-			}
-			r[0] = rsa->n;
-			r[1] = rsa->e;
-			s->s3->tmp.use_rsa_tmp = 1;
-		} else
+
 		if (type & SSL_kDHE) {
 			dhp = cert->dh_tmp;
 			if ((dhp == NULL) && (s->cert->dh_tmp_cb != NULL))
@@ -1094,8 +888,7 @@ dtls1_send_server_key_exchange(SSL *s)
 			r[0] = dh->p;
 			r[1] = dh->g;
 			r[2] = dh->pub_key;
-		} else
-		if (type & SSL_kECDHE) {
+		} else if (type & SSL_kECDHE) {
 			const EC_GROUP *group;
 
 			ecdhp = cert->ecdh_tmp;
@@ -1114,16 +907,12 @@ dtls1_send_server_key_exchange(SSL *s)
 			}
 
 			/* Duplicate the ECDH structure. */
-			if (ecdhp == NULL) {
-				SSLerr(SSL_F_DTLS1_SEND_SERVER_KEY_EXCHANGE, ERR_R_ECDH_LIB);
-				goto err;
-			}
 			if ((ecdh = EC_KEY_dup(ecdhp)) == NULL) {
 				SSLerr(SSL_F_DTLS1_SEND_SERVER_KEY_EXCHANGE, ERR_R_ECDH_LIB);
 				goto err;
 			}
-
 			s->s3->tmp.ecdh = ecdh;
+
 			if ((EC_KEY_get0_public_key(ecdh) == NULL) ||
 			    (EC_KEY_get0_private_key(ecdh) == NULL) ||
 			    (s->options & SSL_OP_SINGLE_ECDH_USE)) {
@@ -1141,7 +930,7 @@ dtls1_send_server_key_exchange(SSL *s)
 			}
 
 			/* XXX: For now, we only support ephemeral ECDH
-			 * keys over named (not generic) curves. For 
+			 * keys over named (not generic) curves. For
 			 * supported named curves, curve_id is non-zero.
 			 */
 			if ((curve_id = tls1_ec_nid2curve_id(
@@ -1181,11 +970,11 @@ dtls1_send_server_key_exchange(SSL *s)
 			BN_CTX_free(bn_ctx);
 			bn_ctx = NULL;
 
-			/* XXX: For now, we only support named (not 
+			/* XXX: For now, we only support named (not
 			 * generic) curves in ECDH ephemeral key exchanges.
 			 * In this situation, we need four additional bytes
 			 * to encode the entire ServerECDHParams
-			 * structure. 
+			 * structure.
 			 */
 			n = 4 + encodedlen;
 
@@ -1196,10 +985,10 @@ dtls1_send_server_key_exchange(SSL *s)
 			r[1] = NULL;
 			r[2] = NULL;
 			r[3] = NULL;
-		} else
-		{
+		} else {
 			al = SSL_AD_HANDSHAKE_FAILURE;
-			SSLerr(SSL_F_DTLS1_SEND_SERVER_KEY_EXCHANGE, SSL_R_UNKNOWN_KEY_EXCHANGE_TYPE);
+			SSLerr(SSL_F_DTLS1_SEND_SERVER_KEY_EXCHANGE,
+			    SSL_R_UNKNOWN_KEY_EXCHANGE_TYPE);
 			goto f_err;
 		}
 		for (i = 0; r[i] != NULL; i++) {
@@ -1264,8 +1053,9 @@ dtls1_send_server_key_exchange(SSL *s)
 				q = md_buf;
 				j = 0;
 				for (num = 2; num > 0; num--) {
-					EVP_DigestInit_ex(&md_ctx, (num == 2)
-					    ? s->ctx->md5 : s->ctx->sha1, NULL);
+					if (!EVP_DigestInit_ex(&md_ctx, (num == 2)
+					    ? s->ctx->md5 : s->ctx->sha1, NULL))
+						goto err;
 					EVP_DigestUpdate(&md_ctx,
 					    &(s->s3->client_random[0]),
 					    SSL3_RANDOM_SIZE);
@@ -1415,17 +1205,6 @@ dtls1_send_certificate_request(SSL *s)
 
 		s->init_num = n + DTLS1_HM_HEADER_LENGTH;
 		s->init_off = 0;
-#ifdef NETSCAPE_HANG_BUG
-/* XXX: what to do about this? */
-		p = (unsigned char *)s->init_buf->data + s->init_num;
-
-		/* do the header */
-		*(p++) = SSL3_MT_SERVER_DONE;
-		*(p++) = 0;
-		*(p++) = 0;
-		*(p++) = 0;
-		s->init_num += 4;
-#endif
 
 		/* XDTLS:  set message header ? */
 		msg_len = s->init_num - DTLS1_HM_HEADER_LENGTH;
@@ -1522,7 +1301,7 @@ dtls1_send_newsession_ticket(SSL *s)
 				return -1;
 			}
 		} else {
-			RAND_pseudo_bytes(iv, 16);
+			arc4random_buf(iv, 16);
 			EVP_EncryptInit_ex(&ctx, EVP_aes_128_cbc(), NULL,
 			    tctx->tlsext_tick_aes_key, iv);
 			HMAC_Init_ex(&hctx, tctx->tlsext_tick_hmac_key, 16,

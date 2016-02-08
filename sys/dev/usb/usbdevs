@@ -1,4 +1,4 @@
-$OpenBSD: usbdevs,v 1.635 2014/06/13 21:43:56 stsp Exp $
+$OpenBSD: usbdevs,v 1.645 2015/02/16 14:51:44 sthen Exp $
 /* $NetBSD: usbdevs,v 1.322 2003/05/10 17:47:14 hamajima Exp $ */
 
 /*
@@ -274,6 +274,7 @@ vendor SMC		0x0707	Standard Microsystems
 vendor PUTERCOM		0x0708	Putercom
 vendor MCT		0x0711	MCT
 vendor IMATION		0x0718	Imation
+vendor DOMAIN		0x071b	Domain Technologies, Inc.
 vendor SUSTEEN		0x0731	Susteen
 vendor EICON		0x0734	Eicon Networks
 vendor STOLLMANN	0x0742	Stollmann
@@ -451,6 +452,7 @@ vendor CTC		0x0e5e	CONWISE Technology
 vendor HAWKING		0x0e66	Hawking
 vendor FOSSIL		0x0e67	Fossil
 vendor GMATE		0x0e7e	G.Mate
+vendor MEDIATEK		0x0e8d	MediaTek Inc.
 vendor OTI		0x0ea0	Ours Technology
 vendor PILOTECH		0x0eaf  Pilotech
 vendor NOVATECH		0x0eb0	Nova Tech
@@ -607,6 +609,7 @@ vendor RTSYSTEMS	0x2100	RT Systems
 vendor DLINK3		0x2101	D-Link
 vendor VIALABS		0x2109	VIA Labs
 vendor MOTOROLA2	0x22b8	Motorola
+vendor ARDUINO		0x2341	Arduino SA
 vendor TPLINK		0x2357	TP-Link
 vendor TRIPPLITE	0x2478	Tripp-Lite
 vendor NHJ		0x2770  NHJ
@@ -976,6 +979,9 @@ product APPLE ISIGHT		0x8502	iSight
 /* Araneus Information Systems products */
 product ARANEUS ALEA		0x0001	True Random Number Generator
 
+/* Arduino SA product */
+product ARDUINO LEONARDO	0x8036	Leonardo
+
 /* Arkmicro products */
 product ARKMICRO ARK3116	0x0232	ARK3116 Serial
 
@@ -1031,8 +1037,9 @@ product ASUSTEK WL140		0x3300	WL-140
 product ATEN UC1284		0x2001	Parallel
 product ATEN UC10T		0x2002	10Mbps Ethernet
 product ATEN UC110T		0x2007	UC-110T Ethernet
-product ATEN UC232A		0x2008	Serial
+product ATEN UC232A		0x2008	UC232A Serial
 product ATEN UC210T		0x2009	UC210T Ethernet
+product ATEN UC2324		0x2011	UC2324 Serial
 product ATEN DSB650C		0x4000	DSB-650C
 
 /* Atheros Communications products */
@@ -1571,6 +1578,9 @@ product DISPLAYLINK POLARIS2	0x0117	Polaris2 USB dock
 /* DMI products */
 product DMI SA2_0		0xb001	Storage Adapter
 
+/* Domain Technologies products */
+product DOMAIN ROCKCHIP		0x3203	RockChip Media Player
+
 /* DrayTek products */
 product DRAYTEK VIGOR550	0x0550	Vigor550
 product DRAYTEK VIGOR600	0x0600	Vigor600
@@ -1956,6 +1966,7 @@ product FUJITSUCOMP KEYBOARD7	0x00a2	Type 7 Keyboard
 product FUJITSUCOMP MOUSE	0x0100	Type 6 Mouse
 product FUJITSUCOMP FX5204PS	0x0423	Smart Power Strip FX-5204PS
 product FUJITSUCOMP FX5251WB	0x042a	Base Station FX-5251WB
+product FUJITSUCOMP VIRTETH	0xa4a2	Virtual Eth Device
 
 /* Fujitsu Siemens Computers products */
 product FSC E5400		0x1009	PrismGT USB 2.0 WLAN
@@ -2252,7 +2263,11 @@ product INTEL EASYPC_CAMERA	0x0110	EasyPC
 product INTEL AP310		0x0200	AP310 AnyPoint II
 product INTEL I2011B		0x1111	Wireless 2011B
 product INTEL2 RMH_3		0x8000	Rate Matching Hub
+product INTEL2 RMH_5		0x8001	Rate Matching Hub
+product INTEL2 RMH_7		0x8002	Rate Matching Hub
 product INTEL2 RMH_4		0x8008	Rate Matching Hub
+product INTEL2 RMH_6		0x8009	Rate Matching Hub
+product INTEL2 RMH_8		0x800a	Rate Matching Hub
 product INTEL TESTBOARD		0x9890	82930 test board
 
 /* InterBiometrics products */
@@ -2487,6 +2502,7 @@ product LOGITECH QUICKCAMWEB	0x0801	QuickCam Web
 product LOGITECH WEBCAMC200	0x0802	Webcam C200
 product LOGITECH WEBCAMC500	0x0807	Webcam C500
 product LOGITECH QUICKCAMPRO	0x0810	QuickCam Pro
+product LOGITECH WEBCAMC310	0x081b	Webcam C310
 product LOGITECH HDPROC910	0x0821	HD Pro Webcam C910
 product LOGITECH QUICKCAMEXP	0x0840	QuickCam Express
 product LOGITECH QUICKCAM	0x0850	QuickCam
@@ -2817,6 +2833,10 @@ product MCT ML_4500		0x0302	ML-4500
 /* MDS products */
 product MDS ISDBT		0x0001	MDS ISDB-T tuner
 
+/* MediaTek Inc. products */
+product MEDIATEK UMASS		0x0002	USB MSM installer
+product MEDIATEK DC_4COM	0x00a5	UMTS USB modem
+
 /* MEI products */
 product MEI CASHFLOW_SC		0x1100	Cashflow-SC
 product MEI S2000		0x1101	Series 2000
@@ -2979,8 +2999,11 @@ product MOBILITY EASIDOCK	0x0304	EasiDock Ethernet
 product MOSCHIP MCS7703		0x7703	MCS7703 Serial
 product	MOSCHIP	MCS7715		0x7715	MCS7715	Serial Parallel
 product MOSCHIP MCS7730		0x7730	MCS7730 Ethernet
+product MOSCHIP MCS7810		0x7810	MCS7810 Serial
+product MOSCHIP MCS7820		0x7820	MCS7820 Serial
 product MOSCHIP MCS7830		0x7830	MCS7830 Ethernet
 product MOSCHIP MCS7832		0x7832	MCS7832 Ethernet
+product MOSCHIP MCS7840		0x7840	MCS7840 Serial
 
 /* Motorola products */
 product MOTOROLA MC141555	0x1555	MC141555 hub controller
@@ -3204,6 +3227,7 @@ product PALM ZIRE		0x0070	Palm Zire
 product PANASONIC LS120		0x0901	LS-120
 product PANASONIC SDCAAE	0x1b00	MultiMediaCard
 product PANASONIC TYTP50P6S	0x3900	TY-TP50P6-S 50in Touch Panel
+product PANASONIC N5HBZ0000055	0x3904	UB94
 
 /* Papouch products */
 product PAPOUCH SB485_1		0x0100	SB485 USB-485/422
@@ -3804,7 +3828,7 @@ product SILABS3 GPRS_MODEM	0xea61	GPRS Modem
 product SILABS4 100EU_MODEM	0xea61	GPRS Modem 100EU
 product SILABS CP210X_3		0xea70	CP210x Serial
 product SILABS INFINITY_MIC	0xea71	Infinity GPS-MIC-1
-product SILABS CP210X_4		0xea80	CP210x Serial
+product SILABS CP2110		0xea80	CP2110 USB HID Serial
 product SILABS USBSCOPE50	0xf001	USBscope50
 product SILABS USBWAVE12	0xf002	USBwave12
 product SILABS USBPULSE100	0xf003	USBpulse100

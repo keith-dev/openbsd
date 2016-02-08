@@ -1,4 +1,4 @@
-/*	$OpenBSD: pstat.c,v 1.90 2014/03/19 04:17:33 guenther Exp $	*/
+/*	$OpenBSD: pstat.c,v 1.98 2015/02/10 11:16:04 miod Exp $	*/
 /*	$NetBSD: pstat.c,v 1.27 1996/10/23 22:50:06 cgd Exp $	*/
 
 /*-
@@ -30,10 +30,10 @@
  * SUCH DAMAGE.
  */
 
-#include <sys/param.h>
+#include <sys/param.h>	/* MAXCOMLEN DEV_BSIZE */
+#include <sys/types.h>
 #include <sys/proc.h>
 #include <sys/time.h>
-#include <sys/buf.h>
 #include <sys/vnode.h>
 #include <sys/ucred.h>
 #include <sys/stat.h>
@@ -55,6 +55,7 @@
 #include <sys/sysctl.h>
 
 #include <stdint.h>
+#include <endian.h>
 #include <err.h>
 #include <kvm.h>
 #include <limits.h>
@@ -83,6 +84,11 @@ struct nlist vnodenl[] = {
 
 struct nlist *globalnl;
 
+struct e_vnode {
+	struct vnode *vptr;
+	struct vnode vnode;
+};
+
 int	usenumflag;
 int	totalflag;
 int	kflag;
@@ -109,8 +115,6 @@ struct mount *
 	getmnt(struct mount *);
 struct e_vnode *
 	kinfo_vnodes(int *);
-struct e_vnode *
-	loadvnodes(int *);
 void	mount_print(struct mount *);
 void	nfs_header(void);
 int	nfs_print(struct vnode *);
@@ -187,7 +191,7 @@ main(int argc, char *argv[])
 	if ((dformat == 0 && argc > 0) || (dformat && argc == 0))
 		usage();
 
-	need_nlist = vnodeflag || dformat;
+	need_nlist = vnodeflag || totalflag || dformat;
 
 	/*
 	 * Discard setgid privileges if not the running kernel so that bad
@@ -212,7 +216,7 @@ main(int argc, char *argv[])
 	if (dformat) {
 		struct nlist *nl;
 		int longformat = 0, stringformat = 0, error = 0, n;
-		int mask = ~0;
+		uint32_t mask = ~0;
 		char format[10], buf[1024];
 		
 		n = strlen(dformat);
@@ -272,7 +276,7 @@ main(int argc, char *argv[])
 		kvm_nlist(kd, nl);
 		globalnl = nl;
 		for (i = 0; i < argc; i++) {
-			long long v;
+			uint64_t v;
 
 			printf("%s ", argv[i]);
 			if (!nl[i].n_value && argv[i][0] == '0') {
@@ -296,8 +300,22 @@ main(int argc, char *argv[])
 					printf(format, &buf);
 				else if (longformat)
 					printf(format, v);
-				else
-					printf(format, ((int)v) & mask);
+				else {
+#if BYTE_ORDER == BIG_ENDIAN
+					switch (mask) {
+					case 0xff:
+						v >>= 8;
+						/* FALLTHROUGH */
+					case 0xffff:
+						v >>= 16;
+						/* FALLTHROUGH */
+					case 0xffffffff:
+						v >>= 32;
+						break;
+					}
+#endif
+					printf(format, ((uint32_t)v) & mask);
+				}
 			}
 			printf("\n");
 		}
@@ -334,11 +352,13 @@ vnodemode(void)
 
 	globalnl = vnodenl;
 
-	e_vnodebase = loadvnodes(&numvnodes);
+	e_vnodebase = kinfo_vnodes(&numvnodes);
 	if (totalflag) {
 		(void)printf("%7d vnodes\n", numvnodes);
 		return;
 	}
+	if (!e_vnodebase)
+		return;
 	endvnode = e_vnodebase + numvnodes;
 	(void)printf("%d active vnodes\n", numvnodes);
 
@@ -777,34 +797,6 @@ mount_print(struct mount *mp)
 	(void)printf("\n");
 }
 
-struct e_vnode *
-loadvnodes(int *avnodes)
-{
-	int mib[2];
-	size_t copysize;
-	struct e_vnode *vnodebase;
-
-	if (memf != NULL) {
-		/*
-		 * do it by hand
-		 */
-		return (kinfo_vnodes(avnodes));
-	}
-	mib[0] = CTL_KERN;
-	mib[1] = KERN_VNODE;
-	if (sysctl(mib, 2, NULL, &copysize, NULL, 0) == -1)
-		err(1, "sysctl: KERN_VNODE");
-	if ((vnodebase = malloc(copysize)) == NULL)
-		err(1, "malloc: vnode table");
-	if (sysctl(mib, 2, vnodebase, &copysize, NULL, 0) == -1)
-		err(1, "sysctl: KERN_VNODE");
-	if (copysize % sizeof(struct e_vnode))
-		errx(1, "vnode size mismatch");
-	*avnodes = copysize / sizeof(struct e_vnode);
-
-	return (vnodebase);
-}
-
 /*
  * simulate what a running kernel does in kinfo_vnode
  */
@@ -826,6 +818,7 @@ kinfo_vnodes(int *avnodes)
 			err(1, "sysctl(KERN_NUMVNODES) failed");
 	} else
 		KGET(V_NUMV, numvnodes);
+	*avnodes = numvnodes;
 	if ((vbuf = calloc(numvnodes + 20,
 	    sizeof(struct vnode *) + sizeof(struct vnode))) == NULL)
 		err(1, "malloc: vnode buffer");
@@ -834,11 +827,12 @@ kinfo_vnodes(int *avnodes)
 	    (sizeof(struct vnode *) + sizeof(struct vnode));
 	KGET(V_MOUNTLIST, kvm_mountlist);
 	num = 0;
-	TAILQ_FOREACH(mp, &kvm_mountlist, mnt_list) {
-		KGET2(mp, &mount, sizeof(mount), "mount entry");
+	for (mp = TAILQ_FIRST(&kvm_mountlist); mp != NULL;
+	    mp = TAILQ_NEXT(&mount, mnt_list)) {
+		KGETRET(mp, &mount, sizeof(mount), "mount entry");
 		for (vp = LIST_FIRST(&mount.mnt_vnodelist);
 		    vp != NULL; vp = LIST_NEXT(&vnode, v_mntvnodes)) {
-			KGET2(vp, &vnode, sizeof(vnode), "vnode");
+			KGETRET(vp, &vnode, sizeof(vnode), "vnode");
 			if ((bp + sizeof(struct vnode *) +
 			    sizeof(struct vnode)) > evbuf)
 				/* XXX - should realloc */
@@ -897,9 +891,9 @@ ttymode(void)
 		mib[0] = CTL_KERN;
 		mib[1] = KERN_TTY;
 		mib[2] = KERN_TTY_INFO;
-		nlen = ntty * sizeof(struct itty);
-		if ((itp = malloc(nlen)) == NULL)
+		if ((itp = reallocarray(NULL, ntty, sizeof(struct itty))) == NULL)
 			err(1, "malloc");
+		nlen = ntty * sizeof(struct itty);
 		if (sysctl(mib, 3, itp, &nlen, NULL, 0) < 0)
 			err(1, "sysctl(KERN_TTY_INFO) failed");
 		for (i = 0; i < ntty; i++)
@@ -991,7 +985,7 @@ filemode(void)
 {
 	struct kinfo_file *kf;
 	char flagbuf[16], *fbp;
-	static char *dtypes[] = { "???", "inode", "socket", "pipe", "kqueue", "crypto", "systrace" };
+	static char *dtypes[] = { "???", "inode", "socket", "pipe", "kqueue", "???", "systrace" };
 	int mib[2], maxfile, nfile;
 	size_t len;
 

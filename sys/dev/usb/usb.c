@@ -1,4 +1,4 @@
-/*	$OpenBSD: usb.c,v 1.100 2014/07/12 18:48:52 tedu Exp $	*/
+/*	$OpenBSD: usb.c,v 1.106 2015/02/10 21:56:09 miod Exp $	*/
 /*	$NetBSD: usb.c,v 1.77 2003/01/01 00:10:26 thorpej Exp $	*/
 
 /*
@@ -195,16 +195,13 @@ usb_attach(struct device *parent, struct device *self, void *aux)
 	usb_init_task(&sc->sc_explore_task, usb_explore, sc,
 	    USB_TASK_TYPE_EXPLORE);
 
-	/* XXX we should have our own level */
-	sc->sc_bus->soft = softintr_establish(IPL_SOFTNET,
+	sc->sc_bus->soft = softintr_establish(IPL_SOFTUSB,
 	    sc->sc_bus->methods->soft_intr, sc->sc_bus);
 	if (sc->sc_bus->soft == NULL) {
 		printf("%s: can't register softintr\n", sc->sc_dev.dv_xname);
 		sc->sc_bus->dying = 1;
 		return;
 	}
-
-
 
 	if (!usb_attach_roothub(sc)) {
 		struct usbd_device *dev = sc->sc_bus->root_hub;
@@ -263,6 +260,13 @@ usb_detach_roothub(struct usb_softc *sc)
 	 * it.
 	 */
 	sc->sc_bus->flags |= USB_BUS_DISCONNECTING;
+	/*
+	 * Reset the dying flag in case it has been set by the interrupt
+	 * handler when unplugging an HC card otherwise the task wont be
+	 * scheduled.  This is safe since a dead HC should not trigger
+	 * new interrupt.
+	 */
+	sc->sc_bus->dying = 0;
 	usb_needs_explore(sc->sc_bus->root_hub, 0);
 
 	usb_wait_task(sc->sc_bus->root_hub, &sc->sc_explore_task);
@@ -292,8 +296,13 @@ usb_add_task(struct usbd_device *dev, struct usb_task *task)
 {
 	int s;
 
-	/* Don't add task if the device's root hub is dying. */
-	if (usbd_is_dying(dev))
+	/*
+	 * If the thread detaching ``dev'' is sleeping, waiting
+	 * for all submitted transfers to finish, we must be able
+	 * to enqueue abort tasks.  Otherwise timeouts can't give
+	 * back submitted transfers to the stack.
+	 */
+	if (usbd_is_dying(dev) && (task->type != USB_TASK_TYPE_ABORT))
 		return;
 
 	DPRINTFN(2,("%s: task=%p state=%d type=%d\n", __func__, task,
@@ -449,12 +458,9 @@ usb_abort_task_thread(void *arg)
 		 */
 		task->state |= USB_TASK_STATE_RUN;
 		task->state &= ~USB_TASK_STATE_ONQ;
-		/* Don't actually execute the task if dying. */
-		if (!usbd_is_dying(task->dev)) {
-			splx(s);
-			task->fun(task->arg);
-			s = splusb();
-		}
+		splx(s);
+		task->fun(task->arg);
+		s = splusb();
 		task->state &= ~USB_TASK_STATE_RUN;
 		if (task->state == USB_TASK_STATE_NONE)
 			wakeup(task);
@@ -637,7 +643,7 @@ usbioctl(dev_t devt, u_long cmd, caddr_t data, int flag, struct proc *p)
 			uio.uio_procp = p;
 			ptr = malloc(len, M_TEMP, M_WAITOK);
 			if (uio.uio_rw == UIO_WRITE) {
-				error = uiomove(ptr, len, &uio);
+				error = uiomovei(ptr, len, &uio);
 				if (error)
 					goto ret;
 			}
@@ -654,7 +660,7 @@ usbioctl(dev_t devt, u_long cmd, caddr_t data, int flag, struct proc *p)
 			len = ur->ucr_actlen;
 		if (len != 0) {
 			if (uio.uio_rw == UIO_READ) {
-				error = uiomove(ptr, len, &uio);
+				error = uiomovei(ptr, len, &uio);
 				if (error)
 					goto ret;
 			}
@@ -782,7 +788,7 @@ usbioctl(dev_t devt, u_long cmd, caddr_t data, int flag, struct proc *p)
 		uio.uio_segflg = UIO_USERSPACE;
 		uio.uio_rw = UIO_READ;
 		uio.uio_procp = p;
-		error = uiomove((void *)cdesc, len, &uio);
+		error = uiomovei((void *)cdesc, len, &uio);
 		free(cdesc, M_TEMP, 0);
 		return (error);
 	}
@@ -835,8 +841,8 @@ usb_explore(void *v)
 		timersub(&now, &sc->sc_ptime, &waited);
 		waited_ms = waited.tv_sec * 1000 + waited.tv_usec / 1000;
 
-		pwrdly = sc->sc_bus->root_hub->hub->hubdesc.bPwrOn2PwrGood * 
-		    UHD_PWRON_FACTOR + USB_EXTRA_POWER_UP_TIME;
+		pwrdly = sc->sc_bus->root_hub->hub->powerdelay +
+		    USB_EXTRA_POWER_UP_TIME;
 		if (pwrdly > waited_ms)
 			usb_delay_ms(sc->sc_bus, pwrdly - waited_ms);
 	}

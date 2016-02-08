@@ -1,4 +1,4 @@
-/*	$OpenBSD: bus_dma.c,v 1.32 2014/07/12 18:44:41 tedu Exp $	*/
+/*	$OpenBSD: bus_dma.c,v 1.34 2015/01/24 15:13:55 kettenis Exp $	*/
 /*-
  * Copyright (c) 1996, 1997 The NetBSD Foundation, Inc.
  * All rights reserved.
@@ -387,7 +387,7 @@ _bus_dmamem_alloc(bus_dma_tag_t t, bus_size_t size, bus_size_t alignment,
 {
 
 	return (_bus_dmamem_alloc_range(t, size, alignment, boundary,
-	    segs, nsegs, rsegs, flags, (paddr_t)0, (paddr_t)-1));
+	    segs, nsegs, rsegs, flags, (bus_addr_t)0, (bus_addr_t)-1));
 }
 
 /*
@@ -456,8 +456,8 @@ _bus_dmamem_map(bus_dma_tag_t t, bus_dma_segment_t *segs, int nsegs,
 			 * alloc
 			 */
 			ret = pmap_enter(pmap_kernel(), va, addr | pmapflags,
-			    VM_PROT_READ | VM_PROT_WRITE, VM_PROT_READ |
-			    VM_PROT_WRITE | PMAP_WIRED | PMAP_CANFAIL);
+			    PROT_READ | PROT_WRITE,
+			    PROT_READ | PROT_WRITE | PMAP_WIRED | PMAP_CANFAIL);
 			if (ret) {
 				pmap_update(pmap_kernel());
 				km_free((void *)sva, ssize, &kv_any, &kp_none);
@@ -619,7 +619,7 @@ _bus_dmamap_load_buffer(bus_dma_tag_t t, bus_dmamap_t map, void *buf,
 int
 _bus_dmamem_alloc_range(bus_dma_tag_t t, bus_size_t size, bus_size_t alignment,
     bus_size_t boundary, bus_dma_segment_t *segs, int nsegs, int *rsegs,
-    int flags, paddr_t low, paddr_t high)
+    int flags, bus_addr_t low, bus_addr_t high)
 {
 	paddr_t curaddr, lastaddr;
 	struct vm_page *m;

@@ -1,4 +1,4 @@
-/*	$OpenBSD: csh.h,v 1.17 2005/03/13 19:08:27 cloder Exp $	*/
+/*	$OpenBSD: csh.h,v 1.21 2015/02/08 06:01:25 tedu Exp $	*/
 /*	$NetBSD: csh.h,v 1.9 1995/03/21 09:02:40 cgd Exp $	*/
 
 /*-
@@ -38,9 +38,6 @@
  *	BUFSIZ		The i/o buffering size; also limits word size
  *	MAILINTVL	How often to mailcheck; more often is more expensive
  */
-#ifndef BUFSIZ
-#define	BUFSIZ	1024		/* default buffer size */
-#endif				/* BUFSIZ */
 
 #define FORKSLEEP	10	/* delay loop on non-interactive fork failure */
 #define	MAILINTVL	600	/* 10 minutes */
@@ -78,14 +75,12 @@ typedef char Char;
 
 typedef void *ioctl_t;		/* Third arg of ioctl */
 
-typedef void *ptr_t;
-
 #include "const.h"
 #include "char.h"
 #include "error.h"
 
 #define xmalloc(i)	Malloc(i)
-#define xrealloc(p, i)	Realloc(p, i)
+#define xreallocarray(p, i, j)	Reallocarray(p, i, j)
 #define xcalloc(n, s)	Calloc(n, s)
 #define xfree(p)	Free(p)
 

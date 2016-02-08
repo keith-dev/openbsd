@@ -1,4 +1,4 @@
-/*	$OpenBSD: armv7_machdep.c,v 1.14 2014/07/21 17:25:47 uebayasi Exp $ */
+/*	$OpenBSD: armv7_machdep.c,v 1.18 2015/01/18 10:17:42 jsg Exp $ */
 /*	$NetBSD: lubbock_machdep.c,v 1.2 2003/07/15 00:25:06 lukem Exp $ */
 
 /*
@@ -157,11 +157,7 @@
 /* Define various stack sizes in pages */
 #define IRQ_STACK_SIZE	1
 #define ABT_STACK_SIZE	1
-#ifdef IPKDB
-#define UND_STACK_SIZE	2
-#else
 #define UND_STACK_SIZE	1
-#endif
 
 BootConfig bootconfig;		/* Boot config storage */
 char *boot_args = NULL;
@@ -245,18 +241,13 @@ int comcnmode = CONMODE;
 __dead void
 boot(int howto)
 {
-	struct device *mainbus;
 #ifdef DIAGNOSTIC
 	/* info */
 	printf("boot: howto=%08x curproc=%p\n", howto, curproc);
 #endif
 
-	mainbus = device_mainbus();
-
 	if (cold) {
-		doshutdownhooks();
-		if (mainbus != NULL)
-			config_suspend(mainbus, DVACT_POWERDOWN);
+		config_suspend_all(DVACT_POWERDOWN);
 		if ((howto & (RB_HALT | RB_USERREQ)) != RB_USERREQ) {
 			printf("The operating system has halted.\n");
 			printf("Please press any key to reboot.\n\n");
@@ -292,9 +283,7 @@ boot(int howto)
 	if ((howto & (RB_DUMP | RB_HALT)) == RB_DUMP)
 		dumpsys();
 
-	doshutdownhooks();
-	if (mainbus != NULL)
-		config_suspend(mainbus, DVACT_POWERDOWN);
+	config_suspend_all(DVACT_POWERDOWN);
 
 	/* Make sure IRQ's are disabled */
 	IRQdisable;
@@ -360,7 +349,7 @@ bootstrap_bs_map(void *t, bus_addr_t bpa, bus_size_t size,
 
 	for (pa = startpa; pa < endpa; pa += L1_S_SIZE, va += L1_S_SIZE)
 		pmap_map_section((vaddr_t)pagedir, va, pa,
-		    VM_PROT_READ | VM_PROT_WRITE, PTE_NOCACHE);
+		    PROT_READ | PROT_WRITE, PTE_NOCACHE);
 
 	cpu_tlb_flushD();
 
@@ -631,10 +620,10 @@ initarm(void *arg0, void *arg1, void *arg2)
 
 		logical += pmap_map_chunk(l1pagetable, KERNEL_BASE + logical,
 		    physical_start + logical, textsize,
-		    VM_PROT_READ|VM_PROT_WRITE|VM_PROT_EXECUTE, PTE_CACHE);
+		    PROT_READ | PROT_WRITE | PROT_EXEC, PTE_CACHE);
 		logical += pmap_map_chunk(l1pagetable, KERNEL_BASE + logical,
 		    physical_start + logical, totalsize - textsize,
-		    VM_PROT_READ|VM_PROT_WRITE, PTE_CACHE);
+		    PROT_READ | PROT_WRITE, PTE_CACHE);
 	}
 
 #ifdef VERBOSE_INIT_ARM
@@ -643,28 +632,28 @@ initarm(void *arg0, void *arg1, void *arg2)
 
 	/* Map the stack pages */
 	pmap_map_chunk(l1pagetable, irqstack.pv_va, irqstack.pv_pa,
-	    IRQ_STACK_SIZE * PAGE_SIZE, VM_PROT_READ|VM_PROT_WRITE, PTE_CACHE);
+	    IRQ_STACK_SIZE * PAGE_SIZE, PROT_READ | PROT_WRITE, PTE_CACHE);
 	pmap_map_chunk(l1pagetable, abtstack.pv_va, abtstack.pv_pa,
-	    ABT_STACK_SIZE * PAGE_SIZE, VM_PROT_READ|VM_PROT_WRITE, PTE_CACHE);
+	    ABT_STACK_SIZE * PAGE_SIZE, PROT_READ | PROT_WRITE, PTE_CACHE);
 	pmap_map_chunk(l1pagetable, undstack.pv_va, undstack.pv_pa,
-	    UND_STACK_SIZE * PAGE_SIZE, VM_PROT_READ|VM_PROT_WRITE, PTE_CACHE);
+	    UND_STACK_SIZE * PAGE_SIZE, PROT_READ | PROT_WRITE, PTE_CACHE);
 	pmap_map_chunk(l1pagetable, kernelstack.pv_va, kernelstack.pv_pa,
-	    UPAGES * PAGE_SIZE, VM_PROT_READ | VM_PROT_WRITE, PTE_CACHE);
+	    UPAGES * PAGE_SIZE, PROT_READ | PROT_WRITE, PTE_CACHE);
 
 	pmap_map_chunk(l1pagetable, kernel_l1pt.pv_va, kernel_l1pt.pv_pa,
-	    L1_TABLE_SIZE, VM_PROT_READ | VM_PROT_WRITE, PTE_PAGETABLE);
+	    L1_TABLE_SIZE, PROT_READ | PROT_WRITE, PTE_PAGETABLE);
 
 	for (loop = 0; loop < NUM_KERNEL_PTS; ++loop) {
 		pmap_map_chunk(l1pagetable, kernel_pt_table[loop].pv_va,
 		    kernel_pt_table[loop].pv_pa, L2_TABLE_SIZE,
-		    VM_PROT_READ|VM_PROT_WRITE, PTE_PAGETABLE);
+		    PROT_READ | PROT_WRITE, PTE_PAGETABLE);
 	}
 
 	/* Map the Mini-Data cache clean area. */
 
 	/* Map the vector page. */
 	pmap_map_entry(l1pagetable, vector_page, systempage.pv_pa,
-	    VM_PROT_READ|VM_PROT_WRITE|VM_PROT_EXECUTE, PTE_CACHE);
+	    PROT_READ | PROT_WRITE | PROT_EXEC, PTE_CACHE);
 
 	/*
 	 * map integrated peripherals at same address in l1pagetable
@@ -747,12 +736,6 @@ initarm(void *arg0, void *arg1, void *arg2)
 	pmap_bootstrap((pd_entry_t *)kernel_l1pt.pv_va, KERNEL_VM_BASE,
 	    KERNEL_VM_BASE + KERNEL_VM_SIZE);
 
-#ifdef IPKDB
-	/* Initialise ipkdb */
-	ipkdb_init();
-	if (boothowto & RB_KDB)
-		ipkdb_connect(0);
-#endif
 	/*
 	 * Restore proper bus_space operation, now that pmap is initialized.
 	 */

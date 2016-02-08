@@ -1,4 +1,4 @@
-/*	$OpenBSD: privsep.c,v 1.34 2008/11/23 04:29:42 brad Exp $	*/
+/*	$OpenBSD: privsep.c,v 1.51 2015/01/19 16:40:49 bluhm Exp $	*/
 
 /*
  * Copyright (c) 2003 Anil Madhavapeddy <anil@recoil.org>
@@ -15,17 +15,19 @@
  * ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
+
 #include <sys/ioctl.h>
-#include <sys/param.h>
 #include <sys/queue.h>
 #include <sys/uio.h>
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
 #include <sys/wait.h>
+
 #include <err.h>
 #include <errno.h>
 #include <fcntl.h>
+#include <limits.h>
 #include <netdb.h>
 #include <paths.h>
 #include <poll.h>
@@ -37,6 +39,7 @@
 #include <unistd.h>
 #include <util.h>
 #include <utmp.h>
+
 #include "syslogd.h"
 
 /*
@@ -67,21 +70,21 @@ enum cmd_types {
 	PRIV_OPEN_UTMP,		/* open utmp for reading only */
 	PRIV_OPEN_CONFIG,	/* open config file for reading only */
 	PRIV_CONFIG_MODIFIED,	/* check if config file has been modified */
-	PRIV_GETHOSTSERV,	/* resolve host/service names */
-	PRIV_GETHOSTBYADDR,	/* resolve numeric address into hostname */
+	PRIV_GETADDRINFO,	/* resolve host/service names */
+	PRIV_GETNAMEINFO,	/* resolve numeric address into hostname */
 	PRIV_DONE_CONFIG_PARSE	/* signal that the initial config parse is done */
 };
 
 static int priv_fd = -1;
 static volatile pid_t child_pid = -1;
-static char config_file[MAXPATHLEN];
+static char config_file[PATH_MAX];
 static struct stat cf_info;
-static int allow_gethostbyaddr = 0;
+static int allow_getnameinfo = 0;
 static volatile sig_atomic_t cur_state = STATE_INIT;
 
 /* Queue for the allowed logfiles */
 struct logname {
-	char path[MAXPATHLEN];
+	char path[PATH_MAX];
 	TAILQ_ENTRY(logname) next;
 };
 static TAILQ_HEAD(, logname) lognames;
@@ -100,12 +103,12 @@ static int  may_read(int, void *, size_t);
 int
 priv_init(char *conf, int numeric, int lockfd, int nullfd, char *argv[])
 {
-	int i, fd, socks[2], cmd, addr_len, addr_af, result, restart;
-	size_t path_len, hostname_len, servname_len;
-	char path[MAXPATHLEN], hostname[MAXHOSTNAMELEN];
-	char servname[MAXHOSTNAMELEN];
+	int i, fd, socks[2], cmd, addr_len, result, restart;
+	size_t path_len, protoname_len, hostname_len, servname_len;
+	char path[PATH_MAX], protoname[5];
+	char hostname[NI_MAXHOST], servname[NI_MAXSERV];
+	struct sockaddr_storage addr;
 	struct stat cf_stat;
-	struct hostent *hp;
 	struct passwd *pw;
 	struct addrinfo hints, *res0;
 	struct sigaction sa;
@@ -153,7 +156,6 @@ priv_init(char *conf, int numeric, int lockfd, int nullfd, char *argv[])
 		dup2(nullfd, STDOUT_FILENO);
 		dup2(nullfd, STDERR_FILENO);
 	}
-
 	if (nullfd > 2)
 		close(nullfd);
 
@@ -172,17 +174,21 @@ priv_init(char *conf, int numeric, int lockfd, int nullfd, char *argv[])
 	close(socks[1]);
 
 	/* Close descriptors that only the unpriv child needs */
-	for (i = 0; i < nfunix; i++)
-		if (pfd[PFD_UNIX_0 + i].fd != -1)
-			close(pfd[PFD_UNIX_0 + i].fd);
-	if (pfd[PFD_INET].fd != -1)
-		close(pfd[PFD_INET].fd);
-	if (pfd[PFD_CTLSOCK].fd != -1)
-		close(pfd[PFD_CTLSOCK].fd);
-	if (pfd[PFD_CTLCONN].fd != -1)
-		close(pfd[PFD_CTLCONN].fd);
-	if (pfd[PFD_KLOG].fd)
-		close(pfd[PFD_KLOG].fd);
+	if (fd_ctlconn != -1)
+		close(fd_ctlconn);
+	if (fd_ctlsock != -1)
+		close(fd_ctlsock);
+	if (fd_klog != -1)
+		close(fd_klog);
+	if (fd_sendsys != -1)
+		close(fd_sendsys);
+	if (fd_udp != -1)
+		close(fd_udp);
+	if (fd_udp6 != -1)
+		close(fd_udp6);
+	for (i = 0; i < nunix; i++)
+		if (fd_unix[i] != -1)
+			close(fd_unix[i]);
 
 	/* Save the config file specified by the child process */
 	if (strlcpy(config_file, conf, sizeof config_file) >= sizeof(config_file))
@@ -191,11 +197,11 @@ priv_init(char *conf, int numeric, int lockfd, int nullfd, char *argv[])
 	if (stat(config_file, &cf_info) < 0)
 		err(1, "stat config file failed");
 
-	/* Save whether or not the child can have access to gethostbyaddr(3) */
+	/* Save whether or not the child can have access to getnameinfo(3) */
 	if (numeric > 0)
-		allow_gethostbyaddr = 0;
+		allow_getnameinfo = 0;
 	else
-		allow_gethostbyaddr = 1;
+		allow_getnameinfo = 1;
 
 	TAILQ_INIT(&lognames);
 	increase_state(STATE_CONFIG);
@@ -210,10 +216,10 @@ priv_init(char *conf, int numeric, int lockfd, int nullfd, char *argv[])
 			/* Expecting: length, path */
 			must_read(socks[0], &path_len, sizeof(size_t));
 			if (path_len == 0 || path_len > sizeof(path))
-				_exit(0);
+				_exit(1);
 			must_read(socks[0], &path, path_len);
 			path[path_len - 1] = '\0';
-			check_tty_name(path, path_len);
+			check_tty_name(path, sizeof(path));
 			fd = open(path, O_WRONLY|O_NONBLOCK, 0);
 			send_fd(socks[0], fd);
 			if (fd < 0)
@@ -229,10 +235,10 @@ priv_init(char *conf, int numeric, int lockfd, int nullfd, char *argv[])
 			/* Expecting: length, path */
 			must_read(socks[0], &path_len, sizeof(size_t));
 			if (path_len == 0 || path_len > sizeof(path))
-				_exit(0);
+				_exit(1);
 			must_read(socks[0], &path, path_len);
 			path[path_len - 1] = '\0';
-			check_log_name(path, path_len);
+			check_log_name(path, sizeof(path));
 
 			if (cmd == PRIV_OPEN_LOG)
 				fd = open_file(path);
@@ -289,24 +295,59 @@ priv_init(char *conf, int numeric, int lockfd, int nullfd, char *argv[])
 			increase_state(STATE_RUNNING);
 			break;
 
-		case PRIV_GETHOSTSERV:
-			dprintf("[priv]: msg PRIV_GETHOSTSERV received\n");
-			/* Expecting: len, hostname, len, servname */
+		case PRIV_GETADDRINFO:
+			dprintf("[priv]: msg PRIV_GETADDRINFO received\n");
+			/* Expecting: len, proto, len, host, len, serv */
+			must_read(socks[0], &protoname_len, sizeof(size_t));
+			if (protoname_len == 0 ||
+			    protoname_len > sizeof(protoname))
+				_exit(1);
+			must_read(socks[0], &protoname, protoname_len);
+			protoname[protoname_len - 1] = '\0';
+
 			must_read(socks[0], &hostname_len, sizeof(size_t));
-			if (hostname_len == 0 || hostname_len > sizeof(hostname))
-				_exit(0);
+			if (hostname_len == 0 ||
+			    hostname_len > sizeof(hostname))
+				_exit(1);
 			must_read(socks[0], &hostname, hostname_len);
 			hostname[hostname_len - 1] = '\0';
 
 			must_read(socks[0], &servname_len, sizeof(size_t));
-			if (servname_len == 0 || servname_len > sizeof(servname))
-				_exit(0);
+			if (servname_len == 0 ||
+			    servname_len > sizeof(servname))
+				_exit(1);
 			must_read(socks[0], &servname, servname_len);
 			servname[servname_len - 1] = '\0';
 
-			memset(&hints, '\0', sizeof(hints));
-			hints.ai_family = AF_INET;
-			hints.ai_socktype = SOCK_DGRAM;
+			memset(&hints, 0, sizeof(hints));
+			switch (strlen(protoname)) {
+			case 3:
+				hints.ai_family = AF_UNSPEC;
+				break;
+			case 4:
+				switch (protoname[3]) {
+				case '4':
+					hints.ai_family = AF_INET;
+					break;
+				case '6':
+					hints.ai_family = AF_INET6;
+					break;
+				default:
+					errx(1, "bad ip version %s", protoname);
+				}
+				break;
+			default:
+				errx(1, "bad protocol length %s", protoname);
+			}
+			if (strncmp(protoname, "udp", 3) == 0) {
+				hints.ai_socktype = SOCK_DGRAM;
+				hints.ai_protocol = IPPROTO_UDP;
+			} else if (strncmp(protoname, "tcp", 3) == 0) {
+				hints.ai_socktype = SOCK_STREAM;
+				hints.ai_protocol = IPPROTO_TCP;
+			} else {
+				errx(1, "unknown protocol %s", protoname);
+			}
 			i = getaddrinfo(hostname, servname, &hints, &res0);
 			if (i != 0 || res0 == NULL) {
 				addr_len = 0;
@@ -320,24 +361,24 @@ priv_init(char *conf, int numeric, int lockfd, int nullfd, char *argv[])
 			}
 			break;
 
-		case PRIV_GETHOSTBYADDR:
-			dprintf("[priv]: msg PRIV_GETHOSTBYADDR received\n");
-			if (!allow_gethostbyaddr)
-				errx(1, "rejected attempt to gethostbyaddr");
-			/* Expecting: length, address, address family */
+		case PRIV_GETNAMEINFO:
+			dprintf("[priv]: msg PRIV_GETNAMEINFO received\n");
+			if (!allow_getnameinfo)
+				errx(1, "rejected attempt to getnameinfo");
+			/* Expecting: length, sockaddr */
 			must_read(socks[0], &addr_len, sizeof(int));
-			if (addr_len <= 0 || addr_len > sizeof(hostname))
-				_exit(0);
-			must_read(socks[0], hostname, addr_len);
-			must_read(socks[0], &addr_af, sizeof(int));
-			hp = gethostbyaddr(hostname, addr_len, addr_af);
-			if (hp == NULL) {
+			if (addr_len <= 0 || (size_t)addr_len > sizeof(addr))
+				_exit(1);
+			must_read(socks[0], &addr, addr_len);
+			if (getnameinfo((struct sockaddr *)&addr, addr_len,
+			    hostname, sizeof(hostname), NULL, 0,
+			    NI_NOFQDN|NI_NAMEREQD|NI_DGRAM) != 0) {
 				addr_len = 0;
 				must_write(socks[0], &addr_len, sizeof(int));
 			} else {
-				addr_len = strlen(hp->h_name) + 1;
+				addr_len = strlen(hostname) + 1;
 				must_write(socks[0], &addr_len, sizeof(int));
-				must_write(socks[0], hp->h_name, addr_len);
+				must_write(socks[0], hostname, addr_len);
 			}
 			break;
 		default:
@@ -349,11 +390,11 @@ priv_init(char *conf, int numeric, int lockfd, int nullfd, char *argv[])
 	close(socks[0]);
 
 	/* Unlink any domain sockets that have been opened */
-	for (i = 0; i < nfunix; i++)
-		if (funixn[i] != NULL && pfd[PFD_UNIX_0 + i].fd != -1)
-			(void)unlink(funixn[i]);
-	if (ctlsock_path != NULL && pfd[PFD_CTLSOCK].fd != -1)
-		(void)unlink(ctlsock_path);
+	for (i = 0; i < nunix; i++)
+		if (fd_unix[i] != -1)
+			(void)unlink(path_unix[i]);
+	if (path_ctlsock != NULL && fd_ctlsock != -1)
+		(void)unlink(path_ctlsock);
 
 	if (restart) {
 		int r;
@@ -362,7 +403,7 @@ priv_init(char *conf, int numeric, int lockfd, int nullfd, char *argv[])
 		execvp(argv[0], argv);
 	}
 	unlink(_PATH_LOGPID);
-	_exit(1);
+	_exit(0);
 }
 
 static int
@@ -449,13 +490,13 @@ open_pipe(char *cmd)
  * Either /dev/console or /dev/tty* are allowed.
  */
 static void
-check_tty_name(char *tty, size_t ttylen)
+check_tty_name(char *tty, size_t ttysize)
 {
 	const char ttypre[] = "/dev/tty";
 	char *p;
 
 	/* Any path containing '..' is invalid.  */
-	for (p = tty; *p && (p - tty) < ttylen; p++)
+	for (p = tty; p + 1 < tty + ttysize && *p; p++)
 		if (*p == '.' && *(p + 1) == '.')
 			goto bad_path;
 
@@ -466,7 +507,7 @@ check_tty_name(char *tty, size_t ttylen)
 bad_path:
 	warnx ("%s: invalid attempt to open %s: rewriting to /dev/null",
 	    "check_tty_name", tty);
-	strlcpy(tty, "/dev/null", ttylen);
+	strlcpy(tty, "/dev/null", ttysize);
 }
 
 /* If we are in the initial configuration state, accept a logname and add
@@ -474,13 +515,13 @@ bad_path:
  * and rewrite to /dev/null if it's a bad path.
  */
 static void
-check_log_name(char *lognam, size_t loglen)
+check_log_name(char *lognam, size_t logsize)
 {
 	struct logname *lg;
 	char *p;
 
 	/* Any path containing '..' is invalid.  */
-	for (p = lognam; *p && (p - lognam) < loglen; p++)
+	for (p = lognam; p + 1 < lognam + logsize && *p; p++)
 		if (*p == '.' && *(p + 1) == '.')
 			goto bad_path;
 
@@ -489,7 +530,7 @@ check_log_name(char *lognam, size_t loglen)
 		lg = malloc(sizeof(struct logname));
 		if (!lg)
 			err(1, "check_log_name() malloc");
-		strlcpy(lg->path, lognam, MAXPATHLEN);
+		strlcpy(lg->path, lognam, PATH_MAX);
 		TAILQ_INSERT_TAIL(&lognames, lg, next);
 		break;
 	case STATE_RUNNING:
@@ -508,7 +549,7 @@ check_log_name(char *lognam, size_t loglen)
 bad_path:
 	warnx("%s: invalid attempt to open %s: rewriting to /dev/null",
 	    "check_log_name", lognam);
-	strlcpy(lognam, "/dev/null", loglen);
+	strlcpy(lognam, "/dev/null", logsize);
 }
 
 /* Crank our state into less permissive modes */
@@ -526,12 +567,12 @@ increase_state(int state)
 int
 priv_open_tty(const char *tty)
 {
-	char path[MAXPATHLEN];
+	char path[PATH_MAX];
 	int cmd, fd;
 	size_t path_len;
 
 	if (priv_fd < 0)
-		errx(1, "%s: called from privileged portion", "priv_open_tty");
+		errx(1, "%s: called from privileged portion", __func__);
 
 	if (strlcpy(path, tty, sizeof path) >= sizeof(path))
 		return -1;
@@ -549,12 +590,12 @@ priv_open_tty(const char *tty)
 int
 priv_open_log(const char *lognam)
 {
-	char path[MAXPATHLEN];
+	char path[PATH_MAX];
 	int cmd, fd;
 	size_t path_len;
 
 	if (priv_fd < 0)
-		errx(1, "%s: called from privileged child", "priv_open_log");
+		errx(1, "%s: called from privileged child", __func__);
 
 	if (strlcpy(path, lognam, sizeof path) >= sizeof(path))
 		return -1;
@@ -579,7 +620,7 @@ priv_open_utmp(void)
 	FILE *fp;
 
 	if (priv_fd < 0)
-		errx(1, "%s: called from privileged portion", "priv_open_utmp");
+		errx(1, "%s: called from privileged portion", __func__);
 
 	cmd = PRIV_OPEN_UTMP;
 	must_write(priv_fd, &cmd, sizeof(int));
@@ -605,7 +646,7 @@ priv_open_config(void)
 	FILE *fp;
 
 	if (priv_fd < 0)
-		errx(1, "%s: called from privileged portion", "priv_open_config");
+		errx(1, "%s: called from privileged portion", __func__);
 
 	cmd = PRIV_OPEN_CONFIG;
 	must_write(priv_fd, &cmd, sizeof(int));
@@ -630,8 +671,7 @@ priv_config_modified(void)
 	int cmd, res;
 
 	if (priv_fd < 0)
-		errx(1, "%s: called from privileged portion",
-		    "priv_config_modified");
+		errx(1, "%s: called from privileged portion", __func__);
 
 	cmd = PRIV_CONFIG_MODIFIED;
 	must_write(priv_fd, &cmd, sizeof(int));
@@ -649,35 +689,39 @@ priv_config_parse_done(void)
 	int cmd;
 
 	if (priv_fd < 0)
-		errx(1, "%s: called from privileged portion",
-		    "priv_config_parse_done");
+		errx(1, "%s: called from privileged portion", __func__);
 
 	cmd = PRIV_DONE_CONFIG_PARSE;
 	must_write(priv_fd, &cmd, sizeof(int));
 }
 
-/* Name/service to address translation.  Response is placed into addr, and
- * the length is returned (zero on error) */
+/* Name/service to address translation.  Response is placed into addr.
+ * Return 0 for success or < 0 for error like getaddrinfo(3) */
 int
-priv_gethostserv(char *host, char *serv, struct sockaddr *addr,
+priv_getaddrinfo(char *proto, char *host, char *serv, struct sockaddr *addr,
     size_t addr_len)
 {
-	char hostcpy[MAXHOSTNAMELEN], servcpy[MAXHOSTNAMELEN];
+	char protocpy[5], hostcpy[NI_MAXHOST], servcpy[NI_MAXSERV];
 	int cmd, ret_len;
-	size_t hostname_len, servname_len;
+	size_t protoname_len, hostname_len, servname_len;
 
 	if (priv_fd < 0)
-		errx(1, "%s: called from privileged portion", "priv_gethostserv");
+		errx(1, "%s: called from privileged portion", __func__);
 
-	if (strlcpy(hostcpy, host, sizeof hostcpy) >= sizeof(hostcpy))
-		errx(1, "%s: overflow attempt in hostname", "priv_gethostserv");
+	if (strlcpy(protocpy, proto, sizeof(protocpy)) >= sizeof(protocpy))
+		errx(1, "%s: overflow attempt in protoname", __func__);
+	protoname_len = strlen(protocpy) + 1;
+	if (strlcpy(hostcpy, host, sizeof(hostcpy)) >= sizeof(hostcpy))
+		errx(1, "%s: overflow attempt in hostname", __func__);
 	hostname_len = strlen(hostcpy) + 1;
-	if (strlcpy(servcpy, serv, sizeof servcpy) >= sizeof(servcpy))
-		errx(1, "%s: overflow attempt in servname", "priv_gethostserv");
+	if (strlcpy(servcpy, serv, sizeof(servcpy)) >= sizeof(servcpy))
+		errx(1, "%s: overflow attempt in servname", __func__);
 	servname_len = strlen(servcpy) + 1;
 
-	cmd = PRIV_GETHOSTSERV;
+	cmd = PRIV_GETADDRINFO;
 	must_write(priv_fd, &cmd, sizeof(int));
+	must_write(priv_fd, &protoname_len, sizeof(size_t));
+	must_write(priv_fd, protocpy, protoname_len);
 	must_write(priv_fd, &hostname_len, sizeof(size_t));
 	must_write(priv_fd, hostcpy, hostname_len);
 	must_write(priv_fd, &servname_len, sizeof(size_t));
@@ -688,49 +732,49 @@ priv_gethostserv(char *host, char *serv, struct sockaddr *addr,
 
 	/* Check there was no error (indicated by a return of 0) */
 	if (!ret_len)
-		return 0;
+		return (-1);
 
 	/* Make sure we aren't overflowing the passed in buffer */
-	if (addr_len < ret_len)
-		errx(1, "%s: overflow attempt in return", "priv_gethostserv");
+	if (ret_len < 0 || (size_t)ret_len > addr_len)
+		errx(1, "%s: overflow attempt in return", __func__);
 
 	/* Read the resolved address and make sure we got all of it */
 	memset(addr, '\0', addr_len);
 	must_read(priv_fd, addr, ret_len);
 
-	return ret_len;
+	return (0);
 }
 
-/* Reverse address resolution; response is placed into res, and length of
- * response is returned (zero on error) */
+/* Reverse address resolution; response is placed into host.
+ * Return 0 for success or < 0 for error like getnameinfo(3) */
 int
-priv_gethostbyaddr(char *addr, int addr_len, int af, char *res, size_t res_len)
+priv_getnameinfo(struct sockaddr *sa, socklen_t salen, char *host,
+    size_t hostlen)
 {
 	int cmd, ret_len;
 
 	if (priv_fd < 0)
-		errx(1, "%s called from privileged portion", "priv_gethostbyaddr");
+		errx(1, "%s called from privileged portion", __func__);
 
-	cmd = PRIV_GETHOSTBYADDR;
+	cmd = PRIV_GETNAMEINFO;
 	must_write(priv_fd, &cmd, sizeof(int));
-	must_write(priv_fd, &addr_len, sizeof(int));
-	must_write(priv_fd, addr, addr_len);
-	must_write(priv_fd, &af, sizeof(int));
+	must_write(priv_fd, &salen, sizeof(int));
+	must_write(priv_fd, sa, salen);
 
 	/* Expect back an integer size, and then a string of that length */
 	must_read(priv_fd, &ret_len, sizeof(int));
 
 	/* Check there was no error (indicated by a return of 0) */
 	if (!ret_len)
-		return 0;
+		return (-1);
 
 	/* Check we don't overflow the passed in buffer */
-	if (res_len < ret_len)
-		errx(1, "%s: overflow attempt in return", "priv_gethostbyaddr");
+	if (ret_len < 0 || (size_t)ret_len > hostlen)
+		errx(1, "%s: overflow attempt in return", __func__);
 
 	/* Read the resolved hostname */
-	must_read(priv_fd, res, ret_len);
-	return ret_len;
+	must_read(priv_fd, host, ret_len);
+	return (0);
 }
 
 /* Pass the signal through to child */
@@ -765,7 +809,8 @@ static int
 may_read(int fd, void *buf, size_t n)
 {
 	char *s = buf;
-	ssize_t res, pos = 0;
+	ssize_t res;
+	size_t pos = 0;
 
 	while (n > pos) {
 		res = read(fd, s + pos, n - pos);
@@ -788,7 +833,8 @@ static void
 must_read(int fd, void *buf, size_t n)
 {
 	char *s = buf;
-	ssize_t res, pos = 0;
+	ssize_t res;
+	size_t pos = 0;
 
 	while (n > pos) {
 		res = read(fd, s + pos, n - pos);
@@ -797,7 +843,7 @@ must_read(int fd, void *buf, size_t n)
 			if (errno == EINTR || errno == EAGAIN)
 				continue;
 		case 0:
-			_exit(0);
+			_exit(1);
 		default:
 			pos += res;
 		}
@@ -810,7 +856,8 @@ static void
 must_write(int fd, void *buf, size_t n)
 {
 	char *s = buf;
-	ssize_t res, pos = 0;
+	ssize_t res;
+	size_t pos = 0;
 
 	while (n > pos) {
 		res = write(fd, s + pos, n - pos);
@@ -819,7 +866,7 @@ must_write(int fd, void *buf, size_t n)
 			if (errno == EINTR || errno == EAGAIN)
 				continue;
 		case 0:
-			_exit(0);
+			_exit(1);
 		default:
 			pos += res;
 		}

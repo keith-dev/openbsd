@@ -1,4 +1,4 @@
-/* $OpenBSD: sxidog.c,v 1.3 2013/11/06 19:03:07 syl Exp $ */
+/* $OpenBSD: sxidog.c,v 1.6 2014/12/13 00:49:20 jsg Exp $ */
 /*
  * Copyright (c) 2007,2009 Dale Rahn <drahn@openbsd.org>
  *
@@ -66,6 +66,7 @@ struct sxidog_softc {
 struct sxidog_softc *sxidog_sc = NULL;	/* for sxidog_reset() */
 
 void sxidog_attach(struct device *, struct device *, void *);
+int sxidog_activate(struct device *, int);
 int sxidog_callback(void *, int);
 #if 0
 int sxidog_intr(void *);
@@ -73,7 +74,8 @@ int sxidog_intr(void *);
 void sxidog_reset(void);
 
 struct cfattach	sxidog_ca = {
-	sizeof (struct sxidog_softc), NULL, sxidog_attach
+	sizeof (struct sxidog_softc), NULL, sxidog_attach,
+	NULL, sxidog_activate
 };
 
 struct cfdriver sxidog_cd = {
@@ -101,9 +103,25 @@ sxidog_attach(struct device *parent, struct device *self, void *args)
 #endif
 	sxidog_sc = sc;
 
+#ifndef SMALL_KERNEL
 	wdog_register(sxidog_callback, sc);
+#endif
 
 	printf("\n");
+}
+
+int
+sxidog_activate(struct device *self, int act)
+{
+	switch (act) {
+	case DVACT_POWERDOWN:
+#ifndef SMALL_KERNEL
+		wdog_shutdown(self);
+#endif
+		break;
+	}
+
+	return (0);
 }
 
 int

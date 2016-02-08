@@ -1,4 +1,4 @@
-/* $OpenBSD: machine.c,v 1.78 2014/07/04 05:58:31 guenther Exp $	 */
+/* $OpenBSD: machine.c,v 1.83 2015/01/19 18:01:13 millert Exp $	 */
 
 /*-
  * Copyright (c) 1994 Thorsten Lockert <tholo@sigmasoft.com>
@@ -33,11 +33,12 @@
  *	    Patch for new swapctl(2) by Tobias Weingartner <weingart@openbsd.org>
  */
 
+#include <sys/param.h>	/* DEV_BSIZE MAXCOMLEN PZERO */
 #include <sys/types.h>
-#include <sys/param.h>
-#include <sys/dkstat.h>
+#include <sys/signal.h>
 #include <sys/mount.h>
 #include <sys/proc.h>
+#include <sys/sched.h>
 #include <sys/swap.h>
 #include <sys/sysctl.h>
 
@@ -52,7 +53,6 @@
 #include "display.h"
 #include "machine.h"
 #include "utils.h"
-#include "loadavg.h"
 
 static int	swapmode(int *, int *);
 static char	*state_abbr(struct kinfo_proc *);
@@ -137,18 +137,45 @@ static int      pageshift;	/* log base 2 of the pagesize */
 #define pagetok(size) ((size) << pageshift)
 
 int		ncpu;
+int		fscale;
 
 unsigned int	maxslp;
 
 int
+getfscale(void)
+{
+	int mib[] = { CTL_KERN, KERN_FSCALE };
+	size_t size = sizeof(fscale);
+
+	if (sysctl(mib, sizeof(mib) / sizeof(mib[0]),
+	    &fscale, &size, NULL, 0) < 0)
+		return (-1);
+	return fscale;
+}
+
+int
+getncpu(void)
+{
+	int mib[] = { CTL_HW, HW_NCPU };
+	int ncpu;
+	size_t size = sizeof(ncpu);
+
+	if (sysctl(mib, sizeof(mib) / sizeof(mib[0]),
+	    &ncpu, &size, NULL, 0) == -1)
+		return (-1);
+
+	return (ncpu);
+}
+
+int
 machine_init(struct statics *statics)
 {
-	size_t size = sizeof(ncpu);
-	int mib[2], pagesize, cpu;
+	int pagesize, cpu;
 
-	mib[0] = CTL_HW;
-	mib[1] = HW_NCPU;
-	if (sysctl(mib, 2, &ncpu, &size, NULL, 0) == -1)
+	ncpu = getncpu();
+	if (ncpu == -1)
+		return (-1);
+	if (getfscale() == -1)
 		return (-1);
 	cpu_states = calloc(ncpu, CPUSTATES * sizeof(int64_t));
 	if (cpu_states == NULL)
@@ -478,7 +505,7 @@ format_next_process(caddr_t handle, char *(*get_userid)(uid_t), pid_t *pid)
 	cputime = pp->p_rtime_sec + ((pp->p_rtime_usec + 500000) / 1000000);
 
 	/* calculate the base for cpu percentages */
-	pct = pctdouble(pp->p_pctcpu);
+	pct = (double)pp->p_pctcpu / fscale;
 
 	if (pp->p_wmesg[0])
 		p_wait = pp->p_wmesg;
@@ -523,8 +550,7 @@ static unsigned char sorted_state[] =
  */
 
 #define ORDERKEY_PCTCPU \
-	if (lresult = (pctcpu)p2->p_pctcpu - (pctcpu)p1->p_pctcpu, \
-	    (result = lresult > 0 ? 1 : lresult < 0 ? -1 : 0) == 0)
+	if ((result = (int)(p2->p_pctcpu - p1->p_pctcpu)) == 0)
 #define ORDERKEY_CPUTIME \
 	if ((result = p2->p_rtime_sec - p1->p_rtime_sec) == 0) \
 		if ((result = p2->p_rtime_usec - p1->p_rtime_usec) == 0)
@@ -549,7 +575,6 @@ compare_cpu(const void *v1, const void *v2)
 	struct proc **pp1 = (struct proc **) v1;
 	struct proc **pp2 = (struct proc **) v2;
 	struct kinfo_proc *p1, *p2;
-	pctcpu lresult;
 	int result;
 
 	/* remove one level of indirection */
@@ -573,7 +598,6 @@ compare_size(const void *v1, const void *v2)
 	struct proc **pp1 = (struct proc **) v1;
 	struct proc **pp2 = (struct proc **) v2;
 	struct kinfo_proc *p1, *p2;
-	pctcpu lresult;
 	int result;
 
 	/* remove one level of indirection */
@@ -597,7 +621,6 @@ compare_res(const void *v1, const void *v2)
 	struct proc **pp1 = (struct proc **) v1;
 	struct proc **pp2 = (struct proc **) v2;
 	struct kinfo_proc *p1, *p2;
-	pctcpu lresult;
 	int result;
 
 	/* remove one level of indirection */
@@ -621,7 +644,6 @@ compare_time(const void *v1, const void *v2)
 	struct proc **pp1 = (struct proc **) v1;
 	struct proc **pp2 = (struct proc **) v2;
 	struct kinfo_proc *p1, *p2;
-	pctcpu lresult;
 	int result;
 
 	/* remove one level of indirection */
@@ -645,7 +667,6 @@ compare_prio(const void *v1, const void *v2)
 	struct proc   **pp1 = (struct proc **) v1;
 	struct proc   **pp2 = (struct proc **) v2;
 	struct kinfo_proc *p1, *p2;
-	pctcpu lresult;
 	int result;
 
 	/* remove one level of indirection */
@@ -668,7 +689,6 @@ compare_pid(const void *v1, const void *v2)
 	struct proc **pp1 = (struct proc **) v1;
 	struct proc **pp2 = (struct proc **) v2;
 	struct kinfo_proc *p1, *p2;
-	pctcpu lresult;
 	int result;
 
 	/* remove one level of indirection */
@@ -692,7 +712,6 @@ compare_cmd(const void *v1, const void *v2)
 	struct proc **pp1 = (struct proc **) v1;
 	struct proc **pp2 = (struct proc **) v2;
 	struct kinfo_proc *p1, *p2;
-	pctcpu lresult;
 	int result;
 
 	/* remove one level of indirection */

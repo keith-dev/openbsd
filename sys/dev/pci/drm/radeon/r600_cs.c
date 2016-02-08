@@ -1,4 +1,4 @@
-/*	$OpenBSD: r600_cs.c,v 1.3 2014/02/15 14:19:44 jsg Exp $	*/
+/*	$OpenBSD: r600_cs.c,v 1.5 2015/02/11 07:01:37 jsg Exp $	*/
 /*
  * Copyright 2008 Advanced Micro Devices, Inc.
  * Copyright 2008 Red Hat Inc.
@@ -1079,7 +1079,7 @@ static int r600_packet0_check(struct radeon_cs_parser *p,
 		}
 		break;
 	default:
-		DRM_ERROR( "Forbidden register 0x%04X in cs at %d\n",
+		printk(KERN_ERR "Forbidden register 0x%04X in cs at %d\n",
 		       reg, idx);
 		return -EINVAL;
 	}
@@ -1153,8 +1153,22 @@ static int r600_cs_check_reg(struct radeon_cs_parser *p, u32 reg, u32 idx)
 	case R_008C64_SQ_VSTMP_RING_SIZE:
 	case R_0288C8_SQ_GS_VERT_ITEMSIZE:
 		/* get value to populate the IB don't remove */
-		tmp =radeon_get_ib_value(p, idx);
-		ib[idx] = 0;
+		/*tmp =radeon_get_ib_value(p, idx);
+		  ib[idx] = 0;*/
+		break;
+	case SQ_ESGS_RING_BASE:
+	case SQ_GSVS_RING_BASE:
+	case SQ_ESTMP_RING_BASE:
+	case SQ_GSTMP_RING_BASE:
+	case SQ_PSTMP_RING_BASE:
+	case SQ_VSTMP_RING_BASE:
+		r = r600_cs_packet_next_reloc(p, &reloc);
+		if (r) {
+			dev_warn(p->dev, "bad SET_CONTEXT_REG "
+					"0x%04X\n", reg);
+			return -EINVAL;
+		}
+		ib[idx] += (u32)((reloc->lobj.gpu_offset >> 8) & 0xffffffff);
 		break;
 	case SQ_CONFIG:
 		track->sq_config = radeon_get_ib_value(p, idx);

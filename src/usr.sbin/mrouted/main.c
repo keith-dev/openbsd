@@ -89,7 +89,7 @@ main(int argc, char *argv[])
 	fprintf(stderr, "must be root\n");
 	exit(1);
     }
-    setlinebuf(stderr);
+    setvbuf(stderr, NULL, _IOLBF, 0);
 
     while ((ch = getopt(argc, argv, "c:d::p")) != -1) {
 	    switch (ch) {
@@ -419,7 +419,7 @@ done(int i)
 static void
 cleanup(void)
 {
-    static in_cleanup = 0;
+    static int in_cleanup = 0;
 
     if (!in_cleanup) {
 	in_cleanup++;

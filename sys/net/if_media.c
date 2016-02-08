@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_media.c,v 1.23 2014/07/12 18:44:22 tedu Exp $	*/
+/*	$OpenBSD: if_media.c,v 1.25 2015/01/21 23:06:10 deraadt Exp $	*/
 /*	$NetBSD: if_media.c,v 1.10 2000/03/13 23:52:39 soren Exp $	*/
 
 /*-
@@ -84,6 +84,7 @@
 #include <sys/malloc.h>
 
 #include <net/if.h>
+#include <net/if_var.h>
 #include <net/if_media.h>
 #include <net/netisr.h>
 
@@ -313,7 +314,7 @@ ifmedia_ioctl(struct ifnet *ifp, struct ifreq *ifr, struct ifmedia *ifm,
 
 			minwords = nwords > (size_t)ifmr->ifm_count ?
 			    (size_t)ifmr->ifm_count : nwords;
-			kptr = malloc(nwords * sizeof(int), M_TEMP,
+			kptr = mallocarray(nwords, sizeof(int), M_TEMP,
 			    M_WAITOK | M_ZERO);
 			/*
 			 * Get the media words from the interface's list.

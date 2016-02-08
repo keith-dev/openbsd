@@ -1,4 +1,4 @@
-/*	$OpenBSD: bus.h,v 1.8 2011/03/23 16:54:35 pirofti Exp $	*/
+/*	$OpenBSD: bus.h,v 1.10 2015/03/03 23:50:37 aoyama Exp $	*/
 /*	$NetBSD: bus.h,v 1.9 1998/01/13 18:32:15 scottr Exp $	*/
 
 /*-
@@ -78,7 +78,15 @@ struct luna88k_bus_space_tag {
 	uint8_t	bs_stride_2;
 	uint8_t bs_stride_4;
 	uint8_t	bs_stride_8;
+	bus_size_t bs_offset;
+	uint	bs_flags;
+#define	TAG_LITTLE_ENDIAN	0x01
 };
+
+#define	SET_TAG_BIG_ENDIAN(t)		((t))->bs_flags &= ~TAG_LITTLE_ENDIAN
+#define	SET_TAG_LITTLE_ENDIAN(t)	((t))->bs_flags |= TAG_LITTLE_ENDIAN
+
+#define	IS_TAG_LITTLE_ENDIAN(t)		((t)->bs_flags & TAG_LITTLE_ENDIAN)
 
 /*
  *	int bus_space_map(bus_space_tag_t t, bus_addr_t addr,
@@ -90,8 +98,14 @@ struct luna88k_bus_space_tag {
 #define	BUS_SPACE_MAP_CACHEABLE		0x01
 #define	BUS_SPACE_MAP_LINEAR		0x02
 
-int	bus_space_map(bus_space_tag_t, bus_addr_t, bus_size_t,
-	    int, bus_space_handle_t *);
+static __inline__ int
+bus_space_map(bus_space_tag_t t, bus_addr_t bpa, bus_size_t size, int flags,
+    bus_space_handle_t *bshp)
+{
+	/* direct-mapped on luna88k, with offset */
+	*bshp = (bus_space_handle_t)(bpa + (t->bs_offset));
+	return 0;
+}
 
 /*
  *	void bus_space_unmap(bus_space_tag_t t,
@@ -100,7 +114,12 @@ int	bus_space_map(bus_space_tag_t, bus_addr_t, bus_size_t,
  * Unmap a region of bus space.
  */
 
-void	bus_space_unmap(bus_space_tag_t, bus_space_handle_t, bus_size_t);
+static __inline__ void
+bus_space_unmap(bus_space_tag_t t, bus_space_handle_t bsh, bus_size_t size)
+{
+	/* direct-mapped on luna88k; nothing to do */
+	return;
+}
 
 /*
  *	int bus_space_subregion(bus_space_tag_t t,
@@ -110,8 +129,13 @@ void	bus_space_unmap(bus_space_tag_t, bus_space_handle_t, bus_size_t);
  * Get a new handle for a subregion of an already-mapped area of bus space.
  */
 
-int	bus_space_subregion(bus_space_tag_t t, bus_space_handle_t bsh,
-	    bus_size_t offset, bus_size_t size, bus_space_handle_t *nbshp);
+static __inline__ int
+bus_space_subregion(bus_space_tag_t t, bus_space_handle_t bsh,
+    bus_size_t offset, bus_size_t size, bus_space_handle_t *nbshp)
+{
+	*nbshp = bsh + offset;
+	return 0;
+}
 
 /*
  *	int bus_space_alloc(bus_space_tag_t t, bus_addr_t, rstart,
@@ -122,10 +146,13 @@ int	bus_space_subregion(bus_space_tag_t t, bus_space_handle_t bsh,
  * Allocate a region of bus space.
  */
 
-int	bus_space_alloc(bus_space_tag_t t, bus_addr_t rstart,
-	    bus_addr_t rend, bus_size_t size, bus_size_t align,
-	    bus_size_t boundary, int flags, bus_addr_t *addrp,
-	    bus_space_handle_t *bshp);
+static __inline__ int
+bus_space_alloc(bus_space_tag_t tag, bus_addr_t rstart, bus_addr_t rend,
+    bus_size_t size, bus_size_t alignment, bus_size_t boundary, int flags,
+    bus_addr_t *addrp, bus_space_handle_t *handlep)
+{
+	panic("bus_space_alloc: unimplemented");
+}
 
 /*
  *	int bus_space_free(bus_space_tag_t t,
@@ -134,8 +161,11 @@ int	bus_space_alloc(bus_space_tag_t t, bus_addr_t rstart,
  * Free a region of bus space.
  */
 
-void	bus_space_free(bus_space_tag_t t, bus_space_handle_t bsh,
-	    bus_size_t size);
+static __inline__ void
+bus_space_free(bus_space_tag_t tag, bus_space_handle_t handle, bus_size_t size)
+{
+	panic("bus_space_free: unimplemented");
+}
 
 /*
  *	u_intN_t bus_space_read_N(bus_space_tag_t tag,
@@ -148,11 +178,21 @@ void	bus_space_free(bus_space_tag_t t, bus_space_handle_t bsh,
 #define	bus_space_read_1(t, h, o)					\
     (*(volatile u_int8_t *)((h) + (t->bs_stride_1) * (o)))
 
-#define	bus_space_read_2(t, h, o)					\
+#define	__bus_space_read_2(t, h, o)					\
     (*(volatile u_int16_t *)((h) + (t->bs_stride_2) * (o)))
 
-#define	bus_space_read_4(t, h, o)					\
+#define	__bus_space_read_4(t, h, o)					\
     (*(volatile u_int32_t *)((h) + (t->bs_stride_4) * (o)))
+
+#define bus_space_read_2(t, h, o)					\
+    ((IS_TAG_LITTLE_ENDIAN(t)) ? 					\
+	letoh16(__bus_space_read_2(t, h, o)) :				\
+	__bus_space_read_2(t, h, o))
+	
+#define bus_space_read_4(t, h, o)					\
+    ((IS_TAG_LITTLE_ENDIAN(t)) ? 					\
+	letoh32(__bus_space_read_4(t, h, o)) :				\
+	__bus_space_read_4(t, h, o))
 
 #if 0	/* Cause a link error for bus_space_read_8 */
 #define	bus_space_read_8(t, h, o)	!!! bus_space_read_8 unimplemented !!!
@@ -194,6 +234,30 @@ bus_space_read_multi_4(bus_space_tag_t tag, bus_space_handle_t handle,
 #if 0	/* Cause a link error for bus_space_read_multi_8 */
 #define	bus_space_read_multi_8	!!! bus_space_read_multi_8 unimplemented !!!
 #endif
+
+static __inline__ void
+bus_space_read_raw_multi_2(bus_space_tag_t tag, bus_space_handle_t handle,
+    bus_addr_t offset, u_int8_t *dest, size_t size)
+{
+	size >>= 1;
+	while ((int)--size >= 0) {
+		*(u_int16_t *)dest =
+		    __bus_space_read_2(tag, handle, offset);
+		dest += 2;
+	}
+}
+
+static __inline__ void
+bus_space_read_raw_multi_4(bus_space_tag_t tag, bus_space_handle_t handle,
+    bus_addr_t offset, u_int8_t *dest, size_t size)
+{
+	size >>= 2;
+	while ((int)--size >= 0) {
+		*(u_int32_t *)dest =
+		    __bus_space_read_4(tag, handle, offset);
+		dest += 4;
+	}
+}
 
 /*
  *	void bus_space_read_region_N(bus_space_tag_t tag,
@@ -249,11 +313,19 @@ bus_space_read_region_4(bus_space_tag_t tag, bus_space_handle_t handle,
 #define	bus_space_write_1(t, h, o, v)					\
     ((void)(*(volatile u_int8_t *)((h) + (t->bs_stride_1) * (o)) = (v)))
 
-#define	bus_space_write_2(t, h, o, v)					\
+#define	__bus_space_write_2(t, h, o, v)					\
     ((void)(*(volatile u_int16_t *)((h) + (t->bs_stride_2) * (o)) = (v)))
 
-#define	bus_space_write_4(t, h, o, v)					\
+#define	__bus_space_write_4(t, h, o, v)					\
     ((void)(*(volatile u_int32_t *)((h) + (t->bs_stride_4) * (o)) = (v)))
+
+#define	bus_space_write_2(t, h, o, v)					\
+    __bus_space_write_2(t, h, o,					\
+	(IS_TAG_LITTLE_ENDIAN(t)) ? htole16(v) : (v))
+
+#define	bus_space_write_4(t, h, o, v)					\
+    __bus_space_write_4(t, h, o,					\
+	(IS_TAG_LITTLE_ENDIAN(t)) ? htole32(v) : (v))
 
 #if 0	/* Cause a link error for bus_space_write_8 */
 #define	bus_space_write_8	!!! bus_space_write_8 not implemented !!!
@@ -296,6 +368,28 @@ bus_space_write_multi_4(bus_space_tag_t tag, bus_space_handle_t handle,
 #define	bus_space_write_multi_8(t, h, o, a, c)				\
 			!!! bus_space_write_multi_8 unimplemented !!!
 #endif
+
+static __inline__ void
+bus_space_write_raw_multi_2(bus_space_tag_t tag, bus_space_handle_t handle,
+    bus_addr_t offset, u_int8_t *dest, size_t size)
+{
+	size >>= 1;
+	while ((int)--size >= 0) {
+		__bus_space_write_2(tag, handle, offset,*(u_int16_t *)dest);
+		dest += 2;
+	}
+}
+
+static __inline__ void
+bus_space_write_raw_multi_4(bus_space_tag_t tag, bus_space_handle_t handle,
+    bus_addr_t offset, u_int8_t *dest, size_t size)
+{
+	size >>= 2;
+	while ((int)--size >= 0) {
+		__bus_space_write_4(tag, handle, offset, *(u_int32_t *)dest);
+		dest += 4;
+	}
+}
 
 /*
  *	void bus_space_write_region_N(bus_space_tag_t tag,

@@ -1,4 +1,4 @@
-/*	$OpenBSD: rt2860.c,v 1.74 2014/07/22 13:12:12 mpi Exp $	*/
+/*	$OpenBSD: rt2860.c,v 1.79 2015/02/10 23:25:46 mpi Exp $	*/
 
 /*-
  * Copyright (c) 2007-2010 Damien Bergamini <damien.bergamini@free.fr>
@@ -34,9 +34,9 @@
 #include <sys/timeout.h>
 #include <sys/conf.h>
 #include <sys/device.h>
+#include <sys/endian.h>
 
 #include <machine/bus.h>
-#include <machine/endian.h>
 #include <machine/intr.h>
 
 #if NBPFILTER > 0
@@ -58,11 +58,7 @@
 #include <dev/ic/rt2860var.h>
 #include <dev/ic/rt2860reg.h>
 
-#include <dev/pci/pcireg.h>
-#include <dev/pci/pcivar.h>
 #include <dev/pci/pcidevs.h>
-
-#include <dev/rndvar.h>
 
 #ifdef RAL_DEBUG
 #define DPRINTF(x)	do { if (rt2860_debug > 0) printf x; } while (0)
@@ -1296,7 +1292,6 @@ rt2860_rx_intr(struct rt2860_softc *sc)
 		rxwi = mtod(m, struct rt2860_rxwi *);
 
 		/* finalize mbuf */
-		m->m_pkthdr.rcvif = ifp;
 		m->m_data = (caddr_t)(rxwi + 1);
 		m->m_pkthdr.len = m->m_len = letoh16(rxwi->len) & 0xfff;
 
@@ -1831,10 +1826,8 @@ rt2860_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 	case SIOCSIFADDR:
 		ifa = (struct ifaddr *)data;
 		ifp->if_flags |= IFF_UP;
-#ifdef INET
 		if (ifa->ifa_addr->sa_family == AF_INET)
 			arp_ifinit(&ic->ic_ac, ifa);
-#endif
 		/* FALLTHROUGH */
 	case SIOCSIFFLAGS:
 		if (ifp->if_flags & IFF_UP) {

@@ -1,4 +1,4 @@
-/*      $OpenBSD: pmap.h,v 1.36 2014/04/03 18:29:37 miod Exp $ */
+/*      $OpenBSD: pmap.h,v 1.38 2015/02/15 21:34:33 miod Exp $ */
 
 /*
  * Copyright (c) 1987 Carnegie-Mellon University
@@ -111,7 +111,6 @@ struct pmap_asid_info {
  */
 typedef struct pmap {
 	int			pm_count;	/* pmap reference count */
-	simple_lock_data_t	pm_lock;	/* lock on pmap */
 	struct pmap_statistics	pm_stats;	/* pmap statistics */
 	struct segtab		*pm_segtab;	/* pointers to pages of PTEs */
 	struct pmap_asid_info	pm_asid[1];	/* ASID information */
@@ -163,7 +162,7 @@ void	pmap_page_cache(vm_page_t, u_int);
 
 #define	pmap_collect(x)			do { /* nothing */ } while (0)
 #define	pmap_unuse_final(p)		do { /* nothing yet */ } while (0)
-#define	pmap_remove_holes(map)		do { /* nothing */ } while (0)
+#define	pmap_remove_holes(vm)		do { /* nothing */ } while (0)
 
 void	pmap_update_user_page(pmap_t, vaddr_t, pt_entry_t);
 #ifdef MULTIPROCESSOR

@@ -1,4 +1,4 @@
-/*	$OpenBSD: config.c,v 1.19 2013/05/08 00:15:03 gsoares Exp $	*/
+/*	$OpenBSD: config.c,v 1.21 2014/09/28 18:42:50 kettenis Exp $	*/
 
 /*
  * Copyright (c) 2012 Mark Kettenis
@@ -433,7 +433,7 @@ hvmd_alloc_frag(uint64_t base)
 		}
 	}
 
-	if (frag == TAILQ_END(&free_frags))
+	if (frag == NULL)
 		return -1;
 
 	TAILQ_REMOVE(&free_frags, frag, link);
@@ -2190,7 +2190,7 @@ guest_finalize(struct guest *guest)
 {
 	struct md *md = guest->md;
 	struct md_node *node, *node2;
-	struct md_prop *prop;
+	struct md_prop *prop, *prop2;
 	struct mblock *mblock;
 	struct md_node *parent;
 	struct md_node *child;
@@ -2201,7 +2201,7 @@ guest_finalize(struct guest *guest)
 	char *path;
 
 	node = md_find_node(md, "cpus");
-	TAILQ_FOREACH(prop, &node->prop_list, link) {
+	TAILQ_FOREACH_SAFE(prop, &node->prop_list, link, prop2) {
 		if (prop->tag == MD_PROP_ARC &&
 		    strcmp(prop->name->str, "fwd") == 0) {
 			node2 = prop->d.arc.node;
@@ -2223,7 +2223,7 @@ guest_finalize(struct guest *guest)
 	 * able to configure crypto work queues.
 	 */
 	node = md_find_node(md, "virtual-devices");
-	TAILQ_FOREACH(prop, &node->prop_list, link) {
+	TAILQ_FOREACH_SAFE(prop, &node->prop_list, link, prop2) {
 		if (prop->tag == MD_PROP_ARC &&
 		    strcmp(prop->name->str, "fwd") == 0) {
 			node2 = prop->d.arc.node;

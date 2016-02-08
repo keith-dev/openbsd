@@ -1,4 +1,4 @@
-/*	$OpenBSD: udp_usrreq.c,v 1.189 2014/07/22 11:06:10 mpi Exp $	*/
+/*	$OpenBSD: udp_usrreq.c,v 1.196 2015/03/04 11:10:55 mpi Exp $	*/
 /*	$NetBSD: udp_usrreq.c,v 1.28 1996/03/16 23:54:03 christos Exp $	*/
 
 /*
@@ -74,10 +74,10 @@
 #include <sys/protosw.h>
 #include <sys/socket.h>
 #include <sys/socketvar.h>
-#include <sys/proc.h>
 #include <sys/sysctl.h>
 
 #include <net/if.h>
+#include <net/if_var.h>
 #include <net/if_media.h>
 #include <net/route.h>
 
@@ -96,9 +96,6 @@
 #endif
 
 #ifdef INET6
-#ifndef INET
-#include <netinet/in.h>
-#endif
 #include <netinet6/in6_var.h>
 #include <netinet6/ip6_var.h>
 #include <netinet6/ip6protosw.h>
@@ -176,7 +173,7 @@ udp_input(struct mbuf *m, ...)
 #ifdef INET6
 		struct sockaddr_in6 sin6;
 #endif /* INET6 */
-	} srcsa, dstsa;
+	} srcsa;
 #ifdef INET6
 	struct ip6_hdr *ip6;
 #endif /* INET6 */
@@ -356,12 +353,6 @@ udp_input(struct mbuf *m, ...)
 		srcsa.sin.sin_family = AF_INET;
 		srcsa.sin.sin_port = uh->uh_sport;
 		srcsa.sin.sin_addr = ip->ip_src;
-
-		bzero(&dstsa, sizeof(struct sockaddr_in));
-		dstsa.sin.sin_len = sizeof(struct sockaddr_in);
-		dstsa.sin.sin_family = AF_INET;
-		dstsa.sin.sin_port = uh->uh_dport;
-		dstsa.sin.sin_addr = ip->ip_dst;
 		break;
 #ifdef INET6
 	case AF_INET6:
@@ -373,16 +364,7 @@ udp_input(struct mbuf *m, ...)
 		srcsa.sin6.sin6_flowinfo = htonl(0x0fffffff) & ip6->ip6_flow;
 #endif
 		/* KAME hack: recover scopeid */
-		(void)in6_recoverscope(&srcsa.sin6, &ip6->ip6_src,
-		    m->m_pkthdr.rcvif);
-
-		bzero(&dstsa, sizeof(struct sockaddr_in6));
-		dstsa.sin6.sin6_len = sizeof(struct sockaddr_in6);
-		dstsa.sin6.sin6_family = AF_INET6;
-		dstsa.sin6.sin6_port = uh->uh_dport;
-		/* KAME hack: recover scopeid */
-		(void)in6_recoverscope(&dstsa.sin6, &ip6->ip6_dst,
-		    m->m_pkthdr.rcvif);
+		(void)in6_recoverscope(&srcsa.sin6, &ip6->ip6_src, NULL);
 		break;
 #endif /* INET6 */
 	}
@@ -401,16 +383,7 @@ udp_input(struct mbuf *m, ...)
 	}
 #endif
 
-#ifdef INET6
-	if ((ip6 && IN6_IS_ADDR_MULTICAST(&ip6->ip6_dst)) ||
-	    (ip && IN_MULTICAST(ip->ip_dst.s_addr)) ||
-	    (ip && in_broadcast(ip->ip_dst, m->m_pkthdr.rcvif,
-	    m->m_pkthdr.ph_rtableid))) {
-#else /* INET6 */
-	if (IN_MULTICAST(ip->ip_dst.s_addr) ||
-	    in_broadcast(ip->ip_dst, m->m_pkthdr.rcvif,
-		m->m_pkthdr.ph_rtableid)) {
-#endif /* INET6 */
+	if (m->m_flags & (M_BCAST|M_MCAST)) {
 		struct inpcb *last;
 		/*
 		 * Deliver a multicast or broadcast datagram to *all* sockets
@@ -618,6 +591,11 @@ udp_input(struct mbuf *m, ...)
 	KASSERT(sotoinpcb(inp->inp_socket) == inp);
 
 #if NPF > 0
+	if (m->m_pkthdr.pf.statekey && !m->m_pkthdr.pf.statekey->inp &&
+	    !inp->inp_pf_sk && (inp->inp_socket->so_state & SS_ISCONNECTED)) {
+		m->m_pkthdr.pf.statekey->inp = inp;
+		inp->inp_pf_sk = m->m_pkthdr.pf.statekey;
+	}
 	/* The statekey has finished finding the inp, it is no longer needed. */
 	m->m_pkthdr.pf.statekey = NULL;
 #endif
@@ -803,12 +781,10 @@ udp6_ctlinput(int cmd, struct sockaddr *sa, u_int rdomain, void *d)
 		cmdarg = NULL;
 		/* XXX: translate addresses into internal form */
 		sa6 = *(struct sockaddr_in6 *)sa;
-#ifndef SCOPEDROUTING
 		if (in6_embedscope(&sa6.sin6_addr, &sa6, NULL, NULL)) {
 			/* should be impossible */
 			return;
 		}
-#endif
 	}
 
 	if (ip6cp && ip6cp->ip6c_finaldst) {
@@ -819,21 +795,17 @@ udp6_ctlinput(int cmd, struct sockaddr *sa, u_int rdomain, void *d)
 		/* XXX: assuming M is valid in this case */
 		sa6.sin6_scope_id = in6_addr2scopeid(m->m_pkthdr.rcvif,
 		    ip6cp->ip6c_finaldst);
-#ifndef SCOPEDROUTING
 		if (in6_embedscope(ip6cp->ip6c_finaldst, &sa6, NULL, NULL)) {
 			/* should be impossible */
 			return;
 		}
-#endif
 	} else {
 		/* XXX: translate addresses into internal form */
 		sa6 = *(struct sockaddr_in6 *)sa;
-#ifndef SCOPEDROUTING
 		if (in6_embedscope(&sa6.sin6_addr, &sa6, NULL, NULL)) {
 			/* should be impossible */
 			return;
 		}
-#endif
 	}
 
 	if (ip6) {
@@ -856,12 +828,10 @@ udp6_ctlinput(int cmd, struct sockaddr *sa, u_int rdomain, void *d)
 		sa6_src.sin6_addr = ip6->ip6_src;
 		sa6_src.sin6_scope_id = in6_addr2scopeid(m->m_pkthdr.rcvif,
 		    &ip6->ip6_src);
-#ifndef SCOPEDROUTING
 		if (in6_embedscope(&sa6_src.sin6_addr, &sa6_src, NULL, NULL)) {
 			/* should be impossible */
 			return;
 		}
-#endif
 
 		if (cmd == PRC_MSGSIZE) {
 			int valid = 0;
@@ -1103,6 +1073,11 @@ udp_output(struct inpcb *inp, struct mbuf *m, struct mbuf *addr,
 
 	/* force routing table */
 	m->m_pkthdr.ph_rtableid = inp->inp_rtableid;
+
+#if NPF > 0
+	if (inp->inp_socket->so_state & SS_ISCONNECTED)
+		m->m_pkthdr.pf.inp = inp;
+#endif
 
 	error = ip_output(m, inp->inp_options, &inp->inp_route,
 	    (inp->inp_socket->so_options & SO_BROADCAST), inp->inp_moptions,

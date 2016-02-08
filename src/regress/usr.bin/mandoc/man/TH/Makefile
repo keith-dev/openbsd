@@ -1,12 +1,13 @@
-# $OpenBSD: Makefile,v 1.6 2014/07/02 06:35:26 schwarze Exp $
+# $OpenBSD: Makefile,v 1.9 2015/02/06 11:54:03 schwarze Exp $
 
-REGRESS_TARGETS  = noTH noarg onearg twoargs sixargs case
-REGRESS_TARGETS += emptydate onlyyear isodate mdocdate baddate
+REGRESS_TARGETS  = noTH noarg onearg twoargs sixargs case longtit longvol
+REGRESS_TARGETS += emptydate onlyyear isodate mdocdate baddate longdate
 REGRESS_TARGETS += nobody
 
-LINT_TARGETS = noTH case twoargs emptydate baddate nobody
+LINT_TARGETS	 = noTH noarg onearg twoargs sixargs case
+LINT_TARGETS	+= emptydate baddate longdate nobody
 
-SKIP_GROFF = noTH
-SKIP_ASCII = noTH
+SKIP_GROFF	 = noTH longtit longvol longdate
+SKIP_ASCII	 = noTH
 
 .include <bsd.regress.mk>

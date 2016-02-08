@@ -1,4 +1,4 @@
-/*	$OpenBSD: acpi_machdep.c,v 1.62 2014/07/16 07:42:50 mlarkin Exp $	*/
+/*	$OpenBSD: acpi_machdep.c,v 1.68 2015/01/06 12:50:47 dlg Exp $	*/
 /*
  * Copyright (c) 2005 Thorsten Lockert <tholo@sigmasoft.com>
  *
@@ -56,6 +56,7 @@
 #endif
 
 extern u_char acpi_real_mode_resume[], acpi_resume_end[];
+extern u_char acpi_tramp_data_start[], acpi_tramp_data_end[];
 extern u_int32_t acpi_pdirpa;
 extern paddr_t tramp_pdirpa;
 
@@ -82,7 +83,7 @@ acpi_map(paddr_t pa, size_t len, struct acpi_mem_map *handle)
 	handle->pa = pa;
 
 	do {
-		pmap_kenter_pa(va, pgpa, VM_PROT_READ | VM_PROT_WRITE);
+		pmap_kenter_pa(va, pgpa, PROT_READ | PROT_WRITE);
 		va += NBPG;
 		pgpa += NBPG;
 	} while (pgpa < endpa);
@@ -224,10 +225,22 @@ acpi_attach_machdep(struct acpi_softc *sc)
 	 */
 	KASSERT(acpi_resume_end - acpi_real_mode_resume < PAGE_SIZE);
 
-	bcopy(acpi_real_mode_resume, (caddr_t)ACPI_TRAMPOLINE,
+	/* Map ACPI tramp code and data pages RW for copy */
+	pmap_kenter_pa(ACPI_TRAMPOLINE, ACPI_TRAMPOLINE,
+	    PROT_READ | PROT_WRITE);
+	pmap_kenter_pa(ACPI_TRAMP_DATA, ACPI_TRAMP_DATA,
+	    PROT_READ | PROT_WRITE);
+
+	memcpy((caddr_t)ACPI_TRAMPOLINE, acpi_real_mode_resume,
 	    acpi_resume_end - acpi_real_mode_resume);
+	memcpy((caddr_t)ACPI_TRAMP_DATA, acpi_tramp_data_start,
+	    acpi_tramp_data_end - acpi_tramp_data_start);
 
 	acpi_pdirpa = tramp_pdirpa;
+
+	/* Unmap, will be remapped in acpi_sleep_cpu */
+	pmap_kremove(ACPI_TRAMPOLINE, PAGE_SIZE);
+	pmap_kremove(ACPI_TRAMP_DATA, PAGE_SIZE);
 }
 
 void
@@ -276,8 +289,6 @@ acpi_resume_clocks(struct acpi_softc *sc)
 int
 acpi_sleep_cpu(struct acpi_softc *sc, int state)
 {
-	/* amd64 does not do lazy pmap_activate */
-
 	/*
 	 * ACPI defines two wakeup vectors. One is used for ACPI 1.0
 	 * implementations - it's in the FACS table as wakeup_vector and
@@ -292,7 +303,13 @@ acpi_sleep_cpu(struct acpi_softc *sc, int state)
 	if (sc->sc_facs->length > 32 && sc->sc_facs->version >= 1)
 		sc->sc_facs->x_wakeup_vector = 0;
 
-	/* Copy the current cpu registers into a safe place for resume.
+	/* Map trampoline and data page */
+	pmap_kenter_pa(ACPI_TRAMPOLINE, ACPI_TRAMPOLINE, PROT_READ | PROT_EXEC);
+	pmap_kenter_pa(ACPI_TRAMP_DATA, ACPI_TRAMP_DATA,
+		PROT_READ | PROT_WRITE);
+
+	/*
+	 * Copy the current cpu registers into a safe place for resume.
 	 * acpi_savecpu actually returns twice - once in the suspend
 	 * path and once in the resume path (see setjmp(3)).
 	 */
@@ -312,12 +329,13 @@ acpi_sleep_cpu(struct acpi_softc *sc, int state)
 		}
 #endif
 
-		/* XXX
+		/*
+		 * XXX
 		 * Flag to disk drivers that they should "power down" the disk
 		 * when we get to DVACT_POWERDOWN.
 		 */
 		boothowto |= RB_POWERDOWN;
-		config_suspend(device_mainbus(), DVACT_POWERDOWN);
+		config_suspend_all(DVACT_POWERDOWN);
 		boothowto &= ~RB_POWERDOWN;
 
 		acpi_sleep_pm(sc, state);
@@ -330,6 +348,9 @@ acpi_sleep_cpu(struct acpi_softc *sc, int state)
 	sc->sc_facs->wakeup_vector = 0;
 	if (sc->sc_facs->length > 32 && sc->sc_facs->version >= 1)
 		sc->sc_facs->x_wakeup_vector = 0;
+
+	pmap_kremove(ACPI_TRAMPOLINE, PAGE_SIZE);
+	pmap_kremove(ACPI_TRAMP_DATA, PAGE_SIZE);
 
 	return (0);
 }
@@ -405,6 +426,7 @@ acpi_resume_mp(void)
 		pcb->pcb_rbp = 0;
 
 		ci->ci_idepth = 0;
+		ci->ci_handled_intr_level = IPL_NONE;
 
 		ci->ci_flags &= ~CPUF_PRESENT;
 		cpu_start_secondary(ci);

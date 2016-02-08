@@ -1,4 +1,4 @@
-/*	$OpenBSD: ieee80211_ioctl.c,v 1.35 2014/07/10 14:32:28 stsp Exp $	*/
+/*	$OpenBSD: ieee80211_ioctl.c,v 1.38 2014/12/23 03:24:08 tedu Exp $	*/
 /*	$NetBSD: ieee80211_ioctl.c,v 1.15 2004/05/06 02:58:16 dyoung Exp $	*/
 
 /*-
@@ -39,17 +39,14 @@
 #include <sys/sockio.h>
 #include <sys/systm.h>
 #include <sys/endian.h>
-#include <sys/proc.h>
 #include <sys/tree.h>
 
 #include <net/if.h>
 #include <net/if_arp.h>
 #include <net/if_media.h>
 
-#ifdef INET
 #include <netinet/in.h>
 #include <netinet/if_ether.h>
-#endif
 
 #include <net80211/ieee80211_var.h>
 #include <net80211/ieee80211_crypto.h>
@@ -649,8 +646,10 @@ ieee80211_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 			if (ic->ic_scan_lock & IEEE80211_SCAN_LOCKED)
 				ic->ic_scan_lock |= IEEE80211_SCAN_RESUME;
 			ic->ic_scan_lock |= IEEE80211_SCAN_REQUEST;
-			if (ic->ic_state != IEEE80211_S_SCAN)
+			if (ic->ic_state != IEEE80211_S_SCAN) {
+				ieee80211_clean_cached(ic);
 				ieee80211_new_state(ic, IEEE80211_S_SCAN, -1);
+			}
 		}
 		/* Let the userspace process wait for completion */
 		error = tsleep(&ic->ic_scan_lock, PCATCH, "80211scan",

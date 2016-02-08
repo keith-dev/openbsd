@@ -1,4 +1,4 @@
-/*	$OpenBSD: uvm_amap.c,v 1.53 2014/07/12 18:44:01 tedu Exp $	*/
+/*	$OpenBSD: uvm_amap.c,v 1.58 2014/12/23 04:56:47 tedu Exp $	*/
 /*	$NetBSD: uvm_amap.c,v 1.27 2000/11/25 06:27:59 chs Exp $	*/
 
 /*
@@ -35,10 +35,10 @@
 
 #include <sys/param.h>
 #include <sys/systm.h>
-#include <sys/proc.h>
 #include <sys/malloc.h>
 #include <sys/kernel.h>
 #include <sys/pool.h>
+#include <sys/atomic.h>
 
 #include <uvm/uvm.h>
 #include <uvm/uvm_swap.h>
@@ -152,8 +152,8 @@ void
 amap_init(void)
 {
 	/* Initialize the vm_amap pool. */
-	pool_init(&uvm_amap_pool, sizeof(struct vm_amap), 0, 0, 0,
-	    "amappl", &pool_allocator_nointr);
+	pool_init(&uvm_amap_pool, sizeof(struct vm_amap), 0, 0, PR_WAITOK,
+	    "amappl", NULL);
 	pool_sethiwat(&uvm_amap_pool, 4096);
 }
 
@@ -329,7 +329,7 @@ amap_extend(struct vm_map_entry *entry, vsize_t addsize)
 #ifdef UVM_AMAP_PPREF
 	newppref = NULL;
 	if (amap->am_ppref && amap->am_ppref != PPREF_NONE) {
-		newppref = malloc(slotalloc *sizeof(int), M_UVMAMAP,
+		newppref = mallocarray(slotalloc, sizeof(int), M_UVMAMAP,
 		    M_WAITOK | M_CANFAIL);
 		if (newppref == NULL) {
 			/* give up if malloc fails */
@@ -745,7 +745,7 @@ void
 amap_pp_establish(struct vm_amap *amap)
 {
 
-	amap->am_ppref = malloc(sizeof(int) * amap->am_maxslot,
+	amap->am_ppref = mallocarray(amap->am_maxslot, sizeof(int),
 	    M_UVMAMAP, M_NOWAIT|M_ZERO);
 
 	/* if we fail then we just won't use ppref for this amap */
@@ -1033,7 +1033,7 @@ amap_add(struct vm_aref *aref, vaddr_t offset, struct vm_anon *anon,
 		if (amap->am_anon[slot]->an_page != NULL && 
 		    (amap->am_flags & AMAP_SHARED) != 0) {
 			pmap_page_protect(amap->am_anon[slot]->an_page,
-			    VM_PROT_NONE);
+			    PROT_NONE);
 			/*
 			 * XXX: suppose page is supposed to be wired somewhere?
 			 */

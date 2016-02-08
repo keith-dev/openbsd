@@ -1,4 +1,4 @@
-/*	$OpenBSD: setup.c,v 1.23 2014/07/13 16:08:53 pelikan Exp $	*/
+/*	$OpenBSD: setup.c,v 1.25 2015/01/16 06:39:57 deraadt Exp $	*/
 /*	$NetBSD: setup.c,v 1.1 1997/06/11 11:22:01 bouyer Exp $	*/
 
 /*
@@ -32,7 +32,7 @@
  */
 
 #define DKTYPENAMES
-#include <sys/param.h>
+#include <sys/param.h>	/* DEV_BSIZE roundup */
 #include <sys/time.h>
 #include <ufs/ext2fs/ext2fs_dinode.h>
 #include <ufs/ext2fs/ext2fs.h>
@@ -40,7 +40,6 @@
 #include <sys/ioctl.h>
 #include <sys/dkio.h>
 #include <sys/disklabel.h>
-#include <sys/file.h>
 
 #include <errno.h>
 #include <fcntl.h>

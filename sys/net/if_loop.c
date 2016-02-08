@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_loop.c,v 1.57 2014/07/22 11:06:09 mpi Exp $	*/
+/*	$OpenBSD: if_loop.c,v 1.63 2015/01/27 10:20:31 mpi Exp $	*/
 /*	$NetBSD: if_loop.c,v 1.15 1996/05/07 02:40:33 thorpej Exp $	*/
 
 /*
@@ -118,19 +118,15 @@
 
 
 #include <net/if.h>
+#include <net/if_var.h>
 #include <net/if_types.h>
 #include <net/netisr.h>
 #include <net/route.h>
 
-#ifdef	INET
 #include <netinet/in.h>
 #include <netinet/ip.h>
-#endif
 
 #ifdef INET6
-#ifndef INET
-#include <netinet/in.h>
-#endif
 #include <netinet/ip6.h>
 #endif
 
@@ -154,7 +150,9 @@ struct if_clone loop_cloner =
 void
 loopattach(int n)
 {
-	(void) loop_clone_create(&loop_cloner, 0);
+	if (loop_clone_create(&loop_cloner, 0))
+		panic("unable to create lo0");
+
 	if_clone_attach(&loop_cloner);
 }
 
@@ -198,7 +196,7 @@ loop_clone_destroy(struct ifnet *ifp)
 
 	if_detach(ifp);
 
-	free(ifp, M_DEVBUF, 0);
+	free(ifp, M_DEVBUF, sizeof(*ifp));
 	return (0);
 }
 
@@ -232,12 +230,10 @@ looutput(struct ifnet *ifp, struct mbuf *m, struct sockaddr *dst,
 	ifp->if_obytes += m->m_pkthdr.len;
 	switch (dst->sa_family) {
 
-#ifdef INET
 	case AF_INET:
 		ifq = &ipintrq;
 		isr = NETISR_IP;
 		break;
-#endif
 #ifdef INET6
 	case AF_INET6:
 		ifq = &ip6intrq;
@@ -275,7 +271,7 @@ looutput(struct ifnet *ifp, struct mbuf *m, struct sockaddr *dst,
 void
 lortrequest(int cmd, struct rtentry *rt)
 {
-	if (rt)
+	if (rt && rt->rt_rmx.rmx_mtu == 0)
 		rt->rt_rmx.rmx_mtu = LOMTU;
 }
 
@@ -288,15 +284,13 @@ loioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 {
 	struct ifaddr *ifa;
 	struct ifreq *ifr;
-	int s, error = 0;
+	int error = 0;
 
 	switch (cmd) {
 
 	case SIOCSIFADDR:
-		s = splnet();
 		ifp->if_flags |= IFF_RUNNING;
 		if_up(ifp);		/* send up RTM_IFINFO */
-		splx(s);
 
 		ifa = (struct ifaddr *)data;
 		if (ifa != 0)

@@ -1,4 +1,4 @@
-/*	$OpenBSD: uvm_unix.c,v 1.50 2014/07/11 16:35:40 jsg Exp $	*/
+/*	$OpenBSD: uvm_unix.c,v 1.55 2015/02/09 09:39:09 miod Exp $	*/
 /*	$NetBSD: uvm_unix.c,v 1.18 2000/09/13 15:00:25 thorpej Exp $	*/
 
 /*
@@ -85,8 +85,9 @@ sys_obreak(struct proc *p, void *v, register_t *retval)
 	if (new > old) {
 		error = uvm_map(&vm->vm_map, &old, new - old, NULL,
 		    UVM_UNKNOWN_OFFSET, 0,
-		    UVM_MAPFLAG(UVM_PROT_RW, UVM_PROT_RWX, UVM_INH_COPY,
-		    UVM_ADV_NORMAL, UVM_FLAG_AMAPPAD|UVM_FLAG_FIXED|
+		    UVM_MAPFLAG(PROT_READ | PROT_WRITE,
+		    PROT_READ | PROT_WRITE | PROT_EXEC, MAP_INHERIT_COPY,
+		    MADV_NORMAL, UVM_FLAG_AMAPPAD|UVM_FLAG_FIXED|
 		    UVM_FLAG_OVERLAY|UVM_FLAG_COPYONW));
 		if (error) {
 			uprintf("sbrk: grow %ld failed, error = %d\n",
@@ -117,17 +118,17 @@ uvm_grow(struct proc *p, vaddr_t sp)
 
 	/* For common case of already allocated (from trap). */
 #ifdef MACHINE_STACK_GROWS_UP
-	if (sp < USRSTACK + ptoa(vm->vm_ssize))
+	if (sp < (vaddr_t)vm->vm_maxsaddr + ptoa(vm->vm_ssize))
 #else
-	if (sp >= USRSTACK - ptoa(vm->vm_ssize))
+	if (sp >= (vaddr_t)vm->vm_minsaddr - ptoa(vm->vm_ssize))
 #endif
 		return;
 
 	/* Really need to check vs limit and increment stack size if ok. */
 #ifdef MACHINE_STACK_GROWS_UP
-	si = atop(sp - USRSTACK) - vm->vm_ssize + 1;
+	si = atop(sp - (vaddr_t)vm->vm_maxsaddr) - vm->vm_ssize + 1;
 #else
-	si = atop(USRSTACK - sp) - vm->vm_ssize;
+	si = atop((vaddr_t)vm->vm_minsaddr - sp) - vm->vm_ssize;
 #endif
 	if (vm->vm_ssize + si <= atop(p->p_rlimit[RLIMIT_STACK].rlim_cur))
 		vm->vm_ssize += si;
@@ -159,7 +160,7 @@ uvm_coredump(struct proc *p, struct vnode *vp, struct ucred *cred,
 			panic("uvm_coredump: user process with submap?");
 		}
 
-		if (!(entry->protection & VM_PROT_WRITE) &&
+		if (!(entry->protection & PROT_WRITE) &&
 		    entry->start != p->p_p->ps_sigcode)
 			continue;
 
@@ -178,8 +179,10 @@ uvm_coredump(struct proc *p, struct vnode *vp, struct ucred *cred,
 			end = VM_MAXUSER_ADDRESS;
 
 #ifdef MACHINE_STACK_GROWS_UP
-		if (USRSTACK <= start && start < (USRSTACK + MAXSSIZ)) {
-			top = round_page(USRSTACK + ptoa(vm->vm_ssize));
+		if ((vaddr_t)vm->vm_maxsaddr <= start &&
+		    start < ((vaddr_t)vm->vm_maxsaddr + MAXSSIZ)) {
+			top = round_page((vaddr_t)vm->vm_maxsaddr +
+			    ptoa(vm->vm_ssize));
 			if (end > top)
 				end = top;
 
@@ -187,7 +190,8 @@ uvm_coredump(struct proc *p, struct vnode *vp, struct ucred *cred,
 				continue;
 #else
 		if (start >= (vaddr_t)vm->vm_maxsaddr) {
-			top = trunc_page(USRSTACK - ptoa(vm->vm_ssize));
+			top = trunc_page((vaddr_t)vm->vm_minsaddr -
+			    ptoa(vm->vm_ssize));
 			if (start < top)
 				start = top;
 
@@ -268,7 +272,7 @@ uvm_coredump_walkmap(struct proc *p, void *iocookie,
 			panic("uvm_coredump: user process with submap?");
 		}
 
-		if (!(entry->protection & VM_PROT_WRITE) &&
+		if (!(entry->protection & PROT_WRITE) &&
 		    entry->start != p->p_p->ps_sigcode)
 			continue;
 
@@ -288,9 +292,10 @@ uvm_coredump_walkmap(struct proc *p, void *iocookie,
 			state.end = VM_MAXUSER_ADDRESS;
 
 #ifdef MACHINE_STACK_GROWS_UP
-		if (USRSTACK <= state.start &&
-		    state.start < (USRSTACK + MAXSSIZ)) {
-			top = round_page(USRSTACK + ptoa(vm->vm_ssize));
+		if ((vaddr_t)vm->vm_maxsaddr <= state.start &&
+		    state.start < ((vaddr_t)vm->vm_maxsaddr + MAXSSIZ)) {
+			top = round_page((vaddr_t)vm->vm_maxsaddr +
+			    ptoa(vm->vm_ssize));
 			if (state.end > top)
 				state.end = top;
 
@@ -298,7 +303,8 @@ uvm_coredump_walkmap(struct proc *p, void *iocookie,
 				continue;
 #else
 		if (state.start >= (vaddr_t)vm->vm_maxsaddr) {
-			top = trunc_page(USRSTACK - ptoa(vm->vm_ssize));
+			top = trunc_page((vaddr_t)vm->vm_minsaddr -
+			    ptoa(vm->vm_ssize));
 			if (state.start < top)
 				state.start = top;
 

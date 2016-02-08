@@ -1,4 +1,4 @@
-/*	$OpenBSD: atascsi.c,v 1.119 2014/07/12 18:48:17 tedu Exp $ */
+/*	$OpenBSD: atascsi.c,v 1.122 2015/01/27 03:17:36 dlg Exp $ */
 
 /*
  * Copyright (c) 2007 David Gwynne <dlg@openbsd.org>
@@ -24,7 +24,6 @@
 #include <sys/kernel.h>
 #include <sys/malloc.h>
 #include <sys/device.h>
-#include <sys/proc.h>
 #include <sys/queue.h>
 #include <sys/pool.h>
 
@@ -122,7 +121,7 @@ void		atascsi_disk_vpd_thin(struct scsi_xfer *);
 void		atascsi_disk_write_same_16(struct scsi_xfer *);
 void		atascsi_disk_write_same_16_done(struct ata_xfer *);
 void		atascsi_disk_unmap(struct scsi_xfer *);
-void		atascsi_disk_unmap_task(void *, void *);
+void		atascsi_disk_unmap_task(void *);
 void		atascsi_disk_unmap_done(struct ata_xfer *);
 void		atascsi_disk_capacity(struct scsi_xfer *);
 void		atascsi_disk_capacity16(struct scsi_xfer *);
@@ -194,8 +193,8 @@ atascsi_attach(struct device *self, struct atascsi_attach_args *aaa)
 	as->as_link.adapter_target = aaa->aaa_nports;
 	as->as_link.openings = 1;
 
-	as->as_host_ports = malloc(sizeof(struct atascsi_host_port *) *
-	    aaa->aaa_nports, M_DEVBUF, M_WAITOK | M_ZERO);
+	as->as_host_ports = mallocarray(aaa->aaa_nports,
+	    sizeof(struct atascsi_host_port *),	M_DEVBUF, M_WAITOK | M_ZERO);
 
 	bzero(&saa, sizeof(saa));
 	saa.saa_sc_link = &as->as_link;
@@ -321,8 +320,8 @@ atascsi_probe(struct scsi_link *link)
 			ahp->ahp_nports = 1;
 			ap->ap_pmp_port = 0;
 		}
-		ahp->ahp_ports = malloc(sizeof(struct atascsi_port *) *
-		    ahp->ahp_nports, M_DEVBUF, M_WAITOK | M_ZERO);
+		ahp->ahp_ports = mallocarray(ahp->ahp_nports,
+		    sizeof(struct atascsi_port *), M_DEVBUF, M_WAITOK | M_ZERO);
 	} else {
 		ahp = as->as_host_ports[port];
 		ap->ap_pmp_port = link->lun - 1;
@@ -1091,16 +1090,16 @@ atascsi_disk_unmap(struct scsi_xfer *xs)
 
 	/* let's go */
 	if (ISSET(xs->flags, SCSI_NOSLEEP)) {
-		task_set(&xa->task, atascsi_disk_unmap_task, xs, NULL);
+		task_set(&xa->task, atascsi_disk_unmap_task, xs);
 		task_add(systq, &xa->task);
 	} else {
 		/* we can already sleep for memory */
-		atascsi_disk_unmap_task(xs, NULL);
+		atascsi_disk_unmap_task(xs);
 	}
 }
 
 void
-atascsi_disk_unmap_task(void *xxs, void *a)
+atascsi_disk_unmap_task(void *xxs)
 {
 	struct scsi_xfer	*xs = xxs;
 	struct scsi_link	*link = xs->sc_link;

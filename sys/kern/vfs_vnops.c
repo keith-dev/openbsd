@@ -1,4 +1,4 @@
-/*	$OpenBSD: vfs_vnops.c,v 1.78 2014/07/13 15:00:40 tedu Exp $	*/
+/*	$OpenBSD: vfs_vnops.c,v 1.80 2014/12/16 18:30:04 tedu Exp $	*/
 /*	$NetBSD: vfs_vnops.c,v 1.20 1996/02/04 02:18:41 christos Exp $	*/
 
 /*
@@ -49,6 +49,7 @@
 #include <sys/signalvar.h>
 #include <sys/mount.h>
 #include <sys/namei.h>
+#include <sys/lock.h>
 #include <sys/vnode.h>
 #include <sys/ioctl.h>
 #include <sys/tty.h>
@@ -56,6 +57,7 @@
 #include <sys/poll.h>
 #include <sys/filedesc.h>
 #include <sys/specdev.h>
+#include <sys/unistd.h>
 
 int vn_read(struct file *, off_t *, struct uio *, struct ucred *);
 int vn_write(struct file *, off_t *, struct uio *, struct ucred *);

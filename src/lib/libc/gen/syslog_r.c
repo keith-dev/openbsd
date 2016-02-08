@@ -1,4 +1,4 @@
-/*	$OpenBSD: syslog_r.c,v 1.5 2014/07/14 03:52:04 deraadt Exp $ */
+/*	$OpenBSD: syslog_r.c,v 1.7 2015/01/21 19:34:24 deraadt Exp $ */
 /*
  * Copyright (c) 1983, 1988, 1993
  *	The Regents of the University of California.  All rights reserved.
@@ -40,6 +40,7 @@
 #include <string.h>
 #include <time.h>
 #include <unistd.h>
+#include <limits.h>
 #include <stdarg.h>
 
 extern char	*__progname;		/* Program name, from crt0. */
@@ -90,7 +91,7 @@ __vsyslog_r(int pri, struct syslog_data *data,
 	int fd, saved_errno, error;
 #define	TBUF_LEN	2048
 #define	FMT_LEN		1024
-	char *stdp, tbuf[TBUF_LEN], fmt_cpy[FMT_LEN];
+	char *conp = NULL, *stdp = NULL, tbuf[TBUF_LEN], fmt_cpy[FMT_LEN];
 	int tbuf_left, fmt_left, prlen;
 
 #define	INTERNALLOG	LOG_ERR|LOG_CONS|LOG_PERROR|LOG_PID
@@ -127,6 +128,8 @@ __vsyslog_r(int pri, struct syslog_data *data,
 
 	prlen = snprintf(p, tbuf_left, "<%d>", pri);
 	DEC();
+	if (data->log_stat & LOG_CONS)
+		conp = p;
 
 	/* 
 	 * syslogd will expand time automagically for reentrant case, and
@@ -142,7 +145,7 @@ __vsyslog_r(int pri, struct syslog_data *data,
 	if (data->log_tag == NULL)
 		data->log_tag = __progname;
 	if (data->log_tag != NULL) {
-		prlen = snprintf(p, tbuf_left, "%s", data->log_tag);
+		prlen = snprintf(p, tbuf_left, "%.*s", NAME_MAX, data->log_tag);
 		DEC();
 	}
 	if (data->log_stat & LOG_PID) {
@@ -195,13 +198,17 @@ __vsyslog_r(int pri, struct syslog_data *data,
 	prlen = vsnprintf(p, tbuf_left, fmt_cpy, ap);
 	DEC();
 	cnt = p - tbuf;
+	while (cnt > 0 && p[-1] == '\n') {
+		*(--p) = '\0';
+		--cnt;
+	}
 
 	/* Output to stderr if requested. */
 	if (data->log_stat & LOG_PERROR) {
 		struct iovec iov[2];
 
 		iov[0].iov_base = stdp;
-		iov[0].iov_len = cnt - (stdp - tbuf);
+		iov[0].iov_len = cnt > stdp - tbuf ? cnt - (stdp - tbuf) : 0;
 		iov[1].iov_base = "\n";
 		iov[1].iov_len = 1;
 		(void)writev(STDERR_FILENO, iov, 2);
@@ -222,9 +229,8 @@ __vsyslog_r(int pri, struct syslog_data *data,
 	    (fd = open(_PATH_CONSOLE, O_WRONLY|O_NONBLOCK, 0)) >= 0) {
 		struct iovec iov[2];
 		
-		p = strchr(tbuf, '>') + 1;
-		iov[0].iov_base = p;
-		iov[0].iov_len = cnt - (p - tbuf);
+		iov[0].iov_base = conp;
+		iov[0].iov_len = cnt > conp - tbuf ? cnt - (conp - tbuf) : 0;
 		iov[1].iov_base = "\r\n";
 		iov[1].iov_len = 2;
 		(void)writev(fd, iov, 2);

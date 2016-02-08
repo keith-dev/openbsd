@@ -1,4 +1,4 @@
-/*	$OpenBSD: pfvar.h,v 1.401 2014/07/02 13:02:08 mikeb Exp $ */
+/*	$OpenBSD: pfvar.h,v 1.413 2015/02/15 10:40:53 sthen Exp $ */
 
 /*
  * Copyright (c) 2001 Daniel Hartmeier
@@ -34,16 +34,13 @@
 #ifndef _NET_PFVAR_H_
 #define _NET_PFVAR_H_
 
-#include <sys/param.h>
-#include <sys/types.h>
 #include <sys/queue.h>
 #include <sys/tree.h>
 #include <sys/rwlock.h>
+#include <sys/syslimits.h>
 
 #include <net/radix.h>
 #include <net/route.h>
-#include <netinet/ip_ipsp.h>
-#include <netinet/tcp_fsm.h>
 
 struct ip;
 struct ip6_hdr;
@@ -54,7 +51,7 @@ struct ip6_hdr;
 #define	PF_MD5_DIGEST_LENGTH	16
 #ifdef MD5_DIGEST_LENGTH
 #if PF_MD5_DIGEST_LENGTH != MD5_DIGEST_LENGTH
-#error
+#error md5 digest length mismatch
 #endif
 #endif
 
@@ -117,6 +114,12 @@ enum	{ PF_ADDR_ADDRMASK, PF_ADDR_NOROUTE, PF_ADDR_DYNIFTL,
 #define PF_POOL_STICKYADDR	0x20
 #define	PF_WSCALE_FLAG		0x80
 #define	PF_WSCALE_MASK		0x0f
+
+#define PF_POOL_DYNTYPE(_o)						\
+	((((_o) & PF_POOL_TYPEMASK) == PF_POOL_ROUNDROBIN) ||		\
+	(((_o) & PF_POOL_TYPEMASK) == PF_POOL_LEASTSTATES) ||		\
+	(((_o) & PF_POOL_TYPEMASK) == PF_POOL_RANDOM) ||		\
+	(((_o) & PF_POOL_TYPEMASK) == PF_POOL_SRCHASH))
 
 #define	PF_LOG			0x01
 #define	PF_LOG_ALL		0x02
@@ -223,23 +226,16 @@ struct pfi_dynaddr {
  */
 
 #ifdef _KERNEL
-#ifdef INET
 #ifndef INET6
 #define PF_INET_ONLY
 #endif /* ! INET6 */
-#endif /* INET */
 
 #ifdef INET6
-#ifndef INET
-#define PF_INET6_ONLY
-#endif /* ! INET */
 #endif /* INET6 */
 
-#ifdef INET
 #ifdef INET6
 #define PF_INET_INET6
 #endif /* INET6 */
-#endif /* INET */
 
 #else
 
@@ -648,10 +644,11 @@ struct pf_rule {
 #define PF_FLUSH		0x01
 #define PF_FLUSH_GLOBAL		0x02
 	u_int8_t		 flush;
+	u_int8_t		 prio;
 	u_int8_t		 set_prio[2];
 	sa_family_t		 naf;
 	u_int8_t		 rcvifnot;
-	u_int8_t		 pad[3];
+	u_int8_t		 pad[2];
 
 	struct {
 		struct pf_addr		addr;
@@ -918,7 +915,7 @@ struct pfsync_state {
 	u_int8_t	 min_ttl;
 	u_int8_t	 set_tos;
 	u_int16_t	 state_flags;
-	u_int8_t	 pad[2];
+	u_int8_t	 set_prio[2];
 } __packed;
 
 #define PFSYNC_FLAG_SRCNODE	0x04
@@ -1003,13 +1000,13 @@ struct pf_anchor {
 	struct pf_anchor	*parent;
 	struct pf_anchor_node	 children;
 	char			 name[PF_ANCHOR_NAME_SIZE];
-	char			 path[MAXPATHLEN];
+	char			 path[PATH_MAX];
 	struct pf_ruleset	 ruleset;
 	int			 refcnt;	/* anchor rules */
 	int			 match;
 };
-RB_PROTOTYPE(pf_anchor_global, pf_anchor, entry_global, pf_anchor_compare);
-RB_PROTOTYPE(pf_anchor_node, pf_anchor, entry_node, pf_anchor_compare);
+RB_PROTOTYPE(pf_anchor_global, pf_anchor, entry_global, pf_anchor_compare)
+RB_PROTOTYPE(pf_anchor_node, pf_anchor, entry_node, pf_anchor_compare)
 
 #define PF_RESERVED_ANCHOR	"_pf"
 
@@ -1026,7 +1023,7 @@ RB_PROTOTYPE(pf_anchor_node, pf_anchor, entry_node, pf_anchor_compare);
 #define PFR_TFLAG_ALLMASK	0x0000007F
 
 struct pfr_table {
-	char			 pfrt_anchor[MAXPATHLEN];
+	char			 pfrt_anchor[PATH_MAX];
 	char			 pfrt_name[PF_TABLE_NAME_SIZE];
 	u_int32_t		 pfrt_flags;
 	u_int8_t		 pfrt_fback;
@@ -1086,10 +1083,21 @@ struct pfr_kcounters {
 	u_int64_t		 states;
 };
 
+/*
+ * XXX ip_ipsp.h's sockaddr_union should be converted to sockaddr *
+ * passing with correct sa_len, then a good approach for cleaning this
+ * will become more clear.
+ */
+union pfsockaddr_union {
+	struct sockaddr		sa;
+	struct sockaddr_in	sin;
+	struct sockaddr_in6	sin6;
+};
+
 SLIST_HEAD(pfr_kentryworkq, pfr_kentry);
 struct _pfr_kentry {
 	struct radix_node	 _pfrke_node[2];
-	union sockaddr_union	 _pfrke_sa;
+	union pfsockaddr_union	 _pfrke_sa;
 	SLIST_ENTRY(pfr_kentry)	 _pfrke_workq;
 	struct pfr_kcounters	*_pfrke_counters;
 	time_t			 _pfrke_tzero;
@@ -1178,11 +1186,11 @@ struct pfr_ktable {
 #define pfrkt_tzero	pfrkt_ts.pfrts_tzero
 
 RB_HEAD(pf_state_tree, pf_state_key);
-RB_PROTOTYPE(pf_state_tree, pf_state_key, entry, pf_state_compare_key);
+RB_PROTOTYPE(pf_state_tree, pf_state_key, entry, pf_state_compare_key)
 
 RB_HEAD(pf_state_tree_ext_gwy, pf_state_key);
 RB_PROTOTYPE(pf_state_tree_ext_gwy, pf_state_key,
-    entry_ext_gwy, pf_state_compare_ext_gwy);
+    entry_ext_gwy, pf_state_compare_ext_gwy)
 
 RB_HEAD(pfi_ifhead, pfi_kif);
 
@@ -1397,10 +1405,11 @@ struct pf_pdesc {
 
 #define REASON_SET(a, x) \
 	do { \
-		if ((void *)(a) != NULL) \
+		if ((void *)(a) != NULL) { \
 			*(a) = (x); \
-		if (x < PFRES_MAX) \
-			pf_status.counters[x]++; \
+			if (x < PFRES_MAX) \
+				pf_status.counters[x]++; \
+		} \
 	} while (0)
 
 struct pf_status {
@@ -1424,6 +1433,8 @@ struct pf_status {
 
 #define PF_REASS_ENABLED	0x01
 #define PF_REASS_NODF		0x02
+
+#define PF_PRIO_ZERO		0xff		/* match "prio 0" packets */
 
 struct pf_queue_bwspec {
 	u_int		absolute;
@@ -1512,8 +1523,8 @@ struct pfioc_rule {
 	u_int32_t	 action;
 	u_int32_t	 ticket;
 	u_int32_t	 nr;
-	char		 anchor[MAXPATHLEN];
-	char		 anchor_call[MAXPATHLEN];
+	char		 anchor[PATH_MAX];
+	char		 anchor_call[PATH_MAX];
 	struct pf_rule	 rule;
 };
 
@@ -1588,7 +1599,7 @@ struct pfioc_limit {
 
 struct pfioc_ruleset {
 	u_int32_t	 nr;
-	char		 path[MAXPATHLEN];
+	char		 path[PATH_MAX];
 	char		 name[PF_ANCHOR_NAME_SIZE];
 };
 
@@ -1597,7 +1608,7 @@ struct pfioc_trans {
 	int		 esize; /* size of each element in bytes */
 	struct pfioc_trans_e {
 		int		type;
-		char		anchor[MAXPATHLEN];
+		char		anchor[PATH_MAX];
 		u_int32_t	ticket;
 	}		*array;
 };
@@ -1786,6 +1797,7 @@ extern void			 pf_addrcpy(struct pf_addr *, struct pf_addr *,
 void				 pf_rm_rule(struct pf_rulequeue *,
 				    struct pf_rule *);
 void				 pf_purge_rule(struct pf_ruleset *,
+				    struct pf_rule *, struct pf_ruleset *,
 				    struct pf_rule *);
 struct pf_divert		*pf_find_divert(struct mbuf *);
 int				 pf_setup_pdesc(struct pf_pdesc *, void *,
@@ -1805,7 +1817,7 @@ void	pf_change_a(struct pf_pdesc *, void *, u_int32_t);
 int	pf_check_proto_cksum(struct pf_pdesc *, int, int, u_int8_t,
 	    sa_family_t);
 int	pflog_packet(struct pf_pdesc *, u_int8_t, struct pf_rule *,
-	    struct pf_rule *, struct pf_ruleset *);
+	    struct pf_rule *, struct pf_ruleset *, struct pf_rule *);
 void	pf_send_deferred_syn(struct pf_state *);
 int	pf_match_addr(u_int8_t, struct pf_addr *, struct pf_addr *,
 	    struct pf_addr *, sa_family_t);

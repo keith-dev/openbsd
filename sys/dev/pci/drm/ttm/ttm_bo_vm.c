@@ -1,4 +1,4 @@
-/*	$OpenBSD: ttm_bo_vm.c,v 1.1 2013/08/12 04:11:53 jsg Exp $	*/
+/*	$OpenBSD: ttm_bo_vm.c,v 1.5 2015/02/11 07:01:37 jsg Exp $	*/
 /**************************************************************************
  *
  * Copyright (c) 2006-2009 VMware, Inc., Palo Alto, CA., USA
@@ -69,13 +69,16 @@ ttm_bo_vm_lookup_rb(struct ttm_bo_device *bdev,
 	struct ttm_buffer_object *bo;
 	struct ttm_buffer_object *best_bo = NULL;
 
-	RB_FOREACH(bo, ttm_bo_device_buffer_objects, &bdev->addr_space_rb) {
+	bo = RB_ROOT(&bdev->addr_space_rb);
+	while (bo != NULL) {
 		cur_offset = bo->vm_node->start;
 		if (page_start >= cur_offset) {
 			best_bo = bo;
 			if (page_start == cur_offset)
 				break;
-		}
+			bo = RB_RIGHT(bo, vm_rb);
+		} else
+			bo = RB_LEFT(bo, vm_rb);
 	}
 
 	if (unlikely(best_bo == NULL))
@@ -157,17 +160,17 @@ ttm_bo_vm_fault(struct uvm_faultinfo *ufi, vaddr_t vaddr, vm_page_t *pps,
 	 * move.
 	 */
 
-	mtx_enter(&bdev->fence_lock);
+	spin_lock(&bdev->fence_lock);
 	if (test_bit(TTM_BO_PRIV_FLAG_MOVING, &bo->priv_flags)) {
 		ret = ttm_bo_wait(bo, false, true, false);
-		mtx_leave(&bdev->fence_lock);
+		spin_unlock(&bdev->fence_lock);
 		if (unlikely(ret != 0)) {
 			retval = (ret != -ERESTARTSYS) ?
 			    VM_PAGER_ERROR : VM_PAGER_REFAULT;
 			goto out_unlock;
 		}
 	} else
-		mtx_leave(&bdev->fence_lock);
+		spin_unlock(&bdev->fence_lock);
 
 	ret = ttm_mem_io_lock(man, true);
 	if (unlikely(ret != 0)) {
@@ -302,14 +305,14 @@ ttm_bo_mmap(voff_t off, vsize_t size, struct ttm_bo_device *bdev)
 	struct ttm_buffer_object *bo;
 	int ret;
 
-	rw_enter_read(&bdev->vm_lock);
+	read_lock(&bdev->vm_lock);
 	bo = ttm_bo_vm_lookup_rb(bdev, off >> PAGE_SHIFT, size >> PAGE_SHIFT);
 	if (likely(bo != NULL))
 		refcount_acquire(&bo->kref);
-	rw_exit_read(&bdev->vm_lock);
+	read_unlock(&bdev->vm_lock);
 
 	if (unlikely(bo == NULL)) {
-//		pr_err("Could not find buffer object to map\n");
+		pr_err("Could not find buffer object to map\n");
 		return NULL;
 	}
 
@@ -375,11 +378,11 @@ ssize_t ttm_bo_io(struct ttm_bo_device *bdev, struct file *filp,
 	bool no_wait = false;
 	bool dummy;
 
-	rw_enter_read(&bdev->vm_lock);
+	read_lock(&bdev->vm_lock);
 	bo = ttm_bo_vm_lookup_rb(bdev, dev_offset, 1);
 	if (likely(bo != NULL))
 		ttm_bo_reference(bo);
-	rw_exit_read(&bdev->vm_lock);
+	read_unlock(&bdev->vm_lock);
 
 	if (unlikely(bo == NULL))
 		return -EFAULT;

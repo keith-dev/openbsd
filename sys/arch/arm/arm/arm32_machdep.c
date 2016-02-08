@@ -1,4 +1,4 @@
-/*	$OpenBSD: arm32_machdep.c,v 1.45 2014/07/10 19:44:35 uebayasi Exp $	*/
+/*	$OpenBSD: arm32_machdep.c,v 1.47 2015/01/12 16:33:31 deraadt Exp $	*/
 /*	$NetBSD: arm32_machdep.c,v 1.42 2003/12/30 12:33:15 pk Exp $	*/
 
 /*
@@ -111,7 +111,7 @@ int allowaperture = 0;
 #endif
 
 #if defined(__zaurus__)
-int lid_suspend;
+int lid_suspend = 1;
 extern int xscale_maxspeed;
 #endif
 
@@ -244,7 +244,7 @@ cpu_startup()
 	cpu_setup();
 
 	/* Lock down zero page */
-	vector_page_setprot(VM_PROT_READ|VM_PROT_EXECUTE);
+	vector_page_setprot(PROT_READ | PROT_EXEC);
 
 	/*
 	 * Give pmap a chance to set up a few more things now the vm
@@ -264,7 +264,7 @@ cpu_startup()
 	/* msgbufphys was setup during the secondary boot strap */
 	for (loop = 0; loop < atop(MSGBUFSIZE); ++loop)
 		pmap_kenter_pa((vaddr_t)msgbufaddr + loop * PAGE_SIZE,
-		    msgbufphys + loop * PAGE_SIZE, VM_PROT_READ|VM_PROT_WRITE);
+		    msgbufphys + loop * PAGE_SIZE, PROT_READ | PROT_WRITE);
 	pmap_update(pmap_kernel());
 	initmsgbuf(msgbufaddr, round_page(MSGBUFSIZE));
 

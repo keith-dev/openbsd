@@ -1,4 +1,4 @@
-/*	$OpenBSD: kvm_mkdb.c,v 1.18 2014/07/20 01:38:40 guenther Exp $	*/
+/*	$OpenBSD: kvm_mkdb.c,v 1.20 2015/01/16 06:40:17 deraadt Exp $	*/
 
 /*-
  * Copyright (c) 1990, 1993
@@ -29,8 +29,10 @@
  * SUCH DAMAGE.
  */
 
-#include <sys/param.h>
 #include <sys/stat.h>
+#include <sys/types.h>
+#include <sys/time.h>
+#include <sys/resource.h>
 
 #include <db.h>
 #include <err.h>
@@ -42,10 +44,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
-
-#include <sys/types.h>
-#include <sys/time.h>
-#include <sys/resource.h>
+#include <grp.h>
 
 #include "extern.h"
 
@@ -67,7 +66,7 @@ main(int argc, char *argv[])
 	struct rlimit rl;
 	int fd, rval, ch, verbose = 0;
 	char *nlistpath, *nlistname;
-	char dbdir[MAXPATHLEN];
+	char dbdir[PATH_MAX];
 
 	/* Increase our data size to the max if we can. */
 	if (getrlimit(RLIMIT_DATA, &rl) == 0) {
@@ -129,8 +128,9 @@ kvm_mkdb(int fd, const char *dbdir, char *nlistpath, char *nlistname,
     int verbose)
 {
 	DB *db;
-	char dbtemp[MAXPATHLEN], dbname[MAXPATHLEN];
+	char dbtemp[PATH_MAX], dbname[PATH_MAX];
 	int r;
+	struct group *gr;
 
 	r = snprintf(dbtemp, sizeof(dbtemp), "%skvm_%s.tmp",
 	    dbdir, nlistname);
@@ -155,7 +155,7 @@ kvm_mkdb(int fd, const char *dbdir, char *nlistpath, char *nlistname,
 
 	(void)umask(0);
 	db = dbopen(dbtemp, O_CREAT | O_EXLOCK | O_TRUNC | O_RDWR,
-	    S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH, DB_HASH, &openinfo);
+	    S_IRUSR | S_IWUSR | S_IRGRP, DB_HASH, &openinfo);
 	if (db == NULL) {
 		warn("can't dbopen %s", dbtemp);
 		return(1);
@@ -167,6 +167,14 @@ kvm_mkdb(int fd, const char *dbdir, char *nlistpath, char *nlistname,
 	}
 	if (db->close(db)) {
 		warn("can't dbclose %s", dbtemp);
+		(void)unlink(dbtemp);
+		return(1);
+	}
+
+	if ((gr = getgrnam("kmem")) == NULL) {
+		warn("can't find kmem group");
+	} else if (chown(dbtemp, -1, gr->gr_gid)) {
+		warn("can't chown %s", dbtemp);
 		(void)unlink(dbtemp);
 		return(1);
 	}

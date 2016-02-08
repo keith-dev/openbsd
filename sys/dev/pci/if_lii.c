@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_lii.c,v 1.32 2013/12/28 03:34:54 deraadt Exp $	*/
+/*	$OpenBSD: if_lii.c,v 1.34 2014/12/22 02:28:52 tedu Exp $	*/
 
 /*
  *  Copyright (c) 2007 The NetBSD Foundation.
@@ -53,10 +53,8 @@
 #include <net/bpf.h>
 #endif
 
-#ifdef INET
 #include <netinet/in.h>
 #include <netinet/if_ether.h>
-#endif
 
 #include <dev/mii/mii.h>
 #include <dev/mii/miivar.h>
@@ -674,8 +672,7 @@ lii_init(struct ifnet *ifp)
 	/* 500000 means 100ms */
 	LII_WRITE_2(sc, LII_IALTIV, 50000);
 
-	LII_WRITE_4(sc, LII_MTU, ifp->if_mtu + ETHER_HDR_LEN
-	    + ETHER_CRC_LEN + ETHER_VLAN_ENCAP_LEN);
+	LII_WRITE_4(sc, LII_MTU, ETHER_MAX_LEN + ETHER_VLAN_ENCAP_LEN);
 
 	/* unit unknown for TX cur-through threshold */
 	LII_WRITE_4(sc, LII_TX_CUT_THRESH, 0x177);
@@ -1086,10 +1083,8 @@ lii_ioctl(struct ifnet *ifp, u_long cmd, caddr_t addr)
 	switch(cmd) {
 	case SIOCSIFADDR:
 		SET(ifp->if_flags, IFF_UP);
-#ifdef INET
 		if (ifa->ifa_addr->sa_family == AF_INET)
 			arp_ifinit(&sc->sc_ac, ifa);
-#endif
 		/* FALLTHROUGH */
 
 	case SIOCSIFFLAGS:

@@ -1,4 +1,4 @@
-/*	$OpenBSD: pf_if.c,v 1.74 2014/07/22 11:06:09 mpi Exp $ */
+/*	$OpenBSD: pf_if.c,v 1.77 2014/12/19 17:14:40 tedu Exp $ */
 
 /*
  * Copyright 2005 Henning Brauer <henning@openbsd.org>
@@ -45,6 +45,7 @@
 #include <sys/syslog.h>
 
 #include <net/if.h>
+#include <net/if_var.h>
 #include <net/if_types.h>
 
 #include <netinet/in.h>
@@ -91,7 +92,7 @@ pfi_initialize(void)
 	pool_init(&pfi_addr_pl, sizeof(struct pfi_dynaddr), 0, 0, 0,
 	    "pfiaddrpl", &pool_allocator_nointr);
 	pfi_buffer_max = 64;
-	pfi_buffer = malloc(pfi_buffer_max * sizeof(*pfi_buffer),
+	pfi_buffer = mallocarray(pfi_buffer_max, sizeof(*pfi_buffer),
 	    PFI_MTYPE, M_WAITOK);
 
 	if ((pfi_all = pfi_kif_get(IFG_ALL)) == NULL)
@@ -319,7 +320,6 @@ int
 pfi_match_addr(struct pfi_dynaddr *dyn, struct pf_addr *a, sa_family_t af)
 {
 	switch (af) {
-#ifdef INET
 	case AF_INET:
 		switch (dyn->pfid_acnt4) {
 		case 0:
@@ -331,7 +331,6 @@ pfi_match_addr(struct pfi_dynaddr *dyn, struct pf_addr *a, sa_family_t af)
 			return (pfr_match_addr(dyn->pfid_kt, a, AF_INET));
 		}
 		break;
-#endif /* INET */
 #ifdef INET6
 	case AF_INET6:
 		switch (dyn->pfid_acnt6) {
@@ -552,7 +551,7 @@ pfi_address_add(struct sockaddr *sa, int af, int net)
 			    pfi_buffer_cnt, PFI_BUFFER_MAX);
 			return;
 		}
-		p = malloc(new_max * sizeof(*pfi_buffer), PFI_MTYPE,
+		p = mallocarray(new_max, sizeof(*pfi_buffer), PFI_MTYPE,
 		    M_DONTWAIT);
 		if (p == NULL) {
 			DPFPRINTF(LOG_ERR,

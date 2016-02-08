@@ -1,4 +1,4 @@
-#	$OpenBSD: GENERIC,v 1.165 2014/07/12 21:56:56 tedu Exp $
+#	$OpenBSD: GENERIC,v 1.168 2015/01/03 21:24:19 uaa Exp $
 #
 # For further information on compiling OpenBSD kernels, see the config(8)
 # man page.
@@ -137,6 +137,8 @@ umsm*	at uhub?		# Qualcomm MSM EVDO
 ucom*	at umsm?
 ucycom*	at uhidev?		# Cypress serial
 ucom*	at ucycom?
+uslhcom* at uhidev?		# Silicon Labs CP2110 USB HID UART
+ucom*	at uslhcom?
 uchcom*	at uhub?		# WinChipHead CH341/340 serial
 ucom*	at uchcom?
 uaudio* at uhub?		# USB Audio
@@ -156,7 +158,6 @@ udav*	at uhub?		# Davicom DM9601 based Ethernet
 upl*	at uhub?		# Prolific PL2301/PL2302 host-to-host `network'
 ugl*	at uhub?		# Genesys Logic GL620USB-A host-to-host `network'
 wi*	at uhub?		# WaveLAN IEEE 802.11DS
-urio*	at uhub?		# Diamond Multimedia Rio 500
 udsbr*	at uhub?		# D-Link DSB-R100 radio
 radio*	at udsbr?		# USB radio
 ugen*	at uhub?		# USB Generic driver
@@ -243,7 +244,6 @@ mpi*	at pci?			# LSI Logic Fusion MPT Message Passing Interface
 #option	BHADEBUG
 #bha*	at eisa?
 #bha*	at pci?
-isp*	at pci?			# Qlogic ISP [12]0x0 SCSI/FibreChannel
 qlw*	at pci?			# QLogic ISP SCSI
 qla*	at pci?			# QLogic ISP 2[123]xx FibreChannel
 qle*	at pci?			# QLogic ISP 2[45]xx FibreChannel

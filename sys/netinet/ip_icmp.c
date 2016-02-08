@@ -1,4 +1,4 @@
-/*	$OpenBSD: ip_icmp.c,v 1.123 2014/07/13 13:57:56 mpi Exp $	*/
+/*	$OpenBSD: ip_icmp.c,v 1.132 2015/02/05 03:01:03 mpi Exp $	*/
 /*	$NetBSD: ip_icmp.c,v 1.19 1996/02/13 23:42:22 christos Exp $	*/
 
 /*
@@ -76,10 +76,10 @@
 #include <sys/mbuf.h>
 #include <sys/protosw.h>
 #include <sys/socket.h>
-#include <sys/proc.h>
 #include <sys/sysctl.h>
 
 #include <net/if.h>
+#include <net/if_var.h>
 #include <net/route.h>
 
 #include <netinet/in.h>
@@ -687,9 +687,11 @@ int
 icmp_reflect(struct mbuf *m, struct mbuf **op, struct in_ifaddr *ia)
 {
 	struct ip *ip = mtod(m, struct ip *);
-	struct in_addr t;
 	struct mbuf *opts = 0;
+	struct sockaddr_in sin;
+	struct rtentry *rt;
 	int optlen = (ip->ip_hl << 2) - sizeof(struct ip);
+	u_int rtableid;
 
 	if (!in_canforward(ip->ip_src) &&
 	    ((ip->ip_src.s_addr & IN_CLASSA_NET) !=
@@ -701,58 +703,53 @@ icmp_reflect(struct mbuf *m, struct mbuf **op, struct in_ifaddr *ia)
 #if NPF > 0
 	pf_pkt_addr_changed(m);
 #endif
-	t = ip->ip_dst;
-	ip->ip_dst = ip->ip_src;
+	rtableid = m->m_pkthdr.ph_rtableid;
+
 	/*
 	 * If the incoming packet was addressed directly to us,
 	 * use dst as the src for the reply.  For broadcast, use
 	 * the address which corresponds to the incoming interface.
 	 */
 	if (ia == NULL) {
-		TAILQ_FOREACH(ia, &in_ifaddr, ia_list) {
-			if (ia->ia_ifp->if_rdomain !=
-			    rtable_l2(m->m_pkthdr.ph_rtableid))
-				continue;
-			if (t.s_addr == ia->ia_addr.sin_addr.s_addr)
-				break;
-			if ((ia->ia_ifp->if_flags & IFF_BROADCAST) &&
-			    ia->ia_broadaddr.sin_addr.s_addr != 0 &&
-			    t.s_addr == ia->ia_broadaddr.sin_addr.s_addr)
-				break;
+		memset(&sin, 0, sizeof(sin));
+		sin.sin_len = sizeof(sin);
+		sin.sin_family = AF_INET;
+		sin.sin_addr = ip->ip_dst;
+
+		rt = rtalloc(sintosa(&sin), 0, rtableid);
+		if (rt != NULL) {
+			if (rt->rt_flags & (RTF_LOCAL|RTF_BROADCAST))
+				ia = ifatoia(rt->rt_ifa);
+			rtfree(rt);
 		}
 	}
+
 	/*
 	 * The following happens if the packet was not addressed to us.
 	 * Use the new source address and do a route lookup. If it fails
 	 * drop the packet as there is no path to the host.
 	 */
 	if (ia == NULL) {
-		struct sockaddr_in *dst;
-		struct route ro;
-
-		memset(&ro, 0, sizeof(ro));
-		ro.ro_tableid = m->m_pkthdr.ph_rtableid;
-		dst = satosin(&ro.ro_dst);
-		dst->sin_family = AF_INET;
-		dst->sin_len = sizeof(*dst);
-		dst->sin_addr = ip->ip_src;
+		memset(&sin, 0, sizeof(sin));
+		sin.sin_len = sizeof(sin);
+		sin.sin_family = AF_INET;
+		sin.sin_addr = ip->ip_src;
 
 		/* keep packet in the original virtual instance */
-		ro.ro_rt = rtalloc1(&ro.ro_dst, RT_REPORT,
-		     m->m_pkthdr.ph_rtableid);
-		if (ro.ro_rt == 0) {
+		rt = rtalloc(sintosa(&sin), RT_REPORT|RT_RESOLVE, rtableid);
+		if (rt == NULL) {
 			ipstat.ips_noroute++;
 			m_freem(m);
 			return (EHOSTUNREACH);
 		}
 
-		ia = ifatoia(ro.ro_rt->rt_ifa);
-		ro.ro_rt->rt_use++;
-		RTFREE(ro.ro_rt);
+		ia = ifatoia(rt->rt_ifa);
+		rt->rt_use++;
+		rtfree(rt);
 	}
 
-	t = ia->ia_addr.sin_addr;
-	ip->ip_src = t;
+	ip->ip_dst = ip->ip_src;
+	ip->ip_src = ia->ia_addr.sin_addr;
 	ip->ip_ttl = MAXTTL;
 
 	if (optlen > 0) {
@@ -916,19 +913,16 @@ icmp_sysctl(int *name, u_int namelen, void *oldp, size_t *oldlenp, void *newp,
 struct rtentry *
 icmp_mtudisc_clone(struct in_addr dst, u_int rtableid)
 {
-	struct sockaddr_in *sin;
-	struct route ro;
+	struct sockaddr_in sin;
 	struct rtentry *rt;
 	int error;
 
-	memset(&ro, 0, sizeof(ro));
-	ro.ro_tableid = rtableid;
-	sin = satosin(&ro.ro_dst);
-	sin->sin_family = AF_INET;
-	sin->sin_len = sizeof(*sin);
-	sin->sin_addr = dst;
+	memset(&sin, 0, sizeof(sin));
+	sin.sin_family = AF_INET;
+	sin.sin_len = sizeof(sin);
+	sin.sin_addr = dst;
 
-	rt = rtalloc1(&ro.ro_dst, RT_REPORT, rtableid);
+	rt = rtalloc(sintosa(&sin), RT_REPORT|RT_RESOLVE, rtableid);
 	if (rt == NULL)
 		return (NULL);
 
@@ -944,7 +938,7 @@ icmp_mtudisc_clone(struct in_addr dst, u_int rtableid)
 		struct rt_addrinfo info;
 
 		memset(&info, 0, sizeof(info));
-		info.rti_info[RTAX_DST] = sintosa(sin);
+		info.rti_info[RTAX_DST] = sintosa(&sin);
 		info.rti_info[RTAX_GATEWAY] = rt->rt_gateway;
 		info.rti_flags = RTF_GATEWAY | RTF_HOST | RTF_DYNAMIC;
 
@@ -1032,27 +1026,24 @@ icmp_mtudisc_timeout(struct rtentry *rt, struct rttimer *r)
 {
 	if (rt == NULL)
 		panic("icmp_mtudisc_timeout:  bad route to timeout");
+
 	if ((rt->rt_flags & (RTF_DYNAMIC | RTF_HOST)) ==
 	    (RTF_DYNAMIC | RTF_HOST)) {
 		void *(*ctlfunc)(int, struct sockaddr *, u_int, void *);
 		struct sockaddr_in sa;
-		struct rt_addrinfo info;
-
-		memset(&info, 0, sizeof(info));
-		info.rti_info[RTAX_DST] = rt_key(rt);
-		info.rti_info[RTAX_NETMASK] = rt_mask(rt);
-		info.rti_info[RTAX_GATEWAY] = rt->rt_gateway;
-		info.rti_flags = rt->rt_flags;   
+		int s;
 
 		sa = *(struct sockaddr_in *)rt_key(rt);
-		rtrequest1(RTM_DELETE, &info, rt->rt_priority, NULL,
-		    r->rtt_tableid);
+
+		s = splsoftnet();
+		rtdeletemsg(rt, r->rtt_tableid);
 
 		/* Notify TCP layer of increased Path MTU estimate */
 		ctlfunc = inetsw[ip_protox[IPPROTO_TCP]].pr_ctlinput;
 		if (ctlfunc)
 			(*ctlfunc)(PRC_MTUINC,(struct sockaddr *)&sa,
 			    r->rtt_tableid, NULL);
+		splx(s);
 	} else
 		if ((rt->rt_rmx.rmx_locks & RTV_MTU) == 0)
 			rt->rt_rmx.rmx_mtu = 0;
@@ -1081,18 +1072,14 @@ icmp_redirect_timeout(struct rtentry *rt, struct rttimer *r)
 {
 	if (rt == NULL)
 		panic("icmp_redirect_timeout:  bad route to timeout");
+
 	if ((rt->rt_flags & (RTF_DYNAMIC | RTF_HOST)) ==
 	    (RTF_DYNAMIC | RTF_HOST)) {
-		struct rt_addrinfo info;
+		int s;
 
-		memset(&info, 0, sizeof(info));
-		info.rti_info[RTAX_DST] = rt_key(rt);
-		info.rti_info[RTAX_NETMASK] = rt_mask(rt);
-		info.rti_info[RTAX_GATEWAY] = rt->rt_gateway;
-		info.rti_flags = rt->rt_flags;   
-
-		rtrequest1(RTM_DELETE, &info, rt->rt_priority, NULL, 
-		    r->rtt_tableid);
+		s = splsoftnet();
+		rtdeletemsg(rt, r->rtt_tableid);
+		splx(s);
 	}
 }
 

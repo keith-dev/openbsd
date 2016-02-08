@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_bgereg.h,v 1.124 2014/07/08 05:35:18 dlg Exp $	*/
+/*	$OpenBSD: if_bgereg.h,v 1.126 2014/09/02 10:14:55 brad Exp $	*/
 
 /*
  * Copyright (c) 2001 Wind River Systems
@@ -2344,15 +2344,26 @@ struct bge_tx_bd {
 #define	BGE_TXBDFLAG_IP_CSUM		0x0002
 #define	BGE_TXBDFLAG_END		0x0004
 #define	BGE_TXBDFLAG_IP_FRAG		0x0008
-#define	BGE_TXBDFLAG_JMB_PKT		0x0008
+#define	BGE_TXBDFLAG_JUMBO_FRAME	0x0008	/* 5717 */
 #define	BGE_TXBDFLAG_IP_FRAG_END	0x0010
+#define	BGE_TXBDFLAG_HDRLEN_BIT2	0x0010	/* 5717 */
+#define	BGE_TXBDFLAG_SNAP		0x0020	/* 5717 */
 #define	BGE_TXBDFLAG_VLAN_TAG		0x0040
 #define	BGE_TXBDFLAG_COAL_NOW		0x0080
 #define	BGE_TXBDFLAG_CPU_PRE_DMA	0x0100
 #define	BGE_TXBDFLAG_CPU_POST_DMA	0x0200
+#define	BGE_TXBDFLAG_HDRLEN_BIT3	0x0400	/* 5717 */
+#define	BGE_TXBDFLAG_HDRLEN_BIT4	0x0800	/* 5717 */
 #define	BGE_TXBDFLAG_INSERT_SRC_ADDR	0x1000
+#define	BGE_TXBDFLAG_HDRLEN_BIT5	0x1000	/* 5717 */
+#define	BGE_TXBDFLAG_HDRLEN_BIT6	0x2000	/* 5717 */
+#define	BGE_TXBDFLAG_HDRLEN_BIT7	0x4000	/* 5717 */
 #define	BGE_TXBDFLAG_CHOOSE_SRC_ADDR	0x6000
 #define	BGE_TXBDFLAG_NO_CRC		0x8000
+
+#define	BGE_TXBDFLAG_MSS_SIZE_MASK	0x3FFF	/* 5717 */
+/* Bits [1:0] of the MSS header length. */
+#define	BGE_TXBDFLAG_MSS_HDRLEN_MASK	0xC000	/* 5717 */
 
 #define	BGE_NIC_TXRING_ADDR(ringno, size)	\
 	BGE_SEND_RING_1_TO_4 +			\
@@ -2869,6 +2880,9 @@ struct bge_softc {
 #define	BGE_TAGGED_STATUS	0x00200000
 #define	BGE_MSI			0x00400000
 #define	BGE_RDMA_BUG		0x00800000
+#define	BGE_JUMBO_RING		0x01000000
+#define	BGE_JUMBO_STD		0x02000000
+#define	BGE_JUMBO_FRAME		0x04000000
 
 	u_int32_t		bge_phy_flags;
 #define	BGE_PHY_NO_3LED		0x00000001
@@ -2900,6 +2914,7 @@ struct bge_softc {
 	u_int32_t		bge_tx_prodidx;
 	struct if_rxring	bge_std_ring;
 	u_int16_t		bge_std;	/* current std ring head */
+	int			bge_rx_std_len;
 	struct if_rxring	bge_jumbo_ring;
 	u_int16_t		bge_jumbo;	/* current jumo ring head */
 	u_int32_t		bge_stat_ticks;

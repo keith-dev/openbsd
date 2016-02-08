@@ -1,4 +1,4 @@
-/* $OpenBSD: md4_dgst.c,v 1.12 2014/07/09 11:10:51 bcook Exp $ */
+/* $OpenBSD: md4_dgst.c,v 1.14 2014/10/28 07:35:59 jsg Exp $ */
 /* Copyright (C) 1995-1998 Eric Young (eay@cryptsoft.com)
  * All rights reserved.
  *
@@ -86,7 +86,7 @@ int MD4_Init(MD4_CTX *c)
 void md4_block_data_order (MD4_CTX *c, const void *data_, size_t num)
 	{
 	const unsigned char *data=data_;
-	register unsigned MD32_REG_T A,B,C,D,l;
+	unsigned MD32_REG_T A,B,C,D,l;
 #ifndef MD32_XARRAY
 	/* See comment in crypto/sha/sha_locl.h for details. */
 	unsigned MD32_REG_T	XX0, XX1, XX2, XX3, XX4, XX5, XX6, XX7,
@@ -104,23 +104,23 @@ void md4_block_data_order (MD4_CTX *c, const void *data_, size_t num)
 
 	for (;num--;)
 		{
-	(void)HOST_c2l(data,l); X( 0)=l;
-	(void)HOST_c2l(data,l); X( 1)=l;
+	HOST_c2l(data,l); X( 0)=l;
+	HOST_c2l(data,l); X( 1)=l;
 	/* Round 0 */
-	R0(A,B,C,D,X( 0), 3,0);	(void)HOST_c2l(data,l); X( 2)=l;
-	R0(D,A,B,C,X( 1), 7,0);	(void)HOST_c2l(data,l); X( 3)=l;
-	R0(C,D,A,B,X( 2),11,0);	(void)HOST_c2l(data,l); X( 4)=l;
-	R0(B,C,D,A,X( 3),19,0);	(void)HOST_c2l(data,l); X( 5)=l;
-	R0(A,B,C,D,X( 4), 3,0);	(void)HOST_c2l(data,l); X( 6)=l;
-	R0(D,A,B,C,X( 5), 7,0);	(void)HOST_c2l(data,l); X( 7)=l;
-	R0(C,D,A,B,X( 6),11,0);	(void)HOST_c2l(data,l); X( 8)=l;
-	R0(B,C,D,A,X( 7),19,0);	(void)HOST_c2l(data,l); X( 9)=l;
-	R0(A,B,C,D,X( 8), 3,0);	(void)HOST_c2l(data,l); X(10)=l;
-	R0(D,A,B,C,X( 9), 7,0);	(void)HOST_c2l(data,l); X(11)=l;
-	R0(C,D,A,B,X(10),11,0);	(void)HOST_c2l(data,l); X(12)=l;
-	R0(B,C,D,A,X(11),19,0);	(void)HOST_c2l(data,l); X(13)=l;
-	R0(A,B,C,D,X(12), 3,0);	(void)HOST_c2l(data,l); X(14)=l;
-	R0(D,A,B,C,X(13), 7,0);	(void)HOST_c2l(data,l); X(15)=l;
+	R0(A,B,C,D,X( 0), 3,0);	HOST_c2l(data,l); X( 2)=l;
+	R0(D,A,B,C,X( 1), 7,0);	HOST_c2l(data,l); X( 3)=l;
+	R0(C,D,A,B,X( 2),11,0);	HOST_c2l(data,l); X( 4)=l;
+	R0(B,C,D,A,X( 3),19,0);	HOST_c2l(data,l); X( 5)=l;
+	R0(A,B,C,D,X( 4), 3,0);	HOST_c2l(data,l); X( 6)=l;
+	R0(D,A,B,C,X( 5), 7,0);	HOST_c2l(data,l); X( 7)=l;
+	R0(C,D,A,B,X( 6),11,0);	HOST_c2l(data,l); X( 8)=l;
+	R0(B,C,D,A,X( 7),19,0);	HOST_c2l(data,l); X( 9)=l;
+	R0(A,B,C,D,X( 8), 3,0);	HOST_c2l(data,l); X(10)=l;
+	R0(D,A,B,C,X( 9), 7,0);	HOST_c2l(data,l); X(11)=l;
+	R0(C,D,A,B,X(10),11,0);	HOST_c2l(data,l); X(12)=l;
+	R0(B,C,D,A,X(11),19,0);	HOST_c2l(data,l); X(13)=l;
+	R0(A,B,C,D,X(12), 3,0);	HOST_c2l(data,l); X(14)=l;
+	R0(D,A,B,C,X(13), 7,0);	HOST_c2l(data,l); X(15)=l;
 	R0(C,D,A,B,X(14),11,0);
 	R0(B,C,D,A,X(15),19,0);
 	/* Round 1 */

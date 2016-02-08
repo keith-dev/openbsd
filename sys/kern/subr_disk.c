@@ -1,4 +1,4 @@
-/*	$OpenBSD: subr_disk.c,v 1.168 2014/07/13 15:32:28 miod Exp $	*/
+/*	$OpenBSD: subr_disk.c,v 1.180 2015/01/27 03:17:36 dlg Exp $	*/
 /*	$NetBSD: subr_disk.c,v 1.17 1996/03/16 23:17:08 christos Exp $	*/
 
 /*
@@ -54,9 +54,8 @@
 #include <sys/disk.h>
 #include <sys/reboot.h>
 #include <sys/dkio.h>
-#include <sys/proc.h>
 #include <sys/vnode.h>
-#include <sys/workq.h>
+#include <sys/task.h>
 
 #include <sys/socket.h>
 #include <sys/socketvar.h>
@@ -95,7 +94,12 @@ void (*softraid_disk_attach)(struct disk *, int);
 
 void sr_map_root(void);
 
-void disk_attach_callback(void *, void *);
+struct disk_attach_task {
+	struct task task;
+	struct disk *dk;
+};
+
+void disk_attach_callback(void *);
 
 /*
  * Compute checksum for disk label.
@@ -393,7 +397,8 @@ donot:
 			struct partition *pp;
 			u_int8_t fstype;
 
-			if (dp2->dp_typ == DOSPTYP_OPENBSD)
+			if (dp2->dp_typ == DOSPTYP_OPENBSD ||
+			    dp2->dp_typ == DOSPTYP_EFI)
 				continue;
 			if (letoh32(dp2->dp_size) > DL_GETDSIZE(lp))
 				continue;
@@ -415,6 +420,7 @@ donot:
 				fstype = FS_NTFS;
 				break;
 
+			case DOSPTYP_EFISYS:
 			case DOSPTYP_FAT12:
 			case DOSPTYP_FAT16S:
 			case DOSPTYP_FAT16B:
@@ -530,7 +536,7 @@ notfat:
 	if (biowait(bp))
 		return (bp->b_error);
 
-	
+
 	error = checkdisklabel(bp->b_data + offset, lp,
 	    DL_GETBSTART((struct disklabel*)(bp->b_data+offset)),
 	    DL_GETBEND((struct disklabel *)(bp->b_data+offset)));
@@ -613,7 +619,7 @@ get_fstype(struct uuid *uuid_part)
  * If gpt partition table requested, attempt to load it and
  * find disklabel inside a GPT partition. Return buffer
  * for use in signalling errors if requested.
- * 
+ *
  * XXX: readgptlabel() is based on readdoslabel(), so they should be merged
  */
 int
@@ -640,12 +646,16 @@ readgptlabel(struct buf *bp, void (*strat)(struct buf *),
 	if (lp->d_secsize == 0)
 		return (ENOSPC);	/* disk too small */
 
-	/* 
-	 * XXX: We should not trust the primary header and instead 
+	/*
+	 * XXX: We should not trust the primary header and instead
 	 * use the last LBA of the disk, as defined in the standard.
 	 */
-	for (part_blkno = GPTSECTOR; ; part_blkno = gh.gh_lba_alt, 
+	for (part_blkno = GPTSECTOR; ; part_blkno = gh.gh_lba_alt,
 	    altheader = 1) {
+		uint32_t ghsize;
+		uint32_t ghpartsize;
+		uint32_t ghpartnum;
+
 		/* read header record */
 		bp->b_blkno = DL_BLKTOSEC(lp, part_blkno) * DL_BLKSPERSEC(lp);
 		offset = DL_BLKOFFSET(lp, part_blkno);
@@ -664,6 +674,10 @@ readgptlabel(struct buf *bp, void (*strat)(struct buf *),
 		}
 
 		bcopy(bp->b_data + offset, &gh, sizeof(gh));
+		ghsize = letoh32(gh.gh_size);
+		ghpartsize = letoh32(gh.gh_part_size);
+		ghpartnum = letoh32(gh.gh_part_num);
+
 
 		if (letoh64(gh.gh_sig) != GPTSIGNATURE)
 			return (EINVAL);
@@ -678,22 +692,21 @@ readgptlabel(struct buf *bp, void (*strat)(struct buf *),
 				DPRINTF("alternate header also broken\n");
 				return (EINVAL);
 			}
-			
+
 			if (gh.gh_lba_alt >= DL_GETDSIZE(lp)) {
 				DPRINTF("alternate header's position is "
 				    "bogous\n");
-				return (EINVAL); 
+				return (EINVAL);
 			}
 
 			continue;
 		}
 
-		/* 
+		/*
 		 * Header size must be greater than or equal to 92 and less
 		 * than or equal to the logical block size.
 		 */
-		if (letoh32(gh.gh_size) < GPTMINHDRSIZE
-		    && letoh32(gh.gh_size) > DEV_BSIZE)
+		if (ghsize < GPTMINHDRSIZE || ghsize > DEV_BSIZE)
 			return (EINVAL);
 
 		if (letoh64(gh.gh_lba_start) >= DL_GETDSIZE(lp) ||
@@ -705,13 +718,13 @@ readgptlabel(struct buf *bp, void (*strat)(struct buf *),
 		* Size per partition entry shall be 128*(2**n) with n >= 0.
 		* We don't support partition entries larger than block size.
 		*/
-		if (letoh32(gh.gh_part_size) % GPTMINPARTSIZE
-		    || letoh32(gh.gh_part_size) > DEV_BSIZE
+		if (ghpartsize % GPTMINPARTSIZE
+		    || ghpartsize > DEV_BSIZE
 		    || GPT_PARTSPERSEC(&gh) == 0) {
 			DPRINTF("invalid partition size\n");
 			return (EINVAL);
 		}
-		
+
 		/* XXX: we don't support multiples of GPTMINPARTSIZE yet */
 		if (letoh32(gh.gh_part_size) != GPTMINPARTSIZE) {
 			DPRINTF("partition sizes larger than %d bytes are not "
@@ -720,16 +733,16 @@ readgptlabel(struct buf *bp, void (*strat)(struct buf *),
 		}
 
 		/* read GPT partition entry array */
-		gpsz = letoh32(gh.gh_part_num) * sizeof(struct gpt_partition);
-		gp = malloc(gpsz, M_DEVBUF, M_NOWAIT|M_ZERO);
+		gp = mallocarray(ghpartnum, sizeof(struct gpt_partition), M_DEVBUF, M_NOWAIT|M_ZERO);
 		if (gp == NULL)
 			return (ENOMEM);
+		gpsz = ghpartnum * sizeof(struct gpt_partition);
 
 		/*
 		* XXX: Fails if # of partition entries is no multiple of
 		* GPT_PARTSPERSEC(&gh)
 		*/
-		for (i = 0; i < letoh32(gh.gh_part_num) / GPT_PARTSPERSEC(&gh);
+		for (i = 0; i < ghpartnum / GPT_PARTSPERSEC(&gh);
 		     i++) {
 			part_blkno = letoh64(gh.gh_part_lba) + i;
 			/* read partition record */
@@ -984,7 +997,7 @@ diskerr(struct buf *bp, char *dname, char *what, int pri, int blkdone,
     struct disklabel *lp)
 {
 	int unit = DISKUNIT(bp->b_dev), part = DISKPART(bp->b_dev);
-    	int (*pr)(const char *, ...) __attribute__((__format__(__kprintf__,1,2)));
+	int (*pr)(const char *, ...) __attribute__((__format__(__kprintf__,1,2)));
 	char partname = 'a' + part;
 	daddr_t sn;
 
@@ -1082,39 +1095,42 @@ disk_attach(struct device *dv, struct disk *diskp)
 		if (majdev >= 0)
 			diskp->dk_devno =
 			    MAKEDISKDEV(majdev, dv->dv_unit, RAW_PART);
+
+		if (diskp->dk_devno != NODEV) {
+			struct disk_attach_task *dat;
+
+			dat = malloc(sizeof(*dat), M_TEMP, M_WAITOK);
+
+			/* XXX: Assumes dk is part of the device softc. */
+			device_ref(dv);
+			dat->dk = diskp;
+
+			task_set(&dat->task, disk_attach_callback, dat);
+			task_add(systq, &dat->task);
+		}
 	}
-	if (diskp->dk_devno != NODEV)
-		workq_add_task(NULL, 0, disk_attach_callback,
-		    (void *)(long)(diskp->dk_devno), NULL);
 
 	if (softraid_disk_attach)
 		softraid_disk_attach(diskp, 1);
 }
 
 void
-disk_attach_callback(void *arg1, void *arg2)
+disk_attach_callback(void *xdat)
 {
+	struct disk_attach_task *dat = xdat;
+	struct disk *dk = dat->dk;
 	char errbuf[100];
 	struct disklabel dl;
-	struct disk *dk;
-	dev_t dev = (dev_t)(long)arg1;
+	dev_t dev;
 
-	/* Locate disk associated with device no. */
-	TAILQ_FOREACH(dk, &disklist, dk_link) {
-		if (dk->dk_devno == dev)
-			break;
-	}
-	if (dk == NULL)
-		return;
-
-	/* XXX: Assumes dk is part of the device softc. */
-	device_ref(dk->dk_device);
+	free(dat, M_TEMP, sizeof(*dat));
 
 	if (dk->dk_flags & (DKF_OPENED | DKF_NOLABELREAD))
 		goto done;
 
 	/* Read disklabel. */
-	if (disk_readlabel(&dl, dev, errbuf, sizeof(errbuf)) == NULL) {
+	dev = dk->dk_devno;
+	if (disk_readlabel(&dl, dk->dk_devno, errbuf, sizeof(errbuf)) == NULL) {
 		add_timer_randomness(dl.d_checksum);
 		dk->dk_flags |= DKF_LABELVALID;
 	}
@@ -1138,7 +1154,7 @@ disk_detach(struct disk *diskp)
 	/*
 	 * Free the space used by the disklabel structures.
 	 */
-	free(diskp->dk_label, M_DEVBUF, 0);
+	free(diskp->dk_label, M_DEVBUF, sizeof(*diskp->dk_label));
 
 	/*
 	 * Remove from the disklist.
@@ -1462,9 +1478,9 @@ setroot(struct device *bootdv, int part, int exitflags)
 			}
 			printf(": ");
 			s = splhigh();
-			cnpollc(TRUE);
+			cnpollc(1);
 			len = getsn(buf, sizeof(buf));
-			cnpollc(FALSE);
+			cnpollc(0);
 			splx(s);
 			if (strcmp(buf, "exit") == 0)
 				reboot(exitflags);
@@ -1499,9 +1515,9 @@ setroot(struct device *bootdv, int part, int exitflags)
 				    rootdv->dv_class == DV_DISK ? "b" : "");
 			printf(": ");
 			s = splhigh();
-			cnpollc(TRUE);
+			cnpollc(1);
 			len = getsn(buf, sizeof(buf));
-			cnpollc(FALSE);
+			cnpollc(0);
 			splx(s);
 			if (strcmp(buf, "exit") == 0)
 				reboot(exitflags);

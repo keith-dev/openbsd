@@ -1,4 +1,4 @@
-/*	$OpenBSD: tcp_input.c,v 1.278 2014/07/22 11:06:10 mpi Exp $	*/
+/*	$OpenBSD: tcp_input.c,v 1.287 2015/02/08 04:40:50 yasuoka Exp $	*/
 /*	$NetBSD: tcp_input.c,v 1.23 1996/02/13 23:43:44 christos Exp $	*/
 
 /*
@@ -80,9 +80,8 @@
 #include <sys/kernel.h>
 #include <sys/pool.h>
 
-#include <dev/rndvar.h>
-
 #include <net/if.h>
+#include <net/if_var.h>
 #include <net/route.h>
 
 #include <netinet/in.h>
@@ -396,7 +395,6 @@ tcp_input(struct mbuf *m, ...)
 
 	/*
 	 * RFC1122 4.2.3.10, p. 104: discard bcast/mcast SYN
-	 * See below for AF specific multicast.
 	 */
 	if (m->m_flags & (M_BCAST|M_MCAST))
 		goto drop;
@@ -461,10 +459,6 @@ tcp_input(struct mbuf *m, ...)
 	switch (af) {
 	case AF_INET:
 		ip = mtod(m, struct ip *);
-		if (IN_MULTICAST(ip->ip_dst.s_addr) ||
-		    in_broadcast(ip->ip_dst, m->m_pkthdr.rcvif,
-		    m->m_pkthdr.ph_rtableid))
-			goto drop;
 #ifdef TCP_ECN
 		/* save ip_tos before clearing it for checksum */
 		iptos = ip->ip_tos;
@@ -588,7 +582,7 @@ tcp_input(struct mbuf *m, ...)
 		inp = m->m_pkthdr.pf.statekey->inp;
 		if (inp && inp->inp_pf_sk)
 			KASSERT(m->m_pkthdr.pf.statekey == inp->inp_pf_sk);
-}
+	}
 #endif
 findpcb:
 	if (inp == NULL) {
@@ -670,7 +664,6 @@ findpcb:
 		bzero(&src, sizeof(src));
 		bzero(&dst, sizeof(dst));
 		switch (af) {
-#ifdef INET
 		case AF_INET:
 			src.sin.sin_len = sizeof(struct sockaddr_in);
 			src.sin.sin_family = AF_INET;
@@ -682,7 +675,6 @@ findpcb:
 			dst.sin.sin_addr = ip->ip_dst;
 			dst.sin.sin_port = th->th_dport;
 			break;
-#endif
 #ifdef INET6
 		case AF_INET6:
 			src.sin6.sin6_len = sizeof(struct sockaddr_in6);
@@ -861,8 +853,10 @@ findpcb:
 				 */
 				if (so->so_qlen > so->so_qlimit ||
 				    syn_cache_add(&src.sa, &dst.sa, th, iphlen,
-				    so, m, optp, optlen, &opti, reuse) == -1)
+				    so, m, optp, optlen, &opti, reuse) == -1) {
+					tcpstat.tcps_dropsyn++;
 					goto drop;
+				}
 				return;
 			}
 		}
@@ -2061,11 +2055,8 @@ step6:
 		 * but if two URG's are pending at once, some out-of-band
 		 * data may creep in... ick.
 		 */
-		if (th->th_urp <= (u_int16_t) tlen
-#ifdef SO_OOBINLINE
-		     && (so->so_options & SO_OOBINLINE) == 0
-#endif
-		     )
+		if (th->th_urp <= (u_int16_t) tlen &&
+		    (so->so_options & SO_OOBINLINE) == 0)
 		        tcp_pulloutofband(so, th->th_urp, m, hdroptlen);
 	} else
 		/*
@@ -2403,7 +2394,6 @@ tcp_dooptions(struct tcpcb *tp, u_char *cp, int cnt, struct tcphdr *th,
 
 		switch (tp->pf) {
 		case 0:
-#ifdef INET
 		case AF_INET:
 			src.sa.sa_len = sizeof(struct sockaddr_in);
 			src.sa.sa_family = AF_INET;
@@ -2412,7 +2402,6 @@ tcp_dooptions(struct tcpcb *tp, u_char *cp, int cnt, struct tcphdr *th,
 			dst.sa.sa_family = AF_INET;
 			dst.sin.sin_addr = mtod(m, struct ip *)->ip_dst;
 			break;
-#endif
 #ifdef INET6
 		case AF_INET6:
 			src.sa.sa_len = sizeof(struct sockaddr_in6);
@@ -3375,8 +3364,10 @@ syn_cache_put(struct syn_cache *sc)
 {
 	if (sc->sc_ipopts)
 		(void) m_free(sc->sc_ipopts);
-	if (sc->sc_route4.ro_rt != NULL)
-		RTFREE(sc->sc_route4.ro_rt);
+	if (sc->sc_route4.ro_rt != NULL) {
+		rtfree(sc->sc_route4.ro_rt);
+		sc->sc_route4.ro_rt = NULL;
+	}
 	timeout_set(&sc->sc_timer, syn_cache_reaper, sc);
 	timeout_add(&sc->sc_timer, 0);
 }
@@ -3410,7 +3401,7 @@ syn_cache_init()
 
 	/* Initialize the syn cache pool. */
 	pool_init(&syn_cache_pool, sizeof(struct syn_cache), 0, 0, 0,
-	    "synpl", NULL);
+	    "syncache", NULL);
 }
 
 void
@@ -4039,14 +4030,12 @@ syn_cache_add(struct sockaddr *src, struct sockaddr *dst, struct tcphdr *th,
 	}
 
 	switch (src->sa_family) {
-#ifdef INET
 	case AF_INET:
 		/*
 		 * Remember the IP options, if any.
 		 */
 		ipopts = ip_srcroute(m);
 		break;
-#endif
 	default:
 		ipopts = NULL;
 	}
@@ -4324,12 +4313,10 @@ syn_cache_respond(struct syn_cache *sc, struct mbuf *m)
 
 		switch (sc->sc_src.sa.sa_family) {
 		case 0:	/*default to PF_INET*/
-#ifdef INET
 		case AF_INET:
 			src.sin.sin_addr = mtod(m, struct ip *)->ip_src;
 			dst.sin.sin_addr = mtod(m, struct ip *)->ip_dst;
 			break;
-#endif /* INET */
 #ifdef INET6
 		case AF_INET6:
 			src.sin6.sin6_addr = mtod(m, struct ip6_hdr *)->ip6_src;
@@ -4390,14 +4377,12 @@ syn_cache_respond(struct syn_cache *sc, struct mbuf *m)
 	 * ip_len to be in host order, for convenience.
 	 */
 	switch (sc->sc_src.sa.sa_family) {
-#ifdef INET
 	case AF_INET:
 		ip->ip_len = htons(tlen);
 		ip->ip_ttl = inp ? inp->inp_ip.ip_ttl : ip_defttl;
 		if (inp != NULL)
 			ip->ip_tos = inp->inp_ip.ip_tos;
 		break;
-#endif
 #ifdef INET6
 	case AF_INET6:
 		ip6->ip6_vfc &= ~IPV6_VERSION_MASK;
@@ -4410,12 +4395,10 @@ syn_cache_respond(struct syn_cache *sc, struct mbuf *m)
 	}
 
 	switch (sc->sc_src.sa.sa_family) {
-#ifdef INET
 	case AF_INET:
 		error = ip_output(m, sc->sc_ipopts, ro,
 		    (ip_mtudisc ? IP_MTUDISC : 0),  NULL, inp, 0);
 		break;
-#endif
 #ifdef INET6
 	case AF_INET6:
 		ip6->ip6_hlim = in6_selecthlim(NULL,

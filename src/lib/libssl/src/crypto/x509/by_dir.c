@@ -1,4 +1,4 @@
-/* $OpenBSD: by_dir.c,v 1.32 2014/07/11 08:44:49 jsing Exp $ */
+/* $OpenBSD: by_dir.c,v 1.36 2015/02/12 03:54:07 jsing Exp $ */
 /* Copyright (C) 1995-1998 Eric Young (eay@cryptsoft.com)
  * All rights reserved.
  *
@@ -70,9 +70,7 @@
 #include <openssl/lhash.h>
 #include <openssl/x509.h>
 
-#ifndef OPENSSL_NO_POSIX_IO
 # include <sys/stat.h>
-#endif
 
 typedef struct lookup_dir_hashes_st {
 	unsigned long hash;
@@ -101,17 +99,17 @@ static int add_cert_dir(BY_DIR *ctx, const char *dir, int type);
 static int get_cert_by_subject(X509_LOOKUP *xl, int type, X509_NAME *name,
     X509_OBJECT *ret);
 
-X509_LOOKUP_METHOD x509_dir_lookup = {
-	"Load certs from files in a directory",
-	new_dir,		/* new */
-	free_dir,		/* free */
-	NULL, 			/* init */
-	NULL,			/* shutdown */
-	dir_ctrl,		/* ctrl */
-	get_cert_by_subject,	/* get_by_subject */
-	NULL,			/* get_by_issuer_serial */
-	NULL,			/* get_by_fingerprint */
-	NULL,			/* get_by_alias */
+static X509_LOOKUP_METHOD x509_dir_lookup = {
+	.name = "Load certs from files in a directory",
+	.new_item = new_dir,
+	.free = free_dir,
+	.init = NULL, 
+	.shutdown = NULL,
+	.ctrl = dir_ctrl,
+	.get_by_subject = get_cert_by_subject,
+	.get_by_issuer_serial = NULL,
+	.get_by_fingerprint = NULL,
+	.get_by_alias = NULL,
 };
 
 X509_LOOKUP_METHOD *
@@ -208,8 +206,9 @@ free_dir(X509_LOOKUP *lu)
 static int
 add_cert_dir(BY_DIR *ctx, const char *dir, int type)
 {
-	int j, len;
+	int j;
 	const char *s, *ss, *p;
+	ptrdiff_t len;
 
 	if (dir == NULL || !*dir) {
 		X509err(X509_F_ADD_CERT_DIR, X509_R_INVALID_DIRECTORY);
@@ -223,14 +222,13 @@ add_cert_dir(BY_DIR *ctx, const char *dir, int type)
 			BY_DIR_ENTRY *ent;
 			ss = s;
 			s = p + 1;
-			len = (int)(p - ss);
+			len = p - ss;
 			if (len == 0)
 				continue;
 			for (j = 0; j < sk_BY_DIR_ENTRY_num(ctx->dirs); j++) {
 				ent = sk_BY_DIR_ENTRY_value(ctx->dirs, j);
 				if (strlen(ent->dir) == (size_t)len &&
-				    strncmp(ent->dir, ss,
-				    (unsigned int)len) == 0)
+				    strncmp(ent->dir, ss, (size_t)len) == 0)
 					break;
 			}
 			if (j < sk_BY_DIR_ENTRY_num(ctx->dirs))
@@ -249,7 +247,7 @@ add_cert_dir(BY_DIR *ctx, const char *dir, int type)
 			}
 			ent->dir_type = type;
 			ent->hashes = sk_BY_DIR_HASH_new(by_dir_hash_cmp);
-			ent->dir = strdup(ss);
+			ent->dir = strndup(ss, (size_t)len);
 			if (!ent->dir || !ent->hashes) {
 				X509err(X509_F_ADD_CERT_DIR, ERR_R_MALLOC_FAILURE);
 				by_dir_entry_free(ent);
@@ -344,13 +342,11 @@ get_cert_by_subject(X509_LOOKUP *xl, int type, X509_NAME *name,
 			(void) snprintf(b->data, b->max, "%s/%08lx.%s%d",
 			    ent->dir, h, postfix, k);
 
-#ifndef OPENSSL_NO_POSIX_IO
 			{
 				struct stat st;
 				if (stat(b->data, &st) < 0)
 					break;
 			}
-#endif
 			/* found one. */
 			if (type == X509_LU_X509) {
 				if ((X509_load_cert_file(xl, b->data,

@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_wi.c,v 1.156 2014/07/22 13:12:12 mpi Exp $	*/
+/*	$OpenBSD: if_wi.c,v 1.159 2014/12/22 02:28:51 tedu Exp $	*/
 
 /*
  * Copyright (c) 1997, 1998, 1999
@@ -70,7 +70,6 @@
 #include <sys/mbuf.h>
 #include <sys/malloc.h>
 #include <sys/kernel.h>
-#include <sys/proc.h>
 #include <sys/socket.h>
 #include <sys/device.h>
 
@@ -79,10 +78,8 @@
 #include <net/if_media.h>
 #include <net/if_types.h>
 
-#ifdef INET
 #include <netinet/in.h>
 #include <netinet/if_ether.h>
-#endif
 
 #include <net80211/ieee80211_var.h>
 #include <net80211/ieee80211_ioctl.h>
@@ -92,8 +89,6 @@
 #endif
 
 #include <machine/bus.h>
-
-#include <dev/rndvar.h>
 
 #include <dev/ic/if_wireg.h>
 #include <dev/ic/if_wi_ieee.h>
@@ -1575,12 +1570,10 @@ wi_ioctl(struct ifnet *ifp, u_long command, caddr_t data)
 	case SIOCSIFADDR:
 		ifp->if_flags |= IFF_UP;
 		switch (ifa->ifa_addr->sa_family) {
-#ifdef INET
 		case AF_INET:
 			wi_init(sc);
 			arp_ifinit(&sc->sc_ic.ic_ac, ifa);
 			break;
-#endif	/* INET */
 		default:
 			wi_init(sc);
 			break;

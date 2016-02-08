@@ -1,4 +1,4 @@
-/*	$OpenBSD: xy.c,v 1.59 2014/07/11 16:35:40 jsg Exp $	*/
+/*	$OpenBSD: xy.c,v 1.68 2015/01/16 20:18:24 miod Exp $	*/
 /*	$NetBSD: xy.c,v 1.26 1997/07/19 21:43:56 pk Exp $	*/
 
 /*
@@ -79,7 +79,6 @@
 
 #include <sparc/dev/xyreg.h>
 #include <sparc/dev/xyvar.h>
-#include <sparc/dev/xio.h>
 #include <sparc/sparc/vaddrs.h>
 
 /*
@@ -141,11 +140,10 @@ extern int pil_to_vme[];	/* from obio.c */
 /* internals */
 struct xy_iopb *xyc_chain(struct xyc_softc *, struct xy_iorq *);
 int	xyc_cmd(struct xyc_softc *, int, int, int, int, int, char *, int);
-char   *xyc_e2str(int);
+const char *xyc_e2str(int);
 int	xyc_entoact(int);
 int	xyc_error(struct xyc_softc *, struct xy_iorq *,
 		   struct xy_iopb *, int);
-int	xyc_ioctlcmd(struct xy_softc *, dev_t dev, struct xd_iocmd *);
 void	xyc_perror(struct xy_iorq *, struct xy_iopb *, int);
 int	xyc_piodriver(struct xyc_softc *, struct xy_iorq *);
 int	xyc_remove_iorq(struct xyc_softc *);
@@ -172,7 +170,7 @@ int	xymatch(struct device *, void *, void *);
 void	xyattach(struct device *, struct device *, void *);
 
 static	void xydummystrat(struct buf *);
-int	xygetdisklabel(struct xy_softc *, void *);
+int	xygetdisklabel(dev_t, struct xy_softc *, struct disklabel *, int);
 
 /*
  * cfdrivers: device driver interface to autoconfig
@@ -202,73 +200,86 @@ struct xyc_attach_args {	/* this is the "aux" args to xyattach */
 	int	booting;	/* are we booting or not? */
 };
 
-/*
- * start: disk label fix code (XXX)
- */
-
-static void *xy_labeldata;
-
 static void
 xydummystrat(bp)
 	struct buf *bp;
 {
-	if (bp->b_bcount != XYFM_BPS)
-		panic("xydummystrat");
-	bcopy(xy_labeldata, bp->b_data, XYFM_BPS);
+	struct xy_softc *xy;
+	size_t sz;
+
+	xy = (struct xy_softc *)xy_cd.cd_devs[DISKUNIT(bp->b_dev)];
+	sz = MIN(bp->b_bcount, XYFM_BPS);
+	bcopy(xy->xy_labeldata, bp->b_data, sz);
+	bp->b_resid = bp->b_bcount - sz;
+	if (bp->b_resid != 0) {
+		bp->b_flags |= B_ERROR;
+		bp->b_error = EIO;
+	}
 	bp->b_flags |= B_DONE;
 }
 
 int
-xygetdisklabel(xy, b)
+xygetdisklabel(dev, xy, lp, spoofonly)
+	dev_t dev;
 	struct xy_softc *xy;
-	void *b;
+	struct disklabel *lp;
+	int spoofonly;
 {
-	struct disklabel *lp = xy->sc_dk.dk_label;
-	struct sun_disklabel *sl = b;
 	int error;
 
 	bzero(lp, sizeof(struct disklabel));
 	/* Required parameters for readdisklabel() */
 	lp->d_secsize = XYFM_BPS;
-	if (sl->sl_magic == SUN_DKMAGIC) {
-		lp->d_secpercyl = sl->sl_nsectors * sl->sl_ntracks;
-		DL_SETDSIZE(lp, (u_int64_t)lp->d_secpercyl * sl->sl_ncylinders);
-	} else {
+	if (xy->state == XY_DRIVE_ATTACHING || xy->state == XY_DRIVE_NOLABEL) {
+		/* needs to be nonzero */
 		lp->d_secpercyl = 1;
+	} else {
+		/*
+		 * Disk geometry is known for a previously found label.
+		 * Use it.
+		 */
+		lp->d_ntracks = xy->nhead;
+		lp->d_nsectors = xy->nsect;
+		lp->d_ncylinders = xy->ncyl;
+		lp->d_acylinders = xy->acyl;
+		lp->d_secpercyl = lp->d_ntracks * lp->d_nsectors;
+		DL_SETDSIZE(lp, (u_int64_t)lp->d_secpercyl * lp->d_ncylinders);
 	}
+	lp->d_type = DTYPE_SMD;
+	lp->d_version = 1;
 
-	/* We already have the label data in `b'; setup for dummy strategy */
-	xy_labeldata = b;
+	/* These are as defined in <ufs/ffs/fs.h> */
+	lp->d_bbsize = 8192; /* BBSIZE */
+	lp->d_sbsize = 8192; /* SBSIZE */
 
-	error = readdisklabel(MAKEDISKDEV(0, xy->sc_dev.dv_unit, RAW_PART),
-	    xydummystrat, lp, 0);
+	lp->d_magic = DISKMAGIC;
+	lp->d_magic2 = DISKMAGIC;
+	lp->d_checksum = dkcksum(lp);
+
+	error = readdisklabel(DISKLABELDEV(dev),
+	    xy->state == XY_DRIVE_ATTACHING ? xydummystrat : xystrategy,
+	    lp, spoofonly);
 	if (error)
-		return (error);
+		return error;
 
-	/* Ok, we have the label; fill in `pcyl' if there's SunOS magic */
-	sl = b;
-	if (sl->sl_magic == SUN_DKMAGIC)
-		xy->pcyl = sl->sl_pcylinders;
-	else {
-		printf("%s: WARNING: no `pcyl' in disk label.\n",
-			xy->sc_dev.dv_xname);
-		xy->pcyl = lp->d_ncylinders +
-			lp->d_acylinders;
-		printf("%s: WARNING: guessing pcyl=%d (ncyl+acyl)\n",
-		xy->sc_dev.dv_xname, xy->pcyl);
+	/*
+	 * If a label was found, get our geometry from it.
+	 */
+	if (xy->state == XY_DRIVE_ATTACHING || xy->state == XY_DRIVE_NOLABEL) {
+		/*
+		 * Note that this relies upon pcyl == cyl + acyl, and will
+		 * ignore the explicit pcyl value from the converted SunOS
+		 * label.
+		 */
+		xy->pcyl = lp->d_ncylinders + lp->d_acylinders;
+		xy->ncyl = lp->d_ncylinders;
+		xy->acyl = lp->d_acylinders;
+		xy->nhead = lp->d_ntracks;
+		xy->nsect = lp->d_nsectors;
+		xy->sectpercyl = lp->d_secpercyl;
 	}
-
-	xy->ncyl = lp->d_ncylinders;
-	xy->acyl = lp->d_acylinders;
-	xy->nhead = lp->d_ntracks;
-	xy->nsect = lp->d_nsectors;
-	xy->sectpercyl = lp->d_secpercyl;
-	return (error);
+	return 0;
 }
-
-/*
- * end: disk label fix code (XXX)
- */
 
 /*
  * a u t o c o n f i g   f u n c t i o n s
@@ -579,8 +590,12 @@ xyattach(parent, self, aux)
 	/* Attach the disk: must be before getdisklabel to malloc label */
 	disk_attach(&xy->sc_dev, &xy->sc_dk);
 
-	if (xygetdisklabel(xy, xa->buf) != 0)
+	xy->xy_labeldata = xa->buf;
+	if (xygetdisklabel(MAKEDISKDEV(0, xy->sc_dev.dv_unit, 0), xy,
+	    xy->sc_dk.dk_label, 0) != 0) {
+		printf("%s: no label, unknown geometry\n", xy->sc_dev.dv_xname);
 		goto done;
+	}
 
 	/* inform the user of what is up */
 	printf("%s: <%s>, pcyl %d\n", xy->sc_dev.dv_xname,
@@ -743,19 +758,6 @@ xydump(dev, blkno, va, size)
 	    'a' + part);
 
 	return ENXIO;
-
-	/* outline: globals: "dumplo" == sector number of partition to start
-	 * dump at (convert to physical sector with partition table)
-	 * "dumpsize" == size of dump in clicks "physmem" == size of physical
-	 * memory (clicks, ptoa() to get bytes) (normal case: dumpsize ==
-	 * physmem)
-	 *
-	 * dump a copy of physical memory to the dump device starting at sector
-	 * "dumplo" in the swap partition (make sure > 0).   map in pages as
-	 * we go.   use polled I/O.
-	 *
-	 * XXX how to handle NON_CONTIG? */
-
 }
 
 /*
@@ -771,7 +773,6 @@ xyioctl(dev, command, addr, flag, p)
 
 {
 	struct xy_softc *xy;
-	struct xd_iocmd *xio;
 	int     error, s, unit;
 
 	unit = DISKUNIT(dev);
@@ -790,14 +791,17 @@ xyioctl(dev, command, addr, flag, p)
 		splx(s);
 		return 0;
 
+	case DIOCGPDINFO:
+		xygetdisklabel(dev, xy, (struct disklabel *)addr, 1);
+		return 0;
+
 	case DIOCGDINFO:	/* get disk label */
-	case DIOCGPDINFO:	/* no separate 'physical' info available. */
 		bcopy(xy->sc_dk.dk_label, addr, sizeof(struct disklabel));
 		return 0;
 
 	case DIOCGPART:	/* get partition info */
-		((struct partinfo *) addr)->disklab = xy->sc_dk.dk_label;
-		((struct partinfo *) addr)->part =
+		((struct partinfo *)addr)->disklab = xy->sc_dk.dk_label;
+		((struct partinfo *)addr)->part =
 		    &xy->sc_dk.dk_label->d_partitions[DISKPART(dev)];
 		return 0;
 
@@ -806,7 +810,7 @@ xyioctl(dev, command, addr, flag, p)
 		if ((flag & FWRITE) == 0)
 			return EBADF;
 		error = setdisklabel(xy->sc_dk.dk_label,
-		    (struct disklabel *) addr, /* xy->sc_dk.dk_openmask : */ 0);
+		    (struct disklabel *)addr, /* xy->sc_dk.dk_openmask : */ 0);
 		if (error == 0) {
 			if (xy->state == XY_DRIVE_NOLABEL)
 				xy->state = XY_DRIVE_ONLINE;
@@ -824,12 +828,6 @@ xyioctl(dev, command, addr, flag, p)
 			}
 		}
 		return error;
-
-	case DIOSXDCMD:
-		xio = (struct xd_iocmd *) addr;
-		if ((error = suser(p, 0)) != 0)
-			return (error);
-		return (xyc_ioctlcmd(xy, dev, xio));
 
 	default:
 		return ENOTTY;
@@ -1750,11 +1748,11 @@ xyc_remove_iorq(xycsc)
 				iopb->head =
 					(iorq->blockno / iorq->xy->nhead) %
 						iorq->xy->nhead;
-				iopb->sect = iorq->blockno % XYFM_BPS;
+				iopb->sect = iorq->blockno % iorq->xy->nsect;
 				addr = (u_long) iorq->dbuf - DVMA_BASE;
 				iopb->dataa = (addr & 0xffff);
 				iopb->datar = ((addr & 0xff0000) >> 16);
-				/* will resubit at end */
+				/* will resubmit at end */
 				continue;
 			}
 		}
@@ -1845,6 +1843,7 @@ xyc_error(xycsc, iorq, iopb, comm)
 	int     errno = iorq->errno;
 	int     erract = xyc_entoact(errno);
 	int     oldmode, advance, i;
+	u_long  addr;
 
 	if (erract == XY_ERA_RSET) {	/* some errors require a reset */
 		oldmode = iorq->mode;
@@ -1871,8 +1870,13 @@ xyc_error(xycsc, iorq, iopb, comm)
 			/* second to last acyl */
 			i = iorq->xy->sectpercyl - 1 - i;	/* follow bad144
 								 * standard */
-			iopb->head = i / iorq->xy->nhead;
-			iopb->sect = i % iorq->xy->nhead;
+			iopb->head = i % iorq->xy->nhead;
+			iopb->sect = i / iorq->xy->nhead;
+
+			addr = (u_long) iorq->dbuf - DVMA_BASE;
+			iopb->dataa = (addr & 0xffff);
+			iopb->datar = ((addr & 0xff0000) >> 16);
+
 			/* will resubmit when we come out of remove_iorq */
 			return (XY_ERR_AOK);	/* recovered! */
 		}
@@ -1917,8 +1921,10 @@ xyc_tick(arg)
 		    XY_STATE(xycsc->reqs[lcv].mode) == XY_SUB_DONE)
 			continue;
 		xycsc->reqs[lcv].ttl--;
-		if (xycsc->reqs[lcv].ttl == 0)
+		if (xycsc->reqs[lcv].ttl == 0) {
 			reset = 1;
+			break;	/* we're going to fail all requests anyway */
+		}
 	}
 	if (reset) {
 		printf("%s: watchdog timeout\n", xycsc->sc_dev.dv_xname);
@@ -1932,90 +1938,9 @@ xyc_tick(arg)
 }
 
 /*
- * xyc_ioctlcmd: this function provides a user level interface to the
- * controller via ioctl.   this allows "format" programs to be written
- * in user code, and is also useful for some debugging.   we return
- * an error code.   called at user priority.
- *
- * XXX missing a few commands (see the 7053 driver for ideas)
- */
-int
-xyc_ioctlcmd(xy, dev, xio)
-	struct xy_softc *xy;
-	dev_t   dev;
-	struct xd_iocmd *xio;
-
-{
-	int     s, err, rqno, dummy = 0;
-	caddr_t dvmabuf = NULL, buf = NULL;
-	struct xyc_softc *xycsc;
-
-	/* check sanity of requested command */
-
-	switch (xio->cmd) {
-
-	case XYCMD_NOP:	/* no op: everything should be zero */
-		if (xio->subfn || xio->dptr || xio->dlen ||
-		    xio->block || xio->sectcnt)
-			return (EINVAL);
-		break;
-
-	case XYCMD_RD:		/* read / write sectors (up to XD_IOCMD_MAXS) */
-	case XYCMD_WR:
-		if (xio->subfn || xio->sectcnt > XD_IOCMD_MAXS ||
-		    xio->sectcnt * XYFM_BPS != xio->dlen || xio->dptr == NULL)
-			return (EINVAL);
-		break;
-
-	case XYCMD_SK:		/* seek: doesn't seem useful to export this */
-		return (EINVAL);
-
-		break;
-
-	default:
-		return (EINVAL);/* ??? */
-	}
-
-	/* create DVMA buffer for request if needed */
-
-	if (xio->dlen) {
-		dvmabuf = dvma_malloc(xio->dlen, &buf, M_WAITOK);
-		if (xio->cmd == XYCMD_WR) {
-			if ((err = copyin(xio->dptr, buf, xio->dlen)) != 0) {
-				dvma_free(dvmabuf, xio->dlen, &buf);
-				return (err);
-			}
-		}
-	}
-	/* do it! */
-
-	err = 0;
-	xycsc = xy->parent;
-	s = splbio();
-	rqno = xyc_cmd(xycsc, xio->cmd, xio->subfn, xy->xy_drive, xio->block,
-	    xio->sectcnt, dvmabuf, XY_SUB_WAIT);
-	if (rqno == XY_ERR_FAIL) {
-		err = EIO;
-		goto done;
-	}
-	xio->errno = xycsc->ciorq->errno;
-	xio->tries = xycsc->ciorq->tries;
-	XYC_DONE(xycsc, dummy);
-
-	if (xio->cmd == XYCMD_RD)
-		err = copyout(buf, xio->dptr, xio->dlen);
-
-done:
-	splx(s);
-	if (dvmabuf)
-		dvma_free(dvmabuf, xio->dlen, &buf);
-	return (err);
-}
-
-/*
  * xyc_e2str: convert error code number into an error string
  */
-char *
+const char *
 xyc_e2str(no)
 	int     no;
 {

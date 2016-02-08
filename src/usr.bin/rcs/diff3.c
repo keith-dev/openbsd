@@ -1,4 +1,4 @@
-/*	$OpenBSD: diff3.c,v 1.33 2012/03/04 04:05:15 fgsch Exp $	*/
+/*	$OpenBSD: diff3.c,v 1.35 2015/01/16 06:40:11 deraadt Exp $	*/
 
 /*
  * Copyright (C) Caldera International Inc.  2001-2002.
@@ -126,7 +126,7 @@ static int last[4];
 static int eflag = 3;	/* default -E for compatibility with former RCS */
 static int oflag = 1;	/* default -E for compatibility with former RCS */
 static int debug  = 0;
-static char f1mark[MAXPATHLEN], f3mark[MAXPATHLEN];	/* markers for -E and -X */
+static char f1mark[PATH_MAX], f3mark[PATH_MAX];	/* markers for -E and -X */
 
 static int duplicate(struct range *, struct range *);
 static int edit(struct diff *, int, int);
@@ -637,7 +637,7 @@ get_line(FILE *b, size_t *n)
 		do {
 			bufsize += 1024;
 		} while (len + 1 > bufsize);
-		buf = xrealloc(buf, 1, bufsize);
+		buf = xreallocarray(buf, 1, bufsize);
 	}
 	memcpy(buf, cp, len - 1);
 	buf[len - 1] = '\n';
@@ -934,13 +934,13 @@ increase(void)
 	newsz = szchanges == 0 ? 64 : 2 * szchanges;
 	incr = newsz - szchanges;
 
-	d13 = xrealloc(d13, newsz, sizeof(*d13));
+	d13 = xreallocarray(d13, newsz, sizeof(*d13));
 	memset(d13 + szchanges, 0, incr * sizeof(*d13));
-	d23 = xrealloc(d23, newsz, sizeof(*d23));
+	d23 = xreallocarray(d23, newsz, sizeof(*d23));
 	memset(d23 + szchanges, 0, incr * sizeof(*d23));
-	de = xrealloc(de, newsz, sizeof(*de));
+	de = xreallocarray(de, newsz, sizeof(*de));
 	memset(de + szchanges, 0, incr * sizeof(*de));
-	overlap = xrealloc(overlap, newsz, sizeof(*overlap));
+	overlap = xreallocarray(overlap, newsz, sizeof(*overlap));
 	memset(overlap + szchanges, 0, incr * sizeof(*overlap));
 	szchanges = newsz;
 }

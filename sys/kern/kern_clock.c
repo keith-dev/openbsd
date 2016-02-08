@@ -1,4 +1,4 @@
-/*	$OpenBSD: kern_clock.c,v 1.85 2014/07/08 17:19:25 deraadt Exp $	*/
+/*	$OpenBSD: kern_clock.c,v 1.87 2014/09/15 19:08:21 miod Exp $	*/
 /*	$NetBSD: kern_clock.c,v 1.34 1996/06/09 04:51:03 briggs Exp $	*/
 
 /*-
@@ -39,7 +39,6 @@
 
 #include <sys/param.h>
 #include <sys/systm.h>
-#include <sys/dkstat.h>
 #include <sys/timeout.h>
 #include <sys/kernel.h>
 #include <sys/limits.h>
@@ -101,8 +100,6 @@ int	profprocs;
 int	ticks;
 static int psdiv, pscnt;		/* prof => stat divider */
 int	psratio;			/* ratio: prof / stat */
-
-long cp_time[CPUSTATES];
 
 void	*softclock_si;
 

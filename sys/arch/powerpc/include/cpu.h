@@ -1,4 +1,4 @@
-/*	$OpenBSD: cpu.h,v 1.53 2014/07/11 10:53:07 uebayasi Exp $	*/
+/*	$OpenBSD: cpu.h,v 1.60 2015/02/11 07:05:39 dlg Exp $	*/
 /*	$NetBSD: cpu.h,v 1.1 1996/09/30 16:34:21 ws Exp $	*/
 
 /*
@@ -37,7 +37,6 @@
 #include <machine/frame.h>
 
 #include <sys/device.h>
-#include <sys/lock.h>
 #include <sys/sched.h>
 
 struct cpu_info {
@@ -54,10 +53,10 @@ struct cpu_info {
 
 	volatile int ci_want_resched;
 	volatile int ci_cpl;
-	volatile int ci_iactive;
-#define		CI_IACTIVE_PROCESSING_SOFT	1
-#define		CI_IACTIVE_PROCESSING_HARD	2
 	volatile int ci_ipending;
+
+	volatile int	ci_flags;
+#define	CI_FLAGS_SLEEPING		2
 
 	int ci_intrdepth;
 	char *ci_intstk;
@@ -122,7 +121,7 @@ void	cpu_boot_secondary_processors(void);
 #define CPU_IS_PRIMARY(ci)	((ci)->ci_cpuid == 0)
 #define CPU_INFO_ITERATOR		int
 #define CPU_INFO_FOREACH(cii, ci)					\
-	for (cii = 0, ci = &cpu_info[0]; cii < ncpus; cii++, ci++)
+	for (cii = 0, ci = &cpu_info[0]; cii < ncpusfound; cii++, ci++)
 
 void cpu_unidle(struct cpu_info *);
 
@@ -151,6 +150,7 @@ extern struct cpu_info cpu_info[PPC_MAXPROCS];
 #define	CLKF_PC(frame)		((frame)->srr0)
 #define	CLKF_INTR(frame)	((frame)->depth != 0)
 
+extern	int ppc_cpuidle;
 /*
  * This is used during profiling to integrate system time.
  */
@@ -255,6 +255,7 @@ FUNC_SPR(275, sprg3)
 FUNC_SPR(280, asr)
 FUNC_SPR(282, ear)
 FUNC_SPR(287, pvr)
+FUNC_SPR(311, hior)
 FUNC_SPR(528, ibat0u)
 FUNC_SPR(529, ibat0l)
 FUNC_SPR(530, ibat1u)
@@ -287,7 +288,6 @@ FUNC_SPR(572, dbat6u)
 FUNC_SPR(573, dbat6l)
 FUNC_SPR(574, dbat7u)
 FUNC_SPR(575, dbat7l)
-FUNC_SPR(1008, hid0)
 FUNC_SPR(1009, hid1)
 FUNC_SPR(1010, iabr)
 FUNC_SPR(1017, l2cr)
@@ -303,6 +303,7 @@ ppc_mftbl (void)
 	return ret;
 }
 
+
 static __inline u_int64_t
 ppc_mftb(void)
 {
@@ -312,6 +313,14 @@ ppc_mftb(void)
 	__asm volatile ("1: mftbu %0; mftb %0+1; mftbu %1;"
 	    " cmpw 0,%0,%1; bne 1b" : "=r"(tb), "=r"(scratch));
 	return tb;
+}
+
+static __inline void
+ppc_mttb(u_int64_t tb)
+{
+	__asm volatile ("mttbl %0" :: "r"(0));
+	__asm volatile ("mttbu %0" :: "r"((u_int32_t)(tb >> 32)));
+	__asm volatile ("mttbl %0" :: "r"((u_int32_t)(tb & 0xffffffff)));
 }
 
 static __inline u_int32_t
@@ -339,6 +348,14 @@ void ppc_mtscomc(u_int32_t);
 void ppc64_mtscomc(u_int64_t);
 u_int64_t ppc64_mfscomd(void);
 void ppc_mtscomd(u_int32_t);
+u_int32_t ppc_mfhid0(void);
+void ppc_mthid0(u_int32_t);
+u_int64_t ppc64_mfhid1(void);
+void ppc64_mthid1(u_int64_t);
+u_int64_t ppc64_mfhid4(void);
+void ppc64_mthid4(u_int64_t);
+u_int64_t ppc64_mfhid5(void);
+void ppc64_mthid5(u_int64_t);
 
 #include <machine/psl.h>
 

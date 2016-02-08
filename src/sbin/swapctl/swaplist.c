@@ -1,4 +1,4 @@
-/*	$OpenBSD: swaplist.c,v 1.8 2011/06/24 21:02:09 jasper Exp $	*/
+/*	$OpenBSD: swaplist.c,v 1.10 2015/01/16 06:40:01 deraadt Exp $	*/
 /*	$NetBSD: swaplist.c,v 1.8 1998/10/08 10:00:31 mrg Exp $	*/
 
 /*
@@ -29,11 +29,12 @@
  * SUCH DAMAGE.
  */
 
-#include <sys/param.h>
+#include <sys/param.h>	/* dbtob */
+#include <sys/types.h>
 #include <sys/swap.h>
 
 #include <err.h>
-#include <inttypes.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>

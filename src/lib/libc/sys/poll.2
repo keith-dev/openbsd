@@ -1,4 +1,4 @@
-.\"	$OpenBSD: poll.2,v 1.23 2013/11/02 17:25:34 espie Exp $
+.\"	$OpenBSD: poll.2,v 1.31 2015/03/03 01:13:41 kspillner Exp $
 .\"
 .\" Copyright (c) 1994 Jason R. Thorpe
 .\" All rights reserved.
@@ -28,7 +28,7 @@
 .\" OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
 .\" OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
 .\"
-.Dd $Mdocdate: November 2 2013 $
+.Dd $Mdocdate: March 3 2015 $
 .Dt POLL 2
 .Os
 .Sh NAME
@@ -36,7 +36,7 @@
 .Nm ppoll
 .Nd synchronous I/O multiplexing
 .Sh SYNOPSIS
-.Fd #include <poll.h>
+.In poll.h
 .Ft int
 .Fn poll "struct pollfd *fds" "nfds_t nfds" "int timeout"
 .Ft int
@@ -61,7 +61,7 @@ The arguments are as follows:
 .Bl -tag -width timeout
 .It Fa fds
 Points to an array of
-.Fa pollfd
+.Vt pollfd
 structures, which are defined as:
 .Bd -literal -offset indent
 struct pollfd {
@@ -78,7 +78,7 @@ If
 .Fa fd
 is -1,
 the
-.Fa pollfd
+.Vt pollfd
 structure is considered unused, and
 .Fa revents
 will be cleared.
@@ -91,14 +91,15 @@ members are bitmasks of conditions to monitor and conditions found,
 respectively.
 .It Fa nfds
 An unsigned integer specifying the number of
-.Fa pollfd
+.Vt pollfd
 structures in the array.
 .It Fa timeout
 Maximum interval to wait for the poll to complete, in milliseconds.
 If this value is 0,
 .Fn poll
 will return immediately.
-If this value is INFTIM (-1),
+If this value is
+.Dv INFTIM Pq -1 ,
 .Fn poll
 will block indefinitely until a condition is found.
 .El
@@ -173,6 +174,14 @@ member.
 .Pp
 The significance and semantics of normal, priority, and high-priority
 data are device-specific.
+For example, on
+.Ox ,
+the
+.Dv POLLPRI
+and
+.Dv POLLRDBAND
+flags may be used to detect when out-of-band socket data may be read
+without blocking.
 .Pp
 In addition to I/O multiplexing,
 .Fn poll
@@ -210,32 +219,86 @@ to indicate the error.
 If the timeout interval was reached before any events occurred,
 they return 0.
 Otherwise, they return the number of
-.Fa pollfd
+.Vt pollfd
 structures for which
 .Fa revents
 is non-zero.
-.Sh EXAMPLES
-The following example implements a read from the standard input that times
-out after 60 seconds:
+.Sh IDIOMS
+Care must be taken when converting code from
+.Xr select 2
+to
+.Fn poll
+as they have slightly different semantics.
+The first semantic difference is that, unlike
+.Xr select 2 ,
+.Fn poll
+has a way of indicating that one or more file descriptors is invalid
+by setting a flag in the
+.Fa revents
+field of corresponding entry of
+.Fa fds ,
+whereas
+.Xr select 2
+returns an error (-1) if any of the descriptors with bits set in
+the
+.Vt fd_set
+are invalid.
+The second difference is that on EOF there is no guarantee that
+.Dv POLLIN
+will be set in
+.Fa revents ,
+the caller must also check for
+.Dv POLLHUP .
+This differs from
+.Xr select 2
+where EOF is considered as a read event.
+.Pp
+Consider the following usage of
+.Xr select 2
+that implements a read from the standard input with a
+60 second time out:
 .Bd -literal -offset indent
-#include <err.h>
-#include <poll.h>
-#include <stdio.h>
-#include <unistd.h>
+struct timeval timeout;
+fd_set readfds;
+char buf[BUFSIZ];
+int nready;
 
+timeout.tv_sec = 60;
+timeout.tv_usec = 0;
+FD_ZERO(&readfds);
+FD_SET(STDIN_FILENO);
+nready = select(STDIN_FILENO + 1, &readfds, NULL, NULL, &timeout);
+if (nready == -1)
+	err(1, "select");
+if (nready == 0)
+	errx(1, "time out");
+if (FD_ISSET(STDIN_FILENO, &readfds)) {
+	if (read(STDIN_FILENO, buf, sizeof(buf)) == -1)
+		err(1, "read");
+}
+.Ed
+.Pp
+This can be converted to
+.Fn poll
+as follows:
+.Bd -literal -offset indent
 struct pollfd pfd[1];
 char buf[BUFSIZ];
-int nfds;
+int nready;
 
 pfd[0].fd = STDIN_FILENO;
 pfd[0].events = POLLIN;
-nfds = poll(pfd, 1, 60 * 1000);
-if (nfds == -1 || (pfd[0].revents & (POLLERR|POLLHUP|POLLNVAL)))
-	errx(1, "poll error");
-if (nfds == 0)
+nready = poll(pfd, 1, 60 * 1000);
+if (nready == -1)
+	err(1, "poll");
+if (nready == 0)
 	errx(1, "time out");
-if (read(STDIN_FILENO, buf, sizeof(buf)) == -1)
-	errx(1, "read");
+if ((pfd[0].revents & (POLLERR|POLLNVAL)))
+	errx(1, "bad fd %d", pfd[0].fd);
+if ((pfd[0].revents & (POLLIN|POLLHUP)))
+	if (read(STDIN_FILENO, buf, sizeof(buf)) == -1)
+		err(1, "read");
+}
 .Ed
 .Sh ERRORS
 .Fn poll
@@ -266,7 +329,7 @@ The timeout passed was invalid.
 The
 .Fn poll
 function is compliant with the
-.St -xpg4.3
+.St -p1003.1-2008
 specification.
 The
 .Fn ppoll
@@ -282,15 +345,12 @@ function appeared in
 .Ox 5.4 .
 .Sh BUGS
 The
-.Dv POLLERR
-and
 .Dv POLLWRBAND
-flags are accepted but ignored by the kernel.
+flag is accepted but ignored by the kernel.
 .Pp
 Because
 .Ox
-does not implement
-.Tn STREAMS ,
+does not implement STREAMS,
 there is no distinction between some of the fields in the
 .Fa events
 and
@@ -302,6 +362,11 @@ As a result, the
 and
 .Dv POLLRDNORM
 flags are equivalent.
+Similarly, the
+.Dv POLLPRI
+and
+.Dv POLLRDBAND
+flags are also equivalent.
 .Pp
 Internally to the kernel,
 .Fn poll

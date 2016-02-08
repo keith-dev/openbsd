@@ -1,4 +1,4 @@
-#	$OpenBSD: GENERIC,v 1.105 2014/02/19 05:32:57 jmatthew Exp $
+#	$OpenBSD: GENERIC,v 1.107 2014/11/22 22:48:38 miod Exp $
 #
 # For further information on compiling OpenBSD kernels, see the config(8)
 # man page.
@@ -72,6 +72,9 @@ oclock0	at obio0 addr 0xf3000000		# sun4/100 and sun4/200
 memreg0	at mainbus0				# sun4c and sun4e
 memreg0	at obio0				# sun4m
 memreg0	at obio0 addr 0xf4000000		# sun4
+
+# ECC memory control
+eccmemctl0 at mainbus0				# sun4m
 
 # Timer chip found on 4/300, sun4c, and sun4m systems.
 timer0	at mainbus0				# sun4c and sun4e
@@ -151,6 +154,7 @@ esp*	at dma? flags 0x00ff000f			# depending on model
 
 #sun4c, sun4e, sun4m
 isp*	at sbus?
+qlw*	at sbus?
 #qla*	at sbus?
 
 # sun4m Ethernet - an AMD 7990 LANCE behind

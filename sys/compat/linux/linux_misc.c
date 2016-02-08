@@ -1,4 +1,4 @@
-/*	$OpenBSD: linux_misc.c,v 1.90 2014/06/28 21:20:19 matthew Exp $	*/
+/*	$OpenBSD: linux_misc.c,v 1.92 2014/11/16 12:30:59 deraadt Exp $	*/
 /*	$NetBSD: linux_misc.c,v 1.27 1996/05/20 01:59:21 fvdl Exp $	*/
 
 /*-
@@ -416,8 +416,6 @@ bsd_to_linux_statfs(const struct statfs *bsp, struct linux_statfs *lsp)
 		lsp->l_ftype = LINUX_FSTYPE_NFS;
 	else if (!strcmp(bsp->f_fstypename, MOUNT_MSDOS))
 		lsp->l_ftype = LINUX_FSTYPE_MSDOS;
-	else if (!strcmp(bsp->f_fstypename, MOUNT_PROCFS))
-		lsp->l_ftype = LINUX_FSTYPE_PROCFS;
 	else if (!strcmp(bsp->f_fstypename, MOUNT_EXT2FS))
 		lsp->l_ftype = LINUX_FSTYPE_EXT2FS;
 	else if (!strcmp(bsp->f_fstypename, MOUNT_CD9660))
@@ -498,8 +496,6 @@ bsd_to_linux_statfs64(const struct statfs *bsp, struct linux_statfs64 *lsp)
 		lsp->l_ftype = LINUX_FSTYPE_NFS;
 	else if (!strcmp(bsp->f_fstypename, MOUNT_MSDOS))
 		lsp->l_ftype = LINUX_FSTYPE_MSDOS;
-	else if (!strcmp(bsp->f_fstypename, MOUNT_PROCFS))
-		lsp->l_ftype = LINUX_FSTYPE_PROCFS;
 	else if (!strcmp(bsp->f_fstypename, MOUNT_EXT2FS))
 		lsp->l_ftype = LINUX_FSTYPE_EXT2FS;
 	else if (!strcmp(bsp->f_fstypename, MOUNT_CD9660))
@@ -814,8 +810,8 @@ linux_to_bsd_mmap_args(cma, uap)
 	SCARG(cma, addr) = (void *)SCARG(uap, addr);
 	SCARG(cma, len) = SCARG(uap, len);
 	SCARG(cma, prot) = SCARG(uap, prot);
-	if (SCARG(cma, prot) & VM_PROT_WRITE) /* XXX */
-		SCARG(cma, prot) |= VM_PROT_READ;
+	if (SCARG(cma, prot) & PROT_WRITE) /* XXX */
+		SCARG(cma, prot) |= PROT_READ;
 	SCARG(cma, flags) = flags;
 	SCARG(cma, fd) = flags & MAP_ANON ? -1 : SCARG(uap, fd);
 	SCARG(cma, pad) = 0;

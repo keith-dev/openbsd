@@ -1,4 +1,4 @@
-/*	$OpenBSD: wizard.c,v 1.15 2013/08/22 04:43:41 guenther Exp $	*/
+/*	$OpenBSD: wizard.c,v 1.17 2014/12/31 15:45:57 tedu Exp $	*/
 /*	$NetBSD: wizard.c,v 1.3 1995/04/24 12:21:41 cgd Exp $	*/
 
 /*-
@@ -37,7 +37,7 @@
 
 /*	Re-coding of advent in C: privileged operations			*/
 
-#include <sys/param.h>
+#include <limits.h>
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
@@ -117,15 +117,15 @@ ciao(void)
 {
 	int	ch;
 	char   *c;
-	char    fname[MAXPATHLEN];
+	char    fname[PATH_MAX];
 
 	printf("What would you like to call the saved version?\n");
-	for (c = fname; c - fname < MAXPATHLEN; c++) {
+	for (c = fname; c - fname < sizeof(fname); c++) {
 		if ((ch = getchar()) == '\n' || ch == EOF)
 			break;
 		*c = ch;
 	}
-	if (c - fname == MAXPATHLEN) {
+	if (c - fname == sizeof(fname)) {
 		c--;
 		FLUSHLINE;
 	}
@@ -141,8 +141,5 @@ ciao(void)
 int
 ran(int range)
 {
-	long    i;
-
-	i = random() % range;
-	return (i);
+	return (arc4random_uniform(range));
 }

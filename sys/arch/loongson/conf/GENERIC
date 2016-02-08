@@ -1,4 +1,4 @@
-#	$OpenBSD: GENERIC,v 1.44 2014/07/11 21:58:09 tedu Exp $
+#	$OpenBSD: GENERIC,v 1.48 2015/01/04 20:55:38 uaa Exp $
 #
 # For further information on compiling OpenBSD kernels, see the config(8)
 # man page.
@@ -115,6 +115,8 @@ uark*		at uhub?	# Arkmicro ARK3116 serial
 ucom*		at uark?
 moscom*		at uhub?	# MosChip MCS7703 serial
 ucom*		at moscom?		
+umcs*		at uhub?	# MosChip MCS78x0 serial
+ucom*		at umcs?
 uipaq*		at uhub?	# iPAQ serial adapter
 ucom*		at uipaq?
 umsm*		at uhub?	# Qualcomm MSM EVDO
@@ -123,12 +125,13 @@ uchcom*		at uhub?	# WinChipHead CH341/340 serial
 ucom*		at uchcom?
 ulpt*		at uhub?	# USB Printers	
 umass*		at uhub?	# USB Mass Storage devices
-urio*		at uhub?	# Diamond Multimedia Rio 500
 uhidev*		at uhub?	# Human Interface Devices
 ums*		at uhidev?	# USB mouse
 wsmouse*	at ums? mux 0
 ukbd*		at uhidev?	# USB keyboard
 wskbd*		at ukbd? mux 1
+uslhcom* 	at uhidev?	# Silicon Labs CP2110 USB HID UART
+ucom*		at uslhcom?
 uhid*		at uhidev?	# USB generic HID support
 upd*		at uhidev?	# USB Power Devices sensors
 atu*		at uhub?	# Atmel AT76c50x based 802.11b
@@ -152,7 +155,7 @@ upl*		at uhub?	# Prolific PL2301/PL2302 host-to-host `network'
 ugl*		at uhub?	# Genesys Logic GL620USB-A host-to-host `network'
 ural*		at uhub?	# Ralink RT2500USB
 url*		at uhub?	# Realtek RTL8150L based adapters
-urtw*		at uhub?	# RealTek 8187
+urtw*		at uhub?	# Realtek 8187
 rsu*		at uhub?	# Realtek RTL8188SU/RTL8191SU/RTL8192SU
 urtwn*		at uhub?	# Realtek RTL8188CU/RTL8192CU
 wi*		at uhub?	# WaveLAN IEEE 802.11DS
@@ -188,7 +191,7 @@ amphy*		at mii?		# AMD 79C873 PHYs
 bmtphy*		at mii?		# Broadcom 10/100 PHYs
 eephy*		at mii?		# Marvell 88E1000 series PHY
 rgephy*		at mii?		# Realtek 8169S/8110S PHY
-rlphy*		at mii?		# RealTek 8139 internal PHYs
+rlphy*		at mii?		# Realtek 8139 internal PHYs
 urlphy*		at mii?		# Realtek RTL8150L internal PHY
 ukphy*		at mii?		# "unknown" PHYs
 

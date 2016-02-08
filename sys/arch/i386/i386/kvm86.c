@@ -1,4 +1,4 @@
-/* $OpenBSD: kvm86.c,v 1.7 2014/04/01 09:05:03 mpi Exp $ */
+/* $OpenBSD: kvm86.c,v 1.9 2015/02/11 05:54:48 dlg Exp $ */
 /* $NetBSD: kvm86.c,v 1.10 2005/12/26 19:23:59 perry Exp $ */
 /*
  * Copyright (c) 2002
@@ -32,7 +32,6 @@
 #include <sys/user.h>
 #include <sys/malloc.h>
 #include <sys/mutex.h>
-#include <sys/lock.h>
 
 #include <uvm/uvm_extern.h>
 
@@ -207,7 +206,7 @@ kvm86_bios_read(u_int32_t vmva, char *buf, size_t len)
 		if (!bioscallvmd->pgtbl[vmva >> 12])
 			break;
 		vmpa = bioscallvmd->pgtbl[vmva >> 12] & ~(PAGE_SIZE - 1);
-		pmap_kenter_pa(bioscalltmpva, vmpa, VM_PROT_READ);
+		pmap_kenter_pa(bioscalltmpva, vmpa, PROT_READ);
 		pmap_update(pmap_kernel());
 
 		memcpy(buf, (void *)(bioscalltmpva + (vmva & (PAGE_SIZE - 1))),

@@ -1,4 +1,4 @@
-/* $OpenBSD: mfii.c,v 1.17 2014/07/13 23:10:23 deraadt Exp $ */
+/* $OpenBSD: mfii.c,v 1.24 2015/01/09 03:34:40 dlg Exp $ */
 
 /*
  * Copyright (c) 2012 David Gwynne <dlg@openbsd.org>
@@ -48,6 +48,7 @@
 #define MFII_REQ_TYPE_LDIO	(0x7 << 1)
 #define MFII_REQ_TYPE_MFA	(0x1 << 1)
 #define MFII_REQ_TYPE_NO_LOCK	(0x2 << 1)
+#define MFII_REQ_TYPE_HI_PRI	(0x6 << 1)
 
 #define MFII_REQ_MFA(_a)	htole64((_a) | MFII_REQ_TYPE_MFA)
 
@@ -59,8 +60,11 @@ struct mfii_request_descr {
 	u_int16_t	smid;
 
 	u_int16_t	lmid;
-	u_int16_t	field;
+	u_int16_t	dev_handle;
 } __packed;
+
+#define MFII_RAID_CTX_IO_TYPE_SYSPD	(0x1 << 4)
+#define MFII_RAID_CTX_TYPE_CUDA		(0x2 << 4)
 
 struct mfii_raid_context {
 	u_int8_t	type_nseg;
@@ -68,6 +72,10 @@ struct mfii_raid_context {
 	u_int16_t	timeout_value;
 
 	u_int8_t	reg_lock_flags;
+#define MFII_RAID_CTX_RL_FLAGS_SEQNO_EN	(0x08)
+#define MFII_RAID_CTX_RL_FLAGS_CPU0	(0x00)
+#define MFII_RAID_CTX_RL_FLAGS_CPU1	(0x10)
+#define MFII_RAID_CTX_RL_FLAGS_CUDA	(0x80)
 	u_int8_t	_reserved2;
 	u_int16_t	virtual_disk_target_id;
 
@@ -104,6 +112,34 @@ struct mfii_sge {
 #define MFII_SGE_CHAIN_ELEMENT		(0x80)
 
 #define MFII_REQUEST_SIZE	256
+
+#define MR_DCMD_LD_MAP_GET_INFO			0x0300e101
+
+#define MFII_MAX_ROW		32
+#define MFII_MAX_ARRAY		128
+
+struct mfii_array_map {
+	uint16_t		mam_pd[MFII_MAX_ROW];
+} __packed;
+
+struct mfii_dev_handle {
+	uint16_t		mdh_cur_handle;
+	uint8_t			mdh_valid;
+	uint8_t			mdh_reserved;
+	uint16_t		mdh_handle[2];
+} __packed;
+
+struct mfii_ld_map {
+	uint32_t		mlm_total_size;
+	uint32_t		mlm_reserved1[5];
+	uint32_t		mlm_num_lds;
+	uint32_t		mlm_reserved2;
+	uint8_t			mlm_tgtid_to_ld[2 * MFI_MAX_LD];
+	uint8_t			mlm_pd_timeout;
+	uint8_t			mlm_reserved3[7];
+	struct mfii_array_map	mlm_am[MFII_MAX_ARRAY];
+	struct mfii_dev_handle	mlm_dev_handle[MFI_MAX_PD];
+} __packed;
 
 struct mfii_dmamem {
 	bus_dmamap_t		mdm_map;
@@ -156,8 +192,30 @@ struct mfii_ccb {
 };
 SIMPLEQ_HEAD(mfii_ccb_list, mfii_ccb);
 
+struct mfii_pd_link {
+	u_int16_t		pd_id;
+	struct mfi_pd_details	pd_info;
+	u_int16_t		pd_handle;
+};
+
+struct mfii_pd_softc {
+	struct scsi_link	pd_link;
+	struct scsibus_softc	*pd_scsibus;
+	struct mfii_pd_link	*pd_links[MFI_MAX_PD];
+	uint8_t			pd_timeout;
+};
+
+struct mfii_iop {
+	u_int8_t ldio_req_type;
+	u_int8_t ldio_ctx_type_nseg;
+	u_int8_t ldio_ctx_reg_lock_flags;
+	u_int8_t sge_flag_chain;
+	u_int8_t sge_flag_eol;
+};
+
 struct mfii_softc {
 	struct device		sc_dev;
+	const struct mfii_iop	*sc_iop;
 
 	pci_chipset_tag_t	sc_pc;
 	pcitag_t		sc_tag;
@@ -189,6 +247,7 @@ struct mfii_softc {
 
 	struct scsi_link	sc_link;
 	struct scsibus_softc	*sc_scsibus;
+	struct mfii_pd_softc	*sc_pd;
 	struct scsi_iopool	sc_iopool;
 
 	struct mfi_ctrl_info	sc_info;
@@ -222,6 +281,15 @@ struct scsi_adapter mfii_switch = {
 	NULL  /* ioctl */
 };
 
+void		mfii_pd_scsi_cmd(struct scsi_xfer *);
+int		mfii_pd_scsi_probe(struct scsi_link *);
+
+struct scsi_adapter mfii_pd_switch = {
+	mfii_pd_scsi_cmd,
+	scsi_minphys,
+	mfii_pd_scsi_probe
+};
+
 #define DEVNAME(_sc)		((_sc)->sc_dev.dv_xname)
 
 u_int32_t		mfii_read(struct mfii_softc *, bus_size_t);
@@ -239,6 +307,7 @@ void			mfii_scrub_ccb(struct mfii_ccb *);
 int			mfii_transition_firmware(struct mfii_softc *);
 int			mfii_initialise_firmware(struct mfii_softc *);
 int			mfii_get_info(struct mfii_softc *);
+int			mfii_syspd(struct mfii_softc *);
 
 void			mfii_start(struct mfii_softc *, struct mfii_ccb *);
 void			mfii_done(struct mfii_softc *, struct mfii_ccb *);
@@ -264,18 +333,69 @@ int			mfii_scsi_cmd_io(struct mfii_softc *,
 			    struct scsi_xfer *);
 int			mfii_scsi_cmd_cdb(struct mfii_softc *,
 			    struct scsi_xfer *);
+int			mfii_pd_scsi_cmd_cdb(struct mfii_softc *,
+			    struct scsi_xfer *);
 
 
 #define mfii_fw_state(_sc) mfii_read((_sc), MFI_OSP)
 
-static const struct pci_matchid mfii_devices[] = {
-	{ PCI_VENDOR_SYMBIOS,	PCI_PRODUCT_SYMBIOS_MEGARAID_2208 }
+const struct mfii_iop mfii_iop_thunderbolt = {
+	MFII_REQ_TYPE_LDIO,
+	0,
+	0,
+	MFII_SGE_CHAIN_ELEMENT | MFII_SGE_ADDR_IOCPLBNTA,
+	0
 };
+
+/*
+ * a lot of these values depend on us not implementing fastpath yet.
+ */
+const struct mfii_iop mfii_iop_25 = {
+	MFII_REQ_TYPE_NO_LOCK,
+	MFII_RAID_CTX_TYPE_CUDA | 0x1,
+	MFII_RAID_CTX_RL_FLAGS_CPU0, /* | MFII_RAID_CTX_RL_FLAGS_SEQNO_EN */
+	MFII_SGE_CHAIN_ELEMENT,
+	MFII_SGE_END_OF_LIST
+};
+
+struct mfii_device {
+	pcireg_t		mpd_vendor;
+	pcireg_t		mpd_product;
+	const struct mfii_iop	*mpd_iop;
+};
+
+const struct mfii_device mfii_devices[] = {
+	{ PCI_VENDOR_SYMBIOS,	PCI_PRODUCT_SYMBIOS_MEGARAID_2208,
+	    &mfii_iop_thunderbolt },
+	{ PCI_VENDOR_SYMBIOS,	PCI_PRODUCT_SYMBIOS_MEGARAID_3008,
+	    &mfii_iop_25 },
+	{ PCI_VENDOR_SYMBIOS,	PCI_PRODUCT_SYMBIOS_MEGARAID_3108,
+	    &mfii_iop_25 }
+};
+
+const struct mfii_iop *mfii_find_iop(struct pci_attach_args *);
+
+const struct mfii_iop *
+mfii_find_iop(struct pci_attach_args *pa)
+{
+	const struct mfii_device *mpd;
+	int i;
+
+	for (i = 0; i < nitems(mfii_devices); i++) {
+		mpd = &mfii_devices[i];
+
+		if (mpd->mpd_vendor == PCI_VENDOR(pa->pa_id) &&
+		    mpd->mpd_product == PCI_PRODUCT(pa->pa_id))
+			return (mpd->mpd_iop);
+	}
+
+	return (NULL);
+}
 
 int
 mfii_match(struct device *parent, void *match, void *aux)
 {
-	return (pci_matchbyid(aux, mfii_devices, nitems(mfii_devices)));
+	return ((mfii_find_iop(aux) != NULL) ? 1 : 0);
 }
 
 void
@@ -289,6 +409,7 @@ mfii_attach(struct device *parent, struct device *self, void *aux)
 	u_int32_t status;
 
 	/* init sc */
+	sc->sc_iop = mfii_find_iop(aux);
 	sc->sc_dmat = pa->pa_dmat;
 	SIMPLEQ_INIT(&sc->sc_ccb_freeq);
 	mtx_init(&sc->sc_ccb_mtx, IPL_BIO);
@@ -383,10 +504,12 @@ mfii_attach(struct device *parent, struct device *self, void *aux)
 	sc->sc_link.adapter_buswidth = sc->sc_info.mci_max_lds;
 	sc->sc_link.pool = &sc->sc_iopool;
 
-	bzero(&saa, sizeof(saa));
+	memset(&saa, 0, sizeof(saa));
 	saa.saa_sc_link = &sc->sc_link;
 
 	config_found(&sc->sc_dev, &saa, scsiprint);
+
+	mfii_syspd(sc);
 
 	/* enable interrupts */
 	mfii_write(sc, MFI_OSTS, 0xffffffff);
@@ -403,6 +526,92 @@ free_sense:
 	mfii_dmamem_free(sc, sc->sc_sense);
 pci_unmap:
 	bus_space_unmap(sc->sc_iot, sc->sc_ioh, sc->sc_ios);
+}
+
+int
+mfii_syspd(struct mfii_softc *sc)
+{
+	struct scsibus_attach_args saa;
+	struct scsi_link *link;
+	struct mfii_ld_map *lm;
+	struct mfii_pd_link *pl;
+	struct mfi_pd_list *pd;
+	struct mfii_ccb *ccb;
+	u_int npds, i;
+	int rv;
+
+	sc->sc_pd = malloc(sizeof(*sc->sc_pd), M_DEVBUF, M_WAITOK|M_ZERO);
+	if (sc->sc_pd == NULL)
+		return (1);
+
+	lm = malloc(sizeof(*lm), M_TEMP, M_WAITOK|M_ZERO);
+	if (lm == NULL)
+		goto free_pdsc;
+
+	ccb = scsi_io_get(&sc->sc_iopool, 0);
+	rv = mfii_mgmt(sc, ccb, MR_DCMD_LD_MAP_GET_INFO, NULL,
+	    lm, sizeof(*lm), SCSI_DATA_IN|SCSI_NOSLEEP);
+	scsi_io_put(&sc->sc_iopool, ccb);
+	if (rv != 0)
+		goto free_lm;
+
+	sc->sc_pd->pd_timeout = lm->mlm_pd_timeout;
+
+	pd = malloc(sizeof(*pd), M_TEMP, M_WAITOK|M_ZERO);
+	if (pd == NULL)
+		goto free_lm;
+
+	ccb = scsi_io_get(&sc->sc_iopool, 0);
+	rv = mfii_mgmt(sc, ccb, MR_DCMD_PD_GET_LIST, NULL,
+	    pd, sizeof(*pd), SCSI_DATA_IN|SCSI_NOSLEEP);
+	scsi_io_put(&sc->sc_iopool, ccb);
+	if (rv != 0)
+		goto free_pd;
+
+	npds = letoh32(pd->mpl_no_pd);
+	for (i = 0; i < npds; i++) {
+		pl = malloc(sizeof(*pl), M_DEVBUF, M_WAITOK|M_ZERO);
+		if (pl == NULL)
+			goto free_pl;
+
+		pl->pd_id = pd->mpl_address[i].mpa_pd_id;
+		pl->pd_handle = lm->mlm_dev_handle[i].mdh_cur_handle;
+		sc->sc_pd->pd_links[i] = pl;
+	}
+
+	free(pd, M_TEMP, 0);
+	free(lm, M_TEMP, 0);
+
+	link = &sc->sc_pd->pd_link;
+	link->adapter = &mfii_pd_switch;
+	link->adapter_softc = sc;
+	link->adapter_buswidth = MFI_MAX_PD;
+	link->adapter_target = -1;
+	link->openings = sc->sc_max_cmds - 1;
+	link->pool = &sc->sc_iopool;
+
+	memset(&saa, 0, sizeof(saa));
+	saa.saa_sc_link = link;
+
+	sc->sc_pd->pd_scsibus = (struct scsibus_softc *)
+	    config_found(&sc->sc_dev, &saa, scsiprint);
+
+	return (0);
+free_pl:
+	for (i = 0; i < npds; i++) {
+		pl = sc->sc_pd->pd_links[i];
+		if (pl == NULL)
+			break;
+
+		free(pl, M_DEVBUF, 0);
+	}
+free_pd:
+	free(pd, M_TEMP, 0);
+free_lm:
+	free(lm, M_TEMP, 0);
+free_pdsc:
+	free(sc->sc_pd, M_DEVBUF, 0);
+	return (1);
 }
 
 int
@@ -855,7 +1064,7 @@ mfii_mgmt(struct mfii_softc *sc, struct mfii_ccb *ccb,
 	case SCSI_DATA_OUT:
 		ccb->ccb_direction = MFII_DATA_OUT;
 		hdr->mfh_flags = htole16(MFI_FRAME_DIR_WRITE);
-		bcopy(buf, dma_buf, len);
+		memcpy(dma_buf, buf, len);
 		break;
 	}
 
@@ -887,7 +1096,7 @@ mfii_mgmt(struct mfii_softc *sc, struct mfii_ccb *ccb,
 		rv = 0;
 
 		if (ccb->ccb_direction == MFII_DATA_IN)
-			bcopy(dma_buf, buf, len);
+			memcpy(buf, dma_buf, len);
 	}
 
 done:
@@ -931,16 +1140,25 @@ mfii_load_mfa(struct mfii_softc *sc, struct mfii_ccb *ccb,
 void
 mfii_start(struct mfii_softc *sc, struct mfii_ccb *ccb)
 {
-	u_int32_t *r = (u_int32_t *)&ccb->ccb_req;
+	u_long *r = (u_long *)&ccb->ccb_req;
 
 	bus_dmamap_sync(sc->sc_dmat, MFII_DMA_MAP(sc->sc_requests),
 	    ccb->ccb_request_offset, MFII_REQUEST_SIZE,
 	    BUS_DMASYNC_PREREAD | BUS_DMASYNC_PREWRITE);
 
+#if defined(__LP64__)
+        bus_space_write_raw_8(sc->sc_iot, sc->sc_ioh, MFI_IQPL, *r);
+#else
 	mtx_enter(&sc->sc_post_mtx);
-	mfii_write(sc, MFI_IQPL, r[0]);
-	mfii_write(sc, MFI_IQPH, r[1]);
+	bus_space_write_raw_4(sc->sc_iot, sc->sc_ioh, MFI_IQPL, r[0]);
+	bus_space_barrier(sc->sc_iot, sc->sc_ioh,
+	    MFI_IQPL, 8, BUS_SPACE_BARRIER_WRITE);
+
+	bus_space_write_raw_4(sc->sc_iot, sc->sc_ioh, MFI_IQPH, r[1]);
+	bus_space_barrier(sc->sc_iot, sc->sc_ioh,
+	    MFI_IQPH, 8, BUS_SPACE_BARRIER_WRITE);
 	mtx_leave(&sc->sc_post_mtx);
+#endif
 }
 
 void
@@ -982,7 +1200,7 @@ mfii_initialise_firmware(struct mfii_softc *sc)
 		return (1);
 
 	iiq = MFII_DMA_KVA(m);
-	bzero(iiq, sizeof(*iiq));
+	memset(iiq, 0, sizeof(*iiq));
 
 	iiq->function = MPII_FUNCTION_IOC_INIT;
 	iiq->whoinit = MPII_WHOINIT_HOST_DRIVER;
@@ -1131,7 +1349,6 @@ mfii_scsi_cmd(struct scsi_xfer *xs)
 	ccb->ccb_data = xs->data;
 	ccb->ccb_len = xs->datalen;
 
-#if 0
 	switch (xs->cmd->opcode) {
 	case READ_COMMAND:
 	case READ_BIG:
@@ -1147,13 +1364,10 @@ mfii_scsi_cmd(struct scsi_xfer *xs)
 		break;
 
 	default:
-#endif
 		if (mfii_scsi_cmd_cdb(sc, xs) != 0)
 			goto stuffup;
-#if 0
 		break;
 	}
-#endif
 
 	xs->error = XS_NOERROR;
 	xs->resid = 0;
@@ -1205,16 +1419,50 @@ mfii_scsi_cmd_done(struct mfii_softc *sc, struct mfii_ccb *ccb)
 int
 mfii_scsi_cmd_io(struct mfii_softc *sc, struct scsi_xfer *xs)
 {
+	struct scsi_link *link = xs->sc_link;
 	struct mfii_ccb *ccb = xs->io;
-	u_int64_t blkno;
-	u_int32_t nblks;
+	struct mpii_msg_scsi_io *io = ccb->ccb_request;
+	struct mfii_raid_context *ctx = (struct mfii_raid_context *)(io + 1);
 
-	ccb->ccb_req.flags = MFII_REQ_TYPE_LDIO;
+	io->dev_handle = htole16(link->target);
+	io->function = MFII_FUNCTION_LDIO_REQUEST;
+	io->sense_buffer_low_address = htole32(ccb->ccb_sense_dva);
+	io->sgl_flags = htole16(0x02); /* XXX */
+	io->sense_buffer_length = sizeof(xs->sense);
+	io->sgl_offset0 = (sizeof(*io) + sizeof(*ctx)) / 4;
+	io->data_length = htole32(xs->datalen);
+	io->io_flags = htole16(xs->cmdlen);
+	switch (xs->flags & (SCSI_DATA_IN | SCSI_DATA_OUT)) {
+	case SCSI_DATA_IN:
+		ccb->ccb_direction = MFII_DATA_IN;
+		io->direction = MPII_SCSIIO_DIR_READ;
+		break;
+	case SCSI_DATA_OUT:
+		ccb->ccb_direction = MFII_DATA_OUT;
+		io->direction = MPII_SCSIIO_DIR_WRITE;
+		break;
+	default:
+		ccb->ccb_direction = MFII_DATA_NONE;
+		io->direction = MPII_SCSIIO_DIR_NONE;
+		break;
+	}
+	memcpy(io->cdb, xs->cmd, xs->cmdlen);
+
+	ctx->type_nseg = sc->sc_iop->ldio_ctx_type_nseg;
+	ctx->timeout_value = htole16(0x14); /* XXX */
+	ctx->reg_lock_flags = sc->sc_iop->ldio_ctx_reg_lock_flags;
+	ctx->virtual_disk_target_id = htole16(link->target);
+
+	if (mfii_load_ccb(sc, ccb, ctx + 1,
+	    ISSET(xs->flags, SCSI_NOSLEEP)) != 0)
+		return (1);
+
+	ctx->num_sge = (ccb->ccb_len == 0) ? 0 : ccb->ccb_dmamap->dm_nsegs;
+
+	ccb->ccb_req.flags = sc->sc_iop->ldio_req_type;
 	ccb->ccb_req.smid = letoh16(ccb->ccb_smid);
 
-	scsi_cmd_rw_decode(xs->cmd, &blkno, &nblks);
-
-	return (1);
+	return (0);
 }
 
 int
@@ -1248,7 +1496,7 @@ mfii_scsi_cmd_cdb(struct mfii_softc *sc, struct scsi_xfer *xs)
 		io->direction = MPII_SCSIIO_DIR_NONE;
 		break;
 	}
-	bcopy(xs->cmd, io->cdb, xs->cmdlen);
+	memcpy(io->cdb, xs->cmd, xs->cmdlen);
 
 	ctx->virtual_disk_target_id = htole16(link->target);
 
@@ -1260,6 +1508,120 @@ mfii_scsi_cmd_cdb(struct mfii_softc *sc, struct scsi_xfer *xs)
 
 	ccb->ccb_req.flags = MFII_REQ_TYPE_SCSI;
 	ccb->ccb_req.smid = letoh16(ccb->ccb_smid);
+
+	return (0);
+}
+
+void
+mfii_pd_scsi_cmd(struct scsi_xfer *xs)
+{
+	struct scsi_link *link = xs->sc_link;
+	struct mfii_softc *sc = link->adapter_softc;
+	struct mfii_ccb *ccb = xs->io;
+
+	mfii_scrub_ccb(ccb);
+	ccb->ccb_cookie = xs;
+	ccb->ccb_done = mfii_scsi_cmd_done;
+	ccb->ccb_data = xs->data;
+	ccb->ccb_len = xs->datalen;
+
+	if (mfii_pd_scsi_cmd_cdb(sc, xs) != 0)
+		goto stuffup;
+
+	xs->error = XS_NOERROR;
+	xs->resid = 0;
+
+	if (ISSET(xs->flags, SCSI_POLL)) {
+		if (mfii_poll(sc, ccb) != 0)
+			goto stuffup;
+		return;
+	}
+
+	mfii_start(sc, ccb);
+	return;
+
+stuffup:
+	xs->error = XS_DRIVER_STUFFUP;
+	scsi_done(xs);
+}
+
+int
+mfii_pd_scsi_probe(struct scsi_link *link)
+{
+	struct mfii_ccb *ccb;
+	uint8_t mbox[MFI_MBOX_SIZE];
+	struct mfii_softc *sc = link->adapter_softc;
+	struct mfii_pd_link *pl = sc->sc_pd->pd_links[link->target];
+	int rv;
+
+	if (link->lun > 0)
+		return (0);
+
+	if (pl == NULL)
+		return (ENXIO);
+
+	memset(mbox, 0, sizeof(mbox));
+	memcpy(&mbox[0], &pl->pd_id, sizeof(pl->pd_id));
+
+	ccb = scsi_io_get(&sc->sc_iopool, 0);
+	rv = mfii_mgmt(sc, ccb, MR_DCMD_PD_GET_INFO, mbox, &pl->pd_info,
+	    sizeof(pl->pd_info), SCSI_DATA_IN|SCSI_NOSLEEP);
+	scsi_io_put(&sc->sc_iopool, ccb);
+	if (rv != 0)
+		return (EIO);
+
+	if (letoh16(pl->pd_info.mpd_fw_state) != MFI_PD_SYSTEM)
+		return (ENXIO);
+
+	return (0);
+}
+
+int
+mfii_pd_scsi_cmd_cdb(struct mfii_softc *sc, struct scsi_xfer *xs)
+{
+	struct scsi_link *link = xs->sc_link;
+	struct mfii_ccb *ccb = xs->io;
+	struct mpii_msg_scsi_io *io = ccb->ccb_request;
+	struct mfii_raid_context *ctx = (struct mfii_raid_context *)(io + 1);
+
+	io->dev_handle = sc->sc_pd->pd_links[link->target]->pd_handle;
+	io->function = 0;
+	io->sense_buffer_low_address = htole32(ccb->ccb_sense_dva);
+	io->sgl_flags = htole16(0x02); /* XXX */
+	io->sense_buffer_length = sizeof(xs->sense);
+	io->sgl_offset0 = (sizeof(*io) + sizeof(*ctx)) / 4;
+	io->data_length = htole32(xs->datalen);
+	io->io_flags = htole16(xs->cmdlen);
+	io->lun[0] = htobe16(link->lun);
+	switch (xs->flags & (SCSI_DATA_IN | SCSI_DATA_OUT)) {
+	case SCSI_DATA_IN:
+		ccb->ccb_direction = MFII_DATA_IN;
+		io->direction = MPII_SCSIIO_DIR_READ;
+		break;
+	case SCSI_DATA_OUT:
+		ccb->ccb_direction = MFII_DATA_OUT;
+		io->direction = MPII_SCSIIO_DIR_WRITE;
+		break;
+	default:
+		ccb->ccb_direction = MFII_DATA_NONE;
+		io->direction = MPII_SCSIIO_DIR_NONE;
+		break;
+	}
+	memcpy(io->cdb, xs->cmd, xs->cmdlen);
+
+	ctx->virtual_disk_target_id = htole16(link->target);
+	ctx->raid_flags = MFII_RAID_CTX_IO_TYPE_SYSPD;
+	ctx->timeout_value = sc->sc_pd->pd_timeout;
+
+	if (mfii_load_ccb(sc, ccb, ctx + 1,
+	    ISSET(xs->flags, SCSI_NOSLEEP)) != 0)
+		return (1);
+
+	ctx->num_sge = (ccb->ccb_len == 0) ? 0 : ccb->ccb_dmamap->dm_nsegs;
+
+	ccb->ccb_req.flags = MFII_REQ_TYPE_HI_PRI;
+	ccb->ccb_req.smid = letoh16(ccb->ccb_smid);
+	ccb->ccb_req.dev_handle = sc->sc_pd->pd_links[link->target]->pd_handle;
 
 	return (0);
 }
@@ -1294,13 +1656,12 @@ mfii_load_ccb(struct mfii_softc *sc, struct mfii_ccb *ccb, void *sglp,
 		space--;
 
 		ccb->ccb_sgl_len = (dmap->dm_nsegs - space) * sizeof(*nsge);
-		bzero(ccb->ccb_sgl, ccb->ccb_sgl_len);
+		memset(ccb->ccb_sgl, 0, ccb->ccb_sgl_len);
 
 		ce = nsge + space;
 		ce->sg_addr = htole64(ccb->ccb_sgl_dva);
 		ce->sg_len = htole32(ccb->ccb_sgl_len);
-		ce->sg_flags = MFII_SGE_CHAIN_ELEMENT |
-		    MFII_SGE_ADDR_IOCPLBNTA;
+		ce->sg_flags = sc->sc_iop->sge_flag_chain;
 
 		req->chain_offset = ((u_int8_t *)ce - (u_int8_t *)req) / 16;
 	}
@@ -1317,6 +1678,7 @@ mfii_load_ccb(struct mfii_softc *sc, struct mfii_ccb *ccb, void *sglp,
 
 		nsge = sge + 1;
 	}
+	sge->sg_flags |= sc->sc_iop->sge_flag_eol;
 
 	bus_dmamap_sync(sc->sc_dmat, dmap, 0, dmap->dm_mapsize,
 	    ccb->ccb_direction == MFII_DATA_OUT ?
@@ -1357,8 +1719,8 @@ mfii_scrub_ccb(struct mfii_ccb *ccb)
 	ccb->ccb_len = 0;
 	ccb->ccb_sgl_len = 0;
 
-	bzero(&ccb->ccb_req, sizeof(ccb->ccb_req));
-	bzero(ccb->ccb_request, MFII_REQUEST_SIZE);
+	memset(&ccb->ccb_req, 0, sizeof(ccb->ccb_req));
+	memset(ccb->ccb_request, 0, MFII_REQUEST_SIZE);
 }
 
 void

@@ -1,4 +1,4 @@
-/*	$OpenBSD: ieee80211_crypto.c,v 1.62 2014/07/12 18:44:22 tedu Exp $	*/
+/*	$OpenBSD: ieee80211_crypto.c,v 1.65 2014/12/23 03:24:08 tedu Exp $	*/
 
 /*-
  * Copyright (c) 2008 Damien Bergamini <damien.bergamini@free.fr>
@@ -25,7 +25,6 @@
 #include <sys/sockio.h>
 #include <sys/endian.h>
 #include <sys/errno.h>
-#include <sys/proc.h>
 #include <sys/sysctl.h>
 
 #include <net/if.h>
@@ -33,15 +32,12 @@
 #include <net/if_media.h>
 #include <net/if_arp.h>
 
-#ifdef INET
 #include <netinet/in.h>
 #include <netinet/if_ether.h>
-#endif
 
 #include <net80211/ieee80211_var.h>
 #include <net80211/ieee80211_priv.h>
 
-#include <dev/rndvar.h>
 #include <crypto/arc4.h>
 #include <crypto/md5.h>
 #include <crypto/sha1.h>

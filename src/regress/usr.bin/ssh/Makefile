@@ -1,10 +1,15 @@
-#	$OpenBSD: Makefile,v 1.70 2014/06/24 01:14:17 djm Exp $
+#	$OpenBSD: Makefile,v 1.78 2015/01/26 06:12:18 djm Exp $
 
-REGRESS_FAIL_EARLY= yes
-REGRESS_TARGETS=	unit t1 t2 t3 t4 t5 t6 t7 t8 t9
+.ifndef SKIP_UNIT
+SUBDIR=		unittests
+.endif
+
+REGRESS_FAIL_EARLY=	yes
+REGRESS_TARGETS=	t1 t2 t3 t4 t5 t6 t7 t8 t9 t10 t11 t12
 
 CLEANFILES+=	t2.out t6.out1 t6.out2 t7.out t7.out.pub copy.1 copy.2 \
-		t8.out t8.out.pub t9.out t9.out.pub
+		t8.out t8.out.pub t9.out t9.out.pub t10.out t10.out.pub \
+		t12.out t12.out.pub
 
 LTESTS= 	connect \
 		proxy-connect \
@@ -58,7 +63,12 @@ LTESTS= 	connect \
 		keys-command \
 		forward-control \
 		integrity \
-		krl
+		krl \
+		multipubkey \
+		limit-keytype \
+		hostkey-agent \
+		keygen-knownhosts \
+		hostkey-rotate
 
 INTEROP_TESTS=	putty-transfer putty-ciphers putty-kex conch-ciphers
 #INTEROP_TESTS+=ssh-com ssh-com-client ssh-com-keygen ssh-com-sftp
@@ -78,17 +88,12 @@ CLEANFILES+=	authorized_keys_${USER} known_hosts pidfile \
 		sshd_proxy.* authorized_keys_${USER}.* revoked-* krl-* \
 		ssh.log failed-ssh.log sshd.log failed-sshd.log \
 		regress.log failed-regress.log ssh-log-wrapper.sh \
-		sftp-server.sh sftp-server.log sftp.log
+		sftp-server.sh sftp-server.log sftp.log kh.*
 
 SUDO_CLEAN+=	/var/run/testdata_${USER} /var/run/keycommand_${USER}
 
 # Enable all malloc(3) randomisations and checks
 TEST_ENV=      "MALLOC_OPTIONS=AFGJPRX"
-
-unit:
-	if test -z "${SKIP_UNIT}" ; then \
-		(set -e ; cd ${.CURDIR}/unittests ; make) \
-	fi
 
 t1:
 	ssh-keygen -if ${.CURDIR}/rsa_ssh2.prv | diff - ${.CURDIR}/rsa_openssh.prv
@@ -108,7 +113,7 @@ t3:
 		diff - ${.CURDIR}/rsa_openssh.pub
 
 t4:
-	ssh-keygen -lf ${.CURDIR}/rsa_openssh.pub |\
+	ssh-keygen -E md5 -lf ${.CURDIR}/rsa_openssh.pub |\
 		awk '{print $$2}' | diff - ${.CURDIR}/t4.ok
 
 t5:
@@ -149,6 +154,16 @@ t10: t10.out
 	ssh-keygen -lf t10.out > /dev/null
 	ssh-keygen -Bf t10.out > /dev/null
 
+t11:
+	ssh-keygen -E sha256 -lf ${.CURDIR}/rsa_openssh.pub |\
+		awk '{print $$2}' | diff - ${.CURDIR}/t11.ok
+
+t12.out:
+	ssh-keygen -q -t ed25519 -N '' -C 'test-comment-1234' -f $@
+
+t12: t12.out
+	ssh-keygen -lf t12.out.pub | grep -q test-comment-1234
+
 modpipe: modpipe.c
 
 t-integrity: modpipe
@@ -174,6 +189,5 @@ clean:
 	rm -f ${CLEANFILES}
 	test -z "${SUDO}" || ${SUDO} rm -f ${SUDO_CLEAN}
 	rm -rf .putty
-	(set -e ; cd ${.CURDIR}/unittests ; make clean)
 
 .include <bsd.regress.mk>

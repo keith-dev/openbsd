@@ -1,4 +1,4 @@
-/*	$OpenBSD: radix.c,v 1.42 2014/07/12 18:44:22 tedu Exp $	*/
+/*	$OpenBSD: radix.c,v 1.44 2015/03/04 15:53:29 claudio Exp $	*/
 /*	$NetBSD: radix.c,v 1.20 2003/08/07 16:32:56 agc Exp $	*/
 
 /*
@@ -1009,8 +1009,13 @@ rn_delete(void *v_arg, void *n_arg, struct radix_node_head *head,
 				tp->rn_l = x;
 			else
 				tp->rn_r = x;
+			/* head changed adjust dupedkey pointer */
+			dupedkey_tt = x;
 		} else {
 			x = saved_tt;
+			/* dupedkey will change so adjust pointer */
+			if (dupedkey_tt == tt)
+				dupedkey_tt = tt->rn_dupedkey;
 			tp->rn_dupedkey = tt->rn_dupedkey;
 			if (tt->rn_dupedkey)
 				tt->rn_dupedkey->rn_p = tp;
@@ -1185,7 +1190,7 @@ rn_init(void)
 		    "rn_init: radix functions require max_keylen be set\n");
 		return;
 	}
-	rn_zeros = malloc(3 * max_keylen, M_RTABLE, M_NOWAIT | M_ZERO);
+	rn_zeros = mallocarray(3, max_keylen, M_RTABLE, M_NOWAIT | M_ZERO);
 	if (rn_zeros == NULL)
 		panic("rn_init");
 	rn_ones = cp = rn_zeros + max_keylen;

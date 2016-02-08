@@ -1,4 +1,4 @@
-/*	$OpenBSD: nfs_subs.c,v 1.116 2014/07/08 17:19:26 deraadt Exp $	*/
+/*	$OpenBSD: nfs_subs.c,v 1.125 2015/02/10 21:56:10 miod Exp $	*/
 /*	$NetBSD: nfs_subs.c,v 1.27.4.3 1996/07/08 20:34:24 jtc Exp $	*/
 
 /*
@@ -42,7 +42,6 @@
  * copy data between mbuf chains and uio lists.
  */
 #include <sys/param.h>
-#include <sys/proc.h>
 #include <sys/systm.h>
 #include <sys/kernel.h>
 #include <sys/mount.h>
@@ -65,10 +64,10 @@
 #include <nfs/nfsmount.h>
 #include <nfs/nfs_var.h>
 
+#include <uvm/uvm_extern.h>
 
 #include <netinet/in.h>
 
-#include <dev/rndvar.h>
 #include <crypto/idgen.h>
 
 int	nfs_attrtimeo(struct nfsnode *np);
@@ -665,7 +664,7 @@ nfsm_mbuftouio(struct mbuf **mrep, struct uio *uiop, int siz, caddr_t *dpos)
 			}
 			xfer = (left > len) ? len : left;
 			if (uiop->uio_segflg == UIO_SYSSPACE)
-				bcopy(mbufcp, uiocp, xfer);
+				memcpy(uiocp, mbufcp, xfer);
 			else
 				copyout(mbufcp, uiocp, xfer);
 			left -= xfer;
@@ -715,7 +714,7 @@ nfsm_uiotombuf(struct mbuf **mp, struct uio *uiop, size_t len)
 
 	while (len) {
 		xfer = min(len, M_TRAILINGSPACE(mb));
-		uiomove(mb_offset(mb), xfer, uiop);
+		uiomovei(mb_offset(mb), xfer, uiop);
 		mb->m_len += xfer;
 		len -= xfer;
 		if (len > 0) {
@@ -735,7 +734,7 @@ nfsm_uiotombuf(struct mbuf **mp, struct uio *uiop, size_t len)
 			mb->m_next = mb2;
 			mb = mb2;
 		}
-		bzero(mb_offset(mb), pad);
+		memset(mb_offset(mb), 0, pad);
 		mb->m_len += pad;
 	}
 
@@ -899,8 +898,8 @@ nfs_init(void)
 	nfsrv_initcache();		/* Init the server request cache */
 #endif /* NFSSERVER */
 
-	pool_init(&nfsreqpl, sizeof(struct nfsreq), 0, 0, 0, "nfsreqpl",
-	    &pool_allocator_nointr);
+	pool_init(&nfsreqpl, sizeof(struct nfsreq), 0, 0, PR_WAITOK,
+	    "nfsreqpl", NULL);
 }
 
 #ifdef NFSCLIENT
@@ -911,7 +910,7 @@ nfs_vfs_init(struct vfsconf *vfsp)
 
 	TAILQ_INIT(&nfs_bufq);
 
-	pool_init(&nfs_node_pool, sizeof(struct nfsnode), 0, 0, 0,
+	pool_init(&nfs_node_pool, sizeof(struct nfsnode), 0, 0, PR_WAITOK,
 	    "nfsnodepl", NULL);
 
 	return (0);
@@ -1095,7 +1094,7 @@ nfs_loadattrcache(struct vnode **vpp, struct mbuf **mdp, caddr_t *dposp,
 	}
 	np->n_attrstamp = time_second;
 	if (vaper != NULL) {
-		bcopy((caddr_t)vap, (caddr_t)vaper, sizeof(*vap));
+		bcopy(vap, vaper, sizeof(*vap));
 		if (np->n_flag & NCHG) {
 			if (np->n_flag & NACC)
 				vaper->va_atime = np->n_atim;
@@ -1162,7 +1161,7 @@ nfs_getattrcache(struct vnode *vp, struct vattr *vaper)
 		} else
 			np->n_size = vap->va_size;
 	}
-	bcopy((caddr_t)vap, (caddr_t)vaper, sizeof(struct vattr));
+	bcopy(vap, vaper, sizeof(struct vattr));
 	if (np->n_flag & NCHG) {
 		if (np->n_flag & NACC)
 			vaper->va_atime = np->n_atim;
@@ -1463,7 +1462,7 @@ nfsrv_fhtovp(fhandle_t *fhp, int lockflag, struct vnode **vpp,
 	if (cred->cr_uid == 0 || (exflags & MNT_EXPORTANON)) {
 		cred->cr_uid = credanon->cr_uid;
 		cred->cr_gid = credanon->cr_gid;
-		for (i = 0; i < credanon->cr_ngroups && i < NGROUPS; i++)
+		for (i = 0; i < credanon->cr_ngroups && i < NGROUPS_MAX; i++)
 			cred->cr_groups[i] = credanon->cr_groups[i];
 		cred->cr_ngroups = i;
 	}

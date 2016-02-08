@@ -1,4 +1,4 @@
-/*	$OpenBSD: fdisk.c,v 1.63 2014/03/20 13:18:21 krw Exp $	*/
+/*	$OpenBSD: fdisk.c,v 1.65 2015/02/09 04:27:15 krw Exp $	*/
 
 /*
  * Copyright (c) 1997 Tobias Weingartner
@@ -47,6 +47,7 @@ static unsigned char builtin_mbr[] = {
 #include "mbrcode.h"
 };
 
+int	g_flag;
 int	y_flag;
 
 static void
@@ -55,7 +56,8 @@ usage(void)
 	extern char * __progname;
 
 	fprintf(stderr, "usage: %s "
-	    "[-eiuy] [-c cylinders -h heads -s sectors] [-f mbrfile] [-l blocks] disk\n"
+	    "[-egiuy] [-c cylinders -h heads -s sectors] [-f mbrfile] "
+	    "[-l blocks] disk\n"
 	    "\t-i: initialize disk with virgin MBR\n"
 	    "\t-u: update MBR code, preserve partition table\n"
 	    "\t-e: edit MBRs on disk interactively\n"
@@ -63,6 +65,7 @@ usage(void)
 	    "\t-chs: specify disk geometry\n"
 	    "\t-l: specify LBA block count\n"
 	    "\t-y: do not ask questions\n"
+	    "\t-g: initialize disk with EFI/GPT partition, requires -i\n"
 	    "`disk' may be of the forms: sd0 or /dev/rsd0c.\n",
 	    __progname);
 	exit(1);
@@ -73,7 +76,7 @@ int
 main(int argc, char *argv[])
 {
 	int ch, fd, error;
-	int i_flag = 0, m_flag = 0, u_flag = 0;
+	int i_flag = 0, e_flag = 0, u_flag = 0;
 	int c_arg = 0, h_arg = 0, s_arg = 0;
 	struct disk disk;
 	u_int32_t l_arg = 0;
@@ -85,7 +88,7 @@ main(int argc, char *argv[])
 	struct mbr mbr;
 	struct dos_mbr dos_mbr;
 
-	while ((ch = getopt(argc, argv, "ieuf:c:h:s:l:y")) != -1) {
+	while ((ch = getopt(argc, argv, "ieguf:c:h:s:l:y")) != -1) {
 		const char *errstr;
 
 		switch(ch) {
@@ -96,7 +99,7 @@ main(int argc, char *argv[])
 			u_flag = 1;
 			break;
 		case 'e':
-			m_flag = 1;
+			e_flag = 1;
 			break;
 		case 'f':
 			mbrfile = optarg;
@@ -116,6 +119,9 @@ main(int argc, char *argv[])
 			s_arg = strtonum(optarg, 1, 63, &errstr);
 			if (errstr)
 				errx(1, "Sector argument %s [1..63].", errstr);
+			break;
+		case 'g':
+			g_flag = 1;
 			break;
 		case 'l':
 			l_arg = strtonum(optarg, 64, UINT32_MAX, &errstr);
@@ -140,6 +146,11 @@ main(int argc, char *argv[])
 		usage();
 	else
 		disk.name = argv[0];
+
+	if (g_flag != 0 && i_flag == 0) {
+		warnx("-g specified without -i");
+		usage();
+	}
 
 	/* Start with the disklabel geometry and get the sector size. */
 	DISK_getlabelgeometry(&disk);
@@ -167,7 +178,7 @@ main(int argc, char *argv[])
 		    "to specify.");
 
 	/* Print out current MBRs on disk */
-	if ((i_flag + u_flag + m_flag) == 0)
+	if ((i_flag + u_flag + e_flag) == 0)
 		exit(USER_print_disk(&disk));
 
 	/* Parse mbr template, to pass on later */
@@ -191,8 +202,8 @@ main(int argc, char *argv[])
 		if (USER_init(&disk, &mbr, u_flag) == -1)
 			err(1, "error initializing MBR");
 
-	if (m_flag)
-		USER_modify(&disk, &mbr, 0, 0);
+	if (e_flag)
+		USER_edit(&disk, &mbr, 0, 0);
 
 	return (0);
 }

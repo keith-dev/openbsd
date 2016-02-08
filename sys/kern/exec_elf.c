@@ -1,4 +1,4 @@
-/*	$OpenBSD: exec_elf.c,v 1.100 2014/07/13 23:59:58 tedu Exp $	*/
+/*	$OpenBSD: exec_elf.c,v 1.112 2015/02/10 23:39:57 guenther Exp $	*/
 
 /*
  * Copyright (c) 1996 Per Fogelstrom
@@ -86,6 +86,8 @@
 
 #include <sys/mman.h>
 
+#include <uvm/uvm_extern.h>
+
 #include <machine/reg.h>
 #include <machine/exec.h>
 
@@ -126,9 +128,6 @@ extern char *syscallnames[];
  * be a reasonable limit for ELF, the most we have seen so far is 12
  */
 #define ELF_MAX_VALID_PHDR 32
-
-/* Limit on total PT_OPENBSD_RANDOMIZE bytes. */
-#define ELF_RANDOMIZE_LIMIT 1024
 
 /*
  * This is the basic elf emul. elf_probe_funcs may change to other emuls.
@@ -171,7 +170,7 @@ ELFNAME(copyargs)(struct exec_package *pack, struct ps_strings *arginfo,
 	 * Push space for extra arguments on the stack needed by
 	 * dynamically linked binaries.
 	 */
-	if (pack->ep_interp != NULL) {
+	if (pack->ep_emul_arg != NULL) {
 		pack->ep_emul_argp = stack;
 		stack = (char *)stack + ELF_AUX_ENTRIES * sizeof (AuxInfo);
 	}
@@ -214,7 +213,7 @@ void
 ELFNAME(load_psection)(struct exec_vmcmd_set *vcset, struct vnode *vp,
 	Elf_Phdr *ph, Elf_Addr *addr, Elf_Addr *size, int *prot, int flags)
 {
-	u_long uaddr, msize, lsize, psize, rm, rf;
+	u_long msize, lsize, psize, rm, rf;
 	long diff, offset, bdiff;
 	Elf_Addr base;
 
@@ -228,23 +227,22 @@ ELFNAME(load_psection)(struct exec_vmcmd_set *vcset, struct vnode *vp,
 			/* page align vaddr */
 			base = *addr + trunc_page(ph->p_vaddr) 
 			    - ELF_TRUNC(ph->p_vaddr, ph->p_align);
-
-			bdiff = ph->p_vaddr - trunc_page(ph->p_vaddr);
-
-		} else
+		} else {
 			diff = 0;
+			base = *addr + trunc_page(ph->p_vaddr) - ph->p_vaddr;
+		}
 	} else {
-		*addr = uaddr = ph->p_vaddr;
+		*addr = ph->p_vaddr;
 		if (ph->p_align > 1)
-			*addr = ELF_TRUNC(uaddr, ph->p_align);
-		base = trunc_page(uaddr);
-		bdiff = uaddr - base;
-		diff = uaddr - *addr;
+			*addr = ELF_TRUNC(*addr, ph->p_align);
+		base = trunc_page(ph->p_vaddr);
+		diff = ph->p_vaddr - *addr;
 	}
+	bdiff = ph->p_vaddr - trunc_page(ph->p_vaddr);
 
-	*prot |= (ph->p_flags & PF_R) ? VM_PROT_READ : 0;
-	*prot |= (ph->p_flags & PF_W) ? VM_PROT_WRITE : 0;
-	*prot |= (ph->p_flags & PF_X) ? VM_PROT_EXECUTE : 0;
+	*prot |= (ph->p_flags & PF_R) ? PROT_READ : 0;
+	*prot |= (ph->p_flags & PF_W) ? PROT_WRITE : 0;
+	*prot |= (ph->p_flags & PF_X) ? PROT_EXEC : 0;
 
 	msize = ph->p_memsz + diff;
 	offset = ph->p_offset - bdiff;
@@ -379,7 +377,7 @@ ELFNAME(load_file)(struct proc *p, char *path, struct exec_package *epp,
 	 * would (i.e. something safely out of the way).
 	 */
 	if (pos == ELFDEFNNAME(NO_ADDR)) {
-		pos = uvm_map_hint(p->p_vmspace, VM_PROT_EXECUTE);
+		pos = uvm_map_hint(p->p_vmspace, PROT_EXEC);
 	}
 
 	pos = ELF_ROUND(pos, file_align);
@@ -490,7 +488,7 @@ ELFNAME(load_file)(struct proc *p, char *path, struct exec_package *epp,
 bad1:
 	VOP_CLOSE(nd.ni_vp, FREAD, p->p_ucred, p);
 bad:
-	free(ph, M_TEMP, 0);
+	free(ph, M_TEMP, phsize);
 
 	*last = addr;
 	vput(nd.ni_vp);
@@ -512,7 +510,7 @@ ELFNAME2(exec,makecmds)(struct proc *p, struct exec_package *epp)
 	Elf_Ehdr *eh = epp->ep_hdr;
 	Elf_Phdr *ph, *pp, *base_ph = NULL;
 	Elf_Addr phdr = 0, exe_base = 0;
-	int error, i;
+	int error, i, has_phdr = 0;
 	char *interp = NULL;
 	u_long pos = 0, phsize;
 	size_t randomizequota = ELF_RANDOMIZE_LIMIT;
@@ -561,13 +559,17 @@ ELFNAME2(exec,makecmds)(struct proc *p, struct exec_package *epp)
 		} else if (pp->p_type == PT_LOAD) {
 			if (base_ph == NULL)
 				base_ph = pp;
+		} else if (pp->p_type == PT_PHDR) {
+			has_phdr = 1;
 		}
 	}
 
 	if (eh->e_type == ET_DYN) {
-		/* need an interpreter and load sections for PIE */
-		if (interp == NULL || base_ph == NULL)
+		/* need phdr and load sections for PIE */
+		if (!has_phdr || base_ph == NULL) {
+			error = EINVAL;
 			goto bad;
+		}
 		/* randomize exe_base for PIE */
 		exe_base = uvm_map_pie(base_ph->p_align);
 	}
@@ -642,7 +644,7 @@ ELFNAME2(exec,makecmds)(struct proc *p, struct exec_package *epp)
 			 * Decide whether it's text or data by looking
 			 * at the protection of the section
 			 */
-			if (prot & VM_PROT_WRITE) {
+			if (prot & PROT_WRITE) {
 				/* data section */
 				if (epp->ep_dsize == ELFDEFNNAME(NO_ADDR)) {
 					epp->ep_daddr = addr;
@@ -658,7 +660,7 @@ ELFNAME2(exec,makecmds)(struct proc *p, struct exec_package *epp)
 						epp->ep_dsize = addr+size -
 						    epp->ep_daddr;
 				}
-			} else if (prot & VM_PROT_EXECUTE) {
+			} else if (prot & PROT_EXEC) {
 				/* text section */
 				if (epp->ep_tsize == ELFDEFNNAME(NO_ADDR)) {
 					epp->ep_taddr = addr;
@@ -736,30 +738,33 @@ ELFNAME2(exec,makecmds)(struct proc *p, struct exec_package *epp)
 	 * Check if we found a dynamically linked binary and arrange to load
 	 * its interpreter when the exec file is released.
 	 */
-	if (interp) {
+	if (interp || eh->e_type == ET_DYN) {
 		struct elf_args *ap;
 
-		ap = malloc(sizeof(struct elf_args), M_TEMP, M_WAITOK);
+		ap = malloc(sizeof(*ap), M_TEMP, M_WAITOK);
 
 		ap->arg_phaddr = phdr;
 		ap->arg_phentsize = eh->e_phentsize;
 		ap->arg_phnum = eh->e_phnum;
 		ap->arg_entry = eh->e_entry + exe_base;
+		ap->arg_interp = exe_base;
 
 		epp->ep_emul_arg = ap;
 		epp->ep_interp_pos = pos;
 	}
 
-	free(ph, M_TEMP, 0);
+	free(ph, M_TEMP, phsize);
 	vn_marktext(epp->ep_vp);
 	return (exec_setup_stack(p, epp));
 
 bad:
 	if (interp)
 		pool_put(&namei_pool, interp);
-	free(ph, M_TEMP, 0);
+	free(ph, M_TEMP, phsize);
 	kill_vmcmds(&epp->ep_vmcmds);
-	return (ENOEXEC);
+	if (error == 0)
+		return (ENOEXEC);
+	return (error);
 }
 
 /*
@@ -770,19 +775,20 @@ int
 ELFNAME2(exec,fixup)(struct proc *p, struct exec_package *epp)
 {
 	char	*interp;
-	int	error;
+	int	error = 0;
 	struct	elf_args *ap;
 	AuxInfo ai[ELF_AUX_ENTRIES], *a;
 	Elf_Addr	pos = epp->ep_interp_pos;
 
-	if (epp->ep_interp == NULL) {
+	if (epp->ep_emul_arg == NULL) {
 		return (0);
 	}
 
 	interp = epp->ep_interp;
 	ap = epp->ep_emul_arg;
 
-	if ((error = ELFNAME(load_file)(p, interp, epp, ap, &pos)) != 0) {
+	if (interp &&
+	    (error = ELFNAME(load_file)(p, interp, epp, ap, &pos)) != 0) {
 		free(ap, M_TEMP, 0);
 		pool_put(&namei_pool, interp);
 		kill_vmcmds(&epp->ep_vmcmds);
@@ -835,7 +841,8 @@ ELFNAME2(exec,fixup)(struct proc *p, struct exec_package *epp)
 		error = copyout(ai, epp->ep_emul_argp, sizeof ai);
 	}
 	free(ap, M_TEMP, 0);
-	pool_put(&namei_pool, interp);
+	if (interp)
+		pool_put(&namei_pool, interp);
 	return (error);
 }
 
@@ -879,7 +886,7 @@ ELFNAME(os_pt_note)(struct proc *p, struct exec_package *epp, Elf_Ehdr *eh,
 
 #if 0
 		if (np->type != ELF_NOTE_TYPE_OSVERSION) {
-			free(np, M_TEMP, 0);
+			free(np, M_TEMP, ph->p_filesz);
 			np = NULL;
 			continue;
 		}
@@ -902,9 +909,9 @@ ELFNAME(os_pt_note)(struct proc *p, struct exec_package *epp, Elf_Ehdr *eh,
 out3:
 	error = ENOEXEC;
 out2:
-	free(np, M_TEMP, 0);
+	free(np, M_TEMP, ph->p_filesz);
 out1:
-	free(hph, M_TEMP, 0);
+	free(hph, M_TEMP, phsize);
 	return error;
 }
 
@@ -938,14 +945,13 @@ ELFNAMEEND(coredump)(struct proc *p, void *cookie)
 	return EPERM;
 #else
 	Elf_Ehdr ehdr;
-	Elf_Phdr phdr, *psections;
+	Elf_Phdr *psections = NULL;
 	struct countsegs_state cs;
 	struct writesegs_state ws;
 	off_t notestart, secstart, offset;
-	size_t notesize;
+	size_t notesize, psectionslen;
 	int error, i;
 
-	psections = NULL;
 	/*
 	 * We have to make a total of 3 passes across the map:
 	 *
@@ -1000,13 +1006,13 @@ ELFNAMEEND(coredump)(struct proc *p, void *cookie)
 	if (error)
 		goto out;
 
-	offset = sizeof(ehdr);
-
-	notestart = offset + sizeof(phdr) * cs.npsections;
-	secstart = notestart + notesize;
-
 	psections = mallocarray(cs.npsections, sizeof(Elf_Phdr),
 	    M_TEMP, M_WAITOK|M_ZERO);
+	psectionslen = cs.npsections * sizeof(Elf_Phdr);
+
+	offset = sizeof(ehdr);
+	notestart = offset + psectionslen;
+	secstart = notestart + notesize;
 
 	/* Pass 2: now write the P-section headers. */
 	ws.secoff = secstart;
@@ -1026,13 +1032,12 @@ ELFNAMEEND(coredump)(struct proc *p, void *cookie)
 	ws.psections->p_flags = PF_R;
 	ws.psections->p_align = ELFROUNDSIZE;
 
-	error = coredump_write(cookie, UIO_SYSSPACE, psections,
-	    cs.npsections * sizeof(Elf_Phdr));
+	error = coredump_write(cookie, UIO_SYSSPACE, psections, psectionslen);
 	if (error)
 		goto out;
 
 #ifdef DIAGNOSTIC
-	offset += cs.npsections * sizeof(Elf_Phdr);
+	offset += psectionslen;
 	if (offset != notestart)
 		panic("coredump: offset %lld != notestart %lld",
 		    (long long) offset, (long long) notestart);
@@ -1077,7 +1082,7 @@ ELFNAMEEND(coredump)(struct proc *p, void *cookie)
 	}
 
 out:
-	free(psections, M_TEMP, 0);
+	free(psections, M_TEMP, psectionslen);
 	return (error);
 #endif
 }
@@ -1113,11 +1118,11 @@ ELFNAMEEND(coredump_writeseghdrs)(struct proc *p, void *iocookie,
 	phdr.p_filesz = realsize;
 	phdr.p_memsz = size;
 	phdr.p_flags = 0;
-	if (us->prot & VM_PROT_READ)
+	if (us->prot & PROT_READ)
 		phdr.p_flags |= PF_R;
-	if (us->prot & VM_PROT_WRITE)
+	if (us->prot & PROT_WRITE)
 		phdr.p_flags |= PF_W;
-	if (us->prot & VM_PROT_EXECUTE)
+	if (us->prot & PROT_EXEC)
 		phdr.p_flags |= PF_X;
 	phdr.p_align = PAGE_SIZE;
 
@@ -1197,7 +1202,7 @@ ELFNAMEEND(coredump_notes)(struct proc *p, void *iocookie, size_t *sizep)
 		iov.iov_len = sizeof(pss);
 		uio.uio_iov = &iov;
 		uio.uio_iovcnt = 1;
-		uio.uio_offset = (off_t)(vaddr_t)PS_STRINGS;
+		uio.uio_offset = (off_t)pr->ps_strings;
 		uio.uio_resid = sizeof(pss);
 		uio.uio_segflg = UIO_SYSSPACE;
 		uio.uio_rw = UIO_READ;

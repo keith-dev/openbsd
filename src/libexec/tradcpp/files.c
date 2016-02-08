@@ -313,11 +313,7 @@ mkfilename(struct place *place, const char *dir, const char *file)
 
 	rlen = dlen + (needslash ? 1 : 0) + flen;
 	ret = domalloc(rlen + 1);
-	strcpy(ret, dir);
-	if (needslash) {
-		strcat(ret, "/");
-	}
-	strcat(ret, file);
+	snprintf(ret, rlen+1, "%s%s%s", dir, needslash ? "/" : "", file);
 	return ret;
 }
 
@@ -400,7 +396,7 @@ file_readabsolute(struct place *place, const char *name)
 
 	assert(place != NULL);
 
-	if (name == NULL) {
+	if ((name == NULL) || !strcmp(name, "-")) {
 		fd = STDIN_FILENO;
 		pf = place_addfile(place, "<standard-input>", false);
 	} else {

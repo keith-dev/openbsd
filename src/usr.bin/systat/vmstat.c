@@ -1,4 +1,4 @@
-/*	$OpenBSD: vmstat.c,v 1.76 2014/04/08 14:04:11 mpi Exp $	*/
+/*	$OpenBSD: vmstat.c,v 1.79 2015/01/16 00:03:38 deraadt Exp $	*/
 /*	$NetBSD: vmstat.c,v 1.5 1996/05/10 23:16:40 thorpej Exp $	*/
 
 /*-
@@ -34,15 +34,14 @@
  * Cursed vmstat -- from Robert Elz.
  */
 
-#include <sys/param.h>
-#include <sys/dkstat.h>
-#include <sys/buf.h>
-#include <sys/stat.h>
-#include <sys/time.h>
-#include <sys/sysctl.h>
-#include <sys/proc.h>
+#include <sys/param.h>	/* MAXCOMLEN */
+#include <sys/types.h>
 #include <sys/namei.h>
+#include <sys/proc.h>
+#include <sys/sched.h>
+#include <sys/stat.h>
 #include <sys/sysctl.h>
+#include <sys/time.h>
 #include <sys/vmmeter.h>
 
 #include <ctype.h>
@@ -55,6 +54,9 @@
 #include <unistd.h>
 
 #include "systat.h"
+#include "dkstats.h"
+
+#define MAXIMUM(a, b)	(((a) > (b)) ? (a) : (b))
 
 static struct Info {
 	long	time[CPUSTATES];
@@ -65,7 +67,6 @@ static struct Info {
 	u_quad_t *intrcnt;
 } s, s1, s2, s3, z;
 
-#include "dkstats.h"
 extern struct _disk	cur;
 
 #define	cnt s.Cnt
@@ -281,7 +282,7 @@ labelkre(void)
 	mvprintw(DISKROW + 4, DISKCOL, "  sec");
 	for (i = 0, j = 0; i < cur.dk_ndrive && j < DRIVESPACE; i++)
 		if (cur.dk_select[i] && (j + strlen(dr_name[i])) < DRIVESPACE) {
-			l = MAX(5, strlen(dr_name[i]));
+			l = MAXIMUM(5, strlen(dr_name[i]));
 			mvprintw(DISKROW, DISKCOL + 5 + j,
 			    " %*s", l, dr_name[i]);
 			j += 1 + l;
@@ -429,7 +430,7 @@ showkre(void)
 	mvprintw(DISKROW, DISKCOL + 5, "                              ");
 	for (i = 0, c = 0; i < cur.dk_ndrive && c < DRIVESPACE; i++)
 		if (cur.dk_select[i] && (c + strlen(dr_name[i])) < DRIVESPACE) {
-			l = MAX(5, strlen(dr_name[i]));
+			l = MAXIMUM(5, strlen(dr_name[i]));
 			mvprintw(DISKROW, DISKCOL + 5 + c,
 			    " %*s", l, dr_name[i]);
 			c += 1 + l;

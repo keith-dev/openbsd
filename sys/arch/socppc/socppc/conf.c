@@ -1,4 +1,4 @@
-/*	$OpenBSD: conf.c,v 1.19 2013/11/04 14:11:29 deraadt Exp $ */
+/*	$OpenBSD: conf.c,v 1.23 2014/12/11 19:44:17 tedu Exp $ */
 
 /*
  * Copyright (c) 1997 Per Fogelstrom
@@ -59,12 +59,12 @@ struct bdevsw bdevsw[] = {
 	bdev_tape_init(NST,st),		/* 5 SCSI tape */
 	bdev_notdef(),			/* 6 unknown*/
 	bdev_notdef(),			/* 7 unknown*/
-	bdev_lkm_dummy(),		/* 8 */
-	bdev_lkm_dummy(),		/* 9 */
-	bdev_lkm_dummy(),		/* 10 */
-	bdev_lkm_dummy(),		/* 11 */
-	bdev_lkm_dummy(),		/* 12 */
-	bdev_lkm_dummy(),		/* 13 */
+	bdev_notdef(),			/* 8 */
+	bdev_notdef(),			/* 9 */
+	bdev_notdef(),			/* 10 */
+	bdev_notdef(),			/* 11 */
+	bdev_notdef(),			/* 12 */
+	bdev_notdef(),			/* 13 */
 	bdev_disk_init(NVND,vnd),	/* 14 vnode disk driver*/
 	bdev_notdef(),			/* 15 unknown*/
 	bdev_notdef(),			/* 16 was: concatenated disk driver */
@@ -87,8 +87,6 @@ cdev_decl(com);
 
 #include "tun.h"
 
-#include "inet.h"
-
 #include "wsmux.h"
 
 #ifdef USER_PCICONF
@@ -100,18 +98,11 @@ cdev_decl(pci);
 
 #include "systrace.h"
 
-#ifdef LKM
-#define NLKM 1
-#else
-#define NLKM 0
-#endif
-
 #include "ksyms.h"
 #include "usb.h"
 #include "uhid.h"
 #include "ugen.h"
 #include "ulpt.h"
-#include "urio.h"
 #include "ucom.h"
 
 #include "vscsi.h"
@@ -144,7 +135,7 @@ struct cdevsw cdevsw[] = {
 	cdev_fd_init(1,filedesc),	/* 21: file descriptor pseudo-dev */
 	cdev_bpf_init(NBPFILTER,bpf),	/* 22: berkeley packet filter */
 	cdev_tun_init(NTUN,tun),	/* 23: network tunnel */
-	cdev_lkm_init(NLKM,lkm),	/* 24: loadable module driver */
+	cdev_notdef(),			/* 24 was LKM */
 	cdev_notdef(),			/* 25 */
 	cdev_tty_init(NCOM,com),	/* 26: serial port */
 	cdev_notdef(),			/* 27 */
@@ -153,12 +144,12 @@ struct cdevsw cdevsw[] = {
 	cdev_notdef(),			/* 30 */
 	cdev_notdef(),			/* 31 */
 	cdev_notdef(),			/* 32 */
-	cdev_lkm_dummy(),		/* 33 */
-	cdev_lkm_dummy(),		/* 34 */
-	cdev_lkm_dummy(),		/* 35 */
-	cdev_lkm_dummy(),		/* 36 */
-	cdev_lkm_dummy(),		/* 37 */
-	cdev_lkm_dummy(),		/* 38 */
+	cdev_notdef(),			/* 33 */
+	cdev_notdef(),			/* 34 */
+	cdev_notdef(),			/* 35 */
+	cdev_notdef(),			/* 36 */
+	cdev_notdef(),			/* 37 */
+	cdev_notdef(),			/* 38 */
 	cdev_pf_init(NPF,pf),		/* 39: packet filter */
 	cdev_random_init(1,random),	/* 40: random data source */
 	cdev_notdef(),			/* 41 */
@@ -167,7 +158,7 @@ struct cdevsw cdevsw[] = {
 	cdev_video_init(NVIDEO,video),	/* 44: generic video I/O */
 	cdev_notdef(),			/* 45 */
 	cdev_notdef(),			/* 46 */
-	cdev_crypto_init(NCRYPTO,crypto), /* 47: /dev/crypto */
+	cdev_notdef(),			/* 47: was: /dev/crypto */
 	cdev_notdef(),			/* 48 */
 	cdev_notdef(),			/* 49 */
 	cdev_systrace_init(NSYSTRACE,systrace),	/* 50 system call tracing */
@@ -185,7 +176,7 @@ struct cdevsw cdevsw[] = {
 	cdev_usbdev_init(NUHID,uhid),	/* 62: USB generic HID */
 	cdev_usbdev_init(NUGEN,ugen),	/* 63: USB generic driver */
 	cdev_ulpt_init(NULPT,ulpt),	/* 64: USB printers */
-	cdev_urio_init(NURIO,urio),	/* 65: USB Diamond Rio 500 */
+	cdev_notdef(),			/* 65 */
 	cdev_tty_init(NUCOM,ucom),	/* 66: USB tty */
 	cdev_wsdisplay_init(NWSDISPLAY,	/* 67: frame buffers, etc. */
 		wsdisplay),

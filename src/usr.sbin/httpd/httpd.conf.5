@@ -1,6 +1,6 @@
-.\"	$OpenBSD: httpd.conf.5,v 1.29 2014/08/06 20:29:54 reyk Exp $
+.\"	$OpenBSD: httpd.conf.5,v 1.54 2015/03/06 05:10:18 reyk Exp $
 .\"
-.\" Copyright (c) 2014 Reyk Floeter <reyk@openbsd.org>
+.\" Copyright (c) 2014, 2015 Reyk Floeter <reyk@openbsd.org>
 .\"
 .\" Permission to use, copy, modify, and distribute this software for any
 .\" purpose with or without fee is hereby granted, provided that the above
@@ -14,7 +14,7 @@
 .\" ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
 .\" OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 .\"
-.Dd $Mdocdate: August 6 2014 $
+.Dd $Mdocdate: March 6 2015 $
 .Dt HTTPD.CONF 5
 .Os
 .Sh NAME
@@ -49,6 +49,15 @@ If the address is an interface name,
 .Xr httpd 8
 will look up the first IPv4 address and any other IPv4 and IPv6
 addresses of the specified network interface.
+If
+.Sq *
+is given as an address,
+it will be used as an alias for
+.Ar 0.0.0.0
+to listen on all IPv4 addresses.
+Likewise,
+.Sq ::
+can be used to listen on all IPv6 addresses.
 A
 .Ar port
 can be specified by number or name.
@@ -80,10 +89,10 @@ Macros can be defined that will later be expanded in context.
 Macro names must start with a letter, digit, or underscore,
 and may contain any of those characters.
 Macro names may not be reserved words (for example,
-.Ic table ,
-.Ic relay ,
+.Ic directory ,
+.Ic log ,
 or
-.Ic timeout ) .
+.Ic root ) .
 Macros are not expanded inside quotes.
 .Pp
 For example:
@@ -96,12 +105,6 @@ server "default" {
 .Sh GLOBAL CONFIGURATION
 Here are the settings that can be set globally:
 .Bl -tag -width Ds
-.It Ic prefork Ar number
-Run the specified number of server processes.
-This increases the performance and prevents delays when connecting
-to a server.
-.Xr httpd 8
-runs 3 server processes by default.
 .It Ic chroot Ar directory
 Set the
 .Xr chroot 2
@@ -109,6 +112,19 @@ directory.
 If not specified, it defaults to
 .Pa /var/www ,
 the home directory of the www user.
+.It Ic logdir Ar directory
+Specifies the full path of the directory in which log files will be written.
+If not specified, it defaults to
+.Pa /logs
+within the
+.Xr chroot 2
+directory.
+.It Ic prefork Ar number
+Run the specified number of server processes.
+This increases the performance and prevents delays when connecting
+to a server.
+.Xr httpd 8
+runs 3 server processes by default.
 .El
 .Sh SERVERS
 The configured web servers.
@@ -119,21 +135,72 @@ must have a
 .Ar name
 and include one or more lines of the following syntax:
 .Bl -tag -width Ds
+.It Ic alias Ar name
+Specify an additional alias
+.Ar name
+for this server.
+.It Oo Ic no Oc Ic authenticate Oo Ar realm Oc Ic with Pa htpasswd
+Authenticate a remote user for
+.Ar realm
+by checking the credentials against the user authentication file
+.Pa htpasswd .
+The file name is relative to the
+.Ic chroot
+and must be readable by the www user.
+Use the
+.Ic no authenticate
+directive to disable authentication in a location.
+.It Ic block drop
+Drop the connection without sending an error page.
+.It Ic block Op Ic return Ar code Op uri
+Close the connection and send an error page.
+If the optional return code is not specified,
+.Xr httpd 8
+denies access with a
+.Sq 403 Forbidden
+response.
+The optional
+.Ar uri
+argument can be used with return codes in the 3xx range to send a
+.Sq Location:
+header for redirection to a specified URI.
+.Pp
+The
+.Ar url
+may contain predefined macros that will be expanded at runtime:
+.Pp
+.Bl -tag -width $DOCUMENT_URI -offset indent -compact
+.It Ic $DOCUMENT_URI
+The request path.
+.It Ic $QUERY_STRING
+The optional query string of the request.
+.It Ic $REMOTE_ADDR
+The IP address of the connected client.
+.It Ic $REMOTE_PORT
+The TCP source port of the connected client.
+.It Ic $REMOTE_USER
+The remote user for HTTP authentication.
+.It Ic $REQUEST_URI
+The request path and optional query string.
+.It Ic $SERVER_ADDR
+The configured IP address of the server.
+.It Ic $SERVER_PORT
+The configured TCP server port of the server.
+.It Ic $SERVER_NAME
+The name of the server.
+.El
 .It Ic connection Ar option
 Set the specified options and limits for HTTP connections.
 Valid options are:
 .Bl -tag -width Ds
 .It Ic max request body Ar number
 Set the maximum body size in bytes that the client can send to the server.
-The default value is
-.Ar 1048576
-bytes (1M).
+The default value is 1048576 bytes (1M).
 .It Ic max requests Ar number
 Set the maximum number of requests per persistent HTTP connection.
 Persistent connections are negotiated using the Keep-Alive header in
 HTTP/1.0 and enabled by default in HTTP/1.1.
-The default maximum number of requests per connection is
-.Ar 100 .
+The default maximum number of requests per connection is 100.
 .It Ic timeout Ar seconds
 Specify the inactivity timeout in seconds for accepted sessions.
 The default timeout is 600 seconds (10 minutes).
@@ -152,7 +219,7 @@ If not specified, it defaults to
 .Pa index.html .
 .It Ic no index
 Disable the directory index.
-.Nm httpd
+.Xr httpd 8
 will neither display nor generate a directory index.
 .El
 .It Oo Ic no Oc Ic fastcgi Op Ic socket Ar socket
@@ -162,16 +229,17 @@ The
 is a local path name within the
 .Xr chroot 2
 root directory of
-.Nm httpd
+.Xr httpd 8
 and defaults to
 .Pa /run/slowcgi.sock .
-.It Ic listen on Ar address Oo Ic ssl Oc Ic port Ar number
+.It Ic listen on Ar address Oo Ic tls Oc Ic port Ar number
 Set the listen address and port.
-.It Ic location Ar path { ... }
+This statement can be specified multiple times.
+.It Ic location Ar path Brq ...
 Specify server configuration rules for a specific location.
 The
 .Ar path
-argument will be matched against the URL path with shell globbing rules.
+argument will be matched against the request path with shell globbing rules.
 A location section may include most of the server configuration rules
 except
 .Ic connection ,
@@ -209,28 +277,38 @@ Set the logging style.
 The
 .Ar style
 can be
-.Ar common ,
-.Ar combined
+.Cm common ,
+.Cm combined
 or
-.Ar connection .
+.Cm connection .
 The styles
-.Ar common
+.Cm common
 and
-.Ar combined
+.Cm combined
 write a log entry after each request similar to the standard Apache
 and nginx access log formats.
 The style
-.Ar connection
+.Cm connection
 writes a summarized log entry after each connection,
 that can have multiple requests,
 similar to the format that is used by
 .Xr relayd 8 .
 If not specified, the default is
-.Ar common .
+.Cm common .
 .It Oo Ic no Oc Ic syslog
-Enable or disable logging to syslog instead of the log files.
+Enable or disable logging to
+.Xr syslog 3
+instead of the log files.
 .El
-.It Ic root Ar directory
+.It Ic pass
+Disable any previous
+.Ic block
+in a location.
+.It Ic root Ar option
+Configure the document root and options for the request path.
+Valid options are:
+.Bl -tag -width Ds
+.It Ar directory
 Set the document root of the server.
 The
 .Ar directory
@@ -240,32 +318,11 @@ root directory of
 .Nm httpd .
 If not specified, it defaults to
 .Pa /htdocs .
-.It Ic ssl Ar option
-Set the SSL configuration for the server.
-These options are only used if SSL has been enabled via the listen directive.
-Valid options are:
-.Bl -tag -width Ds
-.It Ic certificate Ar file
-Specify the certificate to use for this server.
-The
-.Ar file
-should contain a PEM encoded certificate.
-.It Ic ciphers Ar string
-Specify the SSL cipher string.
-If not specified, the default value
-.Ar HIGH:!aNULL
-will be used (strong crypto cipher suites without anonymous DH).
-See the CIPHERS section of
-.Xr openssl 1
-for information about SSL cipher suites and preference lists.
-.It Ic key Ar file
-Specify the private key to use for this server.
-The
-.Ar file
-should contain a PEM encoded private key and reside outside of the
-.Xr chroot 2
-root directory of
-.Nm httpd .
+.It Ic strip Ar number
+Strip
+.Ar number
+path components from the beginning of the request path before looking
+up the stripped-down path at the document root.
 .El
 .It Ic tcp Ar option
 Enable or disable the specified TCP/IP options; see
@@ -278,45 +335,83 @@ Valid options are:
 .It Ic backlog Ar number
 Set the maximum length the queue of pending connections may grow to.
 The backlog option is 10 by default and is limited by the
-.Ic kern.somaxconn
+.Va kern.somaxconn
 .Xr sysctl 8
 variable.
 .It Ic ip minttl Ar number
 This option for the underlying IP connection may be used to discard packets
 with a TTL lower than the specified value.
 This can be used to implement the
-.Ar Generalized TTL Security Mechanism (GTSM)
+Generalized TTL Security Mechanism (GTSM)
 according to RFC 5082.
 .It Ic ip ttl Ar number
 Change the default time-to-live value in the IP headers.
-.It Xo
-.Op Ic no
-.Ic nodelay
-.Xc
+.It Oo Ic no Oc Ic nodelay
 Enable the TCP NODELAY option for this connection.
-This is recommended to avoid delays in the relayed data stream,
-e.g. for SSH connections.
-.It Xo
-.Op Ic no
-.Ic sack
-.Xc
+This is recommended to avoid delays in the data stream.
+.It Oo Ic no Oc Ic sack
 Use selective acknowledgements for this connection.
 .It Ic socket buffer Ar number
 Set the socket-level buffer size for input and output for this
 connection.
 This will affect the TCP window size.
 .El
+.It Ic tls Ar option
+Set the TLS configuration for the server.
+These options are only used if TLS has been enabled via the listen directive.
+Valid options are:
+.Bl -tag -width Ds
+.It Ic certificate Ar file
+Specify the certificate to use for this server.
+The
+.Ar file
+should contain a PEM encoded certificate.
+.It Ic ciphers Ar string
+Specify the TLS cipher string.
+If not specified, the default value
+.Qq HIGH:!aNULL
+will be used (strong crypto cipher suites without anonymous DH).
+See the CIPHERS section of
+.Xr openssl 1
+for information about SSL/TLS cipher suites and preference lists.
+.It Ic dhe Ar params
+Specify the DHE parameters to use for DHE cipher suites.
+Valid parameter values are none, legacy and auto.
+For legacy a fixed key length of 1024 bits is used, whereas for auto the key
+length is determined automatically.
+The default is none, which disables DHE cipher suites.
+.It Ic ecdhe Ar curve
+Specify the ECDHE curve to use for ECDHE cipher suites.
+Valid parameter values are none, auto and the short name of any known curve.
+The default is auto.
+.It Ic key Ar file
+Specify the private key to use for this server.
+The
+.Ar file
+should contain a PEM encoded private key and reside outside of the
+.Xr chroot 2
+root directory of
+.Nm httpd .
+.It Ic protocols Ar string
+Specify the TLS protocols to enable for this server.
+If not specified, the default value
+.Qq all
+will be used (all available protocols).
+Refer to the
+.Xr tls_config_parse_protocols 3
+function for other valid protocol string values.
+.El
 .El
 .Sh TYPES
 Configure the supported media types.
-.Nm httpd
+.Xr httpd 8
 will set the
 .Ar Content-Type
 of the response header based on the file extension listed in the
 .Ic types
 section.
 If not specified,
-.Nm httpd
+.Xr httpd 8
 will use built-in media types for
 .Ar text/css ,
 .Ar text/html ,
@@ -331,7 +426,7 @@ The
 .Ic types
 section must include one or more lines of the following syntax:
 .Bl -tag -width Ds
-.It Ar type/subtype Ar name Op Ar name ... ;
+.It Ar type/subtype Ar name Op Ar name ...
 Set the media
 .Ar type
 and
@@ -339,30 +434,41 @@ and
 to the specified extension
 .Ar name .
 One or more names can be specified per line.
+Each line may end with an optional semicolon.
+.It Ic include Ar file
+Include types definitions from an external file, for example
+.Pa /usr/share/misc/mime.types .
 .El
 .Sh EXAMPLES
 The following example will start one server that is pre-forked two
-times and listening on the primary IP address of the network interface
-that is a member of the
-.Ar egress
-group.
+times and is listening on all local IP addresses.
 It additionally defines some media types overriding the defaults.
 .Bd -literal -offset indent
 prefork 2
 
 server "default" {
-	listen on egress port 80
+	listen on * port 80
 }
 
 types {
-	text/css			css;
-	text/html			htm html;
-	text/txt			txt;
-	image/gif			gif;
-	image/jpeg			jpg jpeg;
-	image/png			png;
-	application/javascript		js;
-	application/xml			xml;
+	text/css			css
+	text/html			htm html
+	text/txt			txt
+	image/gif			gif
+	image/jpeg			jpg jpeg
+	image/png			png
+	application/javascript		js
+	application/xml			xml
+}
+.Ed
+.Pp
+The server can also be configured to only listen on the primary IP
+address of the network interface that is a member of the
+.Qq egress
+group.
+.Bd -literal -offset indent
+server "default" {
+	listen on egress port 80
 }
 .Ed
 .Pp
@@ -372,6 +478,13 @@ If the same address is repeated multiple times in the
 statement,
 the server will be matched based on the requested host name.
 .Bd -literal -offset indent
+server "www.example.com" {
+	alias "example.com"
+	listen on * port 80
+	listen on * tls port 443
+	root "/htdocs/www.example.com"
+}
+
 server "www.a.example.com" {
 	listen on 203.0.113.1 port 80
 	root "/htdocs/www.a.example.com"
@@ -388,8 +501,21 @@ server "intranet.example.com" {
 }
 .Ed
 .Pp
-The syntax of the types section is compatible with the format used by
-.Xr nginx 8 ,
+Simple redirections can be configured with the
+.Ic block
+directive:
+.Bd -literal -offset indent
+server "example.com" {
+	listen on 10.0.0.1 port 80
+	block return 301 "http://www.example.com/"
+}
+
+server "www.example.com" {
+	listen on 10.0.0.1 port 80
+}
+.Ed
+.Pp
+The syntax of the types section is also compatible with the format used by nginx,
 so it is possible to include its
 .Pa mime.types
 file directly:
@@ -397,6 +523,7 @@ file directly:
 include "/etc/nginx/mime.types"
 .Ed
 .Sh SEE ALSO
+.Xr htpasswd 1 ,
 .Xr httpd 8
 .Sh AUTHORS
 .An -nosplit

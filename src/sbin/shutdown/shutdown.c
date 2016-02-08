@@ -1,4 +1,4 @@
-/*	$OpenBSD: shutdown.c,v 1.37 2013/11/22 04:12:48 deraadt Exp $	*/
+/*	$OpenBSD: shutdown.c,v 1.40 2015/01/21 19:38:53 naddy Exp $	*/
 /*	$NetBSD: shutdown.c,v 1.9 1995/03/18 15:01:09 cgd Exp $	*/
 
 /*
@@ -30,7 +30,7 @@
  * SUCH DAMAGE.
  */
 
-#include <sys/param.h>
+#include <sys/types.h>
 #include <sys/resource.h>
 #include <sys/syslog.h>
 #include <sys/types.h>
@@ -48,6 +48,7 @@
 #include <time.h>
 #include <tzfile.h>
 #include <unistd.h>
+#include <limits.h>
 #include <errno.h>
 #include <err.h>
 
@@ -157,9 +158,9 @@ main(int argc, char *argv[])
 		    "shutdown: incompatible switches -h and -r.\n");
 		usage();
 	}
-	if (dopower && !dohalt) {
+	if (doreboot && dopower) {
 		(void)fprintf(stderr,
-		    "shutdown: switch -p must be used with -h.\n");
+		    "shutdown: incompatible switches -p and -r.\n");
 		usage();
 	}
 	getoffset(*argv++);
@@ -273,8 +274,8 @@ static char *restricted_environ[] = {
 void
 timewarn(int timeleft)
 {
-	static char hostname[MAXHOSTNAMELEN];
-	char wcmd[MAXPATHLEN + 4];
+	static char hostname[HOST_NAME_MAX+1];
+	char wcmd[PATH_MAX + 4];
 	extern char **environ;
 	static int first;
 	FILE *pf;
@@ -332,7 +333,8 @@ die_you_gravy_sucking_pig_dog(void)
 {
 
 	syslog(LOG_NOTICE, "%s by %s: %s",
-	    doreboot ? "reboot" : dohalt ? "halt" : "shutdown", whom, mbuf);
+	    doreboot ? "reboot" : dopower ? "power-down" : dohalt ? "halt" :
+	    "shutdown", whom, mbuf);
 	(void)sleep(2);
 
 	(void)printf("\r\nSystem shutdown time has arrived\007\007\r\n");
@@ -345,6 +347,8 @@ die_you_gravy_sucking_pig_dog(void)
 #ifdef DEBUG
 	if (doreboot)
 		(void)printf("reboot");
+	else if (dopower)
+		(void)printf("power-down");
 	else if (dohalt)
 		(void)printf("halt");
 	if (nosync)
@@ -355,20 +359,29 @@ die_you_gravy_sucking_pig_dog(void)
 		(void)printf(" with dump");
 	(void)printf("\nkill -HUP 1\n");
 #else
-	if (doreboot) {
-		execle(_PATH_REBOOT, "reboot", "-l",
-		    (nosync ? "-n" : (dodump ? "-d" : NULL)),
-		    (dodump ? "-d" : NULL), (char *)NULL, (char *)NULL);
-		syslog(LOG_ERR, "shutdown: can't exec %s: %m.", _PATH_REBOOT);
-		warn(_PATH_REBOOT);
-	}
-	else if (dohalt) {
-		execle(_PATH_HALT, "halt", "-l",
-		    (dopower ? "-p" : (nosync ? "-n" : (dodump ? "-d" : NULL))),
-		    (nosync ? "-n" : (dodump ? "-d" : NULL)),
-		    (dodump ? "-d" : NULL), (char *)NULL, (char *)NULL);
-		syslog(LOG_ERR, "shutdown: can't exec %s: %m.", _PATH_HALT);
-		warn(_PATH_HALT);
+	if (dohalt || dopower || doreboot) {
+		char *args[10];
+		char **arg, *path;
+
+		arg = &args[0];
+		if (doreboot) {
+			path = _PATH_REBOOT;
+			*arg++ = "reboot";
+		} else {
+			path = _PATH_HALT;
+			*arg++ = "halt";
+		}
+		*arg++ = "-l";
+		if (dopower)
+			*arg++ = "-p";
+		if (nosync)
+			*arg++ = "-n";
+		if (dodump)
+			*arg++ = "-d";
+		*arg++ = NULL;
+		execve(path, args, NULL);
+		syslog(LOG_ERR, "shutdown: can't exec %s: %m.", path);
+		warn(path);
 	}
 	if (access(_PATH_RC, R_OK) != -1) {
 		pid_t pid;
@@ -545,6 +558,7 @@ badtime(void)
 void
 usage(void)
 {
-	fprintf(stderr, "usage: shutdown [-] [-dfhknpr] time [warning-message ...]\n");
+	fprintf(stderr,
+	    "usage: shutdown [-] [-dfhknpr] time [warning-message ...]\n");
 	exit(1);
 }

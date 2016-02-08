@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_vic.c,v 1.81 2014/07/13 23:10:23 deraadt Exp $	*/
+/*	$OpenBSD: if_vic.c,v 1.85 2015/02/10 23:22:39 brad Exp $	*/
 
 /*
  * Copyright (c) 2006 Reyk Floeter <reyk@openbsd.org>
@@ -45,10 +45,8 @@
 #include <net/bpf.h>
 #endif
 
-#ifdef INET
 #include <netinet/in.h>
 #include <netinet/if_ether.h>
-#endif
 
 #include <dev/pci/pcireg.h>
 #include <dev/pci/pcivar.h>
@@ -342,6 +340,7 @@ int		vic_load_txb(struct vic_softc *, struct vic_txbuf *,
 		    struct mbuf *);
 void		vic_watchdog(struct ifnet *);
 int		vic_ioctl(struct ifnet *, u_long, caddr_t);
+int		vic_rxrinfo(struct vic_softc *, struct if_rxrinfo *);
 void		vic_init(struct ifnet *);
 void		vic_stop(struct ifnet *);
 void		vic_tick(void *);
@@ -815,6 +814,7 @@ vic_rx_proc(struct vic_softc *sc, int q)
 	struct ifnet			*ifp = &sc->sc_ac.ac_if;
 	struct vic_rxdesc		*rxd;
 	struct vic_rxbuf		*rxb;
+	struct mbuf_list		 ml = MBUF_LIST_INITIALIZER();
 	struct mbuf			*m;
 	int				len, idx;
 
@@ -866,18 +866,14 @@ vic_rx_proc(struct vic_softc *sc, int q)
 
 		ifp->if_ipackets++;
 
-#if NBPFILTER > 0
-		if (ifp->if_bpf)
-			bpf_mtap(ifp->if_bpf, m, BPF_DIRECTION_IN);
-#endif
+		ml_enqueue(&ml, m);
 
-		ether_input_mbuf(ifp, m);
-
-nextp:
+ nextp:
 		if_rxr_put(&sc->sc_rxq[q].ring, 1);
 		VIC_INC(sc->sc_data->vd_rx[q].nextidx, sc->sc_nrxbuf);
 	}
 
+	if_input(ifp, &ml);
 	vic_rx_fill(sc, q);
 
 	bus_dmamap_sync(sc->sc_dmat, sc->sc_dma_map, 0, sc->sc_dma_size,
@@ -1136,7 +1132,6 @@ int
 vic_load_txb(struct vic_softc *sc, struct vic_txbuf *txb, struct mbuf *m)
 {
 	bus_dmamap_t			dmap = txb->txb_dmamap;
-	struct mbuf			*m0 = NULL;
 	int				error;
 
 	error = bus_dmamap_load_mbuf(sc->sc_dmat, dmap, m, BUS_DMA_NOWAIT);
@@ -1145,33 +1140,16 @@ vic_load_txb(struct vic_softc *sc, struct vic_txbuf *txb, struct mbuf *m)
 		txb->txb_m = m;
 		break;
 
-	case EFBIG: /* mbuf chain is too fragmented */
-		MGETHDR(m0, M_DONTWAIT, MT_DATA);
-		if (m0 == NULL)
-			return (ENOBUFS);
-		if (m->m_pkthdr.len > MHLEN) {
-			MCLGETI(m0, M_DONTWAIT, NULL, m->m_pkthdr.len);
-			if (!(m0->m_flags & M_EXT)) {
-				m_freem(m0);
-				return (ENOBUFS);
-			}
+	case EFBIG:
+		if (m_defrag(m, M_DONTWAIT) == 0 &&
+		    bus_dmamap_load_mbuf(sc->sc_dmat, dmap, m,
+		    BUS_DMA_NOWAIT) == 0) {
+			txb->txb_m = m;
+			break;
 		}
-		m_copydata(m, 0, m->m_pkthdr.len, mtod(m0, caddr_t));
-		m0->m_pkthdr.len = m0->m_len = m->m_pkthdr.len;
-		error = bus_dmamap_load_mbuf(sc->sc_dmat, dmap, m0,
-		    BUS_DMA_NOWAIT);
-		if (error != 0) {
-			m_freem(m0);
-			printf("%s: tx dmamap load error %d\n", DEVNAME(sc),
-			    error);
-			return (ENOBUFS);
-		}
-		m_freem(m);
-		txb->txb_m = m0;
-		break;
 
+		/* FALLTHROUGH */
 	default:
-		printf("%s: tx dmamap load error %d\n", DEVNAME(sc), error);
 		return (ENOBUFS);
 	}
 
@@ -1212,10 +1190,8 @@ vic_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 	switch (cmd) {
 	case SIOCSIFADDR:
 		ifp->if_flags |= IFF_UP;
-#ifdef INET
 		if (ifa->ifa_addr->sa_family == AF_INET)
 			arp_ifinit(&sc->sc_ac, ifa);
-#endif
 		/* FALLTHROUGH */
 	case SIOCSIFFLAGS:
 		if (ifp->if_flags & IFF_UP) {
@@ -1234,6 +1210,10 @@ vic_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 		error = ifmedia_ioctl(ifp, ifr, &sc->sc_media, cmd);
 		break;
 
+	case SIOCGIFRXR:
+		error = vic_rxrinfo(sc, (struct if_rxrinfo *)ifr->ifr_data);
+		break;
+
 	default:
 		error = ether_ioctl(ifp, &sc->sc_ac, cmd, data);
 	}
@@ -1246,6 +1226,22 @@ vic_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 
 	splx(s);
 	return (error);
+}
+
+int
+vic_rxrinfo(struct vic_softc *sc, struct if_rxrinfo *ifri)
+{
+	struct if_rxring_info ifr[2];
+
+	memset(ifr, 0, sizeof(ifr));
+
+	ifr[0].ifr_size = MCLBYTES;
+	ifr[0].ifr_info = sc->sc_rxq[0].ring;
+
+	ifr[1].ifr_size = 4096;
+	ifr[1].ifr_info = sc->sc_rxq[1].ring;
+
+	return (if_rxr_info_ioctl(ifri, nitems(ifr), ifr));
 }
 
 void

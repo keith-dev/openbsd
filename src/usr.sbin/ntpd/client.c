@@ -1,4 +1,4 @@
-/*	$OpenBSD: client.c,v 1.93 2014/05/12 20:50:46 miod Exp $ */
+/*	$OpenBSD: client.c,v 1.100 2015/02/12 01:54:57 reyk Exp $ */
 
 /*
  * Copyright (c) 2003, 2004 Henning Brauer <henning@openbsd.org>
@@ -17,7 +17,7 @@
  * OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
 
-#include <sys/param.h>
+#include <sys/types.h>
 #include <errno.h>
 #include <md5.h>
 #include <stdio.h>
@@ -85,7 +85,7 @@ client_addr_init(struct ntp_peer *p)
 			break;
 		default:
 			fatalx("king bula sez: wrong AF in client_addr_init");
-			/* not reached */
+			/* NOTREACHED */
 		}
 	}
 
@@ -107,12 +107,12 @@ client_nextaddr(struct ntp_peer *p)
 		return (-1);
 
 	if (p->addr_head.a == NULL) {
-		priv_host_dns(p->addr_head.name, p->id);
+		priv_dns(IMSG_HOST_DNS, p->addr_head.name, p->id);
 		p->state = STATE_DNS_INPROGRESS;
 		return (-1);
 	}
 
-	if ((p->addr = p->addr->next) == NULL)
+	if (p->addr == NULL || (p->addr = p->addr->next) == NULL)
 		p->addr = p->addr_head.a;
 
 	p->shift = 0;
@@ -127,7 +127,7 @@ client_query(struct ntp_peer *p)
 	int	val;
 
 	if (p->addr == NULL && client_nextaddr(p) == -1) {
-		set_next(p, MAX(SETTIME_TIMEOUT,
+		set_next(p, MAXIMUM(SETTIME_TIMEOUT,
 		    scale_interval(INTERVAL_QUERY_AGGRESSIVE)));
 		return (0);
 	}
@@ -150,7 +150,7 @@ client_query(struct ntp_peer *p)
 			if (errno == ECONNREFUSED || errno == ENETUNREACH ||
 			    errno == EHOSTUNREACH || errno == EADDRNOTAVAIL) {
 				client_nextaddr(p);
-				set_next(p, MAX(SETTIME_TIMEOUT,
+				set_next(p, MAXIMUM(SETTIME_TIMEOUT,
 				    scale_interval(INTERVAL_QUERY_AGGRESSIVE)));
 				return (-1);
 			} else
@@ -320,6 +320,15 @@ client_dispatch(struct ntp_peer *p, u_int8_t settime)
 	 * consider every answer with a timestamp beyond january 2030 bogus.
 	 */
 	if (T2 > JAN_2030 || T3 > JAN_2030) {
+		set_next(p, error_interval());
+		return (0);
+	}
+
+	/* Detect liars */
+	if (conf->constraint_median != 0 &&
+	    (constraint_check(T2) != 0 || constraint_check(T3) != 0)) {
+		log_info("reply from %s: constraint check failed",
+		    log_sockaddr((struct sockaddr *)&p->addr->ss));
 		set_next(p, error_interval());
 		return (0);
 	}

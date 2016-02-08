@@ -1,4 +1,4 @@
-/*	$OpenBSD: exf.c,v 1.28 2013/12/01 20:22:34 krw Exp $	*/
+/*	$OpenBSD: exf.c,v 1.33 2015/01/16 06:40:14 deraadt Exp $	*/
 
 /*-
  * Copyright (c) 1992, 1993, 1994
@@ -11,8 +11,6 @@
 
 #include "config.h"
 
-#include <sys/param.h>
-#include <sys/types.h>		/* XXX: param.h may not have included types.h */
 #include <sys/queue.h>
 #include <sys/stat.h>
 
@@ -57,9 +55,7 @@ static int	file_spath(SCR *, FREF *, struct stat *, int *);
  * PUBLIC: FREF *file_add(SCR *, CHAR_T *);
  */
 FREF *
-file_add(sp, name)
-	SCR *sp;
-	CHAR_T *name;
+file_add(SCR *sp, CHAR_T *name)
 {
 	GS *gp;
 	FREF *frp, *tfrp;
@@ -119,18 +115,14 @@ file_add(sp, name)
  * PUBLIC: int file_init(SCR *, FREF *, char *, int);
  */
 int
-file_init(sp, frp, rcv_name, flags)
-	SCR *sp;
-	FREF *frp;
-	char *rcv_name;
-	int flags;
+file_init(SCR *sp, FREF *frp, char *rcv_name, int flags)
 {
 	EXF *ep;
 	RECNOINFO oinfo;
 	struct stat sb;
 	size_t psize;
 	int fd, exists, open_err, readonly;
-	char *oname, tname[MAXPATHLEN];
+	char *oname, tname[PATH_MAX];
 
 	open_err = readonly = 0;
 
@@ -452,16 +444,12 @@ oerr:	if (F_ISSET(ep, F_RCV_ON))
  *	try and open.
  */
 static int
-file_spath(sp, frp, sbp, existsp)
-	SCR *sp;
-	FREF *frp;
-	struct stat *sbp;
-	int *existsp;
+file_spath(SCR *sp, FREF *frp, struct stat *sbp, int *existsp)
 {
 	CHAR_T savech;
 	size_t len;
 	int found;
-	char *name, *p, *t, path[MAXPATHLEN];
+	char *name, *p, *t, path[PATH_MAX];
 
 	/*
 	 * If the name is NULL or an explicit reference (i.e., the first
@@ -521,8 +509,7 @@ file_spath(sp, frp, sbp, existsp)
  *	Set up the initial cursor position.
  */
 static void
-file_cinit(sp)
-	SCR *sp;
+file_cinit(SCR *sp)
 {
 	GS *gp;
 	MARK m;
@@ -630,10 +617,7 @@ file_cinit(sp)
  * PUBLIC: int file_end(SCR *, EXF *, int);
  */
 int
-file_end(sp, ep, force)
-	SCR *sp;
-	EXF *ep;
-	int force;
+file_end(SCR *sp, EXF *ep, int force)
 {
 	FREF *frp;
 
@@ -742,11 +726,7 @@ file_end(sp, ep, force)
  * PUBLIC: int file_write(SCR *, MARK *, MARK *, char *, int);
  */
 int
-file_write(sp, fm, tm, name, flags)
-	SCR *sp;
-	MARK *fm, *tm;
-	char *name;
-	int flags;
+file_write(SCR *sp, MARK *fm, MARK *tm, char *name, int flags)
 {
 	enum { NEWFILE, OLDFILE } mtype;
 	struct stat sb;
@@ -757,7 +737,7 @@ file_write(sp, fm, tm, name, flags)
 	size_t len;
 	u_long nlno, nch;
 	int fd, nf, noname, oflags, rval;
-	char *p, *s, *t, buf[MAXPATHLEN + 64];
+	char *p, *s, *t, buf[PATH_MAX + 64];
 	const char *msgstr;
 
 	ep = sp->ep;
@@ -855,21 +835,6 @@ file_write(sp, fm, tm, name, flags)
 	if (!noname && file_lock(sp, NULL, NULL, fd, 0) == LOCK_UNAVAIL)
 		msgq_str(sp, M_ERR, name,
 		    "252|%s: write lock was unavailable");
-
-#if __linux__
-	/*
-	 * XXX
-	 * In libc 4.5.x, fdopen(fd, "w") clears the O_APPEND flag (if set).
-	 * This bug is fixed in libc 4.6.x.
-	 *
-	 * This code works around this problem for libc 4.5.x users.
-	 * Note that this code is harmless if you're using libc 4.6.x.
-	 */
-	if (LF_ISSET(FS_APPEND) && lseek(fd, (off_t)0, SEEK_END) < 0) {
-		msgq(sp, M_SYSERR, "%s", name);
-		return (1);
-	}
-#endif
 
 	/*
 	 * Use stdio for buffering.
@@ -1008,9 +973,7 @@ file_write(sp, fm, tm, name, flags)
  * recreate the file.  So, let's not risk it.
  */
 static int
-file_backup(sp, name, bname)
-	SCR *sp;
-	char *name, *bname;
+file_backup(SCR *sp, char *name, char *bname)
 {
 	struct dirent *dp;
 	struct stat sb;
@@ -1192,8 +1155,7 @@ err:	if (rfd != -1)
  *	Skip the first comment.
  */
 static void
-file_comment(sp)
-	SCR *sp;
+file_comment(SCR *sp)
 {
 	recno_t lno;
 	size_t len;
@@ -1240,9 +1202,7 @@ file_comment(sp)
  * PUBLIC: int file_m1(SCR *, int, int);
  */
 int
-file_m1(sp, force, flags)
-	SCR *sp;
-	int force, flags;
+file_m1(SCR *sp, int force, int flags)
 {
 	EXF *ep;
 
@@ -1281,9 +1241,7 @@ file_m1(sp, force, flags)
  * PUBLIC: int file_m2(SCR *, int);
  */
 int
-file_m2(sp, force)
-	SCR *sp;
-	int force;
+file_m2(SCR *sp, int force)
 {
 	EXF *ep;
 
@@ -1313,9 +1271,7 @@ file_m2(sp, force)
  * PUBLIC: int file_m3(SCR *, int);
  */
 int
-file_m3(sp, force)
-	SCR *sp;
-	int force;
+file_m3(SCR *sp, int force)
 {
 	EXF *ep;
 
@@ -1349,9 +1305,7 @@ file_m3(sp, force)
  * PUBLIC: int file_aw(SCR *, int);
  */
 int
-file_aw(sp, flags)
-	SCR *sp;
-	int flags;
+file_aw(SCR *sp, int flags)
 {
 	if (!F_ISSET(sp->ep, F_MODIFIED))
 		return (0);
@@ -1410,9 +1364,7 @@ file_aw(sp, flags)
  * PUBLIC: void set_alt_name(SCR *, char *);
  */
 void
-set_alt_name(sp, name)
-	SCR *sp;
-	char *name;
+set_alt_name(SCR *sp, char *name)
 {
 	if (sp->alt_name != NULL)
 		free(sp->alt_name);
@@ -1426,30 +1378,10 @@ set_alt_name(sp, name)
  * file_lock --
  *	Get an exclusive lock on a file.
  *
- * XXX
- * The default locking is flock(2) style, not fcntl(2).  The latter is
- * known to fail badly on some systems, and its only advantage is that
- * it occasionally works over NFS.
- *
- * Furthermore, the semantics of fcntl(2) are wrong.  The problems are
- * two-fold: you can't close any file descriptor associated with the file
- * without losing all of the locks, and you can't get an exclusive lock
- * unless you have the file open for writing.  Someone ought to be shot,
- * but it's probably too late, they may already have reproduced.  To get
- * around these problems, nvi opens the files for writing when it can and
- * acquires a second file descriptor when it can't.  The recovery files
- * are examples of the former, they're always opened for writing.  The DB
- * files can't be opened for writing because the semantics of DB are that
- * files opened for writing are flushed back to disk when the DB session
- * is ended. So, in that case we have to acquire an extra file descriptor.
- *
  * PUBLIC: lockr_t file_lock(SCR *, char *, int *, int, int);
  */
 lockr_t
-file_lock(sp, name, fdp, fd, iswrite)
-	SCR *sp;
-	char *name;
-	int *fdp, fd, iswrite;
+file_lock(SCR *sp, char *name, int *fdp, int fd, int iswrite)
 {
 	if (!O_ISSET(sp, O_LOCKFILES))
 		return (LOCK_SUCCESS);
@@ -1458,7 +1390,6 @@ file_lock(sp, name, fdp, fd, iswrite)
 	if (fcntl(fd, F_SETFD, FD_CLOEXEC) == -1)
 		msgq_str(sp, M_SYSERR, name, "%s");
 
-#ifdef HAVE_LOCK_FLOCK			/* Hurrah!  We've got flock(2). */
 	/*
 	 * !!!
 	 * We need to distinguish a lock not being available for the file
@@ -1467,61 +1398,7 @@ file_lock(sp, name, fdp, fd, iswrite)
 	 * they are the former.  There's no portable way to do this.
 	 */
 	errno = 0;
-	return (flock(fd, LOCK_EX | LOCK_NB) ? errno == EAGAIN
-#ifdef EWOULDBLOCK
-	    || errno == EWOULDBLOCK
-#endif
-	    ? LOCK_UNAVAIL : LOCK_FAILED : LOCK_SUCCESS);
-#endif
-#ifdef HAVE_LOCK_FCNTL			/* Gag me.  We've got fcntl(2). */
-{
-	struct flock arg;
-	int didopen, sverrno;
-
-	arg.l_type = F_WRLCK;
-	arg.l_whence = 0;		/* SEEK_SET */
-	arg.l_start = arg.l_len = 0;
-	arg.l_pid = 0;
-
-	/*
-	 * If the file descriptor isn't opened for writing, it must fail.
-	 * If we fail because we can't get a read/write file descriptor,
-	 * we return LOCK_SUCCESS, believing that the file is readonly
-	 * and that will be sufficient to warn the user.
-	 */
-	if (!iswrite) {
-		if (name == NULL || fdp == NULL)
-			return (LOCK_FAILED);
-		if ((fd = open(name, O_RDWR, 0)) == -1)
-			return (LOCK_SUCCESS);
-		*fdp = fd;
-		didopen = 1;
-	}
-
-	errno = 0;
-	if (!fcntl(fd, F_SETLK, &arg))
-		return (LOCK_SUCCESS);
-	if (didopen) {
-		sverrno = errno;
-		(void)close(fd);
-		errno = sverrno;
-	}
-
-	/*
-	 * !!!
-	 * We need to distinguish a lock not being available for the file
-	 * from the file system not supporting locking.  Fcntl is documented
-	 * as returning EACCESS and EAGAIN; add EWOULDBLOCK for good measure,
-	 * and assume they are the former.  There's no portable way to do this.
-	 */
-	return (errno == EACCES || errno == EAGAIN
-#ifdef EWOULDBLOCK
-	|| errno == EWOULDBLOCK
-#endif
-	?  LOCK_UNAVAIL : LOCK_FAILED);
-}
-#endif
-#if !defined(HAVE_LOCK_FLOCK) && !defined(HAVE_LOCK_FCNTL)
-	return (LOCK_SUCCESS);
-#endif
+	return (flock(fd, LOCK_EX | LOCK_NB) ?
+	    errno == EAGAIN || errno == EWOULDBLOCK ? LOCK_UNAVAIL : LOCK_FAILED :
+	    LOCK_SUCCESS);
 }

@@ -3,8 +3,8 @@
 # THIS FILE AUTOMATICALLY GENERATED.  DO NOT EDIT.
 # generated from:
 #
-#	OpenBSD: etc.i386/MAKEDEV.md,v 1.71 2014/07/11 22:04:09 tedu Exp 
-#	OpenBSD: MAKEDEV.common,v 1.74 2014/07/11 21:58:32 tedu Exp 
+#	OpenBSD: etc.i386/MAKEDEV.md,v 1.74 2014/12/11 19:48:03 tedu Exp 
+#	OpenBSD: MAKEDEV.common,v 1.78 2014/12/11 19:46:15 tedu Exp 
 #	OpenBSD: MAKEDEV.mi,v 1.81 2012/11/05 08:07:09 jasper Exp 
 #	OpenBSD: MAKEDEV.sub,v 1.14 2005/02/07 06:14:18 david Exp 
 #
@@ -62,7 +62,6 @@
 #	ugen*	Generic USB devices
 #	uhid*	Generic HID devices
 #	ulpt*	Printer devices
-#	urio*	Diamond Multimedia Rio 500
 #	usb*	Bus control devices used by usbd for attach/detach
 # Special purpose devices:
 #	amdmsr	AMD MSR access device
@@ -71,7 +70,6 @@
 #	bio	ioctl tunnel pseudo-device
 #	bktr*	Video frame grabbers
 #	bpf*	Berkeley Packet Filter
-#	crypto	Hardware crypto access driver
 #	diskmap	Disk mapper
 #	drm*	Direct Rendering Manager
 #	fd	fd/* nodes
@@ -80,7 +78,6 @@
 #	gpr*	GPR400 smartcard reader
 #	hotplug	devices hot plugging
 #	joy*	Joystick driver
-#	lkm	Loadable kernel modules interface
 #	nvram	NVRAM access
 #	pci*	PCI bus devices
 #	pctr*	PC Performance Tuning Register access device
@@ -314,10 +311,6 @@ nvram)
 	M nvram c 84 0 440 kmem
 	;;
 
-lkm)
-	M lkm c 28 0 640 _lkm
-	;;
-
 joy*)
 	M joy$U c 26 $U 666
 	;;
@@ -350,10 +343,6 @@ drm*)
 
 diskmap)
 	M diskmap c 91 0 640 operator
-	;;
-
-crypto)
-	M crypto c 70 0
 	;;
 
 bpf*)
@@ -393,10 +382,6 @@ usb*)
 	M usb$u c 61 $U 660
 	;;
 
-urio*)
-	M urio$U c 65 $U 660
-	;;
-
 ulpt*)
 	M ulpt$U c 64 $U 660
 	;;
@@ -415,8 +400,8 @@ ugen*)
 
 uall)
 	R ttyU0 ttyU1 ttyU2 ttyU3 ugen0 ugen1 ugen2 ugen3 ugen4 ugen5
-	R ugen6 ugen7 ulpt0 ulpt1 uhid0 uhid1 uhid2 uhid3 urio0 usb0
-	R usb1 usb2 usb3 usb4 usb5 usb6 usb7
+	R ugen6 ugen7 ulpt0 ulpt1 uhid0 uhid1 uhid2 uhid3 usb0 usb1
+	R usb2 usb3 usb4 usb5 usb6 usb7
 	;;
 
 ttyU[0-9a-zA-Z])
@@ -575,10 +560,9 @@ all)
 	R local wscons pci0 pci1 pci2 pci3 uall rmidi0 rmidi1 rmidi2
 	R rmidi3 rmidi4 rmidi5 rmidi6 rmidi7 tuner0 radio0 speaker
 	R video0 video1 uk0 random joy0 joy1 lpa0 lpa1 lpa2 lpt0 lpt1
-	R lpt2 lkm tty00 tty01 tty02 tty03 tty04 tty05 tty06 tty07
-	R tty08 tty09 tty0a tty0b ttyc0 ttyc1 ttyc2 ttyc3 ttyc4 ttyc5
-	R ttyc6 ttyc7 apm crypto pf pctr systrace wd0 wd1 wd2 wd3 std
-	R st0 st1 fd
+	R lpt2 tty00 tty01 tty02 tty03 tty04 tty05 tty06 tty07 tty08
+	R tty09 tty0a tty0b ttyc0 ttyc1 ttyc2 ttyc3 ttyc4 ttyc5 ttyc6
+	R ttyc7 apm pf pctr systrace wd0 wd1 wd2 wd3 std st0 st1 fd
 	;;
 
 wd*|sd*)

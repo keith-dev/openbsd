@@ -1,4 +1,4 @@
-#	$OpenBSD: install.md,v 1.54 2013/11/16 18:37:27 rpe Exp $
+#	$OpenBSD: install.md,v 1.56 2014/08/20 06:52:21 phessler Exp $
 #
 #
 # Copyright (c) 1996 The NetBSD Foundation, Inc.
@@ -35,7 +35,7 @@
 MDXAPERTURE=2
 NCPU=$(sysctl -n hw.ncpufound)
 
-((NCPU > 1)) && { DEFAULTSETS="bsd bsd.rd bsd.mp" ; SANESETS="bsd bsd.mp" ; }
+((NCPU > 1)) && { DEFAULTSETS="bsd bsd.rd bsd.mp"; SANESETS="bsd bsd.mp"; }
 
 md_installboot() {
 	local _disk=$1
@@ -91,6 +91,7 @@ __EOT
 		case $resp in
 		w*|W*)
 			echo -n "Creating a 1MB DOS partition and an OpenBSD partition for rest of $_disk..."
+			dd if=/dev/zero of=/dev/r${_disk}c bs=1m count=1
 			fdisk -e $_disk <<__EOT >/dev/null
 reinit
 update
@@ -115,11 +116,11 @@ $(fdisk $_disk)
 __EOT
 			fdisk -e $_disk
 			fdisk $_disk | grep -q '^..: 06 ' || \
-				{ echo "\nNo DOS (id 06) partition!\n" ; continue ; }
+				{ echo "\nNo DOS (id 06) partition!\n"; continue; }
 			fdisk $_disk | grep -q '^\*.: 06 ' || \
-				{ echo "\nNo active DOS partition!\n" ; continue ; }
+				{ echo "\nNo active DOS partition!\n"; continue; }
 			fdisk $_disk | grep -q "^..: A6 " || \
-				{ echo "\nNo OpenBSD (id A6) partition!\n" ; continue ; }
+				{ echo "\nNo OpenBSD (id A6) partition!\n"; continue; }
 			break ;;
 		o*|O*)	break ;;
 		esac
@@ -136,7 +137,7 @@ md_prep_HFS() {
 		_q=
 		_d=Modify
 		md_has_hfs_openbsd $_disk && \
-			{ _q="Use the (O)penBSD partition, " ; _d=OpenBSD ; }
+			{ _q="Use the (O)penBSD partition, "; _d=OpenBSD; }
 		pdisk -l /dev/${_disk}c
 		ask "$_q(M)odify a partition or (A)bort?" "$_d"
 		case $resp in

@@ -1,4 +1,4 @@
-/*	$OpenBSD: intel_ringbuffer.c,v 1.20 2014/03/30 00:58:24 jsg Exp $	*/
+/*	$OpenBSD: intel_ringbuffer.c,v 1.25 2015/02/12 04:56:03 kettenis Exp $	*/
 /*
  * Copyright © 2008-2010 Intel Corporation
  *
@@ -475,8 +475,8 @@ init_pipe_control(struct intel_ring_buffer *ring)
 	pc->cpu_page = (volatile u_int32_t *)vm_map_min(kernel_map);
 	obj->base.uao->pgops->pgo_reference(obj->base.uao);
 	ret = uvm_map(kernel_map, (vaddr_t *)&pc->cpu_page,
-	    PAGE_SIZE, obj->base.uao, 0, 0, UVM_MAPFLAG(UVM_PROT_RW,
-	    UVM_PROT_RW, UVM_INH_SHARE, UVM_ADV_RANDOM, 0));
+	    PAGE_SIZE, obj->base.uao, 0, 0, UVM_MAPFLAG(PROT_READ | PROT_WRITE,
+	    PROT_READ | PROT_WRITE, MAP_INHERIT_SHARE, MADV_RANDOM, 0));
 	if (ret != 0) {
 		DRM_ERROR("Failed to map status page.\n");
 		obj->base.uao->pgops->pgo_detach(obj->base.uao);
@@ -756,17 +756,18 @@ gen5_ring_get_irq(struct intel_ring_buffer *ring)
 {
 	struct drm_device *dev = ring->dev;
 	drm_i915_private_t *dev_priv = dev->dev_private;
+	unsigned long flags;
 
 	if (!dev->irq_enabled)
 		return false;
 
-	mtx_enter(&dev_priv->irq_lock);
+	spin_lock_irqsave(&dev_priv->irq_lock, flags);
 	if (ring->irq_refcount++ == 0) {
 		dev_priv->gt_irq_mask &= ~ring->irq_enable_mask;
 		I915_WRITE(GTIMR, dev_priv->gt_irq_mask);
 		POSTING_READ(GTIMR);
 	}
-	mtx_leave(&dev_priv->irq_lock);
+	spin_unlock_irqrestore(&dev_priv->irq_lock, flags);
 
 	return true;
 }
@@ -776,14 +777,15 @@ gen5_ring_put_irq(struct intel_ring_buffer *ring)
 {
 	struct drm_device *dev = ring->dev;
 	drm_i915_private_t *dev_priv = dev->dev_private;
+	unsigned long flags;
 
-	mtx_enter(&dev_priv->irq_lock);
+	spin_lock_irqsave(&dev_priv->irq_lock, flags);
 	if (--ring->irq_refcount == 0) {
 		dev_priv->gt_irq_mask |= ring->irq_enable_mask;
 		I915_WRITE(GTIMR, dev_priv->gt_irq_mask);
 		POSTING_READ(GTIMR);
 	}
-	mtx_leave(&dev_priv->irq_lock);
+	spin_unlock_irqrestore(&dev_priv->irq_lock, flags);
 }
 
 static bool
@@ -791,17 +793,18 @@ i9xx_ring_get_irq(struct intel_ring_buffer *ring)
 {
 	struct drm_device *dev = ring->dev;
 	drm_i915_private_t *dev_priv = dev->dev_private;
+	unsigned long flags;
 
 	if (!dev->irq_enabled)
 		return false;
 
-	mtx_enter(&dev_priv->irq_lock);
+	spin_lock_irqsave(&dev_priv->irq_lock, flags);
 	if (ring->irq_refcount++ == 0) {
 		dev_priv->irq_mask &= ~ring->irq_enable_mask;
 		I915_WRITE(IMR, dev_priv->irq_mask);
 		POSTING_READ(IMR);
 	}
-	mtx_leave(&dev_priv->irq_lock);
+	spin_unlock_irqrestore(&dev_priv->irq_lock, flags);
 
 	return true;
 }
@@ -811,14 +814,15 @@ i9xx_ring_put_irq(struct intel_ring_buffer *ring)
 {
 	struct drm_device *dev = ring->dev;
 	drm_i915_private_t *dev_priv = dev->dev_private;
+	unsigned long flags;
 
-	mtx_enter(&dev_priv->irq_lock);
+	spin_lock_irqsave(&dev_priv->irq_lock, flags);
 	if (--ring->irq_refcount == 0) {
 		dev_priv->irq_mask |= ring->irq_enable_mask;
 		I915_WRITE(IMR, dev_priv->irq_mask);
 		POSTING_READ(IMR);
 	}
-	mtx_leave(&dev_priv->irq_lock);
+	spin_unlock_irqrestore(&dev_priv->irq_lock, flags);
 }
 
 static bool
@@ -826,17 +830,18 @@ i8xx_ring_get_irq(struct intel_ring_buffer *ring)
 {
 	struct drm_device *dev = ring->dev;
 	drm_i915_private_t *dev_priv = dev->dev_private;
+	unsigned long flags;
 
 	if (!dev->irq_enabled)
 		return false;
 
-	mtx_enter(&dev_priv->irq_lock);
+	spin_lock_irqsave(&dev_priv->irq_lock, flags);
 	if (ring->irq_refcount++ == 0) {
 		dev_priv->irq_mask &= ~ring->irq_enable_mask;
 		I915_WRITE16(IMR, dev_priv->irq_mask);
 		POSTING_READ16(IMR);
 	}
-	mtx_leave(&dev_priv->irq_lock);
+	spin_unlock_irqrestore(&dev_priv->irq_lock, flags);
 
 	return true;
 }
@@ -846,14 +851,15 @@ i8xx_ring_put_irq(struct intel_ring_buffer *ring)
 {
 	struct drm_device *dev = ring->dev;
 	drm_i915_private_t *dev_priv = dev->dev_private;
+	unsigned long flags;
 
-	mtx_enter(&dev_priv->irq_lock);
+	spin_lock_irqsave(&dev_priv->irq_lock, flags);
 	if (--ring->irq_refcount == 0) {
 		dev_priv->irq_mask |= ring->irq_enable_mask;
 		I915_WRITE16(IMR, dev_priv->irq_mask);
 		POSTING_READ16(IMR);
 	}
-	mtx_leave(&dev_priv->irq_lock);
+	spin_unlock_irqrestore(&dev_priv->irq_lock, flags);
 }
 
 void intel_ring_setup_status_page(struct intel_ring_buffer *ring)
@@ -877,7 +883,7 @@ void intel_ring_setup_status_page(struct intel_ring_buffer *ring)
 			mmio = BSD_HWS_PGA_GEN7;
 			break;
 		}
-	} else if (IS_GEN6(dev)) {
+	} else if (IS_GEN6(dev_priv->dev)) {
 		mmio = RING_HWS_PGA_GEN6(ring->mmio_base);
 	} else {
 		mmio = RING_HWS_PGA(ring->mmio_base);
@@ -944,6 +950,7 @@ gen6_ring_get_irq(struct intel_ring_buffer *ring)
 {
 	struct drm_device *dev = ring->dev;
 	drm_i915_private_t *dev_priv = dev->dev_private;
+	unsigned long flags;
 
 	if (!dev->irq_enabled)
 	       return false;
@@ -953,7 +960,7 @@ gen6_ring_get_irq(struct intel_ring_buffer *ring)
 	 * blt/bsd rings on ivb. */
 	gen6_gt_force_wake_get(dev_priv);
 
-	mtx_enter(&dev_priv->irq_lock);
+	spin_lock_irqsave(&dev_priv->irq_lock, flags);
 	if (ring->irq_refcount++ == 0) {
 		if (HAS_L3_GPU_CACHE(dev) && ring->id == RCS)
 			I915_WRITE_IMR(ring, ~(ring->irq_enable_mask |
@@ -964,7 +971,7 @@ gen6_ring_get_irq(struct intel_ring_buffer *ring)
 		I915_WRITE(GTIMR, dev_priv->gt_irq_mask);
 		POSTING_READ(GTIMR);
 	}
-	mtx_leave(&dev_priv->irq_lock);
+	spin_unlock_irqrestore(&dev_priv->irq_lock, flags);
 
 	return true;
 }
@@ -974,8 +981,9 @@ gen6_ring_put_irq(struct intel_ring_buffer *ring)
 {
 	struct drm_device *dev = ring->dev;
 	drm_i915_private_t *dev_priv = dev->dev_private;
+	unsigned long flags;
 
-	mtx_enter(&dev_priv->irq_lock);
+	spin_lock_irqsave(&dev_priv->irq_lock, flags);
 	if (--ring->irq_refcount == 0) {
 		if (HAS_L3_GPU_CACHE(dev) && ring->id == RCS)
 			I915_WRITE_IMR(ring, ~GEN6_RENDER_L3_PARITY_ERROR);
@@ -985,7 +993,7 @@ gen6_ring_put_irq(struct intel_ring_buffer *ring)
 		I915_WRITE(GTIMR, dev_priv->gt_irq_mask);
 		POSTING_READ(GTIMR);
 	}
-	mtx_leave(&dev_priv->irq_lock);
+	spin_unlock_irqrestore(&dev_priv->irq_lock, flags);
 
 	gen6_gt_force_wake_put(dev_priv);
 }
@@ -1122,8 +1130,8 @@ static int init_status_page(struct intel_ring_buffer *ring)
 	ring->status_page.page_addr = (u_int32_t *)vm_map_min(kernel_map);
 	obj->base.uao->pgops->pgo_reference(obj->base.uao);
 	ret = uvm_map(kernel_map, (vaddr_t *)&ring->status_page.page_addr,
-	    PAGE_SIZE, obj->base.uao, 0, 0, UVM_MAPFLAG(UVM_PROT_RW,
-	    UVM_PROT_RW, UVM_INH_SHARE, UVM_ADV_RANDOM, 0));
+	    PAGE_SIZE, obj->base.uao, 0, 0, UVM_MAPFLAG(PROT_READ | PROT_WRITE,
+	    PROT_READ | PROT_WRITE, MAP_INHERIT_SHARE, MADV_RANDOM, 0));
 	if (ret != 0) {
 		obj->base.uao->pgops->pgo_detach(obj->base.uao);
 		ret = -ENOMEM;

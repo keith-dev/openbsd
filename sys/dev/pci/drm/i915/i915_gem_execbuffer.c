@@ -1,4 +1,4 @@
-/*	$OpenBSD: i915_gem_execbuffer.c,v 1.29 2014/07/12 18:48:52 tedu Exp $	*/
+/*	$OpenBSD: i915_gem_execbuffer.c,v 1.35 2015/02/12 08:48:32 jsg Exp $	*/
 /*
  * Copyright (c) 2008-2009 Owain G. Ainsworth <oga@openbsd.org>
  *
@@ -103,7 +103,7 @@ static void
 eb_destroy(struct eb_objects *eb)
 {
 	free(eb->buckets, M_DRM, 0);
-	free(eb, M_DRM, 0);
+	kfree(eb);
 }
 
 static inline int use_cpu_reloc(struct drm_i915_gem_object *obj)
@@ -233,16 +233,10 @@ i915_gem_execbuffer_relocate_entry(struct drm_i915_gem_object *obj,
 
 		/* Map the page containing the relocation we're going to perform.  */
 		reloc->offset += obj->gtt_offset;
-		if ((ret = agp_map_subregion(dev_priv->agph,
-		    trunc_page(reloc->offset), PAGE_SIZE, &bsh)) != 0) {
-			DRM_ERROR("map failed...\n");
-			return -ret;
-		}
-
+		agp_map_atomic(dev_priv->agph, trunc_page(reloc->offset), &bsh);
 		bus_space_write_4(dev_priv->bst, bsh, reloc->offset & PAGE_MASK,	
 		    reloc->delta);
-
-		agp_unmap_subregion(dev_priv->agph, bsh, PAGE_SIZE);
+		agp_unmap_atomic(dev_priv->agph, bsh);
 	}
 
 	/* and update the user's relocation entry */
@@ -542,18 +536,19 @@ i915_gem_execbuffer_relocate_slow(struct drm_device *dev,
 		drm_gem_object_unreference(&obj->base);
 	}
 
-	DRM_UNLOCK();
+	mutex_unlock(&dev->struct_mutex);
 
 	total = 0;
 	for (i = 0; i < count; i++)
 		total += exec[i].relocation_count;
 
-	reloc_offset = malloc(count * sizeof(*reloc_offset), M_DRM, M_WAITOK);
-	reloc = malloc(total * sizeof(*reloc), M_DRM, M_WAITOK);
+	reloc_offset = mallocarray(count, sizeof(*reloc_offset), M_DRM,
+	    M_WAITOK);
+	reloc = mallocarray(total, sizeof(*reloc), M_DRM, M_WAITOK);
 	if (reloc == NULL || reloc_offset == NULL) {
 		drm_free(reloc);
 		drm_free(reloc_offset);
-		DRM_LOCK();
+		mutex_lock(&dev->struct_mutex);
 		return -ENOMEM;
 	}
 
@@ -568,7 +563,7 @@ i915_gem_execbuffer_relocate_slow(struct drm_device *dev,
 		if (DRM_COPY_FROM_USER(reloc+total, user_relocs,
 				   exec[i].relocation_count * sizeof(*reloc))) {
 			ret = -EFAULT;
-			DRM_LOCK();
+			mutex_lock(&dev->struct_mutex);
 			goto err;
 		}
 
@@ -586,7 +581,7 @@ i915_gem_execbuffer_relocate_slow(struct drm_device *dev,
 					 &invalid_offset,
 					 sizeof(invalid_offset))) {
 				ret = -EFAULT;
-				DRM_LOCK();
+				mutex_lock(&dev->struct_mutex);
 				goto err;
 			}
 		}
@@ -597,7 +592,7 @@ i915_gem_execbuffer_relocate_slow(struct drm_device *dev,
 
 	ret = i915_mutex_lock_interruptible(dev);
 	if (ret) {
-		DRM_LOCK();
+		mutex_lock(&dev->struct_mutex);
 		goto err;
 	}
 
@@ -708,7 +703,7 @@ i915_gem_execbuffer_move_to_gpu(struct intel_ring_buffer *ring,
 		i915_gem_chipset_flush(ring->dev);
 
 	if (flush_domains & I915_GEM_DOMAIN_GTT)
-		DRM_WRITEMEMORYBARRIER();
+		wmb();
 
 	/* Unconditionally invalidate gpu caches and ensure that we do flush
 	 * any residual writes from the previous batch.
@@ -966,14 +961,14 @@ i915_gem_do_execbuffer(struct drm_device *dev, void *data,
 		goto pre_mutex_err;
 
 	if (dev_priv->mm.suspended) {
-		DRM_UNLOCK();
+		mutex_unlock(&dev->struct_mutex);
 		ret = -EBUSY;
 		goto pre_mutex_err;
 	}
 
 	eb = eb_create(args->buffer_count);
 	if (eb == NULL) {
-		DRM_UNLOCK();
+		mutex_unlock(&dev->struct_mutex);
 		ret = -ENOMEM;
 		goto pre_mutex_err;
 	}
@@ -1024,7 +1019,7 @@ i915_gem_do_execbuffer(struct drm_device *dev, void *data,
 								&objects, eb,
 								exec,
 								args->buffer_count);
-			rw_assert_wrlock(&dev->dev_lock);
+			BUG_ON(!mutex_is_locked(&dev->struct_mutex));
 		}
 		if (ret)
 			goto err;
@@ -1118,7 +1113,7 @@ err:
 		drm_gem_object_unreference(&obj->base);
 	}
 
-	DRM_UNLOCK();
+	mutex_unlock(&dev->struct_mutex);
 
 pre_mutex_err:
 #ifdef __linux

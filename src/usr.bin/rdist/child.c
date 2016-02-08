@@ -1,4 +1,4 @@
-/*	$OpenBSD: child.c,v 1.23 2014/07/05 07:57:43 guenther Exp $	*/
+/*	$OpenBSD: child.c,v 1.25 2015/01/20 09:00:16 guenther Exp $	*/
 
 /*
  * Copyright (c) 1983 Regents of the University of California.
@@ -29,8 +29,6 @@
  * SUCH DAMAGE.
  */
 
-#include "defs.h"
-
 /*
  * Functions for rdist related to children
  */
@@ -38,6 +36,14 @@
 #include <sys/types.h>
 #include <sys/select.h>
 #include <sys/wait.h>
+
+#include <errno.h>
+#include <fcntl.h>
+#include <stdlib.h>
+#include <string.h>
+#include <unistd.h>
+
+#include "client.h"
 
 typedef enum _PROCSTATE {
     PSrunning,
@@ -58,7 +64,6 @@ typedef struct _child CHILD;
 
 static CHILD	       *childlist = NULL;	/* List of children */
 int     		activechildren = 0;	/* Number of active children */
-extern int		maxchildren;		/* Max active children */
 static int 		needscan = FALSE;	/* Need to scan children */
 
 static void removechild(CHILD *);
@@ -365,8 +370,7 @@ waitup(void)
 	debugmsg(DM_MISC, "waitup() Call select(), activechildren=%d\n", 
 		 activechildren);
 
-	count = select(rchildfdsn+1, (SELECT_FD_TYPE *) rchildfdsp, 
-		       NULL, NULL, NULL);
+	count = select(rchildfdsn+1, rchildfdsp, NULL, NULL, NULL);
 
 	debugmsg(DM_MISC, "waitup() select returned %d activechildren = %d\n", 
 		 count, activechildren);

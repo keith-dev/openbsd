@@ -1,4 +1,4 @@
-/*	$OpenBSD: ffs_vfsops.c,v 1.143 2014/07/14 08:11:34 beck Exp $	*/
+/*	$OpenBSD: ffs_vfsops.c,v 1.148 2014/12/29 05:29:28 miod Exp $	*/
 /*	$NetBSD: ffs_vfsops.c,v 1.19 1996/02/09 22:22:26 christos Exp $	*/
 
 /*
@@ -53,8 +53,6 @@
 #include <sys/disk.h>
 #include <sys/specdev.h>
 
-#include <dev/rndvar.h>
-
 #include <ufs/ufs/quota.h>
 #include <ufs/ufs/ufsmount.h>
 #include <ufs/ufs/inode.h>
@@ -64,6 +62,8 @@
 
 #include <ufs/ffs/fs.h>
 #include <ufs/ffs/ffs_extern.h>
+
+#include <uvm/uvm_extern.h>
 
 int ffs_sbupdate(struct ufsmount *, int);
 int ffs_reload_vnode(struct vnode *, void *);
@@ -139,7 +139,7 @@ ffs_mountroot(void)
 	if ((error = ffs_mountfs(rootvp, mp, p)) != 0) {
 		mp->mnt_vfc->vfc_refcount--;
 		vfs_unbusy(mp);
-		free(mp, M_MOUNT, 0);
+		free(mp, M_MOUNT, sizeof(*mp));
 		vrele(swapdev_vp);
 		vrele(rootvp);
 		return (error);
@@ -907,8 +907,8 @@ out:
 	VOP_UNLOCK(devvp, 0, p);
 
 	if (ump) {
-		free(ump->um_fs, M_UFSMNT, 0);
-		free(ump, M_UFSMNT, 0);
+		free(ump->um_fs, M_UFSMNT, ump->um_fs->fs_sbsize);
+		free(ump, M_UFSMNT, sizeof(*ump));
 		mp->mnt_data = NULL;
 	}
 	return (error);
@@ -1027,8 +1027,8 @@ ffs_unmount(struct mount *mp, int mntflags, struct proc *p)
 		NOCRED, p);
 	vput(ump->um_devvp);
 	free(fs->fs_csp, M_UFSMNT, 0);
-	free(fs, M_UFSMNT, 0);
-	free(ump, M_UFSMNT, 0);
+	free(fs, M_UFSMNT, fs->fs_sbsize);
+	free(ump, M_UFSMNT, sizeof(*ump));
 	mp->mnt_data = (qaddr_t)0;
 	mp->mnt_flag &= ~MNT_LOCAL;
 	return (error);
@@ -1476,13 +1476,13 @@ ffs_init(struct vfsconf *vfsp)
 
 	done = 1;
 
-	pool_init(&ffs_ino_pool, sizeof(struct inode), 0, 0, 0, "ffsino",
-	    &pool_allocator_nointr);
-	pool_init(&ffs_dinode1_pool, sizeof(struct ufs1_dinode), 0, 0, 0,
-	    "dino1pl", &pool_allocator_nointr);
+	pool_init(&ffs_ino_pool, sizeof(struct inode), 0, 0, PR_WAITOK,
+	    "ffsino", NULL);
+	pool_init(&ffs_dinode1_pool, sizeof(struct ufs1_dinode), 0, 0,
+	    PR_WAITOK, "dino1pl", NULL);
 #ifdef FFS2
-	pool_init(&ffs_dinode2_pool, sizeof(struct ufs2_dinode), 0, 0, 0,
-	    "dino2pl", &pool_allocator_nointr);
+	pool_init(&ffs_dinode2_pool, sizeof(struct ufs2_dinode), 0, 0,
+	    PR_WAITOK, "dino2pl", NULL);
 #endif
 
 	softdep_initialize();

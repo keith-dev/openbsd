@@ -1,4 +1,4 @@
-/*	$OpenBSD: vfs_lookup.c,v 1.47 2014/03/25 04:04:36 guenther Exp $	*/
+/*	$OpenBSD: vfs_lookup.c,v 1.51 2015/01/19 18:05:41 deraadt Exp $	*/
 /*	$NetBSD: vfs_lookup.c,v 1.17 1996/02/09 19:00:59 christos Exp $	*/
 
 /*
@@ -43,13 +43,13 @@
 #include <sys/time.h>
 #include <sys/namei.h>
 #include <sys/vnode.h>
+#include <sys/lock.h>
 #include <sys/mount.h>
 #include <sys/errno.h>
 #include <sys/malloc.h>
 #include <sys/pool.h>
 #include <sys/filedesc.h>
 #include <sys/proc.h>
-#include <sys/hash.h>
 #include <sys/file.h>
 #include <sys/fcntl.h>
 
@@ -211,7 +211,7 @@ namei(struct nameidata *ndp)
 		}
 		if ((cnp->cn_flags & LOCKPARENT) && (cnp->cn_flags & ISLASTCN))
 			VOP_UNLOCK(ndp->ni_dvp, 0, p);
-		if (ndp->ni_loopcnt++ >= MAXSYMLINKS) {
+		if (ndp->ni_loopcnt++ >= SYMLOOP_MAX) {
 			error = ELOOP;
 			break;
 		}
@@ -245,7 +245,7 @@ badlink:
 			goto badlink;
 		}
 		if (ndp->ni_pathlen > 1) {
-			bcopy(ndp->ni_next, cp + linklen, ndp->ni_pathlen);
+			memcpy(cp + linklen, ndp->ni_next, ndp->ni_pathlen);
 			pool_put(&namei_pool, cnp->cn_pnbuf);
 			cnp->cn_pnbuf = cp;
 		} else

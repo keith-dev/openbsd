@@ -1,4 +1,4 @@
-/*	$OpenBSD: ahci.c,v 1.16 2014/07/13 23:10:23 deraadt Exp $ */
+/*	$OpenBSD: ahci.c,v 1.19 2015/02/11 07:13:44 jmatthew Exp $ */
 
 /*
  * Copyright (c) 2006 David Gwynne <dlg@openbsd.org>
@@ -75,7 +75,7 @@ int			ahci_port_alloc(struct ahci_softc *, u_int);
 void			ahci_port_free(struct ahci_softc *, u_int);
 int			ahci_port_init(struct ahci_softc *, u_int);
 
-int			ahci_port_start(struct ahci_port *, int);
+int			ahci_default_port_start(struct ahci_port *, int);
 int			ahci_port_stop(struct ahci_port *, int);
 int			ahci_port_clo(struct ahci_port *);
 int			ahci_port_softreset(struct ahci_port *);
@@ -175,6 +175,9 @@ ahci_attach(struct ahci_softc *sc)
 	u_int32_t			pi;
 	int				i;
 
+	if (sc->sc_port_start == NULL)
+		sc->sc_port_start = ahci_default_port_start;
+
 	if (ahci_init(sc) != 0) {
 		/* error already printed by ahci_init */
 		goto unmap;
@@ -206,6 +209,8 @@ ahci_attach(struct ahci_softc *sc)
 		printf("%s: capabilities 0x%b, %d ports, %d cmds, gen %s\n",
 		    DEVNAME(sc), sc->sc_cap, AHCI_FMT_CAP,
 		    AHCI_REG_CAP_NP(sc->sc_cap), sc->sc_ncmds, gen);
+		printf("%s: extended capabilities 0x%b\n", DEVNAME(sc),
+		    ahci_read(sc, AHCI_REG_CAP2), AHCI_FMT_CAP2);
 	}
 #endif
 
@@ -402,6 +407,9 @@ ahci_init(struct ahci_softc *sc)
 		break;
 	case AHCI_REG_VS_1_3:
 		revision = "1.3";
+		break;
+	case AHCI_REG_VS_1_3_1:
+		revision = "1.3.1";
 		break;
 
 	default:
@@ -832,7 +840,7 @@ reterr:
 }
 
 int
-ahci_port_start(struct ahci_port *ap, int fre_only)
+ahci_default_port_start(struct ahci_port *ap, int fre_only)
 {
 	u_int32_t			r;
 

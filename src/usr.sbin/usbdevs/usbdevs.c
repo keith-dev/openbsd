@@ -1,4 +1,4 @@
-/*	$OpenBSD: usbdevs.c,v 1.21 2012/05/07 11:12:54 mpi Exp $	*/
+/*	$OpenBSD: usbdevs.c,v 1.23 2015/02/09 23:00:15 deraadt Exp $	*/
 /*	$NetBSD: usbdevs.c,v 1.19 2002/02/21 00:34:31 christos Exp $	*/
 
 /*
@@ -89,6 +89,9 @@ usbdev(int f, int a, int rec)
 			break;
 		case USB_SPEED_HIGH:
 			printf("high speed, ");
+			break;
+		case USB_SPEED_SUPER:
+			printf("super speed, ");
 			break;
 		default:
 			break;
@@ -188,7 +191,7 @@ main(int argc, char **argv)
 				errx(1, "addr %s", errstr);
 			break;
 		case 'd':
-			showdevs++;
+			showdevs = 1;
 			break;
 		case 'f':
 			dev = optarg;

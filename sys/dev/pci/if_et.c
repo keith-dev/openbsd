@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_et.c,v 1.23 2014/07/22 13:12:11 mpi Exp $	*/
+/*	$OpenBSD: if_et.c,v 1.25 2014/12/22 02:28:52 tedu Exp $	*/
 /*
  * Copyright (c) 2007 The DragonFly Project.  All rights reserved.
  * 
@@ -56,10 +56,8 @@
 #include <net/if_dl.h>
 #include <net/if_media.h>
 
-#ifdef INET
 #include <netinet/in.h>
 #include <netinet/if_ether.h>
-#endif
 
 #if NBPFILTER > 0
 #include <net/bpf.h>
@@ -1021,10 +1019,8 @@ et_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 		ifp->if_flags |= IFF_UP;
 		if (!(ifp->if_flags & IFF_RUNNING))
 			et_init(ifp);
-#ifdef INET
 		if (ifa->ifa_addr->sa_family == AF_INET)
 			arp_ifinit(&sc->sc_arpcom, ifa);
-#endif
 		break;
 
 	case SIOCSIFFLAGS:
@@ -1264,9 +1260,9 @@ et_chip_init(struct et_softc *sc)
 	/*
 	 * Split internal memory between TX and RX according to MTU
 	 */
-	if (ifp->if_mtu < 2048)
+	if (ifp->if_hardmtu < 2048)
 		rxq_end = 0x2bc;
-	else if (ifp->if_mtu < 8192)
+	else if (ifp->if_hardmtu < 8192)
 		rxq_end = 0x1ff;
 	else
 		rxq_end = 0x1b3;
@@ -1513,8 +1509,7 @@ et_init_mac(struct et_softc *sc)
 	CSR_WRITE_4(sc, ET_MAC_ADDR2, val);
 
 	/* Set max frame length */
-	CSR_WRITE_4(sc, ET_MAX_FRMLEN,
-		    ETHER_HDR_LEN + EVL_ENCAPLEN + ifp->if_mtu + ETHER_CRC_LEN);
+	CSR_WRITE_4(sc, ET_MAX_FRMLEN, ETHER_MAX_LEN + ETHER_VLAN_ENCAP_LEN);
 
 	/* Bring MAC out of reset state */
 	CSR_WRITE_4(sc, ET_MAC_CFG1, 0);
@@ -1555,7 +1550,7 @@ et_init_rxmac(struct et_softc *sc)
 	CSR_WRITE_4(sc, ET_UCAST_FILTADDR2, 0);
 	CSR_WRITE_4(sc, ET_UCAST_FILTADDR3, 0);
 
-	if (ifp->if_mtu > 8192) {
+	if (ifp->if_hardmtu > 8192) {
 		/*
 		 * In order to transmit jumbo packets greater than 8k,
 		 * the FIFO between RX MAC and RX DMA needs to be reduced

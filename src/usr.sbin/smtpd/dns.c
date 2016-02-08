@@ -1,4 +1,4 @@
-/*	$OpenBSD: dns.c,v 1.78 2014/04/19 12:26:15 gilles Exp $	*/
+/*	$OpenBSD: dns.c,v 1.81 2015/01/20 17:37:54 deraadt Exp $	*/
 
 /*
  * Copyright (c) 2008 Gilles Chehade <gilles@poolp.org>
@@ -35,6 +35,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <limits.h>
 
 #include "smtpd.h"
 #include "log.h"
@@ -48,7 +49,7 @@ struct dns_session {
 	struct mproc		*p;
 	uint64_t		 reqid;
 	int			 type;
-	char			 name[SMTPD_MAXHOSTNAMELEN];
+	char			 name[HOST_NAME_MAX+1];
 	size_t			 mxfound;
 	int			 error;
 	int			 refcount;
@@ -244,7 +245,7 @@ dns_imsg(struct mproc *p, struct imsg *imsg)
 		}
 
 		as = res_query_async(s->name, C_IN, T_MX, NULL);
-		if (as ==  NULL) {
+		if (as == NULL) {
 			log_warn("warn: req_query_async: %s", s->name);
 			m_create(s->p, IMSG_MTA_DNS_HOST_END, 0, 0, -1);
 			m_add_id(s->p, s->reqid);
@@ -341,7 +342,7 @@ dns_dispatch_mx(struct asr_result *ar, void *arg)
 	struct unpack		 pack;
 	struct dns_header	 h;
 	struct dns_query	 q;
-	struct dns_rr	 rr;
+	struct dns_rr		 rr;
 	char			 buf[512];
 	size_t			 found;
 
@@ -444,6 +445,7 @@ dns_lookup_host(struct dns_session *s, const char *host, int preference)
 	s->refcount++;
 
 	memset(&hints, 0, sizeof(hints));
+	hints.ai_flags = AI_ADDRCONFIG;
 	hints.ai_family = PF_UNSPEC;
 	hints.ai_socktype = SOCK_STREAM;
 	as = getaddrinfo_async(host, NULL, &hints, NULL);

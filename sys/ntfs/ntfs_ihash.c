@@ -1,4 +1,4 @@
-/*	$OpenBSD: ntfs_ihash.c,v 1.15 2014/07/12 18:43:52 tedu Exp $	*/
+/*	$OpenBSD: ntfs_ihash.c,v 1.18 2015/01/09 05:01:57 tedu Exp $	*/
 /*	$NetBSD: ntfs_ihash.c,v 1.1 2002/12/23 17:38:32 jdolecek Exp $	*/
 
 /*
@@ -39,8 +39,9 @@
 #include <sys/rwlock.h>
 #include <sys/vnode.h>
 #include <sys/malloc.h>
-#include <sys/proc.h>
 #include <sys/mount.h>
+
+#include <crypto/siphash.h>
 
 #include <ntfs/ntfs.h>
 #include <ntfs/ntfs_inode.h>
@@ -49,9 +50,11 @@
 /*
  * Structures associated with inode cacheing.
  */
+u_int ntfs_hash(dev_t, ntfsino_t);
 static LIST_HEAD(nthashhead, ntnode) *ntfs_nthashtbl;
+static SIPHASH_KEY ntfs_nthashkey;
 static u_long	ntfs_nthash;		/* size of hash table - 1 */
-#define	NTNOHASH(device, inum)	((minor(device) + (inum)) & ntfs_nthash)
+#define	NTNOHASH(device, inum) ntfs_hash((device), (inum))
 struct rwlock ntfs_hashlock = RWLOCK_INITIALIZER("ntfs_nthashlock");
 
 /*
@@ -66,13 +69,27 @@ ntfs_nthashinit(void)
 	if (ntfs_nthashtbl)
 		return;
 
-	nthashtbl = hashinit(desiredvnodes, M_NTFSNTHASH, M_WAITOK, &nthash);
+	nthashtbl = hashinit(initialvnodes, M_NTFSNTHASH, M_WAITOK, &nthash);
 	if (ntfs_nthashtbl) {
 		free(nthashtbl, M_NTFSNTHASH, 0);
 		return;
 	}
 	ntfs_nthashtbl = nthashtbl;
 	ntfs_nthash = nthash;
+
+	arc4random_buf(&ntfs_nthashkey, sizeof(ntfs_nthashkey));
+}
+
+u_int
+ntfs_hash(dev_t dev, ntfsino_t inum)
+{
+	SIPHASH_CTX ctx;
+
+	SipHash24_Init(&ctx, &ntfs_nthashkey);
+	SipHash24_Update(&ctx, &dev, sizeof(dev));
+	SipHash24_Update(&ctx, &inum, sizeof(inum));
+
+	return (SipHash24_End(&ctx) & ntfs_nthash);
 }
 
 /*

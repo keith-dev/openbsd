@@ -1,4 +1,4 @@
-/*	$OpenBSD: rcsutil.c,v 1.40 2014/05/29 16:39:42 tedu Exp $	*/
+/*	$OpenBSD: rcsutil.c,v 1.43 2015/01/16 06:40:11 deraadt Exp $	*/
 /*
  * Copyright (c) 2005, 2006 Joris Vink <joris@openbsd.org>
  * Copyright (c) 2006 Xavier Santolaria <xsa@openbsd.org>
@@ -154,10 +154,8 @@ rcs_choosefile(const char *filename, char *out, size_t len)
 {
 	int fd;
 	struct stat sb;
-	char *p, *ext, name[MAXPATHLEN], *next, *ptr, rcsdir[MAXPATHLEN],
-	    *suffixes, rcspath[MAXPATHLEN];
-
-	fd = -1;
+	char *p, *ext, name[PATH_MAX], *next, *ptr, rcsdir[PATH_MAX],
+	    *suffixes, rcspath[PATH_MAX];
 
 	/*
 	 * If `filename' contains a directory, `rcspath' contains that
@@ -217,7 +215,7 @@ rcs_choosefile(const char *filename, char *out, size_t len)
 	 */
 	suffixes = xstrdup(rcs_suffixes);
 	for (next = suffixes; (ext = strsep(&next, "/")) != NULL;) {
-		char fpath[MAXPATHLEN];
+		char fpath[PATH_MAX];
 
 		if ((p = strrchr(rcspath, ',')) != NULL) {
 			if (!strcmp(p, ext)) {
@@ -594,7 +592,7 @@ rcs_strsplit(const char *str, const char *sep)
 
 	while ((p = strsep(&cp, sep)) != NULL) {
 		av->argv[i++] = p;
-		av->argv = xrealloc(av->argv,
+		av->argv = xreallocarray(av->argv,
 		    i + 1, sizeof(*(av->argv)));
 	}
 	av->argv[i] = NULL;

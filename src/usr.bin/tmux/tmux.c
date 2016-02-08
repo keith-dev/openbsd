@@ -1,4 +1,4 @@
-/* $OpenBSD: tmux.c,v 1.131 2014/04/17 07:55:43 nicm Exp $ */
+/* $OpenBSD: tmux.c,v 1.135 2015/01/19 09:58:34 nicm Exp $ */
 
 /*
  * Copyright (c) 2007 Nicholas Marriott <nicm@users.sourceforge.net>
@@ -22,6 +22,7 @@
 #include <errno.h>
 #include <event.h>
 #include <fcntl.h>
+#include <getopt.h>
 #include <locale.h>
 #include <paths.h>
 #include <pwd.h>
@@ -46,7 +47,7 @@ char		*cfg_file;
 char		*shell_cmd;
 int		 debug_level;
 time_t		 start_time;
-char		 socket_path[MAXPATHLEN];
+char		 socket_path[PATH_MAX];
 int		 login_shell;
 char		*environ_path;
 
@@ -124,13 +125,13 @@ areshell(const char *shell)
 char *
 makesocketpath(const char *label)
 {
-	char		base[MAXPATHLEN], realbase[MAXPATHLEN], *path, *s;
+	char		base[PATH_MAX], realbase[PATH_MAX], *path, *s;
 	struct stat	sb;
 	u_int		uid;
 
 	uid = getuid();
 	if ((s = getenv("TMUX_TMPDIR")) != NULL && *s != '\0')
-		xsnprintf(base, sizeof base, "%s/", s);
+		xsnprintf(base, sizeof base, "%s/tmux-%u", s, uid);
 	else if ((s = getenv("TMPDIR")) != NULL && *s != '\0')
 		xsnprintf(base, sizeof base, "%s/tmux-%u", s, uid);
 	else
@@ -145,8 +146,7 @@ makesocketpath(const char *label)
 		errno = ENOTDIR;
 		return (NULL);
 	}
-	if (sb.st_uid != uid || (!S_ISDIR(sb.st_mode) &&
-		sb.st_mode & (S_IRWXG|S_IRWXO)) != 0) {
+	if (sb.st_uid != uid || (sb.st_mode & S_IRWXO) != 0) {
 		errno = EACCES;
 		return (NULL);
 	}
@@ -202,7 +202,7 @@ int
 main(int argc, char **argv)
 {
 	struct passwd	*pw;
-	char		*s, *path, *label, **var, tmp[MAXPATHLEN];
+	char		*s, *path, *label, **var, tmp[PATH_MAX];
 	char		 in[256];
 	const char	*home;
 	long long	 pid;

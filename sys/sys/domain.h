@@ -1,4 +1,4 @@
-/*	$OpenBSD: domain.h,v 1.11 2013/04/24 10:17:08 mpi Exp $	*/
+/*	$OpenBSD: domain.h,v 1.13 2014/12/23 03:26:24 tedu Exp $	*/
 /*	$NetBSD: domain.h,v 1.10 1996/02/09 18:25:07 christos Exp $	*/
 
 /*
@@ -52,7 +52,7 @@ struct	domain {
 	char	*dom_name;
 	void	(*dom_init)(void);	/* initialize domain data structures */
 					/* externalize access rights */
-	int	(*dom_externalize)(struct mbuf *, socklen_t);
+	int	(*dom_externalize)(struct mbuf *, socklen_t, int);
 					/* dispose of internalized rights */
 	void	(*dom_dispose)(struct mbuf *);
 	struct	protosw *dom_protosw, *dom_protoswNPROTOSW;
@@ -70,9 +70,7 @@ struct	domain {
 extern struct	domain *domains;
 void domaininit(void);
 
-#ifdef INET
 extern struct domain inetdomain;
-#endif
 
 #ifdef INET6
 extern struct domain inet6domain;

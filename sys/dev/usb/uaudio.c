@@ -1,4 +1,4 @@
-/*	$OpenBSD: uaudio.c,v 1.104 2014/07/12 18:48:52 tedu Exp $ */
+/*	$OpenBSD: uaudio.c,v 1.109 2015/01/12 07:12:58 deraadt Exp $ */
 /*	$NetBSD: uaudio.c,v 1.90 2004/10/29 17:12:53 kent Exp $	*/
 
 /*
@@ -46,7 +46,6 @@
 #include <sys/tty.h>
 #include <sys/file.h>
 #include <sys/selinfo.h>
-#include <sys/device.h>
 #include <sys/poll.h>
 
 #include <machine/bus.h>
@@ -250,7 +249,6 @@ struct uaudio_softc {
 	int		 sc_nencs;
 	struct mixerctl *sc_ctls;	/* mixer controls */
 	int		 sc_nctls;	/* # of mixer controls */
-	struct device	*sc_audiodev;
 	int		 sc_quirks;
 };
 
@@ -439,18 +437,13 @@ struct audio_device uaudio_device = {
 int uaudio_match(struct device *, void *, void *); 
 void uaudio_attach(struct device *, struct device *, void *); 
 int uaudio_detach(struct device *, int); 
-int uaudio_activate(struct device *, int); 
 
 struct cfdriver uaudio_cd = { 
 	NULL, "uaudio", DV_DULL 
 }; 
 
-const struct cfattach uaudio_ca = { 
-	sizeof(struct uaudio_softc), 
-	uaudio_match, 
-	uaudio_attach, 
-	uaudio_detach, 
-	uaudio_activate, 
+const struct cfattach uaudio_ca = {
+	sizeof(struct uaudio_softc), uaudio_match, uaudio_attach, uaudio_detach
 };
 
 int
@@ -581,23 +574,7 @@ uaudio_attach(struct device *parent, struct device *self, void *aux)
 	uaudio_create_encodings(sc);
 
 	DPRINTF(("uaudio_attach: doing audio_attach_mi\n"));
-	sc->sc_audiodev = audio_attach_mi(&uaudio_hw_if, sc, &sc->sc_dev);
-}
-
-int
-uaudio_activate(struct device *self, int act)
-{
-	struct uaudio_softc *sc = (struct uaudio_softc *)self;
-	int rv = 0;
-
-	switch (act) {
-	case DVACT_DEACTIVATE:
-		if (sc->sc_audiodev != NULL)
-			rv = config_deactivate(sc->sc_audiodev);
-		usbd_deactivate(sc->sc_udev);
-		break;
-	}
-	return (rv);
+	audio_attach_mi(&uaudio_hw_if, sc, &sc->sc_dev);
 }
 
 int
@@ -617,8 +594,7 @@ uaudio_detach(struct device *self, int flags)
 	/* Wait for outstanding requests to complete. */
 	uaudio_drain(sc);
 
-	if (sc->sc_audiodev != NULL)
-		rv = config_detach(sc->sc_audiodev, flags);
+	rv = config_detach_children(self, flags);
 
 	return (rv);
 }
@@ -673,12 +649,14 @@ uaudio_mixer_add_ctl(struct uaudio_softc *sc, struct mixerctl *mc)
 	} else {
 		DPRINTF(("%s: adding %s\n", __func__, mc->ctlname));
 	}
-	len = sizeof(*mc) * (sc->sc_nctls + 1);
-	nmc = malloc(len, M_USBDEV, M_NOWAIT);
+
+	nmc = mallocarray(sc->sc_nctls + 1, sizeof(*mc), M_USBDEV, M_NOWAIT);
 	if (nmc == NULL) {
 		printf("uaudio_mixer_add_ctl: no memory\n");
 		return;
 	}
+	len = sizeof(*mc) * (sc->sc_nctls + 1);
+
 	/* Copy old data, if there was any */
 	if (sc->sc_nctls != 0) {
 		bcopy(sc->sc_ctls, nmc, sizeof(*mc) * (sc->sc_nctls));
@@ -1394,7 +1372,7 @@ uaudio_io_terminaltype(int outtype, struct io_terminal *iot, int id)
 			if (it->output->terminals[i] == outtype)
 				return uaudio_merge_terminal_list(it);
 		tml = malloc(TERMINAL_LIST_SIZE(it->output->size + 1),
-			     M_TEMP, M_NOWAIT);
+		    M_TEMP, M_NOWAIT);
 		if (tml == NULL) {
 			printf("uaudio_io_terminaltype: no memory\n");
 			return uaudio_merge_terminal_list(it);
@@ -1467,8 +1445,8 @@ uaudio_io_terminaltype(int outtype, struct io_terminal *iot, int id)
 		return NULL;
 	case UDESCSUB_AC_MIXER:
 		it->inputs_size = 0;
-		it->inputs = malloc(sizeof(struct terminal_list *)
-				    * it->d.mu->bNrInPins, M_TEMP, M_NOWAIT);
+		it->inputs = mallocarray(it->d.mu->bNrInPins,
+		    sizeof(struct terminal_list *), M_TEMP, M_NOWAIT);
 		if (it->inputs == NULL) {
 			printf("uaudio_io_terminaltype: no memory\n");
 			return NULL;
@@ -1482,8 +1460,8 @@ uaudio_io_terminaltype(int outtype, struct io_terminal *iot, int id)
 		return uaudio_merge_terminal_list(it);
 	case UDESCSUB_AC_SELECTOR:
 		it->inputs_size = 0;
-		it->inputs = malloc(sizeof(struct terminal_list *)
-				    * it->d.su->bNrInPins, M_TEMP, M_NOWAIT);
+		it->inputs = mallocarray(it->d.su->bNrInPins,
+		    sizeof(struct terminal_list *), M_TEMP, M_NOWAIT);
 		if (it->inputs == NULL) {
 			printf("uaudio_io_terminaltype: no memory\n");
 			return NULL;
@@ -1497,8 +1475,8 @@ uaudio_io_terminaltype(int outtype, struct io_terminal *iot, int id)
 		return uaudio_merge_terminal_list(it);
 	case UDESCSUB_AC_PROCESSING:
 		it->inputs_size = 0;
-		it->inputs = malloc(sizeof(struct terminal_list *)
-				    * it->d.pu->bNrInPins, M_TEMP, M_NOWAIT);
+		it->inputs = mallocarray(it->d.pu->bNrInPins,
+		    sizeof(struct terminal_list *), M_TEMP, M_NOWAIT);
 		if (it->inputs == NULL) {
 			printf("uaudio_io_terminaltype: no memory\n");
 			return NULL;
@@ -1512,8 +1490,8 @@ uaudio_io_terminaltype(int outtype, struct io_terminal *iot, int id)
 		return uaudio_merge_terminal_list(it);
 	case UDESCSUB_AC_EXTENSION:
 		it->inputs_size = 0;
-		it->inputs = malloc(sizeof(struct terminal_list *)
-				    * it->d.eu->bNrInPins, M_TEMP, M_NOWAIT);
+		it->inputs = mallocarray(it->d.eu->bNrInPins,
+		    sizeof(struct terminal_list *), M_TEMP, M_NOWAIT);
 		if (it->inputs == NULL) {
 			printf("uaudio_io_terminaltype: no memory\n");
 			return NULL;
@@ -1548,12 +1526,13 @@ uaudio_add_alt(struct uaudio_softc *sc, const struct as_info *ai)
 	size_t len;
 	struct as_info *nai;
 
-	len = sizeof(*ai) * (sc->sc_nalts + 1);
-	nai = malloc(len, M_USBDEV, M_NOWAIT);
+	nai = mallocarray(sc->sc_nalts + 1, sizeof(*ai), M_USBDEV, M_NOWAIT);
 	if (nai == NULL) {
 		printf("uaudio_add_alt: no memory\n");
 		return;
 	}
+	len = sizeof(*ai) * (sc->sc_nalts + 1);
+
 	/* Copy old data, if there was any */
 	if (sc->sc_nalts != 0) {
 		bcopy(sc->sc_alts, nai, sizeof(*ai) * (sc->sc_nalts));
@@ -1586,7 +1565,7 @@ uaudio_create_encodings(struct uaudio_softc *sc)
 	}
 
 	sc->sc_nencs = 0;
-	sc->sc_encs = malloc(sizeof(struct audio_encoding) * nencs,
+	sc->sc_encs = mallocarray(nencs, sizeof(struct audio_encoding),
 	    M_USBDEV, M_NOWAIT);
 	if (sc->sc_encs == NULL) {
 		printf("%s: no memory\n", __func__);
@@ -1962,7 +1941,8 @@ uaudio_identify_ac(struct uaudio_softc *sc, const usb_config_descriptor_t *cdesc
 	ibufend = ibuf + aclen;
 	dp = (const usb_descriptor_t *)ibuf;
 	ndps = 0;
-	iot = malloc(sizeof(struct io_terminal) * 256, M_TEMP, M_NOWAIT | M_ZERO);
+	iot = malloc(256 * sizeof(struct io_terminal),
+	    M_TEMP, M_NOWAIT | M_ZERO);
 	if (iot == NULL) {
 		printf("%s: no memory\n", __func__);
 		return USBD_NOMEM;

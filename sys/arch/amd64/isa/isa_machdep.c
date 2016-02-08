@@ -1,4 +1,4 @@
-/*	$OpenBSD: isa_machdep.c,v 1.24 2014/07/13 21:51:12 kettenis Exp $	*/
+/*	$OpenBSD: isa_machdep.c,v 1.26 2015/01/24 15:13:55 kettenis Exp $	*/
 /*	$NetBSD: isa_machdep.c,v 1.22 1997/06/12 23:57:32 thorpej Exp $	*/
 
 #define ISA_DMA_STATS
@@ -151,6 +151,7 @@ struct bus_dma_tag isa_bus_dma_tag = {
 	_isa_bus_dmamap_unload,
 	_isa_bus_dmamap_sync,
 	_isa_bus_dmamem_alloc,
+	_bus_dmamem_alloc_range,
 	_bus_dmamem_free,
 	_bus_dmamem_map,
 	_bus_dmamem_unmap,
@@ -631,9 +632,8 @@ _isa_bus_dmamap_sync(bus_dma_tag_t t, bus_dmamap_t map, bus_addr_t offset,
 		 * caller's buffer to the bounce buffer.
 		 */
 		if (cookie->id_flags & ID_IS_BOUNCING)
-			bcopy(cookie->id_origbuf + offset,
-			    cookie->id_bouncebuf + offset,
-			    len);
+			memcpy(cookie->id_bouncebuf + offset,
+			    cookie->id_origbuf + offset, len);
 	}
 
 	_bus_dmamap_sync(t, map, offset, len, op);
@@ -644,9 +644,8 @@ _isa_bus_dmamap_sync(bus_dma_tag_t t, bus_dmamap_t map, bus_addr_t offset,
 		 * bounce buffer to the caller's buffer.
 		 */
 		if (cookie->id_flags & ID_IS_BOUNCING)
-			bcopy(cookie->id_bouncebuf + offset,
-			    cookie->id_origbuf + offset,
-			    len);
+			memcpy(cookie->id_origbuf + offset,
+			    cookie->id_bouncebuf + offset, len);
 	}
 }
 
@@ -668,7 +667,7 @@ _isa_bus_dmamem_alloc(bus_dma_tag_t t, bus_size_t size, bus_size_t alignment,
 
 	/* Otherwise try anywhere (we'll bounce later) */
 	error = _bus_dmamem_alloc_range(t, size, alignment, boundary,
-	    segs, nsegs, rsegs, flags, (paddr_t)0, (paddr_t)-1);
+	    segs, nsegs, rsegs, flags, (bus_addr_t)0, (bus_addr_t)-1);
 	return (error);
 }
 

@@ -1,4 +1,4 @@
-/*	$OpenBSD: encrypt.c,v 1.30 2013/11/12 13:54:51 deraadt Exp $	*/
+/*	$OpenBSD: encrypt.c,v 1.40 2015/02/26 17:46:15 tedu Exp $	*/
 
 /*
  * Copyright (c) 1996, Jason Downs.  All rights reserved.
@@ -42,113 +42,46 @@
  * line.  Useful for scripts and such.
  */
 
-#define DO_MAKEKEY 0
-#define DO_DES     1
-#define DO_MD5     2
-#define DO_BLF     3
-
 extern char *__progname;
-char buffer[_PASSWORD_LEN];
 
 void	usage(void);
-int	ideal_rounds(void);
-void	print_passwd(char *, int, void *);
+
+#define DO_BLF		0
 
 void
 usage(void)
 {
 
 	(void)fprintf(stderr,
-	    "usage: %s [-km] [-b rounds] [-c class] [-p | string] [-s salt]\n",
+	    "usage: %s [-b rounds] [-c class] [-p | string]\n",
 	    __progname);
 	exit(1);
 }
 
-/*
- * Time how long 8 rounds takes to measure this system's performance.
- * We are aiming for something that takes between 0.25 and 0.5 seconds.
- */
-int
-ideal_rounds(void)
+static void
+print_passwd(char *string, int operation, char *extra)
 {
-	clock_t before, after;
-	int r = 8;
-	char buf[_PASSWORD_LEN];
-	int duration;
+	char buffer[_PASSWORD_LEN];
+	const char *pref;
+	char prefbuf[64];
 
-	strlcpy(buf, bcrypt_gensalt(r), _PASSWORD_LEN);
-	before = clock();
-	crypt("testpassword", buf);
-	after = clock();
+	if (operation == DO_BLF) {
+		if (snprintf(prefbuf, sizeof(prefbuf), "blowfish,%s", extra) >=
+		    sizeof(prefbuf))
+			errx(1, "pref too long");
+		pref = prefbuf;
+	} else {
+		login_cap_t *lc;
 
-	duration = after - before;
-
-	/* too quick? slow it down. */
-	while (duration <= CLOCKS_PER_SEC / 4) {
-		r += 1;
-		duration *= 2;
-	}
-	/* too slow? speed it up. */
-	while (duration > CLOCKS_PER_SEC / 2) {
-		r -= 1;
-		duration /= 2;
-	}
-
-	return r;
-}
-
-
-void
-print_passwd(char *string, int operation, void *extra)
-{
-	char msalt[3], *salt, *cryptstr;
-	login_cap_t *lc;
-	int pwd_gensalt(char *, int, login_cap_t *, char);
-	void to64(char *, u_int32_t, int n);
-
-	switch(operation) {
-	case DO_MAKEKEY:
-		/*
-		 * makekey mode: parse string into separate DES key and salt.
-		 */
-		if (strlen(string) != 10) {
-			/* To be compatible... */
-			errx(1, "%s", strerror(EFTYPE));
-		}
-		strlcpy(msalt, &string[8], sizeof msalt);
-		salt = msalt;
-		break;
-
-	case DO_MD5:
-		strlcpy(buffer, "$1$", sizeof buffer);
-		to64(&buffer[3], arc4random(), 4);
-		to64(&buffer[7], arc4random(), 4);
-		strlcpy(buffer + 11, "$", sizeof buffer - 11);
-		salt = buffer;
-		break;
-
-	case DO_BLF:
-		strlcpy(buffer, bcrypt_gensalt(*(int *)extra), _PASSWORD_LEN);
-		salt = buffer;
-		break;
-
-	case DO_DES:
-		salt = extra;
-		break;
-
-	default:
 		if ((lc = login_getclass(extra)) == NULL)
 			errx(1, "unable to get login class `%s'",
 			    extra ? (char *)extra : "default");
-		if (!pwd_gensalt(buffer, _PASSWORD_LEN, lc, 'l'))
-			errx(1, "can't generate salt");
-		salt = buffer;
-		break;
+		pref = login_getcapstr(lc, "localcipher", NULL, NULL);
 	}
+	if (crypt_newhash(string, pref, buffer, sizeof(buffer)) != 0)
+		err(1, "can't generate hash");
 
-	if ((cryptstr = crypt(string, salt)) == NULL)
-		errx(1, "crypt failed");
-	fputs(cryptstr, stdout);
+	fputs(buffer, stdout);
 }
 
 int
@@ -157,64 +90,36 @@ main(int argc, char **argv)
 	int opt;
 	int operation = -1;
 	int prompt = 0;
-	int rounds;
-	void *extra = NULL;		/* Store salt or number of rounds */
+	char *extra = NULL;	/* Store login class or number of rounds */
 	const char *errstr;
 
-	if (strcmp(__progname, "makekey") == 0)
-		operation = DO_MAKEKEY;
-
-	while ((opt = getopt(argc, argv, "kmps:b:c:")) != -1) {
+	while ((opt = getopt(argc, argv, "pb:c:")) != -1) {
 		switch (opt) {
-		case 'k':                       /* Stdin/Stdout Unix crypt */
-			if (operation != -1 || prompt)
-				usage();
-			operation = DO_MAKEKEY;
-			break;
-
-		case 'm':                       /* MD5 password hash */
-			if (operation != -1)
-				usage();
-			operation = DO_MD5;
-			break;
-
 		case 'p':
-			if (operation == DO_MAKEKEY)
-				usage();
 			prompt = 1;
 			break;
-
-		case 's':                       /* Unix crypt (DES) */
-			if (operation != -1 || optarg[0] == '$')
-				usage();
-			operation = DO_DES;
-			extra = optarg;
-			break;
-
 		case 'b':                       /* Blowfish password hash */
 			if (operation != -1)
 				usage();
 			operation = DO_BLF;
-			if (strcmp(optarg, "a") == 0)
-				rounds = ideal_rounds();
-			else
-				rounds = strtonum(optarg, 1, INT_MAX, &errstr);
-			if (errstr != NULL)
-				errx(1, "%s: %s", errstr, optarg);
-			extra = &rounds;
+			if (strcmp(optarg, "a") != 0) {
+				(void)strtonum(optarg, 4, 31, &errstr);
+				if (errstr != NULL)
+					errx(1, "rounds is %s: %s", errstr,
+					    optarg);
+			}
+			extra = optarg;
 			break;
-
 		case 'c':                       /* user login class */
 			extra = optarg;
 			operation = -1;
 			break;
-
 		default:
 			usage();
 		}
 	}
 
-	if (((argc - optind) < 1) || operation == DO_MAKEKEY) {
+	if (((argc - optind) < 1)) {
 		char line[BUFSIZ], *string;
 
 		if (prompt) {
@@ -235,10 +140,6 @@ main(int argc, char **argv)
 
 				print_passwd(line, operation, extra);
 
-				if (operation == DO_MAKEKEY) {
-					fflush(stdout);
-					break;
-				}
 				(void)fputc('\n', stdout);
 			}
 		}
@@ -253,14 +154,14 @@ main(int argc, char **argv)
 		if ((string = strdup(argv[optind])) == NULL)
 			err(1, NULL);
 		/* Wipe the argument. */
-		memset(argv[optind], 0, strlen(argv[optind]));
+		explicit_bzero(argv[optind], strlen(argv[optind]));
 
 		print_passwd(string, operation, extra);
 
 		(void)fputc('\n', stdout);
 
 		/* Wipe our copy, before we free it. */
-		memset(string, 0, strlen(string));
+		explicit_bzero(string, strlen(string));
 		free(string);
 	}
 	exit(0);

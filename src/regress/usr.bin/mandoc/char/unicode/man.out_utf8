@@ -1,4 +1,4 @@
-CHAR-UNICODE-MAN(1)        OpenBSD Reference Manual        CHAR-UNICODE-MAN(1)
+CHAR-UNICODE-MAN(1)         General Commands Manual        CHAR-UNICODE-MAN(1)
 
 
 
@@ -12,6 +12,8 @@ DDEESSCCRRIIPPTTIIOONN
 
        nabla: 𝛁 = 𝛁
 
+       not really Unicode: up arrows: ↑⇑ = ↑⇑ = ↑⇑
 
 
-OpenBSD                        November 10, 2013           CHAR-UNICODE-MAN(1)
+
+OpenBSD                        October 13, 2014            CHAR-UNICODE-MAN(1)

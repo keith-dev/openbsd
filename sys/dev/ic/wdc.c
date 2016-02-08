@@ -1,4 +1,4 @@
-/*	$OpenBSD: wdc.c,v 1.125 2014/07/12 18:48:17 tedu Exp $	*/
+/*	$OpenBSD: wdc.c,v 1.127 2014/09/29 00:07:55 dlg Exp $	*/
 /*	$NetBSD: wdc.c,v 1.68 1999/06/23 19:00:17 bouyer Exp $	*/
 /*
  * Copyright (c) 1998, 2001 Manuel Bouyer.  All rights reserved.
@@ -61,7 +61,6 @@
 #include <sys/device.h>
 #include <sys/malloc.h>
 #include <sys/syslog.h>
-#include <sys/proc.h>
 #include <sys/disk.h>
 #include <sys/pool.h>
 
@@ -1975,7 +1974,10 @@ wdc_free_xfer(struct channel_softc *chp, struct wdc_xfer *xfer)
 	s = splbio();
 	chp->ch_flags &= ~WDCF_ACTIVE;
 	TAILQ_REMOVE(&chp->ch_queue->sc_xfer, xfer, c_xferchain);
-	put = !ISSET(xfer->c_flags, C_SCSIXFER);
+	if (ISSET(xfer->c_flags, C_SCSIXFER))
+		CLR(xfer->c_flags, C_SCSIXFER);
+	else
+		put = 1;
 	splx(s);
 
 	if (put)

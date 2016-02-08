@@ -1,4 +1,4 @@
-/*      $OpenBSD: ip6_divert.c,v 1.28 2014/07/22 11:06:10 mpi Exp $ */
+/*      $OpenBSD: ip6_divert.c,v 1.32 2015/01/24 00:29:06 deraadt Exp $ */
 
 /*
  * Copyright (c) 2009 Michele Marchetto <michele@openbsd.org>
@@ -26,8 +26,8 @@
 
 #include <net/if.h>
 #include <net/route.h>
+#include <net/if_var.h>
 #include <net/netisr.h>
-#include <net/pfvar.h>
 
 #include <netinet/in.h>
 #include <netinet/ip.h>
@@ -39,6 +39,8 @@
 #include <netinet/tcp.h>
 #include <netinet/udp.h>
 #include <netinet/icmp6.h>
+
+#include <net/pfvar.h>
 
 struct	inpcbtable	divb6table;
 struct	div6stat	div6stat;
@@ -88,7 +90,7 @@ divert6_output(struct inpcb *inp, struct mbuf *m, struct mbuf *nam,
 	struct sockaddr_in6 *sin6;
 	struct socket *so;
 	struct ifaddr *ifa;
-	int s, error = 0, p_hdrlen = 0, nxt = 0, off, dir;
+	int s, error = 0, min_hdrlen = 0, nxt = 0, off, dir;
 	struct ip6_hdr *ip6;
 
 	m->m_pkthdr.rcvif = NULL;
@@ -127,22 +129,22 @@ divert6_output(struct inpcb *inp, struct mbuf *m, struct mbuf *nam,
 
 	switch (nxt) {
 	case IPPROTO_TCP:
-		p_hdrlen = sizeof(struct tcphdr);
+		min_hdrlen = sizeof(struct tcphdr);
 		m->m_pkthdr.csum_flags |= M_TCP_CSUM_OUT;
 		break;
 	case IPPROTO_UDP:
-		p_hdrlen = sizeof(struct udphdr);
+		min_hdrlen = sizeof(struct udphdr);
 		m->m_pkthdr.csum_flags |= M_UDP_CSUM_OUT;
 		break;
 	case IPPROTO_ICMPV6:
-		p_hdrlen = sizeof(struct icmp6_hdr);
+		min_hdrlen = sizeof(struct icmp6_hdr);
 		m->m_pkthdr.csum_flags |= M_ICMP_CSUM_OUT;
 		break;
 	default:
 		/* nothing */
 		break;
 	}
-	if (p_hdrlen && m->m_pkthdr.len < off + p_hdrlen)
+	if (min_hdrlen && m->m_pkthdr.len < off + min_hdrlen)
 		goto fail;
 
 	m->m_pkthdr.pf.flags |= PF_TAG_DIVERTED_PACKET;

@@ -1,4 +1,4 @@
-/*	$OpenBSD: pf_ioctl.c,v 1.274 2014/07/22 11:06:09 mpi Exp $ */
+/*	$OpenBSD: pf_ioctl.c,v 1.283 2015/02/20 11:08:31 tedu Exp $ */
 
 /*
  * Copyright (c) 2001 Daniel Hartmeier
@@ -56,6 +56,7 @@
 #include <uvm/uvm_extern.h>
 
 #include <net/if.h>
+#include <net/if_var.h>
 #include <net/if_types.h>
 #include <net/route.h>
 
@@ -64,17 +65,17 @@
 #include <netinet/ip_var.h>
 #include <netinet/ip_icmp.h>
 
-#include <dev/rndvar.h>
 #include <crypto/md5.h>
 #include <net/pfvar.h>
-
-#if NPFSYNC > 0
-#include <net/if_pfsync.h>
-#endif /* NPFSYNC > 0 */
 
 #if NPFLOG > 0
 #include <net/if_pflog.h>
 #endif /* NPFLOG > 0 */
+
+#if NPFSYNC > 0
+#include <netinet/ip_ipsp.h>
+#include <net/if_pfsync.h>
+#endif /* NPFSYNC > 0 */
 
 #ifdef INET6
 #include <netinet/ip6.h>
@@ -307,24 +308,29 @@ pf_rm_rule(struct pf_rulequeue *rulequeue, struct pf_rule *rule)
 }
 
 void
-pf_purge_rule(struct pf_ruleset *ruleset, struct pf_rule *rule)
+pf_purge_rule(struct pf_ruleset *ruleset, struct pf_rule *rule,
+    struct pf_ruleset *aruleset, struct pf_rule *arule)
 {
-	u_int32_t		 nr;
+	u_int32_t		 nr = 0;
 
-	if (ruleset == NULL || ruleset->anchor == NULL)
-		return;
+	KASSERT(ruleset != NULL && rule != NULL);
 
 	pf_rm_rule(ruleset->rules.active.ptr, rule);
 	ruleset->rules.active.rcount--;
-
-	nr = 0;
 	TAILQ_FOREACH(rule, ruleset->rules.active.ptr, entries)
 		rule->nr = nr++;
-
 	ruleset->rules.active.ticket++;
-
 	pf_calc_skip_steps(ruleset->rules.active.ptr);
-	pf_remove_if_empty_ruleset(ruleset);
+
+	/* remove the parent anchor rule */
+	if (nr == 0 && arule && aruleset) {
+		pf_rm_rule(aruleset->rules.active.ptr, arule);
+		aruleset->rules.active.rcount--;
+		TAILQ_FOREACH(rule, aruleset->rules.active.ptr, entries)
+			rule->nr = nr++;
+		aruleset->rules.active.ticket++;
+		pf_calc_skip_steps(aruleset->rules.active.ptr);
+	}
 }
 
 u_int16_t
@@ -754,8 +760,9 @@ pf_setup_pfsync_matching(struct pf_ruleset *rs)
 	rs->rules.inactive.ptr_array = NULL;
 
 	if (rs->rules.inactive.rcount) {
-		rs->rules.inactive.ptr_array = malloc(sizeof(caddr_t) *
-		    rs->rules.inactive.rcount,  M_TEMP, M_NOWAIT);
+		rs->rules.inactive.ptr_array =
+		    mallocarray(rs->rules.inactive.rcount, sizeof(caddr_t),
+		    M_TEMP, M_NOWAIT);
 
 		if (!rs->rules.inactive.ptr_array)
 			return (ENOMEM);
@@ -1025,10 +1032,14 @@ pfioctl(dev_t dev, u_long cmd, caddr_t addr, int flags, struct proc *p)
 		bcopy(&q->queue, qs, sizeof(*qs));
 		qs->qid = pf_qname2qid(qs->qname, 1);
 		if (qs->parent[0] && (qs->parent_qid =
-		    pf_qname2qid(qs->parent, 0)) == 0)
-			return (ESRCH);
+		    pf_qname2qid(qs->parent, 0)) == 0) {
+			pool_put(&pf_queue_pl, qs);
+			error = ESRCH;
+			break;
+		}
 		qs->kif = pfi_kif_get(qs->ifname);
-		if (!qs->kif->pfik_ifp) {
+		if (qs->kif == NULL) {
+			pool_put(&pf_queue_pl, qs);
 			error = ESRCH;
 			break;
 		}
@@ -1075,10 +1086,8 @@ pfioctl(dev_t dev, u_long cmd, caddr_t addr, int flags, struct proc *p)
 		switch (rule->af) {
 		case 0:
 			break;
-#ifdef INET
 		case AF_INET:
 			break;
-#endif /* INET */
 #ifdef INET6
 		case AF_INET6:
 			break;
@@ -1251,10 +1260,8 @@ pfioctl(dev_t dev, u_long cmd, caddr_t addr, int flags, struct proc *p)
 			switch (newrule->af) {
 			case 0:
 				break;
-#ifdef INET
 			case AF_INET:
 				break;
-#endif /* INET */
 #ifdef INET6
 			case AF_INET6:
 				break;
@@ -2456,6 +2463,7 @@ pf_rule_copyin(struct pf_rule *from, struct pf_rule *to,
 	to->divert.port = from->divert.port;
 	to->divert_packet.addr = from->divert_packet.addr;
 	to->divert_packet.port = from->divert_packet.port;
+	to->prio = from->prio;
 	to->set_prio[0] = from->set_prio[0];
 	to->set_prio[1] = from->set_prio[1];
 

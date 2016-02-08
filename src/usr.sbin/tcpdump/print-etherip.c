@@ -1,4 +1,4 @@
-/*	$OpenBSD: print-etherip.c,v 1.6 2009/10/27 23:59:55 deraadt Exp $	*/
+/*	$OpenBSD: print-etherip.c,v 1.8 2015/01/16 06:40:21 deraadt Exp $	*/
 
 /*
  * Copyright (c) 2001 Jason L. Wright (jason@thought.net)
@@ -30,19 +30,16 @@
  * Format and print etherip packets
  */
 
-#include <sys/param.h>
 #include <sys/time.h>
 #include <sys/socket.h>
 
 #include <net/if.h>
 #include <netinet/in.h>
-#include <netinet/in_systm.h>
 #include <netinet/ip.h>
 #include <netinet/ip_var.h>
 #include <netinet/udp.h>
 #include <netinet/udp_var.h>
 #include <netinet/tcp.h>
-#include <netinet/tcpip.h>
 #include <netinet/if_ether.h>
 #include <netinet/ip_ether.h>
 

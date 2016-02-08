@@ -1,4 +1,4 @@
-/*	$OpenBSD: uvm_aobj.c,v 1.67 2014/07/12 18:44:01 tedu Exp $	*/
+/*	$OpenBSD: uvm_aobj.c,v 1.78 2015/02/08 02:17:08 deraadt Exp $	*/
 /*	$NetBSD: uvm_aobj.c,v 1.39 2001/02/18 21:19:08 chs Exp $	*/
 
 /*
@@ -39,12 +39,11 @@
 
 #include <sys/param.h>
 #include <sys/systm.h>
-#include <sys/proc.h>
 #include <sys/malloc.h>
 #include <sys/kernel.h>
 #include <sys/pool.h>
-#include <sys/kernel.h>
 #include <sys/stdint.h>
+#include <sys/atomic.h>
 
 #include <uvm/uvm.h>
 
@@ -237,7 +236,17 @@ uao_find_swhash_elt(struct uvm_aobj *aobj, int pageidx, boolean_t create)
 		return NULL;
 
 	/* allocate a new entry for the bucket and init/insert it in */
-	elt = pool_get(&uao_swhash_elt_pool, PR_WAITOK | PR_ZERO);
+	elt = pool_get(&uao_swhash_elt_pool, PR_NOWAIT | PR_ZERO);
+	/*
+	 * XXX We cannot sleep here as the hash table might disappear
+	 * from under our feet.  And we run the risk of deadlocking
+	 * the pagedeamon.  In fact this code will only be called by
+	 * the pagedaemon and allocation will only fail if we
+	 * exhausted the pagedeamon reserve.  In that case we're
+	 * doomed anyway, so panic.
+	 */
+	if (elt == NULL)
+		panic("%s: can't allocate entry", __func__);
 	LIST_INSERT_HEAD(swhash, elt, list);
 	elt->tag = page_tag;
 
@@ -477,7 +486,7 @@ uao_shrink_convert(struct uvm_object *uobj, int pages)
 	struct uao_swhash_elt *elt;
 	int i, *new_swslots;
 
-	new_swslots = malloc(pages * sizeof(int), M_UVMAOBJ,
+	new_swslots = mallocarray(pages, sizeof(int), M_UVMAOBJ,
 	    M_WAITOK | M_CANFAIL | M_ZERO);
 	if (new_swslots == NULL)
 		return ENOMEM;
@@ -512,7 +521,7 @@ uao_shrink_array(struct uvm_object *uobj, int pages)
 	struct uvm_aobj *aobj = (struct uvm_aobj *)uobj;
 	int i, *new_swslots;
 
-	new_swslots = malloc(pages * sizeof(int), M_UVMAOBJ,
+	new_swslots = mallocarray(pages, sizeof(int), M_UVMAOBJ,
 	    M_WAITOK | M_CANFAIL | M_ZERO);
 	if (new_swslots == NULL)
 		return ENOMEM;
@@ -567,7 +576,7 @@ uao_grow_array(struct uvm_object *uobj, int pages)
 
 	KASSERT(aobj->u_pages <= UAO_SWHASH_THRESHOLD);
 
-	new_swslots = malloc(pages * sizeof(int), M_UVMAOBJ,
+	new_swslots = mallocarray(pages, sizeof(int), M_UVMAOBJ,
 	    M_WAITOK | M_CANFAIL | M_ZERO);
 	if (new_swslots == NULL)
 		return ENOMEM;
@@ -740,7 +749,7 @@ uao_create(vsize_t size, int flags)
 				panic("uao_create: hashinit swhash failed");
 			}
 		} else {
-			aobj->u_swslots = malloc(pages * sizeof(int),
+			aobj->u_swslots = mallocarray(pages, sizeof(int),
 			    M_UVMAOBJ, mflags|M_ZERO);
 			if (aobj->u_swslots == NULL) {
 				if (flags & UAO_FLAG_CANFAIL) {
@@ -789,10 +798,10 @@ uao_init(void)
 	 * kernel map!
 	 */
 	pool_init(&uao_swhash_elt_pool, sizeof(struct uao_swhash_elt),
-	    0, 0, 0, "uaoeltpl", &pool_allocator_nointr);
+	    0, 0, PR_WAITOK, "uaoeltpl", NULL);
 
-	pool_init(&uvm_aobj_pool, sizeof(struct uvm_aobj), 0, 0, 0,
-	    "aobjpl", &pool_allocator_nointr);
+	pool_init(&uvm_aobj_pool, sizeof(struct uvm_aobj), 0, 0, PR_WAITOK,
+	    "aobjpl", NULL);
 }
 
 /*
@@ -869,7 +878,7 @@ uao_detach_locked(struct uvm_object *uobj)
 			uvm_lock_pageq();
 			continue;
 		}
-		pmap_page_protect(pg, VM_PROT_NONE);
+		pmap_page_protect(pg, PROT_NONE);
 		uao_dropswap(&aobj->u_obj, pg->offset >> PAGE_SHIFT);
 		uvm_pagefree(pg);
 	}
@@ -892,9 +901,6 @@ uao_detach_locked(struct uvm_object *uobj)
  *	XXXJRT currently never happens, as we never directly initiate
  *	XXXJRT I/O
  */
-
-#define	UAO_HASH_PENALTY 4	/* XXX: a guess */
-
 boolean_t
 uao_flush(struct uvm_object *uobj, voff_t start, voff_t stop, int flags)
 {
@@ -961,7 +967,7 @@ uao_flush(struct uvm_object *uobj, voff_t start, voff_t stop, int flags)
 
 			uvm_lock_pageq();
 			/* zap all mappings for the page. */
-			pmap_page_protect(pp, VM_PROT_NONE);
+			pmap_page_protect(pp, PROT_NONE);
 
 			/* ...and deactivate the page. */
 			uvm_pagedeactivate(pp);
@@ -982,7 +988,7 @@ uao_flush(struct uvm_object *uobj, voff_t start, voff_t stop, int flags)
 				continue;
 
 			/* zap all mappings for the page. */
-			pmap_page_protect(pp, VM_PROT_NONE);
+			pmap_page_protect(pp, PROT_NONE);
 
 			uao_dropswap(uobj, pp->offset >> PAGE_SHIFT);
 			uvm_lock_pageq();
@@ -1409,7 +1415,7 @@ uao_pagein_page(struct uvm_aobj *aobj, int pageidx)
 	pg = NULL;
 	npages = 1;
 	rv = uao_get(&aobj->u_obj, (voff_t)pageidx << PAGE_SHIFT,
-		     &pg, &npages, 0, VM_PROT_READ|VM_PROT_WRITE, 0, 0);
+	    &pg, &npages, 0, PROT_READ | PROT_WRITE, 0, 0);
 
 	switch (rv) {
 	case VM_PAGER_OK:
@@ -1544,9 +1550,7 @@ uao_dropswap_range(struct uvm_object *uobj, voff_t start, voff_t end)
 	 * the swap slots we've freed.
 	 */
 	if (swpgonlydelta > 0) {
-		simple_lock(&uvm.swap_data_lock);
 		KASSERT(uvmexp.swpgonly >= swpgonlydelta);
 		uvmexp.swpgonly -= swpgonlydelta;
-		simple_unlock(&uvm.swap_data_lock);
 	}
 }

@@ -1,4 +1,4 @@
-/*	$OpenBSD: cmds.c,v 1.71 2012/10/15 21:20:05 bluhm Exp $	*/
+/*	$OpenBSD: cmds.c,v 1.74 2015/01/30 04:45:45 tedu Exp $	*/
 /*	$NetBSD: cmds.c,v 1.27 1997/08/18 10:20:15 lukem Exp $	*/
 
 /*
@@ -79,6 +79,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include <errno.h>
 
 #include "ftp_var.h"
 #include "pathnames.h"
@@ -93,18 +94,6 @@ setascii(int argc, char *argv[])
 {
 
 	stype[1] = "ascii";
-	settype(2, stype);
-}
-
-/*
- * Set tenex transfer type.
- */
-/*ARGSUSED*/
-void
-settenex(int argc, char *argv[])
-{
-
-	stype[1] = "tenex";
 	settype(2, stype);
 }
 
@@ -280,7 +269,7 @@ usage:
 	oldintr = signal(SIGINT, mabort);
 	(void)setjmp(jabort);
 	if (proxy) {
-		char *cp, *tp2, tmpbuf[MAXPATHLEN];
+		char *cp, *tp2, tmpbuf[PATH_MAX];
 
 		while ((cp = remglob(argv, 0, NULL)) != NULL) {
 			if (*cp == '\0') {
@@ -695,7 +684,7 @@ setprompt(int argc, char *argv[])
 void
 setgate(int argc, char *argv[])
 {
-	static char gsbuf[MAXHOSTNAMELEN];
+	static char gsbuf[HOST_NAME_MAX+1];
 
 	if (argc > 3) {
 		fprintf(ttyout, "usage: %s [on | off | host [port]]\n",
@@ -799,7 +788,7 @@ setdebug(int argc, char *argv[])
 void
 lcd(int argc, char *argv[])
 {
-	char buf[MAXPATHLEN];
+	char buf[PATH_MAX];
 	char *oldargv1;
 
 	if (argc < 2)
@@ -992,7 +981,7 @@ shell(int argc, char *argv[])
 {
 	pid_t pid;
 	sig_t old1, old2;
-	char shellnam[MAXPATHLEN], *shellp, *namep;
+	char shellnam[PATH_MAX], *shellp, *namep;
 	int wait_status;
 
 	old1 = signal (SIGINT, SIG_IGN);
@@ -1119,7 +1108,7 @@ pwd(int argc, char *argv[])
 void
 lpwd(int argc, char *argv[])
 {
-	char buf[MAXPATHLEN];
+	char buf[PATH_MAX];
 
 	if (getcwd(buf, sizeof(buf)) != NULL)
 		fprintf(ttyout, "Local directory %s\n", buf);
@@ -1326,6 +1315,7 @@ jmp_buf abortprox;
 void
 proxabort(int signo)
 {
+	int save_errno = errno;
 
 	alarmtimer(0);
 	if (!proxy) {
@@ -1338,6 +1328,7 @@ proxabort(int signo)
 		proxflag = 0;
 	}
 	pswitch(0);
+	errno = save_errno;
 	longjmp(abortprox, 1);
 }
 
@@ -1459,10 +1450,10 @@ setnmap(int argc, char *argv[])
 		cp = strchr(altarg, ' ');
 	}
 	*cp = '\0';
-	(void)strncpy(mapin, altarg, MAXPATHLEN - 1);
+	(void)strncpy(mapin, altarg, PATH_MAX - 1);
 	while (*++cp == ' ')
 		continue;
-	(void)strncpy(mapout, cp, MAXPATHLEN - 1);
+	(void)strncpy(mapout, cp, PATH_MAX - 1);
 }
 
 void

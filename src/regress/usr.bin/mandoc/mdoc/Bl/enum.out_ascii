@@ -1,9 +1,24 @@
-BL-ENUM(1)                 OpenBSD Reference Manual                 BL-ENUM(1)
+BL-ENUM(1)                  General Commands Manual                 BL-ENUM(1)
 
 NNAAMMEE
      BBll--eennuumm - enumerated lists
 
 DDEESSCCRRIIPPTTIIOONN
+     1. x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x
+   x x x x x
+
+     1. x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x
+    x x x x x
+
+     1. x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x
+     x x x x x
+
+     1. x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x
+      x x x x x
+
+     1. x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x
+       x x x x x
+
      1. x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x
         x x x x x
 
@@ -49,4 +64,4 @@ DDEESSCCRRIIPPTTIIOONN
      12.  x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x
           x x x x x x
 
-OpenBSD                          June 17, 2009                         OpenBSD
+OpenBSD                        December 25, 2014                       OpenBSD

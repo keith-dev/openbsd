@@ -1,4 +1,4 @@
-/*	$OpenBSD: cd9660_vnops.c,v 1.66 2014/07/12 18:50:00 tedu Exp $	*/
+/*	$OpenBSD: cd9660_vnops.c,v 1.70 2015/02/10 21:56:09 miod Exp $	*/
 /*	$NetBSD: cd9660_vnops.c,v 1.42 1997/10/16 23:56:57 christos Exp $	*/
 
 /*-
@@ -45,10 +45,10 @@
 #include <sys/file.h>
 #include <sys/stat.h>
 #include <sys/buf.h>
-#include <sys/proc.h>
 #include <sys/conf.h>
 #include <sys/mount.h>
 #include <sys/vnode.h>
+#include <sys/lock.h>
 #include <sys/malloc.h>
 #include <sys/pool.h>
 #include <sys/dirent.h>
@@ -57,6 +57,7 @@
 #include <sys/cdio.h>
 #include <sys/poll.h>
 #include <sys/specdev.h>
+#include <sys/unistd.h>
 
 #include <miscfs/fifofs/fifo.h>
 
@@ -272,7 +273,7 @@ cd9660_read(void *v)
 			return (error);
 		}
 
-		error = uiomove(bp->b_data + on, (int)n, uio);
+		error = uiomovei(bp->b_data + on, (int)n, uio);
 
 		brelse(bp);
 	} while (error == 0 && uio->uio_resid > 0 && n != 0);
@@ -340,7 +341,7 @@ iso_uiodir(idp,dp,off)
 	}
 
 	dp->d_off = off;
-	if ((error = uiomove((caddr_t)dp, dp->d_reclen, idp->uio)) != 0)
+	if ((error = uiomovei((caddr_t)dp, dp->d_reclen, idp->uio)) != 0)
 		return (error);
 	idp->uio_off = off;
 	return (0);
@@ -653,7 +654,7 @@ cd9660_readlink(void *v)
 	 */
 	if (uio->uio_segflg != UIO_SYSSPACE ||
 	    uio->uio_iov->iov_len < MAXPATHLEN) {
-		error = uiomove(symname, symlen, uio);
+		error = uiomovei(symname, symlen, uio);
 		pool_put(&namei_pool, symname);
 		return (error);
 	}

@@ -1,4 +1,4 @@
-/*	$OpenBSD: uvm_map.h,v 1.51 2014/07/11 16:35:40 jsg Exp $	*/
+/*	$OpenBSD: uvm_map.h,v 1.53 2015/02/06 09:04:34 tedu Exp $	*/
 /*	$NetBSD: uvm_map.h,v 1.24 2001/02/18 21:19:08 chs Exp $	*/
 
 /*
@@ -80,6 +80,7 @@
 #ifndef _UVM_UVM_MAP_H_
 #define _UVM_UVM_MAP_H_
 
+#include <sys/mutex.h>
 #include <sys/rwlock.h>
 
 #ifdef _KERNEL
@@ -293,6 +294,7 @@ struct vm_map {
 	vsize_t			size;		/* virtual size */
 	int			ref_count;	/* Reference count */
 	int			flags;		/* flags */
+	struct mutex		flags_lock;	/* flags lock */
 	unsigned int		timestamp;	/* Version number */
 
 	vaddr_t			min_offset;	/* First address in map. */
@@ -348,7 +350,9 @@ struct vm_map {
 #ifdef _KERNEL
 #define	vm_map_modflags(map, set, clear)				\
 do {									\
+	mtx_enter(&(map)->flags_lock);					\
 	(map)->flags = ((map)->flags | (set)) & ~(clear);		\
+	mtx_leave(&(map)->flags_lock);					\
 } while (0)
 #endif /* _KERNEL */
 
@@ -399,6 +403,11 @@ int		uvm_map_mquery(struct vm_map*, vaddr_t*, vsize_t, voff_t, int);
 void		uvm_unmap_detach(struct uvm_map_deadq*, int);
 void		uvm_unmap_remove(struct vm_map*, vaddr_t, vaddr_t,
 		    struct uvm_map_deadq*, boolean_t, boolean_t);
+
+struct kinfo_vmentry;
+
+int		uvm_map_fill_vmmap(struct vm_map *, struct kinfo_vmentry *,
+		    size_t *);
 
 #endif /* _KERNEL */
 

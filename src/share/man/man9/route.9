@@ -1,4 +1,4 @@
-.\"     $OpenBSD: route.9,v 1.10 2014/04/02 13:10:48 mpi Exp $
+.\"     $OpenBSD: route.9,v 1.14 2014/12/19 18:57:17 bluhm Exp $
 .\"
 .\" Copyright (c) 2011 Bret S. Lambert <blambert@openbsd.org>
 .\" All rights reserved.
@@ -15,7 +15,7 @@
 .\" ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
 .\" OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 .\"
-.Dd $Mdocdate: April 2 2014 $
+.Dd $Mdocdate: December 19 2014 $
 .Dt ROUTE 9
 .Os
 .Sh NAME
@@ -25,15 +25,6 @@
 .In net/route.h
 .Ft struct rtentry *
 .Fn rt_lookup "struct sockaddr *dst" "struct sockaddr *mask" "u_int tableid"
-.Ft void
-.Fn rtalloc "struct route *ro"
-.Ft void
-.Fn rtalloc_noclone "struct route *ro"
-.Ft struct rtentry *
-.Fn rtalloc1 "struct sockaddr *dst" "int flags" "u_int tableid"
-.Ft void
-.Fn rtfree "struct rtentry *rt"
-.Fn RTFREE "struct rtentry *rt"
 .Ft int
 .Fn rt_setgate "struct rtentry *rt0" "struct sockaddr *dst" \
 "struct sockaddr *gate" "u_int tableid"
@@ -87,17 +78,15 @@ from table
 and forward a notification message to all
 .Fa AF_ROUTE
 sockets.
-.It Fn rtfree "struct rtentry *rt"
-Release a reference to
-.Fa rt ,
-freeing it if the reference count drops to 0.
-.It Fn RTFREE
-A macro which calls
-.Fn rtfree .
 .El
 .Sh RETURN VALUES
 .Fn rt_setgate
-returns non-0 if it cannot allocate memory.
+may fail with:
+.Pp
+.Bl -tag -width Er -compact
+.It Bq Er ENOBUFS
+Memory could not be allocated for the gateway.
+.El
 .Pp
 .Fn rtdeletemsg
 may fail with:
@@ -114,7 +103,7 @@ No routing entry for
 could be found.
 .It Bq Er ESRCH
 .Fa rt
-is a multipath route that conflicts with existing multipath route.
+is a multipath routing entry that conflicts with an existing one.
 .El
 .Sh SEE ALSO
 .Xr route 4 ,

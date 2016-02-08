@@ -1,4 +1,4 @@
-/* $OpenBSD: cmd-run-shell.c,v 1.25 2014/04/17 07:55:43 nicm Exp $ */
+/* $OpenBSD: cmd-run-shell.c,v 1.27 2015/02/05 10:29:43 nicm Exp $ */
 
 /*
  * Copyright (c) 2009 Tiago Cunha <me@tiagocunha.org>
@@ -40,7 +40,6 @@ const struct cmd_entry cmd_run_shell_entry = {
 	"bt:", 1, 1,
 	"[-b] " CMD_TARGET_PANE_USAGE " shell-command",
 	0,
-	NULL,
 	cmd_run_shell_exec
 };
 
@@ -94,12 +93,7 @@ cmd_run_shell_exec(struct cmd *self, struct cmd_q *cmdq)
 	}
 
 	ft = format_create();
-	if (s != NULL)
-		format_session(ft, s);
-	if (s != NULL && wl != NULL)
-		format_winlink(ft, s, wl);
-	if (wp != NULL)
-		format_window_pane(ft, wp);
+	format_defaults(ft, NULL, s, wl, wp);
 	shellcmd = format_expand(ft, args->argv[0]);
 	format_free(ft);
 

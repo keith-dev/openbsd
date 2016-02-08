@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_urtwn.c,v 1.38 2014/07/13 15:52:49 mpi Exp $	*/
+/*	$OpenBSD: if_urtwn.c,v 1.42 2015/02/10 23:25:46 mpi Exp $	*/
 
 /*-
  * Copyright (c) 2010 Damien Bergamini <damien.bergamini@free.fr>
@@ -31,9 +31,9 @@
 #include <sys/timeout.h>
 #include <sys/conf.h>
 #include <sys/device.h>
+#include <sys/endian.h>
 
 #include <machine/bus.h>
-#include <machine/endian.h>
 #include <machine/intr.h>
 
 #if NBPFILTER > 0
@@ -1565,7 +1565,6 @@ urtwn_rx_frame(struct urtwn_softc *sc, uint8_t *buf, int pktlen)
 		}
 	}
 	/* Finalize mbuf. */
-	m->m_pkthdr.rcvif = ifp;
 	wh = (struct ieee80211_frame *)((uint8_t *)&stat[1] + infosz);
 	memcpy(mtod(m, uint8_t *), wh, pktlen);
 	m->m_pkthdr.len = m->m_len = pktlen;
@@ -1970,10 +1969,8 @@ urtwn_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 	case SIOCSIFADDR:
 		ifa = (struct ifaddr *)data;
 		ifp->if_flags |= IFF_UP;
-#ifdef INET
 		if (ifa->ifa_addr->sa_family == AF_INET)
 			arp_ifinit(&ic->ic_ac, ifa);
-#endif
 		/* FALLTHROUGH */
 	case SIOCSIFFLAGS:
 		if (ifp->if_flags & IFF_UP) {
@@ -2060,8 +2057,8 @@ urtwn_power_on(struct urtwn_softc *sc)
 	urtwn_write_2(sc, R92C_APS_FSMCO,
 	    urtwn_read_2(sc, R92C_APS_FSMCO) | R92C_APS_FSMCO_APFM_ONMAC);
 	for (ntries = 0; ntries < 1000; ntries++) {
-		if (urtwn_read_2(sc, R92C_APS_FSMCO) &
-		    R92C_APS_FSMCO_APFM_ONMAC)
+		if (!(urtwn_read_2(sc, R92C_APS_FSMCO) &
+		    R92C_APS_FSMCO_APFM_ONMAC))
 			break;
 		DELAY(5);
 	}
@@ -2230,6 +2227,10 @@ urtwn_load_firmware(struct urtwn_softc *sc)
 	    urtwn_read_1(sc, R92C_MCUFWDL) | R92C_MCUFWDL_EN);
 	urtwn_write_1(sc, R92C_MCUFWDL + 2,
 	    urtwn_read_1(sc, R92C_MCUFWDL + 2) & ~0x08);
+
+	/* Reset the FWDL checksum. */
+	urtwn_write_1(sc, R92C_MCUFWDL,
+	    urtwn_read_1(sc, R92C_MCUFWDL) | R92C_MCUFWDL_CHKSUM_RPT);
 
 	for (page = 0; len > 0; page++) {
 		mlen = MIN(len, R92C_FW_PAGE_SIZE);

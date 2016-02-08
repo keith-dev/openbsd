@@ -1,4 +1,4 @@
-/*	$OpenBSD: npppd_iface.c,v 1.8 2013/02/13 22:10:38 yasuoka Exp $ */
+/*	$OpenBSD: npppd_iface.c,v 1.10 2015/01/19 01:48:59 deraadt Exp $ */
 
 /*-
  * Copyright (c) 2009 Internet Initiative Japan Inc.
@@ -25,19 +25,17 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  */
-/* $Id: npppd_iface.c,v 1.8 2013/02/13 22:10:38 yasuoka Exp $ */
+/* $Id: npppd_iface.c,v 1.10 2015/01/19 01:48:59 deraadt Exp $ */
 /**@file
  * The interface of npppd and kernel.
  * This is an implementation to use tun(4) or pppx(4).
  */
 #include <sys/types.h>
-#include <sys/param.h>
 #include <sys/ioctl.h>
 #include <sys/socket.h>
 #include <sys/uio.h>
 #include <sys/sockio.h>
 #include <netinet/in.h>
-#include <netinet/in_systm.h>
 #include <netinet/ip.h>
 #include <arpa/inet.h>
 #include <net/if_dl.h>
@@ -273,7 +271,7 @@ int
 npppd_iface_start(npppd_iface *_this)
 {
 	int             x;
-	char            buf[MAXPATHLEN];
+	char            buf[PATH_MAX];
 
 	NPPPD_IFACE_ASSERT(_this != NULL);
 

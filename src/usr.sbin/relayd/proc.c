@@ -1,4 +1,4 @@
-/*	$OpenBSD: proc.c,v 1.15 2014/07/11 16:39:10 krw Exp $	*/
+/*	$OpenBSD: proc.c,v 1.20 2015/01/22 17:42:09 reyk Exp $	*/
 
 /*
  * Copyright (c) 2010 - 2014 Reyk Floeter <reyk@openbsd.org>
@@ -21,13 +21,6 @@
 #include <sys/queue.h>
 #include <sys/socket.h>
 #include <sys/wait.h>
-#include <sys/tree.h>
-
-#include <net/if.h>
-#include <netinet/in_systm.h>
-#include <netinet/in.h>
-#include <netinet/ip.h>
-#include <arpa/inet.h>
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -37,8 +30,7 @@
 #include <signal.h>
 #include <pwd.h>
 #include <event.h>
-
-#include <openssl/ssl.h>
+#include <imsg.h>
 
 #include "relayd.h"
 
@@ -163,7 +155,7 @@ proc_open(struct privsep *ps, struct privsep_proc *p,
 
 	/*
 	 * Open socket pairs for our peers
-	 */	
+	 */
 	for (proc = 0; proc < nproc; proc++) {
 		procs[proc].p_ps = ps;
 		procs[proc].p_env = ps->ps_env;
@@ -323,6 +315,7 @@ proc_sig_handler(int sig, short event, void *arg)
 	case SIGCHLD:
 	case SIGHUP:
 	case SIGPIPE:
+	case SIGUSR1:
 		/* ignore */
 		break;
 	default:
@@ -353,7 +346,7 @@ proc_run(struct privsep *ps, struct privsep_proc *p,
 		fatal("proc_run: cannot fork");
 	case 0:
 		/* Set the process group of the current process */
-		setpgrp(0, getpid());
+		setpgid(0, 0);
 		break;
 	default:
 		return (pid);
@@ -409,12 +402,14 @@ proc_run(struct privsep *ps, struct privsep_proc *p,
 	signal_set(&ps->ps_evsigchld, SIGCHLD, proc_sig_handler, p);
 	signal_set(&ps->ps_evsighup, SIGHUP, proc_sig_handler, p);
 	signal_set(&ps->ps_evsigpipe, SIGPIPE, proc_sig_handler, p);
+	signal_set(&ps->ps_evsigusr1, SIGUSR1, proc_sig_handler, p);
 
 	signal_add(&ps->ps_evsigint, NULL);
 	signal_add(&ps->ps_evsigterm, NULL);
 	signal_add(&ps->ps_evsigchld, NULL);
 	signal_add(&ps->ps_evsighup, NULL);
 	signal_add(&ps->ps_evsigpipe, NULL);
+	signal_add(&ps->ps_evsigusr1, NULL);
 
 	proc_listen(ps, procs, nproc);
 

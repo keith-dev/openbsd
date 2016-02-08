@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_wb.c,v 1.56 2014/07/22 13:12:11 mpi Exp $	*/
+/*	$OpenBSD: if_wb.c,v 1.58 2014/12/22 02:28:52 tedu Exp $	*/
 
 /*
  * Copyright (c) 1997, 1998
@@ -102,10 +102,8 @@
 #include <net/if_dl.h>
 #include <net/if_types.h>
 
-#ifdef INET
 #include <netinet/in.h>
 #include <netinet/if_ether.h>
-#endif
 
 #include <net/if_media.h>
 
@@ -948,7 +946,6 @@ void wb_rxeof(sc)
 			printf("%s: receiver babbling: possible chip "
 				"bug, forcing reset\n", sc->sc_dev.dv_xname);
 			wb_fixmedia(sc);
-			wb_reset(sc);
 			wb_init(sc);
 			return;
 		}
@@ -1160,11 +1157,8 @@ int wb_intr(arg)
 			WB_SETBIT(sc, WB_NETCFG, WB_NETCFG_TX_ON);
 		}
 
-		if (status & WB_ISR_BUS_ERR) {
-			wb_reset(sc);
+		if (status & WB_ISR_BUS_ERR)
 			wb_init(sc);
-		}
-
 	}
 
 	/* Re-enable interrupts. */
@@ -1542,12 +1536,10 @@ int wb_ioctl(ifp, command, data)
 	case SIOCSIFADDR:
 		ifp->if_flags |= IFF_UP;
 		switch (ifa->ifa_addr->sa_family) {
-#ifdef INET
 		case AF_INET:
 			wb_init(sc);
 			arp_ifinit(&sc->arpcom, ifa);
 			break;
-#endif /* INET */
 		default:
 			wb_init(sc);
 		}
@@ -1597,8 +1589,6 @@ void wb_watchdog(ifp)
 		printf("%s: no carrier - transceiver cable problem?\n",
 		    sc->sc_dev.dv_xname);
 #endif
-	wb_stop(sc);
-	wb_reset(sc);
 	wb_init(sc);
 
 	if (!IFQ_IS_EMPTY(&ifp->if_snd))

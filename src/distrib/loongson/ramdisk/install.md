@@ -1,4 +1,4 @@
-#	$OpenBSD: install.md,v 1.13 2013/11/16 18:37:27 rpe Exp $
+#	$OpenBSD: install.md,v 1.15 2015/02/12 08:44:47 rpe Exp $
 #
 #
 # Copyright (c) 1996 The NetBSD Foundation, Inc.
@@ -81,13 +81,13 @@ e 0
 
 
 1
-$(expr $_s \* 2048)
+$((_s * 2048))
 e 3
 0
 e 3
 A6
 
-$(expr $_s \* 2048 + 1)
+$((_s * 2048 + 1))
 *
 update
 write
@@ -115,9 +115,9 @@ $(fdisk ${_disk})
 __EOT
 			fdisk -e $_disk
 			fdisk $_disk | grep -q '^..: 83 ' || \
-				{ echo "\nNo Linux files (id 83) partition!\n" ; continue ; }
+				{ echo "\nNo Linux files (id 83) partition!\n"; continue; }
 			fdisk $_disk | grep -q "^..: A6 " || \
-				{ echo "\nNo OpenBSD (id A6) partition!\n" ; continue ; }
+				{ echo "\nNo OpenBSD (id A6) partition!\n"; continue; }
 			disklabel $_disk 2>/dev/null | grep -q "^  i:" || disklabel -w -d $_disk
 			break ;;
 		o*|O*)	break ;;

@@ -1,4 +1,4 @@
-/*	$OpenBSD: autoconf.c,v 1.58 2014/05/08 21:32:45 miod Exp $	*/
+/*	$OpenBSD: autoconf.c,v 1.61 2014/09/15 19:08:21 miod Exp $	*/
 
 /*
  * Copyright (c) 1998-2003 Michael Shalayeff
@@ -76,7 +76,6 @@ void (*cold_hook)(int); /* see below */
  * LED blinking thing
  */
 #ifdef USELEDS
-#include <sys/dkstat.h>
 #include <sys/kernel.h>
 
 struct timeout heartbeat_tmo;
@@ -109,12 +108,14 @@ heartbeat(v)
 {
 	static u_int hbcnt = 0, ocp_total, ocp_idle;
 	int toggle, cp_mask, cp_total, cp_idle;
+	struct schedstate_percpu *spc = &(curcpu()->ci_schedstate);
 
 	timeout_add(&heartbeat_tmo, hz / 16);
 
-	cp_idle = cp_time[CP_IDLE];
-	cp_total = cp_time[CP_USER] + cp_time[CP_NICE] + cp_time[CP_SYS] +
-	    cp_time[CP_INTR] + cp_time[CP_IDLE];
+	cp_idle = spc->spc_cp_time[CP_IDLE];
+	cp_total = spc->spc_cp_time[CP_USER] + spc->spc_cp_time[CP_NICE] +
+	    spc->spc_cp_time[CP_SYS] + spc->spc_cp_time[CP_INTR] +
+	    spc->spc_cp_time[CP_IDLE];
 	if (cp_total == ocp_total)
 		cp_total = ocp_total + 1;
 	if (cp_idle == ocp_idle)

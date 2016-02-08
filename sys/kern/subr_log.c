@@ -1,4 +1,4 @@
-/*	$OpenBSD: subr_log.c,v 1.22 2014/07/28 20:30:01 bluhm Exp $	*/
+/*	$OpenBSD: subr_log.c,v 1.28 2015/02/10 21:56:09 miod Exp $	*/
 /*	$NetBSD: subr_log.c,v 1.11 1996/03/30 22:24:44 christos Exp $	*/
 
 /*
@@ -74,8 +74,8 @@ struct logsoftc {
 
 int	log_open;			/* also used in log() */
 int	msgbufmapped;			/* is the message buffer mapped */
-int	msgbufenabled;			/* is logging to the buffer enabled */
 struct	msgbuf *msgbufp;		/* the mapped buffer, itself. */
+struct	msgbuf *consbufp;		/* console message buffer. */
 struct file *syslogf;
 
 void filt_logrdetach(struct knote *kn);
@@ -113,17 +113,29 @@ initmsgbuf(caddr_t buf, size_t bufsize)
 	
 	/* Always start new buffer data on a new line. */
 	if (mbp->msg_bufx > 0 && mbp->msg_bufc[mbp->msg_bufx - 1] != '\n')
-		msgbuf_putchar('\n');
+		msgbuf_putchar(msgbufp, '\n');
 
 	/* mark it as ready for use. */
-	msgbufmapped = msgbufenabled = 1;
+	msgbufmapped = 1;
 }
 
 void
-msgbuf_putchar(const char c) 
+initconsbuf(void)
 {
-	struct msgbuf *mbp = msgbufp;
+	long new_bufs;
 
+	/* Set up a buffer to collect /dev/console output */
+	consbufp = malloc(CONSBUFSIZE, M_TEMP, M_NOWAIT|M_ZERO);
+	if (consbufp) {
+		new_bufs = CONSBUFSIZE - offsetof(struct msgbuf, msg_bufc);
+		consbufp->msg_magic = MSG_MAGIC;
+		consbufp->msg_bufs = new_bufs;
+	}
+}
+
+void
+msgbuf_putchar(struct msgbuf *mbp, const char c) 
+{
 	if (mbp->msg_magic != MSG_MAGIC)
 		/* Nothing we can do */
 		return;
@@ -195,7 +207,7 @@ logread(dev_t dev, struct uio *uio, int flag)
 		l = min(l, uio->uio_resid);
 		if (l == 0)
 			break;
-		error = uiomove(&mbp->msg_bufc[mbp->msg_bufr], (int)l, uio);
+		error = uiomovei(&mbp->msg_bufc[mbp->msg_bufr], (int)l, uio);
 		if (error)
 			break;
 		mbp->msg_bufr += l;
@@ -345,6 +357,7 @@ sys_sendsyslog(struct proc *p, void *v, register_t *retval)
 	} */ *uap = v;
 #ifdef KTRACE
 	struct iovec *ktriov = NULL;
+	int iovlen;
 #endif
 	struct iovec aiov;
 	struct uio auio;
@@ -368,10 +381,11 @@ sys_sendsyslog(struct proc *p, void *v, register_t *retval)
 	auio.uio_resid = aiov.iov_len;
 #ifdef KTRACE
 	if (KTRPOINT(p, KTR_GENIO)) {
-		int iovlen = auio.uio_iovcnt * sizeof (struct iovec);
+		ktriov = mallocarray(auio.uio_iovcnt, sizeof(struct iovec),
+		    M_TEMP, M_WAITOK);
+		iovlen = auio.uio_iovcnt * sizeof (struct iovec);
 
-		ktriov = malloc(iovlen, M_TEMP, M_WAITOK);
-		bcopy(auio.uio_iov, ktriov, iovlen);
+		memcpy(ktriov, auio.uio_iov, iovlen);
 	}
 #endif
 
@@ -384,7 +398,7 @@ sys_sendsyslog(struct proc *p, void *v, register_t *retval)
 	if (ktriov != NULL) {
 		if (error == 0)
 			ktrgenio(p, -1, UIO_WRITE, ktriov, len);
-		free(ktriov, M_TEMP, 0);
+		free(ktriov, M_TEMP, iovlen);
 	}
 #endif
 	FRELE(f, p);

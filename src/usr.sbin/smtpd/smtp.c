@@ -1,4 +1,4 @@
-/*	$OpenBSD: smtp.c,v 1.139 2014/07/08 14:38:17 eric Exp $	*/
+/*	$OpenBSD: smtp.c,v 1.143 2015/01/20 17:37:54 deraadt Exp $	*/
 
 /*
  * Copyright (c) 2008 Gilles Chehade <gilles@poolp.org>
@@ -30,6 +30,7 @@
 #include <netdb.h>
 #include <pwd.h>
 #include <signal.h>
+#include <limits.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -214,7 +215,7 @@ static int
 smtp_enqueue(uid_t *euid)
 {
 	static struct listener	 local, *listener = NULL;
-	char			 buf[SMTPD_MAXHOSTNAMELEN], *hostname;
+	char			 buf[HOST_NAME_MAX+1], *hostname;
 	int			 fd[2];
 
 	if (listener == NULL) {
@@ -222,7 +223,7 @@ smtp_enqueue(uid_t *euid)
 		(void)strlcpy(listener->tag, "local", sizeof(listener->tag));
 		listener->ss.ss_family = AF_LOCAL;
 		listener->ss.ss_len = sizeof(struct sockaddr *);
-		(void)strlcpy(listener->hostname, "localhost",
+		(void)strlcpy(listener->hostname, env->sc_hostname,
 		    sizeof(listener->hostname));
 	}
 
@@ -238,9 +239,9 @@ smtp_enqueue(uid_t *euid)
 	if (socketpair(AF_UNIX, SOCK_STREAM, PF_UNSPEC, fd))
 		fatal("socketpair");
 
-	hostname = "localhost";
+	hostname = env->sc_hostname;
 	if (euid) {
-		(void)snprintf(buf, sizeof(buf), "%d@localhost", *euid);
+		(void)snprintf(buf, sizeof(buf), "%s", hostname);
 		hostname = buf;
 	}
 

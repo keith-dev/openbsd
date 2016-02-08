@@ -1,4 +1,4 @@
-/*	$OpenBSD: irr_prefix.c,v 1.18 2010/05/10 02:00:50 krw Exp $ */
+/*	$OpenBSD: irr_prefix.c,v 1.20 2015/01/16 06:40:15 deraadt Exp $ */
 
 /*
  * Copyright (c) 2007 Henning Brauer <henning@openbsd.org>
@@ -17,7 +17,6 @@
  */
 
 #include <sys/types.h>
-#include <sys/param.h>
 #include <sys/socket.h>
 #include <err.h>
 #include <errno.h>
@@ -128,8 +127,8 @@ prefixset_addmember(char *s)
 			return (0);
 		}
 
-	if ((p = realloc(curpfxs->prefix,
-	    (curpfxs->prefixcnt + 1) * sizeof(void *))) == NULL)
+	if ((p = reallocarray(curpfxs->prefix,
+	    curpfxs->prefixcnt + 1, sizeof(void *))) == NULL)
 		err(1, "prefixset_addmember realloc");
 	curpfxs->prefix = p;
 	curpfxs->prefixcnt++;
@@ -182,7 +181,7 @@ prefixset_aggregate(struct prefix_set *pfxs)
 		printf("%s: prefix aggregation: %u -> %u\n",
 		    pfxs->as, pfxs->prefixcnt, newcnt);
 
-	if ((p = realloc(pfxs->prefix, newcnt * sizeof(void *))) == NULL)
+	if ((p = reallocarray(pfxs->prefix, newcnt, sizeof(void *))) == NULL)
 		err(1, "prefixset_aggregate realloc");
 	pfxs->prefix = p;
 	pfxs->prefixcnt = newcnt;

@@ -1,4 +1,4 @@
-/*	$OpenBSD: msdosfs_denode.c,v 1.49 2014/07/12 18:50:41 tedu Exp $	*/
+/*	$OpenBSD: msdosfs_denode.c,v 1.53 2015/01/09 05:01:57 tedu Exp $	*/
 /*	$NetBSD: msdosfs_denode.c,v 1.23 1997/10/17 11:23:58 ws Exp $	*/
 
 /*-
@@ -52,12 +52,14 @@
 #include <sys/systm.h>
 #include <sys/mount.h>
 #include <sys/malloc.h>
-#include <sys/proc.h>
 #include <sys/buf.h>
 #include <sys/vnode.h>
+#include <sys/lock.h>
 #include <sys/kernel.h>		/* defines "time" */
 #include <sys/dirent.h>
 #include <sys/namei.h>
+
+#include <crypto/siphash.h>
 
 #include <msdosfs/bpb.h>
 #include <msdosfs/msdosfsmount.h>
@@ -65,10 +67,12 @@
 #include <msdosfs/denode.h>
 #include <msdosfs/fat.h>
 
+u_int msdosfs_dehash(dev_t, uint32_t, uint32_t);
+
 struct denode **dehashtbl;
+SIPHASH_KEY dehashkey;
 u_long dehash;			/* size of hash table - 1 */
-#define	DEHASH(dev, dcl, doff)	(((dev) + (dcl) + (doff) / sizeof(struct direntry)) \
-				 & dehash)
+#define	DEHASH(dev, dcl, doff) msdosfs_dehash((dev), (dcl), (doff))
 
 static struct denode *msdosfs_hashget(dev_t, uint32_t, uint32_t);
 static int msdosfs_hashins(struct denode *);
@@ -78,8 +82,22 @@ static void msdosfs_hashrem(struct denode *);
 int
 msdosfs_init(struct vfsconf *vfsp)
 {
-	dehashtbl = hashinit(desiredvnodes/2, M_MSDOSFSMNT, M_WAITOK, &dehash);
+	dehashtbl = hashinit(initialvnodes / 2, M_MSDOSFSMNT, M_WAITOK, &dehash);
+	arc4random_buf(&dehashkey, sizeof(dehashkey));
 	return (0);
+}
+
+u_int
+msdosfs_dehash(dev_t dev, uint32_t dirclust, uint32_t diroff)
+{
+	SIPHASH_CTX ctx;
+
+	SipHash24_Init(&ctx, &dehashkey);
+	SipHash24_Update(&ctx, &dev, sizeof(dev));
+	SipHash24_Update(&ctx, &dirclust, sizeof(dirclust));
+	SipHash24_Update(&ctx, &diroff, sizeof(diroff));
+
+	return (SipHash24_End(&ctx) & dehash);
 }
 
 static struct denode *

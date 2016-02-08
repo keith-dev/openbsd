@@ -32,7 +32,7 @@
  * SUCH DAMAGE.
  *
  *	from: @(#)info_file.c	8.1 (Berkeley) 6/6/93
- *	$Id: info_file.c,v 1.7 2013/12/03 02:14:57 deraadt Exp $
+ *	$Id: info_file.c,v 1.9 2014/10/26 03:03:34 guenther Exp $
  */
 
 /*
@@ -41,7 +41,6 @@
 
 #include "am.h"
 
-#ifdef HAS_FILE_MAPS
 #include <ctype.h>
 #include <sys/stat.h>
 
@@ -214,7 +213,7 @@ file_init(char *map, time_t *tp)
 }
 
 int
-file_reload(mnt_map *m, char *map, void (*fn)())
+file_reload(mnt_map *m, char *map, void (*fn)(mnt_map *, char *, char *))
 {
 	FILE *mapf = file_open(map, (time_t *) 0);
 
@@ -260,4 +259,3 @@ file_mtime(char *map, time_t *tp)
 
 	return errno;
 }
-#endif /* HAS_FILE_MAPS */

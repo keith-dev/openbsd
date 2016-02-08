@@ -1,4 +1,4 @@
-/* $OpenBSD: x509_trs.c,v 1.15 2014/07/11 08:44:49 jsing Exp $ */
+/* $OpenBSD: x509_trs.c,v 1.20 2015/02/10 11:22:21 jsing Exp $ */
 /* Written by Dr Stephen N Henson (steve@openssl.org) for the OpenSSL
  * project 1999.
  */
@@ -57,6 +57,7 @@
  */
 
 #include <stdio.h>
+#include <string.h>
 
 #include <openssl/err.h>
 #include <openssl/x509v3.h>
@@ -88,8 +89,6 @@ static X509_TRUST trstandard[] = {
 };
 
 #define X509_TRUST_COUNT	(sizeof(trstandard)/sizeof(X509_TRUST))
-
-IMPLEMENT_STACK_OF(X509_TRUST)
 
 static STACK_OF(X509_TRUST) *trtable = NULL;
 
@@ -176,6 +175,7 @@ X509_TRUST_add(int id, int flags, int (*ck)(X509_TRUST *, X509 *, int),
 {
 	int idx;
 	X509_TRUST *trtmp;
+	char *name_dup;
 
 	/* This is set according to what we change: application can't set it */
 	flags &= ~X509_TRUST_DYNAMIC;
@@ -190,17 +190,22 @@ X509_TRUST_add(int id, int flags, int (*ck)(X509_TRUST *, X509 *, int),
 			return 0;
 		}
 		trtmp->flags = X509_TRUST_DYNAMIC;
-	} else
+	} else {
 		trtmp = X509_TRUST_get0(idx);
+		if (trtmp == NULL) {
+			X509err(X509_F_X509_TRUST_ADD, X509_R_INVALID_TRUST);
+			return 0;
+		}
+	}
+
+	if ((name_dup = strdup(name)) == NULL)
+		goto err;
 
 	/* free existing name if dynamic */
 	if (trtmp->flags & X509_TRUST_DYNAMIC_NAME)
 		free(trtmp->name);
 	/* dup supplied name */
-	if (!(trtmp->name = BUF_strdup(name))) {
-		X509err(X509_F_X509_TRUST_ADD, ERR_R_MALLOC_FAILURE);
-		return 0;
-	}
+	trtmp->name = name_dup;
 	/* Keep the dynamic flag of existing entry */
 	trtmp->flags &= X509_TRUST_DYNAMIC;
 	/* Set all other flags */
@@ -211,18 +216,22 @@ X509_TRUST_add(int id, int flags, int (*ck)(X509_TRUST *, X509 *, int),
 	trtmp->arg1 = arg1;
 	trtmp->arg2 = arg2;
 
-	/* If its a new entry manage the dynamic table */
+	/* If it's a new entry, manage the dynamic table */
 	if (idx == -1) {
-		if (!trtable && !(trtable = sk_X509_TRUST_new(tr_cmp))) {
-			X509err(X509_F_X509_TRUST_ADD, ERR_R_MALLOC_FAILURE);
-			return 0;
-		}
-		if (!sk_X509_TRUST_push(trtable, trtmp)) {
-			X509err(X509_F_X509_TRUST_ADD, ERR_R_MALLOC_FAILURE);
-			return 0;
-		}
+		if (trtable == NULL &&
+		    (trtable = sk_X509_TRUST_new(tr_cmp)) == NULL)
+			goto err;
+		if (sk_X509_TRUST_push(trtable, trtmp) == 0)
+			goto err;
 	}
 	return 1;
+
+err:
+	free(name_dup);
+	if (idx == -1)
+		free(trtmp);
+	X509err(X509_F_X509_TRUST_ADD, ERR_R_MALLOC_FAILURE);
+	return 0;
 }
 
 static void

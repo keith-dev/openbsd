@@ -1,5 +1,5 @@
 # ex:ts=8 sw=4:
-# $OpenBSD: Term.pm,v 1.28 2014/07/08 17:02:56 espie Exp $
+# $OpenBSD: Term.pm,v 1.30 2015/01/04 14:20:04 espie Exp $
 #
 # Copyright (c) 2004-2007 Marc Espie <espie@openbsd.org>
 #
@@ -46,7 +46,7 @@ our @ISA = qw(OpenBSD::ProgressMeter);
 sub ntogo
 {
 	my ($self, $state, $offset) = @_;
-	return $state->ntogo_string($offset);
+	return $state->ntodo($offset // 0);
 }
 
 sub compute_count
@@ -271,6 +271,14 @@ sub clear
 	}
 	$self->{lastdisplay} = '';
 	delete $self->{stars};
+}
+
+sub disable
+{
+	my $self = shift;
+	print "\n" if length($self->{lastdisplay}) > 0;
+
+	bless $self, "OpenBSD::ProgressMeter::Stub";
 }
 
 sub next

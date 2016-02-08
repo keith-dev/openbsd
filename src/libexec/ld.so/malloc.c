@@ -1,4 +1,4 @@
-/*	$OpenBSD: malloc.c,v 1.4 2014/07/06 08:34:12 otto Exp $	*/
+/*	$OpenBSD: malloc.c,v 1.7 2015/01/22 05:48:17 deraadt Exp $	*/
 /*
  * Copyright (c) 2008, 2010, 2011 Otto Moerbeek <otto@drijf.net>
  * Copyright (c) 2012 Matthew Dempsky <matthew@openbsd.org>
@@ -23,9 +23,7 @@
  * can buy me a beer in return. Poul-Henning Kamp
  */
 
-
-#include <sys/types.h>
-#include <sys/param.h>
+#include <sys/param.h>	/* PAGE_SHIFT ALIGN */
 #include <sys/queue.h>
 #include <sys/mman.h>
 #include <sys/uio.h>
@@ -153,7 +151,7 @@ static u_char getrbyte(struct dir_info *d);
 /* low bits of r->p determine size: 0 means >= page size and p->size holding
  *  real size, otherwise r->size is a shift count, or 1 for malloc(0)
  */
-#define REALSIZE(sz, r) 					\
+#define REALSIZE(sz, r)						\
 	(sz) = (uintptr_t)(r)->p & MALLOC_PAGEMASK,		\
 	(sz) = ((sz) == 0 ? (r)->size : ((sz) == 1 ? 0 : (1 << ((sz)-1))))
 
@@ -379,7 +377,7 @@ omalloc_init(struct dir_info **dp)
 
 	_dl_randombuf(&tmp, sizeof(tmp));
 	d = (struct dir_info *)(p + MALLOC_PAGESIZE +
-	    ((d_avail % tmp) << MALLOC_MINSHIFT)); /* not uniform */
+	    ((tmp % d_avail) << MALLOC_MINSHIFT)); /* not uniform */
 
 	rbytes_init(d);
 	d->regions_free = d->regions_total = MALLOC_INITIAL_REGIONS;
@@ -431,9 +429,9 @@ omalloc_grow(struct dir_info *d)
 	p = MMAP_ERROR(p);
 	if (p == MAP_FAILED)
 		return 1;
-	
+
 	_dl_memset(p, 0, newsize);
-	for (i = 0; i < d->regions_total; i++) { 
+	for (i = 0; i < d->regions_total; i++) {
 		void *q = d->r[i].p;
 		if (q != NULL) {
 			size_t index = hash(q) & mask;
@@ -444,7 +442,7 @@ omalloc_grow(struct dir_info *d)
 		}
 	}
 	/* avoid pages containing meta info to end up in cache */
-	if (_dl_munmap(d->r, d->regions_total * sizeof(struct region_info))) 
+	if (_dl_munmap(d->r, d->regions_total * sizeof(struct region_info)))
 		wrterror("munmap");
 	d->regions_free = d->regions_free + d->regions_total;
 	d->regions_total = newtotal;
@@ -488,7 +486,7 @@ alloc_chunk_info(struct dir_info *d, int bits)
 }
 
 
-/* 
+/*
  * The hashtable uses the assumption that p is never NULL. This holds since
  * non-MAP_FIXED mappings with hint 0 start at BRKSIZ.
  */
@@ -568,7 +566,7 @@ delete(struct dir_info *d, struct region_info *ri)
 
 	}
 }
- 
+
 /*
  * Allocate a page of chunks
  */
@@ -685,7 +683,7 @@ malloc_bytes(struct dir_info *d, size_t size)
 			lp = &bp->bits[i / MALLOC_BITS];
 			if (!*lp) {
 				i += MALLOC_BITS;
-				i &= ~(MALLOC_BITS - 1); 
+				i &= ~(MALLOC_BITS - 1);
 				if (i >= bp->total)
 					i = 0;
 			} else
@@ -852,7 +850,7 @@ omalloc(size_t sz, int zero_fill)
  * print the error message once, to avoid making the problem
  * potentially worse.
  */
-static void  
+static void
 malloc_recurse(void)
 {
 	static int noprint;
@@ -973,7 +971,7 @@ _dl_free(void *ptr)
 	if (ptr == NULL)
 		return;
 
-	malloc_func = "free():";  
+	malloc_func = "free():";
 	if (g_pool == NULL) {
 		wrterror("free() called before allocation");
 		return;
@@ -998,7 +996,7 @@ _dl_calloc(size_t nmemb, size_t size)
 {
 	void *r;
 
-	malloc_func = "calloc():";  
+	malloc_func = "calloc():";
 	if (g_pool == NULL) {
 		if (malloc_init() != 0)
 			return NULL;
@@ -1015,7 +1013,7 @@ _dl_calloc(size_t nmemb, size_t size)
 
 	size *= nmemb;
 	r = omalloc(size, 1);
-  
+
 	malloc_active--;
 	return r;
 }
@@ -1034,7 +1032,7 @@ orealloc(void *p, size_t newsz)
 	r = find(g_pool, p);
 	if (r == NULL)
 		wrterror("bogus pointer (double free?)");
-	REALSIZE(oldsz, r);	
+	REALSIZE(oldsz, r);
 	if (oldsz > MALLOC_MAXCHUNK) {
 		if (oldsz < mopts.malloc_guard)
 			wrterror("guard size");
@@ -1050,8 +1048,8 @@ void *
 _dl_realloc(void *ptr, size_t size)
 {
 	void *r;
-  
-	malloc_func = "realloc():";  
+
+	malloc_func = "realloc():";
 	if (g_pool == NULL) {
 		if (malloc_init() != 0)
 			return NULL;

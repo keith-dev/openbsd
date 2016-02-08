@@ -1,4 +1,4 @@
-/*	$OpenBSD: exec.h,v 1.27 2013/10/17 08:02:20 deraadt Exp $	*/
+/*	$OpenBSD: exec.h,v 1.30 2015/02/09 11:52:47 miod Exp $	*/
 /*	$NetBSD: exec.h,v 1.59 1996/02/09 18:25:09 christos Exp $	*/
 
 /*-
@@ -58,30 +58,10 @@ struct ps_strings {
 };
 
 /*
- * Address of ps_strings structure (in user space).
- */
-#ifdef MACHINE_STACK_GROWS_UP
-#define	PS_STRINGS	((struct ps_strings *)(USRSTACK))
-#else
-#define	PS_STRINGS \
-	((struct ps_strings *)(USRSTACK - sizeof(struct ps_strings)))
-#endif
-
-/*
  * Below the PS_STRINGS and sigtramp, we may require a gap on the stack
  * (used to copyin/copyout various emulation data structures).
  */
 #define	STACKGAPLEN	(2*1024)	/* plenty enough for now */
-
-#ifdef MACHINE_STACK_GROWS_UP
-#define	STACKGAPBASE_UNALIGNED	\
-	((caddr_t)PS_STRINGS + sizeof(struct ps_strings))
-#else
-#define	STACKGAPBASE_UNALIGNED	\
-	((caddr_t)PS_STRINGS - STACKGAPLEN)
-#endif
-#define	STACKGAPBASE		\
-	((caddr_t)ALIGN(STACKGAPBASE_UNALIGNED))
 
 /*
  * the following structures allow execve() to put together processes
@@ -233,6 +213,15 @@ void	new_vmcmd(struct exec_vmcmd_set *evsp,
 extern struct	execsw execsw[];
 extern int	nexecs;
 extern int	exec_maxhdrsz;
+
+/*
+ * If non-zero, stackgap_random specifies the upper limit of the random gap size
+ * added to the fixed stack position. Must be n^2.
+ */
+extern int	stackgap_random;
+
+/* Limit on total PT_OPENBSD_RANDOMIZE bytes. */
+#define ELF_RANDOMIZE_LIMIT 64*1024
 
 #endif /* _KERNEL */
 

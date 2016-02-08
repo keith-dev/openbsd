@@ -1,4 +1,4 @@
-/*	$OpenBSD: uvm_extern.h,v 1.119 2014/07/11 16:35:40 jsg Exp $	*/
+/*	$OpenBSD: uvm_extern.h,v 1.131 2015/02/07 08:21:24 miod Exp $	*/
 /*	$NetBSD: uvm_extern.h,v 1.57 2001/03/09 01:02:12 chs Exp $	*/
 
 /*
@@ -24,8 +24,6 @@
  * THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
  * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
- *
- * from: Id: uvm_extern.h,v 1.1.2.21 1998/02/07 01:16:53 chs Exp
  */
 
 /*-
@@ -80,91 +78,49 @@ typedef struct vm_map *vm_map_t;
 struct vm_page;
 typedef struct vm_page  *vm_page_t;
 
+/*
+ * Bit assignments assigned by UVM_MAPFLAG() and extracted by
+ * UVM_{PROTECTION,INHERIT,MAXPROTECTION,ADVICE}():
+ * bits 0-2	protection
+ *  bit 3	 unused
+ * bits 4-5	inheritance
+ *  bits 6-7	 unused
+ * bits 8-10	max protection
+ *  bit 11	 unused
+ * bits 12-14	advice
+ *  bit 15	 unused
+ * bits 16-N	flags
+ */
+
 /* protections bits */
-#define UVM_PROT_MASK	0x07	/* protection mask */
-#define UVM_PROT_NONE	0x00	/* protection none */
-#define UVM_PROT_ALL	0x07	/* everything */
-#define UVM_PROT_READ	0x01	/* read */
-#define UVM_PROT_WRITE  0x02	/* write */
-#define UVM_PROT_EXEC	0x04	/* exec */
-
-/* protection short codes */
-#define UVM_PROT_R	0x01	/* read */
-#define UVM_PROT_W	0x02	/* write */
-#define UVM_PROT_RW	0x03    /* read-write */
-#define UVM_PROT_X	0x04	/* exec */
-#define UVM_PROT_RX	0x05	/* read-exec */
-#define UVM_PROT_WX	0x06	/* write-exec */
-#define UVM_PROT_RWX	0x07	/* read-write-exec */
-
-/* 0x08: not used */
+#define PROT_MASK	(PROT_READ | PROT_WRITE | PROT_EXEC)
 
 /* inherit codes */
-#define UVM_INH_MASK	0x30	/* inherit mask */
-#define UVM_INH_SHARE	0x00	/* "share" */
-#define UVM_INH_COPY	0x10	/* "copy" */
-#define UVM_INH_NONE	0x20	/* "none" */
-#define UVM_INH_ZERO	0x30	/* "zero" */
-
-/* 0x40, 0x80: not used */
-
-/* bits 0x700: max protection, 0x800: not used */
-
-/* bits 0x7000: advice, 0x8000: not used */
+#define MAP_INHERIT_MASK	0x3	/* inherit mask */
 
 typedef int		vm_prot_t;
 
-/*
- *	Protection values, defined as bits within the vm_prot_t type
- *
- *   These are funky definitions from old CMU VM and are kept
- *   for compatibility reasons, one day they are going to die,
- *   just like everybody else.
- */
-
-#define	VM_PROT_NONE	((vm_prot_t) 0x00)
-
-#define VM_PROT_READ	((vm_prot_t) 0x01)	/* read permission */
-#define VM_PROT_WRITE	((vm_prot_t) 0x02)	/* write permission */
-#define VM_PROT_EXECUTE	((vm_prot_t) 0x04)	/* execute permission */
-
-/*
- *	The default protection for newly-created virtual memory
- */
-
-#define VM_PROT_DEFAULT	(VM_PROT_READ|VM_PROT_WRITE|VM_PROT_EXECUTE)
-
-/*
- *	The maximum privileges possible, for parameter checking.
- */
-
-#define VM_PROT_ALL	(VM_PROT_READ|VM_PROT_WRITE|VM_PROT_EXECUTE)
-
-/* advice: matches MADV_* from sys/mman.h */
-#define UVM_ADV_NORMAL	0x0	/* 'normal' */
-#define UVM_ADV_RANDOM	0x1	/* 'random' */
-#define UVM_ADV_SEQUENTIAL 0x2	/* 'sequential' */
-/* 0x3: will need, 0x4: dontneed */
-#define UVM_ADV_MASK	0x7	/* mask */
+#define MADV_MASK	0x7	/* mask */
 
 /* mapping flags */
-#define UVM_FLAG_FIXED   0x010000 /* find space */
-#define UVM_FLAG_OVERLAY 0x020000 /* establish overlay */
-#define UVM_FLAG_NOMERGE 0x040000 /* don't merge map entries */
-#define UVM_FLAG_COPYONW 0x080000 /* set copy_on_write flag */
-#define UVM_FLAG_AMAPPAD 0x100000 /* for bss: pad amap to reduce malloc() */
-#define UVM_FLAG_TRYLOCK 0x200000 /* fail if we can not lock map */
-#define	UVM_FLAG_HOLE    0x400000 /* no backend */
-#define UVM_FLAG_QUERY   0x800000 /* do everything, except actual execution */
+#define UVM_FLAG_FIXED   0x0010000 /* find space */
+#define UVM_FLAG_OVERLAY 0x0020000 /* establish overlay */
+#define UVM_FLAG_NOMERGE 0x0040000 /* don't merge map entries */
+#define UVM_FLAG_COPYONW 0x0080000 /* set copy_on_write flag */
+#define UVM_FLAG_AMAPPAD 0x0100000 /* for bss: pad amap to reduce malloc() */
+#define UVM_FLAG_TRYLOCK 0x0200000 /* fail if we can not lock map */
+#define UVM_FLAG_HOLE    0x0400000 /* no backend */
+#define UVM_FLAG_QUERY   0x0800000 /* do everything, except actual execution */
+#define UVM_FLAG_NOFAULT 0x1000000 /* don't fault */
 
 /* macros to extract info */
-#define UVM_PROTECTION(X)	((X) & UVM_PROT_MASK)
-#define UVM_INHERIT(X)		(((X) & UVM_INH_MASK) >> 4)
-#define UVM_MAXPROTECTION(X)	(((X) >> 8) & UVM_PROT_MASK)
-#define UVM_ADVICE(X)		(((X) >> 12) & UVM_ADV_MASK)
+#define UVM_PROTECTION(X)	((X) & PROT_MASK)
+#define UVM_INHERIT(X)		(((X) >> 4) & MAP_INHERIT_MASK)
+#define UVM_MAXPROTECTION(X)	(((X) >> 8) & PROT_MASK)
+#define UVM_ADVICE(X)		(((X) >> 12) & MADV_MASK)
 
-#define UVM_MAPFLAG(PROT,MAXPROT,INH,ADVICE,FLAGS) \
-	((MAXPROT << 8)|(PROT)|(INH)|((ADVICE) << 12)|(FLAGS))
+#define UVM_MAPFLAG(prot, maxprot, inh, advice, flags) \
+	((prot) | ((maxprot) << 8) | ((inh) << 4) | ((advice) << 12) | (flags))
 
 /* magic offset value */
 #define UVM_UNKNOWN_OFFSET ((voff_t) -1)
@@ -207,7 +163,7 @@ typedef int		vm_prot_t;
 
 #include <sys/queue.h>
 #include <sys/tree.h>
-#include <sys/lock.h>
+#include <sys/mman.h>
 
 #ifdef _KERNEL
 struct buf;
@@ -306,6 +262,8 @@ extern struct vm_map *kernel_map;
 extern struct vm_map *kmem_map;
 extern struct vm_map *phys_map;
 
+/* base of kernel virtual memory */
+extern vaddr_t vm_min_kernel_address;
 
 /* zalloc zeros memory, alloc does not */
 #define uvm_km_zalloc(MAP,SIZE) uvm_km_alloc1(MAP,SIZE,0,TRUE)
@@ -383,7 +341,6 @@ struct kmem_va_mode {
 	vsize_t kv_align;
 	char kv_wait;
 	char kv_singlepage;
-	char kv_executable;
 };
 
 /*
@@ -460,6 +417,7 @@ void			km_free(void *, size_t, const struct kmem_va_mode *,
 			    const struct kmem_pa_mode *);
 int			uvm_map(vm_map_t, vaddr_t *, vsize_t,
 			    struct uvm_object *, voff_t, vsize_t, uvm_flag_t);
+int			uvm_mapanon(vm_map_t, vaddr_t *, vsize_t, vsize_t, uvm_flag_t);
 int			uvm_map_pageable(vm_map_t, vaddr_t, 
 			    vaddr_t, boolean_t, int);
 int			uvm_map_pageable_all(vm_map_t, int, vsize_t);
@@ -478,9 +436,6 @@ struct vmspace		*uvmspace_share(struct process *);
 void			uvm_meter(void);
 int			uvm_sysctl(int *, u_int, void *, size_t *, 
 			    void *, size_t, struct proc *);
-int			uvm_mmap(vm_map_t, vaddr_t *, vsize_t,
-			    vm_prot_t, vm_prot_t, int, 
-			    caddr_t, voff_t, vsize_t, struct proc *);
 struct vm_page		*uvm_pagealloc(struct uvm_object *,
 			    voff_t, struct vm_anon *, int);
 vaddr_t			uvm_pagealloc_contig(vaddr_t, vaddr_t,
@@ -514,14 +469,16 @@ int			uvm_coredump_walkmap(struct proc *,
 			    struct uvm_coredump_state *), void *);
 void			uvm_grow(struct proc *, vaddr_t);
 void			uvm_deallocate(vm_map_t, vaddr_t, vsize_t);
-void			uvm_vnp_setsize(struct vnode *, voff_t);
-void			uvm_vnp_sync(struct mount *);
-void 			uvm_vnp_terminate(struct vnode *);
-boolean_t		uvm_vnp_uncache(struct vnode *);
 struct uvm_object	*uvn_attach(struct vnode *, vm_prot_t);
+void			uvm_pagezero_thread(void *);
 void			kmeminit_nkmempages(void);
 void			kmeminit(void);
 extern u_int		nkmempages;
+
+struct process;
+struct kinfo_vmentry;
+int			fill_vmmap(struct process *, struct kinfo_vmentry *,
+			    size_t *);
 
 #endif /* _KERNEL */
 

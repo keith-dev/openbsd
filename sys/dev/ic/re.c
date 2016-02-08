@@ -1,4 +1,4 @@
-/*	$OpenBSD: re.c,v 1.155 2014/07/22 13:12:12 mpi Exp $	*/
+/*	$OpenBSD: re.c,v 1.175 2015/02/09 03:09:57 dlg Exp $	*/
 /*	$FreeBSD: if_re.c,v 1.31 2004/09/04 07:54:05 ru Exp $	*/
 /*
  * Copyright (c) 1997, 1998-2003
@@ -33,7 +33,7 @@
  */
 
 /*
- * RealTek 8139C+/8169/8169S/8110S PCI NIC driver
+ * Realtek 8139C+/8169/8169S/8110S PCI NIC driver
  *
  * Written by Bill Paul <wpaul@windriver.com>
  * Senior Networking Software Engineer
@@ -41,7 +41,7 @@
  */
 
 /*
- * This driver is designed to support RealTek's next generation of
+ * This driver is designed to support Realtek's next generation of
  * 10/100 and 10/100/1000 PCI ethernet controllers. There are currently
  * seven devices in this family: the RTL8139C+, the RTL8169, the RTL8169S,
  * RTL8110S, the RTL8168, the RTL8111 and the RTL8101E.
@@ -96,7 +96,7 @@
  * (the 'S' stands for 'single-chip'). These devices have the same
  * programming API as the older 8169, but also have some vendor-specific
  * registers for the on-board PHY. The 8110S is a LAN-on-motherboard
- * part designed to be pin-compatible with the RealTek 8100 10/100 chip.
+ * part designed to be pin-compatible with the Realtek 8100 10/100 chip.
  * 
  * This driver takes advantage of the RX and TX checksum offload and
  * VLAN tag insertion/extraction features. It also implements TX
@@ -121,14 +121,14 @@
 #include <sys/timeout.h>
 #include <sys/socket.h>
 
+#include <machine/bus.h>
+
 #include <net/if.h>
 #include <net/if_dl.h>
 #include <net/if_media.h>
 
-#ifdef INET
 #include <netinet/in.h>
 #include <netinet/if_ether.h>
-#endif
 
 #if NVLAN > 0
 #include <net/if_types.h>
@@ -142,8 +142,7 @@
 #include <dev/mii/mii.h>
 #include <dev/mii/miivar.h>
 
-#include <dev/pci/pcireg.h>
-#include <dev/pci/pcivar.h>
+#include <dev/pci/pcidevs.h>
 
 #include <dev/ic/rtl81x9reg.h>
 #include <dev/ic/revar.h>
@@ -523,6 +522,36 @@ re_miibus_writereg(struct device *dev, int phy, int reg, int data)
 void
 re_miibus_statchg(struct device *dev)
 {
+	struct rl_softc		*sc = (struct rl_softc *)dev;
+	struct ifnet		*ifp = &sc->sc_arpcom.ac_if;
+	struct mii_data		*mii = &sc->sc_mii;
+
+	if ((ifp->if_flags & IFF_RUNNING) == 0)
+		return;
+
+	sc->rl_flags &= ~RL_FLAG_LINK;
+	if ((mii->mii_media_status & (IFM_ACTIVE | IFM_AVALID)) ==
+	    (IFM_ACTIVE | IFM_AVALID)) {
+		switch (IFM_SUBTYPE(mii->mii_media_active)) {
+		case IFM_10_T:
+		case IFM_100_TX:
+			sc->rl_flags |= RL_FLAG_LINK;
+			break;
+		case IFM_1000_T:
+			if ((sc->rl_flags & RL_FLAG_FASTETHER) != 0)
+				break;
+			sc->rl_flags |= RL_FLAG_LINK;
+			break;
+		default:
+			break;
+		}
+	}
+
+	/*
+	 * Realtek controllers do not provide an interface to
+	 * Tx/Rx MACs for resolved speed, duplex and flow-control
+	 * parameters.
+	 */
 }
 
 void
@@ -573,12 +602,12 @@ re_iff(struct rl_softc *sc)
 	}
 
 	/*
-	 * For some unfathomable reason, RealTek decided to reverse
+	 * For some unfathomable reason, Realtek decided to reverse
 	 * the order of the multicast hash registers in the PCI Express
 	 * parts. This means we have to write the hash pattern in reverse
 	 * order for those devices.
 	 */
-	if (sc->rl_flags & RL_FLAG_INVMAR) {
+	if (sc->rl_flags & RL_FLAG_PCIE) {
 		CSR_WRITE_4(sc, RL_MAR0, swap32(hashes[1]));
 		CSR_WRITE_4(sc, RL_MAR4, swap32(hashes[0]));
 	} else {
@@ -604,7 +633,7 @@ re_reset(struct rl_softc *sc)
 	if (i == RL_TIMEOUT)
 		printf("%s: reset never completed!\n", sc->sc_dev.dv_xname);
 
-	if (sc->rl_flags & RL_FLAG_MACLDPS)
+	if (sc->rl_flags & RL_FLAG_MACRESET)
 		CSR_WRITE_1(sc, RL_LDPS, 1);
 }
 
@@ -639,13 +668,14 @@ re_attach(struct rl_softc *sc, const char *intrstr)
 
 	switch (sc->sc_hwrev) {
 	case RL_HWREV_8139CPLUS:
-		sc->rl_flags |= RL_FLAG_NOJUMBO | RL_FLAG_AUTOPAD;
+		sc->rl_flags |= RL_FLAG_FASTETHER | RL_FLAG_AUTOPAD;
+		sc->rl_max_mtu = RL_MTU;
 		break;
 	case RL_HWREV_8100E:
 	case RL_HWREV_8100E_SPIN2:
 	case RL_HWREV_8101E:
-		sc->rl_flags |= RL_FLAG_NOJUMBO | RL_FLAG_INVMAR |
-		    RL_FLAG_PHYWAKE;
+		sc->rl_flags |= RL_FLAG_PHYWAKE | RL_FLAG_FASTETHER;
+		sc->rl_max_mtu = RL_MTU;
 		break;
 	case RL_HWREV_8103E:
 		sc->rl_flags |= RL_FLAG_MACSLEEP;
@@ -653,70 +683,104 @@ re_attach(struct rl_softc *sc, const char *intrstr)
 	case RL_HWREV_8102E:
 	case RL_HWREV_8102EL:
 	case RL_HWREV_8102EL_SPIN1:
-		sc->rl_flags |= RL_FLAG_NOJUMBO | RL_FLAG_INVMAR |
-		    RL_FLAG_PHYWAKE | RL_FLAG_PAR | RL_FLAG_DESCV2 |
-		    RL_FLAG_MACSTAT | RL_FLAG_CMDSTOP | RL_FLAG_AUTOPAD;
+		sc->rl_flags |= RL_FLAG_PHYWAKE | RL_FLAG_PAR |
+		    RL_FLAG_DESCV2 | RL_FLAG_MACSTAT | RL_FLAG_FASTETHER |
+		    RL_FLAG_CMDSTOP | RL_FLAG_AUTOPAD;
+		sc->rl_max_mtu = RL_MTU;
 		break;
 	case RL_HWREV_8401E:
-	case RL_HWREV_8402:
 	case RL_HWREV_8105E:
 	case RL_HWREV_8105E_SPIN1:
 	case RL_HWREV_8106E:
-		sc->rl_flags |= RL_FLAG_INVMAR | RL_FLAG_PHYWAKE |
-		    RL_FLAG_PHYWAKE_PM | RL_FLAG_PAR | RL_FLAG_DESCV2 |
-		    RL_FLAG_MACSTAT | RL_FLAG_CMDSTOP | RL_FLAG_AUTOPAD |
-		    RL_FLAG_NOJUMBO;
+		sc->rl_flags |= RL_FLAG_PHYWAKE | RL_FLAG_PHYWAKE_PM |
+		    RL_FLAG_PAR | RL_FLAG_DESCV2 | RL_FLAG_MACSTAT |
+		    RL_FLAG_FASTETHER | RL_FLAG_CMDSTOP | RL_FLAG_AUTOPAD;
+		sc->rl_max_mtu = RL_MTU;
+		break;
+	case RL_HWREV_8402:
+		sc->rl_flags |= RL_FLAG_PHYWAKE | RL_FLAG_PHYWAKE_PM |
+		    RL_FLAG_PAR | RL_FLAG_DESCV2 | RL_FLAG_MACSTAT |
+		    RL_FLAG_FASTETHER | RL_FLAG_CMDSTOP | RL_FLAG_AUTOPAD |
+		    RL_FLAG_CMDSTOP_WAIT_TXQ;
+		sc->rl_max_mtu = RL_MTU;
 		break;
 	case RL_HWREV_8168B_SPIN1:
 	case RL_HWREV_8168B_SPIN2:
+		sc->rl_flags |= RL_FLAG_WOLRXENB;
+		/* FALLTHROUGH */
 	case RL_HWREV_8168B_SPIN3:
-		sc->rl_flags |= RL_FLAG_INVMAR | RL_FLAG_PHYWAKE |
-		    RL_FLAG_MACSTAT | RL_FLAG_HWIM;
+		sc->rl_flags |= RL_FLAG_PHYWAKE | RL_FLAG_MACSTAT;
+		sc->rl_max_mtu = RL_MTU;
 		break;
 	case RL_HWREV_8168C_SPIN2:
 		sc->rl_flags |= RL_FLAG_MACSLEEP;
 		/* FALLTHROUGH */
 	case RL_HWREV_8168C:
 	case RL_HWREV_8168CP:
-	case RL_HWREV_8168DP:
-		sc->rl_flags |= RL_FLAG_INVMAR | RL_FLAG_PHYWAKE |
-		    RL_FLAG_PAR | RL_FLAG_DESCV2 | RL_FLAG_MACSTAT |
-		    RL_FLAG_HWIM | RL_FLAG_CMDSTOP | RL_FLAG_AUTOPAD;
-		/*
-		 * These controllers support jumbo frame but it seems
-		 * that enabling it requires touching additional magic
-		 * registers. Depending on MAC revisions some
-		 * controllers need to disable checksum offload. So
-		 * disable jumbo frame until I have better idea what
-		 * it really requires to make it support.
-		 * RTL8168C/CP : supports up to 6KB jumbo frame.
-		 * RTL8111C/CP : supports up to 9KB jumbo frame.
-		 */
-		sc->rl_flags |= RL_FLAG_NOJUMBO;
+		sc->rl_flags |= RL_FLAG_PHYWAKE | RL_FLAG_PAR |
+		    RL_FLAG_DESCV2 | RL_FLAG_MACSTAT | RL_FLAG_CMDSTOP |
+		    RL_FLAG_AUTOPAD | RL_FLAG_JUMBOV2 | RL_FLAG_WOL_MANLINK;
+		sc->rl_max_mtu = RL_JUMBO_MTU_6K;
 		break;
 	case RL_HWREV_8168D:
+		sc->rl_flags |= RL_FLAG_PHYWAKE | RL_FLAG_PHYWAKE_PM |
+		    RL_FLAG_PAR | RL_FLAG_DESCV2 | RL_FLAG_MACSTAT |
+		    RL_FLAG_CMDSTOP | RL_FLAG_AUTOPAD | RL_FLAG_JUMBOV2 |
+		    RL_FLAG_WOL_MANLINK;
+		sc->rl_max_mtu = RL_JUMBO_MTU_9K;
+		break;
+	case RL_HWREV_8168DP:
+		sc->rl_flags |= RL_FLAG_PHYWAKE | RL_FLAG_PAR |
+		    RL_FLAG_DESCV2 | RL_FLAG_MACSTAT | RL_FLAG_AUTOPAD |
+		    RL_FLAG_JUMBOV2 | RL_FLAG_WAIT_TXPOLL | RL_FLAG_WOL_MANLINK;
+		sc->rl_max_mtu = RL_JUMBO_MTU_9K;
+		break;
 	case RL_HWREV_8168E:
-		sc->rl_flags |= RL_FLAG_INVMAR | RL_FLAG_PHYWAKE |
-		    RL_FLAG_PHYWAKE_PM | RL_FLAG_PAR | RL_FLAG_DESCV2 |
-		    RL_FLAG_MACSTAT | RL_FLAG_HWIM | RL_FLAG_CMDSTOP |
-		    RL_FLAG_AUTOPAD | RL_FLAG_NOJUMBO;
+		sc->rl_flags |= RL_FLAG_PHYWAKE | RL_FLAG_PHYWAKE_PM |
+		    RL_FLAG_PAR | RL_FLAG_DESCV2 | RL_FLAG_MACSTAT |
+		    RL_FLAG_CMDSTOP | RL_FLAG_AUTOPAD | RL_FLAG_JUMBOV2 |
+		    RL_FLAG_WOL_MANLINK;
+		sc->rl_max_mtu = RL_JUMBO_MTU_9K;
 		break;
 	case RL_HWREV_8168E_VL:
+		sc->rl_flags |= RL_FLAG_EARLYOFF | RL_FLAG_PHYWAKE | RL_FLAG_PAR |
+		    RL_FLAG_DESCV2 | RL_FLAG_MACSTAT | RL_FLAG_CMDSTOP |
+		    RL_FLAG_AUTOPAD | RL_FLAG_JUMBOV2 | RL_FLAG_CMDSTOP_WAIT_TXQ |
+		    RL_FLAG_WOL_MANLINK;
+		sc->rl_max_mtu = RL_JUMBO_MTU_6K;
+		break;
 	case RL_HWREV_8168F:
 		sc->rl_flags |= RL_FLAG_EARLYOFF;
 		/* FALLTHROUGH */
 	case RL_HWREV_8411:
-		sc->rl_flags |= RL_FLAG_INVMAR | RL_FLAG_PHYWAKE |
-		    RL_FLAG_PAR | RL_FLAG_DESCV2 | RL_FLAG_MACSTAT |
-		    RL_FLAG_CMDSTOP | RL_FLAG_AUTOPAD | RL_FLAG_NOJUMBO;
+		sc->rl_flags |= RL_FLAG_PHYWAKE | RL_FLAG_PAR |
+		    RL_FLAG_DESCV2 | RL_FLAG_MACSTAT | RL_FLAG_CMDSTOP |
+		    RL_FLAG_AUTOPAD | RL_FLAG_JUMBOV2 | RL_FLAG_CMDSTOP_WAIT_TXQ |
+		    RL_FLAG_WOL_MANLINK;
+		sc->rl_max_mtu = RL_JUMBO_MTU_9K;
 		break;
 	case RL_HWREV_8168EP:
 	case RL_HWREV_8168G:
 	case RL_HWREV_8411B:
+		sc->rl_flags |= RL_FLAG_PHYWAKE | RL_FLAG_PAR |
+		    RL_FLAG_DESCV2 | RL_FLAG_MACSTAT | RL_FLAG_CMDSTOP |
+		    RL_FLAG_AUTOPAD | RL_FLAG_JUMBOV2 | RL_FLAG_CMDSTOP_WAIT_TXQ |
+		    RL_FLAG_WOL_MANLINK | RL_FLAG_EARLYOFFV2 | RL_FLAG_RXDV_GATED;
+		sc->rl_max_mtu = RL_JUMBO_MTU_9K;
+		break;
 	case RL_HWREV_8168GU:
-		sc->rl_flags |= RL_FLAG_INVMAR | RL_FLAG_PHYWAKE |
-		    RL_FLAG_PAR | RL_FLAG_DESCV2 | RL_FLAG_MACSTAT |
-		    RL_FLAG_CMDSTOP | RL_FLAG_AUTOPAD | RL_FLAG_NOJUMBO |
+		if (sc->sc_product == PCI_PRODUCT_REALTEK_RT8101E) {
+			/* RTL8106EUS */
+			sc->rl_flags |= RL_FLAG_FASTETHER;
+			sc->rl_max_mtu = RL_MTU;
+		} else {
+			sc->rl_flags |= RL_FLAG_JUMBOV2 | RL_FLAG_WOL_MANLINK;
+			sc->rl_max_mtu = RL_JUMBO_MTU_9K;
+		}
+
+		sc->rl_flags |= RL_FLAG_PHYWAKE | RL_FLAG_PAR |
+		    RL_FLAG_DESCV2 | RL_FLAG_MACSTAT | RL_FLAG_CMDSTOP |
+		    RL_FLAG_AUTOPAD | RL_FLAG_CMDSTOP_WAIT_TXQ |
 		    RL_FLAG_EARLYOFFV2 | RL_FLAG_RXDV_GATED;
 		break;
 	case RL_HWREV_8169_8110SB:
@@ -728,10 +792,27 @@ re_attach(struct rl_softc *sc, const char *intrstr)
 	case RL_HWREV_8169:
 	case RL_HWREV_8169S:
 	case RL_HWREV_8110S:
-		sc->rl_flags |= RL_FLAG_MACLDPS;
+		sc->rl_flags |= RL_FLAG_MACRESET;
+		sc->rl_max_mtu = RL_JUMBO_MTU_7K;
 		break;
 	default:
 		break;
+	}
+
+	if (sc->sc_hwrev == RL_HWREV_8139CPLUS) {
+		sc->rl_cfg0 = RL_8139_CFG0;
+		sc->rl_cfg1 = RL_8139_CFG1;
+		sc->rl_cfg2 = 0;
+		sc->rl_cfg3 = RL_8139_CFG3;
+		sc->rl_cfg4 = RL_8139_CFG4;
+		sc->rl_cfg5 = RL_8139_CFG5;
+	} else {
+		sc->rl_cfg0 = RL_CFG0;
+		sc->rl_cfg1 = RL_CFG1;
+		sc->rl_cfg2 = RL_CFG2;
+		sc->rl_cfg3 = RL_CFG3;
+		sc->rl_cfg4 = RL_CFG4;
+		sc->rl_cfg5 = RL_CFG5;
 	}
 
 	/* Reset the adapter. */
@@ -752,7 +833,7 @@ re_attach(struct rl_softc *sc, const char *intrstr)
 	else {
 		u_int8_t cfg2;
 
-		cfg2 = CSR_READ_1(sc, RL_CFG2);
+		cfg2 = CSR_READ_1(sc, sc->rl_cfg2);
 		switch (cfg2 & RL_CFG2_PCI_MASK) {
 		case RL_CFG2_PCI_33MHZ:
  			sc->rl_bus_speed = 33;
@@ -792,7 +873,7 @@ re_attach(struct rl_softc *sc, const char *intrstr)
 		re_read_eeprom(sc, (caddr_t)as, RL_EE_EADDR, 3);
 		for (i = 0; i < ETHER_ADDR_LEN / 2; i++)
 			as[i] = letoh16(as[i]);
-		bcopy(as, eaddr, sizeof(eaddr));
+		bcopy(as, eaddr, ETHER_ADDR_LEN);
 
 #ifdef __armish__
 		/*
@@ -957,8 +1038,8 @@ re_attach(struct rl_softc *sc, const char *intrstr)
 	ifp->if_ioctl = re_ioctl;
 	ifp->if_start = re_start;
 	ifp->if_watchdog = re_watchdog;
-	if ((sc->rl_flags & RL_FLAG_NOJUMBO) == 0)
-		ifp->if_hardmtu = RL_JUMBO_MTU;
+	if ((sc->rl_flags & RL_FLAG_JUMBOV2) == 0)
+		ifp->if_hardmtu = sc->rl_max_mtu;
 	IFQ_SET_MAXLEN(&ifp->if_snd, RL_TX_QLEN);
 	IFQ_SET_READY(&ifp->if_snd);
 
@@ -1021,7 +1102,6 @@ re_attach(struct rl_softc *sc, const char *intrstr)
 	/*
 	 * Call MI attach routine.
 	 */
-	re_reset(sc);
 	if_attach(ifp);
 	ether_ifattach(ifp);
 
@@ -1192,6 +1272,7 @@ re_rx_list_fill(struct rl_softc *sc)
 int
 re_rxeof(struct rl_softc *sc)
 {
+	struct mbuf_list ml = MBUF_LIST_INITIALIZER();
 	struct mbuf	*m;
 	struct ifnet	*ifp;
 	int		i, total_len, rx = 0;
@@ -1244,7 +1325,7 @@ re_rxeof(struct rl_softc *sc)
 		 * it is 13 bits (since the max RX frame length is 16K).
 		 * Unfortunately, all 32 bits in the status word
 		 * were already used, so to make room for the extra
-		 * length bit, RealTek took out the 'frame alignment
+		 * length bit, Realtek took out the 'frame alignment
 		 * error' bit and shifted the other status bits
 		 * over one slot. The OWN, EOR, FS and LS bits are
 		 * still in the same places. We have already extracted
@@ -1302,7 +1383,6 @@ re_rxeof(struct rl_softc *sc)
 			    (total_len - ETHER_CRC_LEN);
 
 		ifp->if_ipackets++;
-		m->m_pkthdr.rcvif = ifp;
 
 		/* Do RX checksumming */
 
@@ -1342,15 +1422,13 @@ re_rxeof(struct rl_softc *sc)
 		}
 #endif
 
-#if NBPFILTER > 0
-		if (ifp->if_bpf)
-			bpf_mtap_ether(ifp->if_bpf, m, BPF_DIRECTION_IN);
-#endif
-		ether_input_mbuf(ifp, m);
+		ml_enqueue(&ml, m);
 	}
 
 	sc->rl_ldata.rl_rx_considx = i;
 	re_rx_list_fill(sc);
+
+	if_input(ifp, &ml);
 
 	return (rx);
 }
@@ -1424,26 +1502,17 @@ re_tick(void *xsc)
 {
 	struct rl_softc	*sc = xsc;
 	struct mii_data	*mii;
-	struct ifnet	*ifp;
 	int s;
 
-	ifp = &sc->sc_arpcom.ac_if;
 	mii = &sc->sc_mii;
 
 	s = splnet();
 
 	mii_tick(mii);
-	if (sc->rl_flags & RL_FLAG_LINK) {
-		if (!(mii->mii_media_status & IFM_ACTIVE))
-			sc->rl_flags &= ~RL_FLAG_LINK;
-	} else {
-		if (mii->mii_media_status & IFM_ACTIVE &&
-		    IFM_SUBTYPE(mii->mii_media_active) != IFM_NONE) {
-			sc->rl_flags |= RL_FLAG_LINK;
-			if (!IFQ_IS_EMPTY(&ifp->if_snd))
-				re_start(ifp);
-		}
-	}
+
+	if ((sc->rl_flags & RL_FLAG_LINK) == 0)
+		re_miibus_statchg(&sc->sc_dev);
+
 	splx(s);
 
 	timeout_add_sec(&sc->timer_handle, 1);
@@ -1488,14 +1557,7 @@ re_intr(void *arg)
 		}
 
 		if (status & RL_ISR_SYSTEM_ERR) {
-			re_reset(sc);
 			re_init(ifp);
-			claimed = 1;
-		}
-
-		if (status & RL_ISR_LINKCHG) {
-			timeout_del(&sc->timer_handle);
-			re_tick(sc);
 			claimed = 1;
 		}
 	}
@@ -1528,8 +1590,7 @@ re_intr(void *arg)
 		}
 	}
 
-	if (tx && !IFQ_IS_EMPTY(&ifp->if_snd))
-		re_start(ifp);
+	re_start(ifp);
 
 	CSR_WRITE_2(sc, RL_IMR, sc->rl_intrs);
 
@@ -1577,20 +1638,41 @@ re_encap(struct rl_softc *sc, struct mbuf *m, int *idx)
 
 	txq = &sc->rl_ldata.rl_txq[*idx];
 	map = txq->txq_dmamap;
+
 	error = bus_dmamap_load_mbuf(sc->sc_dmat, map, m,
 	    BUS_DMA_WRITE|BUS_DMA_NOWAIT);
-	if (error) {
-		/* XXX try to defrag if EFBIG? */
-		printf("%s: can't map mbuf (error %d)\n",
-		    sc->sc_dev.dv_xname, error);
-		return (error);
+	switch (error) {
+	case 0:
+		break;
+
+	case EFBIG:
+		if (m_defrag(m, M_DONTWAIT) == 0 &&
+		    bus_dmamap_load_mbuf(sc->sc_dmat, map, m,
+		    BUS_DMA_WRITE|BUS_DMA_NOWAIT) == 0)
+			break;
+
+		/* FALLTHROUGH */
+	default:
+		return (ENOBUFS);
 	}
 
 	nsegs = map->dm_nsegs;
 	pad = 0;
-	if ((sc->rl_flags & RL_FLAG_DESCV2) == 0 &&
-	    m->m_pkthdr.len <= RL_IP4CSUMTX_PADLEN &&
-	    (csum_flags & RL_TDESC_CMD_IPCSUM) != 0) {
+
+	/*
+	 * With some of the RealTek chips, using the checksum offload
+	 * support in conjunction with the autopadding feature results
+	 * in the transmission of corrupt frames. For example, if we
+	 * need to send a really small IP fragment that's less than 60
+	 * bytes in size, and IP header checksumming is enabled, the
+	 * resulting ethernet frame that appears on the wire will
+	 * have garbled payload. To work around this, if TX IP checksum
+	 * offload is enabled, we always manually pad short frames out
+	 * to the minimum ethernet frame size.
+	 */
+	if ((sc->rl_flags & RL_FLAG_AUTOPAD) == 0 &&
+	    m->m_pkthdr.len < RL_IP4CSUMTX_PADLEN &&
+	    (m->m_pkthdr.csum_flags & M_IPV4_CSUM_OUT) != 0) {
 		pad = 1;
 		nsegs++;
 	}
@@ -1648,7 +1730,7 @@ re_encap(struct rl_softc *sc, struct mbuf *m, int *idx)
 				RL_TXDESCSYNC(sc, uidx,
 				    BUS_DMASYNC_PREREAD|BUS_DMASYNC_PREWRITE);
 			}
-			error = ENOBUFS;
+			error = EBUSY;
 			goto fail_unload;
 		}
 
@@ -1717,21 +1799,20 @@ fail_unload:
 void
 re_start(struct ifnet *ifp)
 {
-	struct rl_softc	*sc;
-	int		idx, queued = 0;
+	struct rl_softc	*sc = ifp->if_softc;
+	struct mbuf	*m;
+	int		idx, queued = 0, error;
 
-	sc = ifp->if_softc;
-
-	if (ifp->if_flags & IFF_OACTIVE)
+	if ((ifp->if_flags & (IFF_RUNNING | IFF_OACTIVE)) != IFF_RUNNING)
 		return;
 	if ((sc->rl_flags & RL_FLAG_LINK) == 0)
 		return;
+	if (IFQ_IS_EMPTY(&ifp->if_snd))
+		return;
 
 	idx = sc->rl_ldata.rl_txq_prodidx;
-	for (;;) {
-		struct mbuf *m;
-		int error;
 
+	for (;;) {
 		IFQ_POLL(&ifp->if_snd, m);
 		if (m == NULL)
 			break;
@@ -1743,18 +1824,17 @@ re_start(struct ifnet *ifp)
 		}
 
 		error = re_encap(sc, m, &idx);
-		if (error == EFBIG &&
-		    sc->rl_ldata.rl_tx_free == RL_TX_DESC_CNT(sc)) {
+		if (error != 0 && error != ENOBUFS) {
+			ifp->if_flags |= IFF_OACTIVE;
+			break;
+		} else if (error != 0) {
 			IFQ_DEQUEUE(&ifp->if_snd, m);
 			m_freem(m);
 			ifp->if_oerrors++;
 			continue;
 		}
-		if (error) {
-			ifp->if_flags |= IFF_OACTIVE;
-			break;
-		}
 
+		/* now we are committed to transmit the packet */
 		IFQ_DEQUEUE(&ifp->if_snd, m);
 		queued++;
 
@@ -1799,6 +1879,9 @@ re_init(struct ifnet *ifp)
 	 * Cancel pending I/O and free all RX/TX buffers.
 	 */
 	re_stop(ifp);
+
+	/* Put controller into known state. */
+	re_reset(sc);
 
 	/*
 	 * Enable C+ RX and TX mode, as well as VLAN stripping and
@@ -1893,12 +1976,15 @@ re_init(struct ifnet *ifp)
 	 * For 8169 gigE NICs, set the max allowed RX packet
 	 * size so we can receive jumbo frames.
 	 */
-	if (sc->sc_hwrev != RL_HWREV_8139CPLUS)
-		CSR_WRITE_2(sc, RL_MAXRXPKTLEN, 16383);
+	if (sc->sc_hwrev != RL_HWREV_8139CPLUS) {
+		if (sc->rl_flags & RL_FLAG_PCIE)
+			CSR_WRITE_2(sc, RL_MAXRXPKTLEN, RE_RX_DESC_BUFLEN);
+		else
+			CSR_WRITE_2(sc, RL_MAXRXPKTLEN, 16383);
+	}
 
-	mii_mediachg(&sc->sc_mii);
-
-	CSR_WRITE_1(sc, RL_CFG1, CSR_READ_1(sc, RL_CFG1) | RL_CFG1_DRVLOAD);
+	CSR_WRITE_1(sc, sc->rl_cfg1, CSR_READ_1(sc, sc->rl_cfg1) |
+	    RL_CFG1_DRVLOAD);
 
 	ifp->if_flags |= IFF_RUNNING;
 	ifp->if_flags &= ~IFF_OACTIVE;
@@ -1906,6 +1992,7 @@ re_init(struct ifnet *ifp)
 	splx(s);
 
 	sc->rl_flags &= ~RL_FLAG_LINK;
+	mii_mediachg(&sc->sc_mii);
 
 	timeout_add_sec(&sc->timer_handle, 1);
 
@@ -1955,10 +2042,8 @@ re_ioctl(struct ifnet *ifp, u_long command, caddr_t data)
 		ifp->if_flags |= IFF_UP;
 		if (!(ifp->if_flags & IFF_RUNNING))
 			re_init(ifp);
-#ifdef INET
 		if (ifa->ifa_addr->sa_family == AF_INET)
 			arp_ifinit(&sc->sc_arpcom, ifa);
-#endif /* INET */
 		break;
 	case SIOCSIFFLAGS:
 		if (ifp->if_flags & IFF_UP) {
@@ -1975,6 +2060,10 @@ re_ioctl(struct ifnet *ifp, u_long command, caddr_t data)
 	case SIOCSIFMEDIA:
 		error = ifmedia_ioctl(ifp, ifr, &sc->sc_mii.mii_media, command);
 		break;
+	case SIOCGIFRXR:
+		error = if_rxr_ioctl((struct if_rxrinfo *)ifr->ifr_data,
+		    NULL, MCLBYTES, &sc->rl_ldata.rl_rx_ring);
+ 		break;
 	default:
 		error = ether_ioctl(ifp, &sc->sc_arpcom, command, data);
 	}
@@ -2028,7 +2117,44 @@ re_stop(struct ifnet *ifp)
 
 	mii_down(&sc->sc_mii);
 
-	CSR_WRITE_1(sc, RL_COMMAND, 0x00);
+	/*
+	 * Disable accepting frames to put RX MAC into idle state.
+	 * Otherwise it's possible to get frames while stop command
+	 * execution is in progress and controller can DMA the frame
+	 * to already freed RX buffer during that period.
+	 */
+	CSR_WRITE_4(sc, RL_RXCFG, CSR_READ_4(sc, RL_RXCFG) &
+	    ~(RL_RXCFG_RX_ALLPHYS | RL_RXCFG_RX_BROAD | RL_RXCFG_RX_INDIV |
+	    RL_RXCFG_RX_MULTI));
+
+	if (sc->rl_flags & RL_FLAG_WAIT_TXPOLL) {
+		for (i = RL_TIMEOUT; i > 0; i--) {
+			if ((CSR_READ_1(sc, sc->rl_txstart) &
+			    RL_TXSTART_START) == 0)
+				break;
+			DELAY(20);
+		}
+		if (i == 0)
+			printf("%s: stopping TX poll timed out!\n",
+			    sc->sc_dev.dv_xname);
+		CSR_WRITE_1(sc, RL_COMMAND, 0x00);
+	} else if (sc->rl_flags & RL_FLAG_CMDSTOP) {
+		CSR_WRITE_1(sc, RL_COMMAND, RL_CMD_STOPREQ | RL_CMD_TX_ENB |
+		    RL_CMD_RX_ENB);
+		if (sc->rl_flags & RL_FLAG_CMDSTOP_WAIT_TXQ) {
+			for (i = RL_TIMEOUT; i > 0; i--) {
+				if ((CSR_READ_4(sc, RL_TXCFG) &
+				    RL_TXCFG_QUEUE_EMPTY) != 0)
+					break;
+				DELAY(100);
+			}
+			if (i == 0)
+				printf("%s: stopping TXQ timed out!\n",
+				    sc->sc_dev.dv_xname);
+		}
+	} else
+		CSR_WRITE_1(sc, RL_COMMAND, 0x00);
+	DELAY(1000);
 	CSR_WRITE_2(sc, RL_IMR, 0x0000);
 	CSR_WRITE_2(sc, RL_ISR, 0xFFFF);
 
@@ -2194,42 +2320,44 @@ int
 re_wol(struct ifnet *ifp, int enable)
 {
 	struct rl_softc *sc = ifp->if_softc;
-	int i;
 	u_int8_t val;
-	struct re_wolcfg {
-		u_int8_t	enable;
-		u_int8_t	reg;
-		u_int8_t	bit;
-	} re_wolcfg[] = {
-		/* Always disable all wake events expect magic packet. */
-		{ 0,	RL_CFG5,	RL_CFG5_WOL_UCAST },
-		{ 0,	RL_CFG5,	RL_CFG5_WOL_MCAST },
-		{ 0,	RL_CFG5,	RL_CFG5_WOL_BCAST },
-		{ 1,	RL_CFG3,	RL_CFG3_WOL_MAGIC },
-		{ 0,	RL_CFG3,	RL_CFG3_WOL_LINK }
-	};
 
 	if (enable) {
-		if ((CSR_READ_1(sc, RL_CFG1) & RL_CFG1_PME) == 0) {
+		if ((CSR_READ_1(sc, sc->rl_cfg1) & RL_CFG1_PME) == 0) {
 			printf("%s: power management is disabled, "
 			    "cannot do WOL\n", sc->sc_dev.dv_xname);
 			return (ENOTSUP);
 		}
-		if ((CSR_READ_1(sc, RL_CFG2) & RL_CFG2_AUXPWR) == 0)
+		if ((CSR_READ_1(sc, sc->rl_cfg2) & RL_CFG2_AUXPWR) == 0)
 			printf("%s: no auxiliary power, cannot do WOL from D3 "
 			    "(power-off) state\n", sc->sc_dev.dv_xname);
 	}
 
+	re_iff(sc);
+
 	/* Temporarily enable write to configuration registers. */
 	CSR_WRITE_1(sc, RL_EECMD, RL_EEMODE_WRITECFG);
 
-	for (i = 0; i < nitems(re_wolcfg); i++) {
-		val = CSR_READ_1(sc, re_wolcfg[i].reg);
-		if (enable && re_wolcfg[i].enable)
-			val |= re_wolcfg[i].bit;
-		else
-			val &= ~re_wolcfg[i].bit;
-		CSR_WRITE_1(sc, re_wolcfg[i].reg, val);
+	/* Always disable all wake events except magic packet. */
+	if (enable) {
+		val = CSR_READ_1(sc, sc->rl_cfg5);
+		val &= ~(RL_CFG5_WOL_UCAST | RL_CFG5_WOL_MCAST |
+		    RL_CFG5_WOL_BCAST);
+		CSR_WRITE_1(sc, sc->rl_cfg5, val);
+
+		val = CSR_READ_1(sc, sc->rl_cfg3);
+		val |= RL_CFG3_WOL_MAGIC;
+		val &= ~RL_CFG3_WOL_LINK;
+		CSR_WRITE_1(sc, sc->rl_cfg3, val);
+	} else {
+		val = CSR_READ_1(sc, sc->rl_cfg5);
+		val &= ~(RL_CFG5_WOL_UCAST | RL_CFG5_WOL_MCAST |
+		    RL_CFG5_WOL_BCAST);
+		CSR_WRITE_1(sc, sc->rl_cfg5, val);
+
+		val = CSR_READ_1(sc, sc->rl_cfg3);
+		val &= ~(RL_CFG3_WOL_MAGIC | RL_CFG3_WOL_LINK);
+		CSR_WRITE_1(sc, sc->rl_cfg3, val);
 	}
 
 	CSR_WRITE_1(sc, RL_EECMD, RL_EEMODE_OFF);

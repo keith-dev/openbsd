@@ -1,4 +1,4 @@
-/*	$OpenBSD: pmap.h,v 1.12 2014/05/08 21:31:56 miod Exp $	*/
+/*	$OpenBSD: pmap.h,v 1.15 2015/02/15 21:34:33 miod Exp $	*/
 
 /*
  * Copyright (c) 2005 Michael Shalayeff
@@ -28,13 +28,11 @@
 
 struct pv_entry;
 struct vm_page_md {
-	struct simplelock pvh_lock;	/* locks every pv on this list */
 	struct pv_entry	*pvh_list;	/* head of list (locked by pvh_lock) */
 	u_int		pvh_attrs;	/* to preserve ref/mod */
 };
 
 #define	VM_MDPAGE_INIT(pg) do {				\
-	simple_lock_init(&(pg)->mdpage.pvh_lock);	\
 	(pg)->mdpage.pvh_list = NULL;			\
 	(pg)->mdpage.pvh_attrs = 0;			\
 } while (0)
@@ -106,7 +104,7 @@ pmap_prefer(vaddr_t offs, vaddr_t hint)
 #define pmap_is_referenced(pg)	pmap_testbit(pg, PTE_REFTRAP)
 
 #define pmap_unuse_final(p)		/* nothing */
-#define	pmap_remove_holes(map)		do { /* nothing */ } while (0)
+#define	pmap_remove_holes(vm)		do { /* nothing */ } while (0)
 
 void pmap_bootstrap(vaddr_t);
 boolean_t pmap_changebit(struct vm_page *, pt_entry_t, pt_entry_t);
@@ -118,8 +116,8 @@ void pmap_page_remove(struct vm_page *pg);
 static __inline void
 pmap_page_protect(struct vm_page *pg, vm_prot_t prot)
 {
-	if ((prot & UVM_PROT_WRITE) == 0) {
-		if (prot & (UVM_PROT_RX))
+	if ((prot & PROT_WRITE) == 0) {
+		if (prot & (PROT_READ | PROT_EXEC))
 			pmap_changebit(pg, 0, PTE_WRITE);
 		else
 			pmap_page_remove(pg);
@@ -129,8 +127,8 @@ pmap_page_protect(struct vm_page *pg, vm_prot_t prot)
 static __inline void
 pmap_protect(struct pmap *pmap, vaddr_t sva, vaddr_t eva, vm_prot_t prot)
 {
-	if ((prot & UVM_PROT_WRITE) == 0) {
-		if (prot & (UVM_PROT_RX))
+	if ((prot & PROT_WRITE) == 0) {
+		if (prot & (PROT_READ | PROT_EXEC))
 			pmap_write_protect(pmap, sva, eva, prot);
 		else
 			pmap_remove(pmap, sva, eva);

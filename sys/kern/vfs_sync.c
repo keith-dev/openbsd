@@ -1,4 +1,4 @@
-/*       $OpenBSD: vfs_sync.c,v 1.51 2013/07/02 01:04:23 guenther Exp $  */
+/*       $OpenBSD: vfs_sync.c,v 1.53 2014/12/16 18:30:04 tedu Exp $  */
 
 /*
  *  Portions of this code are:
@@ -46,6 +46,7 @@
 #include <sys/proc.h>
 #include <sys/mount.h>
 #include <sys/vnode.h>
+#include <sys/lock.h>
 #include <sys/buf.h>
 #include <sys/malloc.h>
 
@@ -194,6 +195,8 @@ sched_sync(struct proc *p)
 				 */
 				vn_syncer_add_to_worklist(vp, syncdelay);
 			}
+
+			sched_pause();
 		}
 
 		splx(s);

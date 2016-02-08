@@ -1,4 +1,4 @@
-/*	$OpenBSD: ul.c,v 1.15 2009/10/27 23:59:46 deraadt Exp $	*/
+/*	$OpenBSD: ul.c,v 1.18 2015/02/08 23:40:34 deraadt Exp $	*/
 /*	$NetBSD: ul.c,v 1.3 1994/12/07 00:28:24 jtc Exp $	*/
 
 /*
@@ -33,7 +33,6 @@
 #include <curses.h>
 #include <err.h>
 #include <stdio.h>
-#include <stdlib.h>
 #include <stdlib.h>
 #include <string.h>
 #include <term.h>
@@ -102,12 +101,11 @@ main(int argc, char *argv[])
 	termtype = getenv("TERM");
 	if (termtype == NULL || (argv[0][0] == 'c' && !isatty(1)))
 		termtype = "lpr";
-	while ((c=getopt(argc, argv, "it:T:")) != -1)
-		switch(c) {
-
+	while ((c = getopt(argc, argv, "it:T:")) != -1)
+		switch (c) {
 		case 't':
 		case 'T': /* for nroff compatibility */
-				termtype = optarg;
+			termtype = optarg;
 			break;
 		case 'i':
 			iflag = 1;
@@ -120,15 +118,12 @@ main(int argc, char *argv[])
 			exit(1);
 		}
 
-	switch(tgetent(termcap, termtype)) {
-
+	switch (tgetent(termcap, termtype)) {
 	case 1:
 		break;
-
 	default:
 		warnx("trouble reading termcap");
 		/* FALLTHROUGH */
-
 	case 0:
 		/* No such terminal type - assume dumb */
 		(void)strlcpy(termcap, "dumb:os:col#80:cr=^M:sf=^J:am:",
@@ -136,9 +131,9 @@ main(int argc, char *argv[])
 		break;
 	}
 	initcap();
-	if (    (tgetflag("os") && ENTER_BOLD==NULL ) ||
-		(tgetflag("ul") && ENTER_UNDERLINE==NULL && UNDER_CHAR==NULL))
-			must_overstrike = 1;
+	if ((tgetflag("os") && ENTER_BOLD == NULL ) ||
+	    (tgetflag("ul") && ENTER_UNDERLINE == NULL && UNDER_CHAR == NULL))
+		must_overstrike = 1;
 	initbuf();
 	if (optind == argc)
 		mfilter(stdin);
@@ -159,33 +154,26 @@ mfilter(FILE *f)
 	int c;
 
 	while ((c = getc(f)) != EOF && col < MAXBUF) switch(c) {
-
 	case '\b':
 		if (col > 0)
 			col--;
 		continue;
-
 	case '\t':
 		col = (col+8) & ~07;
 		if (col > maxcol)
 			maxcol = col;
 		continue;
-
 	case '\r':
 		col = 0;
 		continue;
-
 	case SO:
 		mode |= ALTSET;
 		continue;
-
 	case SI:
 		mode &= ~ALTSET;
 		continue;
-
 	case IESC:
 		switch (c = getc(f)) {
-
 		case HREV:
 			if (halfpos == 0) {
 				mode |= SUPERSC;
@@ -198,7 +186,6 @@ mfilter(FILE *f)
 				reverse();
 			}
 			continue;
-
 		case HFWD:
 			if (halfpos == 0) {
 				mode |= SUBSC;
@@ -211,11 +198,9 @@ mfilter(FILE *f)
 				fwd();
 			}
 			continue;
-
 		case FREV:
 			reverse();
 			continue;
-
 		default:
 			errx(1, "0%o: unknown escape sequence", c);
 			/* NOTREACHED */
@@ -233,16 +218,13 @@ mfilter(FILE *f)
 		if (col > maxcol)
 			maxcol = col;
 		continue;
-
 	case '\n':
 		flushln();
 		continue;
-
 	case '\f':
 		flushln();
 		putchar('\f');
 		continue;
-
 	default:
 		if (c < ' ')	/* non printing */
 			continue;
@@ -272,7 +254,7 @@ flushln(void)
 	int hadmodes = 0;
 
 	lastmode = NORMAL;
-	for (i=0; i<maxcol; i++) {
+	for (i=0; i < maxcol; i++) {
 		if (obuf[i].c_mode != lastmode) {
 			hadmodes++;
 			msetmode(obuf[i].c_mode);
@@ -309,14 +291,14 @@ overstrike(void)
 {
 	int i;
 	char *buf, *cp;
-	int hadbold=0;
+	int hadbold = 0;
 
 	if ((buf = malloc(maxcol + 1)) == NULL)
 		err(1, NULL);
 	cp = buf;
 
 	/* Set up overstrike buffer */
-	for (i=0; i<maxcol; i++)
+	for (i = 0; i < maxcol; i++)
 		switch (obuf[i].c_mode) {
 		case NORMAL:
 		default:
@@ -357,7 +339,7 @@ iattr(void)
 		err(1, NULL);
 	cp = buf;
 
-	for (i=0; i<maxcol; i++)
+	for (i=0; i < maxcol; i++)
 		switch (obuf[i].c_mode) {
 		case NORMAL:	*cp++ = ' '; break;
 		case ALTSET:	*cp++ = 'g'; break;
@@ -379,8 +361,7 @@ iattr(void)
 void
 initbuf(void)
 {
-
-	bzero((char *)obuf, sizeof (obuf));	/* depends on NORMAL == 0 */
+	bzero(obuf, sizeof (obuf));	/* depends on NORMAL == 0 */
 	col = 0;
 	maxcol = 0;
 	mode &= ALTSET;

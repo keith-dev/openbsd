@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_pcn.c,v 1.30 2014/07/22 13:12:11 mpi Exp $	*/
+/*	$OpenBSD: if_pcn.c,v 1.35 2015/02/09 03:09:57 dlg Exp $	*/
 /*	$NetBSD: if_pcn.c,v 1.26 2005/05/07 09:15:44 is Exp $	*/
 
 /*
@@ -78,14 +78,13 @@
 #include <sys/errno.h>
 #include <sys/device.h>
 #include <sys/queue.h>
+#include <sys/endian.h>
 
 #include <net/if.h>
 #include <net/if_dl.h>
 
-#ifdef INET
 #include <netinet/in.h>
 #include <netinet/if_ether.h>
-#endif
 
 #include <net/if_media.h>
 
@@ -95,7 +94,6 @@
 
 #include <machine/bus.h>
 #include <machine/intr.h>
-#include <machine/endian.h>
 
 #include <dev/mii/mii.h>
 #include <dev/mii/miivar.h>
@@ -1057,10 +1055,8 @@ pcn_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 		ifp->if_flags |= IFF_UP;
 		if (!(ifp->if_flags & IFF_RUNNING))
 			pcn_init(ifp);
-#ifdef INET
 		if (ifa->ifa_addr->sa_family == AF_INET)
 			arp_ifinit(&sc->sc_arpcom, ifa);
-#endif
 		break;
 
 	case SIOCSIFFLAGS:
@@ -1090,9 +1086,6 @@ pcn_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 		else
 			error = 0;
 	}
-
-	/* Try to get more packets going. */
-	pcn_start(ifp);
 
 	splx(s);
 	return (error);
@@ -1305,8 +1298,10 @@ pcn_rxintr(struct pcn_softc *sc)
 	struct ifnet *ifp = &sc->sc_arpcom.ac_if;
 	struct pcn_rxsoft *rxs;
 	struct mbuf *m;
+	struct mbuf_list ml = MBUF_LIST_INITIALIZER();
 	uint32_t rmd1;
 	int i, len;
+	int rv = 0;
 
 	for (i = sc->sc_rxptr;; i = PCN_NEXTRX(i)) {
 		rxs = &sc->sc_rxsoft[i];
@@ -1331,7 +1326,8 @@ pcn_rxintr(struct pcn_softc *sc)
 			    (LE_R1_STP|LE_R1_ENP)) {
 				printf("%s: packet spilled into next buffer\n",
 				    sc->sc_dev.dv_xname);
-				return (1);	/* pcn_intr() will re-init */
+				rv = 1; /* pcn_intr() will re-init */
+				goto done;
 			}
 
 			/*
@@ -1417,23 +1413,17 @@ pcn_rxintr(struct pcn_softc *sc)
 			}
 		}
 
-		m->m_pkthdr.rcvif = ifp;
 		m->m_pkthdr.len = m->m_len = len;
 
-#if NBPFILTER > 0
-		/* Pass this up to any BPF listeners. */
-		if (ifp->if_bpf)
-			bpf_mtap(ifp->if_bpf, m, BPF_DIRECTION_IN);
-#endif /* NBPFILTER > 0 */
-
-		/* Pass it on. */
-		ether_input_mbuf(ifp, m);
+		ml_enqueue(&ml, m);
 		ifp->if_ipackets++;
 	}
 
 	/* Update the receive pointer. */
 	sc->sc_rxptr = i;
-	return (0);
+done:
+	if_input(ifp, &ml);
+	return (rv);
 }
 
 /*

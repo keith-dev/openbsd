@@ -1,4 +1,4 @@
-/*	$OpenBSD: privsep.c,v 1.30 2011/09/22 09:12:30 stsp Exp $	*/
+/*	$OpenBSD: privsep.c,v 1.32 2015/01/20 18:26:58 deraadt Exp $	*/
 
 /*
  * Copyright (c) 2003 Can Erkin Acar
@@ -21,11 +21,11 @@
 #include <sys/socket.h>
 #include <sys/wait.h>
 
-#include <net/bpf.h>
-#include <net/if.h>
-#include <net/pfvar.h>
 #include <netinet/in.h>
+#include <net/if.h>
 #include <netinet/if_ether.h>
+#include <net/bpf.h>
+#include <net/pfvar.h>
 
 #include <rpc/rpc.h>
 
@@ -411,7 +411,7 @@ impl_init_done(int fd, int *bpfd)
 static void
 impl_gethostbyaddr(int fd)
 {
-	char hostname[MAXHOSTNAMELEN];
+	char hostname[HOST_NAME_MAX+1];
 	size_t hostname_len;
 	int addr_af;
 	struct hostent *hp;
@@ -434,7 +434,7 @@ static void
 impl_ether_ntohost(int fd)
 {
 	struct ether_addr ether;
-	char hostname[MAXHOSTNAMELEN];
+	char hostname[HOST_NAME_MAX+1];
 
 	logmsg(LOG_DEBUG, "[priv]: msg PRIV_ETHER_NTOHOST received");
 

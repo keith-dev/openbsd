@@ -1,5 +1,5 @@
 /*	$NetBSD: vmstat.c,v 1.29.4.1 1996/06/05 00:21:05 cgd Exp $	*/
-/*	$OpenBSD: vmstat.c,v 1.132 2014/07/13 21:13:51 kettenis Exp $	*/
+/*	$OpenBSD: vmstat.c,v 1.137 2015/01/30 19:00:56 tedu Exp $	*/
 
 /*
  * Copyright (c) 1980, 1986, 1991, 1993
@@ -30,11 +30,9 @@
  * SUCH DAMAGE.
  */
 
-#include <sys/param.h>
+#include <sys/param.h>	/* MAXCOMLEN */
 #include <sys/time.h>
 #include <sys/proc.h>
-#include <sys/dkstat.h>
-#include <sys/buf.h>
 #include <sys/namei.h>
 #include <sys/malloc.h>
 #include <sys/fcntl.h>
@@ -42,6 +40,7 @@
 #include <sys/sysctl.h>
 #include <sys/device.h>
 #include <sys/pool.h>
+#include <sys/sched.h>
 #include <sys/vmmeter.h>
 
 #include <time.h>
@@ -137,7 +136,9 @@ main(int argc, char *argv[])
 	while ((c = getopt(argc, argv, "c:fiM:mN:stw:vz")) != -1) {
 		switch (c) {
 		case 'c':
-			reps = atoi(optarg);
+			reps = strtonum(optarg, 0, INT_MAX, &errstr);
+			if (errstr)
+				errx(1, "-c %s: %s", optarg, errstr);
 			break;
 		case 'f':
 			todo |= FORKSTAT;
@@ -223,10 +224,13 @@ main(int argc, char *argv[])
 	if (*argv) {
 		interval = (u_int)strtonum(*argv, 0, 1000, &errstr);
 		if (errstr)
-			errx(1, "%s: %s", *argv, errstr);
+			errx(1, "interval %s: %s", *argv, errstr);
 
-		if (*++argv)
-			reps = atoi(*argv);
+		if (*++argv) {
+			reps = strtonum(*argv, 0, INT_MAX, &errstr);
+			if (errstr)
+				errx(1, "reps %s: %s", *argv, errstr);
+		}
 	}
 #endif
 
@@ -277,6 +281,8 @@ choosedrives(char **argv)
 			++ndrives;
 			break;
 		}
+		if (i == dk_ndrive)
+			errx(1, "invalid interval or drive name: %s", *argv);
 	}
 	for (i = 0; i < dk_ndrive && ndrives < 2; i++) {
 		if (dk_select[i])
@@ -1017,7 +1023,6 @@ dopool_kvm(void)
 {
 	SIMPLEQ_HEAD(,pool) pool_head;
 	struct pool pool, *pp = &pool;
-	struct pool_allocator palloc;
 	struct kinfo_pool pi;
 	long total = 0, inuse = 0;
 	u_long addr;
@@ -1040,19 +1045,11 @@ dopool_kvm(void)
 			    kvm_geterr(kd));
 			exit(1);
 		}
-		if (kvm_read(kd, (u_long)pp->pr_alloc,
-		    &palloc, sizeof(palloc)) < 0) {
-			(void)fprintf(stderr,
-			    "vmstat: pool allocator trashed: %s\n",
-			    kvm_geterr(kd));
-			exit(1);
-		}
-
 		name[31] = '\0';
 
 		memset(&pi, 0, sizeof(pi));
 		pi.pr_size = pp->pr_size;
-		pi.pr_pgsize = palloc.pa_pagesz;
+		pi.pr_pgsize = pp->pr_pgsize;
 		pi.pr_itemsperpage = pp->pr_itemsperpage;
 		pi.pr_npages = pp->pr_npages;
 		pi.pr_minpages = pp->pr_minpages;

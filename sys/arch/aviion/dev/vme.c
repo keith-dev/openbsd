@@ -1,4 +1,4 @@
-/*	$OpenBSD: vme.c,v 1.14 2014/07/12 18:44:41 tedu Exp $	*/
+/*	$OpenBSD: vme.c,v 1.18 2015/02/10 22:42:35 miod Exp $	*/
 /*
  * Copyright (c) 2006, 2007, 2010 Miodrag Vallat.
  *
@@ -477,7 +477,7 @@ vme_map(struct vme_softc *sc, struct extent *ext, u_int awidth,
 	/*
 	 * Allocate virtual memory for the range and map it.
 	 */
-	rc = vme_map_r(r, pa, len, flags, UVM_PROT_RW, rva);
+	rc = vme_map_r(r, pa, len, flags, PROT_READ | PROT_WRITE, rva);
 	if (rc != 0) {
 		if (ext != NULL)
 			(void)extent_free(ext, atop(pa), atop(len),
@@ -836,7 +836,7 @@ vmebus_get_bst(struct device *vsc, u_int aspace, u_int dspace,
 void
 vmebus_release_bst(struct device *vsc, bus_space_tag_t b)
 {
-	free((void *)b, M_DEVBUF, 0);
+	free((void *)b, M_DEVBUF, sizeof(struct aviion_bus_space_tag));
 }
 
 /*
@@ -944,11 +944,12 @@ vmerw(struct vme_softc *sc, int awidth, int dwidth, struct uio *uio, int flags)
 		}
 
 		delta = uio->uio_offset & PAGE_MASK;
-		len = min(uio->uio_resid, PAGE_SIZE - delta);
-		/* len = min(len, (off_t)r->vr_end - uio->uio_offset); */
+		len = ulmin(uio->uio_resid, PAGE_SIZE - delta);
+		/* len = ulmin(len, (off_t)r->vr_end - uio->uio_offset); */
 
 		rc = vme_map_r(r, trunc_page(uio->uio_offset), PAGE_SIZE, 0,
-		    uio->uio_rw == UIO_READ ? UVM_PROT_R : UVM_PROT_RW, &vmepg);
+		    uio->uio_rw == UIO_READ ? PROT_READ : PROT_READ | PROT_WRITE,
+		    &vmepg);
 		if (rc != 0)
 			break;
 

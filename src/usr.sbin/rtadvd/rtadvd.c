@@ -1,4 +1,4 @@
-/*	$OpenBSD: rtadvd.c,v 1.47 2014/07/04 22:39:31 guenther Exp $	*/
+/*	$OpenBSD: rtadvd.c,v 1.53 2015/01/16 06:40:20 deraadt Exp $	*/
 /*	$KAME: rtadvd.c,v 1.66 2002/05/29 14:18:36 itojun Exp $	*/
 
 /*
@@ -30,8 +30,9 @@
  * SUCH DAMAGE.
  */
 
-#include <sys/param.h>
+#include <sys/types.h>
 #include <sys/socket.h>
+#include <sys/signal.h>
 #include <sys/uio.h>
 #include <sys/time.h>
 #include <sys/queue.h>
@@ -50,10 +51,10 @@
 #include <unistd.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <poll.h>
 #include <err.h>
 #include <errno.h>
 #include <string.h>
-#include <stdlib.h>
 #include <util.h>
 #include <pwd.h>
 
@@ -158,12 +159,10 @@ main(argc, argv)
 	int argc;
 	char *argv[];
 {
-	fd_set *fdsetp, *selectfdp;
-	int fdmasks;
-	int maxfd = 0;
+	struct pollfd pfd[2];
 	struct timeval *timeout;
-	int i, ch;
 	struct passwd *pw;
+	int i, ch, npfd;
 
 	log_init(1);		/* log to stderr until daemonized */
 
@@ -229,13 +228,9 @@ main(argc, argv)
 	if (pidfile(NULL) < 0)
 		log_warnx("failed to open the pid log file, run anyway.");
 
-	maxfd = sock;
 	if (sflag == 0) {
 		rtsock_open();
-		if (rtsock > sock)
-			maxfd = rtsock;
-	} else
-		rtsock = -1;
+	}
 
 	if ((pw = getpwnam(RTADVD_USER)) == NULL)
 		fatal("getpwnam(" RTADVD_USER ")");
@@ -248,25 +243,19 @@ main(argc, argv)
 	    setresuid(pw->pw_uid, pw->pw_uid, pw->pw_uid))
 		fatal("cannot drop privileges");
 
-	fdmasks = howmany(maxfd + 1, NFDBITS) * sizeof(fd_mask);
-	if ((fdsetp = calloc(1, fdmasks)) == NULL) {
-		err(1, "calloc");
-		/*NOTREACHED*/
+	npfd = 1;
+	pfd[0].fd = sock;
+	pfd[0].events = POLLIN;
+	if (rtsock >= 0) {
+		pfd[1].fd = rtsock;
+		pfd[1].events = POLLIN;
+		npfd++;
 	}
-	if ((selectfdp = malloc(fdmasks)) == NULL) {
-		err(1, "malloc");
-		/*NOTREACHED*/
-	}
-	FD_SET(sock, fdsetp);
-	if (rtsock >= 0)
-		FD_SET(rtsock, fdsetp);
 
 	signal(SIGTERM, set_die);
 	signal(SIGUSR1, rtadvd_set_dump);
 
 	while (1) {
-		memcpy(selectfdp, fdsetp, fdmasks); /* reinitialize */
-
 		if (do_dump) {	/* SIGUSR1 */
 			do_dump = 0;
 			rtadvd_dump();
@@ -288,8 +277,8 @@ main(argc, argv)
 		else
 			log_debug("there's no timer. waiting for inputs");
 
-		if ((i = select(maxfd + 1, selectfdp, NULL, NULL,
-		    timeout)) < 0) {
+		if ((i = poll(pfd, npfd,
+		    timeout->tv_sec * 1000 + timeout->tv_usec / 1000)) < 0) {
 			/* EINTR would occur upon SIGUSR1 for status dump */
 			if (errno != EINTR)
 				log_warn("select");
@@ -297,9 +286,9 @@ main(argc, argv)
 		}
 		if (i == 0)	/* timeout */
 			continue;
-		if (rtsock != -1 && FD_ISSET(rtsock, selectfdp))
+		if (rtsock != -1 && (pfd[1].revents & POLLIN))
 			rtmsg_input();
-		if (FD_ISSET(sock, selectfdp))
+		if (pfd[0].revents & POLLIN)
 			rtadvd_input();
 	}
 	exit(0);		/* NOTREACHED */
@@ -822,13 +811,9 @@ ra_input(int len, struct nd_router_advert *ra,
 	/*
 	 * RA consistency check according to RFC-2461 6.2.7
 	 */
-	if ((rai = if_indextorainfo(pi->ipi6_ifindex)) == 0) {
-		log_info("received RA from %s on non-advertising interface(%s)",
-		    inet_ntop(AF_INET6, &from->sin6_addr, ntopbuf,
-			INET6_ADDRSTRLEN),
-		    if_indextoname(pi->ipi6_ifindex, ifnamebuf));
-		goto done;
-	}
+	if ((rai = if_indextorainfo(pi->ipi6_ifindex)) == NULL)
+		goto done;	/* not our interface */
+
 	rai->rainput++;		/* increment statistics */
 	
 	/* Cur Hop Limit value */
@@ -976,7 +961,7 @@ prefix_check(struct nd_opt_prefix_info *pinfo,
 		preferred_time += now.tv_sec;
 
 		if (rai->clockskew &&
-		    abs(preferred_time - pp->pltimeexpire) > rai->clockskew) {
+		    llabs(preferred_time - pp->pltimeexpire) > rai->clockskew) {
 			log_info("preferred lifetime for %s/%d"
 			    " (decr. in real time) inconsistent on %s:"
 			    " %lld from %s, %lld from us",
@@ -1007,7 +992,7 @@ prefix_check(struct nd_opt_prefix_info *pinfo,
 		valid_time += now.tv_sec;
 
 		if (rai->clockskew &&
-		    abs(valid_time - pp->vltimeexpire) > rai->clockskew) {
+		    llabs(valid_time - pp->vltimeexpire) > rai->clockskew) {
 			log_info("valid lifetime for %s/%d"
 			    " (decr. in real time) inconsistent on %s:"
 			    " %lld from %s, %lld from us",
@@ -1227,14 +1212,14 @@ sock_open()
 
 	/* specify to tell receiving interface */
 	on = 1;
-	if (setsockopt(sock, IPPROTO_IPV6, IPV6_RECVPKTINFO, &on,
-		       sizeof(on)) < 0)
+	if (setsockopt(sock, IPPROTO_IPV6, IPV6_RECVPKTINFO, &on, sizeof(on))
+	    < 0)
 		fatal("IPV6_RECVPKTINFO");
 
 	on = 1;
 	/* specify to tell value of hoplimit field of received IP6 hdr */
-	if (setsockopt(sock, IPPROTO_IPV6, IPV6_RECVHOPLIMIT, &on,
-		       sizeof(on)) < 0)
+	if (setsockopt(sock, IPPROTO_IPV6, IPV6_RECVHOPLIMIT, &on, sizeof(on))
+	    < 0)
 		fatal("IPV6_RECVHOPLIMIT");
 
 	ICMP6_FILTER_SETBLOCKALL(&filt);
@@ -1242,21 +1227,20 @@ sock_open()
 	ICMP6_FILTER_SETPASS(ND_ROUTER_ADVERT, &filt);
 	if (accept_rr)
 		ICMP6_FILTER_SETPASS(ICMP6_ROUTER_RENUMBERING, &filt);
-	if (setsockopt(sock, IPPROTO_ICMPV6, ICMP6_FILTER, &filt,
-		       sizeof(filt)) < 0)
+	if (setsockopt(sock, IPPROTO_ICMPV6, ICMP6_FILTER, &filt, sizeof(filt))
+	    < 0)
 		fatal("IICMP6_FILTER");
 
 	/*
 	 * join all routers multicast address on each advertising interface.
 	 */
-	if (inet_pton(AF_INET6, ALLROUTERS_LINK,
-		      &mreq.ipv6mr_multiaddr.s6_addr)
+	if (inet_pton(AF_INET6, ALLROUTERS_LINK, &mreq.ipv6mr_multiaddr.s6_addr)
 	    != 1)
 		fatal("inet_pton failed(library bug?)");
 	SLIST_FOREACH(ra, &ralist, entry) {
 		mreq.ipv6mr_interface = ra->ifindex;
 		if (setsockopt(sock, IPPROTO_IPV6, IPV6_JOIN_GROUP, &mreq,
-			       sizeof(mreq)) < 0) {
+		    sizeof(mreq)) < 0) {
 			log_warn("IPV6_JOIN_GROUP(link) on %s", ra->ifname);
 			exit(1);
 		}
@@ -1270,7 +1254,7 @@ sock_open()
 	 */
 	if (accept_rr) {
 		if (inet_pton(AF_INET6, ALLROUTERS_SITE,
-			      &in6a_site_allrouters) != 1)
+		    &in6a_site_allrouters) != 1)
 			fatal("inet_pton failed(library bug?)");
 		mreq.ipv6mr_multiaddr = in6a_site_allrouters;
 		if (mcastif) {
@@ -1281,10 +1265,10 @@ sock_open()
 			}
 		} else
 			mreq.ipv6mr_interface = ra->ifindex;
-		if (setsockopt(sock, IPPROTO_IPV6, IPV6_JOIN_GROUP,
-			       &mreq, sizeof(mreq)) < 0) {
-			log_warn("IPV6_JOIN_GROUP(site) on %s",
-			    mcastif ? mcastif : ra->ifname);
+		if (setsockopt(sock, IPPROTO_IPV6, IPV6_JOIN_GROUP, &mreq,
+		    sizeof(mreq)) < 0) {
+			log_warn("IPV6_JOIN_GROUP(site) on %s", mcastif ?
+			    mcastif : ra->ifname);
 			exit(1);
 		}
 	}
@@ -1305,7 +1289,7 @@ sock_open()
 	sndmhdr.msg_iovlen = 1;
 	sndmhdr.msg_control = (caddr_t)sndcmsgbuf;
 	sndmhdr.msg_controllen = sndcmsgbuflen;
-	
+
 	return;
 }
 

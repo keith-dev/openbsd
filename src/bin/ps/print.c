@@ -1,4 +1,4 @@
-/*	$OpenBSD: print.c,v 1.57 2014/07/04 05:58:31 guenther Exp $	*/
+/*	$OpenBSD: print.c,v 1.59 2015/01/16 06:39:32 deraadt Exp $	*/
 /*	$NetBSD: print.c,v 1.27 1995/09/29 21:58:12 cgd Exp $	*/
 
 /*-
@@ -30,7 +30,8 @@
  * SUCH DAMAGE.
  */
 
-#include <sys/param.h>
+#include <sys/param.h>	/* MAXCOMLEN PZERO NODEV */
+#include <sys/types.h>
 #include <sys/proc.h>
 #include <sys/stat.h>
 
@@ -47,6 +48,7 @@
 #include <string.h>
 #include <tzfile.h>
 #include <unistd.h>
+#include <limits.h>
 #include <pwd.h>
 
 #include "ps.h"
@@ -180,7 +182,7 @@ curwd(const struct kinfo_proc *kp, VARENT *ve)
 {
 	VAR *v;
 	int name[] = { CTL_KERN, KERN_PROC_CWD, kp->p_pid };
-	char path[MAXPATHLEN];
+	char path[PATH_MAX];
 	size_t pathlen = sizeof path;
 
 	if (!kvm_sysctl_only || sysctl(name, 3, path, &pathlen, NULL, 0) != 0)
@@ -197,7 +199,7 @@ logname(const struct kinfo_proc *kp, VARENT *ve)
 
 	v = ve->var;
 	if (kp->p_login[0]) {
-		int n = min(v->width, MAXLOGNAME);
+		int n = min(v->width, LOGIN_NAME_MAX);
 		(void)printf("%-*.*s", n, n, kp->p_login);
 		if (v->width > n)
 			(void)printf("%*s", v->width - n, "");
@@ -410,7 +412,7 @@ started(const struct kinfo_proc *kp, VARENT *ve)
 	tp = localtime(&startt);
 	if (!now)
 		(void)time(&now);
-	if (now - kp->p_ustart_sec < 24 * SECSPERHOUR) {
+	if (now - kp->p_ustart_sec < 12 * SECSPERHOUR) {
 		(void)strftime(buf, sizeof(buf) - 1, "%l:%M%p", tp);
 	} else if (now - kp->p_ustart_sec < 7 * SECSPERDAY) {
 		(void)strftime(buf, sizeof(buf) - 1, "%a%I%p", tp);

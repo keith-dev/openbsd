@@ -1,4 +1,4 @@
-/*	$OpenBSD: midi.c,v 1.30 2013/05/15 08:29:24 ratchov Exp $	*/
+/*	$OpenBSD: midi.c,v 1.33 2015/02/10 21:56:09 miod Exp $	*/
 
 /*
  * Copyright (c) 2003, 2004 Alexandre Ratchov
@@ -22,8 +22,6 @@
 #include <sys/ioctl.h>
 #include <sys/exec.h>
 #include <sys/conf.h>
-#include <sys/lkm.h>
-#include <sys/proc.h>
 #include <sys/poll.h>
 #include <sys/kernel.h>
 #include <sys/timeout.h>
@@ -144,7 +142,7 @@ midiread(dev_t dev, struct uio *uio, int ioflag)
 			count = mb->used;
 		if (count > uio->uio_resid)
 			count = uio->uio_resid;
-		error = uiomove(mb->data + mb->start, count, uio);
+		error = uiomovei(mb->data + mb->start, count, uio);
 		if (error) {
 			mtx_leave(&audio_lock);
 			return error;
@@ -282,7 +280,7 @@ midiwrite(dev_t dev, struct uio *uio, int ioflag)
 			count = MIDIBUF_AVAIL(mb);
 		if (count > uio->uio_resid)
 			count = uio->uio_resid;
-		error = uiomove(mb->data + MIDIBUF_END(mb), count, uio);
+		error = uiomovei(mb->data + MIDIBUF_END(mb), count, uio);
 		if (error) {
 			mtx_leave(&audio_lock);
 			return error;

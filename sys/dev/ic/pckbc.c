@@ -1,4 +1,4 @@
-/* $OpenBSD: pckbc.c,v 1.38 2014/07/07 18:20:15 shadchin Exp $ */
+/* $OpenBSD: pckbc.c,v 1.43 2014/12/19 07:23:57 deraadt Exp $ */
 /* $NetBSD: pckbc.c,v 1.5 2000/06/09 04:58:35 soda Exp $ */
 
 /*
@@ -30,7 +30,6 @@
 #include <sys/systm.h>
 #include <sys/timeout.h>
 #include <sys/kernel.h>
-#include <sys/proc.h>
 #include <sys/device.h>
 #include <sys/malloc.h>
 #include <sys/errno.h>
@@ -38,6 +37,7 @@
 #include <sys/lock.h>
 
 #include <machine/bus.h>
+#include <machine/cpu.h>
 
 #include <dev/ic/i8042reg.h>
 #include <dev/ic/pckbcvar.h>
@@ -152,6 +152,7 @@ pckbc_poll_data1(bus_space_tag_t iot, bus_space_handle_t ioh_d,
 			register u_char c;
 
 			KBD_DELAY;
+			CPU_BUSY_CYCLE();
 			c = bus_space_read_1(iot, ioh_d, 0);
 			if (checkaux && (stat & 0x20)) { /* aux data */
 				if (slot != PCKBC_AUX_SLOT) {
@@ -659,7 +660,7 @@ pckbc_poll_cmd(pckbc_tag_t self, pckbc_slot_t slot, u_char *cmd, int len,
 		return (EINVAL);
 
 	bzero(&nc, sizeof(nc));
-	bcopy(cmd, nc.cmd, len);
+	memcpy(nc.cmd, cmd, len);
 	nc.cmdlen = len;
 	nc.responselen = responselen;
 	nc.flags = (slow ? KBC_CMDFLAG_SLOW : 0);
@@ -667,7 +668,7 @@ pckbc_poll_cmd(pckbc_tag_t self, pckbc_slot_t slot, u_char *cmd, int len,
 	pckbc_poll_cmd1(self, slot, &nc);
 
 	if (nc.status == 0 && respbuf)
-		bcopy(nc.response, respbuf, responselen);
+		memcpy(respbuf, nc.response, responselen);
 
 	return (nc.status);
 }
@@ -882,7 +883,7 @@ pckbc_enqueue_cmd(pckbc_tag_t self, pckbc_slot_t slot, u_char *cmd, int len,
 		return (ENOMEM);
 
 	bzero(nc, sizeof(*nc));
-	bcopy(cmd, nc->cmd, len);
+	memcpy(nc->cmd, cmd, len);
 	nc->cmdlen = len;
 	nc->responselen = responselen;
 	nc->flags = (sync ? KBC_CMDFLAG_SYNC : 0);
@@ -918,7 +919,7 @@ pckbc_enqueue_cmd(pckbc_tag_t self, pckbc_slot_t slot, u_char *cmd, int len,
 
 	if (sync) {
 		if (respbuf)
-			bcopy(nc->response, respbuf, responselen);
+			memcpy(respbuf, nc->response, responselen);
 		TAILQ_INSERT_TAIL(&q->freequeue, nc, next);
 	}
 

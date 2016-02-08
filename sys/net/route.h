@@ -1,4 +1,4 @@
-/*	$OpenBSD: route.h,v 1.95 2014/07/29 12:18:41 mpi Exp $	*/
+/*	$OpenBSD: route.h,v 1.105 2015/02/11 23:34:43 mpi Exp $	*/
 /*	$NetBSD: route.h,v 1.9 1996/02/13 22:00:49 christos Exp $	*/
 
 /*
@@ -99,21 +99,23 @@ struct rtentry {
 	struct	radix_node rt_nodes[2];	/* tree glue, and other values */
 #define	rt_key(r)	((struct sockaddr *)((r)->rt_nodes->rn_key))
 #define	rt_mask(r)	((struct sockaddr *)((r)->rt_nodes->rn_mask))
-	struct	sockaddr *rt_gateway;	/* value */
-	u_int	rt_flags;		/* up/down?, host/net */
-	int	rt_refcnt;		/* # held references */
-	struct	ifnet *rt_ifp;		/* the answer: interface to use */
-	struct	ifaddr *rt_ifa;		/* the answer: interface addr to use */
-	caddr_t	rt_llinfo;		/* pointer to link level info cache or
+	struct sockaddr	*rt_gateway;	/* value */
+	struct ifnet	*rt_ifp;	/* the answer: interface to use */
+	struct ifaddr	*rt_ifa;	/* the answer: interface addr to use */
+	caddr_t		 rt_llinfo;	/* pointer to link level info cache or
 					   to an MPLS structure */ 
-	struct	rt_kmetrics rt_rmx;	/* metrics used by rx'ing protocols */
-	struct	rtentry *rt_gwroute;	/* implied entry for gatewayed routes */
-	struct	rtentry *rt_parent;	/* If cloned, parent of this route. */
+	struct rtentry	*rt_gwroute;	/* implied entry for gatewayed routes */
+	struct rtentry	*rt_parent;	/* If cloned, parent of this route. */
 	LIST_HEAD(, rttimer) rt_timer;  /* queue of timeouts for misc funcs */
-	u_int16_t rt_labelid;		/* route label ID */
-	u_int8_t rt_priority;		/* routing priority to use */
+	struct rt_kmetrics rt_rmx;	/* metrics used by rx'ing protocols */
+	unsigned int	 rt_flags;	/* up/down?, host/net */
+	unsigned int	 rt_tableid;	/* routing table ID  */
+	int		 rt_refcnt;	/* # held references */
+	uint16_t	 rt_labelid;	/* route label ID */
+	uint8_t		 rt_priority;	/* routing priority to use */
 };
-#define	rt_use	rt_rmx.rmx_pksent
+#define	rt_use		rt_rmx.rmx_pksent
+#define	rt_expire	rt_rmx.rmx_expire
 
 #endif /* _KERNEL */
 
@@ -330,27 +332,12 @@ u_int16_t	 rtlabel_name2id(char *);
 struct sockaddr	*rtlabel_id2sa(u_int16_t, struct sockaddr_rtlabel *);
 void		 rtlabel_unref(u_int16_t);
 
-#define	RTFREE(rt) do {							\
-	if ((rt)->rt_refcnt <= 1)					\
-		rtfree(rt);						\
-	else								\
-		(rt)->rt_refcnt--;					\
-} while (/* CONSTCOND */0)
-
 /*
- * Values for additional argument to rtalloc1()
+ * Values for additional argument to rtalloc()
  */
 #define	RT_REPORT	0x1
-#define	RT_NOCLONING	0x2
+#define	RT_RESOLVE	0x2
 
-struct route_cb {
-	int	ip_count;
-	int	ip6_count;
-	int     mpls_count;
-	int	any_count;
-};
-
-extern struct route_cb route_cb;
 extern struct rtstat rtstat;
 extern const struct sockaddr_rtin rt_defmask4;
 
@@ -370,11 +357,12 @@ void	 rt_ifannouncemsg(struct ifnet *, int);
 void	 rt_maskedcopy(struct sockaddr *,
 	    struct sockaddr *, struct sockaddr *);
 void	 rt_sendmsg(struct rtentry *, int, u_int);
+void	 rt_sendaddrmsg(struct rtentry *, int);
 void	 rt_missmsg(int, struct rt_addrinfo *, int, struct ifnet *, int,
 	    u_int);
-void	 rt_newaddrmsg(int, struct ifaddr *, int, struct rtentry *);
-int	 rt_setgate(struct rtentry *, struct sockaddr *,
-	    struct sockaddr *, u_int);
+int	 rt_setgate(struct rtentry *, struct sockaddr *, unsigned int);
+int	 rt_checkgate(struct ifnet *, struct rtentry *, struct sockaddr *,
+	    unsigned int, struct rtentry **);
 void	 rt_setmetrics(u_long, struct rt_metrics *, struct rt_kmetrics *);
 void	 rt_getmetrics(struct rt_kmetrics *, struct rt_metrics *);
 
@@ -388,19 +376,17 @@ void			 rt_timer_queue_destroy(struct rttimer_queue *);
 unsigned long		 rt_timer_queue_count(struct rttimer_queue *);
 void			 rt_timer_timer(void *);
 
-void	 rtalloc_noclone(struct route *);
-void	 rtalloc(struct route *);
 #ifdef SMALL_KERNEL
-#define	rtalloc_mpath(r, s)	rtalloc(r)
+#define	 rtalloc_mpath(dst, s, rid) rtalloc((dst), RT_REPORT|RT_RESOLVE, (rid))
 #endif
-struct rtentry *
-	 rtalloc1(struct sockaddr *, int, u_int);
+struct	 rtentry *rtalloc(struct sockaddr *, int, unsigned int);
 void	 rtfree(struct rtentry *);
+
 int	 rt_getifa(struct rt_addrinfo *, u_int);
 int	 rt_ifa_add(struct ifaddr *, int, struct sockaddr *);
 int	 rt_ifa_del(struct ifaddr *, int, struct sockaddr *);
-void	 rt_ifa_addloop(struct ifaddr *);
-void	 rt_ifa_delloop(struct ifaddr *);
+int	 rt_ifa_addlocal(struct ifaddr *);
+int	 rt_ifa_dellocal(struct ifaddr *);
 int	 rtioctl(u_long, caddr_t, struct proc *);
 void	 rtredirect(struct sockaddr *, struct sockaddr *,
 			 struct sockaddr *, int, struct sockaddr *,

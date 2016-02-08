@@ -1,4 +1,4 @@
-/*	$OpenBSD: tcp_usrreq.c,v 1.119 2014/07/22 11:06:10 mpi Exp $	*/
+/*	$OpenBSD: tcp_usrreq.c,v 1.123 2014/12/05 15:50:04 mpi Exp $	*/
 /*	$NetBSD: tcp_usrreq.c,v 1.20 1996/02/13 23:44:16 christos Exp $	*/
 
 /*
@@ -75,15 +75,13 @@
 #include <sys/socketvar.h>
 #include <sys/protosw.h>
 #include <sys/stat.h>
-#include <sys/proc.h>
 #include <sys/sysctl.h>
 #include <sys/domain.h>
 #include <sys/kernel.h>
 #include <sys/pool.h>
 
-#include <dev/rndvar.h>
-
 #include <net/if.h>
+#include <net/if_var.h>
 #include <net/route.h>
 
 #include <netinet/in.h>
@@ -278,9 +276,9 @@ tcp_usrreq(so, req, m, nam, control, p)
 #endif /* INET6 */
 		{
 			if ((sin->sin_addr.s_addr == INADDR_ANY) ||
+			    (sin->sin_addr.s_addr == INADDR_BROADCAST) ||
 			    IN_MULTICAST(sin->sin_addr.s_addr) ||
-			    in_broadcast(sin->sin_addr, NULL,
-			    inp->inp_rtableid)) {
+			    in_broadcast(sin->sin_addr, inp->inp_rtableid)) {
 				error = EINVAL;
 				break;
 			}

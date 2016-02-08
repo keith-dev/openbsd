@@ -1,4 +1,4 @@
-/*	$OpenBSD: mpath.c,v 1.36 2014/07/12 18:50:25 tedu Exp $ */
+/*	$OpenBSD: mpath.c,v 1.38 2015/03/04 23:52:43 dlg Exp $ */
 
 /*
  * Copyright (c) 2009 David Gwynne <dlg@openbsd.org>
@@ -22,7 +22,6 @@
 #include <sys/kernel.h>  
 #include <sys/malloc.h>
 #include <sys/device.h>
-#include <sys/proc.h>
 #include <sys/conf.h>
 #include <sys/queue.h>
 #include <sys/rwlock.h>
@@ -426,6 +425,9 @@ mpath_path_probe(struct scsi_link *link)
 		return (ENXIO);
 
 	if (link->id == NULL)
+		return (EINVAL);
+
+	if (ISSET(link->flags, SDEV_UMASS))
 		return (EINVAL);
 
 	if (mpath == link->adapter_softc)

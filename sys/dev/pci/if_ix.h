@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_ix.h,v 1.25 2014/07/08 05:35:18 dlg Exp $	*/
+/*	$OpenBSD: if_ix.h,v 1.27 2014/11/12 16:06:47 mikeb Exp $	*/
 
 /******************************************************************************
 
@@ -83,7 +83,7 @@
 #define IXGBE_TX_CLEANUP_THRESHOLD	(sc->num_tx_desc / 16)
 #define IXGBE_TX_OP_THRESHOLD		(sc->num_tx_desc / 32)
 
-#define IXGBE_MAX_FRAME_SIZE	0x3F00
+#define IXGBE_MAX_FRAME_SIZE	9216
 
 /* Flow control constants */
 #define IXGBE_FC_PAUSE		0xFFFF
@@ -257,9 +257,6 @@ struct ix_softc {
 
 	/* Mbuf cluster size */
 	uint32_t		rx_mbuf_sz;
-
-	/* Support for pluggable optics */
-	bool			sfp_probe;
 
 	/*
 	 * Queues:

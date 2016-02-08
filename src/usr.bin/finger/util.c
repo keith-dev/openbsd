@@ -1,4 +1,4 @@
-/*	$OpenBSD: util.c,v 1.24 2013/11/26 13:18:55 deraadt Exp $	*/
+/*	$OpenBSD: util.c,v 1.30 2015/01/16 06:40:07 deraadt Exp $	*/
 
 /*
  * Copyright (c) 1989 The Regents of the University of California.
@@ -35,7 +35,6 @@
 
 #include <sys/types.h>
 #include <sys/uio.h>
-#include <sys/param.h>
 #include <sys/stat.h>
 #include <err.h>
 #include <stdio.h>
@@ -47,7 +46,6 @@
 #include <fcntl.h>
 #include <unistd.h>
 #include <vis.h>
-#include <err.h>
 #include "finger.h"
 #include "extern.h"
 
@@ -55,23 +53,6 @@ char	*estrdup(char *);
 WHERE	*walloc(PERSON *pn);
 void	find_idle_and_ttywrite(WHERE *);
 void	userinfo(PERSON *, struct passwd *);
-
-struct storage {
-	struct storage *next;
-	char a[1];
-};
-
-void
-free_storage(struct storage *st)
-{
-	struct storage *nx;
-
-	while (st != NULL) {
-		nx = st->next;
-		free(st);
-		st = nx;
-	}
-}
 
 void
 find_idle_and_ttywrite(WHERE *w)
@@ -107,38 +88,48 @@ userinfo(PERSON *pn, struct passwd *pw)
 	char *p;
 	char *bp, name[1024];
 	struct stat sb;
+	int len;
 
 	pn->realname = pn->office = pn->officephone = pn->homephone = NULL;
+	pn->mailrecv = -1;		/* -1 == not_valid */
 
 	pn->uid = pw->pw_uid;
 	pn->name = estrdup(pw->pw_name);
 	pn->dir = estrdup(pw->pw_dir);
 	pn->shell = estrdup(pw->pw_shell);
 
-	(void)strncpy(bp = tbuf, pw->pw_gecos, sizeof(tbuf));
+	(void)strlcpy(bp = tbuf, pw->pw_gecos, sizeof(tbuf));
 
 	/* ampersands get replaced by the login name */
 	if (!(p = strsep(&bp, ",")))
 		return;
 	expandusername(p, pw->pw_name, name, sizeof(name));
-	pn->realname = estrdup(name);
-	pn->office = ((p = strsep(&bp, ",")) && *p) ?
-	    estrdup(p) : NULL;
-	pn->officephone = ((p = strsep(&bp, ",")) && *p) ?
-	    estrdup(p) : NULL;
-	pn->homephone = ((p = strsep(&bp, ",")) && *p) ?
-	    estrdup(p) : NULL;
-	(void)snprintf(tbuf, sizeof(tbuf), "%s/%s", _PATH_MAILSPOOL,
+	if (stravis(&pn->realname, p, VIS_SAFE|VIS_NOSLASH) == -1)
+		err(1, "stravis");
+	if ((p = strsep(&bp, ",")) && *p) {
+		if (stravis(&pn->office, p, VIS_SAFE|VIS_NOSLASH) == -1)
+			err(1, "stravis");
+	}
+	if ((p = strsep(&bp, ",")) && *p) {
+		if (stravis(&pn->officephone, p, VIS_SAFE|VIS_NOSLASH) == -1)
+			err(1, "stravis");
+	}
+	if ((p = strsep(&bp, ",")) && *p) {
+		if (stravis(&pn->homephone, p, VIS_SAFE|VIS_NOSLASH) == -1)
+			err(1, "stravis");
+	}
+	len = snprintf(tbuf, sizeof(tbuf), "%s/%s", _PATH_MAILSPOOL,
 	    pw->pw_name);
-	pn->mailrecv = -1;		/* -1 == not_valid */
-	if (stat(tbuf, &sb) < 0) {
-		if (errno != ENOENT) {
-			warn("%s", tbuf);
-			return;
+	if (len != -1 && len < sizeof(tbuf)) {
+		if (stat(tbuf, &sb) < 0) {
+			if (errno != ENOENT) {
+				warn("%s", tbuf);
+				return;
+			}
+		} else if (sb.st_size != 0) {
+			pn->mailrecv = sb.st_mtime;
+			pn->mailread = sb.st_atime;
 		}
-	} else if (sb.st_size != 0) {
-		pn->mailrecv = sb.st_mtime;
-		pn->mailread = sb.st_atime;
 	}
 }
 
@@ -148,7 +139,7 @@ match(struct passwd *pw, char *user)
 	char *p, *t;
 	char name[1024];
 
-	(void)strncpy(p = tbuf, pw->pw_gecos, sizeof(tbuf));
+	(void)strlcpy(p = tbuf, pw->pw_gecos, sizeof(tbuf));
 
 	/* ampersands get replaced by the login name */
 	if (!(p = strtok(p, ",")))
@@ -380,26 +371,4 @@ prphone(char *num)
 	*p++ = *num++;
 	*p = '\0';
 	return (pbuf);
-}
-
-/* Like strvis(), but use malloc() to get the space and return a pointer
- * to the beginning of the converted string, not the end.
- *
- * The caller is responsible for free()'ing the returned string.
- */
-char *
-vs(struct storage **exist, char *src)
-{
-	char *dst;
-	struct storage *n;
-
-	if ((n = malloc(sizeof(struct storage) + 4 * strlen(src))) == NULL)
-		err(1, "malloc failed");
-	n->next = *exist;
-	*exist = n;
-
-	dst = n->a;
-
-	strvis(dst, src, VIS_SAFE|VIS_NOSLASH);
-	return (dst);
 }

@@ -1,4 +1,4 @@
-/*	$OpenBSD: pass2.c,v 1.34 2013/06/11 16:42:04 deraadt Exp $	*/
+/*	$OpenBSD: pass2.c,v 1.37 2015/01/20 18:22:21 deraadt Exp $	*/
 /*	$NetBSD: pass2.c,v 1.17 1996/09/27 22:45:15 christos Exp $	*/
 
 /*
@@ -30,7 +30,7 @@
  * SUCH DAMAGE.
  */
 
-#include <sys/param.h>
+#include <sys/param.h>	/* DEV_BSIZE roundup */
 #include <sys/time.h>
 #include <ufs/ufs/dinode.h>
 #include <ufs/ufs/dir.h>
@@ -39,6 +39,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <limits.h>
 
 #include "fsck.h"
 #include "fsutil.h"
@@ -76,7 +77,7 @@ pass2(void)
 	struct inoinfo **inpend;
 	struct inodesc curino;
 	union dinode dino;
-	char pathbuf[MAXPATHLEN + 1];
+	char pathbuf[PATH_MAX + 1];
 	int i;
 
 	switch (GET_ISTATE(ROOTINO)) {
@@ -162,12 +163,12 @@ pass2(void)
 			getpathname(pathbuf, sizeof pathbuf,
 			    inp->i_number, inp->i_number);
 			if (usedsoftdep)
-			        pfatal("%s %s: LENGTH %ld NOT MULTIPLE of %d",
-				       "DIRECTORY", pathbuf, (long)inp->i_isize,
+			        pfatal("%s %s: LENGTH %zu NOT MULTIPLE of %d",
+				       "DIRECTORY", pathbuf, inp->i_isize,
 				       DIRBLKSIZ);
 			else
-				pwarn("%s %s: LENGTH %ld NOT MULTIPLE OF %d",
-				      "DIRECTORY", pathbuf, (long)inp->i_isize,
+				pwarn("%s %s: LENGTH %zu NOT MULTIPLE OF %d",
+				      "DIRECTORY", pathbuf, inp->i_isize,
 				      DIRBLKSIZ);
 			if (preen)
 				printf(" (ADJUSTED)\n");
@@ -254,8 +255,8 @@ pass2check(struct inodesc *idesc)
 	union dinode *dp;
 	char *errmsg;
 	struct direct proto;
-	char namebuf[MAXPATHLEN + 1];
-	char pathbuf[MAXPATHLEN + 1];
+	char namebuf[PATH_MAX + 1];
+	char pathbuf[PATH_MAX + 1];
 
 	/*
 	 * check for "."

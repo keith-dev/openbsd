@@ -1,4 +1,4 @@
-/*	$OpenBSD: fsck.c,v 1.30 2014/07/13 17:28:13 jmc Exp $	*/
+/*	$OpenBSD: fsck.c,v 1.33 2015/01/16 06:39:57 deraadt Exp $	*/
 /*	$NetBSD: fsck.c,v 1.7 1996/10/03 20:06:30 christos Exp $	*/
 
 /*
@@ -35,7 +35,7 @@
  *
  */
 
-#include <sys/param.h>
+#include <sys/types.h>
 #include <sys/mount.h>
 #include <sys/queue.h>
 #include <sys/resource.h>
@@ -49,6 +49,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include <limits.h>
 #include <util.h>
 
 #include "pathnames.h"
@@ -243,14 +244,14 @@ checkfs(const char *vfstype, const char *spec, const char *mntpt, void *auxarg,
 	const char **argv, **edir;
 	pid_t pid;
 	int argc, i, status, maxargc;
-	char *optbuf = NULL, fsname[MAXPATHLEN], execname[MAXPATHLEN];
+	char *optbuf = NULL, fsname[PATH_MAX], execname[PATH_MAX];
 	const char *extra = getoptions(vfstype);
 
 	if (strcmp(vfstype, "ufs") == 0)
 		vfstype = MOUNT_UFS;
 
 	maxargc = 100;
-	argv = emalloc(sizeof(char *) * maxargc);
+	argv = ereallocarray(NULL, maxargc, sizeof(char *));
 
 	argc = 0;
 	(void)snprintf(fsname, sizeof(fsname), "fsck_%s", vfstype);
@@ -455,7 +456,7 @@ mangle(char *opts, int *argcp, const char ***argvp, int *maxargcp)
 		if (argc >= maxargc - 3) {
 			int newmaxargc = maxargc + 50;
 
-			argv = erealloc(argv, newmaxargc * sizeof(char *));
+			argv = ereallocarray(argv, newmaxargc, sizeof(char *));
 			maxargc = newmaxargc;
 		}
 		if (*p != '\0') {

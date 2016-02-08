@@ -1,4 +1,4 @@
-/*	$OpenBSD: si.c,v 1.15 2014/07/12 18:48:52 tedu Exp $	*/
+/*	$OpenBSD: si.c,v 1.19 2015/02/12 11:11:45 jsg Exp $	*/
 /*
  * Copyright 2011 Advanced Micro Devices, Inc.
  *
@@ -321,9 +321,7 @@ static int si_init_microcode(struct radeon_device *rdev)
 	default: BUG();
 	}
 
-#ifdef DRMDEBUG
 	DRM_INFO("Loading %s Microcode\n", chip_name);
-#endif
 
 	snprintf(fw_name, sizeof(fw_name), "radeon-%s_pfp", chip_name);
 	err = loadfirmware(fw_name, &rdev->pfp_fw, &rdev->pfp_fw_size);
@@ -384,7 +382,7 @@ static int si_init_microcode(struct radeon_device *rdev)
 out:
 	if (err) {
 		if (err != -EINVAL)
-			DRM_ERROR(
+			printk(KERN_ERR
 			       "si_cp: Failed to load firmware \"%s\"\n",
 			       fw_name);
 		if (rdev->pfp_fw) {
@@ -3731,22 +3729,22 @@ int si_irq_process(struct radeon_device *rdev)
 	bool queue_hotplug = false;
 
 	if (!rdev->ih.enabled || rdev->shutdown)
-		return (0);
+		return IRQ_NONE;
 
 	wptr = si_get_ih_wptr(rdev);
 
 	if (wptr == rdev->ih.rptr)
-		return (0);
+		return IRQ_NONE;
 restart_ih:
 	/* is somebody else already processing irqs? */
 	if (atomic_xchg(&rdev->ih.lock, 1))
-		return (0);
+		return IRQ_NONE;
 
 	rptr = rdev->ih.rptr;
 	DRM_DEBUG("si_irq_process start: rptr %d, wptr %d\n", rptr, wptr);
 
 	/* Order reading of wptr vs. reading of IH ring data */
-	DRM_READMEMORYBARRIER();
+	rmb();
 
 	/* display interrupts */
 	si_irq_ack(rdev);
@@ -4028,7 +4026,7 @@ restart_ih:
 	if (wptr != rptr)
 		goto restart_ih;
 
-	return (1);
+	return IRQ_HANDLED;
 }
 
 /**
@@ -4446,10 +4444,10 @@ uint64_t si_get_gpu_clock(struct radeon_device *rdev)
 {
 	uint64_t clock;
 
-	rw_enter_write(&rdev->gpu_clock_rwlock);
+	mutex_lock(&rdev->gpu_clock_mutex);
 	WREG32(RLC_CAPTURE_GPU_CLOCK_COUNT, 1);
 	clock = (uint64_t)RREG32(RLC_GPU_CLOCK_COUNT_LSB) |
 	        ((uint64_t)RREG32(RLC_GPU_CLOCK_COUNT_MSB) << 32ULL);
-	rw_exit_write(&rdev->gpu_clock_rwlock);
+	mutex_unlock(&rdev->gpu_clock_mutex);
 	return clock;
 }

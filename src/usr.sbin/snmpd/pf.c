@@ -1,4 +1,4 @@
-/*	$OpenBSD: pf.c,v 1.6 2013/09/07 04:43:21 joel Exp $	*/
+/*	$OpenBSD: pf.c,v 1.10 2015/02/06 23:21:59 millert Exp $	*/
 
 /*
  * Copyright (c) 2012 Joel Knight <joel@openbsd.org>
@@ -31,18 +31,19 @@
  *
  */
 
-#include <sys/param.h>
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <sys/ioctl.h>
 
+#include <netinet/in.h>
+#include <arpa/inet.h>
 #include <net/if.h>
 #include <net/pfvar.h>
-#include <arpa/inet.h>
 
 #include <err.h>
 #include <errno.h>
 #include <fcntl.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -144,11 +145,11 @@ pfr_buf_grow(struct pfr_buffer *b, int minsize)
 	} else {
 		if (minsize == 0)
 			minsize = b->pfrb_msize * 2;
-		if (minsize < 0 || (size_t)minsize >= SIZE_T_MAX / bs) {
+		if (minsize < 0 || (size_t)minsize >= SIZE_MAX / bs) {
 			/* msize overflow */
 			return (-1);
 		}
-		p = realloc(b->pfrb_caddr, minsize * bs);
+		p = reallocarray(b->pfrb_caddr, minsize, bs);
 		if (p == NULL)
 			return (-1);
 		bzero(p + b->pfrb_msize * bs, (minsize - b->pfrb_msize) * bs);

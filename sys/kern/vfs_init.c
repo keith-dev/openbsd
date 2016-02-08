@@ -1,4 +1,4 @@
-/*	$OpenBSD: vfs_init.c,v 1.33 2013/09/24 09:20:12 espie Exp $	*/
+/*	$OpenBSD: vfs_init.c,v 1.35 2014/12/19 05:59:21 tedu Exp $	*/
 /*	$NetBSD: vfs_init.c,v 1.6 1996/02/09 19:00:58 christos Exp $	*/
 
 /*
@@ -66,10 +66,6 @@ extern	const struct vfsops msdosfs_vfsops;
 extern	const struct vfsops nfs_vfsops;
 #endif
 
-#ifdef PROCFS
-extern	const struct vfsops procfs_vfsops;
-#endif
-
 #ifdef CD9660
 extern	const struct vfsops cd9660_vfsops;
 #endif
@@ -120,10 +116,6 @@ static struct vfsconf vfsconflist[] = {
         { &nfs_vfsops, MOUNT_NFS, 2, 0, 0, NULL },
 #endif
 
-#ifdef PROCFS
-        { &procfs_vfsops, MOUNT_PROCFS, 12, 0, 0, NULL },
-#endif
-
 #ifdef NTFS
 	{ &ntfs_vfsops, MOUNT_NTFS, 6, 0, MNT_LOCAL, NULL },
 #endif
@@ -157,8 +149,7 @@ vfsinit(void)
 	struct vfsconf *vfsconflist;
 	int vfsconflistlen;
 
-	pool_init(&namei_pool, MAXPATHLEN, 0, 0, 0, "namei",
-	    &pool_allocator_nointr);
+	pool_init(&namei_pool, MAXPATHLEN, 0, 0, PR_WAITOK, "namei", NULL);
 
 	/* Initialize the vnode table. */
 	vntblinit();

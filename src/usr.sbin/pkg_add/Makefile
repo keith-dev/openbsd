@@ -1,8 +1,9 @@
-# $OpenBSD: Makefile,v 1.82 2014/07/13 17:24:06 espie Exp $
+# $OpenBSD: Makefile,v 1.85 2015/01/11 22:34:08 espie Exp $
 
 .include <bsd.own.mk>
 
-MAN1=pkg_add.1 pkg_info.1 pkg_create.1 pkg_delete.1 pkg_mklocatedb.1 pkg_sign.1
+MAN1=fw_update.1 pkg_add.1 pkg_info.1 pkg_create.1 pkg_delete.1 \
+	pkg_mklocatedb.1 pkg_sign.1
 MAN5=package.5 pkg.conf.5
 MAN8=pkg_check.8
 MAN=${MAN1} ${MAN5} ${MAN8}
@@ -35,7 +36,7 @@ PACKAGES= \
     OpenBSD/PackageRepository.pm \
     OpenBSD/PackageRepository/HTTP.pm \
     OpenBSD/PackageRepository/Installed.pm \
-    OpenBSD/PackageRepository/Persistant.pm \
+    OpenBSD/PackageRepository/Persistent.pm \
     OpenBSD/PackageRepository/SCP.pm \
     OpenBSD/PackageRepositoryList.pm \
     OpenBSD/PackingElement.pm \
@@ -66,6 +67,7 @@ PACKAGES= \
     OpenBSD/UpdateSet.pm \
     OpenBSD/Ustar.pm \
     OpenBSD/Vstat.pm \
+    OpenBSD/FwUpdate.pm \
     OpenBSD/md5.pm \
     OpenBSD/signify.pm \
     OpenBSD/x509.pm
@@ -81,7 +83,8 @@ SCRIPTS_LNK = \
     pkg_add pkg_create \
     pkg_add pkg_delete \
     pkg_add pkg_info \
-    pkg_add pkg_sign
+    pkg_add pkg_sign \
+    pkg_add fw_update
 
 LIBBASE=/usr/libdata/perl5
 

@@ -1,4 +1,4 @@
-/*	$OpenBSD: ntp_msg.c,v 1.19 2013/04/30 11:42:56 mglocker Exp $ */
+/*	$OpenBSD: ntp_msg.c,v 1.21 2015/02/10 06:01:01 bcook Exp $ */
 
 /*
  * Copyright (c) 2003, 2004 Henning Brauer <henning@openbsd.org>
@@ -17,7 +17,7 @@
  * OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
 
-#include <sys/param.h>
+#include <sys/types.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
@@ -62,7 +62,7 @@ ntp_sendmsg(int fd, struct sockaddr *sa, struct ntp_msg *msg)
 	}
 
 	if (n != sizeof(*msg)) {
-		log_warnx("ntp_sendmsg: only %ld of %ld bytes sent", n,
+		log_warnx("ntp_sendmsg: only %zd of %zu bytes sent", n,
 		    sizeof(*msg));
 		return (-1);
 	}

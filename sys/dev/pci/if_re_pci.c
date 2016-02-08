@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_re_pci.c,v 1.41 2014/07/22 13:12:11 mpi Exp $	*/
+/*	$OpenBSD: if_re_pci.c,v 1.47 2015/03/08 01:54:04 tobiasu Exp $	*/
 
 /*
  * Copyright (c) 2005 Peter Valchev <pvalchev@openbsd.org>
@@ -35,10 +35,8 @@
 #include <net/if_dl.h>
 #include <net/if_media.h>
 
-#ifdef INET
 #include <netinet/in.h>
 #include <netinet/if_ether.h>
-#endif
 
 #include <dev/mii/mii.h>
 #include <dev/mii/miivar.h>
@@ -197,6 +195,8 @@ re_pci_attach(struct device *parent, struct device *self, void *aux)
 		CSR_WRITE_1(sc, RL_EECMD, RL_EEMODE_OFF);
 	}
 
+	sc->sc_product = PCI_PRODUCT(pa->pa_id);
+
 	/* Call bus-independent attach routine */
 	if (re_attach(sc, intrstr)) {
 		pci_intr_disestablish(pc, psc->sc_ih);
@@ -246,7 +246,6 @@ re_pci_activate(struct device *self, int act)
 			re_stop(ifp);
 		break;
 	case DVACT_RESUME:
-		re_reset(sc);
 		if (ifp->if_flags & IFF_UP)
 			re_init(ifp);
 		break;

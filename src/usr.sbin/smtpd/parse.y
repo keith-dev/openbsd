@@ -1,4 +1,4 @@
-/*	$OpenBSD: parse.y,v 1.146 2014/07/09 12:44:54 eric Exp $	*/
+/*	$OpenBSD: parse.y,v 1.152 2015/02/08 04:50:32 reyk Exp $	*/
 
 /*
  * Copyright (c) 2008 Gilles Chehade <gilles@poolp.org>
@@ -41,6 +41,7 @@
 #include <imsg.h>
 #include <inttypes.h>
 #include <netdb.h>
+#include <limits.h>
 #include <paths.h>
 #include <pwd.h>
 #include <stdio.h>
@@ -75,7 +76,8 @@ int		 lgetc(int);
 int		 lungetc(int);
 int		 findeol(void);
 int		 yyerror(const char *, ...)
-    __attribute__ ((format (printf, 1, 2)));
+    __attribute__((__format__ (printf, 1, 2)))
+    __attribute__((__nonnull__ (1)));
 
 TAILQ_HEAD(symhead, sym)	 symhead = TAILQ_HEAD_INITIALIZER(symhead);
 struct sym {
@@ -771,7 +773,7 @@ main		: BOUNCEWARN {
 			}
 		} filter_args;
 		| PKI STRING	{
-			char buf[MAXHOSTNAMELEN];
+			char buf[HOST_NAME_MAX+1];
 			xlowercase(buf, $2, sizeof(buf));
 			free($2);
 			pki = dict_get(conf->sc_pki_dict, buf);
@@ -1239,15 +1241,15 @@ int
 yyerror(const char *fmt, ...)
 {
 	va_list		 ap;
-	char		*nfmt;
+	char		*msg;
 
 	file->errors++;
 	va_start(ap, fmt);
-	if (asprintf(&nfmt, "%s:%d: %s", file->name, yylval.lineno, fmt) == -1)
-		fatalx("yyerror asprintf");
-	vlog(LOG_CRIT, nfmt, ap);
+	if (vasprintf(&msg, fmt, ap) == -1)
+		fatalx("yyerror vasprintf");
 	va_end(ap);
-	free(nfmt);
+	logit(LOG_CRIT, "%s:%d: %s", file->name, yylval.lineno, msg);
+	free(msg);
 	return (0);
 }
 
@@ -1493,6 +1495,9 @@ top:
 			} else if (c == quotec) {
 				*p = '\0';
 				break;
+			} else if (c == '\0') {
+				yyerror("syntax error");
+				return (findeol());
 			}
 			if (p + 1 >= buf + sizeof(buf) - 1) {
 				yyerror("string too long");
@@ -1651,8 +1656,8 @@ parse_config(struct smtpd *x_conf, const char *filename, int opts)
 {
 	struct sym     *sym, *next;
 	struct table   *t;
-	char		hostname[SMTPD_MAXHOSTNAMELEN];
-	char		hostname_copy[SMTPD_MAXHOSTNAMELEN];
+	char		hostname[HOST_NAME_MAX+1];
+	char		hostname_copy[HOST_NAME_MAX+1];
 
 	if (! getmailname(hostname, sizeof hostname))
 		return (-1);
@@ -1998,6 +2003,7 @@ host_dns(struct listenerlist *al, struct listen_opts *lo)
 	memset(&hints, 0, sizeof(hints));
 	hints.ai_family = PF_UNSPEC;
 	hints.ai_socktype = SOCK_STREAM;
+	hints.ai_flags = AI_ADDRCONFIG;
 	error = getaddrinfo(lo->ifx, NULL, &hints, &res0);
 	if (error == EAI_AGAIN || error == EAI_NODATA || error == EAI_NONAME)
 		return (0);

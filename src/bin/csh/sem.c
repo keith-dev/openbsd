@@ -1,4 +1,4 @@
-/*	$OpenBSD: sem.c,v 1.17 2010/08/12 02:00:27 kevlo Exp $	*/
+/*	$OpenBSD: sem.c,v 1.19 2015/02/08 05:47:28 tedu Exp $	*/
 /*	$NetBSD: sem.c,v 1.9 1995/09/27 00:38:50 jtc Exp $	*/
 
 /*-
@@ -30,7 +30,7 @@
  * SUCH DAMAGE.
  */
 
-#include <sys/param.h>
+#include <sys/types.h>
 #include <sys/ioctl.h>
 #include <sys/stat.h>
 #include <errno.h>
@@ -38,6 +38,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include <limits.h>
 #include <stdarg.h>
 
 #include "csh.h"
@@ -249,7 +250,7 @@ execute(struct command *t, int wanttty, int *pipein, int *pipeout)
 		otpgrp = tpgrp;
 		ocsigset = csigset;
 		onosigchld = nosigchld;
-		Vsav = Vdp = 0;
+		Vsav = Vdp = NULL;
 		Vexpath = 0;
 		Vt = 0;
 		pid = vfork();
@@ -272,14 +273,14 @@ execute(struct command *t, int wanttty, int *pipein, int *pipeout)
 		    csigset = ocsigset;
 		    nosigchld = onosigchld;
 
-		    xfree((ptr_t) Vsav);
-		    Vsav = 0;
-		    xfree((ptr_t) Vdp);
-		    Vdp = 0;
-		    xfree((ptr_t) Vexpath);
-		    Vexpath = 0;
+		    xfree(Vsav);
+		    Vsav = NULL;
+		    xfree(Vdp);
+		    Vdp = NULL;
+		    xfree(Vexpath);
+		    Vexpath = NULL;
 		    blkfree((Char **) Vt);
-		    Vt = 0;
+		    Vt = NULL;
 		    /* this is from pfork() */
 		    palloc(pid, t);
 		    sigprocmask(SIG_SETMASK, &osigset, NULL);
@@ -482,23 +483,23 @@ splicepipe(struct command *t, Char *cp) /* word after < or > */
 	    pv = globall(blk);
 	    if (pv == NULL) {
 		setname(vis_str(blk[0]));
-		xfree((ptr_t) blk[0]);
+		xfree(blk[0]);
 		stderror(ERR_NAME | ERR_NOMATCH);
 	    }
 	    gargv = NULL;
 	    if (pv[1] != NULL) { /* we need to fix the command vector */
 		Char **av = blkspl(t->t_dcom, &pv[1]);
-		xfree((ptr_t) t->t_dcom);
+		xfree(t->t_dcom);
 		t->t_dcom = av;
 	    }
-	    xfree((ptr_t) blk[0]);
+	    xfree(blk[0]);
 	    blk[0] = pv[0];
-	    xfree((ptr_t) pv);
+	    xfree(pv);
 	}
     }
     else {
 	blk[0] = globone(blk[1] = Dfix1(cp), G_ERROR);
-	xfree((ptr_t) blk[1]);
+	xfree(blk[1]);
     }
     return(blk[0]);
 }
@@ -518,7 +519,7 @@ doio(struct command *t, int *pipein, int *pipeout)
 	return;
     if ((flags & F_READ) == 0) {/* F_READ already done */
 	if (t->t_dlef) {
-	    char    tmp[MAXPATHLEN];
+	    char    tmp[PATH_MAX];
 
 	    /*
 	     * so < /dev/std{in,out,err} work
@@ -528,7 +529,7 @@ doio(struct command *t, int *pipein, int *pipeout)
 	    (void) dcopy(SHERR, 2);
 	    cp = splicepipe(t, t->t_dlef);
 	    strlcpy(tmp, short2str(cp), sizeof tmp);
-	    xfree((ptr_t) cp);
+	    xfree(cp);
 	    if ((fd = open(tmp, O_RDONLY)) < 0)
 		stderror(ERR_SYSTEM, tmp, strerror(errno));
 	    (void) dmove(fd, 0);
@@ -550,11 +551,11 @@ doio(struct command *t, int *pipein, int *pipeout)
 	}
     }
     if (t->t_drit) {
-	char    tmp[MAXPATHLEN];
+	char    tmp[PATH_MAX];
 
 	cp = splicepipe(t, t->t_drit);
 	strlcpy(tmp, short2str(cp), sizeof tmp);
-	xfree((ptr_t) cp);
+	xfree(cp);
 	/*
 	 * so > /dev/std{out,err} work
 	 */

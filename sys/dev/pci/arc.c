@@ -1,4 +1,4 @@
-/*	$OpenBSD: arc.c,v 1.103 2014/07/13 23:10:23 deraadt Exp $ */
+/*	$OpenBSD: arc.c,v 1.106 2015/01/27 03:17:36 dlg Exp $ */
 
 /*
  * Copyright (c) 2006 David Gwynne <dlg@openbsd.org>
@@ -29,6 +29,7 @@
 #include <sys/mutex.h>
 #include <sys/device.h>
 #include <sys/rwlock.h>
+#include <sys/task.h>
 
 #include <machine/bus.h>
 
@@ -668,8 +669,12 @@ int			arc_bio_getvol(struct arc_softc *, int,
 			    struct arc_fw_volinfo *);
 
 #ifndef SMALL_KERNEL
+struct arc_task {
+	struct task t;
+	struct arc_softc *sc;
+};
 /* sensors */
-void			arc_create_sensors(void *, void *);
+void			arc_create_sensors(void *);
 void			arc_refresh_sensors(void *);
 #endif /* SMALL_KERNEL */
 #endif
@@ -824,9 +829,14 @@ arc_attach(struct device *parent, struct device *self, void *aux)
 	 * interface relies on being able to sleep, so we need to use a thread
 	 * to do the work.
 	 */
-	if (scsi_task(arc_create_sensors, sc, NULL, 1) != 0)
-		printf("%s: unable to schedule arc_create_sensors as a "
-		    "scsi task", DEVNAME(sc));
+	{
+		struct arc_task *at;
+		at = malloc(sizeof(*at), M_TEMP, M_WAITOK);
+
+		at->sc = sc;
+		task_set(&at->t, arc_create_sensors, at);
+		task_add(systq, &at->t);
+	}
 #endif
 #endif
 
@@ -2596,12 +2606,15 @@ arc_wait(struct arc_softc *sc)
 
 #ifndef SMALL_KERNEL
 void
-arc_create_sensors(void *xsc, void *arg)
+arc_create_sensors(void *xat)
 {
-	struct arc_softc	*sc = xsc;
+	struct arc_task		*at = xat;
+	struct arc_softc	*sc = at->sc;
 	struct bioc_inq		bi;
 	struct bioc_vol		bv;
 	int			i;
+
+	free(at, M_TEMP, sizeof(*at));
 
 	DPRINTF("%s: arc_create_sensors\n", DEVNAME(sc));
 	/*

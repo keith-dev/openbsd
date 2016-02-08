@@ -1,4 +1,4 @@
-/* $OpenBSD: xhcireg.h,v 1.2 2014/07/12 17:38:51 yuo Exp $ */
+/* $OpenBSD: xhcireg.h,v 1.11 2015/01/18 20:35:11 mpi Exp $ */
 
 /*-
  * Copyright (c) 2014 Martin Pieuchot. All rights reserved.
@@ -26,11 +26,21 @@
  * SUCH DAMAGE.
  */
 
-#ifndef	_XHCIREG_H_
+#ifndef _XHCIREG_H_
 #define _XHCIREG_H_
 
-/* Default command execution time (implementation defined). */
-#define XHCI_COMMAND_TIMEOUT	500	/* ms */
+/* Data Structure Boundary and Alignment Requirement. */
+#define XHCI_DCBAA_ALIGN	64
+#define XHCI_ICTX_ALIGN		64
+#define XHCI_SCTX_ALIGN		32
+#define XHCI_OCTX_ALIGN		32
+#define XHCI_XFER_RING_ALIGN	16
+#define XHCI_CMDS_RING_ALIGN	64
+#define XHCI_EVTS_RING_ALIGN	64
+#define XHCI_RING_BOUNDARY	(64 * 1024)
+#define XHCI_ERST_ALIGN		64
+#define XHCI_ERST_BOUNDARY	0
+#define XHCI_SPAD_TABLE_ALIGN	64
 
 /* XHCI PCI config registers */
 #define PCI_CBMEM		0x10	/* configuration base MEM */
@@ -245,29 +255,20 @@ struct xhci_erseg {
 struct xhci_sctx {
 	 uint32_t		info_lo;
 #define XHCI_SCTX_ROUTE(x)		((x) & 0xfffff)
-#define XHCI_SCTX_SET_SPEED(x)		(((x) & 0xf) << 20)
-#define XHCI_SCTX_GET_SPEED(x)		(((x) >> 20) & 0xf)
-#define XHCI_SCTX_SET_MTT(x)		(((x) & 0x1) << 25)
-#define XHCI_SCTX_GET_MTT(x)		(((x) >> 25) & 0x1)
-#define XHCI_SCTX_SET_HUB(x)		(((x) & 0x1) << 26)
-#define XHCI_SCTX_GET_HUB(x)		(((x) >> 26) & 0x1)
-#define XHCI_SCTX_SET_DCI(x)		(((x) & 0x1f) << 27)
-#define XHCI_SCTX_GET_DCI(x)		(((x) >> 27) & 0x1f)
+#define XHCI_SCTX_SPEED(x)		(((x) & 0xf) << 20)
+#define XHCI_SCTX_MTT(x)		(((x) & 0x1) << 25)
+#define XHCI_SCTX_HUB(x)		(((x) & 0x1) << 26)
+#define XHCI_SCTX_DCI(x)		(((x) & 0x1f) << 27)
 
 	 uint32_t		info_hi;
-#define XHCI_SCTX_SET_MAX_EL(x)		((x) & 0xffff)
-#define XHCI_SCTX_GET_MAX_EL(x)		((x) & 0xffff)
-#define XHCI_SCTX_SET_RHPORT(x)		(((x) & 0xff) << 16)
-#define XHCI_SCTX_GET_RHPORT(x)		(((x) >> 16) & 0xff)
-#define XHCI_SCTX_SET_NPORTS(x)		(((x) & 0xff) << 24)
-#define XHCI_SCTX_GET_NPORTS(x)		(((x) >> 24) & 0xff)
+#define XHCI_SCTX_MAX_EL(x)		((x) & 0xffff)
+#define XHCI_SCTX_RHPORT(x)		(((x) & 0xff) << 16)
+#define XHCI_SCTX_NPORTS(x)		(((x) & 0xff) << 24)
 
 	 uint32_t		tt;
 #define XHCI_SCTX_TT_HUB_SID(x)		((x) & 0xff)
-#define XHCI_SCTX_SET_TT_PORT_NUM(x)	(((x) & 0xff) << 8)
-#define XHCI_SCTX_GET_TT_PORT_NUM(x)	(((x) >> 8) & 0xff)
-#define XHCI_SCTX_SET_TT_THINK_TIME(x)	(((x) & 0x3) << 16)
-#define XHCI_SCTX_GET_TT_THINK_TIME(x)	(((x) >> 16) & 0x3)
+#define XHCI_SCTX_TT_PORT_NUM(x)	(((x) & 0xff) << 8)
+#define XHCI_SCTX_TT_THINK_TIME(x)	(((x) & 0x3) << 16)
 #define XHCI_SCTX_SET_IRQ_TARGET(x)	(((x) & 0x3ff) << 22)
 #define XHCI_SCTX_GET_IRQ_TARGET(x)	(((x) >> 22) & 0x3ff)
 
@@ -311,7 +312,6 @@ struct xhci_epctx {
 #define  XHCI_SPEED_SUPER	4
 
 	 uint64_t		deqp;
-#define XHCI_EPCTX_DCS		0x1
 
 	 uint32_t		txinfo;
 #define XHCI_EPCTX_AVG_TRB_LEN(x)	((x) & 0xffff)
@@ -333,6 +333,7 @@ struct xhci_inctx {
 struct xhci_trb {
 	uint64_t trb_paddr;
 #define XHCI_TRB_PORTID(x)	(((x) & (0xff << 24)) >> 24)	/* Port ID */
+#define XHCI_TRB_MAXSIZE	(64 * 1024)
 
 	uint32_t trb_status;
 #define XHCI_TRB_GET_CODE(x)	(((x) >> 24) & 0xff)
@@ -359,6 +360,9 @@ struct xhci_trb {
 #define XHCI_TRB_GET_SLOT(x)	(((x) >> 24) & 0xff)
 #define XHCI_TRB_SET_SLOT(x)	(((x) & 0xff) << 24)
 } __packed;
+
+#define XHCI_TRB_FLAGS_BITMASK						\
+    "\20\007IDT\006IOC\005CHAIN\004NOSNOOP\003ISP\002LINKSEG\001CYCLE"
 
 #define XHCI_TRB_TYPE_MASK	0xfc00
 #define XHCI_TRB_TYPE(x)	(((x) & XHCI_TRB_TYPE_MASK) >> 10)
@@ -428,7 +432,7 @@ struct xhci_trb {
 #define XHCI_CODE_CMD_RING_STOP	24 	/* Command Stop (CS) requested */
 #define XHCI_CODE_CMD_ABORTED	25 	/* Command Abort (CA) operation */
 #define XHCI_CODE_XFER_STOPPED	26 	/* xfer terminated by a stop endpoint */
-#define XHCI_CODE_XFER_INVLEN	27 	/* TRB transfer length invalid */
+#define XHCI_CODE_XFER_STOPINV	27 	/* TRB transfer length invalid */
 #define XHCI_CODE_XFER_SHORTPKT	28 	/* Stopped before reaching end of TD */
 #define XHCI_CODE_MELAT		29	/* Max Exit Latency too large */
 #define XHCI_CODE_RESERVED	30
@@ -437,6 +441,6 @@ struct xhci_trb {
 #define XHCI_CODE_UNDEFINED	33 	/* Fatal error - impl. specific */
 #define XHCI_CODE_INVALID_SID	34 	/* Invalid stream ID received */
 #define XHCI_CODE_SEC_BW	35 	/* Cannot alloc secondary BW Domain */
-#define XHCI_CODE_SPLIT_XACT	36 	/* USB2 split transaction */
+#define XHCI_CODE_SPLITERR	36 	/* USB2 split transaction */
 
 #endif	/* _XHCIREG_H_ */

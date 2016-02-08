@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_le_syscon.c,v 1.15 2013/10/23 22:14:22 miod Exp $	*/
+/*	$OpenBSD: if_le_syscon.c,v 1.17 2014/12/22 02:26:53 tedu Exp $	*/
 
 /*-
  * Copyright (c) 1996 The NetBSD Foundation, Inc.
@@ -40,10 +40,8 @@
 
 #include <net/if.h>
 
-#ifdef INET
 #include <netinet/in.h>
 #include <netinet/if_ether.h>
-#endif
 
 #include <net/if_media.h>
 
@@ -237,7 +235,8 @@ le_syscon_attach(struct device *parent, struct device *self, void *aux)
 
 	TAILQ_FOREACH(pg, &pglist, pageq) {
 		pmap_enter(pmap_kernel(), va, pa,
-		    UVM_PROT_RW, UVM_PROT_RW | PMAP_WIRED);
+		    PROT_READ | PROT_WRITE,
+		    PROT_READ | PROT_WRITE | PMAP_WIRED);
 		va += PAGE_SIZE;
 		pa += PAGE_SIZE;
 	}

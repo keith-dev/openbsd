@@ -1,4 +1,4 @@
-/*	$OpenBSD: hibernate_machdep.c,v 1.28 2014/07/20 19:47:53 deraadt Exp $	*/
+/*	$OpenBSD: hibernate_machdep.c,v 1.35 2015/02/11 00:56:14 dlg Exp $	*/
 
 /*
  * Copyright (c) 2012 Mike Larkin <mlarkin@openbsd.org>
@@ -26,6 +26,7 @@
 #include <sys/timeout.h>
 #include <sys/malloc.h>
 #include <sys/kcore.h>
+#include <sys/atomic.h>
 
 #include <dev/acpi/acpivar.h>
 
@@ -132,6 +133,7 @@ get_hibernate_info_md(union hibernate_info *hiber_info)
 	}
 
 #if NACPI > 0
+	/* Record ACPI trampoline code page */
 	if (hiber_info->nranges >= VM_PHYSSEG_MAX)
 		return (1);
 	hiber_info->ranges[hiber_info->nranges].base = ACPI_TRAMPOLINE;
@@ -139,11 +141,31 @@ get_hibernate_info_md(union hibernate_info *hiber_info)
 	    hiber_info->ranges[hiber_info->nranges].base + PAGE_SIZE;
 	hiber_info->image_size += PAGE_SIZE;
 	hiber_info->nranges++;
+
+	/* Record ACPI trampoline data page */
+	if (hiber_info->nranges >= VM_PHYSSEG_MAX)
+		return (1);
+	hiber_info->ranges[hiber_info->nranges].base = ACPI_TRAMP_DATA;
+	hiber_info->ranges[hiber_info->nranges].end =
+	    hiber_info->ranges[hiber_info->nranges].base + PAGE_SIZE;
+	hiber_info->image_size += PAGE_SIZE;
+	hiber_info->nranges++;
 #endif
 #ifdef MULTIPROCESSOR
+	/* Record MP trampoline code page */
 	if (hiber_info->nranges >= VM_PHYSSEG_MAX)
 		return (1);
 	hiber_info->ranges[hiber_info->nranges].base = MP_TRAMPOLINE;
+	hiber_info->ranges[hiber_info->nranges].end =
+	    hiber_info->ranges[hiber_info->nranges].base + PAGE_SIZE;
+	hiber_info->image_size += PAGE_SIZE;
+	hiber_info->nranges++;
+
+	/* Record MP trampoline data page */
+	if (hiber_info->nranges >= VM_PHYSSEG_MAX)
+		return (1);
+	hiber_info->ranges[hiber_info->nranges].base =
+		MP_TRAMP_DATA;
 	hiber_info->ranges[hiber_info->nranges].end =
 	    hiber_info->ranges[hiber_info->nranges].base + PAGE_SIZE;
 	hiber_info->image_size += PAGE_SIZE;
@@ -272,22 +294,22 @@ hibernate_populate_resume_pt(union hibernate_info *hib_info,
 	pt_entry_t *pde, npde;
 
 	/* Identity map MMU pages */
-	pmap_kenter_pa(HIBERNATE_PML4T, HIBERNATE_PML4T, VM_PROT_ALL);
-	pmap_kenter_pa(HIBERNATE_PDPT_LOW, HIBERNATE_PDPT_LOW, VM_PROT_ALL);
-	pmap_kenter_pa(HIBERNATE_PDPT_HI, HIBERNATE_PDPT_HI, VM_PROT_ALL);
-	pmap_kenter_pa(HIBERNATE_PD_LOW, HIBERNATE_PD_LOW, VM_PROT_ALL);
-	pmap_kenter_pa(HIBERNATE_PD_LOW2, HIBERNATE_PD_LOW2, VM_PROT_ALL);
-	pmap_kenter_pa(HIBERNATE_PD_HI, HIBERNATE_PD_HI, VM_PROT_ALL);
-	pmap_kenter_pa(HIBERNATE_PT_LOW, HIBERNATE_PT_LOW, VM_PROT_ALL);
-	pmap_kenter_pa(HIBERNATE_PT_LOW2, HIBERNATE_PT_LOW2, VM_PROT_ALL);
-	pmap_kenter_pa(HIBERNATE_PT_HI, HIBERNATE_PT_HI, VM_PROT_ALL);
+	pmap_kenter_pa(HIBERNATE_PML4T, HIBERNATE_PML4T, PROT_MASK);
+	pmap_kenter_pa(HIBERNATE_PDPT_LOW, HIBERNATE_PDPT_LOW, PROT_MASK);
+	pmap_kenter_pa(HIBERNATE_PDPT_HI, HIBERNATE_PDPT_HI, PROT_MASK);
+	pmap_kenter_pa(HIBERNATE_PD_LOW, HIBERNATE_PD_LOW, PROT_MASK);
+	pmap_kenter_pa(HIBERNATE_PD_LOW2, HIBERNATE_PD_LOW2, PROT_MASK);
+	pmap_kenter_pa(HIBERNATE_PD_HI, HIBERNATE_PD_HI, PROT_MASK);
+	pmap_kenter_pa(HIBERNATE_PT_LOW, HIBERNATE_PT_LOW, PROT_MASK);
+	pmap_kenter_pa(HIBERNATE_PT_LOW2, HIBERNATE_PT_LOW2, PROT_MASK);
+	pmap_kenter_pa(HIBERNATE_PT_HI, HIBERNATE_PT_HI, PROT_MASK);
 
 	/* Identity map 3 pages for stack */
-	pmap_kenter_pa(HIBERNATE_STACK_PAGE, HIBERNATE_STACK_PAGE, VM_PROT_ALL);
+	pmap_kenter_pa(HIBERNATE_STACK_PAGE, HIBERNATE_STACK_PAGE, PROT_MASK);
 	pmap_kenter_pa(HIBERNATE_STACK_PAGE - PAGE_SIZE,
-		HIBERNATE_STACK_PAGE - PAGE_SIZE, VM_PROT_ALL);
+		HIBERNATE_STACK_PAGE - PAGE_SIZE, PROT_MASK);
 	pmap_kenter_pa(HIBERNATE_STACK_PAGE - 2*PAGE_SIZE,
-		HIBERNATE_STACK_PAGE - 2*PAGE_SIZE, VM_PROT_ALL);
+		HIBERNATE_STACK_PAGE - 2*PAGE_SIZE, PROT_MASK);
 	pmap_activate(curproc);
 
 	bzero((caddr_t)HIBERNATE_PML4T, PAGE_SIZE);
@@ -329,8 +351,8 @@ hibernate_populate_resume_pt(union hibernate_info *hib_info,
 	/*
 	 * Map current kernel VA range using 2MB pages
 	 */
-	kern_start_2m_va = (paddr_t)&start & ~(PAGE_MASK_2M);
-	kern_end_2m_va = (paddr_t)&end & ~(PAGE_MASK_2M);
+	kern_start_2m_va = (paddr_t)&start & ~(PAGE_MASK_L2);
+	kern_end_2m_va = (paddr_t)&end & ~(PAGE_MASK_L2);
 
 	/* amd64 kernels load at 16MB phys (on the 8th 2mb page) */
 	phys_page_number = 8;
@@ -355,6 +377,19 @@ hibernate_populate_resume_pt(union hibernate_info *hib_info,
 		pa = (paddr_t)(phys_page_number * NBPD_L2);
 		hibernate_enter_resume_mapping(page, pa, 1);
 	}
+
+	/* Unmap MMU pages (stack remains mapped) */
+	pmap_kremove(HIBERNATE_PML4T, PAGE_SIZE);
+	pmap_kremove(HIBERNATE_PDPT_LOW, PAGE_SIZE);
+	pmap_kremove(HIBERNATE_PDPT_HI, PAGE_SIZE);
+	pmap_kremove(HIBERNATE_PD_LOW, PAGE_SIZE);
+	pmap_kremove(HIBERNATE_PD_LOW2, PAGE_SIZE);
+	pmap_kremove(HIBERNATE_PD_HI, PAGE_SIZE);
+	pmap_kremove(HIBERNATE_PT_LOW, PAGE_SIZE);
+	pmap_kremove(HIBERNATE_PT_LOW2, PAGE_SIZE);
+	pmap_kremove(HIBERNATE_PT_HI, PAGE_SIZE);
+
+	pmap_activate(curproc);
 }
 
 /*
@@ -401,6 +436,10 @@ hibernate_quiesce_cpus(void)
 
 	KASSERT(CPU_IS_PRIMARY(curcpu()));
 
+	pmap_kenter_pa(ACPI_TRAMPOLINE, ACPI_TRAMPOLINE, PROT_READ | PROT_EXEC);
+	pmap_kenter_pa(ACPI_TRAMP_DATA, ACPI_TRAMP_DATA,
+		PROT_READ | PROT_WRITE);
+
 	for (i = 0; i < MAXCPUS; i++) {
 		ci = cpu_info[i];
 		if (ci == NULL)
@@ -416,5 +455,8 @@ hibernate_quiesce_cpus(void)
 
 	/* Wait a bit for the APs to park themselves */
 	delay(500000);
+
+	pmap_kremove(ACPI_TRAMPOLINE, PAGE_SIZE);
+	pmap_kremove(ACPI_TRAMP_DATA, PAGE_SIZE);
 }
 #endif /* MULTIPROCESSOR */

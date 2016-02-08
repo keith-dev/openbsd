@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_rl_cardbus.c,v 1.25 2013/08/07 01:06:26 bluhm Exp $ */
+/*	$OpenBSD: if_rl_cardbus.c,v 1.28 2014/12/19 22:44:58 guenther Exp $ */
 /*	$NetBSD: if_rl_cardbus.c,v 1.3.8.3 2001/11/14 19:14:02 nathanw Exp $	*/
 
 /*
@@ -30,10 +30,10 @@
 
 /*
  * if_rl_cardbus.c:
- *	Cardbus specific routines for RealTek 8139 ethernet adapter.
+ *	Cardbus specific routines for Realtek 8139 ethernet adapter.
  *	Tested for 
  *		- elecom-Laneed	LD-10/100CBA (Accton MPX5030)
- *		- MELCO		LPC3-TX-CB   (RealTek 8139)
+ *		- MELCO		LPC3-TX-CB   (Realtek 8139)
  */
 
 #include "bpfilter.h"
@@ -48,24 +48,19 @@
 #include <sys/kernel.h>
 #include <sys/timeout.h>
 #include <sys/device.h>
+#include <sys/endian.h>
  
 #include <net/if.h>
 #include <net/if_dl.h>
 #include <net/if_types.h>
 #include <net/if_media.h>
 
-#include <machine/endian.h>
-
 #if NBPFILTER > 0
 #include <net/bpf.h>
 #endif
 
-#ifdef INET
 #include <netinet/in.h>
-#include <netinet/in_systm.h>
-#include <netinet/ip.h>
 #include <netinet/if_ether.h>
-#endif
 
 #include <machine/bus.h>
 #include <machine/intr.h>
@@ -83,7 +78,7 @@
  * there appear to be problems with memory mapped mode: it looks like
  * doing too many memory mapped access back to back in rapid succession
  * can hang the bus. I'm inclined to blame this on crummy design/construction
- * on the part of RealTek. Memory mapped mode does appear to work on
+ * on the part of Realtek. Memory mapped mode does appear to work on
  * uniprocessor systems though.
  */
 #define RL_USEIOSPACE 

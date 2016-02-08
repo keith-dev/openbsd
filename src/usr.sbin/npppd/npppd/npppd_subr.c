@@ -1,4 +1,4 @@
-/*	$OpenBSD: npppd_subr.c,v 1.12 2014/06/13 06:35:58 yasuoka Exp $ */
+/*	$OpenBSD: npppd_subr.c,v 1.16 2015/01/19 01:48:59 deraadt Exp $ */
 
 /*-
  * Copyright (c) 2009 Internet Initiative Japan Inc.
@@ -28,11 +28,9 @@
 /**@file
  * This file provides helper functions for npppd.
  */
-#include <sys/param.h>
 
 #include <sys/socket.h>
 #include <netinet/in.h>
-#include <netinet/in_systm.h>
 #include <netinet/ip.h>
 #include <netinet/udp.h>
 #include <netinet/tcp.h>
@@ -58,6 +56,8 @@
 #include "npppd_defs.h"
 #include "npppd_subr.h"
 #include "privsep.h"
+
+#define MINIMUM(a, b)	(((a) < (b)) ? (a) : (b))
 
 static u_int16_t route_seq = 0;
 static int  in_route0(int, struct in_addr *, struct in_addr *, struct in_addr *, int, const char *, uint32_t);
@@ -175,8 +175,6 @@ in_route0(int type, struct in_addr *dest, struct in_addr *mask,
 		rtm->rtm_flags |= RTF_GATEWAY;
 	if (mask == NULL)
 		rtm->rtm_flags |= RTF_HOST;
-	else
-		rtm->rtm_flags |= RTF_MASK;
 
 	if (type == RTM_ADD && mtu > 0) {
 		rtm->rtm_inits = RTV_MTU;
@@ -245,8 +243,8 @@ in_route0(int type, struct in_addr *dest, struct in_addr *mask,
 	}
 
 	if ((rval = priv_send(sock, buf, rtm->rtm_msglen, 0)) <= 0) {
-		if (!(type == RTM_DELETE && errno == ESRCH) &&
-		    !(type == RTM_ADD    && errno == EEXIST)) {
+		if ((type == RTM_DELETE && errno == ESRCH) ||
+		    (type == RTM_ADD    && errno == EEXIST)) {
 			log_printf(LOG_DEBUG,
 			    "write() failed in %s on %s : %m", __func__,
 			    strtype);
@@ -510,7 +508,7 @@ adjust_tcp_mss(u_char *pktp, int lpktp, int mtu)
 	if ((th->th_flags & TH_SYN) == 0)
 		return 0;
 
-	lpktp = MIN(th->th_off << 4, lpktp);
+	lpktp = MINIMUM(th->th_off << 4, lpktp);
 
 	pktp += sizeof(struct tcphdr);
 	lpktp -= sizeof(struct tcphdr);

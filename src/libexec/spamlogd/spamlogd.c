@@ -1,4 +1,4 @@
-/*	$OpenBSD: spamlogd.c,v 1.22 2013/08/21 16:13:30 millert Exp $	*/
+/*	$OpenBSD: spamlogd.c,v 1.25 2015/01/21 21:50:33 deraadt Exp $	*/
 
 /*
  * Copyright (c) 2006 Henning Brauer <henning@openbsd.org>
@@ -26,16 +26,16 @@
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <sys/ioctl.h>
+#include <sys/signal.h>
 
 #include <net/if.h>
-#include <net/if_pflog.h>
 
 #include <netinet/in.h>
-#include <netinet/in_systm.h>
 #include <netinet/ip.h>
 #include <arpa/inet.h>
 
 #include <net/pfvar.h>
+#include <net/if_pflog.h>
 
 #include <db.h>
 #include <err.h>

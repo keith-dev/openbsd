@@ -1,4 +1,4 @@
-/*	$OpenBSD: def.h,v 1.13 2003/06/25 15:13:32 millert Exp $	*/
+/*	$OpenBSD: def.h,v 1.15 2015/01/20 16:59:07 millert Exp $	*/
 /*	$NetBSD: def.h,v 1.9 1996/12/28 07:11:00 tls Exp $	*/
 
 /*
@@ -30,7 +30,7 @@
  * SUCH DAMAGE.
  *
  *	@(#)def.h	8.4 (Berkeley) 4/20/95
- *	$OpenBSD: def.h,v 1.13 2003/06/25 15:13:32 millert Exp $
+ *	$OpenBSD: def.h,v 1.15 2015/01/20 16:59:07 millert Exp $
  */
 
 /*
@@ -42,7 +42,6 @@
 #ifndef MAIL_DEF_H
 #define MAIL_DEF_H
 
-#include <sys/param.h>
 #include <sys/stat.h>
 #include <sys/time.h>
 
@@ -54,6 +53,7 @@
 #include <string.h>
 #include <termios.h>
 #include <unistd.h>
+#include <limits.h>
 #include <vis.h>
 #include "pathnames.h"
 
@@ -61,7 +61,7 @@
 
 #define	ESCAPE		'~'		/* Default escape for sending */
 #define	NMLSIZE		1024		/* max names in a message list */
-#define	PATHSIZE	MAXPATHLEN	/* Size of pathnames throughout */
+#define	PATHSIZE	PATH_MAX	/* Size of pathnames throughout */
 #define	HSHSIZE		59		/* Hash size for aliases and vars */
 #define	LINESIZE	BUFSIZ		/* max readable line width */
 #define	STRINGSIZE	((unsigned) 128)/* Dynamic allocation units */
@@ -172,6 +172,7 @@ struct headline {
  */
 struct header {
 	struct name *h_to;		/* Dynamic "To:" string */
+	char *h_from;			/* User-specified "From:" string */
 	char *h_subject;		/* Subject string */
 	struct name *h_cc;		/* Carbon copies string */
 	struct name *h_bcc;		/* Blind carbon copies */

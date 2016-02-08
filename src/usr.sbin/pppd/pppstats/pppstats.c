@@ -1,4 +1,4 @@
-/*	$OpenBSD: pppstats.c,v 1.10 2009/10/27 23:59:53 deraadt Exp $	*/
+/*	$OpenBSD: pppstats.c,v 1.12 2015/02/09 23:00:14 deraadt Exp $	*/
 
 /*
  * print PPP statistics:
@@ -47,6 +47,12 @@
  * SUCH DAMAGE.
  */
 
+#include <sys/types.h>
+#include <sys/ioctl.h>
+#include <sys/socket.h>
+#include <net/ppp_defs.h>
+#include <net/if.h>
+#include <net/if_ppp.h>
 #include <stdio.h>
 #include <stddef.h>
 #include <stdlib.h>
@@ -57,13 +63,6 @@
 #include <fcntl.h>
 #include <err.h>
 #include <unistd.h>
-#include <sys/param.h>
-#include <sys/types.h>
-#include <sys/ioctl.h>
-#include <sys/socket.h>
-#include <net/ppp_defs.h>
-#include <net/if.h>
-#include <net/if_ppp.h>
 
 int	vflag, rflag, zflag;	/* select type of display */
 int	aflag;			/* print absolute values, not deltas */
@@ -319,19 +318,19 @@ main(argc, argv)
 	while ((c = getopt(argc, argv, "advrzc:w:")) != -1) {
 		switch (c) {
 		case 'a':
-			++aflag;
+			aflag = 1;
 			break;
 		case 'd':
-			++dflag;
+			dflag = 1;
 			break;
 		case 'v':
-			++vflag;
+			vflag = 1;
 			break;
 		case 'r':
-			++rflag;
+			rflag = 1;
 			break;
 		case 'z':
-			++zflag;
+			zflag = 1;
 			break;
 		case 'c':
 			count = atoi(optarg);

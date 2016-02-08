@@ -31,7 +31,7 @@ POSSIBILITY OF SUCH DAMAGE.
 
 ***************************************************************************/
 
-/* $OpenBSD: if_em.c,v 1.287 2014/07/13 23:10:23 deraadt Exp $ */
+/* $OpenBSD: if_em.c,v 1.295 2015/02/11 23:21:47 brad Exp $ */
 /* $FreeBSD: if_em.c,v 1.46 2004/09/29 18:28:28 mlaier Exp $ */
 
 #include <dev/pci/if_em.h>
@@ -222,6 +222,7 @@ void em_disable_intr(struct em_softc *);
 void em_free_transmit_structures(struct em_softc *);
 void em_free_receive_structures(struct em_softc *);
 void em_update_stats_counters(struct em_softc *);
+void em_disable_aspm(struct em_softc *);
 void em_txeof(struct em_softc *);
 int  em_allocate_receive_structures(struct em_softc *);
 int  em_allocate_transmit_structures(struct em_softc *);
@@ -430,8 +431,10 @@ em_attach(struct device *parent, struct device *self, void *aux)
 		case em_i350:
 		case em_ich9lan:
 		case em_ich10lan:
+		case em_pch2lan:
+		case em_pch_lpt:
 		case em_80003es2lan:
-			/* Limit Jumbo Frame size */
+			/* 9K Jumbo Frame size */
 			sc->hw.max_frame_size = 9234;
 			break;
 		case em_pchlan:
@@ -667,10 +670,8 @@ em_ioctl(struct ifnet *ifp, u_long command, caddr_t data)
 			ifp->if_flags |= IFF_UP;
 			em_init(sc);
 		}
-#ifdef INET
 		if (ifa->ifa_addr->sa_family == AF_INET)
 			arp_ifinit(&sc->interface_data, ifa);
-#endif /* INET */
 		break;
 
 	case SIOCSIFFLAGS:
@@ -810,14 +811,18 @@ em_init(void *arg)
 		pba = E1000_PBA_12K; /* 12K for Rx, 20K for Tx */
 		break;
 	case em_82574: /* Total Packet Buffer is 40k */
-		pba = E1000_PBA_30K; /* 30K for Rx, 10K for Tx */
+		pba = E1000_PBA_20K; /* 20K for Rx, 20K for Tx */
 		break;
 	case em_ich8lan:
 		pba = E1000_PBA_8K;
 		break;
 	case em_ich9lan:
 	case em_ich10lan:
-		pba = E1000_PBA_10K;
+		/* Boost Receive side for jumbo frames */
+		if (sc->hw.max_frame_size > EM_RXBUFFER_4096)
+			pba = E1000_PBA_14K;
+		else
+			pba = E1000_PBA_10K;
 		break;
 	case em_pchlan:
 	case em_pch2lan:
@@ -914,11 +919,9 @@ em_intr(void *arg)
 
 	/* Link status change */
 	if (reg_icr & (E1000_ICR_RXSEQ | E1000_ICR_LSC)) {
-		timeout_del(&sc->timer_handle);
 		sc->hw.get_link_status = 1;
 		em_check_for_link(&sc->hw);
 		em_update_link_status(sc);
-		timeout_add_sec(&sc->timer_handle, 1); 
 	}
 
 	if (reg_icr & E1000_ICR_RXO) {
@@ -1480,8 +1483,6 @@ em_local_timer(void *arg)
 
 	s = splnet();
 
-	em_check_for_link(&sc->hw);
-	em_update_link_status(sc);
 #ifndef SMALL_KERNEL
 	em_update_stats_counters(sc);
 #ifdef EM_DEBUG
@@ -1834,6 +1835,8 @@ em_hardware_init(struct em_softc *sc)
 		sc->hw.fc_pause_time = 1000;
 	sc->hw.fc_send_xon = TRUE;
 	sc->hw.fc = E1000_FC_FULL;
+
+	em_disable_aspm(sc);
 
 	if ((ret_val = em_init_hw(&sc->hw)) != 0) {
 		if (ret_val == E1000_DEFER_INIT) {
@@ -2817,17 +2820,17 @@ em_rxfill(struct em_softc *sc)
 	i = sc->last_rx_desc_filled;
 
 	for (slots = if_rxr_get(&sc->rx_ring, sc->num_rx_desc);
-	    slots > 0; slots--) { 
+	    slots > 0; slots--) {
 		if (++i == sc->num_rx_desc)
 			i = 0;
 
 		if (em_get_buf(sc, i) != 0)
 			break;
 
+		sc->last_rx_desc_filled = i;
 		post = 1;
 	}
 
-	sc->last_rx_desc_filled = i;
 	if_rxr_put(&sc->rx_ring, slots);
 
 	return (post);
@@ -2844,6 +2847,7 @@ void
 em_rxeof(struct em_softc *sc)
 {
 	struct ifnet	    *ifp = &sc->interface_data.ac_if;
+	struct mbuf_list    ml = MBUF_LIST_INITIALIZER();
 	struct mbuf	    *m;
 	u_int8_t	    accept_frame = 0;
 	u_int8_t	    eop = 0;
@@ -2960,7 +2964,6 @@ em_rxeof(struct em_softc *sc)
 				ifp->if_ipackets++;
 
 				m = sc->fmp;
-				m->m_pkthdr.rcvif = ifp;
 
 				em_receive_checksum(sc, desc, m);
 #if NVLAN > 0
@@ -2970,14 +2973,7 @@ em_rxeof(struct em_softc *sc)
 					m->m_flags |= M_VLANTAG;
 				}
 #endif
-#if NBPFILTER > 0
-				if (ifp->if_bpf) {
-					bpf_mtap_ether(ifp->if_bpf, m,
-					    BPF_DIRECTION_IN);
-				}
-#endif
-
-				ether_input_mbuf(ifp, m);
+				ml_enqueue(&ml, m);
 
 				sc->fmp = NULL;
 				sc->lmp = NULL;
@@ -3002,6 +2998,8 @@ em_rxeof(struct em_softc *sc)
 	bus_dmamap_sync(sc->rxdma.dma_tag, sc->rxdma.dma_map,
 	    0, sizeof(*desc) * sc->num_rx_desc,
 	    BUS_DMASYNC_PREREAD);
+
+	if_input(ifp, &ml);
 
 	sc->next_rx_desc_to_check = i;
 }
@@ -3191,6 +3189,51 @@ em_fill_descriptors(u_int64_t address, u_int32_t length,
         return desc_array->elements;
 }
 
+/*
+ * Disable the L0S and L1 LINK states.
+ */
+void
+em_disable_aspm(struct em_softc *sc)
+{
+	int offset;
+	pcireg_t val;
+
+	switch (sc->hw.mac_type) {
+		case em_82571:
+		case em_82572:
+		case em_82573:
+		case em_82574:
+			break;
+		default:
+			return;
+	}
+
+	if (!pci_get_capability(sc->osdep.em_pa.pa_pc, sc->osdep.em_pa.pa_tag,
+	    PCI_CAP_PCIEXPRESS, &offset, NULL))
+		return;
+
+	/* Disable PCIe Active State Power Management (ASPM). */
+	val = pci_conf_read(sc->osdep.em_pa.pa_pc, sc->osdep.em_pa.pa_tag,
+	    offset + PCI_PCIE_LCSR);
+
+	switch (sc->hw.mac_type) {
+		case em_82571:
+		case em_82572:
+			val &= ~PCI_PCIE_LCSR_ASPM_L1;
+			break;
+		case em_82573:
+		case em_82574:
+			val &= ~(PCI_PCIE_LCSR_ASPM_L0S |
+			    PCI_PCIE_LCSR_ASPM_L1);
+			break;
+		default:
+			break;
+	}
+
+	pci_conf_write(sc->osdep.em_pa.pa_pc, sc->osdep.em_pa.pa_tag,
+	    offset + PCI_PCIE_LCSR, val);
+}
+
 #ifndef SMALL_KERNEL
 /**********************************************************************
  *
@@ -3200,21 +3243,36 @@ em_fill_descriptors(u_int64_t address, u_int32_t length,
 void
 em_update_stats_counters(struct em_softc *sc)
 {
-	struct ifnet   *ifp;
+	struct ifnet   *ifp = &sc->interface_data.ac_if;
 
+	sc->stats.crcerrs += E1000_READ_REG(&sc->hw, CRCERRS);
+	sc->stats.mpc += E1000_READ_REG(&sc->hw, MPC);
+	sc->stats.ecol += E1000_READ_REG(&sc->hw, ECOL);
+
+	sc->stats.latecol += E1000_READ_REG(&sc->hw, LATECOL);
+	sc->stats.colc += E1000_READ_REG(&sc->hw, COLC);
+
+	sc->stats.ruc += E1000_READ_REG(&sc->hw, RUC);
+	sc->stats.roc += E1000_READ_REG(&sc->hw, ROC);
+
+	if (sc->hw.mac_type >= em_82543) {
+		sc->stats.algnerrc += 
+		E1000_READ_REG(&sc->hw, ALGNERRC);
+		sc->stats.rxerrc += 
+		E1000_READ_REG(&sc->hw, RXERRC);
+		sc->stats.cexterr += 
+		E1000_READ_REG(&sc->hw, CEXTERR);
+	}
+
+#ifdef EM_DEBUG
 	if (sc->hw.media_type == em_media_type_copper ||
 	    (E1000_READ_REG(&sc->hw, STATUS) & E1000_STATUS_LU)) {
 		sc->stats.symerrs += E1000_READ_REG(&sc->hw, SYMERRS);
 		sc->stats.sec += E1000_READ_REG(&sc->hw, SEC);
 	}
-	sc->stats.crcerrs += E1000_READ_REG(&sc->hw, CRCERRS);
-	sc->stats.mpc += E1000_READ_REG(&sc->hw, MPC);
 	sc->stats.scc += E1000_READ_REG(&sc->hw, SCC);
-	sc->stats.ecol += E1000_READ_REG(&sc->hw, ECOL);
 
 	sc->stats.mcc += E1000_READ_REG(&sc->hw, MCC);
-	sc->stats.latecol += E1000_READ_REG(&sc->hw, LATECOL);
-	sc->stats.colc += E1000_READ_REG(&sc->hw, COLC);
 	sc->stats.dc += E1000_READ_REG(&sc->hw, DC);
 	sc->stats.rlec += E1000_READ_REG(&sc->hw, RLEC);
 	sc->stats.xonrxc += E1000_READ_REG(&sc->hw, XONRXC);
@@ -3242,9 +3300,7 @@ em_update_stats_counters(struct em_softc *sc)
 	sc->stats.gotch += E1000_READ_REG(&sc->hw, GOTCH);
 
 	sc->stats.rnbc += E1000_READ_REG(&sc->hw, RNBC);
-	sc->stats.ruc += E1000_READ_REG(&sc->hw, RUC);
 	sc->stats.rfc += E1000_READ_REG(&sc->hw, RFC);
-	sc->stats.roc += E1000_READ_REG(&sc->hw, ROC);
 	sc->stats.rjc += E1000_READ_REG(&sc->hw, RJC);
 
 	sc->stats.torl += E1000_READ_REG(&sc->hw, TORL);
@@ -3264,20 +3320,14 @@ em_update_stats_counters(struct em_softc *sc)
 	sc->stats.bptc += E1000_READ_REG(&sc->hw, BPTC);
 
 	if (sc->hw.mac_type >= em_82543) {
-		sc->stats.algnerrc += 
-		E1000_READ_REG(&sc->hw, ALGNERRC);
-		sc->stats.rxerrc += 
-		E1000_READ_REG(&sc->hw, RXERRC);
 		sc->stats.tncrs += 
 		E1000_READ_REG(&sc->hw, TNCRS);
-		sc->stats.cexterr += 
-		E1000_READ_REG(&sc->hw, CEXTERR);
 		sc->stats.tsctc += 
 		E1000_READ_REG(&sc->hw, TSCTC);
 		sc->stats.tsctfc += 
 		E1000_READ_REG(&sc->hw, TSCTFC);
 	}
-	ifp = &sc->interface_data.ac_if;
+#endif
 
 	/* Fill out the OS statistics structure */
 	ifp->if_collisions = sc->stats.colc;

@@ -1,4 +1,4 @@
-/*	$OpenBSD: ext2fs_vnops.c,v 1.67 2014/07/13 16:59:35 pelikan Exp $	*/
+/*	$OpenBSD: ext2fs_vnops.c,v 1.71 2015/02/10 21:56:10 miod Exp $	*/
 /*	$NetBSD: ext2fs_vnops.c,v 1.1 1997/06/11 09:34:09 bouyer Exp $	*/
 
 /*
@@ -56,6 +56,7 @@
 #include <sys/pool.h>
 #include <sys/signalvar.h>
 #include <sys/specdev.h>
+#include <sys/unistd.h>
 
 #include <miscfs/fifofs/fifo.h>
 
@@ -67,6 +68,8 @@
 #include <ufs/ext2fs/ext2fs.h>
 #include <ufs/ext2fs/ext2fs_extern.h>
 #include <ufs/ext2fs/ext2fs_dir.h>
+
+#include <uvm/uvm_extern.h>
 
 static int ext2fs_chmod(struct vnode *, mode_t, struct ucred *, struct proc *);
 static int ext2fs_chown(struct vnode *, uid_t, gid_t, struct ucred *, struct proc *);
@@ -369,7 +372,7 @@ ext2fs_chown(struct vnode *vp, uid_t uid, gid_t gid, struct ucred *cred, struct 
 	 * the caller must be superuser or the call fails.
 	 */
 	if ((cred->cr_uid != ip->i_e2fs_uid || uid != ip->i_e2fs_uid ||
-		(gid != ip->i_e2fs_gid && !groupmember((gid_t)gid, cred))) &&
+		(gid != ip->i_e2fs_gid && !groupmember(gid, cred))) &&
 		(error = suser_ucred(cred)))
 		return (error);
 	ogid = ip->i_e2fs_gid;
@@ -1115,7 +1118,7 @@ ext2fs_readlink(void *v)
 	isize = ext2fs_size(ip);
 	if (isize < vp->v_mount->mnt_maxsymlinklen ||
 	    (vp->v_mount->mnt_maxsymlinklen == 0 && ip->i_e2fs_nblock == 0)) {
-		return (uiomove((char *)ip->i_e2din->e2di_shortlink, isize,
+		return (uiomovei((char *)ip->i_e2din->e2di_shortlink, isize,
 		    ap->a_uio));
 	}
 	return (VOP_READ(vp, ap->a_uio, 0, ap->a_cred));

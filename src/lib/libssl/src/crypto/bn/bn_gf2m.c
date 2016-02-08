@@ -1,4 +1,4 @@
-/* $OpenBSD: bn_gf2m.c,v 1.15 2014/07/11 08:44:47 jsing Exp $ */
+/* $OpenBSD: bn_gf2m.c,v 1.18 2015/02/10 09:50:12 miod Exp $ */
 /* ====================================================================
  * Copyright 2002 Sun Microsystems, Inc. ALL RIGHTS RESERVED.
  *
@@ -88,7 +88,6 @@
  *
  */
 
-#include <assert.h>
 #include <limits.h>
 #include <stdio.h>
 
@@ -137,9 +136,9 @@ static void
 bn_GF2m_mul_1x1(BN_ULONG *r1, BN_ULONG *r0, const BN_ULONG a, const BN_ULONG b)
 {
 #ifndef _LP64
-	register BN_ULONG h, l, s;
+	BN_ULONG h, l, s;
 	BN_ULONG tab[8], top2b = a >> 30;
-	register BN_ULONG a1, a2, a4;
+	BN_ULONG a1, a2, a4;
 
 	a1 = a & (0x3FFFFFFF);
 	a2 = a1 << 1;
@@ -200,9 +199,9 @@ bn_GF2m_mul_1x1(BN_ULONG *r1, BN_ULONG *r0, const BN_ULONG a, const BN_ULONG b)
 	*r1 = h;
 	*r0 = l;
 #else
-	register BN_ULONG h, l, s;
+	BN_ULONG h, l, s;
 	BN_ULONG tab[16], top3b = a >> 61;
-	register BN_ULONG a1, a2, a4, a8;
+	BN_ULONG a1, a2, a4, a8;
 
 	a1 = a & (0x1FFFFFFFFFFFFFFFULL);
 	a2 = a1 << 1;
@@ -840,8 +839,7 @@ BN_GF2m_mod_div(BIGNUM *r, const BIGNUM *y, const BIGNUM *x, const BIGNUM *p,
 	bn_check_top(p);
 
 	BN_CTX_start(ctx);
-	xinv = BN_CTX_get(ctx);
-	if (xinv == NULL)
+	if ((xinv = BN_CTX_get(ctx)) == NULL)
 		goto err;
 
 	if (!BN_GF2m_mod_inv(xinv, x, p, ctx))
@@ -875,11 +873,13 @@ BN_GF2m_mod_div(BIGNUM *r, const BIGNUM *y, const BIGNUM *x, const BIGNUM *p,
 
 	BN_CTX_start(ctx);
 
-	a = BN_CTX_get(ctx);
-	b = BN_CTX_get(ctx);
-	u = BN_CTX_get(ctx);
-	v = BN_CTX_get(ctx);
-	if (v == NULL)
+	if ((a = BN_CTX_get(ctx)) == NULL)
+		goto err;
+	if ((b = BN_CTX_get(ctx)) == NULL)
+		goto err;
+	if ((u = BN_CTX_get(ctx)) == NULL)
+		goto err;
+	if ((v = BN_CTX_get(ctx)) == NULL)
 		goto err;
 
 	/* reduce x and y mod p */
@@ -1137,10 +1137,11 @@ BN_GF2m_mod_solve_quad_arr(BIGNUM *r, const BIGNUM *a_, const int p[],
 	}
 
 	BN_CTX_start(ctx);
-	a = BN_CTX_get(ctx);
-	z = BN_CTX_get(ctx);
-	w = BN_CTX_get(ctx);
-	if (w == NULL)
+	if ((a = BN_CTX_get(ctx)) == NULL)
+		goto err;
+	if ((z = BN_CTX_get(ctx)) == NULL)
+		goto err;
+	if ((w = BN_CTX_get(ctx)) == NULL)
 		goto err;
 
 	if (!BN_GF2m_mod_arr(a, a_, p))
@@ -1169,10 +1170,11 @@ BN_GF2m_mod_solve_quad_arr(BIGNUM *r, const BIGNUM *a_, const int p[],
 	}
 	else /* m is even */
 	{
-		rho = BN_CTX_get(ctx);
-		w2 = BN_CTX_get(ctx);
-		tmp = BN_CTX_get(ctx);
-		if (tmp == NULL)
+		if ((rho = BN_CTX_get(ctx)) == NULL)
+			goto err;
+		if ((w2 = BN_CTX_get(ctx)) == NULL)
+			goto err;
+		if ((tmp = BN_CTX_get(ctx)) == NULL)
 			goto err;
 		do {
 			if (!BN_rand(rho, p[0], 0, 0))

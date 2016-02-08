@@ -1,4 +1,4 @@
-/*	$OpenBSD: qlw.c,v 1.24 2014/07/13 23:10:23 deraadt Exp $ */
+/*	$OpenBSD: qlw.c,v 1.27 2015/01/27 03:17:36 dlg Exp $ */
 
 /*
  * Copyright (c) 2011 David Gwynne <dlg@openbsd.org>
@@ -23,7 +23,6 @@
 #include <sys/buf.h>
 #include <sys/device.h>
 #include <sys/ioctl.h>
-#include <sys/proc.h>
 #include <sys/malloc.h>
 #include <sys/kernel.h>
 #include <sys/mutex.h>
@@ -31,6 +30,7 @@
 #include <sys/sensors.h>
 #include <sys/queue.h>
 
+#include <machine/atomic.h>
 #include <machine/bus.h>
 
 #include <scsi/scsi_all.h>
@@ -76,7 +76,7 @@ int		qlw_config_bus(struct qlw_softc *, int);
 int		qlw_config_target(struct qlw_softc *, int, int);
 void		qlw_update_bus(struct qlw_softc *, int);
 void		qlw_update_target(struct qlw_softc *, int, int);
-void		qlw_update_task(void *, void *);
+void		qlw_update_task(void *);
 
 void		qlw_handle_intr(struct qlw_softc *, u_int16_t, u_int16_t);
 void		qlw_set_ints(struct qlw_softc *, int);
@@ -173,7 +173,7 @@ qlw_attach(struct qlw_softc *sc)
 	int reset_delay;
 	int bus;
 
-	task_set(&sc->sc_update_task, qlw_update_task, sc, NULL);
+	task_set(&sc->sc_update_task, qlw_update_task, sc);
 
 	switch (sc->sc_isp_gen) {
 	case QLW_GEN_ISP1000:
@@ -538,9 +538,9 @@ qlw_update_target(struct qlw_softc *sc, int bus, int target)
 }
 
 void
-qlw_update_task(void *arg1, void *arg2)
+qlw_update_task(void *xsc)
 {
-	struct qlw_softc *sc = arg1;
+	struct qlw_softc *sc = xsc;
 	int bus;
 
 	for (bus = 0; bus < sc->sc_numbusses; bus++)
@@ -1517,7 +1517,7 @@ qlw_read_nvram(struct qlw_softc *sc)
 		csum += data[i] >> 8;
 	}
 
-	bcopy(data, &sc->sc_nvram, sizeof(sc->sc_nvram));
+	memcpy(&sc->sc_nvram, data, sizeof(sc->sc_nvram));
 	/* id field should be 'ISP ', version should high enough */
 	if (sc->sc_nvram.id[0] != 'I' || sc->sc_nvram.id[1] != 'S' ||
 	    sc->sc_nvram.id[2] != 'P' || sc->sc_nvram.id[3] != ' ' ||

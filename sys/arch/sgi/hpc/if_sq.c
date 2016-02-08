@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_sq.c,v 1.10 2014/07/22 10:35:35 mpi Exp $	*/
+/*	$OpenBSD: if_sq.c,v 1.12 2014/12/22 02:26:53 tedu Exp $	*/
 /*	$NetBSD: if_sq.c,v 1.42 2011/07/01 18:53:47 dyoung Exp $	*/
 
 /*
@@ -364,7 +364,6 @@ sq_attach(struct device *parent, struct device *self, void *aux)
 
 	bcopy(sc->sc_dev.dv_xname, ifp->if_xname, IFNAMSIZ);
 	ifp->if_softc = sc;
-	ifp->if_mtu = ETHERMTU;
 	ifp->if_start = sq_start;
 	ifp->if_ioctl = sq_ioctl;
 	ifp->if_watchdog = sq_watchdog;
@@ -611,10 +610,8 @@ sq_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 		ifp->if_flags |= IFF_UP;
 		if (!(ifp->if_flags & IFF_RUNNING))
 			sq_init(ifp);
-#ifdef INET
 		if (ifa->ifa_addr->sa_family == AF_INET)
 			arp_ifinit(&sc->sc_ac, ifa);
-#endif
 		break;
 
 	case SIOCSIFMEDIA:

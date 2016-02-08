@@ -1,4 +1,4 @@
-/*	$OpenBSD: conf.c,v 1.74 2013/11/04 17:14:26 deraadt Exp $	*/
+/*	$OpenBSD: conf.c,v 1.78 2014/12/11 19:44:16 tedu Exp $	*/
 /*	$NetBSD: conf.c,v 1.16 1996/10/18 21:26:57 cgd Exp $	*/
 
 /*-
@@ -40,8 +40,6 @@
 #include <sys/conf.h>
 #include <sys/vnode.h>
 
-#include "inet.h"
-
 #include "wd.h"
 bdev_decl(wd);
 #include "fd.h"
@@ -67,12 +65,12 @@ struct bdevsw	bdevsw[] =
 	bdev_notdef(),			/* 7: was: concatenated disk driver */
 	bdev_disk_init(NSD,sd),		/* 8: SCSI disk */
 	bdev_disk_init(NVND,vnd),	/* 9: vnode disk driver */
-	bdev_lkm_dummy(),		/* 10 */
-	bdev_lkm_dummy(),		/* 11 */
-	bdev_lkm_dummy(),		/* 12 */
-	bdev_lkm_dummy(),		/* 13 */
-	bdev_lkm_dummy(),		/* 14 */
-	bdev_lkm_dummy(),		/* 15 */
+	bdev_notdef(),			/* 10 */
+	bdev_notdef(),			/* 11 */
+	bdev_notdef(),			/* 12 */
+	bdev_notdef(),			/* 13 */
+	bdev_notdef(),			/* 14 */
+	bdev_notdef(),			/* 15 */
 	bdev_notdef(),			/* 16 was: RAIDframe disk driver */
 };
 int	nblkdev = nitems(bdevsw);
@@ -115,7 +113,6 @@ cdev_decl(cy);
 #include "uhid.h"
 #include "ugen.h"
 #include "ulpt.h"
-#include "urio.h"
 #include "ucom.h"
 #include "pf.h"
 #ifdef USER_PCICONF
@@ -147,13 +144,13 @@ struct cdevsw	cdevsw[] =
 	cdev_disk_init(NCD,cd),		/* 13: SCSI CD-ROM */
 	cdev_ch_init(NCH,ch),		/* 14: SCSI autochanger */
 	cdev_tty_init(NSCC,scc),	/* 15: scc 8530 serial interface */
-	cdev_lkm_init(NLKM,lkm),	/* 16: loadable module driver */
-	cdev_lkm_dummy(),		/* 17 */
-	cdev_lkm_dummy(),		/* 18 */
-	cdev_lkm_dummy(),		/* 19 */
-	cdev_lkm_dummy(),		/* 20 */
-	cdev_lkm_dummy(),		/* 21 */
-	cdev_lkm_dummy(),		/* 22 */
+	cdev_notdef(),			/* 16 was lkm */
+	cdev_notdef(),			/* 17 */
+	cdev_notdef(),			/* 18 */
+	cdev_notdef(),			/* 19 */
+	cdev_notdef(),			/* 20 */
+	cdev_notdef(),			/* 21 */
+	cdev_notdef(),			/* 22 */
 	cdev_tty_init(1,prom),          /* 23: XXX prom console */
 	cdev_audio_init(NAUDIO,audio),	/* 24: generic audio I/O */
 	cdev_wsdisplay_init(NWSDISPLAY,wsdisplay), /* 25: workstation console */
@@ -192,7 +189,7 @@ struct cdevsw	cdevsw[] =
 	cdev_notdef(),
 	cdev_ptm_init(NPTY,ptm),	/* 55: pseudo-tty ptm device */
 	cdev_hotplug_init(NHOTPLUG,hotplug), /* 56: devices hot plugging */
-	cdev_crypto_init(NCRYPTO,crypto), /* 57: /dev/crypto */
+	cdev_notdef(),			/* 57: was: /dev/crypto */
 	cdev_bktr_init(NBKTR,bktr),	/* 58: Bt848 video capture device */
 	cdev_radio_init(NRADIO,radio), /* 59: generic radio I/O */
 	cdev_mouse_init(NWSMUX, wsmux),	/* 60: ws multiplexor */
@@ -200,7 +197,7 @@ struct cdevsw	cdevsw[] =
 	cdev_notdef(),
 	cdev_disk_init(1,diskmap),	/* 63: disk mapper */
 	cdev_pppx_init(NPPPX,pppx),	/* 64: pppx */
-	cdev_urio_init(NURIO,urio),	/* 65: USB Diamond Rio 500 */
+	cdev_notdef(),			/* 65: was urio */
 	cdev_notdef(),			/* 66: was USB scanners */
 	cdev_fuse_init(NFUSE,fuse),	/* 67: fuse */
 };
@@ -248,7 +245,6 @@ getnulldev()
 }
 
 int chrtoblktbl[] = {
-	/* XXXX This needs to be dynamic for LKMs. */
 	/*VCHR*/	/*VBLK*/
 	/*  0 */	NODEV,
 	/*  1 */	NODEV,

@@ -1,4 +1,4 @@
-/*	$OpenBSD: systrace.c,v 1.71 2014/07/13 23:10:23 deraadt Exp $	*/
+/*	$OpenBSD: systrace.c,v 1.74 2015/02/10 22:03:11 miod Exp $	*/
 /*
  * Copyright 2002 Niels Provos <provos@citi.umich.edu>
  * All rights reserved.
@@ -1516,7 +1516,7 @@ systrace_namei(struct nameidata *ndp)
 
 	if (hamper) {
 		/* ELOOP if namei() tries to readlink */
-		ndp->ni_loopcnt = MAXSYMLINKS;
+		ndp->ni_loopcnt = SYMLOOP_MAX;
 		cnp->cn_flags &= ~FOLLOW;
 		cnp->cn_flags |= NOFOLLOW;
 	}

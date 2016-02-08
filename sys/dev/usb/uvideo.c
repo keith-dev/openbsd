@@ -1,4 +1,4 @@
-/*	$OpenBSD: uvideo.c,v 1.175 2014/07/12 18:48:53 tedu Exp $ */
+/*	$OpenBSD: uvideo.c,v 1.179 2015/01/06 17:27:58 armani Exp $ */
 
 /*
  * Copyright (c) 2008 Robert Nagy <robert@openbsd.org>
@@ -28,7 +28,6 @@
 #include <sys/selinfo.h>
 #include <sys/lock.h>
 #include <sys/stat.h>
-#include <sys/device.h>
 #include <sys/poll.h>
 #include <sys/timeout.h>
 #include <sys/kthread.h>
@@ -179,6 +178,7 @@ int		uvideo_s_parm(void *, struct v4l2_streamparm *);
 int		uvideo_g_parm(void *, struct v4l2_streamparm *);
 int		uvideo_enum_input(void *, struct v4l2_input *);
 int		uvideo_s_input(void *, int);
+int		uvideo_g_input(void *, int *);
 int		uvideo_reqbufs(void *, struct v4l2_requestbuffers *);
 int		uvideo_querybuf(void *, struct v4l2_buffer *);
 int		uvideo_qbuf(void *, struct v4l2_buffer *);
@@ -228,6 +228,7 @@ struct video_hw_if uvideo_hw_if = {
 	uvideo_g_parm,		/* VIDIOC_G_PARM */
 	uvideo_enum_input,	/* VIDIOC_ENUMINPUT */
 	uvideo_s_input,		/* VIDIOC_S_INPUT */
+	uvideo_g_input,		/* VIDIOC_G_INPUT */
 	uvideo_reqbufs,		/* VIDIOC_REQBUFS */
 	uvideo_querybuf,	/* VIDIOC_QUERYBUF */
 	uvideo_qbuf,		/* VIDIOC_QBUF */
@@ -2845,9 +2846,9 @@ uvideo_enum_fsizes(void *v, struct v4l2_frmsizeenum *fsizes)
 		return (EINVAL);
 
 	fsizes->type = V4L2_FRMSIZE_TYPE_DISCRETE;
-	fsizes->un.discrete.width =
+	fsizes->discrete.width =
 	    UGETW(sc->sc_fmtgrp[idx].frame[fsizes->index]->wWidth);
-	fsizes->un.discrete.height =
+	fsizes->discrete.height =
 	    UGETW(sc->sc_fmtgrp[idx].frame[fsizes->index]->wHeight);
 
 	return (0);
@@ -2889,14 +2890,14 @@ uvideo_enum_fivals(void *v, struct v4l2_frmivalenum *fivals)
 		if (fivals->index != 0)
 			return (EINVAL);
 		fivals->type = V4L2_FRMIVAL_TYPE_STEPWISE;
-		fivals->un.stepwise.min.numerator = UGETDW(p);
-		fivals->un.stepwise.min.denominator = 10000000;
+		fivals->stepwise.min.numerator = UGETDW(p);
+		fivals->stepwise.min.denominator = 10000000;
 		p += sizeof(uDWord);
-		fivals->un.stepwise.max.numerator = UGETDW(p);
-		fivals->un.stepwise.max.denominator = 10000000;
+		fivals->stepwise.max.numerator = UGETDW(p);
+		fivals->stepwise.max.denominator = 10000000;
 		p += sizeof(uDWord);
-		fivals->un.stepwise.step.numerator = UGETDW(p);
-		fivals->un.stepwise.step.denominator = 10000000;
+		fivals->stepwise.step.numerator = UGETDW(p);
+		fivals->stepwise.step.denominator = 10000000;
 		p += sizeof(uDWord);
 	} else {
 		if (fivals->index >= frame->bFrameIntervalType)
@@ -2907,8 +2908,8 @@ uvideo_enum_fivals(void *v, struct v4l2_frmivalenum *fivals)
 			return (EINVAL);
 		}
 		fivals->type = V4L2_FRMIVAL_TYPE_DISCRETE;
-		fivals->un.discrete.numerator = UGETDW(p);
-		fivals->un.discrete.denominator = 10000000;
+		fivals->discrete.numerator = UGETDW(p);
+		fivals->discrete.denominator = 10000000;
 	}
 
 	return (0);
@@ -3074,6 +3075,15 @@ uvideo_s_input(void *v, int input)
 }
 
 int
+uvideo_g_input(void *v, int *input)
+{
+	/* XXX we just support one input for now */
+	*input = 0;
+
+	return (0);
+}
+
+int
 uvideo_reqbufs(void *v, struct v4l2_requestbuffers *rb)
 {
 	struct uvideo_softc *sc = v;
@@ -3081,8 +3091,14 @@ uvideo_reqbufs(void *v, struct v4l2_requestbuffers *rb)
 
 	DPRINTF(1, "%s: %s: count=%d\n", DEVNAME(sc), __func__, rb->count);
 
-	if (sc->sc_mmap_count > 0 || sc->sc_mmap_buffer != NULL)
-		panic("%s: mmap buffers already allocated", __func__);
+	/* We do not support freeing buffers via reqbufs(0) */
+	if (rb->count == 0)
+		return (EINVAL);
+
+	if (sc->sc_mmap_count > 0 || sc->sc_mmap_buffer != NULL) {
+		printf("%s: mmap buffers already allocated\n", __func__);
+		return (EINVAL);
+	}
 
 	/* limit the buffers */
 	if (rb->count > UVIDEO_MAX_BUFFERS)

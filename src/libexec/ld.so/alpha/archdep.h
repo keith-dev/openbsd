@@ -1,4 +1,4 @@
-/*	$OpenBSD: archdep.h,v 1.14 2014/04/16 10:52:58 guenther Exp $ */
+/*	$OpenBSD: archdep.h,v 1.16 2014/12/27 13:13:25 kettenis Exp $ */
 
 /*
  * Copyright (c) 1998 Per Fogelstrom, Opsycon AB
@@ -41,8 +41,6 @@
 #include "syscall.h"
 #include "util.h"
 
-#define RTLD_PROTECT_PLT
-
 static inline void
 RELOC_REL(Elf64_Rel *r, const Elf64_Sym *s, Elf64_Addr *p, unsigned long v)
 {
@@ -56,6 +54,8 @@ RELOC_RELA(Elf64_Rela *r, const Elf64_Sym *s, Elf64_Addr *p, unsigned long v,
 {
 	if (ELF64_R_TYPE(r->r_info) == RELOC_RELATIVE) {
 		/* handled by _reloc_alpha_got */
+	} else if (ELF64_R_TYPE(r->r_info) == RELOC_NONE) {
+		/* nothing to do */
 	} else if (ELF64_R_TYPE(r->r_info) == RELOC_JMP_SLOT) {
 		Elf64_Addr val = v + s->st_value + r->r_addend -
 			(Elf64_Addr)(p);

@@ -1,4 +1,4 @@
-/*	$OpenBSD: util.c,v 1.36 2013/11/26 13:19:07 deraadt Exp $	*/
+/*	$OpenBSD: util.c,v 1.39 2015/01/16 06:40:10 deraadt Exp $	*/
 
 /*
  * patch - a program to apply diffs to original files
@@ -26,7 +26,6 @@
  * behaviour
  */
 
-#include <sys/param.h>
 #include <sys/stat.h>
 
 #include <ctype.h>
@@ -95,7 +94,7 @@ int
 backup_file(const char *orig)
 {
 	struct stat	filestat;
-	char		bakname[MAXPATHLEN], *s, *simplename;
+	char		bakname[PATH_MAX], *s, *simplename;
 	dev_t		orig_device;
 	ino_t		orig_inode;
 
@@ -188,6 +187,22 @@ savestr(const char *s)
 		else
 			fatal("out of memory\n");
 	}
+	return rv;
+}
+
+/*
+ * Allocate a unique area for a string.  Call fatal if out of memory.
+ */
+char *
+xstrdup(const char *s)
+{
+	char	*rv;
+
+	if (!s)
+		s = "Oops";
+	rv = strdup(s);
+	if (rv == NULL)
+		fatal("out of memory\n");
 	return rv;
 }
 
@@ -374,13 +389,13 @@ fetchname(const char *at, bool *exists, int strip_leading)
 }
 
 /*
- * Takes the name returned by fetchname and looks in RCS/SCCS directories
+ * Takes the name returned by fetchname and looks in RCS directory
  * for a checked in version.
  */
 char *
 checked_in(char *file)
 {
-	char		*filebase, *filedir, tmpbuf[MAXPATHLEN];
+	char		*filebase, *filedir, tmpbuf[PATH_MAX];
 	struct stat	filestat;
 
 	filebase = basename(file);
@@ -391,9 +406,7 @@ checked_in(char *file)
 
 	if (try("%s/RCS/%s%s", filedir, filebase, RCSSUFFIX) ||
 	    try("%s/RCS/%s%s", filedir, filebase, "") ||
-	    try("%s/%s%s", filedir, filebase, RCSSUFFIX) ||
-	    try("%s/SCCS/%s%s", filedir, SCCSPREFIX, filebase) ||
-	    try("%s/%s%s", filedir, SCCSPREFIX, filebase))
+	    try("%s/%s%s", filedir, filebase, RCSSUFFIX))
 		return file;
 
 	return NULL;

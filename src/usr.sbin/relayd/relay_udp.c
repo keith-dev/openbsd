@@ -1,4 +1,4 @@
-/*	$OpenBSD: relay_udp.c,v 1.31 2014/07/13 00:32:08 benno Exp $	*/
+/*	$OpenBSD: relay_udp.c,v 1.39 2015/01/22 17:42:09 reyk Exp $	*/
 
 /*
  * Copyright (c) 2007 - 2013 Reyk Floeter <reyk@openbsd.org>
@@ -19,31 +19,21 @@
 #include <sys/types.h>
 #include <sys/queue.h>
 #include <sys/time.h>
-#include <sys/stat.h>
 #include <sys/socket.h>
-#include <sys/un.h>
 #include <sys/tree.h>
-#include <sys/hash.h>
 
-#include <net/if.h>
-#include <netinet/in_systm.h>
 #include <netinet/in.h>
-#include <netinet/ip.h>
-#include <netinet/tcp.h>
 #include <arpa/inet.h>
 
+#include <signal.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
 #include <stdio.h>
-#include <err.h>
-#include <pwd.h>
 #include <event.h>
-#include <fnmatch.h>
-
-#include <openssl/ssl.h>
+#include <imsg.h>
 
 #include "relayd.h"
 
@@ -75,8 +65,8 @@ relay_udp_privinit(struct relayd *x_env, struct relay *rlay)
 	if (env == NULL)
 		env = x_env;
 
-	if (rlay->rl_conf.flags & F_SSL)
-		fatalx("ssl over udp is not supported");
+	if (rlay->rl_conf.flags & F_TLS)
+		fatalx("tls over udp is not supported");
 	rlay->rl_conf.flags |= F_UDP;
 }
 
@@ -219,6 +209,8 @@ relay_udp_server(int fd, short sig, void *arg)
 	void *priv = NULL;
 	ssize_t len;
 
+	event_add(&rlay->rl_ev, NULL);
+
 	if (relay_sessions >= RELAY_MAX_SESSIONS ||
 	    rlay->rl_conf.flags & F_DISABLE)
 		return;
@@ -268,6 +260,7 @@ relay_udp_server(int fd, short sig, void *arg)
 
 	relay_sessions++;
 	SPLAY_INSERT(session_tree, &rlay->rl_sessions, con);
+	relay_session_publish(con);
 
 	/* Increment the per-relay session counter */
 	rlay->rl_stats[proc_id].last++;
@@ -498,7 +491,7 @@ relay_dns_request(struct rsession *con)
 	}
 
 	event_again(&con->se_ev, con->se_out.s, EV_TIMEOUT|EV_READ,
-	    relay_udp_response, &con->se_tv_start, &env->sc_timeout, con);
+	    relay_udp_response, &con->se_tv_start, &rlay->rl_conf.timeout, con);
 
 	return (0);
 }

@@ -1,4 +1,4 @@
-# $OpenBSD: GENERIC-OMAP,v 1.10 2014/07/12 21:56:56 tedu Exp $
+# $OpenBSD: GENERIC-OMAP,v 1.14 2015/01/04 20:55:38 uaa Exp $
 #
 # GENERIC machine description file
 #
@@ -122,6 +122,8 @@ ums*		at uhidev?		# USB mouse
 wsmouse*	at ums? mux 0
 ukbd*		at uhidev?		# USB keyboard
 wskbd*		at ukbd? mux 1
+uslhcom*	at uhidev?		# Silicon Labs CP2110 USB HID UART
+ucom*		at uslhcom?
 uhid*		at uhidev?		# USB generic HID support
 aue*		at uhub?		# ADMtek AN986 Pegasus Ethernet
 atu*		at uhub?		# Atmel AT76c50x based 802.11b
@@ -136,14 +138,13 @@ ugl*		at uhub?		# Genesys Logic GL620USB-A host-to-host `network'
 udav*		at uhub?		# Davicom DM9601 based Ethernet
 url*		at uhub?		# Realtek RTL8150L based adapters
 wi*		at uhub?		# WaveLAN IEEE 802.11DS
-urio*		at uhub?		# Diamond Multimedia Rio 500
 udsbr*		at uhub?		# D-Link DSB-R100 radio
 radio*		at udsbr?		# USB radio
-#ubt*		at uhub? disable	# USB Bluetooth
 ugen*		at uhub?		# USB Generic driver
 rum*		at uhub?		# Ralink RT2501USB/RT2601USB
 
-ukphy*	at mii?				# "unknown" PHYs
+ukphy*		at mii?			# "unknown" PHYs
+atphy*		at mii?			# Attansic F1 PHYs
 
 scsibus*	at scsi?
 sd*		at scsibus?
@@ -160,9 +161,6 @@ com*		at omap?
 #wsdisplay*	at omdisplay? console ?
 
 sdmmc*		at ommmc?		# SD/MMC bus
-
-# Bluetooth controllers
-#sbt*		at sdmmc? disable	# SDIO Bluetooth
 
 # APM emulation
 #apm0		at pxaip?

@@ -1,4 +1,4 @@
-/*	$OpenBSD: uipc_mbuf.c,v 1.192 2014/07/13 15:52:38 tedu Exp $	*/
+/*	$OpenBSD: uipc_mbuf.c,v 1.201 2015/02/07 02:52:09 dlg Exp $	*/
 /*	$NetBSD: uipc_mbuf.c,v 1.15.4.1 1996/06/13 17:11:44 cgd Exp $	*/
 
 /*
@@ -74,7 +74,6 @@
 
 #include <sys/param.h>
 #include <sys/systm.h>
-#include <sys/proc.h>
 #include <sys/malloc.h>
 #include <sys/mbuf.h>
 #include <sys/kernel.h>
@@ -96,6 +95,7 @@
 #endif
 
 struct	mbstat mbstat;		/* mbuf stats */
+struct	mutex mbstatmtx = MUTEX_INITIALIZER(IPL_NET);
 struct	pool mbpool;		/* mbuf pool */
 struct	pool mtagpool;
 
@@ -118,6 +118,8 @@ int max_linkhdr;		/* largest link-level header */
 int max_protohdr;		/* largest protocol header */
 int max_hdr;			/* largest link+protocol header */
 
+struct	mutex m_extref_mtx = MUTEX_INITIALIZER(IPL_NET);
+
 void	m_extfree(struct mbuf *);
 struct mbuf *m_copym0(struct mbuf *, int, int, int, int);
 void	nmbclust_update(void);
@@ -136,11 +138,14 @@ mbinit(void)
 	int i;
 
 #if DIAGNOSTIC
+	if (mclsizes[0] != MCLBYTES)
+		panic("mbinit: the smallest cluster size != MCLBYTES");
 	if (mclsizes[nitems(mclsizes) - 1] != MAXMCLBYTES)
 		panic("mbinit: the largest cluster size != MAXMCLBYTES");
 #endif
 
-	pool_init(&mbpool, MSIZE, 0, 0, 0, "mbpl", NULL);
+	pool_init(&mbpool, MSIZE, 0, 0, 0, "mbufpl", NULL);
+	pool_setipl(&mbpool, IPL_NET);
 	pool_set_constraints(&mbpool, &kp_dma_contig);
 	pool_setlowat(&mbpool, mblowat);
 
@@ -153,6 +158,7 @@ mbinit(void)
 		    mclsizes[i] >> 10);
 		pool_init(&mclpools[i], mclsizes[i], 0, 0, 0,
 		    mclnames[i], NULL);
+		pool_setipl(&mclpools[i], IPL_NET);
 		pool_set_constraints(&mclpools[i], &kp_dma_contig);
 		pool_setlowat(&mclpools[i], mcllowat);
 	}
@@ -184,21 +190,6 @@ nmbclust_update(void)
 	pool_sethiwat(&mbpool, nmbclust);
 }
 
-void
-m_reclaim(void *arg, int flags)
-{
-	struct domain *dp;
-	struct protosw *pr;
-	int s = splnet();
-
-	for (dp = domains; dp; dp = dp->dom_next)
-		for (pr = dp->dom_protosw; pr < dp->dom_protoswNPROTOSW; pr++)
-			if (pr->pr_drain)
-				(*pr->pr_drain)();
-	mbstat.m_drain++;
-	splx(s);
-}
-
 /*
  * Space allocation routines.
  */
@@ -206,20 +197,21 @@ struct mbuf *
 m_get(int nowait, int type)
 {
 	struct mbuf *m;
-	int s;
 
-	s = splnet();
 	m = pool_get(&mbpool, nowait == M_WAIT ? PR_WAITOK : PR_NOWAIT);
-	if (m)
-		mbstat.m_mtypes[type]++;
-	splx(s);
-	if (m) {
-		m->m_type = type;
-		m->m_next = NULL;
-		m->m_nextpkt = NULL;
-		m->m_data = m->m_dat;
-		m->m_flags = 0;
-	}
+	if (m == NULL)
+		return (NULL);
+
+	mtx_enter(&mbstatmtx);
+	mbstat.m_mtypes[type]++;
+	mtx_leave(&mbstatmtx);
+
+	m->m_type = type;
+	m->m_next = NULL;
+	m->m_nextpkt = NULL;
+	m->m_data = m->m_dat;
+	m->m_flags = 0;
+
 	return (m);
 }
 
@@ -231,25 +223,18 @@ struct mbuf *
 m_gethdr(int nowait, int type)
 {
 	struct mbuf *m;
-	int s;
 
-	s = splnet();
 	m = pool_get(&mbpool, nowait == M_WAIT ? PR_WAITOK : PR_NOWAIT);
-	if (m)
-		mbstat.m_mtypes[type]++;
-	splx(s);
-	if (m) {
-		m->m_type = type;
+	if (m == NULL)
+		return (NULL);
 
-		/* keep in sync with m_inithdr */
-		m->m_next = NULL;
-		m->m_nextpkt = NULL;
-		m->m_data = m->m_pktdat;
-		m->m_flags = M_PKTHDR;
-		memset(&m->m_pkthdr, 0, sizeof(m->m_pkthdr));
-		m->m_pkthdr.pf.prio = IFQ_DEFPRIO;
-	}
-	return (m);
+	mtx_enter(&mbstatmtx);
+	mbstat.m_mtypes[type]++;
+	mtx_leave(&mbstatmtx);
+
+	m->m_type = type;
+
+	return (m_inithdr(m));
 }
 
 struct mbuf *
@@ -299,7 +284,6 @@ m_clget(struct mbuf *m, int how, struct ifnet *ifp, u_int pktlen)
 	struct mbuf *m0 = NULL;
 	struct pool *pp;
 	caddr_t buf;
-	int s;
 
 	pp = m_clpool(pktlen);
 #ifdef DIAGNOSTIC
@@ -307,23 +291,19 @@ m_clget(struct mbuf *m, int how, struct ifnet *ifp, u_int pktlen)
 		panic("m_clget: request for %u byte cluster", pktlen);
 #endif
 
-	s = splnet();
 	if (m == NULL) {
-		MGETHDR(m0, M_DONTWAIT, MT_DATA);
-		if (m0 == NULL) {
-			splx(s);
+		m0 = m_gethdr(how, MT_DATA);
+		if (m0 == NULL)
 			return (NULL);
-		}
+
 		m = m0;
 	}
 	buf = pool_get(pp, how == M_WAIT ? PR_WAITOK : PR_NOWAIT);
 	if (buf == NULL) {
 		if (m0)
 			m_freem(m0);
-		splx(s);
 		return (NULL);
 	}
-	splx(s);
 
 	MEXTADD(m, buf, pp->pr_size, M_EXTWR, m_extfree_pool, pp);
 	return (m);
@@ -332,16 +312,18 @@ m_clget(struct mbuf *m, int how, struct ifnet *ifp, u_int pktlen)
 void
 m_extfree_pool(caddr_t buf, u_int size, void *pp)
 {
-	splassert(IPL_NET);
 	pool_put(pp, buf);
 }
 
 struct mbuf *
-m_free_unlocked(struct mbuf *m)
+m_free(struct mbuf *m)
 {
 	struct mbuf *n;
 
+	mtx_enter(&mbstatmtx);
 	mbstat.m_mtypes[m->m_type]--;
+	mtx_leave(&mbstatmtx);
+
 	n = m->m_next;
 	if (m->m_flags & M_ZEROIZE) {
 		m_zero(m);
@@ -353,54 +335,68 @@ m_free_unlocked(struct mbuf *m)
 		m_tag_delete_chain(m);
 	if (m->m_flags & M_EXT)
 		m_extfree(m);
+
 	pool_put(&mbpool, m);
 
 	return (n);
 }
 
-struct mbuf *
-m_free(struct mbuf *m)
+void
+m_extref(struct mbuf *o, struct mbuf *n)
 {
-	struct mbuf *n;
-	int s;
+	int refs = MCLISREFERENCED(o);
 
-	s = splnet();
-	n = m_free_unlocked(m);
-	splx(s);
+	n->m_flags |= o->m_flags & (M_EXT|M_EXTWR);
 
-	return (n);
+	if (refs)
+		mtx_enter(&m_extref_mtx);
+	n->m_ext.ext_nextref = o->m_ext.ext_nextref;
+	n->m_ext.ext_prevref = o;
+	o->m_ext.ext_nextref = n;
+	n->m_ext.ext_nextref->m_ext.ext_prevref = n;
+	if (refs)
+		mtx_leave(&m_extref_mtx);
+
+	MCLREFDEBUGN((n), __FILE__, __LINE__);
 }
 
-void
-m_extfree(struct mbuf *m)
+static inline u_int
+m_extunref(struct mbuf *m)
 {
+	int refs = 1;
+
+	if (!MCLISREFERENCED(m))
+		return (0);
+
+	mtx_enter(&m_extref_mtx);
 	if (MCLISREFERENCED(m)) {
 		m->m_ext.ext_nextref->m_ext.ext_prevref =
 		    m->m_ext.ext_prevref;
 		m->m_ext.ext_prevref->m_ext.ext_nextref =
 		    m->m_ext.ext_nextref;
-	} else if (m->m_ext.ext_free)
+	} else
+		refs = 0;
+	mtx_leave(&m_extref_mtx);
+
+	return (refs);
+}
+
+void
+m_extfree(struct mbuf *m)
+{
+	if (m_extunref(m) == 0) {
 		(*(m->m_ext.ext_free))(m->m_ext.ext_buf,
 		    m->m_ext.ext_size, m->m_ext.ext_arg);
-	else
-		panic("unknown type of extension buffer");
-	m->m_ext.ext_size = 0;
+	}
+
 	m->m_flags &= ~(M_EXT|M_EXTWR);
 }
 
 void
 m_freem(struct mbuf *m)
 {
-	struct mbuf *n;
-	int s;
-
-	if (m == NULL)
-		return;
-	s = splnet();
-	do {
-		n = m_free_unlocked(m);
-	} while ((m = n) != NULL);
-	splx(s);
+	while (m != NULL)
+		m = m_free(m);
 }
 
 /*
@@ -436,12 +432,8 @@ m_defrag(struct mbuf *m, int how)
 	/* free chain behind and possible ext buf on the first mbuf */
 	m_freem(m->m_next);
 	m->m_next = NULL;
-
-	if (m->m_flags & M_EXT) {
-		int s = splnet();
+	if (m->m_flags & M_EXT)
 		m_extfree(m);
-		splx(s);
-	}
 
 	/*
 	 * Bounce copy mbuf over to the original mbuf and set everything up.
@@ -614,7 +606,7 @@ m_copydata(struct mbuf *m, int off, int len, caddr_t cp)
 		if (m == NULL)
 			panic("m_copydata: null mbuf");
 		count = min(m->m_len - off, len);
-		bcopy(mtod(m, caddr_t) + off, cp, count);
+		memmove(cp, mtod(m, caddr_t) + off, count);
 		len -= count;
 		cp += count;
 		off = 0;
@@ -667,7 +659,7 @@ m_copyback(struct mbuf *m0, int off, int len, const void *_cp, int wait)
 			m->m_len += min(len - (m->m_len - off),
 			    M_TRAILINGSPACE(m));
 		mlen = min(m->m_len - off, len);
-		bcopy(cp, mtod(m, caddr_t) + off, (size_t)mlen);
+		memmove(mtod(m, caddr_t) + off, cp, mlen);
 		cp += mlen;
 		len -= mlen;
 		totlen += mlen + off;
@@ -720,8 +712,8 @@ m_cat(struct mbuf *m, struct mbuf *n)
 			return;
 		}
 		/* splat the data from one into the other */
-		bcopy(mtod(n, caddr_t), mtod(m, caddr_t) + m->m_len,
-		    (u_int)n->m_len);
+		memcpy(mtod(m, caddr_t) + m->m_len, mtod(n, caddr_t),
+		    n->m_len);
 		m->m_len += n->m_len;
 		n = m_free(n);
 	}
@@ -849,8 +841,8 @@ m_pullup(struct mbuf *n, int len)
 
 	do {
 		count = min(len, n->m_len);
-		bcopy(mtod(n, caddr_t), mtod(m, caddr_t) + m->m_len,
-		    (unsigned)count);
+		memcpy(mtod(m, caddr_t) + m->m_len, mtod(n, caddr_t),
+		    count);
 		len -= count;
 		m->m_len += count;
 		n->m_len -= count;
@@ -1020,7 +1012,7 @@ extpacket:
 		MCLADDREFERENCE(m, n);
 		n->m_data = m->m_data + len;
 	} else {
-		bcopy(mtod(m, caddr_t) + len, mtod(n, caddr_t), remain);
+		memcpy(mtod(n, caddr_t), mtod(m, caddr_t) + len, remain);
 	}
 	n->m_len = remain;
 	m->m_len = len;
@@ -1241,6 +1233,208 @@ m_print(void *v,
 		    m->m_ext.ext_free, m->m_ext.ext_arg);
 		(*pr)("m_ext.ext_nextref: %p\tm_ext.ext_prevref: %p\n",
 		    m->m_ext.ext_nextref, m->m_ext.ext_prevref);
+
 	}
 }
 #endif
+
+/*
+ * mbuf lists
+ */
+
+void ml_join(struct mbuf_list *, struct mbuf_list *);
+
+void
+ml_init(struct mbuf_list *ml)
+{
+	ml->ml_head = ml->ml_tail = NULL;
+	ml->ml_len = 0;
+}
+
+void
+ml_enqueue(struct mbuf_list *ml, struct mbuf *m)
+{
+	if (ml->ml_tail == NULL)
+		ml->ml_head = ml->ml_tail = m;
+	else {
+		ml->ml_tail->m_nextpkt = m;
+		ml->ml_tail = m;
+	}
+
+	m->m_nextpkt = NULL;
+	ml->ml_len++;
+}
+
+void
+ml_join(struct mbuf_list *mla, struct mbuf_list *mlb)
+{
+	if (mla->ml_tail == NULL)
+		*mla = *mlb;
+	else if (mlb->ml_tail != NULL) {
+		mla->ml_tail->m_nextpkt = mlb->ml_head;
+		mla->ml_tail = mlb->ml_tail;
+		mla->ml_len += mlb->ml_len;
+
+		ml_init(mlb);
+	}
+}
+
+struct mbuf *
+ml_dequeue(struct mbuf_list *ml)
+{
+	struct mbuf *m;
+
+	m = ml->ml_head;
+	if (m != NULL) {
+		ml->ml_head = m->m_nextpkt;
+		if (ml->ml_head == NULL)
+			ml->ml_tail = NULL;
+
+		m->m_nextpkt = NULL;
+		ml->ml_len--;
+	}
+
+	return (m);
+}
+
+struct mbuf *
+ml_dechain(struct mbuf_list *ml)
+{
+	struct mbuf *m0;
+
+	m0 = ml->ml_head;
+
+	ml_init(ml);
+
+	return (m0);
+}
+
+struct mbuf *
+ml_filter(struct mbuf_list *ml,
+    int (*filter)(void *, const struct mbuf *), void *ctx)
+{
+	struct mbuf_list matches = MBUF_LIST_INITIALIZER();
+	struct mbuf *m, *n;
+	struct mbuf **mp;
+
+	mp = &ml->ml_head;
+
+	for (m = ml->ml_head; m != NULL; m = n) {
+		n = m->m_nextpkt;
+		if ((*filter)(ctx, m)) {
+			*mp = n;
+			ml_enqueue(&matches, m);
+		} else {
+			mp = &m->m_nextpkt;
+			ml->ml_tail = m;
+		}
+	}
+
+	/* fixup ml */
+	if (ml->ml_head == NULL)
+		ml->ml_tail = NULL;
+	ml->ml_len -= ml_len(&matches);
+
+	return (matches.ml_head); /* ml_dechain */
+}
+
+/*
+ * mbuf queues
+ */
+
+void
+mq_init(struct mbuf_queue *mq, u_int maxlen, int ipl)
+{
+	mtx_init(&mq->mq_mtx, ipl);
+	ml_init(&mq->mq_list);
+	mq->mq_maxlen = maxlen;
+}
+
+int
+mq_enqueue(struct mbuf_queue *mq, struct mbuf *m)
+{
+	int dropped = 0;
+
+	mtx_enter(&mq->mq_mtx);
+	if (mq_len(mq) < mq->mq_maxlen)
+		ml_enqueue(&mq->mq_list, m);
+	else {
+		mq->mq_drops++;
+		dropped = 1;
+	}
+	mtx_leave(&mq->mq_mtx);
+
+	if (dropped)
+		m_freem(m);
+
+	return (dropped);
+}
+
+struct mbuf *
+mq_dequeue(struct mbuf_queue *mq)
+{
+	struct mbuf *m;
+
+	mtx_enter(&mq->mq_mtx);
+	m = ml_dequeue(&mq->mq_list);
+	mtx_leave(&mq->mq_mtx);
+
+	return (m);
+}
+
+int
+mq_enlist(struct mbuf_queue *mq, struct mbuf_list *ml)
+{
+	struct mbuf *m;
+	int dropped = 0;
+
+	mtx_enter(&mq->mq_mtx);
+	if (mq_len(mq) < mq->mq_maxlen)
+		ml_join(&mq->mq_list, ml);
+	else {
+		dropped = ml_len(ml);
+		mq->mq_drops += dropped;
+	}
+	mtx_leave(&mq->mq_mtx);
+
+	if (dropped) {
+		while ((m = ml_dequeue(ml)) != NULL)
+			m_freem(m);
+	}
+
+	return (dropped);
+}
+
+void
+mq_delist(struct mbuf_queue *mq, struct mbuf_list *ml)
+{
+	mtx_enter(&mq->mq_mtx);
+	*ml = mq->mq_list;
+	ml_init(&mq->mq_list);
+	mtx_leave(&mq->mq_mtx);
+}
+
+struct mbuf *
+mq_dechain(struct mbuf_queue *mq)
+{
+	struct mbuf *m0;
+
+	mtx_enter(&mq->mq_mtx);
+	m0 = ml_dechain(&mq->mq_list);
+	mtx_leave(&mq->mq_mtx);
+
+	return (m0);
+}
+
+struct mbuf *
+mq_filter(struct mbuf_queue *mq,
+    int (*filter)(void *, const struct mbuf *), void *ctx)
+{
+	struct mbuf *m0;
+
+	mtx_enter(&mq->mq_mtx);
+	m0 = ml_filter(&mq->mq_list, filter, ctx);
+	mtx_leave(&mq->mq_mtx);
+
+	return (m0);
+}

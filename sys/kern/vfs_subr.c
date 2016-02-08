@@ -1,4 +1,4 @@
-/*	$OpenBSD: vfs_subr.c,v 1.218 2014/07/13 15:00:40 tedu Exp $	*/
+/*	$OpenBSD: vfs_subr.c,v 1.229 2015/03/02 20:46:50 guenther Exp $	*/
 /*	$NetBSD: vfs_subr.c,v 1.53 1996/04/22 01:39:13 christos Exp $	*/
 
 /*
@@ -50,6 +50,7 @@
 #include <sys/fcntl.h>
 #include <sys/kernel.h>
 #include <sys/vnode.h>
+#include <sys/lock.h>
 #include <sys/stat.h>
 #include <sys/acct.h>
 #include <sys/namei.h>
@@ -64,6 +65,9 @@
 #include <sys/specdev.h>
 
 #include <netinet/in.h>
+
+#include <uvm/uvm_extern.h>
+#include <uvm/uvm_vnode.h>
 
 #include "softraid.h"
 
@@ -116,6 +120,7 @@ void printlockedvnodes(void);
 #endif
 
 struct pool vnode_pool;
+struct pool uvm_vnode_pool;
 
 static int rb_buf_compare(struct buf *b1, struct buf *b2);
 RB_GENERATE(buf_rb_bufs, buf, b_rbbufs, rb_buf_compare);
@@ -137,9 +142,11 @@ void
 vntblinit(void)
 {
 	/* buffer cache may need a vnode for each buffer */
-	maxvnodes = 2 * desiredvnodes;
-	pool_init(&vnode_pool, sizeof(struct vnode), 0, 0, 0, "vnodes",
-	    &pool_allocator_nointr);
+	maxvnodes = 2 * initialvnodes;
+	pool_init(&vnode_pool, sizeof(struct vnode), 0, 0, PR_WAITOK,
+	    "vnodes", NULL);
+	pool_init(&uvm_vnode_pool, sizeof(struct uvm_vnode), 0, 0, PR_WAITOK,
+	    "uvmvnodes", NULL);
 	TAILQ_INIT(&vnode_hold_list);
 	TAILQ_INIT(&vnode_free_list);
 	TAILQ_INIT(&mountlist);
@@ -216,7 +223,7 @@ vfs_rootmountalloc(char *fstypename, char *devname, struct mount **mpp)
 			break;
 	if (vfsp == NULL)
 		return (ENODEV);
-	mp = malloc(sizeof(struct mount), M_MOUNT, M_WAITOK|M_ZERO);
+	mp = malloc(sizeof(*mp), M_MOUNT, M_WAITOK|M_ZERO);
 	(void)vfs_busy(mp, VB_READ|VB_NOWAIT);
 	LIST_INIT(&mp->mnt_vnodelist);
 	mp->mnt_vfc = vfsp;
@@ -350,6 +357,8 @@ getnewvnode(enum vtagtype tag, struct mount *mp, struct vops *vops,
 	    ((TAILQ_FIRST(listhd = &vnode_hold_list) == NULL) || toggle))) {
 		splx(s);
 		vp = pool_get(&vnode_pool, PR_WAITOK | PR_ZERO);
+		vp->v_uvm = pool_get(&uvm_vnode_pool, PR_WAITOK | PR_ZERO);
+		vp->v_uvm->u_vnode = vp;
 		RB_INIT(&vp->v_bufs_tree);
 		RB_INIT(&vp->v_nc_tree);
 		TAILQ_INIT(&vp->v_cache_dst);
@@ -406,7 +415,6 @@ getnewvnode(enum vtagtype tag, struct mount *mp, struct vops *vops,
 	*vpp = vp;
 	vp->v_usecount = 1;
 	vp->v_data = 0;
-	simple_lock_init(&vp->v_uvm.u_obj.vmobjlock);
 	return (0);
 }
 
@@ -1274,7 +1282,7 @@ vfs_sysctl(int *name, u_int namelen, void *oldp, size_t *oldlenp, void *newp,
 
 		/* Make a copy, clear out kernel pointers */
 		tmpvfsp = malloc(sizeof(*tmpvfsp), M_TEMP, M_WAITOK);
-		bcopy(vfsp, tmpvfsp, sizeof(*tmpvfsp));
+		memcpy(tmpvfsp, vfsp, sizeof(*tmpvfsp));
 		tmpvfsp->vfc_vfsops = NULL;
 		tmpvfsp->vfc_next = NULL;
 
@@ -1289,70 +1297,6 @@ vfs_sysctl(int *name, u_int namelen, void *oldp, size_t *oldlenp, void *newp,
 		return(ret);
 	}
 	return (EOPNOTSUPP);
-}
-
-int kinfo_vdebug = 1;
-#define KINFO_VNODESLOP	10
-/*
- * Dump vnode list (via sysctl).
- * Copyout address of vnode followed by vnode.
- */
-/* ARGSUSED */
-int
-sysctl_vnode(char *where, size_t *sizep, struct proc *p)
-{
-	struct mount *mp, *nmp;
-	struct vnode *vp, *nvp;
-	char *bp = where, *savebp;
-	char *ewhere;
-	int error;
-
-	if (where == NULL) {
-		*sizep = (numvnodes + KINFO_VNODESLOP) * sizeof(struct e_vnode);
-		return (0);
-	}
-	ewhere = where + *sizep;
-
-	TAILQ_FOREACH_SAFE(mp, &mountlist, mnt_list, nmp) {
-		if (vfs_busy(mp, VB_READ|VB_NOWAIT))
-			continue;
-		savebp = bp;
-again:
-		LIST_FOREACH_SAFE(vp, &mp->mnt_vnodelist, v_mntvnodes, nvp) {
-			/*
-			 * Check that the vp is still associated with
-			 * this filesystem.  RACE: could have been
-			 * recycled onto the same filesystem.
-			 */
-			if (vp->v_mount != mp) {
-				if (kinfo_vdebug)
-					printf("kinfo: vp changed\n");
-				bp = savebp;
-				goto again;
-			}
-			if (bp + sizeof(struct e_vnode) > ewhere) {
-				*sizep = bp - where;
-				vfs_unbusy(mp);
-				return (ENOMEM);
-			}
-			if ((error = copyout(&vp,
-			    &((struct e_vnode *)bp)->vptr,
-			    sizeof(struct vnode *))) ||
-			   (error = copyout(vp,
-			    &((struct e_vnode *)bp)->vnode,
-			    sizeof(struct vnode)))) {
-				vfs_unbusy(mp);
-				return (error);
-			}
-			bp += sizeof(struct e_vnode);
-		}
-
-		vfs_unbusy(mp);
-	}
-
-	*sizep = bp - where;
-
-	return (0);
 }
 
 /*
@@ -1390,7 +1334,7 @@ vfs_hang_addrlist(struct mount *mp, struct netexport *nep,
 {
 	struct netcred *np;
 	struct radix_node_head *rnh;
-	int i;
+	int nplen, i;
 	struct radix_node *rn;
 	struct sockaddr *saddr, *smask = 0;
 	int error;
@@ -1399,14 +1343,17 @@ vfs_hang_addrlist(struct mount *mp, struct netexport *nep,
 		if (mp->mnt_flag & MNT_DEFEXPORTED)
 			return (EPERM);
 		np = &nep->ne_defexported;
+		/* fill in the kernel's ucred from userspace's xucred */
+		if ((error = crfromxucred(&np->netc_anon, &argp->ex_anon)))
+			return (error);
 		mp->mnt_flag |= MNT_DEFEXPORTED;
 		goto finish;
 	}
 	if (argp->ex_addrlen > MLEN || argp->ex_masklen > MLEN ||
 	    argp->ex_addrlen < 0 || argp->ex_masklen < 0)
 		return (EINVAL);
-	i = sizeof(struct netcred) + argp->ex_addrlen + argp->ex_masklen;
-	np = (struct netcred *)malloc(i, M_NETADDR, M_WAITOK|M_ZERO);
+	nplen = sizeof(struct netcred) + argp->ex_addrlen + argp->ex_masklen;
+	np = (struct netcred *)malloc(nplen, M_NETADDR, M_WAITOK|M_ZERO);
 	saddr = (struct sockaddr *)(np + 1);
 	error = copyin(argp->ex_addr, saddr, argp->ex_addrlen);
 	if (error)
@@ -1421,6 +1368,9 @@ vfs_hang_addrlist(struct mount *mp, struct netexport *nep,
 		if (smask->sa_len > argp->ex_masklen)
 			smask->sa_len = argp->ex_masklen;
 	}
+	/* fill in the kernel's ucred from userspace's xucred */
+	if ((error = crfromxucred(&np->netc_anon, &argp->ex_anon)))
+		goto out;
 	i = saddr->sa_family;
 	switch (i) {
 	case AF_INET:
@@ -1445,11 +1395,9 @@ vfs_hang_addrlist(struct mount *mp, struct netexport *nep,
 	}
 finish:
 	np->netc_exflags = argp->ex_flags;
-	/* fill in the kernel's ucred from userspace's xucred */
-	crfromxucred(&np->netc_anon, &argp->ex_anon);
 	return (0);
 out:
-	free(np, M_NETADDR, 0);
+	free(np, M_NETADDR, nplen);
 	return (error);
 }
 
@@ -1887,8 +1835,7 @@ vflushbuf(struct vnode *vp, int sync)
 
 loop:
 	s = splbio();
-	for (bp = LIST_FIRST(&vp->v_dirtyblkhd);
-	    bp != LIST_END(&vp->v_dirtyblkhd); bp = nbp) {
+	for (bp = LIST_FIRST(&vp->v_dirtyblkhd); bp != NULL; bp = nbp) {
 		nbp = LIST_NEXT(bp, b_vnbufs);
 		if ((bp->b_flags & B_BUSY))
 			continue;
@@ -2288,9 +2235,9 @@ copy_statfs_info(struct statfs *sbp, const struct mount *mp)
 	sbp->f_syncreads = mbp->f_syncreads;
 	sbp->f_asyncreads = mbp->f_asyncreads;
 	sbp->f_namemax = mbp->f_namemax;
-	bcopy(mp->mnt_stat.f_mntonname, sbp->f_mntonname, MNAMELEN);
-	bcopy(mp->mnt_stat.f_mntfromname, sbp->f_mntfromname, MNAMELEN);
-	bcopy(mp->mnt_stat.f_mntfromspec, sbp->f_mntfromspec, MNAMELEN);
-	bcopy(&mp->mnt_stat.mount_info.ufs_args, &sbp->mount_info.ufs_args,
+	memcpy(sbp->f_mntonname, mp->mnt_stat.f_mntonname, MNAMELEN);
+	memcpy(sbp->f_mntfromname, mp->mnt_stat.f_mntfromname, MNAMELEN);
+	memcpy(sbp->f_mntfromspec, mp->mnt_stat.f_mntfromspec, MNAMELEN);
+	memcpy(&sbp->mount_info.ufs_args, &mp->mnt_stat.mount_info.ufs_args,
 	    sizeof(struct ufs_args));
 }

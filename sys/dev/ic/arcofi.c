@@ -1,4 +1,4 @@
-/*	$OpenBSD: arcofi.c,v 1.7 2014/05/08 21:32:45 miod Exp $	*/
+/*	$OpenBSD: arcofi.c,v 1.11 2014/12/19 22:44:58 guenther Exp $	*/
 
 /*
  * Copyright (c) 2011 Miodrag Vallat.
@@ -34,6 +34,7 @@
 #include <sys/device.h>
 #include <sys/kernel.h>
 #include <sys/proc.h>
+#include <sys/endian.h>
 
 #include <sys/audioio.h>
 #include <dev/audio_if.h>
@@ -42,7 +43,6 @@
 
 #include <machine/autoconf.h>
 #include <machine/bus.h>
-#include <machine/endian.h>
 #include <machine/intr.h>
 
 #include <dev/ic/arcofivar.h>
@@ -56,7 +56,7 @@
  */
 
 /* CMDR */
-#define	CMDR_AD		0x80	/* SP1/PS2 address convention */
+#define	CMDR_AD		0x80	/* SP1/SP2 address convention */
 #define	CMDR_READ	0x40
 #define	CMDR_WRITE	0x00
 #define	CMDR_PU		0x20	/* Power Up */
@@ -744,7 +744,7 @@ arcofi_mi_to_gain(int lvl)
  * - the `line out' connector is the `H out' (heaphones) output.
  * - the internal `speaker' is the `LS out' (loudspeaker) output.
  *
- * Each of these can be enabled or disabled indepently, except for
+ * Each of these can be enabled or disabled independently, except for
  * MIC enabled with H out and LS out disabled, which is not allowed
  * by the chip (and makes no sense for a chip which was intended to
  * be used in phones, not voice recorders); we cheat by keeping one
@@ -1150,7 +1150,6 @@ arcofi_swintr(void *v)
 		action |= AUMODE_RECORD;
 	if (sc->sc_xmit.buf != NULL && sc->sc_xmit.buf == sc->sc_xmit.past)
 		action |= AUMODE_PLAY;
-	mtx_leave(&audio_lock);
 
 	if (action & AUMODE_RECORD) {
 		if (sc->sc_recv.cb)
@@ -1160,6 +1159,7 @@ arcofi_swintr(void *v)
 		if (sc->sc_xmit.cb)
 			sc->sc_xmit.cb(sc->sc_xmit.cbarg);
 	}
+	mtx_leave(&audio_lock);
 }
 
 int

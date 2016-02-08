@@ -1,4 +1,4 @@
-/* $OpenBSD: window.c,v 1.112 2014/06/23 10:27:05 nicm Exp $ */
+/* $OpenBSD: window.c,v 1.116 2015/02/09 12:47:18 nicm Exp $ */
 
 /*
  * Copyright (c) 2007 Nicholas Marriott <nicm@users.sourceforge.net>
@@ -263,7 +263,7 @@ window_find_by_id(u_int id)
 
 	for (i = 0; i < ARRAY_LENGTH(&windows); i++) {
 		w = ARRAY_ITEM(&windows, i);
-		if (w->id == id)
+		if (w != NULL && w->id == id)
 			return (w);
 	}
 	return (NULL);
@@ -386,11 +386,11 @@ window_resize(struct window *w, u_int sx, u_int sy)
 	w->sy = sy;
 }
 
-void
+int
 window_set_active_pane(struct window *w, struct window_pane *wp)
 {
 	if (wp == w->active)
-		return;
+		return (0);
 	w->last = w->active;
 	w->active = wp;
 	while (!window_pane_visible(w->active)) {
@@ -398,9 +398,10 @@ window_set_active_pane(struct window *w, struct window_pane *wp)
 		if (w->active == NULL)
 			w->active = TAILQ_LAST(&w->panes, window_panes);
 		if (w->active == wp)
-			return;
+			return (1);
 	}
 	w->active->active_point = next_active_point++;
+	return (1);
 }
 
 struct window_pane *
@@ -490,6 +491,7 @@ window_zoom(struct window_pane *wp)
 	w->saved_layout_root = w->layout_root;
 	layout_init(w, wp);
 	w->flags |= WINDOW_ZOOMED;
+	notify_window_layout_changed(w);
 
 	return (0);
 }
@@ -511,6 +513,7 @@ window_unzoom(struct window *w)
 		wp->saved_layout_cell = NULL;
 	}
 	layout_fix_panes(w, w->sx, w->sy);
+	notify_window_layout_changed(w);
 
 	return (0);
 }
@@ -1057,8 +1060,9 @@ window_pane_key(struct window_pane *wp, struct session *sess, int key)
 		return;
 	}
 
-	if (wp->fd == -1)
+	if (wp->fd == -1 || wp->flags & PANE_INPUTOFF)
 		return;
+
 	input_key(wp, key);
 	if (options_get_number(&wp->window->options, "synchronize-panes")) {
 		TAILQ_FOREACH(wp2, &wp->window->panes, entry) {
@@ -1071,8 +1075,8 @@ window_pane_key(struct window_pane *wp, struct session *sess, int key)
 }
 
 void
-window_pane_mouse(
-    struct window_pane *wp, struct session *sess, struct mouse_event *m)
+window_pane_mouse(struct window_pane *wp, struct session *sess,
+    struct mouse_event *m)
 {
 	if (!window_pane_visible(wp))
 		return;

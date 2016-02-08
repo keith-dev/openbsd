@@ -1,4 +1,4 @@
-/*	$OpenBSD: subr_autoconf.c,v 1.78 2014/07/13 15:29:04 tedu Exp $	*/
+/*	$OpenBSD: subr_autoconf.c,v 1.86 2015/02/09 13:38:50 dlg Exp $	*/
 /*	$NetBSD: subr_autoconf.c,v 1.21 1996/04/04 06:06:18 cgd Exp $	*/
 
 /*
@@ -50,10 +50,11 @@
 #include <sys/malloc.h>
 #include <sys/systm.h>
 #include <sys/queue.h>
-#include <sys/proc.h>
 #include <sys/mutex.h>
+#include <sys/atomic.h>
 
 #include "hotplug.h"
+#include "mpath.h"
 
 /*
  * Autoconfiguration subroutines.
@@ -765,6 +766,40 @@ config_suspend(struct device *dev, int act)
 	return (r);
 }
 
+int
+config_suspend_all(int act)
+{
+	struct device *mainbus = device_mainbus();
+	struct device *mpath = device_mpath();
+	int rv = 0;
+
+	switch (act) {
+	case DVACT_QUIESCE:
+	case DVACT_SUSPEND:
+	case DVACT_POWERDOWN:
+		if (mpath) {
+			rv = config_suspend(mpath, act);
+			if (rv)
+				return rv;
+		}
+		if (mainbus)
+			rv = config_suspend(mainbus, act);
+		break;
+	case DVACT_RESUME:
+	case DVACT_WAKEUP:
+		if (mainbus) {
+			rv = config_suspend(mainbus, act);
+			if (rv)
+				return rv;
+		}
+		if (mpath)
+			rv = config_suspend(mpath, act);
+		break;
+	}
+
+	return (rv);
+}
+
 /*
  * Call the ca_activate for each of our children, letting each
  * decide whether they wish to do the same for their children
@@ -864,6 +899,21 @@ device_mainbus(void)
 	return (mainbus_cd.cd_devs[0]);
 }
 
+struct device *
+device_mpath(void)
+{
+#if NMPATH > 0
+	extern struct cfdriver mpath_cd;
+
+	if (mpath_cd.cd_ndevs < 1)
+		return (NULL);
+		
+	return (mpath_cd.cd_devs[0]);
+#else
+	return (NULL);
+#endif
+}
+
 /*
  * Increments the ref count on the device structure. The device
  * structure is freed when the ref count hits 0.
@@ -873,7 +923,7 @@ device_mainbus(void)
 void
 device_ref(struct device *dv)
 {
-	dv->dv_ref++;
+	atomic_inc_int(&dv->dv_ref);
 }
 
 /*
@@ -886,8 +936,10 @@ device_ref(struct device *dv)
 void
 device_unref(struct device *dv)
 {
-	dv->dv_ref--;
-	if (dv->dv_ref == 0) {
-		free(dv, M_DEVBUF, 0);
+	struct cfattach *ca;
+
+	if (atomic_dec_int_nv(&dv->dv_ref) == 0) {
+		ca = dv->dv_cfdata->cf_attach;
+		free(dv, M_DEVBUF, ca->ca_devsize);
 	}
 }

@@ -1,4 +1,4 @@
-/*	$OpenBSD: conf.c,v 1.45 2014/03/14 23:42:40 kettenis Exp $	*/
+/*	$OpenBSD: conf.c,v 1.49 2014/12/11 19:44:16 tedu Exp $	*/
 
 /*
  * Copyright (c) 1994, 1995 Charles M. Hannum.  All rights reserved.
@@ -40,8 +40,6 @@
 
 #include <machine/conf.h>
 
-#include "inet.h"
-
 #include "wd.h"
 bdev_decl(wd);
 #include "fdc.h"
@@ -64,17 +62,17 @@ struct bdevsw	bdevsw[] =
 	bdev_tape_init(NST,st),		/* 5: SCSI tape */
 	bdev_disk_init(NCD,cd),		/* 6: SCSI CD-ROM */
 	bdev_notdef(),			/* 7 */
-	bdev_lkm_dummy(),		/* 8 */
-	bdev_lkm_dummy(),		/* 9 */
-	bdev_lkm_dummy(),		/* 10 */
-	bdev_lkm_dummy(),		/* 11 */
-	bdev_lkm_dummy(),		/* 12 */
-	bdev_lkm_dummy(),		/* 13 */
+	bdev_notdef(),			/* 8 */
+	bdev_notdef(),			/* 9 */
+	bdev_notdef(),			/* 10 */
+	bdev_notdef(),			/* 11 */
+	bdev_notdef(),			/* 12 */
+	bdev_notdef(),			/* 13 */
 	bdev_disk_init(NVND,vnd),	/* 14: vnode disk driver */
 	bdev_notdef(),			/* 15: was: Sony CD-ROM */
 	bdev_notdef(),			/* 16: was: concatenated disk driver */
 	bdev_disk_init(NRD,rd),		/* 17: ram disk driver */
-	bdev_lkm_dummy(),		/* 18 */
+	bdev_notdef(),			/* 18 */
 	bdev_notdef(),			/* 19 was: RAIDframe disk driver */
 };
 int	nblkdev = nitems(bdevsw);
@@ -149,7 +147,6 @@ cdev_decl(cy);
 #include "uhid.h"
 #include "ugen.h"
 #include "ulpt.h"
-#include "urio.h"
 #include "ucom.h"
 #include "cz.h"
 cdev_decl(cztty);
@@ -189,7 +186,7 @@ struct cdevsw	cdevsw[] =
 	cdev_tty_init(NCOM,com),	/* 8: serial port */
 	cdev_disk_init(NFD,fd),		/* 9: floppy disk */
 	cdev_notdef(),			/* 10 */
-	cdev_lkm_dummy(),		/* 11: Sony CD-ROM */
+	cdev_notdef(),			/* 11: Sony CD-ROM */
 	cdev_wsdisplay_init(NWSDISPLAY,	/* 12: frame buffers, etc. */
 	    wsdisplay),
 	cdev_disk_init(NSD,sd),		/* 13: SCSI disk */
@@ -211,13 +208,13 @@ struct cdevsw	cdevsw[] =
 #endif
 	cdev_notdef(),			/* 26 */
 	cdev_spkr_init(NSPKR,spkr),	/* 27: PC speaker */
-	cdev_lkm_init(NLKM,lkm),	/* 28: loadable module driver */
-	cdev_lkm_dummy(),		/* 29 */
-	cdev_lkm_dummy(),		/* 30 */
-	cdev_lkm_dummy(),		/* 31 */
-	cdev_lkm_dummy(),		/* 32 */
-	cdev_lkm_dummy(),		/* 33 */
-	cdev_lkm_dummy(),		/* 34 */
+	cdev_notdef(),			/* 28 was LKM */
+	cdev_notdef(),			/* 29 */
+	cdev_notdef(),			/* 30 */
+	cdev_notdef(),			/* 31 */
+	cdev_notdef(),			/* 32 */
+	cdev_notdef(),			/* 33 */
+	cdev_notdef(),			/* 34 */
 	cdev_notdef(),			/* 35: Microsoft mouse */
 	cdev_notdef(),			/* 36: Logitech mouse */
 	cdev_notdef(),			/* 37: Extended PS/2 mouse */
@@ -250,13 +247,13 @@ struct cdevsw	cdevsw[] =
 	cdev_usbdev_init(NUHID,uhid),	/* 62: USB generic HID */
 	cdev_usbdev_init(NUGEN,ugen),	/* 63: USB generic driver */
 	cdev_ulpt_init(NULPT,ulpt),	/* 64: USB printers */
-	cdev_urio_init(NURIO,urio),	/* 65: USB Diamond Rio 500 */
+	cdev_notdef(),			/* 65: urio */
 	cdev_tty_init(NUCOM,ucom),	/* 66: USB tty */
 	cdev_mouse_init(NWSKBD, wskbd),	/* 67: keyboards */
 	cdev_mouse_init(NWSMOUSE,	/* 68: mice */
 	    wsmouse),
 	cdev_mouse_init(NWSMUX, wsmux),	/* 69: ws multiplexor */
-	cdev_crypto_init(NCRYPTO,crypto), /* 70: /dev/crypto */
+	cdev_notdef(),			/* 70: was: /dev/crypto */
 	cdev_tty_init(NCZ,cztty),	/* 71: Cyclades-Z serial port */
 #ifdef USER_PCICONF
 	cdev_pci_init(NPCI,pci),        /* 72: PCI user */
@@ -326,7 +323,6 @@ getnulldev(void)
 }
 
 int chrtoblktbl[] = {
-	/* XXXX This needs to be dynamic for LKMs. */
 	/*VCHR*/	/*VBLK*/
 	/*  0 */	NODEV,
 	/*  1 */	NODEV,

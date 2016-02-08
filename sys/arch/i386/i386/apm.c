@@ -1,4 +1,4 @@
-/*	$OpenBSD: apm.c,v 1.105 2014/03/31 12:11:42 mpi Exp $	*/
+/*	$OpenBSD: apm.c,v 1.113 2015/02/07 01:19:40 deraadt Exp $	*/
 
 /*-
  * Copyright (c) 1998-2001 Michael Shalayeff. All rights reserved.
@@ -42,7 +42,6 @@
 #include <sys/kernel.h>
 #include <sys/kthread.h>
 #include <sys/rwlock.h>
-#include <sys/proc.h>
 #include <sys/sysctl.h>
 #include <sys/malloc.h>
 #include <sys/device.h>
@@ -51,6 +50,7 @@
 #include <sys/buf.h>
 #include <sys/reboot.h>
 #include <sys/event.h>
+#include <dev/rndvar.h>
 
 #include <machine/conf.h>
 #include <machine/cpu.h>
@@ -242,26 +242,26 @@ apm_perror(const char *str, struct apmregs *regs)
 void
 apm_suspend(int state)
 {
-	struct device *mainbus = device_mainbus();
 	extern int perflevel;
 	int s;
 
 #if NWSDISPLAY > 0
 	wsdisplay_suspend();
 #endif /* NWSDISPLAY > 0 */
-	config_suspend(mainbus, DVACT_QUIESCE);
+	config_suspend_all(DVACT_QUIESCE);
 	bufq_quiesce();
 
 	s = splhigh();
 	disable_intr();
-	config_suspend(mainbus, DVACT_SUSPEND);
+	config_suspend_all(DVACT_SUSPEND);
+	suspend_randomness();
 
 	/* XXX
 	 * Flag to disk drivers that they should "power down" the disk
 	 * when we get to DVACT_POWERDOWN.
 	 */
 	boothowto |= RB_POWERDOWN;
-	config_suspend(mainbus, DVACT_POWERDOWN);
+	config_suspend_all(DVACT_POWERDOWN);
 	boothowto &= ~RB_POWERDOWN;
 
 	/* Send machine to sleep */
@@ -274,20 +274,22 @@ apm_suspend(int state)
 		rtcstart();		/* in i8254 mode, rtc is profclock */
 	inittodr(time_second);
 
-	config_suspend(mainbus, DVACT_RESUME);
+	config_suspend_all(DVACT_RESUME);
 	enable_intr();
 	splx(s);
 
-	/* restore hw.setperf */
-	if (cpu_setperf != NULL)
-		cpu_setperf(perflevel);
+	resume_randomness(NULL, 0);	/* force RNG upper level reseed */
 	bufq_restart();
 
-	config_suspend(mainbus, DVACT_WAKEUP);
+	config_suspend_all(DVACT_WAKEUP);
 
 #if NWSDISPLAY > 0
 	wsdisplay_resume();
 #endif /* NWSDISPLAY > 0 */
+
+	/* restore hw.setperf */
+	if (cpu_setperf != NULL)
+		cpu_setperf(perflevel);
 }
 
 void
@@ -802,8 +804,8 @@ apmattach(struct device *parent, struct device *self, void *aux)
 		    SDT_MEMERA, SEL_KPL, 0, 0);
 		setgdt(GAPMDATA_SEL, (void *)dh, ap->apm_data_len, SDT_MEMRWA,
 		    SEL_KPL, 1, 0);
-		DPRINTF((": flags %x code 32:%x/%x[%x] 16:%x/%x[%x] "
-		    "data %x/%x/%x ep %x (%x:%x)\n%s", apm_flags,
+		DPRINTF((": flags %x code 32:%x/%lx[%x] 16:%x/%lx[%x] "
+		    "data %x/%lx/%x ep %x (%x:%lx)\n%s", apm_flags,
 		    ap->apm_code32_base, ch32, ap->apm_code_len,
 		    ap->apm_code16_base, ch16, ap->apm_code16_len,
 		    ap->apm_data_base, dh, ap->apm_data_len,

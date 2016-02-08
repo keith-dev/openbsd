@@ -1,4 +1,4 @@
-/*	$OpenBSD: autoconf.c,v 1.18 2014/07/12 18:44:41 tedu Exp $	*/
+/*	$OpenBSD: autoconf.c,v 1.23 2014/12/09 06:58:28 doug Exp $	*/
 
 /*
  * Copyright (c) 1998-2005 Michael Shalayeff
@@ -77,7 +77,6 @@ void (*cold_hook)(int); /* see below */
  * LED blinking thing
  */
 #ifdef USELEDS
-#include <sys/dkstat.h>
 #include <sys/kernel.h>
 
 struct timeout heartbeat_tmo;
@@ -150,12 +149,14 @@ heartbeat(void *v)
 {
 	static u_int hbcnt = 0, ocp_total, ocp_idle;
 	int toggle, cp_mask, cp_total, cp_idle;
+	struct schedstate_percpu *spc = &(curcpu()->ci_schedstate);
 
 	timeout_add(&heartbeat_tmo, hz / 16);
 
-	cp_idle = cp_time[CP_IDLE];
-	cp_total = cp_time[CP_USER] + cp_time[CP_NICE] + cp_time[CP_SYS] +
-	    cp_time[CP_INTR] + cp_time[CP_IDLE];
+	cp_idle = spc->spc_cp_time[CP_IDLE];
+	cp_total = spc->spc_cp_time[CP_USER] + spc->spc_cp_time[CP_NICE] +
+	    spc->spc_cp_time[CP_SYS] + spc->spc_cp_time[CP_INTR] +
+	    spc->spc_cp_time[CP_IDLE];
 	if (cp_total == ocp_total)
 		cp_total = ocp_total + 1;
 	if (cp_idle == ocp_idle)
@@ -231,8 +232,9 @@ print_devpath(const char *label, struct pz_device *pz)
 	for (i = 1; i < 6 && pz->pz_layers[i]; i++)
 		printf(".%x", pz->pz_layers[i]);
 
-	printf(" class=%d flags=%b hpa=%p spa=%p io=%p\n", pz->pz_class,
-	    pz->pz_flags, PZF_BITS, pz->pz_hpa, pz->pz_spa, pz->pz_iodc_io);
+	printf(" class=%d flags=%b hpa=0x%08x spa=0x%08x io=0x%08x\n",
+	    pz->pz_class, pz->pz_flags, PZF_BITS, pz->pz_hpa, pz->pz_spa,
+	    pz->pz_iodc_io);
 }
 
 u_int32_t pdc_rt[16 / 4 * sizeof(struct pdc_pat_pci_rt)] PDC_ALIGNMENT;
@@ -373,14 +375,14 @@ pdc_getirt(int *pn)
 		return (NULL);
 	}
 
-printf("num %ld ", pdc_pat_io_num.num);
+printf("num %d ", pdc_pat_io_num.num);
 	*pn = num = pdc_pat_io_num.num;
 	if (num > sizeof(pdc_rt) / sizeof(*rt)) {
 		printf("\nPCI IRT is too big %d\n", num);
 		return (NULL);
 	}
 
-	if (!(rt = malloc(num * sizeof(*rt), M_DEVBUF, M_NOWAIT)))
+	if (!(rt = mallocarray(num, sizeof(*rt), M_DEVBUF, M_NOWAIT)))
 		return (NULL);
 
 	if (cell >= 0) {

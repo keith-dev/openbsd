@@ -1,4 +1,4 @@
-/*	$OpenBSD: ftp_var.h,v 1.35 2014/07/14 09:26:27 jsing Exp $	*/
+/*	$OpenBSD: ftp_var.h,v 1.38 2015/02/09 08:24:21 tedu Exp $	*/
 /*	$NetBSD: ftp_var.h,v 1.18 1997/08/18 10:20:25 lukem Exp $	*/
 
 /*
@@ -65,39 +65,30 @@
  * FTP global variables.
  */
 
-#include <sys/param.h>
+#include <sys/signal.h>
+#include <limits.h>
 #include <setjmp.h>
 
 #ifndef SMALL
 #include <histedit.h>
 #endif /* !SMALL */
 
-#ifdef SOCKS
-#include <socks.h>
-int fclose(FILE *);
-#endif
-
-#include <ressl.h>
+#include <tls.h>
 
 #include "stringlist.h"
 #include "extern.h"
 #include "small.h"
 
 #define HASHBYTES	1024
-#define FTPBUFLEN	MAXPATHLEN + 200
+#define FTPBUFLEN	PATH_MAX + 200
 
 #define STALLTIME	5	/* # of seconds of no xfer before "stalling" */
 
 #define	FTP_PORT	21	/* default if ! getservbyname("ftp/tcp") */
+#define	GATE_PORT	21	/* default if ! getservbyname("ftpgate/tcp") */
 #define	HTTP_PORT	80	/* default if ! getservbyname("http/tcp") */
 #define	HTTPS_PORT	443	/* default if ! getservbyname("https/tcp") */
 #define	HTTP_USER_AGENT	"User-Agent: OpenBSD ftp"	/* User-Agent string sent to web server */
-#ifndef	GATE_PORT
-#define	GATE_PORT	21	/* default if ! getservbyname("ftpgate/tcp") */
-#endif
-#ifndef	GATE_SERVER
-#define	GATE_SERVER	""	/* default server */
-#endif
 
 #define PAGER		"more"	/* default pager if $PAGER isn't set */
 
@@ -138,8 +129,8 @@ int	passivemode;		/* passive mode enabled */
 int	activefallback;		/* fall back to active mode if passive fails */
 char	ntin[17];		/* input translation table */
 char	ntout[17];		/* output translation table */
-char	mapin[MAXPATHLEN];	/* input map template */
-char	mapout[MAXPATHLEN];	/* output map template */
+char	mapin[PATH_MAX];	/* input map template */
+char	mapout[PATH_MAX];	/* output map template */
 char	typename[32];		/* name of file transfer type */
 int	type;			/* requested file transfer type */
 int	curtype;		/* current file transfer type */
@@ -234,5 +225,5 @@ FILE	*ttyout;		/* stdout or stderr, depending on interactive */
 extern struct cmd cmdtab[];
 
 #ifndef SMALL
-extern struct ressl_config *ressl_config;
+extern struct tls_config *tls_config;
 #endif /* !SMALL */

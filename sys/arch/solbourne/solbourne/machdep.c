@@ -1,4 +1,4 @@
-/*	$OpenBSD: machdep.c,v 1.42 2014/07/21 17:25:47 uebayasi Exp $	*/
+/*	$OpenBSD: machdep.c,v 1.46 2015/01/16 20:17:07 kettenis Exp $	*/
 /*	OpenBSD: machdep.c,v 1.105 2005/04/11 15:13:01 deraadt Exp 	*/
 
 /*
@@ -130,7 +130,8 @@ cpu_startup()
 	/*
 	 * fix message buffer mapping
 	 */
-	pmap_map(MSGBUF_VA, MSGBUF_PA, MSGBUF_PA + MSGBUFSIZE, UVM_PROT_RW);
+	pmap_map(MSGBUF_VA, MSGBUF_PA, MSGBUF_PA + MSGBUFSIZE,
+	    PROT_READ | PROT_WRITE);
 	initmsgbuf((caddr_t)(MSGBUF_VA + (CPU_ISSUN4 ? 4096 : 0)), MSGBUFSIZE);
 
 	proc0.p_addr = proc0paddr;
@@ -260,7 +261,6 @@ setregs(p, pack, stack, retval)
 	bzero((caddr_t)tf, sizeof *tf);
 	tf->tf_psr = psr;
 	tf->tf_npc = pack->ep_entry & ~3;
-	tf->tf_global[1] = (int)PS_STRINGS;
 	tf->tf_global[2] = tf->tf_global[7] = tf->tf_npc;
 	/* XXX exec of init(8) returns via proc_trampoline() */
 	if (p->p_pid == 1) {
@@ -518,7 +518,6 @@ boot(int howto)
 {
 	int i;
 	static char str[4];	/* room for "-sd\0" */
-	struct device *mainbus;
 
 	if (cold) {
 		if ((howto & RB_USERREQ) == 0)
@@ -548,10 +547,7 @@ boot(int howto)
 		dumpsys();
 
 haltsys:
-	doshutdownhooks();
-	mainbus = device_mainbus();
-	if (mainbus != NULL)
-		config_suspend(mainbus, DVACT_POWERDOWN);
+	config_suspend_all(DVACT_POWERDOWN);
 
 	if ((howto & RB_HALT) != 0 || (howto & RB_POWERDOWN) != 0) {
 		printf("halted\n\n");
@@ -632,7 +628,8 @@ mapdev(phys, virt, offset, size)
 	pmtype = PMAP_IOENC(phys->rr_iospace);
 
 	do {
-		pmap_kenter_pa(va, pa | pmtype | PMAP_NC, UVM_PROT_RW);
+		pmap_kenter_pa(va, pa | pmtype | PMAP_NC,
+		    PROT_READ | PROT_WRITE);
 		va += PAGE_SIZE;
 		pa += PAGE_SIZE;
 	} while ((size -= PAGE_SIZE) > 0);
@@ -735,7 +732,7 @@ kap_maskcheck()
 	void (*test)(void);
 
 	pmap_enter(pmap_kernel(), TMPMAP_VA,
-	    trunc_page((vaddr_t)masktest) | PMAP_BWS, UVM_PROT_READ, 0);
+	    trunc_page((vaddr_t)masktest) | PMAP_BWS, PROT_READ, 0);
 	test = (void (*)(void))(TMPMAP_VA + ((vaddr_t)masktest & PAGE_MASK));
 
 	cpcb->pcb_onfault = (caddr_t)kap_maskfault;

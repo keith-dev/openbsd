@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_pfsync.c,v 1.208 2014/07/22 11:06:09 mpi Exp $	*/
+/*	$OpenBSD: if_pfsync.c,v 1.217 2015/02/10 09:28:40 henning Exp $	*/
 
 /*
  * Copyright (c) 2002 Michael Shalayeff
@@ -57,27 +57,28 @@
 
 #include <net/if.h>
 #include <net/if_types.h>
-#include <net/route.h>
 #include <net/bpf.h>
 #include <net/netisr.h>
 #include <netinet/in.h>
 #include <netinet/if_ether.h>
 #include <netinet/tcp.h>
 #include <netinet/tcp_seq.h>
+#include <netinet/tcp_fsm.h>
 
-#ifdef	INET
 #include <netinet/in_var.h>
 #include <netinet/ip.h>
 #include <netinet/ip_var.h>
-#endif
+
+#ifdef IPSEC
+#include <netinet/ip_ipsp.h>
+#endif /* IPSEC */
 
 #ifdef INET6
 #include <netinet6/in6_var.h>
 #include <netinet/ip6.h>
-#include <netinet/in_pcb.h>
+#include <netinet6/ip6_var.h>
 #include <netinet/icmp6.h>
 #include <netinet6/nd6.h>
-#include <netinet6/ip6_divert.h>
 #endif /* INET6 */
 
 #include "carp.h"
@@ -87,6 +88,7 @@
 
 #define PF_DEBUGNAME	"pfsync: "
 #include <net/pfvar.h>
+#include <netinet/ip_ipsp.h>
 #include <net/if_pfsync.h>
 
 #include "bpfilter.h"
@@ -381,7 +383,7 @@ pfsync_clone_destroy(struct ifnet *ifp)
 
 	pool_destroy(&sc->sc_pool);
 	free(sc->sc_imo.imo_membership, M_IPMOPTS, 0);
-	free(sc, M_DEVBUF, 0);
+	free(sc, M_DEVBUF, sizeof(*sc));
 
 	pfsyncif = NULL;
 	splx(s);
@@ -592,6 +594,8 @@ pfsync_state_import(struct pfsync_state *sp, int flags)
 	st->max_mss = ntohs(sp->max_mss);
 	st->min_ttl = sp->min_ttl;
 	st->set_tos = sp->set_tos;
+	st->set_prio[0] = sp->set_prio[0];
+	st->set_prio[1] = sp->set_prio[1];
 
 	st->id = sp->id;
 	st->creatorid = sp->creatorid;
@@ -1207,7 +1211,8 @@ pfsync_update_net_tdb(struct pfsync_tdb *pt)
 		goto bad;
 
 	s = splsoftnet();
-	tdb = gettdb(ntohs(pt->rdomain), pt->spi, &pt->dst, pt->sproto);
+	tdb = gettdb(ntohs(pt->rdomain), pt->spi,
+	    (union sockaddr_union *)&pt->dst, pt->sproto);
 	if (tdb) {
 		pt->rpl = betoh64(pt->rpl);
 		pt->cur_bytes = betoh64(pt->cur_bytes);
@@ -1356,7 +1361,7 @@ pfsyncioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 			if (imo->imo_num_memberships > 0) {
 				in_delmulti(imo->imo_membership[
 				    --imo->imo_num_memberships]);
-				imo->imo_multicast_ifp = NULL;
+				imo->imo_ifidx = 0;
 			}
 			splx(s);
 			break;
@@ -1381,7 +1386,7 @@ pfsyncioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 
 		if (imo->imo_num_memberships > 0) {
 			in_delmulti(imo->imo_membership[--imo->imo_num_memberships]);
-			imo->imo_multicast_ifp = NULL;
+			imo->imo_ifidx = 0;
 		}
 
 		if (sc->sc_sync_if &&
@@ -1403,9 +1408,9 @@ pfsyncioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 				return (ENOBUFS);
 			}
 			imo->imo_num_memberships++;
-			imo->imo_multicast_ifp = sc->sc_sync_if;
-			imo->imo_multicast_ttl = PFSYNC_DFLTTL;
-			imo->imo_multicast_loop = 0;
+			imo->imo_ifidx = sc->sc_sync_if->if_index;
+			imo->imo_ttl = PFSYNC_DFLTTL;
+			imo->imo_loop = 0;
 		}
 
 		ip = &sc->sc_template;
@@ -1679,6 +1684,9 @@ pfsync_sendout(void)
 	}
 #endif
 
+	/* start again */
+	sc->sc_len = PFSYNC_MINPKT;
+
 	sc->sc_if.if_opackets++;
 	sc->sc_if.if_obytes += m->m_pkthdr.len;
 
@@ -1688,9 +1696,6 @@ pfsync_sendout(void)
 		pfsyncstats.pfsyncs_opackets++;
 	else
 		pfsyncstats.pfsyncs_oerrors++;
-
-	/* start again */
-	sc->sc_len = PFSYNC_MINPKT;
 }
 
 void
@@ -1778,13 +1783,11 @@ pfsync_undefer(struct pfsync_deferral *pd, int drop)
 	else {
 		if (pd->pd_st->rule.ptr->rt == PF_ROUTETO) {
 			switch (pd->pd_st->key[PF_SK_WIRE]->af) {
-#ifdef INET
 			case AF_INET:
 				pf_route(&pd->pd_m, pd->pd_st->rule.ptr,
 				    pd->pd_st->direction, 
 				    pd->pd_st->rt_kif->pfik_ifp, pd->pd_st);
 				break;
-#endif /* INET */
 #ifdef INET6
 			case AF_INET6:
 				pf_route6(&pd->pd_m, pd->pd_st->rule.ptr,
@@ -1795,12 +1798,10 @@ pfsync_undefer(struct pfsync_deferral *pd, int drop)
 			}
 		} else {
 			switch (pd->pd_st->key[PF_SK_WIRE]->af) {
-#ifdef INET
 			case AF_INET:
 				ip_output(pd->pd_m, NULL, NULL, 0, NULL, NULL,
 				    0);
 				break;
-#endif /* INET */
 #ifdef INET6
 	                case AF_INET6:
 		                ip6_output(pd->pd_m, NULL, NULL, 0,

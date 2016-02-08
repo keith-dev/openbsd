@@ -1,7 +1,7 @@
-/*	$OpenBSD: server.c,v 1.39 2014/08/06 18:38:11 reyk Exp $	*/
+/*	$OpenBSD: server.c,v 1.60 2015/02/23 09:52:28 reyk Exp $	*/
 
 /*
- * Copyright (c) 2006 - 2014 Reyk Floeter <reyk@openbsd.org>
+ * Copyright (c) 2006 - 2015 Reyk Floeter <reyk@openbsd.org>
  *
  * Permission to use, copy, modify, and distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -16,37 +16,35 @@
  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
 
+#include <sys/param.h>	/* nitems */
 #include <sys/types.h>
 #include <sys/queue.h>
 #include <sys/time.h>
 #include <sys/stat.h>
 #include <sys/socket.h>
-#include <sys/un.h>
 #include <sys/uio.h>
 #include <sys/tree.h>
-#include <sys/hash.h>
 
-#include <net/if.h>
-#include <netinet/in_systm.h>
 #include <netinet/in.h>
-#include <netinet/ip.h>
 #include <netinet/tcp.h>
 #include <arpa/inet.h>
 
+#include <stdio.h>
+#include <stdlib.h>
+#include <stdarg.h>
+#include <limits.h>
 #include <errno.h>
 #include <fcntl.h>
-#include <stdlib.h>
 #include <string.h>
 #include <syslog.h>
 #include <unistd.h>
-#include <stdio.h>
-#include <err.h>
-#include <pwd.h>
 #include <event.h>
-#include <fnmatch.h>
-#include <ressl.h>
+#include <imsg.h>
+#include <tls.h>
 
 #include "httpd.h"
+
+#define MINIMUM(a, b)	(((a) < (b)) ? (a) : (b))
 
 int		 server_dispatch_parent(int, struct privsep_proc *,
 		    struct imsg *);
@@ -61,12 +59,12 @@ int		 server_socket(struct sockaddr_storage *, in_port_t,
 int		 server_socket_listen(struct sockaddr_storage *, in_port_t,
 		    struct server_config *);
 
-int		 server_ssl_init(struct server *);
-void		 server_ssl_readcb(int, short, void *);
-void		 server_ssl_writecb(int, short, void *);
+int		 server_tls_init(struct server *);
+void		 server_tls_readcb(int, short, void *);
+void		 server_tls_writecb(int, short, void *);
 
 void		 server_accept(int, short, void *);
-void		 server_accept_ssl(int, short, void *);
+void		 server_accept_tls(int, short, void *);
 void		 server_input(struct client *);
 
 extern void	 bufferevent_read_pressure_cb(struct evbuffer *, size_t,
@@ -104,11 +102,27 @@ server_shutdown(void)
 int
 server_privinit(struct server *srv)
 {
+	struct server	*s;
+
 	if (srv->srv_conf.flags & SRVFLAG_LOCATION)
 		return (0);
 
 	log_debug("%s: adding server %s", __func__, srv->srv_conf.name);
 
+	/*
+	 * There's no need to open a new socket if a server with the
+	 * same address already exists.
+	 */
+	TAILQ_FOREACH(s, env->sc_servers, srv_entry) {
+		if (s != srv && s->srv_s != -1 &&
+		    s->srv_conf.port == srv->srv_conf.port &&
+		    sockaddr_cmp((struct sockaddr *)&s->srv_conf.ss,
+		    (struct sockaddr *)&srv->srv_conf.ss,
+		    s->srv_conf.prefixlen) == 0)
+			return (0);
+	}
+
+	/* Open listening socket in the privileged process */
 	if ((srv->srv_s = server_socket_listen(&srv->srv_conf.ss,
 	    srv->srv_conf.port, &srv->srv_conf)) == -1)
 		return (-1);
@@ -116,100 +130,97 @@ server_privinit(struct server *srv)
 	return (0);
 }
 
-static char *
-server_load_file(const char *filename, off_t *len)
-{
-	struct stat		 st;
-	off_t			 size;
-	char			*buf = NULL;
-	int			 fd;
-
-	if ((fd = open(filename, O_RDONLY)) == -1)
-		return (NULL);
-	if (fstat(fd, &st) != 0)
-		goto fail;
-	size = st.st_size;
-	if ((buf = calloc(1, size + 1)) == NULL)
-		goto fail;
-	if (read(fd, buf, size) != size)
-		goto fail;
-
-	close(fd);
-
-	*len = size;
-	return (buf);
-
- fail:
-	free(buf);
-	close(fd);
-
-	return (NULL);
-}
-
 int
-server_ssl_load_keypair(struct server *srv)
+server_tls_load_keypair(struct server *srv)
 {
-	if ((srv->srv_conf.flags & SRVFLAG_SSL) == 0)
+	if ((srv->srv_conf.flags & SRVFLAG_TLS) == 0)
 		return (0);
 
-	if ((srv->srv_conf.ssl_cert = server_load_file(
-	    srv->srv_conf.ssl_cert_file, &srv->srv_conf.ssl_cert_len)) == NULL)
+	if ((srv->srv_conf.tls_cert = tls_load_file(
+	    srv->srv_conf.tls_cert_file, &srv->srv_conf.tls_cert_len,
+	    NULL)) == NULL)
 		return (-1);
 	log_debug("%s: using certificate %s", __func__,
-	    srv->srv_conf.ssl_cert_file);
+	    srv->srv_conf.tls_cert_file);
 
-	if ((srv->srv_conf.ssl_key = server_load_file(
-	    srv->srv_conf.ssl_key_file, &srv->srv_conf.ssl_key_len)) == NULL)
+	/* XXX allow to specify password for encrypted key */
+	if ((srv->srv_conf.tls_key = tls_load_file(
+	    srv->srv_conf.tls_key_file, &srv->srv_conf.tls_key_len,
+	    NULL)) == NULL)
 		return (-1);
 	log_debug("%s: using private key %s", __func__,
-	    srv->srv_conf.ssl_key_file);
+	    srv->srv_conf.tls_key_file);
 
 	return (0);
 }
 
 int
-server_ssl_init(struct server *srv)
+server_tls_init(struct server *srv)
 {
-	if ((srv->srv_conf.flags & SRVFLAG_SSL) == 0)
+	if ((srv->srv_conf.flags & SRVFLAG_TLS) == 0)
 		return (0);
 
-	log_debug("%s: setting up SSL for %s", __func__, srv->srv_conf.name);
+	log_debug("%s: setting up TLS for %s", __func__, srv->srv_conf.name);
 
-	if (ressl_init() != 0) {
-		log_warn("%s: failed to initialise ressl", __func__);
+	if (tls_init() != 0) {
+		log_warn("%s: failed to initialise tls", __func__);
 		return (-1);
 	}
-	if ((srv->srv_ressl_config = ressl_config_new()) == NULL) {
-		log_warn("%s: failed to get ressl config", __func__);
+	if ((srv->srv_tls_config = tls_config_new()) == NULL) {
+		log_warn("%s: failed to get tls config", __func__);
 		return (-1);
 	}
-	if ((srv->srv_ressl_ctx = ressl_server()) == NULL) {
-		log_warn("%s: failed to get ressl server", __func__);
+	if ((srv->srv_tls_ctx = tls_server()) == NULL) {
+		log_warn("%s: failed to get tls server", __func__);
 		return (-1);
 	}
 
-	ressl_config_set_ciphers(srv->srv_ressl_config,
-	    srv->srv_conf.ssl_ciphers);
-	ressl_config_set_cert_mem(srv->srv_ressl_config,
-	    srv->srv_conf.ssl_cert, srv->srv_conf.ssl_cert_len);
-	ressl_config_set_key_mem(srv->srv_ressl_config,
-	    srv->srv_conf.ssl_key, srv->srv_conf.ssl_key_len);
+	tls_config_set_protocols(srv->srv_tls_config,
+	    srv->srv_conf.tls_protocols);
 
-	if (ressl_configure(srv->srv_ressl_ctx, srv->srv_ressl_config) != 0) {
-		log_warn("%s: failed to configure SSL - %s", __func__,
-		    ressl_error(srv->srv_ressl_ctx));
+	if (tls_config_set_ciphers(srv->srv_tls_config,
+	    srv->srv_conf.tls_ciphers) != 0) {
+		log_warn("%s: failed to set tls ciphers", __func__);
+		return (-1);
+	}
+	if (tls_config_set_dheparams(srv->srv_tls_config,
+	    srv->srv_conf.tls_dhe_params) != 0) {
+		log_warn("%s: failed to set tls dhe params", __func__);
+		return (-1);
+	}
+	if (tls_config_set_ecdhecurve(srv->srv_tls_config,
+	    srv->srv_conf.tls_ecdhe_curve) != 0) {
+		log_warn("%s: failed to set tls ecdhe curve", __func__);
+		return (-1);
+	}
+
+	if (tls_config_set_cert_mem(srv->srv_tls_config,
+	    srv->srv_conf.tls_cert, srv->srv_conf.tls_cert_len) != 0) {
+		log_warn("%s: failed to set tls cert", __func__);
+		return (-1);
+	}
+	if (tls_config_set_key_mem(srv->srv_tls_config,
+	    srv->srv_conf.tls_key, srv->srv_conf.tls_key_len) != 0) {
+		log_warn("%s: failed to set tls key", __func__);
+		return (-1);
+	}
+
+	if (tls_configure(srv->srv_tls_ctx, srv->srv_tls_config) != 0) {
+		log_warn("%s: failed to configure TLS - %s", __func__,
+		    tls_error(srv->srv_tls_ctx));
 		return (-1);
 	}
 
 	/* We're now done with the public/private key... */
-	explicit_bzero(srv->srv_conf.ssl_cert, srv->srv_conf.ssl_cert_len);
-	explicit_bzero(srv->srv_conf.ssl_key, srv->srv_conf.ssl_key_len);
-	free(srv->srv_conf.ssl_cert);
-	free(srv->srv_conf.ssl_key);
-	srv->srv_conf.ssl_cert = NULL;
-	srv->srv_conf.ssl_key = NULL;
-	srv->srv_conf.ssl_cert_len = 0;
-	srv->srv_conf.ssl_key_len = 0;
+	tls_config_clear_keys(srv->srv_tls_config);
+	explicit_bzero(srv->srv_conf.tls_cert, srv->srv_conf.tls_cert_len);
+	explicit_bzero(srv->srv_conf.tls_key, srv->srv_conf.tls_key_len);
+	free(srv->srv_conf.tls_cert);
+	free(srv->srv_conf.tls_key);
+	srv->srv_conf.tls_cert = NULL;
+	srv->srv_conf.tls_key = NULL;
+	srv->srv_conf.tls_cert_len = 0;
+	srv->srv_conf.tls_key_len = 0;
 
 	return (0);
 }
@@ -245,7 +256,7 @@ server_launch(void)
 	struct server		*srv;
 
 	TAILQ_FOREACH(srv, env->sc_servers, srv_entry) {
-		server_ssl_init(srv);
+		server_tls_init(srv);
 		server_http_init(srv);
 
 		log_debug("%s: running server %s", __func__,
@@ -270,7 +281,8 @@ server_purge(struct server *srv)
 	if (evtimer_initialized(&srv->srv_evt))
 		evtimer_del(&srv->srv_evt);
 
-	close(srv->srv_s);
+	if (srv->srv_s != -1)
+		close(srv->srv_s);
 	TAILQ_REMOVE(env->sc_servers, srv, srv_entry);
 
 	/* cleanup sessions */
@@ -285,16 +297,34 @@ server_purge(struct server *srv)
 
 		/* It might point to our own "default" entry */
 		if (srv_conf != &srv->srv_conf) {
-			free(srv_conf->ssl_cert);
-			free(srv_conf->ssl_key);
+			serverconfig_free(srv_conf);
 			free(srv_conf);
 		}
 	}
 
-	ressl_config_free(srv->srv_ressl_config);
-	ressl_free(srv->srv_ressl_ctx);
+	tls_config_free(srv->srv_tls_config);
+	tls_free(srv->srv_tls_ctx);
 
 	free(srv);
+}
+
+void
+serverconfig_free(struct server_config *srv_conf)
+{
+	free(srv_conf->return_uri);
+	free(srv_conf->tls_cert_file);
+	free(srv_conf->tls_cert);
+	free(srv_conf->tls_key_file);
+	free(srv_conf->tls_key);
+}
+
+void
+serverconfig_reset(struct server_config *srv_conf)
+{
+	srv_conf->tls_cert_file = srv_conf->tls_key_file = NULL;
+	srv_conf->tls_cert = srv_conf->tls_key = NULL;
+	srv_conf->return_uri = NULL;
+	srv_conf->auth = NULL;
 }
 
 struct server *
@@ -514,7 +544,7 @@ server_socket_connect(struct sockaddr_storage *ss, in_port_t port,
 }
 
 void
-server_ssl_readcb(int fd, short event, void *arg)
+server_tls_readcb(int fd, short event, void *arg)
 {
 	struct bufferevent	*bufev = arg;
 	struct client		*clt = bufev->cbarg;
@@ -530,10 +560,10 @@ server_ssl_readcb(int fd, short event, void *arg)
 	}
 
 	if (bufev->wm_read.high != 0)
-		howmuch = MIN(sizeof(rbuf), bufev->wm_read.high);
+		howmuch = MINIMUM(sizeof(rbuf), bufev->wm_read.high);
 
-	ret = ressl_read(clt->clt_ressl_ctx, rbuf, howmuch, &len);
-	if (ret == RESSL_READ_AGAIN || ret == RESSL_WRITE_AGAIN) {
+	ret = tls_read(clt->clt_tls_ctx, rbuf, howmuch, &len);
+	if (ret == TLS_READ_AGAIN || ret == TLS_WRITE_AGAIN) {
 		goto retry;
 	} else if (ret != 0) {
 		what |= EVBUFFER_ERROR;
@@ -570,7 +600,7 @@ server_ssl_readcb(int fd, short event, void *arg)
 }
 
 void
-server_ssl_writecb(int fd, short event, void *arg)
+server_tls_writecb(int fd, short event, void *arg)
 {
 	struct bufferevent	*bufev = arg;
 	struct client		*clt = bufev->cbarg;
@@ -593,9 +623,9 @@ server_ssl_writecb(int fd, short event, void *arg)
 			bcopy(EVBUFFER_DATA(bufev->output),
 			    clt->clt_buf, clt->clt_buflen);
 		}
-		ret = ressl_write(clt->clt_ressl_ctx, clt->clt_buf,
+		ret = tls_write(clt->clt_tls_ctx, clt->clt_buf,
 		    clt->clt_buflen, &len);
-		if (ret == RESSL_READ_AGAIN || ret == RESSL_WRITE_AGAIN) {
+		if (ret == TLS_READ_AGAIN || ret == TLS_WRITE_AGAIN) {
 			goto retry;
 		} else if (ret != 0) {
 			what |= EVBUFFER_ERROR;
@@ -664,11 +694,11 @@ server_input(struct client *clt)
 		return;
 	}
 
-	if (srv_conf->flags & SRVFLAG_SSL) {
+	if (srv_conf->flags & SRVFLAG_TLS) {
 		event_set(&clt->clt_bev->ev_read, clt->clt_s, EV_READ,
-		    server_ssl_readcb, clt->clt_bev);
+		    server_tls_readcb, clt->clt_bev);
 		event_set(&clt->clt_bev->ev_write, clt->clt_s, EV_WRITE,
-		    server_ssl_writecb, clt->clt_bev);
+		    server_tls_writecb, clt->clt_bev);
 	}
 
 	/* Adjust write watermark to the socket buffer output size */
@@ -718,8 +748,8 @@ server_dump(struct client *clt, const void *buf, size_t len)
 	 * of non-blocking events etc. This is useful to print an
 	 * error message before gracefully closing the client.
 	 */
-	if (clt->clt_ressl_ctx != NULL)
-		(void)ressl_write(clt->clt_ressl_ctx, buf, len, &outlen);
+	if (clt->clt_tls_ctx != NULL)
+		(void)tls_write(clt->clt_tls_ctx, buf, len, &outlen);
 	else
 		(void)write(clt->clt_s, buf, len);
 }
@@ -750,23 +780,36 @@ void
 server_error(struct bufferevent *bev, short error, void *arg)
 {
 	struct client		*clt = arg;
+	struct evbuffer		*dst;
 
 	if (error & EVBUFFER_TIMEOUT) {
 		server_close(clt, "buffer event timeout");
 		return;
 	}
-	if (error & EVBUFFER_ERROR && errno == EFBIG) {
-		bufferevent_enable(bev, EV_READ);
+	if (error & EVBUFFER_ERROR) {
+		if (errno == EFBIG) {
+			bufferevent_enable(bev, EV_READ);
+			return;
+		}
+		server_close(clt, "buffer event error");
 		return;
 	}
 	if (error & (EVBUFFER_READ|EVBUFFER_WRITE|EVBUFFER_EOF)) {
 		bufferevent_disable(bev, EV_READ|EV_WRITE);
 
 		clt->clt_done = 1;
+
+		dst = EVBUFFER_OUTPUT(clt->clt_bev);
+		if (EVBUFFER_LENGTH(dst)) {
+			/* Finish writing all data first */
+			bufferevent_enable(clt->clt_bev, EV_WRITE);
+			return;
+		}
+
 		server_close(clt, "done");
 		return;
 	}
-	server_close(clt, "buffer event error");
+	server_close(clt, "unknown event error");
 	return;
 }
 
@@ -862,9 +905,9 @@ server_accept(int fd, short event, void *arg)
 		return;
 	}
 
-	if (srv->srv_conf.flags & SRVFLAG_SSL) {
+	if (srv->srv_conf.flags & SRVFLAG_TLS) {
 		event_again(&clt->clt_ev, clt->clt_s, EV_TIMEOUT|EV_READ,
-		    server_accept_ssl, &clt->clt_tv_start,
+		    server_accept_tls, &clt->clt_tv_start,
 		    &srv->srv_conf.timeout, clt);
 		return;
 	}
@@ -886,33 +929,33 @@ server_accept(int fd, short event, void *arg)
 }
 
 void
-server_accept_ssl(int fd, short event, void *arg)
+server_accept_tls(int fd, short event, void *arg)
 {
 	struct client *clt = (struct client *)arg;
 	struct server *srv = (struct server *)clt->clt_srv;
 	int ret;
 
 	if (event == EV_TIMEOUT) {
-		server_close(clt, "SSL accept timeout");
+		server_close(clt, "TLS accept timeout");
 		return;
 	}
 
-	if (srv->srv_ressl_ctx == NULL)
-		fatalx("NULL ressl context");
+	if (srv->srv_tls_ctx == NULL)
+		fatalx("NULL tls context");
 
-	ret = ressl_accept_socket(srv->srv_ressl_ctx, &clt->clt_ressl_ctx,
+	ret = tls_accept_socket(srv->srv_tls_ctx, &clt->clt_tls_ctx,
 	    clt->clt_s);
-	if (ret == RESSL_READ_AGAIN) {
+	if (ret == TLS_READ_AGAIN) {
 		event_again(&clt->clt_ev, clt->clt_s, EV_TIMEOUT|EV_READ,
-		    server_accept_ssl, &clt->clt_tv_start,
+		    server_accept_tls, &clt->clt_tv_start,
 		    &srv->srv_conf.timeout, clt);
-	} else if (ret == RESSL_WRITE_AGAIN) {
+	} else if (ret == TLS_WRITE_AGAIN) {
 		event_again(&clt->clt_ev, clt->clt_s, EV_TIMEOUT|EV_WRITE,
-		    server_accept_ssl, &clt->clt_tv_start,
+		    server_accept_tls, &clt->clt_tv_start,
 		    &srv->srv_conf.timeout, clt);
 	} else if (ret != 0) {
-		log_warnx("%s: SSL accept failed - %s", __func__,
-		    ressl_error(srv->srv_ressl_ctx));
+		log_warnx("%s: TLS accept failed - %s", __func__,
+		    tls_error(srv->srv_tls_ctx));
 		return;
 	}
 
@@ -973,7 +1016,7 @@ server_sendlog(struct server_config *srv_conf, int cmd, const char *emsg, ...)
 void
 server_log(struct client *clt, const char *msg)
 {
-	char			 ibuf[MAXHOSTNAMELEN], obuf[MAXHOSTNAMELEN];
+	char			 ibuf[HOST_NAME_MAX+1], obuf[HOST_NAME_MAX+1];
 	struct server_config	*srv_conf = clt->clt_srv_conf;
 	char			*ptr = NULL;
 	int			 debug_cmd = -1;
@@ -1047,9 +1090,9 @@ server_close(struct client *clt, const char *msg)
 	if (clt->clt_s != -1)
 		close(clt->clt_s);
 
-	if (clt->clt_ressl_ctx != NULL)
-		ressl_close(clt->clt_ressl_ctx);
-	ressl_free(clt->clt_ressl_ctx);
+	if (clt->clt_tls_ctx != NULL)
+		tls_close(clt->clt_tls_ctx);
+	tls_free(clt->clt_tls_ctx);
 
 	server_inflight_dec(clt, __func__);
 
@@ -1066,6 +1109,9 @@ server_dispatch_parent(int fd, struct privsep_proc *p, struct imsg *imsg)
 	switch (imsg->hdr.type) {
 	case IMSG_CFG_MEDIA:
 		config_getmedia(env, imsg);
+		break;
+	case IMSG_CFG_AUTH:
+		config_getauth(env, imsg);
 		break;
 	case IMSG_CFG_SERVER:
 		config_getserver(env, imsg);
@@ -1109,6 +1155,26 @@ server_bufferevent_add(struct event *ev, int timeout)
 	}
 
 	return (event_add(ev, ptv));
+}
+
+int
+server_bufferevent_printf(struct client *clt, const char *fmt, ...)
+{
+	int	 ret;
+	va_list	 ap;
+	char	*str;
+
+	va_start(ap, fmt);
+	ret = vasprintf(&str, fmt, ap);
+	va_end(ap);
+
+	if (ret == -1)
+		return (ret);
+
+	ret = server_bufferevent_print(clt, str);
+	free(str);
+
+	return (ret);
 }
 
 int

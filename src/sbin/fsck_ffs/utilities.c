@@ -1,4 +1,4 @@
-/*	$OpenBSD: utilities.c,v 1.46 2014/05/24 14:54:49 krw Exp $	*/
+/*	$OpenBSD: utilities.c,v 1.49 2015/01/20 18:22:21 deraadt Exp $	*/
 /*	$NetBSD: utilities.c,v 1.18 1996/09/27 22:45:20 christos Exp $	*/
 
 /*
@@ -30,9 +30,8 @@
  * SUCH DAMAGE.
  */
 
-#include <sys/param.h>
+#include <sys/param.h>	/* DEV_BSIZE isset setbit clrbit */
 #include <sys/time.h>
-#include <sys/types.h>
 #include <sys/uio.h>
 #include <ufs/ufs/dinode.h>
 #include <ufs/ufs/dir.h>
@@ -43,6 +42,7 @@
 #include <string.h>
 #include <ctype.h>
 #include <unistd.h>
+#include <limits.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <paths.h>
@@ -395,10 +395,11 @@ bwrite(int fd, char *buf, daddr_t blk, long size)
 /*
  * allocate a data block with the specified number of fragments
  */
-int
-allocblk(long frags)
+daddr_t
+allocblk(int frags)
 {
-	int i, j, k, cg, baseblk;
+	daddr_t i, baseblk;
+	int j, k, cg;
 	struct cg *cgp = &cgrp;
 
 	if (frags <= 0 || frags > sblock.fs_frag)
@@ -439,7 +440,7 @@ allocblk(long frags)
  * Free a previously allocated block
  */
 void
-freeblk(daddr_t blkno, long frags)
+freeblk(daddr_t blkno, int frags)
 {
 	struct inodesc idesc;
 
@@ -472,7 +473,7 @@ getpathname(char *namebuf, size_t namebuflen, ino_t curdir, ino_t ino)
 	memset(&idesc, 0, sizeof(struct inodesc));
 	idesc.id_type = DATA;
 	idesc.id_fix = IGNORE;
-	cp = &namebuf[MAXPATHLEN - 1];
+	cp = &namebuf[PATH_MAX - 1];
 	*cp = '\0';
 	if (curdir != ino) {
 		idesc.id_parent = curdir;
@@ -502,7 +503,7 @@ getpathname(char *namebuf, size_t namebuflen, ino_t curdir, ino_t ino)
 	busy = 0;
 	if (ino != ROOTINO)
 		*--cp = '?';
-	memcpy(namebuf, cp, (size_t)(&namebuf[MAXPATHLEN] - cp));
+	memcpy(namebuf, cp, (size_t)(&namebuf[PATH_MAX] - cp));
 }
 
 /*ARGSUSED*/

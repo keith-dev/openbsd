@@ -1,4 +1,4 @@
-/*	$OpenBSD: editor.c,v 1.287 2014/07/10 13:31:23 florian Exp $	*/
+/*	$OpenBSD: editor.c,v 1.291 2015/01/20 18:22:20 deraadt Exp $	*/
 
 /*
  * Copyright (c) 1997-2000 Todd C. Miller <Todd.Miller@courtesan.com>
@@ -16,8 +16,9 @@
  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
 
+#include <sys/param.h>	/* MAXBSIZE DEV_BSIZE */
 #include <sys/types.h>
-#include <sys/param.h>
+#include <sys/signal.h>
 #include <sys/stat.h>
 #include <sys/ioctl.h>
 #include <sys/dkio.h>
@@ -35,9 +36,12 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
+#include <limits.h>
 
 #include "extern.h"
 #include "pathnames.h"
+
+#define MAXIMUM(a, b)	(((a) > (b)) ? (a) : (b))
 
 /* flags for getuint64() */
 #define	DO_CONVERSIONS	0x00000001
@@ -126,7 +130,7 @@ void	editor_delete(struct disklabel *, char *);
 void	editor_help(void);
 void	editor_modify(struct disklabel *, char *);
 void	editor_name(struct disklabel *, char *);
-char	*getstring(char *, char *, char *);
+char	*getstring(const char *, const char *, const char *);
 u_int64_t getuint64(struct disklabel *, char *, char *, u_int64_t, u_int64_t,
 	    u_int64_t, int);
 int	has_overlap(struct disklabel *);
@@ -567,7 +571,7 @@ again:
 	memcpy(lp, lp_org, sizeof(struct disklabel));
 	lp->d_npartitions = MAXPARTITIONS;
 	lastalloc = alloc_table[index].sz;
-	alloc = malloc(lastalloc * sizeof(struct space_allocation));
+	alloc = reallocarray(NULL, lastalloc, sizeof(struct space_allocation));
 	if (alloc == NULL)
 		errx(4, "out of memory");
 	memcpy(alloc, alloc_table[index].table,
@@ -1112,7 +1116,7 @@ partition_cmp(const void *e1, const void *e2)
 }
 
 char *
-getstring(char *prompt, char *helpstring, char *oval)
+getstring(const char *prompt, const char *helpstring, const char *oval)
 {
 	static char buf[BUFSIZ];
 	int n;
@@ -1465,7 +1469,7 @@ edit_parms(struct disklabel *lp)
 
 	/* total sectors */
 	for (;;) {
-		u_int64_t nsec = MAX(DL_GETDSIZE(lp),
+		u_int64_t nsec = MAXIMUM(DL_GETDSIZE(lp),
 		    (u_int64_t)lp->d_ncylinders * lp->d_secpercyl);
 		ui = getuint64(lp, "total sectors",
 		    "The total number of sectors on the disk.",
@@ -1537,19 +1541,18 @@ void
 getdisktype(struct disklabel *lp, char *banner, char *dev)
 {
 	int i;
-	char *s, *def = "SCSI";
-	struct dtypes {
-		char *dev;
-		char *type;
+	char *s;
+	const char *def = "SCSI";
+	const struct dtypes {
+		const char *dev;
+		const char *type;
 	} dtypes[] = {
 		{ "sd",   "SCSI" },
-		{ "rz",   "SCSI" },
 		{ "wd",   "IDE" },
 		{ "fd",   "FLOPPY" },
 		{ "xd",   "SMD" },
 		{ "xy",   "SMD" },
 		{ "hd",   "HP-IB" },
-		{ "ccd",  "CCD" },		/* deprecated */
 		{ "vnd",  "VND" },
 		{ "svnd", "VND" },
 		{ NULL,   NULL }
@@ -1832,7 +1835,7 @@ void
 mpsave(struct disklabel *lp)
 {
 	int i, j;
-	char bdev[MAXPATHLEN], *p;
+	char bdev[PATH_MAX], *p;
 	struct mountinfo mi[MAXPARTITIONS];
 	FILE *fp;
 	u_int8_t fstype;

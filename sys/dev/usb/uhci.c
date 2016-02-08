@@ -1,4 +1,4 @@
-/*	$OpenBSD: uhci.c,v 1.129 2014/08/05 20:26:15 mpi Exp $	*/
+/*	$OpenBSD: uhci.c,v 1.135 2014/12/19 22:44:59 guenther Exp $	*/
 /*	$NetBSD: uhci.c,v 1.172 2003/02/23 04:19:26 simonb Exp $	*/
 /*	$FreeBSD: src/sys/dev/usb/uhci.c,v 1.33 1999/11/17 22:33:41 n_hibma Exp $	*/
 
@@ -40,9 +40,9 @@
 #include <sys/queue.h>
 #include <sys/timeout.h>
 #include <sys/pool.h>
+#include <sys/endian.h>
 
 #include <machine/bus.h>
-#include <machine/endian.h>
 
 #include <dev/usb/usb.h>
 #include <dev/usb/usbdi.h>
@@ -373,6 +373,7 @@ uhci_init(struct uhci_softc *sc)
 		}
 		pool_init(uhcixfer, sizeof(struct uhci_xfer), 0, 0, 0,
 		    "uhcixfer", NULL);
+		pool_setipl(uhcixfer, IPL_SOFTUSB);
 	}
 
 	/* Restore saved SOF. */
@@ -586,10 +587,8 @@ uhci_allocx(struct usbd_bus *bus)
 
 	ux = pool_get(uhcixfer, PR_NOWAIT | PR_ZERO);
 #ifdef DIAGNOSTIC
-	if (ux != NULL) {
+	if (ux != NULL)
 		ux->isdone = 1;
-		ux->xfer.busy_free = XFER_BUSY;
-	}
 #endif
 	return ((struct usbd_xfer *)ux);
 }
@@ -600,11 +599,6 @@ uhci_freex(struct usbd_bus *bus, struct usbd_xfer *xfer)
 	struct uhci_xfer *ux = (struct uhci_xfer*)xfer;
 
 #ifdef DIAGNOSTIC
-	if (xfer->busy_free != XFER_BUSY) {
-		printf("%s: xfer=%p not busy, 0x%08x\n", __func__, xfer,
-		    xfer->busy_free);
-		return;
-	}
 	if (!ux->isdone) {
 		printf("%s: !isdone\n", __func__);
 		return;
@@ -1026,13 +1020,14 @@ uhci_intr1(struct uhci_softc *sc)
 	int status;
 	int ack;
 
-	status = UREAD2(sc, UHCI_STS) & UHCI_STS_ALLINTRS;
-	if (status == 0)	/* The interrupt was not for us. */
-		return (0);
-	if (status == 0xffffffff) {
+	status = UREAD2(sc, UHCI_STS);
+	if (status == 0xffff) {
 		sc->sc_bus.dying = 1;
 		return (0);
 	}
+	status &= UHCI_STS_ALLINTRS;
+	if (status == 0)	/* The interrupt was not for us. */
+		return (0);
 
 #ifdef UHCI_DEBUG
 	if (uhcidebug > 15) {
@@ -2430,11 +2425,6 @@ uhci_device_isoc_done(struct usbd_xfer *xfer)
 		return;
 
 #ifdef DIAGNOSTIC
-	if (xfer->busy_free == XFER_FREE) {
-		printf("uhci_device_isoc_done: xfer=%p is free\n", xfer);
-		return;
-	}
-
         if (ux->stdend == NULL) {
                 printf("uhci_device_isoc_done: xfer=%p stdend==NULL\n", xfer);
 #ifdef UHCI_DEBUG
@@ -2621,7 +2611,8 @@ uhci_device_setintr(struct uhci_softc *sc, struct uhci_pipe *upipe, int ival)
 	npoll = (UHCI_VFRAMELIST_COUNT + ival - 1) / ival;
 	DPRINTFN(2, ("uhci_device_setintr: ival=%d npoll=%d\n", ival, npoll));
 
-	qhs = malloc(npoll * sizeof(struct uhci_soft_qh *), M_USBHC, M_NOWAIT);
+	qhs = mallocarray(npoll, sizeof(struct uhci_soft_qh *), M_USBHC,
+	    M_NOWAIT);
 	if (qhs == NULL)
 		return (USBD_NOMEM);
 

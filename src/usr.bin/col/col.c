@@ -1,4 +1,4 @@
-/*	$OpenBSD: col.c,v 1.11 2009/10/27 23:59:36 deraadt Exp $	*/
+/*	$OpenBSD: col.c,v 1.14 2014/10/17 21:27:10 schwarze Exp $	*/
 /*	$NetBSD: col.c,v 1.7 1995/09/02 05:48:50 jtc Exp $	*/
 
 /*-
@@ -62,7 +62,7 @@ typedef char CSET;
 typedef struct char_str {
 #define	CS_NORMAL	1
 #define	CS_ALTERNATE	2
-	short		c_column;	/* column character is in */
+	size_t		c_column;	/* column character is in */
 	CSET		c_set;		/* character set (currently only 2) */
 	char		c_char;		/* character in question */
 } CHAR;
@@ -72,10 +72,10 @@ struct line_str {
 	CHAR	*l_line;		/* characters on the line */
 	LINE	*l_prev;		/* previous line */
 	LINE	*l_next;		/* next line */
-	int	l_lsize;		/* allocated sizeof l_line */
-	int	l_line_len;		/* strlen(l_line) */
+	size_t	l_lsize;		/* allocated sizeof l_line */
+	size_t	l_line_len;		/* strlen(l_line) */
+	size_t	l_max_col;		/* max column in the line */
 	int	l_needs_sort;		/* set if chars went in out of order */
-	int	l_max_col;		/* max column in the line */
 };
 
 LINE   *alloc_line(void);
@@ -85,7 +85,7 @@ void	flush_lines(int);
 void	flush_blanks(void);
 void	free_line(LINE *);
 void	usage(void);
-void   *xmalloc(void *, size_t);
+void   *xreallocarray(void *, size_t, size_t);
 
 CSET	last_set;		/* char_set of last char printed */
 LINE   *lines;
@@ -107,7 +107,7 @@ main(int argc, char *argv[])
 	CSET cur_set;			/* current character set */
 	LINE *l;			/* current line */
 	int extra_lines;		/* # of lines above first line */
-	int cur_col;			/* current column */
+	size_t cur_col;			/* current column */
 	int cur_line;			/* line number of current position */
 	int max_line;			/* max value of cur_line */
 	int this_line;			/* line l points to */
@@ -148,7 +148,8 @@ main(int argc, char *argv[])
 	/* this value is in half lines */
 	max_bufd_lines *= 2;
 
-	adjust = cur_col = extra_lines = warned = 0;
+	adjust = extra_lines = warned = 0;
+	cur_col = 0;
 	cur_line = max_line = nflushd_lines = this_line = 0;
 	cur_set = last_set = CS_NORMAL;
 	lines = l = alloc_line();
@@ -261,12 +262,12 @@ main(int argc, char *argv[])
 		}
 		/* grow line's buffer? */
 		if (l->l_line_len + 1 >= l->l_lsize) {
-			int need;
+			size_t need;
 
-			need = l->l_lsize ? l->l_lsize * 2 : 90;
-			l->l_line = (CHAR *)xmalloc((void *) l->l_line,
-			    (unsigned) need * sizeof(CHAR));
-			l->l_lsize = need;
+			need = l->l_lsize ? l->l_lsize : 45;
+			l->l_line = xreallocarray(l->l_line,
+			    need, 2 * sizeof(CHAR));
+			l->l_lsize = need * 2;
 		}
 		c = &l->l_line[l->l_line_len++];
 		c->c_char = ch;
@@ -349,7 +350,7 @@ flush_blanks(void)
 		PUTC('\n');
 	if (half) {
 		PUTC('\033');
-		PUTC('9');
+		PUTC('\011');
 		if (!nb)
 			PUTC('\r');
 	}
@@ -364,14 +365,15 @@ void
 flush_line(LINE *l)
 {
 	CHAR *c, *endc;
-	int nchars, last_col, this_col;
+	size_t nchars, last_col, this_col;
 
 	last_col = 0;
 	nchars = l->l_line_len;
 
 	if (l->l_needs_sort) {
 		static CHAR *sorted;
-		static int count_size, *count, i, save, sorted_size, tot;
+		static size_t count_size, i, sorted_size;
+		static int *count, save, tot;
 
 		/*
 		 * Do an O(n) sort on l->l_line by column being careful to
@@ -379,16 +381,16 @@ flush_line(LINE *l)
 		 */
 		if (l->l_lsize > sorted_size) {
 			sorted_size = l->l_lsize;
-			sorted = (CHAR *)xmalloc((void *)sorted,
-			    (unsigned)sizeof(CHAR) * sorted_size);
+			sorted = xreallocarray(sorted,
+			    sorted_size, sizeof(CHAR));
 		}
 		if (l->l_max_col >= count_size) {
 			count_size = l->l_max_col + 1;
-			count = (int *)xmalloc((void *)count,
-			    (unsigned)sizeof(int) * count_size);
+			count = xreallocarray(count,
+			    count_size, sizeof(int));
 		}
-		memset((char *)count, 0, sizeof(int) * l->l_max_col + 1);
-		for (i = nchars, c = l->l_line; --i >= 0; c++)
+		memset(count, 0, sizeof(*count) * (l->l_max_col + 1));
+		for (i = nchars, c = l->l_line; i-- > 0; c++)
 			count[c->c_column]++;
 
 		/*
@@ -401,7 +403,7 @@ flush_line(LINE *l)
 			tot += save;
 		}
 
-		for (i = nchars, c = l->l_line; --i >= 0; c++)
+		for (i = nchars, c = l->l_line; i-- > 0; c++)
 			sorted[count[c->c_column]++] = *c;
 		c = sorted;
 	} else
@@ -418,19 +420,19 @@ flush_line(LINE *l)
 			c = endc - 1;
 
 		if (this_col > last_col) {
-			int nspace = this_col - last_col;
+			size_t nspace = this_col - last_col;
 
 			if (compress_spaces && nspace > 1) {
-				int ntabs;
+				size_t ntabs;
 
 				ntabs = ((last_col % 8) + nspace) / 8;
 				if (ntabs) {
 					nspace -= (ntabs * 8) - (last_col % 8);
-					while (--ntabs >= 0)
+					while (ntabs-- > 0)
 						PUTC('\t');
 				}
 			}
-			while (--nspace >= 0)
+			while (nspace-- > 0)
 				PUTC(' ');
 			last_col = this_col;
 		}
@@ -466,7 +468,7 @@ alloc_line(void)
 	int i;
 
 	if (!line_freelist) {
-		l = (LINE *)xmalloc(NULL, sizeof(LINE) * NALLOC);
+		l = xreallocarray(NULL, NALLOC, sizeof(LINE));
 		line_freelist = l;
 		for (i = 1; i < NALLOC; i++, l++)
 			l->l_next = l + 1;
@@ -488,10 +490,10 @@ free_line(LINE *l)
 }
 
 void *
-xmalloc(void *p, size_t size)
+xreallocarray(void *p, size_t n, size_t size)
 {
 
-	if (!(p = (void *)realloc(p, size)))
+	if (!(p = reallocarray(p, n, size)))
 		err(1, "realloc failed");
 	return (p);
 }

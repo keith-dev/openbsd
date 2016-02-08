@@ -1,4 +1,4 @@
-/* $OpenBSD: join.c,v 1.22 2013/11/15 22:20:04 millert Exp $	*/
+/* $OpenBSD: join.c,v 1.24 2015/01/16 06:40:08 deraadt Exp $	*/
 
 /*-
  * Copyright (c) 1991, 1993, 1994
@@ -33,13 +33,13 @@
  * SUCH DAMAGE.
  */
 
-#include <sys/param.h>
-
 #include <err.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+
+#define MAXIMUM(a, b)	(((a) > (b)) ? (a) : (b))
 
 /*
  * There's a structure per input file which encapsulates the state of the
@@ -312,8 +312,8 @@ slurpit(INPUT *F)
 			LINE *p;
 			u_long newsize = F->setalloc + 50;
 			cnt = F->setalloc;
-			if ((p = realloc(F->set,
-			    newsize * sizeof(LINE))) == NULL)
+			if ((p = reallocarray(F->set, newsize, sizeof(LINE)))
+			    == NULL)
 				err(1, NULL);
 			F->set = p;
 			F->setalloc = newsize;
@@ -347,7 +347,7 @@ slurpit(INPUT *F)
 		if (lp->linealloc <= len + 1) {
 			char *p;
 			u_long newsize = lp->linealloc +
-			    MAX(100, len + 1 - lp->linealloc);
+			    MAXIMUM(100, len + 1 - lp->linealloc);
 			if ((p = realloc(lp->line, newsize)) == NULL)
 				err(1, NULL);
 			lp->line = p;
@@ -371,8 +371,8 @@ slurpit(INPUT *F)
 			if (lp->fieldcnt == lp->fieldalloc) {
 				char **p;
 				u_long newsize = lp->fieldalloc + 50;
-				if ((p = realloc(lp->fields,
-				    newsize * sizeof(char *))) == NULL)
+				if ((p = reallocarray(lp->fields, newsize,
+				    sizeof(char *))) == NULL)
 					err(1, NULL);
 				lp->fields = p;
 				lp->fieldalloc = newsize;
@@ -538,8 +538,8 @@ fieldarg(char *option)
 		if (olistcnt == olistalloc) {
 			OLIST *p;
 			u_long newsize = olistalloc + 50;
-			if ((p = realloc(olist,
-			    newsize * sizeof(OLIST))) == NULL)
+			if ((p = reallocarray(olist, newsize, sizeof(OLIST)))
+			    == NULL)
 				err(1, NULL);
 			olist = p;
 			olistalloc = newsize;

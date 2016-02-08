@@ -1,4 +1,4 @@
-/*	$OpenBSD: locore.S,v 1.54 2012/11/10 09:45:05 mglocker Exp $	*/
+/*	$OpenBSD: locore.S,v 1.62 2015/01/16 10:17:51 sf Exp $	*/
 /*	$NetBSD: locore.S,v 1.13 2004/03/25 18:33:17 drochner Exp $	*/
 
 /*
@@ -174,11 +174,12 @@ _C_LABEL(lapic_isr):
 	.globl	_C_LABEL(cpu_perf_ebx)
 	.globl	_C_LABEL(cpu_perf_edx)
 	.globl	_C_LABEL(cpu_apmi_edx)
-	.globl	_C_LABEL(esym),_C_LABEL(boothowto),_C_LABEL(bootdev)
+	.globl	_C_LABEL(ssym),_C_LABEL(esym),_C_LABEL(boothowto),_C_LABEL(bootdev)
 	.globl	_C_LABEL(bootinfo), _C_LABEL(bootinfo_size), _C_LABEL(atdevbase)
 	.globl	_C_LABEL(proc0paddr),_C_LABEL(PTDpaddr)
 	.globl	_C_LABEL(biosbasemem),_C_LABEL(biosextmem)
 	.globl	_C_LABEL(bootapiver)
+	.globl	_C_LABEL(pg_nx)
 _C_LABEL(cpu):		.long	0	# are we 386, 386sx, or 486,
 					#   or Pentium, or..
 _C_LABEL(cpu_id):	.long	0	# saved from `cpuid' instruction
@@ -195,6 +196,7 @@ _C_LABEL(cpuid_level):	.long	-1	# max. level accepted by 'cpuid'
 _C_LABEL(cpu_vendor):	.space	16	# vendor string returned by `cpuid'
 					#   instruction
 _C_LABEL(cpu_brand_id):	.long	0	# brand ID from 'cpuid' instruction
+_C_LABEL(ssym):		.quad	0	# ptr to start of syms
 _C_LABEL(esym):		.quad	0	# ptr to end of syms
 _C_LABEL(atdevbase):	.quad	0	# location of start of iomem in virtual
 _C_LABEL(bootapiver):	.long	0	# /boot API version
@@ -211,6 +213,7 @@ _C_LABEL(biosextmem):	.long	0	# extended memory reported by BIOS
 #else
 _C_LABEL(biosextmem):	.long	REALEXTMEM
 #endif
+_C_LABEL(pg_nx):	.quad	0	# NX PTE bit (if CPU supports)
 
 #define	_RELOC(x)	((x) - KERNBASE)
 #define	RELOC(x)	_RELOC(_C_LABEL(x))
@@ -242,7 +245,6 @@ tmpstk:
  * Some hackage to deal with 64bit symbols in 32 bit mode.
  * This may not be needed if things are cleaned up a little.
  */
-
 
 	.text
 	.globl	_C_LABEL(kernel_text)
@@ -327,6 +329,19 @@ bi_size_ok:
 	movl	$0x80000001, %eax
 	cpuid
 	andl	$CPUID_NXE, %edx	/* other bits may clash */
+	jz	cont
+
+	/*
+	 * We have NX, set pg_nx accordingly.
+	 * NX bit is bit 63 (bit 31 of the second 32 bit dword) - need
+	 * to use 32 bit registers here
+	 */
+	pushl	%edx
+	movl	RELOC((pg_nx + 4)), %edx	/* Second dword */
+	orl	$0x80000000, %edx 		/* Bit 31 (really 63) */
+	movl	%edx, RELOC((pg_nx + 4))
+	popl	%edx
+cont:
 	orl     %edx, RELOC(cpu_feature)
 
 	movl	$0x80000007,%eax
@@ -382,17 +397,27 @@ bi_size_ok:
     ((NKL4_KIMG_ENTRIES + TABLE_L3_ENTRIES + TABLE_L2_ENTRIES + 1 + UPAGES + \
 	NDML3_ENTRIES + NDML2_ENTRIES) * NBPG)
 
-#define fillkpt	\
+#define fillkpt \
 1:	movl	%eax,(%ebx)	; 	/* store phys addr */ \
 	movl	$0,4(%ebx)	; 	/* upper 32 bits 0 */ \
 	addl	$8,%ebx		; 	/* next pte/pde */ \
 	addl	$NBPG,%eax	; 	/* next phys page */ \
-	loop	1b		;  \
+	loop	1b		;	/* till finished */
 
+
+#define fillkpt_nx \
+	pushl	%ebp				;	/* save */ \
+1:	movl	%eax,(%ebx)			; 	/* store phys addr */ \
+	movl	RELOC((pg_nx + 4)), %ebp	;	/* NX bit? */ \
+	movl	%ebp,4(%ebx)			; 	/* upper 32 bits */ \
+	addl	$8,%ebx				; 	/* next pte/pde */ \
+	addl	$NBPG,%eax			; 	/* next phys page */ \
+	loop	1b				;	/* till finished */ \
+	popl	%ebp
 
 	/* Find end of kernel image. */
 	movl	$RELOC(end),%edi
-#if (NKSYMS || defined(DDB) || defined(LKM)) && !defined(SYMTAB_SPACE)
+#if (NKSYMS || defined(DDB)) && !defined(SYMTAB_SPACE)
 	/* Save the symbols (if loaded). */
 	movl	RELOC(esym),%eax
 	testl	%eax,%eax
@@ -433,27 +458,72 @@ bi_size_ok:
 	shrl	$(PGSHIFT-3),%ecx	/* ((n >> PGSHIFT) << 3) for # pdes */
 	addl	%ecx,%ebx
 
-	/* Map kernel text read-only */
+	/* Map kernel text RO, X */
 	movl	%edx,%ecx
 	subl	%eax,%ecx
 	shrl	$PGSHIFT,%ecx
 	orl     $(PG_V|PG_KR),%eax
 	fillkpt
 
-	/* Map the data, BSS, and bootstrap tables read-write. */
+	/* Map .rodata RO, NX */
+	movl	$RELOC(__rodata_start), %eax
+	movl	$RELOC(erodata), %ecx
+	addl	$PGOFSET, %ecx
+	andl	$~PGOFSET, %ecx
+	subl	%eax, %ecx
+	shrl	$PGSHIFT, %ecx
+	orl	$(PG_V|PG_KR), %eax
+	fillkpt_nx
+
+	/* Map the data and BSS sections RW, NX */
+	movl	$RELOC(__data_start), %eax
+	movl	$RELOC(__kernel_bss_end),%ecx
+	addl	$PGOFSET, %ecx
+	andl	$~PGOFSET, %ecx
+	subl	%eax, %ecx
+	shrl	$PGSHIFT,%ecx
+	orl	$(PG_V|PG_KW), %eax
+	fillkpt_nx
+
+	/* Map "hole" at end of BSS RO, NX */
+	movl	$RELOC(__kernel_bss_end), %eax
+	movl	$RELOC(end), %ecx
+	addl	$PGOFSET, %ecx
+	andl	$~PGOFSET, %ecx
+	cmpl	%eax, %ecx
+	je	map_syms
+	subl	%eax, %ecx
+	shrl	$PGSHIFT, %ecx
+	orl	$(PG_V|PG_KR), %eax
+	fillkpt_nx
+
+map_syms:
+	/* Map symbol space RO, NX */
+	movl	$RELOC(end), %eax
+	movl	%esi, %ecx
+	addl	$PGOFSET, %ecx
+	andl	$~PGOFSET, %ecx
+	cmpl	%eax, %ecx
+	je	map_tables
+	subl	%eax, %ecx
+	shrl	$PGSHIFT, %ecx
+	orl	$(PG_V|PG_KR), %eax
+	fillkpt_nx
+
+map_tables:
+	/* Map the bootstrap tables RW, NX */
+	movl	%esi, %edx
 	leal	(PG_V|PG_KW)(%edx),%eax
 	movl	$TABLESIZE,%ecx
-	addl	%esi,%ecx		/* %ecx = &end[TABLESIZE] */
-	subl	%edx,%ecx		/* %ecx = %ecx - etext */
 	shrl	$PGSHIFT,%ecx
-	fillkpt
+	fillkpt_nx
 
-	/* Map ISA I/O mem (later atdevbase) */
+	/* Map ISA I/O mem (later atdevbase) RW, NX */
 	movl	$(IOM_BEGIN|PG_V|PG_KW/*|PG_N*/),%eax
 	movl	$(IOM_SIZE>>PGSHIFT),%ecx
-	fillkpt
+	fillkpt_nx
 
-	/* Set up level 2 pages */
+	/* Set up level 2 pages (RWX) */
 	leal    (PROC0_PTP2_OFF)(%esi),%ebx
 	leal	(PROC0_PTP1_OFF)(%esi),%eax
 	orl	$(PG_V|PG_KW), %eax
@@ -461,7 +531,7 @@ bi_size_ok:
 	fillkpt
 
 #if L2_SLOT_KERNBASE > 0
-	/* If needed, set up level 2 entries for actual kernel mapping */
+	/* If needed, set up L2 entries for actual kernel mapping (RWX) */
 	leal	(PROC0_PTP2_OFF+ L2_SLOT_KERNBASE*8)(%esi),%ebx
 	leal    (PROC0_PTP1_OFF)(%esi),%eax
 	orl     $(PG_V|PG_KW), %eax
@@ -469,7 +539,7 @@ bi_size_ok:
 	fillkpt
 #endif
 
-	/* Set up level 3 pages */
+	/* Set up level 3 pages (RWX) */
 	leal    (PROC0_PTP3_OFF)(%esi),%ebx
 	leal	(PROC0_PTP2_OFF)(%esi),%eax
 	orl	$(PG_V|PG_KW), %eax
@@ -477,7 +547,7 @@ bi_size_ok:
 	fillkpt
 
 #if L3_SLOT_KERNBASE > 0
-	/* If needed, set up level 3 entries for actual kernel mapping */
+	/* If needed, set up L3 entries for actual kernel mapping (RWX) */
 	leal	(PROC0_PTP3_OFF+ L3_SLOT_KERNBASE*8)(%esi),%ebx
 	leal    (PROC0_PTP2_OFF)(%esi),%eax
 	orl     $(PG_V|PG_KW), %eax
@@ -485,14 +555,14 @@ bi_size_ok:
 	fillkpt
 #endif
 
-	/* Set up top level entries for identity mapping */
+	/* Set up top level entries for identity mapping (RWX) */
 	leal    (PROC0_PML4_OFF)(%esi),%ebx
 	leal	(PROC0_PTP3_OFF)(%esi),%eax
 	orl	$(PG_V|PG_KW), %eax
 	movl	$NKL4_KIMG_ENTRIES,%ecx
 	fillkpt
 
-	/* Set up top level entries for actual kernel mapping */
+	/* Set up top level entries for actual kernel mapping (RWX) */
 	leal    (PROC0_PML4_OFF + L4_SLOT_KERNBASE*8)(%esi),%ebx
 	leal	(PROC0_PTP3_OFF)(%esi),%eax
 	orl	$(PG_V|PG_KW), %eax
@@ -502,14 +572,26 @@ bi_size_ok:
 	/*
 	 * Map the first 4 GB with the direct map. We'll map the rest
 	 * in pmap_bootstrap. But we always need the first 4GB during
-	 * bootstrap.
+	 * bootstrap. The direct map is mapped RW, NX. We also change
+	 * the permissions on the 2MB pages corresponding to the kernel
+	 * PAs to RO to prevent someone writing to the kernel area
+	 * via the direct map.
 	 */
 	leal	(PROC0_DMP2_OFF)(%esi), %ebx
 	xorl	%eax, %eax
-	orl	$(PG_V|PG_KW|PG_PS|PG_G), %eax
 	movl	$(NDML2_ENTRIES * NPDPG), %ecx
-1:	movl	%eax, (%ebx)
-	movl	$0, 4(%ebx)
+1:	orl	$(PG_V|PG_KW|PG_PS|PG_G), %eax
+	cmpl	$__kernel_base_phys, %eax
+	jl	store_pte
+	cmpl	$__kernel_end_phys, %eax
+	jg	store_pte
+	andl	$(~PG_KW), %eax
+store_pte:
+	movl	%eax, (%ebx)
+	pushl	%ebp
+	movl	RELOC((pg_nx + 4)), %ebp
+	movl	%ebp, 4(%ebx)
+	popl	%ebp
 	addl	$8, %ebx
 	addl	$NBPD_L2, %eax
 	loop	1b
@@ -518,21 +600,23 @@ bi_size_ok:
 	leal	(PROC0_DMP2_OFF)(%esi), %eax
 	orl	$(PG_V|PG_KW), %eax
 	movl	$NDML2_ENTRIES, %ecx
-	fillkpt
+	fillkpt_nx
 
 	leal	(PROC0_PML4_OFF + PDIR_SLOT_DIRECT * 8)(%esi), %ebx
 	leal	(PROC0_DMP3_OFF)(%esi), %eax
 	orl	$(PG_V|PG_KW), %eax
 	movl	$NDML3_ENTRIES, %ecx
-	fillkpt
+	fillkpt_nx
 
 	/* Install recursive top level PDE */
 	leal	(PROC0_PML4_OFF + PDIR_SLOT_PTE*8)(%esi),%ebx
 	leal	(PROC0_PML4_OFF)(%esi),%eax
 	orl	$(PG_V|PG_KW),%eax
 	movl	%eax,(%ebx)
-	movl	$0, 4(%ebx)
-
+	pushl	%ebp
+	movl	RELOC((pg_nx + 4)), %ebp
+	movl	%ebp, 4(%ebx)
+	popl 	%ebp
 
 	/* Save phys. addr of PTD, for libkvm. */
 	movl	$RELOC(PTDpaddr),%ebp
@@ -549,12 +633,17 @@ bi_size_ok:
 
 	/*
 	 * 2. Set Long Mode Enable in EFER. Also enable the
-	 *    syscall extensions.
+	 *    syscall extensions and NX (if available).
 	 */
 	movl    $MSR_EFER,%ecx
 	rdmsr
 	xorl	%eax,%eax	/* XXX */
 	orl	$(EFER_LME|EFER_SCE),%eax
+	movl	RELOC((pg_nx + 4)), %ebx
+	cmpl	$0, %ebx
+	je 	write_efer
+	orl	$(EFER_NXE), %eax
+write_efer:	
 	wrmsr
 
 	/*
@@ -608,7 +697,7 @@ longmode_hi:
 	movq	$(NKL2_KIMG_ENTRIES+1),%rcx
 	leaq	(PROC0_PTP2_OFF)(%rsi),%rbx
 	addq	%r8, %rbx
-1:	movq	$0,(%rbx)
+1:	movq	$0 ,(%rbx)
 	addq	$8,%rbx
 	loop	1b
 #endif
@@ -617,7 +706,7 @@ longmode_hi:
 	movq	$NKL3_KIMG_ENTRIES,%rcx
 	leaq	(PROC0_PTP3_OFF)(%rsi),%rbx
 	addq	%r8, %rbx
-1:	movq	$0,(%rbx)
+1:	movq	$0 ,(%rbx)
 	addq	$8,%rbx
 	loop	1b
 #endif
@@ -625,7 +714,7 @@ longmode_hi:
 	movq	$NKL4_KIMG_ENTRIES,%rcx
 	leaq	(PROC0_PML4_OFF)(%rsi),%rbx	# old, phys  address of PML4
 	addq	%r8, %rbx			# new, virtual address of PML4
-1:	movq	$0,(%rbx)
+1:	movq	$0, (%rbx)
 	addq	$8,%rbx
 	loop	1b
 
@@ -633,6 +722,9 @@ longmode_hi:
 	movq	$(TABLESIZE+KERNBASE),%rdx
 	addq	%rsi,%rdx
 	movq	%rdx,_C_LABEL(atdevbase)(%rip)
+
+	/* Record start of symbols */
+	movq	$__kernel_bss_end, _C_LABEL(ssym)(%rip)
 
 	/* Set up bootstrap stack. */
 	leaq	(PROC0_STK_OFF)(%rsi),%rax
@@ -1076,3 +1168,13 @@ ENTRY(pagezero)
 	sfence
 	ret
 
+	.section .codepatch,"a"
+	.align  8
+	.globl _C_LABEL(codepatch_begin)
+_C_LABEL(codepatch_begin):
+	.previous
+
+	.section .codepatchend,"a"
+	.globl _C_LABEL(codepatch_end)
+_C_LABEL(codepatch_end):
+	.previous

@@ -1,4 +1,4 @@
-/* $OpenBSD: softraid_raid1.c,v 1.57 2014/07/12 07:39:12 blambert Exp $ */
+/* $OpenBSD: softraid_raid1.c,v 1.60 2015/01/27 10:12:45 dlg Exp $ */
 /*
  * Copyright (c) 2007 Marco Peereboom <marco@peereboom.us>
  *
@@ -22,7 +22,6 @@
 #include <sys/buf.h>
 #include <sys/device.h>
 #include <sys/ioctl.h>
-#include <sys/proc.h>
 #include <sys/malloc.h>
 #include <sys/kernel.h>
 #include <sys/disk.h>
@@ -34,7 +33,6 @@
 #include <sys/sensors.h>
 #include <sys/stat.h>
 #include <sys/task.h>
-#include <sys/workq.h>
 #include <sys/conf.h>
 #include <sys/uio.h>
 
@@ -43,7 +41,6 @@
 #include <scsi/scsi_disk.h>
 
 #include <dev/softraidvar.h>
-#include <dev/rndvar.h>
 
 /* RAID 1 functions. */
 int	sr_raid1_create(struct sr_discipline *, struct bioc_createraid *,

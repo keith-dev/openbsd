@@ -1,4 +1,4 @@
-/*	$OpenBSD: rcsdiff.c,v 1.79 2013/04/16 20:24:45 deraadt Exp $	*/
+/*	$OpenBSD: rcsdiff.c,v 1.82 2015/01/16 06:40:11 deraadt Exp $	*/
 /*
  * Copyright (c) 2005 Joris Vink <joris@openbsd.org>
  * All rights reserved.
@@ -51,7 +51,7 @@ rcsdiff_main(int argc, char **argv)
 	int fd, i, ch, dflags, status;
 	RCSNUM *rev1, *rev2;
 	RCSFILE *file;
-	char fpath[MAXPATHLEN], *rev_str1, *rev_str2;
+	char fpath[PATH_MAX], *rev_str1, *rev_str2;
 	const char *errstr;
 
 	rev1 = rev2 = NULL;
@@ -117,7 +117,6 @@ rcsdiff_main(int argc, char **argv)
 			if (RCS_KWEXP_INVAL(kflag)) {
 				warnx("invalid RCS keyword substitution mode");
 				(usage)();
-				exit(D_ERROR);
 			}
 			break;
 		case 'n':
@@ -184,7 +183,6 @@ rcsdiff_main(int argc, char **argv)
 			break;
 		default:
 			(usage)();
-			exit(D_ERROR);
 		}
 	}
 
@@ -194,7 +192,6 @@ rcsdiff_main(int argc, char **argv)
 	if (argc == 0) {
 		warnx("no input file");
 		(usage)();
-		exit(D_ERROR);
 	}
 
 	if (diff_ignore_pats != NULL) {
@@ -267,12 +264,14 @@ rcsdiff_main(int argc, char **argv)
 	return (status);
 }
 
-void
+__dead void
 rcsdiff_usage(void)
 {
 	fprintf(stderr,
 	    "usage: rcsdiff [-cnquV] [-kmode] [-rrev] [-xsuffixes] [-ztz]\n"
 	    "               [diff_options] file ...\n");
+
+	exit(D_ERROR);
 }
 
 static int
@@ -458,7 +457,7 @@ push_ignore_pats(char *pattern)
 	} else {
 		/* old + "|" + new + NUL */
 		len = strlen(diff_ignore_pats) + strlen(pattern) + 2;
-		diff_ignore_pats = xrealloc(diff_ignore_pats, len, 1);
+		diff_ignore_pats = xreallocarray(diff_ignore_pats, len, 1);
 		strlcat(diff_ignore_pats, "|", len);
 		strlcat(diff_ignore_pats, pattern, len);
 	}

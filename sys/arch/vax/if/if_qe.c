@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_qe.c,v 1.28 2014/08/06 15:40:40 jsg Exp $	*/
+/*	$OpenBSD: if_qe.c,v 1.30 2014/12/23 21:39:12 miod Exp $	*/
 /*      $NetBSD: if_qe.c,v 1.51 2002/06/08 12:28:37 ragge Exp $ */
 /*
  * Copyright (c) 1999 Ludd, University of Lule}, Sweden. All rights reserved.
@@ -195,7 +195,7 @@ qematch(struct device *parent, struct cfdata *cf, void *aux)
 	 * All done with the bus resources.
 	 */
 	ubfree((void *)parent, &ui);
-	free(ring, M_TEMP, 0);
+	free(ring, M_TEMP, PROBESIZE);
 	return 1;
 }
 
@@ -639,12 +639,10 @@ qeioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 	case SIOCSIFADDR:
 		ifp->if_flags |= IFF_UP;
 		switch(ifa->ifa_addr->sa_family) {
-#ifdef INET
 		case AF_INET:
 			qeinit(sc);
 			arp_ifinit(&sc->sc_ac, ifa);
 			break;
-#endif
 		}
 		break;
 

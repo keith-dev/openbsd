@@ -1,4 +1,4 @@
-/*	$OpenBSD: ufs_vnops.c,v 1.115 2014/07/12 18:44:01 tedu Exp $	*/
+/*	$OpenBSD: ufs_vnops.c,v 1.119 2015/02/10 21:56:10 miod Exp $	*/
 /*	$NetBSD: ufs_vnops.c,v 1.18 1996/05/11 18:28:04 mycroft Exp $	*/
 
 /*
@@ -56,6 +56,7 @@
 #include <sys/event.h>
 #include <sys/poll.h>
 #include <sys/specdev.h>
+#include <sys/unistd.h>
 
 #include <miscfs/fifofs/fifo.h>
 
@@ -68,6 +69,8 @@
 #include <ufs/ufs/dirhash.h>
 #endif
 #include <ufs/ext2fs/ext2fs_extern.h>
+
+#include <uvm/uvm_extern.h>
 
 int ufs_chmod(struct vnode *, int, struct ucred *, struct proc *);
 int ufs_chown(struct vnode *, uid_t, gid_t, struct ucred *, struct proc *);
@@ -508,7 +511,7 @@ ufs_chown(struct vnode *vp, uid_t uid, gid_t gid, struct ucred *cred,
 	 * the caller must be superuser or the call fails.
 	 */
 	if ((cred->cr_uid != DIP(ip, uid) || uid != DIP(ip, uid) ||
-	    (gid != DIP(ip, gid) && !groupmember((gid_t)gid, cred))) &&
+	    (gid != DIP(ip, gid) && !groupmember(gid, cred))) &&
 	    (error = suser_ucred(cred)))
 		return (error);
 	ogid = DIP(ip, gid);
@@ -1503,7 +1506,7 @@ ufs_readdir(void *v)
 		memset(u.dn.d_name + u.dn.d_namlen, 0, u.dn.d_reclen
 		    - u.dn.d_namlen - offsetof(struct dirent, d_name));
 
-		error = uiomove(&u.dn, u.dn.d_reclen, uio);
+		error = uiomovei(&u.dn, u.dn.d_reclen, uio);
 		dp = (struct direct *)((char *)dp + dp->d_reclen);
 	}
 
@@ -1536,7 +1539,7 @@ ufs_readlink(void *v)
 	isize = DIP(ip, size);
 	if (isize < vp->v_mount->mnt_maxsymlinklen ||
 	    (vp->v_mount->mnt_maxsymlinklen == 0 && DIP(ip, blocks) == 0)) {
-		return (uiomove((char *)SHORTLINK(ip), isize, ap->a_uio));
+		return (uiomovei((char *)SHORTLINK(ip), isize, ap->a_uio));
 	}
 	return (VOP_READ(vp, ap->a_uio, 0, ap->a_cred));
 }

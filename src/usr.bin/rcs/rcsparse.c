@@ -1,4 +1,4 @@
-/*	$OpenBSD: rcsparse.c,v 1.9 2013/06/03 17:04:35 jcs Exp $	*/
+/*	$OpenBSD: rcsparse.c,v 1.14 2014/12/01 21:58:46 deraadt Exp $	*/
 /*
  * Copyright (c) 2010 Tobias Stoeckmann <tobias@openbsd.org>
  *
@@ -223,7 +223,7 @@ rcsparse_init(RCSFILE *rfp)
 	if (rfp->rf_flags & RCS_PARSED)
 		return (0);
 
-	pdp = xmalloc(sizeof(*pdp));
+	pdp = xcalloc(1, sizeof(*pdp));
 	pdp->rp_buf = xmalloc(RCS_BUFSIZE);
 	pdp->rp_blen = RCS_BUFSIZE;
 	pdp->rp_bufend = pdp->rp_buf + pdp->rp_blen - 1;
@@ -915,7 +915,6 @@ rcsparse_token(RCSFILE *rfp, int allowed)
 	} while (isspace(c));
 
 	pdp->rp_msglineno = pdp->rp_lineno;
-	type = 0;
 	switch (c) {
 	case '@':
 		ret = rcsparse_string(rfp, allowed);
@@ -1104,7 +1103,6 @@ rcsparse(RCSFILE *rfp, struct rcs_section *sec)
 	int i, token;
 
 	pdp = (struct rcs_pdata *)rfp->rf_pdata;
-	i = 0;
 
 	token = 0;
 	for (i = 0; sec[i].token != 0; i++) {
@@ -1201,7 +1199,7 @@ rcsparse_growbuf(RCSFILE *rfp)
 {
 	struct rcs_pdata *pdp = (struct rcs_pdata *)rfp->rf_pdata;
 	
-	pdp->rp_buf = xrealloc(pdp->rp_buf, 1,
+	pdp->rp_buf = xreallocarray(pdp->rp_buf, 1,
 		pdp->rp_blen + RCS_BUFEXTSIZE);
 	pdp->rp_blen += RCS_BUFEXTSIZE;
 	pdp->rp_bufend = pdp->rp_buf + pdp->rp_blen - 1;
@@ -1258,15 +1256,16 @@ rcsparse_warnx(RCSFILE *rfp, char *fmt, ...)
 {
 	struct rcs_pdata *pdp;
 	va_list ap;
-	char *nfmt;
+	char *msg;
 
 	pdp = (struct rcs_pdata *)rfp->rf_pdata;
 	va_start(ap, fmt);
-	if (asprintf(&nfmt, "%s:%d: %s", rfp->rf_path, pdp->rp_msglineno, fmt)
-	    == -1)
-		nfmt = fmt;
-	vwarnx(nfmt, ap);
+	if (vasprintf(&msg, fmt, ap) == -1) {
+		warn("vasprintf");
+		va_end(ap);
+		return;
+	}
 	va_end(ap);
-	if (nfmt != fmt)
-		free(nfmt);
+	warnx("%s:%d: %s", rfp->rf_path, pdp->rp_msglineno, msg);
+	free(msg);
 }

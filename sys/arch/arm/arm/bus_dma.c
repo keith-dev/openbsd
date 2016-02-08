@@ -1,4 +1,4 @@
-/*	$OpenBSD: bus_dma.c,v 1.26 2014/07/12 18:44:41 tedu Exp $	*/
+/*	$OpenBSD: bus_dma.c,v 1.28 2014/11/16 12:30:56 deraadt Exp $	*/
 /*	$NetBSD: bus_dma.c,v 1.38 2003/10/30 08:44:13 scw Exp $	*/
 
 /*-
@@ -765,7 +765,7 @@ _bus_dmamem_map(bus_dma_tag_t t, bus_dma_segment_t *segs, int nsegs,
 			if (size == 0)
 				panic("_bus_dmamem_map: size botch");
 			pmap_kenter_cache(va, addr,
-			    VM_PROT_READ | VM_PROT_WRITE,
+			    PROT_READ | PROT_WRITE,
 			    !(flags & BUS_DMA_COHERENT));
 
 #ifdef DEBUG_DMA
@@ -1033,7 +1033,7 @@ _bus_dmamem_alloc_range(bus_dma_tag_t t, bus_size_t size, bus_size_t alignment,
 #endif	/* DEBUG_DMA */
 	m = TAILQ_NEXT(m, pageq);
 
-	for (; m != TAILQ_END(&mlist); m = TAILQ_NEXT(m, pageq)) {
+	for (; m != NULL; m = TAILQ_NEXT(m, pageq)) {
 		curaddr = VM_PAGE_TO_PHYS(m);
 #ifdef DIAGNOSTIC
 		if (curaddr < low || curaddr >= high) {

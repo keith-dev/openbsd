@@ -1,4 +1,4 @@
-/* $OpenBSD: i915_drv.h,v 1.52 2014/05/12 19:29:16 kettenis Exp $ */
+/* $OpenBSD: i915_drv.h,v 1.56 2015/02/12 04:56:03 kettenis Exp $ */
 /* i915_drv.h -- Private header for the I915 driver -*- linux-c -*-
  */
 /*
@@ -36,13 +36,20 @@
 #include "intel_bios.h"
 #include "intel_ringbuffer.h"
 
+#include "acpi.h"
+#include "drm.h"
+#include "vga.h"
+
+#include <dev/ic/mc6845reg.h>
+#include <dev/ic/pcdisplayvar.h>
+#include <dev/ic/vgareg.h>
+#include <dev/ic/vgavar.h>
+
 #include <sys/task.h>
 #include <dev/pci/vga_pcivar.h>
 #include <dev/wscons/wsconsio.h>
 #include <dev/wscons/wsdisplayvar.h>
 #include <dev/rasops/rasops.h>
-
-#include "acpi.h"
 
 struct intel_gtt {
 	/* Size of memory reserved for graphics by the BIOS */
@@ -525,8 +532,8 @@ struct intel_l3_parity {
  * XXX fence lock ,object lock
  */
 struct inteldrm_softc {
-	struct device		 dev;
-	struct device		*drmdev;
+	struct device		 sc_dev;
+	struct drm_device	*dev;
 	bus_dma_tag_t		 dmat;
 	bus_space_tag_t		 bst;
 	struct agp_map		*agph;
@@ -546,7 +553,8 @@ struct inteldrm_softc {
 	int			 nscreens;
 	void			(*switchcb)(void *, int, int);
 	void			*switchcbarg;
-	struct workq_task	 switchwqt;
+	void			*switchcookie;
+	struct task		 switchtask;
 	struct rasops_info	 ro;
 
 	int	sc_offset;
@@ -1172,7 +1180,7 @@ void	i915_gem_retire_requests_ring(struct intel_ring_buffer *);
 int	i915_gem_check_wedge(struct inteldrm_softc *,
 			     bool interruptible);
 
-void	i915_gem_retire_work_handler(void *, void*);
+void	i915_gem_retire_work_handler(void *);
 int	i915_gem_idle(struct drm_device *);
 void	i915_gem_object_move_to_active(struct drm_i915_gem_object *,
 	    struct intel_ring_buffer *);

@@ -1,4 +1,4 @@
-/*	$OpenBSD: spdmem.c,v 1.3 2011/04/19 21:55:25 chl Exp $	*/
+/*	$OpenBSD: spdmem.c,v 1.5 2015/01/25 11:38:49 jsg Exp $	*/
 /* $NetBSD: spdmem.c,v 1.3 2007/09/20 23:09:59 xtraeme Exp $ */
 
 /*
@@ -533,8 +533,8 @@ spdmem_ddr2_decode(struct spdmem_softc *sc, struct spdmem *s)
 	}
 
 	/* Print CAS latency */
-	for (i = 5; i >= 2; i--) {
-		if (s->sm_data[SPDMEM_DDR_CAS] & (i << i)) {
+	for (i = 7; i >= 2; i--) {
+		if (s->sm_data[SPDMEM_DDR_CAS] & (1 << i)) {
 			printf("CL%d", i);
 			break;
 		}
@@ -593,7 +593,6 @@ spdmem_fbdimm_decode(struct spdmem_softc *sc, struct spdmem *s)
 		    SPDMEM_FBDIMM_RANKS_WIDTH) + 2);
 
 		p_clk = (d_clk * bits) / 8 / cycle_time;
-		d_clk = ((d_clk + cycle_time / 2) ) / cycle_time;
 		p_clk -= p_clk % 100;
 		printf(" PC2-%d", p_clk);
 	}

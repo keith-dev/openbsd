@@ -1,25 +1,25 @@
-/* $OpenBSD: ssl_ciph.c,v 1.66 2014/07/12 22:33:39 jsing Exp $ */
+/* $OpenBSD: ssl_ciph.c,v 1.81 2015/02/07 04:17:11 jsing Exp $ */
 /* Copyright (C) 1995-1998 Eric Young (eay@cryptsoft.com)
  * All rights reserved.
  *
  * This package is an SSL implementation written
  * by Eric Young (eay@cryptsoft.com).
  * The implementation was written so as to conform with Netscapes SSL.
- * 
+ *
  * This library is free for commercial and non-commercial use as long as
  * the following conditions are aheared to.  The following conditions
  * apply to all code found in this distribution, be it the RC4, RSA,
  * lhash, DES, etc., code; not just the SSL code.  The SSL documentation
  * included with this distribution is covered by the same copyright terms
  * except that the holder is Tim Hudson (tjh@cryptsoft.com).
- * 
+ *
  * Copyright remains Eric Young's, and as such any Copyright notices in
  * the code are not to be removed.
  * If this package is used in a product, Eric Young should be given attribution
  * as the author of the parts of the library used.
  * This can be in the form of a textual message at program startup or
  * in documentation (online or textual) provided with the package.
- * 
+ *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
  * are met:
@@ -34,10 +34,10 @@
  *     Eric Young (eay@cryptsoft.com)"
  *    The word 'cryptographic' can be left out if the rouines from the library
  *    being used are not cryptographic related :-).
- * 4. If you include any Windows specific code (or a derivative thereof) from 
+ * 4. If you include any Windows specific code (or a derivative thereof) from
  *    the apps directory (application code) you must include an acknowledgement:
  *    "This product includes software written by Tim Hudson (tjh@cryptsoft.com)"
- * 
+ *
  * THIS SOFTWARE IS PROVIDED BY ERIC YOUNG ``AS IS'' AND
  * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
  * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
@@ -49,7 +49,7 @@
  * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
- * 
+ *
  * The licence and distribution terms for any publically available version or
  * derivative of this code cannot be changed.  i.e. this code cannot simply be
  * copied and put under another distribution licence
@@ -63,7 +63,7 @@
  * are met:
  *
  * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer. 
+ *    notice, this list of conditions and the following disclaimer.
  *
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in
@@ -110,7 +110,7 @@
  */
 /* ====================================================================
  * Copyright 2002 Sun Microsystems, Inc. ALL RIGHTS RESERVED.
- * ECC cipher suite support in OpenSSL originally developed by 
+ * ECC cipher suite support in OpenSSL originally developed by
  * SUN MICROSYSTEMS, INC., and contributed to the OpenSSL project.
  */
 /* ====================================================================
@@ -141,31 +141,32 @@
  */
 
 #include <stdio.h>
+
 #include <openssl/objects.h>
+
 #ifndef OPENSSL_NO_ENGINE
 #include <openssl/engine.h>
 #endif
+
 #include "ssl_locl.h"
 
 #define SSL_ENC_DES_IDX		0
 #define SSL_ENC_3DES_IDX	1
 #define SSL_ENC_RC4_IDX		2
-#define SSL_ENC_RC2_IDX		3
-#define SSL_ENC_IDEA_IDX	4
-#define SSL_ENC_NULL_IDX	5
-#define SSL_ENC_AES128_IDX	6
-#define SSL_ENC_AES256_IDX	7
-#define SSL_ENC_CAMELLIA128_IDX	8
-#define SSL_ENC_CAMELLIA256_IDX	9
-#define SSL_ENC_GOST89_IDX	10
-#define SSL_ENC_SEED_IDX    	11
-#define SSL_ENC_AES128GCM_IDX	12
-#define SSL_ENC_AES256GCM_IDX	13
-#define SSL_ENC_NUM_IDX		14
+#define SSL_ENC_IDEA_IDX	3
+#define SSL_ENC_NULL_IDX	4
+#define SSL_ENC_AES128_IDX	5
+#define SSL_ENC_AES256_IDX	6
+#define SSL_ENC_CAMELLIA128_IDX	7
+#define SSL_ENC_CAMELLIA256_IDX	8
+#define SSL_ENC_GOST89_IDX	9
+#define SSL_ENC_AES128GCM_IDX	10
+#define SSL_ENC_AES256GCM_IDX	11
+#define SSL_ENC_NUM_IDX		12
 
 
 static const EVP_CIPHER *ssl_cipher_methods[SSL_ENC_NUM_IDX] = {
-	NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL
+	NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL
 };
 
 #define SSL_MD_MD5_IDX	0
@@ -174,30 +175,30 @@ static const EVP_CIPHER *ssl_cipher_methods[SSL_ENC_NUM_IDX] = {
 #define SSL_MD_GOST89MAC_IDX 3
 #define SSL_MD_SHA256_IDX 4
 #define SSL_MD_SHA384_IDX 5
-/*Constant SSL_MAX_DIGEST equal to size of digests array should be 
+#define SSL_MD_STREEBOG256_IDX 6
+#define SSL_MD_STREEBOG512_IDX 7
+/*Constant SSL_MAX_DIGEST equal to size of digests array should be
  * defined in the
  * ssl_locl.h */
-#define SSL_MD_NUM_IDX	SSL_MAX_DIGEST 
+#define SSL_MD_NUM_IDX	SSL_MAX_DIGEST
 static const EVP_MD *ssl_digest_methods[SSL_MD_NUM_IDX] = {
-	NULL, NULL, NULL, NULL, NULL, NULL
+	NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL
 };
-/* PKEY_TYPE for GOST89MAC is known in advance, but, because
- * implementation is engine-provided, we'll fill it only if
- * corresponding EVP_PKEY_METHOD is found 
- */
+
 static int  ssl_mac_pkey_id[SSL_MD_NUM_IDX] = {
-	EVP_PKEY_HMAC, EVP_PKEY_HMAC, EVP_PKEY_HMAC, NID_undef,
-	EVP_PKEY_HMAC, EVP_PKEY_HMAC
+	EVP_PKEY_HMAC, EVP_PKEY_HMAC, EVP_PKEY_HMAC, EVP_PKEY_GOSTIMIT,
+	EVP_PKEY_HMAC, EVP_PKEY_HMAC, EVP_PKEY_HMAC, EVP_PKEY_HMAC,
 };
 
 static int ssl_mac_secret_size[SSL_MD_NUM_IDX] = {
-	0, 0, 0, 0, 0, 0
+	0, 0, 0, 0, 0, 0, 0, 0
 };
 
 static int ssl_handshake_digest_flag[SSL_MD_NUM_IDX] = {
 	SSL_HANDSHAKE_MAC_MD5, SSL_HANDSHAKE_MAC_SHA,
 	SSL_HANDSHAKE_MAC_GOST94, 0, SSL_HANDSHAKE_MAC_SHA256,
-	SSL_HANDSHAKE_MAC_SHA384
+	SSL_HANDSHAKE_MAC_SHA384, SSL_HANDSHAKE_MAC_STREEBOG256,
+	SSL_HANDSHAKE_MAC_STREEBOG512
 };
 
 #define CIPHER_ADD	1
@@ -226,7 +227,7 @@ static const SSL_CIPHER cipher_aliases[] = {
 		.name = SSL_TXT_CMPALL,
 		.algorithm_enc = SSL_eNULL,
 	},
-	
+
 	/*
 	 * "COMPLEMENTOFDEFAULT"
 	 * (does *not* include ciphersuites not found in ALL!)
@@ -237,7 +238,7 @@ static const SSL_CIPHER cipher_aliases[] = {
 		.algorithm_auth = SSL_aNULL,
 		.algorithm_enc = ~SSL_eNULL,
 	},
-	
+
 	/*
 	 * key exchange aliases
 	 * (some of those using only a single bit here combine multiple key
@@ -249,29 +250,14 @@ static const SSL_CIPHER cipher_aliases[] = {
 		.algorithm_mkey = SSL_kRSA,
 	},
 	{
-		/* no such ciphersuites supported! */
-		.name = SSL_TXT_kDHr,
-		.algorithm_mkey = SSL_kDHr,
-	},
-	{
-		/* no such ciphersuites supported! */
-		.name = SSL_TXT_kDHd,
-		.algorithm_mkey = SSL_kDHd,
-	},
-	{
-		/* no such ciphersuites supported! */
-		.name = SSL_TXT_kDH,
-		.algorithm_mkey = SSL_kDHr|SSL_kDHd,
-	},
-	{
 		.name = SSL_TXT_kEDH,
 		.algorithm_mkey = SSL_kDHE,
 	},
 	{
 		.name = SSL_TXT_DH,
-		.algorithm_mkey = SSL_kDHr|SSL_kDHd|SSL_kDHE,
+		.algorithm_mkey = SSL_kDHE,
 	},
-	
+
 	{
 		.name = SSL_TXT_kECDHr,
 		.algorithm_mkey = SSL_kECDHr,
@@ -292,12 +278,12 @@ static const SSL_CIPHER cipher_aliases[] = {
 		.name = SSL_TXT_ECDH,
 		.algorithm_mkey = SSL_kECDHr|SSL_kECDHe|SSL_kECDHE,
 	},
-	
+
 	{
 		.name = SSL_TXT_kGOST,
 		.algorithm_mkey = SSL_kGOST,
 	},
-	
+
 	/* server authentication aliases */
 	{
 		.name = SSL_TXT_aRSA,
@@ -316,11 +302,6 @@ static const SSL_CIPHER cipher_aliases[] = {
 		.algorithm_auth = SSL_aNULL,
 	},
 	{
-		/* no such ciphersuites supported! */
-		.name = SSL_TXT_aDH,
-		.algorithm_auth = SSL_aDH,
-	},
-	{
 		.name = SSL_TXT_aECDH,
 		.algorithm_auth = SSL_aECDH,
 	},
@@ -333,22 +314,28 @@ static const SSL_CIPHER cipher_aliases[] = {
 		.algorithm_auth = SSL_aECDSA,
 	},
 	{
-		.name = SSL_TXT_aGOST94,
-		.algorithm_auth = SSL_aGOST94,
-	},
-	{
 		.name = SSL_TXT_aGOST01,
 		.algorithm_auth = SSL_aGOST01,
 	},
 	{
 		.name = SSL_TXT_aGOST,
-		.algorithm_auth = SSL_aGOST94|SSL_aGOST01,
+		.algorithm_auth = SSL_aGOST01,
 	},
-	
+
 	/* aliases combining key exchange and server authentication */
+	{
+		.name = SSL_TXT_DHE,
+		.algorithm_mkey = SSL_kDHE,
+		.algorithm_auth = ~SSL_aNULL,
+	},
 	{
 		.name = SSL_TXT_EDH,
 		.algorithm_mkey = SSL_kDHE,
+		.algorithm_auth = ~SSL_aNULL,
+	},
+	{
+		.name = SSL_TXT_ECDHE,
+		.algorithm_mkey = SSL_kECDHE,
 		.algorithm_auth = ~SSL_aNULL,
 	},
 	{
@@ -390,16 +377,8 @@ static const SSL_CIPHER cipher_aliases[] = {
 		.algorithm_enc = SSL_RC4,
 	},
 	{
-		.name = SSL_TXT_RC2,
-		.algorithm_enc = SSL_RC2,
-	},
-	{
 		.name = SSL_TXT_IDEA,
 		.algorithm_enc = SSL_IDEA,
-	},
-	{
-		.name = SSL_TXT_SEED,
-		.algorithm_enc = SSL_SEED,
 	},
 	{
 		.name = SSL_TXT_eNULL,
@@ -433,8 +412,16 @@ static const SSL_CIPHER cipher_aliases[] = {
 		.name = SSL_TXT_CAMELLIA,
 		.algorithm_enc = SSL_CAMELLIA128|SSL_CAMELLIA256,
 	},
-	
+	{
+		.name = SSL_TXT_CHACHA20,
+		.algorithm_enc = SSL_CHACHA20POLY1305,
+	},
+
 	/* MAC aliases */
+	{
+		.name = SSL_TXT_AEAD,
+		.algorithm_mac = SSL_AEAD,
+	},
 	{
 		.name = SSL_TXT_MD5,
 		.algorithm_mac = SSL_MD5,
@@ -463,12 +450,16 @@ static const SSL_CIPHER cipher_aliases[] = {
 		.name = SSL_TXT_SHA384,
 		.algorithm_mac = SSL_SHA384,
 	},
-	
-	/* protocol version aliases */
 	{
-		.name = SSL_TXT_SSLV2,
-		.algorithm_ssl = SSL_SSLV2,
+		.name = SSL_TXT_STREEBOG256,
+		.algorithm_mac = SSL_STREEBOG256,
 	},
+	{
+		.name = SSL_TXT_STREEBOG512,
+		.algorithm_mac = SSL_STREEBOG512,
+	},
+
+	/* protocol version aliases */
 	{
 		.name = SSL_TXT_SSLV3,
 		.algorithm_ssl = SSL_SSLV3,
@@ -481,7 +472,7 @@ static const SSL_CIPHER cipher_aliases[] = {
 		.name = SSL_TXT_TLSV1_2,
 		.algorithm_ssl = SSL_TLSV1_2,
 	},
-	
+
 	/* strength classes */
 	{
 		.name = SSL_TXT_LOW,
@@ -497,109 +488,76 @@ static const SSL_CIPHER cipher_aliases[] = {
 	},
 };
 
-/* Search for public key algorithm with given name and 
- * return its pkey_id if it is available. Otherwise return 0
- */
-#ifdef OPENSSL_NO_ENGINE
-
-static int
-get_optional_pkey_id(const char *pkey_name)
-{
-	const EVP_PKEY_ASN1_METHOD *ameth;
-	int pkey_id = 0;
-	ameth = EVP_PKEY_asn1_find_str(NULL, pkey_name, -1);
-	if (ameth) {
-		EVP_PKEY_asn1_get0_info(&pkey_id, NULL, NULL, NULL, NULL, ameth);
-	}
-	return pkey_id;
-}
-
-#else
-
-static int
-get_optional_pkey_id(const char *pkey_name)
-{
-	const EVP_PKEY_ASN1_METHOD *ameth;
-	ENGINE *tmpeng = NULL;
-	int pkey_id = 0;
-	ameth = EVP_PKEY_asn1_find_str(&tmpeng, pkey_name, -1);
-	if (ameth) {
-		EVP_PKEY_asn1_get0_info(&pkey_id, NULL, NULL, NULL, NULL, ameth);
-	}
-	if (tmpeng)
-		ENGINE_finish(tmpeng);
-	return pkey_id;
-}
-
-#endif
-
 void
 ssl_load_ciphers(void)
 {
-	ssl_cipher_methods[SSL_ENC_DES_IDX]=
-	EVP_get_cipherbyname(SN_des_cbc);
-	ssl_cipher_methods[SSL_ENC_3DES_IDX]=
-	EVP_get_cipherbyname(SN_des_ede3_cbc);
-	ssl_cipher_methods[SSL_ENC_RC4_IDX]=
-	EVP_get_cipherbyname(SN_rc4);
-	ssl_cipher_methods[SSL_ENC_RC2_IDX]=
-	EVP_get_cipherbyname(SN_rc2_cbc);
+	ssl_cipher_methods[SSL_ENC_DES_IDX] =
+	    EVP_get_cipherbyname(SN_des_cbc);
+	ssl_cipher_methods[SSL_ENC_3DES_IDX] =
+	    EVP_get_cipherbyname(SN_des_ede3_cbc);
+	ssl_cipher_methods[SSL_ENC_RC4_IDX] =
+	    EVP_get_cipherbyname(SN_rc4);
 #ifndef OPENSSL_NO_IDEA
-	ssl_cipher_methods[SSL_ENC_IDEA_IDX]=
-	EVP_get_cipherbyname(SN_idea_cbc);
+	ssl_cipher_methods[SSL_ENC_IDEA_IDX] =
+	    EVP_get_cipherbyname(SN_idea_cbc);
 #else
 	ssl_cipher_methods[SSL_ENC_IDEA_IDX] = NULL;
 #endif
-	ssl_cipher_methods[SSL_ENC_AES128_IDX]=
-	EVP_get_cipherbyname(SN_aes_128_cbc);
-	ssl_cipher_methods[SSL_ENC_AES256_IDX]=
-	EVP_get_cipherbyname(SN_aes_256_cbc);
-	ssl_cipher_methods[SSL_ENC_CAMELLIA128_IDX]=
-	EVP_get_cipherbyname(SN_camellia_128_cbc);
-	ssl_cipher_methods[SSL_ENC_CAMELLIA256_IDX]=
-	EVP_get_cipherbyname(SN_camellia_256_cbc);
-	ssl_cipher_methods[SSL_ENC_GOST89_IDX]=
-	EVP_get_cipherbyname(SN_gost89_cnt);
-	ssl_cipher_methods[SSL_ENC_SEED_IDX]=
-	EVP_get_cipherbyname(SN_seed_cbc);
+	ssl_cipher_methods[SSL_ENC_AES128_IDX] =
+	    EVP_get_cipherbyname(SN_aes_128_cbc);
+	ssl_cipher_methods[SSL_ENC_AES256_IDX] =
+	    EVP_get_cipherbyname(SN_aes_256_cbc);
+	ssl_cipher_methods[SSL_ENC_CAMELLIA128_IDX] =
+	    EVP_get_cipherbyname(SN_camellia_128_cbc);
+	ssl_cipher_methods[SSL_ENC_CAMELLIA256_IDX] =
+	    EVP_get_cipherbyname(SN_camellia_256_cbc);
+	ssl_cipher_methods[SSL_ENC_GOST89_IDX] =
+	    EVP_get_cipherbyname(SN_gost89_cnt);
 
-	ssl_cipher_methods[SSL_ENC_AES128GCM_IDX]=
-	EVP_get_cipherbyname(SN_aes_128_gcm);
-	ssl_cipher_methods[SSL_ENC_AES256GCM_IDX]=
-	EVP_get_cipherbyname(SN_aes_256_gcm);
+	ssl_cipher_methods[SSL_ENC_AES128GCM_IDX] =
+	    EVP_get_cipherbyname(SN_aes_128_gcm);
+	ssl_cipher_methods[SSL_ENC_AES256GCM_IDX] =
+	    EVP_get_cipherbyname(SN_aes_256_gcm);
 
-	ssl_digest_methods[SSL_MD_MD5_IDX]=
-	EVP_get_digestbyname(SN_md5);
-	ssl_mac_secret_size[SSL_MD_MD5_IDX]=
-	EVP_MD_size(ssl_digest_methods[SSL_MD_MD5_IDX]);
+	ssl_digest_methods[SSL_MD_MD5_IDX] =
+	    EVP_get_digestbyname(SN_md5);
+	ssl_mac_secret_size[SSL_MD_MD5_IDX] =
+	    EVP_MD_size(ssl_digest_methods[SSL_MD_MD5_IDX]);
 	OPENSSL_assert(ssl_mac_secret_size[SSL_MD_MD5_IDX] >= 0);
-	ssl_digest_methods[SSL_MD_SHA1_IDX]=
-	EVP_get_digestbyname(SN_sha1);
-	ssl_mac_secret_size[SSL_MD_SHA1_IDX]=
-	EVP_MD_size(ssl_digest_methods[SSL_MD_SHA1_IDX]);
+	ssl_digest_methods[SSL_MD_SHA1_IDX] =
+	    EVP_get_digestbyname(SN_sha1);
+	ssl_mac_secret_size[SSL_MD_SHA1_IDX] =
+	    EVP_MD_size(ssl_digest_methods[SSL_MD_SHA1_IDX]);
 	OPENSSL_assert(ssl_mac_secret_size[SSL_MD_SHA1_IDX] >= 0);
-	ssl_digest_methods[SSL_MD_GOST94_IDX]=
-	EVP_get_digestbyname(SN_id_GostR3411_94);
+	ssl_digest_methods[SSL_MD_GOST94_IDX] =
+	    EVP_get_digestbyname(SN_id_GostR3411_94);
 	if (ssl_digest_methods[SSL_MD_GOST94_IDX]) {
-		ssl_mac_secret_size[SSL_MD_GOST94_IDX]=
-		EVP_MD_size(ssl_digest_methods[SSL_MD_GOST94_IDX]);
+		ssl_mac_secret_size[SSL_MD_GOST94_IDX] =
+		    EVP_MD_size(ssl_digest_methods[SSL_MD_GOST94_IDX]);
 		OPENSSL_assert(ssl_mac_secret_size[SSL_MD_GOST94_IDX] >= 0);
 	}
-	ssl_digest_methods[SSL_MD_GOST89MAC_IDX]=
-	EVP_get_digestbyname(SN_id_Gost28147_89_MAC);
-	ssl_mac_pkey_id[SSL_MD_GOST89MAC_IDX] = get_optional_pkey_id("gost-mac");
+	ssl_digest_methods[SSL_MD_GOST89MAC_IDX] =
+	    EVP_get_digestbyname(SN_id_Gost28147_89_MAC);
 	if (ssl_mac_pkey_id[SSL_MD_GOST89MAC_IDX]) {
 		ssl_mac_secret_size[SSL_MD_GOST89MAC_IDX] = 32;
 	}
 
-	ssl_digest_methods[SSL_MD_SHA256_IDX]=
-	EVP_get_digestbyname(SN_sha256);
-	ssl_mac_secret_size[SSL_MD_SHA256_IDX]=
-	EVP_MD_size(ssl_digest_methods[SSL_MD_SHA256_IDX]);
-	ssl_digest_methods[SSL_MD_SHA384_IDX]=
-	EVP_get_digestbyname(SN_sha384);
-	ssl_mac_secret_size[SSL_MD_SHA384_IDX]=
-	EVP_MD_size(ssl_digest_methods[SSL_MD_SHA384_IDX]);
+	ssl_digest_methods[SSL_MD_SHA256_IDX] =
+	    EVP_get_digestbyname(SN_sha256);
+	ssl_mac_secret_size[SSL_MD_SHA256_IDX] =
+	    EVP_MD_size(ssl_digest_methods[SSL_MD_SHA256_IDX]);
+	ssl_digest_methods[SSL_MD_SHA384_IDX] =
+	    EVP_get_digestbyname(SN_sha384);
+	ssl_mac_secret_size[SSL_MD_SHA384_IDX] =
+	    EVP_MD_size(ssl_digest_methods[SSL_MD_SHA384_IDX]);
+	ssl_digest_methods[SSL_MD_STREEBOG256_IDX] =
+	    EVP_get_digestbyname(SN_id_tc26_gost3411_2012_256);
+	ssl_mac_secret_size[SSL_MD_STREEBOG256_IDX] =
+	    EVP_MD_size(ssl_digest_methods[SSL_MD_STREEBOG256_IDX]);
+	ssl_digest_methods[SSL_MD_STREEBOG512_IDX] =
+	    EVP_get_digestbyname(SN_id_tc26_gost3411_2012_512);
+	ssl_mac_secret_size[SSL_MD_STREEBOG512_IDX] =
+	    EVP_MD_size(ssl_digest_methods[SSL_MD_STREEBOG512_IDX]);
 }
 
 int
@@ -633,9 +591,6 @@ ssl_cipher_get_evp(const SSL_SESSION *s, const EVP_CIPHER **enc,
 	case SSL_RC4:
 		i = SSL_ENC_RC4_IDX;
 		break;
-	case SSL_RC2:
-		i = SSL_ENC_RC2_IDX;
-		break;
 	case SSL_IDEA:
 		i = SSL_ENC_IDEA_IDX;
 		break;
@@ -656,9 +611,6 @@ ssl_cipher_get_evp(const SSL_SESSION *s, const EVP_CIPHER **enc,
 		break;
 	case SSL_eGOST2814789CNT:
 		i = SSL_ENC_GOST89_IDX;
-		break;
-	case SSL_SEED:
-		i = SSL_ENC_SEED_IDX;
 		break;
 	case SSL_AES128GCM:
 		i = SSL_ENC_AES128GCM_IDX;
@@ -698,6 +650,12 @@ ssl_cipher_get_evp(const SSL_SESSION *s, const EVP_CIPHER **enc,
 		break;
 	case SSL_GOST89MAC:
 		i = SSL_MD_GOST89MAC_IDX;
+		break;
+	case SSL_STREEBOG256:
+		i = SSL_MD_STREEBOG256_IDX;
+		break;
+	case SSL_STREEBOG512:
+		i = SSL_MD_STREEBOG512_IDX;
 		break;
 	default:
 		i = -1;
@@ -836,7 +794,8 @@ ll_append_head(CIPHER_ORDER **head, CIPHER_ORDER *curr,
 }
 
 static void
-ssl_cipher_get_disabled(unsigned long *mkey, unsigned long *auth, unsigned long *enc, unsigned long *mac, unsigned long *ssl)
+ssl_cipher_get_disabled(unsigned long *mkey, unsigned long *auth,
+    unsigned long *enc, unsigned long *mac, unsigned long *ssl)
 {
 	*mkey = 0;
 	*auth = 0;
@@ -844,21 +803,16 @@ ssl_cipher_get_disabled(unsigned long *mkey, unsigned long *auth, unsigned long 
 	*mac = 0;
 	*ssl = 0;
 
-	*mkey |= SSL_kDHr|SSL_kDHd; /* no such ciphersuites supported! */
-	*auth |= SSL_aDH;
-
-	/* Check for presence of GOST 34.10 algorithms, and if they
-	 * do not present, disable  appropriate auth and key exchange */
-	if (!get_optional_pkey_id("gost94")) {
-		*auth |= SSL_aGOST94;
-	}
-	if (!get_optional_pkey_id("gost2001")) {
+	/*
+	 * Check for the availability of GOST 34.10 public/private key
+	 * algorithms. If they are not available disable the associated
+	 * authentication and key exchange algorithms.
+	 */
+	if (EVP_PKEY_meth_find(NID_id_GostR3410_2001) == NULL) {
 		*auth |= SSL_aGOST01;
-	}
-	/* Disable GOST key exchange if no GOST signature algs are available * */
-	if ((*auth & (SSL_aGOST94|SSL_aGOST01)) == (SSL_aGOST94|SSL_aGOST01)) {
 		*mkey |= SSL_kGOST;
 	}
+
 #ifdef SSL_FORBID_ENULL
 	*enc |= SSL_eNULL;
 #endif
@@ -866,7 +820,6 @@ ssl_cipher_get_disabled(unsigned long *mkey, unsigned long *auth, unsigned long 
 	*enc |= (ssl_cipher_methods[SSL_ENC_DES_IDX ] == NULL) ? SSL_DES : 0;
 	*enc |= (ssl_cipher_methods[SSL_ENC_3DES_IDX] == NULL) ? SSL_3DES : 0;
 	*enc |= (ssl_cipher_methods[SSL_ENC_RC4_IDX ] == NULL) ? SSL_RC4 : 0;
-	*enc |= (ssl_cipher_methods[SSL_ENC_RC2_IDX ] == NULL) ? SSL_RC2 : 0;
 	*enc |= (ssl_cipher_methods[SSL_ENC_IDEA_IDX] == NULL) ? SSL_IDEA : 0;
 	*enc |= (ssl_cipher_methods[SSL_ENC_AES128_IDX] == NULL) ? SSL_AES128 : 0;
 	*enc |= (ssl_cipher_methods[SSL_ENC_AES256_IDX] == NULL) ? SSL_AES256 : 0;
@@ -875,34 +828,32 @@ ssl_cipher_get_disabled(unsigned long *mkey, unsigned long *auth, unsigned long 
 	*enc |= (ssl_cipher_methods[SSL_ENC_CAMELLIA128_IDX] == NULL) ? SSL_CAMELLIA128 : 0;
 	*enc |= (ssl_cipher_methods[SSL_ENC_CAMELLIA256_IDX] == NULL) ? SSL_CAMELLIA256 : 0;
 	*enc |= (ssl_cipher_methods[SSL_ENC_GOST89_IDX] == NULL) ? SSL_eGOST2814789CNT : 0;
-	*enc |= (ssl_cipher_methods[SSL_ENC_SEED_IDX] == NULL) ? SSL_SEED : 0;
 
 	*mac |= (ssl_digest_methods[SSL_MD_MD5_IDX ] == NULL) ? SSL_MD5 : 0;
 	*mac |= (ssl_digest_methods[SSL_MD_SHA1_IDX] == NULL) ? SSL_SHA1 : 0;
 	*mac |= (ssl_digest_methods[SSL_MD_SHA256_IDX] == NULL) ? SSL_SHA256 : 0;
 	*mac |= (ssl_digest_methods[SSL_MD_SHA384_IDX] == NULL) ? SSL_SHA384 : 0;
 	*mac |= (ssl_digest_methods[SSL_MD_GOST94_IDX] == NULL) ? SSL_GOST94 : 0;
-	*mac |= (ssl_digest_methods[SSL_MD_GOST89MAC_IDX] == NULL || ssl_mac_pkey_id[SSL_MD_GOST89MAC_IDX]==NID_undef) ? SSL_GOST89MAC : 0;
+	*mac |= (ssl_digest_methods[SSL_MD_GOST89MAC_IDX] == NULL) ? SSL_GOST89MAC : 0;
+	*mac |= (ssl_digest_methods[SSL_MD_STREEBOG256_IDX] == NULL) ? SSL_STREEBOG256 : 0;
+	*mac |= (ssl_digest_methods[SSL_MD_STREEBOG512_IDX] == NULL) ? SSL_STREEBOG512 : 0;
 
 }
 
 static void
-ssl_cipher_collect_ciphers(const SSL_METHOD *ssl_method,
-    int num_of_ciphers,
-unsigned long disabled_mkey, unsigned long disabled_auth,
+ssl_cipher_collect_ciphers(const SSL_METHOD *ssl_method, int num_of_ciphers,
+    unsigned long disabled_mkey, unsigned long disabled_auth,
     unsigned long disabled_enc, unsigned long disabled_mac,
-unsigned long disabled_ssl,
-    CIPHER_ORDER *co_list,
-CIPHER_ORDER **head_p, CIPHER_ORDER **tail_p)
+    unsigned long disabled_ssl, CIPHER_ORDER *co_list,
+    CIPHER_ORDER **head_p, CIPHER_ORDER **tail_p)
 {
 	int i, co_list_num;
 	const SSL_CIPHER *c;
 
 	/*
 	 * We have num_of_ciphers descriptions compiled in, depending on the
-	 * method selected (SSLv2 and/or SSLv3, TLSv1 etc).
-	 * These will later be sorted in a linked list with at most num
-	 * entries.
+	 * method selected (SSLv3, TLSv1, etc). These will later be sorted in
+	 * a linked list with at most num entries.
 	 */
 
 	/* Get the initial list of ciphers */
@@ -929,7 +880,7 @@ CIPHER_ORDER **head_p, CIPHER_ORDER **tail_p)
 
 	/*
 	 * Prepare linked list from list entries
-	 */	
+	 */
 	if (co_list_num > 0) {
 		co_list[0].prev = NULL;
 
@@ -941,7 +892,8 @@ CIPHER_ORDER **head_p, CIPHER_ORDER **tail_p)
 				co_list[i].next = &co_list[i + 1];
 			}
 
-			co_list[co_list_num - 1].prev = &co_list[co_list_num - 2];
+			co_list[co_list_num - 1].prev =
+			    &co_list[co_list_num - 2];
 		}
 
 		co_list[co_list_num - 1].next = NULL;
@@ -1474,7 +1426,6 @@ ssl_create_cipher_list(const SSL_METHOD *ssl_method,
 
 	/* Move ciphers without forward secrecy to the end */
 	ssl_cipher_apply_rule(0, 0, SSL_aECDH, 0, 0, 0, 0, CIPHER_ORD, -1, &head, &tail);
-	/* ssl_cipher_apply_rule(0, 0, SSL_aDH, 0, 0, 0, 0, CIPHER_ORD, -1, &head, &tail); */
 	ssl_cipher_apply_rule(0, SSL_kRSA, 0, 0, 0, 0, 0, CIPHER_ORD, -1, &head, &tail);
 
 	/* RC4 is sort-of broken -- move the the end */
@@ -1567,16 +1518,28 @@ ssl_create_cipher_list(const SSL_METHOD *ssl_method,
 	if (*cipher_list_by_id != NULL)
 		sk_SSL_CIPHER_free(*cipher_list_by_id);
 	*cipher_list_by_id = tmp_cipher_list;
-	(void)sk_SSL_CIPHER_set_cmp_func(*cipher_list_by_id, ssl_cipher_ptr_id_cmp);
+	(void)sk_SSL_CIPHER_set_cmp_func(*cipher_list_by_id,
+	    ssl_cipher_ptr_id_cmp);
 
 	sk_SSL_CIPHER_sort(*cipher_list_by_id);
 	return (cipherstack);
 }
 
+const SSL_CIPHER *
+SSL_CIPHER_get_by_id(unsigned int id)
+{
+	return ssl3_get_cipher_by_id(id);
+}
+
+const SSL_CIPHER *
+SSL_CIPHER_get_by_value(uint16_t value)
+{
+	return ssl3_get_cipher_by_value(value);
+}
+
 char *
 SSL_CIPHER_description(const SSL_CIPHER *cipher, char *buf, int len)
 {
-	static const char *fmt="%-23s %s Kx=%-8s Au=%-4s Enc=%-9s Mac=%-4s\n";
 	unsigned long alg_mkey, alg_auth, alg_enc, alg_mac, alg_ssl, alg2;
 	const char *ver, *kx, *au, *enc, *mac;
 	char *ret;
@@ -1590,9 +1553,7 @@ SSL_CIPHER_description(const SSL_CIPHER *cipher, char *buf, int len)
 
 	alg2 = cipher->algorithm2;
 
-	if (alg_ssl & SSL_SSLV2)
-		ver = "SSLv2";
-	else if (alg_ssl & SSL_SSLV3)
+	if (alg_ssl & SSL_SSLV3)
 		ver = "SSLv3";
 	else if (alg_ssl & SSL_TLSV1_2)
 		ver = "TLSv1.2";
@@ -1602,12 +1563,6 @@ SSL_CIPHER_description(const SSL_CIPHER *cipher, char *buf, int len)
 	switch (alg_mkey) {
 	case SSL_kRSA:
 		kx = "RSA";
-		break;
-	case SSL_kDHr:
-		kx = "DH/RSA";
-		break;
-	case SSL_kDHd:
-		kx = "DH/DSS";
 		break;
 	case SSL_kDHE:
 		kx = "DH";
@@ -1621,6 +1576,9 @@ SSL_CIPHER_description(const SSL_CIPHER *cipher, char *buf, int len)
 	case SSL_kECDHE:
 		kx = "ECDH";
 		break;
+	case SSL_kGOST:
+		kx = "GOST";
+		break;
 	default:
 		kx = "unknown";
 	}
@@ -1632,9 +1590,6 @@ SSL_CIPHER_description(const SSL_CIPHER *cipher, char *buf, int len)
 	case SSL_aDSS:
 		au = "DSS";
 		break;
-	case SSL_aDH:
-		au = "DH";
-		break;
 	case SSL_aECDH:
 		au = "ECDH";
 		break;
@@ -1643,6 +1598,9 @@ SSL_CIPHER_description(const SSL_CIPHER *cipher, char *buf, int len)
 		break;
 	case SSL_aECDSA:
 		au = "ECDSA";
+		break;
+	case SSL_aGOST01:
+		au = "GOST01";
 		break;
 	default:
 		au = "unknown";
@@ -1658,9 +1616,6 @@ SSL_CIPHER_description(const SSL_CIPHER *cipher, char *buf, int len)
 		break;
 	case SSL_RC4:
 		enc = alg2 & SSL2_CF_8_BYTE_ENC ? "RC4(64)" : "RC4(128)";
-		break;
-	case SSL_RC2:
-		enc = "RC2(128)";
 		break;
 	case SSL_IDEA:
 		enc = "IDEA(128)";
@@ -1686,11 +1641,11 @@ SSL_CIPHER_description(const SSL_CIPHER *cipher, char *buf, int len)
 	case SSL_CAMELLIA256:
 		enc = "Camellia(256)";
 		break;
-	case SSL_SEED:
-		enc = "SEED(128)";
-		break;
 	case SSL_CHACHA20POLY1305:
 		enc = "ChaCha20-Poly1305";
+		break;
+	case SSL_eGOST2814789CNT:
+		enc = "GOST-28178-89-CNT";
 		break;
 	default:
 		enc = "unknown";
@@ -1713,12 +1668,25 @@ SSL_CIPHER_description(const SSL_CIPHER *cipher, char *buf, int len)
 	case SSL_AEAD:
 		mac = "AEAD";
 		break;
+	case SSL_GOST94:
+		mac = "GOST94";
+		break;
+	case SSL_GOST89MAC:
+		mac = "GOST89IMIT";
+		break;
+	case SSL_STREEBOG256:
+		mac = "STREEBOG256";
+		break;
+	case SSL_STREEBOG512:
+		mac = "STREEBOG512";
+		break;
 	default:
 		mac = "unknown";
 		break;
 	}
 
-	if (asprintf(&ret, fmt, cipher->name, ver, kx, au, enc, mac) == -1)
+	if (asprintf(&ret, "%-23s %s Kx=%-8s Au=%-4s Enc=%-9s Mac=%-4s\n",
+	    cipher->name, ver, kx, au, enc, mac) == -1)
 		return "OPENSSL_malloc Error";
 
 	if (buf != NULL) {
@@ -1735,15 +1703,10 @@ SSL_CIPHER_description(const SSL_CIPHER *cipher, char *buf, int len)
 char *
 SSL_CIPHER_get_version(const SSL_CIPHER *c)
 {
-	int i;
-
 	if (c == NULL)
 		return("(NONE)");
-	i = (int)(c->id >> 24L);
-	if (i == 3)
+	if ((c->id >> 24) == 3)
 		return("TLSv1/SSLv3");
-	else if (i == 2)
-		return("SSLv2");
 	else
 		return("unknown");
 }
@@ -1775,6 +1738,12 @@ unsigned long
 SSL_CIPHER_get_id(const SSL_CIPHER *c)
 {
 	return c->id;
+}
+
+uint16_t
+SSL_CIPHER_get_value(const SSL_CIPHER *c)
+{
+	return ssl3_cipher_get_value(c);
 }
 
 void *

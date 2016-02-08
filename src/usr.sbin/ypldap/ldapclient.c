@@ -1,4 +1,4 @@
-/* $OpenBSD: ldapclient.c,v 1.30 2014/07/13 15:38:09 krw Exp $ */
+/* $OpenBSD: ldapclient.c,v 1.32 2015/01/16 06:40:22 deraadt Exp $ */
 
 /*
  * Copyright (c) 2008 Alexander Schrijver <aschrijver@openbsd.org>
@@ -18,9 +18,9 @@
  */
 
 #include <sys/types.h>
-#include <sys/param.h>
 #include <sys/queue.h>
 #include <sys/socket.h>
+#include <sys/signal.h>
 #include <sys/tree.h>
 
 #include <netinet/in.h>
@@ -36,6 +36,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <limits.h>
 
 #include "aldap.h"
 #include "ypldap.h"
@@ -74,7 +75,7 @@ client_aldap_open(struct ypldap_addr *addr)
 			sizeof(sbuf), NI_NUMERICHOST | NI_NUMERICSERV))
 				errx(1, "could not get numeric hostname");
 
-		if ((fd = socket(AF_INET, SOCK_STREAM, 0)) < 0)
+		if ((fd = socket(sa->sa_family, SOCK_STREAM, 0)) < 0)
 			return NULL;
 
 		if (connect(fd, sa, SA_LEN(sa)) == 0)

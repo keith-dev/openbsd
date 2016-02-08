@@ -1,4 +1,4 @@
-/*	$OpenBSD: rtld_machine.c,v 1.9 2013/06/13 04:13:47 brad Exp $	*/
+/*	$OpenBSD: rtld_machine.c,v 1.11 2014/12/14 19:55:12 miod Exp $	*/
 
 /*
  * Copyright (c) 2013 Miodrag Vallat.
@@ -66,6 +66,8 @@ _dl_md_reloc(elf_object_t *object, int rel, int relasz)
 	struct load_list *llist;
 	Elf32_Addr loff;
 	Elf32_Rela  *relas;
+	Elf32_Addr prev_value = 0, prev_ooff = 0;
+	const Elf32_Sym *prev_sym = NULL;
 
 	loff = object->obj_base;
 	numrela = object->Dyn.info[relasz] / sizeof(Elf32_Rela);
@@ -100,8 +102,6 @@ _dl_md_reloc(elf_object_t *object, int rel, int relasz)
 		const Elf32_Sym *sym, *this;
 		const char *symn;
 		int type;
-		Elf32_Addr prev_value = 0, prev_ooff = 0;
-		const Elf32_Sym *prev_sym = NULL;
 
 		type = ELF32_R_TYPE(relas->r_info);
 

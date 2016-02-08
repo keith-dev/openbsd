@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_cue.c,v 1.66 2014/07/13 15:52:49 mpi Exp $ */
+/*	$OpenBSD: if_cue.c,v 1.68 2015/02/04 05:12:13 mpi Exp $ */
 /*	$NetBSD: if_cue.c,v 1.40 2002/07/11 21:14:26 augustss Exp $	*/
 /*
  * Copyright (c) 1997, 1998, 1999, 2000
@@ -734,12 +734,6 @@ cue_rxeof(struct usbd_xfer *xfer, void *priv, usbd_status status)
 	}
 
 #if NBPFILTER > 0
-	/*
-	 * Handle BPF listeners. Let the BPF user see the packet, but
-	 * don't pass it up to the ether_input() layer unless it's
-	 * a broadcast packet, multicast packet, matches our ethernet
-	 * address or the interface is in promiscuous mode.
-	 */
 	if (ifp->if_bpf)
 		bpf_mtap(ifp->if_bpf, m, BPF_DIRECTION_IN);
 #endif
@@ -1073,11 +1067,9 @@ cue_ioctl(struct ifnet *ifp, u_long command, caddr_t data)
 		cue_init(sc);
 
 		switch (ifa->ifa_addr->sa_family) {
-#ifdef INET
 		case AF_INET:
 			arp_ifinit(&sc->arpcom, ifa);
 			break;
-#endif /* INET */
 		}
 		break;
 

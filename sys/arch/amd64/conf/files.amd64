@@ -1,4 +1,4 @@
-#	$OpenBSD: files.amd64,v 1.74 2014/07/11 21:54:37 tedu Exp $
+#	$OpenBSD: files.amd64,v 1.77 2015/01/16 10:17:51 sf Exp $
 
 maxpartitions 16
 maxusers 2 16 128
@@ -79,6 +79,8 @@ define	mainbus {[apid = -1]}
 device	mainbus: isabus, pcibus, mainbus
 attach	mainbus at root
 file	arch/amd64/amd64/mainbus.c		mainbus
+
+file	arch/amd64/amd64/codepatch.c
 
 device	bios {}
 attach	bios at mainbus
@@ -183,14 +185,10 @@ include	"dev/pckbc/files.pckbc"
 
 file	arch/amd64/amd64/wscons_machdep.c	wsdisplay
 
-# Floppy disk controller
-device	fdc {[drive = -1]}
-attach	fdc at isa
-file	dev/isa/fdc.c				fdc needs-flag
-
-device	fd: disk, isa_dma
-attach	fd at fdc
-file	dev/isa/fd.c				fd needs-flag
+# Soekris GPIO & LEDs driver
+device	skgpio: gpiobus
+attach	skgpio at isa
+file	dev/isa/skgpio.c			skgpio
 
 pseudo-device	pctr
 file	arch/amd64/amd64/pctr.c		pctr needs-flag

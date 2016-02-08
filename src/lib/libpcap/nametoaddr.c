@@ -1,4 +1,4 @@
-/*	$OpenBSD: nametoaddr.c,v 1.14 2014/03/21 02:55:29 lteo Exp $	*/
+/*	$OpenBSD: nametoaddr.c,v 1.16 2015/01/16 03:19:57 lteo Exp $	*/
 
 /*
  * Copyright (c) 1990, 1991, 1992, 1993, 1994, 1995, 1996
@@ -36,10 +36,6 @@ struct rtentry;
 #include <netinet/in.h>
 #include <netinet/if_ether.h>
 #include <arpa/inet.h>
-#ifdef INET6
-#include <netdb.h>
-#include <sys/socket.h>
-#endif /*INET6*/
 
 #include <ctype.h>
 #include <errno.h>
@@ -320,7 +316,7 @@ pcap_ether_aton(const char *s)
 	register u_char *ep, *e;
 	register u_int d;
 
-	e = ep = (u_char *)malloc(6);
+	e = ep = malloc(6);
 	if (e == NULL)
 		bpf_error("malloc");
 
@@ -360,7 +356,7 @@ pcap_ether_hostton(const char *name)
 	
 	while ((ep = pcap_next_etherent(fp)) != NULL) {
 		if (strcmp(ep->name, name) == 0) {
-			ap = (u_char *)malloc(6);
+			ap = malloc(6);
 			if (ap != NULL) {
 				memcpy(ap, ep->addr, 6);
 				return (ap);
@@ -381,7 +377,7 @@ pcap_ether_hostton(const char *name)
 
 	ap = NULL;
 	if (ether_hostton(name, (struct ether_addr *)a) == 0) {
-		ap = (u_char *)malloc(6);
+		ap = malloc(6);
 		if (ap != NULL)
 			memcpy((char *)ap, (char *)a, 6);
 	}

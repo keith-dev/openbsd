@@ -1,4 +1,4 @@
-/*	$OpenBSD: pmap.h,v 1.25 2014/01/30 18:16:41 miod Exp $	*/
+/*	$OpenBSD: pmap.h,v 1.32 2015/02/15 21:34:33 miod Exp $	*/
 /*	$NetBSD: pmap.h,v 1.76 2003/09/06 09:10:46 rearnsha Exp $	*/
 
 /*
@@ -68,8 +68,6 @@
 
 #ifndef	_ARM_PMAP_H_
 #define	_ARM_PMAP_H_
-
-#include <sys/lock.h>		/* struct simplelock */ 
 
 #ifdef _KERNEL
 
@@ -176,7 +174,6 @@ struct pmap {
 	struct l1_ttable	*pm_l1;
 	union pmap_cache_state	pm_cstate;
 	u_int			pm_refs;
-	simple_lock_data_t	pm_lock;
 	struct l2_dtable	*pm_l2[L2_SIZE];
 	struct pmap_statistics	pm_stats;
 };
@@ -246,7 +243,7 @@ extern int		pmap_debug_level; /* Only exists if PMAP_DEBUG */
 #define	pmap_copy(dp, sp, da, l, sa)	do { /* nothing */ } while (0)
 
 #define pmap_unuse_final(p)		do { /* nothing */ } while (0)
-#define	pmap_remove_holes(map)		do { /* nothing */ } while (0)
+#define	pmap_remove_holes(vm)		do { /* nothing */ } while (0)
 
 /*
  * Functions that we need to export
@@ -282,12 +279,6 @@ vsize_t	pmap_map_chunk(vaddr_t, vaddr_t, paddr_t, vsize_t, int, int);
 void	pmap_link_l2pt(vaddr_t, vaddr_t, pv_addr_t *);
 void	pmap_devmap_bootstrap(vaddr_t, const struct pmap_devmap *);
 void	pmap_devmap_register(const struct pmap_devmap *);
-
-/*
- * Special page zero routine for use by the idle loop (no cache cleans). 
- */
-boolean_t	pmap_pageidlezero(struct vm_page *);
-#define PMAP_PAGEIDLEZERO(pg)	pmap_pageidlezero((pg))
 
 /*
  * The current top of kernel VM
@@ -328,9 +319,9 @@ extern int pmap_needs_pte_sync;
 
 #define	PTE_SYNC(pte)							\
 do {									\
+	cpu_drain_writebuf();						\
 	if (PMAP_NEEDS_PTE_SYNC) {					\
 		paddr_t pa;						\
-		cpu_drain_writebuf();					\
 		cpu_dcache_wb_range((vaddr_t)(pte), sizeof(pt_entry_t));\
 		if (cpu_sdcache_enabled()) { 				\
 		(void)pmap_extract(pmap_kernel(), (vaddr_t)(pte), &pa);	\
@@ -343,9 +334,9 @@ do {									\
 
 #define	PTE_SYNC_RANGE(pte, cnt)					\
 do {									\
+	cpu_drain_writebuf();						\
 	if (PMAP_NEEDS_PTE_SYNC) {					\
 		paddr_t pa;						\
-		cpu_drain_writebuf();					\
 		cpu_dcache_wb_range((vaddr_t)(pte),			\
 		    (cnt) << 2); /* * sizeof(pt_entry_t) */		\
 		if (cpu_sdcache_enabled()) { 				\
@@ -440,6 +431,12 @@ extern pt_entry_t		pte_l1_s_coherent;
 extern pt_entry_t		pte_l2_l_coherent;
 extern pt_entry_t		pte_l2_s_coherent;
 
+extern pt_entry_t		pte_l1_s_prot_ur;
+extern pt_entry_t		pte_l1_s_prot_uw;
+extern pt_entry_t		pte_l1_s_prot_kr;
+extern pt_entry_t		pte_l1_s_prot_kw;
+extern pt_entry_t		pte_l1_s_prot_mask;
+
 extern pt_entry_t		pte_l2_s_prot_ur;
 extern pt_entry_t		pte_l2_s_prot_uw;
 extern pt_entry_t		pte_l2_s_prot_kr;
@@ -470,9 +467,23 @@ extern void (*pmap_zero_page_func)(struct vm_page *);
  * We use these macros since we use different bits on different processor
  * models.
  */
-#define	L1_S_PROT_U		(L1_S_AP(AP_U))
-#define	L1_S_PROT_W		(L1_S_AP(AP_W))
-#define	L1_S_PROT_MASK		(L1_S_PROT_U|L1_S_PROT_W)
+#define	L1_S_PROT_UR_generic	(L1_S_AP(AP_U))
+#define	L1_S_PROT_UW_generic	(L1_S_AP(AP_U|AP_W))
+#define	L1_S_PROT_KR_generic	(L1_S_AP(0))
+#define	L1_S_PROT_KW_generic	(L1_S_AP(AP_W))
+#define	L1_S_PROT_MASK_generic	(L1_S_AP(0x03))
+
+#define	L1_S_PROT_UR_xscale	(L1_S_AP(AP_U))
+#define	L1_S_PROT_UW_xscale	(L1_S_AP(AP_U|AP_W))
+#define	L1_S_PROT_KR_xscale	(L1_S_AP(0))
+#define	L1_S_PROT_KW_xscale	(L1_S_AP(AP_W))
+#define	L1_S_PROT_MASK_xscale	(L1_S_AP(0x03))
+
+#define	L1_S_PROT_UR_v7		(L1_S_V7_AP(AP_KRWUR))
+#define	L1_S_PROT_UW_v7		(L1_S_V7_AP(AP_KRWURW))
+#define	L1_S_PROT_KR_v7		(L1_S_V7_AP(AP_V7_KR))
+#define	L1_S_PROT_KW_v7		(L1_S_V7_AP(AP_KRW))
+#define	L1_S_PROT_MASK_v7	(L1_S_V7_AP(0x07))
 
 #define	L1_S_CACHE_MASK_generic	(L1_S_B|L1_S_C)
 #define	L1_S_CACHE_MASK_xscale	(L1_S_B|L1_S_C|L1_S_XSCALE_TEX(TEX_XSCALE_X))
@@ -542,6 +553,12 @@ extern void (*pmap_zero_page_func)(struct vm_page *);
 
 #if ARM_NMMUS > 1
 /* More than one MMU class configured; use variables. */
+#define	L1_S_PROT_UR		pte_l1_s_prot_ur
+#define	L1_S_PROT_UW		pte_l1_s_prot_uw
+#define	L1_S_PROT_KR		pte_l1_s_prot_kr
+#define	L1_S_PROT_KW		pte_l1_s_prot_kw
+#define	L1_S_PROT_MASK		pte_l1_s_prot_mask
+
 #define	L2_S_PROT_UR		pte_l2_s_prot_ur
 #define	L2_S_PROT_UW		pte_l2_s_prot_uw
 #define	L2_S_PROT_KR		pte_l2_s_prot_kr
@@ -563,6 +580,12 @@ extern void (*pmap_zero_page_func)(struct vm_page *);
 #define	pmap_copy_page(s, d)	(*pmap_copy_page_func)((s), (d))
 #define	pmap_zero_page(d)	(*pmap_zero_page_func)((d))
 #elif (ARM_MMU_GENERIC + ARM_MMU_SA1) != 0
+#define	L1_S_PROT_UR		L1_S_PROT_UR_generic
+#define	L1_S_PROT_UW		L1_S_PROT_UW_generic
+#define	L1_S_PROT_KR		L1_S_PROT_KR_generic
+#define	L1_S_PROT_KW		L1_S_PROT_KW_generic
+#define	L1_S_PROT_MASK		L1_S_PROT_MASK_generic
+
 #define	L2_S_PROT_UR		L2_S_PROT_UR_generic
 #define	L2_S_PROT_UW		L2_S_PROT_UW_generic
 #define	L2_S_PROT_KR		L2_S_PROT_KR_generic
@@ -584,6 +607,12 @@ extern void (*pmap_zero_page_func)(struct vm_page *);
 #define	pmap_copy_page(s, d)	pmap_copy_page_generic((s), (d))
 #define	pmap_zero_page(d)	pmap_zero_page_generic((d))
 #elif ARM_MMU_XSCALE == 1
+#define	L1_S_PROT_UR		L1_S_PROT_UR_xscale
+#define	L1_S_PROT_UW		L1_S_PROT_UW_xscale
+#define	L1_S_PROT_KR		L1_S_PROT_KR_xscale
+#define	L1_S_PROT_KW		L1_S_PROT_KW_xscale
+#define	L1_S_PROT_MASK		L1_S_PROT_MASK_xscale
+
 #define	L2_S_PROT_UR		L2_S_PROT_UR_xscale
 #define	L2_S_PROT_UW		L2_S_PROT_UW_xscale
 #define	L2_S_PROT_KR		L2_S_PROT_KR_xscale
@@ -605,6 +634,12 @@ extern void (*pmap_zero_page_func)(struct vm_page *);
 #define	pmap_copy_page(s, d)	pmap_copy_page_xscale((s), (d))
 #define	pmap_zero_page(d)	pmap_zero_page_xscale((d))
 #elif ARM_MMU_V7 == 1
+#define	L1_S_PROT_UR		L1_S_PROT_UR_v7
+#define	L1_S_PROT_UW		L1_S_PROT_UW_v7
+#define	L1_S_PROT_KR		L1_S_PROT_KR_v7
+#define	L1_S_PROT_KW		L1_S_PROT_KW_v7
+#define	L1_S_PROT_MASK		L1_S_PROT_MASK_v7
+
 #define	L2_S_PROT_UR		L2_S_PROT_UR_v7
 #define	L2_S_PROT_UW		L2_S_PROT_UW_v7
 #define	L2_S_PROT_KR		L2_S_PROT_KR_v7
@@ -631,25 +666,42 @@ extern void (*pmap_zero_page_func)(struct vm_page *);
  * These macros return various bits based on kernel/user and protection.
  * Note that the compiler will usually fold these at compile time.
  */
-#define	L1_S_PROT(ku, pr)	((((ku) == PTE_USER) ? L1_S_PROT_U : 0) | \
-				 (((pr) & VM_PROT_WRITE) ? L1_S_PROT_W : 0))
-
 #ifndef _LOCORE
+static __inline pt_entry_t
+L1_S_PROT(int ku, vm_prot_t pr)
+{
+	pt_entry_t pte;
+
+	if (ku == PTE_USER)
+		pte = (pr & PROT_WRITE) ? L1_S_PROT_UW : L1_S_PROT_UR;
+	else
+		pte = (pr & PROT_WRITE) ? L1_S_PROT_KW : L1_S_PROT_KR;
+	/*
+	 * If we set the XN bit, the abort handlers or the vector page
+	 * might be marked as such. Needs Debugging.
+	 */
+	/*
+	if ((pr & PROT_EXEC) == 0)
+		pte |= L1_S_V7_XN;
+	*/
+
+	return pte;
+}
 static __inline pt_entry_t
 L2_L_PROT(int ku, vm_prot_t pr)
 {
 	pt_entry_t pte;
 
 	if (ku == PTE_USER)
-		pte = (pr & VM_PROT_WRITE) ? L2_L_PROT_UW : L2_L_PROT_UR;
+		pte = (pr & PROT_WRITE) ? L2_L_PROT_UW : L2_L_PROT_UR;
 	else
-		pte = (pr & VM_PROT_WRITE) ? L2_L_PROT_KW : L2_L_PROT_KR;
+		pte = (pr & PROT_WRITE) ? L2_L_PROT_KW : L2_L_PROT_KR;
 	/*
 	 * If we set the XN bit, the abort handlers or the vector page
 	 * might be marked as such. Needs Debugging.
 	 */
 	/*
-	if ((pr & VM_PROT_EXECUTE) == 0)
+	if ((pr & PROT_EXEC) == 0)
 		pte |= L2_V7_L_XN;
 	*/
 
@@ -661,15 +713,15 @@ L2_S_PROT(int ku, vm_prot_t pr)
 	pt_entry_t pte;
 
 	if (ku == PTE_USER)
-		pte = (pr & VM_PROT_WRITE) ? L2_S_PROT_UW : L2_S_PROT_UR;
+		pte = (pr & PROT_WRITE) ? L2_S_PROT_UW : L2_S_PROT_UR;
 	else
-		pte = (pr & VM_PROT_WRITE) ? L2_S_PROT_KW : L2_S_PROT_KR;
+		pte = (pr & PROT_WRITE) ? L2_S_PROT_KW : L2_S_PROT_KR;
 	/*
 	 * If we set the XN bit, the abort handlers or the vector page
 	 * might be marked as such. Needs Debugging.
 	 */
 	/*
-	if ((pr & VM_PROT_EXECUTE) == 0)
+	if ((pr & PROT_EXEC) == 0)
 		pte |= L2_V7_S_XN;
 	*/
 
@@ -682,7 +734,7 @@ l2pte_is_writeable(pt_entry_t pte, struct pmap *pm)
 	/* XXX use of L2_V7_S_XN */
 	return (pte & L2_S_PROT_MASK & ~L2_V7_S_XN) ==
 	    L2_S_PROT(pm == pmap_kernel() ? PTE_KERNEL : PTE_USER,
-	              VM_PROT_WRITE);
+	              PROT_WRITE);
 }
 #endif
 
@@ -721,7 +773,6 @@ extern uint32_t pmap_alias_bits;
  */
 struct vm_page_md {
 	struct pv_entry *pvh_list;		/* pv_entry list */
-	struct simplelock pvh_slock;		/* lock on this head */
 	int pvh_attrs;				/* page attributes */
 	u_int uro_mappings;
 	u_int urw_mappings;
@@ -737,7 +788,6 @@ struct vm_page_md {
 #define	VM_MDPAGE_INIT(pg)						\
 do {									\
 	(pg)->mdpage.pvh_list = NULL;					\
-	simple_lock_init(&(pg)->mdpage.pvh_slock);			\
 	(pg)->mdpage.pvh_attrs = 0;					\
 	(pg)->mdpage.uro_mappings = 0;					\
 	(pg)->mdpage.urw_mappings = 0;					\

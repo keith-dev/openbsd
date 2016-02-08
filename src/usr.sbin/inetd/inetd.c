@@ -1,4 +1,4 @@
-/*	$OpenBSD: inetd.c,v 1.138 2014/06/17 03:12:37 lteo Exp $	*/
+/*	$OpenBSD: inetd.c,v 1.143 2015/01/16 06:40:17 deraadt Exp $	*/
 
 /*
  * Copyright (c) 1983,1991 The Regents of the University of California.
@@ -121,7 +121,6 @@
  *
  */
 
-#include <sys/param.h>
 #include <sys/stat.h>
 #include <sys/ioctl.h>
 #include <sys/socket.h>
@@ -145,29 +144,28 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
+#include <limits.h>
 #include <string.h>
 #include <login_cap.h>
 #include <ifaddrs.h>
 #include <rpc/rpc.h>
 #include <rpc/pmap_clnt.h>
 #include <rpcsvc/nfs_prot.h>
+#include <event.h>
 #include "pathnames.h"
+
+#define MINIMUM(a, b)	(((a) < (b)) ? (a) : (b))
 
 #define	TOOMANY		256		/* don't start more than TOOMANY */
 #define	CNT_INTVL	60		/* servers in CNT_INTVL sec. */
 #define	RETRYTIME	(60*10)		/* retry after bind or server fail */
 
 int	 debug = 0;
-int	 nsock, maxsock;
-fd_set	*allsockp;
-int	 allsockn;
+int	 maxsock;
 int	 toomany = TOOMANY;
-int	 options;
 int	 timingout;
 struct	 servent *sp;
 uid_t	 uid;
-sigset_t blockmask;
-sigset_t emptymask;
 
 #ifndef OPEN_MAX
 #define OPEN_MAX	64
@@ -215,6 +213,7 @@ struct	servtab {
 	int	se_count;		/* number started since se_time */
 	struct	timeval se_time;	/* start of se_count */
 	struct	servtab *se_next;
+	struct	event se_event;
 } *servtab;
 
 void echo_stream(int, struct servtab *);
@@ -258,22 +257,19 @@ struct biltin {
 	{ 0 }
 };
 
-volatile sig_atomic_t wantretry;
-volatile sig_atomic_t wantconfig;
-volatile sig_atomic_t wantreap;
-volatile sig_atomic_t wantdie;
+struct event evsig_alrm;
+struct event evsig_hup;
+struct event evsig_chld;
+struct event evsig_term;
+struct event evsig_int;
 
-void	config(int);
-void	doconfig(void);
-void	reap(int);
-void	doreap(void);
-void	retry(int);
-void	doretry(void);
-void	die(int);
-void	dodie(void);
-void	logpid(void);
-void	spawn(struct servtab *, int);
-int	gettcp(struct servtab *);
+void	config(int, short, void *);
+void	reap(int, short, void *);
+void	retry(int, short, void *);
+void	die(int, short, void *);
+
+void	spawn(int, short, void *);
+void	gettcp(int, short, void *);
 int	setconfig(void);
 void	endconfig(void);
 void	register_rpc(struct servtab *);
@@ -290,40 +286,15 @@ int	dg_broadcast(struct in_addr *in);
 #define NUMINT	(sizeof(intab) / sizeof(struct inent))
 char	*CONFIG = _PATH_INETDCONF;
 
-void		fd_grow(fd_set **fdsp, int *bytes, int fd);
 int		dg_badinput(struct sockaddr *sa);
 void		inetd_setproctitle(char *a, int s);
 void		initring(void);
 u_int32_t	machtime(void);
 
-void
-fd_grow(fd_set **fdsp, int *bytes, int fd)
-{
-	caddr_t new;
-	int newbytes;
-
-	newbytes = howmany(fd+1, NFDBITS) * sizeof(fd_mask);
-	if (newbytes > *bytes) {
-		newbytes *= 2;			/* optimism */
-		new = realloc(*fdsp, newbytes);
-		if (new == NULL) {
-			syslog(LOG_ERR, "Out of memory.");
-			exit(1);
-		}
-		memset(new + *bytes, 0, newbytes - *bytes);
-		*fdsp = (fd_set *)new;
-		*bytes = newbytes;
-	}
-}
-
-struct sigaction sa, sapipe;
-
 int
 main(int argc, char *argv[])
 {
-	fd_set *fdsrp = NULL;
-	int readablen = 0, ch;
-	struct servtab *sep;
+	int ch;
 	extern char *optarg;
 	extern int optind;
 	
@@ -331,7 +302,6 @@ main(int argc, char *argv[])
 		switch (ch) {
 		case 'd':
 			debug = 1;
-			options |= SO_DEBUG;
 			break;
 		case 'R': {	/* invocation rate */
 			char *p;
@@ -385,7 +355,6 @@ main(int argc, char *argv[])
 	}
 
 	openlog("inetd", LOG_PID | LOG_NOWAIT, LOG_DAEMON);
-	logpid();
 
 	if (getrlimit(RLIMIT_NOFILE, &rlim_nofile) < 0) {
 		syslog(LOG_ERR, "getrlimit: %m");
@@ -395,108 +364,37 @@ main(int argc, char *argv[])
 			rlim_nofile_cur = OPEN_MAX;
 	}
 
-	sigemptyset(&emptymask);
-	sigemptyset(&blockmask);
-	sigaddset(&blockmask, SIGCHLD);
-	sigaddset(&blockmask, SIGHUP);
-	sigaddset(&blockmask, SIGALRM);
+	event_init();
 
-	memset(&sa, 0, sizeof(sa));
-	sigemptyset(&sa.sa_mask);
-	sigaddset(&sa.sa_mask, SIGALRM);
-	sigaddset(&sa.sa_mask, SIGCHLD);
-	sigaddset(&sa.sa_mask, SIGHUP);
-	sa.sa_handler = retry;
-	sigaction(SIGALRM, &sa, NULL);
-	doconfig();
-	sa.sa_handler = config;
-	sigaction(SIGHUP, &sa, NULL);
-	sa.sa_handler = reap;
-	sigaction(SIGCHLD, &sa, NULL);
-	sa.sa_handler = die;
-	sigaction(SIGTERM, &sa, NULL);
-	sa.sa_handler = die;
-	sigaction(SIGINT, &sa, NULL);
-	sa.sa_handler = SIG_IGN;
-	sigaction(SIGPIPE, &sa, &sapipe);
+	signal_set(&evsig_alrm, SIGALRM, retry, NULL);
+	signal_add(&evsig_alrm, NULL);
 
-	for (;;) {
-		int n, ctrl = -1;
+	config(0, 0, NULL);
 
-	    restart:
-		if (nsock == 0) {
-			(void) sigprocmask(SIG_BLOCK, &blockmask, NULL);
-			while (nsock == 0) {
-				if (wantretry || wantconfig || wantreap || wantdie)
-					break;
-				sigsuspend(&emptymask);
-			}
-			(void) sigprocmask(SIG_SETMASK, &emptymask, NULL);
-		}
+	signal_set(&evsig_hup, SIGHUP, config, NULL);
+	signal_add(&evsig_hup, NULL);
+	signal_set(&evsig_chld, SIGCHLD, reap, NULL);
+	signal_add(&evsig_chld, NULL);
+	signal_set(&evsig_term, SIGTERM, die, NULL);
+	signal_add(&evsig_term, NULL);
+	signal_set(&evsig_int, SIGINT, die, NULL);
+	signal_add(&evsig_int, NULL);
 
-		while (wantretry || wantconfig || wantreap || wantdie) {
-			if (wantretry) {
-				wantretry = 0;
-				doretry();
-			}
-			if (wantconfig) {
-				wantconfig = 0;
-				doconfig();
-			}
-			if (wantreap) {
-				wantreap = 0;
-				doreap();
-			}
-			if (wantdie)
-				dodie();
-			goto restart;
-		}
+	signal(SIGPIPE, SIG_IGN);
 
-		if (readablen != allsockn) {
-			if (fdsrp)
-				free(fdsrp);
-			fdsrp = calloc(allsockn, 1);
-			if (fdsrp == NULL) {
-				syslog(LOG_ERR, "Out of memory.");
-				exit(1);
-			}
-			readablen = allsockn;
-		}
-		bcopy(allsockp, fdsrp, allsockn);
+	event_dispatch();
 
-		if ((n = select(maxsock + 1, fdsrp, NULL, NULL, NULL)) <= 0) {
-			if (n < 0 && errno != EINTR) {
-				syslog(LOG_WARNING, "select: %m");
-				sleep(1);
-			}
-			continue;
-		}
-
-		for (sep = servtab; n && sep; sep = sep->se_next) {
-			if (sep->se_fd != -1 &&
-			    FD_ISSET(sep->se_fd, fdsrp)) {
-				n--;
-				if (debug)
-					fprintf(stderr, "someone wants %s\n",
-					    sep->se_service);
-				if (!sep->se_wait &&
-				    sep->se_socktype == SOCK_STREAM) {
-					ctrl = gettcp(sep);
-					if (ctrl == -1)
-						continue;
-				} else
-					ctrl = sep->se_fd;
-				(void) sigprocmask(SIG_BLOCK, &blockmask, NULL);
-				spawn(sep, ctrl);	/* spawn will unblock */
-			}
-		}
-	}
+	return (0);
 }
 
-int
-gettcp(struct servtab *sep)
+void
+gettcp(int fd, short events, void *xsep)
 {
+	struct servtab *sep = xsep;
 	int ctrl;
+
+	if (debug)
+		fprintf(stderr, "someone wants %s\n", sep->se_service);
 
 	ctrl = accept(sep->se_fd, NULL, NULL);
 	if (debug)
@@ -506,7 +404,7 @@ gettcp(struct servtab *sep)
 		    errno != ECONNABORTED)
 			syslog(LOG_WARNING, "accept (for %s): %m",
 			    sep->se_service);
-		return -1;
+		return;
 	}
 	if ((sep->se_family == AF_INET || sep->se_family == AF_INET6) &&
 	    sep->se_socktype == SOCK_STREAM) {
@@ -517,7 +415,7 @@ gettcp(struct servtab *sep)
 		if (getpeername(ctrl, (struct sockaddr *)&peer, &plen) < 0) {
 			syslog(LOG_WARNING, "could not getpeername");
 			close(ctrl);
-			return -1;
+			return;
 		}
 		if (getnameinfo((struct sockaddr *)&peer, plen, NULL, 0,
 		    sbuf, sizeof(sbuf), NI_NUMERICSERV) == 0 &&
@@ -526,12 +424,12 @@ gettcp(struct servtab *sep)
 			 * ignore things that look like ftp bounce
 			 */
 			close(ctrl);
-			return -1;
+			return;
 		}
 	}
-	return (ctrl);
-}
 
+	spawn(ctrl, 0, sep);
+}
 
 int
 dg_badinput(struct sockaddr *sa)
@@ -607,15 +505,8 @@ dg_broadcast(struct in_addr *in)
 	return (0);
 }
 
-/* ARGSUSED */
 void
-reap(int sig)
-{
-	wantreap = 1;
-}
-
-void
-doreap(void)
+reap(int sig, short event, void *arg)
 {
 	struct servtab *sep;
 	int status;
@@ -644,9 +535,7 @@ doreap(void)
 					    "%s: exit signal %d",
 					    sep->se_server, WTERMSIG(status));
 				sep->se_wait = 1;
-				fd_grow(&allsockp, &allsockn, sep->se_fd);
-				FD_SET(sep->se_fd, allsockp);
-				nsock++;
+				event_add(&sep->se_event, NULL);
 				if (debug)
 					fprintf(stderr, "restored %s, fd %d\n",
 					    sep->se_service, sep->se_fd);
@@ -654,20 +543,12 @@ doreap(void)
 	}
 }
 
-/* ARGSUSED */
 void
-config(int sig)
-{
-	wantconfig = 1;
-}
-
-void
-doconfig(void)
+config(int sig, short event, void *arg)
 {
 	struct servtab *sep, *cp, **sepp;
 	int add;
 	char protoname[10];
-	sigset_t omask;
 
 	if (!setconfig()) {
 		syslog(LOG_ERR, "%s: %m", CONFIG);
@@ -686,7 +567,6 @@ doconfig(void)
 
 #define SWAP(type, a, b) {type c=(type)a; a=(type)b; b=(type)c;}
 
-			sigprocmask(SIG_BLOCK, &blockmask, &omask);
 			/*
 			 * sep->se_wait may be holding the pid of a daemon
 			 * that we're waiting for.  If so, don't overwrite
@@ -707,7 +587,6 @@ doconfig(void)
 				unregister_rpc(sep);
 			sep->se_rpcversl = cp->se_rpcversl;
 			sep->se_rpcversh = cp->se_rpcversh;
-			sigprocmask(SIG_SETMASK, &omask, NULL);
 			freeconfig(cp);
 			add = 1;
 		} else {
@@ -782,8 +661,7 @@ doconfig(void)
 				if (port != sep->se_ctrladdr_in.sin_port) {
 					sep->se_ctrladdr_in.sin_port = port;
 					if (sep->se_fd != -1) {
-						FD_CLR(sep->se_fd, allsockp);
-						nsock--;
+						event_del(&sep->se_event);
 						(void) close(sep->se_fd);
 					}
 					sep->se_fd = -1;
@@ -838,8 +716,7 @@ doconfig(void)
 				if (port != sep->se_ctrladdr_in6.sin6_port) {
 					sep->se_ctrladdr_in6.sin6_port = port;
 					if (sep->se_fd != -1) {
-						FD_CLR(sep->se_fd, allsockp);
-						nsock--;
+						event_del(&sep->se_event);
 						(void) close(sep->se_fd);
 					}
 					sep->se_fd = -1;
@@ -866,7 +743,6 @@ doconfig(void)
 	/*
 	 * Purge anything not looked at above.
 	 */
-	sigprocmask(SIG_BLOCK, &blockmask, &omask);
 	sepp = &servtab;
 	while ((sep = *sepp)) {
 		if (sep->se_checked) {
@@ -875,8 +751,7 @@ doconfig(void)
 		}
 		*sepp = sep->se_next;
 		if (sep->se_fd != -1) {
-			FD_CLR(sep->se_fd, allsockp);
-			nsock--;
+			event_del(&sep->se_event);
 			(void) close(sep->se_fd);
 		}
 		if (isrpcservice(sep))
@@ -888,18 +763,10 @@ doconfig(void)
 		freeconfig(sep);
 		free(sep);
 	}
-	sigprocmask(SIG_SETMASK, &omask, NULL);
-}
-
-/* ARGSUSED */
-void
-retry(int sig)
-{
-	wantretry = 1;
 }
 
 void
-doretry(void)
+retry(int sig, short events, void *arg)
 {
 	struct servtab *sep;
 
@@ -919,15 +786,8 @@ doretry(void)
 	}
 }
 
-/* ARGSUSED */
 void
-die(int sig)
-{
-	wantdie = 1;
-}
-
-void
-dodie(void)
+die(int sig, short events, void *arg)
 {
 	struct servtab *sep;
 
@@ -947,7 +807,6 @@ dodie(void)
 		}
 		(void)close(sep->se_fd);
 	}
-	(void)unlink(_PATH_INETDPID);
 	exit(0);
 }
 
@@ -965,7 +824,7 @@ setup(struct servtab *sep)
 	}
 #define	turnon(fd, opt) \
 setsockopt(fd, SOL_SOCKET, opt, &on, sizeof (on))
-	if (strncmp(sep->se_proto, "tcp", 3) == 0 && (options & SO_DEBUG) &&
+	if (strncmp(sep->se_proto, "tcp", 3) == 0 && debug &&
 	    turnon(sep->se_fd, SO_DEBUG) < 0)
 		syslog(LOG_ERR, "setsockopt (SO_DEBUG): %m");
 	if (turnon(sep->se_fd, SO_REUSEADDR) < 0)
@@ -1020,9 +879,16 @@ setsockopt(fd, SOL_SOCKET, opt, &on, sizeof (on))
 	if (sep->se_socktype == SOCK_STREAM)
 		listen(sep->se_fd, 10);
 
-	fd_grow(&allsockp, &allsockn, sep->se_fd);
-	FD_SET(sep->se_fd, allsockp);
-	nsock++;
+	if (!sep->se_wait && sep->se_socktype == SOCK_STREAM) {
+		event_set(&sep->se_event, sep->se_fd, EV_READ|EV_PERSIST,
+		    gettcp, sep);
+	} else {
+		event_set(&sep->se_event, sep->se_fd, EV_READ|EV_PERSIST,
+		    spawn, sep);
+	}
+
+	event_add(&sep->se_event, NULL);
+
 	if (sep->se_fd > maxsock) {
 		maxsock = sep->se_fd;
 		if (maxsock > rlim_nofile_cur - FD_MARGIN)
@@ -1083,7 +949,6 @@ struct servtab *
 enter(struct servtab *cp)
 {
 	struct servtab *sep;
-	sigset_t omask;
 
 	sep = malloc(sizeof (*sep));
 	if (sep == NULL) {
@@ -1093,10 +958,8 @@ enter(struct servtab *cp)
 	*sep = *cp;
 	sep->se_fd = -1;
 	sep->se_rpcprog = -1;
-	sigprocmask(SIG_BLOCK, &blockmask, &omask);
 	sep->se_next = servtab;
 	servtab = sep;
-	sigprocmask(SIG_SETMASK, &omask, NULL);
 	return (sep);
 }
 
@@ -1556,17 +1419,6 @@ inetd_setproctitle(char *a, int s)
 		setproctitle("-%s", a);
 }
 
-void
-logpid(void)
-{
-	FILE *fp;
-
-	if ((fp = fopen(_PATH_INETDPID, "w")) != NULL) {
-		fprintf(fp, "%ld\n", (long)getpid());
-		(void)fclose(fp);
-	}
-}
-
 int
 bump_nofile(void)
 {
@@ -1578,8 +1430,8 @@ bump_nofile(void)
 		syslog(LOG_ERR, "getrlimit: %m");
 		return -1;
 	}
-	rl.rlim_cur = MIN(rl.rlim_max, rl.rlim_cur + FD_CHUNK);
-	rl.rlim_cur = MIN(FD_SETSIZE, rl.rlim_cur + FD_CHUNK);
+	rl.rlim_cur = MINIMUM(rl.rlim_max, rl.rlim_cur + FD_CHUNK);
+	rl.rlim_cur = MINIMUM(FD_SETSIZE, rl.rlim_cur + FD_CHUNK);
 	if (rl.rlim_cur <= rlim_nofile_cur) {
 		syslog(LOG_ERR,
 		    "bump_nofile: cannot extend file limit, max = %d",
@@ -1759,9 +1611,7 @@ machtime(void)
 
 /* ARGSUSED */
 void
-machtime_stream(s, sep)
-	int s;
-	struct servtab *sep;
+machtime_stream(int s, struct servtab *sep)
 {
 	u_int32_t result;
 
@@ -1853,13 +1703,17 @@ print_service(char *action, struct servtab *sep)
 }
 
 void
-spawn(struct servtab *sep, int ctrl)
+spawn(int ctrl, short events, void *xsep)
 {
+	struct servtab *sep = xsep;
 	struct passwd *pwd;
 	int tmpint, dofork;
 	struct group *grp = NULL;
 	char buf[50];
 	pid_t pid;
+
+	if (debug)
+		fprintf(stderr, "someone wants %s\n", sep->se_service);
 
 	pid = 0;
 	dofork = (sep->se_bi == 0 || sep->se_bi->bi_fork);
@@ -1887,8 +1741,6 @@ spawn(struct servtab *sep, int ctrl)
 					 * Simply ignore the connection.
 					 */
 					--sep->se_count;
-					sigprocmask(SIG_SETMASK, &emptymask,
-					    NULL);
 					return;
 				}
 				syslog(LOG_ERR,
@@ -1897,13 +1749,11 @@ spawn(struct servtab *sep, int ctrl)
 				if (!sep->se_wait &&
 				    sep->se_socktype == SOCK_STREAM)
 					close(ctrl);
-				FD_CLR(sep->se_fd, allsockp);
+				event_del(&sep->se_event);
 				(void) close(sep->se_fd);
+
 				sep->se_fd = -1;
 				sep->se_count = 0;
-				nsock--;
-				sigprocmask(SIG_SETMASK, &emptymask,
-				    NULL);
 				if (!timingout) {
 					timingout = 1;
 					alarm(RETRYTIME);
@@ -1917,16 +1767,13 @@ spawn(struct servtab *sep, int ctrl)
 		syslog(LOG_ERR, "fork: %m");
 		if (!sep->se_wait && sep->se_socktype == SOCK_STREAM)
 			close(ctrl);
-		sigprocmask(SIG_SETMASK, &emptymask, NULL);
 		sleep(1);
 		return;
 	}
 	if (pid && sep->se_wait) {
 		sep->se_wait = pid;
-		FD_CLR(sep->se_fd, allsockp);
-		nsock--;
+		event_del(&sep->se_event);
 	}
-	sigprocmask(SIG_SETMASK, &emptymask, NULL);
 	if (pid == 0) {
 		if (sep->se_bi)
 			(*sep->se_bi->bi_fn)(ctrl, sep);
@@ -1983,7 +1830,7 @@ spawn(struct servtab *sep, int ctrl)
 			dup2(STDIN_FILENO, STDERR_FILENO);
 			closelog();
 			closefrom(3);
-			sigaction(SIGPIPE, &sapipe, NULL);
+			signal(SIGPIPE, SIG_DFL);
 			execv(sep->se_server, sep->se_argv);
 			if (sep->se_socktype != SOCK_STREAM)
 				recv(0, buf, sizeof (buf), 0);

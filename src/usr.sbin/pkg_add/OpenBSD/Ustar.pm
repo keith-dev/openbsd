@@ -1,5 +1,5 @@
 # ex:ts=8 sw=4:
-# $OpenBSD: Ustar.pm,v 1.80 2014/07/23 14:35:17 espie Exp $
+# $OpenBSD: Ustar.pm,v 1.86 2015/01/04 14:10:20 espie Exp $
 #
 # Copyright (c) 2002-2014 Marc Espie <espie@openbsd.org>
 #
@@ -49,10 +49,10 @@ use File::Basename ();
 use OpenBSD::IdCache;
 use OpenBSD::Paths;
 
-my $uidcache = new OpenBSD::UidCache;
-my $gidcache = new OpenBSD::GidCache;
-my $unamecache = new OpenBSD::UnameCache;
-my $gnamecache = new OpenBSD::GnameCache;
+our $uidcache = new OpenBSD::UidCache;
+our $gidcache = new OpenBSD::GidCache;
+our $unamecache = new OpenBSD::UnameCache;
+our $gnamecache = new OpenBSD::GnameCache;
 
 # This is a multiple of st_blksize everywhere....
 my $buffsize = 2 * 1024 * 1024;
@@ -310,10 +310,10 @@ sub pack_header
 		$header = pack(USTAR_HEADER,
 		    $name,
 		    sprintf("%07o", $entry->{mode}),
-		    sprintf("%07o", $entry->{uid}),
-		    sprintf("%07o", $entry->{gid}),
+		    sprintf("%07o", $entry->{uid} // 0),
+		    sprintf("%07o", $entry->{gid} // 0),
 		    sprintf("%011o", $size),
-		    sprintf("%011o", $entry->{mtime}),
+		    sprintf("%011o", $entry->{mtime} // 0),
 		    $cksum,
 		    $type,
 		    $linkname,
@@ -328,7 +328,7 @@ sub pack_header
 	return $header;
 }
 
-my $random_name = "A_random_name000";
+my $whatever = "usual_suspect000";
 
 sub mkheader
 {
@@ -394,8 +394,8 @@ sub mkheader
 	}
 	if ($x) {
 		my $extended = $archive->pack_header(XHDR, length($x), $entry,
-		    '', $random_name, '', $uname, $gname, $major, $minor);
-		$random_name++;
+		    '', $whatever, '', $uname, $gname, $major, $minor);
+		$whatever++;
 		if ((length $x) % 512) {
 			$x .= "\0" x (512 - ((length $x) % 512));
 		}
@@ -485,6 +485,16 @@ sub fh
 
 package OpenBSD::Ustar::Object;
 
+sub recheck_owner
+{
+	my $entry = shift;
+	# XXX weird format to prevent cvs from expanding OpenBSD id
+	$entry->{uid} //= $OpenBSD::Ustar::uidcache
+	    ->lookup($entry->{uname});
+	$entry->{gid} //= $OpenBSD::Ustar::gidcache
+	    ->lookup($entry->{gname});
+}
+
 sub fatal
 {
 	my ($self, @args) = @_;
@@ -502,7 +512,7 @@ sub errsay
 	my ($self, @args) = @_;
 	$self->{archive}{state}->errsay(@args);
 }
-sub todo
+sub left_todo
 {
 	my ($self, $toread) = @_;
 	return if $toread == 0;
@@ -830,7 +840,7 @@ sub create
 		}
 
 		$toread -= $actual;
-		$self->todo($toread);
+		$self->left_todo($toread);
 	}
 	$out->close or $self->fatal("Error closing #1#2: #3",
 	    $self->{destdir}, $self->name, $!);
@@ -897,7 +907,7 @@ sub write_contents
 		}
 
 		$toread -= $actual;
-		$self->todo($toread);
+		$self->left_todo($toread);
 	}
 	if ($size % 512) {
 		print $out "\0" x (512 - $size % 512) or

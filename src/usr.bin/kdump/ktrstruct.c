@@ -1,4 +1,4 @@
-/*	$OpenBSD: ktrstruct.c,v 1.5 2014/07/11 21:49:13 tedu Exp $	*/
+/*	$OpenBSD: ktrstruct.c,v 1.9 2014/12/16 03:19:23 jsg Exp $	*/
 
 /*-
  * Copyright (c) 1988, 1993
@@ -35,6 +35,7 @@
 #include <sys/stat.h>
 #include <sys/time.h>
 #include <sys/un.h>
+#include <ufs/ufs/quota.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
 
@@ -132,17 +133,24 @@ ktrsockaddr(struct sockaddr *sa)
 }
 
 static void
-print_time(time_t t, int relative)
+print_time(time_t t, int relative, int have_subsec)
 {
 	char timestr[PATH_MAX + 4];
 	struct tm *tm;
 
-	if (resolv == 0 || relative)
+	if (t < 0 && have_subsec) {
+		/* negative times with non-zero subsecs require care */
+		printf("-%jd", -(intmax_t)(t + 1));
+	} else
 		printf("%jd", (intmax_t)t);
-	else {
+
+	if (!relative) {
 		tm = localtime(&t);
-		(void)strftime(timestr, sizeof(timestr), TIME_FORMAT, tm);
-		printf("\"%s\"", timestr);
+		if (tm != NULL) {
+			(void)strftime(timestr, sizeof(timestr), TIME_FORMAT,
+			    tm);
+			printf("<\"%s\">", timestr);
+		}
 	}
 }
 
@@ -153,15 +161,43 @@ print_timespec(const struct timespec *tsp, int relative)
 		printf("UTIME_NOW");
 	else if (tsp->tv_nsec == UTIME_OMIT)
 		printf("UTIME_OMIT");
-	else if ((resolv == 0 || relative) && tsp->tv_sec < 0 &&
-	    tsp->tv_nsec > 0) {
-		/* negative relative times with non-zero nsecs require care */
-		printf("-%jd.%09ld", -(intmax_t)(tsp->tv_sec+1),
-		    1000000000 - tsp->tv_nsec);
-	} else {
-		print_time(tsp->tv_sec, relative);
+	else {
+		print_time(tsp->tv_sec, relative, tsp->tv_nsec);
 		if (tsp->tv_nsec != 0)
-			printf(".%09ld", tsp->tv_nsec);
+			printf(".%09ld", tsp->tv_sec >= 0 ? tsp->tv_nsec :
+			    1000000000 - tsp->tv_nsec);
+	}
+}
+
+void
+uidname(int uid)
+{
+	const char *name;
+
+	if (uid == -1)
+		printf("-1");
+	else {
+		printf("%u<", (unsigned)uid);
+		if (uid > UID_MAX || (name = user_from_uid(uid, 1)) == NULL)
+			printf("unknown>");
+		else
+			printf("\"%s\">", name);
+	}
+}
+
+void
+gidname(int gid)
+{
+	const char *name;
+
+	if (gid == -1)
+		printf("-1");
+	else {
+		printf("%u<", (unsigned)gid);
+		if (gid > GID_MAX || (name = group_from_gid(gid, 1)) == NULL)
+			printf("unknown>");
+		else
+			printf("\"%s\">", name);
 	}
 }
 
@@ -169,8 +205,6 @@ static void
 ktrstat(const struct stat *statp)
 {
 	char mode[12];
-	struct passwd *pwd;
-	struct group  *grp;
 
 	/*
 	 * note: ktrstruct() has already verified that statp points to a
@@ -178,25 +212,20 @@ ktrstat(const struct stat *statp)
 	 */
 	printf("struct stat { ");
 	strmode(statp->st_mode, mode);
-	printf("dev=%d, ino=%llu, mode=%s, nlink=%u, ",
+	printf("dev=%d, ino=%llu, mode=%s, nlink=%u, uid=",
 	    statp->st_dev, (unsigned long long)statp->st_ino,
 	    mode, statp->st_nlink);
-	if (resolv == 0 || (pwd = getpwuid(statp->st_uid)) == NULL)
-		printf("uid=%u, ", statp->st_uid);
-	else
-		printf("uid=\"%s\", ", pwd->pw_name);
-	if (resolv == 0 || (grp = getgrgid(statp->st_gid)) == NULL)
-		printf("gid=%u, ", statp->st_gid);
-	else
-		printf("gid=\"%s\", ", grp->gr_name);
-	printf("rdev=%d, ", statp->st_rdev);
+	uidname(statp->st_uid);
+	printf(", gid=");
+	gidname(statp->st_gid);
+	printf(", rdev=%d, ", statp->st_rdev);
 	printf("atime=");
 	print_timespec(&statp->st_atim, 0);
 	printf(", mtime=");
 	print_timespec(&statp->st_mtim, 0);
 	printf(", ctime=");
 	print_timespec(&statp->st_ctim, 0);
-	printf(", size=%lld, blocks=%lld, blksize=%u, flags=0x%x, gen=0x%x",
+	printf(", size=%lld, blocks=%lld, blksize=%d, flags=0x%x, gen=0x%x",
 	    statp->st_size, statp->st_blocks, statp->st_blksize,
 	    statp->st_flags, statp->st_gen);
 	printf(" }\n");
@@ -213,16 +242,10 @@ ktrtimespec(const struct timespec *tsp, int relative)
 static void
 print_timeval(const struct timeval *tvp, int relative)
 {
-	if ((resolv == 0 || relative) && tvp->tv_sec < 0 &&
-	    tvp->tv_usec > 0) {
-		/* negative relative times with non-zero usecs require care */
-		printf("-%jd.%06ld", -(intmax_t)(tvp->tv_sec+1),
+	print_time(tvp->tv_sec, relative, tvp->tv_usec);
+	if (tvp->tv_usec != 0)
+		printf(".%06ld", tvp->tv_sec >= 0 ? tvp->tv_usec :
 		    1000000 - tvp->tv_usec);
-	} else {
-		print_time(tvp->tv_sec, relative);
-		if (tvp->tv_usec != 0)
-			printf(".%06ld", tvp->tv_usec);
-	}
 }
 
 static void
@@ -327,6 +350,20 @@ ktrrusage(const struct rusage *rup)
 	    rup->ru_nvcsw, rup->ru_nivcsw);
 }
 
+static void
+ktrquota(const struct dqblk *quota)
+{
+	printf("struct dqblk { bhardlimit=%u, bsoftlimit=%u, curblocks=%u,"
+	    " ihardlimit=%u, isoftlimit=%u, curinodes=%u, btime=",
+	    quota->dqb_bhardlimit, quota->dqb_bsoftlimit,
+	    quota->dqb_curblocks, quota->dqb_ihardlimit,
+	    quota->dqb_isoftlimit, quota->dqb_curinodes);
+	print_time(quota->dqb_btime, 0, 0);
+	printf(", itime=");
+	print_time(quota->dqb_itime, 0, 0);
+	printf(" }\n");
+}
+
 void
 ktrstruct(char *buf, size_t buflen)
 {
@@ -417,6 +454,13 @@ ktrstruct(char *buf, size_t buflen)
 		memcpy(fds, data, datalen);
 		ktrfdset(fds, datalen);
 		free(fds);
+	} else if (strcmp(name, "quota") == 0) {
+		struct dqblk quota;
+
+		if (datalen != sizeof(quota))
+			goto invalid;
+		memcpy(&quota, data, datalen);
+		ktrquota(&quota);
 	} else {
 		printf("unknown structure %s\n", name);
 	}

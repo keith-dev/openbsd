@@ -1,4 +1,4 @@
-/*	$OpenBSD: icmp6.c,v 1.147 2014/07/22 11:06:10 mpi Exp $	*/
+/*	$OpenBSD: icmp6.c,v 1.157 2015/03/04 11:10:55 mpi Exp $	*/
 /*	$KAME: icmp6.c,v 1.217 2001/06/20 15:03:29 jinmei Exp $	*/
 
 /*
@@ -78,6 +78,7 @@
 #include <sys/domain.h>
 
 #include <net/if.h>
+#include <net/if_var.h>
 #include <net/route.h>
 #include <net/if_dl.h>
 #include <net/if_types.h>
@@ -91,7 +92,6 @@
 #include <netinet6/mld6_var.h>
 #include <netinet/in_pcb.h>
 #include <netinet6/nd6.h>
-#include <netinet6/in6_ifattach.h>
 #include <netinet6/ip6protosw.h>
 
 #if NCARP > 0
@@ -1046,9 +1046,8 @@ icmp6_mtudisc_update(struct ip6ctlparam *ip6cp, int validated)
 			rt->rt_rmx.rmx_mtu = mtu;
 		}
 	}
-	if (rt) { /* XXX: need braces to avoid conflict with else in RTFREE. */
-		RTFREE(rt);
-	}
+	if (rt)
+		rtfree(rt);
 
 	/*
 	 * Notify protocols that the MTU for this destination
@@ -1083,7 +1082,7 @@ icmp6_rip6_input(struct mbuf **mp, int off)
 	rip6src.sin6_len = sizeof(struct sockaddr_in6);
 	rip6src.sin6_family = AF_INET6;
 	/* KAME hack: recover scopeid */
-	(void)in6_recoverscope(&rip6src, &ip6->ip6_src, m->m_pkthdr.rcvif);
+	(void)in6_recoverscope(&rip6src, &ip6->ip6_src, NULL);
 
 	TAILQ_FOREACH(in6p, &rawin6pcbtable.inpt_queue, inp_queue) {
 		if (!(in6p->inp_flags & INP_IPV6))
@@ -1281,9 +1280,8 @@ icmp6_reflect(struct mbuf *m, size_t off)
 		bzero(&ro, sizeof(ro));
 		error = in6_selectsrc(&src, &sa6_src, NULL, NULL, &ro, NULL,
 		    m->m_pkthdr.ph_rtableid);
-		if (ro.ro_rt) { /* XXX: see comments in icmp6_mtudisc_update */
-			RTFREE(ro.ro_rt); /* XXX: we could use this */
-		}
+		if (ro.ro_rt)
+			rtfree(ro.ro_rt); /* XXX: we could use this */
 		if (error) {
 			nd6log((LOG_DEBUG,
 			    "icmp6_reflect: source can't be determined: "
@@ -1386,7 +1384,7 @@ icmp6_redirect_input(struct mbuf *m, int off)
 	/* XXX if we are router, we don't update route by icmp6 redirect */
 	if (ip6_forwarding)
 		goto freeit;
-	if (!icmp6_rediraccept)
+	if (!(ifp->if_xflags & IFXF_AUTOCONF6))
 		goto freeit;
 
 	IP6_EXTHDR_GET(nd_rd, struct nd_redirect *, m, off, icmp6len);
@@ -1434,7 +1432,7 @@ icmp6_redirect_input(struct mbuf *m, int off)
 	sin6.sin6_family = AF_INET6;
 	sin6.sin6_len = sizeof(struct sockaddr_in6);
 	bcopy(&reddst6, &sin6.sin6_addr, sizeof(reddst6));
-	rt = rtalloc1(sin6tosa(&sin6), 0, m->m_pkthdr.ph_rtableid);
+	rt = rtalloc(sin6tosa(&sin6), 0, m->m_pkthdr.ph_rtableid);
 	if (rt) {
 		if (rt->rt_gateway == NULL ||
 		    rt->rt_gateway->sa_family != AF_INET6) {
@@ -1442,7 +1440,7 @@ icmp6_redirect_input(struct mbuf *m, int off)
 			    "ICMP6 redirect rejected; no route "
 			    "with inet6 gateway found for redirect dst: %s\n",
 			    icmp6_redirect_diag(&src6, &reddst6, &redtgt6)));
-			RTFREE(rt);
+			rtfree(rt);
 			goto bad;
 		}
 
@@ -1454,7 +1452,7 @@ icmp6_redirect_input(struct mbuf *m, int off)
 				"%s\n",
 				inet_ntop(AF_INET6, gw6, addr, sizeof(addr)),
 				icmp6_redirect_diag(&src6, &reddst6, &redtgt6)));
-			RTFREE(rt);
+			rtfree(rt);
 			goto bad;
 		}
 	} else {
@@ -1464,7 +1462,7 @@ icmp6_redirect_input(struct mbuf *m, int off)
 			icmp6_redirect_diag(&src6, &reddst6, &redtgt6)));
 		goto bad;
 	}
-	RTFREE(rt);
+	rtfree(rt);
 	rt = NULL;
     }
 
@@ -1941,7 +1939,7 @@ icmp6_mtudisc_clone(struct sockaddr *dst, u_int rdomain)
 	struct rtentry *rt;
 	int    error;
 
-	rt = rtalloc1(dst, RT_REPORT, rdomain);
+	rt = rtalloc(dst, RT_REPORT|RT_RESOLVE, rdomain);
 	if (rt == 0)
 		return NULL;
 
@@ -1949,13 +1947,17 @@ icmp6_mtudisc_clone(struct sockaddr *dst, u_int rdomain)
 	if ((rt->rt_flags & RTF_HOST) == 0) {
 		struct rt_addrinfo info;
 		struct rtentry *nrt;
+		int s;
 
 		bzero(&info, sizeof(info));
 		info.rti_flags = RTF_GATEWAY | RTF_HOST | RTF_DYNAMIC;
 		info.rti_info[RTAX_DST] = dst;
 		info.rti_info[RTAX_GATEWAY] = rt->rt_gateway;
+
+		s = splsoftnet();
 		error = rtrequest1(RTM_ADD, &info, rt->rt_priority, &nrt,
 		    rdomain);
+		splx(s);
 		if (error) {
 			rtfree(rt);
 			return NULL;
@@ -1981,15 +1983,11 @@ icmp6_mtudisc_timeout(struct rtentry *rt, struct rttimer *r)
 		panic("icmp6_mtudisc_timeout: bad route to timeout");
 	if ((rt->rt_flags & (RTF_DYNAMIC | RTF_HOST)) ==
 	    (RTF_DYNAMIC | RTF_HOST)) {
-		struct rt_addrinfo info;
+		int s;
 
-		bzero(&info, sizeof(info));
-		info.rti_flags = rt->rt_flags;
-		info.rti_info[RTAX_DST] = rt_key(rt);
-		info.rti_info[RTAX_GATEWAY] = rt->rt_gateway;
-		info.rti_info[RTAX_NETMASK] = rt_mask(rt);
-		rtrequest1(RTM_DELETE, &info, rt->rt_priority, NULL,
-		    r->rtt_tableid);
+		s = splsoftnet();
+		rtdeletemsg(rt, r->rtt_tableid);
+		splx(s);
 	} else {
 		if (!(rt->rt_rmx.rmx_locks & RTV_MTU))
 			rt->rt_rmx.rmx_mtu = 0;
@@ -2003,15 +2001,11 @@ icmp6_redirect_timeout(struct rtentry *rt, struct rttimer *r)
 		panic("icmp6_redirect_timeout: bad route to timeout");
 	if ((rt->rt_flags & (RTF_GATEWAY | RTF_DYNAMIC | RTF_HOST)) ==
 	    (RTF_GATEWAY | RTF_DYNAMIC | RTF_HOST)) {
-		struct rt_addrinfo info;
+		int s;
 
-		bzero(&info, sizeof(info));
-		info.rti_flags = rt->rt_flags;
-		info.rti_info[RTAX_DST] = rt_key(rt);
-		info.rti_info[RTAX_GATEWAY] = rt->rt_gateway;
-		info.rti_info[RTAX_NETMASK] = rt_mask(rt);
-		rtrequest1(RTM_DELETE, &info, rt->rt_priority, NULL,
-		    r->rtt_tableid);
+		s = splsoftnet();
+		rtdeletemsg(rt, r->rtt_tableid);
+		splx(s);
 	}
 }
 

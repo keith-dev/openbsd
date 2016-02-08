@@ -1,4 +1,4 @@
-/*	$OpenBSD: relayd.c,v 1.130 2014/07/13 00:32:08 benno Exp $	*/
+/*	$OpenBSD: relayd.c,v 1.138 2015/01/22 17:42:09 reyk Exp $	*/
 
 /*
  * Copyright (c) 2007 - 2014 Reyk Floeter <reyk@openbsd.org>
@@ -22,12 +22,11 @@
 #include <sys/socket.h>
 #include <sys/wait.h>
 #include <sys/resource.h>
-#include <sys/hash.h>
 
-#include <net/if.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
 
+#include <signal.h>
 #include <string.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -46,6 +45,8 @@
 #include <openssl/ssl.h>
 
 #include "relayd.h"
+
+#define MAXIMUM(a, b)	(((a) > (b)) ? (a) : (b))
 
 __dead void	 usage(void);
 
@@ -130,6 +131,7 @@ parent_sig_handler(int sig, short event, void *arg)
 		parent_reload(ps->ps_env, CONFIG_RELOAD, NULL);
 		break;
 	case SIGPIPE:
+	case SIGUSR1:
 		/* ignore */
 		break;
 	default:
@@ -199,6 +201,8 @@ main(int argc, char *argv[])
 	TAILQ_INIT(&ps->ps_rcsocks);
 	env->sc_conffile = conffile;
 	env->sc_opts = opts;
+	TAILQ_INIT(&env->sc_hosts);
+	TAILQ_INIT(&env->sc_sessions);
 
 	if (parse_config(env->sc_conffile, env) == -1)
 		exit(1);
@@ -241,12 +245,14 @@ main(int argc, char *argv[])
 	signal_set(&ps->ps_evsigchld, SIGCHLD, parent_sig_handler, ps);
 	signal_set(&ps->ps_evsighup, SIGHUP, parent_sig_handler, ps);
 	signal_set(&ps->ps_evsigpipe, SIGPIPE, parent_sig_handler, ps);
+	signal_set(&ps->ps_evsigusr1, SIGUSR1, parent_sig_handler, ps);
 
 	signal_add(&ps->ps_evsigint, NULL);
 	signal_add(&ps->ps_evsigterm, NULL);
 	signal_add(&ps->ps_evsigchld, NULL);
 	signal_add(&ps->ps_evsighup, NULL);
 	signal_add(&ps->ps_evsigpipe, NULL);
+	signal_add(&ps->ps_evsigusr1, NULL);
 
 	proc_listen(ps, procs, nitems(procs));
 
@@ -261,7 +267,7 @@ main(int argc, char *argv[])
 		exit(0);
 	}
 
-	if (env->sc_flags & (F_SSL|F_SSLCLIENT))
+	if (env->sc_flags & (F_TLS|F_TLSCLIENT))
 		ssl_init(env);
 
 	if (parent_configure(env) == -1)
@@ -300,12 +306,12 @@ parent_configure(struct relayd *env)
 	TAILQ_FOREACH(proto, env->sc_protos, entry)
 		config_setrule(env, proto);
 	TAILQ_FOREACH(rlay, env->sc_relays, rl_entry) {
-		/* Check for SSL Inspection */
-		if ((rlay->rl_conf.flags & (F_SSL|F_SSLCLIENT)) ==
-		    (F_SSL|F_SSLCLIENT) &&
-		    rlay->rl_conf.ssl_cacert_len &&
-		    rlay->rl_conf.ssl_cakey_len)
-			rlay->rl_conf.flags |= F_SSLINSPECT;
+		/* Check for TLS Inspection */
+		if ((rlay->rl_conf.flags & (F_TLS|F_TLSCLIENT)) ==
+		    (F_TLS|F_TLSCLIENT) &&
+		    rlay->rl_conf.tls_cacert_len &&
+		    rlay->rl_conf.tls_cakey_len)
+			rlay->rl_conf.flags |= F_TLSINSPECT;
 
 		config_setrelay(env, rlay);
 	}
@@ -450,6 +456,9 @@ parent_dispatch_pfe(int fd, struct privsep_proc *p, struct imsg *imsg)
 	case IMSG_CFG_DONE:
 		parent_configure_done(env);
 		break;
+	case IMSG_SNMPSOCK:
+		(void)snmp_setsock(env, p->p_id);
+		break;
 	default:
 		return (-1);
 	}
@@ -471,9 +480,6 @@ parent_dispatch_hce(int fd, struct privsep_proc *p, struct imsg *imsg)
 		scr.retval = script_exec(env, &scr);
 		proc_compose_imsg(ps, PROC_HCE, -1, IMSG_SCRIPT,
 		    -1, &scr, sizeof(scr));
-		break;
-	case IMSG_SNMPSOCK:
-		(void)snmp_setsock(env, p->p_id);
 		break;
 	case IMSG_CFG_DONE:
 		parent_configure_done(env);
@@ -558,7 +564,7 @@ purge_table(struct tablelist *head, struct table *table)
 	}
 	if (table->sendbuf != NULL)
 		free(table->sendbuf);
-	if (table->conf.flags & F_SSL)
+	if (table->conf.flags & F_TLS)
 		SSL_CTX_free(table->ssl_ctx);
 
 	if (head != NULL)
@@ -603,26 +609,26 @@ purge_relay(struct relayd *env, struct relay *rlay)
 	if (rlay->rl_dstbev != NULL)
 		bufferevent_free(rlay->rl_dstbev);
 
-	purge_key(&rlay->rl_ssl_cert, rlay->rl_conf.ssl_cert_len);
-	purge_key(&rlay->rl_ssl_key, rlay->rl_conf.ssl_key_len);
-	purge_key(&rlay->rl_ssl_ca, rlay->rl_conf.ssl_ca_len);
-	purge_key(&rlay->rl_ssl_cakey, rlay->rl_conf.ssl_cakey_len);
+	purge_key(&rlay->rl_tls_cert, rlay->rl_conf.tls_cert_len);
+	purge_key(&rlay->rl_tls_key, rlay->rl_conf.tls_key_len);
+	purge_key(&rlay->rl_tls_ca, rlay->rl_conf.tls_ca_len);
+	purge_key(&rlay->rl_tls_cakey, rlay->rl_conf.tls_cakey_len);
 
-	if (rlay->rl_ssl_x509 != NULL) {
-		X509_free(rlay->rl_ssl_x509);
-		rlay->rl_ssl_x509 = NULL;
+	if (rlay->rl_tls_x509 != NULL) {
+		X509_free(rlay->rl_tls_x509);
+		rlay->rl_tls_x509 = NULL;
 	}
-	if (rlay->rl_ssl_pkey != NULL) {
-		EVP_PKEY_free(rlay->rl_ssl_pkey);
-		rlay->rl_ssl_pkey = NULL;
+	if (rlay->rl_tls_pkey != NULL) {
+		EVP_PKEY_free(rlay->rl_tls_pkey);
+		rlay->rl_tls_pkey = NULL;
 	}
-	if (rlay->rl_ssl_cacertx509 != NULL) {
-		X509_free(rlay->rl_ssl_cacertx509);
-		rlay->rl_ssl_cacertx509 = NULL;
+	if (rlay->rl_tls_cacertx509 != NULL) {
+		X509_free(rlay->rl_tls_cacertx509);
+		rlay->rl_tls_cacertx509 = NULL;
 	}
-	if (rlay->rl_ssl_capkey != NULL) {
-		EVP_PKEY_free(rlay->rl_ssl_capkey);
-		rlay->rl_ssl_capkey = NULL;
+	if (rlay->rl_tls_capkey != NULL) {
+		EVP_PKEY_free(rlay->rl_tls_capkey);
+		rlay->rl_tls_capkey = NULL;
 	}
 
 	if (rlay->rl_ssl_ctx != NULL)
@@ -961,7 +967,7 @@ rule_inherit(struct relay_rule *rule)
 			continue;
 		if (kv_inherit(&r->rule_kv[i], kv) == NULL) {
 			free(r);
-			return(NULL);
+			return (NULL);
 		}
 	}
 
@@ -1002,7 +1008,7 @@ void
 rule_settable(struct relay_rules *rules, struct relay_table *rlt)
 {
 	struct relay_rule	*r;
-	char		 	 pname[TABLE_NAME_SIZE];
+	char			 pname[TABLE_NAME_SIZE];
 
 	if (rlt->rlt_table == NULL || strlcpy(pname, rlt->rlt_table->conf.name,
 	    sizeof(pname)) >= sizeof(pname))
@@ -1335,7 +1341,7 @@ canonicalize_host(const char *host, char *name, size_t len)
 {
 	struct sockaddr_in	 sin4;
 	struct sockaddr_in6	 sin6;
-	u_int			 i, j;
+	size_t			 i, j;
 	size_t			 plen;
 	char			 c;
 
@@ -1479,7 +1485,7 @@ socket_rlimit(int maxfd)
 	if (maxfd == -1)
 		rl.rlim_cur = rl.rlim_max;
 	else
-		rl.rlim_cur = MAX(rl.rlim_max, (rlim_t)maxfd);
+		rl.rlim_cur = MAXIMUM(rl.rlim_max, (rlim_t)maxfd);
 	if (setrlimit(RLIMIT_NOFILE, &rl) == -1)
 		fatal("socket_rlimit: failed to set resource limit");
 }

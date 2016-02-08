@@ -1,4 +1,4 @@
-/*	$OpenBSD: radix_mpath.c,v 1.23 2014/05/27 19:38:15 claudio Exp $	*/
+/*	$OpenBSD: radix_mpath.c,v 1.29 2015/03/04 15:53:29 claudio Exp $	*/
 /*	$KAME: radix_mpath.c,v 1.13 2002/10/28 21:05:59 itojun Exp $	*/
 
 /*
@@ -43,7 +43,6 @@
 #include <net/radix.h>
 #include <net/radix_mpath.h>
 #include <net/route.h>
-#include <dev/rndvar.h>
 
 #include <netinet/in.h>
 #include <netinet/ip_var.h>
@@ -53,7 +52,7 @@
 #include <netinet6/ip6_var.h>
 #endif
 
-u_int32_t rn_mpath_hash(struct route *, u_int32_t *);
+u_int32_t rn_mpath_hash(struct sockaddr *, u_int32_t *);
 
 /*
  * give some jitter to hash, to avoid synchronization between routers
@@ -147,6 +146,9 @@ rn_mpath_adj_mpflag(struct radix_node *rn, u_int8_t prio)
 {
 	struct rtentry *rt = (struct rtentry *)rn;
 
+	if (!rn)
+		return;
+
 	prio &= RTP_MASK;
 	rt = rt_mpath_matchgate(rt, NULL, prio);
 	rn = (struct radix_node *)rt;
@@ -205,16 +207,15 @@ rt_mpath_matchgate(struct rtentry *rt, struct sockaddr *gate, u_int8_t prio)
  * check if we have the same key/mask/gateway on the table already.
  */
 int
-rt_mpath_conflict(struct radix_node_head *rnh, struct rtentry *rt,
-		   struct sockaddr *netmask, int mpathok)
+rt_mpath_conflict(struct radix_node_head *rnh, struct sockaddr *dst,
+    struct sockaddr *netmask, struct sockaddr *gate, u_int8_t prio, int mpathok)
 {
-	struct radix_node *rn, *rn1;
+	struct radix_node *rn1;
 	struct rtentry *rt1;
 	char *p, *q, *eq;
 	int same, l, skip;
 
-	rn = (struct radix_node *)rt;
-	rn1 = rnh->rnh_lookup(rt_key(rt), netmask, rnh);
+	rn1 = rnh->rnh_lookup(dst, netmask, rnh);
 	if (!rn1 || rn1->rn_flags & RNF_ROOT)
 		return 0;
 
@@ -225,8 +226,8 @@ rt_mpath_conflict(struct radix_node_head *rnh, struct rtentry *rt,
 	rt1 = (struct rtentry *)rn1;
 
 	/* compare key. */
-	if (rt_key(rt1)->sa_len != rt_key(rt)->sa_len ||
-	    bcmp(rt_key(rt1), rt_key(rt), rt_key(rt1)->sa_len))
+	if (rt_key(rt1)->sa_len != dst->sa_len ||
+	    bcmp(rt_key(rt1), dst, rt_key(rt1)->sa_len))
 		goto different;
 
 	/* key was the same.  compare netmask.  hairy... */
@@ -278,11 +279,11 @@ rt_mpath_conflict(struct radix_node_head *rnh, struct rtentry *rt,
 	}
 
  maskmatched:
-	if (!mpathok && rt1->rt_priority == rt->rt_priority)
+	if (!mpathok && rt1->rt_priority == prio)
 		return EEXIST;
 
 	/* key/mask were the same.  compare gateway for all multipaths */
-	if (rt_mpath_matchgate(rt1, rt->rt_gateway, rt->rt_priority))
+	if (rt_mpath_matchgate(rt1, gate, prio))
 		/* all key/mask/gateway are the same.  conflicting entry. */
 		return EEXIST;
 
@@ -383,42 +384,32 @@ rn_mpath_reprio(struct radix_node *rn, int newprio)
 /*
  * allocate a route, potentially using multipath to select the peer.
  */
-void
-rtalloc_mpath(struct route *ro, u_int32_t *srcaddrp)
+struct rtentry *
+rtalloc_mpath(struct sockaddr *dst, u_int32_t *srcaddrp, u_int rtableid)
 {
-#if defined(INET) || defined(INET6)
+	struct rtentry *rt;
 	struct radix_node *rn;
 	int hash, npaths, threshold;
-#endif
 
-	/*
-	 * return a cached entry if it is still valid, otherwise we increase
-	 * the risk of disrupting local flows.
-	 */
-	if (ro->ro_rt && ro->ro_rt->rt_ifp && (ro->ro_rt->rt_flags & RTF_UP))
-		return;
-	ro->ro_rt = rtalloc1(&ro->ro_dst, RT_REPORT, ro->ro_tableid);
+	rt = rtalloc(dst, RT_REPORT|RT_RESOLVE, rtableid);
 
 	/* if the route does not exist or it is not multipath, don't care */
-	if (!ro->ro_rt || !(ro->ro_rt->rt_flags & RTF_MPATH))
-		return;
+	if (rt == NULL || !ISSET(rt->rt_flags, RTF_MPATH))
+		return (rt);
 
 	/* check if multipath routing is enabled for the specified protocol */
 	if (!(0
-#ifdef INET
-	    || (ipmultipath && ro->ro_dst.sa_family == AF_INET)
-#endif
+	    || (ipmultipath && dst->sa_family == AF_INET)
 #ifdef INET6
-	    || (ip6_multipath && ro->ro_dst.sa_family == AF_INET6)
+	    || (ip6_multipath && dst->sa_family == AF_INET6)
 #endif
 	    ))
-		return;
+		return (rt);
 
-#if defined(INET) || defined(INET6)
 	/* gw selection by Hash-Threshold (RFC 2992) */
-	rn = (struct radix_node *)ro->ro_rt;
+	rn = (struct radix_node *)rt;
 	npaths = rn_mpath_active_count(rn);
-	hash = rn_mpath_hash(ro, srcaddrp) & 0xffff;
+	hash = rn_mpath_hash(dst, srcaddrp) & 0xffff;
 	threshold = 1 + (0xffff / npaths);
 	while (hash > threshold && rn) {
 		/* stay within the multipath routes */
@@ -427,13 +418,13 @@ rtalloc_mpath(struct route *ro, u_int32_t *srcaddrp)
 	}
 
 	/* if gw selection fails, use the first match (default) */
-	if (!rn)
-		return;
+	if (rn != NULL) {
+		rtfree(rt);
+		rt = (struct rtentry *)rn;
+		rt->rt_refcnt++;
+	}
 
-	rtfree(ro->ro_rt);
-	ro->ro_rt = (struct rtentry *)rn;
-	ro->ro_rt->rt_refcnt++;
-#endif
+	return (rt);
 }
 
 int
@@ -468,32 +459,30 @@ rn_mpath_inithead(void **head, int off)
 	} while (0)
 
 u_int32_t
-rn_mpath_hash(struct route *ro, u_int32_t *srcaddrp)
+rn_mpath_hash(struct sockaddr *dst, u_int32_t *srcaddrp)
 {
 	u_int32_t a, b, c;
 
 	a = b = 0x9e3779b9;
 	c = hashjitter;
 
-	switch (ro->ro_dst.sa_family) {
-#ifdef INET
+	switch (dst->sa_family) {
 	case AF_INET:
 	    {
 		struct sockaddr_in *sin_dst;
 
-		sin_dst = (struct sockaddr_in *)&ro->ro_dst;
+		sin_dst = (struct sockaddr_in *)dst;
 		a += sin_dst->sin_addr.s_addr;
 		b += srcaddrp ? srcaddrp[0] : 0;
 		mix(a, b, c);
 		break;
 	    }
-#endif /* INET */
 #ifdef INET6
 	case AF_INET6:
 	    {
 		struct sockaddr_in6 *sin6_dst;
 
-		sin6_dst = (struct sockaddr_in6 *)&ro->ro_dst;
+		sin6_dst = (struct sockaddr_in6 *)dst;
 		a += sin6_dst->sin6_addr.s6_addr32[0];
 		b += sin6_dst->sin6_addr.s6_addr32[2];
 		c += srcaddrp ? srcaddrp[0] : 0;

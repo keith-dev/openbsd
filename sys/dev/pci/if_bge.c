@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_bge.c,v 1.358 2014/07/22 13:12:11 mpi Exp $	*/
+/*	$OpenBSD: if_bge.c,v 1.365 2015/02/09 09:51:16 dlg Exp $	*/
 
 /*
  * Copyright (c) 2001 Wind River Systems
@@ -89,10 +89,8 @@
 #include <net/if_dl.h>
 #include <net/if_media.h>
 
-#ifdef INET
 #include <netinet/in.h>
 #include <netinet/if_ether.h>
-#endif
 
 #if NVLAN > 0
 #include <net/if_types.h>
@@ -1117,10 +1115,10 @@ bge_newbuf(struct bge_softc *sc, int i)
 	struct mbuf		*m;
 	int			error;
 
-	m = MCLGETI(NULL, M_DONTWAIT, NULL, MCLBYTES);
+	m = MCLGETI(NULL, M_DONTWAIT, NULL, sc->bge_rx_std_len);
 	if (!m)
 		return (ENOBUFS);
-	m->m_len = m->m_pkthdr.len = MCLBYTES;
+	m->m_len = m->m_pkthdr.len = sc->bge_rx_std_len;
 	if (!(sc->bge_flags & BGE_RX_ALIGNBUG))
 	    m_adj(m, ETHER_ALIGN);
 
@@ -1226,12 +1224,6 @@ bge_newbuf_jumbo(struct bge_softc *sc, int i)
 	return (0);
 }
 
-/*
- * The standard receive ring has 512 entries in it. At 2K per mbuf cluster,
- * that's 1MB or memory, which is a lot. For now, we fill only the first
- * 256 ring entries and hope that our CPU is fast enough to keep up with
- * the NIC.
- */
 int
 bge_init_rx_ring_std(struct bge_softc *sc)
 {
@@ -1241,8 +1233,8 @@ bge_init_rx_ring_std(struct bge_softc *sc)
 		return (0);
 
 	for (i = 0; i < BGE_STD_RX_RING_CNT; i++) {
-		if (bus_dmamap_create(sc->bge_dmatag, MCLBYTES, 1, MCLBYTES, 0,
-		    BUS_DMA_NOWAIT | BUS_DMA_ALLOCNOW,
+		if (bus_dmamap_create(sc->bge_dmatag, sc->bge_rx_std_len, 1,
+		    sc->bge_rx_std_len, 0, BUS_DMA_NOWAIT | BUS_DMA_ALLOCNOW,
 		    &sc->bge_cdata.bge_rx_std_map[i]) != 0) {
 			printf("%s: unable to create dmamap for slot %d\n",
 			    sc->bge_dev.dv_xname, i);
@@ -1255,7 +1247,7 @@ bge_init_rx_ring_std(struct bge_softc *sc)
 	sc->bge_std = BGE_STD_RX_RING_CNT - 1;
 
 	/* lwm must be greater than the replenish threshold */
-	if_rxr_init(&sc->bge_std_ring, 17, BGE_JUMBO_RX_RING_CNT);
+	if_rxr_init(&sc->bge_std_ring, 17, BGE_STD_RX_RING_CNT);
 	bge_fill_rx_ring_std(sc);
 
 	SET(sc->bge_flags, BGE_RXRING_VALID);
@@ -1301,11 +1293,10 @@ bge_fill_rx_ring_std(struct bge_softc *sc)
 		if (bge_newbuf(sc, i) != 0)
 			break;
 
+		sc->bge_std = i;
 		post = 1;
 	}
 	if_rxr_put(&sc->bge_std_ring, slots);
-
-	sc->bge_std = i;
 
 	if (post)
 		bge_writembx(sc, BGE_MBX_RX_STD_PROD_LO, sc->bge_std);
@@ -1406,11 +1397,10 @@ bge_fill_rx_ring_jumbo(struct bge_softc *sc)
 		if (bge_newbuf_jumbo(sc, i) != 0)
 			break;
 
+		sc->bge_jumbo = i;
 		post = 1;
 	}
 	if_rxr_put(&sc->bge_jumbo_ring, slots);
-
-	sc->bge_jumbo = i;
 
 	if (post)
 		bge_writembx(sc, BGE_MBX_RX_JUMBO_PROD_LO, sc->bge_jumbo);
@@ -1487,6 +1477,7 @@ bge_init_tx_ring(struct bge_softc *sc)
 {
 	int i;
 	bus_dmamap_t dmamap;
+	bus_size_t txsegsz, txmaxsegsz;
 	struct txdmamap_pool_entry *dma;
 
 	if (sc->bge_flags & BGE_TXRING_VALID)
@@ -1506,11 +1497,18 @@ bge_init_tx_ring(struct bge_softc *sc)
 	if (BGE_CHIPREV(sc->bge_chipid) == BGE_CHIPREV_5700_BX)
 		bge_writembx(sc, BGE_MBX_TX_NIC_PROD0_LO, 0);
 
+	if (BGE_IS_JUMBO_CAPABLE(sc)) {
+		txsegsz = 4096;
+		txmaxsegsz = BGE_JLEN;
+	} else {
+		txsegsz = MCLBYTES;
+		txmaxsegsz = MCLBYTES;
+	}
+
 	SLIST_INIT(&sc->txdma_list);
 	for (i = 0; i < BGE_TX_RING_CNT; i++) {
-		if (bus_dmamap_create(sc->bge_dmatag, BGE_JLEN,
-		    BGE_NTXSEG, BGE_JLEN, 0, BUS_DMA_NOWAIT,
-		    &dmamap))
+		if (bus_dmamap_create(sc->bge_dmatag, txmaxsegsz,
+		    BGE_NTXSEG, txsegsz, 0, BUS_DMA_NOWAIT, &dmamap))
 			return (ENOBUFS);
 		if (dmamap == NULL)
 			panic("dmamap NULL in bge_init_tx_ring");
@@ -2003,7 +2001,7 @@ bge_blockinit(struct bge_softc *sc)
 	 * using this ring (i.e. once we set the MTU
 	 * high enough to require it).
 	 */
-	if (BGE_IS_JUMBO_CAPABLE(sc)) {
+	if (sc->bge_flags & BGE_JUMBO_RING) {
 		rcb = &sc->bge_rdata->bge_info.bge_jumbo_rx_rcb;
 		BGE_HOSTADDR(rcb->bge_hostaddr,
 		    BGE_RING_DMA_ADDR(sc, bge_rx_jumbo_ring));
@@ -2067,7 +2065,7 @@ bge_blockinit(struct bge_softc *sc)
 	 * to work around HW bugs.
 	 */
 	CSR_WRITE_4(sc, BGE_RBDI_STD_REPL_THRESH, 8);
-	if (BGE_IS_JUMBO_CAPABLE(sc))
+	if (sc->bge_flags & BGE_JUMBO_RING)
 		CSR_WRITE_4(sc, BGE_RBDI_JUMBO_REPL_THRESH, 8);
 
 	if (BGE_IS_5717_PLUS(sc)) {
@@ -2701,7 +2699,8 @@ bge_attach(struct device *parent, struct device *self, void *aux)
 	case BGE_ASICREV_BCM5719:
 	case BGE_ASICREV_BCM5720:
 		sc->bge_flags |= BGE_5717_PLUS | BGE_5755_PLUS | BGE_575X_PLUS |
-		    BGE_5705_PLUS;
+		    BGE_5705_PLUS | BGE_JUMBO_CAPABLE | BGE_JUMBO_RING |
+		    BGE_JUMBO_FRAME;
 		if (BGE_ASICREV(sc->bge_chipid) == BGE_ASICREV_BCM5719 ||
 		    BGE_ASICREV(sc->bge_chipid) == BGE_ASICREV_BCM5720) {
 			/*
@@ -2709,6 +2708,13 @@ bge_attach(struct device *parent, struct device *self, void *aux)
 			 * of TXMBUF available space.
 			 */
 			sc->bge_flags |= BGE_RDMA_BUG;
+
+			if (BGE_ASICREV(sc->bge_chipid) == BGE_ASICREV_BCM5719 &&
+			    sc->bge_chipid == BGE_CHIPID_BCM5719_A0) {
+				/* Jumbo frame on BCM5719 A0 does not work. */
+				sc->bge_flags &= ~(BGE_JUMBO_CAPABLE |
+				    BGE_JUMBO_RING | BGE_JUMBO_FRAME);
+			}
 		}
 		break;
 	case BGE_ASICREV_BCM5755:
@@ -2723,12 +2729,12 @@ bge_attach(struct device *parent, struct device *self, void *aux)
 	case BGE_ASICREV_BCM5701:
 	case BGE_ASICREV_BCM5703:
 	case BGE_ASICREV_BCM5704:
-		sc->bge_flags |= BGE_5700_FAMILY | BGE_JUMBO_CAPABLE;
+		sc->bge_flags |= BGE_5700_FAMILY | BGE_JUMBO_CAPABLE | BGE_JUMBO_RING;
 		break;
 	case BGE_ASICREV_BCM5714_A0:
 	case BGE_ASICREV_BCM5780:
 	case BGE_ASICREV_BCM5714:
-		sc->bge_flags |= BGE_5714_FAMILY;
+		sc->bge_flags |= BGE_5714_FAMILY | BGE_JUMBO_CAPABLE | BGE_JUMBO_STD;
 		/* FALLTHROUGH */
 	case BGE_ASICREV_BCM5750:
 	case BGE_ASICREV_BCM5752:
@@ -2739,6 +2745,11 @@ bge_attach(struct device *parent, struct device *self, void *aux)
 		sc->bge_flags |= BGE_5705_PLUS;
 		break;
 	}
+
+	if (sc->bge_flags & BGE_JUMBO_STD)
+		sc->bge_rx_std_len = BGE_JLEN;
+	else
+		sc->bge_rx_std_len = MCLBYTES;
 
 	/*
 	 * When using the BCM5701 in PCI-X mode, data corruption has
@@ -3404,6 +3415,7 @@ bge_reset(struct bge_softc *sc)
 void
 bge_rxeof(struct bge_softc *sc)
 {
+	struct mbuf_list ml = MBUF_LIST_INITIALIZER();
 	struct ifnet *ifp;
 	uint16_t rx_prod, rx_cons;
 	int stdcnt = 0, jumbocnt = 0;
@@ -3498,7 +3510,6 @@ bge_rxeof(struct bge_softc *sc)
 		}
 #endif
 		m->m_pkthdr.len = m->m_len = cur_rx->bge_len - ETHER_CRC_LEN;
-		m->m_pkthdr.rcvif = ifp;
 
 		bge_rxcsum(sc, cur_rx, m);
 
@@ -3510,15 +3521,7 @@ bge_rxeof(struct bge_softc *sc)
 		}
 #endif
 
-#if NBPFILTER > 0
-		/*
-		 * Handle BPF listeners. Let the BPF user see the packet.
-		 */
-		if (ifp->if_bpf)
-			bpf_mtap_ether(ifp->if_bpf, m, BPF_DIRECTION_IN);
-#endif
-
-		ether_input_mbuf(ifp, m);
+		ml_enqueue(&ml, m);
 	}
 
 	sc->bge_rx_saved_considx = rx_cons;
@@ -3531,6 +3534,8 @@ bge_rxeof(struct bge_softc *sc)
 		if_rxr_put(&sc->bge_jumbo_ring, jumbocnt);
 		bge_fill_rx_ring_jumbo(sc);
 	}
+
+	if_input(ifp, &ml);
 }
 
 void
@@ -4005,6 +4010,10 @@ bge_encap(struct bge_softc *sc, struct mbuf *m_head, u_int32_t *txidx)
 		}
 	}
 
+	if (sc->bge_flags & BGE_JUMBO_FRAME && 
+	    m_head->m_pkthdr.len > ETHER_MAX_LEN)
+		csum_flags |= BGE_TXBDFLAG_JUMBO_FRAME;
+
 	if (!(BGE_CHIPREV(sc->bge_chipid) == BGE_CHIPREV_5700_BX))
 		goto doit;
 
@@ -4234,7 +4243,7 @@ bge_init(void *xsc)
 	}
 
 	/* Init Jumbo RX ring. */
-	if (BGE_IS_JUMBO_CAPABLE(sc))
+	if (sc->bge_flags & BGE_JUMBO_RING)
 		bge_init_rx_ring_jumbo(sc);
 
 	/* Init our RX return ring index */
@@ -4433,10 +4442,8 @@ bge_ioctl(struct ifnet *ifp, u_long command, caddr_t data)
 		ifp->if_flags |= IFF_UP;
 		if (!(ifp->if_flags & IFF_RUNNING))
 			bge_init(sc);
-#ifdef INET
 		if (ifa->ifa_addr->sa_family == AF_INET)
 			arp_ifinit(&sc->arpcom, ifa);
-#endif /* INET */
 		break;
 
 	case SIOCSIFFLAGS:
@@ -4510,7 +4517,7 @@ bge_rxrinfo(struct bge_softc *sc, struct if_rxrinfo *ifri)
 	memset(ifr, 0, sizeof(ifr));
 
 	if (ISSET(sc->bge_flags, BGE_RXRING_VALID)) {
-		ifr[n].ifr_size = MCLBYTES;
+		ifr[n].ifr_size = sc->bge_rx_std_len;
 		strlcpy(ifr[n].ifr_name, "std", sizeof(ifr[n].ifr_name));
 		ifr[n].ifr_info = sc->bge_std_ring;
 
@@ -4637,7 +4644,7 @@ bge_stop(struct bge_softc *sc)
 	bge_free_rx_ring_std(sc);
 
 	/* Free jumbo RX list. */
-	if (BGE_IS_JUMBO_CAPABLE(sc))
+	if (sc->bge_flags & BGE_JUMBO_RING)
 		bge_free_rx_ring_jumbo(sc);
 
 	/* Free TX buffers. */

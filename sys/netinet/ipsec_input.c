@@ -1,4 +1,4 @@
-/*	$OpenBSD: ipsec_input.c,v 1.122 2014/07/22 11:06:10 mpi Exp $	*/
+/*	$OpenBSD: ipsec_input.c,v 1.126 2015/01/24 00:29:06 deraadt Exp $	*/
 /*
  * The authors of this code are John Ioannidis (ji@tla.org),
  * Angelos D. Keromytis (kermit@csd.uch.gr) and
@@ -47,13 +47,10 @@
 #include <sys/timeout.h>
 
 #include <net/if.h>
+#include <net/if_var.h>
 #include <net/netisr.h>
 #include <net/bpf.h>
 #include <net/route.h>
-
-#if NPF > 0
-#include <net/pfvar.h>
-#endif
 
 #include <netinet/in.h>
 #include <netinet/ip.h>
@@ -62,10 +59,11 @@
 #include <netinet/tcp.h>
 #include <netinet/udp.h>
 
-#ifdef INET6
-#ifndef INET
-#include <netinet/in.h>
+#if NPF > 0
+#include <net/pfvar.h>
 #endif
+
+#ifdef INET6
 #include <netinet6/in6_var.h>
 #include <netinet/ip6.h>
 #include <netinet6/ip6_var.h>
@@ -82,11 +80,9 @@
 #include "bpfilter.h"
 
 void *ipsec_common_ctlinput(u_int, int, struct sockaddr *, void *, int);
-#ifdef INET
 int ah4_input_cb(struct mbuf *, ...);
 int esp4_input_cb(struct mbuf *, ...);
 int ipcomp4_input_cb(struct mbuf *, ...);
-#endif
 
 #ifdef INET6
 int ah6_input_cb(struct mbuf *, int, int);
@@ -147,11 +143,9 @@ ipsec_common_input(struct mbuf *m, int skip, int protoff, int af, int sproto,
 #endif
 	    (sproto == IPPROTO_IPCOMP && !ipcomp_enable)) {
 		switch (af) {
-#ifdef INET
 		case AF_INET:
 			rip_input(m, skip, sproto);
 			break;
-#endif /* INET */
 #ifdef INET6
 		case AF_INET6:
 			rip6_input(&m, &skip, sproto);
@@ -204,14 +198,12 @@ ipsec_common_input(struct mbuf *m, int skip, int protoff, int af, int sproto,
 	dst_address.sa.sa_family = af;
 
 	switch (af) {
-#ifdef INET
 	case AF_INET:
 		dst_address.sin.sin_len = sizeof(struct sockaddr_in);
 		m_copydata(m, offsetof(struct ip, ip_dst),
 		    sizeof(struct in_addr),
 		    (caddr_t) &(dst_address.sin.sin_addr));
 		break;
-#endif /* INET */
 
 #ifdef INET6
 	case AF_INET6:
@@ -332,9 +324,7 @@ ipsec_common_input_cb(struct mbuf *m, struct tdb *tdbp, int skip, int protoff,
 	struct ifnet *encif;
 #endif
 
-#ifdef INET
 	struct ip *ip, ipn;
-#endif /* INET */
 
 #ifdef INET6
 	struct ip6_hdr *ip6, ip6n;
@@ -355,7 +345,6 @@ ipsec_common_input_cb(struct mbuf *m, struct tdb *tdbp, int skip, int protoff,
 		return EINVAL;
 	}
 
-#ifdef INET
 	/* Fix IPv4 header */
 	if (af == AF_INET) {
 		if ((m->m_len < skip) && ((m = m_pullup(m, skip)) == NULL)) {
@@ -464,7 +453,6 @@ ipsec_common_input_cb(struct mbuf *m, struct tdb *tdbp, int skip, int protoff,
 		}
 #endif /* INET6 */
 	}
-#endif /* INET */
 
 #ifdef INET6
 	/* Fix IPv6 header */
@@ -488,7 +476,6 @@ ipsec_common_input_cb(struct mbuf *m, struct tdb *tdbp, int skip, int protoff,
 		/* Save protocol */
 		m_copydata(m, protoff, 1, (caddr_t) &prot);
 
-#ifdef INET
 		/* IP-in-IP encapsulation */
 		if (prot == IPPROTO_IPIP) {
 			if (m->m_pkthdr.len - skip < sizeof(struct ip)) {
@@ -532,7 +519,6 @@ ipsec_common_input_cb(struct mbuf *m, struct tdb *tdbp, int skip, int protoff,
 				return EACCES;
 			}
 		}
-#endif /* INET */
 
 		/* IPv6-in-IP encapsulation */
 		if (prot == IPPROTO_IPV6) {
@@ -708,7 +694,6 @@ ipsec_common_input_cb(struct mbuf *m, struct tdb *tdbp, int skip, int protoff,
 
 	/* Call the appropriate IPsec transform callback. */
 	switch (af) {
-#ifdef INET
 	case AF_INET:
 		switch (sproto)
 		{
@@ -728,7 +713,6 @@ ipsec_common_input_cb(struct mbuf *m, struct tdb *tdbp, int skip, int protoff,
 			return EPFNOSUPPORT;
 		}
 		break;
-#endif /* INET */
 
 #ifdef INET6
 	case AF_INET6:
@@ -826,7 +810,6 @@ ipcomp_sysctl(int *name, u_int namelen, void *oldp, size_t *oldlenp, void *newp,
 	}
 }
 
-#ifdef INET
 /* IPv4 AH wrapper. */
 void
 ah4_input(struct mbuf *m, ...)
@@ -1105,7 +1088,6 @@ esp4_ctlinput(int cmd, struct sockaddr *sa, u_int rdomain, void *v)
 
 	return (ipsec_common_ctlinput(rdomain, cmd, sa, v, IPPROTO_ESP));
 }
-#endif /* INET */
 
 #ifdef INET6
 /* IPv6 AH wrapper. */

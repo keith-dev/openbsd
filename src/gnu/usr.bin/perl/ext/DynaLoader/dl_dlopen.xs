@@ -170,8 +170,8 @@ dl_load_file(filename, flags=0)
     char pathbuf[PATH_MAX + 2];
     if (*filename != '/' && strchr(filename, '/')) {
 	if (getcwd(pathbuf, PATH_MAX - strlen(filename))) {
-	    strcat(pathbuf, "/");
-	    strcat(pathbuf, filename);
+	    my_strlcat(pathbuf, "/", sizeof(pathbuf));
+	    my_strlcat(pathbuf, filename, sizeof(pathbuf));
 	    filename = pathbuf;
 	}
     }
@@ -272,6 +272,8 @@ void
 CLONE(...)
     CODE:
     MY_CXT_CLONE;
+
+    PERL_UNUSED_VAR(items);
 
     /* MY_CXT_CLONE just does a memcpy on the whole structure, so to avoid
      * using Perl variables that belong to another thread, we create our 

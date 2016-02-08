@@ -1,4 +1,4 @@
-/* $OpenBSD: aes_x86core.c,v 1.6 2014/06/12 15:49:27 deraadt Exp $ */
+/* $OpenBSD: aes_x86core.c,v 1.8 2015/02/10 09:46:30 miod Exp $ */
 /**
  * rijndael-alg-fst.c
  *
@@ -40,7 +40,6 @@
 #  define NDEBUG
 # endif
 #endif
-#include <assert.h>
 
 #include <stdlib.h>
 #include <openssl/aes.h>
@@ -90,7 +89,7 @@ typedef unsigned long long u64;
 #undef ROTATE
 #if defined(__GNUC__) && __GNUC__>=2
 # if defined(__i386) || defined(__i386__) || defined(__x86_64) || defined(__x86_64__)
-#   define ROTATE(a,n)	({ register unsigned int ret;	\
+#   define ROTATE(a,n)	({ unsigned int ret;	\
 				asm (			\
 				"roll %1,%0"		\
 				: "=r"(ret)		\
@@ -661,7 +660,6 @@ AES_encrypt(const unsigned char *in, unsigned char *out, const AES_KEY *key)
 	u32 s0, s1, s2, s3, t[4];
 	int r;
 
-	assert(in && out && key);
 	rk = key->rd_key;
 
 	/*
@@ -881,7 +879,6 @@ AES_decrypt(const unsigned char *in, unsigned char *out, const AES_KEY *key)
 	u32 s0, s1, s2, s3, t[4];
 	int r;
 
-	assert(in && out && key);
 	rk = key->rd_key;
 
 	/*

@@ -1,4 +1,4 @@
-/*	$OpenBSD: bus_dma.c,v 1.45 2014/07/12 18:44:41 tedu Exp $	*/
+/*	$OpenBSD: bus_dma.c,v 1.48 2015/01/27 05:10:30 dlg Exp $	*/
 /*	$NetBSD: bus_dma.c,v 1.3 2003/05/07 21:33:58 fvdl Exp $	*/
 
 /*-
@@ -95,24 +95,10 @@
 
 #include <machine/bus.h>
 
-#include <dev/isa/isareg.h>
-#include <dev/isa/isavar.h>
-
 #include <uvm/uvm_extern.h>
-
-#include "ioapic.h"
-
-#if NIOAPIC > 0
-#include <machine/i82093var.h>
-#include <machine/mpbiosvar.h>
-#endif
 
 int _bus_dmamap_load_buffer(bus_dma_tag_t, bus_dmamap_t, void *, bus_size_t,
     struct proc *, int, paddr_t *, int *, int);
-
-#define	IDTVEC(name)	__CONCAT(X,name)
-typedef void (vector)(void);
-extern vector *IDTVEC(intr)[];
 
 /*
  * Common function for DMA map creation.  May be called by bus-specific
@@ -424,7 +410,7 @@ _bus_dmamem_alloc(bus_dma_tag_t t, bus_size_t size, bus_size_t alignment,
 	 * memory under the 4gig boundary.
 	 */
 	return (_bus_dmamem_alloc_range(t, size, alignment, boundary,
-	    segs, nsegs, rsegs, flags, (paddr_t)0, (paddr_t)0xffffffff));
+	    segs, nsegs, rsegs, flags, (bus_addr_t)0, (bus_addr_t)0xffffffff));
 }
 
 /*
@@ -494,8 +480,8 @@ _bus_dmamem_map(bus_dma_tag_t t, bus_dma_segment_t *segs, int nsegs,
 			if (size == 0)
 				panic("_bus_dmamem_map: size botch");
 			error = pmap_enter(pmap_kernel(), va, addr | pmapflags,
-			    VM_PROT_READ | VM_PROT_WRITE, VM_PROT_READ |
-			    VM_PROT_WRITE | PMAP_WIRED | PMAP_CANFAIL);
+			    PROT_READ | PROT_WRITE,
+			    PROT_READ | PROT_WRITE | PMAP_WIRED | PMAP_CANFAIL);
 			if (error) {
 				pmap_update(pmap_kernel());
 				km_free((void *)sva, ssize, &kv_any, &kp_none);
@@ -662,7 +648,7 @@ _bus_dmamap_load_buffer(bus_dma_tag_t t, bus_dmamap_t map, void *buf,
 int
 _bus_dmamem_alloc_range(bus_dma_tag_t t, bus_size_t size, bus_size_t alignment,
     bus_size_t boundary, bus_dma_segment_t *segs, int nsegs, int *rsegs,
-    int flags, paddr_t low, paddr_t high)
+    int flags, bus_addr_t low, bus_addr_t high)
 {
 	paddr_t curaddr, lastaddr;
 	struct vm_page *m;

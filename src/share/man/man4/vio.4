@@ -1,4 +1,4 @@
-.\"     $OpenBSD: vio.4,v 1.12 2014/06/18 16:54:43 jmc Exp $
+.\"     $OpenBSD: vio.4,v 1.14 2014/08/10 12:28:09 sf Exp $
 .\"
 .\" Copyright (c) 2012 Stefan Fritsch <sf@sfritsch.de>
 .\"
@@ -14,7 +14,7 @@
 .\" ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
 .\" OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 .\"
-.Dd $Mdocdate: June 18 2014 $
+.Dd $Mdocdate: August 10 2014 $
 .Dt VIO 4
 .Os
 .Sh NAME
@@ -30,13 +30,13 @@ driver provides support for the
 network interface provided by bhyve, KVM, QEMU, and VirtualBox.
 .Pp
 Setting the bit 0x2 in the flags disables the RingEventIndex feature.
-This can be tried as a workaround for possible bugs in host implementations or
+This can be tried as a workaround for possible bugs in host implementations of
 .Nm
 at the cost of slightly reduced performance.
 .Pp
 Setting the bit 0x100 in the flags forces the interface to be always in
 promiscous mode.
-This can be used as a workaround for a bug in QEMU before version 2.0 that
+This can be used as a workaround for a bug in QEMU before version 1.7.2 that
 prevents packets with a VLAN tag from being sent to the guest.
 .Sh SEE ALSO
 .Xr intro 4 ,

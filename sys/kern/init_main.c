@@ -1,4 +1,4 @@
-/*	$OpenBSD: init_main.c,v 1.216 2014/07/11 08:18:31 guenther Exp $	*/
+/*	$OpenBSD: init_main.c,v 1.235 2015/02/10 05:28:18 guenther Exp $	*/
 /*	$NetBSD: init_main.c,v 1.84.4.1 1996/06/02 09:08:06 mrg Exp $	*/
 
 /*
@@ -72,20 +72,21 @@
 #include <sys/msg.h>
 #endif
 #include <sys/domain.h>
+#include <sys/msgbuf.h>
 #include <sys/mbuf.h>
 #include <sys/pipe.h>
-#include <sys/workq.h>
 #include <sys/task.h>
 
 #include <sys/syscall.h>
 #include <sys/syscallargs.h>
+
+#include <uvm/uvm_extern.h>
 
 #include <dev/rndvar.h>
 
 #include <ufs/ufs/quota.h>
 
 #include <net/if.h>
-#include <net/raw_cb.h>
 #include <net/netisr.h>
 
 #if defined(CRYPTO)
@@ -104,7 +105,7 @@ extern void nfs_init(void);
 const char	copyright[] =
 "Copyright (c) 1982, 1986, 1989, 1991, 1993\n"
 "\tThe Regents of the University of California.  All rights reserved.\n"
-"Copyright (c) 1995-2014 OpenBSD. All rights reserved.  http://www.OpenBSD.org\n";
+"Copyright (c) 1995-2015 OpenBSD. All rights reserved.  http://www.OpenBSD.org\n";
 
 /* Components of the first process -- never freed. */
 struct	session session0;
@@ -117,7 +118,11 @@ struct	sigacts sigacts0;
 struct	process *initprocess;
 struct	proc *reaperproc;
 
-int	cmask = CMASK;
+#ifndef SMALL_KERNEL
+extern struct timeout setperf_to;
+void setperf_auto(void *);
+#endif
+
 extern	struct user *proc0paddr;
 
 struct	vnode *rootvp, *swapdev_vp;
@@ -141,7 +146,6 @@ void	start_reaper(void *);
 void	crypto_init(void);
 void	init_exec(void);
 void	kqueue_init(void);
-void	workq_init(void);
 void	taskq_init(void);
 
 extern char sigcode[], esigcode[];
@@ -253,15 +257,16 @@ main(void *framep)
 	 */
 	kqueue_init();
 
+	/* Create credentials. */
+	p->p_ucred = crget();
+	p->p_ucred->cr_ngroups = 1;	/* group 0 */
+
 	/*
 	 * Create process 0 (the swapper).
 	 */
+	pr = &process0;
+	process_initialize(pr, p);
 
-	process0.ps_mainproc = p;
-	TAILQ_INIT(&process0.ps_threads);
-	TAILQ_INSERT_TAIL(&process0.ps_threads, p, p_thr_link);
-	process0.ps_refcnt = 1;
-	p->p_p = pr = &process0;
 	LIST_INSERT_HEAD(&allprocess, pr, ps_list);
 	atomic_setbits_int(&pr->ps_flags, PS_SYSTEM);
 
@@ -283,18 +288,10 @@ main(void *framep)
 	p->p_stat = SONPROC;
 	pr->ps_nice = NZERO;
 	pr->ps_emul = &emul_native;
-	bcopy("swapper", p->p_comm, sizeof ("swapper"));
+	strlcpy(p->p_comm, "swapper", sizeof(p->p_comm));
 
 	/* Init timeouts. */
 	timeout_set(&p->p_sleep_to, endtsleep, p);
-	timeout_set(&pr->ps_realit_to, realitexpire, pr);
-
-	/* Create credentials. */
-	pr->ps_ucred = crget();
-	pr->ps_ucred->cr_ngroups = 1;	/* group 0 */
-
-	p->p_ucred = pr->ps_ucred;	/* prime the thread's cache */
-	crhold(p->p_ucred);
 
 	/* Initialize signal state for process 0. */
 	signal_init();
@@ -337,8 +334,7 @@ main(void *framep)
 	sched_init_cpu(curcpu());
 	p->p_cpu->ci_randseed = (arc4random() & 0x7fffffff) + 1;
 
-	/* Initialize work queues */
-	workq_init();
+	/* Initialize task queues */
 	taskq_init();
 
 	/* Initialize the interface/address trees */
@@ -401,6 +397,8 @@ main(void *framep)
 	domaininit();
 	if_attachdomain();
 	splx(s);
+
+	initconsbuf();
 
 #ifdef GPROF
 	/* Initialize kernel profiling. */
@@ -527,6 +525,13 @@ main(void *framep)
 	if (kthread_create(uvm_aiodone_daemon, NULL, NULL, "aiodoned"))
 		panic("fork aiodoned");
 
+#if !defined(__hppa__) && \
+    !((defined(__m88k__) || defined(__mips64__)) && defined(MULTIPROCESSOR))
+	/* Create the page zeroing kernel thread. */
+	if (kthread_create(uvm_pagezero_thread, NULL, NULL, "zerothread"))
+		panic("fork zerothread");
+#endif
+
 #if defined(MULTIPROCESSOR)
 	/* Boot the secondary processors. */
 	cpu_boot_secondary_processors();
@@ -539,6 +544,10 @@ main(void *framep)
 	 */
 	start_init_exec = 1;
 	wakeup((void *)&start_init_exec);
+
+#ifndef SMALL_KERNEL
+	timeout_set(&setperf_to, setperf_auto, NULL);
+#endif
 
         /*
          * proc0: nothing to do, back to sleep
@@ -618,12 +627,13 @@ start_init(void *arg)
 #else
 	addr = USRSTACK - PAGE_SIZE;
 #endif
+	p->p_vmspace->vm_maxsaddr = (caddr_t)addr;
+	p->p_vmspace->vm_minsaddr = (caddr_t)(addr + PAGE_SIZE);
 	if (uvm_map(&p->p_vmspace->vm_map, &addr, PAGE_SIZE, 
 	    NULL, UVM_UNKNOWN_OFFSET, 0,
-	    UVM_MAPFLAG(UVM_PROT_RW, UVM_PROT_ALL, UVM_INH_COPY,
-	    UVM_ADV_NORMAL, UVM_FLAG_FIXED|UVM_FLAG_OVERLAY|UVM_FLAG_COPYONW)))
+	    UVM_MAPFLAG(PROT_READ | PROT_WRITE, PROT_MASK, MAP_INHERIT_COPY,
+	    MADV_NORMAL, UVM_FLAG_FIXED|UVM_FLAG_OVERLAY|UVM_FLAG_COPYONW)))
 		panic("init: couldn't allocate argument space");
-	p->p_vmspace->vm_maxsaddr = (caddr_t)addr;
 
 	for (pathp = &initpaths[0]; (path = *pathp) != NULL; pathp++) {
 #ifdef MACHINE_STACK_GROWS_UP

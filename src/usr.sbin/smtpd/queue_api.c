@@ -1,4 +1,4 @@
-/*	$OpenBSD: queue_api.c,v 1.5 2014/07/08 15:45:32 eric Exp $	*/
+/*	$OpenBSD: queue_api.c,v 1.7 2015/01/20 17:37:54 deraadt Exp $	*/
 
 /*
  * Copyright (c) 2013 Eric Faurot <eric@openbsd.org>
@@ -18,7 +18,11 @@
 
 #include <sys/types.h>
 #include <sys/queue.h>
-#include <sys/uio.h>
+#include <sys/tree.h>
+#include <sys/socket.h>
+
+#include <netinet/in.h>
+#include <netdb.h>
 
 #include <imsg.h>
 #include <pwd.h>
@@ -186,8 +190,12 @@ queue_msg_dispatch(void)
 			}
 			if (ifile)
 				fclose(ifile);
+			else
+				close(imsg.fd);
 			if (ofile)
 				fclose(ofile);
+			else
+				close(fd);
 		}
 
 		imsg_compose(&ibuf, PROC_QUEUE_OK, 0, 0, -1, &r, sizeof(r));

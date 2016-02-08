@@ -1,4 +1,4 @@
-/*	$OpenBSD: pmap.h,v 1.50 2014/01/30 18:16:41 miod Exp $	*/
+/*	$OpenBSD: pmap.h,v 1.55 2015/02/15 21:34:33 miod Exp $	*/
 /*	$NetBSD: pmap.h,v 1.1 1996/09/30 16:34:29 ws Exp $	*/
 
 /*-
@@ -70,10 +70,6 @@ typedef u_int sr_t;
 #define VP_IDX2_SIZE	256
 #define VP_IDX2_MASK	(VP_IDX2_SIZE-1)
 #define VP_IDX2_POS 	12
-
-/* functions used by the bus layer for device accesses */
-void pmap_kenter_cache(vaddr_t va, paddr_t pa, vm_prot_t prot, int cacheable);
-void pmap_kremove_pg(vaddr_t va);
 
 /* cache flags */
 #define PMAP_CACHE_DEFAULT	0 	/* WB cache managed mem, devices not */
@@ -150,7 +146,7 @@ int pte_spill_v(struct pmap *pm, u_int32_t va, u_int32_t dsisr, int exec_fault);
 int reserve_dumppages(caddr_t p);
 
 #define pmap_unuse_final(p)		/* nothing */
-#define	pmap_remove_holes(map)		do { /* nothing */ } while (0)
+#define	pmap_remove_holes(vm)		do { /* nothing */ } while (0)
 
 #define	PMAP_STEAL_MEMORY
 
@@ -159,12 +155,11 @@ int reserve_dumppages(caddr_t p);
 #define PG_PMAP_EXE     PG_PMAP2
 
 /*
- * MD flags to pmap_enter:
+ * MD flags that we use for pmap_enter (in the pa):
  */
-
-/* to get just the pa from params to pmap_enter */
-#define PMAP_PA_MASK	~((paddr_t)PAGE_MASK)
+#define PMAP_PA_MASK	~((paddr_t)PAGE_MASK) /* to remove the flags */
 #define PMAP_NOCACHE	0x1		/* map uncached */
+#define PMAP_WT		0x2		/* map write-through */
 
 #endif	/* _KERNEL */
 

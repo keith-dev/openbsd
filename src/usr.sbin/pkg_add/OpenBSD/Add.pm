@@ -1,5 +1,5 @@
 # ex:ts=8 sw=4:
-# $OpenBSD: Add.pm,v 1.161 2014/07/12 19:50:43 espie Exp $
+# $OpenBSD: Add.pm,v 1.164 2014/11/30 15:53:26 espie Exp $
 #
 # Copyright (c) 2003-2014 Marc Espie <espie@openbsd.org>
 #
@@ -694,7 +694,10 @@ sub install
 {
 	my ($self, $state) = @_;
 	$self->SUPER::install($state);
-	$state->log("You may wish to add #1 to /etc/man.conf", $self->fullname);
+	if (!$state->{current_set}{known_mandirs}{$self->fullname}) {
+		$state->log("You may wish to add #1 to /etc/man.conf", 
+		    $self->fullname);
+	}
 }
 
 package OpenBSD::PackingElement::Manpage;
@@ -862,7 +865,7 @@ sub prepare_for_addition
 	if ($self->spec->match_ref(\@old) > 0) {
 		my $key = "update_".OpenBSD::PackageName::splitstem($pkgname);
 		return if $state->defines($key);
-		if ($state->{interactive}) {
+		if ($state->is_interactive) {
 			if ($state->confirm($pkgname.":".$self->{message}."\n".
 			    "Do you want to update now", 0)) {
 			    	return;
@@ -873,6 +876,25 @@ sub prepare_for_addition
 		}
 		$state->{problems}++;
 	}
+}
+
+package OpenBSD::PackingElement::FDISPLAY;
+sub install
+{
+	my ($self, $state) = @_;
+	my $d = $self->{d};
+	if (!$state->{current_set}{known_displays}{$self->{d}->key}) {
+		$self->prepare($state);
+	}
+	$self->SUPER::install($state);
+}
+
+package OpenBSD::PackingElement::FUNDISPLAY;
+sub find_extractible
+{
+	my ($self, $state, $wanted, $tied) = @_;
+	$state->{current_set}{known_displays}{$self->{d}->key} = 1;
+	$self->SUPER::find_extractible($state, $wanted, $tied);
 }
 
 1;

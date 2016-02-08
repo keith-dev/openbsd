@@ -1,4 +1,4 @@
-#	$OpenBSD: GENERIC,v 1.210 2014/07/29 12:57:08 deraadt Exp $
+#	$OpenBSD: GENERIC,v 1.215 2015/03/04 14:36:19 jsg Exp $
 #
 #	Machine-independent option; used by all architectures for their
 #	GENERIC kernel
@@ -27,10 +27,6 @@ option		SYSVSEM		# System V-like semaphores
 option		SYSVSHM		# System V-like memory sharing
 
 option		UVM_SWAP_ENCRYPT# support encryption of pages going to swap
-
-option		COMPAT_43	# Kernel compatibility with 4.3BSD
-
-option		LKM		# loadable kernel modules
 
 option		FFS		# UFS
 option		FFS2		# UFS2
@@ -103,7 +99,6 @@ pseudo-device	mpe		# MPLS PE interface
 pseudo-device	ppp		# PPP
 pseudo-device	pppoe		# PPP over Ethernet (RFC 2516)
 pseudo-device	pppx		# PPP multiplexer
-pseudo-device	sl		# CSLIP
 pseudo-device	sppp	1	# Sync PPP/HDLC
 pseudo-device	trunk		# Trunking support
 pseudo-device	tun		# network tunneling over tty

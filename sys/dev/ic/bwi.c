@@ -1,4 +1,4 @@
-/*	$OpenBSD: bwi.c,v 1.108 2014/08/03 14:23:59 jsg Exp $	*/
+/*	$OpenBSD: bwi.c,v 1.116 2015/02/10 23:25:46 mpi Exp $	*/
 
 /*
  * Copyright (c) 2007 The DragonFly Project.  All rights reserved.
@@ -45,13 +45,12 @@
 #include <sys/kernel.h>
 #include <sys/malloc.h>
 #include <sys/mbuf.h>
-#include <sys/proc.h>
 #include <sys/socket.h>
 #include <sys/sockio.h>
 #include <sys/systm.h>
+#include <sys/endian.h>
 
 #include <machine/bus.h>
-#include <machine/endian.h>
 #include <machine/intr.h>
 
 #include <net/if.h>
@@ -83,7 +82,6 @@ int bwi_debug = 1;
 
 /* XXX temporary porting goop */
 #include <dev/pci/pcireg.h>
-#include <dev/pci/pcivar.h>
 #include <dev/pci/pcidevs.h>
 
 /* XXX does not belong here */
@@ -321,12 +319,6 @@ int		 bwi_init_txstats32(struct bwi_softc *);
 void		 bwi_setup_rx_desc32(struct bwi_softc *, int, bus_addr_t, int);
 void		 bwi_setup_tx_desc32(struct bwi_softc *, struct bwi_ring_data *,
 		     int, bus_addr_t, int);
-int		 bwi_init_tx_ring64(struct bwi_softc *, int);
-int		 bwi_init_rx_ring64(struct bwi_softc *);
-int		 bwi_init_txstats64(struct bwi_softc *);
-void		 bwi_setup_rx_desc64(struct bwi_softc *, int, bus_addr_t, int);
-void		 bwi_setup_tx_desc64(struct bwi_softc *, struct bwi_ring_data *,
-		     int, bus_addr_t, int);
 int		 bwi_newbuf30(struct bwi_softc *, int, int);
 int		 bwi_newbuf(struct bwi_softc *, int, int);
 void		 bwi_set_addr_filter(struct bwi_softc *, uint16_t,
@@ -335,14 +327,10 @@ int		 bwi_set_chan(struct bwi_softc *, uint8_t);
 void		 bwi_next_scan(void *);
 int		 bwi_rxeof(struct bwi_softc *, int);
 int		 bwi_rxeof32(struct bwi_softc *);
-int		 bwi_rxeof64(struct bwi_softc *);
 void		 bwi_reset_rx_ring32(struct bwi_softc *, uint32_t);
 void		 bwi_free_txstats32(struct bwi_softc *);
 void		 bwi_free_rx_ring32(struct bwi_softc *);
 void		 bwi_free_tx_ring32(struct bwi_softc *, int);
-void		 bwi_free_txstats64(struct bwi_softc *);
-void		 bwi_free_rx_ring64(struct bwi_softc *);
-void		 bwi_free_tx_ring64(struct bwi_softc *, int);
 uint8_t		 bwi_plcp2rate(uint32_t, enum ieee80211_phymode);
 void		 bwi_ofdm_plcp_header(uint32_t *, int, uint8_t);
 void		 bwi_ds_plcp_header(struct ieee80211_ds_plcp_hdr *, int,
@@ -351,9 +339,7 @@ void		 bwi_plcp_header(void *, int, uint8_t);
 int		 bwi_encap(struct bwi_softc *, int, struct mbuf *,
 		     struct ieee80211_node *);
 void		 bwi_start_tx32(struct bwi_softc *, uint32_t, int);
-void		 bwi_start_tx64(struct bwi_softc *, uint32_t, int);
 void		 bwi_txeof_status32(struct bwi_softc *);
-void		 bwi_txeof_status64(struct bwi_softc *);
 void		 _bwi_txeof(struct bwi_softc *, uint16_t);
 void		 bwi_txeof_status(struct bwi_softc *, int);
 void		 bwi_txeof(struct bwi_softc *);
@@ -911,7 +897,7 @@ bwi_detach(void *arg)
 {
 	struct bwi_softc *sc = arg;
 	struct ifnet *ifp = &sc->sc_ic.ic_if;
-	int i;
+	int s, i;
 
 	bwi_stop(sc, 1);
 	ieee80211_ifdetach(ifp);
@@ -920,7 +906,9 @@ bwi_detach(void *arg)
 	for (i = 0; i < sc->sc_nmac; ++i)
 		bwi_mac_detach(&sc->sc_mac[i]);
 
+	s = splvm();
 	bwi_dma_free(sc);
+	splx(s);
 	bwi_dma_mbuf_destroy(sc, BWI_TX_NRING, 1);
 
 	return (0);
@@ -2427,7 +2415,8 @@ bwi_mac_get_property(struct bwi_mac *mac)
 	    BWI_STATE_HI_FLAG_64BIT) {
 		/* 64bit address */
 		sc->sc_bus_space = BWI_BUS_SPACE_64BIT;
-		DPRINTF(1, "%s: 64bit bus space\n", sc->sc_dev.dv_xname);
+		printf(": 64bit bus space not supported\n");
+		return (ENODEV);
 	} else {
 		uint32_t txrx_reg = BWI_TXRX_CTRL_BASE + BWI_TX32_CTRL;
 
@@ -3061,7 +3050,7 @@ bwi_phy_init_11g(struct bwi_mac *mac)
 			RF_WRITE(mac, 0x52,
 			    (tpctl->tp_ctrl1 << 4) | tpctl->tp_ctrl2);
 		} else {
-			RF_FILT_SETBITS(mac, 0x52, 0xfff0, tpctl->tp_ctrl1);
+			RF_FILT_SETBITS(mac, 0x52, 0xfff0, tpctl->tp_ctrl2);
 		}
 
 		if (phy->phy_rev >= 6) {
@@ -3351,6 +3340,9 @@ bwi_phy_init_11b_rev6(struct bwi_mac *mac)
 	for (ofs = 0xa8; ofs < 0xc8; ++ofs) {
 		PHY_WRITE(mac, ofs, (val & 0x3f3f));
 		val += 0x202;
+
+		/* XXX: delay 10 us to avoid PCI parity errors with BCM4318 */
+		DELAY(10);
 	}
 
 	if (phy->phy_mode == IEEE80211_MODE_11G) {
@@ -7131,10 +7123,8 @@ bwi_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 	case SIOCSIFADDR:
 		ifa = (struct ifaddr *)data;
 		ifp->if_flags |= IFF_UP;
-#ifdef INET
 		if (ifa->ifa_addr->sa_family == AF_INET)
 			arp_ifinit(&ic->ic_ac, ifa);
-#endif
 		/* FALLTHROUGH */
 	case SIOCSIFFLAGS:
 		if (ifp->if_flags & IFF_UP) {
@@ -7535,6 +7525,7 @@ bwi_dma_alloc(struct bwi_softc *sc)
 	int error, i, has_txstats;
 	bus_size_t tx_ring_sz, rx_ring_sz, desc_sz = 0;
 	uint32_t txrx_ctrl_step = 0;
+	int s;
 
 	has_txstats = 0;
 	for (i = 0; i < sc->sc_nmac; ++i) {
@@ -7577,25 +7568,6 @@ bwi_dma_alloc(struct bwi_softc *sc)
 		}
 		break;
 
-	case BWI_BUS_SPACE_64BIT:
-		desc_sz = sizeof(struct bwi_desc64);
-		txrx_ctrl_step = 0x40;
-
-		sc->sc_init_tx_ring = bwi_init_tx_ring64;
-		sc->sc_free_tx_ring = bwi_free_tx_ring64;
-		sc->sc_init_rx_ring = bwi_init_rx_ring64;
-		sc->sc_free_rx_ring = bwi_free_rx_ring64;
-		sc->sc_newbuf = bwi_newbuf;
-		sc->sc_setup_rxdesc = bwi_setup_rx_desc64;
-		sc->sc_setup_txdesc = bwi_setup_tx_desc64;
-		sc->sc_rxeof = bwi_rxeof64;
-		sc->sc_start_tx = bwi_start_tx64;
-		if (has_txstats) {
-			sc->sc_init_txstats = bwi_init_txstats64;
-			sc->sc_free_txstats = bwi_free_txstats64;
-			sc->sc_txeof_status = bwi_txeof_status64;
-		}
-		break;
 	default:
 		panic("unsupported bus space type %d", sc->sc_bus_space);
 	}
@@ -7605,6 +7577,8 @@ bwi_dma_alloc(struct bwi_softc *sc)
 
 	tx_ring_sz = roundup(desc_sz * BWI_TX_NDESC, BWI_RING_ALIGN);
 	rx_ring_sz = roundup(desc_sz * BWI_RX_NDESC, BWI_RING_ALIGN);
+
+	s = splvm();
 
 #define TXRX_CTRL(idx)	(BWI_TXRX_CTRL_BASE + (idx) * txrx_ctrl_step)
 	/*
@@ -7617,6 +7591,7 @@ bwi_dma_alloc(struct bwi_softc *sc)
 			printf("%s: %dth TX ring DMA alloc failed\n",
 			    sc->sc_dev.dv_xname, i);
 			bwi_dma_free(sc);
+			splx(s);
 			return (error);
 		}
 	}
@@ -7629,6 +7604,7 @@ bwi_dma_alloc(struct bwi_softc *sc)
 	if (error) {
 		printf("%s: RX ring DMA alloc failed\n", sc->sc_dev.dv_xname);
 		bwi_dma_free(sc);
+		splx(s);
 		return (error);
 	}
 
@@ -7638,6 +7614,7 @@ bwi_dma_alloc(struct bwi_softc *sc)
 			printf("%s: TX stats DMA alloc failed\n",
 			    sc->sc_dev.dv_xname);
 			bwi_dma_free(sc);
+			splx(s);
 			return (error);
 		}
 	}
@@ -7649,6 +7626,8 @@ bwi_dma_alloc(struct bwi_softc *sc)
 		error = bwi_dma_mbuf_create(sc);
 	if (error)
 		bwi_dma_free(sc);
+
+	splx(s);
 
 	return (error);
 }
@@ -8219,41 +8198,6 @@ bwi_setup_tx_desc32(struct bwi_softc *sc, struct bwi_ring_data *rd,
 }
 
 int
-bwi_init_tx_ring64(struct bwi_softc *sc, int ring_idx)
-{
-	/* TODO: 64 */
-	return (EOPNOTSUPP);
-}
-
-int
-bwi_init_rx_ring64(struct bwi_softc *sc)
-{
-	/* TODO: 64 */
-	return (EOPNOTSUPP);
-}
-
-int
-bwi_init_txstats64(struct bwi_softc *sc)
-{
-	/* TODO: 64 */
-	return (EOPNOTSUPP);
-}
-
-void
-bwi_setup_rx_desc64(struct bwi_softc *sc, int buf_idx, bus_addr_t paddr,
-    int buf_len)
-{
-	/* TODO: 64 */
-}
-
-void
-bwi_setup_tx_desc64(struct bwi_softc *sc, struct bwi_ring_data *rd,
-    int buf_idx, bus_addr_t paddr, int buf_len)
-{
-	/* TODO: 64 */
-}
-
-int
 bwi_newbuf30(struct bwi_softc *sc, int buf_idx, int init)
 {
 	struct bwi_rxbuf_data *rbd = &sc->sc_rx_bdata;
@@ -8492,7 +8436,6 @@ bwi_rxeof(struct bwi_softc *sc, int end_idx)
 		bcopy((uint8_t *)(hdr + 1) + hdr_extra, &plcp, sizeof(plcp));
 		rssi = bwi_calc_rssi(sc, hdr);
 
-		m->m_pkthdr.rcvif = ifp;
 		m->m_len = m->m_pkthdr.len = buflen + sizeof(*hdr);
 		m_adj(m, sizeof(*hdr) + wh_ofs);
 
@@ -8572,13 +8515,6 @@ bwi_rxeof32(struct bwi_softc *sc)
 	    end_idx * sizeof(struct bwi_desc32));
 
 	return (rx_data);
-}
-
-int
-bwi_rxeof64(struct bwi_softc *sc)
-{
-	/* TODO: 64 */
-	return (0);
 }
 
 void
@@ -8692,24 +8628,6 @@ bwi_free_tx_ring32(struct bwi_softc *sc, int ring_idx)
 			tb->tb_ni = NULL;
 		}
 	}
-}
-
-void
-bwi_free_txstats64(struct bwi_softc *sc)
-{
-	/* TODO: 64 */
-}
-
-void
-bwi_free_rx_ring64(struct bwi_softc *sc)
-{
-	/* TODO: 64 */
-}
-
-void
-bwi_free_tx_ring64(struct bwi_softc *sc, int ring_idx)
-{
-	/* TODO: 64 */
 }
 
 uint8_t
@@ -9140,12 +9058,6 @@ bwi_start_tx32(struct bwi_softc *sc, uint32_t tx_ctrl, int idx)
 }
 
 void
-bwi_start_tx64(struct bwi_softc *sc, uint32_t tx_ctrl, int idx)
-{
-	/* TODO: 64 */
-}
-
-void
 bwi_txeof_status32(struct bwi_softc *sc)
 {
 	struct ifnet *ifp = &sc->sc_ic.ic_if;
@@ -9165,12 +9077,6 @@ bwi_txeof_status32(struct bwi_softc *sc)
 
 	if ((ifp->if_flags & IFF_OACTIVE) == 0)
 		ifp->if_start(ifp);
-}
-
-void
-bwi_txeof_status64(struct bwi_softc *sc)
-{
-	/* TODO: 64 */
 }
 
 void

@@ -1,4 +1,4 @@
-/*	$OpenBSD: uvm_pdaemon.c,v 1.71 2014/07/12 09:02:24 kettenis Exp $	*/
+/*	$OpenBSD: uvm_pdaemon.c,v 1.75 2014/12/17 19:42:15 tedu Exp $	*/
 /*	$NetBSD: uvm_pdaemon.c,v 1.23 2000/08/20 10:24:14 bjh21 Exp $	*/
 
 /* 
@@ -68,12 +68,11 @@
 
 #include <sys/param.h>
 #include <sys/systm.h>
-#include <sys/proc.h>
 #include <sys/kernel.h>
 #include <sys/pool.h>
 #include <sys/buf.h>
-#include <sys/vnode.h>
 #include <sys/mount.h>
+#include <sys/atomic.h>
 
 #ifdef HIBERNATE
 #include <sys/hibernate.h>
@@ -273,6 +272,8 @@ uvm_pageout(void *arg)
 
 		/* scan done. unlock page queues (only lock we are holding) */
 		uvm_unlock_pageq();
+
+		sched_pause();
 	}
 	/*NOTREACHED*/
 }
@@ -313,6 +314,8 @@ uvm_aiodone_daemon(void *arg)
 			(*bp->b_iodone)(bp);
 			splx(s);
 			bp = nbp;
+
+			sched_pause();
 		}
 		uvm_lock_fpageq();
 		wakeup(free <= uvmexp.reserve_kernel ? &uvm.pagedaemon :
@@ -470,7 +473,7 @@ uvmpd_scan_inactive(struct pglist *pglst)
 				}
 
 				/* zap all mappings with pmap_page_protect... */
-				pmap_page_protect(p, VM_PROT_NONE);
+				pmap_page_protect(p, PROT_NONE);
 				uvm_pagefree(p);
 				uvmexp.pdfreed++;
 
@@ -543,7 +546,7 @@ uvmpd_scan_inactive(struct pglist *pglst)
 			swap_backed = ((p->pg_flags & PQ_SWAPBACKED) != 0);
 			atomic_setbits_int(&p->pg_flags, PG_BUSY);
 			UVM_PAGE_OWN(p, "scan_inactive");
-			pmap_page_protect(p, VM_PROT_READ);
+			pmap_page_protect(p, PROT_READ);
 			uvmexp.pgswapout++;
 
 			/*
@@ -738,7 +741,7 @@ uvmpd_scan_inactive(struct pglist *pglst)
 				p->uanon = NULL;
 
 				uvm_anfree(anon);	/* kills anon */
-				pmap_page_protect(p, VM_PROT_NONE);
+				pmap_page_protect(p, PROT_NONE);
 				anon = NULL;
 				uvm_lock_pageq();
 				nextpg = TAILQ_NEXT(p, pageq);
@@ -917,7 +920,7 @@ uvmpd_scan(void)
 		 * inactive pages.
 		 */
 		if (inactive_shortage > 0) {
-			pmap_page_protect(p, VM_PROT_NONE);
+			pmap_page_protect(p, PROT_NONE);
 			/* no need to check wire_count as pg is "active" */
 			uvm_pagedeactivate(p);
 			uvmexp.pddeact++;
@@ -958,7 +961,7 @@ uvmpd_drop(struct pglist *pglst)
 				}
 
 				/* zap all mappings with pmap_page_protect... */
-				pmap_page_protect(p, VM_PROT_NONE);
+				pmap_page_protect(p, PROT_NONE);
 				uvm_pagefree(p);
 			}
 		}

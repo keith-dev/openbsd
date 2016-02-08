@@ -1,4 +1,4 @@
-#	$OpenBSD: Makefile,v 1.50 2014/06/21 08:00:22 otto Exp $
+#	$OpenBSD: Makefile,v 1.55 2015/02/08 00:15:22 uebayasi Exp $
 
 SUBDIR=ldconfig ldd
 MAN=	ld.so.1
@@ -9,6 +9,7 @@ MAN=	ld.so.1
 NOPROG=
 .else
 PROG=	ld.so
+BINMODE=444
 
 VPATH=${.CURDIR}/../../lib/libc/string
 
@@ -22,7 +23,6 @@ SRCS+=	library_mquery.c
 .else
 SRCS+=	library.c
 .endif
-
 
 .include "${.CURDIR}/${MACHINE_CPU}/Makefile.inc"
 .PATH:	${.CURDIR}/${MACHINE_CPU}
@@ -47,7 +47,9 @@ $(test_prog):
 
 $(PROG): $(test_prog)
 	$(LD) -x -e _dl_start $(ELF_LDFLAGS) -o $(candidate) $(OBJS) $(LDADD)
+.ifndef CROSSDIR
 	ulimit -c 0; [ "`${.OBJDIR}/$(test_prog) ok`" = ok ]
+.endif
 	cp $(candidate) $@
 .endif
 

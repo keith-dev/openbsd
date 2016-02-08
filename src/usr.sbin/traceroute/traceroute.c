@@ -1,4 +1,4 @@
-/*	$OpenBSD: traceroute.c,v 1.132 2014/06/05 14:49:11 florian Exp $	*/
+/*	$OpenBSD: traceroute.c,v 1.138 2015/02/11 09:49:38 florian Exp $	*/
 /*	$NetBSD: traceroute.c,v 1.10 1995/05/21 15:50:45 mycroft Exp $	*/
 
 /*
@@ -233,7 +233,6 @@
  *     Tue Dec 20 03:50:13 PST 1988
  */
 
-#include <sys/param.h>
 #include <sys/time.h>
 #include <sys/socket.h>
 #include <sys/uio.h>
@@ -241,7 +240,6 @@
 #include <sys/ioctl.h>
 #include <sys/sysctl.h>
 
-#include <netinet/in_systm.h>
 #include <netinet/in.h>
 #include <netinet/ip.h>
 #include <netinet/ip_icmp.h>
@@ -266,6 +264,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include <limits.h>
 
 #define MAX_LSRR		((MAX_IPOPTLEN - 4) / 4)
 
@@ -441,7 +440,7 @@ main(int argc, char *argv[])
 	    "AcDdf:g:Ilm:nP:p:q:Ss:t:V:vw:x")) != -1)
 		switch (ch) {
 		case 'A':
-			Aflag++;
+			Aflag = 1;
 			break;
 		case 'c':
 			incflag = 0;
@@ -453,12 +452,9 @@ main(int argc, char *argv[])
 			dump = 1;
 			break;
 		case 'f':
-			errno = 0;
-			ep = NULL;
-			l = strtol(optarg, &ep, 10);
-			if (errno || !*optarg || *ep || l < 1 || l > max_ttl)
+			first_ttl = strtonum(optarg, 1, max_ttl, &errstr);
+			if (errstr)
 				errx(1, "min ttl must be 1 to %u.", max_ttl);
-			first_ttl = (u_int8_t)l;
 			break;
 		case 'g':
 			if (lsrr >= MAX_LSRR)
@@ -481,38 +477,28 @@ main(int argc, char *argv[])
 			proto = IPPROTO_ICMP;
 			break;
 		case 'l':
-			ttl_flag++;
+			ttl_flag = 1;
 			break;
 		case 'm':
-			errno = 0;
-			ep = NULL;
-			l = strtol(optarg, &ep, 10);
-			if (errno || !*optarg || *ep || l < first_ttl ||
-			    l > MAXTTL)
+			max_ttl = strtonum(optarg, first_ttl, MAXTTL, &errstr);
+			if (errstr)
 				errx(1, "max ttl must be %u to %u.", first_ttl,
 				    MAXTTL);
-			max_ttl = (u_int8_t)l;
 			break;
 		case 'n':
-			nflag++;
+			nflag = 1;
 			break;
 		case 'p':
-			errno = 0;
-			ep = NULL;
-			l = strtol(optarg, &ep, 10);
-			if (errno || !*optarg || *ep || l <= 0 || l >= 65536)
+			port = strtonum(optarg, 1, 65535, &errstr);
+			if (errstr)
 				errx(1, "port must be >0, <65536.");
-			port = (u_int16_t)l;
 			break;
 		case 'P':
 			if (protoset)
 				errx(1, "protocol already set with -I");
 			protoset = 1;
-			errno = 0;
-			ep = NULL;
-			l = strtol(optarg, &ep, 10);
-			if (errno || !*optarg || *ep || l < 1 ||
-			    l >= IPPROTO_MAX) {
+			proto = strtonum(optarg, 1, IPPROTO_MAX - 1, &errstr);
+			if (errstr) {
 				struct protoent *pent;
 
 				pent = getprotobyname(optarg);
@@ -521,16 +507,12 @@ main(int argc, char *argv[])
 				else
 					errx(1, "proto must be >=1, or a "
 					    "name.");
-			} else
-				proto = (int)l;
+			}
 			break;
 		case 'q':
-			errno = 0;
-			ep = NULL;
-			l = strtol(optarg, &ep, 10);
-			if (errno || !*optarg || *ep || l < 1 || l > INT_MAX)
+			nprobes = strtonum(optarg, 1, INT_MAX, &errstr);
+			if (errstr)
 				errx(1, "nprobes must be >0.");
-			nprobes = (int)l;
 			break;
 		case 's':
 			/*
@@ -544,23 +526,28 @@ main(int argc, char *argv[])
 			break;
 		case 't':
 			if (!map_tos(optarg, &tos)) {
-			errno = 0;
-				errstr = NULL;
 				if (strlen(optarg) > 1 && optarg[0] == '0' &&
-				    optarg[1] == 'x')
-					tos = (int)strtol(optarg, NULL, 16);
-				else
-					tos = (int)strtonum(optarg, 0, 255,
-					    &errstr);
-				if (tos < 0 || tos > 255 || errstr || errno)
-					errx(1, "illegal tos value %s",
-					    optarg);
+				    optarg[1] == 'x') {
+					errno = 0;
+					ep = NULL;
+					l = strtol(optarg, &ep, 16);
+					if (errno || !*optarg || *ep ||
+					    l < 0 || l > 255)
+						errx(1, "illegal tos value %s",
+						    optarg);
+					tos = (int)l;
+				} else {
+					tos = strtonum(optarg, 0, 255, &errstr);
+					if (errstr)
+						errx(1, "illegal tos value %s",
+						    optarg);
+				}
 			}
 			tflag = 1;
 			last_tos = tos;
 			break;
 		case 'v':
-			verbose++;
+			verbose = 1;
 			break;
 		case 'V':
 			rtableid = (unsigned int)strtonum(optarg, 0,
@@ -576,12 +563,9 @@ main(int argc, char *argv[])
 				err(1, "setsockopt SO_RTABLE");
 			break;
 		case 'w':
-			errno = 0;
-			ep = NULL;
-			l = strtol(optarg, &ep, 10);
-			if (errno || !*optarg || *ep || l <= 1 || l > INT_MAX)
+			waittime = strtonum(optarg, 2, INT_MAX, &errstr);
+			if (errstr)
 				errx(1, "wait must be >1 sec.");
-			waittime = (int)l;
 			break;
 		case 'x':
 			xflag = 1;
@@ -659,12 +643,9 @@ main(int argc, char *argv[])
 	freeaddrinfo(res);
 
 	if (*++argv) {
-		errno = 0;
-		ep = NULL;
-		l = strtol(*argv, &ep, 10);
-		if (errno || !*argv || *ep || l < 0 || l > INT_MAX)
+		datalen = strtonum(*argv, 0, INT_MAX, &errstr);
+		if (errstr)
 			errx(1, "datalen out of range");
-		datalen = (int)l;
 	}
 
 	switch (to->sa_family) {
@@ -1460,7 +1441,7 @@ packet_ok6(struct msghdr *mhdr, int cc, int seq, int iflag)
 			return (ICMP6_DST_UNREACH_NOPORT + 1);
 	}
 	if (verbose) {
-		char sbuf[NI_MAXHOST+1], dbuf[INET6_ADDRSTRLEN];
+		char sbuf[NI_MAXHOST], dbuf[INET6_ADDRSTRLEN];
 		u_int8_t *p;
 		int i;
 
@@ -1704,7 +1685,7 @@ in_cksum(u_short *addr, int len)
 const char *
 inetname(struct sockaddr *sa)
 {
-	static char line[NI_MAXHOST], domain[MAXHOSTNAMELEN + 1];
+	static char line[NI_MAXHOST], domain[HOST_NAME_MAX + 1];
 	static int first = 1;
 	char *cp;
 
@@ -1712,7 +1693,7 @@ inetname(struct sockaddr *sa)
 		first = 0;
 		if (gethostname(domain, sizeof(domain)) == 0 &&
 		    (cp = strchr(domain, '.')) != NULL)
-			(void) strlcpy(domain, cp + 1, sizeof(domain));
+			memmove(domain, cp + 1, strlen(cp + 1) + 1);
 		else
 			domain[0] = 0;
 	}

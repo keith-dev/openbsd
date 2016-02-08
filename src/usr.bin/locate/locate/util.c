@@ -1,4 +1,4 @@
-/*	$OpenBSD: util.c,v 1.10 2007/09/02 15:19:33 deraadt Exp $
+/*	$OpenBSD: util.c,v 1.13 2015/01/16 06:40:09 deraadt Exp $
  *
  * Copyright (c) 1995 Wolfram Schneider <wosch@FreeBSD.org>. Berlin.
  * Copyright (c) 1989, 1993
@@ -31,15 +31,15 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- * $Id: util.c,v 1.10 2007/09/02 15:19:33 deraadt Exp $
+ * $Id: util.c,v 1.13 2015/01/16 06:40:09 deraadt Exp $
  */
 
 
 #include <stdlib.h>
 #include <string.h>
 #include <err.h>
-#include <sys/param.h>
 #include <stdio.h>
+#include <limits.h>
 
 #include "locate.h"
 
@@ -72,8 +72,8 @@ check_bigram_char(ch)
 
 /* split a colon separated string into a char vector
  *
- * "bla:foo" -> {"foo", "bla"}
- * "bla:"    -> {"foo", dot}
+ * "bla:foo" -> {"bla", "foo"}
+ * "bla:"    -> {"bla", dot}
  * "bla"     -> {"bla"}
  * ""	     -> do nothing
  *
@@ -89,7 +89,7 @@ colon(dbv, path, dot)
 	char **pv;
 
 	if (dbv == NULL) {
-		if ((dbv = malloc(sizeof(char **))) == NULL)
+		if ((dbv = malloc(sizeof(*dbv))) == NULL)
 			err(1, "malloc");
 		*dbv = NULL;
 	}
@@ -122,8 +122,8 @@ colon(dbv, path, dot)
 				*(p + slen) = '\0';
 			}
 			/* increase dbv with element p */
-			if ((newdbv = realloc(dbv, sizeof(char **) * (vlen + 2)))
-			    == NULL)
+			if ((newdbv = reallocarray(dbv, vlen + 2,
+			    sizeof(*newdbv))) == NULL)
 				err(1, "realloc");
 			dbv = newdbv;
 			*(dbv + vlen) = p;
@@ -242,12 +242,12 @@ getwm(p)
 
 	i = u.i;
 
-	if (i > MAXPATHLEN || i < -(MAXPATHLEN)) {
+	if (i > PATH_MAX || i < -(PATH_MAX)) {
 		i = ntohl(i);
-		if (i > MAXPATHLEN || i < -(MAXPATHLEN)) {
+		if (i > PATH_MAX || i < -(PATH_MAX)) {
 			(void)fprintf(stderr,
-			    "integer out of +-MAXPATHLEN (%d): %d\n",
-			    MAXPATHLEN, i);
+			    "integer out of +-PATH_MAX (%d): %d\n",
+			    PATH_MAX, i);
 			exit(1);
 		}
 	}
@@ -270,12 +270,12 @@ getwf(fp)
 
 	word = getw(fp);
 
-	if (word > MAXPATHLEN || word < -(MAXPATHLEN)) {
+	if (word > PATH_MAX || word < -(PATH_MAX)) {
 		word = ntohl(word);
-		if (word > MAXPATHLEN || word < -(MAXPATHLEN)) {
+		if (word > PATH_MAX || word < -(PATH_MAX)) {
 			(void)fprintf(stderr,
-			    "integer out of +-MAXPATHLEN (%d): %d\n",
-			    MAXPATHLEN, word);
+			    "integer out of +-PATH_MAX (%d): %d\n",
+			    PATH_MAX, word);
 			exit(1);
 		}
 	}

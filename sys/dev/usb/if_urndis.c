@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_urndis.c,v 1.49 2014/07/13 15:52:49 mpi Exp $ */
+/*	$OpenBSD: if_urndis.c,v 1.52 2015/01/09 20:45:40 kettenis Exp $ */
 
 /*
  * Copyright (c) 2010 Jonathan Armani <armani@openbsd.org>
@@ -554,7 +554,7 @@ urndis_ctrl_set(struct urndis_softc *sc, u_int32_t oid, void *buf, size_t len)
 	msg->rm_infobuflen = htole32(len);
 	if (len != 0) {
 		msg->rm_infobufoffset = htole32(20);
-		memcpy((char*)msg + 20, buf, len);
+		memcpy((char*)msg + 28, buf, len);
 	} else
 		msg->rm_infobufoffset = 0;
 	msg->rm_devicevchdl = 0;
@@ -570,7 +570,7 @@ urndis_ctrl_set(struct urndis_softc *sc, u_int32_t oid, void *buf, size_t len)
 	    letoh32(msg->rm_infobufoffset),
 	    letoh32(msg->rm_devicevchdl)));
 
-	rval = urndis_ctrl_send(sc, msg, sizeof(*msg));
+	rval = urndis_ctrl_send(sc, msg, sizeof(*msg) + len);
 	free(msg, M_TEMP, 0);
 
 	if (rval != RNDIS_STATUS_SUCCESS) {
@@ -990,10 +990,8 @@ urndis_ioctl(struct ifnet *ifp, u_long command, caddr_t data)
 		ifp->if_flags |= IFF_UP;
 		if (!(ifp->if_flags & IFF_RUNNING))
 			urndis_init(sc);
-#ifdef INET
 		if (ifa->ifa_addr->sa_family == AF_INET)
 			arp_ifinit(&sc->sc_arpcom, ifa);
-#endif
 		break;
 
 	case SIOCSIFFLAGS:
@@ -1309,10 +1307,13 @@ urndis_lookup(usb_interface_descriptor_t *id)
 int
 urndis_match(struct device *parent, void *match, void *aux)
 {
-	struct usb_attach_arg		*uaa;
+	struct usb_attach_arg		*uaa = aux;
 	usb_interface_descriptor_t	*id;
 
-	uaa = aux;
+	/* Advertises both RNDIS and CDC Ethernet, but RNDIS doesn't work. */
+	if (uaa->vendor == USB_VENDOR_FUJITSUCOMP &&
+	    uaa->product == USB_PRODUCT_FUJITSUCOMP_VIRTETH)
+		return (UMATCH_NONE);
 
 	if (!uaa->iface)
 		return (UMATCH_NONE);

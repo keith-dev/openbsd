@@ -1,4 +1,4 @@
-/*	$OpenBSD: procmap.c,v 1.55 2014/07/08 17:19:26 deraadt Exp $ */
+/*	$OpenBSD: procmap.c,v 1.59 2015/01/19 19:25:28 kettenis Exp $ */
 /*	$NetBSD: pmap.c,v 1.1 2002/09/01 20:32:44 atatat Exp $ */
 
 /*
@@ -30,8 +30,8 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
+#include <sys/param.h>	/* MAXCOMLEN */
 #include <sys/types.h>
-#include <sys/param.h>
 #include <sys/time.h>
 #include <sys/exec.h>
 #include <sys/proc.h>
@@ -92,7 +92,7 @@ void *uvm_vnodeops, *uvm_deviceops, *aobj_pager;
 u_long kernel_map_addr;
 int debug, verbose;
 int print_all, print_map, print_maps, print_solaris, print_ddb, print_amap;
-int rwx = VM_PROT_READ | VM_PROT_WRITE | VM_PROT_EXECUTE;
+int rwx = PROT_READ | PROT_WRITE | PROT_EXEC;
 rlim_t maxssiz;
 
 struct sum {
@@ -601,7 +601,9 @@ dump_vm_map_entry(kvm_t *kd, struct kbit *vmspace,
 		printf("%s = {", "vm_map_entry");
 		printf(" start = %lx,", vme->start);
 		printf(" end = %lx,", vme->end);
-		printf(" object.uvm_obj/sub_map = %p,\n", vme->object.uvm_obj);
+		printf(" fspace = %lx,\n", vme->fspace);
+		printf("    object.uvm_obj/sub_map = %p,\n",
+		    vme->object.uvm_obj);
 		printf("    offset = %lx,", (unsigned long)vme->offset);
 		printf(" etype = %x <%s%s%s%s%s >,", vme->etype,
 		    vme->etype & UVM_ET_OBJ ? " OBJ" : "",
@@ -678,7 +680,6 @@ dump_vm_map_entry(kvm_t *kd, struct kbit *vmspace,
 		case VT_NFS:
 		case VT_MFS:
 		case VT_MSDOSFS:
-		case VT_PROCFS:
 		default:
 			break;
 		}
@@ -689,12 +690,12 @@ dump_vm_map_entry(kvm_t *kd, struct kbit *vmspace,
 	if (print_map) {
 		printf("0x%lx 0x%lx %c%c%c %c%c%c %s %s %d %d %d",
 		    vme->start, vme->end,
-		    (vme->protection & VM_PROT_READ) ? 'r' : '-',
-		    (vme->protection & VM_PROT_WRITE) ? 'w' : '-',
-		    (vme->protection & VM_PROT_EXECUTE) ? 'x' : '-',
-		    (vme->max_protection & VM_PROT_READ) ? 'r' : '-',
-		    (vme->max_protection & VM_PROT_WRITE) ? 'w' : '-',
-		    (vme->max_protection & VM_PROT_EXECUTE) ? 'x' : '-',
+		    (vme->protection & PROT_READ) ? 'r' : '-',
+		    (vme->protection & PROT_WRITE) ? 'w' : '-',
+		    (vme->protection & PROT_EXEC) ? 'x' : '-',
+		    (vme->max_protection & PROT_READ) ? 'r' : '-',
+		    (vme->max_protection & PROT_WRITE) ? 'w' : '-',
+		    (vme->max_protection & PROT_EXEC) ? 'x' : '-',
 		    (vme->etype & UVM_ET_COPYONWRITE) ? "COW" : "NCOW",
 		    (vme->etype & UVM_ET_NEEDSCOPY) ? "NC" : "NNC",
 		    vme->inheritance, vme->wired_count,
@@ -714,9 +715,9 @@ dump_vm_map_entry(kvm_t *kd, struct kbit *vmspace,
 		printf("%0*lx-%0*lx %c%c%c%c %0*lx %02x:%02x %llu     %s\n",
 		    (int)sizeof(void *) * 2, vme->start,
 		    (int)sizeof(void *) * 2, vme->end,
-		    (vme->protection & VM_PROT_READ) ? 'r' : '-',
-		    (vme->protection & VM_PROT_WRITE) ? 'w' : '-',
-		    (vme->protection & VM_PROT_EXECUTE) ? 'x' : '-',
+		    (vme->protection & PROT_READ) ? 'r' : '-',
+		    (vme->protection & PROT_WRITE) ? 'w' : '-',
+		    (vme->protection & PROT_EXEC) ? 'x' : '-',
 		    (vme->etype & UVM_ET_COPYONWRITE) ? 'p' : 's',
 		    (int)sizeof(void *) * 2,
 		    (unsigned long)vme->offset,
@@ -749,11 +750,11 @@ dump_vm_map_entry(kvm_t *kd, struct kbit *vmspace,
 
 		prot[0] = '\0';
 		prot[1] = '\0';
-		if (vme->protection & VM_PROT_READ)
+		if (vme->protection & PROT_READ)
 			strlcat(prot, "/read", sizeof(prot));
-		if (vme->protection & VM_PROT_WRITE)
+		if (vme->protection & PROT_WRITE)
 			strlcat(prot, "/write", sizeof(prot));
-		if (vme->protection & VM_PROT_EXECUTE)
+		if (vme->protection & PROT_EXEC)
 			strlcat(prot, "/exec", sizeof(prot));
 
 		sz = (size_t)((vme->end - vme->start) / 1024);
@@ -768,14 +769,14 @@ dump_vm_map_entry(kvm_t *kd, struct kbit *vmspace,
 		    (int)sizeof(void *) * 2, vme->start, (int)sizeof(void *) * 2,
 		    vme->end - (vme->start != vme->end ? 1 : 0), (unsigned long)sz,
 		    (int)sizeof(void *) * 2, (unsigned long)vme->offset,
-		    (vme->protection & VM_PROT_READ) ? 'r' : '-',
-		    (vme->protection & VM_PROT_WRITE) ? 'w' : '-',
-		    (vme->protection & VM_PROT_EXECUTE) ? 'x' : '-',
+		    (vme->protection & PROT_READ) ? 'r' : '-',
+		    (vme->protection & PROT_WRITE) ? 'w' : '-',
+		    (vme->protection & PROT_EXEC) ? 'x' : '-',
 		    (vme->etype & UVM_ET_COPYONWRITE) ? 'p' : 's',
 		    (vme->etype & UVM_ET_NEEDSCOPY) ? '+' : '-',
-		    (vme->max_protection & VM_PROT_READ) ? 'r' : '-',
-		    (vme->max_protection & VM_PROT_WRITE) ? 'w' : '-',
-		    (vme->max_protection & VM_PROT_EXECUTE) ? 'x' : '-',
+		    (vme->max_protection & PROT_READ) ? 'r' : '-',
+		    (vme->max_protection & PROT_WRITE) ? 'w' : '-',
+		    (vme->max_protection & PROT_EXEC) ? 'x' : '-',
 		    vme->inheritance, vme->wired_count, vme->advice,
 		    major(dev), minor(dev), (unsigned long long)inode, name);
 		if (A(vp))

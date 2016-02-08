@@ -1,4 +1,4 @@
-/*	$OpenBSD: route6d.c,v 1.62 2014/03/24 10:48:29 mpi Exp $	*/
+/*	$OpenBSD: route6d.c,v 1.65 2015/02/04 20:16:23 bluhm Exp $	*/
 /*	$KAME: route6d.c,v 1.111 2006/10/25 06:38:13 jinmei Exp $	*/
 
 /*
@@ -47,7 +47,6 @@
 #include <poll.h>
 
 #include <sys/types.h>
-#include <sys/param.h>
 #include <sys/file.h>
 #include <sys/socket.h>
 #include <sys/ioctl.h>
@@ -2450,9 +2449,9 @@ krtread(int again)
 	mib[5] = 0;		/* No flags */
 	do {
 		retry++;
+		free(buf);
+		buf = NULL;
 		errmsg = NULL;
-		if (buf)
-			free(buf);
 		if (sysctl(mib, 6, NULL, &msize, NULL, 0) < 0) {
 			errmsg = "sysctl estimate";
 			continue;
@@ -3402,8 +3401,7 @@ setindex2ifc(int idx, struct ifc *ifcp)
 	while (nindex2ifc <= idx)
 		nindex2ifc *= 2;
 	if (n != nindex2ifc) {
-		p = (struct ifc **)realloc(index2ifc,
-		    sizeof(*index2ifc) * nindex2ifc);
+		p = reallocarray(index2ifc, nindex2ifc, sizeof(*index2ifc));
 		if (p == NULL) {
 			fatal("realloc");
 			/*NOTREACHED*/

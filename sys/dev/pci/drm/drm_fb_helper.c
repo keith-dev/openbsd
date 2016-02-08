@@ -1,4 +1,4 @@
-/*	$OpenBSD: drm_fb_helper.c,v 1.6 2014/03/09 11:07:18 jsg Exp $	*/
+/*	$OpenBSD: drm_fb_helper.c,v 1.9 2015/02/11 07:01:36 jsg Exp $	*/
 /*
  * Copyright (c) 2006-2009 Red Hat Inc.
  * Copyright (c) 2006-2008 Intel Corporation
@@ -334,7 +334,7 @@ void drm_fb_helper_dpms(struct drm_fb_helper *fb_helper, int dpms_mode)
 	/*
 	 * For each CRTC in this fb, turn the connectors on/off.
 	 */
-	rw_enter_write(&dev->mode_config.rwl);
+	mutex_lock(&dev->mode_config.mutex);
 	for (i = 0; i < fb_helper->crtc_count; i++) {
 		crtc = fb_helper->crtc_info[i].mode_set.crtc;
 
@@ -349,7 +349,7 @@ void drm_fb_helper_dpms(struct drm_fb_helper *fb_helper, int dpms_mode)
 				dev->mode_config.dpms_property, dpms_mode);
 		}
 	}
-	rw_exit_write(&dev->mode_config.rwl);
+	mutex_unlock(&dev->mode_config.mutex);
 }
 
 #if 0
@@ -811,7 +811,7 @@ int drm_fb_helper_single_fb_probe(struct drm_fb_helper *fb_helper,
 	if (crtc_count == 0 || sizes.fb_width == -1 || sizes.fb_height == -1) {
 		/* hmm everyone went away - assume VGA cable just fell out
 		   and will come back later. */
-		printf("Cannot find any crtc or sizes - going 1024x768\n");
+		DRM_INFO("Cannot find any crtc or sizes - going 1024x768\n");
 		sizes.fb_width = sizes.surface_width = 1024;
 		sizes.fb_height = sizes.surface_height = 768;
 	}
@@ -1137,7 +1137,7 @@ static bool drm_target_cloned(struct drm_fb_helper *fb_helper,
 		DRM_DEBUG_KMS("can clone using 1024x768\n");
 		return true;
 	}
-	printf("kms: can't enable cloning when we probably wanted to.\n");
+	DRM_INFO("kms: can't enable cloning when we probably wanted to.\n");
 	return false;
 }
 
@@ -1361,7 +1361,7 @@ bool drm_fb_helper_initial_config(struct drm_fb_helper *fb_helper, int bpp_sel)
 	 * we shouldn't end up with no modes here.
 	 */
 	if (count == 0)
-		printf("No connectors reported connected with modes\n");
+		dev_info(fb_helper->dev->dev, "No connectors reported connected with modes\n");
 
 	drm_setup_crtcs(fb_helper);
 
@@ -1394,7 +1394,7 @@ int drm_fb_helper_hotplug_event(struct drm_fb_helper *fb_helper)
 	if (!fb_helper->fb)
 		return 0;
 
-	rw_enter_write(&dev->mode_config.rwl);
+	mutex_lock(&dev->mode_config.mutex);
 	list_for_each_entry(crtc, &dev->mode_config.crtc_list, head) {
 		if (crtc->fb)
 			crtcs_bound++;
@@ -1404,7 +1404,7 @@ int drm_fb_helper_hotplug_event(struct drm_fb_helper *fb_helper)
 
 	if (bound < crtcs_bound) {
 		fb_helper->delayed_hotplug = true;
-		rw_exit_write(&dev->mode_config.rwl);
+		mutex_unlock(&dev->mode_config.mutex);
 		return 0;
 	}
 	DRM_DEBUG_KMS("\n");
@@ -1416,7 +1416,7 @@ int drm_fb_helper_hotplug_event(struct drm_fb_helper *fb_helper)
 	count = drm_fb_helper_probe_connector_modes(fb_helper, max_width,
 						    max_height);
 	drm_setup_crtcs(fb_helper);
-	rw_exit_write(&dev->mode_config.rwl);
+	mutex_unlock(&dev->mode_config.mutex);
 
 	return drm_fb_helper_single_fb_probe(fb_helper, bpp_sel);
 }
@@ -1433,9 +1433,9 @@ static int __init drm_fb_helper_modinit(void)
 	const char *name = "fbcon";
 	struct module *fbcon;
 
-	mtx_enter(&module_mutex);
+	mutex_lock(&module_mutex);
 	fbcon = find_module(name);
-	mtx_leave(&module_mutex);
+	mutex_unlock(&module_mutex);
 
 	if (!fbcon)
 		request_module_nowait(name);

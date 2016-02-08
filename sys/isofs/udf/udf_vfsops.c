@@ -1,4 +1,4 @@
-/*	$OpenBSD: udf_vfsops.c,v 1.42 2014/07/12 18:50:00 tedu Exp $	*/
+/*	$OpenBSD: udf_vfsops.c,v 1.44 2014/12/16 18:30:03 tedu Exp $	*/
 
 /*
  * Copyright (c) 2001, 2002 Scott Long <scottl@freebsd.org>
@@ -64,8 +64,11 @@
 #include <sys/lock.h>
 #include <sys/queue.h>
 #include <sys/vnode.h>
+#include <sys/lock.h>
 #include <sys/endian.h>
 #include <sys/specdev.h>
+
+#include <crypto/siphash.h>
 
 #include <isofs/udf/ecma167-udf.h>
 #include <isofs/udf/udf.h>
@@ -364,6 +367,7 @@ udf_mountfs(struct vnode *devvp, struct mount *mp, uint32_t lb, struct proc *p)
 	mtx_init(&ump->um_hashmtx, IPL_NONE);
 	ump->um_hashtbl = hashinit(UDF_HASHTBLSIZE, M_UDFMOUNT, M_WAITOK,
 	    &ump->um_hashsz);
+	arc4random_buf(&ump->um_hashkey, sizeof(ump->um_hashkey));
 
 	/* Get the VAT, if needed */
 	if (ump->um_flags & UDF_MNT_FIND_VAT) {

@@ -1,4 +1,4 @@
-/*	$OpenBSD: rtw.c,v 1.87 2014/07/13 23:10:23 deraadt Exp $	*/
+/*	$OpenBSD: rtw.c,v 1.90 2015/02/10 23:25:46 mpi Exp $	*/
 /*	$NetBSD: rtw.c,v 1.29 2004/12/27 19:49:16 dyoung Exp $ */
 
 /*-
@@ -46,8 +46,8 @@
 #include <sys/socket.h>
 #include <sys/time.h>
 #include <sys/types.h>
+#include <sys/endian.h>
 
-#include <machine/endian.h>
 #include <machine/bus.h>
 #include <machine/intr.h>	/* splnet */
 
@@ -58,10 +58,8 @@
 #include <net/bpf.h>
 #endif
 
-#ifdef INET
 #include <netinet/in.h>
 #include <netinet/if_ether.h>
-#endif
 
 #include <net80211/ieee80211_var.h>
 #include <net80211/ieee80211_radiotap.h>
@@ -1239,7 +1237,6 @@ rtw_intr_rx(struct rtw_softc *sc, u_int16_t isr)
 		 * Note well: now we cannot recycle the rs_mbuf unless
 		 * we restore its original length.
 		 */
-		m->m_pkthdr.rcvif = &sc->sc_if;
 		m->m_pkthdr.len = m->m_len = len;
 
 		wh = mtod(m, struct ieee80211_frame *);
@@ -2616,11 +2613,9 @@ rtw_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 	switch (cmd) {
 	case SIOCSIFADDR:
 		ifp->if_flags |= IFF_UP;
-#ifdef INET
 		if (ifa->ifa_addr->sa_family == AF_INET) {
 			arp_ifinit(&ic->ic_ac, ifa);
 		}
-#endif  /* INET */
 		/* FALLTHROUGH */
 
 	case SIOCSIFFLAGS:

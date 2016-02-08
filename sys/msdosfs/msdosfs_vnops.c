@@ -1,4 +1,4 @@
-/*	$OpenBSD: msdosfs_vnops.c,v 1.94 2014/07/08 17:19:25 deraadt Exp $	*/
+/*	$OpenBSD: msdosfs_vnops.c,v 1.98 2015/02/10 21:56:10 miod Exp $	*/
 /*	$NetBSD: msdosfs_vnops.c,v 1.63 1997/10/17 11:24:19 ws Exp $	*/
 
 /*-
@@ -60,6 +60,7 @@
 #include <sys/proc.h>
 #include <sys/mount.h>
 #include <sys/vnode.h>
+#include <sys/lock.h>
 #include <sys/signalvar.h>
 #include <sys/specdev.h> /* XXX */	/* defines v_rdev */
 #include <sys/malloc.h>
@@ -67,6 +68,7 @@
 #include <sys/dirent.h>		/* defines dirent structure */
 #include <sys/lockf.h>
 #include <sys/poll.h>
+#include <sys/unistd.h>
 
 #include <msdosfs/bpb.h>
 #include <msdosfs/direntry.h>
@@ -77,7 +79,8 @@
 static uint32_t fileidhash(uint64_t);
 
 int msdosfs_kqfilter(void *);
-int filt_msdosfsreadwrite(struct knote *, long);
+int filt_msdosfsread(struct knote *, long);
+int filt_msdosfswrite(struct knote *, long);
 int filt_msdosfsvnode(struct knote *, long);
 void filt_msdosfsdetach(struct knote *);
 
@@ -574,7 +577,7 @@ msdosfs_read(void *v)
 			brelse(bp);
 			return (error);
 		}
-		error = uiomove(bp->b_data + on, (int) n, uio);
+		error = uiomovei(bp->b_data + on, (int) n, uio);
 		brelse(bp);
 	} while (error == 0 && uio->uio_resid > 0 && n != 0);
 	if (!isadir && !(vp->v_mount->mnt_flag & MNT_NOATIME))
@@ -732,7 +735,7 @@ msdosfs_write(void *v)
 		/*
 		 * Copy the data from user space into the buf header.
 		 */
-		error = uiomove(bp->b_data + croffset, n, uio);
+		error = uiomovei(bp->b_data + croffset, n, uio);
 
 		/*
 		 * If they want this synchronous then write it and wait for
@@ -1555,7 +1558,7 @@ msdosfs_readdir(void *v)
 				    sizeof(struct direntry);
 				if (uio->uio_resid < dirbuf.d_reclen)
 					goto out;
-				error = uiomove(&dirbuf, dirbuf.d_reclen, uio);
+				error = uiomovei(&dirbuf, dirbuf.d_reclen, uio);
 				if (error)
 					goto out;
 				offset = dirbuf.d_off;
@@ -1683,7 +1686,7 @@ msdosfs_readdir(void *v)
 				goto out;
 			}
 			wlast = -1;
-			error = uiomove(&dirbuf, dirbuf.d_reclen, uio);
+			error = uiomovei(&dirbuf, dirbuf.d_reclen, uio);
 			if (error) {
 				brelse(bp);
 				goto out;
@@ -1939,8 +1942,10 @@ struct vops msdosfs_vops = {
 	.vop_revoke	= vop_generic_revoke,
 };
 
-struct filterops msdosfsreadwrite_filtops =
-	{ 1, NULL, filt_msdosfsdetach, filt_msdosfsreadwrite };
+struct filterops msdosfsread_filtops =
+	{ 1, NULL, filt_msdosfsdetach, filt_msdosfsread };
+struct filterops msdosfswrite_filtops =
+	{ 1, NULL, filt_msdosfsdetach, filt_msdosfswrite };
 struct filterops msdosfsvnode_filtops =
 	{ 1, NULL, filt_msdosfsdetach, filt_msdosfsvnode };
 
@@ -1953,10 +1958,10 @@ msdosfs_kqfilter(void *v)
 
 	switch (kn->kn_filter) {
 	case EVFILT_READ:
-		kn->kn_fop = &msdosfsreadwrite_filtops;
+		kn->kn_fop = &msdosfsread_filtops;
 		break;
 	case EVFILT_WRITE:
-		kn->kn_fop = &msdosfsreadwrite_filtops;
+		kn->kn_fop = &msdosfswrite_filtops;
 		break;
 	case EVFILT_VNODE:
 		kn->kn_fop = &msdosfsvnode_filtops;
@@ -1981,7 +1986,30 @@ filt_msdosfsdetach(struct knote *kn)
 }
 
 int
-filt_msdosfsreadwrite(struct knote *kn, long hint)
+filt_msdosfsread(struct knote *kn, long hint)
+{
+	struct vnode *vp = (struct vnode *)kn->kn_hook;
+	struct denode *dep = VTODE(vp);
+
+	/*
+	 * filesystem is gone, so set the EOF flag and schedule
+	 * the knote for deletion.
+	 */
+	if (hint == NOTE_REVOKE) {
+		kn->kn_flags |= (EV_EOF | EV_ONESHOT);
+		return (1);
+	}
+
+	kn->kn_data = dep->de_FileSize - kn->kn_fp->f_offset;
+	if (kn->kn_data == 0 && kn->kn_sfflags & NOTE_EOF) {
+		kn->kn_fflags |= NOTE_EOF;
+		return (1);
+	}
+	return (kn->kn_data != 0);
+}
+
+int
+filt_msdosfswrite(struct knote *kn, long hint)
 {
 	/*
 	 * filesystem is gone, so set the EOF flag and schedule
@@ -1992,7 +2020,8 @@ filt_msdosfsreadwrite(struct knote *kn, long hint)
 		return (1);
 	}
 
-	return (kn->kn_data != 0);
+	kn->kn_data = 0;
+	return (1);
 }
 
 int

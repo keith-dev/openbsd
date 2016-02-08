@@ -1,4 +1,4 @@
-/*	$OpenBSD: igmp.c,v 1.43 2014/07/22 11:06:10 mpi Exp $	*/
+/*	$OpenBSD: igmp.c,v 1.48 2014/12/17 09:57:13 mpi Exp $	*/
 /*	$NetBSD: igmp.c,v 1.15 1996/02/13 23:41:25 christos Exp $	*/
 
 /*
@@ -80,12 +80,10 @@
 #include <sys/systm.h>
 #include <sys/socket.h>
 #include <sys/protosw.h>
-#include <sys/proc.h>
 #include <sys/sysctl.h>
 
 #include <net/if.h>
 #include <net/if_var.h>
-#include <net/route.h>
 
 #include <netinet/in.h>
 #include <netinet/in_var.h>
@@ -93,7 +91,6 @@
 #include <netinet/ip_var.h>
 #include <netinet/igmp.h>
 #include <netinet/igmp_var.h>
-#include <dev/rndvar.h>
 
 #include <sys/stdarg.h>
 
@@ -644,17 +641,17 @@ igmp_sendpkt(struct in_multi *inm, int type, in_addr_t addr)
 	m->m_data -= sizeof(struct ip);
 	m->m_len += sizeof(struct ip);
 
-	imo.imo_multicast_ifp = if_get(inm->inm_ifidx);
-	imo.imo_multicast_ttl = 1;
+	imo.imo_ifidx = inm->inm_ifidx;
+	imo.imo_ttl = 1;
 
 	/*
 	 * Request loopback of the report if we are acting as a multicast
 	 * router, so that the process-level routing daemon can hear it.
 	 */
 #ifdef MROUTING
-	imo.imo_multicast_loop = (ip_mrouter != NULL);
+	imo.imo_loop = (ip_mrouter != NULL);
 #else
-	imo.imo_multicast_loop = 0;
+	imo.imo_loop = 0;
 #endif /* MROUTING */
 
 	ip_output(m, router_alert, NULL, IP_MULTICASTOPTS, &imo, NULL, 0);

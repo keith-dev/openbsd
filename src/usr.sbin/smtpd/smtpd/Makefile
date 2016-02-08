@@ -1,4 +1,4 @@
-#	$OpenBSD: Makefile,v 1.74 2014/04/15 20:55:42 miod Exp $
+#	$OpenBSD: Makefile,v 1.78 2015/01/22 09:26:05 reyk Exp $
 
 .PATH:		${.CURDIR}/..
 
@@ -10,9 +10,12 @@ SRCS=		aliases.c bounce.c ca.c compress_backend.c config.c		\
 		log.c mda.c mproc.c				\
 		mta.c mta_session.c parse.y pony.c queue.c queue_backend.c	\
 		ruleset.c runq.c scheduler.c scheduler_backend.c		\
-		smtp.c smtp_session.c smtpd.c ssl.c ssl_privsep.c		\
+		smtp.c smtp_session.c smtpd.c ssl.c				\
 		ssl_smtpd.c stat_backend.c table.c to.c tree.c util.c		\
 		waitq.c
+
+# RFC parsers
+SRCS+=		rfc2822.c
 
 # backends
 SRCS+=		compress_gzip.c
@@ -34,7 +37,7 @@ SRCS+=		scheduler_null.c
 SRCS+=		scheduler_proc.c
 SRCS+=		stat_ramstat.c
 
-MAN=		smtpd.8 smtpd.conf.5 table.5
+MAN=		sendmail.8 smtpd.8 smtpd.conf.5 table.5
 BINDIR=		/usr/sbin
 
 LDADD+=		-levent -lutil -lssl -lcrypto -lm -lz

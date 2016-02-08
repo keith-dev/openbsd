@@ -1,4 +1,4 @@
-/*	$OpenBSD: mbuf.c,v 1.32 2014/07/02 00:12:34 dlg Exp $	*/
+/*	$OpenBSD: mbuf.c,v 1.35 2015/01/20 18:26:57 deraadt Exp $	*/
 /*	$NetBSD: mbuf.c,v 1.9 1996/05/07 02:55:03 thorpej Exp $	*/
 
 /*
@@ -30,10 +30,9 @@
  * SUCH DAMAGE.
  */
 
-#include <sys/param.h>
-#include <sys/protosw.h>
 #include <sys/socket.h>
 #include <sys/mbuf.h>
+#include <sys/protosw.h>
 #include <sys/pool.h>
 #include <sys/sysctl.h>
 #include <net/if.h>
@@ -139,7 +138,7 @@ mbpr(void)
 			return;
 		}
 
-		if (!strncmp(name, "mbpl", strlen("mbpl")))
+		if (!strncmp(name, "mbufpl", strlen("mbufpl")))
 			bcopy(&pool, &mbpool, sizeof(pool));
 		else if (mclp < sizeof(mclpools) / sizeof(mclpools[0]) &&
 		    !strncmp(name, *mclnamep, strlen(*mclnamep))) {

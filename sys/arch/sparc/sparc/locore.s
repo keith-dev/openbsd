@@ -1,4 +1,4 @@
-/*	$OpenBSD: locore.s,v 1.94 2013/06/13 19:33:59 deraadt Exp $	*/
+/*	$OpenBSD: locore.s,v 1.97 2015/02/09 09:21:30 miod Exp $	*/
 /*	$NetBSD: locore.s,v 1.73 1997/09/13 20:36:48 pk Exp $	*/
 
 /*
@@ -2534,7 +2534,7 @@ nmi_sun4:
 	 */
 	sethi	%hi(INTRREG_VA), %o0
 	ldub	[%o0 + %lo(INTRREG_VA)], %o1
-	andn	%o0, IE_ALLIE, %o1
+	andn	%o1, IE_ALLIE, %o1
 	stb	%o1, [%o0 + %lo(INTRREG_VA)]
 	wr	%l0, PSR_ET, %psr	! okay, turn traps on again
 
@@ -2560,7 +2560,7 @@ nmi_sun4c:
 	 */
 	sethi	%hi(INTRREG_VA), %o0
 	ldub	[%o0 + %lo(INTRREG_VA)], %o1
-	andn	%o0, IE_ALLIE, %o1
+	andn	%o1, IE_ALLIE, %o1
 	stb	%o1, [%o0 + %lo(INTRREG_VA)]
 	wr	%l0, PSR_ET, %psr	! okay, turn traps on again
 
@@ -2627,8 +2627,13 @@ nmi_sun4m:
 	sethi	%hi(ICR_PI_CLR), %o0
 	set	PINTR_IC, %o1
 	st	%o1, [%o0 + %lo(ICR_PI_CLR)]
+	 nop; nop; nop;
+	ld	[%o0 + %lo(ICR_PI_PEND)], %g0 ! drain register!?
+	 nop;
 
-	wr	%l0, PSR_ET, %psr	! okay, turn traps on again
+	or	%l0, PSR_PIL, %o4	! splhigh()
+	wr	%o4, 0, %psr
+	wr	%o4, PSR_ET, %psr	! okay, turn traps on again
 
 	std	%g2, [%sp + CCFSZ + 0]	! save g2, g3
 	rd	%y, %l4			! save y
@@ -3760,7 +3765,7 @@ startmap_done:
 	sethi	%hi(_C_LABEL(u0) + PCB_WIM), %g2
 	st	%g1, [%g2 + %lo(_C_LABEL(u0) + PCB_WIM)]
 
-	set	USRSTACK - CCFSZ, %fp	! as if called from user code
+	set	VM_MIN_KERNEL_ADDRESS - CCFSZ, %fp	! as if called from user code
 	set	estack0 - CCFSZ - 80, %sp ! via syscall(boot_me_up) or somesuch
 	rd	%psr, %l0
 	wr	%l0, PSR_ET, %psr

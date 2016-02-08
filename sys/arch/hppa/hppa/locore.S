@@ -1,4 +1,4 @@
-/*	$OpenBSD: locore.S,v 1.190 2014/05/30 13:55:58 kettenis Exp $	*/
+/*	$OpenBSD: locore.S,v 1.193 2014/10/23 16:57:45 miod Exp $	*/
 
 /*
  * Copyright (c) 1998-2004 Michael Shalayeff
@@ -570,7 +570,6 @@ $syscall
 	stw	r2 , TF_R2 -TRAPFRAME_SIZEOF(sr1, t3)
 	stw	r3 , TF_R3 -TRAPFRAME_SIZEOF(sr1, t3)
 	copy	t3, r3
-#ifdef DDB
 	/* save callee-save registers */
 	stw	r4 , TF_R4 -TRAPFRAME_SIZEOF(sr1, t3)
 	stw	r5 , TF_R5 -TRAPFRAME_SIZEOF(sr1, t3)
@@ -587,7 +586,6 @@ $syscall
 	stw	r16, TF_R16-TRAPFRAME_SIZEOF(sr1, t3)
 	stw	r17, TF_R17-TRAPFRAME_SIZEOF(sr1, t3)
 	stw	r18, TF_R18-TRAPFRAME_SIZEOF(sr1, t3)
-#endif
 	/*
 	 * Save the rest of the CPU context
 	 */
@@ -713,7 +711,6 @@ $syscall_return
 	ldw	TF_R1(t3), r1
 	ldw	TF_R2(t3), r2
 	ldw	TF_R3(t3), r3
-#ifdef DDB
 	ldw	TF_R4(t3), r4
 	ldw	TF_R5(t3), r5
 	ldw	TF_R6(t3), r6
@@ -729,7 +726,6 @@ $syscall_return
 	ldw	TF_R16(t3), r16
 	ldw	TF_R17(t3), r17
 	ldw	TF_R18(t3), r18
-#endif
 	ldw	TF_R19(t3), t4
 	/*	r20(t3) is used as a temporary and will be restored later */
 	/*	r21(t2) is used as a temporary and will be restored later */
@@ -1745,11 +1741,6 @@ $trapnowvirt
 	ldw 48(t2), r1 ! ldw 52(t2), t1 ! stw r1, 48(t3) ! stw t1, 52(t3)
 	ldw 56(t2), r1 ! ldw 60(t2), t1 ! stw r1, 56(t3) ! stw t1, 60(t3)
 
-	/*
-	 * hmm, we don't need to save all the regs, only caller-save
-	 * (except when DDB)
-	 */
-#ifdef DDB
 	stw	r4, TF_R4(t3)
 	stw	r5, TF_R5(t3)
 	stw	r6, TF_R6(t3)
@@ -1765,7 +1756,6 @@ $trapnowvirt
 	stw	r16, TF_R16(t3)
 	stw	r17, TF_R17(t3)
 	stw	r18, TF_R18(t3)
-#endif
 	stw	r19, TF_R19(t3)	/* t4 */
 	stw	r23, TF_R23(t3)
 	stw	r24, TF_R24(t3)
@@ -1850,8 +1840,9 @@ LEAF_ENTRY(desidhash_s)
 	MFCPU_T(DR_CPUCFG,22)
 	nop
 	nop
-	depi	0, DR0_PCXS_DHE, 3, t1	/* 3 4 DR0_PCXS_DOMAIN|DR0_PCXS_IHE */
+	depi	0, DR0_PCXS_DHE, 3, t1	/* 3: DR0_PCXS_DOMAIN|DR0_PCXS_IHE */
 	depi	1, DR0_PCXS_EQWSTO, 1, t1
+	/* clear `write to clear' bits so they don't get reset */
 	depi	0, DR0_PCXS_DHPMC, 1, t1
 	depi	0, DR0_PCXS_ILPMC, 1, t1
 	sync
@@ -1876,6 +1867,7 @@ LEAF_ENTRY(desidhash_t)
 	nop
 	depi	0, DR0_PCXT_IHE, 1, t1
 	depi	0, DR0_PCXT_DHE, 1, t1
+	/* clear `write to clear' bits so they don't get reset */
 	depi	0, DR0_PCXT_DHPMC, 1, t1
 	depi	0, DR0_PCXT_ILPMC, 1, t1
 	sync
@@ -1967,11 +1959,15 @@ LEAF_ENTRY(desidhash_l)
 	MFCPU_C(DR_CPUCFG,22)	/* t1 */
 	nop
 	nop
-	depi	0, DR0_PCXL_L2IHASH_EN, 2, t1	/* + DR0_PCXL_L2DHASH_EN */
-	depi	0, DR0_PCXL_L2IHPMC, 1, t1	/* don't reset */
-	depi	0, DR0_PCXL_L2DHPMC, 1, t1	/* don't reset */
-	depi	0, DR0_PCXL_L1IHPMC, 1, t1	/* don't reset */
-	depi	0, DR0_PCXL_L2PARERR,1, t1	/* don't reset */
+	depi	0, DR0_PCXL_L2IHASH_EN, 2, t1	/* 2: DR0_PCXL_L2DHASH_EN */
+#if 0 /* better trust the PROM if it left some bits set here */
+	depi	0, DR0_PCXL_DUAL_DIS, 2, t1
+#endif
+	/* clear `write to clear' bits so they don't get reset */
+	depi	0, DR0_PCXL_L2IHPMC, 1, t1
+	depi	0, DR0_PCXL_L2DHPMC, 1, t1
+	depi	0, DR0_PCXL_L1IHPMC, 1, t1
+	depi	0, DR0_PCXL_L2PARERR, 4, t1
 	sync
 	MTCPU_C(22,DR_CPUCFG)
 	nop
@@ -2011,6 +2007,7 @@ EXIT(pbtlb_u)
  */
 	.export	TLABEL(hpmc), entry
 ENTRY(TLABEL(hpmc),0)
+ALTENTRY(hpmc_tramp)
 
 	mtsp	r0, sr0
 	ldil	L%hppa_vtop, t1
@@ -2035,6 +2032,7 @@ ENTRY(TLABEL(hpmc),0)
 hpmc_never_dies
 	b	hpmc_never_dies
 	nop
+ALTENTRY(hpmc_tramp_end)
 EXIT(TLABEL(hpmc))
 
 /*
@@ -2371,7 +2369,6 @@ ENTRY($fpu_emulate,320)
 	/* stw	r1 , TF_R1 (r31) shadowed */
 	stw	r2 , TF_R2 (r31)
 	stw	r3 , TF_R3 (r31)
-#ifdef DDB
 	stw	r4 , TF_R4 (r31)
 	stw	r5 , TF_R5 (r31)
 	stw	r6 , TF_R6 (r31)
@@ -2387,7 +2384,6 @@ ENTRY($fpu_emulate,320)
 	/* stw	r16, TF_R16(r31) shadowed */
 	/* stw	r17, TF_R17(r31) shadowed */
 	stw	r18, TF_R18(r31)
-#endif
 	stw	r19, TF_R19(r31)
 	stw	r20, TF_R20(r31)
 	stw	r21, TF_R21(r31)
@@ -2436,7 +2432,6 @@ ENTRY($fpu_emulate,320)
 	ldw	TF_R3 (r31), r3
 	mtsar	r1
 	copy	ret0, r1
-#ifdef DDB
 	ldw	TF_R4 (r31), r4
 	ldw	TF_R5 (r31), r5
 	ldw	TF_R6 (r31), r6
@@ -2452,7 +2447,6 @@ ENTRY($fpu_emulate,320)
 	/* ldw	TF_R16(r31), r16 shadowed */
 	/* ldw	TF_R17(r31), r17 shadowed */
 	ldw	TF_R18(r31), r18
-#endif
 	ldw	TF_R19(r31), r19
 	ldw	TF_R20(r31), r20
 	ldw	TF_R21(r31), r21

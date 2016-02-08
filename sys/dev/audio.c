@@ -1,4 +1,4 @@
-/*	$OpenBSD: audio.c,v 1.122 2014/07/12 18:48:17 tedu Exp $	*/
+/*	$OpenBSD: audio.c,v 1.129 2015/02/10 21:56:09 miod Exp $	*/
 /*	$NetBSD: audio.c,v 1.119 1999/11/09 16:50:47 augustss Exp $	*/
 
 /*
@@ -41,7 +41,6 @@
 #include <sys/selinfo.h>
 #include <sys/poll.h>
 #include <sys/malloc.h>
-#include <sys/proc.h>
 #include <sys/systm.h>
 #include <sys/syslog.h>
 #include <sys/kernel.h>
@@ -50,12 +49,11 @@
 #include <sys/audioio.h>
 #include <sys/device.h>
 #include <sys/task.h>
+#include <sys/endian.h>
 
 #include <dev/audio_if.h>
 
 #include <dev/rndvar.h>
-
-#include <machine/endian.h>
 
 #include "wskbd.h"	/* NWSKBD (mixer tuning using keyboard) */
 
@@ -333,7 +331,7 @@ struct filterops audioread_filtops =
 #if NWSKBD > 0
 /* Mixer manipulation using keyboard */
 int wskbd_set_mixervolume(long, long);
-void wskbd_set_mixervolume_callback(void *, void *);
+void wskbd_set_mixervolume_callback(void *);
 #endif
 
 /*
@@ -467,11 +465,6 @@ audioattach(struct device *parent, struct device *self, void *aux)
 	}
 	DPRINTF(("audio_attach: inputs ports=0x%x, output ports=0x%x\n",
 		 sc->sc_inports.allports, sc->sc_outports.allports));
-
-#if NWSKBD > 0
-	task_set(&sc->sc_mixer_task, wskbd_set_mixervolume_callback, NULL,
-	    NULL);
-#endif /* NWSKBD > 0 */
 }
 
 int
@@ -1503,7 +1496,7 @@ audio_read(dev_t dev, struct uio *uio, int ioflag)
 		DPRINTFN(1,("audio_read: outp=%p, cc=%d\n", outp, cc));
 		if (sc->sc_rparams.sw_code)
 			sc->sc_rparams.sw_code(sc->hw_hdl, outp, cc);
-		error = uiomove(outp, cc / sc->sc_rparams.factor, uio);
+		error = uiomovei(outp, cc / sc->sc_rparams.factor, uio);
 		if (error)
 			return error;
 	}
@@ -1642,7 +1635,7 @@ audio_silence_copyout(struct audio_softc *sc, int n, struct uio *uio)
 	error = 0;
 	while (n > 0 && uio->uio_resid > 0 && !error) {
 		k = min(n, min(uio->uio_resid, sizeof zerobuf));
-		error = uiomove(zerobuf, k, uio);
+		error = uiomovei(zerobuf, k, uio);
 		n -= k;
 	}
 	return (error);
@@ -1746,7 +1739,7 @@ audio_write(dev_t dev, struct uio *uio, int ioflag)
 		cc /= sc->sc_pparams.factor;
 		DPRINTFN(1, ("audio_write: uiomove cc=%d inp=%p, left=%zd\n",
 		    cc, inp, uio->uio_resid));
-		error = uiomove(inp, cc, uio);
+		error = uiomovei(inp, cc, uio);
 		if (error)
 			return 0;
 		if (sc->sc_pparams.sw_code) {
@@ -2029,18 +2022,18 @@ audio_mmap(dev_t dev, off_t off, int prot)
  * The idea here was to use the protection to determine if
  * we are mapping the read or write buffer, but it fails.
  * The VM system is broken in (at least) two ways.
- * 1) If you map memory VM_PROT_WRITE you SIGSEGV
- *    when writing to it, so VM_PROT_READ|VM_PROT_WRITE
+ * 1) If you map memory PROT_WRITE you SIGSEGV
+ *    when writing to it, so PROT_READ|PROT_WRITE
  *    has to be used for mmapping the play buffer.
- * 2) Even if calling mmap() with VM_PROT_READ|VM_PROT_WRITE
- *    audio_mmap will get called at some point with VM_PROT_READ
+ * 2) Even if calling mmap() with PROT_READ|PROT_WRITE
+ *    audio_mmap will get called at some point with PROT_READ
  *    only.
  * So, alas, we always map the play buffer for now.
  */
-	if (prot == (VM_PROT_READ|VM_PROT_WRITE) ||
-	    prot == VM_PROT_WRITE)
+	if (prot == (PROT_READ | PROT_WRITE) ||
+	    prot == PROT_WRITE)
 		cb = &sc->sc_pr;
-	else if (prot == VM_PROT_READ)
+	else if (prot == PROT_READ)
 		cb = &sc->sc_rr;
 	else
 		return -1;
@@ -3434,27 +3427,39 @@ filt_audiowrite(struct knote *kn, long hint)
 }
 
 #if NWSKBD > 0
+struct wskbd_vol_change {
+	struct task t;
+	long dir;
+	long out;
+};
+
 int
 wskbd_set_mixervolume(long dir, long out)
 {
 	struct audio_softc *sc;
+	struct wskbd_vol_change *ch;
 
 	if (audio_cd.cd_ndevs == 0 || (sc = audio_cd.cd_devs[0]) == NULL) {
 		DPRINTF(("wskbd_set_mixervolume: audio_cd\n"));
 		return (ENXIO);
 	}
 
-	task_del(systq, &sc->sc_mixer_task);
-	task_set(&sc->sc_mixer_task, wskbd_set_mixervolume_callback,
-	    (void *)dir, (void *)out);
-	task_add(systq, &sc->sc_mixer_task);
+	ch = malloc(sizeof(*ch), M_TEMP, M_NOWAIT);
+	if (ch == NULL)
+		return (ENOMEM);
+
+	task_set(&ch->t, wskbd_set_mixervolume_callback, ch);
+	ch->dir = dir;
+	ch->out = out;
+	task_add(systq, &ch->t);
 
 	return (0);
 }
 
 void
-wskbd_set_mixervolume_callback(void *arg1, void *arg2)
+wskbd_set_mixervolume_callback(void *xch)
 {
+	struct wskbd_vol_change *ch = xch;
 	struct audio_softc *sc;
 	struct au_mixer_ports *ports;
 	mixer_devinfo_t mi;
@@ -3463,19 +3468,19 @@ wskbd_set_mixervolume_callback(void *arg1, void *arg2)
 	u_int gain;
 	int error;
 
-	if (audio_cd.cd_ndevs == 0 || (sc = audio_cd.cd_devs[0]) == NULL) {
-		DPRINTF(("%s: audio_cd\n", __func__));
-		return;
-	}
+	dir = ch->dir;
+	out = ch->out;
+	free(ch, M_TEMP, sizeof(*ch));
 
-	dir = (long)arg1;
-	out = (long)arg2;
+	sc = (struct audio_softc *)device_lookup(&audio_cd, 0);
+	if (sc == NULL)
+		return;
 
 	ports = out ? &sc->sc_outports : &sc->sc_inports;
 
 	if (ports->master == -1) {
 		DPRINTF(("%s: master == -1\n", __func__));
-		return;
+		goto done;
 	}
 
 	if (dir == 0) {
@@ -3484,7 +3489,7 @@ wskbd_set_mixervolume_callback(void *arg1, void *arg2)
 		error = au_get_mute(sc, ports, &mute);
 		if (error != 0) {
 			DPRINTF(("%s: au_get_mute: %d\n", __func__, error));
-			return;
+			goto done;
 		}
 
 		mute = !mute;
@@ -3492,7 +3497,7 @@ wskbd_set_mixervolume_callback(void *arg1, void *arg2)
 		error = au_set_mute(sc, ports, mute);
 		if (error != 0) {
 			DPRINTF(("%s: au_set_mute: %d\n", __func__, error));
-			return;
+			goto done;
 		}
 	} else {
 		/* Raise or lower volume */
@@ -3501,7 +3506,7 @@ wskbd_set_mixervolume_callback(void *arg1, void *arg2)
 		error = sc->hw_if->query_devinfo(sc->hw_hdl, &mi);
 		if (error != 0) {
 			DPRINTF(("%s: query_devinfo: %d\n", __func__, error));
-			return;
+			goto done;
 		}
 
 		au_get_gain(sc, ports, &gain, &balance);
@@ -3514,8 +3519,23 @@ wskbd_set_mixervolume_callback(void *arg1, void *arg2)
 		error = au_set_gain(sc, ports, gain, balance);
 		if (error != 0) {
 			DPRINTF(("%s: au_set_gain: %d\n", __func__, error));
-			return;
+			goto done;
+		}
+
+		/*
+		 * Unmute whenever we raise or lower the volume.  This
+		 * mimicks the behaviour of the hardware volume
+		 * buttons on Thinkpads making sure that our software
+		 * mute state follows the hardware mute state.
+		 */
+		error = au_set_mute(sc, ports, 0);
+		if (error != 0) {
+			DPRINTF(("%s: au_set_mute: %d\n", __func__, error));
+			goto done;
 		}
 	}
+
+done:
+	device_unref(&sc->dev);
 }
 #endif /* NWSKBD > 0 */

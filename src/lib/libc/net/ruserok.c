@@ -118,7 +118,7 @@ iruserok_sa(const void *raddr, int rlen, int superuser, const char *ruser,
 
 	sa = (struct sockaddr *)raddr;
 	first = 1;
-	hostf = superuser ? NULL : fopen(_PATH_HEQUIV, "r");
+	hostf = superuser ? NULL : fopen(_PATH_HEQUIV, "re");
 again:
 	if (hostf) {
 		if (__ivaliduser_sa(hostf, sa, rlen, luser, ruser) == 0) {
@@ -144,7 +144,7 @@ again:
 		 */
 		uid = geteuid();
 		(void)seteuid(pwd->pw_uid);
-		hostf = fopen(pbuf, "r");
+		hostf = fopen(pbuf, "re");
 		(void)seteuid(uid);
 
 		if (hostf == NULL)
@@ -204,7 +204,7 @@ __ivaliduser_sa(FILE *hostf, struct sockaddr *raddr, socklen_t salen,
 	const char *auser, *ahost;
 	int hostok, userok;
 	char *rhost = (char *)-1;
-	char domain[MAXHOSTNAMELEN];
+	char domain[HOST_NAME_MAX+1];
 	size_t buflen;
 
 	getdomainname(domain, sizeof(domain));
@@ -245,7 +245,7 @@ __ivaliduser_sa(FILE *hostf, struct sockaddr *raddr, socklen_t salen,
 		auser = *user ? user : luser;
 		ahost = buf;
 
-		if (strlen(ahost) >= MAXHOSTNAMELEN)
+		if (strlen(ahost) > HOST_NAME_MAX)
 			continue;
 
 		/*

@@ -1,4 +1,4 @@
-/*	$OpenBSD: tmpfs_mem.c,v 1.4 2014/07/12 18:50:25 tedu Exp $	*/
+/*	$OpenBSD: tmpfs_mem.c,v 1.6 2015/01/21 22:26:52 deraadt Exp $	*/
 /*	$NetBSD: tmpfs_mem.c,v 1.4 2011/05/24 01:09:47 rmind Exp $	*/
 
 /*
@@ -34,11 +34,6 @@
  * tmpfs memory allocation routines.
  * Implements memory usage accounting and limiting.
  */
-
-#if 0
-#include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: tmpfs_mem.c,v 1.4 2011/05/24 01:09:47 rmind Exp $");
-#endif
 
 #include <sys/param.h>
 #include <sys/namei.h>
@@ -218,7 +213,7 @@ tmpfs_strname_free(struct tmpfs_mount *mp, char *str, size_t len)
 
 	KASSERT(sz > 0 && sz <= 1024);
 	tmpfs_mem_decr(mp, sz);
-	free(str, M_TEMP, 0);
+	free(str, M_TEMP, sz);
 }
 
 int

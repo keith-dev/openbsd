@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_de.c,v 1.115 2014/07/22 13:12:11 mpi Exp $	*/
+/*	$OpenBSD: if_de.c,v 1.117 2014/12/22 02:28:52 tedu Exp $	*/
 /*	$NetBSD: if_de.c,v 1.58 1998/01/12 09:39:58 thorpej Exp $	*/
 
 /*-
@@ -54,7 +54,6 @@
 #include <net/if_media.h>
 #include <net/if_types.h>
 #include <net/if_dl.h>
-#include <net/route.h>
 #include <net/netisr.h>
 
 #include "bpfilter.h"
@@ -4174,12 +4173,10 @@ tulip_ifioctl(struct ifnet * ifp, u_long cmd, caddr_t data)
 	ifp->if_flags |= IFF_UP;
 	tulip_init(sc);
 	switch(ifa->ifa_addr->sa_family) {
-#ifdef INET
 	case AF_INET: {
 	    arp_ifinit(&sc->tulip_ac, ifa);
 	    break;
 	}
-#endif /* INET */
 
 	default: {
 	    break;

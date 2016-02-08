@@ -1,4 +1,4 @@
-/*	$OpenBSD: r600.c,v 1.10 2014/07/12 18:48:52 tedu Exp $	*/
+/*	$OpenBSD: r600.c,v 1.14 2015/02/12 11:11:45 jsg Exp $	*/
 /*
  * Copyright 2008 Advanced Micro Devices, Inc.
  * Copyright 2008 Red Hat Inc.
@@ -855,7 +855,7 @@ void r600_pcie_gart_tlb_flush(struct radeon_device *rdev)
 		tmp = RREG32(VM_CONTEXT0_REQUEST_RESPONSE);
 		tmp = (tmp & RESPONSE_TYPE_MASK) >> RESPONSE_TYPE_SHIFT;
 		if (tmp == 2) {
-			DRM_ERROR("[drm] r600 flush TLB failed\n");
+			printk(KERN_WARNING "[drm] r600 flush TLB failed\n");
 			return;
 		}
 		if (tmp) {
@@ -1977,7 +1977,7 @@ int r600_init_microcode(struct radeon_device *rdev)
 	pdev = platform_device_register_simple("radeon_cp", 0, NULL, 0);
 	err = IS_ERR(pdev);
 	if (err) {
-		DRM_ERROR( "radeon_cp: Failed to register firmware\n");
+		printk(KERN_ERR "radeon_cp: Failed to register firmware\n");
 		return -EINVAL;
 	}
 #endif
@@ -2071,9 +2071,7 @@ int r600_init_microcode(struct radeon_device *rdev)
 		rlc_req_size = RLC_UCODE_SIZE * 4;
 	}
 
-#ifdef DRMDEBUG
 	DRM_INFO("Loading %s Microcode\n", chip_name);
-#endif
 
 	snprintf(fw_name, sizeof(fw_name), "radeon-%s_pfp", chip_name);
 	err = loadfirmware(fw_name, &rdev->pfp_fw, &rdev->pfp_fw_size);
@@ -2112,7 +2110,7 @@ int r600_init_microcode(struct radeon_device *rdev)
 out:
 	if (err) {
 		if (err != -EINVAL)
-			DRM_ERROR(
+			printk(KERN_ERR
 			       "r600_cp: Failed to load firmware \"%s\"\n",
 			       fw_name);
 		if (rdev->pfp_fw) {
@@ -2465,9 +2463,7 @@ int r600_ring_test(struct radeon_device *rdev, struct radeon_ring *ring)
 		udelay(1);
 	}
 	if (i < rdev->usec_timeout) {
-#ifdef DRMDEBUG
 		DRM_INFO("ring test on %d succeeded in %d usecs\n", ring->idx, i);
-#endif
 	} else {
 		DRM_ERROR("radeon: ring %d test failed (scratch(0x%04X)=0x%08X)\n",
 			  ring->idx, scratch, tmp);
@@ -2522,9 +2518,7 @@ int r600_dma_ring_test(struct radeon_device *rdev,
 	}
 
 	if (i < rdev->usec_timeout) {
-#ifdef DRMDEBUG
 		DRM_INFO("ring test on %d succeeded in %d usecs\n", ring->idx, i);
-#endif
 	} else {
 		DRM_ERROR("radeon: ring %d test failed (0x%08X)\n",
 			  ring->idx, tmp);
@@ -3100,9 +3094,7 @@ int r600_ib_test(struct radeon_device *rdev, struct radeon_ring *ring)
 		udelay(1);
 	}
 	if (i < rdev->usec_timeout) {
-#ifdef DRMDEBUG
 		DRM_INFO("ib test on ring %d succeeded in %u usecs\n", ib.fence->ring, i);
-#endif
 	} else {
 		DRM_ERROR("radeon: ib test failed (scratch(0x%04X)=0x%08X)\n",
 			  scratch, tmp);
@@ -3170,9 +3162,7 @@ int r600_dma_ib_test(struct radeon_device *rdev, struct radeon_ring *ring)
 		udelay(1);
 	}
 	if (i < rdev->usec_timeout) {
-#ifdef DRMDEBUG
 		DRM_INFO("ib test on ring %d succeeded in %u usecs\n", ib.fence->ring, i);
-#endif
 	} else {
 		DRM_ERROR("radeon: ib test failed (0x%08X)\n", tmp);
 		r = -EINVAL;
@@ -3863,7 +3853,7 @@ int r600_irq_process(struct radeon_device *rdev)
 	bool queue_hdmi = false;
 
 	if (!rdev->ih.enabled || rdev->shutdown)
-		return (0);
+		return IRQ_NONE;
 
 	/* No MSIs, need a dummy read to flush PCI DMAs */
 	if (!rdev->msi_enabled)
@@ -3872,17 +3862,17 @@ int r600_irq_process(struct radeon_device *rdev)
 	wptr = r600_get_ih_wptr(rdev);
 
 	if (wptr == rdev->ih.rptr)
-		return (0);
+		return IRQ_NONE;
 restart_ih:
 	/* is somebody else already processing irqs? */
 	if (atomic_xchg(&rdev->ih.lock, 1))
-		return (0);
+		return IRQ_NONE;
 
 	rptr = rdev->ih.rptr;
 	DRM_DEBUG("r600_irq_process start: rptr %d, wptr %d\n", rptr, wptr);
 
 	/* Order reading of wptr vs. reading of IH ring data */
-	DRM_READMEMORYBARRIER();
+	rmb();
 
 	/* display interrupts */
 	r600_irq_ack(rdev);
@@ -4055,7 +4045,7 @@ restart_ih:
 	if (wptr != rptr)
 		goto restart_ih;
 
-	return (1);
+	return IRQ_HANDLED;
 }
 
 /*
@@ -4364,10 +4354,10 @@ uint64_t r600_get_gpu_clock(struct radeon_device *rdev)
 {
 	uint64_t clock;
 
-	rw_enter_write(&rdev->gpu_clock_rwlock);
+	mutex_lock(&rdev->gpu_clock_mutex);
 	WREG32(RLC_CAPTURE_GPU_CLOCK_COUNT, 1);
 	clock = (uint64_t)RREG32(RLC_GPU_CLOCK_COUNT_LSB) |
 	        ((uint64_t)RREG32(RLC_GPU_CLOCK_COUNT_MSB) << 32ULL);
-	rw_exit_write(&rdev->gpu_clock_rwlock);
+	mutex_unlock(&rdev->gpu_clock_mutex);
 	return clock;
 }

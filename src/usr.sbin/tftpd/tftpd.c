@@ -1,4 +1,4 @@
-/*	$OpenBSD: tftpd.c,v 1.19 2014/04/21 04:02:52 dlg Exp $	*/
+/*	$OpenBSD: tftpd.c,v 1.26 2015/01/16 06:40:22 deraadt Exp $	*/
 
 /*
  * Copyright (c) 2012 David Gwynne <dlg@uq.edu.au>
@@ -58,8 +58,6 @@
  */
 
 #include <sys/ioctl.h>
-#include <sys/param.h>
-#include <sys/types.h>
 #include <sys/queue.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
@@ -84,6 +82,7 @@
 #include <stdarg.h>
 #include <syslog.h>
 #include <unistd.h>
+#include <limits.h>
 #include <vis.h>
 
 #define TIMEOUT		5		/* packet rexmt timeout */
@@ -434,13 +433,16 @@ rewrite_events(void)
 void
 rewrite_map(struct tftp_client *client, const char *filename)
 {
-	char nicebuf[MAXPATHLEN];
+	char *nicebuf;
 
-	(void)strnvis(nicebuf, filename, MAXPATHLEN, VIS_SAFE|VIS_OCTAL);
+	if (stravis(&nicebuf, filename, VIS_SAFE|VIS_OCTAL) == -1)
+		lerr(1, "rwmap stravis");
 
 	if (evbuffer_add_printf(rwmap->wrbuf, "%s %s %s\n", getip(&client->ss),
 	    client->opcode == WRQ ? "write" : "read", nicebuf) == -1)
 		lerr(1, "rwmap printf");
+
+	free(nicebuf);
 
 	TAILQ_INSERT_TAIL(&rwmap->clients, client, entry);
 
@@ -450,8 +452,16 @@ rewrite_map(struct tftp_client *client, const char *filename)
 void
 rewrite_req(int fd, short events, void *arg)
 {
-	if (evbuffer_write(rwmap->wrbuf, fd) == -1)
-		lerr(1, "rwmap read");
+	if (evbuffer_write(rwmap->wrbuf, fd) == -1) {
+		switch (errno) {
+		case EINTR:
+		case EAGAIN:
+			event_add(&rwmap->wrev, NULL);
+			return;
+		}
+
+		lerr(1, "rewrite socket write");
+	}
 
 	if (EVBUFFER_LENGTH(rwmap->wrbuf))
 		event_add(&rwmap->wrev, NULL);
@@ -464,8 +474,19 @@ rewrite_res(int fd, short events, void *arg)
 	char *filename;
 	size_t len;
 
-	if (evbuffer_read(rwmap->rdbuf, fd, MAXPATHLEN) == -1)
-		lerr(1, "rwmap read");
+	switch (evbuffer_read(rwmap->rdbuf, fd, PATH_MAX)) {
+	case -1:
+		switch (errno) {
+		case EINTR:
+		case EAGAIN:
+			return;
+		}
+		lerr(1, "rewrite socket read");
+	case 0:
+		lerrx(1, "rewrite socket closed");
+	default:
+		break;
+	}
 
 	while ((filename = evbuffer_readln(rwmap->rdbuf, &len,
 	    EVBUFFER_EOL_LF)) != NULL) {
@@ -490,8 +511,8 @@ tftpd_listen(const char *addr, const char *port, int family)
 	int error;
 	int s;
 
-	int saved_errno;
-	const char *cause = NULL;
+	int cerrno = EADDRNOTAVAIL;
+	const char *cause = "getaddrinfo";
 
 	int on = 1;
 
@@ -512,14 +533,14 @@ tftpd_listen(const char *addr, const char *port, int family)
 		s = socket(res->ai_family, res->ai_socktype, res->ai_protocol);
 		if (s == -1) {
 			cause = "socket";
+			cerrno = errno;
 			continue;
 		}
 
 		if (bind(s, res->ai_addr, res->ai_addrlen) == -1) {
 			cause = "bind";
-			saved_errno = errno;
+			cerrno = errno;
 			close(s);
-			errno = saved_errno;
 			continue;
 		}
 
@@ -530,12 +551,12 @@ tftpd_listen(const char *addr, const char *port, int family)
 		case AF_INET:
 			if (setsockopt(s, IPPROTO_IP, IP_RECVDSTADDR,
 			    &on, sizeof(on)) == -1)
-				errx(1, "setsockopt(IP_RECVDSTADDR)");
+				err(1, "setsockopt(IP_RECVDSTADDR)");
 			break;
 		case AF_INET6:
 			if (setsockopt(s, IPPROTO_IPV6, IPV6_RECVPKTINFO,
 			    &on, sizeof(on)) == -1)
-				errx(1, "setsockopt(IPV6_RECVPKTINFO)");
+				err(1, "setsockopt(IPV6_RECVPKTINFO)");
 			break;
 		}
 
@@ -548,8 +569,9 @@ tftpd_listen(const char *addr, const char *port, int family)
 	}
 
 	if (TAILQ_EMPTY(&tftp_servers))
-		err(1, "%s", cause);
+		errc(1, cerrno, "%s", cause);
 
+	freeaddrinfo(res0);
 	return (0);
 }
 
@@ -622,7 +644,7 @@ tftpd_recv(int fd, short events, void *arg)
 
 	client = client_alloc();
 	if (client == NULL) {
-		char *buf = alloca(SEGSIZE_MAX + 4);
+		char buf[SEGSIZE_MAX + 4];
 		/* no memory! flush this request... */
 		recv(fd, buf, SEGSIZE_MAX + 4, 0);
 		/* dont care if it fails */
@@ -771,7 +793,7 @@ tftp(struct tftp_client *client, struct tftphdr *tp, size_t size)
 	int		 i, first = 1, ecode, to;
 	struct formats	*pf;
 	char		*mode = NULL;
-	char		 filename[MAXPATHLEN];
+	char		 filename[PATH_MAX];
 	const char	*errstr;
 
 	if (size < 5) {
@@ -850,9 +872,9 @@ again:
 	}
 
 	if (verbose) {
-		char nicebuf[MAXPATHLEN];
+		char nicebuf[PATH_MAX];
 
-		(void)strnvis(nicebuf, filename, MAXPATHLEN,
+		(void)strnvis(nicebuf, filename, PATH_MAX,
 		    VIS_SAFE|VIS_OCTAL);
 
 		linfo("%s: %s request for '%s'", getip(&client->ss),

@@ -1,4 +1,4 @@
-/*	$OpenBSD: key.c,v 1.11 2013/11/28 22:12:40 krw Exp $	*/
+/*	$OpenBSD: key.c,v 1.14 2015/01/16 06:40:14 deraadt Exp $	*/
 
 /*-
  * Copyright (c) 1991, 1993, 1994
@@ -11,7 +11,6 @@
 
 #include "config.h"
 
-#include <sys/param.h>
 #include <sys/queue.h>
 #include <sys/time.h>
 
@@ -27,6 +26,8 @@
 
 #include "common.h"
 #include "../vi/vi.h"
+
+#define MAXIMUM(a, b)	(((a) > (b)) ? (a) : (b))
 
 static int	v_event_append(SCR *, EVENT *);
 static int	v_event_grow(SCR *, int);
@@ -98,8 +99,7 @@ static int nkeylist =
  * PUBLIC: int v_key_init(SCR *);
  */
 int
-v_key_init(sp)
-	SCR *sp;
+v_key_init(SCR *sp)
 {
 	u_int ch;
 	GS *gp;
@@ -114,16 +114,6 @@ v_key_init(sp)
 	 * character set, as long as nul isn't a character.
 	 */
 	(void)setlocale(LC_ALL, "");
-#if __linux__
-	/*
-	 * In libc 4.5.26, setlocale(LC_ALL, ""), doesn't setup the table
-	 * for ctype(3c) correctly.  This bug is fixed in libc 4.6.x.
-	 *
-	 * This code works around this problem for libc 4.5.x users.
-	 * Note that this code is harmless if you're using libc 4.6.x.
-	 */
-	(void)setlocale(LC_CTYPE, "");
-#endif
 	v_key_ilookup(sp);
 
 	v_keyval(sp, K_CNTRLD, KEY_VEOF);
@@ -164,10 +154,7 @@ v_key_init(sp)
  * in the table, so we check for that first.
  */
 static void
-v_keyval(sp, val, name)
-	SCR *sp;
-	int val;
-	scr_keyval_t name;
+v_keyval(SCR *sp, int val, scr_keyval_t name)
 {
 	KEYLIST *kp;
 	CHAR_T ch;
@@ -201,8 +188,7 @@ v_keyval(sp, val, name)
  * PUBLIC: void v_key_ilookup(SCR *);
  */
 void
-v_key_ilookup(sp)
-	SCR *sp;
+v_key_ilookup(SCR *sp)
 {
 	CHAR_T ch, *p, *t;
 	GS *gp;
@@ -222,9 +208,7 @@ v_key_ilookup(sp)
  * PUBLIC: size_t v_key_len(SCR *, ARG_CHAR_T);
  */
 size_t
-v_key_len(sp, ch)
-	SCR *sp;
-	ARG_CHAR_T ch;
+v_key_len(SCR *sp, ARG_CHAR_T ch)
 {
 	(void)v_key_name(sp, ch);
 	return (sp->clen);
@@ -238,9 +222,7 @@ v_key_len(sp, ch)
  * PUBLIC: CHAR_T *v_key_name(SCR *, ARG_CHAR_T);
  */
 CHAR_T *
-v_key_name(sp, ach)
-	SCR *sp;
-	ARG_CHAR_T ach;
+v_key_name(SCR *sp, ARG_CHAR_T ach)
 {
 	static const CHAR_T hexdigit[] = "0123456789abcdef";
 	static const CHAR_T octdigit[] = "01234567";
@@ -319,9 +301,7 @@ done:	sp->cname[sp->clen = len] = '\0';
  * PUBLIC: int v_key_val(SCR *, ARG_CHAR_T);
  */
 int
-v_key_val(sp, ch)
-	SCR *sp;
-	ARG_CHAR_T ch;
+v_key_val(SCR *sp, ARG_CHAR_T ch)
 {
 	KEYLIST k, *kp;
 
@@ -343,12 +323,7 @@ v_key_val(sp, ch)
  * PUBLIC: int v_event_push(SCR *, EVENT *, CHAR_T *, size_t, u_int);
  */
 int
-v_event_push(sp, p_evp, p_s, nitems, flags)
-	SCR *sp;
-	EVENT *p_evp;			/* Push event. */
-	CHAR_T *p_s;			/* Push characters. */
-	size_t nitems;			/* Number of items to push. */
-	u_int flags;			/* CH_* flags. */
+v_event_push(SCR *sp, EVENT *p_evp, CHAR_T *p_s, size_t nitems, u_int flags)
 {
 	EVENT *evp;
 	GS *gp;
@@ -370,7 +345,7 @@ v_event_push(sp, p_evp, p_s, nitems, flags)
 	 */
 #define	TERM_PUSH_SHIFT	30
 	total = gp->i_cnt + gp->i_next + nitems + TERM_PUSH_SHIFT;
-	if (total >= gp->i_nelem && v_event_grow(sp, MAX(total, 64)))
+	if (total >= gp->i_nelem && v_event_grow(sp, MAXIMUM(total, 64)))
 		return (1);
 	if (gp->i_cnt)
 		MEMMOVE(gp->i_event + TERM_PUSH_SHIFT + nitems,
@@ -397,9 +372,7 @@ copy:	gp->i_cnt += nitems;
  *	Append events onto the tail of the buffer.
  */
 static int
-v_event_append(sp, argp)
-	SCR *sp;
-	EVENT *argp;
+v_event_append(SCR *sp, EVENT *argp)
 {
 	CHAR_T *s;			/* Characters. */
 	EVENT *evp;
@@ -411,7 +384,7 @@ v_event_append(sp, argp)
 	gp = sp->gp;
 	if (gp->i_event == NULL ||
 	    nevents > gp->i_nelem - (gp->i_next + gp->i_cnt))
-		v_event_grow(sp, MAX(nevents, 64));
+		v_event_grow(sp, MAXIMUM(nevents, 64));
 	evp = gp->i_event + gp->i_next + gp->i_cnt;
 	gp->i_cnt += nevents;
 
@@ -524,11 +497,7 @@ v_event_append(sp, argp)
  * PUBLIC: int v_event_get(SCR *, EVENT *, int, u_int32_t);
  */
 int
-v_event_get(sp, argp, timeout, flags)
-	SCR *sp;
-	EVENT *argp;
-	int timeout;
-	u_int32_t flags;
+v_event_get(SCR *sp, EVENT *argp, int timeout, u_int32_t flags)
 {
 	EVENT *evp, ev;
 	GS *gp;
@@ -742,9 +711,7 @@ not_digit:	argp->e_c = CH_NOT_DIGIT;
  *	Walk the screen lists, sync'ing files to their backup copies.
  */
 static void
-v_sync(sp, flags)
-	SCR *sp;
-	int flags;
+v_sync(SCR *sp, int flags)
 {
 	GS *gp;
 
@@ -762,9 +729,7 @@ v_sync(sp, flags)
  * PUBLIC: void v_event_err(SCR *, EVENT *);
  */
 void
-v_event_err(sp, evp)
-	SCR *sp;
-	EVENT *evp;
+v_event_err(SCR *sp, EVENT *evp)
 {
 	switch (evp->e_event) {
 	case E_CHARACTER:
@@ -818,9 +783,7 @@ v_event_err(sp, evp)
  * PUBLIC: int v_event_flush(SCR *, u_int);
  */
 int
-v_event_flush(sp, flags)
-	SCR *sp;
-	u_int flags;
+v_event_flush(SCR *sp, u_int flags)
 {
 	GS *gp;
 	int rval;
@@ -836,9 +799,7 @@ v_event_flush(sp, flags)
  *	Grow the terminal queue.
  */
 static int
-v_event_grow(sp, add)
-	SCR *sp;
-	int add;
+v_event_grow(SCR *sp, int add)
 {
 	GS *gp;
 	size_t new_nelem, olen;
@@ -856,8 +817,7 @@ v_event_grow(sp, add)
  *	Compare two keys for sorting.
  */
 static int
-v_key_cmp(ap, bp)
-	const void *ap, *bp;
+v_key_cmp(const void *ap, const void *bp)
 {
 	return (((KEYLIST *)ap)->ch - ((KEYLIST *)bp)->ch);
 }

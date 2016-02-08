@@ -1,4 +1,4 @@
-/* $OpenBSD: mfireg.h,v 1.40 2013/05/03 02:46:28 dlg Exp $ */
+/* $OpenBSD: mfireg.h,v 1.42 2015/01/09 11:17:29 yasuoka Exp $ */
 /*
  * Copyright (c) 2006 Marco Peereboom <marco@peereboom.us>
  *
@@ -86,6 +86,7 @@
 #define MFI_FRAME_DIR_WRITE			0x0008
 #define MFI_FRAME_DIR_READ			0x0010
 #define MFI_FRAME_DIR_BOTH			0x0018
+#define MFI_FRAME_IEEE				0x0020
 
 /* mfi command opcodes */
 #define MFI_CMD_INIT				0x00
@@ -118,6 +119,7 @@
 #define MR_DCMD_LD_GET_LIST			0x03010000
 #define MR_DCMD_LD_GET_INFO			0x03020000
 #define MR_DCMD_LD_GET_PROPERTIES		0x03030000
+#define MR_DCMD_LD_SET_PROPERTIES		0x03040000
 #define MR_DCMD_CONF_GET			0x04010000
 #define MR_DCMD_BBU_GET_STATUS			0x05010000
 #define MR_DCMD_BBU_GET_CAPACITY_INFO		0x05020000
@@ -134,6 +136,17 @@
 #define MR_DCMD_SPEAKER_DISABLE			0x01030300
 #define MR_DCMD_SPEAKER_SILENCE			0x01030400
 #define MR_DCMD_SPEAKER_TEST			0x01030500
+
+#define MR_LD_CACHE_WRITE_BACK			0x01
+#define MR_LD_CACHE_WRITE_ADAPTIVE		0x02
+#define MR_LD_CACHE_READ_AHEAD	       		0x04
+#define MR_LD_CACHE_READ_ADAPTIVE		0x08
+#define MR_LD_CACHE_WRITE_CACHE_BAD_BBU		0x10
+#define MR_LD_CACHE_ALLOW_WRITE_CACHE		0x20
+#define MR_LD_CACHE_ALLOW_READ_CACHE		0x40
+
+#define MR_LD_DISK_CACHE_ENABLE			0x01
+#define MR_LD_DISK_CACHE_DISABLE		0x02
 
 /* mailbox bytes in direct command */
 #define MFI_MBOX_SIZE				12
@@ -275,9 +288,16 @@ struct mfi_sg64 {
 	uint32_t		len;
 } __packed;
 
+struct mfi_sg_skinny {
+	uint64_t		addr;
+	uint32_t		len;
+	uint32_t		flag;
+} __packed;
+
 union mfi_sgl {
 	struct mfi_sg32		sg32[1];
 	struct mfi_sg64		sg64[1];
+	struct mfi_sg_skinny	sg_skinny[1];
 } __packed;
 
 /* message frame */

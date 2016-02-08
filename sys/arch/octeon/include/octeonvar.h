@@ -1,4 +1,4 @@
-/*	$OpenBSD: octeonvar.h,v 1.20 2014/07/14 10:23:58 jasper Exp $	*/
+/*	$OpenBSD: octeonvar.h,v 1.22 2014/10/26 15:13:04 jasper Exp $	*/
 /*	$NetBSD: maltavar.h,v 1.3 2002/03/18 10:10:16 simonb Exp $	*/
 
 /*-
@@ -194,14 +194,12 @@ struct octeon_fau_map {
 
 /*
  * Octeon board types known to work with OpenBSD/octeon.
- * One of the main reasons for keeping this list is to be able to tell which
- * boards do and do not have octcf(4). Currently the only board not to have octcf(4)
- * is BOARD_TYPE_UBIQUITI_E100. Sadly, this number is also used by other vendors, but
- * we don't run on those boards yet. When that time comes, iobus needs extra care for
- * not blindly attaching octcf(4) on every board.
+ * NB: BOARD_TYPE_UBIQUITI_E100 is also used by other vendors, but we don't run
+ * on those boards yet.
  */
 #define	BOARD_TYPE_SIM			1
 #define	BOARD_TYPE_UBIQUITI_E100	20002
+#define	BOARD_TYPE_UBIQUITI_E200	20003
 
 #if defined(_KERNEL) || defined(_STANDALONE)
 #define OCTEON_ARGV_MAX 64
@@ -420,48 +418,5 @@ octeon_get_cycles(void)
 		: [tmp]"=&r"(tmp));
 	return tmp;
 }
-
-/* -------------------------------------------------------------------------- */
-
-/* ---- event counter */
-
-#if defined(OCTEON_ETH_DEBUG)
-#define	OCTEON_EVCNT_INC(sc, name) \
-	do { (sc)->sc_ev_##name.ev_count++; } while (0)
-#define	OCTEON_EVCNT_ADD(sc, name, n) \
-	do { (sc)->sc_ev_##name.ev_count += (n); } while (0)
-#define	OCTEON_EVCNT_ATTACH_EVCNTS(sc, entries, devname) \
-do {								\
-	int i;							\
-	const struct octeon_evcnt_entry *ee;			\
-								\
-	for (i = 0; i < (int)nitems(entries); i++) {	\
-		ee = &(entries)[i];				\
-		evcnt_attach_dynamic(				\
-		    (struct evcnt *)((uintptr_t)(sc) + ee->ee_offset), \
-		    ee->ee_type, ee->ee_parent, devname,	\
-		    ee->ee_name);				\
-	}							\
-} while (0)
-#else
-#define	OCTEON_EVCNT_INC(sc, name)
-#define	OCTEON_EVCNT_ADD(sc, name, n)
-#define	OCTEON_EVCNT_ATTACH_EVCNTS(sc, entries, devname)
-#endif
-
-struct octeon_evcnt_entry {
-	size_t		ee_offset;
-	int		ee_type;
-	struct evcnt	*ee_parent;
-	const char	*ee_name;
-};
-
-#define	OCTEON_EVCNT_ENTRY(_sc_type, _var, _ev_type, _parent, _name) \
-	{							\
-		.ee_offset = offsetof(_sc_type, sc_ev_##_var),	\
-		.ee_type = EVCNT_TYPE_##_ev_type,		\
-		.ee_parent = _parent,				\
-		.ee_name = _name				\
-	}
 
 #endif	/* _MIPS_OCTEON_OCTEONVAR_H_ */

@@ -1,4 +1,4 @@
-/*	$OpenBSD: ip_mroute.h,v 1.17 2013/10/27 20:57:39 deraadt Exp $	*/
+/*	$OpenBSD: ip_mroute.h,v 1.19 2015/02/09 12:18:19 claudio Exp $	*/
 /*	$NetBSD: ip_mroute.h,v 1.23 2004/04/21 17:49:46 itojun Exp $	*/
 
 #ifndef _NETINET_IP_MROUTE_H_
@@ -36,8 +36,6 @@
 #define	MRT_PIM			MRT_ASSERT /* enable PIM processing */
 #define	MRT_API_SUPPORT		109	/* supported MRT API */
 #define	MRT_API_CONFIG		110	/* config MRT API */
-#define	MRT_ADD_BW_UPCALL	111	/* create bandwidth monitor */
-#define	MRT_DEL_BW_UPCALL	112	/* delete bandwidth monitor */
 
 
 /*
@@ -113,6 +111,29 @@ struct mfcctl2 {
 #define	MRT_API_FLAGS_ALL		(MRT_MFC_FLAGS_ALL |		     \
 					 MRT_MFC_RP |			     \
 					 MRT_MFC_BW_UPCALL)
+
+/* structure used to get all the mfc entries */
+struct mfcinfo {
+	struct	 in_addr mfc_origin;	/* ip origin of mcasts */
+	struct	 in_addr mfc_mcastgrp;	/* multicast group associated */
+	vifi_t	 mfc_parent;		/* incoming vif */
+	u_long	 mfc_pkt_cnt;		/* pkt count for src-grp */
+	u_long	 mfc_byte_cnt;		/* byte count for src-grp */
+	u_int8_t mfc_ttls[MAXVIFS];	/* forwarding ttls on vifs */
+};
+
+/* structure used to get all the vif entries */
+struct vifinfo {
+	vifi_t	  v_vifi;	    	/* the index of the vif to be added */
+	u_int8_t  v_flags;		/* VIFF_ flags defined above */
+	u_int8_t  v_threshold;		/* min ttl required to forward on vif */
+	struct	  in_addr v_lcl_addr;	/* local interface address */
+	struct	  in_addr v_rmt_addr;	/* remote address (tunnels only) */
+	u_long	  v_pkt_in;		/* # pkts in on interface */
+	u_long	  v_pkt_out;		/* # pkts out on interface */
+	u_long	  v_bytes_in;		/* # bytes in on interface */
+	u_long	  v_bytes_out;		/* # bytes out on interface */
+};
 
 /*
  * Structure for installing or delivering an upcall if the
@@ -252,7 +273,6 @@ struct mfc {
 	struct	 rtdetq *mfc_stall;		/* pkts waiting for route */
 	u_int8_t mfc_flags[MAXVIFS];		/* the MRT_MFC_FLAGS_* flags */
 	struct in_addr	mfc_rp;			/* the RP address	     */
-	struct bw_meter	*mfc_bw_meter;		/* list of bandwidth meters  */
 };
 
 /*
@@ -285,35 +305,11 @@ struct rtdetq {
 #define	MFCTBLSIZ	256
 #define	MAX_UPQ		4		/* max. no of pkts in upcall Q */
 
-/*
- * Structure for measuring the bandwidth and sending an upcall if the
- * measured bandwidth is above or below a threshold.
- */
-struct bw_meter {
-	struct bw_meter	*bm_mfc_next;		/* next bw meter (same mfc)  */
-	struct bw_meter	*bm_time_next;		/* next bw meter (same time) */
-	uint32_t	bm_time_hash;		/* the time hash value       */
-	struct mfc	*bm_mfc;		/* the corresponding mfc     */
-	uint32_t	bm_flags;		/* misc flags (see below)    */
-#define	BW_METER_UNIT_PACKETS	(1 << 0)	/* threshold (in packets)    */
-#define	BW_METER_UNIT_BYTES	(1 << 1)	/* threshold (in bytes)      */
-#define	BW_METER_GEQ		(1 << 2)	/* upcall if bw >= threshold */
-#define	BW_METER_LEQ		(1 << 3)	/* upcall if bw <= threshold */
-#define	BW_METER_USER_FLAGS 	(BW_METER_UNIT_PACKETS |		\
-				 BW_METER_UNIT_BYTES |			\
-				 BW_METER_GEQ |				\
-				 BW_METER_LEQ)
-
-#define	BW_METER_UPCALL_DELIVERED (1 << 24)	/* upcall was delivered      */
-
-	struct bw_data	bm_threshold;		/* the upcall threshold	     */
-	struct bw_data	bm_measured;		/* the measured bw	     */
-	struct timeval	bm_start_time;		/* abs. time		     */
-};
-
 int	ip_mrouter_set(struct socket *, int, struct mbuf **);
 int	ip_mrouter_get(struct socket *, int, struct mbuf **);
 int	mrt_ioctl(struct socket *, u_long, caddr_t);
+int	mrt_sysctl_vif(void *, size_t *);
+int	mrt_sysctl_mfc(void *, size_t *);
 int	ip_mrouter_done(void);
 void	ip_mrouter_detach(struct ifnet *);
 void	reset_vif(struct vif *);

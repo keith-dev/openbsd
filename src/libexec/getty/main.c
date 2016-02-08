@@ -1,4 +1,4 @@
-/*	$OpenBSD: main.c,v 1.32 2013/11/27 21:25:25 deraadt Exp $	*/
+/*	$OpenBSD: main.c,v 1.35 2015/01/16 05:53:49 deraadt Exp $	*/
 
 /*-
  * Copyright (c) 1980, 1993
@@ -29,7 +29,6 @@
  * SUCH DAMAGE.
  */
 
-#include <sys/param.h>
 #include <sys/stat.h>
 #include <termios.h>
 #include <sys/ioctl.h>
@@ -40,13 +39,12 @@
 #include <fcntl.h>
 #include <time.h>
 #include <ctype.h>
-#include <fcntl.h>
 #include <stdlib.h>
 #include <string.h>
 #include <syslog.h>
 #include <stdio.h>
-#include <time.h>
 #include <unistd.h>
+#include <limits.h>
 #include <util.h>
 
 #include "gettytab.h"
@@ -73,9 +71,9 @@ struct termios tmode, omode;
 
 int crmod, digit, lower, upper;
 
-char	hostname[MAXHOSTNAMELEN];
+char	hostname[HOST_NAME_MAX+1];
 struct	utsname kerninfo;
-char	name[MAXLOGNAME];
+char	name[LOGIN_NAME_MAX];
 char	dev[] = _PATH_DEV;
 char	ttyn[32];
 char	*portselector(void);

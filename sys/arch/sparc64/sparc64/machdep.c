@@ -1,4 +1,4 @@
-/*	$OpenBSD: machdep.c,v 1.167 2014/07/21 17:25:47 uebayasi Exp $	*/
+/*	$OpenBSD: machdep.c,v 1.172 2014/12/10 15:29:53 mikeb Exp $	*/
 /*	$NetBSD: machdep.c,v 1.108 2001/07/24 19:30:14 eeh Exp $ */
 
 /*-
@@ -160,6 +160,7 @@ int     _bus_dmamem_alloc_range(bus_dma_tag_t tag, bus_dma_tag_t,
 int bus_space_debug = 0;
 
 struct vm_map *exec_map = NULL;
+struct vm_map *phys_map = NULL;
 
 struct uvm_constraint_range  dma_constraint = { 0x0, (paddr_t)-1 };
 struct uvm_constraint_range *uvm_md_constraints[] = { NULL };
@@ -232,6 +233,13 @@ cpu_startup()
 	minaddr = vm_map_min(kernel_map);
 	exec_map = uvm_km_suballoc(kernel_map, &minaddr, &maxaddr,
 	    16*NCARGS, VM_MAP_PAGEABLE, FALSE, NULL);
+
+	/*
+	 * Allocate a submap for physio
+	 */
+	minaddr = vm_map_min(kernel_map);
+	phys_map = uvm_km_suballoc(kernel_map, &minaddr, &maxaddr,
+	    VM_PHYS_SIZE, 0, FALSE, NULL);
 
 #ifdef DEBUG
 	pmapdebug = opmapdebug;
@@ -609,7 +617,6 @@ boot(int howto)
 {
 	int i;
 	static char str[128];
-	struct device *mainbus;
 
 	if (cold) {
 		if ((howto & RB_USERREQ) == 0)
@@ -647,10 +654,7 @@ boot(int howto)
 		dumpsys();
 
 haltsys:
-	doshutdownhooks();
-	mainbus = device_mainbus();
-	if (mainbus != NULL)
-		config_suspend(mainbus, DVACT_POWERDOWN);
+	config_suspend_all(DVACT_POWERDOWN);
 
 	/* If powerdown was requested, do it. */
 	if ((howto & RB_POWERDOWN) != 0) {
@@ -681,7 +685,7 @@ haltsys:
 		i = 1;
 		str[0] = '\0';
 	}
-			
+
 	if ((howto & RB_SINGLE) != 0)
 		str[i++] = 's';
 	if ((howto & RB_KDB) != 0)
@@ -820,7 +824,7 @@ printf("starting dump, blkno %lld\n", (long long)blkno);
 			if (i && (i % (1024*1024)) == 0)
 				printf("%lld ", i / (1024*1024));
 			(void) pmap_enter(pmap_kernel(), dumpspace, maddr,
-					VM_PROT_READ, VM_PROT_READ|PMAP_WIRED);
+			    PROT_READ, PROT_READ | PMAP_WIRED);
 			pmap_update(pmap_kernel());
 			error = (*dump)(dumpdev, blkno,
 					(caddr_t)dumpspace, (int)n);
@@ -1471,8 +1475,8 @@ _bus_dmamem_map(t, t0, segs, nsegs, size, kvap, flags)
 #endif
 		addr = VM_PAGE_TO_PHYS(m);
 		error = pmap_enter(pmap_kernel(), va, addr | cbit,
-		    VM_PROT_READ | VM_PROT_WRITE, VM_PROT_READ |
-		    VM_PROT_WRITE | PMAP_WIRED | PMAP_CANFAIL);
+		    PROT_READ | PROT_WRITE,
+		    PROT_READ | PROT_WRITE | PMAP_WIRED | PMAP_CANFAIL);
 		if (error) {
 			pmap_update(pmap_kernel());
 			km_free((void *)sva, ssize, &kv_any, &kp_none);
@@ -1591,7 +1595,7 @@ sparc_bus_map(bus_space_tag_t t, bus_space_tag_t t0, bus_addr_t	addr,
 	vaddr_t va;
 	u_int64_t pa;
 	paddr_t	pm_flags = 0;
-	vm_prot_t pm_prot = VM_PROT_READ;
+	vm_prot_t pm_prot = PROT_READ;
 
 	if (flags & BUS_SPACE_MAP_PROMADDRESS) {
 		hp->bh_ptr = addr;
@@ -1643,7 +1647,7 @@ sparc_bus_map(bus_space_tag_t t, bus_space_tag_t t0, bus_addr_t	addr,
 	if ((flags & BUS_SPACE_MAP_CACHEABLE) == 0)
 		pm_flags |= PMAP_NC;
 
-	va = uvm_km_valloc(kernel_map, size);
+	va = (vaddr_t)km_alloc(size, &kv_any, &kp_none, &kd_nowait);
 	if (va == 0)
 		return (ENOMEM);
 
@@ -1652,7 +1656,7 @@ sparc_bus_map(bus_space_tag_t t, bus_space_tag_t t0, bus_addr_t	addr,
 
 	pa = trunc_page(addr);
 	if ((flags & BUS_SPACE_MAP_READONLY) == 0)
-		pm_prot |= VM_PROT_WRITE;
+		pm_prot |= PROT_WRITE;
 
 #ifdef BUS_SPACE_DEBUG
 	{ /* scope */
@@ -1723,7 +1727,7 @@ sparc_bus_protect(bus_space_tag_t t, bus_space_tag_t t0, bus_space_handle_t h,
 	}
 
         prot = (flags & BUS_SPACE_MAP_READONLY) ?
-	    VM_PROT_READ : VM_PROT_READ | VM_PROT_WRITE;
+	    PROT_READ : PROT_READ | PROT_WRITE;
 	if ((flags & BUS_SPACE_MAP_CACHEABLE) == 0)
 	    pm_flags |= PMAP_NC;
 
@@ -1756,7 +1760,7 @@ sparc_bus_unmap(bus_space_tag_t t, bus_space_tag_t t0, bus_space_handle_t bh,
 
 	pmap_remove(pmap_kernel(), va, endva);
 	pmap_update(pmap_kernel());
-	uvm_km_free(kernel_map, va, endva - va);
+	km_free((void *)va, endva - va, &kv_any, &kp_none);
 
 	return (0);
 }

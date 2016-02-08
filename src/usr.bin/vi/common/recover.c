@@ -1,4 +1,4 @@
-/*	$OpenBSD: recover.c,v 1.15 2009/10/27 23:59:47 deraadt Exp $	*/
+/*	$OpenBSD: recover.c,v 1.20 2015/01/16 06:40:14 deraadt Exp $	*/
 
 /*-
  * Copyright (c) 1993, 1994
@@ -11,8 +11,6 @@
 
 #include "config.h"
 
-#include <sys/param.h>
-#include <sys/types.h>		/* XXX: param.h may not have included types.h */
 #include <sys/queue.h>
 #include <sys/stat.h>
 
@@ -28,6 +26,7 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <limits.h>
+#include <paths.h>
 #include <pwd.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -36,7 +35,6 @@
 #include <unistd.h>
 
 #include "common.h"
-#include "pathnames.h"
 
 /*
  * Recovery code.
@@ -120,14 +118,11 @@ static int	 rcv_mktemp(SCR *, char *, char *, int);
  * PUBLIC: int rcv_tmp(SCR *, EXF *, char *);
  */
 int
-rcv_tmp(sp, ep, name)
-	SCR *sp;
-	EXF *ep;
-	char *name;
+rcv_tmp(SCR *sp, EXF *ep, char *name)
 {
 	struct stat sb;
 	int fd;
-	char *dp, *p, path[MAXPATHLEN];
+	char *dp, *p, path[PATH_MAX];
 
 	/*
 	 * !!!
@@ -184,8 +179,7 @@ err:		msgq(sp, M_ERR,
  * PUBLIC: int rcv_init(SCR *);
  */
 int
-rcv_init(sp)
-	SCR *sp;
+rcv_init(SCR *sp)
 {
 	EXF *ep;
 	recno_t lno;
@@ -247,9 +241,7 @@ err:	msgq(sp, M_ERR,
  * PUBLIC: int rcv_sync(SCR *, u_int);
  */
 int
-rcv_sync(sp, flags)
-	SCR *sp;
-	u_int flags;
+rcv_sync(SCR *sp, u_int flags)
 {
 	EXF *ep;
 	int fd, rval;
@@ -325,10 +317,7 @@ err:		rval = 1;
  *	Build the file to mail to the user.
  */
 static int
-rcv_mailfile(sp, issync, cp_path)
-	SCR *sp;
-	int issync;
-	char *cp_path;
+rcv_mailfile(SCR *sp, int issync, char *cp_path)
 {
 	EXF *ep;
 	GS *gp;
@@ -337,18 +326,9 @@ rcv_mailfile(sp, issync, cp_path)
 	time_t now;
 	uid_t uid;
 	int fd;
-	char *dp, *p, *t, buf[4096], mpath[MAXPATHLEN];
+	char *dp, *p, *t, buf[4096], mpath[PATH_MAX];
 	char *t1, *t2, *t3;
-
-	/*
-	 * XXX
-	 * MAXHOSTNAMELEN is in various places on various systems, including
-	 * <netdb.h> and <sys/socket.h>.  If not found, use a large default.
-	 */
-#ifndef MAXHOSTNAMELEN
-#define	MAXHOSTNAMELEN	1024
-#endif
-	char host[MAXHOSTNAMELEN];
+	char host[HOST_NAME_MAX+1];
 
 	gp = sp->gp;
 	if ((pw = getpwuid(uid = getuid())) == NULL) {
@@ -487,15 +467,14 @@ err:	if (!issync)
  * PUBLIC: int rcv_list(SCR *);
  */
 int
-rcv_list(sp)
-	SCR *sp;
+rcv_list(SCR *sp)
 {
 	struct dirent *dp;
 	struct stat sb;
 	DIR *dirp;
 	FILE *fp;
 	int found;
-	char *p, *t, file[MAXPATHLEN], path[MAXPATHLEN];
+	char *p, *t, file[PATH_MAX], path[PATH_MAX];
 
 	/* Open the recovery directory for reading. */
 	if (opts_empty(sp, O_RECDIR, 0))
@@ -590,9 +569,7 @@ next:		(void)fclose(fp);
  * PUBLIC: int rcv_read(SCR *, FREF *);
  */
 int
-rcv_read(sp, frp)
-	SCR *sp;
-	FREF *frp;
+rcv_read(SCR *sp, FREF *frp)
 {
 	struct dirent *dp;
 	struct stat sb;
@@ -601,7 +578,7 @@ rcv_read(sp, frp)
 	time_t rec_mtime;
 	int fd, found, locked, requested, sv_fd;
 	char *name, *p, *t, *rp, *recp, *pathp;
-	char file[MAXPATHLEN], path[MAXPATHLEN], recpath[MAXPATHLEN];
+	char file[PATH_MAX], path[PATH_MAX], recpath[PATH_MAX];
 
 	if (opts_empty(sp, O_RECDIR, 0))
 		return (1);
@@ -776,10 +753,7 @@ next:			(void)close(fd);
  *	Copy a recovery file.
  */
 static int
-rcv_copy(sp, wfd, fname)
-	SCR *sp;
-	int wfd;
-	char *fname;
+rcv_copy(SCR *sp, int wfd, char *fname)
 {
 	int nr, nw, off, rfd;
 	char buf[8 * 1024];
@@ -802,10 +776,7 @@ err:	msgq_str(sp, M_SYSERR, fname, "%s");
  *	Fgets(3) for a file descriptor.
  */
 static char *
-rcv_gets(buf, len, fd)
-	char *buf;
-	size_t len;
-	int fd;
+rcv_gets(char *buf, size_t len, int fd)
 {
 	int nr;
 	char *p;
@@ -824,10 +795,7 @@ rcv_gets(buf, len, fd)
  *	Paranoid make temporary file routine.
  */
 static int
-rcv_mktemp(sp, path, dname, perms)
-	SCR *sp;
-	char *path, *dname;
-	int perms;
+rcv_mktemp(SCR *sp, char *path, char *dname, int perms)
 {
 	int fd;
 
@@ -856,12 +824,10 @@ rcv_mktemp(sp, path, dname, perms)
  *	Send email.
  */
 static void
-rcv_email(sp, fname)
-	SCR *sp;
-	char *fname;
+rcv_email(SCR *sp, char *fname)
 {
 	struct stat sb;
-	char buf[MAXPATHLEN * 2 + 20];
+	char buf[PATH_MAX * 2 + 20];
 
 	if (_PATH_SENDMAIL[0] != '/' || stat(_PATH_SENDMAIL, &sb))
 		msgq_str(sp, M_SYSERR,

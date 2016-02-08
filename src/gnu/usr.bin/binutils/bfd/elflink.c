@@ -89,6 +89,9 @@ _bfd_elf_create_got_section (bfd *abfd, struct bfd_link_info *info)
       h = (struct elf_link_hash_entry *) bh;
       h->elf_link_hash_flags |= ELF_LINK_HASH_DEF_REGULAR;
       h->type = STT_OBJECT;
+      if (ELF_ST_VISIBILITY (h->other) != STV_INTERNAL)
+	    h->other = (h->other & ~ELF_ST_VISIBILITY (-1)) | STV_HIDDEN;
+      (*bed->elf_backend_hide_symbol) (info, h, TRUE);
 
       if (! info->executable
 	  && ! bfd_elf_link_record_dynamic_symbol (info, h))
@@ -138,7 +141,7 @@ _bfd_elf_link_create_dynamic_sections (bfd *abfd, struct bfd_link_info *info)
 
   /* A dynamically linked executable has a .interp section, but a
      shared library does not.  */
-  if (info->executable)
+  if (info->executable && !info->static_link)
     {
       s = bfd_make_section (abfd, ".interp");
       if (s == NULL
@@ -219,6 +222,9 @@ _bfd_elf_link_create_dynamic_sections (bfd *abfd, struct bfd_link_info *info)
   h = (struct elf_link_hash_entry *) bh;
   h->elf_link_hash_flags |= ELF_LINK_HASH_DEF_REGULAR;
   h->type = STT_OBJECT;
+  if (ELF_ST_VISIBILITY (h->other) != STV_INTERNAL)
+	h->other = (h->other & ~ELF_ST_VISIBILITY (-1)) | STV_HIDDEN;
+  (*bed->elf_backend_hide_symbol) (info, h, TRUE);
 
   if (! info->executable
       && ! bfd_elf_link_record_dynamic_symbol (info, h))
@@ -284,6 +290,9 @@ _bfd_elf_create_dynamic_sections (bfd *abfd, struct bfd_link_info *info)
       h = (struct elf_link_hash_entry *) bh;
       h->elf_link_hash_flags |= ELF_LINK_HASH_DEF_REGULAR;
       h->type = STT_OBJECT;
+      if (ELF_ST_VISIBILITY (h->other) != STV_INTERNAL)
+	    h->other = (h->other & ~ELF_ST_VISIBILITY (-1)) | STV_HIDDEN;
+      (*bed->elf_backend_hide_symbol) (info, h, TRUE);
 
       if (! info->executable
 	  && ! bfd_elf_link_record_dynamic_symbol (info, h))
@@ -2130,7 +2139,7 @@ _bfd_elf_fix_symbol_flags (struct elf_link_hash_entry *h,
   if ((h->elf_link_hash_flags & ELF_LINK_HASH_NEEDS_PLT) != 0
       && eif->info->shared
       && is_elf_hash_table (eif->info->hash)
-      && (eif->info->symbolic
+      && (eif->info->symbolic || eif->info->static_link
 	  || ELF_ST_VISIBILITY (h->other) != STV_DEFAULT)
       && (h->elf_link_hash_flags & ELF_LINK_HASH_DEF_REGULAR) != 0)
     {
@@ -4617,6 +4626,7 @@ bfd_elf_size_dynamic_sections (bfd *output_bfd,
   if (!is_elf_hash_table (info->hash))
     return TRUE;
 
+  elf_tdata (output_bfd)->executable = info->executable;
   if (info->execstack)
     elf_tdata (output_bfd)->stack_flags = PF_R | PF_W | PF_X;
   else if (info->noexecstack)
@@ -4685,7 +4695,6 @@ bfd_elf_size_dynamic_sections (bfd *output_bfd,
       bfd_boolean all_defined;
 
       *sinterpptr = bfd_get_section_by_name (dynobj, ".interp");
-      BFD_ASSERT (*sinterpptr != NULL || !info->executable);
 
       if (soname != NULL)
 	{

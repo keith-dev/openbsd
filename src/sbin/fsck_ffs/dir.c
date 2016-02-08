@@ -1,4 +1,4 @@
-/*	$OpenBSD: dir.c,v 1.29 2013/06/11 16:42:04 deraadt Exp $	*/
+/*	$OpenBSD: dir.c,v 1.32 2015/01/20 18:22:21 deraadt Exp $	*/
 /*	$NetBSD: dir.c,v 1.20 1996/09/27 22:45:11 christos Exp $	*/
 
 /*
@@ -30,7 +30,7 @@
  * SUCH DAMAGE.
  */
 
-#include <sys/param.h>
+#include <sys/param.h>	/* DEV_BSIZE roundup btodb */
 #include <sys/time.h>
 #include <ufs/ufs/dinode.h>
 #include <ufs/ufs/dir.h>
@@ -39,6 +39,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <limits.h>
 
 #include "fsck.h"
 #include "fsutil.h"
@@ -234,7 +235,7 @@ void
 fileerror(ino_t cwd, ino_t ino, char *errmesg)
 {
 	union dinode *dp;
-	char pathbuf[MAXPATHLEN + 1];
+	char pathbuf[PATH_MAX + 1];
 
 	pwarn("%s ", errmesg);
 	pinode(ino);
@@ -463,7 +464,7 @@ makeentry(ino_t parent, ino_t ino, char *name)
 {
 	union dinode *dp;
 	struct inodesc idesc;
-	char pathbuf[MAXPATHLEN + 1];
+	char pathbuf[PATH_MAX + 1];
 
 	if (parent < ROOTINO || parent >= maxino ||
 	    ino < ROOTINO || ino >= maxino)
@@ -552,7 +553,7 @@ bad:
 /*
  * allocate a new directory
  */
-int
+ino_t
 allocdir(ino_t parent, ino_t request, int mode)
 {
 	ino_t ino;

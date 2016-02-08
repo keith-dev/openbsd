@@ -1,4 +1,4 @@
-/* $OpenBSD: paste.c,v 1.21 2014/06/20 11:00:19 nicm Exp $ */
+/* $OpenBSD: paste.c,v 1.26 2014/11/05 23:25:02 nicm Exp $ */
 
 /*
  * Copyright (c) 2007 Nicholas Marriott <nicm@users.sourceforge.net>
@@ -102,7 +102,7 @@ paste_get_name(const char *name)
 	if (name == NULL || *name == '\0')
 		return (NULL);
 
-	pbfind.name = (char*)name;
+	pbfind.name = (char *)name;
 	return (RB_FIND(paste_name_tree, &paste_by_name, &pbfind));
 }
 
@@ -115,7 +115,7 @@ paste_free_name(const char *name)
 	if (name == NULL || *name == '\0')
 		return (-1);
 
-	pbfind.name = (char*)name;
+	pbfind.name = (char *)name;
 	pb = RB_FIND(paste_name_tree, &paste_by_name, &pbfind);
 	if (pb == NULL)
 		return (-1);
@@ -279,7 +279,7 @@ paste_make_sample(struct paste_buffer *pb, int utf8flag)
 	len = pb->size;
 	if (len > width)
 		len = width;
-	buf = xmalloc(len * 4 + 4);
+	buf = xreallocarray(NULL, len, 4 + 4);
 
 	if (utf8flag)
 		used = utf8_strvis(buf, pb->data, len, flags);
@@ -298,7 +298,10 @@ paste_send_pane(struct paste_buffer *pb, struct window_pane *wp,
 	const char	*data = pb->data, *end = data + pb->size, *lf;
 	size_t		 seplen;
 
-	if (bracket)
+	if (wp->flags & PANE_INPUTOFF)
+		return;
+
+	if (bracket && (wp->screen->mode & MODE_BRACKETPASTE))
 		bufferevent_write(wp->event, "\033[200~", 6);
 
 	seplen = strlen(sep);
@@ -312,6 +315,6 @@ paste_send_pane(struct paste_buffer *pb, struct window_pane *wp,
 	if (end != data)
 		bufferevent_write(wp->event, data, end - data);
 
-	if (bracket)
+	if (bracket && (wp->screen->mode & MODE_BRACKETPASTE))
 		bufferevent_write(wp->event, "\033[201~", 6);
 }

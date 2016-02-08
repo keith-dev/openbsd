@@ -1,4 +1,4 @@
-/*	$OpenBSD: ikev2_pld.c,v 1.45 2014/05/06 10:24:22 markus Exp $	*/
+/*	$OpenBSD: ikev2_pld.c,v 1.49 2015/02/06 10:39:01 deraadt Exp $	*/
 
 /*
  * Copyright (c) 2010-2013 Reyk Floeter <reyk@openbsd.org>
@@ -17,21 +17,18 @@
  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
 
-#include <sys/param.h>
 #include <sys/queue.h>
 #include <sys/socket.h>
 #include <sys/wait.h>
 #include <sys/uio.h>
 
 #include <netinet/in.h>
-#include <netinet/ip_ipsp.h>
 #include <arpa/inet.h>
 
 #include <stdlib.h>
 #include <stdio.h>
 #include <unistd.h>
 #include <string.h>
-#include <getopt.h>
 #include <signal.h>
 #include <errno.h>
 #include <err.h>
@@ -1725,10 +1722,10 @@ ikev2_pld_eap(struct iked *env, struct ikev2_payload *pld,
 		    print_map(eap->eap_code, eap_code_map),
 		    eap->eap_id, betoh16(eap->eap_length),
 		    print_map(eap->eap_type, eap_type_map));
-	}
 
-	if (eap_parse(env, sa, &hdr, msg->msg_response) == -1)
-		return (-1);
+		if (eap_parse(env, sa, eap, msg->msg_response) == -1)
+			return (-1);
+	}
 
 	return (0);
 }

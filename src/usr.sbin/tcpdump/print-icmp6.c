@@ -1,4 +1,4 @@
-/*	$OpenBSD: print-icmp6.c,v 1.13 2014/06/20 04:04:52 lteo Exp $	*/
+/*	$OpenBSD: print-icmp6.c,v 1.15 2015/01/16 06:40:21 deraadt Exp $	*/
 
 /*
  * Copyright (c) 1988, 1989, 1990, 1991, 1993, 1994
@@ -25,7 +25,6 @@
 
 #include <ctype.h>
 
-#include <sys/param.h>
 #include <sys/time.h>
 #include <sys/types.h>
 #include <sys/socket.h>
@@ -34,7 +33,6 @@
 
 #include <netinet/in.h>
 #include <netinet/if_ether.h>
-#include <netinet/in_systm.h>
 #include <netinet/ip.h>
 #include <netinet/ip_icmp.h>
 #include <netinet/ip_var.h>

@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_zyd.c,v 1.104 2014/07/13 15:52:49 mpi Exp $	*/
+/*	$OpenBSD: if_zyd.c,v 1.107 2015/02/10 23:25:46 mpi Exp $	*/
 
 /*-
  * Copyright (c) 2006 by Damien Bergamini <damien.bergamini@free.fr>
@@ -33,9 +33,9 @@
 #include <sys/timeout.h>
 #include <sys/conf.h>
 #include <sys/device.h>
+#include <sys/endian.h>
 
 #include <machine/bus.h>
-#include <machine/endian.h>
 
 #if NBPFILTER > 0
 #include <net/bpf.h>
@@ -1953,7 +1953,6 @@ zyd_rx_data(struct zyd_softc *sc, const uint8_t *buf, uint16_t len)
 		}
 	}
 	bcopy(plcp + 1, mtod(m, caddr_t), len);
-	m->m_pkthdr.rcvif = ifp;
 	m->m_pkthdr.len = m->m_len = len;
 
 #if NBPFILTER > 0
@@ -2314,10 +2313,8 @@ zyd_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 	case SIOCSIFADDR:
 		ifa = (struct ifaddr *)data;
 		ifp->if_flags |= IFF_UP;
-#ifdef INET
 		if (ifa->ifa_addr->sa_family == AF_INET)
 			arp_ifinit(&ic->ic_ac, ifa);
-#endif
 		/* FALLTHROUGH */
 	case SIOCSIFFLAGS:
 		if (ifp->if_flags & IFF_UP) {

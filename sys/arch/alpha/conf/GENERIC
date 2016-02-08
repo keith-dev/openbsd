@@ -1,4 +1,4 @@
-#	$OpenBSD: GENERIC,v 1.245 2014/07/12 21:56:56 tedu Exp $
+#	$OpenBSD: GENERIC,v 1.252 2015/01/03 21:24:19 uaa Exp $
 #
 # For further information on compiling OpenBSD kernels, see the config(8)
 # man page.
@@ -98,6 +98,8 @@ ukbd*	at uhidev?			# USB keyboard
 wskbd*	at ukbd? mux 1
 ucycom*	at uhidev?			# Cypress serial
 ucom*	at ucycom?
+uslhcom* at uhidev?			# Silicon Labs CP2110 USB HID UART
+ucom*	at uslhcom?
 uhid*	at uhidev?			# USB generic HID support
 upd*	at uhidev?			# USB Power Devices sensors
 aue*	at uhub?			# ADMtek AN986 Pegasus Ethernet
@@ -114,7 +116,6 @@ upl*	at uhub?			# Prolific PL2301/PL2302 host-to-host `network'
 ugl*	at uhub?			# Genesys Logic GL620USB-A host-to-host `network'
 url*	at uhub?			# Realtek RTL8150L based adapters
 wi*	at uhub?			# WaveLAN IEEE 802.11DS
-urio*	at uhub?			# Diamond Multimedia Rio 500
 udsbr*	at uhub?			# D-Link DSB-R100 radio
 radio*	at udsbr?			# USB radio
 ugen*	at uhub?			# USB Generic driver
@@ -219,7 +220,7 @@ stge*	at pci?				# Sundance TC9021 GigE
 lge*	at pci?				# Level1 LXT1001 GigE
 hme*	at pci?				# Sun Happy Meal
 ti*	at pci?				# Alteon Tigon 1Gb ethernet
-rl*	at pci?				# RealTek 81[23]9 ethernet
+rl*	at pci?				# Realtek 81[23]9 ethernet
 vr*	at pci?				# VIA Rhine ethernet
 em*	at pci?				# Intel Pro/1000 ethernet
 #ixgb*	at pci?				# Intel Pro/10Gb ethernet
@@ -232,8 +233,6 @@ mskc*	at pci?				# Marvell Yukon-2
 msk*	at mskc?			#  each port of above
 tl*	at pci?				# Compaq Thunderlan ethernet
 ste*	at pci?				# Sundance ST201 ethernet
-musycc*	at pci?				# Conexant HDLC controller
-art*	at musycc?			# Accoom Artery E1/T1 cards
 xge*	at pci?				# Neterion Xframe-I/II 10Gb ethernet
 sf*	at pci?				# Adaptec AIC-6915 ethernet
 wb*	at pci?				# Winbond W89C840F ethernet
@@ -265,7 +264,7 @@ qsphy*	at mii?				# Quality Semi QS6612 PHYs
 luphy*	at mii?				# Lucent LU6612 PHY
 sqphy*	at mii?				# Seeq 8x220 PHYs
 tlphy*	at mii?				# ThunderLAN PHYs
-rlphy*	at mii?				# RealTek 8139 internal PHYs
+rlphy*	at mii?				# Realtek 8139 internal PHYs
 mtdphy*	at mii?				# Myson MTD972 PHYs
 dcphy*	at mii?				# Digital Clone PHYs
 acphy*	at mii?				# Altima AC101 PHYs
@@ -284,6 +283,8 @@ ukphy*	at mii?				# "unknown" PHYs
 # sensors
 alipm*	at pci? disable
 iic*	at alipm?
+tsciic*	at tsc?
+iic*	at tsciic?
 
 adc*	at iic?				# Analog Devices AD7416/AD7417/7418
 admtemp* at iic?			# Analog Devices ADM1021
@@ -414,8 +415,6 @@ wsmouse*	at	pms? mux 0
 
 # crypto support
 hifn*	at pci?				# Hi/fn 7751 crypto card
-lofn*	at pci?				# Hi/fn 6500 crypto card
-nofn*	at pci?				# Hi/fn 7814/7851/7854 crypto card
 ubsec*	at pci?				# Bluesteel Networks 5xxx crypto card
 safe*	at pci?				# SafeNet SafeXcel 1141/1741
 
@@ -426,6 +425,5 @@ owsbm*	at onewire?			# Smart Battery Monitor
 owtemp* at onewire?			# Temperature
 owctr*	at onewire?			# Counter device
 
-pseudo-device	crypto		1
 pseudo-device	hotplug		1	# devices hot plugging
 pseudo-device	wsmux		2	# mouse & keyboard multiplexor

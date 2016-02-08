@@ -32,7 +32,7 @@
  * SUCH DAMAGE.
  *
  *	from: @(#)nfs_subr.c	8.1 (Berkeley) 6/6/93
- *	$Id: nfs_subr.c,v 1.5 2003/06/02 23:36:51 millert Exp $
+ *	$Id: nfs_subr.c,v 1.9 2015/01/22 03:43:58 guenther Exp $
  */
 
 #include "am.h"
@@ -78,19 +78,17 @@ do_readlink(am_node *mp, int *error_return, struct attrstat **attrpp)
 	return ln;
 }
 
-/*ARGSUSED*/
 void *
-nfsproc_null_2(void *argp, struct svc_req *rqstp)
+nfsproc_null_2_svc(void *argp, struct svc_req *rqstp)
 {
 	static char res;
 
-	return (void *)&res;
+	return &res;
 }
 
 
-/*ARGSUSED*/
 struct attrstat *
-nfsproc_getattr_2(struct nfs_fh *argp, struct svc_req *rqstp)
+nfsproc_getattr_2_svc(struct nfs_fh *argp, struct svc_req *rqstp)
 {
 	static struct attrstat res;
 	am_node *mp;
@@ -103,16 +101,13 @@ nfsproc_getattr_2(struct nfs_fh *argp, struct svc_req *rqstp)
 
 	mp = fh_to_mp2(argp, &retry);
 	if (mp == 0) {
-#ifdef PRECISE_SYMLINKS
 getattr_retry:
-#endif /* PRECISE_SYMLINKS */
 
 		if (retry < 0)
 			return 0;
 		res.status = nfs_error(retry);
 	} else {
 		struct attrstat *attrp = &mp->am_attr;
-#ifdef PRECISE_SYMLINKS
 		if (mp->am_fattr.type == NFLNK) {
 			/*
 			 * Make sure we can read the link,
@@ -122,7 +117,6 @@ getattr_retry:
 			if (ln == 0)
 				goto getattr_retry;
 		}
-#endif /* PRECISE_SYMLINKS */
 #ifdef DEBUG
 		Debug(D_TRACE)
 			plog(XLOG_DEBUG, "\tstat(%s), size = %d", mp->am_path, attrp->attrstat_u.attributes.size);
@@ -135,9 +129,8 @@ getattr_retry:
 }
 
 
-/*ARGSUSED*/
 struct attrstat *
-nfsproc_setattr_2(struct sattrargs *argp, struct svc_req *rqstp)
+nfsproc_setattr_2_svc(struct sattrargs *argp, struct svc_req *rqstp)
 {
 	static struct attrstat res;
 
@@ -150,19 +143,17 @@ nfsproc_setattr_2(struct sattrargs *argp, struct svc_req *rqstp)
 }
 
 
-/*ARGSUSED*/
 void *
-nfsproc_root_2(void *argp, struct svc_req *rqstp)
+nfsproc_root_2_svc(void *argp, struct svc_req *rqstp)
 {
 	static char res;
 
-	return (void *)&res;
+	return &res;
 }
 
 
-/*ARGSUSED*/
 struct diropres *
-nfsproc_lookup_2(struct diropargs *argp, struct svc_req *rqstp)
+nfsproc_lookup_2_svc(struct diropargs *argp, struct svc_req *rqstp)
 {
 	static struct diropres res;
 	am_node *mp;
@@ -208,9 +199,8 @@ nfsproc_lookup_2(struct diropargs *argp, struct svc_req *rqstp)
 }
 
 
-/*ARGSUSED*/
 struct readlinkres *
-nfsproc_readlink_2(struct nfs_fh *argp, struct svc_req *rqstp)
+nfsproc_readlink_2_svc(struct nfs_fh *argp, struct svc_req *rqstp)
 {
 	static struct readlinkres res;
 	am_node *mp;
@@ -245,13 +235,12 @@ readlink_retry:
 }
 
 
-/*ARGSUSED*/
 struct readres *
-nfsproc_read_2(struct readargs *argp, struct svc_req *rqstp)
+nfsproc_read_2_svc(struct readargs *argp, struct svc_req *rqstp)
 {
 	static struct readres res;
 
-	bzero((char *)&res, sizeof(res));
+	bzero(&res, sizeof(res));
 
 	res.status = nfs_error(EACCES);
 
@@ -259,19 +248,17 @@ nfsproc_read_2(struct readargs *argp, struct svc_req *rqstp)
 }
 
 
-/*ARGSUSED*/
 void *
-nfsproc_writecache_2(void *argp, struct svc_req *rqstp)
+nfsproc_writecache_2_svc(void *argp, struct svc_req *rqstp)
 {
 	static char res;
 
-	return (void *)&res;
+	return &res;
 }
 
 
-/*ARGSUSED*/
 struct attrstat *
-nfsproc_write_2(writeargs *argp, struct svc_req *rqstp)
+nfsproc_write_2_svc(writeargs *argp, struct svc_req *rqstp)
 {
 	static struct attrstat res;
 
@@ -284,9 +271,8 @@ nfsproc_write_2(writeargs *argp, struct svc_req *rqstp)
 }
 
 
-/*ARGSUSED*/
 struct diropres *
-nfsproc_create_2(createargs *argp, struct svc_req *rqstp)
+nfsproc_create_2_svc(createargs *argp, struct svc_req *rqstp)
 {
 	static struct diropres res;
 
@@ -299,7 +285,6 @@ nfsproc_create_2(createargs *argp, struct svc_req *rqstp)
 }
 
 
-/*ARGSUSED*/
 static nfsstat *
 unlink_or_rmdir(struct diropargs *argp, struct svc_req *rqstp,
     int unlinkp)
@@ -347,16 +332,14 @@ out:
 }
 
 
-/*ARGSUSED*/
 nfsstat *
-nfsproc_remove_2(struct diropargs *argp, struct svc_req *rqstp)
+nfsproc_remove_2_svc(struct diropargs *argp, struct svc_req *rqstp)
 {
 	return unlink_or_rmdir(argp, rqstp, TRUE);
 }
 
-/*ARGSUSED*/
 nfsstat *
-nfsproc_rename_2(renameargs *argp, struct svc_req *rqstp)
+nfsproc_rename_2_svc(renameargs *argp, struct svc_req *rqstp)
 {
 	static nfsstat res;
 	if (!fh_to_mp(&argp->from.dir) || !fh_to_mp(&argp->to.dir))
@@ -376,9 +359,8 @@ nfsproc_rename_2(renameargs *argp, struct svc_req *rqstp)
 }
 
 
-/*ARGSUSED*/
 nfsstat *
-nfsproc_link_2(linkargs *argp, struct svc_req *rqstp)
+nfsproc_link_2_svc(linkargs *argp, struct svc_req *rqstp)
 {
 	static nfsstat res;
 	if (!fh_to_mp(&argp->from) || !fh_to_mp(&argp->to.dir))
@@ -390,9 +372,8 @@ nfsproc_link_2(linkargs *argp, struct svc_req *rqstp)
 }
 
 
-/*ARGSUSED*/
 nfsstat *
-nfsproc_symlink_2(symlinkargs *argp, struct svc_req *rqstp)
+nfsproc_symlink_2_svc(symlinkargs *argp, struct svc_req *rqstp)
 {
 	static nfsstat res;
 	if (!fh_to_mp(&argp->from.dir))
@@ -404,9 +385,8 @@ nfsproc_symlink_2(symlinkargs *argp, struct svc_req *rqstp)
 }
 
 
-/*ARGSUSED*/
 struct diropres *
-nfsproc_mkdir_2(createargs *argp, struct svc_req *rqstp)
+nfsproc_mkdir_2_svc(createargs *argp, struct svc_req *rqstp)
 {
 	static struct diropres res;
 	if (!fh_to_mp(&argp->where.dir))
@@ -418,17 +398,15 @@ nfsproc_mkdir_2(createargs *argp, struct svc_req *rqstp)
 }
 
 
-/*ARGSUSED*/
 nfsstat *
-nfsproc_rmdir_2(struct diropargs *argp, struct svc_req *rqstp)
+nfsproc_rmdir_2_svc(struct diropargs *argp, struct svc_req *rqstp)
 {
 	return unlink_or_rmdir(argp, rqstp, FALSE);
 }
 
 
-/*ARGSUSED*/
 struct readdirres *
-nfsproc_readdir_2(readdirargs *argp, struct svc_req *rqstp)
+nfsproc_readdir_2_svc(readdirargs *argp, struct svc_req *rqstp)
 {
 	static readdirres res;
 	static entry e_res[MAX_READDIR_ENTRIES];
@@ -458,9 +436,8 @@ nfsproc_readdir_2(readdirargs *argp, struct svc_req *rqstp)
 	return &res;
 }
 
-/*ARGSUSED*/
 struct statfsres *
-nfsproc_statfs_2(struct nfs_fh *argp, struct svc_req *rqstp)
+nfsproc_statfs_2_svc(struct nfs_fh *argp, struct svc_req *rqstp)
 {
 	static statfsres res;
 	am_node *mp;
@@ -490,11 +467,7 @@ nfsproc_statfs_2(struct nfs_fh *argp, struct svc_req *rqstp)
 
 		fp->tsize = 1024;
 		fp->bsize = 4096;
-#ifdef HAS_EMPTY_AUTOMOUNTS
 		fp->blocks = 0;
-#else
-		fp->blocks = 1;
-#endif
 		fp->bfree = 0;
 		fp->bavail = 0;
 

@@ -1,4 +1,4 @@
-/*	$OpenBSD: cl_screen.c,v 1.20 2013/11/28 22:12:40 krw Exp $	*/
+/*	$OpenBSD: cl_screen.c,v 1.22 2014/11/12 16:29:04 millert Exp $	*/
 
 /*-
  * Copyright (c) 1993, 1994
@@ -42,9 +42,7 @@ static int	cl_putenv(char *, char *, u_long);
  * PUBLIC: int cl_screen(SCR *, u_int32_t);
  */
 int
-cl_screen(sp, flags)
-	SCR *sp;
-	u_int32_t flags;
+cl_screen(SCR *sp, u_int32_t flags)
 {
 	CL_PRIVATE *clp;
 	GS *gp;
@@ -126,8 +124,7 @@ cl_screen(sp, flags)
  * PUBLIC: int cl_quit(GS *);
  */
 int
-cl_quit(gp)
-	GS *gp;
+cl_quit(GS *gp)
 {
 	CL_PRIVATE *clp;
 	int rval;
@@ -177,8 +174,7 @@ cl_quit(gp)
  *	Initialize the curses vi screen.
  */
 static int
-cl_vi_init(sp)
-	SCR *sp;
+cl_vi_init(SCR *sp)
 {
 	CL_PRIVATE *clp;
 	char *o_cols, *o_lines, *o_term, *ttype;
@@ -337,9 +333,7 @@ cl_vi_init(sp)
 		clp->vi_enter.c_iflag |= IXOFF;
 
 	clp->vi_enter.c_lflag |= ISIG;
-#ifdef VDSUSP
 	clp->vi_enter.c_cc[VDSUSP] = _POSIX_VDISABLE;
-#endif
 	clp->vi_enter.c_cc[VQUIT] = _POSIX_VDISABLE;
 	clp->vi_enter.c_cc[VSUSP] = _POSIX_VDISABLE;
 
@@ -349,15 +343,9 @@ cl_vi_init(sp)
 	 * characters when curses switches into raw mode.  It should be OK
 	 * to do it explicitly for everyone.
 	 */
-#ifdef VDISCARD
 	clp->vi_enter.c_cc[VDISCARD] = _POSIX_VDISABLE;
-#endif
-#ifdef VLNEXT
 	clp->vi_enter.c_cc[VLNEXT] = _POSIX_VDISABLE;
-#endif
-#ifdef VSTATUS
 	clp->vi_enter.c_cc[VSTATUS] = _POSIX_VDISABLE;
-#endif
 
 	/* Initialize terminal based information. */
 	if (cl_term_init(sp))
@@ -379,8 +367,7 @@ err:		(void)cl_vi_end(sp->gp);
  *	Shutdown the vi screen.
  */
 static int
-cl_vi_end(gp)
-	GS *gp;
+cl_vi_end(GS *gp)
 {
 	CL_PRIVATE *clp;
 
@@ -423,8 +410,7 @@ cl_vi_end(gp)
  *	Initialize the ex screen.
  */
 static int
-cl_ex_init(sp)
-	SCR *sp;
+cl_ex_init(SCR *sp)
 {
 	CL_PRIVATE *clp;
 
@@ -471,18 +457,10 @@ cl_ex_init(sp)
 	 * to make all ex printf's output \r\n instead of \n.
 	 */
 	clp->ex_enter = clp->orig;
-	clp->ex_enter.c_lflag  |= ECHO | ECHOE | ECHOK | ICANON | IEXTEN | ISIG;
-#ifdef ECHOCTL
-	clp->ex_enter.c_lflag |= ECHOCTL;
-#endif
-#ifdef ECHOKE
-	clp->ex_enter.c_lflag |= ECHOKE;
-#endif
+	clp->ex_enter.c_lflag |=
+	    ECHO | ECHOCTL | ECHOE | ECHOK | ECHOKE | ICANON | IEXTEN | ISIG;
 	clp->ex_enter.c_iflag |= ICRNL;
-	clp->ex_enter.c_oflag |= OPOST;
-#ifdef ONLCR
-	clp->ex_enter.c_oflag |= ONLCR;
-#endif
+	clp->ex_enter.c_oflag |= ONLCR | OPOST;
 
 fast:	if (tcsetattr(STDIN_FILENO, TCSADRAIN | TCSASOFT, &clp->ex_enter)) {
 		if (errno == EINTR)
@@ -498,8 +476,7 @@ fast:	if (tcsetattr(STDIN_FILENO, TCSADRAIN | TCSASOFT, &clp->ex_enter)) {
  *	Shutdown the ex screen.
  */
 static int
-cl_ex_end(gp)
-	GS *gp;
+cl_ex_end(GS *gp)
 {
 	CL_PRIVATE *clp;
 
@@ -517,9 +494,7 @@ cl_ex_end(gp)
  * PUBLIC: int cl_getcap(SCR *, char *, char **);
  */
 int
-cl_getcap(sp, name, elementp)
-	SCR *sp;
-	char *name, **elementp;
+cl_getcap(SCR *sp, char *name, char **elementp)
 {
 	size_t len;
 	char *t;
@@ -537,8 +512,7 @@ cl_getcap(sp, name, elementp)
  *	Free any allocated termcap/terminfo strings.
  */
 static void
-cl_freecap(clp)
-	CL_PRIVATE *clp;
+cl_freecap(CL_PRIVATE *clp)
 {
 	if (clp->el != NULL) {
 		free(clp->el);
@@ -567,10 +541,7 @@ cl_freecap(clp)
  *	Put a value into the environment.
  */
 static int
-cl_putenv(name, str, value)
-	char *name, *str;
-	u_long value;
-
+cl_putenv(char *name, char *str, u_long value)
 {
 	char buf[40];
 

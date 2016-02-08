@@ -1,4 +1,4 @@
-/*	$OpenBSD: deroff.c,v 1.8 2009/10/27 23:59:37 deraadt Exp $	*/
+/*	$OpenBSD: deroff.c,v 1.11 2015/02/09 11:39:17 tedu Exp $	*/
 
 /*-
  * Copyright (c) 1988, 1993
@@ -300,11 +300,11 @@ main(int ac, char **av)
 				disp = YES;
 				break;
 			default:
-				errflg++;
+				errflg = 1;
 				break;
 			}
-			if (errflg == 0 && optarg[1] != '\0')
-				errflg++;
+			if (optarg[1] != '\0')
+				errflg = 1;
 			break;
 		case 'p':
 			parag = YES;
@@ -314,7 +314,7 @@ main(int ac, char **av)
 			kflag = YES;
 			break;
 		default:
-			errflg++;
+			errflg = 1;
 		}
 	}
 	argc = ac - optind;
@@ -431,7 +431,7 @@ getfname(void)
 			return;
 		}
 
-	q = (struct chain *) malloc(sizeof(struct chain));
+	q = malloc(sizeof(struct chain));
 	if (q == NULL)
 		err(1, NULL);
 	q->nextp = namechain;
@@ -745,10 +745,11 @@ void
 inpic(void)
 {
 	int c1;
-	char *p1;
+	char *p1, *ep;
 
 	SKIP;
 	p1 = line;
+	ep = line + sizeof(line) - 1;
 	c = '\n';
 	for (;;) {
 		c1 = c;
@@ -781,8 +782,11 @@ inpic(void)
 						continue;
 					ungetc(c, infile);
 					backsl();
-				} else
+				} else if (p1 + 1 >= ep) {
+					errx(1, ".PS length exceeds limit");
+				} else {
 					*p1++ = c;
+				}
 			}
 			*p1++ = ' ';
 		}
@@ -1582,7 +1586,7 @@ buildtab(struct mactab **r_back, int *r_size)
 	}
 	size += sizetab(p1);
 	size += sizetab(p2);
-	back = (struct mactab *)calloc(size+2, sizeof(struct mactab));
+	back = calloc(size+2, sizeof(struct mactab));
 	if (back == NULL)
 		err(1, NULL);
 

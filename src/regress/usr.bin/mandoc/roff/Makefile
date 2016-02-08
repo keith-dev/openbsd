@@ -1,7 +1,7 @@
-# $OpenBSD: Makefile,v 1.18 2014/07/07 11:34:41 schwarze Exp $
+# $OpenBSD: Makefile,v 1.20 2015/02/06 16:05:51 schwarze Exp $
 
-SUBDIR  = args cond esc string
-SUBDIR += br cc de ds ft ig it ll na nr ps rm sp
+SUBDIR  = args cond esc scale string
+SUBDIR += br cc de ds ft ig it ll na nr ps rm sp tr
 
 .include "../Makefile.sub"
 .include <bsd.subdir.mk>

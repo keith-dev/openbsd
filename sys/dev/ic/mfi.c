@@ -1,4 +1,4 @@
-/* $OpenBSD: mfi.c,v 1.154 2014/07/13 23:10:23 deraadt Exp $ */
+/* $OpenBSD: mfi.c,v 1.161 2015/03/08 04:33:44 dlg Exp $ */
 /*
  * Copyright (c) 2006 Marco Peereboom <marco@peereboom.us>
  *
@@ -25,9 +25,9 @@
 #include <sys/device.h>
 #include <sys/kernel.h>
 #include <sys/malloc.h>
-#include <sys/proc.h>
 #include <sys/rwlock.h>
 #include <sys/sensors.h>
+#include <sys/dkio.h>
 #include <sys/pool.h>
 
 #include <machine/bus.h>
@@ -59,6 +59,7 @@ struct cfdriver mfi_cd = {
 
 void	mfi_scsi_cmd(struct scsi_xfer *);
 int	mfi_scsi_ioctl(struct scsi_link *, u_long, caddr_t, int);
+int	mfi_ioctl_cache(struct scsi_link *, u_long,  struct dk_cache *);
 void	mfiminphys(struct buf *bp, struct scsi_link *sl);
 
 void	mfi_pd_scsi_cmd(struct scsi_xfer *);
@@ -93,6 +94,7 @@ void		mfi_poll(struct mfi_softc *, struct mfi_ccb *);
 void		mfi_exec(struct mfi_softc *, struct mfi_ccb *);
 void		mfi_exec_done(struct mfi_softc *, struct mfi_ccb *);
 int		mfi_create_sgl(struct mfi_softc *, struct mfi_ccb *, int);
+u_int		mfi_default_sgd_load(struct mfi_softc *, struct mfi_ccb *);
 int		mfi_syspd(struct mfi_softc *);
 
 /* commands */
@@ -136,6 +138,7 @@ static const struct mfi_iop_ops mfi_iop_xscale = {
 	mfi_xscale_intr_ena,
 	mfi_xscale_intr,
 	mfi_xscale_post,
+	mfi_default_sgd_load,
 	0,
 };
 
@@ -149,6 +152,7 @@ static const struct mfi_iop_ops mfi_iop_ppc = {
 	mfi_ppc_intr_ena,
 	mfi_ppc_intr,
 	mfi_ppc_post,
+	mfi_default_sgd_load,
 	MFI_IDB,
 	0
 };
@@ -163,6 +167,7 @@ static const struct mfi_iop_ops mfi_iop_gen2 = {
 	mfi_gen2_intr_ena,
 	mfi_gen2_intr,
 	mfi_gen2_post,
+	mfi_default_sgd_load,
 	MFI_IDB,
 	0
 };
@@ -171,12 +176,14 @@ u_int32_t	mfi_skinny_fw_state(struct mfi_softc *);
 void		mfi_skinny_intr_ena(struct mfi_softc *);
 int		mfi_skinny_intr(struct mfi_softc *);
 void		mfi_skinny_post(struct mfi_softc *, struct mfi_ccb *);
+u_int		mfi_skinny_sgd_load(struct mfi_softc *, struct mfi_ccb *);
 
 static const struct mfi_iop_ops mfi_iop_skinny = {
 	mfi_skinny_fw_state,
 	mfi_skinny_intr_ena,
 	mfi_skinny_intr,
 	mfi_skinny_post,
+	mfi_skinny_sgd_load,
 	MFI_SKINNY_IDB,
 	MFI_IOP_F_SYSPD
 };
@@ -185,12 +192,15 @@ static const struct mfi_iop_ops mfi_iop_skinny = {
 #define mfi_intr_enable(_s)	((_s)->sc_iop->mio_intr_ena(_s))
 #define mfi_my_intr(_s)		((_s)->sc_iop->mio_intr(_s))
 #define mfi_post(_s, _c)	((_s)->sc_iop->mio_post((_s), (_c)))
+#define mfi_sgd_load(_s, _c)	((_s)->sc_iop->mio_sgd_load((_s), (_c)))
 
 void *
 mfi_get_ccb(void *cookie)
 {
 	struct mfi_softc	*sc = cookie;
 	struct mfi_ccb		*ccb;
+
+	KERNEL_UNLOCK();
 
 	mtx_enter(&sc->sc_ccb_mtx);
 	ccb = SLIST_FIRST(&sc->sc_ccb_freeq);
@@ -201,6 +211,7 @@ mfi_get_ccb(void *cookie)
 	mtx_leave(&sc->sc_ccb_mtx);
 
 	DNPRINTF(MFI_D_CCB, "%s: mfi_get_ccb: %p\n", DEVNAME(sc), ccb);
+	KERNEL_LOCK();
 
 	return (ccb);
 }
@@ -213,9 +224,11 @@ mfi_put_ccb(void *cookie, void *io)
 
 	DNPRINTF(MFI_D_CCB, "%s: mfi_put_ccb: %p\n", DEVNAME(sc), ccb);
 
+	KERNEL_UNLOCK();
 	mtx_enter(&sc->sc_ccb_mtx);
 	SLIST_INSERT_HEAD(&sc->sc_ccb_freeq, ccb, ccb_link);
 	mtx_leave(&sc->sc_ccb_mtx);
+	KERNEL_LOCK();
 }
 
 void
@@ -709,6 +722,8 @@ mfi_attach(struct mfi_softc *sc, enum mfi_iop iop)
 		sc->sc_sgl_size = sizeof(struct mfi_sg32);
 		sc->sc_sgl_flags = MFI_FRAME_SGL32;
 	}
+	if (iop == MFI_IOP_SKINNY)
+		sc->sc_sgl_size = sizeof(struct mfi_sg_skinny);
 	DNPRINTF(MFI_D_MISC, "%s: 64bit: %d max commands: %u, max sgl: %u\n",
 	    DEVNAME(sc), sc->sc_64bit_dma, sc->sc_max_cmds, sc->sc_max_sgl);
 
@@ -1099,7 +1114,9 @@ mfi_scsi_xs_done(struct mfi_softc *sc, struct mfi_ccb *ccb)
 		break;
 	}
 
+	KERNEL_LOCK();
 	scsi_done(xs);
+	KERNEL_UNLOCK();
 }
 
 int
@@ -1165,6 +1182,8 @@ mfi_scsi_cmd(struct scsi_xfer *xs)
 	DNPRINTF(MFI_D_CMD, "%s: mfi_scsi_cmd opcode: %#x\n",
 	    DEVNAME(sc), xs->cmd->opcode);
 
+	KERNEL_UNLOCK();
+
 	if (!sc->sc_ld[target].ld_present) {
 		DNPRINTF(MFI_D_CMD, "%s: invalid target %d\n",
 		    DEVNAME(sc), target);
@@ -1227,21 +1246,49 @@ mfi_scsi_cmd(struct scsi_xfer *xs)
 	else 
 		mfi_start(sc, ccb);
 
+	KERNEL_LOCK();
 	return;
 
 stuffup:
 	xs->error = XS_DRIVER_STUFFUP;
 complete:
+	KERNEL_LOCK();
 	scsi_done(xs);
+}
+
+u_int
+mfi_default_sgd_load(struct mfi_softc *sc, struct mfi_ccb *ccb)
+{
+	struct mfi_frame_header	*hdr = &ccb->ccb_frame->mfr_header;
+	union mfi_sgl		*sgl = ccb->ccb_sgl;
+	bus_dma_segment_t	*sgd = ccb->ccb_dmamap->dm_segs;
+	int			 i;
+
+	hdr->mfh_flags |= sc->sc_sgl_flags;
+
+	for (i = 0; i < ccb->ccb_dmamap->dm_nsegs; i++) {
+		if (sc->sc_64bit_dma) {
+			sgl->sg64[i].addr = htole64(sgd[i].ds_addr);
+			sgl->sg64[i].len = htole32(sgd[i].ds_len);
+			DNPRINTF(MFI_D_DMA, "%s: addr: %#x  len: %#x\n",
+			    DEVNAME(sc), sgl->sg64[i].addr, sgl->sg64[i].len);
+		} else {
+			sgl->sg32[i].addr = htole32(sgd[i].ds_addr);
+			sgl->sg32[i].len = htole32(sgd[i].ds_len);
+			DNPRINTF(MFI_D_DMA, "%s: addr: %#x  len: %#x\n",
+			    DEVNAME(sc), sgl->sg32[i].addr, sgl->sg32[i].len);
+		}
+	}
+
+	return (ccb->ccb_dmamap->dm_nsegs *
+	    (sc->sc_64bit_dma ? sizeof(sgl->sg64) : sizeof(sgl->sg32)));
 }
 
 int
 mfi_create_sgl(struct mfi_softc *sc, struct mfi_ccb *ccb, int flags)
 {
 	struct mfi_frame_header	*hdr = &ccb->ccb_frame->mfr_header;
-	bus_dma_segment_t	*sgd;
-	union mfi_sgl		*sgl;
-	int			error, i;
+	int			error;
 
 	DNPRINTF(MFI_D_DMA, "%s: mfi_create_sgl %#x\n", DEVNAME(sc),
 	    ccb->ccb_data);
@@ -1262,21 +1309,7 @@ mfi_create_sgl(struct mfi_softc *sc, struct mfi_ccb *ccb, int flags)
 		return (1);
 	}
 
-	sgl = ccb->ccb_sgl;
-	sgd = ccb->ccb_dmamap->dm_segs;
-	for (i = 0; i < ccb->ccb_dmamap->dm_nsegs; i++) {
-		if (sc->sc_64bit_dma) {
-			sgl->sg64[i].addr = htole64(sgd[i].ds_addr);
-			sgl->sg64[i].len = htole32(sgd[i].ds_len);
-			DNPRINTF(MFI_D_DMA, "%s: addr: %#x  len: %#x\n",
-			    DEVNAME(sc), sgl->sg64[i].addr, sgl->sg64[i].len);
-		} else {
-			sgl->sg32[i].addr = htole32(sgd[i].ds_addr);
-			sgl->sg32[i].len = htole32(sgd[i].ds_len);
-			DNPRINTF(MFI_D_DMA, "%s: addr: %#x  len: %#x\n",
-			    DEVNAME(sc), sgl->sg32[i].addr, sgl->sg32[i].len);
-		}
-	}
+	ccb->ccb_frame_size += mfi_sgd_load(sc, ccb);
 
 	if (ccb->ccb_direction == MFI_DATA_IN) {
 		hdr->mfh_flags |= MFI_FRAME_DIR_READ;
@@ -1288,9 +1321,7 @@ mfi_create_sgl(struct mfi_softc *sc, struct mfi_ccb *ccb, int flags)
 		    ccb->ccb_dmamap->dm_mapsize, BUS_DMASYNC_PREWRITE);
 	}
 
-	hdr->mfh_flags |= sc->sc_sgl_flags;
 	hdr->mfh_sg_count = ccb->ccb_dmamap->dm_nsegs;
-	ccb->ccb_frame_size += sc->sc_sgl_size * ccb->ccb_dmamap->dm_nsegs;
 	ccb->ccb_extra_frames = (ccb->ccb_frame_size - 1) / MFI_FRAME_SIZE;
 
 	DNPRINTF(MFI_D_DMA, "%s: sg_count: %d  frame_size: %d  frames_size: %d"
@@ -1351,7 +1382,7 @@ mfi_do_mgmt(struct mfi_softc *sc, struct mfi_ccb *ccb, uint32_t opc,
 
 	if (dir != MFI_DATA_NONE) {
 		if (dir == MFI_DATA_OUT)
-			bcopy(buf, dma_buf, len);
+			memcpy(dma_buf, buf, len);
 		dcmd->mdf_header.mfh_data_len = len;
 		ccb->ccb_data = dma_buf;
 		ccb->ccb_len = len;
@@ -1370,12 +1401,15 @@ mfi_do_mgmt(struct mfi_softc *sc, struct mfi_ccb *ccb, uint32_t opc,
 		mfi_exec(sc, ccb);
 
 	if (dcmd->mdf_header.mfh_cmd_status != MFI_STAT_OK) {
-		rv = EIO;
+		if (dcmd->mdf_header.mfh_cmd_status == MFI_STAT_WRONG_STATE)
+			rv = ENXIO;
+		else
+			rv = EIO;
 		goto done;
 	}
 
 	if (dir == MFI_DATA_IN)
-		bcopy(dma_buf, buf, len);
+		memcpy(buf, dma_buf, len);
 
 	rv = 0;
 done:
@@ -1392,10 +1426,98 @@ mfi_scsi_ioctl(struct scsi_link *link, u_long cmd, caddr_t addr, int flag)
 
 	DNPRINTF(MFI_D_IOCTL, "%s: mfi_scsi_ioctl\n", DEVNAME(sc));
 
-	if (sc->sc_ioctl)
-		return (sc->sc_ioctl(link->adapter_softc, cmd, addr));
-	else
-		return (ENOTTY);
+	switch (cmd) {
+	case DIOCGCACHE:
+	case DIOCSCACHE:
+		return (mfi_ioctl_cache(link, cmd, (struct dk_cache *)addr));
+		break;
+
+	default:
+		if (sc->sc_ioctl)
+			return (sc->sc_ioctl(link->adapter_softc, cmd, addr));
+		break;
+	}
+
+	return (ENOTTY);
+}
+
+int
+mfi_ioctl_cache(struct scsi_link *link, u_long cmd,  struct dk_cache *dc)
+{
+	struct mfi_softc	*sc = (struct mfi_softc *)link->adapter_softc;
+	int			 rv, wrenable, rdenable;
+	struct mfi_ld_prop	 ldp;
+	uint8_t			 mbox[MFI_MBOX_SIZE];
+
+	if (mfi_get_info(sc)) {
+		rv = EIO;
+		goto done;
+	}
+
+	if (!sc->sc_ld[link->target].ld_present) {
+		rv = EIO;
+		goto done;
+	}
+
+	mbox[0] = link->target;
+	if ((rv = mfi_mgmt(sc, MR_DCMD_LD_GET_PROPERTIES, MFI_DATA_IN,
+	    sizeof(ldp), &ldp, mbox)) != 0)
+		goto done;
+
+	if (sc->sc_info.mci_memory_size > 0) {
+		wrenable = ISSET(ldp.mlp_cur_cache_policy,
+		    MR_LD_CACHE_ALLOW_WRITE_CACHE)? 1 : 0;
+		rdenable = ISSET(ldp.mlp_cur_cache_policy,
+		    MR_LD_CACHE_ALLOW_READ_CACHE)? 1 : 0;
+	} else {
+		wrenable = ISSET(ldp.mlp_diskcache_policy,
+		    MR_LD_DISK_CACHE_ENABLE)? 1 : 0;
+		rdenable = 0;
+	}
+
+	if (cmd == DIOCGCACHE) {
+		dc->wrcache = wrenable;
+		dc->rdcache = rdenable;
+		goto done;
+	} /* else DIOCSCACHE */
+
+	if (((dc->wrcache) ? 1 : 0) == wrenable &&
+	    ((dc->rdcache) ? 1 : 0) == rdenable)
+		goto done;
+
+	mbox[0] = ldp.mlp_ld.mld_target;
+	mbox[1] = ldp.mlp_ld.mld_res;
+	*(uint16_t *)&mbox[2] = ldp.mlp_ld.mld_seq;
+
+	if (sc->sc_info.mci_memory_size > 0) {
+		if (dc->rdcache)
+			SET(ldp.mlp_cur_cache_policy,
+			    MR_LD_CACHE_ALLOW_READ_CACHE);
+		else
+			CLR(ldp.mlp_cur_cache_policy,
+			    MR_LD_CACHE_ALLOW_READ_CACHE);
+		if (dc->wrcache)
+			SET(ldp.mlp_cur_cache_policy,
+			    MR_LD_CACHE_ALLOW_WRITE_CACHE);
+		else
+			CLR(ldp.mlp_cur_cache_policy,
+			    MR_LD_CACHE_ALLOW_WRITE_CACHE);
+	} else {
+		if (dc->rdcache) {
+			rv = EOPNOTSUPP;
+			goto done;
+		}
+		if (dc->wrcache)
+			ldp.mlp_diskcache_policy = MR_LD_DISK_CACHE_ENABLE;
+		else
+			ldp.mlp_diskcache_policy = MR_LD_DISK_CACHE_DISABLE;
+	}
+
+	if ((rv = mfi_mgmt(sc, MR_DCMD_LD_SET_PROPERTIES, MFI_DATA_OUT,
+	    sizeof(ldp), &ldp, mbox)) != 0)
+		goto done;
+done:
+	return (rv);
 }
 
 #if NBIO > 0
@@ -1873,6 +1995,7 @@ int
 mfi_ioctl_setstate(struct mfi_softc *sc, struct bioc_setstate *bs)
 {
 	struct mfi_pd_list	*pd;
+	struct mfi_pd_details	*info;
 	int			i, found, rv = EINVAL;
 	uint8_t			mbox[MFI_MBOX_SIZE];
 
@@ -1880,6 +2003,7 @@ mfi_ioctl_setstate(struct mfi_softc *sc, struct bioc_setstate *bs)
 	    bs->bs_status);
 
 	pd = malloc(sizeof(*pd), M_DEVBUF, M_WAITOK);
+	info = malloc(sizeof *info, M_DEVBUF, M_WAITOK);
 
 	if (mfi_mgmt(sc, MR_DCMD_PD_GET_LIST, MFI_DATA_IN,
 	    sizeof(*pd), pd, NULL))
@@ -1898,23 +2022,30 @@ mfi_ioctl_setstate(struct mfi_softc *sc, struct bioc_setstate *bs)
 	memset(mbox, 0, sizeof mbox);
 
 	*((uint16_t *)&mbox) = pd->mpl_address[i].mpa_pd_id;
+	if (mfi_mgmt(sc, MR_DCMD_PD_GET_INFO, MFI_DATA_IN,
+	    sizeof *info, info, mbox))
+		goto done;
+
+	*((uint16_t *)&mbox[0]) = pd->mpl_address[i].mpa_pd_id;
+	*((uint16_t *)&mbox[2]) = info->mpd_pd.mfp_seq;
 
 	switch (bs->bs_status) {
 	case BIOC_SSONLINE:
-		mbox[2] = MFI_PD_ONLINE;
+		mbox[4] = MFI_PD_ONLINE;
 		break;
 
 	case BIOC_SSOFFLINE:
-		mbox[2] = MFI_PD_OFFLINE;
+		mbox[4] = MFI_PD_OFFLINE;
 		break;
 
 	case BIOC_SSHOTSPARE:
-		mbox[2] = MFI_PD_HOTSPARE;
+		mbox[4] = MFI_PD_HOTSPARE;
 		break;
-/*
+
 	case BIOC_SSREBUILD:
+		mbox[4] = MFI_PD_REBUILD;
 		break;
-*/
+
 	default:
 		DNPRINTF(MFI_D_IOCTL, "%s: mfi_ioctl_setstate invalid "
 		    "opcode %x\n", DEVNAME(sc), bs->bs_status);
@@ -1922,12 +2053,14 @@ mfi_ioctl_setstate(struct mfi_softc *sc, struct bioc_setstate *bs)
 	}
 
 
-	if (mfi_mgmt(sc, MR_DCMD_PD_SET_STATE, MFI_DATA_NONE, 0, NULL, mbox))
+	if ((rv = mfi_mgmt(sc, MR_DCMD_PD_SET_STATE, MFI_DATA_NONE, 0, NULL,
+	    mbox)))
 		goto done;
 
 	rv = 0;
 done:
 	free(pd, M_DEVBUF, 0);
+	free(info, M_DEVBUF, 0);
 	return (rv);
 }
 
@@ -2414,6 +2547,32 @@ mfi_skinny_post(struct mfi_softc *sc, struct mfi_ccb *ccb)
 	mfi_write(sc, MFI_IQPH, 0x00000000);
 }
 
+u_int
+mfi_skinny_sgd_load(struct mfi_softc *sc, struct mfi_ccb *ccb)
+{
+	struct mfi_frame_header	*hdr = &ccb->ccb_frame->mfr_header;
+	union mfi_sgl		*sgl = ccb->ccb_sgl;
+	bus_dma_segment_t	*sgd = ccb->ccb_dmamap->dm_segs;
+	int			 i;
+
+	switch (hdr->mfh_cmd) {
+	case MFI_CMD_LD_READ:
+	case MFI_CMD_LD_WRITE:
+	case MFI_CMD_PD_SCSI_IO:
+		/* Use MF_FRAME_IEEE for some IO commands on skinny adapters */
+		for (i = 0; i < ccb->ccb_dmamap->dm_nsegs; i++) {
+			sgl->sg_skinny[i].addr = htole64(sgd[i].ds_addr);
+			sgl->sg_skinny[i].len = htole32(sgd[i].ds_len);
+			sgl->sg_skinny[i].flag = 0;
+		}
+		hdr->mfh_flags |= MFI_FRAME_IEEE | MFI_FRAME_SGL64;
+
+		return (ccb->ccb_dmamap->dm_nsegs * sizeof(sgl->sg_skinny));
+	default:
+		return (mfi_default_sgd_load(sc, ccb));
+	}
+}
+
 int
 mfi_pd_scsi_probe(struct scsi_link *link)
 {
@@ -2428,7 +2587,7 @@ mfi_pd_scsi_probe(struct scsi_link *link)
 		return (ENXIO);
 
 	bzero(mbox, sizeof(mbox));
-	bcopy(&pl->pd_id, &mbox[0], sizeof(pl->pd_id));
+	memcpy(&mbox[0], &pl->pd_id, sizeof(pl->pd_id));
 
 	if (mfi_mgmt(sc, MR_DCMD_PD_GET_INFO, MFI_DATA_IN,
 	    sizeof(pl->pd_info), &pl->pd_info, mbox))
@@ -2448,6 +2607,8 @@ mfi_pd_scsi_cmd(struct scsi_xfer *xs)
 	struct mfi_ccb *ccb = xs->io;
 	struct mfi_pass_frame *pf = &ccb->ccb_frame->mfr_pass;
 	struct mfi_pd_link *pl = sc->sc_pd->pd_links[link->target];
+
+	KERNEL_UNLOCK();
 
 	mfi_scrub_ccb(ccb);
 	xs->error = XS_NOERROR;
@@ -2489,9 +2650,11 @@ mfi_pd_scsi_cmd(struct scsi_xfer *xs)
 	else
 		mfi_start(sc, ccb);
 
+	KERNEL_LOCK();
 	return;
 
 stuffup:
 	xs->error = XS_DRIVER_STUFFUP;
+	KERNEL_LOCK();
 	scsi_done(xs);
 }

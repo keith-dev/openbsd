@@ -1,4 +1,4 @@
-/* $OpenBSD: i915_drv.c,v 1.67 2014/07/12 14:18:06 jsg Exp $ */
+/* $OpenBSD: i915_drv.c,v 1.75 2015/02/12 04:56:03 kettenis Exp $ */
 /*
  * Copyright (c) 2008-2009 Owain G. Ainsworth <oga@openbsd.org>
  *
@@ -504,7 +504,8 @@ i915_drm_freeze(struct drm_device *dev)
 	if (drm_core_check_feature(dev, DRIVER_MODESET)) {
 		int error = i915_gem_idle(dev);
 		if (error) {
-			printf("GEM idle failed, resume might fail\n");
+			dev_err(&dev->pdev->dev,
+				"GEM idle failed, resume might fail\n");
 			return error;
 		}
 
@@ -539,11 +540,11 @@ __i915_drm_thaw(struct drm_device *dev)
 	if (drm_core_check_feature(dev, DRIVER_MODESET)) {
 		intel_init_pch_refclk(dev);
 
-		DRM_LOCK();
+		mutex_lock(&dev->struct_mutex);
 		dev_priv->mm.suspended = 0;
 
 		error = i915_gem_init_hw(dev);
-		DRM_UNLOCK();
+		mutex_unlock(&dev->struct_mutex);
 
 		intel_modeset_init_hw(dev);
 		drm_mode_config_reset(dev);
@@ -566,9 +567,9 @@ i915_drm_thaw(struct drm_device *dev)
 	intel_gt_sanitize(dev);
 
 	if (drm_core_check_feature(dev, DRIVER_MODESET)) {
-		DRM_LOCK();
+		mutex_lock(&dev->struct_mutex);
 		i915_gem_restore_gtt_mappings(dev);
-		DRM_UNLOCK();
+		mutex_unlock(&dev->struct_mutex);
 	}
 
 	__i915_drm_thaw(dev);
@@ -599,7 +600,7 @@ int inteldrm_alloc_screen(void *, const struct wsscreen_descr *,
 void inteldrm_free_screen(void *, void *);
 int inteldrm_show_screen(void *, void *, int,
     void (*)(void *, int, int), void *);
-void inteldrm_doswitch(void *, void *);
+void inteldrm_doswitch(void *);
 int inteldrm_load_font(void *, void *, struct wsdisplay_font *);
 int inteldrm_list_font(void *, struct wsdisplay_font *);
 int inteldrm_getchar(void *, int, int, struct wsdisplay_charcell *);
@@ -641,7 +642,7 @@ int
 inteldrm_wsioctl(void *v, u_long cmd, caddr_t data, int flag, struct proc *p)
 {
 	struct inteldrm_softc *dev_priv = v;
-	struct drm_device *dev = (struct drm_device *)dev_priv->drmdev;
+	struct drm_device *dev = dev_priv->dev;
 	struct wsdisplay_param *dp = (struct wsdisplay_param *)data;
 	extern u32 _intel_panel_get_max_backlight(struct drm_device *);
 
@@ -714,24 +715,24 @@ inteldrm_show_screen(void *v, void *cookie, int waitok,
 	dev_priv->switchcb = cb;
 	dev_priv->switchcbarg = cbarg;
 	if (cb) {
-		workq_queue_task(NULL, &dev_priv->switchwqt, 0,
-		    inteldrm_doswitch, v, cookie);
+		dev_priv->switchcookie = cookie;
+		task_add(systq, &dev_priv->switchtask);
 		return (EAGAIN);
 	}
 
-	inteldrm_doswitch(v, cookie);
+	inteldrm_doswitch(v);
 
 	return (0);
 }
 
 void
-inteldrm_doswitch(void *v, void *cookie)
+inteldrm_doswitch(void *v)
 {
 	struct inteldrm_softc *dev_priv = v;
 	struct rasops_info *ri = &dev_priv->ro;
-	struct drm_device *dev = (struct drm_device *)dev_priv->drmdev;
+	struct drm_device *dev = dev_priv->dev;
 
-	rasops_show_screen(ri, cookie, 0, NULL, NULL);
+	rasops_show_screen(ri, dev_priv->switchcookie, 0, NULL, NULL);
 	intel_fb_restore_mode(dev);
 
 	if (dev_priv->switchcb)
@@ -883,9 +884,8 @@ inteldrm_attach(struct device *parent, struct device *self, void *aux)
 		inteldrm_driver.flags &= ~(DRIVER_AGP | DRIVER_AGP_REQUIRE);
 
 	/* All intel chipsets need to be treated as agp, so just pass one */
-	dev_priv->drmdev = drm_attach_pci(&inteldrm_driver, pa, 1, 1, self);
-
-	dev = (struct drm_device *)dev_priv->drmdev;
+	dev = dev_priv->dev = (struct drm_device *)
+	    drm_attach_pci(&inteldrm_driver, pa, 1, 1, self);
 
 	mtx_init(&dev_priv->irq_lock, IPL_TTY);
 	mtx_init(&dev_priv->rps.lock, IPL_TTY);
@@ -894,6 +894,8 @@ inteldrm_attach(struct device *parent, struct device *self, void *aux)
 	mtx_init(&mchdev_lock, IPL_TTY);
 	mtx_init(&dev_priv->error_completion_lock, IPL_NONE);
 	rw_init(&dev_priv->rps.hw_lock, "rpshw");
+
+	task_set(&dev_priv->switchtask, inteldrm_doswitch, dev_priv);
 
 	/* we need to use this api for now due to sharing with intagp */
 	bar = vga_pci_bar_info(vga_sc, (IS_I9XX(dev) ? 0 : 1));
@@ -932,13 +934,13 @@ inteldrm_attach(struct device *parent, struct device *self, void *aux)
 	 */
 	dev_priv->irqh = pci_intr_establish(dev_priv->pc, dev_priv->ih, IPL_TTY,
 	    inteldrm_driver.irq_handler,
-	    dev_priv, dev_priv->dev.dv_xname);
+	    dev_priv, dev_priv->sc_dev.dv_xname);
 	if (dev_priv->irqh == NULL) {
 		printf(": couldn't  establish interrupt\n");
 		return;
 	}
 
-	dev_priv->mm.retire_taskq = taskq_create("intelrel", 1, IPL_TTY);
+	dev_priv->mm.retire_taskq = taskq_create("intelrel", 1, IPL_TTY, 0);
 	if (dev_priv->mm.retire_taskq == NULL) {
 		printf("couldn't create taskq\n");
 		return;
@@ -1077,7 +1079,7 @@ inteldrm_attach(struct device *parent, struct device *self, void *aux)
 		aa.console = 1;
 	}
 
-	printf("%s: %dx%d\n", dev_priv->dev.dv_xname, ri->ri_width, ri->ri_height);
+	printf("%s: %dx%d\n", dev_priv->sc_dev.dv_xname, ri->ri_width, ri->ri_height);
 
 	vga_sc->sc_type = -1;
 	config_found(parent, &aa, wsemuldisplaydevprint);
@@ -1089,12 +1091,12 @@ int
 inteldrm_detach(struct device *self, int flags)
 {
 	struct inteldrm_softc	*dev_priv = (struct inteldrm_softc *)self;
-	struct drm_device	*dev = (struct drm_device *)dev_priv->drmdev;
+	struct drm_device	*dev = dev_priv->dev;
 
 	/* this will quiesce any dma that's going on and kill the timeouts. */
-	if (dev_priv->drmdev != NULL) {
-		config_detach(dev_priv->drmdev, flags);
-		dev_priv->drmdev = NULL;
+	if (dev_priv->dev != NULL) {
+		config_detach((struct device *)dev_priv->dev, flags);
+		dev_priv->dev = NULL;
 	}
 
 	if (IS_I9XX(dev) && dev_priv->ifp.i9xx.bsh != 0) {
@@ -1119,8 +1121,11 @@ int
 inteldrm_activate(struct device *self, int act)
 {
 	struct inteldrm_softc *dev_priv = (struct inteldrm_softc *)self;
-	struct drm_device *dev = (struct drm_device *)dev_priv->drmdev;
+	struct drm_device *dev = dev_priv->dev;
 	int rv = 0;
+
+	if (dev == NULL)
+		return (0);
 
 	switch (act) {
 	case DVACT_QUIESCE:
@@ -1480,12 +1485,13 @@ static int gen6_do_reset(struct drm_device *dev)
 {
 	struct drm_i915_private *dev_priv = dev->dev_private;
 	int ret = 0;
+	unsigned long irqflags;
 	int retries;
 
 	/* Hold gt_lock across reset to prevent any register access
 	 * with forcewake not set correctly
 	 */
-	mtx_enter(&dev_priv->gt_lock);
+	spin_lock_irqsave(&dev_priv->gt_lock, irqflags);
 
 	/* Reset the chip */
 
@@ -1515,7 +1521,7 @@ static int gen6_do_reset(struct drm_device *dev)
 	/* Restore fifo count */
 	dev_priv->gt_fifo_count = I915_READ_NOTRACE(GT_FIFO_FREE_ENTRIES);
 
-	mtx_leave(&dev_priv->gt_lock);
+	spin_unlock_irqrestore(&dev_priv->gt_lock, irqflags);
 	return ret;
 }
 
@@ -1579,7 +1585,7 @@ int i915_reset(struct drm_device *dev)
 		return 0;
 #endif
 
-	DRM_LOCK();
+	mutex_lock(&dev->struct_mutex);
 
 	i915_gem_reset(dev);
 
@@ -1592,7 +1598,7 @@ int i915_reset(struct drm_device *dev)
 	dev_priv->last_gpu_reset = time_second;
 	if (ret) {
 		DRM_ERROR("Failed to reset chip.\n");
-		DRM_UNLOCK();
+		mutex_unlock(&dev->struct_mutex);
 		return ret;
 	}
 
@@ -1633,12 +1639,12 @@ int i915_reset(struct drm_device *dev)
 		 * some unknown reason, this blows up my ilk, so don't.
 		 */
 
-		DRM_UNLOCK();
+		mutex_unlock(&dev->struct_mutex);
 
 		drm_irq_uninstall(dev);
 		drm_irq_install(dev);
 	} else {
-		DRM_UNLOCK();
+		mutex_unlock(&dev->struct_mutex);
 	}
 
 	return 0;
@@ -2174,23 +2180,23 @@ ilk_dummy_write(struct drm_i915_private *dev_priv)
 
 #define __i915_read(x, y) \
 u##x i915_read##x(struct drm_i915_private *dev_priv, u32 reg) { \
-	struct drm_device *dev = (struct drm_device *)dev_priv->drmdev; \
+	unsigned long irqflags; \
 	u##x val = 0; \
-	mtx_enter(&dev_priv->gt_lock); \
-	if (IS_GEN5(dev)) \
+	spin_lock_irqsave(&dev_priv->gt_lock, irqflags); \
+	if (IS_GEN5(dev_priv->dev)) \
 		ilk_dummy_write(dev_priv); \
-	if (NEEDS_FORCE_WAKE((dev), (reg))) { \
+	if (NEEDS_FORCE_WAKE((dev_priv->dev), (reg))) { \
 		if (dev_priv->forcewake_count == 0) \
 			dev_priv->gt.force_wake_get(dev_priv); \
 		val = read##x(dev_priv, reg); \
 		if (dev_priv->forcewake_count == 0) \
 			dev_priv->gt.force_wake_put(dev_priv); \
-	} else if (IS_VALLEYVIEW(dev) && IS_DISPLAYREG(reg)) { \
+	} else if (IS_VALLEYVIEW(dev_priv->dev) && IS_DISPLAYREG(reg)) { \
 		val = read##x(dev_priv, reg + 0x180000);		\
 	} else { \
 		val = read##x(dev_priv, reg); \
 	} \
-	mtx_leave(&dev_priv->gt_lock); \
+	spin_unlock_irqrestore(&dev_priv->gt_lock, irqflags); \
 	trace_i915_reg_rw(false, reg, val, sizeof(val)); \
 	return val; \
 }
@@ -2203,20 +2209,20 @@ __i915_read(64, q)
 
 #define __i915_write(x, y) \
 void i915_write##x(struct drm_i915_private *dev_priv, u32 reg, u##x val) { \
+	unsigned long irqflags; \
 	u32 __fifo_ret = 0; \
-	struct drm_device *dev = (struct drm_device *)dev_priv->drmdev; \
 	trace_i915_reg_rw(true, reg, val, sizeof(val)); \
-	mtx_enter(&dev_priv->gt_lock); \
-	if (NEEDS_FORCE_WAKE((dev), (reg))) { \
+	spin_lock_irqsave(&dev_priv->gt_lock, irqflags); \
+	if (NEEDS_FORCE_WAKE((dev_priv->dev), (reg))) { \
 		__fifo_ret = __gen6_gt_wait_for_fifo(dev_priv); \
 	} \
-	if (IS_GEN5(dev)) \
+	if (IS_GEN5(dev_priv->dev)) \
 		ilk_dummy_write(dev_priv); \
-	if (IS_HASWELL(dev) && (I915_READ_NOTRACE(GEN7_ERR_INT) & ERR_INT_MMIO_UNCLAIMED)) { \
+	if (IS_HASWELL(dev_priv->dev) && (I915_READ_NOTRACE(GEN7_ERR_INT) & ERR_INT_MMIO_UNCLAIMED)) { \
 		DRM_ERROR("Unknown unclaimed register before writing to %x\n", reg); \
 		I915_WRITE_NOTRACE(GEN7_ERR_INT, ERR_INT_MMIO_UNCLAIMED); \
 	} \
-	if (IS_VALLEYVIEW(dev) && IS_DISPLAYREG(reg)) { \
+	if (IS_VALLEYVIEW(dev_priv->dev) && IS_DISPLAYREG(reg)) { \
 		write##x(dev_priv, reg + 0x180000, val);		\
 	} else {							\
 		write##x(dev_priv, reg, val);			\
@@ -2224,11 +2230,11 @@ void i915_write##x(struct drm_i915_private *dev_priv, u32 reg, u##x val) { \
 	if (unlikely(__fifo_ret)) { \
 		gen6_gt_check_fifodbg(dev_priv); \
 	} \
-	if (IS_HASWELL(dev) && (I915_READ_NOTRACE(GEN7_ERR_INT) & ERR_INT_MMIO_UNCLAIMED)) { \
+	if (IS_HASWELL(dev_priv->dev) && (I915_READ_NOTRACE(GEN7_ERR_INT) & ERR_INT_MMIO_UNCLAIMED)) { \
 		DRM_ERROR("Unclaimed write to %x\n", reg); \
 		write32(dev_priv, GEN7_ERR_INT, ERR_INT_MMIO_UNCLAIMED);	\
 	} \
-	mtx_leave(&dev_priv->gt_lock); \
+	spin_unlock_irqrestore(&dev_priv->gt_lock, irqflags); \
 }
 __i915_write(8, b)
 __i915_write(16, w)

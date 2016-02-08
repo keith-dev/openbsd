@@ -1,4 +1,4 @@
-/* $OpenBSD: machdep.c,v 1.143 2014/07/21 17:25:47 uebayasi Exp $ */
+/* $OpenBSD: machdep.c,v 1.148 2015/02/07 23:30:13 miod Exp $ */
 /* $NetBSD: machdep.c,v 1.108 2000/09/13 15:00:23 thorpej Exp $	 */
 
 /*
@@ -77,12 +77,8 @@
 #include <net/if.h>
 #include <uvm/uvm.h>
 
-#include <net/if.h>
-
-#ifdef INET
 #include <netinet/in.h>
 #include <netinet/ip_var.h>
-#endif
 #include "ppp.h"	/* For NPPP */
 #include "bridge.h"	/* For NBRIDGE */
 #if NPPP > 0
@@ -511,8 +507,6 @@ static	volatile int showto; /* Must be volatile to survive MM on -> MM off */
 __dead void
 boot(int howto)
 {
-	struct device *mainbus;
-
 	if (cold) {
 		if ((howto & RB_USERREQ) == 0)
 			howto |= RB_HALT;
@@ -539,10 +533,7 @@ boot(int howto)
 		dumpsys();
 
 haltsys:
-	doshutdownhooks();
-	mainbus = device_mainbus();
-	if (mainbus != NULL)
-		config_suspend(mainbus, DVACT_POWERDOWN);
+	config_suspend_all(DVACT_POWERDOWN);
 
 	if ((howto & RB_HALT) != 0) {
 		if (dep_call->cpu_halt)
@@ -793,7 +784,7 @@ process_sstep(p, sstep)
  * allocated from the kernel map instead.
  *
  * It is known that the first page in the iospace area is unused; it may
- * be use by console device drivers (before the map system is inied).
+ * be use by console device drivers (before the map system is initted).
  */
 vaddr_t
 vax_map_physmem(phys, size)

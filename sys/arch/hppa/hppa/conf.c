@@ -1,4 +1,4 @@
-/*	$OpenBSD: conf.c,v 1.58 2013/11/04 14:11:29 deraadt Exp $	*/
+/*	$OpenBSD: conf.c,v 1.62 2014/12/11 19:44:17 tedu Exp $	*/
 
 /*-
  * Copyright (c) 1991 The Regents of the University of California.
@@ -69,12 +69,12 @@ struct bdevsw   bdevsw[] =
 	bdev_disk_init(NCD,cd),		/*  6: SCSI CD-ROM */
 	bdev_disk_init(NFD,fd),		/*  7: floppy drive */
 	bdev_disk_init(NWD,wd),		/*  8: ST506 drive */
-	bdev_lkm_dummy(),		/*  9: */
-	bdev_lkm_dummy(),		/* 10: */
-	bdev_lkm_dummy(),		/* 11: */
-	bdev_lkm_dummy(),		/* 12: */
-	bdev_lkm_dummy(),		/* 13: */
-	bdev_lkm_dummy(),		/* 14: */
+	bdev_notdef(),			/*  9: */
+	bdev_notdef(),			/* 10: */
+	bdev_notdef(),			/* 11: */
+	bdev_notdef(),			/* 12: */
+	bdev_notdef(),			/* 13: */
+	bdev_notdef(),			/* 14: */
 };
 int	nblkdev = nitems(bdevsw);
 
@@ -87,7 +87,6 @@ int	nblkdev = nitems(bdevsw);
 #include "wsmouse.h"
 #include "wsmux.h"
 
-#include "inet.h"
 #include "bpfilter.h"
 #include "tun.h"
 
@@ -115,7 +114,6 @@ cdev_decl(pci);
 #include "uhid.h"
 #include "ugen.h"
 #include "ulpt.h"
-#include "urio.h"
 #include "ucom.h"
 
 #include "fuse.h"
@@ -141,7 +139,7 @@ struct cdevsw   cdevsw[] =
 	cdev_fd_init(1,filedesc),	/* 16: file descriptor pseudo-device */
 	cdev_bpf_init(NBPFILTER,bpf),	/* 17: Berkeley packet filter */
 	cdev_tun_init(NTUN,tun),	/* 18: network tunnel */
-	cdev_lkm_init(NLKM,lkm),	/* 19: loadable module driver */
+	cdev_notdef(),			/* 19: was LKM */
 	cdev_random_init(1,random),	/* 20: random generator */
 	cdev_pf_init(NPF,pf),		/* 21: packet filter */
 	cdev_tty_init(1,pdc),		/* 22: PDC device */
@@ -163,7 +161,7 @@ struct cdevsw   cdevsw[] =
 	cdev_video_init(NVIDEO,video),	/* 33: generic video I/O */
 	cdev_systrace_init(NSYSTRACE,systrace),	/* 34: system call tracing */
 	cdev_audio_init(NAUDIO,audio),	/* 35: /dev/audio */
-	cdev_crypto_init(NCRYPTO,crypto), /* 36: /dev/crypto */
+	cdev_notdef(),			/* 36: was: /dev/crypto */
 	cdev_bio_init(NBIO,bio),	/* 37: ioctl tunnel */
 	cdev_ptm_init(NPTY,ptm),	/* 38: pseudo-tty ptm device */
 	cdev_disk_init(NWD,wd),		/* 39: ST506 disk */
@@ -171,16 +169,16 @@ struct cdevsw   cdevsw[] =
 	cdev_usbdev_init(NUHID,uhid),	/* 41: USB generic HID */
 	cdev_usbdev_init(NUGEN,ugen),	/* 42: USB generic driver */
 	cdev_ulpt_init(NULPT,ulpt),	/* 43: USB printers */
-	cdev_urio_init(NURIO,urio),	/* 44: USB Diamond Rio 500 */
+	cdev_notdef(),			/* 44: was urio */
 	cdev_tty_init(NUCOM,ucom),	/* 45: USB tty */
 	cdev_notdef(),			/* 46: was USB scanners */
 	cdev_hotplug_init(NHOTPLUG,hotplug), /* 47: devices hot plugging */
-	cdev_lkm_dummy(),		/* 48: */
-	cdev_lkm_dummy(),		/* 49: */
-	cdev_lkm_dummy(),		/* 50: */
-	cdev_lkm_dummy(),		/* 51: */
-	cdev_lkm_dummy(),		/* 52: */
-	cdev_lkm_dummy(),		/* 53: */
+	cdev_notdef(),			/* 48: */
+	cdev_notdef(),			/* 49: */
+	cdev_notdef(),			/* 50: */
+	cdev_notdef(),			/* 51: */
+	cdev_notdef(),			/* 52: */
+	cdev_notdef(),			/* 53: */
 	cdev_vscsi_init(NVSCSI,vscsi),	/* 54: vscsi */
 	cdev_notdef(),
 	cdev_disk_init(1,diskmap),	/* 56: disk mapper */
@@ -203,7 +201,6 @@ int mem_no = 2;		/* major device number of memory special file */
 dev_t   swapdev = makedev(0, 0);
 
 int chrtoblktbl[] = {
-	/* XXXX This needs to be dynamic for LKMs. */
 	/*VCHR*/	/*VBLK*/
 	/*  0 */	NODEV,
 	/*  1 */	NODEV,

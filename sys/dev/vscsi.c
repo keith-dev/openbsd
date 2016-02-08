@@ -1,4 +1,4 @@
-/*	$OpenBSD: vscsi.c,v 1.30 2014/07/12 18:48:51 tedu Exp $ */
+/*	$OpenBSD: vscsi.c,v 1.37 2015/01/27 03:17:36 dlg Exp $ */
 
 /*
  * Copyright (c) 2008 David Gwynne <dlg@openbsd.org>
@@ -22,7 +22,6 @@
 #include <sys/kernel.h>  
 #include <sys/malloc.h>
 #include <sys/device.h>
-#include <sys/proc.h>
 #include <sys/conf.h>
 #include <sys/queue.h>
 #include <sys/rwlock.h>
@@ -109,7 +108,7 @@ int		vscsi_data(struct vscsi_softc *, struct vscsi_ioc_data *, int);
 int		vscsi_t2i(struct vscsi_softc *, struct vscsi_ioc_t2i *);
 int		vscsi_devevent(struct vscsi_softc *, u_long,
 		    struct vscsi_ioc_devevent *);
-void		vscsi_devevent_task(void *, void *);
+void		vscsi_devevent_task(void *);
 void		vscsi_done(struct vscsi_softc *, struct vscsi_ccb *);
 
 void *		vscsi_ccb_get(void *);
@@ -157,7 +156,7 @@ vscsi_attach(struct device *parent, struct device *self, void *aux)
 	sc->sc_link.openings = 16;
 	sc->sc_link.pool = &sc->sc_iopool;
 
-	bzero(&saa, sizeof(saa));
+	memset(&saa, 0, sizeof(saa));
 	saa.saa_sc_link = &sc->sc_link;
 
 	sc->sc_scsibus = (struct scsibus_softc *)config_found(&sc->sc_dev,
@@ -357,7 +356,7 @@ vscsi_i2t(struct vscsi_softc *sc, struct vscsi_ioc_i2t *i2t)
 	i2t->tag = ccb->ccb_tag;
 	i2t->target = link->target;
 	i2t->lun = link->lun;
-	bcopy(xs->cmd, &i2t->cmd, xs->cmdlen);
+	memcpy(&i2t->cmd, xs->cmd, xs->cmdlen);
 	i2t->cmdlen = xs->cmdlen;
 	i2t->datalen = xs->datalen;
 
@@ -456,7 +455,7 @@ vscsi_t2i(struct vscsi_softc *sc, struct vscsi_ioc_t2i *t2i)
 		break;
 	case VSCSI_STAT_SENSE:
 		xs->error = XS_SENSE;
-		bcopy(&t2i->sense, &xs->sense, sizeof(xs->sense));
+		memcpy(&xs->sense, &t2i->sense, sizeof(xs->sense));
 		break;
 	case VSCSI_STAT_RESET:
 		xs->error = XS_RESET;
@@ -473,6 +472,7 @@ vscsi_t2i(struct vscsi_softc *sc, struct vscsi_ioc_t2i *t2i)
 }
 
 struct vscsi_devevent_task {
+	struct vscsi_softc *sc;
 	struct task t;
 	struct vscsi_ioc_devevent de;
 	u_long cmd;
@@ -488,7 +488,8 @@ vscsi_devevent(struct vscsi_softc *sc, u_long cmd,
 	if (dt == NULL)
 		return (ENOMEM);
 
-	task_set(&dt->t, vscsi_devevent_task, sc, dt);
+	task_set(&dt->t, vscsi_devevent_task, dt);
+	dt->sc = sc;
 	dt->de = *de;
 	dt->cmd = cmd;
 
@@ -499,10 +500,10 @@ vscsi_devevent(struct vscsi_softc *sc, u_long cmd,
 }
 
 void
-vscsi_devevent_task(void *xsc, void *xdt)
+vscsi_devevent_task(void *xdt)
 {
-	struct vscsi_softc *sc = xsc;
 	struct vscsi_devevent_task *dt = xdt;
+	struct vscsi_softc *sc = dt->sc;
 	int state;
 
 	mtx_enter(&sc->sc_state_mtx);
@@ -524,8 +525,8 @@ vscsi_devevent_task(void *xsc, void *xdt)
 	default:
 		panic("unexpected vscsi_devevent cmd");
 		/* NOTREACHED */
-	}
 #endif
+	}
 
 gone:
 	device_unref(&sc->sc_dev);
@@ -578,31 +579,34 @@ vscsikqfilter(dev_t dev, struct knote *kn)
 		return (EINVAL);
 	}
 
-	kn->kn_hook = (caddr_t)sc;
+	kn->kn_hook = sc;
 
 	mtx_enter(&sc->sc_sel_mtx);
 	SLIST_INSERT_HEAD(klist, kn, kn_selnext);
 	mtx_leave(&sc->sc_sel_mtx);
 
-	device_unref(&sc->sc_dev);
+	/* device ref is given to the knote in the klist */
+
 	return (0);
 }
 
 void
 filt_vscsidetach(struct knote *kn)
 {
-	struct vscsi_softc *sc = (struct vscsi_softc *)kn->kn_hook;
+	struct vscsi_softc *sc = kn->kn_hook;
 	struct klist *klist = &sc->sc_sel.si_note;
  
 	mtx_enter(&sc->sc_sel_mtx);
 	SLIST_REMOVE(klist, kn, knote, kn_selnext);
 	mtx_leave(&sc->sc_sel_mtx);
+
+	device_unref(&sc->sc_dev);
 }
 
 int
 filt_vscsiread(struct knote *kn, long hint)
 {
-	struct vscsi_softc *sc = (struct vscsi_softc *)kn->kn_hook;
+	struct vscsi_softc *sc = kn->kn_hook;
 	int event = 0;
 
 	mtx_enter(&sc->sc_state_mtx);

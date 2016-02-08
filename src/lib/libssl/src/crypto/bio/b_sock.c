@@ -1,4 +1,4 @@
-/* $OpenBSD: b_sock.c,v 1.56 2014/07/16 10:43:06 deraadt Exp $ */
+/* $OpenBSD: b_sock.c,v 1.61 2014/12/03 22:14:38 bcook Exp $ */
 /* Copyright (C) 1995-1998 Eric Young (eay@cryptsoft.com)
  * All rights reserved.
  *
@@ -93,8 +93,7 @@ BIO_get_host_ip(const char *str, unsigned char *ip)
 		goto err;
 	}
 
-	/* cast to short because of win16 winsock definition */
-	if ((short)he->h_addrtype != AF_INET) {
+	if (he->h_addrtype != AF_INET) {
 		BIOerr(BIO_F_BIO_GET_HOST_IP,
 		    BIO_R_GETHOSTBYNAME_ADDR_IS_NOT_AF_INET);
 		goto err;
@@ -191,17 +190,6 @@ struct hostent *
 BIO_gethostbyname(const char *name)
 {
 	return gethostbyname(name);
-}
-
-int
-BIO_sock_init(void)
-{
-	return (1);
-}
-
-void
-BIO_sock_cleanup(void)
-{
 }
 
 int
@@ -317,8 +305,7 @@ again:
 	if (bind_mode == BIO_BIND_REUSEADDR) {
 		int i = 1;
 
-		ret = setsockopt(s, SOL_SOCKET, SO_REUSEADDR, (char *)&i,
-		    sizeof(i));
+		ret = setsockopt(s, SOL_SOCKET, SO_REUSEADDR, &i, sizeof(i));
 		bind_mode = BIO_BIND_NORMAL;
 	}
 	if (bind(s, &server.sa, addrlen) == -1) {
@@ -454,10 +441,4 @@ int
 BIO_set_tcp_ndelay(int s, int on)
 {
 	return (setsockopt(s, IPPROTO_TCP, TCP_NODELAY, &on, sizeof(on)) == 0);
-}
-
-int
-BIO_socket_nbio(int s, int mode)
-{
-	return (BIO_socket_ioctl(s, FIONBIO, &mode) == 0);
 }

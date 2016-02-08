@@ -1,4 +1,4 @@
-/* $OpenBSD: acpi.c,v 1.267 2014/07/20 18:05:21 mlarkin Exp $ */
+/* $OpenBSD: acpi.c,v 1.283 2015/02/07 01:19:40 deraadt Exp $ */
 /*
  * Copyright (c) 2005 Thorsten Lockert <tholo@sigmasoft.com>
  * Copyright (c) 2005 Jordan Hargrave <jordan@openbsd.org>
@@ -29,6 +29,7 @@
 #include <sys/kthread.h>
 #include <sys/sched.h>
 #include <sys/reboot.h>
+#include <sys/sysctl.h>
 
 #ifdef HIBERNATE
 #include <sys/hibernate.h>
@@ -38,6 +39,7 @@
 #include <machine/cpufunc.h>
 #include <machine/bus.h>
 
+#include <dev/rndvar.h>
 #include <dev/pci/pcivar.h>
 #include <dev/acpi/acpireg.h>
 #include <dev/acpi/acpivar.h>
@@ -46,7 +48,6 @@
 #include <dev/acpi/dsdt.h>
 #include <dev/wscons/wsdisplayvar.h>
 
-#include <dev/pci/pcivar.h>
 #include <dev/pci/pcidevs.h>
 #include <dev/pci/ppbreg.h>
 
@@ -74,6 +75,7 @@ int	acpi_hasprocfvs;
 void 	acpi_pci_match(struct device *, struct pci_attach_args *);
 pcireg_t acpi_pci_min_powerstate(pci_chipset_tag_t, pcitag_t);
 void	 acpi_pci_set_powerstate(pci_chipset_tag_t, pcitag_t, int, int);
+int	acpi_pci_notify(struct aml_node *, int, void *);
 
 int	acpi_match(struct device *, void *, void *);
 void	acpi_attach(struct device *, struct device *, void *);
@@ -167,6 +169,55 @@ struct acpi_softc *acpi_softc;
 
 #define acpi_bus_space_map	_bus_space_map
 #define acpi_bus_space_unmap	_bus_space_unmap
+
+#ifndef SMALL_KERNEL
+/*
+ * This is a list of Synaptics devices with a 'top button area'
+ * based on the list in Linux supplied by Synaptics
+ * Synaptics clickpads with the following pnp ids will get a unique
+ * wscons mouse type that is used to define trackpad regions that will
+ * emulate mouse buttons
+ */
+static const char *sbtn_pnp[] = {
+	"LEN0017",
+	"LEN0018",
+	"LEN0019",
+	"LEN0023",
+	"LEN002A",
+	"LEN002B",
+	"LEN002C",
+	"LEN002D",
+	"LEN002E",
+	"LEN0033",
+	"LEN0034",
+	"LEN0035",
+	"LEN0036",
+	"LEN0037",
+	"LEN0038",
+	"LEN0039",
+	"LEN0041",
+	"LEN0042",
+	"LEN0045",
+	"LEN0046",
+	"LEN0047",
+	"LEN0048",
+	"LEN0049",
+	"LEN2000",
+	"LEN2001",
+	"LEN2002",
+	"LEN2003",
+	"LEN2004",
+	"LEN2005",
+	"LEN2006",
+	"LEN2007",
+	"LEN2008",
+	"LEN2009",
+	"LEN200A",
+	"LEN200B",
+};
+
+int	mouse_has_softbtn;
+#endif
 
 int
 acpi_gasio(struct acpi_softc *sc, int iodir, int iospace, uint64_t address,
@@ -567,6 +618,8 @@ acpi_pci_match(struct device *dev, struct pci_attach_args *pa)
 		state = pci_get_powerstate(pa->pa_pc, pa->pa_tag);
 		acpi_pci_set_powerstate(pa->pa_pc, pa->pa_tag, state, 1);
 		acpi_pci_set_powerstate(pa->pa_pc, pa->pa_tag, state, 0);
+
+		aml_register_notify(pdev->node, NULL, acpi_pci_notify, pdev, 0);
 	}
 }
 
@@ -660,6 +713,29 @@ acpi_pci_set_powerstate(pci_chipset_tag_t pc, pcitag_t tag, int state, int pre)
 
 	}
 #endif /* NACPIPWRRES > 0 */
+}
+
+int
+acpi_pci_notify(struct aml_node *node, int ntype, void *arg)
+{
+	struct acpi_pci *pdev = arg;
+	pci_chipset_tag_t pc = NULL;
+	pcitag_t tag;
+	pcireg_t reg;
+	int offset;
+
+	/* We're only interested in Device Wake notifications. */
+	if (ntype != 2)
+		return (0);
+
+	tag = pci_make_tag(pc, pdev->bus, pdev->dev, pdev->fun);
+	if (pci_get_capability(pc, tag, PCI_CAP_PWRMGMT, &offset, 0)) {
+		/* Clear the PME Status bit if it is set. */
+		reg = pci_conf_read(pc, tag, offset + PCI_PMCSR);
+		pci_conf_write(pc, tag, offset + PCI_PMCSR, reg);
+	}
+
+	return (0);
 }
 
 void
@@ -1015,10 +1091,10 @@ acpi_maptable(struct acpi_softc *sc, paddr_t addr, const char *sig,
 	if (acpi_map(addr, len, &handle))
 		return NULL;
 	hdr = (struct acpi_table_header *)handle.va;
-	if (acpi_checksum(hdr, len)) {
-		acpi_unmap(&handle);
-		return NULL;
-	}
+	if (acpi_checksum(hdr, len))
+		printf("\n%s: %.4s checksum error",
+		    DEVNAME(sc), hdr->signature);
+
 	if ((sig && memcmp(sig, hdr->signature, 4)) ||
 	    (oem && memcmp(oem, hdr->oemid, 6)) ||
 	    (tbl && memcmp(tbl, hdr->oemtableid, 8))) {
@@ -1934,7 +2010,7 @@ acpi_init_gpes(struct acpi_softc *sc)
 	dnprintf(50, "Last GPE: %.2x\n", sc->sc_lastgpe);
 
 	/* Allocate GPE table */
-	sc->gpe_table = malloc(sc->sc_lastgpe * sizeof(struct gpe_block),
+	sc->gpe_table = mallocarray(sc->sc_lastgpe, sizeof(struct gpe_block),
 	    M_DEVBUF, M_WAITOK | M_ZERO);
 
 	ngpe = 0;
@@ -2084,8 +2160,11 @@ acpi_indicator(struct acpi_softc *sc, int led_state)
 int
 acpi_sleep_state(struct acpi_softc *sc, int state)
 {
-	struct device *mainbus = device_mainbus();
+	extern int perflevel;
+	extern int lid_suspend;
 	int error = ENXIO;
+	size_t rndbuflen = 0;
+	char *rndbuf = NULL;
 	int s;
 
 	switch (state) {
@@ -2110,18 +2189,29 @@ acpi_sleep_state(struct acpi_softc *sc, int state)
 	acpi_indicator(sc, ACPI_SST_WAKING);	/* blink */
 
 #if NWSDISPLAY > 0
+	/*
+	 * Temporarily release the lock to prevent the X server from
+	 * blocking on setting the display brightness.
+	 */
+	rw_exit_write(&sc->sc_lck);
 	wsdisplay_suspend();
+	rw_enter_write(&sc->sc_lck);
 #endif /* NWSDISPLAY > 0 */
-
-	if (config_suspend(mainbus, DVACT_QUIESCE))
-		goto fail_quiesce;
 
 #ifdef HIBERNATE
 	if (state == ACPI_STATE_S4) {
 		uvmpd_hibernate();
 		hibernate_suspend_bufcache();
+		if (hibernate_alloc()) {
+			printf("%s: failed to allocate hibernate memory\n",
+			    sc->sc_dev.dv_xname);
+			goto fail_alloc;
+		}
 	}
 #endif /* HIBERNATE */
+
+	if (config_suspend_all(DVACT_QUIESCE))
+		goto fail_quiesce;
 
 	bufq_quiesce();
 
@@ -2135,9 +2225,11 @@ acpi_sleep_state(struct acpi_softc *sc, int state)
 	disable_intr();	/* PSL_I for resume; PIC/APIC broken until repair */
 	cold = 1;	/* Force other code to delay() instead of tsleep() */
 
-	if (config_suspend(mainbus, DVACT_SUSPEND) != 0)
+	if (config_suspend_all(DVACT_SUSPEND) != 0)
 		goto fail_suspend;
 	acpi_sleep_clocks(sc, state);
+
+	suspend_randomness();
 
 	/* 2nd suspend AML step: _PTS(tostate) */
 	if (aml_node_setval(sc, sc->sc_pts, state) != 0)
@@ -2166,6 +2258,7 @@ acpi_sleep_state(struct acpi_softc *sc, int state)
 	if (state == ACPI_STATE_S4) {
 		uvm_pmr_dirty_everything();
 		uvm_pmr_zero_everything();
+		hib_getentropy(&rndbuf, &rndbuflen);
 	}
 #endif /* HIBERNATE */
 
@@ -2174,7 +2267,7 @@ acpi_sleep_state(struct acpi_softc *sc, int state)
 	acpi_resume_cpu(sc);
 
 fail_pts:
-	config_suspend(mainbus, DVACT_RESUME);
+	config_suspend_all(DVACT_RESUME);
 
 fail_suspend:
 	cold = 0;
@@ -2187,6 +2280,8 @@ fail_suspend:
 	/* 3rd resume AML step: _TTS(runstate) */
 	aml_node_setval(sc, sc->sc_tts, sc->sc_state);
 
+	resume_randomness(rndbuf, rndbuflen);	/* force RNG upper level reseed */
+
 #ifdef MULTIPROCESSOR
 	acpi_resume_mp();
 #endif
@@ -2194,21 +2289,32 @@ fail_suspend:
 	bufq_restart();
 
 fail_quiesce:
-	config_suspend(mainbus, DVACT_WAKEUP);
-
-#if NWSDISPLAY > 0
-	wsdisplay_resume();
-#endif /* NWSDISPLAY > 0 */
-
-	acpi_record_event(sc, APM_NORMAL_RESUME);
-	acpi_indicator(sc, ACPI_SST_WORKING);
+	config_suspend_all(DVACT_WAKEUP);
 
 #ifdef HIBERNATE
+fail_alloc:
 	if (state == ACPI_STATE_S4) {
 		hibernate_free();
 		hibernate_resume_bufcache();
 	}
 #endif /* HIBERNATE */
+
+#if NWSDISPLAY > 0
+	rw_exit_write(&sc->sc_lck);
+	wsdisplay_resume();
+	rw_enter_write(&sc->sc_lck);
+#endif /* NWSDISPLAY > 0 */
+
+	/* Restore hw.setperf */
+	if (cpu_setperf != NULL)
+		cpu_setperf(perflevel);
+
+	acpi_record_event(sc, APM_NORMAL_RESUME);
+	acpi_indicator(sc, ACPI_SST_WORKING);
+
+	/* If we woke up but all the lids are closed, go back to sleep */
+	if (acpibtn_numopenlids() == 0 && lid_suspend != 0)
+		acpi_addtask(sc, acpi_sleep_task, sc, state);
 
 fail_tts:
 	return (error);
@@ -2408,8 +2514,31 @@ acpi_foundhid(struct aml_node *node, void *arg)
 	struct acpi_softc	*sc = (struct acpi_softc *)arg;
 	struct device		*self = (struct device *)arg;
 	const char		*dev;
+	char			 cdev[16];
 	struct aml_value	 res;
-	struct acpi_attach_args	aaa;
+	struct acpi_attach_args	 aaa;
+	int			 i;
+
+	/* NB aml_eisaid returns a static buffer, this must come first */
+	if (aml_evalname(acpi_softc, node->parent, "_CID", 0, NULL, &res) == 0) {
+		switch (res.type) {
+		case AML_OBJTYPE_STRING:
+			dev = res.v_string;
+			break;
+		case AML_OBJTYPE_INTEGER:
+			dev = aml_eisaid(aml_val2int(&res));
+			break;
+		default:
+			dev = "unknown";
+			break;
+		}
+		strlcpy(cdev, dev, sizeof(cdev));
+		aml_freevalue(&res);
+		
+		dnprintf(10, "compatible with device: %s\n", cdev);
+	} else {
+		cdev[0] = '\0';
+	}
 
 	dnprintf(10, "found hid device: %s ", node->parent->name);
 	if (aml_evalnode(sc, node, 0, NULL, &res) != 0)
@@ -2458,6 +2587,14 @@ acpi_foundhid(struct aml_node *node, void *arg)
 		acpi_toshiba_enabled = 1;
 	}
 
+	if (!strcmp(cdev, ACPI_DEV_MOUSE)) {
+		for (i = 0; i < nitems(sbtn_pnp); i++) {
+			if (!strcmp(dev, sbtn_pnp[i])) {
+				mouse_has_softbtn = 1;
+				break;
+			}
+		}
+	}
 
 	if (aaa.aaa_name)
 		config_found(self, &aaa, acpi_print);

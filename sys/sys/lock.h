@@ -1,4 +1,4 @@
-/*	$OpenBSD: lock.h,v 1.23 2014/07/09 13:32:00 guenther Exp $	*/
+/*	$OpenBSD: lock.h,v 1.25 2015/02/11 07:22:15 dlg Exp $	*/
 
 /* 
  * Copyright (c) 1995
@@ -38,25 +38,7 @@
 #ifndef	_LOCK_H_
 #define	_LOCK_H_
 
-#ifdef _KERNEL
-#include <machine/lock.h>
-#endif
-
 #include <sys/rwlock.h>
-
-struct simplelock {
-};
-
-typedef struct simplelock       simple_lock_data_t;
-typedef struct simplelock       *simple_lock_t;
-
-#ifdef _KERNEL
-#define	simple_lock(lkp)
-#define	simple_lock_try(lkp)	(1)	/* always succeeds */
-#define	simple_unlock(lkp)
-#define simple_lock_assert(lkp)
-#define simple_lock_init(lkp)
-#endif /* _KERNEL */
 
 struct lock {
 	struct rrwlock	lk_lck;

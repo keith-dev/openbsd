@@ -1,4 +1,4 @@
-/*	$OpenBSD: cpu.h,v 1.102 2014/07/11 10:53:07 uebayasi Exp $	*/
+/*	$OpenBSD: cpu.h,v 1.104 2015/02/11 07:05:39 dlg Exp $	*/
 
 /*-
  * Copyright (c) 1992, 1993
@@ -121,7 +121,6 @@
 #if defined(_KERNEL) && !defined(_LOCORE)
 
 #include <sys/device.h>
-#include <sys/lock.h>
 #include <machine/intr.h>
 #include <sys/sched.h>
 
@@ -477,7 +476,7 @@ void	cp0_set_trapbase(register_t);
 u_int	cp1_get_prid(void);
 
 /*
- * Cache routines (may be overriden)
+ * Cache routines (may be overridden)
  */
 
 #ifndef	Mips_SyncCache

@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_pflog.c,v 1.62 2014/07/22 11:06:09 mpi Exp $	*/
+/*	$OpenBSD: if_pflog.c,v 1.69 2015/02/13 13:35:03 millert Exp $	*/
 /*
  * The authors of this code are John Ioannidis (ji@tla.org),
  * Angelos D. Keromytis (kermit@csd.uch.gr) and 
@@ -42,25 +42,21 @@
 #include <sys/mbuf.h>
 #include <sys/proc.h>
 #include <sys/socket.h>
+#include <sys/stdint.h>
 #include <sys/ioctl.h>
 
 #include <net/if.h>
+#include <net/if_var.h>
 #include <net/if_types.h>
-#include <net/route.h>
 #include <net/bpf.h>
 
-#ifdef	INET
 #include <netinet/in.h>
 #include <netinet/ip.h>
 #include <netinet/tcp.h>
 #include <netinet/udp.h>
 #include <netinet/ip_icmp.h>
-#endif
 
 #ifdef INET6
-#ifndef INET
-#include <netinet/in.h>
-#endif
 #include <netinet/ip6.h>
 #include <netinet/icmp6.h>
 #endif /* INET6 */
@@ -118,7 +114,7 @@ pflogifs_resize(size_t n)
 	if (n == 0)
 		p = NULL;
 	else
-		if ((p = malloc(n * sizeof(*p), M_DEVBUF,
+		if ((p = mallocarray(n, sizeof(*p), M_DEVBUF,
 		    M_NOWAIT|M_ZERO)) == NULL)
 			return (ENOMEM);
 	for (i = 0; i < n; i++)
@@ -246,7 +242,7 @@ pflogioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 
 int
 pflog_packet(struct pf_pdesc *pd, u_int8_t reason, struct pf_rule *rm,
-    struct pf_rule *am, struct pf_ruleset *ruleset)
+    struct pf_rule *am, struct pf_ruleset *ruleset, struct pf_rule *trigger)
 {
 #if NBPFILTER > 0
 	struct ifnet *ifn;
@@ -254,9 +250,11 @@ pflog_packet(struct pf_pdesc *pd, u_int8_t reason, struct pf_rule *rm,
 
 	if (rm == NULL || pd == NULL || pd->kif == NULL || pd->m == NULL)
 		return (-1);
+	if (trigger == NULL)
+		trigger = rm;
 
-	if (rm->logif >= npflogifs || (ifn = pflogifs[rm->logif]) == NULL ||
-	    !ifn->if_bpf)
+	if (trigger->logif >= npflogifs || (ifn = pflogifs[trigger->logif]) ==
+	    NULL || !ifn->if_bpf)
 		return (0);
 
 	bzero(&hdr, sizeof(hdr));
@@ -275,7 +273,7 @@ pflog_packet(struct pf_pdesc *pd, u_int8_t reason, struct pf_rule *rm,
 			strlcpy(hdr.ruleset, ruleset->anchor->name,
 			    sizeof(hdr.ruleset));
 	}
-	if (rm->log & PF_LOG_SOCKET_LOOKUP && !pd->lookup.done)
+	if (trigger->log & PF_LOG_SOCKET_LOOKUP && !pd->lookup.done)
 		pd->lookup.done = pf_socket_lookup(pd);
 	if (pd->lookup.done > 0) {
 		hdr.uid = pd->lookup.uid;
@@ -312,7 +310,6 @@ pflog_bpfcopy(const void *src_arg, void *dst_arg, size_t len)
 	struct pfloghdr		*pfloghdr;
 	u_int			 count;
 	u_char			*dst, *mdst;
-	u_short			 reason;
 	int			 afto, hlen, mlen, off;
 	union pf_headers {
 		struct tcphdr		tcp;
@@ -425,9 +422,12 @@ pflog_bpfcopy(const void *src_arg, void *dst_arg, size_t len)
 		mhdr->m_pkthdr.len += m->m_pkthdr.len - hlen;
 	}
 
-	/* rewrite addresses if needed */
+	/*
+	 * Rewrite addresses if needed. Reason pointer must be NULL to avoid
+	 * counting the packet here again.
+	 */
 	if (pf_setup_pdesc(&pd, &pdhdrs, pfloghdr->af, pfloghdr->dir, NULL,
-	    mhdr, &reason) != PF_PASS)
+	    mhdr, NULL) != PF_PASS)
 		goto copy;
 	pd.naf = pfloghdr->naf;
 

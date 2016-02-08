@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_cas.c,v 1.33 2013/08/21 05:21:44 dlg Exp $	*/
+/*	$OpenBSD: if_cas.c,v 1.37 2014/12/22 02:28:52 tedu Exp $	*/
 
 /*
  *
@@ -55,17 +55,14 @@
 #include <sys/ioctl.h>
 #include <sys/errno.h>
 #include <sys/device.h>
-
-#include <machine/endian.h>
+#include <sys/endian.h>
 
 #include <net/if.h>
 #include <net/if_dl.h>
 #include <net/if_media.h>
 
-#ifdef INET
 #include <netinet/in.h>
 #include <netinet/if_ether.h>
-#endif
 
 #if NBPFILTER > 0
 #include <net/bpf.h>
@@ -167,10 +164,15 @@ cas_match(struct device *parent, void *cf, void *aux)
 #define	PROMDATA_DATA2		0x0a
 
 static const u_int8_t cas_promhdr[] = { 0x55, 0xaa };
-static const u_int8_t cas_promdat[] = {
+static const u_int8_t cas_promdat_sun[] = {
 	'P', 'C', 'I', 'R',
 	PCI_VENDOR_SUN & 0xff, PCI_VENDOR_SUN >> 8,
 	PCI_PRODUCT_SUN_CASSINI & 0xff, PCI_PRODUCT_SUN_CASSINI >> 8
+};
+static const u_int8_t cas_promdat_ns[] = {
+	'P', 'C', 'I', 'R',
+	PCI_VENDOR_NS & 0xff, PCI_VENDOR_NS >> 8,
+	PCI_PRODUCT_NS_SATURN & 0xff, PCI_PRODUCT_NS_SATURN >> 8
 };
 
 static const u_int8_t cas_promdat2[] = {
@@ -211,7 +213,8 @@ cas_pci_enaddr(struct cas_softc *sc, struct pci_attach_args *pa)
 		goto fail;
 
 	bus_space_read_region_1(romt, romh, dataoff, buf, sizeof(buf));
-	if (bcmp(buf, cas_promdat, sizeof(cas_promdat)) ||
+	if ((bcmp(buf, cas_promdat_sun, sizeof(cas_promdat_sun)) &&
+	    bcmp(buf, cas_promdat_ns, sizeof(cas_promdat_ns))) ||
 	    bcmp(buf + PROMDATA_DATA2, cas_promdat2, sizeof(cas_promdat2)))
 		goto fail;
 
@@ -274,6 +277,7 @@ next:
 			desc += strlen("local-mac-address") + 1;
 					
 			bcopy(desc, sc->sc_arpcom.ac_enaddr, ETHER_ADDR_LEN);
+			sc->sc_arpcom.ac_enaddr[5] += pa->pa_device;
 			rv = 0;
 		}
 		break;
@@ -1677,10 +1681,8 @@ cas_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 		ifp->if_flags |= IFF_UP;
 		if ((ifp->if_flags & IFF_RUNNING) == 0)
 			cas_init(ifp);
-#ifdef INET
 		if (ifa->ifa_addr->sa_family == AF_INET)
 			arp_ifinit(&sc->sc_arpcom, ifa);
-#endif
 		break;
 
 	case SIOCSIFFLAGS:

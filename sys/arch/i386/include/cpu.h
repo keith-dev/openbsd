@@ -1,4 +1,4 @@
-/*	$OpenBSD: cpu.h,v 1.134 2014/07/11 10:53:07 uebayasi Exp $	*/
+/*	$OpenBSD: cpu.h,v 1.137 2014/12/16 21:40:05 tedu Exp $	*/
 /*	$NetBSD: cpu.h,v 1.35 1996/05/05 19:29:26 christos Exp $	*/
 
 /*-
@@ -64,7 +64,6 @@
 #define clockframe intrframe
 
 #include <sys/device.h>
-#include <sys/lock.h>			/* will also get LOCKDEBUG */
 #include <sys/sched.h>
 #include <sys/sensors.h>
 
@@ -82,7 +81,6 @@ struct cpu_info {
 	 * Public members. 
 	 */
 	struct proc *ci_curproc; 	/* current owner of the processor */
-	struct simplelock ci_slock;	/* lock on this data structure */
 	cpuid_t ci_cpuid; 		/* our CPU ID */
 	u_int ci_apicid;		/* our APIC ID */
 	u_int32_t ci_randseed;
@@ -146,12 +144,6 @@ struct cpu_info {
 #define CI_DDB_STOPPED		2
 #define CI_DDB_ENTERDDB		3
 #define CI_DDB_INDDB		4
-
-	volatile int ci_setperf_state;
-#define CI_SETPERF_READY	0
-#define CI_SETPERF_SHOULDSTOP	1
-#define CI_SETPERF_INTRANSIT	2
-#define CI_SETPERF_DONE		3
 
 	struct ksensordev	ci_sensordev;
 	struct ksensor		ci_sensor;

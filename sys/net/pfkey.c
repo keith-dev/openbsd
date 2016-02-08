@@ -1,4 +1,4 @@
-/*	$OpenBSD: pfkey.c,v 1.21 2014/07/12 18:44:22 tedu Exp $	*/
+/*	$OpenBSD: pfkey.c,v 1.24 2014/12/09 07:05:06 doug Exp $	*/
 
 /*
  *	@(#)COPYRIGHT	1.1 (NRL) 17 January 1995
@@ -74,7 +74,7 @@
 #include <sys/socket.h>
 #include <sys/mbuf.h>
 #include <sys/socketvar.h>
-#include <net/route.h>
+#include <net/radix.h>
 #include <netinet/ip_ipsp.h>
 #include <net/pfkeyv2.h>
 
@@ -218,7 +218,7 @@ pfkey_attach(struct socket *socket, struct mbuf *proto, struct proc *p)
 	return (0);
 
 ret:
-	free(socket->so_pcb, M_PCB, 0);
+	free(socket->so_pcb, M_PCB, sizeof(struct rawcb));
 	return (rval);
 }
 
@@ -303,7 +303,7 @@ pfkey_buildprotosw(void)
 			j++;
 
 	if (j) {
-		if (!(protosw = malloc(j * sizeof(struct protosw),
+		if (!(protosw = mallocarray(j, sizeof(struct protosw),
 		    M_PFKEY, M_DONTWAIT)))
 			return (ENOMEM);
 

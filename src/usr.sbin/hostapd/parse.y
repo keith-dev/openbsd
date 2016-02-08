@@ -1,4 +1,4 @@
-/*	$OpenBSD: parse.y,v 1.45 2014/01/22 00:21:16 henning Exp $	*/
+/*	$OpenBSD: parse.y,v 1.49 2015/01/16 06:40:17 deraadt Exp $	*/
 
 /*
  * Copyright (c) 2004, 2005, 2006 Reyk Floeter <reyk@openbsd.org>
@@ -21,7 +21,6 @@
  */
 
 %{
-#include <sys/param.h>
 #include <sys/ioctl.h>
 #include <sys/types.h>
 #include <sys/socket.h>
@@ -52,6 +51,7 @@
 #include <stdarg.h>
 #include <string.h>
 #include <unistd.h>
+#include <limits.h>
 #include <stdint.h>
 #include <err.h>
 
@@ -70,7 +70,9 @@ int		 popfile(void);
 int		 check_file_secrecy(int, const char *);
 int		 yyparse(void);
 int		 yylex(void);
-int		 yyerror(const char *, ...);
+int		 yyerror(const char *, ...)
+    __attribute__((__format__ (printf, 1, 2)))
+    __attribute__((__nonnull__ (1)));
 int		 kw_cmp(const void *, const void *);
 int		 lookup(char *);
 int		 lgetc(int);
@@ -1484,6 +1486,9 @@ top:
 			} else if (c == quotec) {
 				*p = '\0';
 				break;
+			} else if (c == '\0') {
+				yyerror("syntax error");
+				return (findeol());
 			}
 			if (p + 1 >= buf + sizeof(buf) - 1) {
 				yyerror("string too long");
@@ -1779,18 +1784,17 @@ int
 yyerror(const char *fmt, ...)
 {
 	va_list		 ap;
-	char		*nfmt;
+	char		*msg;
 
 	file->errors++;
 
 	va_start(ap, fmt);
-	if (asprintf(&nfmt, "%s:%d: %s\n", file->name, yylval.lineno,
-	    fmt) == -1)
-		hostapd_fatal("yyerror asprintf");
-	vfprintf(stderr, nfmt, ap);
-	fflush(stderr);
+	if (vasprintf(&msg, fmt, ap) == -1)
+		hostapd_fatal("yyerror vasprintf");
 	va_end(ap);
-	free(nfmt);
+	fprintf(stderr, "%s:%d: %s\n", file->name, yylval.lineno, msg);
+	fflush(stderr);
+	free(msg);
 
 	return (0);
 }

@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_ne_pci.c,v 1.18 2011/04/03 15:36:02 jasper Exp $	*/
+/*	$OpenBSD: if_ne_pci.c,v 1.20 2014/12/22 02:28:52 tedu Exp $	*/
 /*	$NetBSD: if_ne_pci.c,v 1.8 1998/07/05 00:51:24 jonathan Exp $	*/
 
 /*-
@@ -43,10 +43,8 @@
 #include <net/if.h>
 #include <net/if_media.h>
 
-#ifdef INET
 #include <netinet/in.h>
 #include <netinet/if_ether.h>
-#endif
 
 #include <machine/bus.h>
 #include <machine/intr.h>
@@ -92,7 +90,7 @@ const struct ne_pci_product {
 	{ PCI_VENDOR_REALTEK,		PCI_PRODUCT_REALTEK_RT8029,
 	  rtl80x9_mediachange,		rtl80x9_mediastatus,
 	  rtl80x9_init_card,		rtl80x9_media_init,
-	  /* RealTek 8029 */ },
+	  /* Realtek 8029 */ },
 
 	{ PCI_VENDOR_WINBOND,		PCI_PRODUCT_WINBOND_W89C940F,
 	  NULL,				NULL,

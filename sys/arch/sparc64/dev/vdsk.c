@@ -1,4 +1,4 @@
-/*	$OpenBSD: vdsk.c,v 1.39 2014/07/12 18:44:43 tedu Exp $	*/
+/*	$OpenBSD: vdsk.c,v 1.46 2015/01/25 21:42:13 kettenis Exp $	*/
 /*
  * Copyright (c) 2009, 2011 Mark Kettenis
  *
@@ -200,10 +200,12 @@ void	vdsk_send_attr_info(struct vdsk_softc *);
 void	vdsk_send_dring_reg(struct vdsk_softc *);
 void	vdsk_send_rdx(struct vdsk_softc *);
 
-void *	vdsk_io_get(void *);
+void	*vdsk_io_get(void *);
 void	vdsk_io_put(void *, void *);
 
 void	vdsk_scsi_cmd(struct scsi_xfer *);
+int	vdsk_submit_cmd(struct scsi_xfer *);
+void	vdsk_complete_cmd(struct scsi_xfer *, int);
 int	vdsk_dev_probe(struct scsi_link *);
 void	vdsk_dev_free(struct scsi_link *);
 
@@ -231,19 +233,13 @@ vdsk_attach(struct device *parent, struct device *self, void *aux)
 	struct cbus_attach_args *ca = aux;
 	struct scsibus_attach_args saa;
 	struct ldc_conn *lc;
-	uint64_t sysino[2];
 	int err, s;
 	int timeout;
 
 	sc->sc_bustag = ca->ca_bustag;
 	sc->sc_dmatag = ca->ca_dmatag;
 
-	if (cbus_intr_map(ca->ca_node, ca->ca_tx_ino, &sysino[0]) ||
-	    cbus_intr_map(ca->ca_node, ca->ca_rx_ino, &sysino[1])) {
-		printf(": can't map interrupt\n");
-		return;
-	}
-	printf(": ivec 0x%llx, 0x%llx", sysino[0], sysino[1]);
+	printf(": ivec 0x%llx, 0x%llx", ca->ca_tx_ino, ca->ca_rx_ino);
 
 	/*
 	 * Un-configure queues before registering interrupt handlers,
@@ -252,10 +248,10 @@ vdsk_attach(struct device *parent, struct device *self, void *aux)
 	hv_ldc_tx_qconf(ca->ca_id, 0, 0);
 	hv_ldc_rx_qconf(ca->ca_id, 0, 0);
 
-	sc->sc_tx_ih = bus_intr_establish(ca->ca_bustag, sysino[0], IPL_BIO,
-	    0, vdsk_tx_intr, sc, sc->sc_dv.dv_xname);
-	sc->sc_rx_ih = bus_intr_establish(ca->ca_bustag, sysino[1], IPL_BIO,
-	    0, vdsk_rx_intr, sc, sc->sc_dv.dv_xname);
+	sc->sc_tx_ih = bus_intr_establish(ca->ca_bustag, ca->ca_tx_ino,
+	    IPL_BIO, 0, vdsk_tx_intr, sc, sc->sc_dv.dv_xname);
+	sc->sc_rx_ih = bus_intr_establish(ca->ca_bustag, ca->ca_rx_ino,
+	    IPL_BIO, 0, vdsk_rx_intr, sc, sc->sc_dv.dv_xname);
 	if (sc->sc_tx_ih == NULL || sc->sc_rx_ih == NULL) {
 		printf(", can't establish interrupt\n");
 		return;
@@ -321,8 +317,8 @@ vdsk_attach(struct device *parent, struct device *self, void *aux)
 	if (err != H_EOK)
 		printf("hv_ldc_rx_qconf %d\n", err);
 
-	cbus_intr_setenabled(sysino[0], INTR_ENABLED);
-	cbus_intr_setenabled(sysino[1], INTR_ENABLED);
+	cbus_intr_setenabled(sc->sc_bustag, ca->ca_tx_ino, INTR_ENABLED);
+	cbus_intr_setenabled(sc->sc_bustag, ca->ca_rx_ino, INTR_ENABLED);
 
 	ldc_send_vers(lc);
 
@@ -656,7 +652,7 @@ vdsk_rx_vio_rdx(struct vdsk_softc *sc, struct vio_msg_tag *tag)
 		sc->sc_lm->lm_next = 1;
 		sc->sc_lm->lm_count = 1;
 		while (sc->sc_tx_prod != prod)
-			vdsk_scsi_cmd(sc->sc_vsd[sc->sc_tx_prod].vsd_xs);
+			vdsk_submit_cmd(sc->sc_vsd[sc->sc_tx_prod].vsd_xs);
 
 		scsi_iopool_run(&sc->sc_iopool);
 		break;
@@ -701,29 +697,14 @@ vdsk_rx_vio_dring_data(struct vdsk_softc *sc, struct vio_msg_tag *tag)
 	case VIO_SUBTYPE_ACK:
 	{
 		struct scsi_xfer *xs;
-		struct ldc_map *map = sc->sc_lm;
-		int cons, error;
-		int cookie, idx;
+		int cons;
 
 		cons = sc->sc_tx_cons;
 		while (sc->sc_vd->vd_desc[cons].hdr.dstate == VIO_DESC_DONE) {
 			xs = sc->sc_vsd[cons].vsd_xs;
-
-			cookie = 0;
-			while (cookie < sc->sc_vsd[cons].vsd_ncookies) {
-				idx = sc->sc_vsd[cons].vsd_map_idx[cookie++];
-				map->lm_slot[idx].entry = 0;
-				map->lm_count--;
-			}
-
-			error = XS_NOERROR;
-			if (sc->sc_vd->vd_desc[cons].status != 0)
-				error = XS_DRIVER_STUFFUP;
-			xs->resid = xs->datalen -
-			    sc->sc_vd->vd_desc[cons].size;
-			vdsk_scsi_done(xs, error);
-
-			sc->sc_vd->vd_desc[cons++].hdr.dstate = VIO_DESC_FREE;
+			if (ISSET(xs->flags, SCSI_POLL) == 0)
+				vdsk_complete_cmd(xs, cons);
+			cons++;
 			cons &= (sc->sc_vd->vd_nentries - 1);
 		}
 		sc->sc_tx_cons = cons;
@@ -760,28 +741,11 @@ void
 vdsk_sendmsg(struct vdsk_softc *sc, void *msg, size_t len)
 {
 	struct ldc_conn *lc = &sc->sc_lc;
-	struct ldc_pkt *lp;
-	uint64_t tx_head, tx_tail, tx_state;
 	int err;
 
-	err = hv_ldc_tx_get_state(lc->lc_id, &tx_head, &tx_tail, &tx_state);
-	if (err != H_EOK)
-		return;
-
-	lp = (struct ldc_pkt *)(lc->lc_txq->lq_va + tx_tail);
-	bzero(lp, sizeof(struct ldc_pkt));
-	lp->type = LDC_DATA;
-	lp->stype = LDC_INFO;
-	KASSERT((len & ~LDC_LEN_MASK) == 0);
-	lp->env = len | LDC_FRAG_STOP | LDC_FRAG_START;
-	lp->seqid = lc->lc_tx_seqid++;
-	bcopy(msg, &lp->major, len);
-
-	tx_tail += sizeof(*lp);
-	tx_tail &= ((lc->lc_txq->lq_nentries * sizeof(*lp)) - 1);
-	err = hv_ldc_tx_set_qtail(lc->lc_id, tx_tail);
-	if (err != H_EOK)
-		printf("%s: hv_ldc_tx_set_qtail: %d\n", __func__, err);
+	err = ldc_send_unreliable(lc, msg, len);
+	if (err)
+		printf("%s: ldc_send_unreliable: %d\n", __func__, err);
 }
 
 void
@@ -931,7 +895,7 @@ vdsk_io_get(void *xsc)
 	int s;
 
 	s = splbio();
-	if (sc->sc_vio_state != VIO_ESTABLISHED &&
+	if (sc->sc_vio_state != VIO_ESTABLISHED ||
 	    sc->sc_tx_cnt >= sc->sc_vd->vd_nentries)
 		rv = NULL;
 	else
@@ -960,30 +924,20 @@ vdsk_io_put(void *xsc, void *io)
 void
 vdsk_scsi_cmd(struct scsi_xfer *xs)
 {
-	struct scsi_rw *rw;
-	struct scsi_rw_big *rwb;
-	struct scsi_rw_12 *rw12;
-	struct scsi_rw_16 *rw16;
-	u_int64_t lba;
-	u_int32_t sector_count;
-	uint8_t operation;
+	struct vdsk_softc *sc = xs->sc_link->adapter_softc;
+	int timeout, s;
+	int desc;
 
 	switch (xs->cmd->opcode) {
 	case READ_BIG:
 	case READ_COMMAND:
 	case READ_12:
 	case READ_16:
-		operation = VD_OP_BREAD;
-		break;
 	case WRITE_BIG:
 	case WRITE_COMMAND:
 	case WRITE_12:
 	case WRITE_16:
-		operation = VD_OP_BWRITE;
-		break;
-
 	case SYNCHRONIZE_CACHE:
-		operation = VD_OP_FLUSH;
 		break;
 
 	case INQUIRY:
@@ -1012,6 +966,69 @@ vdsk_scsi_cmd(struct scsi_xfer *xs)
 		return;
 	}
 
+	s = splbio();
+	desc = vdsk_submit_cmd(xs);
+
+	if (!ISSET(xs->flags, SCSI_POLL)) {
+		splx(s);
+		return;
+	}
+
+	timeout = 1000;
+	do {
+		if (sc->sc_vd->vd_desc[desc].hdr.dstate == VIO_DESC_DONE)
+			break;
+
+		delay(1000);
+	} while(--timeout > 0);
+	if (sc->sc_vd->vd_desc[desc].hdr.dstate == VIO_DESC_DONE) {
+		vdsk_complete_cmd(xs, desc);
+	} else {
+		ldc_reset(&sc->sc_lc);
+		vdsk_scsi_done(xs, XS_TIMEOUT);
+	}
+	splx(s);
+}
+
+int
+vdsk_submit_cmd(struct scsi_xfer *xs)
+{
+	struct vdsk_softc *sc = xs->sc_link->adapter_softc;
+	struct ldc_map *map = sc->sc_lm;
+	struct vio_dring_msg dm;
+	struct scsi_rw *rw;
+	struct scsi_rw_big *rwb;
+	struct scsi_rw_12 *rw12;
+	struct scsi_rw_16 *rw16;
+	u_int64_t lba;
+	u_int32_t sector_count;
+	uint8_t operation;
+	vaddr_t va;
+	paddr_t pa;
+	psize_t nbytes;
+	int len, ncookies;
+	int desc;
+
+	switch (xs->cmd->opcode) {
+	case READ_BIG:
+	case READ_COMMAND:
+	case READ_12:
+	case READ_16:
+		operation = VD_OP_BREAD;
+		break;
+
+	case WRITE_BIG:
+	case WRITE_COMMAND:
+	case WRITE_12:
+	case WRITE_16:
+		operation = VD_OP_BWRITE;
+		break;
+
+	case SYNCHRONIZE_CACHE:
+		operation = VD_OP_FLUSH;
+		break;
+	}
+
 	/*
 	 * READ/WRITE/SYNCHRONIZE commands. SYNCHRONIZE CACHE has same
 	 * layout as 10-byte READ/WRITE commands.
@@ -1034,18 +1051,6 @@ vdsk_scsi_cmd(struct scsi_xfer *xs)
 		sector_count = _4btol(rw16->length);
 	}
 
-{
-	struct vdsk_softc *sc = xs->sc_link->adapter_softc;
-	struct ldc_map *map = sc->sc_lm;
-	struct vio_dring_msg dm;
-	vaddr_t va;
-	paddr_t pa;
-	psize_t nbytes;
-	int len, ncookies;
-	int desc, s;
-	int timeout;
-
-	s = splbio();
 	desc = sc->sc_tx_prod;
 
 	ncookies = 0;
@@ -1076,7 +1081,10 @@ vdsk_scsi_cmd(struct scsi_xfer *xs)
 		ncookies++;
 	}
 
-	sc->sc_vd->vd_desc[desc].hdr.ack = 1;
+	if (ISSET(xs->flags, SCSI_POLL) == 0)
+		sc->sc_vd->vd_desc[desc].hdr.ack = 1;
+	else
+		sc->sc_vd->vd_desc[desc].hdr.ack = 0;
 	sc->sc_vd->vd_desc[desc].operation = operation;
 	sc->sc_vd->vd_desc[desc].slice = VD_SLICE_NONE;
 	sc->sc_vd->vd_desc[desc].status = 0xffffffff;
@@ -1102,21 +1110,32 @@ vdsk_scsi_cmd(struct scsi_xfer *xs)
 	dm.start_idx = dm.end_idx = desc;
 	vdsk_sendmsg(sc, &dm, sizeof(dm));
 
-	if (!ISSET(xs->flags, SCSI_POLL)) {
-		splx(s);
-		return;
+	return desc;
+}
+
+void
+vdsk_complete_cmd(struct scsi_xfer *xs, int desc)
+{
+	struct vdsk_softc *sc = xs->sc_link->adapter_softc;
+	struct ldc_map *map = sc->sc_lm;
+	int cookie, idx;
+	int error;
+
+	cookie = 0;
+	while (cookie < sc->sc_vsd[desc].vsd_ncookies) {
+		idx = sc->sc_vsd[desc].vsd_map_idx[cookie++];
+		map->lm_slot[idx].entry = 0;
+		map->lm_count--;
 	}
 
-	timeout = 1000;
-	do {
-		if (vdsk_rx_intr(sc) &&
-		    sc->sc_vd->vd_desc[desc].status == VIO_DESC_FREE)
-			break;
+	error = XS_NOERROR;
+	if (sc->sc_vd->vd_desc[desc].status != 0)
+		error = XS_DRIVER_STUFFUP;
+	xs->resid = xs->datalen -
+		sc->sc_vd->vd_desc[desc].size;
+	vdsk_scsi_done(xs, error);
 
-		delay(1000);
-	} while(--timeout > 0);
-	splx(s);
-}
+	sc->sc_vd->vd_desc[desc].hdr.dstate = VIO_DESC_FREE;
 }
 
 void

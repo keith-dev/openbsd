@@ -1,4 +1,4 @@
-/*	$OpenBSD: ospfe.c,v 1.88 2014/07/12 20:16:38 krw Exp $ */
+/*	$OpenBSD: ospfe.c,v 1.90 2015/02/10 05:24:48 claudio Exp $ */
 
 /*
  * Copyright (c) 2005 Claudio Jeker <claudio@openbsd.org>
@@ -34,7 +34,6 @@
 #include <err.h>
 #include <errno.h>
 #include <stdio.h>
-#include <stdlib.h>
 
 #include "ospf.h"
 #include "ospfd.h"
@@ -93,7 +92,8 @@ ospfe(struct ospfd_conf *xconf, int pipe_parent2ospfe[2], int pipe_ospfe2rde[2],
 		fatalx("control socket setup failed");
 
 	/* create the raw ip socket */
-	if ((xconf->ospf_socket = socket(AF_INET, SOCK_RAW,
+	if ((xconf->ospf_socket = socket(AF_INET,
+	    SOCK_RAW | SOCK_CLOEXEC | SOCK_NONBLOCK,
 	    IPPROTO_OSPF)) == -1)
 		fatal("error creating raw socket");
 

@@ -1,4 +1,4 @@
-/*	$OpenBSD: npppd_ctl.c,v 1.12 2014/05/30 05:06:00 yasuoka Exp $ */
+/*	$OpenBSD: npppd_ctl.c,v 1.14 2015/01/19 01:48:59 deraadt Exp $ */
 
 /*-
  * Copyright (c) 2009 Internet Initiative Japan Inc.
@@ -25,7 +25,6 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  */
-#include <sys/param.h>
 #include <sys/socket.h>
 #include <sys/ioctl.h>
 #include <net/if.h>
@@ -128,11 +127,8 @@ npppd_ctl_add_started_ppp_id(struct npppd_ctl *_this, u_int ppp_id)
 		return (-1);
 	if (_this->started_ppp_pos + 1 >= _this->started_ppp_siz) {
 		started_ppp_siz = _this->started_ppp_siz + 128;
-		if (_this->started_ppp == NULL)
-			started_ppp = malloc(sizeof(u_int) * started_ppp_siz);
-		else
-			started_ppp = realloc(_this->started_ppp,
-			    sizeof(u_int) * started_ppp_siz);
+		started_ppp = reallocarray(_this->started_ppp,
+		    started_ppp_siz, sizeof(u_int));
 		if (started_ppp == NULL)
 			return (-1);
 		_this->started_ppp = started_ppp;
@@ -283,7 +279,7 @@ npppd_who_init(struct npppd_who *_this, npppd_ppp *ppp)
 	_this->tunnel_peer.peer_in4.sin_family = AF_UNSPEC;
 	if (((struct sockaddr *)&ppp->phy_info)->sa_len > 0) {
 		memcpy(&_this->tunnel_peer, &ppp->phy_info,
-		    MIN(sizeof(_this->tunnel_peer),
+		    MINIMUM(sizeof(_this->tunnel_peer),
 			((struct sockaddr *)&ppp->phy_info)->sa_len));
 	}
 

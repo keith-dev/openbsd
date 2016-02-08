@@ -1,4 +1,4 @@
-/*	$OpenBSD: mbufs.c,v 1.35 2014/07/08 05:35:19 dlg Exp $ */
+/*	$OpenBSD: mbufs.c,v 1.39 2015/01/20 18:26:57 deraadt Exp $ */
 /*
  * Copyright (c) 2008 Can Erkin Acar <canacar@openbsd.org>
  *
@@ -14,8 +14,8 @@
  * ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
-#include <sys/param.h>
-#include <sys/types.h>
+
+#include <sys/signal.h>
 #include <sys/socket.h>
 #include <sys/sysctl.h>
 #include <sys/mbuf.h>
@@ -151,7 +151,7 @@ initmembufs(void)
 			continue;
 		}
 
-		if (strcmp(pname, "mbpl") == 0) {
+		if (strcmp(pname, "mbufpl") == 0) {
 			mbpool_index = i;
 			continue;
 		}
@@ -335,7 +335,7 @@ read_mb(void)
 		int pnd = num_disp;
 		for (p = 0; p < ifi->data.ifri_total; p++) {
 			ifr = &ifi->data.ifri_entries[p];
-			if (ifr->ifr_info.rxr_alive == 0);
+			if (ifr->ifr_info.rxr_alive == 0)
 				continue;
 			num_disp++;
 		}

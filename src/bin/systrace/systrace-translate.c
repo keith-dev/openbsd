@@ -1,4 +1,4 @@
-/*	$OpenBSD: systrace-translate.c,v 1.22 2007/06/06 15:14:49 henning Exp $	*/
+/*	$OpenBSD: systrace-translate.c,v 1.25 2015/01/16 00:19:12 deraadt Exp $	*/
 /*
  * Copyright 2002 Niels Provos <provos@citi.umich.edu>
  * All rights reserved.
@@ -35,7 +35,8 @@
 #include <sys/socket.h>
 #include <sys/mman.h>
 #include <sys/stat.h>
-#include <inttypes.h>
+#include <sys/signal.h>
+#include <stdint.h>
 #include <limits.h>
 #include <stdlib.h>
 #include <string.h>
@@ -381,6 +382,9 @@ print_fcntlcmd(char *buf, size_t buflen, struct intercept_translate *tl)
 	switch (cmd) {
 	case F_DUPFD:
 		name = "F_DUPFD";
+		break;
+	case F_DUPFD_CLOEXEC:
+		name = "F_DUPFD_CLOEXEC";
 		break;
 	case F_GETFD:
 		name = "F_GETFD";

@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_uath.c,v 1.61 2014/07/13 15:52:49 mpi Exp $	*/
+/*	$OpenBSD: if_uath.c,v 1.66 2015/02/10 23:25:46 mpi Exp $	*/
 
 /*-
  * Copyright (c) 2006
@@ -37,9 +37,9 @@
 #include <sys/timeout.h>
 #include <sys/conf.h>
 #include <sys/device.h>
+#include <sys/endian.h>
 
 #include <machine/bus.h>
-#include <machine/endian.h>
 #include <machine/intr.h>
 
 #if NBPFILTER > 0
@@ -57,7 +57,6 @@
 #include <net80211/ieee80211_var.h>
 #include <net80211/ieee80211_radiotap.h>
 
-#include <dev/rndvar.h>
 #include <crypto/arc4.h>
 
 #include <dev/usb/usb.h>
@@ -218,14 +217,12 @@ uath_attachhook(void *xsc)
 	free(fw, M_DEVBUF, 0);
 
 	if (error == 0) {
-		usb_port_status_t status;
-
 		/*
 		 * Hack alert: the device doesn't always gracefully detach
 		 * from the bus after a firmware upload.  We need to force
 		 * a port reset and a re-exploration on the parent hub.
 		 */
-		usbd_reset_port(sc->sc_uhub, sc->sc_port, &status);
+		usbd_reset_port(sc->sc_uhub, sc->sc_port);
 		usb_needs_reattach(sc->sc_udev);
 	} else {
 		printf("%s: could not load firmware (error=%s)\n",
@@ -1224,7 +1221,6 @@ uath_data_rxeof(struct usbd_xfer *xfer, void *priv,
 	data->m = mnew;
 
 	/* finalize mbuf */
-	m->m_pkthdr.rcvif = ifp;
 	m->m_data = data->buf + sizeof (uint32_t);
 	m->m_pkthdr.len = m->m_len = betoh32(desc->len) -
 	    sizeof (struct uath_rx_desc) - IEEE80211_CRC_LEN;
@@ -1561,10 +1557,8 @@ uath_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 	case SIOCSIFADDR:
 		ifa = (struct ifaddr *)data;
 		ifp->if_flags |= IFF_UP;
-#ifdef INET
 		if (ifa->ifa_addr->sa_family == AF_INET)
 			arp_ifinit(&ic->ic_ac, ifa);
-#endif
 		/* FALLTHROUGH */
 	case SIOCSIFFLAGS:
 		if (ifp->if_flags & IFF_UP) {

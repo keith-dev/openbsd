@@ -1,4 +1,4 @@
-/*	$OpenBSD: kroute.c,v 1.8 2014/06/23 03:46:17 guenther Exp $ */
+/*	$OpenBSD: kroute.c,v 1.11 2015/02/11 05:56:27 claudio Exp $ */
 
 /*
  * Copyright (c) 2004 Esben Norby <norby@openbsd.org>
@@ -17,7 +17,6 @@
  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
 
-#include <sys/param.h>
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <sys/sysctl.h>
@@ -85,7 +84,8 @@ kr_init(void)
 {
 	int opt, fd;
 
-	if ((fd = socket(AF_ROUTE, SOCK_RAW, 0)) == -1) {
+	if ((fd = socket(AF_ROUTE, SOCK_RAW | SOCK_CLOEXEC | SOCK_NONBLOCK,
+	    0)) == -1) {
 		log_warn("kr_init: socket");
 		return (-1);
 	}
@@ -377,8 +377,11 @@ kr_dispatch_msg(int fd, short event, void *bula)
 	struct rt_msghdr	*rtm;
 	struct if_msghdr	 ifm;
 
-	if ((n = read(fd, &buf, sizeof(buf))) == -1)
+	if ((n = read(fd, &buf, sizeof(buf))) == -1) {
+		if (errno == EAGAIN || errno == EINTR)
+			return;
 		fatal("dispatch_rtmsg: read error");
+	}
 
 	if (n == 0)
 		fatalx("routing socket closed");
@@ -386,6 +389,9 @@ kr_dispatch_msg(int fd, short event, void *bula)
 	lim = buf + n;
 	for (next = buf; next < lim; next += rtm->rtm_msglen) {
 		rtm = (struct rt_msghdr *)next;
+		if (lim < next + sizeof(u_short) ||
+		    lim < next + rtm->rtm_msglen)
+			fatalx("dispatch_rtmsg: partial rtm in buffer");
 		if (rtm->rtm_version != RTM_VERSION)
 			continue;
 

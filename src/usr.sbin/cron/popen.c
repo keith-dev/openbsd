@@ -1,4 +1,4 @@
-/*	$OpenBSD: popen.c,v 1.22 2011/08/22 19:32:42 millert Exp $	*/
+/*	$OpenBSD: popen.c,v 1.25 2015/01/23 19:07:27 tedu Exp $	*/
 
 /*
  * Copyright (c) 1988, 1993, 1994
@@ -47,15 +47,16 @@
  * may create a pipe to a hidden program as a side effect of a list or dir
  * command.
  */
-static PID_T *pids;
+static pid_t *pids;
 static int fds;
 
 FILE *
-cron_popen(char *program, char *type, struct passwd *pw) {
+cron_popen(char *program, char *type, struct passwd *pw)
+{
 	char *cp;
 	FILE *iop;
 	int argc, pdes[2];
-	PID_T pid;
+	pid_t pid;
 	char *argv[MAX_ARGV];
 
 	if ((*type != 'r' && *type != 'w') || type[1] != '\0')
@@ -64,7 +65,7 @@ cron_popen(char *program, char *type, struct passwd *pw) {
 	if (!pids) {
 		if ((fds = sysconf(_SC_OPEN_MAX)) <= 0)
 			return (NULL);
-		if (!(pids = calloc(fds, sizeof(PID_T))))
+		if (!(pids = calloc(fds, sizeof(pid_t))))
 			return (NULL);
 	}
 	if (pipe(pdes) < 0)
@@ -99,9 +100,9 @@ cron_popen(char *program, char *type, struct passwd *pw) {
 				    pw->pw_name);
 				_exit(1);
 			}
-#if (defined(BSD)) && (BSD >= 199103)
+#ifdef HAVE_SETLOGIN
 			setlogin(pw->pw_name);
-#endif /* BSD */
+#endif
 			if (setuid(pw->pw_uid)) {
 				fprintf(stderr,
 				    "unable to set uid for %s\n",
@@ -142,10 +143,11 @@ cron_popen(char *program, char *type, struct passwd *pw) {
 }
 
 int
-cron_pclose(FILE *iop) {
+cron_pclose(FILE *iop)
+{
 	int fdes;
-	PID_T pid;
-	WAIT_T status;
+	pid_t pid;
+	int status;
 	sigset_t sigset, osigset;
 
 	/*

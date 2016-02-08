@@ -1,4 +1,4 @@
-/*	$OpenBSD: rup.c,v 1.26 2013/11/17 20:19:36 okan Exp $	*/
+/*	$OpenBSD: rup.c,v 1.29 2015/01/16 06:40:11 deraadt Exp $	*/
 
 /*-
  * Copyright (c) 1993, John Brezak
@@ -32,7 +32,6 @@
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
-#include <sys/param.h>
 #include <sys/socket.h>
 #include <netdb.h>
 #include <rpc/rpc.h>
@@ -132,7 +131,8 @@ remember_rup_data(char *host, struct statstime *st)
 		struct rup_data *newrup;
 
 		newsize = rup_data_max + 16;
-		newrup = realloc(rup_data, newsize * sizeof(struct rup_data));
+		newrup = reallocarray(rup_data, newsize,
+		    sizeof(struct rup_data));
 		if (newrup == NULL) {
 			err(1, NULL);
 			/* NOTREACHED */
@@ -313,7 +313,7 @@ main(int argc, char *argv[])
 			/*NOTREACHED*/
 		}
 
-	setlinebuf(stdout);
+	setvbuf(stdout, NULL, _IOLBF, 0);
 
 	if (argc == optind)
 		allhosts();

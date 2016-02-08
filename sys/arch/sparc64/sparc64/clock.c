@@ -1,4 +1,4 @@
-/*	$OpenBSD: clock.c,v 1.54 2014/07/12 18:44:43 tedu Exp $	*/
+/*	$OpenBSD: clock.c,v 1.56 2014/12/17 19:39:01 tedu Exp $	*/
 /*	$NetBSD: clock.c,v 1.41 2001/07/24 19:29:25 eeh Exp $ */
 
 /*
@@ -75,8 +75,7 @@
 #endif
 #include <sys/sched.h>
 #include <sys/timetc.h>
-
-#include <uvm/uvm_extern.h>
+#include <sys/atomic.h>
 
 #include <machine/bus.h>
 #include <machine/autoconf.h>
@@ -307,11 +306,9 @@ clock_bus_wenable(handle, onoff)
 
 	s = splhigh();
 	if (onoff)
-		prot = writers++ == 0 ?
-		    VM_PROT_READ | VM_PROT_WRITE | PMAP_WIRED : 0;
+		prot = writers++ == 0 ? 1 : 0;
 	else
-		prot = --writers == 0 ?
-		    VM_PROT_READ | PMAP_WIRED : 0;
+		prot = --writers == 0 ? 1 : 0;
 	splx(s);
 
 	if (prot) {

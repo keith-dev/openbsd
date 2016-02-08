@@ -1,4 +1,4 @@
-/*	$OpenBSD: delivery_filename.c,v 1.9 2013/05/24 17:03:14 eric Exp $	*/
+/*	$OpenBSD: delivery_filename.c,v 1.12 2015/01/20 17:37:54 deraadt Exp $	*/
 
 /*
  * Copyright (c) 2011 Gilles Chehade <gilles@poolp.org>
@@ -34,6 +34,7 @@
 #include <string.h>
 #include <time.h>
 #include <unistd.h>
+#include <limits.h>
 
 #include "smtpd.h"
 #include "log.h"
@@ -52,13 +53,13 @@ static void
 delivery_filename_open(struct deliver *deliver)
 {
 	struct stat	 sb;
-	time_t		 now;
 	size_t		 len;
 	int		 fd;
 	FILE		*fp;
 	char		*ln;
 	char		*msg;
 	int		 n;
+	int		 escape_from;
 
 #define error(m)	{ msg = m; goto err; }
 #define error2(m)	{ msg = m; goto err2; }
@@ -74,14 +75,17 @@ delivery_filename_open(struct deliver *deliver)
 	fp = fdopen(fd, "a");
 	if (fp == NULL)
 		error("fdopen");
-	time(&now);
-	fprintf(fp, "From %s@%s %s", SMTPD_USER, env->sc_hostname,
-	    ctime(&now));
+
+	escape_from = 0;
 	while ((ln = fgetln(stdin, &len)) != NULL) {
 		if (ln[len - 1] == '\n')
 			len--;
-		if (len >= 5 && memcmp(ln, "From ", 5) == 0)
-			putc('>', fp);
+		if (len >= 5 && memcmp(ln, "From ", 5) == 0) {
+			if (escape_from == 0)
+				escape_from = 1;
+			else
+				putc('>', fp);
+		}
 		fprintf(fp, "%.*s\n", (int)len, ln);
 		if (ferror(fp))
 			break;

@@ -1,4 +1,4 @@
-/*	$OpenBSD: ypcat.c,v 1.14 2009/10/27 23:59:50 deraadt Exp $ */
+/*	$OpenBSD: ypcat.c,v 1.16 2015/02/08 23:40:35 deraadt Exp $ */
 
 /*
  * Copyright (c) 1992, 1993, 1996 Theo de Raadt <deraadt@theos.com>
@@ -26,7 +26,6 @@
  * SUCH DAMAGE.
  */
 
-#include <sys/param.h>
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <unistd.h>
@@ -101,10 +100,10 @@ main(int argc, char *argv[])
 			domain = optarg;
 			break;
 		case 't':
-			notrans++;
+			notrans = 1;
 			break;
 		case 'k':
-			key++;
+			key = 1;
 			break;
 		default:
 			usage();

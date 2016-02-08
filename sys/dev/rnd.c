@@ -1,4 +1,4 @@
-/*	$OpenBSD: rnd.c,v 1.159 2014/07/17 13:38:22 tedu Exp $	*/
+/*	$OpenBSD: rnd.c,v 1.172 2015/02/17 22:34:59 tedu Exp $	*/
 
 /*
  * Copyright (c) 2011 Theo de Raadt.
@@ -64,29 +64,30 @@
  * a small random token to the "rnd states" queue.
  *
  * When random bytes are desired, they are obtained by pulling from
- * the entropy pool and running a MD5 hash. The MD5 hash avoids
+ * the entropy pool and running a SHA512 hash. The SHA512 hash avoids
  * exposing the internal state of the entropy pool.  Even if it is
- * possible to analyze MD5 in some clever way, as long as the amount
+ * possible to analyze SHA512 in some clever way, as long as the amount
  * of data returned from the generator is less than the inherent
  * entropy in the pool, the output data is totally unpredictable.  For
  * this reason, the routine decreases its internal estimate of how many
  * bits of "true randomness" are contained in the entropy pool as it
  * outputs random numbers.
  *
- * If this estimate goes to zero, the MD5 hash will continue to generate
- * output since there is no true risk because the MD5 output is not
+ * If this estimate goes to zero, the SHA512 hash will continue to generate
+ * output since there is no true risk because the SHA512 output is not
  * exported outside this subsystem.  It is next used as input to seed a
- * RC4 stream cipher.  Attempts are made to follow best practice
- * regarding this stream cipher - the first chunk of output is discarded
- * and the cipher is re-seeded from time to time.  This design provides
- * very high amounts of output data from a potentially small entropy
- * base, at high enough speeds to encourage use of random numbers in
- * nearly any situation.
+ * ChaCha20 stream cipher, which is re-seeded from time to time.  This
+ * design provides very high amounts of output data from a potentially
+ * small entropy base, at high enough speeds to encourage use of random
+ * numbers in nearly any situation.  Before OpenBSD 5.5, the RC4 stream
+ * cipher (also known as ARC4) was used instead of ChaCha20.
  *
- * The output of this single RC4 engine is then shared amongst many
+ * The output of this single ChaCha20 engine is then shared amongst many
  * consumers in the kernel and userland via a few interfaces:
  * arc4random_buf(), arc4random(), arc4random_uniform(), randomread()
- * for the set of /dev/random nodes, and the sysctl kern.arandom.
+ * for the set of /dev/random nodes, the sysctl kern.arandom, and the
+ * system call getentropy(), which provides seeds for process-context
+ * pseudorandom generators.
  *
  * Acknowledgements:
  * =================
@@ -105,7 +106,7 @@
  * RFC 1750, "Randomness Recommendations for Security", by Donald
  * Eastlake, Steve Crocker, and Jeff Schiller.
  *
- * Using a RC4 stream cipher as 2nd stage after the MD5 output
+ * Using a RC4 stream cipher as 2nd stage after the MD5 (now SHA512) output
  * is the result of work by David Mazieres.
  */
 
@@ -126,7 +127,7 @@
 #include <sys/mount.h>
 #include <sys/syscallargs.h>
 
-#include <crypto/md5.h>
+#include <crypto/sha2.h>
 
 #define KEYSTREAM_ONLY
 #include <crypto/chacha_private.h>
@@ -214,14 +215,20 @@ struct timer_rand_state {	/* There is one of these per entropy source */
 #define QEVSLOW (QEVLEN * 3 / 4) /* yet another 0.75 for 60-minutes hour /-; */
 #define QEVSBITS 10
 
+#define KEYSZ	32
+#define IVSZ	8
+#define BLOCKSZ	64
+#define RSBUFSZ	(16*BLOCKSZ)
+#define EBUFSIZE KEYSZ + IVSZ
+
 struct rand_event {
 	struct timer_rand_state *re_state;
 	u_int re_nbits;
 	u_int re_time;
 	u_int re_val;
 } rnd_event_space[QEVLEN];
-struct rand_event *rnd_event_head = rnd_event_space;
-struct rand_event *rnd_event_tail = rnd_event_space;
+/* index of next free slot */
+int rnd_event_idx;
 
 struct timeout rnd_timeout;
 struct rndstats rndstats;
@@ -232,11 +239,14 @@ u_char	entropy_input_rotate;
 
 void	dequeue_randomness(void *);
 void	add_entropy_words(const u_int32_t *, u_int);
-void	extract_entropy(u_int8_t *, int);
+void	extract_entropy(u_int8_t *)
+    __attribute__((__bounded__(__minbytes__,1,EBUFSIZE)));
 
 int	filt_randomread(struct knote *, long);
 void	filt_randomdetach(struct knote *);
 int	filt_randomwrite(struct knote *, long);
+
+static void _rs_seed(u_char *, size_t);
 
 struct filterops randomread_filtops =
 	{ 1, NULL, filt_randomdetach, filt_randomread };
@@ -246,38 +256,25 @@ struct filterops randomwrite_filtops =
 static __inline struct rand_event *
 rnd_get(void)
 {
-	struct rand_event *p = rnd_event_tail;
-
-	if (p == rnd_event_head)
+	if (rnd_event_idx == 0)
 		return NULL;
 
-	if (p + 1 >= &rnd_event_space[QEVLEN])
-		rnd_event_tail = rnd_event_space;
-	else
-		rnd_event_tail++;
-
-	return p;
+	return &rnd_event_space[--rnd_event_idx];
 }
 
 static __inline struct rand_event *
 rnd_put(void)
 {
-	struct rand_event *p = rnd_event_head + 1;
-
-	if (p >= &rnd_event_space[QEVLEN])
-		p = rnd_event_space;
-
-	if (p == rnd_event_tail)
+	if (rnd_event_idx == QEVLEN)
 		return NULL;
 
-	return rnd_event_head = p;
+	return &rnd_event_space[rnd_event_idx++];
 }
 
 static __inline int
 rnd_qlen(void)
 {
-	int len = rnd_event_head - rnd_event_tail;
-	return (len < 0)? -len : len;
+	return rnd_event_idx;
 }
 
 /*
@@ -482,70 +479,89 @@ dequeue_randomness(void *v)
 }
 
 /*
- * Grabs a chunk from the entropy_pool[] and slams it through MD5 when
+ * Grabs a chunk from the entropy_pool[] and slams it through SHA512 when
  * requested.
  */
 void
-extract_entropy(u_int8_t *buf, int nbytes)
+extract_entropy(u_int8_t *buf)
 {
 	static u_int32_t extract_pool[POOLWORDS];
-	u_char buffer[MD5_DIGEST_LENGTH];
-	MD5_CTX tmp;
-	u_int i;
+	u_char digest[SHA512_DIGEST_LENGTH];
+	SHA2_CTX shactx;
 
-	add_timer_randomness(nbytes);
+#if SHA512_DIGEST_LENGTH < EBUFSIZE
+#error "need more bigger hash output"
+#endif
 
-	while (nbytes) {
-		i = MIN(nbytes, sizeof(buffer));
+	/*
+	 * INTENTIONALLY not protected by entropylock.  Races during
+	 * memcpy() result in acceptable input data; races during
+	 * SHA512Update() would create nasty data dependencies.  We
+	 * do not rely on this as a benefit, but if it happens, cool.
+	 */
+	memcpy(extract_pool, entropy_pool, sizeof(extract_pool));
 
-		/*
-		 * INTENTIONALLY not protected by entropylock.  Races
-		 * during bcopy() result in acceptable input data; races
-		 * during MD5Update() would create nasty data dependencies.
-		 */
-		bcopy(entropy_pool, extract_pool,
-		    sizeof(extract_pool));
+	/* Hash the pool to get the output */
+	SHA512Init(&shactx);
+	SHA512Update(&shactx, (u_int8_t *)extract_pool, sizeof(extract_pool));
+	SHA512Final(digest, &shactx);
 
-		/* Hash the pool to get the output */
-		MD5Init(&tmp);
-		MD5Update(&tmp, (u_int8_t *)extract_pool, sizeof(extract_pool));
-		MD5Final(buffer, &tmp);
+	/* Copy data to destination buffer */
+	memcpy(buf, digest, EBUFSIZE);
 
-		/* Copy data to destination buffer */
-		bcopy(buffer, buf, i);
-		nbytes -= i;
-		buf += i;
-
-		/* Modify pool so next hash will produce different results */
-		add_timer_randomness(nbytes);
-		dequeue_randomness(NULL);
-	}
+	/* Modify pool so next hash will produce different results */
+	add_timer_randomness(EBUFSIZE);
+	dequeue_randomness(NULL);
 
 	/* Wipe data from memory */
 	explicit_bzero(extract_pool, sizeof(extract_pool));
-	explicit_bzero(&tmp, sizeof(tmp));
-	explicit_bzero(buffer, sizeof(buffer));
+	explicit_bzero(digest, sizeof(digest));
 }
 
 /* random keystream by ChaCha */
 
+void arc4_reinit(void *v);		/* timeout to start reinit */
+void arc4_init(void *);			/* actually do the reinit */
+
 struct mutex rndlock = MUTEX_INITIALIZER(IPL_HIGH);
 struct timeout arc4_timeout;
-struct task arc4_task;
+struct task arc4_task = TASK_INITIALIZER(arc4_init, NULL);
 
-void arc4_reinit(void *v);		/* timeout to start reinit */
-void arc4_init(void *, void *);		/* actually do the reinit */
-
-#define KEYSZ	32
-#define IVSZ	8
-#define BLOCKSZ	64
-#define RSBUFSZ	(16*BLOCKSZ)
 static int rs_initialized;
 static chacha_ctx rs;		/* chacha context for random keystream */
 /* keystream blocks (also chacha seed from boot) */
 static u_char rs_buf[RSBUFSZ] __attribute__((section(".openbsd.randomdata")));
 static size_t rs_have;		/* valid bytes at end of rs_buf */
 static size_t rs_count;		/* bytes till reseed */
+
+void
+suspend_randomness(void)
+{
+	struct timespec ts;
+
+	getnanotime(&ts);
+	add_true_randomness(ts.tv_sec);
+	add_true_randomness(ts.tv_nsec);
+
+	dequeue_randomness(NULL);
+	rs_count = 0;
+	arc4random_buf(entropy_pool, sizeof(entropy_pool));
+}
+
+void
+resume_randomness(char *buf, size_t buflen)
+{
+	struct timespec ts;
+
+	if (buf && buflen)
+		_rs_seed(buf, sizeof(buf));
+	getnanotime(&ts);
+	add_true_randomness(ts.tv_sec);
+	add_true_randomness(ts.tv_nsec);
+
+	dequeue_randomness(NULL);
+	rs_count = 0;
+}
 
 static inline void _rs_rekey(u_char *dat, size_t datlen);
 
@@ -573,16 +589,16 @@ static void
 _rs_stir(int do_lock)
 {
 	struct timespec ts;
-	u_int8_t buf[KEYSZ + IVSZ], *p;
+	u_int8_t buf[EBUFSIZE], *p;
 	int i;
 
 	/*
-	 * Use MD5 PRNG data and a system timespec; early in the boot
+	 * Use SHA512 PRNG data and a system timespec; early in the boot
 	 * process this is the best we can do -- some architectures do
 	 * not collect entropy very well during this time, but may have
 	 * clock information which is better than nothing.
 	 */
-	extract_entropy((u_int8_t *)buf, sizeof buf);
+	extract_entropy(buf);
 
 	nanotime(&ts);
 	for (p = (u_int8_t *)&ts, i = 0; i < sizeof(ts); i++)
@@ -666,7 +682,7 @@ _rs_random_u32(u_int32_t *val)
 	return;
 }
 
-/* Return one word of randomness from an RC4 generator */
+/* Return one word of randomness from a ChaCha20 generator */
 u_int32_t
 arc4random(void)
 {
@@ -680,7 +696,7 @@ arc4random(void)
 }
 
 /*
- * Fill a buffer of arbitrary length with RC4-derived randomness.
+ * Fill a buffer of arbitrary length with ChaCha20-derived randomness.
  */
 void
 arc4random_buf(void *buf, size_t n)
@@ -729,7 +745,7 @@ arc4random_uniform(u_int32_t upper_bound)
 
 /* ARGSUSED */
 void
-arc4_init(void *v, void *w)
+arc4_init(void *null)
 {
 	_rs_stir(1);
 }
@@ -778,8 +794,7 @@ random_start(void)
 
 	rs_initialized = 1;
 	dequeue_randomness(NULL);
-	arc4_init(NULL, NULL);
-	task_set(&arc4_task, arc4_init, NULL, NULL);
+	arc4_init(NULL);
 	timeout_set(&arc4_timeout, arc4_reinit, NULL);
 	arc4_reinit(NULL);
 	timeout_set(&rnd_timeout, dequeue_randomness, NULL);
@@ -835,14 +850,14 @@ randomread(dev_t dev, struct uio *uio, int ioflag)
 			chacha_encrypt_bytes(&lctx, buf, buf, n);
 		} else
 			arc4random_buf(buf, n);
-		ret = uiomove(buf, n, uio);
+		ret = uiomovei(buf, n, uio);
 		if (ret == 0 && uio->uio_resid > 0)
 			yield();
 	}
 	if (myctx)
 		explicit_bzero(&lctx, sizeof(lctx));
 	explicit_bzero(buf, POOLBYTES);
-	free(buf, M_TEMP, 0);
+	free(buf, M_TEMP, POOLBYTES);
 	return ret;
 }
 
@@ -860,7 +875,7 @@ randomwrite(dev_t dev, struct uio *uio, int flags)
 	while (ret == 0 && uio->uio_resid > 0) {
 		int	n = min(POOLBYTES, uio->uio_resid);
 
-		ret = uiomove(buf, n, uio);
+		ret = uiomovei(buf, n, uio);
 		if (ret != 0)
 			break;
 		while (n % sizeof(u_int32_t))
@@ -872,10 +887,10 @@ randomwrite(dev_t dev, struct uio *uio, int flags)
 	}
 
 	if (newdata)
-		arc4_init(NULL, NULL);
+		arc4_init(NULL);
 
 	explicit_bzero(buf, POOLBYTES);
-	free(buf, M_TEMP, 0);
+	free(buf, M_TEMP, POOLBYTES);
 	return ret;
 }
 

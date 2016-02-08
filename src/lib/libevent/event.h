@@ -1,4 +1,4 @@
-/*	$OpenBSD: event.h,v 1.26 2014/04/03 11:27:02 eric Exp $	*/
+/*	$OpenBSD: event.h,v 1.30 2015/01/05 23:14:36 bluhm Exp $	*/
 
 /*
  * Copyright (c) 2000-2007 Niels Provos <provos@citi.umich.edu>
@@ -128,7 +128,7 @@
   callbacks have been registered for a given URI.
 
   @section evrpc A framework for RPC servers and clients
- 
+
   libevents provides a framework for creating RPC servers and clients.  It
   takes care of marshaling and unmarshaling all data structures.
 
@@ -168,8 +168,11 @@ extern "C" {
 #include <stdarg.h>
 #include <stdint.h>
 
-/* For int types. */
-#include <evutil.h>
+#define ev_uint64_t uint64_t
+#define ev_int64_t int64_t
+#define ev_uint32_t uint32_t
+#define ev_uint16_t uint16_t
+#define ev_uint8_t uint8_t
 
 #define EVLIST_TIMEOUT	0x01
 #define EVLIST_INSERTED	0x02
@@ -290,13 +293,13 @@ int event_base_dispatch(struct event_base *);
 
 /**
  Get the kernel event notification mechanism used by libevent.
- 
+
  @param eb the event_base structure returned by event_base_new()
  @return a string identifying the kernel event mechanism (kqueue, epoll, etc.)
  */
 const char *event_base_get_method(struct event_base *);
-        
-        
+
+
 /**
   Deallocate all memory associated with an event_base, and free the base.
 
@@ -631,13 +634,9 @@ int event_pending(struct event *ev, short event, struct timeval *tv);
 
   @param ev an event structure to be tested
   @return 1 if the structure has been initialized, or 0 if it has not been
-          initialized
+         initialized
  */
-#ifdef WIN32
-#define event_initialized(ev)		((ev)->ev_flags & EVLIST_INIT && (ev)->ev_fd != (int)INVALID_HANDLE_VALUE)
-#else
 #define event_initialized(ev)		((ev)->ev_flags & EVLIST_INIT)
-#endif
 
 
 /**
@@ -800,7 +799,7 @@ struct bufferevent {
   enabling the bufferevent for the first time.
 
   @param fd the file descriptor from which data is read and written to.
-  		This file descriptor is not allowed to be a pipe(2).
+         This file descriptor is not allowed to be a pipe(2).
   @param readcb callback to invoke when there is data to be read, or NULL if
          no callback is desired
   @param writecb callback to invoke when the file descriptor is ready for
@@ -810,7 +809,7 @@ struct bufferevent {
   @param cbarg an argument that will be supplied to each of the callbacks
          (readcb, writecb, and errorcb)
   @return a pointer to a newly allocated bufferevent struct, or NULL if an
-          error occurred
+         error occurred
   @see bufferevent_base_set(), bufferevent_free()
   */
 struct bufferevent *bufferevent_new(int fd,
@@ -974,7 +973,7 @@ void bufferevent_setwatermark(struct bufferevent *bufev, short events,
   Allocate storage for a new evbuffer.
 
   @return a pointer to a newly allocated evbuffer struct, or NULL if an error
-          occurred
+         occurred
  */
 struct evbuffer *evbuffer_new(void);
 
@@ -1208,7 +1207,7 @@ int evtag_unmarshal_string(struct evbuffer *evbuf, ev_uint32_t need_tag,
 int evtag_unmarshal_timeval(struct evbuffer *evbuf, ev_uint32_t need_tag,
     struct timeval *ptv);
 
-#define _EVENT_VERSION "1.4.14b-stable"
+#define _EVENT_VERSION "1.4.15-stable"
 
 #ifdef __cplusplus
 }

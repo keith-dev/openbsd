@@ -1,4 +1,4 @@
-/*	$OpenBSD: mkalias.c,v 1.26 2013/12/05 14:18:54 jca Exp $ */
+/*	$OpenBSD: mkalias.c,v 1.28 2015/02/09 23:00:15 deraadt Exp $ */
 
 /*
  * Copyright (c) 1997 Mats O Jansson <moj@stacken.kth.se>
@@ -33,7 +33,6 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
-#include <sys/param.h>
 #include <sys/types.h>
 #include <netinet/in.h>
 #include <arpa/nameser.h>
@@ -138,7 +137,7 @@ usage(void)
 int
 main(int argc, char *argv[])
 {
-	int	eflag = 0, dflag = 0, nflag = 0, sflag = 0;
+	int	eflag = 0, dflag = 0, nflag = 0;
 	int	uflag = 0, vflag = 0, Eflag = 0;
 	int	status, ch, fd;
 	char	*input = NULL, *output = NULL;
@@ -146,34 +145,33 @@ main(int argc, char *argv[])
 	datum	key, val;
 	DBM	*new_db = NULL;
 	static	char mapname[] = "ypdbXXXXXXXXXX";
-	char	db_mapname[MAXPATHLEN], db_outfile[MAXPATHLEN];
-	char	db_tempname[MAXPATHLEN];
+	char	db_mapname[PATH_MAX], db_outfile[PATH_MAX];
+	char	db_tempname[PATH_MAX];
 	char	user[4096], host[4096]; /* XXX: DB bsize = 4096 in ypdb.c */
-	char	myname[MAXHOSTNAMELEN], datestr[11], *slash;
+	char	myname[HOST_NAME_MAX+1], datestr[11], *slash;
 
 	while ((ch = getopt(argc, argv, "Edensuv")) != -1)
 		switch (ch) {
 		case 'E':
-			eflag++;	/* Check hostname */
-			Eflag++;	/* .. even check MX records */
+			eflag = 1;	/* Check hostname */
+			Eflag = 1;	/* .. even check MX records */
 			break;
 		case 'd':
-			dflag++;	/* Don't check DNS hostname */
+			dflag = 1;	/* Don't check DNS hostname */
 			break;
 		case 'e':
-			eflag++;	/* Check hostname */
+			eflag = 1;	/* Check hostname */
 			break;
 		case 'n':
-			nflag++;	/* Capitalize name parts */
+			nflag = 1;	/* Capitalize name parts */
 			break;
-		case 's':
-			sflag++;	/* Don't know... */
+		case 's':		/* Ignore */ 
 			break;
 		case 'u':
-			uflag++;	/* Don't check UUCP hostname */
+			uflag = 1;	/* Don't check UUCP hostname */
 			break;
 		case 'v':
-			vflag++;	/* Verbose */
+			vflag = 1;	/* Verbose */
 			break;
 		default:
 			usage();
@@ -196,7 +194,7 @@ main(int argc, char *argv[])
 	}
 
 	if (output != NULL) {
-		if (strlen(output) + strlen(YPDB_SUFFIX) > MAXPATHLEN) {
+		if (strlen(output) + strlen(YPDB_SUFFIX) > PATH_MAX) {
 			errx(1, "%s: file name too long", output);
 			/* NOTREACHED */
 		}
@@ -213,7 +211,7 @@ main(int argc, char *argv[])
 		/* note: output is now directory where map goes ! */
 
 		if (strlen(output) + strlen(mapname) +
-		    strlen(YPDB_SUFFIX) > MAXPATHLEN) {
+		    strlen(YPDB_SUFFIX) > PATH_MAX) {
 			errx(1, "%s: directory name too long", output);
 			/* NOTREACHED */
 		}

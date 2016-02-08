@@ -1,4 +1,4 @@
-/*	$OpenBSD: httpd.c,v 1.17 2014/08/05 15:36:59 reyk Exp $	*/
+/*	$OpenBSD: httpd.c,v 1.35 2015/02/23 18:43:18 reyk Exp $	*/
 
 /*
  * Copyright (c) 2014 Reyk Floeter <reyk@openbsd.org>
@@ -16,22 +16,22 @@
  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
 
+#include <sys/param.h>	/* nitems */
 #include <sys/types.h>
 #include <sys/queue.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
 #include <sys/wait.h>
 #include <sys/resource.h>
-#include <sys/hash.h>
 
-#include <net/if.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
 
-#include <string.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <fcntl.h>
+#include <stdarg.h>
+#include <string.h>
+#include <signal.h>
 #include <getopt.h>
 #include <fnmatch.h>
 #include <err.h>
@@ -40,10 +40,10 @@
 #include <unistd.h>
 #include <ctype.h>
 #include <pwd.h>
-#include <sha1.h>
-#include <md5.h>
 
 #include "httpd.h"
+
+#define MAXIMUM(a, b)	(((a) > (b)) ? (a) : (b))
 
 __dead void	 usage(void);
 
@@ -231,6 +231,12 @@ main(int argc, char *argv[])
 	for (proc = 0; proc < nitems(procs); proc++)
 		procs[proc].p_chroot = env->sc_chroot;
 
+	if (env->sc_logdir == NULL) {
+		if (asprintf(&env->sc_logdir, "%s%s", env->sc_chroot,
+			HTTPD_LOGROOT) == -1)
+			errx(1, "malloc failed");
+	}
+
 	proc_init(ps, procs, nitems(procs));
 
 	setproctitle("parent");
@@ -283,15 +289,31 @@ parent_configure(struct httpd *env)
 	int			 ret = -1;
 	struct server		*srv;
 	struct media_type	*media;
+	struct auth		*auth;
 
 	RB_FOREACH(media, mediatypes, env->sc_mediatypes) {
 		if (config_setmedia(env, media) == -1)
 			fatal("send media");
 	}
 
+	TAILQ_FOREACH(auth, env->sc_auth, auth_entry) {
+		if (config_setauth(env, auth) == -1)
+			fatal("send auth");
+	}
+
+	/* First send the servers... */
 	TAILQ_FOREACH(srv, env->sc_servers, srv_entry) {
+		if (srv->srv_conf.flags & SRVFLAG_LOCATION)
+			continue;
 		if (config_setserver(env, srv) == -1)
 			fatal("send server");
+	}
+	/* ...and now send the locations */
+	TAILQ_FOREACH(srv, env->sc_servers, srv_entry) {
+		if ((srv->srv_conf.flags & SRVFLAG_LOCATION) == 0)
+			continue;
+		if (config_setserver(env, srv) == -1)
+			fatal("send location");
 	}
 
 	/* The servers need to reload their config. */
@@ -472,12 +494,45 @@ event_again(struct event *ev, int fd, short event,
 	event_add(ev, &tv);
 }
 
+int
+expand_string(char *label, size_t len, const char *srch, const char *repl)
+{
+	char *tmp;
+	char *p, *q;
+
+	if ((tmp = calloc(1, len)) == NULL) {
+		log_debug("%s: calloc", __func__);
+		return (-1);
+	}
+	p = q = label;
+	while ((q = strstr(p, srch)) != NULL) {
+		*q = '\0';
+		if ((strlcat(tmp, p, len) >= len) ||
+		    (strlcat(tmp, repl, len) >= len)) {
+			log_debug("%s: string too long", __func__);
+			free(tmp);
+			return (-1);
+		}
+		q += strlen(srch);
+		p = q;
+	}
+	if (strlcat(tmp, p, len) >= len) {
+		log_debug("%s: string too long", __func__);
+		free(tmp);
+		return (-1);
+	}
+	(void)strlcpy(label, tmp, len);	/* always fits */
+	free(tmp);
+
+	return (0);
+}
+
 const char *
 canonicalize_host(const char *host, char *name, size_t len)
 {
 	struct sockaddr_in	 sin4;
 	struct sockaddr_in6	 sin6;
-	u_int			 i, j;
+	size_t			 i, j;
 	size_t			 plen;
 	char			 c;
 
@@ -523,6 +578,46 @@ canonicalize_host(const char *host, char *name, size_t len)
  fail:
 	errno = EINVAL;
 	return (NULL);
+}
+
+const char *
+url_decode(char *url)
+{
+	char	*p, *q;
+	char	 hex[3];
+	u_long	 x;
+
+	hex[2] = '\0';
+	p = q = url;
+
+	while (*p != '\0') {
+		switch (*p) {
+		case '%':
+			/* Encoding character is followed by two hex chars */
+			if (!(isxdigit(p[1]) && isxdigit(p[2])))
+				return (NULL);
+
+			hex[0] = p[1];
+			hex[1] = p[2];
+
+			/*
+			 * We don't have to validate "hex" because it is
+			 * guaranteed to include two hex chars followed by nul.
+			 */
+			x = strtoul(hex, NULL, 16);
+			*q = (char)x;
+			p += 2;
+			break;
+		default:
+			*q = *p;
+			break;
+		}
+		p++;
+		q++;
+	}
+	*q = '\0';
+
+	return (url);
 }
 
 const char *
@@ -580,28 +675,89 @@ canonicalize_path(const char *input, char *path, size_t len)
 	return (path);
 }
 
-ssize_t
-path_info(char *name)
+size_t
+path_info(char *path)
 {
-	char		*p, *start, *end;
-	char		 path[MAXPATHLEN];
+	char		*p, *start, *end, ch;
 	struct stat	 st;
-
-	if (strlcpy(path, name, sizeof(path)) >= sizeof(path))
-		return (-1);
+	int		 ret;
 
 	start = path;
 	end = start + strlen(path);
 
 	for (p = end; p > start; p--) {
-		if (*p != '/')
+		/* Scan every path component from the end and at each '/' */
+		if (p < end && *p != '/')
 			continue;
-		if (stat(path, &st) == 0)
-			break;
+
+		/* Temporarily cut the path component out */
+		ch = *p;
 		*p = '\0';
+		ret = stat(path, &st);
+		*p = ch;
+
+		/* Break if the initial path component was found */
+		if (ret == 0)
+			break;
 	}
 
-	return (strlen(path));
+	return (p - start);
+}
+
+char *
+url_encode(const char *src)
+{
+	static char	 hex[] = "0123456789ABCDEF";
+	char		*dp, *dst;
+	unsigned char	 c;
+
+	/* We need 3 times the memory if every letter is encoded. */
+	if ((dst = calloc(3, strlen(src) + 1)) == NULL)
+		return (NULL);
+
+	for (dp = dst; *src != 0; src++) {
+		c = (unsigned char) *src;
+		if (c == ' ' || c == '#' || c == '%' || c == '?' || c == '"' ||
+		    c == '&' || c == '<' || c <= 0x1f || c >= 0x7f) {
+			*dp++ = '%';
+			*dp++ = hex[c >> 4];
+			*dp++ = hex[c & 0x0f];
+		} else
+			*dp++ = *src;
+	}
+	return (dst);
+}
+
+char*
+escape_html(const char* src)
+{
+	char		*dp, *dst;
+
+	/* We need 5 times the memory if every letter is "<" or ">". */
+	if ((dst = calloc(5, strlen(src) + 1)) == NULL)
+		return NULL;
+
+	for (dp = dst; *src != 0; src++) {
+		if (*src == '<') {
+			*dp++ = '&';
+			*dp++ = 'l';
+			*dp++ = 't';
+			*dp++ = ';';
+		} else if (*src == '>') {
+			*dp++ = '&';
+			*dp++ = 'g';
+			*dp++ = 't';
+			*dp++ = ';';
+		} else if (*src == '&') {
+			*dp++ = '&';
+			*dp++ = 'a';
+			*dp++ = 'm';
+			*dp++ = 'p';
+			*dp++ = ';';
+		} else
+			*dp++ = *src;
+	}
+	return (dst);
 }
 
 void
@@ -620,9 +776,43 @@ socket_rlimit(int maxfd)
 	if (maxfd == -1)
 		rl.rlim_cur = rl.rlim_max;
 	else
-		rl.rlim_cur = MAX(rl.rlim_max, (rlim_t)maxfd);
+		rl.rlim_cur = MAXIMUM(rl.rlim_max, (rlim_t)maxfd);
 	if (setrlimit(RLIMIT_NOFILE, &rl) == -1)
 		fatal("socket_rlimit: failed to set resource limit");
+}
+
+char *
+evbuffer_getline(struct evbuffer *evb)
+{
+	u_int8_t	*ptr = EVBUFFER_DATA(evb);
+	size_t		 len = EVBUFFER_LENGTH(evb);
+	char		*str;
+	size_t		 i;
+
+	/* Safe version of evbuffer_readline() */
+	if ((str = get_string(ptr, len)) == NULL)
+		return (NULL);
+
+	for (i = 0; str[i] != '\0'; i++) {
+		if (str[i] == '\r' || str[i] == '\n')
+			break;
+	}
+
+	if (i == len) {
+		free(str);
+		return (NULL);
+	}
+
+	str[i] = '\0';
+
+	if ((i + 1) < len) {
+		if (ptr[i] == '\r' && ptr[i + 1] == '\n')
+			i++;
+	}
+
+	evbuffer_drain(evb, ++i);
+
+	return (str);
 }
 
 char *
@@ -1024,11 +1214,13 @@ media_find(struct mediatypes *types, char *file)
 	struct media_type	*match, media;
 	char			*p;
 
-	if ((p = strrchr(file, '.')) == NULL) {
-		p = file;
-	} else if (*p++ == '\0') {
+	/* Last component of the file name */
+	p = strchr(file, '\0');
+	while (p > file && p[-1] != '.' && p[-1] != '/')
+		p--;
+	if (*p == '\0')
 		return (NULL);
-	}
+
 	if (strlcpy(media.media_name, p,
 	    sizeof(media.media_name)) >=
 	    sizeof(media.media_name)) {
@@ -1048,3 +1240,42 @@ media_cmp(struct media_type *a, struct media_type *b)
 }
 
 RB_GENERATE(mediatypes, media_type, media_entry, media_cmp);
+
+struct auth *
+auth_add(struct serverauth *serverauth, struct auth *auth)
+{
+	struct auth		*entry;
+
+	TAILQ_FOREACH(entry, serverauth, auth_entry) {
+		if (strcmp(entry->auth_htpasswd, auth->auth_htpasswd) == 0)
+			return (entry);
+	}
+
+	if ((entry = calloc(1, sizeof(*entry))) == NULL)
+		return (NULL);
+
+	memcpy(entry, auth, sizeof(*entry));
+
+	TAILQ_INSERT_TAIL(serverauth, entry, auth_entry);
+
+	return (entry);
+}
+
+struct auth *
+auth_byid(struct serverauth *serverauth, u_int32_t id)
+{
+	struct auth	*auth;
+
+	TAILQ_FOREACH(auth, serverauth, auth_entry) {
+		if (auth->auth_id == id)
+			return (auth);
+	}
+
+	return (NULL);
+}
+
+void
+auth_free(struct serverauth *serverauth, struct auth *auth)
+{
+	TAILQ_REMOVE(serverauth, auth, auth_entry);
+}

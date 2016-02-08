@@ -1,4 +1,4 @@
-/*	$OpenBSD: pmap.c,v 1.75 2014/05/10 22:25:16 jasper Exp $	*/
+/*	$OpenBSD: pmap.c,v 1.78 2014/12/17 15:05:54 deraadt Exp $	*/
 
 /*
  * Copyright (c) 2001-2004 Opsycon AB  (www.opsycon.se / www.opsycon.com)
@@ -35,6 +35,7 @@
 #ifdef SYSVSHM
 #include <sys/shm.h>
 #endif
+#include <sys/atomic.h>
 
 #include <mips64/cache.h>
 #include <machine/autoconf.h>
@@ -376,7 +377,6 @@ pmap_bootstrap(void)
 	pool_init(&pmap_pg_pool, PMAP_L2SIZE, PMAP_L2SIZE, 0, 0, "pmappgpl",
 	    &pmap_pg_allocator);
 
-	simple_lock_init(&pmap_kernel()->pm_lock);
 	pmap_kernel()->pm_count = 1;
 
 #ifndef CPU_R8000
@@ -510,7 +510,6 @@ extern struct user *proc0paddr;
 	pmap = pool_get(&pmap_pmap_pool, PR_WAITOK | PR_ZERO);
 	splx(s);
 
-	simple_lock_init(&pmap->pm_lock);
 	pmap->pm_count = 1;
 
 	pmap->pm_segtab = (struct segtab *)pool_get(&pmap_pg_pool,
@@ -549,9 +548,7 @@ pmap_destroy(pmap_t pmap)
 
 	DPRINTF(PDB_FOLLOW|PDB_CREATE, ("pmap_destroy(%p)\n", pmap));
 
-	simple_lock(&pmap->pm_lock);
 	count = --pmap->pm_count;
-	simple_unlock(&pmap->pm_lock);
 	if (count > 0)
 		return;
 
@@ -598,11 +595,8 @@ pmap_reference(pmap_t pmap)
 
 	DPRINTF(PDB_FOLLOW, ("pmap_reference(%p)\n", pmap));
 
-	if (pmap) {
-		simple_lock(&pmap->pm_lock);
+	if (pmap)
 		pmap->pm_count++;
-		simple_unlock(&pmap->pm_lock);
-	}
 }
 
 /*
@@ -738,7 +732,7 @@ pmap_page_protect(struct vm_page *pg, vm_prot_t prot)
 	vaddr_t va;
 	int s;
 
-	if (prot == VM_PROT_NONE) {
+	if (prot == PROT_NONE) {
 		DPRINTF(PDB_REMOVE, ("pmap_page_protect(%p, 0x%x)\n", pg, prot));
 	} else {
 		DPRINTF(PDB_FOLLOW|PDB_PROTECT,
@@ -746,13 +740,13 @@ pmap_page_protect(struct vm_page *pg, vm_prot_t prot)
 	}
 
 	switch (prot) {
-	case VM_PROT_READ|VM_PROT_WRITE:
-	case VM_PROT_ALL:
+	case PROT_READ | PROT_WRITE:
+	case PROT_MASK:
 		break;
 
 	/* copy_on_write */
-	case VM_PROT_READ:
-	case VM_PROT_READ|VM_PROT_EXECUTE:
+	case PROT_READ:
+	case PROT_READ | PROT_EXEC:
 		pv = pg_to_pvh(pg);
 		s = splvm();
 		/*
@@ -795,12 +789,12 @@ pmap_protect(pmap_t pmap, vaddr_t sva, vaddr_t eva, vm_prot_t prot)
 		("pmap_protect(%p, %p, %p, 0x%x)\n",
 		    pmap, (void *)sva, (void *)eva, prot));
 
-	if ((prot & VM_PROT_READ) == VM_PROT_NONE) {
+	if ((prot & PROT_READ) == PROT_NONE) {
 		pmap_remove(pmap, sva, eva);
 		return;
 	}
 
-	p = (prot & VM_PROT_WRITE) ? PG_M : PG_RO;
+	p = (prot & PROT_WRITE) ? PG_M : PG_RO;
 
 	if (pmap == pmap_kernel()) {
 		/*
@@ -908,7 +902,7 @@ pmap_enter(pmap_t pmap, vaddr_t va, paddr_t pa, vm_prot_t prot, int flags)
 	pg = PHYS_TO_VM_PAGE(pa);
 
 	if (pg != NULL) {
-		if (!(prot & VM_PROT_WRITE)) {
+		if (!(prot & PROT_WRITE)) {
 			npte = PG_ROPAGE;
 		} else {
 			if (pmap == pmap_kernel()) {
@@ -931,10 +925,10 @@ pmap_enter(pmap_t pmap, vaddr_t va, paddr_t pa, vm_prot_t prot, int flags)
 		}
 
 		/* Set page referenced/modified status based on flags */
-		if (flags & VM_PROT_WRITE)
+		if (flags & PROT_WRITE)
 			atomic_setbits_int(&pg->pg_flags,
 			    PGF_ATTR_MOD | PGF_ATTR_REF);
-		else if (flags & VM_PROT_ALL)
+		else if (flags & PROT_MASK)
 			atomic_setbits_int(&pg->pg_flags, PGF_ATTR_REF);
 
 		stat_count(enter_stats.managed);
@@ -944,7 +938,7 @@ pmap_enter(pmap_t pmap, vaddr_t va, paddr_t pa, vm_prot_t prot, int flags)
 		 * then it must be device memory which may be volatile.
 		 */
 		stat_count(enter_stats.unmanaged);
-		if (prot & VM_PROT_WRITE) {
+		if (prot & PROT_WRITE) {
 			npte = PG_IOPAGE & ~PG_G;
 		} else {
 			npte = (PG_IOPAGE | PG_RO) & ~(PG_G | PG_M);
@@ -1051,7 +1045,7 @@ pmap_enter(pmap_t pmap, vaddr_t va, paddr_t pa, vm_prot_t prot, int flags)
 	 * flag it in the pte.
 	 */
 	if (r4000_errata != 0) {
-		if (pg != NULL && (prot & VM_PROT_EXECUTE)) {
+		if (pg != NULL && (prot & PROT_EXEC)) {
 			if ((pg->pg_flags & PGF_EOP_CHECKED) == 0)
 				atomic_setbits_int(&pg->pg_flags,
 				     PGF_EOP_CHECKED |
@@ -1069,7 +1063,7 @@ pmap_enter(pmap_t pmap, vaddr_t va, paddr_t pa, vm_prot_t prot, int flags)
 	/*
 	 * If mapping an executable page, invalidate ICache.
 	 */
-	if (pg != NULL && (prot & VM_PROT_EXECUTE))
+	if (pg != NULL && (prot & PROT_EXEC))
 		Mips_InvalidateICache(ci, va, PAGE_SIZE);
 
 	return 0;
@@ -1090,7 +1084,7 @@ pmap_kenter_pa(vaddr_t va, paddr_t pa, vm_prot_t prot)
 #endif
 
 	npte = vad_to_pfn(pa) | PG_G | PG_WIRED;
-	if (prot & VM_PROT_WRITE)
+	if (prot & PROT_WRITE)
 		npte |= PG_RWPAGE;
 	else
 		npte |= PG_ROPAGE;

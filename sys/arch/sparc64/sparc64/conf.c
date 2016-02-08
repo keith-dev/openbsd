@@ -1,4 +1,4 @@
-/*	$OpenBSD: conf.c,v 1.70 2013/11/04 14:11:29 deraadt Exp $	*/
+/*	$OpenBSD: conf.c,v 1.74 2014/12/11 19:44:17 tedu Exp $	*/
 /*	$NetBSD: conf.c,v 1.17 2001/03/26 12:33:26 lukem Exp $ */
 
 /*
@@ -105,13 +105,11 @@ cdev_decl(pci);
 #include "uhid.h"
 #include "ugen.h"
 #include "ulpt.h"
-#include "urio.h"
 #include "ucom.h"
 
 #include "pf.h"
 
 #include "ksyms.h"
-#include "inet.h"
 
 #include "systrace.h"
 #include "hotplug.h"
@@ -140,12 +138,12 @@ struct bdevsw	bdevsw[] =
 	bdev_disk_init(NFD,fd),		/* 16: floppy disk */
 	bdev_notdef(),			/* 17 */
 	bdev_disk_init(NCD,cd),		/* 18: SCSI CD-ROM */
-	bdev_lkm_dummy(),		/* 19 */
-	bdev_lkm_dummy(),		/* 20 */
-	bdev_lkm_dummy(),		/* 21 */
-	bdev_lkm_dummy(),		/* 22 */
-	bdev_lkm_dummy(),		/* 23 */
-	bdev_lkm_dummy(),		/* 24 */
+	bdev_notdef(),			/* 19 */
+	bdev_notdef(),			/* 20 */
+	bdev_notdef(),			/* 21 */
+	bdev_notdef(),			/* 22 */
+	bdev_notdef(),			/* 23 */
+	bdev_notdef(),			/* 24 */
 	bdev_notdef(),			/* 25 was: RAIDframe disk driver */
 };
 int	nblkdev = nitems(bdevsw);
@@ -231,7 +229,7 @@ struct cdevsw	cdevsw[] =
 	cdev_gen_init(NMBPP,mbpp),	/* 72: magma parallel ports */
 	cdev_pf_init(NPF,pf),		/* 73: packet filter */
 	cdev_notdef(),			/* 74: ALTQ (deprecated) */
-	cdev_crypto_init(NCRYPTO,crypto), /* 75: /dev/crypto */
+	cdev_notdef(),			/* 75: was: /dev/crypto */
 	cdev_ksyms_init(NKSYMS,ksyms),	/* 76 *: Kernel symbols device */
 	cdev_tty_init(NSABTTY,sabtty),	/* 77: sab82532 serial ports */
 	cdev_wsdisplay_init(NWSDISPLAY,	/* 78: frame buffers, etc. */
@@ -251,7 +249,7 @@ struct cdevsw	cdevsw[] =
 	cdev_usbdev_init(NUHID,uhid),	/* 91: USB generic HID */
 	cdev_usbdev_init(NUGEN,ugen),	/* 92: USB generic driver */
 	cdev_ulpt_init(NULPT,ulpt),	/* 93: USB printers */
-	cdev_urio_init(NURIO,urio),	/* 94: USB Diamond Rio 500 */
+	cdev_notdef(),			/* 94 */
 	cdev_tty_init(NUCOM,ucom),	/* 95: USB tty */
 	cdev_notdef(),			/* 96: was USB scanners */
 	cdev_notdef(),			/* 97 */
@@ -269,13 +267,13 @@ struct cdevsw	cdevsw[] =
 	cdev_gen_init(NSBPP,sbpp),	/* 109: spif parallel ports */
 	cdev_disk_init(NVND,vnd),	/* 110: vnode disk driver */
 	cdev_tun_init(NTUN,tun),	/* 111: network tunnel */
-	cdev_lkm_init(NLKM,lkm),	/* 112: loadable module driver */
-	cdev_lkm_dummy(),		/* 113 */
-	cdev_lkm_dummy(),		/* 114 */
-	cdev_lkm_dummy(),		/* 115 */
-	cdev_lkm_dummy(),		/* 116 */
-	cdev_lkm_dummy(),		/* 117 */
-	cdev_lkm_dummy(),		/* 118 */
+	cdev_notdef(),			/* 112 was LKM */
+	cdev_notdef(),			/* 113 */
+	cdev_notdef(),			/* 114 */
+	cdev_notdef(),			/* 115 */
+	cdev_notdef(),			/* 116 */
+	cdev_notdef(),			/* 117 */
+	cdev_notdef(),			/* 118 */
 	cdev_random_init(1,random),	/* 119: random data source */
 	cdev_bio_init(NBIO,bio),	/* 120: ioctl tunnel */
 	cdev_notdef(),			/* 121 was: RAIDframe disk driver */
@@ -335,7 +333,6 @@ getnulldev(void)
 }
 
 int chrtoblktbl[] = {
-	/* XXXX This needs to be dynamic for LKMs. */
 	/*VCHR*/	/*VBLK*/
 	/*  0 */	NODEV,
 	/*  1 */	NODEV,

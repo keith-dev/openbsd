@@ -1,4 +1,4 @@
-/*	$OpenBSD: auth.c,v 1.32 2011/10/02 06:25:53 nicm Exp $	*/
+/*	$OpenBSD: auth.c,v 1.34 2015/01/16 06:40:19 deraadt Exp $	*/
 
 /*
  * auth.c - PPP authentication and phase control.
@@ -77,6 +77,7 @@
 #include <stddef.h>
 #include <stdlib.h>
 #include <unistd.h>
+#include <limits.h>
 #include <syslog.h>
 #include <pwd.h>
 #include <string.h>
@@ -552,7 +553,7 @@ auth_check_options()
 
     /* Default our_name to hostname, and user to our_name */
     if (our_name[0] == 0 || usehostname)
-	strlcpy(our_name, hostname, MAXHOSTNAMELEN);
+	strlcpy(our_name, hostname, HOST_NAME_MAX+1);
     if (user[0] == 0)
 	strlcpy(user, our_name, MAXNAMELEN);
 
@@ -1227,7 +1228,6 @@ ip_addr_check(addr, addrs)
     int accept, r = 1;
     char *ptr_word, *ptr_mask;
     struct hostent *hp;
-    struct netent *np;
 
     /* don't allow loopback or multicast address */
     if (bad_ip_adrs(addr))
@@ -1270,11 +1270,7 @@ ip_addr_check(addr, addrs)
 	if (hp != NULL && hp->h_addrtype == AF_INET) {
 	    ina.s_addr = *(u_int32_t *)hp->h_addr;
 	} else {
-	    np = getnetbyname (ptr_word);
-	    if (np != NULL && np->n_addrtype == AF_INET)
-		ina.s_addr = htonl (np->n_net);
-	    else
-		r = inet_aton (ptr_word, &ina);
+	    r = inet_aton (ptr_word, &ina);
 	    if (ptr_mask == NULL) {
 		/* calculate appropriate mask for net */
 		ah = ntohl(ina.s_addr);

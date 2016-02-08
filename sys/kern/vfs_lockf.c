@@ -1,4 +1,4 @@
-/*	$OpenBSD: vfs_lockf.c,v 1.17 2012/04/10 09:07:20 guenther Exp $	*/
+/*	$OpenBSD: vfs_lockf.c,v 1.19 2014/12/19 05:59:21 tedu Exp $	*/
 /*	$NetBSD: vfs_lockf.c,v 1.7 1996/02/04 02:18:21 christos Exp $	*/
 
 /*
@@ -44,6 +44,7 @@
 #include <sys/pool.h>
 #include <sys/fcntl.h>
 #include <sys/lockf.h>
+#include <sys/unistd.h>
 
 struct pool lockfpool;
 
@@ -75,8 +76,8 @@ int	lockf_debug = DEBUG_SETLOCK|DEBUG_CLEARLOCK|DEBUG_WAKELOCK;
 void
 lf_init(void)
 {
-	pool_init(&lockfpool, sizeof(struct lockf), 0, 0, 0,
-	    "lockfpl", &pool_allocator_nointr);
+	pool_init(&lockfpool, sizeof(struct lockf), 0, 0, PR_WAITOK,
+	    "lockfpl", NULL);
 }
 
 struct lockf *lf_alloc(uid_t, int);

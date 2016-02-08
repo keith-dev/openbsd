@@ -1,10 +1,11 @@
+/*	$OpenBSD: htons.c,v 1.9 2014/12/20 18:15:29 miod Exp $	*/
 /*
  * Written by J.T. Conklin <jtc@netbsd.org>.
  * Public domain.
  */
 
 #include <sys/types.h>
-#include <machine/endian.h>
+#include <sys/endian.h>
 
 #undef htons
 

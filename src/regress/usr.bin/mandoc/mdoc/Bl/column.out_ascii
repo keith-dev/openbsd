@@ -1,4 +1,4 @@
-BL-COLUMN(1)               OpenBSD Reference Manual               BL-COLUMN(1)
+BL-COLUMN(1)                General Commands Manual               BL-COLUMN(1)
 
 NNAAMMEE
      BBll--ccoolluummnn - lists with multiple columns
@@ -8,6 +8,10 @@ DDEESSCCRRIIPPTTIIOONN
 
      a    b
 
+     a    b    cc
+     a    b    cc
+     a    b    cc
+     a    b    cc
      a    b    cc
 
      a    b    cc    d
@@ -41,4 +45,11 @@ DDEESSCCRRIIPPTTIIOONN
      a       b
      a       b
 
-OpenBSD                        December 24, 2009                       OpenBSD
+     a
+     a    b
+     a    b    c
+     a    b    cd
+     a    b    cde
+     aa    bb    cc    dd
+
+OpenBSD                        December 13, 2014                       OpenBSD

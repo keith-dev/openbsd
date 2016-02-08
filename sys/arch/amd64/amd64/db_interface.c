@@ -1,4 +1,4 @@
-/*	$OpenBSD: db_interface.c,v 1.17 2013/05/12 20:47:44 kettenis Exp $	*/
+/*	$OpenBSD: db_interface.c,v 1.21 2014/10/15 15:55:42 uebayasi Exp $	*/
 /*	$NetBSD: db_interface.c,v 1.1 2003/04/26 18:39:27 fvdl Exp $	*/
 
 /*
@@ -34,7 +34,6 @@
  */
 
 #include <sys/param.h>
-#include <sys/proc.h>
 #include <sys/reboot.h>
 #include <sys/systm.h>
 
@@ -313,7 +312,7 @@ db_enter_ddb(void)
 		/* Busy wait without locking, we'll confirm with lock later */
 		while (ddb_active_cpu != cpu_number() &&
 		    curcpu()->ci_ddb_paused != CI_DDB_RUNNING)
-			;	/* Do nothing */
+			CPU_BUSY_CYCLE();
 
 		mtx_enter(&ddb_mp_mutex);
 	}

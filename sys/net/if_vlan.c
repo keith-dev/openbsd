@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_vlan.c,v 1.108 2014/07/12 18:44:22 tedu Exp $	*/
+/*	$OpenBSD: if_vlan.c,v 1.112 2015/02/06 08:07:09 henning Exp $	*/
 
 /*
  * Copyright 1998 Massachusetts Institute of Technology
@@ -67,10 +67,8 @@
 #include <net/if_dl.h>
 #include <net/if_types.h>
 
-#ifdef INET
 #include <netinet/in.h>
 #include <netinet/if_ether.h>
-#endif
 
 #include <net/if_vlan_var.h>
 
@@ -164,7 +162,7 @@ vlan_clone_destroy(struct ifnet *ifp)
 	vlan_unconfig(ifp, NULL);
 	ether_ifdetach(ifp);
 	if_detach(ifp);
-	free(ifv, M_DEVBUF, 0);
+	free(ifv, M_DEVBUF, sizeof(*ifv));
 	return (0);
 }
 
@@ -212,9 +210,42 @@ vlan_start(struct ifnet *ifp)
 		}
 
 #if NBPFILTER > 0
-		if (ifp->if_bpf)
-			bpf_mtap_stripvlan(ifp->if_bpf, m, BPF_DIRECTION_OUT);
-#endif
+		if (ifp->if_bpf) {
+			if ((p->if_capabilities & IFCAP_VLAN_HWTAGGING) &&
+			    (ifv->ifv_type == ETHERTYPE_VLAN))
+				bpf_mtap(ifp->if_bpf, m, BPF_DIRECTION_OUT);
+			else {
+				struct mbuf *m0;
+				u_int off;
+				struct m_hdr mh;
+				struct {
+					uint8_t dst[ETHER_ADDR_LEN];
+					uint8_t src[ETHER_ADDR_LEN];
+				} hdr;
+
+				/* copy the ether addresses off the front */
+				m_copydata(m, 0, sizeof(hdr), (caddr_t)&hdr);
+
+				/* find the ethertype after the vlan subhdr*/
+				m0 = m_getptr(m,
+				    offsetof(struct ether_vlan_header,
+				    evl_proto), &off);
+				KASSERT(m0 != NULL);
+
+				/* pretend the vlan subhdr isnt there */
+				mh.mh_flags = 0;
+				mh.mh_data = mtod(m0, caddr_t) + off;
+				mh.mh_len = m0->m_len - off;
+				mh.mh_next = m0->m_next;
+
+				/* dst+src + ethertype == ethernet header */
+				bpf_mtap_hdr(ifp->if_bpf,
+				    (caddr_t)&hdr, sizeof(hdr),
+				    (struct mbuf *)&mh, BPF_DIRECTION_OUT,
+				    NULL);
+			}
+		}
+#endif /* NBPFILTER > 0 */
 
 		/*
 		 * Send it, precisely as ether_output() would have.
@@ -264,6 +295,10 @@ vlan_input(struct ether_header *eh, struct mbuf *m)
 	/* From now on ether_vtag is fine */
 	tag = EVL_VLANOFTAG(m->m_pkthdr.ether_vtag);
 	m->m_pkthdr.pf.prio = EVL_PRIOFTAG(m->m_pkthdr.ether_vtag);
+
+	/* IEEE 802.1p has prio 0 and 1 swapped */
+	if (m->m_pkthdr.pf.prio <= 1)
+		m->m_pkthdr.pf.prio = !m->m_pkthdr.pf.prio;
 
 	LIST_FOREACH(ifv, &tagh[TAG_HASH(tag)], ifv_list) {
 		if (m->m_pkthdr.rcvif == ifv->ifv_p && tag == ifv->ifv_tag &&
@@ -507,10 +542,8 @@ vlan_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 	case SIOCSIFADDR:
 		if (ifv->ifv_p != NULL) {
 			ifp->if_flags |= IFF_UP;
-#ifdef INET
 			if (ifa->ifa_addr->sa_family == AF_INET)
 				arp_ifinit(&ifv->ifv_ac, ifa);
-#endif
 		} else
 			error = EINVAL;
 		break;

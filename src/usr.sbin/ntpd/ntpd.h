@@ -1,4 +1,4 @@
-/*	$OpenBSD: ntpd.h,v 1.109 2014/01/22 02:55:15 benno Exp $ */
+/*	$OpenBSD: ntpd.h,v 1.119 2015/02/12 01:54:57 reyk Exp $ */
 
 /*
  * Copyright (c) 2003, 2004 Henning Brauer <henning@openbsd.org>
@@ -23,17 +23,18 @@
 #include <sys/queue.h>
 #include <sys/time.h>
 #include <netinet/in.h>
-#include <netinet/in_systm.h>
 #include <netinet/ip.h>
 #include <arpa/inet.h>
 #include <netdb.h>
 #include <pwd.h>
 #include <stdarg.h>
-#include <event.h>
 #include <poll.h>
 
+#include "log.h"
 #include "ntp.h"
 #include <imsg.h>
+
+#define MAXIMUM(a, b)	((a) > (b) ? (a) : (b))
 
 #define	NTPD_USER	"_ntp"
 #define	CONFFILE	"/etc/ntpd.conf"
@@ -64,15 +65,24 @@
 #define	MAX_FREQUENCY_ADJUST	128e-5	/* max correction per iteration */
 #define REPORT_INTERVAL		(24*60*60) /* interval between status reports */
 #define MAX_SEND_ERRORS		3	/* max send errors before reconnect */
-#define	MAX_DISPLAY_WIDTH	80 	/* max chars in ctl_show report line */
+#define	MAX_DISPLAY_WIDTH	80	/* max chars in ctl_show report line */
 
 #define FILTER_ADJFREQ		0x01	/* set after doing adjfreq */
 
 #define	SENSOR_DATA_MAXAGE		(15*60)
 #define	SENSOR_QUERY_INTERVAL		15
 #define	SENSOR_QUERY_INTERVAL_SETTIME	(SETTIME_TIMEOUT/3)
-#define	SENSOR_SCAN_INTERVAL		(5*60)
+#define	SENSOR_SCAN_INTERVAL		(1*60)
 #define	SENSOR_DEFAULT_REFID		"HARD"
+
+#define CONSTRAINT_ERROR_MARGIN		(4)
+#define CONSTRAINT_SCAN_INTERVAL	(15*60)
+#define CONSTRAINT_SCAN_TIMEOUT		(10)
+#define CONSTRAINT_MARGIN		(2.0*60)
+#define CONSTRAINT_PORT			"443"	/* HTTPS port */
+#define	CONSTRAINT_MAXHEADERLENGTH	8192
+#define CONSTRAINT_PASSFD		(STDERR_FILENO + 1)
+#define CONSTRAINT_CA			"/etc/ssl/cert.pem"
 
 enum client_state {
 	STATE_NONE,
@@ -80,7 +90,8 @@ enum client_state {
 	STATE_DNS_TEMPFAIL,
 	STATE_DNS_DONE,
 	STATE_QUERY_SENT,
-	STATE_REPLY_RECEIVED
+	STATE_REPLY_RECEIVED,
+	STATE_INVALID
 };
 
 struct listen_addr {
@@ -98,6 +109,7 @@ struct ntp_addr {
 
 struct ntp_addr_wrap {
 	char			*name;
+	char			*path;
 	struct ntp_addr		*a;
 	u_int8_t		 pool;
 };
@@ -159,6 +171,20 @@ struct ntp_sensor {
 	u_int8_t			 shift;
 };
 
+struct constraint {
+	TAILQ_ENTRY(constraint)		 entry;
+	struct ntp_addr_wrap		 addr_head;
+	struct ntp_addr			*addr;
+	int				 senderrors;
+	enum client_state		 state;
+	u_int32_t			 id;
+	int				 fd;
+	pid_t				 pid;
+	struct imsgbuf			 ibuf;
+	time_t				 last;
+	time_t				 constraint;
+};
+
 struct ntp_conf_sensor {
 	TAILQ_ENTRY(ntp_conf_sensor)		 entry;
 	char					*device;
@@ -181,6 +207,7 @@ struct ntpd_conf {
 	TAILQ_HEAD(ntp_peers, ntp_peer)			ntp_peers;
 	TAILQ_HEAD(ntp_sensors, ntp_sensor)		ntp_sensors;
 	TAILQ_HEAD(ntp_conf_sensors, ntp_conf_sensor)	ntp_conf_sensors;
+	TAILQ_HEAD(constraints, constraint)		constraints;
 	struct ntp_status				status;
 	struct ntp_freq					freq;
 	u_int32_t					scale;
@@ -189,14 +216,11 @@ struct ntpd_conf {
 	u_int8_t					debug;
 	u_int8_t					noaction;
 	u_int8_t					filters;
-};
-
-struct imsgev {
-	struct imsgbuf		 ibuf;
-	void			(*handler)(int, short, void *);
-	struct event		 ev;
-	void			*data;
-	short			 events;
+	time_t						constraint_last;
+	time_t						constraint_median;
+	u_int						constraint_errors;
+	u_int8_t					*ca;
+	size_t						ca_len;
 };
 
 struct ctl_show_status {
@@ -207,10 +231,13 @@ struct ctl_show_status {
 	u_int8_t	 synced;
 	u_int8_t	 stratum;
 	double		 clock_offset;
+	time_t		 constraint_median;
+	time_t		 constraint_last;
+	u_int		 constraint_errors;
 };
 
 struct ctl_show_peer {
-	char 		 peer_desc[MAX_DISPLAY_WIDTH];
+	char		 peer_desc[MAX_DISPLAY_WIDTH];
 	u_int8_t	 syncedto;
 	u_int8_t	 weight;
 	u_int8_t	 trustlevel;
@@ -241,7 +268,6 @@ enum blockmodes {
 
 struct ctl_conn {
 	TAILQ_ENTRY(ctl_conn)	entry;
-	struct imsgev		iev;
 	struct imsgbuf		ibuf;
 };
 
@@ -253,6 +279,8 @@ enum imsg_type {
 	IMSG_ADJFREQ,
 	IMSG_SETTIME,
 	IMSG_HOST_DNS,
+	IMSG_CONSTRAINT,
+	IMSG_CONSTRAINT_DNS,
 	IMSG_CTL_SHOW_STATUS,
 	IMSG_CTL_SHOW_PEERS,
 	IMSG_CTL_SHOW_PEERS_END,
@@ -270,22 +298,12 @@ enum ctl_actions {
 };
 
 /* prototypes */
-/* log.c */
-void		 log_init(int);
-void		 vlog(int, const char *, va_list);
-void		 log_warn(const char *, ...);
-void		 log_warnx(const char *, ...);
-void		 log_info(const char *, ...);
-void		 log_debug(const char *, ...);
-void		 fatal(const char *);
-void		 fatalx(const char *);
-const char	*log_sockaddr(struct sockaddr *);
 
 /* ntp.c */
 pid_t	 ntp_main(int[2], int, struct ntpd_conf *, struct passwd *);
 int	 priv_adjtime(void);
 void	 priv_settime(double);
-void	 priv_host_dns(char *, u_int32_t);
+void	 priv_dns(int, char *, u_int32_t);
 int	 offset_compare(const void *, const void *);
 void	 update_scale(double);
 time_t	 scale_interval(time_t);
@@ -297,10 +315,12 @@ extern struct ctl_conns  ctl_conns;
 int	 parse_config(const char *, struct ntpd_conf *);
 
 /* config.c */
-int			 host(const char *, struct ntp_addr **);
+void			 host(const char *, struct ntp_addr **);
 int			 host_dns(const char *, struct ntp_addr **);
+void			 host_dns_free(struct ntp_addr *);
 struct ntp_peer		*new_peer(void);
 struct ntp_conf_sensor	*new_sensor(char *);
+struct constraint	*new_constraint(void);
 
 /* ntp_msg.c */
 int	ntp_getmsg(struct sockaddr *, char *, ssize_t, struct ntp_msg *);
@@ -320,8 +340,17 @@ int	client_dispatch(struct ntp_peer *, u_int8_t);
 void	client_log_error(struct ntp_peer *, const char *, int);
 void	set_next(struct ntp_peer *, time_t);
 
+/* constraint.c */
+int	 constraint_init(struct constraint *);
+int	 constraint_query(struct constraint *);
+int	 constraint_dispatch_msg(struct pollfd *);
+void	 constraint_check_child(void);
+int	 constraint_check(double);
+void	 constraint_dns(u_int32_t, u_int8_t *, size_t);
+
 /* util.c */
 double			 gettime_corrected(void);
+double			 gettime_from_timeval(struct timeval *);
 double			 getoffset(void);
 double			 gettime(void);
 time_t			 getmonotime(void);
@@ -348,7 +377,7 @@ int			 control_listen(int);
 void			 control_shutdown(int);
 void			 control_cleanup(const char *);
 int			 control_accept(int);
-struct ctl_conn 	*control_connbyfd(int);
+struct ctl_conn		*control_connbyfd(int);
 int			 control_close(int);
 int			 control_dispatch_msg(struct pollfd *, u_int *);
 void			 session_socket_blockmode(int, enum blockmodes);

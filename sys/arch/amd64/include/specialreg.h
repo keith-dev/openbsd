@@ -1,4 +1,4 @@
-/*	$OpenBSD: specialreg.h,v 1.28 2014/07/03 21:15:28 matthew Exp $	*/
+/*	$OpenBSD: specialreg.h,v 1.32 2015/01/19 16:01:43 jsg Exp $	*/
 /*	$NetBSD: specialreg.h,v 1.1 2003/04/26 18:39:48 fvdl Exp $	*/
 /*	$NetBSD: x86/specialreg.h,v 1.2 2003/04/25 21:54:30 fvdl Exp $	*/
 
@@ -158,6 +158,7 @@
 #define	CPUIDECX_AVX	0x10000000	/* Advanced Vector Extensions */
 #define	CPUIDECX_F16C	0x20000000	/* 16bit fp conversion  */
 #define	CPUIDECX_RDRAND	0x40000000	/* RDRAND instruction  */
+#define	CPUIDECX_HV	0x80000000	/* Running on hypervisor */
 
 /*
  * "Structured Extended Feature Flags Parameters" (CPUID function 0x7, leaf 0)
@@ -278,9 +279,19 @@
 #define MSR_PERFCTR0		0x0c1
 #define MSR_PERFCTR1		0x0c2
 #define MSR_FSB_FREQ		0x0cd	/* Core Duo/Solo only */   
-/* not documented anywhere, see intelcore_update_sensor() */
-#define MSR_TEMPERATURE_TARGET	0x0ee
-#define MSR_TEMPERATURE_TARGET_LOW_BIT	0x40000000
+/*
+ * for Core i Series and newer Xeons, see
+ * http://www.intel.com/content/dam/www/public/us/en/
+ * documents/white-papers/cpu-monitoring-dts-peci-paper.pdf
+ */
+#define MSR_TEMPERATURE_TARGET	0x1a2	/* Core i Series, Newer Xeons */
+#define MSR_TEMPERATURE_TARGET_TJMAX(msr) (((msr) >> 16) & 0xff)
+/*
+ * not documented anywhere, see intelcore_update_sensor()
+ * only available Core Duo and Core Solo Processors
+ */
+#define MSR_TEMPERATURE_TARGET_UNDOCUMENTED	0x0ee
+#define MSR_TEMPERATURE_TARGET_LOW_BIT_UNDOCUMENTED	0x40000000
 #define MSR_MTRRcap		0x0fe
 #define	MSR_BBL_CR_ADDR		0x116	/* PII+ only */
 #define	MSR_BBL_CR_DECC		0x118	/* PII+ only */
@@ -372,24 +383,24 @@
  */
 #define	MSR_SYSCFG	0xc0000010
 
-#define MSR_EFER	0xc0000080		/* Extended feature enable */
-#define 	EFER_SCE		0x00000001	/* SYSCALL extension */
-#define 	EFER_LME		0x00000100	/* Long Mode Active */
-#define		EFER_LMA		0x00000400	/* Long Mode Enabled */
-#define 	EFER_NXE		0x00000800	/* No-Execute Enabled */
+#define MSR_EFER	0xc0000080	/* Extended feature enable */
+#define EFER_SCE	0x00000001	/* SYSCALL extension */
+#define EFER_LME	0x00000100	/* Long Mode Enabled */
+#define	EFER_LMA	0x00000400	/* Long Mode Active */
+#define EFER_NXE	0x00000800	/* No-Execute Enabled */
 
-#define MSR_STAR	0xc0000081		/* 32 bit syscall gate addr */
-#define MSR_LSTAR	0xc0000082		/* 64 bit syscall gate addr */
-#define MSR_CSTAR	0xc0000083		/* compat syscall gate addr */
-#define MSR_SFMASK	0xc0000084		/* flags to clear on syscall */
+#define MSR_STAR	0xc0000081	/* 32 bit syscall gate addr */
+#define MSR_LSTAR	0xc0000082	/* 64 bit syscall gate addr */
+#define MSR_CSTAR	0xc0000083	/* compat syscall gate addr */
+#define MSR_SFMASK	0xc0000084	/* flags to clear on syscall */
 
-#define MSR_FSBASE	0xc0000100		/* 64bit offset for fs: */
-#define MSR_GSBASE	0xc0000101		/* 64bit offset for gs: */
-#define MSR_KERNELGSBASE 0xc0000102		/* storage for swapgs ins */
-#define MSR_INT_PEN_MSG	0xc0010055		/* Interrupt pending message */
+#define MSR_FSBASE	0xc0000100	/* 64bit offset for fs: */
+#define MSR_GSBASE	0xc0000101	/* 64bit offset for gs: */
+#define MSR_KERNELGSBASE 0xc0000102	/* storage for swapgs ins */
+#define MSR_INT_PEN_MSG	0xc0010055	/* Interrupt pending message */
 
-#define MSR_DE_CFG	0xc0011029		/* Decode Configuration */
-#define		DE_CFG_721		0x00000001	/* errata 721 */
+#define MSR_DE_CFG	0xc0011029	/* Decode Configuration */
+#define	DE_CFG_721	0x00000001	/* errata 721 */
 
 #define IPM_C1E_CMP_HLT	0x10000000
 #define IPM_SMI_CMP_HLT	0x08000000

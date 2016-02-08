@@ -1,4 +1,4 @@
-/*	$OpenBSD: logger.c,v 1.5 2014/08/06 12:56:58 reyk Exp $	*/
+/*	$OpenBSD: logger.c,v 1.11 2015/02/08 00:00:59 reyk Exp $	*/
 
 /*
  * Copyright (c) 2014 Reyk Floeter <reyk@openbsd.org>
@@ -16,19 +16,18 @@
  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
 
+#include <sys/param.h>	/* nitems */
 #include <sys/types.h>
-#include <sys/socket.h>
 #include <sys/queue.h>
 #include <sys/uio.h>
 
-#include <net/if.h>
-
+#include <limits.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
 #include <fcntl.h>
-#include <event.h>
+#include <imsg.h>
 
 #include "httpd.h"
 
@@ -151,7 +150,7 @@ logger_open_fd(struct imsg *imsg)
 int
 logger_open_priv(struct imsg *imsg)
 {
-	char			 path[MAXPATHLEN];
+	char			 path[PATH_MAX];
 	char			 name[NAME_MAX], *p;
 	u_int32_t		 id;
 	size_t			 len;
@@ -164,8 +163,8 @@ logger_open_priv(struct imsg *imsg)
 
 	if ((size_t)snprintf(name, sizeof(name), "/%s", p) >= sizeof(name))
 		return (-1);
-	if ((len = (size_t)snprintf(path, sizeof(path), "%s%s",
-	    env->sc_chroot, HTTPD_LOGROOT)) >= sizeof(path))
+	if ((len = strlcpy(path, env->sc_logdir, sizeof(path)))
+	    >= sizeof(path))
 		return (-1);
 
 	p = path + len;
@@ -193,6 +192,9 @@ int
 logger_open(struct server *srv, struct server_config *srv_conf, void *arg)
 {
 	struct log_file	*log, *logfile = NULL, *errfile = NULL;
+
+	if (srv_conf->flags & SRVFLAG_SYSLOG)
+		return (0);
 
 	/* disassociate */
 	srv_conf->logaccess = srv_conf->logerror = NULL;

@@ -1,4 +1,4 @@
-/* $OpenBSD: acpimadt.c,v 1.29 2014/07/12 18:48:17 tedu Exp $ */
+/* $OpenBSD: acpimadt.c,v 1.31 2015/02/09 08:15:19 kettenis Exp $ */
 /*
  * Copyright (c) 2006 Mark Kettenis <kettenis@openbsd.org>
  *
@@ -294,7 +294,8 @@ acpimadt_attach(struct device *parent, struct device *self, void *aux)
 		addr += entry->madt_lapic.length;
 	}
 
-	mp_intrs = malloc(nlapic_nmis * sizeof (struct mp_intr_map), M_DEVBUF, M_NOWAIT);
+	mp_intrs = mallocarray(nlapic_nmis, sizeof(struct mp_intr_map),
+	    M_DEVBUF, M_NOWAIT);
 	if (mp_intrs == NULL)
 		return;
 
@@ -358,7 +359,8 @@ acpimadt_attach(struct device *parent, struct device *self, void *aux)
 			map->ioapic_pin = pin;
 			map->flags = entry->madt_lapic_nmi.flags;
 
-			if (!acpimadt_cfg_intr(entry->madt_lapic_nmi.flags, &map->redir)) {
+			if ((pin != 0 && pin != 1) ||
+			    !acpimadt_cfg_intr(entry->madt_lapic_nmi.flags, &map->redir)) {
 				printf("%s: bogus nmi for apid %d\n",
 				    self->dv_xname, map->cpu_id);
 				mp_nintrs--;

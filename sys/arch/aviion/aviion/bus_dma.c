@@ -1,4 +1,4 @@
-/*      $OpenBSD: bus_dma.c,v 1.7 2014/07/12 18:44:41 tedu Exp $	*/
+/*      $OpenBSD: bus_dma.c,v 1.10 2014/12/24 22:48:27 miod Exp $	*/
 /*      $NetBSD: bus_dma.c,v 1.2 2001/06/10 02:31:25 briggs Exp $        */
 
 /*-
@@ -112,8 +112,11 @@ bus_dmamap_destroy(t, map)
         bus_dma_tag_t t;
         bus_dmamap_t map;
 {
+        size_t mapsize;
 
-        free(map, M_DEVBUF, 0);
+        mapsize = sizeof(struct m88k_bus_dmamap) +
+            (sizeof(bus_dma_segment_t) * (map->_dm_segcnt - 1));
+        free(map, M_DEVBUF, mapsize);
 }
 
 /*
@@ -541,8 +544,8 @@ bus_dmamem_map(t, segs, nsegs, size, kvap, flags)
                         if (size == 0)
                                 panic("bus_dmamem_map: size botch");
                         error = pmap_enter(pmap_kernel(), va, addr,
-                            VM_PROT_READ | VM_PROT_WRITE, VM_PROT_READ |
-                            VM_PROT_WRITE | PMAP_WIRED | PMAP_CANFAIL);
+                            PROT_READ | PROT_WRITE,
+			    PROT_READ | PROT_WRITE | PMAP_WIRED | PMAP_CANFAIL);
 			if (error) {
 				pmap_update(pmap_kernel());
 				km_free((void *)sva, ssize, &kv_any, &kp_none);
@@ -659,7 +662,7 @@ _bus_dmamem_alloc_range(t, size, alignment, boundary, segs, nsegs, rsegs,
         segs[curseg].ds_len = PAGE_SIZE;
 	m = TAILQ_NEXT(m, pageq);
 
-	for (; m != TAILQ_END(&mlist); m = TAILQ_NEXT(m, pageq)) {
+	for (; m != NULL; m = TAILQ_NEXT(m, pageq)) {
                 curaddr = VM_PAGE_TO_PHYS(m);
 #ifdef DIAGNOSTIC
                 if (curaddr < low || curaddr >= high) {

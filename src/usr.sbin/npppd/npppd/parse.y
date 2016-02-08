@@ -1,4 +1,4 @@
-/*	$OpenBSD: parse.y,v 1.12 2014/07/08 19:00:12 yasuoka Exp $ */
+/*	$OpenBSD: parse.y,v 1.16 2015/02/17 05:12:51 miod Exp $ */
 
 /*
  * Copyright (c) 2002, 2003, 2004 Henning Brauer <henning@openbsd.org>
@@ -61,7 +61,9 @@ struct file	*pushfile(const char *);
 int		 popfile(void);
 int		 yyparse(void);
 int		 yylex(void);
-int		 yyerror(const char *, ...);
+int		 yyerror(const char *, ...)
+    __attribute__((__format__ (printf, 1, 2)))
+    __attribute__((__nonnull__ (1)));
 int		 kw_cmp(const void *, const void *);
 int		 lookup(char *);
 int		 lgetc(int);
@@ -562,7 +564,7 @@ addressport	: address optport {
 
 in4_addr	: STRING {
 			if (inet_aton($1, &($$)) != 1) {
-				yyerror("could not parse the address %s");
+				yyerror("could not parse the address %s", $1);
 				free($1);
 				YYERROR;
 			}
@@ -951,15 +953,15 @@ int
 yyerror(const char *fmt, ...)
 {
 	va_list		 ap;
-	char		*nfmt;
+	char		*msg;
 
 	file->errors++;
 	va_start(ap, fmt);
-	if (asprintf(&nfmt, "%s:%d: %s", file->name, yylval.lineno, fmt) == -1)
-		fatalx("yyerror asprintf");
-	vlog(LOG_CRIT, nfmt, ap);
+	if (vasprintf(&msg, fmt, ap) == -1)
+		fatalx("yyerror vasprintf");
 	va_end(ap);
-	free(nfmt);
+	logit(LOG_CRIT, "%s:%d: %s", file->name, yylval.lineno, msg);
+	free(msg);
 	return (0);
 }
 
@@ -1231,6 +1233,9 @@ yylex(void)
 			} else if (c == quotec) {
 				*p = '\0';
 				break;
+			} else if (c == '\0') {
+				yyerror("syntax error");
+				return (findeol());
 			}
 			if (p + 1 >= buf + sizeof(buf) - 1) {
 				yyerror("string too long");

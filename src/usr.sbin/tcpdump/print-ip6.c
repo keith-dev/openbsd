@@ -1,4 +1,4 @@
-/*	$OpenBSD: print-ip6.c,v 1.15 2011/09/17 16:45:42 naddy Exp $	*/
+/*	$OpenBSD: print-ip6.c,v 1.21 2015/01/16 06:40:21 deraadt Exp $	*/
 
 /*
  * Copyright (c) 1988, 1989, 1990, 1991, 1992, 1993, 1994
@@ -23,13 +23,11 @@
 
 #ifdef INET6
 
-#include <sys/param.h>
 #include <sys/time.h>
 #include <sys/types.h>
 #include <sys/socket.h>
 
 #include <netinet/in.h>
-#include <netinet/in_systm.h>
 #include <netinet/ip.h>
 #include <netinet/ip_var.h>
 #include <netinet/udp.h>
@@ -51,23 +49,29 @@
  * print an IP6 datagram.
  */
 void
-ip6_print(register const u_char *bp, register int length)
+ip6_print(register const u_char *bp, register u_int length)
 {
 	register const struct ip6_hdr *ip6;
 	register int hlen;
 	register int len;
 	register const u_char *cp;
+	const u_char *pktp = packetp;
+	const u_char *send = snapend;
 	int nh;
 	u_int flow;
-	
+
 	ip6 = (const struct ip6_hdr *)bp;
+	if ((u_char *)(ip6 + 1) > snapend) {
+		printf("[|ip6]");
+		return;
+	}
 
 	/*
 	 * The IP header is not word aligned, so copy into abuf.
 	 * This will never happen with BPF.  It does happen with
 	 * raw packet dumps from -r.
 	 */
-	if ((intptr_t)ip6 & (sizeof(long)-1)) {
+	if ((intptr_t)ip6 & (sizeof(u_int32_t)-1)) {
 		static u_char *abuf = NULL;
 		static int didwarn = 0;
 		int clen = snapend - bp;
@@ -90,17 +94,13 @@ ip6_print(register const u_char *bp, register int length)
 		}
 	}
 
-	if ((u_char *)(ip6 + 1) > snapend) {
-		printf("[|ip6]");
-		return;
-	}
 	if (length < sizeof (struct ip6_hdr)) {
 		(void)printf("truncated-ip6 %d", length);
-		return;
+		goto out;
 	}
 	if ((ip6->ip6_vfc & IPV6_VERSION_MASK) != IPV6_VERSION) {
 		(void)printf("bad-ip6-version %u", ip6->ip6_vfc >> 4);
-		return;
+		goto out;
 	}
 	hlen = sizeof(struct ip6_hdr);
 
@@ -207,7 +207,7 @@ ip6_print(register const u_char *bp, register int length)
 	}
 
  end:
-	
+
 	flow = ntohl(ip6->ip6_flow);
 #if 0
 	/* rfc1883 */
@@ -233,6 +233,10 @@ ip6_print(register const u_char *bp, register int length)
 			(void)printf(", hlim %d", (int)ip6->ip6_hlim);
 		printf(")");
 	}
+
+ out:
+	packetp = pktp;
+	snapend = send;
 }
 
 #endif /* INET6 */

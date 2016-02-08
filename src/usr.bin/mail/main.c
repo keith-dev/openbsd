@@ -1,4 +1,4 @@
-/*	$OpenBSD: main.c,v 1.23 2009/10/27 23:59:40 deraadt Exp $	*/
+/*	$OpenBSD: main.c,v 1.31 2015/02/08 23:40:34 deraadt Exp $	*/
 /*	$NetBSD: main.c,v 1.7 1997/05/13 06:15:57 mikel Exp $	*/
 
 /*
@@ -49,6 +49,7 @@ main(int argc, char **argv)
 {
 	int i;
 	struct name *to, *cc, *bcc, *smopts;
+	char *fromaddr;
 	char *subject;
 	char *ef;
 	char nosrc = 0;
@@ -77,24 +78,15 @@ main(int argc, char **argv)
 	cc = NULL;
 	bcc = NULL;
 	smopts = NULL;
+	fromaddr = NULL;
 	subject = NULL;
-	while ((i = getopt(argc, argv, "EINT:b:c:dfins:u:v")) != -1) {
+	while ((i = getopt(argc, argv, "EINb:c:dfinr:s:u:v")) != -1) {
 		switch (i) {
-		case 'T':
-			/*
-			 * Next argument is temp file to write which
-			 * articles have been read/deleted for netnews.
-			 */
-			Tflag = optarg;
-			if ((i = creat(Tflag, 0600)) < 0)
-				err(1, "%s", Tflag);
-			(void)close(i);
-			break;
 		case 'u':
 			/*
 			 * Next argument is person to pretend to be.
 			 */
-			if (strlen(optarg) >= MAXLOGNAME)
+			if (strlen(optarg) >= LOGIN_NAME_MAX)
 				errx(1, "username `%s' too long", optarg);
 			unsetenv("MAIL");
 			myname = optarg;
@@ -110,6 +102,12 @@ main(int argc, char **argv)
 		case 'd':
 			debug++;
 			break;
+		case 'r':
+			/*
+			 * Set From: address
+			 */
+			fromaddr = optarg;
+			break;
 		case 's':
 			/*
 			 * Give a subject field for sending from
@@ -121,22 +119,16 @@ main(int argc, char **argv)
 			/*
 			 * User is specifying file to "edit" with Mail,
 			 * as opposed to reading system mailbox.
-			 * If no argument is given after -f, we read his
-			 * mbox file.
-			 *
-			 * getopt() can't handle optional arguments, so here
-			 * is an ugly hack to get around it.
+			 * We read his mbox file unless another file
+			 * is specified after the arguments.
 			 */
-			if ((argv[optind]) && (argv[optind][0] != '-'))
-				ef = argv[optind++];
-			else
-				ef = "&";
+			ef = "&";
 			break;
 		case 'n':
 			/*
 			 * User doesn't want to source /usr/lib/Mail.rc
 			 */
-			nosrc++;
+			nosrc = 1;
 			break;
 		case 'N':
 			/*
@@ -179,17 +171,24 @@ main(int argc, char **argv)
 			/*NOTREACHED*/
 		}
 	}
-	for (i = optind; (argv[i]) && (*argv[i] != '-'); i++)
-		to = cat(to, nalloc(argv[i], GTO));
-	for (; argv[i]; i++)
-		smopts = cat(smopts, nalloc(argv[i], 0));
+	if (ef != NULL) {
+		/* Check for optional mailbox file name. */
+		if (optind < argc) {
+			ef = argv[optind++];
+			if (optind < argc)
+			    errx(1, "Cannot give -f and people to send to");
+		}
+	} else {
+		for (i = optind; argv[i]; i++)
+			to = cat(to, nalloc(argv[i], GTO));
+	}
 	/*
 	 * Check for inconsistent arguments.
 	 */
-	if (to == NULL && (subject != NULL || cc != NULL || bcc != NULL))
-		errx(1, "You must specify direct recipients with -s, -c, or -b");
-	if (ef != NULL && to != NULL)
-		errx(1, "Cannot give -f and people to send to");
+	if (to == NULL && (subject != NULL || cc != NULL || bcc != NULL ||
+	    fromaddr != NULL))
+		errx(1, "You must specify direct recipients with -s, -c, -b, "
+		    "or -r");
 	/*
 	 * Block SIGINT except where we install an explicit handler for it.
 	 */
@@ -214,7 +213,7 @@ main(int argc, char **argv)
 		rc = "~/.mailrc";
 	load(expand(rc));
 	if (!rcvmode) {
-		mail(to, cc, bcc, smopts, subject);
+		mail(to, cc, bcc, smopts, fromaddr, subject);
 		/*
 		 * why wait?
 		 */
@@ -283,9 +282,7 @@ usage(void)
 {
 
 	fprintf(stderr, "usage: %s [-dEIinv] [-b list] [-c list] "
-	    "[-s subject] to-addr ...\n", __progname);
-	fprintf(stderr, "       %*s [-sendmail-options ...]\n",
-	    (int)strlen(__progname), "");
+	    "[-r from-addr] [-s subject] to-addr ...\n", __progname);
 	fprintf(stderr, "       %s [-dEIiNnv] -f [file]\n", __progname);
 	fprintf(stderr, "       %s [-dEIiNnv] [-u user]\n", __progname);
 	exit(1);

@@ -1,4 +1,4 @@
-/*	$OpenBSD: ca.c,v 1.10 2014/07/10 20:16:48 jsg Exp $	*/
+/*	$OpenBSD: ca.c,v 1.14 2015/01/20 17:37:54 deraadt Exp $	*/
 
 /*
  * Copyright (c) 2014 Reyk Floeter <reyk@openbsd.org>
@@ -20,10 +20,14 @@
 #include <sys/types.h>
 #include <sys/queue.h>
 #include <sys/socket.h>
+#include <sys/tree.h>
 
+#include <signal.h>
 #include <string.h>
+#include <limits.h>
 #include <stdlib.h>
 #include <unistd.h>
+#include <limits.h>
 #include <imsg.h>
 #include <pwd.h>
 #include <err.h>
@@ -559,8 +563,6 @@ ca_engine_init(void)
 	if (rsa_default->flags & RSA_FLAG_SIGN_VER)
 		fatalx("unsupported RSA engine");
 
-	if (rsa_default->rsa_mod_exp == NULL)
-		rsae_method.rsa_mod_exp = NULL;
 	if (rsa_default->rsa_mod_exp == NULL)
 		rsae_method.rsa_mod_exp = NULL;
 	if (rsa_default->bn_mod_exp == NULL)

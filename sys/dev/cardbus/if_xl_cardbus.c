@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_xl_cardbus.c,v 1.28 2013/08/07 01:06:27 bluhm Exp $ */
+/*	$OpenBSD: if_xl_cardbus.c,v 1.30 2014/09/14 14:17:24 jsg Exp $ */
 /*	$NetBSD: if_xl_cardbus.c,v 1.13 2000/03/07 00:32:52 mycroft Exp $	*/
 
 /*
@@ -41,7 +41,6 @@
 #include <sys/errno.h>
 #include <sys/malloc.h>
 #include <sys/kernel.h>
-#include <sys/proc.h>
 #include <sys/device.h>
 
 #include <net/if.h>
@@ -49,12 +48,8 @@
 #include <net/if_types.h>
 #include <net/if_media.h>
 
-#ifdef INET
 #include <netinet/in.h>
-#include <netinet/in_systm.h>
-#include <netinet/ip.h>
 #include <netinet/if_ether.h>
-#endif
 
 #include <machine/cpu.h>
 #include <machine/bus.h>

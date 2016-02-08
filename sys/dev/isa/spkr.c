@@ -1,4 +1,4 @@
-/*	$OpenBSD: spkr.c,v 1.16 2014/07/12 18:48:18 tedu Exp $	*/
+/*	$OpenBSD: spkr.c,v 1.19 2015/02/10 22:50:12 miod Exp $	*/
 /*	$NetBSD: spkr.c,v 1.1 1998/04/15 20:26:18 drochner Exp $	*/
 
 /*
@@ -50,7 +50,6 @@
 #include <sys/device.h>
 #include <sys/malloc.h>
 #include <sys/uio.h>
-#include <sys/proc.h>
 #include <sys/ioctl.h>
 #include <sys/conf.h>
 #include <sys/file.h>
@@ -80,7 +79,7 @@ static void tone(u_int, u_int);
 static void rest(int);
 static void playinit(void);
 static void playtone(int, int, int);
-static void playstring(char *, int);
+static void playstring(char *, size_t);
 
 /* emit tone of frequency hz for given number of ticks */
 static void
@@ -211,7 +210,7 @@ playtone(int pitch, int value, int sustain)
 
 /* interpret and play an item from a notation string */
 static void
-playstring(char *cp, int slen)
+playstring(char *cp, size_t slen)
 {
 	int pitch, lastpitch = OCTAVE_NOTES * DFLT_OCTAVE;
 
@@ -423,7 +422,7 @@ spkropen(dev_t dev, int flags, int mode, struct proc *p)
 int
 spkrwrite(dev_t dev, struct uio *uio, int flags)
 {
-	int n;
+	size_t n;
 	int error;
 #ifdef SPKRDEBUG
 	printf("spkrwrite: entering with dev = %x, count = %d\n",
@@ -433,7 +432,7 @@ spkrwrite(dev_t dev, struct uio *uio, int flags)
 	if (minor(dev) != 0)
 		return (ENXIO);
 	else {
-		n = min(DEV_BSIZE, uio->uio_resid);
+		n = ulmin(DEV_BSIZE, uio->uio_resid);
 		error = uiomove(spkr_inbuf, n, uio);
 		if (!error)
 			playstring((char *)spkr_inbuf, n);

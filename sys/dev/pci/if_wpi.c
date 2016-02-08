@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_wpi.c,v 1.120 2014/07/22 13:12:11 mpi Exp $	*/
+/*	$OpenBSD: if_wpi.c,v 1.124 2015/02/10 23:25:46 mpi Exp $	*/
 
 /*-
  * Copyright (c) 2006-2008
@@ -33,9 +33,9 @@
 #include <sys/conf.h>
 #include <sys/device.h>
 #include <sys/task.h>
+#include <sys/endian.h>
 
 #include <machine/bus.h>
-#include <machine/endian.h>
 #include <machine/intr.h>
 
 #include <dev/pci/pcireg.h>
@@ -74,7 +74,7 @@ void		wpi_radiotap_attach(struct wpi_softc *);
 int		wpi_detach(struct device *, int);
 int		wpi_activate(struct device *, int);
 void		wpi_wakeup(struct wpi_softc *);
-void		wpi_init_task(void *, void *);
+void		wpi_init_task(void *);
 int		wpi_nic_lock(struct wpi_softc *);
 int		wpi_read_prom_data(struct wpi_softc *, uint32_t, void *, int);
 int		wpi_dma_contig_alloc(bus_dma_tag_t, struct wpi_dma_info *,
@@ -324,7 +324,7 @@ wpi_attach(struct device *parent, struct device *self, void *aux)
 	wpi_radiotap_attach(sc);
 #endif
 	timeout_set(&sc->calib_to, wpi_calib_timeout, sc);
-	task_set(&sc->init_task, wpi_init_task, sc, NULL);
+	task_set(&sc->init_task, wpi_init_task, sc);
 	return;
 
 	/* Free allocated memory if something failed during attachment. */
@@ -412,11 +412,11 @@ wpi_wakeup(struct wpi_softc *sc)
 	reg &= ~0xff00;
 	pci_conf_write(sc->sc_pct, sc->sc_pcitag, 0x40, reg);
 
-	wpi_init_task(sc, NULL);
+	wpi_init_task(sc);
 }
 
 void
-wpi_init_task(void *arg1, void *args2)
+wpi_init_task(void *arg1)
 {
 	struct wpi_softc *sc = arg1;
 	struct ifnet *ifp = &sc->sc_ic.ic_if;
@@ -1254,7 +1254,6 @@ wpi_rx_done(struct wpi_softc *sc, struct wpi_rx_desc *desc,
 	    BUS_DMASYNC_PREWRITE);
 
 	/* Finalize mbuf. */
-	m->m_pkthdr.rcvif = ifp;
 	m->m_data = (caddr_t)(head + 1);
 	m->m_pkthdr.len = m->m_len = letoh16(head->len);
 
@@ -2003,10 +2002,8 @@ wpi_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 	case SIOCSIFADDR:
 		ifa = (struct ifaddr *)data;
 		ifp->if_flags |= IFF_UP;
-#ifdef INET
 		if (ifa->ifa_addr->sa_family == AF_INET)
 			arp_ifinit(&ic->ic_ac, ifa);
-#endif
 		/* FALLTHROUGH */
 	case SIOCSIFFLAGS:
 		if (ifp->if_flags & IFF_UP) {

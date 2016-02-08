@@ -1,4 +1,4 @@
-/*	$OpenBSD: control.c,v 1.2 2013/11/13 20:44:39 benno Exp $ */
+/*	$OpenBSD: control.c,v 1.5 2015/02/10 06:40:08 reyk Exp $ */
 
 /*
  * Copyright (c) 2003, 2004 Henning Brauer <henning@openbsd.org>
@@ -36,7 +36,7 @@
 int
 control_init(char *path)
 {
-	struct sockaddr_un	 sun;
+	struct sockaddr_un	 sa;
 	int			 fd;
 	mode_t			 old_umask;
 
@@ -45,10 +45,10 @@ control_init(char *path)
 		return (-1);
 	}
 
-	bzero(&sun, sizeof(sun));
-	sun.sun_family = AF_UNIX;
-	if (strlcpy(sun.sun_path, path, sizeof(sun.sun_path)) >=
-	    sizeof(sun.sun_path))
+	bzero(&sa, sizeof(sa));
+	sa.sun_family = AF_UNIX;
+	if (strlcpy(sa.sun_path, path, sizeof(sa.sun_path)) >=
+	    sizeof(sa.sun_path))
 		errx(1, "ctl socket name too long");
 
 	if (unlink(path) == -1)
@@ -59,7 +59,7 @@ control_init(char *path)
 		}
 
 	old_umask = umask(S_IXUSR|S_IXGRP|S_IWOTH|S_IROTH|S_IXOTH);
-	if (bind(fd, (struct sockaddr *)&sun, sizeof(sun)) == -1) {
+	if (bind(fd, (struct sockaddr *)&sa, sizeof(sa)) == -1) {
 		log_warn("control_init: bind: %s", path);
 		close(fd);
 		umask(old_umask);
@@ -108,12 +108,12 @@ control_accept(int listenfd)
 {
 	int			 connfd;
 	socklen_t		 len;
-	struct sockaddr_un	 sun;
+	struct sockaddr_un	 sa;
 	struct ctl_conn		*ctl_conn;
 
-	len = sizeof(sun);
+	len = sizeof(sa);
 	if ((connfd = accept(listenfd,
-	    (struct sockaddr *)&sun, &len)) == -1) {
+	    (struct sockaddr *)&sa, &len)) == -1) {
 		if (errno != EWOULDBLOCK && errno != EINTR)
 			log_warn("control_accept: accept");
 		return (0);
@@ -170,8 +170,8 @@ control_dispatch_msg(struct pollfd *pfd, u_int *ctl_cnt)
 {
 	struct imsg		 imsg;
 	struct ctl_conn		*c;
-	struct ntp_peer 	*p;
-	struct ntp_sensor 	*s;
+	struct ntp_peer		*p;
+	struct ntp_sensor	*s;
 	struct ctl_show_status	 c_status;
 	struct ctl_show_peer	 c_peer;
 	struct ctl_show_sensor	 c_sensor;
@@ -289,8 +289,8 @@ session_socket_blockmode(int fd, enum blockmodes bm)
 void
 build_show_status(struct ctl_show_status *cs)
 {
-	struct ntp_peer 	*p;
-	struct ntp_sensor 	*s;
+	struct ntp_peer		*p;
+	struct ntp_sensor	*s;
 
 	cs->peercnt = cs->valid_peers = 0;
 	cs->sensorcnt = cs->valid_sensors = 0;
@@ -309,14 +309,17 @@ build_show_status(struct ctl_show_status *cs)
 	cs->synced = conf->status.synced;
 	cs->stratum = conf->status.stratum;
 	cs->clock_offset = getoffset() * 1000.0;
+	cs->constraint_median = conf->constraint_median;
+	cs->constraint_last = conf->constraint_last;
+	cs->constraint_errors = conf->constraint_errors;
 }
 
 void
 build_show_peer(struct ctl_show_peer *cp, struct ntp_peer *p)
 {
-	const char 	*a = "not resolved";
-	const char 	*pool = "", *addr_head_name = "";
-	u_int8_t 	 shift, best, validdelaycnt, jittercnt;
+	const char	*a = "not resolved";
+	const char	*pool = "", *addr_head_name = "";
+	u_int8_t	 shift, best, validdelaycnt, jittercnt;
 	time_t		 now;
 
 	now = getmonotime();
@@ -395,7 +398,7 @@ void
 build_show_sensor(struct ctl_show_sensor *cs, struct ntp_sensor *s)
 {
 	time_t		 now;
-	u_int8_t 	 shift;
+	u_int8_t	 shift;
 	u_int32_t	 refid;
 
 	now = getmonotime();

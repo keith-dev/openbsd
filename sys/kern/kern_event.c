@@ -1,4 +1,4 @@
-/*	$OpenBSD: kern_event.c,v 1.58 2014/07/12 18:43:32 tedu Exp $	*/
+/*	$OpenBSD: kern_event.c,v 1.61 2014/12/19 05:59:21 tedu Exp $	*/
 
 /*-
  * Copyright (c) 1999,2000,2001 Jonathan Lemon <jlemon@FreeBSD.org>
@@ -162,10 +162,10 @@ void
 kqueue_init(void)
 {
 
-	pool_init(&kqueue_pool, sizeof(struct kqueue), 0, 0, 0, "kqueuepl",
-	    &pool_allocator_nointr);
-	pool_init(&knote_pool, sizeof(struct knote), 0, 0, 0, "knotepl",
-	    &pool_allocator_nointr);
+	pool_init(&kqueue_pool, sizeof(struct kqueue), 0, 0, PR_WAITOK,
+	    "kqueuepl", NULL);
+	pool_init(&knote_pool, sizeof(struct knote), 0, 0, PR_WAITOK,
+	    "knotepl", NULL);
 }
 
 int
@@ -376,7 +376,7 @@ filt_timerdetach(struct knote *kn)
 
 	to = (struct timeout *)kn->kn_hook;
 	timeout_del(to);
-	free(to, M_KEVENT, 0);
+	free(to, M_KEVENT, sizeof(*to));
 	kq_ntimeouts--;
 }
 
@@ -1021,7 +1021,8 @@ knote_attach(struct knote *kn, struct filedesc *fdp)
 		size = fdp->fd_knlistsize;
 		while (size <= kn->kn_id)
 			size += KQEXTENT;
-		list = malloc(size * sizeof(struct klist), M_TEMP, M_WAITOK);
+		list = mallocarray(size, sizeof(struct klist), M_TEMP,
+		    M_WAITOK);
 		memcpy(list, fdp->fd_knlist,
 		    fdp->fd_knlistsize * sizeof(struct klist));
 		memset(&list[fdp->fd_knlistsize], 0,

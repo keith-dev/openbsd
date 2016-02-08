@@ -1,4 +1,4 @@
-/*	$OpenBSD: upd.c,v 1.10 2014/07/12 18:48:52 tedu Exp $ */
+/*	$OpenBSD: upd.c,v 1.13 2015/01/11 03:08:38 deraadt Exp $ */
 
 /*
  * Copyright (c) 2014 Andre de Oliveira <andre@openbsd.org>
@@ -171,10 +171,11 @@ upd_attach(struct device *parent, struct device *self, void *aux)
 	DPRINTF(("\nupd: devname=%s sc_max_repid=%d\n",
 	    sc->sc_hdev.sc_dev.dv_xname, sc->sc_max_repid));
 
-	sc->sc_reports = malloc(sc->sc_max_repid * sizeof(struct upd_report),
-	    M_USBDEV, M_WAITOK | M_ZERO);
+	sc->sc_reports = mallocarray(sc->sc_max_repid,
+	    sizeof(struct upd_report), M_USBDEV, M_WAITOK | M_ZERO);
+	sc->sc_sensors = mallocarray(sc->sc_max_sensors,
+	    sizeof(struct upd_sensor), M_USBDEV, M_WAITOK | M_ZERO);
 	size = sc->sc_max_sensors * sizeof(struct upd_sensor);
-	sc->sc_sensors = malloc(size, M_USBDEV, M_WAITOK | M_ZERO);
 	sc->sc_num_sensors = 0;
 	uhidev_get_report_desc(uha->parent, &desc, &size);
 	for (hdata = hid_start_parse(desc, size, hid_feature);
@@ -263,7 +264,7 @@ upd_refresh(void *arg)
 	struct upd_softc	*sc = (struct upd_softc *)arg;
 	struct upd_report	*report;
 	uint8_t			buf[256];
-	int			repid, err;
+	int			repid, actlen;
 
 	for (repid = 0; repid < sc->sc_max_repid; repid++) {
 		report = &sc->sc_reports[repid];
@@ -271,17 +272,17 @@ upd_refresh(void *arg)
 			continue;
 
 		memset(buf, 0x0, sizeof(buf));
-		/*
-		 * XXX uhidev_get_report() is not clever enough to handle
-		 * non-NUl reportID, so add an extra byte for it.
-		 */
-		err = uhidev_get_report(&sc->sc_hdev, UHID_FEATURE_REPORT,
-		    repid, buf, report->size + 1);
-		if (err) {
-			DPRINTF(("read failure: reportid=%02x err=%d\n", repid,
-			    err));
+		actlen = uhidev_get_report(sc->sc_hdev.sc_parent,
+		    UHID_FEATURE_REPORT, repid, buf, report->size);
+
+		if (actlen == -1) {
+			DPRINTF(("upd: failed to get report id=%02x\n", repid));
 			continue;
 		}
+
+		/* Deal with buggy firmwares. */
+		if (actlen < report->size)
+			report->size = actlen;
 
 		upd_update_sensors(sc, buf, report->size, repid);
 	}
@@ -358,13 +359,12 @@ upd_update_sensors(struct upd_softc *sc, uint8_t *buf, unsigned int len,
 			break;
 		}
 
-		/* XXX first byte which is the report id */
-		hdata = hid_get_data(buf + 1, len, &sensor->hitem.loc);
+		hdata = hid_get_data(buf, len, &sensor->hitem.loc);
 
 		sensor->ksensor.value = hdata * adjust;
 		sensor->ksensor.status = SENSOR_S_OK;
 		sensor->ksensor.flags &= ~SENSOR_FINVALID;
-		DPRINTF(("%s: hidget data: %d\n",
+		DPRINTF(("%s: hidget data: %lu\n",
 		    sc->sc_sensordev.xname, hdata));
 	}
 }

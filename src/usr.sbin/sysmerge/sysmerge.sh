@@ -1,6 +1,6 @@
 #!/bin/ksh -
 #
-# $OpenBSD: sysmerge.sh,v 1.144 2014/07/30 16:54:09 ajacoutot Exp $
+# $OpenBSD: sysmerge.sh,v 1.194 2015/02/17 15:43:34 sthen Exp $
 #
 # Copyright (c) 2008-2014 Antoine Jacoutot <ajacoutot@openbsd.org>
 # Copyright (c) 1998-2003 Douglas Barton <DougB@FreeBSD.org>
@@ -20,341 +20,357 @@
 
 umask 0022
 
-unset AUTO_INSTALLED_FILES BATCHMODE DIFFMODE EGSUM ETCSUM NEED_NEWALIASES
-unset NEWGRP NEWUSR NEED_REBOOT NOSIGCHECK SRCDIR SRCSUM TGZ XETCSUM XTGZ
-
-# forced variables
-WRKDIR=$(mktemp -d -p ${TMPDIR:=/var/tmp} sysmerge.XXXXXXXXXX) || exit 1
-SWIDTH=$(stty size | awk '{w=$2} END {if (w==0) {w=80} print w}')
-RELINT=$(uname -r | tr -d '.')
-if [ -z "${VISUAL}" ]; then
-	EDIT="${EDITOR:=/usr/bin/vi}"
-else
-	EDIT="${VISUAL}"
-fi
-
-# sysmerge specific variables (overridable)
-MERGE_CMD="${MERGE_CMD:=sdiff -as -w ${SWIDTH} -o}"
-REPORT="${REPORT:=${WRKDIR}/sysmerge.log}"
-DBDIR="${DBDIR:=/usr/share/sysmerge}"
-
-# system-wide variables (overridable)
-PAGER="${PAGER:=/usr/bin/more}"
-
-# clean leftovers created by make in src
-clean_src() {
-	[[ -n ${SRCDIR} ]] && \
-		cd ${SRCDIR}/gnu/usr.sbin/sendmail/cf/cf && make cleandir >/dev/null
+usage() {
+	echo "usage: ${0##*/} [-bdp]" >&2 && exit 1
 }
 
-# restore sum files from backups or remove the newly generated ones if
-# they did not exist
-restore_sum() {
-	local i _i
-	for i in ${DESTDIR}/${DBDIR}/.{${SRCSUM},${ETCSUM},${XETCSUM},${EGSUM}}.bak; do
-		_i=$(basename ${i} .bak)
-		if [ -f "${i}" ]; then
-			mv ${i} ${DESTDIR}/${DBDIR}/${_i#.}
-		elif [ -f "${DESTDIR}/${DBDIR}/${_i#.}" ]; then
-			rm ${DESTDIR}/${DBDIR}/${_i#.}
+# OpenBSD /etc/rc v1.438
+stripcom() {
+	local _file=$1
+	local _line
+
+	{
+		while read _line ; do
+			_line=${_line%%#*}		# strip comments
+			test -z "$_line" && continue
+			echo $_line
+		done
+	} < $_file
+}
+
+sm_error() {
+	(($#)) && echo "!!!! ERROR: $@"
+
+	# restore sum files from backups or remove the newly created ones
+	for _i in ${_WRKDIR}/{etcsum,xetcsum,examplessum,pkgsum}; do
+		_j=$(basename ${_i})
+		if [[ -f ${_i} ]]; then
+			mv ${_i} /usr/share/sysmerge/${_j}
+		elif [[ -f /usr/share/sysmerge/${_j} ]]; then
+			rm /usr/share/sysmerge/${_j}
 		fi
 	done
-	rm -f ${WRKDIR}/*sum
-}
 
-usage() {
-	echo "usage: ${0##*/} [-bdS] [-s [src | etcXX.tgz]] [-x xetcXX.tgz]" >&2
-}
-
-warn() {
-	echo "**** WARNING: $@"
-}
-
-report() {
-	echo "$@" >> ${REPORT}
-}
-
-# remove newly created work directory and exit with status 1
-error_rm_wrkdir() {
-	(($#)) && echo "**** ERROR: $@"
-	restore_sum
-	clean_src
-	# do not remove the entire WRKDIR in case sysmerge stopped half
-	# way since it contains our backup files
-	rm -rf ${TEMPROOT}
-	rm -f ${WRKDIR}/*.tgz
-	rm -f ${WRKDIR}/SHA256.sig
-	rmdir ${WRKDIR} 2>/dev/null
+	# do not empty _WRKDIR, it may still contain our backup files
+	rm -rf ${_TMPROOT}
+	rmdir ${_WRKDIR} 2>/dev/null
 	exit 1
 }
 
-trap "error_rm_wrkdir; exit 1" 1 2 3 13 15
+trap "sm_error; exit 1" 1 2 3 13 15
 
-if (($(id -u) != 0)); then
-	usage
-	error_rm_wrkdir "need root privileges"
-fi
+sm_warn() {
+	(($#)) && echo "**** WARNING: $@" || true
+}
 
-# extract (x)etcXX.tgz and create cksum file(s);
-# stores sum filename in ETCSUM or XETCSUM (see eval);
-extract_sets() {
-	[[ -n ${SRCDIR} ]] && return
-	local _e _x _set _tgz
+sm_extract_sets() {
+	${PKGMODE} && return
+	local _e _x _set
 
-	[[ -f ${WRKDIR}/${TGZ##*/} ]] && _e=etc
-	[[ -f ${WRKDIR}/${XTGZ##*/} ]] && _x=xetc
+	[[ -f /usr/share/sysmerge/etc.tgz ]] && _e=etc
+	[[ -f /usr/share/sysmerge/xetc.tgz ]] && _x=xetc
 
 	for _set in ${_e} ${_x}; do
-		typeset -u _SETSUM=${_set}sum
-		eval ${_SETSUM}=${_set}sum
-		[[ ${_set} == etc ]] && _tgz=${WRKDIR}/${TGZ##*/}
-		[[ ${_set} == xetc ]] && _tgz=${WRKDIR}/${XTGZ##*/}
-
-		tar -tzf "${_tgz}" .${DBDIR}/${_set}sum >/dev/null ||
-			error_rm_wrkdir "${_tgz##*/}: badly formed \"${_set}\" set, lacks .${DBDIR}/${_set}sum"
-
-		(cd ${TEMPROOT} && tar -xzphf "${_tgz}" && \
-			find . -type f | xargs sha256 -h ${WRKDIR}/${_set}sum) || \
-			error_rm_wrkdir "failed to extract ${_tgz} and create checksum file"
-		rm "${_tgz}"
+		[[ -f /usr/share/sysmerge/${_set}sum ]] && \
+			cp /usr/share/sysmerge/${_set}sum \
+			${_WRKDIR}/${_set}sum
+		tar -xzphf \
+			/usr/share/sysmerge/${_set}.tgz || \
+			sm_error "failed to extract ${_set}.tgz"
 	done
 }
 
-# fetch and verify sets, abort on failure
-sm_fetch_and_verify() {
-	[[ -n ${SRCDIR} ]] && return
-	local _file _sigdone _url;
-	local _key="/etc/signify/openbsd-${RELINT}-base.pub"
+# get pkg @sample information
+exec_espie() {
+	local _tmproot
 
-	for _url in ${TGZ} ${XTGZ}; do
-		[[ -f ${_url} ]] && _url="file://$(readlink -f ${_url})"
-		_file=${WRKDIR}/${_url##*/}
-		[[ ${_url} == @(file|ftp|http|https)://*/*[!/] ]] ||
-			error_rm_wrkdir "${_url}: invalid URL"
-		echo "===> Fetching ${_url}"
-		/usr/bin/ftp -Vm -k "${FTP_KEEPALIVE-0}" -o "${_file}" "${_url}" >/dev/null || \
-			error_rm_wrkdir "could not retrieve ${_url##*/}"
-		if [ -z "${NOSIGCHECK}" ]; then
-			if [ -z ${_sigdone} ]; then
-				echo "===> Fetching ${_url%/*}/SHA256.sig"
-				/usr/bin/ftp -Vm -k "${FTP_KEEPALIVE-0}" -o "${WRKDIR}/SHA256.sig" "${_url%/*}/SHA256.sig" >/dev/null || \
-					error_rm_wrkdir "could not retrieve SHA256.sig"
-				[[ ${TGZ%/*} == ${XTGZ%/*} ]] && _sigdone=1
+	_tmproot=${_TMPROOT} /usr/bin/perl <<'EOF'
+use strict;
+use warnings;
+
+package OpenBSD::PackingElement;
+
+sub walk_sample
+{
+}
+
+package OpenBSD::PackingElement::Sampledir;
+sub walk_sample
+{
+	my $item = shift;
+	print "0-DIR", " ",
+	      $item->{owner} // "root", " ",
+	      $item->{group} // "wheel", " ",
+	      $item->{mode} // "0755", " ",
+	      $ENV{'_tmproot'}, $item->fullname,
+	      "\n";
+}
+
+package OpenBSD::PackingElement::Sample;
+sub walk_sample
+{
+	my $item = shift;
+	print "1-FILE", " ",
+	      $item->{owner} // "root", " ",
+	      $item->{group} // "wheel", " ",
+	      $item->{mode} // "0644", " ",
+	      $item->{copyfrom}->fullname, " ",
+	      $ENV{'_tmproot'}, $item->fullname,
+	      "\n";
+}
+
+package main;
+use OpenBSD::PackageInfo;
+use OpenBSD::PackingList;
+
+for my $i (installed_packages()) {
+	my $plist = OpenBSD::PackingList->from_installation($i);
+	$plist->walk_sample();
+}
+EOF
+}
+
+sm_cp_pkg_samples() {
+	! ${PKGMODE} && return
+	local _install_args _i _ret=0 _sample
+
+	[[ -f /usr/share/sysmerge/pkgsum ]] && \
+		cp /usr/share/sysmerge/pkgsum ${_WRKDIR}/pkgsum
+
+	# access to full base system hierarchy is implied in packages
+	mtree -qdef /etc/mtree/4.4BSD.dist -U >/dev/null
+	mtree -qdef /etc/mtree/BSD.x11.dist -U >/dev/null
+
+	# @sample directories are processed first
+	exec_espie | sort -u | while read _i; do
+		set -A _sample -- ${_i}
+		_install_args="-o ${_sample[1]} -g ${_sample[2]} -m ${_sample[3]}"
+		if [[ ${_sample[0]} == "0-DIR" ]]; then
+			install -d ${_install_args} ${_sample[4]} || _ret=1
+		else
+			# directory we want to copy the @sample file into
+			# does not exist and is not a @sample so we have no
+			# knowledge of the required owner/group/mode
+			# (e.g. /var/www/usr/sbin in mail/femail,-chroot)
+			_pkghier=${_sample[5]%/*}
+			if [[ ! -d ${_pkghier#${_TMPROOT}} ]]; then
+				sm_warn "skipping ${_sample[5]#${_TMPROOT}}: ${_pkghier#${_TMPROOT}} does not exist"
+				continue
+			else
+				# non-default prefix (e.g. mail/roundcubemail)
+				install -d ${_pkghier}
 			fi
-			echo "===> Verifying ${_url##*/} against ${_key}"
-			(cd ${WRKDIR} && /usr/bin/signify -qC -p ${_key} -x SHA256.sig ${_url##*/}) || \
-				error_rm_wrkdir "${_url##*/}: signature/checksum failed"
+			install ${_install_args} \
+				${_sample[4]} ${_sample[5]} || _ret=1
 		fi
 	done
 
-	[[ -z ${NOSIGCHECK} ]] && rm ${WRKDIR}/SHA256.sig
-}
-
-# prepare TEMPROOT content from a src dir and create cksum file 
-prepare_src() {
-	[[ -z ${SRCDIR} ]] && return
-	SRCSUM=srcsum
-	# 2>/dev/null: distribution-etc-root-var complains /var/tmp is world writable
-	(cd ${SRCDIR}/etc && \
-	 make DESTDIR=${TEMPROOT} distribution-etc-root-var >/dev/null 2>&1 && \
-	 cd ${TEMPROOT} && find . -type f | xargs sha256 -h ${WRKDIR}/${SRCSUM}) || \
-		error_rm_wrkdir "failed to populate from ${SRCDIR} and create checksum file"
-}
-
-sm_populate() {
-	local cf i _array _d _r _D _R CF_DIFF CF_FILES CURSUM IGNORE_FILES
-	echo "===> Populating temporary root under ${TEMPROOT}"
-	mkdir -p ${TEMPROOT}
-
-	if [ ! -d ${DESTDIR}/${DBDIR} ]; then
-		mkdir -p ${DESTDIR}/${DBDIR} || exit 1
+	if [[ ${_ret} -eq 0 ]]; then
+		find . -type f -exec sha256 '{}' + | sort \
+			>./usr/share/sysmerge/pkgsum || _ret=1
 	fi
+	[[ ${_ret} -ne 0 ]] && \
+		sm_error "failed to populate packages @samples and create sum file"
+}
 
-	# automatically install missing user(s) and group(s) from the
-	# new master.passwd and group files:
-	# - after extracting the sets (so we have the new files)
-	# - before running distribution-etc-root-var (using files from SRCDIR)
-	extract_sets
-	install_user_group
-	prepare_src
+sm_init() {
+	local _auto_upg _c _c1 _c2 _cursum _diff _i _k _j _cfdiff _cffiles
+	local _ignorefile _cvsid1 _cvsid2 _matchsum _mismatch
 
-	for i in ${SRCSUM} ${ETCSUM} ${XETCSUM}; do
-		if [ -f ${DESTDIR}/${DBDIR}/${i} ]; then
-			# delete file in temproot if it has not changed since last release
-			# and is present in current installation
-			if [ -z "${DIFFMODE}" ]; then
-				# 2>/dev/null: if file got removed manually but is still in the sum file
-				_R=$(cd ${TEMPROOT} && \
-					sha256 -c ${DESTDIR}/${DBDIR}/${i} 2>/dev/null | awk '/OK/ { print $2 }' | sed 's/[:]//')
-				for _r in ${_R}; do
-					if [ -f ${DESTDIR}/${_r} -a -f ${TEMPROOT}/${_r} ]; then
-						rm -f ${TEMPROOT}/${_r}
-					fi
-				done
-			fi
+	sm_extract_sets
+	sm_add_user_grp
+	sm_check_an_eg
+	sm_cp_pkg_samples
+
+	for _i in etcsum xetcsum pkgsum; do
+		if [[ -f /usr/share/sysmerge/${_i} && \
+			-f ./usr/share/sysmerge/${_i} ]] && \
+			! ${DIFFMODE}; then
+			# redirect stderr: file may not exist
+			_matchsum=$(sha256 -c /usr/share/sysmerge/${_i} 2>/dev/null | \
+				sed -n 's/^(SHA256) \(.*\): OK$/\1/p')
+			# delete file in temproot if it has not changed since
+			# last release and is present in current installation
+			for _j in ${_matchsum}; do
+				# skip sum files
+				[[ ${_j} == ./usr/share/sysmerge/${_i} ]] && continue
+				[[ -f ${_j#.} && -f ${_j} ]] && \
+					rm ${_j}
+			done
 
 			# set auto-upgradable files
-			_D=$(diff -u ${WRKDIR}/${i} ${DESTDIR}/${DBDIR}/${i} | sed -n 's/^+SHA256 (\(.*\)).*/\1/p')
-			for _d in ${_D}; do
-				# 2>/dev/null: if file got removed manually but is still in the sum file
-				CURSUM=$(cd ${DESTDIR:=/} && sha256 ${_d} 2>/dev/null)
-				[ -n "$(grep "${CURSUM}" ${DESTDIR}/${DBDIR}/${i})" -a -z "$(grep "${CURSUM}" ${WRKDIR}/${i})" ] && \
-					_array="${_array} ${_d}"
+			_mismatch=$(diff -u ./usr/share/sysmerge/${_i} /usr/share/sysmerge/${_i} | \
+				sed -n 's/^+SHA256 (\(.*\)).*/\1/p')
+			for _k in ${_mismatch}; do
+				# skip sum files
+				[[ ${_k} == ./usr/share/sysmerge/${_i} ]] && continue
+				# compare CVS Id first so if the file hasn't been modified,
+				# it will be deleted from temproot and ignored from comparison;
+				# several files are generated from scripts so CVS ID is not a
+				# reliable way of detecting changes: leave for a full diff
+				if ! ${PKGMODE} && \
+					[[ ${_k} != ./etc/@(fbtab|ttys) && \
+					! -h ${_k} ]]; then
+					_cvsid1=$(sed -n "/[$]OpenBSD:.*Exp [$]/{p;q;}" ${_k#.} 2>/dev/null)
+					_cvsid2=$(sed -n "/[$]OpenBSD:.*Exp [$]/{p;q;}" ${_k} 2>/dev/null)
+					[[ -n ${_cvsid1} ]] && \
+						[[ ${_cvsid1} == ${_cvsid2} ]] && \
+						[[ -f ${_k} ]] && rm ${_k} && \
+						continue
+				fi
+				# redirect stderr: file may not exist
+				_cursum=$(cd / && sha256 ${_k} 2>/dev/null)
+				grep -q "${_cursum}" /usr/share/sysmerge/${_i} && \
+					! grep -q "${_cursum}" ./usr/share/sysmerge/${_i} && \
+					_auto_upg="${_auto_upg} ${_k}"
 			done
-			[[ -n ${_array} ]] && set -A AUTO_UPG -- ${_array}
-
-			mv ${DESTDIR}/${DBDIR}/${i} ${DESTDIR}/${DBDIR}/.${i}.bak
+			[[ -n ${_auto_upg} ]] && set -A AUTO_UPG -- ${_auto_upg}
 		fi
-		mv ${WRKDIR}/${i} ${DESTDIR}/${DBDIR}/${i}
+		[[ -f ./usr/share/sysmerge/${_i} ]] && \
+			mv ./usr/share/sysmerge/${_i} /usr/share/sysmerge/${_i}
 	done
 
 	# files we don't want/need to deal with
-	IGNORE_FILES="/etc/*.db
-		      /etc/group
+	_ignorefiles="/etc/group
 		      /etc/localtime
-		      /etc/mail/*.db
+		      /etc/mail/aliases.db
 		      /etc/master.passwd
-		      /etc/passwd
 		      /etc/motd
-		      /etc/myname
-		      /usr/share/sysmerge/{etc,examples,xetc}sum
+		      /etc/passwd
+		      /etc/pwd.db
+		      /etc/spwd.db
+		      /usr/share/sysmerge/etcsum
+		      /usr/share/sysmerge/examplessum
+		      /usr/share/sysmerge/xetcsum
 		      /var/db/locate.database
 		      /var/mail/root"
-	CF_FILES="/etc/mail/localhost.cf /etc/mail/sendmail.cf /etc/mail/submit.cf"
-	for cf in ${CF_FILES}; do
-		CF_DIFF=$(diff -q -I "##### " ${TEMPROOT}/${cf} ${DESTDIR}/${cf} 2>/dev/null)
-		[[ -z ${CF_DIFF} ]] && IGNORE_FILES="${IGNORE_FILES} ${cf}"
+	[[ -f /etc/sysmerge.ignore ]] && \
+		_ignorefiles="${_ignorefiles} $(stripcom /etc/sysmerge.ignore)"
+	for _i in ${_ignorefiles}; do
+		rm -f ./${_i}
 	done
-	if [ -r /etc/sysmerge.ignore ]; then
-		while read i; do \
-			IGNORE_FILES="${IGNORE_FILES} $(echo ${i} | sed -e 's,\.\.,,g' -e 's,#.*,,g')"
-		done < /etc/sysmerge.ignore
-	fi
-	for i in ${IGNORE_FILES}; do
-		rm -rf ${TEMPROOT}/${i};
-	done
-}
 
-install_and_rm() {
-	if [ -f "${5}/${4##*/}" ]; then
-		mkdir -p ${BKPDIR}/${4%/*}
-		cp ${5}/${4##*/} ${BKPDIR}/${4%/*}
-	fi
+	# aliases(5) needs to be handled last in case mailer.conf(5) changes
+	_c1=$(find . -type f -or -type l | grep -vE '^./etc/mail/aliases$')
+	_c2=$(find . -type f -name aliases)
+	for COMPFILE in ${_c1} ${_c2}; do
+		IS_BIN=false
+		IS_LINK=false
+		TARGET=${COMPFILE#.}
 
-	if ! install -m "${1}" -o "${2}" -g "${3}" "${4}" "${5}"; then
-		rm -f ${BKPDIR}/${4%/*}/${4##*/}
-		return 1
-	fi
-	rm -f "${4}"
-}
+		# links need to be treated in a different way
+		if [[ -h ${COMPFILE} ]]; then
+			IS_LINK=true
+			[[ -h ${TARGET} && \
+				$(readlink ${COMPFILE}) == $(readlink ${TARGET}) ]] && \
+				rm ${COMPFILE} && continue
+		elif [[ -f ${TARGET} ]]; then
+			# empty files = binaries (to avoid comparison);
+			# only process them if they don't exist on the system
+			if [[ ! -s ${COMPFILE} ]]; then
+				rm ${COMPFILE} && continue
+			fi
 
-install_file() {
-	local DIR_MODE FILE_MODE FILE_OWN FILE_GRP INSTDIR
-	INSTDIR=${1#.}
-	INSTDIR=${INSTDIR%/*}
-
-	[[ -z ${INSTDIR} ]] && INSTDIR=/
-
-	DIR_MODE=$(stat -f "%OMp%OLp" "${TEMPROOT}/${INSTDIR}")
-	eval $(stat -f "FILE_MODE=%OMp%OLp FILE_OWN=%Su FILE_GRP=%Sg" ${1})
-
-	[ -n "${DESTDIR}${INSTDIR}" -a ! -d "${DESTDIR}${INSTDIR}" ] && \
-		install -d -o root -g wheel -m "${DIR_MODE}" "${DESTDIR}${INSTDIR}"
-
-	install_and_rm "${FILE_MODE}" "${FILE_OWN}" "${FILE_GRP}" "${1}" "${DESTDIR}${INSTDIR}" || return
-
-	case "${1#.}" in
-	/dev/MAKEDEV)
-		echo " (running MAKEDEV(8))"
-		(cd ${DESTDIR}/dev && /bin/sh MAKEDEV all)
-		export NEED_REBOOT=1
-		;;
-	/etc/login.conf)
-		if [ -f ${DESTDIR}/etc/login.conf.db ]; then
-			echo " (running cap_mkdb(1))"
-			cap_mkdb ${DESTDIR}/etc/login.conf
+			_diff=$(diff -q ${TARGET} ${COMPFILE} 2>&1)
+			# files are the same: delete
+			[[ $? -eq 0 ]] && rm ${COMPFILE} && continue
+			# disable sdiff for binaries
+			echo "${_diff}" | head -1 | grep -q "Binary files" && \
+				IS_BIN=true
 		else
-			echo ""
+			# missing files = binaries (to avoid comparison)
+			IS_BIN=true
 		fi
-		export NEED_REBOOT=1
-		;;
-	/etc/mail/@(access|genericstable|mailertable|virtusertable))
-		echo " (running makemap(8))"
-		/usr/libexec/sendmail/makemap hash ${DESTDIR}/${1#.} < ${DESTDIR}/${1#.}
+
+		sm_diff_loop
+	done
+}
+
+sm_install() {
+	local _dmode _fgrp _fmode _fown
+	local _instdir=${TARGET%/*}
+	[[ -z ${_instdir} ]] && _instdir="/"
+
+	_dmode=$(stat -f "%OMp%OLp" .${_instdir}) || return
+	eval $(stat -f "_fmode=%OMp%OLp _fown=%Su _fgrp=%Sg" ${COMPFILE}) || return
+
+	if [[ ! -d ${_instdir} ]]; then
+		install -d -o root -g wheel -m ${_dmode} "${_instdir}" || return
+	fi
+
+	if ${IS_LINK}; then
+		_linkt=$(readlink ${COMPFILE})
+		(cd ${_instdir} && ln -sf ${_linkt} . && rm ${_TMPROOT}/${COMPFILE})
+		return
+	fi
+
+	if [[ -f ${TARGET} ]]; then
+		mkdir -p ${_BKPDIR}/${_instdir} || return
+		cp -p ${TARGET} ${_BKPDIR}/${_instdir} || return
+	fi
+
+	if ! install -m ${_fmode} -o ${_fown} -g ${_fgrp} ${COMPFILE} ${_instdir}; then
+		rm ${_BKPDIR}/${COMPFILE} && return 1
+	fi
+	rm ${COMPFILE}
+
+	case ${TARGET} in
+	/etc/login.conf)
+		if [[ -f /etc/login.conf.db ]]; then
+			echo " (running cap_mkdb(1), needs a relog)"
+			sm_warn $(cap_mkdb /etc/login.conf 2>&1)
+		else
+			echo
+		fi
 		;;
 	/etc/mail/aliases)
 		echo " (running newaliases(8))"
-		${DESTDIR:+chroot ${DESTDIR}} newaliases >/dev/null || export NEED_NEWALIASES=1
+		sm_warn $(newaliases 2>&1 >/dev/null)
 		;;
 	*)
-		echo ""
+		echo
 		;;
 	esac
 }
 
-install_link() {
-	local _LINKF _LINKT DIR_MODE 
-	_LINKT=$(readlink ${COMPFILE})
-	_LINKF=$(dirname ${DESTDIR}${COMPFILE#.})
+sm_add_user_grp() {
+	local _g _p _gid _l _u _rest _newgrp _newusr
+	local _pw=./etc/master.passwd
+	local _gr=./etc/group
 
-	DIR_MODE=$(stat -f "%OMp%OLp" "${TEMPROOT}/${_LINKF}")
-	[[ ! -d ${_LINKF} ]] && \
-		install -d -o root -g wheel -m "${DIR_MODE}" "${_LINKF}"
+	${PKGMODE} && return
 
-	rm -f ${COMPFILE}
-	(cd ${_LINKF} && ln -sf ${_LINKT} .)
-	return
-}
-
-install_user_group() {
-	local _g _gid _u
-	if [ -n "${SRCDIR}" ]; then
-		local _pw="${SRCDIR}/etc/master.passwd"
-		local _gr="${SRCDIR}/etc/group"
-	else
-		local _pw="${TEMPROOT}/etc/master.passwd"
-		local _gr="${TEMPROOT}/etc/group"
-	fi
-
-	# when running with '-x' only
-	[ ! -f ${_pw} -o ! -f ${_gr} ] && return
-
-	while read l; do
-		_u=$(echo ${l} | awk -F ':' '{ print $1 }')
-		if [ "${_u}" != "root" ]; then
-			if [ -z "$(grep -E "^${_u}:" ${DESTDIR}/etc/master.passwd)" ]; then
+	while read _l; do
+		_u=${_l%%:*}
+		if [[ ${_u} != root ]]; then
+			if ! grep -Eq "^${_u}:" /etc/master.passwd; then
 				echo "===> Adding the ${_u} user"
-				if ${DESTDIR:+chroot ${DESTDIR}} chpass -la "${l}"; then
-					set -A NEWUSR -- ${NEWUSR[@]} ${_u}
-				fi
+				chpass -la "${_l}" && \
+					set -A _newusr -- ${_newusr[@]} ${_u}
 			fi
 		fi
-	done < ${_pw}
+	done <${_pw}
 
-	while read l; do
-		_g=$(echo ${l} | awk -F ':' '{ print $1 }')
-		_gid=$(echo ${l} | awk -F ':' '{ print $3 }')
-		if [ -z "$(grep -E "^${_g}:" ${DESTDIR}/etc/group)" ]; then
+	while IFS=: read -r -- _g _p _gid _rest; do
+		if ! grep -Eq "^${_g}:" /etc/group; then
 			echo "===> Adding the ${_g} group"
-			if ${DESTDIR:+chroot ${DESTDIR}} groupadd -g "${_gid}" "${_g}"; then
-				set -A NEWGRP -- ${NEWGRP[@]} ${_g}
-			fi
+			groupadd -g ${_gid} ${_g} && \
+				set -A _newgrp -- ${_newgrp[@]} ${_g}
 		fi
-	done < ${_gr}
+	done <${_gr}
 }
 
-merge_loop() {
-	local INSTALL_MERGED MERGE_AGAIN
-	[[ ${MERGE_CMD} == sdiff* ]] && \
-		echo "===> Type h at the sdiff prompt (%) to get usage help\n"
-	MERGE_AGAIN=1
-	while [ -n "${MERGE_AGAIN}" ]; do
-		cp -p "${COMPFILE}" "${COMPFILE}.merged"
-		${MERGE_CMD} "${COMPFILE}.merged" \
-			"${DESTDIR}${COMPFILE#.}" "${COMPFILE}"
-		INSTALL_MERGED=v
-		while [ "${INSTALL_MERGED}" = "v" ]; do
-			echo ""
+sm_merge_loop() {
+	local _instmerged _tomerge
+	echo "===> Type h at the sdiff prompt (%) to get usage help\n"
+	_tomerge=true
+	while ${_tomerge}; do
+		cp -p ${COMPFILE} ${COMPFILE}.merged
+		sdiff -as -w $(tput cols) -o ${COMPFILE}.merged \
+			${TARGET} ${COMPFILE}
+		_instmerged=v
+		while [[ ${_instmerged} == v ]]; do
+			echo
 			echo "  Use 'e' to edit the merged file"
 			echo "  Use 'i' to install the merged file"
 			echo "  Use 'n' to view a diff between the merged and new files"
@@ -363,423 +379,253 @@ merge_loop() {
 			echo "  Use 'v' to view the merged file"
 			echo "  Use 'x' to delete the merged file and go back to previous menu"
 			echo "  Default is to leave the temporary file to deal with by hand"
-			echo ""
+			echo
 			echo -n "===> How should I deal with the merged file? [Leave it for later] "
-			read INSTALL_MERGED
-			case "${INSTALL_MERGED}" in
+			read _instmerged
+			case ${_instmerged} in
 			[eE])
 				echo "editing merged file...\n"
-				${EDIT} ${COMPFILE}.merged
-				INSTALL_MERGED=v
+				${EDITOR} ${COMPFILE}.merged
+				_instmerged=v
 				;;
 			[iI])
-				mv "${COMPFILE}.merged" "${COMPFILE}"
-				echo -n "\n===> Merging ${COMPFILE#.}"
-				install_file "${COMPFILE}" || \
-					warn "problem merging ${COMPFILE#.}"
-				unset MERGE_AGAIN
+				mv ${COMPFILE}.merged ${COMPFILE}
+				echo -n "\n===> Merging ${TARGET}"
+				sm_install || \
+					(echo && sm_warn "problem merging ${TARGET}")
+				_tomerge=false
 				;;
 			[nN])
 				(
 					echo "comparison between merged and new files:\n"
 					diff -u ${COMPFILE}.merged ${COMPFILE}
 				) | ${PAGER}
-				INSTALL_MERGED=v
+				_instmerged=v
 				;;
 			[oO])
 				(
 					echo "comparison between old and merged files:\n"
-					diff -u ${DESTDIR}${COMPFILE#.} ${COMPFILE}.merged
+					diff -u ${TARGET} ${COMPFILE}.merged
 				) | ${PAGER}
-				INSTALL_MERGED=v
+				_instmerged=v
 				;;
 			[rR])
-				rm "${COMPFILE}.merged"
+				rm ${COMPFILE}.merged
 				;;
 			[vV])
-				${PAGER} "${COMPFILE}.merged"
+				${PAGER} ${COMPFILE}.merged
 				;;
 			[xX])
-				rm "${COMPFILE}.merged"
+				rm ${COMPFILE}.merged
 				return 1
 				;;
 			'')
-				echo "===> ${COMPFILE} will remain for your consideration"
-				unset MERGE_AGAIN
+				_tomerge=false
 				;;
 			*)
-				echo "invalid choice: ${INSTALL_MERGED}"
-				INSTALL_MERGED=v
+				echo "invalid choice: ${_instmerged}"
+				_instmerged=v
 				;;
 			esac
 		done
 	done
 }
 
-diff_loop() {
-	local i CAN_INSTALL HANDLE_COMPFILE NO_INSTALLED
-	if [ -n "${BATCHMODE}" ]; then
-		HANDLE_COMPFILE=todo
-	else
-		HANDLE_COMPFILE=v
-	fi
+sm_diff_loop() {
+	local i _handle _nonexistent _autoinst
 
-	unset NO_INSTALLED CAN_INSTALL FORCE_UPG
+	${BATCHMODE} && _handle=todo || _handle=v
 
-	while [[ ${HANDLE_COMPFILE} == @(v|todo) ]]; do
-		if [ -f "${DESTDIR}${COMPFILE#.}" -a -f "${COMPFILE}" -a -z "${IS_LINK}" ]; then
-			if [ -z "${DIFFMODE}" ]; then
-				# automatically install files if current != new and current = old
-				for i in "${AUTO_UPG[@]}"; do
-					[[ ${i} == ${COMPFILE} ]] && FORCE_UPG=1
+	FORCE_UPG=false
+	_nonexistent=false
+	while [[ ${_handle} == @(v|todo) ]]; do
+		if [[ -f ${TARGET} && -f ${COMPFILE} ]] && ! ${IS_LINK}; then
+			if ! ${DIFFMODE}; then
+				# automatically install files if current != new
+				# and current = old
+				for i in ${AUTO_UPG[@]}; do \
+					[[ ${i} == ${COMPFILE} ]] && FORCE_UPG=true
 				done
-				# automatically install files which differ only by CVS Id or that are binaries
-				if [ -z "$(diff -q -I'[$]OpenBSD:.*$' "${DESTDIR}${COMPFILE#.}" "${COMPFILE}")" -o -n "${FORCE_UPG}" -o -n "${IS_BINFILE}" ]; then
-					echo -n "===> Updating ${COMPFILE#.}"
-					if install_file "${COMPFILE}"; then
-						AUTO_INSTALLED_FILES="${AUTO_INSTALLED_FILES}${DESTDIR}${COMPFILE#.}\n"
-					else
-						warn "problem updating ${COMPFILE#.}"
-					fi
+				# automatically install files which differ
+				# only by CVS Id or that are binaries
+				if [[ -z $(diff -q -I'[$]OpenBSD:.*$' ${TARGET} ${COMPFILE}) ]] || \
+					${FORCE_UPG} || ${IS_BIN}; then
+					echo -n "===> Updating ${TARGET}"
+					sm_install && \
+						_autoinst="${_autoinst}${TARGET}\n" || \
+						(echo && sm_warn "problem updating ${TARGET}")
 					return
 				fi
 			fi
-			if [ "${HANDLE_COMPFILE}" = "v" ]; then
+			if [[ ${_handle} == v ]]; then
 				(
 					echo "\n========================================================================\n"
 					echo "===> Displaying differences between ${COMPFILE} and installed version:"
-					echo ""
-					diff -u "${DESTDIR}${COMPFILE#.}" "${COMPFILE}"
+					echo
+					diff -u ${TARGET} ${COMPFILE}
 				) | ${PAGER}
-				echo ""
+				echo
 			fi
 		else
 			# file does not exist on the target system
-			if [ -n "${IS_LINK}" ]; then
-				if [ -n "${DIFFMODE}" ]; then
-					echo ""
-					NO_INSTALLED=1
+			if ${IS_LINK}; then
+				if ${DIFFMODE}; then
+					echo && _nonexistent=true
 				else
-					if install_link; then
-						echo "===> ${COMPFILE#.} link created successfully"
-						AUTO_INSTALLED_FILES="${AUTO_INSTALLED_FILES}${DESTDIR}${COMPFILE#.}\n"
-					else
-						warn "problem creating ${COMPFILE#.} link"
-					fi
+					echo "===> Linking ${TARGET}"
+					sm_install && \
+						_autoinst="${_autoinst}${TARGET}\n" || \
+						sm_warn "problem creating ${TARGET} link"
 					return
 				fi
 			fi
-			if [ -n "${DIFFMODE}" ]; then
-				echo ""
-				NO_INSTALLED=1
+			if ${DIFFMODE}; then
+				echo && _nonexistent=true
 			else
-				echo -n "===> Installing ${COMPFILE#.}"
-				if install_file "${COMPFILE}"; then
-					AUTO_INSTALLED_FILES="${AUTO_INSTALLED_FILES}${DESTDIR}${COMPFILE#.}\n"
-				else
-					warn "problem installing ${COMPFILE#.}"
-				fi
+				echo -n "===> Installing ${TARGET}"
+				sm_install && \
+					_autoinst="${_autoinst}${TARGET}\n" || \
+					(echo && sm_warn "problem installing ${TARGET}")
 				return
 			fi
 		fi
 
-		if [ -z "${BATCHMODE}" ]; then
+		if ! ${BATCHMODE}; then
 			echo "  Use 'd' to delete the temporary ${COMPFILE}"
-			if [ "${COMPFILE}" != ./etc/hosts ]; then
-				CAN_INSTALL=1
-				echo "  Use 'i' to install the temporary ${COMPFILE}"
-			fi
-			if [ -z "${NO_INSTALLED}" -a -z "${IS_BINFILE}" -a -z "${IS_LINK}" ]; then
+			echo "  Use 'i' to install the temporary ${COMPFILE}"
+			if ! ${_nonexistent} && ! ${IS_BIN} && \
+				! ${IS_LINK}; then
 				echo "  Use 'm' to merge the temporary and installed versions"
 				echo "  Use 'v' to view the diff results again"
 			fi
-			echo ""
+			echo
 			echo "  Default is to leave the temporary file to deal with by hand"
-			echo ""
+			echo
 			echo -n "How should I deal with this? [Leave it for later] "
-			read HANDLE_COMPFILE
+			read _handle
 		else
-			unset HANDLE_COMPFILE
+			unset _handle
 		fi
 
-		case "${HANDLE_COMPFILE}" in
+		case ${_handle} in
 		[dD])
-			rm "${COMPFILE}"
+			rm ${COMPFILE}
 			echo "\n===> Deleting ${COMPFILE}"
 			;;
 		[iI])
-			if [ -n "${CAN_INSTALL}" ]; then
-				echo ""
-				if [ -n "${IS_LINK}" ]; then
-					if install_link; then
-						echo "===> ${COMPFILE#.} link created successfully"
-						MERGED_FILES="${MERGED_FILES}${DESTDIR}${COMPFILE#.}\n"
-					else
-						warn "problem creating ${COMPFILE#.} link"
-					fi
-				else
-					echo -n "===> Updating ${COMPFILE#.}"
-					if install_file "${COMPFILE}"; then
-						MERGED_FILES="${MERGED_FILES}${DESTDIR}${COMPFILE#.}\n"
-					else
-						warn "problem updating ${COMPFILE#.}"
-					fi
-				fi
+			echo
+			if ${IS_LINK}; then
+				echo "===> Linking ${TARGET}"
+				sm_install && \
+					MERGED_FILES="${MERGED_FILES}${TARGET}\n" || \
+					sm_warn "problem creating ${TARGET} link"
 			else
-				echo "invalid choice: ${HANDLE_COMPFILE}\n"
-				HANDLE_COMPFILE="todo"
+				echo -n "===> Updating ${TARGET}"
+				sm_install && \
+					MERGED_FILES="${MERGED_FILES}${TARGET}\n" || \
+					(echo && sm_warn "problem updating ${TARGET}")
 			fi
-				
 			;;
 		[mM])
-			if [ -z "${NO_INSTALLED}" -a -z "${IS_BINFILE}" -a -z "${IS_LINK}" ]; then
-				merge_loop && \
-					MERGED_FILES="${MERGED_FILES}${DESTDIR}${COMPFILE#.}\n" || \
-					HANDLE_COMPFILE="todo"
+			if ! ${_nonexistent} && ! ${IS_BIN} && ! ${IS_LINK}; then
+				sm_merge_loop && \
+					MERGED_FILES="${MERGED_FILES}${TARGET}\n" || \
+						_handle=todo
 			else
-				echo "invalid choice: ${HANDLE_COMPFILE}\n"
-				HANDLE_COMPFILE="todo"
+				echo "invalid choice: ${_handle}\n"
+				_handle=todo
 			fi
 			;;
 		[vV])
-			if [ -z "${NO_INSTALLED}" -a -z "${IS_BINFILE}" -a -z "${IS_LINK}" ]; then
-				HANDLE_COMPFILE="v"
+			if ! ${_nonexistent} && ! ${IS_BIN} && ! ${IS_LINK}; then
+				_handle=v
 			else
-				echo "invalid choice: ${HANDLE_COMPFILE}\n"
-				HANDLE_COMPFILE="todo"
+				echo "invalid choice: ${_handle}\n"
+				_handle=todo
 			fi
 			;;
 		'')
-			echo "===> ${COMPFILE} will remain for your consideration"
+			echo -n
 			;;
 		*)
-			echo "invalid choice: ${HANDLE_COMPFILE}\n"
-			HANDLE_COMPFILE="todo"
+			echo "invalid choice: ${_handle}\n"
+			_handle=todo
 			continue
 			;;
 		esac
 	done
 }
 
-sm_compare() {
-	local _c1 _c2 COMPFILE CVSID1 CVSID2
-	echo "===> Starting comparison"
-
-	cd ${TEMPROOT} || error_rm_wrkdir "cannot enter ${TEMPROOT}"
-
-	# aliases(5) needs to be handled last in case smtpd.conf(5) syntax changes
-	_c1=$(find . -type f -or -type l | grep -vE '^./etc/mail/aliases$')
-	_c2=$(find . -type f -name aliases)
-	for COMPFILE in ${_c1} ${_c2}; do
-		unset IS_BINFILE IS_LINK
-		# treat empty files the same as IS_BINFILE to avoid comparing them;
-		# only process them (i.e. install) if they don't exist on the target system
-		if [ ! -s "${COMPFILE}" ]; then
-			if [ -f "${DESTDIR}${COMPFILE#.}" ]; then
-				[[ -f ${COMPFILE} ]] && rm ${COMPFILE}
-			else
-				IS_BINFILE=1
-			fi
-		fi
-
-		# links need to be treated in a different way
-		[[ -h ${COMPFILE} ]] && IS_LINK=1
-		if [ -n "${IS_LINK}" -a -h "${DESTDIR}${COMPFILE#.}" ]; then
-			IS_LINK=1
-			# if links target are the same, remove from temproot
-			if [ "$(readlink ${COMPFILE})" = "$(readlink ${DESTDIR}${COMPFILE#.})" ]; then
-				rm "${COMPFILE}"
-			else
-				diff_loop
-			fi
-			continue
-		fi
-
-		# file not present on the system
-		if [ ! -e "${DESTDIR}${COMPFILE#.}" ]; then
-			diff_loop
-			continue
-		fi
-
-		# compare CVS $Id's first so if the file hasn't been modified,
-		# it will be deleted from temproot and ignored from comparison.
-		# several files are generated from scripts so CVS ID is not a
-		# reliable way of detecting changes; leave for a full diff.
-		if [[ -z ${DIFFMODE} && \
-			${COMPFILE} != ./etc/@(fbtab|sysctl.conf|ttys) && \
-			-z ${IS_LINK} ]]; then
-			CVSID1=$(sed -n "/[$]OpenBSD:.*Exp [$]/{p;q;}" ${DESTDIR}${COMPFILE#.} 2>/dev/null)
-			CVSID2=$(sed -n "/[$]OpenBSD:.*Exp [$]/{p;q;}" ${COMPFILE} 2>/dev/null) || CVSID2=none
-			[[ ${CVSID2} == ${CVSID1} ]] && rm "${COMPFILE}"
-		fi
-
-		if [ -f "${COMPFILE}" -a -z "${IS_LINK}" ]; then
-			# make sure files are different; if not, delete the one in temproot
-			if diff -q "${DESTDIR}${COMPFILE#.}" "${COMPFILE}" >/dev/null; then
-				rm "${COMPFILE}"
-			# xetcXX.tgz contains binary files; set IS_BINFILE to disable sdiff
-			elif diff -q "${DESTDIR}${COMPFILE#.}" "${COMPFILE}" | grep -q Binary; then
-				IS_BINFILE=1
-				diff_loop
-			else
-				diff_loop
-			fi
-		fi
-	done
-}
 
 sm_check_an_eg() {
-	EGSUM=examplessum
+	${PKGMODE} && return
 	local _egmods _i _managed
-	if [ -f "${DESTDIR}/${DBDIR}/${EGSUM}" ]; then
-		EGMODS="$(cd ${DESTDIR:=/} && sha256 -c ${DESTDIR}/${DBDIR}/${EGSUM} 2>/dev/null | grep 'FAILED$' | awk '{ print $2 }' | sed -e "s,:,,")"
-		mv ${DESTDIR}/${DBDIR}/${EGSUM} ${DESTDIR}/${DBDIR}/.${EGSUM}.bak
+
+	if [[ -f /usr/share/sysmerge/examplessum ]]; then
+		cp /usr/share/sysmerge/examplessum ${_WRKDIR}/examplessum
+		_egmods=$(cd / && \
+			 sha256 -c /usr/share/sysmerge/examplessum 2>/dev/null | \
+			 sed -n 's/^(SHA256) \(.*\): FAILED$/\1/p')
 	fi
-	for _i in ${EGMODS}; do
-		_managed=$(echo ${_i} | sed -e "s,etc/examples,etc,")
-		if [ -f "${DESTDIR}/${_managed}" ]; then
-			_egmods="${_egmods} ${_managed##*/}"
-		fi
+	for _i in ${_egmods}; do
+		_i=${_i##*/}
+		[[ -f /etc/${_i} ]] && \
+			_managed="${_managed:+${_managed} }${_i}"
 	done
-	if [ -n "${_egmods}" ]; then
-		warn "example file(s) changed for:${_egmods}"
-	else
-		# example changed but we have no corresponding file under /etc
-		unset EGMODS
-	fi
-	cd ${DESTDIR:=/} && \
-		find ./etc/examples -type f | xargs sha256 -h ${DESTDIR}/${DBDIR}/${EGSUM} || \
-		error_rm_wrkdir "failed to create ${EGSUM} checksum file"
-	if [ -f "${DESTDIR}/${DBDIR}/.${EGSUM}.bak" ]; then
-		rm ${DESTDIR}/${DBDIR}/.${EGSUM}.bak
-	fi
+	# only warn for files we care about
+	[[ -n ${_managed} ]] && sm_warn "example(s) changed for: ${_managed}"
+	mv ./usr/share/sysmerge/examplessum \
+		/usr/share/sysmerge/examplessum
 }
 
 sm_post() {
-	local FILES_IN_TEMPROOT FILES_IN_BKPDIR
+	# XXX drop -f after OPENBSD_5_7
+	rm -f ${_WRKDIR}/*sum
+	cd ${_WRKDIR} && \
+		find . -type d -depth -empty -exec rmdir -p '{}' + 2>/dev/null
+	rmdir ${_WRKDIR} 2>/dev/null
 
-	FILES_IN_TEMPROOT=$(find ${TEMPROOT} -type f ! -name \*.merged -size +0)
-	[[ -d ${BKPDIR} ]] && FILES_IN_BKPDIR=$(find ${BKPDIR} -type f -size +0)
+	[[ -d ${_BKPDIR} ]] && \
+		echo "===> Backup file(s):" && \
+		find ${_BKPDIR} -type f -size +0
 
-	if [ -n "${NEED_NEWALIASES}" ]; then
-		report "===> A new ${DESTDIR}/etc/mail/aliases file was installed."
-		report "However ${DESTDIR}/usr/bin/newaliases could not be run,"
-		report "you will need to rebuild your aliases database manually.\n"
-	fi
+	[[ -d ${_TMPROOT} ]] && \
+		sm_warn "file(s) left for comparison:" && \
+		find ${_TMPROOT} -type f ! -name \*.merged -size +0
 
-	if [ -n "${AUTO_INSTALLED_FILES}" ]; then
-		report "===> Automatically installed file(s)"
-		report "${AUTO_INSTALLED_FILES}"
-	fi
-	if [ -n "${MERGED_FILES}" ]; then
-		report "===> Manually merged/installed file(s)"
-		report "${MERGED_FILES}"
-	fi
-	if [ -n "${FILES_IN_BKPDIR}" ]; then
-		report "===> Backup of replaced file(s) can be found under"
-		report "${BKPDIR}\n"
-	fi
-	if [ -n "${NEWUSR}" -o -n "${NEWGRP}" ]; then
-		report "===> The following user(s)/group(s) have been added"
-		[[ -n ${NEWUSR} ]] && report "user(s): ${NEWUSR[@]}"
-		[[ -n ${NEWGRP} ]] && report "group(s): ${NEWGRP[@]}"
-		report ""
-	fi
-	if [ -n "${EGMODS}" ]; then
-		report "===> Example(s) with corresponding used files modified since last run"
-		report "${EGMODS}"
-		report ""
-	fi
-	if [ -n "${FILES_IN_TEMPROOT}" ]; then
-		report "===> File(s) remaining for you to merge by hand"
-		report "${FILES_IN_TEMPROOT}"
-	fi
-
-	[[ -n ${FILES_IN_TEMPROOT} ]] && \
-		warn "some files are still left for comparison"
-
-	[[ -n ${NEED_NEWALIASES} ]] && \
-		warn "newaliases(8) failed to run properly"
-
-	[[ -n ${NEED_REBOOT} ]] && \
-		warn "some new/updated file(s) may require a reboot"
-
-	echo "===> Checking directory hierarchy permissions (running mtree(8))"
-	mtree -qdef ${DESTDIR}/etc/mtree/4.4BSD.dist -p ${DESTDIR:=/} -U >/dev/null
-	[[ -n ${XTGZ} ]] && \
-		mtree -qdef ${DESTDIR}/etc/mtree/BSD.x11.dist -p ${DESTDIR:=/} -U >/dev/null
-
-	if [ -e "${REPORT}" ]; then
-		echo "===> Output log available at ${REPORT}"
-		find ${TEMPROOT} -type f -empty | xargs -r rm
-		find ${TEMPROOT} -type d | sort -r | xargs -r rmdir 2>/dev/null
-	else
-		echo "===> Removing ${WRKDIR}"
-		rm -rf "${WRKDIR}"
-	fi
-
-	unset NEED_NEWALIASES NEED_REBOOT
-
-	clean_src
-	rm -f ${DESTDIR}/${DBDIR}/.*.bak
+	mtree -qdef /etc/mtree/4.4BSD.dist -p / -U >/dev/null
+	[[ -d /etc/X11 ]] && \
+		mtree -qdef /etc/mtree/BSD.x11.dist -p / -U >/dev/null
 }
 
+BATCHMODE=false
+DIFFMODE=false
+PKGMODE=false
 
-while getopts bdSs:x: arg; do
+while getopts bdp arg; do
 	case ${arg} in
-	b)
-		BATCHMODE=1
-		;;
-	d)
-		DIFFMODE=1
-		;;
-	s)
-		if [ -d "${OPTARG}" ]; then
-			SRCDIR="${OPTARG}"
-			[[ -f ${SRCDIR}/etc/Makefile ]] || \
-				error_rm_wrkdir "${SRCDIR}: invalid \"src\" tree, missing ${SRCDIR}/etc/Makefile"
-			continue
-		fi
-		TGZ="${OPTARG}"
-		;;
-	S)	
-		NOSIGCHECK=1
-		;;
-	x)
-		XTGZ="${OPTARG}"
-		;;
-	*)
-		usage
-		error_rm_wrkdir
-		;;
+	b)	BATCHMODE=true;;
+	d)	DIFFMODE=true;;
+	p)	PKGMODE=true;;
+	*)	usage;;
 	esac
 done
-
 shift $(( OPTIND -1 ))
-if (($# != 0)); then
-	usage
-	error_rm_wrkdir
-fi
+[[ $# -ne 0 ]] && usage
 
-if [ -z "${SRCDIR}" -a -z "${TGZ}" -a -z "${XTGZ}" ]; then
-	if [ -n "${SM_PATH}" ]; then
-		TGZ="${SM_PATH}/etc${RELINT}.tgz"
-		if [ -d ${DESTDIR}/etc/X11 ]; then
-			XTGZ="${SM_PATH}/xetc${RELINT}.tgz"
-		fi
-	elif [ -f "/usr/src/etc/Makefile" ]; then
-		SRCDIR=/usr/src
-	else
-		usage
-		error_rm_wrkdir "please specify a valid path to src or (x)etcXX.tgz"
-	fi
-fi
+[[ $(id -u) -ne 0 ]] && echo "${0##*/}: need root privileges" && usage
 
-TEMPROOT="${WRKDIR}/temproot"
-BKPDIR="${WRKDIR}/backups"
+# global constants
+_WRKDIR=$(mktemp -d -p ${TMPDIR:=/tmp} sysmerge.XXXXXXXXXX) || exit 1
+_BKPDIR=${_WRKDIR}/backups
+_TMPROOT=${_WRKDIR}/temproot
+_RELINT=$(uname -r | tr -d '.') || exit 1
+readonly _WRKDIR _BKPDIR _TMPROOT _RELINT
 
-sm_fetch_and_verify
-sm_populate
-sm_compare
-sm_check_an_eg
-sm_post
+[[ -z ${VISUAL} ]] && EDITOR=${EDITOR:=/usr/bin/vi} || EDITOR=${VISUAL}
+PAGER=${PAGER:=/usr/bin/more}
+
+mkdir -p ${_TMPROOT} || sm_error "cannot create ${_TMPROOT}"
+cd ${_TMPROOT} || sm_error "cannot enter ${_TMPROOT}"
+
+sm_init && sm_post

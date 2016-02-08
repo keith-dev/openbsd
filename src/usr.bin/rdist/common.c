@@ -1,4 +1,4 @@
-/*	$OpenBSD: common.c,v 1.33 2014/07/12 03:32:00 guenther Exp $	*/
+/*	$OpenBSD: common.c,v 1.36 2015/01/20 09:00:16 guenther Exp $	*/
 
 /*
  * Copyright (c) 1983 Regents of the University of California.
@@ -29,22 +29,31 @@
  * SUCH DAMAGE.
  */
 
+#include <sys/stat.h>
+#include <sys/time.h>
+#include <sys/wait.h>
+
+#include <errno.h>
+#include <fcntl.h>
+#include <grp.h>
+#include <limits.h>
+#include <paths.h>
+#include <stdarg.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <unistd.h>
+
 #include "defs.h"
 
 /*
  * Things common to both the client and server.
  */
 
-#if	defined(NEED_UTIME_H)
-#include <utime.h>
-#endif	/* defined(NEED_UTIME_H) */
-#include <sys/wait.h>
-#include <sys/socket.h>
-
 /*
  * Variables common to both client and server
  */
-char			host[MAXHOSTNAMELEN];	/* Name of this host */
+char			host[HOST_NAME_MAX+1];	/* Name of this host */
 uid_t			userid = (uid_t)-1;	/* User's UID */
 gid_t			groupid = (gid_t)-1;	/* User's GID */
 char		       *homedir = NULL;		/* User's $HOME */
@@ -58,7 +67,6 @@ int			rem_r = -1;		/* Client file descriptor */
 int			rem_w = -1;		/* Client file descriptor */
 struct passwd	       *pw = NULL;		/* Local user's pwd entry */
 volatile sig_atomic_t 	contimedout = FALSE;	/* Connection timed out */
-int			proto_version = -1;	/* Protocol version */
 int			rtimeout = RTIMEOUT;	/* Response time out */
 jmp_buf			finish_jmpbuf;		/* Finish() jmp buffer */
 int			setjmp_ok = FALSE;	/* setjmp()/longjmp() status */
@@ -145,8 +153,6 @@ init(int argc, char **argv, char **envp)
 void
 finish(void)
 {
-	extern jmp_buf finish_jmpbuf;
-
 	debugmsg(DM_CALL, 
 		 "finish() called: do_fork = %d amchild = %d isserver = %d",
 		 do_fork, amchild, isserver);
@@ -568,7 +574,6 @@ exptilde(char *ebuf, char *file, size_t ebufsize)
 {
 	char *pw_dir, *rest;
 	size_t len;
-	extern char *homedir;
 
 	if (*file != '~') {
 notilde:

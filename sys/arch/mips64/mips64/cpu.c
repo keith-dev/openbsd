@@ -1,4 +1,4 @@
-/*	$OpenBSD: cpu.c,v 1.55 2014/06/18 20:03:55 miod Exp $ */
+/*	$OpenBSD: cpu.c,v 1.57 2015/02/11 05:25:15 miod Exp $ */
 
 /*
  * Copyright (c) 1997-2004 Opsycon AB (www.opsycon.se)
@@ -29,6 +29,7 @@
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/proc.h>
+#include <sys/atomic.h>
 #include <sys/device.h>
 #include <sys/malloc.h>
 #include <dev/rndvar.h>
@@ -378,7 +379,7 @@ enable_fpu(struct proc *p)
 		MipsSwitchFPState(ci->ci_fpuproc, p->p_md.md_regs);
 	else
 		MipsSwitchFPState16(ci->ci_fpuproc, p->p_md.md_regs);
-	atomic_add_int(&uvmexp.fpswtch, 1);
+	atomic_inc_int(&uvmexp.fpswtch);
 
 	ci->ci_fpuproc = p;
 	p->p_md.md_regs->sr |= SR_COP_1_BIT;

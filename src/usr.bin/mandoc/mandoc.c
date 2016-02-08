@@ -1,7 +1,7 @@
-/*	$Id: mandoc.c,v 1.52 2014/07/06 19:08:56 schwarze Exp $ */
+/*	$OpenBSD: mandoc.c,v 1.60 2015/02/20 23:51:54 schwarze Exp $ */
 /*
- * Copyright (c) 2008, 2009, 2010, 2011 Kristaps Dzonsons <kristaps@bsd.lv>
- * Copyright (c) 2011, 2012, 2013, 2014 Ingo Schwarze <schwarze@openbsd.org>
+ * Copyright (c) 2008-2011, 2014 Kristaps Dzonsons <kristaps@bsd.lv>
+ * Copyright (c) 2011-2015 Ingo Schwarze <schwarze@openbsd.org>
  *
  * Permission to use, copy, modify, and distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -77,24 +77,13 @@ mandoc_escape(const char **end, const char **start, int *sz)
 		break;
 	case '[':
 		gly = ESCAPE_SPECIAL;
-		/*
-		 * Unicode escapes are defined in groff as \[uXXXX] to
-		 * \[u10FFFF], where the contained value must be a valid
-		 * Unicode codepoint.  Here, however, only check whether
-		 * it's not a zero-width escape.
-		 */
-		if ('u' == (*start)[0] && ']' != (*start)[1])
-			gly = ESCAPE_UNICODE;
 		term = ']';
 		break;
 	case 'C':
 		if ('\'' != **start)
 			return(ESCAPE_ERROR);
 		*start = ++*end;
-		if ('u' == (*start)[0] && '\'' != (*start)[1])
-			gly = ESCAPE_UNICODE;
-		else
-			gly = ESCAPE_SPECIAL;
+		gly = ESCAPE_SPECIAL;
 		term = '\'';
 		break;
 
@@ -165,16 +154,18 @@ mandoc_escape(const char **end, const char **start, int *sz)
 		/* FALLTHROUGH */
 	case 'D':
 		/* FALLTHROUGH */
-	case 'o':
-		/* FALLTHROUGH */
 	case 'R':
 		/* FALLTHROUGH */
 	case 'X':
 		/* FALLTHROUGH */
 	case 'Z':
-		if ('\0' == **start)
-			return(ESCAPE_ERROR);
 		gly = ESCAPE_IGNORE;
+		/* FALLTHROUGH */
+	case 'o':
+		if (**start == '\0')
+			return(ESCAPE_ERROR);
+		if (gly == ESCAPE_ERROR)
+			gly = ESCAPE_OVERSTRIKE;
 		term = **start;
 		*start = ++*end;
 		break;
@@ -197,7 +188,8 @@ mandoc_escape(const char **end, const char **start, int *sz)
 		/* FALLTHROUGH */
 	case 'x':
 		if (strchr(" %&()*+-./0123456789:<=>", **start)) {
-			++*end;
+			if ('\0' != **start)
+				++*end;
 			return(ESCAPE_ERROR);
 		}
 		gly = ESCAPE_IGNORE;
@@ -233,7 +225,7 @@ mandoc_escape(const char **end, const char **start, int *sz)
 
 		/* See +/- counts as a sign. */
 		if ('+' == **end || '-' == **end || ASCII_HYPH == **end)
-			(*end)++;
+			*start = ++*end;
 
 		switch (**end) {
 		case '(':
@@ -247,6 +239,14 @@ mandoc_escape(const char **end, const char **start, int *sz)
 		case '\'':
 			*start = ++*end;
 			term = '\'';
+			break;
+		case '3':
+			/* FALLTHROUGH */
+		case '2':
+			/* FALLTHROUGH */
+		case '1':
+			*sz = (*end)[-1] == 's' &&
+			    isdigit((unsigned char)(*end)[1]) ? 2 : 1;
 			break;
 		default:
 			*sz = 1;
@@ -341,6 +341,21 @@ mandoc_escape(const char **end, const char **start, int *sz)
 	case ESCAPE_SPECIAL:
 		if (1 == *sz && 'c' == **start)
 			gly = ESCAPE_NOSPACE;
+		/*
+		 * Unicode escapes are defined in groff as \[u0000]
+		 * to \[u10FFFF], where the contained value must be
+		 * a valid Unicode codepoint.  Here, however, only
+		 * check the length and range.
+		 */
+		if (**start != 'u' || *sz < 5 || *sz > 7)
+			break;
+		if (*sz == 7 && ((*start)[1] != '1' || (*start)[2] != '0'))
+			break;
+		if (*sz == 6 && (*start)[1] == '0')
+			break;
+		if ((int)strspn(*start + 1, "0123456789ABCDEFabcdef")
+		    + 1 == *sz)
+			gly = ESCAPE_UNICODE;
 		break;
 	default:
 		break;
@@ -470,6 +485,8 @@ time2a(time_t t)
 	int		 isz;
 
 	tm = localtime(&t);
+	if (tm == NULL)
+		return(NULL);
 
 	/*
 	 * Reserve space:

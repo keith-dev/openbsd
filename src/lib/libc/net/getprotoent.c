@@ -1,4 +1,4 @@
-/*	$OpenBSD: getprotoent.c,v 1.10 2007/09/02 15:19:17 deraadt Exp $ */
+/*	$OpenBSD: getprotoent.c,v 1.12 2014/10/11 03:12:13 doug Exp $ */
 /*
  * Copyright (c) 1983, 1993
  *	The Regents of the University of California.  All rights reserved.
@@ -42,7 +42,7 @@ void
 setprotoent_r(int f, struct protoent_data *pd)
 {
 	if (pd->fp == NULL)
-		pd->fp = fopen(_PATH_PROTOCOLS, "r" );
+		pd->fp = fopen(_PATH_PROTOCOLS, "re" );
 	else
 		rewind(pd->fp);
 	pd->stayopen |= f;
@@ -71,7 +71,7 @@ getprotoent_r(struct protoent *pe, struct protoent_data *pd)
 	long l;
 	int serrno;
 
-	if (pd->fp == NULL && (pd->fp = fopen(_PATH_PROTOCOLS, "r" )) == NULL)
+	if (pd->fp == NULL && (pd->fp = fopen(_PATH_PROTOCOLS, "re" )) == NULL)
 		return (-1);
 again:
 	if ((p = fgetln(pd->fp, &len)) == NULL)
@@ -119,8 +119,8 @@ again:
 				continue;
 			}
 			if (q == &pe->p_aliases[pd->maxaliases - 1]) {
-				p = realloc(pe->p_aliases,
-				    2 * pd->maxaliases * sizeof(char *));
+				p = reallocarray(pe->p_aliases,
+				    pd->maxaliases, 2 * sizeof(char *));
 				if (p == NULL) {
 					serrno = errno;
 					endprotoent_r(pd);

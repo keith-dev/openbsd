@@ -1,4 +1,4 @@
-/*	$OpenBSD: ip_input.c,v 1.235 2014/07/13 13:57:56 mpi Exp $	*/
+/*	$OpenBSD: ip_input.c,v 1.246 2015/02/09 12:18:19 claudio Exp $	*/
 /*	$NetBSD: ip_input.c,v 1.30 1996/03/16 23:53:58 christos Exp $	*/
 
 /*
@@ -47,6 +47,7 @@
 #include <sys/pool.h>
 
 #include <net/if.h>
+#include <net/if_var.h>
 #include <net/if_dl.h>
 #include <net/route.h>
 
@@ -113,7 +114,6 @@ int	ip_frags = 0;
 
 int *ipctl_vars[IPCTL_MAXID] = IPCTL_VARS;
 
-struct	in_ifaddrhead in_ifaddr;
 struct	ifqueue ipintrq;
 
 struct pool ipqent_pool;
@@ -155,10 +155,8 @@ ip_init(void)
 	const u_int16_t defbaddynamicports_tcp[] = DEFBADDYNAMICPORTS_TCP;
 	const u_int16_t defbaddynamicports_udp[] = DEFBADDYNAMICPORTS_UDP;
 
-	pool_init(&ipqent_pool, sizeof(struct ipqent), 0, 0, 0, "ipqepl",
-	    NULL);
-	pool_init(&ipq_pool, sizeof(struct ipq), 0, 0, 0, "ipqpl",
-	    NULL);
+	pool_init(&ipqent_pool, sizeof(struct ipqent), 0, 0, 0, "ipqe",  NULL);
+	pool_init(&ipq_pool, sizeof(struct ipq), 0, 0, 0, "ipq", NULL);
 
 	pr = pffindproto(PF_INET, IPPROTO_RAW, SOCK_RAW);
 	if (pr == 0)
@@ -173,7 +171,6 @@ ip_init(void)
 			ip_protox[pr->pr_protocol] = pr - inetsw;
 	LIST_INIT(&ipq);
 	IFQ_SET_MAXLEN(&ipintrq, IFQ_MAXLEN);
-	TAILQ_INIT(&in_ifaddr);
 	if (ip_mtudisc != 0)
 		ip_mtudisc_timeout_q =
 		    rt_timer_queue_create(ip_mtudisc_timeout);
@@ -350,6 +347,14 @@ ipv4_input(struct mbuf *m)
 
 	if (IN_MULTICAST(ip->ip_dst.s_addr)) {
 		struct in_multi *inm;
+
+		/*
+		 * Make sure M_MCAST is set.  It should theoretically
+		 * already be there, but let's play safe because upper
+		 * layers check for this flag.
+		 */
+		m->m_flags |= M_MCAST;
+
 #ifdef MROUTING
 		if (ipmforwarding && ip_mrouter) {
 			if (m->m_flags & M_EXT) {
@@ -643,7 +648,8 @@ bad:
 int
 in_ouraddr(struct mbuf *m, struct ifnet *ifp, struct in_addr ina)
 {
-	struct in_ifaddr	*ia;
+	struct in_ifaddr	*ia = NULL;
+	struct rtentry		*rt;
 	struct sockaddr_in	 sin;
 #if NPF > 0
 	struct pf_state_key	*key;
@@ -666,7 +672,12 @@ in_ouraddr(struct mbuf *m, struct ifnet *ifp, struct in_addr ina)
 	sin.sin_len = sizeof(sin);
 	sin.sin_family = AF_INET;
 	sin.sin_addr = ina;
-	ia = ifatoia(ifa_ifwithaddr(sintosa(&sin), m->m_pkthdr.ph_rtableid));
+	rt = rtalloc(sintosa(&sin), 0, m->m_pkthdr.ph_rtableid);
+	if (rt != NULL) {
+		if (rt->rt_flags & (RTF_LOCAL|RTF_BROADCAST))
+			ia = ifatoia(rt->rt_ifa);
+		rtfree(rt);
+	}
 
 	if (ia == NULL) {
 		struct ifaddr *ifa;
@@ -715,23 +726,6 @@ in_ouraddr(struct mbuf *m, struct ifnet *ifp, struct in_addr ina)
 	}
 
 	return (ISSET(ia->ia_ifp->if_flags, IFF_UP));
-}
-
-struct in_ifaddr *
-in_iawithaddr(struct in_addr ina, u_int rtableid)
-{
-	struct in_ifaddr	*ia;
-	struct sockaddr_in	 sin;
-
-	memset(&sin, 0, sizeof(sin));
-	sin.sin_len = sizeof(sin);
-	sin.sin_family = AF_INET;
-	sin.sin_addr = ina;
-	ia = ifatoia(ifa_ifwithaddr(sintosa(&sin), rtableid));
-	if (ia == NULL || ina.s_addr == ia->ia_addr.sin_addr.s_addr)
-		return (ia);
-
-	return (NULL);
 }
 
 /*
@@ -958,8 +952,8 @@ ip_slowtimo(void)
 		}
 	}
 	if (ipforward_rt.ro_rt) {
-		RTFREE(ipforward_rt.ro_rt);
-		ipforward_rt.ro_rt = 0;
+		rtfree(ipforward_rt.ro_rt);
+		ipforward_rt.ro_rt = NULL;
 	}
 	splx(s);
 }
@@ -1238,15 +1232,15 @@ ip_rtaddr(struct in_addr dst, u_int rtableid)
 
 	if (ipforward_rt.ro_rt == 0 || dst.s_addr != sin->sin_addr.s_addr) {
 		if (ipforward_rt.ro_rt) {
-			RTFREE(ipforward_rt.ro_rt);
-			ipforward_rt.ro_rt = 0;
+			rtfree(ipforward_rt.ro_rt);
+			ipforward_rt.ro_rt = NULL;
 		}
 		sin->sin_family = AF_INET;
 		sin->sin_len = sizeof(*sin);
 		sin->sin_addr = dst;
 
-		ipforward_rt.ro_rt = rtalloc1(&ipforward_rt.ro_dst, RT_REPORT,
-		    rtableid);
+		ipforward_rt.ro_rt = rtalloc(&ipforward_rt.ro_dst,
+		    RT_REPORT|RT_RESOLVE, rtableid);
 	}
 	if (ipforward_rt.ro_rt == 0)
 		return (NULL);
@@ -1412,19 +1406,20 @@ ip_forward(struct mbuf *m, struct ifnet *ifp, int srcrt)
 	rtableid = m->m_pkthdr.ph_rtableid;
 
 	sin = satosin(&ipforward_rt.ro_dst);
-	if ((rt = ipforward_rt.ro_rt) == 0 ||
+	if ((rt = ipforward_rt.ro_rt) == NULL ||
 	    ip->ip_dst.s_addr != sin->sin_addr.s_addr ||
 	    rtableid != ipforward_rt.ro_tableid) {
 		if (ipforward_rt.ro_rt) {
-			RTFREE(ipforward_rt.ro_rt);
-			ipforward_rt.ro_rt = 0;
+			rtfree(ipforward_rt.ro_rt);
+			ipforward_rt.ro_rt = NULL;
 		}
 		sin->sin_family = AF_INET;
 		sin->sin_len = sizeof(*sin);
 		sin->sin_addr = ip->ip_dst;
 		ipforward_rt.ro_tableid = rtableid;
 
-		rtalloc_mpath(&ipforward_rt, &ip->ip_src.s_addr);
+		ipforward_rt.ro_rt = rtalloc_mpath(&ipforward_rt.ro_dst,
+		    &ip->ip_src.s_addr, ipforward_rt.ro_tableid);
 		if (ipforward_rt.ro_rt == 0) {
 			icmp_error(m, ICMP_UNREACH, ICMP_UNREACH_HOST, dest, 0);
 			return;
@@ -1553,8 +1548,8 @@ ip_forward(struct mbuf *m, struct ifnet *ifp, int srcrt)
 #ifndef SMALL_KERNEL
 	if (ipmultipath && ipforward_rt.ro_rt &&
 	    (ipforward_rt.ro_rt->rt_flags & RTF_MPATH)) {
-		RTFREE(ipforward_rt.ro_rt);
-		ipforward_rt.ro_rt = 0;
+		rtfree(ipforward_rt.ro_rt);
+		ipforward_rt.ro_rt = NULL;
 	}
 #endif
 	return;
@@ -1625,23 +1620,27 @@ ip_sysctl(int *name, u_int namelen, void *oldp, size_t *oldlenp, void *newp,
 	        return (sysctl_ifq(name + 1, namelen - 1,
 		    oldp, oldlenp, newp, newlen, &ipintrq));
 	case IPCTL_STATS:
-		if (newp != NULL)
-			return (EPERM);
-		return (sysctl_struct(oldp, oldlenp, newp, newlen,
+		return (sysctl_rdstruct(oldp, oldlenp, newp,
 		    &ipstat, sizeof(ipstat)));
+#ifdef MROUTING
 	case IPCTL_MRTSTATS:
-#ifdef MROUTING
-		if (newp != NULL)
-			return (EPERM);
-		return (sysctl_struct(oldp, oldlenp, newp, newlen,
+		return (sysctl_rdstruct(oldp, oldlenp, newp,
 		    &mrtstat, sizeof(mrtstat)));
-#else
-		return (EOPNOTSUPP);
-#endif
 	case IPCTL_MRTPROTO:
-#ifdef MROUTING
 		return (sysctl_rdint(oldp, oldlenp, newp, ip_mrtproto));
+	case IPCTL_MRTMFC:
+		if (newp)
+			return (EPERM);
+		return mrt_sysctl_mfc(oldp, oldlenp);
+	case IPCTL_MRTVIF:
+		if (newp)
+			return (EPERM);
+		return mrt_sysctl_vif(oldp, oldlenp);
 #else
+	case IPCTL_MRTPROTO:
+	case IPCTL_MRTSTATS:
+	case IPCTL_MRTMFC:
+	case IPCTL_MRTVIF:
 		return (EOPNOTSUPP);
 #endif
 	default:

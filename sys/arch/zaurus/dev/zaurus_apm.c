@@ -1,4 +1,4 @@
-/*	$OpenBSD: zaurus_apm.c,v 1.27 2014/07/08 17:19:25 deraadt Exp $	*/
+/*	$OpenBSD: zaurus_apm.c,v 1.33 2015/02/11 07:05:39 dlg Exp $	*/
 
 /*
  * Copyright (c) 2005 Uwe Stuehler <uwe@bsdx.de>
@@ -25,8 +25,9 @@
 #include <sys/buf.h>
 #include <sys/sysctl.h>
 #include <sys/mutex.h>
-#include <sys/lock.h>
 #include <sys/reboot.h>
+#include <sys/rwlock.h>
+#include <dev/rndvar.h>
 
 #include <arm/xscale/pxa2x0reg.h>
 #include <arm/xscale/pxa2x0var.h>
@@ -571,7 +572,7 @@ zapm_suspend(struct pxa2x0_apm_softc *pxa_sc)
 {
 	struct zapm_softc *sc = (struct zapm_softc *)pxa_sc;
 
-	config_suspend(device_mainbus(), DVACT_QUIESCE);
+	config_suspend_all(DVACT_QUIESCE);
 	bufq_quiesce();
 
 	/* Poll in suspended mode and forget the discharge timeout. */
@@ -644,7 +645,6 @@ zapm_resume(struct pxa2x0_apm_softc *pxa_sc)
 void
 zapm_poweroff(void)
 {
-	struct device *mainbus = device_mainbus();
 	struct pxa2x0_apm_softc *sc;
 	int s;
 
@@ -656,14 +656,16 @@ zapm_poweroff(void)
 #endif /* NWSDISPLAY > 0 */
 
 	s = splhigh();
-	config_suspend(mainbus, DVACT_SUSPEND);
+	config_suspend_all(DVACT_SUSPEND);
+
+	suspend_randomness();
 
 	/* XXX
 	 * Flag to disk drivers that they should "power down" the disk
 	 * when we get to DVACT_POWERDOWN.
 	 */
 	boothowto |= RB_POWERDOWN;
-	config_suspend(mainbus, DVACT_POWERDOWN);
+	config_suspend_all(DVACT_POWERDOWN);
 	boothowto &= ~RB_POWERDOWN;
 
 	/* XXX enable charging during suspend */
@@ -685,12 +687,13 @@ zapm_poweroff(void)
 	zapm_restart();
 
 	/* NOTREACHED */
-	config_suspend(mainbus, DVACT_RESUME);
+	config_suspend_all(DVACT_RESUME);
 	splx(s);
 
+	resume_randomness(NULL, 0);	/* force RNG upper level reseed */
 	bufq_restart();
 
-	config_suspend(mainbus, DVACT_WAKEUP);
+	config_suspend_all(DVACT_WAKEUP);
 
 #if NWSDISPLAY > 0
 	wsdisplay_resume();

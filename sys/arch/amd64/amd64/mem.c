@@ -1,4 +1,4 @@
-/*	$OpenBSD: mem.c,v 1.17 2014/07/12 18:44:41 tedu Exp $ */
+/*	$OpenBSD: mem.c,v 1.22 2015/02/10 22:44:35 miod Exp $ */
 /*
  * Copyright (c) 1988 University of Utah.
  * Copyright (c) 1982, 1986, 1990, 1993
@@ -52,11 +52,7 @@
 #include <sys/ioccom.h>
 #include <sys/malloc.h>
 #include <sys/memrange.h>
-#include <sys/proc.h>
 #include <sys/fcntl.h>
-#ifdef LKM
-#include <sys/lkm.h>
-#endif
 
 #include <machine/cpu.h>
 #include <machine/conf.h>
@@ -65,10 +61,6 @@
 
 caddr_t zeropage;
 extern int start, end, etext;
-
-#ifdef LKM
-extern vaddr_t lkm_start, lkm_end;
-#endif
 
 /* open counter for aperture */
 #ifdef APERTURE
@@ -131,7 +123,7 @@ mmrw(dev_t dev, struct uio *uio, int flags)
 {
 	extern vaddr_t kern_end;
 	vaddr_t v;
-	int c;
+	size_t c;
 	struct iovec *iov;
 	int error = 0;
 
@@ -155,18 +147,11 @@ mmrw(dev_t dev, struct uio *uio, int flags)
 /* minor device 1 is kernel memory */
 		case 1:
 			v = uio->uio_offset;
-			c = min(iov->iov_len, MAXPHYS);
+			c = ulmin(iov->iov_len, MAXPHYS);
 			if (v >= (vaddr_t)&start && v < kern_end) {
                                 if (v < (vaddr_t)&etext &&
                                     uio->uio_rw == UIO_WRITE)
                                         return EFAULT;
-#ifdef LKM
-			} else if (v >= lkm_start && v < lkm_end) {
-				if (!uvm_map_checkprot(lkm_map, v, v + c,
-				    uio->uio_rw == UIO_READ ?
-				    UVM_PROT_READ: UVM_PROT_WRITE))
-					return (EFAULT);
-#endif
                         } else if ((!uvm_kernacc((caddr_t)v, c,
 			    uio->uio_rw == UIO_READ ? B_READ : B_WRITE)) &&
 			    (v < PMAP_DIRECT_BASE && v > PMAP_DIRECT_END))
@@ -189,7 +174,7 @@ mmrw(dev_t dev, struct uio *uio, int flags)
 			if (zeropage == NULL)
 				zeropage = (caddr_t)
 				    malloc(PAGE_SIZE, M_TEMP, M_WAITOK|M_ZERO);
-			c = min(iov->iov_len, PAGE_SIZE);
+			c = ulmin(iov->iov_len, PAGE_SIZE);
 			error = uiomove(zeropage, c, uio);
 			continue;
 
@@ -329,7 +314,7 @@ mem_range_attr_get(struct mem_range_desc *mrd, int *arg)
 	if (*arg == 0) {
 		*arg = mem_range_softc.mr_ndesc;
 	} else {
-		bcopy(mem_range_softc.mr_desc, mrd, (*arg) * sizeof(struct mem_range_desc));
+		memcpy(mrd, mem_range_softc.mr_desc, (*arg) * sizeof(struct mem_range_desc));
 	}
 	return (0);
 }

@@ -1,4 +1,4 @@
-/*	$OpenBSD: machdep.c,v 1.58 2014/07/21 17:25:47 uebayasi Exp $ */
+/*	$OpenBSD: machdep.c,v 1.61 2014/12/10 15:29:53 mikeb Exp $ */
 
 /*
  * Copyright (c) 2009, 2010, 2014 Miodrag Vallat.
@@ -840,7 +840,7 @@ cpu_startup()
 	 * Good {morning,afternoon,evening,night}.
 	 */
 	printf(version);
-	printf("real mem = %u (%uMB)\n", ptoa((psize_t)physmem),
+	printf("real mem = %lu (%luMB)\n", ptoa((psize_t)physmem),
 	    ptoa((psize_t)physmem)/1024/1024);
 
 	/*
@@ -854,7 +854,7 @@ cpu_startup()
 	phys_map = uvm_km_suballoc(kernel_map, &minaddr, &maxaddr,
 	    VM_PHYS_SIZE, 0, FALSE, NULL);
 
-	printf("avail mem = %u (%uMB)\n", ptoa(uvmexp.free),
+	printf("avail mem = %lu (%luMB)\n", ptoa(uvmexp.free),
 	    ptoa(uvmexp.free)/1024/1024);
 
 	/*
@@ -902,8 +902,6 @@ int	waittime = -1;
 __dead void
 boot(int howto)
 {
-	struct device *mainbus;
-
 	if (curproc)
 		savectx(curproc->p_addr, 0);
 
@@ -934,12 +932,8 @@ boot(int howto)
 		dumpsys();
 
 haltsys:
-	doshutdownhooks();
-	mainbus = device_mainbus();
-	if (mainbus != NULL) {
-		pci_dopm = 0;
-		config_suspend(mainbus, DVACT_POWERDOWN);
-	}
+	pci_dopm = 0;
+	config_suspend_all(DVACT_POWERDOWN);
 
 	if ((howto & RB_HALT) != 0) {
 		if ((howto & RB_POWERDOWN) != 0) {

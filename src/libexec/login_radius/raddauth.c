@@ -1,4 +1,4 @@
-/*	$OpenBSD: raddauth.c,v 1.25 2013/11/27 21:25:25 deraadt Exp $	*/
+/*	$OpenBSD: raddauth.c,v 1.27 2015/01/16 06:39:50 deraadt Exp $	*/
 
 /*-
  * Copyright (c) 1996, 1997 Berkeley Software Design, Inc. All rights reserved.
@@ -73,7 +73,7 @@
 #include <ctype.h>
 #include <err.h>
 #include <errno.h>
-#include <inttypes.h>
+#include <stdint.h>
 #include <limits.h>
 #include <login_cap.h>
 #include <netdb.h>
@@ -483,7 +483,7 @@ rad_recv(char *state, char *challenge, u_char *req_vector)
 in_addr_t
 gethost(void)
 {
-	char hostname[MAXHOSTNAMELEN];
+	char hostname[HOST_NAME_MAX+1];
 
 	if (gethostname(hostname, sizeof(hostname)))
 		err(1, "gethost");
@@ -511,7 +511,7 @@ void
 getsecret(void)
 {
 	FILE *servfd;
-	char *host, *secret, buffer[MAXPATHLEN];
+	char *host, *secret, buffer[PATH_MAX];
 	size_t len;
 
 	snprintf(buffer, sizeof(buffer), "%s/%s",

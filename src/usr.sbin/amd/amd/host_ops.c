@@ -1,4 +1,4 @@
-/*	$OpenBSD: host_ops.c,v 1.13 2003/06/02 23:36:51 millert Exp $	*/
+/*	$OpenBSD: host_ops.c,v 1.18 2014/10/26 03:00:35 guenther Exp $	*/
 
 /*
  * Copyright (c) 1990 Jan-Simon Pendry
@@ -130,7 +130,7 @@ do_mount(fhstatus *fhp, char *dir, char *fs_name, char *opts, mntfs *mf)
 	struct stat stb;
 
 #ifdef DEBUG
-	dlog("host: mounting fs %s on %s\n", fs_name, dir);
+	dlog("host: mounting fs %s on %s", fs_name, dir);
 #endif /* DEBUG */
 #ifdef HOST_MKDIRS
 	(void) mkdirs(dir, 0555);
@@ -172,12 +172,9 @@ fetch_fhandle(CLIENT *client, char *dir, fhstatus *fhp)
 	 * Call the mount daemon on the remote host to
 	 * get the filehandle.
 	 */
-#if NFS_PROTOCOL_VERSION >= 3
 	fhp->fhs_vers = MOUNTVERS;
-#endif
 	clnt_stat = clnt_call(client, MOUNTPROC_MNT, xdr_dirpath, &dir, xdr_fhstatus, fhp, tv);
 	if (clnt_stat != RPC_SUCCESS) {
-		extern char *clnt_sperrno();
 		char *msg = clnt_sperrno(clnt_stat);
 		plog(XLOG_ERROR, "mountd rpc failed: %s", msg);
 		return EIO;
@@ -240,11 +237,6 @@ host_fmount(mntfs *mf)
 	mlist = read_mtab(mf->mf_mount);
 
 	/*
-	 * Unlock the mount list
-	 */
-	unlock_mntlist();
-
-	/*
 	 * Take a copy of the server address
 	 */
 	sin = *mf->mf_server->fs_ip;
@@ -295,7 +287,7 @@ host_fmount(mntfs *mf)
 		n_export++;
 	}
 #ifdef DEBUG
-	/*dlog("%d exports returned\n", n_export);*/
+	/*dlog("%d exports returned", n_export);*/
 #endif /* DEBUG */
 
 	/*
@@ -303,7 +295,7 @@ host_fmount(mntfs *mf)
 	 * so that they can be sorted.  If the filesystem
 	 * is already mounted then ignore it.
 	 */
-	ep = (exports *) xmalloc(n_export * sizeof(exports));
+	ep = xreallocarray(NULL, n_export, sizeof *ep);
 	for (j = 0, ex = exlist; ex; ex = ex->ex_next) {
 		MAKE_MNTPT(mntpt, ex, mf);
 		if (!already_mounted(mlist, mntpt))
@@ -322,7 +314,7 @@ host_fmount(mntfs *mf)
 	/*
 	 * Allocate an array of filehandles
 	 */
-	fp = (fhstatus *) xmalloc(n_export * sizeof(fhstatus));
+	fp = xreallocarray(NULL, n_export, sizeof *fp);
 
 	/*
 	 * Try to obtain filehandles for each directory.
@@ -416,11 +408,6 @@ host_fumount(mntfs *mf)
 	mntlist *mlist = read_mtab(mf->mf_mount);
 
 	/*
-	 * Unlock the mount list
-	 */
-	unlock_mntlist();
-
-	/*
 	 * Reverse list...
 	 */
 	ml = mlist;
@@ -446,7 +433,7 @@ host_fumount(mntfs *mf)
 			/*
 			 * Unmount "dir"
 			 */
-			error = UMOUNT_FS(dir);
+			error = umount_fs(dir);
 			/*
 			 * Keep track of errors
 			 */
@@ -494,61 +481,6 @@ host_fumount(mntfs *mf)
  */
 static void host_umounted(am_node *mp)
 {
-#ifdef INFORM_MOUNTD
-	mntfs *mf = mp->am_mnt;
-	char *host;
-	CLIENT *client;
-	enum clnt_stat clnt_stat;
-	struct sockaddr_in sin;
-	int sock = RPC_ANYSOCK;
-	struct timeval tv;
-	tv.tv_sec = 10; tv.tv_usec = 0;
-
-	if (mf->mf_error || mf->mf_refc > 1 || ! mf->mf_server)
-		return;
-
-	host = mf->mf_server->fs_host;
-	sin = *mf->mf_server->fs_ip;
-
-	/*
-	 * Zero out the port - make sure we recompute
-	 */
-	sin.sin_port = 0;
-	/*
-	 * Make a client end-point.
-	 * Try TCP first
-	 */
-	if ((client = clnttcp_create(&sin, MOUNTPROG, MOUNTVERS, &sock, 0, 0)) == NULL &&
-		(client = clntudp_create(&sin, MOUNTPROG, MOUNTVERS, tv, &sock)) == NULL) {
-		plog(XLOG_ERROR, "Failed to make rpc connection to mountd on %s", host);
-		goto out;
-	}
-
-	if (!nfs_auth) {
-		if (make_nfs_auth())
-			goto out;
-	}
-
-	client->cl_auth = nfs_auth;
-
-#ifdef DEBUG
-	dlog("Unmounting all from %s", host);
-#endif /* DEBUG */
-
-	clnt_stat = clnt_call(client, MOUNTPROC_UMNTALL, xdr_void, 0, xdr_void, 0, tv);
-	if (clnt_stat != RPC_SUCCESS && clnt_stat != RPC_SYSTEMERROR) {
-		/* RPC_SYSTEMERROR seems to be returned for no good reason ...*/
-		extern char *clnt_sperrno();
-		char *msg = clnt_sperrno(clnt_stat);
-		plog(XLOG_ERROR, "unmount all from %s rpc failed: %s", host, msg, clnt_stat);
-		goto out;
-	}
-
-out:
-	if (client)
-		clnt_destroy(client);
-
-#endif /* INFORM_MOUNTD */
 }
 
 

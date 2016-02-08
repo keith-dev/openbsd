@@ -1,4 +1,4 @@
-/*	$OpenBSD: pppoe_session.c,v 1.7 2012/09/18 13:14:08 yasuoka Exp $ */
+/*	$OpenBSD: pppoe_session.c,v 1.9 2015/01/19 01:48:59 deraadt Exp $ */
 
 /*-
  * Copyright (c) 2009 Internet Initiative Japan Inc.
@@ -28,12 +28,11 @@
 
 /**@file
  * Session management of PPPoE protocol
- * $Id: pppoe_session.c,v 1.7 2012/09/18 13:14:08 yasuoka Exp $
+ * $Id: pppoe_session.c,v 1.9 2015/01/19 01:48:59 deraadt Exp $
  */
 
 #include <sys/types.h>
 #include <sys/socket.h>
-#include <sys/param.h>
 #include <sys/uio.h>
 #include <netinet/in.h>
 #include <net/if.h>
@@ -49,7 +48,6 @@
 #include <stdio.h>
 #include <event.h>
 #include <syslog.h>
-#include <stdlib.h>
 #include <stdarg.h>
 
 #include "hash.h"
@@ -324,7 +322,7 @@ pppoe_session_send_PADS(pppoe_session *_this, struct pppoe_tlv *hostuniq,
 		if (len > 0) {
 			bytebuffer_put(buf, service_name->value, len);
 			strlcpy(msgbuf, service_name->value,
-			    MIN(len + 1, sizeof(msgbuf)));
+			    MINIMUM(len + 1, sizeof(msgbuf)));
 		}
 	}
 

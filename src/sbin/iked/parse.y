@@ -1,4 +1,4 @@
-/*	$OpenBSD: parse.y,v 1.38 2014/05/06 10:24:22 markus Exp $	*/
+/*	$OpenBSD: parse.y,v 1.46 2015/02/08 04:50:32 reyk Exp $	*/
 
 /*
  * Copyright (c) 2010-2013 Reyk Floeter <reyk@openbsd.org>
@@ -29,7 +29,6 @@
 #include <sys/stat.h>
 #include <net/if.h>
 #include <netinet/in.h>
-#include <netinet/ip_ipsp.h>
 #include <arpa/inet.h>
 
 #include <ctype.h>
@@ -66,8 +65,9 @@ int		 check_file_secrecy(int, const char *);
 int		 check_pubkey(char *, int );
 int		 yyparse(void);
 int		 yylex(void);
-int		 yyerror(const char *, ...);
-int		 yywarn(const char *, ...);
+int		 yyerror(const char *, ...)
+    __attribute__((__format__ (printf, 1, 2)))
+    __attribute__((__nonnull__ (1)));
 int		 kw_cmp(const void *, const void *);
 int		 lookup(char *);
 int		 lgetc(int);
@@ -237,6 +237,15 @@ const struct ipsec_xf groupxfs[] = {
 	{ "grp25",		IKEV2_XFORMDH_ECP_192 },
 	{ "ecp224",		IKEV2_XFORMDH_ECP_224 },
 	{ "grp26",		IKEV2_XFORMDH_ECP_224 },
+	{ "brainpool224",	IKEV2_XFORMDH_BRAINPOOL_P224R1 },
+	{ "grp27",		IKEV2_XFORMDH_BRAINPOOL_P224R1 },
+	{ "brainpool256",	IKEV2_XFORMDH_BRAINPOOL_P256R1 },
+	{ "grp28",		IKEV2_XFORMDH_BRAINPOOL_P256R1 },
+	{ "brainpool384",	IKEV2_XFORMDH_BRAINPOOL_P384R1 },
+	{ "grp29",		IKEV2_XFORMDH_BRAINPOOL_P384R1 },
+	{ "brainpool512",	IKEV2_XFORMDH_BRAINPOOL_P512R1 },
+	{ "grp30",		IKEV2_XFORMDH_BRAINPOOL_P512R1 },
+	{ "curve25519",		IKEV2_XFORMDH_X_CURVE25519 },
 	{ NULL }
 };
 
@@ -1050,19 +1059,6 @@ yyerror(const char *fmt, ...)
 }
 
 int
-yywarn(const char *fmt, ...)
-{
-	va_list		 ap;
-
-	va_start(ap, fmt);
-	fprintf(stderr, "%s: %d: ", file->name, yylval.lineno);
-	vfprintf(stderr, fmt, ap);
-	fprintf(stderr, "\n");
-	va_end(ap);
-	return (0);
-}
-
-int
 kw_cmp(const void *k, const void *e)
 {
 	return (strcmp(k, ((const struct keywords *)e)->k_name));
@@ -1299,6 +1295,9 @@ top:
 			} else if (c == quotec) {
 				*p = '\0';
 				break;
+			} else if (c == '\0') {
+				yyerror("syntax error");
+				return (findeol());
 			}
 			if (p + 1 >= buf + sizeof(buf) - 1) {
 				yyerror("string too long");
@@ -1653,7 +1652,7 @@ get_id_type(char *string)
 int
 check_pubkey(char *idstr, int type)
 {
-	char		 keyfile[MAXPATHLEN];
+	char		 keyfile[PATH_MAX];
 	FILE		*fp = NULL;
 	const char	*suffix = NULL;
 
@@ -1832,6 +1831,7 @@ host_dns(const char *s, int mask)
 	bzero(&hints, sizeof(struct addrinfo));
 	hints.ai_family = PF_UNSPEC;
 	hints.ai_socktype = SOCK_STREAM;
+	hints.ai_flags = AI_ADDRCONFIG;
 	error = getaddrinfo(s, NULL, &hints, &res0);
 	if (error)
 		return (NULL);
@@ -2622,6 +2622,8 @@ create_ike(char *name, int af, u_int8_t ipproto, struct ipsec_hosts *hosts,
 		flows[j].flow_dst.addr_mask = ipb->mask;
 		flows[j].flow_dst.addr_net = ipb->netaddress;
 		flows[j].flow_dst.addr_port = hosts->dport;
+
+		flows[j].flow_ipproto = ipproto;
 
 		pol.pol_nflows++;
 		RB_INSERT(iked_flows, &pol.pol_flows, &flows[j]);

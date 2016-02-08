@@ -1,4 +1,4 @@
-/*	$OpenBSD: ehcivar.h,v 1.32 2014/05/16 18:17:03 mpi Exp $ */
+/*	$OpenBSD: ehcivar.h,v 1.34 2014/09/01 08:13:02 mpi Exp $ */
 /*	$NetBSD: ehcivar.h,v 1.19 2005/04/29 15:04:29 augustss Exp $	*/
 
 /*
